@@ -199,6 +199,9 @@ func (s *Server) fail(w http.ResponseWriter, method string, err error) {
 }
 
 func (s *Server) route(r *http.Request) (string, any, error) {
+	if beta, ok := strings.CutPrefix(r.URL.Path, "/v1beta1/"); ok {
+		return s.routeV1beta1(r, beta)
+	}
 	path, ok := strings.CutPrefix(r.URL.Path, "/v1/")
 	if !ok {
 		return "", nil, errorf(http.StatusNotFound, "NOT_FOUND", "%s is not a Service Usage API v1 path", r.URL.Path)

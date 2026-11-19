@@ -63,10 +63,23 @@ forgets one, so `get` and a second `delete` are 404, and the change it made stay
 console's **Service Usage operations** page (`/apis/operations`) lists a project's operations with
 Delete.
 
+## Service identities
+
+`v1beta1` `services.generateServiceIdentity` (`gcloud beta services identity create`, and `gcloud
+privateca roots create --kms-key-version` or `--bucket` before granting the Certificate Authority
+Service agent its roles on the key and the bucket, #1834) answers a done operation
+(`operations/finished.DONE_OPERATION`) whose `ServiceIdentity` is the service's agent in the
+project, `service-PROJECT_NUMBER@DOMAIN`, with a 21-digit `uniqueId` that stays the same. The
+domains are the ones each service documents for its agent: `gcp-sa-privateca`, `gcp-sa-cloudkms`,
+`gcp-sa-pubsub`, `gcp-sa-secretmanager`, `gcp-sa-cloud-sql`, `gcp-sa-logging`, `gcp-sa-cloudtasks`,
+`gcp-sa-cloudscheduler`, `gcp-sa-artifactregistry` (each `.iam.gserviceaccount.com`) and Cloud
+Run's `serverless-robot-prod`. Any other served API is 501 naming it, as its agent is not guessed;
+an API the instance does not serve is refused as `:enable` refuses it.
+
 ## Not served
 
 - Folders and organizations as parents (501): the enabled set is kept per project.
-- Consumer quota, `v1beta1`, `v2` and `v2beta`: gcloud's `services` commands that call them
+- Consumer quota, the rest of `v1beta1`, `v2` and `v2beta`: gcloud's `services` commands that call them
   (`services quota`, `services policies`, group and dependency listings) are not served and fail
   locally, never at Google, through `gcloud-setup`'s override.
 

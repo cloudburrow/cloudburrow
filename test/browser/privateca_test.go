@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestPrivateCAThroughThePage (#1834), in the storage shard, whose instance
@@ -142,6 +143,118 @@ func TestPrivateCAThroughThePage(t *testing.T) {
 	p.waitFor(`document.querySelector("#view").textContent.includes("SUPERSEDED") && document.querySelector("#view").textContent.includes("Revoked")`)
 	if got := fmt.Sprint(detail(pool, "certificates", "web")["summary"]); !strings.Contains(got, "Revoked") {
 		t.Errorf("the certificate after Revoke reads %s", got)
+	}
+}
+
+// TestPrivateCAKMSKeyCMEKBucketAndRulesThroughThePage (#1834), in the sql
+// shard, whose instance serves Certificate Authority Service with Cloud KMS
+// and Cloud Storage. Create CA pool with a customer-managed encryption key,
+// a requester-specified not-before time, a CEL expression and passthrough
+// extensions; Create CA whose key is a Cloud KMS version, publishing to a
+// bucket, its subject an RDN sequence; Request certificate from a config
+// with an RDN sequence, the RDN_SEQUENCE subject mode and a not-before
+// time; and Create template with a CEL expression and passthrough
+// extensions. The console API reads each back from the server the SDK
+// calls.
+func TestPrivateCAKMSKeyCMEKBucketAndRulesThroughThePage(t *testing.T) {
+	needService(t, "privateca")
+	needService(t, "kms")
+	needService(t, "storage")
+	project := uniqueProject(t)
+	ring := "projects/" + project + "/locations/us-central1/keyRings/pca"
+	if code, body := consoleDo(t, http.MethodPost, "/api/resources/kms?project="+project, `{"keyRingId":"pca","location":"us-central1"}`); code != http.StatusOK {
+		t.Fatalf("create a key ring through the console API = %d: %s", code, body)
+	}
+	for id, v := range map[string]map[string]string{
+		"sign": {"cryptoKeyId": "sign", "purpose": "ASYMMETRIC_SIGN", "algorithm": "EC_SIGN_P256_SHA256"},
+		"cmek": {"cryptoKeyId": "cmek", "purpose": "ENCRYPT_DECRYPT"},
+	} {
+		b, _ := json.Marshal(map[string]any{"Path": []string{ring}, "Action": "createkey", "Values": v})
+		if code, body := consoleDo(t, http.MethodPost, "/api/actions/kms?project="+project, string(b)); code != http.StatusOK {
+			t.Fatalf("create the %s key through the console API = %d: %s", id, code, body)
+		}
+	}
+	version, cmek := ring+"/cryptoKeys/sign/cryptoKeyVersions/1", ring+"/cryptoKeys/cmek"
+	bucket := project + "-pca"
+	if code, body := consoleDo(t, http.MethodPost, "/api/resources/storage?project="+project, `{"name":"`+bucket+`"}`); code != http.StatusOK {
+		t.Fatalf("create a bucket through the console API = %d: %s", code, body)
+	}
+	t.Cleanup(func() { consoleDo(t, http.MethodDelete, "/api/resources/storage?project="+project+"&name="+bucket, "") })
+	read := func(service string, path ...string) string {
+		t.Helper()
+		q := "/api/detail/" + service + "?project=" + project
+		for _, s := range path {
+			q += "&name=" + url.QueryEscape(s)
+		}
+		code, body := consoleDo(t, http.MethodGet, q, "")
+		if code != http.StatusOK {
+			t.Fatalf("read %v through the console API = %d: %s", path, code, body)
+		}
+		return body
+	}
+	const cel = `subject_alt_names.all(san, san.type == DNS && san.value.endsWith(".example.com"))`
+	pool := "projects/" + project + "/locations/us-central1/caPools/kms-pool"
+
+	p := open(t)
+	p.navigate("/security/cas?project=" + project)
+	p.clickText("#view button", "Create CA pool")
+	p.waitFor(`document.querySelector("#f-allowRequesterNotBefore") !== null`)
+	p.eval(`(() => { const f = document.querySelector("#f-allowRequesterNotBefore"); f.checked = true;
+		f.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`, nil)
+	p.submitForm(map[string]string{"caPoolId": "kms-pool", "location": "us-central1", "tier": "ENTERPRISE", "encryptionKey": cmek,
+		"celExpression": cel, "passthroughExtensions": "EXTENDED_KEY_USAGE,1.2.3.4"}, "caPoolId")
+	p.waitFor(fmt.Sprintf(`location.pathname === "/security/cas" &&
+		[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q))`, pool))
+	got := read("privateca", pool)
+	for _, want := range []string{cmek, "EXTENDED_KEY_USAGE,1.2.3.4", "san.value.endsWith"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the pool made on the page does not show %q: %s", want, got)
+		}
+	}
+	if !strings.Contains(got, `"Requester-specified not-before time","value":"Allowed"`) {
+		t.Errorf("the pool made on the page does not allow a requester's not-before time: %s", got)
+	}
+
+	p.clickText("#view tbody a", pool)
+	p.waitFor(`location.pathname.endsWith("kms-pool")`)
+	p.pageAction("Create CA", map[string]string{"certificateAuthorityId": "root", "rdnSequence": "C=US\nO=CloudBurrow\nCN=KMS Root",
+		"algorithm": "EC_P256_SHA256", "kmsKeyVersion": version, "gcsBucket": bucket, "lifetimeDays": "365"}, "")
+	p.follow("root")
+	p.waitFor(`location.pathname.endsWith("/certificateAuthorities/root")`)
+	p.waitFor(`document.querySelector("#view").textContent.includes("STAGED")`)
+	p.waitFor(fmt.Sprintf(`document.querySelector("#view").textContent.includes(%q)`, version))
+	p.clickText("#view .page-actions button", "Enable")
+	p.waitFor(`document.querySelector("#view").textContent.includes("ENABLED")`)
+	ca := read("privateca", pool, "certificateAuthorities", "root")
+	for _, want := range []string{"Cloud KMS key version", version, `"Publishing bucket","value":"` + bucket + `"`, "/" + bucket + "/", "C=US,O=CloudBurrow,CN=KMS Root"} {
+		if !strings.Contains(ca, want) {
+			t.Errorf("the CA made on the page does not show %q: %s", want, ca)
+		}
+	}
+
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	der, _ := x509.MarshalPKIXPublicKey(&key.PublicKey)
+	pub := string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}))
+	notBefore := time.Now().Add(2 * time.Hour).UTC().Truncate(time.Second).Format(time.RFC3339)
+	p.navigate("/security/cas?project=" + project)
+	p.follow(pool)
+	p.waitFor(`location.pathname.endsWith("kms-pool")`)
+	p.pageAction("Request certificate from a config", map[string]string{"certificateId": "rdn", "rdnSequence": "O=CloudBurrow\nCN=rdn.example.com",
+		"dnsNames": "rdn.example.com", "publicKey": pub, "subjectMode": "RDN_SEQUENCE", "requestedNotBefore": notBefore, "lifetimeDays": "7"}, "")
+	cert := read("privateca", pool, "certificates", "rdn")
+	if !strings.Contains(cert, `"Subject mode","value":"RDN_SEQUENCE"`) || !strings.Contains(cert, strings.TrimSuffix(notBefore, "Z")) {
+		t.Errorf("the certificate requested on the page does not have the RDN_SEQUENCE subject mode and the not-before %s: %s", notBefore, cert)
+	}
+
+	p.navigate("/security/cas/templates?project=" + project)
+	p.clickText("#view button", "Create template")
+	p.submitForm(map[string]string{"certificateTemplateId": "cel-tmpl", "location": "us-central1", "usages": "digital_signature",
+		"celExpression": cel, "passthroughExtensions": "BASE_KEY_USAGE"}, "certificateTemplateId")
+	tmpl := "projects/" + project + "/locations/us-central1/certificateTemplates/cel-tmpl"
+	p.waitFor(fmt.Sprintf(`location.pathname === "/security/cas/templates" &&
+		[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q))`, tmpl))
+	if got := read("privateca-templates", tmpl); !strings.Contains(got, "san.value.endsWith") || !strings.Contains(got, `"Passthrough extensions","value":"BASE_KEY_USAGE"`) {
+		t.Errorf("the template made on the page reads %s", got)
 	}
 }
 

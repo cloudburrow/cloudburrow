@@ -3,14 +3,17 @@
 package compat
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"testing"
 
 	crmv1 "google.golang.org/api/cloudresourcemanager/v1"
 	"google.golang.org/api/option"
 	su "google.golang.org/api/serviceusage/v1"
+	subeta "google.golang.org/api/serviceusage/v1beta1"
 )
 
 // EnvServiceUsage is the Service Usage API v1 endpoint (#1352).
@@ -311,5 +314,54 @@ func TestServiceUsageOperations(t *testing.T) {
 	if _, err := c.Operations.List().Filter("done=true").Context(ctx).Do(); httpCode(err) != http.StatusNotImplemented ||
 		!strings.Contains(err.Error(), "filter") {
 		t.Errorf("list with a filter = %v; want 501 naming the filter", err)
+	}
+}
+
+// TestServiceUsageGenerateServiceIdentity (#1834), with
+// google.golang.org/api/serviceusage/v1beta1, the client and version
+// gcloud's privateca roots create --kms-key-version and --bucket call:
+// services.generateServiceIdentity answers a done operation whose
+// ServiceIdentity is the Certificate Authority Service agent of the
+// project, service-NUMBER@gcp-sa-privateca.iam.gserviceaccount.com, the
+// same at every call; a served API whose agent CloudBurrow does not know is
+// 501, and an API it does not serve is refused as enable refuses it.
+func TestServiceUsageGenerateServiceIdentity(t *testing.T) {
+	h := New(t)
+	addr := h.Endpoint(EnvServiceUsage)
+	c, err := subeta.NewService(h.Context(), option.WithEndpoint("http://"+addr+"/"), option.WithoutAuthentication(), option.WithHTTPClient(http.DefaultClient))
+	if err != nil {
+		t.Fatal(err)
+	}
+	v1 := serviceUsageClient(t, h)
+	p := "projects/" + h.Project()
+	if _, err := v1.Services.Get(p + "/services/privateca.googleapis.com").Context(h.Context()).Do(); err != nil {
+		t.Skipf("this instance does not serve Certificate Authority Service: %v", err)
+	}
+	gen := func(svc string) (*subeta.Operation, map[string]any, error) {
+		op, err := c.Services.GenerateServiceIdentity(p + "/services/" + svc).Context(h.Context()).Do()
+		if err != nil {
+			return nil, nil, err
+		}
+		var resp map[string]any
+		return op, resp, json.Unmarshal(op.Response, &resp)
+	}
+	op, a, err := gen("privateca.googleapis.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	email, _ := a["email"].(string)
+	if !op.Done || a["@type"] != "type.googleapis.com/google.api.serviceusage.v1beta1.ServiceIdentity" ||
+		!regexp.MustCompile(`^service-[0-9]+@gcp-sa-privateca\.iam\.gserviceaccount\.com$`).MatchString(email) ||
+		!regexp.MustCompile(`^[0-9]{21}$`).MatchString(fmt.Sprint(a["uniqueId"])) {
+		t.Fatalf("generateServiceIdentity = %+v, %v; want a done operation naming the privateca agent", op, a)
+	}
+	if _, b, err := gen("privateca.googleapis.com"); err != nil || b["email"] != email || b["uniqueId"] != a["uniqueId"] {
+		t.Errorf("a second call = %v, %v; want the same agent %s", b, err, email)
+	}
+	if _, _, err := gen("storage.googleapis.com"); httpCode(err) != http.StatusNotImplemented {
+		t.Errorf("an agent CloudBurrow does not know: %v; want 501", err)
+	}
+	if _, _, err := gen("nosuch.googleapis.com"); httpCode(err) != http.StatusBadRequest {
+		t.Errorf("an API CloudBurrow does not serve: %v; want 400", err)
 	}
 }

@@ -56,7 +56,10 @@ COMPAT_SHARDS="storage served run emulators memorystore sql acceptance"
 # Firestore, Datastore (#854) and Spanner screens and the Bigtable screen's
 # actions (#1198) only by the emulators shard's; the Memorystore screens
 # only by the memorystore shard's (#1568); and the Cloud SQL screens, MySQL
-# (#868) and PostgreSQL (#995), only by the sql shard's (#1472). The tests
+# (#868) and PostgreSQL (#995), only by the sql shard's (#1472), as is
+# Certificate Authority Service beside Cloud KMS and Cloud Storage, for its
+# Cloud KMS CA keys, CMEK pools and publishing buckets (TestPrivateCAKMS*,
+# #1834). The tests
 # these name run there and the rest in storage.
 # The accessibility audit (#1604) follows the same split: its Cloud Storage,
 # Pub/Sub and Logs Explorer pages run in storage, and
@@ -71,7 +74,7 @@ COMPAT_BROWSER_SHARDS="storage run emulators memorystore sql"
 COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|LoggingAdmin)'
 COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|Bigtable|Spanner)'
 COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS='^TestMemorystore'
-COMPAT_BROWSER_SQL_SHARD_TESTS='^Test(CloudSQL|BackupDR)'
+COMPAT_BROWSER_SQL_SHARD_TESTS='^Test(CloudSQL|BackupDR|PrivateCAKMS)'
 # Browser tests no shard runs: the Studio's local models (#1396) and the
 # Embeddings page's image (#1454), audio and Cloud Storage objects (#1651)
 # and its scanned PDF read with document_ocr (#1733) need a -tags onnx build

@@ -3,18 +3,24 @@
 package compat
 
 import (
+	"bytes"
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"cloud.google.com/go/kms/apiv1/kmspb"
 	"cloud.google.com/go/security/privateca/apiv1/privatecapb"
 )
 
@@ -297,5 +303,161 @@ resource "google_privateca_certificate" "c" {
 	m.must("destroy", "-auto-approve", "-input=false", "-no-color")
 	if _, err := c.GetCaPool(ctx, &privatecapb.GetCaPoolRequest{Name: fmt.Sprintf("%s/caPools/tfroot-%d", parent, n)}); err == nil {
 		t.Errorf("the root pool survived destroy")
+	}
+}
+
+// TestGcloudPrivateCAKMSKeyBucketAndCMEK (#1834): with egress to Google
+// blocked, `gcloud privateca pools create --encryption-key` makes a CMEK
+// pool, and `gcloud privateca roots create --kms-key-version --bucket`
+// makes a root CA in it whose key is a Cloud KMS version and which
+// publishes to a Cloud Storage bucket. Before the create gcloud asks
+// Resource Manager and Cloud KMS testIamPermissions, reads the bucket,
+// has Service Usage v1beta1 generateServiceIdentity name the Certificate
+// Authority Service agent, and grants it roles/cloudkms.signerVerifier and
+// roles/viewer on the key and roles/storage.objectAdmin and
+// roles/storage.legacyBucketReader on the bucket: the official clients
+// find those bindings, the CA's public key is the KMS version's, its
+// certificate is the bucket's object, and a certificate gcloud issues
+// from the pool verifies under it.
+// covers: google.cloud.security.privateca.v1.CertificateAuthorityService/CreateCaPool, google.cloud.security.privateca.v1.CertificateAuthorityService/CreateCertificateAuthority, google.cloud.security.privateca.v1.CertificateAuthorityService/EnableCertificateAuthority, google.cloud.security.privateca.v1.CertificateAuthorityService/CreateCertificate
+func TestGcloudPrivateCAKMSKeyBucketAndCMEK(t *testing.T) {
+	h := New(t)
+	// The sql shard serves Certificate Authority Service, Cloud KMS and
+	// Cloud Storage together, under its own names; the gcloud session
+	// reads the shared ones.
+	shardEndpoint(h, envSQLPrivateCA, EnvPrivateCA)
+	shardEndpoint(h, envCMEKKMS, EnvKMS)
+	shardEndpoint(h, envNoPubSubStorage, EnvStorage)
+	c := privateCAClients(t, h)["grpc"]
+	n := time.Now().UnixNano() % 1e6
+	k, version, cmek := privateCAKMS(t, h, fmt.Sprintf("gring-%d", n), kmspb.CryptoKeyVersion_EC_SIGN_P256_SHA256)
+	sc := storageClient(t, h)
+	ctx := h.Context()
+	bucketName := fmt.Sprintf("%s-gca-%d", h.Project(), n)
+	bh := sc.Bucket(bucketName)
+	if err := bh.Create(ctx, h.Project(), nil); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { emptyAndDelete(context.Background(), bh) })
+	g := newGcloudSession(t, h)
+	pool := fmt.Sprintf("gcmek-%d", n)
+	loc := []string{"--location", "us-central1", "--project", g.project, "--quiet"}
+	run := func(args ...string) string {
+		t.Helper()
+		out, err := g.run(nil, append(append([]string{"privateca"}, args...), loc...)...)
+		if err != nil {
+			t.Fatalf("gcloud privateca %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+		return out
+	}
+	parent := "projects/" + g.project + "/locations/us-central1"
+
+	run("pools", "create", pool, "--tier", "enterprise", "--encryption-key", cmek)
+	defer func() {
+		_, _ = g.run(nil, append([]string{"privateca", "pools", "delete", pool, "--ignore-dependent-resources"}, loc...)...)
+	}()
+	p, err := c.GetCaPool(ctx, &privatecapb.GetCaPoolRequest{Name: parent + "/caPools/" + pool})
+	if err != nil || p.GetEncryptionSpec().GetCloudKmsKey() != cmek {
+		t.Fatalf("the pool gcloud made = %v, %v; want encryption_spec %s", p, err, cmek)
+	}
+	if out, err := g.run(nil, append([]string{"privateca", "pools", "create", pool + "-devops", "--tier", "devops", "--encryption-key", cmek}, loc...)...); err == nil {
+		t.Errorf("a DevOps pool with --encryption-key was made: %s", out)
+	}
+
+	out := run("roots", "create", "root", "--pool", pool, "--subject", "CN=gcloud KMS Root, O=CloudBurrow",
+		"--kms-key-version", version, "--bucket", bucketName, "--auto-enable")
+	if !strings.Contains(out, "Created Certificate Authority") {
+		t.Errorf("roots create: %s", out)
+	}
+	defer func() {
+		_, _ = g.run(nil, append([]string{"privateca", "roots", "disable", "root", "--pool", pool}, loc...)...)
+		_, _ = g.run(nil, append([]string{"privateca", "roots", "delete", "root", "--pool", pool, "--skip-grace-period", "--ignore-active-certificates"}, loc...)...)
+	}()
+	ca, err := c.GetCertificateAuthority(ctx, &privatecapb.GetCertificateAuthorityRequest{Name: parent + "/caPools/" + pool + "/certificateAuthorities/root"})
+	if err != nil || ca.GetState() != privatecapb.CertificateAuthority_ENABLED || ca.GetKeySpec().GetCloudKmsKeyVersion() != version || ca.GetGcsBucket() != bucketName {
+		t.Fatalf("the root gcloud made = %v, %v; want ENABLED, key %s, bucket %s", ca, err, version, bucketName)
+	}
+	pk, err := k.GetPublicKey(ctx, &kmspb.GetPublicKeyRequest{Name: version})
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, err := parsePEM(ca.GetPemCaCertificates()[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want, _ := pem.Decode([]byte(pk.GetPem())); want == nil || !bytes.Equal(root.RawSubjectPublicKeyInfo, want.Bytes) {
+		t.Errorf("the root's public key is not the Cloud KMS version's")
+	}
+
+	// The bindings gcloud granted the service agent, as Google keeps them.
+	agentRE := regexp.MustCompile(`^serviceAccount:service-[0-9]+@gcp-sa-privateca\.iam\.gserviceaccount\.com$`)
+	agent := ""
+	has := func(what string, bindings map[string][]string, roles ...string) {
+		t.Helper()
+		for _, r := range roles {
+			i := slices.IndexFunc(bindings[r], agentRE.MatchString)
+			if i < 0 || (agent != "" && bindings[r][i] != agent) {
+				t.Errorf("%s: the Certificate Authority Service agent %s is not granted %s: %v", what, agent, r, bindings)
+				continue
+			}
+			agent = bindings[r][i]
+		}
+	}
+	kp, err := k.ResourceIAM(strings.Split(version, "/cryptoKeyVersions/")[0]).Policy(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kb := map[string][]string{}
+	for _, r := range kp.Roles() {
+		kb[string(r)] = kp.Members(r)
+	}
+	has("the signing key's policy", kb, "roles/cloudkms.signerVerifier", "roles/viewer")
+	bp, err := bh.IAM().Policy(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bb := map[string][]string{}
+	for _, r := range bp.Roles() {
+		bb[string(r)] = bp.Members(r)
+	}
+	has("the bucket's policy", bb, "roles/storage.objectAdmin", "roles/storage.legacyBucketReader")
+
+	obj := strings.TrimPrefix(ca.GetAccessUrls().GetCaCertificateAccessUrl(), "http://")
+	if _, after, ok := strings.Cut(obj, "/"+bucketName+"/"); !ok {
+		t.Errorf("the CA certificate's access URL %s is not an object of %s", ca.GetAccessUrls().GetCaCertificateAccessUrl(), bucketName)
+	} else if r, err := bh.Object(after).NewReader(ctx); err != nil {
+		t.Errorf("the published CA certificate %s: %v", after, err)
+	} else {
+		b, _ := io.ReadAll(r)
+		_ = r.Close()
+		if strings.TrimSpace(string(b)) != strings.TrimSpace(ca.GetPemCaCertificates()[0]) {
+			t.Errorf("the published CA certificate is not the CA's")
+		}
+	}
+
+	dir := t.TempDir()
+	certFile := filepath.Join(dir, "cert.pem")
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	csrDER, _ := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{DNSNames: []string{"kms.example.com"}}, key)
+	csr := filepath.Join(dir, "req.csr")
+	if err := os.WriteFile(csr, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER}), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := g.run(nil, "privateca", "certificates", "create", "gkcert", "--issuer-pool", pool, "--issuer-location", "us-central1",
+		"--csr", csr, "--cert-output-file", certFile, "--validity", "P1D", "--project", g.project, "--quiet"); err != nil {
+		t.Fatalf("gcloud privateca certificates create: %v\n%s", err, out)
+	}
+	b, err := os.ReadFile(certFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf, err := parsePEM(string(b))
+	if err != nil {
+		t.Fatal(err)
+	}
+	roots := x509.NewCertPool()
+	roots.AddCert(root)
+	if _, err := leaf.Verify(x509.VerifyOptions{Roots: roots, DNSName: "kms.example.com", KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny}}); err != nil {
+		t.Errorf("the certificate gcloud issued in the CMEK pool does not verify under the KMS-held root: %v", err)
 	}
 }

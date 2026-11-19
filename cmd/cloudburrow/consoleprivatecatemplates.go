@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"cloud.google.com/go/security/privateca/apiv1/privatecapb"
+	"google.golang.org/genproto/googleapis/type/expr"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
@@ -58,6 +59,8 @@ func (privateCATemplatesProvider) CreateForm() (string, []console.Field) {
 			Help: "Comma-separated predefined values: " + strings.Join(privateCAUsages, ", ") + ". They override the request's."},
 		{Name: "allowSubjectPassthrough", Label: "Allow the request's subject", Type: "checkbox", Default: "true"},
 		{Name: "allowSansPassthrough", Label: "Allow the request's subject alternative names", Type: "checkbox", Default: "true"},
+		{Name: "celExpression", Label: "Identity CEL expression", Type: "textarea", Help: privateCACELHelp},
+		{Name: "passthroughExtensions", Label: "Passthrough extensions", Type: "text", Help: privateCAExtensionsHelp},
 		{Name: "maximumLifetimeDays", Label: "Maximum lifetime (days)", Type: "text", Pattern: `^[0-9]{0,5}$`},
 		labelsField(nil, ""),
 	}
@@ -108,11 +111,19 @@ func (p privateCATemplatesProvider) Create(ctx context.Context, project string, 
 	if err != nil {
 		return "", err
 	}
+	ext, err := privateCAParseExtensions(values["passthroughExtensions"])
+	if err != nil {
+		return "", err
+	}
 	subj, sans := values["allowSubjectPassthrough"] != "false", values["allowSansPassthrough"] != "false"
+	ident := &privatecapb.CertificateIdentityConstraints{AllowSubjectPassthrough: &subj, AllowSubjectAltNamesPassthrough: &sans}
+	if ic := privateCAIdentity(values); ic != nil {
+		ident = ic
+	}
 	op, err := s.API().CreateCertificateTemplate(ctx, &privatecapb.CreateCertificateTemplateRequest{
 		Parent: "projects/" + project + "/locations/" + strings.TrimSpace(values["location"]), CertificateTemplateId: strings.TrimSpace(values["certificateTemplateId"]),
 		CertificateTemplate: &privatecapb.CertificateTemplate{Description: strings.TrimSpace(values["description"]), PredefinedValues: pv, MaximumLifetime: life, Labels: labels,
-			IdentityConstraints: &privatecapb.CertificateIdentityConstraints{AllowSubjectPassthrough: &subj, AllowSubjectAltNamesPassthrough: &sans}}})
+			IdentityConstraints: ident, PassthroughExtensions: ext}})
 	if err != nil {
 		return "", err
 	}
@@ -175,6 +186,8 @@ func (p privateCATemplatesProvider) Detail(ctx context.Context, project string, 
 				{Label: "Key usages", Value: kmsOrDash(privateCAUsagesText(t.GetPredefinedValues()))},
 				{Label: "Request's subject allowed", Value: fmt.Sprint(ic == nil || ic.GetAllowSubjectPassthrough())},
 				{Label: "Request's SANs allowed", Value: fmt.Sprint(ic == nil || ic.GetAllowSubjectAltNamesPassthrough())},
+				{Label: "Identity CEL expression", Value: kmsOrDash(ic.GetCelExpression().GetExpression())},
+				{Label: "Passthrough extensions", Value: kmsOrDash(privateCAExtensionsText(t.GetPassthroughExtensions()))},
 				{Label: "Maximum lifetime", Value: life}, {Label: "Labels", Value: kmsOrDash(labelsText(t.GetLabels()))}}}}}},
 	}, nil
 }
@@ -189,6 +202,8 @@ func (p privateCATemplatesProvider) DetailActions(ctx context.Context, project s
 			{Name: "description", Label: "Description", Type: "text", Default: t.GetDescription()},
 			{Name: "usages", Label: "Key usages", Type: "text", Default: privateCAUsagesText(t.GetPredefinedValues()),
 				Help: "Comma-separated: " + strings.Join(privateCAUsages, ", ") + "."},
+			{Name: "celExpression", Label: "Identity CEL expression", Type: "textarea", Default: t.GetIdentityConstraints().GetCelExpression().GetExpression(), Help: privateCACELHelp},
+			{Name: "passthroughExtensions", Label: "Passthrough extensions", Type: "text", Default: privateCAExtensionsText(t.GetPassthroughExtensions()), Help: privateCAExtensionsHelp},
 			labelsField(t.GetLabels(), "")}},
 		{ID: "delete", Label: "Delete template", Destructive: true, Leaves: true},
 	}
@@ -205,13 +220,33 @@ func (p privateCATemplatesProvider) ActAt(ctx context.Context, project string, p
 		if err != nil {
 			return err
 		}
+		ext, err := privateCAParseExtensions(values["passthroughExtensions"])
+		if err != nil {
+			return err
+		}
+		// The CEL expression changes inside identity_constraints, whose
+		// passthrough booleans stay as they are.
+		t, err := p.template(ctx, project, path)
+		if err != nil {
+			return err
+		}
+		ident := t.GetIdentityConstraints()
+		if ident == nil {
+			yes := true
+			ident = &privatecapb.CertificateIdentityConstraints{AllowSubjectPassthrough: &yes, AllowSubjectAltNamesPassthrough: pcaPtr(true)}
+		}
+		ident.CelExpression = nil
+		if cel := strings.TrimSpace(values["celExpression"]); cel != "" {
+			ident.CelExpression = &expr.Expr{Expression: cel}
+		}
 		labels, err := console.ParseMap(values["labels"])
 		if err != nil {
 			return err
 		}
 		_, err = api.UpdateCertificateTemplate(ctx, &privatecapb.UpdateCertificateTemplateRequest{
-			CertificateTemplate: &privatecapb.CertificateTemplate{Name: path[0], Description: strings.TrimSpace(values["description"]), PredefinedValues: pv, Labels: labels},
-			UpdateMask:          &fieldmaskpb.FieldMask{Paths: []string{"description", "predefined_values", "labels"}}})
+			CertificateTemplate: &privatecapb.CertificateTemplate{Name: path[0], Description: strings.TrimSpace(values["description"]), PredefinedValues: pv, Labels: labels,
+				IdentityConstraints: ident, PassthroughExtensions: ext},
+			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"description", "predefined_values", "labels", "identity_constraints", "passthrough_extensions"}}})
 		return err
 	case "delete":
 		_, err := api.DeleteCertificateTemplate(ctx, &privatecapb.DeleteCertificateTemplateRequest{Name: path[0]})
