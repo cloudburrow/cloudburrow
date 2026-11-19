@@ -1526,7 +1526,7 @@ func (p datastoreProvider) createEntity(ctx context.Context, project, ns, kind s
 		return "", errors.New("a kind is required")
 	}
 	key := datastore.IncompleteKey(kind, parent)
-	if id := strings.TrimSpace(values["key"]); id != "" {
+	if id := strings.TrimSpace(values["key"]); id != "" && values["keyType"] != datastoreKeyAuto {
 		k, err := datastoreKeyIdentifier(kind, id)
 		if err != nil {
 			return "", err
@@ -1545,6 +1545,26 @@ func (p datastoreProvider) createEntity(ctx context.Context, project, ns, kind s
 	} else if strings.TrimSpace(values["value"]) != "" {
 		return "", errors.New("a value needs a property name")
 	}
+	// Create entity's Properties, a row each (#1846).
+	rows, err := console.ParseGroup(values["properties"])
+	if err != nil {
+		return "", fmt.Errorf("properties: %w", err)
+	}
+	for i, row := range rows {
+		name := strings.TrimSpace(row["name"])
+		if name == "" {
+			return "", fmt.Errorf("property %d has no name", i+1)
+		}
+		if propertyIndex(props, name) >= 0 {
+			return "", fmt.Errorf("property %q is given twice", name)
+		}
+		prop, err := datastoreProperty(name, map[string]string{"type": row["type"], "value": row["value"],
+			"excluded": strconv.FormatBool(row["indexed"] != "true")})
+		if err != nil {
+			return "", fmt.Errorf("property %s: %w", name, err)
+		}
+		props = append(props, prop)
+	}
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
 	c, err := p.client(ctx, project)
@@ -1561,14 +1581,54 @@ func (p datastoreProvider) createEntity(ctx context.Context, project, ns, kind s
 
 // CreateForm implements console.Creator: Create entity, with its kind, as on
 // Google's Datastore page — a kind exists because an entity has it.
+//
+// The page is Google's (#1846): Namespace, Kind, Key identifier (Numeric ID
+// (auto-generated) or Custom name), and Properties, a row per property
+// with its Name, Type, Value and Indexed, and Add property; the button is
+// Create.
 func (datastoreProvider) CreateForm() (string, []console.Field) {
-	return "Create entity", append([]console.Field{
+	return "Create entity", []console.Field{
 		{Name: "namespace", Label: "Namespace", Type: "text", Pattern: datastoreNamespacePattern,
-			Help: "Optional: empty for the default namespace. A new namespace exists once its first entity does. " +
+			Help: "Empty for [default], the default namespace. A new namespace exists once its first entity does. " +
 				"Letters, digits, periods, underscores and dashes, at most 100."},
 		datastoreKindField("The entity's kind. A new kind exists once its first entity does."),
-	}, datastoreEntityFields()...)
+		{Name: "keyType", Label: "Key identifier", Type: "select", Default: datastoreKeyAuto,
+			Options: []string{datastoreKeyAuto, datastoreKeyCustom},
+			Help:    "A numeric ID Datastore allocates, or a name of your own."},
+		{Name: "key", Label: "Custom name", Type: "text", ShowWhen: "keyType=" + datastoreKeyCustom,
+			Help: "The entity's name. As the Name/ID column shows one, name=alice is the name alice and id=123 the numeric ID 123."},
+		{Name: "properties", Label: "Properties", Type: console.GroupFieldType, AddLabel: "Add property",
+			Group: []console.Field{
+				{Name: "name", Label: "Name", Type: "text"},
+				{Name: "type", Label: "Type", Type: "select", Options: datastoreCreateTypes, OptionLabels: datastoreCreateTypeLabels, Default: "string"},
+				{Name: "value", Label: "Value", Type: "textarea"},
+				{Name: "indexed", Label: "Indexed", Type: "checkbox", Default: "true"},
+			},
+			Help: "A timestamp is RFC 3339 (2026-09-27T15:04:05Z); a key Kind/name=… or Kind/id=…, ancestors first; " +
+				"a geographical point latitude, longitude; an array or embedded entity JSON; a blob base64. " +
+				"An unindexed property cannot be filtered or ordered on; a string or blob over 1,500 bytes must be unindexed."},
+	}
 }
+
+// Create entity's Key identifier choices, as Google's.
+const (
+	datastoreKeyAuto   = "Numeric ID (auto-generated)"
+	datastoreKeyCustom = "Custom name"
+)
+
+// datastoreCreateTypes are Create entity's property types, and
+// datastoreCreateTypeLabels Google's names for them.
+var (
+	datastoreCreateTypes      = []string{"string", "integer", "float", "boolean", "timestamp", "key", "geopoint", "array", "entity", "blob", "null"}
+	datastoreCreateTypeLabels = map[string]string{
+		"string": "String", "integer": "Integer", "float": "Floating-point number", "boolean": "Boolean",
+		"timestamp": "Date and time", "key": "Key", "geopoint": "Geographical point", "array": "Array",
+		"entity": "Embedded entity", "blob": "Blob", "null": "Null",
+	}
+)
+
+// CreateSubmit implements console.CreateSubmitter: Google's Create.
+func (datastoreProvider) CreateSubmit() string { return "Create" }
 
 // namespaceValue reads the Namespace input, refusing what Datastore would.
 func namespaceValue(raw string) (string, error) {

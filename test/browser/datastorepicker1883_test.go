@@ -74,6 +74,8 @@ func TestDatastoreDatabasePickerWritesTheChosenDatabaseThroughTheBrowser(t *test
 	p.clickText(`#view button`, "Create entity")
 	p.waitFor(`document.querySelector("#f-kind") !== null`)
 	p.run(chromedp.SendKeys(chromedp.CSS(`#f-kind`), "Picked"))
+	p.setField(`#f-keyType`, "Custom name")
+	p.waitFor(`document.querySelector("#f-key").offsetParent !== null`)
 	p.run(chromedp.SendKeys(chromedp.CSS(`#f-key`), "p1"))
 	p.run(chromedp.Click(chromedp.CSS(`form button[type="submit"]`)))
 	key := datastore.NameKey("Picked", "p1", nil)

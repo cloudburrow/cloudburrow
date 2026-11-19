@@ -77,6 +77,42 @@ func TestDatastoreStudioQueryByGQLIndexesAndImportExportThroughTheBrowser(t *tes
 		t.Errorf("Query by GQL Hours > 4 lists %q, want name=long", row)
 	}
 
+	// Create entity, as Google's: Key identifier, and Properties a row each
+	// with Name, Type, Value and Indexed.
+	p.navigate("/datastore" + q)
+	p.clickText(`#view button`, "Create entity")
+	p.waitFor(`document.querySelector("#f-kind") !== null`)
+	p.run(chromedp.SendKeys(chromedp.CSS(`#f-kind`), "Made"))
+	p.setField(`#f-keyType`, "Custom name")
+	p.waitFor(`document.querySelector("#f-key").offsetParent !== null`)
+	p.run(chromedp.SendKeys(chromedp.CSS(`#f-key`), "m1"))
+	for i, prop := range [][3]string{{"hours", "integer", "3"}, {"title", "string", "Write"}} {
+		p.clickText(`button`, "Add property")
+		p.waitFor(fmt.Sprintf(`document.querySelectorAll(".group-row").length === %d`, i+1))
+		p.eval(fmt.Sprintf(`(() => { const r = document.querySelectorAll(".group-row")[%d];
+			const set = (c, v) => { c.value = v; c.dispatchEvent(new Event("input", { bubbles: true })); c.dispatchEvent(new Event("change", { bubbles: true })); };
+			set(r.querySelector("input[type=text]"), %q); set(r.querySelector("select"), %q); set(r.querySelector("textarea"), %q);
+			if (%d === 0) { const c = r.querySelector("input[type=checkbox]"); c.checked = false; c.dispatchEvent(new Event("change", { bubbles: true })); }
+			return true; })()`, i, prop[0], prop[1], prop[2], i), nil)
+	}
+	p.run(chromedp.Click(chromedp.CSS(`form button[type="submit"]`)))
+	var made datastore.PropertyList
+	key := datastore.NameKey("Made", "m1", nil)
+	deadline := time.Now().Add(10 * time.Second)
+	for err = dc.Get(ctx, key, &made); err != nil && time.Now().Before(deadline); err = dc.Get(ctx, key, &made) {
+		time.Sleep(200 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("Create entity: %v", err)
+	}
+	got := map[string]datastore.Property{}
+	for _, pr := range made {
+		got[pr.Name] = pr
+	}
+	if got["hours"].Value != int64(3) || !got["hours"].NoIndex || got["title"].Value != "Write" || got["title"].NoIndex {
+		t.Errorf("Create entity wrote %+v, want hours 3 unindexed and title Write indexed", made)
+	}
+
 	p.navigate("/datastore" + q)
 	for _, label := range []string{"Export", "Import", "Indexes"} {
 		p.waitFor(fmt.Sprintf(`[...document.querySelectorAll("#view a, #view button")].some((b) => b.textContent.trim() === %q)`, label))

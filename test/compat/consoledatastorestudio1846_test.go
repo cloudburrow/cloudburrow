@@ -63,6 +63,33 @@ func TestConsoleDatastoreStudio(t *testing.T) {
 		t.Errorf("Query by GQL COUNT(*) = %+v, want n 2 (the default namespace's t1, t2)", rows.Items)
 	}
 
+	// Create entity's Properties, a row each with its Indexed.
+	body, _ := json.Marshal(map[string]string{"kind": "Made", "keyType": "Custom name", "key": "m1",
+		"properties": `[{"name":"hours","type":"integer","value":"3","indexed":"false"},{"name":"when","type":"timestamp","value":"2026-11-19T10:00:00Z","indexed":"true"}]`})
+	if code, out := consoleDo(t, addr, http.MethodPost, "/api/resources/datastore"+q, string(body)); code != http.StatusOK {
+		t.Fatalf("Create entity = %d: %s", code, out)
+	}
+	var made datastore.PropertyList
+	if err := dc.Get(ctx, datastore.NameKey("Made", "m1", nil), &made); err != nil {
+		t.Fatalf("the created entity: %v", err)
+	}
+	if len(made) != 2 || made[0].Name != "hours" || made[0].Value != int64(3) || !made[0].NoIndex || made[1].NoIndex {
+		t.Errorf("Create entity wrote %+v", made)
+	}
+	body, _ = json.Marshal(map[string]string{"kind": "Made", "keyType": "Numeric ID (auto-generated)", "key": "ignored"})
+	if code, out := consoleDo(t, addr, http.MethodPost, "/api/resources/datastore"+q, string(body)); code != http.StatusOK {
+		t.Fatalf("Create entity with a numeric ID = %d: %s", code, out)
+	}
+	if keys, err := dc.GetAll(ctx, datastore.NewQuery("Made").KeysOnly(), nil); err != nil || len(keys) != 2 {
+		t.Errorf("Made after two creates = %v, %v", keys, err)
+	} else {
+		for _, k := range keys {
+			if k.Name == "ignored" {
+				t.Errorf("Numeric ID (auto-generated) made a named key %v", k)
+			}
+		}
+	}
+
 	// Indexes.
 	actx := inDatabase(ctx, project, id)
 	op, err := ac.CreateIndex(actx, &dsadminpb.CreateIndexRequest{ProjectId: project, Index: &dsadminpb.Index{Kind: "Task",
@@ -116,7 +143,7 @@ func TestConsoleDatastoreStudio(t *testing.T) {
 		fields[it.Name] = it.Fields["Value"]
 	}
 	file := fields["Output URL"]
-	if !strings.HasPrefix(file, "gs://"+bh.BucketName()+"/console/") || !strings.HasSuffix(file, ".overall_export_metadata") || fields["Entities"] != "4" {
+	if !strings.HasPrefix(file, "gs://"+bh.BucketName()+"/console/") || !strings.HasSuffix(file, ".overall_export_metadata") || fields["Entities"] != "6" {
 		t.Fatalf("Export answered %v", fields)
 	}
 	clearDatastore(t, ctx, dc)

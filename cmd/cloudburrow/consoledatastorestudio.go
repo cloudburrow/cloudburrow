@@ -108,11 +108,11 @@ func (p datastoreProvider) ListActions(ctx context.Context, project string) []co
 		{ID: "export", Label: "Export", Fields: []console.Field{nsField, kindField,
 			{Name: "destination", Label: "Destination", Type: "text", Required: true, Browse: "storage",
 				Pattern: `^gs://[a-z0-9][a-z0-9_.\-]*[a-z0-9](/.*)?$`,
-				Help: "The Cloud Storage bucket, and optionally a folder in it, the export is written to: gs://BUCKET[/PATH]."}}},
+				Help:    "The Cloud Storage bucket, and optionally a folder in it, the export is written to: gs://BUCKET[/PATH]."}}},
 		{ID: "import", Label: "Import", Fields: []console.Field{
 			{Name: "file", Label: "File", Type: "text", Required: true, Browse: "storage",
 				Pattern: `^gs://.+\.overall_export_metadata$`,
-				Help: "An export's .overall_export_metadata file, gs://BUCKET/PATH/NAME.overall_export_metadata. Not an .export_metadata file."},
+				Help:    "An export's .overall_export_metadata file, gs://BUCKET/PATH/NAME.overall_export_metadata. Not an .export_metadata file."},
 			nsField, kindField}},
 	}
 }

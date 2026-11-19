@@ -5859,7 +5859,10 @@ function groupEntry(f, id, errorId, helpId) {
   const list = el("div", { class: "group-rows", role: "list" });
   const rowValue = (r) => Object.fromEntries(sub.map((s, i) =>
     [s.name, s.type === "checkbox" ? String(r.controls[i].checked) : r.controls[i].value.trim()]));
-  const blank = (v) => Object.values(v).every((x) => x === "" || x === "false");
+  // A row is blank when its text is: a checkbox checked by default (the
+  // Datastore Create entity's Indexed, #1846) or a select's first choice
+  // does not make it a row.
+  const blank = (v) => sub.every((s) => s.type === "checkbox" || s.type === "select" || v[s.name] === "");
   const sync = () => {
     const values = rows.map(rowValue).filter((v) => !blank(v));
     control.value = values.length ? JSON.stringify(values) : "";
@@ -5892,7 +5895,7 @@ function groupEntry(f, id, errorId, helpId) {
             ...(s.options || []).map((o) => el("option", { value: o, text: (s.optionLabels || {})[o] || o || "None" })))
         : el("input", { type: s.type === "checkbox" ? "checkbox" : "text", "aria-label": label,
                         autocomplete: "off", spellcheck: "false" });
-      if (s.type === "checkbox") c.checked = value[s.name] === "true";
+      if (s.type === "checkbox") c.checked = (value[s.name] ?? s.default) === "true";
       else c.value = value[s.name] || s.default || "";
       c.addEventListener("input", sync);
       c.addEventListener("change", sync);
