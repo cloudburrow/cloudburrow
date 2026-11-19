@@ -1011,7 +1011,7 @@ func TestEveryDialogSharesOneModalShell(t *testing.T) {
 		`if (opener && opener.isConnected && opener.focus) opener.focus();`,
 		`if (e.key !== "Tab") return;`,
 		`for (const n of inerted) n.inert = true;`,
-		`for (const n of inerted) n.inert = false;`,
+		`for (const n of inerted) if (!n.classList.contains("is-closing")) n.inert = false;`,
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("openModal is missing %q", want)
