@@ -154,6 +154,8 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/hostrelay/` | TCP relay that lets pods reach services the CLI serves on loopback (#575). |
 | `internal/iamcond/` | Compiles and evaluates IAM Conditions: the CEL subset Google accepts on a role binding (#1742, #1745). |
 | `internal/iameval/` | CloudBurrow's one evaluator of IAM allow policies (#1879): whether a principal holds a permission on a resource, and why, for `--iam-enforcement`, Policy Troubleshooter and Policy Analyzer. |
+| `internal/iamcheck/` | How the servers CloudBurrow runs in the cluster (Cloud Storage, Pub/Sub's front) ask the host's one evaluator, `internal/iameval`, whether a caller holds a permission (#1879), so every IAM decision is made in one place. |
+| `internal/orgpolicy/` | Organization policy evaluation (#1890, #1891): a constraint's effective policy down the resource hierarchy, and the checks each enforced built-in and custom constraint makes, whether or not IAM enforcement is on. |
 | `internal/iampolicy/` | IAM policy storage without enforcement (ADR-0006). |
 | `internal/iamroles/` | IAM's permission catalog and the permissions of the roles CloudBurrow's permission checks evaluate (#1743). |
 | `internal/images/` | Gets locally built images into the cluster without a registry. |
