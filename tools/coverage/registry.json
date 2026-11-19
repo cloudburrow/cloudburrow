@@ -599,6 +599,7 @@
   "google.storage.control.v2.StorageControl/GetFolderIntelligenceConfig": "implemented",
   "google.storage.control.v2.StorageControl/GetOrganizationIntelligenceConfig": "implemented",
   "google.storage.control.v2.StorageControl/GetProjectIntelligenceConfig": "implemented",
+  "google.storage.control.v2.StorageControl/PauseAnywhereCache": "implemented",
   "google.storage.control.v2.StorageControl/UpdateFolderIntelligenceConfig": "implemented",
   "google.storage.control.v2.StorageControl/UpdateOrganizationIntelligenceConfig": "implemented",
   "google.storage.control.v2.StorageControl/UpdateProjectIntelligenceConfig": "implemented",

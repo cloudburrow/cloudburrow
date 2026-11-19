@@ -30,7 +30,7 @@ Do not edit these files by hand.
 | [Memorystore for Redis](memorystore.md) | 73 | 69 | 0 | 4 | 0 | 0 | 0 | 1 |
 | [Pub/Sub](pubsub.md) | 47 | 47 | 0 | 0 | 0 | 0 | 0 | 4 |
 | [Cloud Storage (JSON API)](storage.md) | 86 | 83 | 0 | 3 | 0 | 0 | 0 | 33 |
-| [Cloud Storage (gRPC API v2)](storagegrpc.md) | 30 | 29 | 0 | 0 | 1 | 0 | 0 | 0 |
+| [Cloud Storage (gRPC API v2)](storagegrpc.md) | 31 | 30 | 0 | 0 | 1 | 0 | 0 | 0 |
 | [Firestore](firestore.md) | 17 | 17 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Firestore Admin API](firestoreadmin.md) | 32 | 32 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Datastore](datastore.md) | 8 | 8 | 0 | 0 | 0 | 0 | 0 | 0 |

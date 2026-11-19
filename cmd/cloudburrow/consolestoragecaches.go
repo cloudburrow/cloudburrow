@@ -7,18 +7,20 @@ package main
 // which says that no cache exists locally, and the actions Create Anywhere
 // Cache, Change Anywhere Cache (pause, resume, disable, update), Relocate
 // bucket, Finalize relocation and Cancel operation; the operations they
-// start show on the Operations tab.
+// start show on the Operations tab. Pause goes through Storage Control's
+// PauseAnywhereCache over gRPC, the one surface where Google still
+// publishes it (#1791).
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
-	"net/url"
 	"strings"
 
-	"google.golang.org/api/googleapi"
+	"cloud.google.com/go/storage/control/apiv2/controlpb"
 	storagev1 "google.golang.org/api/storage/v1"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
 )
@@ -116,7 +118,7 @@ func (p storageProvider) actOnCaches(ctx context.Context, path []string, action 
 		var err error
 		switch v("change") {
 		case "pause":
-			err = pauseAnywhereCache(ctx, s, b, v("zone"))
+			err = pauseAnywhereCache(ctx, p.endpoint, b, v("zone"))
 		case "resume":
 			_, err = s.AnywhereCaches.Resume(b, v("zone")).Context(ctx).Do()
 		case "disable":
@@ -150,19 +152,23 @@ func (p storageProvider) actOnCaches(ctx context.Context, path []string, action 
 	return true, nil, s.Operations.Cancel(b, v("operation")).Context(ctx).Do()
 }
 
-// pauseAnywhereCache calls storage.anywhereCaches.pause, which
-// google.golang.org/api v0.314.0's storage discovery document (revision
-// 20261107) no longer lists (#1791), so the generated client has no Pause.
-func pauseAnywhereCache(ctx context.Context, s *storagev1.Service, bucket, id string) error {
-	u := strings.TrimSuffix(s.BasePath, "/") + "/b/" + url.PathEscape(bucket) + "/anywhereCaches/" + url.PathEscape(id) + "/pause"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, nil)
-	if err != nil {
-		return err
+// pauseAnywhereCache pauses a cache through Storage Control's
+// PauseAnywhereCache, over gRPC on the storage port. The JSON API's
+// storage.anywhereCaches.pause left the discovery document in revision
+// 20261107, and with it gcloud's anywhere-caches pause, the console's pause
+// and the docs' "Pause a cache"; google.storage.control.v2 still has it
+// (googleapis master and its RPC reference, re-read 2026-11-18), so the
+// console pauses there (#1791).
+func pauseAnywhereCache(ctx context.Context, endpoint, bucket, id string) error {
+	if endpoint == "" {
+		return errors.New("no Cloud Storage endpoint")
 	}
-	resp, err := http.DefaultClient.Do(req)
+	conn, err := grpc.NewClient(endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		return err
+		return fmt.Errorf("cannot reach Cloud Storage: %w", err)
 	}
-	defer resp.Body.Close()
-	return googleapi.CheckResponse(resp)
+	defer func() { _ = conn.Close() }()
+	_, err = controlpb.NewStorageControlClient(conn).PauseAnywhereCache(ctx, &controlpb.PauseAnywhereCacheRequest{
+		Name: "projects/_/buckets/" + bucket + "/anywhereCaches/" + id})
+	return err
 }

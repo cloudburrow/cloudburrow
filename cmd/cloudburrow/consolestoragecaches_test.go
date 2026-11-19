@@ -2,8 +2,17 @@ package main
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	gcsbuiltin "github.com/cloudburrow/cloudburrow/internal/service/storage"
 )
 
 // Anywhere Caches, relocation and cancel (#1444) on a bucket's page: Create
@@ -53,5 +62,71 @@ func TestStorageAnywhereCachesThroughTheConsole(t *testing.T) {
 	}
 	if _, err := p.ActAtResult(ctx, "p", []string{"other"}, "canceloperation", map[string]string{"operation": reloc}); err == nil {
 		t.Error("a cancelled relocation was cancelled again")
+	}
+}
+
+// TestStorageAnywhereCachePauseThroughTheConsole: Change Anywhere Cache's
+// pause goes through Storage Control's PauseAnywhereCache over gRPC on the
+// storage port (#1791: the JSON API's anywhereCaches.pause is no longer in
+// the discovery document), so pausing a paused cache is gRPC's
+// FAILED_PRECONDITION; resume runs it again.
+func TestStorageAnywhereCachePauseThroughTheConsole(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	var mu sync.Mutex
+	now := time.Date(2026, 11, 18, 12, 0, 0, 0, time.UTC)
+	srv, err := gcsbuiltin.NewServer(gcsbuiltin.Options{Now: func() time.Time { mu.Lock(); defer mu.Unlock(); return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := httptest.NewUnstartedServer(srv)
+	h.Config.Protocols = new(http.Protocols)
+	h.Config.Protocols.SetHTTP1(true)
+	h.Config.Protocols.SetUnencryptedHTTP2(true)
+	h.Start()
+	t.Cleanup(h.Close)
+	p := storageProvider{endpoint: strings.TrimPrefix(h.URL, "http://")}
+	if _, err := p.Create(ctx, "p", map[string]string{"name": "pausecache"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.ActAtResult(ctx, "p", []string{"pausecache"}, "createanywherecache", map[string]string{"zone": "us-central1-a"}); err != nil {
+		t.Fatalf("Create Anywhere Cache: %v", err)
+	}
+	mu.Lock()
+	now = now.Add(time.Minute)
+	mu.Unlock()
+	state := func() string {
+		t.Helper()
+		d, err := p.Detail(ctx, "p", []string{"pausecache"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		c := sectionNamed(d, "anywherecaches")
+		if c == nil || len(c.Listing.Items) != 1 {
+			t.Fatalf("the Anywhere caches tab is %+v", c)
+		}
+		return c.Listing.Items[0].Fields["State"]
+	}
+	if st := state(); st != "running" {
+		t.Fatalf("created cache is %q, want running", st)
+	}
+	change := func(c string) error {
+		_, err := p.ActAtResult(ctx, "p", []string{"pausecache"}, "changeanywherecache", map[string]string{"zone": "us-central1-a", "change": c})
+		return err
+	}
+	if err := change("pause"); err != nil {
+		t.Fatalf("Change Anywhere Cache pause: %v", err)
+	}
+	if st := state(); st != "paused" {
+		t.Errorf("after pause the cache is %q, want paused", st)
+	}
+	if err := change("pause"); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("pause a paused cache = %v; want gRPC FAILED_PRECONDITION", err)
+	}
+	if err := change("resume"); err != nil {
+		t.Fatalf("Change Anywhere Cache resume: %v", err)
+	}
+	if st := state(); st != "running" {
+		t.Errorf("after resume the cache is %q, want running", st)
 	}
 }
