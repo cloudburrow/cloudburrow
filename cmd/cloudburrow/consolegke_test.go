@@ -111,8 +111,8 @@ func TestGKEDeployRefusesBeforeKubectl(t *testing.T) {
 	if label != "Deploy" || len(fields) == 0 || fields[0].Label != "Image path" {
 		t.Errorf("Deploy form %q %+v", label, fields)
 	}
-	if label, _ := gkeServices("", "c", "").CreateForm(); label != "" {
-		t.Errorf("Services has a create form %q; Google's Services tab creates through Expose", label)
+	if _, ok := any(gkeServices("", "c", "")).(console.Creator); ok {
+		t.Error("Services is a Creator; Google's Services tab creates through a workload's Expose")
 	}
 }
 

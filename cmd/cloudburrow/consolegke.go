@@ -68,9 +68,11 @@ type gkeObjects struct {
 	cluster, ownNamespace string
 	// clusterColumn adds Google's Cluster column.
 	tabs func(d console.Detail, item map[string]any) console.Detail
-	// deploy, when set, is the Workloads page's Deploy.
-	deploy bool
 }
+
+// gkeWorkloadsProvider is Workloads, the one Kubernetes object screen with a
+// create: Deploy.
+type gkeWorkloadsProvider struct{ gkeObjects }
 
 func (p gkeObjects) ScopeKey() string     { return gkeClusterScope }
 func (p gkeObjects) FilterKeys() []string { return []string{gkeSystemFilter} }
@@ -206,7 +208,7 @@ func gkeDetailsTabs(d console.Detail, _ map[string]any) console.Detail {
 // DaemonSets, Jobs and CronJobs, the top-level objects only (not the
 // ReplicaSets or Pods they own), with Name, Status, Type, Pods, Namespace
 // and Cluster.
-func gkeWorkloads(kubeconfig, cluster, own string) gkeObjects {
+func gkeWorkloads(kubeconfig, cluster, own string) gkeWorkloadsProvider {
 	base := workloadsProvider(kubeconfig)
 	base.kind = "deployments,statefulsets,daemonsets,replicasets,jobs,cronjobs"
 	base.columns = []string{"Type", "Pods", "Namespace"}
@@ -243,7 +245,7 @@ func gkeWorkloads(kubeconfig, cluster, own string) gkeObjects {
 		}
 		return inDetail(item)
 	}
-	return gkeObjects{kubeProvider: base, cluster: cluster, ownNamespace: own, tabs: gkeWorkloadTabs, deploy: true}
+	return gkeWorkloadsProvider{gkeObjects{kubeProvider: base, cluster: cluster, ownNamespace: own, tabs: gkeWorkloadTabs}}
 }
 
 // gkeKindLabel is the Type column's wording: Deployment, Stateful Set,
@@ -291,10 +293,7 @@ func gkeJobRow(item map[string]any) console.Resource {
 // container image, then the application's name, namespace and labels, as
 // https://docs.cloud.google.com/kubernetes-engine/docs/how-to/stateless-apps
 // describes it. Google's Deploy makes three replicas.
-func (p gkeObjects) CreateForm() (string, []console.Field) {
-	if !p.deploy {
-		return "", nil
-	}
+func (p gkeWorkloadsProvider) CreateForm() (string, []console.Field) {
 	return "Deploy", []console.Field{
 		{Name: "image", Label: "Image path", Type: "text", Required: true, Section: "Container",
 			Help: "The container image, such as nginx:latest or a repository of this instance's Artifact Registry."},
@@ -306,19 +305,16 @@ func (p gkeObjects) CreateForm() (string, []console.Field) {
 	}
 }
 
-func (p gkeObjects) CreateOnPage() bool   { return p.deploy }
-func (p gkeObjects) CreateTitle() string  { return "Create deployment" }
-func (p gkeObjects) CreateLayout() string { return "page" }
-func (p gkeObjects) CreateSubmit() string { return "Deploy" }
+func (p gkeWorkloadsProvider) CreateOnPage() bool   { return true }
+func (p gkeWorkloadsProvider) CreateTitle() string  { return "Create deployment" }
+func (p gkeWorkloadsProvider) CreateLayout() string { return "page" }
+func (p gkeWorkloadsProvider) CreateSubmit() string { return "Deploy" }
 
 var gkeNamePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?$`)
 
 // Create deploys the Deployment through the cluster's own API (kubectl
 // create deployment), labelled app=NAME as Google's Deploy labels it.
-func (p gkeObjects) Create(ctx context.Context, _ string, v map[string]string) (string, error) {
-	if !p.deploy {
-		return "", errors.New("this page creates nothing")
-	}
+func (p gkeWorkloadsProvider) Create(ctx context.Context, _ string, v map[string]string) (string, error) {
 	name, image := strings.TrimSpace(v["name"]), strings.TrimSpace(v["image"])
 	ns := strings.TrimSpace(v["namespace"])
 	if ns == "" {
