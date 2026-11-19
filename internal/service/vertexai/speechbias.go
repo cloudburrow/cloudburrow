@@ -37,7 +37,8 @@ import (
 //   - Google's prebuilt classes ($ADDRESSNUM, $OOV_CLASS_DIGIT_SEQUENCE,
 //     ...) are UNIMPLEMENTED: whisper has no class grammar.
 //
-// UNVERIFIED: how strongly a boost biases (Google's is model-internal; the
+// UNVERIFIED (re-read 2026-11-19: https://docs.cloud.google.com/speech-to-text/docs/adaptation-model,
+// which does not say): how strongly a boost biases (Google's is model-internal; the
 // scale here was measured on whisper base, see speechbias_test.go), the
 // default boost, and the texts of the errors.
 

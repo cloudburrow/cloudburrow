@@ -59,7 +59,8 @@ import (
 // Recognize's uri reads a gs:// object of at most 10 MB from this
 // instance's Cloud Storage, as content would be sent.
 //
-// UNVERIFIED (the reference names the prefix, not the objects): the
+// UNVERIFIED (re-read 2026-11-19: the batchRecognize reference above names the prefix, not the
+// objects): the
 // result objects' names, {prefix}/{audio object's base name}_transcript_{id}.json
 // (and .vtt, .srt); the texts of the errors.
 

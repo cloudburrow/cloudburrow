@@ -280,7 +280,10 @@ func TestSpeechAdaptationResources(t *testing.T) {
 			DecodingConfig: &speechpb.RecognitionConfig_AutoDecodingConfig{AutoDecodingConfig: &speechpb.AutoDetectDecodingConfig{}},
 			Adaptation: &speechpb.SpeechAdaptation{PhraseSets: []*speechpb.SpeechAdaptation_AdaptationPhraseSet{{
 				Value: &speechpb.SpeechAdaptation_AdaptationPhraseSet_PhraseSet{PhraseSet: ps.GetName()}}}}},
-		AudioSource: &speechpb.RecognizeRequest_Content{Content: []byte("RIFF")}}); status.Code(err) != codes.Unimplemented {
+		AudioSource: &speechpb.RecognizeRequest_Content{Content: []byte("RIFF")}}); status.Code(err) != codes.InvalidArgument ||
+		strings.Contains(err.Error(), "adaptation") {
+		// The phrase set is applied (TestSpeechAdaptationBoost); four bytes
+		// are not a WAV file.
 		t.Errorf("Recognize with adaptation: %v", err)
 	}
 	pd, err := g.DeletePhraseSet(ctx, &speechpb.DeletePhraseSetRequest{Name: ps.GetName()})

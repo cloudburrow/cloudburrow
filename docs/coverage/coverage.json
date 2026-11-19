@@ -5819,8 +5819,8 @@
     "Key": "vertexai",
     "Title": "Vertex AI PredictionService",
     "counts": {
-      "Unimplemented": 29,
-      "Verified": 60
+      "Unimplemented": 28,
+      "Verified": 61
     },
     "rows": [
       {
@@ -6263,7 +6263,7 @@
         "method": "google.cloud.speech.v2.Speech/BatchRecognize",
         "status": "Verified",
         "tests": [
-          "test/compat/speech_test.go:313 TestSpeechBatchRecognize"
+          "test/compat/speech_test.go:316 TestSpeechBatchRecognize"
         ]
       },
       {
@@ -6359,14 +6359,17 @@
         "method": "google.cloud.speech.v2.Speech/Recognize",
         "status": "Verified",
         "tests": [
-          "test/compat/speech_test.go:313 TestSpeechBatchRecognize",
-          "test/compat/speech_test.go:80 TestSpeechRecognizers"
+          "test/compat/speech_test.go:316 TestSpeechBatchRecognize",
+          "test/compat/speech_test.go:80 TestSpeechRecognizers",
+          "test/compat/speechstream_test.go:58 TestSpeechAdaptationBoost"
         ]
       },
       {
         "method": "google.cloud.speech.v2.Speech/StreamingRecognize",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/speechstream_test.go:137 TestSpeechStreamingRecognize"
+        ]
       },
       {
         "method": "google.cloud.speech.v2.Speech/UndeleteCustomClass",
@@ -6413,6 +6416,36 @@
         "status": "Verified",
         "tests": [
           "test/compat/speech_test.go:80 TestSpeechRecognizers"
+        ]
+      }
+    ]
+  },
+  {
+    "Key": "speechv1",
+    "Title": "Speech-to-Text v1",
+    "counts": {
+      "Verified": 3
+    },
+    "rows": [
+      {
+        "method": "google.cloud.speech.v1.Speech/LongRunningRecognize",
+        "status": "Verified",
+        "tests": [
+          "test/compat/speechstream_test.go:229 TestSpeechV1"
+        ]
+      },
+      {
+        "method": "google.cloud.speech.v1.Speech/Recognize",
+        "status": "Verified",
+        "tests": [
+          "test/compat/speechstream_test.go:229 TestSpeechV1"
+        ]
+      },
+      {
+        "method": "google.cloud.speech.v1.Speech/StreamingRecognize",
+        "status": "Verified",
+        "tests": [
+          "test/compat/speechstream_test.go:229 TestSpeechV1"
         ]
       }
     ]

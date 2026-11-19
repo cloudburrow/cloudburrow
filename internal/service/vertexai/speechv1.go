@@ -48,7 +48,8 @@ import (
 //     UNIMPLEMENTED.
 //   - StreamingRecognize is speechstream.go's, with v1's single_utterance.
 //
-// UNVERIFIED: the model mapping (each is the same local whisper model), and
+// UNVERIFIED (re-read 2026-11-19: https://docs.cloud.google.com/speech-to-text/docs/reference/rpc/google.cloud.speech.v1,
+// which does not say): the model mapping (each is the same local whisper model), and
 // the texts of the errors other than Google's quoted one.
 
 const v1SyncMaxSeconds = 60

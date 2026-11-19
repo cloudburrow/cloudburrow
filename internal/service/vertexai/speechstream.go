@@ -45,7 +45,8 @@ import (
 //     without speech. v1's single_utterance ends recognition after the
 //     first utterance with END_OF_SINGLE_UTTERANCE, then its final result.
 //
-// UNVERIFIED (the references define the fields, not these): the energy
+// UNVERIFIED (re-read 2026-11-19: https://docs.cloud.google.com/speech-to-text/docs/reference/rpc/google.cloud.speech.v2
+// and .../quotas define the fields and limits, not these): the energy
 // threshold and silences, the interim cadence and stability, whether
 // Google counts the 5 minutes as audio or wall time (audio here), and the
 // texts of the errors.
