@@ -131,7 +131,7 @@ func (p cloudSQLInstancesProvider) sqlCreateForm() []console.Field {
 	for h := 0; h < 24; h++ {
 		hours, hourLabels = append(hours, strconv.Itoa(h)), append(hourLabels, fmt.Sprintf("%02d:00 UTC", h))
 	}
-	return []console.Field{
+	return withPasswordPolicy(infoSec, []console.Field{
 		{Name: "engine", Label: "Database engine", Type: "radio", Section: engineSec, Default: sqlEnginePostgres,
 			Options:         []string{sqlEngineMySQL, sqlEnginePostgres, sqlEngineSQLServer},
 			OptionLabels:    []string{"MySQL", "PostgreSQL", "SQL Server (not available locally)"},
@@ -160,6 +160,7 @@ func (p cloudSQLInstancesProvider) sqlCreateForm() []console.Field {
 			Help: availabilityHelp},
 		{Name: "tier", Label: "Machine type", Type: "text", Section: machineSec,
 			Help: "Such as db-custom-2-7680; empty takes the edition preset's. Recorded and reported; the server is not sized by it."},
+		dataCacheField("Data cache"),
 		{Name: "dataDiskSizeGb", Label: "Storage capacity (GB)", Type: "number", Section: storageSec,
 			Help: "Empty is 10 GB. Storage shrink, on the instance's page, makes it smaller later."},
 		serverCAModeSection(serverCAModeField(internalCAMode), connSec),
@@ -186,7 +187,7 @@ func (p cloudSQLInstancesProvider) sqlCreateForm() []console.Field {
 		{Name: "sourcePassword", Label: "Replication password", Type: "password", Section: externalSec},
 		{Name: "sourceDatabases", Label: "Databases to migrate (PostgreSQL)", Type: "text", Section: externalSec,
 			Help: "Comma-separated databases (selectedObjects); empty migrates every database but the templates."},
-	}
+	})
 }
 
 func serverCAModeSection(f console.Field, section string) console.Field {
@@ -259,7 +260,7 @@ func sqlCreateSettings(st *sqladminapi.Settings, v map[string]string) error {
 // buttons are the instance's operations; Create backup, Create database and
 // Add user account are on their pages.
 var sqlPlace = map[string]string{
-	"import": "", "export": "", "restart": "", "clone": "", "failover": "", "promote-replica": "", "upgrade": "",
+	"stop": "", "start": "", "import": "", "export": "", "restart": "", "clone": "", "failover": "", "promote-replica": "", "upgrade": "",
 	"delete-instance": "", "delete-final-backup": "",
 
 	"create-client-cert": "connections", "delete-client-cert": "connections", "reset-ssl": "connections",
@@ -270,8 +271,10 @@ var sqlPlace = map[string]string{
 	"create-database": "databases", "drop-database": "databases",
 	"create-backup": "backups", "restore-backup": "backups", "delete-backup": "backups",
 	"pitr-restore": "backups", "binlog-clone": "backups",
-	"create-project-backup": "project-backups", "edit-project-backup": "project-backups",
-	"restore-project-backup": "project-backups", "delete-project-backup": "project-backups",
+	// The project's Backups API names the same backups (#1860): its
+	// actions are on Backups too.
+	"create-project-backup": "backups", "edit-project-backup": "backups",
+	"restore-project-backup": "backups", "delete-project-backup": "backups",
 
 	"create-replica": "replicas", "stop-replica": "replicas", "start-replica": "replicas",
 	"designate-dr-replica": "replicas", "clear-dr-replica": "replicas", "switchover": "replicas",
@@ -356,18 +359,22 @@ func googleLayout(ctx context.Context, svc *sqladminapi.Service, project string,
 	for _, s := range d.Sections {
 		byID[s.ID] = s
 	}
+	// Connections: Google's Summary, Networking and Security tabs, the
+	// client certificates on Security (#1860).
 	if c, ok := byID["client-certificates"]; ok {
-		c.ID, c.Label = "connections", "Connections"
-		c.Note = "Security: the client certificates signed by the instance's server CA (sslCerts); the server CAs and the connection name are on Overview. " +
-			"The private key is shown once, when the certificate is created."
-		byID["connections"] = c
+		byID["connections"] = sqlConnectionsSection(in, &c)
 	} else {
-		byID["connections"] = console.Section{ID: "connections", Label: "Connections", Kind: console.KindProperties,
-			Groups: []console.PropertyGroup{{Heading: "Networking", Properties: sqlAddresses(in)}}}
+		byID["connections"] = sqlConnectionsSection(in, nil)
+	}
+	// Backups: the instance's backups and the project's of it, one list,
+	// as Google's Backups page has them (#1860).
+	if b, ok := byID["backups"]; ok {
+		byID["backups"] = sqlMergedBackups(b, byID["project-backups"])
+		delete(byID, "project-backups")
 	}
 	byID["replicas"] = sqlReplicasSection(in)
 	byID["operations"] = sqlOperationsSection(ctx, svc, project, in.Name)
-	order := []string{"connections", "users", "databases", "backups", "project-backups", "replicas", "operations"}
+	order := []string{"connections", "users", "databases", "backups", "replicas", "operations"}
 	for _, id := range order {
 		if s, ok := byID[id]; ok {
 			sections = append(sections, s)
@@ -402,6 +409,16 @@ func googleLayout(ctx context.Context, svc *sqladminapi.Service, project string,
 			continue
 		}
 		out.Actions = append(out.Actions, a)
+	}
+	// The certificate and server CA actions are on Connections' Security
+	// tab, as Google's Manage client certificates and server CAs are.
+	if i, ok := index["connections"]; ok {
+		c := &sections[i]
+		for j := range c.Tabs {
+			if c.Tabs[j].ID == "connections-security" {
+				c.Tabs[j].Actions, c.Actions = append(c.Tabs[j].Actions, c.Actions...), nil
+			}
+		}
 	}
 	out.Sections = sections
 	return out
@@ -490,11 +507,10 @@ func instanceOps(in *sqladminapi.DatabaseInstance) []console.Action {
 	if upSQLInstance(in.Name) || in.InstanceType == "ON_PREMISES_INSTANCE" {
 		return nil
 	}
-	return []console.Action{
-		{ID: "restart", Label: "Restart", Confirm: "Restarting the instance closes every connection to it."},
-		{ID: "delete-instance", Label: "Delete", Destructive: true, Leaves: true,
-			Confirm: "The instance, its databases and its automated backups are deleted."},
-	}
+	return append(stopStartActions(in),
+		console.Action{ID: "restart", Label: "Restart", Confirm: "Restarting the instance closes every connection to it."},
+		console.Action{ID: "delete-instance", Label: "Delete", Destructive: true, Leaves: true,
+			Confirm: "The instance, its databases and its automated backups are deleted."})
 }
 
 // cloudSQLBackupsProvider is Cloud SQL's Backups page (#1860): the

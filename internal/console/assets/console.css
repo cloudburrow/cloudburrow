@@ -1897,3 +1897,8 @@ dd.has-copy .property-copy { padding: 2px 8px; font-size: var(--text-badge-size)
   .tab-strip.is-side-nav { flex-direction: row; flex-wrap: wrap; border-right: 0; border-bottom: 1px solid var(--border); }
 }
 .form-row.is-radio input[type="radio"]:disabled + label { color: var(--text-muted); }
+
+/* A menu page's own tabs (#1860): Google's Cloud SQL Connections page has
+   Summary, Networking and Security inside it. */
+.sub-tab-strip { margin: 0 0 12px; }
+.sub-tab-panel { padding-top: 4px; }

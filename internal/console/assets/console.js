@@ -3207,8 +3207,8 @@ async function renderDetail(view, route, resourcePath) {
 
   const panel = el("div", { class: "tab-panel", id: "detail-panel", role: "tabpanel" });
 
-  const drawPanel = () => {
-    const section = sections[current];
+  const drawPanel = () => drawSectionInto(panel, sections[current]);
+  const drawSectionInto = (panel, section) => {
     const reload = () => renderDetail(view, route, segments);
     // The previous tab's list poll redraws its table into this same panel:
     // left running, it replaced a Query tab, editor, results and all, with
@@ -3238,6 +3238,49 @@ async function renderDetail(view, route, resourcePath) {
           onclick: () => runAction(route, segments, a, reload, NO_ROW, data.title || null),
         })));
       note = note ? el("div", {}, bar, note) : bar;
+    }
+
+    // A section's own tabs (#1860): Google's Cloud SQL Connections page
+    // has Summary, Networking and Security. The strip is a tablist of its
+    // own inside the panel, the tab chosen kept in the address as subtab.
+    if ((section.tabs || []).length) {
+      const subs = section.tabs;
+      const subWanted = new URLSearchParams(location.search).get("subtab");
+      let sub = Math.max(0, subs.findIndex((t) => t.id === subWanted));
+      const subPanel = el("div", { class: "tab-panel sub-tab-panel", id: `subpanel-${section.id}`, role: "tabpanel" });
+      const subTabs = subs.map((t, i) => el("button", {
+        class: "tab" + (i === sub ? " is-selected" : ""), role: "tab", id: `subtab-${t.id}`,
+        "aria-selected": i === sub ? "true" : "false", "aria-controls": subPanel.id,
+        tabindex: i === sub ? "0" : "-1", text: t.label,
+        onclick: () => pick(i),
+      }));
+      const pick = (i) => {
+        sub = i;
+        subTabs.forEach((tab, j) => {
+          tab.classList.toggle("is-selected", j === i);
+          tab.setAttribute("aria-selected", j === i ? "true" : "false");
+          tab.setAttribute("tabindex", j === i ? "0" : "-1");
+        });
+        const url = new URL(location.href);
+        url.searchParams.set("subtab", subs[i].id);
+        history.replaceState({}, "", url);
+        subPanel.setAttribute("aria-labelledby", `subtab-${subs[i].id}`);
+        drawSectionInto(subPanel, subs[i]);
+        subTabs[i].focus();
+        announce(`${subs[i].label} selected`);
+      };
+      const subStrip = el("div", { class: "tab-strip sub-tab-strip", role: "tablist",
+        "aria-label": `${section.label} tabs` }, ...subTabs);
+      subStrip.addEventListener("keydown", (e) => {
+        const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1
+          : e.key === "Home" ? -sub : e.key === "End" ? subs.length - 1 - sub : 0;
+        if (!step && e.key !== "Home" && e.key !== "End") return;
+        e.preventDefault();
+        pick((sub + step + subs.length) % subs.length);
+      });
+      subPanel.setAttribute("aria-labelledby", `subtab-${subs[sub].id}`);
+      setChildren(panel, note, subStrip, subPanel);
+      return drawSectionInto(subPanel, subs[sub]);
     }
 
     // The provider says what the section holds. Inferring it from whichever

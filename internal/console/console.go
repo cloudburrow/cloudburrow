@@ -600,6 +600,12 @@ type Section struct {
 	// title, as Google's Lifecycle tab has Add a rule (#1843). The provider's
 	// DetailActions must offer them too, as for the page's own actions.
 	Actions []Action `json:"actions,omitempty"`
+	// Tabs are the section's own tabs, drawn as a tab strip inside its
+	// panel (#1860): Google's Cloud SQL Connections page has Summary,
+	// Networking and Security. A section with Tabs draws its Note and
+	// Actions over the strip, and each tab its own content; the tab
+	// chosen is the address's subtab.
+	Tabs []Section `json:"tabs,omitempty"`
 }
 
 // dropBlankProperties removes every Property whose Value is empty or
@@ -613,8 +619,13 @@ type Section struct {
 // at the one place every Detail is served from.
 func dropBlankProperties(d *Detail) {
 	d.Summary = nonBlank(d.Summary)
-	for i := range d.Sections {
-		sec := &d.Sections[i]
+	dropBlankSections(d.Sections)
+}
+
+func dropBlankSections(secs []Section) {
+	for i := range secs {
+		sec := &secs[i]
+		dropBlankSections(sec.Tabs)
 		if sec.Groups == nil {
 			continue
 		}
@@ -631,6 +642,20 @@ func dropBlankProperties(d *Detail) {
 			groups = append(groups, g)
 		}
 		sec.Groups = groups
+	}
+}
+
+// normalizeSections gives every listing, a section's tabs' too, non-nil
+// items and columns, which the client iterates.
+func normalizeSections(secs []Section) {
+	for i := range secs {
+		if secs[i].Listing.Items == nil {
+			secs[i].Listing.Items = []Resource{}
+		}
+		if secs[i].Listing.Columns == nil {
+			secs[i].Listing.Columns = []string{}
+		}
+		normalizeSections(secs[i].Tabs)
 	}
 }
 
@@ -2398,13 +2423,6 @@ func (s *Server) handleDetail(w http.ResponseWriter, r *http.Request) {
 		detail.Sections = []Section{}
 	}
 	dropBlankProperties(&detail)
-	for i := range detail.Sections {
-		if detail.Sections[i].Listing.Items == nil {
-			detail.Sections[i].Listing.Items = []Resource{}
-		}
-		if detail.Sections[i].Listing.Columns == nil {
-			detail.Sections[i].Listing.Columns = []string{}
-		}
-	}
+	normalizeSections(detail.Sections)
 	writeJSON(w, http.StatusOK, detail)
 }

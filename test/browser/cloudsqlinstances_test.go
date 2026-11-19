@@ -108,7 +108,7 @@ func (p *tab) pageAction(label string, values map[string]string, confirm string)
 //     as, and Create database and Delete database a database
 //     databases.get reads and then does not;
 //   - Create project backup makes a backup ListBackups lists and the
-//     Project backups tab shows;
+//     Backups page shows, one list with the instance's backups (#1860);
 //   - Edit project backup changes a backup GetBackup then reads, and Delete
 //     project backup, confirmed by the instance's name, deletes it;
 //   - a parallel Export writes a folder, and a parallel Import with Clean and
@@ -236,8 +236,8 @@ func TestCloudSQLInstanceActionsThroughThePage(t *testing.T) {
 	p.navigate(page)
 	p.waitFor(`document.querySelectorAll("#view .page-actions button").length > 0`)
 
-	// Create project backup, which the Project backups tab then lists, for
-	// Edit and Delete project backup.
+	// Create project backup, which the Backups page then lists with the
+	// instance's other backups (#1860), for Edit and Delete project backup.
 	p.pageAction("Create project backup", map[string]string{"description": "browser-" + name, "ttlDays": "2"}, "")
 	var backup string
 	for deadline := time.Now().Add(5 * time.Minute); backup == "" && time.Now().Before(deadline); time.Sleep(time.Second) {
@@ -256,8 +256,8 @@ func TestCloudSQLInstanceActionsThroughThePage(t *testing.T) {
 	}
 	t.Cleanup(func() { _, _ = svc.Backups.DeleteBackup(backup).Do() })
 	p.navigate(page)
-	p.clickText("#view [role=tab]", "Project backups")
-	p.waitFor(fmt.Sprintf(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q))`, "browser-"+name))
+	p.clickText("#view [role=tab]", "Backups")
+	p.waitFor(fmt.Sprintf(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q) && r.textContent.includes("us-central1"))`, "browser-"+name))
 
 	// Run SQL (Data API).
 	rows := p.pageAction("Run SQL (Data API)", map[string]string{"database": "postgres", "user": "browserapi",
@@ -318,9 +318,14 @@ func (p *tab) findAction(label string) string {
 		const vis = (sel) => [...document.querySelectorAll(sel)].some((b) => b.textContent.trim() === want && b.getClientRects().length);
 		if (vis("#view .page-actions button")) return "#view .page-actions button";
 		if (vis("#view .section-actions button")) return "#view .section-actions button";
-		for (const t of document.querySelectorAll("#view [role=tab]")) {
+		for (const t of document.querySelectorAll("#view .tab-strip:not(.sub-tab-strip) [role=tab]")) {
 			t.click();
 			if (vis("#view .section-actions button")) return "#view .section-actions button";
+			// A menu page's own tabs (#1860): Connections' Security.
+			for (const s of document.querySelectorAll("#view .sub-tab-strip [role=tab]")) {
+				s.click();
+				if (vis("#view .section-actions button")) return "#view .section-actions button";
+			}
 		}
 		return ""; })()`, label), &where)
 	return where

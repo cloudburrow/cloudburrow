@@ -91,7 +91,7 @@ func (p cloudSQLInstancesProvider) List(ctx context.Context, project string) (co
 		if location == "" {
 			location = in.Region
 		}
-		l.Items = append(l.Items, console.Resource{Name: in.Name, Status: in.State, Fields: map[string]string{
+		l.Items = append(l.Items, console.Resource{Name: in.Name, Status: sqlStateLabel(in), Fields: map[string]string{
 			"Cloud SQL edition": orDash(edition), "Type": sqlVersionLabel(in.DatabaseVersion),
 			"Public IP address": orDash(public), "Private IP address": orDash(private), "Instance connection name": in.ConnectionName,
 			"High availability": ha, "Location": orDash(location), "Storage used": orDash(storage), "Labels": orDash(labels),
@@ -185,6 +185,12 @@ func (p cloudSQLInstancesProvider) Create(ctx context.Context, project string, v
 		Name: name, DatabaseVersion: v["databaseVersion"], RootPassword: v["rootPassword"], Region: regionOr(v["region"]), Settings: st,
 	}
 	withServerCAMode(st, nil, v)
+	if st.PasswordValidationPolicy, err = passwordPolicyOf(v, false); err != nil {
+		return "", fmt.Errorf("password policy: %w", err)
+	}
+	if v["dataCache"] == "on" {
+		return "", fmt.Errorf("data cache is not available locally")
+	}
 	if k := strings.TrimSpace(v["kmsKeyName"]); k != "" {
 		in.DiskEncryptionConfiguration = &sqladminapi.DiskEncryptionConfiguration{KmsKeyName: k}
 	}
@@ -311,7 +317,7 @@ func (p cloudSQLInstancesProvider) detailAllOf(ctx context.Context, project stri
 	d := console.Detail{Title: name}
 	// A setting the instance does not have is left out, not shown blank.
 	for _, pr := range []console.Property{
-		{Label: "State", Value: in.State}, {Label: "Connection name", Value: in.ConnectionName},
+		{Label: "State", Value: sqlStateLabel(in)}, {Label: "Connection name", Value: in.ConnectionName},
 		{Label: "Version", Value: in.DatabaseVersion}, {Label: "Tier", Value: st.Tier},
 		{Label: "Zonal availability", Value: st.AvailabilityType}, {Label: "Zone", Value: in.GceZone},
 		{Label: "Secondary zone", Value: in.SecondaryGceZone},
@@ -434,6 +440,10 @@ func (p cloudSQLInstancesProvider) detailAllOf(ctx context.Context, project stri
 			{Name: "logRetentionDays", Label: "Transaction log retention (days)", Type: "number", Default: logDays,
 				Help: "1 to 7 (35 on Enterprise Plus); older log and bases are dropped, and the earliest recovery time moves with them."},
 		}, Note: "The database version and the instance ID cannot be changed."}
+		if in.MasterInstanceName == "" {
+			// A replica's policy is its primary's (built-in-authentication).
+			d.Edit.Fields = append(d.Edit.Fields, passwordPolicyFields("", st.PasswordValidationPolicy, in.DatabaseVersion)...)
+		}
 	}
 	d.Actions = append(d.Actions, dbUserActs...)
 	return d, in, svc, nil
@@ -512,6 +522,15 @@ func (p cloudSQLInstancesProvider) Edit(ctx context.Context, project string, pat
 	}
 	pitrConfig(st.BackupConfiguration, in.DatabaseVersion, v["pitr"] == "true")
 	withServerCAMode(st, in, v)
+	if _, ok := v["enablePasswordPolicy"]; ok && in.MasterInstanceName == "" {
+		had := in.Settings != nil && in.Settings.PasswordValidationPolicy != nil
+		if strings.HasPrefix(in.DatabaseVersion, "MYSQL_") {
+			v["engine"] = sqlEngineMySQL
+		}
+		if st.PasswordValidationPolicy, err = passwordPolicyOf(v, had); err != nil {
+			return fmt.Errorf("password policy: %w", err)
+		}
+	}
 	if err := retentionConfig(st.BackupConfiguration, v["retainedBackups"], v["logRetentionDays"]); err != nil {
 		return err
 	}
@@ -1066,6 +1085,8 @@ func (p cloudSQLInstancesProvider) actAt(ctx context.Context, project string, pa
 		}
 	}
 	switch action {
+	case "stop", "start":
+		_, err = stopStart(svc, project, name, action).Context(ctx).Do()
 	case "restart":
 		_, err = svc.Instances.Restart(project, name).Context(ctx).Do()
 	case "delete-instance":
