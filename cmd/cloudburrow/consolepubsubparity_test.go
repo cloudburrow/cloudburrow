@@ -40,7 +40,7 @@ func TestPubSubGooglePagesCreate(t *testing.T) {
 		t.Errorf("Create topic is %q titled %q", label, topics.CreateTitle())
 	}
 	if got := strings.Join(names, " "); got != "name defaultSubscription useSchema schema schemaEncoding enableIngestion "+
-		"enableRetention retentionDays retentionHours retentionMinutes exportBigQuery exportStorage addTransform encryption labels" {
+		"enableRetention retentionDays retentionHours retentionMinutes exportBigQuery exportTable exportStorage exportBucket addTransform encryption kmsKeyName labels" {
 		t.Errorf("Create topic's fields are %s; want Google's order", got)
 	}
 	if topics.CreateLayout() != console.CreateLayoutPage {
@@ -91,7 +91,9 @@ func TestPubSubGooglePagesCreate(t *testing.T) {
 	for _, f := range sf {
 		names = append(names, f.Name)
 	}
-	if got := strings.Join(names, " "); !strings.HasPrefix(got, "name topic deliveryType pushEndpoint pushAttributes filter retryPolicy") {
+	if got := strings.Join(names, " "); !strings.HasPrefix(got, "name topic deliveryType bigqueryTable bigquerySchema bigqueryDropUnknown bigqueryWriteMetadata "+
+		"bigqueryServiceAccount storageBucket filenamePrefix filenameSuffix filenameDatetimeFormat storageFormat storageWriteMetadata "+
+		"maxDurationMinutes maxBytes maxMessages pushEndpoint pushAttributes filter retryPolicy") {
 		t.Errorf("Create subscription's fields are %s; want Google's order", got)
 	}
 	sv := pageDefaults(sf)
@@ -276,10 +278,9 @@ func TestPubSubSnapshotsPageCreate(t *testing.T) {
 }
 
 // TestPubSubUnavailableChoicesAreRefused (#1847): Google's choices this
-// instance cannot make (Enable ingestion, the exports, a transform, Cloud
-// KMS key, Write to BigQuery and Write to Cloud Storage) are drawn disabled
+// instance cannot make (Enable ingestion, a transform) are drawn disabled
 // with a reason, and a request that chooses one anyway is refused with that
-// reason, creating nothing.
+// reason, creating nothing. The exports and Cloud KMS key work since #1874.
 func TestPubSubUnavailableChoicesAreRefused(t *testing.T) {
 	ctx := context.Background()
 	const project = "unavailable"
@@ -288,8 +289,7 @@ func TestPubSubUnavailableChoicesAreRefused(t *testing.T) {
 	subs := pubsubSubscriptionsProvider{endpoint: addr}
 
 	_, fields := topics.CreateForm()
-	for name, value := range map[string]string{"enableIngestion": "true", "exportBigQuery": "true",
-		"exportStorage": "true", "addTransform": "true", "encryption": encryptionKMS} {
+	for name, value := range map[string]string{"enableIngestion": "true", "addTransform": "true"} {
 		v := pageDefaults(fields)
 		v["name"], v[name] = "refused-"+strings.ToLower(name), value
 		if _, err := topics.Create(ctx, project, v); err == nil || !strings.Contains(err.Error(), "Not available locally") {
@@ -301,23 +301,9 @@ func TestPubSubUnavailableChoicesAreRefused(t *testing.T) {
 	}
 	_, sf := subs.CreateForm()
 	for _, f := range sf {
-		if f.Name == "deliveryType" && (f.UnavailableOptions[deliveryBigQuery] == "" || f.UnavailableOptions[deliveryStorage] == "") {
-			t.Errorf("Delivery type does not draw Write to BigQuery and Write to Cloud Storage unavailable: %+v", f)
+		if f.Name == "deliveryType" && len(f.UnavailableOptions) != 0 {
+			t.Errorf("Delivery type draws a choice unavailable: %+v", f)
 		}
 	}
-	plain, err := topics.Create(ctx, project, map[string]string{"name": "plain-topic", "defaultSubscription": "false"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, d := range []string{deliveryBigQuery, deliveryStorage} {
-		v := pageDefaults(sf)
-		v["name"], v["topic"], v["deliveryType"] = "export-sub", plain, d
-		if _, err := subs.Create(ctx, project, v); err == nil || !strings.Contains(err.Error(), "Not available locally") {
-			t.Errorf("Create subscription with %s: %v, want the reason it is unavailable", d, err)
-		}
-	}
-	if _, err := c.SubscriptionAdminClient.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{
-		Subscription: "projects/" + project + "/subscriptions/export-sub"}); err == nil {
-		t.Error("an export subscription was created")
-	}
+	_ = c
 }

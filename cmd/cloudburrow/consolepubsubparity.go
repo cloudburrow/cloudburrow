@@ -31,6 +31,7 @@ import (
 
 	vkit "cloud.google.com/go/pubsub/v2/apiv1"
 	"cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
 )
@@ -62,6 +63,12 @@ const (
 	expireAfterDays = "Expire after this many days of inactivity"
 	expireNever     = "Never expire"
 
+	schemaNone  = "Don't use a schema"
+	schemaTopic = "Use topic schema"
+	schemaTable = "Use table schema"
+	formatText  = "Text"
+	formatAvro  = "Avro"
+
 	encodingJSON   = "JSON"
 	encodingBinary = "Binary"
 )
@@ -87,16 +94,9 @@ const pubsubPullHelp = "Click Pull to view messages. A pulled message is not ack
 // nothing, so offering one would create a subscription that silently never
 // delivers; it takes no key either.
 const (
-	pubsubNoExport = "Not available locally: this instance's Pub/Sub accepts a BigQuery or Cloud Storage " +
-		"export configuration but writes nothing to the table or bucket, so the console does not create one " +
-		"that would never deliver. Use Pull or Push."
-	pubsubNoTopicExport = "Not available locally: the export is a BigQuery or Cloud Storage subscription, " +
-		"which this instance's Pub/Sub accepts but never delivers to."
 	pubsubNoIngestion = "Not available locally: CloudBurrow runs no ingestion from Amazon Kinesis Data Streams, " +
 		"Cloud Storage, Azure Event Hubs, Amazon MSK or Confluent Cloud. Publish to the topic instead."
 	pubsubNoTransforms = "Not available locally: CloudBurrow runs no single message transforms."
-	pubsubNoKMS        = "Not available locally: the Pub/Sub emulator encrypts nothing with a customer-managed key " +
-		"and checks none, so a topic here uses the default encryption."
 )
 
 // --- lists ------------------------------------------------------------------
@@ -246,14 +246,19 @@ func topicCreatePageFields() []console.Field {
 		{Name: "retentionHours", Label: "Hours", Type: "number", Default: "0", ShowWhen: "enableRetention"},
 		{Name: "retentionMinutes", Label: "Minutes", Type: "number", Default: "0", ShowWhen: "enableRetention"},
 		{Name: "exportBigQuery", Label: "Export data to BigQuery", Type: "checkbox", Default: "false",
-			Unavailable: pubsubNoTopicExport},
+			Help: "Creates a BigQuery subscription, TOPIC-bigquery, that writes each message to the table (#1874)."},
+		{Name: "exportTable", Label: "BigQuery table", Type: "text", ShowWhen: "exportBigQuery", Required: true,
+			Help: "{project}.{dataset}.{table}: an existing table with a data column of type BYTES, STRING or JSON."},
 		{Name: "exportStorage", Label: "Backup message data to Cloud Storage", Type: "checkbox", Default: "false",
-			Unavailable: pubsubNoTopicExport},
+			Help: "Creates a Cloud Storage subscription, TOPIC-storage, that writes the messages to objects in the bucket (#1874)."},
+		{Name: "exportBucket", Label: "Cloud Storage bucket", Type: "text", ShowWhen: "exportStorage", Required: true,
+			Help: "An existing bucket's name, without gs://."},
 		{Name: "addTransform", Label: "Add a transform", Type: "checkbox", Default: "false", Section: "Transforms",
 			Unavailable: pubsubNoTransforms},
 		{Name: "encryption", Label: "Encryption", Type: "radio", Section: "Encryption",
-			Options: []string{encryptionGoogle, encryptionKMS}, Default: encryptionGoogle,
-			UnavailableOptions: map[string]string{encryptionKMS: pubsubNoKMS}},
+			Options: []string{encryptionGoogle, encryptionKMS}, Default: encryptionGoogle},
+		{Name: "kmsKeyName", Label: "Cloud KMS key", Type: "text", Section: "Encryption", ShowWhen: "encryption=" + encryptionKMS,
+			Required: true, Help: "projects/{project}/locations/{location}/keyRings/{key_ring}/cryptoKeys/{key}: an enabled key of this instance's Cloud KMS."},
 		pubsubLabelsField("", "Labels", pubsubCreateLabelsHelp),
 	}
 }
@@ -356,8 +361,37 @@ func subscriptionPageFields(withTopic bool) []console.Field {
 	return append(fields,
 		console.Field{Name: "deliveryType", Label: "Delivery type", Type: "radio",
 			Options: []string{deliveryPull, deliveryPush, deliveryBigQuery, deliveryStorage}, Default: deliveryPull,
-			UnavailableOptions: map[string]string{deliveryBigQuery: pubsubNoExport, deliveryStorage: pubsubNoExport},
-			Help:               "Pull: subscribers ask for messages. Push: Pub/Sub sends each message to an endpoint as an HTTP POST."},
+			Help: "Pull: subscribers ask for messages. Push: Pub/Sub sends each message to an endpoint as an HTTP POST. " +
+				"Write to BigQuery or Cloud Storage: Pub/Sub writes each message to a table or to objects in a bucket."},
+		console.Field{Name: "bigqueryTable", Label: "Table", Type: "text", ShowWhen: "deliveryType=" + deliveryBigQuery,
+			Required: true, Help: "{project}.{dataset}.{table}, an existing table."},
+		console.Field{Name: "bigquerySchema", Label: "Schema configuration", Type: "radio", ShowWhen: "deliveryType=" + deliveryBigQuery,
+			Options: []string{schemaNone, schemaTopic, schemaTable}, Default: schemaNone,
+			Help: "Without a schema, the table needs a data column of type BYTES, STRING or JSON."},
+		console.Field{Name: "bigqueryDropUnknown", Label: "Drop unknown fields", Type: "checkbox", Default: "false",
+			ShowWhen: "deliveryType=" + deliveryBigQuery},
+		console.Field{Name: "bigqueryWriteMetadata", Label: "Write metadata", Type: "checkbox", Default: "false",
+			ShowWhen: "deliveryType=" + deliveryBigQuery,
+			Help:     "Also writes subscription_name, message_id, publish_time and attributes columns."},
+		console.Field{Name: "bigqueryServiceAccount", Label: "Service account", Type: "text", ShowWhen: "deliveryType=" + deliveryBigQuery,
+			Help: "Optional: the service account that writes to the table; the Pub/Sub service agent by default."},
+		console.Field{Name: "storageBucket", Label: "Cloud Storage bucket", Type: "text", ShowWhen: "deliveryType=" + deliveryStorage,
+			Required: true, Help: "An existing bucket's name, without gs://."},
+		console.Field{Name: "filenamePrefix", Label: "File name prefix", Type: "text", ShowWhen: "deliveryType=" + deliveryStorage},
+		console.Field{Name: "filenameSuffix", Label: "File name suffix", Type: "text", ShowWhen: "deliveryType=" + deliveryStorage,
+			Help: "It cannot end in /."},
+		console.Field{Name: "filenameDatetimeFormat", Label: "File name datetime format", Type: "text", ShowWhen: "deliveryType=" + deliveryStorage,
+			Help: "Optional, such as YYYY-MM-DD/hh_mm_ssZ; YYYY-MM-DDThh:mm:ss+00:00 by default."},
+		console.Field{Name: "storageFormat", Label: "File format", Type: "radio", ShowWhen: "deliveryType=" + deliveryStorage,
+			Options: []string{formatText, formatAvro}, Default: formatText},
+		console.Field{Name: "storageWriteMetadata", Label: "Write metadata", Type: "checkbox", Default: "false",
+			ShowWhen: "storageFormat=" + formatAvro},
+		console.Field{Name: "maxDurationMinutes", Label: "Max duration (minutes)", Type: "number", Default: "5",
+			ShowWhen: "deliveryType=" + deliveryStorage, Help: "1 to 10."},
+		console.Field{Name: "maxBytes", Label: "Max bytes", Type: "number", ShowWhen: "deliveryType=" + deliveryStorage,
+			Help: "Optional: 1000 (1 KB) to 10 GiB."},
+		console.Field{Name: "maxMessages", Label: "Max messages", Type: "number", ShowWhen: "deliveryType=" + deliveryStorage,
+			Help: "Optional: at least 1000."},
 		console.Field{Name: "pushEndpoint", Label: "Endpoint URL", Type: "url", ShowWhen: "deliveryType=" + deliveryPush,
 			Required: true, Help: "The URL each message is POSTed to."},
 		console.Field{Name: "pushAttributes", Label: "Push attributes", Type: "map", ShowWhen: "deliveryType=" + deliveryPush,
@@ -481,6 +515,9 @@ func (p pubsubSubscriptionsProvider) Create(ctx context.Context, project string,
 	}
 	sub, err := subscriptionFromForm(project, topic, subscriptionPageValues(project, values))
 	if err != nil {
+		return "", err
+	}
+	if err := exportFromForm(sub, values); err != nil {
 		return "", err
 	}
 	c, err := p.topics().client(ctx, project)
@@ -862,4 +899,70 @@ func (p pubsubSubscriptionsProvider) pullMessages(ctx context.Context, project s
 		return nil, err
 	}
 	return pullToView(ctx, c.SubscriptionAdminClient, sub, 10, false)
+}
+
+// exportFromForm sets a BigQuery or Cloud Storage subscription's
+// configuration from Create subscription's Write to BigQuery and Write to
+// Cloud Storage fields (#1874).
+func exportFromForm(sub *pubsubpb.Subscription, values map[string]string) error {
+	switch values["deliveryType"] {
+	case deliveryBigQuery:
+		sub.PushConfig = nil
+		sub.BigqueryConfig = &pubsubpb.BigQueryConfig{Table: strings.TrimSpace(values["bigqueryTable"]),
+			UseTopicSchema: values["bigquerySchema"] == schemaTopic, UseTableSchema: values["bigquerySchema"] == schemaTable,
+			WriteMetadata: values["bigqueryWriteMetadata"] == "true", DropUnknownFields: values["bigqueryDropUnknown"] == "true",
+			ServiceAccountEmail: strings.TrimSpace(values["bigqueryServiceAccount"])}
+	case deliveryStorage:
+		sub.PushConfig = nil
+		cs := &pubsubpb.CloudStorageConfig{Bucket: strings.TrimSpace(values["storageBucket"]),
+			FilenamePrefix: values["filenamePrefix"], FilenameSuffix: values["filenameSuffix"],
+			FilenameDatetimeFormat: strings.TrimSpace(values["filenameDatetimeFormat"])}
+		if values["storageFormat"] == formatAvro {
+			cs.OutputFormat = &pubsubpb.CloudStorageConfig_AvroConfig_{AvroConfig: &pubsubpb.CloudStorageConfig_AvroConfig{
+				WriteMetadata: values["storageWriteMetadata"] == "true"}}
+		} else {
+			cs.OutputFormat = &pubsubpb.CloudStorageConfig_TextConfig_{TextConfig: &pubsubpb.CloudStorageConfig_TextConfig{}}
+		}
+		for _, n := range []struct {
+			key   string
+			label string
+			set   func(int64)
+		}{
+			{"maxDurationMinutes", "Max duration", func(v int64) { cs.MaxDuration = durationpb.New(time.Duration(v) * time.Minute) }},
+			{"maxBytes", "Max bytes", func(v int64) { cs.MaxBytes = v }},
+			{"maxMessages", "Max messages", func(v int64) { cs.MaxMessages = v }},
+		} {
+			raw := strings.TrimSpace(values[n.key])
+			if raw == "" {
+				continue
+			}
+			v, err := strconv.ParseInt(raw, 10, 64)
+			if err != nil || v < 0 {
+				return fmt.Errorf("%s: %q is not a whole number", n.label, raw)
+			}
+			n.set(v)
+		}
+		sub.CloudStorageConfig = cs
+	}
+	return nil
+}
+
+// topicExports creates Create topic's Export data to BigQuery and Backup
+// message data to Cloud Storage subscriptions, as Google's console does
+// (#1874).
+func topicExports(ctx context.Context, c *vkit.SubscriptionAdminClient, project, id, topic string, values map[string]string) error {
+	if values["exportBigQuery"] == "true" {
+		if _, err := c.CreateSubscription(ctx, &pubsubpb.Subscription{Name: fmt.Sprintf("projects/%s/subscriptions/%s-bigquery", project, id),
+			Topic: topic, BigqueryConfig: &pubsubpb.BigQueryConfig{Table: strings.TrimSpace(values["exportTable"])}}); err != nil {
+			return fmt.Errorf("the topic was created; its BigQuery export was not: %w", err)
+		}
+	}
+	if values["exportStorage"] == "true" {
+		if _, err := c.CreateSubscription(ctx, &pubsubpb.Subscription{Name: fmt.Sprintf("projects/%s/subscriptions/%s-storage", project, id),
+			Topic: topic, CloudStorageConfig: &pubsubpb.CloudStorageConfig{Bucket: strings.TrimSpace(values["exportBucket"]),
+				OutputFormat: &pubsubpb.CloudStorageConfig_TextConfig_{TextConfig: &pubsubpb.CloudStorageConfig_TextConfig{}}}}); err != nil {
+			return fmt.Errorf("the topic was created; its Cloud Storage backup was not: %w", err)
+		}
+	}
+	return nil
 }

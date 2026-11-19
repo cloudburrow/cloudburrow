@@ -1801,7 +1801,13 @@ func (p pubsubProvider) Create(ctx context.Context, project string, values map[s
 	if err != nil {
 		return "", err
 	}
+	if values["encryption"] == encryptionKMS {
+		t.KmsKeyName = strings.TrimSpace(values["kmsKeyName"])
+	}
 	if _, err := c.TopicAdminClient.CreateTopic(ctx, t); err != nil {
+		return "", err
+	}
+	if err := topicExports(ctx, c.SubscriptionAdminClient, project, id, name, values); err != nil {
 		return "", err
 	}
 
