@@ -18,8 +18,8 @@ import (
 // errors (a small MAE) and, with perform_aggregation FALSE, each row's;
 // ML.EXPLAIN_FORECAST answers the history and the forecast with
 // attribution_temp, about 2·temp; ML.ARIMA_COEFFICIENTS names each
-// processed_input and its weight; ML.FORECAST with no input is 400 and
-// ML.DETECT_ANOMALIES 501. ARIMA_PLUS's ML.EVALUATE of later data
+// processed_input and its weight; ML.FORECAST with no input is 400.
+// ARIMA_PLUS's ML.EVALUATE of later data
 // answers the same aggregate errors.
 //
 // covers: bigquery.jobs.query, bigquery.models.get
@@ -116,8 +116,7 @@ func TestBigQueryMLArimaPlusXreg(t *testing.T) {
 	}
 	_, err = c.Query(fmt.Sprintf("SELECT * FROM ML.FORECAST(MODEL `%s.xr`)", name)).Read(ctx)
 	wantHTTPStatus(t, "ML.FORECAST of an XREG model without input", err, http.StatusBadRequest)
-	_, err = c.Query(fmt.Sprintf("SELECT * FROM ML.DETECT_ANOMALIES(MODEL `%s.xr`, (SELECT * FROM `%s.future`))", name, name)).Read(ctx)
-	wantHTTPStatus(t, "ML.DETECT_ANOMALIES of an XREG model", err, http.StatusNotImplemented)
+	// ML.DETECT_ANOMALIES is TestBigQueryMLXregDetectAnomalies'.
 
 	// ARIMA_PLUS's ML.EVALUATE of later data.
 	if err := mlRun(h, c, fmt.Sprintf("CREATE MODEL `%s.ar` OPTIONS(model_type='ARIMA_PLUS', time_series_timestamp_col='d', "+
