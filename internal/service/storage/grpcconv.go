@@ -285,7 +285,7 @@ type jsonBucket struct {
 	Website               *struct{ MainPageSuffix, NotFoundPage string }
 	Logging               *struct{ LogBucket, LogObjectPrefix string }
 	Billing               *struct{ RequesterPays bool }
-	Encryption            *struct{ DefaultKmsKeyName string }
+	Encryption            *jsonEncryption
 	Autoclass             *struct{ Enabled bool }
 	CustomPlacementConfig *struct{ DataLocations []string }
 	IpFilter              *jsonIPFilter
@@ -337,7 +337,7 @@ func (b jsonBucket) proto() *pb.Bucket {
 		out.Billing = &pb.Bucket_Billing{RequesterPays: x.RequesterPays}
 	}
 	if e := b.Encryption; e != nil {
-		out.Encryption = &pb.Bucket_Encryption{DefaultKmsKey: e.DefaultKmsKeyName}
+		out.Encryption = e.proto()
 	}
 	if a := b.Autoclass; a != nil {
 		out.Autoclass = &pb.Bucket_Autoclass{Enabled: a.Enabled}
@@ -461,10 +461,7 @@ func bucketToJSON(b *pb.Bucket, paths []string) (map[string]any, error) {
 		all["billing"] = map[string]any{"requesterPays": x.GetRequesterPays()}
 	}
 	if e := b.GetEncryption(); e != nil {
-		if e.GetGoogleManagedEncryptionEnforcementConfig() != nil || e.GetCustomerManagedEncryptionEnforcementConfig() != nil || e.GetCustomerSuppliedEncryptionEnforcementConfig() != nil {
-			return nil, grpcstatus.Error(codes.Unimplemented, "encryption enforcement configs are not implemented over gRPC")
-		}
-		all["encryption"] = map[string]any{"defaultKmsKeyName": e.GetDefaultKmsKey()}
+		all["encryption"] = encryptionToJSON(e)
 	}
 	if f := b.GetIpFilter(); f != nil {
 		all["ipFilter"] = ipFilterToJSON(f)
@@ -648,6 +645,60 @@ func ipFilterToJSON(f *pb.Bucket_IpFilter) map[string]any {
 			list = append(list, map[string]any{"network": src.GetNetwork(), "allowedIpCidrRanges": strs(src.GetAllowedIpCidrRanges())})
 		}
 		out["vpcNetworkSources"] = list
+	}
+	return out
+}
+
+// jsonEnforcement is a Bucket.Encryption enforcement config in JSON.
+type jsonEnforcement struct{ RestrictionMode, EffectiveTime string }
+
+// jsonEncryption is Bucket.Encryption in JSON (cmek.go, #1938).
+type jsonEncryption struct {
+	DefaultKmsKeyName                           string
+	GoogleManagedEncryptionEnforcementConfig    *jsonEnforcement
+	CustomerManagedEncryptionEnforcementConfig  *jsonEnforcement
+	CustomerSuppliedEncryptionEnforcementConfig *jsonEnforcement
+}
+
+func optString(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
+func (e *jsonEncryption) proto() *pb.Bucket_Encryption {
+	out := &pb.Bucket_Encryption{DefaultKmsKey: e.DefaultKmsKeyName}
+	if c := e.GoogleManagedEncryptionEnforcementConfig; c != nil {
+		out.GoogleManagedEncryptionEnforcementConfig = &pb.Bucket_Encryption_GoogleManagedEncryptionEnforcementConfig{
+			RestrictionMode: optString(c.RestrictionMode), EffectiveTime: ts(c.EffectiveTime)}
+	}
+	if c := e.CustomerManagedEncryptionEnforcementConfig; c != nil {
+		out.CustomerManagedEncryptionEnforcementConfig = &pb.Bucket_Encryption_CustomerManagedEncryptionEnforcementConfig{
+			RestrictionMode: optString(c.RestrictionMode), EffectiveTime: ts(c.EffectiveTime)}
+	}
+	if c := e.CustomerSuppliedEncryptionEnforcementConfig; c != nil {
+		out.CustomerSuppliedEncryptionEnforcementConfig = &pb.Bucket_Encryption_CustomerSuppliedEncryptionEnforcementConfig{
+			RestrictionMode: optString(c.RestrictionMode), EffectiveTime: ts(c.EffectiveTime)}
+	}
+	return out
+}
+
+// encryptionToJSON is a gRPC Bucket.Encryption as the JSON API's; the
+// effective times are the server's, so they are not carried.
+func encryptionToJSON(e *pb.Bucket_Encryption) map[string]any {
+	out := map[string]any{}
+	if k := e.GetDefaultKmsKey(); k != "" {
+		out["defaultKmsKeyName"] = k
+	}
+	if c := e.GetGoogleManagedEncryptionEnforcementConfig(); c != nil {
+		out["googleManagedEncryptionEnforcementConfig"] = map[string]any{"restrictionMode": c.GetRestrictionMode()}
+	}
+	if c := e.GetCustomerManagedEncryptionEnforcementConfig(); c != nil {
+		out["customerManagedEncryptionEnforcementConfig"] = map[string]any{"restrictionMode": c.GetRestrictionMode()}
+	}
+	if c := e.GetCustomerSuppliedEncryptionEnforcementConfig(); c != nil {
+		out["customerSuppliedEncryptionEnforcementConfig"] = map[string]any{"restrictionMode": c.GetRestrictionMode()}
 	}
 	return out
 }

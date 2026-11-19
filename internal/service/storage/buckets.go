@@ -456,6 +456,10 @@ func (s *Server) bucketsInsert(w http.ResponseWriter, r *http.Request) {
 	}
 	b := bucketRecord{Name: name, Project: project, Created: now, Updated: now, Metageneration: 1, Generation: now.UnixMicro(), Fields: f}
 	defaultBucketFields(b.Fields, now)
+	if err := checkBucketEncryption(b.Fields, nil, rfc3339(now)); err != nil {
+		writeError(w, err)
+		return
+	}
 	if err := bucketBodyACL(r, body, &b); err != nil {
 		writeError(w, err)
 		return
@@ -716,7 +720,8 @@ func (s *Server) bucketsModify(replace bool) http.HandlerFunc {
 			prior := pauseStateOf(b)
 			wasUniform := uniformAccess(b)
 			next := kept(body)
-			old := map[string]any{"softDeletePolicy": copySoftDeletePolicy(b.Fields["softDeletePolicy"]), "retentionPolicy": copyMap(b.Fields["retentionPolicy"])}
+			old := map[string]any{"softDeletePolicy": copySoftDeletePolicy(b.Fields["softDeletePolicy"]), "retentionPolicy": copyMap(b.Fields["retentionPolicy"]),
+				"encryption": deepCopy(b.Fields["encryption"])}
 			if loc, ok := next["location"].(string); ok && !strings.EqualFold(loc, b.Fields["location"].(string)) {
 				// UNVERIFIED: Google's answer to changing a bucket's location.
 				// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/json_api/v1/buckets
@@ -755,6 +760,9 @@ func (s *Server) bucketsModify(replace bool) http.HandlerFunc {
 				}
 			}
 			if err := validateKept(next); err != nil {
+				return err
+			}
+			if err := checkBucketEncryption(next, old, rfc3339(s.now())); err != nil {
 				return err
 			}
 			if err := checkHierarchical(next); err != nil {

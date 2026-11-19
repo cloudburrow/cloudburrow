@@ -107,11 +107,20 @@ func (s *Server) appendData(bucket, name string, gen int64, handle string, data 
 	if len(data) == 0 {
 		return o, nil
 	}
-	old, err := s.blobs.Open(o.Blob)
+	// An object with a Cloud KMS key stays sealed with that key (cmek.go).
+	ctx := context.Background()
+	old, err := s.openObject(ctx, o)
 	if err != nil {
 		return o, err
 	}
-	blob, err := s.blobs.Write(io.MultiReader(old, bytes.NewReader(data)))
+	t := writeTarget{key: keyOfVersion(o.KMSKeyVersion)}
+	_ = s.meta.View(func(tx Tx) error {
+		if b, ok, _ := s.getBucket(tx, o.Bucket); ok {
+			t.project = b.Project
+		}
+		return nil
+	})
+	blob, sealed, err := t.write(ctx, s, io.MultiReader(old, bytes.NewReader(data)))
 	_ = old.Close()
 	if err != nil {
 		return o, err
@@ -126,6 +135,7 @@ func (s *Server) appendData(bucket, name string, gen int64, handle string, data 
 			return grpcstatus.Errorf(codes.Aborted, "%s/%s changed during the append", bucket, name)
 		}
 		o.Blob, o.Size, o.CRC32C, o.Updated = blob.ID, blob.Size, blob.CRC32C, s.now()
+		o.KMSKeyVersion, o.WrappedKey = sealed.Version, sealed.Wrapped
 		return putObject(tx, o)
 	})
 	return o, err
@@ -218,10 +228,15 @@ func (g *grpcStorage) openAppend(ctx context.Context, req *pb.BidiWriteObjectReq
 	if err != nil {
 		return nil, false, statusOf(err)
 	}
-	empty, err := g.s.blobs.Write(bytes.NewReader(nil))
+	t, err := g.s.writeTarget(b, meta.KMSKeyName, nil)
 	if err != nil {
 		return nil, false, statusOf(err)
 	}
+	empty, sealed, err := t.write(ctx, g.s, bytes.NewReader(nil))
+	if err != nil {
+		return nil, false, statusOf(err)
+	}
+	meta.sealed = sealed
 	o, err := g.s.finalizeObject(b, meta, empty, cond, nil, nil)
 	if err != nil {
 		return nil, false, statusOf(err)

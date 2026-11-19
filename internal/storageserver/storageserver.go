@@ -59,6 +59,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	relayChannels := fs.Bool("relay-channels", false, "hand object change notification messages to a relay at "+storage.ChannelOutboxPath+" instead of POSTing them (what `up` passes: the CLI delivers them on the host, #1290)")
 	resourceManager := fs.String("resourcemanager", "", "http://host:port of Resource Manager, whose projects and folders Storage Intelligence inheritance walks (what `up` passes, #1532; default: what inherits inherits the local organization's configuration)")
 	iamCheck := fs.String("iam-check", "", "http://host:port of the host's IAM evaluator, which checks every request's caller when set (what `up --iam-enforcement=on` passes, #1879; default: nothing is checked)")
+	kmsAddr := fs.String("kms", "", "host:port of the instance's Cloud KMS (gRPC), which objects with customer-managed keys are encrypted through (what `up` passes, #1938; default: kmsKeyName and default Cloud KMS keys are refused)")
 	if err := fs.Parse(args); err != nil {
 		return ErrUsage
 	}
@@ -78,6 +79,14 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	opts := storage.Options{Hosts: names, CORSAllowOrigins: origins, RelayChannels: *relayChannels, CertSources: certSources}
 	if *iamCheck != "" {
 		opts.IAMCheck = &iamcheck.Client{Base: *iamCheck}
+	}
+	if *kmsAddr != "" {
+		keys, conn, err := storage.DialKMS(*kmsAddr)
+		if err != nil {
+			return fmt.Errorf("--kms %s: %w", *kmsAddr, err)
+		}
+		defer conn.Close()
+		opts.KMS = keys
 	}
 	if *resourceManager != "" {
 		opts.Hierarchy = storage.ResourceManagerHierarchy{Base: *resourceManager}
