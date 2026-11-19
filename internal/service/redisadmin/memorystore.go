@@ -300,6 +300,7 @@ func renderValkeyBase(r *clusterRecord) *memorystorepb.Instance {
 			out.ZoneDistributionConfig = z
 		}
 	}
+	out.ZoneDistributionConfig.ActiveZones = r.activeZones()
 	if v.Maintenance != "" {
 		mp := &memorystorepb.MaintenancePolicy{}
 		if protojson.Unmarshal([]byte(v.Maintenance), mp) == nil {
@@ -659,6 +660,9 @@ func (s *MemorystoreServer) CreateInstance(ctx context.Context, req *memorystore
 	if err != nil {
 		return nil, err
 	}
+	if err := valkeyZoneDist(in.GetZoneDistributionConfig()).check(m[2]); err != nil {
+		return nil, err
+	}
 	name := req.GetParent() + "/instances/" + id
 	now := c.now()
 	r := &clusterRecord{Name: name, UID: newUID(), Created: now, ShardCount: shards, ReplicaCount: in.GetReplicaCount(),
@@ -872,8 +876,9 @@ func (s *MemorystoreServer) UpdateInstance(ctx context.Context, req *memorystore
 		}
 		vf.Networks, vf.Endpoints = nets, true
 	}
-	if set["zone_distribution_config"] {
-		vf.ZoneDistribution = protoJSON(in.GetZoneDistributionConfig())
+	if set["zone_distribution_config"] && !r.zoneDist().same(valkeyZoneDist(in.GetZoneDistributionConfig())) {
+		// Immutable, as the API documents it (#1908).
+		return nil, apierror.InvalidArgument("zone_distribution_config is immutable")
 	}
 	if set["maintenance_policy"] {
 		vf.Maintenance = protoJSON(in.GetMaintenancePolicy())

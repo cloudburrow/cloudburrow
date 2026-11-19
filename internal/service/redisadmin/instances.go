@@ -522,6 +522,9 @@ func (s *Server) CreateInstance(ctx context.Context, req *redispb.CreateInstance
 	loc := in.GetLocationId()
 	if loc == "" {
 		loc = m[2] + "-a"
+	} else if z := zoneRE.FindStringSubmatch(loc); z == nil || z[1] != m[2] {
+		// The zone the instance (its primary) is in (#1908).
+		return nil, apierror.InvalidArgument("location_id %q is not a zone of the instance's region %s", loc, m[2])
 	}
 	r := &record{Name: name, DisplayName: in.GetDisplayName(), Labels: copyMap(in.GetLabels()), LocationID: loc,
 		MemorySizeGB: in.GetMemorySizeGb(), RedisConfigs: copyMap(in.GetRedisConfigs()), Created: c.now(),

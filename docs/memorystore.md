@@ -664,7 +664,17 @@ An instance is built as a Redis cluster is (§8), of the same Valkey 8.1 image:
 `UpdateInstance` changes `shard_count` (slots and keys move), `replica_count`, `node_type` (1.4,
 6.5, 13 or 58 GB of `maxmemory`), `engine_configs` and `persistence_config`, set on every running
 node, and keeps `labels`, `deletion_protection_enabled`, `endpoints`, zone distribution and
-maintenance policy. `persistence_config` RDB is `save <period> 1`, AOF `appendonly yes` with its
+maintenance policy.
+
+**Zone distribution (#1908).** A Redis cluster's and a Valkey instance's
+`zone_distribution_config` is kept and checked: `SINGLE_ZONE` needs `zone`, a zone of the
+instance's region, and a Valkey instance's `zones` (MULTI_ZONE) are zones of its region, each
+once; it is immutable (an update that changes it is `INVALID_ARGUMENT`). There are no zones
+locally, so each node's server has Valkey's `availability-zone` set to its zone, which `HELLO`
+returns to clients: `SINGLE_ZONE` puts every node in `zone`; `MULTI_ZONE` spreads each shard's
+nodes over region-a, -b and -c (or `zones`), its first node in zone *shard mod 3*, and a Valkey
+instance's `active_zones` lists the zones its nodes are in. A Memorystore for Redis instance's
+`location_id` must be a zone of its region. `persistence_config` RDB is `save <period> 1`, AOF `appendonly yes` with its
 `appendfsync`; after a restart of CloudBurrow an instance comes back with its data when it has
 RDB or AOF persistence, and empty without, as a Redis cluster does (§8, Across a restart). The
 console's **Memorystore for Valkey** page lists, creates (either mode), edits and deletes

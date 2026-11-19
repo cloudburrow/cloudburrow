@@ -838,6 +838,9 @@ func (s *ClusterServer) CreateCluster(ctx context.Context, req *clusterpb.Create
 		r.PscConfigs = append(r.PscConfigs, p.GetNetwork())
 	}
 	keepJSON(&r.Persistence, in.GetPersistenceConfig())
+	if err := clusterZoneDist(in.GetZoneDistributionConfig()).check(m[2]); err != nil {
+		return nil, err
+	}
 	keepJSON(&r.ZoneDistribution, in.GetZoneDistributionConfig())
 	keepJSON(&r.Maintenance, in.GetMaintenancePolicy())
 	for sh := 0; sh < int(r.ShardCount); sh++ {
@@ -1041,6 +1044,13 @@ func (c *clusters) startNodes(ctx context.Context, r *clusterRecord, nodes []*cl
 			_, err = cl.Do(ctx, "CONFIG", "SET", "cluster-announce-hostname", host)
 			if err == nil {
 				_, err = cl.Do(ctx, "CONFIG", "SET", "cluster-preferred-endpoint-type", "hostname")
+			}
+		}
+		if z := r.nodeZone(n); err == nil && z != "" {
+			// The node's zone (zones.go, #1908), which HELLO returns;
+			// Valkey 7.2 has no availability-zone.
+			if _, zerr := cl.Do(ctx, "CONFIG", "SET", "availability-zone", z); zerr != nil && !strings.Contains(strings.ToLower(zerr.Error()), "unknown option") && !strings.Contains(strings.ToLower(zerr.Error()), "unsupported") {
+				err = zerr
 			}
 		}
 		if err == nil {
@@ -1537,9 +1547,9 @@ func (s *ClusterServer) UpdateCluster(ctx context.Context, req *clusterpb.Update
 		next.Persistence = ""
 		keepJSON(&next.Persistence, in.GetPersistenceConfig())
 	}
-	if set["zone_distribution_config"] {
-		next.ZoneDistribution = ""
-		keepJSON(&next.ZoneDistribution, in.GetZoneDistributionConfig())
+	if set["zone_distribution_config"] && !sameClusterZones(next.ZoneDistribution, in.GetZoneDistributionConfig()) {
+		// Immutable (#1908): a cluster's nodes stay in their zones.
+		return nil, apierror.InvalidArgument("zone_distribution_config cannot be changed once a cluster is created")
 	}
 	if set["maintenance_policy"] {
 		next.Maintenance = ""
