@@ -50,8 +50,8 @@ import (
 // is what it issues certificates for. The mode and pool are immutable
 // ("after you configure a customer-managed CA for a cluster, you can't
 // modify the configuration"; UpdateCluster has no such path). The weekly
-// certificate rotation and rotate_server_certificate are not served: a
-// node's certificate is issued again each time it starts.
+// certificate rotation and rotate_server_certificate are in
+// clustercertrotation.go (#1918).
 
 // ClusterCAS is Certificate Authority Service as a Redis cluster's
 // customer-managed CA uses it. Its errors are gRPC statuses.

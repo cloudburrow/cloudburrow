@@ -123,11 +123,17 @@ is taken as one of the instance's project), `connect_mode` (`DIRECT_PEERING`, th
 range is an IPv4 CIDR block of internal addresses of at least `/29` (`/28` with read replicas), as
 Google documents; with `PRIVATE_SERVICE_ACCESS` it may also be the name of an allocated range;
 unset, a `/29` (`/28`) in 10.0.0.0/8 is chosen, the same for the same instance. Anything else is
-INVALID_ARGUMENT, and none of the three can be updated. **What they cannot change here:** there
-is no VPC, so they are stored and checked only. Every local client reaches the instance at its
-`host` and `port`, the host's address (not one of the range), whatever network it is authorized
-on; the network is not looked up (Compute Engine is not served), and Google's restricted ranges
-are not checked.
+INVALID_ARGUMENT, and none of the three can be updated. Refused too (#1919): a range that
+overlaps one of the "Restricted ranges" the networking page links to (the VPC's prohibited
+ranges: `0.0.0.0/8`, `127.0.0.0/8`, `169.254.0.0/16`, `224.0.0.0/4`, `255.255.255.255/32`, and
+the Private Google Access addresses `199.36.153.4/30` and `199.36.153.8/30`), one not wholly in a
+private range, and one overlapping another instance's range on the same authorized network (the
+field's reference: "Range must be unique and non-overlapping with existing subnets in an
+authorized network"); a chosen range skips the blocks the network's other instances use.
+**What they cannot change here:** there is no VPC, so they are stored and checked only. Every
+local client reaches the instance at its `host` and `port`, the host's address (not one of the
+range), whatever network it is authorized on; the network and its Compute Engine subnets are not
+looked up (Compute Engine's networks are not served to this API).
 
 **Modes.** A created instance follows the instance's mode, as the server `up` runs does. In
 persistent mode its record is kept in `<state-dir>/<name>/memorystore`, its server has a volume
@@ -252,6 +258,13 @@ reschedule, applied when due. `clock:advance` moves the Memorystore clock (what 
 create, update and operation times, run by) forward, never back, so a test reaches a window a
 week away; each event whose start it passes is applied at once. The clock's offset is kept in
 memory: `cloudburrow up` starts at the host's time.
+
+In the console (#1919), the Memorystore for Redis, Redis Cluster and Valkey list pages offer both
+as **Release an update (CloudBurrow extension)** (a region, or `-`) and **Advance Memorystore
+clock (CloudBurrow extension)** (`7d`, `1d12h`, ...), confirmed, each answering with what it did.
+Google's Memorystore console has neither (Google releases updates itself, and its clock is the
+real one), so they are labelled as local-only extensions rather than placed among Google's
+controls. Test: `TestMemorystoreReleaseAndClockThroughThePage`.
 
 A Redis cluster's and a Valkey instance's `maintenance_policy` is checked as the protos say:
 `weekly_maintenance_window` is one window ("Minimum 1", at most one), each with a `day` (not
@@ -479,11 +492,27 @@ with another mode, a pool outside the cluster's region, a pool that does not exi
 "Resource ... not found."), one with no enabled CA (`FAILED_PRECONDITION`), and either non-default
 mode without in-transit encryption. The mode and pool cannot be changed. Not enforced: the
 service agent `service-PROJECT_NUMBER@cloud-redis.iam.gserviceaccount.com` and its
-`roles/privateca.certificateRequester` on the pool, as no call here is authorized. Not served:
-the weekly rotation and `rotate_server_certificate` (a node's certificate is issued again each
-time it starts); a Memorystore for Valkey instance's server CA modes stay UNIMPLEMENTED.
-Tests: `TestRedisClusterServerCAModes` (official clients and go-redis over TLS), unit
+`roles/privateca.certificateRequester` on the pool, as no call here is authorized. A
+Memorystore for Valkey instance's server CA modes stay UNIMPLEMENTED. Tests:
+`TestRedisClusterServerCAModes` (official clients and go-redis over TLS), unit
 `TestClusterServerCA`.
+
+**Server certificate rotation** (#1918). "Every week, Memorystore for Redis Cluster conducts
+server-side certificate rotation" in every CA mode (Memorystore for Valkey too): a week after a
+cluster's creation or its last rotation, by the Memorystore clock (so `clock:advance` of a week
+reaches it), each running node is issued a new server certificate of the same CA, or by the
+customer's CA pool, written into its pod and loaded with `CONFIG SET tls-cert-file`, with no
+restart: "new server certificates apply to new connections only, and existing connections remain
+alive". The CA does not change, so clients keep connecting with the CA they downloaded. On demand,
+`UpdateCluster` with `update_mask` `rotate_server_certificate` (`gcloud redis clusters update
+--rotate-server-certificate`; the cluster page's **Rotate server certificates**) rotates every
+node's, for a customer-managed CA only: any other mode is `FAILED_PRECONDITION`, "Server
+certificate rotation can only be triggered for customer-managed CAs." (Google documents the text,
+not the code). Memorystore for Valkey's `UpdateInstance` refuses it the same way. CloudBurrow's
+choices: not in the same update as a shard or replica change (`INVALID_ARGUMENT`); a weekly
+rotation that cannot issue a certificate (the pool deleted, no enabled CA) is logged and retried,
+the nodes keeping their certificates. Tests: `TestRedisClusterServerCertRotation` (official
+clients, go-redis over TLS), unit `TestClusterCertRotation`.
 
 **Automatic failover** (#1910). Google: when a shard's primary fails, a replica is promoted
 automatically, and the failed node is replaced. Valkey's own cluster failover needs the votes of

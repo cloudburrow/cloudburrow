@@ -278,6 +278,7 @@ func (c *clusters) maintenanceLoop(ctx context.Context) {
 		case <-t.C:
 		}
 		c.maintenanceDue()
+		c.rotateDue()
 	}
 }
 

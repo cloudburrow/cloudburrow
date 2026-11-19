@@ -695,6 +695,10 @@ const MemorystoreTLSPort = 6378
 // container, from its environment, before it starts.
 const memorystoreTLSDir = "/tmp/tls"
 
+// MemorystoreTLSDir is where a Memorystore server's TLS files are in its
+// pod, where a certificate rotation writes the next ones (#1918).
+const MemorystoreTLSDir = memorystoreTLSDir
+
 // Redis images of Memorystore's older versions (#1386), each the last
 // release of its line, pinned by the index digest (linux/amd64 and
 // linux/arm64 among others). Both are BSD-3-Clause, as every Redis before

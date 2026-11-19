@@ -587,6 +587,10 @@ func (s *Server) CreateInstance(ctx context.Context, req *redispb.CreateInstance
 		c.mu.Unlock()
 		return nil, apierror.AlreadyExists("Resource '%s' already exists", name)
 	}
+	if err := c.claimRange(r, in.GetReservedIpRange() != ""); err != nil {
+		c.mu.Unlock()
+		return nil, err
+	}
 	if err := c.save(r); err != nil {
 		c.mu.Unlock()
 		return nil, apierror.Internal(err, "keep instance %s", name)
