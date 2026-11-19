@@ -396,6 +396,9 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 				}
 			}()
 		}
+		if serveCustomConstraints(w, r, next) { // customconstraints.go, #1895
+			return
+		}
 		if (front{next: next, records: records, policies: policies}).serveRowPolicies(w, r) { // rowpolicies.go, #1218
 			return
 		}
@@ -857,6 +860,9 @@ func (f front) insertDataset(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusPreconditionFailed, "conditionNotMet", err.Error())
 			return
 		}
+	}
+	if f.refuseCustomDatasetCreate(w, r, raw) { // customconstraints.go, #1895
+		return
 	}
 	if msg := datasetCollationRefused(raw); msg != "" { // #1508, collationddl.go
 		writeError(w, http.StatusBadRequest, "invalid", msg)

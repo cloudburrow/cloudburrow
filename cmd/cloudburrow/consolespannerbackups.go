@@ -104,8 +104,47 @@ func spannerExpiry(v string, now time.Time) (*timestamppb.Timestamp, error) {
 }
 
 func spannerExpiryField(def string) console.Field {
-	return console.Field{Name: "expireDays", Label: "Expires in (days)", Type: "number", Required: true, Default: def,
-		Help: "Days from now until Spanner deletes the backup: at least 6 hours (0.25), at most 366."}
+	days, _ := strconv.Atoi(def)
+	return console.Field{Name: "expireDate", Label: "Expiration date", Type: "date", Required: true,
+		Default: time.Now().UTC().AddDate(0, 0, days).Format(time.DateOnly),
+		Help:    "Spanner deletes the backup on this date (UTC, at this time of day): at least 6 hours and at most a year from its version time."}
+}
+
+// spannerExpireAt is an action's expire time: Google's expiration date
+// (expireDate, a date picker, at the current time of day in UTC, since
+// Google's picker names a day), or the older form's expireDays.
+func spannerExpireAt(values map[string]string, now time.Time) (*timestamppb.Timestamp, error) {
+	d := strings.TrimSpace(values["expireDate"])
+	if d == "" {
+		return spannerExpiry(values["expireDays"], now)
+	}
+	day, err := time.Parse(time.DateOnly, d)
+	if err != nil {
+		return nil, fmt.Errorf("the expiration date must be a date (YYYY-MM-DD), not %q", d)
+	}
+	now = now.UTC()
+	at := time.Date(day.Year(), day.Month(), day.Day(), now.Hour(), now.Minute(), now.Second(), 0, time.UTC)
+	if at.Sub(now) < 6*time.Hour || at.Sub(now) > 366*24*time.Hour {
+		return nil, fmt.Errorf("the expiration date %s must be at least 6 hours and at most a year from now", d)
+	}
+	return timestamppb.New(at), nil
+}
+
+// spannerVersionTime is Create backup's version time: Google's "Create
+// backup from" Current time, or an earlier point in time within the
+// database's version retention period (an RFC 3339 or datetime-local
+// time, read as UTC).
+func spannerVersionTime(values map[string]string) (*timestamppb.Timestamp, error) {
+	if strings.TrimSpace(values["versionFrom"]) != "Earlier point in time" {
+		return nil, nil
+	}
+	v := strings.TrimSpace(values["versionTime"])
+	for _, layout := range []string{time.RFC3339Nano, "2006-01-02T15:04:05", "2006-01-02T15:04"} {
+		if t, err := time.Parse(layout, v); err == nil {
+			return timestamppb.New(t.UTC()), nil
+		}
+	}
+	return nil, fmt.Errorf("the version time must be a date and time, not %q", v)
 }
 
 // spannerRetention reads a backup schedule's retention, in days.
@@ -224,6 +263,11 @@ func spannerCreateBackupAction(databases []string) console.Action {
 		db,
 		{Name: "backup", Label: "Backup ID", Type: "text", Required: true, Pattern: spannerIDPattern,
 			Help: "Lowercase letters, digits, underscores and hyphens, starting with a letter; 2 to 30 characters."},
+		{Name: "versionFrom", Label: "Create backup from", Type: "radio", Options: []string{"Current time", "Earlier point in time"},
+			Default: "Current time",
+			Help:    "An earlier point in time must be within the database's version retention period (1 hour unless set longer)."},
+		{Name: "versionTime", Label: "Version time (UTC)", Type: "datetime-local", Required: true, ShowWhen: "versionFrom=Earlier point in time",
+			Help: "The backup holds the database as it was at this time."},
 		spannerExpiryField("7"),
 	}}
 }
@@ -596,12 +640,16 @@ func spannerDatabaseAct(ctx context.Context, dbAdmin *database.DatabaseAdminClie
 		if db == "" || id == "" {
 			return errors.New("a database and a backup ID are required")
 		}
-		expire, err := spannerExpiry(values["expireDays"], time.Now())
+		expire, err := spannerExpireAt(values, time.Now())
+		if err != nil {
+			return err
+		}
+		version, err := spannerVersionTime(values)
 		if err != nil {
 			return err
 		}
 		op, err := dbAdmin.CreateBackup(ctx, &databasepb.CreateBackupRequest{Parent: instName, BackupId: id,
-			Backup: &databasepb.Backup{Database: instName + "/databases/" + db, ExpireTime: expire}})
+			Backup: &databasepb.Backup{Database: instName + "/databases/" + db, ExpireTime: expire, VersionTime: version}})
 		if err != nil {
 			return err
 		}
@@ -610,7 +658,7 @@ func spannerDatabaseAct(ctx context.Context, dbAdmin *database.DatabaseAdminClie
 	case "deletebackup":
 		return dbAdmin.DeleteBackup(ctx, &databasepb.DeleteBackupRequest{Name: spannerBackupName(project, path[0], path[2])})
 	case "updatebackup":
-		expire, err := spannerExpiry(values["expireDays"], time.Now())
+		expire, err := spannerExpireAt(values, time.Now())
 		if err != nil {
 			return err
 		}
@@ -623,7 +671,7 @@ func spannerDatabaseAct(ctx context.Context, dbAdmin *database.DatabaseAdminClie
 		if id == "" {
 			return errors.New("a new backup ID is required")
 		}
-		expire, err := spannerExpiry(values["expireDays"], time.Now())
+		expire, err := spannerExpireAt(values, time.Now())
 		if err != nil {
 			return err
 		}

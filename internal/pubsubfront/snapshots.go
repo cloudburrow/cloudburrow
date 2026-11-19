@@ -156,6 +156,14 @@ func (f *Front) UpdateSnapshot(ctx context.Context, req *pubsubpb.UpdateSnapshot
 		}
 		next.ExpireTime, next.WallClock = at, false
 	}
+	// Custom constraints (#1895, custom.go).
+	var expireAt *time.Time
+	if expire {
+		expireAt = &next.ExpireTime
+	}
+	if err := customUpdateSnapshot(ctx, cur, expireAt); err != nil {
+		return nil, err
+	}
 	f.mu.Lock()
 	f.snapshots[name] = next
 	f.mu.Unlock()

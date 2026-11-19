@@ -21,6 +21,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/k8s"
+	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 	"github.com/cloudburrow/cloudburrow/internal/paging"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
 )
@@ -373,6 +374,10 @@ func (j *JobsServer) CreateJob(ctx context.Context, req *runpb.CreateJobRequest)
 	}
 	job := proto.Clone(req.GetJob()).(*runpb.Job)
 	job.Name = req.GetParent() + "/jobs/" + id
+	// Custom constraints (#1895, orgpolicycustom.go).
+	if err := checkJobCustom(ctx, job, orgpolicy.MethodCreate); err != nil {
+		return nil, err
+	}
 	spec, err := s.prepareJob(job, id, 1)
 	if err != nil {
 		return nil, err
@@ -494,6 +499,10 @@ func (j *JobsServer) UpdateJob(ctx context.Context, req *runpb.UpdateJobRequest)
 	}
 	prev, err := storedJob(cm)
 	if err != nil {
+		return nil, err
+	}
+	// Custom constraints on the job as the update leaves it (#1895).
+	if err := checkJobCustom(ctx, req.GetJob(), orgpolicy.MethodUpdate); err != nil {
 		return nil, err
 	}
 	spec, err := s.prepareJob(req.GetJob(), id, prev.GetGeneration()+1)

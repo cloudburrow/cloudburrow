@@ -628,6 +628,11 @@ func (s *Server) CreateCryptoKey(_ context.Context, req *kmspb.CreateCryptoKeyRe
 			return nil, apierror.Wrap(apierror.Unimplemented("trusted_wrapping_enabled with skip_initial_version_creation is not implemented: it applies to the first version created, and Google does not document which later version that is; set crypto_key_version.trusted_wrapping_enabled on CreateCryptoKeyVersion, or trusted_wrapping_enabled on ImportCryptoKeyVersion"))
 		}
 	}
+	if res, err := s.toKey(k); err == nil {
+		if err := checkCustom(name, orgpolicy.TypeKMSCryptoKey, orgpolicy.MethodCreate, res); err != nil {
+			return nil, err
+		}
+	}
 	if !req.GetSkipInitialVersionCreation() {
 		v, err := s.newVersion(k, 1, now, kmspb.CryptoKeyVersion_ENABLED, nil)
 		if err != nil {
@@ -770,6 +775,9 @@ func (s *Server) CreateCryptoKeyVersion(_ context.Context, req *kmspb.CreateCryp
 		return nil, apierror.Wrap(err)
 	}
 	v.TrustedWrapping = trusted
+	if err := checkCustom(v.Name, orgpolicy.TypeKMSCryptoKeyVersion, orgpolicy.MethodCreate, s.toVersion(v)); err != nil {
+		return nil, err
+	}
 	if err := s.put(dbKey(versionPrefix, v.Name), v); err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -1010,6 +1018,9 @@ func (s *Server) UpdateCryptoKeyVersion(_ context.Context, req *kmspb.UpdateCryp
 	// now DISABLED, and Encrypt by key name refuses it.
 	if setState {
 		v.State = target.String()
+	}
+	if err := checkCustom(v.Name, orgpolicy.TypeKMSCryptoKeyVersion, orgpolicy.MethodUpdate, s.toVersion(v)); err != nil {
+		return nil, err
 	}
 	if err := s.put(dbKey(versionPrefix, v.Name), v); err != nil {
 		return nil, apierror.Wrap(err)
@@ -1417,6 +1428,11 @@ func (s *Server) UpdateCryptoKey(_ context.Context, req *kmspb.UpdateCryptoKeyRe
 	// supports automatic rotation.
 	if err := checkSchedule(k.RotationPeriod, k.NextRotation); err != nil {
 		return nil, apierror.Wrap(err)
+	}
+	if res, err := s.toKey(k); err == nil {
+		if err := checkCustom(k.Name, orgpolicy.TypeKMSCryptoKey, orgpolicy.MethodUpdate, res); err != nil {
+			return nil, err
+		}
 	}
 	if err := s.put(dbKey(keyPrefix, k.Name), k); err != nil {
 		return nil, apierror.Wrap(err)

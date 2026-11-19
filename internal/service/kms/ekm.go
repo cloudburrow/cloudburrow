@@ -15,6 +15,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
+	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 )
 
 // The EKM service (google.cloud.kms.v1.EkmService, #1452) is CRUD over
@@ -218,6 +219,9 @@ func (e *EkmServer) CreateEkmConnection(_ context.Context, req *kmspb.CreateEkmC
 	} else if found {
 		return nil, apierror.Wrap(apierror.AlreadyExists("EkmConnection %s already exists", name))
 	}
+	if err := checkCustom(name, orgpolicy.TypeKMSEkmConnection, orgpolicy.MethodCreate, c.proto()); err != nil {
+		return nil, err
+	}
 	if err := s.put(dbKey(ekmConnectionPrefix, name), c); err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -337,6 +341,9 @@ func (e *EkmServer) UpdateEkmConnection(_ context.Context, req *kmspb.UpdateEkmC
 	if err := checkCryptoSpace(c); err != nil {
 		return nil, apierror.Wrap(err)
 	}
+	if err := checkCustom(c.Name, orgpolicy.TypeKMSEkmConnection, orgpolicy.MethodUpdate, c.proto()); err != nil {
+		return nil, err
+	}
 	if err := s.put(dbKey(ekmConnectionPrefix, c.Name), c); err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -398,6 +405,10 @@ func (e *EkmServer) UpdateEkmConfig(_ context.Context, req *kmspb.UpdateEkmConfi
 		return nil, apierror.Wrap(err)
 	}
 	c.Name, c.Default = in.GetName(), def
+	if err := checkCustom(c.Name, orgpolicy.TypeKMSEkmConfig, orgpolicy.MethodUpdate,
+		&kmspb.EkmConfig{Name: c.Name, DefaultEkmConnection: c.Default}); err != nil {
+		return nil, err
+	}
 	if err := s.put(dbKey(ekmConfigPrefix, c.Name), c); err != nil {
 		return nil, apierror.Wrap(err)
 	}

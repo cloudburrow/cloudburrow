@@ -21,6 +21,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 )
 
 // Import jobs (#1212), as service.proto and resources.proto document them:
@@ -205,6 +206,11 @@ func (s *Server) CreateImportJob(_ context.Context, req *kmspb.CreateImportJobRe
 	if level == kmspb.ProtectionLevel_HSM_SINGLE_TENANT {
 		if j.Backend, err = s.hsmBackend("import_job.crypto_key_backend", in.GetCryptoKeyBackend(), req.GetParent()); err != nil {
 			return nil, apierror.Wrap(err)
+		}
+	}
+	if res, err := s.toImportJob(j); err == nil {
+		if err := checkCustom(name, orgpolicy.TypeKMSImportJob, orgpolicy.MethodCreate, res); err != nil {
+			return nil, err
 		}
 	}
 	if err := s.put(dbKey(importJobPrefix, name), j); err != nil {
@@ -485,6 +491,9 @@ func (s *Server) ImportCryptoKeyVersion(_ context.Context, req *kmspb.ImportCryp
 	n := k.Next
 	v := keyVersion{Name: versionName(k.Name, n), Created: now, Material: mat, Algorithm: storedAlgorithm(a),
 		ImportJob: j.Name, Imported: now, ProtectionLevel: k.ProtectionLevel, TrustedWrapping: req.GetTrustedWrappingEnabled()}
+	if err := checkCustom(v.Name, orgpolicy.TypeKMSCryptoKeyVersion, orgpolicy.MethodCreate, s.toVersion(v)); err != nil {
+		return nil, err
+	}
 	if err := s.put(dbKey(versionPrefix, v.Name), v); err != nil {
 		return nil, apierror.Wrap(err)
 	}

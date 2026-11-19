@@ -10,8 +10,11 @@ package main
 // same methods the API serves.
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -65,7 +68,7 @@ func (p artifactRegistryProvider) Detail(ctx context.Context, project string, pa
 	}
 	switch len(path) {
 	case 1:
-		return p.repositoryDetail(st, r, repo), nil
+		return p.repositoryDetail(ctx, st, r, repo), nil
 	case 2:
 		return p.imageDetail(st, repo, path[1])
 	case 3:
@@ -74,8 +77,8 @@ func (p artifactRegistryProvider) Detail(ctx context.Context, project string, pa
 	return console.DeeperThan(3, path), nil
 }
 
-func (p artifactRegistryProvider) repositoryDetail(st *registry.Store, r *arpb.Repository, repo registry.Repo) console.Detail {
-	images := console.Listing{Columns: []string{"Versions", "Tags", "Updated"}, NameColumn: "Image", Noun: "images",
+func (p artifactRegistryProvider) repositoryDetail(ctx context.Context, st *registry.Store, r *arpb.Repository, repo registry.Repo) console.Detail {
+	images := console.Listing{Columns: []string{"Created", "Updated", "Versions", "Tags"}, NameColumn: "Name", Noun: "images",
 		RowsOpenable: true}
 	for _, im := range st.Images(repo) {
 		ms, err := st.Manifests(repo, im)
@@ -83,26 +86,20 @@ func (p artifactRegistryProvider) repositoryDetail(st *registry.Store, r *arpb.R
 			continue
 		}
 		tags := 0
+		first, last := ms[0].Uploaded, ms[0].Uploaded
 		for _, m := range ms {
 			tags += len(m.Tags)
+			if m.Uploaded.Before(first) {
+				first = m.Uploaded
+			}
+			if m.Uploaded.After(last) {
+				last = m.Uploaded
+			}
 		}
 		images.Items = append(images.Items, console.Resource{Name: im, Fields: map[string]string{
-			"Versions": strconv.Itoa(len(ms)), "Tags": strconv.Itoa(tags), "Updated": stampAge(timestamppb.New(ms[0].Uploaded))}})
+			"Versions": strconv.Itoa(len(ms)), "Tags": strconv.Itoa(tags), "Created": arTimeOf(first), "Updated": arTimeOf(last)}})
 	}
 	images.Total = len(images.Items)
-	policies := []string{}
-	for id := range r.GetCleanupPolicies() {
-		policies = append(policies, id)
-	}
-	sort.Strings(policies)
-	cleanup := "none"
-	if len(policies) > 0 {
-		cleanup = strings.Join(policies, ", ")
-		if r.GetCleanupPolicyDryRun() {
-			cleanup += " (dry run)"
-		}
-	}
-	ctx := context.Background()
 	cs := runadapter.ConfigServer()
 	rules := console.Listing{Columns: []string{"Action", "Operation", "Package", "Condition"}, NameColumn: "Rule", Noun: "rules",
 		Note: "Rules are stored and read back, never enforced: this instance serves downloads to any caller, as its IAM policies are not enforced."}
@@ -123,35 +120,71 @@ func (p artifactRegistryProvider) repositoryDetail(st *registry.Store, r *arpb.R
 		}
 	}
 	attachments.Total = len(attachments.Items)
-	vpcsc := "-"
-	if c, err := cs.GetVPCSCConfig(ctx, &arpb.GetVPCSCConfigRequest{Name: "projects/" + repo.Project + "/locations/" + repo.Location + "/vpcscConfig"}); err == nil {
-		vpcsc = c.GetVpcscPolicy().String()
-	}
-	platformLogs := "-"
-	if st, sev := runadapter.ProjectPlatformLogs(repo.Project, repo.Location); st != "" || sev != "" {
-		platformLogs = strings.Trim(st+", severity "+orDash(sev), ", ")
-	}
-	settings := "-"
-	if ps, err := cs.GetProjectSettings(ctx, &arpb.GetProjectSettingsRequest{Name: "projects/" + repo.Project + "/projectSettings"}); err == nil {
-		settings = fmt.Sprintf("%s, pull percent %d", ps.GetLegacyRedirectionState(), ps.GetPullPercent())
-	}
 	return console.Detail{
-		Summary: []console.Property{{Label: "Format", Value: r.GetFormat().String()}, {Label: "Mode", Value: dockerMode(r)}, {Label: "Location", Value: repo.Location},
-			{Label: "URL", Value: r.GetRegistryUri()}, {Label: "Push to", Value: registryPushHint(repo)},
-			{Label: "Description", Value: orDash(r.GetDescription())}, {Label: "Cleanup policies", Value: cleanup},
-			{Label: "VPC-SC policy (location)", Value: vpcsc}, {Label: "Project settings", Value: settings},
-			{Label: "Platform logs (location)", Value: platformLogs}},
-		Sections: []console.Section{{ID: "images", Label: "Images", Listing: images}, {ID: "rules", Label: "Rules", Listing: rules},
+		Summary: p.repositorySummary(ctx, r, dockerMode(r)),
+		Sections: []console.Section{{ID: "images", Label: "Images", Listing: images},
+			{ID: "setup", Label: "Setup instructions", Kind: console.KindText, Text: p.setupInstructions(r)},
+			{ID: "rules", Label: "Rules", Listing: rules},
 			{ID: "attachments", Label: "Attachments", Listing: attachments}},
 	}
+}
+
+// repositorySummary is a repository page's header: Google's repository
+// details (Format, Mode, Location, Description, Labels, Encryption,
+// Immutable image tags, Cleanup policies, Repository size, Created,
+// Updated), then its URL.
+func (p artifactRegistryProvider) repositorySummary(ctx context.Context, r *arpb.Repository, mode string) []console.Property {
+	parts := strings.Split(r.GetName(), "/")
+	enc := arEncryptionWord(r)
+	if k := r.GetKmsKeyName(); k != "" {
+		enc += ": " + k
+	}
+	out := []console.Property{{Label: "Format", Value: arFormatWord(r.GetFormat())}, {Label: "Mode", Value: mode},
+		{Label: "Location", Value: parts[3]}, {Label: "Description", Value: orDash(r.GetDescription())},
+		{Label: "Labels", Value: orDash(arLabelsText(r.GetLabels()))}, {Label: "Encryption", Value: enc}}
+	if r.GetFormat() == arpb.Repository_DOCKER {
+		imm := arDisabled
+		if r.GetDockerConfig().GetImmutableTags() {
+			imm = arEnabled
+		}
+		out = append(out, console.Property{Label: "Immutable image tags", Value: imm})
+	}
+	if mc := r.GetMavenConfig(); mc != nil {
+		out = append(out, console.Property{Label: "Version policy", Value: arVersionPolicyWord(mc)})
+	}
+	pols := make([]string, 0, len(r.GetCleanupPolicies()))
+	for id := range r.GetCleanupPolicies() {
+		pols = append(pols, id)
+	}
+	sort.Strings(pols)
+	cleanup := orDash("")
+	if len(pols) > 0 {
+		cleanup = strings.Join(pols, ", ") + " (" + map[bool]string{true: arCleanupDryRun, false: arCleanupDelete}[r.GetCleanupPolicyDryRun()] + ")"
+	}
+	return append(out, console.Property{Label: "Cleanup policies", Value: cleanup},
+		console.Property{Label: "Repository size", Value: humanBytes(arRepositorySize(ctx, r))},
+		console.Property{Label: "Created", Value: arTime(r.GetCreateTime())}, console.Property{Label: "Updated", Value: arTime(r.GetUpdateTime())},
+		console.Property{Label: "URL", Value: r.GetRegistryUri()})
+}
+
+func arVersionPolicyWord(mc *arpb.Repository_MavenRepositoryConfig) string {
+	w := map[arpb.Repository_MavenRepositoryConfig_VersionPolicy]string{arpb.Repository_MavenRepositoryConfig_RELEASE: "Release",
+		arpb.Repository_MavenRepositoryConfig_SNAPSHOT: "Snapshot"}[mc.GetVersionPolicy()]
+	if w == "" {
+		w = "None"
+	}
+	if mc.GetAllowSnapshotOverwrites() {
+		w += ", snapshot overwrites allowed"
+	}
+	return w
 }
 
 // dockerMode is a DOCKER repository's mode, with a remote one's upstream.
 func dockerMode(r *arpb.Repository) string {
 	if u := r.GetRemoteRepositoryConfig().GetCommonRepository().GetUri(); u != "" {
-		return r.GetMode().String() + ": pulls through from " + u
+		return arModeWord(r.GetMode()) + ": pulls through from " + u
 	}
-	return r.GetMode().String()
+	return arModeWord(r.GetMode())
 }
 
 // registryPushHint is where a local docker client pushes the repository's
@@ -165,13 +198,13 @@ func (p artifactRegistryProvider) imageDetail(st *registry.Store, repo registry.
 	if err != nil || len(ms) == 0 {
 		return console.Detail{}, fmt.Errorf("image %q not found in repository %s", image, repo.Repository)
 	}
-	versions := console.Listing{Columns: []string{"Tags", "Size", "Media type", "Uploaded"}, NameColumn: "Digest",
+	versions := console.Listing{Columns: []string{"Tags", "Created", "Uploaded", "Virtual size", "Media type"}, NameColumn: "Name",
 		Noun: "versions", RowsOpenable: true}
 	tags := console.Listing{Columns: []string{"Version"}, NameColumn: "Tag", Noun: "tags"}
 	for _, m := range ms {
 		versions.Items = append(versions.Items, console.Resource{Name: m.Digest, Fields: map[string]string{
-			"Tags": orDash(strings.Join(m.Tags, ", ")), "Size": humanBytes(m.ImageSize), "Media type": m.MediaType,
-			"Uploaded": stampAge(timestamppb.New(m.Uploaded))}})
+			"Tags": orDash(strings.Join(m.Tags, ", ")), "Virtual size": humanBytes(m.ImageSize), "Media type": m.MediaType,
+			"Created": arTimeOf(m.Uploaded), "Uploaded": arTimeOf(m.Uploaded)}})
 		for _, t := range m.Tags {
 			tags.Items = append(tags.Items, console.Resource{Name: t, Fields: map[string]string{"Version": shortDigest(m.Digest)}})
 		}
@@ -194,7 +227,7 @@ func (p artifactRegistryProvider) versionDetail(st *registry.Store, repo registr
 	if err != nil {
 		return console.Detail{}, fmt.Errorf("version %s of %s not found", digest, image)
 	}
-	files := console.Listing{Columns: []string{"Kind", "Media type", "Size", "Annotations"}, NameColumn: "Digest", Noun: "files"}
+	files := console.Listing{Columns: []string{"Kind", "Media type", "Size", "Annotations"}, NameColumn: "Digest", Noun: "layers"}
 	repoName := "projects/" + repo.Project + "/locations/" + repo.Location + "/repositories/" + repo.Repository
 	add := func(kind string, d registry.Descriptor) {
 		ann := "-"
@@ -224,12 +257,23 @@ func (p artifactRegistryProvider) versionDetail(st *registry.Store, repo registr
 	if v, err := runadapter.ConfigServer().GetVersion(context.Background(), &arpb.GetVersionRequest{Name: packageName(repo, image) + "/versions/" + m.Digest}); err == nil {
 		annotations = formatAnnotations(v.GetAnnotations())
 	}
+	manifest := console.Section{ID: "manifest", Label: "Manifest", Kind: console.KindText}
+	if b, _, _, err := st.GetManifest(repo, image, m.Digest); err == nil {
+		var buf bytes.Buffer
+		if json.Indent(&buf, b, "", "  ") == nil {
+			manifest.Text = buf.String()
+		} else {
+			manifest.Text = string(b)
+		}
+	} else {
+		manifest.Unavailable = err.Error()
+	}
 	return console.Detail{
 		Summary: []console.Property{{Label: "Pull by digest", Value: registry.ImageURL(repo, image) + "@" + m.Digest},
 			{Label: "Annotations", Value: annotations},
 			{Label: "Tags", Value: orDash(strings.Join(m.Tags, ", "))}, {Label: "Media type", Value: m.MediaType},
 			{Label: "Size", Value: humanBytes(m.ImageSize)}, {Label: "Uploaded", Value: stampAge(timestamppb.New(m.Uploaded))}},
-		Sections: []console.Section{{ID: "files", Label: "Files", Listing: files}},
+		Sections: []console.Section{{ID: "files", Label: "Layers", Listing: files}, manifest},
 	}, nil
 }
 
@@ -243,7 +287,7 @@ func (p artifactRegistryProvider) DetailActions(ctx context.Context, project str
 	case 1:
 		var acts []console.Action
 		if r, _, err := p.repository(project, path[0]); err == nil {
-			acts = append(acts, editRepositoryAction(r), editCleanupAction(r))
+			acts = append(acts, console.Action{ID: "setup", Label: "Setup Instructions", Href: "/artifact-registry/" + url.PathEscape(path[0]) + "?tab=setup"}, editRepositoryAction(r))
 			if a, ok := editRuleAction(ctx, r.GetName()); ok {
 				acts = append(acts, a)
 			}
@@ -261,19 +305,8 @@ func (p artifactRegistryProvider) DetailActions(ctx context.Context, project str
 				{Name: "id", Label: "Rule ID", Type: "text", Required: true}}},
 			{ID: "delete-attachment", Label: "Delete attachment", Destructive: true, Fields: []console.Field{
 				{Name: "id", Label: "Attachment ID", Type: "text", Required: true, Help: "its files stay"}}},
-			{ID: "pull-percent", Label: "Set project pull percent", Fields: []console.Field{
-				{Name: "percent", Label: "Pull percent", Type: "number", Default: "0",
-					Help: "UpdateProjectSettings' pull_percent; gcr.io redirection stays off, as nothing here serves gcr.io"}}},
-			{ID: "vpcsc", Label: "Set VPC-SC policy", Fields: []console.Field{
-				{Name: "policy", Label: "Policy", Type: "select", Options: []string{"DENY", "ALLOW"}, Default: "DENY",
-					Help: "the location's policy for remote repositories' upstream fetches, as UpdateVPCSCConfig sets it"}}},
-			{ID: "platform-logs", Label: "Set platform logs", Fields: []console.Field{
-				{Name: "state", Label: "Logging state", Type: "select", Options: []string{"ENABLED", "DISABLED", "LOGGING_STATE_UNSPECIFIED"}, Default: "ENABLED",
-					Help: "the location's projectConfig platformLogsConfig, as updateProjectConfig sets it (#1519); stored: this instance writes no platform logs"},
-				{Name: "severity", Label: "Severity level", Type: "select", Options: []string{"SEVERITY_LEVEL_UNSPECIFIED", "DEBUG", "INFO", "NOTICE", "WARNING", "ERROR", "CRITICAL", "ALERT", "EMERGENCY"},
-					Default: "SEVERITY_LEVEL_UNSPECIFIED"}}},
-			{ID: "delete", Label: "Delete repository", Destructive: true, Leaves: true,
-				Confirm: "The repository and every image it holds are deleted, as DeleteRepository does."}}...)
+			{ID: "delete", Label: "Delete", Destructive: true, Leaves: true,
+				Confirm: "The repository and every artifact it holds are deleted, as DeleteRepository does."}}...)
 	case 2:
 		return []console.Action{
 			{ID: "display-name", Label: "Set display name", Fields: []console.Field{
@@ -297,7 +330,7 @@ func (p artifactRegistryProvider) DetailActions(ctx context.Context, project str
 				{Name: "path", Label: "Destination", Type: "text", Required: true, Help: "bucket or bucket/dir in this instance's Cloud Storage"}}},
 			{ID: "add-tag", Label: "Add tag", Fields: []console.Field{{Name: "tag", Label: "Tag", Type: "text", Required: true,
 				Help: "a new tag, or an existing one to move to this version"}}},
-			{ID: "remove-tag", Label: "Remove tag", Fields: []console.Field{{Name: "tag", Label: "Tag", Type: "text", Required: true,
+			{ID: "remove-tag", Label: "Delete tag", Destructive: true, Fields: []console.Field{{Name: "tag", Label: "Tag", Type: "text", Required: true,
 				Help: "one of this version's tags; the version stays"}}},
 			{ID: "delete", Label: "Delete version", Destructive: true, Leaves: true,
 				Confirm: "The version and its tags are deleted, as DeleteVersion with force does."},
@@ -316,10 +349,7 @@ func (p artifactRegistryProvider) ActAt(ctx context.Context, project string, pat
 		return err
 	}
 	if len(path) == 1 && action == "edit-repository" {
-		return p.editRepository(ctx, r.GetName(), values)
-	}
-	if len(path) == 1 && action == "edit-cleanup" {
-		return p.editCleanup(ctx, r.GetName(), values)
+		return p.editRepository(ctx, r, values)
 	}
 	if len(path) == 1 && action == "edit-rule" {
 		return editRule(ctx, r.GetName(), values)
@@ -349,14 +379,6 @@ func (p artifactRegistryProvider) ActAt(ctx context.Context, project string, pat
 		return err
 	case len(path) == 1 && action == "delete-attachment":
 		_, err := cs.DeleteAttachment(ctx, &arpb.DeleteAttachmentRequest{Name: repoName + "/attachments/" + strings.TrimSpace(values["id"])})
-		return err
-	case len(path) == 1 && action == "pull-percent":
-		n, err := strconv.Atoi(strings.TrimSpace(values["percent"]))
-		if err != nil {
-			return fmt.Errorf("pull percent %q is not a number", values["percent"])
-		}
-		_, err = cs.UpdateProjectSettings(ctx, &arpb.UpdateProjectSettingsRequest{ProjectSettings: &arpb.ProjectSettings{
-			Name: "projects/" + repo.Project + "/projectSettings", PullPercent: int32(n)}, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"pull_percent"}}})
 		return err
 	case len(path) == 2 && action == "delete-untagged":
 		ms, err := st.Manifests(repo, path[1])
@@ -391,13 +413,6 @@ func (p artifactRegistryProvider) ActAt(ctx context.Context, project string, pat
 		_, err := cs.ExportArtifact(ctx, &arpb.ExportArtifactRequest{Repository: repoName,
 			SourceArtifact: &arpb.ExportArtifactRequest_SourceVersion{SourceVersion: packageName(repo, path[1]) + "/versions/" + path[2]},
 			Destination:    &arpb.ExportArtifactRequest_GcsPath{GcsPath: strings.TrimSpace(values["path"])}})
-		return err
-	case len(path) == 1 && action == "platform-logs":
-		return runadapter.SetProjectPlatformLogs(repo.Project, repo.Location, values["state"], values["severity"])
-	case len(path) == 1 && action == "vpcsc":
-		_, err := cs.UpdateVPCSCConfig(ctx, &arpb.UpdateVPCSCConfigRequest{VpcscConfig: &arpb.VPCSCConfig{
-			Name:        "projects/" + repo.Project + "/locations/" + repo.Location + "/vpcscConfig",
-			VpcscPolicy: arpb.VPCSCConfig_VPCSCPolicy(arpb.VPCSCConfig_VPCSCPolicy_value[values["policy"]])}})
 		return err
 	case len(path) == 2 && action == "display-name":
 		_, err := cs.UpdatePackage(ctx, &arpb.UpdatePackageRequest{Package: &arpb.Package{Name: packageName(repo, path[1]),

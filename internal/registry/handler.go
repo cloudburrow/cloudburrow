@@ -106,6 +106,10 @@ func (h *Handler) failErr(w http.ResponseWriter, err error) {
 		h.fail(w, http.StatusNotFound, "BLOB_UPLOAD_UNKNOWN", err.Error())
 	case errors.Is(err, ErrDigestInvalid):
 		h.fail(w, http.StatusBadRequest, "DIGEST_INVALID", err.Error())
+	case errors.Is(err, ErrTagImmutable):
+		// A repository with immutable tags refuses the change as a
+		// policy, the distribution spec's DENIED.
+		h.fail(w, http.StatusForbidden, "DENIED", err.Error())
 	case errors.Is(err, ErrTagInvalid):
 		h.fail(w, http.StatusBadRequest, "TAG_INVALID", err.Error())
 	case errors.Is(err, ErrNameInvalid):

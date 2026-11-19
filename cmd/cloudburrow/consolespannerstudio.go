@@ -12,6 +12,19 @@ package main
 // list views, change streams and sequences, labels are kept on an instance,
 // and AnalyzeQuery (query mode PLAN) answers INTERNAL "query plan
 // unavailable", so Explain says the emulator's own words.
+//
+// Query plans stay unavailable (#1859, round 2). The emulator's README says
+// "The SQL query modes PLAN and PROFILE do not return any query plans" and
+// no release or flag up to 1.5.59 changes that: its handler
+// (frontend/handlers/queries.cc) answers PLAN and PROFILE with one node,
+// "No query plan", or none. A plan drawn here from the query's text (a scan
+// of each table, a filter per WHERE) would not be Spanner's: the operators,
+// the index chosen, the distributed unions and the join strategy are its
+// optimizer's decisions, which nothing local makes, so a tuned query could
+// look right here and run differently on Spanner. What the emulator does
+// return is PROFILE's query statistics, rows_returned and elapsed_time
+// (it reports no CPU time), so Run runs in PROFILE mode, as Google's Spanner
+// Studio does, and the Explanation tab shows them as the Query summary.
 
 import (
 	"context"
@@ -27,6 +40,7 @@ import (
 	"cloud.google.com/go/spanner"
 	database "cloud.google.com/go/spanner/admin/database/apiv1"
 	databasepb "cloud.google.com/go/spanner/admin/database/apiv1/databasepb"
+	sppb "cloud.google.com/go/spanner/apiv1/spannerpb"
 	"google.golang.org/api/iterator"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
@@ -238,6 +252,57 @@ type spannerStudioResult struct {
 	Elapsed  string            `json:"elapsed,omitempty"`
 	Plan     []spannerPlanNode `json:"plan,omitempty"`
 	PlanNote string            `json:"planNote,omitempty"`
+	// Stats is PROFILE mode's query statistics, as the emulator returns
+	// them, for the Explanation tab's Query summary.
+	Stats *spannerQueryStats `json:"stats,omitempty"`
+}
+
+// spannerQueryStats is the query statistics PROFILE mode returns
+// (ResultSetStats.query_stats): the emulator sets rows_returned and
+// elapsed_time; Spanner's cpu_time and rows_scanned are shown when present.
+type spannerQueryStats struct {
+	RowsReturned string `json:"rowsReturned,omitempty"`
+	ElapsedTime  string `json:"elapsedTime,omitempty"`
+	CPUTime      string `json:"cpuTime,omitempty"`
+	RowsScanned  string `json:"rowsScanned,omitempty"`
+}
+
+// spannerNoPlanNote is the Explanation tab's word when the emulator has no
+// plan to give; why is in this file's comment.
+const spannerNoPlanNote = "Not available locally: the Spanner emulator returns no query plan (its documented limitation: " +
+	"\"The SQL query modes PLAN and PROFILE do not return any query plans\")."
+
+// spannerPlan is a returned plan's nodes, none when the plan is the
+// emulator's placeholder ("No query plan").
+func spannerPlan(plan *sppb.QueryPlan) []spannerPlanNode {
+	var out []spannerPlanNode
+	for _, n := range plan.GetPlanNodes() {
+		if n.GetDisplayName() == "No query plan" && n.GetKind() == sppb.PlanNode_KIND_UNSPECIFIED {
+			continue
+		}
+		node := spannerPlanNode{Index: n.GetIndex(), Name: n.GetDisplayName(), Kind: n.GetKind().String()}
+		for _, l := range n.GetChildLinks() {
+			node.Children = append(node.Children, l.GetChildIndex())
+		}
+		out = append(out, node)
+	}
+	return out
+}
+
+// spannerStats reads PROFILE's query statistics, nil when there are none.
+func spannerStats(m map[string]any) *spannerQueryStats {
+	str := func(k string) string {
+		if v, ok := m[k]; ok && v != nil {
+			return fmt.Sprint(v)
+		}
+		return ""
+	}
+	st := &spannerQueryStats{RowsReturned: str("rows_returned"), ElapsedTime: str("elapsed_time"),
+		CPUTime: str("cpu_time"), RowsScanned: str("rows_scanned")}
+	if *st == (spannerQueryStats{}) {
+		return nil
+	}
+	return st
 }
 
 type spannerPlanNode struct {
@@ -357,16 +422,24 @@ func (p spannerProvider) spannerStudioRun(ctx context.Context, dbAdmin *database
 	if len(st.Kinds) > 1 {
 		return nil, errors.New("Run runs one query at a time: select one statement, or remove everything after the first semicolon")
 	}
-	it := c.Single().Query(ctx, spanner.Statement{SQL: strings.TrimRight(sql, "; \t\r\n")})
+	// PROFILE mode, as Google's Spanner Studio runs a query: its results
+	// and its statistics. The rows past the first 1,000 are read and
+	// dropped, since the statistics come at the end of the stream.
+	it := c.Single().QueryWithStats(ctx, spanner.Statement{SQL: strings.TrimRight(sql, "; \t\r\n")})
 	defer it.Stop()
 	res := &spannerStudioResult{Kind: "query", Rows: [][]string{}}
-	for len(res.Rows) < 1000 {
+	more := false
+	for {
 		row, err := it.Next()
 		if errors.Is(err, iterator.Done) {
 			break
 		}
 		if err != nil {
 			return nil, err
+		}
+		if len(res.Rows) == 1000 {
+			more = true
+			continue
 		}
 		if res.Columns == nil {
 			res.Columns = row.ColumnNames()
@@ -387,8 +460,12 @@ func (p spannerProvider) spannerStudioRun(ctx context.Context, dbAdmin *database
 		}
 	}
 	res.Elapsed = time.Since(start).Round(time.Millisecond).String()
-	if len(res.Rows) == 1000 {
+	if more {
 		res.Message = "Showing the first 1,000 rows."
+	}
+	res.Stats = spannerStats(it.QueryStats)
+	if res.Plan = spannerPlan(it.QueryPlan); len(res.Plan) == 0 {
+		res.PlanNote = spannerNoPlanNote
 	}
 	return res, nil
 }
@@ -406,19 +483,11 @@ func spannerStudioExplain(ctx context.Context, c *spanner.Client, sql string) (*
 	plan, err := c.Single().AnalyzeQuery(ctx, spanner.Statement{SQL: sql})
 	res := &spannerStudioResult{Kind: "explain"}
 	if err != nil {
-		res.PlanNote = "Not available locally: the Spanner emulator returns no query plan (AnalyzeQuery answered: " +
-			spanner.ErrDesc(err) + ")."
+		res.PlanNote = spannerNoPlanNote[:len(spannerNoPlanNote)-2] + "; AnalyzeQuery answered: " + spanner.ErrDesc(err) + ")."
 		return res, nil
 	}
-	for _, n := range plan.GetPlanNodes() {
-		node := spannerPlanNode{Index: n.GetIndex(), Name: n.GetDisplayName(), Kind: n.GetKind().String()}
-		for _, l := range n.GetChildLinks() {
-			node.Children = append(node.Children, l.GetChildIndex())
-		}
-		res.Plan = append(res.Plan, node)
-	}
-	if len(res.Plan) == 0 {
-		res.PlanNote = "The query plan has no nodes."
+	if res.Plan = spannerPlan(plan); len(res.Plan) == 0 {
+		res.PlanNote = spannerNoPlanNote
 	}
 	return res, nil
 }
@@ -545,17 +614,10 @@ func spannerTableColumns(ctx context.Context, c *spanner.Client, table string) (
 }
 
 // spannerEditable says whether the Data tab's forms can write a column:
-// scalar types a string casts to.
+// the scalar types and ARRAYs of them, in either dialect
+// (consolespannerdata.go).
 func spannerEditable(t string) bool {
-	base := strings.ToUpper(t)
-	if i := strings.IndexByte(base, '('); i >= 0 {
-		base = base[:i]
-	}
-	switch base {
-	case "INT64", "FLOAT64", "FLOAT32", "BOOL", "STRING", "DATE", "TIMESTAMP", "NUMERIC", "JSON", "BYTES":
-		return true
-	}
-	return false
+	return spannerColumnType(t) != nil
 }
 
 // spannerCastExpr is the SQL that turns the string parameter name into a
@@ -588,6 +650,9 @@ func spannerRowFields(cols []spannerColumn, row map[string]string) []console.Fie
 		}
 		f := console.Field{Name: "col_" + col.Name, Label: col.Name, Type: "text", Required: !col.Nullable && col.Key == 0 || col.Key > 0,
 			Help: col.Type}
+		if spannerColumnType(col.Type).GetCode() == sppb.TypeCode_ARRAY {
+			f.Help += ": a JSON array, such as [1, 2] or [\"a\", null]"
+		}
 		if col.Nullable {
 			f.Help += ", nullable: left empty, the value is NULL"
 		}
@@ -604,7 +669,7 @@ func spannerRowFields(cols []spannerColumn, row map[string]string) []console.Fie
 
 // spannerDataSection is a table's Data tab: up to 200 rows, each with Edit
 // row and Delete row, as Google's table Data page has them.
-func spannerDataSection(ctx context.Context, c *spanner.Client, instanceID, dbID, table string, cols []spannerColumn) console.Section {
+func spannerDataSection(ctx context.Context, c *spanner.Client, d spannerDialect, instanceID, dbID, table string, cols []spannerColumn) console.Section {
 	sec := console.Section{ID: "data", Label: "Data"}
 	l := console.Listing{Noun: "rows"}
 	var keys []string
@@ -618,7 +683,7 @@ func spannerDataSection(ctx context.Context, c *spanner.Client, instanceID, dbID
 	})
 	var names []string
 	for _, col := range cols {
-		names = append(names, "`"+col.Name+"`")
+		names = append(names, d.quote(col.Name))
 	}
 	if len(names) == 0 {
 		sec.Listing = l
@@ -626,9 +691,13 @@ func spannerDataSection(ctx context.Context, c *spanner.Client, instanceID, dbID
 	}
 	order := ""
 	if len(keys) > 0 {
-		order = " ORDER BY `" + strings.Join(keys, "`, `") + "`"
+		quoted := make([]string, len(keys))
+		for i, k := range keys {
+			quoted[i] = d.quote(k)
+		}
+		order = " ORDER BY " + strings.Join(quoted, ", ")
 	}
-	it := c.Single().Query(ctx, spanner.Statement{SQL: "SELECT " + strings.Join(names, ", ") + " FROM `" + table + "`" + order + " LIMIT 200"})
+	it := c.Single().Query(ctx, spanner.Statement{SQL: "SELECT " + strings.Join(names, ", ") + " FROM " + d.quote(table) + order + " LIMIT 200"})
 	defer it.Stop()
 	if len(keys) > 0 {
 		l.NameColumn = keys[0]
@@ -710,14 +779,29 @@ func (p spannerProvider) spannerRowAct(ctx context.Context, project string, path
 	}
 	defer c.Close()
 	table := path[2]
-	cols, err := spannerTableColumns(ctx, c, table)
+	d := spannerDialectOfClient(ctx, c)
+	cols, err := spannerTableColumnsIn(ctx, c, d, table)
 	if err != nil {
 		return err
 	}
 	if len(cols) == 0 {
 		return fmt.Errorf("table %s not found", table)
 	}
-	params := map[string]any{}
+	b := &spannerBinder{d: d, params: map[string]any{}}
+	params := b.params
+	// A typed parameter for an ARRAY and every PostgreSQL column; a string
+	// cast to the column's type otherwise (spannerCastExpr).
+	arg := func(col spannerColumn, pn, raw string) (string, error) {
+		if !spannerTypedColumn(d, col.Type) {
+			params[pn] = raw
+			return spannerCastExpr(col.Type, pn), nil
+		}
+		v, err := spannerTypedParam(col.Type, raw)
+		if err != nil {
+			return "", fmt.Errorf("%s: %w", col.Name, err)
+		}
+		return b.bind(pn, v), nil
+	}
 	var keys []spannerColumn
 	for _, col := range cols {
 		if col.Key > 0 {
@@ -732,22 +816,24 @@ func (p spannerProvider) spannerRowAct(ctx context.Context, project string, path
 		}
 		var conds []string
 		for i, k := range keys {
-			pn := fmt.Sprintf("k%d", i)
-			params[pn] = vals[i]
-			conds = append(conds, fmt.Sprintf("`%s` = %s", k.Name, spannerCastExpr(k.Type, pn)))
+			e, err := arg(k, fmt.Sprintf("k%d", i), vals[i])
+			if err != nil {
+				return "", err
+			}
+			conds = append(conds, fmt.Sprintf("%s = %s", d.quote(k.Name), e))
 		}
 		return strings.Join(conds, " AND "), nil
 	}
-	value := func(col spannerColumn, pn string) (string, bool) {
+	value := func(col spannerColumn, pn string) (string, bool, error) {
 		raw, ok := v["col_"+col.Name]
 		if !ok {
-			return "", false
+			return "", false, nil
 		}
 		if raw == "" && col.Nullable {
-			return "NULL", true
+			return "NULL", true, nil
 		}
-		params[pn] = raw
-		return spannerCastExpr(col.Type, pn), true
+		e, err := arg(col, pn, raw)
+		return e, err == nil, err
 	}
 	var sql string
 	switch action {
@@ -757,14 +843,18 @@ func (p spannerProvider) spannerRowAct(ctx context.Context, project string, path
 			if col.Generated || !spannerEditable(col.Type) {
 				continue
 			}
-			if e, ok := value(col, fmt.Sprintf("v%d", i)); ok {
-				names, exprs = append(names, "`"+col.Name+"`"), append(exprs, e)
+			e, ok, err := value(col, fmt.Sprintf("v%d", i))
+			if err != nil {
+				return err
+			}
+			if ok {
+				names, exprs = append(names, d.quote(col.Name)), append(exprs, e)
 			}
 		}
 		if len(names) == 0 {
 			return errors.New("no values to insert")
 		}
-		sql = fmt.Sprintf("INSERT INTO `%s` (%s) VALUES (%s)", table, strings.Join(names, ", "), strings.Join(exprs, ", "))
+		sql = fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", d.quote(table), strings.Join(names, ", "), strings.Join(exprs, ", "))
 	case "editrow":
 		cond, err := where()
 		if err != nil {
@@ -775,20 +865,24 @@ func (p spannerProvider) spannerRowAct(ctx context.Context, project string, path
 			if col.Key > 0 || col.Generated || !spannerEditable(col.Type) {
 				continue
 			}
-			if e, ok := value(col, fmt.Sprintf("v%d", i)); ok {
-				sets = append(sets, fmt.Sprintf("`%s` = %s", col.Name, e))
+			e, ok, err := value(col, fmt.Sprintf("v%d", i))
+			if err != nil {
+				return err
+			}
+			if ok {
+				sets = append(sets, fmt.Sprintf("%s = %s", d.quote(col.Name), e))
 			}
 		}
 		if len(sets) == 0 {
 			return errors.New("nothing to change: a key column cannot change")
 		}
-		sql = fmt.Sprintf("UPDATE `%s` SET %s WHERE %s", table, strings.Join(sets, ", "), cond)
+		sql = fmt.Sprintf("UPDATE %s SET %s WHERE %s", d.quote(table), strings.Join(sets, ", "), cond)
 	case "deleterow":
 		cond, err := where()
 		if err != nil {
 			return err
 		}
-		sql = fmt.Sprintf("DELETE FROM `%s` WHERE %s", table, cond)
+		sql = fmt.Sprintf("DELETE FROM %s WHERE %s", d.quote(table), cond)
 	default:
 		return fmt.Errorf("unknown action %q", action)
 	}

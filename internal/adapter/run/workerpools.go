@@ -17,6 +17,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 	"github.com/cloudburrow/cloudburrow/internal/paging"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
 )
@@ -249,6 +250,10 @@ func (p *WorkerPoolsServer) CreateWorkerPool(ctx context.Context, req *runpb.Cre
 	if err := checkWorkerPool(wp); err != nil {
 		return nil, err
 	}
+	// Custom constraints (#1895, orgpolicycustom.go).
+	if err := checkWorkerPoolCustom(ctx, wp, orgpolicy.MethodCreate); err != nil {
+		return nil, err
+	}
 	rev := wp.GetTemplate().GetRevision()
 	if rev == "" {
 		rev = fmt.Sprintf("%s-%05d-%s", id, 1, revisionSuffix())
@@ -383,6 +388,11 @@ func (p *WorkerPoolsServer) UpdateWorkerPool(ctx context.Context, req *runpb.Upd
 		wp.Template = &runpb.WorkerPoolRevisionTemplate{}
 	}
 	if err := checkWorkerPool(wp); err != nil {
+		return nil, err
+	}
+	// Custom constraints on the pool as the update leaves it (#1895).
+	wp.Name = name
+	if err := checkWorkerPoolCustom(ctx, wp, orgpolicy.MethodUpdate); err != nil {
 		return nil, err
 	}
 	gen := prev.GetGeneration() + 1

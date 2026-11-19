@@ -88,6 +88,9 @@ type Front struct {
 	persist persister
 	// seen is every instance a call has named (seen.go, #1550).
 	seen seenInstances
+	// aggs serialises the writes to the aggregate families the front
+	// computes (aggregates.go, #1893).
+	aggs aggWrites
 }
 
 // New returns a front for the emulator at upstream (host:port). The
@@ -146,6 +149,8 @@ func New(upstream string, logf func(format string, args ...any)) (*Front, error)
 		}
 		return resp, err
 	}
+	// Custom organization policy constraints (custom.go, #1895).
+	f.wrapCustom()
 	return f, nil
 }
 
@@ -267,6 +272,16 @@ func (f *Front) handle(_ any, ss grpc.ServerStream) error {
 		if p != nil {
 			defer p.release()
 			first, change = &out, p
+		}
+		// After the change log has decoded the write as the client sent
+		// it: the Min, Max and HLL++ families' merges (aggregates.go).
+		out, release, err := f.prepareAggregates(ss.Context(), method, *first)
+		if err != nil {
+			return err
+		}
+		if release != nil {
+			defer release()
+			first = &out
 		}
 	}
 	ctx, cancel := context.WithCancel(ss.Context())

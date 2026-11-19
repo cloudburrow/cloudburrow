@@ -67,6 +67,12 @@ ALACDecoder.cpp, ag_dec.c, dp_dec.c, matrix_dec.c), Copyright (c) 2011 Apple
 Inc., under the Apache License, Version 2.0; changed from C++ and C to Go and
 cut down to decoding (#1651).
 
+The Bigtable front is linked with a copy of bsm/zetasketch v0.2.0
+(https://github.com/bsm/zetasketch), a Go port of Google's ZetaSketch
+(https://github.com/google/zetasketch, Copyright 2019 Google LLC), under the
+Apache License, Version 2.0, which CloudBurrow fixes; third_party/zetasketch
+holds the licence and PROVENANCE.md records what was copied and changed.
+
 The binary embeds builds of goccy/bigquery-emulator v0.8.1
 (https://github.com/goccy/bigquery-emulator), Copyright (c) 2022 Masaaki
 Goshima, under the MIT License, linked with goccy/googlesqlite v0.3.1 and

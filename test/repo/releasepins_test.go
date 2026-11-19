@@ -1,12 +1,10 @@
 package repo
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"testing"
 )
@@ -15,20 +13,35 @@ import (
 // install or verify, as opposed to a page recording what an older release
 // did ("v0.1.0 has no trust gate"). After v0.2.0, install.md, ci.md and
 // SECURITY.md still pinned v0.1.0, and cloudburrow.com copied them (#1806).
-// These are the shapes a pin takes in this repository.
+//
+// Since #1898 a release goes out every one to two days, from a commit that
+// is already on main, and nothing is committed back: a page on main can
+// never name the release cut from it. So there is one source of truth for
+// the current version, GitHub's latest release (releases/latest, which the
+// release workflow moves only after the smoke installs pass), and a pin
+// names it rather than a number: a releases/latest link, the `latest`
+// input, or the vX.Y.Z placeholder (#1901). cloudburrow.com resolves
+// releases/latest when it builds and shows the tag itself.
+//
+// These are the shapes a pin takes in this repository. Each captures what
+// the pin names: a concrete vN.N.N fails the test.
 var releasePins = []*regexp.Regexp{
-	// "Current release: [vX](.../releases/tag/vX)", "currently [vX](...)".
-	regexp.MustCompile(`cloudburrow/cloudburrow/releases/tag/(v\d+\.\d+\.\d+)\b`),
+	// "Current release: [the latest](.../releases/latest)"; a
+	// ".../releases/tag/vX" link is a pin to one release.
+	regexp.MustCompile(`cloudburrow/cloudburrow/releases/(latest\b|tag/v[\dX]+\.[\dY]+\.[\dZ]+\b)`),
 	// The install script's "--version vX".
-	regexp.MustCompile(`--version (v\d+\.\d+\.\d+)\b`),
+	regexp.MustCompile(`--version (v[\dX]+\.[\dY]+\.[\dZ]+)\b`),
 	// An archive's name, as in "gh attestation verify cloudburrow_vX_darwin_arm64.tar.gz".
-	regexp.MustCompile(`\bcloudburrow_(v\d+\.\d+\.\d+)_(?:darwin|linux)_`),
+	regexp.MustCompile(`\bcloudburrow_(v[\dX]+\.[\dY]+\.[\dZ]+)_(?:darwin|linux)_`),
 	// The action's input in docs/ci.md's workflow, whose shape cloudburrow.com
-	// reads: "version: vX   # or latest, ...".
-	regexp.MustCompile(`(?m)^\s+version: (v\d+\.\d+\.\d+)\s+# or latest`),
-	// action.yml's "Release tag to install (such as vX)".
-	regexp.MustCompile(`Release tag to install \(such as (v\d+\.\d+\.\d+)\)`),
+	// reads: "version: latest   # or a release tag (vX.Y.Z), ...".
+	regexp.MustCompile(`(?m)^\s+version: (latest|v[\dX]+\.[\dY]+\.[\dZ]+)\s+# or `),
+	// action.yml's "Release tag to install (vX)".
+	regexp.MustCompile(`Release tag to install \((?:such as )?(v[\dX]+\.[\dY]+\.[\dZ]+)\)`),
 }
+
+// concreteRelease is a pin that names one release instead of the latest.
+var concreteRelease = regexp.MustCompile(`v\d+\.\d+\.\d+`)
 
 // pinFiles are the pages a reader installs from: the README, SECURITY.md,
 // every page under docs/, the install script's usage and the action's inputs.
@@ -52,57 +65,12 @@ func pinFiles(t *testing.T, root string) []string {
 	return files
 }
 
-// latestRelease is the newest "## [x.y.z]" heading of CHANGELOG.md, which
-// the release step adds when it tags (CHANGELOG.md's own instructions).
-func latestRelease(t *testing.T, root string) [3]int {
-	t.Helper()
-	b, err := os.ReadFile(filepath.Join(root, "CHANGELOG.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var newest [3]int
-	found := false
-	for _, m := range regexp.MustCompile(`(?m)^## \[(\d+)\.(\d+)\.(\d+)\]`).FindAllStringSubmatch(string(b), -1) {
-		v := [3]int{atoi(m[1]), atoi(m[2]), atoi(m[3])}
-		if !found || less(newest, v) {
-			newest, found = v, true
-		}
-	}
-	if !found {
-		t.Fatal("CHANGELOG.md has no ## [x.y.z] release heading")
-	}
-	return newest
-}
-
-func atoi(s string) int {
-	n, err := strconv.Atoi(s)
-	if err != nil {
-		panic(err)
-	}
-	return n
-}
-
-func less(a, b [3]int) bool {
-	for i := range a {
-		if a[i] != b[i] {
-			return a[i] < b[i]
-		}
-	}
-	return false
-}
-
-func parseTag(tag string) [3]int {
-	m := regexp.MustCompile(`^v(\d+)\.(\d+)\.(\d+)$`).FindStringSubmatch(tag)
-	return [3]int{atoi(m[1]), atoi(m[2]), atoi(m[3])}
-}
-
-// TestDocsPinTheLatestRelease fails when a page pins a release older than
-// the newest one CHANGELOG.md records, so the release step cannot leave a
-// stale install command, attestation example or "current release" link.
+// TestDocsPinTheLatestRelease fails when a page pins a numbered release,
+// which falls behind as soon as the scheduled release tags the next one, so
+// no install command, attestation example or "current release" link can go
+// stale (#1806, #1901).
 func TestDocsPinTheLatestRelease(t *testing.T) {
 	root := repoRoot(t)
-	newest := latestRelease(t, root)
-	want := fmt.Sprintf("v%d.%d.%d", newest[0], newest[1], newest[2])
 	pins := 0
 	for _, f := range pinFiles(t, root) {
 		b, err := os.ReadFile(filepath.Join(root, f))
@@ -113,10 +81,9 @@ func TestDocsPinTheLatestRelease(t *testing.T) {
 		for _, re := range releasePins {
 			for _, m := range re.FindAllStringSubmatchIndex(src, -1) {
 				pins++
-				tag := src[m[2]:m[3]]
-				if less(parseTag(tag), newest) {
+				if got := src[m[2]:m[3]]; concreteRelease.MatchString(got) {
 					line := strings.Count(src[:m[0]], "\n") + 1
-					t.Errorf("%s:%d pins %s; the latest release in CHANGELOG.md is %s", f, line, tag, want)
+					t.Errorf("%s:%d pins %s; a page names the latest release instead (releases/latest, `latest` or vX.Y.Z), since a scheduled release is tagged every one to two days without a commit to main", f, line, concreteRelease.FindString(got))
 				}
 			}
 		}
@@ -129,19 +96,29 @@ func TestDocsPinTheLatestRelease(t *testing.T) {
 }
 
 // TestReleasePinPatternsCatchAStalePin keeps the patterns honest: each one
-// must find the old release in the shape it is written for.
+// must find a numbered release in the shape it is written for, and the
+// latest-release form too.
 func TestReleasePinPatternsCatchAStalePin(t *testing.T) {
-	samples := []string{
+	stale := []string{
 		"**Released: [v0.1.0](https://github.com/cloudburrow/cloudburrow/releases/tag/v0.1.0).**",
 		"install.sh | sh -s -- --version v0.1.0 --prefix /usr/local",
 		"gh attestation verify cloudburrow_v0.1.0_darwin_arm64.tar.gz --repo cloudburrow/cloudburrow",
 		"        with:\n          version: v0.1.0            # or latest, or source (needs actions/setup-go)\n",
 		"      Release tag to install (such as v0.1.0), `latest`, or `source` to build",
 	}
+	current := []string{
+		"**Released: [the latest release](https://github.com/cloudburrow/cloudburrow/releases/latest)**",
+		"install.sh | sh -s -- --version vX.Y.Z --prefix /usr/local",
+		"gh attestation verify cloudburrow_vX.Y.Z_darwin_arm64.tar.gz --repo cloudburrow/cloudburrow",
+		"        with:\n          version: latest            # or a release tag (vX.Y.Z), or source\n",
+		"      Release tag to install (vX.Y.Z), `latest`, or `source` to build",
+	}
 	for i, re := range releasePins {
-		m := re.FindStringSubmatch(samples[i])
-		if m == nil || m[1] != "v0.1.0" {
-			t.Errorf("pattern %s does not find v0.1.0 in %q", re, samples[i])
+		if m := re.FindStringSubmatch(stale[i]); m == nil || concreteRelease.FindString(m[1]) != "v0.1.0" {
+			t.Errorf("pattern %s does not find v0.1.0 in %q", re, stale[i])
+		}
+		if m := re.FindStringSubmatch(current[i]); m == nil || concreteRelease.MatchString(m[1]) {
+			t.Errorf("pattern %s does not take %q for a latest-release pin", re, current[i])
 		}
 	}
 	// What a page may say about an older release is not a pin.

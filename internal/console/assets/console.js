@@ -45,6 +45,10 @@ function agentPlatformRoutes() {
   // A page Google's console has and CloudBurrow does not serve.
   const absent = (path, title, group, api, about, docs, instead) =>
     page(path, title, group, { service: null, screen: "not-served", notServed: true, api, about, docs, instead });
+  // The pages that run locally keep their place in the product menu while
+  // their local backend is off (listedWhenOff), as Google's menu always has
+  // them: each draws its off state, saying how to start it, and the
+  // overview marks it "off".
   return [
     page(AP_PATHS.overview, "Overview", null, { service: null, screen: "ap-overview" }),
     page(AP_PATHS.modelGarden, "Model Garden", null, { service: null, screen: "model-garden" }),
@@ -62,20 +66,20 @@ function agentPlatformRoutes() {
     absent(`${AP}/rag`, "RAG Engine", "Agent Builder", "projects.locations.ragCorpora",
       "Corpora of your documents for retrieval-augmented generation", AP_DOCS + "build"),
     // Agent Studio.
-    page(AP_PATHS.studio, "Studio", "Agent Studio", { service: "playground", screen: "playground" }),
-    page(AP_PATHS.embeddings, "Embeddings", "Agent Studio", { service: "ai-embed", screen: "embeddings" }),
+    page(AP_PATHS.studio, "Studio", "Agent Studio", { service: "playground", screen: "playground", listedWhenOff: true }),
+    page(AP_PATHS.embeddings, "Embeddings", "Agent Studio", { service: "ai-embed", screen: "embeddings", listedWhenOff: true }),
     absent(`${AP}/studio/media`, "Media Studio", "Agent Studio", "Imagen, Veo and Lyria generation",
       "Generate images, video, speech and music (Agent Media Studio)", AP_DOCS + "agent-studio"),
     absent(`${AP}/studio/prompt-gallery`, "Prompt gallery", "Agent Studio", null,
       "Sample prompts to open in Studio", AP_DOCS + "agent-studio",
       "Studio sends your own prompts to the local model."),
     // Models.
-    page(AP_PATHS.localModels, "Local models", "Models", { service: "ai-local", screen: "local-models" }),
+    page(AP_PATHS.localModels, "Local models", "Models", { service: "ai-local", screen: "local-models", listedWhenOff: true }),
     absent(`${AP}/models`, "Model Registry", "Models", "projects.locations.models",
       "Models uploaded or trained in a project, with their versions", AP_DOCS + "models"),
     absent(`${AP}/tuning`, "Tuning", "Models", "projects.locations.tuningJobs",
       "Supervised and preference tuning jobs for Gemini and open models", AP_DOCS + "models"),
-    page(AP_PATHS.predict, "Online prediction", "Models", { service: "ai-predict", screen: "predict" }),
+    page(AP_PATHS.predict, "Online prediction", "Models", { service: "ai-predict", screen: "predict", listedWhenOff: true }),
     page(AP_PATHS.endpoints, "Endpoints", "Models", { service: null, screen: "ap-endpoints" }),
     absent(`${AP}/batch-predictions`, "Batch inference", "Models", "projects.locations.batchPredictionJobs",
       "Batch prediction jobs over Cloud Storage or BigQuery input", AP_DOCS + "models"),
@@ -154,6 +158,12 @@ const ROUTES = [
   // Eventarc's Triggers page (#1877), served on the Run port over Pub/Sub.
   { path: "/eventarc/triggers", service: "eventarc", title: "Triggers", kind: "Trigger", section: "Integration services",
     product: "eventarc", productTitle: "Eventarc" },
+  // Artifact Registry's menu (#1855): Repositories, then Settings (the
+  // project's settings and each location's VPC-SC policy and platform logs).
+  // Not under /artifact-registry/, where it would shadow a repository named
+  // "settings".
+  { path: "/artifact-registry-settings", service: "artifact-registry-settings", icon: "artifact-registry", title: "Settings",
+    section: "CI/CD", product: "artifact-registry", productTitle: "Artifact Registry" },
   // Cloud Functions v2, served on the Run port (#1377).
   { path: "/functions", service: "functions", title: "Functions", kind: "Function", logs: true, section: "Serverless computing",
     product: "functions", productTitle: "Cloud Functions" },
@@ -4128,6 +4138,12 @@ async function renderDetail(view, route, resourcePath) {
 function openActionForm(route, segments, action, onDone, title = null) {
   const name = title || segments[segments.length - 1];
   const fields = buildCreateForm({ label: action.label, fields: action.fields });
+  // An action whose form is Google's steps (Action.Steps, #1858): Create
+  // application profile's type first, then Next to its details. The
+  // steps after the first open with Next.
+  const actionSteps = action.steps
+    ? createSteps(fields.nodes, action.steps === "next" ? "Next" : "Continue", { foldRest: true })
+    : { nodes: fields.nodes, revealInvalid() {} };
   const error = el("p", { class: "form-error", role: "alert", hidden: true });
   let submitting = false;
 
@@ -4152,7 +4168,7 @@ function openActionForm(route, segments, action, onDone, title = null) {
   const submit = async (e) => {
     e.preventDefault();
     error.hidden = true;
-    if (submitting || !fields.validate()) return;
+    if (submitting || !fields.validate()) { actionSteps.revealInvalid(); return; }
     const values = fields.values();
     // An action that changes what a resource does — a Pub/Sub Seek changes
     // which messages are redelivered — asks for the resource's name back
@@ -4234,7 +4250,7 @@ function openActionForm(route, segments, action, onDone, title = null) {
   dialog.append(el("form", { class: "modal-body", novalidate: true, onsubmit: submit },
     el("h2", { id: "action-title", text: segments.length ? `${action.label} for ${name}` : action.label }),
     error,
-    ...fields.nodes,
+    ...actionSteps.nodes,
     el("div", { class: "modal-actions" }, cancel, primary)));
   fields.focusFirst();
 }
@@ -5795,6 +5811,9 @@ function buildCreateForm(spec) {
 
     return { field: f, control, node, error, helpId, errorId, isCheck };
   });
+  // A field's dialog (#1859): a button beside it that opens a table, as
+  // Google's Create instance has Compare editions beside the edition.
+  for (const e of entries) if (e.field.dialog) e.node.append(fieldDialogButton(e.field));
 
   // A map field is edited one "key=value" per line and submitted as the JSON
   // object the backend decodes. The lines are the editable form; the JSON is
@@ -6129,6 +6148,27 @@ function formTabs(section, entries) {
 
 // radioEntry is a "radio" field: one radio button per option, the choice
 // kept in a hidden input whose value is submitted (#1843).
+// fieldDialogButton is a field's dialog (Field.Dialog): its button, and the
+// table it opens.
+function fieldDialogButton(f) {
+  const d = f.dialog;
+  const titleId = `dialog-${f.name}-title`;
+  return el("button", { type: "button", class: "link-button is-inline", id: `f-${f.name}-dialog`, text: d.button,
+    onclick: () => {
+      const { dialog, close } = openModal({ labelledBy: titleId });
+      dialog.append(el("div", { class: "modal-body field-dialog" },
+        el("h2", { id: titleId, text: d.title }),
+        d.intro ? el("p", { class: "form-help", text: d.intro }) : null,
+        el("div", { class: "table-wrap" }, el("table", { class: "field-dialog-table" },
+          el("thead", {}, el("tr", {}, ...(d.columns || []).map((c) => el("th", { scope: "col", text: c })))),
+          el("tbody", {}, ...(d.rows || []).map((r) => el("tr", {},
+            ...r.map((v, i) => (i === 0 ? el("th", { scope: "row", text: v }) : el("td", { text: v })))))))),
+        el("div", { class: "modal-actions" },
+          el("button", { type: "button", class: "primary", text: "Close", onclick: () => close() }))));
+      dialog.querySelector(".modal-actions button").focus();
+    } });
+}
+
 function radioEntry(f, id, errorId, helpId) {
   const control = el("input", { type: "hidden", id, name: f.name });
   control.value = f.default || (f.options || [])[0] || "";
@@ -6561,7 +6601,8 @@ function groupEntry(f, id, errorId, helpId) {
     const cells = sub.map((s) => {
       const label = `${s.label} ${n}`;
       // A select subfield is a dropdown of its options (#1845: a Query
-      // builder WHERE clause's operator).
+      // builder WHERE clause's operator; #1855: a cleanup policy's Policy
+      // type and Tag state), the first chosen when nothing else is.
       // A select's options are its Options; one in UnavailableOptions is
       // drawn disabled with its reason (#1858).
       const c = s.type === "select"
@@ -6574,7 +6615,7 @@ function groupEntry(f, id, errorId, helpId) {
         : el("input", { type: s.type === "checkbox" ? "checkbox" : "text", "aria-label": label,
                         autocomplete: "off", spellcheck: "false" });
       if (s.type === "checkbox") c.checked = (value[s.name] ?? s.default) === "true";
-      else c.value = value[s.name] || s.default || "";
+      else c.value = value[s.name] || s.default || (s.type === "select" ? (s.options || [""])[0] : "");
       c.addEventListener("input", sync);
       c.addEventListener("change", sync);
       r.controls.push(c);
@@ -7065,7 +7106,7 @@ function createChecks(target, spec, fields) {
 //   if (!fields.validate()) steps.revealInvalid();
 // The button is Continue, or Next where Google's page says Next, as
 // Create log bucket does (CreateLayoutNext, #1863).
-function createSteps(nodes, continueLabel = "Continue") {
+function createSteps(nodes, continueLabel = "Continue", { foldRest = false } = {}) {
   const sections = nodes.filter((n) => n.classList && n.classList.contains("form-section"));
   if (!sections.length) return { nodes, revealInvalid() {} };
   const lead = [];
@@ -7097,6 +7138,7 @@ function createSteps(nodes, continueLabel = "Continue") {
     s.head.setAttribute("aria-expanded", open ? "true" : "false");
     s.step.classList.toggle("is-folded", !open);
   };
+  if (foldRest) steps.forEach((s, i) => { if (i > 0) setOpen(s, false); });
   steps.forEach((s, i) => {
     s.head.addEventListener("click", () => setOpen(s, s.body.hidden));
     if (i < steps.length - 1) {
@@ -8168,10 +8210,12 @@ function drawProductNav() {
   if (!host) return;
 
   const here = productOfLocation();
-  // Only the pages this instance serves, as the drawer lists only those.
+  // Only the pages this instance serves, as the drawer lists only those,
+  // and the Agent Platform pages that draw their own off state
+  // (listedWhenOff), which Google's menu always lists.
   const served = new Set(SERVICES.map((sv) => sv.id));
   const pages = here
-    ? pagesOf(productKey(here)).filter((r) => (!r.service || served.has(r.service) || r === here) && !r.navHidden &&
+    ? pagesOf(productKey(here)).filter((r) => (!r.service || served.has(r.service) || r.listedWhenOff || r === here) && !r.navHidden &&
         (!r.requires || served.has(r.requires) || r === here))
     : [];
   if (!pages.length) {
@@ -16257,12 +16301,22 @@ function renderBigtableStudio(panel, route, segments, project) {
   const call = (name, body = {}) => send(
     `/api/studio/bigtable-instances?project=${encodeURIComponent(project)}&call=${name}`, "POST", { instance, ...body });
   const key = `cb.bigtable.studio.${project}.${instance}`;
-  let state;
-  try { state = JSON.parse(sessionStorage.getItem(key) || "null"); } catch { state = null; }
-  if (!state || typeof state !== "object") state = { mode: "builder", sql: "", table: "" };
-  const save = () => { try { sessionStorage.setItem(key, JSON.stringify(state)); } catch { /* per-tab only */ } };
+  // Google's Studio has query tabs (#1858): each a builder or an editor of
+  // its own, opened by New tab or by a table's Query in the Explorer, kept
+  // for the browser tab. state is the current tab; store holds them all.
+  let store;
+  try { store = JSON.parse(sessionStorage.getItem(key) || "null"); } catch { store = null; }
+  if (!store || typeof store !== "object") store = {};
+  if (!Array.isArray(store.tabs) || !store.tabs.length) {
+    store = { tabs: [{ title: "Untitled query", mode: store.mode || "builder", sql: store.sql || "", table: store.table || "" }], current: 0 };
+  }
+  store.current = Math.min(Math.max(0, store.current | 0), store.tabs.length - 1);
+  let state = store.tabs[store.current];
+  const save = () => { try { sessionStorage.setItem(key, JSON.stringify(store)); } catch { /* per-tab only */ } };
   let catalog = { tables: [] };
   let last = null;
+  const lastOf = new Map();
+  const queryTabs = el("div", { class: "tab-strip spanner-editor-tabs", id: "bigtable-query-tabs", role: "tablist", "aria-label": "Query tabs" });
 
   const explorer = el("nav", { class: "spanner-explorer bigtable-explorer", id: "bigtable-explorer", "aria-label": "Explorer" },
     el("h3", { text: "Explorer" }), loadingState(3, { what: "explorer" }));
@@ -16349,17 +16403,23 @@ function renderBigtableStudio(panel, route, segments, project) {
         }, ...row.map((v) => el("td", { class: "mono", text: v }))))))));
   };
   const execute = async (button, name, payload) => {
+    // The query's tab: its results stay with it if another is chosen.
+    const tab = state;
     setBusy(button, true);
     details.hidden = true;
     setChildren(results, el("p", { class: "unavailable" }, spinner("Running"), " Running…"));
+    let res;
     try {
-      last = await call(name, payload);
-      announce(`Query complete: ${(last.rows || []).length} rows`);
+      res = await call(name, payload);
+      announce(`Query complete: ${(res.rows || []).length} rows`);
     } catch (err) {
-      last = { error: err.message };
+      res = { error: err.message };
     } finally {
       setBusy(button, false);
     }
+    lastOf.set(tab, res);
+    if (tab !== state) return;
+    last = res;
     drawResults();
   };
   runBuilder.addEventListener("click", () => execute(runBuilder, "read", {
@@ -16390,8 +16450,61 @@ function renderBigtableStudio(panel, route, segments, project) {
         el("div", { class: "action-bar spanner-editor-actions" }, runBuilder)));
     }
   };
-  const openBuilder = (table) => { state.mode = "builder"; state.table = table; tableSelect.value = table; save(); drawFamilies(); drawMode(); };
-  const openEditor = (sql) => { state.mode = "editor"; state.sql = sql; editor.value = sql; save(); drawMode(); editor.focus(); };
+  // A tab's builder controls are kept with it, and put back when it is
+  // chosen again.
+  const keepBuilder = () => {
+    state.builder = { keyMode: keyMode.value, prefix: prefix.value, start: startKey.value, end: endKey.value, keys: keys.value,
+      family: family.value, qualifier: qualifier.value, latest: latest.checked, limit: limit.value };
+  };
+  const loadTab = () => {
+    const b = state.builder || {};
+    if ((catalog.tables || []).some((t) => t.name === state.table)) tableSelect.value = state.table;
+    drawFamilies();
+    keyMode.value = b.keyMode || "all"; prefix.value = b.prefix || ""; startKey.value = b.start || ""; endKey.value = b.end || "";
+    keys.value = b.keys || ""; family.value = b.family || ""; qualifier.value = b.qualifier || "";
+    latest.checked = !!b.latest; limit.value = b.limit || "100";
+    drawKeyInputs();
+    editor.value = state.sql || "";
+    last = lastOf.get(state) || null;
+    details.hidden = true;
+    drawMode();
+    drawResults();
+  };
+  const selectTab = (i) => {
+    keepBuilder();
+    lastOf.set(state, last);
+    store.current = i;
+    state = store.tabs[i];
+    save();
+    drawQueryTabs();
+    loadTab();
+  };
+  const openTab = (tab) => {
+    keepBuilder();
+    lastOf.set(state, last);
+    store.tabs.push(tab);
+    selectTab(store.tabs.length - 1);
+  };
+  const drawQueryTabs = () => {
+    setChildren(queryTabs, ...store.tabs.map((t, i) => el("span", { class: "spanner-editor-tab" },
+      el("button", { class: "tab" + (i === store.current ? " is-selected" : ""), role: "tab", type: "button",
+        "aria-selected": i === store.current ? "true" : "false", text: t.title, onclick: () => selectTab(i) }),
+      store.tabs.length > 1 ? el("button", { class: "icon-button", type: "button", "aria-label": `Close ${t.title}`, text: "×",
+        onclick: () => {
+          lastOf.delete(t);
+          store.tabs.splice(i, 1);
+          const next = Math.min(store.current >= i && store.current > 0 ? store.current - 1 : store.current, store.tabs.length - 1);
+          store.current = next;
+          state = store.tabs[next];
+          save();
+          drawQueryTabs();
+          loadTab();
+        } }) : null)),
+    el("button", { class: "secondary", id: "bigtable-new-tab", type: "button", text: "New tab",
+      onclick: () => openTab({ title: "Untitled query", mode: "builder", sql: "", table: tableSelect.value }) }));
+  };
+  const openBuilder = (table) => openTab({ title: table, mode: "builder", sql: "", table });
+  const openEditor = (sql) => { openTab({ title: "Untitled query", mode: "editor", sql, table: state.table }); editor.focus(); };
 
   const group = (title, items, row) => el("details", { class: "spanner-explorer-group", open: true },
     el("summary", { text: `${title} (${items.length})` }),
@@ -16402,8 +16515,7 @@ function renderBigtableStudio(panel, route, segments, project) {
       catalog = await call("explorer");
       const tables = catalog.tables || [];
       setChildren(tableSelect, ...tables.map((t) => el("option", { value: t.name, text: t.name })));
-      if (tables.some((t) => t.name === state.table)) tableSelect.value = state.table;
-      drawFamilies();
+      loadTab();
       const tableRow = (t) => el("li", { class: "spanner-explorer-table" },
         el("details", {},
           el("summary", {}, el("span", { class: "mono", text: t.name }),
@@ -16428,12 +16540,11 @@ function renderBigtableStudio(panel, route, segments, project) {
     }
   };
 
-  drawKeyInputs();
-  drawMode();
-  drawResults();
+  drawQueryTabs();
+  loadTab();
   setChildren(panel, el("div", { class: "spanner-studio bigtable-studio", id: "bigtable-studio" },
     explorer,
-    el("div", { class: "spanner-workspace" }, modes, body, results, details)));
+    el("div", { class: "spanner-workspace" }, queryTabs, modes, body, results, details)));
   loadExplorer();
 }
 
@@ -16489,9 +16600,20 @@ function renderSpannerStudio(panel, route, segments, project) {
     }
     if (r.error) return setChildren(results, el("p", { class: "form-error", role: "alert", text: r.error }));
     if (resultTab === "explanation") {
-      if (!(r.plan || []).length) return setChildren(results, el("p", { class: "unavailable", id: "spanner-plan-note", text: r.planNote || "No plan." }));
-      return setChildren(results, el("ol", { class: "spanner-plan" }, ...r.plan.map((n) =>
-        el("li", { text: `${n.index}: ${n.name} (${n.kind})` + ((n.children || []).length ? ` → ${n.children.join(", ")}` : "") }))));
+      // Google's Explanation tab: the Query summary (PROFILE mode's
+      // statistics, after Run) above the plan, which the emulator lacks.
+      const st = r.stats;
+      const summary = st ? el("section", { class: "spanner-query-summary", id: "spanner-query-summary", "aria-label": "Query summary" },
+        el("h3", { text: "Query summary" }),
+        el("dl", { class: "resource-summary" },
+          ...[["Rows returned", st.rowsReturned], ["Elapsed time", st.elapsedTime],
+            ["CPU time", st.cpuTime || "Not reported by the Spanner emulator"], ["Rows scanned", st.rowsScanned || "Not reported by the Spanner emulator"]]
+            .flatMap(([k, v]) => [el("dt", { text: k }), el("dd", { class: "mono", id: `spanner-stat-${k.toLowerCase().replaceAll(" ", "-")}`, text: v || "—" })]))) : null;
+      const plan = (r.plan || []).length
+        ? el("ol", { class: "spanner-plan" }, ...r.plan.map((n) =>
+          el("li", { text: `${n.index}: ${n.name} (${n.kind})` + ((n.children || []).length ? ` → ${n.children.join(", ")}` : "") })))
+        : el("p", { class: "unavailable", id: "spanner-plan-note", text: r.planNote || "No plan." });
+      return setChildren(results, summary, plan);
     }
     if (r.kind !== "query") {
       return setChildren(results, el("p", { class: "spanner-message", id: "spanner-message", text: `${r.message || "Done."} ${r.elapsed ? `(${r.elapsed})` : ""}` }));
@@ -16540,6 +16662,8 @@ function renderSpannerStudio(panel, route, segments, project) {
         return;
       }
       last.results = res;
+      // Run is PROFILE mode: its statistics are the Explanation tab's.
+      if (res.kind === "query") last.explanation = res;
       if (res.kind !== "query") loadExplorer();
       announce(res.kind === "query" ? `Query complete: ${(res.rows || []).length} rows` : (res.message || "Done"));
     } catch (err) {

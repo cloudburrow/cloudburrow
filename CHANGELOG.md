@@ -67,6 +67,11 @@ tagging `vX.Y.Z` by hand, move the entries under **Unreleased** into a new
 
 ### Fixed
 
+- **Release pins follow the latest release** (#1901): scheduled releases are tagged every one to
+  two days without a commit to `main`, so the README, SECURITY.md, docs/install.md, docs/ci.md,
+  the install script's usage and action.yml no longer name a numbered release. They link
+  `releases/latest`, use the action's `version: latest`, or show the `vX.Y.Z` placeholder, and
+  `TestDocsPinTheLatestRelease` fails on any pin that names a number.
 - BigQuery query parameters keep their declared type (#1814, #1816): `SELECT ? AS a` with a
   STRING no longer fails, and a NULL, an `ARRAY` or a `STRUCT` parameter, and a BYTES, NUMERIC,
   DATE, DATETIME or other typed scalar alone in the select list, has its declared type.

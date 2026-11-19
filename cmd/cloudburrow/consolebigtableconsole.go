@@ -37,10 +37,12 @@ const bigtableTablesSegment = "tables"
 
 // The reasons a Google choice is drawn disabled.
 const (
-	bigtableNoKMS       = "Not available locally: the Bigtable front encrypts nothing with a Cloud KMS key; every instance uses Google-managed encryption."
-	bigtableNoInMemory  = "Not available locally: the in-memory tier is turned on per cluster here, with Edit memory layer on the Clusters page; the emulator serves every read from memory either way."
-	bigtableNoAutoBkp   = "Not available locally: the Bigtable front takes no automated backups. Create backup on the Backups page takes one."
-	bigtableNoAggregate = "Not available locally: the emulator computes only Sum aggregates."
+	// Measured 2026-11-19 (bttest, cloud.google.com/go/bigtable v1.58.0):
+	// CreateTable keeps no row_key_schema and GetTable returns none.
+	bigtableNoRowKeySchema = "Not available locally: the Bigtable emulator keeps no row key schema (CreateTable drops it and GetTable returns none), so SQL could not read a row key by its fields."
+	bigtableNoKMS          = "Not available locally: the Bigtable front encrypts nothing with a Cloud KMS key; every instance uses Google-managed encryption."
+	bigtableNoInMemory     = "Not available locally: the in-memory tier is turned on per cluster here, with Edit memory layer on the Clusters page; the emulator serves every read from memory either way."
+	bigtableNoAutoBkp      = "Not available locally: the Bigtable front takes no automated backups. Create backup on the Backups page takes one."
 )
 
 func bigtableEdition(e bigtable.Edition) string {
@@ -206,6 +208,16 @@ func (bigtableInstancesProvider) CreateForm() (string, []console.Field) {
 	fields = append(fields, nodeFields(nil, cluster)...)
 	labels := bigtableLabelsField(nil)
 	labels.Section = more
+	// Google's Show advanced options > Add cluster: more clusters made with
+	// the instance, each in its own zone, replicated (#1858).
+	fields = append(fields, console.Field{Name: "moreClusters", Label: "Additional clusters", Type: console.GroupFieldType,
+		Section: more, AddLabel: "Add cluster",
+		Help: "Each cluster is in a zone of its own, and replicates the instance's tables. The emulator serves every cluster from this machine.",
+		Group: []console.Field{
+			{Name: "cluster", Label: "Cluster ID", Type: "text", Required: true, Pattern: bigtableClusterIDPattern},
+			{Name: "zone", Label: "Zone", Type: "text", Required: true, Pattern: `^[a-z][\-a-z0-9]*$`},
+			{Name: "nodes", Label: "Number of nodes", Type: "text", Pattern: `^[0-9]*$`},
+		}})
 	return "Create instance", append(fields,
 		console.Field{Name: "encryption", Label: "Encryption", Type: "radio", Section: more, Default: "GOOGLE",
 			Options:            []string{"GOOGLE", "CMEK"},
@@ -265,6 +277,33 @@ func (p bigtableInstancesProvider) Create(ctx context.Context, project string, v
 		return "", err
 	}
 	conf.Clusters = []bigtable.ClusterConfig{*cc}
+	more, err := console.ParseGroup(values["moreClusters"])
+	if err != nil {
+		return "", fmt.Errorf("additional clusters: %w", err)
+	}
+	zones := map[string]string{cc.Zone: cc.ClusterID}
+	for _, row := range more {
+		extra := &bigtable.ClusterConfig{InstanceID: id, ClusterID: strings.TrimSpace(row["cluster"]),
+			Zone: strings.TrimSpace(row["zone"]), StorageType: cc.StorageType, NodeScalingFactor: cc.NodeScalingFactor}
+		if extra.ClusterID == "" || extra.Zone == "" {
+			return "", errors.New("an additional cluster needs a cluster ID and a zone")
+		}
+		if other, dup := zones[extra.Zone]; dup {
+			// Google: "Each cluster must be in a different zone".
+			return "", fmt.Errorf("cluster %s is in zone %s, as cluster %s is: each cluster of an instance is in its own zone", extra.ClusterID, extra.Zone, other)
+		}
+		zones[extra.Zone] = extra.ClusterID
+		if conf.InstanceType != bigtable.DEVELOPMENT {
+			n := 1
+			if v := strings.TrimSpace(row["nodes"]); v != "" {
+				if n, err = strconv.Atoi(v); err != nil || n < 1 {
+					return "", fmt.Errorf("cluster %s: nodes %q: a whole number, at least 1", extra.ClusterID, v)
+				}
+			}
+			extra.NumNodes = int32(n)
+		}
+		conf.Clusters = append(conf.Clusters, *extra)
+	}
 	if err := c.CreateInstanceWithClusters(ctx, conf); err != nil {
 		return "", fmt.Errorf("creating the instance: %w", err)
 	}
@@ -374,6 +413,31 @@ func profileFields(ap *btapb.AppProfile, clusters []*bigtable.ClusterInfo) []con
 		{Name: "priority", Label: "Select a routing priority", Type: "radio", Default: priority, Options: []string{"HIGH", "MEDIUM", "LOW"},
 			OptionLabels: map[string]string{"HIGH": "High", "MEDIUM": "Medium", "LOW": "Low"}, ShowWhen: "profileType=STANDARD"},
 	}
+}
+
+// profileCreateFields is Create application profile as Google's steps:
+// Choose a profile type, then (Next) the profile's ID, description and
+// routing.
+func profileCreateFields(clusters []*bigtable.ClusterInfo) []console.Field {
+	const typeStep, details = "Choose an application profile type", "Configure the application profile"
+	fields := profileFields(nil, clusters)
+	out := make([]console.Field, 0, len(fields)+1)
+	for _, f := range fields {
+		if f.Name == "profileType" {
+			f.Section = typeStep
+			out = append(out, f)
+		}
+	}
+	id := profileIDField()
+	id.Section = details
+	out = append(out, id)
+	for _, f := range fields {
+		if f.Name != "profileType" {
+			f.Section = details
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 // formProfile is the app profile the form describes, and the update mask
@@ -649,8 +713,7 @@ func bigtableFamilyGroup(def string) console.Field {
 			"older cells; with both, a cell goes when either is exceeded, or only when both are with the last box checked. Neither: cells never expire.",
 		Group: []console.Field{
 			{Name: "family", Label: "Column family ID", Type: "text", Required: true, Pattern: bigtableFamilyPattern},
-			{Name: "type", Label: "Type", Type: "select", Default: "Standard", Options: []string{"Standard", "Sum", "Min", "Max", "HyperLogLog"},
-				UnavailableOptions: map[string]string{"Min": bigtableNoAggregate, "Max": bigtableNoAggregate, "HyperLogLog": bigtableNoAggregate}},
+			{Name: "type", Label: "Type", Type: "select", Default: "Standard", Options: []string{"Standard", "Sum", "Min", "Max", "HyperLogLog"}},
 			{Name: "maxVersions", Label: "Maximum versions", Type: "text", Pattern: `^[1-9][0-9]{0,8}$`},
 			{Name: "maxAge", Label: "Maximum age", Type: "text", Pattern: `^[1-9][0-9]{0,8}[dhm]$`},
 			{Name: "both", Label: "Only when both are exceeded", Type: "checkbox"},
@@ -663,6 +726,7 @@ func bigtableCreateTableFields() []console.Field {
 		{Name: "table", Label: "Table ID", Type: "text", Required: true, Pattern: `^[A-Za-z0-9][A-Za-z0-9_\-.]{0,49}$`,
 			Help: "1 to 50 letters, digits, hyphens, underscores and periods. It is permanent."},
 		bigtableFamilyGroup(`[{"family":"cf1","type":"Standard"}]`),
+		{Name: "rowKeySchema", Label: "Define row key schema", Type: "checkbox", Unavailable: bigtableNoRowKeySchema},
 		{Name: "changeStream", Label: "Enable change stream", Type: "checkbox",
 			Help: "Records every change to the table, read with ReadChangeStream."},
 		{Name: "retention", Label: "Retention period (days)", Type: "text", Default: "1", Pattern: `^[1-7]$`, ShowWhen: "changeStream",
@@ -687,12 +751,14 @@ func familyConf(row map[string]string) (string, bigtable.Family, error) {
 	f := bigtable.Family{GCPolicy: gc}
 	switch row["type"] {
 	case "", "Standard":
-	case "Sum":
-		f.ValueType = bigtable.AggregateType{Input: bigtable.Int64Type{Encoding: bigtable.BigEndianBytesEncoding{}}, Aggregator: bigtable.SumAggregator{}}
-	case "Min", "Max", "HyperLogLog":
-		return "", bigtable.Family{}, fmt.Errorf("column family %s: %s", name, bigtableNoAggregate)
+	case "Sum", "Min", "Max", "HyperLogLog":
+		// Every aggregate of Int64 inputs; the Bigtable front computes Min,
+		// Max and HyperLogLog++, which the emulator does not (#1893).
+		agg := map[string]bigtable.Aggregator{"Sum": bigtable.SumAggregator{}, "Min": bigtable.MinAggregator{},
+			"Max": bigtable.MaxAggregator{}, "HyperLogLog": bigtable.HllppUniqueCountAggregator{}}[row["type"]]
+		f.ValueType = bigtable.AggregateType{Input: bigtable.Int64Type{Encoding: bigtable.BigEndianBytesEncoding{}}, Aggregator: agg}
 	default:
-		return "", bigtable.Family{}, fmt.Errorf("column family %s: type %q is not Standard or Sum", name, row["type"])
+		return "", bigtable.Family{}, fmt.Errorf("column family %s: type %q is not Standard, Sum, Min, Max or HyperLogLog", name, row["type"])
 	}
 	return name, f, nil
 }
@@ -703,6 +769,9 @@ func createBigtableTable(ctx context.Context, admin *bigtable.AdminClient, value
 	table := strings.TrimSpace(values["table"])
 	if table == "" {
 		return "", errors.New("a table ID is required")
+	}
+	if values["rowKeySchema"] == "true" {
+		return "", errors.New(bigtableNoRowKeySchema)
 	}
 	if values["automatedBackup"] == "true" {
 		return "", errors.New(bigtableNoAutoBkp)
@@ -756,6 +825,26 @@ func tableRowActions(info *bigtable.TableInfo, table string) []console.Action {
 	return []console.Action{{ID: "edittable", Label: "Edit", Fields: editTableFields(info)}, del}
 }
 
+// bigtableFamilyType is a family's type in Create table's words: Standard,
+// or the aggregate it is.
+func bigtableFamilyType(t bigtable.Type) string {
+	at, ok := t.(bigtable.AggregateType)
+	if !ok {
+		return "Standard"
+	}
+	switch at.Aggregator.(type) {
+	case bigtable.SumAggregator:
+		return "Sum"
+	case bigtable.MinAggregator:
+		return "Min"
+	case bigtable.MaxAggregator:
+		return "Max"
+	case bigtable.HllppUniqueCountAggregator:
+		return "HyperLogLog"
+	}
+	return "Standard"
+}
+
 // editTableFields are the Edit table pane: its column families (a family
 // removed is deleted, one added is created, one changed has its policy
 // updated), its change stream and deletion protection.
@@ -766,10 +855,7 @@ func editTableFields(info *bigtable.TableInfo) []console.Field {
 	sort.Slice(names, func(i, j int) bool { return names[i].Name < names[j].Name })
 	for _, f := range names {
 		v, a, both, _ := formatGCPolicy(f.FullGCPolicy)
-		typ := "Standard"
-		if f.ValueType != nil {
-			typ = "Sum"
-		}
+		typ := bigtableFamilyType(f.ValueType)
 		rows = append(rows, fmt.Sprintf(`{"family":%q,"type":%q,"maxVersions":%q,"maxAge":%q,"both":%q}`, f.Name, typ, v, a, strconv.FormatBool(both)))
 	}
 	var retention time.Duration
@@ -922,12 +1008,12 @@ func (p bigtableInstancesProvider) DetailActions(ctx context.Context, project st
 	}
 	if len(path) == 1 {
 		add := append(clusterFields(""), nodeFields(nil, "")...)
-		create := append([]console.Field{profileIDField()}, profileFields(nil, clusters)...)
+		create := profileCreateFields(clusters)
 		return append([]console.Action{
 			{ID: "editinstance", Label: "Edit instance", Fields: instanceEditFields(in)},
 			{ID: "createtable", Label: "Create table", Fields: bigtableCreateTableFields()},
 			{ID: "addcluster", Label: "Add cluster", Fields: add},
-			{ID: "createprofile", Label: "Create application profile", Fields: create},
+			{ID: "createprofile", Label: "Create application profile", Fields: create, Steps: "next"},
 			{ID: "createbackup", Label: "Create backup", Fields: createBackupFields(p.instanceTables(ctx, project, path[0]), clusters)},
 		}, append(instanceExtraActions(),
 			console.Action{ID: "deleteinstance", Label: "Delete instance", Destructive: true, Leaves: true,

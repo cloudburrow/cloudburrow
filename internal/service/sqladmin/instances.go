@@ -387,7 +387,8 @@ func legacyFailoverErr() error {
 
 // instanceBody is the part of DatabaseInstance a write reads.
 type instanceBody struct {
-	raw map[string]any // settings, as sent
+	raw   map[string]any // settings, as sent
+	whole map[string]any // the whole body, as sent (custom constraints, #1895)
 
 	Name                 string           `json:"name"`
 	DatabaseVersion      string           `json:"databaseVersion"`
@@ -542,6 +543,7 @@ func decodeInstance(r *http.Request) (instanceBody, error) {
 	}
 	_ = json.Unmarshal(body, &raw)
 	b.raw = raw.Settings
+	_ = json.Unmarshal(body, &b.whole)
 	var top map[string]json.RawMessage
 	if json.Unmarshal(body, &top) == nil {
 		if v, ok := top["replicationCluster"]; ok && strings.TrimSpace(string(v)) == "null" {
@@ -644,6 +646,10 @@ func (s *Server) insertInstance(r *http.Request, base, project string) (any, err
 	// refused when no policy is set.
 	if err := orgpolicy.CheckLocations(r.Context(), "projects/"+project, "projects/"+project, spec.region()); err != nil {
 		return nil, Errorf(http.StatusPreconditionFailed, "%s", err.Error())
+	}
+	// Custom constraints on sqladmin.googleapis.com/Instance (#1895).
+	if err := checkInstanceCustom(r.Context(), project, insertResource(b, project, spec.region()), orgpolicy.MethodCreate); err != nil {
+		return nil, err
 	}
 	if replica && spec.Regional() {
 		return nil, unimplemented("availabilityType REGIONAL on a read replica",
@@ -813,6 +819,15 @@ func (s *Server) patchInstance(r *http.Request, base, project, name string, repl
 	}
 	if err := checkReplicationSetting(b.raw, cur); err != nil {
 		return nil, err
+	}
+	// Custom constraints on sqladmin.googleapis.com/Instance (#1895), on
+	// the instance as the patch or update would leave it.
+	if orgpolicy.SourceSet() {
+		if in, err := s.createdJSON(r.Context(), base, c); err == nil {
+			if err := checkInstanceCustom(r.Context(), project, mergeInstance(in, b.whole, replace), orgpolicy.MethodUpdate); err != nil {
+				return nil, err
+			}
+		}
 	}
 	s.emu.Lock()
 	if c.state != "RUNNABLE" && c.state != "FAILED" {

@@ -12,7 +12,7 @@ branding:
 inputs:
   version:
     description: >-
-      Release tag to install (such as v0.3.0), `latest`, or `source` to build
+      Release tag to install (vX.Y.Z), `latest`, or `source` to build
       the repository the action was checked out from, which needs Go. Any
       release from v0.1.0 on works: the action passes only the flags the
       installed CLI has (docs/ci.md lists them).
