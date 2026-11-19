@@ -86,7 +86,7 @@ func (p cloudSQLInstancesProvider) List(ctx context.Context, project string) (co
 func (p cloudSQLInstancesProvider) CreateForm() (string, []console.Field) {
 	def := ""
 	for _, v := range p.versions {
-		if def == "" || v == "POSTGRES_17" {
+		if (def == "" && v != "MYSQL_5_7" && v != "MYSQL_5_6") || v == "POSTGRES_17" {
 			def = v
 		}
 	}
@@ -105,6 +105,7 @@ func (p cloudSQLInstancesProvider) CreateForm() (string, []console.Field) {
 			Options: []string{"ZONAL", "REGIONAL"}, Default: "ZONAL", Help: availabilityHelp},
 		{Name: "deletionProtection", Label: "Deletion protection", Type: "checkbox"},
 		serverCAModeField(internalCAMode),
+		serverCAPoolFields(nil)[0], serverCAPoolFields(nil)[1],
 		{Name: "kmsKeyName", Label: "Customer-managed encryption key (Cloud KMS)", Type: "text",
 			Help: "projects/P/locations/REGION/keyRings/R/cryptoKeys/K, a key of this instance's Cloud KMS in the instance's region (needs kms in --services). " +
 				"The instance is SUSPENDED while the key's version is disabled or destroyed. The key cannot be changed later, and the server's data volume is not encrypted with it."},
@@ -191,7 +192,7 @@ func (p cloudSQLInstancesProvider) Create(ctx context.Context, project string, v
 	in := &sqladminapi.DatabaseInstance{
 		Name: name, DatabaseVersion: v["databaseVersion"], RootPassword: v["rootPassword"], Region: regionOr(v["region"]), Settings: st,
 	}
-	withServerCAMode(st, nil, v["serverCaMode"])
+	withServerCAMode(st, nil, v)
 	if k := strings.TrimSpace(v["kmsKeyName"]); k != "" {
 		in.DiskEncryptionConfiguration = &sqladminapi.DiskEncryptionConfiguration{KmsKeyName: k}
 	}
@@ -314,7 +315,8 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 		{Label: "DR replica", Value: drReplicaOf(in)}, {Label: "Disaster recovery role", Value: drRole(in)},
 		{Label: "Encryption key (CMEK)", Value: cmekKey(in)}, {Label: "Encryption key version", Value: cmekVersion(in)},
 		{Label: "Suspension reason", Value: strings.Join(in.SuspensionReason, ", ")},
-		{Label: "Server CA mode", Value: serverCAMode(in)}, {Label: "DNS name", Value: in.DnsName},
+		{Label: "Server CA mode", Value: serverCAMode(in)}, {Label: "Server CA pool", Value: serverCAPool(in)},
+		{Label: "DNS name", Value: in.DnsName},
 		{Label: "Blue-green deployment", Value: blueGreenRole(in)},
 		{Label: "Blue-green deployment state", Value: blueGreenState(ctx, svc, project, in)},
 	} {
@@ -372,7 +374,7 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 		d.Sections = append(secs, d.Sections...)
 		dbUserActs = databaseUserActions(in, dbNames, userRefs)
 	}
-	d.Actions = append(append(append(p.backupActions(ids), replicaActions(in)...), transferActions()...), certActions(fps, serverCAMode(in) == casCAMode)...)
+	d.Actions = append(append(append(p.backupActions(ids), replicaActions(in)...), transferActions()...), certActions(fps, casSigned(in))...)
 	d.Actions = append(d.Actions, serverCertActions(in, otherServerCerts)...)
 	d.Actions = append(d.Actions, upgradeActions(in)...)
 	d.Actions = append(d.Actions, failoverActions(in)...)
@@ -383,6 +385,8 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 	d.Actions = append(d.Actions, demoteActions(in)...)
 	d.Actions = append(d.Actions, dataAPIActions(ctx, svc, project, in)...)
 	d.Actions = append(d.Actions, storageActions(in)...)
+	d.Actions = append(d.Actions, maintenanceActions(in)...)
+	d.Summary = append(d.Summary, maintenanceSummary(in)...)
 	if pitr == "On" && strings.HasPrefix(in.DatabaseVersion, "MYSQL_") {
 		d.Actions = append(d.Actions, console.Action{ID: "binlog-clone", Label: "Clone to binary log position", Fields: []console.Field{
 			{Name: "destination", Label: "New instance ID", Type: "text", Required: true, Pattern: "^[a-z][a-z0-9\\-]{0,53}[a-z0-9]$",
@@ -407,6 +411,7 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 				Help: "name=value pairs, separated by commas, passed to the server, which restarts with them."},
 			{Name: "deletionProtection", Label: "Deletion protection", Type: "checkbox", Default: strconv.FormatBool(st.DeletionProtectionEnabled)},
 			serverCAModeField(serverCAMode(in)),
+			serverCAPoolFields(in)[0], serverCAPoolFields(in)[1],
 			{Name: "availabilityType", Label: "Zonal availability", Type: "select", Required: true,
 				Options: []string{"ZONAL", "REGIONAL"}, Default: availabilityOr(st.AvailabilityType),
 				Help: availabilityHelp + " Changing it adds or removes the standby."},
@@ -496,7 +501,7 @@ func (p cloudSQLInstancesProvider) Edit(ctx context.Context, project string, pat
 		return sqlAPIError(err)
 	}
 	pitrConfig(st.BackupConfiguration, in.DatabaseVersion, v["pitr"] == "true")
-	withServerCAMode(st, in, v["serverCaMode"])
+	withServerCAMode(st, in, v)
 	if err := retentionConfig(st.BackupConfiguration, v["retainedBackups"], v["logRetentionDays"]); err != nil {
 		return err
 	}
@@ -1193,6 +1198,9 @@ func (p cloudSQLInstancesProvider) actAt(ctx context.Context, project string, pa
 			return err
 		}
 		if ok, err := storageAct(ctx, svc, project, name, action, v); ok {
+			return err
+		}
+		if ok, err := p.maintenanceAct(ctx, svc, project, name, action, v); ok {
 			return err
 		}
 		return fmt.Errorf("unknown action %q", action)

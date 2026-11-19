@@ -614,7 +614,7 @@ func TestCopyJobs(t *testing.T) {
 		{"a bad operationType", []string{"ds.s"}, "ds.new", `,"operationType":"MOVE"`, 400},
 		{"a key not in the form", []string{"ds.s"}, "ds.new", `,"destinationEncryptionConfiguration":{"kmsKeyName":"k"}`, 400},
 		{"a key version", []string{"ds.s"}, "ds.new", `,"destinationEncryptionConfiguration":{"kmsKeyName":"` + testKey + `/cryptoKeyVersions/1"}`, 400},
-		{"a key into a partition", []string{"ds.s"}, "ds.new$20250101", `,"destinationEncryptionConfiguration":{"kmsKeyName":"` + testKey + `"}`, 501},
+		{"a key into a partition of no table", []string{"ds.s"}, "ds.new$20250101", `,"destinationEncryptionConfiguration":{"kmsKeyName":"` + testKey + `"}`, 404}, // #1822, as without a key
 		{"an expiration of a table that exists", []string{"ds.s"}, "ds.full", `,"destinationExpirationTime":"2030-01-01T00:00:00Z","writeDisposition":"WRITE_APPEND"`, 501},
 		{"a bad expiration", []string{"ds.s"}, "ds.new", `,"destinationExpirationTime":"soon"`, 400},
 		{"schemas that differ", []string{"ds.s", "ds.other"}, "ds.new", "", 200}, // a failed job, #1002

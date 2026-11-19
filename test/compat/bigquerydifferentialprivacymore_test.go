@@ -26,8 +26,9 @@ import (
 // Noisy results cannot be compared with Google's, so with epsilon 1e20 (no
 // noise) the rows are exact, and with epsilon 1 the counts are checked to
 // vary and to stay within the Laplace noise's spread around the true value.
-// COUNT(DISTINCT …) and max_rows_contributed, which BigQuery's reference
-// does not document, stay 501.
+// COUNT(DISTINCT …) and max_rows_contributed, which neither BigQuery's
+// reference nor GoogleSQL's documents, and report_format, which only
+// GoogleSQL's does (re-read 2026-11-18, #1589), stay 501.
 //
 // covers: bigquery.jobs.query, bigquery.jobs.insert, bigquery.jobs.getQueryResults
 func TestBigQueryDifferentialPrivacyMore(t *testing.T) {
@@ -188,6 +189,9 @@ func TestBigQueryDifferentialPrivacyMore(t *testing.T) {
 		"COUNT(DISTINCT …)": "SELECT WITH DIFFERENTIAL_PRIVACY " + exact + "COUNT(DISTINCT item) FROM `" + d + ".professors`",
 		"max_rows_contributed": "SELECT WITH DIFFERENTIAL_PRIVACY OPTIONS(epsilon=1, delta=.01, max_rows_contributed=1, " +
 			"privacy_unit_column=id) COUNT(*) FROM `" + d + ".professors`",
+		// GoogleSQL documents report_format (2026-10-20); BigQuery's
+		// reference does not (#1589).
+		"report_format": "SELECT WITH DIFFERENTIAL_PRIVACY " + exact + "AVG(quantity, report_format => 'JSON') AS a FROM `" + d + ".professors`",
 	} {
 		_, err := dpQueryRows(t, c, h, sql, false)
 		wantReason(t, what, err, http.StatusNotImplemented, "notImplemented")

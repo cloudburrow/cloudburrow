@@ -198,6 +198,28 @@ func shardEndpoint(h *Harness, own, shared string) string {
 	return addr
 }
 
+// scaleShardEndpoint is for the tests that take minutes each: Cloud Run's
+// scaling, the prediction containers and Secret Manager's 2,000 versions.
+// They run only where the scale shard's own name for their service is
+// exported (#1821), which the run and storage shards do not export, so each
+// runs once, in the scale shard, which exports neither CLOUDBURROW_TEST_RUN
+// nor CLOUDBURROW_TEST_SECRETS, so their suites run there no second time. A
+// developer's instance exports every name and runs them all. The address is
+// exported under the shared name for this test only, for its clients,
+// gcloud session or Terraform module. It skips without the shard's name.
+func scaleShardEndpoint(h *Harness, own, shared string) string {
+	h.t.Helper()
+	addr := h.Endpoint(own)
+	h.t.Setenv(shared, addr)
+	return addr
+}
+
+// The scale shard's names for Cloud Run and Secret Manager (#1821).
+const (
+	envScaleRun     = "CLOUDBURROW_TEST_SCALE_RUN"
+	envScaleSecrets = "CLOUDBURROW_TEST_SCALE_SECRETS"
+)
+
 // The shards' own names for a service a test needs beside the shard's
 // (#1568), each read through shardEndpoint so the service's own suite stays
 // in its shard: Cloud KMS for the customer-managed keys of Memorystore
@@ -218,4 +240,8 @@ const (
 	// compatibility tests, which grant the roles a sign-in's principal
 	// needs (#1738, #1742, #1743; #1761).
 	envFirestoreResourceManager = "CLOUDBURROW_TEST_FIRESTORE_RESOURCEMANAGER"
+	// Certificate Authority Service for the sql shard's
+	// CUSTOMER_MANAGED_CAS_CA instances, whose CA pools issue their server
+	// certificates (#1834).
+	envSQLPrivateCA = "CLOUDBURROW_TEST_SQL_PRIVATECA"
 )

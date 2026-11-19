@@ -134,6 +134,10 @@ var gcloudVerified = []struct {
 	// TestGcloudBackupDR drives vaults, plans, associations, data sources
 	// and backups.
 	{config.ServiceBackupDR, "backupdr", "/", false, false},
+	// Certificate Authority Service (#1834): gcloud privateca appends v1/.
+	// TestGcloudPrivateCA drives pools, roots, subordinates, templates,
+	// certificates and CRLs.
+	{config.ServicePrivateCA, "privateca", "/", false, false},
 	// Bigtable's admin REST API (#1440), on the Bigtable port beside gRPC;
 	// gcloud bigtable appends v2/. TestGcloudBigtableAppProfiles creates,
 	// lists, updates and deletes app profiles.
@@ -201,7 +205,7 @@ func gcloudConfiguration(cfg config.Config, adcPath string) string {
 		sqlAdminEndpoint: cfg.Endpoints.SQLAdmin, memorystoreAdminEndpoint: cfg.Endpoints.MemorystoreAdmin,
 		serviceUsageService: cfg.Endpoints.ServiceUsage, config.ServiceBackupDR: cfg.Endpoints.BackupDR,
 		config.ServiceBigtable: cfg.Endpoints.Bigtable, spannerRESTEndpoint: cfg.Endpoints.SpannerREST,
-		config.ServiceFirestore: cfg.Endpoints.Firestore}
+		config.ServiceFirestore: cfg.Endpoints.Firestore, config.ServicePrivateCA: cfg.Endpoints.PrivateCA}
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n# Instance %q.\n", gcloudMarker, cfg.Name)
 	// should_prompt_to_enable_api is off because gcloud would otherwise ask
@@ -219,6 +223,9 @@ func gcloudConfiguration(cfg config.Config, adcPath string) string {
 		}
 		if v.service == config.ServiceBackupDR {
 			on = backupDREnabled(cfg)
+		}
+		if v.service == config.ServicePrivateCA {
+			on = privateCAEnabled(cfg)
 		}
 		if on && ports[v.service] != 0 {
 			addr := host(ports[v.service])

@@ -268,7 +268,7 @@ func TestCloudSQLInstanceWrites(t *testing.T) {
 	}
 	_, err := svc.Instances.Delete(project, up).Do()
 	wantHTTP(t, "delete of the instance up runs", err, http.StatusBadRequest)
-	_, err = svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: "old-" + suffix, DatabaseVersion: "MYSQL_5_7",
+	_, err = svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: "old-" + suffix, DatabaseVersion: "MYSQL_5_6",
 		Settings: &sqladmin.Settings{Tier: "db-f1-micro"}}).Do()
 	wantHTTP(t, "a version no multi-architecture image provides", err, http.StatusNotImplemented)
 	_, err = svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: "rep-" + suffix, DatabaseVersion: "POSTGRES_17",

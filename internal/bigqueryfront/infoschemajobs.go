@@ -678,7 +678,11 @@ func (f front) withInformationSchemaJobs(w http.ResponseWriter, r *http.Request,
 			subs[key+only.key()] = sub
 		}
 		b.WriteString(q.Query[last:ref.pos])
-		b.WriteString(sub)
+		if optimizationDetailsViews[ref.view] {
+			b.WriteString(withOptimizationDetails(sub))
+		} else {
+			b.WriteString(sub)
+		}
 		if !ref.alias {
 			b.WriteString(" AS " + ref.view)
 		}
@@ -695,6 +699,31 @@ func (f front) withInformationSchemaJobs(w http.ResponseWriter, r *http.Request,
 	rec := newRecorder()
 	f.runQuery(rec, withMetadataReads(r), q, insert) // #1763, tableoptions.go
 	f.clientText(w, rec, client)
+}
+
+// optimizationDetailsViews are the JOBS views whose query_info has
+// optimization_details: "Only the JOBS_BY_PROJECT view has this column",
+// and "INFORMATION_SCHEMA.JOBS and INFORMATION_SCHEMA.JOBS_BY_PROJECT are
+// synonymous and can be used interchangeably" (information-schema-jobs,
+// read 2026-11-18), so JOBS_BY_USER, JOBS_BY_FOLDER and
+// JOBS_BY_ORGANIZATION have none (#1458).
+var optimizationDetailsViews = map[string]bool{"JOBS": true, "JOBS_BY_PROJECT": true}
+
+// withOptimizationDetails is a JOBS subquery (sub, of jobsColumns) with
+// query_info.optimization_details, the job's history-based optimizations
+// (REST QueryInfo.optimizationDetails, "object (Struct format)"). It is
+// JSON: the history-based-optimizations page (read 2026-11-18) speaks of
+// "The JSON in optimization_details" and reads it with
+// JSON_QUERY_ARRAY(query_info.optimization_details.optimizations); its
+// schema row says STRUCT and names no field, and a STRUCT field passed to
+// JSON_QUERY_ARRAY would have to be JSON or STRING. "If no history-based
+// optimizations were applied, NULL is produced for optimization_details",
+// and the emulator applies none, so it is NULL; query_info is NULL as it
+// was for a job with no query_info (#1458).
+func withOptimizationDetails(sub string) string {
+	return "(SELECT * REPLACE (IF(query_info IS NULL, NULL, STRUCT(query_info.resource_warning AS resource_warning, " +
+		"query_info.query_hashes AS query_hashes, query_info.performance_insights AS performance_insights, " +
+		"CAST(NULL AS JSON) AS optimization_details)) AS query_info) FROM " + sub + ")"
 }
 
 // regionViews are the dataset views BigQuery also answers region-qualified

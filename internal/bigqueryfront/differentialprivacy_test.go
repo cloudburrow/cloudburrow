@@ -71,6 +71,21 @@ GROUP BY item ORDER BY item`)
 			t.Errorf("%s: %q, want %q", sql, msg, wantMsg)
 		}
 	}
+	// report_format, which GoogleSQL documents for AVG, COUNT and SUM but
+	// BigQuery's reference does not, is unsupported (501), not invalid; on
+	// PERCENTILE_CONT, which neither documents it for, it is invalid (#1589).
+	for sql, want501 := range map[string]bool{
+		"SELECT WITH DIFFERENTIAL_PRIVACY OPTIONS(epsilon=1, delta=.1, privacy_unit_column=id) AVG(x, report_format => 'JSON') FROM t":                                             true,
+		"SELECT WITH DIFFERENTIAL_PRIVACY OPTIONS(epsilon=1, delta=.1, privacy_unit_column=id) COUNT(*, contribution_bounds_per_group => (0, 1), report_format => 'PROTO') FROM t": true,
+		"SELECT WITH DIFFERENTIAL_PRIVACY OPTIONS(epsilon=1, delta=.1, privacy_unit_column=id) SUM(x, report_format => 'JSON') + 1 AS s FROM t":                                    true,
+		"SELECT WITH DIFFERENTIAL_PRIVACY OPTIONS(epsilon=1, delta=.1, privacy_unit_column=id) PERCENTILE_CONT(x, 0.5, report_format => 'JSON') FROM t":                            false,
+	} {
+		toks, _ := lex(sql)
+		_, msg, unsup := parseDPQuery(sql, toks)
+		if msg == "" || unsup != want501 || want501 && !strings.Contains(msg, "report_format") {
+			t.Errorf("%s: %q unsupported=%v, want unsupported=%v", sql, msg, unsup, want501)
+		}
+	}
 }
 
 // professorsRows is innerSQL's rows of the reference's professors table

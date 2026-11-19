@@ -23,8 +23,9 @@ func TestMatchesLiteRT(t *testing.T) {
 	cases := map[string]litertCase{}
 	// litert_conv.json is gen_conv.py's: the convolution, pooling and
 	// gather operators; litert_quant.json gen_quant.py's quantized models
-	// (#1766).
-	for _, f := range []string{"testdata/litert_predictions.json", "testdata/litert_conv.json", "testdata/litert_quant.json"} {
+	// (#1766); litert_ops3.json gen_ops3.py's: the operators ops3.go adds
+	// and a Keras LSTM and bidirectional LSTM (#1775).
+	for _, f := range []string{"testdata/litert_predictions.json", "testdata/litert_conv.json", "testdata/litert_quant.json", "testdata/litert_ops3.json"} {
 		raw, err := os.ReadFile(f)
 		if err != nil {
 			t.Fatal(err)
@@ -37,7 +38,7 @@ func TestMatchesLiteRT(t *testing.T) {
 			cases[k] = v
 		}
 	}
-	if len(cases) != 6 {
+	if len(cases) != 8 {
 		t.Fatalf("%d cases", len(cases))
 	}
 	for name, c := range cases {
@@ -318,5 +319,37 @@ func TestOps2Direct(t *testing.T) {
 	outs, err := m.evalMulti(op{code: opSplitV, name: "SPLIT_V"}, []*Tensor{f([]int{1, 5}, 1, 2, 3, 4, 5), i([]int{2}, 2, -1), i([]int{}, 1)}, 2)
 	if err != nil || !reflect.DeepEqual(outs[0].F, []float32{1, 2}) || !reflect.DeepEqual(outs[1].F, []float32{3, 4, 5}) {
 		t.Errorf("SPLIT_V %v %v", outs, err)
+	}
+}
+
+// The ops3.go operators TensorFlow 2.20's converter did not write in
+// ops3.tflite or lstm.tflite, checked against LiteRT's reference kernels'
+// definitions (#1775).
+func TestOps3Direct(t *testing.T) {
+	m := &Model{}
+	f := func(shape []int, v ...float32) *Tensor { return &Tensor{Type: Float32, Shape: shape, F: v} }
+	i := func(shape []int, v ...int64) *Tensor { return &Tensor{Type: Int32, Shape: shape, I: v} }
+	run := func(code int32, a ...*Tensor) *Tensor {
+		t.Helper()
+		r, err := m.eval(op{code: code, name: opNames[code]}, a)
+		if err != nil {
+			t.Fatalf("%s: %v", opNames[code], err)
+		}
+		return r
+	}
+	if r := run(opRelu0To1, f([]int{4}, -1, 0.25, 1, 3)); !reflect.DeepEqual(r.F, []float32{0, 0.25, 1, 1}) {
+		t.Errorf("RELU_0_TO_1 %v", r.F)
+	}
+	if r := run(opRank, f([]int{2, 1, 3}, 1, 2, 3, 4, 5, 6)); !reflect.DeepEqual(r.I, []int64{3}) || len(r.Shape) != 0 {
+		t.Errorf("RANK %v %v", r.Shape, r.I)
+	}
+	if r := run(opEmbeddingLookup, i([]int{3}, 2, 0, 2), f([]int{3, 2}, 1, 2, 3, 4, 5, 6)); !reflect.DeepEqual(r.Shape, []int{3, 2}) || !reflect.DeepEqual(r.F, []float32{5, 6, 1, 2, 5, 6}) {
+		t.Errorf("EMBEDDING_LOOKUP %v %v", r.Shape, r.F)
+	}
+	if r := run(opSign, i([]int{3}, -4, 0, 7)); !reflect.DeepEqual(r.I, []int64{-1, 0, 1}) {
+		t.Errorf("SIGN %v", r.I)
+	}
+	if _, err := m.eval(op{code: opRange, name: "RANGE"}, []*Tensor{i(nil, 0), i(nil, 5), i(nil, 0)}); err == nil {
+		t.Error("RANGE with delta 0 ran")
 	}
 }

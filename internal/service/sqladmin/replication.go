@@ -455,6 +455,11 @@ func (s *Server) replicaVerb(base, project, name, verb string) (any, error) {
 		s.emu.Unlock()
 		return nil, Errorf(http.StatusConflict, "Operation failed because another operation was already in progress (the instance is %s).", st)
 	}
+	if c.spec.AwaitingPrimary {
+		why := awaitingWhy(c.spec)
+		s.emu.Unlock()
+		return nil, unimplemented("instances."+verb+" on a replica waiting for its primary's major version upgrade", why)
+	}
 	s.emu.Unlock()
 	r, ok := c.engine.(replicator)
 	if !ok {

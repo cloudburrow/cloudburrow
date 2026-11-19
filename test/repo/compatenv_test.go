@@ -242,6 +242,7 @@ func compatEnvFixture(t *testing.T, edit func(env map[string]string)) (dir, envF
 		"CLOUDBURROW_SQLADMIN_ENDPOINT":           "127.0.0.1:9020",
 		"CLOUDBURROW_CLOUDSQL_CONNECTOR_ENDPOINT": "127.0.0.1:3307",
 		"CLOUDBURROW_BACKUPDR_ENDPOINT":           "127.0.0.1:9024",
+		"CLOUDBURROW_PRIVATECA_ENDPOINT":          "127.0.0.1:9028",
 		"CLOUDBURROW_BIGQUERY_ENDPOINT":           "http://127.0.0.1:9014",
 		"CLOUDBURROW_BIGQUERY_STORAGE_ENDPOINT":   "127.0.0.1:9015",
 	}
@@ -349,6 +350,7 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"SQLADMIN":                 "127.0.0.1:9020",
 		"CLOUDSQL_CONNECTOR":       "127.0.0.1:3307",
 		"BACKUPDR":                 "127.0.0.1:9024",
+		"PRIVATECA":                "127.0.0.1:9028",
 		"BIGQUERY":                 "http://127.0.0.1:9014",
 		"BIGQUERY_STORAGE":         "127.0.0.1:9015",
 		"BIGQUERY_PROJECT":         "ct-local",
@@ -365,9 +367,12 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"SINK_PUBSUB":              "127.0.0.1:50004",
 		"FIRESTORE_STORAGE":        "http://127.0.0.1:50003",
 		"CMEK_KMS":                 "127.0.0.1:9018",
+		"SQL_PRIVATECA":            "127.0.0.1:9028",
 		"CLOUDSQL_SECRETS":         "127.0.0.1:9006",
 		"NOPUBSUB_STORAGE":         "http://127.0.0.1:50003",
 		"APPENGINE_URL":            "http://127.0.0.1:18506",
+		"SCALE_RUN":                "127.0.0.1:50002",
+		"SCALE_SECRETS":            "127.0.0.1:9006",
 
 		// A group of its own, so its long name leaves the others' alignment.
 		"MEMORYSTORE_RESOURCEMANAGER": "127.0.0.1:9007",
@@ -569,4 +574,63 @@ func TestCompatEnvEmbeddingsOnlyWhenLoaded(t *testing.T) {
 	if !strings.Contains(stderr, "CLOUDBURROW_TEST_EMBEDDINGS") {
 		t.Errorf("the unset variable is not named on stderr: %s", stderr)
 	}
+}
+
+// Without --cli, CLOUDBURROW_TEST_CLI is the checkout's bin/cloudburrow, else
+// the bin/cloudburrow-onnx that `make build-onnx` writes (#1651: the
+// EmbedContent suites run against an onnx build, which has no
+// bin/cloudburrow), else cloudburrow on PATH.
+func TestCompatEnvDefaultCLI(t *testing.T) {
+	bash, script := compatEnvScript(t)
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Skip("jq is not on PATH")
+	}
+	_, envFile, statusFile := compatEnvFixture(t, nil)
+	src, err := os.ReadFile(script)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	for _, d := range []string{"scripts", "bin"} {
+		if err := os.Mkdir(filepath.Join(root, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	copied := filepath.Join(root, "scripts", "compat-env.sh")
+	if err := os.WriteFile(copied, src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cli := func() string {
+		t.Helper()
+		cmd := exec.Command(bash, copied, "--plain", "--only", "CLI", "--env-json", envFile, "--status-json", statusFile)
+		cmd.Env = append(os.Environ(), "PATH=/usr/bin:/bin:"+filepath.Dir(mustLook(t, "jq")))
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("compat-env.sh: %v", err)
+		}
+		_, v, _ := strings.Cut(strings.TrimSpace(string(out)), "=")
+		return v
+	}
+	exe := func(name string) {
+		if err := os.WriteFile(filepath.Join(root, "bin", name), []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exe("cloudburrow-onnx")
+	if got, want := cli(), filepath.Join(root, "bin", "cloudburrow-onnx"); got != want {
+		t.Errorf("only an onnx build: CLI %q, want %q", got, want)
+	}
+	exe("cloudburrow")
+	if got, want := cli(), filepath.Join(root, "bin", "cloudburrow"); got != want {
+		t.Errorf("both builds: CLI %q, want %q", got, want)
+	}
+}
+
+func mustLook(t *testing.T, name string) string {
+	t.Helper()
+	p, err := exec.LookPath(name)
+	if err != nil {
+		t.Skipf("%s is not on PATH", name)
+	}
+	return p
 }

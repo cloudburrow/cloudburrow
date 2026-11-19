@@ -1,0 +1,262 @@
+CloudBurrow patch 103 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1823). Applies after patch 0095.
+
+The bug: the catalog of a database is one, shared by its connections, and
+holds every spec they saved or deleted from the moment they did. Its Sync,
+before each statement is analyzed, reads the catalog table's rows saved
+since the last Sync (updatedAt >= lastSyncedAt) on the connection of that
+statement. Since bigquery-emulator patch 0102 a read runs beside the
+writer, in WAL mode, on a snapshot of the last commit, which may be older
+than what the catalog holds: it may hold a row a later save replaced, or a
+later delete removed. The rows' times follow the front's clock, which
+moves, and are compared as text (RFC3339Nano, its trailing zeros trimmed,
+so not in time order within a second), so such an older row could pass the
+filter, and Sync put the older spec back over the newer one, or a dropped
+table back in the catalog (making it again then failed: it exists).
+
+The patch: the catalog records the names of the rows it writes or deletes
+(Catalog.written), and Sync skips a row of such a name. The catalog is the
+only writer of its database's rows (the process's one catalog of that
+database), so what it holds for such a name is the newest. Rows it did not
+write, those of a database it opened, are read as before.
+
+Regression test TestCatalogSyncOnAnOlderSnapshot.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch
+is offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- /dev/null
++++ b/catalog_older_snapshot_test.go
+@@ -0,0 +1,76 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"path/filepath"
++	"testing"
++	"time"
++
++	"github.com/goccy/googlesqlite"
++)
++
++// TestCatalogSyncOnAnOlderSnapshot is CloudBurrow's regression test
++// (cloudburrow/cloudburrow#1823): in WAL mode a reader reads the snapshot
++// its transaction began with, and the catalog's Sync, which runs on the
++// connection of the statement analyzed, read the catalog table's rows from
++// it. A row there that a later delete removed, and that passed Sync's
++// filter of times (here the clock was set back, as the front's moves), put
++// the dropped table back in the catalog: making it again failed, as a
++// table that exists.
++func TestCatalogSyncOnAnOlderSnapshot(t *testing.T) {
++	ctx := context.Background()
++	dsn := "file:" + filepath.Join(t.TempDir(), "db") + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(wal)"
++	db, err := sql.Open("googlesqlite", dsn)
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer db.Close()
++	exec := func(q string) {
++		t.Helper()
++		if _, err := db.ExecContext(ctx, q); err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++	}
++	exec("CREATE TABLE t (a INT64)")
++	exec("INSERT INTO t (a) VALUES (1)")
++
++	// A reader whose snapshot has the table's first spec.
++	reader, err := db.Conn(ctx)
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer reader.Close()
++	tx, err := reader.BeginTx(ctx, nil)
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer tx.Rollback()
++	var n int64
++	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM t").Scan(&n); err != nil || n != 1 {
++		t.Fatalf("COUNT(*) on the reader: %d, %v", n, err)
++	}
++
++	// The table is dropped, at a clock set back.
++	googlesqlite.SetClockOffset(-time.Hour)
++	defer googlesqlite.SetClockOffset(0)
++	exec("DROP TABLE t")
++
++	// The reader analyzes a statement, and so syncs, on its older snapshot.
++	var one int64
++	if err := tx.QueryRowContext(ctx, "SELECT 1").Scan(&one); err != nil {
++		t.Fatalf("SELECT 1 on the reader: %v", err)
++	}
++	if err := tx.Commit(); err != nil {
++		t.Fatal(err)
++	}
++
++	// The table is made again with a second column.
++	if _, err := db.ExecContext(ctx, "CREATE TABLE t (a INT64, b STRING)"); err != nil {
++		t.Fatalf("CREATE TABLE of a dropped table after a reader synced on an older snapshot: %v", err)
++	}
++	var b sql.NullString
++	if err := db.QueryRowContext(ctx, "SELECT b FROM t").Scan(&b); err != sql.ErrNoRows {
++		t.Fatalf("SELECT b FROM t: %v, want no rows", err)
++	}
++}
+--- a/internal/catalog.go
++++ b/internal/catalog.go
+@@ -84,6 +84,10 @@
+ type Catalog struct {
+ 	db           *sql.DB
+ 	lastSyncedAt time.Time
++	// written is the names of the rows the catalog wrote or deleted
++	// (CloudBurrow patch, cloudburrow/cloudburrow#1823,
++	// catalog_written.go).
++	written map[string]struct{}
+ 	// keysMigrated: the catalog table's rows have their kind-qualified
+ 	// keys (CloudBurrow patch, cloudburrow/cloudburrow#1186).
+ 	keysMigrated bool
+@@ -1993,6 +1997,12 @@
+ 		if err := rows.Scan(&name, &kind, &spec); err != nil {
+ 			return fmt.Errorf("failed to scan catalog values: %w", err)
+ 		}
++		// CloudBurrow patch (cloudburrow/cloudburrow#1823): not a row of
++		// an older snapshot over what the catalog holds
++		// (catalog_written.go).
++		if c.holds(name) {
++			continue
++		}
+ 		switch kind {
+ 		case TableSpecKind, ViewSpecKind:
+ 			if err := c.loadTableSpec(spec); err != nil {
+@@ -2054,6 +2064,7 @@
+ 	if _, err := conn.ExecContext(ctx, deleteCatalogQuery, sql.Named("name", catalogKey(TVFSpecKind, name))); err != nil {
+ 		return err
+ 	}
++	c.wrote(catalogKey(TVFSpecKind, name)) // CloudBurrow patch (cloudburrow/cloudburrow#1823)
+ 	return nil
+ }
+ 
+@@ -2089,6 +2100,7 @@
+ 		if _, err := conn.ExecContext(ctx, deleteCatalogQuery, sql.Named("name", name)); err != nil {
+ 			return err
+ 		}
++		c.wrote(name) // CloudBurrow patch (cloudburrow/cloudburrow#1823)
+ 	}
+ 	return nil
+ }
+@@ -2103,6 +2115,7 @@
+ 	if _, err := conn.ExecContext(ctx, deleteCatalogQuery, sql.Named("name", catalogKey(FunctionSpecKind, name))); err != nil {
+ 		return err
+ 	}
++	c.wrote(catalogKey(FunctionSpecKind, name)) // CloudBurrow patch (cloudburrow/cloudburrow#1823)
+ 	return nil
+ }
+ 
+@@ -2279,6 +2292,7 @@
+ 		return fmt.Errorf("failed to encode table spec: %w", err)
+ 	}
+ 	now := clock.Now() // CloudBurrow patch (#1487): the front's clock
++	name := spec.TableName()
+ 	kind := string(TableSpecKind)
+ 	if spec.IsView {
+ 		kind = string(ViewSpecKind)
+@@ -2286,7 +2300,7 @@
+ 	if _, err := conn.ExecContext(
+ 		ctx,
+ 		upsertCatalogQuery,
+-		sql.Named("name", spec.TableName()),
++		sql.Named("name", name),
+ 		sql.Named("kind", kind),
+ 		sql.Named("spec", string(encoded)),
+ 		sql.Named("updatedAt", now),
+@@ -2294,6 +2308,7 @@
+ 	); err != nil {
+ 		return fmt.Errorf("failed to save a new table spec: %w", err)
+ 	}
++	c.wrote(name) // CloudBurrow patch (cloudburrow/cloudburrow#1823)
+ 	return nil
+ }
+ 
+@@ -2303,10 +2318,11 @@
+ 		return fmt.Errorf("failed to encode TVF spec: %w", err)
+ 	}
+ 	now := clock.Now() // CloudBurrow patch (#1487): the front's clock
++	name := catalogKey(TVFSpecKind, spec.TVFName())
+ 	if _, err := conn.ExecContext(
+ 		ctx,
+ 		upsertCatalogQuery,
+-		sql.Named("name", catalogKey(TVFSpecKind, spec.TVFName())),
++		sql.Named("name", name),
+ 		sql.Named("kind", string(TVFSpecKind)),
+ 		sql.Named("spec", string(encoded)),
+ 		sql.Named("updatedAt", now),
+@@ -2314,6 +2330,7 @@
+ 	); err != nil {
+ 		return fmt.Errorf("failed to save a new TVF spec: %w", err)
+ 	}
++	c.wrote(name) // CloudBurrow patch (cloudburrow/cloudburrow#1823)
+ 	return nil
+ }
+ 
+@@ -2323,10 +2340,11 @@
+ 		return fmt.Errorf("failed to encode function spec: %w", err)
+ 	}
+ 	now := clock.Now() // CloudBurrow patch (#1487): the front's clock
++	name := catalogKey(FunctionSpecKind, spec.FuncName())
+ 	if _, err := conn.ExecContext(
+ 		ctx,
+ 		upsertCatalogQuery,
+-		sql.Named("name", catalogKey(FunctionSpecKind, spec.FuncName())),
++		sql.Named("name", name),
+ 		sql.Named("kind", string(FunctionSpecKind)),
+ 		sql.Named("spec", string(encoded)),
+ 		sql.Named("updatedAt", now),
+@@ -2334,6 +2352,7 @@
+ 	); err != nil {
+ 		return fmt.Errorf("failed to save a new function spec: %w", err)
+ 	}
++	c.wrote(name) // CloudBurrow patch (cloudburrow/cloudburrow#1823)
+ 	return nil
+ }
+ 
+--- /dev/null
++++ b/internal/catalog_written.go
+@@ -0,0 +1,33 @@
++package internal
++
++// Rows a catalog wrote (CloudBurrow patch, cloudburrow/cloudburrow#1823).
++//
++// A database has one catalog, shared by its connections, and it holds
++// every spec they saved or deleted from the moment they did. Sync reads
++// the catalog table's rows saved since the last Sync, on the connection of
++// the statement being analyzed. Since the BigQuery emulator runs reads
++// beside the writer (a file database in WAL mode), that connection may read
++// an older snapshot: one with a row a later save replaced, or a later
++// delete removed. The rows' times follow the front's clock, which moves,
++// and are compared as text (RFC3339Nano, its trailing zeros trimmed, so not
++// in time order within a second), so such an older row could pass Sync's
++// filter, and Sync put the older spec back over the newer one, or a
++// dropped table back in the catalog. This catalog is the only writer of its
++// database's rows (its process's one), so a row of a name it wrote or
++// deleted is never newer than what it holds for that name: Sync skips it.
++
++// wrote records that the catalog wrote or deleted the row name. Called
++// under c.mu.
++func (c *Catalog) wrote(name string) {
++	if c.written == nil {
++		c.written = map[string]struct{}{}
++	}
++	c.written[name] = struct{}{}
++}
++
++// holds reports whether the catalog wrote or deleted the row name, so that
++// it holds that name's newest spec, or none. Called under c.mu.
++func (c *Catalog) holds(name string) bool {
++	_, ok := c.written[name]
++	return ok
++}

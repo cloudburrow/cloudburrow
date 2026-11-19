@@ -74,8 +74,35 @@ func TestReplicaUpgradeOnItsOwn(t *testing.T) {
 	if err := s.checkUpgrade(s.writes.byName["myr"], "MYSQL_8_4", false); err != nil {
 		t.Errorf("upgrading a MySQL replica: %v", err)
 	}
-	if err := s.checkUpgrade(s.writes.byName["pgr"], "POSTGRES_17", false); err == nil || !strings.Contains(errStatus(err), "501") {
-		t.Errorf("upgrading a PostgreSQL replica: %v, want 501", err)
+	// A PostgreSQL replica too (#1524): it then waits for its primary.
+	if err := s.checkUpgrade(s.writes.byName["pgr"], "POSTGRES_17", false); err != nil {
+		t.Errorf("upgrading a PostgreSQL replica: %v", err)
+	}
+	if err := s.awaitPrimary("p", "pgr", "POSTGRES_17", false); err != nil {
+		t.Fatalf("awaitPrimary: %v", err)
+	}
+	if r := s.writes.byName["pgr"]; !r.spec.AwaitingPrimary || r.spec.DatabaseVersion != "POSTGRES_17" || r.state != "RUNNABLE" {
+		t.Errorf("the PostgreSQL replica after its upgrade: %+v %s", r.spec, r.state)
+	}
+	if _, err := s.replicaVerb("", "p", "pgr", "promoteReplica"); err == nil || !strings.Contains(errStatus(err), "501") {
+		t.Errorf("promoting a replica waiting for its primary: %v, want 501", err)
+	}
+	// Its primary is not upgraded to an older version than the replica's:
+	// that would roll the replica back.
+	for _, include := range []bool{false, true} {
+		if err := s.checkUpgrade(s.writes.byName["pg"], "POSTGRES_16", include); err == nil || !strings.Contains(errStatus(err), "400") {
+			t.Errorf("upgrading the primary below its replica (include %v): %v, want 400", include, err)
+		}
+	}
+	// Its primary is no longer behind it.
+	if err := s.checkUpgrade(s.writes.byName["pg"], "POSTGRES_17", false); err != nil {
+		t.Errorf("upgrading the PostgreSQL primary after its replica: %v", err)
+	}
+	// An external replica is not upgraded in place.
+	s.writes.byName["ext"] = &created{spec: Spec{Name: "ext", Project: "p", DatabaseVersion: "POSTGRES_16", MasterInstanceName: "src",
+		External: &ExternalSource{}}}
+	if err := s.checkUpgrade(s.writes.byName["ext"], "POSTGRES_17", false); err == nil || !strings.Contains(errStatus(err), "400") {
+		t.Errorf("upgrading an external replica: %v, want 400", err)
 	}
 	// The primary's replica is behind: 400 without includeReplicas.
 	if err := s.checkUpgrade(s.writes.byName["my"], "MYSQL_8_4", false); err == nil || !strings.Contains(errStatus(err), "400") {
@@ -91,3 +118,54 @@ func TestReplicaUpgradeOnItsOwn(t *testing.T) {
 type upgraderProv struct{ *fakeProv }
 
 func (upgraderProv) Upgrade(context.Context, Spec, Spec) error { return nil }
+
+// legacyProv is a provisioner whose node runs, or does not run, MySQL
+// 5.7's linux/amd64 image.
+type legacyProv struct {
+	*fakeProv
+	why string
+}
+
+func (p legacyProv) LegacyUnrunnable(string) string { return p.why }
+
+// MYSQL_5_7 and MYSQL_5_6 are served where the node runs their images (#1524), and their
+// replicas, high availability, point-in-time recovery and upgrades are
+// 501; MYSQL_5_6 too.
+func TestLegacyMySQLServed(t *testing.T) {
+	runs := &Server{writes: &instances{prov: legacyProv{}, byName: map[string]*created{}}}
+	if ok, why := runs.versionServed("MYSQL_5_7"); !ok {
+		t.Errorf("MYSQL_5_7 on a node that runs it: %q", why)
+	}
+	if ok, why := runs.versionServed("MYSQL_5_6"); !ok {
+		t.Errorf("MYSQL_5_6 on a node that runs it: %q", why)
+	}
+	if ok, why := runs.versionServed("MYSQL_5_5"); ok || why == "" {
+		t.Errorf("MYSQL_5_5: %v %q", ok, why)
+	}
+	cannot := &Server{writes: &instances{prov: legacyProv{why: "the node is aarch64"}, byName: map[string]*created{}}}
+	if ok, why := cannot.versionServed("MYSQL_5_7"); ok || why != "the node is aarch64" {
+		t.Errorf("MYSQL_5_7 on a node that cannot run it: %v %q", ok, why)
+	}
+	plain := &Server{writes: &instances{prov: &fakeProv{}, byName: map[string]*created{}}}
+	if ok, why := plain.versionServed("MYSQL_5_7"); ok || !strings.Contains(why, "linux/amd64 only") {
+		t.Errorf("MYSQL_5_7 with no LegacyRunner: %v %q", ok, why)
+	}
+	base := Spec{Name: "a", DatabaseVersion: "MYSQL_5_7"}
+	if err := legacyRefusal(base); err != nil {
+		t.Errorf("a standalone ZONAL MYSQL_5_7 instance: %v", err)
+	}
+	replica, regional := base, base
+	replica.MasterInstanceName, regional.AvailabilityType = "p", "REGIONAL"
+	for _, sp := range []Spec{replica, regional} {
+		if err := legacyRefusal(sp); err == nil || !strings.Contains(errStatus(err), "501") {
+			t.Errorf("%+v: %v, want 501", sp, err)
+		}
+	}
+	c := &created{spec: base}
+	if err := runs.checkUpgrade(c, "MYSQL_8_0", false); err == nil || !strings.Contains(errStatus(err), "501") {
+		t.Errorf("upgrading MYSQL_5_7: %v, want 501", err)
+	}
+	if err := legacyRefusal(Spec{Name: "b", DatabaseVersion: "MYSQL_5_6", MasterInstanceName: "p"}); err == nil || !strings.Contains(errStatus(err), "501") {
+		t.Errorf("a MYSQL_5_6 read replica: %v, want 501", err)
+	}
+}

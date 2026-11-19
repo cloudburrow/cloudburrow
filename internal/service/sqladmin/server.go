@@ -124,8 +124,14 @@ type Server struct {
 	secrets SecretAccessor
 	// kms is Cloud KMS, for diskEncryptionConfiguration (#1538), nil unless
 	// UseKMS was called; emu guards it.
-	kms      KeyService
-	stopAuto chan struct{}
+	kms KeyService
+	// privateca is Certificate Authority Service, for
+	// CUSTOMER_MANAGED_CAS_CA (#1834), nil unless
+	// UseCertificateAuthorityService was called; emu guards it.
+	privateca CertificateAuthorityService
+	stopAuto  chan struct{}
+	// stopMaint stops maintenanceLoop (#1524).
+	stopMaint chan struct{}
 	// advances are the retention clock's Advances (#1330), oldest first.
 	clockMu  sync.Mutex
 	advances []clockAdvance
@@ -181,6 +187,10 @@ func (s *Server) Start(context.Context) error {
 		s.stopAuto = make(chan struct{})
 		go s.automate(s.stopAuto)
 	}
+	if s.writes != nil {
+		s.stopMaint = make(chan struct{})
+		go s.maintenanceLoop(s.stopMaint)
+	}
 	// Loopback-only, but a rebound or cross-site page reaches
 	// loopback too (#676, #1586).
 	s.srv = &http.Server{Handler: hostguard.Wrap(s), ReadHeaderTimeout: 10 * time.Second}
@@ -199,6 +209,10 @@ func (s *Server) Stop(ctx context.Context) error {
 	if s.stopAuto != nil {
 		close(s.stopAuto)
 		s.stopAuto = nil
+	}
+	if s.stopMaint != nil {
+		close(s.stopMaint)
+		s.stopMaint = nil
 	}
 	if s.writes != nil {
 		if c, ok := s.writes.prov.(interface{ Close() }); ok {
@@ -255,8 +269,14 @@ func (s *Server) createdNamed(project, name string) *created {
 // ServeHTTP routes /v1/... and /sql/v1beta4/..., which differ only in prefix.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
-	if path == ClockPath {
-		out, err := s.serveClock(r)
+	if path == ClockPath || strings.HasPrefix(path, MaintenanceControlPrefix) {
+		var out any
+		var err error
+		if path == ClockPath {
+			out, err = s.serveClock(r)
+		} else {
+			out, err = s.serveMaintenanceControl(r)
+		}
 		if err != nil {
 			s.fail(w, "", err)
 			return
@@ -324,9 +344,6 @@ func verbWhy(verb string) string {
 		return "SQL Server Reporting Services leases: " + sqlServerWhy
 	case "listEntraIdCertificates", "addEntraIdCertificate", "rotateEntraIdCertificate":
 		return "Microsoft Entra ID authentication: " + sqlServerWhy
-	case "rescheduleMaintenance":
-		return "CloudBurrow's servers have no Google-managed maintenance: no maintenance event is ever scheduled (scheduledMaintenance is never set), " +
-			"so there is none to reschedule"
 	}
 	return "beneath an instance only databases, users, backupRuns, connectSettings, restart, restoreBackup and clone are served; " +
 		"see docs/cloudsql.md for what is served"
@@ -587,6 +604,11 @@ func (s *Server) route(r *http.Request, base string, p []string) (string, any, e
 		if len(rest) == 3 && r.Method == http.MethodPost {
 			out, err := s.performDiskShrink(r, base, project, name)
 			return "sql.projects.instances.performDiskShrink", out, err
+		}
+	case "rescheduleMaintenance":
+		if len(rest) == 3 && r.Method == http.MethodPost {
+			out, err := s.rescheduleMaintenance(r, base, project, name)
+			return "sql.projects.instances.rescheduleMaintenance", out, err
 		}
 	case "resetReplicaSize":
 		if len(rest) == 3 && r.Method == http.MethodPost {

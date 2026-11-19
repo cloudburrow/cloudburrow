@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	sqladminapi "google.golang.org/api/sqladmin/v1"
 )
 
 // TestCloudSQLConsoleServerCertificates (#1614): Create instance and Edit
@@ -135,5 +136,38 @@ func TestCloudSQLConsoleServerCertificates(t *testing.T) {
 		if !strings.Contains(all, want) {
 			t.Errorf("no call with %s:\n%s", want, all)
 		}
+	}
+}
+
+// TestCloudSQLConsoleCustomerManagedCA (#1834): Create instance and Edit
+// instance send CUSTOMER_MANAGED_CAS_CA with its Server CA pool and
+// rotation mode, and leaving the pool sends serverCaPool "".
+func TestCloudSQLConsoleCustomerManagedCA(t *testing.T) {
+	pool := "projects/proj/locations/us-central1/caPools/p"
+	st := &sqladminapi.Settings{}
+	withServerCAMode(st, nil, map[string]string{"serverCaMode": customerCAMode, "serverCaPool": " " + pool + " ",
+		"serverCertificateRotationMode": "AUTOMATIC_ROTATION_DURING_MAINTENANCE"})
+	ic := st.IpConfiguration
+	if ic == nil || ic.ServerCaMode != customerCAMode || ic.ServerCaPool != pool || ic.ServerCertificateRotationMode != "AUTOMATIC_ROTATION_DURING_MAINTENANCE" {
+		t.Fatalf("create: %+v", ic)
+	}
+	cur := &sqladminapi.DatabaseInstance{Settings: &sqladminapi.Settings{IpConfiguration: ic}}
+	if !casSigned(cur) || serverCAPool(cur) != pool {
+		t.Errorf("a customer-managed instance: %s %s", serverCAMode(cur), serverCAPool(cur))
+	}
+	st = &sqladminapi.Settings{}
+	withServerCAMode(st, cur, map[string]string{"serverCaMode": customerCAMode, "serverCaPool": pool,
+		"serverCertificateRotationMode": "AUTOMATIC_ROTATION_DURING_MAINTENANCE"})
+	if st.IpConfiguration != nil {
+		t.Errorf("an unchanged edit sends %+v", st.IpConfiguration)
+	}
+	withServerCAMode(st, cur, map[string]string{"serverCaMode": casCAMode, "serverCaPool": pool})
+	b, _ := json.Marshal(st.IpConfiguration)
+	if !strings.Contains(string(b), `"serverCaMode":"GOOGLE_MANAGED_CAS_CA"`) || !strings.Contains(string(b), `"serverCaPool":""`) {
+		t.Errorf("leaving the pool sends %s", b)
+	}
+	fields := serverCAPoolFields(cur)
+	if fields[0].Default != pool || fields[1].Default != "AUTOMATIC_ROTATION_DURING_MAINTENANCE" {
+		t.Errorf("Edit instance's defaults: %+v", fields)
 	}
 }

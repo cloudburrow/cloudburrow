@@ -331,24 +331,32 @@ func checkInstanceFields(body []byte) error {
 	if err := checkFields("settings", settingsFields, st); err != nil {
 		return err
 	}
-	return checkIPConfiguration(st["ipConfiguration"])
+	if err := checkIPConfiguration(st["ipConfiguration"]); err != nil {
+		return err
+	}
+	return checkMaintenanceSettings(st)
 }
 
-// checkIPConfiguration refuses a customer-managed server CA: its CA pool
-// is the customer's in Certificate Authority Service, which is not served.
-// GOOGLE_MANAGED_CAS_CA is served since #1614 (servercerts.go).
+// checkIPConfiguration checks the server CA settings' values: every mode
+// is served, GOOGLE_MANAGED_CAS_CA since #1614 (servercerts.go) and
+// CUSTOMER_MANAGED_CAS_CA, with its serverCaPool, since #1834
+// (customerca.go, where the pool is checked against the instance).
 func checkIPConfiguration(v any) error {
 	ic, _ := v.(map[string]any)
 	switch m, _ := ic["serverCaMode"].(string); m {
-	case "", "GOOGLE_MANAGED_INTERNAL_CA", "CA_MODE_UNSPECIFIED", "GOOGLE_MANAGED_CAS_CA":
-	case "CUSTOMER_MANAGED_CAS_CA":
-		return unimplemented("settings.ipConfiguration.serverCaMode "+m, "a CUSTOMER_MANAGED_CAS_CA instance's server certificates are issued by "+
-			"the customer's CA pool in Certificate Authority Service, which is not served; GOOGLE_MANAGED_INTERNAL_CA and GOOGLE_MANAGED_CAS_CA are")
+	case "", "GOOGLE_MANAGED_INTERNAL_CA", "CA_MODE_UNSPECIFIED", "GOOGLE_MANAGED_CAS_CA", "CUSTOMER_MANAGED_CAS_CA":
 	default:
 		return Errorf(http.StatusBadRequest, "Invalid value for settings.ipConfiguration.serverCaMode: %s.", m)
 	}
-	if p, _ := ic["serverCaPool"].(string); p != "" {
-		return unimplemented("settings.ipConfiguration.serverCaPool", "a CUSTOMER_MANAGED_CAS_CA pool is Certificate Authority Service's, which is not served")
+	if p, ok := ic["serverCaPool"]; ok {
+		if _, isString := p.(string); !isString {
+			return Errorf(http.StatusBadRequest, "Invalid value for settings.ipConfiguration.serverCaPool: %v.", p)
+		}
+	}
+	switch m, _ := ic["serverCertificateRotationMode"].(string); m {
+	case "", "SERVER_CERTIFICATE_ROTATION_MODE_UNSPECIFIED", "NO_AUTOMATIC_ROTATION", "AUTOMATIC_ROTATION_DURING_MAINTENANCE":
+	default:
+		return Errorf(http.StatusBadRequest, "Invalid value for settings.ipConfiguration.serverCertificateRotationMode: %s.", m)
 	}
 	return nil
 }

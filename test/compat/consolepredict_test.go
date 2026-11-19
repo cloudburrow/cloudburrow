@@ -55,6 +55,7 @@ func consolePredict(t *testing.T, addr, project string, req map[string]string) (
 // instances that are not a JSON array without sending anything.
 func TestConsoleOnlinePredictionThroughTheConsoleAPI(t *testing.T) {
 	h := New(t)
+	scaleShardEndpoint(h, envScaleRun, EnvRun) // the scale shard only (#1821)
 	addr := consoleAddr(t, h)
 	c := runClient(t, h)
 	buildPredictor(t, h.Context())

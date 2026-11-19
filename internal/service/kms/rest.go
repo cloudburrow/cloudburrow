@@ -79,10 +79,16 @@ func transcoder() *rest.Transcoder {
 func Routes() []Route { return transcoder().Routes() }
 
 // NewRESTHandler returns the JSON API for s: the same services Register
-// adds to gRPC, transcoded.
+// adds to gRPC, transcoded, and the KeyAccessJustificationsConfig methods,
+// which have no proto (kajconfig.go).
 func NewRESTHandler(s *Server) http.Handler {
 	t := transcoder()
 	s.Register(t)
 	s.Operations().Register(t)
-	return t
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.serveKAJConfig(w, r) {
+			return
+		}
+		t.ServeHTTP(w, r)
+	})
 }

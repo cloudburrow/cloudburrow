@@ -299,12 +299,13 @@ func TestCloudSQLDataAPIAndFinalBackup(t *testing.T) {
 	waitSQLOp(t, svc, project, op)
 }
 
-// TestCloudSQLRefusedMethods (#1462): what needs a maintenance schedule
-// or another engine is refused 501 through the official client, naming
-// what is missing. Server certificates and connect.resolve are served
+// TestCloudSQLRefusedMethods (#1462): what needs another engine is
+// refused 501 through the official client, naming what is missing; a
+// malformed rescheduleMaintenance request is 400 (#1524), which is served
+// since #1524 (TestCloudSQLRescheduleMaintenance). Server certificates and connect.resolve are served
 // since #1614 (TestCloudSQLServerCertificates), and blue-green
 // deployments (TestCloudSQLBlueGreenDeployment).
-// covers: sql.instances.ListEntraIdCertificates (unimplemented), sql.instances.addEntraIdCertificate (unimplemented), sql.instances.RotateEntraIdCertificate (unimplemented), sql.instances.acquireSsrsLease (unimplemented), sql.instances.releaseSsrsLease (unimplemented), sql.projects.instances.rescheduleMaintenance (unimplemented)
+// covers: sql.instances.ListEntraIdCertificates (unimplemented), sql.instances.addEntraIdCertificate (unimplemented), sql.instances.RotateEntraIdCertificate (unimplemented), sql.instances.acquireSsrsLease (unimplemented), sql.instances.releaseSsrsLease (unimplemented)
 func TestCloudSQLRefusedMethods(t *testing.T) {
 	h := New(t)
 	if os.Getenv(EnvCloudSQL) == "" {
@@ -327,11 +328,17 @@ func TestCloudSQLRefusedMethods(t *testing.T) {
 			return err
 		}},
 		{"releaseSsrsLease", "SQL Server", func() error { _, err := svc.Instances.ReleaseSsrsLease(p, i).Do(); return err }},
-		{"rescheduleMaintenance", "maintenance", func() error {
-			_, err := svc.Projects.Instances.RescheduleMaintenance(p, i, &sqladmin.SqlInstancesRescheduleMaintenanceRequestBody{}).Do()
-			return err
-		}},
 	} {
 		wantCode(t, c.what, c.call(), 501, c.why)
+	}
+	// reschedule and its rescheduleType are required, and SPECIFIC_TIME
+	// needs scheduleTime; an instance `up` runs has no event either.
+	for what, body := range map[string]*sqladmin.SqlInstancesRescheduleMaintenanceRequestBody{
+		"no reschedule":                      {},
+		"SPECIFIC_TIME with no scheduleTime": {Reschedule: &sqladmin.Reschedule{RescheduleType: "SPECIFIC_TIME"}},
+		"no scheduled event":                 {Reschedule: &sqladmin.Reschedule{RescheduleType: "IMMEDIATE"}},
+	} {
+		_, err := svc.Projects.Instances.RescheduleMaintenance(p, i, body).Do()
+		wantHTTP(t, "rescheduleMaintenance with "+what, err, 400)
 	}
 }

@@ -142,6 +142,7 @@ func deployPredictor(t *testing.T, c *run.ServicesClient, h *Harness, id string,
 // happens to use the same paths CloudBurrow assumes.
 func TestPredictionEndpointServesTheVertexContract(t *testing.T) {
 	h := New(t)
+	scaleShardEndpoint(h, envScaleRun, EnvRun) // the scale shard only (#1821)
 	c := runClient(t, h)
 	buildPredictor(t, h.Context())
 
@@ -231,6 +232,7 @@ func TestPredictionEndpointServesTheVertexContract(t *testing.T) {
 // field to make the container slow.
 func TestPredictionDeadlineBoundsASlowPrediction(t *testing.T) {
 	h := New(t)
+	scaleShardEndpoint(h, envScaleRun, EnvRun) // the scale shard only (#1821)
 	c := runClient(t, h)
 	buildPredictor(t, h.Context())
 
@@ -275,6 +277,7 @@ func TestPredictionDeadlineBoundsASlowPrediction(t *testing.T) {
 // finding — see the Local AI prediction section of docs/compatibility.md.
 func TestPredictionStartupFailureIsReported(t *testing.T) {
 	h := New(t)
+	scaleShardEndpoint(h, envScaleRun, EnvRun) // the scale shard only (#1821)
 	c := runClient(t, h)
 	buildPredictor(t, h.Context())
 
@@ -351,6 +354,7 @@ func TestPredictionStartupFailureIsReported(t *testing.T) {
 // deleted endpoint is gone from the API, so nothing is left running.
 func TestPredictionEndpointDeletionIsComplete(t *testing.T) {
 	h := New(t)
+	scaleShardEndpoint(h, envScaleRun, EnvRun) // the scale shard only (#1821)
 	c := runClient(t, h)
 	buildPredictor(t, h.Context())
 

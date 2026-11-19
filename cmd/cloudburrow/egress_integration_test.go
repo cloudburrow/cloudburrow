@@ -110,6 +110,75 @@ func cloudBurrowDecimal(n int) string {
 }
 `
 
+// googleEgressSwitches are the environment variables, in the module versions
+// go.mod names, that turn on a path to Google in a client library the CLI
+// links, each with the value that turns it on (#1828). TestNoGoogleEgress
+// runs the CLI with all of them set. Where the library reads one is noted
+// beside it; why each leaves the product's clients alone is in the comment
+// after the list.
+var googleEgressSwitches = []struct{ name, value string }{
+	// cloud.google.com/go/bigtable v1.58.0: Direct Access, which overrides
+	// ClientConfig.DisableDirectAccess (client.go:228, 440-443;
+	// internal/transport/channel_pool_factory.go:223-226), and the classic
+	// pool's own (internal/option/option.go:222).
+	{"CBT_ENABLE_DIRECTPATH", "true"},
+	{"CBT_BIGTABLE_CONN_POOL", "true"},
+	// cloud.google.com/go/spanner v1.96.1: Direct Access (client.go:725,
+	// 1001), the DirectPath fallback pool (client.go:758), the location API
+	// (location_router.go:45), end-to-end tracing (client.go:779), the
+	// built-in metrics and where they go (client.go:710, 721-736;
+	// metrics.go:227).
+	{"GOOGLE_SPANNER_ENABLE_DIRECT_ACCESS", "true"},
+	{"GOOGLE_SPANNER_ENABLE_GCP_FALLBACK", "true"},
+	{"GOOGLE_SPANNER_EXPERIMENTAL_LOCATION_API", "true"},
+	{"SPANNER_ENABLE_END_TO_END_TRACING", "true"},
+	{"SPANNER_DISABLE_BUILTIN_METRICS", "false"},
+	{"SPANNER_DISABLE_AFE_SERVER_TIMING", "false"},
+	{"SPANNER_DISABLE_DIRECT_ACCESS_GRPC_BUILTIN_METRICS", "false"},
+	{"SPANNER_MONITORING_HOST", "monitoring.googleapis.com:443"},
+	// cloud.google.com/go/storage v1.70.0: client metrics to Cloud
+	// Monitoring (metrics.go:95, 112) and tracing (trace.go:63).
+	{"GCP_STORAGE_GO_ENABLE_OTEL_METRICS", "true"},
+	{"GCP_STORAGE_GO_ENABLE_OTEL_DEBUG_METRICS", "true"},
+	{"GO_STORAGE_DEV_OTEL_TRACING", "true"},
+	// cloud.google.com/go/auth v0.24.1 and google.golang.org/api v0.314.0,
+	// every gRPC and HTTP client: DirectPath over xDS (auth
+	// grpctransport/directpath.go:99, 194; api transport/grpc/dial.go:456),
+	// S2A, whose address comes from the metadata server (auth
+	// internal/transport/s2a.go:133; api internal/cba.go:293), mTLS endpoints
+	// and client certificates (auth internal/transport/cba.go:294, 354; api
+	// internal/cba.go:146, 204), regional access boundaries (auth
+	// internal/regionalaccessboundary/regional_access_boundary.go:85).
+	{"GOOGLE_CLOUD_ENABLE_DIRECT_PATH_XDS", "true"},
+	{"GOOGLE_CLOUD_ENABLE_DIRECT_PATH_XDS_OVER_INTERCONNECT", "true"},
+	{"EXPERIMENTAL_GOOGLE_API_USE_S2A", "true"},
+	{"GOOGLE_API_USE_MTLS_ENDPOINT", "always"},
+	{"GOOGLE_API_USE_CLIENT_CERTIFICATE", "true"},
+	{"GOOGLE_AUTH_TRUST_BOUNDARY_ENABLED", "true"},
+	// cloud.google.com/go/compute/metadata v0.10.0: says the process runs on
+	// GCE (metadata.go:458), so every metadata-gated path goes on to query
+	// it, by a name the guard records (metadata.go:519).
+	{"GCE_METADATA_HOST", "metadata.google.internal"},
+}
+
+// Why the product's clients ignore each of googleEgressSwitches:
+//
+//   - Bigtable: the console's data clients run on a connection the console
+//     dials (newConsoleBigtableClient), so the library builds no channel
+//     pool and runs no Direct Access check; its admin clients dial no Direct
+//     Access at all.
+//   - Spanner: SPANNER_EMULATOR_HOST, which newConsoleSpannerClient sets
+//     when unset, turns the built-in metrics and the location detector off,
+//     and its endpoint is the local one.
+//   - Storage: WithDisabledClientMetrics on every storage.Client.
+//   - DirectPath, S2A and the mTLS endpoint: every client passes
+//     option.WithoutAuthentication, which skips DirectPath in both
+//     transports (auth grpctransport.go:333-386, api transport/grpc
+//     dial.go:309), and an explicit endpoint, which skips S2A and the mTLS
+//     endpoint (auth internal/transport/s2a.go shouldUseS2A, cba.go
+//     getEndpoint). No client asks for credentials, so neither do the trust
+//     boundaries nor the metadata server.
+
 // TestNoGoogleEgress is #1825's proof that nothing CloudBurrow's own process
 // builds reaches Google, or anywhere else off the machine: not a client
 // library's built-in metrics exporter (Spanner's and Bigtable's send to
@@ -172,6 +241,12 @@ func TestNoGoogleEgress(t *testing.T) {
 			continue
 		}
 		env = append(env, kv)
+	}
+	// And every switch that turns a Google network path on in the client
+	// libraries is on (#1828): the product's own clients must not follow
+	// them.
+	for _, s := range googleEgressSwitches {
+		env = append(env, s.name+"="+s.value)
 	}
 	env = append(env, "CLOUDBURROW_EGRESS_LOG="+logPath)
 

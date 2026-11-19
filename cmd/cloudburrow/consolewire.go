@@ -66,6 +66,8 @@ type consoleDeps struct {
 	serviceUsage *serviceusage.Server
 	// backupdr is the Backup and DR Service (#1433), nil unless enabled.
 	backupdr *backupdr.Server
+	// privateCA is Certificate Authority Service (#1834), nil unless enabled.
+	privateCA *privateCAService
 	// sqlAdmin is the Cloud SQL Admin API, which restores Backup and DR
 	// backups; nil unless a Cloud SQL service is enabled.
 	sqlAdmin *sqladmin.Server
@@ -222,6 +224,10 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	if enabled[config.ServiceKMS] && d.kms != nil {
 		providers = append(providers, kmsProvider{svc: d.kms}, kmsEkmProvider{svc: d.kms}, kmsAutokeyProvider{svc: d.kms}, kmsHsmProvider{svc: d.kms})
 	}
+	// Certificate Authority Service (#1834) runs in this process too.
+	if enabled[config.ServicePrivateCA] && d.privateCA != nil {
+		providers = append(providers, privateCAProvider{svc: d.privateCA}, privateCATemplatesProvider{svc: d.privateCA})
+	}
 	if enabled[config.ServiceScheduler] && d.scheduler != nil {
 		providers = append(providers, schedulerProvider{svc: d.scheduler, faults: d.faults})
 	}
@@ -299,7 +305,10 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			versions = append(versions, sqladmin.EngineVersions("POSTGRES")...)
 		}
 		if enabled[config.ServiceCloudSQLMySQL] {
-			versions = append(versions, sqladmin.EngineVersions("MYSQL")...)
+			// MYSQL_5_6 and MYSQL_5_7 (#1524) are served where the node
+			// runs their linux/amd64 images; elsewhere a create is 501
+			// saying why.
+			versions = append(append(versions, "MYSQL_5_6", "MYSQL_5_7"), sqladmin.EngineVersions("MYSQL")...)
 		}
 		host := d.cfg.BindAddress
 		if host == "" || host == "0.0.0.0" || host == "::" {
@@ -524,6 +533,7 @@ var serviceTitles = map[config.Service]string{
 	config.ServiceLogging:       "Cloud Logging",
 	config.ServiceKMS:           "Cloud KMS",
 	config.ServiceBackupDR:      "Backup and DR",
+	config.ServicePrivateCA:     "Certificate Authority Service",
 }
 
 func serviceTitle(s config.Service) string {
