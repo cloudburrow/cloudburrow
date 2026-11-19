@@ -15,7 +15,7 @@ Do not edit these files by hand.
 | [Cloud Run v2](run.md) | 46 | 41 | 0 | 2 | 3 | 0 | 0 | 1 |
 | [Artifact Registry](artifactregistry.md) | 50 | 50 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Build](cloudbuild.md) | 19 | 19 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Secure Source Manager](securesourcemanager.md) | 53 | 40 | 0 | 13 | 0 | 0 | 0 | 0 |
+| [Secure Source Manager](securesourcemanager.md) | 53 | 53 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Developer Connect](developerconnect.md) | 26 | 11 | 0 | 15 | 0 | 0 | 0 | 0 |
 | [Eventarc](eventarc.md) | 39 | 7 | 0 | 32 | 0 | 0 | 0 | 0 |
 | [Cloud Functions v2](functions.md) | 8 | 8 | 0 | 0 | 0 | 0 | 0 | 0 |

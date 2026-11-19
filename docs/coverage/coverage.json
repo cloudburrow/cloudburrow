@@ -1557,14 +1557,15 @@
     "Key": "securesourcemanager",
     "Title": "Secure Source Manager",
     "counts": {
-      "Unimplemented": 13,
-      "Verified": 40
+      "Verified": 53
     },
     "rows": [
       {
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/BatchCreatePullRequestComments",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/securesourcemanagerreviews_test.go:128 TestSecureSourceManagerReviewsAndHooks"
+        ]
       },
       {
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/CloseIssue",
@@ -1589,8 +1590,10 @@
       },
       {
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/CreateHook",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/securesourcemanagerreviews_test.go:128 TestSecureSourceManagerReviewsAndHooks"
+        ]
       },
       {
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/CreateInstance",
@@ -1623,8 +1626,10 @@
       },
       {
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/CreatePullRequestComment",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/securesourcemanagerreviews_test.go:128 TestSecureSourceManagerReviewsAndHooks"
+        ]
       },
       {
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/CreateRepository",
@@ -1643,8 +1648,10 @@
       },
       {
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/DeleteHook",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/securesourcemanagerreviews_test.go:128 TestSecureSourceManagerReviewsAndHooks"
+        ]
       },
       {
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/DeleteInstance",
@@ -1670,8 +1677,10 @@
       },
       {
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/DeletePullRequestComment",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/securesourcemanagerreviews_test.go:128 TestSecureSourceManagerReviewsAndHooks"
+        ]
       },
       {
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/DeleteRepository",
@@ -1711,8 +1720,10 @@
       },
       {
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/GetHook",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/securesourcemanagerreviews_test.go:128 TestSecureSourceManagerReviewsAndHooks"
+        ]
       },
       {
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/GetIamPolicyRepo",
@@ -1752,8 +1763,10 @@
       },
       {
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/GetPullRequestComment",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/securesourcemanagerreviews_test.go:128 TestSecureSourceManagerReviewsAndHooks"
+        ]
       },
       {
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/GetRepository",
@@ -1771,8 +1784,10 @@
       },
       {
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/ListHooks",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/securesourcemanagerreviews_test.go:128 TestSecureSourceManagerReviewsAndHooks"
+        ]
       },
       {
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/ListInstances",
@@ -1797,8 +1812,10 @@
       },
       {
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/ListPullRequestComments",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/securesourcemanagerreviews_test.go:128 TestSecureSourceManagerReviewsAndHooks"
+        ]
       },
       {
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/ListPullRequestFileDiffs",
@@ -1844,8 +1861,10 @@
       },
       {
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/ResolvePullRequestComments",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/securesourcemanagerreviews_test.go:128 TestSecureSourceManagerReviewsAndHooks"
+        ]
       },
       {
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/SetIamPolicyRepo",
@@ -1864,8 +1883,10 @@
       },
       {
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/UnresolvePullRequestComments",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/securesourcemanagerreviews_test.go:128 TestSecureSourceManagerReviewsAndHooks"
+        ]
       },
       {
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/UpdateBranchRule",
@@ -1876,8 +1897,10 @@
       },
       {
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/UpdateHook",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/securesourcemanagerreviews_test.go:128 TestSecureSourceManagerReviewsAndHooks"
+        ]
       },
       {
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/UpdateIssue",
@@ -1902,8 +1925,10 @@
       },
       {
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/UpdatePullRequestComment",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/securesourcemanagerreviews_test.go:128 TestSecureSourceManagerReviewsAndHooks"
+        ]
       },
       {
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/UpdateRepository",

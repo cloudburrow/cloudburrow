@@ -29,11 +29,11 @@ import (
 // merging blocks direct pushes to the branch (a pre-receive hook refuses
 // them), and cannot be used with `.*`. The rest is checked when a pull
 // request is merged: linear history (a fast-forward, securesourcemanagerpulls.go);
-// reviewers, approvers and code owner approval, which need reviews, and
-// required status checks, which need pull request builds: neither is
-// served here, so a rule asking for them refuses the merge with that
-// reason. Require conversation resolution is met, as pull request
-// comments are not served either.
+// the required numbers of approving reviewers and approvers, conversation
+// resolution (securesourcemanagerreviews.go) and required status checks
+// (the pull request's trigger builds, securesourcemanagerpullevents.go),
+// #1927. Code owner approval needs CODEOWNERS files, which are not read,
+// so a rule asking for it refuses the merge with that reason.
 
 var ssmRuleIDRE = regexp.MustCompile(`^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
@@ -117,20 +117,35 @@ func effectiveBranchRuleLocked(repo, branch string) *ssmpb.BranchRule {
 	return wild
 }
 
-// ruleAllowsMerge refuses a merge whose branch rule asks for what is not
-// served.
-func ruleAllowsMerge(r *ssmpb.BranchRule, branch string) error {
+// ruleAllowsMergeLocked refuses a merge of a pull request at head into
+// branch that its branch rule does not allow yet (#1927): too few
+// approving reviewers or approvers, unresolved conversations or change
+// requests, or required status checks that have not passed. Code owner
+// approval reads CODEOWNERS files, which are not served.
+func ruleAllowsMergeLocked(r *ssmpb.BranchRule, pull, head, branch string) error {
 	if r == nil {
 		return nil
 	}
 	id := lastSegment(r.GetName())
-	if r.GetMinimumReviewsCount() > 0 || r.GetMinimumApprovalsCount() > 0 || r.GetRequireCodeOwnerApproval() {
-		return apierror.FailedPrecondition("branch rule %q on %s requires reviews or approvals, and pull request reviews are not served by this instance", id, branch)
+	if r.GetRequireCodeOwnerApproval() {
+		return apierror.FailedPrecondition("branch rule %q on %s requires code owner approval, and this instance does not read CODEOWNERS files", id, branch)
 	}
-	if len(r.GetRequiredStatusChecks()) > 0 {
-		return apierror.FailedPrecondition("branch rule %q on %s requires status checks, and pull request builds are not run by this instance", id, branch)
+	st := reviewStateLocked(pull, head, r.GetAllowStaleReviews())
+	if n := r.GetMinimumReviewsCount(); n > 0 && int32(st.reviewers) < n {
+		return apierror.FailedPrecondition("branch rule %q on %s requires %d approving reviewers of %s, and it has %d", id, branch, n, shortSHA(head), st.reviewers)
 	}
-	return nil
+	if n := r.GetMinimumApprovalsCount(); n > 0 && int32(st.approvers) < n {
+		return apierror.FailedPrecondition("branch rule %q on %s requires %d approvals of %s, and it has %d", id, branch, n, shortSHA(head), st.approvers)
+	}
+	if r.GetRequireCommentsResolved() {
+		if st.unresolved > 0 {
+			return apierror.FailedPrecondition("branch rule %q on %s requires conversation resolution: %d conversations are unresolved", id, branch, st.unresolved)
+		}
+		if len(st.changesRequested) > 0 {
+			return apierror.FailedPrecondition("branch rule %q on %s requires conversation resolution: changes were requested by %s", id, branch, strings.Join(st.changesRequested, ", "))
+		}
+	}
+	return statusChecksLocked(r, pull, head, branch)
 }
 
 // CreateBranchRule adds a branch rule to a repository.

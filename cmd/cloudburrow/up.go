@@ -149,6 +149,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	metaSrv := metadata.NewServer(creds, cfg.DefaultProject(), cfg.BindAddress, cfg.Endpoints.Metadata)
+	// Secure Source Manager names a review's or a pull request's author
+	// from the request's bearer token (#1927).
+	runadapter.SetSourceManagerCaller(func(bearer string) (string, bool) { return creds.TokenAccount(bearer, time.Now()) }, creds.Email)
 
 	coord := lifecycle.New(time.Duration(cfg.ShutdownTimeout))
 	control := lifecycle.NewControlServer(cfg.Endpoints.Control, coord)

@@ -17,7 +17,8 @@ import (
 )
 
 // What a Secure Source Manager repository holds besides its git data
-// (#1856): issues and their comments, pull requests and branch rules,
+// (#1856): issues and their comments, pull requests, their comments and
+// reviews, branch rules and hooks (#1927),
 // saved in the instance state file beside the repositories and deleted
 // with their repository.
 
@@ -28,6 +29,13 @@ type ssmSavedChildren struct {
 	PullRequests  []json.RawMessage `json:"pullRequests,omitempty"`
 	BranchRules   []json.RawMessage `json:"branchRules,omitempty"`
 	Counters      map[string]int    `json:"counters,omitempty"`
+	// #1927: pull request comments, hooks, who made what, and the hooks'
+	// sensitive query strings and the pull requests' builds.
+	PullRequestComments []json.RawMessage         `json:"pullRequestComments,omitempty"`
+	Hooks               []json.RawMessage         `json:"hooks,omitempty"`
+	Authors             map[string]string         `json:"authors,omitempty"`
+	HookSecrets         map[string]string         `json:"hookSecrets,omitempty"`
+	PullBuilds          map[string][]ssmPullBuild `json:"pullBuilds,omitempty"`
 }
 
 func ssmMarshalAll[T proto.Message](m map[string]T) []json.RawMessage {
@@ -50,7 +58,9 @@ func ssmUnmarshalAll[T proto.Message](raws []json.RawMessage, mk func() T, name 
 
 func saveSSMChildrenLocked() ssmSavedChildren {
 	return ssmSavedChildren{Issues: ssmMarshalAll(ssmState.issues), IssueComments: ssmMarshalAll(ssmState.issueComments),
-		PullRequests: ssmMarshalAll(ssmState.pulls), BranchRules: ssmMarshalAll(ssmState.rules), Counters: ssmState.counters}
+		PullRequests: ssmMarshalAll(ssmState.pulls), BranchRules: ssmMarshalAll(ssmState.rules), Counters: ssmState.counters,
+		PullRequestComments: ssmMarshalAll(ssmState.prComments), Hooks: ssmMarshalAll(ssmState.hooks), Authors: ssmState.authors,
+		HookSecrets: ssmState.hookSecrets, PullBuilds: ssmState.prBuilds}
 }
 
 func loadSSMChildrenLocked(c ssmSavedChildren) {
@@ -58,6 +68,24 @@ func loadSSMChildrenLocked(c ssmSavedChildren) {
 	ssmUnmarshalAll(c.IssueComments, func() *ssmpb.IssueComment { return &ssmpb.IssueComment{} }, (*ssmpb.IssueComment).GetName, ssmState.issueComments)
 	ssmUnmarshalAll(c.PullRequests, func() *ssmpb.PullRequest { return &ssmpb.PullRequest{} }, (*ssmpb.PullRequest).GetName, ssmState.pulls)
 	ssmUnmarshalAll(c.BranchRules, func() *ssmpb.BranchRule { return &ssmpb.BranchRule{} }, (*ssmpb.BranchRule).GetName, ssmState.rules)
+	ssmUnmarshalAll(c.PullRequestComments, func() *ssmpb.PullRequestComment { return &ssmpb.PullRequestComment{} },
+		(*ssmpb.PullRequestComment).GetName, ssmState.prComments)
+	ssmUnmarshalAll(c.Hooks, func() *ssmpb.Hook { return &ssmpb.Hook{} }, (*ssmpb.Hook).GetName, ssmState.hooks)
+	for k, v := range c.Authors {
+		if ssmState.repos[ssmRepoOf(k)] != nil {
+			ssmState.authors[k] = v
+		}
+	}
+	for k, v := range c.HookSecrets {
+		if ssmState.hooks[k] != nil {
+			ssmState.hookSecrets[k] = v
+		}
+	}
+	for k, v := range c.PullBuilds {
+		if ssmState.pulls[k] != nil {
+			ssmState.prBuilds[k] = v
+		}
+	}
 	for k, v := range c.Counters {
 		if ssmState.repos[ssmRepoOf(k)] != nil {
 			ssmState.counters[k] = v
@@ -73,6 +101,12 @@ func deleteSSMChildrenLocked(repo string) {
 	deletePrefix(ssmState.pulls, prefix)
 	deletePrefix(ssmState.rules, prefix)
 	deletePrefix(ssmState.counters, prefix)
+	deletePrefix(ssmState.prComments, prefix)
+	deletePrefix(ssmState.hooks, prefix)
+	deletePrefix(ssmState.authors, prefix)
+	deletePrefix(ssmState.hookSecrets, prefix)
+	deletePrefix(ssmState.prBuilds, prefix)
+	deleteDeliveries(prefix)
 }
 
 func deletePrefix[T any](m map[string]T, prefix string) {
