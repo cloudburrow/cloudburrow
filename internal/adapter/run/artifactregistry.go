@@ -13,6 +13,7 @@ import (
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
+	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 	"github.com/cloudburrow/cloudburrow/internal/registry"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"google.golang.org/grpc"
@@ -175,7 +176,7 @@ func repositoryNameFilter(filter string) (func(string) bool, error) {
 // done with the repository, as Artifact Registry's completes in moments.
 // Every format but KFP and GO is served (#1531, artifactregistryformats.go);
 // a remote repository's upstream must be one of this instance's (checkMode).
-func (a *ArtifactRegistryServer) CreateRepository(_ context.Context, req *arpb.CreateRepositoryRequest) (*longrunningpb.Operation, error) {
+func (a *ArtifactRegistryServer) CreateRepository(ctx context.Context, req *arpb.CreateRepositoryRequest) (*longrunningpb.Operation, error) {
 	if _, _, err := resource.ParseLocation(req.GetParent()); err != nil {
 		return nil, apierror.InvalidArgument("%v", err)
 	}
@@ -209,6 +210,9 @@ func (a *ArtifactRegistryServer) CreateRepository(_ context.Context, req *arpb.C
 	}
 	r.Name, r.CreateTime, r.UpdateTime = name, now, now
 	r.RegistryUri = formatURL(name, r.GetFormat())
+	if err := checkRepositoryCustom(ctx, r, orgpolicy.MethodCreate); err != nil {
+		return nil, err
+	}
 	repositories.mu.Lock()
 	if _, ok := repositories.repos[name]; ok {
 		repositories.mu.Unlock()
@@ -227,7 +231,7 @@ func (a *ArtifactRegistryServer) CreateRepository(_ context.Context, req *arpb.C
 // cleanup_policies and cleanup_policy_dry_run, the fields a stored
 // repository can change here; any other path is refused, as those fields
 // are refused at create. An empty mask replaces all four.
-func (a *ArtifactRegistryServer) UpdateRepository(_ context.Context, req *arpb.UpdateRepositoryRequest) (*arpb.Repository, error) {
+func (a *ArtifactRegistryServer) UpdateRepository(ctx context.Context, req *arpb.UpdateRepositoryRequest) (*arpb.Repository, error) {
 	in := req.GetRepository()
 	if _, _, err := parseRepositoryName(in.GetName()); err != nil {
 		return nil, err
@@ -263,6 +267,9 @@ func (a *ArtifactRegistryServer) UpdateRepository(_ context.Context, req *arpb.U
 		}
 	}
 	r.UpdateTime = timestamppb.New(time.Now())
+	if err := checkRepositoryCustom(ctx, r, orgpolicy.MethodUpdate); err != nil {
+		return nil, err
+	}
 	repositories.repos[in.GetName()] = r
 	saveRepositoriesLocked()
 	return proto.Clone(r).(*arpb.Repository), nil

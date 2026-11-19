@@ -6,13 +6,16 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 )
@@ -189,4 +192,147 @@ func (f *Front) customREST(r *http.Request) error {
 		req.Subscription.Name = sub
 		return f.customUpdateSubscription(r.Context(), req.GetSubscription(), restMask(r, req.GetUpdateMask().GetPaths()))
 	}
+}
+
+// Custom constraints on pubsub.googleapis.com/Schema and
+// pubsub.googleapis.com/Snapshot (#1895), whose documented fields are
+// resource.definition, .name and .type, and resource.expireTime, .name
+// and .topic (internal/orgpolicy/fields_pubsub.go): CreateSchema is a
+// CREATE, CommitSchema (a new revision of the definition) an UPDATE;
+// CreateSnapshot a CREATE, UpdateSnapshot an UPDATE.
+
+// customSchema checks a schema as CreateSchema or CommitSchema would
+// leave it.
+func customSchema(ctx context.Context, name string, s *pubsubpb.Schema, method string) error {
+	if !orgpolicy.SourceSet() || name == "" {
+		return nil
+	}
+	res := &pubsubpb.Schema{Name: name, Type: s.GetType(), Definition: s.GetDefinition()}
+	return checkCustom(ctx, name, orgpolicy.TypeSchema, method, res)
+}
+
+// snapshotLifetime is a new snapshot's longest life: "A newly-created
+// snapshot expires no later than 7 days from the time of its creation"
+// (google/pubsub/v1/pubsub.proto, Snapshot.expire_time).
+const snapshotLifetime = 7 * 24 * time.Hour
+
+// customCreateSnapshot checks the snapshot a CreateSnapshot would make:
+// its name, its subscription's topic, and its expiry, 7 days from now
+// (its lifetime less the age of the subscription's oldest unacked
+// message, which the front does not read before the create).
+func (f *Front) customCreateSnapshot(ctx context.Context, req *pubsubpb.CreateSnapshotRequest) error {
+	if !orgpolicy.SourceSet() || req.GetName() == "" {
+		return nil
+	}
+	res := &pubsubpb.Snapshot{Name: req.GetName(), ExpireTime: timestamppb.New(f.clock.Now().Add(snapshotLifetime))}
+	if sub, err := f.admin.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: req.GetSubscription()}); err == nil {
+		res.Topic = sub.GetTopic()
+	}
+	return checkCustom(ctx, req.GetName(), orgpolicy.TypeSnapshot, orgpolicy.MethodCreate, res)
+}
+
+// customFirstFrame checks a CreateSchema, CommitSchema or CreateSnapshot
+// over gRPC, answering a stream that replays its first frame.
+func (f *Front) customFirstFrame(ctx context.Context, ss grpc.ServerStream, method string) (grpc.ServerStream, error) {
+	if !orgpolicy.SourceSet() {
+		return ss, nil
+	}
+	switch method {
+	case schemaService + "CreateSchema", schemaService + "CommitSchema", subscriber + "CreateSnapshot":
+	default:
+		return ss, nil
+	}
+	var first frame
+	if err := ss.RecvMsg(&first); err != nil {
+		return nil, err
+	}
+	var err error
+	switch method {
+	case schemaService + "CreateSchema":
+		var req pubsubpb.CreateSchemaRequest
+		if proto.Unmarshal(first, &req) == nil && req.GetSchemaId() != "" {
+			err = customSchema(ctx, req.GetParent()+"/schemas/"+req.GetSchemaId(), req.GetSchema(), orgpolicy.MethodCreate)
+		}
+	case schemaService + "CommitSchema":
+		var req pubsubpb.CommitSchemaRequest
+		if proto.Unmarshal(first, &req) == nil {
+			err = customSchema(ctx, req.GetName(), req.GetSchema(), orgpolicy.MethodUpdate)
+		}
+	default:
+		var req pubsubpb.CreateSnapshotRequest
+		if proto.Unmarshal(first, &req) == nil {
+			err = f.customCreateSnapshot(ctx, &req)
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &replayStream{ServerStream: ss, first: first}, nil
+}
+
+// customRESTSchema checks a REST CreateSchema (POST
+// /v1/projects/{p}/schemas?schemaId=) or CommitSchema (POST
+// /v1/{name}:commit).
+func customRESTSchema(r *http.Request, parent, name, verb string) error {
+	if r.Method != http.MethodPost || !orgpolicy.SourceSet() {
+		return nil
+	}
+	switch {
+	case name == "" && verb == "":
+		id := r.URL.Query().Get("schemaId")
+		if id == "" {
+			return nil
+		}
+		body, err := readBody(r)
+		if err != nil {
+			return err
+		}
+		s := &pubsubpb.Schema{}
+		if restJSON.Unmarshal(body, s) != nil {
+			return nil
+		}
+		return customSchema(r.Context(), parent+"/schemas/"+id, s, orgpolicy.MethodCreate)
+	case name != "" && verb == "commit":
+		body, err := readBody(r)
+		if err != nil {
+			return err
+		}
+		var req pubsubpb.CommitSchemaRequest
+		if restJSON.Unmarshal(body, &req) != nil {
+			return nil
+		}
+		return customSchema(r.Context(), name, req.GetSchema(), orgpolicy.MethodUpdate)
+	}
+	return nil
+}
+
+// customRESTSnapshot checks a REST CreateSnapshot (PUT
+// /v1/projects/{p}/snapshots/{n}, the body {subscription}).
+func (f *Front) customRESTSnapshot(r *http.Request, name string) error {
+	if r.Method != http.MethodPut || !orgpolicy.SourceSet() {
+		return nil
+	}
+	body, err := readBody(r)
+	if err != nil {
+		return err
+	}
+	var req pubsubpb.CreateSnapshotRequest
+	if restJSON.Unmarshal(body, &req) != nil {
+		return nil
+	}
+	req.Name = name
+	return f.customCreateSnapshot(r.Context(), &req)
+}
+
+// customUpdateSnapshot checks an UpdateSnapshot on the snapshot as it
+// would be: its expiry the one the update sets.
+func customUpdateSnapshot(ctx context.Context, cur *pubsubpb.Snapshot, expire *time.Time) error {
+	if !orgpolicy.SourceSet() {
+		return nil
+	}
+	res := &pubsubpb.Snapshot{Name: cur.GetName(), Topic: cur.GetTopic(), ExpireTime: cur.GetExpireTime()}
+	if expire != nil {
+		res.ExpireTime = timestamppb.New(*expire)
+	}
+	return checkCustom(ctx, cur.GetName(), orgpolicy.TypeSnapshot, orgpolicy.MethodUpdate, res)
 }

@@ -9,6 +9,7 @@ import (
 	"cloud.google.com/go/spanner/admin/instance/apiv1/instancepb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 )
@@ -49,6 +50,14 @@ func (s *Instances) CreateInstance(ctx context.Context, req *instancepb.CreateIn
 		if err := orgpolicy.CheckLocations(ctx, req.GetParent(), req.GetParent(), loc); err != nil {
 			return nil, status.Error(codes.FailedPrecondition, err.Error())
 		}
+	}
+	inst := &instancepb.Instance{}
+	if req.GetInstance() != nil {
+		inst = proto.Clone(req.GetInstance()).(*instancepb.Instance)
+	}
+	inst.Name = req.GetParent() + "/instances/" + req.GetInstanceId()
+	if err := checkCustom(ctx, inst.GetName(), orgpolicy.TypeSpannerInstance, orgpolicy.MethodCreate, inst); err != nil {
+		return nil, err
 	}
 	return s.emu.CreateInstance(ctx, req)
 }

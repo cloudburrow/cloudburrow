@@ -13,6 +13,8 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
+
+	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 )
 
 // Database drop protection (#1461). The emulator refuses UpdateDatabase,
@@ -109,6 +111,11 @@ func (d databases) UpdateDatabase(ctx context.Context, req *databasepb.UpdateDat
 	}
 	cur, err := d.s.emuDB.GetDatabase(ctx, &databasepb.GetDatabaseRequest{Name: in.GetName()})
 	if err != nil {
+		return nil, err
+	}
+	next := proto.Clone(cur).(*databasepb.Database)
+	next.EnableDropProtection = in.GetEnableDropProtection()
+	if err := checkCustom(ctx, in.GetName(), orgpolicy.TypeSpannerDatabase, orgpolicy.MethodUpdate, next); err != nil {
 		return nil, err
 	}
 	start := d.s.now()

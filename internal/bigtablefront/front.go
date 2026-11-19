@@ -146,6 +146,8 @@ func New(upstream string, logf func(format string, args ...any)) (*Front, error)
 		}
 		return resp, err
 	}
+	// Custom organization policy constraints (custom.go, #1895).
+	f.wrapCustom()
 	return f, nil
 }
 

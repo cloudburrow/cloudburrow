@@ -741,6 +741,11 @@ func (f *Front) handle(_ any, ss grpc.ServerStream) (err error) {
 		// The emulator serves no IAM; the front stores policies (iam.go).
 		return f.handleIAM(ctx, ss, method)
 	}
+	// Custom constraints on a schema or snapshot created or committed
+	// (#1895, custom.go).
+	if ss, err = f.customFirstFrame(ctx, ss, method); err != nil {
+		return err
+	}
 	switch method {
 	case publisher + "DetachSubscription":
 		// The emulator refuses it; the front detaches (detach.go, #1406).
