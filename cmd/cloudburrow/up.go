@@ -630,6 +630,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if kmsSvc != nil {
 			sqlAdminSrv.UseKMS(sqlAdminKMS{svc: kmsSvc})
 		}
+		// CUSTOMER_MANAGED_CAS_CA (#1834) has this instance's Certificate
+		// Authority Service issue the server certificates, in process.
+		if privateCASvc != nil {
+			sqlAdminSrv.UseCertificateAuthorityService(sqlAdminCAS{svc: privateCASvc})
+		}
 		coord.Register(sqlAdminSrv)
 	}
 	// The Backup and DR Service (#1433), over the Admin API's backups.

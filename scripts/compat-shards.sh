@@ -272,9 +272,11 @@ compat_shard() {
       # which every instance serves, as SQL_RESOURCEMANAGER, for the purged
       # project's Cloud SQL and Backup and DR and for Backup and DR's
       # folder fetch (#1568); CMEK_KMS for Cloud SQL's customer-managed
-      # keys too.
-      SERVICES=cloudsql,cloudsql-mysql,backupdr,storage,secretmanager,kms
-      TEST_VARS+=,MYSQL,MYSQL_PASSWORD,CLOUDSQL,SQLADMIN,BACKUPDR,CMEK_KMS,CLOUDSQL_SECRETS,NOPUBSUB_STORAGE,SQL_RESOURCEMANAGER
+      # keys too. Certificate Authority Service as SQL_PRIVATECA, for
+      # CUSTOMER_MANAGED_CAS_CA's CA pools (#1834), so the privateca suite
+      # stays in its own shard.
+      SERVICES=cloudsql,cloudsql-mysql,backupdr,storage,secretmanager,kms,privateca
+      TEST_VARS+=,MYSQL,MYSQL_PASSWORD,CLOUDSQL,SQLADMIN,BACKUPDR,CMEK_KMS,CLOUDSQL_SECRETS,NOPUBSUB_STORAGE,SQL_RESOURCEMANAGER,SQL_PRIVATECA
       # Cloud SQL for PostgreSQL (#701): a table with a row.
       SETUP_TESTS="TestCloudSQLRestartSetup"
       PROBE_TESTS="TestCloudSQLMySQLAcrossRestart TestCloudSQLAcrossRestart"

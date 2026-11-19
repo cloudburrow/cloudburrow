@@ -52,14 +52,15 @@ func (s *Server) serverCAsReady(e Engine) (*serverCA, error) {
 	if s.conn == nil || s.conn.cas == nil {
 		return nil, unimplemented("server CAs", "this server was started without its connector, which holds the instances' server CAs")
 	}
-	if s.serverCaMode(e.Instance()) == casCA {
+	if m := s.serverCaMode(e.Instance()); isCASMode(m) {
 		// UNVERIFIED (docs re-read 2026-11-17:
 		// <https://docs.cloud.google.com/sql/docs/postgres/admin-api/rest/v1/instances/addServerCertificate>,
 		// "For instances not using CAS server CA, use instances.addServerCa
 		// instead"; no error is documented): the 400 and its message are
 		// CloudBurrow's.
-		return nil, Errorf(http.StatusBadRequest, "Invalid request: instance %s's serverCaMode is %s: its server CA is the region's, "+
-			"and its server certificate is rotated with addServerCertificate and rotateServerCertificate.", e.Instance(), casCA)
+		return nil, Errorf(http.StatusBadRequest, "Invalid request: instance %s's serverCaMode is %s: its server CA is %s, "+
+			"and its server certificate is rotated with addServerCertificate and rotateServerCertificate.", e.Instance(), m,
+			map[string]string{casCA: "the region's", customerCA: "its CA pool's"}[m])
 	}
 	ca := s.conn.ca(e.Instance())
 	if ca == nil {
@@ -71,14 +72,38 @@ func (s *Server) serverCAsReady(e Engine) (*serverCA, error) {
 // listServerCas is instances.listServerCas: the active CA, the upcoming one
 // addServerCa made, and the one rotated out.
 func (s *Server) listServerCas(project string, e Engine) (any, error) {
-	if s.serverCaMode(e.Instance()) == casCA && s.conn != nil && s.conn.cas != nil {
-		// A CAS instance trusts its region's CA chain.
-		chain, err := s.conn.casFor(s.regionOf(e.Instance()))
+	if isCASMode(s.serverCaMode(e.Instance())) && s.conn != nil && s.conn.cas != nil {
+		// A CAS instance trusts its region's CA chain; a customer-managed
+		// one the chain of each pool CA that issued one of its server
+		// certificate versions, the active one's first.
+		iss, err := s.serverIssuer(e.Instance())
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"kind": "sql#instancesListServerCas", "certs": []any{casCertJSON(project, e.Instance(), chain)},
-			"activeVersion": fingerprint(chain.sub)}, nil
+		s.conn.camu.Lock()
+		f, err := s.conn.serverCertsLocked(iss, project, e.Instance())
+		s.conn.camu.Unlock()
+		if err != nil {
+			return nil, err
+		}
+		certs, active := []any{}, ""
+		seen := map[string]bool{}
+		for _, first := range []bool{true, false} {
+			for _, v := range f.Versions {
+				fp, _ := certFingerprint(v.Cert)
+				chain := iss.caChain(v)
+				if (fp == f.Active) != first || seen[chain] {
+					continue
+				}
+				seen[chain] = true
+				j := chainJSON(project, e.Instance(), chain)
+				if first {
+					active, _ = j["sha1Fingerprint"].(string)
+				}
+				certs = append(certs, j)
+			}
+		}
+		return map[string]any{"kind": "sql#instancesListServerCas", "certs": certs, "activeVersion": active}, nil
 	}
 	ca, err := s.serverCAsReady(e)
 	if err != nil {

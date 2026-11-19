@@ -16,13 +16,15 @@ package sqladmin
 // Here CloudBurrow plays the Google-managed CAs: each region's root and
 // subordinate CA are generated locally on first use and kept in the
 // connector's directory, like the instances' internal CAs, and never leave
-// the host. CUSTOMER_MANAGED_CAS_CA, whose CA pool is the customer's in
-// Certificate Authority Service, stays 501 (checkIPConfiguration).
+// the host. CUSTOMER_MANAGED_CAS_CA instances are rotated the same way,
+// their server certificates issued by the customer's CA pool in
+// Certificate Authority Service instead (customerca.go).
 //
 // The client side is unchanged: ephemeral client certificates are still
 // signed by the instance's own CA, which the listener on 3307 trusts.
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -38,6 +40,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"time"
 )
 
@@ -52,17 +56,89 @@ const serverCertLifetime = 365 * 24 * time.Hour
 // serverCaMode is the instance's settings.ipConfiguration.serverCaMode:
 // a created instance's, or GOOGLE_MANAGED_INTERNAL_CA.
 func (s *Server) serverCaMode(instance string) string {
+	m, _ := s.serverCaSettings(instance)
+	return m
+}
+
+// serverCaSettings is the instance's server CA mode and, for
+// CUSTOMER_MANAGED_CAS_CA, its CA pool.
+func (s *Server) serverCaSettings(instance string) (mode, pool string) {
 	s.emu.RLock()
 	defer s.emu.RUnlock()
 	if s.writes != nil {
 		if c := s.writes.byName[instance]; c != nil {
-			ic, _ := c.spec.Settings["ipConfiguration"].(map[string]any)
-			if m, _ := ic["serverCaMode"].(string); m == casCA {
-				return casCA
-			}
+			return specCAMode(&c.spec), specCAPool(&c.spec)
 		}
 	}
-	return internalCA
+	return internalCA, ""
+}
+
+// certIssuer signs an instance's server certificates: its region's
+// shared CA hierarchy (GOOGLE_MANAGED_CAS_CA), or the customer's CA pool
+// (CUSTOMER_MANAGED_CAS_CA).
+type certIssuer struct {
+	// id is "" for the shared hierarchy, and the pool's name otherwise:
+	// the server certificate file records it, and versions issued by
+	// another issuer are dropped.
+	id    string
+	chain *casChain
+	cas   CertificateAuthorityService
+}
+
+// issue signs a new server certificate version.
+func (i *certIssuer) issue(project, instance string) (serverCertVersion, error) {
+	if i.id == "" {
+		return issueServerCert(i.chain, project, instance)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return issueFromPool(ctx, i.cas, i.id, project, instance)
+}
+
+// caChain is the PEM chain of the CA that signed v, issuer first.
+func (i *certIssuer) caChain(v serverCertVersion) string {
+	if v.Chain != "" {
+		return v.Chain
+	}
+	if i.chain != nil {
+		return i.chain.pem
+	}
+	return ""
+}
+
+// presented is what the listener presents for v: the certificate and the
+// CAs between it and the root.
+func (i *certIssuer) presented(v serverCertVersion) string {
+	out := v.Cert
+	if i.id == "" {
+		return out + i.chain.sub.certPEM
+	}
+	for _, c := range pemCerts(v.Chain) {
+		if !selfSigned(c) {
+			out += string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: c.Raw}))
+		}
+	}
+	return out
+}
+
+// serverIssuer is the issuer of a CAS or customer-managed instance's
+// server certificates.
+func (s *Server) serverIssuer(instance string) (*certIssuer, error) {
+	mode, pool := s.serverCaSettings(instance)
+	if mode == customerCA {
+		s.emu.RLock()
+		cas := s.privateca
+		s.emu.RUnlock()
+		if cas == nil {
+			return nil, errNoCAService(instance, pool)
+		}
+		return &certIssuer{id: pool, cas: cas}, nil
+	}
+	chain, err := s.conn.casFor(s.regionOf(instance))
+	if err != nil {
+		return nil, err
+	}
+	return &certIssuer{chain: chain}, nil
 }
 
 // casChain is a region's Google-managed CA hierarchy: the subordinate CA
@@ -149,9 +225,17 @@ type serverCertVersion struct {
 	// upcoming version from the previous one by createTime, and the
 	// certificate's own NotBefore has whole seconds only.
 	Created string `json:"created"`
+	// Chain is the issuing CA's chain, for a customer's CA pool's
+	// certificate (the region's chain otherwise), and Name the
+	// certificate's resource name in the pool.
+	Chain string `json:"chain,omitempty"`
+	Name  string `json:"name,omitempty"`
 }
 
 type serverCertFile struct {
+	// Issuer is the CA pool that issued the versions, "" for the
+	// region's shared hierarchy.
+	Issuer   string              `json:"issuer,omitempty"`
 	Active   string              `json:"active"` // sha1 fingerprint
 	Versions []serverCertVersion `json:"versions"`
 }
@@ -207,7 +291,7 @@ func issueServerCert(chain *casChain, project, instance string) (serverCertVersi
 
 // serverCerts reads the instance's server certificate versions, issuing
 // the first, active one when it has none. The caller holds c.camu.
-func (c *connector) serverCertsLocked(chain *casChain, project, instance string) (*serverCertFile, error) {
+func (c *connector) serverCertsLocked(iss *certIssuer, project, instance string) (*serverCertFile, error) {
 	path := serverCertsPath(c.dir, instance)
 	var f serverCertFile
 	if b, err := os.ReadFile(path); err == nil {
@@ -217,8 +301,13 @@ func (c *connector) serverCertsLocked(chain *casChain, project, instance string)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
+	if f.Issuer != iss.id {
+		// The instance moved to another issuer: its versions are not
+		// valid under the new one.
+		f = serverCertFile{Issuer: iss.id}
+	}
 	if len(f.Versions) == 0 {
-		v, err := issueServerCert(chain, project, instance)
+		v, err := iss.issue(project, instance)
 		if err != nil {
 			return nil, err
 		}
@@ -241,21 +330,17 @@ func (c *connector) writeServerCertsLocked(instance string, f *serverCertFile) e
 }
 
 // casServerCert is the certificate the listener presents for a CAS
-// instance: its active server certificate, with the subordinate CA.
-func (c *connector) casServerCert(region, project, instance string) (*tls.Certificate, error) {
-	chain, err := c.casFor(region)
-	if err != nil {
-		return nil, err
-	}
+// instance: its active server certificate, with the CAs under the root.
+func (c *connector) casServerCert(iss *certIssuer, project, instance string) (*tls.Certificate, error) {
 	c.camu.Lock()
-	f, err := c.serverCertsLocked(chain, project, instance)
+	f, err := c.serverCertsLocked(iss, project, instance)
 	c.camu.Unlock()
 	if err != nil {
 		return nil, err
 	}
 	for _, v := range f.Versions {
 		if fp, _ := certFingerprint(v.Cert); fp == f.Active {
-			crt, err := tls.X509KeyPair([]byte(v.Cert+chain.sub.certPEM), []byte(v.Key))
+			crt, err := tls.X509KeyPair([]byte(iss.presented(v)), []byte(v.Key))
 			if err != nil {
 				return nil, err
 			}
@@ -265,36 +350,36 @@ func (c *connector) casServerCert(region, project, instance string) (*tls.Certif
 	return nil, fmt.Errorf("instance %s has no active server certificate", instance)
 }
 
-// casReady is the CA hierarchy of a CAS instance, or why the server
-// certificate methods do not apply to it.
-func (s *Server) casReady(e Engine, method string) (*casChain, error) {
+// casReady is the issuer of a CAS or customer-managed instance, or why
+// the server certificate methods do not apply to it.
+func (s *Server) casReady(e Engine, method string) (*certIssuer, error) {
 	if s.conn == nil || s.conn.cas == nil {
 		return nil, unimplemented("server certificates", "this server was started without its connector, which holds the server certificates")
 	}
-	if m := s.serverCaMode(e.Instance()); m != casCA {
-		return nil, Errorf(http.StatusBadRequest, "Invalid request: %s applies to an instance whose serverCaMode is %s; "+
+	if m := s.serverCaMode(e.Instance()); !isCASMode(m) {
+		return nil, Errorf(http.StatusBadRequest, "Invalid request: %s applies to an instance whose serverCaMode is %s or %s; "+
 			"instance %s's is %s, whose server CA is managed with addServerCa, rotateServerCa and listServerCas.",
-			method, casCA, e.Instance(), m)
+			method, casCA, customerCA, e.Instance(), m)
 	}
-	return s.conn.casFor(s.regionOf(e.Instance()))
+	return s.serverIssuer(e.Instance())
 }
 
 // listServerCertificates is instances.ListServerCertificates.
 func (s *Server) listServerCertificates(project string, e Engine) (any, error) {
-	chain, err := s.casReady(e, "listServerCertificates")
+	iss, err := s.casReady(e, "listServerCertificates")
 	if err != nil {
 		return nil, err
 	}
 	inst := e.Instance()
 	s.conn.camu.Lock()
-	f, err := s.conn.serverCertsLocked(chain, project, inst)
+	f, err := s.conn.serverCertsLocked(iss, project, inst)
 	s.conn.camu.Unlock()
 	if err != nil {
 		return nil, err
 	}
 	// caCerts is index for index the CA that signed each server certificate
-	// (gcloud reads caCerts[i] beside serverCerts[i]): here always the
-	// region's subordinate CA.
+	// (gcloud reads caCerts[i] beside serverCerts[i]): the region's
+	// subordinate CA, or the pool's CA that issued it.
 	certs, cas := []any{}, []any{}
 	for _, v := range f.Versions {
 		if _, cert := certFingerprint(v.Cert); cert != nil {
@@ -303,7 +388,7 @@ func (s *Server) listServerCertificates(project string, e Engine) (any, error) {
 				j["createTime"] = v.Created
 			}
 			certs = append(certs, j)
-			cas = append(cas, casCertJSON(project, inst, chain))
+			cas = append(cas, chainJSON(project, inst, iss.caChain(v)))
 		}
 	}
 	return map[string]any{
@@ -320,22 +405,53 @@ func casCertJSON(project, instance string, chain *casChain) map[string]any {
 	return sslCertJSON(project, instance, chain.sub.cert, chain.pem)
 }
 
+// chainJSON is a CA chain as an SslCert: its first certificate's, whose
+// cert holds the whole chain.
+func chainJSON(project, instance, chain string) map[string]any {
+	certs := pemCerts(chain)
+	if len(certs) == 0 {
+		return map[string]any{"kind": "sql#sslCert", "instance": instance, "cert": chain}
+	}
+	return sslCertJSON(project, instance, certs[0], chain)
+}
+
+// trustedChains are the CA chains of the instance's server certificate
+// versions, the active one's first, each once: what a client trusts to
+// reach it across a rotation.
+func trustedChains(iss *certIssuer, f *serverCertFile) string {
+	var out []string
+	add := func(c string) {
+		if c != "" && !slices.Contains(out, c) {
+			out = append(out, c)
+		}
+	}
+	for _, v := range f.Versions {
+		if fp, _ := certFingerprint(v.Cert); fp == f.Active {
+			add(iss.caChain(v))
+		}
+	}
+	for _, v := range f.Versions {
+		add(iss.caChain(v))
+	}
+	return strings.Join(out, "")
+}
+
 // addServerCertificate is instances.addServerCertificate: a new upcoming
 // version, replacing one added before and never rotated in. At most three
 // versions are kept: the active one, the upcoming one and the previous one.
 func (s *Server) addServerCertificate(base, project string, e Engine) (any, error) {
-	chain, err := s.casReady(e, "addServerCertificate")
+	iss, err := s.casReady(e, "addServerCertificate")
 	if err != nil {
 		return nil, err
 	}
 	inst := e.Instance()
 	s.conn.camu.Lock()
 	defer s.conn.camu.Unlock()
-	f, err := s.conn.serverCertsLocked(chain, project, inst)
+	f, err := s.conn.serverCertsLocked(iss, project, inst)
 	if err != nil {
 		return nil, err
 	}
-	v, err := issueServerCert(chain, project, inst)
+	v, err := iss.issue(project, inst)
 	if err != nil {
 		return nil, err
 	}
@@ -377,14 +493,14 @@ func (s *Server) rotateServerCertificate(r *http.Request, base, project string, 
 	if err := decode(r, &req); err != nil {
 		return nil, err
 	}
-	chain, err := s.casReady(e, "rotateServerCertificate")
+	iss, err := s.casReady(e, "rotateServerCertificate")
 	if err != nil {
 		return nil, err
 	}
 	inst := e.Instance()
 	s.conn.camu.Lock()
 	defer s.conn.camu.Unlock()
-	f, err := s.conn.serverCertsLocked(chain, project, inst)
+	f, err := s.conn.serverCertsLocked(iss, project, inst)
 	if err != nil {
 		return nil, err
 	}
@@ -430,15 +546,22 @@ func (s *Server) rotateServerCertificate(r *http.Request, base, project string, 
 // casConnectSettings adds a CAS instance's CA chain and DNS names to its
 // connect settings.
 func (s *Server) casConnectSettings(out map[string]any, project string, e Engine) error {
-	if s.serverCaMode(e.Instance()) != casCA {
+	mode := s.serverCaMode(e.Instance())
+	if !isCASMode(mode) {
 		return nil
 	}
-	chain, err := s.conn.casFor(s.regionOf(e.Instance()))
+	iss, err := s.serverIssuer(e.Instance())
 	if err != nil {
 		return err
 	}
-	out["serverCaMode"] = casCA
-	out["serverCaCert"] = casCertJSON(project, e.Instance(), chain)
+	s.conn.camu.Lock()
+	f, err := s.conn.serverCertsLocked(iss, project, e.Instance())
+	s.conn.camu.Unlock()
+	if err != nil {
+		return err
+	}
+	out["serverCaMode"] = mode
+	out["serverCaCert"] = chainJSON(project, e.Instance(), trustedChains(iss, f))
 	out["dnsNames"] = dnsNamesJSON(project, e.Instance())
 	return nil
 }
@@ -452,7 +575,7 @@ func dnsNamesJSON(project, instance string) []any {
 
 // casInstanceJSON adds a CAS instance's DNS names to its resource.
 func (s *Server) casInstanceJSON(in map[string]any, spec Spec) {
-	if s.serverCaMode(spec.Name) != casCA {
+	if !isCASMode(s.serverCaMode(spec.Name)) {
 		return
 	}
 	in["dnsName"] = dnsName(spec.Project, spec.Name) + "."
