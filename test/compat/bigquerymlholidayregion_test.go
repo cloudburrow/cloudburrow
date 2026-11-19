@@ -24,7 +24,7 @@ import (
 // holiday of region US named IndependenceDay replaces the built-in one
 // (its window is the custom one); a series of under a year is not
 // holiday-modelled (has_holiday_effect FALSE), as documented; an unknown
-// or lower-case region is 400. The calendar is an UNVERIFIED stand-in for
+// or lower-case region is 400. The calendar is an UNVERIFIED (docs re-read 2026-11-18) stand-in for
 // Google's (python-holidays 0.84, internal/bigqueryfront/modelholidayregion.go).
 //
 // covers: bigquery.jobs.query, bigquery.models.get

@@ -3,7 +3,6 @@
 package compat
 
 import (
-	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -11,7 +10,6 @@ import (
 	"time"
 
 	"cloud.google.com/go/bigquery"
-	"google.golang.org/api/googleapi"
 )
 
 // BigQuery ML ARIMA_PLUS (#1504): training, ML.FORECAST,
@@ -118,11 +116,13 @@ func TestBigQueryMLArimaPlus(t *testing.T) {
 	if n := len(mlQuery(t, h, c, fmt.Sprintf("SELECT * FROM ML.FORECAST(MODEL `%s.multi`)", name))); n != 6 {
 		t.Errorf("ML.FORECAST of two series: %d rows; want 3 each", n)
 	}
-	_, err = c.Query(fmt.Sprintf("CREATE MODEL `%s.no` OPTIONS(model_type='ARIMA_PLUS', time_series_timestamp_col='d', time_series_data_col='v', "+
-		"holiday_region='US') AS SELECT d, v FROM `%s.walk`", name, name)).Read(ctx)
-	var ge *googleapi.Error
-	if !errors.As(err, &ge) || ge.Code != http.StatusNotImplemented {
-		t.Errorf("holiday_region: %v; want 501", err)
+	// holiday_region on a series of under a year trains, with no holiday
+	// effect, as documented (#1776, TestBigQueryMLHolidayRegion).
+	if err := mlRun(h, c, fmt.Sprintf("CREATE MODEL `%s.short` OPTIONS(model_type='ARIMA_PLUS', time_series_timestamp_col='d', time_series_data_col='v', "+
+		"holiday_region='US') AS SELECT d, v FROM `%s.walk`", name, name)); err != nil {
+		t.Errorf("holiday_region on a short series: %v", err)
+	} else if ae := mlQuery(t, h, c, fmt.Sprintf("SELECT has_holiday_effect FROM ML.ARIMA_EVALUATE(MODEL `%s.short`, STRUCT(FALSE AS show_all_candidate_models))", name)); len(ae) != 1 || ae[0]["has_holiday_effect"] != false {
+		t.Errorf("holiday_region on a short series: has_holiday_effect %v; want FALSE", ae)
 	}
 	_, err = c.Query(fmt.Sprintf("SELECT * FROM ML.PREDICT(MODEL `%s.rw`, (SELECT 1 AS x))", name)).Read(ctx)
 	wantHTTPStatus(t, "ML.PREDICT of an ARIMA_PLUS model", err, http.StatusBadRequest)

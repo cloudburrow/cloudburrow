@@ -3,7 +3,7 @@
 Google publishes its ARIMA_PLUS holiday calendar only as a BigQuery public
 dataset, which CloudBurrow must not query, so the built-in holidays come
 from the MIT-licensed python-holidays package, pinned by SHA-256 in
-dependencies.json (components.bigqueryml.pythonHolidays). UNVERIFIED: the
+dependencies.json (components.bigqueryml.pythonHolidays). UNVERIFIED (docs re-read 2026-11-18): the
 holidays, their English names and the continental groups are not Google's.
 
 Run with the pinned package installed (see tools/bqholidays/README in the
@@ -32,7 +32,7 @@ COUNTRIES = (
     "RU SA SE SG SI SK TH TR TW UA US VE VN ZA"
 ).split()
 
-# UNVERIFIED (2026-11-18): Google does not document which countries each
+# UNVERIFIED (docs re-read 2026-11-18): Google does not document which countries each
 # continental region covers, nor how its holidays are chosen. Here a
 # continental region (and GLOBAL, over every country) has a holiday on a
 # date when at least half of its countries do, named by the most common
@@ -79,7 +79,7 @@ def merge(rows):
     """One occurrence per run of a holiday's days: a holiday's dates within
     2 days of its previous kept date (a multi-day festival, an observed
     bridge day) fold into that date, as BigQuery ML's holiday windows
-    (1 day on each side here) must not overlap. UNVERIFIED (2026-11-18)."""
+    (1 day on each side here) must not overlap. UNVERIFIED (docs re-read 2026-11-18)."""
     out = set()
     by = collections.defaultdict(list)
     for r, n, d in rows:

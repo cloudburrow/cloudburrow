@@ -11,7 +11,7 @@ import (
 
 // TestBigQueryMLAutoML (#1776): AUTOML_REGRESSOR and AUTOML_CLASSIFIER
 // models, trained locally by a search over CloudBurrow's trainers
-// (UNVERIFIED: Google does not document AutoML's), through the official
+// (UNVERIFIED, docs re-read 2026-11-18: Google does not document AutoML's), through the official
 // cloud.google.com/go/bigquery client, on 1,200 rows of y = 3 x1 − 2 x2 +
 // a category's offset: models.get answers modelType AUTOML_REGRESSOR and
 // the trainingOptions budgetHours (default 1) and inputLabelColumns (the
@@ -50,7 +50,7 @@ func TestBigQueryMLAutoML(t *testing.T) {
 		len(runs[0].TrainingOptions.InputLabelColumns) != 1 || runs[0].TrainingOptions.InputLabelColumns[0] != "y" {
 		t.Errorf("trainingOptions not budgetHours 1 and inputLabelColumns [y]")
 	}
-	pr := mlQuery(t, h, c, fmt.Sprintf("SELECT y, predicted_y FROM ML.PREDICT(MODEL `%s.reg`, (SELECT * FROM `%[1]s.t` WHERE MOD(x1 * 1000, 7) < 1))", name))
+	pr := mlQuery(t, h, c, fmt.Sprintf("SELECT y, predicted_y FROM ML.PREDICT(MODEL `%s.reg`, (SELECT * FROM `%[1]s.t` WHERE part = 'TEST'))", name))
 	if len(pr) == 0 {
 		t.Fatal("ML.PREDICT: no rows")
 	}
