@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -292,6 +293,72 @@ func TestBigQueryMLAnnotateImageDetections(t *testing.T) {
 	}
 	if r := rows[2]; r["status"] != "" || r["faces"] != nil || r["objects"] != nil {
 		t.Errorf("the scanned page: %v", r)
+	}
+}
+
+// EnvVisionLandmarks, when set, runs TestBigQueryMLAnnotateImageLandmarks:
+// its instance fetches Google's six landmark classifiers (216 MB of
+// archives) from Kaggle Models the first time it needs them.
+const EnvVisionLandmarks = "CLOUDBURROW_TEST_VISION_LANDMARKS"
+
+// EnvLandmarkImages optionally names a directory holding ggb.jpg, the
+// Wikimedia Commons photograph GoldenGateBridge-001.jpg at 960 pixels
+// wide (not kept in the repo), for TestBigQueryMLAnnotateImageLandmarks.
+const EnvLandmarkImages = "CLOUDBURROW_TEST_LANDMARK_IMAGES"
+
+// TestBigQueryMLAnnotateImageLandmarks (#1799): ML.ANNOTATE_IMAGE's
+// LANDMARK_DETECTION through the official cloud.google.com/go/bigquery,
+// storage and bigquery/connection/apiv1 clients, answered by Google's six
+// on-device landmark classifiers run locally (never Vision). Each image's
+// landmarkAnnotations entries have a description and a score from the
+// models' 0.7 threshold, most probable first, at most maxResults (10 by
+// default), and no mid. The classifiers answer a landmark even for the
+// scanned page (the gap docs/gaps.md names); with EnvLandmarkImages, the
+// Golden Gate Bridge photograph's first landmark is "Golden Gate Bridge".
+// An object that is not an image is "Bad image data.".
+//
+// covers: bigquery.jobs.query
+func TestBigQueryMLAnnotateImageLandmarks(t *testing.T) {
+	if os.Getenv(EnvVisionLandmarks) == "" {
+		t.Skip("set " + EnvVisionLandmarks + " to run LANDMARK_DETECTION: the instance fetches Google's six landmark classifiers (216 MB) from Kaggle Models")
+	}
+	h := New(t)
+	h.Endpoint(EnvLocalAI)
+	var extra []map[string][]byte
+	if dir := os.Getenv(EnvLandmarkImages); dir != "" {
+		ggb, err := os.ReadFile(filepath.Join(dir, "ggb.jpg"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		extra = append(extra, map[string][]byte{"img/ggb.jpg": ggb})
+	}
+	c, ds, id := visionObjectTable(t, h, extra...)
+	if err := mlRun(h, c, fmt.Sprintf("CREATE MODEL `%s.vision` REMOTE WITH CONNECTION `%s` OPTIONS(REMOTE_SERVICE_TYPE = 'CLOUD_AI_VISION_V1')",
+		ds, c.Project()+".us."+id)); err != nil {
+		t.Fatalf("CREATE MODEL CLOUD_AI_VISION_V1: %v", err)
+	}
+	rows := mlQuery(t, h, c, fmt.Sprintf("SELECT uri, ml_annotate_image_status AS status, "+
+		"ARRAY_LENGTH(JSON_QUERY_ARRAY(ml_annotate_image_result, '$.landmarkAnnotations')) AS n, "+
+		"JSON_VALUE(ml_annotate_image_result, '$.landmarkAnnotations[0].description') AS top, "+
+		"LAX_FLOAT64(ml_annotate_image_result.landmarkAnnotations[0].score) AS score, "+
+		"LAX_FLOAT64(ml_annotate_image_result.landmarkAnnotations[1].score) AS second, "+
+		"JSON_VALUE(ml_annotate_image_result, '$.landmarkAnnotations[0].mid') AS mid "+
+		"FROM ML.ANNOTATE_IMAGE(MODEL `%s.vision`, TABLE `%s.images`, STRUCT(['LANDMARK_DETECTION'] AS vision_features)) ORDER BY uri", ds, ds))
+	if len(rows) != 2+len(extra) || rows[0]["status"] != "Bad image data." {
+		t.Fatalf("rows: %v", rows)
+	}
+	for _, r := range rows[1:] {
+		score, _ := r["score"].(float64)
+		second, _ := r["second"].(float64)
+		n, _ := r["n"].(int64)
+		if r["status"] != "" || n < 1 || n > 10 || r["top"] == nil || score < 0.7 || score > 1 || second > score || r["mid"] != nil {
+			t.Errorf("LANDMARK_DETECTION of %v: %v", r["uri"], r)
+		}
+	}
+	if len(extra) > 0 {
+		if r := rows[1]; !strings.HasSuffix(fmt.Sprint(r["uri"]), "/img/ggb.jpg") || r["top"] != "Golden Gate Bridge" {
+			t.Errorf("the Golden Gate Bridge: %v", r)
+		}
 	}
 }
 

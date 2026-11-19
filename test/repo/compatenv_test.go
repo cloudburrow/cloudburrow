@@ -55,9 +55,11 @@ var compatEnvExceptions = map[string]string{
 	"CLOUDBURROW_TEST_CLOUD_SQL_PROXY": "host fixture: the pinned binary make cloud-sql-proxy downloads",
 	// The registry test (#1383) deploys from the pushed image unless this
 	// is set, which skips only that slower Cloud Run step.
-	"CLOUDBURROW_TEST_VISION_LABELS": "opt-in switch: the label test downloads an 18.6 MB model",
-	"CLOUDBURROW_TEST_VISION_DETECT": "opt-in switch: the detection test downloads 14 MB of models",
-	"CLOUDBURROW_TEST_SKIP_RUN_PULL": "opt-out switch: skips the Cloud Run pull of the registry test",
+	"CLOUDBURROW_TEST_VISION_LABELS":    "opt-in switch: the label test downloads an 18.6 MB model",
+	"CLOUDBURROW_TEST_VISION_DETECT":    "opt-in switch: the detection test downloads 14 MB of models",
+	"CLOUDBURROW_TEST_VISION_LANDMARKS": "opt-in switch: the landmark test downloads 216 MB of models",
+	"CLOUDBURROW_TEST_LANDMARK_IMAGES":  "a directory of landmark photographs not kept in the repo",
+	"CLOUDBURROW_TEST_SKIP_RUN_PULL":    "opt-out switch: skips the Cloud Run pull of the registry test",
 	// An opt-in switch for a slow test no CI shard runs (#678).
 	"CLOUDBURROW_TEST_FUNCTIONS": "opt-in switch",
 	// The signed URL tests' key and account, for the builtin storage-server

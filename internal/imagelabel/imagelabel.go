@@ -137,28 +137,37 @@ func (c *Classifier) Classify(img image.Image) ([]Label, error) {
 // Input is img resized to Size×Size bilinearly and normalised as the
 // model's metadata says, row-major RGB.
 func Input(img image.Image) []float32 {
+	out := ResizeRGB(img, Size, Size)
+	for i, v := range out {
+		out[i] = (v - 127) / 128
+	}
+	return out
+}
+
+// ResizeRGB is img resized to w×h bilinearly (pixel centres aligned,
+// aspect ratio not kept, alpha dropped), row-major RGB in [0, 255].
+func ResizeRGB(img image.Image, w, h int) []float32 {
 	b := img.Bounds()
-	w, h := b.Dx(), b.Dy()
+	iw, ih := b.Dx(), b.Dy()
 	px := func(x, y int) (r, g, bl float64) {
 		cr, cg, cb, _ := img.At(b.Min.X+x, b.Min.Y+y).RGBA()
 		return float64(cr >> 8), float64(cg >> 8), float64(cb >> 8)
 	}
-	out := make([]float32, 0, Size*Size*3)
-	for oy := 0; oy < Size; oy++ {
-		sy := (float64(oy)+0.5)*float64(h)/Size - 0.5
-		y0, fy := splitCoord(sy, h)
-		y1 := min(y0+1, h-1)
-		for ox := 0; ox < Size; ox++ {
-			sx := (float64(ox)+0.5)*float64(w)/Size - 0.5
-			x0, fx := splitCoord(sx, w)
-			x1 := min(x0+1, w-1)
+	out := make([]float32, 0, w*h*3)
+	for oy := 0; oy < h; oy++ {
+		sy := (float64(oy)+0.5)*float64(ih)/float64(h) - 0.5
+		y0, fy := splitCoord(sy, ih)
+		y1 := min(y0+1, ih-1)
+		for ox := 0; ox < w; ox++ {
+			sx := (float64(ox)+0.5)*float64(iw)/float64(w) - 0.5
+			x0, fx := splitCoord(sx, iw)
+			x1 := min(x0+1, iw-1)
 			r00, g00, b00 := px(x0, y0)
 			r10, g10, b10 := px(x1, y0)
 			r01, g01, b01 := px(x0, y1)
 			r11, g11, b11 := px(x1, y1)
 			lerp := func(a, b, c, d float64) float32 {
-				v := (a*(1-fx)+b*fx)*(1-fy) + (c*(1-fx)+d*fx)*fy
-				return float32((v - 127) / 128)
+				return float32((a*(1-fx)+b*fx)*(1-fy) + (c*(1-fx)+d*fx)*fy)
 			}
 			out = append(out, lerp(r00, r10, r01, r11), lerp(g00, g10, g01, g11), lerp(b00, b10, b01, b11))
 		}

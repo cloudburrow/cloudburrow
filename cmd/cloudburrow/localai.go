@@ -21,6 +21,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/embedding"
 	"github.com/cloudburrow/cloudburrow/internal/imagedetect"
 	"github.com/cloudburrow/cloudburrow/internal/imagelabel"
+	"github.com/cloudburrow/cloudburrow/internal/imagelandmark"
 	"github.com/cloudburrow/cloudburrow/internal/localai"
 	"github.com/cloudburrow/cloudburrow/internal/ocr"
 	"github.com/cloudburrow/cloudburrow/internal/service/vertexai"
@@ -178,7 +179,9 @@ func attachSpeechModel(cfg config.Config) {
 //
 // It does the same for OBJECT_LOCALIZATION and FACE_DETECTION, whose
 // MediaPipe EfficientDet-Lite0 and BlazeFace detectors are fetched the
-// first time an image needs one.
+// first time an image needs one, and for LANDMARK_DETECTION, whose six
+// Google landmark classifiers are fetched from Kaggle Models the first
+// time an image's landmarks are asked for.
 func attachLabelModel(cfg config.Config) {
 	cache := embeddingCache(cfg)
 	pinned := func(m localai.Model, feature string) func(ctx context.Context) (string, error) {
@@ -193,6 +196,20 @@ func attachLabelModel(cfg config.Config) {
 	imagelabel.SetSource(pinned(localai.EfficientNetLite0, "LABEL_DETECTION"))
 	imagedetect.SetObjectSource(pinned(localai.EfficientDetLite0, "OBJECT_LOCALIZATION"))
 	imagedetect.SetFaceSource(pinned(localai.BlazeFaceShortRange, "FACE_DETECTION"))
+	imagelandmark.SetSource(func(ctx context.Context) ([]string, error) {
+		paths := make([]string, 0, len(localai.LandmarkClassifiers))
+		for _, l := range localai.LandmarkClassifiers {
+			if _, err := os.Stat(filepath.Join(cache.PinnedDir(l.Model), l.TFLite.Path)); err != nil {
+				fmt.Fprintf(os.Stderr, "fetching Google's landmark classifier for %s (Kaggle google/landmarks, Apache-2.0) for Vision LANDMARK_DETECTION...\n", l.Region)
+			}
+			p, err := cache.FetchLandmarkClassifier(ctx, l)
+			if err != nil {
+				return nil, err
+			}
+			paths = append(paths, p)
+		}
+		return paths, nil
+	})
 }
 
 func attachEmbedder(srv *vertexai.Server, cfg config.Config) {

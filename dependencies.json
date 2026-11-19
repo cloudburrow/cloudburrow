@@ -745,6 +745,60 @@
         "skipDiscovery": "A model file at a versioned path in MediaPipe's bucket, not a release depcheck can compare; re-pinned by hand when MediaPipe publishes a new version.",
         "notes": "Vision FACE_DETECTION for ML.ANNOTATE_IMAGE and the local images:annotate (#1799, internal/imagedetect), approved by the maintainer 2026-11-18: Google's MediaPipe BlazeFace short-range face detector (229,746 bytes; MediaPipe publishes it in float16 only), run on the pure-Go internal/tflitemodel, so no cgo. Not shipped in the binary: fetched once from storage.googleapis.com (a file download, never a call to a Google Cloud API) the first time an image needs it, into <state-dir>/models, and checked against the SHA-256 pinned in internal/localai/imagedetector.go."
       },
+      "googleLandmarksClassifierAfrica": {
+        "version": "tfLite/classifier-africa-v1/1",
+        "source": "https://www.kaggle.com/api/v1/models/google/landmarks/tfLite/classifier-africa-v1/1/download",
+        "license": "Apache-2.0",
+        "verification": "checksum",
+        "digest": "sha256:8defc478be0de3bc3a2f3475ef6abafc8607b35cc42ac01de108676cf6eb737f",
+        "skipDiscovery": "A model version on Kaggle Models, not a release depcheck can compare; re-pinned by hand when Google publishes a new version.",
+        "notes": "Vision LANDMARK_DETECTION for ML.ANNOTATE_IMAGE and the local images:annotate (#1799, internal/imagelandmark): Google's on-device landmark classifier for africa (landmarks_classifier_africa_V1, formerly on tfhub.dev; Apache-2.0 on its Kaggle page and in the file's TFLite metadata), a gzip tar of 20,837,994 bytes holding 1.tflite (23,524,241 bytes, sha256:c028020601f3245ba5fda4fbc295dce9e920caf52078917daa0c96930e3b4fce), run on the pure-Go internal/tflitemodel, so no cgo. Not shipped in the binary: fetched once from Kaggle's public download (a file download, never a call to a Google Cloud API) the first time an image's landmarks are asked for, into <state-dir>/models; the archive and the extracted model are checked against the SHA-256s pinned in internal/localai/imagelandmark.go, and the archive is removed. Its English landmark names (probability-labels-en.txt) are carried in the file."
+      },
+      "googleLandmarksClassifierAsia": {
+        "version": "tfLite/classifier-asia-v1/1",
+        "source": "https://www.kaggle.com/api/v1/models/google/landmarks/tfLite/classifier-asia-v1/1/download",
+        "license": "Apache-2.0",
+        "verification": "checksum",
+        "digest": "sha256:9eb9a9f8f254d0644940213062d2127961d325a347b1317743a1471f5b08f792",
+        "skipDiscovery": "A model version on Kaggle Models, not a release depcheck can compare; re-pinned by hand when Google publishes a new version.",
+        "notes": "Vision LANDMARK_DETECTION for ML.ANNOTATE_IMAGE and the local images:annotate (#1799, internal/imagelandmark): Google's on-device landmark classifier for asia (landmarks_classifier_asia_V1, formerly on tfhub.dev; Apache-2.0 on its Kaggle page and in the file's TFLite metadata), a gzip tar of 41,210,816 bytes holding 1.tflite (49,672,026 bytes, sha256:1ae50c9a4f11890560636712fe770356a1bd3d322f8753b088d1b51f53d7cc14), run on the pure-Go internal/tflitemodel, so no cgo. Not shipped in the binary: fetched once from Kaggle's public download (a file download, never a call to a Google Cloud API) the first time an image's landmarks are asked for, into <state-dir>/models; the archive and the extracted model are checked against the SHA-256s pinned in internal/localai/imagelandmark.go, and the archive is removed. Its English landmark names (probability-labels-en.txt) are carried in the file."
+      },
+      "googleLandmarksClassifierEurope": {
+        "version": "tfLite/classifier-europe-v1/1",
+        "source": "https://www.kaggle.com/api/v1/models/google/landmarks/tfLite/classifier-europe-v1/1/download",
+        "license": "Apache-2.0",
+        "verification": "checksum",
+        "digest": "sha256:3e8efa3e9e380e7e6a0ee3bfb61bb3d75b93fcaa9107f08eb5bb34382aa6aa32",
+        "skipDiscovery": "A model version on Kaggle Models, not a release depcheck can compare; re-pinned by hand when Google publishes a new version.",
+        "notes": "Vision LANDMARK_DETECTION for ML.ANNOTATE_IMAGE and the local images:annotate (#1799, internal/imagelandmark): Google's on-device landmark classifier for europe (landmarks_classifier_europe_V1, formerly on tfhub.dev; Apache-2.0 on its Kaggle page and in the file's TFLite metadata), a gzip tar of 41,497,005 bytes holding 1.tflite (50,056,052 bytes, sha256:4a486cab99c1296a5fd73e70bd111046a3541e798555271299999e31002a17f5), run on the pure-Go internal/tflitemodel, so no cgo. Not shipped in the binary: fetched once from Kaggle's public download (a file download, never a call to a Google Cloud API) the first time an image's landmarks are asked for, into <state-dir>/models; the archive and the extracted model are checked against the SHA-256s pinned in internal/localai/imagelandmark.go, and the archive is removed. Its English landmark names (probability-labels-en.txt) are carried in the file."
+      },
+      "googleLandmarksClassifierNorthAmerica": {
+        "version": "tfLite/classifier-north-america-v1/1",
+        "source": "https://www.kaggle.com/api/v1/models/google/landmarks/tfLite/classifier-north-america-v1/1/download",
+        "license": "Apache-2.0",
+        "verification": "checksum",
+        "digest": "sha256:490ea505de6e8706912ec0c3f11af05adcfa55308ce71c56554adc91767ca4f9",
+        "skipDiscovery": "A model version on Kaggle Models, not a release depcheck can compare; re-pinned by hand when Google publishes a new version.",
+        "notes": "Vision LANDMARK_DETECTION for ML.ANNOTATE_IMAGE and the local images:annotate (#1799, internal/imagelandmark): Google's on-device landmark classifier for north america (landmarks_classifier_north_america_V1, formerly on tfhub.dev; Apache-2.0 on its Kaggle page and in the file's TFLite metadata), a gzip tar of 41,279,396 bytes holding 1.tflite (50,908,148 bytes, sha256:f0c8df5bc0de1fee3a53db904f600896b7b57eedea9afe422d9aed6f94669021), run on the pure-Go internal/tflitemodel, so no cgo. Not shipped in the binary: fetched once from Kaggle's public download (a file download, never a call to a Google Cloud API) the first time an image's landmarks are asked for, into <state-dir>/models; the archive and the extracted model are checked against the SHA-256s pinned in internal/localai/imagelandmark.go, and the archive is removed. Its English landmark names (probability-labels-en.txt) are carried in the file."
+      },
+      "googleLandmarksClassifierOceaniaAntarctica": {
+        "version": "tfLite/classifier-oceania-antarctica-v1/1",
+        "source": "https://www.kaggle.com/api/v1/models/google/landmarks/tfLite/classifier-oceania-antarctica-v1/1/download",
+        "license": "Apache-2.0",
+        "verification": "checksum",
+        "digest": "sha256:9e10bf81b8a608311d88a412cf5d3fe9e57eaf356301ef8051130c955e12d76c",
+        "skipDiscovery": "A model version on Kaggle Models, not a release depcheck can compare; re-pinned by hand when Google publishes a new version.",
+        "notes": "Vision LANDMARK_DETECTION for ML.ANNOTATE_IMAGE and the local images:annotate (#1799, internal/imagelandmark): Google's on-device landmark classifier for oceania antarctica (landmarks_classifier_oceania_antarctica_V1, formerly on tfhub.dev; Apache-2.0 on its Kaggle page and in the file's TFLite metadata), a gzip tar of 30,307,256 bytes holding 1.tflite (36,580,969 bytes, sha256:3d181a72229bbb4d61afdea908b17d9b4ec751eaa4407dc3a70f1d1c3e469ed3), run on the pure-Go internal/tflitemodel, so no cgo. Not shipped in the binary: fetched once from Kaggle's public download (a file download, never a call to a Google Cloud API) the first time an image's landmarks are asked for, into <state-dir>/models; the archive and the extracted model are checked against the SHA-256s pinned in internal/localai/imagelandmark.go, and the archive is removed. Its English landmark names (probability-labels-en.txt) are carried in the file."
+      },
+      "googleLandmarksClassifierSouthAmerica": {
+        "version": "tfLite/classifier-south-america-v1/1",
+        "source": "https://www.kaggle.com/api/v1/models/google/landmarks/tfLite/classifier-south-america-v1/1/download",
+        "license": "Apache-2.0",
+        "verification": "checksum",
+        "digest": "sha256:00567932a69aced56bf7e1a1e17d263c3c2d77e1d392c8ea07173544c75a1fc3",
+        "skipDiscovery": "A model version on Kaggle Models, not a release depcheck can compare; re-pinned by hand when Google publishes a new version.",
+        "notes": "Vision LANDMARK_DETECTION for ML.ANNOTATE_IMAGE and the local images:annotate (#1799, internal/imagelandmark): Google's on-device landmark classifier for south america (landmarks_classifier_south_america_V1, formerly on tfhub.dev; Apache-2.0 on its Kaggle page and in the file's TFLite metadata), a gzip tar of 41,164,133 bytes holding 1.tflite (50,492,916 bytes, sha256:30a21efe6914b10044d336fec4dbb2d8845102fe1b2cff880a03f0058d240649), run on the pure-Go internal/tflitemodel, so no cgo. Not shipped in the binary: fetched once from Kaggle's public download (a file download, never a call to a Google Cloud API) the first time an image's landmarks are asked for, into <state-dir>/models; the archive and the extracted model are checked against the SHA-256s pinned in internal/localai/imagelandmark.go, and the archive is removed. Its English landmark names (probability-labels-en.txt) are carried in the file."
+      },
       "goH265": {
         "module": "github.com/gen2brain/h265",
         "version": "v0.2.5",
