@@ -99,7 +99,9 @@ func (p firestoreDatabasesProvider) List(ctx context.Context, project string) (c
 			"Scheduled backups": scheduledBackups(ctx, c, db.Name),
 			"Concurrency":       enumWord(db.ConcurrencyMode, ""),
 			"Delete protection": enumWord(db.DeleteProtectionState, "DELETE_PROTECTION_"),
-		}})
+		},
+			// Clone in the row's View more, as Google's (#1845).
+			Actions: []console.Action{cloneAction()}, ActsOn: []string{dbID(db.Name)}})
 	}
 	base.Total = len(base.Items)
 	base.Note = "Data browses any database, chosen in its Database picker; each database's Query builder runs against its own documents. Every database is served by the one emulator, " +
@@ -164,8 +166,9 @@ func (p firestoreDatabasesProvider) Detail(ctx context.Context, project string, 
 		{ID: "importexport", Label: "Import/Export", Listing: p.importExportJobs(ctx, c, name), Actions: acts["importexport"],
 			Note: "Export copies the database's documents, every collection group or the ones named, to a gs:// folder of this " +
 				"instance's Cloud Storage; Import reads such a folder back. Each runs as a long-running operation, listed here."},
-		{ID: "schedules", Label: "Disaster recovery", Listing: p.schedules(ctx, c, name, path[0]), Actions: acts["schedules"]},
-		{ID: "backups", Label: "Backups", Listing: p.backups(ctx, c, name, path[0])},
+		// Google's Disaster recovery page: the schedules described, Edit,
+		// and the Backups table (#1845).
+		p.disasterRecovery(ctx, c, name, path[0]),
 		{ID: "ttl", Label: "Time-to-live", Listing: p.ttlPolicies(ctx, c, name, path[0]), Actions: acts["ttl"]},
 	}
 	// User credentials and pipelines are Enterprise edition features

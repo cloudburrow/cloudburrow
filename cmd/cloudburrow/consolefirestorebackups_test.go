@@ -81,10 +81,10 @@ func TestConsoleFirestoreTransferAndBackups(t *testing.T) {
 		t.Fatal(err)
 	}
 	d, err := p.Detail(ctx, "p", at)
-	if err != nil || len(d.Sections) != 7 || len(fsSection(d, "backups").Listing.Items) != 1 {
+	if err != nil || len(d.Sections) != 6 || len(fsSection(d, "schedules").Listing.Items) != 1 {
 		t.Fatalf("Detail = %+v, %v", d, err)
 	}
-	row := fsSection(d, "backups").Listing.Items[0]
+	row := fsSection(d, "schedules").Listing.Items[0]
 	if row.Fields["State"] != "Ready" || row.Fields["Documents"] != "5" || row.Fields["Location"] != "nam5" {
 		t.Errorf("the backup row = %+v", row.Fields)
 	}
@@ -100,8 +100,8 @@ func TestConsoleFirestoreTransferAndBackups(t *testing.T) {
 	if err := p.ActAt(ctx, "p", row.ActsOn, "deletebackup", nil); err != nil {
 		t.Fatalf("Delete backup: %v", err)
 	}
-	if d, _ := p.Detail(ctx, "p", at); len(fsSection(d, "backups").Listing.Items) != 0 {
-		t.Errorf("backups after Delete backup = %+v", fsSection(d, "backups").Listing.Items)
+	if d, _ := p.Detail(ctx, "p", at); len(fsSection(d, "schedules").Listing.Items) != 0 {
+		t.Errorf("backups after Delete backup = %+v", fsSection(d, "schedules").Listing.Items)
 	}
 }
 

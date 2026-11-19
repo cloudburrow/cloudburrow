@@ -51,10 +51,22 @@ func firestoreTransferActions() []console.Action {
 		{ID: "bulkdelete", Label: "Bulk delete documents", Destructive: true, Fields: []console.Field{
 			collectionIDsField("The collections to delete."),
 		}, Confirm: "Every document of the named collection groups, or of the whole database, is deleted."},
-		{ID: "clonedatabase", Label: "Clone", Fields: []console.Field{
-			{Name: "databaseId", Label: "New database ID", Type: "text", Required: true, Pattern: databaseIDPattern},
-		}},
+		cloneAction(),
 	}
+}
+
+// cloneAction is Google's Clone and its "Create a clone" dialog
+// (https://docs.cloud.google.com/firestore/native/docs/manage-databases,
+// read 2026-11-19): the clone's ID and the minute it is cloned from.
+func cloneAction() console.Action {
+	return console.Action{ID: "clonedatabase", Label: "Clone", Fields: []console.Field{
+		{Name: "databaseId", Label: "Give the clone an ID", Type: "text", Required: true, Pattern: databaseIDPattern,
+			Help: "The new database's ID, which no database of the project has."},
+		{Name: "cloneFrom", Label: "Clone from", Type: "select", Options: []string{"now"}, Default: "now",
+			OptionLabels: map[string]string{"now": "The current minute"},
+			Help: "The local Firestore keeps no earlier versions of the documents, so a clone is of the current minute; " +
+				"CloneDatabase refuses an earlier snapshot_time."},
+	}}
 }
 
 // fsNoSnapshotExport is why an export from an earlier point in time is drawn

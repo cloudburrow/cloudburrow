@@ -97,8 +97,8 @@ func TestFirestoreBulkDeleteAndBackupsThroughTheBrowser(t *testing.T) {
 	bname := list.GetBackups()[0].GetName()
 	id := bname[strings.LastIndex(bname, "/")+1:]
 	p.navigate("/firestore-databases/(default)" + q)
-	p.waitFor(`document.querySelector("#tab-backups") !== null`)
-	p.run(chromedp.Click(chromedp.CSS(`#tab-backups`)))
+	p.waitFor(`document.querySelector("#tab-schedules") !== null`)
+	p.run(chromedp.Click(chromedp.CSS(`#tab-schedules`)))
 	p.waitFor(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.offsetParent && r.textContent.includes("Ready"))`)
 
 	// Restore on its row.
@@ -121,8 +121,8 @@ func TestFirestoreBulkDeleteAndBackupsThroughTheBrowser(t *testing.T) {
 
 	// Delete backup, confirmed by its ID.
 	p.navigate("/firestore-databases/(default)" + q)
-	p.waitFor(`document.querySelector("#tab-backups") !== null`)
-	p.run(chromedp.Click(chromedp.CSS(`#tab-backups`)))
+	p.waitFor(`document.querySelector("#tab-schedules") !== null`)
+	p.run(chromedp.Click(chromedp.CSS(`#tab-schedules`)))
 	p.cellMenu(id, "Delete backup")
 	p.confirmByName(id)
 	p.waitFor(`document.querySelector(".modal") === null`)

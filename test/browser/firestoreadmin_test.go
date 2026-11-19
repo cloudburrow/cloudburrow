@@ -60,8 +60,8 @@ func TestFirestoreDatabaseEditAndIndexFormsThroughTheBrowser(t *testing.T) {
 		t.Errorf("after Edit database, GetDatabase reads delete protection %v, want enabled", got.DeleteProtectionState)
 	}
 
-	p.navigate("/firestore-databases/(default)" + q)
-	p.clickText("#view .page-actions button", "Create Index")
+	p.navigate("/firestore-databases/(default)" + q + "&tab=indexes")
+	p.clickText("#view .section-actions button", "Create Index")
 	p.waitFor(`document.querySelector(".modal #f-fields") !== null`)
 	p.setField(".modal #f-collectionGroup", "orders")
 	p.setField(".modal #f-fields", "city ascending\ntotal descending")

@@ -275,7 +275,7 @@ func firestoreTabActions() map[string][]console.Action {
 			{ID: "createvectorindex", Label: "Create vector index", Fields: createVectorIndexFields()}},
 		"fields":       {{ID: "addfield", Label: "Add Exemption", Fields: add}},
 		"importexport": transfer[:2],
-		"schedules":    {{ID: "createschedule", Label: "Create backup schedule", Fields: createScheduleFields()}},
+		"schedules":    {disasterRecoveryEdit(nil, nil)},
 		"ttl":          {createTTLAction()},
 	}
 }
@@ -390,6 +390,9 @@ func (p firestoreDatabasesProvider) ActAt(ctx context.Context, project string, p
 	}
 	defer c.Close()
 	db := p.dbName(project, path[0])
+	if action == editDisasterRecovery && len(path) == 1 {
+		return actDisasterRecovery(ctx, c, db, values)
+	}
 	if ok, err := actSchedule(ctx, c, db, path, action, values); ok {
 		return err
 	}

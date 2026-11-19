@@ -62,7 +62,7 @@ func TestFirestoreTextIndexAndExplainThroughThePage(t *testing.T) {
 
 	p := open(t)
 	q := "?project=" + project
-	p.navigate("/firestore-databases/" + dbID + q)
+	p.navigate("/firestore-databases/" + dbID + q + "&tab=indexes")
 	p.pageAction("Create Index", map[string]string{"collectionGroup": "books", "fields": "title text\nsummary text",
 		"queryScope": "COLLECTION_GROUP", "apiScope": "MONGODB_COMPATIBLE_API", "textLanguage": "en"}, "")
 	var text *adminpb.Index

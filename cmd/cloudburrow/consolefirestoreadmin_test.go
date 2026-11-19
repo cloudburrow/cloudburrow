@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -81,7 +82,7 @@ func TestConsoleFirestoreDatabasesIndexesAndFields(t *testing.T) {
 	}
 
 	d, err := p.Detail(ctx, "p", []string{"orders"})
-	if err != nil || d.Unavailable != "" || len(d.Sections) != 7 {
+	if err != nil || d.Unavailable != "" || len(d.Sections) != 6 {
 		t.Fatalf("Detail = %+v, %v", d, err)
 	}
 	props := map[string]string{}
@@ -193,7 +194,7 @@ func TestConsoleFirestoreDatabaseEditsIndexesAndFieldOverrides(t *testing.T) {
 		t.Errorf("the created index = %v", resp)
 	}
 	d, err := p.Detail(ctx, "p", []string{"(default)"})
-	if err != nil || len(d.Sections) != 7 || len(fsSection(d, "indexes").Listing.Items) != 1 {
+	if err != nil || len(d.Sections) != 6 || len(fsSection(d, "indexes").Listing.Items) != 1 {
 		t.Fatalf("Detail = %+v, %v", d, err)
 	}
 	row := fsSection(d, "indexes").Listing.Items[0]
@@ -296,39 +297,54 @@ func TestConsoleFirestoreBackupSchedules(t *testing.T) {
 	db := "projects/p/databases/(default)"
 	found := false
 	for _, a := range p.DetailActions(ctx, "p", []string{"(default)"}) {
-		found = found || a.ID == "createschedule"
+		found = found || a.ID == editDisasterRecovery
 	}
 	if !found {
-		t.Fatal("a database's page offers no Create backup schedule")
+		t.Fatal("a database's page offers no Disaster recovery Edit")
 	}
-	if err := p.ActAt(ctx, "p", []string{"(default)"}, "createschedule", map[string]string{"recurrence": "weekly", "day": "SUNDAY", "retentionDays": "14"}); err != nil {
-		t.Fatalf("Create backup schedule: %v", err)
+	at := []string{"(default)"}
+	// Weekly on Sunday, kept 2 weeks; then daily too, kept 8 days, which the
+	// API refuses.
+	if err := p.ActAt(ctx, "p", at, editDisasterRecovery, map[string]string{"weekly": "true", "weeklyDay": "SUNDAY", "weeklyRetention": "2"}); err != nil {
+		t.Fatalf("Edit, Weekly: %v", err)
 	}
-	if err := p.ActAt(ctx, "p", []string{"(default)"}, "createschedule", map[string]string{"recurrence": "daily", "retentionDays": "8"}); status.Code(err) != codes.InvalidArgument {
+	if err := p.ActAt(ctx, "p", at, editDisasterRecovery, map[string]string{"daily": "true", "dailyRetention": "8",
+		"weekly": "true", "weeklyDay": "SUNDAY", "weeklyRetention": "2"}); status.Code(errors.Unwrap(err)) != codes.InvalidArgument {
 		t.Errorf("a daily schedule keeping 8 days: %v, want the API's INVALID_ARGUMENT", err)
 	}
-	d, err := p.Detail(ctx, "p", []string{"(default)"})
-	if err != nil || len(d.Sections) != 7 || len(fsSection(d, "schedules").Listing.Items) != 1 {
+	daily, weekly, err := drSchedules(ctx, c, db)
+	if err != nil || daily != nil || weekly == nil || weekly.GetRetention().AsDuration() != 14*24*time.Hour {
+		t.Fatalf("schedules = %v, %v, %v; want one weekly schedule kept 14 days", daily, weekly, err)
+	}
+	d, err := p.Detail(ctx, "p", at)
+	if err != nil || len(d.Sections) != 6 {
 		t.Fatalf("Detail = %+v, %v", d, err)
 	}
-	row := fsSection(d, "schedules").Listing.Items[0]
-	if row.Fields["Recurrence"] != "Weekly, Sunday" || row.Fields["Retention"] != "336h0m0s" {
-		t.Errorf("the schedule row = %+v", row.Fields)
+	sec := fsSection(d, "schedules")
+	if sec.Label != "Disaster recovery" || !strings.Contains(sec.Note, "Weekly backups: on, every Sunday, each kept 2 weeks") ||
+		len(sec.Actions) != 1 || sec.Actions[0].ID != editDisasterRecovery {
+		t.Errorf("the Disaster recovery tab = %+v", sec)
 	}
-	if err := p.ActAt(ctx, "p", row.ActsOn, "editschedule", map[string]string{"retentionDays": "21"}); err != nil {
-		t.Fatalf("Edit retention: %v", err)
+	for _, f := range sec.Actions[0].Fields {
+		if (f.Name == "weekly" && f.Default != "true") || (f.Name == "weeklyRetention" && f.Default != "2") || (f.Name == "daily" && f.Default != "false") {
+			t.Errorf("Edit opens with %s = %q", f.Name, f.Default)
+		}
 	}
-	s, err := c.GetBackupSchedule(ctx, &adminpb.GetBackupScheduleRequest{Name: db + "/backupSchedules/" + row.Name})
-	if err != nil || s.GetRetention().AsDuration() != 21*24*time.Hour {
-		t.Errorf("after Edit retention = %v, %v", s, err)
+	// Daily on, kept 7 days; Weekly moved to Monday, kept 3 weeks.
+	if err := p.ActAt(ctx, "p", at, editDisasterRecovery, map[string]string{"daily": "true", "dailyRetention": "7",
+		"weekly": "true", "weeklyDay": "MONDAY", "weeklyRetention": "3"}); err != nil {
+		t.Fatalf("Edit, Daily and Weekly on Monday: %v", err)
 	}
-	if acts := p.DetailActions(ctx, "p", row.ActsOn); len(acts) != 2 {
-		t.Errorf("a schedule's actions = %+v", acts)
+	daily, weekly, err = drSchedules(ctx, c, db)
+	if err != nil || daily.GetRetention().AsDuration() != 7*24*time.Hour ||
+		weekly.GetWeeklyRecurrence().GetDay().String() != "MONDAY" || weekly.GetRetention().AsDuration() != 21*24*time.Hour {
+		t.Errorf("after Edit: daily %v, weekly %v, %v", daily, weekly, err)
 	}
-	if err := p.ActAt(ctx, "p", row.ActsOn, "deleteschedule", nil); err != nil {
-		t.Fatalf("Delete backup schedule: %v", err)
+	// Both off.
+	if err := p.ActAt(ctx, "p", at, editDisasterRecovery, map[string]string{"daily": "false", "weekly": "false"}); err != nil {
+		t.Fatalf("Edit, both off: %v", err)
 	}
-	if _, err := c.GetBackupSchedule(ctx, &adminpb.GetBackupScheduleRequest{Name: db + "/backupSchedules/" + row.Name}); status.Code(err) != codes.NotFound {
-		t.Errorf("after Delete backup schedule: %v, want NotFound", err)
+	if daily, weekly, err = drSchedules(ctx, c, db); err != nil || daily != nil || weekly != nil {
+		t.Errorf("after turning both off: %v, %v, %v", daily, weekly, err)
 	}
 }

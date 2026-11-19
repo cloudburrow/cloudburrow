@@ -63,7 +63,8 @@ func waitSQL(t *testing.T, svc *sqladmin.Service, project string, op *sqladmin.O
 func (p *tab) pageAction(label string, values map[string]string, confirm string) string {
 	p.t.Helper()
 	p.waitFor(`document.querySelector(".modal") === null`)
-	p.clickText("#view .page-actions button", label)
+	// Beside the title, or at the top of the tab whose action it is (#1845).
+	p.clickText("#view .page-actions button, #view .section-actions button", label)
 	p.waitFor(`document.querySelectorAll(".modal").length === 1 && document.querySelector(".modal.is-open form") !== null`)
 	for id, v := range values {
 		p.eval(fmt.Sprintf(`(() => { const f = document.querySelector(".modal.is-open #f-%s");

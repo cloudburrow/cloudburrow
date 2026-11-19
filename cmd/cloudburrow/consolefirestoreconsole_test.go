@@ -92,7 +92,7 @@ func TestConsoleFirestoreTTLPage(t *testing.T) {
 	for _, s := range d.Sections {
 		ids = append(ids, s.ID)
 	}
-	if got := strings.Join(ids, ","); got != "query,indexes,fields,importexport,schedules,backups,ttl" {
+	if got := strings.Join(ids, ","); got != "query,indexes,fields,importexport,schedules,ttl" {
 		t.Errorf("the tabs = %s", got)
 	}
 }
