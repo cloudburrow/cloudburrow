@@ -2252,3 +2252,7 @@ svg.bq-chart { display: block; border: 1px solid var(--border); border-radius: v
 .upload-into { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; }
 .upload-into-label { font-size: var(--text-caption-size); color: var(--text-muted); }
 .upload-into-input { max-width: 100%; }
+
+/* A create field's dialog (#1859): Spanner's Compare editions. */
+.field-dialog { max-width: min(880px, calc(100vw - 32px)); }
+.field-dialog-table th[scope="row"] { font-weight: 500; text-align: left; }

@@ -380,6 +380,20 @@ type Field struct {
 	// the Secret value typed or from Upload file (#1850). The value is still
 	// the textarea's, so nothing else about the form changes.
 	Upload string `json:"upload,omitempty"`
+	// Dialog is a button beside the field that opens a table, as
+	// Google's Spanner Create instance has Compare editions beside the
+	// edition (#1859).
+	Dialog *FieldDialog `json:"dialog,omitempty"`
+}
+
+// FieldDialog is a Field's Dialog: Button opens a dialog titled Title, an
+// Intro above a table of Columns, each of Rows headed by its first cell.
+type FieldDialog struct {
+	Button  string     `json:"button"`
+	Title   string     `json:"title"`
+	Intro   string     `json:"intro,omitempty"`
+	Columns []string   `json:"columns"`
+	Rows    [][]string `json:"rows"`
 }
 
 // GroupFieldType is the Type of a repeatable group of fields (Field.Group).
@@ -1121,6 +1135,11 @@ type Action struct {
 	// Button draws a row's action as a button on the row, before its
 	// menu, as Google's Triggers rows carry Run (#1854).
 	Button bool `json:"button,omitempty"`
+	// Steps lays the action's form out as Google's numbered steps, its
+	// fields' Sections each a step, the later ones opened in turn by a
+	// button: "next" for Next, as Google's Create application profile
+	// asks for the profile's type first (#1858), "continue" for Continue.
+	Steps string `json:"steps,omitempty"`
 }
 
 // PathActor is a provider with actions on the resources inside a resource.

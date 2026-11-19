@@ -282,3 +282,25 @@ func bigtableSection(d console.Detail, id string) console.Section {
 	}
 	return console.Section{}
 }
+
+// Create instance's Add cluster (#1858): the instance is made with every
+// cluster, each in its own zone, with the first's storage type.
+func TestConsoleBigtableCreateWithMoreClusters(t *testing.T) {
+	p, _, iac := bigtableInstancesConsole(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if _, err := p.Create(ctx, "demo", map[string]string{"instance": "replicated", "displayName": "Replicated",
+		"cluster": "replicated-c1", "zone": "us-east1-b", "storage": "HDD", "nodes": "1",
+		"moreClusters": `[{"cluster":"replicated-c2","zone":"us-west1-a","nodes":"3"}]`}); err != nil {
+		t.Fatalf("Create with an added cluster: %v", err)
+	}
+	c2, err := iac.GetCluster(ctx, "replicated", "replicated-c2")
+	if err != nil || c2.Zone != "us-west1-a" || c2.ServeNodes != 3 || c2.StorageType != bigtable.HDD {
+		t.Fatalf("GetCluster replicated-c2 = %+v, %v", c2, err)
+	}
+	if _, err := p.Create(ctx, "demo", map[string]string{"instance": "samezone", "displayName": "Same zone",
+		"cluster": "samezone-c1", "zone": "us-east1-b", "nodes": "1",
+		"moreClusters": `[{"cluster":"samezone-c2","zone":"us-east1-b"}]`}); err == nil || !strings.Contains(err.Error(), "own zone") {
+		t.Errorf("Create with two clusters in one zone: %v", err)
+	}
+}

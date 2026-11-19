@@ -428,3 +428,36 @@ func TestConsoleSpannerBackupsAndSchedules(t *testing.T) {
 		}
 	}
 }
+
+// Create backup's Expiration date and version time (#1859): a date picker,
+// at this time of day in UTC, and "Create backup from" an earlier point in
+// time.
+func TestSpannerBackupExpirationDateAndVersionTime(t *testing.T) {
+	now := time.Date(2026, 11, 19, 13, 30, 0, 0, time.UTC)
+	got, err := spannerExpireAt(map[string]string{"expireDate": "2026-11-26"}, now)
+	if err != nil || !got.AsTime().Equal(time.Date(2026, 11, 26, 13, 30, 0, 0, time.UTC)) {
+		t.Errorf("expireDate 2026-11-26 = %v, %v; want 2026-11-26T13:30:00Z", got.AsTime(), err)
+	}
+	for _, bad := range []string{"2026-11-19", "2028-01-01", "26/11/2026"} {
+		if _, err := spannerExpireAt(map[string]string{"expireDate": bad}, now); err == nil {
+			t.Errorf("expireDate %q was accepted", bad)
+		}
+	}
+	if got, err := spannerExpireAt(map[string]string{"expireDays": "2"}, now); err != nil || !got.AsTime().Equal(now.Add(48*time.Hour)) {
+		t.Errorf("expireDays 2 = %v, %v", got.AsTime(), err)
+	}
+	if v, err := spannerVersionTime(map[string]string{"versionFrom": "Current time", "versionTime": "x"}); v != nil || err != nil {
+		t.Errorf("Current time gave version time %v, %v; want none", v, err)
+	}
+	v, err := spannerVersionTime(map[string]string{"versionFrom": "Earlier point in time", "versionTime": "2026-11-19T12:45"})
+	if err != nil || !v.AsTime().Equal(time.Date(2026, 11, 19, 12, 45, 0, 0, time.UTC)) {
+		t.Errorf("versionTime 2026-11-19T12:45 = %v, %v", v.AsTime(), err)
+	}
+	if _, err := spannerVersionTime(map[string]string{"versionFrom": "Earlier point in time", "versionTime": ""}); err == nil {
+		t.Error("an empty version time was accepted")
+	}
+	f := spannerExpiryField("7")
+	if f.Type != "date" || f.Default != time.Now().UTC().AddDate(0, 0, 7).Format(time.DateOnly) {
+		t.Errorf("the expiry field is %s defaulting to %q; want a date a week out", f.Type, f.Default)
+	}
+}

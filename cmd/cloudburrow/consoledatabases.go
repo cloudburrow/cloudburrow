@@ -1564,6 +1564,10 @@ func (p spannerProvider) spannerTableDetail(ctx context.Context, project, instan
 		return console.Detail{Unavailable: "cannot open the database: " + err.Error()}, nil
 	}
 	defer c.Close()
+	d := spannerDialectOfClient(ctx, c)
+	if d.pg {
+		return p.spannerPGTableDetail(ctx, c, d, instanceID, dbID, table), nil
+	}
 
 	columns := console.Listing{
 		Columns:    []string{"Type", "Nullable", "Key", "Generated"},
@@ -1675,18 +1679,18 @@ func (p spannerProvider) spannerTableDetail(ctx context.Context, project, instan
 		Sections: []console.Section{
 			{ID: "columns", Label: "Schema", Listing: columns},
 			{ID: "indexes", Label: "Indexes", Listing: indexes},
-			p.spannerTableData(ctx, c, instanceID, dbID, table),
+			p.spannerTableData(ctx, c, d, instanceID, dbID, table),
 		},
 	}, nil
 }
 
 // spannerTableData is the Data tab, or why it cannot be drawn.
-func (p spannerProvider) spannerTableData(ctx context.Context, c *spanner.Client, instanceID, dbID, table string) console.Section {
-	cols, err := spannerTableColumns(ctx, c, table)
+func (p spannerProvider) spannerTableData(ctx context.Context, c *spanner.Client, d spannerDialect, instanceID, dbID, table string) console.Section {
+	cols, err := spannerTableColumnsIn(ctx, c, d, table)
 	if err != nil {
 		return console.Section{ID: "data", Label: "Data", Unavailable: "reading columns: " + err.Error()}
 	}
-	return spannerDataSection(ctx, c, instanceID, dbID, table, cols)
+	return spannerDataSection(ctx, c, d, instanceID, dbID, table, cols)
 }
 
 // QueryHint is the Spanner Studio's contract with the user.
@@ -2022,7 +2026,7 @@ func (p spannerProvider) spannerInsertRowActions(ctx context.Context, project st
 		return nil
 	}
 	defer c.Close()
-	cols, err := spannerTableColumns(ctx, c, path[2])
+	cols, err := spannerTableColumnsIn(ctx, c, spannerDialectOfClient(ctx, c), path[2])
 	if err != nil || len(cols) == 0 {
 		return nil
 	}

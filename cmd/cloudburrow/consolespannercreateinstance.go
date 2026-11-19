@@ -40,6 +40,27 @@ const (
 	spannerNoDefaultBk = "Not available locally: new databases get no default backup schedule here; create one on the database's Backup schedules tab."
 )
 
+// spannerCompareEditions is Create instance's Compare editions dialog,
+// Google's comparison (https://docs.cloud.google.com/spanner/docs/editions-overview,
+// read 2026-11-19), with what the emulator serves of it.
+var spannerCompareEditions = &console.FieldDialog{
+	Button:  "Compare editions",
+	Title:   "Compare editions",
+	Intro:   "Locally, the Spanner emulator has no editions: every instance serves the same features, those of the Standard edition that the emulator has.",
+	Columns: []string{"", "Standard", "Enterprise", "Enterprise Plus"},
+	Rows: [][]string{
+		{"Availability SLA", "99.99%", "99.99%", "Up to 99.999%"},
+		{"Configurations", "Regional", "Regional, plus optional custom read-only replicas", "Regional, dual-region and multi-region, plus optional custom read-only replicas"},
+		{"Multi-model capabilities", "Relational (GoogleSQL, PostgreSQL), key-value", "Standard's, plus Spanner Graph", "Enterprise's"},
+		{"Search capabilities", "—", "Full-text search, vector search (KNN, ANN)", "Enterprise's"},
+		{"Resource management", "Open source Autoscaler", "Managed autoscaler, asymmetric read-only autoscaling, locality groups, tiered storage", "Enterprise's, plus geo-partitioning"},
+		{"Analytics", "BigQuery federation, Spanner Data Boost, Reverse ETL", "Standard's, plus the columnar engine", "Enterprise's"},
+		{"Data protection", "Standard backups, 7-day PITR, scheduled backups", "Standard's, plus incremental backups", "Enterprise's"},
+		{"Committed use discounts", "20% for 1 year, 40% for 3 years", "Standard's", "Standard's"},
+		{"Locally", "Created with no edition", "Not available locally", "Not available locally"},
+	},
+}
+
 // spannerMultiRegions are the multi-region configurations the call front
 // serves, with Google's names for them.
 var spannerMultiRegions = map[string]string{
@@ -63,7 +84,8 @@ func spannerCreateInstanceFields() []console.Field {
 		{Name: "edition", Label: "Select an edition", Type: "radio", Section: "Select an edition",
 			Options: []string{"Standard", "Enterprise", "Enterprise Plus"}, Default: "Standard",
 			UnavailableOptions: map[string]string{"Enterprise": spannerNoEdition, "Enterprise Plus": spannerNoEdition},
-			Help:               "Compare editions: the emulator serves every instance the same, with no edition."},
+			Help:               "The emulator serves every instance the same, with no edition.",
+			Dialog:             spannerCompareEditions},
 		{Name: "displayName", Label: "Instance name", Type: "text", Required: true, Section: "Name your instance",
 			Pattern: `^.{4,30}$`, Help: "For display purposes only: 4 to 30 characters."},
 		{Name: "instance", Label: "Instance ID", Type: "text", Required: true, Section: "Name your instance",
