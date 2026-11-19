@@ -5770,7 +5770,15 @@ function buildCreateForm(spec) {
       // from the control's own `required`, so announcing "star" as well would
       // be saying it twice.
       f.required ? el("span", { class: "required-mark", "aria-hidden": "true", text: "*" }) : null);
-    const help = f.help ? el("p", { id: helpId, class: "form-help", text: f.help }) : null;
+    // Field.Links (#1916): the documents a field is about, such as the
+    // licence a checkbox accepts, under its help. Only https links are drawn.
+    const links = (f.links || []).filter((l) => /^https:\/\//.test(l.url || ""));
+    const helpText = f.help ? el("p", { id: helpId, class: "form-help", text: f.help }) : null;
+    const help = links.length
+      ? el("div", { class: "form-links" }, helpText, el("p", { class: "form-help" },
+          ...links.flatMap((l, i) => [i ? " · " : null,
+            el("a", { href: l.url, target: "_blank", rel: "noopener noreferrer", text: l.label })]).filter(Boolean)))
+      : helpText;
     const error = el("p", { id: errorId, class: "form-field-error", hidden: true });
     const unavailable = unavailableId
       ? el("p", { id: unavailableId, class: "form-help form-unavailable", text: f.unavailable }) : null;

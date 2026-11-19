@@ -1332,6 +1332,10 @@ func runStatus(args []string, stdout, stderr io.Writer) error {
 		iam = info.IAMEnforcement
 	}
 	fmt.Fprintf(stdout, "iam:        enforcement %s\n", iam)
+	// Microsoft's SQL Server licence (#1916): who accepted it, when, how.
+	for _, l := range mssqlEULALines(readMSSQLEULAStatus(cfg)) {
+		fmt.Fprintln(stdout, l)
+	}
 	fmt.Fprintln(stdout, "\nservice persistence:")
 	for _, s := range cfg.EnabledServices() {
 		note := "survives restart in persistent mode"

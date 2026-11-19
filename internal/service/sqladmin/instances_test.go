@@ -112,13 +112,17 @@ func TestInstanceWritesThroughTheGoClient(t *testing.T) {
 	for _, bad := range []*sqladmin.DatabaseInstance{
 		{Name: "xy", DatabaseVersion: "POSTGRES_8_4", Settings: &sqladmin.Settings{Tier: "db-f1-micro"}},
 		{Name: "xy", DatabaseVersion: "MYSQL_5_7", Settings: &sqladmin.Settings{Tier: "db-f1-micro"}},
-		{Name: "xy", DatabaseVersion: "SQLSERVER_2019_STANDARD", Settings: &sqladmin.Settings{Tier: "db-f1-micro"}},
 		{Name: "xy", DatabaseVersion: "POSTGRES_17", Settings: &sqladmin.Settings{Tier: "t",
 			DatabaseFlags: []*sqladmin.DatabaseFlags{{Name: "cloudsql.iam_authentication", Value: "on"}}}},
 	} {
 		if _, err := svc.Instances.Insert("proj", bad).Do(); err == nil || !strings.Contains(err.Error(), "501") {
 			t.Errorf("insert %s %s: %v, want 501", bad.DatabaseVersion, bad.MasterInstanceName, err)
 		}
+	}
+	// SQL Server with no acceptance of Microsoft's licence (#1916).
+	if _, err := svc.Instances.Insert("proj", &sqladmin.DatabaseInstance{Name: "xy", DatabaseVersion: "SQLSERVER_2019_STANDARD",
+		Settings: &sqladmin.Settings{Tier: "db-f1-micro"}}).Do(); err == nil || !strings.Contains(err.Error(), "412") {
+		t.Errorf("insert SQLSERVER_2019_STANDARD with no licence acceptance: %v, want 412", err)
 	}
 	// Cloud SQL refuses the legacy failover replica (#1462).
 	if _, err := svc.Instances.Insert("proj", &sqladmin.DatabaseInstance{Name: "xy", DatabaseVersion: "POSTGRES_17",

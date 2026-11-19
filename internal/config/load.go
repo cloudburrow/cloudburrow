@@ -19,6 +19,10 @@ import (
 // EnvPrefix is the prefix for every CloudBurrow environment variable.
 const EnvPrefix = "CLOUDBURROW_"
 
+// MSSQLEULAURL is Microsoft's End-User Licensing Agreement for the SQL
+// Server container image, as its ACCEPT_EULA variable links it.
+const MSSQLEULAURL = "https://go.microsoft.com/fwlink/?LinkId=746388"
+
 // DefaultFileName is the configuration file looked for in the working
 // directory when no path is given.
 const DefaultFileName = "cloudburrow.json"
@@ -182,6 +186,7 @@ type rawFlags struct {
 	cloudsqlConn     string
 	allowRemote      bool
 	cbHostSteps      bool
+	acceptMSSQLEULA  bool
 	appEngineURL     string
 	emulatorHeapMiB  int
 	bigQueryHeapMiB  int
@@ -319,6 +324,7 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.DurationVar(&r.readyTimeout, "ready-timeout", 0, "bounded time to wait for cluster components to become ready")
 	fs.StringVar(&r.logLevel, "log-level", "", "log level: trace, debug, info, warn, error")
 	fs.StringVar(&r.iamEnforcement, "iam-enforcement", "", "IAM enforcement: off (policies are stored, never checked) or on (mapped API methods check the caller's permissions, as on Google) (default off)")
+	fs.BoolVar(&r.acceptMSSQLEULA, "accept-mssql-eula", false, "accept Microsoft's End-User Licensing Agreement for SQL Server ("+MSSQLEULAURL+") yourself, for the Cloud SQL for SQL Server instances this instance creates: their servers run Microsoft's SQL Server image, which starts only once it is accepted; who accepted and when is recorded on each instance (also CLOUDBURROW_ACCEPT_MSSQL_EULA=Y)")
 	fs.BoolVar(&r.cbHostSteps, "cloudbuild-host-steps", false, "let Cloud Build run steps other than docker build, docker push and pack, for builds submitted from this machine's loopback only; each runs as a container with the host's Docker socket, which gives it control of the host (unsafe)")
 	fs.StringVar(&r.appEngineURL, "appengine-url", "", "base URL of a local HTTP server standing in for the App Engine app, such as http://localhost:8080: Cloud Tasks and Cloud Scheduler deliver App Engine targets there (default: none, and every App Engine attempt fails 404)")
 	fs.IntVar(&r.emulatorHeapMiB, "emulator-heap-mib", 0, fmt.Sprintf("maximum Java heap, in MiB, of the Pub/Sub, Firestore and Datastore emulators, which also sizes their containers' memory limit; 0 = unbounded (default %d)", DefaultEmulatorHeapMiB))
@@ -570,6 +576,14 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 		}
 		cfg.BigQueryHeapMiB = n
 	}
+	// Microsoft's licence (#1916): exactly Y, as the image's own
+	// ACCEPT_EULA=Y, so nothing vaguer reads as an acceptance.
+	if v := getenv(EnvPrefix + "ACCEPT_MSSQL_EULA"); v != "" {
+		if v != "Y" {
+			return fmt.Errorf("%sACCEPT_MSSQL_EULA: must be Y, which accepts Microsoft's SQL Server licence (%s) (got %q)", EnvPrefix, MSSQLEULAURL, v)
+		}
+		cfg.AcceptMSSQLEULA, cfg.Source.MSSQLEULA = true, "env"
+	}
 	if v := getenv(EnvPrefix + "CLOUDBUILD_HOST_STEPS"); v != "" {
 		b, err := strconv.ParseBool(v)
 		if err != nil {
@@ -703,6 +717,13 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 	}
 	if set["cloudbuild-host-steps"] {
 		cfg.CloudBuildHostSteps = raw.cbHostSteps
+	}
+	if set["accept-mssql-eula"] {
+		cfg.AcceptMSSQLEULA = raw.acceptMSSQLEULA
+		cfg.Source.MSSQLEULA = ""
+		if raw.acceptMSSQLEULA {
+			cfg.Source.MSSQLEULA = "flag"
+		}
 	}
 	if set["appengine-url"] {
 		cfg.AppEngineURL = raw.appEngineURL

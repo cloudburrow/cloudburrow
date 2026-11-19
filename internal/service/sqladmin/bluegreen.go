@@ -223,8 +223,8 @@ func (s *Server) createBlueGreen(r *http.Request, base, project, location string
 	if err != nil {
 		return nil, err
 	}
-	if legacyMySQL(bc.spec.DatabaseVersion) {
-		return nil, legacyUnimplemented("a blue-green deployment")
+	if err := limitedUnimplemented(bc.spec.DatabaseVersion, "a blue-green deployment"); err != nil {
+		return nil, err
 	}
 	target := ""
 	if body.RequestedConfig != nil {

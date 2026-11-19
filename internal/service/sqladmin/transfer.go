@@ -159,6 +159,9 @@ const bakWhy = "BAK (a SQL Server backup) and TDE (a SQL Server Transparent Data
 	"exported by a SQL Server instance's server, and none runs: " + sqlServerVersionWhy
 
 func (s *Server) exportInstance(r *http.Request, base, project string, e Engine) (any, error) {
+	if err := sqlServerEngine(e, "instances.export"); err != nil {
+		return nil, err
+	}
 	if s.transfers == nil {
 		return nil, s.noTransfers("instances.export")
 	}
@@ -317,6 +320,9 @@ func (s *Server) exportInstance(r *http.Request, base, project string, e Engine)
 }
 
 func (s *Server) importInstance(r *http.Request, base, project string, e Engine) (any, error) {
+	if err := sqlServerEngine(e, "instances.import"); err != nil {
+		return nil, err
+	}
 	if s.transfers == nil {
 		return nil, s.noTransfers("instances.import")
 	}

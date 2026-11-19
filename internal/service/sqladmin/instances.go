@@ -121,6 +121,12 @@ type Spec struct {
 	// Maintenance is the maintenance event scheduled on the instance
 	// (#1524, maintenance.go), nil while none is.
 	Maintenance *Maintenance `json:"scheduledMaintenance,omitempty"`
+	// MSSQLEULA is who accepted Microsoft's SQL Server licence for a SQL
+	// Server instance, when and how (#1916, sqlserver.go): its server is
+	// given ACCEPT_EULA=Y only when it is set. SAPassword is its sa login's,
+	// which only CloudBurrow uses; never answered.
+	MSSQLEULA  *EULAAcceptance `json:"mssqlEulaAcceptance,omitempty"`
+	SAPassword string          `json:"saPassword,omitempty"`
 }
 
 // ServerName is the name of the instance's server in the cluster.
@@ -595,12 +601,20 @@ func (s *Server) insertInstance(r *http.Request, base, project string) (any, err
 	if b.DatabaseVersion == "" && !replica {
 		return nil, Errorf(http.StatusBadRequest, "Missing parameter: databaseVersion.")
 	}
+	// Microsoft's licence is accepted by the user, or the instance is
+	// refused (#1916), before whether this node can run its image.
+	var eula *EULAAcceptance
+	if IsSQLServer(b.DatabaseVersion) && !replica {
+		if eula, err = s.eulaFor(r, b.DatabaseVersion); err != nil {
+			return nil, err
+		}
+	}
 	if served, why := s.versionServed(b.DatabaseVersion); b.DatabaseVersion != "" && !served {
 		if strings.HasPrefix(b.DatabaseVersion, "POSTGRES_") || strings.HasPrefix(b.DatabaseVersion, "MYSQL_") {
 			return nil, unimplemented("databaseVersion "+b.DatabaseVersion, why)
 		}
 		if strings.HasPrefix(b.DatabaseVersion, "SQLSERVER_") {
-			return nil, unimplemented("databaseVersion "+b.DatabaseVersion, sqlServerVersionWhy)
+			return nil, unimplemented("databaseVersion "+b.DatabaseVersion, why)
 		}
 		return nil, Errorf(http.StatusBadRequest, "Invalid request: Invalid value for databaseVersion: %s.", b.DatabaseVersion)
 	}
@@ -624,6 +638,18 @@ func (s *Server) insertInstance(r *http.Request, base, project string) (any, err
 	}
 	if err := legacyRefusal(spec); err != nil {
 		return nil, err
+	}
+	if err := sqlServerRefusal(spec); err != nil {
+		return nil, err
+	}
+	if IsSQLServer(spec.DatabaseVersion) {
+		if spec.RootPassword == "" {
+			// Cloud SQL for SQL Server asks for the sqlserver user's password
+			// at creation (gcloud's --root-password is required for it).
+			// UNVERIFIED (re-read 2026-11-19, docs.cloud.google.com/sql/docs/sqlserver/create-instance): the wording.
+			return nil, Errorf(http.StatusBadRequest, "Invalid request: rootPassword, the sqlserver user's password, is required for a SQL Server instance.")
+		}
+		spec.MSSQLEULA, spec.SAPassword = eula, NewSAPassword()
 	}
 	if err := checkPasswordPolicy(spec); err != nil {
 		return nil, err
@@ -666,16 +692,18 @@ func (s *Server) insertInstance(r *http.Request, base, project string) (any, err
 		s.emu.RLock()
 		pc := s.writes.byName[b.MasterInstanceName]
 		s.emu.RUnlock()
-		if pc != nil && legacyMySQL(pc.spec.DatabaseVersion) {
+		if pc != nil {
 			// Before prepareReplica, which turns on the primary's GTIDs.
-			return nil, legacyUnimplemented("a read replica")
+			if err := limitedUnimplemented(pc.spec.DatabaseVersion, "a read replica"); err != nil {
+				return nil, err
+			}
 		}
 		if err := s.prepareReplica(r.Context(), project, b, &spec); err != nil {
 			return nil, err
 		}
 		b.DatabaseVersion = spec.DatabaseVersion
-		if legacyMySQL(spec.DatabaseVersion) {
-			return nil, legacyUnimplemented("a read replica")
+		if err := limitedUnimplemented(spec.DatabaseVersion, "a read replica"); err != nil {
+			return nil, err
 		}
 	} else if b.Settings == nil || b.Settings.Tier == "" {
 		return nil, Errorf(http.StatusBadRequest, "Invalid request: Invalid request since instance settings are missing tier.")
@@ -684,7 +712,7 @@ func (s *Server) insertInstance(r *http.Request, base, project string) (any, err
 	if err != nil {
 		return nil, err
 	}
-	if !s.engineServed(b.DatabaseVersion) {
+	if !IsSQLServer(b.DatabaseVersion) && !s.engineServed(b.DatabaseVersion) {
 		svc := "cloudsql"
 		if strings.HasPrefix(b.DatabaseVersion, "MYSQL_") {
 			svc = "cloudsql-mysql"
@@ -692,7 +720,7 @@ func (s *Server) insertInstance(r *http.Request, base, project string) (any, err
 		return nil, Errorf(http.StatusPreconditionFailed, "Invalid request: a %s instance runs the image of --services %s, "+
 			"which this instance was not started with; run `cloudburrow up --services ...,%s`.", b.DatabaseVersion, svc, svc)
 	}
-	if !spec.MySQL() {
+	if !spec.MySQL() && !IsSQLServer(spec.DatabaseVersion) {
 		// PostgreSQL's postgres user trusts every connection, as the server
 		// `up` runs does (docs/cloudsql.md): no password is kept.
 		spec.RootPassword = ""
@@ -911,6 +939,10 @@ func (s *Server) patchInstance(r *http.Request, base, project, name string, repl
 		err = s.checkDRReplicaPatchLocked(next, b.raw)
 	}
 	if err != nil {
+		s.emu.Unlock()
+		return nil, err
+	}
+	if err := sqlServerRefusal(next); err != nil {
 		s.emu.Unlock()
 		return nil, err
 	}

@@ -6,6 +6,8 @@ Flags of status:
     	exit status 0 ready, 3 not running, 4 not ready (2 is a usage error)
 
 Flags:
+  -accept-mssql-eula
+    	accept Microsoft's End-User Licensing Agreement for SQL Server (https://go.microsoft.com/fwlink/?LinkId=746388) yourself, for the Cloud SQL for SQL Server instances this instance creates: their servers run Microsoft's SQL Server image, which starts only once it is accepted; who accepted and when is recorded on each instance (also CLOUDBURROW_ACCEPT_MSSQL_EULA=Y)
   -allow-remote
     	permit binding a non-loopback address (unsafe)
   -appengine-url string

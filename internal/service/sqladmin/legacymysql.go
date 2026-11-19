@@ -37,6 +37,9 @@ func (s *Server) versionServed(version string) (ok bool, why string) {
 	if SupportedVersions[version] {
 		return true, ""
 	}
+	if IsSQLServer(version) {
+		return s.sqlServerServed(version)
+	}
 	if legacyMySQL(version) && s.writes != nil {
 		lr, isLR := s.writes.prov.(LegacyRunner)
 		if !isLR {

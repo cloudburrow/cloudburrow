@@ -458,6 +458,74 @@
         "updateFeed": "docker-hub-tags",
         "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect`."
       },
+      "cloudSQLServer2017": {
+        "$comment": "SQL Server 2017 14.0.3570.2, the server of a Cloud SQL for SQL Server instance of a SQLSERVER_2017_* version (#1916); pulled by a node only when one is created by a user who accepted Microsoft's licence. NOT a Google-published component. The digest is the tag's one linux/amd64 OCI manifest, read from the registry's manifest API without pulling (2026-11-19).",
+        "image": "mcr.microsoft.com/mssql/server:2017-latest",
+        "version": "14.0.3570.2",
+        "digest": "sha256:5f6fd78f8752390dbd3584b91dee463f1f4b2b30beef9af3fd35753d32940c52",
+        "source": "https://mcr.microsoft.com/en-us/artifact/mar/mssql/server",
+        "license": "Proprietary: Microsoft SQL Server End-User Licensing Agreement (https://go.microsoft.com/fwlink/?LinkId=746388), which the user who provisions an instance accepts; CloudBurrow never accepts it",
+        "redistribution": "not-redistributed",
+        "redistributionPlan": "Pulled from Microsoft's registry by digest at run time, and started only with the user's own acceptance of the licence.",
+        "platforms": [
+          "linux/amd64"
+        ],
+        "provides": "A real SQL Server for a created Cloud SQL for SQL Server instance. NOT the Cloud SQL Admin API.",
+        "verification": "image-digest",
+        "updateFeed": "mcr-tags",
+        "skipDiscovery": "Microsoft Container Registry tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest from https://mcr.microsoft.com/v2/mssql/server/manifests/2017-latest."
+      },
+      "cloudSQLServer2019": {
+        "$comment": "SQL Server 2019 15.0.4510.2, the server of a Cloud SQL for SQL Server instance of a SQLSERVER_2019_* version (#1916); pulled by a node only when one is created by a user who accepted Microsoft's licence. NOT a Google-published component. The digest is the tag's one linux/amd64 OCI manifest, read from the registry's manifest API without pulling (2026-11-19).",
+        "image": "mcr.microsoft.com/mssql/server:2019-latest",
+        "version": "15.0.4510.2",
+        "digest": "sha256:debdc21628cddd1a4433371c601c8dee9bad3533ae8b18fe9dc8c5596368b10d",
+        "source": "https://mcr.microsoft.com/en-us/artifact/mar/mssql/server",
+        "license": "Proprietary: Microsoft SQL Server End-User Licensing Agreement (https://go.microsoft.com/fwlink/?LinkId=746388), which the user who provisions an instance accepts; CloudBurrow never accepts it",
+        "redistribution": "not-redistributed",
+        "redistributionPlan": "Pulled from Microsoft's registry by digest at run time, and started only with the user's own acceptance of the licence.",
+        "platforms": [
+          "linux/amd64"
+        ],
+        "provides": "A real SQL Server for a created Cloud SQL for SQL Server instance. NOT the Cloud SQL Admin API.",
+        "verification": "image-digest",
+        "updateFeed": "mcr-tags",
+        "skipDiscovery": "Microsoft Container Registry tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest from https://mcr.microsoft.com/v2/mssql/server/manifests/2019-latest."
+      },
+      "cloudSQLServer2022": {
+        "$comment": "SQL Server 2022 16.0.4325.4, the server of a Cloud SQL for SQL Server instance of a SQLSERVER_2022_* version (#1916); pulled by a node only when one is created by a user who accepted Microsoft's licence. NOT a Google-published component. The digest is the tag's one linux/amd64 OCI manifest, read from the registry's manifest API without pulling (2026-11-19).",
+        "image": "mcr.microsoft.com/mssql/server:2022-latest",
+        "version": "16.0.4325.4",
+        "digest": "sha256:4525e3efac9f3e241cb003bb2ff2a82818b502f37e12049d788b1a9fa7e13b7f",
+        "source": "https://mcr.microsoft.com/en-us/artifact/mar/mssql/server",
+        "license": "Proprietary: Microsoft SQL Server End-User Licensing Agreement (https://go.microsoft.com/fwlink/?LinkId=746388), which the user who provisions an instance accepts; CloudBurrow never accepts it",
+        "redistribution": "not-redistributed",
+        "redistributionPlan": "Pulled from Microsoft's registry by digest at run time, and started only with the user's own acceptance of the licence.",
+        "platforms": [
+          "linux/amd64"
+        ],
+        "provides": "A real SQL Server for a created Cloud SQL for SQL Server instance. NOT the Cloud SQL Admin API.",
+        "verification": "image-digest",
+        "updateFeed": "mcr-tags",
+        "skipDiscovery": "Microsoft Container Registry tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest from https://mcr.microsoft.com/v2/mssql/server/manifests/2022-latest."
+      },
+      "cloudSQLServer2025": {
+        "$comment": "SQL Server 2025 17.0.5065.9, the server of a Cloud SQL for SQL Server instance of a SQLSERVER_2025_* version (#1916); pulled by a node only when one is created by a user who accepted Microsoft's licence. NOT a Google-published component. The digest is the tag's one linux/amd64 OCI manifest, read from the registry's manifest API without pulling (2026-11-19).",
+        "image": "mcr.microsoft.com/mssql/server:2025-latest",
+        "version": "17.0.5065.9",
+        "digest": "sha256:05644dad1266ca3d445d1e8f6d2ebb9a6a03df9a39376e0f7b48917356dca9d9",
+        "source": "https://mcr.microsoft.com/en-us/artifact/mar/mssql/server",
+        "license": "Proprietary: Microsoft SQL Server End-User Licensing Agreement (https://go.microsoft.com/fwlink/?LinkId=746388), which the user who provisions an instance accepts; CloudBurrow never accepts it",
+        "redistribution": "not-redistributed",
+        "redistributionPlan": "Pulled from Microsoft's registry by digest at run time, and started only with the user's own acceptance of the licence.",
+        "platforms": [
+          "linux/amd64"
+        ],
+        "provides": "A real SQL Server for a created Cloud SQL for SQL Server instance. NOT the Cloud SQL Admin API.",
+        "verification": "image-digest",
+        "updateFeed": "mcr-tags",
+        "skipDiscovery": "Microsoft Container Registry tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest from https://mcr.microsoft.com/v2/mssql/server/manifests/2025-latest."
+      },
       "cloudSQLMySQL80": {
         "$comment": "MySQL 8.0.46, the server of a Cloud SQL Admin API instance created with that databaseVersion (#1381); pulled by a node only when one is created. NOT a Google-published component.",
         "image": "mysql:8.0",
@@ -652,6 +720,13 @@
         "license": "BSD-3-Clause",
         "verification": "go.sum",
         "notes": "Promoted from indirect to direct for h2c, which lets Secret Manager serve gRPC and JSON on one port. Same version as before; no new dependency was added."
+      },
+      "goMSSQL": {
+        "module": "github.com/microsoft/go-mssqldb",
+        "version": "1.10.0",
+        "license": "BSD-3-Clause",
+        "verification": "go.sum",
+        "notes": "Cloud SQL for SQL Server (#1916): internal/service/sqladmin reaches a SQL Server instance's server as sa, to make its sqlserver user, databases, users and flags, as pgx and go-sql-driver/mysql reach PostgreSQL and MySQL. Microsoft's own pure-Go driver; Google publishes none. Only its root package is imported (no Azure or Kerberos packages)."
       },
       "goCreackPty": {
         "module": "github.com/creack/pty",

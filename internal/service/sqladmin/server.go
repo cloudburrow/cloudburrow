@@ -105,6 +105,10 @@ type Server struct {
 	ln  net.Listener
 	// conn is the connector path, nil unless EnableConnector was called.
 	conn *connector
+	// mssqlEULA is the acceptance of Microsoft's SQL Server licence `up`
+	// was given for every SQL Server instance (#1916), nil for none;
+	// guarded by emu.
+	mssqlEULA *EULAAcceptance
 	// writes are the created instances, nil unless EnableInstanceWrites
 	// was called; emu guards them.
 	emu    sync.RWMutex
@@ -334,16 +338,17 @@ const instanceWhy = "this server was started without instance writes (docs/cloud
 // The reasons the instance methods CloudBurrow cannot serve faithfully are
 // refused (#1462): each names what is missing.
 const (
-	sqlServerWhy = "it is a SQL Server feature, and CloudBurrow runs PostgreSQL and MySQL servers only"
+	sqlServerFeatureWhy = "it is a SQL Server feature that CloudBurrow's SQL Server instances (#1916) do not have: " +
+		"they run Microsoft's container image with SQL authentication only"
 )
 
 // verbWhy is why an instance method other than restart is not served.
 func verbWhy(verb string) string {
 	switch verb {
 	case "acquireSsrsLease", "releaseSsrsLease":
-		return "SQL Server Reporting Services leases: " + sqlServerWhy
+		return "SQL Server Reporting Services leases: " + sqlServerFeatureWhy
 	case "listEntraIdCertificates", "addEntraIdCertificate", "rotateEntraIdCertificate":
-		return "Microsoft Entra ID authentication: " + sqlServerWhy
+		return "Microsoft Entra ID authentication: " + sqlServerFeatureWhy
 	}
 	return "beneath an instance only databases, users, backupRuns, connectSettings, restart, restoreBackup and clone are served; " +
 		"see docs/cloudsql.md for what is served"
