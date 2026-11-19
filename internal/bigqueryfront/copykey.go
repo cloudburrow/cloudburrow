@@ -45,7 +45,29 @@ import (
 // (CloudBurrow: the job, as a partitioning mismatch), and the message of a
 // key not in that form (CloudBurrow: 400 invalid, its own wording). As
 // every key in CloudBurrow, it is recorded, not used: the emulator
-// encrypts nothing. A key with a partition decorator on a table stays 501.
+// encrypts nothing.
+//
+// A partition decorator (#1822). managing-partitioned-tables (read
+// 2026-11-18, https://docs.cloud.google.com/bigquery/docs/managing-partitioned-tables#copy_individual_partitions)
+// gives bq cp of a partition "--destination_kms_key is the customer-managed
+// Cloud KMS key used to encrypt the destination table or partition", and
+// a table has one encryptionConfiguration (Table). So:
+//   - a copy of a partition (mytable$20180130) into a table follows the
+//     rules above, as a copy of a table;
+//   - a copy into a partition (mytable2$20180130) writes into a table that
+//     exists: a key given must be the table's own, under every
+//     writeDisposition, or the job fails, keyMismatchMessage, and the
+//     table is unchanged. WRITE_TRUNCATE of a partition replaces the
+//     partition's rows, not the table ("use the TRUNCATE write
+//     disposition to replace the table"), so the table keeps its key, and
+//     with no key given, it keeps it too;
+//   - a key of another region fails the job, as above.
+//
+// UNVERIFIED (docs re-read 2026-11-18: managing-partitioned-tables,
+// customer-managed-encryption, bq-cli-reference's bq cp,
+// JobConfigurationTableCopy): that a partition's WRITE_TRUNCATE with
+// another key fails rather than re-encrypting the whole table; none of
+// them gives that case.
 
 // copyKeyName reads a copy job's destinationEncryptionConfiguration: its
 // kmsKeyName, "" when none is given, and why it cannot be used, or "".
