@@ -594,6 +594,35 @@ jobs:
           shasum -a 256 -c SHA256SUMS
           cp bigquery-emulator-* "$GITHUB_WORKSPACE/internal/bigqueryimage/bin/"
 
+      # Artifact Registry's vulnerability scanning (#1912) in the run shard,
+      # so TestArtifactRegistryVulnerabilityScanning and
+      # TestGcloudArtifactsVulnerabilityScanning scan instead of skipping
+      # (#1917): the pinned OSV-Scanner and the Alpine snapshot (about 67 MB)
+      # in the instance's prefetch cache, from this cache, keyed by the pins,
+      # or else the latest release's mirror, then upstream, each file checked
+      # against its pinned SHA-256 (tools/osvmirror fetch). Saved as soon as
+      # it is fetched, so a failing suite still keeps it. With
+      # CLOUDBURROW_TEST_OSV_REQUIRED the tests fail rather than skip when
+      # the scanner is missing.
+      - name: Restore the vulnerability scanner
+        id: osv-cache
+        if: matrix.shard == 'run'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/cb/cache/osv-scanner
+          key: osv-scanner-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('internal/osvscan/pins.go') }}
+      - name: Prefetch the vulnerability scanner
+        if: matrix.shard == 'run'
+        run: |
+          go run ./tools/osvmirror fetch -dir "$RUNNER_TEMP/cb/cache" -ecosystems Alpine
+          echo "CLOUDBURROW_TEST_OSV_REQUIRED=1" >> "$GITHUB_ENV"
+      - name: Save the vulnerability scanner
+        if: matrix.shard == 'run' && steps.osv-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/cb/cache/osv-scanner
+          key: osv-scanner-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('internal/osvscan/pins.go') }}
+
       - name: Start an instance and run the compatibility suite
         run: |
           # make build, not go build: the CLI embeds the Linux storage server

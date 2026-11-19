@@ -242,3 +242,18 @@ func TestOfflineFlag(t *testing.T) {
 func components0(cfg config.Config) *components.LifecycleComponent {
 	return components.NewLifecycleComponent(cfg.KubeconfigPath(), cfg, io.Discard)
 }
+
+// The scanner and its database come from CloudBurrow's release mirror
+// first (#1917); CLOUDBURROW_OSV_MIRROR replaces it, and "none" leaves
+// upstream only.
+func TestOSVMirrors(t *testing.T) {
+	if m := osvMirrors(""); len(m) == 0 || m[len(m)-1] != "https://github.com/cloudburrow/cloudburrow/releases/latest/download" {
+		t.Errorf("default: %v", m)
+	}
+	if m := osvMirrors(" https://a.test/x , https://b.test/y"); len(m) != 2 || m[0] != "https://a.test/x" || m[1] != "https://b.test/y" {
+		t.Errorf("CLOUDBURROW_OSV_MIRROR: %v", m)
+	}
+	if m := osvMirrors("none"); len(m) != 0 {
+		t.Errorf("none: %v", m)
+	}
+}

@@ -16,7 +16,9 @@ package osvscan
 
 import (
 	"fmt"
+	"regexp"
 	"runtime"
+	"strings"
 )
 
 // Version is the pinned OSV-Scanner release.
@@ -83,4 +85,57 @@ var Snapshots = []Snapshot{
 // generation.
 func SnapshotURL(s Snapshot) string {
 	return "https://osv-vulnerabilities.storage.googleapis.com/" + s.Ecosystem + "/all.zip?generation=" + s.Generation
+}
+
+// Mirrored are the ecosystems each CloudBurrow release mirrors (#1917):
+// release.yml's osv-mirror job uploads their pinned snapshots, with the
+// scanner's four binaries, as release assets, because OSV keeps a pinned
+// generation for only about a week and a release's assets stay. They are
+// about 375 MB together. Ubuntu (about 820 MB, more than twice the rest
+// together, and over a gigabyte of release assets a day with the scanner)
+// is not mirrored: it is fetched from OSV's live bucket only, so it is
+// prefetched while its pin is fresh, and a prefetch that names no
+// ecosystem goes on without it when its generation is gone.
+var Mirrored = []string{"Alpine", "Debian", "Go", "Maven", "PyPI", "npm"}
+
+// IsMirrored reports whether a release mirrors the ecosystem's snapshot.
+func IsMirrored(ecosystem string) bool {
+	for _, e := range Mirrored {
+		if strings.EqualFold(e, ecosystem) {
+			return true
+		}
+	}
+	return false
+}
+
+// MirrorRepo is the GitHub repository whose releases carry the mirror.
+const MirrorRepo = "cloudburrow/cloudburrow"
+
+// MirrorSnapshotAsset is a snapshot's release asset name. It names the
+// archive's SHA-256, so the same bytes have the same name in every release
+// and a mirror base can be any release that holds them.
+func MirrorSnapshotAsset(s Snapshot) string {
+	return "osv-db-" + s.Ecosystem + "-" + s.SHA256[:16] + ".zip"
+}
+
+// MirrorBinaryAsset is a scanner binary's release asset name.
+func MirrorBinaryAsset(b Binary) string {
+	return "osv-scanner-" + Version + "-" + strings.TrimPrefix(b.Name, "osv-scanner_")
+}
+
+// releaseTag is a release version this CLI may carry.
+var releaseTag = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+$`)
+
+// DefaultMirrors are the release download bases prefetch tries before
+// OSV's bucket and the scanner's own release: this CLI's own release when
+// it is one (a build from source is not), then the latest release, which
+// holds the same files whenever its pins are this CLI's. Every file is
+// checked against the SHA-256 pinned here whichever base serves it.
+func DefaultMirrors(cliVersion string) []string {
+	base := "https://github.com/" + MirrorRepo + "/releases/"
+	var m []string
+	if releaseTag.MatchString(cliVersion) {
+		m = append(m, base+"download/"+cliVersion)
+	}
+	return append(m, base+"latest/download")
 }

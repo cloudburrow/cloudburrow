@@ -25,6 +25,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/storageimage"
 	"github.com/cloudburrow/cloudburrow/internal/terminal"
 	"github.com/cloudburrow/cloudburrow/internal/tfconvert"
+	"github.com/cloudburrow/cloudburrow/internal/version"
 )
 
 // offlinePlan is what `up` with this configuration downloads (#604): the
@@ -137,7 +138,8 @@ func runPrefetch(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		if !serviceEnabled(cfg, config.ServiceRun) {
 			return errors.New("--vulnerability-scanning: Artifact Registry's scanning is served with Cloud Run, which this configuration does not enable")
 		}
-		n, err := osvscan.Fetcher{Logf: func(f string, a ...any) { fmt.Fprintf(stdout, f, a...) }}.Prefetch(ctx, osvscan.Dir(cache.Dir), ecosystems...)
+		fetcher := osvscan.Fetcher{Logf: func(f string, a ...any) { fmt.Fprintf(stdout, f, a...) }, Mirrors: osvMirrors(os.Getenv("CLOUDBURROW_OSV_MIRROR"))}
+		n, err := fetcher.Prefetch(ctx, osvscan.Dir(cache.Dir), ecosystems...)
 		if err != nil {
 			return fmt.Errorf("vulnerability scanning: %w", err)
 		}
@@ -158,6 +160,25 @@ func runPrefetch(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		fmt.Fprintf(stdout, "TensorFlow converter image %s is in Docker; BigQuery ML's TENSORFLOW imports need no network.\n", engine.Image)
 	}
 	return nil
+}
+
+// osvMirrors are the release download bases the scanner and its database
+// are fetched from before upstream (#1917): CLOUDBURROW_OSV_MIRROR's
+// comma-separated bases when it is set (an organisation's own copy of a
+// release's assets, or "none" for upstream only), else this CLI's own
+// release and the latest one.
+func osvMirrors(env string) []string {
+	env = strings.TrimSpace(env)
+	if env == "" {
+		return osvscan.DefaultMirrors(version.Get().Version)
+	}
+	var m []string
+	for _, b := range strings.Split(env, ",") {
+		if b = strings.TrimSpace(b); b != "" && b != "none" {
+			m = append(m, b)
+		}
+	}
+	return m
 }
 
 // takeFlag removes a boolean flag (-name, --name, -name=true or

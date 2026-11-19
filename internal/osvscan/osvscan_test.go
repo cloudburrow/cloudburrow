@@ -5,9 +5,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -227,5 +229,88 @@ func TestPinsMatchDependenciesJSON(t *testing.T) {
 		if j.URL != SnapshotURL(s) || j.SHA256 != "sha256:"+s.SHA256 || j.Size != s.Size {
 			t.Errorf("%s: dependencies.json %+v, pins.go %+v", s.Ecosystem, j, s)
 		}
+	}
+}
+
+// TestPrefetchTriesTheMirrorFirst (#1917): each file comes from the first
+// mirror base serving its pinned bytes, then upstream; a base serving
+// other bytes is passed over; an unmirrored ecosystem whose generation is
+// gone is left out of a prefetch that names none, and fails one that
+// names it.
+func TestPrefetchTriesTheMirrorFirst(t *testing.T) {
+	bin, alpine, ubuntu := []byte("scanner"), []byte("alpine db"), []byte("ubuntu db")
+	sum := func(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
+	host, err := HostBinary()
+	if err != nil {
+		t.Skip(err)
+	}
+	key := runtime.GOOS + "/" + runtime.GOARCH
+	oldB, oldS := Binaries[key], Snapshots
+	t.Cleanup(func() { Binaries[key], Snapshots = oldB, oldS })
+	Binaries[key] = Binary{Name: host.Name, SHA256: sum(bin), Size: int64(len(bin))}
+	Snapshots = []Snapshot{{"Alpine", "1", sum(alpine), int64(len(alpine))}, {"Ubuntu", "1", sum(ubuntu), int64(len(ubuntu))}}
+	var asked []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		asked = append(asked, r.URL.Path)
+		switch r.URL.Path {
+		case "/bad/" + MirrorSnapshotAsset(Snapshots[0]):
+			_, _ = w.Write([]byte("not the pinned bytes"))
+		case "/good/" + MirrorSnapshotAsset(Snapshots[0]):
+			_, _ = w.Write(alpine)
+		case "/good/" + MirrorBinaryAsset(Binaries[key]):
+			_, _ = w.Write(bin)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	f := Fetcher{Client: srv.Client(), Mirrors: []string{srv.URL + "/bad", srv.URL + "/good/"}}
+	if got := f.SnapshotSources(Snapshots[1]); len(got) != 1 || got[0] != SnapshotURL(Snapshots[1]) {
+		t.Errorf("Ubuntu, unmirrored, is fetched from %v", got)
+	}
+	var log strings.Builder
+	f.Logf = func(format string, a ...any) { fmt.Fprintf(&log, format, a...) }
+	d := Dir(t.TempDir())
+	// Every other host answers 404, as OSV's bucket does once a pinned
+	// generation is gone; nothing leaves the machine.
+	f.Client = &http.Client{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Host != strings.TrimPrefix(srv.URL, "http://") {
+			return &http.Response{StatusCode: http.StatusNotFound, Status: "404 Not Found", Body: http.NoBody, Request: r}, nil
+		}
+		return srv.Client().Transport.RoundTrip(r)
+	})}
+	if _, err := f.Prefetch(context.Background(), d); err != nil {
+		t.Fatalf("Prefetch: %v\n%s", err, log.String())
+	}
+	if !strings.Contains(log.String(), "WARNING: Ubuntu is not mirrored") {
+		t.Errorf("no warning for the missing Ubuntu snapshot:\n%s", log.String())
+	}
+	if got := strings.Join(asked, " "); got != "/bad/"+MirrorBinaryAsset(Binaries[key])+" /good/"+MirrorBinaryAsset(Binaries[key])+
+		" /bad/"+MirrorSnapshotAsset(Snapshots[0])+" /good/"+MirrorSnapshotAsset(Snapshots[0]) {
+		t.Errorf("asked %s", got)
+	}
+	if err := Ready(d); err != nil {
+		t.Error(err)
+	}
+	if _, err := f.Prefetch(context.Background(), d, "Ubuntu"); err == nil || !strings.Contains(err.Error(), "404") {
+		t.Errorf("a named Ubuntu whose generation is gone: %v", err)
+	}
+}
+
+func TestDefaultMirrors(t *testing.T) {
+	if m := DefaultMirrors("v0.31.2"); len(m) != 2 || m[0] != "https://github.com/cloudburrow/cloudburrow/releases/download/v0.31.2" ||
+		m[1] != "https://github.com/cloudburrow/cloudburrow/releases/latest/download" {
+		t.Errorf("a release: %v", m)
+	}
+	if m := DefaultMirrors("v0.31.2-0.20261119-abcdef"); len(m) != 1 {
+		t.Errorf("a pseudo-version: %v", m)
+	}
+	for _, s := range Snapshots {
+		if a := MirrorSnapshotAsset(s); !strings.HasPrefix(a, "osv-db-"+s.Ecosystem+"-"+s.SHA256[:16]) {
+			t.Errorf("%s: %s", s.Ecosystem, a)
+		}
+	}
+	if IsMirrored("Ubuntu") || !IsMirrored("pypi") {
+		t.Error("IsMirrored")
 	}
 }

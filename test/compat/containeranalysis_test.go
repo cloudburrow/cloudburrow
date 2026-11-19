@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -96,6 +97,11 @@ func waitDiscovery(t *testing.T, ctx context.Context, g *grafeas.Client, project
 				return o
 			case gpb.DiscoveryOccurrence_FINISHED_FAILED:
 				if codes.Code(d.GetAnalysisStatusError().GetCode()) == codes.FailedPrecondition {
+					// CI's run shard prefetches the scanner (#1917) and
+					// sets this, so a lost prefetch fails there.
+					if os.Getenv("CLOUDBURROW_TEST_OSV_REQUIRED") != "" {
+						t.Fatalf("the instance's scanner is not prefetched, and CLOUDBURROW_TEST_OSV_REQUIRED is set: %s", d.GetAnalysisStatusError().GetMessage())
+					}
 					t.Skipf("the instance's scanner is not prefetched (cloudburrow prefetch --vulnerability-scanning): %s", d.GetAnalysisStatusError().GetMessage())
 				}
 				t.Fatalf("the scan failed: %v", d.GetAnalysisStatusError())
