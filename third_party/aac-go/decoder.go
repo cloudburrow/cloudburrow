@@ -58,6 +58,7 @@ type Decoder struct {
 	configured             bool
 	sampleRate             int
 	channels               int
+	channelConfig          int // as configured: channel_configuration, or a PCE's count
 	samplingFrequencyIndex int
 
 	mdctLong  *transform.MDCT
@@ -73,6 +74,9 @@ type Decoder struct {
 	noise     *rand.Rand // PNS noise source (only the distribution is normative)
 
 	heState // SBR and PS (hev2.go)
+
+	// pce is channel configuration 0's program_config_element (pce.go).
+	pce *programConfig
 }
 
 // icsInfo is the parsed ics_info() — the window and band layout shared by
@@ -147,7 +151,7 @@ func (d *Decoder) Decode(data []byte) ([]int16, error) {
 // mid-stream format changes.
 func (d *Decoder) configure(h adts.Header) error {
 	if d.configured {
-		if int(h.SamplingFrequencyIndex) != d.samplingFrequencyIndex || int(h.ChannelConfiguration) != d.channels {
+		if int(h.SamplingFrequencyIndex) != d.samplingFrequencyIndex || int(h.ChannelConfiguration) != d.channelConfig {
 			return unsupportedf("mid-stream format change")
 		}
 		return nil
@@ -167,11 +171,25 @@ func (d *Decoder) configureCore(sfi, channels int) error {
 	}
 	// Channel configurations 1 to 6 (#1651): their channel count is the
 	// configuration (SCE; CPE; SCE CPE; SCE CPE SCE; SCE CPE CPE; SCE CPE
-	// CPE LFE). Configuration 7 (eight channels) is not decoded: no
-	// encoder at hand writes it (ffmpeg's writes 7.1 with a
-	// program_config_element).
-	if channels < 1 || channels > 6 {
-		return unsupportedf("channel_configuration %d (1 to 6 only)", channels)
+	// CPE LFE); 7 and 12 are eight channels (SCE CPE CPE CPE LFE:
+	// AudioToolbox's 7.1, and ffmpeg's), 11 seven (SCE CPE CPE SCE LFE,
+	// 6.1; ISO/IEC 14496-3:2019 Table 1.19); with a program_config_element,
+	// the count it lists.
+	d.channelConfig = channels
+	if d.pce == nil {
+		switch channels {
+		case 7, 12:
+			channels = 8
+		case 11:
+			channels = 7
+		default:
+			if channels < 1 || channels > 6 {
+				return unsupportedf("channel_configuration %d (1 to 7, 11, 12, or a program_config_element, only)", channels)
+			}
+		}
+	}
+	if channels < 1 || channels > 48 {
+		return unsupportedf("a program_config_element of %d channels", channels)
 	}
 	d.sampleRate = rate
 	d.samplingFrequencyIndex = sfi
@@ -222,18 +240,18 @@ func (d *Decoder) decodeFrame(payload []byte) ([][]float64, error) {
 		}
 		switch id {
 		case idSCE:
-			ch, err := d.decodeSCE(r)
+			ch, tag, err := d.decodeSCE(r)
 			if err != nil {
 				return nil, err
 			}
-			elems = append(elems, frameElement{first: len(chans)})
+			elems = append(elems, frameElement{first: len(chans), tag: tag})
 			chans = append(chans, ch)
 		case idCPE:
-			left, right, err := d.decodeCPE(r)
+			left, right, tag, err := d.decodeCPE(r)
 			if err != nil {
 				return nil, err
 			}
-			elems = append(elems, frameElement{first: len(chans), stereo: true})
+			elems = append(elems, frameElement{first: len(chans), stereo: true, tag: tag})
 			chans = append(chans, left, right)
 		case idDSE:
 			if err := skipDSE(r); err != nil {
@@ -244,17 +262,17 @@ func (d *Decoder) decodeFrame(payload []byte) ([][]float64, error) {
 				return nil, err
 			}
 		case idPCE:
-			if err := skipPCE(r); err != nil {
+			if _, err := parsePCE(r); err != nil {
 				return nil, err
 			}
 		case idLFE:
 			// lfe_channel_element() is a single_channel_element() of
 			// long windows (#1651); SBR does not apply to it.
-			ch, err := d.decodeSCE(r)
+			ch, tag, err := d.decodeSCE(r)
 			if err != nil {
 				return nil, err
 			}
-			elems = append(elems, frameElement{first: len(chans), lfe: true})
+			elems = append(elems, frameElement{first: len(chans), lfe: true, tag: tag})
 			chans = append(chans, ch)
 		case idCCE:
 			return nil, unsupportedf("syntactic element id %d", id)
@@ -266,34 +284,37 @@ func (d *Decoder) decodeFrame(payload []byte) ([][]float64, error) {
 			for i, ch := range chans {
 				pcm[i] = d.synthesize(i, ch)
 			}
-			return d.applySBR(pcm, elems), nil
+			return d.programOrder(d.applySBR(pcm, elems), elems)
 		}
 	}
 }
 
 // decodeSCE decodes single_channel_element() — ISO/IEC 14496-3 Table 4.4.
-func (d *Decoder) decodeSCE(r *bits.BitReader) (*channelState, error) {
-	if _, err := r.ReadBits(4); err != nil { // element_instance_tag
-		return nil, err
+func (d *Decoder) decodeSCE(r *bits.BitReader) (*channelState, int, error) {
+	tag, err := r.ReadBits(4) // element_instance_tag
+	if err != nil {
+		return nil, 0, err
 	}
 	ch, err := d.decodeICS(r, nil)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	d.applyChannelTNS(ch)
-	return ch, nil
+	return ch, int(tag), nil
 }
 
 // decodeCPE decodes channel_pair_element() — ISO/IEC 14496-3 Table 4.5 —
 // and applies the stereo tools in decoding order: both channels' ICS,
 // then M/S, then intensity, then per-channel TNS.
-func (d *Decoder) decodeCPE(r *bits.BitReader) (left, right *channelState, err error) {
-	if _, err := r.ReadBits(4); err != nil { // element_instance_tag
-		return nil, nil, err
+func (d *Decoder) decodeCPE(r *bits.BitReader) (left, right *channelState, tag int, err error) {
+	t, err := r.ReadBits(4) // element_instance_tag
+	if err != nil {
+		return nil, nil, 0, err
 	}
+	tag = int(t)
 	commonWindow, err := r.ReadBit()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 
 	var shared *icsInfo
@@ -301,10 +322,10 @@ func (d *Decoder) decodeCPE(r *bits.BitReader) (left, right *channelState, err e
 	msPresent := uint64(0)
 	if commonWindow {
 		if shared, err = d.parseICSInfo(r); err != nil {
-			return nil, nil, err
+			return nil, nil, 0, err
 		}
 		if msPresent, err = r.ReadBits(2); err != nil {
-			return nil, nil, err
+			return nil, nil, 0, err
 		}
 		switch msPresent {
 		case 0:
@@ -317,20 +338,20 @@ func (d *Decoder) decodeCPE(r *bits.BitReader) (left, right *channelState, err e
 				}
 				bit, err := r.ReadBit()
 				if err != nil {
-					return nil, nil, err
+					return nil, nil, 0, err
 				}
 				msMask[i] = bit
 			}
 		default:
-			return nil, nil, fmt.Errorf("aac: ms_mask_present 3 is reserved")
+			return nil, nil, 0, fmt.Errorf("aac: ms_mask_present 3 is reserved")
 		}
 	}
 
 	if left, err = d.decodeICS(r, shared); err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 	if right, err = d.decodeICS(r, shared); err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 
 	if commonWindow && msPresent != 0 {
@@ -339,7 +360,7 @@ func (d *Decoder) decodeCPE(r *bits.BitReader) (left, right *channelState, err e
 	applyCPEIntensity(left, right, msMask)
 	d.applyChannelTNS(left)
 	d.applyChannelTNS(right)
-	return left, right, nil
+	return left, right, tag, nil
 }
 
 // applyCPEMidSide undoes M/S coding on every masked band whose codebooks on
@@ -879,66 +900,6 @@ func (d *Decoder) readFIL(r *bits.BitReader, elems []frameElement) error {
 	}
 	for i := uint64(0); i < count*8-4; i++ {
 		if _, err := r.ReadBits(1); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// skipPCE parses and discards program_config_element() — ISO/IEC 14496-3
-// Table 4.2 — so streams with channel_configuration 0 keep bit alignment.
-func skipPCE(r *bits.BitReader) error {
-	skip := func(n int) error {
-		_, err := r.ReadBits(n)
-		return err
-	}
-	if err := skip(4 + 2 + 4); err != nil { // instance tag, object_type, sampling_frequency_index
-		return err
-	}
-	counts, err := r.ReadBits(4 + 4 + 4 + 2 + 3 + 4)
-	if err != nil {
-		return err
-	}
-	numFront := int(counts >> 17 & 0xf)
-	numSide := int(counts >> 13 & 0xf)
-	numBack := int(counts >> 9 & 0xf)
-	numLFE := int(counts >> 7 & 0x3)
-	numAssoc := int(counts >> 4 & 0x7)
-	numCC := int(counts & 0xf)
-
-	for _, present := range []int{4, 4, 3} { // mono/stereo mixdown, matrix mixdown
-		flag, err := r.ReadBit()
-		if err != nil {
-			return err
-		}
-		if flag {
-			if err := skip(present); err != nil {
-				return err
-			}
-		}
-	}
-	for range numFront + numSide + numBack {
-		if err := skip(1 + 4); err != nil { // element_is_cpe, tag_select
-			return err
-		}
-	}
-	for range numLFE + numAssoc {
-		if err := skip(4); err != nil {
-			return err
-		}
-	}
-	for range numCC {
-		if err := skip(1 + 4); err != nil { // cc_element_is_ind_sw, tag
-			return err
-		}
-	}
-	alignReader(r)
-	commentBytes, err := r.ReadBits(8)
-	if err != nil {
-		return err
-	}
-	for range commentBytes {
-		if err := skip(8); err != nil {
 			return err
 		}
 	}

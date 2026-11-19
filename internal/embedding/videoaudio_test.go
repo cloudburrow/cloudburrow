@@ -139,7 +139,7 @@ func TestDecodeVideoAudioTrack(t *testing.T) {
 // refused naming its codec.
 func TestDecodeVideoAudioRefuses(t *testing.T) {
 	for file, want := range map[string]string{
-		"va-ulaw.mov": `codec "ulaw"`,
+		"va-ima4.mov": `codec "ima4"`,
 	} {
 		b, err := os.ReadFile(filepath.Join("testdata", file))
 		if err != nil {

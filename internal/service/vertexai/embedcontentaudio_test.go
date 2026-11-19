@@ -120,9 +120,9 @@ func TestEmbedContentAudioAndFileDataOnEmbeddingGemma2(t *testing.T) {
 		"bad uri": {`{"content":{"parts":[{"fileData":{"mimeType":"audio/wav","fileUri":"s3://x/y.wav"}}]}}`, "file_data.file_uri", http.StatusBadRequest},
 		// Vertex takes HTTP URLs too; an instance fetches nothing (#1651).
 		"http uri": {`{"content":{"parts":[{"fileData":{"mimeType":"audio/wav","fileUri":"https://x/y.wav"}}]}}`, "HTTP URLs are not fetched", http.StatusNotImplemented},
-		// A valid WAV this build does not decode (3-bit IMA ADPCM; 4-bit
-		// IMA and Microsoft ADPCM decode) is 501, not 400 (#1651).
-		"adpcm wav":  {`{"content":{"parts":[{"inlineData":{"mimeType":"audio/wav","data":"` + base64.StdEncoding.EncodeToString(adpcmWAV()) + `"}}]}}`, "3-bit IMA ADPCM", http.StatusNotImplemented},
+		// A valid WAV this build does not decode (5-bit IMA ADPCM; 3- and
+		// 4-bit IMA and Microsoft ADPCM decode) is 501, not 400 (#1651).
+		"adpcm wav":  {`{"content":{"parts":[{"inlineData":{"mimeType":"audio/wav","data":"` + base64.StdEncoding.EncodeToString(adpcmWAV()) + `"}}]}}`, "5-bit IMA ADPCM", http.StatusNotImplemented},
 		"video":      {`{"content":{"parts":[{"fileData":{"fileUri":"gs://b/movie.mp4"}}]}}`, "file_data: the data is not a valid MP4", http.StatusBadRequest},
 		"bad mp3":    {`{"content":{"parts":[{"inlineData":{"mimeType":"audio/mpeg","data":"AA=="}}]}}`, "parts[0].inline_data: the data is not a valid MP3 file", http.StatusBadRequest},
 		"ogg":        {`{"content":{"parts":[{"inlineData":{"mimeType":"audio/ogg","data":"AA=="}}]}}`, "audio/wav, audio/mpeg", http.StatusBadRequest},
@@ -153,10 +153,10 @@ func mustB64(t *testing.T, s string) []byte {
 	return b
 }
 
-// adpcmWAV is a mono 3-bit IMA ADPCM WAV header with a little data: valid,
+// adpcmWAV is a mono 5-bit IMA ADPCM WAV header with a little data: valid,
 // and not decoded here.
 func adpcmWAV() []byte {
-	fmtChunk := []byte{0x11, 0, 1, 0, 0x80, 0x3e, 0, 0, 0, 0x5e, 0, 0, 0, 1, 3, 0}
+	fmtChunk := []byte{0x11, 0, 1, 0, 0x80, 0x3e, 0, 0, 0, 0x5e, 0, 0, 0, 1, 5, 0}
 	data := make([]byte, 64)
 	b := append([]byte("WAVEfmt "), byte(len(fmtChunk)), 0, 0, 0)
 	b = append(b, fmtChunk...)

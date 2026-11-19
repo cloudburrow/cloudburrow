@@ -5442,8 +5442,9 @@
           "test/compat/embedimages_test.go:111 TestEmbedContentEmbedsImagesThroughThePredictionClient",
           "test/compat/embedmp3_test.go:39 TestEmbedContentEmbedsMP3ThroughThePredictionClient",
           "test/compat/embedmpeg25_test.go:28 TestEmbedContentEmbedsMPEG25MP3ThroughThePredictionClient",
-          "test/compat/embedrest_test.go:221 TestEmbedContentEmbedsADPCMWAVAndLosslessAndMultichannelTracksThroughThePredictionClient",
-          "test/compat/embedrest_test.go:43 TestEmbedContentEmbedsMultichannelWAVAndGrayVideoThroughThePredictionClient",
+          "test/compat/embedrest_test.go:223 TestEmbedContentEmbedsADPCMWAVAndLosslessAndMultichannelTracksThroughThePredictionClient",
+          "test/compat/embedrest_test.go:317 TestEmbedContentEmbedsSurroundAACAndG711TracksAnd3BitADPCMThroughThePredictionClient",
+          "test/compat/embedrest_test.go:45 TestEmbedContentEmbedsMultichannelWAVAndGrayVideoThroughThePredictionClient",
           "test/compat/embedvideo_test.go:85 TestEmbedContentEmbedsVideoAndPDFThroughThePredictionClient",
           "test/compat/embedvp9av1_test.go:35 TestEmbedContentEmbedsVP9AndAV1ThroughThePredictionClient",
           "test/compat/embedwebp_test.go:41 TestEmbedContentEmbedsWebPAndBMPThroughThePredictionClient"

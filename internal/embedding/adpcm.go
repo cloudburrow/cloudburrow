@@ -5,8 +5,9 @@ import (
 	"fmt"
 )
 
-// ADPCM WAV (#1651): IMA ADPCM (WAVE format 0x11, the DVI/Intel layout) and
-// Microsoft ADPCM (WAVE format 2), 4 bits a sample, decoded as ffmpeg's
+// ADPCM WAV (#1651): IMA ADPCM (WAVE format 0x11, the DVI/Intel layout),
+// 4 or 3 bits a sample, and Microsoft ADPCM (WAVE format 2), 4 bits a
+// sample, mono or stereo, decoded as ffmpeg's
 // adpcm_ima_wav and adpcm_ms decoders decode them (checked sample for
 // sample against ffmpeg 9's decodes in adpcm_test.go). Each block of
 // block_align bytes starts afresh from its header.
@@ -59,12 +60,43 @@ func (s *imaState) nibble(n int) int {
 	return s.predictor
 }
 
+// ima3Index is the 3-bit step index adjustment (IMA's Recommended
+// Practices), by the code's two magnitude bits.
+var ima3Index = [4]int{-1, -1, 1, 2}
+
+// nibble3 expands one 3-bit code (a sign bit and two magnitude bits) with
+// the same shift-and-add (checked against ffmpeg 9's decodes).
+func (s *imaState) nibble3(n int) int {
+	step := imaStepTable[s.index]
+	s.index = max(0, min(88, s.index+ima3Index[n&3]))
+	diff := step >> 2
+	if n&2 != 0 {
+		diff += step
+	}
+	if n&1 != 0 {
+		diff += step >> 1
+	}
+	if n&4 != 0 {
+		s.predictor -= diff
+	} else {
+		s.predictor += diff
+	}
+	s.predictor = clip16(s.predictor)
+	return s.predictor
+}
+
 // decodeIMAADPCM decodes IMA ADPCM blocks to interleaved 16-bit samples.
 // Each block has a 4-byte header a channel (the first sample and the step
-// index), then 4 bytes of each channel in turn, 8 samples, low nibble first.
+// index), then 4 bytes of each channel in turn, 8 samples, low nibble
+// first; or (#1651), for 3-bit IMA ADPCM, 32 samples of each channel in 12
+// bytes, a little-endian bit stream, its three 4-byte words interleaved
+// with the other channels' as the 4-bit words are.
 func decodeIMAADPCM(data []byte, channels, blockAlign, bits int) ([]int16, error) {
+	if bits == 3 {
+		return decodeIMA3(data, channels, blockAlign)
+	}
 	if bits != 4 {
-		return nil, notDecodedf("%d-bit IMA ADPCM is not decoded; 4-bit IMA ADPCM is", bits)
+		return nil, notDecodedf("%d-bit IMA ADPCM is not decoded; 3- and 4-bit IMA ADPCM are", bits)
 	}
 	if blockAlign < 4*channels || blockAlign > 1<<16 {
 		return nil, fmt.Errorf("an IMA ADPCM block_align of %d for %d channels", blockAlign, channels)
@@ -102,6 +134,74 @@ func decodeIMAADPCM(data []byte, channels, blockAlign, bits int) ([]int16, error
 	return out, nil
 }
 
+// decodeIMA3 decodes 3-bit IMA ADPCM blocks (decodeIMAADPCM).
+func decodeIMA3(data []byte, channels, blockAlign int) ([]int16, error) {
+	if blockAlign < 4*channels || blockAlign > 1<<16 {
+		return nil, fmt.Errorf("an IMA ADPCM block_align of %d for %d channels", blockAlign, channels)
+	}
+	var out []int16
+	st := make([]imaState, channels)
+	for len(data) >= 4*channels {
+		blk := data[:min(len(data), blockAlign)]
+		data = data[len(blk):]
+		groups := (len(blk) - 4*channels) / (12 * channels)
+		frames := 1 + groups*32
+		base := len(out)
+		out = append(out, make([]int16, frames*channels)...)
+		for c := range channels {
+			h := blk[4*c:]
+			st[c].predictor = int(int16(binary.LittleEndian.Uint16(h)))
+			st[c].index = int(int16(binary.LittleEndian.Uint16(h[2:])))
+			if st[c].index < 0 || st[c].index > 88 {
+				return nil, fmt.Errorf("an IMA ADPCM step index of %d", st[c].index)
+			}
+			out[base+c] = int16(st[c].predictor)
+		}
+		for g := range groups {
+			p := 4*channels + g*12*channels
+			for c := range channels {
+				var v uint128le
+				for w := range 3 {
+					o := p + (w*channels+c)*4
+					v.set(w, binary.LittleEndian.Uint32(blk[o:]))
+				}
+				for k := range 32 {
+					f := 1 + g*32 + k
+					out[base+f*channels+c] = int16(st[c].nibble3(v.bits(3*k, 3)))
+				}
+			}
+		}
+	}
+	return out, nil
+}
+
+// uint128le is three little-endian 32-bit words read as one bit stream.
+type uint128le struct{ lo, hi uint64 }
+
+func (v *uint128le) set(w int, x uint32) {
+	switch w {
+	case 0:
+		v.lo |= uint64(x)
+	case 1:
+		v.lo |= uint64(x) << 32
+	default:
+		v.hi = uint64(x)
+	}
+}
+
+func (v *uint128le) bits(at, n int) int {
+	var x uint64
+	switch {
+	case at >= 64:
+		x = v.hi >> (at - 64)
+	case at+n <= 64:
+		x = v.lo >> at
+	default:
+		x = v.lo>>at | v.hi<<(64-at)
+	}
+	return int(x & (1<<n - 1))
+}
+
 // msAdaptation and the coefficient pairs are Microsoft ADPCM's standard
 // tables; ffmpeg decodes with these whatever coefficients the fmt chunk
 // lists.
@@ -133,6 +233,10 @@ func decodeMSADPCM(data []byte, channels, blockAlign, bits int) ([]int16, error)
 	if bits != 4 {
 		return nil, notDecodedf("%d-bit Microsoft ADPCM is not decoded; 4-bit is", bits)
 	}
+	// More channels have no layout to verify against: Microsoft's codec
+	// writes one or two, and ffmpeg 9 decodes a packet of several blocks
+	// of more as one block (checked: a 3-channel file of two 768-byte
+	// blocks comes back as 1012 samples a channel, not 1000).
 	if channels > 2 {
 		return nil, notDecodedf("Microsoft ADPCM of %d channels is not decoded; mono and stereo are", channels)
 	}
