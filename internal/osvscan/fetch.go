@@ -43,6 +43,11 @@ var ErrNotPrefetched = errors.New("OSV-Scanner and its database are not prefetch
 type Fetcher struct {
 	Client *http.Client
 	Logf   func(format string, a ...any)
+	// Mirrors are release download bases (DefaultMirrors) tried, in
+	// order, before each file's upstream URL: a base serves a file at
+	// <base>/<MirrorSnapshotAsset or MirrorBinaryAsset>. A snapshot that
+	// is not Mirrored is fetched from upstream only.
+	Mirrors []string
 }
 
 func (f Fetcher) logf(format string, a ...any) {
@@ -51,9 +56,36 @@ func (f Fetcher) logf(format string, a ...any) {
 	}
 }
 
+// BinarySources are the URLs a binary is fetched from, in order: each
+// mirror, then the scanner's own GitHub release.
+func (f Fetcher) BinarySources(b Binary) []string {
+	var urls []string
+	for _, m := range f.Mirrors {
+		urls = append(urls, strings.TrimSuffix(m, "/")+"/"+MirrorBinaryAsset(b))
+	}
+	return append(urls, BinaryURL(b))
+}
+
+// SnapshotSources are the URLs a snapshot is fetched from, in order: each
+// mirror when the ecosystem is Mirrored, then OSV's bucket at the pinned
+// generation.
+func (f Fetcher) SnapshotSources(s Snapshot) []string {
+	var urls []string
+	if IsMirrored(s.Ecosystem) {
+		for _, m := range f.Mirrors {
+			urls = append(urls, strings.TrimSuffix(m, "/")+"/"+MirrorSnapshotAsset(s))
+		}
+	}
+	return append(urls, SnapshotURL(s))
+}
+
 // Prefetch stores this machine's scanner binary and the pinned snapshots
-// of the ecosystems named (every one when none is) under d, skipping what
-// is already there and checks out, and returns the bytes it downloaded.
+// of the ecosystems named under d, skipping what is already there and
+// checks out, and returns the bytes it downloaded. A named ecosystem must
+// be fetched. When none is named, every Mirrored one must be, and the
+// others (Ubuntu) are fetched when their generation is still served and
+// otherwise left out with a warning, so the default prefetch keeps working
+// after OSV drops a pinned generation.
 func (f Fetcher) Prefetch(ctx context.Context, d Dir, ecosystems ...string) (int64, error) {
 	want := map[string]bool{}
 	for _, e := range ecosystems {
@@ -72,7 +104,7 @@ func (f Fetcher) Prefetch(ctx context.Context, d Dir, ecosystems ...string) (int
 		return 0, err
 	}
 	var total int64
-	n, err := f.fetch(ctx, BinaryURL(b), d.BinaryPath(), b.SHA256, b.Size, 0o755)
+	n, err := f.FetchFile(ctx, f.BinarySources(b), d.BinaryPath(), b.SHA256, b.Size, 0o755)
 	total += n
 	if err != nil {
 		return total, err
@@ -81,9 +113,13 @@ func (f Fetcher) Prefetch(ctx context.Context, d Dir, ecosystems ...string) (int
 		if s.SHA256 == "" || (len(want) > 0 && !want[s.Ecosystem]) {
 			continue
 		}
-		n, err := f.fetch(ctx, SnapshotURL(s), d.SnapshotPath(s), s.SHA256, s.Size, 0o644)
+		n, err := f.FetchFile(ctx, f.SnapshotSources(s), d.SnapshotPath(s), s.SHA256, s.Size, 0o644)
 		total += n
 		if err != nil {
+			if len(want) == 0 && !IsMirrored(s.Ecosystem) {
+				f.logf("  osv-scanner: WARNING: %s is not mirrored by CloudBurrow's releases and OSV no longer serves its pinned generation, so it is left out: %v\n", s.Ecosystem, err)
+				continue
+			}
 			return total, err
 		}
 	}
@@ -103,7 +139,11 @@ func fileSHA256(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-func (f Fetcher) fetch(ctx context.Context, url, path, sum string, size int64, mode os.FileMode) (int64, error) {
+// FetchFile stores at path the first of urls whose bytes have the SHA-256
+// sum, unless path already has it, and returns the bytes downloaded. A
+// source that fails, answers other than 200 or serves other bytes is
+// logged and the next is tried; the error names every attempt.
+func (f Fetcher) FetchFile(ctx context.Context, urls []string, path, sum string, size int64, mode os.FileMode) (int64, error) {
 	if got, err := fileSHA256(path); err == nil && got == sum {
 		f.logf("  osv-scanner: %s already cached\n", path)
 		return 0, nil
@@ -111,7 +151,26 @@ func (f Fetcher) fetch(ctx context.Context, url, path, sum string, size int64, m
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return 0, err
 	}
-	f.logf("  osv-scanner: downloading %s (%d bytes)\n", url, size)
+	var total int64
+	var failures []string
+	for _, url := range urls {
+		f.logf("  osv-scanner: downloading %s (%d bytes)\n", url, size)
+		n, err := f.fetchOne(ctx, url, path, sum, mode)
+		total += n
+		if err == nil {
+			return total, nil
+		}
+		if ctx.Err() != nil {
+			return total, err
+		}
+		f.logf("  osv-scanner: %v\n", err)
+		failures = append(failures, err.Error())
+	}
+	return total, fmt.Errorf("%s: no source served the pinned bytes (sha256 %s): %s (a mirror is a CloudBurrow release's assets; OSV keeps a pinned database generation for about a week, after which only the mirror has it)",
+		path, sum, strings.Join(failures, "; "))
+}
+
+func (f Fetcher) fetchOne(ctx context.Context, url, path, sum string, mode os.FileMode) (int64, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return 0, err
@@ -126,7 +185,7 @@ func (f Fetcher) fetch(ctx context.Context, url, path, sum string, size int64, m
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("download %s: %s (a pinned OSV database generation is kept for about a week; move the pin in internal/osvscan/pins.go and dependencies.json)", url, resp.Status)
+		return 0, fmt.Errorf("download %s: %s", url, resp.Status)
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".download-*")
 	if err != nil {
@@ -139,7 +198,7 @@ func (f Fetcher) fetch(ctx context.Context, url, path, sum string, size int64, m
 		err = cerr
 	}
 	if err != nil {
-		return n, err
+		return n, fmt.Errorf("download %s: %w", url, err)
 	}
 	if got := hex.EncodeToString(h.Sum(nil)); got != sum {
 		return n, fmt.Errorf("download %s: sha256 %s, not the pinned %s", url, got, sum)

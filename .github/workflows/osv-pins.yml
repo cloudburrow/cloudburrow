@@ -1,0 +1,69 @@
+name: OSV database pins
+
+# Artifact Registry's vulnerability scanning pins each OSV database
+# snapshot to an object generation of OSV's bucket, which keeps old
+# generations for only about a week (#1917). Once a day this moves the pins
+# when they are three days old: tools/osvmirror bump reads each ecosystem's
+# live generation, downloads it, hashes it and rewrites
+# internal/osvscan/pins.go and dependencies.json together; the unit tests
+# check the two agree; and scripts/osv-mirror.sh pushes the change to a new
+# branch auto/osv-pins-<date> and opens a pull request for it.
+#
+# Only the workflow's own GITHUB_TOKEN. This repository does not let GitHub
+# Actions create pull requests (Settings > Actions > General, "Allow GitHub
+# Actions to create and approve pull requests", is off), so where
+# `gh pr create` is refused the script files an issue naming the branch
+# instead; nothing here changes that setting. Three days leaves four for the
+# branch to land and a release to mirror it before OSV drops the old
+# generations; release.yml's osv-mirror job keeps them after that.
+on:
+  schedule:
+    - cron: "41 5 * * *"
+  workflow_dispatch:
+    inputs:
+      min_age:
+        description: Move the pins only when they are at least this many days old (0 to move them now).
+        type: string
+        required: false
+        default: "3"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: osv-pins
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    name: move the OSV database pins
+    if: github.repository == 'cloudburrow/cloudburrow'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      # Push the auto/osv-pins-<date> branch.
+      contents: write
+      # Open its pull request, where the repository allows it.
+      pull-requests: write
+      # Otherwise file an issue naming the branch.
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27"
+      - name: Move the pins
+        env:
+          MIN_AGE: ${{ inputs.min_age || '3' }}
+        run: |
+          set -o pipefail
+          printf '%s\n' "${MIN_AGE}" | grep -Eq '^[0-9]+$' || { echo "::error::min_age '${MIN_AGE}' is not a number of days"; exit 1; }
+          go run ./tools/osvmirror bump -min-age "${MIN_AGE}" | tee "${RUNNER_TEMP}/bump.log"
+      - name: Check the new pins
+        run: go test -count=1 ./internal/osvscan/ ./tools/osvmirror/
+      - name: Propose them
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: sh scripts/osv-mirror.sh propose "${RUNNER_TEMP}/bump.log"

@@ -1331,7 +1331,7 @@
         "tests": [
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
           "test/compat/artifactregistrycleanup_test.go:46 TestArtifactRegistryCleanupPolicies",
-          "test/compat/containeranalysis_test.go:144 TestArtifactRegistryVulnerabilityScanning",
+          "test/compat/containeranalysis_test.go:150 TestArtifactRegistryVulnerabilityScanning",
           "test/compat/orgpolicycustom1895_artifactregistry_test.go:22 TestOrgPolicyCustomConstraintsArtifactRegistry",
           "test/compat/terraform_batch11_run_test.go:264 TestTerraformArtifactRegistryPackageDataSources",
           "test/compat/terraform_batch7_test.go:37 TestTerraformArtifactRegistryRuleAndCleanupPolicies",
@@ -2355,128 +2355,128 @@
         "method": "google.devtools.containeranalysis.v1.ContainerAnalysis/GetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/containeranalysis_test.go:284 TestContainerAnalysisNotesAndOccurrences"
+          "test/compat/containeranalysis_test.go:290 TestContainerAnalysisNotesAndOccurrences"
         ]
       },
       {
         "method": "google.devtools.containeranalysis.v1.ContainerAnalysis/GetVulnerabilityOccurrencesSummary",
         "status": "Verified",
         "tests": [
-          "test/compat/containeranalysis_test.go:144 TestArtifactRegistryVulnerabilityScanning",
-          "test/compat/containeranalysis_test.go:408 TestGcloudArtifactsVulnerabilityScanning"
+          "test/compat/containeranalysis_test.go:150 TestArtifactRegistryVulnerabilityScanning",
+          "test/compat/containeranalysis_test.go:414 TestGcloudArtifactsVulnerabilityScanning"
         ]
       },
       {
         "method": "google.devtools.containeranalysis.v1.ContainerAnalysis/SetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/containeranalysis_test.go:284 TestContainerAnalysisNotesAndOccurrences"
+          "test/compat/containeranalysis_test.go:290 TestContainerAnalysisNotesAndOccurrences"
         ]
       },
       {
         "method": "google.devtools.containeranalysis.v1.ContainerAnalysis/TestIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/containeranalysis_test.go:284 TestContainerAnalysisNotesAndOccurrences"
+          "test/compat/containeranalysis_test.go:290 TestContainerAnalysisNotesAndOccurrences"
         ]
       },
       {
         "method": "grafeas.v1.Grafeas/BatchCreateNotes",
         "status": "Verified",
         "tests": [
-          "test/compat/containeranalysis_test.go:284 TestContainerAnalysisNotesAndOccurrences"
+          "test/compat/containeranalysis_test.go:290 TestContainerAnalysisNotesAndOccurrences"
         ]
       },
       {
         "method": "grafeas.v1.Grafeas/BatchCreateOccurrences",
         "status": "Verified",
         "tests": [
-          "test/compat/containeranalysis_test.go:284 TestContainerAnalysisNotesAndOccurrences"
+          "test/compat/containeranalysis_test.go:290 TestContainerAnalysisNotesAndOccurrences"
         ]
       },
       {
         "method": "grafeas.v1.Grafeas/CreateNote",
         "status": "Verified",
         "tests": [
-          "test/compat/containeranalysis_test.go:284 TestContainerAnalysisNotesAndOccurrences"
+          "test/compat/containeranalysis_test.go:290 TestContainerAnalysisNotesAndOccurrences"
         ]
       },
       {
         "method": "grafeas.v1.Grafeas/CreateOccurrence",
         "status": "Verified",
         "tests": [
-          "test/compat/containeranalysis_test.go:284 TestContainerAnalysisNotesAndOccurrences"
+          "test/compat/containeranalysis_test.go:290 TestContainerAnalysisNotesAndOccurrences"
         ]
       },
       {
         "method": "grafeas.v1.Grafeas/DeleteNote",
         "status": "Verified",
         "tests": [
-          "test/compat/containeranalysis_test.go:284 TestContainerAnalysisNotesAndOccurrences"
+          "test/compat/containeranalysis_test.go:290 TestContainerAnalysisNotesAndOccurrences"
         ]
       },
       {
         "method": "grafeas.v1.Grafeas/DeleteOccurrence",
         "status": "Verified",
         "tests": [
-          "test/compat/containeranalysis_test.go:284 TestContainerAnalysisNotesAndOccurrences"
+          "test/compat/containeranalysis_test.go:290 TestContainerAnalysisNotesAndOccurrences"
         ]
       },
       {
         "method": "grafeas.v1.Grafeas/GetNote",
         "status": "Verified",
         "tests": [
-          "test/compat/containeranalysis_test.go:144 TestArtifactRegistryVulnerabilityScanning"
+          "test/compat/containeranalysis_test.go:150 TestArtifactRegistryVulnerabilityScanning"
         ]
       },
       {
         "method": "grafeas.v1.Grafeas/GetOccurrence",
         "status": "Verified",
         "tests": [
-          "test/compat/containeranalysis_test.go:144 TestArtifactRegistryVulnerabilityScanning"
+          "test/compat/containeranalysis_test.go:150 TestArtifactRegistryVulnerabilityScanning"
         ]
       },
       {
         "method": "grafeas.v1.Grafeas/GetOccurrenceNote",
         "status": "Verified",
         "tests": [
-          "test/compat/containeranalysis_test.go:144 TestArtifactRegistryVulnerabilityScanning"
+          "test/compat/containeranalysis_test.go:150 TestArtifactRegistryVulnerabilityScanning"
         ]
       },
       {
         "method": "grafeas.v1.Grafeas/ListNoteOccurrences",
         "status": "Verified",
         "tests": [
-          "test/compat/containeranalysis_test.go:144 TestArtifactRegistryVulnerabilityScanning"
+          "test/compat/containeranalysis_test.go:150 TestArtifactRegistryVulnerabilityScanning"
         ]
       },
       {
         "method": "grafeas.v1.Grafeas/ListNotes",
         "status": "Verified",
         "tests": [
-          "test/compat/containeranalysis_test.go:284 TestContainerAnalysisNotesAndOccurrences"
+          "test/compat/containeranalysis_test.go:290 TestContainerAnalysisNotesAndOccurrences"
         ]
       },
       {
         "method": "grafeas.v1.Grafeas/ListOccurrences",
         "status": "Verified",
         "tests": [
-          "test/compat/containeranalysis_test.go:144 TestArtifactRegistryVulnerabilityScanning",
-          "test/compat/containeranalysis_test.go:408 TestGcloudArtifactsVulnerabilityScanning"
+          "test/compat/containeranalysis_test.go:150 TestArtifactRegistryVulnerabilityScanning",
+          "test/compat/containeranalysis_test.go:414 TestGcloudArtifactsVulnerabilityScanning"
         ]
       },
       {
         "method": "grafeas.v1.Grafeas/UpdateNote",
         "status": "Verified",
         "tests": [
-          "test/compat/containeranalysis_test.go:284 TestContainerAnalysisNotesAndOccurrences"
+          "test/compat/containeranalysis_test.go:290 TestContainerAnalysisNotesAndOccurrences"
         ]
       },
       {
         "method": "grafeas.v1.Grafeas/UpdateOccurrence",
         "status": "Verified",
         "tests": [
-          "test/compat/containeranalysis_test.go:284 TestContainerAnalysisNotesAndOccurrences"
+          "test/compat/containeranalysis_test.go:290 TestContainerAnalysisNotesAndOccurrences"
         ]
       }
     ]

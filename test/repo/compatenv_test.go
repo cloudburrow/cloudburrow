@@ -70,6 +70,9 @@ var compatEnvExceptions = map[string]string{
 	// The workloads' namespace, which defaults to the one every instance
 	// uses; set only for an instance configured with another.
 	"CLOUDBURROW_TEST_NAMESPACE": "defaults to the instance default",
+	// Whether the vulnerability scanner must be prefetched (#1917): CI's run
+	// shard sets it after prefetching; an instance does not say.
+	"CLOUDBURROW_TEST_OSV_REQUIRED": "opt-in switch: the scanning tests fail rather than skip without the prefetched scanner",
 }
 
 var compatVarRE = regexp.MustCompile(`CLOUDBURROW_TEST_[A-Z0-9_]*[A-Z0-9]`)

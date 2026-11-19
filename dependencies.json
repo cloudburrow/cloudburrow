@@ -1282,12 +1282,12 @@
       }
     },
     "scanning": {
-      "$comment": "Artifact Registry's vulnerability scanning (#1912): downloaded by `cloudburrow prefetch --vulnerability-scanning`, each file checked against these SHA-256s (internal/osvscan/pins.go holds the same values; a test compares them), and run offline. Nothing is redistributed: every user downloads from the upstream.",
+      "$comment": "Artifact Registry's vulnerability scanning (#1912): downloaded by `cloudburrow prefetch --vulnerability-scanning`, each file checked against these SHA-256s (internal/osvscan/pins.go holds the same values; a test compares them), and run offline. Since #1917 each release mirrors the four scanner binaries and the snapshots of internal/osvscan's Mirrored ecosystems as its own assets (release.yml osv-mirror, tools/osvmirror stage), and prefetch tries that release, then the latest one, before upstream; whichever serves a file, it must match the SHA-256 here.",
       "osvScanner": {
         "version": "v2.7.1",
         "source": "https://github.com/google/osv-scanner",
         "license": "Apache-2.0",
-        "redistribution": "download-only; fetched by cloudburrow prefetch from the project's GitHub release, never shipped",
+        "redistribution": "mirrored unmodified as release assets osv-scanner-v2.7.1-<os>_<arch> (#1917), with osv-mirror-NOTICE.txt (Apache-2.0, a copy in LICENSE); prefetch tries the CloudBurrow release first and the project's GitHub release after",
         "updateFeed": "github-releases",
         "verification": "release-checksum",
         "digest": null,
@@ -1309,9 +1309,9 @@
         "version": "2026-11-19",
         "source": "https://google.github.io/osv.dev/data/#data-dumps",
         "license": "mixed: each OSV record keeps its source database's licence (for example CC-BY-4.0 for the GitHub Advisory Database, the Go vulnerability database and PyPA's advisory database); the distributions' trackers (Alpine secdb, Debian security tracker, Ubuntu CVE tracker) set their own terms",
-        "redistribution": "download-only; fetched by cloudburrow prefetch from OSV's public bucket, never shipped",
+        "redistribution": "Alpine, Debian, Go, Maven, npm and PyPI are mirrored unmodified as release assets osv-db-<ecosystem>-<sha256 prefix>.zip (#1917), with osv-mirror-NOTICE.txt naming the sources and their licences; Ubuntu (820 MB) is fetched from OSV's bucket only. Prefetch tries the CloudBurrow release first and OSV's bucket after",
         "updateFeed": "none",
-        "skipDiscovery": "A data snapshot, not a release: OSV rewrites each ecosystem's all.zip several times a day. The pin is an object generation of the versioned bucket osv-vulnerabilities, which keeps old generations for about a week, so the pin is moved (pins.go and here together) when a prefetch reports 404.",
+        "skipDiscovery": "A data snapshot, not a release: OSV rewrites each ecosystem's all.zip several times a day. The pin is an object generation of the versioned bucket osv-vulnerabilities, which keeps old generations for about a week, so .github/workflows/osv-pins.yml moves the pin (pins.go and here together, by tools/osvmirror bump) once it is three days old and proposes the change on a branch auto/osv-pins-<date>; each release mirrors its pins so they outlive the week.",
         "verification": "sha256-on-download",
         "digest": null,
         "snapshots": {

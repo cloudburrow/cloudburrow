@@ -276,3 +276,37 @@ replaces it at the next run.
 **By hand.** Pushing a `vX.Y.Z` tag still releases, through the same gate: the tagged commit needs
 `main`'s full CI run. `release.yml`'s own manual dispatch remains a dry run that builds the
 archives and renders a tag's notes, and publishes nothing.
+
+### The vulnerability scanner's mirror and pins
+
+Artifact Registry's vulnerability scanning (#1912) runs Google's OSV-Scanner against snapshots of
+the OSV database pinned by object generation and SHA-256 (`internal/osvscan/pins.go`,
+`dependencies.json` `scanning`). OSV keeps an old generation for only about a week, so (#1917):
+
+- **Each release mirrors its pins.** `release.yml`'s `osv-mirror` job, after `publish`, runs
+  `scripts/osv-mirror.sh stage` (`tools/osvmirror stage`): it downloads the four OSV-Scanner
+  binaries and the pinned snapshots of Alpine, Debian, Go, Maven, npm and PyPI, from upstream
+  first and then from the five newest earlier releases (the asset names carry the SHA-256, so the
+  same name is the same bytes), checks every file against the pin at the release's tag, and
+  uploads them (about 600 MB) with `osv-mirror-SHA256SUMS` and `osv-mirror-NOTICE.txt`. Only the
+  workflow's `GITHUB_TOKEN`. `cloudburrow prefetch --vulnerability-scanning` tries its own
+  release's copy, then the latest release's, then upstream. It does not gate `promote`: a
+  release without its mirror still prefetches from upstream while OSV serves its pins, and the
+  job failing means the pins are older than OSV's week and no earlier release has them.
+- **Ubuntu is not mirrored**: 820 MB, more than twice the six above together, on a release
+  every one to two days. [Install](install.md) says what prefetch does without it.
+- **The pins move every few days.** `.github/workflows/osv-pins.yml` runs daily; once the pins are
+  three days old, `tools/osvmirror bump` reads each archive's live generation from the bucket's
+  metadata, downloads and hashes it, and rewrites `pins.go` and `dependencies.json` together; the
+  unit tests check they agree; `scripts/osv-mirror.sh propose` pushes the change to a branch
+  `auto/osv-pins-<date>` with the workflow's `GITHUB_TOKEN` and opens a pull request. This
+  repository does not let GitHub Actions create pull requests ("Allow GitHub Actions to create
+  and approve pull requests" is off), so `gh pr create` is refused and the script files (or
+  updates) an issue titled `OSV database pins: move to <date>` linking the branch instead. A push
+  with `GITHUB_TOKEN` starts no CI run: land the branch like any other, and its landing's CI checks
+  it. To move the pins now: Actions > OSV database pins > Run workflow, with `min_age` 0.
+- **CI scans for real.** The compatibility job's `run` shard prefetches the scanner and the
+  Alpine snapshot into the instance's prefetch cache before `up` (`tools/osvmirror fetch`, about
+  67 MB), from an Actions cache keyed by `pins.go`, else the latest release's mirror, else
+  upstream, and sets `CLOUDBURROW_TEST_OSV_REQUIRED`, so the scanning compat tests fail rather
+  than skip without it.
