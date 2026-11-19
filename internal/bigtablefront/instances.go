@@ -227,10 +227,12 @@ func (s *instances) createInstance(_ context.Context, req *btapb.CreateInstanceR
 		in.pb.Type = btapb.Instance_PRODUCTION
 	}
 	// Every instance is created with a default app profile, routing to its
-	// one cluster or, with several, to any.
+	// one cluster with single-row transactions enabled or, with several, to
+	// any ("it enables single-row transactions",
+	// https://docs.cloud.google.com/bigtable/docs/app-profiles, #1858).
 	def := &btapb.AppProfile{Name: name + "/appProfiles/default", Etag: newEtag(), Description: "Default application profile"}
 	if len(ids) == 1 {
-		def.RoutingPolicy = &btapb.AppProfile_SingleClusterRouting_{SingleClusterRouting: &btapb.AppProfile_SingleClusterRouting{ClusterId: ids[0]}}
+		def.RoutingPolicy = &btapb.AppProfile_SingleClusterRouting_{SingleClusterRouting: &btapb.AppProfile_SingleClusterRouting{ClusterId: ids[0], AllowTransactionalWrites: true}}
 	} else {
 		def.RoutingPolicy = &btapb.AppProfile_MultiClusterRoutingUseAny_{MultiClusterRoutingUseAny: &btapb.AppProfile_MultiClusterRoutingUseAny{}}
 	}

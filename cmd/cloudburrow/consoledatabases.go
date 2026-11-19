@@ -1667,30 +1667,17 @@ func database2AdminClient(ctx context.Context, endpoint string) (*database.Datab
 // halfway and leave the thing it claimed to remove. Neither is offered, and
 // the screens say why rather than leaving the absence unexplained.
 
-// CreateForm implements console.Creator for Bigtable.
+// CreateForm implements console.Creator for Bigtable: Google's Create
+// table (#1858), its column families with their type and garbage
+// collection, change stream and deletion protection.
 func (bigtableProvider) CreateForm() (string, []console.Field) {
-	return "Create table", []console.Field{
-		{
-			Name: "table", Label: "Table ID", Type: "text", Required: true,
-			Help:    "Letters, digits, hyphens and underscores.",
-			Pattern: `^[A-Za-z0-9][A-Za-z0-9_\-]{0,49}$`,
-		},
-		{
-			Name: "families", Label: "Column families", Type: "text",
-			Help:    "Comma-separated. A table with no column family can hold nothing, so one is created if this is empty.",
-			Default: "cf1",
-		},
-	}
+	return "Create table", bigtableCreateTableFields()
 }
 
 // Create implements console.Creator for Bigtable.
 func (p bigtableProvider) Create(ctx context.Context, project string, values map[string]string) (string, error) {
 	if project == "" {
 		return "", fmt.Errorf("choose a project first")
-	}
-	table := strings.TrimSpace(values["table"])
-	if table == "" {
-		return "", fmt.Errorf("a table ID is required")
 	}
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
@@ -1700,23 +1687,7 @@ func (p bigtableProvider) Create(ctx context.Context, project string, values map
 		return "", fmt.Errorf("cannot reach Bigtable: %w", err)
 	}
 	defer admin.Close()
-
-	if err := admin.CreateTable(ctx, table); err != nil {
-		return "", fmt.Errorf("creating the table: %w", err)
-	}
-	families := splitAndTrim(values["families"])
-	if len(families) == 0 {
-		families = []string{"cf1"}
-	}
-	for _, f := range families {
-		if err := admin.CreateColumnFamily(ctx, table, f); err != nil {
-			// The table exists but is unusable without a family, so the
-			// half-made resource is removed rather than left behind.
-			_ = admin.DeleteTable(ctx, table)
-			return "", fmt.Errorf("creating column family %q: %w", f, err)
-		}
-	}
-	return table, nil
+	return createBigtableTable(ctx, admin, values)
 }
 
 // Delete implements console.Deleter for Bigtable.

@@ -121,11 +121,11 @@ const ROUTES = [
   { path: "/firestore-databases", service: "firestore-databases", icon: "firestore", title: "Databases", kind: "Database", section: "Databases",
     product: "firestore", productTitle: "Firestore" },
   { path: "/datastore", service: "datastore", title: "Datastore", section: "Databases" },
-  { path: "/bigtable",  service: "bigtable",  title: "Tables", kind: "Table",  section: "Databases",
-    product: "bigtable", productTitle: "Bigtable" },
   // The project's Bigtable instances, with their clusters, app profiles and
-  // IAM policy (#1358). Not under /bigtable/, where it would shadow a table.
+  // IAM policy (#1358). First, as Google's Bigtable opens on its Instances list (#1858). Not under /bigtable/, where it would shadow a table.
   { path: "/bigtable-instances", service: "bigtable-instances", icon: "bigtable", title: "Instances", kind: "Instance", section: "Databases",
+    product: "bigtable", productTitle: "Bigtable" },
+  { path: "/bigtable",  service: "bigtable",  title: "Tables", kind: "Table",  section: "Databases",
     product: "bigtable", productTitle: "Bigtable" },
   { path: "/spanner",   service: "spanner",   title: "Spanner", kind: "Instance",   section: "Databases" },
   // Cloud SQL is one product with a page per engine, as the console this
@@ -5919,7 +5919,14 @@ function groupEntry(f, id, errorId, helpId) {
     const r = { controls: [] };
     const cells = sub.map((s) => {
       const label = `${s.label} ${n}`;
-      const c = s.type === "textarea"
+      // A select's options are its Options; one in UnavailableOptions is
+      // drawn disabled with its reason (#1858).
+      const c = s.type === "select"
+        ? el("select", { "aria-label": label }, ...(s.options || []).map((o) => {
+          const why = (s.unavailableOptions || {})[o];
+          return el("option", { value: o, text: (s.optionLabels || {})[o] || o, disabled: why ? true : null, title: why || null });
+        }))
+        : s.type === "textarea"
         ? el("textarea", { rows: "2", "aria-label": label, spellcheck: "false" })
         : el("input", { type: s.type === "checkbox" ? "checkbox" : "text", "aria-label": label,
                         autocomplete: "off", spellcheck: "false" });
@@ -13905,6 +13912,202 @@ async function openIAMEditPanel(data, row, rolesNow, onDone) {
   });
 }
 
+// --- Bigtable Studio (#1858) ------------------------------------------------
+//
+// An instance's Bigtable Studio, as Google's console draws it
+// (https://docs.cloud.google.com/bigtable/docs/manage-data-using-console):
+// the Explorer (tables with their column families and authorized views,
+// logical and materialized views, each table with View actions), the Query
+// builder (a table, a row-key filter, column filters and a limit, run as
+// ReadRows), the Query editor (GoogleSQL for Bigtable, ExecuteQuery), and
+// the results with a Row details pane and Export. Its calls are the
+// provider's Studio (POST /api/studio/bigtable-instances).
+
+function renderBigtableStudio(panel, route, segments, project) {
+  const [instance] = segments;
+  const call = (name, body = {}) => send(
+    `/api/studio/bigtable-instances?project=${encodeURIComponent(project)}&call=${name}`, "POST", { instance, ...body });
+  const key = `cb.bigtable.studio.${project}.${instance}`;
+  let state;
+  try { state = JSON.parse(sessionStorage.getItem(key) || "null"); } catch { state = null; }
+  if (!state || typeof state !== "object") state = { mode: "builder", sql: "", table: "" };
+  const save = () => { try { sessionStorage.setItem(key, JSON.stringify(state)); } catch { /* per-tab only */ } };
+  let catalog = { tables: [] };
+  let last = null;
+
+  const explorer = el("nav", { class: "spanner-explorer bigtable-explorer", id: "bigtable-explorer", "aria-label": "Explorer" },
+    el("h3", { text: "Explorer" }), loadingState(3, { what: "explorer" }));
+  const modes = el("div", { class: "tab-strip", role: "tablist", "aria-label": "Query mode" });
+  const body = el("div", { class: "bigtable-studio-body" });
+  const results = el("div", { class: "spanner-results", id: "bigtable-results", role: "region", "aria-label": "Query results" });
+  const details = el("aside", { class: "bigtable-row-details", id: "bigtable-row-details", "aria-label": "Row details", hidden: true });
+
+  // The builder's controls.
+  const tableSelect = el("select", { id: "bigtable-builder-table", "aria-label": "Table" });
+  const keyMode = el("select", { id: "bigtable-builder-keymode", "aria-label": "Row key filter" },
+    ...[["all", "All rows"], ["prefix", "Row key prefix"], ["range", "Row key range"], ["keys", "Row keys"]].map(([v, t]) => el("option", { value: v, text: t })));
+  const prefix = el("input", { id: "bigtable-builder-prefix", type: "text", "aria-label": "Row key prefix", placeholder: "Row key prefix" });
+  const startKey = el("input", { id: "bigtable-builder-start", type: "text", "aria-label": "Start row key (inclusive)", placeholder: "Start (inclusive)" });
+  const endKey = el("input", { id: "bigtable-builder-end", type: "text", "aria-label": "End row key (exclusive)", placeholder: "End (exclusive)" });
+  const keys = el("input", { id: "bigtable-builder-keys", type: "text", "aria-label": "Row keys", placeholder: "key1, key2" });
+  const family = el("select", { id: "bigtable-builder-family", "aria-label": "Column family" });
+  const qualifier = el("input", { id: "bigtable-builder-qualifier", type: "text", "aria-label": "Column qualifier", placeholder: "Column qualifier" });
+  const latest = el("input", { id: "bigtable-builder-latest", type: "checkbox" });
+  const limit = el("input", { id: "bigtable-builder-limit", type: "number", min: "1", max: "200", value: "100", "aria-label": "Limit" });
+  const runBuilder = el("button", { class: "primary", id: "bigtable-builder-run", type: "button", text: "Run" });
+  const keyInputs = el("div", { class: "bigtable-key-inputs" });
+  const drawKeyInputs = () => setChildren(keyInputs, ...({ all: [], prefix: [prefix], range: [startKey, endKey], keys: [keys] }[keyMode.value]));
+  keyMode.addEventListener("change", drawKeyInputs);
+  const drawFamilies = () => {
+    const t = (catalog.tables || []).find((x) => x.name === tableSelect.value);
+    setChildren(family, el("option", { value: "", text: "All column families" }),
+      ...((t && t.families) || []).map((f) => el("option", { value: f.name, text: f.name })));
+  };
+  tableSelect.addEventListener("change", () => { state.table = tableSelect.value; save(); drawFamilies(); });
+
+  // The editor.
+  const editor = el("textarea", { class: "mono spanner-editor", id: "bigtable-editor", rows: "8", spellcheck: "false",
+    "aria-label": "Query editor", placeholder: "SELECT _key, cf1 FROM `my-table` LIMIT 10" });
+  editor.value = state.sql || "";
+  editor.addEventListener("input", () => { state.sql = editor.value; save(); });
+  const runEditor = el("button", { class: "primary", id: "bigtable-editor-run", type: "button", text: "Run" });
+  const clear = el("button", { class: "secondary", id: "bigtable-editor-clear", type: "button", text: "Clear",
+    onclick: () => { editor.value = ""; state.sql = ""; save(); editor.focus(); } });
+
+  const showDetails = (row) => {
+    details.hidden = false;
+    setChildren(details, el("h3", { text: "Row details" }),
+      el("p", { class: "mono", id: "bigtable-row-key", text: row.key }),
+      el("table", {}, el("thead", {}, el("tr", {}, el("th", { text: "Column" }), el("th", { text: "Value" }), el("th", { text: "Timestamp" }))),
+        el("tbody", {}, ...(row.cells || []).map((c) => el("tr", {}, el("td", { class: "mono", text: c.column }),
+          el("td", { class: "mono", text: c.value }), el("td", { class: "mono", text: c.timestamp }))))),
+      el("button", { class: "secondary", type: "button", text: "Close", onclick: () => { details.hidden = true; } }));
+  };
+  const exportAs = (kind) => {
+    if (!last) return;
+    const cols = last.columns || [];
+    const objects = (last.rows || []).map((r) => Object.fromEntries(cols.map((c, i) => [c, r[i]])));
+    const csv = [cols, ...(last.rows || [])].map((r) => r.map((v) => `"${String(v ?? "").replaceAll('"', '""')}"`).join(",")).join("\n");
+    if (kind === "clipboard") {
+      navigator.clipboard?.writeText(csv).then(() => announce("Copied to clipboard"), () => announce("Copy failed"));
+      return;
+    }
+    const blob = new Blob([kind === "json" ? JSON.stringify(objects, null, 2) : csv], { type: kind === "json" ? "application/json" : "text/csv" });
+    const a = el("a", { href: URL.createObjectURL(blob), download: `bigtable-results.${kind}` });
+    document.body.append(a); a.click(); a.remove();
+  };
+  const drawResults = () => {
+    if (!last) return setChildren(results, el("p", { class: "unavailable", text: "Run a query to see its results." }));
+    if (last.error) return setChildren(results, el("p", { class: "form-error", role: "alert", text: last.error }));
+    const cols = last.columns || [];
+    const exportMenu = bqMenu("Export", [
+      { label: "Export to CSV", run: () => exportAs("csv") },
+      { label: "Export to JSON", run: () => exportAs("json") },
+      { label: "Copy to clipboard", run: () => exportAs("clipboard") },
+      { label: "Export to Google Sheets", disabled: true, title: "Not available locally: Google Sheets is not served.", run: () => {} },
+    ]);
+    bqMenuButton(exportMenu, "Export", "Export results");
+    setChildren(results,
+      el("div", { class: "action-bar" },
+        el("p", { class: "spanner-message", id: "bigtable-message", text: `${last.message || ""} (${last.elapsed || "—"})` }),
+        exportMenu),
+      el("div", { class: "table-wrap" }, el("table", { id: "bigtable-results-table" },
+        el("thead", {}, el("tr", {}, ...cols.map((c) => el("th", { text: c })))),
+        el("tbody", {}, ...(last.rows || []).map((row, i) => el("tr", {
+          class: last.details ? "is-clickable" : "", tabindex: last.details ? "0" : null,
+          onclick: () => last.details && showDetails(last.details[i]),
+          onkeydown: (e) => { if (e.key === "Enter" && last.details) showDetails(last.details[i]); },
+        }, ...row.map((v) => el("td", { class: "mono", text: v }))))))));
+  };
+  const execute = async (button, name, payload) => {
+    setBusy(button, true);
+    details.hidden = true;
+    setChildren(results, el("p", { class: "unavailable" }, spinner("Running"), " Running…"));
+    try {
+      last = await call(name, payload);
+      announce(`Query complete: ${(last.rows || []).length} rows`);
+    } catch (err) {
+      last = { error: err.message };
+    } finally {
+      setBusy(button, false);
+    }
+    drawResults();
+  };
+  runBuilder.addEventListener("click", () => execute(runBuilder, "read", {
+    table: tableSelect.value, latest: latest.checked, limit: Number(limit.value) || 100,
+    family: family.value, qualifier: qualifier.value.trim(),
+    prefix: keyMode.value === "prefix" ? prefix.value : "",
+    start: keyMode.value === "range" ? startKey.value : "", end: keyMode.value === "range" ? endKey.value : "",
+    keys: keyMode.value === "keys" ? keys.value : "",
+  }));
+  runEditor.addEventListener("click", () => { if (editor.value.trim()) execute(runEditor, "sql", { sql: editor.value }); });
+
+  const label = (text, control) => el("label", { class: "form-row" }, el("span", { class: "form-label", text }), control);
+  const drawMode = () => {
+    setChildren(modes, ...[["builder", "Query builder"], ["editor", "Query editor"]].map(([id, text]) =>
+      el("button", { class: "tab" + (state.mode === id ? " is-selected" : ""), role: "tab", type: "button", id: `bigtable-mode-${id}`,
+        "aria-selected": state.mode === id ? "true" : "false", text,
+        onclick: () => { state.mode = id; save(); drawMode(); } })));
+    if (state.mode === "editor") {
+      setChildren(body, el("p", { class: "form-help", text: "GoogleSQL for Bigtable: SELECT over a table, a logical view or a materialized view, read with ExecuteQuery." }),
+        editor, el("div", { class: "action-bar spanner-editor-actions" }, runEditor, clear));
+    } else {
+      setChildren(body, el("div", { class: "bigtable-builder", id: "bigtable-builder" },
+        label("Table", tableSelect),
+        label("Row key filter", keyMode), keyInputs,
+        label("Column family", family), label("Column qualifier", qualifier),
+        el("label", { class: "check-line" }, latest, el("span", { text: "Latest cell versions only" })),
+        label("Limit", limit),
+        el("div", { class: "action-bar spanner-editor-actions" }, runBuilder)));
+    }
+  };
+  const openBuilder = (table) => { state.mode = "builder"; state.table = table; tableSelect.value = table; save(); drawFamilies(); drawMode(); };
+  const openEditor = (sql) => { state.mode = "editor"; state.sql = sql; editor.value = sql; save(); drawMode(); editor.focus(); };
+
+  const group = (title, items, row) => el("details", { class: "spanner-explorer-group", open: true },
+    el("summary", { text: `${title} (${items.length})` }),
+    items.length ? el("ul", {}, ...items.map(row)) : el("p", { class: "unavailable", text: `No ${title.toLowerCase()}` }));
+  const quote = (n) => `\`${n.replaceAll("`", "\\`")}\``;
+  const loadExplorer = async () => {
+    try {
+      catalog = await call("explorer");
+      const tables = catalog.tables || [];
+      setChildren(tableSelect, ...tables.map((t) => el("option", { value: t.name, text: t.name })));
+      if (tables.some((t) => t.name === state.table)) tableSelect.value = state.table;
+      drawFamilies();
+      const tableRow = (t) => el("li", { class: "spanner-explorer-table" },
+        el("details", {},
+          el("summary", {}, el("span", { class: "mono", text: t.name }),
+            bqMenu(`View actions for ${t.name}`, [
+              { label: "Query", run: () => openBuilder(t.name) },
+              { label: "Open in query editor", run: () => openEditor(`SELECT * FROM ${quote(t.name)} LIMIT 100`) },
+              { label: "Open table page", run: () => navigate(`/bigtable/${encodeURIComponent(t.name)}?project=${encodeURIComponent(project)}&instance=${encodeURIComponent(instance)}`) },
+            ])),
+          el("ul", { class: "spanner-columns" },
+            ...t.families.map((f) => el("li", {}, el("span", { class: "mono", text: f.name }), el("span", { class: "unavailable", text: ` ${f.gc}` }))),
+            ...t.authorizedViews.map((v) => el("li", {}, el("span", { class: "mono", text: v }), el("span", { class: "unavailable", text: " authorized view" }))))));
+      const viewRow = (v) => el("li", {}, el("button", { class: "link-button mono", type: "button", text: v,
+        onclick: () => openEditor(`SELECT * FROM ${quote(v)} LIMIT 100`) }));
+      setChildren(explorer, el("h3", { text: "Explorer" }),
+        el("p", { class: "spanner-explorer-db mono", text: instance }),
+        group("Tables", tables, tableRow),
+        group("Logical views", catalog.logicalViews || [], viewRow),
+        group("Materialized views", catalog.materializedViews || [], viewRow),
+        ...Object.entries(catalog.errors || {}).map(([k, v]) => el("p", { class: "unavailable", text: `${k}: ${v}` })));
+    } catch (err) {
+      setChildren(explorer, el("h3", { text: "Explorer" }), el("p", { class: "form-error", role: "alert", text: err.message }));
+    }
+  };
+
+  drawKeyInputs();
+  drawMode();
+  drawResults();
+  setChildren(panel, el("div", { class: "spanner-studio bigtable-studio", id: "bigtable-studio" },
+    explorer,
+    el("div", { class: "spanner-workspace" }, modes, body, results, details)));
+  loadExplorer();
+}
+
 // --- Spanner Studio (#1859) -------------------------------------------------
 //
 // A database's Spanner Studio, as Google's console draws it
@@ -13916,7 +14119,7 @@ async function openIAMEditPanel(data, row, rolesNow, onDone) {
 // provider's Studio (POST /api/studio/spanner). A statement that changes
 // data or schema runs after a confirmation that names the database.
 
-const STUDIO_SECTIONS = { spanner: renderSpannerStudio };
+const STUDIO_SECTIONS = { spanner: renderSpannerStudio, "bigtable-instances": renderBigtableStudio };
 
 function renderSpannerStudio(panel, route, segments, project) {
   const [instance, database] = segments;

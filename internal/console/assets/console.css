@@ -2100,6 +2100,11 @@ svg.bq-chart { display: block; border: 1px solid var(--border); border-radius: v
   .tab-strip.side-nav { flex-direction: row; overflow-x: auto; border-right: 0; }
 }
 /* Spanner Studio: the Explorer beside the editor and its results. */
+/* Bigtable Studio (#1858): the query builder's rows and the Row details pane. */
+.bigtable-builder { display: grid; gap: 8px; max-width: 560px; }
+.bigtable-key-inputs { display: flex; gap: 8px; flex-wrap: wrap; }
+.bigtable-row-details { border-top: 1px solid var(--border, #dadce0); margin-top: 12px; padding-top: 8px; }
+#bigtable-results-table tr.is-clickable { cursor: pointer; }
 .spanner-studio { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 16px; align-items: start; }
 .spanner-explorer { border-right: 1px solid var(--border, #dadce0); padding-right: 12px; font-size: var(--text-body-size); }
 .spanner-explorer h3 { margin: 0 0 8px; font-size: inherit; }
