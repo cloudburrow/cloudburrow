@@ -214,6 +214,9 @@ func TestTerraformBackupDRDataSources(t *testing.T) {
 	vault := fmt.Sprintf("tfdsvault-%d", n)
 	loc := "projects/" + m.project + "/locations/us-central1"
 	assoc := fmt.Sprintf("%s/backupPlanAssociations/tfdsassoc-%d", loc, n)
+	// Outside the daily rule's window, so the backups the data sources and
+	// the client read are the test's own (#1871).
+	start, end := idleBackupWindow()
 	resources := func(desc string) string {
 		return fmt.Sprintf(`
 resource "google_backup_dr_backup_vault" "v" {
@@ -239,8 +242,8 @@ resource "google_backup_dr_backup_plan" "p" {
       recurrence_type = "DAILY"
       time_zone       = "UTC"
       backup_window {
-        start_hour_of_day = 1
-        end_hour_of_day   = 5
+        start_hour_of_day = %[6]d
+        end_hour_of_day   = %[7]d
       }
     }
   }
@@ -253,7 +256,7 @@ resource "google_backup_dr_backup_plan_association" "a" {
   resource_type              = "sqladmin.googleapis.com/Instance"
   backup_plan                = google_backup_dr_backup_plan.p.name
 }
-`, m.project, vault, n, instance, desc)
+`, m.project, vault, n, instance, desc, start, end)
 	}
 	// The data sources, added once the association has a data source and a
 	// backup, as the provider reads them at plan time.
