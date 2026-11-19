@@ -22,9 +22,10 @@ import (
 // local model the genai SDK reaches over REST. StreamGenerateContent sends
 // more than one GenerateContentResponse, each naming the model that ran, with
 // STOP on the last and on no other; GenerateContent answers the same prompt
-// in one response; and both refuse what the runtime cannot honour (a
-// temperature) with the same INVALID_ARGUMENT, and another model with the
-// same NOT_FOUND, never substituting. What the model says is not asserted.
+// in one response; a temperature is applied (#1797: at 0, with top-k 1, two
+// runs answer the same words), one outside Gemini's [0, 2] is the same
+// INVALID_ARGUMENT naming it from both, and another model the same
+// NOT_FOUND, never substituting. What the model says is not asserted.
 func TestStreamGenerateContentThroughThePredictionClient(t *testing.T) {
 	h := New(t)
 	pc := predictionClientAt(t, h, EnvLocalAI)
@@ -114,15 +115,47 @@ func TestStreamGenerateContentThroughThePredictionClient(t *testing.T) {
 			return err
 		}
 	}
-	temp := float32(0.2)
+	// The temperature is applied (#1797): at 0 with top-k 1 the decoding is
+	// greedy, so two runs answer the same words, unary and streaming. A
+	// temperature outside Gemini's documented [0, 2] is refused naming it.
+	zero, one, eight := float32(0), float32(1), int32(8)
+	greedy := &aiplatformpb.GenerateContentRequest{Model: name, Contents: user("Name one colour. Answer with one word."),
+		GenerationConfig: &aiplatformpb.GenerationConfig{Temperature: &zero, TopK: &one, MaxOutputTokens: &eight}}
+	answer := func() string {
+		resp, err := pc.GenerateContent(ctx, greedy)
+		if err != nil {
+			t.Fatalf("GenerateContent at temperature 0: %v", err)
+		}
+		var b strings.Builder
+		for _, p := range resp.GetCandidates()[0].GetContent().GetParts() {
+			b.WriteString(p.GetText())
+		}
+		return b.String()
+	}
+	if a, b := answer(), answer(); a == "" || a != b {
+		t.Errorf("temperature 0 answered %q, then %q; want the same words", a, b)
+	}
+	st, err := pc.StreamGenerateContent(ctx, greedy)
+	if err != nil {
+		t.Fatalf("StreamGenerateContent at temperature 0: %v", err)
+	}
+	for {
+		if _, err := st.Recv(); err != nil {
+			if !errors.Is(err, io.EOF) {
+				t.Errorf("StreamGenerateContent at temperature 0: %v", err)
+			}
+			break
+		}
+	}
+	hot := float32(2.5)
 	refused := []struct {
 		name string
 		req  *aiplatformpb.GenerateContentRequest
 		code codes.Code
 		says string
 	}{
-		{"temperature", &aiplatformpb.GenerateContentRequest{Model: name, Contents: user("hi"),
-			GenerationConfig: &aiplatformpb.GenerationConfig{Temperature: &temp}}, codes.InvalidArgument, "temperature"},
+		{"temperature out of range", &aiplatformpb.GenerateContentRequest{Model: name, Contents: user("hi"),
+			GenerationConfig: &aiplatformpb.GenerationConfig{Temperature: &hot}}, codes.InvalidArgument, "temperature"},
 		{"another model", &aiplatformpb.GenerateContentRequest{
 			Model: "projects/" + h.Project() + "/locations/us-central1/publishers/google/models/gemini-2.0-flash", Contents: user("hi")},
 			codes.NotFound, "gemini-2.0-flash"},

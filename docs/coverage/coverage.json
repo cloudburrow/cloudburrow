@@ -6239,8 +6239,8 @@
         "method": "google.cloud.aiplatform.v1.PredictionService/DirectPredict",
         "status": "Verified",
         "tests": [
-          "test/compat/streampredict_test.go:180 TestStreamingPredictOnTheEmbeddingModel",
-          "test/compat/streampredict_test.go:48 TestStreamingPredictOnTheGenerationModel"
+          "test/compat/streampredict_test.go:182 TestStreamingPredictOnTheEmbeddingModel",
+          "test/compat/streampredict_test.go:50 TestStreamingPredictOnTheGenerationModel"
         ]
       },
       {
@@ -6290,7 +6290,7 @@
         "method": "google.cloud.aiplatform.v1.PredictionService/GenerateContent",
         "status": "Verified",
         "tests": [
-          "test/compat/generationgrpc_test.go:28 TestStreamGenerateContentThroughThePredictionClient"
+          "test/compat/generationgrpc_test.go:29 TestStreamGenerateContentThroughThePredictionClient"
         ]
       },
       {
@@ -6306,22 +6306,22 @@
         "tests": [
           "test/compat/predictiongrpc_test.go:63 TestPredictionClientReachesACustomEndpoint",
           "test/compat/rawpredict_test.go:26 TestRawPredictOnTheEmbeddingModel",
-          "test/compat/rawpredict_test.go:70 TestRawPredictOnTheGenerationModel"
+          "test/compat/rawpredict_test.go:71 TestRawPredictOnTheGenerationModel"
         ]
       },
       {
         "method": "google.cloud.aiplatform.v1.PredictionService/ServerStreamingPredict",
         "status": "Verified",
         "tests": [
-          "test/compat/streampredict_test.go:180 TestStreamingPredictOnTheEmbeddingModel",
-          "test/compat/streampredict_test.go:48 TestStreamingPredictOnTheGenerationModel"
+          "test/compat/streampredict_test.go:182 TestStreamingPredictOnTheEmbeddingModel",
+          "test/compat/streampredict_test.go:50 TestStreamingPredictOnTheGenerationModel"
         ]
       },
       {
         "method": "google.cloud.aiplatform.v1.PredictionService/StreamDirectPredict",
         "status": "Verified",
         "tests": [
-          "test/compat/streampredict_test.go:48 TestStreamingPredictOnTheGenerationModel"
+          "test/compat/streampredict_test.go:50 TestStreamingPredictOnTheGenerationModel"
         ]
       },
       {
@@ -6335,22 +6335,22 @@
         "method": "google.cloud.aiplatform.v1.PredictionService/StreamGenerateContent",
         "status": "Verified",
         "tests": [
-          "test/compat/generationgrpc_test.go:28 TestStreamGenerateContentThroughThePredictionClient"
+          "test/compat/generationgrpc_test.go:29 TestStreamGenerateContentThroughThePredictionClient"
         ]
       },
       {
         "method": "google.cloud.aiplatform.v1.PredictionService/StreamRawPredict",
         "status": "Verified",
         "tests": [
-          "test/compat/streampredict_test.go:180 TestStreamingPredictOnTheEmbeddingModel",
-          "test/compat/streampredict_test.go:48 TestStreamingPredictOnTheGenerationModel"
+          "test/compat/streampredict_test.go:182 TestStreamingPredictOnTheEmbeddingModel",
+          "test/compat/streampredict_test.go:50 TestStreamingPredictOnTheGenerationModel"
         ]
       },
       {
         "method": "google.cloud.aiplatform.v1.PredictionService/StreamingPredict",
         "status": "Verified",
         "tests": [
-          "test/compat/streampredict_test.go:48 TestStreamingPredictOnTheGenerationModel"
+          "test/compat/streampredict_test.go:50 TestStreamingPredictOnTheGenerationModel"
         ]
       },
       {
@@ -11704,6 +11704,8 @@
           "test/compat/bigquery1562_test.go:34 TestBigQueryTempScriptsUndropAndAlterSchema",
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
           "test/compat/bigqueryaiagg_test.go:26 TestBigQueryAIAgg",
+          "test/compat/bigqueryaicounttokens_test.go:106 TestBigQueryAICountTokensArguments",
+          "test/compat/bigqueryaicounttokens_test.go:30 TestBigQueryAICountTokens",
           "test/compat/bigqueryaifunctions_test.go:143 TestBigQueryAIManagedFunctions",
           "test/compat/bigqueryaifunctions_test.go:228 TestBigQueryAIEmbed",
           "test/compat/bigqueryaifunctions_test.go:47 TestBigQueryAIGenerateStructured",

@@ -11670,9 +11670,107 @@ let PLAYGROUND_HISTORY = [];
 let PLAYGROUND_ABORT = null;
 let PLAYGROUND_STREAM = true;
 let PLAYGROUND_RAW = false;
+// The conversation (#1962): every turn sent and answered, as the request's
+// contents, held in memory for this page only, as the history is. A turn's
+// image is kept by name beside it for display; its bytes are in the part.
+let PLAYGROUND_CHAT = [];
+let PLAYGROUND_SYSTEM = "";
+let PLAYGROUND_TOOLS = "";
+let PLAYGROUND_TOOL_MODE = "AUTO";
+
+// The image types Agent Studio's Insert Media takes for Gemini (Google's
+// image understanding page: image/png, image/jpeg, image/webp, image/heic,
+// image/heif), which the local endpoint serves too (#1937).
+const PLAYGROUND_IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp", "image/heic", "image/heif"];
 
 function stopGeneration() {
   if (PLAYGROUND_ABORT) { PLAYGROUND_ABORT.abort(); PLAYGROUND_ABORT = null; }
+}
+
+// playgroundImageType is the MIME type of a Cloud Storage object's name, by
+// its extension, or "".
+function playgroundImageType(name) {
+  const ext = (name.split(".").pop() || "").toLowerCase();
+  return { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", heic: "image/heic", heif: "image/heif" }[ext] || "";
+}
+
+// playgroundPartText is how a part reads in the chat.
+function playgroundPartText(p) {
+  if (p.text !== undefined) return p.text;
+  if (p.inlineData) return `[image ${p.inlineData.mimeType}${p._name ? ": " + p._name : ""}]`;
+  if (p.fileData) return `[image ${p.fileData.mimeType}: ${p.fileData.fileUri}]`;
+  if (p.functionCall) return `Function call: ${p.functionCall.name}(${JSON.stringify(p.functionCall.args || {})})`;
+  if (p.functionResponse) return `Function response: ${p.functionResponse.name} → ${JSON.stringify(p.functionResponse.response || {})}`;
+  return JSON.stringify(p);
+}
+
+// playgroundStrip is a content as the API takes it: the display-only names
+// dropped.
+function playgroundStrip(content) {
+  return { role: content.role, parts: content.parts.map((p) => {
+    const { _name, ...rest } = p;
+    return rest;
+  }) };
+}
+
+// playgroundCode is Get code's text for a request (#1962): the same body the
+// page sends, as the Google Gen AI SDK for Python or a curl command (the two
+// Google's Text generation page names), pointed at this instance's local
+// endpoint, never Google's.
+function playgroundCode(lang, status, body) {
+  const json = JSON.stringify(body, null, 2);
+  const shown = json.length > 65536 ? json.slice(0, 65536) + "\n… (truncated: the request holds inline image bytes)" : json;
+  const path = `/v1beta1/projects/PROJECT_ID/locations/us-central1/publishers/google/models/${status.model}:generateContent`;
+  if (lang === "curl") {
+    return `curl -X POST \\\n  -H "Content-Type: application/json" \\\n  "http://${status.endpoint}${path}" \\\n  -d @- <<'EOF'\n${shown}\nEOF`;
+  }
+  const cfg = {};
+  const gc = body.generationConfig || {};
+  const snake = { maxOutputTokens: "max_output_tokens", topP: "top_p", topK: "top_k", stopSequences: "stop_sequences",
+    presencePenalty: "presence_penalty", frequencyPenalty: "frequency_penalty", responseMimeType: "response_mime_type",
+    responseSchema: "response_schema" };
+  for (const [k, v] of Object.entries(gc)) cfg[snake[k] || k] = v;
+  if (body.systemInstruction) cfg.system_instruction = body.systemInstruction;
+  if (body.tools) cfg.tools = body.tools;
+  if (body.toolConfig) cfg.tool_config = { function_calling_config: body.toolConfig.functionCallingConfig };
+  const py = (v) => JSON.stringify(v, null, 4).replace(/\btrue\b/g, "True").replace(/\bfalse\b/g, "False").replace(/\bnull\b/g, "None");
+  const contents = json.length > 65536 ? "json.loads(open('request.json').read())['contents']" : py(body.contents);
+  return [
+    "import json",
+    "",
+    "from google import genai",
+    "from google.genai import types",
+    "",
+    "# This instance's local Agent Platform endpoint; no credentials are sent.",
+    "client = genai.Client(",
+    "    vertexai=True,",
+    '    project="PROJECT_ID",',
+    '    location="us-central1",',
+    `    http_options=types.HttpOptions(base_url="http://${status.endpoint}", api_version="v1beta1"),`,
+    ")",
+    "",
+    "response = client.models.generate_content(",
+    `    model="${status.model}",`,
+    `    contents=${contents},`,
+    `    config=${py(cfg)},`,
+    ")",
+    "print(response.text)",
+  ].join("\n");
+}
+
+// playgroundDisclosure is a button that shows and hides a section, so a
+// closed section's controls are out of the Tab order and an open one's in
+// it (a closed <details> keeps them in the accessibility tree).
+function playgroundDisclosure(id, label, ...children) {
+  const body = el("div", { id: id + "-body", class: "pg-stack" }, ...children);
+  body.hidden = true;
+  const button = el("button", { type: "button", id, class: "secondary pg-disclosure", "aria-expanded": "false",
+    "aria-controls": id + "-body", text: label });
+  button.addEventListener("click", () => {
+    body.hidden = !body.hidden;
+    button.setAttribute("aria-expanded", String(!body.hidden));
+  });
+  return el("div", { class: "pg-section" }, button, body);
 }
 
 async function renderPlayground(view) {
@@ -11683,13 +11781,13 @@ async function renderPlayground(view) {
   try {
     status = await api("/api/ai/playground");
   } catch (err) {
-    return setChildren(view, 
+    return setChildren(view,
       pageHeader(PLAYGROUND_TITLE, PLAYGROUND_SUBTITLE),
       errorState("Playground unavailable", String(err.message), () => renderPlayground(view)));
   }
 
   if (!status.configured) {
-    return setChildren(view, 
+    return setChildren(view,
       pageHeader(PLAYGROUND_TITLE, PLAYGROUND_SUBTITLE),
       emptyState("Local AI is not configured", status.note || ""));
   }
@@ -11713,65 +11811,87 @@ async function renderPlayground(view) {
     header.append(el("p", { class: "unavailable", text: status.note }));
   }
 
-  const prompt = el("textarea", { id: "pg-prompt", rows: "4",
-    placeholder: "Ask the local model something…", "aria-label": "Prompt" });
-  const send = el("button", { text: "Run" });
-  const cancel = el("button", { class: "secondary", text: "Cancel", disabled: "disabled" });
-  // Stream (#1257): on, the answer arrives as streamGenerateContent sends it
-  // (StreamGenerateContent over gRPC); off, it is one generateContent answer
-  // (GenerateContent). Kept for the page's lifetime, as the history is.
+  // --- Model settings (Google's panel beside the prompt) -------------
+  const supported = new Set(status.supported || []);
+  const optInput = (id, label, attrs) => {
+    const input = el("input", Object.assign({ id: "pg-opt-" + id }, attrs));
+    return { id, input, field: el("label", { for: "pg-opt-" + id, class: "pg-field" }, el("span", { text: label }), input) };
+  };
+  // Google's labels (Text generation's console steps): Temperature, Output
+  // token limit and Add stop sequence on the panel, Top-K and Top-P under
+  // Advanced; Seed is on Agent Studio's Model settings list. Frequency and
+  // presence penalty are the API's fields, which Google's console pages do
+  // not label (UNVERIFIED, re-read 2026-11-19:
+  // https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/capabilities/send-chat-prompts-gemini).
+  const basic = [
+    optInput("temperature", "Temperature", { type: "number", step: "0.05", min: "0", max: "2" }),
+    optInput("maxOutputTokens", "Output token limit", { type: "number", step: "1", min: "1" }),
+  ].filter((o) => supported.has(o.id));
+  const advanced = [
+    optInput("topK", "Top-K", { type: "number", step: "1", min: "1" }),
+    optInput("topP", "Top-P", { type: "number", step: "0.05", min: "0", max: "1" }),
+    optInput("seed", "Seed", { type: "number", step: "1" }),
+    optInput("frequencyPenalty", "Frequency penalty", { type: "number", step: "0.1", min: "-2", max: "2" }),
+    optInput("presencePenalty", "Presence penalty", { type: "number", step: "0.1", min: "-2", max: "2" }),
+  ].filter((o) => supported.has(o.id));
+  const numOpts = [...basic, ...advanced];
+  const stops = optInput("stopSequences", "Add stop sequence (comma-separated)", { type: "text" });
+  const schema = el("textarea", { id: "pg-opt-responseSchema", rows: "2", class: "mono",
+    placeholder: '{"type":"BOOLEAN"}' });
+  const jsonOut = el("input", { type: "checkbox", id: "pg-opt-json" });
+
+  // Function calling (#1962): the declarations as the API takes them, a
+  // JSON array of FunctionDeclaration, and the mode (AUTO, ANY, NONE,
+  // VALIDATED: Google's function calling page). Agent Studio lists
+  // Function calling among its model settings; the editor's own layout is
+  // not documented (UNVERIFIED, re-read 2026-11-19:
+  // https://docs.cloud.google.com/gemini-enterprise-agent-platform/agent-studio/agent-studio-capabilities).
+  const fcOn = el("input", { type: "checkbox", id: "pg-fc" });
+  fcOn.checked = PLAYGROUND_TOOLS.trim() !== "";
+  const decls = el("textarea", { id: "pg-fc-decls", rows: "6", class: "mono",
+    placeholder: '[{"name":"get_weather","description":"The weather in a city","parameters":{"type":"OBJECT","properties":{"city":{"type":"STRING"}},"required":["city"]}}]' });
+  decls.value = PLAYGROUND_TOOLS;
+  const mode = el("select", { id: "pg-fc-mode" },
+    ...["AUTO", "ANY", "NONE", "VALIDATED"].map((m) => el("option", { value: m, text: m })));
+  mode.value = PLAYGROUND_TOOL_MODE;
+  const fcBody = el("div", { id: "pg-fc-body", class: "pg-stack" },
+    el("label", { for: "pg-fc-decls", class: "pg-field" }, el("span", { text: "Function declarations (JSON array)" }), decls),
+    el("label", { for: "pg-fc-mode", class: "pg-field" }, el("span", { text: "Mode" }), mode));
+  fcBody.hidden = !fcOn.checked;
+  fcOn.addEventListener("change", () => { fcBody.hidden = !fcOn.checked; countSoon(); });
+  decls.addEventListener("input", () => { PLAYGROUND_TOOLS = decls.value; countSoon(); });
+  mode.addEventListener("change", () => { PLAYGROUND_TOOL_MODE = mode.value; });
+
+  // Stream model responses (#1257): on, streamGenerateContent; off,
+  // generateContent. Raw (#1284, #1285): the same body to :streamRawPredict
+  // or :rawPredict.
   const stream = el("input", { type: "checkbox", id: "pg-stream" });
   stream.checked = PLAYGROUND_STREAM;
   stream.addEventListener("change", () => { PLAYGROUND_STREAM = stream.checked; });
-  const streamLabel = el("label", { for: "pg-stream", title:
+  const streamLabel = el("label", { for: "pg-stream", class: "pg-check", title:
     "On: streamGenerateContent, shown as each chunk arrives. Off: generateContent, one answer." },
-    stream, " Stream");
-  // Raw (#1284, #1285): the same body sent as RawPredict sends it, to
-  // :streamRawPredict (StreamRawPredict) or :rawPredict (RawPredict).
+    stream, " Stream model responses");
   const raw = el("input", { type: "checkbox", id: "pg-raw" });
   raw.checked = PLAYGROUND_RAW;
   raw.addEventListener("change", () => { PLAYGROUND_RAW = raw.checked; });
-  const rawLabel = el("label", { for: "pg-raw", title:
+  const rawLabel = el("label", { for: "pg-raw", class: "pg-check", title:
     "On: the body is sent as RawPredict sends it, to :streamRawPredict (Stream on) or :rawPredict (Stream off)." },
     raw, " Raw");
-  const timing = el("span", { class: "unavailable", text: "" });
-  const output = el("pre", { class: "mono pg-output", id: "pg-output", "aria-live": "polite" });
-  const historyBody = el("tbody");
 
-  const refused = el("details", { class: "card" },
-    el("summary", { text: `Options the endpoint refuses rather than ignores (${status.refused.length})` }),
-    el("p", { text:
-      "The runtime applies none of these, and a request carrying one is rejected rather than " +
-      "answered as though it applied:" }),
-    el("p", { class: "mono", text: status.refused.join(", ") }));
+  const settings = el("section", { class: "card pg-settings", id: "pg-options", "aria-labelledby": "pg-settings-h" },
+    el("h2", { id: "pg-settings-h", text: "Model settings" }),
+    el("p", { class: "pg-field" }, el("span", { text: "Model" }), el("span", { class: "mono", text: status.model })),
+    ...basic.map((o) => o.field),
+    ...(supported.has("stopSequences") ? [stops.field] : []),
+    playgroundDisclosure("pg-advanced", "Advanced", ...advanced.map((o) => o.field)),
+    ...(supported.has("responseMimeType") ? [playgroundDisclosure("pg-output-format", "Output format",
+      el("label", { for: "pg-opt-json", class: "pg-check", title: "responseMimeType application/json; the schema, if given, constrains the answer" },
+        jsonOut, " JSON (application/json)"),
+      el("label", { for: "pg-opt-responseSchema", class: "pg-field" }, el("span", { text: "Response schema" }), schema))] : []),
+    el("label", { for: "pg-fc", class: "pg-check" }, fcOn, " Function calling"),
+    fcBody,
+    streamLabel, rawLabel);
 
-  // Generation options (#1797, #1779): sent as generationConfig, only the
-  // fields given. An empty field is absent, not zero: temperature 0 must be
-  // typed to mean greedy decoding.
-  const supported = new Set(status.supported || []);
-  const optInput = (id, label, attrs) => {
-    const input = el("input", Object.assign({ id: "pg-opt-" + id, "aria-label": label }, attrs));
-    return { id, input, field: el("label", { for: "pg-opt-" + id }, label + " ", input) };
-  };
-  const numOpts = [
-    optInput("temperature", "Temperature", { type: "number", step: "0.05", min: "0", max: "2" }),
-    optInput("topP", "Top-p", { type: "number", step: "0.05", min: "0", max: "1" }),
-    optInput("topK", "Top-k", { type: "number", step: "1", min: "1" }),
-    optInput("seed", "Seed", { type: "number", step: "1" }),
-    optInput("maxOutputTokens", "Max output tokens", { type: "number", step: "1", min: "1" }),
-  ].filter((o) => supported.has(o.id));
-  const stops = optInput("stopSequences", "Stop sequences (comma-separated)", { type: "text" });
-  const schema = el("textarea", { id: "pg-opt-responseSchema", rows: "2", class: "mono",
-    placeholder: '{"type":"BOOLEAN"}', "aria-label": "Response schema" });
-  const jsonOut = el("input", { type: "checkbox", id: "pg-opt-json" });
-  const options = el("details", { class: "card", id: "pg-options" },
-    el("summary", { text: "Generation options" }),
-    el("div", { class: "card-actions" }, ...numOpts.map((o) => o.field),
-      ...(supported.has("stopSequences") ? [stops.field] : [])),
-    ...(supported.has("responseMimeType") ? [el("div", {},
-      el("label", { for: "pg-opt-json", title: "responseMimeType application/json; the schema, if given, constrains the answer" },
-        jsonOut, " JSON response (application/json)"),
-      el("label", { for: "pg-opt-responseSchema" }, " Response schema "), schema)] : []));
   const generationConfig = () => {
     const cfg = {};
     for (const o of numOpts) {
@@ -11787,6 +11907,252 @@ async function renderPlayground(view) {
     }
     return cfg;
   };
+
+  // --- System instructions --------------------------------------------
+  const system = el("textarea", { id: "pg-system", rows: "2",
+    placeholder: "Add instructions for the model to follow, such as its tone or role" });
+  system.value = PLAYGROUND_SYSTEM;
+  system.addEventListener("input", () => { PLAYGROUND_SYSTEM = system.value; countSoon(); });
+  const systemCard = el("section", { class: "card", "aria-labelledby": "pg-system-h" },
+    el("h2", { id: "pg-system-h" }, el("label", { for: "pg-system", text: "System instructions" })),
+    system);
+
+  // --- Chat -----------------------------------------------------------
+  const chat = el("div", { id: "pg-chat", class: "pg-chat", role: "log", "aria-label": "Conversation" });
+  const fnResp = el("div", { id: "pg-fnresp", class: "pg-stack" });
+  const roleName = (c) => {
+    if (c.parts.some((p) => p.functionResponse)) return "Function response";
+    if (c.parts.some((p) => p.functionCall)) return "Function call";
+    return c.role === "model" ? "Model" : "User";
+  };
+  const renderChat = () => {
+    chat.replaceChildren();
+    if (!PLAYGROUND_CHAT.length) {
+      chat.append(el("p", { class: "unavailable", text: "No messages yet. Each turn you send, and the model's answer, is kept here and sent again with the next one." }));
+    }
+    for (const c of PLAYGROUND_CHAT) {
+      chat.append(el("div", { class: "pg-turn", "data-role": c.role },
+        el("p", { class: "pg-turn-role", text: roleName(c) }),
+        ...c.parts.map((p) => el("p", { class: p.text !== undefined ? "pg-turn-text" : "pg-turn-text mono", text: playgroundPartText(p) }))));
+    }
+    // The model's function calls wait for the user's function responses.
+    fnResp.replaceChildren();
+    const last = PLAYGROUND_CHAT[PLAYGROUND_CHAT.length - 1];
+    const calls = last && last.role === "model" ? last.parts.filter((p) => p.functionCall).map((p) => p.functionCall) : [];
+    if (!calls.length) return;
+    const boxes = calls.map((fc, i) => {
+      const box = el("textarea", { id: "pg-fnresp-" + i, rows: "2", class: "mono", placeholder: '{"result": ...}' });
+      box.value = "{}";
+      return { fc, box, field: el("label", { for: "pg-fnresp-" + i, class: "pg-field" },
+        el("span", { text: `Function response for ${fc.name} (JSON object)` }), box) };
+    });
+    const sendResp = el("button", { type: "button", id: "pg-fnresp-send", text: "Send function response" });
+    sendResp.addEventListener("click", () => {
+      const parts = [];
+      for (const b of boxes) {
+        let response;
+        try { response = JSON.parse(b.box.value || "{}"); } catch (err) {
+          announce(`The response for ${b.fc.name} is not JSON: ${err.message}`); b.box.focus(); return;
+        }
+        if (response === null || typeof response !== "object" || Array.isArray(response)) {
+          announce(`The response for ${b.fc.name} must be a JSON object`); b.box.focus(); return;
+        }
+        parts.push({ functionResponse: Object.assign(b.fc.id ? { id: b.fc.id } : {}, { name: b.fc.name, response }) });
+      }
+      run(parts);
+    });
+    fnResp.append(el("p", { text: "The model asked to call a function. Run it yourself, then send its result back as the function response." }),
+      ...boxes.map((b) => b.field), el("div", { class: "card-actions" }, sendResp));
+  };
+
+  // --- Prompt ---------------------------------------------------------
+  const prompt = el("textarea", { id: "pg-prompt", rows: "4",
+    placeholder: "Enter a prompt for the local model" });
+  prompt.addEventListener("input", () => countSoon());
+  prompt.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); run(); }
+  });
+  let attachments = [];
+  const attachList = el("ul", { id: "pg-attachments", class: "pg-attachments", "aria-label": "Inserted media" });
+  const renderAttachments = () => {
+    setChildren(attachList, ...attachments.map((a, i) => el("li", {},
+      el("span", { class: "mono", text: a._name || (a.fileData && a.fileData.fileUri) || "image" }),
+      el("button", { type: "button", class: "secondary", "aria-label": "Remove " + (a._name || "image"), text: "Remove",
+        onclick: () => { attachments.splice(i, 1); renderAttachments(); countSoon(); } }))));
+    attachList.hidden = !attachments.length;
+  };
+  // Insert Media: Upload and Cloud Storage (Google's sources; By URL and
+  // Google Drive reach outside the instance and are not offered).
+  const upload = el("input", { type: "file", id: "pg-upload", accept: PLAYGROUND_IMAGE_TYPES.join(","), multiple: "multiple", class: "pg-file" });
+  upload.addEventListener("change", async () => {
+    for (const f of upload.files) {
+      if (!PLAYGROUND_IMAGE_TYPES.includes(f.type)) { announce(`${f.name}: ${f.type || "unknown type"} is not an image type the model takes`); continue; }
+      const data = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(String(r.result).split(",", 2)[1] || "");
+        r.onerror = () => reject(r.error);
+        r.readAsDataURL(f);
+      });
+      attachments.push({ inlineData: { mimeType: f.type, data }, _name: f.name });
+    }
+    upload.value = "";
+    renderAttachments();
+    countSoon();
+  });
+  const gcs = el("input", { type: "text", id: "pg-gcs", class: "mono", placeholder: "gs://bucket/image.png" });
+  const gcsAdd = el("button", { type: "button", class: "secondary", text: "Insert", id: "pg-gcs-insert" });
+  gcsAdd.addEventListener("click", () => {
+    const uri = gcs.value.trim();
+    const type = playgroundImageType(uri);
+    if (!uri.startsWith("gs://") || !type) { announce("Enter a gs:// URI of a PNG, JPEG, WebP, HEIC or HEIF object"); gcs.focus(); return; }
+    attachments.push({ fileData: { mimeType: type, fileUri: uri } });
+    gcs.value = "";
+    renderAttachments();
+    countSoon();
+  });
+  const media = playgroundDisclosure("pg-media", "Insert Media",
+    el("label", { for: "pg-upload", class: "pg-field" }, el("span", { text: "Upload" }), upload),
+    el("div", { class: "pg-field" },
+      el("label", { for: "pg-gcs", text: "Cloud Storage" }),
+      el("div", { class: "card-actions" }, gcs, gcsAdd)));
+
+  // The request the page sends: the conversation, then the new turn.
+  const turnParts = () => {
+    const parts = [];
+    const text = prompt.value.trim();
+    if (text) parts.push({ text });
+    return parts.concat(attachments);
+  };
+  const requestBody = (pending) => {
+    const contents = PLAYGROUND_CHAT.concat(pending && pending.length ? [{ role: "user", parts: pending }] : []).map(playgroundStrip);
+    const body = { contents };
+    const si = system.value.trim();
+    if (si) body.systemInstruction = { parts: [{ text: si }] };
+    if (fcOn.checked && decls.value.trim()) {
+      body.tools = [{ functionDeclarations: JSON.parse(decls.value) }];
+      body.toolConfig = { functionCallingConfig: { mode: mode.value } };
+    }
+    const cfg = generationConfig();
+    if (Object.keys(cfg).length) body.generationConfig = cfg;
+    return body;
+  };
+
+  // --- Token count (Google: "<count> tokens", opening the prompt
+  // tokenizer, with Token ID to text and Token ID) -------------------
+  const tokens = el("button", { type: "button", id: "pg-tokens", class: "secondary", "aria-expanded": "false",
+    "aria-controls": "pg-tokenizer", text: "0 tokens" });
+  const tokenizer = el("section", { id: "pg-tokenizer", class: "card pg-tokenizer", "aria-label": "Prompt tokenizer" });
+  tokenizer.hidden = true;
+  let countTimer = null;
+  let countSeq = 0;
+  const countNow = async () => {
+    const seq = ++countSeq;
+    let body;
+    try { body = requestBody(turnParts()); } catch (err) { tokens.textContent = "Token count unavailable"; tokens.title = err.message; return; }
+    if (!body.contents.length) { tokens.textContent = "0 tokens"; tokens.title = ""; return; }
+    try {
+      const resp = await fetch("/api/ai/playground/tokens?verb=countTokens", { method: "POST",
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const text = await resp.text();
+      if (seq !== countSeq) return;
+      if (!resp.ok) { tokens.textContent = "Token count unavailable"; tokens.title = errorMessageOf(text) || `HTTP ${resp.status}`; return; }
+      const n = JSON.parse(text).totalTokens || 0;
+      tokens.textContent = `${n} ${n === 1 ? "token" : "tokens"}`;
+      tokens.title = "countTokens of the conversation, the system instructions, the declarations and this prompt";
+    } catch (err) {
+      if (seq === countSeq) { tokens.textContent = "Token count unavailable"; tokens.title = err.message; }
+    }
+  };
+  const countSoon = () => { clearTimeout(countTimer); countTimer = setTimeout(countNow, 300); };
+  let tokenView = "text";
+  const drawTokenizer = async () => {
+    const text = prompt.value.trim();
+    const close = el("button", { type: "button", class: "secondary", "aria-label": "Close the tokenizer", text: "Close",
+      onclick: () => { tokenizer.hidden = true; tokens.setAttribute("aria-expanded", "false"); tokens.focus(); } });
+    const pick = (v, label) => el("button", { type: "button", class: tokenView === v ? "" : "secondary", "aria-pressed": String(tokenView === v),
+      text: label, onclick: () => { tokenView = v; drawTokenizer(); } });
+    const out = el("div", { id: "pg-tokenizer-out", class: "pg-tokens" });
+    setChildren(tokenizer, el("div", { class: "card-actions" },
+      el("h2", { text: tokens.textContent }), pick("text", "Token ID to text"), pick("id", "Token ID"), close),
+      el("p", { class: "unavailable", text: "The prompt's text, tokenized by the model's tokenizer (computeTokens). Media tokens aren't supported." }),
+      out);
+    if (!text) { out.append(el("p", { class: "unavailable", text: "Enter a prompt to see its tokens." })); return; }
+    try {
+      const resp = await fetch("/api/ai/playground/tokens?verb=computeTokens", { method: "POST",
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: text }) });
+      const body = await resp.text();
+      if (!resp.ok) throw new Error(errorMessageOf(body) || `HTTP ${resp.status}`);
+      const info = (JSON.parse(body).tokensInfo || [])[0] || { tokens: [], tokenIds: [] };
+      const decode = (b64) => { try { return new TextDecoder().decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))); } catch { return b64; } };
+      (info.tokens || []).forEach((tk, i) => {
+        out.append(el("span", { class: "pg-token", "data-n": String(i % 4), title: "Token ID " + (info.tokenIds || [])[i],
+          text: tokenView === "id" ? String((info.tokenIds || [])[i]) : decode(tk) }));
+      });
+    } catch (err) {
+      out.append(el("p", { class: "unavailable", text: "computeTokens failed: " + err.message }));
+    }
+  };
+  tokens.addEventListener("click", () => {
+    const open = tokenizer.hidden;
+    tokenizer.hidden = !open;
+    tokens.setAttribute("aria-expanded", String(open));
+    if (open) drawTokenizer();
+  });
+
+  // --- Get code (Google: Build with code > Get code) ---------------
+  const codeLang = el("select", { id: "pg-code-lang" },
+    el("option", { value: "python", text: "Python (Google Gen AI SDK)" }), el("option", { value: "curl", text: "REST (curl)" }));
+  const codeText = el("pre", { id: "pg-code-text", class: "mono pg-output", tabindex: "0", "aria-label": "Code" });
+  const codePane = el("section", { id: "pg-code", class: "card", "aria-labelledby": "pg-code-h" });
+  codePane.hidden = true;
+  const getCode = el("button", { type: "button", class: "secondary", id: "pg-get-code", text: "Get code",
+    "aria-expanded": "false", "aria-controls": "pg-code" });
+  const drawCode = () => {
+    let body;
+    try { body = requestBody(turnParts()); } catch (err) { codeText.textContent = "The request is not valid: " + err.message; return; }
+    codeText.textContent = playgroundCode(codeLang.value, status, body);
+  };
+  codeLang.addEventListener("change", drawCode);
+  const copy = el("button", { type: "button", class: "secondary", text: "Copy", onclick: async () => {
+    try { await navigator.clipboard.writeText(codeText.textContent); announce("Copied"); } catch { announce("Copy is not available here"); }
+  } });
+  const closeCode = el("button", { type: "button", class: "secondary", text: "Close", "aria-label": "Close Get code", onclick: () => {
+    codePane.hidden = true; getCode.setAttribute("aria-expanded", "false"); getCode.focus();
+  } });
+  setChildren(codePane, el("h2", { id: "pg-code-h", text: "Get code" }),
+    el("p", { class: "unavailable", text: "The request this page sends, as code. It calls this instance's local endpoint; on Google Cloud, drop base_url (or use https://us-central1-aiplatform.googleapis.com) and authenticate." }),
+    el("div", { class: "card-actions" }, el("label", { for: "pg-code-lang", text: "Language " }), codeLang, copy, closeCode),
+    codeText);
+  getCode.addEventListener("click", () => {
+    const open = codePane.hidden;
+    codePane.hidden = !open;
+    getCode.setAttribute("aria-expanded", String(open));
+    if (open) drawCode();
+  });
+
+  const send = el("button", { type: "button", id: "pg-submit", text: "Submit" });
+  const cancel = el("button", { type: "button", class: "secondary", text: "Cancel", disabled: "disabled" });
+  const clear = el("button", { type: "button", class: "secondary", id: "pg-clear", text: "Clear conversation" });
+  clear.addEventListener("click", () => {
+    stopGeneration();
+    PLAYGROUND_CHAT = [];
+    output.textContent = "";
+    usage.textContent = "";
+    renderChat();
+    countSoon();
+    announce("Conversation cleared");
+  });
+  const timing = el("span", { class: "unavailable", text: "" });
+  const usage = el("p", { id: "pg-usage", class: "unavailable" });
+  const output = el("pre", { class: "mono pg-output", id: "pg-output", "aria-live": "polite", "aria-label": "Response" });
+  const historyBody = el("tbody");
+
+  const refused = el("details", { class: "card" },
+    el("summary", { text: `Options the endpoint refuses rather than ignores (${status.refused.length})` }),
+    el("p", { text:
+      "The runtime applies none of these, and a request carrying one is rejected rather than " +
+      "answered as though it applied:" }),
+    el("p", { class: "mono", text: status.refused.join(", ") }));
 
   const renderHistory = () => {
     historyBody.replaceChildren();
@@ -11808,12 +12174,19 @@ async function renderPlayground(view) {
     }
   };
 
-  const run = async () => {
-    const text = prompt.value.trim();
-    if (!text) { announce("A prompt is required"); prompt.focus(); return; }
+  // run sends the conversation with a new user turn: the prompt and its
+  // media, or the function responses given.
+  const run = async (responseParts) => {
+    const pending = responseParts || turnParts();
+    if (!pending.length) { announce("A prompt is required"); prompt.focus(); return; }
+    let body;
+    try { body = requestBody(pending); } catch (err) {
+      announce("The request is not valid: " + err.message); output.textContent = `[error] ${err.message}`; return;
+    }
 
     stopGeneration();
     output.textContent = "";
+    usage.textContent = "";
     timing.textContent = "running…";
     send.disabled = true;
     cancel.disabled = false;
@@ -11826,52 +12199,60 @@ async function renderPlayground(view) {
     let firstAt = null;
     let ok = true;
     let cancelled = false;
+    let text = "";
+    const calls = [];
+    let meta = null;
+    const take = (event) => {
+      if (event.usageMetadata) meta = event.usageMetadata;
+      for (const p of event.candidates?.[0]?.content?.parts || []) {
+        if (p.functionCall) calls.push(p.functionCall);
+        if (p.text) {
+          if (firstAt === null) firstAt = performance.now();
+          text += p.text;
+          output.textContent += p.text;
+        }
+      }
+      if (calls.length && firstAt === null) firstAt = performance.now();
+    };
 
     try {
       const resp = await fetch("/api/ai/playground", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: text, stream: streaming, raw: rawBody, generationConfig: generationConfig() }),
+        body: JSON.stringify(Object.assign({ stream: streaming, raw: rawBody }, body)),
         signal: controller.signal,
       });
       if (!resp.ok) {
-        const body = await resp.text();
-        throw new Error(errorMessageOf(body) || `HTTP ${resp.status}`);
+        const msg = await resp.text();
+        throw new Error(errorMessageOf(msg) || `HTTP ${resp.status}`);
       }
       if (!streaming) {
-        // One GenerateContentResponse: its first token is the whole answer.
-        const answer = await resp.json();
-        firstAt = performance.now();
-        output.textContent = (answer.candidates?.[0]?.content?.parts || []).map((p) => p.text || "").join("");
-        return;
-      }
-
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        // Server-sent events are separated by a blank line; a partial event
-        // is kept in the buffer rather than parsed as truncated JSON.
-        let split;
-        while ((split = buffer.indexOf("\n\n")) !== -1) {
-          const chunk = buffer.slice(0, split);
-          buffer = buffer.slice(split + 2);
-          for (const line of chunk.split("\n")) {
-            if (!line.startsWith("data: ")) continue;
-            let event;
-            try { event = JSON.parse(line.slice(6)); } catch { continue; }
-            if (event.error) { ok = false; throw new Error(event.error.message || "generation failed"); }
-            const part = event.candidates?.[0]?.content?.parts?.[0]?.text;
-            if (part) {
-              if (firstAt === null) firstAt = performance.now();
-              output.textContent += part;
+        take(await resp.json());
+      } else {
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          // Server-sent events are separated by a blank line; a partial event
+          // is kept in the buffer rather than parsed as truncated JSON.
+          let split;
+          while ((split = buffer.indexOf("\n\n")) !== -1) {
+            const chunk = buffer.slice(0, split);
+            buffer = buffer.slice(split + 2);
+            for (const line of chunk.split("\n")) {
+              if (!line.startsWith("data: ")) continue;
+              let event;
+              try { event = JSON.parse(line.slice(6)); } catch { continue; }
+              if (event.error) { ok = false; throw new Error(event.error.message || "generation failed"); }
+              take(event);
             }
           }
         }
       }
+      if (calls.length) output.textContent += (text ? "\n" : "") + calls.map((fc) => playgroundPartText({ functionCall: fc })).join("\n");
     } catch (err) {
       ok = false;
       if (err.name === "AbortError") {
@@ -11890,9 +12271,24 @@ async function renderPlayground(view) {
       send.disabled = false;
       cancel.disabled = true;
       PLAYGROUND_ABORT = null;
-
+      if (meta) {
+        usage.textContent = `Tokens: prompt ${meta.promptTokenCount ?? "—"} · response ${meta.candidatesTokenCount ?? "—"} · total ${meta.totalTokenCount ?? "—"} (usageMetadata)`;
+      }
+      if (ok) {
+        // The turn and its answer join the conversation; the prompt box
+        // empties for the next turn, as a chat's does.
+        const answer = [];
+        if (text) answer.push({ text });
+        for (const fc of calls) answer.push({ functionCall: fc });
+        PLAYGROUND_CHAT.push({ role: "user", parts: pending });
+        if (answer.length) PLAYGROUND_CHAT.push({ role: "model", parts: answer });
+        if (!responseParts) { prompt.value = ""; attachments = []; renderAttachments(); }
+        renderChat();
+        countSoon();
+      }
+      const what = pending.map((p) => playgroundPartText(p)).join(" ");
       PLAYGROUND_HISTORY.unshift({
-        at: new Date().toLocaleTimeString(), prompt: text, method: (rawBody ? "Raw " : "") + (streaming ? "Stream" : "Unary"),
+        at: new Date().toLocaleTimeString(), prompt: what, method: (rawBody ? "Raw " : "") + (streaming ? "Stream" : "Unary"),
         ttft, total: `${Math.round(total)} ms`, ok, cancelled,
       });
       PLAYGROUND_HISTORY = PLAYGROUND_HISTORY.slice(0, PLAYGROUND_HISTORY_LIMIT);
@@ -11900,31 +12296,43 @@ async function renderPlayground(view) {
     }
   };
 
-  send.addEventListener("click", run);
+  send.addEventListener("click", () => run());
   cancel.addEventListener("click", stopGeneration);
 
   renderHistory();
+  renderChat();
+  renderAttachments();
+  countSoon();
   const models = await playgroundModelsCard();
-  setChildren(view, 
+  setChildren(view,
     pageHeader(PLAYGROUND_TITLE, PLAYGROUND_SUBTITLE),
     header,
     ...(models ? [models] : []),
     refused,
-    options,
-    el("div", { class: "card" },
-      prompt,
-      el("div", { class: "card-actions" }, send, cancel, streamLabel, rawLabel, timing),
-      output),
+    el("div", { class: "pg-layout" },
+      el("div", { class: "pg-main" },
+        systemCard,
+        el("section", { class: "card", "aria-labelledby": "pg-chat-h" },
+          el("h2", { id: "pg-chat-h", text: "Chat" }), chat, fnResp),
+        el("section", { class: "card", "aria-labelledby": "pg-prompt-h" },
+          el("h2", { id: "pg-prompt-h" }, el("label", { for: "pg-prompt", text: "Prompt" })),
+          prompt, attachList, media,
+          el("div", { class: "card-actions" }, send, cancel, tokens, getCode, clear, timing),
+          tokenizer,
+          el("h3", { id: "pg-response-h", text: "Response" }),
+          output, usage),
+        codePane),
+      settings),
     el("div", { class: "card" },
       el("h2", { text: "This session" }),
       el("p", { class: "unavailable", text:
         `Bounded to ${PLAYGROUND_HISTORY_LIMIT} entries, held in memory for this page only. ` +
         "Nothing is written to storage and nothing leaves the browser." }),
-      el("table", {},
+      el("div", { class: "table-wrap" }, el("table", {},
         el("thead", {}, el("tr", {},
           ["Time", "Prompt", "Method", "First token", "Total", "Result"].map((c) =>
             el("th", { scope: "col", text: c })))),
-        historyBody)));
+        historyBody))));
 }
 
 // errorMessageOf pulls the API's own message out of an error body, so the

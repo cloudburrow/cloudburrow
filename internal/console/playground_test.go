@@ -354,17 +354,15 @@ func TestPlaygroundCancellationPropagatesUpstream(t *testing.T) {
 // the day the runtime gains a real temperature control, this fails and the
 // screen stops telling users it is refused.
 func TestPlaygroundRefusalsMatchTheAPI(t *testing.T) {
-	api := httptest.NewServer(vertexai.NewServer(&vertexai.EchoGenerator{ID: "m"}).Handler())
+	// The runtime that applies the options (cloudburrow_generate): what it
+	// still refuses is what the screen says it refuses.
+	api := httptest.NewServer(vertexai.NewServer(&vertexai.ScriptedGenerator{ID: "m", Chunks: []string{"x"}, Options: true}).Handler())
 	defer api.Close()
 
 	// Each refused name paired with a request that exercises it.
 	bodies := map[string]string{
-		"candidateCount":    `{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"candidateCount":2}}`,
-		"tools":             `{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"tools":[{}]}`,
-		"safetySettings":    `{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"safetySettings":[{}]}`,
-		"systemInstruction": `{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"systemInstruction":{"parts":[{"text":"x"}]}}`,
-		"multi-turn":        `{"contents":[{"role":"user","parts":[{"text":"a"}]},{"role":"user","parts":[{"text":"b"}]}]}`,
-		"countTokens":       `{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}`,
+		"candidateCount": `{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"candidateCount":2}}`,
+		"safetySettings": `{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"safetySettings":[{}]}`,
 	}
 
 	if len(bodies) != len(refusedOptions) {
@@ -379,11 +377,7 @@ func TestPlaygroundRefusalsMatchTheAPI(t *testing.T) {
 			continue
 		}
 		t.Run(name, func(t *testing.T) {
-			verb := "generateContent"
-			if name == "countTokens" {
-				verb = "countTokens"
-			}
-			url := api.URL + "/v1beta1/projects/p/locations/l/publishers/google/models/m:" + verb
+			url := api.URL + "/v1beta1/projects/p/locations/l/publishers/google/models/m:generateContent"
 			resp, err := http.Post(url, "application/json", strings.NewReader(body))
 			if err != nil {
 				t.Fatal(err)
@@ -413,17 +407,18 @@ func TestPlaygroundSupportedOptionsAreHonoured(t *testing.T) {
 	})
 	resp, body := postJSON(t, srv, "/api/ai/playground", `{"prompt":"hi","stream":false,"generationConfig":{
 		"temperature":0.4,"topP":0.9,"topK":20,"seed":3,"maxOutputTokens":16,"stopSequences":["zz"],
-		"responseMimeType":"application/json","responseSchema":{"type":"BOOLEAN"}}}`)
+		"presencePenalty":0.5,"frequencyPenalty":-0.5,"responseMimeType":"application/json","responseSchema":{"type":"BOOLEAN"}}}`)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status %d: %s", resp.StatusCode, body)
 	}
 	mu.Lock()
 	defer mu.Unlock()
 	if got.Temperature == nil || *got.Temperature != 0.4 || got.TopP == nil || got.TopK == nil || *got.TopK != 20 ||
-		got.Seed == nil || got.MaxOutputTokens == nil || *got.MaxOutputTokens != 16 || got.JSONSchema != `{"type":"boolean"}` {
+		got.Seed == nil || got.MaxOutputTokens == nil || *got.MaxOutputTokens != 16 || got.JSONSchema != `{"type":"boolean"}` ||
+		got.PresencePenalty == nil || *got.PresencePenalty != 0.5 || got.FrequencyPenalty == nil || *got.FrequencyPenalty != -0.5 {
 		t.Errorf("the generator was asked %+v", got)
 	}
-	if len(supportedOptions) != 8 {
+	if len(supportedOptions) != 10 {
 		t.Errorf("supportedOptions changed (%v): extend this test's request", supportedOptions)
 	}
 }
