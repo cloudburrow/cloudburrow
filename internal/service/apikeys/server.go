@@ -409,7 +409,24 @@ func (s *Server) project(idOrNumber string) (string, error) {
 	if s.projects == nil {
 		return idOrNumber, nil
 	}
-	return s.projects.Resolve(idOrNumber)
+	id, err := s.projects.Resolve(idOrNumber)
+	if err == nil {
+		return id, nil
+	}
+	// A key's name carries its project's number (projects/<number>/...),
+	// which the registry knows only for the projects made in it: a
+	// project this server holds keys in is known by its number too.
+	if n, nerr := strconv.ParseInt(idOrNumber, 10, 64); nerr == nil && s.st != nil {
+		if keys, lerr := s.st.List(keyPrefix); lerr == nil {
+			for _, k := range keys {
+				p, _, _ := strings.Cut(strings.TrimPrefix(k, keyPrefix), "/")
+				if resource.ProjectNumber(p) == n {
+					return p, nil
+				}
+			}
+		}
+	}
+	return "", err
 }
 
 func storeKey(project, id string) string { return keyPrefix + project + "/keys/" + id }
