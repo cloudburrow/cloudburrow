@@ -10375,6 +10375,7 @@
           "test/compat/bigquerymltensorflow_test.go:41 TestBigQueryMLImportedTensorFlowModel",
           "test/compat/bigquerymltflite_test.go:35 TestBigQueryMLImportedTFLiteModel",
           "test/compat/bigquerymltflitegaps_test.go:29 TestBigQueryMLImportedTFLiteGaps",
+          "test/compat/bigquerymltfliteops_test.go:33 TestBigQueryMLImportedTFLiteOps3",
           "test/compat/bigquerymltransformcolumns_test.go:20 TestBigQueryMLTransformColumns",
           "test/compat/bigquerymltransformcolumns_test.go:62 TestBigQueryMLPolynomialExpandOrder",
           "test/compat/bigquerymltree_test.go:129 TestBigQueryMLBoostedTreeLabelEncoding",
