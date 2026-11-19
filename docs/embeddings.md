@@ -458,3 +458,16 @@ docker run --rm -v "$PWD:/models" \
 > `program_config_element` (ffmpeg's 7.1) or channel configuration 7, SBR over more than two
 > channels, AAC Main and SSR, 960-sample frames, HE-AACv2's full parametric stereo (#1754) and
 > QuickTime A-law and µ-law tracks.
+
+> **Update 2026-11-18 (#1651): surround AAC, multichannel HE-AAC, QuickTime G.711 and 3-bit IMA
+> ADPCM.** A video's AAC track of channel configuration 0 (a `program_config_element`, as ffmpeg
+> writes 7.1(wide) and 6.1), 7, 11 or 12 (AudioToolbox's and ffmpeg's 7.1 and 6.1), and HE-AAC
+> over more than two channels, are decoded (`third_party/aac-go/pce.go`) and downmixed as ffmpeg 9
+> does, within 2.4e-7 of its downmix (1.3e-5 for HE-AAC); so are QuickTime `ulaw` and `alaw`
+> tracks and 3-bit IMA ADPCM WAV, sample for sample (the 3-bit fixtures were written by a scratch
+> encoder, since ffmpeg writes none, and checked against ffmpeg's decode). Embedded through the
+> official client by
+> `TestEmbedContentEmbedsSurroundAACAndG711TracksAnd3BitADPCMThroughThePredictionClient`. Still
+> `UNIMPLEMENTED` (501): multichannel Microsoft ADPCM (no layout to verify: ffmpeg 9 decodes a
+> packet of several such blocks as one block), AAC Main and SSR, 960-sample frames, and
+> HE-AACv2's full parametric stereo (#1754).
