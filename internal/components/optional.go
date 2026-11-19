@@ -147,8 +147,14 @@ const (
 // and the pod served 5.7.44.
 const CloudSQLMySQL57Image = "mysql:5.7@sha256:dab0a802b44617303694fb17d166501de279c3031ddeb28c56ecf7fcab5ef0da" // 5.7.44
 
-// cloudSQLMySQL57Command starts MySQL 5.7's entrypoint with a lower
-// open-files limit: mysqld 5.7 sizes its tables from RLIMIT_NOFILE, and
+// CloudSQLMySQL56Image is MYSQL_5_6's server (#1524): the official
+// mysql:5.6, last built 2021-12 at 5.6.51, linux/amd64 only too, pinned
+// by its linux/amd64 manifest's digest as MySQL 5.7's is
+// (docker buildx imagetools inspect mysql:5.6, 2026-11-18).
+const CloudSQLMySQL56Image = "mysql:5.6@sha256:897086d07d1efa876224b147397ea8d3147e61dd84dce963aace1d5e9dc2802d" // 5.6.51
+
+// cloudSQLMySQL57Command starts MySQL 5.7's and 5.6's entrypoint with a
+// lower open-files limit: mysqld 5.7 sizes its tables from RLIMIT_NOFILE, and
 // containerd's default of 2^30 made the server OOMKilled at its first
 // start (measured 2026-11-18); 1048576 is Docker's own default.
 var cloudSQLMySQL57Command = []string{"bash", "-c", `ulimit -n 1048576 && exec docker-entrypoint.sh "$@"`, "bash"}
@@ -189,6 +195,7 @@ var CloudSQLVersionImages = map[string]string{
 	"POSTGRES_16":  CloudSQLPostgres16Image,
 	"POSTGRES_17":  CloudSQLImage,
 	"POSTGRES_18":  CloudSQLPostgres18Image,
+	"MYSQL_5_6":    CloudSQLMySQL56Image,
 	"MYSQL_5_7":    CloudSQLMySQL57Image,
 	"MYSQL_8_0":    CloudSQLMySQL80Image,
 	"MYSQL_8_4":    CloudSQLMySQLImage,
@@ -1017,7 +1024,7 @@ func CloudSQLInstanceBackend(name, version string, persistent bool, rootPassword
 	if img, ok := CloudSQLVersionImages[version]; ok {
 		b.Image = img
 	}
-	if version == "MYSQL_5_7" {
+	if version == "MYSQL_5_7" || version == "MYSQL_5_6" {
 		b.Command = cloudSQLMySQL57Command
 	}
 	b.Name = SQLInstancePrefix + name

@@ -89,6 +89,10 @@ func TestEveryUnservedMethodIsNotImplemented(t *testing.T) {
 			body = `{"datasource":"projects/p/locations/us-central1/backupVaults/v/dataSources/d",` +
 				`"targetInstance":"target","pointInTime":"2026-01-01T00:00:00Z"}`
 		}
+		if m.ID == "sql.projects.instances.rescheduleMaintenance" {
+			// It checks its request, then is 501 (#1524).
+			body = `{"reschedule":{"rescheduleType":"IMMEDIATE"}}`
+		}
 		req, _ := http.NewRequest(m.HTTPMethod, ts.URL+"/"+path+"?name=x", strings.NewReader(body))
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {

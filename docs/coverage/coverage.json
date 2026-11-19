@@ -11156,7 +11156,8 @@
           "test/compat/cloudsqlexternalpg_test.go:28 TestCloudSQLExternalPostgresPrimary",
           "test/compat/cloudsqlha_test.go:34 TestCloudSQLHighAvailability",
           "test/compat/cloudsqlinstances_test.go:58 TestCloudSQLInstanceWrites",
-          "test/compat/cloudsqlmysql57_test.go:27 TestCloudSQLMySQL57",
+          "test/compat/cloudsqlmysql57_test.go:29 TestCloudSQLMySQL57",
+          "test/compat/cloudsqlmysql57_test.go:32 TestCloudSQLMySQL56",
           "test/compat/cloudsqlphysical_test.go:37 TestCloudSQLExternalMySQLPhysical",
           "test/compat/cloudsqlproxy_test.go:135 TestCloudSQLAuthProxyBinary",
           "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas",
@@ -11184,7 +11185,8 @@
           "test/compat/cloudsqlfields_test.go:65 TestCloudSQLFieldsNeverSilentlyDropped",
           "test/compat/cloudsqlha_test.go:34 TestCloudSQLHighAvailability",
           "test/compat/cloudsqlinstances_test.go:58 TestCloudSQLInstanceWrites",
-          "test/compat/cloudsqlmysql57_test.go:27 TestCloudSQLMySQL57",
+          "test/compat/cloudsqlmysql57_test.go:29 TestCloudSQLMySQL57",
+          "test/compat/cloudsqlmysql57_test.go:32 TestCloudSQLMySQL56",
           "test/compat/cloudsqlphysical_test.go:37 TestCloudSQLExternalMySQLPhysical",
           "test/compat/cloudsqlproxy_test.go:135 TestCloudSQLAuthProxyBinary",
           "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas",
@@ -11218,8 +11220,9 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqlinstances_test.go:312 TestTerraformSQLDatabaseInstance",
-          "test/compat/cloudsqlmysql57_test.go:27 TestCloudSQLMySQL57",
-          "test/compat/cloudsqlreplicaupgrade_test.go:179 TestGcloudSQLOldPostgresVersion",
+          "test/compat/cloudsqlmysql57_test.go:29 TestCloudSQLMySQL57",
+          "test/compat/cloudsqlmysql57_test.go:32 TestCloudSQLMySQL56",
+          "test/compat/cloudsqlreplicaupgrade_test.go:226 TestGcloudSQLOldPostgresVersion",
           "test/compat/cloudsqlversions_test.go:113 TestCloudSQLDatabaseVersions",
           "test/compat/sqladmin_test.go:279 TestSQLAdminDatabasesAndUsersAreTheServers",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
@@ -11231,9 +11234,10 @@
         "tests": [
           "test/compat/cloudsqlinstances_test.go:312 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlinstances_test.go:58 TestCloudSQLInstanceWrites",
-          "test/compat/cloudsqlmysql57_test.go:27 TestCloudSQLMySQL57",
-          "test/compat/cloudsqlreplicaupgrade_test.go:111 TestCloudSQLPostgresOldVersionsAndRefusals",
-          "test/compat/cloudsqlreplicaupgrade_test.go:179 TestGcloudSQLOldPostgresVersion",
+          "test/compat/cloudsqlmysql57_test.go:29 TestCloudSQLMySQL57",
+          "test/compat/cloudsqlmysql57_test.go:32 TestCloudSQLMySQL56",
+          "test/compat/cloudsqlreplicaupgrade_test.go:113 TestCloudSQLPostgresOldVersionsAndRefusals",
+          "test/compat/cloudsqlreplicaupgrade_test.go:226 TestGcloudSQLOldPostgresVersion",
           "test/compat/cloudsqlversions_test.go:113 TestCloudSQLDatabaseVersions",
           "test/compat/sqladmin_test.go:279 TestSQLAdminDatabasesAndUsersAreTheServers",
           "test/compat/sqladmin_test.go:432 TestGcloudSQL",
@@ -11253,8 +11257,8 @@
         "method": "sql.databases.patch",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudsqlreplicaupgrade_test.go:111 TestCloudSQLPostgresOldVersionsAndRefusals",
-          "test/compat/cloudsqlreplicaupgrade_test.go:179 TestGcloudSQLOldPostgresVersion",
+          "test/compat/cloudsqlreplicaupgrade_test.go:113 TestCloudSQLPostgresOldVersionsAndRefusals",
+          "test/compat/cloudsqlreplicaupgrade_test.go:226 TestGcloudSQLOldPostgresVersion",
           "test/compat/sqladmin_test.go:279 TestSQLAdminDatabasesAndUsersAreTheServers"
         ]
       },
@@ -11277,7 +11281,7 @@
         "method": "sql.instances.ListEntraIdCertificates",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/cloudsqladminverbs_test.go:308 TestCloudSQLRefusedMethods"
+          "test/compat/cloudsqladminverbs_test.go:309 TestCloudSQLRefusedMethods"
         ],
         "note": "returns UNIMPLEMENTED (in-process check): Microsoft Entra ID authentication: it is a SQL Server feature, and CloudBurrow runs PostgreSQL and MySQL servers only"
       },
@@ -11292,7 +11296,7 @@
         "method": "sql.instances.RotateEntraIdCertificate",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/cloudsqladminverbs_test.go:308 TestCloudSQLRefusedMethods"
+          "test/compat/cloudsqladminverbs_test.go:309 TestCloudSQLRefusedMethods"
         ],
         "note": "returns UNIMPLEMENTED (in-process check): Microsoft Entra ID authentication: it is a SQL Server feature, and CloudBurrow runs PostgreSQL and MySQL servers only"
       },
@@ -11307,7 +11311,7 @@
         "method": "sql.instances.acquireSsrsLease",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/cloudsqladminverbs_test.go:308 TestCloudSQLRefusedMethods"
+          "test/compat/cloudsqladminverbs_test.go:309 TestCloudSQLRefusedMethods"
         ],
         "note": "returns UNIMPLEMENTED (in-process check): SQL Server Reporting Services leases: it is a SQL Server feature, and CloudBurrow runs PostgreSQL and MySQL servers only"
       },
@@ -11315,7 +11319,7 @@
         "method": "sql.instances.addEntraIdCertificate",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/cloudsqladminverbs_test.go:308 TestCloudSQLRefusedMethods"
+          "test/compat/cloudsqladminverbs_test.go:309 TestCloudSQLRefusedMethods"
         ],
         "note": "returns UNIMPLEMENTED (in-process check): Microsoft Entra ID authentication: it is a SQL Server feature, and CloudBurrow runs PostgreSQL and MySQL servers only"
       },
@@ -11367,17 +11371,18 @@
           "test/compat/cloudsqlinstances_test.go:285 TestGcloudSQLInstances",
           "test/compat/cloudsqlinstances_test.go:312 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlinstances_test.go:58 TestCloudSQLInstanceWrites",
-          "test/compat/cloudsqlmysql57_test.go:27 TestCloudSQLMySQL57",
+          "test/compat/cloudsqlmysql57_test.go:29 TestCloudSQLMySQL57",
+          "test/compat/cloudsqlmysql57_test.go:32 TestCloudSQLMySQL56",
           "test/compat/cloudsqlphysical_test.go:37 TestCloudSQLExternalMySQLPhysical",
           "test/compat/cloudsqlpitr_test.go:222 TestGcloudSQLPointInTimeClone",
           "test/compat/cloudsqlreencrypt_test.go:25 TestCloudSQLReencrypt",
           "test/compat/cloudsqlreplicas_test.go:204 TestCloudSQLReplicaOfUpsServer",
           "test/compat/cloudsqlreplicas_test.go:270 TestGcloudSQLReadReplica",
           "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas",
-          "test/compat/cloudsqlreplicaupgrade_test.go:111 TestCloudSQLPostgresOldVersionsAndRefusals",
-          "test/compat/cloudsqlreplicaupgrade_test.go:179 TestGcloudSQLOldPostgresVersion",
-          "test/compat/cloudsqlreplicaupgrade_test.go:210 TestTerraformSQLOldPostgresVersion",
+          "test/compat/cloudsqlreplicaupgrade_test.go:113 TestCloudSQLPostgresOldVersionsAndRefusals",
+          "test/compat/cloudsqlreplicaupgrade_test.go:226 TestGcloudSQLOldPostgresVersion",
           "test/compat/cloudsqlreplicaupgrade_test.go:25 TestCloudSQLMySQLReplicaUpgradedOnItsOwn",
+          "test/compat/cloudsqlreplicaupgrade_test.go:257 TestTerraformSQLOldPostgresVersion",
           "test/compat/cloudsqlservercerts_test.go:81 TestCloudSQLServerCertificates",
           "test/compat/cloudsqlstorageshrink_test.go:27 TestCloudSQLStorageShrink",
           "test/compat/cloudsqlswitchover_test.go:196 TestGcloudSQLSwitchover",
@@ -11462,7 +11467,8 @@
           "test/compat/cloudsqlinstances_test.go:285 TestGcloudSQLInstances",
           "test/compat/cloudsqlinstances_test.go:312 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlinstances_test.go:58 TestCloudSQLInstanceWrites",
-          "test/compat/cloudsqlmysql57_test.go:27 TestCloudSQLMySQL57",
+          "test/compat/cloudsqlmysql57_test.go:29 TestCloudSQLMySQL57",
+          "test/compat/cloudsqlmysql57_test.go:32 TestCloudSQLMySQL56",
           "test/compat/cloudsqlphysical_test.go:37 TestCloudSQLExternalMySQLPhysical",
           "test/compat/cloudsqlpitr_test.go:222 TestGcloudSQLPointInTimeClone",
           "test/compat/cloudsqlpitr_test.go:273 TestCloudSQLPointInTimeRetention",
@@ -11473,10 +11479,10 @@
           "test/compat/cloudsqlreplicas_test.go:204 TestCloudSQLReplicaOfUpsServer",
           "test/compat/cloudsqlreplicas_test.go:270 TestGcloudSQLReadReplica",
           "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas",
-          "test/compat/cloudsqlreplicaupgrade_test.go:111 TestCloudSQLPostgresOldVersionsAndRefusals",
-          "test/compat/cloudsqlreplicaupgrade_test.go:179 TestGcloudSQLOldPostgresVersion",
-          "test/compat/cloudsqlreplicaupgrade_test.go:210 TestTerraformSQLOldPostgresVersion",
+          "test/compat/cloudsqlreplicaupgrade_test.go:113 TestCloudSQLPostgresOldVersionsAndRefusals",
+          "test/compat/cloudsqlreplicaupgrade_test.go:226 TestGcloudSQLOldPostgresVersion",
           "test/compat/cloudsqlreplicaupgrade_test.go:25 TestCloudSQLMySQLReplicaUpgradedOnItsOwn",
+          "test/compat/cloudsqlreplicaupgrade_test.go:257 TestTerraformSQLOldPostgresVersion",
           "test/compat/cloudsqlservercerts_test.go:81 TestCloudSQLServerCertificates",
           "test/compat/cloudsqlstorageshrink_test.go:27 TestCloudSQLStorageShrink",
           "test/compat/cloudsqlswitchover_test.go:196 TestGcloudSQLSwitchover",
@@ -11500,7 +11506,7 @@
         "tests": [
           "test/compat/cloudsqlparallel_test.go:48 TestCloudSQLParallelExportAndImport",
           "test/compat/cloudsqlproxy_test.go:135 TestCloudSQLAuthProxyBinary",
-          "test/compat/cloudsqlreplicaupgrade_test.go:111 TestCloudSQLPostgresOldVersionsAndRefusals",
+          "test/compat/cloudsqlreplicaupgrade_test.go:113 TestCloudSQLPostgresOldVersionsAndRefusals",
           "test/compat/cloudsqltransfers_test.go:155 TestCloudSQLImportAndExport"
         ]
       },
@@ -11528,7 +11534,8 @@
           "test/compat/cloudsqlinstances_test.go:285 TestGcloudSQLInstances",
           "test/compat/cloudsqlinstances_test.go:312 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlinstances_test.go:58 TestCloudSQLInstanceWrites",
-          "test/compat/cloudsqlmysql57_test.go:27 TestCloudSQLMySQL57",
+          "test/compat/cloudsqlmysql57_test.go:29 TestCloudSQLMySQL57",
+          "test/compat/cloudsqlmysql57_test.go:32 TestCloudSQLMySQL56",
           "test/compat/cloudsqlpgreplicas1524_test.go:24 TestCloudSQLReadReplicasBeforePostgres12",
           "test/compat/cloudsqlphysical_test.go:37 TestCloudSQLExternalMySQLPhysical",
           "test/compat/cloudsqlpitr_test.go:112 TestCloudSQLPointInTimeRecoveryBeforePostgres12",
@@ -11539,10 +11546,10 @@
           "test/compat/cloudsqlreplicas_test.go:204 TestCloudSQLReplicaOfUpsServer",
           "test/compat/cloudsqlreplicas_test.go:270 TestGcloudSQLReadReplica",
           "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas",
-          "test/compat/cloudsqlreplicaupgrade_test.go:111 TestCloudSQLPostgresOldVersionsAndRefusals",
-          "test/compat/cloudsqlreplicaupgrade_test.go:179 TestGcloudSQLOldPostgresVersion",
-          "test/compat/cloudsqlreplicaupgrade_test.go:210 TestTerraformSQLOldPostgresVersion",
+          "test/compat/cloudsqlreplicaupgrade_test.go:113 TestCloudSQLPostgresOldVersionsAndRefusals",
+          "test/compat/cloudsqlreplicaupgrade_test.go:226 TestGcloudSQLOldPostgresVersion",
           "test/compat/cloudsqlreplicaupgrade_test.go:25 TestCloudSQLMySQLReplicaUpgradedOnItsOwn",
+          "test/compat/cloudsqlreplicaupgrade_test.go:257 TestTerraformSQLOldPostgresVersion",
           "test/compat/cloudsqlservercerts_test.go:81 TestCloudSQLServerCertificates",
           "test/compat/cloudsqlstorageshrink_test.go:27 TestCloudSQLStorageShrink",
           "test/compat/cloudsqlswitchover_test.go:196 TestGcloudSQLSwitchover",
@@ -11594,9 +11601,10 @@
           "test/compat/cloudsqlhapg1524_test.go:21 TestCloudSQLHighAvailabilityBeforePostgres13",
           "test/compat/cloudsqlinstances_test.go:312 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlinstances_test.go:58 TestCloudSQLInstanceWrites",
-          "test/compat/cloudsqlmysql57_test.go:27 TestCloudSQLMySQL57",
+          "test/compat/cloudsqlmysql57_test.go:29 TestCloudSQLMySQL57",
+          "test/compat/cloudsqlmysql57_test.go:32 TestCloudSQLMySQL56",
           "test/compat/cloudsqlparallel_test.go:267 TestCloudSQLUpgradeWithReplicas",
-          "test/compat/cloudsqlreplicaupgrade_test.go:111 TestCloudSQLPostgresOldVersionsAndRefusals",
+          "test/compat/cloudsqlreplicaupgrade_test.go:113 TestCloudSQLPostgresOldVersionsAndRefusals",
           "test/compat/cloudsqlreplicaupgrade_test.go:25 TestCloudSQLMySQLReplicaUpgradedOnItsOwn",
           "test/compat/cloudsqlswitchover_test.go:196 TestGcloudSQLSwitchover",
           "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
@@ -11641,6 +11649,7 @@
           "test/compat/cloudsqlpgreplicas1524_test.go:24 TestCloudSQLReadReplicasBeforePostgres12",
           "test/compat/cloudsqlreplicas_test.go:270 TestGcloudSQLReadReplica",
           "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas",
+          "test/compat/cloudsqlreplicaupgrade_test.go:113 TestCloudSQLPostgresOldVersionsAndRefusals",
           "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
           "test/compat/cloudsqlswitchoverpg_test.go:35 TestCloudSQLSwitchoverPostgres",
           "test/compat/cloudsqlversions_test.go:298 TestCloudSQLCascadingAndCrossRegionReplicas",
@@ -11658,7 +11667,7 @@
         "method": "sql.instances.releaseSsrsLease",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/cloudsqladminverbs_test.go:308 TestCloudSQLRefusedMethods"
+          "test/compat/cloudsqladminverbs_test.go:309 TestCloudSQLRefusedMethods"
         ],
         "note": "returns UNIMPLEMENTED (in-process check): SQL Server Reporting Services leases: it is a SQL Server feature, and CloudBurrow runs PostgreSQL and MySQL servers only"
       },
@@ -11771,14 +11780,15 @@
           "test/compat/cloudsqlinstances_test.go:285 TestGcloudSQLInstances",
           "test/compat/cloudsqlinstances_test.go:312 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlinstances_test.go:58 TestCloudSQLInstanceWrites",
-          "test/compat/cloudsqlmysql57_test.go:27 TestCloudSQLMySQL57",
+          "test/compat/cloudsqlmysql57_test.go:29 TestCloudSQLMySQL57",
+          "test/compat/cloudsqlmysql57_test.go:32 TestCloudSQLMySQL56",
           "test/compat/cloudsqlphysical_test.go:37 TestCloudSQLExternalMySQLPhysical",
           "test/compat/cloudsqlpitr_test.go:222 TestGcloudSQLPointInTimeClone",
           "test/compat/cloudsqlpitr_test.go:83 TestCloudSQLPointInTimeRecovery",
-          "test/compat/cloudsqlreplicaupgrade_test.go:111 TestCloudSQLPostgresOldVersionsAndRefusals",
-          "test/compat/cloudsqlreplicaupgrade_test.go:179 TestGcloudSQLOldPostgresVersion",
-          "test/compat/cloudsqlreplicaupgrade_test.go:210 TestTerraformSQLOldPostgresVersion",
+          "test/compat/cloudsqlreplicaupgrade_test.go:113 TestCloudSQLPostgresOldVersionsAndRefusals",
+          "test/compat/cloudsqlreplicaupgrade_test.go:226 TestGcloudSQLOldPostgresVersion",
           "test/compat/cloudsqlreplicaupgrade_test.go:25 TestCloudSQLMySQLReplicaUpgradedOnItsOwn",
+          "test/compat/cloudsqlreplicaupgrade_test.go:257 TestTerraformSQLOldPostgresVersion",
           "test/compat/cloudsqlswitchover_test.go:196 TestGcloudSQLSwitchover",
           "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
           "test/compat/cloudsqlswitchoverpg_test.go:35 TestCloudSQLSwitchoverPostgres",
@@ -11827,7 +11837,7 @@
         "method": "sql.projects.instances.rescheduleMaintenance",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/cloudsqladminverbs_test.go:308 TestCloudSQLRefusedMethods"
+          "test/compat/cloudsqladminverbs_test.go:309 TestCloudSQLRefusedMethods"
         ],
         "note": "returns UNIMPLEMENTED (in-process check): CloudBurrow's servers have no Google-managed maintenance: no maintenance event is ever scheduled (scheduledMaintenance is never set), so there is none to reschedule (re-read 2026-11-17, #1524: Google documents the reschedule types and the 28-day limit for a scheduled event, and no answer for an instance with none, so there is nothing to emulate the call against)"
       },
@@ -11931,7 +11941,8 @@
           "test/compat/cloudsqladminverbs_test.go:137 TestCloudSQLDataAPIAndFinalBackup",
           "test/compat/cloudsqlfields_test.go:65 TestCloudSQLFieldsNeverSilentlyDropped",
           "test/compat/cloudsqlinstances_test.go:58 TestCloudSQLInstanceWrites",
-          "test/compat/cloudsqlmysql57_test.go:27 TestCloudSQLMySQL57",
+          "test/compat/cloudsqlmysql57_test.go:29 TestCloudSQLMySQL57",
+          "test/compat/cloudsqlmysql57_test.go:32 TestCloudSQLMySQL56",
           "test/compat/cloudsqlversions_test.go:205 TestCloudSQLMajorVersionUpgrade",
           "test/compat/sqladmin_test.go:279 TestSQLAdminDatabasesAndUsersAreTheServers",
           "test/compat/sqladmin_test.go:432 TestGcloudSQL",
@@ -11942,7 +11953,8 @@
         "method": "sql.users.list",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudsqlmysql57_test.go:27 TestCloudSQLMySQL57",
+          "test/compat/cloudsqlmysql57_test.go:29 TestCloudSQLMySQL57",
+          "test/compat/cloudsqlmysql57_test.go:32 TestCloudSQLMySQL56",
           "test/compat/sqladmin_test.go:279 TestSQLAdminDatabasesAndUsersAreTheServers",
           "test/compat/sqladmin_test.go:432 TestGcloudSQL",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
@@ -11952,6 +11964,8 @@
         "method": "sql.users.update",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudsqlmysql57_test.go:29 TestCloudSQLMySQL57",
+          "test/compat/cloudsqlmysql57_test.go:32 TestCloudSQLMySQL56",
           "test/compat/sqladmin_test.go:279 TestSQLAdminDatabasesAndUsersAreTheServers",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
