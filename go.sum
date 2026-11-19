@@ -228,6 +228,7 @@ cloud.google.com/go/developerconnect v1.2.0 h1:Zc0b05giQGcEvSCRv6je4lG0LYVmswSgp
 cloud.google.com/go/developerconnect v1.2.0/go.mod h1:oNd+mqz+PfvpIB1XSslIB/pyAeJCtm59/+bkmppU9hw=
 cloud.google.com/go/dialogflow v1.84.0/go.mod h1:OU8Lj1aw5Vr2hl9ifW+vsKnc2b4iJH+41U7nZ4whg3U=
 cloud.google.com/go/dlp v1.34.0/go.mod h1:+haQd/n0QTv5BK7wZnCk2qctd5sfKL50jjh9E6N0d/Q=
+cloud.google.com/go/documentai v1.49.0 h1:WLZOaWvK4NH7xMLxANsDgIdXugeqmVyYRCbVN1m87DQ=
 cloud.google.com/go/documentai v1.49.0/go.mod h1:VyQA+SxPnCPlVLSJ5UcFx+LQm8JCzK7uUXdkOaAHvG8=
 cloud.google.com/go/domains v0.16.0/go.mod h1:O5AhaEyUAgZC2X4M10nSu3dQt2cJLtbjhtrNrdeSPF8=
 cloud.google.com/go/edgecontainer v1.10.0/go.mod h1:g4xb11IzVWa9peXNTlnNguKP8uJVvMK4zZeDlGS2Wus=

@@ -10,6 +10,7 @@ import (
 
 	"cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
 	betapb "cloud.google.com/go/aiplatform/apiv1beta1/aiplatformpb"
+	"cloud.google.com/go/documentai/apiv1/documentaipb"
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
 	"google.golang.org/genproto/googleapis/api/annotations"
 	"google.golang.org/genproto/googleapis/api/httpbody"
@@ -531,22 +532,30 @@ func opRule(pattern string) *annotations.HttpRule {
 // restTranscoder serves the JSON surface of the registered services.
 func (s *Server) restTranscoder() *rest.Transcoder {
 	s.restOnce.Do(func() {
-		t := &rest.Transcoder{Packages: []string{"google.cloud.aiplatform.v1"}, Mixins: []*annotations.HttpRule{
+		t := &rest.Transcoder{Packages: []string{"google.cloud.aiplatform.v1", "google.cloud.documentai.v1"}, Mixins: []*annotations.HttpRule{
 			opRule("/v1/{name=projects/*/locations/*/operations/*}"),
 			opRule("/v1/{name=projects/*/locations/*/endpoints/*/operations/*}"),
 			opRule("/v1/{name=projects/*/locations/*/models/*/operations/*}"),
 		}}
 		s.registerModelGarden(t)
+		documentaipb.RegisterDocumentProcessorServiceServer(t, &documentAIService{s: s}) // documentai.go, #1799
 		longrunningpb.RegisterOperationsServer(t, &operations{s: s})
 		s.rest = t
 	})
 	return s.rest
 }
 
+// documentAIPath reports whether a path is Document AI's (documentai.go),
+// served with or without Model Garden.
+func documentAIPath(p string) bool {
+	return strings.Contains(p, "/processors") || strings.Contains(p, "/processorTypes") ||
+		strings.HasSuffix(p, ":fetchProcessorTypes") || strings.Contains(p, "/operations/")
+}
+
 // serveREST hands a request the routes above did not take to the transcoder,
 // or answers the not-found body when Model Garden is not served.
 func (s *Server) serveREST(w http.ResponseWriter, r *http.Request, body []byte) {
-	if s.modelGarden() == nil || !strings.HasPrefix(r.URL.Path, "/v1/") {
+	if !strings.HasPrefix(r.URL.Path, "/v1/") || (s.modelGarden() == nil && !documentAIPath(r.URL.Path)) {
 		s.notFound(w, r)
 		return
 	}

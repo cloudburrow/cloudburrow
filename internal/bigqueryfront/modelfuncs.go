@@ -33,7 +33,7 @@ var mlFunctionsServed = map[string]bool{"PREDICT": true, "EVALUATE": true, "WEIG
 	"CONFUSION_MATRIX": true, "ROC_CURVE": true, "CENTROIDS": true, "PRINCIPAL_COMPONENTS": true, "PRINCIPAL_COMPONENT_INFO": true, "RECOMMEND": true, "FEATURE_IMPORTANCE": true,
 	"FORECAST": true, "EXPLAIN_FORECAST": true, "DETECT_ANOMALIES": true, "ARIMA_EVALUATE": true, "ARIMA_COEFFICIENTS": true, "HOLIDAY_INFO": true,
 	"EXPLAIN_PREDICT": true, "GLOBAL_EXPLAIN": true, "RECONSTRUCTION_LOSS": true, "GENERATE_TEXT": true, "GENERATE_EMBEDDING": true,
-	"ANNOTATE_IMAGE": true, "TRANSCRIBE": true, "TRANSLATE": true, "UNDERSTAND_TEXT": true} // modelservice.go, #1773, #1799
+	"ANNOTATE_IMAGE": true, "TRANSCRIBE": true, "TRANSLATE": true, "UNDERSTAND_TEXT": true, "PROCESS_DOCUMENT": true} // modelservice.go, #1773, #1799
 
 // mlCall is one ML.<fn>(MODEL ...) call in a query's text.
 type mlCall struct {
@@ -43,7 +43,10 @@ type mlCall struct {
 	// table is the TABLE argument's path, or nil (ML.ANNOTATE_IMAGE's
 	// object table, modelservice.go).
 	table []string
-	struc map[string]string
+	// objectQuery is ML.PROCESS_DOCUMENT's query over its object table
+	// (modelprocessdocument.go), whose table is then table.
+	objectQuery string
+	struc       map[string]string
 	// named are the named arguments (name => value), by lower-case name,
 	// each value's SQL text: ML.TRANSCRIBE's recognition_config (#1799).
 	named map[string]string
@@ -642,7 +645,7 @@ func (f front) mlSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall)
 	if c.ai && c.fn == "GENERATE_EMBEDDING" {
 		return "", 501, "Not implemented here: AI.GENERATE_EMBEDDING of a " + typ + " model: CloudBurrow serves it on remote embedding models (#1772). Nothing was run."
 	}
-	if c.fn == "GENERATE_TEXT" || c.fn == "GENERATE_EMBEDDING" || c.fn == "GENERATE_TABLE" || c.fn == "ANNOTATE_IMAGE" || c.fn == "TRANSCRIBE" || c.fn == "TRANSLATE" || c.fn == "UNDERSTAND_TEXT" {
+	if c.fn == "GENERATE_TEXT" || c.fn == "GENERATE_EMBEDDING" || c.fn == "GENERATE_TABLE" || c.fn == "ANNOTATE_IMAGE" || c.fn == "TRANSCRIBE" || c.fn == "TRANSLATE" || c.fn == "UNDERSTAND_TEXT" || c.fn == "PROCESS_DOCUMENT" {
 		fname := "ML." + c.fn
 		if c.ai {
 			fname = "AI." + c.fn
