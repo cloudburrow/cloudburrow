@@ -2149,7 +2149,7 @@ func TestTheDrawerListsProductsNotPages(t *testing.T) {
 			cloudRun = append(cloudRun, r["title"]+" "+r["path"]+" "+r["service"])
 		}
 	}
-	if want := []string{"Services /run run", "Jobs /run/jobs run-jobs", "Worker pools /run/worker-pools run-worker-pools", "Instances /run/instances run-instances", "Build history /run/builds run-builds"}; strings.Join(cloudRun, "|") != strings.Join(want, "|") {
+	if want := []string{"Services /run run", "Jobs /run/jobs run-jobs", "Worker pools /run/worker-pools run-worker-pools", "Domain mappings /run/domains run-domains", "Instances /run/instances run-instances", "Build history /run/builds run-builds"}; strings.Join(cloudRun, "|") != strings.Join(want, "|") {
 		t.Errorf("Cloud Run pages = %q, want %q", cloudRun, want)
 	}
 	// Cloud Storage's menu is Google's order (#1843), with Deleted buckets

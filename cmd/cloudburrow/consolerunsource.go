@@ -56,8 +56,13 @@ func runSourceFields() []console.Field {
 // and region, then the source fields Deploy from source takes.
 func (p runProvider) runCreateFromSourceAction() console.Action {
 	_, create := p.CreateForm()
-	name := create[0] // the deploy form's own name field and its pattern
-	name.Section = ""
+	var name console.Field // the deploy form's own name field and its pattern
+	for _, f := range create {
+		if f.Name == "name" {
+			name = f
+		}
+	}
+	name.Section, name.Tab = "", ""
 	return console.Action{ID: runCreateFromSource, Label: "Create service from source", Fields: append([]console.Field{
 		name,
 		{Name: "region", Label: "Region", Type: "select", Options: []string{p.location()}, Default: p.location(),
@@ -112,9 +117,9 @@ func (p runProvider) createFromSource(ctx context.Context, project string, value
 	if service == "" {
 		return errors.New("a service name is required")
 	}
-	_, create := p.CreateForm()
-	if !regexp.MustCompile(create[0].Pattern).MatchString(service) {
-		return fmt.Errorf("service name %q: %s", service, create[0].Help)
+	name := p.runCreateFromSourceAction().Fields[0]
+	if !regexp.MustCompile(name.Pattern).MatchString(service) {
+		return fmt.Errorf("service name %q: %s", service, name.Help)
 	}
 	if r := strings.TrimSpace(values["region"]); r != "" && r != p.location() {
 		return fmt.Errorf("region %s is not served here; this instance serves Cloud Run in %s", r, p.location())

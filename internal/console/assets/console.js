@@ -32,10 +32,13 @@ const ROUTES = [
   // "jobs" is shadowed by the Jobs page, as one called "create" is by the
   // deploy form.
   { path: "/run",      service: "run",      title: "Services", section: "Serverless computing",
-    product: "run", productTitle: "Cloud Run" },
+    product: "run", productTitle: "Cloud Run", kind: "Service" },
   { path: "/run/jobs", service: "run-jobs", title: "Jobs",     section: "Serverless computing",
-    product: "run", productTitle: "Cloud Run" },
+    product: "run", productTitle: "Cloud Run", kind: "Job" },
   { path: "/run/worker-pools", service: "run-worker-pools", title: "Worker pools", section: "Serverless computing",
+    product: "run", productTitle: "Cloud Run", kind: "Worker pool" },
+  // Every domain mapping of the project, as Google's /run/domains (#1852).
+  { path: "/run/domains", service: "run-domains", title: "Domain mappings", section: "Serverless computing",
     product: "run", productTitle: "Cloud Run" },
   { path: "/run/instances", service: "run-instances", title: "Instances", section: "Serverless computing",
     product: "run", productTitle: "Cloud Run" },
@@ -332,6 +335,7 @@ const ICONS = {
   "run-jobs": '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5l5 2.5-5 2.5z"/>',
   "run-instances": '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5l5 2.5-5 2.5z"/>',
   "run-worker-pools": '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5l5 2.5-5 2.5z"/>',
+  "run-domains": '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5l5 2.5-5 2.5z"/>',
   "run-builds": '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5l5 2.5-5 2.5z"/>',
   "cloud-build-triggers": '<path d="M13 3L5 13h6l-1 8 8-10h-6z"/>',
   "cloud-build-worker-pools": '<rect x="3" y="4" width="8" height="7" rx="1.5"/><rect x="13" y="4" width="8" height="7" rx="1.5"/><rect x="3" y="13" width="8" height="7" rx="1.5"/><rect x="13" y="13" width="8" height="7" rx="1.5"/>',
@@ -3035,11 +3039,16 @@ async function renderDetail(view, route, resourcePath) {
   // A provider that draws its own Logs tab keeps it: a Cloud Run execution's
   // tasks are pods that finish before the log follower's next sweep, so their
   // output is read from the pods themselves (#785).
-  if (!sections.some((s) => s.id === "logs")) {
+  const ownLogs = sections.find((s) => s.id === "logs");
+  if (!ownLogs) {
     sections.push({
       id: "logs", label: "Logs", kind: "logs",
       resource: name,
     });
+  } else if (ownLogs.kind === "logs" && !ownLogs.resource) {
+    // A placeholder (console.KindLogs) puts the Logs tab in the provider's
+    // order, as Google's service page has Metrics, SLOs, Logs (#1852).
+    ownLogs.resource = name;
   }
 
   const queryable = capabilityOf(route.service).query;
@@ -5158,7 +5167,7 @@ function buildCreateForm(spec) {
   const nodes = groups.flatMap((g) => g.name
     ? [el("section", { class: "form-section" },
         el("h3", { class: "form-section-title", text: g.name }),
-        ...g.entries.map((e) => e.node))]
+        ...formTabs(g.name, g.entries))]
     : g.entries.map((e) => e.node));
 
   // Stated once, not once per field: the marker means nothing until something
@@ -5195,7 +5204,12 @@ function buildCreateForm(spec) {
       for (const entry of entries) {
         if (!check(entry) && !first) first = entry;
       }
-      if (first) (first.focus || (() => first.control.focus()))();
+      if (first) {
+        // A field on a tab that is not showing: show its tab first (#1852).
+        const panel = first.node.closest && first.node.closest(".form-tab-panel");
+        if (panel && panel.hidden) panel.dispatchEvent(new Event("form-tab-show"));
+        (first.focus || (() => first.control.focus()))();
+      }
       return !first;
     },
     // The files chosen in "file" fields (#999), which are sent as parts of
@@ -5217,6 +5231,54 @@ function buildCreateForm(spec) {
         })]);
     },
   };
+}
+
+// formTabs lays out one form section's fields: those with no tab, then a
+// tab strip over the fields that name a tab (Field.Tab), in the order the
+// backend gave them, as Google's Create service page holds Container(s),
+// Variables & Secrets, Volumes, Networking and Security (#1852). Every field
+// stays in the form whichever tab shows, so Create submits them all.
+function formTabs(section, entries) {
+  const plain = entries.filter((e) => !e.field.tab).map((e) => e.node);
+  const tabs = [];
+  for (const e of entries.filter((x) => x.field.tab)) {
+    let t = tabs.find((x) => x.name === e.field.tab);
+    if (!t) tabs.push(t = { name: e.field.tab, entries: [] });
+    t.entries.push(e);
+  }
+  if (!tabs.length) return plain;
+  const slug = (n) => n.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const base = `form-tab-${slug(section)}`;
+  const buttons = [];
+  const panels = tabs.map((t, i) => el("div", { class: "form-tab-panel tab-panel", role: "tabpanel",
+    id: `${base}-${slug(t.name)}`, "aria-labelledby": `${base}-${slug(t.name)}-tab`, hidden: i !== 0 },
+    ...t.entries.map((e) => e.node)));
+  const select = (i) => {
+    buttons.forEach((b, j) => {
+      b.classList.toggle("is-selected", i === j);
+      b.setAttribute("aria-selected", i === j ? "true" : "false");
+      b.tabIndex = i === j ? 0 : -1;
+    });
+    panels.forEach((p, j) => { p.hidden = i !== j; });
+  };
+  tabs.forEach((t, i) => {
+    buttons.push(el("button", { type: "button", class: "tab" + (i === 0 ? " is-selected" : ""), role: "tab",
+      id: `${base}-${slug(t.name)}-tab`, "aria-controls": panels[i].id,
+      "aria-selected": i === 0 ? "true" : "false", tabindex: i === 0 ? "0" : "-1", text: t.name,
+      onclick: () => select(i),
+      onkeydown: (ev) => {
+        const step = ev.key === "ArrowRight" ? 1 : ev.key === "ArrowLeft" ? -1 : 0;
+        if (!step) return;
+        ev.preventDefault();
+        const j = (i + step + tabs.length) % tabs.length;
+        select(j);
+        buttons[j].focus();
+      } }));
+    panels[i].addEventListener("form-tab-show", () => select(i));
+  });
+  return [...plain,
+    el("div", { class: "tab-strip form-tabs", role: "tablist", "aria-label": section }, ...buttons),
+    ...panels];
 }
 
 // radioEntry is a "radio" field: one radio button per option, the choice
@@ -5590,7 +5652,7 @@ async function renderCreatePage(view, route) {
   const fields = buildCreateForm(caps.create);
   const error = el("p", { class: "form-error", role: "alert", hidden: true });
   const cancel = el("a", { class: "button secondary", href: listHref, text: "Cancel" });
-  const primary = el("button", { type: "submit", class: "primary", text: caps.create.label });
+  const primary = el("button", { type: "submit", class: "primary", text: caps.create.submit || caps.create.label });
 
   const steps = createSteps(fields.nodes);
 

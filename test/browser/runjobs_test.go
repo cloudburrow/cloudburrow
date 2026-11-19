@@ -50,7 +50,7 @@ func TestCloudRunJobCreatedExecutedAndDeletedInTheBrowser(t *testing.T) {
 		chromedp.SendKeys(chromedp.CSS(`#view #f-image`), "docker.io/library/busybox:1.36"),
 		chromedp.SendKeys(chromedp.CSS(`#view #f-command`), "sh -c"),
 		chromedp.SendKeys(chromedp.CSS(`#view #f-args`), `'echo "from the browser"'`))
-	p.clickText(`#view button[type="submit"]`, "Create job")
+	p.clickText(`#view button[type="submit"]`, "Create")
 	p.waitFor(fmt.Sprintf(`location.pathname === "/run/jobs" &&
 		[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q))`, id))
 	if posts := p.posts("/api/resources/run-jobs"); len(posts) != 1 {
@@ -87,7 +87,7 @@ func TestCloudRunJobCreatedExecutedAndDeletedInTheBrowser(t *testing.T) {
 	}
 
 	// Edit job opens prefilled; Cancel discards typed input without asking.
-	p.clickText("#view .page-actions button", "Edit job")
+	p.clickText("#view .page-actions button", "View and edit job configuration")
 	p.waitFor(`document.querySelector(".modal.is-open #f-image") !== null`)
 	var form struct {
 		Image, Args  string

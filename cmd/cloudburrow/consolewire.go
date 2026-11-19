@@ -189,7 +189,12 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			runAddr:        runAddrOf(d.run),
 			defaultProject: d.cfg.DefaultProject(),
 			storageAddr:    runStorage,
-		}, runJobsProvider{
+		}, runDomainsProvider{run: runProvider{
+			kubeconfig:     d.cfg.KubeconfigPath(),
+			namespace:      runadapter.WorkloadNamespace,
+			runAddr:        runAddrOf(d.run),
+			defaultProject: d.cfg.DefaultProject(),
+		}}, runJobsProvider{
 			kubeconfig:     d.cfg.KubeconfigPath(),
 			namespace:      runadapter.WorkloadNamespace,
 			runAddr:        runAddrOf(d.run),
