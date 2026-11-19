@@ -26,11 +26,29 @@ type Terminal interface {
 	// Prepare makes the shell's pod ready, reporting what it is waiting for
 	// through progress. It decides for itself how long to wait; ctx ends
 	// when the browser goes away. An error is shown in the drawer as it
-	// stands, with Try again.
-	Prepare(ctx context.Context, progress func(string)) error
+	// stands, with Retry.
+	Prepare(ctx context.Context, progress func(TerminalProgress)) error
 	// Open starts a shell scoped to project (none when it is empty) on a
 	// terminal of cols by rows.
 	Open(project string, cols, rows uint16) (TerminalSession, error)
+}
+
+// TerminalProgress is one report from Prepare. The drawer shows it as one
+// loading panel, Cloud Shell's "Provisioning your Cloud Shell machine": a
+// progress bar from the bytes during a pull, and Message otherwise (#1838).
+type TerminalProgress struct {
+	// Message says what is being waited for, in a sentence.
+	Message string
+	// Step is "import" (from the offline cache), "pull", "unpack" (every
+	// byte fetched), or empty for any other wait: the steps of a first
+	// start only.
+	Step string
+	// Fetched and Total are the image's compressed bytes on the node and in
+	// all, as the node reports them; zero when it does not.
+	Fetched, Total int64
+	// Elapsed is how long the pull has run, as the cluster reports it; zero
+	// when it is not known.
+	Elapsed time.Duration
 }
 
 // TerminalSession is one open shell.
@@ -73,7 +91,8 @@ type terminalMessage struct {
 	// Type is one of:
 	//   from the browser: "resize" (Cols, Rows), "project" (Project),
 	//   "close" (end this shell now, when its drawer tab is closed);
-	//   from the server: "status" (Message), "session" (ID, Project,
+	//   from the server: "status" (Message, Step, Fetched, Total,
+	//   Elapsed), "session" (ID, Project,
 	//   Resumed), "project" (Project, Message), "unavailable" (Message),
 	//   "exit" (Message), "detached" (Message).
 	Type    string `json:"type"`
@@ -83,6 +102,12 @@ type terminalMessage struct {
 	Resumed bool   `json:"resumed,omitempty"`
 	Cols    uint16 `json:"cols,omitempty"`
 	Rows    uint16 `json:"rows,omitempty"`
+
+	Step    string `json:"step,omitempty"`
+	Fetched int64  `json:"fetched,omitempty"`
+	Total   int64  `json:"total,omitempty"`
+	// Elapsed is in seconds.
+	Elapsed float64 `json:"elapsed,omitempty"`
 }
 
 // handleTerminalStatus answers whether the drawer can open a terminal, so it
@@ -233,7 +258,12 @@ func (s *Server) bridgeTerminal(ws *websocket.Conn, r *http.Request) {
 		// about 1 GB, which took longer than the quarter of an hour this
 		// once allowed (#824). Prepare waits while the pull is under way and
 		// gives up on a real failure; the browser going away cancels ctx.
-		err := t.Prepare(ctx, func(msg string) { _ = sendControl(ws, terminalMessage{Type: "status", Message: msg}) })
+		// Each report is one status message, which the drawer draws into its
+		// one loading panel, replacing the last.
+		err := t.Prepare(ctx, func(p TerminalProgress) {
+			_ = sendControl(ws, terminalMessage{Type: "status", Message: p.Message, Step: p.Step,
+				Fetched: p.Fetched, Total: p.Total, Elapsed: p.Elapsed.Seconds()})
+		})
 		if err != nil {
 			s.sessions().release()
 			_ = sendControl(ws, terminalMessage{Type: "unavailable", Message: userMessage(err)})

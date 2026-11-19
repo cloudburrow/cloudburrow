@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -19,12 +20,19 @@ import (
 // bridge can be tested without a cluster.
 type fakeTerminal struct {
 	prepareErr error
-	mu         sync.Mutex
-	opened     []*fakeShell
+	// reports, when set, are what Prepare reports in place of its one line.
+	reports []TerminalProgress
+	mu      sync.Mutex
+	opened  []*fakeShell
 }
 
-func (f *fakeTerminal) Prepare(_ context.Context, progress func(string)) error {
-	progress("Creating the terminal pod")
+func (f *fakeTerminal) Prepare(_ context.Context, progress func(TerminalProgress)) error {
+	if f.reports == nil {
+		progress(TerminalProgress{Message: "Creating the terminal pod"})
+	}
+	for _, r := range f.reports {
+		progress(r)
+	}
 	return f.prepareErr
 }
 
@@ -239,6 +247,35 @@ func TestTerminalIsRefusedToARemotePeer(t *testing.T) {
 	r.RemoteAddr = "127.0.0.1:51000"
 	if why := terminalRefusal(r); why != "" {
 		t.Errorf("a loopback peer was refused: %q", why)
+	}
+}
+
+// A first start's pull reaches the drawer as numbers it can draw a progress
+// bar from, one status message per report (#1838): the step, the bytes as
+// the node reports them, and the elapsed time in seconds.
+func TestTerminalStatusCarriesThePullsProgress(t *testing.T) {
+	t.Parallel()
+	term := &fakeTerminal{reports: []TerminalProgress{
+		{Message: "Creating the terminal pod"},
+		{Message: "pulling", Step: "pull", Fetched: 800e6, Total: 1033e6, Elapsed: 20 * time.Second},
+		{Message: "unpacking", Step: "unpack", Fetched: 1033e6, Total: 1033e6, Elapsed: 90 * time.Second},
+	}}
+	srv := serveTerminal(t, term)
+	ws := dial(t, srv, "")
+	var got []terminalMessage
+	for range term.reports {
+		got = append(got, message(t, next(t, ws, control("status"))))
+	}
+	want := []terminalMessage{
+		{Type: "status", Message: "Creating the terminal pod"},
+		{Type: "status", Message: "pulling", Step: "pull", Fetched: 800e6, Total: 1033e6, Elapsed: 20},
+		{Type: "status", Message: "unpacking", Step: "unpack", Fetched: 1033e6, Total: 1033e6, Elapsed: 90},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("status messages = %+v\nwant %+v", got, want)
+	}
+	if m := message(t, next(t, ws, control("session"))); m.ID == "" {
+		t.Errorf("session = %+v; want the shell attached once the pod is ready", m)
 	}
 }
 
