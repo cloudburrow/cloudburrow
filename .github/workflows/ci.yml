@@ -305,7 +305,7 @@ jobs:
           ./bin/cloudburrow storage-server --listen 127.0.0.1:4443 --host storage.localhost --pubsub-emulator 127.0.0.1:8095 \
             --cors-allow-origin https://app.test:8443 \
             --signing-cert "signer@cloudburrow-ci.iam.gserviceaccount.com=$RUNNER_TEMP/sign-cert.pem" > storage-server.log 2>&1 &
-          for i in $(seq 1 50); do curl -s -o /dev/null http://127.0.0.1:4443/storage/v1/b?project=p && break; sleep 0.2; done
+          for _ in $(seq 1 50); do curl -s -o /dev/null http://127.0.0.1:4443/storage/v1/b?project=p && break; sleep 0.2; done
           set -o pipefail
           CLOUDBURROW_TEST_STORAGE=http://127.0.0.1:4443 CLOUDBURROW_TEST_PUBSUB=127.0.0.1:8095 CLOUDBURROW_TEST_CORS_ORIGIN=https://app.test:8443 \
             CLOUDBURROW_TEST_SIGNING_KEY="$RUNNER_TEMP/sign-key.pem" CLOUDBURROW_TEST_SIGNING_EMAIL=signer@cloudburrow-ci.iam.gserviceaccount.com \
@@ -343,7 +343,7 @@ jobs:
           persist() {
             ./bin/cloudburrow storage-server --listen 127.0.0.1:4444 --data-dir "$RUNNER_TEMP/gcs-data" --mode "${1:-persistent}" >> storage-persist.log 2>&1 &
             PERSIST=$!
-            for i in $(seq 1 50); do curl -s -o /dev/null 'http://127.0.0.1:4444/storage/v1/b?project=p' && break; sleep 0.2; done
+            for _ in $(seq 1 50); do curl -s -o /dev/null 'http://127.0.0.1:4444/storage/v1/b?project=p' && break; sleep 0.2; done
           }
           probe() {
             CLOUDBURROW_TEST_STORAGE=http://127.0.0.1:4444 \
@@ -723,8 +723,9 @@ jobs:
           COMPAT_ENV=$(scripts/compat-env.sh --strict --only "$TEST_VARS" --env-json env.json \
             --cli "$PWD/bin/cloudburrow" --gcloud "$RUNNER_TEMP/google-cloud-sdk/bin/gcloud" -- "${CB[@]}")
           eval "$COMPAT_ENV"
-          [ -s "$CLOUDBURROW_TEST_KUBECONFIG" ] && kind get clusters | grep -qx "$CLOUDBURROW_TEST_CLUSTER" ||
-            { echo "the instance's kubeconfig or kind cluster is not where the compat tests expect"; kind get clusters; exit 1; }
+          if ! { [ -s "$CLOUDBURROW_TEST_KUBECONFIG" ] && kind get clusters | grep -qx "$CLOUDBURROW_TEST_CLUSTER"; }; then
+            echo "the instance's kubeconfig or kind cluster is not where the compat tests expect"; kind get clusters; exit 1
+          fi
 
           # -v, so each test's PASS or SKIP is in the log. Without it go test
           # prints only a package-level "ok", and a skipped test is
