@@ -7158,6 +7158,7 @@
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/GetClusterCertificateAuthority",
         "status": "Verified",
         "tests": [
+          "test/compat/memorystorecertrotation1918_test.go:40 TestRedisClusterServerCertRotation",
           "test/compat/memorystoreclusterca1907_test.go:46 TestRedisClusterServerCAModes",
           "test/compat/memorystoreclustertls_test.go:49 TestMemorystoreRedisClusterInTransitEncryption"
         ]
@@ -7248,6 +7249,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudrediscluster_test.go:23 TestGcloudRedisCluster",
+          "test/compat/memorystorecertrotation1918_test.go:40 TestRedisClusterServerCertRotation",
           "test/compat/memorystorecluster_test.go:136 TestMemorystoreRedisCluster",
           "test/compat/memorystoreiam1614_test.go:114 TestMemorystoreIAMAuthChecksTheToken",
           "test/compat/memorystorezones1908_test.go:77 TestMemorystoreZoneDistribution",
@@ -7275,6 +7277,7 @@
           "test/compat/memorystoreimport_test.go:179 TestMemorystoreRDBPersistence",
           "test/compat/memorystorenetwork1906_test.go:29 TestMemorystoreInstanceNetwork",
           "test/compat/memorystorepersistence1911_test.go:28 TestMemorystoreDataAcrossServerRestart",
+          "test/compat/memorystoreranges1919_test.go:25 TestMemorystoreReservedIPRanges",
           "test/compat/memorystoretls1768_test.go:142 TestGcloudRedisInTransitEncryptionBefore60",
           "test/compat/memorystoretls1768_test.go:184 TestTerraformRedisInTransitEncryptionBefore60",
           "test/compat/memorystoretls1768_test.go:33 TestMemorystoreInTransitEncryptionBefore60",
@@ -7346,6 +7349,7 @@
           "test/compat/memorystoremaintenance_test.go:68 TestMemorystoreRescheduleMaintenance",
           "test/compat/memorystorenetwork1906_test.go:29 TestMemorystoreInstanceNetwork",
           "test/compat/memorystorepersistence1911_test.go:28 TestMemorystoreDataAcrossServerRestart",
+          "test/compat/memorystoreranges1919_test.go:25 TestMemorystoreReservedIPRanges",
           "test/compat/memorystoretls1768_test.go:142 TestGcloudRedisInTransitEncryptionBefore60",
           "test/compat/memorystoretls1768_test.go:184 TestTerraformRedisInTransitEncryptionBefore60",
           "test/compat/memorystoretls1768_test.go:33 TestMemorystoreInTransitEncryptionBefore60",

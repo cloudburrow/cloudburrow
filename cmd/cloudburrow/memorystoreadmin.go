@@ -443,29 +443,7 @@ func (p *memorystoreProvisioner) StartClusterNode(ctx context.Context, spec redi
 		// In-transit encryption (#1549): TLS only, on the node's one port,
 		// with a certificate of the cluster's CA for the host's address,
 		// where clients reach the node, and the node's Service.
-		ns := p.cfg.Cluster.Namespace
-		services := []string{spec.Server}
-		if spec.PortName == redisadmin.ValkeyPortName {
-			// A CLUSTER_DISABLED node is also reached at its instance's
-			// role Services (#1614): a secondary of cross-instance
-			// replication replicates the primary Service.
-			base := memorystoreNodeNumber.ReplaceAllString(spec.Server, "")
-			services = append(services, base+"-primary", base+"-reader")
-		}
-		names := []string{p.cfg.BindAddress}
-		if clusterIP != "" {
-			names = append(names, "::1", clusterIP)
-		}
-		for _, n := range services {
-			names = append(names, n+"."+ns, n+"."+ns+".svc", n+"."+ns+".svc.cluster.local")
-		}
-		var files *redisadmin.TLSFiles
-		var err error
-		if spec.ServerCAPool != "" {
-			files, err = p.poolTLS(ctx, spec, names)
-		} else {
-			files, err = redisadmin.ServerTLS(spec, time.Now(), names...)
-		}
+		files, err := p.nodeTLS(ctx, spec, clusterIP)
 		if err != nil {
 			return "", "", 0, fmt.Errorf("issue %s a server certificate: %w", spec.Server, err)
 		}
@@ -498,6 +476,56 @@ func (p *memorystoreProvisioner) StartClusterNode(ctx context.Context, spec redi
 		_ = old.Stop(ctx)
 	}
 	return f.HostAddr(), strings.TrimSpace(ip), port, nil
+}
+
+// nodeTLS issues a cluster node a server certificate (#1549): of its
+// cluster's CA, or its customer-managed CA pool's (#1907), for the host's
+// address, where clients reach the node, its Service's cluster IP and its
+// Services' names.
+func (p *memorystoreProvisioner) nodeTLS(ctx context.Context, spec redisadmin.Spec, clusterIP string) (*redisadmin.TLSFiles, error) {
+	ns := p.cfg.Cluster.Namespace
+	services := []string{spec.Server}
+	if spec.PortName == redisadmin.ValkeyPortName {
+		// A CLUSTER_DISABLED node is also reached at its instance's
+		// role Services (#1614): a secondary of cross-instance
+		// replication replicates the primary Service.
+		base := memorystoreNodeNumber.ReplaceAllString(spec.Server, "")
+		services = append(services, base+"-primary", base+"-reader")
+	}
+	names := []string{p.cfg.BindAddress}
+	if clusterIP != "" {
+		names = append(names, "::1", clusterIP)
+	}
+	for _, n := range services {
+		names = append(names, n+"."+ns, n+"."+ns+".svc", n+"."+ns+".svc.cluster.local")
+	}
+	if spec.ServerCAPool != "" {
+		return p.poolTLS(ctx, spec, names)
+	}
+	return redisadmin.ServerTLS(spec, time.Now(), names...)
+}
+
+// StageNodeCert implements redisadmin.ClusterCertRotator (#1918): a running
+// node's next server certificate, issued as when it started, written into
+// its pod beside the first, for the node to load on CONFIG SET. The
+// certificates an earlier rotation wrote are removed first.
+func (p *memorystoreProvisioner) StageNodeCert(ctx context.Context, spec redisadmin.Spec) (string, string, error) {
+	p.mu.Lock()
+	clusterIP := p.clusterIPs[spec.Server]
+	p.mu.Unlock()
+	files, err := p.nodeTLS(ctx, spec, clusterIP)
+	if err != nil {
+		return "", "", fmt.Errorf("issue %s a server certificate: %w", spec.Server, err)
+	}
+	stamp := strconv.FormatInt(time.Now().UnixNano(), 36)
+	certFile := components.MemorystoreTLSDir + "/rotated-" + stamp + ".crt"
+	keyFile := components.MemorystoreTLSDir + "/rotated-" + stamp + ".key"
+	script := `set -e; umask 022; rm -f "$(dirname "$3")"/rotated-*; printf '%s' "$1" > "$3"; printf '%s' "$2" > "$4"; chmod 0644 "$3" "$4"`
+	if _, err := p.installer.Kubectl(ctx, "-n", p.cfg.Cluster.Namespace, "exec", "deploy/"+spec.Server, "--",
+		"sh", "-c", script, "sh", files.Cert, files.Key, certFile, keyFile); err != nil {
+		return "", "", fmt.Errorf("write %s's new server certificate: %w", spec.Server, err)
+	}
+	return certFile, keyFile, nil
 }
 
 // byFamily is whether cluster nodes serve host clients and in-cluster

@@ -137,6 +137,7 @@ func (s *Server) AdvanceClock(d time.Duration) (time.Time, error) {
 	for _, c := range []*clusters{s.clusters, s.valkey} {
 		if c != nil {
 			go c.maintenanceDue()
+			go c.rotateDue()
 		}
 	}
 	return s.now(), nil

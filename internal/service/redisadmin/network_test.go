@@ -41,3 +41,41 @@ func TestInstanceNetwork(t *testing.T) {
 		t.Errorf("a /24: %v", err)
 	}
 }
+
+// TestRestrictedAndOverlappingRanges (#1919): the VPC's restricted ranges,
+// a range reaching out of its private block, and another instance's range
+// on the same network are refused; a chosen range skips the used ones.
+func TestRestrictedAndOverlappingRanges(t *testing.T) {
+	for _, s := range []string{"127.0.0.0/29", "169.254.10.0/29", "199.36.153.0/29", "0.0.0.0/29", "224.0.0.0/29", "10.0.0.0/7", "172.16.0.0/11"} {
+		if err := checkRange(s, 29); code(err) != codes.InvalidArgument {
+			t.Errorf("%s: %v, want INVALID_ARGUMENT", s, err)
+		}
+	}
+	for _, s := range []string{"192.88.99.0/29", "100.64.0.0/29", "240.0.0.0/29", "172.17.0.0/29"} {
+		if err := checkRange(s, 29); err != nil {
+			t.Errorf("%s: %v", s, err)
+		}
+	}
+	c := &instances{byID: map[string]*record{}}
+	net1 := "projects/p/global/networks/default"
+	a := &record{Name: "projects/p/locations/us-central1/instances/a", AuthorizedNetwork: net1, ReservedIPRange: "10.1.0.0/28"}
+	c.byID[a.Name] = a
+	b := &record{Name: "projects/p/locations/us-central1/instances/b", AuthorizedNetwork: net1, ReservedIPRange: "10.1.0.8/29"}
+	if err := c.claimRange(b, true); code(err) != codes.InvalidArgument {
+		t.Errorf("overlapping range: %v, want INVALID_ARGUMENT", err)
+	}
+	other := &record{Name: b.Name, AuthorizedNetwork: "projects/p/global/networks/vpc-2", ReservedIPRange: "10.1.0.8/29"}
+	if err := c.claimRange(other, true); err != nil {
+		t.Errorf("the same range on another network: %v", err)
+	}
+	// A chosen range that would collide moves to the next unused block.
+	d := &record{Name: "projects/p/locations/us-central1/instances/d", AuthorizedNetwork: net1}
+	d.ReservedIPRange = defaultRange(d.Name, 29)
+	c.byID["projects/p/locations/us-central1/instances/x"] = &record{Name: "projects/p/locations/us-central1/instances/x", AuthorizedNetwork: net1, ReservedIPRange: d.ReservedIPRange}
+	if err := c.claimRange(d, false); err != nil || d.ReservedIPRange == defaultRange(d.Name, 29) || checkRange(d.ReservedIPRange, 29) != nil {
+		t.Errorf("chosen range %q, %v", d.ReservedIPRange, err)
+	}
+	if err := c.claimRange(&record{Name: "n", AuthorizedNetwork: net1, ReservedIPRange: "google-managed-services-default"}, true); err != nil {
+		t.Errorf("an allocated range's name: %v", err)
+	}
+}

@@ -159,6 +159,9 @@ type clusterRecord struct {
 	// then holds, with no TransitCAKey (clusterca.go, #1907).
 	ServerCAMode string `json:"serverCaMode,omitempty"`
 	ServerCAPool string `json:"serverCaPool,omitempty"`
+	// CertsIssued is when the nodes' server certificates were last
+	// rotated, by the Memorystore clock (clustercertrotation.go, #1918).
+	CertsIssued time.Time `json:"certsIssued,omitempty"`
 	// AdminPassword is the nodes' default user's password with token auth
 	// (clusterauth.go) or IAM auth (iamauth.go): only the admin plane's;
 	// "" for none.
@@ -237,6 +240,9 @@ type clusters struct {
 	// (clusterca.go).
 	cas    ClusterCAS
 	shared map[string]sharedRecord
+	// rotating are the clusters whose certificates are being rotated
+	// (clustercertrotation.go).
+	rotating map[string]bool
 }
 
 // ClusterServer implements clusterpb.CloudRedisClusterServer.
@@ -1495,6 +1501,8 @@ func (s *ClusterServer) UpdateCluster(ctx context.Context, req *clusterpb.Update
 			return nil, checkCrossCluster(true)
 		case "labels":
 			// Set by ClusterLabels, beside the transcoder.
+		case "rotate_server_certificate", "rotateServerCertificate":
+			set["rotate_server_certificate"] = in.GetRotateServerCertificate()
 		case "authorization_mode", "authorizationMode", "transit_encryption_mode", "transitEncryptionMode":
 			if p == "transit_encryption_mode" || p == "transitEncryptionMode" {
 				return nil, apierror.InvalidArgument("transit_encryption_mode cannot be changed once a cluster is created")
@@ -1629,6 +1637,15 @@ func (s *ClusterServer) UpdateCluster(ctx context.Context, req *clusterpb.Update
 	if reshape && authChange {
 		return nil, apierror.InvalidArgument("authorization_mode is changed in an update of its own, not with shard_count or replica_count")
 	}
+	rotate := set["rotate_server_certificate"]
+	if rotate {
+		if r.ServerCAMode != clusterpb.ServerCaMode_SERVER_CA_MODE_CUSTOMER_MANAGED_CAS_CA.String() || r.TransitCA == "" {
+			return nil, errRotateNotCustomer
+		}
+		if reshape {
+			return nil, apierror.InvalidArgument("rotate_server_certificate is updated without shard_count or replica_count")
+		}
+	}
 	shards, replicas := next.ShardCount, next.ReplicaCount
 	next.ShardCount, next.ReplicaCount = r.ShardCount, r.ReplicaCount // until the nodes are
 	if err := c.save(&next); err != nil {
@@ -1636,7 +1653,7 @@ func (s *ClusterServer) UpdateCluster(ctx context.Context, req *clusterpb.Update
 	}
 	*r = next
 	op := c.newOperation(r.Name, "update")
-	if (syncACL || authChange) && !reshape {
+	if (syncACL || authChange || rotate) && !reshape {
 		// The policy's users on every node (aclpolicy.go), and the
 		// default user's password when IAM auth was turned on or off
 		// (iamauth.go), then done.
@@ -1646,7 +1663,15 @@ func (s *ClusterServer) UpdateCluster(ctx context.Context, req *clusterpb.Update
 		return s.api.launch(op, func() {
 			ctx, cancel := context.WithTimeout(c.bg, clusterWait)
 			defer cancel()
-			err := c.switchAuth(ctx, &snap, oldPassword, authChange, users, nodes)
+			var err error
+			if syncACL || authChange {
+				err = c.switchAuth(ctx, &snap, oldPassword, authChange, users, nodes)
+			}
+			if err == nil && rotate {
+				// On demand (clustercertrotation.go, #1918).
+				snap.Nodes = nodes
+				err = c.rotateCerts(ctx, &snap)
+			}
 			c.mu.Lock()
 			delete(c.busy, snap.Name)
 			out := c.render(r)

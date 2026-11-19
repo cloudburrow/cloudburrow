@@ -786,6 +786,13 @@ func (s *MemorystoreServer) UpdateInstance(ctx context.Context, req *memorystore
 			set["cross_instance_replication_config"] = true
 		case "acl_policy", "aclPolicy":
 			set["acl_policy"] = true
+		case "rotate_server_certificate", "rotateServerCertificate":
+			// Only a customer-managed CA's are rotated on demand
+			// (clustercertrotation.go, #1918), which a Valkey instance
+			// does not have here; false asks for nothing.
+			if in.GetRotateServerCertificate() {
+				set["rotate_server_certificate"] = true
+			}
 		case "authorization_mode", "authorizationMode", "transit_encryption_mode", "transitEncryptionMode", "mode",
 			"psc_auto_connections", "pscAutoConnections":
 			return nil, apierror.InvalidArgument("update_mask path %q is an immutable field of Instance", p)
@@ -803,6 +810,9 @@ func (s *MemorystoreServer) UpdateInstance(ctx context.Context, req *memorystore
 	}
 	if r.state != clusterpb.Cluster_ACTIVE {
 		return nil, apierror.FailedPrecondition("instance %s is %s: an instance is updated only when ACTIVE", r.Name, r.state)
+	}
+	if set["rotate_server_certificate"] {
+		return nil, errRotateNotCustomer
 	}
 	if r.Valkey.Migration.migrating() {
 		return nil, apierror.FailedPrecondition("instance %s is migrating: an instance is updated once FinishMigration completes", r.Name)
