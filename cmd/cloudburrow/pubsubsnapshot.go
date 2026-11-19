@@ -19,6 +19,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -361,7 +362,10 @@ func (p *pubsubSnapshotter) Import(ctx context.Context, r admin.EntryReader) err
 			// push config is not sent as one.
 			s.PushConfig = nil
 		}
-		if _, err := c.SubscriptionAdminClient.CreateSubscription(ctx, s); err != nil {
+		// Marked as a state load, so an export subscription whose table or
+		// bucket is gone comes back as saved, as GCP keeps it (#1874).
+		loadCtx := metadata.AppendToOutgoingContext(ctx, pubsubfront.StateLoadHeader, "1")
+		if _, err := c.SubscriptionAdminClient.CreateSubscription(loadCtx, s); err != nil {
 			return fmt.Errorf("create %s: %w", s.GetName(), err)
 		}
 		if _, ok := byTopic[s.GetTopic()]; !ok {

@@ -27,6 +27,7 @@ import (
 // without the policies is unaffected.
 func TestOrgPolicyCustomConstraintsKMS(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, envLoggingResourceManager, EnvResourceManager)
 	kcs := kmsClients(t, h)
 	ctx := h.Context()
 	c := orgPolicyClients(t, h)["grpc"]

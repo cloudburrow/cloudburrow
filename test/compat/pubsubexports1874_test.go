@@ -308,6 +308,7 @@ func TestPubSubCloudStorageSubscriptionWritesObjects(t *testing.T) {
 
 func TestPubSubCMEKTopic(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, envCMEKKMS, EnvKMS)
 	ps, _ := exportClients(t, h)
 	k := kmsClients(t, h)["grpc"]
 	ctx := h.Context()

@@ -234,6 +234,9 @@ const (
 	// Resource Manager for the sql shard's tests that make a folder or
 	// purge a project (#1568).
 	envSQLResourceManager = "CLOUDBURROW_TEST_SQL_RESOURCEMANAGER"
+	// Service Usage for the sql shard's gcloud privateca roots create,
+	// which has generateServiceIdentity name the CA service agent (#1834).
+	envSQLServiceUsage = "CLOUDBURROW_TEST_SQL_SERVICEUSAGE"
 	// Resource Manager for the memorystore shard's IAM auth tests, which
 	// grant a principal the connect role (#1614).
 	envMemorystoreResourceManager = "CLOUDBURROW_TEST_MEMORYSTORE_RESOURCEMANAGER"
@@ -241,6 +244,14 @@ const (
 	// compatibility tests, which grant the roles a sign-in's principal
 	// needs (#1738, #1742, #1743; #1761).
 	envFirestoreResourceManager = "CLOUDBURROW_TEST_FIRESTORE_RESOURCEMANAGER"
+	// Resource Manager, which serves the Organization Policy API, for the
+	// run shard's tests beside Cloud Run, Cloud Build and Artifact Registry
+	// (#1890, #1891, #1895) and Cloud Build's service accounts, and for the
+	// emulators shard's beside BigQuery, Bigtable and Spanner; before these
+	// names those tests asked for RESOURCEMANAGER, which only the storage
+	// and iam shards export, and ran in no shard (main run 44560144998).
+	envRunResourceManager      = "CLOUDBURROW_TEST_RUN_RESOURCEMANAGER"
+	envBigQueryResourceManager = "CLOUDBURROW_TEST_BIGQUERY_RESOURCEMANAGER"
 	// Certificate Authority Service for the sql shard's
 	// CUSTOMER_MANAGED_CAS_CA instances, whose CA pools issue their server
 	// certificates (#1834).

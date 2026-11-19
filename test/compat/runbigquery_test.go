@@ -84,8 +84,11 @@ func TestAPodDialingTheBigQueryServiceGetsTheFrontWithoutCloudRun(t *testing.T) 
 	// publishes Cloud Run's API and the rest too, and the Cloud Run tests
 	// cover that instance. (Main run 44326182935 skipped this test in the
 	// emulators shard, which has no Cloud Run, on "metadata", so it ran in
-	// no shard.)
-	withoutRun := map[string]bool{"resourcemanager": true, "onnx": true, "tfconvert": true, "localai": true, "metadata": true}
+	// no shard.) And Cloud KMS, beside Pub/Sub for the CMEK topics' keys
+	// (#1874) or Firestore for its customer-managed keys (#1881), as the
+	// emulators shard has both (main run 44560144998 skipped it there on
+	// "kms").
+	withoutRun := map[string]bool{"resourcemanager": true, "onnx": true, "tfconvert": true, "localai": true, "metadata": true, "kms": true}
 	if names, err := exec.Command("kubectl", "--kubeconfig", kubeconfig, "-n", ns, "get", "service", "cloudburrow-host",
 		"-o", "jsonpath={.spec.ports[*].name}").Output(); err == nil {
 		for _, name := range strings.Fields(string(names)) {

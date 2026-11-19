@@ -330,9 +330,11 @@ compat_shard() {
       # folder fetch (#1568); CMEK_KMS for Cloud SQL's customer-managed
       # keys too. Certificate Authority Service as SQL_PRIVATECA, for
       # CUSTOMER_MANAGED_CAS_CA's CA pools (#1834), so the privateca suite
-      # stays in its own shard.
+      # stays in its own shard. Service Usage, always served, as
+      # SQL_SERVICEUSAGE, for gcloud privateca roots create's
+      # generateServiceIdentity of the CA service agent (#1834).
       SERVICES=cloudsql,cloudsql-mysql,backupdr,storage,secretmanager,kms,privateca
-      TEST_VARS+=,MYSQL,MYSQL_PASSWORD,CLOUDSQL,SQLADMIN,BACKUPDR,CMEK_KMS,CLOUDSQL_SECRETS,NOPUBSUB_STORAGE,SQL_RESOURCEMANAGER,SQL_PRIVATECA
+      TEST_VARS+=,MYSQL,MYSQL_PASSWORD,CLOUDSQL,SQLADMIN,BACKUPDR,CMEK_KMS,CLOUDSQL_SECRETS,NOPUBSUB_STORAGE,SQL_RESOURCEMANAGER,SQL_SERVICEUSAGE,SQL_PRIVATECA
       # Cloud SQL for PostgreSQL (#701): a table with a row.
       SETUP_TESTS="TestCloudSQLRestartSetup"
       PROBE_TESTS="TestCloudSQLMySQLAcrossRestart TestCloudSQLAcrossRestart"

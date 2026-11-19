@@ -184,6 +184,7 @@ func TestOrgPolicyCustomConstraintsPubSubSchemasSnapshots(t *testing.T) {
 // Authorization on a worker pool is 501 locally, before any constraint.)
 func TestOrgPolicyCustomConstraintsRunJobsWorkerPools(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, envRunResourceManager, EnvResourceManager)
 	ctx := h.Context()
 	jc, _ := runJobClients(t, h)
 	pools, err := run.NewWorkerPoolsClient(ctx, runClientOptions(h)...)
@@ -324,9 +325,9 @@ func TestOrgPolicyCustomConstraintsServiceAccountKeyName(t *testing.T) {
 // are refused what they forbid.
 func TestGcloudOrgPoliciesCustomConstraintsSchemaJob(t *testing.T) {
 	h := New(t)
-	h.Endpoint(EnvResourceManager)
+	shardEndpoint(h, envRunResourceManager, EnvResourceManager)
+	shardEndpoint(h, "CLOUDBURROW_TEST_RUN_PUBSUB", EnvPubSub)
 	h.Endpoint(EnvMetadata)
-	h.Endpoint(EnvPubSub)
 	h.Endpoint(EnvRun)
 	ps := pubsubClient(t, h)
 	_ = ps

@@ -324,7 +324,12 @@ func TestGcloudPrivateCAKMSKeyBucketAndCMEK(t *testing.T) {
 	h := New(t)
 	// The sql shard serves Certificate Authority Service, Cloud KMS and
 	// Cloud Storage together, under its own names; the gcloud session
-	// reads the shared ones.
+	// reads the shared ones. Resource Manager too, as SQL_RESOURCEMANAGER:
+	// roots create asks its testIamPermissions, and without the shared
+	// name the session drops its override (main run 44560144998); and
+	// Service Usage as SQL_SERVICEUSAGE, which names the service agent.
+	shardEndpoint(h, envSQLResourceManager, EnvResourceManager)
+	shardEndpoint(h, envSQLServiceUsage, EnvServiceUsage)
 	shardEndpoint(h, envSQLPrivateCA, EnvPrivateCA)
 	shardEndpoint(h, envCMEKKMS, EnvKMS)
 	shardEndpoint(h, envNoPubSubStorage, EnvStorage)

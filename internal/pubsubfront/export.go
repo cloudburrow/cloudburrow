@@ -43,6 +43,7 @@ import (
 
 	"cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -121,11 +122,19 @@ func (f *Front) RunExports(ctx context.Context) {
 		f.syncExports(ctx)
 		select {
 		case <-ctx.Done():
+			// Stop every delivery and wait for each to return, so none
+			// outlives RunExports. Wait without the lock: a delivery
+			// records its state under it on the way out.
 			f.exp.mu.Lock()
+			running := make([]exportWorker, 0, len(f.exp.workers))
 			for _, w := range f.exp.workers {
 				w.cancel()
+				running = append(running, w)
 			}
 			f.exp.mu.Unlock()
+			for _, w := range running {
+				<-w.done
+			}
 			return
 		case <-t.C:
 		}
@@ -497,4 +506,27 @@ func (f *Front) withExportStateJSON(sub json.RawMessage) (json.RawMessage, bool)
 		return sub, false
 	}
 	return out, true
+}
+
+// StateLoadHeader is the gRPC metadata key `cloudburrow state load` sets on
+// the subscriptions it creates again. A saved export subscription whose
+// table or bucket is gone is restored as it was saved: on GCP such a
+// subscription is kept, its state NOT_FOUND or PERMISSION_DENIED, and only
+// a new one is refused (#1874). Every other check still applies. It grants
+// nothing a caller could not already do: the subscription is one the
+// caller could have created before the destination was deleted.
+const StateLoadHeader = "x-cloudburrow-state-load"
+
+// stateLoad reports whether ctx is a call `cloudburrow state load` made.
+func stateLoad(ctx context.Context) bool {
+	md, _ := metadata.FromIncomingContext(ctx)
+	return len(md.Get(StateLoadHeader)) > 0
+}
+
+// context is the call's context, or Background for one built without it.
+func (o *observed) context() context.Context {
+	if o.ctx == nil {
+		return context.Background()
+	}
+	return o.ctx
 }

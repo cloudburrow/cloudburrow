@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // AutoML models, AUTOML_REGRESSOR and AUTOML_CLASSIFIER (#1776,
@@ -39,9 +38,12 @@ import (
 //     RANDOM_FOREST_CLASSIFIER and DNN_CLASSIFIER, each with its
 //     documented defaults and, for the boosted trees and the network, a
 //     second trial with more capacity (max_tree_depth 10 and 50
-//     iterations; hidden_units [64, 32]), as the budget allows: trials
-//     stop once the elapsed time passes a thousandth of BUDGET_HOURS (3.6
-//     s an hour), after the first; ties keep the earlier trial;
+//     iterations; hidden_units [64, 32]); every trial runs, whatever
+//     BUDGET_HOURS (at least one hour, ample for these six), so the same
+//     data makes the same model on any machine: a cut at a share of the
+//     budget in wall-clock time chose by the machine's speed (main,
+//     Landing 153: one trial under -race on macOS); ties keep the earlier
+//     trial;
 //   - each trial trains on the TRAIN rows and is scored by
 //     OPTIMIZATION_OBJECTIVE on the VALIDATE rows; the best is trained
 //     again on TRAIN and VALIDATE, and evaluated on TEST, which ML.EVALUATE
@@ -308,14 +310,9 @@ func trainAutoML(opts mlOptions, cols []mlColumn, rows [][]*string, fp fingerpri
 		return t, mlInvalid("No VALIDATE rows after the data split")
 	}
 	info := &automlOptions{Type: opts.ModelType, BudgetHours: opts.BudgetHours, Objective: opts.Objective, ObjValue: opts.ObjValue}
-	budget := time.Duration(opts.BudgetHours * float64(time.Hour) / 1000)
-	began := time.Now()
 	best, bestScore := -1, math.Inf(1)
 	cands := automlCandidates(opts)
 	for k, c := range cands {
-		if k > 0 && time.Since(began) > budget {
-			break
-		}
 		tr, fe := trainModel(c.opts, tcols, trialRows, fp)
 		if fe != nil {
 			continue // a trainer that refuses this data is not a candidate

@@ -805,7 +805,7 @@ func (f *Front) handle(_ any, ss grpc.ServerStream) (err error) {
 	if err != nil {
 		return err
 	}
-	call := &observed{f: f, method: method}
+	call := &observed{f: f, method: method, ctx: ctx}
 	defer call.finish()
 
 	reqErr := make(chan error, 1)
@@ -848,7 +848,7 @@ func (f *Front) handleUpdate(ctx context.Context, ss grpc.ServerStream, method s
 			return err
 		}
 	}
-	call := &observed{f: f, method: method}
+	call := &observed{f: f, method: method, ctx: ctx}
 	out, err := call.request(in)
 	if err != nil {
 		return err
@@ -944,6 +944,9 @@ func pumpResponses(ss grpc.ServerStream, cs grpc.ClientStream, rewrite func(fram
 type observed struct {
 	f      *Front
 	method string
+	// ctx is the call's: its metadata says whether `cloudburrow state
+	// load` made it (StateLoadHeader).
+	ctx context.Context
 	// sub is the subscription the call names, once its first request is read.
 	sub string
 	// streaming is set once a StreamingPull has been counted as open.
@@ -1106,7 +1109,7 @@ func (o *observed) request(fr frame) (frame, error) {
 		if err := CheckLabels(s.GetLabels()); err != nil {
 			return nil, err
 		}
-		if err := o.f.checkExport(context.Background(), &s); err != nil {
+		if err := o.f.checkExport(o.context(), &s); err != nil {
 			return nil, err
 		}
 		o.sub = s.GetName()
