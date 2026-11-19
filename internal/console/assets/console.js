@@ -236,13 +236,22 @@ const ROUTES = [
 
   { path: "/secrets", service: "secrets", title: "Secret Manager", navTitle: "Secrets", kind: "Secret",
     section: "Security and identity" },
-  { path: "/kms/keyrings", service: "kms", title: "Key rings", kind: "Key ring", section: "Security and identity",
-    product: "kms", productTitle: "Key Management" },
+  // Key Management (#1851), in Google's menu order: Key management (the key
+  // rings), Autokey, EKM connections, KMS config, Key inventory; then
+  // CloudBurrow's Single-tenant HSM, whose instances Google manages with
+  // gcloud only.
+  { path: "/kms/keyrings", service: "kms", title: "Key management", navTitle: "Key management", kind: "Key ring",
+    section: "Security and identity", product: "kms", productTitle: "Key Management" },
   // Cloud KMS EKM connections and Autokey (#1452): stored connections, and
   // the Autokey configurations a project resolves through, with its key handles.
+  { path: "/kms/autokey", service: "kms-autokey", icon: "kms", title: "Autokey", kind: "Key handle", section: "Security and identity",
+    product: "kms", productTitle: "Key Management" },
   { path: "/kms/ekm", service: "kms-ekm", icon: "kms", title: "EKM connections", kind: "EKM connection", section: "Security and identity",
     product: "kms", productTitle: "Key Management" },
-  { path: "/kms/autokey", service: "kms-autokey", icon: "kms", title: "Autokey", kind: "Key handle", section: "Security and identity",
+  { path: "/kms/config", title: "KMS config", service: null, requires: "kms", screen: "unavailable", icon: "kms",
+    section: "Security and identity", product: "kms", productTitle: "Key Management",
+    unavailable: "KMS config holds a project's and an organization's Cloud KMS settings, such as the default Key Access Justifications policy for new keys, which Google serves through an API CloudBurrow does not run. Autokey's configuration is on the Autokey page, the default EKM connection on EKM connections, and a key's own settings on its page." },
+  { path: "/kms/inventory", service: "kms-inventory", icon: "kms", title: "Key inventory", section: "Security and identity",
     product: "kms", productTitle: "Key Management" },
   { path: "/kms/hsm", service: "kms-hsm", icon: "kms", title: "Single-tenant HSM", kind: "Single-tenant HSM instance", section: "Security and identity",
     product: "kms", productTitle: "Key Management" },
@@ -2560,7 +2569,8 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   // sent with an empty path: Roles' Create role from selection.
   const selectActions = data.selectActions || [];
   const selectable = Boolean(opts.rowControls && caps.delete) || selectActions.length > 0;
-  const canSelect = (item) => !selectActions.length || !(opts.pagePath || []).length || Boolean(item.object);
+  const canSelect = (item) => !selectActions.length || !(opts.pagePath || []).length || Boolean(item.object) ||
+    Boolean(item.selectable);
 
   // All of the table's state lives here, so a refresh can put it back.
   let sortColumn = null;
@@ -3757,8 +3767,11 @@ async function renderDetail(view, route, resourcePath) {
     navigate(route.path);
   };
   const leaves = (a) => a.leaves || (a.destructive && a.id.startsWith("delete") && segments.length > 1);
+  // An action a tab's table offers on its checked rows is that table's
+  // button, not the header's (#1851): a key's Disable over its versions.
+  const onRows = new Set(sections.flatMap((s) => ((s.listing || {}).selectActions || []).map((a) => a.id)));
   const pageActions = [
-    ...(data.actions || []).map((a) =>
+    ...(data.actions || []).filter((a) => !onRows.has(a.id)).map((a) =>
       el("button", {
         class: "secondary" + (a.destructive ? " danger" : ""),
         text: a.label,
@@ -3820,6 +3833,17 @@ async function renderDetail(view, route, resourcePath) {
   setChildren(view, ...header, panel);
   drawPanel();
   announce(`${data.title || name} opened`);
+  // An address naming one of the page's actions opens it once (#1851):
+  // Create key ring goes on to the ring's Create key. The action is taken
+  // off the address, so a reload or Back does not open it again.
+  const asked = new URLSearchParams(location.search).get("action");
+  const opened = asked && (data.actions || []).find((a) => a.id === asked);
+  if (asked) {
+    const here = new URL(location.href);
+    here.searchParams.delete("action");
+    history.replaceState(history.state, "", here.pathname + here.search);
+  }
+  if (opened) runAction(route, segments, opened, reloadPage, NO_ROW, data.title || null);
 }
 
 // openActionForm collects an action's inputs and then performs it.
@@ -6257,7 +6281,13 @@ async function renderCreatePage(view, route) {
       const name = await submitCreate(target, caps.create, fields.values(), (o) => { once = o; });
       notify(`Created ${name}`);
       announce(`Created ${name}`);
-      navigate(target.path);
+      // A create that goes on to an action of what it made (#1851): Create
+      // key ring opens the ring's page with Create key.
+      if (caps.create.then && name) {
+        const next = new URL(detailHref(target, [name]), location.origin);
+        next.searchParams.set("action", caps.create.then);
+        navigate(next.pathname + next.search);
+      } else navigate(target.path);
       if (once) showOneTime(once);
     } catch (err) {
       setBusy(primary, false);
