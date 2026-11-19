@@ -44,7 +44,10 @@ func TestRecognizeRefusals(t *testing.T) {
 		{recognizePath, `{"config": {"model": "chirp", "languageCodes": ["en-US"], "autoDecodingConfig": {}}, "uri": "gs://b/o"}`, 501},
 		{recognizePath, `{"config": {"model": "telephony", "languageCodes": ["en-US"], "autoDecodingConfig": {}}, "content": ""}`, 501},
 		{recognizePath, `{"config": {"model": "chirp", "languageCodes": ["en-US"], "autoDecodingConfig": {}}, "content": "` +
-			base64.StdEncoding.EncodeToString([]byte("fLaC\x00\x00")) + `"}`, 501},
+			base64.StdEncoding.EncodeToString([]byte("OggS\x00\x02")) + `"}`, 501},
+		// FLAC is decoded since #1799: a stream that ends early is bad data.
+		{recognizePath, `{"config": {"model": "chirp", "languageCodes": ["en-US"], "autoDecodingConfig": {}}, "content": "` +
+			base64.StdEncoding.EncodeToString([]byte("fLaC\x00\x00")) + `"}`, 400},
 		{recognizePath, `{"config": {"model": "chirp", "languageCodes": ["en-US"], "autoDecodingConfig": {}}, "content": "` +
 			base64.StdEncoding.EncodeToString([]byte("not audio")) + `"}`, 400},
 		// A valid request with no model installed.

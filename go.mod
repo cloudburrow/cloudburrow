@@ -34,6 +34,7 @@ require (
 	cloud.google.com/go/securesourcemanager v1.12.0
 	cloud.google.com/go/security v1.29.1
 	cloud.google.com/go/spanner v1.96.1
+	cloud.google.com/go/speech v1.36.0
 	cloud.google.com/go/storage v1.70.0
 	github.com/Eyevinn/mp4ff v0.63.0
 	github.com/apache/arrow-go/v18 v18.8.0

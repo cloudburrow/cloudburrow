@@ -5819,8 +5819,8 @@
     "Key": "vertexai",
     "Title": "Vertex AI PredictionService",
     "counts": {
-      "Unimplemented": 34,
-      "Verified": 32
+      "Unimplemented": 50,
+      "Verified": 39
     },
     "rows": [
       {
@@ -6242,6 +6242,135 @@
         "method": "google.cloud.documentai.v1.DocumentProcessorService/UndeployProcessorVersion",
         "status": "Unimplemented",
         "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.speech.v2.Speech/BatchRecognize",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.speech.v2.Speech/CreateCustomClass",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.speech.v2.Speech/CreatePhraseSet",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.speech.v2.Speech/CreateRecognizer",
+        "status": "Verified",
+        "tests": [
+          "test/compat/speech_test.go:75 TestSpeechRecognizers"
+        ]
+      },
+      {
+        "method": "google.cloud.speech.v2.Speech/DeleteCustomClass",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.speech.v2.Speech/DeletePhraseSet",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.speech.v2.Speech/DeleteRecognizer",
+        "status": "Verified",
+        "tests": [
+          "test/compat/speech_test.go:75 TestSpeechRecognizers"
+        ]
+      },
+      {
+        "method": "google.cloud.speech.v2.Speech/GetConfig",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.speech.v2.Speech/GetCustomClass",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.speech.v2.Speech/GetPhraseSet",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.speech.v2.Speech/GetRecognizer",
+        "status": "Verified",
+        "tests": [
+          "test/compat/speech_test.go:75 TestSpeechRecognizers"
+        ]
+      },
+      {
+        "method": "google.cloud.speech.v2.Speech/ListCustomClasses",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.speech.v2.Speech/ListPhraseSets",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.speech.v2.Speech/ListRecognizers",
+        "status": "Verified",
+        "tests": [
+          "test/compat/speech_test.go:75 TestSpeechRecognizers"
+        ]
+      },
+      {
+        "method": "google.cloud.speech.v2.Speech/Recognize",
+        "status": "Verified",
+        "tests": [
+          "test/compat/speech_test.go:75 TestSpeechRecognizers"
+        ]
+      },
+      {
+        "method": "google.cloud.speech.v2.Speech/StreamingRecognize",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.speech.v2.Speech/UndeleteCustomClass",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.speech.v2.Speech/UndeletePhraseSet",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.speech.v2.Speech/UndeleteRecognizer",
+        "status": "Verified",
+        "tests": [
+          "test/compat/speech_test.go:75 TestSpeechRecognizers"
+        ]
+      },
+      {
+        "method": "google.cloud.speech.v2.Speech/UpdateConfig",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.speech.v2.Speech/UpdateCustomClass",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.speech.v2.Speech/UpdatePhraseSet",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.speech.v2.Speech/UpdateRecognizer",
+        "status": "Verified",
+        "tests": [
+          "test/compat/speech_test.go:75 TestSpeechRecognizers"
+        ]
       }
     ]
   },
@@ -11324,10 +11453,10 @@
           "test/compat/bigquerymlremoteoptions_test.go:28 TestBigQueryMLRemoteGenerationOptions",
           "test/compat/bigquerymlservice_test.go:198 TestBigQueryMLAnnotateImageLabels",
           "test/compat/bigquerymlservice_test.go:249 TestBigQueryMLAnnotateImageDetections",
-          "test/compat/bigquerymlservice_test.go:308 TestBigQueryMLTranscribe",
+          "test/compat/bigquerymlservice_test.go:312 TestBigQueryMLTranscribe",
           "test/compat/bigquerymlservice_test.go:35 TestBigQueryMLAnnotateImage",
-          "test/compat/bigquerymlservice_test.go:453 TestBigQueryMLTranslate",
-          "test/compat/bigquerymlservice_test.go:635 TestBigQueryMLUnderstandText",
+          "test/compat/bigquerymlservice_test.go:473 TestBigQueryMLTranslate",
+          "test/compat/bigquerymlservice_test.go:655 TestBigQueryMLUnderstandText",
           "test/compat/bigquerymltensorflow_test.go:41 TestBigQueryMLImportedTensorFlowModel",
           "test/compat/bigquerymltflite_test.go:35 TestBigQueryMLImportedTFLiteModel",
           "test/compat/bigquerymltflitegaps_test.go:29 TestBigQueryMLImportedTFLiteGaps",
@@ -11458,7 +11587,7 @@
           "test/compat/bigquerymlpreprocess_test.go:75 TestBigQueryMLTransformPreprocess",
           "test/compat/bigquerymlremote_test.go:94 TestBigQueryMLRemoteGenerateText",
           "test/compat/bigquerymlservice_test.go:35 TestBigQueryMLAnnotateImage",
-          "test/compat/bigquerymlservice_test.go:635 TestBigQueryMLUnderstandText",
+          "test/compat/bigquerymlservice_test.go:655 TestBigQueryMLUnderstandText",
           "test/compat/bigquerymltensorflow_test.go:41 TestBigQueryMLImportedTensorFlowModel",
           "test/compat/bigquerymltflite_test.go:35 TestBigQueryMLImportedTFLiteModel",
           "test/compat/bigquerymltflitegaps_test.go:29 TestBigQueryMLImportedTFLiteGaps",

@@ -12,6 +12,7 @@ import (
 	betapb "cloud.google.com/go/aiplatform/apiv1beta1/aiplatformpb"
 	"cloud.google.com/go/documentai/apiv1/documentaipb"
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
+	"cloud.google.com/go/speech/apiv2/speechpb"
 	"google.golang.org/genproto/googleapis/api/annotations"
 	"google.golang.org/genproto/googleapis/api/httpbody"
 	"google.golang.org/grpc"
@@ -532,13 +533,15 @@ func opRule(pattern string) *annotations.HttpRule {
 // restTranscoder serves the JSON surface of the registered services.
 func (s *Server) restTranscoder() *rest.Transcoder {
 	s.restOnce.Do(func() {
-		t := &rest.Transcoder{Packages: []string{"google.cloud.aiplatform.v1", "google.cloud.documentai.v1"}, Mixins: []*annotations.HttpRule{
+		t := &rest.Transcoder{Packages: []string{"google.cloud.aiplatform.v1", "google.cloud.documentai.v1", "google.cloud.speech.v2"}, Mixins: []*annotations.HttpRule{
+			opRule("/v2/{name=projects/*/locations/*/operations/*}"),
 			opRule("/v1/{name=projects/*/locations/*/operations/*}"),
 			opRule("/v1/{name=projects/*/locations/*/endpoints/*/operations/*}"),
 			opRule("/v1/{name=projects/*/locations/*/models/*/operations/*}"),
 		}}
 		s.registerModelGarden(t)
 		documentaipb.RegisterDocumentProcessorServiceServer(t, &documentAIService{s: s}) // documentai.go, #1799
+		speechpb.RegisterSpeechServer(t, &speechService{s: s})                           // speechrecognizers.go, #1799
 		longrunningpb.RegisterOperationsServer(t, &operations{s: s})
 		s.rest = t
 	})
@@ -555,7 +558,8 @@ func documentAIPath(p string) bool {
 // serveREST hands a request the routes above did not take to the transcoder,
 // or answers the not-found body when Model Garden is not served.
 func (s *Server) serveREST(w http.ResponseWriter, r *http.Request, body []byte) {
-	if !strings.HasPrefix(r.URL.Path, "/v1/") || (s.modelGarden() == nil && !documentAIPath(r.URL.Path)) {
+	v2 := strings.HasPrefix(r.URL.Path, "/v2/") && (strings.Contains(r.URL.Path, "/recognizers") || strings.Contains(r.URL.Path, "/operations/"))
+	if !v2 && (!strings.HasPrefix(r.URL.Path, "/v1/") || (s.modelGarden() == nil && !documentAIPath(r.URL.Path))) {
 		s.notFound(w, r)
 		return
 	}

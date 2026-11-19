@@ -752,10 +752,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// Model Garden's Hugging Face downloads (#1840), shared by the console
 	// and ModelGardenService.Deploy, which serves them on that endpoint.
 	hfModels, garden := modelGardenFor(cfg, localAISrv)
-	// Document AI's processors (#1799), which ML.PROCESS_DOCUMENT names,
-	// are kept with the instance's state.
+	// Document AI's processors and Speech-to-Text's recognizers (#1799),
+	// which ML.PROCESS_DOCUMENT and ML.TRANSCRIBE name, are kept with the
+	// instance's state.
 	if localAISrv != nil {
 		localAISrv.SetDocumentAIState(filepath.Join(cfg.StateDir, "documentai", "processors.json"))
+		localAISrv.SetSpeechState(filepath.Join(cfg.StateDir, "speech", "recognizers.json"))
 	}
 	if garden != nil {
 		defer garden.Close()

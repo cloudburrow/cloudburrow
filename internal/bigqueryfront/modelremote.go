@@ -81,6 +81,9 @@ type remoteModel struct {
 	// Processor is a CLOUD_AI_DOCUMENT_V1 model's Document AI processor,
 	// or processor version, by its resource name (#1799).
 	Processor string `json:"documentProcessor,omitempty"`
+	// Recognizer is a CLOUD_AI_SPEECH_TO_TEXT_V2 model's Speech-to-Text
+	// recognizer, by its resource name (#1799); empty for the default one.
+	Recognizer string `json:"speechRecognizer,omitempty"`
 }
 
 // remoteDDL is a CREATE MODEL … REMOTE WITH CONNECTION's parts.
@@ -92,6 +95,8 @@ type remoteDDL struct {
 	serviceType string
 	// processor is DOCUMENT_PROCESSOR (modelprocessdocument.go, #1799).
 	processor string
+	// recognizer is SPEECH_RECOGNIZER (modeltranscribe.go, #1799).
+	recognizer string
 }
 
 // parseRemote reads REMOTE WITH CONNECTION {DEFAULT | name} OPTIONS(...)
@@ -158,11 +163,12 @@ func parseRemote(stmt []token, i int, d *modelDDL) (int, string) {
 			}
 			rd.processor = v
 		case "SPEECH_RECOGNIZER":
-			// CLOUD_AI_SPEECH_TO_TEXT_V2's (#1799): CloudBurrow serves no
-			// Speech-to-Text API, so no recognizer exists to name.
-			return 501, "Not implemented here: the SPEECH_RECOGNIZER option of a remote model: CloudBurrow serves no Speech-to-Text " +
-				"API, so no recognizer can exist for it to name; create the model without it and pass ML.TRANSCRIBE a " +
-				"recognition_config, which configures the default recognizer (#1799). Nothing was run."
+			// CLOUD_AI_SPEECH_TO_TEXT_V2's recognizer (modeltranscribe.go, #1799).
+			v, ok := unquoteString(opts[k+2].text)
+			if opts[k+2].kind != tokString || !ok || strings.TrimSpace(v) == "" {
+				return 400, "The SPEECH_RECOGNIZER option of a remote model must be a non-empty string literal"
+			}
+			rd.recognizer = v
 		case "MAX_BATCHING_ROWS", "PROMPT_COL", "INPUT_LABEL_COLS",
 			"MODEL_TYPE", "AI_SERVICE_TYPE":
 			return 501, "Not implemented here: the " + name + " option of a remote model: CloudBurrow's remote models are LLM " +
@@ -183,6 +189,9 @@ func parseRemote(stmt []token, i int, d *modelDDL) (int, string) {
 	}
 	if rd.processor != "" && rd.serviceType != "CLOUD_AI_DOCUMENT_V1" {
 		return 400, "The DOCUMENT_PROCESSOR option can only be used with REMOTE_SERVICE_TYPE CLOUD_AI_DOCUMENT_V1"
+	}
+	if rd.recognizer != "" && rd.serviceType != "CLOUD_AI_SPEECH_TO_TEXT_V2" {
+		return 400, "The SPEECH_RECOGNIZER option can only be used with REMOTE_SERVICE_TYPE CLOUD_AI_SPEECH_TO_TEXT_V2"
 	}
 	if rd.processor == "" && rd.serviceType == "CLOUD_AI_DOCUMENT_V1" {
 		return 400, "A remote model over the Document AI API requires the DOCUMENT_PROCESSOR option"
@@ -272,6 +281,12 @@ func (f front) createRemote(ctx context.Context, d modelDDL, project, loc string
 				return nil, code, msg
 			}
 			rm.Processor = name
+		}
+		if rd.recognizer != "" {
+			if code, msg := f.speechRecognizer(ctx, rd.recognizer); code != 0 { // modeltranscribe.go
+				return nil, code, msg
+			}
+			rm.Recognizer = rd.recognizer
 		}
 		return rm, 0, ""
 	}

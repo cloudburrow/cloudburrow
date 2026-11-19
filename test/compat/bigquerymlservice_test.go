@@ -300,7 +300,11 @@ func TestBigQueryMLAnnotateImageDetections(t *testing.T) {
 // the same speech as a FLAC file (decoded locally since #1799) answers the
 // same words; an Ogg Opus file (no local decoder) and a text file are their
 // rows' errors.
-// SPEECH_RECOGNIZER is 501 at CREATE MODEL; a missing recognition_config, a
+// A model with SPEECH_RECOGNIZER, a recognizer made with the official
+// cloud.google.com/go/speech client on the local endpoint, transcribes with
+// no recognition_config (the recognizer's chirp and word offsets apply); a
+// recognizer that does not exist is refused at CREATE MODEL, as is the
+// option on another service type. A missing recognition_config, a
 // model other than chirp and a config option with no local equivalent
 // (profanity_filter, 501) are refused before anything is read.
 //
@@ -372,9 +376,18 @@ func TestBigQueryMLTranscribe(t *testing.T) {
 		t.Fatalf("CREATE EXTERNAL TABLE: %v", err)
 	}
 	if err := run(fmt.Sprintf("CREATE MODEL `%s.refused` REMOTE WITH CONNECTION `%s` OPTIONS(REMOTE_SERVICE_TYPE = 'CLOUD_AI_SPEECH_TO_TEXT_V2', "+
-		"SPEECH_RECOGNIZER = 'projects/p/locations/us/recognizers/r')", ds, conn)); err == nil || !strings.Contains(err.Error(), "Not implemented here") ||
-		!strings.Contains(err.Error(), "SPEECH_RECOGNIZER") {
-		t.Errorf("SPEECH_RECOGNIZER: %v", err)
+		"SPEECH_RECOGNIZER = 'projects/%s/locations/us/recognizers/none')", ds, conn, h.Project())); err == nil || !strings.Contains(err.Error(), "doesn't exist") {
+		t.Errorf("SPEECH_RECOGNIZER of no recognizer: %v", err)
+	}
+	if err := run(fmt.Sprintf("CREATE MODEL `%s.refused` REMOTE WITH CONNECTION `%s` OPTIONS(REMOTE_SERVICE_TYPE = 'CLOUD_AI_TRANSLATE_V3', "+
+		"SPEECH_RECOGNIZER = 'projects/%s/locations/us/recognizers/none')", ds, conn, h.Project())); err == nil || !strings.Contains(err.Error(), "CLOUD_AI_SPEECH_TO_TEXT_V2") {
+		t.Errorf("SPEECH_RECOGNIZER on a translation model: %v", err)
+	}
+	sg, _ := speechClients(t, h)
+	rec := createRecognizer(t, h, sg, "projects/"+h.Project()+"/locations/us", "bqml-jfk")
+	if err := run(fmt.Sprintf("CREATE MODEL `%s.speech_rec` REMOTE WITH CONNECTION `%s` OPTIONS(REMOTE_SERVICE_TYPE = 'CLOUD_AI_SPEECH_TO_TEXT_V2', "+
+		"SPEECH_RECOGNIZER = '%s')", ds, conn, rec.GetName())); err != nil {
+		t.Fatalf("CREATE MODEL with SPEECH_RECOGNIZER: %v", err)
 	}
 	if err := run(fmt.Sprintf("CREATE MODEL `%s.speech` REMOTE WITH CONNECTION `%s` OPTIONS(REMOTE_SERVICE_TYPE = 'CLOUD_AI_SPEECH_TO_TEXT_V2')", ds, conn)); err != nil {
 		t.Fatalf("CREATE MODEL CLOUD_AI_SPEECH_TO_TEXT_V2: %v", err)
@@ -415,6 +428,13 @@ func TestBigQueryMLTranscribe(t *testing.T) {
 	}
 	if status, _ := notes["status"].(string); !strings.Contains(status, "INVALID_ARGUMENT") || notes["transcripts"] != nil {
 		t.Errorf("text row: %v", notes)
+	}
+
+	recRows := mlQuery(t, h, c, fmt.Sprintf("SELECT uri, transcripts, ml_transcribe_status AS status, "+
+		"LAX_INT64(ml_transcribe_result.results[0].alternatives[0].words[1].start_offset.nanos) AS word_nanos "+
+		"FROM ML.TRANSCRIBE(MODEL `%s.speech_rec`, TABLE `%s.audio`) WHERE uri LIKE '%%.wav'", ds, ds))
+	if len(recRows) != 1 || recRows[0]["status"] != "" || recRows[0]["transcripts"] != text || recRows[0]["word_nanos"] == nil {
+		t.Errorf("ML.TRANSCRIBE with the recognizer: %v", recRows)
 	}
 
 	for cfg, want := range map[string]string{

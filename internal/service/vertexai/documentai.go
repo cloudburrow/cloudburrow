@@ -73,8 +73,8 @@ import (
 //     paragraphs of at most chunk_size words, 500 by default, with
 //     sourceBlockIds and pageSpan).
 //
-// UNVERIFIED (the references define the fields, not these values, re-read
-// 2026-11-19): text anchors count Unicode code points (as the client
+// UNVERIFIED (re-read 2026-11-19: the references define the fields, not
+// these values): text anchors count Unicode code points (as the client
 // samples slice Document.text); the layout parser's block types (Google's
 // model also finds headings, lists and tables; here every block is a
 // paragraph) and its default chunk size; the default processor version IDs;

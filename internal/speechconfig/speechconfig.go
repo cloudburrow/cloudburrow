@@ -94,6 +94,10 @@ func whisperLanguage(code string) string {
 
 // camelKeys rewrites a JSON value's snake_case keys as lowerCamelCase, as
 // protobuf's JSON parser accepts both.
+// CamelKeys rewrites a decoded JSON value's snake_case keys as protojson's
+// lowerCamelCase, so configs written either way compare and merge.
+func CamelKeys(v any) any { return camelKeys(v) }
+
 func camelKeys(v any) any {
 	switch x := v.(type) {
 	case map[string]any:

@@ -1744,6 +1744,18 @@ var parityRows = []parityRow{
 		Screen:  "/agent-platform/endpoints", Offers: "Endpoints' Test your model: Predict sends Model Garden's prompt instance (or TEI's " +
 			"inputs) and shows the prediction; Chat completion sends the OpenAI chat body ChatCompletions relays and shows the reply",
 		Tests: []string{"TestModelGardenDeploysADownloadedHuggingFaceModel", "TestModelGardenDeploysHuggingFaceModels"}},
+	// Document AI's processors and Speech-to-Text's recognizers (#1799),
+	// which BigQuery ML's ML.PROCESS_DOCUMENT and ML.TRANSCRIBE name.
+	{Resource: "Document AI: processors", Service: "vertexai",
+		Methods: []string{"DocumentProcessorService/FetchProcessorTypes", "DocumentProcessorService/ListProcessorTypes",
+			"DocumentProcessorService/GetProcessorType", "DocumentProcessorService/CreateProcessor", "DocumentProcessorService/GetProcessor",
+			"DocumentProcessorService/ListProcessors", "DocumentProcessorService/EnableProcessor", "DocumentProcessorService/DisableProcessor",
+			"DocumentProcessorService/DeleteProcessor", "DocumentProcessorService/ProcessDocument"},
+		Issue: 1930},
+	{Resource: "Speech-to-Text: recognizers", Service: "vertexai",
+		Methods: []string{"Speech/CreateRecognizer", "Speech/GetRecognizer", "Speech/ListRecognizers", "Speech/UpdateRecognizer",
+			"Speech/DeleteRecognizer", "Speech/UndeleteRecognizer", "Speech/Recognize"},
+		Issue: 1930},
 	{Resource: "Starting the instance",
 		Commands: []string{"up"},
 		Excluded: "starts the process that serves the console, so the console cannot exist before it"},
