@@ -58,22 +58,22 @@ func seedKeys() []*datastore.Key {
 	return []*datastore.Key{datastore.NameKey("Task", "t1", nil), datastore.NameKey("Task", "t2", nil), k3, datastore.NameKey("Note", "n1", nil)}
 }
 
-// entityNames is "namespace/Kind/name" of each of seedKeys the database
-// holds, sorted, read by Lookup: the emulator's queries answer every
-// database's entities, and its lookups the named database's alone.
+// entityNames is "namespace/Kind/name" of each of seedKeys' kinds the
+// database holds, sorted, read by queries, which see the named database
+// alone (#1885), in each of seedKeys' namespaces.
 func entityNames(t *testing.T, ctx context.Context, c *datastore.Client) []string {
 	t.Helper()
 	var out []string
-	for _, k := range seedKeys() {
-		var e dsTask
-		err := c.Get(ctx, k, &e)
-		if err == datastore.ErrNoSuchEntity {
-			continue
+	for _, ns := range []string{"", "tenant"} {
+		for _, kind := range []string{"Note", "Task"} {
+			keys, err := c.GetAll(ctx, datastore.NewQuery(kind).Namespace(ns).KeysOnly(), nil)
+			if err != nil {
+				t.Fatalf("query %s/%s: %v", ns, kind, err)
+			}
+			for _, k := range keys {
+				out = append(out, k.Namespace+"/"+k.Kind+"/"+k.Name)
+			}
 		}
-		if err != nil {
-			t.Fatalf("get %v: %v", k, err)
-		}
-		out = append(out, k.Namespace+"/"+k.Kind+"/"+k.Name)
 	}
 	sort.Strings(out)
 	return out

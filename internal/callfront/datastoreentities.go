@@ -107,15 +107,7 @@ func (d *datastoreDatabases) queryAll(ctx context.Context, project, dbID, ns, ki
 		}
 		batch := resp.GetBatch()
 		for _, r := range batch.GetEntityResults() {
-			// The emulator's queries answer every database's entities
-			// (measured: a kind query in one named database returns
-			// another's), so those of other databases are dropped
-			// by their keys, which name their database (#1885). The
-			// metadata kinds' keys name none; a namespace of another
-			// database only costs a query that finds nothing.
-			if strings.HasPrefix(kind, "__") || r.GetEntity().GetKey().GetPartitionId().GetDatabaseId() == dbID {
-				out = append(out, r.GetEntity())
-			}
+			out = append(out, r.GetEntity())
 		}
 		if batch.GetMoreResults() != pb.QueryResultBatch_NOT_FINISHED || len(batch.GetEntityResults()) == 0 {
 			return out, nil

@@ -20,6 +20,7 @@ import (
 	"google.golang.org/protobuf/encoding/protowire"
 
 	"github.com/cloudburrow/cloudburrow/internal/frontstate"
+	"github.com/cloudburrow/cloudburrow/internal/queryfront"
 )
 
 // The named Datastore databases calls name (#1550). The Datastore emulator
@@ -74,7 +75,9 @@ func (d *datastoreDatabases) client() (pb.DatastoreClient, error) {
 	if d.err != nil {
 		return nil, d.err
 	}
-	return pb.NewDatastoreClient(d.conn), nil
+	// Each named database is kept in an emulator project of its own
+	// (#1885), as the calls the front passes keep it.
+	return queryfront.DatabasesClient(pb.NewDatastoreClient(d.conn)), nil
 }
 
 // namedDatabase splits "projects/p/databases/d" for a named d.

@@ -33,6 +33,20 @@ type Datastore struct {
 	grpc *grpc.Server
 	// client overrides the emulator's client (tests).
 	client pb.DatastoreClient
+	// databases: each named database is kept in its own emulator project
+	// (databases.go, #1885), and the front answers every call naming one.
+	databases bool
+	// sawDatabase is told each named database a call the front answers
+	// names, "projects/p/databases/d".
+	sawDatabase func(resource string)
+}
+
+// SeparateDatabases has the front answer every Datastore call naming a
+// named database, kept in an emulator project of its own (#1885); saw,
+// if not nil, is told each such database ("projects/p/databases/d").
+// Call it before the front serves.
+func (d *Datastore) SeparateDatabases(saw func(resource string)) {
+	d.databases, d.sawDatabase = true, saw
 }
 
 // NewDatastore returns the front for the Datastore emulator at emulator
@@ -57,6 +71,9 @@ func (d *Datastore) Stop(ctx context.Context) error { return grpchttp.Stop(ctx, 
 // Claims reports whether r is a RunAggregationQuery call, or a RunQuery
 // call with explain_options (explain.go), over gRPC or REST.
 func (d *Datastore) Claims(r *http.Request) bool {
+	if d.databases && namesDatabase(r) != "" {
+		return true
+	}
 	if isGRPC(r) {
 		return r.URL.Path == datastoreAggregation || (r.URL.Path == datastoreRunQuery && asksExplain(r))
 	}
@@ -69,7 +86,16 @@ func (d *Datastore) Claims(r *http.Request) bool {
 // ServeHTTP answers a call Claims claimed.
 func (d *Datastore) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if isGRPC(r) {
+		if d.databases && d.sawDatabase != nil {
+			if res := namesDatabase(r); res != "" {
+				d.sawDatabase(res)
+			}
+		}
 		d.grpc.ServeHTTP(w, r)
+		return
+	}
+	if d.databases && namesDatabase(r) != "" {
+		d.serveDatabaseREST(w, r)
 		return
 	}
 	if datastoreRunQueryREST.MatchString(r.URL.Path) {
@@ -87,14 +113,18 @@ func (d *Datastore) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d *Datastore) emulator() (pb.DatastoreClient, error) {
-	if d.client != nil {
-		return d.client, nil
+	c := d.client
+	if c == nil {
+		conn, err := d.up.get()
+		if err != nil {
+			return nil, err
+		}
+		c = pb.NewDatastoreClient(conn)
 	}
-	conn, err := d.up.get()
-	if err != nil {
-		return nil, err
+	if d.databases {
+		c = DatabasesClient(c)
 	}
-	return pb.NewDatastoreClient(conn), nil
+	return c, nil
 }
 
 // RunAggregationQuery runs the nested query through the emulator and

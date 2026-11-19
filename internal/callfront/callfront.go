@@ -332,14 +332,23 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// other intercept or the emulator sees it.
 		icpts = append(icpts, newDatastoreGate(*firestoreAdminAddr))
 	}
-	switch *queries {
-	case "datastore":
-		icpts = append(icpts, queryfront.NewDatastore(*upstream))
-	case "firestore":
+	var dbs *datastoreDatabases
+	if *datastoreDBs {
+		dbs = newDatastoreDatabases(*upstream, logger.Printf)
+	}
+	switch {
+	case *queries == "datastore" || (*datastoreDBs && *queries == ""):
+		qd := queryfront.NewDatastore(*upstream)
+		if dbs != nil {
+			// Each named database in an emulator project of its own
+			// (#1885), as the front's own calls keep it (dbs.client).
+			qd.SeparateDatabases(dbs.SawResource)
+		}
+		icpts = append(icpts, qd)
+	case *queries == "firestore":
 		icpts = append(icpts, queryfront.NewFirestore(*upstream))
 	}
-	if *datastoreDBs {
-		dbs := newDatastoreDatabases(*upstream, logger.Printf)
+	if dbs != nil {
 		if len(icpts) > 0 {
 			if g, ok := icpts[0].(*datastoreGate); ok {
 				dbs.gate = g

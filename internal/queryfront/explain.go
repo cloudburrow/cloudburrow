@@ -82,13 +82,17 @@ func (d *Datastore) serveRunQueryREST(w http.ResponseWriter, r *http.Request) {
 	writeReply(w, resp, err)
 }
 
-// RunQuery answers a query with explain_options; the front claims no other.
+// RunQuery answers a query with explain_options, and any query in a named
+// database (databases.go); the front claims no other.
 func (d *Datastore) RunQuery(ctx context.Context, req *pb.RunQueryRequest) (*pb.RunQueryResponse, error) {
 	client, err := d.emulator()
 	if err != nil {
 		return nil, err
 	}
 	eo := req.GetExplainOptions()
+	if eo == nil {
+		return client.RunQuery(forward(ctx), req)
+	}
 	inner := proto.Clone(req).(*pb.RunQueryRequest)
 	inner.ExplainOptions = nil
 	if !eo.GetAnalyze() {
