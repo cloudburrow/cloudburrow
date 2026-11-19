@@ -108,7 +108,7 @@ func TestBackupDRDeletesThroughThePage(t *testing.T) {
 	// for Backup plans.
 	p := open(t)
 	p.navigate("/backupdr-plans/" + plan + "?project=" + project)
-	p.pageAction("Delete", nil, plan)
+	p.clickAction("Delete", plan)
 	if _, err := bdr.Projects.Locations.BackupPlans.Get(loc + "/backupPlans/" + plan).Do(); err == nil {
 		t.Errorf("backupPlans.get after Delete found %s", plan)
 	}

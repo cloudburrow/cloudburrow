@@ -5022,7 +5022,10 @@ async function renderList(view, route) {
   // A screen that is its summary cards alone, as Google's Cloud Build
   // Dashboard is a card per trigger (#1854).
   if (data.summaryOnly && (data.summary || []).length) {
-    setChildren(headerActions(header), refreshButton(() => renderList(view, route)));
+    // With the screen's own actions, as Backup and DR's Overview has its
+    // trial and protected resources actions (#1844).
+    setChildren(headerActions(header), ...listActionButtons(route, data, () => renderList(view, route)),
+      refreshButton(() => renderList(view, route)));
     setChildren(view, ...header, noteBanner(data.note),
       el("div", { class: "summary-cards" }, ...listingSummary(data)));
     announce(`${data.summary.length} ${noun} loaded`);
