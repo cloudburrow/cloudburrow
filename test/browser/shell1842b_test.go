@@ -141,7 +141,8 @@ func TestSelectAProjectAndTheNewProjectPage(t *testing.T) {
 	// Star the project, and Starred lists it; Recent lists the selected one.
 	p.eval(`[...document.querySelectorAll("#project-list .picker-row")].find((r) => r.textContent.includes("`+project+`")).querySelector(".picker-star").click()`, nil)
 	p.run(chromedp.Click(chromedp.CSS(`#project-views [data-view=starred]`)))
-	p.waitFor(`[...document.querySelectorAll("#project-list .picker-item-id")].map((n) => n.textContent).join() === "` + project + `"`)
+	p.waitFor(`[...document.querySelectorAll("#project-list .picker-row")].some((r) =>
+		r.querySelector(".picker-item-id").textContent === "` + project + `" && r.querySelector(".picker-star").getAttribute("aria-pressed") === "true")`)
 	p.run(chromedp.Click(chromedp.CSS(`#project-views [data-view=recent]`)))
 	p.waitFor(`[...document.querySelectorAll("#project-list .picker-item-id")].some((n) => n.textContent === "` + project + `")`)
 	p.run(chromedp.Click(chromedp.CSS(`#project-views [data-view=all]`)))

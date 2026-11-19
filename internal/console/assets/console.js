@@ -847,6 +847,7 @@ function showOverlay(node) {
   const pending = OVERLAY_TIMERS.get(node);
   if (pending) { clearTimeout(pending); OVERLAY_TIMERS.delete(node); }
   node.hidden = false;
+  node.classList.remove("is-closing");
   // Not if it was closed again before the frame came: a picker closed by
   // the click that followed its opening stayed drawn open (#1842).
   requestAnimationFrame(() => { if (!node.hidden && !OVERLAY_TIMERS.has(node)) node.classList.add("is-open"); });
@@ -854,6 +855,8 @@ function showOverlay(node) {
 
 function hideOverlay(node) {
   node.classList.remove("is-open");
+  // See-through on its way out, and not in the way of a click (#1842).
+  node.classList.add("is-closing");
   const pending = OVERLAY_TIMERS.get(node);
   if (pending) clearTimeout(pending);
   // Hidden after the exit, so the panel does not vanish mid-animation. With
@@ -861,6 +864,7 @@ function hideOverlay(node) {
   // before an already-invisible node is taken out of the tree.
   OVERLAY_TIMERS.set(node, setTimeout(() => {
     node.hidden = true;
+    node.classList.remove("is-closing");
     OVERLAY_TIMERS.delete(node);
   }, OVERLAY_EXIT_MS));
 }

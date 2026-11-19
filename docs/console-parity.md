@@ -305,7 +305,8 @@ Logs Explorer interface); the layout below is what every category screen (#1843â
 - [x] **Details in the page header** (round 2). A resource's properties are a row of its page header
   (`.resource-summary`, label over value) above the tab strip, as Google's bucket page carries
   Location and Storage class beside its title, not a "Details" card between the header and the
-  tabs. Every detail route declares `kind`, so every top-level resource page is "<Kind> details"
+  tabs; such a header scrolls with the page rather than staying pinned over the tab's table. Every
+  detail route declares `kind`, so every top-level resource page is "<Kind> details"
   with its name under the title; the data browsers (Firestore Data, Datastore), whose pages are a
   collection or entity path rather than a resource, keep the path as their title, and Firestore's
   breadcrumb starts at "Firestore" (`crumb`).

@@ -820,7 +820,7 @@ td a { color: var(--accent); }
 /* A panel on its way out (or not yet in) is see-through and must not take
    the click meant for the page under it: the New project page's first
    control sat under the closing project picker for its 200ms exit (#1842). */
-.panel:not(.is-open), .picker-panel:not(.is-open) { pointer-events: none; }
+.panel.is-closing, .picker-panel.is-closing { pointer-events: none; }
 
 .modal {
   position: fixed; inset: 0; z-index: 40;
