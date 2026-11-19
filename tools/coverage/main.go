@@ -91,6 +91,8 @@ import (
 	_ "cloud.google.com/go/spanner/admin/instance/apiv1/instancepb"
 	_ "cloud.google.com/go/spanner/apiv1/spannerpb"
 	_ "google.golang.org/genproto/googleapis/cloud/location"
+	_ "google.golang.org/genproto/googleapis/devtools/containeranalysis/v1"
+	_ "google.golang.org/genproto/googleapis/grafeas/v1"
 )
 
 // area is one generated page.
@@ -123,6 +125,9 @@ var areas = []area{
 	// host whose pushes run Cloud Build triggers.
 	{Key: "securesourcemanager", Title: "Secure Source Manager", Own: true, Services: []string{"google.cloud.securesourcemanager.v1.SecureSourceManager"}},
 	{Key: "developerconnect", Title: "Developer Connect", Own: true, Services: []string{"google.cloud.developerconnect.v1.DeveloperConnect"}},
+	// Container Analysis (#1912), on the Run port: Grafeas's notes and
+	// occurrences, which Artifact Registry's vulnerability scanning writes.
+	{Key: "containeranalysis", Title: "Container Analysis", Own: true, Services: []string{"grafeas.v1.Grafeas", "google.devtools.containeranalysis.v1.ContainerAnalysis"}},
 	// Cloud Functions v2 (#1377), on the Run port: a function is a
 	// SubmitBuild buildpacks build and a Cloud Run service. Its IAM and
 	// Locations mixins are KMS's keys, which are global.

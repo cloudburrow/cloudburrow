@@ -166,6 +166,14 @@ func (r *runService) Start(ctx context.Context) error {
 		return fmt.Errorf("open the Artifact Registry store: %w", err)
 	}
 	runadapter.UseRegistry(regStore)
+	// Container Analysis (#1912): notes and occurrences beside the
+	// registry, and the scanning of pushed images with the OSV-Scanner
+	// and database `cloudburrow prefetch` keeps in the cache.
+	caSrv, err := openContainerAnalysis(r.cfg)
+	if err != nil {
+		return err
+	}
+	go runadapter.RunContinuousAnalysis(cpuCtx, time.Hour)
 	// Cleanup policies run in the background, about daily (#1897), for as
 	// long as the adapter.
 	runadapter.StartCleanupPolicies(cpuCtx, time.Duration(r.cfg.ArtifactRegistryCleanupInterval))
@@ -292,6 +300,10 @@ func (r *runService) Start(ctx context.Context) error {
 	// Artifact Registry's own prefix (#1578): its Locations mixin, whose
 	// /v1/ path is Cloud Run v1's, and its other calls through the above.
 	jsonAPI = runadapter.ArtifactRegistryHandlerOr(jsonAPI)
+	// Container Analysis's JSON under /containeranalysis/ (#1912): its v1
+	// paths, /v1/projects/{p}/occurrences and /notes, are beside Cloud
+	// Run v1's and Artifact Registry's.
+	jsonAPI = containerAnalysisHandlerOr(caSrv, jsonAPI)
 	if r.requests != nil {
 		jsonAPI = rest.Observe(jsonAPI, r.requests)
 	}
@@ -299,6 +311,7 @@ func (r *runService) Start(ctx context.Context) error {
 	if err := r.server.Register(func(g *grpc.Server) {
 		register(g)
 		adapter.ArtifactRegistry().Register(g)
+		caSrv.Register(g)
 		builds.CloudBuild().Register(g)
 		ssm.Register(g)
 		devConnect.Register(g)
@@ -341,6 +354,7 @@ func (r *runVolumesResetter) ResetProject(ctx context.Context, project string) e
 	var errs []error
 	if project != "" {
 		errs = append(errs, a.ResetProject(ctx, project, r.svc.functions.Load()))
+		runadapter.ResetContainerAnalysisProject(project)
 	}
 	_, err := a.CollectVolumes(ctx)
 	return errors.Join(append(errs, err)...)

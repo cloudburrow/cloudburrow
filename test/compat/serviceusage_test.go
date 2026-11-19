@@ -5,6 +5,7 @@ package compat
 import (
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"testing"
 
@@ -79,8 +80,16 @@ func TestServiceUsageServices(t *testing.T) {
 		t.Errorf("after disable storage is %s", st)
 	}
 	disabled, err := c.Services.List(p).Filter("state:DISABLED").Context(ctx).Do()
-	if err != nil || len(disabled.Services) != 1 || disabled.Services[0].Config.Name != "storage.googleapis.com" {
-		t.Errorf("list state:DISABLED = %+v, %v", disabled, err)
+	// The Container Scanning API is off until enabled, as on Google (#1912).
+	var off []string
+	if err == nil {
+		for _, s := range disabled.Services {
+			off = append(off, s.Config.Name)
+		}
+	}
+	sort.Strings(off)
+	if err != nil || strings.Join(off, ",") != "containerscanning.googleapis.com,storage.googleapis.com" {
+		t.Errorf("list state:DISABLED = %v, %v; want containerscanning and storage", off, err)
 	}
 
 	// Not enforced, and per project: another project still has it.

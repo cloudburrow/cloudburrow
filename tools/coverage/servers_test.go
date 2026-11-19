@@ -23,6 +23,7 @@ import (
 
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
+	"github.com/cloudburrow/cloudburrow/internal/grafeas"
 	"github.com/cloudburrow/cloudburrow/internal/service/kms"
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
 	"github.com/cloudburrow/cloudburrow/internal/service/redisadmin"
@@ -91,6 +92,7 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	runSrv.CloudBuild().Register(srv)
 	runSrv.SecureSourceManager(func() string { return "" }).Register(srv)
 	runSrv.DeveloperConnect().Register(srv)
+	grafeas.NewServer(grafeas.NewStore(nil)).Register(srv)
 	// FunctionService alone: its IAM and Locations mixins are KMS's above;
 	// and Cloud Functions v1 (#1428) over the same functions.
 	fns := runSrv.Functions(runSrv.Builds(nil, nil), func() string { return "" })

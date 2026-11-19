@@ -49,8 +49,9 @@ func TestConsoleArtifactRegistryImagesAndTags(t *testing.T) {
 		d.Sections[1].ID != "setup" || !strings.Contains(d.Sections[1].Text, "docker push us-central1-docker.pkg.localhost:") {
 		t.Fatalf("repository page = %+v, %v", d, err)
 	}
-	if d, err := p.Detail(ctx, "", []string{"images", "web", digest.String()}); err != nil || len(d.Sections) != 2 ||
-		d.Sections[1].ID != "manifest" || !strings.Contains(d.Sections[1].Text, `"layers"`) {
+	if d, err := p.Detail(ctx, "", []string{"images", "web", digest.String()}); err != nil || len(d.Sections) != 3 ||
+		d.Sections[1].ID != "manifest" || !strings.Contains(d.Sections[1].Text, `"layers"`) ||
+		d.Sections[2].ID != "vulnerabilities" || !strings.Contains(d.Sections[2].Listing.Unavailable, "not active") {
 		t.Fatalf("repository page = %+v, %v", d, err)
 	}
 	d, err = p.Detail(ctx, "", []string{"images", "web"})

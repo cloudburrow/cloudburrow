@@ -105,7 +105,7 @@ func (a *ArtifactRegistryServer) GetRepository(_ context.Context, req *arpb.GetR
 	if !ok {
 		return nil, apierror.NotFound("Requested entity was not found.")
 	}
-	return proto.Clone(r).(*arpb.Repository), nil
+	return withScanning(proto.Clone(r).(*arpb.Repository)), nil
 }
 
 // ListRepositories lists a location's repositories, by name.
@@ -134,7 +134,7 @@ func (a *ArtifactRegistryServer) ListRepositories(_ context.Context, req *arpb.L
 	out := &arpb.ListRepositoriesResponse{}
 	for name, r := range repositories.repos {
 		if strings.HasPrefix(name, req.GetParent()+"/repositories/") && match(name) {
-			out.Repositories = append(out.Repositories, proto.Clone(r).(*arpb.Repository))
+			out.Repositories = append(out.Repositories, withScanning(proto.Clone(r).(*arpb.Repository)))
 		}
 	}
 	sort.Slice(out.Repositories, func(i, j int) bool {
@@ -220,6 +220,12 @@ func (a *ArtifactRegistryServer) CreateRepository(_ context.Context, req *arpb.C
 	}
 	r.Name, r.CreateTime, r.UpdateTime = name, now, now
 	r.RegistryUri = formatURL(name, r.GetFormat())
+	// Only enablement_config is the caller's (#1912); the state is
+	// worked out on every read.
+	if in := r.GetVulnerabilityScanningConfig(); in != nil {
+		r.VulnerabilityScanningConfig = nil
+		setScanningConfig(r, in, now.AsTime())
+	}
 	repositories.mu.Lock()
 	if _, ok := repositories.repos[name]; ok {
 		repositories.mu.Unlock()
@@ -231,7 +237,7 @@ func (a *ArtifactRegistryServer) CreateRepository(_ context.Context, req *arpb.C
 	repositories.mu.Unlock()
 	op := a.s.ops.Create(req.GetParent(), name)
 	_ = a.s.ops.SetMetadata(op.Name, &arpb.OperationMetadata{})
-	_ = a.s.ops.Succeed(op.Name, proto.Clone(r))
+	_ = a.s.ops.Succeed(op.Name, withScanning(proto.Clone(r).(*arpb.Repository)))
 	return a.s.toProtoOperation(op.Name)
 }
 
@@ -250,12 +256,16 @@ func (a *ArtifactRegistryServer) UpdateRepository(_ context.Context, req *arpb.U
 		if in.GetDockerConfig() != nil {
 			paths = append(paths, "docker_config")
 		}
+		if in.GetVulnerabilityScanningConfig() != nil {
+			paths = append(paths, "vulnerability_scanning_config")
+		}
 	}
 	for _, p := range paths {
 		switch p {
-		case "description", "labels", "cleanup_policies", "cleanup_policy_dry_run", "docker_config", "docker_config.immutable_tags":
+		case "description", "labels", "cleanup_policies", "cleanup_policy_dry_run", "docker_config", "docker_config.immutable_tags",
+			"vulnerability_scanning_config", "vulnerability_scanning_config.enablement_config":
 		default:
-			return nil, apierror.Unimplemented("update_mask path %q is not supported: only description, labels, cleanup policies and docker_config.immutable_tags can change", p)
+			return nil, apierror.Unimplemented("update_mask path %q is not supported: only description, labels, cleanup policies, docker_config.immutable_tags and vulnerability_scanning_config.enablement_config can change", p)
 		}
 	}
 	repositories.mu.Lock()
@@ -281,6 +291,8 @@ func (a *ArtifactRegistryServer) UpdateRepository(_ context.Context, req *arpb.U
 			}
 			r.FormatConfig = &arpb.Repository_DockerConfig{DockerConfig: &arpb.Repository_DockerRepositoryConfig{
 				ImmutableTags: in.GetDockerConfig().GetImmutableTags()}}
+		case "vulnerability_scanning_config", "vulnerability_scanning_config.enablement_config":
+			setScanningConfig(r, in.GetVulnerabilityScanningConfig(), time.Now())
 		}
 	}
 	if err := checkCleanupPolicies(r); err != nil {
@@ -289,7 +301,7 @@ func (a *ArtifactRegistryServer) UpdateRepository(_ context.Context, req *arpb.U
 	r.UpdateTime = timestamppb.New(time.Now())
 	repositories.repos[in.GetName()] = r
 	saveRepositoriesLocked()
-	return proto.Clone(r).(*arpb.Repository), nil
+	return withScanning(proto.Clone(r).(*arpb.Repository)), nil
 }
 
 // DeleteRepository removes a repository, and every image its registry

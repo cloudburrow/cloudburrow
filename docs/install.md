@@ -599,6 +599,17 @@ What `prefetch` stores in `<state dir>/cache`, and how:
   `TestTheTerminalImageIsPrefetchedAndOptional`, `TestOfflinePlanIncludesTheTerminalImage` and
   `TestTerminalWaitsForTheBackgroundImport`.
 
+- **Vulnerability scanning** (#1912), only with `--vulnerability-scanning` (which needs `run`):
+  Google's OSV-Scanner v2.7.1 for this machine (about 56 MB, from its GitHub release) and the OSV
+  database snapshot it scans against (`osv-scanner/`), each checked against the SHA-256 in
+  dependencies.json (`scanning`). The whole snapshot is **about 1.19 GB**: Ubuntu 820 MB, npm
+  222 MB, Debian 82 MB, PyPI 38 MB, Go 13 MB, Maven 10.5 MB, Alpine 9.3 MB;
+  `--vulnerability-scanning=Alpine,Go` fetches only the ecosystems named. The snapshot is pinned
+  to object generations OSV keeps for about a week, so an old CloudBurrow's prefetch can answer
+  404 and needs the pin moved. Without it an image push to a repository with scanning on records
+  a `DISCOVERY` occurrence `FINISHED_FAILED`, saying the scanner is not prefetched. The scanner
+  runs with `--offline`, so a scan makes no calls off the machine.
+
 Every image is the reference CloudBurrow pins by digest, or the one a checksummed Knative YAML
 names, with one exception: Kourier's YAML names its Envoy gateway by tag,
 `docker.io/envoyproxy/envoy:v1.37-latest`. Prefetch stores what that tag resolved to when it ran,

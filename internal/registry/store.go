@@ -77,6 +77,14 @@ type Store struct {
 	// error when its key cannot be used. Like Immutable, it must not call
 	// back into the store; nil encrypts nothing.
 	Encryption func(Repo) (Cipher, error)
+	// Pushed, when set, is called after a manifest is stored, outside the
+	// store's lock, with its digest and media type: Artifact Registry's
+	// vulnerability scanning scans a pushed image (#1912).
+	Pushed func(r Repo, image, digest, mediaType string)
+	// Pulled, when set, is called after a manifest is read through the
+	// registry's HTTP API, outside the lock: a pull keeps an image's
+	// continuous analysis active (#1912).
+	Pulled func(r Repo, image, digest string)
 }
 
 // immutable reports whether r's tags are immutable.
@@ -419,6 +427,15 @@ func ParseManifest(contentType string, b []byte) (*ManifestDoc, string, error) {
 // ref is a tag, that tag. Every blob or manifest it references must
 // already be stored. It returns the manifest's digest.
 func (s *Store) PutManifest(r Repo, image, ref, contentType string, b []byte) (string, error) {
+	d, err := s.putManifest(r, image, ref, contentType, b)
+	if err == nil && s.Pushed != nil {
+		_, mt, _ := ParseManifest(contentType, b)
+		s.Pushed(r, image, d, mt)
+	}
+	return d, err
+}
+
+func (s *Store) putManifest(r Repo, image, ref, contentType string, b []byte) (string, error) {
 	if !ValidImage(image) {
 		return "", ErrNameInvalid
 	}

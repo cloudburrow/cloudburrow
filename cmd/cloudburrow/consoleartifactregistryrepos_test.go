@@ -143,7 +143,8 @@ func TestConsoleArtifactRegistryCreatePage(t *testing.T) {
 	r, _, err := p.repository(proj, "multi")
 	if err != nil || !strings.Contains(r.GetName(), "/locations/us/") || r.GetKmsKeyName() != key || !r.GetDockerConfig().GetImmutableTags() ||
 		!r.GetCleanupPolicyDryRun() || r.GetCleanupPolicies()["untagged"].GetCondition().GetOlderThan().GetSeconds() != 30*86400 ||
-		r.GetLabels()["team"] != "web" {
+		r.GetLabels()["team"] != "web" ||
+		r.GetVulnerabilityScanningConfig().GetEnablementConfig().String() != "DISABLED" {
 		t.Fatalf("the repository = %v, %v", r, err)
 	}
 	l, _ := p.List(ctx, "")
@@ -179,8 +180,7 @@ func TestConsoleArtifactRegistryCreatePage(t *testing.T) {
 		t.Errorf("the virtual repository's upstreams = %v", ups)
 	}
 	for name, v := range map[string]map[string]string{
-		"a preset upstream":      {"mode": "REMOTE_REPOSITORY", "remoteSource": arRemotePreset, "upstream": "base"},
-		"vulnerability scanning": {"vulnerabilityScanning": arEnabled},
+		"a preset upstream": {"mode": "REMOTE_REPOSITORY", "remoteSource": arRemotePreset, "upstream": "base"},
 	} {
 		v["id"], v["location"] = "refused", "us-east1"
 		if _, err := p.Create(ctx, "", v); err == nil || !strings.Contains(err.Error(), "Not available locally") {

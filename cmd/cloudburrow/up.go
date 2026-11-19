@@ -610,6 +610,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	serviceUsageSrv := newServiceUsageServer(cfg, projects, projects.Backing())
 	if serviceUsageSrv != nil {
 		serviceUsageRef = serviceUsageSrv
+		// Artifact Registry's scanning reads the Container Scanning API's
+		// state in each project (#1912).
+		scanningServiceUsage.Store(serviceUsageSrv)
 		coord.Register(serviceUsageSrv)
 	}
 

@@ -211,6 +211,7 @@ var gcloudOverrides = []struct {
 	// Served on the Run port (#1347).
 	{"artifactregistry", []string{"RUN"}},
 	{"cloudbuild", []string{"RUN"}},
+	{"containeranalysis", []string{"RUN"}},
 	{"cloudfunctions", []string{"RUN"}},
 	{"securesourcemanager", []string{"RUN"}},
 	{"developerconnect", []string{"RUN"}},

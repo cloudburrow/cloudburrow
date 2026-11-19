@@ -81,8 +81,9 @@ const (
 	arNoEgress = "Not available locally: an upstream outside this instance (a preset such as Docker Hub, PyPI, npmjs or " +
 		"Maven Central, or a custom URL) needs the internet, and this instance makes no calls off the machine."
 	arNoUpstreamAuth = "Not available locally: an Artifact Registry upstream of this instance is read without credentials."
-	arNoScanning     = "Not available locally: vulnerability scanning is Artifact Analysis (the Container Scanning API), " +
-		"which CloudBurrow does not run."
+	arScanningHelp   = "Artifact Analysis scans each image pushed to the repository, on this machine with OSV-Scanner and the OSV " +
+		"database `cloudburrow prefetch --vulnerability-scanning` downloads, while the project's Container Scanning API " +
+		"(containerscanning.googleapis.com) is enabled (#1912)."
 )
 
 // arMultiRegionLabels name the multi-regions as Google's Multi-region list does.
@@ -206,10 +207,28 @@ func (artifactRegistryProvider) CreateForm() (string, []console.Field) {
 		withSection(arImmutableField(false, "format=DOCKER"), "Immutable image tags"),
 		arCleanupModeField(true),
 		arCleanupGroup(""),
-		{Name: "vulnerabilityScanning", Label: "Vulnerability scanning", Type: "radio", Section: "Artifact Analysis",
-			Options: []string{arEnabled, arDisabled}, Default: arDisabled,
-			UnavailableOptions: map[string]string{arEnabled: arNoScanning}},
+		arScanningField(true, "format=DOCKER"),
 	}
+}
+
+// arScanningField is Artifact Analysis's Vulnerability scanning choice.
+func arScanningField(on bool, showWhen string) console.Field {
+	def := arDisabled
+	if on {
+		def = arEnabled
+	}
+	return console.Field{Name: "vulnerabilityScanning", Label: "Vulnerability scanning", Type: "radio", Section: "Artifact Analysis",
+		Options: []string{arEnabled, arDisabled}, Default: def, ShowWhen: showWhen, Help: arScanningHelp}
+}
+
+// arScanningConfig is the repository's vulnerability_scanning_config for
+// the choice: Enabled inherits the project's Container Scanning API.
+func arScanningConfig(choice string) *arpb.Repository_VulnerabilityScanningConfig {
+	c := arpb.Repository_VulnerabilityScanningConfig_INHERITED
+	if choice == arDisabled {
+		c = arpb.Repository_VulnerabilityScanningConfig_DISABLED
+	}
+	return &arpb.Repository_VulnerabilityScanningConfig{EnablementConfig: c}
 }
 
 func withSection(f console.Field, s string) console.Field {
@@ -308,9 +327,8 @@ func (p artifactRegistryProvider) Create(ctx context.Context, project string, v 
 		repo.CleanupPolicies = pols
 		repo.CleanupPolicyDryRun = v["cleanupMode"] != arCleanupDelete
 	}
-	if _, ok := v["vulnerabilityScanning"]; ok {
-		repo.VulnerabilityScanningConfig = &arpb.Repository_VulnerabilityScanningConfig{
-			EnablementConfig: arpb.Repository_VulnerabilityScanningConfig_DISABLED}
+	if choice, ok := v["vulnerabilityScanning"]; ok && repo.GetFormat() == arpb.Repository_DOCKER {
+		repo.VulnerabilityScanningConfig = arScanningConfig(choice)
 	}
 	err = p.withClient(ctx, func(c *artifactregistry.Client) error {
 		op, err := c.CreateRepository(ctx, &arpb.CreateRepositoryRequest{Parent: parent, RepositoryId: id, Repository: repo})
@@ -409,6 +427,9 @@ func editRepositoryAction(r *arpb.Repository) console.Action {
 	}
 	if r.GetFormat() == arpb.Repository_DOCKER {
 		fields = append(fields, withSection(arImmutableField(r.GetDockerConfig().GetImmutableTags(), ""), "Immutable image tags"))
+		if r.GetMode() != arpb.Repository_VIRTUAL_REPOSITORY {
+			fields = append(fields, arScanningField(r.GetVulnerabilityScanningConfig().GetEnablementConfig() != arpb.Repository_VulnerabilityScanningConfig_DISABLED, ""))
+		}
 	}
 	if r.GetMode() == arpb.Repository_STANDARD_REPOSITORY || r.GetMode() == arpb.Repository_REMOTE_REPOSITORY {
 		fields = append(fields, arCleanupModeField(r.GetCleanupPolicyDryRun()), arCleanupGroup(arCleanupToGroup(r)))
@@ -444,6 +465,10 @@ func (p artifactRegistryProvider) editRepository(ctx context.Context, r *arpb.Re
 		}
 		in.CleanupPolicies, in.CleanupPolicyDryRun = pols, v["cleanupMode"] != arCleanupDelete
 		mask = append(mask, "cleanup_policies", "cleanup_policy_dry_run")
+	}
+	if choice, ok := v["vulnerabilityScanning"]; ok && r.GetFormat() == arpb.Repository_DOCKER {
+		in.VulnerabilityScanningConfig = arScanningConfig(choice)
+		mask = append(mask, "vulnerability_scanning_config.enablement_config")
 	}
 	return p.withClient(ctx, func(c *artifactregistry.Client) error {
 		_, err := c.UpdateRepository(ctx, &arpb.UpdateRepositoryRequest{Repository: in, UpdateMask: &fieldmaskpb.FieldMask{Paths: mask}})

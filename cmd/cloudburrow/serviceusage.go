@@ -25,6 +25,11 @@ var serviceUsageAPIs = []struct {
 	{config.ServicePubSub, serviceusage.API{Name: "pubsub.googleapis.com", Title: "Cloud Pub/Sub API"}},
 	{config.ServiceTasks, serviceusage.API{Name: "cloudtasks.googleapis.com", Title: "Cloud Tasks API"}},
 	{config.ServiceRun, serviceusage.API{Name: "run.googleapis.com", Title: "Cloud Run Admin API"}},
+	// Container Analysis and Artifact Registry's scanning (#1912), on the
+	// Run port: the Container Scanning API is off until a project enables
+	// it, as on Google, and turns on the scanning of pushed images.
+	{config.ServiceRun, serviceusage.API{Name: "containeranalysis.googleapis.com", Title: "Container Analysis API"}},
+	{config.ServiceRun, serviceusage.API{Name: "containerscanning.googleapis.com", Title: "Container Scanning API", Disabled: true}},
 	{config.ServiceSecrets, serviceusage.API{Name: "secretmanager.googleapis.com", Title: "Secret Manager API"}},
 	{config.ServiceKMS, serviceusage.API{Name: "cloudkms.googleapis.com", Title: "Cloud Key Management Service (KMS) API"}},
 	{config.ServiceScheduler, serviceusage.API{Name: "cloudscheduler.googleapis.com", Title: "Cloud Scheduler API"}},

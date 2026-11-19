@@ -340,6 +340,9 @@ func (h *Handler) manifest(w http.ResponseWriter, r *http.Request, repo Repo, im
 		w.Header().Set("Content-Length", strconv.Itoa(len(b)))
 		if r.Method == http.MethodGet {
 			_, _ = w.Write(b)
+			if h.Store.Pulled != nil {
+				h.Store.Pulled(repo, image, d)
+			}
 		}
 	case http.MethodPut:
 		if h.readOnly(w, repo) {
