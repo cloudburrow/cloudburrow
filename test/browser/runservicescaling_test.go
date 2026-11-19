@@ -71,7 +71,7 @@ func TestCloudRunServiceScalingThroughTheForms(t *testing.T) {
 	setField(p, "#view", "f-serviceMinInstances", "1")
 	setField(p, "#view", "f-serviceMaxInstances", "2")
 	setField(p, "#view", "f-concurrencyUtilization", "0.7")
-	p.clickText(`#view button[type="submit"]`, "Deploy container")
+	p.clickText(`#view button[type="submit"]`, "Create")
 
 	svc := get(func(s *runpb.Service) bool { return s.GetScaling() != nil })
 	if sc := svc.GetScaling(); sc.GetScalingMode() != runpb.ServiceScaling_AUTOMATIC ||

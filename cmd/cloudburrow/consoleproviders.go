@@ -628,11 +628,16 @@ func (p runProvider) List(ctx context.Context, project string) (console.Listing,
 		return console.Listing{}, err
 	}
 	items := make([]console.Resource, 0, len(svcs))
+	latest := p.runLatestCreated(ctx, svcs)
 	for _, s := range svcs {
-		items = append(items, s.resource())
+		r := s.resource()
+		for k, v := range p.runGoogleFields(ctx, project, s, latest[s.Metadata.Name]) {
+			r.Fields[k] = v
+		}
+		items = append(items, r)
 	}
 	return console.Listing{
-		Columns: runColumns, Noun: "services", Items: items, Total: len(items),
+		Columns: runServiceColumns, Noun: "services", Items: items, Total: len(items),
 		AlwaysStatus: true,
 		// The selected project's services (#1400): two projects can each
 		// have a service of one ID. A service created before its Knative
@@ -745,18 +750,15 @@ func (p runProvider) Detail(ctx context.Context, project string, path []string) 
 		summary = append(summary, console.Property{Label: "Detail", Value: message})
 	}
 
-	sections := []console.Section{
-		// "Revision history" is what the Cloud Run console calls this tab, and
-		// it is the more accurate name: the list includes revisions that are no
-		// longer serving anything.
-		{ID: "revisions", Label: "Revision history", Listing: p.revisions(ctx, name, svc)},
-		{ID: "traffic", Label: "Traffic", Listing: trafficListing(svc)},
-		runConfiguration(svc, p.defaultProject),
-		p.domainsSection(ctx, project, serviceIDOf(name)),
-	}
+	// Google's tabs, in Google's order (#1852): the traffic split is the
+	// Revisions tab's Traffic and Tags columns, with Manage traffic on it.
+	sections := p.runServiceSections(ctx, project, name, svc)
 	return console.Detail{
 		Summary: summary, Sections: sections,
-		Edit: p.editForm(ctx, name, svc),
+		// Each action is on its tab: Manage traffic on Revisions, Deploy
+		// from source on Source, Map a domain on Domain mappings.
+		Actions: []console.Action{},
+		Edit:    p.editForm(ctx, name, svc),
 	}, nil
 }
 
@@ -1987,7 +1989,7 @@ func apiError(resp *http.Response) error {
 // rejects would deploy from the console and not from the SDK, which is the
 // console inventing support.
 
-func (runProvider) CreateForm() (string, []console.Field) {
+func (p runProvider) CreateForm() (string, []console.Field) {
 	// Every field the adapter maps, and nothing else. The set is taken from
 	// internal/adapter/run's ToKnative: what it writes into the manifest is
 	// what can be offered here, and what its Unsupported refuses is named in
@@ -1997,7 +1999,7 @@ func (runProvider) CreateForm() (string, []console.Field) {
 	// authorization and the execution environment are all absent for the same
 	// reason: the adapter refuses them, so offering the control would be
 	// offering support.
-	return "Deploy container", append([]console.Field{
+	return "Deploy container", runCreateLayout(p.location(), append([]console.Field{
 		{
 			Name: "name", Label: "Service name", Type: "text", Required: true,
 			Help:    "Lowercase letters, numbers and hyphens; at most 49 characters.",
@@ -2095,7 +2097,7 @@ func (runProvider) CreateForm() (string, []console.Field) {
 			Pattern: runUtilizationPattern,
 			Section: "Scaling",
 		},
-	}, runServiceScalingFields(nil)...)
+	}, runServiceScalingFields(nil)...))
 }
 
 // runUtilizationPattern is a utilization target: blank, or a fraction.
@@ -2239,6 +2241,10 @@ func (p runProvider) Create(ctx context.Context, project string, values map[stri
 	}
 	defer func() { _ = c.Close() }()
 
+	public, err := p.runCreateChoices(values)
+	if err != nil {
+		return "", err
+	}
 	labels, _, err := runLabels(values)
 	if err != nil {
 		return "", err
@@ -2260,6 +2266,13 @@ func (p runProvider) Create(ctx context.Context, project string, values map[stri
 	svc, err := op.Wait(ctx)
 	if err != nil {
 		return "", fmt.Errorf("the service never became ready: %w", err)
+	}
+	// Allow public access is the service's IAM policy, set once it exists,
+	// as Google's console does after the create (#1852).
+	if public {
+		if err := p.allowPublicAccess(ctx, project, id); err != nil {
+			return "", fmt.Errorf("the service was created, but public access could not be allowed: %w", err)
+		}
 	}
 	return svc.GetName(), nil
 }

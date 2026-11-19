@@ -56,7 +56,7 @@ func TestCloudRunJobNFSAndStorageVolumesThroughTheBrowser(t *testing.T) {
 		chromedp.SendKeys(chromedp.CSS(`#view #f-image`), "docker.io/library/busybox:1.36"))
 	setField(p, "#view", "f-nfsVolumes", nfs)
 	setField(p, "#view", "f-gcsVolumes", gcs)
-	p.clickText(`#view button[type="submit"]`, "Create job")
+	p.clickText(`#view button[type="submit"]`, "Create")
 	p.waitFor(fmt.Sprintf(`location.pathname === "/run/jobs" &&
 		[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q))`, id))
 	if posts := p.posts("/api/resources/run-jobs"); len(posts) != 1 {
@@ -89,7 +89,7 @@ func TestCloudRunJobNFSAndStorageVolumesThroughTheBrowser(t *testing.T) {
 
 	// Edit job opens with both fields prefilled with the lines given.
 	p.clickText("#view tbody a", id)
-	p.clickText("#view .page-actions button", "Edit job")
+	p.clickText("#view .page-actions button", "View and edit job configuration")
 	p.waitFor(`document.querySelector(".modal.is-open #f-nfsVolumes") !== null`)
 	var form struct{ NFS, GCS string }
 	p.eval(`({ NFS: document.querySelector(".modal.is-open #f-nfsVolumes").value,

@@ -1854,6 +1854,10 @@ dd.has-copy { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 dd.has-copy .property-copy-value { overflow-wrap: anywhere; min-width: 0; }
 dd.has-copy .property-copy { padding: 2px 8px; font-size: var(--text-badge-size); }
 .objects-show { display: inline-flex; align-items: center; gap: 6px; }
+/* A form section's tabs (Field.Tab, #1852): Google's Create service page's
+   Container(s), Variables & Secrets, Volumes, Networking and Security. */
+.form-tabs { margin: 4px 0 16px; overflow-x: auto; }
+.form-tab-panel { padding-top: 4px; }
 
 /* Help (#1842): the toolbar's question-mark menu. */
 .help-panel { min-width: 260px; }

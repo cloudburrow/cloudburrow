@@ -370,7 +370,7 @@ func TestRunJobsCreateExecuteCancelAndDeleteThroughTheAPI(t *testing.T) {
 	if err != nil || d.Unavailable != "" {
 		t.Fatalf("job detail = %+v, %v", d, err)
 	}
-	if d.Edit == nil || d.Edit.Label != "Edit job" {
+	if d.Edit == nil || d.Edit.Label != runJobEditLabel {
 		t.Errorf("the job page offers edit %+v", d.Edit)
 	}
 	var execs console.Listing

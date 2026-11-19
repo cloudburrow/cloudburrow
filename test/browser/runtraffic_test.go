@@ -39,10 +39,11 @@ func TestCloudRunManageTrafficThroughTheBrowser(t *testing.T) {
 	p := open(t)
 	const actions = "/api/actions/run"
 
-	p.navigate("/run/" + id + "?project=" + project)
+	// Manage traffic is on the Revisions tab, as Google's is (#1852).
+	p.navigate("/run/" + id + "?project=" + project + "&tab=revisions")
 	openForm := func() {
 		p.waitFor(`document.querySelector(".modal") === null`)
-		p.clickText("#view .page-actions button", "Manage traffic")
+		p.clickText("#view .section-actions button", "Manage traffic")
 		p.waitFor(`document.querySelector(".modal.is-open #f-traffic") !== null`)
 	}
 	openForm()
@@ -77,7 +78,7 @@ func TestCloudRunManageTrafficThroughTheBrowser(t *testing.T) {
 			break
 		}
 	}
-	p.navigate("/run/" + id + "?project=" + project + "&tab=traffic")
+	p.navigate("/run/" + id + "?project=" + project + "&tab=revisions")
 	p.waitFor(fmt.Sprintf(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q))`, tagHost))
 	code, detail := consoleDo(t, http.MethodGet, "/api/detail/run?project="+project+"&name="+id, "")
 	if code != http.StatusOK || !strings.Contains(detail, tagHost) {

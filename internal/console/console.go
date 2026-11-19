@@ -247,6 +247,12 @@ type Field struct {
 	// section renders as one ungrouped block, which is what a two-field form
 	// should look like.
 	Section string `json:"section,omitempty"`
+	// Tab, inside a Section, puts the field on one tab of that section's
+	// tab strip, as Google's Create service page holds Container(s),
+	// Variables & Secrets, Volumes, Networking and Security as tabs under
+	// "Containers, Volumes, Networking, Security" (#1852). The section's
+	// fields with no Tab are drawn above the strip.
+	Tab string `json:"tab,omitempty"`
 	// Immutable marks a field shown for context and refused on submit. An
 	// edit form that hides a resource's identity makes the operator guess
 	// which resource they are editing; one that accepts a change to it lies,
@@ -430,6 +436,14 @@ type CreateChecker interface {
 	CheckCreate(ctx context.Context, project, check string, values map[string]string) (string, error)
 }
 
+// CreateSubmitter is a Creator whose create page's submit button has a
+// label of its own: Google's Services list has Deploy container, which opens
+// the Create service page, ending in Create (#1852).
+type CreateSubmitter interface {
+	Creator
+	CreateSubmit() string
+}
+
 // Pager is a provider whose listings can be continued past their first page.
 //
 // Separate from Provider and Driller because paging is a property of a specific
@@ -594,6 +608,11 @@ const (
 	KindText SectionKind = "text"
 	// KindChart is a series over time.
 	KindChart SectionKind = "chart"
+	// KindLogs, on a placeholder section with the ID "logs", puts the
+	// console's Logs tab (the resource's entries from local Cloud Logging)
+	// where the provider lists it, as Google's service page has Metrics,
+	// SLOs, Logs, Revisions (#1852); otherwise it is appended last.
+	KindLogs SectionKind = "logs"
 )
 
 // Section is one aspect of a resource, rendered as a tab.
@@ -1558,6 +1577,9 @@ type createForm struct {
 	// Title is the create page's heading when it differs from the button,
 	// as Google's "Create a bucket" page ends in Create (CreateTitler).
 	Title string `json:"title,omitempty"`
+	// Submit is the create page's submit label when it differs from the
+	// button that opens it (CreateSubmitter).
+	Submit string `json:"submit,omitempty"`
 	// Page means the form is rendered at its own address instead of in a
 	// dialog. Decided here rather than in the client so that "long enough to
 	// deserve a page" has one definition.
@@ -1590,6 +1612,9 @@ func (s *Server) capabilitiesOf(p Provider) capabilities {
 		}
 		if cc, ok := p.(CreateChecker); ok {
 			c.Create.Checks = cc.CreateChecks()
+		}
+		if cs, ok := p.(CreateSubmitter); ok {
+			c.Create.Submit = cs.CreateSubmit()
 		}
 	}
 	if e, ok := p.(Executor); ok {

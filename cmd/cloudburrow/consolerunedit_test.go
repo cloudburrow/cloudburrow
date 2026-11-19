@@ -142,6 +142,9 @@ func TestRunEditFormIsTheDeployFormPrefilledFromTheServingRevision(t *testing.T)
 	}
 
 	_, deploy := runProvider{}.CreateForm()
+	// Region, Authentication, Billing and Ingress are Create service's own
+	// (#1852): Edit and deploy new revision leaves them out, as Google's does.
+	deploy = withoutCreateOnly(deploy)
 	if len(form.Fields) != len(deploy) {
 		t.Fatalf("edit form has %d fields, the deploy form %d: the two must offer the same settings",
 			len(form.Fields), len(deploy))

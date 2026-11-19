@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -394,7 +395,7 @@ func (p runJobsProvider) Delete(ctx context.Context, project, name string) error
 // VPC access, volumes): those are named in the last field's help rather
 // than drawn as controls that fail.
 func (runJobsProvider) CreateForm() (string, []console.Field) {
-	return "Create job", []console.Field{
+	return "Create job", runJobLayout([]console.Field{
 		{
 			Name: "name", Label: "Job name", Type: "text", Required: true,
 			Help:    "Lowercase letters, numbers and hyphens, starting with a letter; at most 63 characters.",
@@ -463,7 +464,7 @@ func (runJobsProvider) CreateForm() (string, []console.Field) {
 			Pattern: `^[0-9]+(Ki|Mi|Gi|K|M|G)?$`,
 			Section: "Resources",
 		},
-	}
+	})
 }
 
 // CreateOnPage implements console.PageCreator: thirteen fields in four groups.
@@ -721,7 +722,7 @@ func runJobEditForm(job *runpb.Job) *console.EditForm {
 		note += " Variables with neither a value nor a secret (" + strings.Join(unknown, ", ") +
 			") cannot be shown, so the form cannot be saved while they are there."
 	}
-	return &console.EditForm{Label: "Edit job", Fields: fields, Note: note}
+	return &console.EditForm{Label: runJobEditLabel, Fields: fields, Note: note}
 }
 
 // --- detail pages -------------------------------------------------------
@@ -765,6 +766,8 @@ func (p runJobsProvider) Detail(ctx context.Context, project string, path []stri
 			return err
 		}
 		d = runJobDetail(job, p.executions(ctx, xc, job.GetName()))
+		// The YAML tab, before CloudBurrow's Configuration (#1852).
+		d.Sections = slices.Insert(d.Sections, len(d.Sections)-1, p.runJobYAML(ctx, project, path[0]))
 		return nil
 	})
 	if err != nil {
@@ -790,8 +793,14 @@ func runJobDetail(job *runpb.Job, executions console.Listing) console.Detail {
 	)
 	return console.Detail{
 		Summary: summary,
+		// Google's job tabs (#1852): History, Metrics, Logs, Triggers, YAML.
 		Sections: []console.Section{
-			{ID: "executions", Label: "Executions", Listing: executions},
+			{ID: "executions", Label: "History", Listing: executions},
+			runNotLocal("metrics", "Metrics", "Task and execution metrics are Cloud Monitoring's, which CloudBurrow "+
+				"does not run. Each execution's tasks and their output are on the execution's page."),
+			{ID: "logs", Label: "Logs", Kind: console.KindLogs},
+			runNotLocal("triggers", "Triggers", "A job is run on a schedule by a Cloud Scheduler job whose HTTP "+
+				"target is the job's :run method, made on the Cloud Scheduler page."),
 			runJobConfiguration(job),
 		},
 		Edit: runJobEditForm(job),
@@ -936,9 +945,9 @@ func (p runJobsProvider) executionDetail(ctx context.Context, e *runpb.Execution
 		Summary: summary,
 		Sections: []console.Section{
 			p.tasks(ctx, e),
+			p.executionLogs(ctx, e, ""),
 			{ID: "conditions", Label: "Conditions", Listing: conditions},
 			executionConfiguration(e),
-			p.executionLogs(ctx, e, ""),
 		},
 	}
 }
