@@ -192,8 +192,10 @@ func (a *ArtifactRegistryServer) CreateRepository(_ context.Context, req *arpb.C
 	if err := checkMode(req.GetParent(), r); err != nil {
 		return nil, err
 	}
-	// Cleanup policies are stored and read back, as documented; nothing
-	// here runs them, as Artifact Registry runs them only daily.
+	// Cleanup policies run in the background (artifactregistrycleanup.go).
+	if err := checkCleanupPolicies(r); err != nil {
+		return nil, err
+	}
 	if err := checkRepositoryKMSKey(req.GetParent(), r.GetKmsKeyName()); err != nil {
 		return nil, err
 	}
@@ -279,6 +281,9 @@ func (a *ArtifactRegistryServer) UpdateRepository(_ context.Context, req *arpb.U
 			r.FormatConfig = &arpb.Repository_DockerConfig{DockerConfig: &arpb.Repository_DockerRepositoryConfig{
 				ImmutableTags: in.GetDockerConfig().GetImmutableTags()}}
 		}
+	}
+	if err := checkCleanupPolicies(r); err != nil {
+		return nil, err
 	}
 	r.UpdateTime = timestamppb.New(time.Now())
 	repositories.repos[in.GetName()] = r

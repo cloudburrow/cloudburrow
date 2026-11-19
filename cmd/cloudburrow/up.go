@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
@@ -316,6 +317,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// Logging through its own WriteLogEntries (#1256), so exclusions
 		// apply to them as to any write.
 		api := loggingSvc.api
+		// Artifact Registry's cleanup runs write their audit entries the
+		// same way (#1897).
+		runadapter.UseCleanupLogging(func(ctx context.Context, e *loggingpb.LogEntry) error {
+			_, err := api.WriteLogEntries(ctx, &loggingpb.WriteLogEntriesRequest{Entries: []*loggingpb.LogEntry{e}})
+			return err
+		})
 		tasksSvc.useLogging(func(ctx context.Context, e *loggingpb.LogEntry) error {
 			_, err := api.WriteLogEntries(ctx, &loggingpb.WriteLogEntriesRequest{Entries: []*loggingpb.LogEntry{e}})
 			return err

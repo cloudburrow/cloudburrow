@@ -166,6 +166,9 @@ func (r *runService) Start(ctx context.Context) error {
 		return fmt.Errorf("open the Artifact Registry store: %w", err)
 	}
 	runadapter.UseRegistry(regStore)
+	// Cleanup policies run in the background, about daily (#1897), for as
+	// long as the adapter.
+	runadapter.StartCleanupPolicies(cpuCtx, time.Duration(r.cfg.ArtifactRegistryCleanupInterval))
 	// Secure Source Manager's repositories (#1521), bare git directories
 	// beside it.
 	if err := runadapter.UseSourceManagerRoot(filepath.Join(r.cfg.InstanceDir(), "securesourcemanager")); err != nil {

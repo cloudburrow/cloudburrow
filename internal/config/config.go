@@ -629,6 +629,10 @@ type Config struct {
 	// set it.
 	CloudBuildHostSteps bool `json:"cloudbuildHostSteps,omitempty"`
 
+	// ArtifactRegistryCleanupInterval is how often Artifact Registry's
+	// cleanup policies run (#1897); zero is Google's, about once a day.
+	ArtifactRegistryCleanupInterval Duration `json:"artifactRegistryCleanupInterval,omitempty"`
+
 	// AppEngineURL is the base URL of a local HTTP server standing in for
 	// the App Engine app (#1506): Cloud Tasks and Cloud Scheduler deliver an
 	// App Engine target's request there, at its relative_uri, with the Host
