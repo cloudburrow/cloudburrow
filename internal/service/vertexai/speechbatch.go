@@ -11,6 +11,7 @@ import (
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
 	"cloud.google.com/go/speech/apiv2/speechpb"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -29,8 +30,7 @@ import (
 //   - files: 1 to 15 ("The maximum number of files allowed to be specified
 //     is 15"), each a gs:// uri, each with an optional config merged over
 //     the request's config, which is merged over the recognizer's
-//     default_recognition_config (config_mask is UNIMPLEMENTED, as in
-//     Recognize). The merged configs are checked when the request is made:
+//     default_recognition_config. The merged configs are checked when the request is made:
 //     an invalid one fails the call, not the operation.
 //   - recognition_output_config: gcs_output_config writes each file's
 //     BatchRecognizeResults, in JSON, under its uri prefix, and the
@@ -48,7 +48,13 @@ import (
 //     audio) has its error in its BatchRecognizeFileResult and the others
 //     still run, as the per-file error field allows.
 //   - Audio is transcribed with the recognizer's model on local whisper.cpp
-//     (speech.go), up to 30 minutes a file, not Google's 480.
+//     (speech.go), up to Google's 480 minutes a file, in pieces of at most
+//     speech.ChunkSeconds cut at the quietest point near each piece's end.
+//     MP3 and AAC stay limited by their decoders (internal/embedding's
+//     MaxAudioSeconds); WAV, FLAC and headerless audio reach 480 minutes,
+//     within batchMaxAudioBytes (1 GiB) an object.
+//   - config_mask, on the request and on each file, is applied as
+//     Recognize's (speechrecognizers.go's effectiveConfig).
 //
 // Recognize's uri reads a gs:// object of at most 10 MB from this
 // instance's Cloud Storage, as content would be sent.
@@ -61,6 +67,10 @@ const (
 	batchMaxFiles       = 15
 	recognizeMaxContent = 10 << 20
 	batchMaxAudioBytes  = 1 << 30
+	// batchMaxSeconds is BatchRecognize's limit: "Each file can be up to 8
+	// hours long" (quotas, read 2026-11-19). Audio longer than
+	// speech.ChunkSeconds is transcribed in pieces.
+	batchMaxSeconds = 480 * 60
 )
 
 // readAudioURI reads a gs:// audio object.
@@ -128,9 +138,6 @@ func (s *Server) batchRecognize(req *speechpb.BatchRecognizeRequest) (*longrunni
 	if _, _, _, err := parseChild("recognizer", "recognizers", req.GetRecognizer()); err != nil {
 		return nil, err
 	}
-	if len(req.GetConfigMask().GetPaths()) > 0 {
-		return nil, apierror.Unimplemented("BatchRecognizeRequest.config_mask: the request's config overrides each field it sets")
-	}
 	n := len(req.GetFiles())
 	switch {
 	case n == 0:
@@ -163,7 +170,11 @@ func (s *Server) batchRecognize(req *speechpb.BatchRecognizeRequest) (*longrunni
 	if _, _, err := s.storageRW("BatchRecognize"); err != nil {
 		return nil, err
 	}
-	reqConfig := configJSON(req.GetConfig())
+	reqConfig, err := s.effectiveConfig(req.GetRecognizer(), configJSON(req.GetConfig()), req.GetConfigMask().GetPaths())
+	if err != nil {
+		return nil, err
+	}
+	recognizer := defaultRecognizer(req.GetRecognizer())
 	var files []batchFile
 	seen := map[string]bool{}
 	for i, f := range req.GetFiles() {
@@ -175,11 +186,18 @@ func (s *Server) batchRecognize(req *speechpb.BatchRecognizeRequest) (*longrunni
 			return nil, apierror.InvalidArgument("files[%d].uri %q is named twice", i, uri)
 		}
 		seen[uri] = true
-		if len(f.GetConfigMask().GetPaths()) > 0 {
-			return nil, apierror.Unimplemented("files[%d].config_mask: the file's config overrides each field it sets", i)
-		}
 		cfg := overConfig(reqConfig, configJSON(f.GetConfig()))
-		if _, err := s.checkedConfig(req.GetRecognizer(), cfg); err != nil {
+		if paths := f.GetConfigMask().GetPaths(); len(paths) > 0 {
+			var base map[string]any
+			_ = json.Unmarshal(reqConfig, &base)
+			if base == nil {
+				base = map[string]any{}
+			}
+			if cfg, err = applyConfigMask(base, configJSON(f.GetConfig()), paths); err != nil {
+				return nil, err
+			}
+		}
+		if _, err := s.checkedConfig(recognizer, cfg); err != nil {
 			return nil, err
 		}
 		bf := batchFile{uri: uri, config: cfg}
@@ -199,7 +217,13 @@ func (s *Server) batchRecognize(req *speechpb.BatchRecognizeRequest) (*longrunni
 	p := strings.Split(req.GetRecognizer(), "/")
 	op := s.newOp(strings.Join(p[:4], "/"))
 	start := timestamppb.Now()
-	meta := func(progress int32, tm map[string]*speechpb.BatchRecognizeTranscriptionMetadata) *speechpb.OperationMetadata {
+	meta := func(progress int32, live map[string]*speechpb.BatchRecognizeTranscriptionMetadata) *speechpb.OperationMetadata {
+		// The stored metadata is a copy: the run goes on changing live
+		// while a client reads the operation.
+		tm := make(map[string]*speechpb.BatchRecognizeTranscriptionMetadata, len(live))
+		for k, v := range live {
+			tm[k] = proto.Clone(v).(*speechpb.BatchRecognizeTranscriptionMetadata)
+		}
 		return &speechpb.OperationMetadata{CreateTime: start, UpdateTime: timestamppb.Now(), Resource: req.GetRecognizer(),
 			Method: "google.cloud.speech.v2.Speech.BatchRecognize", ProgressPercent: progress,
 			Request:  &speechpb.OperationMetadata_BatchRecognizeRequest{BatchRecognizeRequest: req},
@@ -210,7 +234,7 @@ func (s *Server) batchRecognize(req *speechpb.BatchRecognizeRequest) (*longrunni
 		tm[f.uri] = &speechpb.BatchRecognizeTranscriptionMetadata{Uri: nativeURI(f.out)}
 	}
 	_ = s.ops.SetMetadata(op, meta(0, tm))
-	go s.runSpeechBatch(op, req.GetRecognizer(), files, native, vtt, srt, inline != nil, tm, meta)
+	go s.runSpeechBatch(op, recognizer, files, native, vtt, srt, inline != nil, tm, meta)
 	got, _ := s.ops.Get(op)
 	return opProto(got)
 }
@@ -226,7 +250,7 @@ func nativeURI(out string) string {
 func (s *Server) runSpeechBatch(op, recognizer string, files []batchFile, native, vtt, srt, inline bool,
 	tm map[string]*speechpb.BatchRecognizeTranscriptionMetadata,
 	meta func(int32, map[string]*speechpb.BatchRecognizeTranscriptionMetadata) *speechpb.OperationMetadata) {
-	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Hour)
+	ctx, cancel := context.WithTimeout(context.Background(), 24*time.Hour)
 	defer cancel()
 	resp := &speechpb.BatchRecognizeResponse{Results: map[string]*speechpb.BatchRecognizeFileResult{}}
 	var billed time.Duration
@@ -252,7 +276,7 @@ func (s *Server) speechBatchOne(ctx context.Context, recognizer string, f batchF
 	if err != nil {
 		return nil, 0, err
 	}
-	res, samples, cfg, err := s.transcribeAudio(ctx, recognizer, f.config, data)
+	res, samples, cfg, err := s.transcribeAudioMax(ctx, recognizer, f.config, data, batchMaxSeconds)
 	if err != nil {
 		return nil, 0, err
 	}

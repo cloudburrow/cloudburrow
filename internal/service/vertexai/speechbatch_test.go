@@ -96,8 +96,12 @@ func TestSpeechBatchRecognizeRefusals(t *testing.T) {
 		{"no config", &speechpb.BatchRecognizeRequest{Recognizer: rec, Files: files("gs://b/a.wav"), RecognitionOutputConfig: gcsOut("gs://b/out")}, codes.InvalidArgument},
 		{"medical", &speechpb.BatchRecognizeRequest{Recognizer: rec, Config: &speechpb.RecognitionConfig{Model: "medical_dictation", LanguageCodes: []string{"en-US"},
 			DecodingConfig: autoChirp.DecodingConfig}, Files: files("gs://b/a.wav"), RecognitionOutputConfig: gcsOut("gs://b/out")}, codes.Unimplemented},
+		// On the default recognizer a mask keeps only its fields of config:
+		// model alone has no language.
 		{"mask", &speechpb.BatchRecognizeRequest{Recognizer: rec, Config: autoChirp, ConfigMask: &fieldmaskpb.FieldMask{Paths: []string{"model"}},
-			Files: files("gs://b/a.wav"), RecognitionOutputConfig: gcsOut("gs://b/out")}, codes.Unimplemented},
+			Files: files("gs://b/a.wav"), RecognitionOutputConfig: gcsOut("gs://b/out")}, codes.InvalidArgument},
+		{"bad mask", &speechpb.BatchRecognizeRequest{Recognizer: rec, Config: autoChirp, ConfigMask: &fieldmaskpb.FieldMask{Paths: []string{"nope"}},
+			Files: files("gs://b/a.wav"), RecognitionOutputConfig: gcsOut("gs://b/out")}, codes.InvalidArgument},
 		{"missing recognizer", &speechpb.BatchRecognizeRequest{Recognizer: speechParent + "/recognizers/nope", Files: files("gs://b/a.wav"), RecognitionOutputConfig: gcsOut("gs://b/out")}, codes.NotFound},
 	} {
 		if _, err := v.BatchRecognize(ctx, c.req); code(err) != c.want {

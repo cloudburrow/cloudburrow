@@ -96,6 +96,7 @@ import (
 	_ "cloud.google.com/go/spanner/admin/database/apiv1/databasepb"
 	_ "cloud.google.com/go/spanner/admin/instance/apiv1/instancepb"
 	_ "cloud.google.com/go/spanner/apiv1/spannerpb"
+	_ "cloud.google.com/go/speech/apiv1/speechpb"
 	_ "cloud.google.com/go/speech/apiv2/speechpb"
 	_ "google.golang.org/genproto/googleapis/cloud/location"
 )
@@ -188,11 +189,11 @@ var areas = []area{
 	// The local AI endpoint's PredictionService (#1193).
 	// Model Garden's Hugging Face deployments on the same port (#1840):
 	// Deploy, and the Endpoint and Model it creates. Document AI's
-	// processors and Speech-to-Text v2's recognizers (#1799) on the same
-	// port.
+	// processors, Speech-to-Text v2's recognizers (#1799) and v1's Speech
+	// (#1930) on the same port.
 	{Key: "vertexai", Title: "Vertex AI PredictionService", Own: true, Services: []string{"google.cloud.aiplatform.v1.PredictionService",
 		"google.cloud.aiplatform.v1.ModelGardenService", "google.cloud.aiplatform.v1.EndpointService", "google.cloud.aiplatform.v1.ModelService",
-		"google.cloud.documentai.v1.DocumentProcessorService", "google.cloud.speech.v2.Speech"}},
+		"google.cloud.documentai.v1.DocumentProcessorService", "google.cloud.speech.v2.Speech", "google.cloud.speech.v1.Speech"}},
 	// v1beta1's PredictionService, for ChatCompletions on those endpoints
 	// (#1840): a page of its own, since its method names repeat v1's.
 	{Key: "vertexaiv1beta1", Title: "Vertex AI PredictionService v1beta1", Own: true, Services: []string{"google.cloud.aiplatform.v1beta1.PredictionService"}},

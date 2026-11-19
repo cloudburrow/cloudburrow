@@ -359,15 +359,16 @@ func (v *speechService) UndeleteRecognizer(_ context.Context, req *speechpb.Unde
 }
 
 func (v *speechService) Recognize(ctx context.Context, req *speechpb.RecognizeRequest) (*speechpb.RecognizeResponse, error) {
-	if len(req.GetConfigMask().GetPaths()) > 0 {
-		return nil, grpcError(apierror.Unimplemented("RecognizeRequest.config_mask: the request's config overrides each field it sets"))
-	}
 	if _, _, _, err := parseChild("recognizer", "recognizers", req.GetRecognizer()); err != nil {
 		return nil, grpcError(err)
 	}
 	var config json.RawMessage
 	if req.GetConfig() != nil {
 		config, _ = protojson.Marshal(req.GetConfig())
+	}
+	config, err := v.s.effectiveConfig(req.GetRecognizer(), config, req.GetConfigMask().GetPaths())
+	if err != nil {
+		return nil, grpcError(err)
 	}
 	content := req.GetContent()
 	if req.GetUri() != "" {
@@ -377,7 +378,7 @@ func (v *speechService) Recognize(ctx context.Context, req *speechpb.RecognizeRe
 		}
 		content = data
 	}
-	out, err := v.s.recognizeAudio(ctx, req.GetRecognizer(), config, content)
+	out, err := v.s.recognizeAudio(ctx, defaultRecognizer(req.GetRecognizer()), config, content)
 	if err != nil {
 		return nil, grpcError(err)
 	}
@@ -392,6 +393,105 @@ func (v *speechService) Recognize(ctx context.Context, req *speechpb.RecognizeRe
 // recognizerConfig is a recognizer's default_recognition_config with the
 // request's config merged over it, as JSON.
 func (s *Server) recognizerConfig(name string, config json.RawMessage) (json.RawMessage, error) {
+	return s.maskedRecognizerConfig(name, config, nil)
+}
+
+// effectiveConfig is the config a request recognises with: on the default
+// recognizer _, config itself (only mask's fields of it when a mask is
+// given); on another, its default_recognition_config with config applied
+// through mask (configMask's rule: no mask, every field config sets
+// overrides; a mask, only its fields; "*", config replaces the recognizer's
+// whole).
+func (s *Server) effectiveConfig(name string, config json.RawMessage, mask []string) (json.RawMessage, error) {
+	if strings.HasSuffix(name, "/recognizers/_") {
+		if len(mask) == 0 || len(mask) == 1 && mask[0] == "*" {
+			return config, nil
+		}
+		return applyConfigMask(map[string]any{}, config, mask)
+	}
+	return s.maskedRecognizerConfig(name, config, mask)
+}
+
+// defaultRecognizer is the default recognizer _ beside a recognizer.
+func defaultRecognizer(name string) string {
+	p := strings.Split(name, "/")
+	if len(p) < 4 {
+		return name
+	}
+	return strings.Join(p[:4], "/") + "/recognizers/_"
+}
+
+// applyConfigMask sets each masked field of config (a JSON
+// RecognitionConfig) over base, removing it where config does not set it.
+func applyConfigMask(base map[string]any, config json.RawMessage, mask []string) (json.RawMessage, error) {
+	var c map[string]any
+	if len(config) > 0 && string(config) != "null" {
+		if err := json.Unmarshal(config, &c); err != nil {
+			return nil, apierror.InvalidArgument("config is not a RecognitionConfig")
+		}
+	}
+	c = normaliseKeys(c)
+	if len(mask) == 1 && mask[0] == "*" {
+		return json.Marshal(c)
+	}
+	for _, path := range mask {
+		keys := strings.Split(path, ".")
+		for i, k := range keys {
+			keys[i] = camelKey(k)
+		}
+		dst, src := base, c
+		for _, k := range keys[:len(keys)-1] {
+			next, _ := dst[k].(map[string]any)
+			if next == nil {
+				next = map[string]any{}
+				dst[k] = next
+			}
+			dst = next
+			src, _ = src[k].(map[string]any)
+		}
+		last := keys[len(keys)-1]
+		if !knownConfigPath(keys) {
+			return nil, apierror.InvalidArgument("config_mask path %q is not a field of RecognitionConfig", path)
+		}
+		if v, ok := src[last]; ok {
+			dst[last] = v
+		} else {
+			delete(dst, last)
+		}
+	}
+	return json.Marshal(base)
+}
+
+// knownConfigPath reports whether a camelCase path names a field of
+// RecognitionConfig.
+func knownConfigPath(keys []string) bool {
+	md := (&speechpb.RecognitionConfig{}).ProtoReflect().Descriptor()
+	for i, k := range keys {
+		f := md.Fields().ByJSONName(k)
+		if f == nil {
+			return false
+		}
+		if i < len(keys)-1 {
+			if f.Message() == nil {
+				return false
+			}
+			md = f.Message()
+		}
+	}
+	return true
+}
+
+func camelKey(k string) string {
+	parts := strings.Split(k, "_")
+	for i := 1; i < len(parts); i++ {
+		if parts[i] != "" {
+			parts[i] = strings.ToUpper(parts[i][:1]) + parts[i][1:]
+		}
+	}
+	return strings.Join(parts, "")
+}
+
+func (s *Server) maskedRecognizerConfig(name string, config json.RawMessage, mask []string) (json.RawMessage, error) {
 	s.mu.Lock()
 	r, ok := s.speechRecognizers().recognizers[name]
 	var base *speechpb.RecognitionConfig
@@ -413,6 +513,9 @@ func (s *Server) recognizerConfig(name string, config json.RawMessage) (json.Raw
 	}
 	if b == nil {
 		b = map[string]any{}
+	}
+	if len(mask) > 0 {
+		return applyConfigMask(b, config, mask)
 	}
 	if len(config) > 0 && string(config) != "null" {
 		var c map[string]any

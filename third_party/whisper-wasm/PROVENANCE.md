@@ -19,7 +19,10 @@ time audio is transcribed, into `<state-dir>/models`, and checks it against the 
 which is Hugging Face's LFS object ID for the file and matched the file downloaded from the
 revision on 2026-11-18. `internal/speech/testdata/jfk.wav` is whisper.cpp's own sample
 (`samples/jfk.wav` of the same release: eleven seconds of John F. Kennedy's 1961 inaugural
-address, a US government work in the public domain).
+address, a US government work in the public domain). `internal/speech/testdata/adaptation.wav`
+(16 kHz LINEAR16, "We met Siobhan Nyhuis at the Kildrummy station.") was generated for the
+adaptation test on 2026-11-19 with macOS's `say` text-to-speech; it contains no third-party
+recording.
 
 `whisper.wasm` (SHA-256 in `whisper.wasm.sha256`) is built from the first two only. The build
 compiles ggml's base and CPU backend (with its WebAssembly SIMD128 quantised kernels,
@@ -33,9 +36,13 @@ sysroot and builtins come from the release's host-independent archives and paths
 away; checked 2026-11-18 on macOS arm64. CloudBurrow's own sources, under this repository's
 licence:
 
-- `src/cbwhisper.cpp`: the module's exports (`cb_init`, `cb_full`, `cb_n_segments`,
-  `cb_segment_text`, `cb_segment_times`, `cb_token_data`, `cb_lang`, ...), a thin layer over
-  `include/whisper.h`;
+- `src/cbwhisper.cpp`: the module's exports (`cb_init`, `cb_full`, `cb_full_adapt`,
+  `cb_n_segments`, `cb_segment_text`, `cb_segment_times`, `cb_token_data`, `cb_lang`, ...), a thin
+  layer over `include/whisper.h`. `cb_full_adapt` (#1930, Speech-to-Text adaptation) passes an
+  initial prompt (`initial_prompt`, `carry_initial_prompt`) and installs whisper.cpp's
+  `logits_filter_callback` with a phrase-biasing filter: each phrase is tokenized with
+  `whisper_tokenize`, and the logit of the token that starts it, or continues it where the
+  decoded text ends with a prefix of it, is raised by the phrase's bias;
 - `whisperwasm.go`: embeds the module.
 
 To rebuild: `third_party/whisper-wasm/build.sh` (needs bash, curl, tar and a SHA-256 tool;

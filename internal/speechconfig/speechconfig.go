@@ -50,6 +50,10 @@ type Config struct {
 	Options
 	// Model is the recognition model asked for.
 	Model string
+	// Adaptation is the config's SpeechAdaptation in JSON, nil for none:
+	// the Speech-to-Text front resolves its phrase sets and custom
+	// classes and biases whisper with them (#1930).
+	Adaptation json.RawMessage
 }
 
 // Parse reads a RecognitionConfig in JSON (camelCase or snake_case keys)
@@ -65,6 +69,9 @@ func Parse(raw []byte) (c Config, code int, err error) {
 	var rc recognitionConfig
 	_ = json.Unmarshal(norm, &rc)
 	c = Config{Decoding: d, Language: lang, Options: opt, Model: rc.Model}
+	if len(rc.Adaptation) > 0 && string(rc.Adaptation) != "null" {
+		c.Adaptation = rc.Adaptation
+	}
 	if !strings.EqualFold(rc.LanguageCodes[0], "auto") {
 		c.LanguageCode = strings.ToLower(rc.LanguageCodes[0])
 	}
@@ -201,8 +208,6 @@ func parse(raw []byte) (Decoding, string, Options, int, error) {
 		return d, "", opt, 400, errors.New("RecognitionConfig.languageCodes is required: the default recognizer has no language")
 	case len(c.LanguageCodes) > 1:
 		return unimpl("recognising one of several languageCodes")
-	case c.Adaptation != nil:
-		return unimpl("adaptation")
 	case c.TranscriptNormalization != nil:
 		return unimpl("transcriptNormalization")
 	case c.TranslationConfig != nil:

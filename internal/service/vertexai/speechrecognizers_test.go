@@ -122,8 +122,10 @@ func TestSpeechRecognizers(t *testing.T) {
 		t.Errorf("undelete of an active recognizer: %v", err)
 	}
 	if _, err := v2.Recognize(ctx, &speechpb.RecognizeRequest{Recognizer: name, ConfigMask: &fieldmaskpb.FieldMask{Paths: []string{"model"}},
-		AudioSource: &speechpb.RecognizeRequest_Content{Content: []byte("x")}}); code(err) != codes.Unimplemented ||
-		!strings.Contains(err.Error(), "config_mask") {
+		AudioSource: &speechpb.RecognizeRequest_Content{Content: []byte("x")}}); code(err) != codes.InvalidArgument ||
+		!strings.Contains(err.Error(), "model is required") {
+		// The mask names model, which the request does not set: the
+		// recognizer's model is cleared.
 		t.Errorf("config_mask: %v", err)
 	}
 }
