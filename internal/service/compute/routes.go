@@ -96,7 +96,7 @@ func (s *Server) insertRoute(project string, b obj) (obj, error) {
 			}
 		}
 		if !in {
-			// UNVERIFIED wording.
+			// UNVERIFIED wording (docs re-read 2026-11-19).
 			return nil, invalid("Invalid value for field 'resource.nextHopIp': '%s'. The next hop IP address must be in a subnetwork of network '%s'.", ip, lastSeg(nw))
 		}
 		o["nextHopIp"] = ip.String()
@@ -106,7 +106,7 @@ func (s *Server) insertRoute(project string, b obj) (obj, error) {
 	if ones, _ := dn.Mask.Size(); ones > 0 {
 		for _, r := range s.rangesLocked(nw, "") {
 			if r.kind == "subnetwork" && contains(r.n, dn) {
-				// UNVERIFIED wording.
+				// UNVERIFIED wording (docs re-read 2026-11-19).
 				return nil, invalid("Invalid value for field 'resource.destRange': '%s'. The destination range matches or fits within the range %s of subnetwork '%s'.", dn, r.n, lastSeg(r.holder))
 			}
 		}
@@ -129,7 +129,7 @@ func (s *Server) deleteRoute(project, name string) (obj, error) {
 		return nil, notFound(rel)
 	}
 	if sys := str(o, "_system"); sys != "" && sys != "internet" {
-		// UNVERIFIED wording: a subnet route goes with its subnet.
+		// UNVERIFIED wording (docs re-read 2026-11-19): a subnet route goes with its subnet.
 		return nil, invalid("Invalid resource usage: 'Cannot delete the subnet route %s: it is deleted with its subnetwork %s.'.", rel, sys)
 	}
 	delete(s.res, rel)

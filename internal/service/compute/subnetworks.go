@@ -79,10 +79,10 @@ func secondaries(o obj) []map[string]any {
 func conflict(n *net.IPNet, r netRange) error {
 	switch r.kind {
 	case "allocated":
-		// UNVERIFIED wording.
+		// UNVERIFIED wording (docs re-read 2026-11-19).
 		return invalid("Invalid IPCidrRange: %s conflicts with the allocated IP range '%s' (%s).", n, lastSeg(r.holder), r.n)
 	case "route":
-		// UNVERIFIED wording.
+		// UNVERIFIED wording (docs re-read 2026-11-19).
 		return invalid("Invalid IPCidrRange: %s conflicts with the destination range %s of route '%s'.", n, r.n, lastSeg(r.holder))
 	}
 	return invalid("Invalid IPCidrRange: %s conflicts with existing subnetwork '%s' in region '%s'.", n, lastSeg(r.holder), r.region)
@@ -134,7 +134,7 @@ func (s *Server) insertSubnetwork(project, region string, b obj) (obj, error) {
 		return nil, err
 	}
 	if auto, _ := netObj["autoCreateSubnetworks"].(bool); auto && Overlaps(n, autoBlock) {
-		// UNVERIFIED wording: 10.128.0.0/9 is the auto mode subnets'.
+		// UNVERIFIED wording (docs re-read 2026-11-19): 10.128.0.0/9 is the auto mode subnets'.
 		return nil, invalid("Invalid IPCidrRange: %s conflicts with 10.128.0.0/9, the range reserved for the auto mode subnetworks of network '%s'.", n, lastSeg(nw))
 	}
 	ranges := s.rangesLocked(nw, "")
@@ -279,7 +279,7 @@ func (s *Server) deleteSubnetwork(project, region, name string) (obj, error) {
 		return nil, err
 	}
 	if o["_auto"] != nil {
-		// UNVERIFIED wording.
+		// UNVERIFIED wording (docs re-read 2026-11-19).
 		return nil, invalid("Invalid resource usage: 'Cannot delete auto subnetwork from an auto subnet mode network.'.")
 	}
 	for k, a := range s.res {
@@ -370,7 +370,7 @@ func (s *Server) expandSubnetwork(project, region, name string, b obj) (obj, err
 	co, _ := cur.Mask.Size()
 	no, _ := n.Mask.Size()
 	if no >= co || !n.Contains(cur.IP) {
-		// UNVERIFIED wording; the rule is documented: expand, never
+		// UNVERIFIED wording (docs re-read 2026-11-19); the rule is documented: expand, never
 		// shrink or replace.
 		return nil, invalid("Invalid IPCidrRange: %s. The new range must be larger than the subnetwork's current range %s and contain it.", n, cur)
 	}

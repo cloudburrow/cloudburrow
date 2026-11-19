@@ -69,6 +69,11 @@ func TestMemorystoreInstanceNetwork(t *testing.T) {
 		t.Errorf("defaults: authorized_network %q, connect_mode %v, reserved_ip_range %q", def.GetAuthorizedNetwork(), def.GetConnectMode(), def.GetReservedIpRange())
 	}
 	network := "projects/" + project + "/global/networks/app-vpc"
+	// Beside Compute Engine (#1936) the network and its allocated range
+	// must exist, as on Google.
+	if addr := memorystoreComputeAddr(h); addr != "" {
+		computeNetwork(t, addr, project, "app-vpc", "", "my-allocated-range")
+	}
 	psa := create(fmt.Sprintf("net-psa-%d", suffix), &redispb.Instance{Tier: redispb.Instance_BASIC, MemorySizeGb: 1,
 		AuthorizedNetwork: network, ConnectMode: redispb.Instance_PRIVATE_SERVICE_ACCESS, ReservedIpRange: "my-allocated-range"})
 	if psa.GetAuthorizedNetwork() != network || psa.GetConnectMode() != redispb.Instance_PRIVATE_SERVICE_ACCESS || psa.GetReservedIpRange() != "my-allocated-range" {

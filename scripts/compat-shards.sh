@@ -321,8 +321,10 @@ compat_shard() {
       # Certificate Authority Service as MEMORYSTORE_PRIVATECA, for a Redis
       # cluster's customer-managed CA (#1907), so the privateca suite stays
       # in its own shard.
-      SERVICES=memorystore,storage,kms,privateca
-      TEST_VARS+=,MEMORYSTORE,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT,CMEK_KMS,MEMORYSTORE_RESOURCEMANAGER,MEMORYSTORE_PRIVATECA
+      # Compute Engine (#1936) as MEMORYSTORE_COMPUTE: networks and
+      # reserved ranges are checked against its networks.
+      SERVICES=memorystore,storage,kms,privateca,compute
+      TEST_VARS+=,MEMORYSTORE,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT,CMEK_KMS,MEMORYSTORE_RESOURCEMANAGER,MEMORYSTORE_PRIVATECA,MEMORYSTORE_COMPUTE
       # A created Memorystore instance follows the mode too (#1302), with RDB
       # persistence as well (#1384), and Redis clusters and Valkey instances
       # with and without persistence_config (#1557).
@@ -357,8 +359,10 @@ compat_shard() {
       # generateServiceIdentity of the CA service agent (#1834).
       # Cloud Logging as SQL_LOGGING, for Backup and DR's job logs (#1924);
       # LOGGING is not in TEST_VARS, so the Logging suites stay in theirs.
-      SERVICES=cloudsql,cloudsql-mysql,backupdr,storage,secretmanager,kms,privateca,logging
-      TEST_VARS+=,MYSQL,MYSQL_PASSWORD,CLOUDSQL,SQLADMIN,BACKUPDR,CMEK_KMS,CLOUDSQL_SECRETS,NOPUBSUB_STORAGE,SQL_RESOURCEMANAGER,SQL_SERVICEUSAGE,SQL_PRIVATECA,SQL_LOGGING
+      # Compute Engine (#1936) as SQL_COMPUTE: private networks are
+      # checked against its networks.
+      SERVICES=cloudsql,cloudsql-mysql,backupdr,storage,secretmanager,kms,privateca,logging,compute
+      TEST_VARS+=,MYSQL,MYSQL_PASSWORD,CLOUDSQL,SQLADMIN,BACKUPDR,CMEK_KMS,CLOUDSQL_SECRETS,NOPUBSUB_STORAGE,SQL_RESOURCEMANAGER,SQL_SERVICEUSAGE,SQL_PRIVATECA,SQL_LOGGING,SQL_COMPUTE
       # Cloud SQL for PostgreSQL (#701): a table with a row.
       SETUP_TESTS="TestCloudSQLRestartSetup"
       PROBE_TESTS="TestCloudSQLMySQLAcrossRestart TestCloudSQLAcrossRestart"
