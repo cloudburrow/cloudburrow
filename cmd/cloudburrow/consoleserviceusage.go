@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/metrics"
 	"github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
 )
 
@@ -14,7 +15,12 @@ import (
 // APIs and their state, read and changed through the same
 // serviceusage.Server the Service Usage API serves, so an API disabled here
 // is one gcloud and Terraform see DISABLED.
-type serviceUsageProvider struct{ api *serviceusage.Server }
+type serviceUsageProvider struct {
+	api *serviceusage.Server
+	// metrics are the request counters the APIs & Services pages count
+	// calls from (#1866); nil shows no counts.
+	metrics *metrics.Registry
+}
 
 func (serviceUsageProvider) ID() string    { return "serviceusage" }
 func (serviceUsageProvider) Title() string { return "APIs & Services" }

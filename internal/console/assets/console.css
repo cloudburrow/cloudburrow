@@ -2264,3 +2264,18 @@ svg.bq-chart { display: block; border: 1px solid var(--border); border-radius: v
 #mr-panel .tab-strip { margin: 12px 0 16px; border-bottom: 1px solid var(--border); }
 #mr-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; }
 #mr-actions .filter { flex: 1 1 200px; min-width: 0; }
+
+/* APIs & Services (#1866): Create credentials' menu, the Library's
+   categories and cards, and an API's facts. */
+.menu-anchor { position: relative; display: inline-block; }
+.menu-anchor .overflow-menu { left: 0; right: auto; min-width: 280px; }
+.overflow-item[disabled] { color: var(--text-muted); cursor: default; }
+.library-categories { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 16px; }
+.library-categories .chip { border: 1px solid var(--border); background: var(--surface); color: var(--text); padding: 4px 12px; cursor: pointer; font: inherit; }
+.library-categories .chip.is-selected { background: var(--nav-selected); color: var(--nav-selected-text); }
+.library-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr)); }
+.library-card { display: block; color: inherit; text-decoration: none; }
+.library-card h3 { margin: 0 0 4px; }
+.api-facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 24px; margin: 12px 0; }
+.api-facts dt { color: var(--text-muted); }
+.api-facts dd { margin: 0; }

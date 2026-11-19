@@ -716,6 +716,17 @@ func (s *Server) operation(name string) (any, error) {
 	return nil, errorf(http.StatusNotFound, "NOT_FOUND", "Operation %s not found", name)
 }
 
+// Unserved returns the APIs CloudBurrow could serve with another
+// configuration, by name, with the reason this instance does not: the
+// console's API Library shows them as not available here.
+func (s *Server) Unserved() map[string]string {
+	out := make(map[string]string, len(s.unserved))
+	for k, v := range s.unserved {
+		out[k] = v
+	}
+	return out
+}
+
 // Catalog returns the served APIs, sorted by name.
 func (s *Server) Catalog() []API { return append([]API(nil), s.catalog...) }
 

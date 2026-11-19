@@ -8,7 +8,9 @@ It runs in the CLI process on `--port-serviceusage` (default `9023`, moved by `-
 as Resource Manager does. `cloudburrow env` exports `CLOUDBURROW_SERVICEUSAGE_ENDPOINT` and
 `CLOUDSDK_API_ENDPOINT_OVERRIDES_SERVICEUSAGE`, `cloudburrow gcloud-setup` writes the `serviceusage`
 override, and `cloudburrow terraform` sets the provider's `service_usage_custom_endpoint`. The
-console's **APIs & Services** page lists a project's APIs, with **Enable** and **Disable**.
+console's **APIs & Services** pages (#1866) are Google's: Enabled APIs & services (charts and each
+enabled API's requests, errors and latency, from the instance's own request counters), each API's
+page with **Disable API**, the Library with **Enable**, and Credentials.
 
 ## What is listed
 
@@ -38,7 +40,7 @@ send that call to Google.
 ## Disabling is stored, not enforced
 
 Disabling an API records it as DISABLED for that project, and every read reports it so, but the API
-keeps answering. This is the same choice [ADR-0006](adr/0006-iam-policy-surface.md) makes for IAM
+keeps answering, where Google's fails each call with `SERVICE_DISABLED` (#1914). This is the same choice [ADR-0006](adr/0006-iam-policy-surface.md) makes for IAM
 policies:
 
 - **What is stored is faithful.** A disable is persisted and returned exactly, so Terraform's
