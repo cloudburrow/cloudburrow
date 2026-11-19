@@ -493,9 +493,28 @@ with another mode, a pool outside the cluster's region, a pool that does not exi
 mode without in-transit encryption. The mode and pool cannot be changed. Not enforced: the
 service agent `service-PROJECT_NUMBER@cloud-redis.iam.gserviceaccount.com` and its
 `roles/privateca.certificateRequester` on the pool, as no call here is authorized. A
-Memorystore for Valkey instance's server CA modes stay UNIMPLEMENTED. Tests:
+Memorystore for Valkey instance takes the same three modes (#1918, below). Tests:
 `TestRedisClusterServerCAModes` (official clients and go-redis over TLS), unit
 `TestClusterServerCA`.
+
+**Memorystore for Valkey server CA modes** (#1918), as Google documents them
+(<https://docs.cloud.google.com/memorystore/docs/valkey/about-in-transit-encryption>,
+`/valkey/use-customer-managed-ca`): an instance's `server_ca_mode` and `server_ca_pool` work as a
+Redis cluster's above. `SERVER_CA_MODE_GOOGLE_MANAGED_SHARED_CA` instances share one CA per project
+and region (Memorystore for Valkey's own, not Redis Cluster's), which
+`Memorystore.GetSharedRegionalCertificateAuthority` and each instance's `GetCertificateAuthority`
+return; `SERVER_CA_MODE_CUSTOMER_MANAGED_CAS_CA` has the pool issue each node's certificate, and
+`GetCertificateAuthority` is `FAILED_PRECONDITION` (Google: "Memorystore for Valkey can't retrieve
+these certificates"; they are the pool's, from CA Service). Refusals carry Google's texts:
+"server_ca_pool must be provided when ...", "server_ca_pool must not be provided when ...",
+"Invalid format for server CA pool: ...", "The instance's server CA pool must be in the same
+region as the instance.", "Resource ... not found.", "There are no enabled CAs in the CaPool ...".
+Create instance (and Create cluster) offer **Certificate authority management** with each mode and
+a **CA pool**, and the pages show the mode and pool. Not enforced: the service agent
+`service-PROJECT_NUMBER@cloud-memorystore.iam.gserviceaccount.com`'s
+`roles/privateca.certificateRequester`. Tests: `TestMemorystoreValkeyServerCA` (official
+`memorystore/apiv1` and `security/privateca/apiv1` clients, go-redis over TLS), unit
+`TestValkeyServerCA`.
 
 **Server certificate rotation** (#1918). "Every week, Memorystore for Redis Cluster conducts
 server-side certificate rotation" in every CA mode (Memorystore for Valkey too): a week after a
@@ -508,11 +527,16 @@ alive". The CA does not change, so clients keep connecting with the CA they down
 --rotate-server-certificate`; the cluster page's **Rotate server certificates**) rotates every
 node's, for a customer-managed CA only: any other mode is `FAILED_PRECONDITION`, "Server
 certificate rotation can only be triggered for customer-managed CAs." (Google documents the text,
-not the code). Memorystore for Valkey's `UpdateInstance` refuses it the same way. CloudBurrow's
+not the code). Memorystore for Valkey's `UpdateInstance` does the same (`gcloud memorystore
+instances update --rotate-server-certificate`; the instance page's **Rotate server
+certificates**): a customer-managed CA instance's node gets another certificate from the pool, and
+any other mode is refused with the same text. CloudBurrow's
 choices: not in the same update as a shard or replica change (`INVALID_ARGUMENT`); a weekly
 rotation that cannot issue a certificate (the pool deleted, no enabled CA) is logged and retried,
-the nodes keeping their certificates. Tests: `TestRedisClusterServerCertRotation` (official
-clients, go-redis over TLS), unit `TestClusterCertRotation`.
+the nodes keeping their certificates; Valkey's on-demand rotation is an update of its own
+(`INVALID_ARGUMENT` with any other path). Tests: `TestRedisClusterServerCertRotation`,
+`TestMemorystoreValkeyServerCA` (official clients, go-redis over TLS), unit
+`TestClusterCertRotation`.
 
 **Automatic failover** (#1910). Google: when a shard's primary fails, a replica is promoted
 automatically, and the failed node is replaced. Valkey's own cluster failover needs the votes of
@@ -825,8 +849,8 @@ migrating, **Finish migration**; **Enable in-transit encryption** with **Seconda
 TLS secondary (`TestConsoleValkeyReplicationMigrationVersions`, `TestConsoleValkeySecondaryWithTLS`,
 `TestMemorystoreValkeySecondaryThroughThePage`).
 
-Not served: node types whose size is not modelled here and server CA modes, each 501 with the
-reason.
+Not served: node types whose size is not modelled here, 501 with the reason. Server CA modes are
+served since #1918 (§8).
 
 `TOKEN_AUTH`, backups (`BackupInstance`, `ListBackupCollections`, `GetBackupCollection`,
 `ListBackups`, `GetBackup`, `DeleteBackup`, `ExportBackup`, `automated_backup_config`) and

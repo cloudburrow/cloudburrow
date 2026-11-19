@@ -65,18 +65,22 @@ type ClusterCAS interface {
 
 // UseClusterCAS makes SERVER_CA_MODE_CUSTOMER_MANAGED_CAS_CA work over cas.
 func (s *Server) UseClusterCAS(cas ClusterCAS) {
-	if s.clusters != nil {
-		s.clusters.mu.Lock()
-		s.clusters.cas = cas
-		s.clusters.mu.Unlock()
+	for _, c := range []*clusters{s.clusters, s.valkey} {
+		if c != nil {
+			c.mu.Lock()
+			c.cas = cas
+			c.mu.Unlock()
+		}
 	}
 }
 
 var clusterCAPoolRE = regexp.MustCompile(`^projects/([^/]+)/locations/([^/]+)/caPools/([^/]+)$`)
 
 // serverCA sets r's CA for in's server CA mode, in project and region,
-// with in-transit encryption tlsOn.
-func (c *clusters) serverCA(ctx context.Context, r *clusterRecord, in *clusterpb.Cluster, project, region string, tlsOn bool) error {
+// with in-transit encryption tlsOn. kind is "cluster" or "instance" (a
+// Valkey instance's mode and pool, #1918, converted), which Google's
+// refusals name.
+func (c *clusters) serverCA(ctx context.Context, r *clusterRecord, in *clusterpb.Cluster, project, region string, tlsOn bool, kind string) error {
 	mode := in.GetServerCaMode()
 	pool := in.GetServerCaPool()
 	switch mode {
@@ -89,7 +93,7 @@ func (c *clusters) serverCA(ctx context.Context, r *clusterRecord, in *clusterpb
 		return apierror.InvalidArgument("server_ca_pool must be provided when server_ca_mode is SERVER_CA_MODE_CUSTOMER_MANAGED_CAS_CA.")
 	}
 	if pool != "" && mode != clusterpb.ServerCaMode_SERVER_CA_MODE_CUSTOMER_MANAGED_CAS_CA {
-		return apierror.InvalidArgument("server_ca_pool can only be provided when server_ca_mode is SERVER_CA_MODE_CUSTOMER_MANAGED_CAS_CA.")
+		return apierror.InvalidArgument("server_ca_pool must not be provided when server_ca_mode is not SERVER_CA_MODE_CUSTOMER_MANAGED_CAS_CA.")
 	}
 	if in.ServerCaMode != nil && mode != clusterpb.ServerCaMode_SERVER_CA_MODE_UNSPECIFIED {
 		r.ServerCAMode = mode.String()
@@ -110,10 +114,10 @@ func (c *clusters) serverCA(ctx context.Context, r *clusterRecord, in *clusterpb
 	case clusterpb.ServerCaMode_SERVER_CA_MODE_CUSTOMER_MANAGED_CAS_CA:
 		m := clusterCAPoolRE.FindStringSubmatch(pool)
 		if m == nil {
-			return apierror.InvalidArgument("server_ca_pool %q must be projects/{project}/locations/{region}/caPools/{ca_pool}", pool)
+			return apierror.InvalidArgument("Invalid format for server CA pool: %s. Expected projects/{project}/locations/{location}/caPools/{caPool}.", pool)
 		}
 		if m[2] != region {
-			return apierror.InvalidArgument("server_ca_pool %s must be in the cluster's region, %s", pool, region)
+			return apierror.InvalidArgument("The %s's server CA pool must be in the same region as the %s.", kind, kind)
 		}
 		c.mu.Lock()
 		cas := c.cas
@@ -140,7 +144,7 @@ func (c *clusters) serverCA(ctx context.Context, r *clusterRecord, in *clusterpb
 	default:
 		var err error
 		if r.TransitCA, r.TransitCAKey, err = newCA(r.Name[strings.LastIndex(r.Name, "/")+1:]); err != nil {
-			return apierror.Internal(err, "create the CA of cluster %s", r.Name)
+			return apierror.Internal(err, "create the CA of %s %s", kind, r.Name)
 		}
 	}
 	return nil
@@ -159,6 +163,11 @@ func (c *clusters) sharedCA(project, region string) (string, string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	k := project + "/" + region
+	if c.valkey {
+		// Memorystore for Valkey's regional CA is its own, not Redis
+		// Cluster's.
+		k = "valkey/" + k
+	}
 	if s, ok := c.shared[k]; ok {
 		return s.CA, s.Key, nil
 	}

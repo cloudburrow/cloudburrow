@@ -33,7 +33,7 @@ func TestClusterServerCA(t *testing.T) {
 	shared := clusterpb.ServerCaMode_SERVER_CA_MODE_GOOGLE_MANAGED_SHARED_CA.Enum()
 	try := func(in *clusterpb.Cluster, tlsOn bool) (*clusterRecord, error) {
 		r := &clusterRecord{Name: "projects/p/locations/us-central1/clusters/c"}
-		return r, c.serverCA(ctx, r, in, "p", "us-central1", tlsOn)
+		return r, c.serverCA(ctx, r, in, "p", "us-central1", tlsOn, "cluster")
 	}
 	for _, tc := range []struct {
 		in   *clusterpb.Cluster
@@ -69,5 +69,30 @@ func TestClusterServerCA(t *testing.T) {
 	r, err := try(&clusterpb.Cluster{ServerCaMode: cust, ServerCaPool: proto.String(pool)}, true)
 	if err != nil || r.ServerCAPool != pool || r.TransitCA != "ROOT" || r.TransitCAKey != "" || r.spec("n").ServerCAPool != pool {
 		t.Errorf("customer pool: %+v, %v", r, err)
+	}
+}
+
+// TestValkeyServerCA (#1918): a Valkey instance's refusals are Google's
+// texts, naming the instance, and its shared regional CA is not Redis
+// Cluster's.
+func TestValkeyServerCA(t *testing.T) {
+	ctx := context.Background()
+	redisC := &clusters{now: time.Now, byName: map[string]*clusterRecord{}}
+	valkeyC := &clusters{valkey: true, now: time.Now, byName: map[string]*clusterRecord{}}
+	cust := clusterpb.ServerCaMode_SERVER_CA_MODE_CUSTOMER_MANAGED_CAS_CA.Enum()
+	r := &clusterRecord{Name: "projects/p/locations/us-central1/instances/i"}
+	for in, want := range map[*clusterpb.Cluster]string{
+		{ServerCaMode: cust, ServerCaPool: proto.String("projects/p/locations/europe-west1/caPools/pool")}: "The instance's server CA pool must be in the same region as the instance.",
+		{ServerCaMode: cust, ServerCaPool: proto.String("pool")}:                                           "Invalid format for server CA pool: pool. Expected projects/{project}/locations/{location}/caPools/{caPool}.",
+		{ServerCaPool: proto.String("pool")}:                                                               "server_ca_pool must not be provided when server_ca_mode is not SERVER_CA_MODE_CUSTOMER_MANAGED_CAS_CA.",
+	} {
+		if err := valkeyC.serverCA(ctx, r, in, "p", "us-central1", true, "instance"); status.Convert(err).Message() != want {
+			t.Errorf("%v: %v, want %q", in, err, want)
+		}
+	}
+	a, _, err := redisC.sharedCA("p", "us-central1")
+	b, _, err2 := valkeyC.sharedCA("p", "us-central1")
+	if err != nil || err2 != nil || a == b {
+		t.Errorf("Redis Cluster's and Valkey's shared CAs: %v %v, same %v", err, err2, a == b)
 	}
 }

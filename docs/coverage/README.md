@@ -30,7 +30,7 @@ Do not edit these files by hand.
 | [Cloud Logging](logging.md) | 43 | 43 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Vertex AI PredictionService](vertexai.md) | 89 | 39 | 0 | 50 | 0 | 0 | 0 | 0 |
 | [Vertex AI PredictionService v1beta1](vertexaiv1beta1.md) | 16 | 1 | 0 | 15 | 0 | 0 | 0 | 0 |
-| [Memorystore for Redis](memorystore.md) | 73 | 72 | 0 | 1 | 0 | 0 | 0 | 1 |
+| [Memorystore for Redis](memorystore.md) | 73 | 73 | 0 | 0 | 0 | 0 | 0 | 1 |
 | [Pub/Sub](pubsub.md) | 47 | 47 | 0 | 0 | 0 | 0 | 0 | 4 |
 | [Cloud Storage (JSON API)](storage.md) | 86 | 83 | 0 | 3 | 0 | 0 | 0 | 33 |
 | [Cloud Storage (gRPC API v2)](storagegrpc.md) | 31 | 30 | 0 | 0 | 1 | 0 | 0 | 0 |

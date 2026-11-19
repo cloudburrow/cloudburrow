@@ -851,8 +851,8 @@ var parityRows = []parityRow{
 		Provider: "memorystore-clusters", Offers: "Create cluster's Enable in-transit encryption and IAM authentication (#1549); a cluster's page shows both modes, with IAM authentication the role a principal needs (roles/redis.dbConnectionUser, granted on the IAM page, which IAM auth checks, #1614), Edit's IAM authentication through UpdateCluster's authorization_mode (#1614) and, with in-transit encryption, a Server CA tab with the CA its clients trust, as Google's console offers the CA's download on the cluster's page (#1591)",
 		Tests: []string{"TestConsoleRedisClusterServerCA", "TestMemorystoreClusterServerCATabsThroughThePage"}},
 	{Resource: "Memorystore shared regional CA", Service: "memorystore",
-		Methods:  []string{"CloudRedisCluster/GetSharedRegionalCertificateAuthority"},
-		Excluded: "the region's shared CA is every SERVER_CA_MODE_GOOGLE_MANAGED_SHARED_CA cluster's own CA, which that cluster's Server CA tab shows (#1907)"},
+		Methods:  []string{"CloudRedisCluster/GetSharedRegionalCertificateAuthority", "Memorystore/GetSharedRegionalCertificateAuthority"},
+		Excluded: "the region's shared CA is every SERVER_CA_MODE_GOOGLE_MANAGED_SHARED_CA cluster's or Valkey instance's own CA, which that cluster's or instance's Server CA tab shows (#1907, #1918)"},
 
 	{Resource: "Memorystore Redis cluster token auth and backups", Service: "memorystore",
 		Methods: []string{"CloudRedisCluster/AddTokenAuthUser", "CloudRedisCluster/ListTokenAuthUsers", "CloudRedisCluster/DeleteTokenAuthUser",

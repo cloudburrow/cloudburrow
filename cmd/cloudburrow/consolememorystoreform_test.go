@@ -54,12 +54,12 @@ func TestMemorystoreCreateFormsFollowGoogle(t *testing.T) {
 		t.Error("Create a Redis instance does not end in Create")
 	}
 	_, cluster := (redisClusterProvider{}).CreateForm()
-	if got, want := names(cluster), "id,region,zoneDistribution,zone,nodeType,shardCount,replicaCount,network,security,transitEncryption,caMode,"+
+	if got, want := names(cluster), "id,region,zoneDistribution,zone,nodeType,shardCount,replicaCount,network,security,transitEncryption,caMode,caPool,"+
 		"encryption,kmsKey,aclPolicy,persistence,autoBackup,backupRetention,backupHour,maintenance,maintenanceDay,maintenanceHour,redisConfigs,restoreBackup"; got != want {
 		t.Errorf("Create cluster fields = %s, want %s", got, want)
 	}
 	_, valkey := (valkeyProvider{}).CreateForm()
-	if got, want := names(valkey), "id,region,zoneDistribution,zone,mode,nodeType,shardCount,replicaCount,network,security,transitEncryption,caMode,"+
+	if got, want := names(valkey), "id,region,zoneDistribution,zone,mode,nodeType,shardCount,replicaCount,network,security,transitEncryption,caMode,caPool,"+
 		"encryption,kmsKey,aclPolicy,persistence,autoBackup,backupRetention,backupHour,maintenance,maintenanceDay,maintenanceHour,engineVersion,"+
 		"engineConfigs,restoreBackup,primaryInstance"; got != want {
 		t.Errorf("Create instance (Valkey) fields = %s, want %s", got, want)
@@ -71,8 +71,11 @@ func TestMemorystoreCreateFormsFollowGoogle(t *testing.T) {
 		if f := byName(fs, "transitEncryption"); f.CheckedWhen != "security=IAM_AUTH|TOKEN_AUTH" {
 			t.Errorf("TLS is not held by Security: %q", f.CheckedWhen)
 		}
-		if f := byName(fs, "caMode"); f.UnavailableOptions["SHARED"] == "" || f.UnavailableOptions["CUSTOMER_MANAGED"] == "" {
-			t.Errorf("CA modes not drawn as unavailable: %+v", f.UnavailableOptions)
+		if f := byName(fs, "caMode"); len(f.UnavailableOptions) != 0 || len(f.Options) != 3 {
+			t.Errorf("every CA mode is served (#1907, #1918): %+v", f)
+		}
+		if f := byName(fs, "caPool"); f.ShowWhen != "caMode=CUSTOMER_MANAGED" {
+			t.Errorf("CA pool shows when %q", f.ShowWhen)
 		}
 		if f := byName(fs, "backupRetention"); f.Default != "35" {
 			t.Errorf("Days to retain backups default %q, want 35", f.Default)
@@ -80,6 +83,20 @@ func TestMemorystoreCreateFormsFollowGoogle(t *testing.T) {
 	}
 	if f := byName(valkey, "engineVersion"); f.UnavailableOptions["VALKEY_9_1"] == "" || f.OptionLabels["VALKEY_9_0"] != "Valkey 9.0" {
 		t.Errorf("Choose version = %+v", f)
+	}
+	for _, tc := range []struct {
+		values map[string]string
+		mode   int32
+		pool   string
+	}{
+		{map[string]string{"caMode": "SHARED"}, 0, ""},
+		{map[string]string{"transitEncryption": "true", "caMode": "PER_INSTANCE"}, 0, ""},
+		{map[string]string{"transitEncryption": "true", "caMode": "SHARED"}, 2, ""},
+		{map[string]string{"security": "IAM_AUTH", "caMode": "CUSTOMER_MANAGED", "caPool": " projects/p/locations/us-central1/caPools/x "}, 3, "projects/p/locations/us-central1/caPools/x"},
+	} {
+		if mode, pool := memorystoreCAMode(tc.values); mode != tc.mode || pool != tc.pool {
+			t.Errorf("memorystoreCAMode(%v) = %d, %q; want %d, %q", tc.values, mode, pool, tc.mode, tc.pool)
+		}
 	}
 	for k, want := range map[string]bool{"IAM_AUTH": true, "TOKEN_AUTH": true, "DISABLED": false} {
 		if memorystoreTLS(map[string]string{"security": k}) != want {

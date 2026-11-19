@@ -72,8 +72,8 @@ func TestMemorystoreConsoleFollowsGoogle(t *testing.T) {
 		return { TLS: b.checked && b.disabled, CA: !document.querySelector("form.create-page #f-caMode").closest(".form-row").hidden,
 			Shared: shared.disabled };
 	})()`, &held)
-	if !held.TLS || !held.CA || !held.Shared {
-		t.Errorf("IAM Auth: TLS checked and locked %v, CA management shown %v, Shared CA disabled %v; want all", held.TLS, held.CA, held.Shared)
+	if !held.TLS || !held.CA || held.Shared {
+		t.Errorf("IAM Auth: TLS checked and locked %v, CA management shown %v, Shared CA disabled %v; want TLS locked, CA management shown and Shared CA choosable (#1918)", held.TLS, held.CA, held.Shared)
 	}
 
 	// Create a Redis instance.

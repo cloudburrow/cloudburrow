@@ -6703,8 +6703,7 @@
     "Key": "memorystore",
     "Title": "Memorystore for Redis",
     "counts": {
-      "Unimplemented": 1,
-      "Verified": 72
+      "Verified": 73
     },
     "rows": [
       {
@@ -6765,6 +6764,7 @@
           "test/compat/memorystorevalkey_test.go:233 TestMemorystoreValkeyClusterDisabled",
           "test/compat/memorystorevalkey_test.go:308 TestMemorystoreValkeyRefusals",
           "test/compat/memorystorevalkey_test.go:85 TestMemorystoreValkeyInstance",
+          "test/compat/memorystorevalkeyca1918_test.go:47 TestMemorystoreValkeyServerCA",
           "test/compat/memorystorewindows1909_test.go:52 TestMemorystoreMaintenanceWindowSchedules",
           "test/compat/memorystorezones1908_test.go:77 TestMemorystoreZoneDistribution",
           "test/compat/terraform_memorystore1557_test.go:26 TestTerraformMemorystore1557",
@@ -6873,7 +6873,8 @@
         "tests": [
           "test/compat/memorystore1563_test.go:57 TestMemorystoreValkeyCrossInstanceReplicationTLS",
           "test/compat/memorystoreclustertls_test.go:130 TestMemorystoreValkeyInTransitEncryption",
-          "test/compat/memorystorevalkey_test.go:308 TestMemorystoreValkeyRefusals"
+          "test/compat/memorystorevalkey_test.go:308 TestMemorystoreValkeyRefusals",
+          "test/compat/memorystorevalkeyca1918_test.go:47 TestMemorystoreValkeyServerCA"
         ]
       },
       {
@@ -6891,6 +6892,7 @@
           "test/compat/memorystoreclustermaintenance_test.go:194 TestValkeyRescheduleMaintenance",
           "test/compat/memorystorerestart1557_test.go:74 TestMemorystoreClustersAcrossRestart",
           "test/compat/memorystorevalkey_test.go:85 TestMemorystoreValkeyInstance",
+          "test/compat/memorystorevalkeyca1918_test.go:47 TestMemorystoreValkeyServerCA",
           "test/compat/memorystorezones1908_test.go:77 TestMemorystoreZoneDistribution",
           "test/compat/terraform_memorystore1563_test.go:21 TestTerraformMemorystore1563",
           "test/compat/terraform_memorystore_test.go:26 TestTerraformMemorystoreInstance"
@@ -6898,8 +6900,10 @@
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/GetSharedRegionalCertificateAuthority",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystorevalkeyca1918_test.go:47 TestMemorystoreValkeyServerCA"
+        ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/GetTokenAuthUser",
@@ -6998,6 +7002,7 @@
           "test/compat/memorystore1614_test.go:224 TestMemorystoreValkeyCrossInstanceFollowsFailover",
           "test/compat/memorystorevalkey_test.go:233 TestMemorystoreValkeyClusterDisabled",
           "test/compat/memorystorevalkey_test.go:85 TestMemorystoreValkeyInstance",
+          "test/compat/memorystorevalkeyca1918_test.go:47 TestMemorystoreValkeyServerCA",
           "test/compat/memorystorezones1908_test.go:77 TestMemorystoreZoneDistribution",
           "test/compat/terraform_memorystore1557_test.go:26 TestTerraformMemorystore1557",
           "test/compat/terraform_memorystore_test.go:26 TestTerraformMemorystoreInstance"

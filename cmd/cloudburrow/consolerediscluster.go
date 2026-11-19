@@ -180,6 +180,12 @@ func (p redisClusterProvider) Create(ctx context.Context, project string, values
 	if memorystoreTLS(values) {
 		in.TransitEncryptionMode = clusterpb.TransitEncryptionMode_TRANSIT_ENCRYPTION_MODE_SERVER_AUTHENTICATION
 	}
+	if mode, pool := memorystoreCAMode(values); mode != 0 {
+		in.ServerCaMode = clusterpb.ServerCaMode(mode).Enum()
+		if pool != "" {
+			in.ServerCaPool = proto.String(pool)
+		}
+	}
 	switch memorystoreAuthMode(values) {
 	case "IAM_AUTH":
 		in.AuthorizationMode = clusterpb.AuthorizationMode_AUTH_MODE_IAM_AUTH
@@ -315,6 +321,8 @@ func (p redisClusterProvider) Detail(ctx context.Context, project string, path [
 	config := []console.Property{
 		{Label: "Authorization", Value: c.GetAuthorizationMode().String()},
 		{Label: "In-transit encryption", Value: c.GetTransitEncryptionMode().String()},
+		{Label: "Server CA mode", Value: orDash(memorystoreCAModeText(c.GetServerCaMode().String(), c.ServerCaMode != nil))},
+		{Label: "Server CA pool", Value: orDash(c.GetServerCaPool())},
 	}
 	if c.GetAuthorizationMode() == clusterpb.AuthorizationMode_AUTH_MODE_IAM_AUTH {
 		// IAM auth checks the token (#1614): who may connect is the
