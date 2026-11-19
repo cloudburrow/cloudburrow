@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -18,6 +19,7 @@ import (
 	"cloud.google.com/go/documentai/apiv1/documentaipb"
 	speech "cloud.google.com/go/speech/apiv2"
 	"cloud.google.com/go/speech/apiv2/speechpb"
+	"cloud.google.com/go/storage"
 	"github.com/chromedp/chromedp"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
@@ -54,7 +56,14 @@ const envLocalAI = "CLOUDBURROW_TEST_LOCALAI"
 func (p *tab) fileAction(label, file string) (text, rows string) {
 	p.t.Helper()
 	p.waitFor(`document.querySelector(".modal") === null`)
-	where := p.findAction(label)
+	// A list screen with no rows draws its actions in the empty state
+	// (Transcriptions' New transcription), where findAction does not look.
+	var onView bool
+	p.eval(fmt.Sprintf(`[...document.querySelectorAll("#view button[id^=\"list-action-\"]")].some((b) => b.textContent.trim() === %q && b.getClientRects().length)`, label), &onView)
+	where := "#view button[id^=\"list-action-\"]"
+	if !onView {
+		where = p.findAction(label)
+	}
 	if where == "" {
 		p.t.Fatalf("the page offers no %s", label)
 	}
@@ -408,4 +417,88 @@ func TestDocumentAIAndSpeechScreensMeetWCAG(t *testing.T) {
 	pages = append(pages, listAndCreate("recognizers", "/speech/recognizers", project)...)
 	pages = append(pages, screen("recognizer", "/speech/recognizers/a11y-rec", project))
 	auditScreens(t, pages)
+}
+
+// TestDocumentAIBatchProcessThroughThePage (#1930), in the run shard, whose
+// instance serves Cloud Storage beside the local AI endpoint: Batch process
+// on a processor's page sends a gs:// folder holding the scanned page to
+// BatchProcessDocuments; the answer names the document Succeeded and the
+// folder its Document was written to, which the official storage client
+// reads back with the page's text.
+func TestDocumentAIBatchProcessThroughThePage(t *testing.T) {
+	needService(t, "documentai")
+	sc, _ := storageSDK(t)
+	c, err := documentai.NewDocumentProcessorClient(context.Background(), localAIDial(t)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close() }()
+	ctx := context.Background()
+	project := uniqueProject(t)
+	proc, err := c.CreateProcessor(ctx, &documentaipb.CreateProcessorRequest{Parent: "projects/" + project + "/locations/us",
+		Processor: &documentaipb.Processor{Type: "OCR_PROCESSOR", DisplayName: "browser-batch"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if op, err := c.DeleteProcessor(context.Background(), &documentaipb.DeleteProcessorRequest{Name: proc.GetName()}); err == nil {
+			_ = op.Wait(context.Background())
+		}
+	})
+	bucket := project + "-docs"
+	bh := sc.Bucket(bucket)
+	if err := bh.Create(ctx, project, nil); err != nil {
+		t.Fatalf("create bucket: %v", err)
+	}
+	var written []string
+	t.Cleanup(func() {
+		for _, n := range append(written, "in/scan.png") {
+			_ = bh.Object(n).Delete(context.Background())
+		}
+		_ = bh.Delete(context.Background())
+	})
+	scan, err := os.ReadFile(filepath.Join("..", "..", "internal", "ocr", "testdata", "scan.png"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := bh.Object("in/scan.png").NewWriter(ctx)
+	w.ContentType = "image/png"
+	if _, err := w.Write(scan); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("upload: %v", err)
+	}
+
+	id := proc.GetName()[strings.LastIndex(proc.GetName(), "/")+1:]
+	p := open(t)
+	p.navigate("/document-ai/processors/" + id + "?project=" + project)
+	p.waitFor(settled)
+	got := p.pageAction("Batch process", map[string]string{"input": "gs://" + bucket + "/in/", "output": "gs://" + bucket + "/out"}, "")
+	if !strings.Contains(got, "Succeeded") || !strings.Contains(got, "gs://"+bucket+"/out/") {
+		t.Fatalf("Batch process answered %q", got)
+	}
+	it := bh.Objects(ctx, &storage.Query{Prefix: "out/"})
+	for {
+		a, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		written = append(written, a.Name)
+	}
+	if len(written) != 1 || !strings.HasSuffix(written[0], "/0/scan-0.json") {
+		t.Fatalf("the batch wrote %q", written)
+	}
+	rd, err := bh.Object(written[0]).NewReader(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rd.Close() }()
+	b, _ := io.ReadAll(rd)
+	if !strings.Contains(string(b), "INVOICE") {
+		t.Errorf("the Document written reads %.200q", b)
+	}
 }

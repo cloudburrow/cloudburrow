@@ -71,7 +71,7 @@ COMPAT_SHARDS="storage served run scale emulators memorystore sql acceptance iam
 # screens (TestSecretManager*, #1850), whose regional secrets and CMEK need
 # its Cloud KMS, and Eventarc's (TestEventarc*, #1877), whose triggers
 # deliver to a Cloud Run service, and Document AI's and Speech-to-Text's
-# (TestDocumentAI*, TestSpeechRecognizers*, #1930), served by the local AI
+# (TestDocumentAI*, TestSpeech*, #1930), served by the local AI
 # endpoint Cloud Run starts; the BigQuery,
 # Firestore, Datastore (#854) and Spanner screens and the Bigtable screen's
 # actions (#1198) only by the emulators shard's; the Memorystore screens
@@ -86,14 +86,15 @@ COMPAT_SHARDS="storage served run scale emulators memorystore sql acceptance iam
 # Pub/Sub and Logs Explorer pages run in storage, and
 # TestBigQueryScreensAreNamedAndLegible in emulators; the rest of the
 # console's screens are TestCloudRunAndCICDScreensMeetWCAG (run),
-# TestDocumentAIAndSpeechScreensMeetWCAG (run),
+# TestDocumentAIAndSpeechScreensMeetWCAG and
+# TestSpeechAdaptationScreensMeetWCAG (run),
 # TestCloudSQLAndBackupDRScreensMeetWCAG (sql),
 # TestSpannerAndTheEmulatorScreensMeetWCAG (emulators),
 # TestMemorystoreScreensMeetWCAG (memorystore) and
 # TestSecretsSchedulerTasksProjectsIAMAndAIScreensMeetWCAG (storage, which
 # serves Secret Manager, Cloud Scheduler and Cloud Tasks).
 COMPAT_BROWSER_SHARDS="storage run emulators memorystore sql"
-COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|LoggingAdmin|SecretManager|Eventarc|DocumentAI|SpeechRecognizers)'
+COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|LoggingAdmin|SecretManager|Eventarc|DocumentAI|Speech)'
 COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|Bigtable|Spanner)'
 COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS='^TestMemorystore'
 COMPAT_BROWSER_SQL_SHARD_TESTS='^Test(CloudSQL|BackupDR|PrivateCAKMS)'

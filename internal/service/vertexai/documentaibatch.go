@@ -39,7 +39,7 @@ import (
 //   - gcs_output_config.field_mask and sharding_config, and skip_human_review
 //     (there is no human review) are UNIMPLEMENTED.
 //
-// UNVERIFIED: that one failed document leaves the operation SUCCEEDED, and
+// UNVERIFIED (re-read 2026-11-19: the batchProcess reference and the send-request page do not say): that one failed document leaves the operation SUCCEEDED, and
 // the texts of the errors.
 
 const (

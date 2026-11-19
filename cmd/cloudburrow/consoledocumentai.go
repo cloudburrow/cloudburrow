@@ -565,6 +565,11 @@ func (p docAIProcessorsProvider) DetailActions(ctx context.Context, project stri
 		acts = append(acts, docAIDefaultVersionAction(pr, vers))
 	}
 	acts = append(acts, docAIVersionSelectActions()...)
+	acts = append(acts, console.Action{ID: "batch-process", Label: "Batch process", Submit: "Process", Fields: []console.Field{
+		{Name: "input", Label: "Source path", Type: "text", Required: true, Pattern: `^gs://[^\/]+(\/.*)?$`,
+			Help: "gs://bucket/folder/ to process every document under it, or gs://bucket/file.pdf for one"},
+		{Name: "output", Label: "Destination path", Type: "text", Required: true, Pattern: `^gs://[^\/]+(\/.*)?$`,
+			Help: "gs://bucket/folder: each result is written under {operation ID}/{index}/"}}})
 	if pr.GetState() == documentaipb.Processor_ENABLED {
 		acts = append(acts, console.Action{ID: "disable", Label: "Disable processor"})
 	} else {
@@ -574,7 +579,62 @@ func (p docAIProcessorsProvider) DetailActions(ctx context.Context, project stri
 		Confirm: "the processor"})
 }
 
+// ActAtResult implements console.ResultActor: Batch process answers each
+// document's status and where its result was written; every other action
+// answers nothing.
+func (p docAIProcessorsProvider) ActAtResult(ctx context.Context, project string, path []string, action string, v map[string]string) (*console.Listing, error) {
+	if action != "batch-process" {
+		return nil, p.ActAt(ctx, project, path, action, v)
+	}
+	if len(path) != 1 {
+		return nil, fmt.Errorf("unknown action %q", action)
+	}
+	pr, err := p.d.processor(ctx, project, path[0])
+	if err != nil {
+		return nil, err
+	}
+	in := strings.TrimSpace(v["input"])
+	src := &documentaipb.BatchDocumentsInputConfig{Source: &documentaipb.BatchDocumentsInputConfig_GcsPrefix{
+		GcsPrefix: &documentaipb.GcsPrefix{GcsUriPrefix: in}}}
+	if mt := docAIMimeTypes[strings.ToLower(filepath.Ext(in))]; mt != "" && !strings.HasSuffix(in, "/") {
+		src = &documentaipb.BatchDocumentsInputConfig{Source: &documentaipb.BatchDocumentsInputConfig_GcsDocuments{
+			GcsDocuments: &documentaipb.GcsDocuments{Documents: []*documentaipb.GcsDocument{{GcsUri: in, MimeType: mt}}}}}
+	}
+	out := &console.Listing{Columns: []string{"Status", "Result"}, NameColumn: "Document", Noun: "documents"}
+	err = p.d.withClient(ctx, func(c *documentai.DocumentProcessorClient) error {
+		op, err := c.BatchProcessDocuments(ctx, &documentaipb.BatchProcessRequest{Name: pr.GetName(), InputDocuments: src,
+			DocumentOutputConfig: &documentaipb.DocumentOutputConfig{Destination: &documentaipb.DocumentOutputConfig_GcsOutputConfig_{
+				GcsOutputConfig: &documentaipb.DocumentOutputConfig_GcsOutputConfig{GcsUri: strings.TrimSpace(v["output"])}}}})
+		if err != nil {
+			return err
+		}
+		_, werr := op.Wait(ctx)
+		meta, _ := op.Metadata()
+		for _, st := range meta.GetIndividualProcessStatuses() {
+			state, res := "Succeeded", st.GetOutputGcsDestination()
+			if st.GetStatus().GetCode() != 0 {
+				state, res = "Failed", st.GetStatus().GetMessage()
+			}
+			out.Items = append(out.Items, console.Resource{Name: st.GetInputGcsSource(), Fields: map[string]string{"Status": state, "Result": res}})
+		}
+		out.Note = "Operation " + op.Name() + ": " + stateWord(meta.GetState().String()) + "."
+		if werr != nil && len(out.Items) == 0 {
+			return werr
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	out.Total = len(out.Items)
+	return out, nil
+}
+
 func (p docAIProcessorsProvider) ActAt(ctx context.Context, project string, path []string, action string, v map[string]string) error {
+	if action == "batch-process" {
+		_, err := p.ActAtResult(ctx, project, path, action, v)
+		return err
+	}
 	if len(path) != 1 {
 		return fmt.Errorf("unknown action %q", action)
 	}
@@ -840,4 +900,5 @@ var (
 	_ console.Driller     = docAIProcessorsProvider{}
 	_ console.Actor       = docAIProcessorsProvider{}
 	_ console.FileActor   = docAIProcessorsProvider{}
+	_ console.ResultActor = docAIProcessorsProvider{}
 )

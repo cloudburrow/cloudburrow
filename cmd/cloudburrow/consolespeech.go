@@ -1,8 +1,10 @@
 package main
 
 // Speech-to-Text's console (#1930): Transcriptions, where New transcription
-// uploads audio and shows its transcript, and Recognizers, with Create
-// recognizer, a recognizer's page, Edit, Delete, Undelete and Transcribe.
+// uploads audio and shows its transcript, or transcribes a Cloud Storage file
+// with BatchRecognize; Recognizers, with Create recognizer, a recognizer's
+// page, Edit, Delete, Undelete and Transcribe; and Custom classes and Phrase
+// sets (consolespeechadaptation.go).
 // Google's console opens on Transcriptions
 // (https://docs.cloud.google.com/speech-to-text/docs/migration, read
 // 2026-11-19: "navigate to the Transcriptions page", "New Transcription");
@@ -32,6 +34,7 @@ import (
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/speechconfig"
 )
 
 // speechRegions are the locations the pages list and create recognizers
@@ -181,7 +184,7 @@ func (p speechRecognizersProvider) List(ctx context.Context, project string) (co
 	out := console.Listing{Columns: []string{"Display name", "Region", "Model", "Language", "Updated"}, NameColumn: "Recognizer ID",
 		Noun: "recognizers", AlwaysStatus: true, RowsOpenable: true,
 		Note: "Recognizers in " + strings.Join(speechRegions, ", ") + ". A deleted recognizer is listed until it expires, with Undelete. " +
-			"Only the chirp model is served, on local whisper.cpp."}
+			"Google's models " + strings.Join(speechconfig.Models(), ", ") + " are served, each on local whisper.cpp."}
 	rs, err := p.s.recognizers(ctx, project)
 	if err != nil {
 		return console.Listing{Unavailable: consoleErr(err)}, nil
@@ -207,10 +210,14 @@ func recognizerConfigFields(cur *speechpb.Recognizer) []console.Field {
 		lang = l[0]
 	}
 	f := c.GetFeatures()
+	model := c.GetModel()
+	if model == "" {
+		model = "chirp"
+	}
 	return []console.Field{
 		{Name: "displayName", Label: "Display name", Type: "text", Default: cur.GetDisplayName(), Pattern: "^.{0,63}$"},
-		{Name: "model", Label: "Model", Type: "select", Options: []string{"chirp"}, Default: "chirp",
-			Help: "chirp, on local whisper.cpp; Google's other models (long, short, telephony, chirp_2, chirp_3) are not available locally"},
+		{Name: "model", Label: "Model", Type: "select", Options: speechconfig.Models(), Default: model,
+			Help: "each runs on local whisper.cpp; the medical models are not available locally"},
 		{Name: "language", Label: "Language", Type: "text", Required: true, Default: lang,
 			Help: "a BCP-47 language code such as en-US, or auto to detect it", Pattern: "^([A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*|auto)$"},
 		{Name: "wordTimeOffsets", Label: "Word timestamps", Type: "checkbox", Default: strconv.FormatBool(f.GetEnableWordTimeOffsets())},
@@ -439,9 +446,9 @@ func (speechTranscriptionsProvider) Title() string { return "Transcriptions" }
 func (p speechTranscriptionsProvider) List(_ context.Context, project string) (console.Listing, error) {
 	out := console.Listing{Columns: []string{"Recognizer", "Audio file", "Transcript", "Created"}, NameColumn: "Transcription",
 		Noun: "transcriptions", RowsOpenable: true,
-		Note: "New transcription sends the audio to Recognize with a recognizer's default config. The transcriptions made here " +
-			"are kept in this console's memory until the instance stops; batch transcriptions to Cloud Storage (BatchRecognize) " +
-			"are not available locally."}
+		Note: "New transcription sends uploaded audio to Recognize, or a Cloud Storage file to BatchRecognize (its transcript " +
+			"shown here or written under a gs:// prefix), with a recognizer's default config. The transcriptions made here are " +
+			"listed in this console's memory until the instance stops."}
 	p.held.mu.Lock()
 	defer p.held.mu.Unlock()
 	project = p.s.project(project)
@@ -484,6 +491,13 @@ func (p speechTranscriptionsProvider) ListActions(ctx context.Context, project s
 			Help: "its default recognition config transcribes the audio"},
 		{Name: "file", Label: "Audio file", Type: console.FileFieldType, Required: true, Section: "Audio configuration",
 			Help: "WAV, FLAC, MP3, OGG Opus or WebM Opus, at most 10 MB and one minute"},
+	}}, {ID: "batch", Label: "Transcribe from Cloud Storage", Submit: "Transcribe", Fields: []console.Field{
+		{Name: "recognizer", Label: "Recognizer", Type: "select", Options: ids, Default: ids[0], Required: true, Section: "Transcription options",
+			Help: "its default recognition config transcribes the audio"},
+		{Name: "uri", Label: "Audio file in Cloud Storage", Type: "text", Required: true, Section: "Audio configuration",
+			Pattern: `^gs://[^\/]+\/.+$`, Help: "gs://bucket/object, up to 30 minutes of audio, sent to BatchRecognize"},
+		{Name: "output", Label: "Output location", Type: "text", Section: "Output", Pattern: `^(gs://[^\/]+(\/.*)?)?$`,
+			Help: "a gs:// prefix the transcript is written under; empty to show it here"},
 	}}}
 }
 

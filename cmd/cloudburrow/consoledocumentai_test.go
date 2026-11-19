@@ -94,6 +94,12 @@ func TestConsoleDocumentAIProcessors(t *testing.T) {
 		!strings.Contains(err.Error(), "pretrained") {
 		t.Errorf("Delete of a pretrained version: %v", err)
 	}
+	// Batch process needs the instance's Cloud Storage, which this
+	// endpoint has none of: BatchProcessDocuments' refusal is shown.
+	if _, err := procs.ActAtResult(ctx, "p1", []string{id}, "batch-process", map[string]string{"input": "gs://b/in/", "output": "gs://b/out"}); err == nil ||
+		!strings.Contains(err.Error(), "Cloud Storage") {
+		t.Errorf("Batch process with no Cloud Storage: %v", err)
+	}
 	scan, err := os.ReadFile("../../internal/ocr/testdata/scan.png")
 	if err != nil {
 		t.Fatal(err)

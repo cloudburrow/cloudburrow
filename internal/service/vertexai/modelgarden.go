@@ -558,7 +558,8 @@ func documentAIPath(p string) bool {
 // serveREST hands a request the routes above did not take to the transcoder,
 // or answers the not-found body when Model Garden is not served.
 func (s *Server) serveREST(w http.ResponseWriter, r *http.Request, body []byte) {
-	v2 := strings.HasPrefix(r.URL.Path, "/v2/") && (strings.Contains(r.URL.Path, "/recognizers") || strings.Contains(r.URL.Path, "/operations/"))
+	v2 := strings.HasPrefix(r.URL.Path, "/v2/") && (strings.Contains(r.URL.Path, "/recognizers") || strings.Contains(r.URL.Path, "/customClasses") ||
+		strings.Contains(r.URL.Path, "/phraseSets") || strings.Contains(r.URL.Path, "/operations/"))
 	if !v2 && (!strings.HasPrefix(r.URL.Path, "/v1/") || (s.modelGarden() == nil && !documentAIPath(r.URL.Path))) {
 		s.notFound(w, r)
 		return

@@ -28,10 +28,11 @@ import (
 // (https://docs.cloud.google.com/speech-to-text/docs/reference/rest/v2/projects.locations.recognizers/recognize,
 // read 2026-11-18), for what a local model can answer:
 //
-//   - model "chirp", the one ML.TRANSCRIBE takes, is read with whisper.cpp
-//     and OpenAI's multilingual Whisper base model (internal/speech), not
-//     Google's Chirp: the words recognised and the confidences differ.
-//     Other models are UNIMPLEMENTED.
+//   - models chirp (the one ML.TRANSCRIBE takes), chirp_2, chirp_3,
+//     chirp_telephony, long, short, telephony and telephony_short are each
+//     read with whisper.cpp and OpenAI's multilingual Whisper base model
+//     (internal/speech), not Google's models: the words recognised and the
+//     confidences differ (#1930). The medical models are UNIMPLEMENTED.
 //   - languageCodes: one BCP-47 code, whose language whisper knows (its
 //     primary subtag, cmn as zh, iw as he, fil as tl, nb as no), or "auto"
 //     to detect it. Several codes are UNIMPLEMENTED.
@@ -60,7 +61,8 @@ func protoDuration(d time.Duration) string {
 	return s + "s"
 }
 
-// recognize serves POST /v2/projects/{p}/locations/{l}/recognizers/{r}:recognize;
+// recognize serves POST /v2/projects/{p}/locations/{l}/recognizers/{r}:recognize
+// (its uri a gs:// object, speechbatch.go);
 // the recognizers' other JSON methods go to the REST transcoder
 // (speechrecognizers.go).
 func (s *Server) recognize(w http.ResponseWriter, r *http.Request) {
@@ -80,10 +82,6 @@ func (s *Server) recognize(w http.ResponseWriter, r *http.Request) {
 		apierror.WriteJSON(w, apierror.InvalidArgument("malformed request body: expected a RecognizeRequest"))
 		return
 	}
-	if req.URI != "" {
-		apierror.WriteJSON(w, apierror.Unimplemented("RecognizeRequest.uri: send the audio as content"))
-		return
-	}
 	if len(req.Mask) > 0 && string(req.Mask) != "null" && string(req.Mask) != `""` {
 		apierror.WriteJSON(w, apierror.Unimplemented("RecognizeRequest.configMask: the request's config overrides each field it sets"))
 		return
@@ -92,6 +90,12 @@ func (s *Server) recognize(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		apierror.WriteJSON(w, apierror.InvalidArgument("RecognizeRequest.content is not valid base64"))
 		return
+	}
+	if req.URI != "" {
+		if data, err = s.readAudioURI(r.Context(), req.URI, recognizeMaxContent); err != nil {
+			apierror.WriteJSON(w, err)
+			return
+		}
 	}
 	name := "projects/" + r.PathValue("project") + "/locations/" + r.PathValue("location") + "/recognizers/" + rec
 	out, err := s.recognizeAudio(r.Context(), name, req.Config, data)
@@ -107,38 +111,59 @@ func (s *Server) recognize(w http.ResponseWriter, r *http.Request) {
 // default recognizer _ takes config whole, another merges config over its
 // default_recognition_config. The answer is a RecognizeResponse's JSON.
 func (s *Server) recognizeAudio(ctx context.Context, name string, config json.RawMessage, data []byte) (map[string]any, error) {
+	res, samples, cfg, err := s.transcribeAudio(ctx, name, config, data)
+	if err != nil {
+		return nil, err
+	}
+	return recognizeResponse(res, samples, cfg), nil
+}
+
+// checkedConfig is the recognizer's config with config merged over it,
+// checked.
+func (s *Server) checkedConfig(name string, config json.RawMessage) (speechconfig.Config, error) {
 	if !strings.HasSuffix(name, "/recognizers/_") {
 		merged, err := s.recognizerConfig(name, config)
 		if err != nil {
-			return nil, err
+			return speechconfig.Config{}, err
 		}
 		config = merged
 	}
 	if len(config) == 0 || string(config) == "null" {
-		return nil, apierror.InvalidArgument("RecognizeRequest.config is required for the default recognizer")
+		return speechconfig.Config{}, apierror.InvalidArgument("RecognizeRequest.config is required for the default recognizer")
 	}
 	cfg, code, err := speechconfig.Parse(config)
 	if code == 501 {
-		return nil, apierror.Unimplemented("%v", err)
+		return cfg, apierror.Unimplemented("%v", err)
 	} else if code != 0 {
-		return nil, apierror.InvalidArgument("%v", err)
+		return cfg, apierror.InvalidArgument("%v", err)
+	}
+	return cfg, nil
+}
+
+// transcribeAudio is recognizeAudio's transcription, before it is written
+// as a response.
+func (s *Server) transcribeAudio(ctx context.Context, name string, config json.RawMessage, data []byte) (speech.Result, []float32, speechconfig.Config, error) {
+	var none speech.Result
+	cfg, err := s.checkedConfig(name, config)
+	if err != nil {
+		return none, nil, cfg, err
 	}
 	samples, err := speech.Decode(cfg.Decoding, data)
 	switch {
 	case errors.Is(err, speech.ErrUnsupported):
-		return nil, apierror.Unimplemented("Not implemented here: %v", err)
+		return none, nil, cfg, apierror.Unimplemented("Not implemented here: %v", err)
 	case errors.Is(err, speech.ErrTooLong):
-		return nil, apierror.InvalidArgument("%v", err)
+		return none, nil, cfg, apierror.InvalidArgument("%v", err)
 	case err != nil:
-		return nil, apierror.InvalidArgument("Audio data does not appear to be in a supported encoding: %v", err)
+		return none, nil, cfg, apierror.InvalidArgument("Audio data does not appear to be in a supported encoding: %v", err)
 	}
 	if lang := cfg.Language; lang != "" {
 		known, err := speech.LanguageKnown(ctx, lang)
 		if err != nil {
-			return nil, speechError(err)
+			return none, nil, cfg, speechError(err)
 		}
 		if !known {
-			return nil, apierror.Unimplemented("Not implemented here: the language %s: CloudBurrow's local Whisper model "+
+			return none, nil, cfg, apierror.Unimplemented("Not implemented here: the language %s: CloudBurrow's local Whisper model "+
 				"does not recognise it, and CloudBurrow never calls Google", lang)
 		}
 	}
@@ -146,9 +171,9 @@ func (s *Server) recognizeAudio(ctx context.Context, name string, config json.Ra
 	defer cancel()
 	res, err := speech.Transcribe(ctx, samples, speech.Options{Language: cfg.Language, Words: cfg.Words})
 	if err != nil {
-		return nil, speechError(err)
+		return none, nil, cfg, speechError(err)
 	}
-	return recognizeResponse(res, samples, cfg), nil
+	return res, samples, cfg, nil
 }
 
 func speechError(err error) error {

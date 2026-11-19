@@ -42,7 +42,7 @@ import (
 //     EvaluateProcessorVersion and
 //     evaluations, which need a labelled dataset, are UNIMPLEMENTED.
 //
-// UNVERIFIED: the version display names and create times (taken from the
+// UNVERIFIED (re-read 2026-11-19: the manage-processor-versions page and the processorVersions reference do not say): the version display names and create times (taken from the
 // IDs), the codes and texts of the refusals, and that a refusal is the RPC's
 // error rather than a failed operation.
 

@@ -392,7 +392,8 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		docs := docAI{defaultProject: d.cfg.DefaultProject(), addr: d.localAI.Addr}
 		sp := speechSvc{defaultProject: d.cfg.DefaultProject(), addr: d.localAI.Addr}
 		providers = append(providers, docAIOverviewProvider{d: docs}, docAIGalleryProvider{d: docs}, docAIProcessorsProvider{d: docs},
-			speechTranscriptionsProvider{s: sp, held: &speechTranscriptions{}}, speechRecognizersProvider{s: sp})
+			speechTranscriptionsProvider{s: sp, held: &speechTranscriptions{}}, speechRecognizersProvider{s: sp},
+			speechCustomClassesProvider{s: sp}, speechPhraseSetsProvider{s: sp})
 	}
 
 	kubeconfig := d.cfg.KubeconfigPath()
