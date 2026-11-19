@@ -173,10 +173,12 @@ func TestDocumentAIProcessorsThroughThePage(t *testing.T) {
 	}
 
 	p.clickAction("Disable processor", "")
+	p.waitFor(`[...document.querySelectorAll("#view button")].some((b) => b.textContent.trim() === "Enable processor")`)
 	if got, err := c.GetProcessor(ctx, &documentaipb.GetProcessorRequest{Name: proc.GetName()}); err != nil || got.GetState() != documentaipb.Processor_DISABLED {
 		t.Errorf("GetProcessor after Disable processor: %v %v", got.GetState(), err)
 	}
 	p.clickAction("Enable processor", "")
+	p.waitFor(`[...document.querySelectorAll("#view button")].some((b) => b.textContent.trim() === "Disable processor")`)
 	if got, err := c.GetProcessor(ctx, &documentaipb.GetProcessorRequest{Name: proc.GetName()}); err != nil || got.GetState() != documentaipb.Processor_ENABLED {
 		t.Errorf("GetProcessor after Enable processor: %v %v", got.GetState(), err)
 	}
@@ -229,7 +231,7 @@ func TestSpeechRecognizersThroughThePage(t *testing.T) {
 	}
 
 	p.navigate("/speech/recognizers/" + id + q)
-	p.waitFor(settled + ` && document.querySelector("#view").textContent.includes("Default recognition config")`)
+	p.waitFor(settled + ` && document.querySelector("#view").textContent.includes("Word timestamps")`)
 	p.pageAction("Edit", map[string]string{"language": "fr-FR", "displayName": "Edited"}, "")
 	if r, err = c.GetRecognizer(ctx, &speechpb.GetRecognizerRequest{Name: full}); err != nil ||
 		r.GetDefaultRecognitionConfig().GetLanguageCodes()[0] != "fr-FR" || r.GetDisplayName() != "Edited" {
