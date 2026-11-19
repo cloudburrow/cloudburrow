@@ -26,10 +26,14 @@ import (
 // countTokens' totalTokens is the same count generateContent reports as
 // usageMetadata.promptTokenCount: LiteRT-LM's Conversation::CountTokens of
 // the rendered conversation, so the chat template's turn markers, the
-// declared tools and each image's soft tokens are included. UNVERIFIED:
-// whether Google's count includes template tokens; Google documents the
-// count as "the number of tokens that the model tokenizes the prompt into".
-// computeTokens tokenizes each content's text alone, with no template.
+// declared tools and each image's soft tokens are included. UNVERIFIED
+// (docs re-read 2026-11-19, still unanswered:
+// https://docs.cloud.google.com/vertex-ai/generative-ai/docs/multimodal/get-token-count):
+// whether Google's count includes template tokens, system instructions or
+// tools; the page says only that multimodal counts "are an estimation".
+// computeTokens tokenizes each content's text alone, with no template; the
+// list-token page documents it as text only: "The prompt must contain only
+// text. Multimodal prompts are not supported."
 
 // CountTokensRequest is the countTokens body.
 type CountTokensRequest struct {
@@ -155,7 +159,8 @@ func (s *Server) computeTokens(ctx context.Context, requested string, body io.Re
 		var b strings.Builder
 		for j, p := range c.Parts {
 			if p.kind() != "text" {
-				// UNVERIFIED: Google documents computeTokens over text.
+				// "The prompt must contain only text. Multimodal prompts are
+				// not supported." (https://docs.cloud.google.com/vertex-ai/generative-ai/docs/multimodal/list-token)
 				return nil, apierror.InvalidArgument("contents[%d].parts[%d]: computeTokens tokenizes text parts only", i, j)
 			}
 			b.WriteString(p.Text)

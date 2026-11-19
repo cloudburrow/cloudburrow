@@ -320,6 +320,10 @@ func TestConversationRequestsAreValidatedAsVertexValidatesThem(t *testing.T) {
 		"response without call": {`{"contents":[` + user + `,{"role":"user","parts":[{"functionResponse":{"name":"f","response":{}}}]}]}`, 400, "immediately after a function call"},
 		"count mismatch": {`{"contents":[` + user + `,{"role":"model","parts":[{"functionCall":{"name":"get_weather"}},{"functionCall":{"name":"get_weather"}}]},` +
 			`{"role":"user","parts":[{"functionResponse":{"name":"get_weather","response":{}}}]}],` + weatherTool + `}`, 400, "number of function response parts"},
+		"response name mismatch": {`{"contents":[` + user + `,` + call + `,` +
+			`{"role":"user","parts":[{"functionResponse":{"name":"get_time","response":{}}}]}],` + weatherTool + `}`, 400, "matches no functionCall"},
+		"response id mismatch": {`{"contents":[` + user + `,{"role":"model","parts":[{"functionCall":{"id":"c1","name":"get_weather"}}]},` +
+			`{"role":"user","parts":[{"functionResponse":{"id":"c1","name":"get_time","response":{}}}]}],` + weatherTool + `}`, 400, "must match the name of its functionCall"},
 		"call not answered":  {`{"contents":[` + user + `,` + call + `,` + user + `]}`, 400, "immediately after a function call"},
 		"empty part":         {`{"contents":[{"role":"user","parts":[{}]}]}`, 400, "empty text parameter"},
 		"pdf":                {`{"contents":[{"role":"user","parts":[{"inlineData":{"mimeType":"application/pdf","data":"AA=="}}]}]}`, 400, `application/pdf`},
