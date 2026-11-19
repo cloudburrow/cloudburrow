@@ -385,6 +385,8 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 	d.Actions = append(d.Actions, demoteActions(in)...)
 	d.Actions = append(d.Actions, dataAPIActions(ctx, svc, project, in)...)
 	d.Actions = append(d.Actions, storageActions(in)...)
+	d.Actions = append(d.Actions, maintenanceActions(in)...)
+	d.Summary = append(d.Summary, maintenanceSummary(in)...)
 	if pitr == "On" && strings.HasPrefix(in.DatabaseVersion, "MYSQL_") {
 		d.Actions = append(d.Actions, console.Action{ID: "binlog-clone", Label: "Clone to binary log position", Fields: []console.Field{
 			{Name: "destination", Label: "New instance ID", Type: "text", Required: true, Pattern: "^[a-z][a-z0-9\\-]{0,53}[a-z0-9]$",
@@ -1196,6 +1198,9 @@ func (p cloudSQLInstancesProvider) actAt(ctx context.Context, project string, pa
 			return err
 		}
 		if ok, err := storageAct(ctx, svc, project, name, action, v); ok {
+			return err
+		}
+		if ok, err := p.maintenanceAct(ctx, svc, project, name, action, v); ok {
 			return err
 		}
 		return fmt.Errorf("unknown action %q", action)

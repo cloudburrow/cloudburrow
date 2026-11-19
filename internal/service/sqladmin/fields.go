@@ -331,7 +331,10 @@ func checkInstanceFields(body []byte) error {
 	if err := checkFields("settings", settingsFields, st); err != nil {
 		return err
 	}
-	return checkIPConfiguration(st["ipConfiguration"])
+	if err := checkIPConfiguration(st["ipConfiguration"]); err != nil {
+		return err
+	}
+	return checkMaintenanceSettings(st)
 }
 
 // checkIPConfiguration checks the server CA settings' values: every mode

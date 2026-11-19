@@ -153,7 +153,25 @@ Refused with 501, each naming what is missing:
 | Methods | Why |
 |---|---|
 | Entra ID certificates, `acquireSsrsLease`, `releaseSsrsLease` | SQL Server features; CloudBurrow runs PostgreSQL and MySQL |
-| `rescheduleMaintenance` | no Google-managed maintenance is ever scheduled: an instance's server is its version's pinned image, replaced when CloudBurrow itself is upgraded, so `scheduledMaintenance` is never set. The request is checked first (#1524): no `reschedule`, no `rescheduleType`, or `SPECIFIC_TIME` without an RFC 3339 `scheduleTime` is 400 |
+
+### Maintenance (#1524)
+
+Google never updates CloudBurrow's servers (each is its version's pinned image), so a maintenance event is scheduled locally instead, standing in for the update Google would schedule. This is **CloudBurrow's own control endpoint, not a Cloud SQL API**:
+
+```
+POST http://<sqladmin>/cloudburrow/v1/projects/PROJECT/instances/INSTANCE:scheduleMaintenance
+{"startTime": "2026-12-06T03:00:00Z", "scheduleDeadlineTime": "..."}   # both optional
+POST http://<sqladmin>/cloudburrow/v1/projects/PROJECT/instances/INSTANCE:cancelMaintenance
+```
+
+or the console's **Schedule maintenance (CloudBurrow)** and **Cancel maintenance (CloudBurrow)** on a created instance's page. From then on the event behaves as Google documents it (docs.cloud.google.com/sql/docs/mysql/maintenance and set-maintenance-window, read 2026-11-18):
+
+- `instances.get` reports `scheduledMaintenance` (`startTime`, `canReschedule`, `canDefer`, `scheduleDeadlineTime`). With no `startTime`, the event starts in the first `settings.maintenanceWindow` (day 1 Monday to 7 Sunday, 0 any day; hour UTC) at least a week away, the notice Google gives. The deadline is 28 days after the start, 7 on the `week5` update track.
+- `instances.rescheduleMaintenance` (and `gcloud sql reschedule-maintenance`): `IMMEDIATE` starts it now; `NEXT_AVAILABLE_WINDOW` moves it to the next window after its current start; `SPECIFIC_TIME` to `scheduleTime`, no earlier than the current start (gcloud checks this itself: "Must be after original scheduled time") and no later than the deadline. The answer is a `RESCHEDULE_MAINTENANCE` operation. It is 400 with no scheduled event (the instances `up` runs never have one), within 24 hours of the start (`canReschedule` false), or before the current start or past the deadline; the messages for the first two are gcloud's own client-side ones.
+- At its start the instance is `MAINTENANCE`, its server restarted (connections dropped) in a `MAINTENANCE` operation, then `RUNNABLE`, with no `scheduledMaintenance`. It is skipped when a deny maintenance period holds the start (a replica's primary's too) or the instance is stopped, and waits while another operation runs.
+- `settings.denyMaintenancePeriods` holds at most one period, of 1 to 90 days, `yyyy-mm-dd` or recurring `mm-dd`; `maintenanceWindow` day and hour are checked.
+
+UNVERIFIED (re-read 2026-11-18: https://docs.cloud.google.com/sql/docs/mysql/set-maintenance-window and /maintenance give none of them): the errors' wording; `NEXT_AVAILABLE_WINDOW` with no window set moves the event a week; `canDefer` (deprecated) equals `canReschedule`.
 
 ### Imports and exports (#1380)
 

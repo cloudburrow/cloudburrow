@@ -109,6 +109,9 @@ type Spec struct {
 	// deployment's switchover (#1614) moves the blue instance's name to
 	// the green instance's server, and the green name to the blue's.
 	Server string `json:"server,omitempty"`
+	// Maintenance is the maintenance event scheduled on the instance
+	// (#1524, maintenance.go), nil while none is.
+	Maintenance *Maintenance `json:"scheduledMaintenance,omitempty"`
 }
 
 // ServerName is the name of the instance's server in the cluster.
@@ -1096,6 +1099,7 @@ func (s *Server) createdJSON(ctx context.Context, base string, c *created) (map[
 	s.replicationClusterJSON(in, spec)
 	s.casInstanceJSON(in, spec)
 	s.blueGreenInfoJSON(in, spec)
+	maintenanceJSON(in, spec, time.Now())
 	return in, nil
 }
 

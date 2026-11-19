@@ -78,7 +78,7 @@ var Methods = []Method{
 	{"sql.projects.instances.getDiskShrinkConfig", "GET", "v1/projects/{project}/instances/{instance}/getDiskShrinkConfig", true},
 	{"sql.projects.instances.getLatestRecoveryTime", "GET", "v1/projects/{project}/instances/{instance}/getLatestRecoveryTime", true},
 	{"sql.projects.instances.performDiskShrink", "POST", "v1/projects/{project}/instances/{instance}/performDiskShrink", true},
-	{"sql.projects.instances.rescheduleMaintenance", "POST", "v1/projects/{project}/instances/{instance}/rescheduleMaintenance", false},
+	{"sql.projects.instances.rescheduleMaintenance", "POST", "v1/projects/{project}/instances/{instance}/rescheduleMaintenance", true},
 	{"sql.projects.instances.resetReplicaSize", "POST", "v1/projects/{project}/instances/{instance}/resetReplicaSize", true},
 	{"sql.projects.instances.startExternalSync", "POST", "v1/projects/{project}/instances/{instance}/startExternalSync", true},
 	{"sql.projects.instances.verifyExternalSyncSettings", "POST", "v1/projects/{project}/instances/{instance}/verifyExternalSyncSettings", true},

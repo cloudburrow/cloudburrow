@@ -11057,8 +11057,8 @@
     "Key": "sqladmin",
     "Title": "Cloud SQL Admin API (v1)",
     "counts": {
-      "Unimplemented": 6,
-      "Verified": 74
+      "Unimplemented": 5,
+      "Verified": 75
     },
     "rows": [
       {
@@ -11513,6 +11513,7 @@
           "test/compat/cloudsqlinstances_test.go:285 TestGcloudSQLInstances",
           "test/compat/cloudsqlinstances_test.go:312 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlinstances_test.go:58 TestCloudSQLInstanceWrites",
+          "test/compat/cloudsqlmaintenance_test.go:51 TestCloudSQLRescheduleMaintenance",
           "test/compat/cloudsqlmysql57_test.go:29 TestCloudSQLMySQL57",
           "test/compat/cloudsqlmysql57_test.go:32 TestCloudSQLMySQL56",
           "test/compat/cloudsqlphysical_test.go:37 TestCloudSQLExternalMySQLPhysical",
@@ -11855,6 +11856,7 @@
         "method": "sql.operations.list",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudsqlmaintenance_test.go:51 TestCloudSQLRescheduleMaintenance",
           "test/compat/sqladmin_test.go:279 TestSQLAdminDatabasesAndUsersAreTheServers"
         ]
       },
@@ -11884,11 +11886,10 @@
       },
       {
         "method": "sql.projects.instances.rescheduleMaintenance",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/cloudsqladminverbs_test.go:309 TestCloudSQLRefusedMethods"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check): CloudBurrow's servers have no Google-managed maintenance: no maintenance event is ever scheduled (scheduledMaintenance is never set), so there is none to reschedule (re-read 2026-11-17, #1524: Google documents the reschedule types and the 28-day limit for a scheduled event, and no answer for an instance with none, so there is nothing to emulate the call against)"
+          "test/compat/cloudsqlmaintenance_test.go:51 TestCloudSQLRescheduleMaintenance"
+        ]
       },
       {
         "method": "sql.projects.instances.resetReplicaSize",
