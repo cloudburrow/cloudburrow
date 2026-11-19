@@ -3,14 +3,17 @@
 package compat
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"testing"
 
 	crmv1 "google.golang.org/api/cloudresourcemanager/v1"
 	"google.golang.org/api/option"
 	su "google.golang.org/api/serviceusage/v1"
+	subeta "google.golang.org/api/serviceusage/v1beta1"
 )
 
 // EnvServiceUsage is the Service Usage API v1 endpoint (#1352).
@@ -311,5 +314,97 @@ func TestServiceUsageOperations(t *testing.T) {
 	if _, err := c.Operations.List().Filter("done=true").Context(ctx).Do(); httpCode(err) != http.StatusNotImplemented ||
 		!strings.Contains(err.Error(), "filter") {
 		t.Errorf("list with a filter = %v; want 501 naming the filter", err)
+	}
+}
+
+// TestServiceUsageGenerateServiceIdentity (#1834), with
+// google.golang.org/api/serviceusage/v1beta1, the client and version
+// gcloud's privateca roots create --kms-key-version and --bucket call:
+// services.generateServiceIdentity answers a done operation whose
+// ServiceIdentity is the service's primary service agent in the project,
+// as https://cloud.google.com/iam/docs/service-agents lists it
+// (service-NUMBER@gcp-sa-privateca for Certificate Authority Service,
+// gcp-sa-ekms for Cloud KMS, gcp-sa-pubsub, gcp-sa-secretmanager,
+// serverless-robot-prod for Cloud Run, ...), with a 21-digit uniqueId, the
+// same at every call; a service with no primary agent (Cloud Storage,
+// Cloud Logging) answers an empty ServiceIdentity, as gcloud documents; an
+// API CloudBurrow does not serve is refused as enable refuses it.
+func TestServiceUsageGenerateServiceIdentity(t *testing.T) {
+	h := New(t)
+	addr := h.Endpoint(EnvServiceUsage)
+	c, err := subeta.NewService(h.Context(), option.WithEndpoint("http://"+addr+"/"), option.WithoutAuthentication(), option.WithHTTPClient(http.DefaultClient))
+	if err != nil {
+		t.Fatal(err)
+	}
+	v1 := serviceUsageClient(t, h)
+	p := "projects/" + h.Project()
+	gen := func(svc string) (*subeta.Operation, map[string]any, error) {
+		op, err := c.Services.GenerateServiceIdentity(p + "/services/" + svc).Context(h.Context()).Do()
+		if err != nil {
+			return nil, nil, err
+		}
+		var resp map[string]any
+		return op, resp, json.Unmarshal(op.Response, &resp)
+	}
+	agents := []struct{ svc, domain string }{
+		{"privateca.googleapis.com", "gcp-sa-privateca.iam.gserviceaccount.com"},
+		{"cloudkms.googleapis.com", "gcp-sa-ekms.iam.gserviceaccount.com"},
+		{"pubsub.googleapis.com", "gcp-sa-pubsub.iam.gserviceaccount.com"},
+		{"secretmanager.googleapis.com", "gcp-sa-secretmanager.iam.gserviceaccount.com"},
+		{"run.googleapis.com", "serverless-robot-prod.iam.gserviceaccount.com"},
+		{"storage.googleapis.com", ""},
+		{"logging.googleapis.com", ""},
+	}
+	// A fresh project has every API the instance serves ENABLED.
+	list, err := v1.Services.List(p).Filter("state:ENABLED").Context(h.Context()).Do()
+	if err != nil {
+		t.Fatal(err)
+	}
+	served := map[string]bool{}
+	for _, s := range list.Services {
+		served[s.Config.Name] = true
+	}
+	tested := 0
+	number := ""
+	for _, a := range agents {
+		if !served[a.svc] {
+			t.Logf("%s: not served by this instance, skipped", a.svc)
+			continue
+		}
+		tested++
+		op, r, err := gen(a.svc)
+		if err != nil {
+			t.Errorf("%s: %v", a.svc, err)
+			continue
+		}
+		if !op.Done || r["@type"] != "type.googleapis.com/google.api.serviceusage.v1beta1.ServiceIdentity" {
+			t.Errorf("%s: %+v, %v; want a done operation with a ServiceIdentity", a.svc, op, r)
+			continue
+		}
+		if a.domain == "" {
+			if len(r) != 1 {
+				t.Errorf("%s: %v; want an empty ServiceIdentity, it has no primary service agent", a.svc, r)
+			}
+			continue
+		}
+		email, _ := r["email"].(string)
+		m := regexp.MustCompile(`^service-([0-9]{12})@` + regexp.QuoteMeta(a.domain) + `$`).FindStringSubmatch(email)
+		if m == nil || !regexp.MustCompile(`^[0-9]{21}$`).MatchString(fmt.Sprint(r["uniqueId"])) {
+			t.Errorf("%s: %v; want service-NUMBER@%s with a 21-digit uniqueId", a.svc, r, a.domain)
+			continue
+		}
+		if number != "" && m[1] != number {
+			t.Errorf("%s: project number %s; another agent has %s", a.svc, m[1], number)
+		}
+		number = m[1]
+		if _, b, err := gen(a.svc); err != nil || b["email"] != email || b["uniqueId"] != r["uniqueId"] {
+			t.Errorf("%s: a second call = %v, %v; want the same agent %s", a.svc, b, err, email)
+		}
+	}
+	if tested == 0 {
+		t.Skip("this instance serves none of the services this test asks for")
+	}
+	if _, _, err := gen("nosuch.googleapis.com"); httpCode(err) != http.StatusBadRequest {
+		t.Errorf("an API CloudBurrow does not serve: %v; want 400", err)
 	}
 }

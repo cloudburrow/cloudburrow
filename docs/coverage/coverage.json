@@ -12032,71 +12032,71 @@
         "method": "serviceusage.operations.cancel",
         "status": "Verified",
         "tests": [
-          "test/compat/serviceusage_test.go:256 TestServiceUsageOperations"
+          "test/compat/serviceusage_test.go:259 TestServiceUsageOperations"
         ]
       },
       {
         "method": "serviceusage.operations.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/serviceusage_test.go:256 TestServiceUsageOperations"
+          "test/compat/serviceusage_test.go:259 TestServiceUsageOperations"
         ]
       },
       {
         "method": "serviceusage.operations.get",
         "status": "Verified",
         "tests": [
-          "test/compat/serviceusage_test.go:256 TestServiceUsageOperations",
-          "test/compat/serviceusage_test.go:47 TestServiceUsageServices"
+          "test/compat/serviceusage_test.go:259 TestServiceUsageOperations",
+          "test/compat/serviceusage_test.go:50 TestServiceUsageServices"
         ]
       },
       {
         "method": "serviceusage.operations.list",
         "status": "Verified",
         "tests": [
-          "test/compat/serviceusage_test.go:256 TestServiceUsageOperations"
+          "test/compat/serviceusage_test.go:259 TestServiceUsageOperations"
         ]
       },
       {
         "method": "serviceusage.services.batchEnable",
         "status": "Verified",
         "tests": [
-          "test/compat/serviceusage_test.go:146 TestTerraformProjectService",
-          "test/compat/serviceusage_test.go:47 TestServiceUsageServices"
+          "test/compat/serviceusage_test.go:149 TestTerraformProjectService",
+          "test/compat/serviceusage_test.go:50 TestServiceUsageServices"
         ]
       },
       {
         "method": "serviceusage.services.batchGet",
         "status": "Verified",
         "tests": [
-          "test/compat/serviceusage_test.go:47 TestServiceUsageServices"
+          "test/compat/serviceusage_test.go:50 TestServiceUsageServices"
         ]
       },
       {
         "method": "serviceusage.services.disable",
         "status": "Verified",
         "tests": [
-          "test/compat/serviceusage_test.go:146 TestTerraformProjectService",
-          "test/compat/serviceusage_test.go:217 TestGcloudServices",
-          "test/compat/serviceusage_test.go:47 TestServiceUsageServices"
+          "test/compat/serviceusage_test.go:149 TestTerraformProjectService",
+          "test/compat/serviceusage_test.go:220 TestGcloudServices",
+          "test/compat/serviceusage_test.go:50 TestServiceUsageServices"
         ]
       },
       {
         "method": "serviceusage.services.enable",
         "status": "Verified",
         "tests": [
-          "test/compat/serviceusage_test.go:146 TestTerraformProjectService",
-          "test/compat/serviceusage_test.go:217 TestGcloudServices",
-          "test/compat/serviceusage_test.go:47 TestServiceUsageServices"
+          "test/compat/serviceusage_test.go:149 TestTerraformProjectService",
+          "test/compat/serviceusage_test.go:220 TestGcloudServices",
+          "test/compat/serviceusage_test.go:50 TestServiceUsageServices"
         ]
       },
       {
         "method": "serviceusage.services.get",
         "status": "Verified",
         "tests": [
-          "test/compat/serviceusage_test.go:146 TestTerraformProjectService",
-          "test/compat/serviceusage_test.go:217 TestGcloudServices",
-          "test/compat/serviceusage_test.go:47 TestServiceUsageServices"
+          "test/compat/serviceusage_test.go:149 TestTerraformProjectService",
+          "test/compat/serviceusage_test.go:220 TestGcloudServices",
+          "test/compat/serviceusage_test.go:50 TestServiceUsageServices"
         ]
       },
       {
@@ -12104,9 +12104,9 @@
         "status": "Verified",
         "tests": [
           "test/compat/loggingparents_test.go:278 TestServiceUsageFolderParentRefused",
-          "test/compat/serviceusage_test.go:146 TestTerraformProjectService",
-          "test/compat/serviceusage_test.go:217 TestGcloudServices",
-          "test/compat/serviceusage_test.go:47 TestServiceUsageServices"
+          "test/compat/serviceusage_test.go:149 TestTerraformProjectService",
+          "test/compat/serviceusage_test.go:220 TestGcloudServices",
+          "test/compat/serviceusage_test.go:50 TestServiceUsageServices"
         ]
       }
     ]
@@ -13021,8 +13021,8 @@
         "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/ActivateCertificateAuthority",
         "status": "Verified",
         "tests": [
-          "test/compat/privateca_cli_test.go:135 TestTerraformPrivateCA",
-          "test/compat/privateca_cli_test.go:30 TestGcloudPrivateCA",
+          "test/compat/privateca_cli_test.go:141 TestTerraformPrivateCA",
+          "test/compat/privateca_cli_test.go:36 TestGcloudPrivateCA",
           "test/compat/privateca_phase2_test.go:50 TestPrivateCASubordinatesTemplatesAndCRLs"
         ]
       },
@@ -13030,8 +13030,9 @@
         "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/CreateCaPool",
         "status": "Verified",
         "tests": [
-          "test/compat/privateca_cli_test.go:135 TestTerraformPrivateCA",
-          "test/compat/privateca_cli_test.go:30 TestGcloudPrivateCA",
+          "test/compat/privateca_cli_test.go:141 TestTerraformPrivateCA",
+          "test/compat/privateca_cli_test.go:323 TestGcloudPrivateCAKMSKeyBucketAndCMEK",
+          "test/compat/privateca_cli_test.go:36 TestGcloudPrivateCA",
           "test/compat/privateca_kms_test.go:101 TestPrivateCAKMSKeysCMEKAndIssuanceRules",
           "test/compat/privateca_kms_test.go:429 TestTerraformPrivateCAKMSKeyAndTemplateRules",
           "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
@@ -13041,8 +13042,9 @@
         "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/CreateCertificate",
         "status": "Verified",
         "tests": [
-          "test/compat/privateca_cli_test.go:135 TestTerraformPrivateCA",
-          "test/compat/privateca_cli_test.go:30 TestGcloudPrivateCA",
+          "test/compat/privateca_cli_test.go:141 TestTerraformPrivateCA",
+          "test/compat/privateca_cli_test.go:323 TestGcloudPrivateCAKMSKeyBucketAndCMEK",
+          "test/compat/privateca_cli_test.go:36 TestGcloudPrivateCA",
           "test/compat/privateca_kms_test.go:101 TestPrivateCAKMSKeysCMEKAndIssuanceRules",
           "test/compat/privateca_kms_test.go:429 TestTerraformPrivateCAKMSKeyAndTemplateRules",
           "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
@@ -13052,8 +13054,9 @@
         "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/CreateCertificateAuthority",
         "status": "Verified",
         "tests": [
-          "test/compat/privateca_cli_test.go:135 TestTerraformPrivateCA",
-          "test/compat/privateca_cli_test.go:30 TestGcloudPrivateCA",
+          "test/compat/privateca_cli_test.go:141 TestTerraformPrivateCA",
+          "test/compat/privateca_cli_test.go:323 TestGcloudPrivateCAKMSKeyBucketAndCMEK",
+          "test/compat/privateca_cli_test.go:36 TestGcloudPrivateCA",
           "test/compat/privateca_kms_test.go:101 TestPrivateCAKMSKeysCMEKAndIssuanceRules",
           "test/compat/privateca_kms_test.go:307 TestPrivateCAPublishesToGCSBucket",
           "test/compat/privateca_kms_test.go:429 TestTerraformPrivateCAKMSKeyAndTemplateRules",
@@ -13064,8 +13067,8 @@
         "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/CreateCertificateTemplate",
         "status": "Verified",
         "tests": [
-          "test/compat/privateca_cli_test.go:135 TestTerraformPrivateCA",
-          "test/compat/privateca_cli_test.go:30 TestGcloudPrivateCA",
+          "test/compat/privateca_cli_test.go:141 TestTerraformPrivateCA",
+          "test/compat/privateca_cli_test.go:36 TestGcloudPrivateCA",
           "test/compat/privateca_kms_test.go:101 TestPrivateCAKMSKeysCMEKAndIssuanceRules",
           "test/compat/privateca_kms_test.go:429 TestTerraformPrivateCAKMSKeyAndTemplateRules",
           "test/compat/privateca_phase2_test.go:50 TestPrivateCASubordinatesTemplatesAndCRLs"
@@ -13075,7 +13078,7 @@
         "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/DeleteCaPool",
         "status": "Verified",
         "tests": [
-          "test/compat/privateca_cli_test.go:135 TestTerraformPrivateCA",
+          "test/compat/privateca_cli_test.go:141 TestTerraformPrivateCA",
           "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
         ]
       },
@@ -13083,7 +13086,7 @@
         "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/DeleteCertificateAuthority",
         "status": "Verified",
         "tests": [
-          "test/compat/privateca_cli_test.go:135 TestTerraformPrivateCA",
+          "test/compat/privateca_cli_test.go:141 TestTerraformPrivateCA",
           "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
         ]
       },
@@ -13091,7 +13094,7 @@
         "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/DeleteCertificateTemplate",
         "status": "Verified",
         "tests": [
-          "test/compat/privateca_cli_test.go:135 TestTerraformPrivateCA",
+          "test/compat/privateca_cli_test.go:141 TestTerraformPrivateCA",
           "test/compat/privateca_phase2_test.go:50 TestPrivateCASubordinatesTemplatesAndCRLs"
         ]
       },
@@ -13099,7 +13102,7 @@
         "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/DisableCertificateAuthority",
         "status": "Verified",
         "tests": [
-          "test/compat/privateca_cli_test.go:135 TestTerraformPrivateCA",
+          "test/compat/privateca_cli_test.go:141 TestTerraformPrivateCA",
           "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
         ]
       },
@@ -13107,8 +13110,9 @@
         "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/EnableCertificateAuthority",
         "status": "Verified",
         "tests": [
-          "test/compat/privateca_cli_test.go:135 TestTerraformPrivateCA",
-          "test/compat/privateca_cli_test.go:30 TestGcloudPrivateCA",
+          "test/compat/privateca_cli_test.go:141 TestTerraformPrivateCA",
+          "test/compat/privateca_cli_test.go:323 TestGcloudPrivateCAKMSKeyBucketAndCMEK",
+          "test/compat/privateca_cli_test.go:36 TestGcloudPrivateCA",
           "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
         ]
       },
@@ -13124,8 +13128,8 @@
         "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/FetchCertificateAuthorityCsr",
         "status": "Verified",
         "tests": [
-          "test/compat/privateca_cli_test.go:135 TestTerraformPrivateCA",
-          "test/compat/privateca_cli_test.go:30 TestGcloudPrivateCA",
+          "test/compat/privateca_cli_test.go:141 TestTerraformPrivateCA",
+          "test/compat/privateca_cli_test.go:36 TestGcloudPrivateCA",
           "test/compat/privateca_phase2_test.go:50 TestPrivateCASubordinatesTemplatesAndCRLs"
         ]
       },
@@ -13133,7 +13137,7 @@
         "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/GetCaPool",
         "status": "Verified",
         "tests": [
-          "test/compat/privateca_cli_test.go:135 TestTerraformPrivateCA",
+          "test/compat/privateca_cli_test.go:141 TestTerraformPrivateCA",
           "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
         ]
       },
@@ -13141,7 +13145,7 @@
         "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/GetCertificate",
         "status": "Verified",
         "tests": [
-          "test/compat/privateca_cli_test.go:135 TestTerraformPrivateCA",
+          "test/compat/privateca_cli_test.go:141 TestTerraformPrivateCA",
           "test/compat/privateca_kms_test.go:101 TestPrivateCAKMSKeysCMEKAndIssuanceRules",
           "test/compat/privateca_kms_test.go:429 TestTerraformPrivateCAKMSKeyAndTemplateRules",
           "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
@@ -13151,7 +13155,7 @@
         "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/GetCertificateAuthority",
         "status": "Verified",
         "tests": [
-          "test/compat/privateca_cli_test.go:135 TestTerraformPrivateCA",
+          "test/compat/privateca_cli_test.go:141 TestTerraformPrivateCA",
           "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
         ]
       },
@@ -13166,7 +13170,7 @@
         "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/GetCertificateTemplate",
         "status": "Verified",
         "tests": [
-          "test/compat/privateca_cli_test.go:135 TestTerraformPrivateCA",
+          "test/compat/privateca_cli_test.go:141 TestTerraformPrivateCA",
           "test/compat/privateca_kms_test.go:429 TestTerraformPrivateCAKMSKeyAndTemplateRules",
           "test/compat/privateca_phase2_test.go:50 TestPrivateCASubordinatesTemplatesAndCRLs"
         ]
@@ -13211,7 +13215,7 @@
         "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/RevokeCertificate",
         "status": "Verified",
         "tests": [
-          "test/compat/privateca_cli_test.go:30 TestGcloudPrivateCA",
+          "test/compat/privateca_cli_test.go:36 TestGcloudPrivateCA",
           "test/compat/privateca_kms_test.go:307 TestPrivateCAPublishesToGCSBucket",
           "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
         ]

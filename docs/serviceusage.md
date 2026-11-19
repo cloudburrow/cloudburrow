@@ -63,10 +63,50 @@ forgets one, so `get` and a second `delete` are 404, and the change it made stay
 console's **Service Usage operations** page (`/apis/operations`) lists a project's operations with
 Delete.
 
+## Service identities
+
+`v1beta1` `services.generateServiceIdentity` (`gcloud beta services identity create`, and `gcloud
+privateca roots create --kms-key-version` or `--bucket` before granting the Certificate Authority
+Service agent its roles on the key and the bucket, #1834) answers a done operation
+(`operations/finished.DONE_OPERATION`) whose `ServiceIdentity` is the service's *primary* service
+agent in the project: Google defines primary service agents as "service agents whose email address
+is returned when you trigger service agent creation"
+([service account types](https://cloud.google.com/iam/docs/service-account-types#service-agents)),
+and [Google's service agent list](https://cloud.google.com/iam/docs/service-agents) marks each
+service's. The email is `service-PROJECT_NUMBER@DOMAIN` (the project's 12-digit number) with a
+21-digit `uniqueId` that stays the same, as IAM's service account IDs are.
+
+| API | Primary service agent domain (`.iam.gserviceaccount.com`) |
+|---|---|
+| `privateca.googleapis.com` | `gcp-sa-privateca` |
+| `cloudkms.googleapis.com` | `gcp-sa-ekms` (the External Key Management Service agent, which [Create an EKM connection](https://cloud.google.com/kms/docs/create-ekm-connection) creates this way; the Cloud KMS Service Agent `gcp-sa-cloudkms` is not primary) |
+| `pubsub.googleapis.com` | `gcp-sa-pubsub` |
+| `secretmanager.googleapis.com` | `gcp-sa-secretmanager` ([Secret Manager CMEK](https://cloud.google.com/secret-manager/docs/cmek)) |
+| `sqladmin.googleapis.com` | `gcp-sa-cloud-sql` ([Cloud SQL CMEK](https://cloud.google.com/sql/docs/mysql/configure-cmek)) |
+| `cloudtasks.googleapis.com` | `gcp-sa-cloudtasks` |
+| `cloudscheduler.googleapis.com` | `gcp-sa-cloudscheduler` |
+| `run.googleapis.com` | `serverless-robot-prod` |
+| `firestore.googleapis.com` | `gcp-sa-firestore` |
+| `bigtableadmin.googleapis.com` | `gcp-sa-bigtable` |
+| `spanner.googleapis.com` | `gcp-sa-spanner` |
+| `redis.googleapis.com` | `cloud-redis` |
+| `backupdr.googleapis.com` | `gcp-sa-backupdr` |
+
+The other served APIs have no primary service agent in Google's list: `logging` (its agents,
+`gcp-sa-logging` among them, are not primary; Logging names its CMEK account through
+`getCmekSettings`), `storage` (`gs-project-accounts`, named through `projects.serviceAccount.get`),
+`bigquery`, `bigquerystorage`, `datastore`, `bigtable` (the data API), `cloudresourcemanager` and
+`serviceusage`. For them the operation's `ServiceIdentity` is empty, which gcloud's
+`GenerateServiceIdentity` documents ("If service does not have a default identity, the response
+will be an empty dictionary") and `services identity create` reports as "Service identity
+created" with no email. An API CloudBurrow serves but has not looked up is 501 naming it, never a
+guessed agent (a unit test fails when a newly served API is missing from both lists); an API the
+instance does not serve is refused as `:enable` refuses it.
+
 ## Not served
 
 - Folders and organizations as parents (501): the enabled set is kept per project.
-- Consumer quota, `v1beta1`, `v2` and `v2beta`: gcloud's `services` commands that call them
+- Consumer quota, the rest of `v1beta1`, `v2` and `v2beta`: gcloud's `services` commands that call them
   (`services quota`, `services policies`, group and dependency listings) are not served and fail
   locally, never at Google, through `gcloud-setup`'s override.
 

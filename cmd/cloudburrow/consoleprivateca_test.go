@@ -21,8 +21,14 @@ import (
 
 func privateCAFixture(t *testing.T) (privateCAProvider, *privatecaapi.CertificateAuthorityClient) {
 	t.Helper()
+	return privateCAFixtureWith(t, nil)
+}
+
+// privateCAFixtureWith is privateCAFixture with the instance's Cloud KMS.
+func privateCAFixtureWith(t *testing.T, k *kmsService) (privateCAProvider, *privatecaapi.CertificateAuthorityClient) {
+	t.Helper()
 	ctx := context.Background()
-	svc := &privateCAService{cfg: config.Config{BindAddress: "127.0.0.1"}}
+	svc := &privateCAService{cfg: config.Config{BindAddress: "127.0.0.1"}, kms: k}
 	if err := svc.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
