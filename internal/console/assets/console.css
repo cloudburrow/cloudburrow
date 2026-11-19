@@ -1709,6 +1709,7 @@ tr.is-inspected { background: var(--nav-selected); }
 .listing-summary { margin-bottom: 16px; }
 .listing-summary dd { overflow-wrap: anywhere; }
 /* A screen of summary cards alone (#1854): Cloud Build's Dashboard, a card per trigger. */
+/* min(): a card is never wider than a 320px window less its gutter (#1930). */
 .summary-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr)); gap: 16px; }
 .summary-cards .listing-summary { margin-bottom: 0; }
 
@@ -2285,3 +2286,8 @@ svg.bq-chart { display: block; border: 1px solid var(--border); border-radius: v
 .api-facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 24px; margin: 12px 0; }
 .api-facts dt { color: var(--text-muted); }
 .api-facts dd { margin: 0; }
+
+/* An action's answer text (#1930): Document AI's extracted text, a
+   transcript. Scrolls inside the dialog rather than stretching it. */
+.result-text { font-family: var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 40vh;
+  overflow: auto; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-alt); }

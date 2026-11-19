@@ -415,6 +415,24 @@ const ROUTES = [
     section: "AI and machine learning", product: "vertexai", productTitle: "Agent Platform" },
   ...AP_ROUTES.slice(AP_ROUTES.findIndex((r) => r.path === AP_PATHS.predict)),
 
+  // Document AI (#1930), its menu in Google's order: Overview, Processor
+  // gallery (Google's /ai/document-ai/processor-library) and My processors
+  // (/ai/document-ai/processors). Served by the local AI endpoint (#1799):
+  // Enterprise Document OCR and Layout Parser run here, every other type
+  // in the gallery says it is not available locally.
+  { path: "/document-ai/overview", service: "documentai-overview", icon: "ai", title: "Overview",
+    section: "AI and machine learning", product: "documentai", productTitle: "Document AI" },
+  { path: "/document-ai/processor-library", service: "documentai-gallery", icon: "ai", title: "Processor gallery",
+    section: "AI and machine learning", product: "documentai", productTitle: "Document AI" },
+  { path: "/document-ai/processors", service: "documentai", icon: "ai", title: "My processors", kind: "Processor",
+    section: "AI and machine learning", product: "documentai", productTitle: "Document AI" },
+  // Speech-to-Text (#1930): Transcriptions, where Google's console opens,
+  // and Recognizers, Speech-to-Text v2's, on the local AI endpoint.
+  { path: "/speech/transcriptions", service: "speech-transcriptions", icon: "ai", title: "Transcriptions",
+    section: "AI and machine learning", product: "speech", productTitle: "Speech-to-Text" },
+  { path: "/speech/recognizers", service: "speech-recognizers", icon: "ai", title: "Recognizers", kind: "Recognizer",
+    section: "AI and machine learning", product: "speech", productTitle: "Speech-to-Text" },
+
   // Secret Manager (#1850): Google's menu, Secret Manager (the global
   // secrets), Regional secrets and Settings.
   { path: "/secrets", service: "secrets", title: "Secret Manager", navTitle: "Secret Manager", kind: "Secret",
@@ -4662,6 +4680,10 @@ function resultTable(listing, at = null) {
   }));
   return el("div", {},
     listing.note ? el("p", { class: "form-help", id: "action-result-note", text: listing.note }) : null,
+    // An answer's text, line breaks kept: a test document's extracted
+    // text, a transcript (#1930).
+    listing.text ? el("pre", { class: "result-text", id: "action-result-text", tabindex: "0",
+      "aria-label": "Result text", text: listing.text }) : null,
     items.length
       ? el("table", { class: "table", id: "action-result-table" },
           el("thead", {}, el("tr", {},
