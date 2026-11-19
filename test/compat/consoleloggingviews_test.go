@@ -105,8 +105,9 @@ func TestConsoleLogsExplorerThroughView(t *testing.T) {
 		consoleDetail
 	}
 	consoleJSON(t, addr, http.MethodGet, "/api/detail/logging-buckets?"+url.Values{"project": {project}, "name": {bucket}}.Encode(), "", &d)
-	if !strings.Contains(fmt.Sprint(d.Summary), "{Retention 1 days}") {
-		t.Errorf("the bucket's page summary is %+v; want Retention 1 days", d.Summary)
+	// "Retention period", as Google's Logs Storage page labels it (#1863).
+	if !strings.Contains(fmt.Sprint(d.Summary), "{Retention period 1 days}") {
+		t.Errorf("the bucket's page summary is %+v; want Retention period 1 days", d.Summary)
 	}
 
 	sctx, stop := context.WithCancel(ctx)
