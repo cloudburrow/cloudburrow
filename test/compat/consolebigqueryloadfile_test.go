@@ -23,10 +23,17 @@ import (
 // upload route, as the form does: the action's request, then the file.
 func consoleLoadFile(t *testing.T, addr, project string, path []string, values map[string]string, filename string, data []byte) (int, string) {
 	t.Helper()
+	return consoleUploadAction(t, addr, project, path, "loadfile", values, filename, data)
+}
+
+// consoleUploadAction posts any BigQuery action whose form holds a file,
+// such as Create table from Upload (#1861).
+func consoleUploadAction(t *testing.T, addr, project string, path []string, action string, values map[string]string, filename string, data []byte) (int, string) {
+	t.Helper()
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
 	w, _ := mw.CreateFormField("request")
-	_ = json.NewEncoder(w).Encode(map[string]any{"Path": path, "Action": "loadfile", "Values": values})
+	_ = json.NewEncoder(w).Encode(map[string]any{"Path": path, "Action": action, "Values": values})
 	part, _ := mw.CreateFormFile("file", filename)
 	_, _ = part.Write(data)
 	_ = mw.Close()

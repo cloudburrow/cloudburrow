@@ -228,6 +228,11 @@ func blankCheckDeps(t *testing.T) consoleDeps {
 	if _, err := d.projects.EnsureExists(blankProject); err != nil {
 		t.Fatal(err)
 	}
+	// IAM & Admin > Labels (#1864) lists the project's labels; an empty
+	// value is one of Google's.
+	if _, err := d.projects.Update(blankProject, "", map[string]string{"env": "dev", "team": ""}); err != nil {
+		t.Fatal(err)
+	}
 	// A Cloud Identity group with no display name or description (#1812),
 	// with a member, so its member page and graph are walked (#1817).
 	blankGroup, err := d.projects.CreateGroup(resourcemanager.GroupInput{Email: "blank@" + resourcemanager.OrganizationDomain,

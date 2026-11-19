@@ -296,6 +296,10 @@ type Field struct {
 	// condition holds. Conditions joined by "&" must all hold:
 	// "type=Distribution&bucket_type=Linear" (#1863).
 	ShowWhen string `json:"showWhen,omitempty"`
+	// DeriveFrom names another field this one follows until it is edited
+	// (#1864): its value lowercased, other characters made dashes, as
+	// Google's Create service account derives the ID from the name.
+	DeriveFrom string `json:"deriveFrom,omitempty"`
 	// Unavailable, on a checkbox, is why the choice cannot be made on this
 	// instance: the box is drawn as Google's page has it, unchecked and
 	// disabled, with the reason beside it, so the option stays visible and
@@ -314,6 +318,10 @@ type Field struct {
 	// value ("true" or "false" for a checkbox); ParseGroup reads it.
 	Group    []Field `json:"group,omitempty"`
 	AddLabel string  `json:"addLabel,omitempty"`
+	// OptionLabels, on a select or a radio, are the words an option is
+	// shown as when they are not its value: BigQuery's Region list shows
+	// "us-central1 (Iowa)" and submits us-central1 (#1861).
+	OptionLabels map[string]string `json:"optionLabels,omitempty"`
 }
 
 // GroupFieldType is the Type of a repeatable group of fields (Field.Group).
@@ -1248,6 +1256,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/iam/lint", s.handleLintCondition)
 	mux.HandleFunc("GET /api/page/{service}", s.handlePage)
 	mux.HandleFunc("POST /api/query/{service}", s.handleQuery)
+	mux.HandleFunc("POST /api/studio/{service}", s.handleStudio)
 	mux.HandleFunc("GET /api/logs", s.handleLogs)
 	mux.HandleFunc("GET /api/logs/buckets", s.handleLogBuckets)
 	mux.HandleFunc("GET /api/logs/names", s.handleLogNames)

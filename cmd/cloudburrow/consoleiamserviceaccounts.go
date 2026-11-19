@@ -19,6 +19,7 @@ import (
 	"cloud.google.com/go/iam/admin/apiv1/adminpb"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/iamroles"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 )
 
@@ -33,7 +34,7 @@ const iamServiceAccountsNote = "Service accounts of this project. A caller grant
 	"impersonates it through IAM Credentials; a key file signs in at this instance's token endpoint only. " +
 	"A deleted account can be undeleted by its unique ID for 30 days."
 
-const serviceAccountIDPattern = `^[a-z][a-z0-9-]{4,28}[a-z0-9]$`
+const serviceAccountIDPattern = `^[a-z][a-z0-9\-]{4,28}[a-z0-9]$`
 
 func (p iamServiceAccountsProvider) admin() *resourcemanager.IAMAdminServer {
 	return resourcemanager.NewIAMAdminServer(p.registry)
@@ -101,25 +102,103 @@ func saFields(a *adminpb.ServiceAccount) []console.Field {
 	}
 }
 
+// CreateForm is Google's Create service account (#1864), in its three
+// steps: the account's name (its ID made from it, editable) and
+// description; the project roles it is granted; and the principals granted
+// the Service Account User and Service Account Admin roles on it.
 func (iamServiceAccountsProvider) CreateForm() (string, []console.Field) {
-	return "Create service account", append([]console.Field{
-		{Name: "accountId", Label: "Service account ID", Type: "text", Required: true, Pattern: serviceAccountIDPattern,
-			Help: "6 to 30 lowercase letters, digits and dashes, starting with a letter. The email is ID@PROJECT.iam.gserviceaccount.com; it cannot change."},
-	}, saFields(nil)...)
+	const details = "Service account details"
+	const access = "Grant this service account access to project (optional)"
+	const users = "Grant users access to this service account (optional)"
+	return "Create service account", []console.Field{
+		{Name: "displayName", Label: "Service account name", Type: "text", Section: details, Help: "Display name for this service account. At most 100 bytes."},
+		{Name: "accountId", Label: "Service account ID", Type: "text", Required: true, Pattern: serviceAccountIDPattern, Section: details, DeriveFrom: "displayName",
+			Help: "6 to 30 lowercase letters, digits and dashes, starting with a letter. The email address is ID@PROJECT.iam.gserviceaccount.com; it cannot be changed."},
+		{Name: "description", Label: "Service account description", Type: "text", Section: details, Help: "At most 256 bytes."},
+		{Name: "roles", Label: "Role", Type: "textarea", Section: access,
+			Help: "Grant this service account roles on the project, one per line, such as roles/viewer or projects/PROJECT/roles/myRole. The IAM page changes them later."},
+		{Name: "users", Label: "Service account users role", Type: "textarea", Section: users,
+			Help: "Principals who may deploy jobs and VMs with this service account (roles/iam.serviceAccountUser), such as user:ada@example.com; separate several with commas or lines."},
+		{Name: "admins", Label: "Service account admins role", Type: "textarea", Section: users,
+			Help: "Principals who may manage this service account (roles/iam.serviceAccountAdmin)."},
+	}
 }
+
+func (iamServiceAccountsProvider) CreateTitle() string { return "Create service account" }
 
 func (iamServiceAccountsProvider) CreateOnPage() bool { return true }
 
-func (p iamServiceAccountsProvider) Create(_ context.Context, project string, values map[string]string) (string, error) {
+func (p iamServiceAccountsProvider) Create(ctx context.Context, project string, values map[string]string) (string, error) {
 	if project == "" {
 		return "", errors.New("choose a project in the toolbar")
 	}
+	roles := formPrincipals(values["roles"])
+	for _, r := range roles {
+		if _, err := roleKnown(p.registry, r); err != nil {
+			return "", err
+		}
+	}
+	users, admins := formPrincipals(values["users"]), formPrincipals(values["admins"])
 	a, err := p.registry.CreateServiceAccount(&adminpb.CreateServiceAccountRequest{Name: "projects/" + project, AccountId: strings.TrimSpace(values["accountId"]),
 		ServiceAccount: &adminpb.ServiceAccount{DisplayName: values["displayName"], Description: values["description"]}})
 	if err != nil {
 		return "", err
 	}
+	// Step 2: the project roles, one SetIamPolicy of the project's policy.
+	if len(roles) > 0 {
+		api := resourcemanager.NewProjectsServer(p.registry)
+		pol, err := getProtoPolicy(ctx, api, resourcemanager.V3Name(project))
+		if err == nil {
+			for _, r := range roles {
+				if pol, err = console.GrantAccess(pol, r, []string{"serviceAccount:" + a.GetEmail()}); err != nil {
+					break
+				}
+			}
+		}
+		if err == nil {
+			err = setProtoPolicy(ctx, api, resourcemanager.V3Name(project), pol)
+		}
+		if err != nil {
+			return a.GetEmail(), fmt.Errorf("created %s, but could not grant its project roles: %w", a.GetEmail(), err)
+		}
+	}
+	// Step 3: who may use and manage it, on the account's own policy.
+	if len(users)+len(admins) > 0 {
+		pol, err := getProtoPolicy(ctx, p.admin(), a.GetName())
+		if err == nil && len(users) > 0 {
+			pol, err = console.GrantAccess(pol, "roles/iam.serviceAccountUser", users)
+		}
+		if err == nil && len(admins) > 0 {
+			pol, err = console.GrantAccess(pol, "roles/iam.serviceAccountAdmin", admins)
+		}
+		if err == nil {
+			err = setProtoPolicy(ctx, p.admin(), a.GetName(), pol)
+		}
+		if err != nil {
+			return a.GetEmail(), fmt.Errorf("created %s, but could not grant access to it: %w", a.GetEmail(), err)
+		}
+	}
 	return a.GetEmail(), nil
+}
+
+// formPrincipals splits a form's list, by commas, spaces or lines.
+func formPrincipals(v string) []string {
+	return strings.FieldsFunc(v, func(r rune) bool { return r == ',' || r == '\n' || r == '\r' || r == ' ' || r == '\t' })
+}
+
+// roleKnown checks a role a form grants: a predefined role Google lists, or
+// a custom role of this project or the organization.
+func roleKnown(reg *resourcemanager.Registry, role string) (string, error) {
+	if strings.HasPrefix(role, "roles/") {
+		if iamroles.Predefined(role) == nil {
+			return "", fmt.Errorf("role %s is not a predefined role", role)
+		}
+		return role, nil
+	}
+	if _, err := reg.GetRole(role); err != nil {
+		return "", fmt.Errorf("role %s: %w", role, err)
+	}
+	return role, nil
 }
 
 func keyRow(k *adminpb.ServiceAccountKey) console.Resource {
@@ -174,9 +253,14 @@ func (p iamServiceAccountsProvider) Detail(ctx context.Context, project string, 
 		keys.Items = append(keys.Items, r)
 	}
 	keys.Total = len(keys.Items)
+	// Google's tabs (#1864): Details, Permissions, Keys, Metrics, then the
+	// shared Logs tab (the route's logs).
 	return console.Detail{Summary: props[:2], Sections: []console.Section{
 		{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Heading: "Service account", Properties: props}}},
+		{ID: "permissions", Kind: console.KindPermissions},
 		{ID: "keys", Label: "Keys", Listing: keys},
+		{ID: "metrics", Label: "Metrics", Kind: console.KindText, Unavailable: "Not available locally: a service account's metrics " +
+			"(authentication and key usage) are Cloud Monitoring's, which CloudBurrow does not serve."},
 	}, Edit: &console.EditForm{Label: "Edit service account", Fields: saFields(a), Note: "The ID and email cannot change, as on Google."}}, nil
 }
 

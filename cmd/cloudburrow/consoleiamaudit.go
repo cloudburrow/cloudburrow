@@ -179,6 +179,11 @@ func (p iamAuditProvider) List(ctx context.Context, project string) (console.Lis
 			Actions: []console.Action{auditConfigAction(auditEditAction, "Edit log types", s.GetName(), configs[s.GetName()], etag)}})
 	}
 	l.Total = len(l.Items)
+	for _, a := range p.ListActions(ctx, project) {
+		if a.ID == auditSelectAction {
+			l.SelectActions = []console.Action{a}
+		}
+	}
 	return l, nil
 }
 
@@ -212,9 +217,9 @@ func auditConfigAction(id, label, service string, c *iampb.AuditConfig, etag str
 			on = "true"
 		}
 		fields = append(fields,
-			console.Field{Name: t.field, Label: t.column, Type: "checkbox", Default: on, Section: "Log types",
+			console.Field{Name: t.field, Label: t.column, Type: "checkbox", Default: on, Section: "Log Types",
 				Help: t.column + " audit logs for " + service + "."},
-			console.Field{Name: t.field + "Exempted", Label: t.column + ": exempted principals", Type: "textarea", Section: "Exempted principals",
+			console.Field{Name: t.field + "Exempted", Label: t.column + ": exempted principals", Type: "textarea", Section: "Exempted Principals",
 				Default: strings.Join(lc.GetExemptedMembers(), "\n"),
 				Help:    "Principals whose " + t.column + " accesses are not logged, one per line or separated by commas, such as user:ada@example.com. Only for a log type that is enabled."})
 	}
@@ -250,20 +255,38 @@ func (p iamAuditProvider) ListActions(ctx context.Context, project string) []con
 	if err != nil {
 		return nil
 	}
-	return []console.Action{auditConfigAction(auditDefaultAction, "Set default configuration", allServices, auditConfigsByService(pol)[allServices],
-		base64.StdEncoding.EncodeToString(pol.GetEtag()))}
+	etag := base64.StdEncoding.EncodeToString(pol.GetEtag())
+	// Google's page configures the services checked in its table together
+	// (#1864): the selection's Edit selected services, its services written
+	// into Services.
+	sel := auditConfigAction(auditSelectAction, "Edit selected services", "the selected services", nil, etag)
+	sel.SelectionField = "services"
+	sel.Fields = append([]console.Field{{Name: "services", Label: "Services", Type: "textarea", Required: true,
+		Help: "The services checked in the table, one per line. Each gets the log types and exempted principals below."}}, sel.Fields...)
+	return []console.Action{auditConfigAction(auditDefaultAction, "Set default configuration", allServices, auditConfigsByService(pol)[allServices], etag), sel}
 }
+
+const auditSelectAction = "edit-selected"
 
 // ActAt implements console.PathActor: it replaces one service's audit
 // config (allServices' for the default configuration) in the resource's
 // policy, through SetIamPolicy with the update mask auditConfigs.
 func (p iamAuditProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
-	var service string
+	var services []string
 	switch {
 	case action == auditEditAction && len(path) == 1 && path[0] != allServices:
-		service = path[0]
+		services = []string{path[0]}
 	case action == auditDefaultAction && len(path) == 0:
-		service = allServices
+		services = []string{allServices}
+	case action == auditSelectAction && len(path) == 0:
+		for _, s := range strings.Fields(values["services"]) {
+			if s != allServices && !slices.Contains(services, s) {
+				services = append(services, s)
+			}
+		}
+		if len(services) == 0 {
+			return errors.New("select at least one service")
+		}
 	default:
 		return fmt.Errorf("%s is not an action of the Audit Logs page", action)
 	}
@@ -275,36 +298,41 @@ func (p iamAuditProvider) ActAt(ctx context.Context, project string, path []stri
 	if err != nil || len(etag) == 0 {
 		return errors.New("the form carries no policy etag this console read: reload the page")
 	}
-	next := &iampb.AuditConfig{Service: service}
+	var logConfigs []*iampb.AuditLogConfig
 	for _, t := range auditLogTypes {
 		exempt := splitPrincipals(values[t.field+"Exempted"])
 		if values[t.field] != "true" {
 			if len(exempt) > 0 {
-				return fmt.Errorf("%s exempts principals from %s, which is not enabled: enable it, or clear its exempted principals", service, t.column)
+				return fmt.Errorf("%s exempts principals from %s, which is not enabled: enable it, or clear its exempted principals", strings.Join(services, ", "), t.column)
 			}
 			continue
 		}
-		next.AuditLogConfigs = append(next.AuditLogConfigs, &iampb.AuditLogConfig{
+		logConfigs = append(logConfigs, &iampb.AuditLogConfig{
 			LogType: iampb.AuditLogConfig_LogType(iampb.AuditLogConfig_LogType_value[t.logType]), ExemptedMembers: exempt})
 	}
 	pol, err := p.auditPolicy(ctx, resource)
 	if err != nil {
 		return err
 	}
-	var configs []*iampb.AuditConfig
-	replaced := false
-	for _, c := range pol.GetAuditConfigs() {
-		if c.GetService() != service {
-			configs = append(configs, c)
-			continue
+	configs := pol.GetAuditConfigs()
+	for _, service := range services {
+		next := &iampb.AuditConfig{Service: service, AuditLogConfigs: logConfigs}
+		var kept []*iampb.AuditConfig
+		replaced := false
+		for _, c := range configs {
+			if c.GetService() != service {
+				kept = append(kept, c)
+				continue
+			}
+			replaced = true
+			if len(next.AuditLogConfigs) > 0 {
+				kept = append(kept, next)
+			}
 		}
-		replaced = true
-		if len(next.AuditLogConfigs) > 0 {
-			configs = append(configs, next)
+		if !replaced && len(next.AuditLogConfigs) > 0 {
+			kept = append(kept, next)
 		}
-	}
-	if !replaced && len(next.AuditLogConfigs) > 0 {
-		configs = append(configs, next)
+		configs = kept
 	}
 	api, name := p.auditPolicyAPI(resource)
 	// The page's etag, so a policy changed since it was read is refused;

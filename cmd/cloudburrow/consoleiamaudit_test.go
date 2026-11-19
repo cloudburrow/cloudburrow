@@ -69,9 +69,21 @@ func TestConsoleAuditLogsScopes(t *testing.T) {
 				t.Errorf("Edit log types with a stale etag = %v; want the etag refused", err)
 			}
 			acts := p.ListActions(sctx, "any-project")
-			if len(acts) != 1 || acts[0].ID != auditDefaultAction {
+			if len(acts) != 2 || acts[0].ID != auditDefaultAction || acts[1].ID != auditSelectAction {
 				t.Fatalf("ListActions = %v", acts)
 			}
+			// Edit selected services (#1864): two services configured in
+			// one SetIamPolicy.
+			sel := map[string]string{"services": "pubsub.googleapis.com\nsecretmanager.googleapis.com", "dataWrite": "true",
+				"etag": acts[1].Fields[len(acts[1].Fields)-1].Default}
+			if err := p.ActAt(sctx, "any-project", nil, auditSelectAction, sel); err != nil {
+				t.Fatalf("Edit selected services: %v", err)
+			}
+			if got, _ := c.api.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: c.resource}); logConfig(auditConfigsByService(got)["pubsub.googleapis.com"], "DATA_WRITE") == nil ||
+				logConfig(auditConfigsByService(got)["secretmanager.googleapis.com"], "DATA_WRITE") == nil {
+				t.Errorf("after Edit selected services the audit configs are %v", got.GetAuditConfigs())
+			}
+			acts = p.ListActions(sctx, "any-project")
 			def := map[string]string{"adminRead": "true", "etag": acts[0].Fields[len(acts[0].Fields)-1].Default}
 			if err := p.ActAt(sctx, "any-project", nil, auditDefaultAction, def); err != nil {
 				t.Fatalf("Set default configuration: %v", err)

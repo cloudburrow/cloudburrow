@@ -61,6 +61,9 @@ func (p bigqueryProvider) ActAtFile(ctx context.Context, project string, path []
 	if err := p.writable(project); err != nil {
 		return nil, err
 	}
+	if action == "createtable" && len(path) == 1 {
+		return p.createTableFromUpload(ctx, project, path[0], values, file)
+	}
 	if action != actLoadFile || len(path) < 1 || len(path) > 2 {
 		return nil, fmt.Errorf("unknown action %q with a file", action)
 	}
@@ -73,6 +76,12 @@ func (p bigqueryProvider) ActAtFile(ctx context.Context, project string, path []
 
 // loadFile runs Load from a file into datasetID.tableID and waits for it.
 func (p bigqueryProvider) loadFile(ctx context.Context, project, datasetID, tableID string, values map[string]string, file console.UploadedFile) (*console.Listing, error) {
+	return p.loadFileWrite(ctx, project, datasetID, tableID, values, file, false)
+}
+
+// loadFileWrite is loadFile; newTable loads with WRITE_EMPTY, as Create
+// table from Upload does, which Load from a file's form does not offer.
+func (p bigqueryProvider) loadFileWrite(ctx context.Context, project, datasetID, tableID string, values map[string]string, file console.UploadedFile, newTable bool) (*console.Listing, error) {
 	if tableID == "" {
 		return nil, errors.New("a table ID is required")
 	}
@@ -88,7 +97,9 @@ func (p bigqueryProvider) loadFile(ctx context.Context, project, datasetID, tabl
 	if write == "" {
 		write = "WRITE_APPEND"
 	}
-	if !slices.Contains(bigqueryWriteModes, write) {
+	if newTable {
+		write = "WRITE_EMPTY"
+	} else if !slices.Contains(bigqueryWriteModes, write) {
 		return nil, fmt.Errorf("the write preference is WRITE_APPEND or WRITE_TRUNCATE, not %q", write)
 	}
 	ctx, cancel := context.WithTimeout(ctx, bigqueryFileLoadTimeout)
@@ -117,3 +128,27 @@ func (p bigqueryProvider) loadFile(ctx context.Context, project, datasetID, tabl
 }
 
 var _ console.FileActor = bigqueryProvider{}
+
+// createTableFromUpload is Create table with Create table from Upload
+// (#1861): the file is loaded into the new table, as Load from a file
+// loads it, with the form's format, schema or Auto detect, partitioning
+// and clustering. The table must not exist yet, as Google's Create table
+// refuses an existing one.
+func (p bigqueryProvider) createTableFromUpload(ctx context.Context, project, datasetID string, values map[string]string, file console.UploadedFile) (*console.Listing, error) {
+	if values["source"] != bqSourceUpload {
+		return nil, errors.New("a file is sent with Create table from Upload only")
+	}
+	if err := refuseUnavailable(values, bigqueryTableFields()); err != nil {
+		return nil, err
+	}
+	if t := strings.TrimSpace(values["tableType"]); t != "" && t != "TABLE" {
+		return nil, errors.New("a table loaded from a file is a native table: choose TABLE")
+	}
+	load := map[string]string{}
+	for _, k := range []string{"format", "autodetect", "schema", "partitionType", "partitionField", "clusteringFields", "skipLeadingRows"} {
+		if v, ok := values[k]; ok {
+			load[k] = v
+		}
+	}
+	return p.loadFileWrite(ctx, project, datasetID, strings.TrimSpace(values["tableId"]), load, file, true)
+}
