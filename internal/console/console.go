@@ -314,6 +314,10 @@ type Field struct {
 	// value ("true" or "false" for a checkbox); ParseGroup reads it.
 	Group    []Field `json:"group,omitempty"`
 	AddLabel string  `json:"addLabel,omitempty"`
+	// OptionLabels, on a select or a radio, are the words an option is
+	// shown as when they are not its value: BigQuery's Region list shows
+	// "us-central1 (Iowa)" and submits us-central1 (#1861).
+	OptionLabels map[string]string `json:"optionLabels,omitempty"`
 }
 
 // GroupFieldType is the Type of a repeatable group of fields (Field.Group).
@@ -1248,6 +1252,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/iam/lint", s.handleLintCondition)
 	mux.HandleFunc("GET /api/page/{service}", s.handlePage)
 	mux.HandleFunc("POST /api/query/{service}", s.handleQuery)
+	mux.HandleFunc("POST /api/studio/{service}", s.handleStudio)
 	mux.HandleFunc("GET /api/logs", s.handleLogs)
 	mux.HandleFunc("GET /api/logs/buckets", s.handleLogBuckets)
 	mux.HandleFunc("GET /api/logs/names", s.handleLogNames)

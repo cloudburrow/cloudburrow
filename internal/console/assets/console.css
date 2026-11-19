@@ -1967,3 +1967,105 @@ tr.log-entry.is-pinned { background: var(--state-hover); }
 .timeline-handle::-webkit-slider-thumb { pointer-events: auto; }
 .timeline-handle::-moz-range-thumb { pointer-events: auto; }
 .timeline-selection-shade { position: absolute; top: 8px; height: 8px; background: var(--accent); opacity: .3; border-radius: var(--radius-control); }
+
+/* BigQuery Studio (#1861): the Explorer pane beside the tabbed workspace. */
+.bq-studio { display: grid; grid-template-columns: minmax(240px, 320px) minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 959px) { .bq-studio { grid-template-columns: minmax(0, 1fr); } }
+.bq-explorer { padding: 12px; min-width: 0; }
+.bq-explorer-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.bq-explorer-head h2 { margin: 0; }
+.bq-explorer-search { width: 100%; box-sizing: border-box; margin: 8px 0; }
+.bq-starred { display: block; font-size: var(--text-caption-size); color: var(--text-muted); margin-bottom: 8px; }
+.bq-tree, .bq-tree ul { list-style: none; margin: 0; padding: 0; }
+.bq-node-row { display: flex; align-items: center; gap: 2px; min-height: 32px; }
+.bq-node-row:hover { background: var(--state-hover); }
+.bq-node-row .icon-button { width: 28px; height: 28px; }
+.bq-node-row .icon-button svg { width: 18px; height: 18px; }
+.bq-twisty-space { display: inline-block; width: 28px; flex: none; }
+.bq-node-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bq-star.is-starred { color: var(--accent); }
+.bq-menu-wrap { position: relative; display: inline-flex; }
+.bq-menu { position: absolute; right: 0; top: 100%; z-index: 30; min-width: 180px; padding: 4px 0;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-menu); }
+.bq-menu-item { display: block; width: 100%; text-align: left; padding: 8px 16px; background: none; border: 0;
+  font: inherit; color: var(--text); cursor: pointer; white-space: nowrap; }
+.bq-menu-item:hover { background: var(--state-hover); }
+.bq-menu-item.danger { color: var(--error); }
+.bq-workspace { min-width: 0; display: grid; gap: 12px; }
+.bq-tabs { margin: 0; align-items: center; border-bottom: 1px solid var(--border); }
+.bq-tab-wrap { display: inline-flex; align-items: center; }
+.bq-tab-close { width: 28px; height: 28px; }
+.bq-tab-close svg { width: 16px; height: 16px; }
+.bq-new-query { margin-left: 8px; }
+.bq-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
+.bq-dialect { margin-left: auto; }
+.bq-editor { width: 100%; box-sizing: border-box; }
+.bq-validator { min-height: 1.4em; margin: 4px 0; font-size: var(--text-caption-size); color: var(--text-muted); }
+.bq-validator.is-valid { color: var(--ok); }
+.bq-validator.is-invalid { color: var(--error); }
+.bq-results-tabs, .bq-history-tabs { margin: 0 0 8px; }
+.bq-results-scroll { overflow-x: auto; }
+.bq-results-table, .bq-history-table { border-collapse: collapse; width: 100%; }
+.bq-results-table th, .bq-results-table td, .bq-history-table th, .bq-history-table td {
+  text-align: left; padding: 6px 12px; border-bottom: 1px solid var(--border); }
+.bq-job-info { display: grid; grid-template-columns: auto 1fr; gap: 6px 24px; margin: 0; }
+.bq-job-info dt { color: var(--text-muted); }
+.bq-job-info dd { margin: 0; font-family: var(--mono); overflow-wrap: anywhere; }
+.bq-json { overflow-x: auto; max-height: 480px; }
+.bq-history { overflow-x: auto; }
+.bq-settings fieldset { border: 1px solid var(--border); border-radius: var(--radius); margin: 0 0 12px; padding: 8px 12px; }
+.bq-radio { display: block; margin: 4px 0; }
+.bq-dest-fields { display: grid; gap: 4px; margin-top: 8px; }
+/* A schema editor's Edit as text (#1861). */
+.schema-text-switch { display: block; margin: 4px 0 8px; }
+.schema-text { width: 100%; box-sizing: border-box; }
+.schema-field:has(.schema-text-toggle:checked) .schema-head { display: none; }
+/* A radio group's choices sit beside their labels, as a checkbox's do
+   (#1861: the generic .form-row input rule stretched each radio across
+   the row, with its label below it). */
+.form-row.is-radio .check-line { display: flex; align-items: center; gap: 8px; }
+.form-row.is-radio .check-line input[type="radio"] { width: auto; flex: none; margin: 0; }
+.form-row.is-radio .check-line label { margin: 0; color: var(--text); }
+.bq-history-table td.mono { white-space: nowrap; }
+/* Studio round 2 (#1861). Create dataset and Create table open as a panel
+   on the right, as BigQuery Studio's do. */
+.modal.is-side { justify-content: flex-end; align-items: stretch; padding: 0; }
+.modal.is-side .modal-body { max-width: min(640px, 100vw); height: 100%; max-height: none;
+  border-radius: 0; transform: translateX(24px); }
+.modal.is-side.is-open .modal-body { transform: none; }
+/* A preview tab's name is italic until it is kept (double-click). */
+.bq-tabs .tab.is-preview { font-style: italic; }
+.bq-explorer-home { display: block; width: 100%; text-align: left; margin: 8px 0 0; padding: 6px 8px;
+  background: none; border: 0; border-radius: var(--radius); font: inherit; color: var(--text); cursor: pointer; }
+.bq-explorer-home:hover { background: var(--state-hover); }
+.bq-node-empty { padding: 4px 0 4px 60px; font-size: var(--text-caption-size); }
+.bq-menu-button { white-space: nowrap; }
+.bq-resource-tab { min-width: 0; }
+/* The workspace never widens the page: its tab strips scroll, and the
+   panels shrink to the column (#1861: six result tabs did). */
+.bq-workspace > *, .bq-tab-panel > *, .bq-results, .bq-viz-chart { min-width: 0; }
+.bq-tabs, .bq-results-tabs { overflow-x: auto; flex-wrap: nowrap; }
+.bq-resource-tab .page-header h2 { font-size: var(--text-heading-size); font-weight: 400; margin: 0; }
+.bq-home { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+.bq-home-title { grid-column: 1 / -1; margin: 4px 0; font-weight: 400; }
+.bq-home-card { padding: 12px 16px; min-width: 0; }
+.bq-home-card h3 { margin: 0 0 8px; font-size: var(--text-body-size, 14px); }
+.bq-home-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.bq-home-recent, .bq-home-templates { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.bq-home-dataset-label { display: block; margin-top: 8px; font-size: var(--text-caption-size); color: var(--text-muted); }
+/* The chart beside its configuration pane, or above it when the column is
+   narrow. */
+.bq-viz { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+.bq-viz-chart { flex: 1 1 360px; }
+.bq-viz-config { flex: 1 0 200px; max-width: 320px; }
+.bq-viz-tools { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.bq-chart-scroll { overflow-x: auto; max-width: 100%; }
+/* The chart's marks carry their own fill and stroke: the console's icon
+   rule for svg (fill none, stroke currentColor) is not inherited by them. */
+svg.bq-chart { display: block; border: 1px solid var(--border); border-radius: var(--radius);
+  fill: #202124; stroke: none; stroke-width: 1; }
+.bq-chart-legend { list-style: none; display: flex; flex-wrap: wrap; gap: 12px; padding: 0; margin: 8px 0 0; }
+.bq-swatch { display: inline-block; width: 12px; height: 12px; border-radius: 2px; vertical-align: middle; }
+.bq-viz-config { display: grid; gap: 4px; }
+.bq-viz-config h3 { margin: 0 0 4px; font-size: var(--text-body-size, 14px); }
+.bq-viz-measures { border: 1px solid var(--border); border-radius: var(--radius); margin: 8px 0 0; padding: 4px 12px; }
