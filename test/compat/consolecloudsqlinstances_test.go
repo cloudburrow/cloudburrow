@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -279,20 +280,24 @@ func consoleCloudSQLReadReplica(t *testing.T, version, prefix string) {
 		t.Fatalf("replica: %+v %v", in, err)
 		return nil
 	}
-	if d := consoleDetailOf(t, addr, "cloudsql-instances", project, name); !d.offers("create-replica") || d.offers("promote-replica") {
-		t.Errorf("a primary's page offers %+v", d.Actions)
+	// The page in Google's layout (#1860): Promote replica beside the
+	// title, Create read replica and Stop and Start replication on the
+	// Replicas page, the primary and the replicas on the Overview's
+	// Replication card and in the Replicas list.
+	if d := sqlInstancePageOf(t, addr, project, name); !d.offers("replicas", "create-replica") || d.offers("", "promote-replica") {
+		t.Errorf("a primary's page offers %+v, its Replicas page %+v", d.Actions, d.section("replicas").Actions)
 	}
 	act(name, "create-replica", map[string]string{"replica": replica})
 	get(func(in *sqladmin.DatabaseInstance) bool {
 		return in.InstanceType == "READ_REPLICA_INSTANCE" && in.MasterInstanceName == project+":"+name
 	})
-	d := consoleDetailOf(t, addr, "cloudsql-instances", project, replica)
-	if !d.offers("promote-replica") || !d.offers("stop-replica") || !d.offers("create-replica") ||
-		d.summary("Primary instance") != project+":"+name {
+	d := sqlInstancePageOf(t, addr, project, replica)
+	if !d.offers("", "promote-replica") || !d.offers("replicas", "stop-replica") || !d.offers("replicas", "create-replica") ||
+		d.property("Replication", "Primary instance") != project+":"+name || d.role(name) != "Primary" {
 		t.Errorf("the replica's page: %+v", d)
 	}
-	if p := consoleDetailOf(t, addr, "cloudsql-instances", project, name); p.summary("Read replicas") != replica {
-		t.Errorf("the primary's page lists replicas %q", p.summary("Read replicas"))
+	if p := sqlInstancePageOf(t, addr, project, name); p.property("Replication", "Read replicas") != replica || p.role(replica) != "Read replica" {
+		t.Errorf("the primary's page lists replicas %q, its Replicas page %+v", p.property("Replication", "Read replicas"), p.section("replicas").Listing.Items)
 	}
 	act(replica, "stop-replica", nil)
 	get(func(in *sqladmin.DatabaseInstance) bool { return !in.Settings.DatabaseReplicationEnabled })
@@ -406,10 +411,15 @@ func TestConsoleCloudSQLVersionsAndUpgrade(t *testing.T) {
 				Options []string
 			}
 		}
+		// Google's create page picks the engine first, then its version
+		// (#1860): PostgreSQL's versions in databaseVersion, MySQL's in
+		// mysqlVersion.
 		if s.ID == "cloudsql-instances" && json.Unmarshal(s.Create, &form) == nil {
-			for _, f := range form.Fields {
-				if f.Name == "databaseVersion" {
-					picker = f.Options
+			for _, name := range []string{"databaseVersion", "mysqlVersion"} {
+				for _, f := range form.Fields {
+					if f.Name == name {
+						picker = append(picker, f.Options...)
+					}
 				}
 			}
 		}
@@ -535,4 +545,87 @@ func TestConsoleCloudSQLHighAvailabilityPostgres11(t *testing.T) {
 	get(func(got *sqladmin.DatabaseInstance) bool {
 		return got.GceZone == in.SecondaryGceZone && got.SecondaryGceZone == in.GceZone
 	})
+}
+
+// sqlInstancePage is a Cloud SQL instance's console page in Google's layout
+// (#1860), as much of it as these tests read: the actions beside the title,
+// and each menu page's actions, property cards and list.
+type sqlInstancePage struct {
+	Actions  []struct{ ID string }
+	Sections []sqlPageSection
+}
+
+// sqlPageSection is one menu page of it.
+type sqlPageSection struct {
+	ID      string
+	Actions []struct{ ID string }
+	Groups  []struct {
+		Heading    string
+		Properties []struct{ Label, Value string }
+	}
+	Listing struct {
+		Items []struct {
+			Name   string
+			Fields map[string]string
+		}
+	}
+}
+
+// sqlInstancePageOf reads an instance's page through the console's detail
+// route.
+func sqlInstancePageOf(t *testing.T, addr, project, name string) sqlInstancePage {
+	t.Helper()
+	var d sqlInstancePage
+	consoleJSON(t, addr, http.MethodGet, "/api/detail/cloudsql-instances?"+url.Values{"project": {project}, "name": {name}}.Encode(), "", &d)
+	return d
+}
+
+// section is the menu page id, or a zero one.
+func (d sqlInstancePage) section(id string) sqlPageSection {
+	for _, s := range d.Sections {
+		if s.ID == id {
+			return s
+		}
+	}
+	return sqlPageSection{}
+}
+
+// offers reports whether the menu page on ("" for beside the title) offers
+// the action id.
+func (d sqlInstancePage) offers(on, id string) bool {
+	acts := d.Actions
+	if on != "" {
+		acts = d.section(on).Actions
+	}
+	for _, a := range acts {
+		if a.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+// property is the value of label on the Overview's card heading.
+func (d sqlInstancePage) property(heading, label string) string {
+	for _, g := range d.section("overview").Groups {
+		if g.Heading != heading {
+			continue
+		}
+		for _, p := range g.Properties {
+			if p.Label == label {
+				return p.Value
+			}
+		}
+	}
+	return ""
+}
+
+// role is the Role the Replicas list gives the instance name.
+func (d sqlInstancePage) role(name string) string {
+	for _, it := range d.section("replicas").Listing.Items {
+		if it.Name == name {
+			return it.Fields["Role"]
+		}
+	}
+	return ""
 }
