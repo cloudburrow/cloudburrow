@@ -37,21 +37,71 @@ A `batchEnable` that includes one changes nothing, as Google's fails as a whole.
 for an API nothing serves would let a module apply and then fail at its first call, or worse,
 send that call to Google.
 
-## Disabling is stored, not enforced
+## Disabling is enforced, as on Google
 
-Disabling an API records it as DISABLED for that project, and every read reports it so, but the API
-keeps answering, where Google's fails each call with `SERVICE_DISABLED` (#1914). This is the same choice [ADR-0006](adr/0006-iam-policy-surface.md) makes for IAM
-policies:
+Disabling an API records it as DISABLED for that project, every read reports it so, and every call
+to the API made in that project fails as Google fails it (#1914). This reverses the earlier choice
+to store a disable without enforcing it: what runs locally should predict what runs on Google, and
+an application, module or test that disables an API (Terraform's `disable_on_destroy`, `gcloud
+services disable`, the console's **Disable API**) and then calls it must see the failure it will
+see there. Nothing changes until someone disables an API: every served API stays ENABLED in every
+project by default.
 
-- **What is stored is faithful.** A disable is persisted and returned exactly, so Terraform's
-  `disable_on_destroy`, `gcloud services list --enabled` and any code that checks a project's
-  enabled set behave as they do on Google.
-- **Nothing is enforced.** Refusing calls to a disabled API would make every local service depend on
-  a per-project switch that no test of the application itself is about, and a module destroyed with
-  `disable_on_destroy` would break every other test sharing the instance. An application that must
-  observe a disabled API failing needs a real project.
-- `disableDependentServices` and `checkIfServiceHasUsage` are accepted. No API here depends on
-  another, and no usage is tracked, so neither changes the result.
+The failure is Google's `SERVICE_DISABLED`:
+
+- gRPC `PERMISSION_DENIED`, or HTTP 403 with the JSON error body (`code`, `message`,
+  `status: PERMISSION_DENIED`, `details`);
+- the message `<Title> has not been used in project <number> before or it is disabled. Enable it by
+  visiting <activationUrl> then retry. If you enabled this API recently, wait a few minutes for the
+  action to propagate to our systems and retry.`, where the title is the API's (`Cloud Pub/Sub
+  API`) and the activation URL is Google's
+  (`https://console.developers.google.com/apis/api/<service>/overview?project=<number>`);
+- a `google.rpc.ErrorInfo` with `reason: SERVICE_DISABLED`, `domain: googleapis.com` and metadata
+  `service`, `consumer` (`projects/<number>`), `activationUrl`, `serviceTitle` and `containerInfo`
+  (the number), then a `google.rpc.LocalizedMessage` (`en-US`) and a `google.rpc.Help` link
+  ("Google developers console API activation"), as Google's error model carries them
+  ([AIP-193](https://google.aip.dev/193), https://cloud.google.com/apis/design/errors). The
+  official clients read them with `apierror` (`Reason()`, `Metadata()`). A Cloud Storage XML API
+  request is answered `AccessDenied` with the message in `Details`.
+
+A call's project is the one Google checks: its quota project (`x-goog-user-project`, which the
+clients send for `option.WithQuotaProject` and gcloud's `--billing-project`) if it names one, else
+the project its resource names, from the routing headers the official clients send
+(`x-goog-request-params`, `google-cloud-resource-prefix`), the request path, a `project` parameter
+(`buckets.list`, `buckets.insert`), the bucket's own project for Cloud Storage, or, for an
+in-process service, the first `projects/...` name in the request message. A call that names no
+project is not checked.
+
+There is one decision and one check, made the way IAM enforcement makes its (#1879):
+
+- the Service Usage server decides, from the stored states (`internal/apienable`'s `Decider`);
+- the services CloudBurrow serves in process (Cloud Tasks, Cloud Run, Cloud Scheduler, Memorystore,
+  Cloud Logging, Cloud KMS, Secret Manager, the Cloud SQL Admin API and the Backup and DR Service)
+  take a gRPC interceptor and an HTTP wrapper over their JSON API, which ask it directly, so a
+  disable takes effect at once;
+- the servers that run in the cluster (Cloud Storage's builtin server, the Pub/Sub, BigQuery and
+  Bigtable fronts, and the call fronts of Firestore, Datastore and Spanner) ask it at
+  `/cloudburrow/v1/services:disabled` on the Resource Manager port, through `cloudburrow-host`,
+  and keep the answer for one second. A disable or an enable reaches them within that second, as
+  Google's own change takes a while to reach its servers; a test against them retries until it
+  has.
+
+Resource Manager and Service Usage themselves are not gated: disabling them is stored and
+reported, but they keep answering, so the instance can always be put back.
+
+### Dependent services
+
+Google refuses to disable an API that enabled APIs depend on: `services.disable` fails
+`FAILED_PRECONDITION`, "The service <service> is depended on by the following active service(s):
+<services>; Please specify disable_dependent_services=true if you want to proceed with disabling all
+services.", unless `disableDependentServices` is true, which disables it and every enabled API that
+depends on it, directly or through another, together
+(https://docs.cloud.google.com/service-usage/docs/reference/rest/v1/services/disable; `gcloud
+services disable --force` sets it). CloudBurrow follows those rules over the dependencies Google
+documents among the APIs it serves (`serviceUsageDependents`). Google documents none among them
+today (the BigQuery API's documented dependents, such as Google Kubernetes Engine, are not served:
+https://docs.cloud.google.com/bigquery/docs/enable-assets), so no disable is refused for one yet.
+`checkIfServiceHasUsage` is accepted; no usage is tracked, so it changes nothing.
 
 ## Operations
 

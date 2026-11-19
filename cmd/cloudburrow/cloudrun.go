@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/cloudburrow/cloudburrow/internal/apienable"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"log/slog"
 	"net"
@@ -36,6 +37,9 @@ type runService struct {
 	// interpose run inside the call observer, in order: the request log
 	// (#314), then fault injection (#306), so the log sees injected faults.
 	interpose []grpc.UnaryServerInterceptor
+	// apiGate refuses calls in a project where the API is disabled
+	// (#1914); nil refuses none.
+	apiGate apienable.Decider
 	// requests reports each JSON request to the admin event log (#591).
 	requests func(rest.Request)
 	cfg      config.Config
@@ -174,6 +178,7 @@ func (r *runService) Start(ctx context.Context) error {
 
 	addr := net.JoinHostPort(r.cfg.BindAddress, strconv.Itoa(r.cfg.Endpoints.Run))
 	r.server = grpctransport.New(addr)
+	r.server.Gate(r.apiGate, "run.googleapis.com")
 	r.server.Observe(r.calls)
 	if r.tracing != nil {
 		r.server.ServerOptions(r.tracing.ServerOptions()...)

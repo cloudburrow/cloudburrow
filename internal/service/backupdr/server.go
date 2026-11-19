@@ -136,6 +136,9 @@ type Server struct {
 	// hierarchy is Resource Manager's folders and organization, for their
 	// resourceBackupConfigs.fetch (#1536); nil refuses it. mu guards it.
 	hierarchy Hierarchy
+	// Wrap, when set before Start, wraps the API's handler: the gate
+	// refusing calls in a project where the API is disabled (#1914).
+	Wrap func(http.Handler) http.Handler
 }
 
 // state is every record, as it is kept.
@@ -234,7 +237,11 @@ func (s *Server) Start(context.Context) error {
 	s.ln = ln
 	// Loopback-only, but a rebound or cross-site page reaches
 	// loopback too (#676, #1586).
-	s.srv = &http.Server{Handler: hostguard.Wrap(s), ReadHeaderTimeout: 10 * time.Second}
+	var h http.Handler = s
+	if s.Wrap != nil {
+		h = s.Wrap(h)
+	}
+	s.srv = &http.Server{Handler: hostguard.Wrap(h), ReadHeaderTimeout: 10 * time.Second}
 	s.stop = make(chan struct{})
 	go func() { _ = s.srv.Serve(ln) }()
 	go s.schedule(s.stop)

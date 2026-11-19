@@ -15,6 +15,7 @@ import (
 	"google.golang.org/grpc"
 
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
+	"github.com/cloudburrow/cloudburrow/internal/apienable"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/k8s"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
@@ -45,6 +46,9 @@ type secretsService struct {
 	// interpose run inside the call observer, in order: the request log
 	// (#314), then fault injection (#306), so the log sees injected faults.
 	interpose []grpc.UnaryServerInterceptor
+	// apiGate refuses calls in a project where the API is disabled
+	// (#1914); nil refuses none.
+	apiGate apienable.Decider
 	// wrapJSON wraps the JSON API (IAM enforcement, #1879); nil is none.
 	wrapJSON func(http.Handler) http.Handler
 	db       store.Store
@@ -134,6 +138,9 @@ func (s *secretsService) Addr() string {
 	return s.server.Addr()
 }
 
+// secretManagerAPI is Secret Manager's googleapis.com name.
+const secretManagerAPI = "secretmanager.googleapis.com"
+
 // Start opens state, registers the service and begins serving.
 func (s *secretsService) Start(ctx context.Context) error {
 	// Secrets are stored in the cluster (#84): a Kubernetes Secret is what a
@@ -201,8 +208,20 @@ func (s *secretsService) Start(ctx context.Context) error {
 	for _, i := range s.interpose {
 		s.server.Interpose(i)
 	}
-	if s.wrapJSON != nil {
-		s.server.WrapJSON(s.wrapJSON)
+	wrap := s.wrapJSON
+	if s.apiGate != nil {
+		// Innermost, as IAM enforcement's (#1914).
+		s.server.Interpose(apienable.UnaryInterceptor(s.apiGate, secretManagerAPI))
+		inner := wrap
+		wrap = func(h http.Handler) http.Handler {
+			if inner != nil {
+				h = inner(h)
+			}
+			return apienable.Gate(s.apiGate, secretManagerAPI, h)
+		}
+	}
+	if wrap != nil {
+		s.server.WrapJSON(wrap)
 	}
 	if err := s.server.Start(ctx); err != nil {
 		_ = db.Close()

@@ -26,7 +26,7 @@ func (serviceUsageProvider) ID() string    { return "serviceusage" }
 func (serviceUsageProvider) Title() string { return "APIs & Services" }
 
 const serviceUsageNote = "Every API this instance serves, as Service Usage lists it. " +
-	"Disabling one is recorded and reported, not enforced: the API keeps answering (docs/serviceusage.md)."
+	"Disabling one makes its calls in the project fail with Google's SERVICE_DISABLED, as on Google (docs/serviceusage.md)."
 
 // List implements console.Provider.
 func (p serviceUsageProvider) List(_ context.Context, project string) (console.Listing, error) {

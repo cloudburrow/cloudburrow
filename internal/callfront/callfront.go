@@ -35,6 +35,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cloudburrow/cloudburrow/internal/apienable"
 	"github.com/cloudburrow/cloudburrow/internal/calllog"
 	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
 	"github.com/cloudburrow/cloudburrow/internal/frontready"
@@ -196,7 +197,7 @@ func Server(h http.Handler, logf func(string, ...any), service ...string) *http.
 	protocols.SetHTTP1(true)
 	protocols.SetUnencryptedHTTP2(true)
 	return &http.Server{
-		Handler:   hostguard.WrapService(h, name),
+		Handler:   hostguard.WrapService(gateAPI(h, name), name),
 		Protocols: &protocols,
 		// The emulators set no stream limit; Go's default of 250 could
 		// queue a client's new calls behind its long-lived streams.
@@ -310,6 +311,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if *resourceManager != "" {
 		orgpolicy.Use(orgpolicy.Remote{Base: *resourceManager})
 		defer orgpolicy.Use(nil)
+		// Disabled APIs (#1914) are the host's too.
+		apienable.Use(&apienable.Remote{Base: *resourceManager})
+		defer apienable.Use(nil)
 	}
 	ring := &calllog.Ring{}
 	pairs := [][2]string{{*listen, *upstream}}
@@ -419,4 +423,14 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		<-docs.Done()
 	}
 	return nil
+}
+
+// gateAPI refuses calls to the front's API in a project where it is
+// disabled (#1914), as the host decides (apienable.Use).
+func gateAPI(h http.Handler, service string) http.Handler {
+	switch service {
+	case "firestore", "datastore", "spanner":
+		return apienable.Gate(nil, service+".googleapis.com", h)
+	}
+	return h
 }

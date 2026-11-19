@@ -104,6 +104,18 @@ func newServiceUsageServer(cfg config.Config, reg *resourcemanager.Registry, st 
 		return nil
 	}
 	served, unserved := serviceUsageCatalog(cfg)
-	return serviceusage.NewServer(net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Endpoints.ServiceUsage)),
+	srv := serviceusage.NewServer(net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Endpoints.ServiceUsage)),
 		served, unserved, st, serviceUsageProjects{reg: reg})
+	srv.Dependents = serviceUsageDependents
+	return srv
 }
+
+// serviceUsageDependents are the dependencies Google documents among the
+// APIs CloudBurrow serves (#1914), by the API depended on. Google's
+// documented dependents of the BigQuery API (Binary Authorization, Google
+// Kubernetes Engine, Google Cloud APIs, Dataprep, Open Service Broker,
+// Telecom Data Fabric: https://docs.cloud.google.com/bigquery/docs/enable-assets)
+// are none of them served, and no other dependency among the served APIs
+// is documented, so the table is empty; services.disable's
+// disableDependentServices rules apply to whatever is added here.
+var serviceUsageDependents = map[string][]string{}

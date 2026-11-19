@@ -12253,6 +12253,12 @@
         "method": "serviceusage.services.disable",
         "status": "Verified",
         "tests": [
+          "test/compat/apienable_test.go:129 TestServiceDisabledStorage",
+          "test/compat/apienable_test.go:156 TestServiceDisabledPubSub",
+          "test/compat/apienable_test.go:178 TestServiceDisabledSecretManager",
+          "test/compat/apienable_test.go:211 TestServiceDisabledBigQuery",
+          "test/compat/apienable_test.go:244 TestServiceDisabledFirestore",
+          "test/compat/apienable_test.go:270 TestGcloudServicesDisableEnforced",
           "test/compat/serviceusage_test.go:146 TestTerraformProjectService",
           "test/compat/serviceusage_test.go:217 TestGcloudServices",
           "test/compat/serviceusage_test.go:47 TestServiceUsageServices"
@@ -12262,6 +12268,12 @@
         "method": "serviceusage.services.enable",
         "status": "Verified",
         "tests": [
+          "test/compat/apienable_test.go:129 TestServiceDisabledStorage",
+          "test/compat/apienable_test.go:156 TestServiceDisabledPubSub",
+          "test/compat/apienable_test.go:178 TestServiceDisabledSecretManager",
+          "test/compat/apienable_test.go:211 TestServiceDisabledBigQuery",
+          "test/compat/apienable_test.go:244 TestServiceDisabledFirestore",
+          "test/compat/apienable_test.go:270 TestGcloudServicesDisableEnforced",
           "test/compat/serviceusage_test.go:146 TestTerraformProjectService",
           "test/compat/serviceusage_test.go:217 TestGcloudServices",
           "test/compat/serviceusage_test.go:47 TestServiceUsageServices"

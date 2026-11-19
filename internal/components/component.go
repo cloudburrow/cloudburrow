@@ -272,8 +272,9 @@ func (c *LifecycleComponent) Backends() []Backend {
 				// created where gcp.resourceLocations allows, and these
 				// fronts' setIamPolicy refuses members
 				// iam.allowedPolicyMemberDomains does not permit (#1890):
-				// the fronts ask the host, through cloudburrow-host.
-				if (s == config.ServiceFirestore || s == config.ServiceSpanner || s == config.ServiceBigtable) && c.resourceManager != "" && b.Front != nil {
+				// the fronts ask the host, through cloudburrow-host. So
+				// does Datastore's, for disabled APIs (#1914).
+				if (s == config.ServiceFirestore || s == config.ServiceSpanner || s == config.ServiceBigtable || s == config.ServiceDatastore) && c.resourceManager != "" && b.Front != nil {
 					b.Front.Args = append(append([]string{}, b.Front.Args...), "--resourcemanager", "http://"+c.resourceManager)
 					b.EgressPorts = c.withResourceManagerPort(b.EgressPorts)
 				}
@@ -306,6 +307,7 @@ func (c *LifecycleComponent) Backends() []Backend {
 					// (#1392).
 					if c.resourceManager != "" {
 						b.Front.Args = append(b.Front.Args, "--resourcemanager", "http://"+c.resourceManager)
+						b.EgressPorts = c.withResourceManagerPort(b.EgressPorts)
 					}
 					// Imported ONNX models run on the onnx build's
 					// runner, through cloudburrow-host (#1711).

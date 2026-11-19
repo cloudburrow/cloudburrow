@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cloudburrow/cloudburrow/internal/apienable"
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/grpchttp"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
@@ -47,9 +48,14 @@ type Server struct {
 	httpSrv *http.Server
 	// options are extra server options, such as tracing's stats handler.
 	options []grpc.ServerOption
-	srv     *grpc.Server
-	ln      net.Listener
-	done    chan struct{}
+	// gate and gateService refuse calls to the API in a project where it
+	// is disabled (#1914, internal/apienable): the gRPC calls innermost,
+	// as IAM enforcement's, and the JSON requests before their routing.
+	gate        apienable.Decider
+	gateService string
+	srv         *grpc.Server
+	ln          net.Listener
+	done        chan struct{}
 }
 
 // New returns a server bound to addr when started.
@@ -78,6 +84,10 @@ func (s *Server) Register(fn func(*grpc.Server)) error {
 			stream = append(stream, StreamObserver(s.observe))
 		}
 		unary = append(unary, s.interpose...)
+		if s.gate != nil {
+			unary = append(unary, apienable.UnaryInterceptor(s.gate, s.gateService))
+			stream = append(stream, apienable.StreamInterceptor(s.gate, s.gateService))
+		}
 		unary = append(unary, errorInterceptor)
 		// grpchttp: Stop waits for every call's handler goroutine, where
 		// a call's trace span ends (#1804), on either transport.
@@ -114,6 +124,15 @@ func (s *Server) Interpose(i grpc.UnaryServerInterceptor) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.interpose = append(s.interpose, i)
+}
+
+// Gate refuses calls to service (its googleapis.com name) in a project
+// where d says it is disabled (#1914), gRPC and JSON both. A nil d gates
+// nothing. Like Observe it must be called before Register.
+func (s *Server) Gate(d apienable.Decider, service string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.gate, s.gateService = d, service
 }
 
 // ServeHTTP adds a JSON API on the gRPC port (#366). It must be called
@@ -166,6 +185,9 @@ func (s *Server) Start(ctx context.Context) error {
 		return errors.New("no services registered")
 	}
 	srv, jsonAPI := s.srv, s.http
+	if jsonAPI != nil && s.gate != nil {
+		jsonAPI = apienable.Gate(s.gate, s.gateService, jsonAPI)
+	}
 	s.mu.Unlock()
 
 	var lc net.ListenConfig

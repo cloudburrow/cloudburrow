@@ -137,6 +137,9 @@ type Server struct {
 	servers sync.Map
 	// bgs are the blue-green deployments (#1614); emu guards them.
 	bgs map[string]*blueGreen
+	// Wrap, when set before Start, wraps the API's handler: the gate
+	// refusing calls in a project where the API is disabled (#1914).
+	Wrap func(http.Handler) http.Handler
 }
 
 // ServerOf is the name of instance name's server in the cluster: its own
@@ -183,7 +186,11 @@ func (s *Server) Start(context.Context) error {
 	}
 	// Loopback-only, but a rebound or cross-site page reaches
 	// loopback too (#676, #1586).
-	s.srv = &http.Server{Handler: hostguard.Wrap(s), ReadHeaderTimeout: 10 * time.Second}
+	var h http.Handler = s
+	if s.Wrap != nil {
+		h = s.Wrap(h)
+	}
+	s.srv = &http.Server{Handler: hostguard.Wrap(h), ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = s.srv.Serve(ln) }()
 	return nil
 }

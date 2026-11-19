@@ -666,6 +666,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		coord.Register(backupDRSrv)
 	}
+	// Disabled APIs are enforced as Google enforces them (#1914): every
+	// API is enabled in every project until someone disables it.
+	useAPIEnablement(serviceUsageSrv, rmSrv, apiGated{tasks: tasksSvc, run: runSvc, scheduler: schedulerSvc,
+		memorystore: memorystoreAdminSvc, logging: loggingSvc, kms: kmsSvc, secrets: secretsSvc, sqlAdmin: sqlAdminSrv, backupDR: backupDRSrv})
 
 	// Built before the console so the console can offer its playground, and
 	// registered after it for the same reason the other components are:
