@@ -174,7 +174,10 @@ func TestBigQueryMLBoostedTreeLabelEncoding(t *testing.T) {
 	}
 	_, err = c.Query(fmt.Sprintf("CREATE MODEL `%s.no` OPTIONS(model_type='boosted_tree_regressor', input_label_cols=['y'], "+
 		"category_encoding_method='TARGET_ENCODING') AS SELECT c, y FROM `%s.cats`", name, name)).Read(ctx)
-	wantHTTPStatus(t, "category_encoding_method TARGET_ENCODING", err, http.StatusNotImplemented)
+	if err != nil {
+		// Built since #1929 (TestBigQueryMLCategoryEncodings).
+		t.Errorf("category_encoding_method TARGET_ENCODING: %v", err)
+	}
 	_, err = c.Query(fmt.Sprintf("CREATE MODEL `%s.no` OPTIONS(model_type='linear_reg', input_label_cols=['y'], "+
 		"category_encoding_method='LABEL_ENCODING') AS SELECT c, y FROM `%s.cats`", name, name)).Read(ctx)
 	wantHTTPStatus(t, "category_encoding_method LABEL_ENCODING of a linear model", err, http.StatusBadRequest)
