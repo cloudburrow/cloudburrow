@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -167,51 +169,144 @@ func (datastoreProvider) ID() string    { return "datastore" }
 func (datastoreProvider) Title() string { return "Datastore" }
 
 func (p datastoreProvider) List(ctx context.Context, project string) (console.Listing, error) {
-	// Every namespace's kinds (#854): a kind in a namespace other than the
-	// default is a different kind, and a screen that listed only the default
-	// namespace hid it. The Namespace column is the picker: its filter narrows
-	// the list to one namespace, and a row opens the kind in its own.
-	base := console.Listing{Columns: []string{"Namespace"}, Noun: "kinds", NameColumn: "Kind"}
+	// Google's Entities page (#1846): the entities of one kind, chosen with
+	// the namespace in pickers over the table, each row opening its entity
+	// and checked rows deleted together. Before, the page listed kinds
+	// (#854), which Google's has not.
+	base := console.Listing{Columns: datastoreEntityColumns, Noun: "entities", NameColumn: datastoreNameIDColumn, RowsOpenable: true}
 	if project == "" {
 		base.Prompt = "Datastore holds entities per project. Choose one in the toolbar."
 		return base, nil
 	}
 	base.Scope = p.databaseScope(ctx, project)
-	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
+	lctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
 
-	c, err := p.client(ctx, project)
+	c, err := p.client(lctx, project)
 	if err != nil {
 		base.Unavailable = "cannot reach Datastore: " + err.Error()
 		return base, nil
 	}
 	defer c.Close()
 
-	namespaces, err := datastoreNamespaces(ctx, c)
+	namespaces, err := datastoreNamespaces(lctx, c)
 	if err != nil {
 		base.Unavailable = "listing namespaces: " + err.Error()
 		return base, nil
 	}
-	var items []console.Resource
-	for _, ns := range append([]string{""}, namespaces...) {
-		kinds, err := datastoreKinds(ctx, c, ns)
-		if err != nil {
-			base.Unavailable = "listing kinds: " + err.Error()
-			return base, nil
-		}
-		for _, kind := range kinds {
-			item := console.Resource{Name: kind, Fields: map[string]string{"Namespace": namespaceLabel(ns)}}
-			if ns != "" {
-				item.Opens = datastoreScope{ns: ns, namespaced: true}.at(kind)
-			}
-			items = append(items, item)
+	ns := console.ScopeValue(ctx, datastoreNamespaceKey)
+	nsScope := &console.Scope{Key: datastoreNamespaceKey, Label: "Namespace", Selected: ns, Default: "",
+		Options: []console.ScopeOption{{ID: "", Label: datastoreDefaultNamespaceLabel}}}
+	known := ns == ""
+	for _, n := range namespaces {
+		nsScope.Options = append(nsScope.Options, console.ScopeOption{ID: n})
+		known = known || n == ns
+	}
+	if !known {
+		nsScope.Options = append(nsScope.Options, console.ScopeOption{ID: ns, Label: ns + " (no entities)"})
+	}
+	kinds, err := datastoreKinds(lctx, c, ns)
+	if err != nil {
+		base.Unavailable = "listing kinds: " + err.Error()
+		return base, nil
+	}
+	kind := console.ScopeValue(ctx, datastoreKindKey)
+	kindScope := &console.Scope{Key: datastoreKindKey, Label: "Kind"}
+	for _, k := range kinds {
+		kindScope.Options = append(kindScope.Options, console.ScopeOption{ID: k})
+	}
+	if len(kinds) > 0 {
+		kindScope.Default = kinds[0]
+		if kind == "" {
+			kind = kinds[0]
 		}
 	}
-	base.Items, base.Total = items, len(items)
-	base.Note = "A kind exists because an entity has it: Create entity makes its first entity, " +
-		"and it goes when its last entity is deleted. Kinds in every namespace are listed, the default first; " +
-		"filter on a namespace's name to see only its kinds."
+	if kind != "" && !slices.Contains(kinds, kind) {
+		kindScope.Options = append(kindScope.Options, console.ScopeOption{ID: kind, Label: kind + " (no entities)"})
+	}
+	kindScope.Selected = kind
+	base.Filters = []*console.Scope{nsScope, kindScope}
+	base.Note = "The entities of the kind chosen, in the namespace chosen. A kind exists because an entity has it: " +
+		"Create entity makes its first entity, and it goes when its last entity is deleted. " +
+		"Check entities to delete them together; a kind's own page has Query by kind and Query by GQL."
+	if kind == "" {
+		return base, nil
+	}
+	scope := datastoreScope{ns: ns, namespaced: ns != ""}
+	page, err := p.entitiesPage(ctx, project, scope, kind, "")
+	if err != nil {
+		return console.Listing{}, err
+	}
+	if page.Unavailable != "" {
+		base.Unavailable = page.Unavailable
+		return base, nil
+	}
+	base.Items, base.Total, base.More, base.Cursor = page.Items, page.Total, page.More, page.Cursor
 	return base, nil
+}
+
+// The Entities page's pickers' query parameters (console.Filterer).
+const (
+	datastoreNamespaceKey = "namespace"
+	datastoreKindKey      = "kind"
+)
+
+// datastoreDefaultNamespaceLabel names the default namespace, as Google's
+// console does.
+const datastoreDefaultNamespaceLabel = "[default]"
+
+// FilterKeys implements console.Filterer: the Entities page's Namespace
+// and Kind.
+func (datastoreProvider) FilterKeys() []string {
+	return []string{datastoreNamespaceKey, datastoreKindKey}
+}
+
+var _ console.Filterer = datastoreProvider{}
+
+// Delete implements console.Deleter: an entity the Entities page lists,
+// by its Name/ID, in the kind and namespace its pickers chose. Two
+// entities of the kind with one Name/ID under different parents are
+// deleted from their own pages.
+func (p datastoreProvider) Delete(ctx context.Context, project, name string) error {
+	if project == "" {
+		return errors.New("choose a project first")
+	}
+	ns := console.ScopeValue(ctx, datastoreNamespaceKey)
+	kind := console.ScopeValue(ctx, datastoreKindKey)
+	lctx, cancel := context.WithTimeout(ctx, dbTimeout)
+	defer cancel()
+	c, err := p.client(lctx, project)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	if kind == "" {
+		kinds, err := datastoreKinds(lctx, c, ns)
+		if err != nil {
+			return err
+		}
+		if len(kinds) == 0 {
+			return fmt.Errorf("no entity %s: the namespace has no kinds", name)
+		}
+		kind = kinds[0]
+	}
+	keys, err := c.GetAll(lctx, datastore.NewQuery(kind).Namespace(ns).KeysOnly(), nil)
+	if err != nil {
+		return err
+	}
+	var match []*datastore.Key
+	for _, k := range keys {
+		if datastoreNameID(k) == name {
+			match = append(match, k)
+		}
+	}
+	switch len(match) {
+	case 0:
+		return fmt.Errorf("%s has no entity %s in namespace %s", kind, name, namespaceLabel(ns))
+	case 1:
+		return c.Delete(lctx, match[0])
+	}
+	return fmt.Errorf("%d entities of %s are %s, under different parents: delete each from its own page", len(match), kind, name)
 }
 
 // datastoreNamespaces are the project's namespaces other than the default,
@@ -918,6 +1013,23 @@ func datastoreEntityRow(scope datastoreScope, kind string, k *datastore.Key, pro
 
 // Page implements console.Pager for a kind's entities.
 func (p datastoreProvider) Page(ctx context.Context, project string, path []string, cursor string) (console.Listing, error) {
+	if len(path) == 0 {
+		// The Entities page, in its pickers' namespace and kind.
+		ns, kind := console.ScopeValue(ctx, datastoreNamespaceKey), console.ScopeValue(ctx, datastoreKindKey)
+		if kind == "" {
+			c, err := p.client(ctx, project)
+			if err != nil {
+				return console.Listing{}, err
+			}
+			kinds, err := datastoreKinds(ctx, c, ns)
+			_ = c.Close()
+			if err != nil || len(kinds) == 0 {
+				return console.Listing{}, errors.New("choose a kind")
+			}
+			kind = kinds[0]
+		}
+		return p.entitiesPage(ctx, project, datastoreScope{ns: ns, namespaced: ns != ""}, kind, cursor)
+	}
 	scope, rest := parseDatastorePath(path)
 	if scope.index || len(rest) != 1 {
 		return console.Listing{}, fmt.Errorf("only a kind's entity list can be paged")
@@ -2416,32 +2528,46 @@ func (p datastoreProvider) QueryForm(path []string) (string, []console.Field) {
 	if len(rest) == 1 {
 		kind = rest[0]
 	}
-	byKind := datastoreQueryFields()
-	for i := range byKind {
-		byKind[i].ShowWhen = "queryBy=" + datastoreQueryByKind
+	// Google's two tabs (#1846), the one showing sent as tab:Query.
+	fields := []console.Field{{Name: datastoreQueryTabField, Type: "hidden", Default: datastoreQueryByKind}}
+	for _, f := range datastoreQueryFields() {
+		f.Section, f.Tab = datastoreQuerySection, datastoreQueryByKind
+		fields = append(fields, f)
 	}
-	fields := []console.Field{{Name: "queryBy", Label: "Query", Type: "select",
-		Options: []string{datastoreQueryByKind, datastoreQueryByGQL}, Default: datastoreQueryByKind,
-		Help: "Query by kind builds the query from a filter and an order; Query by GQL runs a GQL query you write."}}
-	fields = append(fields, byKind...)
-	return "Run query", append(fields, datastoreGQLFields(kind)...)
+	for _, f := range datastoreGQLFields(kind) {
+		f.Section, f.Tab, f.ShowWhen = datastoreQuerySection, datastoreQueryByGQL, ""
+		fields = append(fields, f)
+	}
+	return "Run", fields
 }
+
+// The query tab's section, and the hidden field the tab showing in it is
+// sent in (console's form tabs).
+const (
+	datastoreQuerySection  = "Query"
+	datastoreQueryTabField = "tab:" + datastoreQuerySection
+)
+
+// datastoreClauseOps are a query clause's operators: a WHERE clause's
+// comparisons, and an ORDER BY clause's directions. Google's != , IN and
+// NOT_IN are not offered: the Datastore emulator refuses them (measured:
+// IN "Filter has 2 properties, expected 1", != an empty UNKNOWN; #1888).
+var datastoreClauseOps = []string{"==", "<", "<=", ">", ">=", "Ascending", "Descending"}
 
 // datastoreQueryFields are the query tab's Query by kind controls.
 func datastoreQueryFields() []console.Field {
 	return []console.Field{
-		{Name: "property", Label: "Property", Type: "text",
-			Help: "The property to filter on. Leave empty to list in order."},
-		{Name: "op", Label: "Operator", Type: "text", Default: "=",
-			Help:    "One of =, <, <=, >, >=.",
-			Pattern: `^(=|<|<=|>|>=)$`},
-		{Name: "value", Label: "Value", Type: "text",
-			Help: "Compared as a number when it parses as one, as a boolean for " +
-				"true and false, and as a string otherwise."},
-		{Name: "orderBy", Label: "Order by", Type: "text",
-			Help: "Optional property name. Datastore requires an index for an " +
-				"ordering it has not been given one for, and says which."},
-		{Name: "descending", Label: "Descending", Type: "checkbox"},
+		{Name: "clauses", Label: "Query clauses", Type: console.GroupFieldType, AddLabel: "Add query clause",
+			Group: []console.Field{
+				{Name: "clause", Label: "Clause", Type: "select", Options: []string{"WHERE", "ORDER BY"}, Default: "WHERE"},
+				{Name: "property", Label: "Property", Type: "text"},
+				{Name: "op", Label: "Operator", Type: "select", Options: datastoreClauseOps, Default: "=="},
+				{Name: "type", Label: "Value type", Type: "select", Options: datastoreCreateTypes, OptionLabels: datastoreCreateTypeLabels, Default: "string"},
+				{Name: "value", Label: "Value", Type: "text"},
+			},
+			Help: "Each WHERE clause filters on a property: ==, <, <=, > or >= (the Datastore emulator does not serve !=, IN or NOT_IN). " +
+				"An ORDER BY clause orders by a property, Ascending or Descending. With no clause the kind's entities are listed in key order. " +
+				"Datastore needs a composite index for some combinations, and names the one it needs."},
 		{Name: "limit", Label: "Limit", Type: "text", Default: "50",
 			Pattern: `^[0-9]{1,4}$`,
 			Help:    fmt.Sprintf("At most %d.", detailLimit)},
@@ -2452,6 +2578,78 @@ func datastoreQueryFields() []console.Field {
 		{Name: "aggregateProperty", Label: "Aggregated property", Type: "text",
 			Help: "The property SUM and AVG add up; values that are not numbers are skipped."},
 	}
+}
+
+// datastoreClauseOperators are the WHERE clause operators the query
+// builder offers, as the v1 API has them.
+var datastoreClauseOperators = map[string]datastorepb.PropertyFilter_Operator{
+	"==": datastorepb.PropertyFilter_EQUAL, "=": datastorepb.PropertyFilter_EQUAL,
+	"<": datastorepb.PropertyFilter_LESS_THAN, "<=": datastorepb.PropertyFilter_LESS_THAN_OR_EQUAL,
+	">": datastorepb.PropertyFilter_GREATER_THAN, ">=": datastorepb.PropertyFilter_GREATER_THAN_OR_EQUAL,
+}
+
+// datastoreClauseValue is a WHERE clause's value of its chosen type.
+func datastoreClauseValue(typ, raw string) (*datastorepb.Value, error) {
+	prop, err := datastoreProperty("value", map[string]string{"type": typ, "value": raw})
+	if err != nil {
+		return nil, err
+	}
+	return datastorePropertyPB(prop)
+}
+
+// datastoreClauses are the query's Query clauses: its filter, every WHERE
+// clause together, and its orders.
+func datastoreClauses(raw string) (*datastorepb.Filter, []*datastorepb.PropertyOrder, error) {
+	rows, err := console.ParseGroup(raw)
+	if err != nil {
+		return nil, nil, fmt.Errorf("query clauses: %w", err)
+	}
+	var filters []*datastorepb.Filter
+	var orders []*datastorepb.PropertyOrder
+	for i, r := range rows {
+		prop := strings.TrimSpace(r["property"])
+		if prop == "" {
+			if strings.TrimSpace(r["value"]) == "" {
+				continue // a clause added and left empty
+			}
+			return nil, nil, fmt.Errorf("query clause %d needs a property", i+1)
+		}
+		name, err := datastoreFieldName(prop)
+		if err != nil {
+			return nil, nil, err
+		}
+		op := r["op"]
+		if r["clause"] == "ORDER BY" {
+			dir := datastorepb.PropertyOrder_ASCENDING
+			switch op {
+			case "Descending":
+				dir = datastorepb.PropertyOrder_DESCENDING
+			case "Ascending", "":
+			default:
+				return nil, nil, fmt.Errorf("ORDER BY %s is Ascending or Descending, not %s", prop, op)
+			}
+			orders = append(orders, &datastorepb.PropertyOrder{Property: &datastorepb.PropertyReference{Name: name}, Direction: dir})
+			continue
+		}
+		o, ok := datastoreClauseOperators[op]
+		if !ok {
+			return nil, nil, fmt.Errorf("WHERE %s takes ==, <, <=, >, or >=, not %s", prop, op)
+		}
+		v, err := datastoreClauseValue(r["type"], r["value"])
+		if err != nil {
+			return nil, nil, fmt.Errorf("WHERE %s: %w", prop, err)
+		}
+		filters = append(filters, &datastorepb.Filter{FilterType: &datastorepb.Filter_PropertyFilter{PropertyFilter: &datastorepb.PropertyFilter{
+			Property: &datastorepb.PropertyReference{Name: name}, Op: o, Value: v}}})
+	}
+	switch len(filters) {
+	case 0:
+		return nil, orders, nil
+	case 1:
+		return filters[0], orders, nil
+	}
+	return &datastorepb.Filter{FilterType: &datastorepb.Filter_CompositeFilter{CompositeFilter: &datastorepb.CompositeFilter{
+		Op: datastorepb.CompositeFilter_AND, Filters: filters}}}, orders, nil
 }
 
 // datastoreAggregateOptions are the query builder's aggregations; "none"
@@ -2543,11 +2741,20 @@ func (p datastoreProvider) Build(ctx context.Context, project string, path []str
 		return out, nil
 	}
 	defer done()
-	if values["queryBy"] == datastoreQueryByGQL {
+	mode := values[datastoreQueryTabField]
+	if mode == "" {
+		mode = values["queryBy"] // the API's callers before the tabs
+	}
+	if mode == datastoreQueryByGQL {
 		return p.buildGQL(ctx, c, project, scope, values["gql"])
 	}
 
 	q := &datastorepb.Query{Kind: []*datastorepb.KindExpression{{Name: kind}}}
+	if q.Filter, q.Order, err = datastoreClauses(values["clauses"]); err != nil {
+		return console.Listing{}, err
+	}
+	// One filter and one order, as the API's callers before the query
+	// clauses send them.
 	if prop := strings.TrimSpace(values["property"]); prop != "" {
 		op := strings.TrimSpace(values["op"])
 		if op == "" {
@@ -2557,8 +2764,15 @@ func (p datastoreProvider) Build(ctx context.Context, project string, path []str
 		if err != nil {
 			return console.Listing{}, err
 		}
-		if q.Filter, err = datastoreFilterPB(prop, op, value); err != nil {
+		f, err := datastoreFilterPB(prop, op, value)
+		if err != nil {
 			return console.Listing{}, err
+		}
+		if q.Filter == nil {
+			q.Filter = f
+		} else {
+			q.Filter = &datastorepb.Filter{FilterType: &datastorepb.Filter_CompositeFilter{CompositeFilter: &datastorepb.CompositeFilter{
+				Op: datastorepb.CompositeFilter_AND, Filters: []*datastorepb.Filter{q.Filter, f}}}}
 		}
 	}
 	if order := strings.TrimSpace(values["orderBy"]); order != "" {
@@ -2569,7 +2783,7 @@ func (p datastoreProvider) Build(ctx context.Context, project string, path []str
 		if err != nil {
 			return console.Listing{}, err
 		}
-		q.Order = []*datastorepb.PropertyOrder{o}
+		q.Order = append(q.Order, o)
 	}
 	if op := values["aggregate"]; op != "" && op != "none" {
 		// Over every matching entity, as Firestore's Count only is: the

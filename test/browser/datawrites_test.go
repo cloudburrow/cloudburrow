@@ -343,11 +343,16 @@ func TestDatastoreNamespaceAndChildEntityThroughTheBrowser(t *testing.T) {
 		t.Fatalf("create an entity through the console API = %d: %s", code, body)
 	}
 
+	// The Entities page (#1846): its Namespace picker on tenant-b lists
+	// Widget's w1.
 	p.navigate("/datastore" + q)
-	p.waitFor(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes("Widget") && r.textContent.includes("tenant-b"))`)
-	p.clickText("#view tbody a", "Widget")
-	p.waitFor(`location.pathname === "/datastore/__namespace__/tenant-b/Widget" && ` +
-		`document.querySelector("#view .breadcrumb").textContent.includes("Namespaces")`)
+	p.waitFor(`[...document.querySelectorAll("#scope-namespace option")].some((o) => o.value === "tenant-b")`)
+	p.eval(`(() => { const s = document.querySelector("#scope-namespace"); s.value = "tenant-b";
+		s.dispatchEvent(new Event("change")); return true; })()`, nil)
+	p.waitFor(`new URLSearchParams(location.search).get("namespace") === "tenant-b" && ` +
+		`[...document.querySelectorAll("#view tbody a")].some((a) => a.textContent.trim() === "name=w1")`)
+	p.navigate("/datastore/__namespace__/tenant-b/Widget" + q)
+	p.waitFor(`document.querySelector("#view .breadcrumb") && document.querySelector("#view .breadcrumb").textContent.includes("Namespaces")`)
 	var trail string
 	p.eval(`document.querySelector("#view .breadcrumb").textContent`, &trail)
 	if trail != "Datastore/Namespaces/tenant-b/Widget" {

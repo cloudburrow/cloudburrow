@@ -21,7 +21,7 @@ import (
 
 // TestDatastoreStudioQueryByGQLIndexesAndImportExportThroughTheBrowser
 // (#1846), in the emulators shard. In a Datastore mode database chosen in
-// the picker, a kind's query tab switches to Query by GQL and Run query
+// the picker, a kind's query tab's Query by GQL tab, and Run
 // lists that database's matching entity; the Datastore page offers Export,
 // Import and Indexes, and Indexes opens the database's Indexes page.
 func TestDatastoreStudioQueryByGQLIndexesAndImportExportThroughTheBrowser(t *testing.T) {
@@ -65,8 +65,8 @@ func TestDatastoreStudioQueryByGQLIndexesAndImportExportThroughTheBrowser(t *tes
 	p.navigate("/datastore/Task" + q)
 	p.waitFor(`document.querySelector("#tab-query") !== null`)
 	p.run(chromedp.Click(chromedp.CSS(`#tab-query`)))
-	p.waitFor(`document.querySelector(".query-form #f-queryBy") !== null`)
-	p.setField(".query-form #f-queryBy", "Query by GQL")
+	p.waitFor(`[...document.querySelectorAll(".query-form .form-tabs button")].some((b) => b.textContent === "Query by GQL")`)
+	p.clickText(".query-form .form-tabs button", "Query by GQL")
 	p.waitFor(`document.querySelector(".query-form #f-gql") && document.querySelector(".query-form #f-gql").offsetParent !== null`)
 	p.setField(".query-form #f-gql", "SELECT * FROM Task WHERE Hours > 4")
 	p.run(chromedp.Click(chromedp.CSS(`.query-form button[type="submit"]`)))

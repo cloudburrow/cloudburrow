@@ -177,6 +177,11 @@ type Listing struct {
 	// Scope is the picker a Scoper's list screen draws above its rows: the
 	// Bigtable instance whose tables these are (#1360).
 	Scope *Scope `json:"scope,omitempty"`
+	// Filters are pickers drawn after Scope that narrow the rows, each
+	// in a query parameter of its own, as Google's Datastore Entities
+	// page has Namespace and Kind (#1846). A Filterer's screens carry
+	// them on every request; choosing one clears those after it.
+	Filters []*Scope `json:"filters,omitempty"`
 	// Tabs, when set, draw the list screen as tabs, as Google's Cloud
 	// Storage Settings page has Project access and Interoperability (#1843):
 	// the tab whose ID is ListTab holds the rows, with the screen's create
@@ -1445,7 +1450,7 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 			"create": caps.Create, "delete": caps.Delete, "detail": caps.Detail,
 			"query": caps.Query, "edit": caps.Edit, "reveal": caps.Reveal,
 			"deleteLabel": caps.DeleteLabel, "editRow": caps.EditRow,
-			"page": caps.Page, "scope": caps.Scope,
+			"page": caps.Page, "scope": caps.Scope, "filters": caps.Filters,
 		})
 	}
 	// The playground is advertised only when local AI is configured, so the
@@ -1644,6 +1649,9 @@ type capabilities struct {
 	// Scope is the query parameter a Scoper's screens carry on every request
 	// and link, empty for a service scoped by the project alone.
 	Scope string `json:"scope,omitempty"`
+	// Filters are the query parameters a Filterer's screens carry with
+	// the scope (Listing.Filters).
+	Filters []string `json:"filters,omitempty"`
 }
 
 // QuerySpec is a query surface: either a statement box or a form.
@@ -1755,6 +1763,9 @@ func (s *Server) capabilitiesOf(p Provider) capabilities {
 	}
 	if sc, ok := p.(Scoper); ok {
 		c.Scope = sc.ScopeKey()
+	}
+	if f, ok := p.(Filterer); ok {
+		c.Filters = f.FilterKeys()
 	}
 	return c
 }

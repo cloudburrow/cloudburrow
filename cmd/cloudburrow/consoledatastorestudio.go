@@ -239,12 +239,25 @@ func (p datastoreProvider) indexesDetail(ctx context.Context, project string) (c
 	if project == "" {
 		return console.Detail{Prompt: "Choose a project in the toolbar."}, nil
 	}
-	list := console.Listing{Columns: []string{"Kind", "Properties", "Ancestor", "Status"}, NameColumn: "Index ID", Noun: "indexes"}
+	list := console.Listing{Columns: []string{"Kind", "Properties", "Ancestor", "Status", "Entries", "Size"}, NameColumn: "Index ID", Noun: "indexes"}
 	c, actx, err := p.datastoreAdmin(ctx, project)
 	if err != nil {
 		return console.Detail{Unavailable: err.Error()}, nil
 	}
 	defer c.Close()
+	// The entities the indexes' Entries and Size are computed from
+	// (consoledatastoreindexsize.go): the kind's, in every namespace.
+	namespaces := []string{""}
+	raw, rawDone, rawErr := p.rawDatastore()
+	if rawErr == nil {
+		defer rawDone()
+		if dc, err := p.client(ctx, project); err == nil {
+			if nss, err := datastoreNamespaces(ctx, dc); err == nil {
+				namespaces = append(namespaces, nss...)
+			}
+			_ = dc.Close()
+		}
+	}
 	it := c.ListIndexes(actx, &dsadminpb.ListIndexesRequest{ProjectId: project})
 	for {
 		ix, err := it.Next()
@@ -258,14 +271,22 @@ func (p datastoreProvider) indexesDetail(ctx context.Context, project string) (c
 		if ix.GetAncestor() == dsadminpb.Index_ALL_ANCESTORS {
 			anc = "All ancestors"
 		}
+		entries, size := "—", "—"
+		if rawErr == nil {
+			if n, sz, ok := datastoreIndexStats(ctx, raw, project, namespaces, ix); ok {
+				entries, size = strconv.FormatInt(n, 10), datastoreIndexSize(sz)
+			}
+		}
 		list.Items = append(list.Items, console.Resource{Name: ix.GetIndexId(), Fields: map[string]string{
 			"Kind": ix.GetKind(), "Properties": datastoreIndexProperties(ix), "Ancestor": anc,
-			"Status": datastoreIndexState(ix.GetState())}})
+			"Status": datastoreIndexState(ix.GetState()), "Entries": entries, "Size": size}})
 	}
 	list.Total = len(list.Items)
 	list.Note = "Composite indexes, which a query on more than one property needs. Datastore indexes every " +
 		"property on its own unless it is excluded from indexes. Composite indexes are created from an " +
-		"index.yaml file with gcloud datastore indexes create, or through the Datastore Admin API."
+		"index.yaml file with gcloud datastore indexes create, or through the Datastore Admin API. " +
+		"Entries and Size are computed from the kind's entities by Google's storage size rules: an entry for each " +
+		"combination of the indexed properties' values, each the entity's key size, its indexed values' sizes and 32 bytes."
 	d := singleSection("indexes", "Indexes", list,
 		[]console.Property{{Label: "Database", Value: datastoreDatabaseIn(ctx)}})
 	d.Title = "Indexes"
@@ -426,4 +447,13 @@ func (p datastoreProvider) editDatastoreEntity(ctx context.Context, project stri
 		}
 		return nil
 	})
+}
+
+// datastoreIndexSize is an index's Size: bytes, or KB and MB as Google's
+// storage sizes are given (powers of 1,024).
+func datastoreIndexSize(n int64) string {
+	if n == 0 {
+		return "0 B"
+	}
+	return formatBytes(n)
 }

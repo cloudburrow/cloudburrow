@@ -8140,8 +8140,8 @@
         "method": "google.firestore.v1.Firestore/ListDocuments",
         "status": "Verified",
         "tests": [
-          "test/compat/consoledatawrites_test.go:1013 TestConsoleFirestoreCountsMissingDocuments",
-          "test/compat/consoledatawrites_test.go:600 TestConsoleFirestoreListsMissingDocumentsWithSubcollections"
+          "test/compat/consoledatawrites_test.go:1015 TestConsoleFirestoreCountsMissingDocuments",
+          "test/compat/consoledatawrites_test.go:602 TestConsoleFirestoreListsMissingDocumentsWithSubcollections"
         ]
       },
       {

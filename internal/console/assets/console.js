@@ -537,8 +537,12 @@ const scopeKeyOf = (service) => capabilityOf(service).scope || "";
 function carryScope(url, service) {
   const key = scopeKeyOf(service);
   if (!key) return url;
-  const value = new URLSearchParams(location.search).get(key);
-  if (value && !url.searchParams.has(key)) url.searchParams.set(key, value);
+  // A Filterer's own pickers (Listing.Filters, #1846) travel with it.
+  const here = new URLSearchParams(location.search);
+  for (const k of [key, ...(capabilityOf(service).filters || [])]) {
+    const value = here.get(k);
+    if (value && !url.searchParams.has(k)) url.searchParams.set(k, value);
+  }
   return url;
 }
 
@@ -577,7 +581,7 @@ function scopeSubtitle(service) {
 
 // scopePicker is a list screen's picker for its scope: choosing puts it in
 // the address (the default leaves it out) and redraws.
-function scopePicker(spec, reload) {
+function scopePicker(spec, reload, clears = []) {
   const id = `scope-${spec.key}`;
   const select = el("select", { id, name: spec.key },
     ...(spec.options || []).map((o) =>
@@ -586,6 +590,9 @@ function scopePicker(spec, reload) {
     const params = new URLSearchParams(location.search);
     if (select.value && select.value !== spec.default) params.set(spec.key, select.value);
     else params.delete(spec.key);
+    // A filter after this one was chosen among this one's (#1846): a
+    // kind of another namespace.
+    for (const k of clears) params.delete(k);
     const qs = params.toString();
     history.pushState(history.state, "", location.pathname + (qs ? `?${qs}` : ""));
     reload();
@@ -4662,7 +4669,9 @@ async function renderList(view, route) {
     header.push(...listingSummary(data));
   }
   if (data.serverFilter) header.push(serverFilterBox(data.serverFilter, () => renderList(view, route)));
-  if (data.scope) header.push(scopePicker(data.scope, () => renderList(view, route)));
+  if (data.scope) header.push(scopePicker(data.scope, () => renderList(view, route), (data.filters || []).map((f) => f.key)));
+  (data.filters || []).forEach((f, i, all) =>
+    header.push(scopePicker(f, () => renderList(view, route), all.slice(i + 1).map((x) => x.key))));
 
   // A screen that needs something from the user is not a broken screen. This
   // is rendered as a prompt rather than as an error, because a red failure
@@ -5575,7 +5584,13 @@ function buildCreateForm(spec) {
       // An immutable field is context, not input. Sending it back would ask
       // the API to set a value to what it already is, which some APIs accept
       // and others reject as an attempt to change an immutable field.
-      return Object.fromEntries([...hiddenValues(hidden), ...entries
+      // A hidden field named "tab:<section>" is sent the tab showing in
+      // that section, as Datastore's Query by kind and Query by GQL
+      // (#1846).
+      const tabsShown = nodes.flatMap((n) => (n.querySelectorAll ? [...n.querySelectorAll(".form-tabs")] : []))
+        .filter((t) => hidden.some((h) => h.name === `tab:${t.dataset.section}`))
+        .map((t) => [`tab:${t.dataset.section}`, t.dataset.selected || ""]);
+      return Object.fromEntries([...hiddenValues(hidden), ...tabsShown, ...entries
         .filter((e) => !e.field.immutable && e.field.type !== "file")
         .map((e) => {
           if (e.isCheck) return [e.field.name, String(e.control.checked)];
@@ -5606,7 +5621,10 @@ function formTabs(section, entries) {
   const panels = tabs.map((t, i) => el("div", { class: "form-tab-panel tab-panel", role: "tabpanel",
     id: `${base}-${slug(t.name)}`, "aria-labelledby": `${base}-${slug(t.name)}-tab`, hidden: i !== 0 },
     ...t.entries.map((e) => e.node)));
+  const strip = el("div", { class: "tab-strip form-tabs", role: "tablist", "aria-label": section,
+    "data-section": section, "data-selected": tabs[0].name });
   const select = (i) => {
+    strip.dataset.selected = tabs[i].name;
     buttons.forEach((b, j) => {
       b.classList.toggle("is-selected", i === j);
       b.setAttribute("aria-selected", i === j ? "true" : "false");
@@ -5629,9 +5647,8 @@ function formTabs(section, entries) {
       } }));
     panels[i].addEventListener("form-tab-show", () => select(i));
   });
-  return [...plain,
-    el("div", { class: "tab-strip form-tabs", role: "tablist", "aria-label": section }, ...buttons),
-    ...panels];
+  strip.append(...buttons);
+  return [...plain, strip, ...panels];
 }
 
 // radioEntry is a "radio" field: one radio button per option, the choice

@@ -447,8 +447,8 @@ func TestConsoleFirestoreSubcollections(t *testing.T) {
 //
 // Datastore namespaces and ancestors on the console (#854), each read back
 // through the official client. Create entity with a namespace writes the
-// entity in it; the Datastore screen lists every namespace's kinds with the
-// namespace named, and a row in another namespace opens its kind there; the
+// entity in it; the Datastore screen, its Namespace picker on the
+// namespace, lists the entity and opens it there (#1846); the
 // Namespaces page lists it, and its page its kinds. On an entity's page,
 // Create child entity writes an entity whose parent is that one, in the same
 // namespace; the parent's Children tab lists it by its key path and opens it;
@@ -491,15 +491,17 @@ func TestConsoleDatastoreNamespacesAndChildren(t *testing.T) {
 			Opens  []string
 		}
 	}
-	consoleJSON(t, addr, http.MethodGet, "/api/resources/datastore?project="+project, "", &list)
+	// The Entities page (#1846), its Namespace picker on ns: Widget's
+	// w1, opening its entity there.
+	consoleJSON(t, addr, http.MethodGet, "/api/resources/datastore?project="+project+"&namespace="+url.QueryEscape(ns), "", &list)
 	found := false
 	for _, it := range list.Items {
-		if it.Name == "Widget" && it.Fields["Namespace"] == ns {
-			found = strings.Join(it.Opens, "|") == "__namespace__|"+ns+"|Widget"
+		if it.Name == "name=w1" {
+			found = len(it.Opens) == 4 && strings.Join(it.Opens[:3], "|") == "__namespace__|"+ns+"|Widget"
 		}
 	}
 	if !found {
-		t.Errorf("the Datastore screen does not list Widget in %s opening its kind there: %+v", ns, list.Items)
+		t.Errorf("the Entities page in %s does not list Widget's w1 opening it there: %+v", ns, list.Items)
 	}
 	if got := consoleWriteDetail(t, addr, "datastore", project, "__namespace__").rows(t, "namespaces"); got == nil || len(got) != 1 {
 		t.Errorf("the Namespaces page lists %v, want %s", got, ns)
