@@ -5439,6 +5439,7 @@
         "method": "google.cloud.aiplatform.v1.PredictionService/EmbedContent",
         "status": "Verified",
         "tests": [
+          "test/compat/embed16k_test.go:30 TestEmbedContentEmbeds16KVideoThroughThePredictionClient",
           "test/compat/embedaudio_test.go:71 TestEmbedContentEmbedsAudioThroughThePredictionClient",
           "test/compat/embedaudiotrack_test.go:37 TestEmbedContentEmbedsAVideosAudioTrackThroughThePredictionClient",
           "test/compat/embedavif_test.go:43 TestEmbedContentEmbedsAVIFThroughThePredictionClient",
@@ -5449,7 +5450,7 @@
           "test/compat/embedmpeg25_test.go:28 TestEmbedContentEmbedsMPEG25MP3ThroughThePredictionClient",
           "test/compat/embedrest_test.go:224 TestEmbedContentEmbedsADPCMWAVAndLosslessAndMultichannelTracksThroughThePredictionClient",
           "test/compat/embedrest_test.go:318 TestEmbedContentEmbedsSurroundAACAndG711TracksAnd3BitADPCMThroughThePredictionClient",
-          "test/compat/embedrest_test.go:406 TestEmbedContentEmbeds2And5BitADPCMAndMP3WAVsThroughThePredictionClient",
+          "test/compat/embedrest_test.go:405 TestEmbedContentEmbeds2And5BitADPCMAndMP3WAVsThroughThePredictionClient",
           "test/compat/embedrest_test.go:45 TestEmbedContentEmbedsMultichannelWAVAndGrayVideoThroughThePredictionClient",
           "test/compat/embedvideo_test.go:85 TestEmbedContentEmbedsVideoAndPDFThroughThePredictionClient",
           "test/compat/embedvp9av1_test.go:35 TestEmbedContentEmbedsVP9AndAV1ThroughThePredictionClient",

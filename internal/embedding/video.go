@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"image/color"
 	"math"
 	"sort"
 	"strings"
@@ -54,19 +55,46 @@ const MaxVideoFrames = 120
 // DefaultVideoFPS is Google's default sampling rate.
 const DefaultVideoFPS = 1.0
 
-// maxVideoPixels bounds a video's frame size: 8K UHD. Google documents no
-// frame size, so a larger one is ErrNotDecoded (UNIMPLEMENTED), not invalid.
-// The decoders take frames up to 16384 x 16384, the image limit (measured
-// for #1651: H.264 16384x2048, H.265 16384x8192, AV1 16384x8704, VP9
-// 8704x4352), but DecodeVideo holds every sampled frame at full size, up
-// to 120 of them, so larger frames wait for a pipeline that patches each
-// frame as it is decoded.
-const maxVideoPixels = 8192 * 4320
-
-// maxVideoSide is the widest or tallest frame a decoder reads before the
-// maxVideoPixels check: a frame over 8K UHD is then ErrNotDecoded, not a
-// decoder's refusal (a VP9 frame wider than 8192 was INVALID_ARGUMENT).
+// maxVideoSide bounds a video's frame: 16384 on a side, Google's image
+// limit for gemini-embedding-2. Google documents no video frame size, so a
+// larger frame is ErrNotDecoded (UNIMPLEMENTED), not invalid. Since #1651's
+// fourth round each wanted picture is patched as soon as it is decoded and
+// its full-size RGB released (DecodeVideoPatched), so a 16K video holds
+// one RGB frame at a time beside the decoder's references, not up to 120.
 const maxVideoSide = 16384
+
+// maxVideoPixels is maxVideoSide squared.
+const maxVideoPixels = maxVideoSide * maxVideoSide
+
+// frameTooLarge is ErrNotDecoded for a w x h frame over maxVideoSide.
+func frameTooLarge(w, h int) error {
+	if w <= maxVideoSide && h <= maxVideoSide {
+		return nil
+	}
+	return notDecodedf("the video is %dx%d; frames up to %dx%d are decoded", w, h, maxVideoSide, maxVideoSide)
+}
+
+// frameConv converts a wanted sample's picture as it is decoded; the
+// identity for DecodeVideo, PatchVideoFrame's patches for DecodeVideoPatched.
+type frameConv func(image.Image) (image.Image, error)
+
+// keepFrame stores a wanted sample's converted picture in pics (a later
+// picture of the same sample replacing it); mk makes the full-size
+// picture, and is called only for a wanted sample.
+func keepFrame(pics map[int]image.Image, wanted map[int]bool, conv frameConv, s int, mk func() (image.Image, error)) error {
+	if !wanted[s] {
+		return nil
+	}
+	img, err := mk()
+	if err != nil {
+		return err
+	}
+	if img, err = conv(img); err != nil {
+		return err
+	}
+	pics[s] = img
+	return nil
+}
 
 // VideoOptions are a part's video_metadata.
 type VideoOptions struct {
@@ -96,8 +124,35 @@ type videoTrack struct {
 	av1Config     []byte       // AV1's configOBUs: the sequence header
 }
 
-// DecodeVideo samples the frames of an MP4 or MOV video.
+// DecodeVideo samples the frames of an MP4 or MOV video, each at full
+// size; DecodeVideoPatched is the form EmbedContent uses.
 func DecodeVideo(mimeType string, data []byte, opt VideoOptions) ([]image.Image, error) {
+	return decodeVideo(mimeType, data, opt, false)
+}
+
+// PatchedFrame is a sampled video frame already prepared for the vision
+// encoder (PatchVideoFrame's patches), its full-size picture released. A
+// frame VideoFrames drops carries no patches.
+type PatchedFrame struct {
+	W, H    int
+	patches *ImagePatches
+}
+
+func (f *PatchedFrame) ColorModel() color.Model { return color.NRGBAModel }
+func (f *PatchedFrame) Bounds() image.Rectangle { return image.Rect(0, 0, f.W, f.H) }
+
+// At is black: a patched frame keeps no pixels.
+func (f *PatchedFrame) At(x, y int) color.Color { return color.NRGBA{A: 255} }
+
+// DecodeVideoPatched samples the frames of an MP4 or MOV video as
+// DecodeVideo does, but patches each frame VideoFrames keeps as soon as it
+// is decoded (exactly PatchVideoFrame of DecodeVideo's frame) and keeps
+// only the patches: the frames are PatchedFrames.
+func DecodeVideoPatched(mimeType string, data []byte, opt VideoOptions) ([]image.Image, error) {
+	return decodeVideo(mimeType, data, opt, true)
+}
+
+func decodeVideo(mimeType string, data []byte, opt VideoOptions, patch bool) ([]image.Image, error) {
 	if !videoMIMETypes[baseMIME(mimeType)] {
 		return nil, fmt.Errorf("mime_type %q is not supported; send one of %s", mimeType, strings.Join(VideoMIMETypes, ", "))
 	}
@@ -126,13 +181,41 @@ func DecodeVideo(mimeType string, data []byte, opt VideoOptions) ([]image.Image,
 		}
 		want[i] = order[k]
 	}
-	frames, err := decodeSamples(tr, want)
+	if !patch {
+		frames, err := decodeSamples(tr, want, func(img image.Image) (image.Image, error) { return img, nil })
+		if err != nil {
+			return nil, err
+		}
+		out := make([]image.Image, len(want))
+		for i, s := range want {
+			out[i] = frames[s]
+		}
+		return out, nil
+	}
+	// Only the frames VideoFrames keeps are converted and patched.
+	kept := videoFrameIndexes(len(want))
+	keptSamples := make([]int, len(kept))
+	for i, k := range kept {
+		keptSamples[i] = want[k]
+	}
+	frames, err := decodeSamples(tr, keptSamples, func(img image.Image) (image.Image, error) {
+		ip, err := patchImage(img, videoSoftTokens)
+		if err != nil {
+			return nil, err
+		}
+		b := img.Bounds()
+		return &PatchedFrame{W: b.Dx(), H: b.Dy(), patches: &ip}, nil
+	})
 	if err != nil {
 		return nil, err
 	}
+	first := frames[keptSamples[0]].(*PatchedFrame)
 	out := make([]image.Image, len(want))
-	for i, s := range want {
-		out[i] = frames[s]
+	for i := range out {
+		out[i] = &PatchedFrame{W: first.W, H: first.H}
+	}
+	for _, k := range kept {
+		out[k] = frames[want[k]]
 	}
 	return out, nil
 }
@@ -348,7 +431,7 @@ func progressiveSamples(st *mp4.StblBox, data []byte,
 
 // decodeSamples decodes the pictures of the samples in want, starting each
 // at the sync sample before it, and returns them by sample index.
-func decodeSamples(tr *videoTrack, want []int) (map[int]image.Image, error) {
+func decodeSamples(tr *videoTrack, want []int, conv frameConv) (map[int]image.Image, error) {
 	// Group the wanted samples by the sync sample they are decoded from.
 	groups := map[int][]int{}
 	for _, s := range want {
@@ -375,19 +458,23 @@ func decodeSamples(tr *videoTrack, want []int) (map[int]image.Image, error) {
 		// A picture's references precede it in decode order, so decoding
 		// to the last wanted sample and flushing outputs every one.
 		stop := last + 1
+		wanted := make(map[int]bool, len(groups[k]))
+		for _, s := range groups[k] {
+			wanted[s] = true
+		}
 		var (
 			pics map[int]image.Image
 			err  error
 		)
 		switch tr.codec {
 		case "avc1", "avc3":
-			pics, err = decodeH264(tr, k, stop)
+			pics, err = decodeH264(tr, k, stop, wanted, conv)
 		case "vp09":
-			pics, err = decodeVP9(tr, k, stop)
+			pics, err = decodeVP9(tr, k, stop, wanted, conv)
 		case "av01":
-			pics, err = decodeAV1(tr, k, stop)
+			pics, err = decodeAV1(tr, k, stop, wanted, conv)
 		default:
-			pics, err = decodeH265(tr, k, stop)
+			pics, err = decodeH265(tr, k, stop, wanted, conv)
 		}
 		if err != nil {
 			return nil, err
@@ -427,7 +514,7 @@ func nalUnits(sample []byte, lengthSize int) ([][]byte, error) {
 // decodeH264 decodes samples from to stop (exclusive) of an H.264 track. The
 // decoder hands its pictures back in display order, which is the samples'
 // presentation order.
-func decodeH264(tr *videoTrack, from, stop int) (pics map[int]image.Image, err error) {
+func decodeH264(tr *videoTrack, from, stop int, wanted map[int]bool, conv frameConv) (pics map[int]image.Image, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			pics, err = nil, fmt.Errorf("decoding the H.264 video: %v", r)
@@ -436,22 +523,50 @@ func decodeH264(tr *videoTrack, from, stop int) (pics map[int]image.Image, err e
 	matrix, full := bt601, false
 	if len(tr.avcC.SPSnalus) > 0 {
 		if sps, err := avc.ParseSPSNALUnit(tr.avcC.SPSnalus[0], true); err == nil {
-			if sps.Width*sps.Height > maxVideoPixels {
-				return nil, notDecodedf("the video is %dx%d; at most %d pixels a frame are decoded", sps.Width, sps.Height, maxVideoPixels)
+			if err := frameTooLarge(int(sps.Width), int(sps.Height)); err != nil {
+				return nil, err
 			}
 			matrix = colourMatrix(sps.VUI != nil, vuiMatrix(sps), int(sps.Height))
 			full = sps.VUI != nil && sps.VUI.VideoFullRangeFlag
 		}
 	}
 	d := go264.NewDecoderWithConfig(go264.DecoderConfig{ForceSoftware: true,
-		Limits: go264.DecoderLimits{MaxFrameMBs: maxVideoPixels / 256}})
+		Limits: go264.DecoderLimits{MaxFrameMBs: maxVideoPixels / 256, AboveTable: true}})
 	defer d.Close()
 	var stream []byte
 	start := []byte{0, 0, 0, 1}
 	for _, ps := range append(append([][]byte(nil), tr.avcC.SPSnalus...), tr.avcC.PPSnalus...) {
 		stream = append(append(stream, start...), ps...)
 	}
-	var frames []*go264.Frame
+	// The decoded samples in presentation order: the decoder's pictures
+	// come out in that order, each converted before the next Decode
+	// reuses its planes.
+	idx := make([]int, 0, stop-from)
+	for s := from; s < stop; s++ {
+		idx = append(idx, s)
+	}
+	sort.SliceStable(idx, func(a, b int) bool { return tr.pts[idx[a]] < tr.pts[idx[b]] })
+	pics = make(map[int]image.Image, len(wanted))
+	n := 0
+	take := func(fs []*go264.Frame) error {
+		for _, f := range fs {
+			if n >= len(idx) {
+				n++
+				continue
+			}
+			err := keepFrame(pics, wanted, conv, idx[n], func() (image.Image, error) {
+				return yuvToNRGBA(yuvPlanes{
+					w: f.Width, h: f.Height, y: f.Y, cb: f.Cb, cr: f.Cr, strideY: f.StrideY, strideC: f.StrideC,
+					ssX: 1, ssY: 1, depth: 8,
+				}, matrix, full), nil
+			})
+			if err != nil {
+				return err
+			}
+			n++
+		}
+		return nil
+	}
 	for s := from; s < stop; s++ {
 		nals, err := nalUnits(tr.samples[s], tr.nalLengthSize)
 		if err != nil {
@@ -464,45 +579,22 @@ func decodeH264(tr *videoTrack, from, stop int) (pics map[int]image.Image, err e
 		if err != nil {
 			return nil, fmt.Errorf("decoding the H.264 video: %v", err)
 		}
-		frames = append(frames, copyFrames(fs)...)
+		if err := take(fs); err != nil {
+			return nil, err
+		}
 		stream = stream[:0]
 	}
 	fs, err := d.Flush()
 	if err != nil {
 		return nil, fmt.Errorf("decoding the H.264 video: %v", err)
 	}
-	frames = append(frames, copyFrames(fs)...)
-	// The decoded samples in presentation order.
-	idx := make([]int, 0, stop-from)
-	for s := from; s < stop; s++ {
-		idx = append(idx, s)
+	if err := take(fs); err != nil {
+		return nil, err
 	}
-	sort.SliceStable(idx, func(a, b int) bool { return tr.pts[idx[a]] < tr.pts[idx[b]] })
-	if len(frames) != len(idx) {
-		return nil, fmt.Errorf("decoding the H.264 video: %d samples made %d pictures", len(idx), len(frames))
-	}
-	pics = make(map[int]image.Image, len(idx))
-	for i, s := range idx {
-		f := frames[i]
-		pics[s] = yuvToNRGBA(yuvPlanes{
-			w: f.Width, h: f.Height, y: f.Y, cb: f.Cb, cr: f.Cr, strideY: f.StrideY, strideC: f.StrideC,
-			ssX: 1, ssY: 1, depth: 8,
-		}, matrix, full)
+	if n != len(idx) {
+		return nil, fmt.Errorf("decoding the H.264 video: %d samples made %d pictures", len(idx), n)
 	}
 	return pics, nil
-}
-
-// copyFrames copies go.264's frames, whose planes the decoder reuses.
-func copyFrames(fs []*go264.Frame) []*go264.Frame {
-	out := make([]*go264.Frame, len(fs))
-	for i, f := range fs {
-		c := *f
-		c.Y = append([]byte(nil), f.Y...)
-		c.Cb = append([]byte(nil), f.Cb...)
-		c.Cr = append([]byte(nil), f.Cr...)
-		out[i] = &c
-	}
-	return out
 }
 
 func vuiMatrix(sps *avc.SPS) int {
@@ -514,7 +606,7 @@ func vuiMatrix(sps *avc.SPS) int {
 
 // decodeH265 decodes samples from to stop (exclusive) of an H.265 track,
 // each picture tagged with its sample.
-func decodeH265(tr *videoTrack, from, stop int) (pics map[int]image.Image, err error) {
+func decodeH265(tr *videoTrack, from, stop int, wanted map[int]bool, conv frameConv) (pics map[int]image.Image, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			pics, err = nil, fmt.Errorf("decoding the H.265 video: %v", r)
@@ -522,7 +614,24 @@ func decodeH265(tr *videoTrack, from, stop int) (pics map[int]image.Image, err e
 	}()
 	d := hevc.Decoder{}
 	d.FrameSizeLimit(maxVideoSide * maxVideoSide)
-	var out []*hevc.Picture
+	pics = make(map[int]image.Image, len(wanted))
+	// Each picture is converted as the decoder outputs it.
+	take := func(ps []*hevc.Picture) error {
+		for _, p := range ps {
+			if err := frameTooLarge(p.Width, p.Height); err != nil {
+				return err
+			}
+		}
+		for _, p := range ps {
+			if p.Corrupt {
+				continue
+			}
+			if err := keepFrame(pics, wanted, conv, int(p.Tag), func() (image.Image, error) { return h265Picture(p), nil }); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	feed := func(raw []byte, tag uint64) error {
 		nal, ok := hevc.ParseNAL(raw)
 		if !ok {
@@ -530,16 +639,16 @@ func decodeH265(tr *videoTrack, from, stop int) (pics map[int]image.Image, err e
 		}
 		nal.Tag = tag
 		ps, err := d.DecodeNAL(nal)
-		for _, p := range ps {
-			if p.Width*p.Height > maxVideoPixels {
-				return notDecodedf("the video is %dx%d; at most %d pixels a frame are decoded", p.Width, p.Height, maxVideoPixels)
-			}
+		if terr := take(ps); terr != nil {
+			return terr
 		}
-		out = append(out, ps...)
 		return err
 	}
 	for _, ps := range tr.hvcC {
 		if err := feed(ps, 0); err != nil {
+			if errors.Is(err, ErrNotDecoded) {
+				return nil, err
+			}
 			return nil, fmt.Errorf("decoding the H.265 video's parameter sets: %v", err)
 		}
 	}
@@ -557,48 +666,42 @@ func decodeH265(tr *videoTrack, from, stop int) (pics map[int]image.Image, err e
 			}
 		}
 	}
-	out = append(out, d.Flush()...)
-	for _, p := range out {
-		if p.Width*p.Height > maxVideoPixels {
-			return nil, notDecodedf("the video is %dx%d; at most %d pixels a frame are decoded", p.Width, p.Height, maxVideoPixels)
-		}
-	}
-	pics = make(map[int]image.Image, len(out))
-	for _, p := range out {
-		if p.Corrupt {
-			continue
-		}
-		ssX, ssY := 0, 0
-		switch p.ChromaFormat {
-		case 1:
-			ssX, ssY = 1, 1
-		case 2:
-			ssX = 1
-		}
-		planes := yuvPlanes{w: p.Width, h: p.Height, strideY: p.StrideY, strideC: p.StrideC,
-			ssX: ssX, ssY: ssY, depth: max(p.BitDepth, p.BitDepthC),
-			cropX: p.CropX, cropY: p.CropY, cropW: p.CropW, cropH: p.CropH}
-		if planes.depth > 8 {
-			planes.y16, planes.cb16, planes.cr16 = p.Y16, p.Cb16, p.Cr16
-		} else {
-			planes.y, planes.cb, planes.cr = p.Y, p.Cb, p.Cr
-		}
-		if p.ChromaFormat == 0 {
-			// Monochrome (4:0:0, #1651): gray, as ffmpeg converts it.
-			planes.depth = max(p.BitDepth, 8)
-			pics[int(p.Tag)] = grayToNRGBA(planes)
-			continue
-		}
-		pics[int(p.Tag)] = yuvToNRGBA(planes, colourMatrix(p.ColorMatrix != 2, int(p.ColorMatrix), p.CropH), p.FullRange)
+	if err := take(d.Flush()); err != nil {
+		return nil, err
 	}
 	return pics, nil
+}
+
+// h265Picture is a decoded H.265 picture as RGB.
+func h265Picture(p *hevc.Picture) image.Image {
+	ssX, ssY := 0, 0
+	switch p.ChromaFormat {
+	case 1:
+		ssX, ssY = 1, 1
+	case 2:
+		ssX = 1
+	}
+	planes := yuvPlanes{w: p.Width, h: p.Height, strideY: p.StrideY, strideC: p.StrideC,
+		ssX: ssX, ssY: ssY, depth: max(p.BitDepth, p.BitDepthC),
+		cropX: p.CropX, cropY: p.CropY, cropW: p.CropW, cropH: p.CropH}
+	if planes.depth > 8 {
+		planes.y16, planes.cb16, planes.cr16 = p.Y16, p.Cb16, p.Cr16
+	} else {
+		planes.y, planes.cb, planes.cr = p.Y, p.Cb, p.Cr
+	}
+	if p.ChromaFormat == 0 {
+		// Monochrome (4:0:0, #1651): gray, as ffmpeg converts it.
+		planes.depth = max(p.BitDepth, 8)
+		return grayToNRGBA(planes)
+	}
+	return yuvToNRGBA(planes, colourMatrix(p.ColorMatrix != 2, int(p.ColorMatrix), p.CropH), p.FullRange)
 }
 
 // decodeVP9 decodes samples from to stop (exclusive) of a VP9 track. A
 // sample is one shown frame, with any hidden frame (an alternate reference)
 // before it in a superframe; VP9 has no reordering, so each sample's picture
 // is the one it shows.
-func decodeVP9(tr *videoTrack, from, stop int) (pics map[int]image.Image, err error) {
+func decodeVP9(tr *videoTrack, from, stop int, wanted map[int]bool, conv frameConv) (pics map[int]image.Image, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			pics, err = nil, fmt.Errorf("decoding the VP9 video: %v", r)
@@ -617,14 +720,14 @@ func decodeVP9(tr *videoTrack, from, stop int) (pics map[int]image.Image, err er
 		full, declared, mc = c.VideoFullRangeFlag != 0, c.MatrixCoefficients != 2, int(c.MatrixCoefficients)
 	}
 	if tr.vpcC != nil && tr.vpcC.Profile != 0 {
-		return decodeVP9Profiles(tr, from, stop, declared, mc, full)
+		return decodeVP9Profiles(tr, from, stop, declared, mc, full, wanted, conv)
 	}
-	pics = make(map[int]image.Image, stop-from)
+	pics = make(map[int]image.Image, len(wanted))
 	for s := from; s < stop; s++ {
 		if err := d.Decode(tr.samples[s]); err != nil {
 			if errors.Is(err, govpx.ErrVP9NotImplemented) {
 				// A profile 1 to 3 frame with no vpcC to say so.
-				return decodeVP9Profiles(tr, from, stop, declared, mc, full)
+				return decodeVP9Profiles(tr, from, stop, declared, mc, full, wanted, conv)
 			}
 			return nil, fmt.Errorf("decoding the VP9 video's sample %d: %v", s+1, err)
 		}
@@ -632,14 +735,19 @@ func decodeVP9(tr *videoTrack, from, stop int) (pics map[int]image.Image, err er
 		if !ok {
 			continue
 		}
-		if img.Width*img.Height > maxVideoPixels {
-			return nil, notDecodedf("the video is %dx%d; at most %d pixels a frame are decoded", img.Width, img.Height, maxVideoPixels)
+		if err := frameTooLarge(img.Width, img.Height); err != nil {
+			return nil, err
 		}
 		// The planes are the decoder's until the next Decode, which
 		// yuvToNRGBA's copy precedes.
-		pics[s] = yuvToNRGBA(yuvPlanes{w: img.Width, h: img.Height, y: img.Y, cb: img.U, cr: img.V,
-			strideY: img.YStride, strideC: img.UStride, ssX: 1, ssY: 1, depth: 8},
-			colourMatrix(declared, mc, img.Height), full)
+		err := keepFrame(pics, wanted, conv, s, func() (image.Image, error) {
+			return yuvToNRGBA(yuvPlanes{w: img.Width, h: img.Height, y: img.Y, cb: img.U, cr: img.V,
+				strideY: img.YStride, strideC: img.UStride, ssX: 1, ssY: 1, depth: 8},
+				colourMatrix(declared, mc, img.Height), full), nil
+		})
+		if err != nil {
+			return nil, err
+		}
 	}
 	return pics, nil
 }
@@ -648,9 +756,10 @@ func decodeVP9(tr *videoTrack, from, stop int) (pics map[int]image.Image, err er
 // track in any profile with govpx's vp9hbd (#1739), written for CloudBurrow
 // from the VP9 bitstream specification: 8, 10 and 12 bits, 4:2:0, 4:2:2,
 // 4:4:0 and 4:4:4, each frame bit-exact against ffmpeg's decode.
-func decodeVP9Profiles(tr *videoTrack, from, stop int, declared bool, mc int, full bool) (map[int]image.Image, error) {
+func decodeVP9Profiles(tr *videoTrack, from, stop int, declared bool, mc int, full bool,
+	wanted map[int]bool, conv frameConv) (map[int]image.Image, error) {
 	d := vp9hbd.NewDecoder()
-	pics := make(map[int]image.Image, stop-from)
+	pics := make(map[int]image.Image, len(wanted))
 	for s := from; s < stop; s++ {
 		frames, err := d.Decode(tr.samples[s])
 		if err != nil {
@@ -660,16 +769,20 @@ func decodeVP9Profiles(tr *videoTrack, from, stop int, declared bool, mc int, fu
 			continue
 		}
 		f := frames[len(frames)-1]
-		if f.Width*f.Height > maxVideoPixels {
-			return nil, notDecodedf("the video is %dx%d; at most %d pixels a frame are decoded", f.Width, f.Height, maxVideoPixels)
+		if err := frameTooLarge(f.Width, f.Height); err != nil {
+			return nil, err
 		}
-		if f.ColorSpace == 7 { // CS_RGB: 4:4:4 planes of G, B and R
-			pics[s] = vp9RGB(f)
-			continue
+		err = keepFrame(pics, wanted, conv, s, func() (image.Image, error) {
+			if f.ColorSpace == 7 { // CS_RGB: 4:4:4 planes of G, B and R
+				return vp9RGB(f), nil
+			}
+			return yuvToNRGBA(yuvPlanes{w: f.Width, h: f.Height, y16: f.Planes[0], cb16: f.Planes[1], cr16: f.Planes[2],
+				strideY: f.Strides[0], strideC: f.Strides[1], ssX: f.SubsamplingX, ssY: f.SubsamplingY, depth: f.BitDepth},
+				colourMatrix(declared, mc, f.Height), full || f.FullRange), nil
+		})
+		if err != nil {
+			return nil, err
 		}
-		pics[s] = yuvToNRGBA(yuvPlanes{w: f.Width, h: f.Height, y16: f.Planes[0], cb16: f.Planes[1], cr16: f.Planes[2],
-			strideY: f.Strides[0], strideC: f.Strides[1], ssX: f.SubsamplingX, ssY: f.SubsamplingY, depth: f.BitDepth},
-			colourMatrix(declared, mc, f.Height), full || f.FullRange)
 	}
 	return pics, nil
 }
@@ -695,7 +808,7 @@ func vp9RGB(f *vp9hbd.Frame) image.Image {
 // decodeAV1 decodes samples from to stop (exclusive) of an AV1 track. A
 // sample is a temporal unit, which shows at most one frame; AV1 has no
 // reordering in its output, so each sample's picture is the one it shows.
-func decodeAV1(tr *videoTrack, from, stop int) (pics map[int]image.Image, err error) {
+func decodeAV1(tr *videoTrack, from, stop int, wanted map[int]bool, conv frameConv) (pics map[int]image.Image, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			pics, err = nil, fmt.Errorf("decoding the AV1 video: %v", r)
@@ -710,7 +823,7 @@ func decodeAV1(tr *videoTrack, from, stop int) (pics map[int]image.Image, err er
 			return nil, fmt.Errorf("decoding the AV1 video's configuration: %v", err)
 		}
 	}
-	pics = make(map[int]image.Image, stop-from)
+	pics = make(map[int]image.Image, len(wanted))
 	for s := from; s < stop; s++ {
 		ps, err := d.DecodeOBUs(tr.samples[s])
 		if err != nil {
@@ -720,20 +833,19 @@ func decodeAV1(tr *videoTrack, from, stop int) (pics map[int]image.Image, err er
 			continue
 		}
 		p := ps[len(ps)-1]
-		if p.Width*p.Height > maxVideoPixels {
+		if err := frameTooLarge(p.Width, p.Height); err != nil {
 			for _, q := range ps {
 				q.Release()
 			}
-			return nil, notDecodedf("the video is %dx%d; at most %d pixels a frame are decoded", p.Width, p.Height, maxVideoPixels)
+			return nil, err
 		}
-		img, err := av1Picture(p)
+		err = keepFrame(pics, wanted, conv, s, func() (image.Image, error) { return av1Picture(p) })
 		for _, q := range ps {
 			q.Release()
 		}
 		if err != nil {
 			return nil, err
 		}
-		pics[s] = img
 	}
 	return pics, nil
 }
@@ -945,18 +1057,34 @@ const (
 // EmbeddingGemma2VideoProcessor's sample_frames does with
 // overflow_strategy "uniform".
 func VideoFrames(frames []image.Image) []image.Image {
-	n := len(frames)
-	if n <= videoMaxFrames {
+	if len(frames) <= videoMaxFrames {
 		return frames
 	}
+	idx := videoFrameIndexes(len(frames))
+	out := make([]image.Image, len(idx))
+	for i, k := range idx {
+		out[i] = frames[k]
+	}
+	return out
+}
+
+// videoFrameIndexes are the indexes of the frames VideoFrames keeps of n.
+func videoFrameIndexes(n int) []int {
+	if n <= videoMaxFrames {
+		out := make([]int, n)
+		for i := range out {
+			out[i] = i
+		}
+		return out
+	}
 	step := float64(n-1) / float64(videoMaxFrames-1)
-	out := make([]image.Image, videoMaxFrames)
+	out := make([]int, videoMaxFrames)
 	for i := range out {
 		k := int(math.Floor(float64(i) * step))
 		if i == videoMaxFrames-1 {
 			k = n - 1
 		}
-		out[i] = frames[k]
+		out[i] = k
 	}
 	return out
 }
@@ -964,5 +1092,11 @@ func VideoFrames(frames []image.Image) []image.Image {
 // PatchVideoFrame prepares a video frame for the vision encoder, with the
 // video processor's budget of soft tokens.
 func PatchVideoFrame(img image.Image) (ImagePatches, error) {
+	if f, ok := img.(*PatchedFrame); ok {
+		if f.patches == nil {
+			return ImagePatches{}, fmt.Errorf("the video frame was dropped (VideoFrames does not keep it)")
+		}
+		return *f.patches, nil
+	}
 	return patchImage(img, videoSoftTokens)
 }

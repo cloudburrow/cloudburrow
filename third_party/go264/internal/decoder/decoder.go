@@ -38,6 +38,9 @@ type Limits struct {
 	MaxFrameMBs  int
 	MaxNALBytes  int
 	EnforceLevel bool
+	// AboveTable (CloudBurrow, #1651) decodes frames larger than any level
+	// of Table A-1 allows, up to MaxFrameMBs, as ffmpeg does.
+	AboveTable bool
 }
 
 func New() *Decoder {
@@ -195,7 +198,7 @@ func (d *Decoder) checkSupported(sps *syntax.SPS) error {
 	if sps.QpprimeYZeroTransformBypass {
 		return fmt.Errorf("%w: lossless transform bypass", ErrUnsupported)
 	}
-	if err := level.CheckCeiling(sps); err != nil {
+	if err := level.CheckCeiling(sps); err != nil && !(d.limits.AboveTable && d.limits.MaxFrameMBs > 0) {
 		return fmt.Errorf("%w: %s", ErrOverLimit, err)
 	}
 	if d.limits.EnforceLevel {

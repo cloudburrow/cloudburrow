@@ -299,7 +299,7 @@ func embedParts(ctx context.Context, c *aiplatformpb.Content, m mediaSupport, na
 			if err != nil {
 				return nil, 0, err
 			}
-			frames, err := embedding.DecodeVideo(mt, data, opt)
+			frames, err := embedding.DecodeVideoPatched(mt, data, opt)
 			if err != nil {
 				return nil, 0, mediaError(i, field, "", err)
 			}

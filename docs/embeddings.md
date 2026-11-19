@@ -485,3 +485,17 @@ docker run --rm -v "$PWD:/models" \
 > `UNIMPLEMENTED` (501): multichannel Microsoft ADPCM, other non-PCM WAV formats (GSM 6.10,
 > G.726, MPEG Layer I or II), AAC Main and SSR, 960-sample frames, HE-AACv2's full parametric
 > stereo (#1754) and video frames over 8K UHD.
+
+> **Update 2026-11-18 (#1651): video frames over 8K UHD.** Each sampled frame is now patched for
+> the vision encoder as soon as it is decoded and its full-size RGB released, and only the frames
+> the video processor keeps (32 of up to 120) are converted at all, so a video's frames are
+> decoded up to 16384 × 16384, Google's image limit (Google documents no video frame size; a
+> larger frame stays `UNIMPLEMENTED`). The patches are bit for bit those of the full-size frames
+> (unit `TestPatchedVideoMatchesFullFrames`, every codec and bit depth of the test clips). An
+> H.264 frame above level 6.2's 139264 macroblocks, which go.264 refused, is decoded as ffmpeg
+> decodes it (`third_party/go264`'s `AboveTable` limit). Measured on an M4 Max, natively: a
+> 16384 × 8704 clip, 3 sampled frames, decodes and patches at a peak RSS of 4.1 GB (H.264),
+> 4.3 GB (H.265), 4.4 GB (VP9) and 3.8 GB (AV1) in 10 to 12 s, and 12 sampled H.264 frames at
+> 5.5 GB (holding every frame at full size was 570 MB of RGB a frame, 68 GB for 120); each frame's
+> patches are within a mean 0.06 of 255 of ffmpeg 9's BT.709 RGB conversion's. Embedded through
+> the official client by `TestEmbedContentEmbeds16KVideoThroughThePredictionClient`.

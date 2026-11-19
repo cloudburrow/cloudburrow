@@ -400,9 +400,8 @@ func TestEmbedContentEmbedsSurroundAACAndG711TracksAnd3BitADPCMThroughThePredict
 //
 // each the A-law clip's token count (up to 1 more for the last ADPCM
 // block's padding, 2 more for the MP3 frames' delay) and within cosine
-// 0.97 of its vector. And an 8704x4352 video in H.264, H.265, VP9 and AV1
-// (internal/embedding/testdata/over8k-*.mp4) is UNIMPLEMENTED naming its
-// size, not INVALID_ARGUMENT.
+// 0.97 of its vector. (An 8704x4352 video, UNIMPLEMENTED here before, is
+// embedded since by TestEmbedContentEmbeds16KVideoThroughThePredictionClient.)
 func TestEmbedContentEmbeds2And5BitADPCMAndMP3WAVsThroughThePredictionClient(t *testing.T) {
 	h := New(t)
 	pc := predictionClientAt(t, h, EnvEmbeddings)
@@ -454,19 +453,5 @@ func TestEmbedContentEmbeds2And5BitADPCMAndMP3WAVsThroughThePredictionClient(t *
 			t.Errorf("%s against the A-law clip: cosine %.4f, want at least %.2f", c.file, cs, c.cosine)
 		}
 		t.Logf("%s: %d tokens (A-law %d), cosine %.6f to the A-law clip", c.file, n, want, cs)
-	}
-
-	// A video over 8K UHD is UNIMPLEMENTED in every codec, naming its size
-	// (a VP9 frame wider than 8192, and H.265 and AV1 frames over their
-	// decoders' limits, were INVALID_ARGUMENT).
-	for _, c := range []string{"h264", "h265", "vp9", "av1"} {
-		_, err := pc.EmbedContent(ctx, &aiplatformpb.EmbedContentRequest{
-			Model: proto.String(name),
-			Content: &aiplatformpb.Content{Role: "user", Parts: []*aiplatformpb.Part{{Data: &aiplatformpb.Part_InlineData{
-				InlineData: &aiplatformpb.Blob{MimeType: "video/mp4", Data: embeddingTestdata(t, "over8k-"+c+".mp4")}}}}},
-		})
-		if status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), "8704x4352") {
-			t.Errorf("an 8704x4352 %s video: %v; want Unimplemented naming its size", c, err)
-		}
 	}
 }
