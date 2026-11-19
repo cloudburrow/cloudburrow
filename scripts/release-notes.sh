@@ -9,6 +9,15 @@
 # empty, so a release cannot be published with notes that say nothing about
 # what changed.
 #
+# A scheduled release (#1898) commits nothing to main: its notes are
+# generated from the landings since the previous tag and kept in its
+# annotated tag's message (scripts/scheduled-release.sh). When CHANGELOG.md
+# has no section for the tag, the notes are the tag message's body, if it
+# starts with the marker line that script writes; any other tag message is
+# not release notes, and the tag fails as before. A hand-written CHANGELOG.md
+# section always wins. The tag must be in the repository in the current
+# directory, as an annotated tag object.
+#
 # With RELEASE_NOTES_LINK_BASE set (such as
 # https://github.com/cloudburrow/cloudburrow/blob/v0.1.0), relative Markdown
 # links are made absolute against it: a release page resolves a relative link
@@ -29,9 +38,21 @@ v[0-9]*) ;;
 esac
 [ -r "$changelog" ] || { echo "release-notes.sh: cannot read ${changelog}" >&2; exit 1; }
 
+# The marker scripts/scheduled-release.sh puts on the first line of a
+# generated tag message's body. An HTML comment, so it renders as nothing.
+marker='<!-- cloudburrow-release-notes: generated -->'
+
+# The generated notes in the tag's annotated message, without the marker.
+tag_notes() {
+	[ "$(git cat-file -t "refs/tags/${tag}" 2>/dev/null)" = tag ] || return 1
+	body="$(git for-each-ref --format='%(contents:body)' "refs/tags/${tag}")"
+	[ "$(printf '%s\n' "$body" | sed -n 1p)" = "$marker" ] || return 1
+	printf '%s\n' "$body" | sed 1d
+}
+
 # Matched as a string, not a pattern, so the dots in a version match only
 # dots, and 0.1.0 never matches the heading of 0.1.0-rc.1 or 0.1.01.
-section="$(awk -v want="## [${tag#v}]" '
+if section="$(awk -v want="## [${tag#v}]" '
 	function heading(line) { return substr(line, 1, 3) == "## " }
 	!found {
 		if (index($0, want) == 1) {
@@ -48,10 +69,15 @@ section="$(awk -v want="## [${tag#v}]" '
 		last = n; while (last >= first && lines[last] ~ /^[[:space:]]*$/) last--
 		for (i = first; i <= last; i++) print lines[i]
 	}
-' "$changelog")" || {
-	echo "release-notes.sh: ${changelog} has no '## [${tag#v}]' section for ${tag}; add one before tagging" >&2
+' "$changelog")"; then
+	:
+elif section="$(tag_notes)"; then
+	# Leading and trailing blank lines dropped, as for a section.
+	section="$(printf '%s\n' "$section" | awk 'NF { seen = 1 } seen { lines[++n] = $0; if (NF) last = n } END { for (i = 1; i <= last; i++) print lines[i] }')"
+else
+	echo "release-notes.sh: ${changelog} has no '## [${tag#v}]' section for ${tag}, and ${tag} is not a scheduled release's annotated tag with generated notes; add a section before tagging" >&2
 	exit 1
-}
+fi
 
 [ -n "$section" ] || { echo "release-notes.sh: the ${tag} section of ${changelog} is empty" >&2; exit 1; }
 if [ -n "${RELEASE_NOTES_LINK_BASE:-}" ]; then

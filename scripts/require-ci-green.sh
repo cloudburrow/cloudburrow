@@ -1,10 +1,26 @@
 #!/bin/sh
-# Refuse to release a commit that CI has not passed (#596).
+# Refuse to release a commit that CI has not passed (#596, #1898).
 #
-#   GH_TOKEN=... GITHUB_REPOSITORY=owner/repo sh scripts/require-ci-green.sh <sha>
+#   GH_TOKEN=... GITHUB_REPOSITORY=owner/repo sh scripts/require-ci-green.sh [--main-push] <sha>
 #
 # The release workflow runs this first, before anything is built or pushed.
-# It passes when the commit has a completed, successful `ci-green` check run:
+#
+# --main-push, which every real release uses (#1898): the commit needs a
+# completed `ci.yml` run of its own push to main whose every job passed or
+# was skipped by design, with the compatibility shards, their coverage check,
+# the integration suite and ci-green among those that passed. A pull
+# request's ci-green is not enough: pull-request CI runs the fast jobs only
+# (ci.yml, "detect changes"), and a release once shipped from a green PR
+# whose main CI then failed. A push run cancelled by the next push to main
+# (CI's concurrency group) proves nothing, so such a commit is refused and
+# the scheduled release picks an older one that has a full run. It waits
+# while a push run for the commit is in progress, for up to CI_GREEN_TIMEOUT
+# seconds (7200 in this mode: main's full run takes 80-100 minutes); with
+# CI_GREEN_TIMEOUT=0 it answers at once, which is how
+# scripts/scheduled-release.sh asks about each candidate commit.
+#
+# Without --main-push (a manual dry run of release.yml on a branch), it
+# passes when the commit has a completed, successful `ci-green` check run:
 # the one check the merge queue requires, which fails when any CI job failed
 # or was cancelled.
 #
@@ -24,11 +40,110 @@
 
 set -eu
 
-[ $# -eq 1 ] || { echo "usage: require-ci-green.sh <sha>" >&2; exit 2; }
+mode=any
+if [ "${1:-}" = "--main-push" ]; then
+	mode=main
+	shift
+fi
+[ $# -eq 1 ] || { echo "usage: require-ci-green.sh [--main-push] <sha>" >&2; exit 2; }
 sha="$1"
+case "${sha}" in
+*[!0-9a-f]* | "") echo "require-ci-green.sh: '${sha}' is not a commit SHA" >&2; exit 2 ;;
+esac
 repo="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is not set}"
-timeout="${CI_GREEN_TIMEOUT:-2700}"
+if [ "${mode}" = main ]; then
+	timeout="${CI_GREEN_TIMEOUT:-7200}"
+else
+	timeout="${CI_GREEN_TIMEOUT:-2700}"
+fi
 interval="${CI_GREEN_INTERVAL:-60}"
+
+# main-push mode. One line per ci.yml run of a push to main for the commit:
+# "<id> <status> <conclusion> <url>".
+main_push_runs() {
+	gh api --paginate \
+		"repos/${repo}/actions/workflows/ci.yml/runs?head_sha=${sha}&event=push&branch=main&per_page=100" \
+		--jq '.workflow_runs[] | select(.path == ".github/workflows/ci.yml" and .event == "push" and .head_branch == "main" and .head_sha == "'"${sha}"'") | "\(.id) \(.status) \(.conclusion // "none") \(.html_url)"'
+}
+
+# The latest attempt of each job of a run: "<conclusion><TAB><name>".
+run_jobs() {
+	gh api --paginate \
+		"repos/${repo}/actions/runs/$1/jobs?filter=latest&per_page=100" \
+		--jq '.jobs[] | "\(.conclusion // "none")\t\(.name)"'
+}
+
+# Reads run_jobs lines; prints nothing and succeeds when the run is a full
+# pass, else prints why not. Every job passed or was skipped, and these
+# passed, not skipped: each compatibility shard (at least one), the check
+# that every compat test ran in a shard, the integration suite and ci-green.
+full_pass() {
+	awk -F '\t' '
+		NF < 2 { next }
+		{ jobs++ }
+		$1 != "success" && $1 != "skipped" { why = why "\n  " $2 ": " $1 }
+		index($2, "official SDK compatibility (") == 1 {
+			shards++
+			if ($1 == "skipped") why = why "\n  " $2 ": skipped"
+		}
+		$2 == "every compat test ran in a shard" && $1 == "success" { coverage = 1 }
+		$2 == "integration (cluster)" && $1 == "success" { integration = 1 }
+		$2 == "ci-green" && $1 == "success" { green = 1 }
+		END {
+			if (!jobs) why = why "\n  the run has no jobs"
+			if (!shards) why = why "\n  no official SDK compatibility shard ran"
+			if (!coverage) why = why "\n  every compat test ran in a shard: did not pass"
+			if (!integration) why = why "\n  integration (cluster): did not pass"
+			if (!green) why = why "\n  ci-green: did not pass"
+			if (why != "") { printf "%s\n", substr(why, 2); exit 1 }
+		}'
+}
+
+if [ "${mode}" = main ]; then
+	waited=0
+	while :; do
+		pending=0
+		reasons=""
+		if runs="$(main_push_runs)"; then
+			# Completed successful runs first: a pass on any attempt is enough.
+			for id in $(printf '%s\n' "${runs}" | awk '$2 == "completed" && $3 == "success" { print $1 }'); do
+				if ! jobs="$(run_jobs "${id}")"; then
+					echo "::warning::could not list the jobs of CI run ${id}; retrying"
+					pending=1
+					continue
+				fi
+				if why="$(printf '%s\n' "${jobs}" | full_pass)"; then
+					echo "main CI passed in full for ${sha}: $(printf '%s\n' "${runs}" | awk -v id="${id}" '$1 == id { print $4 }')"
+					exit 0
+				fi
+				reasons="${reasons}run ${id}:
+${why}
+"
+			done
+			running="$(printf '%s\n' "${runs}" | awk 'NF && $2 != "completed"' | wc -l | tr -d ' ')"
+			[ "${running}" -eq 0 ] || pending=1
+			if [ "${pending}" -eq 0 ]; then
+				if [ -z "${runs}" ]; then
+					echo "::error::Refusing to release ${sha}: it has no CI run of its own push to main. A release needs main's full CI run (compat shards included) to have passed on this exact commit; a pull request's ci-green is not enough."
+				else
+					echo "::error::Refusing to release ${sha}: no CI run of its push to main passed in full, and none is still running. A run cancelled by a later push to main does not count."
+					printf '%s\n' "${runs}" | awk '{ printf "  run %s %s: %s\n", $1, $3, $4 }'
+					[ -z "${reasons}" ] || printf '%s' "${reasons}"
+				fi
+				exit 1
+			fi
+		else
+			echo "::warning::could not list the CI runs on main for ${sha}; retrying"
+		fi
+		if [ "${waited}" -ge "${timeout}" ]; then
+			echo "::error::Refusing to release ${sha}: main's CI run for this commit had not passed in full after ${waited}s. Re-run the release once it has."
+			exit 1
+		fi
+		echo "main CI for ${sha} is still running; checking again in ${interval}s (${waited}s of ${timeout}s waited)"
+		sleep "${interval}"
+		waited=$((waited + interval))
+	done
+fi
 
 # One line per ci-green check run created by GitHub Actions for the commit:
 # "<status> <conclusion> <url>". Another app cannot pass for it by naming a

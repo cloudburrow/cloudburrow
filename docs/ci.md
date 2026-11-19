@@ -220,3 +220,59 @@ Releases do not use the cache. `release.yml` builds the binaries from source onc
 release's Go (`dependencies.json` `toolchain.goRelease`), in its own `bigquery-emulator` job, and
 its four `build` jobs check them the same way and embed them with `-prebuilt`: every CLI of a
 release embeds the same bytes, built from the pinned, checksummed modules by that run.
+
+## Releasing
+
+A release goes out every one to two days on its own (#1898). `.github/workflows/scheduled-release.yml`
+runs four times a day; [`scripts/scheduled-release.sh`](../scripts/scheduled-release.sh) decides,
+and the release itself is `release.yml`, the same jobs a pushed tag runs: the CI gate, `make check`,
+the builds, macOS signing and notarization, the smoke installs on every platform, promotion to
+latest and the Homebrew tap.
+
+**Which commit.** The newest commit on `main` whose own push run of `ci.yml` passed in full: every
+job passed or was skipped by design, and the compatibility shards, the check that every compat test
+ran in a shard, the integration suite and `ci-green` all passed. A pull request's `ci-green` is not
+enough, because pull-request CI runs the fast jobs only, and a push run cancelled by the next push to
+`main` proves nothing. `scripts/require-ci-green.sh --main-push <sha>` is the check, and
+`release.yml` applies it to every release, a tag pushed by hand included.
+
+**When.** Nothing happens when that commit is already tagged or is not newer than the last release,
+or while the last release (its tag's date) is under 24 hours old. From 24 to 48 hours, the commit is
+released only if it is `main`'s head, so a release does not go out while newer work is still in CI.
+From 48 hours on, the newest fully green commit is released whatever `main`'s head is doing.
+
+**Which version.** While CloudBurrow is before 1.0, a minor bump (`v0.3.0` to `v0.4.0`) when a
+feature branch landed since the last tag, else a patch bump (`v0.3.0` to `v0.3.1`). A feature
+branch landed when any merge commit in `<last tag>..<commit>` merged a branch named `feat/...`: a
+landing's `Merge feat/1799-nl (...) into Landing 149`, a pull request's `Merge pull request #N
+from cloudburrow/feat/...`, or `Merge branch 'feat/...'`. The rule reads branch names git records
+in every merge, so it needs no API, label or issue lookup; name a branch `fix/...` when it only
+corrects behaviour. The major version never moves on its own.
+
+**Release notes.** Nothing is committed to `main`. The notes are generated from the merges since the
+last tag (a section per kind for the `feat/` and `fix/` branches each landing merged, then the
+landings themselves) and stored as the annotated tag's message. `scripts/release-notes.sh` uses a
+tag's `## [X.Y.Z]` section of `CHANGELOG.md` when there is one, and otherwise the tag message, if it
+starts with the generated-notes marker. To publish hand-written notes instead, add the section to
+`CHANGELOG.md` on `main` first, or tag by hand.
+
+**Starting a release without the schedule.** Actions › Scheduled release › Run workflow:
+
+- with **dry run** ticked (the default), it decides and shows the commit, the version and the notes
+  in the run's summary, and tags and releases nothing;
+- untick **dry run** to release for real, on the same rules;
+- tick **force** to skip the 24 and 48 hour rules (the commit must still have passed `main`'s full CI
+  run and be newer than the last release);
+- set **version** (`vX.Y.Z`, newer than the last tag) to choose the version, for example `v1.0.0`.
+
+The same from a shell: `gh workflow run scheduled-release.yml -R cloudburrow/cloudburrow -f
+dry_run=false -f force=true`.
+
+**Skipping releases.** Set the repository variable `RELEASE_SCHEDULE_PAUSED` to `true` to pause the
+schedule (a manual run still works), or disable the workflow with `gh workflow disable
+scheduled-release.yml`. A commit that should not be released needs nothing: a newer green commit
+replaces it at the next run.
+
+**By hand.** Pushing a `vX.Y.Z` tag still releases, through the same gate: the tagged commit needs
+`main`'s full CI run. `release.yml`'s own manual dispatch remains a dry run that builds the
+archives and renders a tag's notes, and publishes nothing.

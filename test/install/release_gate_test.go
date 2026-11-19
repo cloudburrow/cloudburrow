@@ -77,7 +77,7 @@ func TestReleaseIsMarkedLatestOnlyAfterSmoke(t *testing.T) {
 	if n := needs(t, j); !contains(n, "smoke") {
 		t.Errorf("%s needs %v; it must need smoke, so a release is latest only once smoke has passed on every OS", name, n)
 	}
-	if !strings.Contains(j, "    if: startsWith(github.ref, 'refs/tags/v')\n") {
+	if !strings.Contains(j, "    if: "+releaseOnly+"\n") {
 		t.Errorf("%s does not run only for a tag", name)
 	}
 	if !regexp.MustCompile(`(?m)^      contents: write$`).MatchString(j) {

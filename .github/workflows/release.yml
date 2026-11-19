@@ -2,10 +2,23 @@ name: Release
 
 # Kept separate from CI so that ordinary pull-request checks never run with
 # publishing permissions. An untrusted PR cannot reach this workflow: it is
-# triggered only by a tag push or a manual dispatch on a branch.
+# triggered only by a tag push, a manual dispatch on a branch, or a call from
+# scheduled-release.yml with the tag it just pushed.
 on:
   push:
     tags: ["v*"]
+  # The scheduled release (#1898). A tag pushed with GITHUB_TOKEN starts no
+  # workflow, so scheduled-release.yml pushes its annotated tag and then
+  # calls this with that tag. Every job releases RELEASE_TAG and checks out
+  # RELEASE_REF, never the caller's own ref or SHA (main's head when the
+  # schedule fired), so a called release is the same as one started by
+  # pushing the tag.
+  workflow_call:
+    inputs:
+      release_tag:
+        description: The vX.Y.Z tag to release; it must already be pushed.
+        type: string
+        required: true
   workflow_dispatch:
     inputs:
       tag:
@@ -20,33 +33,57 @@ permissions:
   contents: read
 
 env:
+  # The tag this run releases: the pushed tag, or the called release's input;
+  # empty for a dry run. RELEASE_REF is what every checkout checks out: the
+  # called release's tag, or empty for the event's own ref and SHA.
+  RELEASE_TAG: ${{ inputs.release_tag || (startsWith(github.ref, 'refs/tags/v') && github.ref_name) || '' }}
+  RELEASE_REF: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || '' }}
   # The local-AI runtime image (#602). Every release pushes it, tagged with
   # the release tag, and stamps its digest into the CLIs it builds.
   LOCAL_AI_IMAGE: ghcr.io/cloudburrow/litert-lm
 
 jobs:
-  # Only a commit CI has passed is released (#596). This runs first, and every
-  # other job waits on it, so an untested commit fails here before anything is
-  # built, pushed to ghcr.io or published. It needs a successful ci-green check
-  # run for this exact commit: a merged commit has one from its merge-queue run,
-  # which tested this same SHA. When CI for the commit is still running it
-  # waits, polling once a minute for up to 45 minutes; with no CI run, or none
-  # that passed, it fails at once with the SHA in the error. A manual dispatch
-  # is gated too, so a dry run exercises the same path.
+  # Only a commit CI has passed is released (#596, #1898). This runs first,
+  # and every other job waits on it, so an untested commit fails here before
+  # anything is built, pushed to ghcr.io or published. A release (a pushed tag,
+  # or the one the scheduled release passes) needs the commit's own push run
+  # of ci.yml on main to have passed in full, compat shards included: a pull
+  # request's ci-green is not enough, since pull-request CI skips the slow
+  # suites, and a release once shipped from a green PR whose main CI then
+  # failed. While that run is in progress it waits, polling once a minute for
+  # up to two hours; with no such run, or none that passed, it fails at once
+  # with the SHA in the error. A manual dispatch is gated too, on a successful
+  # ci-green for the commit, so a dry run exercises the same path.
   require-ci-green:
     name: require a green CI run for this commit
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 130
     permissions:
       contents: read
       checks: read
       actions: read
+    outputs:
+      sha: ${{ steps.gate.outputs.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Require a successful ci-green for this commit
+        with:
+          ref: ${{ env.RELEASE_REF }}
+      - name: Require main's full CI run for a release, or ci-green for a dry run
+        id: gate
         env:
           GH_TOKEN: ${{ github.token }}
-        run: sh scripts/require-ci-green.sh "${GITHUB_SHA}"
+        run: |
+          set -eu
+          sha="$(git rev-parse HEAD)"
+          if [ -n "${RELEASE_TAG}" ]; then
+            printf '%s\n' "${RELEASE_TAG}" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$' \
+              || { echo "::error::'${RELEASE_TAG}' is not a release tag (vX.Y.Z)"; exit 1; }
+            echo "Releasing ${RELEASE_TAG} at ${sha}"
+            sh scripts/require-ci-green.sh --main-push "${sha}"
+          else
+            sh scripts/require-ci-green.sh "${sha}"
+          fi
+          echo "sha=${sha}" >> "${GITHUB_OUTPUT}"
 
   verify:
     name: verify before releasing
@@ -55,6 +92,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_REF }}
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           # Exact patch, so the compiler that builds a release is recorded:
@@ -77,10 +116,14 @@ jobs:
         env:
           DRY_RUN_TAG: ${{ inputs.tag }}
         run: |
-          if [ "${GITHUB_REF_TYPE}" = tag ]; then
-            TAG="${GITHUB_REF_NAME}"
+          if [ -n "${RELEASE_TAG}" ]; then
+            TAG="${RELEASE_TAG}"
+            # The annotated tag object itself: a scheduled release's notes
+            # are its message (scripts/release-notes.sh).
+            git fetch --force --no-tags --quiet origin "+refs/tags/${TAG}:refs/tags/${TAG}"
           elif [ -n "${DRY_RUN_TAG}" ]; then
             TAG="${DRY_RUN_TAG}"
+            git fetch --force --no-tags --quiet origin "+refs/tags/${TAG}:refs/tags/${TAG}" 2>/dev/null || true
           else
             echo "::notice::not a tag and no tag input; release notes not rendered"
             exit 0
@@ -97,7 +140,7 @@ jobs:
   runtime-image:
     name: runtime image ${{ matrix.platform }}
     needs: verify
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || startsWith(inputs.release_tag, 'v')
     strategy:
       matrix:
         include:
@@ -110,6 +153,8 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_REF }}
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Log in to ghcr.io
@@ -132,8 +177,8 @@ jobs:
             --platform "${PLATFORM}" \
             --provenance=false \
             --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
-            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
-            --label "org.opencontainers.image.version=${GITHUB_REF_NAME}" \
+            --label "org.opencontainers.image.revision=$(git rev-parse HEAD)" \
+            --label "org.opencontainers.image.version=${RELEASE_TAG}" \
             --label "org.opencontainers.image.licenses=Apache-2.0" \
             --metadata-file metadata.json \
             --output "type=image,name=${LOCAL_AI_IMAGE},push-by-digest=true,name-canonical=true,push=true"
@@ -157,7 +202,7 @@ jobs:
   # tree.
   runtime-image-publish:
     name: publish the runtime image
-    needs: runtime-image
+    needs: [require-ci-green, runtime-image]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -182,20 +227,22 @@ jobs:
 
       - name: Create the multi-arch index under the release tag
         id: index
+        env:
+          REVISION: ${{ needs.require-ci-green.outputs.sha }}
         run: |
           set -eu
           set --
           for f in digests/*; do set -- "$@" "${LOCAL_AI_IMAGE}@sha256:$(basename "${f}")"; done
           [ "$#" -eq 2 ] || { echo "::error::expected two per-arch digests, got: $*"; exit 1; }
           docker buildx imagetools create \
-            --tag "${LOCAL_AI_IMAGE}:${GITHUB_REF_NAME}" \
+            --tag "${LOCAL_AI_IMAGE}:${RELEASE_TAG}" \
             --annotation "index:org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
-            --annotation "index:org.opencontainers.image.revision=${GITHUB_SHA}" \
-            --annotation "index:org.opencontainers.image.version=${GITHUB_REF_NAME}" \
+            --annotation "index:org.opencontainers.image.revision=${REVISION}" \
+            --annotation "index:org.opencontainers.image.version=${RELEASE_TAG}" \
             --annotation "index:org.opencontainers.image.licenses=Apache-2.0" \
             --annotation "index:org.opencontainers.image.description=LiteRT-LM runtime for CloudBurrow's local generation endpoint" \
             "$@"
-          digest="$(docker buildx imagetools inspect "${LOCAL_AI_IMAGE}:${GITHUB_REF_NAME}" --format '{{json .Manifest}}' | jq -r .digest)"
+          digest="$(docker buildx imagetools inspect "${LOCAL_AI_IMAGE}:${RELEASE_TAG}" --format '{{json .Manifest}}' | jq -r .digest)"
           case "${digest}" in sha256:*) ;; *) echo "::error::could not read the index digest"; exit 1 ;; esac
           # The index must hold exactly the two platforms, and nothing else.
           platforms="$(docker buildx imagetools inspect "${LOCAL_AI_IMAGE}@${digest}" --raw \
@@ -222,7 +269,7 @@ jobs:
             echo
             echo "| | |"
             echo "|---|---|"
-            echo "| Tag | \`${LOCAL_AI_IMAGE}:${GITHUB_REF_NAME}\` |"
+            echo "| Tag | \`${LOCAL_AI_IMAGE}:${RELEASE_TAG}\` |"
             echo "| Index digest | \`${DIGEST}\` |"
             echo "| Platforms | linux/amd64, linux/arm64 |"
             echo
@@ -244,6 +291,8 @@ jobs:
       sums: ${{ steps.sums.outputs.sums }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_REF }}
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           # The release's Go: dependencies.json toolchain.goRelease (#695).
@@ -276,7 +325,7 @@ jobs:
       !cancelled() && needs.verify.result == 'success' &&
       needs.bigquery-emulator.result == 'success' &&
       (needs.runtime-image-publish.result == 'success' ||
-       (needs.runtime-image-publish.result == 'skipped' && !startsWith(github.ref, 'refs/tags/v')))
+       (needs.runtime-image-publish.result == 'skipped' && !(startsWith(github.ref, 'refs/tags/v') || startsWith(inputs.release_tag, 'v'))))
     runs-on: ubuntu-latest
     # 20: the embedded BigQuery emulator is built once, by the job above (#1087).
     timeout-minutes: 20
@@ -290,6 +339,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ env.RELEASE_REF }}
           fetch-depth: 0 # version is derived from tags
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -324,7 +374,7 @@ jobs:
           # run published, by digest; any other build keeps the unpublished
           # `make litert-lm` tag (#602).
           LOCAL_AI_LDFLAG=""
-          if [ "${GITHUB_REF_TYPE}" = tag ]; then
+          if [ -n "${RELEASE_TAG}" ]; then
             case "${LOCAL_AI_DIGEST}" in sha256:*) ;; *) echo "::error::no runtime image digest to stamp"; exit 1 ;; esac
             LOCAL_AI_LDFLAG="-X 'github.com/cloudburrow/cloudburrow/internal/config.releaseLocalAIImage=${LOCAL_AI_IMAGE}@${LOCAL_AI_DIGEST}'"
           fi
@@ -623,7 +673,7 @@ jobs:
     # Only a tag publishes. A manual dispatch builds and uploads artifacts for
     # inspection but never creates a release, so the workflow can be exercised
     # without shipping anything.
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || startsWith(inputs.release_tag, 'v')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # One of the two jobs with write access to the repository (promote is the
@@ -637,6 +687,8 @@ jobs:
       attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_REF }}
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -659,7 +711,7 @@ jobs:
             dist/checksums.txt
 
       - name: Render the Homebrew formula
-        run: sh scripts/render-formula.sh "${GITHUB_REF_NAME}" dist/checksums.txt > dist/cloudburrow.rb
+        run: sh scripts/render-formula.sh "${RELEASE_TAG}" dist/checksums.txt > dist/cloudburrow.rb
 
       - name: Create the release
         env:
@@ -667,9 +719,10 @@ jobs:
           LOCAL_AI_DIGEST: ${{ needs.runtime-image-publish.outputs.digest }}
           MACOS_SIGNED: ${{ needs.sign-macos.outputs.signed }}
         run: |
-          VERSION="${GITHUB_REF_NAME}"
+          VERSION="${RELEASE_TAG}"
           # Checked in verify already; run again so these notes are exactly
-          # the section at this tag.
+          # the section, or the generated notes, at this tag.
+          git fetch --force --no-tags --quiet origin "+refs/tags/${VERSION}:refs/tags/${VERSION}"
           RELEASE_NOTES_LINK_BASE="https://github.com/${GITHUB_REPOSITORY}/blob/${VERSION}" \
             sh scripts/release-notes.sh "${VERSION}" > section.md
           {
@@ -747,7 +800,7 @@ jobs:
   smoke:
     name: smoke-install the release (${{ matrix.platform }}, ${{ matrix.os }})
     needs: publish
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || startsWith(inputs.release_tag, 'v')
     strategy:
       fail-fast: false
       matrix:
@@ -764,6 +817,8 @@ jobs:
       attestations: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_REF }}
 
       # The installer comes from the tag's raw URL, as the notes tell users
       # to fetch it, and must verify both the checksum and the attestation;
@@ -772,7 +827,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           SMOKE_PLATFORM: ${{ matrix.platform }}
-        run: sh scripts/smoke-release.sh "${GITHUB_REF_NAME}"
+        run: sh scripts/smoke-release.sh "${RELEASE_TAG}"
 
       # Homebrew refuses a formula by path (`brew install ./cloudburrow.rb`:
       # "Homebrew requires formulae to be in a tap"; `brew audit [path]` is
@@ -789,7 +844,7 @@ jobs:
             [ -x /home/linuxbrew/.linuxbrew/bin/brew ] || { echo "the matrix says ${{ matrix.os }} has Homebrew, but it has none" >&2; exit 1; }
             eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
           fi
-          gh release download "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --pattern cloudburrow.rb --dir dist
+          gh release download "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --pattern cloudburrow.rb --dir dist
           brew tap-new --no-git cloudburrow-smoke/local
           cp dist/cloudburrow.rb "$(brew --repository cloudburrow-smoke/local)/Formula/cloudburrow.rb"
           brew install --formula cloudburrow-smoke/local/cloudburrow
@@ -802,7 +857,7 @@ jobs:
   action-selftest:
     name: self-test the action against the release
     needs: publish
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || startsWith(inputs.release_tag, 'v')
     permissions:
       contents: read
       # The action verifies the release's build attestation with gh.
@@ -811,7 +866,9 @@ jobs:
       actions: read
     uses: ./.github/workflows/action-selftest.yml
     with:
-      version: ${{ github.ref_name }}
+      version: ${{ inputs.release_tag || github.ref_name }}
+      # The action at the tag, not at a calling workflow's ref.
+      ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || '' }}
 
   # Only once smoke has passed on every OS in its matrix does the release
   # stop being a prerelease and become "latest" (#680). Until then
@@ -822,7 +879,7 @@ jobs:
   promote:
     name: mark the release latest
     needs: [publish, smoke]
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || startsWith(inputs.release_tag, 'v')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -831,14 +888,14 @@ jobs:
       - name: Mark the release a full release, and latest
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release edit "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --prerelease=false --latest
+        run: gh release edit "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --prerelease=false --latest
 
   # After smoke and promote, so `brew upgrade` never delivers a release that
   # failed its smoke test or is not yet latest (#680).
   tap:
     name: update the Homebrew tap
     needs: [publish, smoke, promote]
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || startsWith(inputs.release_tag, 'v')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -856,7 +913,7 @@ jobs:
             echo "::notice::HOMEBREW_TAP_TOKEN is not set; the tap was not updated. cloudburrow.rb is attached to the release."
             exit 0
           fi
-          gh release download "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --pattern cloudburrow.rb
+          gh release download "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --pattern cloudburrow.rb
           git clone "https://x-access-token:${TAP_TOKEN}@github.com/cloudburrow/homebrew-tap.git" tap
           mkdir -p tap/Formula
           cp cloudburrow.rb tap/Formula/cloudburrow.rb
@@ -865,5 +922,5 @@ jobs:
           git config user.email "cloudburrow-release@users.noreply.github.com"
           git add Formula/cloudburrow.rb
           git diff --cached --quiet && { echo "formula unchanged"; exit 0; }
-          git commit -m "cloudburrow ${GITHUB_REF_NAME}"
+          git commit -m "cloudburrow ${RELEASE_TAG}"
           git push origin HEAD
