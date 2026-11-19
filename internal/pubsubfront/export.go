@@ -121,11 +121,19 @@ func (f *Front) RunExports(ctx context.Context) {
 		f.syncExports(ctx)
 		select {
 		case <-ctx.Done():
+			// Stop every delivery and wait for each to return, so none
+			// outlives RunExports. Wait without the lock: a delivery
+			// records its state under it on the way out.
 			f.exp.mu.Lock()
+			running := make([]exportWorker, 0, len(f.exp.workers))
 			for _, w := range f.exp.workers {
 				w.cancel()
+				running = append(running, w)
 			}
 			f.exp.mu.Unlock()
+			for _, w := range running {
+				<-w.done
+			}
 			return
 		case <-t.C:
 		}
