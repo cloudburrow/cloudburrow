@@ -208,6 +208,9 @@ func (p storageProvider) DetailActions(ctx context.Context, project string, path
 	if path[0] == softObjectPage {
 		return p.softDeletedActions(ctx, path)
 	}
+	if path[0] == softBucketPage {
+		return p.softBucketActions(ctx, path)
+	}
 	if path[0] == managedFolderPage {
 		return p.managedFolderActions(ctx, path)
 	}
@@ -230,22 +233,28 @@ func (p storageProvider) DetailActions(ctx context.Context, project string, path
 	if actions, ok := aclEntryActions(path); ok {
 		return actions
 	}
+	if actions, ok := p.lifecycleRuleActions(ctx, path); ok {
+		return actions
+	}
 	if path[0] != objectPage {
 		prefix := ""
 		if len(path) > 1 {
 			prefix = strings.Join(path[1:], "/") + "/"
 		}
-		actions := []console.Action{composeAction(prefix), createManagedFolderAction(path[0], prefix)}
 		b, err := p.readBucket(ctx, path[0])
-		// Create folder, in a bucket with hierarchical namespace (#1203).
-		if err == nil && b.hierarchical() {
-			actions = append(actions, createFolderAction(path[0], prefix))
-		}
+		// Create folder: a real one in a bucket with hierarchical namespace
+		// (#1203), an empty "name/" object otherwise (#1843); and Create
+		// managed folder.
+		actions := append([]console.Action{composeAction(prefix)},
+			objectsTabActions(path[0], prefix, err == nil && b.hierarchical())...)
 		// A bucket's own page also offers Lock retention policy, while its
-		// policy is there and unlocked (#789), and Create notification (#791).
+		// policy is there and unlocked (#789), Add a rule (#1843) and Create
+		// notification (#791).
 		if len(path) == 1 {
 			if err == nil {
 				actions = append(actions, lockRetentionAction(b)...)
+				actions = append(actions, addLifecycleRuleAction(b.Metageneration))
+				actions = append(actions, bucketTabActions(b)...)
 				actions = append(actions, bucketACLActions(b)...)
 				actions = append(actions, bulkRestoreAction(), filterOperationsAction())
 				actions = append(actions, cacheActions()...)
@@ -269,6 +278,18 @@ func (p storageProvider) ActAt(ctx context.Context, project string, path []strin
 	}
 	if handled, err := p.actOnACL(ctx, path, action, values); handled {
 		return err
+	}
+	if handled, err := p.actOnLifecycle(ctx, path, action, values); handled {
+		return err
+	}
+	if handled, err := p.actOnBucketTabs(ctx, path, action, values); handled {
+		return err
+	}
+	if len(path) > 0 && path[0] == softBucketPage {
+		return p.restoreSoftBucket(ctx, path, action)
+	}
+	if action == "createsimplefolder" {
+		return p.createSimpleFolder(ctx, path, values)
 	}
 	c, err := p.storageClient(ctx)
 	if err != nil {
@@ -474,7 +495,7 @@ func rewriteStorageClass(ctx context.Context, o *storage.ObjectHandle, class str
 
 // objectDetail is an object's page, or one generation's (#853): what the
 // server holds for it.
-func (p storageProvider) objectDetail(ctx context.Context, path []string) (console.Detail, error) {
+func (p storageProvider) objectDetail(ctx context.Context, project string, path []string) (console.Detail, error) {
 	bucket, name, gen, err := objectTarget(path)
 	if err != nil {
 		return console.Detail{Unavailable: err.Error()}, nil
@@ -561,6 +582,12 @@ func (p storageProvider) objectDetail(ctx context.Context, path []string) (conso
 	}
 
 	groups := []console.PropertyGroup{
+		// Google's Overview: the object's addresses, each with its Copy
+		// button (#1843). The public URL is this instance's storage server,
+		// where Google's is storage.googleapis.com, and the authenticated
+		// one this console's download, where Google's is
+		// storage.cloud.google.com.
+		{Heading: "Overview", Properties: p.objectAddresses(project, bucket, name, gen)},
 		{Heading: "Object", Properties: props(
 			"Size", size,
 			"Content-Type", a.ContentType,
@@ -629,6 +656,7 @@ func (p storageProvider) objectDetail(ctx context.Context, path []string) (conso
 			"Generation", strconv.FormatInt(a.Generation, 10), "State", state),
 		Sections: sections,
 		Trail:    trail,
+		Object:   objectPageTarget(bucket, name, gen),
 	}, nil
 }
 

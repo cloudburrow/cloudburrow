@@ -67,7 +67,7 @@ const (
 
 // bucketHelp is the Cloud Storage create form's help text, which the console
 // shows under the name field when the value does not match its pattern.
-const bucketHelp = "Lowercase letters, numbers, hyphens and underscores; 3-63 characters."
+const bucketHelp = "A globally unique name: lowercase letters, numbers, hyphens, underscores and dots; 3-63 characters."
 
 // TestConsoleShellLandmarksAndLocalBadge: the dashboard at / exposes the
 // banner, navigation and main landmarks to assistive technology, read from

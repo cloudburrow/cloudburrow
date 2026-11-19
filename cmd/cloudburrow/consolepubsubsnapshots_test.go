@@ -253,9 +253,9 @@ func TestASubscriptionPageCreatesSnapshotsAndSeeks(t *testing.T) {
 	}
 
 	acts := actionsByID(detail(sub))
-	if len(acts) != 4 || acts[actCreateSnapshot].Label != "Create snapshot" || acts[actSeekTime].Label != "Seek to time" ||
+	if len(acts) != 4 || acts[actCreateSnapshot].Label != "Create snapshot" || acts[actReplayMessages].Label != "Replay messages" ||
 		acts[actAdvanceClock].Label != "Advance clock (CloudBurrow extension)" || !acts[actDetachSubscription].Destructive {
-		t.Fatalf("a subscription whose topic has no snapshot offers %+v; want Create snapshot, Detach from topic, Seek to time and Advance clock", acts)
+		t.Fatalf("a subscription whose topic has no snapshot offers %+v; want Create snapshot, Replay messages, Detach and Advance clock", acts)
 	}
 	create := acts[actCreateSnapshot]
 	if len(create.Fields) != 1 || create.Fields[0].Name != "name" || !strings.Contains(create.Fields[0].Help, pubsubSnapshotLabelsDropped) {
@@ -264,13 +264,16 @@ func TestASubscriptionPageCreatesSnapshotsAndSeeks(t *testing.T) {
 	if create.Confirm != "" || create.Destructive {
 		t.Errorf("Create snapshot asks for confirmation: %+v", create)
 	}
-	seekTime := acts[actSeekTime]
-	if seekTime.Confirm != seekTimeConfirm || !strings.Contains(seekTime.Fields[0].Help, "redelivered") ||
-		!strings.Contains(seekTime.Fields[0].Help, "does not retain acknowledged messages") {
-		t.Errorf("Seek to time = %+v; want the confirmation, and help saying what is redelivered and what is retained", seekTime)
+	// Replay messages (#1847) stands for both seeks; without a snapshot it
+	// offers only a time point.
+	replay := acts[actReplayMessages]
+	if replay.Confirm != replayConfirm || len(replay.Fields) != 2 || replay.Fields[1].Name != "time" ||
+		!strings.Contains(replay.Fields[1].Help, "redelivered") ||
+		!strings.Contains(replay.Fields[1].Help, "does not retain acknowledged messages") {
+		t.Errorf("Replay messages = %+v; want the confirmation, and help saying what is redelivered and what is retained", replay)
 	}
-	if _, err := time.Parse(time.RFC3339, seekTime.Fields[0].Default); err != nil {
-		t.Errorf("Seek to time is prefilled with %q, not an RFC 3339 time", seekTime.Fields[0].Default)
+	if _, err := time.Parse(time.RFC3339, replay.Fields[1].Default); err != nil {
+		t.Errorf("the time point is prefilled with %q, not an RFC 3339 time", replay.Fields[1].Default)
 	}
 
 	if code, out := subscriptionAct(t, srv, project, sub, actCreateSnapshot, map[string]string{"name": "orders-snap"}); code != http.StatusOK {
@@ -286,10 +289,10 @@ func TestASubscriptionPageCreatesSnapshotsAndSeeks(t *testing.T) {
 	}
 
 	acts = actionsByID(detail(sub))
-	seekSnap, ok := acts[actSeekSnapshot]
-	if !ok || seekSnap.Confirm != seekSnapshotConfirm || seekSnap.Fields[0].Default != "orders-snap" ||
-		!strings.Contains(seekSnap.Fields[0].Help, "orders-snap") {
-		t.Fatalf("with a snapshot of its topic the page offers %+v; want Seek to snapshot prefilled with orders-snap and confirmed", acts)
+	replay = acts[actReplayMessages]
+	if len(replay.Fields) != 3 || replay.Fields[2].Name != "snapshot" || replay.Fields[2].Default != "orders-snap" ||
+		!strings.Contains(replay.Fields[2].Help, "orders-snap") || len(replay.Fields[0].Options) != 2 {
+		t.Fatalf("with a snapshot of its topic Replay messages is %+v; want To a snapshot, prefilled with orders-snap", replay)
 	}
 	if code, out := subscriptionAct(t, srv, project, sub, actSeekSnapshot, map[string]string{"snapshot": "orders-snap"}); code != http.StatusOK {
 		t.Fatalf("Seek to snapshot = %d: %s", code, out)
@@ -300,7 +303,7 @@ func TestASubscriptionPageCreatesSnapshotsAndSeeks(t *testing.T) {
 
 	// The other topic's subscription is not offered it, and a request that
 	// names it anyway is refused by the API with its own message.
-	if _, ok := actionsByID(detail(otherSub))[actSeekSnapshot]; ok {
+	if r := actionsByID(detail(otherSub))[actReplayMessages]; len(r.Fields) != 2 {
 		t.Error("a subscription of another topic is offered Seek to snapshot")
 	}
 	if _, err := c.SubscriptionAdminClient.CreateSnapshot(ctx, &pubsubpb.CreateSnapshotRequest{
@@ -389,20 +392,21 @@ func TestTheSnapshotsScreenListsOpensAndDeletes(t *testing.T) {
 	advertised := false
 	for _, s := range services.Services {
 		if s.ID == "pubsub-snapshots" {
-			advertised = s.Detail && s.Delete && (s.Create == nil || s.Create == false)
+			// Create snapshot on the Snapshots page (#1847).
+			advertised = s.Detail && s.Delete && s.Create != nil && s.Create != false
 		}
 	}
 	if !advertised {
-		t.Fatalf("pubsub-snapshots is not advertised with detail and delete and no create: %+v", services)
+		t.Fatalf("pubsub-snapshots is not advertised with detail, delete and Create snapshot: %+v", services)
 	}
 
 	var listing console.Listing
 	getJSON200(t, srv.URL+"/api/resources/pubsub-snapshots?project="+project, &listing)
-	if len(listing.Items) != 1 || listing.Items[0].Name != snap || listing.Items[0].Fields["Topic"] != topic {
+	if len(listing.Items) != 1 || listing.Items[0].Name != snap || listing.Items[0].Fields["Topic name"] != topic {
 		t.Fatalf("snapshots listing = %+v, want %s of %s", listing.Items, snap, topic)
 	}
-	if _, err := time.Parse(time.RFC3339, listing.Items[0].Fields["Expires"]); err != nil {
-		t.Errorf("the expiry column reads %q", listing.Items[0].Fields["Expires"])
+	if _, err := time.Parse(time.RFC3339, listing.Items[0].Fields["Expiration"]); err != nil {
+		t.Errorf("the expiry column reads %q", listing.Items[0].Fields["Expiration"])
 	}
 
 	var d console.Detail

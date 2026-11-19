@@ -2153,7 +2153,9 @@ func TestTheDrawerListsProductsNotPages(t *testing.T) {
 	if want := []string{"Services /run run", "Jobs /run/jobs run-jobs", "Worker pools /run/worker-pools run-worker-pools", "Instances /run/instances run-instances", "Build history /run/builds run-builds"}; strings.Join(cloudRun, "|") != strings.Join(want, "|") {
 		t.Errorf("Cloud Run pages = %q, want %q", cloudRun, want)
 	}
-	// Cloud Storage lists Buckets and Deleted buckets (#789).
+	// Cloud Storage's menu is Google's order (#1843), with Deleted buckets
+	// (#789), now a redirect to Buckets' View options and not in the menu,
+	// last.
 	var gcs []string
 	for _, r := range routes {
 		if r["product"] == "storage" {
@@ -2162,9 +2164,12 @@ func TestTheDrawerListsProductsNotPages(t *testing.T) {
 	}
 	wantGCS := []string{
 		"Buckets /storage/browser storage Cloud Storage",
-		"Deleted buckets /storage/deleted storage-deleted Cloud Storage",
+		"Observability /storage/observability  Cloud Storage",
+		"Configuration /storage/intelligence storage-intelligence Cloud Storage",
+		"Inventory reports /storage/inventory-reports  Cloud Storage",
+		"Transfer data /storage/transfer  Cloud Storage",
 		"Settings /storage/settings storage-settings Cloud Storage",
-		"Storage Intelligence /storage/intelligence storage-intelligence Cloud Storage",
+		"Deleted buckets /storage/deleted storage-deleted Cloud Storage",
 	}
 	if strings.Join(gcs, "|") != strings.Join(wantGCS, "|") {
 		t.Errorf("Cloud Storage pages = %q, want %q", gcs, wantGCS)
