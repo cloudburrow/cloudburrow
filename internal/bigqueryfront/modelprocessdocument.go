@@ -72,7 +72,10 @@ func (f front) documentProcessor(ctx context.Context, v, project string, number 
 		if m[2] != region {
 			return "", 400, fmt.Sprintf("The processor %s exists in a different region (%s) than the model (%s)", v, m[2], location)
 		}
-		names, version = []string{strings.TrimSuffix(v, m[4])}, v
+		names = []string{strings.TrimSuffix(v, m[4])}
+		if m[4] != "" {
+			version = v
+		}
 	} else {
 		names = []string{fmt.Sprintf("projects/%d/locations/%s/processors/%s", number, region, v),
 			"projects/" + project + "/locations/" + region + "/processors/" + v}

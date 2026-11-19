@@ -27,10 +27,8 @@ import (
 // (#1799), and an object that is not an image
 // is "Bad image data." in its row's status; the object table's columns
 // are kept. IMAGE_PROPERTIES answers the page's dominant colors and a
-// crop hint (#1799). LOGO_DETECTION (no local model) is refused 501, as is the
-// service type with no local model at CREATE MODEL (Document AI),
-// naming its
-// function; ML.GENERATE_TEXT of the Vision model and ML.ANNOTATE_IMAGE
+// crop hint (#1799). LOGO_DETECTION (no local model) is refused 501;
+// ML.GENERATE_TEXT of the Vision model and ML.ANNOTATE_IMAGE
 // over a query are 400.
 //
 // covers: bigquery.jobs.query, bigquery.models.get
@@ -42,12 +40,6 @@ func TestBigQueryMLAnnotateImage(t *testing.T) {
 	conn := c.Project() + ".us." + id
 	ctx := h.Context()
 
-	for typ, fn := range map[string]string{"CLOUD_AI_DOCUMENT_V1": "ML.PROCESS_DOCUMENT"} {
-		err := run(fmt.Sprintf("CREATE MODEL `%s.refused` REMOTE WITH CONNECTION `%s` OPTIONS(REMOTE_SERVICE_TYPE = '%s')", ds, conn, typ))
-		if err == nil || !strings.Contains(err.Error(), "Not implemented here") || !strings.Contains(err.Error(), fn) {
-			t.Errorf("%s: %v", typ, err)
-		}
-	}
 	if err := run(fmt.Sprintf("CREATE MODEL `%s.vision` REMOTE WITH CONNECTION `%s` OPTIONS(REMOTE_SERVICE_TYPE = 'CLOUD_AI_VISION_V1')", ds, conn)); err != nil {
 		t.Fatalf("CREATE MODEL CLOUD_AI_VISION_V1: %v", err)
 	}
@@ -305,7 +297,9 @@ func TestBigQueryMLAnnotateImageDetections(t *testing.T) {
 // ml_transcribe_result (results with alternatives, language_code and
 // result_end_offset, metadata.total_billed_duration, and each word's
 // offsets with enable_word_time_offsets) and an empty ml_transcribe_status;
-// a FLAC file (no local decoder) and a text file are their rows' errors.
+// the same speech as a FLAC file (decoded locally since #1799) answers the
+// same words; an Ogg Opus file (no local decoder) and a text file are their
+// rows' errors.
 // SPEECH_RECOGNIZER is 501 at CREATE MODEL; a missing recognition_config, a
 // model other than chirp and a config option with no local equivalent
 // (profanity_filter, 501) are refused before anything is read.
@@ -319,6 +313,10 @@ func TestBigQueryMLTranscribe(t *testing.T) {
 	sc := storageClient(t, h)
 	ctx := h.Context()
 	wav, err := os.ReadFile("../../internal/speech/testdata/jfk.wav")
+	if err != nil {
+		t.Fatal(err)
+	}
+	flac, err := os.ReadFile("../../internal/speech/testdata/jfk.flac")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,7 +345,8 @@ func TestBigQueryMLTranscribe(t *testing.T) {
 		data []byte
 	}{
 		"audio/jfk.wav":   {"audio/wav", wav},
-		"audio/song.flac": {"audio/flac", []byte("fLaC\x00\x00\x00\x22 not really")},
+		"audio/jfk.flac":  {"audio/flac", flac},
+		"audio/song.ogg":  {"audio/ogg", []byte("OggS\x00\x02 not really")},
 		"audio/notes.txt": {"text/plain", []byte("not audio at all")},
 	} {
 		w := bh.Object(name).NewWriter(ctx)
@@ -397,10 +396,10 @@ func TestBigQueryMLTranscribe(t *testing.T) {
 		"LAX_INT64(ml_transcribe_result.results[0].alternatives[0].words[1].start_offset.nanos) AS word_nanos "+
 		`FROM ML.TRANSCRIBE(MODEL `+"`%s.speech`, TABLE `%s.audio`"+`, recognition_config => (JSON '{"language_codes": ["en-US"], "model": "chirp", `+
 		`"auto_decoding_config": {}, "features": {"enable_word_time_offsets": true}}')) ORDER BY uri`, ds, ds))
-	if len(rows) != 3 {
+	if len(rows) != 4 {
 		t.Fatalf("rows: %v", rows)
 	}
-	jfk, notes, song := rows[0], rows[1], rows[2]
+	jfkFLAC, jfk, notes, song := rows[0], rows[1], rows[2], rows[3]
 	text, _ := jfk["transcripts"].(string)
 	confidence, _ := jfk["confidence"].(float64)
 	if !strings.HasSuffix(fmt.Sprint(jfk["uri"]), "/audio/jfk.wav") || jfk["status"] != "" || jfk["content_type"] != "audio/wav" ||
@@ -408,8 +407,11 @@ func TestBigQueryMLTranscribe(t *testing.T) {
 		jfk["billed"] != int64(11) || jfk["end_s"] != int64(11) || confidence <= 0 || confidence > 1 || jfk["word"] != "And" || jfk["word_nanos"] == nil {
 		t.Errorf("jfk.wav row: %v", jfk)
 	}
-	if status, _ := song["status"].(string); !strings.Contains(status, "FLAC") || song["transcripts"] != nil {
-		t.Errorf("FLAC row: %v", song)
+	if flacText, _ := jfkFLAC["transcripts"].(string); jfkFLAC["status"] != "" || flacText != text || jfkFLAC["billed"] != int64(11) {
+		t.Errorf("jfk.flac row: %v", jfkFLAC)
+	}
+	if status, _ := song["status"].(string); !strings.Contains(status, "OGG_OPUS") || song["transcripts"] != nil {
+		t.Errorf("Ogg Opus row: %v", song)
 	}
 	if status, _ := notes["status"].(string); !strings.Contains(status, "INVALID_ARGUMENT") || notes["transcripts"] != nil {
 		t.Errorf("text row: %v", notes)

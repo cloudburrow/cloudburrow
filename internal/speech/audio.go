@@ -24,7 +24,7 @@ const MaxSeconds = 30 * 60
 
 func unsupported(format string) error {
 	return fmt.Errorf("%w: %s audio has no local decoder in CloudBurrow (WAV of LINEAR16, MULAW or ALAW, headerless "+
-		"LINEAR16, MULAW and ALAW, MP3, and AAC in MP4, M4A or MOV are decoded)", ErrUnsupported, format)
+		"LINEAR16, MULAW and ALAW, FLAC, MP3, and AAC in MP4, M4A or MOV are decoded)", ErrUnsupported, format)
 }
 
 // sniff names the container of data as autoDecodingConfig detects it.
@@ -82,6 +82,8 @@ func Decode(d speechconfig.Decoding, data []byte) ([]float32, error) {
 			break
 		}
 		mono, err = headerless(format, d.SampleRate, d.Channels, data)
+	case "FLAC":
+		mono, err = DecodeFLAC(data) // flac.go, #1799
 	case "MP3":
 		mono, err = embedding.DecodeAudio("audio/mpeg", data)
 	case "MP4_AAC", "M4A_AAC", "MOV_AAC":

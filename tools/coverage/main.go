@@ -72,6 +72,7 @@ import (
 	_ "cloud.google.com/go/datastore/admin/apiv1/adminpb"
 	_ "cloud.google.com/go/datastore/apiv1/datastorepb"
 	_ "cloud.google.com/go/developerconnect/apiv1/developerconnectpb"
+	_ "cloud.google.com/go/documentai/apiv1/documentaipb"
 	_ "cloud.google.com/go/eventarc/apiv1/eventarcpb"
 	_ "cloud.google.com/go/firestore/apiv1/admin/adminpb"
 	_ "cloud.google.com/go/firestore/apiv1/firestorepb"
@@ -185,9 +186,11 @@ var areas = []area{
 	{Key: "logging", Title: "Cloud Logging", Own: true, Services: []string{"google.logging.v2.LoggingServiceV2", "google.logging.v2.MetricsServiceV2", "google.logging.v2.ConfigServiceV2"}},
 	// The local AI endpoint's PredictionService (#1193).
 	// Model Garden's Hugging Face deployments on the same port (#1840):
-	// Deploy, and the Endpoint and Model it creates.
+	// Deploy, and the Endpoint and Model it creates. Document AI's
+	// processors (#1799) on the same port.
 	{Key: "vertexai", Title: "Vertex AI PredictionService", Own: true, Services: []string{"google.cloud.aiplatform.v1.PredictionService",
-		"google.cloud.aiplatform.v1.ModelGardenService", "google.cloud.aiplatform.v1.EndpointService", "google.cloud.aiplatform.v1.ModelService"}},
+		"google.cloud.aiplatform.v1.ModelGardenService", "google.cloud.aiplatform.v1.EndpointService", "google.cloud.aiplatform.v1.ModelService",
+		"google.cloud.documentai.v1.DocumentProcessorService"}},
 	// v1beta1's PredictionService, for ChatCompletions on those endpoints
 	// (#1840): a page of its own, since its method names repeat v1's.
 	{Key: "vertexaiv1beta1", Title: "Vertex AI PredictionService v1beta1", Own: true, Services: []string{"google.cloud.aiplatform.v1beta1.PredictionService"}},

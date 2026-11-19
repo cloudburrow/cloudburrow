@@ -43,7 +43,8 @@ import (
 //     are UNIMPLEMENTED, as are adaptation, transcriptNormalization,
 //     translationConfig and denoiserConfig.
 //   - decoding (speech/audio.go): WAV, headerless LINEAR16, MULAW and ALAW,
-//     MP3, and AAC in MP4, M4A or MOV; FLAC, Opus and AMR are UNIMPLEMENTED.
+//     MP3, AAC in MP4, M4A or MOV, and FLAC (internal/speech/flac.go, #1799);
+//     Opus and AMR are UNIMPLEMENTED.
 //   - each whisper segment is one result, its resultEndOffset the segment's
 //     end; metadata.totalBilledDuration is the audio's length rounded up to
 //     a second.

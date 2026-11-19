@@ -50,6 +50,7 @@ func TestDocumentProcessorRules(t *testing.T) {
 	}{
 		{"aaaa", "US", "projects/42/locations/us/processors/aaaa", 0},
 		{"projects/42/locations/us/processors/aaaa/processorVersions/v1", "us", "projects/42/locations/us/processors/aaaa/processorVersions/v1", 0},
+		{"projects/42/locations/us/processors/aaaa", "us", "projects/42/locations/us/processors/aaaa", 0},
 		{"projects/42/locations/us/processors/aaaa/processorVersions/v2", "us", "", 400}, // no such version
 		{"bbbb", "US", "", 400}, // the OCR processor is not supported
 		{"cccc", "US", "", 400}, // not enabled

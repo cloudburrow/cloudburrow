@@ -5819,8 +5819,8 @@
     "Key": "vertexai",
     "Title": "Vertex AI PredictionService",
     "counts": {
-      "Unimplemented": 22,
-      "Verified": 22
+      "Unimplemented": 34,
+      "Verified": 32
     },
     "rows": [
       {
@@ -6112,6 +6112,136 @@
         "tests": [
           "test/compat/predictiondirectraw_test.go:64 TestPredictionClientReachesAModelsGRPCServer"
         ]
+      },
+      {
+        "method": "google.cloud.documentai.v1.DocumentProcessorService/BatchProcessDocuments",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.documentai.v1.DocumentProcessorService/CreateProcessor",
+        "status": "Verified",
+        "tests": [
+          "test/compat/documentai_test.go:71 TestDocumentAIProcessors"
+        ]
+      },
+      {
+        "method": "google.cloud.documentai.v1.DocumentProcessorService/DeleteProcessor",
+        "status": "Verified",
+        "tests": [
+          "test/compat/documentai_test.go:71 TestDocumentAIProcessors"
+        ]
+      },
+      {
+        "method": "google.cloud.documentai.v1.DocumentProcessorService/DeleteProcessorVersion",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.documentai.v1.DocumentProcessorService/DeployProcessorVersion",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.documentai.v1.DocumentProcessorService/DisableProcessor",
+        "status": "Verified",
+        "tests": [
+          "test/compat/documentai_test.go:71 TestDocumentAIProcessors"
+        ]
+      },
+      {
+        "method": "google.cloud.documentai.v1.DocumentProcessorService/EnableProcessor",
+        "status": "Verified",
+        "tests": [
+          "test/compat/documentai_test.go:71 TestDocumentAIProcessors"
+        ]
+      },
+      {
+        "method": "google.cloud.documentai.v1.DocumentProcessorService/EvaluateProcessorVersion",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.documentai.v1.DocumentProcessorService/FetchProcessorTypes",
+        "status": "Verified",
+        "tests": [
+          "test/compat/documentai_test.go:71 TestDocumentAIProcessors"
+        ]
+      },
+      {
+        "method": "google.cloud.documentai.v1.DocumentProcessorService/GetEvaluation",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.documentai.v1.DocumentProcessorService/GetProcessor",
+        "status": "Verified",
+        "tests": [
+          "test/compat/documentai_test.go:71 TestDocumentAIProcessors"
+        ]
+      },
+      {
+        "method": "google.cloud.documentai.v1.DocumentProcessorService/GetProcessorType",
+        "status": "Verified",
+        "tests": [
+          "test/compat/documentai_test.go:71 TestDocumentAIProcessors"
+        ]
+      },
+      {
+        "method": "google.cloud.documentai.v1.DocumentProcessorService/GetProcessorVersion",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.documentai.v1.DocumentProcessorService/ListEvaluations",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.documentai.v1.DocumentProcessorService/ListProcessorTypes",
+        "status": "Verified",
+        "tests": [
+          "test/compat/documentai_test.go:71 TestDocumentAIProcessors"
+        ]
+      },
+      {
+        "method": "google.cloud.documentai.v1.DocumentProcessorService/ListProcessorVersions",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.documentai.v1.DocumentProcessorService/ListProcessors",
+        "status": "Verified",
+        "tests": [
+          "test/compat/documentai_test.go:71 TestDocumentAIProcessors"
+        ]
+      },
+      {
+        "method": "google.cloud.documentai.v1.DocumentProcessorService/ProcessDocument",
+        "status": "Verified",
+        "tests": [
+          "test/compat/documentai_test.go:71 TestDocumentAIProcessors"
+        ]
+      },
+      {
+        "method": "google.cloud.documentai.v1.DocumentProcessorService/ReviewDocument",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.documentai.v1.DocumentProcessorService/SetDefaultProcessorVersion",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.documentai.v1.DocumentProcessorService/TrainProcessorVersion",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.documentai.v1.DocumentProcessorService/UndeployProcessorVersion",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       }
     ]
   },
@@ -11192,12 +11322,12 @@
           "test/compat/bigquerymlremoteiam_test.go:164 TestBigQueryMLRemoteConnectionPermissions",
           "test/compat/bigquerymlremoteiam_test.go:242 TestBigQueryMLRemoteDefaultConnection",
           "test/compat/bigquerymlremoteoptions_test.go:28 TestBigQueryMLRemoteGenerationOptions",
-          "test/compat/bigquerymlservice_test.go:206 TestBigQueryMLAnnotateImageLabels",
-          "test/compat/bigquerymlservice_test.go:257 TestBigQueryMLAnnotateImageDetections",
-          "test/compat/bigquerymlservice_test.go:314 TestBigQueryMLTranscribe",
-          "test/compat/bigquerymlservice_test.go:37 TestBigQueryMLAnnotateImage",
-          "test/compat/bigquerymlservice_test.go:451 TestBigQueryMLTranslate",
-          "test/compat/bigquerymlservice_test.go:633 TestBigQueryMLUnderstandText",
+          "test/compat/bigquerymlservice_test.go:198 TestBigQueryMLAnnotateImageLabels",
+          "test/compat/bigquerymlservice_test.go:249 TestBigQueryMLAnnotateImageDetections",
+          "test/compat/bigquerymlservice_test.go:308 TestBigQueryMLTranscribe",
+          "test/compat/bigquerymlservice_test.go:35 TestBigQueryMLAnnotateImage",
+          "test/compat/bigquerymlservice_test.go:453 TestBigQueryMLTranslate",
+          "test/compat/bigquerymlservice_test.go:635 TestBigQueryMLUnderstandText",
           "test/compat/bigquerymltensorflow_test.go:41 TestBigQueryMLImportedTensorFlowModel",
           "test/compat/bigquerymltflite_test.go:35 TestBigQueryMLImportedTFLiteModel",
           "test/compat/bigquerymltflitegaps_test.go:29 TestBigQueryMLImportedTFLiteGaps",
@@ -11283,6 +11413,7 @@
           "test/compat/bigquerywrites_test.go:145 TestBigQueryBytesParameters",
           "test/compat/consolebigqueryorc_test.go:17 TestConsoleBigQueryLoadORCThroughTheForm",
           "test/compat/consolebigquerywrites_test.go:398 TestConsoleBigQueryReadWriteEditorRunsDML",
+          "test/compat/documentai_test.go:200 TestBigQueryMLProcessDocument",
           "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
           "test/compat/logginganalyticsviews_test.go:188 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
           "test/compat/logginganalyticsviews_test.go:266 TestLoggingLinkedDatasetAcrossRestarts",
@@ -11326,8 +11457,8 @@
           "test/compat/bigquerymlonnx_test.go:48 TestBigQueryMLImportedONNXModel",
           "test/compat/bigquerymlpreprocess_test.go:75 TestBigQueryMLTransformPreprocess",
           "test/compat/bigquerymlremote_test.go:94 TestBigQueryMLRemoteGenerateText",
-          "test/compat/bigquerymlservice_test.go:37 TestBigQueryMLAnnotateImage",
-          "test/compat/bigquerymlservice_test.go:633 TestBigQueryMLUnderstandText",
+          "test/compat/bigquerymlservice_test.go:35 TestBigQueryMLAnnotateImage",
+          "test/compat/bigquerymlservice_test.go:635 TestBigQueryMLUnderstandText",
           "test/compat/bigquerymltensorflow_test.go:41 TestBigQueryMLImportedTensorFlowModel",
           "test/compat/bigquerymltflite_test.go:35 TestBigQueryMLImportedTFLiteModel",
           "test/compat/bigquerymltflitegaps_test.go:29 TestBigQueryMLImportedTFLiteGaps",
