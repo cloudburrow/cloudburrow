@@ -28,6 +28,7 @@ package resourcemanager
 // (KEY_ALG_RSA_1024), the REST reference's other values (#1750).
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -44,6 +45,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 )
 
 const (
@@ -220,6 +222,14 @@ type keyCredentialsFile struct {
 // CreateServiceAccountKey makes a user-managed key and returns its private
 // half, once.
 func (r *Registry) CreateServiceAccountKey(req *adminpb.CreateServiceAccountKeyRequest) (*adminpb.ServiceAccountKey, error) {
+	// iam.disableServiceAccountKeyCreation and its managed form (#1890):
+	// Google's FAILED_PRECONDITION, as gcloud prints it.
+	if project := saProjectOf(req.GetName()); project != "" {
+		ctx := context.Background()
+		if orgpolicy.Enforced(ctx, project, orgpolicy.DisableServiceAccountKeyCreate) || orgpolicy.Enforced(ctx, project, orgpolicy.ManagedDisableKeyCreate) {
+			return nil, apierror.FailedPrecondition("Key creation is not allowed on this service account.")
+		}
+	}
 	keyType := req.GetPrivateKeyType()
 	switch keyType {
 	case adminpb.ServiceAccountPrivateKeyType_TYPE_UNSPECIFIED:
@@ -491,4 +501,20 @@ func (r *Registry) ServiceAccountPublicCerts(account string) (certs []ServiceAcc
 		}
 	}
 	return append(sys, user...), true
+}
+
+// saProjectOf is the projects/{id} of a service account name
+// (projects/{p}/serviceAccounts/{email or id}); for projects/-, the
+// project of the account's email.
+func saProjectOf(name string) string {
+	if p := orgpolicy.ProjectOf(name); p != "" {
+		return p
+	}
+	email := name[strings.LastIndex(name, "/")+1:]
+	if _, domain, ok := strings.Cut(email, "@"); ok {
+		if p, ok := strings.CutSuffix(domain, ".iam.gserviceaccount.com"); ok {
+			return "projects/" + p
+		}
+	}
+	return ""
 }

@@ -19,6 +19,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 )
 
 // Flag is one database flag.
@@ -570,6 +572,12 @@ func (s *Server) insertInstance(r *http.Request, base, project string) (any, err
 		if b.Region != Region {
 			spec.Region = b.Region
 		}
+	}
+	// gcp.resourceLocations (#1890), whatever --iam-enforcement: 412
+	// FAILED_PRECONDITION with Google's documented message. Nothing is
+	// refused when no policy is set.
+	if err := orgpolicy.CheckLocations(r.Context(), "projects/"+project, "projects/"+project, spec.region()); err != nil {
+		return nil, Errorf(http.StatusPreconditionFailed, "%s", err.Error())
 	}
 	if replica && spec.Regional() {
 		return nil, unimplemented("availabilityType REGIONAL on a read replica",

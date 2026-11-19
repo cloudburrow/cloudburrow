@@ -8,6 +8,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
+	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 )
 
 // iamServer serves the google.iam.v1.IAMPolicy mixin on the KMS port (#428).
@@ -174,6 +175,20 @@ func (i *iamServer) SetIamPolicy(_ context.Context, req *iampb.SetIamPolicyReque
 	r, err := iamTarget(req.GetResource())
 	if err != nil {
 		return nil, apierror.Wrap(err)
+	}
+	// iam.allowedPolicyMemberDomains (#1890), against the members the
+	// policy already has.
+	var before, after []string
+	if cur, found, err := i.policyOf(r); err == nil && found && cur != nil {
+		for _, b := range cur.Bindings {
+			before = append(before, b.Members...)
+		}
+	}
+	for _, b := range req.GetPolicy().GetBindings() {
+		after = append(after, b.GetMembers()...)
+	}
+	if err := orgpolicy.CheckMembers(context.Background(), orgpolicy.ProjectOf(req.GetResource()), before, after); err != nil {
+		return nil, apierror.Wrap(apierror.FailedPrecondition("%s", err.Error()))
 	}
 	i.s.mu.Lock()
 	defer i.s.mu.Unlock()

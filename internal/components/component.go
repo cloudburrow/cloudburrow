@@ -224,15 +224,17 @@ func (c *LifecycleComponent) Backends() []Backend {
 		switch s {
 		case config.ServicePubSub:
 			b := PubSubBackend("cloudburrow", c.storageImage)
+			// Organization policies (#1890) are asked of the host whatever
+			// --iam-enforcement, through cloudburrow-host.
+			if c.resourceManager != "" && b.Front != nil {
+				b.Front.Args = append(append([]string{}, b.Front.Args...), "--resourcemanager", "http://"+c.resourceManager)
+				b.EgressPorts = c.withResourceManagerPort(b.EgressPorts)
+			}
 			// IAM enforcement asks the host's one evaluator, through
 			// cloudburrow-host (#1879).
 			if c.iamCheck && c.resourceManager != "" && b.Front != nil {
 				b.Front.Args = append(append([]string{}, b.Front.Args...), "--iam-check", "http://"+c.resourceManager)
-				if _, p, err := net.SplitHostPort(c.resourceManager); err == nil {
-					if port, err := strconv.Atoi(p); err == nil {
-						b.EgressPorts = append(b.EgressPorts, port)
-					}
-				}
+				b.EgressPorts = c.withResourceManagerPort(b.EgressPorts)
 			}
 			out = append(out, b)
 		default:
@@ -265,6 +267,15 @@ func (c *LifecycleComponent) Backends() []Backend {
 					}
 					env[FirestoreMongoTLSCertEnv], env[FirestoreMongoTLSKeyEnv] = c.mongoCert, c.mongoKey
 					b.Front.Env = env
+				}
+				// Firestore's databases and Spanner's instances are
+				// created where gcp.resourceLocations allows, and these
+				// fronts' setIamPolicy refuses members
+				// iam.allowedPolicyMemberDomains does not permit (#1890):
+				// the fronts ask the host, through cloudburrow-host.
+				if (s == config.ServiceFirestore || s == config.ServiceSpanner || s == config.ServiceBigtable) && c.resourceManager != "" && b.Front != nil {
+					b.Front.Args = append(append([]string{}, b.Front.Args...), "--resourcemanager", "http://"+c.resourceManager)
+					b.EgressPorts = c.withResourceManagerPort(b.EgressPorts)
 				}
 				if s == config.ServiceFirestore && c.enabled(config.ServiceStorage) {
 					b.Front.Args = append(append([]string{}, b.Front.Args...), "--storage", "http://"+InClusterBuiltinStorageHost(c.installer.Namespace))
@@ -693,3 +704,19 @@ func (c *LifecycleComponent) ReadyTimeout() time.Duration { return c.timeout }
 // Stop is a no-op: components live in the cluster and outlive the CLI process.
 // Removing them belongs to `reset`, which is explicit.
 func (c *LifecycleComponent) Stop(context.Context) error { return nil }
+
+// withResourceManagerPort is ports with Resource Manager's in-cluster port,
+// which a pod asking the host (cloudburrow-host) must be allowed to reach.
+func (c *LifecycleComponent) withResourceManagerPort(ports []int) []int {
+	if _, p, err := net.SplitHostPort(c.resourceManager); err == nil {
+		if port, err := strconv.Atoi(p); err == nil {
+			for _, q := range ports {
+				if q == port {
+					return ports
+				}
+			}
+			return append(append([]int{}, ports...), port)
+		}
+	}
+	return ports
+}

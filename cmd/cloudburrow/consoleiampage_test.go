@@ -177,10 +177,10 @@ func TestConsoleIAMResourcePages(t *testing.T) {
 	}
 	const c = "constraints/compute.requireOsLogin"
 	acts := op.DetailActions(ctx, "iam-page", []string{c})
-	if len(acts) == 0 || acts[0].Label != "Manage policy" {
+	if len(acts) == 0 || acts[0].Label != "Manage policy" || acts[0].Href != "/iam-admin/orgpolicies/constraints%2Fcompute.requireOsLogin/edit?project=iam-page" {
 		t.Fatalf("a constraint's actions are %+v", acts)
 	}
-	if err := op.ActAt(ctx, "iam-page", []string{c}, acts[0].ID, map[string]string{"enforced": "true"}); err != nil {
+	if _, err := op.StudioCall(ctx, "iam-page", "policy-set", json.RawMessage(`{"constraint":"`+c+`","source":"override","rules":[{"enforce":true}]}`)); err != nil {
 		t.Fatal(err)
 	}
 	l, _ = op.List(ctx, "iam-page")

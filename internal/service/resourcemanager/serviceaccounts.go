@@ -45,6 +45,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 )
 
 const saPrefix = "resourcemanager/serviceaccounts/"
@@ -220,6 +221,10 @@ func (r *Registry) CreateServiceAccount(req *adminpb.CreateServiceAccountRequest
 	p, ok := strings.CutPrefix(req.GetName(), "projects/")
 	if !ok || p == "" || strings.Contains(p, "/") {
 		return nil, apierror.InvalidArgument("name %q must be projects/{project}", req.GetName())
+	}
+	// iam.disableServiceAccountCreation (#1890).
+	if orgpolicy.Enforced(context.Background(), "projects/"+p, orgpolicy.DisableServiceAccountCreation) {
+		return nil, apierror.FailedPrecondition("Service account creation is not allowed on this project.")
 	}
 	id := req.GetAccountId()
 	if !saIDPattern.MatchString(id) {

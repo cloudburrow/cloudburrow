@@ -15,6 +15,7 @@ import (
 	"cloud.google.com/go/iam/admin/apiv1/adminpb"
 	iamv2 "cloud.google.com/go/iam/apiv2/iampb"
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
+	"cloud.google.com/go/orgpolicy/apiv2/orgpolicypb"
 	rmpb "cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
@@ -663,6 +664,11 @@ func (s *Server) Start(ctx context.Context) error {
 		Pattern:  &annotations.HttpRule_Get{Get: "/v2/{name=policies/*/*/*/operations/*}"}}}}
 	iamV2REST.RegisterService(&iamv2.Policies_ServiceDesc, policies)
 	iamV2REST.RegisterService(&longrunningpb.Operations_ServiceDesc, OperationsServer{})
+	// The Organization Policy API v2 (#1890, orgpolicyv2.go).
+	orgPolicy := NewOrgPolicyServer(s.projects.reg)
+	orgpolicypb.RegisterOrgPolicyServer(g, orgPolicy)
+	orgPolicyREST := &rest.Transcoder{Packages: []string{"google.cloud.orgpolicy.v2"}}
+	orgPolicyREST.RegisterService(&orgpolicypb.OrgPolicy_ServiceDesc, orgPolicy)
 
 	router := rest.NewRouter()
 	s.projects.restRoutes(router)
@@ -679,6 +685,10 @@ func (s *Server) Start(ctx context.Context) error {
 				x.h.ServeHTTP(w, r)
 				return
 			}
+		}
+		if isOrgPolicyPath(r.URL.Path) {
+			orgPolicyREST.ServeHTTP(w, r)
+			return
 		}
 		if isIAMv2Path(r.URL.Path) {
 			iamV2REST.ServeHTTP(w, r)

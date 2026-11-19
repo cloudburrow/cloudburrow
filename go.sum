@@ -346,6 +346,8 @@ cloud.google.com/go/notebooks v1.18.0/go.mod h1:fXU6A3TJ2YobFy6fxOr4tKZZ8QgTjdJA
 cloud.google.com/go/optimization v1.12.0/go.mod h1:28gzCUmeCLcT4vctGEo71QF4b60TYkKQo5y8Gs2KPq8=
 cloud.google.com/go/orchestration v1.17.0/go.mod h1:Lf/Czqh4Jfy3IFpvDkKWjfjkYFI+tj6nAjq5ihivrq4=
 cloud.google.com/go/orgpolicy v1.20.0/go.mod h1:9LHqEGx5P5dhansdKTNIEXpM+QbebAIOs66+HUID4aQ=
+cloud.google.com/go/orgpolicy v1.22.1 h1:7ALTEnwYhRc2P0I83IoUHxkAZTR4E63OXBL0wrU6A2w=
+cloud.google.com/go/orgpolicy v1.22.1/go.mod h1:yleebuPUQYw8z6yHHYogRE0Q9ZYJqNF0pqnOLKpwM3E=
 cloud.google.com/go/osconfig v1.21.0/go.mod h1:BofnHqjjvu6lZQv/hqo2+rLCUiY4O6A9UYwwvVrSBjk=
 cloud.google.com/go/osconfig v1.22.0/go.mod h1:bUL0FaSR2ahPcFRRYnd6a0LyUzsQYIdUpBq8Tmxg8fE=
 cloud.google.com/go/oslogin v1.18.0/go.mod h1:3Oa36T3781Mv+yCSVYlfasi7auHjfPFqvNOd1q92umc=

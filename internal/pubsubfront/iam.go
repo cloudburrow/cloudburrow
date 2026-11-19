@@ -152,6 +152,11 @@ func (f *Front) SetIamPolicy(ctx context.Context, req *iampb.SetIamPolicyRequest
 	}
 	next, err := iampolicy.Set(current, req)
 	if err == nil {
+		// iam.allowedPolicyMemberDomains (#1890), asked of the host
+		// whatever --iam-enforcement.
+		err = checkOrgMembers(ctx, req.GetResource(), current, &next)
+	}
+	if err == nil {
 		f.iam[req.GetResource()] = next
 	}
 	f.mu.Unlock()

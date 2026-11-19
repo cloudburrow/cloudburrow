@@ -336,6 +336,10 @@ func (s *Server) bucketsSetIamPolicy(w http.ResponseWriter, r *http.Request) {
 		if err := checkConditional(b, p); err != nil {
 			return err
 		}
+		// Organization policy constraints (orgpolicy.go, #1890).
+		if err := checkPolicyOrg(b, b.Policy, p); err != nil {
+			return err
+		}
 		next, err := nextPolicy(b.Policy, p, sentETag)
 		if err != nil {
 			return err

@@ -82,6 +82,9 @@ func (s *Server) CreateService(ctx context.Context, req *runpb.CreateServiceRequ
 	if _, _, err := resource.ParseLocation(req.GetParent()); err != nil {
 		return nil, apierror.InvalidArgument("%v", err)
 	}
+	if err := checkOrgLocation(ctx, req.GetParent()); err != nil {
+		return nil, err
+	}
 	id := req.GetServiceId()
 	if err := ValidateServiceID(id); err != nil {
 		return nil, err

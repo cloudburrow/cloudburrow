@@ -77,7 +77,7 @@ func TestIAMPageGrantEditAndRemoveAccess(t *testing.T) {
 	p.waitFor(`document.querySelector("#iam-principals-table") !== null || document.querySelector("#iam-body .state") !== null`)
 	var tabs []string
 	p.eval(`[...document.querySelectorAll("#view .tab-strip .tab")].map((t) => t.textContent)`, &tabs)
-	if strings.Join(tabs, ",") != "View by principals,View by roles" {
+	if strings.Join(tabs, ",") != "View by principals,View by roles,Deny" {
 		t.Errorf("the IAM page's tabs are %v", tabs)
 	}
 
@@ -146,7 +146,7 @@ func TestIAMPageGrantEditAndRemoveAccess(t *testing.T) {
 }
 
 // TestIAMMenuFollowsGoogle (#1864): IAM & Admin's menu in Google's order;
-// a page whose API is not served says "Not available locally".
+// Policy Troubleshooter's page is its check form (#1879).
 func TestIAMMenuFollowsGoogle(t *testing.T) {
 	needService(t, "iam")
 	project := uniqueProject(t)
@@ -166,13 +166,10 @@ func TestIAMMenuFollowsGoogle(t *testing.T) {
 		}
 		at += i + 1
 	}
+	// Policy Troubleshooter is served since #1879: its page is the check
+	// form, not "Not available locally".
 	p.navigate("/iam-admin/troubleshooter?project=" + project)
-	p.waitFor(`(document.querySelector("#view .state h2") || {}).textContent === "Not available locally"`)
-	var why string
-	p.eval(`document.querySelector("#view .state p").textContent`, &why)
-	if !strings.Contains(why, "troubleshootIamPolicy") {
-		t.Errorf("Policy Troubleshooter reads %q; want why it is not served", why)
-	}
+	p.waitFor(`[...document.querySelectorAll("#view button")].some((b) => b.textContent.trim() === "Check access")`)
 	// Tags in this menu is Resource Manager's tag keys page.
 	p.navigate("/iam-admin/tags?project=" + project)
 	p.waitFor(`(document.querySelector("#product-nav [aria-current=page]") || {}).textContent?.trim() === "Tags"`)

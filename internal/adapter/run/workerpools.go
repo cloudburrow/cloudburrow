@@ -230,6 +230,9 @@ func (p *WorkerPoolsServer) CreateWorkerPool(ctx context.Context, req *runpb.Cre
 	if _, _, err := resource.ParseLocation(req.GetParent()); err != nil {
 		return nil, apierror.InvalidArgument("%v", err)
 	}
+	if err := checkOrgLocation(ctx, req.GetParent()); err != nil {
+		return nil, err
+	}
 	id := req.GetWorkerPoolId()
 	if err := validateJobID(id); err != nil {
 		return nil, apierror.InvalidArgument("%s", strings.ReplaceAll(apierror.From(err).Message, "job", "worker pool"))

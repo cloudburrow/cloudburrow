@@ -16,6 +16,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/frontready"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/onnxrunner"
+	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 	"github.com/cloudburrow/cloudburrow/internal/tfconvert"
 )
 
@@ -83,6 +84,12 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			_ = l.Close()
 			return fmt.Errorf("listen on %s: %w", *readListen, err)
 		}
+	}
+	// Organization policies (#1890) are asked of the host's Resource
+	// Manager, whatever --iam-enforcement.
+	if *resourceManager != "" {
+		orgpolicy.Use(orgpolicy.Remote{Base: *resourceManager})
+		defer orgpolicy.Use(nil)
 	}
 	handler := Wrap(results, WithStorage(*storage), WithStoragePublic(*storagePublic), func(o *options) {
 		o.restarts, o.ids, o.records, o.stateDir, o.logf = watch, ids, records, *stateDir, logger.Printf

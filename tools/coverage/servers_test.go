@@ -13,6 +13,7 @@ import (
 
 	iamadminpb "cloud.google.com/go/iam/admin/apiv1/adminpb"
 	iamv2pb "cloud.google.com/go/iam/apiv2/iampb"
+	"cloud.google.com/go/orgpolicy/apiv2/orgpolicypb"
 	rmpb "cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -63,6 +64,7 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	rmpb.RegisterTagHoldsServer(srv, resourcemanager.NewTagHoldsServer(rmReg))
 	iamadminpb.RegisterIAMServer(srv, resourcemanager.NewIAMAdminServer(rmReg))
 	iamv2pb.RegisterPoliciesServer(srv, resourcemanager.NewPoliciesServer(rmReg))
+	orgpolicypb.RegisterOrgPolicyServer(srv, resourcemanager.NewOrgPolicyServer(rmReg))
 	schedStore := scheduler.NewStore(store.NewMemory())
 	scheduler.NewGRPCServer(schedStore, scheduler.NewRunner(schedStore, nil, nil, nil, time.Second), nil).Register(srv)
 	// The Locations mixin is registered once, by KMS above (#1291): Cloud

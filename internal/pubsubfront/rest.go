@@ -113,6 +113,14 @@ func (f *Front) serveREST(w http.ResponseWriter, r *http.Request, next http.Hand
 		return
 	}
 	if name, verb, ok := topicPath(r.URL.Path); ok {
+		// gcp.resourceLocations on the message storage policy (#1890,
+		// orgpolicy.go).
+		if verb == "" {
+			if err := checkRESTTopic(r, name); err != nil {
+				writeRESTError(w, err)
+				return
+			}
+		}
 		f.serveTopic(w, r, name, verb, next)
 		return
 	}

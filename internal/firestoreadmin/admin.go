@@ -62,6 +62,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/frontstate"
 	"github.com/cloudburrow/cloudburrow/internal/grpchttp"
+	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 )
 
 // DefaultLocation is the location `(default)` is described in: the emulator
@@ -345,7 +346,7 @@ func (a *Admin) GetDatabase(_ context.Context, req *adminpb.GetDatabaseRequest) 
 	return a.describe(db), nil
 }
 
-func (a *Admin) CreateDatabase(_ context.Context, req *adminpb.CreateDatabaseRequest) (*longrunningpb.Operation, error) {
+func (a *Admin) CreateDatabase(ctx context.Context, req *adminpb.CreateDatabaseRequest) (*longrunningpb.Operation, error) {
 	m := projectRe.FindStringSubmatch(req.GetParent())
 	if m == nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid parent %q: want projects/{project}", req.GetParent())
@@ -360,6 +361,12 @@ func (a *Admin) CreateDatabase(_ context.Context, req *adminpb.CreateDatabaseReq
 	}
 	if in.GetLocationId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "location_id is required.")
+	}
+	// gcp.resourceLocations (#1890), asked of the host whatever
+	// --iam-enforcement: FAILED_PRECONDITION with Google's documented
+	// message. Nothing is refused when no policy is set.
+	if err := orgpolicy.CheckLocations(ctx, req.GetParent(), req.GetParent(), in.GetLocationId()); err != nil {
+		return nil, status.Error(codes.FailedPrecondition, err.Error())
 	}
 	switch in.GetType() {
 	case adminpb.Database_DATASTORE_MODE:

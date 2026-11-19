@@ -23,6 +23,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/iamcheck"
+	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"github.com/cloudburrow/cloudburrow/internal/sched"
 	"github.com/cloudburrow/cloudburrow/internal/service/storage"
@@ -80,6 +81,10 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	if *resourceManager != "" {
 		opts.Hierarchy = storage.ResourceManagerHierarchy{Base: *resourceManager}
+		// Organization policies are the host's, enforced whatever IAM
+		// enforcement (#1890).
+		orgpolicy.Use(orgpolicy.Remote{Base: *resourceManager})
+		defer orgpolicy.Use(nil)
 	}
 	if *mode != "persistent" && *mode != "ephemeral" {
 		return fmt.Errorf("--mode %q: want persistent or ephemeral", *mode)

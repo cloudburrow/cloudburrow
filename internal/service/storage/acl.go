@@ -419,13 +419,16 @@ func objectRequestACL(b bucketRecord, p string, rawACL any, hasACL bool) (acl []
 	}
 	if p != "" {
 		acl, err = predefinedObjectACL(b.Project, p)
-		return acl, err == nil, err
-	}
-	if hasACL && rawACL != nil {
+	} else if hasACL && rawACL != nil {
 		acl, err = parseACL(objectACL, rawACL)
-		return acl, err == nil, err
+	} else {
+		return nil, false, nil
 	}
-	return nil, false, nil
+	if err == nil {
+		// Public access prevention (orgpolicy.go, #1890).
+		err = checkPublicACL(b, nil, acl)
+	}
+	return acl, err == nil, err
 }
 
 // The three ACL resources. Each path is b/{bucket}/acl[/{entity}],
@@ -519,6 +522,10 @@ func (s *Server) loadACL(tx Tx, r *http.Request, t aclTarget) (aclState, error) 
 // storeACL writes a changed ACL back, advancing the metageneration of the
 // bucket or the object it belongs to.
 func (s *Server) storeACL(tx Tx, st *aclState, kind aclKind, acl []aclEntry) error {
+	// Public access prevention (orgpolicy.go, #1890).
+	if err := checkPublicACL(st.b, st.list(kind), acl); err != nil {
+		return err
+	}
 	now := s.now()
 	switch kind {
 	case bucketACL, defaultObjectACL:

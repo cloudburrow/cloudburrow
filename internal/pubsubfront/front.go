@@ -760,6 +760,13 @@ func (f *Front) handle(_ any, ss grpc.ServerStream) (err error) {
 	if method == subscriber+"UpdateSubscription" || method == publisher+"UpdateTopic" {
 		return f.handleUpdate(ctx, ss, method)
 	}
+	if method == publisher+"CreateTopic" {
+		// gcp.resourceLocations on the message storage policy (#1890,
+		// orgpolicy.go).
+		if ss, err = checkCreateTopic(ctx, ss); err != nil {
+			return err
+		}
+	}
 	cs, err := f.upstream.NewStream(ctx, &grpc.StreamDesc{ServerStreams: true, ClientStreams: true}, method,
 		grpc.ForceCodec(rawCodec{}))
 	if err != nil {
@@ -797,6 +804,12 @@ func (f *Front) handleUpdate(ctx context.Context, ss grpc.ServerStream, method s
 	var in frame
 	if err := ss.RecvMsg(&in); err != nil {
 		return err
+	}
+	if method == publisher+"UpdateTopic" {
+		// gcp.resourceLocations (#1890, orgpolicy.go).
+		if err := checkUpdateTopic(ctx, in); err != nil {
+			return err
+		}
 	}
 	call := &observed{f: f, method: method}
 	out, err := call.request(in)

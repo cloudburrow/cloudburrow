@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/url"
 	"regexp"
 	"slices"
 	"strconv"
@@ -102,14 +103,19 @@ func (p iamOrgPoliciesProvider) Detail(_ context.Context, project string, path [
 	}, Sections: []console.Section{{ID: "about", Label: "Details", Kind: console.KindText, Text: orgPolicyNote}}}, nil
 }
 
-// DetailActions are Manage policy and, on a policy of the project's own,
-// Delete policy, each on this constraint.
+// DetailActions are Manage policy, which opens Edit policy
+// (consoleorgpolicyedit.go), as Google's page does, and, on a policy of the
+// project's own, Delete policy, each on this constraint.
 func (p iamOrgPoliciesProvider) DetailActions(_ context.Context, project string, path []string) []console.Action {
 	if project == "" || len(path) != 1 || resourcemanager.KnownConstraint(path[0]) == nil {
 		return nil
 	}
-	var out []console.Action
+	out := []console.Action{{ID: "manage-policy", Label: "Manage policy",
+		Href: "/iam-admin/orgpolicies/" + url.PathEscape(path[0]) + "/edit?project=" + url.QueryEscape(project)}}
 	for _, a := range orgPolicyActions(p.registry, "projects/"+project, "") {
+		if a.ID == orgPolicySet {
+			continue
+		}
 		fields := make([]console.Field, 0, len(a.Fields))
 		for _, f := range a.Fields {
 			if f.Name == "constraint" {
@@ -125,11 +131,7 @@ func (p iamOrgPoliciesProvider) DetailActions(_ context.Context, project string,
 			continue
 		}
 		a.Fields = fields
-		if a.ID == orgPolicySet {
-			a.Label = "Manage policy"
-		} else {
-			a.Label = "Delete policy"
-		}
+		a.Label = "Delete policy"
 		out = append(out, a)
 	}
 	return out

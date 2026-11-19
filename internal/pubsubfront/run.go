@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/iamcheck"
+	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 )
 
 // ErrUsage means the arguments were refused; the reason has been written.
@@ -29,6 +30,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	stateFile := fs.String("state-file", "", "file the front keeps the expiration policies and labels updates set, its clock and "+
 		"each subscription's activity in, and the emulator's definitions it creates again after an emulator restart (#1608), "+
 		"restored when it starts (#898); empty: kept in memory only")
+	resourceManager := fs.String("resourcemanager", "", "http://host:port of the host's Resource Manager, asked for organization policies whatever --iam-check (what `up` passes, #1890)")
 	iamCheck := fs.String("iam-check", "", "http://host:port of the host's IAM evaluator, which checks each call's caller when set (what `up --iam-enforcement=on` passes, #1879)")
 	if err := fs.Parse(args); err != nil {
 		return ErrUsage
@@ -43,6 +45,10 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	defer f.Close()
+	if *resourceManager != "" {
+		orgpolicy.Use(orgpolicy.Remote{Base: *resourceManager})
+		defer orgpolicy.Use(nil)
+	}
 	if *iamCheck != "" {
 		f.UseIAMCheck(&iamcheck.Client{Base: *iamCheck})
 	}

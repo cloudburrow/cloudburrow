@@ -149,7 +149,9 @@ var areas = []area{
 	// QueryTestablePermissions, service accounts, their keys and IAM
 	// policies; SignBlob and SignJwt (deprecated for IAM Credentials'),
 	// grantable roles, auditable services and lint are UNIMPLEMENTED.
-	{Key: "iam", Title: "IAM (custom roles, service accounts, deny policies)", Own: true, Services: []string{"google.iam.admin.v1.IAM", "google.iam.v2.Policies"}},
+	// The Organization Policy API v2 (#1890) is on the same port.
+	{Key: "iam", Title: "IAM (custom roles, service accounts, deny policies, organization policies)", Own: true, Services: []string{"google.iam.admin.v1.IAM", "google.iam.v2.Policies",
+		"google.cloud.orgpolicy.v2.OrgPolicy"}},
 	// Liens (#1295) have no gRPC service: they are on resourcemanagerv1.
 	{Key: "resourcemanager", Title: "Resource Manager v3 (Projects, Folders, Organizations, Tags)", Own: true, Services: []string{"google.cloud.resourcemanager.v3.Projects",
 		"google.cloud.resourcemanager.v3.Folders", "google.cloud.resourcemanager.v3.Organizations", "google.cloud.resourcemanager.v3.TagKeys",

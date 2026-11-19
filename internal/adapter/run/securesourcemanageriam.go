@@ -79,6 +79,9 @@ func ssmSetPolicy(collection string, req *iampb.SetIamPolicyRequest) (*iampb.Pol
 	if err != nil {
 		return nil, err
 	}
+	if err := checkOrgMembers(context.Background(), req.GetResource(), storedProto(cur), next.Proto()); err != nil {
+		return nil, err
+	}
 	ssmState.policies[req.GetResource()] = next
 	saveSSMLocked()
 	return next.Proto(), nil

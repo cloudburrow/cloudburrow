@@ -9,6 +9,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/iamcheck"
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
+	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
@@ -609,6 +610,14 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// internal/iamcheck), through cloudburrow-host, so every decision is
 	// this evaluator's.
 	rmSrv.HandleJSON(func(r *http.Request) bool { return r.URL.Path == iamcheck.Path }, http.HandlerFunc(iamEnforcer.ServeCheck))
+	// Organization policies (#1890) are enforced whatever
+	// --iam-enforcement: the in-process services ask the registry, the
+	// in-cluster servers (Cloud Storage, Pub/Sub's and BigQuery's fronts)
+	// ask it here through cloudburrow-host (internal/orgpolicy).
+	orgPolicySrc := resourcemanager.OrgPolicySource{Reg: func() *resourcemanager.Registry { return projects }}
+	orgpolicy.Use(orgPolicySrc)
+	defer orgpolicy.Use(nil)
+	rmSrv.HandleJSON(func(r *http.Request) bool { return r.URL.Path == orgpolicy.Path }, orgpolicy.Handler(orgPolicySrc))
 	// Kourier's gateway asks before routing to a Cloud Run service
 	// (run.routes.invoke, runinvoke.go).
 	rmSrv.HandleUnguarded(isRunInvokeAuthz, runInvokeAuthz{e: iamEnforcer, creds: creds, run: runSvc})

@@ -21,8 +21,11 @@ const (
 	orgPolicyClear = "clear-org-policy"
 )
 
-const orgPolicyNote = "Stored, never enforced, as IAM policies are. Effective is the policy evaluated from the organization down " +
-	"through the folders: a policy below replaces the one above, unless it is a list policy that inherits from its parent."
+const orgPolicyNote = "Effective is the policy evaluated from the organization down through the folders: a policy below replaces the one above, " +
+	"unless it merges with its parent (inheritFromParent). Enforced, whether or not IAM enforcement is on, as on Google Cloud, for " +
+	"iam.allowedPolicyMemberDomains, storage.uniformBucketLevelAccess, storage.publicAccessPrevention, gcp.resourceLocations, " +
+	"iam.disableServiceAccountKeyCreation and iam.disableServiceAccountCreation; the other constraints are stored and evaluated, not enforced. " +
+	"A dry-run policy is evaluated and never refuses a call."
 
 // orgPolicyListing is resource's Organization policies listing.
 func orgPolicyListing(reg *resourcemanager.Registry, resource string) console.Listing {

@@ -332,6 +332,9 @@ func (f *FunctionsServer) CreateFunction(ctx context.Context, req *functionspb.C
 	if _, _, err := resource.ParseLocation(req.GetParent()); err != nil {
 		return nil, apierror.InvalidArgument("%v", err)
 	}
+	if err := checkOrgLocation(ctx, req.GetParent()); err != nil {
+		return nil, err
+	}
 	id := req.GetFunctionId()
 	in := req.GetFunction()
 	if in == nil {
@@ -1190,6 +1193,9 @@ func (i functionsIAM) SetIamPolicy(ctx context.Context, req *iampb.SetIamPolicyR
 	}
 	p, err := iampolicy.Set(sf.policy, req)
 	if err != nil {
+		return nil, err
+	}
+	if err := checkOrgMembers(ctx, req.GetResource(), storedProto(sf.policy), p.Proto()); err != nil {
 		return nil, err
 	}
 	sf.policy = &p

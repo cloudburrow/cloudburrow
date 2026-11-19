@@ -40,6 +40,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/frontready"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
+	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 	"github.com/cloudburrow/cloudburrow/internal/queryfront"
 	"github.com/cloudburrow/cloudburrow/internal/spannerfront"
 )
@@ -286,6 +287,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	datastoreDBs := fs.Bool("datastore-databases", false, "record the named Datastore databases calls name, for a project's purge")
 	// The cluster Service the front serves, which pods dial it by (#1587).
 	service := fs.String("service", "", "the cluster Service the front serves, such as firestore: pods dial it by that name, which the Host check passes")
+	// Organization policies (#1890): where the host's Resource Manager
+	// answers them, for Firestore's databases and Spanner's instances.
+	resourceManager := fs.String("resourcemanager", "", "http://host:port of the host's Resource Manager, which the Firestore Admin API and the Spanner front ask for organization policies (what `up` passes, #1890)")
 	queries := fs.String("queries", "", "answer the query RPCs the emulator does not serve: datastore (RunAggregationQuery) or firestore (PartitionQuery)")
 	if err := fs.Parse(args); err != nil {
 		return ErrUsage
@@ -303,6 +307,10 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return ErrUsage
 	}
 	logger := log.New(stdout, "", log.LstdFlags|log.LUTC)
+	if *resourceManager != "" {
+		orgpolicy.Use(orgpolicy.Remote{Base: *resourceManager})
+		defer orgpolicy.Use(nil)
+	}
 	ring := &calllog.Ring{}
 	pairs := [][2]string{{*listen, *upstream}}
 	if *restListen != "" {

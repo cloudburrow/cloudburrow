@@ -83,6 +83,8 @@ func (p projectIAMProvider) StudioCall(ctx context.Context, project, call string
 		return p.pagePolicy(ctx, project)
 	case "roles":
 		return p.pageRoles(project)
+	case "deny-list", "deny-get", "deny-create", "deny-update", "deny-delete":
+		return p.denyCall(project, call, body)
 	case "troubleshoot", "analyze", "enforcement":
 		return p.analysisCall(ctx, project, call, body)
 	case "change":

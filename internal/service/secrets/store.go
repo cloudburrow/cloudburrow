@@ -12,6 +12,7 @@
 package secrets
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -27,6 +28,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
+	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"github.com/cloudburrow/cloudburrow/internal/sched"
 	"github.com/cloudburrow/cloudburrow/internal/store"
@@ -436,6 +438,18 @@ func (s *Store) CreateSecretEncrypted(project, id string, labels, annotations ma
 	if err := ValidateSecretID(id); err != nil {
 		return Secret{}, err
 	}
+	// gcp.resourceLocations (#1890): a user-managed replica, or a regional
+	// secret's location, that the constraint does not allow is
+	// FAILED_PRECONDITION with the documented message.
+	{
+		proj, locs := project, locations
+		if p, l, ok := strings.Cut(project, regionalSep); ok {
+			proj, locs = p, append([]string{l}, locations...)
+		}
+		if err := orgpolicy.CheckLocations(context.Background(), "projects/"+proj, "projects/"+proj, locs...); err != nil {
+			return Secret{}, apierror.FailedPrecondition("%s", err.Error())
+		}
+	}
 	if replication == "" {
 		replication = "automatic"
 	}
@@ -674,6 +688,20 @@ func (s *Store) SetIamPolicy(project, id string, req *iampb.SetIamPolicyRequest)
 	sec, err := s.getSecret(project, id)
 	if err != nil {
 		return iampolicy.Stored{}, err
+	}
+	// iam.allowedPolicyMemberDomains (#1890).
+	var before, after []string
+	if sec.IAMPolicy != nil {
+		for _, b := range sec.IAMPolicy.Bindings {
+			before = append(before, b.Members...)
+		}
+	}
+	for _, b := range req.GetPolicy().GetBindings() {
+		after = append(after, b.GetMembers()...)
+	}
+	proj, _, _ := strings.Cut(project, regionalSep)
+	if err := orgpolicy.CheckMembers(context.Background(), "projects/"+proj, before, after); err != nil {
+		return iampolicy.Stored{}, apierror.FailedPrecondition("%s", err.Error())
 	}
 	next, err := iampolicy.SetConditional(sec.IAMPolicy, req)
 	if err != nil {

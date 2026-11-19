@@ -22,6 +22,7 @@ require (
 	cloud.google.com/go/logging v1.20.0
 	cloud.google.com/go/longrunning v1.5.0
 	cloud.google.com/go/memorystore v1.7.0
+	cloud.google.com/go/orgpolicy v1.22.1
 	cloud.google.com/go/pubsub/v2 v2.7.0
 	cloud.google.com/go/resourcemanager v1.17.0
 	cloud.google.com/go/run v1.25.0
