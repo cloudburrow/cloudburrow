@@ -263,6 +263,13 @@ type Front struct {
 	// grpcOptions are extra options for the gRPC server (tests: a stats
 	// handler).
 	grpcOptions []grpc.ServerOption
+
+	// exp delivers export subscriptions and checks CMEK topics (export.go,
+	// #1874).
+	exp exporter
+	// revisionTimes are the creation times the front gave schema
+	// revisions the emulator answers with none (schematime.go, #1874).
+	revisionTimes map[string]*timestamppb.Timestamp
 }
 
 // subscriptionAdmin is the part of the emulator's Subscriber service a sweep
@@ -951,6 +958,11 @@ func (o *observed) request(fr frame) (frame, error) {
 			return fr, nil
 		}
 		o.resource = r.GetTopic().GetName()
+		if masks(r.GetUpdateMask().GetPaths(), "kms_key_name") {
+			if err := o.f.checkTopicKey(context.Background(), r.GetTopic()); err != nil {
+				return nil, err
+			}
+		}
 		plan, err := o.f.planTopicSchemaUpdate(&r)
 		if err != nil {
 			return nil, err
@@ -975,6 +987,9 @@ func (o *observed) request(fr frame) (frame, error) {
 			if err := CheckLabels(t.GetLabels()); err != nil {
 				return nil, err
 			}
+			if err := o.f.checkTopicKey(context.Background(), &t); err != nil {
+				return nil, err
+			}
 			ss, err := o.f.takeTopicSchema(&t)
 			if err != nil {
 				return nil, err
@@ -989,6 +1004,9 @@ func (o *observed) request(fr frame) (frame, error) {
 		var r pubsubpb.PublishRequest
 		if proto.Unmarshal(fr, &r) == nil {
 			if err := o.f.checkPublish(r.GetTopic(), r.GetMessages()); err != nil {
+				return nil, err
+			}
+			if err := o.f.checkKeyEnabled(context.Background(), o.f.topicKey(r.GetTopic())); err != nil {
 				return nil, err
 			}
 		}
@@ -1036,8 +1054,14 @@ func (o *observed) request(fr frame) (frame, error) {
 		if err := CheckLabels(s.GetLabels()); err != nil {
 			return nil, err
 		}
+		if err := o.f.checkExport(context.Background(), &s); err != nil {
+			return nil, err
+		}
 		o.sub = s.GetName()
 		changed := o.f.toRelay(&s)
+		if withStorageDefaults(&s) {
+			changed = true
+		}
 		if s.ExpirationPolicy == nil {
 			s.ExpirationPolicy = &pubsubpb.ExpirationPolicy{Ttl: durationpb.New(DefaultTTL)}
 			changed = true
@@ -1099,6 +1123,9 @@ func (o *observed) request(fr frame) (frame, error) {
 	case "StreamingPull":
 		var r pubsubpb.StreamingPullRequest
 		if err := proto.Unmarshal(fr, &r); err == nil && r.GetSubscription() != "" {
+			if err := o.f.checkKeyEnabled(context.Background(), o.f.subscriptionKey(r.GetSubscription())); err != nil {
+				return nil, err
+			}
 			o.sub = r.GetSubscription()
 			o.streaming = true
 			o.f.stream(o.sub, +1)
@@ -1112,6 +1139,11 @@ func (o *observed) request(fr frame) (frame, error) {
 		return fr, nil
 	default:
 		o.sub = subscriptionOf(o.method[len(subscriber):], fr)
+		if o.method == subscriber+"Pull" {
+			if err := o.f.checkKeyEnabled(context.Background(), o.f.subscriptionKey(o.sub)); err != nil {
+				return nil, err
+			}
+		}
 		if o.method == subscriber+"CreateSnapshot" {
 			var r pubsubpb.CreateSnapshotRequest
 			if proto.Unmarshal(fr, &r) == nil {
@@ -1247,7 +1279,13 @@ func (f *Front) checkUpdate(ctx context.Context, r *pubsubpb.UpdateSubscriptionR
 	if masks(paths, "bigtable_config") {
 		next.BigtableConfig = u.GetBigtableConfig()
 	}
-	return checkExactlyOnce(next)
+	if err := checkExactlyOnce(next); err != nil {
+		return err
+	}
+	if masks(paths, "bigquery_config") || masks(paths, "cloud_storage_config") {
+		return f.checkExport(ctx, next)
+	}
+	return nil
 }
 
 // checkModifyPush refuses a push endpoint for a subscription with
@@ -1267,6 +1305,9 @@ func (f *Front) checkModifyPush(ctx context.Context, sub string, p *pubsubpb.Pus
 // every subscription names its real push endpoint, never the relay's, and
 // the expiration policy an update set (#891), never the emulator's.
 func (o *observed) response(fr frame) frame {
+	if strings.HasPrefix(o.method, schemaService) {
+		return o.f.schemaResponse(o.method, fr)
+	}
 	if strings.HasPrefix(o.method, publisher) {
 		return o.topicResponse(fr)
 	}
@@ -1280,6 +1321,7 @@ func (o *observed) response(fr frame) frame {
 			return fr
 		}
 		changed := o.f.fromRelay(&s)
+		changed = o.f.withExportState(&s) || changed
 		if m == "CreateSubscription" {
 			// A new subscription: its policy and labels are the ones it was
 			// created with, which the emulator keeps.
@@ -1304,6 +1346,7 @@ func (o *observed) response(fr frame) frame {
 		changed := o.f.withDetached(o.project, &l)
 		for _, s := range l.GetSubscriptions() {
 			changed = o.f.fromRelay(s) || changed
+			changed = o.f.withExportState(s) || changed
 			changed = o.f.withPolicy(s) || changed
 			changed = o.f.withLabels(s.GetName(), &s.Labels) || changed
 		}

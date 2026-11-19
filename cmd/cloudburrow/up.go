@@ -172,6 +172,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		comps.SetResourceManager(fmt.Sprintf("%s.%s.svc.cluster.local:%d", ClusterHostService, cfg.Cluster.Namespace,
 			cfg.Endpoints.ResourceManager))
 	}
+	if serviceEnabled(cfg, config.ServicePubSub) && serviceEnabled(cfg, config.ServiceKMS) && cfg.Endpoints.KMS > 0 {
+		// The Pub/Sub front checks CMEK topics' keys against Cloud KMS,
+		// through cloudburrow-host (#1874).
+		comps.SetKMS(fmt.Sprintf("%s.%s.svc.cluster.local:%d", ClusterHostService, cfg.Cluster.Namespace,
+			cfg.Endpoints.KMS))
+	}
 	if serviceEnabled(cfg, config.ServiceStorage) && cfg.Endpoints.Metadata > 0 {
 		// Cloud Storage verifies a URL an IAM service account signed
 		// (signBlob, or a user-managed key file) against the account's
@@ -817,7 +823,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// Storage, the metadata server, whose service account certificates
 	// verify the URLs those accounts sign (#1787).
 	runEnabled := serviceEnabled(cfg, config.ServiceRun)
-	if runEnabled || serviceEnabled(cfg, config.ServiceBigQuery) || serviceEnabled(cfg, config.ServiceStorage) {
+	pubsubKMS := serviceEnabled(cfg, config.ServicePubSub) && serviceEnabled(cfg, config.ServiceKMS)
+	if runEnabled || serviceEnabled(cfg, config.ServiceBigQuery) || serviceEnabled(cfg, config.ServiceStorage) || pubsubKMS {
 		// The Cloud SQL Admin API and its connector are published for Cloud
 		// SQL volumes (#1346): the Auth Proxy a revision runs reaches both.
 		published := map[string]bool{"run": true, "tasks": true, "secretmanager": true, "kms": true,
@@ -829,6 +836,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			// from the metadata server (#1787).
 			if serviceEnabled(cfg, config.ServiceStorage) {
 				published["metadata"] = true
+			}
+			// The Pub/Sub front reads CMEK topics' keys (#1874).
+			if pubsubKMS {
+				published["kms"] = true
 			}
 		}
 		hostComp = newClusterHost(cfg, stdout, func() map[string]string {

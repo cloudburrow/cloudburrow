@@ -27,6 +27,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	stateFile := fs.String("state-file", "", "file the front keeps the expiration policies and labels updates set, its clock and "+
 		"each subscription's activity in, and the emulator's definitions it creates again after an emulator restart (#1608), "+
 		"restored when it starts (#898); empty: kept in memory only")
+	bigquery := fs.String("bigquery", "", "base URL of the instance's BigQuery, which BigQuery subscriptions write to (#1874); empty: not served")
+	storage := fs.String("storage", "", "base URL of the instance's Cloud Storage, which Cloud Storage subscriptions write to (#1874); empty: not served")
+	kms := fs.String("kms", "", "base URL of the instance's Cloud KMS, which CMEK topics' keys are checked against (#1874); empty: not served")
 	if err := fs.Parse(args); err != nil {
 		return ErrUsage
 	}
@@ -40,6 +43,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	defer f.Close()
+	f.UseExports(*bigquery, *storage, *kms)
+	go f.RunExports(ctx)
 	if *stateFile != "" {
 		if err := f.KeepState(*stateFile); err != nil {
 			return err

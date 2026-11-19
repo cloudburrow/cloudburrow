@@ -139,7 +139,8 @@ func (f *Front) rewriteJSON(sub json.RawMessage) (json.RawMessage, bool) {
 	a, relayed := f.fromRelayJSON(sub)
 	b, kept := f.withPolicyJSON(a)
 	c, labelled := f.withLabelsJSON(b)
-	return c, relayed || kept || labelled
+	d, stated := f.withExportStateJSON(c)
+	return d, relayed || kept || labelled || stated
 }
 
 // answersSubscriptions reports whether the emulator's answer to r is a

@@ -51,6 +51,9 @@ type LifecycleComponent struct {
 	// from (#1392), and the storage server a project's and a folder's
 	// parents (#1532), or "".
 	resourceManager string
+	// kms is Cloud KMS's in-cluster address, through cloudburrow-host,
+	// or "" (#1874).
+	kms string
 	// onnxRunner is the ONNX runner's in-cluster address (host:port),
 	// which BigQuery's front runs imported ONNX models on (#1711), or "".
 	onnxRunner string
@@ -106,6 +109,10 @@ type EarlierStorage interface {
 // SetEarlierStorage records the migration of an earlier release's Cloud
 // Storage (#1606). It runs only in persistent mode, with storage enabled.
 func (c *LifecycleComponent) SetEarlierStorage(m EarlierStorage) { c.earlierStorage = m }
+
+// SetKMS records Cloud KMS's in-cluster address, for the Pub/Sub front's
+// CMEK topics (#1874).
+func (c *LifecycleComponent) SetKMS(addr string) { c.kms = addr }
 
 // SetResourceManager records Resource Manager's in-cluster address, for
 // BigQuery's front (#1392) and the storage server (#1532).
@@ -205,7 +212,22 @@ func (c *LifecycleComponent) Backends() []Backend {
 	for _, s := range c.services {
 		switch s {
 		case config.ServicePubSub:
-			out = append(out, PubSubBackend("cloudburrow", c.storageImage))
+			b := PubSubBackend("cloudburrow", c.storageImage)
+			// Export subscriptions write to the instance's BigQuery and
+			// Cloud Storage, and CMEK topics' keys are the instance's
+			// Cloud KMS's, through cloudburrow-host (#1874).
+			args := append([]string{}, b.Front.Args...)
+			if c.enabled(config.ServiceBigQuery) {
+				args = append(args, "--bigquery", "http://"+InClusterBigQueryHost(c.installer.Namespace))
+			}
+			if c.enabled(config.ServiceStorage) {
+				args = append(args, "--storage", "http://"+InClusterBuiltinStorageHost(c.installer.Namespace))
+			}
+			if c.kms != "" {
+				args = append(args, "--kms", "http://"+c.kms)
+			}
+			b.Front.Args = args
+			out = append(out, b)
 		default:
 			// The Google emulators serve any project, so the name they are
 			// started with is only a default. BigQuery's serves the one it

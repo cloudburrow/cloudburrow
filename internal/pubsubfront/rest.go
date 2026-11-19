@@ -222,6 +222,10 @@ func (f *Front) restCreate(w http.ResponseWriter, r *http.Request, name string, 
 			writeRESTError(w, err)
 			return
 		}
+		if err := f.checkExport(r.Context(), &s); err != nil {
+			writeRESTError(w, err)
+			return
+		}
 		if s.ExpirationPolicy == nil {
 			if b, err := withDefaultPolicy(body); err == nil {
 				body = b
