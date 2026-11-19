@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/chromedp/chromedp"
 )
@@ -81,7 +82,8 @@ func TestLoggingSinkRowsAndExclusionRows(t *testing.T) {
 // Actions menu has Create log alert, disabled because Cloud Monitoring is
 // not served, and Highlight in results, which marks the text; Preferences
 // has Manage summary fields, whose field is drawn as a chip; the query
-// editor suggests the field names the entries carry; an entry can be
+// editor suggests the field names the local entries carry, and their
+// values; an entry can be
 // pinned, which puts it on the Timeline; and the Timeline's drag handles
 // narrow the range and Run.
 func TestLoggingExplorerRound2(t *testing.T) {
@@ -92,14 +94,19 @@ func TestLoggingExplorerRound2(t *testing.T) {
 	}
 	project := uniqueProject(t)
 	b, _ := json.Marshal(map[string]any{"logName": "projects/" + project + "/logs/app", "resource": map[string]string{"type": "global"},
-		"entries": []map[string]any{{"severity": "ERROR", "jsonPayload": map[string]string{"method": "GET", "message": "round2-hello"}}}})
+		"entries": []map[string]any{{"severity": "ERROR", "jsonPayload": map[string]string{"method": "GET", "message": "round2-hello"}},
+			// Ten minutes earlier, so the Timeline has columns between
+			// its handles.
+			{"severity": "INFO", "textPayload": "round2-earlier", "timestamp": time.Now().Add(-10 * time.Minute).UTC().Format(time.RFC3339)}}})
 	if code, out := do(t, http.MethodPost, "http://"+logAddr+"/v2/entries:write", string(b), ""); code != http.StatusOK {
 		t.Fatalf("entries:write = %d: %s", code, out)
 	}
 	p := open(t)
-	p.eval(`localStorage.removeItem("cloudburrow.logs.summary"), true`, nil)
 	p.navigate("/logs?project=" + project)
-	p.waitFor(`document.querySelector("#view tr.log-entry") !== null`)
+	p.eval(`localStorage.removeItem("cloudburrow.logs.summary"), true`, nil)
+	// The project's entries alone, so the one written is among those shown.
+	p.navigate("/logs?scope=project&project=" + project)
+	p.waitFor(`[...document.querySelectorAll("#view tr.log-entry td.log-summary")].some((td) => td.textContent.includes("round2-hello"))`)
 
 	p.run(chromedp.Click(chromedp.CSS(`button[aria-label="Actions"]`)))
 	var alert bool
@@ -116,15 +123,15 @@ func TestLoggingExplorerRound2(t *testing.T) {
 	p.run(chromedp.Click(chromedp.CSS(`button[aria-label="Preferences"]`)))
 	p.clickText(`.overflow-menu:not([hidden]) [role="menuitem"]`, "Manage summary fields")
 	p.waitFor(`document.querySelector("#log-summary-input") !== null`)
-	setField(p, ".modal", "log-summary-input", "jsonPayload.method")
+	setField(p, ".modal", "log-summary-input", "resource.labels.project_id")
 	p.clickText(".modal button", "Add")
 	p.clickText(".modal button", "Apply")
-	p.waitFor(`[...document.querySelectorAll("#view .log-summary-chip")].some((c) => c.textContent === "GET")`)
+	p.waitFor(fmt.Sprintf(`[...document.querySelectorAll("#view .log-summary-chip")].some((c) => c.textContent === %q)`, project))
 
-	p.eval(`(() => { const q = document.querySelector("#log-query"); q.focus(); q.value = "jsonPayload.me"; q.setSelectionRange(14, 14); q.dispatchEvent(new Event("input")); return true; })()`, nil)
-	p.waitFor(`[...document.querySelectorAll("#log-query-suggestions li")].some((li) => li.textContent === "jsonPayload.method")`)
-	p.eval(`(() => { const q = document.querySelector("#log-query"); q.value = "jsonPayload.method="; q.setSelectionRange(19, 19); q.dispatchEvent(new Event("input")); return true; })()`, nil)
-	p.waitFor(`[...document.querySelectorAll("#log-query-suggestions li")].some((li) => li.textContent === "GET")`)
+	p.eval(`(() => { const q = document.querySelector("#log-query"); q.focus(); q.value = "resource.ty"; q.setSelectionRange(11, 11); q.dispatchEvent(new Event("input")); return true; })()`, nil)
+	p.waitFor(`[...document.querySelectorAll("#log-query-suggestions li")].some((li) => li.textContent === "resource.type")`)
+	p.eval(`(() => { const q = document.querySelector("#log-query"); q.value = "severity="; q.setSelectionRange(9, 9); q.dispatchEvent(new Event("input")); return true; })()`, nil)
+	p.waitFor(`[...document.querySelectorAll("#log-query-suggestions li")].some((li) => li.textContent === "ERROR")`)
 	p.eval(`(() => { const q = document.querySelector("#log-query"); q.value = ""; q.dispatchEvent(new Event("input")); return true; })()`, nil)
 
 	p.eval(`document.querySelector("#view tr.log-entry .log-pin").click(), true`, nil)
@@ -148,20 +155,24 @@ func TestLoggingAdminLogAnalytics(t *testing.T) {
 	if project == "" {
 		t.Skip("CLOUDBURROW_TEST_BIGQUERY_PROJECT is not set: the linked dataset is in the project BigQuery serves")
 	}
-	bucket := "projects/" + project + "/locations/global/buckets/analytics-b"
-	create, _ := json.Marshal(map[string]string{"name": "analytics-b", "location": "global", "retention": "30", "analytics": "true",
-		"link": "true", "linkId": "analytics_b"})
+	// A name of its own each run: a deleted bucket's ID stays taken
+	// while it is pending deletion, as on Google.
+	id := fmt.Sprintf("analytics-%d", time.Now().UnixNano()%1_000_000_000)
+	link := strings.ReplaceAll(id, "-", "_")
+	bucket := "projects/" + project + "/locations/global/buckets/" + id
+	create, _ := json.Marshal(map[string]string{"name": id, "location": "global", "retention": "30", "analytics": "true",
+		"link": "true", "linkId": link})
 	if code, out := consoleDo(t, http.MethodPost, "/api/resources/logging-buckets?project="+project, string(create)); code != http.StatusOK && code != http.StatusCreated {
 		t.Fatalf("create the bucket = %d %s", code, out)
 	}
 	t.Cleanup(func() {
-		b, _ := json.Marshal(map[string]any{"Path": []string{bucket}, "Action": "delete-link", "Values": map[string]string{"linkId": "analytics_b"}})
+		b, _ := json.Marshal(map[string]any{"Path": []string{bucket}, "Action": "delete-link", "Values": map[string]string{"linkId": link}})
 		consoleDo(t, http.MethodPost, "/api/actions/logging-buckets?project="+project, string(b))
 		consoleDo(t, http.MethodDelete, "/api/resources/logging-buckets?project="+project+"&name="+url.QueryEscape(bucket), "")
 	})
 	p := open(t)
 	p.navigate("/logs/analytics?project=" + project)
-	ref := project + ".global.analytics-b._AllLogs"
+	ref := project + ".global." + id + "._AllLogs"
 	p.waitFor(fmt.Sprintf(`[...document.querySelectorAll(".log-view-list button")].some((b) => b.textContent === %q)`, ref))
 	p.clickText(".log-view-list button", ref)
 	var q string

@@ -6664,7 +6664,9 @@ async function renderLogAnalytics(view, match) {
       () => renderLogAnalytics(view, match)));
   }
   const views = data.items || [];
-  const pane = queryPane(route, [], caps.query, () => {});
+  // The query route asks for a resource: the page's is the project's log
+  // views, which the statement itself names.
+  const pane = queryPane(route, ["log-views"], caps.query, () => {});
   const editor = pane.querySelector("textarea.query-editor");
   editor.setAttribute("aria-label", "Query");
   const run = [...pane.querySelectorAll("button")].find((b) => b.textContent === "Run");

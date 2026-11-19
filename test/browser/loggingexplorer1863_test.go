@@ -134,11 +134,13 @@ func TestLoggingExplorerAsGoogleLaysItOut(t *testing.T) {
 	// filter.
 	setQuery("severity>=ERROR")
 	p.waitFor(shown("q-error"))
-	p.eval(`document.querySelector(".log-results-head .overflow-trigger").click(), true`, nil)
+	p.eval(`document.querySelector('.log-results-head [aria-label="Actions"]').click(), true`, nil)
 	var items []string
-	p.eval(`[...document.querySelectorAll(".log-results-head .overflow-item")].map((b) => b.textContent)`, &items)
-	if strings.Join(items, "|") != "Create metric|Create sink|Download" {
-		t.Errorf("the query's Actions are %q, want Create metric, Create sink, Download", items)
+	p.eval(`[...document.querySelector('.log-results-head [aria-label="Actions"]').closest(".overflow").querySelectorAll(".overflow-item")].map((b) => b.textContent)`, &items)
+	// Round 2 (#1863): Create log alert (disabled without Cloud
+	// Monitoring) and Highlight in results, in Google's menu.
+	if strings.Join(items, "|") != "Create metric|Create sink|Create log alert|Highlight in results|Download" {
+		t.Errorf("the query's Actions are %q, want Create metric, Create sink, Create log alert, Highlight in results, Download", items)
 	}
 	p.clickText(".log-results-head .overflow-item", "Create metric")
 	p.waitFor(`location.pathname === "/logs/metrics/create" && document.querySelector("#f-filter") !== null`)
