@@ -439,6 +439,9 @@ func (md bqModel) resource(full bool) map[string]any {
 		}
 		metrics = map[string]any{"clusteringMetrics": map[string]any{"daviesBouldinIndex": num("davies_bouldin_index"),
 			"meanSquaredDistance": num("mean_squared_distance"), "clusters": clusters}}
+	case "TRANSFORM_ONLY":
+		// No label, options or metrics but the model type (modeltransformonly.go, #1929).
+		opts = map[string]any{}
 	case "PCA":
 		var lc []map[string]any
 		for k := range t.Components {
@@ -746,7 +749,6 @@ var unsupportedModelTypes = map[string]string{
 	// opt-in `-tags onnx` build (modelonnx.go), and an XGBoost one on
 	// internal/xgbmodel (modelxgb.go) (#1711).
 	"CONTRIBUTION_ANALYSIS": "its analysis is Google's",
-	"TRANSFORM_ONLY":        "a model of a TRANSFORM alone is not carried out; CloudBurrow applies a TRANSFORM as part of a model it trains",
 }
 
 // refusedModelType is the 501 of a model type CloudBurrow refuses.
@@ -876,6 +878,12 @@ func parseModelDDL(stmt []token, sql string) (d modelDDL, isModel bool, code int
 	}
 	if c, m := checkModelOptions(d.opts); c != 0 {
 		return d, true, c, m
+	}
+	if d.opts.ModelType == "TRANSFORM_ONLY" && len(d.transform) == 0 {
+		// "TRANSFORM (select_list) OPTIONS(MODEL_TYPE = 'TRANSFORM_ONLY')"
+		// (bigqueryml-syntax-create-transform): the clause is not optional
+		// (the text is UNVERIFIED, 2026-11-19).
+		return d, true, 400, "A TRANSFORM_ONLY model requires a TRANSFORM clause"
 	}
 	if d.opts.ModelType == "MATRIX_FACTORIZATION" {
 		applyMFDefaults(&d.opts)
@@ -1505,13 +1513,10 @@ func parseModelOptions(toks []token, o *mlOptions) (int, string) {
 			}
 			s = strings.ToUpper(s)
 			switch s {
-			case "ONE_HOT_ENCODING", "LABEL_ENCODING":
-				// LABEL_ENCODING is checked against the model type
-				// once every option is read (checkModelOptions).
+			case "ONE_HOT_ENCODING", "LABEL_ENCODING", "DUMMY_ENCODING", "TARGET_ENCODING":
+				// Each is checked against the model type once every
+				// option is read (checkModelOptions).
 				o.CategoryEncoding = s
-			case "DUMMY_ENCODING", "TARGET_ENCODING":
-				return 501, "Not implemented here: category_encoding_method " + s + "; CloudBurrow carries out ONE_HOT_ENCODING, and " +
-					"LABEL_ENCODING for a boosted tree model. Nothing was run."
 			default:
 				return bad()
 			}
@@ -1565,6 +1570,10 @@ var modelTypeOptions = map[string][]string{
 		"category_encoding_method", "enable_global_explain", "calculate_p_values", "warm_start"},
 	"KMEANS": {"num_clusters", "kmeans_init_method", "kmeans_init_col", "distance_type", "standardize_features", "max_iterations",
 		"early_stop", "min_rel_progress", "warm_start"},
+
+	// modeltransformonly.go, #1929: model_type alone.
+	"TRANSFORM_ONLY": {},
+
 	"PCA": {"num_principal_components", "pca_explained_variance_ratio", "scale_features", "pca_solver"},
 	"BOOSTED_TREE_REGRESSOR": {"input_label_cols", "max_iterations", "learn_rate", "l1_reg", "l2_reg", "early_stop", "min_rel_progress",
 		"data_split_method", "data_split_eval_fraction", "data_split_col", "category_encoding_method", "enable_global_explain", "max_tree_depth",
@@ -1645,6 +1654,13 @@ func checkModelOptions(o mlOptions) (int, string) {
 		// "Label encoding is supported by boosted tree models"
 		// (https://docs.cloud.google.com/bigquery/docs/auto-preprocessing).
 		return 400, "category_encoding_method LABEL_ENCODING is not supported for model type " + o.ModelType
+	}
+	// "Dummy encoding is supported by linear and logistic regression
+	// models"; "Target encoding is supported by boosted tree models"
+	// (bigqueryml-auto-preprocessing, #1929).
+	if o.CategoryEncoding == "DUMMY_ENCODING" && o.ModelType != "LINEAR_REG" && o.ModelType != "LOGISTIC_REG" ||
+		o.CategoryEncoding == "TARGET_ENCODING" && !isBoostedTree(o.ModelType) {
+		return 400, "category_encoding_method " + o.CategoryEncoding + " is not supported for model type " + o.ModelType
 	}
 	switch o.ModelType {
 	case "KMEANS":
@@ -1868,6 +1884,14 @@ func (f front) modelStatements(w http.ResponseWriter, r *http.Request, q queryOp
 				Location: loc, Options: d.opts, TFLite: imp})
 		}
 	default:
+		// ML.TRANSFORM of a model in the training query, as Google's
+		// TRANSFORM_ONLY example trains on (modeltransformonly.go, #1929).
+		if text, c, m := f.expandMLTransform(r, q, d.query); c != 0 {
+			fail(c, m)
+			return true
+		} else {
+			d.query = text
+		}
 		trainSQL := d.query
 		var transformSQL []string
 		var queryCols []mlColumn

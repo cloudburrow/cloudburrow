@@ -169,6 +169,16 @@ type mlFeature struct {
 	// LabelEncoded is a categorical feature of a tree model label encoded
 	// (LABEL_ENCODING, labelEncode): one column, the category's index.
 	LabelEncoded bool `json:"labelEncoded,omitempty"`
+	// Dropped is a DUMMY_ENCODING feature's dropped category, its index in
+	// Categories plus 1 (0 none): its column is always 0 and its weight
+	// 0.0 (modelencoding.go, #1929).
+	Dropped int `json:"dropped,omitempty"`
+	// TargetEncoded is a TARGET_ENCODING feature: one column, Targets'
+	// value of its category, TargetPrior for NULL or a category training
+	// did not see (modelencoding.go, #1929).
+	TargetEncoded bool      `json:"targetEncoded,omitempty"`
+	Targets       []float64 `json:"targets,omitempty"`
+	TargetPrior   float64   `json:"targetPrior,omitempty"`
 	// Weight is a numeric feature's weight on its standardized value;
 	// CategoryWeights a categorical one's, by category, the NULL
 	// category's last when NullSeen.
@@ -186,7 +196,7 @@ func (ft mlFeature) numeric() bool {
 
 // dims is how many encoded columns the feature has.
 func (ft mlFeature) dims() int {
-	if ft.numeric() || ft.LabelEncoded {
+	if ft.numeric() || ft.LabelEncoded || ft.TargetEncoded {
 		return 1
 	}
 	n := len(ft.Categories)
@@ -264,6 +274,9 @@ type mlTrained struct {
 	// Xreg is an ARIMA_PLUS_XREG model's regression on its features
 	// (modelxreg.go, #1766); its ARIMA is Arima.
 	Xreg *xregTrained `json:"xreg,omitempty"`
+	// Anomaly is a KMEANS, PCA or AUTOENCODER model's training rows' metrics
+	// for ML.DETECT_ANOMALIES (modelanomaly.go, #1929).
+	Anomaly *anomalyBaseline `json:"anomaly,omitempty"`
 }
 
 // multiclass reports whether t is a multiclass logistic model.
@@ -313,18 +326,31 @@ func mlUnimplemented(format string, a ...any) *mlFail {
 // of a RANDOM split.
 func trainModel(opts mlOptions, cols []mlColumn, rows [][]*string, fp fingerprinter) (mlTrained, *mlFail) {
 	switch opts.ModelType {
-	case "KMEANS":
-		return trainKMeans(opts, cols, rows)
-	case "PCA":
-		return trainPCA(opts, cols, rows)
+	case "KMEANS", "PCA", "AUTOENCODER":
+		train := map[string]func(mlOptions, []mlColumn, [][]*string) (mlTrained, *mlFail){"KMEANS": trainKMeans, "PCA": trainPCA,
+			"AUTOENCODER": trainAutoencoder}[opts.ModelType]
+		t, fe := train(opts, cols, rows)
+		if fe == nil {
+			// ML.DETECT_ANOMALIES' training metrics (modelanomaly.go, #1929).
+			X := make([][]float64, len(rows))
+			for i, row := range rows {
+				vals := map[string]*string{}
+				for j, c := range cols {
+					vals[strings.ToLower(c.Name)] = row[j]
+				}
+				X[i] = t.encodeRow(vals)[1:]
+			}
+			t.setAnomalyBaseline(opts.ModelType, X)
+		}
+		return t, fe
 	case "MATRIX_FACTORIZATION":
 		return trainMF(opts, cols, rows)
 	case "ARIMA_PLUS":
 		return trainArima(opts, cols, rows)
 	case "ARIMA_PLUS_XREG":
 		return trainXreg(opts, cols, rows)
-	case "AUTOENCODER":
-		return trainAutoencoder(opts, cols, rows)
+	case "TRANSFORM_ONLY":
+		return trainTransformOnly(cols, rows) // modeltransformonly.go, #1929
 	case "AUTOML_REGRESSOR", "AUTOML_CLASSIFIER":
 		return trainAutoML(opts, cols, rows, fp) // modelautoml.go, #1776
 	}
@@ -368,7 +394,8 @@ func trainModel(opts mlOptions, cols []mlColumn, rows [][]*string, fp fingerprin
 				"STRING and BOOL features only", c.Name, c.Type)
 		}
 		ft := mlFeature{Name: c.Name, Type: ty}
-		ft.LabelEncoded = !ft.numeric() && isTreeModel(opts.ModelType) && opts.CategoryEncoding != "ONE_HOT_ENCODING"
+		ft.LabelEncoded = !ft.numeric() && isTreeModel(opts.ModelType) && opts.CategoryEncoding != "ONE_HOT_ENCODING" &&
+			opts.CategoryEncoding != "TARGET_ENCODING"
 		t.Features = append(t.Features, ft)
 		fidx = append(fidx, i)
 	}
@@ -473,6 +500,9 @@ func trainModel(opts mlOptions, cols []mlColumn, rows [][]*string, fp fingerprin
 	if fe := learnFeatures(t.Features, fidx, kept, train); fe != nil {
 		return t, fe
 	}
+	if fe := learnEncoding(opts, &t, fidx, kept, train, y); fe != nil { // modelencoding.go, #1929
+		return t, fe
+	}
 	encode := func(i int) []float64 {
 		x := []float64{1}
 		for k, ft := range t.Features {
@@ -562,8 +592,10 @@ func trainModel(opts mlOptions, cols []mlColumn, rows [][]*string, fp fingerprin
 	if multi {
 		for k := 0; k < K; k++ {
 			t.ClassWeights = append(t.ClassWeights, append([]float64(nil), w[k*dim:(k+1)*dim]...))
+			dropDummies(t.Features, t.ClassWeights[k])
 		}
 	} else {
+		dropDummies(t.Features, w)
 		t.Intercept = w[0]
 		j := 1
 		for k := range t.Features {
@@ -911,6 +943,9 @@ func encodeFeatureMode(ft mlFeature, v *string, scaling string) []float64 {
 	if ft.LabelEncoded {
 		return []float64{float64(labelEncode(ft, v))}
 	}
+	if ft.TargetEncoded {
+		return []float64{targetEncode(ft, v)}
+	}
 	out := make([]float64, ft.dims())
 	if v == nil {
 		if ft.NullSeen {
@@ -920,6 +955,9 @@ func encodeFeatureMode(ft mlFeature, v *string, scaling string) []float64 {
 	}
 	if i := sort.SearchStrings(ft.Categories, *v); i < len(ft.Categories) && ft.Categories[i] == *v {
 		out[i] = 1
+	}
+	if ft.Dropped > 0 {
+		out[ft.Dropped-1] = 0
 	}
 	return out
 }
