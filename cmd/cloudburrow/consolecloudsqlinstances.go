@@ -86,7 +86,7 @@ func (p cloudSQLInstancesProvider) List(ctx context.Context, project string) (co
 func (p cloudSQLInstancesProvider) CreateForm() (string, []console.Field) {
 	def := ""
 	for _, v := range p.versions {
-		if def == "" || v == "POSTGRES_17" {
+		if (def == "" && v != "MYSQL_5_7") || v == "POSTGRES_17" {
 			def = v
 		}
 	}
