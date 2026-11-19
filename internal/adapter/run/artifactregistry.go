@@ -247,33 +247,53 @@ func (a *ArtifactRegistryServer) UpdateRepository(ctx context.Context, req *arpb
 			return nil, apierror.Unimplemented("update_mask path %q is not supported: only description, labels and cleanup policies can change", p)
 		}
 	}
-	repositories.mu.Lock()
-	defer repositories.mu.Unlock()
-	r, ok := repositories.repos[in.GetName()]
-	if !ok {
-		return nil, apierror.NotFound("Requested entity was not found.")
-	}
-	r = proto.Clone(r).(*arpb.Repository)
-	for _, p := range paths {
-		switch p {
-		case "description":
-			r.Description = in.GetDescription()
-		case "labels":
-			r.Labels = in.GetLabels()
-		case "cleanup_policies":
-			r.CleanupPolicies = in.GetCleanupPolicies()
-		case "cleanup_policy_dry_run":
-			r.CleanupPolicyDryRun = in.GetCleanupPolicyDryRun()
+	// The custom-constraint check runs outside repositories.mu (#1902), as
+	// CreateRepository's does: it may call the host's evaluator, which is
+	// slow and may call back into Artifact Registry (a delete of this
+	// repository deadlocked against a locked check in #1855). The update is
+	// applied only if the stored repository is still the one it was built
+	// from; one changed meanwhile is built again, one deleted is NOT_FOUND.
+	for attempt := 0; ; attempt++ {
+		repositories.mu.Lock()
+		cur, ok := repositories.repos[in.GetName()]
+		repositories.mu.Unlock()
+		if !ok {
+			return nil, apierror.NotFound("Requested entity was not found.")
+		}
+		r := proto.Clone(cur).(*arpb.Repository)
+		for _, p := range paths {
+			switch p {
+			case "description":
+				r.Description = in.GetDescription()
+			case "labels":
+				r.Labels = in.GetLabels()
+			case "cleanup_policies":
+				r.CleanupPolicies = in.GetCleanupPolicies()
+			case "cleanup_policy_dry_run":
+				r.CleanupPolicyDryRun = in.GetCleanupPolicyDryRun()
+			}
+		}
+		r.UpdateTime = timestamppb.New(time.Now())
+		if err := checkRepositoryCustom(ctx, r, orgpolicy.MethodUpdate); err != nil {
+			return nil, err
+		}
+		repositories.mu.Lock()
+		if repositories.repos[in.GetName()] == cur {
+			repositories.repos[in.GetName()] = r
+			saveRepositoriesLocked()
+			repositories.mu.Unlock()
+			return proto.Clone(r).(*arpb.Repository), nil
+		}
+		repositories.mu.Unlock()
+		if attempt == repositoryUpdateRetries {
+			return nil, apierror.Aborted("The repository was changed by another request while this one was checked against custom organization policy constraints; retry.")
 		}
 	}
-	r.UpdateTime = timestamppb.New(time.Now())
-	if err := checkRepositoryCustom(ctx, r, orgpolicy.MethodUpdate); err != nil {
-		return nil, err
-	}
-	repositories.repos[in.GetName()] = r
-	saveRepositoriesLocked()
-	return proto.Clone(r).(*arpb.Repository), nil
 }
+
+// repositoryUpdateRetries is how many times UpdateRepository builds its
+// update again after a concurrent change before it is refused ABORTED.
+const repositoryUpdateRetries = 8
 
 // DeleteRepository removes a repository, and every image its registry
 // holds, and returns its operation, already done. Images built under its

@@ -109,9 +109,9 @@ func (f *Front) serveREST(w http.ResponseWriter, r *http.Request, next http.Hand
 		return
 	}
 	if parent, name, verb, ok := schemaPath(r.URL.Path); ok {
-		// Custom constraints on a schema created or committed (#1895,
-		// custom.go).
-		if err := customRESTSchema(r, parent, name, verb); err != nil {
+		// Custom constraints on a schema created, committed or rolled
+		// back (#1895, #1902, custom.go).
+		if err := f.customRESTSchema(r, parent, name, verb); err != nil {
 			writeRESTError(w, err)
 			return
 		}

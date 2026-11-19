@@ -26,16 +26,20 @@ import (
 
 const ccAvro = `{"type":"record","name":"Order","fields":[{"name":"n","type":"int"}]}`
 
+const ccAvroLegacy = `{"type":"record","name":"Order","fields":[{"name":"legacy","type":"int"}]}`
+
 const ccProto = `syntax = "proto3"; message Order { int32 n = 1; }`
 
-// covers: google.pubsub.v1.SchemaService/CreateSchema, google.pubsub.v1.SchemaService/CommitSchema, google.pubsub.v1.Subscriber/CreateSnapshot, google.pubsub.v1.Subscriber/UpdateSnapshot
+// covers: google.pubsub.v1.SchemaService/CreateSchema, google.pubsub.v1.SchemaService/CommitSchema, google.pubsub.v1.SchemaService/RollbackSchema, google.pubsub.v1.Subscriber/CreateSnapshot, google.pubsub.v1.Subscriber/UpdateSnapshot
 //
 // TestOrgPolicyCustomConstraintsPubSubSchemasSnapshots (#1895), with the
 // official Pub/Sub clients: an ALLOW on pubsub.googleapis.com/Schema
 // (resource.type == 'AVRO', CREATE and UPDATE) refuses a Protocol Buffer
 // schema, FAILED_PRECONDITION "Operation denied by custom org policies:
 // [...]", over gRPC and REST, creates an Avro one, and refuses committing
-// a Protocol Buffer revision of it; a DENY on
+// a Protocol Buffer revision of it; a DENY on the definition (UPDATE)
+// refuses a RollbackSchema to a revision it matches, over gRPC and REST
+// (#1902); a DENY on
 // pubsub.googleapis.com/Snapshot reading resource.topic refuses a
 // snapshot of a subscription to the topic it names, and one reading
 // resource.expireTime (UPDATE) an update that brings the expiry within
@@ -84,6 +88,29 @@ func TestOrgPolicyCustomConstraintsPubSubSchemasSnapshots(t *testing.T) {
 	_, err = sc.CommitSchema(ctx, &pubsubpb.CommitSchemaRequest{Name: schema,
 		Schema: &pubsubpb.Schema{Name: schema, Type: pubsubpb.Schema_PROTOCOL_BUFFER, Definition: ccProto}})
 	wantFailedPrecondition(t, "committing a Protocol Buffer revision", err, customMessage(avro, adesc))
+
+	// RollbackSchema (#1902) is an UPDATE read on the revision it copies.
+	roll := parent + "/schemas/cc-roll"
+	first, err := sc.CreateSchema(ctx, &pubsubpb.CreateSchemaRequest{Parent: parent, SchemaId: "cc-roll",
+		Schema: &pubsubpb.Schema{Type: pubsubpb.Schema_AVRO, Definition: ccAvroLegacy}})
+	if err != nil {
+		t.Fatalf("an Avro schema with a legacy field: %v", err)
+	}
+	t.Cleanup(func() { _ = sc.DeleteSchema(context.Background(), &pubsubpb.DeleteSchemaRequest{Name: roll}) })
+	if _, err := sc.CommitSchema(ctx, &pubsubpb.CommitSchemaRequest{Name: roll,
+		Schema: &pubsubpb.Schema{Name: roll, Type: pubsubpb.Schema_AVRO, Definition: ccAvro}}); err != nil {
+		t.Fatalf("committing a revision without it: %v", err)
+	}
+	legacy := customName(h, "nolegacy")
+	ldesc := "No legacy fields."
+	createCustom(t, h, c, legacy, "pubsub.googleapis.com/Schema", "resource.definition.contains('legacy')", ccDeny, ldesc, ccUpdate)
+	setOrgPolicy(t, h, c, "projects/"+project, legacy, opEnforce())
+	_, err = sc.RollbackSchema(ctx, &pubsubpb.RollbackSchemaRequest{Name: roll, RevisionId: first.GetRevisionId()})
+	wantFailedPrecondition(t, "rolling back to the legacy revision", err, customMessage(legacy, ldesc))
+	code, out = pubsubREST(t, h, http.MethodPost, "/v1/"+roll+":rollback", `{"revisionId":"`+first.GetRevisionId()+`"}`)
+	if e, _ := out["error"].(map[string]any); code != http.StatusBadRequest || e["message"] != customMessage(legacy, ldesc) {
+		t.Errorf("REST rollback to the legacy revision = %d %v, want 400 FAILED_PRECONDITION", code, out)
+	}
 
 	// Topics and subscriptions to snapshot.
 	sub := func(topicID, subID string) string {

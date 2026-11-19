@@ -83,3 +83,8 @@ func checkCustom(ctx context.Context, name, resourceType, method string, m proto
 	}
 	return nil
 }
+
+// changedRetries is how many times an update whose resource changed
+// during its unlocked custom-constraint check (#1902) is built again
+// before it is refused ABORTED, Spanner's code for a concurrent change.
+const changedRetries = 8
