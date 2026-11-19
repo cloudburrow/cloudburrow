@@ -397,7 +397,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	// Object Browser.
 	cluster, own := d.cfg.ClusterName(), d.cfg.Cluster.Namespace
 	providers = append(providers,
-		gkeClustersProvider{name: cluster, kubeconfig: kubeconfig, own: own},
+		gkeClustersProvider{name: cluster, kubeconfig: kubeconfig, own: own, svc: d.gke, gkeDir: gkeDir(d.cfg)},
 		gkeWorkloads(kubeconfig, cluster, own),
 		podsProvider(kubeconfig, metrics, series),
 		gkeServices(kubeconfig, cluster, own),

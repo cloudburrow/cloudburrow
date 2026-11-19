@@ -51,6 +51,9 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 	config.ServiceCloudSQLMySQL: {Providers: []string{"cloudsql-mysql", "cloudsql-instances", "cloudsql-backups"}},
 	config.ServiceBackupDR:      {Providers: []string{"backupdr"}},
 	config.ServicePrivateCA:     {Providers: []string{"privateca", "privateca-templates"}},
+	// The Kubernetes Engine API (#1913): its clusters are on Kubernetes
+	// clusters, beside the instance's own.
+	config.ServiceGKE: {Providers: []string{"gkeclusters"}},
 }
 
 // clusterScreens are the registry's screens that belong to no selectable

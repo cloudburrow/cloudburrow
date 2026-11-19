@@ -69,6 +69,23 @@ type parityRow struct {
 }
 
 var parityRows = []parityRow{
+	// The Kubernetes Engine API (#1913), on the Kubernetes clusters page.
+	{Resource: "Kubernetes Engine clusters", Service: "gke",
+		Methods: []string{"ClusterManager/CreateCluster", "ClusterManager/GetCluster", "ClusterManager/ListClusters",
+			"ClusterManager/UpdateCluster", "ClusterManager/SetLabels", "ClusterManager/DeleteCluster", "ClusterManager/GetServerConfig"},
+		Provider: "gkeclusters", Offers: "Kubernetes clusters (/kubernetes/clusters): the project's Kubernetes Engine clusters beside the instance's own (location, mode, nodes, labels); Create cluster, Autopilot or Standard (name, regional or zonal location, release channel, version, network, default-pool size and machine type, a client certificate); a cluster's page with its details, Node pools and Nodes (read from the cluster); Edit (release channel, labels), Upgrade (to a newer version served, otherwise disabled with the reason) and Delete (#1913)",
+		Tests: []string{"TestGKEServedClustersOnTheConsole"}},
+	{Resource: "Kubernetes Engine node pools", Service: "gke",
+		Methods:  []string{"ClusterManager/GetNodePool", "ClusterManager/ListNodePools"},
+		Provider: "gkeclusters", Offers: "a cluster's Node pools tab: each pool's status, node count, machine type, image type and version (#1913)",
+		Tests: []string{"TestGKEServedClustersOnTheConsole"}},
+	{Resource: "Kubernetes Engine node pool changes and operations", Service: "gke",
+		Methods: []string{"ClusterManager/CreateNodePool", "ClusterManager/SetNodePoolSize", "ClusterManager/UpdateNodePool", "ClusterManager/DeleteNodePool",
+			"ClusterManager/GetOperation", "ClusterManager/ListOperations", "ClusterManager/CancelOperation"},
+		Issue: 1925},
+	{Resource: "Kubernetes Engine legacy auth and master updates", Service: "gke",
+		Methods:  []string{"ClusterManager/SetMasterAuth", "ClusterManager/UpdateMaster"},
+		Excluded: "basic authentication, which GKE removed in 1.19 (SetMasterAuth only clears it), and UpdateMaster, which is Upgrade's UpdateCluster with desired_master_version"},
 	// Secure Source Manager (#1521): served on the Run port; its console
 	// page is #1527's.
 	{Resource: "Secure Source Manager instances and repositories", Service: "securesourcemanager",

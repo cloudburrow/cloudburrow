@@ -72,6 +72,8 @@ var compatSections = map[string]string{
 	"cloudidentity": "## Cloud Identity groups — `cloudidentity.googleapis.com` v1",
 	// Certificate Authority Service (#1834), named by gRPC method.
 	"privateca": "## Certificate Authority Service — `google.cloud.security.privateca.v1`",
+	// The Kubernetes Engine API (#1913), named by gRPC method.
+	"gke": "## Kubernetes Engine API — `google.container.v1`",
 }
 
 // acceptedStatuses maps a status cell of docs/compatibility.md to the

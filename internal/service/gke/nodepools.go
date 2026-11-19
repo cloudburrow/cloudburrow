@@ -20,7 +20,7 @@ func findPool(c *containerpb.Cluster, name string) *containerpb.NodePool {
 }
 
 // autopilotRefusal: Google manages an Autopilot cluster's nodes, so its node
-// pools cannot be changed (UNVERIFIED wording).
+// pools cannot be changed (UNVERIFIED wording (docs re-read 2026-11-19: https://docs.cloud.google.com/kubernetes-engine/docs/reference/rest/v1/projects.locations.clusters)).
 func autopilotRefusal(e *entry) error {
 	if e.cluster.GetAutopilot().GetEnabled() {
 		return status.Error(codes.FailedPrecondition, "This operation is not supported on Autopilot clusters: Google manages their nodes.")

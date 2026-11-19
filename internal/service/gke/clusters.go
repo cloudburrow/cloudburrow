@@ -41,7 +41,7 @@ func zonesOf(location string) []string {
 }
 
 // checkName refuses a name outside Google's rule. The wording is
-// UNVERIFIED; the rule is the documented one.
+// UNVERIFIED (docs re-read 2026-11-19: https://docs.cloud.google.com/kubernetes-engine/docs/reference/rest/v1/projects.locations.clusters); the rule is the documented one.
 func checkName(what, name string) error {
 	if !nameRE.MatchString(name) {
 		return status.Errorf(codes.InvalidArgument,
@@ -69,7 +69,7 @@ func (s *Server) resolveVersion(field, v string) (Version, error) {
 			return sv, nil
 		}
 	}
-	// UNVERIFIED wording: Google names the version it refuses.
+	// UNVERIFIED wording (docs re-read 2026-11-19: https://docs.cloud.google.com/kubernetes-engine/docs/reference/rest/v1/projects.locations.clusters): Google names the version it refuses.
 	return Version{}, status.Errorf(codes.InvalidArgument, "%s %q is unsupported.", field, v)
 }
 
@@ -581,7 +581,7 @@ func (s *Server) SetLabels(_ context.Context, req *containerpb.SetLabelsRequest)
 		return nil, err
 	}
 	if req.GetLabelFingerprint() != e.cluster.LabelFingerprint {
-		// UNVERIFIED wording; the fingerprint check is documented.
+		// UNVERIFIED wording (docs re-read 2026-11-19: https://docs.cloud.google.com/kubernetes-engine/docs/reference/rest/v1/projects.locations.clusters); the fingerprint check is documented.
 		return nil, status.Error(codes.FailedPrecondition, "Labels could not be set due to fingerprint mismatch.")
 	}
 	labels := map[string]string{}

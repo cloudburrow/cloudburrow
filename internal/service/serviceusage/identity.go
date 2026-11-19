@@ -42,6 +42,9 @@ var serviceAgents = map[string]string{
 	// Private CA Service Account; gcloud privateca roots create --kms-key-version
 	// and --bucket call this method for it and grant it roles on the key and bucket.
 	"privateca.googleapis.com": "gcp-sa-privateca.iam.gserviceaccount.com",
+	// Kubernetes Engine Service Agent, the primary agent of
+	// container.googleapis.com.
+	"container.googleapis.com": "container-engine-robot.iam.gserviceaccount.com",
 	// External Key Management Service Service Account, Cloud KMS's primary
 	// agent, not the Cloud KMS Service Agent (gcp-sa-cloudkms, which is not
 	// primary): https://cloud.google.com/kms/docs/create-ekm-connection runs
