@@ -45,16 +45,14 @@ func (p artifactRegistryProvider) withClient(ctx context.Context, fn func(*artif
 }
 
 // The formats Google's Format list offers, in its order, and the words it
-// shows them as. Go and Kubeflow Pipelines are drawn disabled: this
-// instance serves neither (CreateRepository refuses them).
+// shows them as. Every one is served (Go and Kubeflow Pipelines since
+// #1897); a format this instance did not serve would be drawn disabled
+// with its reason in arFormatsUnavailable.
 var (
 	arFormats      = []string{"DOCKER", "MAVEN", "NPM", "PYTHON", "APT", "YUM", "KFP", "GO", "GENERIC"}
 	arFormatLabels = map[string]string{"DOCKER": "Docker", "MAVEN": "Maven", "NPM": "npm", "PYTHON": "Python",
 		"APT": "Apt", "YUM": "Yum", "KFP": "Kubeflow Pipelines", "GO": "Go", "GENERIC": "Generic"}
-	arFormatsUnavailable = map[string]string{
-		"KFP": "Not available locally: this instance serves no Kubeflow Pipelines template registry.",
-		"GO":  "Not available locally: this instance serves no Go module proxy.",
-	}
+	arFormatsUnavailable = map[string]string{}
 	arModeLabels = map[string]string{"STANDARD_REPOSITORY": "Standard", "REMOTE_REPOSITORY": "Remote", "VIRTUAL_REPOSITORY": "Virtual"}
 )
 

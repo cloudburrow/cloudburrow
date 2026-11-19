@@ -126,6 +126,7 @@ func dropFormatRepo(repoName string) {
 var servedFormats = map[arpb.Repository_Format]string{
 	arpb.Repository_DOCKER: "docker", arpb.Repository_PYTHON: "python", arpb.Repository_NPM: "npm",
 	arpb.Repository_MAVEN: "maven", arpb.Repository_GENERIC: "generic", arpb.Repository_APT: "apt", arpb.Repository_YUM: "yum",
+	arpb.Repository_GO: "go", arpb.Repository_KFP: "kfp",
 }
 
 // formatURL is a repository's registryUri: Docker's is RepositoryURL;

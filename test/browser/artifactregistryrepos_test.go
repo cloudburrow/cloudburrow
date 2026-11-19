@@ -53,7 +53,7 @@ func clickRadio(p *tab, field string, i int) {
 // the run shard, whose Run port serves Artifact Registry (#1855). The
 // product's menu is Repositories and Settings; the Repositories page has
 // Google's columns; Create Repository is Google's page, whose Format lists
-// Go and Kubeflow Pipelines disabled, whose Mode reveals each mode's
+// Go and Kubeflow Pipelines enabled (#1897), whose Mode reveals each mode's
 // settings and whose Location type switches Region for Multi-region, and a
 // Docker repository made with its labels, a customer-managed key,
 // immutable image tags and a cleanup policy in dry run reads back so
@@ -84,8 +84,8 @@ func TestCloudRunArtifactRegistryCreateAndEditRepositoryThroughThePage(t *testin
 	var off struct{ KFP, Go, Scanning bool }
 	p.eval(`(() => ({ KFP: document.querySelector("#view #f-format-6").disabled, Go: document.querySelector("#view #f-format-7").disabled,
 		Scanning: document.querySelector("#view #f-vulnerabilityScanning-0").disabled }))()`, &off)
-	if !off.KFP || !off.Go || !off.Scanning {
-		t.Errorf("Create Repository draws %+v; want Kubeflow Pipelines, Go and vulnerability scanning disabled", off)
+	if off.KFP || off.Go || !off.Scanning {
+		t.Errorf("Create Repository draws %+v; want Kubeflow Pipelines and Go enabled (#1897), vulnerability scanning disabled", off)
 	}
 	if !hidden("f-upstream") || hidden("f-location") || !hidden("f-multiRegion") || !hidden("f-kmsKey") {
 		t.Error("Create Repository shows a remote upstream, the multi-regions or the key before their choice is made")

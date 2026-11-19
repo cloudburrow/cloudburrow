@@ -173,7 +173,7 @@ func repositoryNameFilter(filter string) (func(string) bool, error) {
 
 // CreateRepository stores a repository and returns its operation, already
 // done with the repository, as Artifact Registry's completes in moments.
-// Every format but KFP and GO is served (#1531, artifactregistryformats.go);
+// Every format but RUBY is served (#1531, #1897, artifactregistryformats.go);
 // a remote repository's upstream must be one of this instance's (checkMode).
 func (a *ArtifactRegistryServer) CreateRepository(_ context.Context, req *arpb.CreateRepositoryRequest) (*longrunningpb.Operation, error) {
 	if _, _, err := resource.ParseLocation(req.GetParent()); err != nil {
@@ -187,7 +187,7 @@ func (a *ArtifactRegistryServer) CreateRepository(_ context.Context, req *arpb.C
 		r = &arpb.Repository{}
 	}
 	if _, ok := servedFormats[r.GetFormat()]; !ok {
-		return nil, apierror.Unimplemented("format %v is not supported: DOCKER, PYTHON, NPM, MAVEN, GENERIC, APT and YUM repositories are", r.GetFormat())
+		return nil, apierror.Unimplemented("format %v is not supported: DOCKER, PYTHON, NPM, MAVEN, GENERIC, APT, YUM, GO and KFP repositories are", r.GetFormat())
 	}
 	if err := checkMode(req.GetParent(), r); err != nil {
 		return nil, err
@@ -442,9 +442,9 @@ func checkMode(parent string, r *arpb.Repository) error {
 		return apierror.Unimplemented("repository mode %v is not supported", r.GetMode())
 	}
 	switch r.GetFormat() {
-	case arpb.Repository_PYTHON, arpb.Repository_NPM, arpb.Repository_MAVEN, arpb.Repository_DOCKER:
+	case arpb.Repository_PYTHON, arpb.Repository_NPM, arpb.Repository_MAVEN, arpb.Repository_DOCKER, arpb.Repository_GO:
 	default:
-		return apierror.Unimplemented("virtual %v repositories are not supported: DOCKER, PYTHON, NPM and MAVEN ones are", r.GetFormat())
+		return apierror.Unimplemented("virtual %v repositories are not supported: DOCKER, PYTHON, NPM, MAVEN and GO ones are", r.GetFormat())
 	}
 	ups := r.GetVirtualRepositoryConfig().GetUpstreamPolicies()
 	if len(ups) == 0 {
