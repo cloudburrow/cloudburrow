@@ -29,7 +29,17 @@ import (
 //   - table4.tflite: a vocabulary's HASHTABLE, HASHTABLE_FIND,
 //     HASHTABLE_SIZE, initialized by CALL_ONCE and HASHTABLE_IMPORT;
 //   - var4.tflite: VAR_HANDLE, READ_VARIABLE, ASSIGN_VARIABLE;
-//   - random4.tflite: seeded RANDOM_UNIFORM and RANDOM_STANDARD_NORMAL.
+//   - random4.tflite: seeded RANDOM_UNIFORM and RANDOM_STANDARD_NORMAL;
+//   - ops5.tflite: WHERE, UNIQUE, DYNAMIC_UPDATE_SLICE, MATRIX_SET_DIAG,
+//     REVERSE_SEQUENCE, SPARSE_TO_DENSE, BROADCAST_ARGS, L2_POOL_2D,
+//     BITWISE_XOR, RIGHT_SHIFT, FAKE_QUANT, SVDF, HASHTABLE_LOOKUP, DILATE
+//     and STABLEHLO_ADD, _MULTIPLY, _MAXIMUM, _MINIMUM, _AND, _SHIFT_LEFT,
+//     _PAD and _COMPOSITE;
+//   - ops6.tflite: BITCAST, EMBEDDING_LOOKUP_SPARSE and the
+//     TFLite_Detection_PostProcess custom operator (fast and regular NMS);
+//   - audio4.tflite: the AudioSpectrogram and Mfcc custom operators;
+//   - hlo4.tflite: STABLEHLO_GATHER, STABLEHLO_SCATTER and
+//     STABLEHLO_REDUCE_WINDOW.
 //
 // Numbers match to 1e-4 and strings exactly. Every input has a fixed
 // shape, so one row holds each whole tensor, row-major.
@@ -52,7 +62,7 @@ func TestBigQueryMLImportedTFLiteOps4(t *testing.T) {
 		}
 		return data
 	}
-	models := []string{"rnn4", "ops4", "ops5", "table4", "var4", "random4"}
+	models := []string{"rnn4", "ops4", "ops5", "ops6", "audio4", "hlo4", "table4", "var4", "random4"}
 	for _, m := range models {
 		w := bh.Object("tflo4/" + m + ".tflite").NewWriter(ctx)
 		if _, err := w.Write(read(m + ".tflite")); err != nil {
@@ -81,9 +91,9 @@ func TestBigQueryMLImportedTFLiteOps4(t *testing.T) {
 		}
 		return out
 	}
-	// The ports that are not FLOAT32: table4's tokens (STRING) and codes
-	// (INT64).
-	types := map[string]string{"tokens": "STRING", "codes": "INT64", "u": "INT64", "look": "INT64"}
+	// The ports that are not FLOAT32: table4's tokens (STRING), and the
+	// integer ones (INT64).
+	types := map[string]string{"tokens": "STRING", "codes": "INT64", "u": "INT64", "look": "INT64", "q": "INT64", "ind": "INT64"}
 	var cols []string
 	inputs := map[string][]string{}
 	for _, m := range models {

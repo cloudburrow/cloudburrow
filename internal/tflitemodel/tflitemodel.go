@@ -132,6 +132,9 @@ type op struct {
 	// custom_options (a FlexBuffer), when the caller supplied one (LoadWith).
 	custom     CustomOp
 	customOpts []byte
+	// outType is its first output tensor's type, as stored (BITCAST's
+	// target).
+	outType Type
 }
 
 // CustomOp runs one custom operator: its custom_options, as the model
@@ -474,6 +477,14 @@ func loadGraph(sg *flatbuffers.Table, codes, bufs []*flatbuffers.Table, custom m
 				m.ops = append(m.ops, op{code: code, name: str(c, 6), in: ints(o, 6), out: ints(o, 8), custom: k, customOpts: opts})
 				continue
 			}
+			if bc, ok := builtinCustom[str(c, 6)]; ok { // detect.go
+				var opts []byte
+				if f := field(o, 14); f != 0 {
+					opts = o.ByteVector(o.Pos + f)
+				}
+				m.ops = append(m.ops, op{code: bc, name: str(c, 6), in: ints(o, 6), out: ints(o, 8), customOpts: opts})
+				continue
+			}
 			return nil, &UnsupportedError{"the model uses the custom operator " + str(c, 6) + ": only TensorFlow core operations are supported"}
 		}
 		name, ok := opNames[code]
@@ -481,6 +492,12 @@ func loadGraph(sg *flatbuffers.Table, codes, bufs []*flatbuffers.Table, custom m
 			return nil, &UnsupportedError{fmt.Sprintf("the model uses TensorFlow Lite builtin operator %d, which CloudBurrow's interpreter does not run (it runs %v)", code, Ops())}
 		}
 		op := op{code: code, name: name, in: ints(o, 6), out: ints(o, 8)}
+		if outs := op.out; len(outs) > 0 && outs[0] >= 0 && outs[0] < len(m.tensors) {
+			op.outType = m.tensors[outs[0]].typ
+			if m.tensors[outs[0]].q != nil {
+				op.outType = m.tensors[outs[0]].stored
+			}
+		}
 		op.opts = sub(o, 12)
 		if op.opts == nil {
 			op.opts = sub(o, 28) // builtin_options_2: the StableHLO operators' (#1775)

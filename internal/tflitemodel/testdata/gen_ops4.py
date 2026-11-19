@@ -58,11 +58,13 @@ class Builder:
         self.inputs.append(i)
         return i
 
-    def op(self, code, ins, outs, otype=0, opts=None, v2=False):
+    def op(self, code, ins, outs, otype=0, opts=None, v2=False, custom=None):
         if code not in self.codes:
             self.codes.append(code)
         o = S.OperatorT()
         o.opcodeIndex, o.inputs, o.outputs = self.codes.index(code), list(ins), list(outs)
+        if custom is not None:  # (custom_code, custom_options FlexBuffer)
+            o.customOptions = list(custom[1])
         if v2:  # schema.fbs's builtin_options_2 (the StableHLO options)
             o.builtinOptions2Type, o.builtinOptions2 = otype, opts
         else:
@@ -82,6 +84,10 @@ class Builder:
         m.version, m.description, m.buffers = 3, "gen_ops4.py", self.buffers
         for c in self.codes:
             oc = S.OperatorCodeT()
+            if isinstance(c, str):  # a custom operator, by its custom_code
+                oc.builtinCode, oc.deprecatedBuiltinCode, oc.customCode, oc.version = OP.CUSTOM, OP.CUSTOM, c, 1
+                m.operatorCodes = (m.operatorCodes or []) + [oc]
+                continue
             oc.builtinCode, oc.deprecatedBuiltinCode, oc.version = c, min(c, 127), 1
             m.operatorCodes = (m.operatorCodes or []) + [oc]
         m.subgraphs = [self.graph("main")] + [x.graph(f"sub{i + 1}") for i, x in enumerate(subs)]
@@ -432,4 +438,143 @@ def ops5_model():
 
 blob, feed = ops5_model()
 cases["ops5"] = case("ops5", blob, feed)
+
+
+def ops6_model():
+    """BITCAST, EMBEDDING_LOOKUP_SPARSE and the TFLite_Detection_PostProcess
+    custom operator (fast and regular NMS) (ops6.go, detect.go)."""
+    from flatbuffers import flexbuffers
+    b = Builder()
+    f = b.input("f", [2, 3])
+    q = b.input("q", [4], I32)
+    enc = b.input("enc", [1, 6, 4])
+    cls = b.input("cls", [1, 6, 4])
+
+    def out(name, shape, typ=F32):
+        t = b.tensor(name, shape, typ)
+        b.output(t)
+        return t
+
+    b.op(OP.BITCAST, [f], [out("bits_i32", [2, 3], I32)])
+    b.op(OP.BITCAST, [q], [out("bits_u8", [4, 4], S.TensorType.UINT8)])
+    h = b.tensor("halves", [2, 3, 2], S.TensorType.FLOAT16)
+    b.op(OP.BITCAST, [f], [h])
+    b.op(OP.CAST, [h], [out("bits_f16", [2, 3, 2])])
+    ids = b.tensor("els_ids", [5], I32, data=np.array([1, 3, 0, 2, 3], np.int32))
+    idx = b.tensor("els_idx", [5, 2], I32, data=np.array([[0, 0], [0, 1], [1, 0], [2, 0], [2, 1]], np.int32))
+    dshape = b.tensor("els_shape", [2], I32, data=np.array([3, 2], np.int32))
+    wts = b.tensor("els_w", [5], data=np.array([1.0, 2.0, 0.5, 1.5, -1.0], np.float32))
+    val = b.const("els_val", 4, 3)
+    for comb, name in [(0, "els_sum"), (1, "els_mean"), (2, "els_sqrtn")]:
+        o = S.EmbeddingLookupSparseOptionsT()
+        o.combiner = comb
+        b.op(OP.EMBEDDING_LOOKUP_SPARSE, [ids, idx, dshape, wts, val], [out(name, [3, 3])], BO.EmbeddingLookupSparseOptions, o)
+    anchors = b.tensor("anchors", [6, 4], data=np.array([[0.2, 0.2, 0.3, 0.3], [0.25, 0.22, 0.3, 0.3], [0.7, 0.7, 0.2, 0.25],
+                                                          [0.72, 0.69, 0.2, 0.2], [0.5, 0.1, 0.4, 0.1], [0.1, 0.9, 0.1, 0.1]], np.float32))
+    for name, regular, mcpd in [("det_fast", False, 2), ("det_regular", True, 1)]:
+        opts = flexbuffers.Dumps({"max_detections": 3, "max_classes_per_detection": mcpd, "detections_per_class": 2,
+                                  "use_regular_nms": regular, "nms_score_threshold": 0.3, "nms_iou_threshold": 0.5,
+                                  "num_classes": 3, "y_scale": 10.0, "x_scale": 10.0, "h_scale": 5.0, "w_scale": 5.0})
+        slots = 3 * (1 if regular else mcpd)
+        b.op("TFLite_Detection_PostProcess", [enc, cls, anchors],
+             [out(name + "_boxes", [1, slots, 4]), out(name + "_classes", [1, slots]), out(name + "_scores", [1, slots]), out(name + "_num", [1])],
+             custom=("TFLite_Detection_PostProcess", opts))
+    sc = np.array([[0.1, 0.9, 0.2, 0.35], [0.0, 0.8, 0.5, 0.1], [0.3, 0.05, 0.7, 0.6], [0.2, 0.4, 0.65, 0.55],
+                   [0.6, 0.31, 0.1, 0.2], [0.9, 0.05, 0.02, 0.33]], np.float32)
+    feed = {"f": rng.standard_normal((2, 3)).astype(np.float32), "q": np.array([1, -2, 70000, 255], np.int32),
+            "enc": (rng.standard_normal((1, 6, 4)) * 0.5).astype(np.float32), "cls": sc[None]}
+    return b.bytes(), feed
+
+
+blob, feed = ops6_model()
+cases["ops6"] = case("ops6", blob, feed)
+
+
+def audio_model():
+    """The AudioSpectrogram and Mfcc custom operators of TensorFlow's speech
+    models (audio.go)."""
+    from flatbuffers import flexbuffers
+    b = Builder()
+    wav = b.input("wav", [400, 2])
+    for name, win, stride, sq in [("spec", 100, 60, True), ("spec_mag", 64, 50, False)]:
+        frames = 1 + (400 - win) // stride
+        fft = 1 << (win - 1).bit_length()
+        t = b.tensor(name, [2, frames, fft // 2 + 1])
+        b.output(t)
+        b.op("AudioSpectrogram", [wav], [t], custom=("AudioSpectrogram", flexbuffers.Dumps(
+            {"window_size": win, "stride": stride, "magnitude_squared": sq})))
+    rate = b.tensor("rate", [], I32, data=np.array(16000, np.int32))
+    spec = b.outputs[0]
+    for name, opts in [("mfcc", {"upper_frequency_limit": 4000, "lower_frequency_limit": 20, "filterbank_channel_count": 40,
+                                "dct_coefficient_count": 13}), ("mfcc_small", {"upper_frequency_limit": 3000, "lower_frequency_limit": 100,
+                                                     "filterbank_channel_count": 20, "dct_coefficient_count": 8})]:
+        t = b.tensor(name, [2, 6, opts["dct_coefficient_count"]])
+        b.output(t)
+        b.op("Mfcc", [spec, rate], [t], custom=("Mfcc", flexbuffers.Dumps(opts)))
+    n = np.arange(400)
+    w = np.stack([np.sin(2 * np.pi * 440 * n / 16000) + 0.3 * rng.standard_normal(400),
+                  0.5 * np.sin(2 * np.pi * 1250 * n / 16000) + 0.2 * rng.standard_normal(400)], 1).astype(np.float32)
+    return b.bytes(), {"wav": w}
+
+
+blob, feed = audio_model()
+cases["audio4"] = case("audio4", blob, feed)
+
+
+def hlo_model():
+    """STABLEHLO_GATHER, STABLEHLO_SCATTER and STABLEHLO_REDUCE_WINDOW
+    (hlo.go). STABLEHLO_CASE is left out: LiteRT 2.20's kernel checks a
+    branch's inputs against the wrong subgraph and will not prepare."""
+    O2 = S.BuiltinOptions2
+    b = Builder()
+    x = b.input("x", [3, 4, 5])
+    ind = b.input("ind", [2, 2], I32)
+    upd = b.input("upd", [2, 4])
+
+    def out(name, shape, typ=F32):
+        t = b.tensor(name, shape, typ)
+        b.output(t)
+        return t
+
+    # Gather rows x[i0, :, i1:i1+2] for each index pair: offset dims 1, 2.
+    o = S.StablehloGatherOptionsT()
+    o.offsetDims, o.collapsedSliceDims, o.startIndexMap, o.indexVectorDim, o.sliceSizes = [1, 2], [0], [0, 2], 1, [1, 4, 2]
+    b.op(OP.STABLEHLO_GATHER, [x, ind], [out("gather", [2, 4, 2])], O2.StablehloGatherOptions, o, v2=True)
+
+    def body(code):
+        d = Builder(b)
+        p, q = d.input("p", []), d.input("q", [])
+        r = d.tensor("r", [])
+        d.op(code, [p, q], [r])
+        d.output(r)
+        return d
+
+    def replace():
+        d = Builder(b)
+        d.input("p", [])
+        q = d.input("q", [])
+        d.output(q)
+        return d
+
+    subs = [body(OP.STABLEHLO_ADD), body(OP.STABLEHLO_MAXIMUM), replace()]
+    # Scatter-add rows into x[i0, :, i1] (update window dim 1 over operand dim 1).
+    for name, sub in [("scatter_add", 1), ("scatter_set", 3)]:
+        o = S.StablehloScatterOptionsT()
+        o.updateWindowDims, o.insertedWindowDims, o.scatterDimsToOperandDims, o.indexVectorDim = [1], [0, 2], [0, 2], 1
+        o.updateComputationSubgraphIndex = sub
+        b.op(OP.STABLEHLO_SCATTER, [x, ind, upd], [out(name, [3, 4, 5])], O2.StablehloScatterOptions, o, v2=True)
+    for name, sub, win, strides, bdil, wdil, pad, shape in [
+            ("rw_sum", 1, [1, 2, 3], [1, 2, 1], [1, 1, 1], [1, 1, 1], [0, 0, 0, 0, 1, 1], [3, 2, 5]),
+            ("rw_max_dil", 2, [2, 2, 2], [1, 1, 2], [1, 2, 1], [1, 1, 2], [1, 0, 0, 1, 0, 0], [3, 7, 1])]:
+        o = S.StablehloReduceWindowOptionsT()
+        o.windowDimensions, o.windowStrides, o.baseDilations, o.windowDilations, o.padding, o.bodySubgraphIndex = win, strides, bdil, wdil, pad, sub
+        init = b.tensor(name + "_init", [], data=np.array(0.0 if sub == 1 else -1e30, np.float32))
+        b.op(OP.STABLEHLO_REDUCE_WINDOW, [x, init], [out(name, shape)], O2.StablehloReduceWindowOptions, o, v2=True)
+    feed = {"x": rng.standard_normal((3, 4, 5)).astype(np.float32), "ind": np.array([[2, 1], [0, 3]], np.int32),
+            "upd": rng.standard_normal((2, 4)).astype(np.float32)}
+    return b.bytes(subs), feed
+
+
+blob, feed = hlo_model()
+cases["hlo4"] = case("hlo4", blob, feed)
 json.dump(cases, open(os.path.join(out, "litert_ops4.json"), "w"), indent=1)

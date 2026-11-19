@@ -57,7 +57,7 @@ func listOutput(code int32) bool {
 	switch code {
 	case opNonMaxSuppressionV4, opNonMaxSuppressionV5, opBidirectionalSequenceLSTM, opBidirectionalSequenceRNN,
 		opCallOnce, opHashtable, opHashtableFind, opHashtableImport, opHashtableSize, opVarHandle, opReadVariable, opAssignVariable,
-		opUnique, opHashtableLookup, opStablehloComposite:
+		opUnique, opHashtableLookup, opStablehloComposite, opDetectionPostProcess:
 		return true
 	}
 	return false
@@ -79,6 +79,8 @@ func (m *Model) evalList(o op, a []*Tensor, n, depth int, st *runState) ([]*Tens
 		return unique(o, a[0], n) // ops5.go
 	case opHashtableLookup:
 		return hashtableLookup(o, a, n)
+	case opDetectionPostProcess:
+		return detectionPostProcess(o, a, n) // detect.go
 	case opStablehloComposite:
 		k := int(o.i32(6, -1))
 		if k < 0 || k >= len(m.graphs) {

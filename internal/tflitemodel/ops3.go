@@ -206,9 +206,10 @@ func (o op) arity() int {
 	case opLSTM, opUnidirectionalSequenceLSTM, opRNN, opUnidirectionalSequenceRNN, opRandomUniform, opRandomNormal, opReal, opImag, opComplexAbs,
 		opWhere, opDynamicUpdateSlice, opMatrixSetDiag, opReverseSequence, opSparseToDense, opBroadcastArgs, opL2Pool2D, opBitwiseXor,
 		opRightShift, opStablehloAdd, opStablehloMultiply, opStablehloMaximum, opStablehloMinimum, opStablehloAnd, opStablehloShiftLeft,
-		opStablehloPad, opDilate, opFakeQuant, opSVDF:
+		opStablehloPad, opDilate, opFakeQuant, opSVDF, opBitcast, opEmbeddingLookupSparse,
+		opAudioSpectrogram:
 		return 1 // ops4.go and rnn.go check the rest
-	case opConv3DTranspose:
+	case opConv3DTranspose, opStablehloScatter:
 		return 3
 	}
 	return 2

@@ -156,6 +156,20 @@ func (m *Model) eval5(o op, a []*Tensor) (*Tensor, error) {
 			return nil, err
 		}
 		return svdf(o, x, arg(1), arg(2), arg(3), arg(4))
+	case opBitcast: // ops6.go
+		return bitcast(x, o.outType)
+	case opEmbeddingLookupSparse:
+		return embeddingLookupSparse(o, a)
+	case opAudioSpectrogram: // audio.go
+		return audioSpectrogram(o, x)
+	case opMfcc:
+		return mfcc(o, x, arg(1))
+	case opStablehloGather: // hlo.go
+		return stablehloGather(o, x, arg(1))
+	case opStablehloScatter:
+		return m.stablehloScatter(o, a)
+	case opStablehloReduceWindow:
+		return m.stablehloReduceWindow(o, a)
 	}
 	return nil, &UnsupportedError{"operator " + o.name + " is not supported"}
 }

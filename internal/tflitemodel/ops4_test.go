@@ -18,8 +18,10 @@ import (
 // random4.tflite the seeded random operators, ops4.tflite (TensorFlow
 // 2.20's TFLiteConverter) NON_MAX_SUPPRESSION_V4/V5, CONV_3D,
 // CONV_3D_TRANSPOSE, RFFT2D, REAL, IMAG and COMPLEX_ABS, table4.tflite the
-// HASHTABLE operators under CALL_ONCE, and var4.tflite the resource
-// variables.
+// HASHTABLE operators under CALL_ONCE, var4.tflite the resource
+// variables, ops5.tflite and ops6.tflite the operators of ops5.go and
+// ops6.go with TFLite_Detection_PostProcess, audio4.tflite AudioSpectrogram
+// and Mfcc, and hlo4.tflite STABLEHLO_GATHER, _SCATTER and _REDUCE_WINDOW.
 func TestOps4MatchLiteRT(t *testing.T) {
 	raw, err := os.ReadFile("testdata/litert_ops4.json")
 	if err != nil {
@@ -34,7 +36,7 @@ func TestOps4MatchLiteRT(t *testing.T) {
 	if err := json.Unmarshal(raw, &cases); err != nil {
 		t.Fatal(err)
 	}
-	if len(cases) != 6 {
+	if len(cases) != 9 {
 		t.Fatalf("%d cases", len(cases))
 	}
 	for name, c := range cases {
@@ -49,7 +51,8 @@ func TestOps4MatchLiteRT(t *testing.T) {
 			}
 			uses := m.Uses()
 			for _, o := range c.Ops {
-				if !slices.Contains(uses, o) || !slices.Contains(Ops(), o) {
+				_, custom := builtinCustom[o]
+				if !slices.Contains(uses, o) || !slices.Contains(Ops(), o) && !custom {
 					t.Errorf("operator %s: in the model %v, run %v", o, slices.Contains(uses, o), slices.Contains(Ops(), o))
 				}
 			}
