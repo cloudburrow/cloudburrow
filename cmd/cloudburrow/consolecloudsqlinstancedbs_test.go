@@ -44,7 +44,7 @@ func TestCloudSQLConsoleInstanceDatabasesAndUsers(t *testing.T) {
 	p := cloudSQLInstancesProvider{endpoint: strings.TrimPrefix(ts.URL, "http://"), versions: []string{"MYSQL_8_0"}}
 	ctx := context.Background()
 
-	d, err := p.Detail(ctx, "proj", []string{"my"})
+	d, err := p.allOf(ctx, "proj", []string{"my"})
 	if err != nil {
 		t.Fatal(err)
 	}

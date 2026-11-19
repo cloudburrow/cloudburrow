@@ -43,7 +43,7 @@ func TestCloudSQLConsoleProjectBackups(t *testing.T) {
 	p := cloudSQLInstancesProvider{endpoint: strings.TrimPrefix(ts.URL, "http://"), versions: []string{"POSTGRES_17"}}
 	ctx := context.Background()
 
-	d, err := p.Detail(ctx, "proj", []string{"pg"})
+	d, err := p.allOf(ctx, "proj", []string{"pg"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -180,6 +180,12 @@ func grpcCaller(ctx context.Context, req *http.Request) {
 		if v := md.Get(strings.ToLower(clientAddrHeader)); len(v) > 0 {
 			req.Header.Set(clientAddrHeader, v[0])
 		}
+		// The caller's bearer token, which IAM enforcement checks
+		// (iamenforce.go, #1879): a gRPC call is served as its JSON
+		// method, so it is checked as that method.
+		if v := md.Get("authorization"); len(v) > 0 {
+			req.Header.Set("Authorization", v[0])
+		}
 	}
 }
 

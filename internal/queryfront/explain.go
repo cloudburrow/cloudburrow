@@ -42,7 +42,8 @@ const datastoreRunQuery = "/google.datastore.v1.Datastore/RunQuery"
 var datastoreRunQueryREST = regexp.MustCompile(`^/v1/projects/([^/:]+):runQuery$`)
 
 // asksExplain reads r's body, puts it back, and reports whether it is a
-// RunQuery request with explain_options.
+// RunQuery request the front answers: with explain_options, or with a
+// filter the emulator does not serve (operators.go).
 func asksExplain(r *http.Request) bool {
 	orig := r.Body
 	b, err := io.ReadAll(io.LimitReader(orig, 64<<20))
@@ -65,30 +66,58 @@ func asksExplain(r *http.Request) bool {
 		if uint64(len(b)-5) < uint64(n) || proto.Unmarshal(b[5:5+n], req) != nil {
 			return false
 		}
+	} else if strings.HasPrefix(r.Header.Get("Content-Type"), "application/x-protobuf") {
+		// The Java client's REST calls are protobuf.
+		if proto.Unmarshal(b, req) != nil {
+			return false
+		}
 	} else if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(b, req); err != nil {
 		return false
 	}
-	return req.GetExplainOptions() != nil
+	return req.GetExplainOptions() != nil || needsOperators(req.GetQuery()) ||
+		(req.GetGqlQuery() != nil && gqlNeedsOperators(req.GetGqlQuery().GetQueryString()))
 }
 
-func (d *Datastore) serveRunQueryREST(w http.ResponseWriter, r *http.Request) {
-	req := &pb.RunQueryRequest{}
-	if err := readJSON(r, req); err != nil {
-		writeError(w, err)
-		return
-	}
-	req.ProjectId = datastoreRunQueryREST.FindStringSubmatch(r.URL.Path)[1]
-	resp, err := d.RunQuery(forwardHTTP(r.Context(), r), req)
-	writeReply(w, resp, err)
-}
-
-// RunQuery answers a query with explain_options; the front claims no other.
+// RunQuery answers a query with explain_options, and any query in a named
+// database (databases.go); the front claims no other.
 func (d *Datastore) RunQuery(ctx context.Context, req *pb.RunQueryRequest) (*pb.RunQueryResponse, error) {
 	client, err := d.emulator()
 	if err != nil {
 		return nil, err
 	}
+	var parsed *pb.Query
+	if g := req.GetGqlQuery(); g != nil && gqlNeedsOperators(g.GetQueryString()) {
+		if parsed, err = parseOperatorGQL(forward(ctx), client, req, req.GetPartitionId(), g); err != nil {
+			return nil, err
+		}
+		req = proto.Clone(req).(*pb.RunQueryRequest)
+		req.QueryType = &pb.RunQueryRequest_Query{Query: parsed}
+	}
 	eo := req.GetExplainOptions()
+	if needsOperators(req.GetQuery()) {
+		q := req.GetQuery()
+		if eo != nil && !eo.GetAnalyze() {
+			return &pb.RunQueryResponse{Query: parsed,
+				Batch:          &pb.QueryResultBatch{EntityResultType: resultType(q), MoreResults: pb.QueryResultBatch_NO_MORE_RESULTS},
+				ExplainMetrics: &pb.ExplainMetrics{PlanSummary: planSummary(q)}}, nil
+		}
+		inner := proto.Clone(req).(*pb.RunQueryRequest)
+		inner.ExplainOptions = nil
+		start := time.Now()
+		resp, err := d.runOperators(forward(ctx), client, inner)
+		if err != nil {
+			return nil, err
+		}
+		resp.Query = parsed
+		if eo != nil {
+			resp.ExplainMetrics = &pb.ExplainMetrics{PlanSummary: planSummary(q),
+				ExecutionStats: executionStats(int64(len(resp.GetBatch().GetEntityResults())), time.Since(start))}
+		}
+		return resp, nil
+	}
+	if eo == nil {
+		return client.RunQuery(forward(ctx), req)
+	}
 	inner := proto.Clone(req).(*pb.RunQueryRequest)
 	inner.ExplainOptions = nil
 	if !eo.GetAnalyze() {

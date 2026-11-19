@@ -48,8 +48,25 @@ type keptSnapshot struct {
 	// HasLabels is set when an update named labels, so that none is kept as
 	// none.
 	HasLabels bool `json:"hasLabels,omitempty"`
-	// ExpireTime is the expiry an update set, zero for none.
+	// ExpireTime is the expiry an update set, zero for none; or, with
+	// WallClock, the expiry the emulator gave the snapshot before it
+	// restarted, kept through it (restore.go).
 	ExpireTime time.Time `json:"expireTime,omitzero"`
+	// WallClock is set when ExpireTime is the emulator's: its times are the
+	// wall clock's, never the front's advanced clock (#1899). An update's
+	// expiry is the front's clock's, as UpdateSnapshot checks it against.
+	WallClock bool `json:"wallClock,omitempty"`
+}
+
+// expired reports whether a kept expiry has passed, on the clock it is on.
+func (k keptSnapshot) expired(now, wall time.Time) bool {
+	if k.ExpireTime.IsZero() {
+		return false
+	}
+	if k.WallClock {
+		return !wall.Before(k.ExpireTime)
+	}
+	return !now.Before(k.ExpireTime)
 }
 
 // snapshotAdmin is the part of the emulator's Subscriber service the front
@@ -137,7 +154,7 @@ func (f *Front) UpdateSnapshot(ctx context.Context, req *pubsubpb.UpdateSnapshot
 			return nil, apierror.InvalidArgument("snapshot.expire_time %s is later than %s, the latest the snapshot is guaranteed to exist until",
 				at.UTC().Format(time.RFC3339Nano), limit.AsTime().UTC().Format(time.RFC3339Nano))
 		}
-		next.ExpireTime = at
+		next.ExpireTime, next.WallClock = at, false
 	}
 	f.mu.Lock()
 	f.snapshots[name] = next
@@ -214,11 +231,11 @@ func (f *Front) snapshotResponse(method string, fr frame) frame {
 
 // sweepSnapshots deletes every snapshot whose kept expire_time has passed.
 func (f *Front) sweepSnapshots(ctx context.Context) {
-	now := f.clock.Now()
+	now, wall := f.clock.Now(), f.clock.Wall()
 	var due []string
 	f.mu.Lock()
 	for name, k := range f.snapshots {
-		if !k.ExpireTime.IsZero() && !now.Before(k.ExpireTime) {
+		if k.expired(now, wall) {
 			due = append(due, name)
 		}
 	}

@@ -315,7 +315,7 @@ func (p sourceManagerProvider) repositoryDetail(ctx context.Context, project str
 	}
 	for _, b := range bs {
 		builds.Listing.Items = append(builds.Listing.Items, console.Resource{Name: b.GetId(), Status: stateWord(b.GetStatus().String()),
-			Link:   "/run/builds/" + url.PathEscape(b.GetId()) + "?project=" + url.QueryEscape(p.project(project)),
+			Link:   "/cloud-build/builds/" + url.PathEscape(b.GetId()) + "?project=" + url.QueryEscape(p.project(project)),
 			Fields: map[string]string{"Commit": orDash(shortSHA(b.GetSource().GetGitSource().GetRevision())), "Created": stampAge(b.GetCreateTime())}})
 	}
 	builds.Listing.Total = len(builds.Listing.Items)

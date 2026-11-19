@@ -195,24 +195,98 @@ func (p runBuildsProvider) DetailActions(_ context.Context, project string, path
 	switch {
 	case b == nil:
 		return nil
-	case b.GetStatus() == cbpb.Build_PENDING && b.GetApproval().GetState() == cbpb.BuildApproval_PENDING:
-		comment := []console.Field{{Name: "comment", Label: "Comment", Type: "text", Help: "optional: recorded on the build's approval"}}
+	case awaitingApproval(b):
+		decision := approvalFields()
 		return []console.Action{
-			{ID: "approve", Label: "Approve", Fields: comment},
-			{ID: "reject", Label: "Reject", Fields: comment, Destructive: true},
+			{ID: "approve", Label: "Approve", Fields: decision},
+			{ID: "reject", Label: "Reject", Fields: decision, Destructive: true},
 			{ID: "cancel", Label: "Cancel", Confirm: "the build never runs and is CANCELLED"},
 		}
 	case b.GetStatus() == cbpb.Build_QUEUED || b.GetStatus() == cbpb.Build_WORKING:
 		return []console.Action{{ID: "cancel", Label: "Cancel", Confirm: "the build stops and is CANCELLED"}}
 	case runadapter.Retryable(b.GetName()):
-		return []console.Action{{ID: "retry", Label: "Retry", Confirm: "a new build, with a new ID, runs the same source and steps"}}
+		return []console.Action{{ID: "retry", Label: "Rebuild", Confirm: "a new build, with a new ID, runs the same source and steps"}}
 	}
 	return nil
 }
 
+// awaitingApproval reports whether a build waits for ApproveBuild.
+func awaitingApproval(b *cbpb.Build) bool {
+	return b.GetStatus() == cbpb.Build_PENDING && b.GetApproval().GetState() == cbpb.BuildApproval_PENDING
+}
+
+// approvalFields are Google's Approve and Reject dialogs: an optional
+// message, and a URL under "Show additional options" (#1854).
+func approvalFields() []console.Field {
+	return []console.Field{
+		{Name: "comment", Label: "Message", Type: "textarea", Help: "Optional: recorded on the build's approval."},
+		{Name: "url", Label: "URL", Type: "text", Pattern: `^https?://\S+$`, Section: "Show additional options",
+			Help: "Optional: a link to more on the decision, such as a review."}}
+}
+
+// ListSelectActions is History's Approve (#1854): the builds awaiting
+// approval checked on the page, approved together with one message, as
+// Google's History approves the builds selected.
+// It is offered while some build awaits approval.
+func (p runBuildsProvider) ListSelectActions(_ context.Context, project string) []console.Action {
+	if project == "" {
+		project = p.defaultProject
+	}
+	waiting := false
+	for _, b := range runadapter.CloudBuilds(project, "") {
+		waiting = waiting || awaitingApproval(b)
+	}
+	if !waiting {
+		return nil
+	}
+	return []console.Action{{ID: "approve-selected", Label: "Approve", SelectionField: "builds", Submit: "Approve",
+		Fields: append([]console.Field{{Name: "builds", Label: "Builds", Type: "textarea", Required: true,
+			Help: "The builds checked on History, one ID per line; each must be awaiting approval."}}, approvalFields()...)}}
+}
+
+// approveSelected approves each checked build through ApproveBuild.
+func (p runBuildsProvider) approveSelected(ctx context.Context, project string, values map[string]string) error {
+	var ids []string
+	for _, l := range strings.Split(values["builds"], "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			ids = append(ids, l)
+		}
+	}
+	if len(ids) == 0 {
+		return fmt.Errorf("select the builds to approve")
+	}
+	var builds []*cbpb.Build
+	for _, id := range ids {
+		b := p.build(project, id)
+		switch {
+		case b == nil:
+			return fmt.Errorf("build %s not found", id)
+		case !awaitingApproval(b):
+			return fmt.Errorf("build %s is not awaiting approval", id)
+		}
+		builds = append(builds, b)
+	}
+	return p.withClient(ctx, func(c *cloudbuild.Client) error {
+		for _, b := range builds {
+			op, err := c.ApproveBuild(ctx, &cbpb.ApproveBuildRequest{Name: b.GetName(), ApprovalResult: &cbpb.ApprovalResult{
+				Decision: cbpb.ApprovalResult_APPROVED, Comment: values["comment"], Url: strings.TrimSpace(values["url"])}})
+			if err != nil {
+				return fmt.Errorf("approve %s: %w", b.GetId(), err)
+			}
+			if _, err := op.Wait(ctx); err != nil {
+				return fmt.Errorf("approve %s: %w", b.GetId(), err)
+			}
+		}
+		return nil
+	})
+}
+
 // ActAt cancels the build through CancelBuild, or reruns it through
-// RetryBuild.
+// RetryBuild; on History itself, approves the checked builds.
 func (p runBuildsProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
+	if len(path) == 0 && action == "approve-selected" {
+		return p.approveSelected(ctx, project, values)
+	}
 	if (action != "cancel" && action != "retry" && action != "approve" && action != "reject") || len(path) != 1 {
 		return fmt.Errorf("unknown action %q", action)
 	}
@@ -228,7 +302,7 @@ func (p runBuildsProvider) ActAt(ctx context.Context, project string, path []str
 				d = cbpb.ApprovalResult_REJECTED
 			}
 			op, err := c.ApproveBuild(ctx, &cbpb.ApproveBuildRequest{Name: b.GetName(),
-				ApprovalResult: &cbpb.ApprovalResult{Decision: d, Comment: values["comment"]}})
+				ApprovalResult: &cbpb.ApprovalResult{Decision: d, Comment: values["comment"], Url: strings.TrimSpace(values["url"])}})
 			if err != nil {
 				return err
 			}
@@ -258,7 +332,7 @@ func (p runBuildsProvider) build(project, id string) *cbpb.Build {
 }
 
 func (runBuildsProvider) ID() string    { return "run-builds" }
-func (runBuildsProvider) Title() string { return "Cloud Run build history" }
+func (runBuildsProvider) Title() string { return "Cloud Build history" }
 
 func (p runBuildsProvider) List(ctx context.Context, project string) (console.Listing, error) {
 	return p.ListFiltered(ctx, project, "")
@@ -269,10 +343,11 @@ const buildsFilterHelp = `ListBuilds' filter, as "Filtering build results" docum
 	`= and != (and > >= < <= for times, RFC 3339), combined with AND, OR, NOT and parentheses`
 
 // ListFiltered is the build history narrowed by a ListBuilds filter
-// (#1382), evaluated by the same code as the API.
+// (#1382), evaluated by the same code as the API. Its columns are
+// Google's History columns (#1854), then the region and image.
 func (p runBuildsProvider) ListFiltered(_ context.Context, project, filter string) (console.Listing, error) {
-	out := console.Listing{Columns: []string{"Location", "Image", "Digest", "Source", "Age"},
-		NameColumn: "Build", Noun: "builds", AlwaysStatus: true, Note: buildStepsNote(p.hostSteps),
+	out := console.Listing{Columns: []string{"Source", "Ref", "Commit", "Trigger name", "Created", "Duration", "Region", "Image"},
+		NameColumn: "Build", Noun: "builds", AlwaysStatus: true, RowsOpenable: true, Note: buildStepsNote(p.hostSteps),
 		ServerFilter: &console.ServerFilter{Value: filter, Placeholder: `status="FAILURE" OR status="TIMEOUT"`, Help: buildsFilterHelp}}
 	if project == "" {
 		project = p.defaultProject
@@ -282,38 +357,79 @@ func (p runBuildsProvider) ListFiltered(_ context.Context, project, filter strin
 		out.ServerFilter.Error = err.Error()
 		return out, nil
 	}
+	triggers := map[string]string{}
+	for _, t := range runadapter.Triggers(project, "") {
+		triggers[t.GetId()] = t.GetName()
+	}
 	for _, b := range builds {
-		parts := strings.Split(b.GetName(), "/")
-		location, image, digest, source := "global", "", "", ""
-		if len(parts) == 6 {
-			location = parts[3]
-		}
+		image := ""
 		if len(b.GetImages()) > 0 {
 			image = b.GetImages()[0]
 		}
-		if imgs := b.GetResults().GetImages(); len(imgs) > 0 {
-			digest = imgs[0].GetDigest()
+		subs := b.GetSubstitutions()
+		ref := subs["BRANCH_NAME"]
+		if ref == "" {
+			ref = subs["TAG_NAME"]
 		}
-		if s := b.GetSource().GetStorageSource(); s != nil {
-			source = "gs://" + s.GetBucket() + "/" + s.GetObject()
-		}
-		out.Items = append(out.Items, console.Resource{Name: b.GetId(), Status: buildStatus(b), Fields: map[string]string{
-			"Location": location, "Image": orDash(image), "Digest": orDash(digest), "Source": orDash(source),
-			"Age": stampAge(b.GetCreateTime())}})
+		out.Items = append(out.Items, console.Resource{Name: b.GetId(), Status: buildStatus(b), Selectable: awaitingApproval(b), Fields: map[string]string{
+			"Source": orDash(buildSource(b)), "Ref": orDash(ref), "Commit": orDash(subs["SHORT_SHA"]),
+			"Trigger name": orDash(triggers[b.GetBuildTriggerId()]), "Created": stampAge(b.GetCreateTime()),
+			"Duration": orDash(buildDuration(b)), "Region": buildRegion(b), "Image": orDash(image)}})
 	}
 	out.Total = len(out.Items)
 	return out, nil
 }
 
-// Detail is one build's page: its steps with their status and timing, and
-// its log.
+// buildRegion is a build's location, global for the global form.
+func buildRegion(b *cbpb.Build) string {
+	if parts := strings.Split(b.GetName(), "/"); len(parts) == 6 {
+		return parts[3]
+	}
+	return "global"
+}
+
+// buildSource is a build's Source column: its Cloud Storage archive or its
+// repository.
+func buildSource(b *cbpb.Build) string {
+	if s := b.GetSource().GetStorageSource(); s != nil {
+		return "gs://" + s.GetBucket() + "/" + s.GetObject()
+	}
+	if g := b.GetSource().GetGitSource(); g != nil {
+		u := strings.TrimSuffix(g.GetUrl(), ".git")
+		return u[strings.LastIndex(u, "/")+1:]
+	}
+	return ""
+}
+
+// buildDuration is how long a build ran, or has run so far.
+func buildDuration(b *cbpb.Build) string {
+	if b.GetStartTime() == nil {
+		return ""
+	}
+	end := time.Now()
+	if b.GetFinishTime() != nil {
+		end = b.GetFinishTime().AsTime()
+	}
+	return end.Sub(b.GetStartTime().AsTime()).Round(time.Second).String()
+}
+
+// Detail is one build's page, with Google's views (#1854): Build summary
+// (the steps; a step opens its own log), Build log, Execution details and
+// Build artifacts.
 func (p runBuildsProvider) Detail(_ context.Context, project string, path []string) (console.Detail, error) {
-	if len(path) > 1 {
-		return console.DeeperThan(1, path), nil
+	if len(path) > 2 {
+		return console.DeeperThan(2, path), nil
 	}
 	b := p.build(project, path[0])
 	if b == nil {
 		return console.Detail{Unavailable: "build " + path[0] + " not found"}, nil
+	}
+	log, ok := runadapter.BuildLog(b.GetName())
+	if !ok {
+		log = b.GetStatusDetail()
+	}
+	if len(path) == 2 {
+		return buildStepPage(b, path[1], log), nil
 	}
 	summary := []console.Property{{Label: "Status", Value: b.GetStatus().String()}, {Label: "Name", Value: b.GetName()}}
 	add := func(label, v string) {
@@ -321,11 +437,8 @@ func (p runBuildsProvider) Detail(_ context.Context, project string, path []stri
 			summary = append(summary, console.Property{Label: label, Value: v})
 		}
 	}
-	if s := b.GetSource().GetStorageSource(); s != nil {
-		add("Source", "gs://"+s.GetBucket()+"/"+s.GetObject())
-	}
+	add("Source", buildSource(b))
 	add("Images", strings.Join(b.GetImages(), ", "))
-	add("Logs bucket", b.GetLogsBucket())
 	add("Log write error", runadapter.BuildLogError(b.GetName()))
 	add("Status detail", b.GetStatusDetail())
 	if a := b.GetApproval(); a != nil {
@@ -334,13 +447,9 @@ func (p runBuildsProvider) Detail(_ context.Context, project string, path []stri
 			v += ": " + c
 		}
 		add("Approval", v)
+		add("Approval URL", a.GetResult().GetUrl())
 	}
-	if b.GetOptions().GetDynamicSubstitutions() {
-		add("Dynamic substitutions", "on")
-	}
-	if b.GetStartTime() != nil && b.GetFinishTime() != nil {
-		add("Duration", b.GetFinishTime().AsTime().Sub(b.GetStartTime().AsTime()).Round(time.Millisecond).String())
-	}
+	add("Duration", buildDuration(b))
 	steps := console.Listing{Columns: []string{"Name", "Args", "Duration"}, NameColumn: "Step", Noun: "steps", AlwaysStatus: true}
 	for i, st := range b.GetSteps() {
 		dur := "-"
@@ -352,20 +461,124 @@ func (p runBuildsProvider) Detail(_ context.Context, project string, path []stri
 			label += " " + st.GetId()
 		}
 		steps.Items = append(steps.Items, console.Resource{Name: label, Status: buildStatus(&cbpb.Build{Status: st.GetStatus()}),
+			Opens:  []string{b.GetId(), fmt.Sprint(i)},
 			Fields: map[string]string{"Name": st.GetName(), "Args": strings.Join(st.GetArgs(), " "), "Duration": dur}})
 	}
 	steps.Total = len(steps.Items)
-	log, ok := runadapter.BuildLog(b.GetName())
-	if !ok {
-		log = b.GetStatusDetail()
-	}
 	if log == "" {
 		log = "(no log yet)"
 	}
 	return console.Detail{Summary: summary, Sections: []console.Section{
-		{ID: "steps", Label: "Steps", Listing: steps},
+		{ID: "summary", Label: "Build summary", Listing: steps, Note: "Select a step to see its log."},
 		{ID: "log", Label: "Build log", Kind: console.KindText, Text: log},
+		{ID: "execution", Label: "Execution details", Kind: console.KindProperties, Groups: buildExecution(b)},
+		{ID: "artifacts", Label: "Build artifacts", Listing: buildArtifacts(b)},
 	}}, nil
+}
+
+// buildStepPage is one step's log: the build log's lines that step wrote,
+// as Google's Build summary shows a selected step's.
+func buildStepPage(b *cbpb.Build, step, log string) console.Detail {
+	var i int
+	if _, err := fmt.Sscan(step, &i); err != nil || i < 0 || i >= len(b.GetSteps()) || fmt.Sprint(i) != step {
+		return console.Detail{Unavailable: "build " + b.GetId() + " has no step " + step}
+	}
+	prefix := fmt.Sprintf("Step #%d", i)
+	var lines []string
+	for _, l := range strings.Split(log, "\n") {
+		if l == "Starting "+prefix || strings.HasPrefix(l, "Starting "+prefix+" ") ||
+			strings.HasPrefix(l, prefix+":") || strings.HasPrefix(l, prefix+" ") || l == "Finished "+prefix ||
+			strings.HasPrefix(l, "Finished "+prefix+" ") {
+			lines = append(lines, l)
+		}
+	}
+	text := strings.Join(lines, "\n")
+	if text == "" {
+		text = "(no log for this step yet)"
+	}
+	st := b.GetSteps()[i]
+	title := prefix
+	if st.GetId() != "" {
+		title += " - " + st.GetId()
+	}
+	return console.Detail{Title: title, Summary: []console.Property{{Label: "Status", Value: st.GetStatus().String()},
+		{Label: "Name", Value: st.GetName()}, {Label: "Args", Value: strings.Join(st.GetArgs(), " ")}},
+		Trail:    []console.Crumb{{Label: b.GetId(), Path: []string{b.GetId()}}},
+		Sections: []console.Section{{ID: "log", Label: "Step log", Kind: console.KindText, Text: text}}}
+}
+
+// buildAccountLabel is the account a build runs as (#1854): its own, or
+// the project's default Cloud Build account.
+func buildAccountLabel(b *cbpb.Build) string {
+	if sa := b.GetServiceAccount(); sa != "" {
+		return sa[strings.LastIndex(sa, "/")+1:]
+	}
+	return runadapter.DefaultBuildAccount(b.GetProjectId())
+}
+
+// buildExecution is the Execution details view: what the build ran with.
+func buildExecution(b *cbpb.Build) []console.PropertyGroup {
+	o := b.GetOptions()
+	run := []console.Property{{Label: "Build ID", Value: b.GetId()}, {Label: "Region", Value: buildRegion(b)},
+		{Label: "Trigger", Value: b.GetBuildTriggerId()}, {Label: "Created", Value: stampAge(b.GetCreateTime())},
+		{Label: "Duration", Value: buildDuration(b)}, {Label: "Logs bucket", Value: b.GetLogsBucket()},
+		{Label: "Service account", Value: buildAccountLabel(b)}, {Label: "Private pool", Value: o.GetPool().GetName()},
+		{Label: "Machine type", Value: o.GetMachineType().String()}, {Label: "Logging", Value: o.GetLogging().String()}}
+	// A property the build does not have is left out, never shown blank:
+	// a build no trigger ran, one with no logs bucket, one on no pool.
+	kept := run[:0]
+	for _, pr := range run {
+		if pr.Value != "" {
+			kept = append(kept, pr)
+		}
+	}
+	run = kept
+	if b.GetTimeout() != nil {
+		run = append(run, console.Property{Label: "Timeout", Value: b.GetTimeout().AsDuration().String()})
+	}
+	if o.GetDynamicSubstitutions() {
+		run = append(run, console.Property{Label: "Dynamic substitutions", Value: "on"})
+	}
+	groups := []console.PropertyGroup{{Heading: "Execution details", Properties: run}}
+	if subs := b.GetSubstitutions(); len(subs) > 0 {
+		var ps []console.Property
+		for _, k := range sortedKeys(subs) {
+			ps = append(ps, console.Property{Label: k, Value: subs[k]})
+		}
+		groups = append(groups, console.PropertyGroup{Heading: "Substitutions", Properties: ps})
+	}
+	if env := o.GetEnv(); len(env) > 0 {
+		var ps []console.Property
+		for _, e := range env {
+			k, v, _ := strings.Cut(e, "=")
+			ps = append(ps, console.Property{Label: k, Value: v})
+		}
+		groups = append(groups, console.PropertyGroup{Heading: "Environment variables", Properties: ps})
+	}
+	return groups
+}
+
+// buildArtifacts is the Build artifacts view: the images the build pushed,
+// with their digests, and the images it names that it has not pushed yet.
+func buildArtifacts(b *cbpb.Build) console.Listing {
+	out := console.Listing{Columns: []string{"Type", "Digest"}, NameColumn: "Artifact", Noun: "artifacts"}
+	pushed := map[string]bool{}
+	for _, img := range b.GetResults().GetImages() {
+		pushed[img.GetName()] = true
+		out.Items = append(out.Items, console.Resource{Name: img.GetName(), Fields: map[string]string{"Type": "Image", "Digest": orDash(img.GetDigest())}})
+	}
+	for _, img := range b.GetImages() {
+		if !pushed[img] {
+			out.Items = append(out.Items, console.Resource{Name: img, Fields: map[string]string{"Type": "Image", "Digest": "-"}})
+		}
+	}
+	if loc := b.GetArtifacts().GetObjects().GetLocation(); loc != "" {
+		for _, path := range b.GetArtifacts().GetObjects().GetPaths() {
+			out.Items = append(out.Items, console.Resource{Name: strings.TrimSuffix(loc, "/") + "/" + path, Fields: map[string]string{"Type": "Object", "Digest": "-"}})
+		}
+	}
+	out.Total = len(out.Items)
+	return out
 }
 
 // buildStatus is a build's status as the console's Cloud Build page words it.
@@ -386,10 +599,11 @@ func buildStatus(b *cbpb.Build) string {
 }
 
 var (
-	_ console.Provider     = artifactRegistryProvider{}
-	_ console.Provider     = runBuildsProvider{}
-	_ console.Driller      = runBuildsProvider{}
-	_ console.Creator      = runBuildsProvider{}
-	_ console.PathActor    = runBuildsProvider{}
-	_ console.FilterLister = runBuildsProvider{}
+	_ console.Provider        = artifactRegistryProvider{}
+	_ console.Provider        = runBuildsProvider{}
+	_ console.Driller         = runBuildsProvider{}
+	_ console.Creator         = runBuildsProvider{}
+	_ console.PathActor       = runBuildsProvider{}
+	_ console.FilterLister    = runBuildsProvider{}
+	_ console.SelectionLister = runBuildsProvider{}
 )

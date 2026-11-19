@@ -20,8 +20,8 @@ import (
 
 // fakeTools puts docker, kind and kubectl stand-ins first on PATH. Each
 // logs its arguments; docker answers `image inspect` and `crictl inspecti`
-// from files of present images, and a load or import adds the image the
-// archive names (a test archive's content is "archive:<ref>").
+// from files of present images, docker cp into node-1 keeps the file, and
+// a load, or an import of a copied file, adds the image the archive names (a test archive's content is "archive:<ref>").
 func fakeTools(t *testing.T) (log string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -39,7 +39,10 @@ case "$*" in
   "image inspect "*) grep -qxF "$3" "` + host + `" || exit 1 ;;
   "load --quiet --input "*) sed 's/^archive://' "$4" >> "` + host + `" ;;
   *" crictl inspecti -q "*) for last; do :; done; grep -qxF "$last" "` + node + `" || exit 1 ;;
-  *" images import "*) sed 's/^archive://' >> "` + node + `" ;;
+  "cp "*" node-1:"*) cp "$2" "` + dir + `/copied-${3##*/}" ;;
+  "exec node-1 stat -c %s "*) wc -c < "` + dir + `/copied-${6##*/}" | tr -d ' ' ;;
+  *" images import "*) for last; do :; done; sed 's/^archive://' "` + dir + `/copied-${last##*/}" >> "` + node + `" ;;
+  "exec node-1 rm -f "*) rm -f "` + dir + `/copied-${5##*/}" ;;
   *) echo "unexpected: docker $*" >&2; exit 97 ;;
 esac
 `
@@ -160,7 +163,7 @@ func TestUpOfflineNeverPullsOrDownloads(t *testing.T) {
 	}
 	for _, want := range []string{
 		"docker load --quiet --input " + prefetch.Cache{Dir: prefetch.CacheDir(cfg.StateDir)}.Path(arts[0]),
-		"docker exec --privileged -i node-1 ctr --namespace=k8s.io images import --snapshotter=overlayfs -",
+		"docker exec --privileged node-1 ctr --namespace=k8s.io images import --snapshotter=overlayfs /var/cloudburrow-import-",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("no %q in:\n%s", want, got)

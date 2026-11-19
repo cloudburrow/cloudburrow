@@ -374,8 +374,10 @@ func TestConsoleBigQueryLoadExportAndJobHistory(t *testing.T) {
 	if text, _ := page.section("configuration"); !strings.Contains(text, `"skipLeadingRows": 1`) || !strings.Contains(text, `"maxBadRecords": 1`) {
 		t.Errorf("the load's configuration tab reads %q", text)
 	}
-	if ids := page.actionIDs(); strings.Join(ids, ",") != "delete" {
-		t.Errorf("a done load job's page offers %v, want Delete job alone", ids)
+	// Repeat load job, as Google's job page offers on a load (#1861), then
+	// Delete job.
+	if ids := page.actionIDs(); strings.Join(ids, ",") != "repeatload,delete" {
+		t.Errorf("a done load job's page offers %v, want Repeat load job and Delete job", ids)
 	}
 
 	xpage := consoleJob(t, addr, project, exportID)

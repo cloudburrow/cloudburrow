@@ -60,9 +60,13 @@ func TestStorageHMACKeySecretShownOnce(t *testing.T) {
 	p.waitFor(`[...document.querySelectorAll("#view .listing-summary dd")].some((n) => n.textContent.endsWith("@gs-project-accounts.iam.gserviceaccount.com"))`)
 	var pages string
 	p.eval(`[...document.querySelectorAll("#product-nav a")].map((a) => a.textContent).join(" | ")`, &pages)
-	if pages != "Buckets | Deleted buckets | Settings | Storage Intelligence" {
+	if pages != "Buckets | Observability | Storage Intelligence | Inventory reports | Transfer data | Settings" {
 		t.Errorf("the Cloud Storage product's pages read %q", pages)
 	}
+
+	// The keys are on Interoperability, as on Google's Settings page (#1843).
+	p.run(chromedp.Click(chromedp.CSS(`#tab-interoperability`)))
+	p.waitFor(`document.querySelector("#tab-interoperability.is-selected") !== null`)
 
 	// Cancel discards what was typed without asking (#783).
 	p.clickText("#view button", "Create key")
@@ -117,7 +121,7 @@ func TestStorageHMACKeySecretShownOnce(t *testing.T) {
 	}
 
 	// Reloaded, the key is listed and the secret is still nowhere.
-	p.navigate("/storage/settings?project=" + project)
+	p.navigate("/storage/settings?project=" + project + "&tab=interoperability")
 	row := fmt.Sprintf(`tr[aria-label=%q]`, "Inspect "+accessID)
 	p.waitFor(fmt.Sprintf(`document.querySelector(%q) !== null`, row))
 	if holds(shown.Secret) {

@@ -10,12 +10,16 @@ package images
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/k8s"
 )
@@ -177,12 +181,6 @@ func (l *Loader) Load(ctx context.Context, ref, kubeconfig string) error {
 	return nil
 }
 
-// StdinRunner is a Runner that can also feed a command's standard input.
-// Importing an archive into a node streams it through `docker exec -i`.
-type StdinRunner interface {
-	RunStdin(ctx context.Context, stdin io.Reader, name string, args ...string) (string, error)
-}
-
 // Nodes returns the cluster's node containers.
 func (l *Loader) Nodes(ctx context.Context) ([]string, error) {
 	out, err := l.Runner.Run(ctx, "kind", "get", "nodes", "--name", l.ClusterName)
@@ -211,6 +209,15 @@ func (l *Loader) NodeHas(ctx context.Context, node, ref string) bool {
 // ImportArchive imports an image archive into every node that lacks ref,
 // and confirms each node then has it (#604).
 //
+// The archive goes into the node with docker cp, through the daemon's
+// archive API, and ctr imports it from that file. It used to be streamed
+// through `docker exec -i`'s stdin, the stream whose stdout counterpart
+// lost an export's tail and exited 0 (#1805), and Offline then failed the
+// same way on this side: ctr's import exited 0, but the node had no
+// activator image (run 44442795331). The copy is checked against the
+// archive's size before ctr reads it, so a short copy is an error, not an
+// image missing later.
+//
 // It is the import `kind load image-archive` performs, less two flags
 // measured to break a digest-pinned image. --all-platforms fails on an
 // archive of a multi-platform index that holds one platform's layers,
@@ -220,30 +227,69 @@ func (l *Loader) NodeHas(ctx context.Context, node, ref string) bool {
 // image is named by the archive's io.containerd.image.name annotation,
 // which the cache writes.
 func (l *Loader) ImportArchive(ctx context.Context, archive, ref string) error {
-	sr, ok := l.Runner.(StdinRunner)
-	if !ok {
-		return errors.New("this runner cannot stream an archive into a node")
+	info, err := os.Stat(archive)
+	if err != nil {
+		return err
 	}
 	nodes, err := l.Nodes(ctx)
 	if err != nil {
 		return err
 	}
+	// Named for the reference: `up` imports an optional image in the
+	// background while it imports the others, into the same node.
+	sum := sha256.Sum256([]byte(ref))
+	inNode := "/var/cloudburrow-import-" + hex.EncodeToString(sum[:8]) + ".tar"
 	for _, node := range nodes {
 		if l.NodeHas(ctx, node, ref) {
 			continue
 		}
-		f, err := os.Open(archive)
+		err := l.importInto(ctx, node, archive, inNode, info.Size(), ref)
+		// Removed whatever happened: the node's disk holds the images.
+		_, _ = l.Runner.Run(ctx, "docker", "exec", node, "rm", "-f", inNode)
 		if err != nil {
 			return err
 		}
-		_, err = sr.RunStdin(ctx, f, "docker", "exec", "--privileged", "-i", node,
-			"ctr", "--namespace=k8s.io", "images", "import", "--snapshotter=overlayfs", "-")
-		_ = f.Close()
-		if err != nil {
-			return fmt.Errorf("import %s into %s: %w", archive, node, err)
+	}
+	return nil
+}
+
+// criSync bounds the wait for the CRI to list an image ctr has imported:
+// the CRI plugin learns of an image from containerd's events, not from the
+// import itself.
+var criSync = 30 * time.Second
+
+func (l *Loader) importInto(ctx context.Context, node, archive, inNode string, size int64, ref string) error {
+	if _, err := l.Runner.Run(ctx, "docker", "cp", archive, node+":"+inNode); err != nil {
+		return fmt.Errorf("copy %s into %s: %w", archive, node, err)
+	}
+	out, err := l.Runner.Run(ctx, "docker", "exec", node, "stat", "-c", "%s", inNode)
+	if err != nil {
+		return fmt.Errorf("copy %s into %s: %w", archive, node, err)
+	}
+	if got := strings.TrimSpace(out); got != strconv.FormatInt(size, 10) {
+		return fmt.Errorf("copied %s into %s, but the copy holds %s bytes of its %d", archive, node, got, size)
+	}
+	imported, err := l.Runner.Run(ctx, "docker", "exec", "--privileged", node,
+		"ctr", "--namespace=k8s.io", "images", "import", "--snapshotter=overlayfs", inNode)
+	if err != nil {
+		return fmt.Errorf("import %s into %s: %w", archive, node, err)
+	}
+	deadline := time.Now().Add(criSync)
+	for !l.NodeHas(ctx, node, ref) {
+		if time.Now().After(deadline) || ctx.Err() != nil {
+			listed, _ := l.Runner.Run(ctx, "docker", "exec", node, "ctr", "--namespace=k8s.io", "images", "ls", "-q")
+			has := "does not list it either"
+			for _, line := range strings.Split(listed, "\n") {
+				if strings.TrimSpace(line) == ref {
+					has = "lists it"
+				}
+			}
+			return fmt.Errorf("imported %s into %s, but the node's runtime does not have %s (ctr %s; its import printed %q)",
+				archive, node, ref, has, strings.TrimSpace(imported))
 		}
-		if !l.NodeHas(ctx, node, ref) {
-			return fmt.Errorf("imported %s into %s, but the node's runtime does not have %s", archive, node, ref)
+		select {
+		case <-ctx.Done():
+		case <-time.After(250 * time.Millisecond):
 		}
 	}
 	return nil

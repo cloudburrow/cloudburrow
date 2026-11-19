@@ -299,6 +299,7 @@ func (p valkeyProvider) Detail(ctx context.Context, project string, path []strin
 		props = append(props, console.Property{Label: "Key state", Value: ks.String()})
 	}
 	props = append(props, valkeyReplicationProps(i)...)
+	props = append(props, valkeyMaintenance(i).summary()...)
 	d := console.Detail{Sections: []console.Section{{ID: "config", Label: "Configuration", Kind: console.KindProperties,
 		Groups: []console.PropertyGroup{{Properties: props}}}}}
 	if i.GetTransitEncryptionMode() == memorystorepb.Instance_SERVER_AUTHENTICATION {

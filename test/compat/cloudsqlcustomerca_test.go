@@ -40,6 +40,13 @@ func sqlCAConfig(cn string) *privatecapb.CertificateConfig {
 // root's certificate and the issuing pool's name.
 func sqlCAHierarchy(t *testing.T, ctx context.Context, c *privateca.CertificateAuthorityClient, project, id string) (*x509.Certificate, string) {
 	t.Helper()
+	return sqlCAHierarchyFor(t, ctx, c, project, id, 5*365*24*time.Hour)
+}
+
+// sqlCAHierarchyFor is sqlCAHierarchy with an issuing CA valid for
+// subLife: the server certificates it issues expire with it.
+func sqlCAHierarchyFor(t *testing.T, ctx context.Context, c *privateca.CertificateAuthorityClient, project, id string, subLife time.Duration) (*x509.Certificate, string) {
+	t.Helper()
 	loc := "projects/" + project + "/locations/us-central1"
 	for _, p := range []string{"roots", "issuing", "empty"} {
 		op, err := c.CreateCaPool(ctx, &privatecapb.CreateCaPoolRequest{Parent: loc, CaPoolId: id + "-" + p,
@@ -77,7 +84,7 @@ func sqlCAHierarchy(t *testing.T, ctx context.Context, c *privateca.CertificateA
 	}
 	op, err = c.CreateCertificateAuthority(ctx, &privatecapb.CreateCertificateAuthorityRequest{Parent: issuing, CertificateAuthorityId: "sub",
 		CertificateAuthority: &privatecapb.CertificateAuthority{Type: privatecapb.CertificateAuthority_SUBORDINATE,
-			Config: sqlCAConfig("Example Issuing"), KeySpec: key, Lifetime: durationpb.New(5 * 365 * 24 * time.Hour)}})
+			Config: sqlCAConfig("Example Issuing"), KeySpec: key, Lifetime: durationpb.New(subLife)}})
 	if err == nil {
 		_, err = op.Wait(ctx)
 	}
@@ -89,7 +96,7 @@ func sqlCAHierarchy(t *testing.T, ctx context.Context, c *privateca.CertificateA
 		t.Fatal(err)
 	}
 	signed, err := c.CreateCertificate(ctx, &privatecapb.CreateCertificateRequest{Parent: rootPool, CertificateId: "sub",
-		Certificate: &privatecapb.Certificate{Lifetime: durationpb.New(5 * 365 * 24 * time.Hour),
+		Certificate: &privatecapb.Certificate{Lifetime: durationpb.New(subLife),
 			CertificateConfig: &privatecapb.Certificate_PemCsr{PemCsr: csr.GetPemCsr()}}})
 	if err != nil {
 		t.Fatalf("sign the subordinate's CSR: %v", err)

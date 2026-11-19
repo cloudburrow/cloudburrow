@@ -17,27 +17,30 @@ Do not edit these files by hand.
 | [Cloud Build](cloudbuild.md) | 19 | 19 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Secure Source Manager](securesourcemanager.md) | 53 | 12 | 0 | 41 | 0 | 0 | 0 | 0 |
 | [Developer Connect](developerconnect.md) | 26 | 11 | 0 | 15 | 0 | 0 | 0 | 0 |
+| [Eventarc](eventarc.md) | 39 | 7 | 0 | 32 | 0 | 0 | 0 | 0 |
 | [Cloud Functions v2](functions.md) | 8 | 8 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Functions v1](functionsv1.md) | 11 | 11 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Run v1 (Knative API)](runv1.md) | 76 | 76 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud KMS](kms.md) | 63 | 63 | 0 | 0 | 0 | 0 | 0 | 88 |
-| [IAM (custom roles, service accounts)](iam.md) | 31 | 31 | 0 | 0 | 0 | 0 | 0 | 4 |
+| [IAM (custom roles, service accounts, deny policies, organization policies)](iam.md) | 48 | 48 | 0 | 0 | 0 | 0 | 0 | 4 |
 | [Resource Manager v3 (Projects, Folders, Organizations, Tags)](resourcemanager.md) | 54 | 54 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Resource Manager v1 REST (projects, org policies; liens on v1 and v3)](resourcemanagerv1.md) | 38 | 38 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Scheduler](scheduler.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Logging](logging.md) | 43 | 43 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Vertex AI PredictionService](vertexai.md) | 14 | 14 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Memorystore for Redis](memorystore.md) | 73 | 69 | 0 | 4 | 0 | 0 | 0 | 1 |
+| [Vertex AI PredictionService](vertexai.md) | 44 | 22 | 0 | 22 | 0 | 0 | 0 | 0 |
+| [Vertex AI PredictionService v1beta1](vertexaiv1beta1.md) | 16 | 1 | 0 | 15 | 0 | 0 | 0 | 0 |
+| [Memorystore for Redis](memorystore.md) | 73 | 71 | 0 | 2 | 0 | 0 | 0 | 1 |
 | [Pub/Sub](pubsub.md) | 47 | 47 | 0 | 0 | 0 | 0 | 0 | 4 |
 | [Cloud Storage (JSON API)](storage.md) | 86 | 83 | 0 | 3 | 0 | 0 | 0 | 33 |
-| [Cloud Storage (gRPC API v2)](storagegrpc.md) | 30 | 29 | 0 | 0 | 1 | 0 | 0 | 0 |
+| [Cloud Storage (gRPC API v2)](storagegrpc.md) | 31 | 30 | 0 | 0 | 1 | 0 | 0 | 0 |
 | [Firestore](firestore.md) | 17 | 17 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Firestore Admin API](firestoreadmin.md) | 32 | 32 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Datastore](datastore.md) | 8 | 8 | 0 | 0 | 0 | 0 | 0 | 0 |
+| [Datastore Admin API](datastoreadmin.md) | 6 | 6 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Bigtable](bigtable.md) | 84 | 83 | 1 | 0 | 0 | 0 | 0 | 0 |
 | [Spanner](spanner.md) | 65 | 64 | 1 | 0 | 0 | 0 | 0 | 0 |
 | [BigQuery (REST API v2)](bigquery.md) | 55 | 55 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Cloud SQL Admin API (v1)](sqladmin.md) | 80 | 74 | 0 | 6 | 0 | 0 | 0 | 0 |
+| [Cloud SQL Admin API (v1)](sqladmin.md) | 80 | 75 | 0 | 5 | 0 | 0 | 0 | 0 |
 | [Service Usage API (v1)](serviceusage.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Backup and DR Service API (v1)](backupdr.md) | 61 | 46 | 0 | 15 | 0 | 0 | 0 | 0 |
 | [Cloud Identity API (v1)](cloudidentity.md) | 70 | 18 | 0 | 52 | 0 | 0 | 0 | 0 |

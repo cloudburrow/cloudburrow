@@ -56,7 +56,7 @@ func TestCloudSQLConsoleExternalPrimary(t *testing.T) {
 		t.Errorf("insert body %s", b)
 	}
 
-	d, err := p.Detail(ctx, "proj", []string{"src"})
+	d, err := p.allOf(ctx, "proj", []string{"src"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestCloudSQLConsoleExternalPrimary(t *testing.T) {
 		t.Errorf("source representation actions %+v", d.Actions)
 	}
 
-	d, err = p.Detail(ctx, "proj", []string{"rep"})
+	d, err = p.allOf(ctx, "proj", []string{"rep"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +165,7 @@ func TestCloudSQLConsoleExternalPostgres(t *testing.T) {
 	if b := bodies["POST /v1/projects/proj/instances"]; !strings.Contains(b, `"selectedObjects":[{"database":"shop"},{"database":"crm"}]`) {
 		t.Errorf("insert body %s", b)
 	}
-	d, err := p.Detail(ctx, "proj", []string{"pgrep"})
+	d, err := p.allOf(ctx, "proj", []string{"pgrep"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +224,7 @@ func TestCloudSQLConsoleDemote(t *testing.T) {
 	p := cloudSQLInstancesProvider{endpoint: strings.TrimPrefix(ts.URL, "http://"), versions: []string{"MYSQL_8_4"}}
 	ctx := context.Background()
 	has := func(name string) bool {
-		d, err := p.Detail(ctx, "proj", []string{name})
+		d, err := p.allOf(ctx, "proj", []string{name})
 		if err != nil {
 			t.Fatal(err)
 		}

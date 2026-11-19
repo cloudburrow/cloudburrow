@@ -39,7 +39,7 @@ func TestDatastoreKeyValuesKeepTheirProjectAndDatabase(t *testing.T) {
 		{"another database", key("demo", "db2", ""), "Order/id=7 (database db2)", false},
 		{"both", key("other", "db2", "tenant-a"), "__namespace__/tenant-a/Order/id=7 (project other, database db2)", false},
 	} {
-		v := datastoreValueGo(tc.value, "demo")
+		v := datastoreValueGo(tc.value, datastoreHome{project: "demo"})
 		if typ := datastoreType(v); typ != "key" {
 			t.Errorf("%s: type %q, want key", tc.name, typ)
 		}
@@ -55,11 +55,11 @@ func TestDatastoreKeyValuesKeepTheirProjectAndDatabase(t *testing.T) {
 		// Nested, as #894 renders it.
 		arr := &datastorepb.Value{ValueType: &datastorepb.Value_ArrayValue{ArrayValue: &datastorepb.ArrayValue{
 			Values: []*datastorepb.Value{tc.value}}}}
-		if shown := renderDatastoreValue(datastoreValueGo(arr, "demo"), false); shown != "[key("+tc.shown+")]" {
+		if shown := renderDatastoreValue(datastoreValueGo(arr, datastoreHome{project: "demo"}), false); shown != "[key("+tc.shown+")]" {
 			t.Errorf("%s in an array: shown as %q", tc.name, shown)
 		}
 	}
-	if !strings.Contains(datastoreNoEditNote(datastoreValueGo(key("other", "db2", ""), "demo")), "project other, database db2") {
+	if !strings.Contains(datastoreNoEditNote(datastoreValueGo(key("other", "db2", ""), datastoreHome{project: "demo"})), "project other, database db2") {
 		t.Error("the note does not name the key's project and database")
 	}
 }
@@ -85,7 +85,7 @@ func TestDatastoreFormValuesAreWrittenAsTheClientWritesThem(t *testing.T) {
 				t.Errorf("%#v: %v", v, err)
 				continue
 			}
-			back := datastorePropertiesGo(map[string]*datastorepb.Value{"p": pv}, "demo")[0]
+			back := datastorePropertiesGo(map[string]*datastorepb.Value{"p": pv}, datastoreHome{project: "demo"})[0]
 			want := v
 			if e, ok := v.(*datastore.Entity); ok && noIndex {
 				// An entity in an excluded property has its own properties

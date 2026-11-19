@@ -70,6 +70,19 @@ func (s *Server) serveBatch(w http.ResponseWriter, r *http.Request) {
 			c.err = badRequest("A batch part is not an HTTP request: %v", perr)
 		} else {
 			inner.RemoteAddr, inner.Host = r.RemoteAddr, r.Host
+			// The outer request's headers, "except for the Content-
+			// headers", apply to every nested request, whose own value of
+			// one overrides it; "If you provide an Authorization header
+			// for the outer request, then that header applies to all of
+			// the nested requests" (https://docs.cloud.google.com/storage/docs/batch,
+			// read 2026-11-19), so each call is checked as its caller
+			// (#1887).
+			for k, v := range r.Header {
+				if strings.HasPrefix(strings.ToLower(k), "content-") || len(inner.Header.Values(k)) > 0 {
+					continue
+				}
+				inner.Header[k] = append([]string(nil), v...)
+			}
 			if inner.URL.Host != "" {
 				inner.URL.Host, inner.URL.Scheme = "", ""
 			}

@@ -58,6 +58,9 @@ var compatEnvExceptions = map[string]string{
 	"CLOUDBURROW_TEST_VISION_LABELS": "opt-in switch: the label test downloads an 18.6 MB model",
 	"CLOUDBURROW_TEST_VISION_DETECT": "opt-in switch: the detection test downloads 14 MB of models",
 	"CLOUDBURROW_TEST_SKIP_RUN_PULL": "opt-out switch: skips the Cloud Run pull of the registry test",
+	// Model Garden's Hugging Face deploy test (#1840) downloads 1.3 GB of
+	// models and runs 6 GB of engine images, beyond a CI shard's budget.
+	"CLOUDBURROW_TEST_HF_DEPLOY": "opt-in switch: the Model Garden deploy test downloads 1.3 GB of models and 6 GB of images",
 	// An opt-in switch for a slow test no CI shard runs (#678).
 	"CLOUDBURROW_TEST_FUNCTIONS": "opt-in switch",
 	// The signed URL tests' key and account, for the builtin storage-server
@@ -213,7 +216,7 @@ func compatEnvFixture(t *testing.T, edit func(env map[string]string)) (dir, envF
 		"2026-10-15T10:31:31.107900Z   embeddings: POST /v1/projects/{p}/locations/{l}/publishers/google/models/e:predict\n")
 	write("up.json", `{"pid": 1, "control": "127.0.0.1:50001", "log": "`+filepath.Join(dir, "up.log")+`",
   "endpoints": {"control": "127.0.0.1:50001", "metadata": "127.0.0.1:9005", "console": "127.0.0.1:9090",
-    "tasks": "127.0.0.1:9003", "secretmanager": "127.0.0.1:9006", "run": "127.0.0.1:50002"}}`)
+    "tasks": "127.0.0.1:9003", "secretmanager": "127.0.0.1:9006", "run": "127.0.0.1:50002"}, "iamEnforcement": "on"}`)
 	env := map[string]string{
 		"GOOGLE_APPLICATION_CREDENTIALS":          filepath.Join(dir, "credentials.json"),
 		"GOOGLE_CLOUD_PROJECT":                    "ct-local",
@@ -325,6 +328,7 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"SERVICEUSAGE":             "127.0.0.1:9023",
 		"RUN_STORAGE":              "http://127.0.0.1:50003",
 		"RUN_PUBSUB":               "127.0.0.1:50004",
+		"RUN_FIRESTORE":            "127.0.0.1:9010",
 		"RUN_KMS":                  "127.0.0.1:9018",
 		"RUN_SCHEDULER":            "127.0.0.1:9008",
 		"RUN_LOGGING":              "127.0.0.1:9009",
@@ -373,6 +377,7 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"APPENGINE_URL":            "http://127.0.0.1:18506",
 		"SCALE_RUN":                "127.0.0.1:50002",
 		"SCALE_SECRETS":            "127.0.0.1:9006",
+		"IAM_ENFORCEMENT":          "on",
 
 		// A group of its own, so its long name leaves the others' alignment.
 		"MEMORYSTORE_RESOURCEMANAGER": "127.0.0.1:9007",
@@ -479,7 +484,7 @@ func TestWorkflowsSetCompatEnvThroughTheScript(t *testing.T) {
 		// that shard's instance serves, which its browser tests read back
 		// through the official clients: --strict would fail elsewhere (#895).
 		`BROWSER_VARS=CONSOLE,CONTROL,ADMIN_TOKEN,CLUSTER` + "\n",
-		`if [ "$SHARD" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE,BIGTABLE,SPANNER; fi`,
+		`if [ "$SHARD" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE,BIGTABLE,SPANNER,KMS; fi`,
 		`if [ "$SHARD" = memorystore ]; then BROWSER_VARS+=,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT; fi`,
 		`if [ "$SHARD" = storage ]; then BROWSER_VARS+=,LOGGING,STORAGE,PUBSUB,TASKS,SCHEDULER,RESOURCEMANAGER,SERVICEUSAGE; fi`,
 		`if [ "$SHARD" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT; fi`,
@@ -496,7 +501,7 @@ func TestWorkflowsSetCompatEnvThroughTheScript(t *testing.T) {
 	}
 	for _, want := range []string{
 		`BROWSER_VARS=CONSOLE,CONTROL,ADMIN_TOKEN,CLUSTER` + "\n",
-		`if [ "$shard" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE,BIGTABLE,SPANNER; fi`,
+		`if [ "$shard" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE,BIGTABLE,SPANNER,KMS; fi`,
 		`if [ "$shard" = memorystore ]; then BROWSER_VARS+=,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT; fi`,
 		`if [ "$shard" = storage ]; then BROWSER_VARS+=,LOGGING,STORAGE,PUBSUB,TASKS,SCHEDULER,RESOURCEMANAGER,SERVICEUSAGE; fi`,
 		`if [ "$shard" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT; fi`,

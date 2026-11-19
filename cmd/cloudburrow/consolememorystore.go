@@ -313,6 +313,7 @@ func (p memorystoreProvider) Detail(ctx context.Context, project string, path []
 			console.Property{Label: "Alternative zone", Value: inst.GetAlternativeLocationId()},
 			console.Property{Label: "Nodes", Value: strings.Join(nodes, ", ")})
 	}
+	props = append(props, memorystoreMaintenanceSummary(inst)...)
 	if inst.GetAuthEnabled() {
 		if a, err := p.api().GetInstanceAuthString(ctx, &redispb.GetInstanceAuthStringRequest{Name: name}); err == nil {
 			props = append(props, console.Property{Label: "AUTH string", Value: orDash(a.GetAuthString())})
@@ -355,6 +356,10 @@ func (p memorystoreProvider) Detail(ctx context.Context, project string, path []
 			{Name: "persistence", Label: "Persistence", Type: "select", Default: memorystorePersistenceChoice(inst.GetPersistenceConfig()),
 				Options: memorystorePersistenceChoices,
 				Help:    "RDB snapshots every period (the server's save point), or none; set on the running server."},
+			{Name: "maintenanceDay", Label: "Maintenance window day", Type: "select", Default: memorystoreWindowDay(inst),
+				Options: memorystoreWindowDays, Help: "The weekly one-hour maintenance window (maintenance_policy); NONE for no window."},
+			{Name: "maintenanceHour", Label: "Maintenance window hour (UTC)", Type: "number", Pattern: `^([0-9]|1[0-9]|2[0-3])$`,
+				Default: memorystoreWindowHour(inst), Help: "0 to 23."},
 		},
 		Note: "Saved through UpdateInstance. The ID, region, tier, version and AUTH cannot be changed here.",
 	}
@@ -404,6 +409,20 @@ func (p memorystoreProvider) Edit(ctx context.Context, project string, path []st
 				return fmt.Errorf("persistence %q is not DISABLED or a snapshot period", v)
 			}
 			paths, in.PersistenceConfig = append(paths, "persistence_config"), pc
+		}
+	}
+	if day, ok := values["maintenanceDay"]; ok {
+		cur, err := p.api().GetInstance(ctx, &redispb.GetInstanceRequest{Name: name})
+		if err != nil {
+			return err
+		}
+		hour := strings.TrimSpace(values["maintenanceHour"])
+		if day != memorystoreWindowDay(cur) || (day != "NONE" && hour != memorystoreWindowHour(cur)) {
+			mp, err := memorystorePolicy(day, hour)
+			if err != nil {
+				return err
+			}
+			paths, in.MaintenancePolicy = append(paths, "maintenance_policy"), mp
 		}
 	}
 	if values["readReplicas"] == "true" {
@@ -473,6 +492,9 @@ func (p memorystoreProvider) DetailActions(ctx context.Context, project string, 
 		upgrade = append(upgrade, console.Action{ID: "rotate-ca", Label: "Rotate server CA",
 			Confirm: "A new server CA is listed beside the current one, which stays valid until it expires; the server is started again with a certificate of the new CA. Install every listed CA on your clients first. (Memorystore rotates five years after creation, or on a support request.)"})
 	}
+	if ierr == nil {
+		upgrade = append(upgrade, memorystoreMaintenanceActions(inst)...)
+	}
 	return append(upgrade, []console.Action{
 		{ID: "export", Label: "Export", Fields: []console.Field{{Name: "uri", Label: "Destination", Type: "text", Required: true,
 			Pattern: "^gs://[^\\/]+/.+$", Help: "gs://bucket/object: the RDB file ExportInstance writes, in this instance's Cloud Storage."}}},
@@ -516,6 +538,8 @@ func (p memorystoreProvider) ActAt(ctx context.Context, project string, path []s
 		opName = op.GetName()
 	case "rotate-ca":
 		return p.api().RotateServerCA(ctx, name)
+	case "schedule-maintenance", "cancel-maintenance", "reschedule-maintenance":
+		return p.maintenanceAct(ctx, name, action, values)
 	case "upgrade":
 		op, err := p.api().UpgradeInstance(ctx, &redispb.UpgradeInstanceRequest{Name: name, RedisVersion: values["redisVersion"]})
 		if err != nil {

@@ -36,19 +36,19 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 	config.ServiceStorage:       {Providers: []string{"storage", "storage-deleted", "storage-settings", "storage-intelligence"}},
 	config.ServicePubSub:        {Providers: []string{"pubsub", "pubsub-subscriptions", "pubsub-snapshots", "pubsub-schemas"}},
 	config.ServiceTasks:         {Providers: []string{"tasks"}},
-	config.ServiceRun:           {Providers: []string{"run", "run-jobs", "run-worker-pools", "run-instances", "run-builds", "cloud-build-triggers", "cloud-build-worker-pools", "secure-source-manager", "artifact-registry", "functions"}},
-	config.ServiceSecrets:       {Providers: []string{"secrets"}},
+	config.ServiceRun:           {Providers: []string{"run", "run-jobs", "run-worker-pools", "run-domains", "run-instances", "run-builds", "cloud-build-triggers", "cloud-build-worker-pools", "cloud-build-dashboard", "cloud-build-repositories", "cloud-build-settings", "secure-source-manager", "artifact-registry", "functions", "eventarc"}},
+	config.ServiceSecrets:       {Providers: []string{"secrets", "secrets-regional"}},
 	config.ServiceFirestore:     {Providers: []string{"firestore", "firestore-databases"}},
 	config.ServiceDatastore:     {Providers: []string{"datastore"}},
 	config.ServiceBigtable:      {Providers: []string{"bigtable", "bigtable-instances"}},
 	config.ServiceSpanner:       {Providers: []string{"spanner"}},
-	config.ServiceCloudSQL:      {Providers: []string{"cloudsql", "cloudsql-instances"}},
+	config.ServiceCloudSQL:      {Providers: []string{"cloudsql", "cloudsql-instances", "cloudsql-backups"}},
 	config.ServiceBigQuery:      {Providers: []string{"bigquery", "bigquery-jobs"}},
 	config.ServiceScheduler:     {Providers: []string{"scheduler"}},
-	config.ServiceKMS:           {Providers: []string{"kms", "kms-ekm", "kms-autokey", "kms-hsm"}},
-	config.ServiceLogging:       {Providers: []string{"logging-metrics", "logging-sinks", "logging-exclusions", "logging-buckets", "logging-settings", "logging-saved-queries", "logging-log-scopes"}, Screen: "/logs"},
+	config.ServiceKMS:           {Providers: []string{"kms", "kms-ekm", "kms-autokey", "kms-inventory", "kms-hsm"}},
+	config.ServiceLogging:       {Providers: []string{"logging-metrics", "logging-sinks", "logging-exclusions", "logging-buckets", "logging-settings", "logging-saved-queries", "logging-log-scopes", "logging-analytics"}, Screen: "/logs"},
 	config.ServiceMemorystore:   {Providers: []string{"memorystore", "memorystore-clusters", "memorystore-valkey"}},
-	config.ServiceCloudSQLMySQL: {Providers: []string{"cloudsql-mysql", "cloudsql-instances"}},
+	config.ServiceCloudSQLMySQL: {Providers: []string{"cloudsql-mysql", "cloudsql-instances", "cloudsql-backups"}},
 	config.ServiceBackupDR:      {Providers: []string{"backupdr"}},
 	config.ServicePrivateCA:     {Providers: []string{"privateca", "privateca-templates"}},
 }
@@ -56,7 +56,7 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 // clusterScreens are the registry's screens that belong to no selectable
 // service: Resource Manager, the AI catalogue and CloudBurrow's own cluster.
 var clusterScreens = []string{
-	"projects", "hierarchy", "tags", "iam", "iam-roles", "iam-groups", "iam-service-accounts", "iam-audit", "serviceusage", "serviceusage-operations", "ai",
+	"projects", "hierarchy", "tags", "iam", "iam-roles", "iam-groups", "iam-service-accounts", "iam-audit", "iam-orgpolicies", "iam-labels", "iam-settings", "serviceusage", "serviceusage-operations", "ai",
 	"workloads", "pods", "k8sservices", "jobs", "nodes", "k8sstorage", "events",
 }
 

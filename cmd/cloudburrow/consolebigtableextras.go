@@ -50,6 +50,11 @@ func (p bigtableProvider) bigtableSQL(ctx context.Context, project, sql string) 
 		return console.Listing{Unavailable: "cannot reach Bigtable: " + err.Error()}, nil
 	}
 	defer c.Close()
+	return bigtableSQLWith(ctx, c, sql)
+}
+
+// bigtableSQLWith runs a query on c and lists its rows.
+func bigtableSQLWith(ctx context.Context, c *bigtable.Client, sql string) (console.Listing, error) {
 	ps, err := c.PrepareStatement(ctx, sql, nil)
 	if err != nil {
 		return console.Listing{}, err

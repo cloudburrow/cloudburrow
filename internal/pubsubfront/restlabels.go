@@ -137,6 +137,10 @@ func (f *Front) serveTopic(w http.ResponseWriter, r *http.Request, name, verb st
 				writeRESTError(w, err)
 				return
 			}
+			if err := f.checkTopicKey(r.Context(), &t); err != nil {
+				writeRESTError(w, err)
+				return
+			}
 			// A binding to a Protocol Buffer schema the front keeps
 			// (protobufschemas.go, #1406) is the front's.
 			ss, err := f.takeTopicSchema(&t)

@@ -63,19 +63,23 @@ import (
 	"google.golang.org/protobuf/reflect/protoregistry"
 
 	_ "cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
+	_ "cloud.google.com/go/aiplatform/apiv1beta1/aiplatformpb"
 	_ "cloud.google.com/go/artifactregistry/apiv1/artifactregistrypb"
 	_ "cloud.google.com/go/bigtable/admin/apiv2/adminpb"
 	_ "cloud.google.com/go/bigtable/apiv2/bigtablepb"
 	_ "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
 	_ "cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
+	_ "cloud.google.com/go/datastore/admin/apiv1/adminpb"
 	_ "cloud.google.com/go/datastore/apiv1/datastorepb"
 	_ "cloud.google.com/go/developerconnect/apiv1/developerconnectpb"
+	_ "cloud.google.com/go/eventarc/apiv1/eventarcpb"
 	_ "cloud.google.com/go/firestore/apiv1/admin/adminpb"
 	_ "cloud.google.com/go/firestore/apiv1/firestorepb"
 	_ "cloud.google.com/go/functions/apiv1/functionspb"
 	_ "cloud.google.com/go/functions/apiv2/functionspb"
 	_ "cloud.google.com/go/iam/admin/apiv1/adminpb"
 	_ "cloud.google.com/go/iam/apiv1/iampb"
+	_ "cloud.google.com/go/iam/apiv2/iampb"
 	_ "cloud.google.com/go/kms/apiv1/kmspb"
 	_ "cloud.google.com/go/logging/apiv2/loggingpb"
 	_ "cloud.google.com/go/memorystore/apiv1/memorystorepb"
@@ -124,6 +128,9 @@ var areas = []area{
 	// host whose pushes run Cloud Build triggers.
 	{Key: "securesourcemanager", Title: "Secure Source Manager", Own: true, Services: []string{"google.cloud.securesourcemanager.v1.SecureSourceManager"}},
 	{Key: "developerconnect", Title: "Developer Connect", Own: true, Services: []string{"google.cloud.developerconnect.v1.DeveloperConnect"}},
+	// Eventarc (#1877), on the Run port: triggers delivering Pub/Sub and
+	// Cloud Storage events to Cloud Run as CloudEvents.
+	{Key: "eventarc", Title: "Eventarc", Own: true, Services: []string{"google.cloud.eventarc.v1.Eventarc"}},
 	// Cloud Functions v2 (#1377), on the Run port: a function is a
 	// SubmitBuild buildpacks build and a Cloud Run service. Its IAM and
 	// Locations mixins are KMS's keys, which are global.
@@ -149,7 +156,9 @@ var areas = []area{
 	// QueryTestablePermissions, service accounts, their keys and IAM
 	// policies; SignBlob and SignJwt (deprecated for IAM Credentials'),
 	// grantable roles, auditable services and lint are UNIMPLEMENTED.
-	{Key: "iam", Title: "IAM (custom roles, service accounts)", Own: true, Services: []string{"google.iam.admin.v1.IAM"}},
+	// The Organization Policy API v2 (#1890) is on the same port.
+	{Key: "iam", Title: "IAM (custom roles, service accounts, deny policies, organization policies)", Own: true, Services: []string{"google.iam.admin.v1.IAM", "google.iam.v2.Policies",
+		"google.cloud.orgpolicy.v2.OrgPolicy"}},
 	// Liens (#1295) have no gRPC service: they are on resourcemanagerv1.
 	{Key: "resourcemanager", Title: "Resource Manager v3 (Projects, Folders, Organizations, Tags)", Own: true, Services: []string{"google.cloud.resourcemanager.v3.Projects",
 		"google.cloud.resourcemanager.v3.Folders", "google.cloud.resourcemanager.v3.Organizations", "google.cloud.resourcemanager.v3.TagKeys",
@@ -175,7 +184,13 @@ var areas = []area{
 	// Async bucket calls, links and settings since #1292, and CopyLogEntries since #1394.
 	{Key: "logging", Title: "Cloud Logging", Own: true, Services: []string{"google.logging.v2.LoggingServiceV2", "google.logging.v2.MetricsServiceV2", "google.logging.v2.ConfigServiceV2"}},
 	// The local AI endpoint's PredictionService (#1193).
-	{Key: "vertexai", Title: "Vertex AI PredictionService", Own: true, Services: []string{"google.cloud.aiplatform.v1.PredictionService"}},
+	// Model Garden's Hugging Face deployments on the same port (#1840):
+	// Deploy, and the Endpoint and Model it creates.
+	{Key: "vertexai", Title: "Vertex AI PredictionService", Own: true, Services: []string{"google.cloud.aiplatform.v1.PredictionService",
+		"google.cloud.aiplatform.v1.ModelGardenService", "google.cloud.aiplatform.v1.EndpointService", "google.cloud.aiplatform.v1.ModelService"}},
+	// v1beta1's PredictionService, for ChatCompletions on those endpoints
+	// (#1840): a page of its own, since its method names repeat v1's.
+	{Key: "vertexaiv1beta1", Title: "Vertex AI PredictionService v1beta1", Own: true, Services: []string{"google.cloud.aiplatform.v1beta1.PredictionService"}},
 	// The Memorystore for Redis admin API (#1302), over the one Valkey
 	// server --services memorystore runs, and Memorystore for Redis
 	// Cluster and Memorystore for Valkey (#1519) on the same port.
@@ -204,6 +219,10 @@ var areas = []area{
 	// serves the documents API alone.
 	{Key: "firestoreadmin", Title: "Firestore Admin API", Own: true, Services: []string{"google.firestore.admin.v1.FirestoreAdmin"}},
 	{Key: "datastore", Title: "Datastore", Services: []string{"google.datastore.v1.Datastore"}},
+	// The Datastore Admin API (#1884) is CloudBurrow's own, served by the
+	// Datastore pod's call front (internal/callfront): exports, imports
+	// and indexes, which the emulator does not serve.
+	{Key: "datastoreadmin", Title: "Datastore Admin API", Own: true, Services: []string{"google.datastore.admin.v1.DatastoreAdmin"}},
 	{Key: "bigtable", Title: "Bigtable", Services: []string{"google.bigtable.v2.Bigtable", "google.bigtable.admin.v2.BigtableTableAdmin", "google.bigtable.admin.v2.BigtableInstanceAdmin"}},
 	{Key: "spanner", Title: "Spanner", Services: []string{"google.spanner.v1.Spanner", "google.spanner.admin.database.v1.DatabaseAdmin", "google.spanner.admin.instance.v1.InstanceAdmin"}},
 	// BigQuery (#993): the community emulator behind CloudBurrow's

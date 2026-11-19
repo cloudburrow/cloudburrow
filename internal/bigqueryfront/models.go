@@ -287,6 +287,9 @@ func (md bqModel) resource(full bool) map[string]any {
 			"DNN_LINEAR_COMBINED_REGRESSOR": "DNN_LINEAR_COMBINED_REGRESSOR", "DNN_LINEAR_COMBINED_CLASSIFIER": "DNN_LINEAR_COMBINED_CLASSIFIER",
 			"ONNX": "ONNX", "XGBOOST": "XGBOOST", "TENSORFLOW_LITE": "TENSORFLOW_LITE", "TENSORFLOW": "TENSORFLOW"}[md.Options.ModelType],
 	}
+	if md.Options.AutoML != nil {
+		res["modelType"] = md.Options.AutoML.Type // modelautoml.go, #1776
+	}
 	if md.Location != "" {
 		res["location"] = md.Location
 	}
@@ -549,6 +552,9 @@ func (md bqModel) resource(full bool) map[string]any {
 		}
 		res["transformColumns"] = tc
 	}
+	if md.Options.AutoML != nil {
+		opts = md.automlResource() // modelautoml.go, #1776
+	}
 	res["trainingRuns"] = []map[string]any{{
 		"trainingOptions":   opts,
 		"startTime":         time.UnixMilli(md.Created).UTC().Format(time.RFC3339Nano),
@@ -735,8 +741,6 @@ type modelDDL struct {
 // unsupportedModelTypes are the model types CloudBurrow refuses, and
 // why.
 var unsupportedModelTypes = map[string]string{
-	"AUTOML_REGRESSOR":  "AutoML trains on Vertex AI's hosted service, whose model search Google does not document",
-	"AUTOML_CLASSIFIER": "AutoML trains on Vertex AI's hosted service, whose model search Google does not document",
 	// An imported model (#1562, measured): no CloudBurrow build has a
 	// TensorFlow runtime. An ONNX model runs on the ONNX Runtime of the
 	// opt-in `-tags onnx` build (modelonnx.go), and an XGBoost one on
@@ -748,7 +752,7 @@ var unsupportedModelTypes = map[string]string{
 // refusedModelType is the 501 of a model type CloudBurrow refuses.
 func refusedModelType(typ, why string) string {
 	return "Not implemented here: model_type " + typ + ": " + why +
-		". CloudBurrow trains LINEAR_REG, LOGISTIC_REG, KMEANS, PCA, MATRIX_FACTORIZATION, BOOSTED_TREE_REGRESSOR / BOOSTED_TREE_CLASSIFIER, RANDOM_FOREST_REGRESSOR / RANDOM_FOREST_CLASSIFIER, DNN_REGRESSOR / DNN_CLASSIFIER, DNN_LINEAR_COMBINED_REGRESSOR / DNN_LINEAR_COMBINED_CLASSIFIER, AUTOENCODER and ARIMA_PLUS models. Nothing was run."
+		". CloudBurrow trains LINEAR_REG, LOGISTIC_REG, KMEANS, PCA, MATRIX_FACTORIZATION, BOOSTED_TREE_REGRESSOR / BOOSTED_TREE_CLASSIFIER, RANDOM_FOREST_REGRESSOR / RANDOM_FOREST_CLASSIFIER, DNN_REGRESSOR / DNN_CLASSIFIER, DNN_LINEAR_COMBINED_REGRESSOR / DNN_LINEAR_COMBINED_CLASSIFIER, AUTOENCODER, AUTOML_REGRESSOR / AUTOML_CLASSIFIER and ARIMA_PLUS models. Nothing was run."
 }
 
 // parseModelDDL reads stmt as CREATE MODEL or DROP MODEL. isModel is
@@ -875,6 +879,11 @@ func parseModelDDL(stmt []token, sql string) (d modelDDL, isModel bool, code int
 	}
 	if d.opts.ModelType == "MATRIX_FACTORIZATION" {
 		applyMFDefaults(&d.opts)
+	}
+	if isAutoML(d.opts.ModelType) {
+		if c, m := checkAutoMLOptions(&d.opts); c != 0 {
+			return d, true, c, m
+		}
 	}
 	if isTreeModel(d.opts.ModelType) {
 		applyTreeDefaults(&d.opts)
@@ -1307,8 +1316,30 @@ func parseModelOptions(toks []token, o *mlOptions) (int, string) {
 			}
 			o.TS.Seasonalities = strings.Join(ss, ",")
 		case "holiday_region":
-			return 501, "Not implemented here: holiday_region: its holiday effects come from Google's holiday calendar " +
-				"(bigquery-public-data.ml_datasets.holidays_and_events_for_forecasting), which CloudBurrow does not have. Nothing was run."
+			// A STRING or ARRAY<STRING> (modelholidayregion.go, #1776);
+			// the values are case-sensitive.
+			var rs []string
+			if s, ok := str(); ok {
+				rs = []string{s}
+			} else if len(val) >= 2 && val[0].punct("[") && val[len(val)-1].punct("]") {
+				for _, t := range val[1 : len(val)-1] {
+					if t.punct(",") {
+						continue
+					}
+					s, ok := unquoteString(t.text)
+					if t.kind != tokString || !ok {
+						return bad()
+					}
+					rs = append(rs, s)
+				}
+			} else {
+				return bad()
+			}
+			regions, why := parseHolidayRegions(rs)
+			if why != "" {
+				return 400, why
+			}
+			o.TS.Regions = regions
 		case "forecast_limit_lower_bound", "forecast_limit_upper_bound":
 			v, ok := num()
 			if !ok {
@@ -1484,6 +1515,16 @@ func parseModelOptions(toks []token, o *mlOptions) (int, string) {
 			default:
 				return bad()
 			}
+		case "budget_hours": // AUTOML_* (modelautoml.go, #1776)
+			v, ok := num()
+			if !ok {
+				return bad()
+			}
+			o.BudgetHours = v
+		case "optimization_objective":
+			if c, m := parseAutoMLObjective(val, o); c != 0 {
+				return c, m
+			}
 		case "enable_global_explain":
 			b, ok := boolv()
 			if !ok {
@@ -1529,15 +1570,19 @@ var modelTypeOptions = map[string][]string{
 		"data_split_method", "data_split_eval_fraction", "data_split_col", "category_encoding_method", "enable_global_explain", "max_tree_depth",
 		"min_split_loss", "min_tree_child_weight", "booster_type", "tree_method", "num_parallel_tree", "subsample", "colsample_bytree",
 		"colsample_bylevel", "colsample_bynode"},
+	// The AutoML page's options but kms_key_name (modelautoml.go, #1776).
+	"AUTOML_REGRESSOR":  {"input_label_cols", "budget_hours", "optimization_objective", "data_split_col"},
+	"AUTOML_CLASSIFIER": {"input_label_cols", "budget_hours", "optimization_objective", "data_split_col"},
 	"ARIMA_PLUS": {"time_series_timestamp_col", "time_series_data_col", "time_series_id_col", "horizon", "auto_arima", "auto_arima_max_order",
 		"auto_arima_min_order", "non_seasonal_order", "data_frequency", "include_drift", "clean_spikes_and_dips", "adjust_step_changes",
 		"decompose_time_series", "seasonalities", "trend_smoothing_window_size", "time_series_length_fraction", "min_time_series_length",
-		"max_time_series_length", "forecast_limit_lower_bound", "forecast_limit_upper_bound"},
+		"max_time_series_length", "forecast_limit_lower_bound", "forecast_limit_upper_bound", "holiday_region"},
 	// ARIMA_PLUS_XREG's page lists no decompose_time_series, seasonalities
 	// or forecast limits, and adds l2_reg (#1766).
 	"ARIMA_PLUS_XREG": {"time_series_timestamp_col", "time_series_data_col", "time_series_id_col", "horizon", "auto_arima", "auto_arima_max_order",
 		"auto_arima_min_order", "non_seasonal_order", "data_frequency", "include_drift", "clean_spikes_and_dips", "adjust_step_changes",
-		"trend_smoothing_window_size", "time_series_length_fraction", "min_time_series_length", "max_time_series_length", "l2_reg"},
+		"trend_smoothing_window_size", "time_series_length_fraction", "min_time_series_length", "max_time_series_length", "l2_reg",
+		"holiday_region"},
 	"RANDOM_FOREST_REGRESSOR": {"input_label_cols", "l1_reg", "l2_reg", "early_stop", "min_rel_progress", "data_split_method",
 		"data_split_eval_fraction", "data_split_col", "enable_global_explain", "max_tree_depth", "min_split_loss", "min_tree_child_weight",
 		"tree_method", "num_parallel_tree", "subsample", "colsample_bytree", "colsample_bylevel", "colsample_bynode"},
@@ -1880,6 +1925,11 @@ func (f front) modelStatements(w http.ResponseWriter, r *http.Request, q queryOp
 			}
 			fail(fe.code, msg)
 			return true
+		}
+		if trained.automlOpts != nil {
+			// The model the AutoML search chose (modelautoml.go, #1776).
+			d.opts = *trained.automlOpts
+			trained.automlOpts = nil
 		}
 		if !dry {
 			now := f.now().UnixMilli()

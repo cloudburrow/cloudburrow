@@ -42,7 +42,7 @@ func TestCloudSQLConsoleReencrypt(t *testing.T) {
 	p := cloudSQLInstancesProvider{endpoint: strings.TrimPrefix(ts.URL, "http://"), versions: []string{"POSTGRES_17"}}
 	ctx := context.Background()
 	has := func(name string) bool {
-		d, err := p.Detail(ctx, "proj", []string{name})
+		d, err := p.allOf(ctx, "proj", []string{name})
 		if err != nil {
 			t.Fatal(err)
 		}

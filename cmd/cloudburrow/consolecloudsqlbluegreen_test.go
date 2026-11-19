@@ -62,7 +62,7 @@ func TestCloudSQLConsoleBlueGreen(t *testing.T) {
 	p := cloudSQLInstancesProvider{endpoint: strings.TrimPrefix(ts.URL, "http://"), versions: []string{"MYSQL_8_0"}}
 	ctx := context.Background()
 	page := func(name string) (map[string]string, map[string]bool) {
-		d, err := p.Detail(ctx, "proj", []string{name})
+		d, err := p.allOf(ctx, "proj", []string{name})
 		if err != nil {
 			t.Fatal(err)
 		}

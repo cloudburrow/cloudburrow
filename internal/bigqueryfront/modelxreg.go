@@ -507,7 +507,7 @@ func (f front) xregSubquery(r *http.Request, q queryOptions, md bqModel, c mlCal
 		return "", code, msg
 	}
 	z := normalQuantile(level)
-	names := holidayNames(ts.Holidays) // #1776
+	names := holidayNames(md.holidays()) // #1776
 	var attrCols []string
 	for _, ft := range x.Features {
 		attrCols = append(attrCols, sqlIdent("attribution_"+ft.Name)+" FLOAT64")

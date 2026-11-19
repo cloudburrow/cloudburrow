@@ -599,12 +599,18 @@ func (s *Server) anywhereCachesList(w http.ResponseWriter, r *http.Request) {
 // anywhereCachesPauseRE is anywhereCaches.pause's path under /storage/v1/.
 // Google removed the method from the discovery document in revision
 // 20261107 (google.golang.org/api v0.314.0, whose generated client no
-// longer has AnywhereCaches.Pause, and whose resume now "Resumes a paused or
-// disabled Anywhere Cache instance"); google.storage.control.v2 still has
-// PauseAnywhereCache and older JSON clients (and the console) still send
-// it, so it stays
-// served, routed by its path ahead of the discovery methods and out of
-// methodStatus, as objects.watchAll and channels.stop are (channels.go).
+// longer has AnywhereCaches.Pause, and whose resume now "Resumes a disabled
+// Anywhere Cache instance", where 20261009's resumed "a paused or disabled"
+// one); the public document, revision 20261111, re-read 2026-11-18, still
+// has none. gcloud's anywhere-caches pause, the console's pause and the
+// docs' "Pause a cache" went with it. google.storage.control.v2 still has
+// PauseAnywhereCache (googleapis master, cloud.google.com/go/storage
+// v1.71.0) and still resumes "a disabled or paused" cache, and older JSON
+// clients still send this path, so it stays served, routed by its path
+// ahead of the discovery methods and out of methodStatus, as
+// objects.watchAll and channels.stop are (channels.go). What Google itself
+// now answers on this path is UNVERIFIED (2026-11-18): it can only be
+// measured against a live project (#1791).
 var anywhereCachesPauseRE = pathRE("b/{bucket}/anywhereCaches/{anywhereCacheId}/pause")
 
 // anywhereCachesState is pause, resume or disable: from the states listed to

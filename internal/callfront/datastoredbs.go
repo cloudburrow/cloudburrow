@@ -20,6 +20,7 @@ import (
 	"google.golang.org/protobuf/encoding/protowire"
 
 	"github.com/cloudburrow/cloudburrow/internal/frontstate"
+	"github.com/cloudburrow/cloudburrow/internal/queryfront"
 )
 
 // The named Datastore databases calls name (#1550). The Datastore emulator
@@ -58,6 +59,9 @@ type datastoreDatabases struct {
 	// known is the databases recorded since the front started,
 	// "projects/p/databases/d".
 	known map[string]bool
+	// gate is the front's access gate (datastoregate.go), nil without
+	// the Firestore Admin API.
+	gate *datastoreGate
 }
 
 func newDatastoreDatabases(upstream string, logf func(string, ...any)) *datastoreDatabases {
@@ -71,7 +75,9 @@ func (d *datastoreDatabases) client() (pb.DatastoreClient, error) {
 	if d.err != nil {
 		return nil, d.err
 	}
-	return pb.NewDatastoreClient(d.conn), nil
+	// Each named database is kept in an emulator project of its own
+	// (#1885), as the calls the front passes keep it.
+	return queryfront.DatabasesClient(pb.NewDatastoreClient(d.conn)), nil
 }
 
 // namedDatabase splits "projects/p/databases/d" for a named d.
@@ -166,6 +172,20 @@ func (d *datastoreDatabases) forget(ctx context.Context, project string) ([]stri
 	for _, db := range sortedKeys(dbs) {
 		muts = append(muts, &pb.Mutation{Operation: &pb.Mutation_Delete{Delete: markerKey(project, db)}})
 	}
+	// The project's Datastore Admin API indexes go with it (#1884).
+	ixs, err := c.RunQuery(withRouting(ctx), &pb.RunQueryRequest{ProjectId: MarkerProject,
+		QueryType: &pb.RunQueryRequest_Query{Query: &pb.Query{
+			Kind: []*pb.KindExpression{{Name: indexKind}},
+			Filter: &pb.Filter{FilterType: &pb.Filter_PropertyFilter{PropertyFilter: &pb.PropertyFilter{
+				Property: &pb.PropertyReference{Name: "project"}, Op: pb.PropertyFilter_EQUAL,
+				Value: &pb.Value{ValueType: &pb.Value_StringValue{StringValue: project}}}}},
+		}}})
+	if err != nil {
+		return nil, fmt.Errorf("read the indexes: %w", err)
+	}
+	for _, r := range ixs.GetBatch().GetEntityResults() {
+		muts = append(muts, &pb.Mutation{Operation: &pb.Mutation_Delete{Delete: r.GetEntity().GetKey()}})
+	}
 	if len(muts) > 0 {
 		if _, err := c.Commit(withRouting(ctx), &pb.CommitRequest{ProjectId: MarkerProject,
 			Mode: pb.CommitRequest_NON_TRANSACTIONAL, Mutations: muts}); err != nil {
@@ -252,11 +272,17 @@ func restDatabase(contentType string, b []byte) string {
 	return body.DatabaseID
 }
 
-// Claims claims ForgetPath.
-func (d *datastoreDatabases) Claims(r *http.Request) bool { return r.URL.Path == ForgetPath }
+// Claims claims ForgetPath and frontstate.DatastoreClearPath.
+func (d *datastoreDatabases) Claims(r *http.Request) bool {
+	return r.URL.Path == ForgetPath || r.URL.Path == frontstate.DatastoreClearPath
+}
 
-// ServeHTTP answers ForgetPath.
+// ServeHTTP answers ForgetPath and frontstate.DatastoreClearPath.
 func (d *datastoreDatabases) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == frontstate.DatastoreClearPath {
+		d.serveClear(w, r)
+		return
+	}
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
 		http.Error(w, "POST only", http.StatusMethodNotAllowed)

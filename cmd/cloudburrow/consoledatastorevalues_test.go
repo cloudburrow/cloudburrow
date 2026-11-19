@@ -166,7 +166,7 @@ func TestDatastoreValueActionsAreOfferedWhereTheyApply(t *testing.T) {
 	got := map[string][]string{}
 	for _, el := range datastoreElements(drawn) {
 		var ids []string
-		for _, a := range datastoreElementActions("demo", el, drawn) {
+		for _, a := range datastoreElementActions(datastoreHome{project: "demo"}, el, drawn) {
 			ids = append(ids, a.ID)
 			last := a.Fields[len(a.Fields)-1]
 			if last.Name != datastoreExpectedField || last.Type != "hidden" || last.Default != digest {
@@ -227,7 +227,7 @@ func TestDatastoreBlobValuesRoundTripAsBase64(t *testing.T) {
 	blob := &datastorepb.Value{ValueType: &datastorepb.Value_BlobValue{BlobValue: []byte{0, 1, 0xff}}, Meaning: 16}
 	orig := &datastorepb.Value{ValueType: &datastorepb.Value_ArrayValue{ArrayValue: &datastorepb.ArrayValue{
 		Values: []*datastorepb.Value{blob}}}}
-	fields, _, ok := datastoreElementForm(datastoreValueGo(blob, "demo"), false, false)
+	fields, _, ok := datastoreElementForm(datastoreValueGo(blob, datastoreHome{project: "demo"}), false, false)
 	if !ok {
 		t.Fatal("a blob is offered no Edit value")
 	}
@@ -243,7 +243,7 @@ func TestDatastoreBlobValuesRoundTripAsBase64(t *testing.T) {
 		t.Fatal(err)
 	}
 	prop := proto.Clone(orig).(*datastorepb.Value)
-	if err := setDatastoreElement(prop, "demo", "b", []any{0}, parsed, datastoreExcludedValue(values)); err != nil {
+	if err := setDatastoreElement(prop, datastoreHome{project: "demo"}, "b", []any{0}, parsed, datastoreExcludedValue(values)); err != nil {
 		t.Fatal(err)
 	}
 	if !proto.Equal(prop, orig) {
@@ -253,13 +253,13 @@ func TestDatastoreBlobValuesRoundTripAsBase64(t *testing.T) {
 	long := strings.Repeat("AAAA", 501) // 1,503 bytes
 	values = map[string]string{"type": "blob", "value": long, "excluded": "false"}
 	parsed, _ = parseDatastoreElementValue(values, false)
-	if err := setDatastoreElement(proto.Clone(orig).(*datastorepb.Value), "demo", "b", []any{0}, parsed, datastoreExcludedValue(values)); err == nil ||
+	if err := setDatastoreElement(proto.Clone(orig).(*datastorepb.Value), datastoreHome{project: "demo"}, "b", []any{0}, parsed, datastoreExcludedValue(values)); err == nil ||
 		!strings.Contains(err.Error(), "too long to index") {
 		t.Errorf("an indexed 1,503-byte blob: err %v, want too long to index", err)
 	}
 	values["excluded"] = "true"
 	prop = proto.Clone(orig).(*datastorepb.Value)
-	if err := setDatastoreElement(prop, "demo", "b", []any{0}, parsed, datastoreExcludedValue(values)); err != nil {
+	if err := setDatastoreElement(prop, datastoreHome{project: "demo"}, "b", []any{0}, parsed, datastoreExcludedValue(values)); err != nil {
 		t.Fatal(err)
 	}
 	if v := prop.GetArrayValue().GetValues()[0]; len(v.GetBlobValue()) != 1503 || !v.GetExcludeFromIndexes() {
@@ -271,7 +271,7 @@ func TestDatastoreBlobValuesRoundTripAsBase64(t *testing.T) {
 	two := proto.Clone(orig).(*datastorepb.Value)
 	two.GetArrayValue().Values = append(two.GetArrayValue().Values, &datastorepb.Value{ValueType: &datastorepb.Value_StringValue{StringValue: "x"}})
 	before := proto.Clone(two).(*datastorepb.Value)
-	if err := setDatastoreElement(two, "demo", "b", []any{0}, parsed, datastoreExcludedValue(values)); err == nil || !strings.Contains(err.Error(), "reorder") {
+	if err := setDatastoreElement(two, datastoreHome{project: "demo"}, "b", []any{0}, parsed, datastoreExcludedValue(values)); err == nil || !strings.Contains(err.Error(), "reorder") {
 		t.Errorf("an excluded blob before an indexed value: err %v, want it refused", err)
 	}
 	if !proto.Equal(two, before) {

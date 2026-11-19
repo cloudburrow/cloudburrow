@@ -8,6 +8,8 @@ import (
 	"io"
 	"log"
 	"net"
+
+	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 )
 
 // ErrUsage means the arguments were refused; the reason has been written.
@@ -23,6 +25,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// Where the front keeps its records and data copies (state.go,
 	// #1514): the pod's emptyDir.
 	stateDir := fs.String("state-dir", "", "directory the front keeps its state in")
+	resourceManager := fs.String("resourcemanager", "", "http://host:port of the host's Resource Manager, asked for organization policies (what `up` passes, #1890)")
 	if err := fs.Parse(args); err != nil {
 		return ErrUsage
 	}
@@ -31,6 +34,10 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return ErrUsage
 	}
 	logger := log.New(stdout, "", log.LstdFlags|log.LUTC)
+	if *resourceManager != "" {
+		orgpolicy.Use(orgpolicy.Remote{Base: *resourceManager})
+		defer orgpolicy.Use(nil)
+	}
 	f, err := New(*upstream, logger.Printf)
 	if err != nil {
 		return err

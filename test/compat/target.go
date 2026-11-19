@@ -207,6 +207,9 @@ var gcloudOverrides = []struct {
 	{"iam", []string{"RESOURCEMANAGER"}},
 	// Cloud Identity groups (#1812), on the Resource Manager port.
 	{"cloudidentity", []string{"RESOURCEMANAGER"}},
+	{"policytroubleshooter", []string{"RESOURCEMANAGER"}},
+	// The Organization Policy API v2 (#1890), on the Resource Manager port.
+	{"orgpolicy", []string{"RESOURCEMANAGER"}},
 	{"serviceusage", []string{"SERVICEUSAGE", "RUN_SERVICEUSAGE"}},
 	{"run", []string{"RUN"}},
 	// Served on the Run port (#1347).
@@ -215,6 +218,7 @@ var gcloudOverrides = []struct {
 	{"cloudfunctions", []string{"RUN"}},
 	{"securesourcemanager", []string{"RUN"}},
 	{"developerconnect", []string{"RUN"}},
+	{"eventarc", []string{"RUN"}},
 	{"sql", []string{"SQLADMIN"}},
 	{"redis", []string{"MEMORYSTORE_ADMIN"}},
 	{"memorystore", []string{"MEMORYSTORE_ADMIN"}},
@@ -225,6 +229,7 @@ var gcloudOverrides = []struct {
 	// Spanner's admin REST API and the Firestore Admin API (#1461).
 	{"spanner", []string{"SPANNER_REST"}},
 	{"firestore", []string{"FIRESTORE"}},
+	{"datastore", []string{"DATASTORE"}},
 }
 
 // gcloudRestrictConfig checks a configuration `cloudburrow gcloud-setup`

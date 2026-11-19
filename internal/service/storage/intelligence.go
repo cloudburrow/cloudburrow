@@ -397,10 +397,12 @@ func writeControlProto(w http.ResponseWriter, mo protojson.MarshalOptions, m pro
 }
 
 // ControlGRPCMethods are the google.storage.control.v2.StorageControl
-// methods tools/coverage lists, the IntelligenceConfig ones (the
-// StorageControl service's other methods are named on the JSON API's rows).
+// methods tools/coverage lists: the IntelligenceConfig ones, and
+// PauseAnywhereCache, whose JSON API twin anywhereCaches.pause left the
+// discovery document in revision 20261107 (#1791). The StorageControl
+// service's other methods are named on the JSON API's rows.
 func ControlGRPCMethods() []string {
-	var out []string
+	out := []string{"google.storage.control.v2.StorageControl/PauseAnywhereCache"}
 	for _, kind := range []string{"Project", "Folder", "Organization"} {
 		for _, verb := range []string{"Get", "Update"} {
 			out = append(out, "google.storage.control.v2.StorageControl/"+verb+kind+"IntelligenceConfig")

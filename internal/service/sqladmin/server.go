@@ -130,6 +130,8 @@ type Server struct {
 	// UseCertificateAuthorityService was called; emu guards it.
 	privateca CertificateAuthorityService
 	stopAuto  chan struct{}
+	// stopMaint stops maintenanceLoop (#1524).
+	stopMaint chan struct{}
 	// advances are the retention clock's Advances (#1330), oldest first.
 	clockMu  sync.Mutex
 	advances []clockAdvance
@@ -185,6 +187,10 @@ func (s *Server) Start(context.Context) error {
 		s.stopAuto = make(chan struct{})
 		go s.automate(s.stopAuto)
 	}
+	if s.writes != nil {
+		s.stopMaint = make(chan struct{})
+		go s.maintenanceLoop(s.stopMaint)
+	}
 	// Loopback-only, but a rebound or cross-site page reaches
 	// loopback too (#676, #1586).
 	s.srv = &http.Server{Handler: hostguard.Wrap(s), ReadHeaderTimeout: 10 * time.Second}
@@ -203,6 +209,10 @@ func (s *Server) Stop(ctx context.Context) error {
 	if s.stopAuto != nil {
 		close(s.stopAuto)
 		s.stopAuto = nil
+	}
+	if s.stopMaint != nil {
+		close(s.stopMaint)
+		s.stopMaint = nil
 	}
 	if s.writes != nil {
 		if c, ok := s.writes.prov.(interface{ Close() }); ok {
@@ -259,8 +269,14 @@ func (s *Server) createdNamed(project, name string) *created {
 // ServeHTTP routes /v1/... and /sql/v1beta4/..., which differ only in prefix.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
-	if path == ClockPath {
-		out, err := s.serveClock(r)
+	if path == ClockPath || strings.HasPrefix(path, MaintenanceControlPrefix) {
+		var out any
+		var err error
+		if path == ClockPath {
+			out, err = s.serveClock(r)
+		} else {
+			out, err = s.serveMaintenanceControl(r)
+		}
 		if err != nil {
 			s.fail(w, "", err)
 			return
@@ -328,9 +344,6 @@ func verbWhy(verb string) string {
 		return "SQL Server Reporting Services leases: " + sqlServerWhy
 	case "listEntraIdCertificates", "addEntraIdCertificate", "rotateEntraIdCertificate":
 		return "Microsoft Entra ID authentication: " + sqlServerWhy
-	case "rescheduleMaintenance":
-		return "CloudBurrow's servers have no Google-managed maintenance: no maintenance event is ever scheduled (scheduledMaintenance is never set; " +
-			"an instance's server is its version's pinned image, replaced when CloudBurrow itself is upgraded), so there is none to reschedule"
 	}
 	return "beneath an instance only databases, users, backupRuns, connectSettings, restart, restoreBackup and clone are served; " +
 		"see docs/cloudsql.md for what is served"
@@ -412,6 +425,9 @@ func (s *Server) route(r *http.Request, base string, p []string) (string, any, e
 	if e == nil {
 		return "sql.instances.get", nil, Errorf(http.StatusNotFound, "The Cloud SQL instance does not exist. "+
 			"CloudBurrow's instances are %s.", s.instanceNames())
+	}
+	if err := s.stoppedRefusal(c, r.Method, rest, verb); err != nil {
+		return "sql.instances", nil, err
 	}
 	if verb == "generateEphemeralCert" {
 		if r.Method != http.MethodPost {
@@ -594,7 +610,7 @@ func (s *Server) route(r *http.Request, base string, p []string) (string, any, e
 		}
 	case "rescheduleMaintenance":
 		if len(rest) == 3 && r.Method == http.MethodPost {
-			out, err := rescheduleMaintenance(r)
+			out, err := s.rescheduleMaintenance(r, base, project, name)
 			return "sql.projects.instances.rescheduleMaintenance", out, err
 		}
 	case "resetReplicaSize":
@@ -862,9 +878,13 @@ func (s *Server) users(r *http.Request, base, project string, e Engine, rest []s
 			return "sql.users.insert", nil, unimplemented("users of type "+u.Type,
 				iamWhy+", so only BUILT_IN users are served")
 		}
+		if err := s.checkPassword(project, e.Instance(), u.Name, u.Host, u.Password, false); err != nil {
+			return "sql.users.insert", nil, err
+		}
 		if err := e.CreateUser(ctx, User{Name: u.Name, Host: u.Host}, u.Password); err != nil {
 			return "sql.users.insert", nil, err
 		}
+		s.notePassword(project, e.Instance(), u.Name, u.Host, u.Password)
 		return "sql.users.insert", s.done(base, project, e, "CREATE_USER", u.Name), nil
 	case http.MethodPut:
 		var u struct{ Name, Host, Password string }
@@ -879,9 +899,13 @@ func (s *Server) users(r *http.Request, base, project string, e Engine, rest []s
 		if err != nil {
 			return "sql.users.update", nil, err
 		}
+		if err := s.checkPassword(project, e.Instance(), cur.Name, cur.Host, u.Password, true); err != nil {
+			return "sql.users.update", nil, err
+		}
 		if err := e.UpdateUser(ctx, cur, u.Password); err != nil {
 			return "sql.users.update", nil, err
 		}
+		s.notePassword(project, e.Instance(), cur.Name, cur.Host, u.Password)
 		return "sql.users.update", s.done(base, project, e, "UPDATE_USER", name), nil
 	case http.MethodDelete:
 		cur, err := find(q.Get("name"), q.Get("host"))
@@ -891,6 +915,7 @@ func (s *Server) users(r *http.Request, base, project string, e Engine, rest []s
 		if err := e.DeleteUser(ctx, cur); err != nil {
 			return "sql.users.delete", nil, err
 		}
+		s.forgetPasswords(project, e.Instance(), cur.Name, cur.Host)
 		return "sql.users.delete", s.done(base, project, e, "DELETE_USER", cur.Name), nil
 	}
 	return "sql.users", nil, Errorf(http.StatusNotFound, "method %s is not served on users", r.Method)

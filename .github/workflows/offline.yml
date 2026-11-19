@@ -1,10 +1,13 @@
 # `up --offline` with no egress (#604, #685): TestPrefetchThenUpOfflineWithNoEgress
 # prefetches, cuts the kind node's outbound network, and requires `up
 # --offline` for the default services plus Bigtable to reach ready with no
-# image pulled. It downloads about 2 GiB and takes minutes, so it runs
-# nightly and on demand, never on pull requests or merge groups, and cannot
-# block a merge. A failure fails the run, and the step summary says which
-# test did not pass.
+# image pulled. TestNoGoogleEgress (#1825, #1833) builds the CLI with a
+# guard in its net package, starts every service offline, walks the console
+# and runs the CLI's commands, and fails on any connection CloudBurrow's own
+# process makes, or tries to, off the machine. Each downloads gigabytes and
+# takes minutes, so they run nightly and on demand, never on pull requests,
+# merge groups or pushes, and cannot block a merge. A failure fails the
+# run, and the step summary says which test did not pass.
 name: Offline
 
 on:
@@ -83,6 +86,89 @@ jobs:
         if: failure()
         with:
           name: offline-diagnostics
+          path: diagnostics
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Leave no clusters behind
+        if: always()
+        run: |
+          for c in $(kind get clusters 2>/dev/null); do kind delete cluster --name "$c" || true; done
+
+  egress:
+    name: every service offline, no egress from the CLI's process
+    runs-on: ubuntu-latest
+    # go test's own deadline is 60m; this leaves the build its share.
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27"
+      - id: go
+        run: echo "version=$(go env GOVERSION)" >> "$GITHUB_OUTPUT"
+
+      # The embedded BigQuery emulator, from ci.yml's cache, read only and
+      # under ci.yml's key, as upgrade.yml restores it.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: internal/bigqueryimage/bin/bigquery-emulator-*
+          key: bigquery-emulator-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.version }}-${{ hashFiles('tools/bqengine/*.go', 'third_party/bigquery-emulator/sources.json', 'third_party/bigquery-emulator/go.mod', 'third_party/bigquery-emulator/go.sum', 'third_party/bigquery-emulator/patches/**') }}
+
+      - name: Install kubectl
+        run: |
+          curl --retry 5 --retry-all-errors -fsSLo kubectl "https://dl.k8s.io/release/v1.36.4/bin/linux/amd64/kubectl"
+          chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+
+      - uses: helm/kind-action@ea822c7bf1874f08e5a491df991c228edffc3376 # v1.15.2
+        with:
+          install_only: true
+          version: v0.33.0
+
+      # The test's guarded `go build` embeds the storage server and the
+      # BigQuery emulator (#514), which every service needs.
+      - name: Build the embedded binaries
+        run: make storage-binaries bigquery-binaries
+
+      - name: Egress test
+        env:
+          CLOUDBURROW_TEST_EGRESS: "1"
+        run: |
+          set +e
+          go test -tags=integration -count=1 -timeout 60m -v \
+            -run '^TestNoGoogleEgress$' ./cmd/cloudburrow/ | tee egress.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          # go test exits 0 when a test skips, and this one skips without
+          # CLOUDBURROW_TEST_EGRESS, so it must have passed.
+          result=$(grep -- '^--- [A-Z]*: TestNoGoogleEgress (' egress.log || echo 'no result')
+          {
+            echo "## Egress"
+            echo
+            echo "\`$result\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$rc" -ne 0 ] || ! grep -q -- '^--- PASS: TestNoGoogleEgress (' egress.log; then
+            echo "TestNoGoogleEgress did not pass: $result"; exit 1
+          fi
+
+      - name: Collect diagnostics
+        if: failure()
+        run: |
+          mkdir -p diagnostics
+          cp egress.log diagnostics/ 2>/dev/null || true
+          kind get clusters > diagnostics/clusters.txt 2>&1 || true
+          docker ps -a > diagnostics/containers.txt 2>&1 || true
+          df -h > diagnostics/df.txt 2>&1 || true
+          # Bounded on purpose: a multi-megabyte dump helps nobody.
+          for c in $(kind get clusters 2>/dev/null); do
+            kind export logs "diagnostics/$c" --name "$c" 2>&1 | tail -50 || true
+          done
+          find diagnostics -type f -size +1M -delete || true
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: egress-diagnostics
           path: diagnostics
           retention-days: 7
           if-no-files-found: ignore

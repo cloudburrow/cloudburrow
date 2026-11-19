@@ -87,7 +87,8 @@ type datastoreForeignEntity struct {
 
 // rawDatastore is the emulator's Datastore v1 API. done closes it.
 func (p datastoreProvider) rawDatastore() (c datastorepb.DatastoreClient, done func(), err error) {
-	conn, err := grpc.NewClient(p.endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(p.endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithUnaryInterceptor(datastoreDatabaseInterceptor))
 	if err != nil {
 		return nil, nil, fmt.Errorf("cannot reach Datastore: %w", err)
 	}
@@ -118,10 +119,10 @@ func datastoreKeyPB(k *datastore.Key) *datastorepb.Key {
 	return pk
 }
 
-// datastoreKeyValue reads a key value as the page in project shows it: a
-// *datastore.Key when it is in this project's default database, and a
-// datastoreForeignKey otherwise.
-func datastoreKeyValue(pk *datastorepb.Key, project string) any {
+// datastoreKeyValue reads a key value as the page at home shows it: a
+// *datastore.Key when it is in the page's project and database (#1883),
+// and a datastoreForeignKey otherwise.
+func datastoreKeyValue(pk *datastorepb.Key, home datastoreHome) any {
 	ns := pk.GetPartitionId().GetNamespaceId()
 	var k *datastore.Key
 	for _, el := range pk.GetPath() {
@@ -130,8 +131,14 @@ func datastoreKeyValue(pk *datastorepb.Key, project string) any {
 	if k == nil {
 		return nil // a key with no path, which only a nested entity can hold
 	}
-	f := datastoreForeignKey{Key: k, Database: pk.GetPartitionId().GetDatabaseId()}
-	if p := pk.GetPartitionId().GetProjectId(); p != "" && p != project {
+	f := datastoreForeignKey{Key: k}
+	if db := pk.GetPartitionId().GetDatabaseId(); db != home.database {
+		f.Database = db
+		if db == "" {
+			f.Database = firestoreDefaultDatabase
+		}
+	}
+	if p := pk.GetPartitionId().GetProjectId(); p != "" && p != home.project {
 		f.Project = p
 	}
 	if f.Project == "" && f.Database == "" {
@@ -143,7 +150,7 @@ func datastoreKeyValue(pk *datastorepb.Key, project string) any {
 // datastoreValueGo is a stored value as the Go client reads it
 // (propToValue), except that a key in another project or database is a
 // datastoreForeignKey.
-func datastoreValueGo(v *datastorepb.Value, project string) any {
+func datastoreValueGo(v *datastorepb.Value, home datastoreHome) any {
 	switch t := v.GetValueType().(type) {
 	case *datastorepb.Value_BooleanValue:
 		return t.BooleanValue
@@ -154,7 +161,7 @@ func datastoreValueGo(v *datastorepb.Value, project string) any {
 	case *datastorepb.Value_TimestampValue:
 		return time.Unix(t.TimestampValue.GetSeconds(), int64(t.TimestampValue.GetNanos())).In(time.UTC)
 	case *datastorepb.Value_KeyValue:
-		return datastoreKeyValue(t.KeyValue, project)
+		return datastoreKeyValue(t.KeyValue, home)
 	case *datastorepb.Value_StringValue:
 		return t.StringValue
 	case *datastorepb.Value_BlobValue:
@@ -162,10 +169,10 @@ func datastoreValueGo(v *datastorepb.Value, project string) any {
 	case *datastorepb.Value_GeoPointValue:
 		return datastore.GeoPoint{Lat: t.GeoPointValue.GetLatitude(), Lng: t.GeoPointValue.GetLongitude()}
 	case *datastorepb.Value_EntityValue:
-		props := datastorePropertiesGo(t.EntityValue.GetProperties(), project)
+		props := datastorePropertiesGo(t.EntityValue.GetProperties(), home)
 		e := &datastore.Entity{Properties: props}
 		if pk := t.EntityValue.GetKey(); pk != nil {
-			switch k := datastoreKeyValue(pk, project).(type) {
+			switch k := datastoreKeyValue(pk, home).(type) {
 			case *datastore.Key:
 				e.Key = k
 			case datastoreForeignKey:
@@ -176,7 +183,7 @@ func datastoreValueGo(v *datastorepb.Value, project string) any {
 	case *datastorepb.Value_ArrayValue:
 		out := make([]any, 0, len(t.ArrayValue.GetValues()))
 		for _, e := range t.ArrayValue.GetValues() {
-			out = append(out, datastoreValueGo(e, project))
+			out = append(out, datastoreValueGo(e, home))
 		}
 		return out
 	}
@@ -186,14 +193,14 @@ func datastoreValueGo(v *datastorepb.Value, project string) any {
 // datastorePropertiesGo is an entity's properties as the Go client reads
 // them (protoToEntity), sorted by name: an array's index flag is its first
 // element's.
-func datastorePropertiesGo(props map[string]*datastorepb.Value, project string) datastore.PropertyList {
+func datastorePropertiesGo(props map[string]*datastorepb.Value, home datastoreHome) datastore.PropertyList {
 	out := make(datastore.PropertyList, 0, len(props))
 	for name, v := range props {
 		noIndex := v.GetExcludeFromIndexes()
 		if values := v.GetArrayValue().GetValues(); len(values) > 0 {
 			noIndex = values[0].GetExcludeFromIndexes()
 		}
-		out = append(out, datastore.Property{Name: name, Value: datastoreValueGo(v, project), NoIndex: noIndex})
+		out = append(out, datastore.Property{Name: name, Value: datastoreValueGo(v, home), NoIndex: noIndex})
 	}
 	sort.Slice(out, func(a, b int) bool { return out[a].Name < out[b].Name })
 	return out
@@ -321,7 +328,7 @@ func (p datastoreProvider) readEntity(ctx context.Context, project string, key *
 	if err != nil {
 		return nil, err
 	}
-	return datastorePropertiesGo(e.GetProperties(), project), nil
+	return datastorePropertiesGo(e.GetProperties(), homeOf(ctx, project)), nil
 }
 
 // changeEntity reads an entity, changes its properties and writes it back
@@ -582,15 +589,15 @@ func runEntityQuery(ctx context.Context, c datastorepb.DatastoreClient, project,
 
 // datastoreEntityProperties is a listed entity's key and properties as its
 // row shows them, read as its own page reads them (datastorePropertiesGo).
-func datastoreEntityProperties(e *datastorepb.Entity, project string) (*datastore.Key, datastore.PropertyList) {
+func datastoreEntityProperties(e *datastorepb.Entity, home datastoreHome) (*datastore.Key, datastore.PropertyList) {
 	var key *datastore.Key
-	switch k := datastoreKeyValue(e.GetKey(), project).(type) {
+	switch k := datastoreKeyValue(e.GetKey(), home).(type) {
 	case *datastore.Key:
 		key = k
 	case datastoreForeignKey:
 		key = k.Key
 	}
-	return key, datastorePropertiesGo(e.GetProperties(), project)
+	return key, datastorePropertiesGo(e.GetProperties(), home)
 }
 
 // datastorePropertiesCell is a listed entity's Properties cell: each

@@ -198,6 +198,12 @@ func TestRunV1DomainMappings(t *testing.T) {
 	ns := "namespaces/" + h.Project()
 	domain := "www.cloudburrow-test.example.com"
 	auto := "auto.cloudburrow-test.example.com"
+	// With enforcement on, the owner's ID token for the service's URL
+	// (ownerinvoke1879_test.go).
+	if svc, err := c.Namespaces.Services.Get(ns + "/services/v1-domain").Do(); err == nil && svc.Status != nil {
+		ownerInvokeAudience(domain, svc.Status.Url)
+		ownerInvokeAudience(auto, svc.Status.Url)
+	}
 	t.Cleanup(func() {
 		_, _ = c.Namespaces.Domainmappings.Delete(ns + "/domainmappings/" + domain).Do()
 		_, _ = c.Namespaces.Domainmappings.Delete(ns + "/domainmappings/" + auto).Do()

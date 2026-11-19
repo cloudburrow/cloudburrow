@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -70,7 +71,7 @@ func TestFirestoreElementsAreListedAndAddressed(t *testing.T) {
 		if err != nil || datastoreElementSegment(steps) != datastoreElementSegment(el.Steps) {
 			t.Errorf("%s: its segment reads back as %v, %v", label, steps, err)
 		}
-		_, _, why, ok := formatFirestorePB("demo", el.Value)
+		_, _, why, ok := formatFirestorePB(context.Background(), "demo", el.Value)
 		wantOK := !isFirestoreContainer(el.Value) && label != "meta.away"
 		if ok != wantOK {
 			t.Errorf("%s offers Edit value = %v (%s), want %v", label, ok, why, wantOK)
@@ -81,7 +82,7 @@ func TestFirestoreElementsAreListedAndAddressed(t *testing.T) {
 	if got := strings.Join(labels, " "); got != want {
 		t.Errorf("the Elements tab lists\n%s\nwant\n%s", got, want)
 	}
-	if _, _, why, _ := formatFirestorePB("demo", firestoreNestedFixture().GetMapValue().GetFields()["away"]); !strings.Contains(why, "projects/other") {
+	if _, _, why, _ := formatFirestorePB(context.Background(), "demo", firestoreNestedFixture().GetMapValue().GetFields()["away"]); !strings.Contains(why, "projects/other") {
 		t.Errorf("a foreign reference's note %q does not name it", why)
 	}
 }
@@ -94,12 +95,12 @@ func TestFirestoreElementsAreListedAndAddressed(t *testing.T) {
 func TestFirestoreEditValueSavedUnchangedWritesTheSameValue(t *testing.T) {
 	orig := firestoreNestedFixture()
 	for _, el := range firestoreElements(orig) {
-		typ, raw, _, ok := formatFirestorePB("demo", el.Value)
+		typ, raw, _, ok := formatFirestorePB(context.Background(), "demo", el.Value)
 		if !ok {
 			continue
 		}
 		prop := proto.Clone(orig).(*firestorepb.Value)
-		at, err := setFirestoreElement(prop, "demo", "meta", el.Steps, map[string]string{"type": typ, "value": raw})
+		at, err := setFirestoreElement(context.Background(), prop, "demo", "meta", el.Steps, map[string]string{"type": typ, "value": raw})
 		if err != nil {
 			t.Errorf("%s: saving %s %q unchanged: %v", firestoreElementLabel("meta", el.Steps), typ, raw, err)
 			continue
@@ -125,7 +126,7 @@ func TestFirestoreEditValueSavedUnchangedWritesTheSameValue(t *testing.T) {
 		{[]any{"gone"}, map[string]string{"type": "string", "value": "x"}, "holds no value"},
 	} {
 		prop := proto.Clone(orig).(*firestorepb.Value)
-		if _, err := setFirestoreElement(prop, "demo", "meta", c.steps, c.values); err == nil || !strings.Contains(err.Error(), c.want) {
+		if _, err := setFirestoreElement(context.Background(), prop, "demo", "meta", c.steps, c.values); err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("Edit value at %v with %v: %v, want an error containing %q", c.steps, c.values, err, c.want)
 		}
 		if !proto.Equal(prop, orig) {
@@ -150,7 +151,7 @@ func TestFirestoreAddAndRemoveValueChangeOnlyThatValue(t *testing.T) {
 		at    int
 	}{{"0", 0}, {"2", 2}, {"", 3}, {" 3 ", 3}} {
 		prop := proto.Clone(orig).(*firestorepb.Value)
-		steps, err := addFirestoreElement(prop, "demo", "meta", []any{"items"}, map[string]string{"index": tc.index, "type": "bytes", "value": "AQID"})
+		steps, err := addFirestoreElement(context.Background(), prop, "demo", "meta", []any{"items"}, map[string]string{"index": tc.index, "type": "bytes", "value": "AQID"})
 		if err != nil {
 			t.Fatalf("Add value at %q: %v", tc.index, err)
 		}
@@ -168,7 +169,7 @@ func TestFirestoreAddAndRemoveValueChangeOnlyThatValue(t *testing.T) {
 	}
 
 	prop := proto.Clone(orig).(*firestorepb.Value)
-	steps, err := addFirestoreElement(prop, "demo", "meta", []any{"items", 2}, map[string]string{"field": "qty", "type": "number", "value": "3"})
+	steps, err := addFirestoreElement(context.Background(), prop, "demo", "meta", []any{"items", 2}, map[string]string{"field": "qty", "type": "number", "value": "3"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +196,7 @@ func TestFirestoreAddAndRemoveValueChangeOnlyThatValue(t *testing.T) {
 		{[]any{"flag"}, map[string]string{"field": "x", "type": "string"}, "not a map or an array"},
 	} {
 		prop := proto.Clone(orig).(*firestorepb.Value)
-		if _, err := addFirestoreElement(prop, "demo", "meta", c.steps, c.values); err == nil || !strings.Contains(err.Error(), c.want) {
+		if _, err := addFirestoreElement(context.Background(), prop, "demo", "meta", c.steps, c.values); err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("Add value at %v with %v: %v, want an error containing %q", c.steps, c.values, err, c.want)
 		}
 		if !proto.Equal(prop, orig) {
@@ -309,7 +310,7 @@ func TestFirestoreValueWritesAreMaskedToWhatChanged(t *testing.T) {
 func TestFirestoreValueActionsRefuseAChangedField(t *testing.T) {
 	orig := firestoreNestedFixture()
 	els := firestoreElements(orig)
-	actions := firestoreElementActions("demo", els[len(els)-1], orig)
+	actions := firestoreElementActions(context.Background(), "demo", els[len(els)-1], orig)
 	values := map[string]string{}
 	for _, f := range actions[0].Fields {
 		values[f.Name] = f.Default
@@ -340,7 +341,7 @@ func TestFirestoreValueActionsRefuseAChangedField(t *testing.T) {
 		}
 	}
 	ids = nil
-	for _, a := range firestoreElementActions("demo", container, orig) {
+	for _, a := range firestoreElementActions(context.Background(), "demo", container, orig) {
 		ids = append(ids, a.ID)
 	}
 	if strings.Join(ids, ",") != "addvalue,removevalue" {
@@ -353,7 +354,7 @@ func TestFirestoreValueActionsRefuseAChangedField(t *testing.T) {
 // padding, and what is not base64 is refused with the reason.
 func TestFirestoreBytesRoundTripAsBase64(t *testing.T) {
 	for _, raw := range []string{"", "AQID", "AAEC/v8=", "AA EC\n/v8="} {
-		v, err := parseFirestoreValue(nil, "demo", "bytes", raw)
+		v, err := parseFirestoreValue(context.Background(), nil, "demo", "bytes", raw)
 		if err != nil {
 			t.Errorf("bytes %q: %v", raw, err)
 			continue
@@ -364,7 +365,7 @@ func TestFirestoreBytesRoundTripAsBase64(t *testing.T) {
 		}
 	}
 	for _, raw := range []string{"AQI", "not base64", "AQID===="} {
-		if _, err := parseFirestoreValue(nil, "demo", "bytes", raw); err == nil || !strings.Contains(err.Error(), "base64") {
+		if _, err := parseFirestoreValue(context.Background(), nil, "demo", "bytes", raw); err == nil || !strings.Contains(err.Error(), "base64") {
 			t.Errorf("bytes %q: %v, want refused as not base64", raw, err)
 		}
 	}

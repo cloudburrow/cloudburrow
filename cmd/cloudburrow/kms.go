@@ -42,6 +42,8 @@ type kmsService struct {
 	interpose []grpc.UnaryServerInterceptor
 	// requests reports each JSON request to the admin event log (#414).
 	requests func(rest.Request)
+	// wrapJSON wraps the JSON API (IAM enforcement, #1879); nil is none.
+	wrapJSON func(http.Handler) http.Handler
 	server   *grpctransport.Server
 	db       store.Store
 	kube     *kms.KubeStore
@@ -200,6 +202,9 @@ func (s *kmsService) Start(ctx context.Context) error {
 	_, _ = s.api.Sweep()
 	// One port for gRPC and JSON, as cloudkms.googleapis.com (#414).
 	var jsonAPI http.Handler = kms.NewRESTHandler(s.api)
+	if s.wrapJSON != nil {
+		jsonAPI = s.wrapJSON(jsonAPI)
+	}
 	if s.requests != nil {
 		jsonAPI = rest.Observe(jsonAPI, s.requests)
 	}
@@ -322,4 +327,24 @@ func printKMSWarning(w io.Writer, s *kmsService) {
 	fmt.Fprintf(w, "\n  WARNING: Cloud KMS is not a security boundary. Key material is kept\n")
 	fmt.Fprintf(w, "  unencrypted in %s, and anyone with access to it\n", backend)
 	fmt.Fprintf(w, "  can read it. Never use CloudBurrow's KMS to protect real data.\n")
+}
+
+// firestoreKMS reports whether the Firestore front checks customer-managed
+// keys against this process's Cloud KMS (#1881): both are served.
+func firestoreKMS(cfg config.Config) bool {
+	return serviceEnabled(cfg, config.ServiceFirestore) && serviceEnabled(cfg, config.ServiceKMS)
+}
+
+// pinKMSPort chooses Cloud KMS's port now when it is OS-assigned (0), so
+// the Firestore front can be told it before the API binds.
+func pinKMSPort(cfg *config.Config) error {
+	if cfg.Endpoints.KMS != 0 {
+		return nil
+	}
+	l, err := net.Listen("tcp", net.JoinHostPort(cfg.BindAddress, "0"))
+	if err != nil {
+		return fmt.Errorf("choose a port for Cloud KMS: %w", err)
+	}
+	cfg.Endpoints.KMS = l.Addr().(*net.TCPAddr).Port
+	return l.Close()
 }

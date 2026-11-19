@@ -57,8 +57,8 @@ import (
 // and forecast_limit_upper_bound clamp the forecast and its interval
 // (UNVERIFIED). Custom holidays (CREATE MODEL … AS (training_data AS
 // (…), custom_holiday AS (…))) are a stage of their own (modelholiday.go,
-// #1776). Refused 501: holiday_region (Google's holiday calendar),
-// hierarchical_time_series_cols and more than one time_series_id_col.
+// #1776), as are holiday_region's built-in holidays
+// (modelholidayregion.go). Refused 501: hierarchical_time_series_cols and more than one time_series_id_col.
 // ARIMA_PLUS_XREG is this pipeline on a linear regression's residuals
 // (modelxreg.go, #1766).
 // Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-create-time-series
@@ -90,6 +90,8 @@ type tsOptions struct {
 	// Holidays are the custom_holiday query's rows (modelholiday.go,
 	// #1776).
 	Holidays []customHoliday `json:"customHolidays,omitempty"`
+	// Regions are holiday_region's (modelholidayregion.go, #1776).
+	Regions []string `json:"holidayRegions,omitempty"`
 }
 
 // applyArimaDefaults sets an ARIMA_PLUS model's documented defaults.
@@ -309,6 +311,9 @@ type arimaTrained struct {
 	Frequency string        `json:"frequency"`
 	Cond      int           `json:"cond"`
 	Series    []arimaSeries `json:"series"`
+	// Holidays are the holidays of a model with holiday_region, built-in
+	// and custom (modelholidayregion.go, #1776).
+	Holidays []customHoliday `json:"holidays,omitempty"`
 }
 
 // parseTSValue reads a TIMESTAMP (seconds), DATE or DATETIME REST value
@@ -496,6 +501,19 @@ func trainArima(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *
 		orders = []order{{ts.Order[0], ts.Order[2]}}
 		a.Cond = ts.Order[0]
 	}
+	// holiday_region's built-in holidays (modelholidayregion.go, #1776),
+	// from the earliest point through the end of the latest horizon.
+	if len(ts.Regions) > 0 {
+		first, last := int64(math.MaxInt64), int64(math.MinInt64)
+		for _, id := range ids {
+			o := byID[id]
+			sort.SliceStable(o, func(x, y int) bool { return o[x].t < o[y].t })
+			first = min(first, o[0].t)
+			n := gridIndex(o[0].t, a.Frequency, o[len(o)-1].t)
+			last = max(last, gridPoint(o[0].t, a.Frequency, n+max(ts.Horizon, 1)))
+		}
+		a.Holidays = modelHolidaysFor(ts.Regions, ts.Holidays, first, last)
+	}
 	for _, id := range ids {
 		o := byID[id]
 		sort.SliceStable(o, func(x, y int) bool { return o[x].t < o[y].t })
@@ -535,8 +553,12 @@ func trainArima(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *
 			k = r
 		}
 		// The pipeline's stages before the ARIMA (#1518).
-		if len(ts.Holidays) > 0 {
-			s.Holidays = seriesHolidays(ts.Holidays, start) // #1776
+		hs := ts.Holidays // #1776
+		if len(ts.Regions) > 0 && holidayEligible(a.Frequency, start, o[len(o)-1].t) {
+			hs = a.Holidays
+		}
+		if len(hs) > 0 {
+			s.Holidays = seriesHolidays(hs, start, a.Frequency)
 		}
 		dc := decomposeSeries(s.Data, a.Frequency, ts, s.Holidays)
 		s.Seasons, s.Seasonal, s.Spikes, s.Steps = dc.Seasons, dc.Seasonal, dc.Spikes, dc.Steps
@@ -1000,7 +1022,7 @@ func (f front) arimaSubquery(r *http.Request, q queryOptions, md bqModel, c mlCa
 			return "", 400, "ML.EXPLAIN_FORECAST requires a model trained with decompose_time_series TRUE"
 		}
 		z := normalQuantile(level)
-		names := holidayNames(ts.Holidays)
+		names := holidayNames(md.holidays())
 		var rows []string
 		for _, s := range a.Series {
 			if len(s.Cands) == 0 {
@@ -1305,6 +1327,14 @@ func (md bqModel) arimaResource() (opts map[string]any, info []map[string]any) {
 	}
 	if ts.IDCol != "" {
 		opts["timeSeriesIdColumn"] = ts.IDCol
+	}
+	if len(ts.Regions) > 0 {
+		// The REST TrainingOptions' holidayRegions, and the deprecated
+		// holidayRegion of a single region (#1776).
+		opts["holidayRegions"] = ts.Regions
+		if len(ts.Regions) == 1 {
+			opts["holidayRegion"] = ts.Regions[0]
+		}
 	}
 	if md.Options.ModelType == "ARIMA_PLUS_XREG" {
 		// Its regression's (modelxreg.go, #1766); it has no

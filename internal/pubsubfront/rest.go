@@ -84,6 +84,12 @@ func (f *Front) serveREST(w http.ResponseWriter, r *http.Request, next http.Hand
 		writeRESTError(w, err)
 		return
 	}
+	// IAM enforcement (#1887), as over gRPC (restenforce.go).
+	r = withBearer(r)
+	if err := f.restAuthorize(r); err != nil {
+		writeRESTError(w, err)
+		return
+	}
 	if kind, name := restMutationTarget(r.Method, r.URL.Path, r.URL.Query().Get("schemaId")); kind != "" {
 		// A request that changes a definition: the front keeps it as the
 		// emulator then holds it, before the answer goes (restore.go, #1608).
@@ -106,7 +112,21 @@ func (f *Front) serveREST(w http.ResponseWriter, r *http.Request, next http.Hand
 		// A Protocol Buffer schema is the front's (protobufschemas.go).
 		return
 	}
+	// Custom constraints on a topic or subscription created or updated
+	// (#1891, custom.go).
+	if err := f.customREST(r); err != nil {
+		writeRESTError(w, err)
+		return
+	}
 	if name, verb, ok := topicPath(r.URL.Path); ok {
+		// gcp.resourceLocations on the message storage policy (#1890,
+		// orgpolicy.go).
+		if verb == "" {
+			if err := checkRESTTopic(r, name); err != nil {
+				writeRESTError(w, err)
+				return
+			}
+		}
 		f.serveTopic(w, r, name, verb, next)
 		return
 	}
@@ -219,6 +239,10 @@ func (f *Front) restCreate(w http.ResponseWriter, r *http.Request, name string, 
 			return
 		}
 		if err := CheckLabels(s.GetLabels()); err != nil {
+			writeRESTError(w, err)
+			return
+		}
+		if err := f.checkExport(r.Context(), &s); err != nil {
 			writeRESTError(w, err)
 			return
 		}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	dsadminpb "cloud.google.com/go/datastore/admin/apiv1/adminpb"
 	adminpb "cloud.google.com/go/firestore/apiv1/admin/adminpb"
 	functionspb "cloud.google.com/go/functions/apiv2/functionspb"
 	"context"
@@ -12,6 +13,8 @@ import (
 	"time"
 
 	iamadminpb "cloud.google.com/go/iam/admin/apiv1/adminpb"
+	iamv2pb "cloud.google.com/go/iam/apiv2/iampb"
+	"cloud.google.com/go/orgpolicy/apiv2/orgpolicypb"
 	rmpb "cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
 	"cloud.google.com/go/security/privateca/apiv1/privatecapb"
 	"google.golang.org/grpc"
@@ -23,7 +26,9 @@ import (
 	"google.golang.org/protobuf/types/dynamicpb"
 
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
+	"github.com/cloudburrow/cloudburrow/internal/callfront"
 	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
+	"github.com/cloudburrow/cloudburrow/internal/modelgarden"
 	"github.com/cloudburrow/cloudburrow/internal/service/kms"
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
 	"github.com/cloudburrow/cloudburrow/internal/service/privateca"
@@ -70,6 +75,8 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	rmpb.RegisterTagBindingsServer(srv, resourcemanager.NewTagBindingsServer(rmReg))
 	rmpb.RegisterTagHoldsServer(srv, resourcemanager.NewTagHoldsServer(rmReg))
 	iamadminpb.RegisterIAMServer(srv, resourcemanager.NewIAMAdminServer(rmReg))
+	iamv2pb.RegisterPoliciesServer(srv, resourcemanager.NewPoliciesServer(rmReg))
+	orgpolicypb.RegisterOrgPolicyServer(srv, resourcemanager.NewOrgPolicyServer(rmReg))
 	schedStore := scheduler.NewStore(store.NewMemory())
 	scheduler.NewGRPCServer(schedStore, scheduler.NewRunner(schedStore, nil, nil, nil, time.Second), nil).Register(srv)
 	// The Locations mixin is registered once, by KMS above (#1291): Cloud
@@ -82,8 +89,13 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	redisadmin.NewClusterServer(redis).Register(srv)
 	redis.EnableValkey(context.Background(), nil, nil, nil)
 	redisadmin.NewMemorystoreServer(redis).Register(srv)
-	vertexai.NewServer(nil).RegisterGRPC(srv)
+	// With Model Garden deployments (#1840), which an empty request never
+	// reaches: no state file is written, no container started.
+	ai := vertexai.NewServer(nil)
+	ai.SetModelGarden(&modelgarden.Manager{})
+	ai.RegisterGRPC(srv)
 	adminpb.RegisterFirestoreAdminServer(srv, firestoreadmin.New(""))
+	dsadminpb.RegisterDatastoreAdminServer(srv, callfront.NewDatastoreAdmin("127.0.0.1:1", ""))
 	logging.NewAdmin(store.NewMemory()).Register(srv)
 	// No Knative: every Cloud Run handler validates its request before
 	// reaching the cluster, and an empty request never gets that far.
@@ -105,6 +117,7 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	fns := runSrv.Functions(runSrv.Builds(nil, nil), func() string { return "" })
 	functionspb.RegisterFunctionServiceServer(srv, fns)
 	fns.V1().Register(srv)
+	fns.Eventarc().Register(srv) // Eventarc (#1877), on the functions' event transport
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

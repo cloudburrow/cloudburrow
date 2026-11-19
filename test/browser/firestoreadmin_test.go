@@ -60,8 +60,8 @@ func TestFirestoreDatabaseEditAndIndexFormsThroughTheBrowser(t *testing.T) {
 		t.Errorf("after Edit database, GetDatabase reads delete protection %v, want enabled", got.DeleteProtectionState)
 	}
 
-	p.navigate("/firestore-databases/(default)" + q)
-	p.clickText("#view .page-actions button", "Create index")
+	p.navigate("/firestore-databases/(default)" + q + "&tab=indexes")
+	p.clickText("#view .section-actions button", "Create Index")
 	p.waitFor(`document.querySelector(".modal #f-fields") !== null`)
 	p.setField(".modal #f-collectionGroup", "orders")
 	p.setField(".modal #f-fields", "city ascending\ntotal descending")
@@ -78,7 +78,9 @@ func TestFirestoreDatabaseEditAndIndexFormsThroughTheBrowser(t *testing.T) {
 	}
 
 	id := idx.Name[strings.LastIndex(idx.Name, "/")+1:]
-	p.navigate("/firestore-databases/(default)" + q)
+	// The page opens on the Query builder, as Google's database opens on
+	// Firestore Studio (#1845); the index is on Composite indexes.
+	p.navigate("/firestore-databases/(default)" + q + "&tab=indexes")
 	p.cellMenu(id, "Delete index")
 	p.confirmByName(id)
 	p.waitFor(`document.querySelector(".modal") === null`)

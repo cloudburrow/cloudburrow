@@ -30,6 +30,7 @@ func TestBigQueryJobsByFolderAndOrganization(t *testing.T) {
 	h := New(t)
 	c, project := bigqueryClient(t, h)
 	ctx := h.Context()
+	control := h.Endpoint(EnvControl)
 	// Resource Manager under the emulators shard's own name, so its suite
 	// stays in the storage shard; a developer's instance sets either.
 	fc, _, pc := foldersClientsAt(t, h, rmOptionsAt(runShardEndpoint(h, "CLOUDBURROW_TEST_BIGQUERY_RESOURCEMANAGER", EnvResourceManager)))
@@ -58,6 +59,22 @@ func TestBigQueryJobsByFolderAndOrganization(t *testing.T) {
 	}
 	top := folder(localOrg, folderLabel(h, "jbf-"))
 	child := folder(top, "child")
+	// A project of the folder that BigQuery has never been asked of (a
+	// folder's management project, which a browser test's app-management
+	// capability makes, was one): it has no jobs, and the views still read
+	// the folder's (#1891 item 1; it failed "project ... is not found").
+	idle := v1ID(h, "jbfidle-")
+	op, err := pc.CreateProject(ctx, &rmpb.CreateProjectRequest{Project: &rmpb.Project{ProjectId: idle, Parent: child}})
+	if err == nil {
+		_, err = waitLRO(ctx, op)
+	}
+	if err != nil {
+		t.Fatalf("CreateProject %s: %v", idle, err)
+	}
+	t.Cleanup(func() {
+		_, _ = pc.DeleteProject(context.Background(), &rmpb.DeleteProjectRequest{Name: "projects/" + idle})
+		_, _ = adminDo(t, http.MethodPost, fmt.Sprintf("http://%s/admin/purge?project=%s", control, idle), "", nil)
+	})
 	move(child)
 	t.Cleanup(func() {
 		// A project cannot be moved to no parent: it is left in the

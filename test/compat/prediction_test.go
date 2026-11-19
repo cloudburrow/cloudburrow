@@ -426,6 +426,7 @@ func ingress(t *testing.T) string {
 		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), time.Second)
 		if err == nil {
 			_ = conn.Close()
+			ingressAddrs.Store(fmt.Sprintf("127.0.0.1:%d", port), true)
 			return base
 		}
 		if time.Now().After(deadline) {

@@ -139,30 +139,35 @@ func unsupportedTrigger(t *cbpb.BuildTrigger) error {
 		return events("github")
 	case t.GetTriggerTemplate() != nil:
 		return events("triggerTemplate")
-	case t.GetRepositoryEventConfig() != nil:
-		return events("repositoryEventConfig")
+	case t.GetRepositoryEventConfig() != nil && devConnectEventError(t.GetRepositoryEventConfig()) != nil:
+		return devConnectEventError(t.GetRepositoryEventConfig())
 	case t.GetPubsubConfig() != nil && validPubsubConfig(t.GetPubsubConfig()) != nil:
 		return validPubsubConfig(t.GetPubsubConfig())
-	case t.GetFilename() != "":
+	case t.GetFilename() != "" && !onDevConnectLink(t):
 		return repo("filename")
 	case t.GetGitFileSource() != nil:
 		return repo("gitFileSource")
 	case t.GetSourceToBuild() != nil:
 		return repo("sourceToBuild")
-	case t.GetAutodetect():
+	case t.GetAutodetect() && !onDevConnectLink(t):
 		return repo("autodetect")
 	case t.GetFilter() != "":
 		return apierror.Unimplemented("BuildTrigger field filter (a CEL expression over the event) is not supported")
-	case t.GetServiceAccount() != "":
-		return apierror.Unimplemented("BuildTrigger field serviceAccount is not supported: builds run as the host's Docker, under no account")
+	case t.GetServiceAccount() != "" && checkServiceAccountName("trigger.service_account", t.GetServiceAccount()) != nil:
+		return checkServiceAccountName("trigger.service_account", t.GetServiceAccount())
 	case len(t.GetIncludedFiles()) > 0 || len(t.GetIgnoredFiles()) > 0:
 		return apierror.Unimplemented("BuildTrigger fields includedFiles and ignoredFiles filter repository pushes, which no trigger here has")
 	}
-	if t.GetBuild() == nil {
+	// A trigger on a Developer Connect link reads its config file from the
+	// pushed commit (#1854): there is no inline build to check until then.
+	repoConfig := onDevConnectLink(t) && (t.GetFilename() != "" || t.GetAutodetect())
+	if t.GetBuild() == nil && !repoConfig {
 		return apierror.InvalidArgument("invalid trigger: a trigger needs a build (an inline build config)")
 	}
-	if err := unsupportedCreate(t.GetBuild()); err != nil {
-		return err
+	if !repoConfig {
+		if err := unsupportedCreate(t.GetBuild()); err != nil {
+			return err
+		}
 	}
 	if wc := t.GetWebhookConfig(); wc != nil && !secretVersionRE.MatchString(wc.GetSecret()) {
 		return apierror.InvalidArgument("invalid trigger: webhookConfig.secret %q is not a Secret Manager version, "+
@@ -444,6 +449,23 @@ func (c *CloudBuildServer) UpdateBuildTrigger(ctx context.Context, req *cbpb.Upd
 // carry substitutions, which override the trigger's; a branch, tag or
 // commit is refused, as no trigger here has a repository.
 func (c *CloudBuildServer) RunBuildTrigger(ctx context.Context, req *cbpb.RunBuildTriggerRequest) (*longrunning.Operation, error) {
+	// A trigger on a Developer Connect link builds a commit of its
+	// repository (#1852, cloudbuilddevconnect.go).
+	triggerStore.mu.Lock()
+	t, err := triggerOf(req.GetName(), req.GetProjectId(), req.GetTriggerId())
+	if err == nil {
+		t = proto.Clone(t).(*cbpb.BuildTrigger)
+	}
+	triggerStore.mu.Unlock()
+	if err == nil && t.GetRepositoryEventConfig() != nil {
+		if t.GetDisabled() {
+			return nil, apierror.FailedPrecondition("trigger %s is disabled", t.GetName())
+		}
+		if s := req.GetSource(); s.GetRepoName() != "" || s.GetDir() != "" || s.GetProjectId() != "" {
+			return nil, apierror.InvalidArgument("RunBuildTrigger source of a repository trigger takes a branchName, tagName or commitSha only")
+		}
+		return c.runDevConnectManual(ctx, t, req.GetSource())
+	}
 	if s := req.GetSource(); s != nil && (s.GetRepoName() != "" || s.GetRevision() != nil || s.GetDir() != "" || s.GetProjectId() != "") {
 		return nil, apierror.Unimplemented("RunBuildTrigger source names a repository revision, which needs a hosted git " +
 			"repository; this trigger's build has its own source")
@@ -483,6 +505,8 @@ func (c *CloudBuildServer) runTrigger(ctx context.Context, name, project, trigge
 	for k, v := range extra {
 		b.Substitutions[k] = v
 	}
+	// The trigger's account, never the build config's (#1854).
+	b.ServiceAccount = t.GetServiceAccount()
 	p, l, _ := resource.ParseLocation(strings.SplitN(t.GetResourceName(), "/triggers/", 2)[0])
 	return c.createBuild(ctx, p, l, l == "global", b, &triggerContext{id: t.GetId(), name: t.GetName(), approval: approval})
 }

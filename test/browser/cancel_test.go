@@ -14,20 +14,22 @@ import (
 // changes? Keep editing / Discard", although Cancel is that decision. The
 // maintainer called it out on 2026-09-27. Cancel now closes at once; Escape,
 // which can be pressed by accident, still asks before throwing input away.
+// The dialog is Resource Manager's Create project: Create queue is a page of
+// its own since #1842.
 func TestCancelDiscardsWithoutAskingEscapeAsks(t *testing.T) {
-	needService(t, "tasks")
 	p := open(t)
 	project := uniqueProject(t)
-	p.navigate("/tasks/queues?project=" + project)
-	p.waitFor(`[...document.querySelectorAll("#view .state button.primary")].some((b) => b.textContent === "Create queue")`)
+	p.navigate("/projects?project=" + project)
+	create := `#view .page-header-actions button.header-button`
+	p.waitFor(`[...document.querySelectorAll("` + create + `")].some((b) => b.textContent === "Create project")`)
 
 	openTyped := func() {
 		// Only the open dialog: a cancelled one fades out for a moment,
 		// inert, before it is removed.
 		p.waitFor(`document.querySelector(".modal") === null`)
-		p.run(chromedp.Click(chromedp.CSS(`#view .state button.primary`)))
-		p.waitFor(`document.querySelector(".modal.is-open #f-name") !== null`)
-		p.run(chromedp.SendKeys(chromedp.CSS(`.modal.is-open #f-name`), "typed-queue"))
+		p.clickText(create, "Create project")
+		p.waitFor(`document.querySelector(".modal.is-open #f-projectId") !== null`)
+		p.run(chromedp.SendKeys(chromedp.CSS(`.modal.is-open #f-projectId`), "typed-project"))
 	}
 
 	openTyped()
@@ -43,11 +45,11 @@ func TestCancelDiscardsWithoutAskingEscapeAsks(t *testing.T) {
 	p.run(chromedp.KeyEvent(kb.Escape))
 	p.waitFor(`document.querySelector(".modal.is-open .discard-prompt:not([hidden])") !== null`)
 	var stillOpen bool
-	p.eval(`document.querySelector(".modal.is-open") !== null && document.querySelector(".modal.is-open #f-name").value === "typed-queue"`, &stillOpen)
+	p.eval(`document.querySelector(".modal.is-open") !== null && document.querySelector(".modal.is-open #f-projectId").value === "typed-project"`, &stillOpen)
 	if !stillOpen {
 		t.Error("Escape on a form with typed input closed it or lost the input instead of asking")
 	}
-	if got := p.posts("/api/resources/tasks"); len(got) != 0 {
+	if got := p.posts("/api/resources/projects"); len(got) != 0 {
 		t.Errorf("cancelling sent %v", got)
 	}
 }

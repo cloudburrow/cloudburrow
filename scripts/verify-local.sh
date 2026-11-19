@@ -17,7 +17,7 @@
 #
 # Options:
 #   --shards A,B,...  the shards to run, in order; default every one:
-#                     storage,served,run,scale,emulators,memorystore,sql,acceptance
+#                     storage,served,run,scale,emulators,memorystore,sql,acceptance,iam
 #   --port-base N     the instances' port layout (default 41000)
 #   --out DIR         where the result and logs go (default ./verify-local)
 #   --no-build        use bin/cloudburrow as it is instead of `make build`
@@ -215,7 +215,7 @@ run_shard() {
   mkdir -p "$RUNNER_TEMP"
   local CB=(--name "$name" --state-dir "$STATE" ${FIXTURES[@]+"${FIXTURES[@]}"} --port-base "$port_base"
     --port-control 0 --port-storage 0 --port-pubsub 0 --port-run 0 --port-memorystore 0 --port-cloudsql-mysql 0 --port-cloudsql 0
-    --services "$SERVICES")
+    --services "$SERVICES" ${UP_FLAGS[@]+"${UP_FLAGS[@]}"})
   local RUNTIME="$STATE/$name/up.json" UPLOG="$STATE/$name/up.log" PID
   CREATED+=("$name")
   CLUSTER_HOST=""
@@ -302,7 +302,10 @@ run_shard() {
     fi
     rc=0
     # CI's timeout: the emulators and sql shards pass 25m.
-    go test -tags=compat -count=1 -timeout 60m -v ./test/compat/... > "$dir/compat.log" 2>&1 || rc=$?
+    # The iam shard runs only the enforcement tests (COMPAT_RUN, #1879).
+    local select_run=()
+    [ -n "$COMPAT_RUN" ] && select_run=(-run "$COMPAT_RUN")
+    go test -tags=compat -count=1 -timeout 60m -v ${select_run[@]+"${select_run[@]}"} ./test/compat/... > "$dir/compat.log" 2>&1 || rc=$?
     if [ "$rc" -ne 0 ]; then
       retry_flaky "$dir/compat.log" go test -tags=compat -count=1 -timeout 10m -v ./test/compat/... > "$dir/retry.out" 2>&1 || true
       settle_retries "$dir/compat.log"
@@ -458,7 +461,9 @@ browser_suite() {  # <shard> <dir> <flags...>
   local BROWSER_ENV BROWSER_VARS=CONSOLE,CONTROL,ADMIN_TOKEN,CLUSTER
   # As in CI: the emulators shard's tests also read back through the
   # Datastore, Firestore and Bigtable emulators (#895, #1198).
-  if [ "$shard" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE,BIGTABLE,SPANNER; fi
+  # And Cloud KMS, whose key the Create a Firestore database page chooses
+  # (#1881).
+  if [ "$shard" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE,BIGTABLE,SPANNER,KMS; fi
   # The memorystore shard's read back through the Memorystore admin API.
   if [ "$shard" = memorystore ]; then BROWSER_VARS+=,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT; fi
   # The Logs Explorer reads entries written through the Logging API (#1410).
@@ -528,7 +533,7 @@ done
 # from ci.yml so the two cannot drift.
 compat_coverage() {
   local s never none
-  for s in storage served run emulators memorystore sql; do
+  for s in storage served run emulators memorystore sql iam; do
     case " ${SHARD_LIST[*]} " in *" $s "*) ;; *) return 0 ;; esac
   done
   SUITES="$WORK/coverage.suites" CHECKS="$WORK/coverage.checks"
@@ -537,7 +542,7 @@ compat_coverage() {
   go test -tags=compat -list '.*' ./test/compat/ | grep '^Test' | sort > "$WORK/all.txt"
   # A shard without restart probes has no probe-*.log, and cat's exit 1
   # for the unmatched glob would end the script under set -e.
-  for s in storage served run emulators memorystore sql; do
+  for s in storage served run emulators memorystore sql iam; do
     cat "$LOGS/$s"/compat.log "$LOGS/$s"/probe-*.log 2>/dev/null || true
   done | grep -oE -- '^--- (PASS|FAIL): Test[A-Za-z0-9_]+' | awk '{print $3}' | sort -u > "$WORK/ran.txt"
   none=$(comm -23 "$WORK/all.txt" "$WORK/ran.txt" | grep -vE "${never:-^$}" || true)

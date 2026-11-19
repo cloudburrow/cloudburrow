@@ -45,6 +45,9 @@ func (s *Server) serveXML(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if !s.authorizeXML(w, r, bucket, object) {
+		return
+	}
 	switch {
 	case bucket != "" && object != "" && q.Has("uploads") && r.Method == http.MethodPost:
 		s.mpuInitiate(w, r, bucket, object)

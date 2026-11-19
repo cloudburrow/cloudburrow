@@ -138,8 +138,14 @@ func TestConsoleBigtableInstanceAdmin(t *testing.T) {
 		t.Errorf("after Edit nodes to autoscaling, GetCluster = %+v", cl)
 	}
 	page = consoleBigtableInstance(t, addr, project, id)
-	if len(page.Sections) < 2 || len(page.Sections[0].Listing.Items) != 2 {
-		t.Fatalf("the Clusters tab = %+v", page.Sections)
+	clusters := -1
+	for i, s := range page.Sections {
+		if s.ID == "clusters" {
+			clusters = i
+		}
+	}
+	if clusters < 0 || len(page.Sections[clusters].Listing.Items) != 2 {
+		t.Fatalf("the Clusters page = %+v", page.Sections)
 	}
 
 	// App profiles.

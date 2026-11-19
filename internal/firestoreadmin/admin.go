@@ -62,6 +62,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/frontstate"
 	"github.com/cloudburrow/cloudburrow/internal/grpchttp"
+	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 )
 
 // DefaultLocation is the location `(default)` is described in: the emulator
@@ -118,6 +119,13 @@ type Admin struct {
 
 	// storage is the instance's Cloud Storage, for exports and imports.
 	storage string
+	// datastore is the Datastore call front's address (host:port), which
+	// clears a deleted Datastore mode database's entities (#1880); "" when
+	// Datastore is not served.
+	datastore string
+	// keys is the link to Cloud KMS, for customer-managed keys (cmek.go,
+	// #1881).
+	keys keyChecks
 	emulatorConn
 
 	// state is the front's state directory (state.go, #1514); nil keeps
@@ -175,7 +183,7 @@ const (
 // a gRPC call to FirestoreAdmin or Operations, or a REST call under
 // /v1/projects/ that is not under a database's documents.
 func (a *Admin) Claims(r *http.Request) bool {
-	if r.URL.Path == frontstate.ResetPath || r.URL.Path == MongoIAMPath || r.URL.Path == MongoExplainPath {
+	if r.URL.Path == frontstate.ResetPath || r.URL.Path == MongoIAMPath || r.URL.Path == MongoExplainPath || r.URL.Path == AccessPath {
 		return true
 	}
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
@@ -206,6 +214,10 @@ func (a *Admin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == MongoIAMPath {
 		a.serveMongoIAM(w, r)
+		return
+	}
+	if r.URL.Path == AccessPath {
+		a.serveAccess(w, r)
 		return
 	}
 	if r.URL.Path == MongoExplainPath {
@@ -345,7 +357,7 @@ func (a *Admin) GetDatabase(_ context.Context, req *adminpb.GetDatabaseRequest) 
 	return a.describe(db), nil
 }
 
-func (a *Admin) CreateDatabase(_ context.Context, req *adminpb.CreateDatabaseRequest) (*longrunningpb.Operation, error) {
+func (a *Admin) CreateDatabase(ctx context.Context, req *adminpb.CreateDatabaseRequest) (*longrunningpb.Operation, error) {
 	m := projectRe.FindStringSubmatch(req.GetParent())
 	if m == nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid parent %q: want projects/{project}", req.GetParent())
@@ -361,14 +373,33 @@ func (a *Admin) CreateDatabase(_ context.Context, req *adminpb.CreateDatabaseReq
 	if in.GetLocationId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "location_id is required.")
 	}
+	// gcp.resourceLocations (#1890), asked of the host whatever
+	// --iam-enforcement: FAILED_PRECONDITION with Google's documented
+	// message. Nothing is refused when no policy is set.
+	if err := orgpolicy.CheckLocations(ctx, req.GetParent(), req.GetParent(), in.GetLocationId()); err != nil {
+		return nil, status.Error(codes.FailedPrecondition, err.Error())
+	}
 	switch in.GetType() {
 	case adminpb.Database_DATASTORE_MODE:
-		return nil, status.Error(codes.Unimplemented, "a Datastore mode database is not served here: the Firestore emulator serves Native mode, and Datastore mode is the Datastore service")
+		// A Datastore mode database is served through the Datastore API,
+		// by the Datastore emulator (access.go, #1880): Enterprise
+		// edition is Native mode's alone.
+		if in.GetDatabaseEdition() == adminpb.Database_ENTERPRISE {
+			return nil, status.Error(codes.InvalidArgument, "Enterprise edition is only supported for Firestore Native mode databases: a Datastore mode database is Standard edition.")
+		}
 	case adminpb.Database_DATABASE_TYPE_UNSPECIFIED:
 		return nil, status.Error(codes.InvalidArgument, "type is required: FIRESTORE_NATIVE or DATASTORE_MODE.")
 	}
-	if in.GetCmekConfig() != nil {
-		return nil, status.Error(codes.Unimplemented, "customer-managed encryption (cmek_config) is not served here: the emulator does not encrypt with Cloud KMS keys")
+	var cmek *adminpb.Database_CmekConfig
+	// An empty cmek_config, as gcloud sends without --kms-key-name, is
+	// Google's default encryption.
+	if in.GetCmekConfig().GetKmsKeyName() != "" {
+		// The key, checked against the instance's Cloud KMS (cmek.go,
+		// #1881), before the database is recorded.
+		var err error
+		if cmek, err = a.checkKey(ctx, in.GetCmekConfig().GetKmsKeyName(), in.GetLocationId()); err != nil {
+			return nil, err
+		}
 	}
 	name := req.GetParent() + "/databases/" + id
 	a.mu.Lock()
@@ -390,8 +421,14 @@ func (a *Admin) CreateDatabase(_ context.Context, req *adminpb.CreateDatabaseReq
 		// its user credentials.
 		DatabaseEdition: orDefault(in.GetDatabaseEdition(), adminpb.Database_STANDARD),
 		Tags:            in.GetTags(),
+		CmekConfig:      cmek,
+	}
+	// Custom constraints (#1891, custom.go).
+	if err := checkDatabaseCustom(ctx, db, orgpolicy.MethodCreate); err != nil {
+		return nil, err
 	}
 	a.databases[name] = db
+	a.forgetKey(name)
 	return a.done(name, &adminpb.CreateDatabaseMetadata{}, a.describe(db))
 }
 
@@ -431,7 +468,7 @@ func snake(p string) string {
 	return b.String()
 }
 
-func (a *Admin) UpdateDatabase(_ context.Context, req *adminpb.UpdateDatabaseRequest) (*longrunningpb.Operation, error) {
+func (a *Admin) UpdateDatabase(ctx context.Context, req *adminpb.UpdateDatabaseRequest) (*longrunningpb.Operation, error) {
 	in := req.GetDatabase()
 	if in == nil {
 		return nil, status.Error(codes.InvalidArgument, "database is required")
@@ -458,6 +495,14 @@ func (a *Admin) UpdateDatabase(_ context.Context, req *adminpb.UpdateDatabaseReq
 	if in.GetEtag() != "" && in.GetEtag() != etag(a.describe(db)) {
 		return nil, status.Error(codes.Aborted, "the database's etag does not match: it has changed since it was read")
 	}
+	next := proto.Clone(db).(*adminpb.Database)
+	for _, p := range paths {
+		mutableDatabaseFields[p](next, in)
+	}
+	// Custom constraints on the database as the update leaves it (#1891).
+	if err := checkDatabaseCustom(ctx, next, orgpolicy.MethodUpdate); err != nil {
+		return nil, err
+	}
 	for _, p := range paths {
 		mutableDatabaseFields[p](db, in)
 	}
@@ -478,9 +523,16 @@ func (a *Admin) DeleteDatabase(ctx context.Context, req *adminpb.DeleteDatabaseR
 	if db.DeleteProtectionState == adminpb.Database_DELETE_PROTECTION_ENABLED {
 		return nil, status.Errorf(codes.FailedPrecondition, "The database %s has delete protection enabled. Disable delete protection before deleting it.", db.Name)
 	}
-	if err := a.clearDocuments(ctx, db.Name); err != nil {
+	// A Datastore mode database's entities are the Datastore emulator's
+	// (#1880), a Native mode one's documents this pod's emulator's.
+	clear := a.clearDocuments
+	if db.GetType() == adminpb.Database_DATASTORE_MODE {
+		clear = a.clearEntities
+	}
+	if err := clear(ctx, db.Name); err != nil {
 		return nil, err
 	}
+	a.forgetKey(db.Name)
 	for n := range a.indexes {
 		if strings.HasPrefix(n, db.Name+"/") {
 			delete(a.indexes, n)
@@ -840,7 +892,13 @@ func (a *Admin) UpdateField(_ context.Context, req *adminpb.UpdateFieldRequest) 
 				if override.TtlConfig == nil {
 					meta.TtlConfigDelta = &adminpb.FieldOperationMetadata_TtlConfigDelta{ChangeType: adminpb.FieldOperationMetadata_TtlConfigDelta_ADD}
 				}
-				override.TtlConfig = &adminpb.Field_TtlConfig{State: adminpb.Field_TtlConfig_ACTIVE}
+				// The expiration offset is kept as given (#1845): Google's
+				// Create Policy sets it, and GetField returns it.
+				off := in.GetTtlConfig().GetExpirationOffset()
+				if off != nil && (off.CheckValid() != nil || off.AsDuration() < 0) {
+					return nil, status.Error(codes.InvalidArgument, "ttl_config.expiration_offset must be a non-negative duration")
+				}
+				override.TtlConfig = &adminpb.Field_TtlConfig{State: adminpb.Field_TtlConfig_ACTIVE, ExpirationOffset: off}
 			}
 		default:
 			return nil, status.Errorf(codes.InvalidArgument, "update_mask path %q cannot be updated: only index_config and ttl_config can", p)

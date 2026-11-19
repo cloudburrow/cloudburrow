@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/cloudburrow/cloudburrow/internal/iameval"
 	"io"
 	"net"
 	"path/filepath"
@@ -15,9 +16,11 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
+	"github.com/cloudburrow/cloudburrow/internal/hfmodels"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/localai"
 	"github.com/cloudburrow/cloudburrow/internal/metadata"
+	"github.com/cloudburrow/cloudburrow/internal/modelgarden"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
@@ -32,18 +35,26 @@ import (
 // service: it is handed the same objects the services use, so there is no way
 // for it to answer from anywhere else.
 type consoleDeps struct {
-	cfg     config.Config
+	cfg config.Config
+	// iam is the IAM evaluator Policy Troubleshooter and Policy Analyzer
+	// answer from (#1879); nil leaves those pages without answers.
+	iam     *iameval.Enforcer
 	localAI *vertexai.Server
 	// localModels manages the local AI models, shared with the admin API
 	// (#1396); nil makes one for the console alone.
 	localModels *localai.Manager
-	projects    *resourcemanager.Registry
-	coord       *lifecycle.Coordinator
-	cluster     interface{ ServerVersion() string }
-	tasks       *tasksService
-	secrets     *secretsService
-	kms         *kmsService
-	scheduler   *schedulerService
+	// hfModels and garden are Model Garden's Hugging Face downloads and
+	// deployments (#1840), shared with ModelGardenService; nil hfModels
+	// makes a download manager for the console alone.
+	hfModels  *hfmodels.Manager
+	garden    *modelgarden.Manager
+	projects  *resourcemanager.Registry
+	coord     *lifecycle.Coordinator
+	cluster   interface{ ServerVersion() string }
+	tasks     *tasksService
+	secrets   *secretsService
+	kms       *kmsService
+	scheduler *schedulerService
 	// memorystore is the Memorystore admin API (#1302), whose instances the
 	// Memorystore page creates, edits and deletes.
 	memorystore *memorystoreAdminService
@@ -111,6 +122,13 @@ func buildConsole(d consoleDeps) *console.Server {
 		d.localModels = localModelsFor(d.cfg, d.localAI)
 	}
 	srv.SetLocalModels(d.localModels)
+	// Model Garden's Hugging Face downloads (#1840), into the state dir's
+	// model cache beside the pinned local models.
+	if d.hfModels == nil {
+		d.hfModels = &hfmodels.Manager{Dir: filepath.Join(d.cfg.StateDir, "models", "huggingface")}
+	}
+	srv.SetHFModels(d.hfModels)
+	srv.SetModelGarden(d.garden, d.localAI, d.cfg.DefaultProject())
 	srv.SetMetrics(metrics)
 	// The history is the console's, not a browser tab's. Kept server-side so
 	// it survives a reload and so the sampling rate does not depend on how
@@ -144,8 +162,9 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			h.sinks = &loggingAdminScreen{svc: d.logging, faults: d.faults}
 		}
 		providers = append(providers, projectsProvider{registry: d.projects}, h, tagsProvider{registry: d.projects},
-			projectIAMProvider{registry: d.projects}, iamRolesProvider{registry: d.projects}, iamGroupsProvider{registry: d.projects},
-			iamServiceAccountsProvider{registry: d.projects}, iamAuditProvider{registry: d.projects})
+			projectIAMProvider{registry: d.projects, iam: d.iam}, iamRolesProvider{registry: d.projects}, iamGroupsProvider{registry: d.projects},
+			iamServiceAccountsProvider{registry: d.projects}, iamAuditProvider{registry: d.projects},
+			iamOrgPoliciesProvider{registry: d.projects}, iamLabelsProvider{registry: d.projects}, iamSettingsProvider{registry: d.projects})
 	}
 	if enabled[config.ServiceStorage] && storageAddr != "" {
 		// Three screens of one product: buckets, the project's soft-deleted
@@ -181,17 +200,29 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		// executions (#785).
 		// The storage tunnel's bound address, not the configured port, which
 		// is 0 when the OS assigns it (--port-storage 0).
-		var runStorage string
+		var runStorage, runPubSub string
 		if enabled[config.ServiceStorage] && storageAddr != "" {
 			runStorage = hostURL(storageAddr)
 		}
+		if enabled[config.ServicePubSub] {
+			runPubSub = pubsubAddr
+		}
+		functions := &functionsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run),
+			storage: enabled[config.ServiceStorage]}
 		providers = append(providers, runProvider{
 			kubeconfig:     d.cfg.KubeconfigPath(),
 			namespace:      runadapter.WorkloadNamespace,
 			runAddr:        runAddrOf(d.run),
 			defaultProject: d.cfg.DefaultProject(),
 			storageAddr:    runStorage,
-		}, runJobsProvider{
+			pubsubAddr:     runPubSub,
+			functions:      functions,
+		}, runDomainsProvider{run: runProvider{
+			kubeconfig:     d.cfg.KubeconfigPath(),
+			namespace:      runadapter.WorkloadNamespace,
+			runAddr:        runAddrOf(d.run),
+			defaultProject: d.cfg.DefaultProject(),
+		}}, runJobsProvider{
 			kubeconfig:     d.cfg.KubeconfigPath(),
 			namespace:      runadapter.WorkloadNamespace,
 			runAddr:        runAddrOf(d.run),
@@ -206,23 +237,34 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			readyTimeout:   time.Duration(d.cfg.ReadyTimeout),
 		}, runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run), hostSteps: d.cfg.CloudBuildHostSteps},
 			// Cloud Build's triggers and worker pools (#1422).
-			buildTriggersProvider{b: runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)}},
+			buildTriggersProvider{b: runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)}, registry: d.projects},
 			buildWorkerPoolsProvider{b: runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)}},
+			// Cloud Build's Dashboard, Repositories and Settings (#1854).
+			buildDashboardProvider{b: runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)}},
+			buildRepositoriesProvider{ssm: sourceManagerProvider{b: runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)}}},
+			buildSettingsProvider{b: runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)}, registry: d.projects},
 			// Secure Source Manager's instances and repositories (#1527).
 			sourceManagerProvider{b: runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)}},
 			// Artifact Registry's repositories are served on the Run port (#1347).
 			artifactRegistryProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)},
 			// Cloud Functions v2 is served on the Run port too (#1377).
-			functionsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run),
-				storage: enabled[config.ServiceStorage]})
+			*functions)
+		if runPubSub != "" {
+			// Eventarc's own Triggers page (#1877), on the Run port, over
+			// Pub/Sub, its transport.
+			providers = append(providers, eventarcProvider{run: runProvider{runAddr: runAddrOf(d.run),
+				defaultProject: d.cfg.DefaultProject(), pubsubAddr: runPubSub}})
+		}
 	}
 	if enabled[config.ServiceSecrets] && d.secrets != nil {
-		providers = append(providers, secretsProvider{svc: d.secrets, faults: d.faults})
+		sp := secretsProvider{svc: d.secrets, faults: d.faults}
+		// Regional secrets (#1850) are their own page in Secret Manager's menu.
+		providers = append(providers, sp, secretsRegionalProvider{sp})
 	}
 	// Cloud KMS and Cloud Scheduler run in this process too, so their screens
 	// read the objects their APIs serve rather than going through a tunnel.
 	if enabled[config.ServiceKMS] && d.kms != nil {
-		providers = append(providers, kmsProvider{svc: d.kms}, kmsEkmProvider{svc: d.kms}, kmsAutokeyProvider{svc: d.kms}, kmsHsmProvider{svc: d.kms})
+		providers = append(providers, kmsProvider{svc: d.kms}, kmsEkmProvider{svc: d.kms}, kmsAutokeyProvider{svc: d.kms}, kmsInventoryProvider{svc: d.kms}, kmsHsmProvider{svc: d.kms})
 	}
 	// Certificate Authority Service (#1834) runs in this process too.
 	if enabled[config.ServicePrivateCA] && d.privateCA != nil {
@@ -250,6 +292,13 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			loggingSettingsProvider{screen},
 			// Saved queries and log scopes (#1519).
 			loggingSavedQueriesProvider{screen}, loggingLogScopesProvider{screen})
+		// Log Analytics (#1863), over the buckets' linked datasets in the
+		// instance's BigQuery; without BigQuery the page says it is not
+		// available.
+		if addr := forwardedAddr(d.forwarders, string(config.ServiceBigQuery)); enabled[config.ServiceBigQuery] && addr != "" {
+			providers = append(providers, loggingAnalyticsProvider{screen,
+				bigqueryProvider{endpoint: addr, project: d.cfg.DefaultProject(), registry: d.projects}})
+		}
 	}
 	// The opt-in databases. Each had a working backend and no screen, which
 	// reads as "not implemented" to anyone looking at the console. The
@@ -266,7 +315,15 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			return firestoreDatabasesProvider{endpoint: a, mongo: forwardedAddr(d.forwarders, "firestore-mongodb"),
 				mongoCA: filepath.Join(d.cfg.InstanceDir(), firestoreadmin.MongoCAFile)}
 		}},
-		{config.ServiceDatastore, func(a string) console.Provider { return datastoreProvider{endpoint: a} }},
+		// The Firestore Admin API lists the Datastore mode databases the
+		// page's database picker offers (#1883).
+		{config.ServiceDatastore, func(a string) console.Provider {
+			fs := ""
+			if enabled[config.ServiceFirestore] {
+				fs = forwardedAddr(d.forwarders, string(config.ServiceFirestore))
+			}
+			return datastoreProvider{endpoint: a, firestore: fs}
+		}},
 		{config.ServiceBigtable, func(a string) console.Provider { return bigtableProvider{endpoint: a} }},
 		// Instances, clusters, app profiles and instance IAM, through the
 		// instance admin API the Bigtable front serves (#1358).
@@ -283,7 +340,8 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		// The emulator serves the instance's default project and no other, so
 		// the screen is told which one that is (#698).
 		{config.ServiceBigQuery, func(a string) console.Provider {
-			return bigqueryProvider{endpoint: a, project: d.cfg.DefaultProject(), registry: d.projects}
+			return bigqueryProvider{endpoint: a, project: d.cfg.DefaultProject(), registry: d.projects,
+				savedQueries: filepath.Join(d.cfg.InstanceDir(), bqSavedQueriesFile)}
 		}},
 		// Job history, BigQuery's second screen (#993).
 		{config.ServiceBigQuery, func(a string) console.Provider {
@@ -314,8 +372,10 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		if host == "" || host == "0.0.0.0" || host == "::" {
 			host = "127.0.0.1"
 		}
-		providers = append(providers, cloudSQLInstancesProvider{
-			endpoint: net.JoinHostPort(host, strconv.Itoa(d.cfg.Endpoints.SQLAdmin)), versions: versions})
+		instances := cloudSQLInstancesProvider{
+			endpoint: net.JoinHostPort(host, strconv.Itoa(d.cfg.Endpoints.SQLAdmin)), versions: versions}
+		// Cloud SQL's Backups page (#1860), the project's backups.
+		providers = append(providers, instances, cloudSQLBackupsProvider{instances: instances})
 	}
 
 	// The cluster views are read-only and always present: CloudBurrow owns

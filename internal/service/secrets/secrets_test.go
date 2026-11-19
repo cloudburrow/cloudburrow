@@ -96,7 +96,7 @@ func TestParseVersionNameAcceptsNumbersAndLatest(t *testing.T) {
 		"projects/demo/secrets/k/versions/",
 		"projects/demo/secrets/k/versions/0",
 		"projects/demo/secrets/k/versions/-1",
-		"projects/demo/secrets/k/versions/newest",
+		"projects/demo/secrets/k/versions/1newest",
 		"projects/demo/secrets/k/versions/1/extra",
 	} {
 		if _, _, _, err := ParseVersionName(bad); err == nil {

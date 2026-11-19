@@ -94,8 +94,10 @@ func waitOp(t *testing.T, s *storagev1.Service, bucket, id string) *storagev1.Go
 // (anywhereCaches.pause, sent by hand: a cache that is not running is 400,
 // UNVERIFIED, docs re-read 2026-10-17, still unanswered:
 // https://docs.cloud.google.com/storage/docs/anywhere-cache. Revision
-// 20261107 of the discovery document has no pause, so it is no coverage
-// method, #1791.)
+// 20261107 of the discovery document has no pause, nor has 20261111, the
+// public one re-read 2026-11-18, so it is no coverage method; what Google
+// now answers on the path is UNVERIFIED (2026-11-18), measurable only on a
+// live project, so it stays served for older clients, #1791.)
 // unverified: storage.buckets.operations.cancel 400: an Anywhere Cache update's operation, and a done one
 // Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/anywhere-cache
 // covers: storage.anywhereCaches.insert, storage.anywhereCaches.get, storage.anywhereCaches.list, storage.anywhereCaches.update
@@ -210,6 +212,7 @@ func storageControlGRPC(t *testing.T, h *Harness) *control.StorageControlClient 
 //
 // covers: storage.anywhereCaches.insert, storage.anywhereCaches.update, storage.anywhereCaches.get, storage.anywhereCaches.list
 // covers: storage.anywhereCaches.resume, storage.anywhereCaches.disable, storage.buckets.operations.cancel
+// covers: google.storage.control.v2.StorageControl/PauseAnywhereCache
 func TestStorageAnywhereCachesControl(t *testing.T) {
 	h := New(t)
 	sc := storageControlGRPC(t, h)
@@ -504,7 +507,8 @@ func TestStorageNotificationsWithoutPubSub(t *testing.T) {
 
 // pauseAnywhereCache calls storage.anywhereCaches.pause, which the storage
 // v1 discovery document lists up to revision 20261009 and google.golang.org/api
-// v0.314.0's (revision 20261107) no longer does (#1791), so the generated
+// v0.314.0's (revision 20261107) and the public 20261111 no longer do
+// (#1791), so the generated
 // client has no Pause: the same request, made by hand against s's endpoint.
 func pauseAnywhereCache(s *storagev1.Service, bucket, id string) (*storagev1.AnywhereCache, error) {
 	if s.BasePath == "" {

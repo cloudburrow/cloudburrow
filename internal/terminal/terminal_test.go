@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -148,7 +149,7 @@ func TestPrepareCreatesThePodAndReportsTheWait(t *testing.T) {
 	m := manager(kube, nil)
 	kube.pods = []string{"", pod(t, m, "ContainerCreating", false), pod(t, m, "", true)}
 	var progress []string
-	if err := m.Prepare(context.Background(), func(s string) { progress = append(progress, s) }); err != nil {
+	if err := m.Prepare(context.Background(), func(p Progress) { progress = append(progress, p.Message) }); err != nil {
 		t.Fatal(err)
 	}
 	if !kube.ran("-n cloudburrow apply -f -") {
@@ -252,7 +253,7 @@ func TestPrepareWaitsThroughALongPull(t *testing.T) {
 	kube.pods, kube.events = pods, evs
 
 	var progress []string
-	if err := m.Prepare(context.Background(), func(s string) { progress = append(progress, s) }); err != nil {
+	if err := m.Prepare(context.Background(), func(p Progress) { progress = append(progress, p.Message) }); err != nil {
 		t.Fatalf("a pull under way was reported as a failure: %v", err)
 	}
 	all := strings.Join(progress, "\n")
@@ -320,8 +321,31 @@ func TestPrepareShowsTheBytesTheNodeReports(t *testing.T) {
 	kube.events = []string{events(t, pulling)}
 
 	var progress []string
-	if err := m.Prepare(context.Background(), func(s string) { progress = append(progress, s) }); err != nil {
+	var reports []Progress
+	if err := m.Prepare(context.Background(), func(p Progress) {
+		progress = append(progress, p.Message)
+		reports = append(reports, p)
+	}); err != nil {
 		t.Fatal(err)
+	}
+	// The drawer draws its progress bar from the numbers, not the sentence
+	// (#1838): the bytes as the node reports them, unrounded, and the time
+	// since the kubelet's Pulling event.
+	var steps []Progress
+	for _, r := range reports {
+		if r.Step != "" {
+			r.Message = ""
+			steps = append(steps, r)
+		}
+	}
+	wantSteps := []Progress{
+		{Step: StepPull, Fetched: 11540202, Total: total, Elapsed: 2 * time.Minute},
+		{Step: StepPull, Fetched: 273495893, Total: total, Elapsed: 3 * time.Minute},
+		{Step: StepPull, Elapsed: 4 * time.Minute},
+		{Step: StepUnpack, Fetched: total, Total: total, Elapsed: 5 * time.Minute},
+	}
+	if !reflect.DeepEqual(steps, wantSteps) {
+		t.Errorf("reports = %+v\nwant %+v", steps, wantSteps)
 	}
 	want := []string{
 		"Pulling the terminal image (the Cloud SDK with kubectl; first use only): fetched 10 MB of 1033 MB, as the node reports it; 2m0s so far",
@@ -358,7 +382,7 @@ func TestPrepareWithoutANodeShowsTheElapsedTime(t *testing.T) {
 	kube.pods = []string{pod(t, m, "ContainerCreating", false), pod(t, m, "ContainerCreating", false), pod(t, m, "", true)}
 	kube.events = []string{events(t, pulling)}
 	var progress []string
-	if err := m.Prepare(context.Background(), func(s string) { progress = append(progress, s) }); err != nil {
+	if err := m.Prepare(context.Background(), func(p Progress) { progress = append(progress, p.Message) }); err != nil {
 		t.Fatal(err)
 	}
 	if called {
@@ -381,7 +405,7 @@ func TestPrepareReportsAPullThatFailsAfterAWait(t *testing.T) {
 	kube.pods = []string{pod(t, m, "ContainerCreating", false), pod(t, m, "ContainerCreating", false), pod(t, m, "ErrImagePull", false)}
 	kube.events = []string{events(t, pulling), events(t, pulling, failed)}
 	var progress []string
-	err := m.Prepare(context.Background(), func(s string) { progress = append(progress, s) })
+	err := m.Prepare(context.Background(), func(p Progress) { progress = append(progress, p.Message) })
 	reason, ok := IsUnavailable(err)
 	if !ok || !strings.Contains(reason, "ErrImagePull") || !strings.Contains(reason, "context deadline exceeded") {
 		t.Errorf("err = %v; want ErrImagePull with the pull's error", err)

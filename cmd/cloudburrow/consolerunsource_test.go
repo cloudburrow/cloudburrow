@@ -48,12 +48,13 @@ func TestRunDeployFromSourceIsOfferedWithStorage(t *testing.T) {
 // before anything is uploaded.
 func TestRunCreateServiceFromSourceIsAListAction(t *testing.T) {
 	addr := func() string { return "127.0.0.1:1" }
-	if got := (runProvider{runAddr: addr}).ListActions(context.Background(), "p"); len(got) != 0 {
-		t.Errorf("without Cloud Storage: %v; want no list actions", got)
+	// Connect repo (#1852) needs no Cloud Storage.
+	if got := (runProvider{runAddr: addr}).ListActions(context.Background(), "p"); len(got) != 1 || got[0].ID != runConnectRepo {
+		t.Errorf("without Cloud Storage: %v; want Connect repo alone", got)
 	}
 	p := runProvider{runAddr: addr, storageAddr: "http://127.0.0.1:2", region: "europe-west1"}
 	got := p.ListActions(context.Background(), "p")
-	if len(got) != 1 || got[0].ID != runCreateFromSource || got[0].Label != "Create service from source" {
+	if len(got) != 2 || got[0].ID != runCreateFromSource || got[0].Label != "Create service from source" || got[1].ID != runConnectRepo {
 		t.Fatalf("ListActions = %+v; want Create service from source", got)
 	}
 	var names []string

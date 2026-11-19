@@ -26,6 +26,9 @@ func TestMain(m *testing.M) {
 			os.Exit(1)
 		}
 	}
+	// An instance that enforces IAM: Cloud Run services are invoked as
+	// the instance's own account (ownerinvoke1879_test.go).
+	useOwnerInvokeTokens()
 	os.Exit(m.Run())
 }
 

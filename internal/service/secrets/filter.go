@@ -181,9 +181,7 @@ func parseFilterDuration(s string) (time.Duration, error) {
 
 // unsetSecretFields are documented filter fields of a Secret that this
 // service refuses to create (checkCreatable), so no secret ever has them.
-var unsetSecretFields = map[string]bool{
-	"version_aliases": true,
-}
+var unsetSecretFields = map[string]bool{}
 
 // cmekFilterFields are the documented filter fields of a secret's
 // customer-managed keys (#1453), in both casings, each mapped to whether it
@@ -223,7 +221,7 @@ func secretFieldKind(field string) (byte, bool) {
 		return 's', true
 	case field == "create_time", field == "expire_time", field == "rotation.next_rotation_time":
 		return 't', true
-	case field == "rotation":
+	case field == "rotation", field == "version_aliases":
 		return 's', true
 	case field == "rotation.rotation_period", field == "version_destroy_ttl":
 		return 'd', true
@@ -304,6 +302,9 @@ func secretField(r any, field string) (filterValue, bool) {
 		return filterValue{set: s.RotationPeriod > 0, d: s.RotationPeriod, kind: 'd'}, true
 	case field == "version_destroy_ttl":
 		return filterValue{set: s.VersionDestroyTTL > 0, d: s.VersionDestroyTTL, kind: 'd'}, true
+	case field == "version_aliases":
+		// The aliases' names (#1850), as labels:KEY matches a label's key.
+		return strValue(SortedAliases(s.VersionAliases)...), true
 	}
 	if automatic, ok := cmekFilterFields[field]; ok {
 		return cmekFilterValue(s, automatic), true

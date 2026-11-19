@@ -78,6 +78,12 @@ func toProtoSecret(s Secret) *secretmanagerpb.Secret {
 	if s.VersionDestroyTTL > 0 {
 		out.VersionDestroyTtl = durationpb.New(s.VersionDestroyTTL)
 	}
+	if len(s.VersionAliases) > 0 {
+		out.VersionAliases = make(map[string]int64, len(s.VersionAliases))
+		for a, n := range s.VersionAliases {
+			out.VersionAliases[a] = int64(n)
+		}
+	}
 	if s.Regional() {
 		// A regional secret (#1519) has no replication; its key is the
 		// secret's own.
@@ -290,7 +296,7 @@ func (g *GRPCServer) UpdateSecret(_ context.Context, req *secretmanagerpb.Update
 	}
 
 	var updateLabels, updateAnnotations, checkReplication, updateExpire, updateTopics, updateCMEK bool
-	var updateNext, updatePeriod, updateTTL bool
+	var updateNext, updatePeriod, updateTTL, updateAliases bool
 	for _, p := range paths {
 		switch {
 		case p == "rotation":
@@ -302,6 +308,8 @@ func (g *GRPCServer) UpdateSecret(_ context.Context, req *secretmanagerpb.Update
 			updatePeriod = true
 		case p == "version_destroy_ttl" || p == "versionDestroyTtl":
 			updateTTL = true
+		case p == "version_aliases" || p == "versionAliases":
+			updateAliases = true
 		case p == "labels":
 			updateLabels = true
 		case p == "annotations":
@@ -319,7 +327,7 @@ func (g *GRPCServer) UpdateSecret(_ context.Context, req *secretmanagerpb.Update
 			updateCMEK = true
 		default:
 			return nil, apierror.Wrap(apierror.InvalidArgument(
-				"update_mask path %q is not supported; only labels, annotations, expire_time, ttl, topics, rotation and version_destroy_ttl are mutable", p))
+				"update_mask path %q is not supported; only labels, annotations, expire_time, ttl, topics, rotation, version_destroy_ttl and version_aliases are mutable", p))
 		}
 	}
 	if err := g.secretEtag(project, id, sec.GetEtag()); err != nil {
@@ -369,6 +377,7 @@ func (g *GRPCServer) UpdateSecret(_ context.Context, req *secretmanagerpb.Update
 		UpdateLabels: updateLabels, UpdateAnnotations: updateAnnotations,
 		Expire: expire, UpdateExpire: updateExpire,
 		Topics: topicNames(sec), UpdateTopics: updateTopics,
+		VersionAliases: aliasesOf(sec), UpdateVersionAliases: updateAliases,
 	})
 	if err != nil {
 		return nil, apierror.Wrap(err)
@@ -380,6 +389,18 @@ func (g *GRPCServer) UpdateSecret(_ context.Context, req *secretmanagerpb.Update
 		}
 	}
 	return toProtoSecret(updated), nil
+}
+
+// aliasesOf is a request Secret's version_aliases (#1850).
+func aliasesOf(sec *secretmanagerpb.Secret) map[string]int {
+	if len(sec.GetVersionAliases()) == 0 {
+		return nil
+	}
+	out := make(map[string]int, len(sec.GetVersionAliases()))
+	for a, n := range sec.GetVersionAliases() {
+		out[a] = int(n)
+	}
+	return out
 }
 
 // scheduleOf is a request Secret's rotation and version_destroy_ttl.

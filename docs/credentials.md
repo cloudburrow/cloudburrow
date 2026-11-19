@@ -228,7 +228,7 @@ where the source credential is the fixture and every call stays on loopback.
 | **Access tokens** | Opaque `cbl_…` strings, as they are opaque on Google. Deliberately **not** JWTs: making one look verifiable invites someone to try to verify it. The instance keeps each one's SHA-256, with the account it was minted for and its expiry, in `issued-tokens.json` beside the key, so Memorystore's IAM auth can check a client's token (#1614); nothing else checks one. |
 | **ID tokens** | Real RS256 JWTs, signed with the instance's own key and verifiable against `/certs`. They will **not** verify against Google's public certificates, because Google did not issue them. |
 | **Validation** | None, anywhere. CloudBurrow never checks a token, an assertion, a signature or an expiry. The token endpoint checks only that an assertion was *sent*, so a client silently sending none finds out. |
-| **Authorization** | None. There is no IAM, no scopes enforcement, no per-resource permission. Every caller can do everything. |
+| **Authorization** | None by default: no scopes enforcement, and every caller can do everything. With `up --iam-enforcement=on` (#1879) the mapped methods check the account a minted token names against the stored allow policies ([compatibility.md](compatibility.md#iam-enforcement)); the ADC fixture's account and a request with no token are the project owner. |
 
 ## Verified with real tooling
 
@@ -270,6 +270,39 @@ Run, Cloud Scheduler and Resource Manager), and any other enabled service, Cloud
 them, is named in a warning. The file is removed however the run ends, Ctrl-C included, and a file of either name
 that `cloudburrow terraform` did not write is never replaced.
 
+**Hard-coded Google hosts: `--intercept-hardcoded` (opt-in, #1578).** When a plan's
+`google_bigquery_table` schema drops a column, `hashicorp/google` (8.4.0 to 8.12.0 and its main
+branch) lists the table's row access policies at a literal
+`https://bigquery.googleapis.com/bigquery/v2/.../rowAccessPolicies`, to decide whether to replace
+the table. No provider setting moves it: not `big_query_custom_endpoint`, not `universe_domain`
+(it only rewrites the default base paths), not any `GOOGLE_*` variable, and the provider's HTTP
+client rewrites no hosts. It ignores that call's error, so without help the plan goes ahead in
+place, where Google's would replace a table with row access policies. With the flag, for every
+subcommand but `init`:
+
+```sh
+cloudburrow terraform --intercept-hardcoded -- plan
+```
+
+- the wrapper mints, in memory, an ephemeral CA (valid one day, name-constrained to
+  `bigquery.googleapis.com`) and a leaf for that host. Only the CA **certificate** is written, to
+  a `terraform-intercept-*` directory in the instance's state directory, removed when the run
+  ends. Neither private key is written or printed, and nothing is installed in a keychain or
+  system trust store.
+- it starts an HTTPS proxy on loopback that accepts `CONNECT bigquery.googleapis.com:443` alone,
+  terminates TLS there and sends each `/bigquery/v2/` request, path unchanged, to the instance's
+  BigQuery front. Any other host, port, path or plain proxy request is refused 403: nothing is
+  forwarded to the internet. The run ends with a line naming how many requests it served and what
+  it refused.
+- only the Terraform process gets `HTTPS_PROXY`/`HTTP_PROXY` (that proxy), `NO_PROXY` reset to
+  loopback, `SSL_CERT_FILE`/`SSL_CERT_DIR` (that CA alone) and
+  `GODEBUG=x509sslcertoverrideplatform=1`.
+
+Linux honours `SSL_CERT_FILE` with every Go. On macOS only a provider built with Go 1.27 or later
+does; the released providers through 8.12.0 are built with Go 1.26, so there the wrapper warns, the
+call fails its TLS check (still locally) and the plan behaves as without the flag.
+`TestTerraformBigQueryTableDropColumnIntercepted` (emulators shard) covers it.
+
 The original manual run, full create/read/destroy against the `hashicorp/google` provider:
 
 ```
@@ -309,7 +342,7 @@ eval "$(cloudburrow gcloud-teardown)"  # unset CLOUDSDK_ACTIVE_CONFIG_NAME
 gcloud's configuration directory (`CLOUDSDK_CONFIG`, or `~/.config/gcloud`). It sets
 `core/project`, turns on `auth/disable_credentials` and names the ADC fixture. It writes
 `api_endpoint_overrides` **only** for the services whose gcloud use is Verified below.
-Overrides written: `storage`, `pubsub`, `cloudkms`, `secretmanager`, `cloudtasks`, `cloudscheduler`, `logging`, `run`, `artifactregistry`, `cloudbuild`, `cloudfunctions`, `securesourcemanager`, `cloudresourcemanager`, `iam`, `cloudidentity`, `serviceusage`, `sql`, `redis`, `memorystore`, `bigtableadmin`, `spanner`, `firestore`, `developerconnect`, `privateca` and `backupdr` (`privateca`, Certificate Authority Service, with `privateca`, #1834; `backupdr`, the Backup and DR Service, with `backupdr` and a Cloud SQL service, #1433)
+Overrides written: `storage`, `pubsub`, `cloudkms`, `secretmanager`, `cloudtasks`, `cloudscheduler`, `logging`, `run`, `artifactregistry`, `cloudbuild`, `cloudfunctions`, `securesourcemanager`, `cloudresourcemanager`, `iam`, `cloudidentity`, `policytroubleshooter`, `orgpolicy`, `serviceusage`, `sql`, `redis`, `memorystore`, `bigtableadmin`, `spanner`, `firestore`, `datastore`, `developerconnect`, `eventarc`, `privateca` and `backupdr` (`privateca`, Certificate Authority Service, with `privateca`, #1834; `backupdr`, the Backup and DR Service, with `backupdr` and a Cloud SQL service, #1433)
 (written whatever `--services` selects, since Resource Manager and Service Usage are always served; `sql` with either Cloud SQL service; `redis`, the Memorystore admin API, and `memorystore`, its Memorystore for Valkey JSON under `/memorystore/` (#1519), with `memorystore`; `bigtableadmin`, Bigtable's admin REST API on the Bigtable port, with `bigtable`, #1440; `spanner`, Spanner's admin REST port, with `spanner`, and `firestore`, the Firestore Admin API on the Firestore port, with `firestore`, #1461). `run` (#1293) is
 `http://run.localhost:<port>/` on a loopback bind: gcloud run calls `{region}-{host}` for a
 command given `--region`, and `us-central1-run.localhost` is still loopback. `cloudresourcemanager`
@@ -327,7 +360,8 @@ Cloud Functions v2 for `gcloud functions … --gen2`. `securesourcemanager` (#15
 under `/securesourcemanager/`, since Secure Source Manager's v1 paths are Artifact Registry's, for
 `gcloud source-manager instances` and `repos`. `developerconnect` (#1546) is the Run port under
 `/developerconnect/`, beside it, for `gcloud developer-connect connections` and their
-`git-repository-links`.
+`git-repository-links`. `eventarc` (#1877) is the Run port under `/eventarc/`, since Eventarc's v1
+trigger paths are Cloud Build's, for `gcloud eventarc triggers` and `providers`.
 `gcloud tasks` covers queues (#590) and, since tasks are transcoded (#591), tasks;
 `gcloud tasks run` is RunTask, which is not implemented, so it answers 501 (which gcloud retries)
 rather than reaching Google. `gcloud scheduler` needs `--location`: without it gcloud looks for an

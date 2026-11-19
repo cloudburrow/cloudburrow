@@ -24,6 +24,8 @@ func editDefaults(t *testing.T, service, project string, path ...string) map[str
 		Edit struct {
 			Fields []struct{ Name, Default string }
 		}
+		// The page header's properties too (#1851: a key's).
+		Summary  []struct{ Label, Value string }
 		Sections []struct {
 			Groups []struct {
 				Properties []struct{ Label, Value string }
@@ -36,6 +38,9 @@ func editDefaults(t *testing.T, service, project string, path ...string) map[str
 	out := map[string]string{}
 	for _, f := range d.Edit.Fields {
 		out[f.Name] = f.Default
+	}
+	for _, pr := range d.Summary {
+		out[pr.Label] = pr.Value
 	}
 	for _, s := range d.Sections {
 		for _, g := range s.Groups {
@@ -56,16 +61,17 @@ func setField(p *tab, scope, id, v string) {
 		return true; })()`, scope+" #"+id, v, v), nil)
 }
 
-// TestPubSubCreateOptionsThroughTheForms (#852), in the storage shard, whose
-// instance serves Pub/Sub: Create topic, on its own page now that it holds
-// the topic's options, offers the message retention and the schema, and a
-// topic created with a retention reads it back; the topic's
-// Create subscription dialog offers ordering, the filter, exactly-once
-// delivery, the expiration period (#873), retry and dead lettering, and fits
-// the window; a malformed filter is refused on the form with the console's
-// explanation, an expiration under a day with the API's reason, and a valid
-// create is saved with one action that the console API reads back, its
-// expiration and exactly-once included.
+// TestPubSubCreateOptionsThroughTheForms (#852, #1847), in the storage
+// shard, whose instance serves Pub/Sub: Create topic is Google's page, whose
+// Use a schema and Enable message retention reveal their fields, and a
+// topic created with a retention of 2 days reads it back. A topic row's
+// Create subscription opens Google's Create subscription page with the topic
+// filled in: Delivery type Push reveals the endpoint, Retry after
+// exponential backoff delay the backoffs and Enable dead lettering the
+// dead-letter topic; the expiration period opens at Google's 31 days. A
+// malformed filter is refused on the page with the console's explanation,
+// an expiration shorter than the retention with the API's reason, and a
+// valid create is saved and read back through the console API.
 func TestPubSubCreateOptionsThroughTheForms(t *testing.T) {
 	needService(t, "pubsub")
 	p := open(t)
@@ -76,97 +82,127 @@ func TestPubSubCreateOptionsThroughTheForms(t *testing.T) {
 		consoleDo(t, http.MethodDelete, "/api/resources/pubsub-subscriptions?project="+project+"&name="+url.QueryEscape(sub), "")
 		consoleDo(t, http.MethodDelete, "/api/resources/pubsub?project="+project+"&name="+url.QueryEscape(topic), "")
 	})
+	hidden := func(id string) bool {
+		var h bool
+		p.eval(fmt.Sprintf(`document.querySelector("#view #%s").closest(".form-row").hidden`, id), &h)
+		return h
+	}
 
 	p.navigate("/pubsub/topics?project=" + project)
 	p.waitFor(`[...document.querySelectorAll("#view button.primary")].some((b) => b.textContent === "Create topic")`)
 	p.clickText("#view button.primary", "Create topic")
-	p.waitFor(`document.querySelector("#view #f-messageRetention") !== null`)
-	var topicForm struct {
-		Encodings []string
-		Schema    bool
+	p.waitFor(`location.pathname === "/pubsub/topics/create" && document.querySelector("#view #f-enableRetention") !== null`)
+	if !hidden("f-schema") || !hidden("f-retentionDays") {
+		t.Error("Create topic shows the schema or the retention before its checkbox is checked")
 	}
-	p.eval(`(() => { const q = (s) => document.querySelector("#view " + s);
-		return { Encodings: [...q("#f-schemaEncoding").options].map((o) => o.value), Schema: q("#f-schema") !== null }; })()`, &topicForm)
-	if strings.Join(topicForm.Encodings, ",") != "JSON,BINARY" || !topicForm.Schema {
-		t.Errorf("Create topic offers schema %v, encodings %v; want a schema and JSON or BINARY", topicForm.Schema, topicForm.Encodings)
+	setField(p, "#view", "f-useSchema", "true")
+	if hidden("f-schema") || hidden("f-schemaEncoding-0") {
+		t.Error("Use a schema does not reveal the schema and its encoding")
+	}
+	setField(p, "#view", "f-useSchema", "false")
+	// Google's choices this instance cannot make are drawn disabled with
+	// their reasons (#1847): Enable ingestion, the two exports, a transform,
+	// and Cloud KMS key under Encryption.
+	var off struct {
+		Boxes    []bool
+		KMS      bool
+		Google   bool
+		Reasons  int
+		Headings []string
+	}
+	p.eval(`(() => ({ Boxes: ["enableIngestion", "exportBigQuery", "exportStorage", "addTransform"].map((n) => document.querySelector("#view #f-" + n).disabled),
+		KMS: document.querySelector("#view #f-encryption-1").disabled, Google: document.querySelector("#view #f-encryption-0").checked,
+		Reasons: document.querySelectorAll("#view .form-unavailable").length,
+		Headings: [...document.querySelectorAll("#view .form-section-title")].map((h) => h.textContent) }))()`, &off)
+	if fmt.Sprint(off.Boxes) != "[true true true true]" || !off.KMS || !off.Google || off.Reasons != 5 ||
+		strings.Join(off.Headings, ",") != "Transforms,Encryption,Labels" {
+		t.Errorf("Create topic draws %+v; want the four boxes and Cloud KMS key disabled with five reasons, under Google's headings", off)
 	}
 	setField(p, "#view", "f-name", "browser-opts")
 	setField(p, "#view", "f-defaultSubscription", "false")
-	setField(p, "#view", "f-messageRetention", "2d")
+	setField(p, "#view", "f-enableRetention", "true")
+	setField(p, "#view", "f-retentionDays", "2")
 	p.run(chromedp.Click(chromedp.CSS(`#view button[type="submit"]`)))
 	p.waitFor(`location.pathname === "/pubsub/topics"`)
 	if got := editDefaults(t, "pubsub", project, topic)["messageRetention"]; got != "2d" {
 		t.Errorf("the topic created in the browser reads a retention of %q; want 2d", got)
 	}
 
+	// The topic's row menu opens Create subscription with the topic.
 	p.navigate("/pubsub/topics?project=" + project)
-	p.clickText("#view tbody a", topic)
-	openCreate := func() {
-		p.waitFor(`document.querySelector(".modal") === null`)
-		p.clickText("#view .page-actions button", "Create subscription")
-		p.waitFor(`document.querySelector(".modal.is-open #f-filter") !== null`)
+	p.waitFor(fmt.Sprintf(`document.querySelector(%q) !== null`, fmt.Sprintf(`button[aria-label=%q]`, "Actions for "+topic)))
+	p.run(chromedp.Click(chromedp.CSS(fmt.Sprintf(`button[aria-label=%q]`, "Actions for "+topic))))
+	p.clickText(`.overflow-menu:not([hidden]) [role="menuitem"]`, "Create subscription")
+	p.waitFor(`location.pathname === "/pubsub/subscriptions/create" && document.querySelector("#view #f-topic") !== null`)
+	var page struct {
+		Topic, Expiration string
+		Fields            []string
 	}
-	openCreate()
-	var form struct {
-		Fields []string
-		Fits   bool
+	p.eval(`(() => ({ Topic: document.querySelector("#view #f-topic").value,
+		Expiration: document.querySelector("#view #f-expirationDays").value,
+		Fields: [...document.querySelectorAll("#view [id^=f-]")].map((f) => f.id.slice(2)) }))()`, &page)
+	if page.Topic != topic || page.Expiration != "31" {
+		t.Errorf("Create subscription opens with topic %q and expiration %q; want %s and 31 days", page.Topic, page.Expiration, topic)
 	}
-	p.eval(`(() => { const r = document.querySelector(".modal.is-open .modal-body").getBoundingClientRect();
-		return { Fields: [...document.querySelectorAll(".modal.is-open [id^=f-]")].map((f) => f.id.slice(2)),
-		         Fits: r.top >= 0 && r.bottom <= window.innerHeight }; })()`, &form)
-	for _, want := range []string{"messageOrdering", "filter", "retainAcked", "exactlyOnce", "expiration", "minBackoff",
-		"deadLetterTopic", "maxDeliveryAttempts"} {
-		if !contains(form.Fields, want) {
-			t.Errorf("Create subscription does not offer %s: %v", want, form.Fields)
+	for _, want := range []string{"deliveryType", "filter", "retryPolicy", "deadLettering", "exactlyOnce", "messageOrdering",
+		"ackDeadline", "messageRetention", "retainAcked", "expirationMode"} {
+		if !contains(page.Fields, want) {
+			t.Errorf("Create subscription does not offer %s: %v", want, page.Fields)
 		}
 	}
-	var expiration string
-	p.eval(`document.querySelector(".modal.is-open #f-expiration").value`, &expiration)
-	if expiration != "31d" {
-		t.Errorf("the expiration period opens as %q; want Google's default, 31d", expiration)
+	if !hidden("f-pushEndpoint") || !hidden("f-minBackoff") || !hidden("f-deadLetterTopic") {
+		t.Error("a field its choice hides is shown")
 	}
-	if !form.Fits {
-		t.Error("the Create subscription dialog runs past the window; a form taller than the window must scroll inside it")
+	p.run(chromedp.Click(chromedp.CSS(`#view #f-deliveryType-1`)))
+	if hidden("f-pushEndpoint") {
+		t.Error("Delivery type Push does not reveal the endpoint")
 	}
+	p.run(chromedp.Click(chromedp.CSS(`#view #f-deliveryType-0`)))
+	p.run(chromedp.Click(chromedp.CSS(`#view #f-retryPolicy-1`)))
+	setField(p, "#view", "f-deadLettering", "true")
+	if hidden("f-minBackoff") || hidden("f-deadLetterTopic") {
+		t.Error("the backoffs or the dead-letter topic are not revealed by their choice")
+	}
+	setField(p, "#view", "f-deadLettering", "false")
+	// Every section open, so the page's fields can be set.
+	p.eval(`[...document.querySelectorAll("#view .create-step-body")].forEach((b) => { b.hidden = false; })`, nil)
 
-	setField(p, ".modal.is-open", "f-name", "browser-opts-eu")
-	setField(p, ".modal.is-open", "f-filter", "nonsense ===")
-	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
-	p.waitFor(`!document.querySelector(".modal.is-open .form-error").hidden`)
+	setField(p, "#view", "f-name", "browser-opts-eu")
+	setField(p, "#view", "f-filter", "nonsense ===")
+	submit := func() { p.run(chromedp.Click(chromedp.CSS(`#view button[type="submit"]`))) }
+	submit()
+	p.waitFor(`!document.querySelector("#view .form-error").hidden`)
 	var refusal string
-	p.eval(`document.querySelector(".modal.is-open .form-error").textContent`, &refusal)
+	p.eval(`document.querySelector("#view .form-error").textContent`, &refusal)
 	if !strings.Contains(refusal, "the emulator refused the filter") {
-		t.Errorf("a malformed filter was refused on the form with %q", refusal)
+		t.Errorf("a malformed filter was refused on the page with %q", refusal)
 	}
 	p.forgive()
 
-	setField(p, ".modal.is-open", "f-filter", `attributes.region = "eu"`)
-	setField(p, ".modal.is-open", "f-messageOrdering", "true")
-	setField(p, ".modal.is-open", "f-messageRetention", "1d")
-	setField(p, ".modal.is-open", "f-expiration", "12h")
-	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
-	p.waitFor(`!document.querySelector(".modal.is-open .form-error").hidden &&
-		document.querySelector(".modal.is-open .form-error").textContent.includes("at least 1 day")`)
+	setField(p, "#view", "f-filter", `attributes.region = "eu"`)
+	setField(p, "#view", "f-messageOrdering", "true")
+	setField(p, "#view", "f-messageRetention", "3d")
+	setField(p, "#view", "f-expirationDays", "2")
+	submit()
+	p.waitFor(`!document.querySelector("#view .form-error").hidden &&
+		document.querySelector("#view .form-error").textContent !== ` + fmt.Sprintf("%q", refusal))
 	p.forgive()
 
-	setField(p, ".modal.is-open", "f-expiration", "2d")
-	setField(p, ".modal.is-open", "f-exactlyOnce", "true")
-	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
-	p.waitFor(`document.querySelector(".modal") === null`)
-	if sent := p.sent(http.MethodPost, "/api/actions/pubsub"); len(sent) != 3 {
-		t.Errorf("the two refused and the saved create sent %d actions, want 3: %v", len(sent), sent)
-	}
+	setField(p, "#view", "f-messageRetention", "1d")
+	setField(p, "#view", "f-exactlyOnce", "true")
+	submit()
+	p.waitFor(`location.pathname === "/pubsub/subscriptions"`)
 	got := editDefaults(t, "pubsub-subscriptions", project, sub)
-	if got["filter"] != `attributes.region = "eu"` || got["messageOrdering"] != "Yes" || got["exactlyOnce"] != "true" || got["expiration"] != "2d" {
-		t.Errorf("the subscription created in the browser reads filter %q, ordering %q, exactly-once %q, expiration %q",
-			got["filter"], got["messageOrdering"], got["exactlyOnce"], got["expiration"])
+	if got["filter"] != `attributes.region = "eu"` || got["messageOrdering"] != "Yes" || got["exactlyOnce"] != "true" ||
+		got["expiration"] != "2d" || got["minBackoff"] != "10s" || got["maxBackoff"] != "10m0s" {
+		t.Errorf("the subscription created in the browser reads %v", got)
 	}
 }
 
-// TestKMSCreateKeyOptionsThroughTheForm (#852), in the run shard, whose
-// instance serves Cloud KMS: Create key on a ring's page offers the destroy
-// scheduled duration, defaulted to Cloud KMS's 30 days, and the rotation
-// schedule; a key created there with 3 days and a 30-day period reads both
+// TestKMSCreateKeyOptionsThroughTheForm (#852, #1851), in the run shard,
+// whose instance serves Cloud KMS: Create key on a ring's page offers the
+// Duration of 'scheduled for destruction' state, defaulted to Cloud KMS's
+// 30 days, and the Rotation period, defaulted to 90 days as Google's is; a key created there with 3 days and a 30-day period reads both
 // back through the console API.
 func TestKMSCreateKeyOptionsThroughTheForm(t *testing.T) {
 	needService(t, "kms")
@@ -180,31 +216,32 @@ func TestKMSCreateKeyOptionsThroughTheForm(t *testing.T) {
 	p.navigate("/kms/keyrings?project=" + project)
 	p.clickText("#view tbody a", ring)
 	p.clickText("#view .page-actions button", "Create key")
-	p.waitFor(`document.querySelector(".modal.is-open #f-destroyScheduledDuration") !== null`)
+	p.waitFor(`document.querySelector(".modal.is-open #f-destroyScheduledDays") !== null`)
 	var defaults struct{ Destroy, Period string }
-	p.eval(`({ Destroy: document.querySelector(".modal.is-open #f-destroyScheduledDuration").value,
+	p.eval(`({ Destroy: document.querySelector(".modal.is-open #f-destroyScheduledDays").value,
 	           Period: document.querySelector(".modal.is-open #f-rotationPeriod").value })`, &defaults)
-	if defaults.Destroy != "30d" || defaults.Period != "" {
-		t.Errorf("Create key opened with destroy %q, period %q; want 30d and none", defaults.Destroy, defaults.Period)
+	if defaults.Destroy != "30" || defaults.Period != "90d" {
+		t.Errorf("Create key opened with destroy %q, period %q; want 30 days and 90d", defaults.Destroy, defaults.Period)
 	}
 	next := time.Now().UTC().Add(10 * 24 * time.Hour).Truncate(time.Second).Format(time.RFC3339)
 	setField(p, ".modal.is-open", "f-cryptoKeyId", "k")
-	setField(p, ".modal.is-open", "f-destroyScheduledDuration", "3d")
+	setField(p, ".modal.is-open", "f-destroyScheduledDays", "3")
 	setField(p, ".modal.is-open", "f-rotationPeriod", "30d")
 	setField(p, ".modal.is-open", "f-nextRotationTime", next)
 	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	got := editDefaults(t, "kms", project, ring, "k")
-	if got["Destroy scheduled duration"] != "72h0m0s" || got["rotationPeriod"] != "30d" || got["nextRotationTime"] != next {
+	const destroy = "Duration of 'scheduled for destruction' state"
+	if got[destroy] != "3 days" || got["rotationPeriod"] != "30d" || got["nextRotationTime"] != next {
 		t.Errorf("the key created in the browser reads destroy %q, period %q, next %q",
-			got["Destroy scheduled duration"], got["rotationPeriod"], got["nextRotationTime"])
+			got[destroy], got["rotationPeriod"], got["nextRotationTime"])
 	}
 }
 
 // TestStorageCreateBucketOptionsThroughTheForm (#852), in the storage shard:
 // Create, on its own page, offers the storage classes the backend keeps, uniform access on as
-// the documented form defaults it, versioning, the soft delete retention and
-// object retention; a bucket created there with NEARLINE and versioning
+// the documented form defaults it, versioning, the soft delete policy with its
+// 7-day default (#1843) and object retention; a bucket created there with NEARLINE and versioning
 // reads both back through the console API.
 func TestStorageCreateBucketOptionsThroughTheForm(t *testing.T) {
 	p := open(t)
@@ -221,13 +258,14 @@ func TestStorageCreateBucketOptionsThroughTheForm(t *testing.T) {
 		Classes                      []string
 		Uniform, Versioning, Objects bool
 		SoftDelete                   string
+		SoftOn                       bool
 	}
 	p.eval(`(() => { const q = (s) => document.querySelector("#view " + s);
-		return { Classes: [...q("#f-storageClass").options].map((o) => o.value), Uniform: q("#f-uniformAccess").checked,
+		return { Classes: [...q("#f-storageClass").options].map((o) => o.value), Uniform: q("#f-uniformAccess").value === "Uniform",
 		         Versioning: q("#f-versioning").checked, Objects: q("#f-objectRetention").checked,
-		         SoftDelete: q("#f-softDeleteSeconds").value }; })()`, &form)
+		         SoftDelete: q("#f-softDeleteDays").value, SoftOn: q("#f-softDelete").checked }; })()`, &form)
 	if strings.Join(form.Classes, ",") != "STANDARD,NEARLINE,COLDLINE,ARCHIVE,RAPID" || !form.Uniform || form.Versioning ||
-		form.Objects || form.SoftDelete != "604800" {
+		form.Objects || form.SoftDelete != "7" || !form.SoftOn {
 		t.Errorf("Create opened with %+v", form)
 	}
 	setField(p, "#view", "f-name", bucket)
@@ -314,13 +352,13 @@ func TestCloudRunJobExecuteWithOverridesThroughTheForm(t *testing.T) {
 
 func lastPathSegment(s string) string { return s[strings.LastIndex(s, "/")+1:] }
 
-// TestSecretCreateReplicationPolicyThroughTheForm (#857): Create secret, on
+// TestSecretManagerCreateReplicationPolicyThroughTheForm (#857): Create secret, on
 // its own page, offers the replication policy, Automatic by default or
 // User-managed, and its locations; User-managed with no location is refused
 // on the form with the console's explanation, and a secret created there
 // with two locations reads the policy and both locations back through the
 // console API.
-func TestSecretCreateReplicationPolicyThroughTheForm(t *testing.T) {
+func TestSecretManagerCreateReplicationPolicyThroughTheForm(t *testing.T) {
 	needService(t, "secrets")
 	p := open(t)
 	project := uniqueProject(t)
@@ -335,23 +373,20 @@ func TestSecretCreateReplicationPolicyThroughTheForm(t *testing.T) {
 		Policy   string
 		Location bool
 	}
+	// Google's two choices, as radio buttons (#1850).
 	p.eval(`(() => { const q = (s) => document.querySelector("#view " + s);
-		return { Policies: [...q("#f-replication").options].map((o) => o.value), Policy: q("#f-replication").value,
-		         Location: q("#f-locations") !== null }; })()`, &form)
+		return { Policies: [...document.querySelectorAll('#view input[name="f-replication-choice"]')].map((o) => o.value),
+		         Policy: q("#f-replication").value, Location: q("#f-locations") !== null }; })()`, &form)
 	if strings.Join(form.Policies, ",") != "Automatic,User-managed" || form.Policy != "Automatic" || !form.Location {
 		t.Errorf("Create secret opened with %+v; want Automatic or User-managed, Automatic chosen, and a locations field", form)
 	}
 	setField(p, "#view", "f-secretId", id)
 	setField(p, "#view", "f-payload", "value")
-	setField(p, "#view", "f-replication", "User-managed")
+	p.clickText("#view label", "Manually manage locations for this secret")
+	p.waitFor(`!document.querySelector("#view #f-locations").closest(".form-row").hidden`)
+	// Locations is required once shown, so the form refuses it unsent.
 	p.run(chromedp.Click(chromedp.CSS(`#view button[type="submit"]`)))
-	p.waitFor(`!document.querySelector("#view .form-error").hidden`)
-	var refusal string
-	p.eval(`document.querySelector("#view .form-error").textContent`, &refusal)
-	if !strings.Contains(refusal, "needs at least one location") {
-		t.Errorf("User-managed with no location was refused on the form with %q", refusal)
-	}
-	p.forgive()
+	p.waitFor(`document.querySelector("#view #f-locations").getAttribute("aria-invalid") === "true"`)
 
 	setField(p, "#view", "f-locations", "us-east1, europe-west1")
 	p.run(chromedp.Click(chromedp.CSS(`#view button[type="submit"]`)))

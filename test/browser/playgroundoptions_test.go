@@ -34,7 +34,7 @@ func TestPlaygroundGenerationOptions(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	p := openAt(t, strings.TrimPrefix(srv.URL, "http://"))
-	p.navigate("/ai/playground")
+	p.navigate("/agent-platform/studio")
 	p.waitFor(`document.querySelector("#pg-opt-temperature") !== null && document.querySelector("#pg-prompt") !== null`)
 	p.waitFor(`performance.getEntriesByType("resource").some((e) => e.name.includes("/api/resources/projects"))`)
 	p.forgive()

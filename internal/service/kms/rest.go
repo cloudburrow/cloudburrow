@@ -55,6 +55,11 @@ var mixins = func() []*annotations.HttpRule {
 	return rs
 }()
 
+// Mixins are the HTTP bindings cloudkms_v1.yaml adds, for a caller that
+// matches KMS JSON requests to their methods (IAM enforcement, #1879). The
+// caller must not change them.
+func Mixins() []*annotations.HttpRule { return mixins }
+
 // transcoder is the KMS JSON API's configuration. The path's name wins over
 // one in the body for Encrypt, Decrypt and the IAMPolicy mixin; the methods
 // below refuse a body that names another resource instead. What Google does

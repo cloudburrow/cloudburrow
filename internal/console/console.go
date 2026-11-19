@@ -28,7 +28,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/cloudburrow/cloudburrow/internal/hfmodels"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
+	"github.com/cloudburrow/cloudburrow/internal/modelgarden"
 )
 
 //go:embed assets
@@ -82,6 +84,13 @@ type Resource struct {
 	// that implements ObjectStore: the row offers download, preview and
 	// delete for it.
 	Object []string `json:"object,omitempty"`
+	// Selectable lets a row of a resource page's listing be checked for the
+	// listing's SelectActions without being an Object: a key's versions,
+	// checked for Disable, Enable, Destroy and Restore (#1851); and a list
+	// screen's row its selection actions take (SelectionLister): a build
+	// awaiting approval, which History's Approve takes with the others
+	// checked (#1854).
+	Selectable bool `json:"selectable,omitempty"`
 	// Size and ContentType describe an Object row, so the page offers a
 	// preview only where the server would give one.
 	Size        int64  `json:"size,omitempty"`
@@ -167,6 +176,11 @@ type Listing struct {
 	// line, in the order they were checked. The server checks the action
 	// against the page's DetailActions like any other.
 	SelectActions []Action `json:"selectActions,omitempty"`
+	// SelectMarked says that only rows marked Selectable can be checked on
+	// this list screen (a SelectionLister's, #1854: History's builds awaiting
+	// approval), where a top-level list's own SelectActions take any row
+	// (#1864: Roles' Create role from selection). The server sets it.
+	SelectMarked bool `json:"selectMarked,omitempty"`
 	// Actions are the list screen's own actions, on no existing resource,
 	// drawn beside Create (ListActor, #1289). The server sets them.
 	Actions []Action `json:"actions,omitempty"`
@@ -174,9 +188,25 @@ type Listing struct {
 	// drawn as headed cards above the table: the Cloud Storage Settings
 	// screen names the project's service account over its HMAC keys (#792).
 	Summary []PropertyGroup `json:"summary,omitempty"`
+	// SummaryOnly draws the screen as its Summary cards alone, with no
+	// table, as Google's Cloud Build Dashboard is a card per trigger
+	// (#1854). With no card, the screen's empty state shows.
+	SummaryOnly bool `json:"summaryOnly,omitempty"`
 	// Scope is the picker a Scoper's list screen draws above its rows: the
 	// Bigtable instance whose tables these are (#1360).
 	Scope *Scope `json:"scope,omitempty"`
+	// Filters are pickers drawn after Scope that narrow the rows, each
+	// in a query parameter of its own, as Google's Datastore Entities
+	// page has Namespace and Kind (#1846). A Filterer's screens carry
+	// them on every request; choosing one clears those after it.
+	Filters []*Scope `json:"filters,omitempty"`
+	// Tabs, when set, draw the list screen as tabs, as Google's Cloud
+	// Storage Settings page has Project access and Interoperability (#1843):
+	// the tab whose ID is ListTab holds the rows, with the screen's create
+	// and actions, and any other shows Summary. Only ID, Label and Note of
+	// each are read.
+	Tabs    []Section `json:"tabs,omitempty"`
+	ListTab string    `json:"listTab,omitempty"`
 }
 
 // Provider reads live state for one service.
@@ -240,6 +270,12 @@ type Field struct {
 	// section renders as one ungrouped block, which is what a two-field form
 	// should look like.
 	Section string `json:"section,omitempty"`
+	// Tab, inside a Section, puts the field on one tab of that section's
+	// tab strip, as Google's Create service page holds Container(s),
+	// Variables & Secrets, Volumes, Networking and Security as tabs under
+	// "Containers, Volumes, Networking, Security" (#1852). The section's
+	// fields with no Tab are drawn above the strip.
+	Tab string `json:"tab,omitempty"`
 	// Immutable marks a field shown for context and refused on submit. An
 	// edit form that hides a resource's identity makes the operator guess
 	// which resource they are editing; one that accepts a change to it lies,
@@ -257,6 +293,24 @@ type Field struct {
 	// project's topics this way (#791), so the form cannot name one that
 	// does not exist.
 	Options []string `json:"options,omitempty"`
+	// OptionLabels names an option where its value is not what the
+	// console shows, on a "select" or a "radio": Manage traffic's LATEST is
+	// "Latest healthy revision" (#1852), Cloud SQL's POSTGRES_17 is
+	// "PostgreSQL 17" (#1860), and BigQuery's Region list shows
+	// "us-central1 (Iowa)" and submits us-central1 (#1861).
+	OptionLabels map[string]string `json:"optionLabels,omitempty"`
+	// Follows and Templates, on a "sourcefiles" field (Google's inline
+	// source editor, #1852), name the select field whose choice picks the
+	// files the editor starts with, and those files by choice: a function's
+	// runtime and its sample source. A "sourcefiles" field's value is a JSON
+	// object of file name to contents.
+	Follows   string                       `json:"follows,omitempty"`
+	Templates map[string]map[string]string `json:"templates,omitempty"`
+	// Completions, on a text or textarea field, are the words Ctrl+Space
+	// offers at the cursor, those beginning with the word being typed, as
+	// Google's Query by GQL offers the namespace's kinds (#1846): choosing
+	// one with Enter or a click puts it in place of that word.
+	Completions []string `json:"completions,omitempty"`
 	// KeyPattern and ValuePattern, on a "map" field, are what the API
 	// accepts as each entry's key and value, and MaxEntries how many entries
 	// it takes (0: any number). The browser checks every line against them
@@ -275,6 +329,95 @@ type Field struct {
 	// submit what the API refuses.
 	Requires []string `json:"requires,omitempty"`
 	Excludes []string `json:"excludes,omitempty"`
+	// ShowWhen shows the field only while another field of the form holds
+	// a value: "name" for a checkbox that is checked, "name=value" for a
+	// radio or select choice, as Google's Create topic reveals the retention
+	// period under Enable message retention (#1847). A hidden field is not
+	// validated; it is still sent, so the provider reads it only when its
+	// condition holds. Conditions joined by "&" must all hold:
+	// "type=Distribution&bucket_type=Linear" (#1863).
+	ShowWhen string `json:"showWhen,omitempty"`
+	// DeriveFrom names another field this one follows until it is edited
+	// (#1864): its value lowercased, other characters made dashes, as
+	// Google's Create service account derives the ID from the name.
+	DeriveFrom string `json:"deriveFrom,omitempty"`
+	// Browse names what the field's Browse button chooses from: "storage" is
+	// a bucket of this instance's Cloud Storage, filled in as gs://BUCKET/,
+	// as Google's Choose Destination does (#1845); "kms" is a symmetric key
+	// of this instance's Cloud KMS in the location the form's
+	// locationType, multiRegion and region fields hold, filled in as its
+	// resource name (#1881).
+	Browse string `json:"browse,omitempty"`
+	// Unavailable, on a checkbox, is why the choice cannot be made on this
+	// instance: the box is drawn as Google's page has it, unchecked and
+	// disabled, with the reason beside it, so the option stays visible and
+	// says why rather than vanishing (#1847: Create topic's Export data to
+	// BigQuery). The form sends it unchecked.
+	Unavailable string `json:"unavailable,omitempty"`
+	// UnavailableOptions, on a radio, are the choices that cannot be made on
+	// this instance, each with its reason: drawn disabled where Google's page
+	// has them, as Create subscription's Write to BigQuery (#1847).
+	UnavailableOptions map[string]string `json:"unavailableOptions,omitempty"`
+	// Group, on a "group" field (GroupFieldType), is the fields of one row
+	// of a repeatable group, as Google's Create sink has a row per
+	// exclusion filter, each with its name, filter and Disable (#1863).
+	// AddLabel is the button that adds a row ("Add exclusion"). The value
+	// is a JSON array of one object per row, each subfield's name to its
+	// value ("true" or "false" for a checkbox); ParseGroup reads it.
+	Group    []Field `json:"group,omitempty"`
+	AddLabel string  `json:"addLabel,omitempty"`
+	// DisabledOptions, on a "radio" field, are options drawn but not
+	// choosable: SQL Server on Cloud SQL's engine choice, which CloudBurrow
+	// does not run (#1860).
+	DisabledOptions []string `json:"disabledOptions,omitempty"`
+	// VisibleWhen shows the field only while each named field of the same
+	// form holds the given value ("true"/"false" for a checkbox); a hidden
+	// field is neither checked nor submitted. Cloud SQL's Database version
+	// lists the chosen engine's versions only (#1860).
+	VisibleWhen map[string]string `json:"visibleWhen,omitempty"`
+	// Upload, on a textarea, is the label of a file chooser beside it whose
+	// text file is read into the textarea, as Google's Create secret takes
+	// the Secret value typed or from Upload file (#1850). The value is still
+	// the textarea's, so nothing else about the form changes.
+	Upload string `json:"upload,omitempty"`
+}
+
+// GroupFieldType is the Type of a repeatable group of fields (Field.Group).
+const GroupFieldType = "group"
+
+// ParseGroup decodes a "group" field's value: one map per row, rows with
+// every subfield empty or "false" left out. An empty value is no rows.
+func ParseGroup(value string) ([]map[string]string, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return nil, nil
+	}
+	var rows []map[string]string
+	if err := json.Unmarshal([]byte(trimmed), &rows); err != nil {
+		return nil, fmt.Errorf("expected a JSON array of objects of string keys and values: %w", err)
+	}
+	out := rows[:0]
+	for _, r := range rows {
+		for _, v := range r {
+			if v != "" && v != "false" {
+				out = append(out, r)
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
+// FormatGroup encodes rows for a "group" field's prefilled value.
+func FormatGroup(rows []map[string]string) string {
+	if len(rows) == 0 {
+		return ""
+	}
+	encoded, err := json.Marshal(rows)
+	if err != nil {
+		return ""
+	}
+	return string(encoded)
 }
 
 // ParseMap decodes a "map" field's value.
@@ -360,6 +503,74 @@ type PageCreator interface {
 	Creator
 	// CreateOnPage reports whether the form gets its own page.
 	CreateOnPage() bool
+}
+
+// CreateTitler is a Creator whose create page has a title of its own,
+// apart from the label of its buttons: Google's "Create a bucket" page and
+// its Create button (#1843).
+type CreateTitler interface {
+	Creator
+	CreateTitle() string
+}
+
+// CreateLayouter is a Creator whose create page is laid out other than as
+// numbered steps. CreateLayout returns "page" for one page with the
+// sections under headings, as Google's Pub/Sub Create topic, Create
+// subscription and Create schema are (#1847); "steps" (or a provider that
+// does not implement this) keeps the numbered sections with Continue that
+// Google's Cloud Storage and Cloud SQL create pages use.
+type CreateLayouter interface {
+	Creator
+	CreateLayout() string
+}
+
+// CreateLayoutPage is CreateLayout's single-page layout.
+const CreateLayoutPage = "page"
+
+// CreateLayoutNext is the numbered steps with Next where Continue would be,
+// as Google's Create log bucket has (#1863).
+const CreateLayoutNext = "next"
+
+// CreateCheck is a button on a create page that checks what the form holds
+// without creating anything: Google's Validate definition and Test message
+// on Create schema (#1847). A check with fields asks for them in a dialog
+// first, as Test message asks for the message encoding and body.
+type CreateCheck struct {
+	ID     string  `json:"id"`
+	Label  string  `json:"label"`
+	Fields []Field `json:"fields,omitempty"`
+	// Submit is the dialog's button, "Test" for Test message.
+	Submit string `json:"submit,omitempty"`
+	// Opens means the check's answer is a console address, opened in a new
+	// tab rather than shown: Create sink's Preview logs opens the Logs
+	// Explorer on the inclusion filter (#1863).
+	Opens bool `json:"opens,omitempty"`
+}
+
+// CreateChecker is a Creator whose create page has CreateChecks. CheckCreate
+// gets the form's values with the check's own fields merged over them, and
+// returns what the page says when the check passes; an error is the
+// refusal, shown as the API gave it.
+type CreateChecker interface {
+	Creator
+	CreateChecks() []CreateCheck
+	CheckCreate(ctx context.Context, project, check string, values map[string]string) (string, error)
+}
+
+// CreateSubmitter is a Creator whose create page's submit button has a
+// label of its own: Google's Services list has Deploy container, which opens
+// the Create service page, ending in Create (#1852).
+type CreateSubmitter interface {
+	Creator
+	CreateSubmit() string
+}
+
+// CreateThener is a Creator whose create page goes on to an action of the
+// resource it made, opened on that resource's page: Create key ring goes on
+// to Create key, as Google's flow does (#1851).
+type CreateThener interface {
+	Creator
+	CreateThen() string
 }
 
 // Pager is a provider whose listings can be continued past their first page.
@@ -456,6 +667,11 @@ type Detail struct {
 	// what it holds now. Nil means it cannot be edited, which is why the
 	// button is absent rather than present and refusing.
 	Edit *EditForm `json:"edit,omitempty"`
+	// OpenTab is the ID of the section the page opens on when the address
+	// names none, for a resource whose Google page does not open on its
+	// first tab: a Pub/Sub subscription's opens on Details, Metrics being a
+	// tab clicked to (#1847). Empty opens the first.
+	OpenTab string `json:"openTab,omitempty"`
 	// Trail is the breadcrumb, for a resource whose path is not its
 	// hierarchy. An object's page is addressed apart from its bucket's
 	// folders, which share the path space with it (#790), so the provider
@@ -466,6 +682,16 @@ type Detail struct {
 	// is addressed by its encoded key and headed by its key path (#875).
 	// Empty means the last segment.
 	Title string `json:"title,omitempty"`
+	// Object, on an object's page, is the bucket and the object name the
+	// page is about: the page then offers Download and Delete beside its
+	// title, through the object routes, as Google's object page does (#1843).
+	Object []string `json:"object,omitempty"`
+	// SideNav draws the sections as a menu on the left of the page rather
+	// than a tab strip, as Google's Cloud SQL instance has Overview,
+	// Connections, Users, Databases and the rest in a menu of its own
+	// (#1860), and Google's Spanner instance and database pages have
+	// Overview, Spanner Studio, Backup/Restore and the rest (#1859).
+	SideNav bool `json:"sideNav,omitempty"`
 }
 
 // Crumb is one breadcrumb: its text, and the path it opens (none for the
@@ -483,6 +709,11 @@ type EditForm struct {
 	// omits the immutable half reads as though everything absent from it does
 	// not exist.
 	Note string `json:"note,omitempty"`
+	// Title and Submit are the form's heading and submit label when they are
+	// not Label: Google's worker pool has Edit and deploy new revision, which
+	// opens Deploy worker pool revision, ending in Deploy (#1852).
+	Title  string `json:"title,omitempty"`
+	Submit string `json:"submit,omitempty"`
 }
 
 // Property is one label/value pair on a resource's summary.
@@ -492,6 +723,10 @@ type Property struct {
 	// Link, when set, is a console route the value opens: the Resource
 	// hierarchy list's organization opens the organization's page (#1554).
 	Link string `json:"link,omitempty"`
+	// Copy, when set, is the label of a button beside the value that
+	// copies it: Google's object page has Copy URL and Copy gsutil URI
+	// (#1843).
+	Copy string `json:"copy,omitempty"`
 }
 
 // SectionKind says what a section actually holds.
@@ -513,6 +748,21 @@ const (
 	KindText SectionKind = "text"
 	// KindChart is a series over time.
 	KindChart SectionKind = "chart"
+	// KindLogs, on a placeholder section with the ID "logs", puts the
+	// console's Logs tab (the resource's entries from local Cloud Logging)
+	// where the provider lists it, as Google's service page has Metrics,
+	// SLOs, Logs, Revisions (#1852); otherwise it is appended last.
+	KindLogs SectionKind = "logs"
+	// KindQuery is a placeholder for the query tab, drawn where the
+	// provider lists it and under its Label, as Firestore's database page
+	// has its Query builder first (#1845). The form is the provider's
+	// QueryForm for the page; a page with none drops it.
+	KindQuery SectionKind = "query"
+	// KindStudio is a provider's workspace drawn in the tab by console.js's
+	// renderer for the service (STUDIO_SECTIONS), whose calls go to the
+	// provider's Studio: Spanner Studio on a database's page (#1859). The
+	// page then has no separate Query tab, the Studio's editor being it.
+	KindStudio SectionKind = "studio"
 )
 
 // Section is one aspect of a resource, rendered as a tab.
@@ -526,6 +776,10 @@ type Section struct {
 	ID string `json:"id"`
 	// Label is the tab's text.
 	Label string `json:"label"`
+	// Group, when set, draws this section and the others with the same Group
+	// as one tab named Group, with their labels on a strip inside it, as
+	// Google's Firestore Indexes page holds Manual and Automatic (#1845).
+	Group string `json:"group,omitempty"`
 	// Kind selects the content field below. Empty means Listing, so this is
 	// backward compatible by construction.
 	Kind SectionKind `json:"kind,omitempty"`
@@ -554,6 +808,16 @@ type Section struct {
 	// Permissions is the content when Kind is KindPermissions, set by the
 	// server from the provider's PolicyEditor (#793).
 	Permissions *PermissionsView `json:"permissions,omitempty"`
+	// Actions are drawn at the top of this tab rather than beside the page
+	// title, as Google's Lifecycle tab has Add a rule (#1843). The provider's
+	// DetailActions must offer them too, as for the page's own actions.
+	Actions []Action `json:"actions,omitempty"`
+	// Tabs are the section's own tabs, drawn as a tab strip inside its
+	// panel (#1860): Google's Cloud SQL Connections page has Summary,
+	// Networking and Security. A section with Tabs draws its Note and
+	// Actions over the strip, and each tab its own content; the tab
+	// chosen is the address's subtab.
+	Tabs []Section `json:"tabs,omitempty"`
 }
 
 // dropBlankProperties removes every Property whose Value is empty or
@@ -567,8 +831,13 @@ type Section struct {
 // at the one place every Detail is served from.
 func dropBlankProperties(d *Detail) {
 	d.Summary = nonBlank(d.Summary)
-	for i := range d.Sections {
-		sec := &d.Sections[i]
+	dropBlankSections(d.Sections)
+}
+
+func dropBlankSections(secs []Section) {
+	for i := range secs {
+		sec := &secs[i]
+		dropBlankSections(sec.Tabs)
 		if sec.Groups == nil {
 			continue
 		}
@@ -585,6 +854,20 @@ func dropBlankProperties(d *Detail) {
 			groups = append(groups, g)
 		}
 		sec.Groups = groups
+	}
+}
+
+// normalizeSections gives every listing, a section's tabs' too, non-nil
+// items and columns, which the client iterates.
+func normalizeSections(secs []Section) {
+	for i := range secs {
+		if secs[i].Listing.Items == nil {
+			secs[i].Listing.Items = []Resource{}
+		}
+		if secs[i].Listing.Columns == nil {
+			secs[i].Listing.Columns = []string{}
+		}
+		normalizeSections(secs[i].Tabs)
 	}
 }
 
@@ -743,6 +1026,47 @@ type Deleter interface {
 	Delete(ctx context.Context, project, name string) error
 }
 
+// DeleteLabeler is a Deleter whose rows' menus and pages name the resource
+// in Delete, as Google's Log Router has Delete sink and Logs Storage Delete
+// bucket (#1863).
+type DeleteLabeler interface {
+	Deleter
+	DeleteLabel() string
+}
+
+// RowEditLeader is a RowEditor whose rows' menus begin with Edit, as
+// Google's Triggers menu reads Edit, Disable, Delete (#1854).
+type RowEditLeader interface {
+	RowEditor
+	RowEditFirst() bool
+}
+
+// SelectionLister is a list screen whose rows marked Selectable can be
+// checked and acted on together (#1854): History's Approve takes every
+// checked build awaiting approval. Its actions reach ActAt with an empty
+// path, the checked rows' names one per line in the field each action's
+// SelectionField names.
+type SelectionLister interface {
+	PathActor
+	ListSelectActions(ctx context.Context, project string) []Action
+}
+
+// listSelectActions are a provider's list-screen selection actions.
+func listSelectActions(ctx context.Context, p Provider, project string) []Action {
+	if sl, ok := p.(SelectionLister); ok {
+		return sl.ListSelectActions(ctx, project)
+	}
+	return nil
+}
+
+// RowEditor is an Editor whose list rows' menus open the edit form too,
+// under this label, as Google's Log Router has Edit sink in each sink's
+// menu (#1863). The form is the one the resource's page offers.
+type RowEditor interface {
+	Editor
+	RowEditLabel() string
+}
+
 // Actor is a provider with named per-resource actions, such as pausing a
 // queue.
 type Actor interface {
@@ -786,6 +1110,17 @@ type Action struct {
 	// SelectionField names the field a selection action's selected rows are
 	// written into (Listing.SelectActions).
 	SelectionField string `json:"selectionField,omitempty"`
+	// Submit is the dialog's submit label when it is not the action's own:
+	// Google's Manage traffic dialog ends in Save (#1852).
+	Submit string `json:"submit,omitempty"`
+	// Href, when set, makes the action a link: it opens this console
+	// route instead of being performed, as a topic row's Create
+	// subscription opens the Create subscription page with the topic filled
+	// in (#1847). The action route never receives it.
+	Href string `json:"href,omitempty"`
+	// Button draws a row's action as a button on the row, before its
+	// menu, as Google's Triggers rows carry Run (#1854).
+	Button bool `json:"button,omitempty"`
 }
 
 // PathActor is a provider with actions on the resources inside a resource.
@@ -956,7 +1291,13 @@ type Server struct {
 	prediction *Prediction
 	// localModels, when set, offers the Local models page (#1306).
 	localModels LocalModels
-	metrics     MetricsSource
+	hfModels    *hfmodels.Manager
+	// garden and hfDeploy are Model Garden's Hugging Face deployments
+	// (#1840, hfdeploy.go); nil offers no Deploy.
+	garden    *modelgarden.Manager
+	hfDeploy  HFDeployer
+	hfProject string
+	metrics   MetricsSource
 	// series is the retained history the charts draw. Nil means this
 	// instance keeps none, which the endpoint says rather than returning an
 	// empty array that looks like an idle cluster.
@@ -1058,6 +1399,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/resources/{service}", s.handleResources)
 	mux.HandleFunc("GET /api/detail/{service}", s.handleDetail)
 	mux.HandleFunc("POST /api/resources/{service}", s.handleCreate)
+	mux.HandleFunc("POST /api/resources/{service}/check", s.handleCreateCheck)
+	mux.HandleFunc("GET /api/createform/{service}", s.handleCreateFormFor)
 	mux.HandleFunc("DELETE /api/resources/{service}", s.handleDelete)
 	mux.HandleFunc("POST /api/actions/{service}", s.handleAction)
 	mux.HandleFunc("POST /api/actions/{service}/upload", s.handleActionUpload)
@@ -1067,6 +1410,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/iam/lint", s.handleLintCondition)
 	mux.HandleFunc("GET /api/page/{service}", s.handlePage)
 	mux.HandleFunc("POST /api/query/{service}", s.handleQuery)
+	mux.HandleFunc("POST /api/studio/{service}", s.handleStudio)
 	mux.HandleFunc("GET /api/logs", s.handleLogs)
 	mux.HandleFunc("GET /api/logs/buckets", s.handleLogBuckets)
 	mux.HandleFunc("GET /api/logs/names", s.handleLogNames)
@@ -1086,6 +1430,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/ai/embeddings", s.handleEmbeddingsStatus)
 	mux.HandleFunc("POST /api/ai/embeddings", s.handleEmbeddingsPredict)
 	mux.HandleFunc("GET /api/ai/local-models", s.handleLocalModels)
+	mux.HandleFunc("GET /api/ai/model-garden", s.handleModelGarden)
+	mux.HandleFunc("GET /api/ai/agent-garden", s.handleAgentGarden)
+	mux.HandleFunc("GET /api/ai/hf-models", s.handleHFModels)
+	mux.HandleFunc("GET /api/ai/hf-models/lookup", s.handleHFLookup)
+	mux.HandleFunc("POST /api/ai/hf-models/{action}", s.handleHFAction)
+	mux.HandleFunc("GET /api/ai/hf-deployments", s.handleHFDeployments)
+	mux.HandleFunc("POST /api/ai/hf-deployments/{action}", s.handleHFDeploymentAction)
 	mux.HandleFunc("POST /api/ai/local-models/{id}/{action}", s.handleLocalModelAction)
 	mux.HandleFunc("GET /api/ai/predict", s.handlePredictStatus)
 	mux.HandleFunc("POST /api/ai/predict", s.handlePredict)
@@ -1124,6 +1475,15 @@ func (s *Server) Handler() http.Handler {
 		// the path.
 		if isAsset(r.URL.Path) {
 			files.ServeHTTP(w, r)
+			return
+		}
+		// Vertex AI's pages moved when Google renamed it Agent Platform
+		// (#1839); an address saved before then still lands on its page.
+		if to, ok := RenamedAIPath(r.URL.Path); ok {
+			if r.URL.RawQuery != "" {
+				to += "?" + r.URL.RawQuery
+			}
+			http.Redirect(w, r, to, http.StatusMovedPermanently)
 			return
 		}
 		s.serveShell(w, r)
@@ -1242,7 +1602,8 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 			"id": p.ID(), "title": p.Title(),
 			"create": caps.Create, "delete": caps.Delete, "detail": caps.Detail,
 			"query": caps.Query, "edit": caps.Edit, "reveal": caps.Reveal,
-			"page": caps.Page, "scope": caps.Scope,
+			"deleteLabel": caps.DeleteLabel, "editRow": caps.EditRow, "editRowFirst": caps.EditRowFirst,
+			"page": caps.Page, "scope": caps.Scope, "filters": caps.Filters,
 		})
 	}
 	// The playground is advertised only when local AI is configured, so the
@@ -1328,6 +1689,10 @@ func (s *Server) handleResources(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	listing.Actions = listActions(ctx, p, project)
+	if marked := listSelectActions(ctx, p, project); len(marked) > 0 {
+		listing.SelectActions = append(listing.SelectActions, marked...)
+		listing.SelectMarked = true
+	}
 	writeJSON(w, http.StatusOK, listing)
 }
 
@@ -1421,6 +1786,13 @@ type capabilities struct {
 	// Query means a statement can be run against this service's resources.
 	Query  *queryCapability `json:"query,omitempty"`
 	Delete bool             `json:"delete,omitempty"`
+	// DeleteLabel is the Delete item's label where the provider names it
+	// (DeleteLabeler), and EditRow the label of the rows' Edit item
+	// (RowEditor), empty for none.
+	DeleteLabel string `json:"deleteLabel,omitempty"`
+	EditRow     string `json:"editRow,omitempty"`
+	// EditRowFirst puts the rows' Edit first in their menus (RowEditLeader).
+	EditRowFirst bool `json:"editRowFirst,omitempty"`
 	// Detail means a row can be opened to show what is inside it.
 	Detail bool `json:"detail,omitempty"`
 	// Edit means a resource's detail page can offer an edit form. The form
@@ -1436,6 +1808,9 @@ type capabilities struct {
 	// Scope is the query parameter a Scoper's screens carry on every request
 	// and link, empty for a service scoped by the project alone.
 	Scope string `json:"scope,omitempty"`
+	// Filters are the query parameters a Filterer's screens carry with
+	// the scope (Listing.Filters).
+	Filters []string `json:"filters,omitempty"`
 }
 
 // QuerySpec is a query surface: either a statement box or a form.
@@ -1447,6 +1822,12 @@ type QuerySpec struct {
 	Hint   string  `json:"hint,omitempty"`
 	Fields []Field `json:"fields,omitempty"`
 	Label  string  `json:"label,omitempty"`
+	// TabLabels name the run button while a tab of the form's tab strip
+	// shows, as Google's Query by GQL runs with Run query where Query by
+	// kind runs with Run (#1846); Label otherwise. ClearLabel names the
+	// button that clears the results, "Clear results" when empty.
+	TabLabels  map[string]string `json:"tabLabels,omitempty"`
+	ClearLabel string            `json:"clearLabel,omitempty"`
 	// Write is the statement box's read-write mode, where this resource has
 	// one. Set per resource by the server from the provider's WriteSpec, so a
 	// page offers the mode exactly where the query route will accept it.
@@ -1464,10 +1845,51 @@ type queryCapability = QuerySpec
 type createForm struct {
 	Label  string  `json:"label"`
 	Fields []Field `json:"fields"`
+	// Title is the create page's heading when it differs from the button,
+	// as Google's "Create a bucket" page ends in Create (CreateTitler).
+	Title string `json:"title,omitempty"`
+	// Submit is the create page's submit label when it differs from the
+	// button that opens it (CreateSubmitter).
+	Submit string `json:"submit,omitempty"`
 	// Page means the form is rendered at its own address instead of in a
 	// dialog. Decided here rather than in the client so that "long enough to
 	// deserve a page" has one definition.
 	Page bool `json:"page,omitempty"`
+	// Layout is CreateLayouter's: "page", or empty for numbered steps.
+	Layout string `json:"layout,omitempty"`
+	// Checks are CreateChecker's buttons.
+	Checks []CreateCheck `json:"checks,omitempty"`
+	// PerProject means the fields are the selected project's: the page
+	// reads them from /api/createform/{service}?project= each time it
+	// opens (ProjectCreateFormer), not from these, read once per load.
+	PerProject bool `json:"perProject,omitempty"`
+	// Then is CreateThener's: the action the made resource's page opens.
+	Then string `json:"then,omitempty"`
+}
+
+// ProjectCreateFormer is a Creator whose fields depend on the project, as
+// Create trigger's Repository lists the selected project's linked
+// repositories (#1854).
+type ProjectCreateFormer interface {
+	Creator
+	CreateFormFor(ctx context.Context, project string) []Field
+}
+
+// handleCreateFormFor is a ProjectCreateFormer's fields for a project.
+func (s *Server) handleCreateFormFor(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.providers[r.PathValue("service")]
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such service"})
+		return
+	}
+	pf, ok := p.(ProjectCreateFormer)
+	if !ok {
+		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": p.Title() + " has no per-project create form"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), budgetFor(p))
+	defer cancel()
+	writeJSON(w, http.StatusOK, map[string]any{"fields": pf.CreateFormFor(ctx, r.URL.Query().Get("project"))})
 }
 
 // createPageThreshold is the number of fields past which a create form stops
@@ -1483,6 +1905,24 @@ func (s *Server) capabilitiesOf(p Provider) capabilities {
 		c.Create.Page = len(fields) > createPageThreshold
 		if pc, ok := p.(PageCreator); ok && pc.CreateOnPage() {
 			c.Create.Page = true
+		}
+		if ct, ok := p.(CreateTitler); ok {
+			c.Create.Title = ct.CreateTitle()
+		}
+		if cl, ok := p.(CreateLayouter); ok && (cl.CreateLayout() == CreateLayoutPage || cl.CreateLayout() == CreateLayoutNext) {
+			c.Create.Layout = cl.CreateLayout()
+		}
+		if cc, ok := p.(CreateChecker); ok {
+			c.Create.Checks = cc.CreateChecks()
+		}
+		if cs, ok := p.(CreateSubmitter); ok {
+			c.Create.Submit = cs.CreateSubmit()
+		}
+		if _, ok := p.(ProjectCreateFormer); ok {
+			c.Create.PerProject = true
+		}
+		if ct, ok := p.(CreateThener); ok {
+			c.Create.Then = ct.CreateThen()
 		}
 	}
 	if e, ok := p.(Executor); ok {
@@ -1500,6 +1940,15 @@ func (s *Server) capabilitiesOf(p Provider) capabilities {
 	}
 	if _, ok := p.(Deleter); ok {
 		c.Delete = true
+	}
+	if dl, ok := p.(DeleteLabeler); ok {
+		c.DeleteLabel = dl.DeleteLabel()
+	}
+	if rl, ok := p.(RowEditLeader); ok {
+		c.EditRowFirst = rl.RowEditFirst()
+	}
+	if re, ok := p.(RowEditor); ok {
+		c.EditRow = re.RowEditLabel()
 	}
 	// Asked of the instance when it can answer, because the interface alone
 	// speaks for the type.
@@ -1519,6 +1968,9 @@ func (s *Server) capabilitiesOf(p Provider) capabilities {
 	}
 	if sc, ok := p.(Scoper); ok {
 		c.Scope = sc.ScopeKey()
+	}
+	if f, ok := p.(Filterer); ok {
+		c.Filters = f.FilterKeys()
 	}
 	return c
 }
@@ -1587,6 +2039,50 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"name": name, "operation": opID})
+}
+
+// handleCreateCheck runs one of a create page's checks (CreateChecker): it
+// creates nothing, so it is not an operation, and answers with the check's
+// verdict, or its refusal as a 400 with the API's message.
+func (s *Server) handleCreateCheck(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.providers[r.PathValue("service")]
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such service"})
+		return
+	}
+	checker, ok := p.(CreateChecker)
+	if !ok {
+		writeJSON(w, http.StatusNotImplemented, map[string]string{
+			"error": p.Title() + " offers no checks on its create page",
+		})
+		return
+	}
+	var req struct {
+		Check  string            `json:"check"`
+		Values map[string]string `json:"values"`
+	}
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "malformed request: " + err.Error()})
+		return
+	}
+	known := false
+	for _, c := range checker.CreateChecks() {
+		known = known || c.ID == req.Check
+	}
+	if !known {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("no check %q on this create page", req.Check)})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), budgetFor(p))
+	defer cancel()
+	msg, err := checker.CheckCreate(ctx, r.URL.Query().Get("project"), req.Check, req.Values)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": userMessage(err)})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": msg})
 }
 
 // handleDelete removes a resource.
@@ -1734,7 +2230,7 @@ func (s *Server) actAtPath(w http.ResponseWriter, r *http.Request, p Provider, p
 	// The action must be one the page would have offered. Without this check
 	// the route is a way to invoke any action name the provider happens to
 	// understand on any path, which is wider than the UI it serves.
-	offers := listActions(ctx, p, project)
+	offers := append(listActions(ctx, p, project), listSelectActions(ctx, p, project)...)
 	if len(path) > 0 {
 		offers = actor.DetailActions(ctx, project, path)
 	}
@@ -2293,7 +2789,7 @@ func (s *Server) handleDetail(w http.ResponseWriter, r *http.Request) {
 	// the same call the reveal route makes — so the button and the route agree
 	// by construction rather than by two lists being kept in step.
 	if revealer, ok := p.(Revealer); ok && detail.Reveal == "" && revealer.CanReveal(path) {
-		detail.Reveal = "Show value"
+		detail.Reveal = "View secret value"
 	}
 	// The form for this resource, from the same call the query route validates
 	// against — so a control the page draws is one the route will accept.
@@ -2310,11 +2806,34 @@ func (s *Server) handleDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	// The IAM policy's tab, read here so that every one carries the note
 	// that nothing is enforced, whichever provider serves it (#793).
+	// A provider can place the tab among its own with a placeholder
+	// section (ID "permissions", Kind KindPermissions, no content), as
+	// Google's bucket page puts Permissions third (#1843); otherwise it is
+	// appended. A placeholder with no policy behind it is dropped.
+	slot := -1
+	for i, sec := range detail.Sections {
+		if sec.ID == "permissions" && sec.Kind == KindPermissions && sec.Permissions == nil {
+			slot = i
+			break
+		}
+	}
+	placed := false
 	if pe, ok := p.(PolicyEditor); ok && detail.Unavailable == "" && detail.Prompt == "" {
 		if target := pe.PolicyOn(ctx, path); target != nil {
-			detail.Sections = append(detail.Sections,
-				permissionsSection(ctx, pe, r.URL.Query().Get("project"), path, target))
+			sec := permissionsSection(ctx, pe, r.URL.Query().Get("project"), path, target)
+			if slot >= 0 {
+				// The placeholder's own actions and note stay with the
+				// tab: a bucket's access control and Switch to (#1843).
+				sec.Actions, sec.Note = detail.Sections[slot].Actions, detail.Sections[slot].Note
+				detail.Sections[slot] = sec
+			} else {
+				detail.Sections = append(detail.Sections, sec)
+			}
+			placed = true
 		}
+	}
+	if slot >= 0 && !placed {
+		detail.Sections = append(detail.Sections[:slot], detail.Sections[slot+1:]...)
 	}
 	// Collections are arrays rather than null, so a client that iterates
 	// before checking does not fall over on top of the failure it was about
@@ -2323,13 +2842,6 @@ func (s *Server) handleDetail(w http.ResponseWriter, r *http.Request) {
 		detail.Sections = []Section{}
 	}
 	dropBlankProperties(&detail)
-	for i := range detail.Sections {
-		if detail.Sections[i].Listing.Items == nil {
-			detail.Sections[i].Listing.Items = []Resource{}
-		}
-		if detail.Sections[i].Listing.Columns == nil {
-			detail.Sections[i].Listing.Columns = []string{}
-		}
-	}
+	normalizeSections(detail.Sections)
 	writeJSON(w, http.StatusOK, detail)
 }

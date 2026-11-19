@@ -13,10 +13,13 @@ import (
 	"time"
 
 	"cloud.google.com/go/iam/admin/apiv1/adminpb"
+	iamv2 "cloud.google.com/go/iam/apiv2/iampb"
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
+	"cloud.google.com/go/orgpolicy/apiv2/orgpolicypb"
 	rmpb "cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
+	"google.golang.org/genproto/googleapis/api/annotations"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -550,6 +553,11 @@ type Server struct {
 	requests  func(rest.Request)
 	interpose []grpc.UnaryServerInterceptor
 	options   []grpc.ServerOption
+	// extra are JSON APIs served on this port beside Resource Manager's
+	// (Policy Troubleshooter and Cloud Asset's analyzeIamPolicy, #1879).
+	extra []extraJSON
+	// unguarded are served before the Host check (HandleUnguarded).
+	unguarded []extraJSON
 
 	mu   sync.Mutex
 	ln   net.Listener
@@ -573,6 +581,28 @@ func NewServer(addr string, reg *Registry) *Server {
 // Observe sets who is told about completed calls. It must be set before Start.
 func (s *Server) Observe(calls grpcx.Observer, requests func(rest.Request)) {
 	s.calls, s.requests = calls, requests
+}
+
+// extraJSON is a JSON API another package serves on this port.
+type extraJSON struct {
+	match func(*http.Request) bool
+	h     http.Handler
+}
+
+// HandleJSON serves the JSON requests match accepts with h, before
+// Resource Manager's own routes. It must be called before Start.
+func (s *Server) HandleJSON(match func(*http.Request) bool, h http.Handler) {
+	s.extra = append(s.extra, extraJSON{match: match, h: h})
+}
+
+// HandleUnguarded serves the requests match accepts before the server's
+// Host check (hostguard), for a caller that cannot choose the Host it
+// sends: Kourier's external authorization forwards the Host of the request
+// it asks about, which for a domain mapping is any name (#1879). h must
+// change nothing and reveal nothing a request to the service itself would
+// not. It must be called before Start.
+func (s *Server) HandleUnguarded(match func(*http.Request) bool, h http.Handler) {
+	s.unguarded = append(s.unguarded, extraJSON{match: match, h: h})
 }
 
 // Interpose adds a unary interceptor inside the call observer, such as the
@@ -626,6 +656,19 @@ func (s *Server) Start(ctx context.Context) error {
 	adminpb.RegisterIAMServer(g, iamAdmin)
 	iamREST := &rest.Transcoder{Packages: []string{"google.iam.admin.v1"}}
 	iamREST.RegisterService(iamAdminDesc, iamAdmin)
+	// IAM v2 deny policies (#1886), and their operations.
+	policies := NewPoliciesServer(s.projects.reg)
+	iamv2.RegisterPoliciesServer(g, policies)
+	iamV2REST := &rest.Transcoder{Packages: []string{"google.iam.v2"}, Mixins: []*annotations.HttpRule{{
+		Selector: "google.longrunning.Operations.GetOperation",
+		Pattern:  &annotations.HttpRule_Get{Get: "/v2/{name=policies/*/*/*/operations/*}"}}}}
+	iamV2REST.RegisterService(&iamv2.Policies_ServiceDesc, policies)
+	iamV2REST.RegisterService(&longrunningpb.Operations_ServiceDesc, OperationsServer{})
+	// The Organization Policy API v2 (#1890, orgpolicyv2.go).
+	orgPolicy := NewOrgPolicyServer(s.projects.reg)
+	orgpolicypb.RegisterOrgPolicyServer(g, orgPolicy)
+	orgPolicyREST := &rest.Transcoder{Packages: []string{"google.cloud.orgpolicy.v2"}}
+	orgPolicyREST.RegisterService(&orgpolicypb.OrgPolicy_ServiceDesc, orgPolicy)
 
 	router := rest.NewRouter()
 	s.projects.restRoutes(router)
@@ -637,6 +680,20 @@ func (s *Server) Start(ctx context.Context) error {
 	s.tags.restRoutes(router)
 	s.projects.reg.identityRoutes(router)
 	var jsonAPI http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for _, x := range s.extra {
+			if x.match(r) {
+				x.h.ServeHTTP(w, r)
+				return
+			}
+		}
+		if isOrgPolicyPath(r.URL.Path) {
+			orgPolicyREST.ServeHTTP(w, r)
+			return
+		}
+		if isIAMv2Path(r.URL.Path) {
+			iamV2REST.ServeHTTP(w, r)
+			return
+		}
 		if isIAMAdminPath(r.URL.Path) {
 			iamREST.ServeHTTP(w, r)
 			return
@@ -668,7 +725,18 @@ func (s *Server) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("bind Resource Manager address %s: %w", s.addr, err)
 	}
-	srv := &http.Server{Handler: h2c.NewHandler(hostguard.Wrap(both), &http2.Server{}), ReadHeaderTimeout: 10 * time.Second}
+	guarded := hostguard.Wrap(both)
+	unguarded := s.unguarded
+	top := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for _, e := range unguarded {
+			if e.match(r) {
+				e.h.ServeHTTP(w, r)
+				return
+			}
+		}
+		guarded.ServeHTTP(w, r)
+	})
+	srv := &http.Server{Handler: h2c.NewHandler(top, &http2.Server{}), ReadHeaderTimeout: 10 * time.Second}
 	done := make(chan struct{})
 	s.mu.Lock()
 	s.ln, s.srv, s.grpc, s.done = ln, srv, g, done

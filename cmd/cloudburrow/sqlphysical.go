@@ -542,19 +542,63 @@ func (p *sqlProvisioner) physicalRestoreEphemeral(ctx context.Context, spec sqla
 	if err := p.execContainer(ctx, pod, server, nil, &out, "sh", "-c", "kill -TERM 1"); err != nil {
 		return fmt.Errorf("stop the replica's server: %w %s", err, out.String())
 	}
+	// The wait is bounded on its own, well inside the operation's: a
+	// server that does not come up on the restored data fails the sync in
+	// minutes, with its own log, instead of silently holding the operation
+	// (nightly run 44342114886, #1813: 20 minutes, and no log of why).
+	wctx, cancel := context.WithTimeout(ctx, physicalStartTimeout)
+	defer cancel()
 	for {
 		out.Reset()
 		// mysqladmin ping succeeds once the server answers, even when it
 		// refuses the user.
-		err := p.execContainer(ctx, pod, server, nil, &out, "sh", "-c", "test ! -e /var/lib/mysql/"+physicalSwapMarker+
+		err := p.execContainer(wctx, pod, server, nil, &out, "sh", "-c", "test ! -e /var/lib/mysql/"+physicalSwapMarker+
 			" && mysqladmin ping >/dev/null 2>&1")
 		if err == nil {
 			return nil
 		}
 		select {
-		case <-ctx.Done():
-			return fmt.Errorf("the replica's server did not start on the restored data: %w", ctx.Err())
+		case <-wctx.Done():
+			return fmt.Errorf("the replica's server did not start on the restored data within %s: %w\n%s",
+				physicalStartTimeout, wctx.Err(), p.serverReport(ctx, pod, server))
 		case <-time.After(2 * time.Second):
 		}
 	}
+}
+
+// physicalStartTimeout bounds the wait for the replica's server to answer
+// on the restored data after its restart. Measured 2026-11-18 on the
+// compat test's backup: about a second.
+const physicalStartTimeout = 10 * time.Minute
+
+// serverReport is what the pod's server container says about itself: its
+// state, its restarts, whether the swap marker is still there, and the
+// tail of its log (and of its previous run's, after a restart), for an
+// error that otherwise would not say why the server did not come up.
+func (p *sqlProvisioner) serverReport(ctx context.Context, pod, server string) string {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	var sb strings.Builder
+	state, err := p.inst.Kubectl(ctx, "-n", p.inst.Namespace, "get", "pod", pod, "-o",
+		`jsonpath={.status.containerStatuses[?(@.name=="`+server+`")]}`)
+	fmt.Fprintf(&sb, "container %s of %s: %s", server, pod, strings.TrimSpace(state))
+	if err != nil {
+		fmt.Fprintf(&sb, " (%v)", err)
+	}
+	var out bytes.Buffer
+	if err := p.execContainer(ctx, pod, server, nil, &out, "sh", "-c",
+		"cd /var/lib/mysql && ls -la . && ls data | head -50"); err == nil {
+		fmt.Fprintf(&sb, "\n/var/lib/mysql:\n%s", strings.TrimSpace(tail(out.String(), 3000)))
+	}
+	for _, prev := range []bool{true, false} {
+		args := []string{"-n", p.inst.Namespace, "logs", pod, "-c", server, "--tail=60"}
+		label := "log"
+		if prev {
+			args, label = append(args, "--previous"), "previous log"
+		}
+		if l, err := p.inst.Kubectl(ctx, args...); err == nil && strings.TrimSpace(l) != "" {
+			fmt.Fprintf(&sb, "\n%s:\n%s", label, strings.TrimSpace(tail(l, 6000)))
+		}
+	}
+	return sb.String()
 }

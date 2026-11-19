@@ -3,6 +3,7 @@ package pubsubfront
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
@@ -19,6 +20,11 @@ import (
 func TestRESTPatchReadsTheMaskInTheURL(t *testing.T) {
 	up := newRESTUpstream(t)
 	fx := newFixtureOpts(t, true, up.addr())
+	// The export's table is checked, as Google does (#1874).
+	d := &fakeDestinations{objects: map[string][]byte{}, columns: []bqField{{Name: "data", Type: "BYTES"}}}
+	bq := httptest.NewServer(d)
+	t.Cleanup(bq.Close)
+	fx.front.UseExports(bq.URL, "", "")
 	topic := fx.topic(t, "t")
 	name := subName("tf")
 	if _, err := fx.create(t, &pubsubpb.Subscription{Name: name, Topic: topic,

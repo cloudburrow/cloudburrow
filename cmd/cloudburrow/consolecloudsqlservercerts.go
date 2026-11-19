@@ -58,7 +58,7 @@ func serverCAPoolFields(in *sqladminapi.DatabaseInstance) []console.Field {
 				"Leave it empty for the other modes."},
 		{Name: "serverCertificateRotationMode", Label: "Rotate server certificates automatically", Type: "select",
 			Options: []string{"NO_AUTOMATIC_ROTATION", "AUTOMATIC_ROTATION_DURING_MAINTENANCE"}, Default: rot,
-			Help: "Recorded. Cloud SQL rotates during maintenance; no maintenance event is scheduled here, so rotate with Add server certificate."},
+			Help: "With AUTOMATIC_ROTATION_DURING_MAINTENANCE a maintenance run (Schedule maintenance, then Reschedule maintenance) rotates the server certificate when it expires within 180 days; otherwise rotate with Add server certificate."},
 	}
 }
 

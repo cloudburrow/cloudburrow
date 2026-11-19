@@ -235,7 +235,7 @@ var settingsSamples = map[string][2]string{
 	"connectionPoolConfig":      {`{"connectionPoolingEnabled":true}`, "refuse"},
 	"connectorEnforcement":      {`"REQUIRED"`, "refuse"},
 	"enableGoogleMlIntegration": {`true`, "refuse"},
-	"passwordValidationPolicy":  {`{"enablePasswordPolicy":true,"minLength":12}`, "refuse"},
+	"passwordValidationPolicy":  {`{"enablePasswordPolicy":true,"minLength":12}`, "echo"},
 	"readPoolAutoScaleConfig":   {`{"enabled":true}`, "refuse"},
 }
 

@@ -282,6 +282,39 @@ func (p *sqlProvisioner) Restart(ctx context.Context, spec sqladmin.Spec) error 
 	return p.serves(ctx, spec)
 }
 
+// Stop shuts a stopped instance's server down (#1875): its tunnel goes,
+// and its Deployments (a REGIONAL instance's standby too) are scaled to no
+// pods, their volumes kept. Start applies them again, with one pod each.
+func (p *sqlProvisioner) Stop(ctx context.Context, spec sqladmin.Spec) error {
+	srv := spec.ServerName()
+	p.mu.Lock()
+	f := p.fwds[srv]
+	delete(p.fwds, srv)
+	delete(p.up, srv)
+	p.mu.Unlock()
+	if f != nil {
+		_ = f.Stop(ctx)
+	}
+	for node := 0; node < 2; node++ {
+		d := nodeName(srv, node)
+		if node == 1 && spec.HAEpochs == [2]int{} {
+			break // never had a standby
+		}
+		if _, err := p.inst.Kubectl(ctx, "-n", p.inst.Namespace, "scale", "deployment/"+d, "--replicas=0"); err != nil {
+			if node == 1 {
+				continue // a standby removed when high availability was turned off
+			}
+			return fmt.Errorf("stop the server of instance %s: %w", spec.Name, err)
+		}
+		// kubectl wait answers "no matching resources" once none is left.
+		if _, err := p.inst.Kubectl(ctx, "-n", p.inst.Namespace, "wait", "--for=delete", "pod", "-l", "app="+d,
+			"--timeout=120s"); err != nil && !strings.Contains(err.Error(), "no matching resources") {
+			return fmt.Errorf("stop the server of instance %s: %w", spec.Name, err)
+		}
+	}
+	return nil
+}
+
 // sqlServerOf is the name of a created instance's server in the cluster
 // (sqladmin.Server.ServerOf): its own, unless a blue-green switchover
 // moved it (#1614).

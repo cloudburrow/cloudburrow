@@ -70,7 +70,12 @@ func (p pubsubProvider) DetailActions(ctx context.Context, project string, path 
 	}
 	noAckSub := subField
 	noAckSub.Help = pullNoAckHelp
+	// Google's page (#1847): Create subscription opens the Create
+	// subscription page with this topic, and the Messages tab has Publish
+	// message and Pull, each message with an Ack. The topic page's own
+	// Create subscription form is still served for older pages and scripts.
 	return []console.Action{
+		createSubscriptionLink(project, path[0]),
 		{ID: actCreateSubscription, Label: "Create subscription", Fields: subscriptionCreateFields()},
 		{ID: actPublish, Label: "Publish message", Fields: []console.Field{
 			{Name: "data", Label: "Message body", Type: "textarea", Required: true},
@@ -83,8 +88,10 @@ func (p pubsubProvider) DetailActions(ctx context.Context, project string, path 
 				Help: "Delivered in order only to subscriptions with message ordering enabled.",
 			},
 		}},
+		topicPullAction(subField.Default),
 		{ID: actPullAck, Label: "Pull and ack", Fields: []console.Field{subField, maxField}},
 		{ID: actPullNoAck, Label: "Pull without ack", Fields: []console.Field{noAckSub, maxField}},
+		{ID: actAckMessage, Label: "Ack"},
 	}
 }
 
@@ -154,6 +161,10 @@ func (p pubsubProvider) ActAtResult(ctx context.Context, project string, path []
 
 	case actPullAck, actPullNoAck:
 		return p.pull(ctx, c.SubscriptionAdminClient, project, topic, values, action == actPullAck)
+	case actPull:
+		return pullOnTopic(ctx, c.SubscriptionAdminClient, project, topic, values["subscription"])
+	case actAckMessage:
+		return nil, ackOnTopic(ctx, c.SubscriptionAdminClient, project, topic, values)
 	default:
 		return nil, fmt.Errorf("unknown action %q", action)
 	}

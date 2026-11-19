@@ -252,7 +252,7 @@ const (
 func (p firestoreProvider) client(ctx context.Context, project string) (*firestore.Client, error) {
 	opts := append(localOpts(p.endpoint),
 		option.WithGRPCDialOption(grpc.WithPerRPCCredentials(emulatorOwner{})))
-	c, err := firestore.NewClient(ctx, project, opts...)
+	c, err := firestore.NewClientWithDatabase(ctx, project, firestoreDatabaseIn(ctx), opts...)
 	if err != nil {
 		return nil, fmt.Errorf("cannot reach Firestore: %w", err)
 	}
@@ -337,12 +337,12 @@ func firestoreSubcollections(ctx context.Context, doc *firestore.DocumentRef, do
 
 // firestoreDocumentsPrefix is the part of a document's full name before its
 // path inside the database.
-func firestoreDocumentsPrefix(project string) string {
-	return "projects/" + project + "/databases/(default)/documents/"
+func firestoreDocumentsPrefix(ctx context.Context, project string) string {
+	return "projects/" + project + "/databases/" + firestoreDatabaseIn(ctx) + "/documents/"
 }
 
 // parseFirestoreValue reads a form's value as the type the form names.
-func parseFirestoreValue(c *firestore.Client, project, typ, raw string) (any, error) {
+func parseFirestoreValue(ctx context.Context, c *firestore.Client, project, typ, raw string) (any, error) {
 	switch strings.TrimSpace(typ) {
 	case "string":
 		return raw, nil
@@ -364,7 +364,7 @@ func parseFirestoreValue(c *firestore.Client, project, typ, raw string) (any, er
 		}
 		return &latlng.LatLng{Latitude: lat, Longitude: lng}, nil
 	case "reference":
-		path, err := firestoreReferencePath(project, raw)
+		path, err := firestoreReferencePath(ctx, project, raw)
 		if err != nil {
 			return nil, err
 		}
@@ -396,9 +396,9 @@ func parseFirestoreValue(c *firestore.Client, project, typ, raw string) (any, er
 // firestoreReferencePath is a reference's document path inside this
 // project's default database, as the form writes one: collection/document
 // pairs, with this project's own documents prefix allowed and dropped.
-func firestoreReferencePath(project, raw string) (string, error) {
+func firestoreReferencePath(ctx context.Context, project, raw string) (string, error) {
 	path := strings.Trim(strings.TrimSpace(raw), "/")
-	path = strings.TrimPrefix(path, firestoreDocumentsPrefix(project))
+	path = strings.TrimPrefix(path, firestoreDocumentsPrefix(ctx, project))
 	if strings.HasPrefix(path, "projects/") {
 		return "", fmt.Errorf("a reference names a document in this project's database, such as users/alice")
 	}
@@ -490,7 +490,7 @@ func renderFirestoreValue(v any) string {
 }
 
 // firestoreFirstField reads the optional first field of Add document.
-func firestoreFirstField(c *firestore.Client, project string, values map[string]string) (map[string]any, error) {
+func firestoreFirstField(ctx context.Context, c *firestore.Client, project string, values map[string]string) (map[string]any, error) {
 	data := map[string]any{}
 	name := values["field"]
 	if strings.TrimSpace(name) == "" {
@@ -499,7 +499,7 @@ func firestoreFirstField(c *firestore.Client, project string, values map[string]
 		}
 		return data, nil
 	}
-	v, err := parseFirestoreValue(c, project, values["type"], values["value"])
+	v, err := parseFirestoreValue(ctx, c, project, values["type"], values["value"])
 	if err != nil {
 		return nil, err
 	}
@@ -525,7 +525,7 @@ func (p firestoreProvider) addDocument(ctx context.Context, project, collection 
 	if err != nil {
 		return "", err
 	}
-	data, err := firestoreFirstField(c, project, values)
+	data, err := firestoreFirstField(ctx, c, project, values)
 	if err != nil {
 		return "", err
 	}
@@ -546,7 +546,7 @@ func firestoreDocumentFields() []console.Field {
 	return append([]console.Field{
 		{Name: "documentId", Label: "Document ID", Type: "text", Pattern: firestoreIDPattern,
 			Help: "Optional. Empty gives the document an auto ID, as Firestore's own does."},
-	}, valueFields("field", firestoreTypeList, firestoreValueHelp, firestoreTypePattern, false, "", "")...)
+	}, firestoreValueFields(false, "", "")...)
 }
 
 // CreateForm implements console.Creator: Start collection, which is Google's
@@ -628,7 +628,7 @@ func (p firestoreProvider) fieldDetail(ctx context.Context, project, collection,
 	}
 	typ, raw, ok := formatFirestoreValue(v)
 	if ref, isRef := v.(*firestore.DocumentRef); isRef {
-		if _, local := firestoreLocalReference(project, ref.Path); !local {
+		if _, local := firestoreLocalReference(ctx, project, ref.Path); !local {
 			ok = false
 			d.Sections[0].Note = firestoreForeignReferenceNote(ref.Path)
 		}
@@ -656,7 +656,7 @@ func (p firestoreProvider) fieldDetail(ctx context.Context, project, collection,
 	if isMap || isArray {
 		if _, prop, err := p.lookupFirestoreField(ctx, project, collection, id, field); err != nil {
 			d.Sections = append(d.Sections, console.Section{ID: "elements", Label: "Elements", Unavailable: err.Error()})
-		} else if sec, ok := firestoreElementsSection(project, collection, id, field, nil, prop, prop); ok {
+		} else if sec, ok := firestoreElementsSection(ctx, project, collection, id, field, nil, prop, prop); ok {
 			d.Sections = append(d.Sections, sec)
 		}
 	}
@@ -665,7 +665,7 @@ func (p firestoreProvider) fieldDetail(ctx context.Context, project, collection,
 
 // firestoreEditFields is Edit field, prefilled with the stored type and value.
 func firestoreEditFields(field, typ, raw string) []console.Field {
-	fields := valueFields("field", firestoreTypeList, firestoreValueHelp, firestoreTypePattern, true, typ, raw)
+	fields := firestoreValueFields(true, typ, raw)
 	fields[0].Default, fields[0].Immutable = field, true
 	fields[0].Help = "A field is renamed by adding it under the new name and deleting this one."
 	return fields
@@ -738,9 +738,9 @@ func (p firestoreProvider) Edit(ctx context.Context, project string, path []stri
 	if len(path) != 3 {
 		return errors.New("a field is edited on its own page; a document's fields are added with Add field")
 	}
-	return p.updateFieldChecked(ctx, project, path[0], path[1], path[2], true, editableFirestoreField(project),
+	return p.updateFieldChecked(ctx, project, path[0], path[1], path[2], true, editableFirestoreField(ctx, project),
 		func(c *firestore.Client) (any, error) {
-			return parseFirestoreValue(c, project, values["type"], values["value"])
+			return parseFirestoreValue(ctx, c, project, values["type"], values["value"])
 		})
 }
 
@@ -751,10 +751,10 @@ func (p firestoreProvider) Edit(ctx context.Context, project string, path []stri
 // since #995). Checked on the route, so a request posted by hand is refused
 // as the page is, with the page's note, as Datastore refuses a key in
 // another project or database (#893).
-func editableFirestoreField(project string) func(stored any) error {
+func editableFirestoreField(ctx context.Context, project string) func(stored any) error {
 	return func(stored any) error {
 		if ref, ok := stored.(*firestore.DocumentRef); ok && ref != nil {
-			if _, local := firestoreLocalReference(project, ref.Path); !local {
+			if _, local := firestoreLocalReference(ctx, project, ref.Path); !local {
 				return errors.New(firestoreForeignReferenceNote(ref.Path))
 			}
 		}
@@ -770,15 +770,22 @@ func (p firestoreProvider) DetailActions(ctx context.Context, project string, pa
 	}
 	switch len(path) {
 	case 1:
-		return []console.Action{{ID: "adddocument", Label: "Add document", Fields: firestoreDocumentFields()}}
+		return []console.Action{{ID: "adddocument", Label: "Add document", Fields: firestoreDocumentFields()},
+			// Google's Delete collection (#1845): every document in it and in its
+			// subcollections.
+			{ID: "deletecollection", Label: "Delete collection", Destructive: true, Leaves: true,
+				Confirm: "Every document in the collection, and in each of their subcollections, is deleted."}}
 	case 2:
 		return []console.Action{
 			{ID: "addfield", Label: "Add field",
-				Fields: valueFields("field", firestoreTypeList, firestoreValueHelp, firestoreTypePattern, true, "", "")},
+				Fields: firestoreValueFields(true, "", "")},
 			// A subcollection of this document, started with its first
 			// document, as on Google's console (#854).
 			{ID: "startcollection", Label: "Start collection", Fields: firestoreStartCollectionFields()},
 			{ID: "deletedocument", Label: "Delete document", Destructive: true, Leaves: true},
+			// Google's Delete document fields (#1845): the document stays, with none.
+			{ID: "deletefields", Label: "Delete document fields", Destructive: true,
+				Confirm: "Every field of the document is deleted; the document and its subcollections are kept."},
 		}
 	case 3:
 		// Add value on a map or array field (#995).
@@ -796,6 +803,10 @@ func (p firestoreProvider) ActAt(ctx context.Context, project string, path []str
 		return err
 	}
 	switch {
+	case action == "deletefields" && len(path) == 2:
+		return p.deleteFields(ctx, project, path[0], path[1])
+	case action == "deletecollection" && len(path) == 1:
+		return p.deleteCollection(ctx, project, path[0])
 	case action == "adddocument" && len(path) == 1:
 		_, err := p.addDocument(ctx, project, path[0], values)
 		return err
@@ -808,7 +819,7 @@ func (p firestoreProvider) ActAt(ctx context.Context, project string, path []str
 		return err
 	case action == "addfield" && len(path) == 2:
 		return p.updateField(ctx, project, path[0], path[1], values["field"], false, func(c *firestore.Client) (any, error) {
-			return parseFirestoreValue(c, project, values["type"], values["value"])
+			return parseFirestoreValue(ctx, c, project, values["type"], values["value"])
 		})
 	case action == "deletefield" && len(path) == 3:
 		return p.updateField(ctx, project, path[0], path[1], path[2], true, func(*firestore.Client) (any, error) {
@@ -1482,9 +1493,10 @@ func datastoreChildFields() []console.Field {
 		datastoreEntityFields()...)
 }
 
-// client is the Datastore client every screen uses.
+// client is the Datastore client every screen uses, for the database the
+// request names (#1883).
 func (p datastoreProvider) client(ctx context.Context, project string) (*datastore.Client, error) {
-	c, err := datastore.NewClient(ctx, project, localOpts(p.endpoint)...)
+	c, err := datastore.NewClientWithDatabase(ctx, project, datastoreDatabaseID(ctx), localOpts(p.endpoint)...)
 	if err != nil {
 		return nil, fmt.Errorf("cannot reach Datastore: %w", err)
 	}
@@ -1514,7 +1526,7 @@ func (p datastoreProvider) createEntity(ctx context.Context, project, ns, kind s
 		return "", errors.New("a kind is required")
 	}
 	key := datastore.IncompleteKey(kind, parent)
-	if id := strings.TrimSpace(values["key"]); id != "" {
+	if id := strings.TrimSpace(values["key"]); id != "" && values["keyType"] != datastoreKeyAuto {
 		k, err := datastoreKeyIdentifier(kind, id)
 		if err != nil {
 			return "", err
@@ -1533,6 +1545,26 @@ func (p datastoreProvider) createEntity(ctx context.Context, project, ns, kind s
 	} else if strings.TrimSpace(values["value"]) != "" {
 		return "", errors.New("a value needs a property name")
 	}
+	// Create entity's Properties, a row each (#1846).
+	rows, err := console.ParseGroup(values["properties"])
+	if err != nil {
+		return "", fmt.Errorf("properties: %w", err)
+	}
+	for i, row := range rows {
+		name := strings.TrimSpace(row["name"])
+		if name == "" {
+			return "", fmt.Errorf("property %d has no name", i+1)
+		}
+		if propertyIndex(props, name) >= 0 {
+			return "", fmt.Errorf("property %q is given twice", name)
+		}
+		prop, err := datastoreProperty(name, map[string]string{"type": row["type"], "value": row["value"],
+			"excluded": strconv.FormatBool(row["indexed"] != "true")})
+		if err != nil {
+			return "", fmt.Errorf("property %s: %w", name, err)
+		}
+		props = append(props, prop)
+	}
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
 	c, err := p.client(ctx, project)
@@ -1549,14 +1581,60 @@ func (p datastoreProvider) createEntity(ctx context.Context, project, ns, kind s
 
 // CreateForm implements console.Creator: Create entity, with its kind, as on
 // Google's Datastore page — a kind exists because an entity has it.
+//
+// The page is Google's (#1846): Namespace, Kind, Key identifier (Numeric ID
+// (auto-generated) or Custom name), and Properties, a row per property
+// with its Name, Type, Value and Indexed, and Add property; the button is
+// Create.
 func (datastoreProvider) CreateForm() (string, []console.Field) {
-	return "Create entity", append([]console.Field{
+	return "Create entity", []console.Field{
 		{Name: "namespace", Label: "Namespace", Type: "text", Pattern: datastoreNamespacePattern,
-			Help: "Optional: empty for the default namespace. A new namespace exists once its first entity does. " +
+			Help: "Empty for [default], the default namespace. A new namespace exists once its first entity does. " +
 				"Letters, digits, periods, underscores and dashes, at most 100."},
 		datastoreKindField("The entity's kind. A new kind exists once its first entity does."),
-	}, datastoreEntityFields()...)
+		{Name: "keyType", Label: "Key identifier", Type: "select", Default: datastoreKeyAuto,
+			Options: []string{datastoreKeyAuto, datastoreKeyCustom},
+			Help:    "A numeric ID Datastore allocates, or a name of your own."},
+		{Name: "key", Label: "Custom name", Type: "text", ShowWhen: "keyType=" + datastoreKeyCustom,
+			Help: "The entity's name. As the Name/ID column shows one, name=alice is the name alice and id=123 the numeric ID 123."},
+		datastorePropertiesField(),
+	}
 }
+
+// datastorePropertiesField is Create entity's and Edit entity's
+// Properties: a row each with Name, Type, Value and Indexed (#1846).
+func datastorePropertiesField() console.Field {
+	return console.Field{Name: "properties", Label: "Properties", Type: console.GroupFieldType, AddLabel: "Add property",
+		Group: []console.Field{
+			{Name: "name", Label: "Name", Type: "text"},
+			{Name: "type", Label: "Type", Type: "select", Options: datastoreCreateTypes, OptionLabels: datastoreCreateTypeLabels, Default: "string"},
+			{Name: "value", Label: "Value", Type: "textarea"},
+			{Name: "indexed", Label: "Indexed", Type: "checkbox", Default: "true"},
+		},
+		Help: "A timestamp is RFC 3339 (2026-09-27T15:04:05Z); a key Kind/name=… or Kind/id=…, ancestors first; " +
+			"a geographical point latitude, longitude; an array or embedded entity JSON; a blob base64. " +
+			"An unindexed property cannot be filtered or ordered on; a string or blob over 1,500 bytes must be unindexed."}
+}
+
+// Create entity's Key identifier choices, as Google's.
+const (
+	datastoreKeyAuto   = "Numeric ID (auto-generated)"
+	datastoreKeyCustom = "Custom name"
+)
+
+// datastoreCreateTypes are Create entity's property types, and
+// datastoreCreateTypeLabels Google's names for them.
+var (
+	datastoreCreateTypes      = []string{"string", "integer", "float", "boolean", "timestamp", "key", "geopoint", "array", "entity", "blob", "null"}
+	datastoreCreateTypeLabels = map[string]string{
+		"string": "String", "integer": "Integer", "float": "Floating-point number", "boolean": "Boolean",
+		"timestamp": "Date and time", "key": "Key", "geopoint": "Geographical point", "array": "Array",
+		"entity": "Embedded entity", "blob": "Blob", "null": "Null",
+	}
+)
+
+// CreateSubmit implements console.CreateSubmitter: Google's Create.
+func (datastoreProvider) CreateSubmit() string { return "Create" }
 
 // namespaceValue reads the Namespace input, refusing what Datastore would.
 func namespaceValue(raw string) (string, error) {
@@ -1620,7 +1698,7 @@ func (p datastoreProvider) propertyDetail(ctx context.Context, project string, s
 	if err != nil {
 		return console.Detail{Unavailable: "cannot read the entity: " + err.Error()}, nil
 	}
-	props := datastorePropertiesGo(e.GetProperties(), project)
+	props := datastorePropertiesGo(e.GetProperties(), homeOf(ctx, project))
 	i := propertyIndex(props, name)
 	if i < 0 {
 		return console.Detail{Unavailable: fmt.Sprintf("entity %s has no property %q", datastoreEntityHeading(key), name)}, nil
@@ -1651,7 +1729,7 @@ func (p datastoreProvider) propertyDetail(ctx context.Context, project string, s
 	}
 	// The values inside an array or embedded entity, each edited on its own
 	// (#905).
-	if sec, ok := datastoreElementsSection(project, scope, key, kind, name, nil, e.GetProperties()[name], e.GetProperties()[name]); ok {
+	if sec, ok := datastoreElementsSection(homeOf(ctx, project), scope, key, kind, name, nil, e.GetProperties()[name], e.GetProperties()[name]); ok {
 		d.Sections = append(d.Sections, sec)
 	}
 	return d, nil
@@ -1660,6 +1738,10 @@ func (p datastoreProvider) propertyDetail(ctx context.Context, project string, s
 // Edit implements console.Editor for one property of an entity.
 func (p datastoreProvider) Edit(ctx context.Context, project string, full []string, values map[string]string) error {
 	scope, path := parseDatastorePath(full)
+	if !scope.index && len(path) == 2 {
+		// Edit entity (#1846).
+		return p.editDatastoreEntity(ctx, project, scope, path[0], path[1], values)
+	}
 	if scope.index || len(path) != 3 {
 		return errors.New("a property is edited on its own page; an entity's properties are added with Add property")
 	}
@@ -1690,6 +1772,11 @@ func (p datastoreProvider) Edit(ctx context.Context, project string, full []stri
 func (p datastoreProvider) DetailActions(ctx context.Context, project string, full []string) []console.Action {
 	if project == "" {
 		return nil
+	}
+	if len(full) == 1 && full[0] == datastoreIndexesSegment {
+		return []console.Action{{ID: "deleteindex", Label: "Delete index", Destructive: true,
+			Fields: []console.Field{{Name: "index", Label: "Index ID", Type: "text", Required: true,
+				Help: "The ID of the composite index to delete, as the Index ID column shows it."}}}}
 	}
 	scope, path := parseDatastorePath(full)
 	if scope.index {

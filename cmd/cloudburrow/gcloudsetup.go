@@ -86,6 +86,15 @@ var gcloudVerified = []struct {
 	// TestGcloudIdentityGroups drives groups create, describe, list,
 	// delete and memberships add, list and delete.
 	{resourceManagerService, "cloudidentity", "/", true, false},
+	// Policy Troubleshooter (#1879): gcloud policy-troubleshoot iam calls
+	// v2alpha1 iam:troubleshoot, served on the Resource Manager port.
+	// TestGcloudPolicyTroubleshoot drives a denied and a granted check.
+	{resourceManagerService, "policytroubleshooter", "/", true, false},
+	// The Organization Policy API v2 (#1890): gcloud org-policies calls
+	// orgpolicy.googleapis.com v2, served on the Resource Manager port.
+	// TestGcloudOrgPolicies drives set-policy, describe (--effective),
+	// list and delete.
+	{resourceManagerService, "orgpolicy", "/", true, false},
 	// Service Usage (#1352): gcloud services list, enable and disable call
 	// v1, which gcloud appends. TestGcloudServices drives them.
 	{serviceUsageService, "serviceusage", "/", true, false},
@@ -117,6 +126,11 @@ var gcloudVerified = []struct {
 	// --secure-source-manager-instance-config, describe, list and delete,
 	// and git-repository-links create, describe, list and delete.
 	{config.ServiceRun, "developerconnect", "/developerconnect/", false, false},
+	// Eventarc (#1877), on the Run port under /eventarc/, since its v1
+	// trigger paths are Cloud Build's; gcloud eventarc appends v1/.
+	// TestGcloudEventarcTriggers drives triggers create, describe, list,
+	// update and delete, and providers list.
+	{config.ServiceRun, "eventarc", "/eventarc/", false, false},
 	// The Cloud SQL Admin API (#1301): gcloud sql appends sql/v1beta4/.
 	// TestGcloudSQL drives instances list and describe, and databases and
 	// users create, list and delete, with either Cloud SQL service.
@@ -151,6 +165,11 @@ var gcloudVerified = []struct {
 	// firestore appends v1/. TestGcloudFirestoreBackupSchedules lists
 	// databases and drives backup schedules.
 	{config.ServiceFirestore, "firestore", "/", false, false},
+	// The Datastore Admin API (#1884), on the Datastore port, which the
+	// front in its pod serves beside the emulator's data API; gcloud
+	// datastore appends v1/. TestGcloudDatastoreExportImport drives export
+	// and import.
+	{config.ServiceDatastore, "datastore", "/", false, false},
 }
 
 // spannerRESTEndpoint keys the Spanner admin REST row (#1461): Spanner's
@@ -205,7 +224,7 @@ func gcloudConfiguration(cfg config.Config, adcPath string) string {
 		sqlAdminEndpoint: cfg.Endpoints.SQLAdmin, memorystoreAdminEndpoint: cfg.Endpoints.MemorystoreAdmin,
 		serviceUsageService: cfg.Endpoints.ServiceUsage, config.ServiceBackupDR: cfg.Endpoints.BackupDR,
 		config.ServiceBigtable: cfg.Endpoints.Bigtable, spannerRESTEndpoint: cfg.Endpoints.SpannerREST,
-		config.ServiceFirestore: cfg.Endpoints.Firestore, config.ServicePrivateCA: cfg.Endpoints.PrivateCA}
+		config.ServiceFirestore: cfg.Endpoints.Firestore, config.ServicePrivateCA: cfg.Endpoints.PrivateCA, config.ServiceDatastore: cfg.Endpoints.Datastore}
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n# Instance %q.\n", gcloudMarker, cfg.Name)
 	// should_prompt_to_enable_api is off because gcloud would otherwise ask

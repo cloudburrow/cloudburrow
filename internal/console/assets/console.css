@@ -351,6 +351,120 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .page-header h1 { margin-bottom: 2px; }
 .page-header .subtitle { margin: 0; }
 
+/* The title line (#1842): a back arrow where there is somewhere to go back
+   to, the title, and the screen's own controls beside it, as Google's
+   console puts "+ Create  Refresh" and "Edit  Delete" on the title's line. */
+.page-title-row { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 16px; min-height: 40px; }
+.page-title-row h1 { margin: 0; }
+.page-header-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; flex: 1 1 auto; }
+.page-header-actions:empty { display: none; }
+.page-header-actions .info-toggle { margin-left: auto; }
+.page-header-actions .page-actions { margin: 0; }
+.back-arrow { margin-left: -8px; color: var(--accent); }
+.back-arrow svg, .header-button svg, .info-toggle svg, .view-options svg, .note-icon svg,
+.note-dismiss svg, .status-glyph, .filter-icon svg {
+  width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+.header-button {
+  display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 12px;
+  background: none; border: 0; border-radius: var(--radius-control);
+  font: inherit; font-weight: 500; color: var(--accent); cursor: pointer;
+}
+button.primary.header-button { height: 36px; padding: 0 12px; background: none; color: var(--accent); box-shadow: none; }
+button.header-button:hover, button.primary.header-button:hover { background: var(--state-hover); }
+button.header-button:active, button.primary.header-button:active { background: var(--state-press); }
+button.primary.header-button[disabled], button.primary.header-button.is-busy[disabled] {
+  background: none; color: var(--accent);
+}
+.resource-name { margin: 4px 0 0; font-size: var(--text-heading-size); overflow-wrap: anywhere; }
+/* A resource's details in its page header, above the tabs (#1842): one
+   label over its value per item, wrapping to as many rows as it needs.
+   Such a header, with its actions, details and tabs, is too tall to stay
+   pinned over the tab's table, so it scrolls with the page. */
+.page-header.has-summary { position: static; }
+.resource-summary {
+  display: flex; flex-wrap: wrap; gap: 8px 32px; margin: 12px 0 4px; padding: 0;
+  min-width: 0;
+}
+.resource-summary-item { min-width: 0; max-width: 100%; }
+.resource-summary dt { color: var(--text-muted); font-size: 0.875em; }
+.resource-summary dd { margin: 2px 0 0; overflow-wrap: anywhere; }
+
+/* An emulation note, as a banner the reader can dismiss (#1842). */
+.note-banner {
+  display: flex; align-items: flex-start; gap: 12px; margin: 0 0 12px; padding: 8px 8px 8px 16px;
+  background: var(--surface-alt); border: 1px solid var(--border); border-radius: var(--radius);
+}
+.note-banner .note-icon { flex: none; padding-top: 8px; color: var(--accent); display: inline-flex; }
+.note-banner { min-width: 0; max-width: 100%; box-sizing: border-box; }
+/* A note may hold a long unbroken name (a sink's destination, a filter):
+   it wraps inside the banner rather than pushing Dismiss off a 320px
+   screen (the run shard's reflow audit). */
+.note-banner .note-text { flex: 1 1 auto; min-width: 0; margin: 8px 0; overflow-wrap: anywhere; }
+.note-banner .note-dismiss { flex: none; width: 36px; height: 36px; }
+
+/* Status, first, as an icon (#1842). */
+.status-cell { width: 40px; }
+.status-icon::before { content: none; }
+.status-icon { color: var(--text-muted); }
+.status-icon[data-state="ok"] { color: var(--ok); }
+.status-icon[data-state="warn"] { color: var(--warn); }
+.status-icon[data-state="error"] { color: var(--error); }
+.sort-button.is-status { display: inline-flex; align-items: center; min-width: 24px; min-height: 24px; }
+.status-head-icon { display: inline-flex; color: var(--text-muted); }
+
+/* The filter bar (#1842): a filter icon, the box with its property menu, and
+   View options beside it. */
+.filter-field { display: flex; align-items: center; gap: 8px; flex: 1 1 auto; max-width: 560px; }
+.filter-icon { display: inline-flex; color: var(--text-muted); }
+.filter-box { position: relative; flex: 1 1 auto; display: flex; }
+.filter-box .filter { max-width: none; width: 100%; }
+.filter-menu {
+  position: absolute; top: 40px; left: 0; z-index: 30; min-width: 220px; max-height: 320px; overflow-y: auto;
+  list-style: none; margin: 0; padding: 8px 0;
+  background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow-menu);
+}
+.filter-menu[hidden] { display: none; }
+.filter-menu-title { padding: 4px 16px; font-size: var(--text-caption-size); color: var(--text-muted); }
+.filter-menu-item {
+  display: block; width: 100%; padding: 8px 16px; text-align: left;
+  background: none; border: 0; font: inherit; color: var(--text); cursor: pointer;
+}
+.filter-menu-item:hover, .filter-menu-item:focus-visible { background: var(--state-hover); }
+.chip-clear-all {
+  background: none; border: 0; padding: 4px 8px; font: inherit; font-size: var(--text-caption-size);
+  font-weight: 500; color: var(--accent); cursor: pointer;
+}
+.view-options-wrap { position: relative; }
+.view-options-menu {
+  position: absolute; top: 44px; right: 0; z-index: 30; min-width: 240px; max-height: 360px; overflow-y: auto;
+  padding: 8px 0; background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow-menu);
+}
+.view-options-menu[hidden] { display: none; }
+.view-options-title { margin: 0; padding: 4px 16px 8px; font-weight: 500; }
+.view-options-item { display: flex; align-items: center; gap: 12px; padding: 6px 16px; cursor: pointer; }
+.view-options-item:hover { background: var(--state-hover); }
+
+/* A create page's numbered sections (#1842). */
+.create-step { border-bottom: 1px solid var(--border); padding: 8px 0 16px; margin-bottom: 8px; }
+.create-step-head {
+  display: flex; align-items: center; gap: 12px; width: 100%; padding: 8px 0;
+  background: none; border: 0; font: inherit; font-size: var(--text-heading-size); color: var(--text);
+  text-align: left; cursor: pointer;
+}
+.create-step-number {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 24px; height: 24px; border-radius: 50%;
+  background: var(--accent); color: var(--accent-contrast); font-size: var(--text-caption-size); font-weight: 500;
+}
+.create-step.is-folded .create-step-number { background: var(--text-muted); }
+.create-step.is-done .create-step-number { background: var(--ok); }
+.create-step-body { padding: 8px 0 0 36px; }
+.create-step-body[hidden] { display: none; }
+.create-step-continue { margin-top: 8px; }
+@media (max-width: 959px) { .create-step-body { padding-left: 0; } }
+
 /* A resource's own actions, on its own page. Wrapping rather than scrolling,
    because a control pushed off the right edge of a sticky header has nowhere
    to be reached from. */
@@ -666,6 +780,9 @@ td a { color: var(--accent); }
   /* Settings and utilities links to Connect too, so the bar can give it up
      here and nothing becomes unreachable (#802). */
   .connect-link { display: none; }
+  /* Help goes too: Settings and utilities lists the keyboard shortcuts,
+     and Connect, so both stay reachable (#1842). */
+  .help-button { display: none; }
   .avatar { width: 28px; height: 28px; }
   /* The picker gives up width before anything gives up its place: the
      project name ellipsises, and the control stays where it is. */
@@ -700,6 +817,10 @@ td a { color: var(--accent); }
               transform var(--motion-fast) var(--ease-decelerate);
 }
 .panel.is-open, .picker-panel.is-open { opacity: 1; transform: none; }
+/* A panel on its way out (or not yet in) is see-through and must not take
+   the click meant for the page under it: the New project page's first
+   control sat under the closing project picker for its 200ms exit (#1842). */
+.panel.is-closing, .picker-panel.is-closing { pointer-events: none; }
 
 .modal {
   position: fixed; inset: 0; z-index: 40;
@@ -786,6 +907,34 @@ td a { color: var(--accent); }
   .schema-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .schema-row .schema-name { grid-column: 1 / -1; }
 }
+/* Manage traffic's rows (#1852): a revision and its percent per row, with
+   its own Remove, Add revision under them and the total. */
+.traffic-field, .sourcefiles-field { border: 0; padding: 0; min-width: 0; }
+.traffic-field legend, .sourcefiles-field legend { padding: 0; margin-bottom: 4px; color: var(--text-muted); }
+.traffic-head,
+.traffic-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) auto; gap: 8px; }
+.traffic-head { font-size: var(--text-caption-size); color: var(--text-muted); margin-bottom: 4px; }
+.traffic-row { margin-bottom: 8px; align-items: center; }
+.traffic-row select { width: 100%; }
+.traffic-percent-box { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.traffic-percent-box input { width: 100%; min-width: 0; }
+.traffic-total { margin: 8px 0 0; color: var(--text-muted); }
+.form-row.is-invalid .traffic-percent { border-color: var(--error); }
+/* The inline source editor (#1852): the file list beside a code editor;
+   the list goes above the editor on a phone. */
+.sourcefiles-body { display: grid; grid-template-columns: minmax(120px, 200px) minmax(0, 1fr); gap: 8px; }
+.sourcefiles-side { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.sourcefiles-list { display: flex; flex-direction: column; gap: 2px; }
+.sourcefiles-file { text-align: left; background: none; border: 0; padding: 6px 8px; border-radius: var(--radius);
+  font-family: var(--mono); color: var(--text); cursor: pointer; overflow-wrap: anywhere; }
+.sourcefiles-file.is-selected { background: var(--selected, rgba(26, 115, 232, 0.12)); font-weight: 600; }
+.sourcefiles-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+.sourcefiles-actions input { flex: 1 1 100%; min-width: 0; }
+.sourcefiles-editor { font-family: var(--mono); width: 100%; min-height: 280px; white-space: pre; tab-size: 2; }
+@media (max-width: 600px) {
+  .traffic-head { display: none; }
+  .sourcefiles-body { grid-template-columns: minmax(0, 1fr); }
+}
 .form-row.is-invalid input,
 .form-row.is-invalid textarea { border-color: var(--error); }
 .form-row.is-invalid input:focus,
@@ -831,6 +980,19 @@ td a { color: var(--accent); }
    but not full-bleed: a text field the width of a monitor is unreadable. */
 .create-page { max-width: 720px; }
 .create-page .form-error { max-width: none; }
+/* One page under headings, as Google's Pub/Sub create pages are (#1847):
+   each section's heading a little larger than a step's title would be. */
+.create-page.is-single-page .form-section-title { font-size: var(--text-title-size, 16px); }
+/* A create page's checks (#1847): Validate definition and Test message. */
+.create-checks { margin-top: 8px; }
+.create-check-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+.create-check-result { margin: 8px 0 0; color: var(--text); overflow-wrap: anywhere; }
+.create-check-result.is-error { color: var(--error); }
+/* A choice this instance cannot make, drawn disabled with its reason. */
+.form-unavailable { font-style: italic; }
+.check-line.is-unavailable { flex-wrap: wrap; }
+.check-line.is-unavailable .form-unavailable { flex-basis: 100%; margin-left: 24px; }
+.is-unavailable label { color: var(--text-muted); }
 .form-actions {
   display: flex; gap: 8px; margin-top: 24px;
   padding-top: 16px; border-top: 1px solid var(--border);
@@ -965,7 +1127,7 @@ tr.is-operating td:first-child {
 /* A control row inside a card is a plain row. It used to reuse .toolbar —
    the application bar — so a content card contained a second elevated 64px
    bar that stuck to the top of the viewport. */
-.card-actions { display: flex; align-items: center; gap: 8px; margin: 12px 0; }
+.card-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
 /* Show versions on an object list (#853), after the upload control. */
 .versions-toggle { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; cursor: pointer; }
 
@@ -1041,7 +1203,7 @@ td.mono { word-break: break-word; }
 .project-picker { position: relative; }
 .picker-panel {
   left: 0; right: auto; top: calc(100% + 6px);
-  min-width: 340px; max-width: 420px; padding: 12px;
+  min-width: 340px; max-width: 560px; width: 520px; padding: 12px;
 }
 
 /* The same anchoring for the panels that do belong at the right-hand end:
@@ -1066,6 +1228,21 @@ td.mono { word-break: break-word; }
 .picker-item-name { font-weight: 500; }
 .picker-item-id { font-family: var(--mono); font-size: var(--text-caption-size); color: var(--text-muted); }
 .picker-item.is-selected .picker-item-id { color: inherit; }
+/* Select a project lists Name and ID in two columns (#1842). */
+.picker-columns, .picker-item {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 2px 12px; align-items: baseline;
+}
+.picker-columns { padding: 4px 10px; font-size: var(--text-caption-size); color: var(--text-muted); border-bottom: 1px solid var(--border); }
+.picker-item-name, .picker-item-id { min-width: 0; overflow-wrap: anywhere; }
+.picker-manage { display: inline-block; margin-top: 8px; }
+/* Narrower windows: the dialog gives up width rather than run past the
+   window's right edge (the reflow audit at 640px). */
+@media (max-width: 959px) {
+  .picker-panel { width: auto; max-width: min(420px, calc(100vw - 160px)); }
+}
+@media (max-width: 599px) {
+  .picker-panel { width: auto; }
+}
 
 .account-button { padding: 0; }
 .avatar {
@@ -1434,30 +1611,44 @@ tr.is-inspected { background: var(--nav-selected); }
 
 /* --- in-product navigation -------------------------------------------- */
 
-/* A product's pages, inside the product. The drawer lists products; this
-   lists what is in one. */
+/* A product's own menu, on the left (#1842): the product's mark and name,
+   then its pages, one per row, collapsible to a narrow rail. It sits beside
+   the page rather than above it, so the page header pins under the toolbar
+   alone. */
 .product-nav[hidden] { display: none; }
 .product-nav {
-  display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
-  padding: 0 32px; height: 48px;
-  border-bottom: 1px solid var(--border);
+  flex: none; width: var(--product-nav-w, 256px);
+  position: sticky; top: var(--toolbar-h); align-self: flex-start;
+  height: calc(100vh - var(--toolbar-h)); overflow-y: auto;
+  padding: 8px 8px 16px 0;
+  border-right: 1px solid var(--border);
   background: var(--surface);
-  position: sticky; top: var(--toolbar-h); z-index: 16;
+  z-index: 16;
 }
-.product-nav-title { font-weight: 500; }
-.product-nav ul { display: flex; gap: 4px; list-style: none; margin: 0; padding: 0;
-                  overflow-x: auto; }
+.product-nav-head {
+  display: flex; align-items: center; gap: 12px;
+  min-height: 48px; padding: 0 4px 0 20px; margin-bottom: 4px;
+}
+.product-nav-title { font-weight: 500; flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.product-nav-toggle { flex: none; }
+.product-nav ul { list-style: none; margin: 0; padding: 0; }
+.product-nav ul[hidden] { display: none; }
 .product-nav a {
-  display: block; padding: 6px 12px; border-radius: var(--radius-control);
-  color: var(--text-muted); text-decoration: none; white-space: nowrap;
+  display: flex; align-items: center; min-height: 36px; padding: 6px 20px 6px 56px;
+  border-radius: 0 18px 18px 0;
+  color: var(--text); text-decoration: none;
 }
-.product-nav a:hover { background: var(--state-hover); color: var(--text); }
+.product-nav a:hover { background: var(--state-hover); }
 .product-nav a:active { background: var(--state-press); }
-.product-nav a.is-current { color: var(--accent); background: var(--nav-selected); }
-
-/* With the sub-nav present the page header pins below it rather than below
-   the toolbar, or the two overlap. */
-.product-nav:not([hidden]) ~ #view .page-header { top: calc(var(--toolbar-h) + 48px); }
+.product-nav a.is-current {
+  color: var(--nav-selected-text); background: var(--nav-selected); font-weight: 500;
+}
+/* Collapsed: a rail holding the mark and the control that opens it again. */
+:root[data-product-nav="collapsed"] .product-nav { width: 56px; padding-right: 0; }
+:root[data-product-nav="collapsed"] .product-nav-head { flex-direction: column; padding: 8px 0; gap: 8px; }
+:root[data-product-nav="collapsed"] .product-nav-title {
+  position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+}
 
 /* --- the product catalogue -------------------------------------------- */
 
@@ -1488,7 +1679,21 @@ tr.is-inspected { background: var(--nav-selected); }
 
 @media (max-width: 959px) {
   .catalogue { columns: 1; }
-  .product-nav { padding: 0 16px; }
+  /* A narrow window has no room beside the page: the product menu becomes a
+     strip above it, its pages scrolling sideways. */
+  .layout { flex-wrap: wrap; }
+  .product-nav, :root[data-product-nav="collapsed"] .product-nav {
+    width: 100%; height: auto; position: static; padding: 0 8px;
+    border-right: 0; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 8px; overflow-x: auto;
+  }
+  .product-nav[hidden] { display: none; }
+  .product-nav-head, :root[data-product-nav="collapsed"] .product-nav-head {
+    flex-direction: row; padding: 0 8px; margin: 0; flex: none;
+  }
+  .product-nav ul { display: flex; gap: 4px; }
+  .product-nav a { padding: 6px 12px; border-radius: var(--radius-control); white-space: nowrap; }
+  .layout > main { flex-basis: 100%; }
 }
 
 /* --- detail screens --------------------------------------------------- */
@@ -1500,6 +1705,9 @@ tr.is-inspected { background: var(--nav-selected); }
 /* A list screen's summary sits between its header and its action bar. */
 .listing-summary { margin-bottom: 16px; }
 .listing-summary dd { overflow-wrap: anywhere; }
+/* A screen of summary cards alone (#1854): Cloud Build's Dashboard, a card per trigger. */
+.summary-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
+.summary-cards .listing-summary { margin-bottom: 0; }
 
 /* The tab strip sits at the bottom of the header block, where the console
    this mirrors puts it, so the header stays put as you move between tabs. */
@@ -1611,6 +1819,28 @@ tr.is-inspected { background: var(--nav-selected); }
 }
 .terminal-notice[hidden] { display: none; }
 .terminal-notice .unavailable { margin: 0; max-width: 72ch; }
+/* The starting panel (#1838), over the screen while the pod is made ready:
+   the console's own surface, so it follows the theme, centred as Cloud
+   Shell's provisioning panel is. */
+.terminal-starting {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  padding: 16px 24px; overflow: auto; background: var(--surface); color: var(--text);
+}
+.terminal-starting[hidden] { display: none; }
+.terminal-starting-card { width: 100%; max-width: 440px; display: flex; flex-direction: column; gap: 10px; }
+.terminal-starting-card p { margin: 0; }
+.terminal-starting-title { display: flex; align-items: center; gap: 10px; }
+.terminal-starting-title .spinner { color: var(--accent); }
+.terminal-starting-bar {
+  position: relative; height: 4px; border-radius: 2px; overflow: hidden;
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+.terminal-starting-bar span {
+  display: block; height: 100%; width: 0; background: var(--accent);
+  transition: width var(--motion-standard) var(--ease-standard);
+}
+.terminal-starting-bar.is-indeterminate span { width: 40%; animation: cb-sweep 1.4s ease-in-out infinite; }
+.terminal-starting-line { font-variant-numeric: tabular-nums; font-size: var(--text-caption-size); }
 
 @media (prefers-reduced-motion: reduce) {
   #nav,
@@ -1624,6 +1854,8 @@ tr.is-inspected { background: var(--nav-selected); }
   .skeleton div { animation: none; }
   .spinner { animation: none; border-top-color: var(--accent); }
   .busy-bar span { animation: none; width: 100%; }
+  .terminal-starting-bar span { transition: none; }
+  .terminal-starting-bar.is-indeterminate span { animation: none; width: 100%; opacity: .5; }
   tr.is-operating td:first-child { animation: none; background-size: 100% 3px; }
 }
 
@@ -1668,3 +1900,355 @@ tr.is-inspected { background: var(--nav-selected); }
 .lint-results { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 4px; }
 .lint-result { display: flex; gap: 6px; align-items: baseline; font-size: var(--text-caption-size); }
 .lint-severity { font-weight: 600; }
+
+/* --- Agent Platform: Model Garden and Agent Garden (#1839) ------------ */
+
+.garden { display: grid; grid-template-columns: minmax(180px, 220px) 1fr; gap: 24px; margin-top: 16px; }
+.garden-filters fieldset { border: 0; margin: 0 0 16px; padding: 0; }
+.garden-filters legend { font-weight: 500; padding: 0 0 6px; }
+.garden-filters h2 { font-size: var(--text-heading-size); font-weight: 400; margin: 0 0 12px; }
+.garden-filter { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+.garden-main { min-width: 0; }
+.garden-main input[type="search"] { width: 100%; max-width: 480px; }
+.garden-cards { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); margin-top: 12px; }
+.garden-card { display: flex; flex-direction: column; gap: 4px; }
+.garden-card p { margin: 0 0 8px; }
+.garden-provider { color: var(--text-muted); }
+.garden-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.garden-tag {
+  padding: 2px 8px; border-radius: 999px; font-size: var(--text-caption-size);
+  background: var(--nav-selected); color: var(--nav-selected-text);
+}
+.garden-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: auto; padding-top: 8px; }
+.garden-status { display: flex; flex-direction: column; gap: 4px; margin: 4px 0; }
+.garden-status progress { width: 100%; }
+@media (max-width: 720px) {
+  .garden { grid-template-columns: 1fr; }
+}
+
+/* A "radio" field (#1843): Google's radio choices, such as a bucket's access control. */
+.form-row.is-radio { border: 0; margin: 0 0 16px; padding: 0; min-width: 0; }
+.form-row.is-radio legend { font-weight: 500; margin-bottom: 6px; padding: 0; }
+.form-row.is-radio .check-line { margin: 4px 0; }
+/* A property with a Copy button of its own (#1843). */
+dd.has-copy { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+dd.has-copy .property-copy-value { overflow-wrap: anywhere; min-width: 0; }
+dd.has-copy .property-copy { padding: 2px 8px; font-size: var(--text-badge-size); }
+.objects-show { display: inline-flex; align-items: center; gap: 6px; }
+/* A form section's tabs (Field.Tab, #1852): Google's Create service page's
+   Container(s), Variables & Secrets, Volumes, Networking and Security. */
+.form-tabs { margin: 4px 0 16px; overflow-x: auto; }
+.form-tab-panel { padding-top: 4px; }
+
+/* Help (#1842): the toolbar's question-mark menu. */
+.help-panel { min-width: 260px; }
+.help-panel .help-list li { padding: 0; }
+.help-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%;
+  padding: 10px 4px; background: none; border: 0; font: inherit; color: var(--text);
+  text-align: left; text-decoration: none; cursor: pointer;
+}
+.help-item:hover, .help-item:focus-visible { background: var(--surface-alt); }
+.link-button {
+  display: block; margin-top: 6px; padding: 0; background: none; border: 0; font: inherit;
+  color: var(--accent); text-decoration: underline; cursor: pointer;
+}
+.link-button.is-inline { display: inline; margin: 0; }
+.new-project { max-width: 560px; }
+
+/* The Welcome page (#1842). */
+.section-heading { margin: 24px 0 12px; font-size: var(--text-heading-size); }
+.quick-access { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+.quick-tile {
+  display: flex; align-items: center; min-height: 44px; padding: 8px 12px; box-sizing: border-box;
+  border: 1px solid var(--border); border-radius: var(--radius); text-decoration: none; overflow-wrap: anywhere;
+}
+.quick-tile:hover { background: var(--state-hover); }
+.welcome-resources { list-style: none; margin: 0; padding: 0; }
+.welcome-resources li { padding: 4px 0; }
+.welcome-cards .card-actions { flex-wrap: wrap; }
+
+/* Select a project: Recent / Starred / All, and each row's star (#1842). */
+.picker-views { display: flex; gap: 4px; margin-bottom: 8px; }
+.picker-view {
+  padding: 4px 12px; background: none; border: 1px solid var(--border); border-radius: 16px;
+  font: inherit; color: var(--text); cursor: pointer;
+}
+.picker-view[aria-pressed="true"] { background: var(--nav-selected); color: var(--nav-selected-text); border-color: transparent; }
+.picker-list .picker-row { display: flex; align-items: center; gap: 4px; padding: 0; }
+.picker-row .picker-item { flex: 1 1 auto; min-width: 0; }
+.picker-star svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linejoin: round; }
+.picker-star[aria-pressed="true"] svg { fill: currentColor; color: var(--accent); }
+.picker-columns { padding-right: 46px; }
+
+/* Logs Explorer (#1863): the query pane, the Fields pane beside the Query
+   results, and an entry expanded to its fields. */
+.log-query { display: grid; gap: 8px; margin-bottom: 12px; }
+.log-query-editor { width: 100%; box-sizing: border-box; min-height: 72px; resize: vertical;
+  border: 1px solid var(--text-muted); border-radius: var(--radius-control); padding: 8px;
+  background: var(--surface); color: var(--text); }
+.log-timeline-head, .log-results-head, .log-fields-head { display: flex; align-items: center; gap: 12px; }
+.log-timeline-head h2, .log-results-head h2, .log-fields-head h2 { margin-right: auto; }
+.log-panes { display: grid; grid-template-columns: minmax(180px, 240px) minmax(0, 1fr); gap: 12px; align-items: start; }
+.log-fields h3 { font-size: var(--text-caption-size); color: var(--text-muted); margin: 12px 0 4px; }
+.log-fields ul { list-style: none; margin: 0; padding: 0; }
+.log-field-value { display: flex; justify-content: space-between; gap: 8px; width: 100%; padding: 4px 6px;
+  border: 0; background: none; color: var(--text); text-align: left; border-radius: var(--radius-control); cursor: pointer; }
+.log-field-value:hover { background: var(--state-hover); }
+.log-field-value .mono { overflow-wrap: anywhere; }
+.log-field-count { color: var(--text-muted); }
+.log-results { min-width: 0; }
+.log-expand svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; }
+.log-expand[aria-expanded="true"] svg { transform: rotate(90deg); }
+.log-detail-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.log-json { list-style: none; margin: 0; padding-left: 16px; }
+.log-json-key { color: var(--accent); }
+.log-json-leaf { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.log-json-value { overflow-wrap: anywhere; }
+.timeline-column { cursor: pointer; }
+.logs-dashboard { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+@media (max-width: 700px) { .log-panes { grid-template-columns: minmax(0, 1fr); } }
+.log-toolbar > *, .log-query .actions > *, .log-view-controls > * { max-width: 100%; min-width: 0; }
+
+/* Log Analytics (#1863): the Log views panel beside the editor. */
+.log-analytics { display: grid; grid-template-columns: minmax(200px, 300px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.log-analytics .log-views h2 { font-size: var(--text-body-size); margin: 0 0 8px; }
+.log-view-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.log-view-list .link-button { word-break: break-all; text-align: left; }
+@media (max-width: 720px) { .log-analytics { grid-template-columns: minmax(0, 1fr); } }
+
+/* A repeatable group of fields (Field.Group, #1863): a row per exclusion filter. */
+.group-rows { display: grid; gap: 8px; margin-bottom: 8px; }
+.group-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; padding: 8px; border: 1px solid var(--border, var(--text-muted)); border-radius: var(--radius-control); }
+.group-cell { display: grid; gap: 4px; flex: 1 1 200px; min-width: 0; }
+.group-cell textarea, .group-cell input { width: 100%; box-sizing: border-box; }
+.group-cell-label { font-size: var(--text-caption-size); color: var(--text-muted); }
+.group-check { display: inline-flex; align-items: center; gap: 6px; }
+
+/* Logs Explorer (#1863, round 2): query suggestions, summary chips,
+   highlight, pinned entries and the Timeline's drag handles. */
+.log-suggestions { list-style: none; margin: 0; padding: 4px; max-height: 220px; overflow-y: auto;
+  border: 1px solid var(--text-muted); border-radius: var(--radius-control); background: var(--surface); }
+.log-suggestion { padding: 4px 8px; cursor: pointer; border-radius: var(--radius-control); overflow-wrap: anywhere; }
+.log-suggestion:hover, .log-suggestion:focus { background: var(--state-hover); outline: 2px solid var(--accent); }
+.log-summary-chip { display: inline-block; margin-right: 6px; padding: 0 6px; border-radius: 10px;
+  border: 1px solid var(--text-muted); font-size: var(--text-caption-size); }
+mark.log-highlight { background: var(--warn); color: var(--on-warn); }
+.log-entry-controls { white-space: nowrap; }
+.log-entry-controls .overflow { display: inline-block; }
+.log-pin svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6; }
+.log-pin[aria-pressed="true"] svg { fill: currentColor; }
+.log-pin-menu { display: none; }
+tr.is-pinned .log-pin-menu { display: inline-block; }
+tr.log-entry.is-pinned { background: var(--state-hover); }
+.log-pins { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; }
+.log-pin-mark { display: inline-flex; align-items: center; gap: 2px; }
+.timeline-handles { position: relative; height: 24px; }
+.timeline-handle { position: absolute; left: 0; top: 0; width: 100%; margin: 0; pointer-events: none; background: transparent; }
+.timeline-handle::-webkit-slider-thumb { pointer-events: auto; }
+.timeline-handle::-moz-range-thumb { pointer-events: auto; }
+.timeline-selection-shade { position: absolute; top: 8px; height: 8px; background: var(--accent); opacity: .3; border-radius: var(--radius-control); }
+
+/* A resource's own side menu (#1860): Google's Cloud SQL instance menu,
+   Overview, Connections, Users, Databases and the rest, down the left of the
+   page; above the page in a narrow window. */
+.detail-with-nav { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 24px; align-items: start; }
+.tab-strip.is-side-nav { flex-direction: column; margin: 0; border-right: 1px solid var(--border); overflow: visible; }
+.tab-strip.is-side-nav .tab {
+  text-align: left; border-bottom: 0; border-left: 3px solid transparent; border-radius: 0 16px 16px 0; padding: 8px 12px;
+}
+.tab-strip.is-side-nav .tab.is-selected { border-left-color: var(--accent); background: var(--nav-selected); color: var(--nav-selected-text); }
+@media (max-width: 959px) {
+  .detail-with-nav { grid-template-columns: 1fr; }
+  .tab-strip.is-side-nav { flex-direction: row; flex-wrap: wrap; border-right: 0; border-bottom: 1px solid var(--border); }
+}
+.form-row.is-radio input[type="radio"]:disabled + label { color: var(--text-muted); }
+
+/* A menu page's own tabs (#1860): Google's Cloud SQL Connections page has
+   Summary, Networking and Security inside it. */
+.sub-tab-strip { margin: 0 0 12px; }
+.sub-tab-panel { padding-top: 4px; }
+
+/* BigQuery Studio (#1861): the Explorer pane beside the tabbed workspace. */
+.bq-studio { display: grid; grid-template-columns: minmax(240px, 320px) minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 959px) { .bq-studio { grid-template-columns: minmax(0, 1fr); } }
+.bq-explorer { padding: 12px; min-width: 0; }
+.bq-explorer-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.bq-explorer-head h2 { margin: 0; }
+.bq-explorer-search { width: 100%; box-sizing: border-box; margin: 8px 0; }
+.bq-starred { display: block; font-size: var(--text-caption-size); color: var(--text-muted); margin-bottom: 8px; }
+.bq-tree, .bq-tree ul { list-style: none; margin: 0; padding: 0; }
+.bq-node-row { display: flex; align-items: center; gap: 2px; min-height: 32px; }
+.bq-node-row:hover { background: var(--state-hover); }
+.bq-node-row .icon-button { width: 28px; height: 28px; }
+.bq-node-row .icon-button svg { width: 18px; height: 18px; }
+.bq-twisty-space { display: inline-block; width: 28px; flex: none; }
+.bq-node-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bq-star.is-starred { color: var(--accent); }
+.bq-menu-wrap { position: relative; display: inline-flex; }
+.bq-menu { position: absolute; right: 0; top: 100%; z-index: 30; min-width: 180px; padding: 4px 0;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-menu); }
+.bq-menu-item { display: block; width: 100%; text-align: left; padding: 8px 16px; background: none; border: 0;
+  font: inherit; color: var(--text); cursor: pointer; white-space: nowrap; }
+.bq-menu-item:hover { background: var(--state-hover); }
+.bq-menu-item.danger { color: var(--error); }
+.bq-workspace { min-width: 0; display: grid; gap: 12px; }
+.bq-tabs { margin: 0; align-items: center; border-bottom: 1px solid var(--border); }
+.bq-tab-wrap { display: inline-flex; align-items: center; }
+.bq-tab-close { width: 28px; height: 28px; }
+.bq-tab-close svg { width: 16px; height: 16px; }
+.bq-new-query { margin-left: 8px; }
+.bq-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
+.bq-dialect { margin-left: auto; }
+.bq-editor { width: 100%; box-sizing: border-box; }
+.bq-validator { min-height: 1.4em; margin: 4px 0; font-size: var(--text-caption-size); color: var(--text-muted); }
+.bq-validator.is-valid { color: var(--ok); }
+.bq-validator.is-invalid { color: var(--error); }
+.bq-results-tabs, .bq-history-tabs { margin: 0 0 8px; }
+.bq-results-scroll { overflow-x: auto; }
+.bq-results-table, .bq-history-table { border-collapse: collapse; width: 100%; }
+.bq-results-table th, .bq-results-table td, .bq-history-table th, .bq-history-table td {
+  text-align: left; padding: 6px 12px; border-bottom: 1px solid var(--border); }
+.bq-job-info { display: grid; grid-template-columns: auto 1fr; gap: 6px 24px; margin: 0; }
+.bq-job-info dt { color: var(--text-muted); }
+.bq-job-info dd { margin: 0; font-family: var(--mono); overflow-wrap: anywhere; }
+.bq-json { overflow-x: auto; max-height: 480px; }
+.bq-history { overflow-x: auto; }
+.bq-settings fieldset { border: 1px solid var(--border); border-radius: var(--radius); margin: 0 0 12px; padding: 8px 12px; }
+.bq-radio { display: block; margin: 4px 0; }
+.bq-dest-fields { display: grid; gap: 4px; margin-top: 8px; }
+/* A schema editor's Edit as text (#1861). */
+.schema-text-switch { display: block; margin: 4px 0 8px; }
+.schema-text { width: 100%; box-sizing: border-box; }
+.schema-field:has(.schema-text-toggle:checked) .schema-head { display: none; }
+/* A radio group's choices sit beside their labels, as a checkbox's do
+   (#1861: the generic .form-row input rule stretched each radio across
+   the row, with its label below it). */
+.form-row.is-radio .check-line { display: flex; align-items: center; gap: 8px; }
+.form-row.is-radio .check-line input[type="radio"] { width: auto; flex: none; margin: 0; }
+.form-row.is-radio .check-line label { margin: 0; color: var(--text); }
+.bq-history-table td.mono { white-space: nowrap; }
+/* Studio round 2 (#1861). Create dataset and Create table open as a panel
+   on the right, as BigQuery Studio's do. */
+.modal.is-side { justify-content: flex-end; align-items: stretch; padding: 0; }
+.modal.is-side .modal-body { max-width: min(640px, 100vw); height: 100%; max-height: none;
+  border-radius: 0; transform: translateX(24px); }
+.modal.is-side.is-open .modal-body { transform: none; }
+/* A preview tab's name is italic until it is kept (double-click). */
+.bq-tabs .tab.is-preview { font-style: italic; }
+.bq-explorer-home { display: block; width: 100%; text-align: left; margin: 8px 0 0; padding: 6px 8px;
+  background: none; border: 0; border-radius: var(--radius); font: inherit; color: var(--text); cursor: pointer; }
+.bq-explorer-home:hover { background: var(--state-hover); }
+.bq-node-empty { padding: 4px 0 4px 60px; font-size: var(--text-caption-size); }
+.bq-menu-button { white-space: nowrap; }
+.bq-resource-tab { min-width: 0; }
+/* The workspace never widens the page: its tab strips scroll, and the
+   panels shrink to the column (#1861: six result tabs did). */
+.bq-workspace > *, .bq-tab-panel > *, .bq-results, .bq-viz-chart { min-width: 0; }
+.bq-tabs, .bq-results-tabs { overflow-x: auto; flex-wrap: nowrap; }
+.bq-resource-tab .page-header h2 { font-size: var(--text-heading-size); font-weight: 400; margin: 0; }
+.bq-home { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+.bq-home-title { grid-column: 1 / -1; margin: 4px 0; font-weight: 400; }
+.bq-home-card { padding: 12px 16px; min-width: 0; }
+.bq-home-card h3 { margin: 0 0 8px; font-size: var(--text-body-size, 14px); }
+.bq-home-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.bq-home-recent, .bq-home-templates { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.bq-home-dataset-label { display: block; margin-top: 8px; font-size: var(--text-caption-size); color: var(--text-muted); }
+/* The chart beside its configuration pane, or above it when the column is
+   narrow. */
+.bq-viz { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+.bq-viz-chart { flex: 1 1 360px; }
+.bq-viz-config { flex: 1 0 200px; max-width: 320px; }
+.bq-viz-tools { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.bq-chart-scroll { overflow-x: auto; max-width: 100%; }
+/* The chart's marks carry their own fill and stroke: the console's icon
+   rule for svg (fill none, stroke currentColor) is not inherited by them. */
+svg.bq-chart { display: block; border: 1px solid var(--border); border-radius: var(--radius);
+  fill: #202124; stroke: none; stroke-width: 1; }
+.bq-chart-legend { list-style: none; display: flex; flex-wrap: wrap; gap: 12px; padding: 0; margin: 8px 0 0; }
+.bq-swatch { display: inline-block; width: 12px; height: 12px; border-radius: 2px; vertical-align: middle; }
+.bq-viz-config { display: grid; gap: 4px; }
+.bq-viz-config h3 { margin: 0 0 4px; font-size: var(--text-body-size, 14px); }
+.bq-viz-measures { border: 1px solid var(--border); border-radius: var(--radius); margin: 8px 0 0; padding: 4px 12px; }
+
+/* IAM & Admin > IAM (#1864): the principals table's stacked roles, and
+   Grant access's role rows and Select a role. */
+#iam-principals-table .iam-role { white-space: nowrap; line-height: 1.6; }
+.iam-role-rows { display: flex; flex-direction: column; gap: 12px; margin: 8px 0 12px; }
+.iam-role-row { padding: 12px; }
+.iam-role-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.iam-role-picker { position: relative; flex: 1 1 240px; min-width: 0; }
+.iam-role-button { width: 100%; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.iam-role-pop { position: absolute; z-index: 5; left: 0; right: 0; top: calc(100% + 4px);
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-control); padding: 8px;
+  box-shadow: var(--shadow-menu); }
+.iam-role-search { width: 100%; box-sizing: border-box; }
+.iam-role-list { list-style: none; margin: 8px 0 0; padding: 0; max-height: 280px; overflow-y: auto; }
+.iam-role-option { display: block; width: 100%; text-align: left; background: none; border: 0; padding: 6px 8px;
+  cursor: pointer; color: inherit; font: inherit; }
+.iam-role-option:hover, .iam-role-option:focus-visible, .iam-role-option[aria-selected="true"] { background: var(--surface-alt); }
+.iam-condition { display: grid; gap: 4px; margin-top: 8px; }
+.iam-condition[hidden], .iam-role-pop[hidden] { display: none; }
+.iam-condition input, .iam-condition textarea, #iam-new-principals { width: 100%; box-sizing: border-box; }
+
+/* Firestore's Data panel (#1845): three columns, collections | documents |
+   fields, as Google's Firestore Studio draws them; one column under another
+   on a narrow screen. */
+.fs-panel { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; margin-top: 8px; }
+.fs-panel .fs-column { margin: 0; border-radius: 0; min-height: 320px; overflow: auto; }
+.fs-panel .fs-column + .fs-column { border-left: none; }
+.fs-column-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.fs-column-title { font-size: var(--text-body-size); margin: 0; overflow-wrap: anywhere; }
+.fs-column-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.fs-rows { list-style: none; margin: 0; padding: 0; }
+.fs-row { display: flex; align-items: center; justify-content: space-between; gap: 4px; }
+.fs-row.is-selected { background: var(--selected, rgba(26, 115, 232, 0.12)); }
+.fs-row.is-absent .fs-row-link { font-style: italic; }
+.fs-row-link { background: none; border: none; color: inherit; cursor: pointer; text-align: left; padding: 6px 8px;
+  flex: 1; overflow-wrap: anywhere; font: inherit; }
+.fs-field-type { opacity: 0.7; }
+.fs-path { margin: 8px 0; }
+.fs-menu { width: auto; }
+@media (max-width: 720px) {
+  .fs-panel { grid-template-columns: minmax(0, 1fr); }
+  .fs-panel .fs-column + .fs-column { border-left: 1px solid var(--border, #dadce0); border-top: none; }
+}
+.browse-row { display: flex; gap: 8px; align-items: center; }
+.browse-row > input { flex: 1; min-width: 0; }
+
+/* Ctrl+Space completions at a text control's cursor (#1846). */
+.completions { list-style: none; margin: 2px 0 0; padding: 4px 0; max-height: 220px; overflow-y: auto;
+  border: 1px solid var(--border, #dadce0); border-radius: var(--radius-control); background: var(--surface, #fff);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15); font-family: var(--mono, monospace); }
+.completions li { padding: 4px 12px; cursor: pointer; }
+.completions li.active, .completions li:hover { background: var(--hover, #e8f0fe); }
+
+/* Spanner's instance and database pages (#1859) use the side menu of
+   #1860 above (.is-side-nav, .detail-with-nav); .side-nav and
+   .side-nav-layout name the same strip and layout. */
+/* Spanner Studio: the Explorer beside the editor and its results. */
+/* Bigtable Studio (#1858): the query builder's rows and the Row details pane. */
+.bigtable-builder { display: grid; gap: 8px; max-width: 560px; }
+.bigtable-key-inputs { display: flex; gap: 8px; flex-wrap: wrap; }
+.bigtable-row-details { border-top: 1px solid var(--border, #dadce0); margin-top: 12px; padding-top: 8px; }
+#bigtable-results-table tr.is-clickable { cursor: pointer; }
+.spanner-studio { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 16px; align-items: start; }
+.spanner-explorer { border-right: 1px solid var(--border, #dadce0); padding-right: 12px; font-size: var(--text-body-size); }
+.spanner-explorer h3 { margin: 0 0 8px; font-size: inherit; }
+.spanner-explorer ul { list-style: none; margin: 4px 0; padding-left: 12px; }
+.spanner-explorer summary { cursor: pointer; display: flex; align-items: center; gap: 4px; }
+.spanner-explorer .bq-menu { position: absolute; }
+.spanner-explorer-table summary { justify-content: space-between; }
+.spanner-editor { width: 100%; box-sizing: border-box; min-height: 160px; }
+.spanner-editor-tab { display: inline-flex; align-items: center; }
+.spanner-editor-actions { margin: 8px 0; }
+.spanner-plan { font-family: var(--font-mono, monospace); }
+.form-templates { margin: 6px 0; }
+.form-template { display: flex; gap: 8px; align-items: flex-start; margin: 6px 0; }
+.form-template pre { margin: 0; flex: 1; overflow-x: auto; }
+@media (max-width: 720px) { .spanner-studio { grid-template-columns: minmax(0, 1fr); } .spanner-explorer { border-right: 0; } }
+
+/* Upload file beside a textarea (Field.Upload, #1850). */
+.upload-into { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; }
+.upload-into-label { font-size: var(--text-caption-size); color: var(--text-muted); }
+.upload-into-input { max-width: 100%; }

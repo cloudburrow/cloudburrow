@@ -3,9 +3,12 @@ package main
 import (
 	"context"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"cloud.google.com/go/datastore/apiv1/datastorepb"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
 )
@@ -172,21 +175,22 @@ func TestQueryFormsCoverTheOperatorsTheyDocument(t *testing.T) {
 		t.Error("the Firestore operator pattern accepts something that is not an operator")
 	}
 
-	_, dsFields := datastoreProvider{}.QueryForm(nil)
-	for _, f := range dsFields {
-		if f.Name != "op" {
-			continue
+	// Datastore's query clauses offer Google's operators, != , IN and
+	// NOT_IN among them, which the Datastore front serves (#1888); each
+	// one offered is one the builder turns into a filter.
+	for _, op := range []string{"==", "!=", "<", "<=", ">", ">=", "IN", "NOT_IN"} {
+		if !slices.Contains(datastoreClauseOps, op) {
+			t.Errorf("Datastore's query clauses do not offer %q", op)
 		}
-		for _, op := range []string{"=", "<", "<=", ">", ">="} {
-			if !matches(t, f.Pattern, op) {
-				t.Errorf("the Datastore operator pattern refuses %q", op)
-			}
+	}
+	for _, op := range datastoreClauseOps {
+		if _, ok := datastoreClauseOperators[op]; !ok && op != "Ascending" && op != "Descending" {
+			t.Errorf("Datastore's query clauses offer %q, which the builder does not read", op)
 		}
-		// Datastore has no inequality operator, so offering one would be a
-		// control that fails.
-		if matches(t, f.Pattern, "!=") {
-			t.Error(`the Datastore operator pattern accepts "!=", which Datastore has no filter for`)
-		}
+	}
+	f, _, err := datastoreClauses(`[{"clause":"WHERE","property":"n","op":"IN","type":"integer","value":"1, 2"}]`)
+	if err != nil || f.GetPropertyFilter().GetOp() != datastorepb.PropertyFilter_IN || len(f.GetPropertyFilter().GetValue().GetArrayValue().GetValues()) != 2 {
+		t.Errorf("WHERE n IN 1, 2 = %v, %v", f, err)
 	}
 
 	// Every builder's form must be non-empty, or the capability advertises a

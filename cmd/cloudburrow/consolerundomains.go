@@ -119,15 +119,21 @@ func (p runProvider) domainActions(svc *ksvcStatus) []console.Action {
 		return nil
 	}
 	return []console.Action{
-		{ID: runMapDomain, Label: "Map a domain", Fields: []console.Field{
-			{Name: "domain", Label: "Domain", Type: "text", Required: true, Pattern: `([a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}`,
-				Help: "Such as www.example.com. Ownership is not checked, as there is no Search Console locally."},
-			{Name: "certificateMode", Label: "Certificate mode", Type: "select", Default: "AUTOMATIC", Options: []string{"AUTOMATIC", "NONE"},
-				Help: "AUTOMATIC asks for a managed certificate, which is never issued locally; NONE serves the domain without one."},
-		}},
+		{ID: runMapDomain, Label: "Map a domain", Fields: runMapDomainFields()},
 		{ID: runUnmapDomain, Label: "Remove domain mapping", Fields: []console.Field{
 			{Name: "domain", Label: "Domain", Type: "text", Required: true, Help: "A domain on the Domain mappings tab."},
 		}},
+	}
+}
+
+// runMapDomainFields are Map a domain's fields, and Add mapping's after its
+// service (#1852).
+func runMapDomainFields() []console.Field {
+	return []console.Field{
+		{Name: "domain", Label: "Domain", Type: "text", Required: true, Pattern: `([a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}`,
+			Help: "Such as www.example.com. Ownership is not checked, as there is no Search Console locally."},
+		{Name: "certificateMode", Label: "Certificate mode", Type: "select", Default: "AUTOMATIC", Options: []string{"AUTOMATIC", "NONE"},
+			Help: "AUTOMATIC asks for a managed certificate, which is never issued locally; NONE serves the domain without one."},
 	}
 }
 

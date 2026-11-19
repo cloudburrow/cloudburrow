@@ -1,8 +1,10 @@
 package embedding
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"math"
 	"strings"
 	"testing"
@@ -43,9 +45,20 @@ func maxAbsDiff(t *testing.T, name string, got, want []float32) float64 {
 // small encoder made for the fixtures (scratch, not kept): a 1-second
 // signal of S1's kind, mono in 260-byte blocks (four bytes of padding
 // after 21 groups) and stereo in 512-byte blocks, wav-ima3.wav and
-// wav-ima3-st.wav; ffmpeg's decode (`-f f32le`) is the reference.
+// wav-ima3-st.wav; ffmpeg's decode (`-f f32le`) is the reference. 2- and
+// 5-bit IMA ADPCM (#1651) the same way, mono in 258- and 256-byte blocks
+// (2 and 12 bytes of padding) and stereo in 512-byte blocks:
+// wav-ima2.wav, wav-ima2-st.wav, wav-ima5.wav, wav-ima5-st.wav.
+//
+// GSM 6.10 (#1651), which ffmpeg does not encode: Microsoft-packed blocks
+// of frames of random parameters written by a scratch generator (not
+// kept), xmaxc at most 36 so the synthesis does not overflow (there this
+// decoder saturates as GSM 06.10 specifies and ffmpeg 9 wraps): wav-gsm.wav
+// (50 blocks, lags 40 to 120) and wav-gsm-lags.wav (24 blocks, any lag,
+// out-of-range ones clamped as ffmpeg does). wav-gsm-ffmpeg.wav is ffmpeg's
+// decode as 16-bit PCM, for the compat test.
 func TestDecodeADPCMWAV(t *testing.T) {
-	for _, name := range []string{"wav-ima", "wav-ima-st", "wav-ms", "wav-ms-st", "wav-ima3", "wav-ima3-st"} {
+	for _, name := range []string{"wav-ima", "wav-ima-st", "wav-ms", "wav-ms-st", "wav-ima3", "wav-ima3-st", "wav-ima2", "wav-ima2-st", "wav-ima5", "wav-ima5-st", "wav-gsm", "wav-gsm-lags"} {
 		w, err := decodeWAV(readTestdata(t, name+".wav"))
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
@@ -246,5 +259,136 @@ func TestDecodeMultichannelAACTracks(t *testing.T) {
 	t.Logf("5.1 HE-AAC: max %.2e from ffmpeg", d)
 	if d > 1e-3 {
 		t.Errorf("5.1 HE-AAC: %.2e from ffmpeg's decode, want at most 1e-3", d)
+	}
+}
+
+// TestDecodeMP3WAV (#1651) decodes MP3 in a WAV (WAVE_FORMAT_MPEGLAYER3) as
+// ffmpeg 9 does (`ffmpeg -i f.wav -f s16le`, testdata/*.ffmpeg.s16): every
+// frame, nothing trimmed, mono within one 16-bit step and joint stereo
+// within two a channel, as TestDecodeMPEG25MP3. Made with ffmpeg 9 (S1 and
+// S2 of TestDecodeADPCMWAV, S2 at 44.1 kHz):
+//
+//	ffmpeg -f lavfi -i "$S1" -c:a libmp3lame -b:a 32k -map_metadata -1 -fflags +bitexact -flags +bitexact -f wav wav-mp3.wav
+//	ffmpeg -f lavfi -i "$S2" -c:a libmp3lame -b:a 96k ... -f wav wav-mp3-st.wav
+func TestDecodeMP3WAV(t *testing.T) {
+	for _, c := range []struct {
+		file           string
+		rate, channels int
+		tol            float64
+	}{
+		{"wav-mp3", 16000, 1, 1},
+		{"wav-mp3-st", 44100, 2, 2},
+	} {
+		w, err := decodeWAV(readTestdata(t, c.file+".wav"))
+		if err != nil {
+			t.Fatalf("%s: %v", c.file, err)
+		}
+		ref := readTestdata(t, c.file+".ffmpeg.s16")
+		if w.rate != c.rate || w.channels != c.channels || len(w.samples) != len(ref)/2 {
+			t.Fatalf("%s: %d samples, %d channels at %d Hz; want ffmpeg's %d, %d at %d Hz",
+				c.file, len(w.samples), w.channels, w.rate, len(ref)/2, c.channels, c.rate)
+		}
+		var d float64
+		for i, v := range w.samples {
+			want := float64(int16(binary.LittleEndian.Uint16(ref[2*i:])))
+			d = max(d, math.Abs(math.Round(float64(v)*32768)-want))
+		}
+		if d > c.tol {
+			t.Errorf("%s: %v 16-bit steps from ffmpeg's decode, want at most %v", c.file, d, c.tol)
+		}
+		if _, err := DecodeAudio("audio/wav", readTestdata(t, c.file+".wav")); err != nil {
+			t.Errorf("%s: DecodeAudio: %v", c.file, err)
+		}
+	}
+}
+
+// TestDecodeMPEGLayerIIWAV (#1651): a WAV of MPEG Layer II frames
+// (WAVE_FORMAT_MPEG) decodes within 1.1 16-bit steps of ffmpeg 9's decode
+// (its mp2 decoder rounds to 16 bits) in each allocation table: MPEG-1's
+// tables a (48 kHz stereo, 192 kbit/s), b (44.1 kHz stereo, 256 kbit/s), c
+// (48 kHz mono, 32 kbit/s) and d (32 kHz mono, 48 kbit/s), and MPEG-2's
+// (24 kHz stereo, 96 kbit/s). Half a second of testdata/jfk-alaw.wav each:
+//
+//	ffmpeg -ss 1 -i jfk-alaw.wav -t 0.5 -ar 48000 -ac 2 -c:a mp2 -b:a 192k -map_metadata -1 -fflags +bitexact -f wav wav-mp2-48-st.wav
+//	ffmpeg -i wav-mp2-48-st.wav -f f32le wav-mp2-48-st.raw.f32
+//
+// Joint stereo, which no encoder at hand writes, and Layer I are
+// ErrNotDecoded.
+func TestDecodeMPEGLayerIIWAV(t *testing.T) {
+	// ffmpeg 9 encodes neither Layer I nor joint stereo: the wav-mp1-* and
+	// wav-mp2-js-* frames are random parameters written to the standard's
+	// syntax by a scratch generator (intensity bounds 4 to 16, a CRC word
+	// in wav-mp1-mo-44, MPEG-2 LSF at 24 kHz), against ffmpeg's decode.
+	for _, name := range []string{"wav-mp2-48-st", "wav-mp2-44-st", "wav-mp2-48-mo", "wav-mp2-32-mo", "wav-mp2-24-st",
+		"wav-mp2-js-48", "wav-mp2-js-24", "wav-mp1-js-48", "wav-mp1-mo-44", "wav-mp1-js-24"} {
+		w, err := decodeWAV(readTestdata(t, name+".wav"))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if d := maxAbsDiff(t, name, w.samples, readF32(t, name+".raw.f32")); d > 1.1/32768 {
+			t.Errorf("%s: %.2f 16-bit steps from ffmpeg's decode, want at most 1.1", name, d*32768)
+		}
+		if _, err := DecodeAudio("audio/wav", readTestdata(t, name+".wav")); err != nil {
+			t.Errorf("%s: DecodeAudio: %v", name, err)
+		}
+	}
+	st := readTestdata(t, "wav-mp2-48-st.wav")
+	at := bytes.Index(st, []byte("data")) + 8
+	for _, c := range []struct {
+		name string
+		edit func(h []byte)
+		want string
+	}{
+		{"Layer III", func(h []byte) { h[1] = h[1]&^6 | 1<<1 }, "mixes Layer III"},
+		{"Layer I after Layer II", func(h []byte) {
+			i := bytes.Index(h[4:], []byte{0xFF, h[1]}) + 4 // the second frame
+			h[i+1] = h[i+1]&^6 | 3<<1
+		}, "mixes layers"},
+	} {
+		b := append([]byte(nil), st...)
+		c.edit(b[at:])
+		_, err := DecodeAudio("audio/wav", b)
+		if err == nil || errors.Is(err, ErrNotDecoded) || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: %v; want an invalid-data error naming %q", c.name, err, c.want)
+		}
+	}
+}
+
+// TestDecodeG726WAV checks the G.726 decoder against ffmpeg 9's decode of
+// its own g726 encodes (WAVE_FORMAT 0x45, codes packed most significant bit
+// first) at 16, 24, 32 and 40 kbit/s, sample for sample: 1.5 s of speech
+// (the step size mix went one step off ffmpeg from about sample 1000 on)
+// then a clipping sine (the reconstructed signal's 16-bit wrap).
+func TestDecodeG726WAV(t *testing.T) {
+	for bits := 2; bits <= 5; bits++ {
+		name := fmt.Sprintf("wav-g726-%d", bits)
+		w, err := decodeWAV(readTestdata(t, name+".wav"))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		ref := readTestdata(t, name+".s16")
+		if len(w.samples) != len(ref)/2 || w.rate != 8000 || w.channels != 1 {
+			t.Fatalf("%s: %d samples at %d Hz, %d channels; want %d at 8000 Hz, mono", name, len(w.samples), w.rate, w.channels, len(ref)/2)
+		}
+		bad := 0
+		for i, v := range w.samples {
+			if want := int16(binary.LittleEndian.Uint16(ref[2*i:])); int16(v*32768) != want {
+				if bad++; bad <= 3 {
+					t.Errorf("%s: sample %d is %d, ffmpeg's %d", name, i, int16(v*32768), want)
+				}
+			}
+		}
+		if bad > 0 {
+			t.Errorf("%s: %d samples differ from ffmpeg's", name, bad)
+		}
+	}
+	b := readTestdata(t, "wav-g726-4.wav")
+	b[20] = 0x64 // APICOM's tag, which ffmpeg decodes alike
+	if w, err := decodeWAV(b); err != nil || len(w.samples) != 16000 {
+		t.Errorf("G.726 tagged 0x64: %v", err)
+	}
+	b[22] = 2 // stereo
+	if _, err := DecodeAudio("audio/wav", b); !errors.Is(err, ErrNotDecoded) {
+		t.Errorf("stereo G.726: %v; want ErrNotDecoded", err)
 	}
 }

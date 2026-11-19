@@ -630,6 +630,15 @@ func (f front) mlSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall)
 	if md.Remote != nil {
 		return f.remoteSubquery(r, q, md, c) // modelremote.go, #1760
 	}
+	if md.Options.AutoML != nil {
+		// The functions an AutoML model takes (modelautoml.go, #1776).
+		if !automlFunctions[c.fn] || c.ai {
+			return "", 400, "ML." + c.fn + " is not supported for model type " + md.Options.AutoML.Type
+		}
+		if c.fn == "GLOBAL_EXPLAIN" {
+			md.Options.GlobalExplain = true
+		}
+	}
 	if c.ai && c.fn == "GENERATE_EMBEDDING" {
 		return "", 501, "Not implemented here: AI.GENERATE_EMBEDDING of a " + typ + " model: CloudBurrow serves it on remote embedding models (#1772). Nothing was run."
 	}

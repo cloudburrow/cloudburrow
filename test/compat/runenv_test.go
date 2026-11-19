@@ -223,9 +223,10 @@ const (
 // The shards' own names for a service a test needs beside the shard's
 // (#1568), each read through shardEndpoint so the service's own suite stays
 // in its shard: Cloud KMS for the customer-managed keys of Memorystore
-// (emulators) and the Backup and DR Service (sql); Secret Manager for Cloud
-// SQL's Data API (sql); and Cloud Storage on an instance that serves no
-// Pub/Sub (sql), for its notifications' refusal.
+// (memorystore), Firestore (emulators, #1881) and the Backup and DR
+// Service (sql); Secret Manager for Cloud SQL's Data API (sql); and Cloud
+// Storage on an instance that serves no Pub/Sub (sql), for its
+// notifications' refusal.
 const (
 	envCMEKKMS         = "CLOUDBURROW_TEST_CMEK_KMS"
 	envCloudSQLSecrets = "CLOUDBURROW_TEST_CLOUDSQL_SECRETS"

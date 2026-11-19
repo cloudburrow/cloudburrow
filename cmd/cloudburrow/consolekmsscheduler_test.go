@@ -124,7 +124,7 @@ func TestConsoleSchedulerFollowsTheSDK(t *testing.T) {
 			row = &l.Items[i]
 		}
 	}
-	if row == nil || row.Fields["Schedule"] != "0 3 * * *" || !strings.EqualFold(row.Status, "enabled") {
+	if row == nil || !strings.HasPrefix(row.Fields["Frequency"], "0 3 * * *") || !strings.EqualFold(row.Status, "enabled") {
 		t.Fatalf("the console lists %+v; want the job with its schedule and ENABLED", l.Items)
 	}
 	if err := p.Act(ctx, "demo-proj", name, "pause"); err != nil {

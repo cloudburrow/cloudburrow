@@ -239,6 +239,11 @@ type Filter struct {
 	Since       uint64
 	Contains    string
 	Limit       int
+	// Query is the Logs Explorer's query (#1863), compiled by CompileQuery;
+	// QueryError is why it was refused. From and To are its time range.
+	Query      func(Entry) bool
+	QueryError string
+	From, To   time.Time
 }
 
 func (f Filter) matches(e Entry) bool {
@@ -266,6 +271,15 @@ func (f Filter) matches(e Entry) bool {
 		return false
 	}
 	if f.Contains != "" && !strings.Contains(strings.ToLower(e.Message), strings.ToLower(f.Contains)) {
+		return false
+	}
+	if !f.From.IsZero() && e.Timestamp.Before(f.From) {
+		return false
+	}
+	if !f.To.IsZero() && e.Timestamp.After(f.To) {
+		return false
+	}
+	if f.Query != nil && !f.Query(e) {
 		return false
 	}
 	return true
@@ -416,6 +430,19 @@ func filterFrom(r *http.Request) Filter {
 	if n, err := strconv.ParseUint(q.Get("since"), 10, 64); err == nil {
 		f.Since = n
 	}
+	if t, err := time.Parse(time.RFC3339Nano, q.Get("from")); err == nil {
+		f.From = t
+	}
+	if t, err := time.Parse(time.RFC3339Nano, q.Get("to")); err == nil {
+		f.To = t
+	}
+	if query := q.Get("query"); strings.TrimSpace(query) != "" {
+		pred, err := CompileQuery(query)
+		if err != nil {
+			f.QueryError = "Invalid query: " + err.Error()
+		}
+		f.Query = pred
+	}
 	return f
 }
 
@@ -424,7 +451,12 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 		s.handleViewLogs(w, r, view)
 		return
 	}
-	entries := s.logs.Entries(filterFrom(r))
+	filter := filterFrom(r)
+	if filter.QueryError != "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": filter.QueryError})
+		return
+	}
+	entries := s.logs.Entries(filter)
 	if entries == nil {
 		entries = []Entry{}
 	}
@@ -447,6 +479,9 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 		// instance serves the Cloud Logging API, so the page never offers a
 		// Delete log that the backend would refuse.
 		"logDelete": s.logDeleter != nil,
+		// Whether the instance serves Cloud Logging (#1842), so a resource's
+		// Logs tab can say its lines are the containers' own when it does not.
+		"cloudLogging": s.logViews != nil,
 	})
 }
 
@@ -591,6 +626,12 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if f := filterFrom(r); f.QueryError != "" {
+		fmt.Fprintf(w, "event: failure\ndata: %s\n\n", mustJSON(map[string]string{"error": f.QueryError}))
+		flusher.Flush()
+		return
+	}
+
 	if view := r.URL.Query().Get("view"); view != "" {
 		if s.logViews == nil {
 			fmt.Fprintf(w, "event: failure\ndata: %s\n\n", mustJSON(map[string]string{"error": "Cloud Logging is not enabled on this instance"}))
@@ -622,6 +663,9 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 		writeEvent(w, e)
 		lastSent = e.ID
 	}
+	// The end of the backlog (#1863): the page shows what came before it as
+	// the query's results, and what follows only while it streams.
+	fmt.Fprint(w, "event: ready\ndata: {}\n\n")
 	flusher.Flush()
 
 	// A heartbeat keeps an idle connection from being closed by anything in

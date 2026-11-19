@@ -23,7 +23,7 @@ import (
 type loggingSettingsProvider struct{ loggingAdminScreen }
 
 func (loggingSettingsProvider) ID() string    { return "logging-settings" }
-func (loggingSettingsProvider) Title() string { return "Logs Storage settings" }
+func (loggingSettingsProvider) Title() string { return "Settings" }
 
 const loggingSettingsNote = "Stored and read back; a storage location and the default sink change nothing that is written or read here. " +
 	"Customer-managed encryption (a KMS key) is not supported: the API refuses one."

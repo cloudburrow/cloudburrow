@@ -29,6 +29,9 @@ import (
 // Like Cloud Tasks it runs in the CLI process, because the adapter is ours
 // even though the execution engine is the cluster's.
 type runService struct {
+	// stepMetadata is where a build step reaches the metadata server
+	// (#1854), IP:port, or "": set once cloudburrow-host is known.
+	stepMetadata func() string
 	// tracing, when on, spans calls (#313).
 	tracing *telemetry.Tracing
 	// calls reports each completed API call to the admin event log.
@@ -205,7 +208,14 @@ func (r *runService) Start(ctx context.Context) error {
 		runadapter.UseImportReader(sf)
 	}
 	// Arbitrary steps run only with --cloudbuild-host-steps, from loopback (#1382).
-	builds := adapter.Builds(fetch, newLocalImageBuilder(r.cfg)).AllowHostSteps(r.cfg.CloudBuildHostSteps)
+	builder := newLocalImageBuilder(r.cfg)
+	builder.metadataHost = func() string {
+		if r.stepMetadata == nil {
+			return ""
+		}
+		return r.stepMetadata()
+	}
+	builds := adapter.Builds(fetch, builder).AllowHostSteps(r.cfg.CloudBuildHostSteps)
 	builds = builds.WithBuildSecrets(r.buildSecretManager, r.buildKMS)
 	// Pub/Sub triggers subscribe on the instance's Pub/Sub (#1506).
 	if r.events != nil {
@@ -284,8 +294,11 @@ func (r *runService) Start(ctx context.Context) error {
 	var jsonAPI http.Handler = runadapter.RegistryHandlerOr(runadapter.SourceManagerHandlerOr(ssm, cloudBuild,
 		func(g grpc.ServiceRegistrar) { ssm.Register(g); ops.Register(g) },
 		runadapter.DeveloperConnectHandlerOr(func(g grpc.ServiceRegistrar) { devConnect.Register(g); ops.Register(g) },
-			functions.FunctionsHandler(runadapter.SourceDeployHandler(sourceDeploy,
-				adapter.V1Handler(runadapter.NewRESTHandler(register)))))))
+			// Eventarc (#1877) under /eventarc/v1/: its trigger paths are
+			// Cloud Build's.
+			runadapter.EventarcHandlerOr(func(g grpc.ServiceRegistrar) { functions.Eventarc().Register(g); ops.Register(g) },
+				functions.FunctionsHandler(runadapter.SourceDeployHandler(sourceDeploy,
+					adapter.V1Handler(runadapter.NewRESTHandler(register))))))))
 	// Artifact Registry's own prefix (#1578): its Locations mixin, whose
 	// /v1/ path is Cloud Run v1's, and its other calls through the above.
 	jsonAPI = runadapter.ArtifactRegistryHandlerOr(jsonAPI)
@@ -300,6 +313,8 @@ func (r *runService) Start(ctx context.Context) error {
 		ssm.Register(g)
 		devConnect.Register(g)
 		functions.Register(g)
+		// Eventarc (#1877), on the functions' event transport.
+		functions.Eventarc().Register(g)
 	}); err != nil {
 		return err
 	}

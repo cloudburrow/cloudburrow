@@ -56,8 +56,13 @@ func runSourceFields() []console.Field {
 // and region, then the source fields Deploy from source takes.
 func (p runProvider) runCreateFromSourceAction() console.Action {
 	_, create := p.CreateForm()
-	name := create[0] // the deploy form's own name field and its pattern
-	name.Section = ""
+	var name console.Field // the deploy form's own name field and its pattern
+	for _, f := range create {
+		if f.Name == "name" {
+			name = f
+		}
+	}
+	name.Section, name.Tab = "", ""
 	return console.Action{ID: runCreateFromSource, Label: "Create service from source", Fields: append([]console.Field{
 		name,
 		{Name: "region", Label: "Region", Type: "select", Options: []string{p.location()}, Default: p.location(),
@@ -67,11 +72,16 @@ func (p runProvider) runCreateFromSourceAction() console.Action {
 
 // ListActions implements console.ListActor: Create service from source,
 // offered only when both the adapter and Cloud Storage are running here.
-func (p runProvider) ListActions(context.Context, string) []console.Action {
-	if p.runEndpoint() == "" || p.storageAddr == "" {
+func (p runProvider) ListActions(_ context.Context, project string) []console.Action {
+	if p.runEndpoint() == "" {
 		return nil
 	}
-	return []console.Action{p.runCreateFromSourceAction()}
+	var out []console.Action
+	if p.storageAddr != "" {
+		out = append(out, p.runCreateFromSourceAction())
+	}
+	out = append(out, p.connectRepoAction(project))
+	return append(out, p.writeFunctionAction()...)
 }
 
 // sourceActions is the service's Deploy from source, offered only when both
@@ -86,6 +96,9 @@ func (p runProvider) sourceActions() []console.Action {
 // ActAtFile implements console.FileActor: Deploy from source on a service's
 // page, and Create service from source on the list page (no path).
 func (p runProvider) ActAtFile(ctx context.Context, project string, path []string, action string, values map[string]string, file console.UploadedFile) (*console.Listing, error) {
+	if action == runWriteFunction && len(path) == 0 {
+		return p.writeFunction(ctx, project, values, file)
+	}
 	deploy := action == runDeploySource && len(path) == 1
 	create := action == runCreateFromSource && len(path) == 0
 	if !deploy && !create {
@@ -112,9 +125,9 @@ func (p runProvider) createFromSource(ctx context.Context, project string, value
 	if service == "" {
 		return errors.New("a service name is required")
 	}
-	_, create := p.CreateForm()
-	if !regexp.MustCompile(create[0].Pattern).MatchString(service) {
-		return fmt.Errorf("service name %q: %s", service, create[0].Help)
+	name := p.runCreateFromSourceAction().Fields[0]
+	if !regexp.MustCompile(name.Pattern).MatchString(service) {
+		return fmt.Errorf("service name %q: %s", service, name.Help)
 	}
 	if r := strings.TrimSpace(values["region"]); r != "" && r != p.location() {
 		return fmt.Errorf("region %s is not served here; this instance serves Cloud Run in %s", r, p.location())

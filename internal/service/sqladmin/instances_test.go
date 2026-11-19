@@ -21,6 +21,7 @@ type fakeProv struct {
 	started  map[string]Spec
 	removed  []string
 	restarts int
+	stopped  map[string]bool
 	pruned   []string
 	failWith error
 }
@@ -51,6 +52,16 @@ func (p *fakeProv) Restart(context.Context, Spec) error {
 	p.mu.Lock()
 	p.restarts++
 	p.mu.Unlock()
+	return nil
+}
+func (p *fakeProv) Stop(_ context.Context, s Spec) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.stopped == nil {
+		p.stopped = map[string]bool{}
+	}
+	p.stopped[s.Name] = true
+	delete(p.started, s.Name)
 	return nil
 }
 func (p *fakeProv) Remove(_ context.Context, name string) error {

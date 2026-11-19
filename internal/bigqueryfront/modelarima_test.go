@@ -168,7 +168,7 @@ func TestTrainArimaAuto(t *testing.T) {
 func TestArimaOptions(t *testing.T) {
 	for sql, want := range map[string]int{
 		"CREATE MODEL d.m OPTIONS(model_type='ARIMA_PLUS', time_series_timestamp_col='d', time_series_data_col='v') AS SELECT 1":                                   0,
-		"CREATE MODEL d.m OPTIONS(model_type='ARIMA_PLUS', time_series_timestamp_col='d', time_series_data_col='v', holiday_region='US') AS SELECT 1":              501,
+		"CREATE MODEL d.m OPTIONS(model_type='ARIMA_PLUS', time_series_timestamp_col='d', time_series_data_col='v', holiday_region='US') AS SELECT 1":              0,
 		"CREATE MODEL d.m OPTIONS(model_type='ARIMA_PLUS', time_series_timestamp_col='d', time_series_data_col='v', auto_arima=FALSE) AS SELECT 1":                 400,
 		"CREATE MODEL d.m OPTIONS(model_type='ARIMA_PLUS', time_series_timestamp_col='d', time_series_data_col='v', include_drift=TRUE) AS SELECT 1":               400,
 		"CREATE MODEL d.m OPTIONS(model_type='ARIMA_PLUS', time_series_timestamp_col='d', time_series_data_col='v', seasonalities=['WEEKLY']) AS SELECT 1":         0,

@@ -190,6 +190,9 @@ func (i *InstancesServer) CreateInstance(ctx context.Context, req *runpb.CreateI
 	if _, _, err := resource.ParseLocation(req.GetParent()); err != nil {
 		return nil, apierror.InvalidArgument("%v", err)
 	}
+	if err := checkOrgLocation(ctx, req.GetParent()); err != nil {
+		return nil, err
+	}
 	id := req.GetInstanceId()
 	if err := validateJobID(id); err != nil {
 		return nil, apierror.InvalidArgument("%s", strings.ReplaceAll(apierror.From(err).Message, "job", "instance"))

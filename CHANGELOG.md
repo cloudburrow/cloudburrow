@@ -5,14 +5,33 @@ All notable changes to CloudBurrow are recorded here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html); before 1.0.0, a minor
 version may change behaviour.
 
-The release workflow publishes a tag's section of this file as the release notes, and refuses
-to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the entries under
-**Unreleased** into a new `## [X.Y.Z] - YYYY-MM-DD` section and add its link at the bottom.
+The release workflow publishes a tag's section of this file as the release notes. A scheduled
+release (every one to two days, [docs/ci.md](docs/ci.md#releasing)) commits nothing here: its
+notes are generated from the landings since the previous tag and kept in its annotated tag, and
+are used only when this file has no section for the tag. A tag with neither is refused. Before
+tagging `vX.Y.Z` by hand, move the entries under **Unreleased** into a new
+`## [X.Y.Z] - YYYY-MM-DD` section and add its link at the bottom.
 
 ## [Unreleased]
 
 ### Added
 
+- Model Garden deploys Hugging Face models locally (#1840): `ModelGardenService.Deploy` (gRPC and
+  REST) creates an Endpoint and a Model and serves the model with the engine Model Garden picks,
+  vLLM's CPU build for text generation and Text Embeddings Inference's for embeddings; the
+  endpoint answers `:predict`, `:rawPredict`, `:streamRawPredict` and v1beta1 `chat/completions`
+  in the shapes Google documents, and `UndeployModel`, `DeleteEndpoint` and `DeleteModel` free it.
+  The console's Deploy on a downloaded model opens the new Endpoints page, with progress through
+  to Ready and a test panel.
+- Scheduled releases (#1898): `.github/workflows/scheduled-release.yml` releases the newest commit
+  on main whose own push run of CI passed in full, compat shards included, every one to two days:
+  never within 24 hours of the last release, and always once 48 hours have passed and a newer
+  fully green commit exists. A minor bump when a `feat/` branch landed since the last tag, else a
+  patch. The notes are generated from the landings and kept in the annotated tag; nothing is
+  committed to main. `release.yml` is callable with the tag, and every release, a hand-pushed tag
+  included, now needs main's full push run (`scripts/require-ci-green.sh --main-push`), not only a
+  pull request's `ci-green`. [docs/ci.md](docs/ci.md#releasing) says how to dry-run, force, choose
+  the version or pause.
 - BigQuery jobs outlive their request (#1819): `jobs.query` and `jobs.getQueryResults` wait at
   most `timeoutMs` (10 s by default) and then answer `jobComplete: false` with the job's
   reference; `jobs.insert` answers a job still running `RUNNING`, `jobs.get` reports it so, and

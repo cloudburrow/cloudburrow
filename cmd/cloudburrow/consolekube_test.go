@@ -479,10 +479,17 @@ func TestDeployFormOffersOnlyWhatTheAdapterMaps(t *testing.T) {
 	}
 	// Every field its Unsupported refuses.
 	for _, absent := range []string{
-		"vpcAccess", "volumes", "binaryAuthorization", "ingress",
+		"vpcAccess", "volumes", "binaryAuthorization",
 	} {
 		if offered[absent] {
 			t.Errorf("the deploy form offers %q, which the adapter refuses", absent)
+		}
+	}
+	// Ingress is Google's Create service choice (#1852), offering only All,
+	// the INGRESS_TRAFFIC_ALL the adapter maps.
+	for _, f := range fields {
+		if f.Name == "ingress" && strings.Join(f.Options, ",") != "All" {
+			t.Errorf("the deploy form's ingress offers %v; only All is mapped", f.Options)
 		}
 	}
 }

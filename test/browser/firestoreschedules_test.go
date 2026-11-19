@@ -18,13 +18,14 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-// TestFirestoreBackupSchedulesTabThroughTheBrowser (#1461), in the
-// emulators shard. On a database's page, Create backup schedule, weekly on
-// Friday with 14 days' retention, makes the schedule the official admin
-// client's ListBackupSchedules returns; the Backup schedules tab lists it,
-// with its note on the backups it takes. Edit retention on its
-// row, to 21 days, is read back by GetBackupSchedule, and Delete backup
-// schedule, confirmed by its ID, removes it.
+// TestFirestoreBackupSchedulesTabThroughTheBrowser (#1461, #1845), in the
+// emulators shard. The Disaster recovery tab is Google's: Edit, with
+// Weekly checked, Friday and 2 weeks' retention, makes the schedule the
+// official admin client's ListBackupSchedules returns, and the tab
+// describes it above its Backups table. Edit again opens with those values;
+// changing the retention to 3 weeks is read back by GetBackupSchedule, and
+// unchecking Weekly removes the schedule. Clone, in a database row's menu
+// on the Databases list, makes the clone GetDatabase reads.
 func TestFirestoreBackupSchedulesTabThroughTheBrowser(t *testing.T) {
 	needService(t, "firestore")
 	addr := strings.TrimPrefix(strings.TrimSpace(os.Getenv(envFirestore)), "http://")
@@ -42,63 +43,75 @@ func TestFirestoreBackupSchedulesTabThroughTheBrowser(t *testing.T) {
 	project := uniqueProject(t)
 	q := "?project=" + project
 	db := "projects/" + project + "/databases/(default)"
+	edit := func() {
+		t.Helper()
+		p.navigate("/firestore-databases/(default)" + q + "&tab=schedules")
+		p.waitFor(`document.querySelector("#section-actions-schedules") !== null`)
+		p.clickText("#section-actions-schedules button", "Edit")
+		p.waitFor(`document.querySelector(".modal.is-open #f-weekly") !== null`)
+	}
 
-	p.navigate("/firestore-databases/(default)" + q)
-	p.clickText("#view .page-actions button", "Create backup schedule")
-	p.waitFor(`document.querySelector(".modal.is-open #f-retentionDays") !== null`)
-	p.setField(".modal.is-open #f-recurrence", "weekly")
-	p.setField(".modal.is-open #f-day", "FRIDAY")
-	p.setField(".modal.is-open #f-retentionDays", "14")
+	edit()
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open #f-weekly`)))
+	p.waitFor(`!document.querySelector(".modal.is-open #f-weeklyDay").closest(".form-row").hidden`)
+	p.setField(".modal.is-open #f-weeklyDay", "FRIDAY")
+	p.setField(".modal.is-open #f-weeklyRetention", "2")
 	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	resp, err := c.ListBackupSchedules(ctx, &adminpb.ListBackupSchedulesRequest{Parent: db})
 	if err != nil || len(resp.GetBackupSchedules()) != 1 {
-		t.Fatalf("ListBackupSchedules after Create backup schedule = %v, %v; want one schedule", resp, err)
+		t.Fatalf("ListBackupSchedules after Edit = %v, %v; want one schedule", resp, err)
 	}
 	s := resp.GetBackupSchedules()[0]
 	t.Cleanup(func() {
 		_ = c.DeleteBackupSchedule(context.Background(), &adminpb.DeleteBackupScheduleRequest{Name: s.GetName()})
 	})
 	if s.GetWeeklyRecurrence().GetDay() != dayofweek.DayOfWeek_FRIDAY || s.GetRetention().AsDuration() != 14*24*time.Hour {
-		t.Errorf("the schedule made is %v; want weekly on Friday, retained 14 days", s)
+		t.Errorf("the schedule made is %v; want weekly on Friday, retained 2 weeks", s)
 	}
-	id := s.GetName()[strings.LastIndex(s.GetName(), "/")+1:]
+	p.waitFor(`document.querySelector("#detail-panel").textContent.includes("every Friday")`)
 
-	// The Backup schedules tab lists it.
-	p.navigate("/firestore-databases/(default)" + q)
-	p.waitFor(`document.querySelector("#tab-schedules") !== null`)
-	p.run(chromedp.Click(chromedp.CSS(`#tab-schedules`)))
-	p.waitFor(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.offsetParent && r.textContent.includes("Weekly"))`)
-	var tab string
-	p.eval(`[...document.querySelectorAll("#view [role=tabpanel]")].filter((e) => !e.hidden).map((e) => e.textContent).join(" ")`, &tab)
-	if !strings.Contains(tab, id) || !strings.Contains(tab, "336h0m0s") || !strings.Contains(tab, "first backup") {
-		t.Errorf("the Backup schedules tab reads %q; want schedule %s, 336h retention and the note on the backups it takes", tab, id)
+	// Edit again: the form holds the schedule; 3 weeks.
+	edit()
+	var form struct {
+		Weekly, Daily bool
+		Weeks         string
 	}
-
-	// Edit retention on the row.
-	p.cellMenu(id, "Edit retention")
-	p.waitFor(`document.querySelector(".modal.is-open #f-retentionDays") !== null`)
-	var days string
-	p.eval(`document.querySelector(".modal.is-open #f-retentionDays").value`, &days)
-	if days != "14" {
-		t.Errorf("Edit retention opens with %q days; want 14", days)
+	p.eval(`({ Weekly: document.querySelector(".modal.is-open #f-weekly").checked, Daily: document.querySelector(".modal.is-open #f-daily").checked,
+		Weeks: document.querySelector(".modal.is-open #f-weeklyRetention").value })`, &form)
+	if !form.Weekly || form.Daily || form.Weeks != "2" {
+		t.Errorf("Edit opens with %+v; want Weekly checked, 2 weeks, Daily unchecked", form)
 	}
-	p.setField(".modal.is-open #f-retentionDays", "21")
+	p.setField(".modal.is-open #f-weeklyRetention", "3")
 	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	got, err := c.GetBackupSchedule(ctx, &adminpb.GetBackupScheduleRequest{Name: s.GetName()})
 	if err != nil || got.GetRetention().AsDuration() != 21*24*time.Hour {
-		t.Errorf("after Edit retention, GetBackupSchedule = %v, %v; want 21 days", got, err)
+		t.Errorf("after Edit, GetBackupSchedule = %v, %v; want 3 weeks", got, err)
 	}
 
-	// Delete backup schedule, confirmed by its ID.
-	p.navigate("/firestore-databases/(default)" + q)
-	p.waitFor(`document.querySelector("#tab-schedules") !== null`)
-	p.run(chromedp.Click(chromedp.CSS(`#tab-schedules`)))
-	p.cellMenu(id, "Delete backup schedule")
-	p.confirmByName(id)
+	// Weekly unchecked: the schedule goes.
+	edit()
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open #f-weekly`)))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	if resp, err := c.ListBackupSchedules(ctx, &adminpb.ListBackupSchedulesRequest{Parent: db}); err != nil || len(resp.GetBackupSchedules()) != 0 {
-		t.Errorf("after Delete backup schedule, ListBackupSchedules = %v, %v; want none", resp, err)
+		t.Errorf("after unchecking Weekly, ListBackupSchedules = %v, %v; want none", resp, err)
+	}
+
+	// Clone, from the Databases list's row menu.
+	p.navigate("/firestore-databases" + q)
+	p.cellMenu("(default)", "Clone")
+	p.waitFor(`document.querySelector(".modal.is-open #f-databaseId") !== null && document.querySelector(".modal.is-open #f-cloneFrom") !== null`)
+	var label string
+	p.eval(`document.querySelector("label[for=f-databaseId]").textContent`, &label)
+	if !strings.HasPrefix(label, "Give the clone an ID") {
+		t.Errorf("Clone's ID field is labelled %q", label)
+	}
+	p.setField(".modal.is-open #f-databaseId", "row-clone")
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
+	p.waitFor(`document.querySelector(".modal") === null`)
+	if _, err := c.GetDatabase(ctx, &adminpb.GetDatabaseRequest{Name: "projects/" + project + "/databases/row-clone"}); err != nil {
+		t.Errorf("after Clone from the row, GetDatabase: %v", err)
 	}
 }

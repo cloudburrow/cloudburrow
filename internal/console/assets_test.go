@@ -227,7 +227,8 @@ func TestTablesSort(t *testing.T) {
 	if !strings.Contains(js, `"aria-sort"`) {
 		t.Error("sorted columns are not announced")
 	}
-	if !strings.Contains(js, `if (c === "Actions") return el("th", { scope: "col", text: c });`) {
+	if !strings.Contains(js, `if (c === "Actions") {
+        return el("th", { scope: "col", class: "actions-cell" }`) {
 		t.Error("the Actions column is offered as sortable, which sorts nothing")
 	}
 }
@@ -287,13 +288,17 @@ func TestNavigationNamesTheProductsBeingEmulated(t *testing.T) {
 	// `title` then names the page inside it.
 	for _, product := range []string{
 		"Cloud Tasks",
-		"Secret Manager", "Cloud KMS", "Cloud Scheduler",
+		"Secret Manager", "Cloud Scheduler",
 	} {
 		if !strings.Contains(js, `title: "`+product) {
 			t.Errorf("the navigation does not name %q", product)
 		}
 	}
-	for _, product := range []string{"Vertex AI", "Kubernetes Engine", "Pub/Sub", "Cloud Run", "Cloud Storage", "Resource Manager"} {
+	// One drawer row per product (#1842): Key Management, Memorystore,
+	// Firestore, Bigtable, Cloud Logging, APIs & Services and IAM & Admin
+	// each hold their pages rather than appearing once per page.
+	for _, product := range []string{"Agent Platform", "Kubernetes Engine", "Pub/Sub", "Cloud Run", "Cloud Storage", "Resource Manager",
+		"Key Management", "Memorystore", "Firestore", "Bigtable", "Cloud Logging", "APIs & Services", "IAM & Admin"} {
 		if !strings.Contains(js, `productTitle: "`+product+`"`) {
 			t.Errorf("the navigation does not name the product %q", product)
 		}
@@ -831,12 +836,14 @@ func TestTheFilterMatchesEveryDisplayedColumn(t *testing.T) {
 	if strings.Contains(js, "data.items.filter((i) => !q || i.name.toLowerCase().includes(q))") {
 		t.Error("the filter still matches the name column only")
 	}
-	if !strings.Contains(js, "const matches = (item, q) =>") {
+	// The shared filter bar (#1842): plain text is matched against every
+	// column's value, a chip against its own column's.
+	if !strings.Contains(js, "const filterColumns = () => [nameColumn(), ...allDataColumns(), ...(hasStatus() ? [\"Status\"] : [])];") {
 		t.Fatal("there is no predicate that spans the displayed columns")
 	}
-	block := js[strings.Index(js, "const matches = (item, q) =>"):]
-	block = block[:strings.Index(block, "\n  };")]
-	for _, part := range []string{"item.name", "item.status", "dataColumns().some"} {
+	block := js[strings.Index(js, "const matches = (item) => bar.matches("):]
+	block = block[:strings.Index(block, ";\n")]
+	for _, part := range []string{"filterColumns().map((c) => valueOf(item, c))", "valueOf(item, column)"} {
 		if !strings.Contains(block, part) {
 			t.Errorf("the filter does not consider %s", part)
 		}
@@ -1098,7 +1105,7 @@ func TestHiddenFieldsAreSentBackAsTheyCame(t *testing.T) {
 	for _, want := range []string{
 		`const hidden = spec.fields.filter((f) => f.type === "hidden");`,
 		`const entries = spec.fields.filter((f) => f.type !== "hidden").map((f) => {`,
-		`return Object.fromEntries([...hiddenValues(hidden), ...entries`,
+		`return Object.fromEntries([...hiddenValues(hidden), ...tabsShown, ...entries`,
 		`if ((action.fields || []).some((f) => f.type !== "hidden")) {`,
 		`if (carried.length) body.Values = Object.fromEntries(carried);`,
 		`const hiddenValues = (fields) => fields.map((f) => [f.name, f.default || ""]);`,
@@ -1286,7 +1293,7 @@ func TestALongFormHasAnAddress(t *testing.T) {
 func TestAnEmptiedTableIsNotAnEmptyFilterResult(t *testing.T) {
 	src := consoleAsset(t, "console.js")
 
-	if !strings.Contains(src, "const query = filter.value.trim();\n      const state = query") {
+	if !strings.Contains(src, "const query = bar.text();\n      const state = bar.active()") {
 		t.Error("the empty table draws one state regardless of whether a filter is set")
 	}
 	if !strings.Contains(src, "text: `No ${noun} yet` }),") {
@@ -1813,7 +1820,8 @@ func TestOverlaysAnimateFromOneScale(t *testing.T) {
 	for _, want := range []string{
 		"function showOverlay(node)",
 		"function hideOverlay(node)",
-		`requestAnimationFrame(() => node.classList.add("is-open"))`,
+		// Only if it was not closed again before the frame came (#1842).
+		`requestAnimationFrame(() => { if (!node.hidden && !OVERLAY_TIMERS.has(node)) node.classList.add("is-open"); })`,
 		`const overlayOpen = (node) => node.classList.contains("is-open");`,
 	} {
 		if !strings.Contains(src, want) {
@@ -1835,7 +1843,7 @@ func TestOverlaysAnimateFromOneScale(t *testing.T) {
 func TestEveryScreenOpensWithThePageHeader(t *testing.T) {
 	src := consoleAsset(t, "console.js")
 
-	if !strings.Contains(src, "const pageHeader = (title, subtitle)") {
+	if !strings.Contains(src, "function pageHeader(title, subtitle, opts = {})") {
 		t.Fatal("there is no shared page header")
 	}
 	for _, screen := range []string{`pageHeader("Logs Explorer"`, `pageHeader("Activity"`,
@@ -1855,7 +1863,7 @@ func TestEveryScreenOpensWithThePageHeader(t *testing.T) {
 	if strings.Contains(src, `text: "AI Playground"`) {
 		t.Error("the playground heading still disagrees with its route title")
 	}
-	if !strings.Contains(src, `const PLAYGROUND_TITLE = "Vertex AI Studio";`) {
+	if !strings.Contains(src, `const PLAYGROUND_TITLE = "Agent Studio";`) {
 		t.Error("the playground has no single definition of its own name")
 	}
 }
@@ -2142,10 +2150,25 @@ func TestTheDrawerListsProductsNotPages(t *testing.T) {
 			cloudRun = append(cloudRun, r["title"]+" "+r["path"]+" "+r["service"])
 		}
 	}
-	if want := []string{"Services /run run", "Jobs /run/jobs run-jobs", "Worker pools /run/worker-pools run-worker-pools", "Instances /run/instances run-instances", "Build history /run/builds run-builds"}; strings.Join(cloudRun, "|") != strings.Join(want, "|") {
+	if want := []string{"Services /run run", "Jobs /run/jobs run-jobs", "Worker pools /run/worker-pools run-worker-pools", "Domain mappings /run/domains run-domains", "Instances /run/instances run-instances"}; strings.Join(cloudRun, "|") != strings.Join(want, "|") {
 		t.Errorf("Cloud Run pages = %q, want %q", cloudRun, want)
 	}
-	// Cloud Storage lists Buckets and Deleted buckets (#789).
+	// Cloud Build is its own product in Google's order (#1854); its old
+	// History address, under Cloud Run, is a hidden redirect, last.
+	var build []string
+	for _, r := range routes {
+		if r["product"] == "cloud-build" {
+			build = append(build, r["title"]+" "+r["path"])
+		}
+	}
+	if want := []string{"Dashboard /cloud-build/dashboard", "History /cloud-build/builds", "Triggers /cloud-build/triggers",
+		"Repositories /cloud-build/repositories", "Worker pools /cloud-build/worker-pools", "Settings /cloud-build/settings",
+		"History /run/builds"}; strings.Join(build, "|") != strings.Join(want, "|") {
+		t.Errorf("Cloud Build pages = %q, want %q", build, want)
+	}
+	// Cloud Storage's menu is Google's order (#1843), with Deleted buckets
+	// (#789), now a redirect to Buckets' View options and not in the menu,
+	// last.
 	var gcs []string
 	for _, r := range routes {
 		if r["product"] == "storage" {
@@ -2154,9 +2177,12 @@ func TestTheDrawerListsProductsNotPages(t *testing.T) {
 	}
 	wantGCS := []string{
 		"Buckets /storage/browser storage Cloud Storage",
-		"Deleted buckets /storage/deleted storage-deleted Cloud Storage",
+		"Observability /storage/observability  Cloud Storage",
+		"Configuration /storage/intelligence storage-intelligence Cloud Storage",
+		"Inventory reports /storage/inventory-reports  Cloud Storage",
+		"Transfer data /storage/transfer  Cloud Storage",
 		"Settings /storage/settings storage-settings Cloud Storage",
-		"Storage Intelligence /storage/intelligence storage-intelligence Cloud Storage",
+		"Deleted buckets /storage/deleted storage-deleted Cloud Storage",
 	}
 	if strings.Join(gcs, "|") != strings.Join(wantGCS, "|") {
 		t.Errorf("Cloud Storage pages = %q, want %q", gcs, wantGCS)
@@ -2183,8 +2209,10 @@ func TestTheDrawerListsProductsNotPages(t *testing.T) {
 	if !strings.Contains(js, "function drawProductNav()") {
 		t.Error("nothing fills the in-product navigation")
 	}
-	if !strings.Contains(js, "if (pages.length < 2)") {
-		t.Error("a single-page product still gets a sub-navigation, which is a list of one")
+	// Every product has its own left-hand menu, as Google's console draws
+	// one even for a product with a single page (#1842).
+	if !strings.Contains(js, "if (!pages.length) {") {
+		t.Error("a screen outside any product still gets a product menu")
 	}
 }
 
@@ -2278,7 +2306,7 @@ func TestTheInfoPanelShowsOnlyWhatTheBackendHolds(t *testing.T) {
 		"function drawInfoPanel(item, columns, route, onDone)",
 		`text: "Select a resource"`,
 		"const INFO_OPEN_KEY =",
-		`text: open ? "Hide info panel" : "Show info panel"`,
+		`const label = open ? "Hide info panel" : "Show info panel";`,
 	} {
 		if !strings.Contains(js, want) {
 			t.Errorf("console.js is missing %q", want)
@@ -2386,7 +2414,8 @@ func TestTheLogsScreenDoesNotHideUnattributedEntries(t *testing.T) {
 	}
 	// And an entry's own resource is visible, so an unattributed line is
 	// still traceable.
-	if !strings.Contains(src, `const LOG_COLUMNS = ["Time", "Severity", "Source", "Resource", "Message"];`) {
+	// Google's Query results columns since #1863, the Resource kept.
+	if !strings.Contains(src, `const LOG_COLUMNS = ["Severity", "Timestamp", "Resource", "Summary"];`) {
 		t.Error("the logs table has no Resource column")
 	}
 }
@@ -2435,7 +2464,7 @@ func TestListsRefreshThemselvesAndSayHowFresh(t *testing.T) {
 		t.Error("the list poll is not cleared on a route change")
 	}
 	// The manual control clears its spinner in a finally.
-	if !strings.Contains(src, "try { await refresh(); } finally { setBusy(refreshButton, false); }") {
+	if !strings.Contains(src, "try { await run(); } finally { setBusy(button, false); }") {
 		t.Error("a failed refresh strands the spinner")
 	}
 }

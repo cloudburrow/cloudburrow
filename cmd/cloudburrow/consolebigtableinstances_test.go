@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/bigtable"
+	btapb "cloud.google.com/go/bigtable/admin/apiv2/adminpb"
 	"cloud.google.com/go/bigtable/bttest"
 
 	"github.com/cloudburrow/cloudburrow/internal/bigtablefront"
@@ -113,14 +114,30 @@ func TestConsoleBigtableInstancesScreen(t *testing.T) {
 		t.Fatalf("List = %+v, %v", list, err)
 	}
 	d, err := p.Detail(ctx, "demo", []string{"orders-inst"})
-	if err != nil || d.Unavailable != "" || len(d.Sections) != 9 {
+	if err != nil || d.Unavailable != "" || !d.SideNav {
 		t.Fatalf("Detail = %+v, %v", d, err)
 	}
-	if cl := d.Sections[0].Listing.Items; len(cl) != 1 || cl[0].Fields["Nodes"] != "2" || cl[0].Fields["Storage type"] != "HDD" {
-		t.Errorf("the Clusters tab = %+v", cl)
+	// Google's left-hand menu (#1858).
+	var menu []string
+	for _, s := range d.Sections {
+		menu = append(menu, s.Label)
 	}
-	if ap := d.Sections[1].Listing.Items; len(ap) != 1 || ap[0].Name != "default" || ap[0].Fields["Routing"] != "Single cluster: orders-c1" {
-		t.Errorf("the App profiles tab = %+v", ap)
+	if got := strings.Join(menu, ", "); got != "Overview, Tables, Bigtable Studio, Clusters, Application profiles, Backups, "+
+		"Authorized views, Logical views, Materialized views, Monitoring, Key Visualizer, System insights, Snapshots, Schema bundles" {
+		t.Errorf("the menu = %s", got)
+	}
+	if cl := bigtableSection(d, "clusters").Listing.Items; len(cl) != 1 || cl[0].Fields["Nodes"] != "2" || cl[0].Fields["Storage type"] != "HDD" {
+		t.Errorf("the Clusters page = %+v", cl)
+	}
+	if ap := bigtableSection(d, "appprofiles").Listing.Items; len(ap) != 1 || ap[0].Name != "default" ||
+		ap[0].Fields["Cluster routing"] != "Single-cluster routing: orders-c1" || ap[0].Fields["Single-row transactions"] != "Allowed" {
+		t.Errorf("the Application profiles page = %+v", ap)
+	}
+	if m := bigtableSection(d, "monitoring"); !strings.HasPrefix(m.Unavailable, "Not available locally") {
+		t.Errorf("Monitoring = %+v", m)
+	}
+	if a := bigtableSection(d, "tables").Actions; len(a) == 0 || a[0].ID != "createtable" {
+		t.Errorf("the Tables page's actions = %+v", a)
 	}
 
 	page := p.DetailActions(ctx, "demo", []string{"orders-inst"})
@@ -171,12 +188,13 @@ func TestConsoleBigtableInstancesScreen(t *testing.T) {
 
 	// App profiles.
 	if code, out := bigtableInstancesAct(t, srv, []string{"orders-inst"}, "createprofile", map[string]string{
-		"profile": "batch", "description": "Batch jobs", "routing": "SINGLE_CLUSTER", "routeTo": "orders-c2", "transactionalWrites": "true"}); code != http.StatusOK {
+		"profile": "batch", "description": "Batch jobs", "profileType": "STANDARD", "routing": "SINGLE_CLUSTER", "routeTo": "orders-c2",
+		"transactionalWrites": "true", "priority": "LOW"}); code != http.StatusOK {
 		t.Fatalf("Create app profile = %d: %s", code, out)
 	}
 	ap, err := iac.GetAppProfile(ctx, "orders-inst", "batch")
 	if err != nil || ap.Description != "Batch jobs" || ap.GetSingleClusterRouting().GetClusterId() != "orders-c2" ||
-		!ap.GetSingleClusterRouting().GetAllowTransactionalWrites() {
+		!ap.GetSingleClusterRouting().GetAllowTransactionalWrites() || ap.GetStandardIsolation().GetPriority() != btapb.AppProfile_PRIORITY_LOW {
 		t.Fatalf("GetAppProfile = %v, %v", ap, err)
 	}
 	// c2 is routed to by batch: Delete cluster is refused with the front's
@@ -185,10 +203,11 @@ func TestConsoleBigtableInstancesScreen(t *testing.T) {
 		t.Errorf("Delete cluster routed to = %d: %s", code, out)
 	}
 	if code, out := bigtableInstancesAct(t, srv, []string{"orders-inst", "appProfiles", "batch"}, "editprofile", map[string]string{
-		"description": "Any cluster", "routing": "MULTI_CLUSTER"}); code != http.StatusOK {
+		"description": "Any cluster", "profileType": "STANDARD", "routing": "MULTI_CLUSTER", "rowAffinity": "true", "priority": "MEDIUM"}); code != http.StatusOK {
 		t.Fatalf("Edit app profile = %d: %s", code, out)
 	}
-	if ap, _ := iac.GetAppProfile(ctx, "orders-inst", "batch"); ap.Description != "Any cluster" || ap.GetMultiClusterRoutingUseAny() == nil {
+	if ap, _ := iac.GetAppProfile(ctx, "orders-inst", "batch"); ap.Description != "Any cluster" || ap.GetMultiClusterRoutingUseAny().GetRowAffinity() == nil ||
+		ap.GetStandardIsolation().GetPriority() != btapb.AppProfile_PRIORITY_MEDIUM {
 		t.Errorf("after Edit app profile, GetAppProfile = %v", ap)
 	}
 	if code, out := bigtableInstancesAct(t, srv, []string{"orders-inst", "appProfiles", "batch"}, "deleteprofile", nil); code != http.StatusOK {
@@ -252,4 +271,14 @@ func TestBigtableInstanceFormsRefuseWhatTheyCannotSend(t *testing.T) {
 	if err != nil || cc.AutoscalingConfig == nil || cc.NumNodes != 0 {
 		t.Errorf("formCluster autoscaled = %+v, %v", cc, err)
 	}
+}
+
+// bigtableSection is the page's section of that ID, or an empty one.
+func bigtableSection(d console.Detail, id string) console.Section {
+	for _, s := range d.Sections {
+		if s.ID == id {
+			return s
+		}
+	}
+	return console.Section{}
 }

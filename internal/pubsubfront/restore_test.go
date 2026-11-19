@@ -224,3 +224,40 @@ func TestMutationTargets(t *testing.T) {
 		}
 	}
 }
+
+// TestRestoredSnapshotExpiryIsOnTheWallClock (#1899): the expiry a snapshot
+// keeps through an emulator restart is the emulator's, on the wall clock,
+// so a front whose clock was advanced past it does not sweep the snapshot;
+// an update's expiry is on the front's clock, and is swept by it.
+func TestRestoredSnapshotExpiryIsOnTheWallClock(t *testing.T) {
+	wall := time.Date(2026, 11, 19, 12, 0, 0, 0, time.UTC)
+	now := wall.Add(18 * 24 * time.Hour) // the front's clock, advanced
+	restored := keptSnapshot{ExpireTime: wall.Add(7 * 24 * time.Hour), WallClock: true}
+	if restored.expired(now, wall) {
+		t.Errorf("a restored snapshot expiring in 7 days on the wall clock expired under an 18-day advance")
+	}
+	if !restored.expired(now, wall.Add(7*24*time.Hour)) {
+		t.Errorf("a restored snapshot did not expire at its expiry on the wall clock")
+	}
+	updated := keptSnapshot{ExpireTime: wall.Add(7 * 24 * time.Hour)}
+	if !updated.expired(now, wall) {
+		t.Errorf("an updated snapshot's expiry is on the front's clock; it did not expire under an 18-day advance")
+	}
+	if (keptSnapshot{}).expired(now, wall) {
+		t.Errorf("a snapshot with no kept expiry expired")
+	}
+
+	fake := pstest.NewServer()
+	t.Cleanup(func() { _ = fake.Close() })
+	f, err := New(fake.Addr, func(string, ...any) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.clock.Advance(18 * 24 * time.Hour)
+	name := "projects/" + project + "/snapshots/restored"
+	f.snapshots[name] = keptSnapshot{ExpireTime: time.Now().Add(7 * 24 * time.Hour), WallClock: true}
+	f.sweepSnapshots(context.Background())
+	if _, ok := f.snapshots[name]; !ok {
+		t.Errorf("the sweep deleted a restored snapshot whose wall-clock expiry is 7 days away")
+	}
+}

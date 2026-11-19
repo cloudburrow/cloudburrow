@@ -465,6 +465,12 @@ func InClusterBuiltinStorageHost(namespace string) string {
 	return fmt.Sprintf("storage.%s.svc.cluster.local:%d", namespace, StoragePort)
 }
 
+// InClusterFrontHost is the in-cluster address of a backend's call front,
+// its Service's name and port.
+func InClusterFrontHost(namespace, service string, port int) string {
+	return fmt.Sprintf("%s.%s.svc.cluster.local:%d", service, namespace, port)
+}
+
 // BigQueryServiceAgentDomain is the email domain of BigQuery connections'
 // service agents (#1786).
 const BigQueryServiceAgentDomain = "gcp-sa-bigquery-condel.iam.gserviceaccount.com"

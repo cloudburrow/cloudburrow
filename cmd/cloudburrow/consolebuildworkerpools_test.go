@@ -73,9 +73,10 @@ func TestConsoleBuildWorkerPoolPageAndDefaultServiceAccount(t *testing.T) {
 		t.Error("Edit worker pool with the etag of a pool since changed was accepted")
 	}
 
-	l, err := trigs.List(ctx, "")
-	if err != nil || len(l.Summary) != 1 || len(l.Summary[0].Properties) != 1 ||
-		l.Summary[0].Properties[0].Label != "Default build service account" || l.Summary[0].Properties[0].Value == "" {
-		t.Errorf("the Triggers page's summary = %+v, %v; want the default build service account", l.Summary, err)
+	// The default build service account is Create trigger's Service
+	// account choice, and Settings' (#1854).
+	l := trigs.defaultServiceAccount(ctx, "")
+	if len(l) != 1 || len(l[0].Properties) != 1 || l[0].Properties[0].Value == "" {
+		t.Errorf("the default build service account = %+v", l)
 	}
 }

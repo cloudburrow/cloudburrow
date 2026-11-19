@@ -558,7 +558,10 @@ func (f *Front) createSnapshotAgain(ctx context.Context, pub pubsubpb.PublisherC
 		f.mu.Lock()
 		k := f.snapshots[snap.GetName()]
 		if k.ExpireTime.IsZero() {
-			k.ExpireTime = snap.GetExpireTime().AsTime()
+			// The emulator's expiry is on the wall clock; swept against
+			// the front's advanced clock it would have passed already, and
+			// the snapshot be deleted at the next sweep (#1899).
+			k.ExpireTime, k.WallClock = snap.GetExpireTime().AsTime(), true
 			f.snapshots[snap.GetName()] = k
 		}
 		f.mu.Unlock()

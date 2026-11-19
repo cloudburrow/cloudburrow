@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	urlpkg "net/url"
 	"slices"
@@ -62,40 +63,35 @@ func (p storageProvider) List(ctx context.Context, project string) (console.List
 	// screen says so rather than inventing one.
 	if project == "" {
 		return console.Listing{
-			Columns: []string{"Location", "Storage class"},
+			Columns: bucketListColumns,
 			Noun:    "buckets",
 			Prompt:  "Cloud Storage lists buckets per project. Choose one in the toolbar.",
 		}, nil
 	}
 
+	// View options: Soft deleted buckets only (#1843), the buckets.list
+	// softDeleted=true the Deleted buckets page read, which now leads here.
+	if console.ScopeValue(ctx, bucketViewKey) == bucketViewSoftDeleted {
+		return p.softDeletedBuckets(ctx, project)
+	}
 	var body struct {
-		Items []struct {
-			Name         string `json:"name"`
-			Location     string `json:"location"`
-			StorageClass string `json:"storageClass"`
-			TimeCreated  string `json:"timeCreated"`
-		} `json:"items"`
+		Items []bucketMeta `json:"items"`
 	}
 	url := fmt.Sprintf("http://%s/storage/v1/b?project=%s", p.endpoint, project)
 	if err := getJSON(ctx, url, &body); err != nil {
 		return console.Listing{}, err
 	}
 
+	// Google's Buckets list columns (#1843).
 	items := make([]console.Resource, 0, len(body.Items))
 	for _, b := range body.Items {
-		items = append(items, console.Resource{
-			Name: b.Name,
-			Fields: map[string]string{
-				"Location":      b.Location,
-				"Storage class": b.StorageClass,
-				"Created":       shortTime(b.TimeCreated),
-			},
-		})
+		items = append(items, bucketListRow(b))
 	}
 	return console.Listing{
-		Columns: []string{"Location", "Storage class", "Created"},
+		Columns: bucketListColumns,
 		Noun:    "buckets",
 		Items:   items, Total: len(items),
+		Scope: bucketViewScope(bucketViewLive),
 	}, nil
 }
 
@@ -108,9 +104,9 @@ func (pubsubProvider) Title() string { return "Pub/Sub" }
 func (p pubsubProvider) List(ctx context.Context, project string) (console.Listing, error) {
 	if project == "" {
 		return console.Listing{
-			Columns: []string{"Subscriptions"},
-			Noun:    "topics",
-			Prompt:  "Pub/Sub lists topics per project. Choose one in the toolbar.",
+			Columns: topicListColumns, NameColumn: "Topic name",
+			Noun:   "topics",
+			Prompt: "Pub/Sub lists topics per project. Choose one in the toolbar.",
 		}, nil
 	}
 
@@ -136,9 +132,9 @@ func (p pubsubProvider) List(ctx context.Context, project string) (console.Listi
 		if err != nil {
 			return console.Listing{}, fmt.Errorf("list topics: %w", err)
 		}
-		items = append(items, console.Resource{Name: t.GetName()})
+		items = append(items, topicRow(project, t))
 	}
-	return console.Listing{Columns: []string{}, Noun: "topics", Items: items, Total: len(items)}, nil
+	return console.Listing{Columns: topicListColumns, NameColumn: "Topic name", Noun: "topics", Items: items, Total: len(items)}, nil
 }
 
 // tasksProvider lists queues from the in-process Cloud Tasks store.
@@ -178,14 +174,15 @@ func (p tasksProvider) ListFiltered(ctx context.Context, project, filter string)
 	if err != nil {
 		return console.Listing{}, err
 	}
-	columns := []string{"Tasks in queue", "Due now", "Created"}
+	columns := tasksListColumns
 	sf := &console.ServerFilter{Value: filter, Placeholder: "state: PAUSED AND name: orders", Help: tasksFilterHelp}
 	keep, err := tasks.QueueFilter(filter)
 	if err != nil {
 		// A refused filter is reported on the box, with no rows, so the
 		// screen keeps the box to correct it in.
 		sf.Error = err.Error()
-		return console.Listing{Columns: columns, Noun: "queues", ServerFilter: sf, AlwaysStatus: true}, nil
+		return console.Listing{Columns: columns, Noun: "queues", ServerFilter: sf, AlwaysStatus: true,
+			SelectActions: p.ListActions(ctx, project)}, nil
 	}
 
 	items := make([]console.Resource, 0, len(queues))
@@ -200,35 +197,24 @@ func (p tasksProvider) ListFiltered(ctx context.Context, project, filter string)
 		// that cannot say how much is in the queue is answering the wrong
 		// question: "paused" and "paused with four hundred tasks waiting" are
 		// very different facts.
-		depth, due := "—", "—"
+		fields := tasksQueueRow(q, p.svc.running(q.Name))
 		if tasks, err := st.ListTasks(q.Name); err == nil {
-			depth = fmt.Sprint(len(tasks))
-			ready := 0
-			now := time.Now()
-			for _, t := range tasks {
-				if !t.ScheduleTime.After(now) {
-					ready++
-				}
-			}
-			due = fmt.Sprint(ready)
+			tasksDepthFields(fields, tasks, time.Now())
 		}
 		items = append(items, console.Resource{
 			Name:   q.Name,
 			Status: string(q.State),
-			Fields: map[string]string{
-				"Tasks in queue": depth,
-				"Due now":        due,
-				"Created":        q.Created.Format(time.RFC3339),
-			},
+			Fields: fields,
 		})
 	}
 	return console.Listing{
-		Columns:      columns,
-		Noun:         "queues",
-		Items:        items,
-		Total:        len(items),
-		AlwaysStatus: true,
-		ServerFilter: sf,
+		Columns:       columns,
+		Noun:          "queues",
+		Items:         items,
+		Total:         len(items),
+		AlwaysStatus:  true,
+		ServerFilter:  sf,
+		SelectActions: p.ListActions(ctx, project),
 	}, nil
 }
 
@@ -277,7 +263,8 @@ func (p tasksProvider) Detail(_ context.Context, project string, path []string) 
 				last = fmt.Sprint(t.LastResponseCode)
 			}
 			listing.Items = append(listing.Items, console.Resource{
-				Name: t.Name,
+				Name:    t.Name,
+				Actions: tasksTaskActions(),
 				Fields: map[string]string{
 					"Scheduled":     t.ScheduleTime.Format(time.RFC3339),
 					"Attempts":      fmt.Sprint(t.DispatchCount),
@@ -316,11 +303,18 @@ func (p tasksProvider) Detail(_ context.Context, project string, path []string) 
 
 	return console.Detail{
 		Summary: summary,
+		// Google's queue page: Tasks, Metrics, Logs, Configuration and
+		// Permissions (#1848). Metrics are Cloud Monitoring's, not run here;
+		// the Logs tab is where the queue's logging is turned on or off.
 		Sections: []console.Section{
 			{ID: "tasks", Label: "Tasks", Listing: listing},
+			tasksMetricsSection(),
+			tasksLogsSection(queue),
 			config,
+			{ID: "permissions", Kind: console.KindPermissions},
 		},
-		Edit: tasksQueueEditForm(queue),
+		Actions: p.titleActions(name),
+		Edit:    tasksQueueEditForm(queue),
 	}, nil
 }
 
@@ -443,10 +437,7 @@ func (p tasksProvider) taskDetail(queue, task string) (console.Detail, error) {
 			{Label: "Last response", Value: last},
 		},
 		Sections: sections,
-		Actions: []console.Action{
-			{ID: "runtask", Label: "Run now"},
-			{ID: "deletetask", Label: "Delete task", Destructive: true},
-		},
+		Actions:  tasksTaskActions(),
 	}, nil
 }
 
@@ -516,69 +507,13 @@ const secretsFilterHelp = "Secret Manager's filter syntax: name:app, labels.env=
 // ListFiltered lists the project's secrets that match filter, in the API's
 // own filter syntax, evaluated by the same code as ListSecrets (#1228).
 func (p secretsProvider) ListFiltered(ctx context.Context, project, filter string) (console.Listing, error) {
-	st := p.svc.Store()
-	if st == nil {
-		return console.Listing{}, fmt.Errorf("Secret Manager has not started")
-	}
-	if project == "" {
-		return console.Listing{
-			Columns: []string{"Versions"},
-			Noun:    "secrets",
-			Prompt:  "Secret Manager lists secrets per project. Choose one in the toolbar.",
-		}, nil
-	}
-	if err := p.faults.Apply(ctx, "secretmanager", secretmanagerpb.SecretManagerService_ListSecrets_FullMethodName, projectResource(project)); err != nil {
-		return console.Listing{}, err
-	}
-
-	sf := &console.ServerFilter{Value: filter, Placeholder: "labels.env=prod AND name:app", Help: secretsFilterHelp}
-	all, err := st.ListSecretsFiltered(project, filter)
-	if err == nil {
-		// The project's regional secrets (#1519), location by location,
-		// under the same filter.
-		var regional []secrets.Secret
-		if regional, err = st.ListRegionalSecretsFiltered(project, filter); err == nil {
-			all = append(all, regional...)
-		}
-	}
-	if err != nil {
-		if filter == "" {
+	if project != "" {
+		if err := p.faults.Apply(ctx, "secretmanager", secretmanagerpb.SecretManagerService_ListSecrets_FullMethodName, projectResource(project)); err != nil {
 			return console.Listing{}, err
 		}
-		// A refused filter is reported on the box, with no rows, so the
-		// screen keeps the box to correct it in.
-		sf.Error = err.Error()
-		return console.Listing{Columns: []string{"Location", "Versions", "Created", "Expires"}, Noun: "secrets", ServerFilter: sf}, nil
 	}
-	items := make([]console.Resource, 0, len(all))
-	for _, s := range all {
-		expires := "Never"
-		if !s.Expire.IsZero() {
-			expires = s.Expire.Format(time.RFC3339)
-		}
-		versions, vErr := st.ListVersions(secretAt(project, s.Name))
-		count := "—"
-		if vErr == nil {
-			count = fmt.Sprint(len(versions))
-		}
-		location := "global"
-		if _, l := secrets.SplitScope(secretScope(project, s.Name)); l != "" {
-			location = l
-		}
-		items = append(items, console.Resource{
-			Name: s.Name,
-			Fields: map[string]string{
-				"Location": location,
-				"Versions": count,
-				"Created":  s.Created.Format(time.RFC3339),
-				"Expires":  expires,
-			},
-		})
-	}
-	return console.Listing{
-		Columns: []string{"Location", "Versions", "Created", "Expires"}, Noun: "secrets", Items: items, Total: len(items),
-		ServerFilter: sf,
-	}, nil
+	// The global secrets; the regional ones are on Regional secrets (#1850).
+	return p.secretsListing(ctx, project, filter, false)
 }
 
 // secretAt is the Store scope and ID of the secret a console path names
@@ -622,6 +557,12 @@ type runProvider struct {
 	// storageAddr is this instance's Cloud Storage base URL, or "" when it
 	// is not served; Deploy from source uploads its archive there (#1268).
 	storageAddr string
+	// pubsubAddr is this instance's Pub/Sub, or "" when it is not served: a
+	// service's Pub/Sub triggers are push subscriptions on it (#1852).
+	pubsubAddr string
+	// functions is this instance's Cloud Functions screen, nil when it is
+	// not served: Write a function creates through it (#1852).
+	functions *functionsProvider
 }
 
 func (runProvider) ID() string    { return "run" }
@@ -633,11 +574,16 @@ func (p runProvider) List(ctx context.Context, project string) (console.Listing,
 		return console.Listing{}, err
 	}
 	items := make([]console.Resource, 0, len(svcs))
+	latest := p.runLatestCreated(ctx, svcs)
 	for _, s := range svcs {
-		items = append(items, s.resource())
+		r := s.resource()
+		for k, v := range p.runGoogleFields(ctx, project, s, latest[s.Metadata.Name]) {
+			r.Fields[k] = v
+		}
+		items = append(items, r)
 	}
 	return console.Listing{
-		Columns: runColumns, Noun: "services", Items: items, Total: len(items),
+		Columns: runServiceColumns, Noun: "services", Items: items, Total: len(items),
 		AlwaysStatus: true,
 		// The selected project's services (#1400): two projects can each
 		// have a service of one ID. A service created before its Knative
@@ -750,18 +696,16 @@ func (p runProvider) Detail(ctx context.Context, project string, path []string) 
 		summary = append(summary, console.Property{Label: "Detail", Value: message})
 	}
 
-	sections := []console.Section{
-		// "Revision history" is what the Cloud Run console calls this tab, and
-		// it is the more accurate name: the list includes revisions that are no
-		// longer serving anything.
-		{ID: "revisions", Label: "Revision history", Listing: p.revisions(ctx, name, svc)},
-		{ID: "traffic", Label: "Traffic", Listing: trafficListing(svc)},
-		runConfiguration(svc, p.defaultProject),
-		p.domainsSection(ctx, project, serviceIDOf(name)),
-	}
+	// Google's tabs, in Google's order (#1852): the traffic split is the
+	// Revisions tab's Traffic and Tags columns, with Manage traffic on it.
+	sections := p.runServiceSections(ctx, project, name, svc)
 	return console.Detail{
 		Summary: summary, Sections: sections,
-		Edit: p.editForm(ctx, name, svc),
+		// Each action is on its tab: Manage traffic on Revisions, Deploy
+		// from source on Source, Map a domain on Domain mappings.
+		// Copy is beside the title, as Google's is.
+		Actions: append([]console.Action{}, p.copyAction(svc)...),
+		Edit:    p.editForm(ctx, name, svc),
 	}, nil
 }
 
@@ -1588,48 +1532,76 @@ func kubectlJSON(ctx context.Context, kubeconfig, namespace, kind string) ([]byt
 // Storage: create and delete buckets.
 
 func (storageProvider) CreateForm() (string, []console.Field) {
-	// The field names follow the documented Create a bucket form, restricted
-	// to what the local backend accepts. Location is absent because the
-	// backend has one and offering a choice it ignores would be a control
-	// that does nothing. The rest are the bucket fields the backend keeps
-	// and acts on (docs/compatibility.md, "Bucket fields"; #852), under the
-	// documented form's section names.
-	const class, access, protect = "Choose a storage class for your data", "Choose how to control access to objects",
-		"Choose how to protect object data"
+	// Google's Create a bucket page (#1843): five numbered steps, in its
+	// order and with its defaults, ending in Create. Every field is one the
+	// backend keeps (docs/compatibility.md, "Bucket fields"); turbo
+	// replication, public access prevention and the default key are stored
+	// with no effect, as that table says. Autoclass, cross-bucket replication
+	// and IP filtering's VPC settings are not on the form: IP filtering is
+	// Edit IP filtering on the bucket's page, and Rapid Cache is its Create
+	// Rapid Cache.
+	const where, how, access, protect = "Choose where to store your data", "Choose how to store your data",
+		"Choose how to control access to objects", "Choose how to protect object data"
 	return "Create", []console.Field{
 		{
-			Name: "name", Label: "Bucket name", Type: "text", Required: true,
-			Help:    "Lowercase letters, numbers, hyphens and underscores; 3-63 characters.",
+			Name: "name", Label: "Name your bucket", Type: "text", Required: true,
+			Help:    "A globally unique name: lowercase letters, numbers, hyphens, underscores and dots; 3-63 characters.",
 			Pattern: `^[a-z0-9][a-z0-9._\-]{1,61}[a-z0-9]$`,
 		},
-		{Name: "labels", Label: "Labels", Type: "map", Help: "Optional. One key=value per line."},
-		{Name: "storageClass", Label: "Default storage class", Type: "select", Section: class, Default: "STANDARD",
+		{Name: "labels", Label: "Labels", Type: "map", Help: "Optional. Add label: one key=value per line."},
+		{Name: "locationType", Label: "Location type", Type: "select", Section: where, Default: locMulti,
+			Options: []string{locMulti, locDual, locRegion},
+			Help: "Multi-region (the default), Dual-region or Region. The location is recorded; this instance keeps " +
+				"every object in one place."},
+		{Name: "location", Label: "Location", Type: "text", Section: where, Default: "US",
+			Pattern: `^[A-Za-z0-9\-]+$`,
+			Help:    "A multi-region such as US, EU or ASIA, a dual-region such as NAM4, or a region such as us-central1."},
+		{Name: "turboReplication", Label: "Add turbo replication", Type: "checkbox", Section: where, Default: "false",
+			Help: "Dual-region only: sets the recovery point objective to ASYNC_TURBO. Stored; there is no replication here."},
+		// Google's choice between a default class and Autoclass (#1843).
+		// Autoclass is stored (docs/compatibility.md, "Bucket fields"):
+		// no object changes class by itself on this instance.
+		{Name: "storageClassChoice", Label: "Choose how to store your data", Type: "radio", Section: how,
+			Default: classChoiceDefault, Options: []string{classChoiceDefault, classChoiceAutoclass},
+			Help: "Set a default class (the default) applies the class below to new objects. Autoclass is stored as " +
+				"autoclass enabled and shown on the bucket; this instance does not move objects between classes."},
+		{Name: "storageClass", Label: "Set a default class", Type: "select", Section: how, Default: "STANDARD",
 			Options: []string{"STANDARD", "NEARLINE", "COLDLINE", "ARCHIVE", "RAPID"},
-			Help: "The class a new object gets when it names none. Classes are recorded, not priced: nothing is billed here. " +
-				"RAPID (Rapid storage) needs a zone below, and holds appendable objects."},
+			Help: "Standard (the default), Nearline, Coldline or Archive: the class a new object gets when it names none. " +
+				"Classes are recorded, not priced. RAPID (Rapid storage) needs a zone below, and holds appendable objects."},
 		// A zone makes a zonal bucket (#1443): its location is the zone's
 		// region and customPlacementConfig names the zone.
-		{Name: "zone", Label: "Zone (Rapid storage)", Type: "text", Section: class, Pattern: `^([a-z]+-[a-z]+[0-9]+-[a-z])?$`,
-			Help: "Optional. A zone such as us-central1-a places the bucket in that zone, as Rapid storage needs. " +
-				"It can be set only when the bucket is created."},
+		{Name: "zone", Label: "Zone (Rapid storage)", Type: "text", Section: how, Pattern: `^([a-z]+-[a-z]+[0-9]+-[a-z])?$`,
+			Help: "Optional. A zone such as us-central1-a places the bucket in that zone, as Rapid storage needs; " +
+				"it takes the place of the location above. It can be set only when the bucket is created."},
 		// Hierarchical namespace (#1203) needs uniform bucket-level access
 		// and excludes versioning, so checking it turns the one on and the
 		// other off, and holds them there.
-		{Name: "hierarchicalNamespace", Label: "Enable hierarchical namespace", Type: "checkbox", Section: class,
-			Default: "false", Requires: []string{"uniformAccess"}, Excludes: []string{"versioning"},
-			Help: "The bucket has real folders, which can be created, renamed and deleted as folders. It can be " +
-				"enabled only when the bucket is created, needs uniform bucket-level access and excludes object versioning."},
-		{Name: "uniformAccess", Label: "Uniform bucket-level access", Type: "checkbox", Section: access, Default: "true",
-			Help: "On, access is granted by IAM alone, as a managed folder requires. Off, the bucket has " +
-				"fine-grained access: its ACLs are on its Access control tab, stored and not enforced (#1233)."},
-		{Name: "versioning", Label: "Object versioning", Type: "checkbox", Section: protect, Default: "false",
+		{Name: "hierarchicalNamespace", Label: "Enable Hierarchical namespace on this bucket", Type: "checkbox", Section: how,
+			Default: "false", Requires: []string{"uniformAccess=" + accessUniform}, Excludes: []string{"versioning"},
+			Help: "Optimize storage for data-intensive workloads: the bucket has real folders, which can be created, renamed and " +
+				"deleted as folders. It can be enabled only when the bucket is created, needs uniform access control and " +
+				"excludes object versioning."},
+		{Name: "publicAccessPrevention", Label: "Enforce public access prevention on this bucket", Type: "checkbox",
+			Section: access, Default: "true",
+			Help: "Prevent public access: stored as publicAccessPrevention enforced. Nothing is public on this instance either way."},
+		{Name: "uniformAccess", Label: "Access control", Type: "radio", Section: access, Default: accessUniform,
+			Options: []string{accessUniform, accessFineGrained},
+			Help: "Uniform (recommended): access is granted by IAM alone, as a managed folder and hierarchical namespace " +
+				"require. Fine-grained: objects also carry ACLs, edited with Edit access, stored and not enforced (#1233)."},
+		{Name: "softDelete", Label: "Soft delete policy (for data recovery)", Type: "checkbox", Section: protect, Default: "true",
+			Help: "A deleted object can be restored for the retention duration. Cleared, soft delete is off."},
+		{Name: "softDeleteDays", Label: "Set custom retention duration (days)", Type: "text", Section: protect,
+			Default: "7", Pattern: `^[0-9]+$`,
+			Help: "7 days by default, at most 90."},
+		{Name: "versioning", Label: "Object versioning (for version control)", Type: "checkbox", Section: protect, Default: "false",
 			Help: "An overwritten or deleted object is kept as a noncurrent version."},
-		{Name: "softDeleteSeconds", Label: "Soft delete retention (seconds)", Type: "text", Section: protect,
-			Default: "604800", Pattern: `^[0-9]+$`,
-			Help: "How long a deleted object can be restored: 0 turns soft delete off, otherwise 604800 (7 days, " +
-				"the default) to 7776000 (90 days)."},
-		{Name: "objectRetention", Label: "Enable object retention", Type: "checkbox", Section: protect, Default: "false",
-			Help: "Lets each object carry its own retention configuration. It can be enabled only when the bucket is created."},
+		{Name: "objectRetention", Label: "Retention (for compliance): enable object retention", Type: "checkbox", Section: protect,
+			Default: "false",
+			Help:    "Lets each object carry its own retention configuration. It can be enabled only when the bucket is created."},
+		{Name: "kmsKey", Label: "Data encryption: Cloud KMS key", Type: "text", Section: protect,
+			Help: "Optional. Empty, the bucket uses a Google-managed encryption key (the default). A key name, " +
+				"projects/P/locations/L/keyRings/R/cryptoKeys/K, is stored as the default key; objects are not encrypted with it here."},
 	}
 }
 
@@ -1675,7 +1647,10 @@ func bucketCreateRequest(name string, values map[string]string) ([]byte, string,
 		b["customPlacementConfig"] = map[string]any{"dataLocations": []string{z}}
 	}
 	if v, ok := values["uniformAccess"]; ok {
-		b["iamConfiguration"] = map[string]any{"uniformBucketLevelAccess": map[string]any{"enabled": v == "true"}}
+		b["iamConfiguration"] = map[string]any{"uniformBucketLevelAccess": map[string]any{"enabled": v == "true" || v == accessUniform}}
+	}
+	if values["storageClassChoice"] == classChoiceAutoclass {
+		b["autoclass"] = map[string]any{"enabled": true}
 	}
 	if values["versioning"] == "true" {
 		b["versioning"] = map[string]any{"enabled": true}
@@ -1683,8 +1658,30 @@ func bucketCreateRequest(name string, values map[string]string) ([]byte, string,
 	if values["hierarchicalNamespace"] == "true" {
 		b["hierarchicalNamespace"] = map[string]any{"enabled": true}
 	}
-	if v := strings.TrimSpace(values["softDeleteSeconds"]); v != "" {
+	if v, ok, err := softDeleteSecondsFrom(values); err != nil {
+		return nil, "", err
+	} else if ok {
 		b["softDeletePolicy"] = map[string]any{"retentionDurationSeconds": v}
+	}
+	// Google's step 2 location, unless a zone has placed the bucket.
+	if _, zoned := b["location"]; !zoned {
+		if v := strings.TrimSpace(values["location"]); v != "" {
+			b["location"] = strings.ToUpper(v)
+		}
+	}
+	if values["turboReplication"] == "true" {
+		b["rpo"] = "ASYNC_TURBO"
+	}
+	if k := strings.TrimSpace(values["kmsKey"]); k != "" {
+		b["encryption"] = map[string]any{"defaultKmsKeyName": k}
+	}
+	if v, ok := values["publicAccessPrevention"]; ok {
+		iam, _ := b["iamConfiguration"].(map[string]any)
+		if iam == nil {
+			iam = map[string]any{}
+			b["iamConfiguration"] = iam
+		}
+		iam["publicAccessPrevention"] = map[bool]string{true: "enforced", false: "inherited"}[v == "true"]
 	}
 	query := ""
 	if values["objectRetention"] == "true" {
@@ -1701,24 +1698,17 @@ func (p storageProvider) Delete(ctx context.Context, _ string, name string) erro
 
 // Pub/Sub: create and delete topics.
 
+// Google's Create topic page (#1847): Topic ID, Add a default subscription
+// (checked: a topic with no subscription drops every message published to
+// it, a confusing first experience for someone testing a publisher), Use a
+// schema and Enable message retention, each revealing its fields.
 func (pubsubProvider) CreateForm() (string, []console.Field) {
-	return "Create topic", append([]console.Field{
-		{
-			Name: "name", Label: "Topic ID", Type: "text", Required: true,
-			Help:    "3-255 characters, starting with a letter.",
-			Pattern: `^[A-Za-z][A-Za-z0-9._~%+\-]{2,254}$`,
-		},
-		{
-			// The console this mirrors offers the same checkbox on Create
-			// topic, and it is not decoration: a topic with no subscription
-			// drops every message published to it, which is a confusing first
-			// experience for someone testing a publisher.
-			Name: "defaultSubscription", Label: "Add a default subscription", Type: "checkbox",
-			Default: "true",
-			Help:    "Creates a pull subscription named after the topic, with the default settings.",
-		},
-	}, topicCreateFields()...)
+	return "Create topic", topicCreatePageFields()
 }
+
+func (pubsubProvider) CreateOnPage() bool   { return true }
+func (pubsubProvider) CreateTitle() string  { return "Create topic" }
+func (pubsubProvider) CreateLayout() string { return console.CreateLayoutPage }
 
 func (p pubsubProvider) client(ctx context.Context, project string) (*pubsub.Client, error) {
 	return pubsub.NewClient(ctx, project,
@@ -1743,11 +1733,21 @@ func (p pubsubProvider) Create(ctx context.Context, project string, values map[s
 	defer func() { _ = c.Close() }()
 
 	name := fmt.Sprintf("projects/%s/topics/%s", project, id)
+	values, err = topicPageValues(values)
+	if err != nil {
+		return "", err
+	}
 	t, err := topicFromForm(project, name, values)
 	if err != nil {
 		return "", err
 	}
+	if values["encryption"] == encryptionKMS {
+		t.KmsKeyName = strings.TrimSpace(values["kmsKeyName"])
+	}
 	if _, err := c.TopicAdminClient.CreateTopic(ctx, t); err != nil {
+		return "", err
+	}
+	if err := topicExports(ctx, c.SubscriptionAdminClient, project, id, name, values); err != nil {
 		return "", err
 	}
 
@@ -1781,19 +1781,12 @@ func (p pubsubProvider) Delete(ctx context.Context, project, name string) error 
 // Cloud Tasks: create queues, and pause, resume or purge them.
 
 func (tasksProvider) CreateForm() (string, []console.Field) {
-	return "Create queue", []console.Field{
-		{
-			Name: "name", Label: "Queue name", Type: "text", Required: true,
-			Help:    "Letters, numbers and hyphens.",
-			Pattern: `^[A-Za-z][A-Za-z0-9\-]{0,99}$`,
-		},
-		{
-			Name: "location", Label: "Region", Type: "text", Required: true,
-			Default: "us-central1",
-			Help:    "Any location string; CloudBurrow does not place resources geographically.",
-		},
-	}
+	return "Create queue", tasksCreateQueueFields()
 }
+
+// CreateOnPage puts Create queue on a page of its own, as Google's console
+// opens it (#1842): a full page with a back arrow, not a dialog.
+func (tasksProvider) CreateOnPage() bool { return true }
 
 func (p tasksProvider) Create(ctx context.Context, project string, values map[string]string) (string, error) {
 	if project == "" {
@@ -1803,24 +1796,7 @@ func (p tasksProvider) Create(ctx context.Context, project string, values map[st
 	if st == nil {
 		return "", fmt.Errorf("Cloud Tasks has not started")
 	}
-	id := strings.TrimSpace(values["name"])
-	location := strings.TrimSpace(values["location"])
-	if location == "" {
-		location = "us-central1"
-	}
-	name := fmt.Sprintf("projects/%s/locations/%s/queues/%s", project, location, id)
-	// The defaults are the service's own, so a queue created here behaves
-	// exactly like one created through the API with no overrides.
-	q, err := st.CreateQueue(tasks.Queue{
-		Name:        name,
-		State:       tasks.StateRunning,
-		RetryConfig: tasks.DefaultRetryConfig(),
-		RateLimits:  tasks.DefaultRateLimits(),
-	})
-	if err != nil {
-		return "", err
-	}
-	return q.Name, nil
+	return p.createQueue(ctx, project, values)
 }
 
 func (p tasksProvider) Delete(_ context.Context, _ string, name string) error {
@@ -1835,18 +1811,7 @@ func (tasksProvider) Actions(r console.Resource) []console.Action {
 	// The available actions depend on the queue's own state, so a paused
 	// queue is not offered "Pause" — an action that would do nothing is
 	// indistinguishable from one that is broken.
-	switch strings.ToUpper(r.Status) {
-	case "PAUSED":
-		return []console.Action{
-			{ID: "resume", Label: "Resume"},
-			{ID: "purge", Label: "Purge", Destructive: true},
-		}
-	default:
-		return []console.Action{
-			{ID: "pause", Label: "Pause"},
-			{ID: "purge", Label: "Purge", Destructive: true},
-		}
-	}
+	return tasksQueueActions(r.Status)
 }
 
 func (p tasksProvider) Act(_ context.Context, _ string, name, action string) error {
@@ -1938,7 +1903,7 @@ func apiError(resp *http.Response) error {
 // rejects would deploy from the console and not from the SDK, which is the
 // console inventing support.
 
-func (runProvider) CreateForm() (string, []console.Field) {
+func (p runProvider) CreateForm() (string, []console.Field) {
 	// Every field the adapter maps, and nothing else. The set is taken from
 	// internal/adapter/run's ToKnative: what it writes into the manifest is
 	// what can be offered here, and what its Unsupported refuses is named in
@@ -1948,7 +1913,7 @@ func (runProvider) CreateForm() (string, []console.Field) {
 	// authorization and the execution environment are all absent for the same
 	// reason: the adapter refuses them, so offering the control would be
 	// offering support.
-	return "Deploy container", append([]console.Field{
+	return "Deploy container", runCreateLayout(p.location(), append([]console.Field{
 		{
 			Name: "name", Label: "Service name", Type: "text", Required: true,
 			Help:    "Lowercase letters, numbers and hyphens; at most 49 characters.",
@@ -2046,7 +2011,7 @@ func (runProvider) CreateForm() (string, []console.Field) {
 			Pattern: runUtilizationPattern,
 			Section: "Scaling",
 		},
-	}, runServiceScalingFields(nil)...)
+	}, runServiceScalingFields(nil)...))
 }
 
 // runUtilizationPattern is a utilization target: blank, or a fraction.
@@ -2190,6 +2155,10 @@ func (p runProvider) Create(ctx context.Context, project string, values map[stri
 	}
 	defer func() { _ = c.Close() }()
 
+	public, err := p.runCreateChoices(values)
+	if err != nil {
+		return "", err
+	}
 	labels, _, err := runLabels(values)
 	if err != nil {
 		return "", err
@@ -2211,6 +2180,13 @@ func (p runProvider) Create(ctx context.Context, project string, values map[stri
 	svc, err := op.Wait(ctx)
 	if err != nil {
 		return "", fmt.Errorf("the service never became ready: %w", err)
+	}
+	// Allow public access is the service's IAM policy, set once it exists,
+	// as Google's console does after the create (#1852).
+	if public {
+		if err := p.allowPublicAccess(ctx, project, id); err != nil {
+			return "", fmt.Errorf("the service was created, but public access could not be allowed: %w", err)
+		}
 	}
 	return svc.GetName(), nil
 }
@@ -3446,7 +3422,7 @@ func eventsProvider(kubeconfig string) kubeProvider {
 type aiProvider struct{}
 
 func (aiProvider) ID() string    { return "ai" }
-func (aiProvider) Title() string { return "Vertex AI Model Garden" }
+func (aiProvider) Title() string { return "Agent Platform local model catalogue" }
 
 func (aiProvider) List(context.Context, string) (console.Listing, error) {
 	models := localai.Models()
@@ -3503,7 +3479,7 @@ func modelStatus(m localai.Model) (status, detail string) {
 		if ok, why := m.Runnable(); !ok {
 			return "Unavailable", why
 		}
-		return "Available", "runs on ONNX Runtime with up -local-ai-embeddings (Vertex AI → Embeddings); " +
+		return "Available", "runs on ONNX Runtime with up -local-ai-embeddings (Agent Platform → Studio → Embeddings); " +
 			"a COMMUNITY conversion, NOT an official Google artifact"
 	case m.Runtime == "" && m.Modality == localai.ModalityEmbedding:
 		// The embedding runtime exists and builds; what is missing is a model
@@ -3533,10 +3509,13 @@ func modelStatus(m localai.Model) (status, detail string) {
 // own address and can be linked to.
 func (p storageProvider) Detail(ctx context.Context, project string, path []string) (console.Detail, error) {
 	if path[0] == objectPage {
-		return p.objectDetail(ctx, path)
+		return p.objectDetail(ctx, project, path)
 	}
 	if path[0] == operationPage {
 		return p.operationDetail(ctx, path)
+	}
+	if path[0] == softBucketPage {
+		return p.softBucketDetail(ctx, path)
 	}
 	if b, id, ok := notificationPath(path); ok {
 		return p.notificationDetail(ctx, b, id)
@@ -3571,42 +3550,47 @@ func (p storageProvider) Detail(ctx context.Context, project string, path []stri
 	// Compose acts on the objects checked in this listing (#790), not on the
 	// page, so the page draws no button of its own for it.
 	objects.SelectActions = []console.Action{composeAction(prefix)}
-	sections := []console.Section{{ID: "objects", Label: "Objects", Listing: objects,
-		UploadTo: append([]string{}, path...)}}
-
-	// A bucket's own settings, which nothing showed, what can be changed
-	// about them, and its soft-deleted objects (#789). Only the prefix root
-	// carries them: a folder is not a resource and has no configuration.
-	// Every page can make a managed folder under it (#828), and, in a
-	// bucket with hierarchical namespace, a folder (#1203).
-	actions := []console.Action{createManagedFolderAction(bucket, prefix)}
 	meta, metaErr := p.readBucket(ctx, bucket)
 	hns := metaErr == nil && meta.hierarchical()
-	if hns {
-		actions = append(actions, createFolderAction(bucket, prefix))
-	}
+	// The Objects tab's own buttons, after Upload files and Upload folder:
+	// Create folder, and Create managed folder (#828, #1203, #1843).
+	sections := []console.Section{{ID: "objects", Label: "Objects", Listing: objects,
+		UploadTo: append([]string{}, path...), Actions: objectsTabActions(bucket, prefix, hns)}}
+
+	// The bucket's own tabs, in Google's order (#1843): Configuration,
+	// Permissions (drawn by the console where the placeholder is),
+	// Protection, Lifecycle and Operations; then what CloudBurrow also
+	// serves: soft-deleted objects (#789), ACLs while access is fine-grained
+	// (#1233), Anywhere Caches (#1444), Rapid Caches (#1505), notifications
+	// (#791) and channels (#1281). Only the prefix root carries them: a
+	// folder is not a resource and has no configuration.
+	var actions []console.Action
 	var edit *console.EditForm
 	if prefix == "" {
 		if metaErr == nil {
-			sections = append(sections, bucketConfigSection(meta), p.deletedObjects(ctx, meta))
-			// Its ACLs, while uniform access is off (#1233).
-			if acl, ok := p.bucketACLSection(ctx, meta); ok {
-				sections = append(sections, acl)
+			// Each tab's own actions (#1843): Edit Autoclass on
+			// Configuration, Switch to on Permissions, Edit object
+			// versioning on Protection.
+			config, protection := bucketConfigSection(meta), protectionSection(meta)
+			config.Actions = append(config.Actions, editAutoclassAction(meta))
+			if !meta.hierarchical() {
+				protection.Actions = append([]console.Action{editVersioningAction(meta)}, protection.Actions...)
 			}
-			actions = append(actions, bucketACLActions(meta)...)
-			edit = bucketEditForm(meta)
-			actions = append(actions, lockRetentionAction(meta)...)
-			actions = append(actions, bulkRestoreAction(), filterOperationsAction())
+			sections = append(sections, config, permissionsPlaceholder(meta), protection, lifecycleSection(meta))
 			// The Operations tab, on an HNS bucket always, and on any
 			// other once it has an operation, a bulk restore (#1279).
 			if ops := p.operationsSection(ctx, bucket); hns || len(ops.Listing.Items) > 0 || ops.Listing.Unavailable != "" {
 				sections = append(sections, ops)
 			}
-			// Its Anywhere Caches, and the cache, relocation and cancel
-			// actions (#1444).
+			sections = append(sections, p.deletedObjects(ctx, meta))
+			if acl, ok := p.bucketACLSection(ctx, meta); ok {
+				sections = append(sections, acl)
+			}
+			actions = append(actions, bucketACLActions(meta)...)
+			edit = bucketEditForm(meta)
+			actions = append(actions, bulkRestoreAction(), filterOperationsAction())
 			sections = append(sections, p.cachesSection(ctx, bucket))
 			actions = append(actions, cacheActions()...)
-			// Its Rapid Caches and IP filtering (#1505).
 			sections = append(sections, p.rapidSection(ctx, bucket))
 			actions = append(actions, createRapidAction(), ipFilterAction(meta))
 		}
@@ -3813,6 +3797,7 @@ func bucketConfigSection(b bucketMeta) console.Section {
 				{Label: "Location type", Value: b.LocationType},
 				{Label: "Placement", Value: b.placement()},
 				{Label: "Storage class", Value: b.StorageClass},
+				{Label: "Autoclass", Value: autoclassText(b)},
 			}},
 			{Heading: "Protection", Properties: protection},
 			{Heading: "Lifecycle", Properties: []console.Property{
@@ -3857,7 +3842,7 @@ func (p secretsProvider) Detail(_ context.Context, project string, path []string
 	}
 
 	versions := console.Listing{
-		Columns:      []string{"State", "Created", "Destroyed"},
+		Columns:      []string{"State", "Aliases", "Created", "Scheduled for destruction", "Destroyed"},
 		NameColumn:   "Version",
 		Noun:         "versions",
 		AlwaysStatus: true,
@@ -3868,19 +3853,31 @@ func (p secretsProvider) Detail(_ context.Context, project string, path []string
 	} else {
 		// Newest first: the current version is what someone came to check.
 		sort.Slice(all, func(i, j int) bool { return all[i].Number > all[j].Number })
+		aliases := secretVersionAliases(secret)
 		for _, v := range all {
-			destroyed := "—"
+			destroyed, scheduled := "—", "—"
 			if !v.Destroyed.IsZero() {
 				destroyed = v.Destroyed.Format(time.RFC3339)
 			}
+			if !v.ScheduledDestroy.IsZero() {
+				scheduled = v.ScheduledDestroy.Format(time.RFC3339)
+			}
+			va := "—"
+			if a := aliases[v.Number]; len(a) > 0 {
+				va = strings.Join(a, ", ")
+			}
+			href := "/secrets/" + urlpkg.PathEscape(path[0]) + "/" + strconv.Itoa(v.Number) + "?reveal=1"
 			versions.Items = append(versions.Items, console.Resource{
 				Name:   fmt.Sprint(v.Number),
 				Status: string(v.State),
 				Fields: map[string]string{
-					"State":     string(v.State),
-					"Created":   v.Created.Format(time.RFC3339),
-					"Destroyed": destroyed,
+					"State":                     string(v.State),
+					"Aliases":                   va,
+					"Created":                   v.Created.Format(time.RFC3339),
+					"Scheduled for destruction": scheduled,
+					"Destroyed":                 destroyed,
 				},
+				Actions: secretVersionRowActions(secret, v, st.Now(), href),
 			})
 		}
 		versions.Total = len(versions.Items)
@@ -3890,67 +3887,29 @@ func (p secretsProvider) Detail(_ context.Context, project string, path []string
 		// holds to anyone who opened a page. A value is shown only from the
 		// version's own page, only when asked for, and the asking is recorded.
 		versions.RowsOpenable = true
-		versions.Note = "Open a version to see its state, or to show its value. " +
+		versions.Note = "Each version's Actions menu has View secret value, Disable, Enable and Destroy. " +
 			"Payloads are never included in this list."
-	}
-
-	config := console.Section{
-		ID: "configuration", Label: "Configuration", Kind: console.KindProperties,
-		Groups: []console.PropertyGroup{
-			{Heading: "Replication", Properties: replicationProperties(secret)},
-			{Heading: "Encryption", Properties: secretEncryptionProperties(secret)},
-			{Heading: "Expiration", Properties: []console.Property{{Label: "Expire time", Value: secretExpiry(secret)}}},
-			{Heading: "Notifications", Properties: []console.Property{{Label: "Pub/Sub topics", Value: secretTopicsText(secret)}}},
-		},
-		// Replication is fixed at creation in the real API, so the edit form
-		// covers labels and annotations and says so rather than offering a
-		// field the API would refuse.
-		Note: "Labels, annotations, the expiry, the notification topics, the rotation and the destruction delay can be " +
-			"edited. Replication is fixed when the secret is created, except for its customer-managed encryption keys " +
-			"(Change encryption keys).",
-	}
-	config.Groups = append(config.Groups, secretScheduleProperties(secret)...)
-	if len(secret.Labels) > 0 {
-		config.Groups = append(config.Groups, console.PropertyGroup{
-			Heading: "Labels", Properties: sortedPairs(secret.Labels),
-		})
-	}
-	if len(secret.Annotations) > 0 {
-		config.Groups = append(config.Groups, console.PropertyGroup{
-			Heading: "Annotations", Properties: sortedPairs(secret.Annotations),
-		})
 	}
 
 	return console.Detail{
 		Summary: []console.Property{
+			{Label: "Location", Value: secretLocationText(secret)},
+			{Label: "Encryption", Value: secretEncryptionText(secret)},
 			{Label: "Created", Value: secret.Created.Format(time.RFC3339)},
-			{Label: "Expires", Value: secretExpiry(secret)},
-			{Label: "Versions", Value: fmt.Sprint(len(versions.Items))},
-			{Label: "Next version", Value: fmt.Sprint(secret.NextVersion)},
+			{Label: "Expiration", Value: secretExpiry(secret)},
 		},
+		// Google's tabs: Overview, Versions, Permissions, Logs (#1850).
 		Sections: []console.Section{
+			secretOverview(secret, len(versions.Items)),
 			{ID: "versions", Label: "Versions", Listing: versions},
-			config,
+			{ID: "permissions", Kind: console.KindPermissions},
+			{ID: "logs", Label: "Logs", Kind: console.KindLogs},
 		},
 		Edit: &console.EditForm{
-			Label: "Edit secret",
-			Fields: append([]console.Field{
-				{Name: "labels", Label: "Labels", Type: "map",
-					Default: console.FormatMap(secret.Labels),
-					Help:    "One key=value per line. Replaces the whole set."},
-				{Name: "annotations", Label: "Annotations", Type: "map",
-					Default: console.FormatMap(secret.Annotations),
-					Help:    "One key=value per line. Replaces the whole set."},
-				{Name: "expireTime", Label: "Expire time", Type: "text", Section: "Expiration",
-					Default: expireDefault(secret), Pattern: secretExpireTimePattern,
-					Help: secretExpireTimeHelp + " Clear it, and the TTL, to remove the expiry."},
-				{Name: "ttl", Label: "TTL", Type: "text", Section: "Expiration", Pattern: secretTTLPattern,
-					Help: secretTTLHelp + " It replaces the expire time."},
-				{Name: "topics", Label: "Pub/Sub topics", Type: "textarea", Section: "Notifications",
-					Default: strings.Join(secret.Topics, "\n"), Help: secretTopicsHelp + " Clear it to stop the notifications."},
-			}, secretScheduleFields(&secret)...),
-			Note: "Replication cannot be changed after a secret is created, so it " +
-				"is not offered here.",
+			Label:  "Edit secret",
+			Fields: secretOptionalFields(&secret),
+			Note: "Replication cannot be changed after a secret is created, so it is not offered here; " +
+				"Change encryption keys changes its customer-managed keys.",
 		},
 	}, nil
 }
@@ -4046,14 +4005,7 @@ func (p secretsProvider) DetailActions(_ context.Context, project string, path [
 		if err != nil {
 			return nil
 		}
-		return []console.Action{{
-			ID: "addversion", Label: "Add version",
-			Fields: []console.Field{{
-				Name: "payload", Label: "Secret value", Type: "textarea", Required: true,
-				Help: "Stored as UTF-8 bytes. This becomes the new enabled version; " +
-					"earlier versions keep the state they have.",
-			}},
-		}, secretAdvanceClockAction(), secretKeysAction(sec)}
+		return []console.Action{secretAddVersionAction(), secretAdvanceClockAction(), secretKeysAction(sec)}
 	case 2:
 		// What is offered depends on the version's current state. Enabling an
 		// enabled version and destroying a destroyed one are both buttons that
@@ -4097,15 +4049,10 @@ func (p secretsProvider) ActAt(_ context.Context, project string, path []string,
 	project, id := secretAt(project, path[0])
 
 	switch action {
-	case "addversion":
-		payload := values["payload"]
-		if payload == "" {
-			// Refused here rather than stored: an empty version is
-			// indistinguishable from a mistake, and the API would accept it.
-			return fmt.Errorf("a version needs a value")
-		}
-		_, err := st.AddVersion(project, id, []byte(payload))
-		return err
+	case actSecretAddVersion:
+		// An empty value is refused rather than stored: an empty version
+		// is indistinguishable from a mistake, and the API would accept it.
+		return addSecretVersion(st, project, id, values)
 	case "enable":
 		_, err := st.SetVersionState(project, id, path[1], secrets.StateEnabled)
 		return err
@@ -4174,6 +4121,7 @@ func (p secretsProvider) Edit(_ context.Context, project string, path []string, 
 	if len(path) != 1 {
 		return fmt.Errorf("only a secret can be edited, not a version")
 	}
+	values = secretFormValues(values)
 	labels, err := console.ParseMap(values["labels"])
 	if err != nil {
 		return fmt.Errorf("labels: %w", err)
@@ -4201,9 +4149,14 @@ func (p secretsProvider) Edit(_ context.Context, project string, path []string, 
 	if err != nil {
 		return err
 	}
+	aliases, err := secretAliasesValue(values["versionAliases"])
+	if err != nil {
+		return err
+	}
 	// The rotation and the delay go only when changed too: an unchanged
 	// next rotation time under 5 minutes away would be refused (#1278).
 	_, err = st.UpdateSecretFields(project, id, secrets.SecretUpdate{
+		VersionAliases: aliases, UpdateVersionAliases: !maps.Equal(aliases, current.VersionAliases),
 		Labels: labels, Annotations: annotations, UpdateLabels: true, UpdateAnnotations: true,
 		Expire: expire, UpdateExpire: true,
 		Topics: topics, UpdateTopics: !slices.Equal(topics, current.Topics),
@@ -4296,37 +4249,7 @@ func secretExpireValue(values map[string]string, st *secrets.Store) (time.Time, 
 // real console asks for the first value in the same step, and a two-step
 // create would leave an empty secret behind whenever the second step failed.
 func (p secretsProvider) CreateForm() (string, []console.Field) {
-	return "Create secret", []console.Field{
-		{Name: "secretId", Label: "Name", Type: "text", Required: true,
-			Help:    "Up to 255 characters: letters, digits, hyphens and underscores.",
-			Pattern: `^[A-Za-z0-9_\-]{1,255}$`},
-		{Name: "payload", Label: "Secret value", Type: "textarea", Required: true,
-			Help: "Stored as UTF-8 bytes and becomes version 1."},
-		{Name: "labels", Label: "Labels", Type: "map",
-			Help: "Optional. One key=value per line."},
-		{Name: "annotations", Label: "Annotations", Type: "map",
-			Help: "Optional. One key=value per line."},
-		{Name: "expireTime", Label: "Expire time", Type: "text", Section: "Expiration",
-			Pattern: secretExpireTimePattern, Help: secretExpireTimeHelp},
-		{Name: "ttl", Label: "TTL", Type: "text", Section: "Expiration",
-			Pattern: secretTTLPattern, Help: secretTTLHelp},
-		{Name: "topics", Label: "Pub/Sub topics", Type: "textarea", Section: "Notifications",
-			Help: secretTopicsHelp},
-		secretScheduleFields(nil)[0], secretScheduleFields(nil)[1], secretScheduleFields(nil)[2],
-		{Name: "replication", Label: "Replication policy", Type: "select", Section: "Replication policy",
-			Options: []string{replicationAutomatic, replicationUserManaged}, Default: replicationAutomatic,
-			Help: "Recorded and returned as set; there is one local store either way. It cannot be changed " +
-				"after the secret is created."},
-		{Name: "locations", Label: "Locations", Type: "text", Section: "Replication policy",
-			Pattern: `^[a-z0-9\-]+(\s*,\s*[a-z0-9\-]+)*$`,
-			Help:    "User-managed only: the replica locations, comma-separated, for example us-east1, europe-west1."},
-		{Name: "location", Label: "Location", Type: "text", Section: "Replication policy",
-			Pattern: `^[a-z0-9\-]*$`,
-			Help: "Optional. A region, for example us-central1, makes a regional secret (#1519), served as " +
-				"secretmanager.{location}.rep.googleapis.com serves it: its data stays in that location, it has no " +
-				"replication policy, and its customer-managed key must be in that location. Empty is a global secret."},
-		secretKMSKeysField(),
-	}
+	return "Create secret", secretCreateFields(false)
 }
 
 // The Create secret form's replication choices (#857).
@@ -4394,9 +4317,14 @@ func (p secretsProvider) Create(_ context.Context, project string, values map[st
 	if project == "" {
 		return "", fmt.Errorf("choose a project first")
 	}
+	values = secretFormValues(values)
 	labels, err := console.ParseMap(values["labels"])
 	if err != nil {
 		return "", fmt.Errorf("labels: %w", err)
+	}
+	aliases, err := secretAliasesValue(values["versionAliases"])
+	if err != nil {
+		return "", err
 	}
 	annotations, err := console.ParseMap(values["annotations"])
 	if err != nil {
@@ -4443,6 +4371,14 @@ func (p secretsProvider) Create(_ context.Context, project string, values map[st
 		}
 		return "", fmt.Errorf("adding the first version failed, so the secret was "+
 			"not created: %w", err)
+	}
+	if len(aliases) > 0 {
+		// Version aliases are set by an update once version 1 exists, as
+		// CreateSecret takes none here; a refused alias undoes the create.
+		if _, err := st.UpdateSecretFields(project, id, secrets.SecretUpdate{VersionAliases: aliases, UpdateVersionAliases: true}); err != nil {
+			_ = st.DeleteSecret(project, id)
+			return "", fmt.Errorf("the version aliases were refused, so the secret was not created: %w", err)
+		}
 	}
 	return sec.Name, nil
 }
@@ -4551,7 +4487,8 @@ func (p pubsubProvider) Detail(ctx context.Context, project string, path []strin
 	// Edit topic (#786) is offered once the topic has been read, prefilled
 	// from what the emulator returned.
 	var edit *console.EditForm
-	if t, err := c.TopicAdminClient.GetTopic(ctx, &pubsubpb.GetTopicRequest{Topic: topic}); err == nil {
+	t, terr := c.TopicAdminClient.GetTopic(ctx, &pubsubpb.GetTopicRequest{Topic: topic})
+	if terr == nil {
 		retention := "None"
 		if d := t.GetMessageRetentionDuration(); d != nil {
 			retention = formatPubSubDuration(d)
@@ -4575,15 +4512,28 @@ func (p pubsubProvider) Detail(ctx context.Context, project string, path []strin
 		edit = topicEditForm(t)
 	}
 
+	// Google's tabs, in its order (#1847): Subscriptions, Snapshots,
+	// Metrics, Details, Messages, Ingestion, then Permissions. The tab
+	// actions (Publish message, Pull) are drawn in the Messages tab, the
+	// rest beside the title.
+	actions := p.DetailActions(ctx, project, path)
+	sections := []console.Section{
+		{ID: "subscriptions", Label: "Subscriptions", Listing: subs},
+		// ListTopicSnapshots (#787): what this topic's subscriptions can
+		// seek to.
+		topicSnapshotsSection(ctx, c.TopicAdminClient, project, topic),
+		metricsSection(),
+	}
+	if terr == nil {
+		sections = append(sections, topicDetailsSection(t, len(subs.Items)))
+	}
+	sections = append(sections, topicMessagesSection(actions), topicIngestionSection(t),
+		console.Section{ID: "permissions", Kind: console.KindPermissions})
 	return console.Detail{
-		Edit:    edit,
-		Summary: summary,
-		Sections: []console.Section{
-			{ID: "subscriptions", Label: "Subscriptions", Listing: subs},
-			// ListTopicSnapshots (#787): what this topic's subscriptions can
-			// seek to.
-			topicSnapshotsSection(ctx, c.TopicAdminClient, project, topic),
-		},
+		Edit:     edit,
+		Summary:  summary,
+		Actions:  headerActions(actions, topicTabActions),
+		Sections: sections,
 	}, nil
 }
 
@@ -5355,8 +5305,10 @@ func (p tasksProvider) DetailActions(_ context.Context, _ string, path []string)
 		return nil
 	}
 	switch len(path) {
+	case 0:
+		return p.ListActions(context.Background(), "")
 	case 1:
-		return []console.Action{{ID: "createtask", Label: "Create task", Fields: tasksCreateTaskFields()}}
+		return p.queuePageActions(path[0])
 	case 2:
 		// Run now is RunTask (#1215): dispatched on the next pass, even on a
 		// paused queue or one at its rate limits.
@@ -5374,6 +5326,10 @@ func (p tasksProvider) ActAt(ctx context.Context, project string, path []string,
 		return fmt.Errorf("Cloud Tasks has not started")
 	}
 	switch {
+	case len(path) == 0:
+		return p.actOnSelection(ctx, project, action, values)
+	case len(path) == 1 && tasksQueuePageAction(action):
+		return p.actOnQueue(ctx, project, path[0], action, values)
 	case action == "createtask" && len(path) == 1:
 		return p.createTask(ctx, project, path[0], values)
 	case action == "deletetask" && len(path) == 2:

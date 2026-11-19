@@ -89,17 +89,28 @@ func (p iamGroupsProvider) ListFiltered(_ context.Context, _ string, filter stri
 	return l, nil
 }
 
+// CreateForm is Google's Create group (#1864): Group name, Group email
+// and Group description, then the members to add with their Google Groups
+// role, on one page.
 func (iamGroupsProvider) CreateForm() (string, []console.Field) {
 	return "Create group", []console.Field{
-		{Name: "email", Label: "Group email", Type: "text", Required: true, Pattern: groupEmailPattern,
+		{Name: "displayName", Label: "Group name", Type: "text", Pattern: `.{0,73}`, Section: "Group details", Help: "At most 73 characters."},
+		{Name: "email", Label: "Group email", Type: "text", Required: true, Pattern: groupEmailPattern, Section: "Group details",
 			Help: "NAME@" + resourcemanager.OrganizationDomain + ": the customer's groups are in its domain. NAME follows a username's rules: " +
 				"at most 64 characters, no period at the start or end or two in a row, and no = & < > + , or !."},
-		groupDisplayNameField(""),
-		{Name: "description", Label: "Description", Type: "text", Help: "At most 4,096 characters."},
-		{Name: "security", Label: "Security group", Type: "select", Options: []string{"No", "Yes"}, Default: "No",
+		{Name: "description", Label: "Group description", Type: "text", Section: "Group details", Help: "Optional. At most 4,096 characters."},
+		{Name: "security", Label: "Security group", Type: "select", Options: []string{"No", "Yes"}, Default: "No", Section: "Group details",
 			Help: "Adds the groups.security label, which cannot be removed afterwards."},
+		{Name: "members", Label: "Member email", Type: "textarea", Section: "Add members",
+			Help: "Optional: users, service accounts or groups to add, one per line or separated by commas."},
+		{Name: "memberRole", Label: "Google Groups role", Type: "select", Options: []string{"MEMBER", "MANAGER", "OWNER"},
+			OptionLabels: map[string]string{"MEMBER": "Member", "MANAGER": "Manager", "OWNER": "Owner"}, Default: "MEMBER", Section: "Add members"},
 	}
 }
+
+func (iamGroupsProvider) CreateOnPage() bool   { return true }
+func (iamGroupsProvider) CreateLayout() string { return console.CreateLayoutPage }
+func (iamGroupsProvider) CreateTitle() string  { return "Create group" }
 
 // groupEmailPattern is a group email's shape in the instance's domain:
 // periods only between other characters, none of = & < > + , !
@@ -122,8 +133,6 @@ func addMemberHelp(g *resourcemanager.Group) string {
 	return h
 }
 
-func (iamGroupsProvider) CreateOnPage() bool { return true }
-
 func (p iamGroupsProvider) Create(_ context.Context, _ string, values map[string]string) (string, error) {
 	labels := map[string]string{resourcemanager.LabelDiscussionForum: ""}
 	if values["security"] == "Yes" {
@@ -133,6 +142,15 @@ func (p iamGroupsProvider) Create(_ context.Context, _ string, values map[string
 		DisplayName: values["displayName"], Description: values["description"], Labels: labels})
 	if err != nil {
 		return "", err
+	}
+	roles := []string{"MEMBER"}
+	if r := values["memberRole"]; r == "MANAGER" || r == "OWNER" {
+		roles = []string{r, "MEMBER"}
+	}
+	for _, m := range strings.FieldsFunc(values["members"], func(r rune) bool { return r == ',' || r == '\n' || r == '\r' || r == ' ' }) {
+		if _, _, err := p.registry.CreateMembership(g.Name(), m, "", roles); err != nil {
+			return g.Email, fmt.Errorf("created %s, but could not add %s: %w", g.Email, m, err)
+		}
 	}
 	return g.Email, nil
 }

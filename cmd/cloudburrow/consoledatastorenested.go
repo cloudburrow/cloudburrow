@@ -285,7 +285,7 @@ func (p datastoreProvider) lookupDatastoreElement(ctx context.Context, project s
 // base is where v is inside the property: none for the property itself, and
 // an element's steps on that element's page. drawn is the whole property as
 // read, whose digest every row's actions carry (#923).
-func datastoreElementsSection(project string, scope datastoreScope, key *datastore.Key, kind, name string, base []any, prop, drawn *datastorepb.Value) (console.Section, bool) {
+func datastoreElementsSection(home datastoreHome, scope datastoreScope, key *datastore.Key, kind, name string, base []any, prop, drawn *datastorepb.Value) (console.Section, bool) {
 	switch prop.GetValueType().(type) {
 	case *datastorepb.Value_ArrayValue, *datastorepb.Value_EntityValue:
 	default:
@@ -299,7 +299,7 @@ func datastoreElementsSection(project string, scope datastoreScope, key *datasto
 			break
 		}
 		el.Steps = append(append([]any{}, base...), el.Steps...)
-		v := datastoreValueGo(el.Value, project)
+		v := datastoreValueGo(el.Value, home)
 		at := scope.at(kind, datastoreEntityAddress(key), name, datastoreElementSegment(el.Steps))
 		row := console.Resource{
 			Name: datastoreElementLabel(name, el.Steps),
@@ -309,7 +309,7 @@ func datastoreElementsSection(project string, scope datastoreScope, key *datasto
 				"Value":   datastoreRowValue(v, el.Value.GetExcludeFromIndexes()),
 			},
 			Opens:   at,
-			Actions: datastoreElementActions(project, el, drawn),
+			Actions: datastoreElementActions(home, el, drawn),
 			ActsOn:  at,
 		}
 		if isDatastoreKeyStep(el.Steps) || el.Value.GetArrayValue() != nil {
@@ -348,7 +348,7 @@ func (p datastoreProvider) elementDetail(ctx context.Context, project string, sc
 	if err != nil {
 		return console.Detail{Unavailable: err.Error()}, nil
 	}
-	v := datastoreValueGo(el.Value, project)
+	v := datastoreValueGo(el.Value, homeOf(ctx, project))
 	summary := []console.Property{
 		{Label: "Kind", Value: kind},
 		{Label: "Key", Value: datastoreEntityHeading(key)},
@@ -372,7 +372,7 @@ func (p datastoreProvider) elementDetail(ctx context.Context, project string, sc
 	}
 	// What is inside an array or embedded entity, each opening its own page
 	// (#911).
-	if sec, ok := datastoreElementsSection(project, scope, key, kind, name, steps, el.Value, drawn); ok {
+	if sec, ok := datastoreElementsSection(homeOf(ctx, project), scope, key, kind, name, steps, el.Value, drawn); ok {
 		d.Sections = append(d.Sections, sec)
 	}
 	return d, nil
@@ -384,9 +384,9 @@ func (p datastoreProvider) elementDetail(ctx context.Context, project string, sc
 // every value (#911). The action route checks the same things in the
 // transaction, so a value offered no edit is refused there too. Each carries
 // the digest of drawn, the property as read (#923).
-func datastoreElementActions(project string, el datastoreElement, drawn *datastorepb.Value) []console.Action {
+func datastoreElementActions(home datastoreHome, el datastoreElement, drawn *datastorepb.Value) []console.Action {
 	var out []console.Action
-	if fields, _, ok := datastoreElementForm(datastoreValueGo(el.Value, project), isDatastoreKeyStep(el.Steps),
+	if fields, _, ok := datastoreElementForm(datastoreValueGo(el.Value, home), isDatastoreKeyStep(el.Steps),
 		el.Value.GetExcludeFromIndexes()); ok {
 		out = append(out, datastoreElementAction(fields))
 	}
@@ -415,7 +415,7 @@ func (p datastoreProvider) elementActions(ctx context.Context, project string, s
 	if err != nil {
 		return nil
 	}
-	return datastoreElementActions(project, el, drawn)
+	return datastoreElementActions(homeOf(ctx, project), el, drawn)
 }
 
 // parseDatastoreElementValue reads Edit value's form: one value, as Edit
@@ -458,7 +458,7 @@ func (p datastoreProvider) editDatastoreElement(ctx context.Context, project str
 		return err
 	}
 	return p.changeDrawnProperty(ctx, project, scope, path, values, func(prop *datastorepb.Value) error {
-		return setDatastoreElement(prop, project, name, steps, parsed, datastoreExcludedValue(values))
+		return setDatastoreElement(prop, homeOf(ctx, project), name, steps, parsed, datastoreExcludedValue(values))
 	})
 }
 
@@ -479,12 +479,12 @@ func (p datastoreProvider) changeProperty(ctx context.Context, project string, s
 // noIndex names or, when it is nil, the old value's, and the old value's
 // meaning when the type is the same; nothing else inside the property
 // changes.
-func setDatastoreElement(prop *datastorepb.Value, project, name string, steps []any, parsed any, noIndex *bool) error {
+func setDatastoreElement(prop *datastorepb.Value, home datastoreHome, name string, steps []any, parsed any, noIndex *bool) error {
 	label := datastoreElementLabel(name, steps)
 	return replaceDatastoreElement(prop, steps, label, func(old *datastorepb.Value) (*datastorepb.Value, error) {
 		// Checked again in the transaction: the value may have changed
 		// since the form was drawn.
-		if _, why, ok := datastoreElementForm(datastoreValueGo(old, project), isDatastoreKeyStep(steps), old.GetExcludeFromIndexes()); !ok {
+		if _, why, ok := datastoreElementForm(datastoreValueGo(old, home), isDatastoreKeyStep(steps), old.GetExcludeFromIndexes()); !ok {
 			return nil, fmt.Errorf("%s: %s", label, why)
 		}
 		flag := old.GetExcludeFromIndexes()

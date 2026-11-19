@@ -50,7 +50,7 @@ func TestConsoleBuildTriggersAndWorkerPools(t *testing.T) {
 		t.Fatalf("triggers = %+v", tl.Items)
 	}
 	acts := trigs.Actions(tl.Items[0])
-	if len(acts) != 1 || acts[0].ID != "run" {
+	if len(acts) != 2 || acts[0].ID != "run" || acts[1].ID != "disable-trigger" {
 		t.Fatalf("actions = %+v", acts)
 	}
 	if err := trigs.Act(ctx, "", "t1", "run"); err == nil || !strings.Contains(err.Error(), "--cloudbuild-host-steps") {
@@ -100,11 +100,16 @@ func TestConsoleBuildTriggerPageEditAndDisable(t *testing.T) {
 		}
 		return strings.Join(out, ",")
 	}
-	if got := ids(); got != "edit-trigger,disable-trigger,run" {
+	if got := ids(); got != "run,disable-trigger" {
 		t.Errorf("an enabled manual trigger's actions: %s", got)
 	}
-	if err := trigs.ActAt(ctx, "", []string{"t2"}, "edit-trigger", map[string]string{"description": "second", "image": "busybox:1.36",
-		"command": "echo two", "pool": ""}); err != nil {
+	// Edit (#1854) is Create trigger's page, prefilled; an inline config
+	// replaces the build.
+	if d, _ := trigs.Detail(ctx, "", []string{"t2"}); d.Edit == nil || d.Edit.Title != "Edit trigger" {
+		t.Fatalf("the trigger's page offers no Edit trigger form: %+v", d.Edit)
+	}
+	if err := trigs.Edit(ctx, "", []string{"t2"}, map[string]string{"description": "second", "event": evManual, "config": cfgFile,
+		"location": locInline, "inline": "steps:\n- name: busybox:1.36\n  entrypoint: sh\n  args: ['-c', 'echo two']\n"}); err != nil {
 		t.Fatalf("Edit trigger: %v", err)
 	}
 	d, err := trigs.Detail(ctx, "", []string{"t2"})
@@ -121,7 +126,7 @@ func TestConsoleBuildTriggerPageEditAndDisable(t *testing.T) {
 	if err := trigs.ActAt(ctx, "", []string{"t2"}, "disable-trigger", nil); err != nil {
 		t.Fatalf("Disable: %v", err)
 	}
-	if got := ids(); got != "edit-trigger,enable-trigger" {
+	if got := ids(); got != "enable-trigger" {
 		t.Errorf("a disabled trigger's actions: %s", got)
 	}
 	if tl, _ := trigs.List(ctx, ""); len(tl.Items) != 1 || tl.Items[0].Status != "Disabled" {
@@ -133,8 +138,11 @@ func TestConsoleBuildTriggerPageEditAndDisable(t *testing.T) {
 	if d, _ := trigs.Detail(ctx, "", []string{"t2"}); !strings.Contains(consoleDetailText(d), "Enabled") {
 		t.Errorf("the trigger's page after Enable: %+v", d.Summary)
 	}
-	if err := trigs.ActAt(ctx, "", []string{"t2"}, "edit-trigger", map[string]string{"image": "", "command": "x"}); err == nil {
-		t.Error("Edit trigger took an empty step image")
+	if err := trigs.Edit(ctx, "", []string{"t2"}, map[string]string{"event": evManual, "config": cfgFile, "location": locInline, "inline": "steps: []"}); err == nil {
+		t.Error("Edit trigger took an inline config with no steps")
+	}
+	if err := trigs.Edit(ctx, "", []string{"t2"}, map[string]string{"event": evManual, "config": cfgAuto}); err == nil {
+		t.Error("Edit trigger took Autodetected on a manual trigger with no repository")
 	}
 }
 
@@ -176,7 +184,7 @@ func TestConsoleBuildPubsubTrigger(t *testing.T) {
 	if len(tl.Items) != 1 || tl.Items[0].Fields["Event"] != "Pub/Sub message: projects/console-ps/topics/builds" {
 		t.Fatalf("triggers = %+v", tl.Items)
 	}
-	if acts := trigs.Actions(tl.Items[0]); len(acts) != 0 {
-		t.Errorf("a Pub/Sub trigger offers %+v; it runs from its topic", acts)
+	if acts := trigs.Actions(tl.Items[0]); len(acts) != 1 || acts[0].ID != "disable-trigger" {
+		t.Errorf("a Pub/Sub trigger offers %+v; it runs from its topic, so only Disable", acts)
 	}
 }

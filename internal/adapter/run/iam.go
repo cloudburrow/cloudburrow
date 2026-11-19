@@ -148,6 +148,9 @@ func (s *Server) setPolicy(ctx context.Context, o iamOwner, req *iampb.SetIamPol
 	if err != nil {
 		return nil, err
 	}
+	if err := checkOrgMembers(ctx, req.GetResource(), st.Proto(), next.Proto()); err != nil {
+		return nil, err
+	}
 	verb, rv := "create", ""
 	if cm != nil {
 		verb, rv = "replace", cm.Metadata.ResourceVersion

@@ -61,7 +61,8 @@ func TestRunH2CPortServesGRPC(t *testing.T) {
 
 	base, host := ingress(t), hostOf(t, svc.GetUri())
 	conn, err := grpc.NewClient(strings.TrimPrefix(base, "http://"),
-		grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithAuthority(host))
+		append([]grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithAuthority(host)},
+			ownerInvokeDialOptions(t, host)...)...)
 	if err != nil {
 		t.Fatalf("grpc.NewClient: %v", err)
 	}

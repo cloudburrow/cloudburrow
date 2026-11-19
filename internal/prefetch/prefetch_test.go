@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -249,6 +250,8 @@ type fakeRunner struct {
 	archive []byte          // what docker save or ctr export writes
 	// loadAs names the image each cached file holds, as a load would.
 	loadAs map[string]string
+	// copied holds what docker cp put in the node, by path.
+	copied map[string][]byte
 }
 
 func (f *fakeRunner) record(name string, args []string) string {
@@ -274,6 +277,28 @@ func (f *fakeRunner) Run(_ context.Context, name string, args ...string) (string
 		return "", nil
 	case strings.HasPrefix(c, "kind get nodes"):
 		return "node-1\n", nil
+	case name == "docker" && len(args) == 3 && args[0] == "cp":
+		// docker cp FILE NODE:PATH, an archive into a node.
+		b, err := os.ReadFile(args[1])
+		if err != nil {
+			return "", err
+		}
+		f.mu.Lock()
+		if f.copied == nil {
+			f.copied = map[string][]byte{}
+		}
+		f.copied[args[2][strings.Index(args[2], ":")+1:]] = b
+		f.mu.Unlock()
+		return "", nil
+	case strings.Contains(c, " stat -c %s "):
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		return strconv.Itoa(len(f.copied[args[len(args)-1]])), nil
+	case strings.Contains(c, " images import "):
+		f.mu.Lock()
+		f.present[strings.TrimPrefix(string(f.copied[args[len(args)-1]]), "archive:")] = true
+		f.mu.Unlock()
+		return "", nil
 	}
 	return "", nil
 }
@@ -293,15 +318,6 @@ func (f *fakeRunner) RunStdout(_ context.Context, w io.Writer, name string, args
 	}
 	_, err := w.Write(f.archive)
 	return err
-}
-
-func (f *fakeRunner) RunStdin(_ context.Context, stdin io.Reader, name string, args ...string) (string, error) {
-	f.record(name, args)
-	b, _ := io.ReadAll(stdin)
-	f.mu.Lock()
-	f.present[strings.TrimPrefix(string(b), "archive:")] = true
-	f.mu.Unlock()
-	return "", nil
 }
 
 func (f *fakeRunner) joined() string {

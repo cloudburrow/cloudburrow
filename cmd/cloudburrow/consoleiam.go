@@ -17,6 +17,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/cloudburrow/cloudburrow/internal/iameval"
 	"sort"
 	"strconv"
 	"strings"
@@ -32,6 +33,8 @@ const projectIAMNote = "The project's IAM policy, stored and never enforced (ADR
 
 type projectIAMProvider struct {
 	registry *resourcemanager.Registry
+	// iam answers Policy Troubleshooter and Policy Analyzer (#1879).
+	iam *iameval.Enforcer
 }
 
 func (projectIAMProvider) ID() string    { return "iam" }

@@ -140,8 +140,10 @@ type clusterRecord struct {
 	Persistence      string            `json:"persistence,omitempty"`
 	ZoneDistribution string            `json:"zoneDistribution,omitempty"`
 	Maintenance      string            `json:"maintenance,omitempty"`
-	Nodes            []*clusterNode    `json:"nodes"`
-	NextNode         int               `json:"nextNode"`
+	// Scheduled is the maintenance event scheduled, or nil (#1524).
+	Scheduled *scheduledMaintenance `json:"scheduledMaintenance,omitempty"`
+	Nodes     []*clusterNode        `json:"nodes"`
+	NextNode  int                   `json:"nextNode"`
 	// Labels are the REST Cluster\'s labels, which the Go proto has not
 	// (clusterlabels.go).
 	Labels map[string]string `json:"labels,omitempty"`
@@ -252,6 +254,7 @@ func (s *Server) EnableClusters(ctx context.Context, rt ClusterRuntime, dial Clu
 	s.clusters = &clusters{rt: rt, dial: dial, db: db, api: s, now: time.Now, bg: ctx,
 		byName: map[string]*clusterRecord{}, busy: map[string]string{}}
 	go s.clusters.autoBackups(ctx)
+	go s.clusters.maintenanceLoop(ctx)
 }
 
 const clusterPrefix = "clusters/"
@@ -574,6 +577,9 @@ func (c *clusters) render(r *clusterRecord) *clusterpb.Cluster {
 		if json.Unmarshal([]byte(r.Maintenance), mp) == nil {
 			out.MaintenancePolicy = mp
 		}
+	}
+	if m := r.Scheduled; m != nil {
+		out.MaintenanceSchedule = &clusterpb.ClusterMaintenanceSchedule{StartTime: timestamppb.New(m.Start), EndTime: timestamppb.New(m.Start.Add(maintenanceWindow))}
 	}
 	if r.state != clusterpb.Cluster_ACTIVE && r.message != "" {
 		out.StateInfo = &clusterpb.Cluster_StateInfo{Info: &clusterpb.Cluster_StateInfo_UpdateInfo_{

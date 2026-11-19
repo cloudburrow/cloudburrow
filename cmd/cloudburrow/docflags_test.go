@@ -108,8 +108,9 @@ func cliFlags(t *testing.T, cmd string) map[string]bool {
 	config.Usage(&help)
 	switch cmd {
 	case "terraform":
-		// `terraform --help` is terraform's own; ours is --binary.
-		help.WriteString(" --binary")
+		// `terraform --help` is terraform's own; ours are --binary and
+		// --intercept-hardcoded (#1578).
+		help.WriteString(" --binary --intercept-hardcoded")
 	default:
 		var out bytes.Buffer
 		_ = run([]string{cmd, "--help"}, &out, &out)

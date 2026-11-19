@@ -103,7 +103,9 @@ func TestBigtableLogicalViewAndSnapshotThroughTheBrowser(t *testing.T) {
 
 	p := open(t)
 	p.navigate("/bigtable-instances/" + id + "?project=" + project)
-	p.clickText("#view .page-actions button", "Create logical view")
+	p.waitFor(`document.querySelector("#tab-logicalviews") !== null`)
+	p.run(chromedp.Click(chromedp.CSS(`#tab-logicalviews`)))
+	p.clickText("#view #section-actions-logicalviews button", "Create logical view")
 	p.waitFor(`document.querySelector(".modal #f-view") !== null`)
 	p.setField(".modal #f-view", "lv")
 	p.setField(".modal #f-query", "SELECT _key FROM items")

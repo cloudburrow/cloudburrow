@@ -36,6 +36,8 @@ type tasksService struct {
 	interpose []grpc.UnaryServerInterceptor
 	// requests reports each JSON request to the admin event log (#591).
 	requests func(rest.Request)
+	// wrapJSON wraps the JSON API (IAM enforcement, #1879); nil is none.
+	wrapJSON func(http.Handler) http.Handler
 	cfg      config.Config
 	// observer receives each dispatch attempt, so the console can show the
 	// attempt history a queue count does not.
@@ -156,6 +158,9 @@ func (t *tasksService) Start(ctx context.Context) error {
 	router := rest.NewRouter()
 	tasks.NewRESTServerFor(api).Routes(router)
 	var jsonAPI http.Handler = router
+	if t.wrapJSON != nil {
+		jsonAPI = t.wrapJSON(jsonAPI)
+	}
 	if t.requests != nil {
 		jsonAPI = rest.Observe(jsonAPI, t.requests)
 	}
@@ -217,4 +222,12 @@ func (t *tasksService) appEngineURL() string {
 		return ""
 	}
 	return t.cfg.AppEngineURL
+}
+
+// running is how many of queue's tasks are being dispatched now (#1848).
+func (t *tasksService) running(queue string) int {
+	if t == nil {
+		return 0
+	}
+	return t.worker.Running(queue)
 }

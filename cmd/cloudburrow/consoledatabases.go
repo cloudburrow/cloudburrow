@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -76,6 +78,7 @@ func (p firestoreProvider) List(ctx context.Context, project string) (console.Li
 		base.Prompt = "Firestore holds collections per project. Choose one in the toolbar."
 		return base, nil
 	}
+	base.Scope = p.databaseScope(ctx, project)
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
 
@@ -87,7 +90,7 @@ func (p firestoreProvider) List(ctx context.Context, project string) (console.Li
 	// sent per call instead.
 	opts := append(localOpts(p.endpoint),
 		option.WithGRPCDialOption(grpc.WithPerRPCCredentials(emulatorOwner{})))
-	c, err := firestore.NewClient(ctx, project, opts...)
+	c, err := firestore.NewClientWithDatabase(ctx, project, firestoreDatabaseIn(ctx), opts...)
 	if err != nil {
 		base.Unavailable = "cannot reach Firestore: " + err.Error()
 		return base, nil
@@ -157,56 +160,153 @@ func countDocuments(ctx context.Context, col *firestore.CollectionRef) string {
 
 // --- Datastore ------------------------------------------------------------
 
-type datastoreProvider struct{ endpoint string }
+// datastoreProvider is the Datastore page; firestore, when Firestore is
+// served, is the Firestore Admin API, which lists the project's Datastore
+// mode databases (#1883).
+type datastoreProvider struct{ endpoint, firestore string }
 
 func (datastoreProvider) ID() string    { return "datastore" }
 func (datastoreProvider) Title() string { return "Datastore" }
 
 func (p datastoreProvider) List(ctx context.Context, project string) (console.Listing, error) {
-	// Every namespace's kinds (#854): a kind in a namespace other than the
-	// default is a different kind, and a screen that listed only the default
-	// namespace hid it. The Namespace column is the picker: its filter narrows
-	// the list to one namespace, and a row opens the kind in its own.
-	base := console.Listing{Columns: []string{"Namespace"}, Noun: "kinds", NameColumn: "Kind"}
+	// Google's Entities page (#1846): the entities of one kind, chosen with
+	// the namespace in pickers over the table, each row opening its entity
+	// and checked rows deleted together. Before, the page listed kinds
+	// (#854), which Google's has not.
+	base := console.Listing{Columns: datastoreEntityColumns, Noun: "entities", NameColumn: datastoreNameIDColumn, RowsOpenable: true}
 	if project == "" {
 		base.Prompt = "Datastore holds entities per project. Choose one in the toolbar."
 		return base, nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
+	base.Scope = p.databaseScope(ctx, project)
+	lctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
 
-	c, err := datastore.NewClient(ctx, project, localOpts(p.endpoint)...)
+	c, err := p.client(lctx, project)
 	if err != nil {
 		base.Unavailable = "cannot reach Datastore: " + err.Error()
 		return base, nil
 	}
 	defer c.Close()
 
-	namespaces, err := datastoreNamespaces(ctx, c)
+	namespaces, err := datastoreNamespaces(lctx, c)
 	if err != nil {
 		base.Unavailable = "listing namespaces: " + err.Error()
 		return base, nil
 	}
-	var items []console.Resource
-	for _, ns := range append([]string{""}, namespaces...) {
-		kinds, err := datastoreKinds(ctx, c, ns)
-		if err != nil {
-			base.Unavailable = "listing kinds: " + err.Error()
-			return base, nil
-		}
-		for _, kind := range kinds {
-			item := console.Resource{Name: kind, Fields: map[string]string{"Namespace": namespaceLabel(ns)}}
-			if ns != "" {
-				item.Opens = datastoreScope{ns: ns, namespaced: true}.at(kind)
-			}
-			items = append(items, item)
+	ns := console.ScopeValue(ctx, datastoreNamespaceKey)
+	nsScope := &console.Scope{Key: datastoreNamespaceKey, Label: "Namespace", Selected: ns, Default: "",
+		Options: []console.ScopeOption{{ID: "", Label: datastoreDefaultNamespaceLabel}}}
+	known := ns == ""
+	for _, n := range namespaces {
+		nsScope.Options = append(nsScope.Options, console.ScopeOption{ID: n})
+		known = known || n == ns
+	}
+	if !known {
+		nsScope.Options = append(nsScope.Options, console.ScopeOption{ID: ns, Label: ns + " (no entities)"})
+	}
+	kinds, err := datastoreKinds(lctx, c, ns)
+	if err != nil {
+		base.Unavailable = "listing kinds: " + err.Error()
+		return base, nil
+	}
+	kind := console.ScopeValue(ctx, datastoreKindKey)
+	kindScope := &console.Scope{Key: datastoreKindKey, Label: "Kind"}
+	for _, k := range kinds {
+		kindScope.Options = append(kindScope.Options, console.ScopeOption{ID: k})
+	}
+	if len(kinds) > 0 {
+		kindScope.Default = kinds[0]
+		if kind == "" {
+			kind = kinds[0]
 		}
 	}
-	base.Items, base.Total = items, len(items)
-	base.Note = "A kind exists because an entity has it: Create entity makes its first entity, " +
-		"and it goes when its last entity is deleted. Kinds in every namespace are listed, the default first; " +
-		"filter on a namespace's name to see only its kinds."
+	if kind != "" && !slices.Contains(kinds, kind) {
+		kindScope.Options = append(kindScope.Options, console.ScopeOption{ID: kind, Label: kind + " (no entities)"})
+	}
+	kindScope.Selected = kind
+	base.Filters = []*console.Scope{nsScope, kindScope}
+	base.Note = "The entities of the kind chosen, in the namespace chosen. A kind exists because an entity has it: " +
+		"Create entity makes its first entity, and it goes when its last entity is deleted. " +
+		"Check entities to delete them together; a kind's own page has Query by kind and Query by GQL."
+	if kind == "" {
+		return base, nil
+	}
+	scope := datastoreScope{ns: ns, namespaced: ns != ""}
+	page, err := p.entitiesPage(ctx, project, scope, kind, "")
+	if err != nil {
+		return console.Listing{}, err
+	}
+	if page.Unavailable != "" {
+		base.Unavailable = page.Unavailable
+		return base, nil
+	}
+	base.Items, base.Total, base.More, base.Cursor = page.Items, page.Total, page.More, page.Cursor
 	return base, nil
+}
+
+// The Entities page's pickers' query parameters (console.Filterer).
+const (
+	datastoreNamespaceKey = "namespace"
+	datastoreKindKey      = "kind"
+)
+
+// datastoreDefaultNamespaceLabel names the default namespace, as Google's
+// console does.
+const datastoreDefaultNamespaceLabel = "[default]"
+
+// FilterKeys implements console.Filterer: the Entities page's Namespace
+// and Kind.
+func (datastoreProvider) FilterKeys() []string {
+	return []string{datastoreNamespaceKey, datastoreKindKey}
+}
+
+var _ console.Filterer = datastoreProvider{}
+
+// Delete implements console.Deleter: an entity the Entities page lists,
+// by its Name/ID, in the kind and namespace its pickers chose. Two
+// entities of the kind with one Name/ID under different parents are
+// deleted from their own pages.
+func (p datastoreProvider) Delete(ctx context.Context, project, name string) error {
+	if project == "" {
+		return errors.New("choose a project first")
+	}
+	ns := console.ScopeValue(ctx, datastoreNamespaceKey)
+	kind := console.ScopeValue(ctx, datastoreKindKey)
+	lctx, cancel := context.WithTimeout(ctx, dbTimeout)
+	defer cancel()
+	c, err := p.client(lctx, project)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	if kind == "" {
+		kinds, err := datastoreKinds(lctx, c, ns)
+		if err != nil {
+			return err
+		}
+		if len(kinds) == 0 {
+			return fmt.Errorf("no entity %s: the namespace has no kinds", name)
+		}
+		kind = kinds[0]
+	}
+	keys, err := c.GetAll(lctx, datastore.NewQuery(kind).Namespace(ns).KeysOnly(), nil)
+	if err != nil {
+		return err
+	}
+	var match []*datastore.Key
+	for _, k := range keys {
+		if datastoreNameID(k) == name {
+			match = append(match, k)
+		}
+	}
+	switch len(match) {
+	case 0:
+		return fmt.Errorf("%s has no entity %s in namespace %s", kind, name, namespaceLabel(ns))
+	case 1:
+		return c.Delete(lctx, match[0])
+	}
+	return fmt.Errorf("%d entities of %s are %s, under different parents: delete each from its own page", len(match), kind, name)
 }
 
 // datastoreNamespaces are the project's namespaces other than the default,
@@ -367,8 +467,10 @@ func (p spannerProvider) List(ctx context.Context, project string) (console.List
 	// every instance for a database with that name and took whichever it found
 	// first — so with a duplicate, the console opened an arbitrary one.
 	base := console.Listing{
-		Columns: []string{"Databases", "Nodes", "Configuration"},
-		Noun:    "instances", NameColumn: "Instance",
+		// Google's Instances list (#1859): the ID links, then the name,
+		// edition, configuration, compute capacity, databases and labels.
+		Columns: []string{"Instance name", "Edition", "Configuration", "Compute capacity", "Databases", "Labels"},
+		Noun:    "instances", NameColumn: "Instance ID",
 		AlwaysStatus: true,
 		RowsOpenable: true,
 	}
@@ -416,9 +518,12 @@ func (p spannerProvider) List(ctx context.Context, project string) (console.List
 			Name:   lastSegment(inst.GetName()),
 			Status: inst.GetState().String(),
 			Fields: map[string]string{
-				"Databases":     count,
-				"Nodes":         fmt.Sprint(inst.GetNodeCount()),
-				"Configuration": lastSegment(inst.GetConfig()),
+				"Instance name":    inst.GetDisplayName(),
+				"Edition":          spannerEdition(inst.GetEdition()),
+				"Configuration":    lastSegment(inst.GetConfig()),
+				"Compute capacity": spannerCapacity(inst.GetNodeCount(), inst.GetProcessingUnits()),
+				"Databases":        count,
+				"Labels":           orDash(spannerLabels(inst.GetLabels())),
 			},
 		})
 	}
@@ -616,7 +721,7 @@ func (p firestoreProvider) documentsPage(ctx context.Context, project, name, aft
 
 	opts := append(localOpts(p.endpoint),
 		option.WithGRPCDialOption(grpc.WithPerRPCCredentials(emulatorOwner{})))
-	c, err := firestore.NewClient(ctx, project, opts...)
+	c, err := firestore.NewClientWithDatabase(ctx, project, firestoreDatabaseIn(ctx), opts...)
 	if err != nil {
 		out.Unavailable = "cannot reach Firestore: " + err.Error()
 		return out, nil
@@ -699,6 +804,9 @@ func (p datastoreProvider) Detail(ctx context.Context, project string, path []st
 	// (datastoreScope), and a child entity is addressed by its whole key path
 	// (datastoreEntityKey), so the three levels hold in every namespace and
 	// at every depth of ancestry (#854).
+	if len(path) == 1 && path[0] == datastoreIndexesSegment {
+		return p.indexesDetail(ctx, project)
+	}
 	scope, rest := parseDatastorePath(path)
 	var (
 		d   console.Detail
@@ -754,7 +862,47 @@ func (p datastoreProvider) kindDetail(ctx context.Context, project string, scope
 		return console.Detail{}, err
 	}
 	summary := []console.Property{{Label: "Namespace", Value: namespaceLabel(scope.ns)}}
-	return singleSection("entities", "Entities", list, summary), nil
+	d := singleSection("entities", "Entities", list, summary)
+	// Query by GQL's Ctrl+Space offers the namespace's kinds (#1846).
+	if label, fields := p.QueryForm(scope.at(kind)); len(fields) > 0 {
+		if kinds := p.kindCompletions(ctx, project, scope.ns); len(kinds) > 0 {
+			for i := range fields {
+				if fields[i].Name == "gql" {
+					fields[i].Completions = kinds
+				}
+			}
+		}
+		// Google's buttons: Run and Clear on Query by kind, Run query on
+		// Query by GQL.
+		d.Query = &console.QuerySpec{Label: label, Fields: fields, ClearLabel: "Clear",
+			TabLabels: map[string]string{datastoreQueryByGQL: "Run query"}}
+	}
+	return d, nil
+}
+
+// kindCompletions are the kinds of namespace ns, as GQL names them
+// (backquoted where a bare name would not parse), for Query by GQL's
+// Ctrl+Space; none when they cannot be listed.
+func (p datastoreProvider) kindCompletions(ctx context.Context, project, ns string) []string {
+	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
+	defer cancel()
+	c, err := p.client(ctx, project)
+	if err != nil {
+		return nil
+	}
+	defer c.Close()
+	kinds, err := datastoreKinds(ctx, c, ns)
+	if err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(kinds))
+	for _, k := range kinds {
+		if !datastoreBareGQLNameRe.MatchString(k) {
+			k = "`" + strings.ReplaceAll(k, "`", "``") + "`"
+		}
+		out = append(out, k)
+	}
+	return out
 }
 
 // namespacesDetail lists the namespaces other than the default, whose kinds
@@ -863,7 +1011,7 @@ func (p datastoreProvider) entitiesPage(ctx context.Context, project string, sco
 		// An entity's page is addressed by its encoded key, which tells
 		// every entity from every other (#875); its row names it by Name/ID
 		// and its parent, which tell the rows apart too (#882, #885).
-		k, props := datastoreEntityProperties(e, project)
+		k, props := datastoreEntityProperties(e, homeOf(ctx, project))
 		items = append(items, datastoreEntityRow(scope, name, k, datastorePropertiesCell(props)))
 	}
 	out.Items, out.Total = items, len(items)
@@ -910,6 +1058,23 @@ func datastoreEntityRow(scope datastoreScope, kind string, k *datastore.Key, pro
 
 // Page implements console.Pager for a kind's entities.
 func (p datastoreProvider) Page(ctx context.Context, project string, path []string, cursor string) (console.Listing, error) {
+	if len(path) == 0 {
+		// The Entities page, in its pickers' namespace and kind.
+		ns, kind := console.ScopeValue(ctx, datastoreNamespaceKey), console.ScopeValue(ctx, datastoreKindKey)
+		if kind == "" {
+			c, err := p.client(ctx, project)
+			if err != nil {
+				return console.Listing{}, err
+			}
+			kinds, err := datastoreKinds(ctx, c, ns)
+			_ = c.Close()
+			if err != nil || len(kinds) == 0 {
+				return console.Listing{}, errors.New("choose a kind")
+			}
+			kind = kinds[0]
+		}
+		return p.entitiesPage(ctx, project, datastoreScope{ns: ns, namespaced: ns != ""}, kind, cursor)
+	}
 	scope, rest := parseDatastorePath(path)
 	if scope.index || len(rest) != 1 {
 		return console.Listing{}, fmt.Errorf("only a kind's entity list can be paged")
@@ -1152,7 +1317,7 @@ func (p spannerProvider) instanceDetail(ctx context.Context, project, instanceID
 	defer dbAdmin.Close()
 
 	databases := console.Listing{
-		Columns: []string{"Dialect", "Created"}, NameColumn: "Database", Noun: "databases",
+		Columns: []string{"Dialect", "Created"}, NameColumn: "Database name", Noun: "databases",
 		AlwaysStatus: true,
 		RowsOpenable: true,
 	}
@@ -1174,7 +1339,7 @@ func (p spannerProvider) instanceDetail(ctx context.Context, project, instanceID
 			Name:   lastSegment(db.GetName()),
 			Status: db.GetState().String(),
 			Fields: map[string]string{
-				"Dialect": db.GetDatabaseDialect().String(),
+				"Dialect": spannerDialectOf(db),
 				"Created": created,
 			},
 		})
@@ -1201,26 +1366,52 @@ func (p spannerProvider) instanceDetail(ctx context.Context, project, instanceID
 		groups = append(groups, *configGroup)
 	}
 
+	// Google's instance page (#1859): a left-hand menu of Overview (the
+	// databases, with Create database), Backup/Restore, Import/Export,
+	// Monitoring and System insights, then CloudBurrow's own pages.
+	backupSections[0].Label = "Backup/Restore"
+	// The title line has Google's Edit instance, Create database and Delete
+	// instance (with Move instance); Create backup is at the top of the
+	// Backup/Restore tab and Create instance partition at the top of the
+	// Instance partitions tab, where Google's pages put such actions. The
+	// action route still checks every one against DetailActions.
+	var header []console.Action
+	for _, a := range p.DetailActions(ctx, project, []string{instanceID}) {
+		switch a.ID {
+		case "createbackup":
+			backupSections[0].Actions = append(backupSections[0].Actions, a)
+		case "createpartition":
+			partitions.Actions = append(partitions.Actions, a)
+		default:
+			header = append(header, a)
+		}
+	}
 	return console.Detail{
+		SideNav: true,
+		Actions: header,
 		Summary: []console.Property{
-			{Label: "State", Value: inst.GetState().String()},
-			{Label: "Databases", Value: fmt.Sprint(databases.Total)},
-			{Label: "Nodes", Value: fmt.Sprint(inst.GetNodeCount())},
+			{Label: "Instance name", Value: inst.GetDisplayName()},
+			{Label: "Edition", Value: spannerEdition(inst.GetEdition())},
 			{Label: "Configuration", Value: lastSegment(inst.GetConfig())},
+			{Label: "Compute capacity", Value: spannerCapacity(inst.GetNodeCount(), inst.GetProcessingUnits())},
+			{Label: "Databases", Value: fmt.Sprint(databases.Total)},
+			{Label: "Labels", Value: orDash(spannerLabels(inst.GetLabels()))},
 		},
 		Sections: []console.Section{
-			{ID: "databases", Label: "Databases", Listing: databases},
+			{ID: "databases", Label: "Overview", Listing: databases},
+			backupSections[0],
+			spannerNotLocal("import-export", "Import/Export", "Spanner's imports and exports are Dataflow jobs that read and write Avro or CSV files in Cloud Storage, and CloudBurrow runs no Dataflow. Copy data with Spanner Studio's DML, or a backup's restore."),
+			spannerNotLocal("monitoring", "Monitoring", "an instance's charts (CPU utilization, latency, throughput, storage) are Cloud Monitoring metrics, which the Spanner emulator does not report. The console's Monitoring page charts the requests this instance served."),
+			spannerNotLocal("system-insights", "System insights", "system insights are Cloud Monitoring dashboards over Spanner's metrics, which the emulator does not report."),
 			partitions,
 			operations,
-			backupSections[0],
 			backupSections[1],
 			backupSections[2],
 			{
 				ID: "configuration", Label: "Configuration", Kind: console.KindProperties,
 				Groups: groups,
-				Note: "Read-only. The emulator accepts an instance's node count and " +
-					"does nothing with it: there is one process serving everything, " +
-					"so capacity is not a setting that has an effect here.",
+				Note: "The emulator accepts an instance's compute capacity and does nothing with it: there is one process serving everything, " +
+					"so capacity is not a setting that has an effect here. Edit instance changes it.",
 			},
 			configs,
 			spannerConfigOperationsSection(ctx, instAdmin, project),
@@ -1228,12 +1419,17 @@ func (p spannerProvider) instanceDetail(ctx context.Context, project, instanceID
 	}, nil
 }
 
-// databaseDetail is a database's tables, its DDL and its query editor.
+// databaseDetail is a database's page, with Google's left-hand menu
+// (#1859): Overview (its tables), Spanner Studio, Indexes, Views, Change
+// streams, Sequences, Roles, Backup/Restore, Import/Export, Query insights,
+// Lock insights and Key Visualizer, then CloudBurrow's Backup schedules,
+// DDL and Properties.
 func (p spannerProvider) databaseDetail(ctx context.Context, project, instanceID, dbID string) (console.Detail, error) {
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
 
 	dbName := fmt.Sprintf("projects/%s/instances/%s/databases/%s", project, instanceID, dbID)
+	instName := fmt.Sprintf("projects/%s/instances/%s", project, instanceID)
 
 	dbAdmin, err := database.NewDatabaseAdminClient(ctx, localOpts(p.endpoint)...)
 	if err != nil {
@@ -1247,60 +1443,42 @@ func (p spannerProvider) databaseDetail(ctx context.Context, project, instanceID
 	}
 
 	tables := console.Listing{
-		Columns: []string{"Columns", "Indexes", "Parent"}, NameColumn: "Table", Noun: "tables",
+		Columns: []string{"Columns", "Indexes", "Interleaved in"}, NameColumn: "Table name", Noun: "tables",
 		RowsOpenable: true,
 	}
+	var cat spannerCatalog
+	catFailed := ""
 	c, err := newConsoleSpannerClient(ctx, p.endpoint, dbName)
 	if err != nil {
-		tables.Unavailable = "cannot open the database: " + err.Error()
+		catFailed = "cannot open the database: " + err.Error()
+		tables.Unavailable = catFailed
 	} else {
 		defer c.Close()
 		// INFORMATION_SCHEMA is Spanner's own catalogue, so this asks the
-		// database what it holds rather than keeping a second record of it.
-		// PARENT_TABLE_NAME is here because an interleaved table's parent is
-		// part of its identity, not a detail.
-		stmt := spanner.Statement{SQL: `
-			SELECT t.TABLE_NAME,
-			       (SELECT COUNT(1) FROM INFORMATION_SCHEMA.COLUMNS c
-			          WHERE c.TABLE_NAME = t.TABLE_NAME AND c.TABLE_SCHEMA = t.TABLE_SCHEMA),
-			       (SELECT COUNT(1) FROM INFORMATION_SCHEMA.INDEXES i
-			          WHERE i.TABLE_NAME = t.TABLE_NAME AND i.TABLE_SCHEMA = t.TABLE_SCHEMA),
-			       IFNULL(t.PARENT_TABLE_NAME, '')
-			FROM INFORMATION_SCHEMA.TABLES t
-			WHERE t.TABLE_SCHEMA = ''
-			ORDER BY t.TABLE_NAME`}
-		iter := c.Single().Query(ctx, stmt)
-		defer iter.Stop()
-		for {
-			row, err := iter.Next()
-			if err == iterator.Done {
-				break
-			}
-			if err != nil {
-				tables.Unavailable = "reading the schema: " + err.Error()
-				break
-			}
-			var table, parent string
-			var columns, indexes int64
-			if err := row.Columns(&table, &columns, &indexes, &parent); err != nil {
-				tables.Unavailable = "decoding the schema: " + err.Error()
-				break
-			}
+		// database what it holds rather than keeping a second record of it,
+		// in the database's own dialect.
+		cat = readSpannerCatalog(ctx, c, db.GetDatabaseDialect().String())
+		if e := cat.Errors["tables"]; e != "" {
+			tables.Unavailable = "reading the schema: " + e
+		}
+		perTable := map[string]int{}
+		for _, ix := range cat.Indexes {
+			perTable[ix[0]]++
+		}
+		for _, t := range cat.Tables {
 			tables.Items = append(tables.Items, console.Resource{
-				Name: table,
+				Name: t.Name,
 				Fields: map[string]string{
-					"Columns": fmt.Sprint(columns),
-					"Indexes": fmt.Sprint(indexes),
-					"Parent":  orDash(parent),
+					"Columns":        fmt.Sprint(len(t.Columns)),
+					"Indexes":        fmt.Sprint(perTable[t.Name]),
+					"Interleaved in": orDash(t.Parent),
 				},
 			})
 		}
 		tables.Total = len(tables.Items)
 	}
 
-	// The whole schema as Spanner states it. A table list says what exists; the
-	// DDL says how it was defined — the constraints, the interleaving and the
-	// key order that a per-table view has to reassemble from the catalogue.
+	// The whole schema as Spanner states it.
 	ddl := console.Section{ID: "ddl", Label: "DDL", Kind: console.KindText}
 	if statements, err := dbAdmin.GetDatabaseDdl(ctx,
 		&databasepb.GetDatabaseDdlRequest{Database: dbName}); err != nil {
@@ -1316,17 +1494,45 @@ func (p spannerProvider) databaseDetail(ctx context.Context, project, instanceID
 		created = t.AsTime().Format(time.RFC3339)
 	}
 	dbSections := spannerDatabaseBackupSections(ctx, dbAdmin, instanceID, dbID, dbName)
+	dbSections[1].Label = "Roles"
 
+	// Backup/Restore: this database's backups, each restorable from its
+	// row, with Create backup at the top of the tab.
+	backups := spannerBackupListing(ctx, dbAdmin, instanceID, instName)
+	mine := backups.Items[:0:0]
+	for _, b := range backups.Items {
+		if b.Fields["Database"] == dbID {
+			b.Actions = append([]console.Action{spannerRestoreAction()}, b.Actions...)
+			mine = append(mine, b)
+		}
+	}
+	backups.Items, backups.Total = mine, len(mine)
+	if len(mine) == 0 {
+		backups.Note = "No backups of " + dbID + " yet: Create backup takes one of its schema and rows."
+	}
+
+	catalog := spannerCatalogSections(cat, catFailed)
 	return console.Detail{
+		SideNav: true,
 		Summary: []console.Property{
-			{Label: "State", Value: db.GetState().String()},
+			{Label: "Dialect", Value: spannerDialectOf(db)},
 			{Label: "Instance", Value: instanceID},
 			{Label: "Tables", Value: fmt.Sprint(tables.Total)},
-			{Label: "Dialect", Value: db.GetDatabaseDialect().String()},
 			{Label: "Created", Value: created},
+			{Label: "State", Value: db.GetState().String()},
 		},
 		Sections: []console.Section{
-			{ID: "tables", Label: "Tables", Listing: tables},
+			{ID: "tables", Label: "Overview", Listing: tables},
+			{ID: "studio", Label: "Spanner Studio", Kind: console.KindStudio},
+			catalog[0], catalog[1], catalog[2], catalog[3],
+			dbSections[1],
+			{ID: "backup-restore", Label: "Backup/Restore", Listing: backups,
+				Actions: []console.Action{spannerCreateDatabaseBackupAction()}},
+			dbSections[0],
+			spannerNotLocal("import-export", "Import/Export", "Spanner's imports and exports are Dataflow jobs that read and write Avro or CSV files in Cloud Storage, and CloudBurrow runs no Dataflow."),
+			spannerNotLocal("query-insights", "Query insights", "query insights read SPANNER_SYS query statistics, which the Spanner emulator does not keep."),
+			spannerNotLocal("lock-insights", "Lock insights", "lock insights read SPANNER_SYS lock statistics, which the Spanner emulator does not keep: it runs one transaction at a time."),
+			spannerNotLocal("key-visualizer", "Key Visualizer", "Key Visualizer draws Spanner's key-access heatmaps, which the emulator does not record."),
 			ddl,
 			{
 				ID: "properties", Label: "Properties", Kind: console.KindProperties,
@@ -1335,14 +1541,14 @@ func (p spannerProvider) databaseDetail(ctx context.Context, project, instanceID
 					Properties: []console.Property{
 						{Label: "Resource name", Value: db.GetName()},
 						{Label: "State", Value: db.GetState().String()},
-						{Label: "Dialect", Value: db.GetDatabaseDialect().String()},
+						{Label: "Dialect", Value: spannerDialectOf(db)},
 						{Label: "Version retention", Value: orDash(db.GetVersionRetentionPeriod())},
+						{Label: "Encryption", Value: "Google-managed"},
+						{Label: "Deletion protection", Value: yesNo(db.GetEnableDropProtection())},
 						{Label: "Created", Value: created},
 					},
 				}},
 			},
-			dbSections[0],
-			dbSections[1],
 		},
 	}, nil
 }
@@ -1464,11 +1670,23 @@ func (p spannerProvider) spannerTableDetail(ctx context.Context, project, instan
 			{Label: "Columns", Value: fmt.Sprint(columns.Total)},
 			{Label: "Indexes", Value: fmt.Sprint(indexes.Total)},
 		},
+		// Google's table page (#1859): Schema, Indexes and Data, whose rows
+		// are inserted, edited and deleted there.
 		Sections: []console.Section{
-			{ID: "columns", Label: "Columns", Listing: columns},
+			{ID: "columns", Label: "Schema", Listing: columns},
 			{ID: "indexes", Label: "Indexes", Listing: indexes},
+			p.spannerTableData(ctx, c, instanceID, dbID, table),
 		},
 	}, nil
+}
+
+// spannerTableData is the Data tab, or why it cannot be drawn.
+func (p spannerProvider) spannerTableData(ctx context.Context, c *spanner.Client, instanceID, dbID, table string) console.Section {
+	cols, err := spannerTableColumns(ctx, c, table)
+	if err != nil {
+		return console.Section{ID: "data", Label: "Data", Unavailable: "reading columns: " + err.Error()}
+	}
+	return spannerDataSection(ctx, c, instanceID, dbID, table, cols)
 }
 
 // QueryHint is the Spanner Studio's contract with the user.
@@ -1609,30 +1827,21 @@ func database2AdminClient(ctx context.Context, endpoint string) (*database.Datab
 // halfway and leave the thing it claimed to remove. Neither is offered, and
 // the screens say why rather than leaving the absence unexplained.
 
-// CreateForm implements console.Creator for Bigtable.
+// CreateForm implements console.Creator for Bigtable: Google's Create
+// table (#1858), its column families with their type and garbage
+// collection, change stream and deletion protection.
 func (bigtableProvider) CreateForm() (string, []console.Field) {
-	return "Create table", []console.Field{
-		{
-			Name: "table", Label: "Table ID", Type: "text", Required: true,
-			Help:    "Letters, digits, hyphens and underscores.",
-			Pattern: `^[A-Za-z0-9][A-Za-z0-9_\-]{0,49}$`,
-		},
-		{
-			Name: "families", Label: "Column families", Type: "text",
-			Help:    "Comma-separated. A table with no column family can hold nothing, so one is created if this is empty.",
-			Default: "cf1",
-		},
-	}
+	return "Create table", bigtableCreateTableFields()
 }
+
+// CreateSubmit implements console.CreateSubmitter: Google's Create table
+// ends in Create.
+func (bigtableProvider) CreateSubmit() string { return "Create" }
 
 // Create implements console.Creator for Bigtable.
 func (p bigtableProvider) Create(ctx context.Context, project string, values map[string]string) (string, error) {
 	if project == "" {
 		return "", fmt.Errorf("choose a project first")
-	}
-	table := strings.TrimSpace(values["table"])
-	if table == "" {
-		return "", fmt.Errorf("a table ID is required")
 	}
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
@@ -1642,23 +1851,7 @@ func (p bigtableProvider) Create(ctx context.Context, project string, values map
 		return "", fmt.Errorf("cannot reach Bigtable: %w", err)
 	}
 	defer admin.Close()
-
-	if err := admin.CreateTable(ctx, table); err != nil {
-		return "", fmt.Errorf("creating the table: %w", err)
-	}
-	families := splitAndTrim(values["families"])
-	if len(families) == 0 {
-		families = []string{"cf1"}
-	}
-	for _, f := range families {
-		if err := admin.CreateColumnFamily(ctx, table, f); err != nil {
-			// The table exists but is unusable without a family, so the
-			// half-made resource is removed rather than left behind.
-			_ = admin.DeleteTable(ctx, table)
-			return "", fmt.Errorf("creating column family %q: %w", f, err)
-		}
-	}
-	return table, nil
+	return createBigtableTable(ctx, admin, values)
 }
 
 // Delete implements console.Deleter for Bigtable.
@@ -1676,36 +1869,17 @@ func (p bigtableProvider) Delete(ctx context.Context, project, name string) erro
 	return admin.DeleteTable(ctx, name)
 }
 
-// CreateForm implements console.Creator for Spanner.
+// CreateForm implements console.Creator for Spanner: Google's Instances
+// page creates an instance (#1859); a database is created on its instance's
+// Overview (spannerCreateDatabaseForm).
 func (spannerProvider) CreateForm() (string, []console.Field) {
-	return "Create database", []console.Field{
-		{
-			Name: "instance", Label: "Instance ID", Type: "text", Required: true,
-			Help: "An existing instance, or a new one — it is created when absent, " +
-				"because a database cannot exist without one. The Spanner screen " +
-				"lists the instances this project already has.",
-			Default: "main",
-			Pattern: `^[a-z][a-z0-9\-]{1,62}[a-z0-9]$`,
-		},
-		{
-			Name: "database", Label: "Database ID", Type: "text", Required: true,
-			Help:    "Lowercase letters, digits and hyphens.",
-			Pattern: `^[a-z][a-z0-9\-_]{1,28}[a-z0-9]$`,
-		},
-		{
-			// A textarea, not an input: a CREATE TABLE statement past one
-			// narrow table does not fit on one line, and a single-line box
-			// makes the user edit what they cannot see.
-			Name: "ddl", Label: "First table (DDL)", Type: "textarea",
-			Help: "Optional. One CREATE TABLE statement; the database is created empty without it.",
-		},
-	}
+	return "Create instance", spannerCreateInstanceFields()
 }
 
+// CreateSubmit implements console.CreateSubmitter: the page ends in Create.
+func (spannerProvider) CreateSubmit() string { return "Create" }
+
 // CreateOnPage implements console.PageCreator.
-//
-// Three fields would otherwise be a dialog, but one of them is a DDL
-// statement: the dialog gives it 440px and no room to grow.
 func (spannerProvider) CreateOnPage() bool { return true }
 
 // Create implements console.Creator for Spanner.
@@ -1715,11 +1889,20 @@ func (p spannerProvider) Create(ctx context.Context, project string, values map[
 	}
 	instanceID := strings.TrimSpace(values["instance"])
 	dbID := strings.TrimSpace(values["database"])
+	ctx, cancel := context.WithTimeout(ctx, 2*dbTimeout)
+	defer cancel()
+	// The page's Create instance (#1859). A request naming a database is
+	// the earlier Create database, kept for its callers: it makes the
+	// database, and the instance when absent.
+	if _, ok := values["database"]; !ok {
+		if err := p.createInstance(ctx, project, values); err != nil {
+			return "", err
+		}
+		return instanceID, nil
+	}
 	if instanceID == "" || dbID == "" {
 		return "", fmt.Errorf("an instance ID and a database ID are required")
 	}
-	ctx, cancel := context.WithTimeout(ctx, 2*dbTimeout)
-	defer cancel()
 
 	instAdmin, err := instance.NewInstanceAdminClient(ctx, localOpts(p.endpoint)...)
 	if err != nil {
@@ -1803,7 +1986,7 @@ func (p spannerProvider) DetailActions(ctx context.Context, project string, path
 	}
 	switch len(path) {
 	case 1:
-		acts := []console.Action{spannerCreatePartitionAction()}
+		acts := []console.Action{spannerCreateDatabaseForm(), spannerCreatePartitionAction()}
 		acts = append(acts, p.spannerInstanceExtraActions(ctx, project, path[0])...)
 		acts = append(acts, console.Action{ID: "dropinstance", Label: "Delete instance", Destructive: true})
 		if edit, ok := p.spannerEditInstanceAction(ctx, project, path[0]); ok {
@@ -1811,15 +1994,43 @@ func (p spannerProvider) DetailActions(ctx context.Context, project string, path
 		}
 		return acts
 	case 2:
-		acts := []console.Action{spannerDDLAction(path[0], path[1]), spannerCreateScheduleAction(), {
-			ID: "dropdatabase", Label: "Drop database", Destructive: true,
-		}}
+		acts := []console.Action{spannerDDLAction(path[0], path[1]), spannerCreateScheduleAction(),
+			spannerCreateDatabaseBackupAction(), {
+				ID: "dropdatabase", Label: "Delete database", Destructive: true,
+			}}
 		if edit, ok := p.spannerDropProtectionAction(ctx, project, path[0], path[1]); ok {
 			acts = append(acts, edit)
 		}
 		return acts
+	case 3:
+		// A table's page: Insert row, with a field per column it can write.
+		return p.spannerInsertRowActions(ctx, project, path)
+	case 4:
+		if path[3] == "rows" {
+			return []console.Action{{ID: "editrow", Label: "Edit row"}, {ID: "deleterow", Label: "Delete row", Destructive: true}}
+		}
 	}
 	return nil
+}
+
+// spannerInsertRowActions are a table page's actions: Insert row.
+func (p spannerProvider) spannerInsertRowActions(ctx context.Context, project string, path []string) []console.Action {
+	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
+	defer cancel()
+	c, err := newConsoleSpannerClient(ctx, p.endpoint, fmt.Sprintf("projects/%s/instances/%s/databases/%s", project, path[0], path[1]))
+	if err != nil {
+		return nil
+	}
+	defer c.Close()
+	cols, err := spannerTableColumns(ctx, c, path[2])
+	if err != nil || len(cols) == 0 {
+		return nil
+	}
+	fields := spannerRowFields(cols, nil)
+	if len(fields) == 0 {
+		return nil
+	}
+	return []console.Action{{ID: "insertrow", Label: "Insert row", Fields: fields}}
 }
 
 func (p spannerProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
@@ -1831,6 +2042,24 @@ func (p spannerProvider) ActAt(ctx context.Context, project string, path []strin
 
 	if len(path) == 0 && action == spannerCreateInstanceAction {
 		return p.createInstance(ctx, project, values)
+	}
+	switch {
+	case len(path) == 1 && action == spannerCreateDatabaseAction:
+		return p.spannerCreateDatabase(ctx, project, path[0], values)
+	case len(path) == 2 && action == "createdbbackup" && !isSpannerChildPath(path):
+		// The database page's Create backup: the instance's, of this database.
+		v := map[string]string{"database": path[1]}
+		for k, val := range values {
+			if k != "database" {
+				v[k] = val
+			}
+		}
+		return p.ActAt(ctx, project, path[:1], "createbackup", v)
+	case (len(path) == 3 && action == "insertrow") || (len(path) == 4 && path[3] == "rows" && (action == "editrow" || action == "deleterow")):
+		if isSpannerChildPath(path) {
+			return fmt.Errorf("%s is a table's action", action)
+		}
+		return p.spannerRowAct(ctx, project, path, action, values)
 	}
 	if handled, err := p.spannerAdminAct(ctx, project, path, action, values); handled {
 		return err
@@ -1909,7 +2138,7 @@ func (p firestoreProvider) documentDetail(ctx context.Context, project, collecti
 
 	opts := append(localOpts(p.endpoint),
 		option.WithGRPCDialOption(grpc.WithPerRPCCredentials(emulatorOwner{})))
-	c, err := firestore.NewClient(ctx, project, opts...)
+	c, err := firestore.NewClientWithDatabase(ctx, project, firestoreDatabaseIn(ctx), opts...)
 	if err != nil {
 		return console.Detail{Unavailable: "cannot reach Firestore: " + err.Error()}, nil
 	}
@@ -2047,7 +2276,7 @@ func (p firestoreProvider) Build(ctx context.Context, project string, path []str
 
 	opts := append(localOpts(p.endpoint),
 		option.WithGRPCDialOption(grpc.WithPerRPCCredentials(emulatorOwner{})))
-	c, err := firestore.NewClient(ctx, project, opts...)
+	c, err := firestore.NewClientWithDatabase(ctx, project, firestoreDatabaseIn(ctx), opts...)
 	if err != nil {
 		out.Unavailable = "cannot reach Firestore: " + err.Error()
 		return out, nil
@@ -2269,7 +2498,7 @@ func (p datastoreProvider) entityDetail(ctx context.Context, project string, sco
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
 
-	c, err := datastore.NewClient(ctx, project, localOpts(p.endpoint)...)
+	c, err := p.client(ctx, project)
 	if err != nil {
 		return console.Detail{Unavailable: "cannot reach Datastore: " + err.Error()}, nil
 	}
@@ -2334,6 +2563,7 @@ func (p datastoreProvider) entityDetail(ctx context.Context, project string, sco
 			{ID: "properties", Label: "Properties", Listing: fields},
 			datastoreChildren(ctx, c, scope, key),
 		},
+		Edit: datastoreEntityEdit(props),
 	}, nil
 }
 
@@ -2399,22 +2629,54 @@ func datastoreKey(kind, id string) (*datastore.Key, error) {
 func (p datastoreProvider) QueryForm(path []string) (string, []console.Field) {
 	// A namespace's own pages list kinds, not entities: there is nothing on
 	// them to query.
-	if scope, rest := parseDatastorePath(path); scope.index || (scope.namespaced && len(rest) == 0) {
+	scope, rest := parseDatastorePath(path)
+	if scope.index || (scope.namespaced && len(rest) == 0) || (len(path) == 1 && path[0] == datastoreIndexesSegment) {
 		return "", nil
 	}
-	return "Run query", []console.Field{
-		{Name: "property", Label: "Property", Type: "text",
-			Help: "The property to filter on. Leave empty to list in order."},
-		{Name: "op", Label: "Operator", Type: "text", Default: "=",
-			Help:    "One of =, <, <=, >, >=.",
-			Pattern: `^(=|<|<=|>|>=)$`},
-		{Name: "value", Label: "Value", Type: "text",
-			Help: "Compared as a number when it parses as one, as a boolean for " +
-				"true and false, and as a string otherwise."},
-		{Name: "orderBy", Label: "Order by", Type: "text",
-			Help: "Optional property name. Datastore requires an index for an " +
-				"ordering it has not been given one for, and says which."},
-		{Name: "descending", Label: "Descending", Type: "checkbox"},
+	kind := ""
+	if len(rest) == 1 {
+		kind = rest[0]
+	}
+	// Google's two tabs (#1846), the one showing sent as tab:Query.
+	fields := []console.Field{{Name: datastoreQueryTabField, Type: "hidden", Default: datastoreQueryByKind}}
+	for _, f := range datastoreQueryFields() {
+		f.Section, f.Tab = datastoreQuerySection, datastoreQueryByKind
+		fields = append(fields, f)
+	}
+	for _, f := range datastoreGQLFields(kind) {
+		f.Section, f.Tab, f.ShowWhen = datastoreQuerySection, datastoreQueryByGQL, ""
+		fields = append(fields, f)
+	}
+	return "Run", fields
+}
+
+// The query tab's section, and the hidden field the tab showing in it is
+// sent in (console's form tabs).
+const (
+	datastoreQuerySection  = "Query"
+	datastoreQueryTabField = "tab:" + datastoreQuerySection
+)
+
+// datastoreClauseOps are a query clause's operators, Google's: a WHERE
+// clause's comparisons, and an ORDER BY clause's directions. != , IN and
+// NOT_IN are served by the Datastore front (#1888); IN and NOT_IN take
+// their values separated by commas.
+var datastoreClauseOps = []string{"==", "!=", "<", "<=", ">", ">=", "IN", "NOT_IN", "Ascending", "Descending"}
+
+// datastoreQueryFields are the query tab's Query by kind controls.
+func datastoreQueryFields() []console.Field {
+	return []console.Field{
+		{Name: "clauses", Label: "Query clauses", Type: console.GroupFieldType, AddLabel: "Add query clause",
+			Group: []console.Field{
+				{Name: "clause", Label: "Clause", Type: "select", Options: []string{"WHERE", "ORDER BY"}, Default: "WHERE"},
+				{Name: "property", Label: "Property", Type: "text"},
+				{Name: "op", Label: "Operator", Type: "select", Options: datastoreClauseOps, Default: "=="},
+				{Name: "type", Label: "Value type", Type: "select", Options: datastoreCreateTypes, OptionLabels: datastoreCreateTypeLabels, Default: "string"},
+				{Name: "value", Label: "Value", Type: "text"},
+			},
+			Help: "Each WHERE clause filters on a property: ==, !=, <, <=, >, >=, IN or NOT_IN; IN and NOT_IN take their values separated by commas. " +
+				"An ORDER BY clause orders by a property, Ascending or Descending. With no clause the kind's entities are listed in key order. " +
+				"Datastore needs a composite index for some combinations, and names the one it needs."},
 		{Name: "limit", Label: "Limit", Type: "text", Default: "50",
 			Pattern: `^[0-9]{1,4}$`,
 			Help:    fmt.Sprintf("At most %d.", detailLimit)},
@@ -2425,6 +2687,90 @@ func (p datastoreProvider) QueryForm(path []string) (string, []console.Field) {
 		{Name: "aggregateProperty", Label: "Aggregated property", Type: "text",
 			Help: "The property SUM and AVG add up; values that are not numbers are skipped."},
 	}
+}
+
+// datastoreClauseOperators are the WHERE clause operators the query
+// builder offers, as the v1 API has them.
+var datastoreClauseOperators = map[string]datastorepb.PropertyFilter_Operator{
+	"==": datastorepb.PropertyFilter_EQUAL, "=": datastorepb.PropertyFilter_EQUAL,
+	"<": datastorepb.PropertyFilter_LESS_THAN, "<=": datastorepb.PropertyFilter_LESS_THAN_OR_EQUAL,
+	">": datastorepb.PropertyFilter_GREATER_THAN, ">=": datastorepb.PropertyFilter_GREATER_THAN_OR_EQUAL,
+	"!=": datastorepb.PropertyFilter_NOT_EQUAL, "IN": datastorepb.PropertyFilter_IN, "NOT_IN": datastorepb.PropertyFilter_NOT_IN,
+}
+
+// datastoreClauseValue is a WHERE clause's value of its chosen type.
+func datastoreClauseValue(typ, raw string) (*datastorepb.Value, error) {
+	prop, err := datastoreProperty("value", map[string]string{"type": typ, "value": raw})
+	if err != nil {
+		return nil, err
+	}
+	return datastorePropertyPB(prop)
+}
+
+// datastoreClauses are the query's Query clauses: its filter, every WHERE
+// clause together, and its orders.
+func datastoreClauses(raw string) (*datastorepb.Filter, []*datastorepb.PropertyOrder, error) {
+	rows, err := console.ParseGroup(raw)
+	if err != nil {
+		return nil, nil, fmt.Errorf("query clauses: %w", err)
+	}
+	var filters []*datastorepb.Filter
+	var orders []*datastorepb.PropertyOrder
+	for i, r := range rows {
+		prop := strings.TrimSpace(r["property"])
+		if prop == "" {
+			if strings.TrimSpace(r["value"]) == "" {
+				continue // a clause added and left empty
+			}
+			return nil, nil, fmt.Errorf("query clause %d needs a property", i+1)
+		}
+		name, err := datastoreFieldName(prop)
+		if err != nil {
+			return nil, nil, err
+		}
+		op := r["op"]
+		if r["clause"] == "ORDER BY" {
+			dir := datastorepb.PropertyOrder_ASCENDING
+			switch op {
+			case "Descending":
+				dir = datastorepb.PropertyOrder_DESCENDING
+			case "Ascending", "":
+			default:
+				return nil, nil, fmt.Errorf("ORDER BY %s is Ascending or Descending, not %s", prop, op)
+			}
+			orders = append(orders, &datastorepb.PropertyOrder{Property: &datastorepb.PropertyReference{Name: name}, Direction: dir})
+			continue
+		}
+		o, ok := datastoreClauseOperators[op]
+		if !ok {
+			return nil, nil, fmt.Errorf("WHERE %s takes ==, !=, <, <=, >, >=, IN or NOT_IN, not %s", prop, op)
+		}
+		var v *datastorepb.Value
+		if o == datastorepb.PropertyFilter_IN || o == datastorepb.PropertyFilter_NOT_IN {
+			// The values, separated by commas, each of the value type.
+			arr := &datastorepb.ArrayValue{}
+			for _, part := range strings.Split(r["value"], ",") {
+				e, err := datastoreClauseValue(r["type"], strings.TrimSpace(part))
+				if err != nil {
+					return nil, nil, fmt.Errorf("WHERE %s %s: %w", prop, op, err)
+				}
+				arr.Values = append(arr.Values, e)
+			}
+			v = &datastorepb.Value{ValueType: &datastorepb.Value_ArrayValue{ArrayValue: arr}}
+		} else if v, err = datastoreClauseValue(r["type"], r["value"]); err != nil {
+			return nil, nil, fmt.Errorf("WHERE %s: %w", prop, err)
+		}
+		filters = append(filters, &datastorepb.Filter{FilterType: &datastorepb.Filter_PropertyFilter{PropertyFilter: &datastorepb.PropertyFilter{
+			Property: &datastorepb.PropertyReference{Name: name}, Op: o, Value: v}}})
+	}
+	switch len(filters) {
+	case 0:
+		return nil, orders, nil
+	case 1:
+		return filters[0], orders, nil
+	}
+	return &datastorepb.Filter{FilterType: &datastorepb.Filter_CompositeFilter{CompositeFilter: &datastorepb.CompositeFilter{
+		Op: datastorepb.CompositeFilter_AND, Filters: filters}}}, orders, nil
 }
 
 // datastoreAggregateOptions are the query builder's aggregations; "none"
@@ -2516,8 +2862,20 @@ func (p datastoreProvider) Build(ctx context.Context, project string, path []str
 		return out, nil
 	}
 	defer done()
+	mode := values[datastoreQueryTabField]
+	if mode == "" {
+		mode = values["queryBy"] // the API's callers before the tabs
+	}
+	if mode == datastoreQueryByGQL {
+		return p.buildGQL(ctx, c, project, scope, values["gql"])
+	}
 
 	q := &datastorepb.Query{Kind: []*datastorepb.KindExpression{{Name: kind}}}
+	if q.Filter, q.Order, err = datastoreClauses(values["clauses"]); err != nil {
+		return console.Listing{}, err
+	}
+	// One filter and one order, as the API's callers before the query
+	// clauses send them.
 	if prop := strings.TrimSpace(values["property"]); prop != "" {
 		op := strings.TrimSpace(values["op"])
 		if op == "" {
@@ -2527,8 +2885,15 @@ func (p datastoreProvider) Build(ctx context.Context, project string, path []str
 		if err != nil {
 			return console.Listing{}, err
 		}
-		if q.Filter, err = datastoreFilterPB(prop, op, value); err != nil {
+		f, err := datastoreFilterPB(prop, op, value)
+		if err != nil {
 			return console.Listing{}, err
+		}
+		if q.Filter == nil {
+			q.Filter = f
+		} else {
+			q.Filter = &datastorepb.Filter{FilterType: &datastorepb.Filter_CompositeFilter{CompositeFilter: &datastorepb.CompositeFilter{
+				Op: datastorepb.CompositeFilter_AND, Filters: []*datastorepb.Filter{q.Filter, f}}}}
 		}
 	}
 	if order := strings.TrimSpace(values["orderBy"]); order != "" {
@@ -2539,7 +2904,7 @@ func (p datastoreProvider) Build(ctx context.Context, project string, path []str
 		if err != nil {
 			return console.Listing{}, err
 		}
-		q.Order = []*datastorepb.PropertyOrder{o}
+		q.Order = append(q.Order, o)
 	}
 	if op := values["aggregate"]; op != "" && op != "none" {
 		// Over every matching entity, as Firestore's Count only is: the
@@ -2553,7 +2918,7 @@ func (p datastoreProvider) Build(ctx context.Context, project string, path []str
 		return console.Listing{}, err
 	}
 	for _, e := range res.Entities {
-		k, props := datastoreEntityProperties(e, project)
+		k, props := datastoreEntityProperties(e, homeOf(ctx, project))
 		out.Items = append(out.Items, datastoreEntityRow(scope, kind, k, datastorePropertiesCell(props)))
 	}
 	out.Total = len(out.Items)

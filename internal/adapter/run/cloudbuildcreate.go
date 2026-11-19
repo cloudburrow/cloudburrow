@@ -77,7 +77,11 @@ type StepSpec struct {
 	// The runner must pass them without putting a value on a command line
 	// or in a log.
 	Secrets map[string]string
-	Log     io.Writer
+	// ServiceAccount is the email of the account the build runs as
+	// (#1854), and MetadataLabel the metadata server's host label for it
+	// (metadataaccount.go): the runner points GCE_METADATA_HOST at it.
+	ServiceAccount, MetadataLabel string
+	Log                           io.Writer
 }
 
 // ScriptPath is where a step's script is written in its container.
@@ -114,6 +118,7 @@ const (
 	stepDockerPush
 	stepPack
 	stepContainer
+	stepGcloudRun // a Deploy step's gcloud run services update (#1852)
 )
 
 // plannedStep is one validated step and what running it does.
@@ -126,7 +131,8 @@ type plannedStep struct {
 	buildArgs  []string
 	env        map[string]string // pack --env
 	timeout    time.Duration
-	step       StepSpec // stepContainer
+	step       StepSpec       // stepContainer
+	gcloud     *gcloudRunStep // stepGcloudRun
 	// allowFailure and allowExitCodes (#1407): a failure they allow is
 	// the step's FAILURE, not the build's.
 	allowFailure   bool
@@ -253,6 +259,13 @@ func planStepKind(i int, st *cbpb.BuildStep, subs map[string]string, refuse func
 		// `gcloud builds submit --tag`'s step: Cloud Build's own builder
 		// image running docker, args[0] the command.
 		name, args = "gcr.io/cloud-builders/docker", args[1:]
+	}
+	if g, ok, err := planGcloudRun(name, st, args); ok {
+		if err != nil {
+			return plannedStep{}, refuseGcloudRun(i, err)
+		}
+		p.kind, p.gcloud = stepGcloudRun, g
+		return p, nil
 	}
 	local := st.GetScript() == "" && (dockerBuilders[name] && (st.GetEntrypoint() == "" || st.GetEntrypoint() == "docker") && len(args) > 0 &&
 		(args[0] == "build" || args[0] == "push")) || (packBuilders[name] && (st.GetEntrypoint() == "" || st.GetEntrypoint() == "pack"))
@@ -478,7 +491,6 @@ func unsupportedCreate(b *cbpb.Build) error {
 		}
 	}
 	add(b.GetArtifacts() != nil, "artifacts")
-	add(b.GetServiceAccount() != "", "serviceAccount")
 	add(b.GetGitConfig() != nil, "gitConfig")
 	if o := b.GetOptions(); o != nil {
 		add(len(o.GetSourceProvenanceHash()) > 0, "options.sourceProvenanceHash")
@@ -568,6 +580,10 @@ func (c *CloudBuildServer) createBuild(ctx context.Context, project, location st
 		return nil, apierror.InvalidArgument("invalid build: build must have at least one step")
 	}
 	if err := unsupportedCreate(in); err != nil {
+		return nil, err
+	}
+	account, err := buildAccount(project, in)
+	if err != nil {
 		return nil, err
 	}
 	pool, err := buildPool(location, in.GetOptions())
@@ -699,6 +715,14 @@ func (c *CloudBuildServer) createBuild(ctx context.Context, project, location st
 			}
 		}
 		plan[i] = p
+	}
+	// Each step runs as the build's account (#1854).
+	label := metadataAliasLabel(account)
+	for i := range plan {
+		plan[i].step.ServiceAccount, plan[i].step.MetadataLabel = account, label
+	}
+	if containers && c.builds.s != nil {
+		c.builds.s.aliases.remember(label, account)
 	}
 	var runner StepRunner
 	if containers {
@@ -1272,6 +1296,12 @@ func (r *buildRun) runStep(ctx context.Context, p plannedStep, w *stepWriter) er
 		}
 		fmt.Fprintf(w, "%s: loaded into the cluster as %s\n", tagged(p.push), local)
 		return nil
+	case stepGcloudRun:
+		project, location := r.project, ""
+		if parts := strings.Split(r.name, "/"); len(parts) >= 4 && parts[2] == "locations" {
+			location = parts[3]
+		}
+		return r.gcloudRun(ctx, p.gcloud, project, location, w)
 	case stepDockerBuild, stepPack:
 		var rc io.ReadCloser
 		var err error

@@ -36,8 +36,8 @@ func (p pubsubSubscriptionsProvider) topics() pubsubProvider { return pubsubProv
 
 func (p pubsubSubscriptionsProvider) List(ctx context.Context, project string) (console.Listing, error) {
 	out := console.Listing{
-		Columns:    []string{"Topic", "Delivery type", "Ack deadline"},
-		NameColumn: "Subscription",
+		Columns:    subscriptionListColumns,
+		NameColumn: "Subscription name",
 		Noun:       "subscriptions",
 	}
 	if project == "" {
@@ -61,11 +61,7 @@ func (p pubsubSubscriptionsProvider) List(ctx context.Context, project string) (
 		if err != nil {
 			return console.Listing{}, fmt.Errorf("list subscriptions: %w", err)
 		}
-		out.Items = append(out.Items, console.Resource{Name: s.GetName(), Fields: map[string]string{
-			"Topic":         subscriptionTopic(s),
-			"Delivery type": deliveryType(s),
-			"Ack deadline":  fmt.Sprintf("%ds", s.GetAckDeadlineSeconds()),
-		}})
+		out.Items = append(out.Items, subscriptionRow(s))
 	}
 	out.Total = len(out.Items)
 	return out, nil
@@ -140,14 +136,21 @@ func (p pubsubSubscriptionsProvider) Detail(ctx context.Context, project string,
 	// Edit subscription (#786), prefilled from what the emulator returned;
 	// a detached subscription's configuration, which CloudBurrow's front
 	// keeps, is edited the same way (#1446).
+	// Google's tabs (#1847): Metrics, Details, Messages (Pull, then Ack),
+	// Snapshots, then Permissions. Pull and Create snapshot are drawn in
+	// their tabs; Replay messages, Detach and Advance clock beside the title.
+	actions := p.DetailActions(ctx, project, path)
+	snaps := subscriptionSnapshotsSection(ctx, c.TopicAdminClient, project, s.GetTopic())
 	return console.Detail{
-		Edit:    subscriptionEditForm(s),
-		Summary: summary,
-		Sections: []console.Section{
-			subscriptionDeliverySection(s),
-			subscriptionDeadLetterSection(s),
-			subscriptionConfigSection(s, activity),
-		},
+		Edit:     subscriptionEditForm(s),
+		Summary:  summary,
+		Actions:  headerActions(actions, subscriptionTabActions),
+		Sections: subscriptionTabs(s, activity, snaps, actionsWith(actions, actPull)),
+		// Google's subscription page does not open on Metrics: its monitoring
+		// guide opens the page, then says "click the Metrics tab"
+		// (https://docs.cloud.google.com/pubsub/docs/monitor-subscription,
+		// re-read 2026-11-19). It opens on Details here (#1847).
+		OpenTab: "details",
 	}, nil
 }
 

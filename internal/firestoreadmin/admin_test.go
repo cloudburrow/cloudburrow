@@ -93,9 +93,22 @@ func TestAdminOverGRPC(t *testing.T) {
 		Database: &adminpb.Database{LocationId: "us-east1", Type: adminpb.Database_FIRESTORE_NATIVE}}); status.Code(err) != codes.AlreadyExists {
 		t.Errorf("a second create: %v, want AlreadyExists", err)
 	}
-	if _, err := c.CreateDatabase(ctx, &adminpb.CreateDatabaseRequest{Parent: "projects/p", DatabaseId: "dsdb",
-		Database: &adminpb.Database{LocationId: "us-east1", Type: adminpb.Database_DATASTORE_MODE}}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("a Datastore mode database: %v, want Unimplemented", err)
+	// A Datastore mode database is created, Standard edition alone (#1880).
+	if _, err := c.CreateDatabase(ctx, &adminpb.CreateDatabaseRequest{Parent: "projects/p", DatabaseId: "dsent",
+		Database: &adminpb.Database{LocationId: "us-east1", Type: adminpb.Database_DATASTORE_MODE,
+			DatabaseEdition: adminpb.Database_ENTERPRISE}}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("an Enterprise edition Datastore mode database: %v, want InvalidArgument", err)
+	}
+	dsop, err := c.CreateDatabase(ctx, &adminpb.CreateDatabaseRequest{Parent: "projects/p", DatabaseId: "dsdb",
+		Database: &adminpb.Database{LocationId: "us-east1", Type: adminpb.Database_DATASTORE_MODE}})
+	if err != nil {
+		t.Fatalf("a Datastore mode database: %v", err)
+	}
+	if ds, err := dsop.Wait(ctx); err != nil || ds.Type != adminpb.Database_DATASTORE_MODE || ds.DatabaseEdition != adminpb.Database_STANDARD {
+		t.Fatalf("the Datastore mode database = %v, %v", ds, err)
+	}
+	if ds, err := c.GetDatabase(ctx, &adminpb.GetDatabaseRequest{Name: "projects/p/databases/dsdb"}); err != nil || ds.Type != adminpb.Database_DATASTORE_MODE {
+		t.Errorf("GetDatabase of the Datastore mode database = %v, %v", ds, err)
 	}
 	uop, err := c.UpdateDatabase(ctx, &adminpb.UpdateDatabaseRequest{
 		Database:   &adminpb.Database{Name: db.Name, DeleteProtectionState: adminpb.Database_DELETE_PROTECTION_ENABLED},

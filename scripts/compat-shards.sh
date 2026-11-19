@@ -55,21 +55,30 @@
 #              emulators shard, which passed 45m with them (#1472).
 # An eighth, acceptance, runs no compat test: storage, pubsub and run, for
 # the acceptance workflow (test/e2e) and test/k8s (#596).
+# An eighth, iam, starts its instance with `up --iam-enforcement=on`
+# (UP_FLAGS) and runs only the enforcement tests (COMPAT_RUN,
+# ^TestIAMEnforcement), which skip on every other shard's instance, as
+# those run with enforcement off (#1879): Cloud Storage, Pub/Sub, Cloud
+# Tasks, Secret Manager, Cloud KMS and Cloud Run (for run.routes.invoke).
 
 # The shards, in the order ci.yml's matrix lists them.
-COMPAT_SHARDS="storage served run scale emulators memorystore sql acceptance"
+COMPAT_SHARDS="storage served run scale emulators memorystore sql acceptance iam"
 
 # The console's headless-browser suite (#594) runs in the storage, run,
 # emulators, memorystore and sql shards: the Cloud KMS and Cloud Run
 # screens are served only by the run shard's instance (#700), as are Cloud
-# Logging's admin screens (TestLoggingAdmin*, #1226); the BigQuery,
+# Logging's admin screens (TestLoggingAdmin*, #1226), and Secret Manager's
+# screens (TestSecretManager*, #1850), whose regional secrets and CMEK need
+# its Cloud KMS; the BigQuery,
 # Firestore, Datastore (#854) and Spanner screens and the Bigtable screen's
 # actions (#1198) only by the emulators shard's; the Memorystore screens
 # only by the memorystore shard's (#1568); and the Cloud SQL screens, MySQL
-# (#868) and PostgreSQL (#995), only by the sql shard's (#1472). The tests
-# these name run there and the rest in storage. The scale shard (#1821)
-# runs no browser test: the Cloud Run screens stay in run, whose instance
-# serves the services they read back.
+# (#868) and PostgreSQL (#995), only by the sql shard's (#1472), as is
+# Certificate Authority Service beside Cloud KMS and Cloud Storage, for its
+# Cloud KMS CA keys, CMEK pools and publishing buckets (TestPrivateCAKMS*,
+# #1834). The tests these name run there and the rest in storage. The scale
+# shard (#1821) runs no browser test: the Cloud Run screens stay in run,
+# whose instance serves the services they read back.
 # The accessibility audit (#1604) follows the same split: its Cloud Storage,
 # Pub/Sub and Logs Explorer pages run in storage, and
 # TestBigQueryScreensAreNamedAndLegible in emulators; the rest of the
@@ -80,10 +89,10 @@ COMPAT_SHARDS="storage served run scale emulators memorystore sql acceptance"
 # TestSecretsSchedulerTasksProjectsIAMAndAIScreensMeetWCAG (storage, which
 # serves Secret Manager, Cloud Scheduler and Cloud Tasks).
 COMPAT_BROWSER_SHARDS="storage run emulators memorystore sql"
-COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|LoggingAdmin)'
+COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|LoggingAdmin|SecretManager)'
 COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|Bigtable|Spanner)'
 COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS='^TestMemorystore'
-COMPAT_BROWSER_SQL_SHARD_TESTS='^Test(CloudSQL|BackupDR)'
+COMPAT_BROWSER_SQL_SHARD_TESTS='^Test(CloudSQL|BackupDR|PrivateCAKMS)'
 # Browser tests no shard runs: the Studio's local models (#1396) and the
 # Embeddings page's image (#1454), audio and Cloud Storage objects (#1651)
 # and its scanned PDF read with document_ocr (#1733) need a -tags onnx build
@@ -108,6 +117,11 @@ COMPAT_BROWSER_NEVER_TESTS='^Test(StudioManagesLocalModelsAndTestsEmbeddings|Emb
 compat_shard() {
   FIXTURES=()
   SETUP_TESTS="" PROBE_TESTS="" PROBE_VARS=""
+  # UP_FLAGS are `up` flags beyond the services and fixtures; COMPAT_RUN,
+  # when set, is the -run pattern of the shard's compat suite (all of it
+  # when empty).
+  UP_FLAGS=()
+  COMPAT_RUN=""
   # What every instance has, whatever its services: the ADC fixture
   # (#346), the instance's own kubeconfig and kind cluster (#346, never
   # the default kubeconfig), the admin API, the metadata server (#303),
@@ -176,7 +190,8 @@ compat_shard() {
       # refused by the front in its pod (#874, #902). Cloud SQL for the
       # revision and task that query PostgreSQL, and Cloud SQL for MySQL for
       # the revision that queries MySQL, through a Cloud SQL volume (#1346).
-      SERVICES=run,secretmanager,tasks,storage,pubsub,kms,scheduler,logging,bigquery,cloudsql,cloudsql-mysql
+      # Firestore, as RUN_FIRESTORE, for the Eventarc Firestore triggers (#1877).
+      SERVICES=run,secretmanager,tasks,storage,pubsub,firestore,kms,scheduler,logging,bigquery,cloudsql,cloudsql-mysql
       # Cloud Run (#336). For the revisions that reach Storage and Pub/Sub
       # with no client options (#576) and call KMS, Scheduler and Logging
       # (#681), the RUN_* names, so those suites do not run a second time
@@ -202,7 +217,7 @@ compat_shard() {
       # (#1568): the customer-managed and regional secrets, Terraform's data
       # sources, Cloud Storage volumes and Pub/Sub build triggers.
       FIXTURES=(--cloudbuild-host-steps --appengine-url http://127.0.0.1:18506)
-      TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_KMS,RUN_SCHEDULER,RUN_LOGGING,RUN_BIGQUERY,RUN_SQLADMIN,RUN_RESOURCEMANAGER,RUN_SERVICEUSAGE,RUN_MYSQL,MYSQL_PASSWORD,BIGQUERY_PROJECT,APPENGINE_URL ;;
+      TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_FIRESTORE,RUN_KMS,RUN_SCHEDULER,RUN_LOGGING,RUN_BIGQUERY,RUN_SQLADMIN,RUN_RESOURCEMANAGER,RUN_SERVICEUSAGE,RUN_MYSQL,MYSQL_PASSWORD,BIGQUERY_PROJECT,APPENGINE_URL ;;
     scale)
       # The tests that take minutes each (#1821), split from run: Cloud
       # Run's CPU, automatic and manual scaling and instance splits, through
@@ -219,6 +234,14 @@ compat_shard() {
       # The acceptance workflow uploads, publishes and runs a Cloud Run
       # worker; test/k8s needs the cluster and Knative.
       SERVICES=storage,pubsub,run ;;
+    iam)
+      # IAM enforcement (#1879): every TestIAMEnforcement* test, against
+      # an instance that enforces, and nothing else, so the shard is a few
+      # minutes; the other suites ran with enforcement off in their shards.
+      SERVICES=storage,pubsub,tasks,secretmanager,kms,run
+      TEST_VARS+=,STORAGE,PUBSUB,TASKS,SECRETS,KMS,RUN,RESOURCEMANAGER,IAM_ENFORCEMENT
+      UP_FLAGS=(--iam-enforcement=on)
+      COMPAT_RUN='^TestIAMEnforcement' ;;
     emulators)
       # pubsub for TestEmulatorsBehindAFrontRefuseOtherPods (#1114), which
       # dials both emulators from a pod; PUBSUB is not exported, so the
@@ -250,7 +273,9 @@ compat_shard() {
       # The Logging tests that need BigQuery (linked datasets, Log Analytics)
       # or Cloud Storage (the copies) read SINK_LOGGING and SINK_STORAGE, and
       # the copies from a folder LOGGING_RESOURCEMANAGER (#1568).
-      TEST_VARS+=,LOGGING_RESOURCEMANAGER,SPANNER,SPANNER_REST,DATASTORE,FIRESTORE,FIRESTORE_MONGODB,FIRESTORE_MONGODB_CA,FIRESTORE_RESOURCEMANAGER,BIGTABLE,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT,BIGQUERY_RESOURCEMANAGER,SINK_LOGGING,SINK_STORAGE,SINK_PUBSUB,FIRESTORE_STORAGE,BQML_STORAGE
+      # Cloud KMS as CMEK_KMS, for Firestore's customer-managed keys
+      # (#1881), so the KMS suite stays in served.
+      TEST_VARS+=,LOGGING_RESOURCEMANAGER,SPANNER,SPANNER_REST,DATASTORE,FIRESTORE,FIRESTORE_MONGODB,FIRESTORE_MONGODB_CA,FIRESTORE_RESOURCEMANAGER,BIGTABLE,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT,BIGQUERY_RESOURCEMANAGER,SINK_LOGGING,SINK_STORAGE,SINK_PUBSUB,FIRESTORE_STORAGE,BQML_STORAGE,CMEK_KMS
       # Firestore's probe documents and named database (#1636): written
       # alone, as a front-state reset in the suite forgets the database.
       SETUP_TESTS="TestFirestoreRestartSetup"

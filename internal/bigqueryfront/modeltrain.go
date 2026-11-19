@@ -118,6 +118,13 @@ type mlOptions struct {
 	L1Activation     float64            `json:"l1RegActivation,omitempty"`
 	// GlobalExplain is enable_global_explain (modelexplain.go).
 	GlobalExplain bool `json:"enableGlobalExplain,omitempty"`
+	// AUTOML_* (modelautoml.go, #1776): budget_hours and
+	// optimization_objective as given; AutoML is set on the model a
+	// search chose, whose options these are.
+	BudgetHours float64        `json:"budgetHours,omitempty"`
+	Objective   string         `json:"optimizationObjective,omitempty"`
+	ObjValue    *float64       `json:"objectiveValue,omitempty"`
+	AutoML      *automlOptions `json:"automl,omitempty"`
 	// ARIMA_PLUS (modelarima.go).
 	TS tsOptions `json:"timeSeries"`
 	// Set are the options CREATE MODEL gave, lower case.
@@ -249,6 +256,9 @@ type mlTrained struct {
 	MF *mfTrained `json:"mf,omitempty"`
 	// Global are ML.GLOBAL_EXPLAIN's rows (modelexplain.go).
 	Global []mlGlobal `json:"global,omitempty"`
+	// automlOpts are the options of the model an AutoML search chose
+	// (modelautoml.go, #1776), which CREATE MODEL stores.
+	automlOpts *mlOptions
 	// Arima is an ARIMA_PLUS model's series and fits (modelarima.go).
 	Arima *arimaTrained `json:"arima,omitempty"`
 	// Xreg is an ARIMA_PLUS_XREG model's regression on its features
@@ -315,6 +325,8 @@ func trainModel(opts mlOptions, cols []mlColumn, rows [][]*string, fp fingerprin
 		return trainXreg(opts, cols, rows)
 	case "AUTOENCODER":
 		return trainAutoencoder(opts, cols, rows)
+	case "AUTOML_REGRESSOR", "AUTOML_CLASSIFIER":
+		return trainAutoML(opts, cols, rows, fp) // modelautoml.go, #1776
 	}
 	var t mlTrained
 	label := "label"

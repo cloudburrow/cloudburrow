@@ -43,6 +43,8 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
+
+	"github.com/cloudburrow/cloudburrow/internal/frontstate"
 )
 
 // SetStorage names the instance's Cloud Storage (a base URL, such as
@@ -226,15 +228,17 @@ func docBytes(docs []*firestorepb.Document) int64 {
 	return n
 }
 
-// liveDatabase checks the database exists, and returns its name.
-func (a *Admin) liveDatabase(name string) (string, error) {
+// liveDatabase checks the database exists, and returns its name and
+// whether it is a Datastore mode database, whose entities the Datastore
+// front copies (#1884).
+func (a *Admin) liveDatabase(name string) (string, bool, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	db, err := a.database(name)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
-	return db.Name, nil
+	return db.Name, isDatastoreMode(db), nil
 }
 
 // finish records a finished operation, taking a.mu.
@@ -265,18 +269,22 @@ func (a *Admin) needStorage(method string) error {
 }
 
 func (a *Admin) ExportDocuments(ctx context.Context, req *adminpb.ExportDocumentsRequest) (*longrunningpb.Operation, error) {
-	dbName, err := a.liveDatabase(req.GetName())
+	dbName, entities, err := a.liveDatabase(req.GetName())
 	if err != nil {
 		return nil, err
 	}
-	if err := a.needStorage("ExportDocuments"); err != nil {
-		return nil, err
+	if !entities {
+		if err := a.needStorage("ExportDocuments"); err != nil {
+			return nil, err
+		}
 	}
 	if req.GetOutputUriPrefix() == "" {
 		return nil, status.Error(codes.InvalidArgument, "output_uri_prefix is required: gs://BUCKET_NAME[/NAMESPACE_PATH].")
 	}
-	if err := checkNamespaces(req.GetNamespaceIds()); err != nil {
-		return nil, err
+	if !entities {
+		if err := checkNamespaces(req.GetNamespaceIds()); err != nil {
+			return nil, err
+		}
 	}
 	bucket, prefix, err := splitGS(req.GetOutputUriPrefix())
 	if err != nil {
@@ -285,6 +293,24 @@ func (a *Admin) ExportDocuments(ctx context.Context, req *adminpb.ExportDocument
 	start := a.now()
 	if st := req.GetSnapshotTime(); st != nil {
 		return nil, status.Error(codes.Unimplemented, "snapshot_time is not served here: the emulator keeps no earlier versions of the documents, so an export is of the documents as they are now")
+	}
+	if entities {
+		// A Datastore mode database's entities, exported by the
+		// Datastore front in the Datastore Admin API's format (#1884):
+		// collection_ids are kinds, namespace_ids namespaces.
+		res, err := a.copyDatastore(ctx, frontstate.DatastoreExportPath, dbName, datastoreCopyRequest{
+			Kinds: req.GetCollectionIds(), Namespaces: req.GetNamespaceIds(), OutputURIPrefix: req.GetOutputUriPrefix(), Exact: true})
+		if err != nil {
+			return nil, err
+		}
+		outURI := res.OutputURI[:strings.LastIndex(res.OutputURI, "/")]
+		md := &adminpb.ExportDocumentsMetadata{StartTime: timestamppb.New(start), EndTime: timestamppb.New(a.now()),
+			OperationState:    adminpb.OperationState_SUCCESSFUL,
+			ProgressDocuments: &adminpb.Progress{EstimatedWork: res.Entities, CompletedWork: res.Entities},
+			ProgressBytes:     &adminpb.Progress{EstimatedWork: res.Bytes, CompletedWork: res.Bytes},
+			CollectionIds:     req.GetCollectionIds(), NamespaceIds: req.GetNamespaceIds(), OutputUriPrefix: outURI,
+			SnapshotTime: timestamppb.New(start)}
+		return a.finish(dbName, md, &adminpb.ExportDocumentsResponse{OutputUriPrefix: outURI})
 	}
 	if prefix == "" {
 		// Google names the export after its start time.
@@ -341,18 +367,22 @@ func (a *Admin) ExportDocuments(ctx context.Context, req *adminpb.ExportDocument
 }
 
 func (a *Admin) ImportDocuments(ctx context.Context, req *adminpb.ImportDocumentsRequest) (*longrunningpb.Operation, error) {
-	dbName, err := a.liveDatabase(req.GetName())
+	dbName, entities, err := a.liveDatabase(req.GetName())
 	if err != nil {
 		return nil, err
 	}
-	if err := a.needStorage("ImportDocuments"); err != nil {
-		return nil, err
+	if !entities {
+		if err := a.needStorage("ImportDocuments"); err != nil {
+			return nil, err
+		}
 	}
 	if req.GetInputUriPrefix() == "" {
 		return nil, status.Error(codes.InvalidArgument, "input_uri_prefix is required: the output_uri_prefix of an export.")
 	}
-	if err := checkNamespaces(req.GetNamespaceIds()); err != nil {
-		return nil, err
+	if !entities {
+		if err := checkNamespaces(req.GetNamespaceIds()); err != nil {
+			return nil, err
+		}
 	}
 	bucket, prefix, err := splitGS(req.GetInputUriPrefix())
 	if err != nil {
@@ -362,6 +392,19 @@ func (a *Admin) ImportDocuments(ctx context.Context, req *adminpb.ImportDocument
 		return nil, status.Errorf(codes.InvalidArgument, "input_uri_prefix %q names a bucket alone: name the export's folder in it", req.GetInputUriPrefix())
 	}
 	start := a.now()
+	if entities {
+		res, err := a.copyDatastore(ctx, frontstate.DatastoreImportPath, dbName, datastoreCopyRequest{
+			Kinds: req.GetCollectionIds(), Namespaces: req.GetNamespaceIds(), InputURI: req.GetInputUriPrefix()})
+		if err != nil {
+			return nil, err
+		}
+		md := &adminpb.ImportDocumentsMetadata{StartTime: timestamppb.New(start), EndTime: timestamppb.New(a.now()),
+			OperationState:    adminpb.OperationState_SUCCESSFUL,
+			ProgressDocuments: &adminpb.Progress{EstimatedWork: res.Entities, CompletedWork: res.Entities},
+			ProgressBytes:     &adminpb.Progress{EstimatedWork: res.Bytes, CompletedWork: res.Bytes},
+			CollectionIds:     req.GetCollectionIds(), InputUriPrefix: req.GetInputUriPrefix(), NamespaceIds: req.GetNamespaceIds()}
+		return a.finish(dbName, md, &emptypb.Empty{})
+	}
 	gcs := &gcsClient{base: a.storage, http: a.client}
 	if _, err := gcs.get(ctx, bucket, prefix+"/"+path.Base(prefix)+".overall_export_metadata"); err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "%s is not an export: it has no %s.overall_export_metadata file (%v)", req.GetInputUriPrefix(), path.Base(prefix), status.Convert(err).Message())
@@ -423,14 +466,26 @@ func checkNamespaces(ids []string) error {
 // --- bulk delete ---
 
 func (a *Admin) BulkDeleteDocuments(ctx context.Context, req *adminpb.BulkDeleteDocumentsRequest) (*longrunningpb.Operation, error) {
-	dbName, err := a.liveDatabase(req.GetName())
+	dbName, entities, err := a.liveDatabase(req.GetName())
 	if err != nil {
 		return nil, err
+	}
+	start := a.now()
+	if entities {
+		res, err := a.copyDatastore(ctx, frontstate.DatastoreDeletePath, dbName, datastoreCopyRequest{
+			Kinds: req.GetCollectionIds(), Namespaces: req.GetNamespaceIds()})
+		if err != nil {
+			return nil, err
+		}
+		md := &adminpb.BulkDeleteDocumentsMetadata{StartTime: timestamppb.New(start), EndTime: timestamppb.New(a.now()),
+			OperationState:    adminpb.OperationState_SUCCESSFUL,
+			ProgressDocuments: &adminpb.Progress{EstimatedWork: res.Entities, CompletedWork: res.Entities},
+			CollectionIds:     req.GetCollectionIds(), NamespaceIds: req.GetNamespaceIds(), SnapshotTime: timestamppb.New(start)}
+		return a.finish(dbName, md, &adminpb.BulkDeleteDocumentsResponse{})
 	}
 	if err := checkNamespaces(req.GetNamespaceIds()); err != nil {
 		return nil, err
 	}
-	start := a.now()
 	all, err := a.readAll(ctx, dbName)
 	if err != nil {
 		return nil, err

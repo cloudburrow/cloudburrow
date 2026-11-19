@@ -94,6 +94,33 @@ type Config struct {
 	PullProgress func(ctx context.Context, node string) (fetched, total int64, err error)
 }
 
+// Progress is one report from Prepare of what the terminal is waiting for.
+type Progress struct {
+	// Message says it in a sentence.
+	Message string
+	// Step is what kind of wait it is: StepImport, StepPull, StepUnpack, or
+	// empty for any other (the pod being made, scheduled or started).
+	Step string
+	// Fetched and Total are the image's compressed bytes on the node and in
+	// all, as the node reports them during StepPull and StepUnpack; zero
+	// when it does not.
+	Fetched, Total int64
+	// Elapsed is how long the pull has run, from the kubelet's Pulling
+	// event, during StepPull and StepUnpack; zero otherwise.
+	Elapsed time.Duration
+}
+
+// The steps of a first start, which a drawer shows as a progress panel
+// rather than a line of text.
+const (
+	// StepImport is `up`'s import of the image from the offline cache.
+	StepImport = "import"
+	// StepPull is the kubelet pulling the image.
+	StepPull = "pull"
+	// StepUnpack is a pull whose bytes have all been fetched.
+	StepUnpack = "unpack"
+)
+
 // Manager makes the terminal pod and opens shells in it.
 type Manager struct {
 	cfg Config
@@ -417,14 +444,15 @@ const readRetries = 5
 // on a real failure (an image that cannot be pulled, a pod that cannot be
 // scheduled or has gone) with the cluster's reason, and on a pod that
 // shows no change for Stall while nothing is being pulled.
-func (m *Manager) Prepare(ctx context.Context, progress func(string)) error {
+func (m *Manager) Prepare(ctx context.Context, report func(Progress)) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if progress == nil {
-		progress = func(string) {}
+	if report == nil {
+		report = func(Progress) {}
 	}
+	progress := func(msg string) { report(Progress{Message: msg}) }
 	if m.cfg.Before != nil {
-		if err := m.cfg.Before(ctx, progress); err != nil {
+		if err := m.cfg.Before(ctx, func(msg string) { report(Progress{Message: msg, Step: StepImport}) }); err != nil {
 			return err
 		}
 	}
@@ -506,7 +534,7 @@ func (m *Manager) Prepare(ctx context.Context, progress func(string)) error {
 					m.cfg.Stall.String() + ": " + st.msg}
 			}
 			if st.msg != lastMsg {
-				progress(st.msg)
+				report(Progress{Message: st.msg, Step: st.step, Fetched: st.fetched, Total: st.total, Elapsed: st.elapsed})
 				lastMsg = st.msg
 			}
 		}
@@ -545,6 +573,10 @@ type startState struct {
 	// pulling is an image pull under way, which is waited on without
 	// bound.
 	pulling bool
+	// step, fetched, total and elapsed are Progress's.
+	step           string
+	fetched, total int64
+	elapsed        time.Duration
 }
 
 // imageNote describes the image while it is pulled. The size is
@@ -615,15 +647,16 @@ func creating(pull pullState, now time.Time) startState {
 			elapsed = 0
 		}
 		if pull.Total > 0 {
-			fetched := "fetched " + pulledSoFar(pull.Fetched) + " of " + size(pull.Total)
+			fetched, step := "fetched "+pulledSoFar(pull.Fetched)+" of "+size(pull.Total), StepPull
 			if pull.Fetched >= pull.Total {
-				fetched = "fetched all " + size(pull.Total) + ", unpacking it"
+				fetched, step = "fetched all "+size(pull.Total)+", unpacking it", StepUnpack
 			}
-			return startState{key: "pulling", pulling: true,
+			return startState{key: "pulling", pulling: true, step: step,
+				fetched: min(pull.Fetched, pull.Total), total: pull.Total, elapsed: elapsed,
 				msg: "Pulling the terminal image (" + pullNote + "): " + fetched + ", as the node reports it; " +
 					roughly(elapsed) + " so far"}
 		}
-		return startState{key: "pulling", pulling: true,
+		return startState{key: "pulling", pulling: true, step: StepPull, elapsed: elapsed,
 			msg: "Pulling the terminal image (" + imageNote + "): still pulling, " + roughly(elapsed) +
 				" so far. The cluster reports no byte count until the pull finishes"}
 	case pull.Present:

@@ -19,5 +19,10 @@
     "firebase": "13.2.0",
     "google-auth-library": "11.3.4",
     "google-gax": "6.17.0"
+  },
+  "overrides": {
+    "@firebase/firestore": {
+      "@grpc/grpc-js": "1.14.5"
+    }
   }
 }

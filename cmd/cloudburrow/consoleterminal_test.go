@@ -39,6 +39,8 @@ func TestTerminalEnvIsGcloudSetupAtInClusterAddresses(t *testing.T) {
 		// Spanner's REST port and Firestore, with the admin APIs (#1461).
 		"spanner-rest": "spanner.cloudburrow.svc.cluster.local:9020",
 		"firestore":    "firestore.cloudburrow.svc.cluster.local:8080",
+		// Datastore, with the Datastore Admin API (#1884).
+		"datastore": "datastore.cloudburrow.svc.cluster.local:8081",
 	}
 	env := terminalEnv(addrs)
 	for name, want := range map[string]string{
@@ -51,6 +53,7 @@ func TestTerminalEnvIsGcloudSetupAtInClusterAddresses(t *testing.T) {
 		"CLOUDSDK_API_ENDPOINT_OVERRIDES_BIGTABLEADMIN":        "http://bigtable.cloudburrow.svc.cluster.local:8086/",
 		"CLOUDSDK_API_ENDPOINT_OVERRIDES_SPANNER":              "http://spanner.cloudburrow.svc.cluster.local:9020/",
 		"CLOUDSDK_API_ENDPOINT_OVERRIDES_FIRESTORE":            "http://firestore.cloudburrow.svc.cluster.local:8080/",
+		"CLOUDSDK_API_ENDPOINT_OVERRIDES_DATASTORE":            "http://datastore.cloudburrow.svc.cluster.local:8081/",
 		"CLOUDSDK_AUTH_DISABLE_CREDENTIALS":                    "true",
 		"STORAGE_EMULATOR_HOST":                                "http://storage.cloudburrow.svc.cluster.local:4443",
 		"PUBSUB_EMULATOR_HOST":                                 "pubsub.cloudburrow.svc.cluster.local:8085",

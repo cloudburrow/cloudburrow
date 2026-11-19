@@ -16,6 +16,7 @@ require (
 	cloud.google.com/go/compute/metadata v0.10.0
 	cloud.google.com/go/datastore v1.27.0
 	cloud.google.com/go/developerconnect v1.2.0
+	cloud.google.com/go/eventarc v1.27.1
 	cloud.google.com/go/firestore v1.26.0
 	cloud.google.com/go/functions v1.26.0
 	cloud.google.com/go/iam v1.14.0
@@ -23,6 +24,7 @@ require (
 	cloud.google.com/go/logging v1.20.0
 	cloud.google.com/go/longrunning v1.5.0
 	cloud.google.com/go/memorystore v1.7.0
+	cloud.google.com/go/orgpolicy v1.22.1
 	cloud.google.com/go/pubsub/v2 v2.7.0
 	cloud.google.com/go/resourcemanager v1.17.0
 	cloud.google.com/go/run v1.25.0
@@ -47,7 +49,7 @@ require (
 	github.com/golang/geo v0.0.0-20261029132150-f51d36688936
 	github.com/golang/protobuf v1.5.4
 	github.com/google/differential-privacy/go/v4 v4.1.0
-	github.com/google/go-containerregistry v0.20.6
+	github.com/google/go-containerregistry v0.22.1
 	github.com/google/uuid v1.6.0
 	github.com/googleapis/gax-go/v2 v2.27.0
 	github.com/jackc/pgx/v5 v5.11.0
@@ -91,10 +93,8 @@ require (
 	github.com/apache/arrow/go/v15 v15.0.2 // indirect
 	github.com/bits-and-blooms/bitset v1.24.4 // indirect
 	github.com/cockroachdb/apd/v3 v3.2.1 // indirect
-	github.com/containerd/stargz-snapshotter/estargz v0.16.3 // indirect
 	github.com/creasty/defaults v1.8.0 // indirect
-	github.com/docker/cli v29.6.0+incompatible // indirect
-	github.com/docker/distribution v2.8.3+incompatible // indirect
+	github.com/docker/cli v29.7.2+incompatible // indirect
 	github.com/docker/docker-credential-helpers v0.9.8 // indirect
 	github.com/geoarrow/geoarrow-go v0.0.0-20260403143023-f54751c3e3a1 // indirect
 	github.com/goccy/go-yaml v1.17.1 // indirect
@@ -103,7 +103,6 @@ require (
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/jolestar/go-commons-pool/v2 v2.1.2 // indirect
-	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/mschoch/smat v0.2.0 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
@@ -116,7 +115,6 @@ require (
 	github.com/twmb/avro v1.8.0 // indirect
 	github.com/twmb/murmur3 v1.1.8 // indirect
 	github.com/twpayne/go-geom v1.6.1 // indirect
-	github.com/vbatts/tar-split v0.12.1 // indirect
 	github.com/xdg-go/scram v1.4.0 // indirect
 	github.com/xdg-go/stringprep v1.0.4 // indirect
 	github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78 // indirect
@@ -142,7 +140,7 @@ require (
 	github.com/envoyproxy/go-control-plane/envoy v1.39.1-0.20260819172001-e6e3fd93e4be // indirect
 	github.com/envoyproxy/protoc-gen-validate v1.3.3 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
-	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
+	github.com/go-jose/go-jose/v4 v4.1.9 // indirect
 	github.com/go-json-experiment/json v0.0.0-20260623181947-01eb4420fa68 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect

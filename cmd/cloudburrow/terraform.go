@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -91,6 +92,7 @@ var terraformEndpoints = []terraformEndpoint{
 	// official client updates in place and destroys, in
 	// TestTerraformDeveloperConnect.
 	{config.ServiceRun, "developer_connect_custom_endpoint", "GOOGLE_DEVELOPER_CONNECT_CUSTOM_ENDPOINT", "/developerconnect/v1/", true, ""},
+	{config.ServiceRun, "eventarc_custom_endpoint", "GOOGLE_EVENTARC_CUSTOM_ENDPOINT", "/eventarc/v1/", true, ""},
 	// Cloud Functions v2 (#1377), on the Run port: a function is a
 	// buildpacks build and a Cloud Run service. google_cloudfunctions2_function
 	// applies, plans clean, updates in place and destroys in
@@ -498,6 +500,12 @@ func runTerraform(args []string, stdout, stderr io.Writer) error {
 		fmt.Fprintln(stderr, err)
 		return errUsage
 	}
+	iv, intercept, ours, err := splitFlag(ours, interceptFlag, true)
+	intercept = intercept && iv != "false"
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return errUsage
+	}
 	cfg, err := config.Load(config.Options{Args: ours, Output: stderr})
 	if err != nil {
 		return err
@@ -535,9 +543,24 @@ func runTerraform(args []string, stdout, stderr io.Writer) error {
 
 	cmd := exec.Command(binary, theirs...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, stdout, stderr
+	env := os.Environ()
 	if h := bigtableHost(cfg); h != "" {
-		cmd.Env = append(os.Environ(), "BIGTABLE_EMULATOR_HOST="+h)
+		env = append(env, "BIGTABLE_EMULATOR_HOST="+h)
 	}
+	// The opt-in intercept (#1578, terraform_intercept.go), for subcommands
+	// that call the provider: init downloads providers, which it would refuse.
+	if intercept && !offlineSubcommands[subcommand(theirs)] {
+		ic, err := startIntercept(cfg, stderr)
+		if err != nil {
+			return err
+		}
+		defer ic.stop()
+		if w := interceptTrustWarning(dir, runtime.GOOS); w != "" {
+			fmt.Fprintln(stderr, w)
+		}
+		env = ic.env(env, cfg.BindAddress)
+	}
+	cmd.Env = env
 	// Terraform handles Ctrl-C itself: the terminal delivers SIGINT to it
 	// directly, and it stops cleanly and saves state. This process only has
 	// to outlive it, so the file is removed afterwards rather than under a

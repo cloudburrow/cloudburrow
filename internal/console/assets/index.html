@@ -36,7 +36,7 @@
     <button id="project-button" class="picker-button" aria-haspopup="dialog"
             aria-expanded="false" aria-controls="project-panel">
       <span class="picker-label">Project</span>
-      <span class="picker-value" id="project-current">All projects</span>
+      <span class="picker-value" id="project-current">Select a project</span>
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10l5 5 5-5"/></svg>
     </button>
     <div id="project-panel" class="panel picker-panel" role="dialog"
@@ -45,27 +45,36 @@
         <strong>Select a project</strong>
         <button id="project-new" class="secondary">New project</button>
       </div>
-      <label class="sr-only" for="project-filter">Filter projects</label>
-      <input id="project-filter" type="search" class="filter" placeholder="Filter projects"
+      <label class="sr-only" for="project-filter">Search projects and folders</label>
+      <input id="project-filter" type="search" class="filter" placeholder="Search projects and folders"
              autocomplete="off">
+      <!-- Recent, Starred and All, kept in this browser (#1842). -->
+      <div id="project-views" class="picker-views" role="group" aria-label="Show projects">
+        <button type="button" class="picker-view" data-view="recent" aria-pressed="false">Recent</button>
+        <button type="button" class="picker-view" data-view="starred" aria-pressed="false">Starred</button>
+        <button type="button" class="picker-view" data-view="all" aria-pressed="true">All</button>
+      </div>
+      <!-- Name and ID, as the console this mirrors lists them (#1842). -->
+      <div class="picker-columns" aria-hidden="true"><span>Name</span><span>ID</span></div>
       <ul id="project-list" class="picker-list"></ul>
+      <a id="project-manage" class="picker-manage" href="/projects">Manage resources</a>
       <p id="project-hint" class="panel-empty">Resources are read in the selected project.</p>
     </div>
   </div>
 
   <div class="search">
-    <label class="sr-only" for="search">Search resources</label>
+    <label class="sr-only" for="search">Search for resources, pages and products</label>
     <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true">
       <circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>
     </svg>
-    <input id="search" type="search" placeholder="Search resources" autocomplete="off">
+    <input id="search" type="search" placeholder="Search (/) for resources, pages and products" aria-keyshortcuts="/" autocomplete="off">
   </div>
 
   <!-- Below 960px the search field has nowhere to sit, so it collapses to
        this control and expands over the bar. It used to be deleted outright,
        which silently removed the console's most prominent control on the
        width most likely to be a phone. -->
-  <button id="search-toggle" class="icon-button search-toggle" aria-label="Search resources"
+  <button id="search-toggle" class="icon-button search-toggle" aria-label="Search for resources, pages and products"
           aria-expanded="false" aria-controls="search">
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>
@@ -91,6 +100,14 @@
       <path d="M9 3v5M15 3v5"/><path d="M6 8h12v3a6 6 0 0 1-12 0z"/><path d="M12 17v4"/>
     </svg>
   </a>
+  <!-- Help (#1842), the question mark Google's toolbar carries: the
+       keyboard shortcuts (also on "?"), Connect and the console's guide. -->
+  <button id="help" class="icon-button help-button" aria-label="Help" title="Help"
+          aria-expanded="false" aria-controls="help-panel">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .9-1 1.7v.5"/><path d="M12 17h.01"/>
+    </svg>
+  </button>
   <button id="notifications" class="icon-button" aria-label="Notifications"
           aria-expanded="false" aria-controls="notifications-panel">
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -163,9 +180,17 @@
       <dt>Built</dt><dd id="about-date"></dd>
     </dl>
     <a id="settings-connect" href="/connect">Connect, and the diagnose bundle</a>
+    <button type="button" id="settings-shortcuts" class="link-button">Keyboard shortcuts</button>
   </fieldset>
 </div>
 
+<div id="help-panel" class="panel help-panel" role="dialog" aria-label="Help" hidden>
+  <ul class="help-list">
+    <li><button type="button" id="help-shortcuts" class="help-item">Keyboard shortcuts <kbd>?</kbd></button></li>
+    <li><a class="help-item" href="/connect">Connect: environment, gcloud, Terraform</a></li>
+    <li><a class="help-item" href="/products">All products</a></li>
+  </ul>
+</div>
 <div id="notifications-panel" class="panel" role="dialog" aria-label="Notifications" hidden>
   <p class="panel-empty">No recent activity.</p>
   <!-- The panel is a view of the server's operations ledger. When it cannot
@@ -203,11 +228,13 @@
     </div>
   </nav>
 
+  <!-- A product's own left-hand menu (#1842): its name, then its pages,
+       collapsible to a rail, as the console this mirrors draws every
+       product's. Filled by the router, so it is right on every screen of the
+       product and survives a screen re-rendering itself. -->
+  <nav id="product-nav" class="product-nav" aria-label="Pages in this product" hidden></nav>
+
   <main id="main" tabindex="-1">
-    <!-- A product's own pages, listed inside the product rather than as
-         siblings in the drawer. Filled by the router, so it is right on every
-         screen and survives a screen re-rendering itself. -->
-    <nav id="product-nav" class="product-nav" aria-label="Pages in this product" hidden></nav>
     <div id="view"></div>
   </main>
 
@@ -247,6 +274,18 @@
   </div>
   <div class="terminal-body">
     <div id="terminal-screen" class="terminal-screen"></div>
+    <!-- The starting panel (#1838): one spinner, bar and line while the pod
+         is made ready, as Cloud Shell's first start shows. -->
+    <div id="terminal-starting" class="terminal-starting" hidden>
+      <div class="terminal-starting-card">
+        <p class="terminal-starting-title"><span class="spinner" aria-hidden="true"></span>
+          <strong id="terminal-starting-title">Preparing the terminal…</strong></p>
+        <div id="terminal-starting-bar" class="terminal-starting-bar is-indeterminate" role="progressbar"
+             aria-labelledby="terminal-starting-title" aria-valuemin="0" aria-valuemax="100"><span></span></div>
+        <p id="terminal-starting-line" class="terminal-starting-line"></p>
+        <p id="terminal-starting-note" class="unavailable" hidden>First start only — this takes a few minutes.</p>
+      </div>
+    </div>
     <div id="terminal-notice" class="terminal-notice" hidden>
       <p id="terminal-notice-text" class="unavailable"></p>
       <button id="terminal-retry" class="secondary" type="button" hidden>Try again</button>

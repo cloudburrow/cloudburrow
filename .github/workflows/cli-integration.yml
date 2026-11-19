@@ -7,8 +7,8 @@
 # On pushes to main only, never on a pull request or a merge group: runners are
 # what the merge queue waits on, and this is its own workflow, not a job in
 # CI, so ci-green never waits on it and it cannot block a merge. A failure is
-# a red run on the main commit that broke it. The offline test is nightly, in
-# offline.yml.
+# a red run on the main commit that broke it. The offline test and the
+# every-service egress test (TestNoGoogleEgress) are nightly, in offline.yml.
 name: CLI integration
 
 on:
@@ -60,11 +60,13 @@ jobs:
       - name: Integration tests
         run: |
           # Every test in cmd/cloudburrow's integration-tagged files, except
-          # the offline one, which is nightly. Read from the files, so a test
-          # added there runs here without editing this list.
+          # the offline and egress ones, which start every service (or
+          # download gigabytes) and are nightly, in offline.yml. Read from
+          # the files, so a test added there runs here without editing this
+          # list.
           tests=$(grep -l '^//go:build integration' cmd/cloudburrow/*_test.go |
             xargs grep -ho '^func Test[A-Za-z0-9_]*' | sed 's/^func //' |
-            grep -vx TestPrefetchThenUpOfflineWithNoEgress | sort -u)
+            grep -vx -e TestPrefetchThenUpOfflineWithNoEgress -e TestNoGoogleEgress | sort -u)
           [ -n "$tests" ] || { echo "no integration tests found in cmd/cloudburrow"; exit 1; }
           echo "$tests"
           set +e
