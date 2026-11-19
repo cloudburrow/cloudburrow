@@ -52,9 +52,11 @@ type keptSnapshot struct {
 	// WallClock, the expiry the emulator gave the snapshot before it
 	// restarted, kept through it (restore.go).
 	ExpireTime time.Time `json:"expireTime,omitzero"`
-	// WallClock is set when ExpireTime is the emulator's: its times are the
-	// wall clock's, never the front's advanced clock (#1899). An update's
-	// expiry is the front's clock's, as UpdateSnapshot checks it against.
+	// WallClock is set when ExpireTime is on the wall clock, never the
+	// front's advanced clock (#1899): the emulator's expiry kept through a
+	// restart, and an update's, which UpdateSnapshot checks against the
+	// wall clock as the emulator's own expire_time is. Only a state file
+	// written before that has an update's expiry on the front's clock.
 	WallClock bool `json:"wallClock,omitempty"`
 }
 
@@ -146,15 +148,20 @@ func (f *Front) UpdateSnapshot(ctx context.Context, req *pubsubpb.UpdateSnapshot
 		if t == nil || t.CheckValid() != nil {
 			return nil, apierror.InvalidArgument("snapshot.expire_time must be a valid time when update_mask names it")
 		}
+		// A snapshot's times are the emulator's, on the wall clock: the
+		// expire_time it reports, the limit below, and what a client sends.
+		// The front's clock, which EmulatorClock/Advance moves ahead for
+		// subscription expiration, would refuse every expiry the limit
+		// allows once advanced more than 7 days.
 		at := t.AsTime()
-		if !at.After(f.clock.Now()) {
+		if !at.After(f.clock.Wall()) {
 			return nil, apierror.InvalidArgument("snapshot.expire_time %s is not in the future", at.UTC().Format(time.RFC3339Nano))
 		}
 		if limit := cur.GetExpireTime(); limit != nil && at.After(limit.AsTime()) {
 			return nil, apierror.InvalidArgument("snapshot.expire_time %s is later than %s, the latest the snapshot is guaranteed to exist until",
 				at.UTC().Format(time.RFC3339Nano), limit.AsTime().UTC().Format(time.RFC3339Nano))
 		}
-		next.ExpireTime, next.WallClock = at, false
+		next.ExpireTime, next.WallClock = at, true
 	}
 	// Custom constraints (#1895, custom.go).
 	var expireAt *time.Time

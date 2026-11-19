@@ -220,8 +220,23 @@ func (u *snapshotUpstream) DeleteSnapshot(_ context.Context, r *pubsubpb.DeleteS
 // labels and an earlier expire_time read back on GetSnapshot, ListSnapshots
 // and over REST, the emulator's own copy is untouched, a mask naming
 // anything else and an expiry in the past or past the snapshot's are
-// refused, and the snapshot is deleted when its kept expiry passes.
+// refused, and the snapshot is deleted when its kept expiry passes. The
+// expiry is on the wall clock, as the emulator's is: a front clock advanced
+// 18 days (as the storage shard leaves it) neither refuses an expiry an
+// hour ahead nor sweeps it before the wall clock reaches it.
 func TestUpdateSnapshot(t *testing.T) {
+	var wallMu sync.Mutex
+	wall := time.Now()
+	wallNow := func() time.Time {
+		wallMu.Lock()
+		defer wallMu.Unlock()
+		return wall
+	}
+	passWall := func(d time.Duration) {
+		wallMu.Lock()
+		defer wallMu.Unlock()
+		wall = wall.Add(d)
+	}
 	up := &snapshotUpstream{snaps: map[string]*pubsubpb.Snapshot{}}
 	srv := grpc.NewServer()
 	pubsubpb.RegisterSubscriberServer(srv, up)
@@ -236,6 +251,7 @@ func TestUpdateSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = f.Close() })
+	f.clock.now = wallNow
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -262,7 +278,8 @@ func TestUpdateSnapshot(t *testing.T) {
 		s.Name = snap
 		return c.UpdateSnapshot(ctx, &pubsubpb.UpdateSnapshotRequest{Snapshot: s, UpdateMask: &fieldmaskpb.FieldMask{Paths: paths}})
 	}
-	expire := f.clock.Now().Add(2 * time.Hour).Truncate(time.Second)
+	fx.advance(t, 18*24*time.Hour)
+	expire := wallNow().Add(2 * time.Hour).Truncate(time.Second)
 	got, err := update(&pubsubpb.Snapshot{Labels: map[string]string{"k": "v"}, ExpireTime: timestamppb.New(expire)}, "labels", "expireTime")
 	if err != nil {
 		t.Fatalf("UpdateSnapshot: %v", err)
@@ -299,7 +316,7 @@ func TestUpdateSnapshot(t *testing.T) {
 	}{
 		{"topic", &pubsubpb.Snapshot{Topic: "projects/" + project + "/topics/u"}, []string{"topic"}},
 		{"no mask", &pubsubpb.Snapshot{}, nil},
-		{"past", &pubsubpb.Snapshot{ExpireTime: timestamppb.New(time.Now().Add(-time.Hour))}, []string{"expire_time"}},
+		{"past", &pubsubpb.Snapshot{ExpireTime: timestamppb.New(wallNow().Add(-time.Hour))}, []string{"expire_time"}},
 		{"after its expiry", &pubsubpb.Snapshot{ExpireTime: timestamppb.New(created.GetExpireTime().AsTime().Add(time.Hour))}, []string{"expire_time"}},
 		{"bad labels", &pubsubpb.Snapshot{Labels: map[string]string{"UPPER": "x"}}, []string{"labels"}},
 	} {
@@ -308,6 +325,11 @@ func TestUpdateSnapshot(t *testing.T) {
 		}
 	}
 	fx.advance(t, 3*time.Hour)
+	if _, err := c.GetSnapshot(ctx, &pubsubpb.GetSnapshotRequest{Snapshot: snap}); err != nil {
+		t.Errorf("the snapshot after the front's clock passed its expiry but the wall clock did not = %v, want it kept", err)
+	}
+	passWall(3 * time.Hour)
+	fx.advance(t, 0)
 	if _, err := c.GetSnapshot(ctx, &pubsubpb.GetSnapshotRequest{Snapshot: snap}); status.Code(err) != codes.NotFound {
 		t.Errorf("the snapshot after its kept expiry = %v, want it deleted", err)
 	}

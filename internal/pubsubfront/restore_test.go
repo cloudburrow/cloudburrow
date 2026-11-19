@@ -228,7 +228,8 @@ func TestMutationTargets(t *testing.T) {
 // TestRestoredSnapshotExpiryIsOnTheWallClock (#1899): the expiry a snapshot
 // keeps through an emulator restart is the emulator's, on the wall clock,
 // so a front whose clock was advanced past it does not sweep the snapshot;
-// an update's expiry is on the front's clock, and is swept by it.
+// an expiry on the front's clock (an update's, in a state file written
+// before updates moved to the wall clock) is swept by it.
 func TestRestoredSnapshotExpiryIsOnTheWallClock(t *testing.T) {
 	wall := time.Date(2026, 11, 19, 12, 0, 0, 0, time.UTC)
 	now := wall.Add(18 * 24 * time.Hour) // the front's clock, advanced
@@ -241,7 +242,7 @@ func TestRestoredSnapshotExpiryIsOnTheWallClock(t *testing.T) {
 	}
 	updated := keptSnapshot{ExpireTime: wall.Add(7 * 24 * time.Hour)}
 	if !updated.expired(now, wall) {
-		t.Errorf("an updated snapshot's expiry is on the front's clock; it did not expire under an 18-day advance")
+		t.Errorf("an expiry on the front's clock did not expire under an 18-day advance")
 	}
 	if (keptSnapshot{}).expired(now, wall) {
 		t.Errorf("a snapshot with no kept expiry expired")
