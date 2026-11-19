@@ -980,7 +980,7 @@ var parityRows = []parityRow{
 		Methods: []string{"storage.anywhereCaches.insert", "storage.anywhereCaches.list", "storage.anywhereCaches.update",
 			"storage.anywhereCaches.resume", "storage.anywhereCaches.disable",
 			"storage.buckets.relocate", "storage.buckets.operations.advanceRelocateBucket", "storage.buckets.operations.cancel"},
-		Provider: "storage", Offers: "Anywhere caches tab on a bucket's page (zone, state, TTL, admission policy, ingest on write, pending update), noting that no cache tier exists locally; Create Anywhere Cache and Change Anywhere Cache (pause, resume, disable, update) on a bucket's page (pause by its path: the discovery document no longer lists it, #1791); Relocate bucket (location, placement, dry run), Finalize relocation and Cancel operation, whose operations show on the Operations tab (#1444)",
+		Provider: "storage", Offers: "Anywhere caches tab on a bucket's page (zone, state, TTL, admission policy, ingest on write, pending update), noting that no cache tier exists locally; Create Anywhere Cache and Change Anywhere Cache (pause, resume, disable, update) on a bucket's page (pause is the next row's, #1791); Relocate bucket (location, placement, dry run), Finalize relocation and Cancel operation, whose operations show on the Operations tab (#1444)",
 		Tests: []string{"TestStorageAnywhereCachesThroughTheConsole"}},
 	{Resource: "Cloud Storage Anywhere Cache reads", Service: "storage",
 		Methods:  []string{"storage.anywhereCaches.get"},
@@ -1007,6 +1007,13 @@ var parityRows = []parityRow{
 	// The gRPC API (#1321) is a second transport onto the JSON API's store,
 	// answered by its handlers, so the Cloud Storage pages, which use the
 	// JSON API, show and change what gRPC does.
+	// anywhereCaches.pause left the JSON discovery document in revision
+	// 20261107 (#1791); Storage Control still has it, and the console's
+	// Change Anywhere Cache pauses there.
+	{Resource: "Cloud Storage Anywhere Cache pause", Service: "storagegrpc",
+		Methods:  []string{"StorageControl/PauseAnywhereCache"},
+		Provider: "storage", Offers: "Change Anywhere Cache > pause on a bucket's page, through Storage Control's PauseAnywhereCache over gRPC: the JSON API's discovery document no longer lists anywhereCaches.pause, and Google's own console no longer offers it (#1791)",
+		Tests: []string{"TestStorageAnywhereCachePauseThroughTheConsole"}},
 	{Resource: "Storage Intelligence configurations", Service: "storagegrpc",
 		Methods: []string{"StorageControl/GetProjectIntelligenceConfig", "StorageControl/UpdateProjectIntelligenceConfig",
 			"StorageControl/GetFolderIntelligenceConfig", "StorageControl/UpdateFolderIntelligenceConfig",
