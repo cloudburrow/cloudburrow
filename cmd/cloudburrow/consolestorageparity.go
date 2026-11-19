@@ -169,6 +169,15 @@ func (storageProvider) CreateTitle() string { return "Create a bucket" }
 // of numbered steps.
 func (storageProvider) CreateOnPage() bool { return true }
 
+// Google's access control choice, on the create form and the Permissions
+// tab's Switch to (#1843), and its storage class choice.
+const (
+	accessUniform        = "Uniform"
+	accessFineGrained    = "Fine-grained"
+	classChoiceDefault   = "Set a default class"
+	classChoiceAutoclass = "Autoclass"
+)
+
 // The location types Google's step 2 offers, and the default location of
 // each: US multi-region is Google's default.
 const (
@@ -369,7 +378,9 @@ func lifecycleSection(b bucketMeta) console.Section {
 				"Action":           lifecycleActionLabel(r),
 				"Object condition": lifecycleConditionText(r.Condition),
 			},
-			Target:  []string{lifecycleRulePage, b.Name, strconv.Itoa(i)},
+			// The rule's own name, "Rule N", last: Delete rule's confirmation
+			// asks for what the row shows.
+			Target:  []string{lifecycleRulePage, b.Name, fmt.Sprintf("Rule %d", i+1)},
 			Actions: []console.Action{deleteLifecycleRuleAction(b.Metageneration)},
 		})
 	}
@@ -524,7 +535,8 @@ func (p storageProvider) actOnLifecycle(ctx context.Context, path []string, acti
 		if err != nil {
 			return true, err
 		}
-		i, err := strconv.Atoi(path[2])
+		i, err := strconv.Atoi(strings.TrimPrefix(path[2], "Rule "))
+		i-- // rules are numbered from 1, as the tab lists them
 		if err != nil || i < 0 || i >= len(b.Lifecycle.Rule) {
 			return true, fmt.Errorf("%s has no rule %s", path[1], path[2])
 		}

@@ -177,6 +177,13 @@ type Listing struct {
 	// Scope is the picker a Scoper's list screen draws above its rows: the
 	// Bigtable instance whose tables these are (#1360).
 	Scope *Scope `json:"scope,omitempty"`
+	// Tabs, when set, draw the list screen as tabs, as Google's Cloud
+	// Storage Settings page has Project access and Interoperability (#1843):
+	// the tab whose ID is ListTab holds the rows, with the screen's create
+	// and actions, and any other shows Summary. Only ID, Label and Note of
+	// each are read.
+	Tabs    []Section `json:"tabs,omitempty"`
+	ListTab string    `json:"listTab,omitempty"`
 }
 
 // Provider reads live state for one service.
@@ -474,6 +481,10 @@ type Detail struct {
 	// is addressed by its encoded key and headed by its key path (#875).
 	// Empty means the last segment.
 	Title string `json:"title,omitempty"`
+	// Object, on an object's page, is the bucket and the object name the
+	// page is about: the page then offers Download and Delete beside its
+	// title, through the object routes, as Google's object page does (#1843).
+	Object []string `json:"object,omitempty"`
 }
 
 // Crumb is one breadcrumb: its text, and the path it opens (none for the
@@ -500,6 +511,10 @@ type Property struct {
 	// Link, when set, is a console route the value opens: the Resource
 	// hierarchy list's organization opens the organization's page (#1554).
 	Link string `json:"link,omitempty"`
+	// Copy, when set, is the label of a button beside the value that
+	// copies it: Google's object page has Copy URL and Copy gsutil URI
+	// (#1843).
+	Copy string `json:"copy,omitempty"`
 }
 
 // SectionKind says what a section actually holds.
@@ -2344,6 +2359,9 @@ func (s *Server) handleDetail(w http.ResponseWriter, r *http.Request) {
 		if target := pe.PolicyOn(ctx, path); target != nil {
 			sec := permissionsSection(ctx, pe, r.URL.Query().Get("project"), path, target)
 			if slot >= 0 {
+				// The placeholder's own actions and note stay with the
+				// tab: a bucket's access control and Switch to (#1843).
+				sec.Actions, sec.Note = detail.Sections[slot].Actions, detail.Sections[slot].Note
 				detail.Sections[slot] = sec
 			} else {
 				detail.Sections = append(detail.Sections, sec)

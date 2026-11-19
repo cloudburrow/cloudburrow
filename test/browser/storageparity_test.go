@@ -55,7 +55,7 @@ func TestStorageGooglePagesThroughTheBrowser(t *testing.T) {
 		Loc: document.querySelector("#view #f-location").value,
 		Soft: document.querySelector("#view #f-softDelete").checked,
 		Days: document.querySelector("#view #f-softDeleteDays").value,
-		Uniform: document.querySelector("#view #f-uniformAccess").checked }))()`, &form)
+		Uniform: document.querySelector("#view #f-uniformAccess").value === "Uniform" }))()`, &form)
 	want := "Get started|Choose where to store your data|Choose how to store your data|" +
 		"Choose how to control access to objects|Choose how to protect object data"
 	if form.Title != "Create a bucket" || strings.Join(form.Steps, "|") != want || form.Button != "Create" ||

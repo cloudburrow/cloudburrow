@@ -2153,7 +2153,8 @@ func TestTheDrawerListsProductsNotPages(t *testing.T) {
 		t.Errorf("Cloud Run pages = %q, want %q", cloudRun, want)
 	}
 	// Cloud Storage's menu is Google's order (#1843), with Deleted buckets
-	// (#789) last.
+	// (#789), now a redirect to Buckets' View options and not in the menu,
+	// last.
 	var gcs []string
 	for _, r := range routes {
 		if r["product"] == "storage" {
@@ -2162,7 +2163,10 @@ func TestTheDrawerListsProductsNotPages(t *testing.T) {
 	}
 	wantGCS := []string{
 		"Buckets /storage/browser storage Cloud Storage",
-		"Storage Intelligence /storage/intelligence storage-intelligence Cloud Storage",
+		"Observability /storage/observability  Cloud Storage",
+		"Configuration /storage/intelligence storage-intelligence Cloud Storage",
+		"Inventory reports /storage/inventory-reports  Cloud Storage",
+		"Transfer data /storage/transfer  Cloud Storage",
 		"Settings /storage/settings storage-settings Cloud Storage",
 		"Deleted buckets /storage/deleted storage-deleted Cloud Storage",
 	}

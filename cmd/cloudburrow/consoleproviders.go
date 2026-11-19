@@ -68,6 +68,11 @@ func (p storageProvider) List(ctx context.Context, project string) (console.List
 		}, nil
 	}
 
+	// View options: Soft deleted buckets only (#1843), the buckets.list
+	// softDeleted=true the Deleted buckets page read, which now leads here.
+	if console.ScopeValue(ctx, bucketViewKey) == bucketViewSoftDeleted {
+		return p.softDeletedBuckets(ctx, project)
+	}
 	var body struct {
 		Items []bucketMeta `json:"items"`
 	}
@@ -85,6 +90,7 @@ func (p storageProvider) List(ctx context.Context, project string) (console.List
 		Columns: bucketListColumns,
 		Noun:    "buckets",
 		Items:   items, Total: len(items),
+		Scope: bucketViewScope(bucketViewLive),
 	}, nil
 }
 
@@ -1599,10 +1605,17 @@ func (storageProvider) CreateForm() (string, []console.Field) {
 			Help: "Multi-region (the default), Dual-region or Region. The location is recorded; this instance keeps " +
 				"every object in one place."},
 		{Name: "location", Label: "Location", Type: "text", Section: where, Default: "US",
-			Pattern: `^[A-Za-z0-9-]+$`,
+			Pattern: `^[A-Za-z0-9\-]+$`,
 			Help:    "A multi-region such as US, EU or ASIA, a dual-region such as NAM4, or a region such as us-central1."},
 		{Name: "turboReplication", Label: "Add turbo replication", Type: "checkbox", Section: where, Default: "false",
 			Help: "Dual-region only: sets the recovery point objective to ASYNC_TURBO. Stored; there is no replication here."},
+		// Google's choice between a default class and Autoclass (#1843).
+		// Autoclass is stored (docs/compatibility.md, "Bucket fields"):
+		// no object changes class by itself on this instance.
+		{Name: "storageClassChoice", Label: "Choose how to store your data", Type: "radio", Section: how,
+			Default: classChoiceDefault, Options: []string{classChoiceDefault, classChoiceAutoclass},
+			Help: "Set a default class (the default) applies the class below to new objects. Autoclass is stored as " +
+				"autoclass enabled and shown on the bucket; this instance does not move objects between classes."},
 		{Name: "storageClass", Label: "Set a default class", Type: "select", Section: how, Default: "STANDARD",
 			Options: []string{"STANDARD", "NEARLINE", "COLDLINE", "ARCHIVE", "RAPID"},
 			Help: "Standard (the default), Nearline, Coldline or Archive: the class a new object gets when it names none. " +
@@ -1616,16 +1629,17 @@ func (storageProvider) CreateForm() (string, []console.Field) {
 		// and excludes versioning, so checking it turns the one on and the
 		// other off, and holds them there.
 		{Name: "hierarchicalNamespace", Label: "Enable Hierarchical namespace on this bucket", Type: "checkbox", Section: how,
-			Default: "false", Requires: []string{"uniformAccess"}, Excludes: []string{"versioning"},
+			Default: "false", Requires: []string{"uniformAccess=" + accessUniform}, Excludes: []string{"versioning"},
 			Help: "Optimize storage for data-intensive workloads: the bucket has real folders, which can be created, renamed and " +
 				"deleted as folders. It can be enabled only when the bucket is created, needs uniform access control and " +
 				"excludes object versioning."},
 		{Name: "publicAccessPrevention", Label: "Enforce public access prevention on this bucket", Type: "checkbox",
 			Section: access, Default: "true",
 			Help: "Prevent public access: stored as publicAccessPrevention enforced. Nothing is public on this instance either way."},
-		{Name: "uniformAccess", Label: "Access control: Uniform", Type: "checkbox", Section: access, Default: "true",
-			Help: "Uniform (recommended, checked): access is granted by IAM alone, as a managed folder requires. " +
-				"Cleared, the bucket is Fine-grained: its ACLs are on its Access control tab, stored and not enforced (#1233)."},
+		{Name: "uniformAccess", Label: "Access control", Type: "radio", Section: access, Default: accessUniform,
+			Options: []string{accessUniform, accessFineGrained},
+			Help: "Uniform (recommended): access is granted by IAM alone, as a managed folder and hierarchical namespace " +
+				"require. Fine-grained: objects also carry ACLs, edited with Edit access, stored and not enforced (#1233)."},
 		{Name: "softDelete", Label: "Soft delete policy (for data recovery)", Type: "checkbox", Section: protect, Default: "true",
 			Help: "A deleted object can be restored for the retention duration. Cleared, soft delete is off."},
 		{Name: "softDeleteDays", Label: "Set custom retention duration (days)", Type: "text", Section: protect,
@@ -1684,7 +1698,10 @@ func bucketCreateRequest(name string, values map[string]string) ([]byte, string,
 		b["customPlacementConfig"] = map[string]any{"dataLocations": []string{z}}
 	}
 	if v, ok := values["uniformAccess"]; ok {
-		b["iamConfiguration"] = map[string]any{"uniformBucketLevelAccess": map[string]any{"enabled": v == "true"}}
+		b["iamConfiguration"] = map[string]any{"uniformBucketLevelAccess": map[string]any{"enabled": v == "true" || v == accessUniform}}
+	}
+	if values["storageClassChoice"] == classChoiceAutoclass {
+		b["autoclass"] = map[string]any{"enabled": true}
 	}
 	if values["versioning"] == "true" {
 		b["versioning"] = map[string]any{"enabled": true}
@@ -3568,10 +3585,13 @@ func modelStatus(m localai.Model) (status, detail string) {
 // own address and can be linked to.
 func (p storageProvider) Detail(ctx context.Context, project string, path []string) (console.Detail, error) {
 	if path[0] == objectPage {
-		return p.objectDetail(ctx, path)
+		return p.objectDetail(ctx, project, path)
 	}
 	if path[0] == operationPage {
 		return p.operationDetail(ctx, path)
+	}
+	if path[0] == softBucketPage {
+		return p.softBucketDetail(ctx, path)
 	}
 	if b, id, ok := notificationPath(path); ok {
 		return p.notificationDetail(ctx, b, id)
@@ -3624,9 +3644,15 @@ func (p storageProvider) Detail(ctx context.Context, project string, path []stri
 	var edit *console.EditForm
 	if prefix == "" {
 		if metaErr == nil {
-			sections = append(sections, bucketConfigSection(meta),
-				console.Section{ID: "permissions", Label: "Permissions", Kind: console.KindPermissions},
-				protectionSection(meta), lifecycleSection(meta))
+			// Each tab's own actions (#1843): Edit Autoclass on
+			// Configuration, Switch to on Permissions, Edit object
+			// versioning on Protection.
+			config, protection := bucketConfigSection(meta), protectionSection(meta)
+			config.Actions = append(config.Actions, editAutoclassAction(meta))
+			if !meta.hierarchical() {
+				protection.Actions = append([]console.Action{editVersioningAction(meta)}, protection.Actions...)
+			}
+			sections = append(sections, config, permissionsPlaceholder(meta), protection, lifecycleSection(meta))
 			// The Operations tab, on an HNS bucket always, and on any
 			// other once it has an operation, a bulk restore (#1279).
 			if ops := p.operationsSection(ctx, bucket); hns || len(ops.Listing.Items) > 0 || ops.Listing.Unavailable != "" {
@@ -3847,6 +3873,7 @@ func bucketConfigSection(b bucketMeta) console.Section {
 				{Label: "Location type", Value: b.LocationType},
 				{Label: "Placement", Value: b.placement()},
 				{Label: "Storage class", Value: b.StorageClass},
+				{Label: "Autoclass", Value: autoclassText(b)},
 			}},
 			{Heading: "Protection", Properties: protection},
 			{Heading: "Lifecycle", Properties: []console.Property{

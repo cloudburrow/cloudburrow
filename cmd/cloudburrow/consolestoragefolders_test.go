@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -26,12 +27,15 @@ func TestStorageCreateFormHierarchicalNamespace(t *testing.T) {
 	if !ok || hns.Type != "checkbox" || hns.Default != "false" {
 		t.Fatalf("the Create form's hierarchical namespace field is %+v", hns)
 	}
-	if strings.Join(hns.Requires, ",") != "uniformAccess" || strings.Join(hns.Excludes, ",") != "versioning" {
+	if strings.Join(hns.Requires, ",") != "uniformAccess=Uniform" || strings.Join(hns.Excludes, ",") != "versioning" {
 		t.Errorf("hierarchical namespace requires %v and excludes %v", hns.Requires, hns.Excludes)
 	}
+	// A checkbox, or a radio choice named "name=value" (#1843).
 	for _, n := range append(append([]string{}, hns.Requires...), hns.Excludes...) {
-		if byName[n].Type != "checkbox" {
-			t.Errorf("hierarchical namespace ties %q, which is no checkbox on the form", n)
+		name, value, radio := strings.Cut(n, "=")
+		f := byName[name]
+		if radio && (f.Type != "radio" || !slices.Contains(f.Options, value)) || !radio && f.Type != "checkbox" {
+			t.Errorf("hierarchical namespace ties %q, which is no checkbox or radio choice on the form", n)
 		}
 	}
 	raw, _, err := bucketCreateRequest("b", map[string]string{"hierarchicalNamespace": "true", "uniformAccess": "true"})

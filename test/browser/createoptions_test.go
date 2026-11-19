@@ -224,7 +224,7 @@ func TestStorageCreateBucketOptionsThroughTheForm(t *testing.T) {
 		SoftOn                       bool
 	}
 	p.eval(`(() => { const q = (s) => document.querySelector("#view " + s);
-		return { Classes: [...q("#f-storageClass").options].map((o) => o.value), Uniform: q("#f-uniformAccess").checked,
+		return { Classes: [...q("#f-storageClass").options].map((o) => o.value), Uniform: q("#f-uniformAccess").value === "Uniform",
 		         Versioning: q("#f-versioning").checked, Objects: q("#f-objectRetention").checked,
 		         SoftDelete: q("#f-softDeleteDays").value, SoftOn: q("#f-softDelete").checked }; })()`, &form)
 	if strings.Join(form.Classes, ",") != "STANDARD,NEARLINE,COLDLINE,ARCHIVE,RAPID" || !form.Uniform || form.Versioning ||
