@@ -44,9 +44,14 @@
 #              emulators shard, which passed 45m with them (#1472).
 # A seventh, acceptance, runs no compat test: storage, pubsub and run, for
 # the acceptance workflow (test/e2e) and test/k8s (#596).
+# An eighth, iam, starts its instance with `up --iam-enforcement=on`
+# (UP_FLAGS) and runs only the enforcement tests (COMPAT_RUN,
+# ^TestIAMEnforcement), which skip on every other shard's instance, as
+# those run with enforcement off (#1879): Cloud Storage, Pub/Sub, Cloud
+# Tasks, Secret Manager, Cloud KMS and Cloud Run (for run.routes.invoke).
 
 # The shards, in the order ci.yml's matrix lists them.
-COMPAT_SHARDS="storage served run emulators memorystore sql acceptance"
+COMPAT_SHARDS="storage served run emulators memorystore sql acceptance iam"
 
 # The console's headless-browser suite (#594) runs in the storage, run,
 # emulators, memorystore and sql shards: the Cloud KMS and Cloud Run
@@ -95,6 +100,11 @@ COMPAT_BROWSER_NEVER_TESTS='^Test(StudioManagesLocalModelsAndTestsEmbeddings|Emb
 compat_shard() {
   FIXTURES=()
   SETUP_TESTS="" PROBE_TESTS="" PROBE_VARS=""
+  # UP_FLAGS are `up` flags beyond the services and fixtures; COMPAT_RUN,
+  # when set, is the -run pattern of the shard's compat suite (all of it
+  # when empty).
+  UP_FLAGS=()
+  COMPAT_RUN=""
   # What every instance has, whatever its services: the ADC fixture
   # (#346), the instance's own kubeconfig and kind cluster (#346, never
   # the default kubeconfig), the admin API, the metadata server (#303),
@@ -190,6 +200,14 @@ compat_shard() {
       # The acceptance workflow uploads, publishes and runs a Cloud Run
       # worker; test/k8s needs the cluster and Knative.
       SERVICES=storage,pubsub,run ;;
+    iam)
+      # IAM enforcement (#1879): every TestIAMEnforcement* test, against
+      # an instance that enforces, and nothing else, so the shard is a few
+      # minutes; the other suites ran with enforcement off in their shards.
+      SERVICES=storage,pubsub,tasks,secretmanager,kms,run
+      TEST_VARS+=,STORAGE,PUBSUB,TASKS,SECRETS,KMS,RUN,RESOURCEMANAGER,IAM_ENFORCEMENT
+      UP_FLAGS=(--iam-enforcement=on)
+      COMPAT_RUN='^TestIAMEnforcement' ;;
     emulators)
       # pubsub for TestEmulatorsBehindAFrontRefuseOtherPods (#1114), which
       # dials both emulators from a pod; PUBSUB is not exported, so the

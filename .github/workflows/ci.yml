@@ -486,7 +486,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [storage, served, run, emulators, memorystore, sql, acceptance]
+        shard: [storage, served, run, emulators, memorystore, sql, acceptance, iam]
     env:
       SHARD: ${{ matrix.shard }}
       # Every make build here uses the emulator binaries the
@@ -610,7 +610,7 @@ jobs:
           # OS-assigned on purpose: a fixed port hid the #269 regression.
           CB=(--name ci --state-dir "$RUNNER_TEMP/cb" "${FIXTURES[@]}"
             --port-control 0 --port-storage 0 --port-pubsub 0 --port-run 0 --port-memorystore 0 --port-cloudsql-mysql 0 --port-cloudsql 0
-            --services "$SERVICES")
+            --services "$SERVICES" ${UP_FLAGS[@]+"${UP_FLAGS[@]}"})
           RUNTIME="$RUNNER_TEMP/cb/ci/up.json"
 
           # up --detach returns only once /readyz is 200, and exits non-zero
@@ -720,7 +720,10 @@ jobs:
             # Terraform and Secure Source Manager tests still to run. #1821
             # splits the shard so every shard is back near 30 minutes.
             COMPAT_TIMEOUT=60m; [ "$SHARD" = run ] && COMPAT_TIMEOUT=90m
-            go test -tags=compat -timeout "$COMPAT_TIMEOUT" -v ./test/compat/... | tee compat.log
+            # COMPAT_RUN, from compat_shard: the iam shard runs only the
+            # enforcement tests (#1879).
+            SELECT_RUN=(); [ -n "$COMPAT_RUN" ] && SELECT_RUN=(-run "$COMPAT_RUN")
+            go test -tags=compat -timeout "$COMPAT_TIMEOUT" -v ${SELECT_RUN[@]+"${SELECT_RUN[@]}"} ./test/compat/... | tee compat.log
             rc=$?
             set -e
             if [ "$rc" -ne 0 ]; then
@@ -1037,7 +1040,7 @@ jobs:
         run: |
           go test -tags=compat -list '.*' ./test/compat/ | grep '^Test' | sort > all.txt
           missing=
-          for shard in storage served run emulators memorystore sql; do
+          for shard in storage served run emulators memorystore sql iam; do
             d=logs/compat-log-$shard
             [ -d "$d" ] || { echo "no logs from the $shard shard"; missing=1; continue; }
             # Top-level results only; a subtest's line is indented.
