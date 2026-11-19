@@ -750,6 +750,22 @@ func (p bigqueryProvider) ActAtResult(ctx context.Context, project string, path 
 		return nil, err
 	}
 	switch {
+	case action == "createtable" && len(path) == 1 && values["source"] == bqSourceGCS:
+		// Create table from Google Cloud Storage is a load into a new
+		// table (#1861), as Load from Cloud Storage's.
+		if err := refuseUnavailable(values, bigqueryTableFields()); err != nil {
+			return nil, err
+		}
+		if t := strings.TrimSpace(values["tableType"]); t != "" && t != "TABLE" {
+			return nil, errors.New("a table loaded from Cloud Storage is a native table: choose TABLE")
+		}
+		load := map[string]string{}
+		for _, k := range []string{"uris", "format", "autodetect", "schema", "partitionType", "partitionField", "clusteringFields"} {
+			if v, ok := values[k]; ok {
+				load[k] = v
+			}
+		}
+		return p.loadJob(ctx, project, path[0], strings.TrimSpace(values["tableId"]), load)
 	case action == "load" && len(path) == 1:
 		return p.loadJob(ctx, project, path[0], strings.TrimSpace(values["tableId"]), values)
 	case action == "load" && len(path) == 2:
@@ -778,6 +794,9 @@ type bigqueryJobsProvider struct {
 	bq bigqueryProvider
 }
 
+// actRepeatLoad is Repeat load job (#1861).
+const actRepeatLoad = "repeatload"
+
 func (bigqueryJobsProvider) ID() string    { return "bigquery-jobs" }
 func (bigqueryJobsProvider) Title() string { return "Job history" }
 
@@ -794,7 +813,7 @@ func (p bigqueryJobsProvider) service(ctx context.Context) (*bqv2.Service, error
 func (p bigqueryJobsProvider) List(ctx context.Context, project string) (console.Listing, error) {
 	p.bq = p.bq.in(project) // #1764: the project chosen in the toolbar
 	base := console.Listing{
-		Columns: []string{"Type", "Created", "Error"}, NameColumn: "Job ID", Noun: "jobs",
+		Columns: []string{"Type", "Created", "Duration", "User", "Bytes processed", "Error"}, NameColumn: "Job ID", Noun: "jobs",
 		RowsOpenable: true, AlwaysStatus: true,
 	}
 	if prompt := p.bq.scope(project); prompt != "" {
@@ -832,11 +851,14 @@ func (p bigqueryJobsProvider) List(ctx context.Context, project string) (console
 			}
 			base.Items = append(base.Items, console.Resource{
 				Name:   j.JobReference.JobId,
-				Status: jobStateWord(j.State, j.ErrorResult),
+				Status: listedJobState(j),
 				Fields: map[string]string{
-					"Type":    jobType(j.Configuration),
-					"Created": jobTime(j.Statistics),
-					"Error":   orDash(errorText(j.ErrorResult)),
+					"Type":            jobType(j.Configuration),
+					"Created":         jobTime(j.Statistics),
+					"Duration":        bqJobDuration(j.Statistics),
+					"User":            orDash(j.UserEmail),
+					"Bytes processed": jobBytes(j.Statistics),
+					"Error":           orDash(errorText(j.ErrorResult)),
 				},
 			})
 			if len(base.Items) >= bigqueryJobsShown {
@@ -1258,9 +1280,23 @@ func (p bigqueryJobsProvider) DetailActions(ctx context.Context, project string,
 	actions := []console.Action{}
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
-	if job, _, err := p.getJob(ctx, path[0]); err == nil && job.Status != nil && job.Status.State != "DONE" {
+	job, _, err := p.getJob(ctx, path[0])
+	if err == nil && job.Status != nil && job.Status.State != "DONE" {
 		actions = append(actions, console.Action{ID: "cancel", Label: "Cancel job",
 			Confirm: "The job is asked to stop; what it has already written stays."})
+	}
+	// Google's job details offer Open as new query on a query job and
+	// Repeat load job on a load job; copy and extract jobs cannot be
+	// repeated (#1861, https://docs.cloud.google.com/bigquery/docs/managing-jobs).
+	if err == nil && job.Configuration != nil {
+		if q := job.Configuration.Query; q != nil && q.Query != "" {
+			actions = append(actions, console.Action{ID: "openquery", Label: "Open as new query",
+				Href: "/bigquery-studio?query=" + url.QueryEscape(q.Query)})
+		}
+		if job.Configuration.Load != nil {
+			actions = append(actions, console.Action{ID: actRepeatLoad, Label: "Repeat load job",
+				Confirm: "The load runs again with the same configuration, as a new job: its rows are written to the table again."})
+		}
 	}
 	return append(actions, console.Action{ID: "delete", Label: "Delete job", Destructive: true, Leaves: true,
 		Confirm: "The job's record is deleted: Job history, jobs.get and jobs.list no longer find it. " +
@@ -1279,6 +1315,32 @@ func (p bigqueryJobsProvider) ActAt(ctx context.Context, project string, path []
 	switch action {
 	case "delete":
 		return p.Delete(ctx, project, path[0])
+	case actRepeatLoad:
+		ctx, cancel := context.WithTimeout(ctx, bigqueryJobTimeout)
+		defer cancel()
+		job, _, err := p.getJob(ctx, path[0])
+		if err != nil {
+			return bigqueryRefusal(err)
+		}
+		if job.Configuration == nil || job.Configuration.Load == nil {
+			return errors.New("only a load job can be repeated")
+		}
+		svc, err := p.service(ctx)
+		if err != nil {
+			return err
+		}
+		again := &bqv2.Job{Configuration: &bqv2.JobConfiguration{Load: job.Configuration.Load, Labels: job.Configuration.Labels}}
+		if job.JobReference != nil && job.JobReference.Location != "" {
+			again.JobReference = &bqv2.JobReference{ProjectId: p.bq.project, Location: job.JobReference.Location}
+		}
+		done, err := svc.Jobs.Insert(p.bq.project, again).Context(ctx).Do()
+		if err != nil {
+			return bigqueryRefusal(err)
+		}
+		if done.Status != nil && done.Status.ErrorResult != nil {
+			return errors.New(done.Status.ErrorResult.Message)
+		}
+		return nil
 	case "cancel":
 		ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 		defer cancel()
@@ -1298,3 +1360,20 @@ var (
 	_ console.Deleter     = bigqueryJobsProvider{}
 	_ console.PathActor   = bigqueryJobsProvider{}
 )
+
+// bqJobDuration is a job's end time less its start time, as Google's job
+// details give it (#1861).
+func bqJobDuration(s *bqv2.JobStatistics) string {
+	if s == nil || s.StartTime <= 0 || s.EndTime < s.StartTime {
+		return "—"
+	}
+	return (time.Duration(s.EndTime-s.StartTime) * time.Millisecond).String()
+}
+
+// jobBytes is a job's bytes processed, for a job that reports them.
+func jobBytes(s *bqv2.JobStatistics) string {
+	if s == nil || (s.Query == nil && s.TotalBytesProcessed == 0) {
+		return "—"
+	}
+	return studioBytes(s.TotalBytesProcessed)
+}

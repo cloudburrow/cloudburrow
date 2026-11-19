@@ -89,52 +89,6 @@ var bigqueryColumnTypes = []string{
 // offers no RECORD below it.
 const bigqueryRecordDepth = 15
 
-// CreateForm implements console.Creator: Create dataset.
-func (bigqueryProvider) CreateForm() (string, []console.Field) {
-	return "Create dataset", []console.Field{
-		{Name: "datasetId", Label: "Dataset ID", Type: "text", Required: true, Pattern: bigqueryDatasetIDPattern,
-			Help: "Letters, numbers and underscores, at most 1,024."},
-		{Name: "location", Label: "Location", Type: "text",
-			Help: "Optional, such as US or EU. Stored and shown; the emulator runs every dataset in one place."},
-		{Name: "description", Label: "Description", Type: "textarea"},
-		{Name: "labels", Label: "Labels", Type: "map", Help: "One key=value per line."},
-	}
-}
-
-// Create implements console.Creator.
-func (p bigqueryProvider) Create(ctx context.Context, project string, values map[string]string) (string, error) {
-	p = p.in(project) // #1764: the project chosen in the toolbar
-	if err := p.writable(project); err != nil {
-		return "", err
-	}
-	id := strings.TrimSpace(values["datasetId"])
-	labels, err := console.ParseMap(values["labels"])
-	if err != nil {
-		return "", fmt.Errorf("labels: %w", err)
-	}
-	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
-	defer cancel()
-	c, err := p.client(ctx)
-	if err != nil {
-		return "", err
-	}
-	defer c.Close()
-	ds := c.Dataset(id)
-	// An invalid ID is the front's 400 and an existing dataset its 409
-	// "Already Exists", at once, as BigQuery answers them (#861).
-	md := &bigquery.DatasetMetadata{
-		Location:    strings.TrimSpace(values["location"]),
-		Description: values["description"],
-	}
-	if len(labels) > 0 {
-		md.Labels = labels
-	}
-	if err := ds.Create(ctx, md); err != nil {
-		return "", bigqueryRefusal(err)
-	}
-	return id, nil
-}
-
 // Delete implements console.Deleter for a dataset row: the dataset and every
 // table in it, which is what BigQuery's console deletes too. The confirmation
 // names the tables (DELETE_DETAIL in console.js).
@@ -287,24 +241,69 @@ var bigqueryTableTypes = []string{"TABLE", "VIEW", "MATERIALIZED_VIEW"}
 const bigqueryFieldNameHelp = "A name is letters, numbers, underscores, dashes, spaces and & % = + : ' < > # |, " +
 	"at most 300 characters (BigQuery's flexible column names), and no two at one level may differ only in case."
 
-// bigqueryTableFields are Create table's inputs.
+// Create table's sources, as Google's "Create table from" names them
+// (https://docs.cloud.google.com/bigquery/docs/tables, #1861).
+const (
+	bqSourceEmpty  = "Empty table"
+	bqSourceGCS    = "Google Cloud Storage"
+	bqSourceUpload = "Upload"
+)
+
+var bqTableSources = []string{bqSourceEmpty, bqSourceGCS, bqSourceUpload, "Drive", "Google Bigtable", "Amazon S3", "Azure Blob Storage"}
+
+var bqUnservedSources = map[string]string{
+	bqSourceUpload:       "Upload a file with the dataset's Load from a file, which sends the file with these options.",
+	"Drive":              "Not available locally: Google Drive is not reachable from a local instance.",
+	"Google Bigtable":    "Not available locally: CloudBurrow's BigQuery does not read external Bigtable tables.",
+	"Amazon S3":          "Not available locally: BigQuery Omni is not run.",
+	"Azure Blob Storage": "Not available locally: BigQuery Omni is not run.",
+}
+
+// bigqueryTableFields are Create table's inputs, in Google's sections:
+// Source, Destination, Schema (with Edit as text), Partition and cluster
+// settings, and Advanced options (#1861). A table from Google Cloud Storage
+// is made by the load job Load from Cloud Storage runs, with the same
+// options.
 func bigqueryTableFields() []console.Field {
+	const (
+		source = "Source"
+		dest   = "Destination"
+		schema = "Schema"
+		part   = "Partition and cluster settings"
+		adv    = "Advanced options"
+		fromGS = "source=" + bqSourceGCS
+	)
 	return []console.Field{
-		{Name: "tableId", Label: "Table ID", Type: "text", Required: true, Pattern: bigqueryTableIDPattern,
+		{Name: "source", Label: "Create table from", Type: "radio", Section: source, Options: bqTableSources,
+			Default: bqSourceEmpty, UnavailableOptions: bqUnservedSources},
+		{Name: "uris", Label: "Select file from GCS bucket or use a URI pattern", Type: "textarea", Section: source,
+			ShowWhen: fromGS, Required: true,
+			Help: "gs://bucket/path, one per line; an object name may hold one * wildcard."},
+		{Name: "format", Label: "File format", Type: "select", Options: bigqueryLoadFormats, Section: source, ShowWhen: fromGS},
+		{Name: "tableId", Label: "Table", Type: "text", Required: true, Pattern: bigqueryTableIDPattern, Section: dest,
 			Help: "Letters, numbers, underscores, dashes and spaces, at most 1,024."},
-		{Name: "tableType", Label: "Table type", Type: "select", Options: bigqueryTableTypes,
-			Help: "TABLE holds rows, in the schema below. VIEW is a saved query: its columns are the query's, " +
+		{Name: "tableType", Label: "Table type", Type: "select", Options: bigqueryTableTypes, Section: dest,
+			Help: "TABLE is a native table that holds rows, in the schema below. VIEW is a saved query: its columns are the query's, " +
 				"so it takes the view query and no schema. MATERIALIZED_VIEW keeps its query's results as of its " +
 				"last refresh, every 30 minutes by default."},
-		{Name: "description", Label: "Description", Type: "textarea"},
-		{Name: "schema", Label: "Schema", Type: "schema", Options: bigqueryColumnTypes,
-			Pattern: bigqueryFieldNamePattern,
-			Help: "A table's fields: each one's name, type and mode. " + bigqueryFieldNameHelp + " REQUIRED " +
-				"refuses a row without the value; REPEATED holds an array. A RECORD holds nested fields, added " +
-				"under it. A view has none."},
-		{Name: "viewQuery", Label: "View query", Type: "textarea",
+		{Name: "viewQuery", Label: "View query", Type: "textarea", Section: dest,
 			Help: "A view's GoogleSQL query, such as SELECT region, SUM(amount) AS total FROM mydataset.orders " +
 				"GROUP BY region. Name each table with its dataset: a view has no default dataset."},
+		{Name: "autodetect", Label: "Auto detect", Type: "checkbox", Section: schema, ShowWhen: fromGS,
+			Help: "BigQuery reads the columns from the data: a CSV's header and values, or a JSON file's fields."},
+		{Name: "schema", Label: "Schema", Type: "schema", Options: bigqueryColumnTypes, Section: schema,
+			Pattern: bigqueryFieldNamePattern,
+			Help: "A table's fields: each one's name, type and mode, or Edit as text for the JSON array. " + bigqueryFieldNameHelp + " REQUIRED " +
+				"refuses a row without the value; REPEATED holds an array. A RECORD holds nested fields, added " +
+				"under it. A view has none."},
+		{Name: "partitionType", Label: "Partitioning", Type: "select", Section: part,
+			Options: append([]string{"NONE"}, bigqueryPartitionings...),
+			Help:    "No partitioning (NONE), or partition by this unit of the column below, or of ingestion time when no column is named."},
+		{Name: "partitionField", Label: "Partitioning column", Type: "text", Section: part,
+			Help: "Optional: a DATE, TIMESTAMP or DATETIME column of the schema; empty partitions by ingestion time."},
+		{Name: "clusteringFields", Label: "Clustering order", Type: "text", Section: part,
+			Help: "Optional: up to four column names, separated by commas."},
+		{Name: "description", Label: "Description", Type: "textarea", Section: adv},
 	}
 }
 
@@ -528,7 +527,15 @@ func schemaFromColumns(cols []schemaColumn) bigquery.Schema {
 // createTable makes a table with its schema, or a view with its query.
 func (p bigqueryProvider) createTable(ctx context.Context, datasetID string, values map[string]string) error {
 	id := strings.TrimSpace(values["tableId"])
+	if err := refuseUnavailable(values, bigqueryTableFields()); err != nil {
+		return err
+	}
 	md := &bigquery.TableMetadata{Description: values["description"]}
+	tp, cl, err := loadTableOptions(values)
+	if err != nil {
+		return err
+	}
+	md.TimePartitioning, md.Clustering = tp, cl
 	viewQuery := strings.TrimSpace(values["viewQuery"])
 	switch kind := strings.TrimSpace(values["tableType"]); kind {
 	case "", "TABLE":

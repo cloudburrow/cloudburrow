@@ -280,6 +280,7 @@ func (p bigqueryProvider) datasetDetail(ctx context.Context, datasetID string) (
 	if len(md.Labels) > 0 {
 		props = append(props, console.Property{Label: "Labels", Value: formatLabels(md.Labels)})
 	}
+	props = append(props, datasetSettingProps(md)...)
 
 	return console.Detail{
 		Summary: []console.Property{
@@ -287,7 +288,9 @@ func (p bigqueryProvider) datasetDetail(ctx context.Context, datasetID string) (
 			{Label: "Location", Value: orDash(md.Location)},
 		},
 		Sections: []console.Section{
-			{ID: "tables", Label: "Tables", Listing: tables},
+			// Google's dataset page opens on Overview (#1861); the id stays
+			// "tables", which addresses and tests name.
+			{ID: "tables", Label: "Overview", Listing: tables},
 			p.routinesSection(ctx, ds),
 			p.modelsSection(ctx, ds), // #1465
 			{
@@ -401,6 +404,10 @@ func (p bigqueryProvider) tableDetail(ctx context.Context, datasetID, tableID st
 			{Label: base, Path: []string{datasetID, base}}, {Label: part}}
 		return detail, nil
 	}
+	// Lineage, Data profile and Data quality follow Preview, as on Google's
+	// table page (#1861). Each is another service's (the Data Lineage API,
+	// Dataplex's profile and quality scans), none of which CloudBurrow runs.
+	detail.Sections = append(detail.Sections, bigqueryUnservedTabs()...)
 	if sec, ok := p.partitionsSection(ctx, c, datasetID, tableID, md); ok {
 		detail.Sections = append(detail.Sections, sec)
 	}
@@ -796,3 +803,40 @@ var (
 	_ console.Executor        = bigqueryProvider{}
 	_ console.StatementWriter = bigqueryProvider{}
 )
+
+// bigqueryUnservedTabs are the table page's tabs whose service CloudBurrow
+// does not run, in Google's place and saying so (#1861).
+func bigqueryUnservedTabs() []console.Section {
+	return []console.Section{
+		{ID: "lineage", Label: "Lineage", Unavailable: "Not available locally: lineage is recorded by the Data Lineage API, " +
+			"which CloudBurrow does not run. A table's source jobs are listed in Job history."},
+		{ID: "profile", Label: "Data profile", Unavailable: "Not available locally: a data profile is a Dataplex data profile scan, " +
+			"which CloudBurrow does not run. Query the table for its column statistics instead."},
+		{ID: "quality", Label: "Data quality", Unavailable: "Not available locally: data quality is a Dataplex data quality scan, " +
+			"which CloudBurrow does not run."},
+	}
+}
+
+// datasetSettingProps are the settings Create dataset sets, as Google's
+// Details names them (#1861): durations, which the front keeps as sent.
+func datasetSettingProps(md *bigquery.DatasetMetadata) []console.Property {
+	expiration := "Never"
+	if md.DefaultTableExpiration > 0 {
+		expiration = fmt.Sprintf("%g days", md.DefaultTableExpiration.Hours()/24)
+	}
+	travel := "7 days"
+	if md.MaxTimeTravel > 0 {
+		travel = fmt.Sprintf("%g days", md.MaxTimeTravel.Hours()/24)
+	}
+	billing := "Logical"
+	if md.StorageBillingModel == "PHYSICAL" {
+		billing = "Physical"
+	}
+	return []console.Property{
+		{Label: "Default table expiration", Value: expiration},
+		{Label: "Default collation", Value: orDash(md.DefaultCollation)},
+		{Label: "Case insensitive", Value: fmt.Sprint(md.IsCaseInsensitive)},
+		{Label: "Time travel window", Value: travel},
+		{Label: "Storage billing model", Value: billing},
+	}
+}

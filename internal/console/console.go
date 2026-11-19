@@ -1158,6 +1158,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/iam/lint", s.handleLintCondition)
 	mux.HandleFunc("GET /api/page/{service}", s.handlePage)
 	mux.HandleFunc("POST /api/query/{service}", s.handleQuery)
+	mux.HandleFunc("POST /api/studio/{service}", s.handleStudio)
 	mux.HandleFunc("GET /api/logs", s.handleLogs)
 	mux.HandleFunc("GET /api/logs/buckets", s.handleLogBuckets)
 	mux.HandleFunc("GET /api/logs/names", s.handleLogNames)
