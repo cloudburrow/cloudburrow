@@ -16,6 +16,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/debugpprof"
 	"github.com/cloudburrow/cloudburrow/internal/version"
@@ -84,6 +85,9 @@ Project: https://github.com/cloudburrow/cloudburrow
 var errUsage = errors.New("usage")
 
 func main() {
+	// A repository's pre-receive hook runs this executable to check the
+	// CODEOWNERS files a push brings (#1928).
+	runadapter.RunSourceManagerPresubmitIfAsked()
 	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
 		if errors.Is(err, errUsage) {
 			os.Exit(2)

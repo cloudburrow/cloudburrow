@@ -183,6 +183,7 @@ func (p sourceManagerProvider) codeDetail(ctx context.Context, in *ssmpb.Instanc
 		d.Summary = append(d.Summary, console.Property{Label: "Size", Value: fmt.Sprint(e.GetSize()) + " bytes"},
 			console.Property{Label: "Blob", Value: e.GetSha()})
 		sec := console.Section{ID: "file", Label: path.Base(file), Kind: console.KindText}
+		content := ""
 		if e.GetSize() > ssmMaxBlob {
 			sec.Text = fmt.Sprintf("This file is %d bytes, larger than the %d the page shows. Clone the repository to read it.", e.GetSize(), ssmMaxBlob)
 		} else if text, err := p.blob(ctx, r.GetName(), e.GetSha()); err != nil {
@@ -190,9 +191,12 @@ func (p sourceManagerProvider) codeDetail(ctx context.Context, in *ssmpb.Instanc
 		} else if !utf8.ValidString(text) || strings.ContainsRune(text, 0) {
 			sec.Text = "This is a binary file."
 		} else {
-			sec.Text = text
+			sec.Text, content = text, text
 		}
 		d.Sections = []console.Section{sec}
+		if path.Base(file) == runadapter.SourceManagerCodeOwnersFile && content != "" {
+			d.Sections = append(d.Sections, p.codeOwnersFileSection(ctx, r.GetName(), ref, file, content))
+		}
 		return d, nil
 	}
 	return console.Detail{Unavailable: fmt.Sprintf("%s is not in %s at %s", file, lastSegment(r.GetName()), ref)}, nil
@@ -517,7 +521,11 @@ func (p sourceManagerProvider) pullDetail(ctx context.Context, in *ssmpb.Instanc
 	all := conv.Actions
 	conv.Actions = append([]console.Action{all[0]}, all[2:]...)
 	fileActs := all[1:]
-	d.Sections = []console.Section{conv, filesSection(diffs, derr, cms, fileActs)}
+	co, coErr := runadapter.SourceManagerCodeOwners(ctx, name)
+	if line := codeOwnersSummary(co, coErr); line != "" {
+		d.Summary = append(d.Summary, console.Property{Label: "Code owners", Value: line})
+	}
+	d.Sections = []console.Section{conv, filesSection(diffs, derr, cms, fileActs), codeOwnersSection(co, coErr)}
 	return d, nil
 }
 
@@ -562,6 +570,9 @@ func branchRuleFields(br *ssmpb.BranchRule) []console.Field {
 			Default: b(br.GetRequirePullRequest() && !br.GetAllowStaleReviews()), ShowWhen: "requirePullRequest"},
 		{Name: "requireCommentsResolved", Label: "Require conversation resolution before merging", Type: "checkbox", Section: sec,
 			Default: b(br.GetRequireCommentsResolved()), ShowWhen: "requirePullRequest"},
+		{Name: "requireCodeOwners", Label: "Require Code Owner Review on Pull Requests", Type: "checkbox", Section: sec,
+			Default: b(br.GetRequireCodeOwnerApproval()),
+			Help:    "Each changed file's owners in the base branch's CODEOWNERS files must approve; pushes bringing a CODEOWNERS file with syntax errors are refused."},
 		{Name: "requireLinearHistory", Label: "Require linear history", Type: "checkbox", Section: sec, Default: b(br.GetRequireLinearHistory())},
 		{Name: "requireStatusChecks", Label: "Require status checks", Type: "checkbox", Section: sec, Default: b(len(checks) > 0)},
 		{Name: "statusChecks", Label: "Status checks", Type: "textarea", Section: sec, Default: strings.Join(checks, "\n"),
@@ -573,7 +584,8 @@ func branchRuleFields(br *ssmpb.BranchRule) []console.Field {
 // branchRuleFrom reads the branch rule fields.
 func branchRuleFrom(v map[string]string) (*ssmpb.BranchRule, error) {
 	br := &ssmpb.BranchRule{IncludePattern: strings.TrimSpace(v["filter"]), RequirePullRequest: v["requirePullRequest"] == "true",
-		RequireLinearHistory: v["requireLinearHistory"] == "true", Disabled: v["disabled"] == "true"}
+		RequireLinearHistory: v["requireLinearHistory"] == "true", Disabled: v["disabled"] == "true",
+		RequireCodeOwnerApproval: v["requireCodeOwners"] == "true"}
 	if br.RequirePullRequest {
 		for _, f := range []struct {
 			key string
@@ -608,7 +620,7 @@ func (p sourceManagerProvider) settingsSection(ctx context.Context, r *ssmpb.Rep
 			{Label: "Description", Value: orDash(r.GetDescription())}, {Label: "Default branch", Value: ssmDefaultBranch(r)},
 			{Label: "Service account", Value: r.GetServiceAccount()}, {Label: "Etag", Value: r.GetEtag()}})}}}
 	rules := console.Section{ID: "branchrules", Label: "Branch rules", Listing: console.Listing{
-		Columns: []string{"Branch filter", "Pull request", "Approvals", "Linear history", "Status checks"}, NameColumn: "Branch rule ID",
+		Columns: []string{"Branch filter", "Pull request", "Approvals", "Code owners", "Linear history", "Status checks"}, NameColumn: "Branch rule ID",
 		Noun: "branch rules", AlwaysStatus: true},
 		Actions: []console.Action{addBranchRuleAction()}}
 	brs, err := p.branchRules(ctx, r.GetName())
@@ -629,8 +641,9 @@ func (p sourceManagerProvider) settingsSection(ctx context.Context, r *ssmpb.Rep
 		rules.Listing.Items = append(rules.Listing.Items, console.Resource{Name: lastSegment(br.GetName()), Status: st,
 			ActsOn: []string{lastSegment(r.GetInstance()), lastSegment(r.GetName()), ssmBranchRulesSegment, lastSegment(br.GetName())},
 			Fields: map[string]string{"Branch filter": br.GetIncludePattern(), "Pull request": yes(br.GetRequirePullRequest()),
-				"Approvals": fmt.Sprint(br.GetMinimumApprovalsCount()), "Linear history": yes(br.GetRequireLinearHistory()),
-				"Status checks": fmt.Sprint(len(br.GetRequiredStatusChecks()))},
+				"Approvals": fmt.Sprint(br.GetMinimumApprovalsCount()), "Code owners": yes(br.GetRequireCodeOwnerApproval()),
+				"Linear history": yes(br.GetRequireLinearHistory()),
+				"Status checks":  fmt.Sprint(len(br.GetRequiredStatusChecks()))},
 			Actions: branchRuleRowActions(br)})
 	}
 	rules.Listing.Total = len(rules.Listing.Items)

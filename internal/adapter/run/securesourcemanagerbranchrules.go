@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
@@ -32,8 +33,8 @@ import (
 // the required numbers of approving reviewers and approvers, conversation
 // resolution (securesourcemanagerreviews.go) and required status checks
 // (the pull request's trigger builds, securesourcemanagerpullevents.go),
-// #1927. Code owner approval needs CODEOWNERS files, which are not read,
-// so a rule asking for it refuses the merge with that reason.
+// #1927, and code owner approval, from the base branch's CODEOWNERS files
+// (securesourcemanagercodeowners.go, #1928).
 
 var ssmRuleIDRE = regexp.MustCompile(`^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
@@ -80,20 +81,29 @@ func duplicateFilterLocked(repo string, r *ssmpb.BranchRule) error {
 }
 
 // writeProtectedLocked writes the branches the pre-receive hook refuses
-// direct pushes to.
+// direct pushes to, and the branch filters whose rules require code owner
+// approval, whose CODEOWNERS files it checks.
 func writeProtectedLocked(repo string) error {
 	_, dir, err := ssmRepoLocked(repo)
 	if err != nil {
 		return err
 	}
-	var names []string
+	var names, owners []string
 	for name, r := range ssmState.rules {
-		if ssmRepoOf(name) == repo && !r.GetDisabled() && r.GetRequirePullRequest() {
+		if ssmRepoOf(name) != repo || r.GetDisabled() {
+			continue
+		}
+		if r.GetRequirePullRequest() {
 			names = append(names, r.GetIncludePattern())
 		}
+		owners = append(owners, r.GetIncludePattern()+"\t"+strconv.FormatBool(r.GetRequireCodeOwnerApproval()))
 	}
 	sort.Strings(names)
+	sort.Strings(owners)
 	if err := installSSMPreReceive(dir); err != nil { // repositories made before #1856 have none
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(dir, ssmCodeOwnersBranchesFile), []byte(strings.Join(owners, "\n")+"\n"), 0o600); err != nil {
 		return err
 	}
 	return os.WriteFile(filepath.Join(dir, ssmProtectedFile), []byte(strings.Join(names, "\n")+"\n"), 0o600)
@@ -120,22 +130,46 @@ func effectiveBranchRuleLocked(repo, branch string) *ssmpb.BranchRule {
 // ruleAllowsMergeLocked refuses a merge of a pull request at head into
 // branch that its branch rule does not allow yet (#1927): too few
 // approving reviewers or approvers, unresolved conversations or change
-// requests, or required status checks that have not passed. Code owner
-// approval reads CODEOWNERS files, which are not served.
-func ruleAllowsMergeLocked(r *ssmpb.BranchRule, pull, head, branch string) error {
+// requests, required status checks that have not passed, or (#1928) code
+// owners who have not approved, or CODEOWNERS files the merge would bring
+// with lines that do not parse. base is the base branch's commit.
+func ruleAllowsMergeLocked(ctx context.Context, dir string, r *ssmpb.BranchRule, pr *ssmpb.PullRequest, base, head, branch string) error {
 	if r == nil {
 		return nil
 	}
+	pull := pr.GetName()
 	id := lastSegment(r.GetName())
-	if r.GetRequireCodeOwnerApproval() {
-		return apierror.FailedPrecondition("branch rule %q on %s requires code owner approval, and this instance does not read CODEOWNERS files", id, branch)
-	}
 	st := reviewStateLocked(pull, head, r.GetAllowStaleReviews())
 	if n := r.GetMinimumReviewsCount(); n > 0 && int32(st.reviewers) < n {
 		return apierror.FailedPrecondition("branch rule %q on %s requires %d approving reviewers of %s, and it has %d", id, branch, n, shortSHA(head), st.reviewers)
 	}
 	if n := r.GetMinimumApprovalsCount(); n > 0 && int32(st.approvers) < n {
 		return apierror.FailedPrecondition("branch rule %q on %s requires %d approvals of %s, and it has %d", id, branch, n, shortSHA(head), st.approvers)
+	}
+	if r.GetRequireCodeOwnerApproval() {
+		from := base
+		if mb, err := ssmGit(ctx, dir, "merge-base", base, head); err == nil {
+			from = strings.TrimSpace(string(mb))
+		}
+		if bad := codeOwnersPresubmit(ctx, dir, from, head); len(bad) > 0 {
+			return apierror.FailedPrecondition("branch rule %q on %s requires code owner review, and the pull request's CODEOWNERS has a syntax error: %s", id, branch, strings.Join(bad, "; "))
+		}
+		changed := prChangedFiles(ctx, dir, pr)
+		co, err := codeOwnerStatus(ctx, dir, branch, base, changed, approvedEmailsLocked(pull, head, r.GetAllowStaleReviews()))
+		if err != nil {
+			return apierror.Internal(err, "CODEOWNERS")
+		}
+		for _, q := range co.Requirements {
+			if q.Satisfied {
+				continue
+			}
+			sec := ""
+			if q.Section != "" {
+				sec = " in section [" + q.Section + "]"
+			}
+			return apierror.FailedPrecondition("branch rule %q on %s requires code owner approval of %s: %d approval(s) of %s are needed%s, and %d approved %s",
+				id, branch, strings.Join(q.Files, ", "), q.Approvals, strings.Join(q.Owners, ", "), sec, len(q.ApprovedBy), shortSHA(head))
+		}
 	}
 	if r.GetRequireCommentsResolved() {
 		if st.unresolved > 0 {

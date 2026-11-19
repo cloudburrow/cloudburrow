@@ -1307,6 +1307,9 @@ td.mono { word-break: break-word; }
               font-size: var(--text-caption-size); color: var(--text-muted); }
 .breadcrumb a { color: var(--accent); text-decoration: none; }
 .breadcrumb a:hover { text-decoration: underline; }
+/* A crumb that is one long word (a file named CODEOWNERS) breaks rather
+   than widening a 320px page (#1928). */
+.breadcrumb > * { min-width: 0; overflow-wrap: anywhere; }
 
 /* --- navigation menu ------------------------------------------------- */
 

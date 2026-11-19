@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/cgi"
+	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -105,7 +106,7 @@ func (m *SecureSourceManagerServer) serveGit(builds *CloudBuildServer, w http.Re
 		Path: gitExe,
 		Args: []string{"http-backend"},
 		Root: ssmGitPrefix + project + "/" + location,
-		Env:  []string{"GIT_PROJECT_ROOT=" + strings.TrimSuffix(dir, "/"+id+".git"), "GIT_HTTP_EXPORT_ALL=1"},
+		Env:  []string{"GIT_PROJECT_ROOT=" + strings.TrimSuffix(dir, "/"+id+".git"), "GIT_HTTP_EXPORT_ALL=1", ssmPresubmitEnv + "=" + ssmSelf()},
 	}
 	h.ServeHTTP(w, r)
 	if !push {
@@ -130,6 +131,16 @@ func (m *SecureSourceManagerServer) serveGit(builds *CloudBuildServer, w http.Re
 			m.deliverPush(ctx, repo.GetName(), dir, ref, sha, strings.Repeat("0", 40), pusher)
 		}
 	}
+}
+
+// ssmSelf is the running executable, which a repository's pre-receive hook
+// runs to check CODEOWNERS files (#1928); "" when it cannot be named.
+func ssmSelf() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	return exe
 }
 
 // ssmGitCaller is a git request's caller: its bearer token, or the

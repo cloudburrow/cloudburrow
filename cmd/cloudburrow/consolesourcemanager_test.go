@@ -358,6 +358,81 @@ func testSourceManagerRepositoryPages(t *testing.T, ctx context.Context, p sourc
 	}
 	git("checkout", "--quiet", "main")
 	git("pull", "--quiet", "origin", "main")
+	testSourceManagerCodeOwners(t, ctx, p, work, git, sections)
+}
+
+// testSourceManagerCodeOwners (#1928): a CODEOWNERS file's page shows its
+// line-level checks; Add branch rule's Require Code Owner Review on Pull
+// Requests; a pull request's Code owners tab and summary show what the
+// base branch's CODEOWNERS require and who approved, and Merge pull
+// request is refused until they have.
+func testSourceManagerCodeOwners(t *testing.T, ctx context.Context, p sourceManagerProvider, work string, git func(...string),
+	sections func(path ...string) (console.Detail, map[string]console.Section)) {
+	t.Helper()
+	write := func(name, body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(work, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("CODEOWNERS", "* lead@example.com\n[Docs][2]\n*.md doc1@example.com doc2@example.com\n* @team\nrelease-* /x/ rel@example.com\n")
+	git("add", "CODEOWNERS")
+	git("commit", "--quiet", "-m", "owners")
+	git("push", "--quiet", "origin", "main")
+	_, s := sections("inst", "app", "tree", "main", "CODEOWNERS")
+	checks := s["codeowners"]
+	if len(checks.Listing.Items) != 2 || checks.Listing.Items[0].Name != "4" || checks.Listing.Items[0].Status != "Error" ||
+		checks.Listing.Items[1].Name != "5" || checks.Listing.Items[1].Status != "Information" || !strings.Contains(checks.Note, "1 lines have syntax errors") {
+		t.Fatalf("the CODEOWNERS page's checks = %+v", checks)
+	}
+	if err := p.ActAt(ctx, "", []string{"inst", "app"}, "add-branch-rule", map[string]string{"id": "owners", "filter": "main",
+		"requireCodeOwners": "true"}); err != nil {
+		t.Fatalf("add-branch-rule: %v", err)
+	}
+	git("checkout", "--quiet", "-b", "docs")
+	write("GUIDE.md", "# guide\n")
+	git("add", "GUIDE.md")
+	git("commit", "--quiet", "-m", "guide")
+	git("push", "--quiet", "origin", "docs")
+	if err := p.ActAt(ctx, "", []string{"inst", "app"}, "new-pull", map[string]string{"base": "main", "head": "docs", "title": "Guide"}); err != nil {
+		t.Fatalf("new-pull: %v", err)
+	}
+	_, secs := sections("inst", "app")
+	var pr []string
+	for _, x := range secs["pulls"].Listing.Items {
+		if x.Fields["Title"] == "Guide" {
+			pr = x.Opens
+		}
+	}
+	d, s := sections(pr...)
+	co := s["codeowners"]
+	if len(co.Listing.Items) != 2 || !strings.Contains(co.Note, "Branch rule owners requires code owner review") || !strings.Contains(co.Note, "1 lines") {
+		t.Fatalf("the Code owners tab = %+v", co)
+	}
+	for _, x := range co.Listing.Items {
+		if x.Status != "Pending" || x.Fields["Files"] != "GUIDE.md" || x.Fields["Approved by"] != "—" {
+			t.Errorf("a requirement = %+v", x)
+		}
+	}
+	if docs := co.Listing.Items[1]; docs.Fields["Section"] != "Docs" || docs.Fields["Approvals needed"] != "2" || docs.Fields["Owners"] != "doc1@example.com, doc2@example.com" {
+		t.Errorf("the Docs requirement = %+v", docs)
+	}
+	summary := ""
+	for _, x := range d.Summary {
+		if x.Label == "Code owners" {
+			summary = x.Value
+		}
+	}
+	if summary != "0 of 2 satisfied; required by branch rule owners" {
+		t.Errorf("the summary's Code owners = %q", summary)
+	}
+	if err := p.ActAt(ctx, "", pr, "merge-pull", nil); err == nil || !strings.Contains(err.Error(), "code owner") {
+		t.Errorf("merge-pull without the code owners: %v", err)
+	}
+	if err := p.ActAt(ctx, "", pr, "close-pull", nil); err != nil {
+		t.Logf("close-pull: %v", err)
+	}
+	git("checkout", "--quiet", "main")
 }
 
 // testSourceManagerReviews (#1927): a pull request's Comment, Add line
