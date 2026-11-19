@@ -29,7 +29,7 @@ or `NewCertificateAuthorityRESTClient` with `http://` before the address.
 - Certificates from a CSR or a config: get, list, revoke, update labels. A DEVOPS pool does not store them.
 - `FetchCaCerts`, operations, locations, and IAM policies on CA pools (stored, not enforced).
 
-Every long-running method answers an operation that is already done. Not served, and answered 501: CA keys in Cloud KMS, CMEK pools, `gcs_bucket`, template `passthrough_extensions` and CEL identity constraints. [compatibility.md](compatibility.md#certificate-authority-service--googlecloudsecurityprivatecav1) has each claim and [coverage/privateca.md](coverage/privateca.md) each method.
+Every long-running method answers an operation that is already done. A CA's key can be a Cloud KMS CryptoKeyVersion of this instance (`key_spec.cloud_kms_key_version`, signing in process); a pool's `encryption_spec` (CMEK) keeps its certificates encrypted at rest with a Cloud KMS key; a CA's `gcs_bucket` publishes its CA certificate and CRLs to this instance's Cloud Storage. `subject_mode` `RDN_SEQUENCE`, `subject.rdn_sequence`, `requested_not_before_time`, `passthrough_extensions` and CEL `identity_constraints` (Google's cel-go) are served; `REFLECTED_SPIFFE` answers Google's "caller does not have a SPIFFE identity" error, as no local caller has one. [compatibility.md](compatibility.md#certificate-authority-service--googlecloudsecurityprivatecav1) has each claim and [coverage/privateca.md](coverage/privateca.md) each method.
 
 ## gcloud and Terraform
 

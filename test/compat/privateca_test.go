@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -388,10 +389,16 @@ func privateCAFlow(t *testing.T, h *Harness, c *privateca.CertificateAuthorityCl
 		t.Errorf("GetIamPolicy = %v, %v", got, err)
 	}
 
-	// What is not served answers 501: a CMEK pool.
+	// A CMEK pool naming a key that does not exist: NOT_FOUND from Cloud
+	// KMS, or FAILED_PRECONDITION on an instance that serves no Cloud KMS
+	// (TestPrivateCAKMSKeysCMEKAndIssuanceRules drives CMEK itself).
 	_, err = c.CreateCaPool(ctx, &privatecapb.CreateCaPoolRequest{Parent: loc, CaPoolId: poolID + "-cmek", CaPool: &privatecapb.CaPool{
 		Tier: privatecapb.CaPool_ENTERPRISE, EncryptionSpec: &privatecapb.EncryptionSpec{CloudKmsKey: loc + "/keyRings/r/cryptoKeys/k"}}})
-	wantPrivateCACode(t, "a CMEK pool", err, codes.Unimplemented)
+	if os.Getenv(EnvKMS) != "" {
+		wantPrivateCACode(t, "a CMEK pool with a missing key", err, codes.NotFound)
+	} else {
+		wantPrivateCACode(t, "a CMEK pool without Cloud KMS", err, codes.FailedPrecondition)
+	}
 
 	dpop, err := c.DeleteCaPool(ctx, &privatecapb.DeleteCaPoolRequest{Name: poolName})
 	if err != nil {

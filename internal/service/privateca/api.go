@@ -771,8 +771,9 @@ func (a *API) CreateCertificate(_ context.Context, req *privatecapb.CreateCertif
 	// passthrough_extensions: the request's extensions outside the pool's
 	// or the template's are dropped; a template's predefined_values outside
 	// the pool's, or the pool's baseline_values outside the template's,
-	// fail the issuance (UNVERIFIED: the code; the field comments name
-	// none).
+	// fail the issuance (the code is UNVERIFIED (docs re-read 2026-11-18:
+	// <https://docs.cloud.google.com/certificate-authority-service/docs/reference/rest/v1/projects.locations.certificateTemplates>
+	// names none)).
 	x509Req = filterExtensions(filterExtensions(x509Req, policy.GetPassthroughExtensions()), tmpl.GetPassthroughExtensions())
 	if e := outsideExtensions(tmpl.GetPredefinedValues(), policy.GetPassthroughExtensions()); e != "" {
 		return nil, apierror.InvalidArgument("certificate_template %s's predefined_values set %s, which CaPool %s's issuance_policy.passthrough_extensions does not allow", tmpl.GetName(), e, req.GetParent())

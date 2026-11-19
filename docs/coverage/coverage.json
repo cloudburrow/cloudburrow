@@ -12583,7 +12583,9 @@
         "tests": [
           "test/compat/privateca_cli_test.go:135 TestTerraformPrivateCA",
           "test/compat/privateca_cli_test.go:30 TestGcloudPrivateCA",
-          "test/compat/privateca_test.go:102 TestPrivateCAPoolsRootsAndCertificates"
+          "test/compat/privateca_kms_test.go:101 TestPrivateCAKMSKeysCMEKAndIssuanceRules",
+          "test/compat/privateca_kms_test.go:429 TestTerraformPrivateCAKMSKeyAndTemplateRules",
+          "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
         ]
       },
       {
@@ -12592,7 +12594,9 @@
         "tests": [
           "test/compat/privateca_cli_test.go:135 TestTerraformPrivateCA",
           "test/compat/privateca_cli_test.go:30 TestGcloudPrivateCA",
-          "test/compat/privateca_test.go:102 TestPrivateCAPoolsRootsAndCertificates"
+          "test/compat/privateca_kms_test.go:101 TestPrivateCAKMSKeysCMEKAndIssuanceRules",
+          "test/compat/privateca_kms_test.go:429 TestTerraformPrivateCAKMSKeyAndTemplateRules",
+          "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
         ]
       },
       {
@@ -12601,7 +12605,10 @@
         "tests": [
           "test/compat/privateca_cli_test.go:135 TestTerraformPrivateCA",
           "test/compat/privateca_cli_test.go:30 TestGcloudPrivateCA",
-          "test/compat/privateca_test.go:102 TestPrivateCAPoolsRootsAndCertificates"
+          "test/compat/privateca_kms_test.go:101 TestPrivateCAKMSKeysCMEKAndIssuanceRules",
+          "test/compat/privateca_kms_test.go:307 TestPrivateCAPublishesToGCSBucket",
+          "test/compat/privateca_kms_test.go:429 TestTerraformPrivateCAKMSKeyAndTemplateRules",
+          "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
         ]
       },
       {
@@ -12610,6 +12617,8 @@
         "tests": [
           "test/compat/privateca_cli_test.go:135 TestTerraformPrivateCA",
           "test/compat/privateca_cli_test.go:30 TestGcloudPrivateCA",
+          "test/compat/privateca_kms_test.go:101 TestPrivateCAKMSKeysCMEKAndIssuanceRules",
+          "test/compat/privateca_kms_test.go:429 TestTerraformPrivateCAKMSKeyAndTemplateRules",
           "test/compat/privateca_phase2_test.go:50 TestPrivateCASubordinatesTemplatesAndCRLs"
         ]
       },
@@ -12618,7 +12627,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/privateca_cli_test.go:135 TestTerraformPrivateCA",
-          "test/compat/privateca_test.go:102 TestPrivateCAPoolsRootsAndCertificates"
+          "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
         ]
       },
       {
@@ -12626,7 +12635,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/privateca_cli_test.go:135 TestTerraformPrivateCA",
-          "test/compat/privateca_test.go:102 TestPrivateCAPoolsRootsAndCertificates"
+          "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
         ]
       },
       {
@@ -12642,7 +12651,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/privateca_cli_test.go:135 TestTerraformPrivateCA",
-          "test/compat/privateca_test.go:102 TestPrivateCAPoolsRootsAndCertificates"
+          "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
         ]
       },
       {
@@ -12651,7 +12660,7 @@
         "tests": [
           "test/compat/privateca_cli_test.go:135 TestTerraformPrivateCA",
           "test/compat/privateca_cli_test.go:30 TestGcloudPrivateCA",
-          "test/compat/privateca_test.go:102 TestPrivateCAPoolsRootsAndCertificates"
+          "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
         ]
       },
       {
@@ -12659,7 +12668,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqlcustomerca_test.go:203 TestCloudSQLCustomerManagedCA",
-          "test/compat/privateca_test.go:102 TestPrivateCAPoolsRootsAndCertificates"
+          "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
         ]
       },
       {
@@ -12676,7 +12685,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/privateca_cli_test.go:135 TestTerraformPrivateCA",
-          "test/compat/privateca_test.go:102 TestPrivateCAPoolsRootsAndCertificates"
+          "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
         ]
       },
       {
@@ -12684,7 +12693,9 @@
         "status": "Verified",
         "tests": [
           "test/compat/privateca_cli_test.go:135 TestTerraformPrivateCA",
-          "test/compat/privateca_test.go:102 TestPrivateCAPoolsRootsAndCertificates"
+          "test/compat/privateca_kms_test.go:101 TestPrivateCAKMSKeysCMEKAndIssuanceRules",
+          "test/compat/privateca_kms_test.go:429 TestTerraformPrivateCAKMSKeyAndTemplateRules",
+          "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
         ]
       },
       {
@@ -12692,7 +12703,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/privateca_cli_test.go:135 TestTerraformPrivateCA",
-          "test/compat/privateca_test.go:102 TestPrivateCAPoolsRootsAndCertificates"
+          "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
         ]
       },
       {
@@ -12707,6 +12718,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/privateca_cli_test.go:135 TestTerraformPrivateCA",
+          "test/compat/privateca_kms_test.go:429 TestTerraformPrivateCAKMSKeyAndTemplateRules",
           "test/compat/privateca_phase2_test.go:50 TestPrivateCASubordinatesTemplatesAndCRLs"
         ]
       },
@@ -12714,14 +12726,14 @@
         "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/ListCaPools",
         "status": "Verified",
         "tests": [
-          "test/compat/privateca_test.go:102 TestPrivateCAPoolsRootsAndCertificates"
+          "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
         ]
       },
       {
         "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/ListCertificateAuthorities",
         "status": "Verified",
         "tests": [
-          "test/compat/privateca_test.go:102 TestPrivateCAPoolsRootsAndCertificates"
+          "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
         ]
       },
       {
@@ -12743,7 +12755,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqlcustomerca_test.go:203 TestCloudSQLCustomerManagedCA",
-          "test/compat/privateca_test.go:102 TestPrivateCAPoolsRootsAndCertificates"
+          "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
         ]
       },
       {
@@ -12751,35 +12763,36 @@
         "status": "Verified",
         "tests": [
           "test/compat/privateca_cli_test.go:30 TestGcloudPrivateCA",
-          "test/compat/privateca_test.go:102 TestPrivateCAPoolsRootsAndCertificates"
+          "test/compat/privateca_kms_test.go:307 TestPrivateCAPublishesToGCSBucket",
+          "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
         ]
       },
       {
         "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/UndeleteCertificateAuthority",
         "status": "Verified",
         "tests": [
-          "test/compat/privateca_test.go:102 TestPrivateCAPoolsRootsAndCertificates"
+          "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
         ]
       },
       {
         "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/UpdateCaPool",
         "status": "Verified",
         "tests": [
-          "test/compat/privateca_test.go:102 TestPrivateCAPoolsRootsAndCertificates"
+          "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
         ]
       },
       {
         "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/UpdateCertificate",
         "status": "Verified",
         "tests": [
-          "test/compat/privateca_test.go:102 TestPrivateCAPoolsRootsAndCertificates"
+          "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
         ]
       },
       {
         "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/UpdateCertificateAuthority",
         "status": "Verified",
         "tests": [
-          "test/compat/privateca_test.go:102 TestPrivateCAPoolsRootsAndCertificates"
+          "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
         ]
       },
       {

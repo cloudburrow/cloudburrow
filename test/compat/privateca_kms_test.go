@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -104,6 +103,7 @@ func TestPrivateCAKMSKeysCMEKAndIssuanceRules(t *testing.T) {
 	clients := privateCAClients(t, h)
 	for i, transport := range []string{"grpc", "rest"} {
 		t.Run(transport, func(t *testing.T) {
+			h := h.For(t)
 			k, version, cmek := privateCAKMS(t, h, fmt.Sprintf("pca-%d-%d", time.Now().UnixNano()%1e6, i), kmspb.CryptoKeyVersion_EC_SIGN_P384_SHA384)
 			privateCAKMSFlow(t, h, clients[transport], k, version, cmek)
 		})
@@ -358,7 +358,7 @@ func TestPrivateCAPublishesToGCSBucket(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	storageAddr := os.Getenv(EnvStorage)
+	storageAddr := h.Endpoint(EnvStorage)
 	u := ca.GetAccessUrls()
 	prefix := "http://" + strings.TrimPrefix(strings.TrimPrefix(storageAddr, "http://"), "https://") + "/" + bucketName + "/"
 	if !strings.HasPrefix(u.GetCaCertificateAccessUrl(), prefix) || len(u.GetCrlAccessUrls()) != 1 || !strings.HasPrefix(u.GetCrlAccessUrls()[0], prefix) {
@@ -416,4 +416,175 @@ func TestPrivateCAPublishesToGCSBucket(t *testing.T) {
 	if len(crl.RevokedCertificateEntries) != 1 || crl.RevokedCertificateEntries[0].SerialNumber.Cmp(leaf.SerialNumber) != 0 {
 		t.Errorf("the republished CRL lists %d certificates; want the revoked leaf", len(crl.RevokedCertificateEntries))
 	}
+}
+
+// TestTerraformPrivateCAKMSKeyAndTemplateRules (#1834): with egress to
+// Google blocked, Terraform makes a Cloud KMS key ring and ASYMMETRIC_SIGN
+// key, a CMEK key, a CMEK pool (encryption_spec), a root CA whose key_spec
+// is the key's version 1, a certificate template with a cel_expression and
+// passthrough_extensions, and a certificate under it;
+// the official client checks the CA's key and the certificate; the plan is
+// clean; destroy removes them.
+// covers: google.cloud.security.privateca.v1.CertificateAuthorityService/CreateCaPool, google.cloud.security.privateca.v1.CertificateAuthorityService/CreateCertificateAuthority, google.cloud.security.privateca.v1.CertificateAuthorityService/CreateCertificateTemplate, google.cloud.security.privateca.v1.CertificateAuthorityService/GetCertificateTemplate, google.cloud.security.privateca.v1.CertificateAuthorityService/CreateCertificate, google.cloud.security.privateca.v1.CertificateAuthorityService/GetCertificate
+func TestTerraformPrivateCAKMSKeyAndTemplateRules(t *testing.T) {
+	h := New(t)
+	c := privateCAClients(t, h)["grpc"] // skips without CLOUDBURROW_TEST_PRIVATECA
+	h.Endpoint(EnvKMS)
+	ctx := h.Context()
+	m := newTFModule(t)
+	n := time.Now().UnixNano() % 1e6
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	pubDER, _ := x509.MarshalPKIXPublicKey(&key.PublicKey)
+	pub := strings.TrimSpace(string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubDER})))
+	m.write(fmt.Sprintf(`
+resource "google_kms_key_ring" "r" {
+  project  = %[1]q
+  location = "us-central1"
+  name     = "tfpca-%[2]d"
+}
+resource "google_kms_crypto_key" "ca" {
+  name     = "ca"
+  key_ring = google_kms_key_ring.r.id
+  purpose  = "ASYMMETRIC_SIGN"
+  version_template {
+    algorithm = "EC_SIGN_P256_SHA256"
+  }
+}
+resource "google_kms_crypto_key" "cmek" {
+  name     = "cmek"
+  key_ring = google_kms_key_ring.r.id
+}
+resource "google_privateca_ca_pool" "p" {
+  project  = %[1]q
+  location = "us-central1"
+  name     = "tfkms-%[2]d"
+  tier     = "ENTERPRISE"
+  encryption_spec {
+    cloud_kms_key = google_kms_crypto_key.cmek.id
+  }
+}
+resource "google_privateca_certificate_authority" "root" {
+  project                                = %[1]q
+  location                               = "us-central1"
+  pool                                   = google_privateca_ca_pool.p.name
+  certificate_authority_id               = "root"
+  deletion_protection                    = false
+  skip_grace_period                      = true
+  ignore_active_certificates_on_deletion = true
+  lifetime                               = "864000s"
+  config {
+    subject_config {
+      subject {
+        organization = "CloudBurrow"
+        common_name  = "Terraform KMS Root"
+      }
+    }
+    x509_config {
+      ca_options {
+        is_ca = true
+      }
+      key_usage {
+        base_key_usage {
+          cert_sign = true
+          crl_sign  = true
+        }
+        extended_key_usage {}
+      }
+    }
+  }
+  key_spec {
+    cloud_kms_key_version = "${google_kms_crypto_key.ca.id}/cryptoKeyVersions/1"
+  }
+}
+resource "google_privateca_certificate_template" "t" {
+  project     = %[1]q
+  location    = "us-central1"
+  name        = "tfkmst-%[2]d"
+  description = "cel and passthrough"
+  # ca_options is needed for a clean plan with any server: provider 8.4.0's
+  # flattenPrivatecaCertificateTemplateConfigX509ConfigCaOptions returns a
+  # ca_options block (null_ca = true) for every response, absent or not.
+  predefined_values {
+    ca_options {
+      is_ca = false
+    }
+    key_usage {
+      base_key_usage {
+        digital_signature = true
+      }
+      extended_key_usage {
+        server_auth = true
+      }
+    }
+  }
+  identity_constraints {
+    allow_subject_passthrough           = true
+    allow_subject_alt_names_passthrough = true
+    cel_expression {
+      expression = "subject_alt_names.all(san, san.type == DNS && san.value.endsWith(\".example.com\"))"
+      title      = "example.com only"
+    }
+  }
+  passthrough_extensions {
+    known_extensions = ["BASE_KEY_USAGE"]
+  }
+}
+resource "google_privateca_certificate" "c" {
+  project               = %[1]q
+  location              = "us-central1"
+  pool                  = google_privateca_ca_pool.p.name
+  name                  = "tfcert"
+  certificate_authority = google_privateca_certificate_authority.root.certificate_authority_id
+  certificate_template  = google_privateca_certificate_template.t.id
+  lifetime              = "3600s"
+  config {
+    subject_config {
+      subject {
+        common_name  = "tf.example.com"
+        organization = "CloudBurrow"
+      }
+      subject_alt_name {
+        dns_names = ["tf.example.com"]
+      }
+    }
+    x509_config {
+      ca_options {
+        is_ca = false
+      }
+      key_usage {
+        base_key_usage {
+          key_encipherment = true
+        }
+        extended_key_usage {}
+      }
+    }
+    public_key {
+      format = "PEM"
+      key    = base64encode(%[3]q)
+    }
+  }
+}
+`, m.project, n, pub+"\n"))
+	m.must("init", "-input=false", "-no-color")
+	m.apply()
+	parent := "projects/" + m.project + "/locations/us-central1"
+	ca, err := c.GetCertificateAuthority(ctx, &privatecapb.GetCertificateAuthorityRequest{Name: fmt.Sprintf("%s/caPools/tfkms-%d/certificateAuthorities/root", parent, n)})
+	if err != nil || !strings.HasSuffix(ca.GetKeySpec().GetCloudKmsKeyVersion(), "/cryptoKeys/ca/cryptoKeyVersions/1") || ca.GetState() != privatecapb.CertificateAuthority_ENABLED {
+		t.Fatalf("the CA Terraform made = %v, %v; want ENABLED with the Cloud KMS key version", ca.GetKeySpec(), err)
+	}
+	crt, err := c.GetCertificate(ctx, &privatecapb.GetCertificateRequest{Name: fmt.Sprintf("%s/caPools/tfkms-%d/certificates/tfcert", parent, n)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf, _ := parsePEM(crt.GetPemCertificate())
+	root, _ := parsePEM(ca.GetPemCaCertificates()[0])
+	if leaf == nil || root == nil || leaf.CheckSignatureFrom(root) != nil {
+		t.Fatalf("the certificate Terraform made does not verify against the Cloud KMS-held root")
+	}
+	// The template's predefined values apply over the request's.
+	if leaf.KeyUsage&x509.KeyUsageDigitalSignature == 0 || len(leaf.ExtKeyUsage) != 1 || leaf.ExtKeyUsage[0] != x509.ExtKeyUsageServerAuth {
+		t.Errorf("the certificate's KU %v EKU %v; want the template's", leaf.KeyUsage, leaf.ExtKeyUsage)
+	}
+	m.planClean()
+	m.must("destroy", "-auto-approve", "-input=false", "-no-color")
 }
