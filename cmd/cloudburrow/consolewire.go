@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/cloudburrow/cloudburrow/internal/iameval"
 	"io"
 	"net"
 	"path/filepath"
@@ -34,7 +35,10 @@ import (
 // service: it is handed the same objects the services use, so there is no way
 // for it to answer from anywhere else.
 type consoleDeps struct {
-	cfg     config.Config
+	cfg config.Config
+	// iam is the IAM evaluator Policy Troubleshooter and Policy Analyzer
+	// answer from (#1879); nil leaves those pages without answers.
+	iam     *iameval.Enforcer
 	localAI *vertexai.Server
 	// localModels manages the local AI models, shared with the admin API
 	// (#1396); nil makes one for the console alone.
@@ -158,8 +162,9 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			h.sinks = &loggingAdminScreen{svc: d.logging, faults: d.faults}
 		}
 		providers = append(providers, projectsProvider{registry: d.projects}, h, tagsProvider{registry: d.projects},
-			projectIAMProvider{registry: d.projects}, iamRolesProvider{registry: d.projects}, iamGroupsProvider{registry: d.projects},
-			iamServiceAccountsProvider{registry: d.projects}, iamAuditProvider{registry: d.projects})
+			projectIAMProvider{registry: d.projects, iam: d.iam}, iamRolesProvider{registry: d.projects}, iamGroupsProvider{registry: d.projects},
+			iamServiceAccountsProvider{registry: d.projects}, iamAuditProvider{registry: d.projects},
+			iamOrgPoliciesProvider{registry: d.projects}, iamLabelsProvider{registry: d.projects}, iamSettingsProvider{registry: d.projects})
 	}
 	if enabled[config.ServiceStorage] && storageAddr != "" {
 		// Three screens of one product: buckets, the project's soft-deleted
@@ -325,7 +330,8 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		// The emulator serves the instance's default project and no other, so
 		// the screen is told which one that is (#698).
 		{config.ServiceBigQuery, func(a string) console.Provider {
-			return bigqueryProvider{endpoint: a, project: d.cfg.DefaultProject(), registry: d.projects}
+			return bigqueryProvider{endpoint: a, project: d.cfg.DefaultProject(), registry: d.projects,
+				savedQueries: filepath.Join(d.cfg.InstanceDir(), bqSavedQueriesFile)}
 		}},
 		// Job history, BigQuery's second screen (#993).
 		{config.ServiceBigQuery, func(a string) console.Provider {

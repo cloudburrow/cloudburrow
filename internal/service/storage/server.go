@@ -29,6 +29,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/grpchttp"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
+	"github.com/cloudburrow/cloudburrow/internal/iamcheck"
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 )
 
@@ -71,6 +72,9 @@ type Server struct {
 	// grpc serves google.storage.v2.Storage (#1321) on the same port, as
 	// h2c, through ServeHTTP; Stop stops it.
 	grpc *grpc.Server
+	// iamCheck is the host's evaluator, nil unless `up
+	// --iam-enforcement=on` (iamenforce.go, #1879).
+	iamCheck *iamcheck.Client
 }
 
 // Options configure a Server.
@@ -114,6 +118,9 @@ type Options struct {
 	// (#1532); nil means none: what inherits inherits the local
 	// organization's configuration.
 	Hierarchy Hierarchy
+	// IAMCheck, when set, checks every request with the host's evaluator
+	// (#1879).
+	IAMCheck *iamcheck.Client
 
 	// grpcOptions are extra options for the gRPC server (tests: a stats
 	// handler).
@@ -133,6 +140,7 @@ func NewServer(o Options) (*Server, error) {
 		s.certSources[strings.ToLower(d)] = base
 	}
 	s.relayChannels, s.hierarchy = o.RelayChannels, o.Hierarchy
+	s.iamCheck = o.IAMCheck
 	s.allowOrigins = map[string]bool{}
 	for _, v := range o.CORSAllowOrigins {
 		origin, err := hostguard.ParseOrigin(v)
@@ -295,6 +303,12 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		rest := strings.TrimPrefix(strings.TrimPrefix(path, resumablePrefix), uploadPrefix)
 		if uploadPathRE.MatchString(rest) {
 			q := r.URL.Query()
+			if q.Get("upload_id") == "" && r.Method == http.MethodPost {
+				if err := s.authorizeJSON(r, "storage.objects.insert", strings.TrimSuffix(path, rest), rest); err != nil {
+					writeError(w, err)
+					return
+				}
+			}
 			switch {
 			case q.Get("upload_id") != "":
 				s.resumableChunk(w, r, q.Get("upload_id"))
@@ -339,6 +353,10 @@ func (s *Server) serveJSON(w http.ResponseWriter, r *http.Request, rest string, 
 	// objects.watchAll and channels.stop are no longer in the discovery
 	// document (channels.go).
 	if !upload && r.Method == http.MethodPost && watchAllRE.MatchString(rest) {
+		if err := s.authorizeJSON(r, "storage.objects.watchAll", jsonPrefix, rest); err != nil {
+			writeError(w, err)
+			return
+		}
 		s.objectsWatchAll(w, r)
 		return
 	}
@@ -348,6 +366,10 @@ func (s *Server) serveJSON(w http.ResponseWriter, r *http.Request, rest string, 
 	}
 	// Nor is anywhereCaches.pause since revision 20261107 (anywherecache.go).
 	if !upload && r.Method == http.MethodPost && anywhereCachesPauseRE.MatchString(rest) {
+		if err := s.authorizeJSON(r, "storage.anywhereCaches.pause", jsonPrefix, rest); err != nil {
+			writeError(w, err)
+			return
+		}
 		s.anywhereCachesState(cachePaused, cacheRunning)(w, r)
 		return
 	}
@@ -356,6 +378,14 @@ func (s *Server) serveJSON(w http.ResponseWriter, r *http.Request, rest string, 
 			continue
 		}
 		if h, ok := s.handlers[m.ID]; ok && methodStatus[m.ID] == built {
+			prefix := jsonPrefix
+			if upload {
+				prefix = strings.TrimSuffix(r.URL.EscapedPath(), rest)
+			}
+			if err := s.authorizeJSON(r, m.ID, prefix, rest); err != nil {
+				writeError(w, err)
+				return
+			}
 			h(w, r)
 			return
 		}

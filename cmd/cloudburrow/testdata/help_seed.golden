@@ -35,6 +35,8 @@ Flags:
     	time limit for each hook script (default 5m)
   -hooks-dir string
     	directory of ready.d and shutdown.d hook scripts (default .cloudburrow/hooks)
+  -iam-enforcement string
+    	IAM enforcement: off (policies are stored, never checked) or on (mapped API methods check the caller's permissions, as on Google) (default off)
   -kubeconfig string
     	explicit kubeconfig path (never the developer default)
   -local-ai-alias string

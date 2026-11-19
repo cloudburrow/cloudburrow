@@ -86,9 +86,17 @@ func (s *Instances) setIAM(ctx context.Context, req *iampb.SetIamPolicyRequest, 
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	next, err := iampolicy.SetConditional(s.policies[req.GetResource()], req)
+	cur := s.policies[req.GetResource()]
+	next, err := iampolicy.SetConditional(cur, req)
 	if err != nil {
 		return nil, apierror.Wrap(err)
+	}
+	var before *iampb.Policy
+	if cur != nil {
+		before = cur.Proto()
+	}
+	if err := checkOrgMembers(ctx, req.GetResource(), before, next.Proto()); err != nil {
+		return nil, err
 	}
 	s.policies[req.GetResource()] = &next
 	return next.Proto(), nil

@@ -51,7 +51,7 @@ func (a *ArtifactRegistryServer) GetIamPolicy(_ context.Context, req *iampb.GetI
 
 // SetIamPolicy stores a repository's policy with a new etag; a stale etag
 // is ABORTED.
-func (a *ArtifactRegistryServer) SetIamPolicy(_ context.Context, req *iampb.SetIamPolicyRequest) (*iampb.Policy, error) {
+func (a *ArtifactRegistryServer) SetIamPolicy(ctx context.Context, req *iampb.SetIamPolicyRequest) (*iampb.Policy, error) {
 	repositories.mu.Lock()
 	defer repositories.mu.Unlock()
 	if err := repositoryForIAM(req.GetResource()); err != nil {
@@ -63,6 +63,9 @@ func (a *ArtifactRegistryServer) SetIamPolicy(_ context.Context, req *iampb.SetI
 	}
 	next, err := iampolicy.Set(cur, req)
 	if err != nil {
+		return nil, err
+	}
+	if err := checkOrgMembers(ctx, req.GetResource(), storedProto(cur), next.Proto()); err != nil {
 		return nil, err
 	}
 	repositories.policies[req.GetResource()] = next

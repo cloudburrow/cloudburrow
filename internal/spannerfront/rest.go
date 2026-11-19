@@ -34,6 +34,8 @@ func restCall(r *http.Request) (string, bool) {
 	switch {
 	case restInstances.MatchString(p) && r.Method == http.MethodGet:
 		return "ListInstances", true
+	case restInstances.MatchString(p) && r.Method == http.MethodPost:
+		return "CreateInstance", true
 	case restDatabases.MatchString(p) && r.Method == http.MethodGet:
 		return "ListDatabases", true
 	case restDatabase.MatchString(p):
@@ -111,6 +113,18 @@ func (s *Instances) serveREST(w http.ResponseWriter, r *http.Request) {
 		n, _ := strconv.Atoi(q.Get("pageSize"))
 		reply(s.ListInstances(ctx, &instancepb.ListInstancesRequest{Parent: restInstances.FindStringSubmatch(r.URL.Path)[1],
 			PageSize: int32(n), PageToken: q.Get("pageToken"), Filter: q.Get("filter")}))
+	case "CreateInstance":
+		req := &instancepb.CreateInstanceRequest{}
+		b, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+		if err == nil {
+			err = protojson.UnmarshalOptions{DiscardUnknown: true}.Unmarshal(b, req)
+		}
+		if err != nil {
+			writeError(w, status.Errorf(codes.InvalidArgument, "Invalid JSON payload received. %v", err))
+			return
+		}
+		req.Parent = restInstances.FindStringSubmatch(r.URL.Path)[1]
+		reply(s.CreateInstance(ctx, req))
 	case "GetInstance":
 		reply(s.GetInstance(ctx, &instancepb.GetInstanceRequest{Name: restInstance.FindStringSubmatch(r.URL.Path)[1]}))
 	case "DeleteInstance":

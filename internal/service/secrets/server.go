@@ -44,6 +44,8 @@ type Server struct {
 	// fault injection (#306, #314).
 	interpose []grpc.UnaryServerInterceptor
 	options   []grpc.ServerOption
+	// wrap wraps the JSON API (IAM enforcement, #1879); nil is none.
+	wrap func(http.Handler) http.Handler
 
 	mu   sync.Mutex
 	ln   net.Listener
@@ -60,6 +62,10 @@ func (s *Server) Observe(calls grpcx.Observer, requests func(rest.Request)) {
 // Interpose adds an interceptor inside the observer. It must be set before
 // Start.
 func (s *Server) Interpose(i grpc.UnaryServerInterceptor) { s.interpose = append(s.interpose, i) }
+
+// WrapJSON wraps the JSON API's handler, inside the request observer. It
+// must be set before Start.
+func (s *Server) WrapJSON(f func(http.Handler) http.Handler) { s.wrap = f }
 
 // ServerOptions adds gRPC server options, such as tracing (#313). It must be
 // called before Start.
@@ -96,10 +102,13 @@ func (s *Server) handler(grpcSrv *grpc.Server) http.Handler {
 			return
 		}
 		jsonAPI := http.Handler(router)
+		if s.wrap != nil {
+			jsonAPI = s.wrap(jsonAPI)
+		}
 		// Only the JSON path is wrapped: gRPC calls are already reported by the
 		// interceptors, and wrapping both would record every gRPC call twice.
 		if s.requests != nil {
-			jsonAPI = rest.Observe(router, s.requests)
+			jsonAPI = rest.Observe(jsonAPI, s.requests)
 		}
 		jsonAPI.ServeHTTP(w, r)
 	})

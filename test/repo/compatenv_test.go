@@ -216,7 +216,7 @@ func compatEnvFixture(t *testing.T, edit func(env map[string]string)) (dir, envF
 		"2026-10-15T10:31:31.107900Z   embeddings: POST /v1/projects/{p}/locations/{l}/publishers/google/models/e:predict\n")
 	write("up.json", `{"pid": 1, "control": "127.0.0.1:50001", "log": "`+filepath.Join(dir, "up.log")+`",
   "endpoints": {"control": "127.0.0.1:50001", "metadata": "127.0.0.1:9005", "console": "127.0.0.1:9090",
-    "tasks": "127.0.0.1:9003", "secretmanager": "127.0.0.1:9006", "run": "127.0.0.1:50002"}}`)
+    "tasks": "127.0.0.1:9003", "secretmanager": "127.0.0.1:9006", "run": "127.0.0.1:50002"}, "iamEnforcement": "on"}`)
 	env := map[string]string{
 		"GOOGLE_APPLICATION_CREDENTIALS":          filepath.Join(dir, "credentials.json"),
 		"GOOGLE_CLOUD_PROJECT":                    "ct-local",
@@ -377,6 +377,7 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"APPENGINE_URL":            "http://127.0.0.1:18506",
 		"SCALE_RUN":                "127.0.0.1:50002",
 		"SCALE_SECRETS":            "127.0.0.1:9006",
+		"IAM_ENFORCEMENT":          "on",
 
 		// A group of its own, so its long name leaves the others' alignment.
 		"MEMORYSTORE_RESOURCEMANAGER": "127.0.0.1:9007",

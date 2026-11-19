@@ -22,6 +22,8 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
+	"github.com/cloudburrow/cloudburrow/internal/iamcheck"
+	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"github.com/cloudburrow/cloudburrow/internal/sched"
 	"github.com/cloudburrow/cloudburrow/internal/service/storage"
@@ -56,6 +58,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	pubsubAddr := fs.String("pubsub-emulator", "", "host:port of a Pub/Sub emulator to deliver notifications to (default: notifications cannot be configured)")
 	relayChannels := fs.Bool("relay-channels", false, "hand object change notification messages to a relay at "+storage.ChannelOutboxPath+" instead of POSTing them (what `up` passes: the CLI delivers them on the host, #1290)")
 	resourceManager := fs.String("resourcemanager", "", "http://host:port of Resource Manager, whose projects and folders Storage Intelligence inheritance walks (what `up` passes, #1532; default: what inherits inherits the local organization's configuration)")
+	iamCheck := fs.String("iam-check", "", "http://host:port of the host's IAM evaluator, which checks every request's caller when set (what `up --iam-enforcement=on` passes, #1879; default: nothing is checked)")
 	if err := fs.Parse(args); err != nil {
 		return ErrUsage
 	}
@@ -73,8 +76,15 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 	}
 	opts := storage.Options{Hosts: names, CORSAllowOrigins: origins, RelayChannels: *relayChannels, CertSources: certSources}
+	if *iamCheck != "" {
+		opts.IAMCheck = &iamcheck.Client{Base: *iamCheck}
+	}
 	if *resourceManager != "" {
 		opts.Hierarchy = storage.ResourceManagerHierarchy{Base: *resourceManager}
+		// Organization policies are the host's, enforced whatever IAM
+		// enforcement (#1890).
+		orgpolicy.Use(orgpolicy.Remote{Base: *resourceManager})
+		defer orgpolicy.Use(nil)
 	}
 	if *mode != "persistent" && *mode != "ephemeral" {
 		return fmt.Errorf("--mode %q: want persistent or ephemeral", *mode)

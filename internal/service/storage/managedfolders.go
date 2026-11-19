@@ -605,6 +605,12 @@ func (s *Server) managedFoldersSetIamPolicy(w http.ResponseWriter, r *http.Reque
 		if p.conditional() {
 			return badRequest("Invalid argument: a managed folder's IAM policy does not accept conditional role bindings; set the condition on the bucket's policy instead.")
 		}
+		// Organization policy constraints (orgpolicy.go, #1890).
+		if b, ok, err := s.getBucket(tx, bucket); err == nil && ok {
+			if err := checkPolicyOrg(b, f.Policy, p); err != nil {
+				return err
+			}
+		}
 		next, err := nextPolicy(f.Policy, p, sentETag)
 		if err != nil {
 			return err
@@ -634,5 +640,6 @@ func (s *Server) managedFoldersTestIamPermissions(w http.ResponseWriter, r *http
 		writeError(w, err)
 		return
 	}
+	perms = s.heldPermissions(r, target{bucket: bucket, object: strings.TrimSuffix(name, "/") + "/"}, perms)
 	writeResponse(w, r, http.StatusOK, map[string]any{"kind": "storage#testIamPermissionsResponse", "permissions": perms})
 }

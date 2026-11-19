@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 )
 
 // CREATE SCHEMA of a dataset that exists (#946).
@@ -202,6 +204,17 @@ func (f front) createSchema(w http.ResponseWriter, r *http.Request, q queryOptio
 			creates[i].Location = location
 		}
 		creates[i].DatasetReference.ProjectID = project
+		// gcp.resourceLocations (#1891), as on datasets.insert (#1890):
+		// a CREATE SCHEMA in a location the constraint does not allow
+		// fails before anything runs, 412 conditionNotMet with the
+		// documented message. UNVERIFIED: the status and reason of a
+		// query refused so. Docs re-read 2026-11-19:
+		// https://docs.cloud.google.com/resource-manager/docs/organization-policy/defining-locations
+		if err := orgpolicy.CheckLocations(r.Context(), "projects/"+project, "projects/"+project, creates[i].Location); err != nil {
+			f.failBeforeRun(w, r, q, insert, creates[i].DatasetReference.DatasetID, http.StatusPreconditionFailed,
+				rowError{Reason: "conditionNotMet", Message: err.Error()})
+			return nil, true
+		}
 	}
 	return f.makingDatasets(r, q.Query, insert, creates, noop, drops), false
 }

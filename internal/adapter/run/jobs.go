@@ -361,6 +361,9 @@ func (j *JobsServer) CreateJob(ctx context.Context, req *runpb.CreateJobRequest)
 	if _, _, err := resource.ParseLocation(req.GetParent()); err != nil {
 		return nil, apierror.InvalidArgument("%v", err)
 	}
+	if err := checkOrgLocation(ctx, req.GetParent()); err != nil {
+		return nil, err
+	}
 	id := req.GetJobId()
 	if err := validateJobID(id); err != nil {
 		return nil, err

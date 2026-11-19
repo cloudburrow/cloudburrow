@@ -12,6 +12,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
+	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 )
 
@@ -104,7 +105,7 @@ func (s viewIAMServer) GetIamPolicy(_ context.Context, req *iampb.GetIamPolicyRe
 	return out, apierror.Wrap(err)
 }
 
-func (s viewIAMServer) SetIamPolicy(_ context.Context, req *iampb.SetIamPolicyRequest) (*iampb.Policy, error) {
+func (s viewIAMServer) SetIamPolicy(ctx context.Context, req *iampb.SetIamPolicyRequest) (*iampb.Policy, error) {
 	s.a.mu.Lock()
 	defer s.a.mu.Unlock()
 	ref, id, err := s.view(req.GetResource())
@@ -118,6 +119,24 @@ func (s viewIAMServer) SetIamPolicy(_ context.Context, req *iampb.SetIamPolicyRe
 	next, err := iampolicy.SetConditional(cur, req)
 	if err != nil {
 		return nil, apierror.Wrap(err)
+	}
+	// iam.allowedPolicyMemberDomains (#1890), whatever --iam-enforcement,
+	// on the project, folder or organization the view is under.
+	var before, after []string
+	if cur != nil {
+		for _, b := range cur.Bindings {
+			before = append(before, b.Members...)
+		}
+	}
+	for _, b := range next.Bindings {
+		after = append(after, b.Members...)
+	}
+	under := orgpolicy.ProjectOf(req.GetResource())
+	if parts := strings.SplitN(req.GetResource(), "/", 3); under == "" && len(parts) >= 2 && (parts[0] == "folders" || parts[0] == "organizations") {
+		under = parts[0] + "/" + parts[1]
+	}
+	if err := orgpolicy.CheckMembers(ctx, under, before, after); err != nil {
+		return nil, apierror.Wrap(apierror.FailedPrecondition("%s", err.Error()))
 	}
 	raw, err := json.Marshal(next)
 	if err != nil {

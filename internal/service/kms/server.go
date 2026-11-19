@@ -44,6 +44,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 	"github.com/cloudburrow/cloudburrow/internal/locations"
+	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 	"github.com/cloudburrow/cloudburrow/internal/paging"
 	"github.com/cloudburrow/cloudburrow/internal/sched"
 	"github.com/cloudburrow/cloudburrow/internal/store"
@@ -280,6 +281,13 @@ func toRing(r keyRing) *kmspb.KeyRing {
 func (s *Server) CreateKeyRing(_ context.Context, req *kmspb.CreateKeyRingRequest) (*kmspb.KeyRing, error) {
 	if err := parseLocation("parent", req.GetParent()); err != nil {
 		return nil, apierror.Wrap(err)
+	}
+	// gcp.resourceLocations (#1890): a key ring outside the allowed
+	// locations is FAILED_PRECONDITION, with the documented message.
+	if loc := req.GetParent()[strings.LastIndex(req.GetParent(), "/")+1:]; loc != "" {
+		if err := orgpolicy.CheckLocations(context.Background(), orgpolicy.ProjectOf(req.GetParent()), orgpolicy.ProjectOf(req.GetParent()), loc); err != nil {
+			return nil, apierror.Wrap(apierror.FailedPrecondition("%s", err.Error()))
+		}
 	}
 	if !idRE.MatchString(req.GetKeyRingId()) {
 		return nil, apierror.Wrap(apierror.InvalidArgument("key_ring_id %q must be 1-63 letters, digits, - or _", req.GetKeyRingId()))

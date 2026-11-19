@@ -138,7 +138,14 @@ func (f front) hierarchyJobsRows(r *http.Request, view string, filter *jobsFilte
 		if !in {
 			continue
 		}
-		osub, st, msg := f.inProject(other).jobsRows(r, filter)
+		// Resource Manager has it ACTIVE, so BigQuery serves it (#1764),
+		// even one no request has named yet: a folder's management
+		// project, a project made a moment ago. The engine is told so,
+		// and adds it empty, with no jobs; unmarked, it answered 404
+		// "project P is not found", which failed the whole view (#1891).
+		or := r.Clone(r.Context())
+		or.Header.Set(KnownProjectHeader, "1")
+		osub, st, msg := f.inProject(other).jobsRows(or, filter)
 		if st != 0 {
 			return "", st, msg
 		}

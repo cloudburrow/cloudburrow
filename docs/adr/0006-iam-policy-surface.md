@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-09-25
 - Issue: #308
-- **Amended by:** #421 (Cloud KMS), #504 (Cloud Storage), #1233 (Cloud Storage ACLs, 2026-10-15), #1216 (Cloud Run), #1231 (BigQuery), #1367 (Pub/Sub), #1368 (Resource Manager projects, folders and the organization, 2026-10-15), #1304 (Artifact Registry repositories, 2026-10-16), #1486 (Spanner, Bigtable tables, tags and audit configs, 2026-10-16), #1527 (Secure Source Manager instances and repositories, 2026-10-17), #1614 (Memorystore IAM auth, 2026-11-17), #1738, #1747 and #1751 (Firestore with MongoDB compatibility's sign-ins and IAM Credentials, 2026-11-17; recorded 2026-11-18), #1765 (BigQuery remote models' connection permissions, 2026-11-17), #1767 (BigQuery per-project IAM of a minted token, 2026-11-17), #1774 (the rest of BigQuery's per-project IAM, 2026-11-18), #1812 (Cloud Identity groups and domain members, 2026-11-18)
+- **Amended by:** #421 (Cloud KMS), #504 (Cloud Storage), #1233 (Cloud Storage ACLs, 2026-10-15), #1216 (Cloud Run), #1231 (BigQuery), #1367 (Pub/Sub), #1368 (Resource Manager projects, folders and the organization, 2026-10-15), #1304 (Artifact Registry repositories, 2026-10-16), #1486 (Spanner, Bigtable tables, tags and audit configs, 2026-10-16), #1527 (Secure Source Manager instances and repositories, 2026-10-17), #1614 (Memorystore IAM auth, 2026-11-17), #1738, #1747 and #1751 (Firestore with MongoDB compatibility's sign-ins and IAM Credentials, 2026-11-17; recorded 2026-11-18), #1765 (BigQuery remote models' connection permissions, 2026-11-17), #1767 (BigQuery per-project IAM of a minted token, 2026-11-17), #1774 (the rest of BigQuery's per-project IAM, 2026-11-18), #1812 (Cloud Identity groups and domain members, 2026-11-18), #1879 (opt-in enforcement, `up --iam-enforcement=on`, on Secret Manager, Cloud KMS and Cloud Tasks, with Policy Troubleshooter and Policy Analyzer, then Cloud Storage, Pub/Sub and Cloud Run invoke, 2026-11-19), #1886 (IAM v2 deny policies, evaluated before allow policies, 2026-11-19)
 - **Reaffirms:** the no-authorization clause of [ADR-0004](0004-local-access-and-no-authentication.md).
   It supersedes nothing.
 
@@ -568,3 +568,39 @@ repositories (#1527), keeps its current behaviour.
   no page claims untested support.
 - A future request for enforcement has to supersede this ADR and ADR-0004's clause, and answer
   option (c)'s objection: an evaluator whose disagreements with Google cannot be detected.
+
+## Amendment: opt-in enforcement (#1879, 2026-11-19)
+
+The maintainer asked for local results to match GCP's, and a missing permission that GCP refuses
+but CloudBurrow serves is the largest difference. Option (c) is therefore taken, opt-in and
+narrowly: `up --iam-enforcement=on` (default `off`, so rule 1 still holds for every instance not
+started with it) checks the methods `internal/iameval` maps, Secret Manager, Cloud KMS and Cloud
+Tasks first, against the stored allow policies, with the hierarchy (organization, folders,
+project, resource), predefined roles from Google's published index, custom roles, IAM conditions
+and Cloud Identity groups that (c)'s objections named, which have all been built since. What (c)
+warned about stays true and is recorded in compatibility.md: the basic roles' permissions are
+derived (Google does not list them), deny policies, principal access boundaries and organization
+policy are not evaluated, and a method without a mapping is not enforced. Policy Troubleshooter
+and Cloud Asset's analyzeIamPolicy explain the same evaluator's decisions, so a denial can be
+traced locally the way it is on Google.
+
+Round 2 (#1879, 2026-11-19) extends the same enforcement to Cloud Storage (JSON, XML and gRPC),
+Pub/Sub (gRPC) and Cloud Run invoke (`run.routes.invoke`), and makes `TestIamPermissions` over JSON
+answer only held permissions. The servers that run in the cluster (the storage server, Pub/Sub's
+front, Kourier's gateway for Cloud Run) do not copy the policies, as BigQuery's per-project check
+(#1767) does: each asks the host's evaluator per request (`internal/iamcheck`), so there is still
+one evaluator and nothing to keep in step. Cloud Run invoke treats a request with no bearer token
+as `allUsers`, as Google does, rather than as the owner: invoking an unauthenticated URL is what a
+service's IAM decides there.
+
+## Amendment: deny policies (#1886, 2026-11-19)
+
+IAM v2 deny policies are stored per attachment point (a project, a folder or the organization)
+and served through `google.iam.v2.Policies` on the IAM API's port. The one evaluator
+(`internal/iameval`) checks them before the allow policies, as Google documents
+(https://docs.cloud.google.com/iam/docs/deny-overview): a permission a deny rule in the resource's
+ancestry denies is refused whatever the allow policies grant, and that applies to the instance's
+own account as well, which is otherwise the owner of everything. Which permissions can be denied,
+and their v2 names, are Google's published list, embedded. Policy Troubleshooter v3 explains the
+deny policies rule by rule. The rule that nothing is enforced unless `--iam-enforcement=on` is
+unchanged: with enforcement off, deny policies are stored and explained but refuse nothing.

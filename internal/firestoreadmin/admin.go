@@ -62,6 +62,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/frontstate"
 	"github.com/cloudburrow/cloudburrow/internal/grpchttp"
+	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 )
 
 // DefaultLocation is the location `(default)` is described in: the emulator
@@ -345,7 +346,7 @@ func (a *Admin) GetDatabase(_ context.Context, req *adminpb.GetDatabaseRequest) 
 	return a.describe(db), nil
 }
 
-func (a *Admin) CreateDatabase(_ context.Context, req *adminpb.CreateDatabaseRequest) (*longrunningpb.Operation, error) {
+func (a *Admin) CreateDatabase(ctx context.Context, req *adminpb.CreateDatabaseRequest) (*longrunningpb.Operation, error) {
 	m := projectRe.FindStringSubmatch(req.GetParent())
 	if m == nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid parent %q: want projects/{project}", req.GetParent())
@@ -360,6 +361,12 @@ func (a *Admin) CreateDatabase(_ context.Context, req *adminpb.CreateDatabaseReq
 	}
 	if in.GetLocationId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "location_id is required.")
+	}
+	// gcp.resourceLocations (#1890), asked of the host whatever
+	// --iam-enforcement: FAILED_PRECONDITION with Google's documented
+	// message. Nothing is refused when no policy is set.
+	if err := orgpolicy.CheckLocations(ctx, req.GetParent(), req.GetParent(), in.GetLocationId()); err != nil {
+		return nil, status.Error(codes.FailedPrecondition, err.Error())
 	}
 	switch in.GetType() {
 	case adminpb.Database_DATASTORE_MODE:
@@ -390,6 +397,10 @@ func (a *Admin) CreateDatabase(_ context.Context, req *adminpb.CreateDatabaseReq
 		// its user credentials.
 		DatabaseEdition: orDefault(in.GetDatabaseEdition(), adminpb.Database_STANDARD),
 		Tags:            in.GetTags(),
+	}
+	// Custom constraints (#1891, custom.go).
+	if err := checkDatabaseCustom(ctx, db, orgpolicy.MethodCreate); err != nil {
+		return nil, err
 	}
 	a.databases[name] = db
 	return a.done(name, &adminpb.CreateDatabaseMetadata{}, a.describe(db))
@@ -431,7 +442,7 @@ func snake(p string) string {
 	return b.String()
 }
 
-func (a *Admin) UpdateDatabase(_ context.Context, req *adminpb.UpdateDatabaseRequest) (*longrunningpb.Operation, error) {
+func (a *Admin) UpdateDatabase(ctx context.Context, req *adminpb.UpdateDatabaseRequest) (*longrunningpb.Operation, error) {
 	in := req.GetDatabase()
 	if in == nil {
 		return nil, status.Error(codes.InvalidArgument, "database is required")
@@ -457,6 +468,14 @@ func (a *Admin) UpdateDatabase(_ context.Context, req *adminpb.UpdateDatabaseReq
 	}
 	if in.GetEtag() != "" && in.GetEtag() != etag(a.describe(db)) {
 		return nil, status.Error(codes.Aborted, "the database's etag does not match: it has changed since it was read")
+	}
+	next := proto.Clone(db).(*adminpb.Database)
+	for _, p := range paths {
+		mutableDatabaseFields[p](next, in)
+	}
+	// Custom constraints on the database as the update leaves it (#1891).
+	if err := checkDatabaseCustom(ctx, next, orgpolicy.MethodUpdate); err != nil {
+		return nil, err
 	}
 	for _, p := range paths {
 		mutableDatabaseFields[p](db, in)

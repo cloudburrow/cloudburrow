@@ -51,8 +51,16 @@ func TestConsoleIAMServiceAccounts(t *testing.T) {
 	}
 	keyID := res.Items[0].Name
 	d, _ := p.Detail(ctx, "console-sa", []string{email})
-	if d.Unavailable != "" || d.Edit == nil || len(d.Sections) != 2 || d.Sections[1].Listing.Total != 2 {
+	// Google's tabs (#1864): Details, Permissions, Keys, Metrics.
+	if d.Unavailable != "" || d.Edit == nil || len(d.Sections) != 4 || d.Sections[2].Listing.Total != 2 {
 		t.Fatalf("Detail: unavailable %q, sections %d", d.Unavailable, len(d.Sections))
+	}
+	var ids []string
+	for _, s := range d.Sections {
+		ids = append(ids, s.ID)
+	}
+	if got := strings.Join(ids, ","); got != "details,permissions,keys,metrics" {
+		t.Errorf("the account's tabs are %s; want details,permissions,keys,metrics", got)
 	}
 	kd, _ := p.Detail(ctx, "console-sa", []string{email, keyID})
 	if kd.Unavailable != "" || !strings.HasPrefix(kd.Sections[1].Text, "-----BEGIN CERTIFICATE-----") {

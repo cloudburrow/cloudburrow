@@ -167,6 +167,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 )
 
 // maxBody bounds a request body the front reads. BigQuery's own limit for
@@ -834,6 +836,7 @@ func (f front) insertDataset(w http.ResponseWriter, r *http.Request) {
 		DatasetReference struct {
 			DatasetID string `json:"datasetId"`
 		} `json:"datasetReference"`
+		Location string `json:"location"`
 	}
 	raw, ok := decode(r, &body)
 	if !ok {
@@ -844,6 +847,16 @@ func (f front) insertDataset(w http.ResponseWriter, r *http.Request) {
 	if msg := checkDatasetID(id); msg != "" {
 		writeError(w, http.StatusBadRequest, "invalid", msg)
 		return
+	}
+	// gcp.resourceLocations (#1890), asked of the host whatever
+	// --iam-enforcement: a dataset is created only where the constraint
+	// allows (its location, the default US filled in above), 412
+	// FAILED_PRECONDITION with Google's documented message.
+	if p := projectOf(f.base); p != "" {
+		if err := orgpolicy.CheckLocations(r.Context(), "projects/"+p, "projects/"+p, body.Location); err != nil {
+			writeError(w, http.StatusPreconditionFailed, "conditionNotMet", err.Error())
+			return
+		}
 	}
 	if msg := datasetCollationRefused(raw); msg != "" { // #1508, collationddl.go
 		writeError(w, http.StatusBadRequest, "invalid", msg)

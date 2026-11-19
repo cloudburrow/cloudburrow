@@ -8,7 +8,9 @@ import (
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
+	"github.com/cloudburrow/cloudburrow/internal/iamcheck"
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
+	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
@@ -165,7 +167,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	comps.SetStorageSigningKeys(signingKeys)
 	comps.SetEarlierStorage(&earlierStorage{kubeconfig: cfg.KubeconfigPath(), namespace: cfg.Cluster.Namespace,
 		instance: cfg.InstanceDir(), project: cfg.DefaultProject(), out: stdout})
-	if serviceEnabled(cfg, config.ServiceBigQuery) || serviceEnabled(cfg, config.ServiceStorage) {
+	if serviceEnabled(cfg, config.ServiceBigQuery) || serviceEnabled(cfg, config.ServiceStorage) ||
+		(cfg.IAMEnforced() && serviceEnabled(cfg, config.ServicePubSub)) {
 		// BigQuery's front reads a project's folders and organization
 		// from Resource Manager, through cloudburrow-host (#1392,
 		// INFORMATION_SCHEMA.JOBS_BY_FOLDER and JOBS_BY_ORGANIZATION),
@@ -173,6 +176,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// Storage Intelligence inheritance (#1532).
 		comps.SetResourceManager(fmt.Sprintf("%s.%s.svc.cluster.local:%d", ClusterHostService, cfg.Cluster.Namespace,
 			cfg.Endpoints.ResourceManager))
+		// With --iam-enforcement=on the storage server (and Pub/Sub's
+		// front) ask the host's evaluator there (#1879).
+		comps.SetIAMCheck(cfg.IAMEnforced())
 	}
 	if serviceEnabled(cfg, config.ServicePubSub) && serviceEnabled(cfg, config.ServiceKMS) && cfg.Endpoints.KMS > 0 {
 		// The Pub/Sub front checks CMEK topics' keys against Cloud KMS,
@@ -521,6 +527,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		secretsSvc.interpose = append(secretsSvc.interpose, grpctransport.LogInterceptor(logger, "secretmanager"), faults.Interceptor("secretmanager"))
 		secretsSvc.requests = requestEvents(recorder, requestMetrics, "secretmanager")
 	}
+	// IAM enforcement (#1879), innermost, so the request log and fault
+	// injection see a denied call as the client does. Off by default: the
+	// interceptors pass every call through until --iam-enforcement=on.
+	iamEnforcer := newIAMEnforcer(cfg, creds, func() *resourcemanager.Registry { return projectRegistry })
+	useIAMEnforcement(iamEnforcer, secretsSvc, kmsSvc, tasksSvc)
 
 	// The runtime file straight after the control server, so it names an
 	// address already listening and `wait` can follow startup from the start.
@@ -628,6 +639,26 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	rmSrv.ServerOptions(tracing.ServerOptions()...)
 	rmSrv.Interpose(grpctransport.LogInterceptor(logger, "resourcemanager"))
 	rmSrv.Interpose(faults.Interceptor("resourcemanager"))
+	// Policy Troubleshooter and Policy Analyzer (#1879) on the same port,
+	// over the enforcement's evaluator.
+	rmSrv.HandleJSON(isIAMAnalysisPath, iamAnalysis{e: iamEnforcer})
+	// The in-cluster servers' checks (Cloud Storage, Pub/Sub's front,
+	// internal/iamcheck), through cloudburrow-host, so every decision is
+	// this evaluator's.
+	rmSrv.HandleJSON(func(r *http.Request) bool { return r.URL.Path == iamcheck.Path }, http.HandlerFunc(iamEnforcer.ServeCheck))
+	// Organization policies (#1890) are enforced whatever
+	// --iam-enforcement: the in-process services ask the registry, the
+	// in-cluster servers (Cloud Storage, Pub/Sub's and BigQuery's fronts)
+	// ask it here through cloudburrow-host (internal/orgpolicy).
+	orgPolicySrc := resourcemanager.OrgPolicySource{Reg: func() *resourcemanager.Registry { return projects }}
+	orgpolicy.Use(orgPolicySrc)
+	defer orgpolicy.Use(nil)
+	rmSrv.HandleJSON(func(r *http.Request) bool { return r.URL.Path == orgpolicy.Path }, orgpolicy.Handler(orgPolicySrc))
+	// Custom constraints (#1891), with their effective policies.
+	rmSrv.HandleJSON(func(r *http.Request) bool { return r.URL.Path == orgpolicy.CustomPath }, orgpolicy.CustomHandler(orgPolicySrc))
+	// Kourier's gateway asks before routing to a Cloud Run service
+	// (run.routes.invoke, runinvoke.go).
+	rmSrv.HandleUnguarded(isRunInvokeAuthz, runInvokeAuthz{e: iamEnforcer, creds: creds, run: runSvc})
 	coord.Register(rmSrv)
 	// A build's serviceAccount names an IAM account of this registry (#1854).
 	runadapter.UseServiceAccounts(func(name string) (string, bool, bool) {
@@ -737,7 +768,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// The console reads through the objects above rather than owning any of
 	// them, so it cannot answer from a store of its own.
 	consoleSrv := buildConsole(consoleDeps{
-		cfg: cfg, coord: coord, cluster: clusterComp, localAI: localAISrv, localModels: localModels,
+		cfg: cfg, iam: iamEnforcer, coord: coord, cluster: clusterComp, localAI: localAISrv, localModels: localModels,
 		hfModels: hfModels, garden: garden,
 		projects: projects,
 		tasks:    tasksSvc, secrets: secretsSvc, forwarders: forwarders,
@@ -1181,6 +1212,7 @@ func printStartup(w io.Writer, cfg config.Config, control *lifecycle.ControlServ
 	fmt.Fprintf(w, "  namespace:  %s\n", cfg.Cluster.Namespace)
 	fmt.Fprintf(w, "  kubeconfig: %s\n", cfg.KubeconfigPath())
 	fmt.Fprintf(w, "  mode:       %s\n", cfg.Mode)
+	fmt.Fprintf(w, "  iam:        enforcement %s\n", iamEnforcementMode(cfg))
 
 	if !cfg.IsLoopback() {
 		fmt.Fprintf(w, "\n  WARNING: bound to %s, which is not loopback.\n", cfg.BindAddress)
@@ -1282,6 +1314,11 @@ func runStatus(args []string, stdout, stderr io.Writer) error {
 	fmt.Fprintf(stdout, "kubeconfig: %s\n", cfg.KubeconfigPath())
 	fmt.Fprintf(stdout, "mode:       %s\n", cfg.Mode)
 	fmt.Fprintf(stdout, "bind:       %s\n", cfg.BindAddress)
+	iam := iamEnforcementMode(cfg)
+	if info, err := readRuntime(cfg); err == nil && info.IAMEnforcement != "" {
+		iam = info.IAMEnforcement
+	}
+	fmt.Fprintf(stdout, "iam:        enforcement %s\n", iam)
 	fmt.Fprintln(stdout, "\nservice persistence:")
 	for _, s := range cfg.EnabledServices() {
 		note := "survives restart in persistent mode"

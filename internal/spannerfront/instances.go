@@ -57,7 +57,7 @@ import (
 const instanceService = "/google.spanner.admin.instance.v1.InstanceAdmin/"
 
 // claimed are the InstanceAdmin methods the front answers.
-var claimed = map[string]bool{"GetInstance": true, "ListInstances": true, "UpdateInstance": true, "DeleteInstance": true,
+var claimed = map[string]bool{"GetInstance": true, "ListInstances": true, "UpdateInstance": true, "DeleteInstance": true, "CreateInstance": true,
 	"GetInstanceConfig": true, "ListInstanceConfigs": true, "CreateInstanceConfig": true, "UpdateInstanceConfig": true,
 	"DeleteInstanceConfig": true, "ListInstanceConfigOperations": true, "MoveInstance": true,
 	"GetInstancePartition": true, "ListInstancePartitions": true, "UpdateInstancePartition": true, "DeleteInstancePartition": true}

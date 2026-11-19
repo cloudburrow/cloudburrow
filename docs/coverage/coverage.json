@@ -42,6 +42,7 @@
           "test/compat/appengine1506_test.go:101 TestTasksAppEngineDelivery",
           "test/compat/consoletasksattempts_test.go:23 TestConsoleTasksAttemptHistory",
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
+          "test/compat/iamenforcement1879_test.go:282 TestIAMEnforcementTasks",
           "test/compat/tasks_test.go:145 TestTasksTaskLifecycle",
           "test/compat/tasktokens_test.go:115 TestTasksOIDCAndOAuthTokens"
         ]
@@ -90,6 +91,8 @@
           "test/compat/consoleappengine1447_test.go:137 TestAppEngineSeedIsReadBackByTheOfficialClients",
           "test/compat/consoleappengine1447_test.go:28 TestConsoleTasksEditQueueAppEngineRouting",
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
+          "test/compat/iamenforcement1879_test.go:282 TestIAMEnforcementTasks",
+          "test/compat/iamenforcement1879_test.go:499 TestIAMEnforcementJSON",
           "test/compat/tasks_test.go:64 TestTasksQueueLifecycle",
           "test/compat/taskshttptarget_test.go:33 TestTasksQueueHTTPTarget",
           "test/compat/taskslogging_test.go:35 TestTasksStackdriverLoggingConfig",
@@ -210,6 +213,10 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/AccessSecretVersion",
         "status": "Verified",
         "tests": [
+          "test/compat/iamdenypolicies1886_test.go:50 TestIAMEnforcementDenyPolicies",
+          "test/compat/iamenforcement1879_test.go:119 TestIAMEnforcementSecretManager",
+          "test/compat/iamenforcement1879_test.go:342 TestIAMEnforcementInherited",
+          "test/compat/iamenforcement1879_test.go:499 TestIAMEnforcementJSON",
           "test/compat/resterrorstatus_test.go:94 TestGcloudSecretManagerErrorStatus",
           "test/compat/secretcmek_test.go:246 TestTerraformSecretCMEK",
           "test/compat/secretcmek_test.go:74 TestSecretManagerCMEK",
@@ -241,6 +248,8 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/CreateSecret",
         "status": "Verified",
         "tests": [
+          "test/compat/orgpolicy1890_test.go:418 TestOrgPolicyEnforcementSecretLocations",
+          "test/compat/orgpolicycustom1891_test.go:282 TestOrgPolicyCustomConstraintsSecretManager",
           "test/compat/resterrorstatus_test.go:94 TestGcloudSecretManagerErrorStatus",
           "test/compat/secretcmek_test.go:246 TestTerraformSecretCMEK",
           "test/compat/secretcmek_test.go:74 TestSecretManagerCMEK",
@@ -336,6 +345,7 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/GetSecret",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcement1879_test.go:119 TestIAMEnforcementSecretManager",
           "test/compat/secretcmek_test.go:74 TestSecretManagerCMEK",
           "test/compat/secretexpiryfilter_test.go:35 TestSecretManagerExpiry",
           "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
@@ -380,6 +390,7 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/ListSecrets",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcement1879_test.go:119 TestIAMEnforcementSecretManager",
           "test/compat/secretexpiryfilter_test.go:118 TestSecretManagerListFilters",
           "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secretreplication_test.go:53 TestSecretManagerUserManagedReplicasRoundTrip",
@@ -416,6 +427,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolepermissions_test.go:237 TestConsolePermissionsOnASecret",
+          "test/compat/iamenforcement1879_test.go:119 TestIAMEnforcementSecretManager",
+          "test/compat/iamenforcement1879_test.go:618 TestIAMEnforcementJSONTestIamPermissions",
           "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secretsiam_test.go:22 TestSecretIamPolicyIsStoredNotEnforced"
         ]
@@ -425,6 +438,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudsecrets_test.go:19 TestGcloudSecrets",
+          "test/compat/orgpolicycustom1891_test.go:282 TestOrgPolicyCustomConstraintsSecretManager",
           "test/compat/secretcmek_test.go:202 TestGcloudSecretsCMEK",
           "test/compat/secretcmek_test.go:74 TestSecretManagerCMEK",
           "test/compat/secretexpiryfilter_test.go:35 TestSecretManagerExpiry",
@@ -680,6 +694,7 @@
         "tests": [
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
           "test/compat/artifactregistry_remote_test.go:45 TestArtifactRegistryRemoteDockerRepository",
+          "test/compat/orgpolicycustom1891_test.go:520 TestOrgPolicyCustomConstraintsRun",
           "test/compat/run_test.go:58 TestRunServiceLifecycle",
           "test/compat/runcloudsql_test.go:89 TestRunServiceCloudSQLVolume",
           "test/compat/runcloudsqlv1_test.go:53 TestRunServiceCloudSQLMySQLVolume",
@@ -722,6 +737,7 @@
         "method": "google.cloud.run.v2.Services/GetIamPolicy",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcementrun1879_test.go:103 TestIAMEnforcementRunInvoke",
           "test/compat/runiam_test.go:86 TestRunServiceIamPolicyIsStoredNotEnforced",
           "test/compat/terraform_iam_test.go:326 TestTerraformRunIAM"
         ]
@@ -765,6 +781,7 @@
         "method": "google.cloud.run.v2.Services/SetIamPolicy",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcementrun1879_test.go:103 TestIAMEnforcementRunInvoke",
           "test/compat/runiam_test.go:86 TestRunServiceIamPolicyIsStoredNotEnforced",
           "test/compat/terraform_iam_test.go:326 TestTerraformRunIAM"
         ]
@@ -2638,7 +2655,7 @@
           "test/compat/gclouddeploysource_test.go:53 TestGcloudRunDeploySource",
           "test/compat/runcloudsqlv1_test.go:106 TestGcloudRunDeployCloudSQL",
           "test/compat/rungcsfuse_test.go:185 TestGcloudRunDeployCloudStorageVolume",
-          "test/compat/runh2c_test.go:89 TestGcloudRunDeployUseHTTP2",
+          "test/compat/runh2c_test.go:90 TestGcloudRunDeployUseHTTP2",
           "test/compat/runnfstools_test.go:23 TestGcloudRunDeployNFSVolume",
           "test/compat/runv1_test.go:59 TestRunV1KnativeAPI",
           "test/compat/runvolumes_test.go:167 TestRunV1VolumesProbesAndServiceAccount",
@@ -2666,7 +2683,7 @@
           "test/compat/gclouddeploysource_test.go:53 TestGcloudRunDeploySource",
           "test/compat/runcloudsqlv1_test.go:106 TestGcloudRunDeployCloudSQL",
           "test/compat/rungcsfuse_test.go:185 TestGcloudRunDeployCloudStorageVolume",
-          "test/compat/runh2c_test.go:89 TestGcloudRunDeployUseHTTP2",
+          "test/compat/runh2c_test.go:90 TestGcloudRunDeployUseHTTP2",
           "test/compat/runnfstools_test.go:23 TestGcloudRunDeployNFSVolume",
           "test/compat/runv1_test.go:59 TestRunV1KnativeAPI",
           "test/compat/runvolumes_test.go:167 TestRunV1VolumesProbesAndServiceAccount",
@@ -2748,7 +2765,7 @@
         "method": "run.projects.authorizeddomains.list",
         "status": "Verified",
         "tests": [
-          "test/compat/runv1global_test.go:323 TestGcloudRunDomainMappings"
+          "test/compat/runv1global_test.go:329 TestGcloudRunDomainMappings"
         ]
       },
       {
@@ -3330,6 +3347,7 @@
           "test/compat/kms_deletering_test.go:132 TestGcloudKMSDeleteKeyRing",
           "test/compat/kms_deletering_test.go:34 TestKMSDeleteKeyRing",
           "test/compat/kms_test.go:47 TestKMSResources",
+          "test/compat/orgpolicy1890_test.go:392 TestOrgPolicyEnforcementKMSLocations",
           "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
         ],
         "unverified": [
@@ -3351,6 +3369,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/Decrypt",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcement1879_test.go:224 TestIAMEnforcementKMS",
           "test/compat/kms_external_test.go:39 TestKMSExternalKeys",
           "test/compat/kms_hsm_ekm_autokey_test.go:54 TestKMSHSMKeysAndKeyAccessJustifications",
           "test/compat/kms_test.go:630 TestKMSDecrypt",
@@ -3457,6 +3476,8 @@
         "method": "google.cloud.kms.v1.KeyManagementService/Encrypt",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcement1879_test.go:224 TestIAMEnforcementKMS",
+          "test/compat/iamenforcement1879_test.go:499 TestIAMEnforcementJSON",
           "test/compat/kms1577_test.go:34 TestKMSDefaultKeyAccessJustificationsPolicies",
           "test/compat/kms_external_test.go:39 TestKMSExternalKeys",
           "test/compat/kms_hsm_ekm_autokey_test.go:54 TestKMSHSMKeysAndKeyAccessJustifications",
@@ -3521,6 +3542,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/GetCryptoKey",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcement1879_test.go:224 TestIAMEnforcementKMS",
           "test/compat/kms1577_test.go:34 TestKMSDefaultKeyAccessJustificationsPolicies",
           "test/compat/kms_rotation_test.go:33 TestKMSRotationSchedule",
           "test/compat/kms_test.go:202 TestKMSNamesAreValidatedBeforeLookup",
@@ -3980,6 +4002,7 @@
           "test/compat/consolepermissions_test.go:258 TestConsolePermissionsOnAKeyRingAndKey",
           "test/compat/consolepermissions_test.go:294 TestConsolePermissionsOnAnEkmConnection",
           "test/compat/iamconditions1745_test.go:81 TestIAMConditionsOnServicePolicies",
+          "test/compat/iamenforcementpubsub1879_test.go:59 TestIAMEnforcementPubSub",
           "test/compat/kms_ekm_iam_test.go:31 TestKMSEkmIamPolicyIsStoredNotEnforced",
           "test/compat/kms_iam_test.go:35 TestKMSIamPolicyIsStoredNotEnforced",
           "test/compat/terraform_batch11_test.go:698 TestTerraformKMSDataSourcesBatch11",
@@ -4011,8 +4034,10 @@
           "test/compat/consolepermissions_test.go:258 TestConsolePermissionsOnAKeyRingAndKey",
           "test/compat/consolepermissions_test.go:294 TestConsolePermissionsOnAnEkmConnection",
           "test/compat/iamconditions1745_test.go:81 TestIAMConditionsOnServicePolicies",
+          "test/compat/iamenforcementpubsub1879_test.go:59 TestIAMEnforcementPubSub",
           "test/compat/kms_ekm_iam_test.go:31 TestKMSEkmIamPolicyIsStoredNotEnforced",
           "test/compat/kms_iam_test.go:35 TestKMSIamPolicyIsStoredNotEnforced",
+          "test/compat/orgpolicylocations1890_test.go:49 TestOrgPolicyEnforcementPubSub",
           "test/compat/terraform_batch9_test.go:127 TestTerraformCloudFunctions2FunctionIAM",
           "test/compat/terraform_iam_more_test.go:119 TestTerraformKMSStoredIAM"
         ],
@@ -4035,6 +4060,7 @@
         "tests": [
           "test/compat/consolepermissions_test.go:258 TestConsolePermissionsOnAKeyRingAndKey",
           "test/compat/consolepermissions_test.go:294 TestConsolePermissionsOnAnEkmConnection",
+          "test/compat/iamenforcementpubsub1879_test.go:59 TestIAMEnforcementPubSub",
           "test/compat/kms_ekm_iam_test.go:31 TestKMSEkmIamPolicyIsStoredNotEnforced",
           "test/compat/kms_iam_test.go:35 TestKMSIamPolicyIsStoredNotEnforced"
         ]
@@ -4043,11 +4069,98 @@
   },
   {
     "Key": "iam",
-    "Title": "IAM (custom roles, service accounts)",
+    "Title": "IAM (custom roles, service accounts, deny policies, organization policies)",
     "counts": {
-      "Verified": 31
+      "Verified": 48
     },
     "rows": [
+      {
+        "method": "google.cloud.orgpolicy.v2.OrgPolicy/CreateCustomConstraint",
+        "status": "Verified",
+        "tests": [
+          "test/compat/orgpolicy1890_test.go:101 TestOrgPolicyV2",
+          "test/compat/orgpolicycustom1891_test.go:319 TestOrgPolicyCustomConstraintRefusals",
+          "test/compat/orgpolicycustom1891_test.go:85 TestOrgPolicyCustomConstraintsStorage"
+        ]
+      },
+      {
+        "method": "google.cloud.orgpolicy.v2.OrgPolicy/CreatePolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/orgpolicy1890_test.go:101 TestOrgPolicyV2"
+        ]
+      },
+      {
+        "method": "google.cloud.orgpolicy.v2.OrgPolicy/DeleteCustomConstraint",
+        "status": "Verified",
+        "tests": [
+          "test/compat/orgpolicy1890_test.go:101 TestOrgPolicyV2",
+          "test/compat/orgpolicycustom1891_test.go:85 TestOrgPolicyCustomConstraintsStorage"
+        ]
+      },
+      {
+        "method": "google.cloud.orgpolicy.v2.OrgPolicy/DeletePolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/orgpolicy1890_test.go:101 TestOrgPolicyV2"
+        ]
+      },
+      {
+        "method": "google.cloud.orgpolicy.v2.OrgPolicy/GetCustomConstraint",
+        "status": "Verified",
+        "tests": [
+          "test/compat/orgpolicy1890_test.go:101 TestOrgPolicyV2"
+        ]
+      },
+      {
+        "method": "google.cloud.orgpolicy.v2.OrgPolicy/GetEffectivePolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/orgpolicy1890_test.go:101 TestOrgPolicyV2"
+        ]
+      },
+      {
+        "method": "google.cloud.orgpolicy.v2.OrgPolicy/GetPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/orgpolicy1890_test.go:101 TestOrgPolicyV2"
+        ]
+      },
+      {
+        "method": "google.cloud.orgpolicy.v2.OrgPolicy/ListConstraints",
+        "status": "Verified",
+        "tests": [
+          "test/compat/orgpolicy1890_test.go:101 TestOrgPolicyV2"
+        ]
+      },
+      {
+        "method": "google.cloud.orgpolicy.v2.OrgPolicy/ListCustomConstraints",
+        "status": "Verified",
+        "tests": [
+          "test/compat/orgpolicy1890_test.go:101 TestOrgPolicyV2"
+        ]
+      },
+      {
+        "method": "google.cloud.orgpolicy.v2.OrgPolicy/ListPolicies",
+        "status": "Verified",
+        "tests": [
+          "test/compat/orgpolicy1890_test.go:101 TestOrgPolicyV2"
+        ]
+      },
+      {
+        "method": "google.cloud.orgpolicy.v2.OrgPolicy/UpdateCustomConstraint",
+        "status": "Verified",
+        "tests": [
+          "test/compat/orgpolicy1890_test.go:101 TestOrgPolicyV2"
+        ]
+      },
+      {
+        "method": "google.cloud.orgpolicy.v2.OrgPolicy/UpdatePolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/orgpolicy1890_test.go:101 TestOrgPolicyV2"
+        ]
+      },
       {
         "method": "google.iam.admin.v1.IAM/CreateRole",
         "status": "Verified",
@@ -4060,7 +4173,9 @@
         "method": "google.iam.admin.v1.IAM/CreateServiceAccount",
         "status": "Verified",
         "tests": [
-          "test/compat/iamserviceaccounts1747_test.go:133 TestIAMServiceAccounts"
+          "test/compat/iamserviceaccounts1747_test.go:133 TestIAMServiceAccounts",
+          "test/compat/orgpolicy1890_test.go:269 TestOrgPolicyEnforcementIAM",
+          "test/compat/orgpolicycustom1891_test.go:156 TestOrgPolicyCustomConstraintsIAM"
         ],
         "unverified": [
           {
@@ -4075,6 +4190,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/iamserviceaccounts1747_test.go:256 TestIAMServiceAccountKeys",
+          "test/compat/orgpolicy1890_test.go:269 TestOrgPolicyEnforcementIAM",
+          "test/compat/orgpolicycustom1891_test.go:156 TestOrgPolicyCustomConstraintsIAM",
           "test/compat/storagesignediam_test.go:32 TestStorageSignedURLIAMServiceAccount"
         ],
         "unverified": [
@@ -4205,7 +4322,8 @@
         "method": "google.iam.admin.v1.IAM/PatchServiceAccount",
         "status": "Verified",
         "tests": [
-          "test/compat/iamserviceaccounts1747_test.go:133 TestIAMServiceAccounts"
+          "test/compat/iamserviceaccounts1747_test.go:133 TestIAMServiceAccounts",
+          "test/compat/orgpolicycustom1891_test.go:156 TestOrgPolicyCustomConstraintsIAM"
         ],
         "unverified": [
           {
@@ -4309,6 +4427,41 @@
         "status": "Verified",
         "tests": [
           "test/compat/iamserviceaccounts1747_test.go:256 TestIAMServiceAccountKeys"
+        ]
+      },
+      {
+        "method": "google.iam.v2.Policies/CreatePolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamdenypolicies1886_test.go:50 TestIAMEnforcementDenyPolicies"
+        ]
+      },
+      {
+        "method": "google.iam.v2.Policies/DeletePolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamdenypolicies1886_test.go:50 TestIAMEnforcementDenyPolicies"
+        ]
+      },
+      {
+        "method": "google.iam.v2.Policies/GetPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamdenypolicies1886_test.go:50 TestIAMEnforcementDenyPolicies"
+        ]
+      },
+      {
+        "method": "google.iam.v2.Policies/ListPolicies",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamdenypolicies1886_test.go:50 TestIAMEnforcementDenyPolicies"
+        ]
+      },
+      {
+        "method": "google.iam.v2.Policies/UpdatePolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamdenypolicies1886_test.go:50 TestIAMEnforcementDenyPolicies"
         ]
       }
     ]
@@ -4538,6 +4691,7 @@
         "tests": [
           "test/compat/bigquerymlremoteiam_test.go:164 TestBigQueryMLRemoteConnectionPermissions",
           "test/compat/iamconditions1745_test.go:135 TestIAMConditionAttributes",
+          "test/compat/orgpolicy1890_test.go:269 TestOrgPolicyEnforcementIAM",
           "test/compat/resourcemanageriam_test.go:276 TestConsoleProjectIAM",
           "test/compat/resourcemanageriam_test.go:70 TestResourceManagerProjectIAM",
           "test/compat/resourcemanageriamconditions1742_test.go:29 TestResourceManagerIAMConditions",
@@ -6744,6 +6898,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
+          "test/compat/orgpolicycustom1891_test.go:211 TestOrgPolicyCustomConstraintsPubSub",
+          "test/compat/orgpolicylocations1890_test.go:49 TestOrgPolicyEnforcementPubSub",
           "test/compat/pubsub_test.go:65 TestPubSubTopicLifecycle",
           "test/compat/pubsubfronth2c_test.go:27 TestPubSubRESTOverH2CPriorKnowledge",
           "test/compat/pubsubiam_test.go:269 TestTerraformPubSubIAM",
@@ -6770,6 +6926,7 @@
         "method": "google.pubsub.v1.Publisher/DetachSubscription",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcementpubsub1887_test.go:41 TestIAMEnforcementPubSubRESTAndSchemas",
           "test/compat/pubsubadmin_test.go:234 TestPubSubDetachSubscription",
           "test/compat/pubsubdetached_test.go:33 TestPubSubDetachedSubscriptionCalls",
           "test/compat/pubsubprotobuf_test.go:260 TestGcloudPubSubDetachAndProtobufSchemas",
@@ -6780,6 +6937,7 @@
         "method": "google.pubsub.v1.Publisher/GetTopic",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcementpubsub1879_test.go:59 TestIAMEnforcementPubSub",
           "test/compat/pubsub_test.go:65 TestPubSubTopicLifecycle",
           "test/compat/pubsubfronth2c_test.go:89 TestPubSubRESTOverH2CUpgrade",
           "test/compat/pubsubiam_test.go:269 TestTerraformPubSubIAM",
@@ -6812,6 +6970,7 @@
         "tests": [
           "test/compat/frontloopback_test.go:33 TestEmulatorsBehindAFrontRefuseOtherPods",
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
+          "test/compat/iamenforcementpubsub1879_test.go:59 TestIAMEnforcementPubSub",
           "test/compat/pubsub_test.go:242 TestPubSubListTopicsAndSubscriptions",
           "test/compat/pubsubfronth2c_test.go:89 TestPubSubRESTOverH2CUpgrade",
           "test/compat/pubsublabels_test.go:32 TestPubSubUpdateLabels"
@@ -6822,6 +6981,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
+          "test/compat/iamenforcementpubsub1879_test.go:59 TestIAMEnforcementPubSub",
           "test/compat/pubsub_test.go:90 TestPubSubPublishAndPull",
           "test/compat/pubsubprotobuf_test.go:141 TestPubSubProtobufSchemaTopic",
           "test/compat/pubsubresetseed_test.go:85 TestPubSubSeedSchemaAndBoundTopic",
@@ -6832,6 +6992,7 @@
         "method": "google.pubsub.v1.Publisher/UpdateTopic",
         "status": "Verified",
         "tests": [
+          "test/compat/orgpolicycustom1891_test.go:211 TestOrgPolicyCustomConstraintsPubSub",
           "test/compat/pubsubadmin_test.go:73 TestPubSubUpdateTopic",
           "test/compat/pubsublabels_test.go:144 TestPubSubLabelsAreHeldToGoogleRules",
           "test/compat/pubsublabels_test.go:32 TestPubSubUpdateLabels",
@@ -6855,6 +7016,7 @@
         "method": "google.pubsub.v1.SchemaService/CreateSchema",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcementpubsub1887_test.go:41 TestIAMEnforcementPubSubRESTAndSchemas",
           "test/compat/pubsubadmin_test.go:320 TestPubSubSchemaService",
           "test/compat/pubsubfollowups_test.go:326 TestPubSubStateSaveAndLoad",
           "test/compat/pubsubiam_test.go:269 TestTerraformPubSubIAM",
@@ -6870,6 +7032,7 @@
         "method": "google.pubsub.v1.SchemaService/DeleteSchema",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcementpubsub1887_test.go:41 TestIAMEnforcementPubSubRESTAndSchemas",
           "test/compat/pubsubadmin_test.go:320 TestPubSubSchemaService",
           "test/compat/pubsubiam_test.go:269 TestTerraformPubSubIAM",
           "test/compat/pubsubprotobuf_test.go:260 TestGcloudPubSubDetachAndProtobufSchemas",
@@ -6890,6 +7053,7 @@
         "method": "google.pubsub.v1.SchemaService/GetSchema",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcementpubsub1887_test.go:41 TestIAMEnforcementPubSubRESTAndSchemas",
           "test/compat/pubsubadmin_test.go:320 TestPubSubSchemaService",
           "test/compat/pubsubiam_test.go:269 TestTerraformPubSubIAM",
           "test/compat/pubsubprotobuf_test.go:260 TestGcloudPubSubDetachAndProtobufSchemas",
@@ -6946,6 +7110,7 @@
         "method": "google.pubsub.v1.SchemaService/ValidateSchema",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcementpubsub1887_test.go:41 TestIAMEnforcementPubSubRESTAndSchemas",
           "test/compat/pubsubadmin_test.go:320 TestPubSubSchemaService",
           "test/compat/pubsubprotobuf_test.go:260 TestGcloudPubSubDetachAndProtobufSchemas",
           "test/compat/pubsubprotobuf_test.go:38 TestPubSubProtobufSchemaService"
@@ -6956,6 +7121,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
+          "test/compat/iamenforcementpubsub1879_test.go:59 TestIAMEnforcementPubSub",
           "test/compat/pubsub_test.go:90 TestPubSubPublishAndPull",
           "test/compat/pubsubdetached_test.go:33 TestPubSubDetachedSubscriptionCalls",
           "test/compat/pubsubexpiration_test.go:210 TestPubSubExactlyOnceDelivery",
@@ -6966,6 +7132,7 @@
         "method": "google.pubsub.v1.Subscriber/CreateSnapshot",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcementpubsub1879_test.go:59 TestIAMEnforcementPubSub",
           "test/compat/pubsubdetached_test.go:33 TestPubSubDetachedSubscriptionCalls",
           "test/compat/pubsubfollowups_test.go:326 TestPubSubStateSaveAndLoad",
           "test/compat/pubsubprotobuf_test.go:260 TestGcloudPubSubDetachAndProtobufSchemas",
@@ -6978,6 +7145,7 @@
         "tests": [
           "test/compat/consolepubsubidle_test.go:35 TestConsolePubSubIdleTimeAndPushAttributes",
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
+          "test/compat/orgpolicycustom1891_test.go:211 TestOrgPolicyCustomConstraintsPubSub",
           "test/compat/pubsub_test.go:90 TestPubSubPublishAndPull",
           "test/compat/pubsubexpiration_test.go:164 TestPubSubRefusesAnExpirationGoogleRefuses",
           "test/compat/pubsubexpiration_test.go:340 TestPubSubRESTSubscriptionExpiresWhenIdle",
@@ -7111,6 +7279,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
+          "test/compat/iamenforcementpubsub1879_test.go:59 TestIAMEnforcementPubSub",
           "test/compat/pubsub_test.go:90 TestPubSubPublishAndPull",
           "test/compat/pubsubexpiration_test.go:210 TestPubSubExactlyOnceDelivery",
           "test/compat/pubsubexpiration_test.go:340 TestPubSubRESTSubscriptionExpiresWhenIdle",
@@ -7121,6 +7290,7 @@
         "method": "google.pubsub.v1.Subscriber/Seek",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcementpubsub1879_test.go:59 TestIAMEnforcementPubSub",
           "test/compat/pubsubdetached_test.go:33 TestPubSubDetachedSubscriptionCalls",
           "test/compat/pubsubprotobuf_test.go:260 TestGcloudPubSubDetachAndProtobufSchemas",
           "test/compat/remaining_test.go:423 TestSnapshotsAndSeekAreSupported"
@@ -7130,6 +7300,7 @@
         "method": "google.pubsub.v1.Subscriber/StreamingPull",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcementpubsub1879_test.go:59 TestIAMEnforcementPubSub",
           "test/compat/pubsub_test.go:137 TestPubSubStreamingPull",
           "test/compat/pubsubexpiration_test.go:210 TestPubSubExactlyOnceDelivery"
         ]
@@ -7472,6 +7643,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolepermissions_test.go:326 TestConsolePermissionsOnABucket",
+          "test/compat/iamenforcementstorage1879_test.go:102 TestIAMEnforcementStorage",
           "test/compat/storageiam_test.go:34 TestStorageBucketIAMRoundTrip",
           "test/compat/storageiam_test.go:94 TestStorageBucketIAMConditions",
           "test/compat/terraform_batch9_test.go:77 TestTerraformStorageBucketIAM",
@@ -7483,13 +7655,16 @@
         "method": "storage.buckets.getStorageLayout",
         "status": "Verified",
         "tests": [
-          "test/compat/gcloudstorage_test.go:163 TestGcloudStorageParallelCompositeUpload"
+          "test/compat/gcloudstorage_test.go:163 TestGcloudStorageParallelCompositeUpload",
+          "test/compat/iamenforcementstorage1887_test.go:92 TestIAMEnforcementStorageSignersAndBatch"
         ]
       },
       {
         "method": "storage.buckets.insert",
         "status": "Verified",
         "tests": [
+          "test/compat/orgpolicy1890_test.go:334 TestOrgPolicyEnforcementStorage",
+          "test/compat/orgpolicycustom1891_test.go:85 TestOrgPolicyCustomConstraintsStorage",
           "test/compat/storage_test.go:65 TestStorageBucketLifecycle",
           "test/compat/storageacl_test.go:128 TestStoragePredefinedACL",
           "test/compat/storagebucketfields_test.go:21 TestStorageBucketLabelsAndStorageClassRoundTrip",
@@ -7584,6 +7759,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudstorage_test.go:238 TestGcloudStorageClearLabels",
+          "test/compat/orgpolicy1890_test.go:334 TestOrgPolicyEnforcementStorage",
+          "test/compat/orgpolicycustom1891_test.go:85 TestOrgPolicyCustomConstraintsStorage",
           "test/compat/remaining_test.go:33 TestBucketUpdateChangesMetadata",
           "test/compat/storage_test.go:442 TestStorageBucketPatchKeepsOmittedFields",
           "test/compat/storage_test.go:474 TestStorageBucketMetagenerationPreconditions",
@@ -7654,6 +7831,8 @@
         "tests": [
           "test/compat/consolepermissions_test.go:326 TestConsolePermissionsOnABucket",
           "test/compat/iamconditions1745_test.go:197 TestConsoleIAMConditionsOnServicePolicies",
+          "test/compat/iamenforcementstorage1879_test.go:102 TestIAMEnforcementStorage",
+          "test/compat/orgpolicy1890_test.go:334 TestOrgPolicyEnforcementStorage",
           "test/compat/storageiam_test.go:34 TestStorageBucketIAMRoundTrip",
           "test/compat/storageiam_test.go:63 TestStorageBucketIAMStaleEtag",
           "test/compat/storageiam_test.go:94 TestStorageBucketIAMConditions",
@@ -7684,6 +7863,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolepermissions_test.go:326 TestConsolePermissionsOnABucket",
+          "test/compat/iamenforcementstorage1879_test.go:102 TestIAMEnforcementStorage",
           "test/compat/storageiam_test.go:34 TestStorageBucketIAMRoundTrip"
         ]
       },
@@ -7979,6 +8159,7 @@
         "method": "storage.objectAccessControls.insert",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcementstorage1879_test.go:102 TestIAMEnforcementStorage",
           "test/compat/storageacl_test.go:217 TestStorageACLMethods",
           "test/compat/terraform_iam_more_test.go:169 TestTerraformStorageACLLists",
           "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
@@ -8052,6 +8233,7 @@
         "tests": [
           "test/compat/cloudbuilddefaultlogs_test.go:132 TestGcloudBuildsSubmitDefaultLogsBucket",
           "test/compat/cloudbuilddefaultlogs_test.go:47 TestCloudBuildDefaultLogsBucket",
+          "test/compat/iamenforcementstorage1879_test.go:102 TestIAMEnforcementStorage",
           "test/compat/storage_test.go:92 TestStorageObjectRoundTrip",
           "test/compat/storagegrpccsek_test.go:28 TestStorageCSEKParity",
           "test/compat/storagesoftdelete_test.go:59 TestStorageSoftDeleteAndRestore",
@@ -8080,6 +8262,7 @@
         "method": "storage.objects.insert",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcementstorage1879_test.go:102 TestIAMEnforcementStorage",
           "test/compat/storage_test.go:92 TestStorageObjectRoundTrip",
           "test/compat/storageacl_test.go:128 TestStoragePredefinedACL",
           "test/compat/storagecontexts_test.go:37 TestStorageObjectContexts",
@@ -8100,6 +8283,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudbuilddefaultlogs_test.go:47 TestCloudBuildDefaultLogsBucket",
+          "test/compat/iamenforcementstorage1879_test.go:102 TestIAMEnforcementStorage",
           "test/compat/storage_test.go:136 TestStorageListWithPrefix",
           "test/compat/storagechannels_test.go:177 TestStorageObjectChangeChannelSelection",
           "test/compat/storagecontexts_test.go:224 TestGcloudStorageObjectContexts",
@@ -8249,6 +8433,7 @@
         "method": "storage.projects.serviceAccount.get",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcementstorage1887_test.go:92 TestIAMEnforcementStorageSignersAndBatch",
           "test/compat/storagehmac_test.go:33 TestStorageHMACKeyLifecycle",
           "test/compat/terraform_batch10_test.go:164 TestTerraformDataSourcesBatch10"
         ]
@@ -8442,6 +8627,7 @@
         "method": "google.storage.v2.Storage/ReadObject",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcementstorage1879_test.go:102 TestIAMEnforcementStorage",
           "test/compat/storagegrpc_test.go:153 TestStorageGRPCObjects",
           "test/compat/storagegrpccsek_test.go:28 TestStorageCSEKParity",
           "test/compat/storagegrpcread_test.go:31 TestStorageGRPCReadObjectMessagesHandleAndRange"
@@ -8757,7 +8943,9 @@
           "test/compat/firestoreadmin_test.go:47 TestFirestoreAdminDatabases",
           "test/compat/firestorepersist1615_test.go:120 TestFirestoreRestartSetup",
           "test/compat/firestorepersist1615_test.go:64 TestFirestoreSurvivesAPodRestart",
-          "test/compat/groupmembers1812_test.go:99 TestFirestoreMongoDBGroupMember1812"
+          "test/compat/groupmembers1812_test.go:99 TestFirestoreMongoDBGroupMember1812",
+          "test/compat/orgpolicycustom1891_test.go:482 TestOrgPolicyCustomConstraintsFirestore",
+          "test/compat/orgpolicylocations1890_test.go:103 TestOrgPolicyEnforcementFirestore"
         ]
       },
       {
@@ -8972,7 +9160,8 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/UpdateDatabase",
         "status": "Verified",
         "tests": [
-          "test/compat/firestoreadmin_test.go:47 TestFirestoreAdminDatabases"
+          "test/compat/firestoreadmin_test.go:47 TestFirestoreAdminDatabases",
+          "test/compat/orgpolicycustom1891_test.go:482 TestOrgPolicyCustomConstraintsFirestore"
         ]
       },
       {
@@ -9079,14 +9268,16 @@
         "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/CreateCluster",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtableinstances_test.go:44 TestBigtableInstancesAndClusters"
+          "test/compat/bigtableinstances_test.go:44 TestBigtableInstancesAndClusters",
+          "test/compat/orgpolicycustom1891_test.go:394 TestOrgPolicyEnforcementBigtableLocations"
         ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/CreateInstance",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtableinstances_test.go:44 TestBigtableInstancesAndClusters"
+          "test/compat/bigtableinstances_test.go:44 TestBigtableInstancesAndClusters",
+          "test/compat/orgpolicycustom1891_test.go:394 TestOrgPolicyEnforcementBigtableLocations"
         ]
       },
       {
@@ -9962,6 +10153,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/optional_test.go:264 TestSpannerSchemaAndQuery",
+          "test/compat/orgpolicylocations1890_test.go:83 TestOrgPolicyEnforcementSpanner",
           "test/compat/spanner_test.go:104 TestSpannerReadWriteTransactionIsAtomic",
           "test/compat/spanner_test.go:202 TestSpannerDatabasesAreIsolated"
         ]
@@ -10330,6 +10522,7 @@
           "test/compat/bigqueryrestart_test.go:50 TestBigQueryEmulatorRestartsPromptly",
           "test/compat/bigquerytimes_test.go:22 TestBigQueryResourceTimesInMilliseconds",
           "test/compat/bigquerytimezonecolumns_test.go:27 TestBigQueryDefaultTimeZoneOfColumns",
+          "test/compat/orgpolicylocations1890_test.go:118 TestOrgPolicyEnforcementBigQuery",
           "test/compat/terraform_batch6_test.go:318 TestTerraformBigQueryDatasetCMEK",
           "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess",
           "test/compat/terraform_bigquery_tables_test.go:24 TestTerraformBigQueryPartitionedTableAndJob",
@@ -10460,8 +10653,8 @@
           "test/compat/bqcopysnapshot_test.go:25 TestBqCopySnapshotCloneAndRestore",
           "test/compat/bqscript_test.go:17 TestBqRunsAScriptWithControlFlow",
           "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory",
-          "test/compat/consolebigqueryloadfile_test.go:200 TestConsoleBigQueryJobPageShowsDMLRows",
-          "test/compat/consolebigqueryloadfile_test.go:90 TestConsoleBigQueryLoadFromAFile",
+          "test/compat/consolebigqueryloadfile_test.go:207 TestConsoleBigQueryJobPageShowsDMLRows",
+          "test/compat/consolebigqueryloadfile_test.go:97 TestConsoleBigQueryLoadFromAFile",
           "test/compat/consolebigqueryorc_test.go:17 TestConsoleBigQueryLoadORCThroughTheForm",
           "test/compat/terraform_bigquery_tables_test.go:24 TestTerraformBigQueryPartitionedTableAndJob"
         ]
@@ -10704,7 +10897,7 @@
           "test/compat/bqcopysnapshot_test.go:25 TestBqCopySnapshotCloneAndRestore",
           "test/compat/bqscript_test.go:17 TestBqRunsAScriptWithControlFlow",
           "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory",
-          "test/compat/consolebigqueryloadfile_test.go:90 TestConsoleBigQueryLoadFromAFile",
+          "test/compat/consolebigqueryloadfile_test.go:97 TestConsoleBigQueryLoadFromAFile",
           "test/compat/consolebigqueryorc_test.go:17 TestConsoleBigQueryLoadORCThroughTheForm",
           "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
           "test/compat/logginganalyticsviews_test.go:188 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
@@ -10979,7 +11172,8 @@
           "test/compat/consolebigquerywrites_test.go:398 TestConsoleBigQueryReadWriteEditorRunsDML",
           "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
           "test/compat/logginganalyticsviews_test.go:188 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
-          "test/compat/logginganalyticsviews_test.go:266 TestLoggingLinkedDatasetAcrossRestarts"
+          "test/compat/logginganalyticsviews_test.go:266 TestLoggingLinkedDatasetAcrossRestarts",
+          "test/compat/orgpolicycustom1891_test.go:435 TestOrgPolicyEnforcementBigQueryDDL"
         ]
       },
       {

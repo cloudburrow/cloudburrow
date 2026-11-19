@@ -107,6 +107,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/calllog"
 	"github.com/cloudburrow/cloudburrow/internal/frontready"
 	"github.com/cloudburrow/cloudburrow/internal/grpchttp"
+	"github.com/cloudburrow/cloudburrow/internal/iamcheck"
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 )
 
@@ -185,6 +186,9 @@ type subState struct {
 // Front proxies to the emulator and expires idle subscriptions.
 type Front struct {
 	upstream *grpc.ClientConn
+	// iamCheck is the host's evaluator, nil unless `up
+	// --iam-enforcement=on` (enforce.go, #1879).
+	iamCheck *iamcheck.Client
 	// rest is the emulator's address for its REST API, which it serves on
 	// the same port as gRPC.
 	rest   string
@@ -701,6 +705,11 @@ func (f *Front) handle(_ any, ss grpc.ServerStream) (err error) {
 	if err := f.waitServing(ss.Context()); err != nil {
 		return err
 	}
+	// IAM enforcement checks the call before anything serves it
+	// (enforce.go, #1879).
+	if ss, err = f.enforce(ss, method); err != nil {
+		return err
+	}
 	if kind, _ := mutationTarget(method, nil); kind != "" {
 		// A call that changes a definition: the front keeps it as the
 		// emulator then holds it (restore.go, #1608).
@@ -758,6 +767,19 @@ func (f *Front) handle(_ any, ss grpc.ServerStream) (err error) {
 	if method == subscriber+"UpdateSubscription" || method == publisher+"UpdateTopic" {
 		return f.handleUpdate(ctx, ss, method)
 	}
+	if method == publisher+"CreateTopic" {
+		// gcp.resourceLocations on the message storage policy (#1890,
+		// orgpolicy.go).
+		if ss, err = checkCreateTopic(ctx, ss); err != nil {
+			return err
+		}
+	}
+	if method == subscriber+"CreateSubscription" {
+		// Custom constraints (#1891, custom.go).
+		if ss, err = checkCreateSubscription(ctx, ss); err != nil {
+			return err
+		}
+	}
 	cs, err := f.upstream.NewStream(ctx, &grpc.StreamDesc{ServerStreams: true, ClientStreams: true}, method,
 		grpc.ForceCodec(rawCodec{}))
 	if err != nil {
@@ -795,6 +817,16 @@ func (f *Front) handleUpdate(ctx context.Context, ss grpc.ServerStream, method s
 	var in frame
 	if err := ss.RecvMsg(&in); err != nil {
 		return err
+	}
+	// Custom constraints first (#1891, custom.go).
+	if err := f.customGRPCUpdate(ctx, method, in); err != nil {
+		return err
+	}
+	if method == publisher+"UpdateTopic" {
+		// gcp.resourceLocations (#1890, orgpolicy.go).
+		if err := checkUpdateTopic(ctx, in); err != nil {
+			return err
+		}
 	}
 	call := &observed{f: f, method: method}
 	out, err := call.request(in)
@@ -1523,6 +1555,9 @@ func (r *replayStream) RecvMsg(m any) error {
 	r.done = true
 	fr, ok := m.(*frame)
 	if !ok {
+		if pm, isProto := m.(proto.Message); isProto {
+			return proto.Unmarshal(r.first, pm)
+		}
 		return r.ServerStream.RecvMsg(m)
 	}
 	*fr = append((*fr)[:0], r.first...)

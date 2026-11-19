@@ -291,3 +291,38 @@ func bigEndian(v int) []byte {
 	}
 	return out
 }
+
+// IDTokenClaims verifies an ID token this instance signed (MintIDToken,
+// MintIDTokenFor, IAM Credentials' generateIdToken, the metadata server's
+// identity endpoint) and is its email and audience; ok is false for one it
+// did not sign, one that has expired, or one with no email (#1879: Cloud
+// Run's invoke check names the caller by it).
+func (c *Credentials) IDTokenClaims(tok string, now time.Time) (email, audience string, ok bool) {
+	parts := strings.Split(tok, ".")
+	if len(parts) != 3 {
+		return "", "", false
+	}
+	sig, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil {
+		return "", "", false
+	}
+	sum := sha256.Sum256([]byte(parts[0] + "." + parts[1]))
+	if rsa.VerifyPKCS1v15(&c.PrivateKey.PublicKey, cryptoSHA256, sum[:], sig) != nil {
+		return "", "", false
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return "", "", false
+	}
+	var claims struct {
+		Iss   string `json:"iss"`
+		Aud   string `json:"aud"`
+		Email string `json:"email"`
+		Exp   int64  `json:"exp"`
+	}
+	if json.Unmarshal(payload, &claims) != nil || claims.Email == "" || claims.Aud == "" ||
+		claims.Iss != "https://accounts.google.com" || now.Unix() >= claims.Exp {
+		return "", "", false
+	}
+	return claims.Email, claims.Aud, true
+}

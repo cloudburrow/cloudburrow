@@ -54,6 +54,10 @@ type LifecycleComponent struct {
 	// kms is Cloud KMS's in-cluster address, through cloudburrow-host,
 	// or "" (#1874).
 	kms string
+	// iamCheck is whether the in-cluster servers ask the host's evaluator,
+	// at resourceManager's address, before serving (up
+	// --iam-enforcement=on, #1879).
+	iamCheck bool
 	// onnxRunner is the ONNX runner's in-cluster address (host:port),
 	// which BigQuery's front runs imported ONNX models on (#1711), or "".
 	onnxRunner string
@@ -117,6 +121,20 @@ func (c *LifecycleComponent) SetKMS(addr string) { c.kms = addr }
 // SetResourceManager records Resource Manager's in-cluster address, for
 // BigQuery's front (#1392) and the storage server (#1532).
 func (c *LifecycleComponent) SetResourceManager(addr string) { c.resourceManager = addr }
+
+// invokeAuthz is the address Kourier asks before routing a request to a
+// Cloud Run service (run.routes.invoke, #1879), "" when enforcement is off.
+func (c *LifecycleComponent) invokeAuthz() string {
+	if !c.iamCheck || c.resourceManager == "" {
+		return ""
+	}
+	return c.resourceManager
+}
+
+// SetIAMCheck makes the storage server and Pub/Sub's front check each
+// request with the host's evaluator, at Resource Manager's in-cluster
+// address (#1879).
+func (c *LifecycleComponent) SetIAMCheck(on bool) { c.iamCheck = on }
 
 // SetStoragePublic records the address clients reach Cloud Storage at
 // (http://host:port), which BigQuery's signed URLs name (#1786): the
@@ -227,6 +245,18 @@ func (c *LifecycleComponent) Backends() []Backend {
 				args = append(args, "--kms", "http://"+c.kms)
 			}
 			b.Front.Args = args
+			// Organization policies (#1890) are asked of the host whatever
+			// --iam-enforcement, through cloudburrow-host.
+			if c.resourceManager != "" && b.Front != nil {
+				b.Front.Args = append(append([]string{}, b.Front.Args...), "--resourcemanager", "http://"+c.resourceManager)
+				b.EgressPorts = c.withResourceManagerPort(b.EgressPorts)
+			}
+			// IAM enforcement asks the host's one evaluator, through
+			// cloudburrow-host (#1879).
+			if c.iamCheck && c.resourceManager != "" && b.Front != nil {
+				b.Front.Args = append(append([]string{}, b.Front.Args...), "--iam-check", "http://"+c.resourceManager)
+				b.EgressPorts = c.withResourceManagerPort(b.EgressPorts)
+			}
 			out = append(out, b)
 		default:
 			// The Google emulators serve any project, so the name they are
@@ -258,6 +288,15 @@ func (c *LifecycleComponent) Backends() []Backend {
 					}
 					env[FirestoreMongoTLSCertEnv], env[FirestoreMongoTLSKeyEnv] = c.mongoCert, c.mongoKey
 					b.Front.Env = env
+				}
+				// Firestore's databases and Spanner's instances are
+				// created where gcp.resourceLocations allows, and these
+				// fronts' setIamPolicy refuses members
+				// iam.allowedPolicyMemberDomains does not permit (#1890):
+				// the fronts ask the host, through cloudburrow-host.
+				if (s == config.ServiceFirestore || s == config.ServiceSpanner || s == config.ServiceBigtable) && c.resourceManager != "" && b.Front != nil {
+					b.Front.Args = append(append([]string{}, b.Front.Args...), "--resourcemanager", "http://"+c.resourceManager)
+					b.EgressPorts = c.withResourceManagerPort(b.EgressPorts)
 				}
 				if s == config.ServiceFirestore && c.enabled(config.ServiceStorage) {
 					b.Front.Args = append(append([]string{}, b.Front.Args...), "--storage", "http://"+InClusterBuiltinStorageHost(c.installer.Namespace))
@@ -334,6 +373,10 @@ func (c *LifecycleComponent) Backends() []Backend {
 			// folders of Resource Manager, through cloudburrow-host (#1532).
 			if c.resourceManager != "" {
 				b.Args = append(b.Args, "--resourcemanager", "http://"+c.resourceManager)
+				// IAM enforcement asks the host's one evaluator (#1879).
+				if c.iamCheck {
+					b.Args = append(b.Args, "--iam-check", "http://"+c.resourceManager)
+				}
 				if _, p, err := net.SplitHostPort(c.resourceManager); err == nil {
 					if port, err := strconv.Atoi(p); err == nil {
 						b.EgressPorts = append(b.EgressPorts, port)
@@ -460,6 +503,9 @@ func (c *LifecycleComponent) startKnative(ctx context.Context) {
 	go func() {
 		defer close(run.done)
 		run.err = c.ensureKnative(kctx)
+		if run.err == nil {
+			run.err = c.installer.ConfigureInvokeAuthz(kctx, c.invokeAuthz())
+		}
 		if run.err == nil {
 			c.ensureMetricsServer(kctx)
 		}
@@ -679,3 +725,19 @@ func (c *LifecycleComponent) ReadyTimeout() time.Duration { return c.timeout }
 // Stop is a no-op: components live in the cluster and outlive the CLI process.
 // Removing them belongs to `reset`, which is explicit.
 func (c *LifecycleComponent) Stop(context.Context) error { return nil }
+
+// withResourceManagerPort is ports with Resource Manager's in-cluster port,
+// which a pod asking the host (cloudburrow-host) must be allowed to reach.
+func (c *LifecycleComponent) withResourceManagerPort(ports []int) []int {
+	if _, p, err := net.SplitHostPort(c.resourceManager); err == nil {
+		if port, err := strconv.Atoi(p); err == nil {
+			for _, q := range ports {
+				if q == port {
+					return ports
+				}
+			}
+			return append(append([]int{}, ports...), port)
+		}
+	}
+	return ports
+}

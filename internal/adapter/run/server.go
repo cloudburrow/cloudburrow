@@ -12,6 +12,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/k8s"
 	"github.com/cloudburrow/cloudburrow/internal/lro"
+	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 	"github.com/cloudburrow/cloudburrow/internal/paging"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
 	rpcstatus "google.golang.org/genproto/googleapis/rpc/status"
@@ -82,6 +83,9 @@ func (s *Server) CreateService(ctx context.Context, req *runpb.CreateServiceRequ
 	if _, _, err := resource.ParseLocation(req.GetParent()); err != nil {
 		return nil, apierror.InvalidArgument("%v", err)
 	}
+	if err := checkOrgLocation(ctx, req.GetParent()); err != nil {
+		return nil, err
+	}
 	id := req.GetServiceId()
 	if err := ValidateServiceID(id); err != nil {
 		return nil, err
@@ -92,6 +96,10 @@ func (s *Server) CreateService(ctx context.Context, req *runpb.CreateServiceRequ
 	}
 	name := fmt.Sprintf("%s/services/%s", req.GetParent(), id)
 	svc.Name = name
+	// Custom constraints (#1891, orgpolicy.go).
+	if err := checkServiceCustom(ctx, svc, orgpolicy.MethodCreate); err != nil {
+		return nil, err
+	}
 
 	if _, err := s.service(ctx, name, id); err == nil {
 		return nil, apierror.AlreadyExists("service %s already exists", name)
@@ -180,6 +188,10 @@ func (s *Server) UpdateService(ctx context.Context, req *runpb.UpdateServiceRequ
 		if svc, err = mergeServiceMask(FromKnative(existing, parent), svc, paths); err != nil {
 			return nil, err
 		}
+	}
+	// Custom constraints on the service as the update leaves it (#1891).
+	if err := checkServiceCustom(ctx, svc, orgpolicy.MethodUpdate); err != nil {
+		return nil, err
 	}
 	// Updated in place, under the name it has: an older version's service
 	// keeps its ID as its Knative name (#1400).

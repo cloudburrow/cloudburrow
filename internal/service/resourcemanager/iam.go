@@ -42,6 +42,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
+	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 )
 
 const iamPrefix = "resourcemanager/iam/"
@@ -113,6 +114,9 @@ func (r *Registry) IAMPolicy(resource string) (*iampolicy.Stored, error) {
 // stores the result. A resource pending deletion is FAILED_PRECONDITION, as
 // every other change to one is.
 func (r *Registry) SetIAMPolicy(resource string, req *iampb.SetIamPolicyRequest) (*iampb.Policy, error) {
+	if err := r.checkMemberDomains(resource, req.GetPolicy()); err != nil {
+		return nil, err
+	}
 	r.mu.Lock()
 	defer r.unlock()
 	deleting, err := r.iamTargetLocked(resource)
@@ -459,4 +463,31 @@ func (s *TagValuesServer) TestIamPermissions(_ context.Context, req *iampb.TestI
 		return nil, apierror.Wrap(err)
 	}
 	return testIAM(s.reg, res, req)
+}
+
+// checkMemberDomains refuses, as FAILED_PRECONDITION, a policy granting a
+// member iam.allowedPolicyMemberDomains does not permit on resource
+// (#1890). It reads the effective policy, so the caller does not hold r.mu.
+func (r *Registry) checkMemberDomains(resource string, next *iampb.Policy) error {
+	under := resource
+	switch {
+	case strings.HasPrefix(resource, "tagKeys/"), strings.HasPrefix(resource, "tagValues/"):
+		under = OrganizationName
+	case strings.HasPrefix(resource, "projects/"):
+		under = orgpolicy.ProjectOf(resource)
+	}
+	var before []string
+	if cur, err := r.IAMPolicy(resource); err == nil && cur != nil {
+		for _, b := range cur.Bindings {
+			before = append(before, b.Members...)
+		}
+	}
+	var after []string
+	for _, b := range next.GetBindings() {
+		after = append(after, b.GetMembers()...)
+	}
+	if err := orgpolicy.CheckMembers(context.Background(), under, before, after); err != nil {
+		return apierror.FailedPrecondition("%s", err.Error())
+	}
+	return nil
 }

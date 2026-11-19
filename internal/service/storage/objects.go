@@ -676,6 +676,10 @@ func (s *Server) serveDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	bucket, name := pathVar(r, downloadPrefix, 1), pathVar(r, downloadPrefix, 3)
+	if err := s.authorize(r, target{bucket: bucket, object: name}, "storage.objects.get"); err != nil {
+		writeError(w, err)
+		return
+	}
 	if r.URL.Query().Get("softDeleted") == "true" {
 		writeError(w, badRequest("A soft-deleted object cannot be read; restore it first"))
 		return

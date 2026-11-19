@@ -7,6 +7,7 @@
 package tasks
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
+	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"github.com/cloudburrow/cloudburrow/internal/sched"
 	"github.com/cloudburrow/cloudburrow/internal/store"
@@ -309,6 +311,10 @@ func (s *Store) SetIamPolicy(name string, req *iampb.SetIamPolicyRequest) (iampo
 	next, err := iampolicy.Set(q.IAMPolicy, req)
 	if err != nil {
 		return iampolicy.Stored{}, err
+	}
+	// iam.allowedPolicyMemberDomains (#1890), whatever --iam-enforcement.
+	if err := orgpolicy.CheckMembers(context.Background(), orgpolicy.ProjectOf(name), storedMembers(q.IAMPolicy), storedMembers(&next)); err != nil {
+		return iampolicy.Stored{}, apierror.FailedPrecondition("%s", err.Error())
 	}
 	q.IAMPolicy = &next
 	return next, s.put(queueKey(name), q)
@@ -721,4 +727,16 @@ func (s *Store) RewriteIAMMember(from, to string) error {
 		}
 	}
 	return nil
+}
+
+// storedMembers are p's members, across its bindings.
+func storedMembers(p *iampolicy.Stored) []string {
+	if p == nil {
+		return nil
+	}
+	var out []string
+	for _, b := range p.Bindings {
+		out = append(out, b.Members...)
+	}
+	return out
 }

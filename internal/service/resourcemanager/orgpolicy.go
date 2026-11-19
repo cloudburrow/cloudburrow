@@ -35,7 +35,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"sort"
 	"strings"
 
 	crmv1 "google.golang.org/api/cloudresourcemanager/v1"
@@ -180,7 +179,13 @@ func (r *Registry) stored(resource, constraint string) (*crmv1.OrgPolicy, error)
 	}
 	raw, err := r.st.Get(scope + strings.TrimPrefix(constraint, "constraints/"))
 	if errors.Is(err, store.ErrNotFound) {
-		return nil, nil
+		// A policy set through v2 (orgpolicyv2.go) reads back converted.
+		short := strings.TrimPrefix(constraint, "constraints/")
+		v2, err := r.v2Stored(resource, short)
+		if err != nil || v2 == nil {
+			return nil, err
+		}
+		return specToV1(short, v2), nil
 	}
 	if err != nil {
 		return nil, apierror.Internal(err, "reading the org policy")
@@ -256,6 +261,9 @@ func (r *Registry) SetOrgPolicy(resource string, p *crmv1.OrgPolicy) (*crmv1.Org
 	if err := r.st.Put(scope+strings.TrimPrefix(p.Constraint, "constraints/"), raw); err != nil {
 		return nil, apierror.Internal(err, "writing the org policy")
 	}
+	if err := r.st.Delete(v2Key(resource, strings.TrimPrefix(p.Constraint, "constraints/"))); err != nil && !errors.Is(err, store.ErrNotFound) {
+		return nil, apierror.Internal(err, "replacing the v2 org policy")
+	}
 	return &out, nil
 }
 
@@ -285,14 +293,16 @@ func (r *Registry) ClearOrgPolicy(resource, constraint, etag string) error {
 	if err := r.st.Delete(scope + strings.TrimPrefix(constraint, "constraints/")); err != nil && !errors.Is(err, store.ErrNotFound) {
 		return apierror.Internal(err, "deleting the org policy")
 	}
+	if err := r.st.Delete(v2Key(resource, strings.TrimPrefix(constraint, "constraints/"))); err != nil && !errors.Is(err, store.ErrNotFound) {
+		return apierror.Internal(err, "deleting the org policy")
+	}
 	return nil
 }
 
 // OrgPolicies are the policies set on resource, by constraint.
 func (r *Registry) OrgPolicies(resource string) ([]*crmv1.OrgPolicy, error) {
 	resource = policyResource(resource)
-	scope, err := orgPolicyScope(resource)
-	if err != nil {
+	if _, err := orgPolicyScope(resource); err != nil {
 		return nil, err
 	}
 	r.mu.Lock()
@@ -300,14 +310,13 @@ func (r *Registry) OrgPolicies(resource string) ([]*crmv1.OrgPolicy, error) {
 	if err := r.checkPolicyResource(resource); err != nil {
 		return nil, err
 	}
-	keys, err := r.st.List(scope)
+	keys, err := r.constraintsSetLocked(resource)
 	if err != nil {
-		return nil, apierror.Internal(err, "listing org policies")
+		return nil, err
 	}
-	sort.Strings(keys)
 	var out []*crmv1.OrgPolicy
 	for _, k := range keys {
-		p, err := r.orgPolicy(resource, "constraints/"+strings.TrimPrefix(k, scope))
+		p, err := r.orgPolicy(resource, "constraints/"+k)
 		if err != nil {
 			return nil, err
 		}

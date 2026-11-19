@@ -17,12 +17,13 @@ import (
 // with hostguard.Wrap (the Host check of #676 and the Origin check of
 // #1586) or listed here with its reason.
 var guardedElsewhere = map[string]string{
-	"internal/console/console.go":            "s.Handler() returns hostguard.Wrap(sameOriginOnly(...))",
-	"internal/metadata/server.go":            "s.Handler() returns hostguard.Wrap, except for a pod's own workload host",
-	"internal/service/secrets/server.go":     "s.handler() returns h2c.NewHandler(hostguard.Wrap(...))",
-	"internal/service/vertexai/lifecycle.go": "mixedHandler serves hostguard.Wrap'd REST and gRPC",
-	"internal/netfwd/guard.go":               "the guard itself: guardHandler checks Host and Origin",
-	"cmd/cloudburrow/terraform_intercept.go": "the --intercept-hardcoded proxy (#1578) lives for one terraform run and answers only CONNECT to an intercepted host (a browser cannot send CONNECT); the inner server has no listener, only those tunnels, and serves only an intercepted Host",
+	"internal/console/console.go":             "s.Handler() returns hostguard.Wrap(sameOriginOnly(...))",
+	"internal/metadata/server.go":             "s.Handler() returns hostguard.Wrap, except for a pod's own workload host",
+	"internal/service/secrets/server.go":      "s.handler() returns h2c.NewHandler(hostguard.Wrap(...))",
+	"internal/service/resourcemanager/api.go": "top serves hostguard.Wrap(both), except for HandleUnguarded's matches: Kourier's invoke check (#1879), which forwards any routed Host and answers only allow or deny",
+	"internal/service/vertexai/lifecycle.go":  "mixedHandler serves hostguard.Wrap'd REST and gRPC",
+	"internal/netfwd/guard.go":                "the guard itself: guardHandler checks Host and Origin",
+	"cmd/cloudburrow/terraform_intercept.go":  "the --intercept-hardcoded proxy (#1578) lives for one terraform run and answers only CONNECT to an intercepted host (a browser cannot send CONNECT); the inner server has no listener, only those tunnels, and serves only an intercepted Host",
 }
 
 // TestEveryHTTPListenerIsGuarded (#1586): three in-process REST APIs

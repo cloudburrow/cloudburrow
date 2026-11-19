@@ -9,6 +9,9 @@ import (
 	"log"
 	"net"
 	"time"
+
+	"github.com/cloudburrow/cloudburrow/internal/iamcheck"
+	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 )
 
 // ErrUsage means the arguments were refused; the reason has been written.
@@ -30,6 +33,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	bigquery := fs.String("bigquery", "", "base URL of the instance's BigQuery, which BigQuery subscriptions write to (#1874); empty: not served")
 	storage := fs.String("storage", "", "base URL of the instance's Cloud Storage, which Cloud Storage subscriptions write to (#1874); empty: not served")
 	kms := fs.String("kms", "", "base URL of the instance's Cloud KMS, which CMEK topics' keys are checked against (#1874); empty: not served")
+	resourceManager := fs.String("resourcemanager", "", "http://host:port of the host's Resource Manager, asked for organization policies whatever --iam-check (what `up` passes, #1890)")
+	iamCheck := fs.String("iam-check", "", "http://host:port of the host's IAM evaluator, which checks each call's caller when set (what `up --iam-enforcement=on` passes, #1879)")
 	if err := fs.Parse(args); err != nil {
 		return ErrUsage
 	}
@@ -45,6 +50,13 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	defer f.Close()
 	f.UseExports(*bigquery, *storage, *kms)
 	go f.RunExports(ctx)
+	if *resourceManager != "" {
+		orgpolicy.Use(orgpolicy.Remote{Base: *resourceManager})
+		defer orgpolicy.Use(nil)
+	}
+	if *iamCheck != "" {
+		f.UseIAMCheck(&iamcheck.Client{Base: *iamCheck})
+	}
 	if *stateFile != "" {
 		if err := f.KeepState(*stateFile); err != nil {
 			return err

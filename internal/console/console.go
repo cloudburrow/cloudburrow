@@ -173,6 +173,11 @@ type Listing struct {
 	// line, in the order they were checked. The server checks the action
 	// against the page's DetailActions like any other.
 	SelectActions []Action `json:"selectActions,omitempty"`
+	// SelectMarked says that only rows marked Selectable can be checked on
+	// this list screen (a SelectionLister's, #1854: History's builds awaiting
+	// approval), where a top-level list's own SelectActions take any row
+	// (#1864: Roles' Create role from selection). The server sets it.
+	SelectMarked bool `json:"selectMarked,omitempty"`
 	// Actions are the list screen's own actions, on no existing resource,
 	// drawn beside Create (ListActor, #1289). The server sets them.
 	Actions []Action `json:"actions,omitempty"`
@@ -283,7 +288,8 @@ type Field struct {
 	// OptionLabels names an option where its value is not what the
 	// console shows, on a "select" or a "radio": Manage traffic's LATEST is
 	// "Latest healthy revision" (#1852), Cloud SQL's POSTGRES_17 is
-	// "PostgreSQL 17" (#1860).
+	// "PostgreSQL 17" (#1860), and BigQuery's Region list shows
+	// "us-central1 (Iowa)" and submits us-central1 (#1861).
 	OptionLabels map[string]string `json:"optionLabels,omitempty"`
 	// Follows and Templates, on a "sourcefiles" field (Google's inline
 	// source editor, #1852), name the select field whose choice picks the
@@ -318,6 +324,10 @@ type Field struct {
 	// condition holds. Conditions joined by "&" must all hold:
 	// "type=Distribution&bucket_type=Linear" (#1863).
 	ShowWhen string `json:"showWhen,omitempty"`
+	// DeriveFrom names another field this one follows until it is edited
+	// (#1864): its value lowercased, other characters made dashes, as
+	// Google's Create service account derives the ID from the name.
+	DeriveFrom string `json:"deriveFrom,omitempty"`
 	// Unavailable, on a checkbox, is why the choice cannot be made on this
 	// instance: the box is drawn as Google's page has it, unchecked and
 	// disabled, with the reason beside it, so the option stays visible and
@@ -1352,6 +1362,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/iam/lint", s.handleLintCondition)
 	mux.HandleFunc("GET /api/page/{service}", s.handlePage)
 	mux.HandleFunc("POST /api/query/{service}", s.handleQuery)
+	mux.HandleFunc("POST /api/studio/{service}", s.handleStudio)
 	mux.HandleFunc("GET /api/logs", s.handleLogs)
 	mux.HandleFunc("GET /api/logs/buckets", s.handleLogBuckets)
 	mux.HandleFunc("GET /api/logs/names", s.handleLogNames)
@@ -1630,7 +1641,10 @@ func (s *Server) handleResources(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	listing.Actions = listActions(ctx, p, project)
-	listing.SelectActions = append(listing.SelectActions, listSelectActions(ctx, p, project)...)
+	if marked := listSelectActions(ctx, p, project); len(marked) > 0 {
+		listing.SelectActions = append(listing.SelectActions, marked...)
+		listing.SelectMarked = true
+	}
 	writeJSON(w, http.StatusOK, listing)
 }
 

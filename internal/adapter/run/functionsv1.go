@@ -417,6 +417,9 @@ func (v *FunctionsV1Server) CreateFunction(ctx context.Context, req *fv1.CreateF
 	if _, _, err := resource.ParseLocation(req.GetLocation()); err != nil {
 		return nil, apierror.InvalidArgument("%v", err)
 	}
+	if err := checkOrgLocation(ctx, req.GetLocation()); err != nil {
+		return nil, err
+	}
 	in := req.GetFunction()
 	if in == nil {
 		return nil, apierror.InvalidArgument("function is required")
