@@ -83,6 +83,8 @@ func (p projectIAMProvider) StudioCall(ctx context.Context, project, call string
 		return p.pagePolicy(ctx, project)
 	case "roles":
 		return p.pageRoles(project)
+	case "troubleshoot", "analyze", "enforcement":
+		return p.analysisCall(ctx, project, call, body)
 	case "change":
 		var c iamPageChange
 		if err := json.Unmarshal(body, &c); err != nil {
@@ -141,7 +143,7 @@ func (p projectIAMProvider) pagePolicy(ctx context.Context, project string) (iam
 }
 
 func (p projectIAMProvider) pageRoles(project string) ([]iamPageRole, error) {
-	custom, err := iamRolesProvider(p).roles(project)
+	custom, err := iamRolesProvider{registry: p.registry}.roles(project)
 	if err != nil {
 		return nil, err
 	}

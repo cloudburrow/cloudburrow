@@ -255,10 +255,10 @@ const ROUTES = [
     product: "iam", productTitle: "IAM & Admin" },
   { path: "/iam-admin/cloudidentity", title: "Identity & Organization", service: null, requires: "iam", screen: "unavailable", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin",
     unavailable: "Identity & Organization is Cloud Identity's sign-up and organization setup checklist, which a local instance has no counterpart for: its organization (organizations/100000000001) exists from the start. Groups are on the Groups page." },
-  { path: "/iam-admin/troubleshooter", title: "Policy Troubleshooter", service: null, requires: "iam", screen: "unavailable", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin",
-    unavailable: "Policy Troubleshooter is the Policy Troubleshooter API's troubleshootIamPolicy, which CloudBurrow does not serve: IAM policies here are stored and never enforced (ADR-0006), so there is no access decision to explain. The IAM page lists who holds which role, and a policy's Permissions tab has Test permissions." },
-  { path: "/iam-admin/analyzer", title: "Policy Analyzer", service: null, requires: "iam", screen: "unavailable", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin",
-    unavailable: "Policy Analyzer is the Cloud Asset API's analyzeIamPolicy, which CloudBurrow does not serve. View by roles on the IAM page lists each role's principals on the project, its folders and the organization." },
+  // Policy Troubleshooter and Policy Analyzer (#1879): iam:troubleshoot and
+  // analyzeIamPolicy, over the evaluator `up --iam-enforcement=on` enforces.
+  { path: "/iam-admin/troubleshooter", title: "Policy Troubleshooter", service: null, requires: "iam", screen: "iam-troubleshooter", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin" },
+  { path: "/iam-admin/analyzer", title: "Policy Analyzer", service: null, requires: "iam", screen: "iam-analyzer", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin" },
   // Organization Policies (#1864): the selected project's constraints, the
   // policy set on it and the effective one, over Resource Manager's v1
   // org policy methods.
@@ -6689,6 +6689,8 @@ function dispatch(view) {
   if (match.screen === "products") return renderProducts(view);
   if (match.screen === "connect") return renderConnect(view);
   if (match.screen === "unavailable") return renderUnavailable(view, match);
+  if (match.screen === "iam-troubleshooter") return renderIAMTroubleshooter(view);
+  if (match.screen === "iam-analyzer") return renderIAMAnalyzer(view);
   if (match.screen === "bigquery-studio") return renderBigQueryStudio(view);
   if (match.screen === "new-project") return renderNewProject(view);
   if (!match.service) return renderDashboard(view);
@@ -12794,9 +12796,138 @@ function renderIAMPage(view, route) {
     el("p", { class: "form-help" },
       el("span", { text: "Test permissions and the condition linter are on " }),
       el("a", { href: `/iam-admin/iam/${encodeURIComponent(project)}?tab=permissions`, text: "the policy's Permissions tab" }),
-      el("span", { text: ". Policy Troubleshooter and Policy Analyzer are not available locally." })));
+      el("span", { text: ". " }),
+      el("a", { href: "/iam-admin/troubleshooter", text: "Policy Troubleshooter" }),
+      el("span", { text: " explains a principal's access, and " }),
+      el("a", { href: "/iam-admin/analyzer", text: "Policy Analyzer" }),
+      el("span", { text: " finds who holds a permission." })));
   announce("IAM");
   reload();
+}
+
+// iamEnforcementNote says whether this instance enforces what the
+// Troubleshooter and Analyzer explain (#1879).
+function iamEnforcementNote(into) {
+  iamCall("enforcement").then((r) => {
+    setChildren(into, noteBanner(r.mode === "on"
+      ? "IAM enforcement is on (up --iam-enforcement=on): the mapped methods of Secret Manager, Cloud KMS and Cloud Tasks are refused as this explains."
+      : "IAM enforcement is off: policies are stored and explained here, and no call is refused because of them. Start the instance with up --iam-enforcement=on to enforce them.",
+      "iam-enforcement-" + r.mode));
+  }).catch(() => {});
+}
+
+// renderIAMTroubleshooter is Policy Troubleshooter (#1879): a principal, a
+// resource and a permission in; whether the principal has it, and each
+// allow policy's bindings with why each grants it or not.
+function renderIAMTroubleshooter(view) {
+  const project = currentProject();
+  const note = el("div", { id: "iam-enforcement-note" });
+  const fields = buildCreateForm({ label: "Troubleshoot access", fields: [
+    { name: "principal", label: "Principal email", required: true,
+      help: "The email of a user or service account, such as worker@my-project.iam.gserviceaccount.com." },
+    { name: "resource", label: "Resource", required: true, default: project ? `//cloudresourcemanager.googleapis.com/projects/${project}` : "",
+      help: "A full resource name, such as //secretmanager.googleapis.com/projects/my-project/secrets/my-secret." },
+    { name: "permission", label: "Permission", required: true, help: "Such as secretmanager.versions.access." },
+  ] });
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  const results = el("div", { id: "troubleshoot-result", "aria-live": "polite" });
+  const check = el("button", { type: "submit", class: "primary", id: "troubleshoot-check", text: "Check access" });
+  const submit = async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    if (!fields.validate()) return;
+    check.disabled = true;
+    try {
+      const r = await iamCall("troubleshoot", fields.values());
+      const granted = r.overallAccessState === "CAN_ACCESS";
+      const rows = [];
+      for (const p of (r.allowPolicyExplanation || {}).explainedPolicies || []) {
+        for (const b of p.bindingExplanations || []) {
+          const matched = Object.entries(b.memberships || {}).filter(([, m]) => m.membership === "MEMBERSHIP_MATCHED").map(([k]) => k);
+          rows.push(el("tr", {},
+            el("td", { class: "mono", text: p.fullResourceName }),
+            el("td", { class: "mono", text: b.role }),
+            el("td", { text: b.rolePermission === "ROLE_PERMISSION_INCLUDED" ? "Yes" : "No" }),
+            el("td", { class: "mono", text: matched.join(", ") || "No" }),
+            el("td", { class: "mono", text: b.condition ? `${b.condition.expression} (${b.conditionExplanation && b.conditionExplanation.value ? "true" : "false"})` : "" }),
+            el("td", { text: b.allowAccessState === "ALLOW_ACCESS_STATE_GRANTED" ? "Grants access" : "Does not grant" })));
+        }
+      }
+      setChildren(results,
+        el("h2", { id: "troubleshoot-verdict", text: granted ? "Access granted" : "Access not granted" }),
+        el("p", { class: "subtitle", text: `${fields.values().principal} ${granted ? "has" : "does not have"} ${fields.values().permission} on ${fields.values().resource}. No deny policy applies: deny policies are not stored locally.` }),
+        rows.length ? el("table", { class: "table", id: "troubleshoot-bindings" },
+          el("thead", {}, el("tr", {}, ...["Policy", "Role", "Role has permission", "Principal included", "Condition", "Result"].map((h) => el("th", { text: h })))),
+          el("tbody", {}, ...rows)) : el("p", { class: "unavailable", text: "No allow policy on the resource or its ancestors has a binding." }));
+      announce(granted ? "Access granted" : "Access not granted");
+    } catch (err) {
+      setChildren(results);
+      error.textContent = err.message;
+      error.hidden = false;
+    }
+    check.disabled = false;
+  };
+  setChildren(view, pageHeader("Policy Troubleshooter", ""), note,
+    el("p", { class: "subtitle", text: "Check whether a principal has a permission on a resource, and which allow policies decide it." }),
+    el("form", { class: "card", novalidate: true, onsubmit: submit }, error, ...fields.nodes, el("div", { class: "modal-actions" }, check)),
+    results);
+  iamEnforcementNote(note);
+  announce("Policy Troubleshooter");
+  fields.focusFirst();
+}
+
+// renderIAMAnalyzer is Policy Analyzer (#1879): who has what in the
+// project's policies and its ancestors', by principal, permission or role.
+function renderIAMAnalyzer(view) {
+  const project = currentProject();
+  const note = el("div", { id: "iam-enforcement-note" });
+  const fields = buildCreateForm({ label: "Analyze", fields: [
+    { name: "scope", label: "Scope", default: project ? `projects/${project}` : "", required: true,
+      help: "projects/PROJECT_ID, folders/NUMBER or organizations/NUMBER." },
+    { name: "identity", label: "Principal", help: "Such as serviceAccount:worker@my-project.iam.gserviceaccount.com, user:… or group:…" },
+    { name: "permissions", label: "Permissions", help: "Comma-separated, such as secretmanager.versions.access." },
+    { name: "roles", label: "Roles", help: "Comma-separated, such as roles/secretmanager.secretAccessor." },
+    { name: "resource", label: "Resource", help: "A full resource name, to include its own policies." },
+  ] });
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  const results = el("div", { id: "analyze-result", "aria-live": "polite" });
+  const run = el("button", { type: "submit", class: "primary", id: "analyze-run", text: "Analyze" });
+  const list = (v) => (v || "").split(/[\s,]+/).map((x) => x.trim()).filter(Boolean);
+  const submit = async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    if (!fields.validate()) return;
+    const v = fields.values();
+    run.disabled = true;
+    try {
+      const r = await iamCall("analyze", { scope: v.scope, identity: v.identity, permissions: list(v.permissions), roles: list(v.roles), resource: v.resource });
+      const res = (r.mainAnalysis || {}).analysisResults || [];
+      setChildren(results, res.length ? el("table", { class: "table", id: "analyze-table" },
+        el("thead", {}, el("tr", {}, ...["Policy", "Role", "Principals", "Access", "Condition"].map((h) => el("th", { text: h })))),
+        el("tbody", {}, ...res.map((x) => {
+          const acl = (x.accessControlLists || [])[0] || {};
+          return el("tr", {},
+            el("td", { class: "mono", text: x.attachedResourceFullName }),
+            el("td", { class: "mono", text: x.iamBinding.role }),
+            el("td", { class: "mono", text: ((x.identityList || {}).identities || []).map((i) => i.name).join(", ") }),
+            el("td", { class: "mono", text: (acl.accesses || []).map((a) => a.permission || a.role).join(", ") }),
+            el("td", { class: "mono", text: x.iamBinding.condition ? `${x.iamBinding.condition.expression} (${(acl.conditionEvaluation || {}).evaluationValue || ""})` : "" }));
+        }))) : el("p", { class: "unavailable", id: "analyze-empty", text: "No binding matches the query." }));
+      announce(`${res.length} results`);
+    } catch (err) {
+      setChildren(results);
+      error.textContent = err.message;
+      error.hidden = false;
+    }
+    run.disabled = false;
+  };
+  setChildren(view, pageHeader("Policy Analyzer", ""), note,
+    el("p", { class: "subtitle", text: "Find which bindings give a principal, a permission or a role, in the scope's policies and its ancestors'." }),
+    el("form", { class: "card", novalidate: true, onsubmit: submit }, error, ...fields.nodes, el("div", { class: "modal-actions" }, run)),
+    results);
+  iamEnforcementNote(note);
+  announce("Policy Analyzer");
+  fields.focusFirst();
 }
 
 function PROJECT_IAM_NOTE_TEXT() {

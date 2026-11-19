@@ -206,6 +206,7 @@ var gcloudOverrides = []struct {
 	{"iam", []string{"RESOURCEMANAGER"}},
 	// Cloud Identity groups (#1812), on the Resource Manager port.
 	{"cloudidentity", []string{"RESOURCEMANAGER"}},
+	{"policytroubleshooter", []string{"RESOURCEMANAGER"}},
 	{"serviceusage", []string{"SERVICEUSAGE", "RUN_SERVICEUSAGE"}},
 	{"run", []string{"RUN"}},
 	// Served on the Run port (#1347).

@@ -228,7 +228,7 @@ where the source credential is the fixture and every call stays on loopback.
 | **Access tokens** | Opaque `cbl_…` strings, as they are opaque on Google. Deliberately **not** JWTs: making one look verifiable invites someone to try to verify it. The instance keeps each one's SHA-256, with the account it was minted for and its expiry, in `issued-tokens.json` beside the key, so Memorystore's IAM auth can check a client's token (#1614); nothing else checks one. |
 | **ID tokens** | Real RS256 JWTs, signed with the instance's own key and verifiable against `/certs`. They will **not** verify against Google's public certificates, because Google did not issue them. |
 | **Validation** | None, anywhere. CloudBurrow never checks a token, an assertion, a signature or an expiry. The token endpoint checks only that an assertion was *sent*, so a client silently sending none finds out. |
-| **Authorization** | None. There is no IAM, no scopes enforcement, no per-resource permission. Every caller can do everything. |
+| **Authorization** | None by default: no scopes enforcement, and every caller can do everything. With `up --iam-enforcement=on` (#1879) the mapped methods check the account a minted token names against the stored allow policies ([compatibility.md](compatibility.md#iam-enforcement)); the ADC fixture's account and a request with no token are the project owner. |
 
 ## Verified with real tooling
 

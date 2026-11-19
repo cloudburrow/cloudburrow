@@ -290,8 +290,9 @@ func predefinedGrants(role, permission string) bool {
 // (setIamPolicy, IAM roles, and the organization's and folders' own
 // management), and Owner every permission. ok is false for a role that is
 // not basic. Which permissions Google's basic roles hold exactly is
-// UNVERIFIED (https://docs.cloud.google.com/iam/docs/roles-overview#basic,
-// read 2026-11-19). Viewer's verbs exclude data access such as
+// UNVERIFIED (docs re-read 2026-11-19:
+// https://docs.cloud.google.com/iam/docs/roles-overview#basic). Viewer's
+// verbs exclude data access such as
 // secretmanager.versions.access and cloudkms.cryptoKeyVersions.useToDecrypt.
 func basicGrants(role, permission string) (grants, ok bool) {
 	parts := strings.Split(permission, ".")

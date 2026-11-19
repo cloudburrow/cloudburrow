@@ -68,7 +68,9 @@ Out of contract, not merely unscheduled:
   IAM auth, Firestore with MongoDB compatibility's sign-ins, IAM Credentials on service
   accounts the IAM API created, and BigQuery's per-project IAM of a minted token's caller, each
   against this instance's own minted tokens and the project's stored policy (`internal/iamcond`,
-  `internal/iamroles`), and BigQuery remote models' connection permissions.
+  `internal/iamroles`), and BigQuery remote models' connection permissions; and, with
+  `up --iam-enforcement=on` (#1879, off by default), the methods `internal/iameval` maps on Secret
+  Manager, Cloud KMS and Cloud Tasks ([compatibility.md](compatibility.md#iam-enforcement)).
 - **GKE-specific APIs**, Google-managed load balancing, storage classes and identity.
 - **BigQuery beyond what its community emulator does.** Firestore, Spanner, Bigtable and
   Datastore now ship as opt-in Google emulators. BigQuery ships as `goccy/bigquery-emulator`,
@@ -151,6 +153,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/hostguard/` | Refuses HTTP requests whose Host header names a host CloudBurrow does not answer to: the DNS-rebinding defence on every HTTP listener (#676). |
 | `internal/hostrelay/` | TCP relay that lets pods reach services the CLI serves on loopback (#575). |
 | `internal/iamcond/` | Compiles and evaluates IAM Conditions: the CEL subset Google accepts on a role binding (#1742, #1745). |
+| `internal/iameval/` | CloudBurrow's one evaluator of IAM allow policies (#1879): whether a principal holds a permission on a resource, and why, for `--iam-enforcement`, Policy Troubleshooter and Policy Analyzer. |
 | `internal/iampolicy/` | IAM policy storage without enforcement (ADR-0006). |
 | `internal/iamroles/` | IAM's permission catalog and the permissions of the roles CloudBurrow's permission checks evaluate (#1743). |
 | `internal/images/` | Gets locally built images into the cluster without a registry. |

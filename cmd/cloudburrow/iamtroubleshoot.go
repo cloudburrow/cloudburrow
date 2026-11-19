@@ -1,10 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"slices"
 	"sort"
 	"strings"
@@ -15,6 +20,7 @@ import (
 	pt "google.golang.org/api/policytroubleshooter/v3"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/iameval"
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 )
@@ -41,7 +47,8 @@ import (
 // (analysisQuery.accessSelector), as an analysis result. Policies of a
 // service's resources are read only through resourceSelector: the
 // resources under a scope are not enumerated (UNVERIFIED against Google's
-// expanded output, which lists them).
+// expanded output, which lists them; docs re-read 2026-11-19:
+// https://docs.cloud.google.com/asset-inventory/docs/analyzing-iam-policy).
 
 const (
 	troubleshootPath = "/v3/iam:troubleshoot"
@@ -461,4 +468,84 @@ func writeIAMJSON(w http.ResponseWriter, v any) {
 	}
 	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 	_, _ = w.Write(b)
+}
+
+// consoleTroubleshoot is the console's Policy Troubleshooter form.
+type consoleTroubleshoot struct {
+	Principal  string `json:"principal"`
+	Resource   string `json:"resource"`
+	Permission string `json:"permission"`
+}
+
+// consoleAnalyze is the console's Policy Analyzer query.
+type consoleAnalyze struct {
+	Scope       string   `json:"scope"`
+	Identity    string   `json:"identity"`
+	Permissions []string `json:"permissions"`
+	Roles       []string `json:"roles"`
+	Resource    string   `json:"resource"`
+}
+
+// analysisCall answers the console's Policy Troubleshooter and Policy
+// Analyzer pages through the same methods a client calls, and reports the
+// enforcement mode.
+func (p projectIAMProvider) analysisCall(ctx context.Context, project, call string, body json.RawMessage) (any, error) {
+	if p.iam == nil {
+		return nil, errors.New("IAM evaluation is not available on this instance")
+	}
+	var r *http.Request
+	switch call {
+	case "enforcement":
+		mode := config.IAMEnforcementOff
+		if p.iam.On != nil && p.iam.On() {
+			mode = config.IAMEnforcementOn
+		}
+		return map[string]string{"mode": mode}, nil
+	case "troubleshoot":
+		var in consoleTroubleshoot
+		if err := json.Unmarshal(body, &in); err != nil {
+			return nil, fmt.Errorf("malformed request: %v", err)
+		}
+		b, _ := json.Marshal(pt.GoogleCloudPolicytroubleshooterIamV3TroubleshootIamPolicyRequest{AccessTuple: &pt.GoogleCloudPolicytroubleshooterIamV3AccessTuple{
+			Principal: in.Principal, FullResourceName: in.Resource, Permission: in.Permission}})
+		r = httptest.NewRequestWithContext(ctx, http.MethodPost, troubleshootPath, bytes.NewReader(b))
+	default:
+		var in consoleAnalyze
+		if err := json.Unmarshal(body, &in); err != nil {
+			return nil, fmt.Errorf("malformed request: %v", err)
+		}
+		scope := in.Scope
+		if scope == "" {
+			scope = "projects/" + project
+		}
+		q := url.Values{}
+		if in.Identity != "" {
+			q.Set("analysisQuery.identitySelector.identity", in.Identity)
+		}
+		for _, x := range in.Permissions {
+			q.Add("analysisQuery.accessSelector.permissions", x)
+		}
+		for _, x := range in.Roles {
+			q.Add("analysisQuery.accessSelector.roles", x)
+		}
+		if in.Resource != "" {
+			q.Set("analysisQuery.resourceSelector.fullResourceName", in.Resource)
+		}
+		r = httptest.NewRequestWithContext(ctx, http.MethodGet, "/v1/"+scope+":analyzeIamPolicy?"+q.Encode(), nil)
+	}
+	w := httptest.NewRecorder()
+	iamAnalysis{e: p.iam}.ServeHTTP(w, r)
+	var out any
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		return nil, err
+	}
+	if w.Code != http.StatusOK {
+		if m, ok := out.(map[string]any); ok {
+			if e, ok := m["error"].(map[string]any); ok {
+				return nil, fmt.Errorf("%v", e["message"])
+			}
+		}
+		return nil, fmt.Errorf("%s", w.Body.String())
+	}
+	return out, nil
 }
