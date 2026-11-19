@@ -235,6 +235,9 @@ func (m *SecureSourceManagerServer) runPushTriggers(ctx context.Context, builds 
 	if strings.Trim(sha, "0") == "" || (!strings.HasPrefix(ref, "refs/heads/") && !strings.HasPrefix(ref, "refs/tags/")) {
 		return // a deleted ref, or not a branch or tag
 	}
+	// The Cloud Build triggers on a Developer Connect link to the
+	// repository run too (#1852, cloudbuilddevconnect.go).
+	runDevConnectPushTriggers(ctx, builds, repo.GetName(), dir, ref, sha)
 	raw, err := exec.CommandContext(ctx, "git", "-C", dir, "show", "HEAD:"+ssmTriggersFile).Output()
 	if err != nil {
 		return // no triggers file on the default branch

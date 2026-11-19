@@ -72,7 +72,7 @@ func (p runProvider) runCreateFromSourceAction() console.Action {
 
 // ListActions implements console.ListActor: Create service from source,
 // offered only when both the adapter and Cloud Storage are running here.
-func (p runProvider) ListActions(context.Context, string) []console.Action {
+func (p runProvider) ListActions(_ context.Context, project string) []console.Action {
 	if p.runEndpoint() == "" {
 		return nil
 	}
@@ -80,6 +80,7 @@ func (p runProvider) ListActions(context.Context, string) []console.Action {
 	if p.storageAddr != "" {
 		out = append(out, p.runCreateFromSourceAction())
 	}
+	out = append(out, p.connectRepoAction(project))
 	return append(out, p.writeFunctionAction()...)
 }
 

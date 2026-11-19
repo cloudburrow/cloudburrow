@@ -139,8 +139,8 @@ func unsupportedTrigger(t *cbpb.BuildTrigger) error {
 		return events("github")
 	case t.GetTriggerTemplate() != nil:
 		return events("triggerTemplate")
-	case t.GetRepositoryEventConfig() != nil:
-		return events("repositoryEventConfig")
+	case t.GetRepositoryEventConfig() != nil && devConnectEventError(t.GetRepositoryEventConfig()) != nil:
+		return devConnectEventError(t.GetRepositoryEventConfig())
 	case t.GetPubsubConfig() != nil && validPubsubConfig(t.GetPubsubConfig()) != nil:
 		return validPubsubConfig(t.GetPubsubConfig())
 	case t.GetFilename() != "":
@@ -444,6 +444,23 @@ func (c *CloudBuildServer) UpdateBuildTrigger(ctx context.Context, req *cbpb.Upd
 // carry substitutions, which override the trigger's; a branch, tag or
 // commit is refused, as no trigger here has a repository.
 func (c *CloudBuildServer) RunBuildTrigger(ctx context.Context, req *cbpb.RunBuildTriggerRequest) (*longrunning.Operation, error) {
+	// A trigger on a Developer Connect link builds a commit of its
+	// repository (#1852, cloudbuilddevconnect.go).
+	triggerStore.mu.Lock()
+	t, err := triggerOf(req.GetName(), req.GetProjectId(), req.GetTriggerId())
+	if err == nil {
+		t = proto.Clone(t).(*cbpb.BuildTrigger)
+	}
+	triggerStore.mu.Unlock()
+	if err == nil && t.GetRepositoryEventConfig() != nil {
+		if t.GetDisabled() {
+			return nil, apierror.FailedPrecondition("trigger %s is disabled", t.GetName())
+		}
+		if s := req.GetSource(); s.GetRepoName() != "" || s.GetDir() != "" || s.GetProjectId() != "" {
+			return nil, apierror.InvalidArgument("RunBuildTrigger source of a repository trigger takes a branchName, tagName or commitSha only")
+		}
+		return c.runDevConnectManual(ctx, t, req.GetSource())
+	}
 	if s := req.GetSource(); s != nil && (s.GetRepoName() != "" || s.GetRevision() != nil || s.GetDir() != "" || s.GetProjectId() != "") {
 		return nil, apierror.Unimplemented("RunBuildTrigger source names a repository revision, which needs a hosted git " +
 			"repository; this trigger's build has its own source")

@@ -114,6 +114,7 @@ const (
 	stepDockerPush
 	stepPack
 	stepContainer
+	stepGcloudRun // a Deploy step's gcloud run services update (#1852)
 )
 
 // plannedStep is one validated step and what running it does.
@@ -126,7 +127,8 @@ type plannedStep struct {
 	buildArgs  []string
 	env        map[string]string // pack --env
 	timeout    time.Duration
-	step       StepSpec // stepContainer
+	step       StepSpec       // stepContainer
+	gcloud     *gcloudRunStep // stepGcloudRun
 	// allowFailure and allowExitCodes (#1407): a failure they allow is
 	// the step's FAILURE, not the build's.
 	allowFailure   bool
@@ -253,6 +255,13 @@ func planStepKind(i int, st *cbpb.BuildStep, subs map[string]string, refuse func
 		// `gcloud builds submit --tag`'s step: Cloud Build's own builder
 		// image running docker, args[0] the command.
 		name, args = "gcr.io/cloud-builders/docker", args[1:]
+	}
+	if g, ok, err := planGcloudRun(name, st, args); ok {
+		if err != nil {
+			return plannedStep{}, refuseGcloudRun(i, err)
+		}
+		p.kind, p.gcloud = stepGcloudRun, g
+		return p, nil
 	}
 	local := st.GetScript() == "" && (dockerBuilders[name] && (st.GetEntrypoint() == "" || st.GetEntrypoint() == "docker") && len(args) > 0 &&
 		(args[0] == "build" || args[0] == "push")) || (packBuilders[name] && (st.GetEntrypoint() == "" || st.GetEntrypoint() == "pack"))
@@ -1272,6 +1281,12 @@ func (r *buildRun) runStep(ctx context.Context, p plannedStep, w *stepWriter) er
 		}
 		fmt.Fprintf(w, "%s: loaded into the cluster as %s\n", tagged(p.push), local)
 		return nil
+	case stepGcloudRun:
+		project, location := r.project, ""
+		if parts := strings.Split(r.name, "/"); len(parts) >= 4 && parts[2] == "locations" {
+			location = parts[3]
+		}
+		return r.gcloudRun(ctx, p.gcloud, project, location, w)
 	case stepDockerBuild, stepPack:
 		var rc io.ReadCloser
 		var err error

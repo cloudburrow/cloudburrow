@@ -32,7 +32,7 @@ func (p buildTriggersProvider) project(project string) string {
 func (p buildTriggersProvider) List(ctx context.Context, project string) (console.Listing, error) {
 	out := console.Listing{Columns: []string{"Region", "Event", "Description", "Pool", "Approval", "Age"},
 		NameColumn: "Trigger", Noun: "triggers", AlwaysStatus: true,
-		Note: "Manual, webhook and Pub/Sub triggers run an inline build; a Pub/Sub trigger subscribes to its topic on this " +
+		Note: "Manual, webhook, Pub/Sub and push (a Developer Connect link to a Secure Source Manager repository) triggers run an inline build; a Pub/Sub trigger subscribes to its topic on this " +
 			"instance's Pub/Sub, and its builds, which arrive from the cluster, run docker build, docker push and pack steps only. " +
 			"GitHub, GitLab, Bitbucket and Cloud Source Repositories events, and builds read from a repository, need a hosted " +
 			"git service and are refused."}
@@ -44,6 +44,14 @@ func (p buildTriggersProvider) List(ctx context.Context, project string) (consol
 		}
 		if pc := t.GetPubsubConfig(); pc != nil {
 			event = "Pub/Sub message: " + pc.GetTopic()
+		}
+		// A trigger on a Developer Connect link (#1852): Google's "Push to
+		// branch" or "Push new tag".
+		if push := t.GetRepositoryEventConfig().GetPush(); push != nil {
+			event = "Push to branch: " + push.GetBranch()
+			if push.GetTag() != "" {
+				event = "Push new tag: " + push.GetTag()
+			}
 		}
 		if t.GetDisabled() {
 			st = "Disabled"

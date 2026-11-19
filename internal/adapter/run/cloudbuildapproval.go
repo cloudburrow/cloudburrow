@@ -181,17 +181,37 @@ func takeApprovalConfig(r *http.Request) (*http.Request, error) {
 	if json.Unmarshal(raw, &body) != nil {
 		return r, nil // the transcoder reports it
 	}
-	if _, ok := body["developerConnectEventConfig"]; ok {
-		// #1546: Developer Connect's git repository links reach this
-		// instance only over a Secure Source Manager connection, and
-		// Google documents such a link's triggers in the repository's
-		// .cloudbuild/triggers.yaml (devConnectGitRepositoryLink), not as a
-		// BuildTrigger: gitRepositoryLinkType names no Secure Source
-		// Manager type.
-		return r, apierror.Unimplemented("BuildTrigger field developerConnectEventConfig is not supported: its links name " +
-			"hosted git providers (gitRepositoryLinkType has no Secure Source Manager type); a Developer Connect link " +
-			"to this instance's Secure Source Manager runs builds from the repository's .cloudbuild/triggers.yaml, " +
-			"whose trigger names it in devConnectGitRepositoryLink")
+	if dc, ok := body["developerConnectEventConfig"]; ok {
+		// #1852: a trigger on a Developer Connect link to this instance's
+		// Secure Source Manager runs on its pushes. The client libraries'
+		// BuildTrigger has no such field, so it travels as the
+		// repositoryEventConfig naming the link (cloudbuilddevconnect.go),
+		// and answers carry it back as developerConnectEventConfig.
+		var cfg struct {
+			GitRepositoryLink string          `json:"gitRepositoryLink"`
+			Push              json.RawMessage `json:"push,omitempty"`
+			PullRequest       json.RawMessage `json:"pullRequest,omitempty"`
+		}
+		if json.Unmarshal(dc, &cfg) != nil {
+			return r, apierror.InvalidArgument("invalid developerConnectEventConfig")
+		}
+		if _, both := body["repositoryEventConfig"]; both {
+			return r, apierror.InvalidArgument("invalid trigger: developerConnectEventConfig and repositoryEventConfig are exclusive")
+		}
+		rc := map[string]json.RawMessage{}
+		rc["repository"], _ = json.Marshal(cfg.GitRepositoryLink)
+		if len(cfg.Push) > 0 {
+			rc["push"] = cfg.Push
+		}
+		if len(cfg.PullRequest) > 0 {
+			rc["pullRequest"] = cfg.PullRequest
+		}
+		delete(body, "developerConnectEventConfig")
+		body["repositoryEventConfig"], _ = json.Marshal(rc)
+		raw, _ = json.Marshal(body)
+		r.Body = io.NopCloser(bytes.NewReader(raw))
+		r.ContentLength = int64(len(raw))
+		r.Header.Set("Content-Length", strconv.Itoa(len(raw)))
 	}
 	ac, ok := body["approvalConfig"]
 	if !ok {
@@ -255,6 +275,19 @@ func addApprovalConfig(raw []byte) []byte {
 			cfg["approvalRequired"] = true
 		}
 		t["approvalConfig"], _ = json.Marshal(cfg)
+		// A trigger on a Developer Connect link answers as Google's does,
+		// in developerConnectEventConfig (#1852).
+		var rc map[string]json.RawMessage
+		var repo string
+		if json.Unmarshal(t["repositoryEventConfig"], &rc) == nil && json.Unmarshal(rc["repository"], &repo) == nil &&
+			devConnectLinkRE.MatchString(repo) {
+			dc := map[string]json.RawMessage{"gitRepositoryLink": rc["repository"]}
+			if p, ok := rc["push"]; ok {
+				dc["push"] = p
+			}
+			delete(t, "repositoryEventConfig")
+			t["developerConnectEventConfig"], _ = json.Marshal(dc)
+		}
 	}
 	if list, ok := body["triggers"]; ok {
 		var ts []map[string]json.RawMessage

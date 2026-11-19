@@ -44,7 +44,8 @@ import (
 // naming a missing link is skipped. FetchGitRefs lists the pushed branch.
 // A connection with links is not deleted; an update or delete with a
 // stale etag is ABORTED (#1595); the link, then the connection, are. The JSON API's BuildTrigger developerConnectEventConfig, sent with
-// the official REST client, is UNIMPLEMENTED with the reason.
+// the official REST client, makes a push trigger on the link (#1852) and is
+// answered as it was sent; a pull request filter is UNIMPLEMENTED.
 func TestDeveloperConnectSourceManagerTrigger(t *testing.T) {
 	h := New(t)
 	_ = runClient(t, h) // skips without CLOUDBURROW_TEST_RUN
@@ -271,13 +272,26 @@ func TestDeveloperConnectSourceManagerTrigger(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = svc.Projects.Locations.Triggers.Create(parent, &cbrest.BuildTrigger{Name: "dc-" + suffix,
+	made, err := svc.Projects.Locations.Triggers.Create(parent, &cbrest.BuildTrigger{Name: "dc-" + suffix,
 		DeveloperConnectEventConfig: &cbrest.DeveloperConnectEventConfig{GitRepositoryLink: link.GetName(),
 			Push: &cbrest.PushFilter{Branch: "^main$"}},
 		Build: &cbrest.Build{Steps: []*cbrest.BuildStep{{Name: "ubuntu", Args: []string{"true"}}}}}).Context(ctx).Do()
+	if err != nil {
+		t.Fatalf("CreateBuildTrigger with developerConnectEventConfig: %v", err)
+	}
+	if dce := made.DeveloperConnectEventConfig; dce == nil || dce.GitRepositoryLink != link.GetName() || dce.Push == nil || dce.Push.Branch != "^main$" {
+		t.Errorf("the trigger's developerConnectEventConfig = %+v; want the link and its push filter", dce)
+	}
+	if _, err := svc.Projects.Locations.Triggers.Delete(made.ResourceName).Context(ctx).Do(); err != nil {
+		t.Errorf("DeleteBuildTrigger: %v", err)
+	}
 	var gerr *googleapi.Error
-	if !errors.As(err, &gerr) || gerr.Code != http.StatusNotImplemented || !strings.Contains(gerr.Message, "devConnectGitRepositoryLink") {
-		t.Errorf("CreateBuildTrigger with developerConnectEventConfig: %v; want 501 naming devConnectGitRepositoryLink", err)
+	_, err = svc.Projects.Locations.Triggers.Create(parent, &cbrest.BuildTrigger{Name: "dc-pr-" + suffix,
+		DeveloperConnectEventConfig: &cbrest.DeveloperConnectEventConfig{GitRepositoryLink: link.GetName(),
+			PullRequest: &cbrest.PullRequestFilter{Branch: "^main$"}},
+		Build: &cbrest.Build{Steps: []*cbrest.BuildStep{{Name: "ubuntu", Args: []string{"true"}}}}}).Context(ctx).Do()
+	if !errors.As(err, &gerr) || gerr.Code != http.StatusNotImplemented {
+		t.Errorf("CreateBuildTrigger with a pull request filter: %v; want 501", err)
 	}
 
 	if _, err := dc.DeleteConnection(ctx, &dcpb.DeleteConnectionRequest{Name: conn.GetName()}); status.Code(err) != codes.FailedPrecondition {
