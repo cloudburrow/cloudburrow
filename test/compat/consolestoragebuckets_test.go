@@ -62,6 +62,7 @@ func TestConsoleStorageBucketSettings(t *testing.T) {
 		Edit        *struct{ Fields []field }
 		Sections    []struct {
 			ID      string
+			Actions []action
 			Listing struct {
 				Items []row
 				Note  string
@@ -78,6 +79,12 @@ func TestConsoleStorageBucketSettings(t *testing.T) {
 		var d page
 		if err := json.Unmarshal([]byte(body), &d); code != http.StatusOK || err != nil || d.Unavailable != "" {
 			t.Fatalf("console detail %v = %d (%v): %s", path, code, err, body)
+		}
+		// The page's buttons are its own and its tabs': Lock retention policy
+		// on Protection, Run lifecycle on Lifecycle and Create folder on
+		// Objects, where Google's console puts them (#1843).
+		for _, s := range d.Sections {
+			d.Actions = append(d.Actions, s.Actions...)
 		}
 		return d
 	}
