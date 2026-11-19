@@ -294,7 +294,10 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		if d.sqlAdmin != nil {
 			p.sql = d.sqlAdmin
 		}
-		providers = append(providers, p)
+		// Google's menu (#1844): Overview, Vaulted backups, Backup plans,
+		// Backup plan associations, Backup vaults (p) and Jobs.
+		providers = append(providers, bdrOverviewProvider{api: p}, bdrVaultedProvider{api: p}, bdrPlansProvider{api: p},
+			bdrAssocsProvider{api: p}, p, bdrJobsProvider{api: p})
 	}
 	// Cloud Logging's admin screens, beside the Logs Explorer (#1226).
 	if enabled[config.ServiceLogging] && d.logging != nil {

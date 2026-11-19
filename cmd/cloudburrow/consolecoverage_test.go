@@ -49,8 +49,9 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 	config.ServiceLogging:       {Providers: []string{"logging-metrics", "logging-sinks", "logging-exclusions", "logging-buckets", "logging-settings", "logging-saved-queries", "logging-log-scopes", "logging-analytics"}, Screen: "/logs"},
 	config.ServiceMemorystore:   {Providers: []string{"memorystore", "memorystore-clusters", "memorystore-valkey"}},
 	config.ServiceCloudSQLMySQL: {Providers: []string{"cloudsql-mysql", "cloudsql-instances", "cloudsql-backups"}},
-	config.ServiceBackupDR:      {Providers: []string{"backupdr"}},
-	config.ServicePrivateCA:     {Providers: []string{"privateca", "privateca-templates"}},
+	config.ServiceBackupDR: {Providers: []string{"backupdr-overview", "backupdr-vaulted", "backupdr-plans", "backupdr-associations",
+		"backupdr", "backupdr-jobs"}},
+	config.ServicePrivateCA: {Providers: []string{"privateca", "privateca-templates"}},
 	// The Kubernetes Engine API (#1913): its clusters are on Kubernetes
 	// clusters, beside the instance's own.
 	config.ServiceGKE: {Providers: []string{"gkeclusters"}},

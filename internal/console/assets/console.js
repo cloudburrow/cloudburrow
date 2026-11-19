@@ -322,7 +322,25 @@ const ROUTES = [
     title: "Memorystore for Memcached", navTitle: "Memcached", section: "Databases", product: "memorystore", productTitle: "Memorystore",
     unavailable: "Memorystore for Memcached is the Memcache API (memcache.googleapis.com), which CloudBurrow does not serve. " +
       "Memorystore for Valkey, Redis Cluster and Redis are served: their pages are in this menu." },
-  { path: "/backupdr", service: "backupdr", icon: "storage", title: "Backup and DR", kind: "Backup vault", section: "Storage" },
+  // Backup and DR's menu (#1844), Google's pages: Overview, Vaulted backups
+  // (the protected resources, Schedule backup), Backup plans, Backup plan
+  // associations, Backup vaults (at /backupdr, its address before), Jobs and
+  // Reports. The product key stays "backupdr", so a pin keeps pointing here.
+  { path: "/backupdr-overview", service: "backupdr-overview", icon: "storage", title: "Overview", section: "Storage",
+    product: "backupdr", productTitle: "Backup and DR" },
+  { path: "/backupdr-vaulted-backups", service: "backupdr-vaulted", icon: "storage", title: "Vaulted backups", kind: "Resource",
+    section: "Storage", product: "backupdr", productTitle: "Backup and DR" },
+  { path: "/backupdr-plans", service: "backupdr-plans", icon: "storage", title: "Backup plans", kind: "Backup plan", section: "Storage",
+    product: "backupdr", productTitle: "Backup and DR" },
+  { path: "/backupdr-associations", service: "backupdr-associations", icon: "storage", title: "Backup plan associations",
+    kind: "Backup plan association", section: "Storage", product: "backupdr", productTitle: "Backup and DR" },
+  { path: "/backupdr", service: "backupdr", icon: "storage", title: "Backup vaults", kind: "Backup vault", section: "Storage",
+    product: "backupdr", productTitle: "Backup and DR" },
+  { path: "/backupdr-jobs", service: "backupdr-jobs", icon: "storage", title: "Jobs", section: "Storage",
+    product: "backupdr", productTitle: "Backup and DR" },
+  { path: "/backupdr-reports", title: "Reports", service: null, requires: "backupdr", screen: "unavailable", icon: "storage",
+    section: "Storage", product: "backupdr", productTitle: "Backup and DR",
+    unavailable: "Backup and DR reports are Looker Studio reports over the backup and job logs Google's Cloud Logging routes into a BigQuery dataset. CloudBurrow runs no Looker Studio, and its Backup and DR Service writes no job logs to Cloud Logging (#1924). The Jobs page lists the backup jobs and the system jobs from the service itself, and the Overview counts them." },
   // Google files BigQuery under Analytics, a category with no vendored icon
   // here, so it sits with the other data stores rather than under a heading
   // drawn without one (#698). It is one product with two pages: datasets,
@@ -5097,7 +5115,10 @@ async function renderList(view, route) {
   // A screen that is its summary cards alone, as Google's Cloud Build
   // Dashboard is a card per trigger (#1854).
   if (data.summaryOnly && (data.summary || []).length) {
-    setChildren(headerActions(header), refreshButton(() => renderList(view, route)));
+    // With the screen's own actions, as Backup and DR's Overview has its
+    // trial and protected resources actions (#1844).
+    setChildren(headerActions(header), ...listActionButtons(route, data, () => renderList(view, route)),
+      refreshButton(() => renderList(view, route)));
     setChildren(view, ...header, noteBanner(data.note),
       el("div", { class: "summary-cards" }, ...listingSummary(data)));
     announce(`${data.summary.length} ${noun} loaded`);

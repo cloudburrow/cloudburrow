@@ -1706,7 +1706,7 @@ tr.is-inspected { background: var(--nav-selected); }
 .listing-summary { margin-bottom: 16px; }
 .listing-summary dd { overflow-wrap: anywhere; }
 /* A screen of summary cards alone (#1854): Cloud Build's Dashboard, a card per trigger. */
-.summary-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
+.summary-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr)); gap: 16px; }
 .summary-cards .listing-summary { margin-bottom: 0; }
 
 /* The tab strip sits at the bottom of the header block, where the console

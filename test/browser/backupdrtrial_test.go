@@ -58,7 +58,7 @@ func (p *tab) listAction(id string, values map[string]string) string {
 
 // TestBackupDRProtectedTrialAndComplianceThroughThePage (#1536, #1592), in
 // the sql shard. A project in a folder, with a Cloud SQL instance. On the
-// Backup and DR page:
+// Backup and DR Overview (#1844):
 //   - Find protected resources of the project, of the folder and of the
 //     organization each answers the instance, as resourceBackupConfigs.fetch
 //     of the project, the folder and the organization reads it;
@@ -100,7 +100,7 @@ func TestBackupDRProtectedTrialAndComplianceThroughThePage(t *testing.T) {
 		Region: "us-central1", Settings: &sqladmin.Settings{Tier: "db-custom-1-3840"}})
 
 	p := open(t)
-	p.navigate("/backupdr?project=" + project)
+	p.navigate("/backupdr-overview?project=" + project)
 	for _, scope := range []string{"", folder, "organizations/100000000001"} {
 		var got *backupdr.FetchResourceBackupConfigsResponse
 		switch {

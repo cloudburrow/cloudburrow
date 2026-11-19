@@ -54,14 +54,14 @@ func TestConsoleBackupDRVaultPlanAssociationRestore(t *testing.T) {
 	ctx := context.Background()
 	const project = "bdr-console"
 
-	if _, err := p.Create(ctx, project, map[string]string{"id": "vault-1", "location": "us-central1", "retention": "86400s"}); err != nil {
+	if _, err := p.Create(ctx, project, map[string]string{"id": "vault-1", "region": "us-central1", "retentionDays": "1"}); err != nil {
 		t.Fatal(err)
 	}
 	l, err := p.List(ctx, project)
 	if err != nil || len(l.Items) != 1 || l.Items[0].Name != "vault-1" || l.Items[0].Fields["Location"] != "us-central1" {
 		t.Fatalf("vaults: %v %+v", err, l)
 	}
-	if acts := bdrActionIDs(p.DetailActions(ctx, project, []string{"vault-1"})); acts != "createplan,editvault,delete" {
+	if acts := bdrActionIDs(p.DetailActions(ctx, project, []string{"vault-1"})); acts != "editretention,editvault,delete" {
 		t.Errorf("a new vault's actions: %s", acts)
 	}
 	for _, step := range []struct {
@@ -82,21 +82,22 @@ func TestConsoleBackupDRVaultPlanAssociationRestore(t *testing.T) {
 	}
 
 	d, err := p.Detail(ctx, project, []string{"vault-1"})
-	if err != nil || len(d.Sections) != 5 {
+	if err != nil || len(d.Sections) != 3 {
 		t.Fatalf("vault page: %v %+v", err, d)
 	}
 	ds := d.Sections[0].Listing.Items
 	if len(ds) != 1 || ds[0].Fields["Instance"] != "projects/"+project+"/instances/pg" {
 		t.Fatalf("data sources: %+v", ds)
 	}
-	if plans := d.Sections[1].Listing.Items; len(plans) != 1 || plans[0].Fields["Rules"] != "daily: DAILY, 7 days" {
+	if plans := d.Sections[1].Listing.Items; len(plans) != 1 || plans[0].Fields["Backup rules"] != "daily: DAILY, 7 days" {
 		t.Errorf("plans: %+v", plans)
 	}
-	if pr := d.Sections[4].Listing.Items; len(pr) != 1 || pr[0].Name != "pg" || pr[0].Fields["Association"] != "assoc-1" {
-		t.Errorf("protected resources: %+v (%s)", pr, d.Sections[4].Listing.Unavailable)
+	if pr := d.Sections[2].Listing.Items; len(pr) != 1 || pr[0].Name != "pg" || pr[0].Fields["Association"] != "assoc-1" {
+		t.Errorf("protected resources: %+v (%s)", pr, d.Sections[2].Listing.Unavailable)
 	}
-	if as := d.Sections[3].Listing.Items; len(as) != 1 || as[0].Fields["Resource"] != "projects/"+project+"/instances/pg" {
-		t.Errorf("associations: %+v", as)
+	if as, err := (bdrAssocsProvider{api: p}).List(ctx, project); err != nil || len(as.Items) != 1 || as.Items[0].Fields["Resource"] != "pg" ||
+		as.Items[0].Fields["Backup vault"] != "vault-1" {
+		t.Errorf("associations: %v %+v", err, as.Items)
 	}
 
 	path := []string{"vault-1", ds[0].Name}
@@ -152,7 +153,7 @@ func TestConsoleBackupDREdits(t *testing.T) {
 	ctx := context.Background()
 	const project = "bdr-edits"
 	for _, id := range []string{"vault-1", "vault-2"} {
-		if _, err := p.Create(ctx, project, map[string]string{"id": id, "location": "us-central1", "retention": "86400s"}); err != nil {
+		if _, err := p.Create(ctx, project, map[string]string{"id": id, "region": "us-central1", "retentionDays": "1"}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -175,7 +176,7 @@ func TestConsoleBackupDREdits(t *testing.T) {
 		t.Errorf("an edit that changes nothing: no error")
 	}
 	acts := bdrActionIDs(p.DetailActions(ctx, project, []string{"vault-1"}))
-	if acts != "createplan,associate,editplan,moveassoc,trigger,assocdelete,plandelete,editvault,delete" {
+	if acts != "editretention,editvault,delete" {
 		t.Errorf("vault actions: %s", acts)
 	}
 	v, err := p.get(ctx, "projects/"+project+"/locations/us-central1/backupVaults/vault-1")
@@ -188,12 +189,16 @@ func TestConsoleBackupDREdits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if plans := d.Sections[1].Listing.Items; len(plans) != 1 || plans[0].Fields["Rules"] != "daily: WEEKLY, 14 days" {
+	if plans := d.Sections[1].Listing.Items; len(plans) != 1 || plans[0].Fields["Backup rules"] != "daily: WEEKLY, 14 days" {
 		t.Errorf("plans after Edit backup plan: %+v", plans)
 	}
-	revs := d.Sections[2].Listing.Items
-	if len(revs) != 2 || revs[0].Fields["Revision"] != "v1" || revs[0].Status != "ACTIVE" ||
-		revs[1].Fields["Revision"] != "v0" || revs[1].Fields["Rules"] != "daily: DAILY, 7 days" {
+	pd, err := (bdrPlansProvider{api: p}).Detail(ctx, project, []string{"plan-1"})
+	if err != nil || len(pd.Sections) != 3 {
+		t.Fatalf("plan page: %v %+v", err, pd)
+	}
+	revs := pd.Sections[2].Listing.Items
+	if len(revs) != 2 || revs[0].Name != "v1" || revs[0].Status != "ACTIVE" ||
+		revs[1].Name != "v0" || revs[1].Fields["Backup rules"] != "daily: DAILY, 7 days" {
 		t.Errorf("plan revisions: %+v", revs)
 	}
 
@@ -225,9 +230,10 @@ func TestConsoleBackupDREdits(t *testing.T) {
 		t.Fatal(err)
 	}
 	d2, err := p.Detail(ctx, project, []string{"vault-2"})
-	if err != nil || len(d2.Sections[3].Listing.Items) != 1 || d2.Sections[3].Listing.Items[0].Fields["Backup plan"] != "plan-2" ||
+	as, aerr := (bdrAssocsProvider{api: p}).List(ctx, project)
+	if err != nil || aerr != nil || len(as.Items) != 1 || as.Items[0].Fields["Backup plan"] != "plan-2" || as.Items[0].Fields["Backup vault"] != "vault-2" ||
 		len(d2.Sections[0].Listing.Items) != 1 {
-		t.Errorf("vault-2 after Move association: %v %+v", err, d2.Sections)
+		t.Errorf("vault-2 after Move association: %v %v %+v %+v", err, aerr, as.Items, d2.Sections)
 	}
 }
 
@@ -240,7 +246,7 @@ func TestConsoleBackupDRDeletes(t *testing.T) {
 	p := backupDRProvider{bdr: srv}
 	ctx := context.Background()
 	const project = "bdr-deletes"
-	if _, err := p.Create(ctx, project, map[string]string{"id": "vault-1", "location": "us-central1", "retention": "86400s"}); err != nil {
+	if _, err := p.Create(ctx, project, map[string]string{"id": "vault-1", "region": "us-central1", "retentionDays": "1"}); err != nil {
 		t.Fatal(err)
 	}
 	for _, step := range []struct {
@@ -280,21 +286,25 @@ func TestConsoleBackupDRDeletes(t *testing.T) {
 		t.Errorf("Delete backup offered with no backup: %s", acts)
 	}
 
-	if err := p.ActAt(ctx, project, []string{"vault-1"}, "plandelete", map[string]string{"plan": "plan-1"}); err == nil ||
+	// The plan's page's Delete, and the association's Remove backup plan
+	// (#1844).
+	plans, assocs := bdrPlansProvider{api: p}, bdrAssocsProvider{api: p}
+	if err := plans.ActAt(ctx, project, []string{"plan-1"}, "delete", map[string]string{}); err == nil ||
 		!strings.Contains(err.Error(), "delete the association first") {
 		t.Errorf("deleting a plan an association applies: %v", err)
 	}
-	if err := p.ActAt(ctx, project, []string{"vault-1"}, "assocdelete", map[string]string{"association": "assoc-1"}); err != nil {
+	if err := assocs.ActAt(ctx, project, []string{"assoc-1"}, "delete", map[string]string{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := p.ActAt(ctx, project, []string{"vault-1"}, "plandelete", map[string]string{"plan": "plan-1"}); err != nil {
+	if err := plans.ActAt(ctx, project, []string{"plan-1"}, "delete", map[string]string{}); err != nil {
 		t.Fatal(err)
 	}
 	d, _ = p.Detail(ctx, project, []string{"vault-1"})
-	if n, m := len(d.Sections[1].Listing.Items), len(d.Sections[3].Listing.Items); n != 0 || m != 0 {
+	al, _ := assocs.List(ctx, project)
+	if n, m := len(d.Sections[1].Listing.Items), len(al.Items); n != 0 || m != 0 {
 		t.Errorf("plans %d and associations %d after the deletes", n, m)
 	}
-	if acts := bdrActionIDs(p.DetailActions(ctx, project, []string{"vault-1"})); acts != "createplan,editvault,delete" {
+	if acts := bdrActionIDs(p.DetailActions(ctx, project, []string{"vault-1"})); acts != "editretention,editvault,delete" {
 		t.Errorf("the vault's actions after the deletes: %s", acts)
 	}
 }
