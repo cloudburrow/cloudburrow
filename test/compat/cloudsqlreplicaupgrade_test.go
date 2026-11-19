@@ -219,8 +219,9 @@ func TestCloudSQLPostgresOldVersionsAndRefusals(t *testing.T) {
 // TestGcloudSQLOldPostgresVersion (#1462): `gcloud sql instances create
 // --database-version=POSTGRES_12` creates an instance whose
 // databaseInstalledVersion is POSTGRES_12_22; `gcloud sql databases patch
-// --charset` of its database is refused (400), and `--database-version=MYSQL_5_6`
-// is 501 naming why, through the configuration `cloudburrow gcloud-setup`
+// --charset` of its database is refused (400), and
+// `--database-version=SQLSERVER_2022_STANDARD`, served on no node, is 501
+// naming why (MYSQL_5_6 is served where the node runs linux/amd64, #1524), through the configuration `cloudburrow gcloud-setup`
 // writes, with egress to Google blocked.
 // covers: sql.instances.insert, sql.instances.get, sql.instances.delete, sql.databases.insert, sql.databases.get, sql.databases.patch, sql.operations.get
 func TestGcloudSQLOldPostgresVersion(t *testing.T) {
@@ -243,9 +244,9 @@ func TestGcloudSQLOldPostgresVersion(t *testing.T) {
 		!strings.Contains(out, "can't be changed") {
 		t.Errorf("databases patch --charset: %v %s", err, out)
 	}
-	if out, err := g.run(nil, "sql", "instances", "create", name+"-x", "--project", g.project, "--database-version=MYSQL_5_6",
-		"--tier=db-custom-1-3840", "--region=us-central1", "--quiet"); err == nil || !strings.Contains(out, "linux/amd64 only") {
-		t.Errorf("create MYSQL_5_6: %v %s", err, out)
+	if out, err := g.run(nil, "sql", "instances", "create", name+"-x", "--project", g.project, "--database-version=SQLSERVER_2022_STANDARD",
+		"--root-password=Root-pass1", "--tier=db-custom-1-3840", "--region=us-central1", "--quiet"); err == nil || !strings.Contains(out, "linux/amd64 only") {
+		t.Errorf("create SQLSERVER_2022_STANDARD: %v %s", err, out)
 	}
 }
 
