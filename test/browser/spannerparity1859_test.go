@@ -86,7 +86,7 @@ func TestSpannerConsoleParityPages(t *testing.T) {
 		p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 		p.waitFor(`document.querySelector(".modal") === null`)
 	}
-	createDB("pgdb", true, false, "CREATE TABLE singers (id bigint PRIMARY KEY, name varchar)")
+	createDB("pgdb", true, false, "CREATE TABLE singers (id bigint PRIMARY KEY, name varchar, tags varchar[])")
 	createDB("gdb", false, true, "")
 	dbs := readDataPage(t, "spanner", project, inst).rows("databases")
 	if dbs["pgdb"]["Dialect"] != "PostgreSQL" || dbs["gdb"]["Dialect"] != "Google Standard SQL" {
@@ -181,5 +181,35 @@ func TestSpannerConsoleParityPages(t *testing.T) {
 	}
 	if strings.Contains(fmt.Sprint(rows()), "Gracie") {
 		t.Errorf("the deleted row is still read")
+	}
+
+	// A PostgreSQL database's table, with an ARRAY column, written from
+	// its Data tab: an array is a JSON array.
+	p.navigate("/spanner/" + inst + "/pgdb/singers" + q + "&tab=data")
+	p.waitFor(`document.querySelector("#view .page-actions") !== null`)
+	p.waitFor(`document.querySelector(".modal") === null`)
+	p.clickText("#view .page-actions button", "Insert row")
+	p.waitFor(`document.querySelector(".modal.is-open #f-col_tags") !== null`)
+	setField(p, ".modal.is-open", "f-col_id", "7")
+	setField(p, ".modal.is-open", "f-col_name", "Ada")
+	setField(p, ".modal.is-open", "f-col_tags", `["x", "y"]`)
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
+	p.waitFor(`document.querySelector(".modal") === null`)
+	pgRows := func() map[string]map[string]string {
+		return readDataPage(t, "spanner", project, inst, "pgdb", "singers").rows("data")
+	}
+	if r := pgRows(); r["7"]["name"] != "Ada" || !strings.Contains(r["7"]["tags"], `"y"`) {
+		t.Fatalf("after Insert row in the PostgreSQL table its rows are %v; want 7 Ada [x y]", r)
+	}
+	p.navigate("/spanner/" + inst + "/pgdb/singers" + q + "&tab=data")
+	p.waitFor(`document.querySelector('button[aria-label="Actions for 7"]') !== null`)
+	p.run(chromedp.Click(chromedp.CSS(`button[aria-label="Actions for 7"]`)))
+	p.clickText(`.overflow-menu:not([hidden]) [role="menuitem"]`, "Edit row")
+	p.waitFor(`document.querySelector(".modal.is-open #f-col_tags") !== null`)
+	setField(p, ".modal.is-open", "f-col_tags", `["z", null]`)
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
+	p.waitFor(`document.querySelector(".modal") === null`)
+	if r := pgRows(); !strings.Contains(r["7"]["tags"], `"z"`) || strings.Contains(r["7"]["tags"], `"y"`) {
+		t.Errorf("after Edit row in the PostgreSQL table its rows are %v; want 7's tags [z null]", r)
 	}
 }

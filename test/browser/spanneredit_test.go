@@ -192,6 +192,19 @@ func TestSpannerCreateInstanceThroughTheListScreen(t *testing.T) {
 			t.Errorf("%s is not drawn disabled (not available locally); disabled are %v", w, disabled)
 		}
 	}
+	// Compare editions opens Google's comparison, and Continue folds a step
+	// and opens the next.
+	p.run(chromedp.Click(chromedp.CSS(`#view #f-edition-dialog`)))
+	p.waitFor(`(document.querySelector(".modal.is-open .field-dialog-table") || {}).textContent?.includes("Enterprise Plus")`)
+	var rows int
+	p.eval(`document.querySelectorAll(".modal.is-open .field-dialog-table tbody tr").length`, &rows)
+	if rows < 8 {
+		t.Errorf("Compare editions has %d rows; want Google's comparison (8 and Locally)", rows)
+	}
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open .modal-actions button`)))
+	p.waitFor(`document.querySelector(".modal") === null`)
+	p.eval(`(() => { document.querySelector("#view .create-step .create-step-continue button").click(); return true })()`, new(bool))
+	p.waitFor(`document.querySelector("#view .create-step").classList.contains("is-folded") && document.activeElement && document.activeElement.id === "f-displayName"`)
 	setField(p, "#view", "f-displayName", "Made in browser")
 	setField(p, "#view", "f-instance", inst)
 	p.run(chromedp.Click(chromedp.CSS(`#view #f-unit-1`)))

@@ -614,17 +614,10 @@ func spannerTableColumns(ctx context.Context, c *spanner.Client, table string) (
 }
 
 // spannerEditable says whether the Data tab's forms can write a column:
-// scalar types a string casts to.
+// the scalar types and ARRAYs of them, in either dialect
+// (consolespannerdata.go).
 func spannerEditable(t string) bool {
-	base := strings.ToUpper(t)
-	if i := strings.IndexByte(base, '('); i >= 0 {
-		base = base[:i]
-	}
-	switch base {
-	case "INT64", "FLOAT64", "FLOAT32", "BOOL", "STRING", "DATE", "TIMESTAMP", "NUMERIC", "JSON", "BYTES":
-		return true
-	}
-	return false
+	return spannerColumnType(t) != nil
 }
 
 // spannerCastExpr is the SQL that turns the string parameter name into a
@@ -657,6 +650,9 @@ func spannerRowFields(cols []spannerColumn, row map[string]string) []console.Fie
 		}
 		f := console.Field{Name: "col_" + col.Name, Label: col.Name, Type: "text", Required: !col.Nullable && col.Key == 0 || col.Key > 0,
 			Help: col.Type}
+		if spannerColumnType(col.Type).GetCode() == sppb.TypeCode_ARRAY {
+			f.Help += ": a JSON array, such as [1, 2] or [\"a\", null]"
+		}
 		if col.Nullable {
 			f.Help += ", nullable: left empty, the value is NULL"
 		}
@@ -673,7 +669,7 @@ func spannerRowFields(cols []spannerColumn, row map[string]string) []console.Fie
 
 // spannerDataSection is a table's Data tab: up to 200 rows, each with Edit
 // row and Delete row, as Google's table Data page has them.
-func spannerDataSection(ctx context.Context, c *spanner.Client, instanceID, dbID, table string, cols []spannerColumn) console.Section {
+func spannerDataSection(ctx context.Context, c *spanner.Client, d spannerDialect, instanceID, dbID, table string, cols []spannerColumn) console.Section {
 	sec := console.Section{ID: "data", Label: "Data"}
 	l := console.Listing{Noun: "rows"}
 	var keys []string
@@ -687,7 +683,7 @@ func spannerDataSection(ctx context.Context, c *spanner.Client, instanceID, dbID
 	})
 	var names []string
 	for _, col := range cols {
-		names = append(names, "`"+col.Name+"`")
+		names = append(names, d.quote(col.Name))
 	}
 	if len(names) == 0 {
 		sec.Listing = l
@@ -695,9 +691,13 @@ func spannerDataSection(ctx context.Context, c *spanner.Client, instanceID, dbID
 	}
 	order := ""
 	if len(keys) > 0 {
-		order = " ORDER BY `" + strings.Join(keys, "`, `") + "`"
+		quoted := make([]string, len(keys))
+		for i, k := range keys {
+			quoted[i] = d.quote(k)
+		}
+		order = " ORDER BY " + strings.Join(quoted, ", ")
 	}
-	it := c.Single().Query(ctx, spanner.Statement{SQL: "SELECT " + strings.Join(names, ", ") + " FROM `" + table + "`" + order + " LIMIT 200"})
+	it := c.Single().Query(ctx, spanner.Statement{SQL: "SELECT " + strings.Join(names, ", ") + " FROM " + d.quote(table) + order + " LIMIT 200"})
 	defer it.Stop()
 	if len(keys) > 0 {
 		l.NameColumn = keys[0]
@@ -779,14 +779,29 @@ func (p spannerProvider) spannerRowAct(ctx context.Context, project string, path
 	}
 	defer c.Close()
 	table := path[2]
-	cols, err := spannerTableColumns(ctx, c, table)
+	d := spannerDialectOfClient(ctx, c)
+	cols, err := spannerTableColumnsIn(ctx, c, d, table)
 	if err != nil {
 		return err
 	}
 	if len(cols) == 0 {
 		return fmt.Errorf("table %s not found", table)
 	}
-	params := map[string]any{}
+	b := &spannerBinder{d: d, params: map[string]any{}}
+	params := b.params
+	// A typed parameter for an ARRAY and every PostgreSQL column; a string
+	// cast to the column's type otherwise (spannerCastExpr).
+	arg := func(col spannerColumn, pn, raw string) (string, error) {
+		if !spannerTypedColumn(d, col.Type) {
+			params[pn] = raw
+			return spannerCastExpr(col.Type, pn), nil
+		}
+		v, err := spannerTypedParam(col.Type, raw)
+		if err != nil {
+			return "", fmt.Errorf("%s: %w", col.Name, err)
+		}
+		return b.bind(pn, v), nil
+	}
 	var keys []spannerColumn
 	for _, col := range cols {
 		if col.Key > 0 {
@@ -801,22 +816,24 @@ func (p spannerProvider) spannerRowAct(ctx context.Context, project string, path
 		}
 		var conds []string
 		for i, k := range keys {
-			pn := fmt.Sprintf("k%d", i)
-			params[pn] = vals[i]
-			conds = append(conds, fmt.Sprintf("`%s` = %s", k.Name, spannerCastExpr(k.Type, pn)))
+			e, err := arg(k, fmt.Sprintf("k%d", i), vals[i])
+			if err != nil {
+				return "", err
+			}
+			conds = append(conds, fmt.Sprintf("%s = %s", d.quote(k.Name), e))
 		}
 		return strings.Join(conds, " AND "), nil
 	}
-	value := func(col spannerColumn, pn string) (string, bool) {
+	value := func(col spannerColumn, pn string) (string, bool, error) {
 		raw, ok := v["col_"+col.Name]
 		if !ok {
-			return "", false
+			return "", false, nil
 		}
 		if raw == "" && col.Nullable {
-			return "NULL", true
+			return "NULL", true, nil
 		}
-		params[pn] = raw
-		return spannerCastExpr(col.Type, pn), true
+		e, err := arg(col, pn, raw)
+		return e, err == nil, err
 	}
 	var sql string
 	switch action {
@@ -826,14 +843,18 @@ func (p spannerProvider) spannerRowAct(ctx context.Context, project string, path
 			if col.Generated || !spannerEditable(col.Type) {
 				continue
 			}
-			if e, ok := value(col, fmt.Sprintf("v%d", i)); ok {
-				names, exprs = append(names, "`"+col.Name+"`"), append(exprs, e)
+			e, ok, err := value(col, fmt.Sprintf("v%d", i))
+			if err != nil {
+				return err
+			}
+			if ok {
+				names, exprs = append(names, d.quote(col.Name)), append(exprs, e)
 			}
 		}
 		if len(names) == 0 {
 			return errors.New("no values to insert")
 		}
-		sql = fmt.Sprintf("INSERT INTO `%s` (%s) VALUES (%s)", table, strings.Join(names, ", "), strings.Join(exprs, ", "))
+		sql = fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", d.quote(table), strings.Join(names, ", "), strings.Join(exprs, ", "))
 	case "editrow":
 		cond, err := where()
 		if err != nil {
@@ -844,20 +865,24 @@ func (p spannerProvider) spannerRowAct(ctx context.Context, project string, path
 			if col.Key > 0 || col.Generated || !spannerEditable(col.Type) {
 				continue
 			}
-			if e, ok := value(col, fmt.Sprintf("v%d", i)); ok {
-				sets = append(sets, fmt.Sprintf("`%s` = %s", col.Name, e))
+			e, ok, err := value(col, fmt.Sprintf("v%d", i))
+			if err != nil {
+				return err
+			}
+			if ok {
+				sets = append(sets, fmt.Sprintf("%s = %s", d.quote(col.Name), e))
 			}
 		}
 		if len(sets) == 0 {
 			return errors.New("nothing to change: a key column cannot change")
 		}
-		sql = fmt.Sprintf("UPDATE `%s` SET %s WHERE %s", table, strings.Join(sets, ", "), cond)
+		sql = fmt.Sprintf("UPDATE %s SET %s WHERE %s", d.quote(table), strings.Join(sets, ", "), cond)
 	case "deleterow":
 		cond, err := where()
 		if err != nil {
 			return err
 		}
-		sql = fmt.Sprintf("DELETE FROM `%s` WHERE %s", table, cond)
+		sql = fmt.Sprintf("DELETE FROM %s WHERE %s", d.quote(table), cond)
 	default:
 		return fmt.Errorf("unknown action %q", action)
 	}

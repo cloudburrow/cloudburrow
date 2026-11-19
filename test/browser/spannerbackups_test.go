@@ -51,6 +51,21 @@ func TestSpannerBackupsThroughThePage(t *testing.T) {
 	if dbChoice != db {
 		t.Errorf("Create backup's database is %q, want %s chosen", dbChoice, db)
 	}
+	// Google's Expiration date is a date picker a week out, and Create
+	// backup from offers an earlier point in time, its version time.
+	var expiry struct {
+		Type, Value string
+		Earlier     bool
+		VersionShow bool
+	}
+	p.eval(`(() => { const e = document.querySelector(".modal.is-open #f-expireDate");
+		const v = document.querySelector(".modal.is-open #f-versionTime");
+		return { Type: e.type, Value: e.value,
+			Earlier: [...document.querySelectorAll(".modal.is-open input[type=radio]")].some((r) => r.value === "Earlier point in time"),
+			VersionShow: !!v && !v.closest("[hidden]") } })()`, &expiry)
+	if want := time.Now().UTC().AddDate(0, 0, 7).Format(time.DateOnly); expiry.Type != "date" || expiry.Value != want || !expiry.Earlier || expiry.VersionShow {
+		t.Errorf("Create backup's expiration is %+v; want a date picker at %s, an Earlier point in time choice, and no version time shown for Current time", expiry, want)
+	}
 	p.run(chromedp.SendKeys(chromedp.CSS(`.modal.is-open #f-backup`), "nightly"))
 	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)

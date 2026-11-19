@@ -5396,6 +5396,9 @@ function buildCreateForm(spec) {
 
     return { field: f, control, node, error, helpId, errorId, isCheck };
   });
+  // A field's dialog (#1859): a button beside it that opens a table, as
+  // Google's Create instance has Compare editions beside the edition.
+  for (const e of entries) if (e.field.dialog) e.node.append(fieldDialogButton(e.field));
 
   // A map field is edited one "key=value" per line and submitted as the JSON
   // object the backend decodes. The lines are the editable form; the JSON is
@@ -5672,6 +5675,27 @@ function formTabs(section, entries) {
 
 // radioEntry is a "radio" field: one radio button per option, the choice
 // kept in a hidden input whose value is submitted (#1843).
+// fieldDialogButton is a field's dialog (Field.Dialog): its button, and the
+// table it opens.
+function fieldDialogButton(f) {
+  const d = f.dialog;
+  const titleId = `dialog-${f.name}-title`;
+  return el("button", { type: "button", class: "link-button is-inline", id: `f-${f.name}-dialog`, text: d.button,
+    onclick: () => {
+      const { dialog, close } = openModal({ labelledBy: titleId });
+      dialog.append(el("div", { class: "modal-body field-dialog" },
+        el("h2", { id: titleId, text: d.title }),
+        d.intro ? el("p", { class: "form-help", text: d.intro }) : null,
+        el("div", { class: "table-wrap" }, el("table", { class: "field-dialog-table" },
+          el("thead", {}, el("tr", {}, ...(d.columns || []).map((c) => el("th", { scope: "col", text: c })))),
+          el("tbody", {}, ...(d.rows || []).map((r) => el("tr", {},
+            ...r.map((v, i) => (i === 0 ? el("th", { scope: "row", text: v }) : el("td", { text: v })))))))),
+        el("div", { class: "modal-actions" },
+          el("button", { type: "button", class: "primary", text: "Close", onclick: () => close() }))));
+      dialog.querySelector(".modal-actions button").focus();
+    } });
+}
+
 function radioEntry(f, id, errorId, helpId) {
   const control = el("input", { type: "hidden", id, name: f.name });
   control.value = f.default || (f.options || [])[0] || "";

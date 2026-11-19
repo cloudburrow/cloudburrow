@@ -2120,3 +2120,7 @@ svg.bq-chart { display: block; border: 1px solid var(--border); border-radius: v
 .form-template { display: flex; gap: 8px; align-items: flex-start; margin: 6px 0; }
 .form-template pre { margin: 0; flex: 1; overflow-x: auto; }
 @media (max-width: 720px) { .spanner-studio { grid-template-columns: minmax(0, 1fr); } .spanner-explorer { border-right: 0; } }
+
+/* A create field's dialog (#1859): Spanner's Compare editions. */
+.field-dialog { max-width: min(880px, calc(100vw - 32px)); }
+.field-dialog-table th[scope="row"] { font-weight: 500; text-align: left; }

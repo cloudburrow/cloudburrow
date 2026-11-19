@@ -322,6 +322,20 @@ type Field struct {
 	// value ("true" or "false" for a checkbox); ParseGroup reads it.
 	Group    []Field `json:"group,omitempty"`
 	AddLabel string  `json:"addLabel,omitempty"`
+	// Dialog is a button beside the field that opens a table, as
+	// Google's Spanner Create instance has Compare editions beside the
+	// edition (#1859).
+	Dialog *FieldDialog `json:"dialog,omitempty"`
+}
+
+// FieldDialog is a Field's Dialog: Button opens a dialog titled Title, an
+// Intro above a table of Columns, each of Rows headed by its first cell.
+type FieldDialog struct {
+	Button  string     `json:"button"`
+	Title   string     `json:"title"`
+	Intro   string     `json:"intro,omitempty"`
+	Columns []string   `json:"columns"`
+	Rows    [][]string `json:"rows"`
 }
 
 // GroupFieldType is the Type of a repeatable group of fields (Field.Group).
