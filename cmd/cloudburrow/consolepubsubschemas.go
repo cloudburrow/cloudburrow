@@ -110,8 +110,8 @@ func schemaRevisionTime(s *pubsubpb.Schema) string {
 
 func (p pubsubSchemasProvider) List(ctx context.Context, project string) (console.Listing, error) {
 	out := console.Listing{
-		Columns:    []string{"Type", "Latest revision", "Revision created"},
-		NameColumn: "Schema",
+		Columns:    []string{"Schema ID", "Schema type", "Latest revision", "Revision created"},
+		NameColumn: "Schema name",
 		Noun:       "schemas",
 	}
 	if project == "" {
@@ -137,7 +137,8 @@ func (p pubsubSchemasProvider) List(ctx context.Context, project string) (consol
 			continue
 		}
 		out.Items = append(out.Items, console.Resource{Name: s.GetName(), Fields: map[string]string{
-			"Type":             schemaType(s),
+			"Schema ID":        lastSegment(s.GetName()),
+			"Schema type":      schemaTypeLabel(s.GetType()),
 			"Latest revision":  orDash(s.GetRevisionId()),
 			"Revision created": schemaRevisionTime(s),
 		}})
@@ -147,7 +148,9 @@ func (p pubsubSchemasProvider) List(ctx context.Context, project string) (consol
 	return out, nil
 }
 
-// CreateForm implements console.Creator: a schema ID and an Avro definition.
+// CreateForm implements console.Creator: Google's Create schema, in its
+// order (#1847): Schema ID, Schema type (Avro or Protocol Buffer), Schema
+// definition.
 func (pubsubSchemasProvider) CreateForm() (string, []console.Field) {
 	return "Create schema", []console.Field{
 		{
@@ -155,23 +158,44 @@ func (pubsubSchemasProvider) CreateForm() (string, []console.Field) {
 			Help: "3-255 characters, starting with a letter.",
 		},
 		{
-			Name: "definition", Label: "Definition", Type: "textarea", Required: true,
-			Help: "An Avro schema, in JSON, or a Protocol Buffer definition (proto2 or proto3, one top-level message, " +
-				"no imports). The definition is checked with ValidateSchema first, and one it refuses is not created.",
+			Name: "type", Label: "Schema type", Type: "radio", Options: []string{schemaAvro, schemaProto}, Default: schemaAvro,
+			Help: "Protocol Buffer schemas are served by CloudBurrow's Pub/Sub front, as the emulator refuses them.",
 		},
 		{
-			Name: "type", Label: "Type", Type: "select", Options: schemaTypes, Default: "AVRO",
-			Help: "Protocol Buffer schemas are served by CloudBurrow's Pub/Sub front, as the emulator refuses them.",
+			Name: "definition", Label: "Schema definition", Type: "textarea", Required: true,
+			Help: "An Avro schema, in JSON, or a Protocol Buffer definition (proto2 or proto3, one top-level message, " +
+				"no imports). The definition is checked with ValidateSchema first, and one it refuses is not created; " +
+				"Test message is on the schema's page once it exists.",
 		},
 	}
 }
 
-// schemaTypeOf is the type a form chose; none is AVRO.
+func (pubsubSchemasProvider) CreateOnPage() bool  { return true }
+func (pubsubSchemasProvider) CreateTitle() string { return "Create schema" }
+
+// Google's names for the two schema types (#1847).
+const (
+	schemaAvro  = "Avro"
+	schemaProto = "Protocol Buffer"
+)
+
+func schemaTypeLabel(t pubsubpb.Schema_Type) string {
+	switch t {
+	case pubsubpb.Schema_AVRO:
+		return schemaAvro
+	case pubsubpb.Schema_PROTOCOL_BUFFER:
+		return schemaProto
+	}
+	return t.String()
+}
+
+// schemaTypeOf is the type a form chose, in Google's words or the API's;
+// none is AVRO.
 func schemaTypeOf(v string) (pubsubpb.Schema_Type, error) {
 	switch strings.TrimSpace(v) {
-	case "", "AVRO":
+	case "", "AVRO", schemaAvro:
 		return pubsubpb.Schema_AVRO, nil
-	case "PROTOCOL_BUFFER":
+	case "PROTOCOL_BUFFER", schemaProto:
 		return pubsubpb.Schema_PROTOCOL_BUFFER, nil
 	}
 	return 0, fmt.Errorf("schema type %q is neither AVRO nor PROTOCOL_BUFFER", v)

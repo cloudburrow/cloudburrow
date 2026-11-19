@@ -321,20 +321,20 @@ func TestTheSubscriptionsScreenListsOpensAndDeletes(t *testing.T) {
 	if props[""]["Topic"] != orders || props[""]["Delivery type"] != "Push" || props[""]["Ack deadline"] != "30s" {
 		t.Errorf("push summary = %v", props[""])
 	}
-	if props["delivery"]["Endpoint"] != "https://example.invalid/push" || props["delivery"]["Attribute x-goog-version"] != "v1" {
-		t.Errorf("push delivery = %v", props["delivery"])
+	if props["details"]["Endpoint"] != "https://example.invalid/push" || props["details"]["Attribute x-goog-version"] != "v1" {
+		t.Errorf("push delivery = %v", props["details"])
 	}
-	if props["dead-lettering"]["Dead-letter topic"] != "None" {
-		t.Errorf("push dead lettering = %v, want None", props["dead-lettering"])
+	if props["details"]["Dead-letter topic"] != "None" {
+		t.Errorf("push dead lettering = %v, want None", props["details"])
 	}
 
 	// The dead-lettered one shows its policy.
 	props = detailProps(detail(pull))
-	if props["dead-lettering"]["Dead-letter topic"] != dead || props["dead-lettering"]["Maximum delivery attempts"] != "7" {
-		t.Errorf("dead-letter policy = %v, want %s after 7", props["dead-lettering"], dead)
+	if props["details"]["Dead-letter topic"] != dead || props["details"]["Maximum delivery attempts"] != "7" {
+		t.Errorf("dead-letter policy = %v, want %s after 7", props["details"], dead)
 	}
-	if props["delivery"]["Push endpoint"] == "" {
-		t.Errorf("pull delivery = %v", props["delivery"])
+	if props["details"]["Push endpoint"] == "" {
+		t.Errorf("pull delivery = %v", props["details"])
 	}
 
 	// Another project's subscription has no page here, and nothing deeper.

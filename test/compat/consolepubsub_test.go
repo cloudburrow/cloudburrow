@@ -389,9 +389,9 @@ func TestConsolePubSubSubscriptionsScreen(t *testing.T) {
 	for k, v := range map[string]string{
 		"Topic":                            tp,
 		"Delivery type":                    "Push",
-		"delivery.Endpoint":                endpoint,
-		"dead-lettering.Dead-letter topic": dead,
-		"dead-lettering.Maximum delivery attempts": "6",
+		"details.Endpoint":                  endpoint,
+		"details.Dead-letter topic":         dead,
+		"details.Maximum delivery attempts": "6",
 	} {
 		if props[k] != v {
 			t.Errorf("page %s = %q, want %q (page: %s)", k, props[k], v, out)

@@ -316,15 +316,18 @@ func TestPubSubIdleTimeAndPushAttributesThroughTheForms(t *testing.T) {
 		consoleDo(t, http.MethodDelete, "/api/resources/pubsub?project="+project+"&name="+url.QueryEscape(topic), "")
 	})
 
+	// The topic page's Create subscription opens Google's page with the
+	// topic filled in (#1847); Push reveals the endpoint and attributes.
 	p.navigate("/pubsub/topics?project=" + project)
 	p.clickText("#view tbody a", topic)
 	p.clickText("#view .page-actions button", "Create subscription")
-	p.waitFor(`document.querySelector(".modal.is-open #f-pushAttributes") !== null`)
-	setField(p, ".modal.is-open", "f-name", "browser-idle-push")
-	setField(p, ".modal.is-open", "f-pushEndpoint", "http://127.0.0.1:1/push")
-	setField(p, ".modal.is-open", "f-pushAttributes", "x-goog-version=v1")
-	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
-	p.waitFor(`document.querySelector(".modal") === null`)
+	p.waitFor(`location.pathname === "/pubsub/subscriptions/create" && document.querySelector("#view #f-pushAttributes") !== null`)
+	p.run(chromedp.Click(chromedp.CSS(`#view #f-deliveryType-1`)))
+	setField(p, "#view", "f-name", "browser-idle-push")
+	setField(p, "#view", "f-pushEndpoint", "http://127.0.0.1:1/push")
+	setField(p, "#view", "f-pushAttributes", "x-goog-version=v1")
+	p.run(chromedp.Click(chromedp.CSS(`#view button[type="submit"]`)))
+	p.waitFor(`location.pathname === "/pubsub/subscriptions"`)
 	got := editDefaults(t, "pubsub-subscriptions", project, sub)
 	if got["Endpoint"] != "http://127.0.0.1:1/push" || got["Attribute x-goog-version"] != "v1" {
 		t.Errorf("the subscription created in the browser reads endpoint %q, attribute %q",
@@ -334,10 +337,11 @@ func TestPubSubIdleTimeAndPushAttributesThroughTheForms(t *testing.T) {
 		t.Errorf("the console API's page reads idle %q, deleted %q", got["Idle for"], got["Deleted by expiration"])
 	}
 
+	// The Details tab (#1847) holds the push attributes and the expiry.
 	p.navigate("/pubsub/subscriptions?project=" + project)
 	p.clickText("#view tbody a", sub)
+	p.run(chromedp.Click(chromedp.CSS(`#tab-details`)))
 	p.waitFor(`document.querySelector("#view").textContent.includes("Attribute x-goog-version")`)
-	p.run(chromedp.Click(chromedp.CSS(`#tab-configuration`)))
 	p.waitFor(`document.querySelector("#view").textContent.includes("Deleted by expiration")`)
 	var text string
 	p.eval(`document.querySelector("#view").textContent`, &text)

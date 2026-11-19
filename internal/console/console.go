@@ -282,6 +282,13 @@ type Field struct {
 	// submit what the API refuses.
 	Requires []string `json:"requires,omitempty"`
 	Excludes []string `json:"excludes,omitempty"`
+	// ShowWhen shows the field only while another field of the form holds
+	// a value: "name" for a checkbox that is checked, "name=value" for a
+	// radio or select choice, as Google's Create topic reveals the retention
+	// period under Enable message retention (#1847). A hidden field is not
+	// validated; it is still sent, so the provider reads it only when its
+	// condition holds.
+	ShowWhen string `json:"showWhen,omitempty"`
 }
 
 // ParseMap decodes a "map" field's value.
@@ -813,6 +820,11 @@ type Action struct {
 	// SelectionField names the field a selection action's selected rows are
 	// written into (Listing.SelectActions).
 	SelectionField string `json:"selectionField,omitempty"`
+	// Href, when set, makes the action a link: it opens this console
+	// route instead of being performed, as a topic row's Create
+	// subscription opens the Create subscription page with the topic filled
+	// in (#1847). The action route never receives it.
+	Href string `json:"href,omitempty"`
 }
 
 // PathActor is a provider with actions on the resources inside a resource.

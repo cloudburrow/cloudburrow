@@ -3652,7 +3652,7 @@ function openActionForm(route, segments, action, onDone, title = null) {
       if (res.result) {
         setChildren(dialog, el("div", { class: "modal-body", id: "action-result" },
           el("h2", { id: "action-title", text: `${action.label}: ${name}` }),
-          resultTable(res.result),
+          resultTable(res.result, { route, path: segments }),
           el("div", { class: "modal-actions" },
             el("button", { type: "button", class: "primary", text: "Close", onclick: () => close() }))));
         return null;
@@ -3949,20 +3949,39 @@ function openTestPermissionsForm(view, name, ask) {
 }
 
 // resultTable draws the rows an action answered with.
-function resultTable(listing) {
+//
+// at, when given, is { route, path }: where a row's own actions are sent, as
+// a pulled message's Ack is sent to its subscription with the message's ack
+// ID (#1847). Each is performed once, its button then saying so.
+function resultTable(listing, at = null) {
   const cols = listing.columns || [];
   const items = listing.items || [];
+  const acts = at && items.some((r) => (r.actions || []).length);
+  const rowButtons = (r) => el("td", { class: "row-actions" }, ...(r.actions || []).map((a) => {
+    const b = el("button", { type: "button", class: "secondary", text: a.label,
+      "aria-label": `${a.label} ${r.name}` });
+    b.onclick = async () => {
+      b.disabled = true;
+      try {
+        await runAction(at.route, at.path, a, () => {}, NO_ROW, r.name);
+        b.textContent = a.done || `${a.label}ed`;
+      } catch { b.disabled = false; }
+    };
+    return b;
+  }));
   return el("div", {},
     listing.note ? el("p", { class: "form-help", id: "action-result-note", text: listing.note }) : null,
     items.length
       ? el("table", { class: "table", id: "action-result-table" },
           el("thead", {}, el("tr", {},
-            el("th", { text: listing.nameColumn || "Name" }), ...cols.map((c) => el("th", { text: c })))),
+            el("th", { text: listing.nameColumn || "Name" }), ...cols.map((c) => el("th", { text: c })),
+            acts ? el("th", { "aria-label": "Actions" }) : null)),
           el("tbody", {}, ...items.map((r) => el("tr", {},
             // A row that names something with a page of its own links to
             // it: a BigQuery load's job, in Job history (#993).
             el("td", {}, r.link ? el("a", { href: r.link, text: r.name }) : r.name),
-            ...cols.map((c) => el("td", { text: (r.fields || {})[c] || "" }))))))
+            ...cols.map((c) => el("td", { text: (r.fields || {})[c] || "" })),
+            acts ? rowButtons(r) : null))))
       : null);
 }
 
@@ -5096,7 +5115,8 @@ function buildCreateForm(spec) {
   };
 
   const check = (entry) => {
-    if (entry.control.checkValidity()) { markValid(entry); return true; }
+    // A field its ShowWhen hides is not asked for (#1847).
+    if (entry.node.hidden || entry.control.checkValidity()) { markValid(entry); return true; }
     markInvalid(entry);
     return false;
   };
@@ -5143,6 +5163,27 @@ function buildCreateForm(spec) {
     };
     entry.control.addEventListener("change", hold);
     hold();
+  }
+
+  // A field shown only while another holds a value (#1847): "name" for a
+  // checked checkbox, "name=value" for a radio or select choice, as Google's
+  // Create topic reveals the retention period under Enable message retention.
+  for (const entry of entries) {
+    const cond = entry.field.showWhen;
+    if (!cond) continue;
+    const [name, choice] = cond.split("=");
+    const other = byName.get(name);
+    if (!other) continue;
+    const show = () => {
+      const on = choice === undefined
+        ? (other.isCheck ? other.control.checked : !!other.control.value)
+        : other.control.value === choice;
+      entry.node.hidden = !on;
+      if (!on) markValid(entry);
+    };
+    other.control.addEventListener("change", show);
+    other.control.addEventListener("input", show);
+    show();
   }
 
   // Fields group under their section heading, in the order the backend gave
@@ -5587,7 +5628,11 @@ async function renderCreatePage(view, route) {
     return;
   }
 
-  const fields = buildCreateForm(caps.create);
+  // A field named in the address starts with that value: a topic row's
+  // Create subscription opens this page with ?topic= (#1847).
+  const given = new URLSearchParams(location.search);
+  const fields = buildCreateForm({ ...caps.create, fields: caps.create.fields.map((f) =>
+    f.type !== "hidden" && f.name !== "project" && given.has(f.name) ? { ...f, default: given.get(f.name) } : f) });
   const error = el("p", { class: "form-error", role: "alert", hidden: true });
   const cancel = el("a", { class: "button secondary", href: listHref, text: "Cancel" });
   const primary = el("button", { type: "submit", class: "primary", text: caps.create.label });
@@ -5940,17 +5985,20 @@ const hiddenValues = (fields) => fields.map((f) => [f.name, f.default || ""]);
 
 // showActionResult opens a dialog with the rows an action performed on
 // click answered (#1592), as openActionForm shows a form's.
-function showActionResult(title, result) {
+function showActionResult(title, result, at = null) {
   const { dialog, close } = openModal({ labelledBy: "action-title" });
   const done = el("button", { type: "button", class: "primary", text: "Close", onclick: () => close() });
   dialog.append(el("div", { class: "modal-body", id: "action-result" },
     el("h2", { id: "action-title", text: title }),
-    resultTable(result),
+    resultTable(result, at),
     el("div", { class: "modal-actions" }, done)));
   done.focus();
 }
 
 async function runAction(route, target, action, onDone, row = NO_ROW, title = null) {
+  // An action that is a link opens its page (#1847): a topic row's Create
+  // subscription.
+  if (action.href) return navigate(action.href);
   const path = Array.isArray(target) ? target : null;
   // A page's own heading, when its last segment is an address no reader
   // recognises: a Datastore entity's encoded key (#875). A delete is
@@ -5988,7 +6036,9 @@ async function runAction(route, target, action, onDone, row = NO_ROW, title = nu
       // is its operation, which the notification and the Operations tab
       // already say: Google's console opens no dialog after Delete folder
       // and contents, so only an action whose answer is data opens one.
-      if (res.result && !action.destructive) showActionResult(`${action.label}: ${name}`, res.result);
+      if (res.result && !action.destructive) {
+        showActionResult(`${action.label}: ${name}`, res.result, path ? { route, path } : null);
+      }
     } catch (err) {
       op.failed(err.message, err.operation);
       row.end();

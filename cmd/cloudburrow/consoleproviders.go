@@ -103,9 +103,9 @@ func (pubsubProvider) Title() string { return "Pub/Sub" }
 func (p pubsubProvider) List(ctx context.Context, project string) (console.Listing, error) {
 	if project == "" {
 		return console.Listing{
-			Columns: []string{"Subscriptions"},
-			Noun:    "topics",
-			Prompt:  "Pub/Sub lists topics per project. Choose one in the toolbar.",
+			Columns: topicListColumns, NameColumn: "Topic name",
+			Noun:   "topics",
+			Prompt: "Pub/Sub lists topics per project. Choose one in the toolbar.",
 		}, nil
 	}
 
@@ -131,9 +131,9 @@ func (p pubsubProvider) List(ctx context.Context, project string) (console.Listi
 		if err != nil {
 			return console.Listing{}, fmt.Errorf("list topics: %w", err)
 		}
-		items = append(items, console.Resource{Name: t.GetName()})
+		items = append(items, topicRow(project, t))
 	}
-	return console.Listing{Columns: []string{}, Noun: "topics", Items: items, Total: len(items)}, nil
+	return console.Listing{Columns: topicListColumns, NameColumn: "Topic name", Noun: "topics", Items: items, Total: len(items)}, nil
 }
 
 // tasksProvider lists queues from the in-process Cloud Tasks store.
@@ -1749,24 +1749,17 @@ func (p storageProvider) Delete(ctx context.Context, _ string, name string) erro
 
 // Pub/Sub: create and delete topics.
 
+//
+// Google's Create topic page (#1847): Topic ID, Add a default subscription
+// (checked: a topic with no subscription drops every message published to
+// it, a confusing first experience for someone testing a publisher), Use a
+// schema and Enable message retention, each revealing its fields.
 func (pubsubProvider) CreateForm() (string, []console.Field) {
-	return "Create topic", append([]console.Field{
-		{
-			Name: "name", Label: "Topic ID", Type: "text", Required: true,
-			Help:    "3-255 characters, starting with a letter.",
-			Pattern: `^[A-Za-z][A-Za-z0-9._~%+\-]{2,254}$`,
-		},
-		{
-			// The console this mirrors offers the same checkbox on Create
-			// topic, and it is not decoration: a topic with no subscription
-			// drops every message published to it, which is a confusing first
-			// experience for someone testing a publisher.
-			Name: "defaultSubscription", Label: "Add a default subscription", Type: "checkbox",
-			Default: "true",
-			Help:    "Creates a pull subscription named after the topic, with the default settings.",
-		},
-	}, topicCreateFields()...)
+	return "Create topic", topicCreatePageFields()
 }
+
+func (pubsubProvider) CreateOnPage() bool  { return true }
+func (pubsubProvider) CreateTitle() string { return "Create topic" }
 
 func (p pubsubProvider) client(ctx context.Context, project string) (*pubsub.Client, error) {
 	return pubsub.NewClient(ctx, project,
@@ -1791,6 +1784,10 @@ func (p pubsubProvider) Create(ctx context.Context, project string, values map[s
 	defer func() { _ = c.Close() }()
 
 	name := fmt.Sprintf("projects/%s/topics/%s", project, id)
+	values, err = topicPageValues(values)
+	if err != nil {
+		return "", err
+	}
 	t, err := topicFromForm(project, name, values)
 	if err != nil {
 		return "", err
@@ -4612,7 +4609,8 @@ func (p pubsubProvider) Detail(ctx context.Context, project string, path []strin
 	// Edit topic (#786) is offered once the topic has been read, prefilled
 	// from what the emulator returned.
 	var edit *console.EditForm
-	if t, err := c.TopicAdminClient.GetTopic(ctx, &pubsubpb.GetTopicRequest{Topic: topic}); err == nil {
+	t, terr := c.TopicAdminClient.GetTopic(ctx, &pubsubpb.GetTopicRequest{Topic: topic})
+	if terr == nil {
 		retention := "None"
 		if d := t.GetMessageRetentionDuration(); d != nil {
 			retention = formatPubSubDuration(d)
@@ -4636,15 +4634,28 @@ func (p pubsubProvider) Detail(ctx context.Context, project string, path []strin
 		edit = topicEditForm(t)
 	}
 
+	// Google's tabs, in its order (#1847): Subscriptions, Snapshots,
+	// Metrics, Details, Messages, Ingestion, then Permissions. The tab
+	// actions (Publish message, Pull) are drawn in the Messages tab, the
+	// rest beside the title.
+	actions := p.DetailActions(ctx, project, path)
+	sections := []console.Section{
+		{ID: "subscriptions", Label: "Subscriptions", Listing: subs},
+		// ListTopicSnapshots (#787): what this topic's subscriptions can
+		// seek to.
+		topicSnapshotsSection(ctx, c.TopicAdminClient, project, topic),
+		metricsSection(),
+	}
+	if terr == nil {
+		sections = append(sections, topicDetailsSection(t, len(subs.Items)))
+	}
+	sections = append(sections, topicMessagesSection(actions), topicIngestionSection(t),
+		console.Section{ID: "permissions", Kind: console.KindPermissions})
 	return console.Detail{
-		Edit:    edit,
-		Summary: summary,
-		Sections: []console.Section{
-			{ID: "subscriptions", Label: "Subscriptions", Listing: subs},
-			// ListTopicSnapshots (#787): what this topic's subscriptions can
-			// seek to.
-			topicSnapshotsSection(ctx, c.TopicAdminClient, project, topic),
-		},
+		Edit:     edit,
+		Summary:  summary,
+		Actions:  headerActions(actions, topicTabActions),
+		Sections: sections,
 	}, nil
 }
 
