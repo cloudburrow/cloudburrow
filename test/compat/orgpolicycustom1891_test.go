@@ -393,6 +393,7 @@ func TestGcloudOrgPoliciesCustomConstraints(t *testing.T) {
 // documented message, and creates them in us-central1-b and us-east1-c.
 func TestOrgPolicyEnforcementBigtableLocations(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, envBigQueryResourceManager, EnvResourceManager)
 	ctx := h.Context()
 	t.Setenv("BIGTABLE_EMULATOR_HOST", h.Endpoint(EnvBigtable))
 	c := orgPolicyClients(t, h)["grpc"]
@@ -434,6 +435,7 @@ func TestOrgPolicyEnforcementBigtableLocations(t *testing.T) {
 // and creates one in US, as datasets.insert does.
 func TestOrgPolicyEnforcementBigQueryDDL(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, envBigQueryResourceManager, EnvResourceManager)
 	ctx := h.Context()
 	endpoint := h.Endpoint(EnvBigQuery)
 	c := orgPolicyClients(t, h)["grpc"]
@@ -481,6 +483,7 @@ func TestOrgPolicyEnforcementBigQueryDDL(t *testing.T) {
 // it off.
 func TestOrgPolicyCustomConstraintsFirestore(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, envFirestoreResourceManager, EnvResourceManager)
 	fc := firestoreAdmin(t, h)
 	ctx := h.Context()
 	c := orgPolicyClients(t, h)["grpc"]
@@ -519,6 +522,7 @@ func TestOrgPolicyCustomConstraintsFirestore(t *testing.T) {
 // and validates an Artifact Registry one.
 func TestOrgPolicyCustomConstraintsRun(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, envRunResourceManager, EnvResourceManager)
 	rc := runClient(t, h)
 	ctx := h.Context()
 	c := orgPolicyClients(t, h)["grpc"]
