@@ -7,8 +7,10 @@ import (
 	"net/http"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	"cloud.google.com/go/security/privateca/apiv1/privatecapb"
+	"cloud.google.com/go/kms/apiv1/kmspb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -17,6 +19,8 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
+	"github.com/cloudburrow/cloudburrow/internal/netfwd"
+	"github.com/cloudburrow/cloudburrow/internal/service/kms"
 	"github.com/cloudburrow/cloudburrow/internal/service/privateca"
 	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
 	"github.com/cloudburrow/cloudburrow/internal/telemetry"
@@ -36,6 +40,10 @@ type privateCAService struct {
 	requests  func(rest.Request)
 	server    *grpctransport.Server
 	api       *privateca.Server
+	// kms is the instance's Cloud KMS, or nil; storage its Cloud Storage
+	// tunnel (#1834).
+	kms     *kmsService
+	storage func() *netfwd.Forwarder
 }
 
 func newPrivateCAService(cfg config.Config) *privateCAService {
@@ -87,6 +95,18 @@ func (s *privateCAService) Start(ctx context.Context) error {
 	s.api = api
 	// CA certificates and CRLs are published on this port (#1834).
 	api.SetAddress(s.Addr)
+	if s.kms != nil {
+		api.UseKMS(privateCAKMS{svc: s.kms})
+	}
+	if serviceEnabled(s.cfg, config.ServiceStorage) && s.storage != nil {
+		addr := func() string {
+			if f := s.storage(); f != nil {
+				return f.HostAddr()
+			}
+			return ""
+		}
+		api.UseStorage(storageObjectWriter{src: storageSourceFetcher{cfg: s.cfg, addr: addr}, client: &http.Client{Timeout: time.Minute}}, addr)
+	}
 	s.server = grpctransport.New(net.JoinHostPort(s.cfg.BindAddress, strconv.Itoa(s.cfg.Endpoints.PrivateCA)))
 	s.server.Observe(s.calls)
 	if s.tracing != nil {
@@ -195,4 +215,62 @@ func (c sqlAdminCAS) IssueCertificate(ctx context.Context, pool string, r sqladm
 		return sqladmin.IssuedCertificate{}, err
 	}
 	return sqladmin.IssuedCertificate{Name: cert.GetName(), CertPEM: cert.GetPemCertificate(), ChainPEM: cert.GetPemCertificateChain()}, nil
+}
+
+// privateCAKMS is privateca.KMS over this instance's Cloud KMS server.
+type privateCAKMS struct{ svc *kmsService }
+
+func (k privateCAKMS) api() (*kms.Server, error) {
+	if a := k.svc.API(); a != nil {
+		return a, nil
+	}
+	return nil, status.Error(codes.Unavailable, "Cloud KMS has not started yet")
+}
+
+func (k privateCAKMS) GetCryptoKey(ctx context.Context, r *kmspb.GetCryptoKeyRequest) (*kmspb.CryptoKey, error) {
+	a, err := k.api()
+	if err != nil {
+		return nil, err
+	}
+	return a.GetCryptoKey(ctx, r)
+}
+
+func (k privateCAKMS) GetCryptoKeyVersion(ctx context.Context, r *kmspb.GetCryptoKeyVersionRequest) (*kmspb.CryptoKeyVersion, error) {
+	a, err := k.api()
+	if err != nil {
+		return nil, err
+	}
+	return a.GetCryptoKeyVersion(ctx, r)
+}
+
+func (k privateCAKMS) GetPublicKey(ctx context.Context, r *kmspb.GetPublicKeyRequest) (*kmspb.PublicKey, error) {
+	a, err := k.api()
+	if err != nil {
+		return nil, err
+	}
+	return a.GetPublicKey(ctx, r)
+}
+
+func (k privateCAKMS) AsymmetricSign(ctx context.Context, r *kmspb.AsymmetricSignRequest) (*kmspb.AsymmetricSignResponse, error) {
+	a, err := k.api()
+	if err != nil {
+		return nil, err
+	}
+	return a.AsymmetricSign(ctx, r)
+}
+
+func (k privateCAKMS) Encrypt(ctx context.Context, r *kmspb.EncryptRequest) (*kmspb.EncryptResponse, error) {
+	a, err := k.api()
+	if err != nil {
+		return nil, err
+	}
+	return a.Encrypt(ctx, r)
+}
+
+func (k privateCAKMS) Decrypt(ctx context.Context, r *kmspb.DecryptRequest) (*kmspb.DecryptResponse, error) {
+	a, err := k.api()
+	if err != nil {
+		return nil, err
+	}
+	return a.Decrypt(ctx, r)
 }

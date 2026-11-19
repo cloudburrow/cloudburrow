@@ -70,17 +70,10 @@ func newKey(alg privatecapb.CertificateAuthority_SignHashAlgorithm) (crypto.Sign
 // subordinate's own certificate is signed with its issuer's algorithm, so
 // that is not it.
 func signatureAlgorithm(c *caRecord) x509.SignatureAlgorithm {
-	switch c.CA.GetKeySpec().GetAlgorithm() {
-	case privatecapb.CertificateAuthority_RSA_PSS_2048_SHA256, privatecapb.CertificateAuthority_RSA_PSS_3072_SHA256, privatecapb.CertificateAuthority_RSA_PSS_4096_SHA256:
-		return x509.SHA256WithRSAPSS
-	case privatecapb.CertificateAuthority_RSA_PKCS1_2048_SHA256, privatecapb.CertificateAuthority_RSA_PKCS1_3072_SHA256, privatecapb.CertificateAuthority_RSA_PKCS1_4096_SHA256:
-		return x509.SHA256WithRSA
-	case privatecapb.CertificateAuthority_EC_P256_SHA256:
-		return x509.ECDSAWithSHA256
-	case privatecapb.CertificateAuthority_EC_P384_SHA384:
-		return x509.ECDSAWithSHA384
+	if k, ok := c.Key.(*kmsSigner); ok {
+		return sigAlgOf(k.alg)
 	}
-	return x509.UnknownSignatureAlgorithm
+	return sigAlgOf(c.CA.GetKeySpec().GetAlgorithm())
 }
 
 // subjectName is a Subject as an X.509 name. An rdn_sequence is kept in
@@ -105,7 +98,18 @@ func subjectName(s *privatecapb.Subject) (pkix.Name, error) {
 	n.StreetAddress = one(s.GetStreetAddress())
 	n.PostalCode = one(s.GetPostalCode())
 	if len(s.GetRdnSequence()) > 0 {
-		return n, apierror.Unimplemented("subject.rdn_sequence (SubjectRequestMode RDN_SEQUENCE) is not implemented in CloudBurrow yet")
+		// The certificate's subject is the rdn_sequence (rdnSubject); its
+		// named fields are read from it.
+		raw, err := rdnSubject(s)
+		if err != nil {
+			return n, err
+		}
+		var seq pkix.RDNSequence
+		if _, err := asn1.Unmarshal(raw, &seq); err != nil {
+			return n, apierror.InvalidArgument("subject.rdn_sequence: %v", err)
+		}
+		n = pkix.Name{}
+		n.FillFromRDNSequence(&seq)
 	}
 	return n, nil
 }

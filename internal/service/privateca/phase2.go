@@ -69,6 +69,10 @@ func (s *Server) accessURLs(ca *privatecapb.CertificateAuthority) *privatecapb.C
 	pool, _, _ := strings.Cut(ca.GetName(), "/certificateAuthorities/")
 	p, ok := s.pools[pool]
 	base := s.contentBase(ca.GetName())
+	if ca.GetGcsBucket() != "" {
+		// Published to the CA's bucket, as Google publishes there.
+		base = s.bucketBase(ca)
+	}
 	if !ok || base == "" {
 		return out
 	}
@@ -208,16 +212,16 @@ func crlReason(r privatecapb.RevocationReason) int {
 func (s *Server) regenCRL(caName string) error {
 	c, ok := s.cas[caName]
 	if !ok || c.Cert == nil {
-		return nil
+		return s.publish(caName)
 	}
 	switch c.CA.GetState() {
 	case privatecapb.CertificateAuthority_ENABLED, privatecapb.CertificateAuthority_STAGED, privatecapb.CertificateAuthority_DISABLED:
 	default:
-		return nil
+		return s.publish(caName)
 	}
 	if c.Cert.KeyUsage != 0 && c.Cert.KeyUsage&x509.KeyUsageCRLSign == 0 {
 		// The CA's certificate does not allow it to sign CRLs.
-		return nil
+		return s.publish(caName)
 	}
 	now := s.now()
 	name := s.crlFor(caName)
@@ -264,7 +268,7 @@ func (s *Server) regenCRL(caName string) error {
 		out.AccessUrl = urls[0]
 	}
 	s.crls[name] = out
-	return nil
+	return s.publish(caName)
 }
 
 func (s *Server) crl(name string) (*privatecapb.CertificateRevocationList, error) {
@@ -350,6 +354,11 @@ func (a *API) FetchCertificateAuthorityCsr(_ context.Context, req *privatecapb.F
 	if c.CA.GetState() != privatecapb.CertificateAuthority_AWAITING_USER_ACTIVATION {
 		return nil, wrongState(c.CA, "fetch the CSR of", privatecapb.CertificateAuthority_AWAITING_USER_ACTIVATION)
 	}
+	if c.CSR == "" {
+		if c.CSR, err = makeCSR(c); err != nil {
+			return nil, signErr(err, func(error) error { return err })
+		}
+	}
 	return &privatecapb.FetchCertificateAuthorityCsrResponse{PemCsr: c.CSR}, nil
 }
 
@@ -383,7 +392,11 @@ func makeCSR(rec *caRecord) (string, error) {
 		}
 		exts = append(exts, e)
 	}
-	csr, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{Subject: subj, ExtraExtensions: exts}, rec.Key)
+	raw, err := rdnSubject(cfg.GetSubjectConfig().GetSubject())
+	if err != nil {
+		return "", err
+	}
+	csr, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{Subject: subj, RawSubject: raw, ExtraExtensions: exts}, rec.Key)
 	if err != nil {
 		return "", apierror.InvalidArgument("the CSR cannot be made: %v", err)
 	}
@@ -509,15 +522,8 @@ func (s *Server) template(name string) (*templateRecord, error) {
 
 // checkTemplate refuses what a template holds that is not served.
 func checkTemplate(t *privatecapb.CertificateTemplate) error {
-	if t.GetIdentityConstraints().GetCelExpression().GetExpression() != "" {
-		return apierror.Unimplemented("identity_constraints.cel_expression is not implemented in CloudBurrow yet")
-	}
-	if pe := t.GetPassthroughExtensions(); len(pe.GetKnownExtensions()) > 0 || len(pe.GetAdditionalExtensions()) > 0 {
-		return apierror.Unimplemented("passthrough_extensions is not implemented in CloudBurrow yet: no CSR extension is copied")
-	}
-	if t.GetPredefinedValues().GetCaOptions().GetIsCa() {
-		// Allowed, as Google allows a template that issues CA certificates.
-		return nil
+	if _, err := compileIdentity("identity_constraints", t.GetIdentityConstraints()); err != nil {
+		return err
 	}
 	return nil
 }

@@ -3,6 +3,7 @@ module github.com/cloudburrow/cloudburrow
 go 1.26.5
 
 require (
+	cel.dev/cel-go v0.33.4
 	cloud.google.com/go v0.123.0
 	cloud.google.com/go/aiplatform v1.127.0
 	cloud.google.com/go/artifactregistry v1.27.0

@@ -293,6 +293,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	schedulerSvc.register(coord)
 	// Certificate Authority Service (#1834), in process.
 	privateCASvc := newPrivateCAService(cfg)
+	if privateCASvc != nil {
+		// A CA key held in Cloud KMS and a CMEK pool use this instance's
+		// Cloud KMS, and a CA's gcs_bucket its Cloud Storage, in process.
+		privateCASvc.kms = kmsSvc
+		privateCASvc.storage = func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") }
+	}
 	privateCASvc.register(coord)
 	// The Memorystore admin API (#1302), over the Valkey server's tunnel.
 	memorystoreAdminSvc := newMemorystoreAdminService(cfg, func() *netfwd.Forwarder { return forwarderFor(forwarders, "memorystore") })

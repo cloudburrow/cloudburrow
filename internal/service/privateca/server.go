@@ -10,8 +10,11 @@
 //
 // Subordinate CAs, certificate templates and CRLs (published, with each
 // CA's certificate, at the access URLs this port serves) are phase 2.
-// What is not served yet (keys held in Cloud KMS, CMEK pools) answers 501
-// UNIMPLEMENTED with its reason.
+// A CA's key may be a Cloud KMS CryptoKeyVersion of the instance's Cloud
+// KMS, which signs everything the CA issues; a pool's encryption_spec wraps
+// its certificates' data at rest with a Cloud KMS key; a CA's gcs_bucket
+// has its CA certificate and CRLs published to the instance's Cloud
+// Storage.
 // docs/privateca.md is the user's guide.
 package privateca
 
@@ -99,6 +102,18 @@ type Server struct {
 
 	// addr is the address published content is served at.
 	addr func() string
+	// kms is the instance's Cloud KMS, or nil (kmskey.go).
+	kms KMS
+	// objects writes a CA's published content to its gcs_bucket, and
+	// storageAddr is where the instance's Cloud Storage serves it
+	// (publish.go); nil without Cloud Storage.
+	objects     ObjectWriter
+	storageAddr func() string
+	// sealed are certificates of CMEK pools loaded encrypted that Cloud
+	// KMS has not decrypted yet; sealedCache each certificate's last
+	// ciphertext (cmek.go).
+	sealed      map[string]*sealedCert
+	sealedCache map[string]*sealedCert
 
 	// now is the clock, for tests.
 	now func() time.Time
@@ -111,7 +126,7 @@ func NewServer(state string) (*Server, error) {
 		pools: map[string]*poolRecord{}, cas: map[string]*caRecord{},
 		certs: map[string]*privatecapb.Certificate{}, ops: map[string]*longrunningpb.Operation{},
 		templates: map[string]*templateRecord{}, crls: map[string]*privatecapb.CertificateRevocationList{},
-		crlPolicies: map[string]**iampolicy.Stored{}}
+		crlPolicies: map[string]**iampolicy.Stored{}, sealed: map[string]*sealedCert{}, sealedCache: map[string]*sealedCert{}}
 	if state != "" {
 		if err := s.load(); err != nil {
 			return nil, err
@@ -132,11 +147,17 @@ type disk struct {
 	Templates        map[string]json.RawMessage `json:"templates,omitempty"`
 	TemplatePolicies map[string]json.RawMessage `json:"templatePolicies,omitempty"`
 	CRLs             map[string]json.RawMessage `json:"crls,omitempty"`
+	// SealedCerts are the certificates of CMEK pools, encrypted.
+	SealedCerts map[string]*sealedCert `json:"sealedCertificates,omitempty"`
 }
 
 type diskCA struct {
 	CA  json.RawMessage `json:"ca"`
-	Key string          `json:"key"`
+	Key string          `json:"key,omitempty"`
+	// PublicKey and Algorithm are a Cloud KMS key's, whose private part
+	// stays in Cloud KMS.
+	PublicKey string `json:"publicKey,omitempty"`
+	Algorithm string `json:"algorithm,omitempty"`
 }
 
 func (s *Server) load() error {
@@ -170,21 +191,34 @@ func (s *Server) load() error {
 		if err := protojson.Unmarshal(dc.CA, ca); err != nil {
 			return fmt.Errorf("parse CA %s: %w", n, err)
 		}
-		blk, _ := pem.Decode([]byte(dc.Key))
-		if blk == nil {
-			return fmt.Errorf("CA %s: no key", n)
+		var key crypto.Signer
+		if v := ca.GetKeySpec().GetCloudKmsKeyVersion(); v != "" {
+			pub, err := parsePublicPEM(dc.PublicKey)
+			if err != nil {
+				return fmt.Errorf("CA %s public key: %w", n, err)
+			}
+			key = &kmsSigner{s: s, version: v, pub: pub,
+				alg: privatecapb.CertificateAuthority_SignHashAlgorithm(privatecapb.CertificateAuthority_SignHashAlgorithm_value[dc.Algorithm])}
+		} else {
+			blk, _ := pem.Decode([]byte(dc.Key))
+			if blk == nil {
+				return fmt.Errorf("CA %s: no key", n)
+			}
+			k, err := x509.ParsePKCS8PrivateKey(blk.Bytes)
+			if err != nil {
+				return fmt.Errorf("CA %s key: %w", n, err)
+			}
+			key = k.(crypto.Signer)
 		}
-		k, err := x509.ParsePKCS8PrivateKey(blk.Bytes)
-		if err != nil {
-			return fmt.Errorf("CA %s key: %w", n, err)
-		}
-		rec := &caRecord{CA: ca, Key: k.(crypto.Signer)}
+		rec := &caRecord{CA: ca, Key: key}
 		if len(ca.GetPemCaCertificates()) > 0 {
 			if c, err := parsePEMCert(ca.GetPemCaCertificates()[0]); err == nil {
 				rec.Cert = c
 			}
 		}
-		if ca.GetState() == privatecapb.CertificateAuthority_AWAITING_USER_ACTIVATION {
+		if _, inKMS := key.(*kmsSigner); !inKMS && ca.GetState() == privatecapb.CertificateAuthority_AWAITING_USER_ACTIVATION {
+			// A Cloud KMS key's CSR is made when it is fetched, once Cloud
+			// KMS is up.
 			if rec.CSR, err = makeCSR(rec); err != nil {
 				return fmt.Errorf("CA %s CSR: %w", n, err)
 			}
@@ -218,6 +252,9 @@ func (s *Server) load() error {
 			return fmt.Errorf("parse certificate %s: %w", n, err)
 		}
 		s.certs[n] = c
+	}
+	for n, sc := range d.SealedCerts {
+		s.sealed[n] = sc
 	}
 	for n, raw := range d.Ops {
 		o := &longrunningpb.Operation{}
@@ -277,13 +314,33 @@ func (s *Server) save() error {
 		if err != nil {
 			return err
 		}
+		if k, ok := c.Key.(*kmsSigner); ok {
+			p, err := publicPEM(k.pub)
+			if err != nil {
+				return err
+			}
+			d.CAs[n] = diskCA{CA: b, PublicKey: p, Algorithm: k.alg.String()}
+			continue
+		}
 		der, err := x509.MarshalPKCS8PrivateKey(c.Key)
 		if err != nil {
 			return err
 		}
 		d.CAs[n] = diskCA{CA: b, Key: string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}))}
 	}
+	d.SealedCerts = map[string]*sealedCert{}
+	for n, sc := range s.sealed {
+		d.SealedCerts[n] = sc
+	}
 	for n, c := range s.certs {
+		if key := s.cmekKey(n); key != "" {
+			sc, err := s.seal(n, c, key)
+			if err != nil {
+				return err
+			}
+			d.SealedCerts[n] = sc
+			continue
+		}
 		b, err := protojson.Marshal(c)
 		if err != nil {
 			return err
@@ -330,6 +387,12 @@ func (s *Server) ResetProject(project string) error {
 	for n := range s.certs {
 		if match(n) {
 			delete(s.certs, n)
+		}
+	}
+	for n := range s.sealed {
+		if match(n) {
+			delete(s.sealed, n)
+			delete(s.sealedCache, n)
 		}
 	}
 	for n := range s.ops {

@@ -716,6 +716,13 @@
         "verification": "go.sum",
         "notes": "BigQuery ORC loads (#1713, internal/bigqueryfront), approved by the maintainer 2026-11-17: an ORC reader. No tagged releases upstream, so a commit is pinned."
       },
+      "goCEL": {
+        "module": "cel.dev/cel-go",
+        "version": "v0.33.4",
+        "license": "Apache-2.0",
+        "verification": "go.sum",
+        "notes": "Certificate Authority Service identity_constraints.cel_expression (#1834, internal/service/privateca/cel.go): Google's Common Expression Language, Google-authored and so pre-approved. cel.dev/cel-go is the module path github.com/google/cel-go moved to."
+      },
       "goSecp256k1": {
         "module": "github.com/decred/dcrd/dcrec/secp256k1/v4",
         "version": "v4.4.1",

@@ -2,6 +2,7 @@ package privateca
 
 import (
 	"context"
+	"crypto"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
@@ -114,7 +115,7 @@ func (s *Server) pool(name string) (*poolRecord, error) {
 
 // ---- CA pools ----
 
-func (a *API) CreateCaPool(_ context.Context, req *privatecapb.CreateCaPoolRequest) (*longrunningpb.Operation, error) {
+func (a *API) CreateCaPool(ctx context.Context, req *privatecapb.CreateCaPoolRequest) (*longrunningpb.Operation, error) {
 	s := a.s
 	if err := checkLocation("parent", req.GetParent()); err != nil {
 		return nil, err
@@ -129,13 +130,13 @@ func (a *API) CreateCaPool(_ context.Context, req *privatecapb.CreateCaPoolReque
 	if p.GetTier() == privatecapb.CaPool_TIER_UNSPECIFIED {
 		return nil, apierror.InvalidArgument("ca_pool.tier is required: ENTERPRISE or DEVOPS")
 	}
-	if p.GetEncryptionSpec().GetCloudKmsKey() != "" {
-		return nil, apierror.Unimplemented("ca_pool.encryption_spec (CMEK) is not implemented in CloudBurrow yet")
-	}
 	if err := checkPolicy(p.GetIssuancePolicy()); err != nil {
 		return nil, err
 	}
 	name := req.GetParent() + "/caPools/" + req.GetCaPoolId()
+	if err := s.checkEncryption(ctx, name, p.GetTier(), p.GetEncryptionSpec()); err != nil {
+		return nil, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.pools[name]; ok {
@@ -160,8 +161,8 @@ func checkPolicy(p *privatecapb.CaPool_IssuancePolicy) error {
 		// enforced below one minute: zero means unset.
 		return apierror.InvalidArgument("issuance_policy.backdate_duration must be between 1 minute and 48 hours")
 	}
-	if ic := p.GetIdentityConstraints(); ic != nil && ic.GetCelExpression().GetExpression() != "" {
-		return apierror.Unimplemented("issuance_policy.identity_constraints.cel_expression is not implemented in CloudBurrow yet")
+	if _, err := compileIdentity("issuance_policy.identity_constraints", p.GetIdentityConstraints()); err != nil {
+		return err
 	}
 	return nil
 }
@@ -199,7 +200,7 @@ func (a *API) ListCaPools(_ context.Context, req *privatecapb.ListCaPoolsRequest
 	return &privatecapb.ListCaPoolsResponse{CaPools: out, NextPageToken: next}, nil
 }
 
-func (a *API) UpdateCaPool(_ context.Context, req *privatecapb.UpdateCaPoolRequest) (*longrunningpb.Operation, error) {
+func (a *API) UpdateCaPool(ctx context.Context, req *privatecapb.UpdateCaPoolRequest) (*longrunningpb.Operation, error) {
 	in := req.GetCaPool()
 	if in == nil {
 		return nil, apierror.InvalidArgument("ca_pool is required")
@@ -227,12 +228,24 @@ func (a *API) UpdateCaPool(_ context.Context, req *privatecapb.UpdateCaPoolReque
 			next.IssuancePolicy = in.GetIssuancePolicy()
 		case "publishing_options", "publishingOptions":
 			next.PublishingOptions = in.GetPublishingOptions()
+		case "encryption_spec", "encryptionSpec":
+			// gcloud privateca pools update --encryption-key; the pool's
+			// certificates are encrypted with the new key at the next save.
+			if err := s.checkEncryption(ctx, next.GetName(), next.GetTier(), in.GetEncryptionSpec()); err != nil {
+				return nil, err
+			}
+			next.EncryptionSpec = in.GetEncryptionSpec()
 		default:
-			return nil, apierror.InvalidArgument("update_mask path %q cannot be updated: labels, issuance_policy and publishing_options can", path)
+			return nil, apierror.InvalidArgument("update_mask path %q cannot be updated: labels, issuance_policy, publishing_options and encryption_spec can", path)
 		}
 	}
 	p.Pool = next
 	s.refreshAccessURLs(next.Name)
+	for _, k := range sortedKeys(s.cas, next.Name+"/certificateAuthorities/") {
+		if err := s.publish(k); err != nil {
+			return nil, err
+		}
+	}
 	loc, _, _ := strings.Cut(next.Name, "/caPools/")
 	return s.done(loc, "update", next.Name, next)
 }
@@ -255,6 +268,10 @@ func (a *API) DeleteCaPool(_ context.Context, req *privatecapb.DeleteCaPoolReque
 	delete(s.pools, req.GetName())
 	for _, k := range sortedKeys(s.certs, req.GetName()+"/certificates/") {
 		delete(s.certs, k)
+	}
+	for _, k := range sortedKeys(s.sealed, req.GetName()+"/certificates/") {
+		delete(s.sealed, k)
+		delete(s.sealedCache, k)
 	}
 	for _, k := range sortedKeys(s.crls, req.GetName()+"/certificateAuthorities/") {
 		delete(s.crls, k)
@@ -308,7 +325,7 @@ func (s *Server) ca(name string) (*caRecord, error) {
 	return c, nil
 }
 
-func (a *API) CreateCertificateAuthority(_ context.Context, req *privatecapb.CreateCertificateAuthorityRequest) (*longrunningpb.Operation, error) {
+func (a *API) CreateCertificateAuthority(ctx context.Context, req *privatecapb.CreateCertificateAuthorityRequest) (*longrunningpb.Operation, error) {
 	s := a.s
 	if err := checkID("certificate_authority_id", req.GetCertificateAuthorityId()); err != nil {
 		return nil, err
@@ -332,11 +349,8 @@ func (a *API) CreateCertificateAuthority(_ context.Context, req *privatecapb.Cre
 	if in.GetKeySpec() == nil {
 		return nil, apierror.InvalidArgument("certificate_authority.key_spec is required")
 	}
-	if in.GetKeySpec().GetCloudKmsKeyVersion() != "" {
-		return nil, apierror.Unimplemented("key_spec.cloud_kms_key_version (a CA key held in Cloud KMS) is not implemented in CloudBurrow yet")
-	}
-	if in.GetGcsBucket() != "" {
-		return nil, apierror.Unimplemented("certificate_authority.gcs_bucket is not implemented in CloudBurrow yet: CA certificates and CRLs are not published")
+	if err := checkBucket(in.GetGcsBucket()); err != nil {
+		return nil, err
 	}
 	if in.GetLifetime() == nil || in.GetLifetime().CheckValid() != nil || in.GetLifetime().AsDuration() <= 0 {
 		return nil, apierror.InvalidArgument("certificate_authority.lifetime must be a positive duration")
@@ -347,6 +361,9 @@ func (a *API) CreateCertificateAuthority(_ context.Context, req *privatecapb.Cre
 	if err != nil {
 		return nil, err
 	}
+	if in.GetGcsBucket() != "" && s.objects == nil {
+		return nil, apierror.FailedPrecondition("certificate_authority.gcs_bucket needs Cloud Storage, which this instance does not serve")
+	}
 	name := req.GetParent() + "/certificateAuthorities/" + req.GetCertificateAuthorityId()
 	s.purge()
 	if _, ok := s.cas[name]; ok {
@@ -356,8 +373,19 @@ func (a *API) CreateCertificateAuthority(_ context.Context, req *privatecapb.Cre
 	if len(sortedKeys(s.cas, loc+"/")) >= MaxCAsPerLocation {
 		return nil, status.Errorf(codes.ResourceExhausted, "quota exceeded: at most %d CAs per location per project", MaxCAsPerLocation)
 	}
-	key, sigAlg, err := newKey(in.GetKeySpec().GetAlgorithm())
-	if err != nil {
+	var (
+		key    crypto.Signer
+		sigAlg x509.SignatureAlgorithm
+	)
+	if v := in.GetKeySpec().GetCloudKmsKeyVersion(); v != "" {
+		// "Cloud KMS defines the key's algorithm and size": the CA signs
+		// with that version, through the instance's Cloud KMS.
+		k, err := s.kmsKey(ctx, v, req.GetParent())
+		if err != nil {
+			return nil, err
+		}
+		key, sigAlg = k, sigAlgOf(k.alg)
+	} else if key, sigAlg, err = newKey(in.GetKeySpec().GetAlgorithm()); err != nil {
 		return nil, apierror.Wrap(err)
 	}
 	subj, err := subjectName(in.GetConfig().GetSubjectConfig().GetSubject())
@@ -379,7 +407,7 @@ func (a *API) CreateCertificateAuthority(_ context.Context, req *privatecapb.Cre
 		rec.PemCaCertificates, rec.CaCertificateDescriptions = nil, nil
 		cr := &caRecord{CA: rec, Key: key}
 		if cr.CSR, err = makeCSR(cr); err != nil {
-			return nil, err
+			return nil, signErr(err, func(error) error { return err })
 		}
 		rec.AccessUrls = s.accessURLs(rec)
 		s.cas[name] = cr
@@ -388,6 +416,9 @@ func (a *API) CreateCertificateAuthority(_ context.Context, req *privatecapb.Cre
 	start := now.Truncate(time.Second)
 	t := &x509.Certificate{SerialNumber: serial(), Subject: subj, NotBefore: start, NotAfter: start.Add(in.GetLifetime().AsDuration()),
 		SignatureAlgorithm: sigAlg}
+	if t.RawSubject, err = rdnSubject(in.GetConfig().GetSubjectConfig().GetSubject()); err != nil {
+		return nil, err
+	}
 	if err := applySANs(t, in.GetConfig().GetSubjectConfig().GetSubjectAltName()); err != nil {
 		return nil, err
 	}
@@ -399,7 +430,7 @@ func (a *API) CreateCertificateAuthority(_ context.Context, req *privatecapb.Cre
 	}
 	der, err := x509.CreateCertificate(nil, t, t, key.Public(), key)
 	if err != nil {
-		return nil, apierror.InvalidArgument("the CA certificate cannot be made: %v", err)
+		return nil, signErr(err, func(err error) error { return apierror.InvalidArgument("the CA certificate cannot be made: %v", err) })
 	}
 	cert, _ := x509.ParseCertificate(der)
 	rec := clone(in)
@@ -410,11 +441,19 @@ func (a *API) CreateCertificateAuthority(_ context.Context, req *privatecapb.Cre
 	rec.State = privatecapb.CertificateAuthority_STAGED
 	rec.PemCaCertificates = []string{pemCert(der)}
 	rec.CaCertificateDescriptions = []*privatecapb.CertificateDescription{describe(cert)}
+	if len(t.RawSubject) > 0 {
+		rec.CaCertificateDescriptions[0].SubjectDescription.Subject.RdnSequence = rdnProto(cert.RawSubject)
+	}
 	rec.CreateTime = timestamppb.New(now)
 	rec.UpdateTime = rec.CreateTime
 	s.cas[name] = &caRecord{CA: rec, Key: key, Cert: cert}
 	rec.AccessUrls = s.accessURLs(rec)
 	if err := s.regenCRL(name); err != nil {
+		// Its content could not be published (gcs_bucket): no CA.
+		delete(s.cas, name)
+		for _, k := range sortedKeys(s.crls, name+"/certificateRevocationLists/") {
+			delete(s.crls, k)
+		}
 		return nil, err
 	}
 	return s.done(loc, "create", name, clone(rec))
@@ -603,10 +642,22 @@ func (a *API) CreateCertificate(_ context.Context, req *privatecapb.CreateCertif
 	if in == nil {
 		return nil, apierror.InvalidArgument("certificate is required")
 	}
-	switch in.GetSubjectMode() {
-	case privatecapb.SubjectRequestMode_SUBJECT_REQUEST_MODE_UNSPECIFIED, privatecapb.SubjectRequestMode_DEFAULT:
+	mode := in.GetSubjectMode()
+	switch mode {
+	case privatecapb.SubjectRequestMode_SUBJECT_REQUEST_MODE_UNSPECIFIED:
+		mode = privatecapb.SubjectRequestMode_DEFAULT
+	case privatecapb.SubjectRequestMode_DEFAULT, privatecapb.SubjectRequestMode_RDN_SEQUENCE:
+	case privatecapb.SubjectRequestMode_REFLECTED_SPIFFE:
+		// The SPIFFE ID is the caller's federated workload identity
+		// (tutorials/using-3pi-with-reflection). No caller of a local
+		// instance has one: CloudBurrow serves no Workload Identity
+		// Federation, so every request gets the error Google documents for
+		// "the caller does not have a SPIFFE identity" (troubleshooting).
+		// Its code is UNVERIFIED (docs re-read 2026-11-18: the page names
+		// none).
+		return nil, apierror.FailedPrecondition("Could not use the REFLECTED_SPIFFE subject mode because the caller does not have a SPIFFE identity. Please visit the CA Service documentation to ensure that this is a supported use-case.")
 	default:
-		return nil, apierror.Unimplemented("subject_mode %s is not implemented in CloudBurrow yet", in.GetSubjectMode())
+		return nil, apierror.InvalidArgument("subject_mode %s is not a SubjectRequestMode", mode)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -665,7 +716,11 @@ func (a *API) CreateCertificate(_ context.Context, req *privatecapb.CreateCertif
 			// config is what it asks the issuer for.
 			x509Req = sub.CA.GetConfig().GetX509Config()
 		}
-		if passthroughSubject(policy) && passthroughSubject(tmplPolicy(tmpl)) {
+		if passthroughSubject(policy) && passthroughSubject(tmplPolicy(tmpl)) && mode == privatecapb.SubjectRequestMode_RDN_SEQUENCE {
+			// "When parsing a PEM CSR this mode will maintain the sequence
+			// of RDNs found in the CSR's subject field."
+			t.RawSubject, t.Subject = csr.RawSubject, csr.Subject
+		} else if passthroughSubject(policy) && passthroughSubject(tmplPolicy(tmpl)) {
 			t.Subject = pkix.Name{CommonName: csr.Subject.CommonName, Country: csr.Subject.Country, Organization: csr.Subject.Organization,
 				OrganizationalUnit: csr.Subject.OrganizationalUnit, Locality: csr.Subject.Locality, Province: csr.Subject.Province,
 				StreetAddress: csr.Subject.StreetAddress, PostalCode: csr.Subject.PostalCode}
@@ -691,6 +746,9 @@ func (a *API) CreateCertificate(_ context.Context, req *privatecapb.CreateCertif
 			if t.Subject, err = subjectName(c.GetSubjectConfig().GetSubject()); err != nil {
 				return nil, err
 			}
+			if t.RawSubject, err = rdnSubject(c.GetSubjectConfig().GetSubject()); err != nil {
+				return nil, err
+			}
 		}
 		if passthroughSANs(policy) && passthroughSANs(tmplPolicy(tmpl)) {
 			if err := applySANs(t, c.GetSubjectConfig().GetSubjectAltName()); err != nil {
@@ -710,14 +768,31 @@ func (a *API) CreateCertificate(_ context.Context, req *privatecapb.CreateCertif
 	if t.Subject.String() == "" && len(t.DNSNames)+len(t.EmailAddresses)+len(t.IPAddresses)+len(t.URIs) == 0 {
 		return nil, apierror.InvalidArgument("the certificate needs a subject or a subject alternative name")
 	}
+	// passthrough_extensions: the request's extensions outside the pool's
+	// or the template's are dropped; a template's predefined_values outside
+	// the pool's, or the pool's baseline_values outside the template's,
+	// fail the issuance (UNVERIFIED: the code; the field comments name
+	// none).
+	x509Req = filterExtensions(filterExtensions(x509Req, policy.GetPassthroughExtensions()), tmpl.GetPassthroughExtensions())
+	if e := outsideExtensions(tmpl.GetPredefinedValues(), policy.GetPassthroughExtensions()); e != "" {
+		return nil, apierror.InvalidArgument("certificate_template %s's predefined_values set %s, which CaPool %s's issuance_policy.passthrough_extensions does not allow", tmpl.GetName(), e, req.GetParent())
+	}
+	if e := outsideExtensions(policy.GetBaselineValues(), tmpl.GetPassthroughExtensions()); e != "" {
+		return nil, apierror.InvalidArgument("CaPool %s's baseline_values set %s, which certificate_template %s's passthrough_extensions does not allow", req.GetParent(), e, tmpl.GetName())
+	}
 	if err := applyX509(t, mergeX509(mergeX509(x509Req, tmpl.GetPredefinedValues()), policy.GetBaselineValues())); err != nil {
+		return nil, err
+	}
+	// The resolved subject and SANs must satisfy the pool's and the
+	// template's cel_expression.
+	if err := checkIdentity("issuance_policy.identity_constraints", policy.GetIdentityConstraints(), t); err != nil {
+		return nil, err
+	}
+	if err := checkIdentity("certificate_template.identity_constraints", tmpl.GetIdentityConstraints(), t); err != nil {
 		return nil, err
 	}
 	publishTo(t, issuer.CA)
 	now := s.now()
-	if in.GetRequestedNotBeforeTime() != nil {
-		return nil, apierror.Unimplemented("requested_not_before_time is not implemented in CloudBurrow yet")
-	}
 	maxLife := policy.GetMaximumLifetime()
 	if tl := tmpl.GetMaximumLifetime(); tl != nil && (maxLife == nil || tl.AsDuration() < maxLife.AsDuration()) {
 		maxLife = tl
@@ -725,12 +800,31 @@ func (a *API) CreateCertificate(_ context.Context, req *privatecapb.CreateCertif
 	if t.NotBefore, t.NotAfter, err = validity(now, in.GetLifetime(), maxLife, policy.GetBackdateDuration(), issuer.Cert.NotAfter); err != nil {
 		return nil, err
 	}
+	if nb := in.GetRequestedNotBeforeTime(); nb != nil {
+		// "This field may only be set if the
+		// CaPool.IssuancePolicy.allow_requester_specified_not_before_time
+		// field is set to true"; then "the certificate will be issued with
+		// this 'not_before_time'", and the lifetime runs from it.
+		if !policy.GetAllowRequesterSpecifiedNotBeforeTime() {
+			return nil, apierror.InvalidArgument("requested_not_before_time may only be set when CaPool %s's issuance_policy.allow_requester_specified_not_before_time is true", req.GetParent())
+		}
+		if err := nb.CheckValid(); err != nil {
+			return nil, apierror.InvalidArgument("requested_not_before_time: %v", err)
+		}
+		life := t.NotAfter.Sub(t.NotBefore)
+		if t.NotBefore, t.NotAfter, err = validity(nb.AsTime(), durationpb.New(life), nil, nil, issuer.Cert.NotAfter); err != nil {
+			return nil, err
+		}
+		if !t.NotBefore.Before(t.NotAfter) {
+			return nil, apierror.InvalidArgument("requested_not_before_time %s is not before the issuing CA's expiry %s", nb.AsTime().UTC().Format(time.RFC3339), issuer.Cert.NotAfter.UTC().Format(time.RFC3339))
+		}
+	}
 	if t.SubjectKeyId, err = keyID(pub); err != nil {
 		return nil, apierror.InvalidArgument("the public key: %v", err)
 	}
 	der, err := x509.CreateCertificate(nil, t, issuer.Cert, pub, issuer.Key)
 	if err != nil {
-		return nil, apierror.InvalidArgument("the certificate cannot be issued: %v", err)
+		return nil, signErr(err, func(err error) error { return apierror.InvalidArgument("the certificate cannot be issued: %v", err) })
 	}
 	cert, _ := x509.ParseCertificate(der)
 	out := clone(in)
@@ -739,15 +833,20 @@ func (a *API) CreateCertificate(_ context.Context, req *privatecapb.CreateCertif
 	out.PemCertificate = pemCert(der)
 	out.PemCertificateChain = issuer.CA.GetPemCaCertificates()
 	out.CertificateDescription = describe(cert)
+	if len(t.RawSubject) > 0 {
+		out.CertificateDescription.SubjectDescription.Subject.RdnSequence = rdnProto(cert.RawSubject)
+	}
 	out.CreateTime = timestamppb.New(now)
 	out.UpdateTime = out.CreateTime
-	out.SubjectMode = privatecapb.SubjectRequestMode_DEFAULT
+	out.SubjectMode = mode
 	out.Lifetime = durationpb.New(t.NotAfter.Sub(t.NotBefore))
 	// A DevOps pool "does not store certificates": the certificate is
 	// returned and not kept, so Get, List and Revoke cannot find it.
 	if enterprise {
 		s.certs[name] = clone(out)
 		if err := s.save(); err != nil {
+			// A CMEK pool whose key cannot encrypt it keeps no certificate.
+			delete(s.certs, name)
 			return nil, apierror.Wrap(err)
 		}
 	}
@@ -794,6 +893,10 @@ func (s *Server) cert(name string) (*privatecapb.Certificate, error) {
 	if !certRE.MatchString(name) {
 		return nil, apierror.InvalidArgument("name %q must be projects/{project}/locations/{location}/caPools/{ca_pool}/certificates/{certificate}", name)
 	}
+	s.unseal()
+	if sc, ok := s.sealed[name]; ok {
+		return nil, sealedErr(name, sc.Key)
+	}
 	c, ok := s.certs[name]
 	if !ok {
 		return nil, apierror.NotFound("Certificate %s not found", name)
@@ -820,6 +923,10 @@ func (a *API) ListCertificates(_ context.Context, req *privatecapb.ListCertifica
 	defer s.mu.Unlock()
 	if !poolRE.MatchString(req.GetParent()) {
 		return nil, apierror.InvalidArgument("parent %q must be a CaPool name", req.GetParent())
+	}
+	s.unseal()
+	if k := sortedKeys(s.sealed, req.GetParent()+"/certificates/"); len(k) > 0 {
+		return nil, sealedErr(k[0], s.sealed[k[0]].Key)
 	}
 	out, next, err := page("privateca-certs:"+req.GetParent(), sortedKeys(s.certs, req.GetParent()+"/certificates/"), req.GetPageToken(), req.GetPageSize(),
 		func(k string) *privatecapb.Certificate { return clone(s.certs[k]) })
@@ -859,6 +966,10 @@ func (a *API) RevokeCertificate(_ context.Context, req *privatecapb.RevokeCertif
 	next.RevocationDetails = &privatecapb.Certificate_RevocationDetails{RevocationState: req.GetReason(), RevocationTime: now}
 	next.UpdateTime = now
 	s.certs[req.GetName()] = next
+	if err := s.save(); err != nil {
+		s.certs[req.GetName()] = c
+		return nil, apierror.Wrap(err)
+	}
 	if err := s.regenCRL(next.GetIssuerCertificateAuthority()); err != nil {
 		return nil, err
 	}
@@ -891,6 +1002,7 @@ func (a *API) UpdateCertificate(_ context.Context, req *privatecapb.UpdateCertif
 	next.UpdateTime = timestamppb.New(s.now())
 	s.certs[in.GetName()] = next
 	if err := s.save(); err != nil {
+		s.certs[in.GetName()] = c
 		return nil, apierror.Wrap(err)
 	}
 	return clone(next), nil
