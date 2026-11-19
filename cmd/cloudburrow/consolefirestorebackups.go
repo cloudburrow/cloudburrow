@@ -35,12 +35,16 @@ func collectionIDsField(help string) console.Field {
 func firestoreTransferActions() []console.Action {
 	return []console.Action{
 		{ID: "exportdocuments", Label: "Export", Fields: []console.Field{
-			{Name: "outputUriPrefix", Label: "Destination", Type: "text", Required: true, Pattern: `^gs://.+`,
+			{Name: "outputUriPrefix", Label: "Destination", Type: "text", Required: true, Pattern: `^gs://.+`, Browse: "storage",
 				Help: "gs://BUCKET[/PATH] in this instance's Cloud Storage; a bucket alone gets a folder named after the time."},
 			collectionIDsField("The collections to export."),
+			// Google's "Export from an earlier point in time", for a
+			// database with PITR (#1845).
+			{Name: "snapshot", Label: "Export from an earlier point in time", Type: "checkbox", Default: "false",
+				Unavailable: fsNoSnapshotExport},
 		}},
 		{ID: "importdocuments", Label: "Import", Fields: []console.Field{
-			{Name: "inputUriPrefix", Label: "Export location", Type: "text", Required: true, Pattern: `^gs://.+/.+`,
+			{Name: "inputUriPrefix", Label: "Export location", Type: "text", Required: true, Pattern: `^gs://.+/.+`, Browse: "storage",
 				Help: "The gs:// folder of an export (its output URI prefix)."},
 			collectionIDsField("The collections to import."),
 		}, Confirm: "Imported documents overwrite the documents of the same names."},
@@ -52,6 +56,11 @@ func firestoreTransferActions() []console.Action {
 		}},
 	}
 }
+
+// fsNoSnapshotExport is why an export from an earlier point in time is drawn
+// disabled.
+const fsNoSnapshotExport = "Not available locally: the local Firestore keeps no earlier versions of the documents, " +
+	"so ExportDocuments refuses snapshot_time and an export is of the documents as they are now."
 
 func firestoreBackupActions() []console.Action {
 	return []console.Action{
@@ -133,6 +142,9 @@ func actTransfer(ctx context.Context, c *admin.FirestoreAdminClient, db string, 
 	project := strings.SplitN(db, "/databases/", 2)[0]
 	switch {
 	case action == "exportdocuments" && len(path) == 1:
+		if values["snapshot"] == "true" {
+			return true, errors.New(fsNoSnapshotExport)
+		}
 		op, err := c.ExportDocuments(ctx, &adminpb.ExportDocumentsRequest{Name: db,
 			OutputUriPrefix: strings.TrimSpace(values["outputUriPrefix"]), CollectionIds: collectionIDs(values["collectionIds"])})
 		if err == nil {

@@ -161,9 +161,9 @@ func (p firestoreDatabasesProvider) Detail(ctx context.Context, project string, 
 		// (https://docs.cloud.google.com/firestore/native/docs/query-data/indexing).
 		{ID: "indexes", Label: "Manual", Group: "Indexes", Listing: p.indexes(ctx, c, name, path[0]), Actions: acts["indexes"]},
 		{ID: "fields", Label: "Automatic", Group: "Indexes", Listing: p.fields(ctx, c, name, path[0]), Actions: acts["fields"]},
-		{ID: "importexport", Label: "Import/Export", Kind: console.KindText, Actions: acts["importexport"],
-			Text: "Export copies the database's documents, every collection group or the ones named, to a gs:// folder of this " +
-				"instance's Cloud Storage; Import reads such a folder back. Each runs as a long-running operation."},
+		{ID: "importexport", Label: "Import/Export", Listing: p.importExportJobs(ctx, c, name), Actions: acts["importexport"],
+			Note: "Export copies the database's documents, every collection group or the ones named, to a gs:// folder of this " +
+				"instance's Cloud Storage; Import reads such a folder back. Each runs as a long-running operation, listed here."},
 		{ID: "schedules", Label: "Disaster recovery", Listing: p.schedules(ctx, c, name, path[0]), Actions: acts["schedules"]},
 		{ID: "backups", Label: "Backups", Listing: p.backups(ctx, c, name, path[0])},
 		{ID: "ttl", Label: "Time-to-live", Listing: p.ttlPolicies(ctx, c, name, path[0]), Actions: acts["ttl"]},

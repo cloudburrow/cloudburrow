@@ -2092,3 +2092,5 @@ svg.bq-chart { display: block; border: 1px solid var(--border); border-radius: v
   .fs-panel { grid-template-columns: minmax(0, 1fr); }
   .fs-panel .fs-column + .fs-column { border-left: 1px solid var(--border, #dadce0); border-top: none; }
 }
+.browse-row { display: flex; gap: 8px; align-items: center; }
+.browse-row > input { flex: 1; min-width: 0; }

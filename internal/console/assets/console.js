@@ -5359,7 +5359,13 @@ function buildCreateForm(spec) {
     const node = isCheck
       ? el("div", { class: "form-row is-check" + (unavailableId ? " is-unavailable" : "") },
           el("div", { class: "check-line" }, control, label), help, unavailable, error)
-      : el("div", { class: "form-row" }, label, control, help, error);
+      : el("div", { class: "form-row" }, label,
+          // Browse (#1845): a gs:// field chooses a bucket of this
+          // instance's Cloud Storage, as Google's Choose Destination does.
+          f.browse === "storage" ? el("div", { class: "browse-row" }, control,
+            el("button", { type: "button", class: "secondary", id: `browse-${f.name}`, text: "Browse",
+              onclick: () => browseBuckets(control) })) : control,
+          help, error);
 
     return { field: f, control, node, error, helpId, errorId, isCheck };
   });
@@ -12042,6 +12048,36 @@ async function requestCharts(samples = []) {
       ? el("ul", { class: "unmeasured" }, ...unmeasured.map((s) =>
           el("li", { text: `${s}: ${data.unmeasured_label}` })))
       : null);
+}
+
+// browseBuckets is a gs:// field's Browse (#1845): the project's buckets in
+// this instance's Cloud Storage, one of which fills the field as
+// gs://BUCKET/. It is drawn over the form it was opened from.
+async function browseBuckets(control) {
+  const { dialog, close } = openModal({ labelledBy: "browse-title" });
+  const body = el("div", { class: "browse-list" }, loadingState(3, { what: "buckets" }));
+  dialog.append(el("div", { class: "modal-body" },
+    el("h2", { id: "browse-title", text: "Select a bucket" }),
+    body,
+    el("div", { class: "modal-actions" },
+      el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }))));
+  try {
+    const list = await api(`/api/resources/storage?project=${encodeURIComponent(currentProject())}`);
+    const items = list.items || [];
+    if (list.unavailable || list.prompt) return setChildren(body, el("p", { class: "form-error", text: list.unavailable || list.prompt }));
+    if (!items.length) return setChildren(body, el("p", { class: "unavailable", text: "This project has no buckets. Create one in Cloud Storage first." }));
+    setChildren(body, el("ul", { class: "fs-rows", role: "list" }, ...items.map((b) => el("li", { class: "fs-row" },
+      el("button", { type: "button", class: "fs-row-link", text: b.name, onclick: () => {
+        control.value = `gs://${b.name}/`;
+        control.dispatchEvent(new Event("input", { bubbles: true }));
+        control.dispatchEvent(new Event("change", { bubbles: true }));
+        close();
+        control.focus();
+      } })))));
+    body.querySelector("button").focus();
+  } catch (err) {
+    setChildren(body, el("p", { class: "form-error", text: `Cloud Storage cannot be read: ${err.message}` }));
+  }
 }
 
 // --- Firestore's Data panel (#1845, round 2) ------------------------------

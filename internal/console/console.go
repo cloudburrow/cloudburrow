@@ -296,6 +296,10 @@ type Field struct {
 	// condition holds. Conditions joined by "&" must all hold:
 	// "type=Distribution&bucket_type=Linear" (#1863).
 	ShowWhen string `json:"showWhen,omitempty"`
+	// Browse names what the field's Browse button chooses from: "storage" is
+	// a bucket of this instance's Cloud Storage, filled in as gs://BUCKET/,
+	// as Google's Choose Destination does (#1845).
+	Browse string `json:"browse,omitempty"`
 	// Unavailable, on a checkbox, is why the choice cannot be made on this
 	// instance: the box is drawn as Google's page has it, unchecked and
 	// disabled, with the reason beside it, so the option stays visible and
@@ -690,14 +694,14 @@ type Section struct {
 	ID string `json:"id"`
 	// Label is the tab's text.
 	Label string `json:"label"`
-	// Kind selects the content field below. Empty means Listing, so this is
-	// backward compatible by construction.
-	Kind SectionKind `json:"kind,omitempty"`
-	// Listing is the section's content when Kind is KindListing, drawn by the
 	// Group, when set, draws this section and the others with the same Group
 	// as one tab named Group, with their labels on a strip inside it, as
 	// Google's Firestore Indexes page holds Manual and Automatic (#1845).
 	Group string `json:"group,omitempty"`
+	// Kind selects the content field below. Empty means Listing, so this is
+	// backward compatible by construction.
+	Kind SectionKind `json:"kind,omitempty"`
+	// Listing is the section's content when Kind is KindListing, drawn by the
 	// same table renderer as every other listing.
 	Listing Listing `json:"listing,omitempty"`
 	// Groups are the content when Kind is KindProperties. Headed groups
