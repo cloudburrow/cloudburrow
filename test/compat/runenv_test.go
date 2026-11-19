@@ -234,6 +234,9 @@ const (
 	// Resource Manager for the sql shard's tests that make a folder or
 	// purge a project (#1568).
 	envSQLResourceManager = "CLOUDBURROW_TEST_SQL_RESOURCEMANAGER"
+	// Service Usage for the sql shard's gcloud privateca roots create,
+	// which has generateServiceIdentity name the CA service agent (#1834).
+	envSQLServiceUsage = "CLOUDBURROW_TEST_SQL_SERVICEUSAGE"
 	// Resource Manager for the memorystore shard's IAM auth tests, which
 	// grant a principal the connect role (#1614).
 	envMemorystoreResourceManager = "CLOUDBURROW_TEST_MEMORYSTORE_RESOURCEMANAGER"
