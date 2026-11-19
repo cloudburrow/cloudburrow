@@ -43,12 +43,69 @@ var (
 	ErrDigestInvalid   = errors.New("provided digest did not match uploaded content")
 	ErrNameInvalid     = errors.New("invalid repository name")
 	ErrTagInvalid      = errors.New("invalid tag")
+	// ErrTagImmutable is a change to a tag of a repository with immutable
+	// tags: TagImmutableError names the tag and wraps it.
+	ErrTagImmutable = errors.New("tag is immutable")
 )
+
+// TagImmutableError is a tag a repository with immutable tags keeps: it
+// cannot be moved to another digest or deleted, and the version it names
+// cannot be deleted while it does.
+type TagImmutableError struct{ Image, Tag string }
+
+func (e *TagImmutableError) Error() string {
+	return fmt.Sprintf("tag %q of image %q is immutable: the repository has immutable tags enabled", e.Tag, e.Image)
+}
+
+// Unwrap makes errors.Is(err, ErrTagImmutable) hold.
+func (e *TagImmutableError) Unwrap() error { return ErrTagImmutable }
 
 // Store is the registry's content on disk.
 type Store struct {
 	root string
 	mu   sync.Mutex
+	// Immutable reports whether a repository's tags are immutable
+	// (Artifact Registry's docker_config.immutable_tags); nil is never.
+	// It is called before the store's lock is taken (the run adapter's
+	// takes the repositories' lock, which is held around store calls), and
+	// must not call back into the store.
+	Immutable func(Repo) bool
+}
+
+// immutable reports whether r's tags are immutable.
+func (s *Store) immutable(r Repo) bool { return s.Immutable != nil && s.Immutable(r) }
+
+// keepTagLocked refuses pointing an existing tag of an immutable
+// repository at another digest; a new tag, or the same digest, is allowed.
+func (s *Store) keepTagLocked(imm bool, r Repo, image, tag, digest string) error {
+	if !imm {
+		return nil
+	}
+	b, err := os.ReadFile(s.tagPath(r, image, tag))
+	if err != nil || strings.TrimSpace(string(b)) == digest {
+		return nil
+	}
+	return &TagImmutableError{Image: image, Tag: tag}
+}
+
+// keepTaggedLocked refuses deleting what a tag of an immutable repository
+// names: every digest when digest is empty (the whole image).
+func (s *Store) keepTaggedLocked(imm bool, r Repo, image, digest string) error {
+	if !imm {
+		return nil
+	}
+	tags, _ := s.tagsLocked(r, image)
+	names := make([]string, 0, len(tags))
+	for t, d := range tags {
+		if digest == "" || d == digest {
+			names = append(names, t)
+		}
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	sort.Strings(names)
+	return &TagImmutableError{Image: image, Tag: names[0]}
 }
 
 // Open returns the store rooted at dir, creating it.
@@ -380,8 +437,14 @@ func (s *Store) PutManifest(r Repo, image, ref, contentType string, b []byte) (s
 			return "", &BlobUnknownError{x.Digest}
 		}
 	}
+	imm := s.immutable(r)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if !isDigest {
+		if err := s.keepTagLocked(imm, r, image, ref, d); err != nil {
+			return "", err
+		}
+	}
 	for _, x := range m.Manifests {
 		if _, err := os.Stat(s.revisionPath(r, image, x.Digest)); err != nil {
 			return "", &ManifestBlobUnknownError{x.Digest}
@@ -500,10 +563,14 @@ func (s *Store) SetTag(r Repo, image, tag, digest string) error {
 	if !ValidTag(tag) {
 		return ErrTagInvalid
 	}
+	imm := s.immutable(r)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, err := os.Stat(s.revisionPath(r, image, digest)); err != nil {
 		return ErrManifestUnknown
+	}
+	if err := s.keepTagLocked(imm, r, image, tag, digest); err != nil {
+		return err
 	}
 	return s.setTagLocked(r, image, tag, digest)
 }
@@ -521,8 +588,15 @@ func (s *Store) DeleteTag(r Repo, image, tag string) error {
 	if !ValidTag(tag) {
 		return ErrManifestUnknown
 	}
+	imm := s.immutable(r)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if _, err := os.Stat(s.tagPath(r, image, tag)); err != nil {
+		return ErrManifestUnknown
+	}
+	if imm {
+		return &TagImmutableError{Image: image, Tag: tag}
+	}
 	if err := os.Remove(s.tagPath(r, image, tag)); err != nil {
 		return ErrManifestUnknown
 	}
@@ -535,8 +609,15 @@ func (s *Store) DeleteManifest(r Repo, image, digest string) error {
 	if !ValidDigest(digest) {
 		return ErrManifestUnknown
 	}
+	imm := s.immutable(r)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if _, err := os.Stat(s.revisionPath(r, image, digest)); err != nil {
+		return ErrManifestUnknown
+	}
+	if err := s.keepTaggedLocked(imm, r, image, digest); err != nil {
+		return err
+	}
 	if err := os.Remove(s.revisionPath(r, image, digest)); err != nil {
 		return ErrManifestUnknown
 	}
@@ -569,11 +650,15 @@ func (s *Store) DeleteImage(r Repo, image string) error {
 	if !ValidImage(image) {
 		return ErrNameInvalid
 	}
+	imm := s.immutable(r)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	dir := filepath.Join(r.dir(s.root), filepath.FromSlash(image))
 	if _, err := os.Stat(filepath.Join(dir, "_manifests")); err != nil {
 		return ErrNameInvalid
+	}
+	if err := s.keepTaggedLocked(imm, r, image, ""); err != nil {
+		return err
 	}
 	if err := os.RemoveAll(dir); err != nil {
 		return err

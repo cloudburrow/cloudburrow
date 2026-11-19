@@ -154,6 +154,12 @@ const ROUTES = [
   // Eventarc's Triggers page (#1877), served on the Run port over Pub/Sub.
   { path: "/eventarc/triggers", service: "eventarc", title: "Triggers", kind: "Trigger", section: "Integration services",
     product: "eventarc", productTitle: "Eventarc" },
+  // Artifact Registry's menu (#1855): Repositories, then Settings (the
+  // project's settings and each location's VPC-SC policy and platform logs).
+  // Not under /artifact-registry/, where it would shadow a repository named
+  // "settings".
+  { path: "/artifact-registry-settings", service: "artifact-registry-settings", icon: "artifact-registry", title: "Settings",
+    section: "CI/CD", product: "artifact-registry", productTitle: "Artifact Registry" },
   // Cloud Functions v2, served on the Run port (#1377).
   { path: "/functions", service: "functions", title: "Functions", kind: "Function", logs: true, section: "Serverless computing",
     product: "functions", productTitle: "Cloud Functions" },
@@ -6591,7 +6597,8 @@ function groupEntry(f, id, errorId, helpId) {
     const cells = sub.map((s) => {
       const label = `${s.label} ${n}`;
       // A select subfield is a dropdown of its options (#1845: a Query
-      // builder WHERE clause's operator).
+      // builder WHERE clause's operator; #1855: a cleanup policy's Policy
+      // type and Tag state), the first chosen when nothing else is.
       // A select's options are its Options; one in UnavailableOptions is
       // drawn disabled with its reason (#1858).
       const c = s.type === "select"
@@ -6604,7 +6611,7 @@ function groupEntry(f, id, errorId, helpId) {
         : el("input", { type: s.type === "checkbox" ? "checkbox" : "text", "aria-label": label,
                         autocomplete: "off", spellcheck: "false" });
       if (s.type === "checkbox") c.checked = (value[s.name] ?? s.default) === "true";
-      else c.value = value[s.name] || s.default || "";
+      else c.value = value[s.name] || s.default || (s.type === "select" ? (s.options || [""])[0] : "");
       c.addEventListener("input", sync);
       c.addEventListener("change", sync);
       r.controls.push(c);

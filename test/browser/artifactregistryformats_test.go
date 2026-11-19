@@ -93,18 +93,11 @@ func TestCloudRunArtifactRegistryPackageFormatsThroughThePage(t *testing.T) {
 	})
 
 	p := open(t)
-	p.navigate("/artifact-registry?project=" + project)
-	p.clickText("#view button", "Create repository")
-	p.waitFor(`document.querySelector("#view #f-id, .modal.is-open #f-id") !== null`)
+	openCreateRepository(p, project)
 	scope := "#view"
-	var inModal bool
-	p.eval(`document.querySelector(".modal.is-open #f-id") !== null`, &inModal)
-	if inModal {
-		scope = ".modal.is-open"
-	}
 	setField(p, scope, "f-id", py)
 	setField(p, scope, "f-location", "us-central1")
-	setField(p, scope, "f-format", "PYTHON")
+	clickRadio(p, "format", 3) // Python
 	p.run(chromedp.Click(chromedp.CSS(scope + ` button[type="submit"]`)))
 	p.waitFor(fmt.Sprintf(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q))`, py))
 	if r, err := c.GetRepository(ctx, &arpb.GetRepositoryRequest{Name: parent + "/repositories/" + py}); err != nil || r.GetFormat() != arpb.Repository_PYTHON {

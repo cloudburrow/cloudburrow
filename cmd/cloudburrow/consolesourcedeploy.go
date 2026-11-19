@@ -30,11 +30,13 @@ type artifactRegistryProvider struct {
 }
 
 func (artifactRegistryProvider) ID() string    { return "artifact-registry" }
-func (artifactRegistryProvider) Title() string { return "Artifact Registry repositories" }
+func (artifactRegistryProvider) Title() string { return "Repositories" }
 
-func (p artifactRegistryProvider) List(_ context.Context, project string) (console.Listing, error) {
-	out := console.Listing{Columns: []string{"Format", "Location", "URL", "Description", "Age"},
-		NameColumn: "Repository", Noun: "repositories", RowsOpenable: true}
+// arListColumns are Google's Repositories columns (#1855).
+var arListColumns = []string{"Format", "Mode", "Description", "Location", "Labels", "Encryption", "Cleanup policies", "Size", "Created", "Updated"}
+
+func (p artifactRegistryProvider) List(ctx context.Context, project string) (console.Listing, error) {
+	out := console.Listing{Columns: arListColumns, NameColumn: "Name", Noun: "repositories", RowsOpenable: true}
 	if project == "" {
 		project = p.defaultProject
 	}
@@ -44,8 +46,10 @@ func (p artifactRegistryProvider) List(_ context.Context, project string) (conso
 			continue
 		}
 		out.Items = append(out.Items, console.Resource{Name: parts[5], Fields: map[string]string{
-			"Format": r.GetFormat().String(), "Location": parts[3], "URL": orDash(r.GetRegistryUri()),
-			"Description": orDash(r.GetDescription()), "Age": stampAge(r.GetCreateTime())}})
+			"Format": arFormatWord(r.GetFormat()), "Mode": arModeWord(r.GetMode()), "Location": parts[3],
+			"Description": orDash(r.GetDescription()), "Labels": orDash(arLabelsText(r.GetLabels())),
+			"Encryption": arEncryptionWord(r), "Cleanup policies": arCleanupWord(r),
+			"Size": humanBytes(arRepositorySize(ctx, r)), "Created": arTime(r.GetCreateTime()), "Updated": arTime(r.GetUpdateTime())}})
 	}
 	out.Total = len(out.Items)
 	return out, nil
