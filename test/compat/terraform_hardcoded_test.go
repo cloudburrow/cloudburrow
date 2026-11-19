@@ -20,8 +20,8 @@ import (
 // wrapper let them through to Google.
 func TestTerraformRefusesHardCodedDataSources(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, envRunResourceManager, EnvResourceManager)
 	h.Endpoint(EnvRun) // skips where the Run port is not served
-	h.Endpoint(EnvResourceManager)
 	for _, c := range []struct{ typ, body, host string }{
 		{"google_cloud_run_locations", `data "google_cloud_run_locations" "l" {}`, "run.googleapis.com"},
 		{"google_artifact_registry_locations", `data "google_artifact_registry_locations" "l" {}`, "artifactregistry.googleapis.com"},

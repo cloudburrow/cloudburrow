@@ -31,6 +31,7 @@ func bigtableCustomMessage(short, desc string) string {
 // org policy: [...]".
 func TestOrgPolicyCustomConstraintsBigtable(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, envBigQueryResourceManager, EnvResourceManager)
 	ctx := h.Context()
 	t.Setenv("BIGTABLE_EMULATOR_HOST", h.Endpoint(EnvBigtable))
 	c := orgPolicyClients(t, h)["grpc"]

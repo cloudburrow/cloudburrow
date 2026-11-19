@@ -37,6 +37,7 @@ const spannerDatabaseDenied = "Either caller is missing IAM permission spanner.d
 // 7, and refuses extending it.
 func TestOrgPolicyCustomConstraintsSpanner(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, envBigQueryResourceManager, EnvResourceManager)
 	addr := h.Endpoint(EnvSpanner)
 	ctx := h.Context()
 	c := orgPolicyClients(t, h)["grpc"]

@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"time"
 )
 
 // A CSV load whose columns are given, by the load's schema or by the table
@@ -223,8 +224,39 @@ func (f front) reportFailure(req *http.Request, next http.Handler, job jobBody, 
 			project = projectOf(f.base)
 		}
 		f.failed.add(project, job.JobReference.JobID, rowError{Reason: e.reason, Message: e.msg})
+		if rec.status == http.StatusBadGateway {
+			// The emulator did not answer: the proxy gave up on it when
+			// the stream was cut (run.go), while it went on (below).
+			f.awaitEmulatorJob(r, job.JobReference.JobID)
+		}
 		writeError(w, e.code, e.reason, e.msg)
 	})
+}
+
+// emulatorJobWithin bounds how long a failed load's answer waits for the
+// emulator to have recorded its job.
+const emulatorJobWithin = 10 * time.Second
+
+// awaitEmulatorJob waits until the emulator has the job id, or
+// emulatorJobWithin passes. The front cut the load's data stream, and the
+// proxy then answers 502 at once, its request's body failed, while the
+// emulator, which adds the job when it reads the job's metadata
+// (server/handler.go, uploadHandler.Handle), may not have committed it
+// yet: a jobs.get right after the failure was 404 on an emulator just
+// restarted (main, Landing 153, TestBigQueryJobsAcrossAnEmulatorRestart),
+// where BigQuery reports the job, failed. A load without a job ID (the
+// emulator names it) is not waited for.
+func (f front) awaitEmulatorJob(r *http.Request, id string) {
+	if id == "" {
+		return
+	}
+	path := "/jobs/" + url.PathEscape(id)
+	for end := time.Now().Add(emulatorJobWithin); ; {
+		if status, _ := f.get(r, path); status == http.StatusOK || time.Now().After(end) || r.Context().Err() != nil {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 
 // asLoadDataError returns err as a loadDataError, a 500 for one that is

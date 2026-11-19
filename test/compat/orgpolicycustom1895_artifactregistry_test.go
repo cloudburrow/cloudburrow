@@ -21,6 +21,7 @@ import (
 // the policies is unaffected.
 func TestOrgPolicyCustomConstraintsArtifactRegistry(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, envRunResourceManager, EnvResourceManager)
 	ar, ctx := arClient(t, h)
 	c := orgPolicyClients(t, h)["grpc"]
 	_, _, pc := foldersClientsAt(t, h, rmOptionsAt(h.Endpoint(EnvResourceManager)))

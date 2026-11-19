@@ -391,6 +391,7 @@ func TestOrgPolicyEnforcementStorage(t *testing.T) {
 // and the global location.
 func TestOrgPolicyEnforcementKMSLocations(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, envLoggingResourceManager, EnvResourceManager)
 	ctx := h.Context()
 	kc := kmsClients(t, h)["grpc"]
 	c := orgPolicyClients(t, h)["grpc"]

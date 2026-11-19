@@ -99,7 +99,8 @@ func TestConsoleStorageObjectVersionsHoldsAndRetention(t *testing.T) {
 			Unavailable string
 			Actions     []action
 			Sections    []struct {
-				Groups []struct {
+				Actions []action
+				Groups  []struct {
 					Heading    string
 					Properties []struct{ Label, Value string }
 				}
@@ -115,6 +116,12 @@ func TestConsoleStorageObjectVersionsHoldsAndRetention(t *testing.T) {
 					props[g.Heading+"/"+p.Label] = p.Value
 				}
 			}
+		}
+		// The page's buttons are its own and its tabs': Lock retention policy
+		// on Protection, Run lifecycle on Lifecycle and Create folder on
+		// Objects, where Google's console puts them (#1843).
+		for _, s := range d.Sections {
+			d.Actions = append(d.Actions, s.Actions...)
 		}
 		return d.Actions, props
 	}

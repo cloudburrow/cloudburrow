@@ -91,8 +91,8 @@ func buildServiceAccount(t *testing.T, h *Harness, project, prefix string) *admi
 //     refused INVALID_ARGUMENT at CreateBuildTrigger.
 func TestCloudBuildServiceAccount(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, envRunResourceManager, EnvResourceManager)
 	h.Endpoint(EnvRun)
-	h.Endpoint(EnvResourceManager)
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker is required: builds run with the host's Docker")
 	}
@@ -202,9 +202,9 @@ func TestCloudBuildServiceAccount(t *testing.T) {
 // message.
 func TestGcloudBuildsServiceAccount(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, envRunResourceManager, EnvResourceManager)
+	shardEndpoint(h, "CLOUDBURROW_TEST_RUN_STORAGE", EnvStorage)
 	h.Endpoint(EnvRun)
-	h.Endpoint(EnvResourceManager)
-	h.Endpoint(EnvStorage)
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker is required: builds run with the host's Docker")
 	}

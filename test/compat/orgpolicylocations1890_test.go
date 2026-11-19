@@ -82,6 +82,7 @@ func TestOrgPolicyEnforcementPubSub(t *testing.T) {
 // message.
 func TestOrgPolicyEnforcementSpanner(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, envBigQueryResourceManager, EnvResourceManager)
 	addr := h.Endpoint(EnvSpanner)
 	project, want := orgLocationProject(t, h, "opn-")
 	ctx := h.Context()
@@ -102,6 +103,7 @@ func TestOrgPolicyEnforcementSpanner(t *testing.T) {
 // FAILED_PRECONDITION with the documented message.
 func TestOrgPolicyEnforcementFirestore(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, envFirestoreResourceManager, EnvResourceManager)
 	c := firestoreAdmin(t, h)
 	project, want := orgLocationProject(t, h, "opf-")
 	_, err := c.CreateDatabase(h.Context(), &fsadminpb.CreateDatabaseRequest{Parent: "projects/" + project, DatabaseId: "op-eu",
@@ -117,6 +119,7 @@ func TestOrgPolicyEnforcementFirestore(t *testing.T) {
 // is created. The policy is removed when the test ends.
 func TestOrgPolicyEnforcementBigQuery(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, envBigQueryResourceManager, EnvResourceManager)
 	bq, project := bigqueryClient(t, h)
 	ctx := h.Context()
 	setOrgPolicy(t, h, orgPolicyClients(t, h)["grpc"], "projects/"+project, "gcp.resourceLocations", opValues("in:us-locations"))

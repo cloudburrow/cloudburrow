@@ -320,9 +320,27 @@ func (d *dnnTrained) dnnFrom(from string, enc []string) (string, []string) {
 				names = append(names, name)
 			}
 		}
-		from = "(SELECT *, " + strings.Join(cols, ", ") + " FROM " + from + ")"
+		// Each layer's subquery computes its units once a row: a window
+		// column keeps the engine (SQLite, beneath googlesqlite) from
+		// flattening it into the next, which would write each unit's
+		// expression into every unit of the next layer that reads it, and
+		// so evaluate the first layer's units once per path through the
+		// network (SQLite's query flattener, rule 25: no subquery with a
+		// window function is flattened). Measured on main (Landing 153):
+		// ML.PREDICT of a DNN_CLASSIFIER with hidden_units [64, 32] over
+		// 1,200 rows took 62 s, the time of computing the network 32 × 64
+		// times a row. The column is dropped by the layer that reads it.
+		rn := fmt.Sprintf("_cbml_r%d", l)
+		sel := "*"
+		if l > 0 {
+			sel = fmt.Sprintf("* EXCEPT (_cbml_r%d)", l-1)
+		}
+		from = "(SELECT " + sel + ", " + strings.Join(cols, ", ") + ", ROW_NUMBER() OVER () AS " + rn + " FROM " + from + ")"
 		added = append(added, names...)
 		in = names
+	}
+	if len(d.Layers) > 0 {
+		from = fmt.Sprintf("(SELECT * EXCEPT (_cbml_r%d) FROM %s)", len(d.Layers)-1, from)
 	}
 	return from, added
 }

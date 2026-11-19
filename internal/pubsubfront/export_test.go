@@ -15,7 +15,9 @@ import (
 	"cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	"github.com/linkedin/goavro/v2"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
@@ -109,6 +111,37 @@ func TestBigQuerySubscriptionWritesDataAndMetadata(t *testing.T) {
 	row := d.rows[0]
 	if row["data"] != "hello" || row["subscription_name"] != subName("bq") || row["attributes"] != `{"k":"v"}` || row["message_id"] == "" {
 		t.Errorf("row = %v", row)
+	}
+}
+
+// A state load (StateLoadHeader) restores an export subscription whose
+// bucket or table is gone, as GCP keeps one whose destination was deleted,
+// and its state reads NOT_FOUND; a create without the header is refused,
+// and the header excuses nothing else: Google's limits still apply.
+func TestStateLoadRestoresAnExportWhoseDestinationIsGone(t *testing.T) {
+	fx, _ := exportFixture(t)
+	topic := fx.topic(t, "gone")
+	load := metadata.AppendToOutgoingContext(context.Background(), StateLoadHeader, "1")
+	gcs := &pubsubpb.Subscription{Name: subName("gcs-gone"), Topic: topic,
+		CloudStorageConfig: &pubsubpb.CloudStorageConfig{Bucket: "none"}}
+	if _, err := fx.create(t, proto.Clone(gcs).(*pubsubpb.Subscription)); status.Code(err) != codes.NotFound {
+		t.Fatalf("a new subscription to a missing bucket: %v, want NotFound", err)
+	}
+	if _, err := fx.client.SubscriptionAdminClient.CreateSubscription(load, gcs); err != nil {
+		t.Fatalf("a state load of a subscription whose bucket is gone: %v", err)
+	}
+	waitFor(t, "the restored subscription's NOT_FOUND state", func() bool {
+		s, err := fx.client.SubscriptionAdminClient.GetSubscription(context.Background(), &pubsubpb.GetSubscriptionRequest{Subscription: gcs.GetName()})
+		return err == nil && s.GetCloudStorageConfig().GetState() == pubsubpb.CloudStorageConfig_NOT_FOUND
+	})
+	bq := &pubsubpb.Subscription{Name: subName("bq-gone"), Topic: topic,
+		BigqueryConfig: &pubsubpb.BigQueryConfig{Table: "p.d.missing"}}
+	if _, err := fx.client.SubscriptionAdminClient.CreateSubscription(load, bq); err != nil {
+		t.Errorf("a state load of a subscription whose table is gone: %v", err)
+	}
+	if _, err := fx.client.SubscriptionAdminClient.CreateSubscription(load, &pubsubpb.Subscription{Name: subName("gcs-short"), Topic: topic,
+		CloudStorageConfig: &pubsubpb.CloudStorageConfig{Bucket: "none", MaxDuration: durationpb.New(30 * time.Second)}}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("a state load past max_duration's limit: %v, want InvalidArgument", err)
 	}
 }
 
