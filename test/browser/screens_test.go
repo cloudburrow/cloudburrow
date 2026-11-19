@@ -23,9 +23,9 @@ import (
 // TestKMSCreateKeyRingThroughTheForm: from the empty Key rings screen of a
 // new project, Create key ring opens its own page, as Google's console opens
 // it (#1842), with a back arrow, focus on the name and the location
-// prefilled; the ring created through it is listed, exactly one POST was
-// sent, the console API lists it, and its row opens the ring's page, where
-// keys are created.
+// prefilled; Create goes on to the new ring's page with Create key open, as
+// Google's does (#1851); exactly one POST was sent, the console API lists
+// the ring, and its row in Key management opens the ring's page.
 func TestKMSCreateKeyRingThroughTheForm(t *testing.T) {
 	needService(t, "kms")
 	p := open(t)
@@ -49,8 +49,12 @@ func TestKMSCreateKeyRingThroughTheForm(t *testing.T) {
 
 	p.run(chromedp.SendKeys(chromedp.CSS(`#view #f-keyRingId`), "browser-ring"),
 		chromedp.Click(chromedp.CSS(`#view form.create-page button[type="submit"]`)))
-	p.waitFor(fmt.Sprintf(`location.pathname === "/kms/keyrings" &&
-		[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q))`, ring))
+	p.waitFor(`location.pathname.startsWith("/kms/keyrings/") && location.pathname !== "/kms/keyrings/create" && ` +
+		`document.querySelector(".modal.is-open #f-cryptoKeyId") !== null`)
+	p.clickText(".modal.is-open .modal-actions button", "Cancel")
+	p.waitFor(`document.querySelector(".modal") === null`)
+	p.navigate("/kms/keyrings?project=" + project)
+	p.waitFor(fmt.Sprintf(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q))`, ring))
 	if posts := p.posts("/api/resources/kms"); len(posts) != 1 {
 		t.Errorf("the create was posted %d times, want once: %v", len(posts), posts)
 	}
