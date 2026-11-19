@@ -221,7 +221,9 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 				storage: enabled[config.ServiceStorage]})
 	}
 	if enabled[config.ServiceSecrets] && d.secrets != nil {
-		providers = append(providers, secretsProvider{svc: d.secrets, faults: d.faults})
+		sp := secretsProvider{svc: d.secrets, faults: d.faults}
+		// Regional secrets (#1850) are their own page in Secret Manager's menu.
+		providers = append(providers, sp, secretsRegionalProvider{sp})
 	}
 	// Cloud KMS and Cloud Scheduler run in this process too, so their screens
 	// read the objects their APIs serve rather than going through a tunnel.

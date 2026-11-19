@@ -234,8 +234,15 @@ const ROUTES = [
     title: "Online prediction",
     section: "AI and machine learning", product: "vertexai", productTitle: "Vertex AI" },
 
-  { path: "/secrets", service: "secrets", title: "Secret Manager", navTitle: "Secrets", kind: "Secret",
-    section: "Security and identity" },
+  // Secret Manager (#1850): Google's menu, Secret Manager (the global
+  // secrets), Regional secrets and Settings.
+  { path: "/secrets", service: "secrets", title: "Secret Manager", navTitle: "Secret Manager", kind: "Secret",
+    section: "Security and identity", product: "secrets", productTitle: "Secret Manager" },
+  { path: "/secrets-regional", service: "secrets-regional", icon: "secrets", title: "Regional secrets", kind: "Secret",
+    section: "Security and identity", product: "secrets", productTitle: "Secret Manager" },
+  { path: "/secrets-settings", service: null, requires: "secrets", screen: "unavailable", icon: "secrets", title: "Settings",
+    section: "Security and identity", product: "secrets", productTitle: "Secret Manager",
+    unavailable: "Google's Secret Manager settings are the project's own Google Cloud configuration, which Google's documentation does not describe and a local instance does not hold. A secret's replication, encryption, rotation, expiration and destruction delay are set on the secret itself, with Create secret and Edit secret." },
   { path: "/kms/keyrings", service: "kms", title: "Key rings", kind: "Key ring", section: "Security and identity",
     product: "kms", productTitle: "Key Management" },
   // Cloud KMS EKM connections and Autokey (#1452): stored connections, and
@@ -3804,6 +3811,16 @@ async function renderDetail(view, route, resourcePath) {
       class: "secondary", text: data.reveal,
       onclick: () => revealValue(route, segments, data.reveal),
     }));
+    // A version row's View secret value (#1850) opens this page with
+    // reveal=1: the value is shown as if the button were pressed, recorded
+    // the same way, and the address loses the flag so a reload shows nothing.
+    const asked = new URLSearchParams(location.search);
+    if (asked.get("reveal") === "1") {
+      asked.delete("reveal");
+      const rest = asked.toString();
+      history.replaceState(history.state, "", location.pathname + (rest ? "?" + rest : ""));
+      setTimeout(() => revealValue(route, segments, data.reveal), 0);
+    }
   }
   if (data.edit) {
     pageActions.unshift(el("button", {
@@ -5355,10 +5372,13 @@ function buildCreateForm(spec) {
     const unavailable = unavailableId
       ? el("p", { id: unavailableId, class: "form-help form-unavailable", text: f.unavailable }) : null;
 
+    // Upload file beside a textarea (Field.Upload, #1850): the chosen text
+    // file is read into the textarea, which stays the value.
+    const upload = isArea && !isMap && f.upload ? uploadIntoTextarea(f, control) : null;
     const node = isCheck
       ? el("div", { class: "form-row is-check" + (unavailableId ? " is-unavailable" : "") },
           el("div", { class: "check-line" }, control, label), help, unavailable, error)
-      : el("div", { class: "form-row" }, label, control, help, error);
+      : el("div", { class: "form-row" }, label, control, upload, help, error);
 
     return { field: f, control, node, error, helpId, errorId, isCheck };
   });
@@ -5586,6 +5606,27 @@ function buildCreateForm(spec) {
         })]);
     },
   };
+}
+
+// uploadIntoTextarea is a textarea's Upload file control (Field.Upload,
+// #1850): a file chooser whose text file replaces the textarea's value.
+function uploadIntoTextarea(f, control) {
+  const input = el("input", { type: "file", id: `up-${f.name}`, class: "upload-into-input",
+    "aria-label": `${f.upload} for ${f.label}` });
+  const status = el("span", { class: "form-help", role: "status" });
+  input.addEventListener("change", () => {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    const r = new FileReader();
+    r.onload = () => {
+      control.value = String(r.result);
+      control.dispatchEvent(new Event("input", { bubbles: true }));
+      status.textContent = `Read ${file.name}`;
+    };
+    r.onerror = () => { status.textContent = `Could not read ${file.name}`; };
+    r.readAsText(file);
+  });
+  return el("div", { class: "upload-into" }, el("span", { class: "upload-into-label", text: f.upload }), input, status);
 }
 
 // formTabs lays out one form section's fields: those with no tab, then a

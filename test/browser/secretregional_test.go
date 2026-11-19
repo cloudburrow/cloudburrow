@@ -58,14 +58,15 @@ func TestKMSKeyEncryptsARegionalSecretThroughTheBrowser(t *testing.T) {
 	name := "projects/" + project + "/locations/us-central1/secrets/" + id
 	t.Cleanup(func() { _ = c.DeleteSecret(context.Background(), &smpb.DeleteSecretRequest{Name: name}) })
 
-	p.navigate("/secrets/create?project=" + project)
+	p.navigate("/secrets-regional/create?project=" + project)
 	p.waitFor(`document.querySelector("#view #f-location") !== null`)
 	setField(p, "#view", "f-secretId", id)
 	setField(p, "#view", "f-payload", "regional value")
 	setField(p, "#view", "f-location", "us-central1")
+	setField(p, "#view", "f-encryption", "cmek")
 	setField(p, "#view", "f-kmsKeys", key)
 	p.run(chromedp.Click(chromedp.CSS(`#view button[type="submit"]`)))
-	p.waitFor(`location.pathname === "/secrets"`)
+	p.waitFor(`location.pathname === "/secrets-regional"`)
 
 	got, err := c.GetSecret(ctx, &smpb.GetSecretRequest{Name: name})
 	if err != nil {
@@ -85,8 +86,8 @@ func TestKMSKeyEncryptsARegionalSecretThroughTheBrowser(t *testing.T) {
 
 	p.waitFor(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes("us-central1"))`)
 	p.clickText("#view tbody a", name)
-	p.waitFor(`[...document.querySelectorAll("#view .tab-strip .tab")].some((t) => t.textContent === "Configuration")`)
-	p.clickText("#view .tab-strip .tab", "Configuration")
+	p.waitFor(`[...document.querySelectorAll("#view .tab-strip .tab")].some((t) => t.textContent === "Overview")`)
+	p.clickText("#view .tab-strip .tab", "Overview")
 	p.waitFor(`document.querySelector("#view").textContent.includes("regional secret") && ` +
 		`document.querySelector("#view").textContent.includes(` + strconv.Quote(key) + `)`)
 }

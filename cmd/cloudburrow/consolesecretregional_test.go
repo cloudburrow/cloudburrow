@@ -7,6 +7,7 @@ import (
 
 	"cloud.google.com/go/kms/apiv1/kmspb"
 
+	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/service/kms"
 	"github.com/cloudburrow/cloudburrow/internal/service/secrets"
 	"github.com/cloudburrow/cloudburrow/internal/store"
@@ -46,16 +47,25 @@ func TestConsoleRegionalSecret(t *testing.T) {
 	if _, err := p.Create(ctx, "demo", map[string]string{"secretId": "r", "payload": "global"}); err != nil {
 		t.Fatalf("a global secret of the same ID: %v", err)
 	}
-	l, err := p.List(ctx, "demo")
-	if err != nil {
-		t.Fatal(err)
-	}
+	// The global secrets on Secret Manager, the regional ones on Regional
+	// secrets (#1850).
 	found := map[string]string{}
-	for _, it := range l.Items {
-		found[it.Name] = it.Fields["Location"]
+	for _, lister := range []interface {
+		List(context.Context, string) (console.Listing, error)
+	}{p, secretsRegionalProvider{p}} {
+		l, err := lister.List(ctx, "demo")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, it := range l.Items {
+			found[it.Name] = it.Fields["Location"]
+		}
 	}
-	if found[name] != "us-central1" || found["projects/demo/secrets/r"] != "global" {
+	if found[name] != "us-central1" || found["projects/demo/secrets/r"] != "Automatically replicated" || len(found) != 2 {
 		t.Errorf("listed %v", found)
+	}
+	if l, _ := p.List(ctx, "demo"); len(l.Items) != 1 {
+		t.Errorf("Secret Manager's list holds %d secrets, want the global one only", len(l.Items))
 	}
 	d, err := p.Detail(ctx, "demo", []string{name})
 	if err != nil {

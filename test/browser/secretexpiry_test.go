@@ -12,11 +12,12 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
-// TestSecretExpiryThroughTheForms (#1225): Create secret, on its own page,
-// offers an expire time and a TTL; a secret created with a TTL shows its
+// TestSecretManagerExpiryThroughTheForms (#1225), in the run shard: Create
+// secret, on its own page, offers an expire time and a TTL under Set
+// expiration date (#1850); a secret created with a TTL shows its
 // expiry on its page, and Edit secret, prefilled with that expire time,
 // clears it, after which the page says Never.
-func TestSecretExpiryThroughTheForms(t *testing.T) {
+func TestSecretManagerExpiryThroughTheForms(t *testing.T) {
 	needService(t, "secrets")
 	p := open(t)
 	project := uniqueProject(t)
@@ -29,6 +30,7 @@ func TestSecretExpiryThroughTheForms(t *testing.T) {
 	p.waitFor(`document.querySelector("#view #f-ttl") !== null && document.querySelector("#view #f-expireTime") !== null`)
 	setField(p, "#view", "f-secretId", id)
 	setField(p, "#view", "f-payload", "value")
+	setField(p, "#view", "f-setExpiration", "true")
 	setField(p, "#view", "f-ttl", "48h")
 	p.run(chromedp.Click(chromedp.CSS(`#view button[type="submit"]`)))
 	p.waitFor(`location.pathname === "/secrets"`)
@@ -38,8 +40,8 @@ func TestSecretExpiryThroughTheForms(t *testing.T) {
 	if err != nil || time.Until(exp) < 47*time.Hour || time.Until(exp) > 49*time.Hour {
 		t.Fatalf("a 48h TTL created in the browser reads expire time %q (%v)", got["expireTime"], err)
 	}
-	if got["Expire time"] != got["expireTime"] {
-		t.Errorf("the page shows expire time %q, the edit form %q", got["Expire time"], got["expireTime"])
+	if got["Expiration time"] != got["expireTime"] {
+		t.Errorf("the page shows expire time %q, the edit form %q", got["Expiration time"], got["expireTime"])
 	}
 
 	p.clickText("#view tbody a", name)
@@ -53,16 +55,16 @@ func TestSecretExpiryThroughTheForms(t *testing.T) {
 	setField(p, ".modal", "f-expireTime", "")
 	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
-	if got := editDefaults(t, "secrets", project, name); got["Expire time"] != "Never" || got["expireTime"] != "" {
-		t.Errorf("after clearing in Edit secret the secret reads expire time %q, form %q", got["Expire time"], got["expireTime"])
+	if got := editDefaults(t, "secrets", project, name); got["Expiration time"] != "Never" || got["expireTime"] != "" {
+		t.Errorf("after clearing in Edit secret the secret reads expire time %q, form %q", got["Expiration time"], got["expireTime"])
 	}
 }
 
-// TestSecretListFilterThroughTheBox (#1228): the Secrets list has a filter
+// TestSecretManagerListFilterThroughTheBox (#1228): the Secrets list has a filter
 // box in Secret Manager's syntax; applying a filter lists only the matching
 // secrets and keeps it in the URL, a regular expression is refused under
 // the box with the API's message, and Clear lists every secret again.
-func TestSecretListFilterThroughTheBox(t *testing.T) {
+func TestSecretManagerListFilterThroughTheBox(t *testing.T) {
 	needService(t, "secrets")
 	p := open(t)
 	project := uniqueProject(t)

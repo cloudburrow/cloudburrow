@@ -246,7 +246,7 @@ func TestGRPCRejectsMalformedNames(t *testing.T) {
 	wantGRPCCode(t, err, codes.InvalidArgument)
 
 	_, err = g.AccessSecretVersion(ctx, &secretmanagerpb.AccessSecretVersionRequest{
-		Name: "projects/demo/secrets/k/versions/newest",
+		Name: "projects/demo/secrets/k/versions/1newest",
 	})
 	wantGRPCCode(t, err, codes.InvalidArgument)
 }
@@ -370,7 +370,7 @@ func TestRESTErrorsUseGoogleStatusCodes(t *testing.T) {
 		{"missing secret", http.MethodGet, "/v1/projects/demo/secrets/nope", "", http.StatusNotFound},
 		{"duplicate", http.MethodPost, "/v1/projects/demo/secrets?secretId=k", "", http.StatusConflict},
 		{"no secretId", http.MethodPost, "/v1/projects/demo/secrets", "", http.StatusBadRequest},
-		{"bad version", http.MethodGet, "/v1/projects/demo/secrets/k/versions/zero", "", http.StatusBadRequest},
+		{"bad version", http.MethodGet, "/v1/projects/demo/secrets/k/versions/0zero", "", http.StatusBadRequest},
 		{"missing version", http.MethodGet, "/v1/projects/demo/secrets/k/versions/9", "", http.StatusNotFound},
 	} {
 		code, body := do(t, srv, tc.method, tc.path, tc.body)

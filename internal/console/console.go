@@ -322,6 +322,11 @@ type Field struct {
 	// shown as when they are not its value: BigQuery's Region list shows
 	// "us-central1 (Iowa)" and submits us-central1 (#1861).
 	OptionLabels map[string]string `json:"optionLabels,omitempty"`
+	// Upload, on a textarea, is the label of a file chooser beside it whose
+	// text file is read into the textarea, as Google's Create secret takes
+	// the Secret value typed or from Upload file (#1850). The value is still
+	// the textarea's, so nothing else about the form changes.
+	Upload string `json:"upload,omitempty"`
 }
 
 // GroupFieldType is the Type of a repeatable group of fields (Field.Group).
@@ -2561,7 +2566,7 @@ func (s *Server) handleDetail(w http.ResponseWriter, r *http.Request) {
 	// the same call the reveal route makes — so the button and the route agree
 	// by construction rather than by two lists being kept in step.
 	if revealer, ok := p.(Revealer); ok && detail.Reveal == "" && revealer.CanReveal(path) {
-		detail.Reveal = "Show value"
+		detail.Reveal = "View secret value"
 	}
 	// The form for this resource, from the same call the query route validates
 	// against — so a control the page draws is one the route will accept.
