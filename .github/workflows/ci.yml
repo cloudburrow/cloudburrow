@@ -203,8 +203,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     # 45 since make build compiled the embedded BigQuery emulator (#1061),
     # 8.5 minutes cold on ubuntu-latest, when the macOS job took 27.5 of 30;
-    # it now downloads it (#1087), and 45 stays until runs show the margin.
-    timeout-minutes: 45
+    # it now downloads it (#1087). 60 since main's run 44588485912 (2026-11-19):
+    # ubuntu go 1.27 reached minute 45 in make cross, four targets at about 4
+    # minutes each after make test-race, and was cancelled before linux/arm64.
+    timeout-minutes: 60
     # The emulator binaries, from the job above (#1087).
     needs: bigquery-emulator
     env:
