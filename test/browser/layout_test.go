@@ -110,20 +110,22 @@ func TestViewportsDrawerBadgeAndTableScroll(t *testing.T) {
 	}
 }
 
-// TestDialogTakesFocusClosesOnEscapeAndGivesItBack: the Create project
-// dialog (Create queue is a page since #1842), opened from the keyboard,
+// TestDialogTakesFocusClosesOnEscapeAndGivesItBack: the Resource
+// hierarchy's Create folder dialog (Create queue is a page since #1842, and
+// Create project the New project page since #1932), opened from the keyboard,
 // takes focus to its first field, marks itself as a modal dialog named by
 // its heading, makes the page behind it inert and keeps Tab and Shift+Tab
 // inside it. Escape closes it without sending anything, and focus returns to
 // the button that opened it (parity §5, Accessibility).
 func TestDialogTakesFocusClosesOnEscapeAndGivesItBack(t *testing.T) {
+	needService(t, "hierarchy")
 	p := open(t)
 	project := uniqueProject(t)
-	p.navigate("/projects?project=" + project)
+	p.navigate("/resource-hierarchy?project=" + project)
 	create := `#view .page-header-actions button.header-button`
-	p.waitFor(`[...document.querySelectorAll("` + create + `")].some((b) => b.textContent === "Create project")`)
+	p.waitFor(`[...document.querySelectorAll("` + create + `")].some((b) => b.textContent === "Create folder")`)
 
-	p.tabTo(`a.matches("` + create + `") && a.textContent === "Create project"`)
+	p.tabTo(`a.matches("` + create + `") && a.textContent === "Create folder"`)
 	p.eval(`document.activeElement.setAttribute("data-cb-trigger", ""); true`, nil)
 	p.run(chromedp.KeyEvent(kb.Enter))
 	p.waitFor(`document.querySelector(".modal.is-open") !== null`)
@@ -139,10 +141,10 @@ func TestDialogTakesFocusClosesOnEscapeAndGivesItBack(t *testing.T) {
 		         Name: label ? label.textContent : "", Focus: a ? a.id : "",
 		         FocusInside: d.contains(a), MainInert: document.getElementById("main").closest("[inert]") !== null,
 		         BannerInert: document.querySelector('[role="banner"]').inert }; })()`, &opened)
-	if opened.Role != "dialog" || opened.Modal != "true" || opened.Name != "Create project" {
-		t.Errorf("the dialog is role=%q aria-modal=%q named %q; want a modal dialog named Create project", opened.Role, opened.Modal, opened.Name)
+	if opened.Role != "dialog" || opened.Modal != "true" || opened.Name != "Create folder" {
+		t.Errorf("the dialog is role=%q aria-modal=%q named %q; want a modal dialog named Create folder", opened.Role, opened.Modal, opened.Name)
 	}
-	if !opened.FocusInside || opened.Focus != "f-projectId" {
+	if !opened.FocusInside || opened.Focus != "f-displayName" {
 		t.Errorf("focus did not move into the dialog's first field: on #%s, inside the dialog %v", opened.Focus, opened.FocusInside)
 	}
 	if !opened.MainInert || !opened.BannerInert {
@@ -179,12 +181,12 @@ func TestDialogTakesFocusClosesOnEscapeAndGivesItBack(t *testing.T) {
 	           MainInert: document.getElementById("main").closest("[inert]") !== null,
 	           Focus: document.activeElement.outerHTML.slice(0, 120) })`, &after)
 	if !after.Trigger {
-		t.Errorf("Escape closed the dialog but focus went to %s, not the Create project button", after.Focus)
+		t.Errorf("Escape closed the dialog but focus went to %s, not the Create folder button", after.Focus)
 	}
 	if after.MainInert {
 		t.Error("the page is still inert after the dialog closed")
 	}
-	if posts := p.posts("/api/resources/projects"); len(posts) != 0 {
+	if posts := p.posts("/api/resources/hierarchy"); len(posts) != 0 {
 		t.Errorf("closing the dialog with Escape sent a create: %v", posts)
 	}
 }

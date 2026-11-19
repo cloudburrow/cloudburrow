@@ -1797,7 +1797,7 @@ func (p datastoreProvider) DetailActions(ctx context.Context, project string, fu
 			{ID: "addproperty", Label: "Add property", Fields: datastorePropertyFields(true, "", "", false)},
 			// A child entity, whose parent is this one (#854).
 			{ID: "createchild", Label: "Create child entity", Fields: datastoreChildFields()},
-			{ID: "deleteentity", Label: "Delete entity", Destructive: true, Leaves: true},
+			{ID: "deleteentity", Label: "Delete entity", Destructive: true, Leaves: true, ConfirmStyle: console.DeleteConfirmClick},
 		}
 	case 3:
 		// Add value on an array or embedded entity property (#911).

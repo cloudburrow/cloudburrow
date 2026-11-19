@@ -1781,6 +1781,10 @@ func (p pubsubProvider) Delete(ctx context.Context, project, name string) error 
 
 // Cloud Tasks: create queues, and pause, resume or purge them.
 
+// CreateSubmit implements console.CreateSubmitter: the create flow ends
+// in Create, as docs.cloud.google.com/tasks/docs/creating-queues words it (#1933).
+func (tasksProvider) CreateSubmit() string { return "Create" }
+
 func (tasksProvider) CreateForm() (string, []console.Field) {
 	return "Create queue", tasksCreateQueueFields()
 }

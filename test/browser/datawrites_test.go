@@ -183,9 +183,20 @@ func TestBigQueryCreateTableInsertRowsAndDeleteThroughTheForms(t *testing.T) {
 		t.Errorf("the table previews %v after two rows were inserted", preview)
 	}
 
+	// Confirmed as Google's is: "Type delete in the dialog"
+	// (docs.cloud.google.com/bigquery/docs/managing-tables, #1931); the
+	// table's name is refused.
 	p.clickText("#view .page-actions button", "Delete table")
 	p.waitFor(`document.activeElement === document.querySelector(".modal #confirm-input")`)
 	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #confirm-input`), "events"), chromedp.KeyEvent(kb.Enter))
+	p.waitFor(`!document.querySelector(".modal .form-error").hidden`)
+	var refused string
+	p.eval(`document.querySelector(".modal .form-error").textContent`, &refused)
+	if refused != "Type delete exactly to confirm." {
+		t.Errorf("Delete table confirmed by the table's name answers %q; want the word delete asked for", refused)
+	}
+	p.eval(`(() => { document.querySelector(".modal #confirm-input").value = ""; return true; })()`, nil)
+	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #confirm-input`), "delete"), chromedp.KeyEvent(kb.Enter))
 	p.waitFor(`document.querySelector(".modal") === null && location.pathname === "/bigquery/` + ds + `"`)
 	if tables := readDataPage(t, "bigquery", project, ds).rows("tables"); len(tables) != 0 {
 		t.Errorf("the dataset still lists %v after Delete table", tables)
@@ -376,8 +387,7 @@ func TestDatastoreNamespaceAndChildEntityThroughTheBrowser(t *testing.T) {
 		t.Errorf("the child's page names parent %q (%s)", d.summary("Parent"), d.Unavailable)
 	}
 	p.clickText("#view .page-actions button", "Delete entity")
-	p.waitFor(`document.activeElement === document.querySelector(".modal #confirm-input")`)
-	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #confirm-input`), heading), chromedp.KeyEvent(kb.Enter))
+	p.confirmEntityDelete(heading)
 	p.waitFor(`document.querySelector(".modal") === null && location.pathname === "/datastore/__namespace__/tenant-b/Part"`)
 	if d := readDataPage(t, "datastore", project, "__namespace__", "tenant-b", "Part", child); !strings.Contains(d.Unavailable, "no such entity") {
 		t.Errorf("after Delete entity the child's page reads %+v", d)
@@ -494,11 +504,10 @@ func TestDatastoreRootEntityNamedLikeAKeyPathOpens(t *testing.T) {
 		}
 	}
 
-	// On the root's page: Delete entity, confirmed by the key it is headed
-	// by, not its address.
+	// On the root's page: Delete entity, its dialog naming the key it is
+	// headed by, not its address.
 	p.clickText("#view .page-actions button", "Delete entity")
-	p.waitFor(`document.activeElement === document.querySelector(".modal #confirm-input")`)
-	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #confirm-input`), heading["root"]), chromedp.KeyEvent(kb.Enter))
+	p.confirmEntityDelete(heading["root"])
 	p.waitFor(`document.querySelector(".modal") === null && location.pathname === "/datastore/Order"`)
 	if d := readDataPage(t, "datastore", project, "Order", addr["root"]); !strings.Contains(d.Unavailable, "no such entity") {
 		t.Errorf("after Delete entity the root's page reads %+v", d)
@@ -621,10 +630,9 @@ func TestDatastoreNameIDColumnTellsANameFromAnID(t *testing.T) {
 		}
 	}
 
-	// On the named one's page: Delete entity, confirmed by its Name/ID.
+	// On the named one's page: Delete entity, its dialog naming its Name/ID.
 	p.clickText("#view .page-actions button", "Delete entity")
-	p.waitFor(`document.activeElement === document.querySelector(".modal #confirm-input")`)
-	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #confirm-input`), "name=id=7"), chromedp.KeyEvent(kb.Enter))
+	p.confirmEntityDelete("name=id=7")
 	p.waitFor(`document.querySelector(".modal") === null && location.pathname === "/datastore/Order"`)
 	p.waitFor(`document.querySelectorAll("#view tbody tr").length === 1 && ` +
 		`document.querySelector("#view tbody a").textContent.trim() === "id=7"`)

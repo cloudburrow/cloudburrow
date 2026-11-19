@@ -47,7 +47,7 @@ func TestPrivateCAThroughThePage(t *testing.T) {
 	p := open(t)
 	p.navigateByDrawer("Security and identity", "/security/cas", "Certificate Authority Service")
 	p.navigate("/security/cas?project=" + project)
-	p.clickText("#view button", "Create CA pool")
+	p.clickText("#view button", "Create pool")
 	p.submitForm(map[string]string{"caPoolId": "browser-pool", "location": "us-east1", "tier": "ENTERPRISE"}, "caPoolId")
 	p.waitFor(fmt.Sprintf(`location.pathname === "/security/cas" &&
 		[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q))`, pool))
@@ -197,7 +197,7 @@ func TestPrivateCAKMSKeyCMEKBucketAndRulesThroughThePage(t *testing.T) {
 
 	p := open(t)
 	p.navigate("/security/cas?project=" + project)
-	p.clickText("#view button", "Create CA pool")
+	p.clickText("#view button", "Create pool")
 	p.waitFor(`document.querySelector("#f-allowRequesterNotBefore") !== null`)
 	p.eval(`(() => { const f = document.querySelector("#f-allowRequesterNotBefore"); f.checked = true;
 		f.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`, nil)

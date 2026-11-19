@@ -81,7 +81,7 @@ func objectTableActions(md *bigquery.TableMetadata) []console.Action {
 	}
 	return append(actions,
 		console.Action{ID: "edittable", Label: "Edit table", Fields: bigqueryEditFields(md)},
-		console.Action{ID: "deletetable", Label: "Delete table", Destructive: true, Leaves: true})
+		console.Action{ID: "deletetable", Label: "Delete table", Destructive: true, Leaves: true, ConfirmStyle: console.DeleteConfirmWord})
 }
 
 // createObjectTableFields are Create object table's form.

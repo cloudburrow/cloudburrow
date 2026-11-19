@@ -903,11 +903,24 @@ func TestDestructiveActionsAskForTheName(t *testing.T) {
 	if strings.Contains(js, "return window.confirm(") {
 		t.Error("deletes still go through window.confirm")
 	}
-	if !strings.Contains(js, "function confirmDestructive({ title, detail, confirmWord, onConfirm, confirmLabel = \"Delete\", consequence = \"This cannot be undone.\" })") {
-		t.Fatal("there is no typed-name confirmation")
+	if !strings.Contains(js, "function confirmDestructive({ title, detail, confirmWord, onConfirm, confirmLabel = \"Delete\", consequence = \"This cannot be undone.\", style = \"name\" })") {
+		t.Fatal("there is no typed-name confirmation, the name typed back by default")
 	}
 	if !strings.Contains(js, `Type ${confirmWord} exactly to confirm.`) {
 		t.Error("the confirmation does not require the name back")
+	}
+	// #1931: each kind's delete is confirmed as Google's console confirms
+	// it, the word delete or DELETE, or the button alone, which leaves
+	// focus on Cancel so one Enter does not delete.
+	if !strings.Contains(js, `if (style === "delete" || style === "DELETE") confirmWord = style;`) {
+		t.Error("a delete confirmed by the word delete does not ask for that word")
+	}
+	if !strings.Contains(js, "(input || cancel).focus();") {
+		t.Error("a confirmation with nothing to type does not leave focus on Cancel")
+	}
+	if strings.Count(js, `style: capabilityOf(route.service).deleteConfirm || "name",`) != 1 ||
+		strings.Count(js, `style: caps.deleteConfirm || "name",`) != 1 {
+		t.Error("a row's Delete or the bulk Delete does not confirm as its kind's capability says")
 	}
 	if !strings.Contains(js, "is-destructive") {
 		t.Error("destructive row actions are not marked apart from the others")

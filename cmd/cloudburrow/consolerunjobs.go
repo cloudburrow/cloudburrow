@@ -394,8 +394,12 @@ func (p runJobsProvider) Delete(ctx context.Context, project, name string) error
 // batch Job, and nothing it refuses (a port, a probe, a service account,
 // VPC access, volumes): those are named in the last field's help rather
 // than drawn as controls that fail.
+// CreateTitle implements console.CreateTitler: the page the create button
+// opens is headed Create job (#1933).
+func (runJobsProvider) CreateTitle() string { return "Create job" }
+
 func (p runJobsProvider) CreateForm() (string, []console.Field) {
-	return "Create job", runJobLayout(p.location(), []console.Field{
+	return "Deploy container", runJobLayout(p.location(), []console.Field{
 		{
 			Name: "name", Label: "Job name", Type: "text", Required: true,
 			Help:    "Lowercase letters, numbers and hyphens, starting with a letter; at most 63 characters.",

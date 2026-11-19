@@ -201,6 +201,13 @@ func TestIAMCreateServiceAccountInThreeSteps(t *testing.T) {
 	if len(steps) != 3 || steps[0] != "Service account details" || !strings.HasPrefix(steps[2], "Grant users access") {
 		t.Errorf("the create page's steps are %v", steps)
 	}
+	// Google's create page ends in Done
+	// (docs.cloud.google.com/iam/docs/service-accounts-create, #1933).
+	var done string
+	p.eval(`document.querySelector('#view form button[type="submit"].primary').textContent`, &done)
+	if done != "Done" {
+		t.Errorf("Create service account ends in %q, want Done", done)
+	}
 	p.eval(`(() => { const f = document.querySelector("#f-displayName"); f.value = "Build Runner";
 		f.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`, nil)
 	var id string
@@ -324,6 +331,13 @@ func TestIAMCreateGroupWithMembers(t *testing.T) {
 	setField(p, "#view", "f-email", email)
 	setField(p, "#view", "f-members", "ada@example.com")
 	setField(p, "#view", "f-memberRole", "MANAGER")
+	// Google's Create group ends in Submit
+	// (docs.cloud.google.com/iam/docs/groups-in-cloud-console, #1933).
+	var submit string
+	p.eval(`document.querySelector('#view form button[type="submit"].primary').textContent`, &submit)
+	if submit != "Submit" {
+		t.Errorf("Create group ends in %q, want Submit", submit)
+	}
 	p.run(chromedp.Click(chromedp.CSS(`#view form button[type="submit"].primary`)))
 	p.waitFor(fmt.Sprintf(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q))`, email))
 	p.navigate("/iam-admin/groups/" + email + "?project=" + project)

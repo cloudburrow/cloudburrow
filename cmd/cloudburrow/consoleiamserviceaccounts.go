@@ -106,6 +106,10 @@ func saFields(a *adminpb.ServiceAccount) []console.Field {
 // steps: the account's name (its ID made from it, editable) and
 // description; the project roles it is granted; and the principals granted
 // the Service Account User and Service Account Admin roles on it.
+// CreateSubmit implements console.CreateSubmitter: the create flow ends
+// in Done, as docs.cloud.google.com/iam/docs/service-accounts-create words it (#1933).
+func (iamServiceAccountsProvider) CreateSubmit() string { return "Done" }
+
 func (iamServiceAccountsProvider) CreateForm() (string, []console.Field) {
 	const details = "Service account details"
 	const access = "Grant this service account access to project (optional)"

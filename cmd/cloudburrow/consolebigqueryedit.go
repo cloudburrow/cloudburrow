@@ -161,11 +161,11 @@ func (p bigqueryProvider) detailActions(ctx context.Context, path []string) []co
 			console.Action{ID: "load", Label: "Load from Cloud Storage", Fields: bigqueryLoadFields(true)},
 			console.Action{ID: actLoadFile, Label: "Load from a file", Fields: bigqueryLoadFileFields(true)},
 			console.Action{ID: actCreateObjectTable, Label: "Create object table", Fields: createObjectTableFields()}, // #1783
-			console.Action{ID: "deletedataset", Label: "Delete dataset", Destructive: true, Leaves: true,
+			console.Action{ID: "deletedataset", Label: "Delete dataset", Destructive: true, Leaves: true, ConfirmStyle: console.DeleteConfirmWord,
 				Confirm: "Every table in the dataset, and every row in them, is deleted with it."})
 	case 2:
 		md, err := p.tableMetadata(ctx, path[0], path[1])
-		deleteTable := console.Action{ID: "deletetable", Label: "Delete table", Destructive: true, Leaves: true}
+		deleteTable := console.Action{ID: "deletetable", Label: "Delete table", Destructive: true, Leaves: true, ConfirmStyle: console.DeleteConfirmWord}
 		if err == nil && md.Type == bigquery.ViewTable {
 			return []console.Action{
 				{ID: "edittable", Label: "Edit table", Fields: bigqueryEditFields(md)},

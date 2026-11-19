@@ -32,7 +32,7 @@ func TestCloudSQLExternalPrimaryThroughThePage(t *testing.T) {
 	p := open(t)
 	p.navigate("/cloudsql-instances?project=" + project)
 	// Google's create page (#1860): the engine first, then its version.
-	p.clickText("#view button", "Create Instance")
+	p.clickText("#view button", "Create instance")
 	p.waitFor(`document.querySelector("input[type=radio][value=MySQL]") !== null`)
 	p.eval(`(() => { document.querySelector("input[type=radio][value=MySQL]").click(); return true; })()`, nil)
 	p.submitForm(map[string]string{"name": src, "mysqlVersion": "MYSQL_8_4", "sourceHostPort": "127.0.0.1:1",

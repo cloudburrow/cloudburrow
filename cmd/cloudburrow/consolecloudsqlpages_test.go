@@ -129,8 +129,10 @@ func TestCloudSQLConsoleCreatePage(t *testing.T) {
 	defer ts.Close()
 	p := cloudSQLInstancesProvider{endpoint: strings.TrimPrefix(ts.URL, "http://"), versions: []string{"POSTGRES_16", "POSTGRES_17", "MYSQL_8_0", "MYSQL_8_4"}}
 	label, fields := p.CreateForm()
-	if label != "Create Instance" || p.CreateTitle() != "Create an instance" {
-		t.Errorf("label %q, title %q", label, p.CreateTitle())
+	// Google's Instances page has Create instance, its page ends in Create
+	// Instance (docs.cloud.google.com/sql/docs/mysql/create-instance, #1933).
+	if label != "Create instance" || p.CreateTitle() != "Create an instance" || p.CreateSubmit() != "Create Instance" {
+		t.Errorf("label %q, title %q, submit %q", label, p.CreateTitle(), p.CreateSubmit())
 	}
 	by := map[string]console.Field{}
 	for _, f := range fields {

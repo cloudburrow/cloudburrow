@@ -2908,6 +2908,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
       title: `Delete ${names.length} ${names.length === 1 ? noun.replace(/s$/, "") : noun}?`,
       detail: [names.join(", "), DELETE_DETAIL[route.service]].filter(Boolean).join("\n\n"),
       confirmWord: names.length === 1 ? names[0] : String(names.length),
+      style: caps.deleteConfirm || "name",
       onConfirm: async () => {
         for (const name of names) operating.add(name);
         draw();
@@ -6894,6 +6895,9 @@ async function submitCreate(route, spec, values, onOneTime = () => {}) {
 // The threshold is the server's, not the client's, so "long enough to deserve
 // a page" has one definition rather than one per caller.
 function startCreate(route, create, onDone) {
+  // A create flow that is a page of its own (#1932): the Projects list's
+  // Create project is the New project page, as the picker's New project is.
+  if (create.href) return navigate(create.href + scopeSearch());
   if (create.page) return navigate(`${route.path}/create`);
   openCreateForm(route, create, onDone);
 }
@@ -6935,7 +6939,7 @@ function openCreateForm(route, spec, onDone) {
 
   const cancel = el("button", { type: "button", class: "secondary", text: "Cancel",
                                 onclick: () => { discarding = true; close(); } });
-  const primary = el("button", { type: "submit", class: "primary", text: spec.label });
+  const primary = el("button", { type: "submit", class: "primary", text: spec.submit || spec.label });
 
   const submit = async (e) => {
     e.preventDefault();
@@ -7080,6 +7084,8 @@ async function renderCreatePage(view, route) {
   const target = route.of;
   const project = currentProject();
   const caps = capabilityOf(target.service);
+  // A create flow that is a page of the console's own (#1932) is that page.
+  if (caps.create && caps.create.href) return navigate(caps.create.href + scopeSearch());
   const back = new URL(target.path, location.origin);
   if (project) back.searchParams.set("project", project);
   carryScope(back, target.service);
@@ -7369,10 +7375,18 @@ function notify(message, kind = "info") {
 // `consequence` is the closing sentence. A Seek passes none: it is not a
 // delete, and another Seek can move the subscription again (#787); nor does
 // removing a principal from a role, which can be granted back (#793).
-function confirmDestructive({ title, detail, confirmWord, onConfirm, confirmLabel = "Delete", consequence = "This cannot be undone." }) {
+//
+// `style` is how Google's console confirms this kind (#1931): "name" (the
+// default) asks for confirmWord typed back, "delete" or "DELETE" for that
+// word, as a Pub/Sub topic's or a BigQuery dataset's delete does, and
+// "confirm" for nothing typed, the dialog's button alone, as a Cloud Storage
+// bucket's or a Cloud Run service's does.
+function confirmDestructive({ title, detail, confirmWord, onConfirm, confirmLabel = "Delete", consequence = "This cannot be undone.", style = "name" }) {
+  if (style === "delete" || style === "DELETE") confirmWord = style;
+  const typed = style !== "confirm";
   return new Promise((settle) => {
     const error = el("p", { class: "form-error", role: "alert", hidden: true });
-    const input = el("input", { type: "text", autocomplete: "off", id: "confirm-input" });
+    const input = typed ? el("input", { type: "text", autocomplete: "off", id: "confirm-input" }) : null;
 
     let running = false;
     const { dialog, close } = openModal({
@@ -7387,7 +7401,7 @@ function confirmDestructive({ title, detail, confirmWord, onConfirm, confirmLabe
 
     const submit = async (e) => {
       e.preventDefault();
-      if (input.value.trim() !== confirmWord) {
+      if (typed && input.value.trim() !== confirmWord) {
         error.textContent = `Type ${confirmWord} exactly to confirm.`;
         error.hidden = false;
         input.focus();
@@ -7409,20 +7423,22 @@ function confirmDestructive({ title, detail, confirmWord, onConfirm, confirmLabe
       }
     };
 
-    dialog.append(el("form", { class: "modal-body", onsubmit: submit },
+    dialog.append(el("form", { class: "modal-body", onsubmit: submit, "data-confirm": typed ? style : "confirm" },
       el("h2", { id: "confirm-title", text: title }),
       detail ? el("p", { class: "confirm-detail", text: detail }) : null,
       consequence ? el("p", { text: consequence }) : null,
       error,
-      el("label", { for: "confirm-input" },
+      typed ? el("label", { for: "confirm-input" },
         el("span", { text: `Type ` }),
         el("strong", { text: confirmWord }),
-        el("span", { text: ` to confirm` })),
+        el("span", { text: ` to confirm` })) : null,
       input,
       el("div", { class: "modal-actions" }, cancel, confirm)));
 
     dialog.addEventListener("cb-closed", () => settle());
-    input.focus();
+    // With nothing to type, focus is on Cancel: one reflexive Enter must
+    // not delete.
+    (input || cancel).focus();
   });
 }
 
@@ -7532,6 +7548,7 @@ async function deleteResource(route, name, onDone, row = NO_ROW) {
     title: `Delete ${name}?`,
     detail: DELETE_DETAIL[route.service],
     confirmWord: name,
+    style: capabilityOf(route.service).deleteConfirm || "name",
     onConfirm: async () => {
       const op = recordOperation(`Delete ${name}`);
       row.start();
@@ -7649,6 +7666,10 @@ async function runAction(route, target, action, onDone, row = NO_ROW, title = nu
     confirmWord: name,
     confirmLabel: action.confirm ? action.label : undefined,
     consequence: action.destructive ? undefined : "",
+    // As Google's console confirms this action (#1931): BigQuery's Delete
+    // table asks for the word delete, a Datastore entity's Delete for
+    // nothing typed.
+    style: action.confirmStyle || "name",
     onConfirm: apply,
   });
 }
@@ -12179,7 +12200,7 @@ async function renderLocalModels(view) {
           `at revision ${m.revision.slice(0, 12)}: ${m.files.map((f) => f.path).join(", ")}. ` +
           (m.official ? "" : "This is a COMMUNITY conversion, NOT an official Google artifact. ") +
           `Licence: ${m.license}.`,
-        confirmWord: m.id, confirmLabel: "Download",
+        confirmWord: m.id, confirmLabel: "Download", style: "confirm",
         consequence: "Each file is checked against its pinned SHA-256 before it is kept.",
         onConfirm: async () => { await localModelAction(m.id, "download", { confirmBytes: m.bytes }); again(); },
       }), "primary");
@@ -12296,7 +12317,7 @@ function gardenDeployAction(m, again, fail) {
         `cache, then serves it from the local endpoint. ` +
         (st.official ? "" : "The file is a COMMUNITY conversion, NOT an official Google artifact. ") +
         `Licence: ${st.license}.`,
-      confirmWord: st.id, confirmLabel: "Deploy",
+      confirmWord: st.id, confirmLabel: "Deploy", style: "confirm",
       consequence: "Each file is checked against its pinned SHA-256 before it is kept.",
       onConfirm: async () => { await localModelAction(st.id, "download", { confirmBytes: st.bytes }); again(); },
     }).catch(fail);
@@ -12378,7 +12399,7 @@ async function drawHFPanel(host) {
         title: `Download ${m.id}?`,
         detail: `${formatBytes(m.bytes)} in ${m.files.length} files from huggingface.co/${m.id} at revision ` +
           `${m.revision.slice(0, 12)}. Licence: ${m.license}.`,
-        confirmWord: m.id, confirmLabel: "Download",
+        confirmWord: m.id, confirmLabel: "Download", style: "confirm",
         consequence: "Each LFS file is checked against its SHA-256 before it is kept.",
         onConfirm: async () => { await hfAction("download", m.id); again(); },
       }).catch(fail));
@@ -12459,7 +12480,7 @@ async function hfDeploy(m) {
   if (!m.gated) return go();
   return confirmDestructive({
     title: `Deploy ${m.id}?`, detail: `${m.id} is gated on Hugging Face. Deploying accepts its licence (${m.license}).`,
-    confirmWord: m.id, confirmLabel: "Deploy", consequence: `It is served by ${engine} on a local endpoint.`, onConfirm: go,
+    confirmWord: m.id, confirmLabel: "Deploy", style: "confirm", consequence: `It is served by ${engine} on a local endpoint.`, onConfirm: go,
   });
 }
 
@@ -14424,7 +14445,7 @@ async function bqDetailAction(path, actionID, onDone, side = false) {
     if (action.destructive) {
       await confirmDestructive({
         title: `${action.label}?`, detail: path[path.length - 1], confirmWord: path[path.length - 1],
-        confirmLabel: action.label,
+        confirmLabel: action.label, style: action.confirmStyle || "name",
         onConfirm: () => send(`/api/actions/bigquery?project=${encodeURIComponent(currentProject())}`,
           "POST", { Path: path, Action: action.id }),
       });
@@ -14456,7 +14477,7 @@ function bqCreateDataset(onDone) {
 
 async function bqDeleteDataset(id, onDone) {
   await confirmDestructive({
-    title: "Delete dataset?", detail: id, confirmWord: id,
+    title: "Delete dataset?", detail: id, confirmWord: id, style: capabilityOf("bigquery").deleteConfirm || "name",
     consequence: "Every table in the dataset, and every row in them, is deleted with it.",
     onConfirm: () => send(`/api/resources/bigquery?project=${encodeURIComponent(currentProject())}&name=${encodeURIComponent(id)}`,
       "DELETE"),

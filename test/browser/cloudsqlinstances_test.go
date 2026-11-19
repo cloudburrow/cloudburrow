@@ -142,7 +142,7 @@ func TestCloudSQLInstanceActionsThroughThePage(t *testing.T) {
 
 	// Create Instance is Google's create page: the engine first, SQL Server
 	// shown and not available, then each engine's versions.
-	p.clickText("#view button", "Create Instance")
+	p.clickText("#view button", "Create instance")
 	p.waitFor(`document.querySelector("#f-databaseVersion") !== null`)
 	var steps []string
 	p.eval(`[...document.querySelectorAll(".create-step-title")].map((s) => s.textContent)`, &steps)

@@ -136,7 +136,7 @@ func TestCloudSQLConsoleStopStartConnectionsAndPasswordPolicy(t *testing.T) {
 	// The create page: Enable password policies after the password, and
 	// Data cache's on choice not available locally.
 	p.navigate("/cloudsql-instances?project=" + project)
-	p.clickText("#view button", "Create Instance")
+	p.clickText("#view button", "Create instance")
 	p.waitFor(`document.querySelector("#f-enablePasswordPolicy") !== null`)
 	var order bool
 	p.eval(`(() => { const ids = [...document.querySelectorAll("[id^=f-]")].map((e) => e.id);

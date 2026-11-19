@@ -188,6 +188,10 @@ func roleFromForm(values map[string]string) *adminpb.Role {
 		IncludedPermissions: permissionsOf(values["permissions"])}
 }
 
+// CreateSubmit implements console.CreateSubmitter: the create flow ends
+// in Create, as docs.cloud.google.com/iam/docs/creating-custom-roles words it (#1933).
+func (iamRolesProvider) CreateSubmit() string { return "Create" }
+
 func (p iamRolesProvider) CreateForm() (string, []console.Field) {
 	return "Create role", createFields(nil)
 }
