@@ -475,6 +475,10 @@ type CreateCheck struct {
 	Fields []Field `json:"fields,omitempty"`
 	// Submit is the dialog's button, "Test" for Test message.
 	Submit string `json:"submit,omitempty"`
+	// Opens means the check's answer is a console address, opened in a new
+	// tab rather than shown: Create sink's Preview logs opens the Logs
+	// Explorer on the inclusion filter (#1863).
+	Opens bool `json:"opens,omitempty"`
 }
 
 // CreateChecker is a Creator whose create page has CreateChecks. CheckCreate
@@ -1419,6 +1423,7 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 			"id": p.ID(), "title": p.Title(),
 			"create": caps.Create, "delete": caps.Delete, "detail": caps.Detail,
 			"query": caps.Query, "edit": caps.Edit, "reveal": caps.Reveal,
+			"deleteLabel": caps.DeleteLabel, "editRow": caps.EditRow,
 			"page": caps.Page, "scope": caps.Scope,
 		})
 	}

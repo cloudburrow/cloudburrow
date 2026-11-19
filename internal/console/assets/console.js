@@ -6147,7 +6147,20 @@ function createChecks(target, spec, fields) {
       setBusy(e.currentTarget, true);
       const b = e.currentTarget;
       try {
-        show(verdict, true, (await run(check, {})).message);
+        const answer = (await run(check, {})).message;
+        // A check that opens a page (#1863): Preview logs opens the Logs
+        // Explorer on the form's filter in a new tab, and says so with a
+        // link, in case the browser held the tab back.
+        if (check.opens && answer.startsWith("/")) {
+          window.open(answer, "_blank", "noopener");
+          setChildren(verdict, document.createTextNode(`${check.label} opened in a new tab: `),
+            el("a", { href: answer, target: "_blank", rel: "noopener", text: answer }));
+          verdict.hidden = false;
+          verdict.classList.remove("is-error");
+          setBusy(b, false);
+          return;
+        }
+        show(verdict, true, answer);
       } catch (err) {
         show(verdict, false, err.message);
       }
@@ -9105,6 +9118,119 @@ async function renderLogs(view) {
   const addClause = (clause) => {
     queryEditor.value = queryEditor.value.trim() ? `${queryEditor.value.trim()}\n${clause}` : clause;
   };
+
+  // Query autocomplete (#1863): the field paths the entries read so far
+  // carry, and, after a path and = or :, the values they hold for it,
+  // offered under the editor as the word at the caret is typed.
+  const knownFields = new Map(); // path -> Set of values
+  const learnFields = (obj, prefix) => {
+    if (!obj || typeof obj !== "object" || knownFields.size > 2000) return;
+    for (const [k, v] of Object.entries(obj)) {
+      const path = prefix ? `${prefix}.${k}` : k;
+      if (v && typeof v === "object" && !Array.isArray(v)) { learnFields(v, path); continue; }
+      if (Array.isArray(v)) continue;
+      if (!knownFields.has(path)) knownFields.set(path, new Set());
+      const vals = knownFields.get(path);
+      if (vals.size < 50 && v !== "" && v !== null && v !== undefined) vals.add(String(v));
+    }
+  };
+  const suggestions = el("ul", { class: "log-suggestions", id: "log-query-suggestions", role: "listbox",
+    "aria-label": "Query suggestions", hidden: true });
+  queryEditor.setAttribute("aria-autocomplete", "list");
+  queryEditor.setAttribute("aria-controls", "log-query-suggestions");
+  const wordAtCaret = () => {
+    const upto = queryEditor.value.slice(0, queryEditor.selectionStart);
+    const m = /[^\s()]*$/.exec(upto);
+    return { word: m ? m[0] : "", start: upto.length - (m ? m[0].length : 0) };
+  };
+  const insertSuggestion = (text) => {
+    const { start } = wordAtCaret();
+    const end = queryEditor.selectionStart;
+    queryEditor.value = queryEditor.value.slice(0, start) + text + queryEditor.value.slice(end);
+    const caret = start + text.length;
+    queryEditor.setSelectionRange(caret, caret);
+    suggestions.hidden = true;
+    queryEditor.focus();
+  };
+  const suggest = () => {
+    const { word } = wordAtCaret();
+    let items = [];
+    const op = /^([A-Za-z0-9_."\/-]+?)(=|:|!=|>=|<=)(.*)$/.exec(word);
+    if (op) {
+      const vals = knownFields.get(op[1]);
+      const typed = op[3].replace(/^"/, "");
+      if (vals) items = [...vals].filter((v) => v.startsWith(typed) && v !== typed).sort().slice(0, 12)
+        .map((v) => ({ label: v, text: `${op[1]}${op[2]}${logQueryValue(v)}` }));
+    } else if (word.length >= 1) {
+      items = [...knownFields.keys()].filter((k) => k.startsWith(word) && k !== word).sort().slice(0, 12)
+        .map((k) => ({ label: k, text: k }));
+    }
+    if (!items.length) { suggestions.hidden = true; return; }
+    setChildren(suggestions, ...items.map((it, i) => el("li", { role: "option", id: `log-suggestion-${i}`,
+      class: "log-suggestion mono", text: it.label, tabindex: "-1",
+      onmousedown: (e) => { e.preventDefault(); insertSuggestion(it.text); },
+      onkeydown: (e) => {
+        if (e.key === "Enter") { e.preventDefault(); insertSuggestion(it.text); }
+        else if (e.key === "ArrowDown") { e.preventDefault(); (e.target.nextElementSibling || e.target).focus(); }
+        else if (e.key === "ArrowUp") { e.preventDefault(); (e.target.previousElementSibling || queryEditor).focus(); }
+        else if (e.key === "Escape") { e.preventDefault(); suggestions.hidden = true; queryEditor.focus(); }
+      } })));
+    suggestions.hidden = false;
+  };
+  queryEditor.addEventListener("input", suggest);
+  queryEditor.addEventListener("blur", () => setTimeout(() => {
+    if (!suggestions.contains(document.activeElement)) suggestions.hidden = true;
+  }, 150));
+  queryEditor.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown" && !suggestions.hidden) { e.preventDefault(); suggestions.firstElementChild.focus(); }
+    else if (e.key === "Escape" && !suggestions.hidden) { e.preventDefault(); e.stopPropagation(); suggestions.hidden = true; }
+  });
+
+  // Summary fields (#1863), Google's Preferences > Manage summary fields:
+  // custom fields drawn as chips at the start of each entry's summary,
+  // optionally truncated; and Show summary chips. Per viewer.
+  const SUMMARY_KEY = "cloudburrow.logs.summary";
+  let summary = { fields: [], truncate: false, chars: 30, fromEnd: false, show: true };
+  try { summary = { ...summary, ...JSON.parse(readStored(SUMMARY_KEY, "{}")) }; } catch { /* the defaults */ }
+  const saveSummary = () => writeStored(SUMMARY_KEY, JSON.stringify(summary));
+  const fieldValue = (entry, path) => path.split(".").map((k) => k.replace(/^"|"$/g, ""))
+    .reduce((o, k) => (o && typeof o === "object" ? o[k] : undefined), entry.logEntry || {});
+  const summaryChips = (entry) => {
+    if (!summary.show) return [];
+    return summary.fields.map((f) => {
+      let v = fieldValue(entry, f);
+      if (v === undefined || v === null || v === "") return null;
+      v = typeof v === "object" ? JSON.stringify(v) : String(v);
+      if (summary.truncate && v.length > summary.chars) {
+        v = summary.fromEnd ? `…${v.slice(v.length - summary.chars)}` : `${v.slice(0, summary.chars)}…`;
+      }
+      return el("span", { class: "log-summary-chip", title: f, text: v });
+    }).filter(Boolean);
+  };
+
+  // Highlight in results (#1863): the text is marked wherever an entry's
+  // summary holds it.
+  let highlight = "";
+  const highlighted = (text) => {
+    if (!highlight) return [document.createTextNode(text)];
+    const out = [];
+    const lower = text.toLowerCase(), h = highlight.toLowerCase();
+    let i = 0;
+    for (let j = lower.indexOf(h); j >= 0; j = lower.indexOf(h, i)) {
+      if (j > i) out.push(document.createTextNode(text.slice(i, j)));
+      out.push(el("mark", { class: "log-highlight", text: text.slice(j, j + h.length) }));
+      i = j + h.length;
+    }
+    if (i < text.length) out.push(document.createTextNode(text.slice(i)));
+    return out;
+  };
+
+  // Pinned entries (#1863): Pin on an entry darkens it and puts a pin on
+  // the Timeline at its time, whose menu has Scroll to log entry, Zoom to
+  // log entry and Unpin; the entry's own pin menu has Same resource.type,
+  // Same resource.labels, Same trace and Show all.
+  const pinned = new Map();
+  const pinStrip = el("div", { class: "log-pins", id: "log-pins", "aria-label": "Pinned log entries" });
   // The Log name picker (#1554), as Google's Logs Explorer lists the scope's
   // log names: Cloud Logging's ListLogs of the project, folder or
   // organization in scope. A log's full name is its entries' resource, so
@@ -9234,6 +9360,81 @@ async function renderLogs(view) {
           : el("p", { class: "unavailable", text: "No values" }))));
   };
 
+  // The Timeline's drag handles (#1863): the start and end of the range,
+  // dragged (or moved with the arrow keys) inward to narrow it or outward
+  // to widen it, then Run, as on Google's Timeline.
+  const timelineHandles = (buckets, width) => {
+    const n = buckets.length;
+    if (!n) return null;
+    const start = el("input", { type: "range", min: "0", max: String(n), value: "0", step: "1",
+      class: "timeline-handle", id: "timeline-start", "aria-label": "Start of the time range" });
+    const end = el("input", { type: "range", min: "0", max: String(n), value: String(n), step: "1",
+      class: "timeline-handle", id: "timeline-end", "aria-label": "End of the time range" });
+    const at = (i) => new Date(new Date(buckets[0].at).getTime() + i * width);
+    const label = el("span", { class: "unavailable", id: "timeline-selection" });
+    const run = el("button", { type: "button", class: "secondary", id: "timeline-run", text: "Run", disabled: true });
+    const shade = el("div", { class: "timeline-selection-shade", "aria-hidden": "true" });
+    const update = () => {
+      if (+start.value >= +end.value) {
+        if (document.activeElement === start) start.value = String(+end.value - 1);
+        else end.value = String(+start.value + 1);
+      }
+      start.setAttribute("aria-valuetext", at(+start.value).toLocaleTimeString());
+      end.setAttribute("aria-valuetext", at(+end.value).toLocaleTimeString());
+      label.textContent = `${at(+start.value).toLocaleTimeString()} to ${at(+end.value).toLocaleTimeString()}`;
+      shade.style.left = `${(+start.value / n) * 100}%`;
+      shade.style.width = `${((+end.value - +start.value) / n) * 100}%`;
+      run.disabled = +start.value === 0 && +end.value === n;
+    };
+    start.addEventListener("input", update);
+    end.addEventListener("input", update);
+    run.addEventListener("click", () => {
+      customFrom = at(+start.value).toISOString();
+      customTo = at(+end.value).toISOString();
+      timeRange.value = "custom";
+      runQuery();
+      announce(`Time range ${label.textContent}`);
+    });
+    update();
+    return el("div", { class: "timeline-range" },
+      el("div", { class: "timeline-handles" }, shade, start, end),
+      el("div", { class: "actions" }, label, run));
+  };
+
+  const drawPins = () => {
+    if (!pinned.size) return setChildren(pinStrip);
+    setChildren(pinStrip, el("span", { class: "unavailable", text: "Pinned:" }),
+      ...[...pinned.values()].map((entry) => {
+        const when = new Date(entry.timestamp);
+        const menu = overflowMenu([
+          { label: "Scroll to log entry", run: () => {
+            const row = body.querySelector(`tr.log-entry[data-insert-id="${CSS.escape(String(entry.id))}"]`);
+            if (row) { row.scrollIntoView({ block: "center" }); row.querySelector("button").focus(); }
+          } },
+          { label: "Zoom to log entry", run: () => {
+            customFrom = new Date(when.getTime() - 30000).toISOString();
+            customTo = new Date(when.getTime() + 30000).toISOString();
+            timeRange.value = "custom";
+            runQuery();
+          } },
+          { label: "Unpin", run: () => togglePin(entry) },
+        ], `pinned entry at ${when.toLocaleTimeString()}`);
+        return el("span", { class: "log-pin-mark" },
+          el("span", { class: "mono", text: when.toLocaleTimeString() }), menu);
+      }));
+  };
+  const togglePin = (entry) => {
+    const id = String(entry.id);
+    if (pinned.has(id)) pinned.delete(id); else pinned.set(id, entry);
+    for (const row of body.querySelectorAll(`tr.log-entry[data-insert-id="${CSS.escape(id)}"]`)) {
+      row.classList.toggle("is-pinned", pinned.has(id));
+      const b = row.querySelector(".log-pin");
+      if (b) b.setAttribute("aria-pressed", pinned.has(id) ? "true" : "false");
+    }
+    drawPins();
+    announce(pinned.has(id) ? "Pinned the log entry" : "Unpinned the log entry");
+  };
+
   const drawTimeline = async () => {
     const query = filterQuery();
     query.set("limit", "1000");
@@ -9299,6 +9500,8 @@ async function renderLogs(view) {
           }
           return column;
         })),
+      timelineHandles(buckets, width),
+      pinStrip,
       el("p", { class: "unavailable",
         text: `${total} entries in the retained window` +
               (first && last ? `, from ${first.toLocaleTimeString()} to ${last.toLocaleTimeString()}` : "") +
@@ -9503,6 +9706,23 @@ async function renderLogs(view) {
   const append = (entry) => {
     if (!rows) body.replaceChildren();
     rows++;
+    learnFields(entry.logEntry, "");
+    const isPinned = pinned.has(String(entry.id));
+    const pin = el("button", { class: "icon-button log-pin", "aria-pressed": isPinned ? "true" : "false",
+      "aria-label": `Pin entry ${entry.id}`, title: "Pin",
+      html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3l7 7-3 1-4 4 1 5-2 1-4-5-5 5-1-1 5-5-5-4 1-2 5 1 4-4z"/></svg>',
+      onclick: () => togglePin(entry) });
+    // The pinned entry's menu: queries for its neighbours.
+    const le = entry.logEntry || {};
+    const pinMenu = overflowMenu([
+      { label: "Same resource.type", run: () => onMatch(`resource.type=${logQueryValue((le.resource || {}).type || "")}`) },
+      { label: "Same resource.labels", run: () => onMatch(Object.entries((le.resource || {}).labels || {})
+          .map(([k, v]) => `resource.labels.${k}=${logQueryValue(String(v))}`).join("\n") || `resource.type=${logQueryValue((le.resource || {}).type || "")}`) },
+      { label: "Same trace", unavailable: le.trace ? "" : "This entry has no trace.",
+        run: () => onMatch(`trace=${logQueryValue(le.trace || "")}`) },
+      { label: "Show all", run: () => { queryEditor.value = ""; runQuery(); } },
+    ], `pinned entry ${entry.id}`);
+    pinMenu.classList.add("log-pin-menu");
     const expand = el("button", { class: "icon-button log-expand", "aria-expanded": "false",
       "aria-label": `Expand entry ${entry.id}`,
       html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>' });
@@ -9527,8 +9747,8 @@ async function renderLogs(view) {
       row.after(detail);
       expand.setAttribute("aria-expanded", "true");
     });
-    const row = el("tr", { class: "log-entry", "data-insert-id": String(entry.id) },
-      el("td", {}, expand),
+    const row = el("tr", { class: "log-entry" + (isPinned ? " is-pinned" : ""), "data-insert-id": String(entry.id) },
+      el("td", { class: "log-entry-controls" }, expand, pin, pinMenu),
       el("td", {}, el("span", { class: "status",
         "data-state": entry.severity === "ERROR" ? "error"
           : entry.severity === "WARNING" ? "warn" : "ok" },
@@ -9540,8 +9760,10 @@ async function renderLogs(view) {
                  title: [entry.project ? `project ${entry.project}` : "no project",
                          entry.operationId ? `operation ${entry.operationId}` : null]
                    .filter(Boolean).join(" · ") }),
-      el("td", { class: "mono", text: entry.message }),
+      el("td", { class: "mono log-summary", "data-message": entry.message || "" },
+        ...summaryChips(entry), ...highlighted(entry.message || "")),
       logDelete ? el("td", {}, logRowActions(entry)) : null);
+    row.logEntryData = entry;
     body.append(row);
     // Bounded: an unbounded log view eventually becomes the reason the tab
     // stops responding.
@@ -9719,6 +9941,7 @@ async function renderLogs(view) {
     // which this instance does not serve (#1863).
     { label: "Create log alert", run: () => {},
       unavailable: "Not available locally: a log alert is a Cloud Monitoring alerting policy, and this instance does not serve Cloud Monitoring." },
+    { label: "Highlight in results", run: () => openHighlight() },
     { label: "Download", run: async () => {
       const query = filterQuery();
       query.set("limit", "1000");
@@ -9731,6 +9954,73 @@ async function renderLogs(view) {
     } },
   ], "the query results");
   queryActions.querySelector(".overflow-trigger").setAttribute("aria-label", "Actions");
+
+  const redrawSummaries = () => {
+    for (const row of body.querySelectorAll("tr.log-entry")) {
+      const cell = row.querySelector("td.log-summary");
+      if (cell && row.logEntryData) setChildren(cell, ...summaryChips(row.logEntryData), ...highlighted(cell.dataset.message));
+    }
+  };
+  const openHighlight = () => {
+    const { dialog, close } = openModal({ labelledBy: "log-highlight-title" });
+    const input = el("input", { type: "text", id: "log-highlight-text", value: highlight, "aria-label": "Text to highlight" });
+    dialog.append(el("form", { class: "modal-body", onsubmit: (e) => {
+        e.preventDefault(); highlight = input.value.trim(); redrawSummaries(); close();
+        announce(highlight ? `Highlighting ${highlight}` : "Highlight cleared"); } },
+      el("h2", { id: "log-highlight-title", text: "Highlight in results" }),
+      el("label", { for: "log-highlight-text", text: "Text to highlight" }), input,
+      el("div", { class: "modal-actions" },
+        el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }),
+        el("button", { type: "submit", class: "primary", text: "Highlight" }))));
+    input.focus();
+  };
+  const openSummaryFields = () => {
+    const { dialog, close } = openModal({ labelledBy: "log-summary-title" });
+    const fields = [...summary.fields];
+    const list = el("div", { class: "filter-chips", id: "log-summary-fields" });
+    const drawList = () => setChildren(list, ...fields.map((f) => el("span", { class: "chip" },
+      el("span", { class: "mono", text: f }),
+      el("button", { type: "button", class: "chip-remove", "aria-label": `Remove ${f}`, text: "×",
+        onclick: () => { fields.splice(fields.indexOf(f), 1); drawList(); } }))));
+    const options = el("datalist", { id: "log-summary-options" },
+      ...[...knownFields.keys()].sort().map((k) => el("option", { value: k })));
+    const input = el("input", { type: "text", id: "log-summary-input", list: "log-summary-options",
+      class: "mono", placeholder: "jsonPayload.method" });
+    const quote = (path) => path.split(".").map((p) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(p) || /^".*"$/.test(p) ? p : `"${p}"`).join(".");
+    const add = el("button", { type: "button", class: "secondary", text: "Add", onclick: () => {
+      const v = quote(input.value.trim());
+      if (v && !fields.includes(v)) fields.push(v);
+      input.value = ""; drawList(); input.focus(); } });
+    const truncate = el("input", { type: "checkbox", id: "log-summary-truncate" });
+    truncate.checked = summary.truncate;
+    const chars = el("input", { type: "number", id: "log-summary-chars", min: "1", max: "1000", value: String(summary.chars),
+      "aria-label": "Characters" });
+    const fromEnd = el("select", { id: "log-summary-from", "aria-label": "Truncate from" },
+      el("option", { value: "start", text: "Show the beginning" }), el("option", { value: "end", text: "Show the end" }));
+    fromEnd.value = summary.fromEnd ? "end" : "start";
+    drawList();
+    dialog.append(el("form", { class: "modal-body", onsubmit: (e) => {
+        e.preventDefault();
+        summary = { ...summary, fields, truncate: truncate.checked, chars: Math.max(1, +chars.value || 30), fromEnd: fromEnd.value === "end" };
+        saveSummary(); redrawSummaries(); close(); announce("Summary fields applied"); } },
+      el("h2", { id: "log-summary-title", text: "Manage summary fields" }),
+      el("h3", { text: "Custom summary fields" }), list,
+      el("div", { class: "actions" },
+        el("label", { for: "log-summary-input", class: "sr-only", text: "Field name" }), input, options, add),
+      el("div", { class: "check-line" }, truncate, el("label", { for: "log-summary-truncate", text: "Truncate custom summary fields" })),
+      el("div", { class: "actions" }, chars, fromEnd),
+      el("div", { class: "modal-actions" },
+        el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }),
+        el("button", { type: "submit", class: "primary", text: "Apply" }))));
+    input.focus();
+  };
+  const preferences = overflowMenu([
+    { label: "Manage summary fields", run: () => openSummaryFields() },
+    { label: "Show summary chips", run: () => {
+      summary.show = !summary.show; saveSummary(); redrawSummaries();
+      notify(summary.show ? "Summary chips shown" : "Summary chips hidden"); } },
+  ], "the query results' preferences");
+  preferences.querySelector(".overflow-trigger").setAttribute("aria-label", "Preferences");
 
   drawScope();
   const shareLink = el("button", { class: "secondary", text: "Share link",
@@ -9752,6 +10042,7 @@ async function renderLogs(view) {
     el("section", { class: "card log-query", "aria-label": "Query" },
       el("div", { class: "actions" }, contains, resourceType, logName, severity, source, resource),
       queryEditor,
+      suggestions,
       queryError,
       el("div", { class: "actions" }, runButton)),
     chips,
@@ -9759,7 +10050,7 @@ async function renderLogs(view) {
     el("div", { class: "log-panes" },
       fieldsPane,
       el("section", { class: "log-results", "aria-label": "Query results" },
-        el("div", { class: "log-results-head" }, el("h2", { text: "Query results" }), resultsCount, queryActions),
+        el("div", { class: "log-results-head" }, el("h2", { text: "Query results" }), resultsCount, queryActions, preferences),
         el("div", { class: "table-wrap" }, table))));
 
   showViewControls();
