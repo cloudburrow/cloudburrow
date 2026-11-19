@@ -144,6 +144,27 @@ func (s *Server) checkUpgrade(c *created, version string, includeReplicas bool) 
 	// Versions"), so a replica is upgraded before its primary, as Cloud SQL
 	// documents (#1462). A PostgreSQL replica is too (#1524), and then
 	// waits for its primary (awaitPrimary).
+	if engineOf(version) == "POSTGRES" {
+		// A PostgreSQL replica upgraded on its own (awaitPrimary) is rebuilt
+		// from its primary at the primary's version once the primary is
+		// upgraded; to an older version than the replica's that would roll
+		// the replica back, which Cloud SQL does not do: "After you upgrade a
+		// replica, you can't roll back the database version of the replica"
+		// (upgrade-major-db-version-inplace, re-read 2026-11-18). UNVERIFIED
+		// (re-read 2026-11-18, which documents no error): the code and
+		// wording of this refusal.
+		var ahead []string
+		for _, r := range s.replicaTreeLocked(c.spec.Project, c.spec.Name) {
+			if rc := s.writes.byName[r]; rc != nil && versionIndex(rc.spec.DatabaseVersion) > versionIndex(version) {
+				ahead = append(ahead, r+" ("+rc.spec.DatabaseVersion+")")
+			}
+		}
+		if len(ahead) > 0 {
+			return Errorf(http.StatusBadRequest, "Invalid request: the read replicas %s of %s were upgraded to a newer version than %s, and a "+
+				"replica's database version cannot be rolled back; upgrade the primary to the replicas' version.",
+				strings.Join(ahead, ", "), c.spec.Name, version)
+		}
+	}
 	if rs := s.replicaNamesLocked(c.spec.Project, c.spec.Name); len(rs) > 0 && !includeReplicas {
 		// Cloud SQL: "If you don't include replicas in the upgrade, then you
 		// must upgrade the read replicas before you upgrade the primary

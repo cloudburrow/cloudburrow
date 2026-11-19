@@ -90,7 +90,7 @@ func TestEveryUnservedMethodIsNotImplemented(t *testing.T) {
 				`"targetInstance":"target","pointInTime":"2026-01-01T00:00:00Z"}`
 		}
 		if m.ID == "sql.projects.instances.rescheduleMaintenance" {
-			// It checks its request, then is 501 (#1524).
+			// Served since #1524: refused only for want of a scheduled event.
 			body = `{"reschedule":{"rescheduleType":"IMMEDIATE"}}`
 		}
 		req, _ := http.NewRequest(m.HTTPMethod, ts.URL+"/"+path+"?name=x", strings.NewReader(body))

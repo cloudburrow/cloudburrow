@@ -109,6 +109,16 @@ type Spec struct {
 	// deployment's switchover (#1614) moves the blue instance's name to
 	// the green instance's server, and the green name to the blue's.
 	Server string `json:"server,omitempty"`
+	// PasswordHistory are, per user ("name@host"), the hashes of the
+	// passwords users.insert and update set, oldest first, and
+	// PasswordChanged when each was last set: what the password policy's
+	// reuseInterval and passwordChangeInterval check (#1876). Never
+	// answered.
+	PasswordHistory map[string][]string `json:"passwordHistory,omitempty"`
+	PasswordChanged map[string]string   `json:"passwordChanged,omitempty"`
+	// Maintenance is the maintenance event scheduled on the instance
+	// (#1524, maintenance.go), nil while none is.
+	Maintenance *Maintenance `json:"scheduledMaintenance,omitempty"`
 }
 
 // ServerName is the name of the instance's server in the cluster.
@@ -159,6 +169,9 @@ type Provisioner interface {
 	Start(ctx context.Context, spec Spec) error
 	// Restart restarts the server's pod and returns once it serves again.
 	Restart(ctx context.Context, spec Spec) error
+	// Stop shuts spec's server down (#1875): its pods go, with its
+	// tunnel, and its volume stays; Start brings it back with its data.
+	Stop(ctx context.Context, spec Spec) error
 	// Remove deletes the server and its volume.
 	Remove(ctx context.Context, name string) error
 	// Prune removes every created server not named in keep: what an
@@ -265,8 +278,11 @@ func (s *Server) bringUp(name, opID string) {
 	s.emu.RLock()
 	c := s.writes.byName[name]
 	var spec Spec
+	fresh := false
 	if c != nil {
 		spec = c.spec
+		// An instance being created, not one restored by a later `up`.
+		fresh = c.state == "PENDING_CREATE" && opID != ""
 	}
 	s.emu.RUnlock()
 	if c == nil {
@@ -281,6 +297,19 @@ func (s *Server) bringUp(name, opID string) {
 	defer cancel()
 	// A server whose key cannot be used is not started (#1538).
 	err := s.keyUsable(spec)
+	if err == nil && spec.Stopped() {
+		// A stopped instance's server is shut down (#1875). One created
+		// stopped is started first, to initialise its data, as Cloud SQL
+		// creates the instance and then stops it.
+		if fresh {
+			err = s.writes.prov.Start(ctx, spec)
+		}
+		if err == nil {
+			err = s.writes.prov.Stop(ctx, spec)
+		}
+		s.settle(c, opID, err)
+		return
+	}
 	if err == nil {
 		// A physical sync's backup is restored first (#1570), and Start
 		// then sets up replication from its GTIDs.
@@ -298,8 +327,13 @@ func (s *Server) bringUp(name, opID string) {
 			err = fmt.Errorf("take the point-in-time recovery base: %w", err)
 		}
 	}
+	s.settle(c, opID, err)
+}
+
+// settle marks c RUNNABLE, or FAILED with err, and finishes opID.
+func (s *Server) settle(c *created, opID string, err error) {
 	s.emu.Lock()
-	if cur := s.writes.byName[name]; cur == c && c.state != "PENDING_DELETE" {
+	if cur := s.writes.byName[c.spec.Name]; cur == c && c.state != "PENDING_DELETE" {
 		if err != nil {
 			c.state, c.failure = "FAILED", err.Error()
 		} else {
@@ -417,8 +451,8 @@ func (b instanceBody) unsupported() error {
 				}
 			}
 		}
-		if b.Settings.ActivationPolicy == "NEVER" || b.Settings.ActivationPolicy == "ON_DEMAND" {
-			return unimplemented("activationPolicy "+b.Settings.ActivationPolicy, "a created instance's server always runs")
+		if err := checkActivationPolicy(b.Settings.ActivationPolicy); err != nil {
+			return err
 		}
 		if b.Settings.DatabaseFlags != nil {
 			for _, f := range *b.Settings.DatabaseFlags {
@@ -453,6 +487,9 @@ func (b instanceBody) apply(spec *Spec, replace bool) {
 			next[k] = v
 		}
 		for k, v := range b.raw {
+			if k == "passwordValidationPolicy" && !replace {
+				v = mergePasswordPolicy(next[k], v)
+			}
 			next[k] = v
 		}
 		spec.Settings = next
@@ -474,6 +511,9 @@ func (b instanceBody) apply(spec *Spec, replace bool) {
 	}
 	if st.AvailabilityType != "" {
 		spec.AvailabilityType = st.AvailabilityType
+	}
+	if st.ActivationPolicy != "" {
+		spec.ActivationPolicy = st.ActivationPolicy
 	}
 	if st.BackupConfiguration != nil && st.BackupConfiguration.Enabled != nil {
 		spec.BackupEnabled = *st.BackupConfiguration.Enabled
@@ -580,6 +620,22 @@ func (s *Server) insertInstance(r *http.Request, base, project string) (any, err
 	}
 	if err := legacyRefusal(spec); err != nil {
 		return nil, err
+	}
+	if err := checkPasswordPolicy(spec); err != nil {
+		return nil, err
+	}
+	if replica && spec.Stopped() {
+		return nil, replicaNeverErr()
+	}
+	if replica {
+		if pc := s.createdNamed(project, b.MasterInstanceName); pc != nil {
+			s.emu.RLock()
+			stopped := pc.spec.Stopped()
+			s.emu.RUnlock()
+			if stopped {
+				return nil, notRunningErr()
+			}
+		}
 	}
 	if replica && spec.Regional() {
 		return nil, unimplemented("availabilityType REGIONAL on a read replica",
@@ -722,6 +778,12 @@ func (s *Server) patchInstance(r *http.Request, base, project, name string, repl
 		return nil, err
 	}
 	upgrade := b.DatabaseVersion != "" && b.DatabaseVersion != c.spec.DatabaseVersion
+	s.emu.RLock()
+	wasStopped := c.spec.Stopped()
+	s.emu.RUnlock()
+	if upgrade && wasStopped {
+		return nil, notRunningErr()
+	}
 	if b.Name != "" && b.Name != name {
 		return nil, Errorf(http.StatusBadRequest, "Invalid request: an instance cannot be renamed.")
 	}
@@ -833,6 +895,14 @@ func (s *Server) patchInstance(r *http.Request, base, project, name string, repl
 		s.emu.Unlock()
 		return nil, err
 	}
+	if err := checkPasswordPolicy(next); err != nil {
+		s.emu.Unlock()
+		return nil, err
+	}
+	if next.Stopped() && next.MasterInstanceName != "" {
+		s.emu.Unlock()
+		return nil, replicaNeverErr()
+	}
 	if next.Regional() && next.MasterInstanceName != "" {
 		s.emu.Unlock()
 		return nil, unimplemented("availabilityType REGIONAL on a read replica",
@@ -849,8 +919,11 @@ func (s *Server) patchInstance(r *http.Request, base, project, name string, repl
 		sb := 1 - next.PrimaryNode()
 		next.HAEpochs[sb] = max(next.HAEpochs[0], next.HAEpochs[1]) + 1
 	}
-	restart := !flagsEqual(next.Flags, c.spec.Flags) || c.state == "FAILED" || haChange
-	if restart {
+	// Stopping or starting the instance (#1875) shuts its server down, or
+	// starts it with its data.
+	activation := next.Stopped() != c.spec.Stopped()
+	restart := !flagsEqual(next.Flags, c.spec.Flags) || c.state == "FAILED" || haChange || activation
+	if restart && !next.Stopped() {
 		// A server whose key cannot be used is not started again (#1538).
 		if err := s.keyUsableWith(s.kms, next); err != nil {
 			s.emu.Unlock()
@@ -981,6 +1054,10 @@ func (s *Server) restartInstance(base, project, name string) (any, error) {
 		s.emu.Unlock()
 		return nil, Errorf(http.StatusConflict, "Operation failed because another operation was already in progress (the instance is %s).", st)
 	}
+	if c.spec.Stopped() {
+		s.emu.Unlock()
+		return nil, notRunningErr()
+	}
 	c.state = "MAINTENANCE"
 	spec = c.spec
 	s.emu.Unlock()
@@ -1013,7 +1090,10 @@ func (s *Server) createdJSON(ctx context.Context, base string, c *created) (map[
 	if err != nil {
 		return nil, err
 	}
-	if state != "RUNNABLE" || in["state"] == "UNKNOWN_STATE" {
+	if state == "RUNNABLE" && spec.Stopped() {
+		// "The instance is running, or has been stopped by owner" (#1875).
+		in["state"] = "RUNNABLE"
+	} else if state != "RUNNABLE" || in["state"] == "UNKNOWN_STATE" {
 		if state == "RUNNABLE" {
 			state = "UNKNOWN_STATE"
 		}
@@ -1063,6 +1143,10 @@ func (s *Server) createdJSON(ctx context.Context, base string, c *created) (map[
 		}
 	}
 	st["tier"] = spec.Tier
+	st["activationPolicy"] = "ALWAYS"
+	if spec.ActivationPolicy != "" {
+		st["activationPolicy"] = spec.ActivationPolicy
+	}
 	st["settingsVersion"] = fmt.Sprint(spec.SettingsVersion)
 	st["deletionProtectionEnabled"] = spec.DeletionProtection
 	if spec.AvailabilityType != "" {
@@ -1096,6 +1180,7 @@ func (s *Server) createdJSON(ctx context.Context, base string, c *created) (map[
 	s.replicationClusterJSON(in, spec)
 	s.casInstanceJSON(in, spec)
 	s.blueGreenInfoJSON(in, spec)
+	maintenanceJSON(in, spec, time.Now())
 	return in, nil
 }
 

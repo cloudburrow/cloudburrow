@@ -87,6 +87,13 @@ func TestReplicaUpgradeOnItsOwn(t *testing.T) {
 	if _, err := s.replicaVerb("", "p", "pgr", "promoteReplica"); err == nil || !strings.Contains(errStatus(err), "501") {
 		t.Errorf("promoting a replica waiting for its primary: %v, want 501", err)
 	}
+	// Its primary is not upgraded to an older version than the replica's:
+	// that would roll the replica back.
+	for _, include := range []bool{false, true} {
+		if err := s.checkUpgrade(s.writes.byName["pg"], "POSTGRES_16", include); err == nil || !strings.Contains(errStatus(err), "400") {
+			t.Errorf("upgrading the primary below its replica (include %v): %v, want 400", include, err)
+		}
+	}
 	// Its primary is no longer behind it.
 	if err := s.checkUpgrade(s.writes.byName["pg"], "POSTGRES_17", false); err != nil {
 		t.Errorf("upgrading the PostgreSQL primary after its replica: %v", err)

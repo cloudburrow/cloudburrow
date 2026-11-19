@@ -2048,3 +2048,23 @@ tr.log-entry.is-pinned { background: var(--state-hover); }
 .timeline-handle::-webkit-slider-thumb { pointer-events: auto; }
 .timeline-handle::-moz-range-thumb { pointer-events: auto; }
 .timeline-selection-shade { position: absolute; top: 8px; height: 8px; background: var(--accent); opacity: .3; border-radius: var(--radius-control); }
+
+/* A resource's own side menu (#1860): Google's Cloud SQL instance menu,
+   Overview, Connections, Users, Databases and the rest, down the left of the
+   page; above the page in a narrow window. */
+.detail-with-nav { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 24px; align-items: start; }
+.tab-strip.is-side-nav { flex-direction: column; margin: 0; border-right: 1px solid var(--border); overflow: visible; }
+.tab-strip.is-side-nav .tab {
+  text-align: left; border-bottom: 0; border-left: 3px solid transparent; border-radius: 0 16px 16px 0; padding: 8px 12px;
+}
+.tab-strip.is-side-nav .tab.is-selected { border-left-color: var(--accent); background: var(--nav-selected); color: var(--nav-selected-text); }
+@media (max-width: 959px) {
+  .detail-with-nav { grid-template-columns: 1fr; }
+  .tab-strip.is-side-nav { flex-direction: row; flex-wrap: wrap; border-right: 0; border-bottom: 1px solid var(--border); }
+}
+.form-row.is-radio input[type="radio"]:disabled + label { color: var(--text-muted); }
+
+/* A menu page's own tabs (#1860): Google's Cloud SQL Connections page has
+   Summary, Networking and Security inside it. */
+.sub-tab-strip { margin: 0 0 12px; }
+.sub-tab-panel { padding-top: 4px; }

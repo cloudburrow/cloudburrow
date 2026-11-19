@@ -52,7 +52,7 @@ func projectBackupsListing(ctx context.Context, svc *sqladminapi.Service, projec
 			created = b.BackupInterval.StartTime
 		}
 		l.Items = append(l.Items, console.Resource{Name: lastSegment(b.Name), Status: b.State, Fields: map[string]string{
-			"Type": b.Type, "Description": b.Description, "Created": created, "Expires": b.ExpiryTime}})
+			"Type": b.Type, "Description": b.Description, "Created": created, "Expires": b.ExpiryTime, "Location": b.Location}})
 	}
 	l.Total = len(l.Items)
 	return l

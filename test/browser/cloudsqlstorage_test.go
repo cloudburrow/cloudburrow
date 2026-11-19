@@ -18,7 +18,11 @@ import (
 func (p *tab) clickAction(label, confirm string) string {
 	p.t.Helper()
 	p.waitFor(`document.querySelector(".modal") === null`)
-	p.clickText("#view .page-actions button", label)
+	where := p.findAction(label)
+	if where == "" {
+		p.t.Fatalf("the page offers no %s", label)
+	}
+	p.clickText(where, label)
 	if confirm != "" {
 		p.confirmByName(confirm)
 	}
@@ -147,10 +151,7 @@ func TestCloudSQLDemoteThroughThePage(t *testing.T) {
 		return in.State == "RUNNABLE" && in.InstanceType == "READ_REPLICA_INSTANCE" && in.MasterInstanceName == project+":"+rep
 	})
 	p.navigate(page)
-	p.waitFor(`document.querySelectorAll("#view .page-actions button").length > 0`)
-	var offered bool
-	p.eval(`[...document.querySelectorAll("#view .page-actions button")].some((b) => b.textContent.trim() === "Demote")`, &offered)
-	if offered {
+	if p.findAction("Demote") != "" {
 		t.Error("the demoted replica's page still offers Demote")
 	}
 }

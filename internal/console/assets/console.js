@@ -227,19 +227,22 @@ const ROUTES = [
   { path: "/bigtable-instances", service: "bigtable-instances", icon: "bigtable", title: "Instances", kind: "Instance", section: "Databases",
     product: "bigtable", productTitle: "Bigtable" },
   { path: "/spanner",   service: "spanner",   title: "Spanner", kind: "Instance",   section: "Databases" },
-  // Cloud SQL is one product with a page per engine, as the console this
-  // mirrors lists PostgreSQL and MySQL instances under one product (#868).
-  // MySQL's page is not under /cloudsql/, where it would shadow a PostgreSQL
-  // database named "mysql".
-  { path: "/cloudsql",       service: "cloudsql",       title: "PostgreSQL", kind: "Database", section: "Databases",
-    product: "cloudsql", productTitle: "Cloud SQL" },
-  { path: "/cloudsql-mysql", service: "cloudsql-mysql", title: "MySQL", kind: "Database",      section: "Databases",
-    product: "cloudsql", productTitle: "Cloud SQL", icon: "cloudsql" },
-  // Every instance the Admin API serves (#1330), with Create instance, its
-  // backups, replicas, exports and imports, Run SQL and Upgrade. It had a
-  // provider but no route, so /cloudsql-instances was "No such screen".
+  // Cloud SQL's menu is Google's (#1860): Instances, the product's landing
+  // page, every engine's instances in one list, then Backups, the
+  // project's backups. Each instance's page has Google's own menu
+  // (Overview, Connections, Users, Databases, Backups, Replicas,
+  // Operations, Logs); the PostgreSQL and MySQL database browsers are its
+  // Cloud SQL Studio, opened from the instance `up` runs for each, and
+  // keep their addresses. MySQL's page is not under /cloudsql/, where it
+  // would shadow a PostgreSQL database named "mysql".
   { path: "/cloudsql-instances", service: "cloudsql-instances", title: "Instances", kind: "Instance", section: "Databases",
+    product: "cloudsql", productTitle: "Cloud SQL", icon: "cloudsql", logs: true },
+  { path: "/cloudsql-backups", service: "cloudsql-backups", title: "Backups", section: "Databases",
     product: "cloudsql", productTitle: "Cloud SQL", icon: "cloudsql" },
+  { path: "/cloudsql",       service: "cloudsql",       title: "PostgreSQL", kind: "Database", section: "Databases",
+    navTitle: "Cloud SQL Studio (PostgreSQL)", navHidden: true, product: "cloudsql", productTitle: "Cloud SQL" },
+  { path: "/cloudsql-mysql", service: "cloudsql-mysql", title: "MySQL", kind: "Database",      section: "Databases",
+    navTitle: "Cloud SQL Studio (MySQL)", navHidden: true, product: "cloudsql", productTitle: "Cloud SQL", icon: "cloudsql" },
   // Memorystore for Redis (#1302) and the Backup and DR Service (#1433) had
   // providers, and console API pages, but no route: /memorystore and
   // /backupdr were "No such screen", so nothing of either was reachable from
@@ -3352,8 +3355,8 @@ async function renderDetail(view, route, resourcePath) {
 
   const panel = el("div", { class: "tab-panel", id: "detail-panel", role: "tabpanel" });
 
-  const drawPanel = () => {
-    const section = sections[current];
+  const drawPanel = () => drawSectionInto(panel, sections[current]);
+  const drawSectionInto = (panel, section) => {
     const reload = () => renderDetail(view, route, segments);
     // The previous tab's list poll redraws its table into this same panel:
     // left running, it replaced a Query tab, editor, results and all, with
@@ -3383,6 +3386,49 @@ async function renderDetail(view, route, resourcePath) {
           onclick: () => runAction(route, segments, a, reload, NO_ROW, data.title || null),
         })));
       note = note ? el("div", {}, bar, note) : bar;
+    }
+
+    // A section's own tabs (#1860): Google's Cloud SQL Connections page
+    // has Summary, Networking and Security. The strip is a tablist of its
+    // own inside the panel, the tab chosen kept in the address as subtab.
+    if ((section.tabs || []).length) {
+      const subs = section.tabs;
+      const subWanted = new URLSearchParams(location.search).get("subtab");
+      let sub = Math.max(0, subs.findIndex((t) => t.id === subWanted));
+      const subPanel = el("div", { class: "tab-panel sub-tab-panel", id: `subpanel-${section.id}`, role: "tabpanel" });
+      const subTabs = subs.map((t, i) => el("button", {
+        class: "tab" + (i === sub ? " is-selected" : ""), role: "tab", id: `subtab-${t.id}`,
+        "aria-selected": i === sub ? "true" : "false", "aria-controls": subPanel.id,
+        tabindex: i === sub ? "0" : "-1", text: t.label,
+        onclick: () => pick(i),
+      }));
+      const pick = (i) => {
+        sub = i;
+        subTabs.forEach((tab, j) => {
+          tab.classList.toggle("is-selected", j === i);
+          tab.setAttribute("aria-selected", j === i ? "true" : "false");
+          tab.setAttribute("tabindex", j === i ? "0" : "-1");
+        });
+        const url = new URL(location.href);
+        url.searchParams.set("subtab", subs[i].id);
+        history.replaceState({}, "", url);
+        subPanel.setAttribute("aria-labelledby", `subtab-${subs[i].id}`);
+        drawSectionInto(subPanel, subs[i]);
+        subTabs[i].focus();
+        announce(`${subs[i].label} selected`);
+      };
+      const subStrip = el("div", { class: "tab-strip sub-tab-strip", role: "tablist",
+        "aria-label": `${section.label} tabs` }, ...subTabs);
+      subStrip.addEventListener("keydown", (e) => {
+        const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1
+          : e.key === "Home" ? -sub : e.key === "End" ? subs.length - 1 - sub : 0;
+        if (!step && e.key !== "Home" && e.key !== "End") return;
+        e.preventDefault();
+        pick((sub + step + subs.length) % subs.length);
+      });
+      subPanel.setAttribute("aria-labelledby", `subtab-${subs[sub].id}`);
+      setChildren(panel, note, subStrip, subPanel);
+      return drawSectionInto(subPanel, subs[sub]);
     }
 
     // The provider says what the section holds. Inferring it from whichever
@@ -3726,18 +3772,23 @@ async function renderDetail(view, route, resourcePath) {
       announce(`${sections[i].label} selected`);
     };
 
-    strip = el("div", { class: "tab-strip", role: "tablist", "aria-label": `${name} sections` },
+    // A side menu (#1860) is the same tablist, drawn down the left of the
+    // page as Google's Cloud SQL instance menu is.
+    strip = el("div", { class: "tab-strip" + (data.sideNav ? " is-side-nav" : ""), role: "tablist",
+      "aria-label": `${name} sections`, "aria-orientation": data.sideNav ? "vertical" : null },
       ...tabs);
     // Arrow keys move between tabs, which is what makes a tablist a tablist
     // rather than a row of buttons.
     strip.addEventListener("keydown", (e) => {
-      const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1
+      const fwd = data.sideNav ? "ArrowDown" : "ArrowRight";
+      const bwd = data.sideNav ? "ArrowUp" : "ArrowLeft";
+      const step = e.key === fwd ? 1 : e.key === bwd ? -1
         : e.key === "Home" ? -current : e.key === "End" ? sections.length - 1 - current : 0;
       if (!step && e.key !== "Home" && e.key !== "End") return;
       e.preventDefault();
       select((current + step + sections.length) % sections.length);
     });
-    crumb.append(strip);
+    if (!data.sideNav) crumb.append(strip);
   }
 
   // What can be done to this resource, on the resource's own page.
@@ -3837,7 +3888,8 @@ async function renderDetail(view, route, resourcePath) {
   }
 
   panel.setAttribute("aria-labelledby", `tab-${sections[current].id}`);
-  setChildren(view, ...header, panel);
+  setChildren(view, ...header, data.sideNav && strip
+    ? el("div", { class: "detail-with-nav" }, strip, panel) : panel);
   drawPanel();
   announce(`${data.title || name} opened`);
 }
@@ -5343,7 +5395,7 @@ function buildCreateForm(spec) {
       ? el("select", { id, name: f.name, required: f.required },
           // An empty option (an optional choice left unset) is named, so
           // it is not read as a blank item (#1604); optionLabels name an
-          // option as Google's console does (#1852).
+          // option as Google's console does (#1852, #1860).
           ...(f.options || []).map((o) => el("option", { value: o, text: (f.optionLabels || {})[o] || o || "None" })))
       : el("input", {
           id, name: f.name, type: f.type || "text", required: f.required,
@@ -5527,6 +5579,26 @@ function buildCreateForm(spec) {
     show();
   }
 
+  // A field shown only while others hold given values (visibleWhen,
+  // #1860): Cloud SQL's Database version lists the chosen engine's
+  // versions. Hidden, it is disabled, so it is neither checked nor sent.
+  const valueText = (e) => (e.isCheck ? String(e.control.checked) : e.control.value);
+  for (const entry of entries) {
+    const when = Object.entries(entry.field.visibleWhen || {});
+    if (!when.length) continue;
+    const show = () => {
+      const on = when.every(([n, v]) => byName.has(n) && valueText(byName.get(n)) === v);
+      entry.node.hidden = !on;
+      entry.inactive = !on;
+      entry.control.disabled = !on || !!entry.field.immutable;
+    };
+    for (const [n] of when) {
+      const other = byName.get(n);
+      if (other) other.control.addEventListener("change", show);
+    }
+    show();
+  }
+
   // Fields group under their section heading, in the order the backend gave
   // them. A form whose fields declare no section renders as one block, which
   // is what a two-field form should look like.
@@ -5596,7 +5668,7 @@ function buildCreateForm(spec) {
       // the API to set a value to what it already is, which some APIs accept
       // and others reject as an attempt to change an immutable field.
       return Object.fromEntries([...hiddenValues(hidden), ...entries
-        .filter((e) => !e.field.immutable && e.field.type !== "file")
+        .filter((e) => !e.field.immutable && e.field.type !== "file" && !e.inactive)
         .map((e) => {
           if (e.isCheck) return [e.field.name, String(e.control.checked)];
           if (e.field.type === "map") return [e.field.name, linesToMap(e.control.value)];
@@ -5674,7 +5746,9 @@ function radioEntry(f, id, errorId, helpId) {
       control.value = o;
       control.dispatchEvent(new Event("change", { bubbles: true }));
     });
-    if (f.immutable) r.disabled = true;
+    // An option drawn but not choosable, such as SQL Server where
+    // CloudBurrow does not run it (#1860).
+    if (f.immutable || (f.disabledOptions || []).includes(o)) r.disabled = true;
     return r;
   });
   const help = f.help ? el("p", { id: helpId, class: "form-help", text: f.help }) : null;
@@ -5684,7 +5758,7 @@ function radioEntry(f, id, errorId, helpId) {
     el("legend", { text: f.label }),
     control,
     ...radios.map((r, i) => el("div", { class: "check-line" + (off[f.options[i]] ? " is-unavailable" : "") }, r,
-      el("label", { for: r.id, text: f.options[i] }),
+      el("label", { for: r.id, text: (f.optionLabels || {})[f.options[i]] || f.options[i] }),
       off[f.options[i]] ? el("p", { id: `${r.id}-unavailable`, class: "form-help form-unavailable",
                                     text: off[f.options[i]] }) : null)),
     help, error);
@@ -5693,7 +5767,11 @@ function radioEntry(f, id, errorId, helpId) {
     for (const r of radios) r.checked = r.value === value;
   };
   return { field: f, control, node, error, helpId, errorId, isCheck: false, isRadio: true,
-           choose, hold: (on) => { for (const r of radios) r.disabled = on || !!f.immutable || !!off[r.value]; },
+           choose, hold: (on) => {
+             for (const r of radios) {
+               r.disabled = on || !!f.immutable || !!off[r.value] || (f.disabledOptions || []).includes(r.value);
+             }
+           },
            focus: () => (radios.find((r) => r.checked) || radios[0] || control).focus() };
 }
 

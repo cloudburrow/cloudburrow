@@ -209,6 +209,11 @@ func (s *memorystoreAdminService) Start(ctx context.Context) error {
 	redisJSON := s.api.ClusterLabels(redisadmin.NewRESTHandler(register))
 	valkeyJSON := redisadmin.NewMemorystoreRESTHandler(registerValkey)
 	var jsonAPI http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, redisadmin.MaintenanceControlPath) {
+			// CloudBurrow's own maintenance control, not a Memorystore API (#1524).
+			s.api.ServeMaintenanceControl(w, r)
+			return
+		}
 		if strings.HasPrefix(r.URL.Path, redisadmin.MemorystoreRESTPrefix+"/") {
 			valkeyJSON.ServeHTTP(w, r)
 			return
@@ -361,6 +366,17 @@ func (p *memorystoreProvisioner) Provision(ctx context.Context, spec redisadmin.
 	p.tunnels[spec.Server] = f
 	p.mu.Unlock()
 	return f.HostAddr(), nil
+}
+
+// Restart implements redisadmin.Restarter, a Basic tier instance's
+// maintenance update (#1524): its pod is deleted, so the server is
+// unavailable until the Deployment's next pod serves, through a new
+// tunnel.
+func (p *memorystoreProvisioner) Restart(ctx context.Context, spec redisadmin.Spec) (string, error) {
+	if _, err := p.installer.Kubectl(ctx, "-n", p.cfg.Cluster.Namespace, "delete", "pods", "-l", "app="+spec.Server, "--wait=true"); err != nil {
+		return "", fmt.Errorf("stop %s: %w", spec.Server, err)
+	}
+	return p.Provision(ctx, spec)
 }
 
 // StartClusterNode runs a Redis Cluster node (#1519): the server of spec

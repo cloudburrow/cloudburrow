@@ -67,7 +67,7 @@ func TestCloudSQLConsoleServerCertificates(t *testing.T) {
 	}
 
 	actions := func(name string) (map[string]console.Action, console.Detail) {
-		d, err := p.Detail(ctx, "proj", []string{name})
+		d, err := p.allOf(ctx, "proj", []string{name})
 		if err != nil {
 			t.Fatal(err)
 		}

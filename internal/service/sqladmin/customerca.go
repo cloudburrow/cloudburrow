@@ -37,8 +37,8 @@ package sqladmin
 // roles/privateca.certificateRequester on the pool. No call here is
 // authorized (ADR-0004), and the pool's IAM policy is stored, not
 // enforced (ADR-0006). serverCertificateRotationMode
-// AUTOMATIC_ROTATION_DURING_MAINTENANCE is recorded, and never acts: no
-// maintenance event is ever scheduled here (maintenance.go).
+// AUTOMATIC_ROTATION_DURING_MAINTENANCE rotates the server certificate in
+// a maintenance run when it expires within 180 days (certrotation.go).
 
 import (
 	"context"

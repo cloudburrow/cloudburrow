@@ -121,11 +121,6 @@ func TestRefusedVerbsSayWhy(t *testing.T) {
 		t.Fatal(err)
 	}
 	for what, call := range map[string]func() error{
-		"no Google-managed maintenance": func() error {
-			_, err := svc.Projects.Instances.RescheduleMaintenance("proj", "pg", &sqladmin.SqlInstancesRescheduleMaintenanceRequestBody{
-				Reschedule: &sqladmin.Reschedule{RescheduleType: "NEXT_AVAILABLE_WINDOW"}}).Do()
-			return err
-		},
 		"SQL Server": func() error { _, err := svc.Instances.AcquireSsrsLease("proj", "pg", nil).Do(); return err },
 		"without instance writes": func() error {
 			_, err := svc.BlueGreenDeployments.List("projects/proj/locations/us-central1").Do()

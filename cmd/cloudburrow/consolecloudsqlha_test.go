@@ -58,7 +58,7 @@ func TestCloudSQLConsoleHighAvailability(t *testing.T) {
 		t.Errorf("insert body %s", b)
 	}
 
-	d, err := p.Detail(ctx, "proj", []string{"ha"})
+	d, err := p.allOf(ctx, "proj", []string{"ha"})
 	if err != nil {
 		t.Fatal(err)
 	}
