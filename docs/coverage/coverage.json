@@ -9863,6 +9863,7 @@
         "method": "bigquery.jobs.cancel",
         "status": "Verified",
         "tests": [
+          "test/compat/bigqueryasyncjobs_test.go:57 TestBigQueryAsyncJobs",
           "test/compat/bigqueryiam1774_test.go:42 TestBigQueryPerProjectIAMRest",
           "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory"
         ]
@@ -9879,6 +9880,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigqueryalterprojectstatement_test.go:19 TestBigQueryAlterProjectStatementType",
+          "test/compat/bigqueryasyncjobs_test.go:57 TestBigQueryAsyncJobs",
           "test/compat/bigqueryavroload_test.go:108 TestBigQueryAvroLoadTypes",
           "test/compat/bigquerycharmap_test.go:30 TestBigQueryColumnNameCharacterMap",
           "test/compat/bigquerycloneddl_test.go:28 TestBigQueryCloneAndSnapshotDDL",
@@ -9941,6 +9943,7 @@
         "method": "bigquery.jobs.getQueryResults",
         "status": "Verified",
         "tests": [
+          "test/compat/bigqueryasyncjobs_test.go:57 TestBigQueryAsyncJobs",
           "test/compat/bigquerydifferentialprivacy_test.go:213 TestBigQueryDifferentialPrivacyPolicyBudget",
           "test/compat/bigquerydifferentialprivacy_test.go:77 TestBigQueryPrivacyPolicyDifferentialPrivacy",
           "test/compat/bigquerydifferentialprivacymore_test.go:33 TestBigQueryDifferentialPrivacyMore",
@@ -9974,6 +9977,7 @@
           "test/compat/bigqueryalterprojectstatement_test.go:19 TestBigQueryAlterProjectStatementType",
           "test/compat/bigqueryalterremake_test.go:30 TestBigQueryAlterTableRenameAndDropColumn",
           "test/compat/bigqueryaltertypes_test.go:31 TestBigQueryAlterTableSetDataTypeAndKeys",
+          "test/compat/bigqueryasyncjobs_test.go:57 TestBigQueryAsyncJobs",
           "test/compat/bigqueryavroload_test.go:108 TestBigQueryAvroLoadTypes",
           "test/compat/bigqueryavrozstd_test.go:87 TestBigQueryAvroZstandardLoad",
           "test/compat/bigquerychangehistory1466_test.go:147 TestBigQueryChangeHistoryLimits",
@@ -10179,6 +10183,7 @@
         "method": "bigquery.jobs.list",
         "status": "Verified",
         "tests": [
+          "test/compat/bigqueryasyncjobs_test.go:57 TestBigQueryAsyncJobs",
           "test/compat/bigquerydml_test.go:31 TestBigQueryPlainDMLThroughTheFront",
           "test/compat/bigqueryexecimmediate_test.go:157 TestBigQueryExecuteImmediateChildJobs",
           "test/compat/bigqueryfailedjobs_test.go:27 TestBigQueryFailedQueriesAreJobs",
@@ -10216,6 +10221,7 @@
           "test/compat/bigqueryalterfields_test.go:34 TestBigQueryAlterTableFieldsKeysAndPolicies",
           "test/compat/bigqueryalterremake_test.go:30 TestBigQueryAlterTableRenameAndDropColumn",
           "test/compat/bigqueryaltertypes_test.go:31 TestBigQueryAlterTableSetDataTypeAndKeys",
+          "test/compat/bigqueryasyncjobs_test.go:57 TestBigQueryAsyncJobs",
           "test/compat/bigqueryavroload_test.go:108 TestBigQueryAvroLoadTypes",
           "test/compat/bigqueryavrozstd_test.go:87 TestBigQueryAvroZstandardLoad",
           "test/compat/bigquerychangehistory1466_test.go:103 TestBigQueryChangeHistoryReplace",

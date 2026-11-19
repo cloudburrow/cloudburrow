@@ -568,6 +568,44 @@ func TestJobsTableOutlivesAFrontRestart(t *testing.T) {
 // sent on a request whose context has ended, as an engine reached over
 // HTTP does; it ends the client's request (cancel) when it is asked for
 // the list of jobs, as a client that gives up during it does.
+// idleTracker serves next, and waits for the requests it serves to end.
+type idleTracker struct {
+	next http.Handler
+	mu   sync.Mutex
+	n    int
+}
+
+func (i *idleTracker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	i.mu.Lock()
+	i.n++
+	i.mu.Unlock()
+	defer func() {
+		i.mu.Lock()
+		i.n--
+		i.mu.Unlock()
+	}()
+	i.next.ServeHTTP(w, r)
+}
+
+// wait waits until no request has been served for 100 ms.
+func (i *idleTracker) wait(t *testing.T) {
+	t.Helper()
+	quiet := 0
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		i.mu.Lock()
+		n := i.n
+		i.mu.Unlock()
+		if n > 0 {
+			quiet = 0
+			continue
+		}
+		if quiet++; quiet >= 10 {
+			return
+		}
+	}
+	t.Fatal("requests still running after 10s")
+}
+
 type flakyEmulator struct {
 	e      tableEmulator
 	fail   map[string]int
@@ -613,7 +651,8 @@ func (f *flakyEmulator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func TestJobsTableNotMadeAgainWhenAWriteFails(t *testing.T) {
 	emu := tableEmulator{&jobsEmulator{tables: map[string]string{}}}
 	flaky := &flakyEmulator{e: emu, fail: map[string]int{}}
-	h := Wrap(flaky)
+	idle := &idleTracker{next: flaky}
+	h := Wrap(idle)
 	for _, q := range []string{"SELECT 1", "SELECT 2", "SELECT 3"} {
 		if code, got := do(t, h, "POST", base+"/queries", `{"query":"`+q+`"}`); code != 200 {
 			t.Fatalf("%s: %d %v", q, code, got)
@@ -662,6 +701,8 @@ func TestJobsTableNotMadeAgainWhenAWriteFails(t *testing.T) {
 	from := len(emu.log)
 	r := httptest.NewRequest("POST", base+"/queries", strings.NewReader(`{"query":"`+count+`"}`)).WithContext(ctx)
 	h.ServeHTTP(httptest.NewRecorder(), r)
+	// The job outlives its client (asyncjobs.go, #1819): wait for its end.
+	idle.wait(t)
 	flaky.cancel = nil
 	sent = emu.sentSince(from)
 	if len(sent) == 0 || !strings.HasPrefix(sent[0], "INSERT INTO "+table) || strings.Contains(strings.Join(emu.log[from:], "\n"), "cancelled ") {
