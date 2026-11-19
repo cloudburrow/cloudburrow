@@ -60,8 +60,11 @@ func invokeAs(t *testing.T, base, host, path, token string) (int, string) {
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	hc := &http.Client{}
-	defer hc.CloseIdleConnections()
+	// A transport of its own: never the owner's token the suite's
+	// default transport adds (ownerinvoke1879_test.go).
+	tr := &http.Transport{}
+	defer tr.CloseIdleConnections()
+	hc := &http.Client{Transport: tr}
 	resp, err := hc.Do(req)
 	if err != nil {
 		return 0, err.Error()
