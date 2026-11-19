@@ -92,7 +92,7 @@ func (p buildTriggersProvider) triggerFields(ctx context.Context, project string
 
 		{Name: "event", Label: "Event", Type: "radio", Section: "Event", Default: evPushBranch,
 			Options:            []string{evPushBranch, evPushTag, evPullRequest, evManual, evPubsub, evWebhook},
-			UnavailableOptions: map[string]string{evPullRequest: "No pull request is served: this instance's Secure Source Manager has no pull requests (its pull request methods are UNIMPLEMENTED), so it takes pushes only."},
+			UnavailableOptions: map[string]string{evPullRequest: "Pull request triggers do not run: this instance's Secure Source Manager serves pull requests but runs no build when one is opened or updated (#1927), so it takes pushes only."},
 			Help:               "Repository event that invokes trigger, or another event."},
 		{Name: "topic", Label: "Subscription", Type: "text", Section: "Event", ShowWhen: "event=" + evPubsub,
 			Pattern: `^projects/[^\/]+/topics/[^\/]+$`,
