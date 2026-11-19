@@ -227,7 +227,8 @@ func TestTablesSort(t *testing.T) {
 	if !strings.Contains(js, `"aria-sort"`) {
 		t.Error("sorted columns are not announced")
 	}
-	if !strings.Contains(js, `if (c === "Actions") return el("th", { scope: "col", text: c });`) {
+	if !strings.Contains(js, `if (c === "Actions") {
+        return el("th", { scope: "col", class: "actions-cell" }`) {
 		t.Error("the Actions column is offered as sortable, which sorts nothing")
 	}
 }
@@ -287,13 +288,17 @@ func TestNavigationNamesTheProductsBeingEmulated(t *testing.T) {
 	// `title` then names the page inside it.
 	for _, product := range []string{
 		"Cloud Tasks",
-		"Secret Manager", "Cloud KMS", "Cloud Scheduler",
+		"Secret Manager", "Cloud Scheduler",
 	} {
 		if !strings.Contains(js, `title: "`+product) {
 			t.Errorf("the navigation does not name %q", product)
 		}
 	}
-	for _, product := range []string{"Vertex AI", "Kubernetes Engine", "Pub/Sub", "Cloud Run", "Cloud Storage", "Resource Manager"} {
+	// One drawer row per product (#1842): Key Management, Memorystore,
+	// Firestore, Bigtable, Cloud Logging, APIs & Services and IAM & Admin
+	// each hold their pages rather than appearing once per page.
+	for _, product := range []string{"Vertex AI", "Kubernetes Engine", "Pub/Sub", "Cloud Run", "Cloud Storage", "Resource Manager",
+		"Key Management", "Memorystore", "Firestore", "Bigtable", "Cloud Logging", "APIs & Services", "IAM & Admin"} {
 		if !strings.Contains(js, `productTitle: "`+product+`"`) {
 			t.Errorf("the navigation does not name the product %q", product)
 		}
@@ -831,12 +836,14 @@ func TestTheFilterMatchesEveryDisplayedColumn(t *testing.T) {
 	if strings.Contains(js, "data.items.filter((i) => !q || i.name.toLowerCase().includes(q))") {
 		t.Error("the filter still matches the name column only")
 	}
-	if !strings.Contains(js, "const matches = (item, q) =>") {
+	// The shared filter bar (#1842): plain text is matched against every
+	// column's value, a chip against its own column's.
+	if !strings.Contains(js, "const filterColumns = () => [nameColumn(), ...allDataColumns(), ...(hasStatus() ? [\"Status\"] : [])];") {
 		t.Fatal("there is no predicate that spans the displayed columns")
 	}
-	block := js[strings.Index(js, "const matches = (item, q) =>"):]
-	block = block[:strings.Index(block, "\n  };")]
-	for _, part := range []string{"item.name", "item.status", "dataColumns().some"} {
+	block := js[strings.Index(js, "const matches = (item) => bar.matches("):]
+	block = block[:strings.Index(block, ";\n")]
+	for _, part := range []string{"filterColumns().map((c) => valueOf(item, c))", "valueOf(item, column)"} {
 		if !strings.Contains(block, part) {
 			t.Errorf("the filter does not consider %s", part)
 		}
@@ -1286,7 +1293,7 @@ func TestALongFormHasAnAddress(t *testing.T) {
 func TestAnEmptiedTableIsNotAnEmptyFilterResult(t *testing.T) {
 	src := consoleAsset(t, "console.js")
 
-	if !strings.Contains(src, "const query = filter.value.trim();\n      const state = query") {
+	if !strings.Contains(src, "const query = bar.text();\n      const state = bar.active()") {
 		t.Error("the empty table draws one state regardless of whether a filter is set")
 	}
 	if !strings.Contains(src, "text: `No ${noun} yet` }),") {
@@ -1835,7 +1842,7 @@ func TestOverlaysAnimateFromOneScale(t *testing.T) {
 func TestEveryScreenOpensWithThePageHeader(t *testing.T) {
 	src := consoleAsset(t, "console.js")
 
-	if !strings.Contains(src, "const pageHeader = (title, subtitle)") {
+	if !strings.Contains(src, "function pageHeader(title, subtitle, opts = {})") {
 		t.Fatal("there is no shared page header")
 	}
 	for _, screen := range []string{`pageHeader("Logs Explorer"`, `pageHeader("Activity"`,
@@ -2183,8 +2190,10 @@ func TestTheDrawerListsProductsNotPages(t *testing.T) {
 	if !strings.Contains(js, "function drawProductNav()") {
 		t.Error("nothing fills the in-product navigation")
 	}
-	if !strings.Contains(js, "if (pages.length < 2)") {
-		t.Error("a single-page product still gets a sub-navigation, which is a list of one")
+	// Every product has its own left-hand menu, as Google's console draws
+	// one even for a product with a single page (#1842).
+	if !strings.Contains(js, "if (!pages.length) {") {
+		t.Error("a screen outside any product still gets a product menu")
 	}
 }
 
@@ -2278,7 +2287,7 @@ func TestTheInfoPanelShowsOnlyWhatTheBackendHolds(t *testing.T) {
 		"function drawInfoPanel(item, columns, route, onDone)",
 		`text: "Select a resource"`,
 		"const INFO_OPEN_KEY =",
-		`text: open ? "Hide info panel" : "Show info panel"`,
+		`const label = open ? "Hide info panel" : "Show info panel";`,
 	} {
 		if !strings.Contains(js, want) {
 			t.Errorf("console.js is missing %q", want)
@@ -2435,7 +2444,7 @@ func TestListsRefreshThemselvesAndSayHowFresh(t *testing.T) {
 		t.Error("the list poll is not cleared on a route change")
 	}
 	// The manual control clears its spinner in a finally.
-	if !strings.Contains(src, "try { await refresh(); } finally { setBusy(refreshButton, false); }") {
+	if !strings.Contains(src, "try { await run(); } finally { setBusy(button, false); }") {
 		t.Error("a failed refresh strands the spinner")
 	}
 }

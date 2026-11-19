@@ -351,6 +351,99 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .page-header h1 { margin-bottom: 2px; }
 .page-header .subtitle { margin: 0; }
 
+/* The title line (#1842): a back arrow where there is somewhere to go back
+   to, the title, and the screen's own controls beside it, as Google's
+   console puts "+ Create  Refresh" and "Edit  Delete" on the title's line. */
+.page-title-row { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 16px; min-height: 40px; }
+.page-title-row h1 { margin: 0; }
+.page-header-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; flex: 1 1 auto; }
+.page-header-actions:empty { display: none; }
+.page-header-actions .info-toggle { margin-left: auto; }
+.page-header-actions .page-actions { margin: 0; }
+.back-arrow { margin-left: -8px; color: var(--accent); }
+.back-arrow svg, .header-button svg, .info-toggle svg, .view-options svg, .note-icon svg,
+.note-dismiss svg, .status-glyph, .filter-icon svg {
+  width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+.header-button {
+  display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 12px;
+  background: none; border: 0; border-radius: var(--radius-control);
+  font: inherit; font-weight: 500; color: var(--accent); cursor: pointer;
+}
+.header-button:hover { background: var(--state-hover); }
+.header-button:active { background: var(--state-press); }
+.resource-name { margin: 4px 0 0; font-size: var(--text-heading-size); overflow-wrap: anywhere; }
+
+/* An emulation note, as a banner the reader can dismiss (#1842). */
+.note-banner {
+  display: flex; align-items: flex-start; gap: 12px; margin: 0 0 12px; padding: 8px 8px 8px 16px;
+  background: var(--surface-alt); border: 1px solid var(--border); border-radius: var(--radius);
+}
+.note-banner .note-icon { flex: none; padding-top: 8px; color: var(--accent); display: inline-flex; }
+.note-banner .note-text { flex: 1 1 auto; margin: 8px 0; }
+.note-banner .note-dismiss { width: 36px; height: 36px; }
+
+/* Status, first, as an icon (#1842). */
+.status-cell { width: 40px; }
+.status-icon::before { content: none; }
+.status-icon { color: var(--text-muted); }
+.status-icon[data-state="ok"] { color: var(--ok); }
+.status-icon[data-state="warn"] { color: var(--warn); }
+.status-icon[data-state="error"] { color: var(--error); }
+.sort-button.is-status { min-width: 24px; }
+
+/* The filter bar (#1842): a filter icon, the box with its property menu, and
+   View options beside it. */
+.filter-field { display: flex; align-items: center; gap: 8px; flex: 1 1 auto; max-width: 560px; }
+.filter-icon { display: inline-flex; color: var(--text-muted); }
+.filter-box { position: relative; flex: 1 1 auto; display: flex; }
+.filter-box .filter { max-width: none; width: 100%; }
+.filter-menu {
+  position: absolute; top: 40px; left: 0; z-index: 30; min-width: 220px; max-height: 320px; overflow-y: auto;
+  list-style: none; margin: 0; padding: 8px 0;
+  background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow-menu);
+}
+.filter-menu[hidden] { display: none; }
+.filter-menu-title { padding: 4px 16px; font-size: var(--text-caption-size); color: var(--text-muted); }
+.filter-menu-item {
+  display: block; width: 100%; padding: 8px 16px; text-align: left;
+  background: none; border: 0; font: inherit; color: var(--text); cursor: pointer;
+}
+.filter-menu-item:hover, .filter-menu-item:focus-visible { background: var(--state-hover); }
+.chip-clear-all {
+  background: none; border: 0; padding: 4px 8px; font: inherit; font-size: var(--text-caption-size);
+  font-weight: 500; color: var(--accent); cursor: pointer;
+}
+.view-options-wrap { position: relative; }
+.view-options-menu {
+  position: absolute; top: 44px; right: 0; z-index: 30; min-width: 240px; max-height: 360px; overflow-y: auto;
+  padding: 8px 0; background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow-menu);
+}
+.view-options-menu[hidden] { display: none; }
+.view-options-title { margin: 0; padding: 4px 16px 8px; font-weight: 500; }
+.view-options-item { display: flex; align-items: center; gap: 12px; padding: 6px 16px; cursor: pointer; }
+.view-options-item:hover { background: var(--state-hover); }
+
+/* A create page's numbered sections (#1842). */
+.create-step { border-bottom: 1px solid var(--border); padding: 8px 0 16px; margin-bottom: 8px; }
+.create-step-head {
+  display: flex; align-items: center; gap: 12px; width: 100%; padding: 8px 0;
+  background: none; border: 0; font: inherit; font-size: var(--text-heading-size); color: var(--text);
+  text-align: left; cursor: pointer;
+}
+.create-step-number {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 24px; height: 24px; border-radius: 50%;
+  background: var(--accent); color: var(--accent-contrast); font-size: var(--text-caption-size); font-weight: 500;
+}
+.create-step.is-folded .create-step-number { background: var(--text-muted); }
+.create-step.is-done .create-step-number { background: var(--ok); }
+.create-step-body { padding: 8px 0 0 36px; }
+.create-step-body[hidden] { display: none; }
+.create-step-continue { margin-top: 8px; }
+@media (max-width: 959px) { .create-step-body { padding-left: 0; } }
+
 /* A resource's own actions, on its own page. Wrapping rather than scrolling,
    because a control pushed off the right edge of a sticky header has nowhere
    to be reached from. */
@@ -1434,30 +1527,44 @@ tr.is-inspected { background: var(--nav-selected); }
 
 /* --- in-product navigation -------------------------------------------- */
 
-/* A product's pages, inside the product. The drawer lists products; this
-   lists what is in one. */
+/* A product's own menu, on the left (#1842): the product's mark and name,
+   then its pages, one per row, collapsible to a narrow rail. It sits beside
+   the page rather than above it, so the page header pins under the toolbar
+   alone. */
 .product-nav[hidden] { display: none; }
 .product-nav {
-  display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
-  padding: 0 32px; height: 48px;
-  border-bottom: 1px solid var(--border);
+  flex: none; width: var(--product-nav-w, 256px);
+  position: sticky; top: var(--toolbar-h); align-self: flex-start;
+  height: calc(100vh - var(--toolbar-h)); overflow-y: auto;
+  padding: 8px 8px 16px 0;
+  border-right: 1px solid var(--border);
   background: var(--surface);
-  position: sticky; top: var(--toolbar-h); z-index: 16;
+  z-index: 16;
 }
-.product-nav-title { font-weight: 500; }
-.product-nav ul { display: flex; gap: 4px; list-style: none; margin: 0; padding: 0;
-                  overflow-x: auto; }
+.product-nav-head {
+  display: flex; align-items: center; gap: 12px;
+  min-height: 48px; padding: 0 4px 0 20px; margin-bottom: 4px;
+}
+.product-nav-title { font-weight: 500; flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.product-nav-toggle { flex: none; }
+.product-nav ul { list-style: none; margin: 0; padding: 0; }
+.product-nav ul[hidden] { display: none; }
 .product-nav a {
-  display: block; padding: 6px 12px; border-radius: var(--radius-control);
-  color: var(--text-muted); text-decoration: none; white-space: nowrap;
+  display: flex; align-items: center; min-height: 36px; padding: 6px 20px 6px 56px;
+  border-radius: 0 18px 18px 0;
+  color: var(--text); text-decoration: none;
 }
-.product-nav a:hover { background: var(--state-hover); color: var(--text); }
+.product-nav a:hover { background: var(--state-hover); }
 .product-nav a:active { background: var(--state-press); }
-.product-nav a.is-current { color: var(--accent); background: var(--nav-selected); }
-
-/* With the sub-nav present the page header pins below it rather than below
-   the toolbar, or the two overlap. */
-.product-nav:not([hidden]) ~ #view .page-header { top: calc(var(--toolbar-h) + 48px); }
+.product-nav a.is-current {
+  color: var(--nav-selected-text); background: var(--nav-selected); font-weight: 500;
+}
+/* Collapsed: a rail holding the mark and the control that opens it again. */
+:root[data-product-nav="collapsed"] .product-nav { width: 56px; padding-right: 0; }
+:root[data-product-nav="collapsed"] .product-nav-head { flex-direction: column; padding: 8px 0; gap: 8px; }
+:root[data-product-nav="collapsed"] .product-nav-title {
+  position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+}
 
 /* --- the product catalogue -------------------------------------------- */
 
@@ -1488,7 +1595,21 @@ tr.is-inspected { background: var(--nav-selected); }
 
 @media (max-width: 959px) {
   .catalogue { columns: 1; }
-  .product-nav { padding: 0 16px; }
+  /* A narrow window has no room beside the page: the product menu becomes a
+     strip above it, its pages scrolling sideways. */
+  .layout { flex-wrap: wrap; }
+  .product-nav, :root[data-product-nav="collapsed"] .product-nav {
+    width: 100%; height: auto; position: static; padding: 0 8px;
+    border-right: 0; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 8px; overflow-x: auto;
+  }
+  .product-nav[hidden] { display: none; }
+  .product-nav-head, :root[data-product-nav="collapsed"] .product-nav-head {
+    flex-direction: row; padding: 0 8px; margin: 0; flex: none;
+  }
+  .product-nav ul { display: flex; gap: 4px; }
+  .product-nav a { padding: 6px 12px; border-radius: var(--radius-control); white-space: nowrap; }
+  .layout > main { flex-basis: 100%; }
 }
 
 /* --- detail screens --------------------------------------------------- */

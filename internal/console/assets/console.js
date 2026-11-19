@@ -81,7 +81,7 @@ const ROUTES = [
   // Cloud Storage is one product with three pages: buckets; the project's
   // soft-deleted buckets, which the bucket list no longer holds (#789); and
   // Settings, with the project's service account and HMAC keys (#792).
-  { path: "/storage/browser",  service: "storage",          title: "Buckets",         section: "Storage",
+  { path: "/storage/browser",  service: "storage",          title: "Buckets", kind: "Bucket",         section: "Storage",
     product: "storage", productTitle: "Cloud Storage" },
   { path: "/storage/deleted",  service: "storage-deleted", icon: "storage",  title: "Deleted buckets", section: "Storage",
     product: "storage", productTitle: "Cloud Storage" },
@@ -90,16 +90,20 @@ const ROUTES = [
   { path: "/storage/intelligence", service: "storage-intelligence", icon: "storage", title: "Storage Intelligence", section: "Storage",
     product: "storage", productTitle: "Cloud Storage" },
 
-  { path: "/firestore", service: "firestore", title: "Firestore", section: "Databases" },
+  { path: "/firestore", service: "firestore", title: "Data", section: "Databases",
+    product: "firestore", productTitle: "Firestore" },
   // The project's Firestore databases, each with its settings, indexes and
   // field overrides (#1331, #1343). Not under /firestore/, where it would
   // shadow a collection named "databases".
-  { path: "/firestore-databases", service: "firestore-databases", icon: "firestore", title: "Firestore databases", section: "Databases" },
+  { path: "/firestore-databases", service: "firestore-databases", icon: "firestore", title: "Databases", section: "Databases",
+    product: "firestore", productTitle: "Firestore" },
   { path: "/datastore", service: "datastore", title: "Datastore", section: "Databases" },
-  { path: "/bigtable",  service: "bigtable",  title: "Bigtable",  section: "Databases" },
+  { path: "/bigtable",  service: "bigtable",  title: "Tables",  section: "Databases",
+    product: "bigtable", productTitle: "Bigtable" },
   // The project's Bigtable instances, with their clusters, app profiles and
   // IAM policy (#1358). Not under /bigtable/, where it would shadow a table.
-  { path: "/bigtable-instances", service: "bigtable-instances", icon: "bigtable", title: "Bigtable instances", section: "Databases" },
+  { path: "/bigtable-instances", service: "bigtable-instances", icon: "bigtable", title: "Instances", section: "Databases",
+    product: "bigtable", productTitle: "Bigtable" },
   { path: "/spanner",   service: "spanner",   title: "Spanner",   section: "Databases" },
   // Cloud SQL is one product with a page per engine, as the console this
   // mirrors lists PostgreSQL and MySQL instances under one product (#868).
@@ -118,12 +122,15 @@ const ROUTES = [
   // providers, and console API pages, but no route: /memorystore and
   // /backupdr were "No such screen", so nothing of either was reachable from
   // the console (found by TestMemorystoreRotateServerCAThroughThePage).
-  { path: "/memorystore", service: "memorystore", title: "Memorystore", section: "Databases" },
+  { path: "/memorystore", service: "memorystore", title: "Redis", section: "Databases",
+    product: "memorystore", productTitle: "Memorystore" },
   // Memorystore for Redis Cluster (#1519), a page of its own beside the
   // instances, as the Memorystore console's Redis Cluster tab is.
-  { path: "/memorystore-clusters", service: "memorystore-clusters", icon: "memorystore", title: "Memorystore Redis Cluster", section: "Databases" },
+  { path: "/memorystore-clusters", service: "memorystore-clusters", icon: "memorystore", title: "Redis Cluster", section: "Databases",
+    product: "memorystore", productTitle: "Memorystore" },
   // Memorystore for Valkey (#1519), memorystore.googleapis.com's instances.
-  { path: "/memorystore-valkey", service: "memorystore-valkey", icon: "memorystore", title: "Memorystore for Valkey", section: "Databases" },
+  { path: "/memorystore-valkey", service: "memorystore-valkey", icon: "memorystore", title: "Valkey", section: "Databases",
+    product: "memorystore", productTitle: "Memorystore" },
   { path: "/backupdr", service: "backupdr", icon: "storage", title: "Backup and DR", section: "Storage" },
   // Google files BigQuery under Analytics, a category with no vendored icon
   // here, so it sits with the other data stores rather than under a heading
@@ -139,9 +146,9 @@ const ROUTES = [
   // Pub/Sub is one product with three pages. A subscription is reached from its
   // topic too, but one whose topic was deleted, or one that was detached, is
   // reachable only here (#595).
-  { path: "/pubsub/topics",        service: "pubsub",               title: "Topics",
+  { path: "/pubsub/topics",        service: "pubsub",               title: "Topics", kind: "Topic",
     section: "Integration services", product: "pubsub", productTitle: "Pub/Sub" },
-  { path: "/pubsub/subscriptions", service: "pubsub-subscriptions", title: "Subscriptions",
+  { path: "/pubsub/subscriptions", service: "pubsub-subscriptions", title: "Subscriptions", kind: "Subscription",
     section: "Integration services", product: "pubsub", productTitle: "Pub/Sub" },
   // Snapshots are created from a subscription's page and listed here (#787).
   { path: "/pubsub/snapshots",     service: "pubsub-snapshots", icon: "pubsub",     title: "Snapshots",
@@ -150,8 +157,10 @@ const ROUTES = [
   // page (#788).
   { path: "/pubsub/schemas",       service: "pubsub-schemas", icon: "pubsub",       title: "Schemas",
     section: "Integration services", product: "pubsub", productTitle: "Pub/Sub" },
-  { path: "/tasks/queues",  service: "tasks",  title: "Cloud Tasks", section: "Integration services" },
-  { path: "/scheduler/jobs", service: "scheduler", title: "Cloud Scheduler", section: "Integration services" },
+  { path: "/tasks/queues",  service: "tasks",  title: "Cloud Tasks", navTitle: "Queues", kind: "Queue",
+    section: "Integration services" },
+  { path: "/scheduler/jobs", service: "scheduler", title: "Cloud Scheduler", navTitle: "Jobs", kind: "Job",
+    section: "Integration services" },
 
   // Vertex AI is likewise one product with three pages. Online prediction
   // (#869) sends a custom prediction request to a deployed contract
@@ -173,32 +182,43 @@ const ROUTES = [
     title: "Online prediction",
     section: "AI and machine learning", product: "vertexai", productTitle: "Vertex AI" },
 
-  { path: "/secrets", service: "secrets", title: "Secret Manager", section: "Security and identity" },
-  { path: "/kms/keyrings", service: "kms", title: "Cloud KMS", section: "Security and identity" },
+  { path: "/secrets", service: "secrets", title: "Secret Manager", navTitle: "Secrets", kind: "Secret",
+    section: "Security and identity" },
+  { path: "/kms/keyrings", service: "kms", title: "Key rings", kind: "Key ring", section: "Security and identity",
+    product: "kms", productTitle: "Key Management" },
   // Cloud KMS EKM connections and Autokey (#1452): stored connections, and
   // the Autokey configurations a project resolves through, with its key handles.
-  { path: "/kms/ekm", service: "kms-ekm", icon: "kms", title: "Cloud KMS EKM connections", section: "Security and identity" },
-  { path: "/kms/autokey", service: "kms-autokey", icon: "kms", title: "Cloud KMS Autokey", section: "Security and identity" },
-  { path: "/kms/hsm", service: "kms-hsm", icon: "kms", title: "Cloud KMS single-tenant HSM", section: "Security and identity" },
+  { path: "/kms/ekm", service: "kms-ekm", icon: "kms", title: "EKM connections", section: "Security and identity",
+    product: "kms", productTitle: "Key Management" },
+  { path: "/kms/autokey", service: "kms-autokey", icon: "kms", title: "Autokey", section: "Security and identity",
+    product: "kms", productTitle: "Key Management" },
+  { path: "/kms/hsm", service: "kms-hsm", icon: "kms", title: "Single-tenant HSM", section: "Security and identity",
+    product: "kms", productTitle: "Key Management" },
   // IAM & Admin > IAM (#1368): the selected project's IAM policy, stored and
   // never enforced (ADR-0006); Grant access and Remove principal on its
   // Permissions tab.
-  { path: "/iam-admin/iam", service: "iam", title: "IAM", section: "IAM & Admin" },
+  { path: "/iam-admin/iam", service: "iam", title: "IAM", section: "IAM & Admin",
+    product: "iam", productTitle: "IAM & Admin" },
   // IAM & Admin > Roles (#1743): the project's and the organization's
   // custom roles, with Create role, Edit role, Delete and Undelete.
-  { path: "/iam-admin/roles", service: "iam-roles", icon: "iam", title: "Roles", section: "IAM & Admin" },
-  { path: "/iam-admin/groups", service: "iam-groups", icon: "iam", title: "Groups", section: "IAM & Admin" },
+  { path: "/iam-admin/roles", service: "iam-roles", icon: "iam", title: "Roles", section: "IAM & Admin",
+    product: "iam", productTitle: "IAM & Admin" },
+  { path: "/iam-admin/groups", service: "iam-groups", icon: "iam", title: "Groups", section: "IAM & Admin",
+    product: "iam", productTitle: "IAM & Admin" },
   // IAM & Admin > Service accounts (#1747): the project's accounts, their
   // keys and Permissions tab, Create, Edit, Disable, Enable, Delete,
   // Undelete, Create key and Upload key.
-  { path: "/iam-admin/serviceaccounts", service: "iam-service-accounts", icon: "iam", title: "Service accounts", section: "IAM & Admin" },
+  { path: "/iam-admin/serviceaccounts", service: "iam-service-accounts", icon: "iam", title: "Service accounts", section: "IAM & Admin",
+    product: "iam", productTitle: "IAM & Admin" },
   // IAM & Admin > Audit Logs (#1756): the services that can write Data
   // Access audit logs (queryAuditableServices) and the project policy's
   // log types for each.
-  { path: "/iam-admin/audit", service: "iam-audit", icon: "iam", title: "Audit Logs", section: "IAM & Admin" },
+  { path: "/iam-admin/audit", service: "iam-audit", icon: "iam", title: "Audit Logs", section: "IAM & Admin",
+    product: "iam", productTitle: "IAM & Admin" },
 
   { path: "/monitoring", service: null, screen: "monitoring", title: "Monitoring", section: "Operations" },
-  { path: "/logs",     service: null, screen: "logs",     title: "Logs Explorer", section: "Operations" },
+  { path: "/logs",     service: null, screen: "logs",     title: "Logs Explorer", section: "Operations",
+    product: "logging", productTitle: "Cloud Logging" },
   // Cloud Logging's admin resources (#1226), beside the Explorer: they are
   // stored and validated; a metric has no time series and a sink delivers
   // nothing, which each screen says.
@@ -235,10 +255,12 @@ const ROUTES = [
     product: "projects", productTitle: "Resource Manager" },
   // APIs & Services (#1352): a project's APIs, Enable and Disable. It had a
   // provider but no route.
-  { path: "/apis", service: "serviceusage", title: "APIs & Services", section: "Management tools" },
+  { path: "/apis", service: "serviceusage", title: "Enabled APIs & services", section: "Management tools",
+    product: "serviceusage", productTitle: "APIs & Services" },
   // Service Usage operations (#1530): what operations.list answers, with
   // Delete.
-  { path: "/apis/operations", service: "serviceusage-operations", icon: "serviceusage", title: "Service Usage operations", section: "Management tools" },
+  { path: "/apis/operations", service: "serviceusage-operations", icon: "serviceusage", title: "Operations", section: "Management tools",
+    product: "serviceusage", productTitle: "APIs & Services" },
   // Connect (#802): what `env`, `gcloud-setup`, `terraform`, `version` and
   // `diagnose` give at a terminal. Not a Google Cloud product, so it carries
   // no product icon.
@@ -1625,10 +1647,271 @@ const emptyState = (title, hint) =>
 // Three screens emitted a bare h1 instead, so the title sat at a different
 // height with no rule under it and no room for a subtitle — the kind of drift
 // that makes one console feel like three applications.
-const pageHeader = (title, subtitle) =>
-  el("div", { class: "page-header" },
-    el("h1", { text: title }),
+//
+// The Google Cloud console carries a screen's own actions on the title's line
+// (#1842): "Buckets  + Create  Refresh" with the info-panel toggle at the
+// right on a list, "<Kind> details  Edit  Delete" with a back arrow on a
+// resource. opts.back is the address the arrow returns to; opts.actions are
+// the controls on the title line. headerActions(header) is the slot itself,
+// for a screen that adds its controls once its data has arrived.
+const ICON_BACK = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12H5M11 6l-6 6 6 6"/></svg>';
+const ICON_ADD = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>';
+const ICON_REFRESH = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12a7 7 0 1 1-2.05-4.95"/><path d="M19 4v4h-4"/></svg>';
+
+function backArrow(href, label = "Back") {
+  return el("a", { class: "icon-button back-arrow", href, "aria-label": label, title: label, html: ICON_BACK });
+}
+
+function pageHeader(title, subtitle, opts = {}) {
+  return el("div", { class: "page-header" },
+    el("div", { class: "page-title-row" },
+      opts.back ? backArrow(opts.back, opts.backLabel) : null,
+      el("h1", { text: title }),
+      el("div", { class: "page-header-actions" }, ...(opts.actions || []))),
     subtitle ? el("p", { class: "subtitle", text: subtitle }) : null);
+}
+
+// headerActions is the title-line slot of a screen's header, added to a
+// header drawn without one.
+function headerActions(header) {
+  const node = (Array.isArray(header) ? header : [header])
+    .find((n) => n && n.classList && n.classList.contains("page-header"));
+  if (!node) return null;
+  let slot = node.querySelector(".page-header-actions");
+  if (slot) return slot;
+  let row = node.querySelector(".page-title-row");
+  if (!row) {
+    const h1 = node.querySelector("h1");
+    row = el("div", { class: "page-title-row" });
+    if (h1) { h1.replaceWith(row); row.append(h1); } else node.prepend(row);
+  }
+  slot = el("div", { class: "page-header-actions" });
+  row.append(slot);
+  return slot;
+}
+
+// createButton is a list's Create on the title line, with Google's plus.
+function createButton(label, onclick) {
+  const button = el("button", { class: "header-button primary-text", type: "button", onclick });
+  button.innerHTML = ICON_ADD;
+  button.append(el("span", { text: label }));
+  return button;
+}
+
+// refreshButton reloads, and says it is working for as long as it is.
+function refreshButton(run) {
+  const button = el("button", { class: "header-button", type: "button" });
+  button.innerHTML = ICON_REFRESH;
+  button.append(el("span", { text: "Refresh" }));
+  button.addEventListener("click", async () => {
+    setBusy(button, true);
+    try { await run(); } finally { setBusy(button, false); }
+  });
+  return button;
+}
+
+// noteBanner is what a screen says about its emulation (#1842). Google's
+// list pages open on the table, with at most a dismissible banner, so the
+// note is a banner with a Dismiss control, remembered per screen for this
+// tab, instead of a paragraph pushing the table down. The text stays in the
+// info panel too (drawInfoPanel reads LAST_NOTE).
+const DISMISSED_NOTES_KEY = "cloudburrow.notes.dismissed";
+let LAST_NOTE = "";
+
+function noteBanner(text, key = location.pathname) {
+  LAST_NOTE = text || "";
+  if (!text) return null;
+  let dismissed = [];
+  try { dismissed = JSON.parse(sessionStorage.getItem(DISMISSED_NOTES_KEY) || "[]"); } catch { /* refused */ }
+  const id = `${key}\n${text}`;
+  if (dismissed.includes(id)) return null;
+  const banner = el("div", { class: "note-banner", role: "note" },
+    el("span", { class: "note-icon", "aria-hidden": "true",
+      html: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8v.01"/></svg>' }),
+    el("p", { class: "unavailable note-text", text }),
+    el("button", { type: "button", class: "icon-button note-dismiss", "aria-label": "Dismiss this note",
+      title: "Dismiss",
+      html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+      onclick: () => {
+        try {
+          dismissed.push(id);
+          sessionStorage.setItem(DISMISSED_NOTES_KEY, JSON.stringify(dismissed.slice(-100)));
+        } catch { /* storage refused: dismissed for this render only */ }
+        banner.remove();
+        syncStickyOffsets();
+      } }));
+  return banner;
+}
+
+// statusIcon is a row's state as Google draws it (#1842): an icon in the
+// first column, its text for assistive technology and in the tooltip.
+const STATUS_GLYPHS = {
+  ok: '<svg class="status-glyph" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.7 2.7L16 9.8"/></svg>',
+  warn: '<svg class="status-glyph" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l9.5 17h-19z"/><path d="M12 10v4M12 17v.01"/></svg>',
+  error: '<svg class="status-glyph" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6"/></svg>',
+  "": '<svg class="status-glyph" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16v.01"/></svg>',
+};
+
+function statusIcon(status) {
+  const state = stateOf(status);
+  const node = el("span", { class: "status status-icon", "data-state": state, title: status || "No status" });
+  node.innerHTML = status ? STATUS_GLYPHS[state] || STATUS_GLYPHS[""] : "";
+  node.append(el("span", { class: "sr-only", text: status || "—" }));
+  return node;
+}
+
+// filterBar is every list table's filter (#1842), as Google's list toolbar
+// draws it: "Filter <noun>", where choosing a property and typing a value
+// makes a chip, chips are joined by AND, and plain text matches any column.
+// Typing narrows the rows as it is typed; Enter keeps it as a chip.
+//
+//   const f = filterBar({ noun, columns: () => ["Name", "Location"], onChange: draw });
+//   f.node            the bar, to put above the table
+//   f.matches(get)    whether a row passes: get(column) is the row's value
+//                     in a column, get(null) every value it has
+//   f.active()        whether anything is filtering
+//   f.clear()         drops every chip and the typed text
+//   f.input           the text box (input.filter)
+function filterBar({ noun, columns, onChange, extra = [] }) {
+  let chips = [];
+  const input = el("input", {
+    class: "filter", type: "search", placeholder: `Filter ${noun}`,
+    "aria-label": `Filter ${noun}`, autocomplete: "off",
+    "aria-haspopup": "listbox", "aria-expanded": "false",
+  });
+  const chipRow = el("div", { class: "filter-chips", role: "list", "aria-label": "Filters" });
+  const menu = el("ul", { class: "filter-menu", role: "listbox", "aria-label": "Filter by property", hidden: true });
+
+  const parse = (text) => {
+    const m = /^([^:]+):\s*(.*)$/.exec(text);
+    if (m) {
+      const col = columns().find((c) => c.toLowerCase() === m[1].trim().toLowerCase());
+      if (col) return { column: col, value: m[2].trim() };
+    }
+    return { column: null, value: text.trim() };
+  };
+  const closeMenu = () => { menu.hidden = true; input.setAttribute("aria-expanded", "false"); };
+  const openMenu = () => {
+    if (input.value.trim()) return closeMenu();
+    setChildren(menu,
+      el("li", { class: "filter-menu-title", role: "presentation", text: "Properties" }),
+      ...columns().map((c) => el("li", { role: "presentation" },
+        el("button", { type: "button", role: "option", class: "filter-menu-item", text: c,
+          onmousedown: (e) => e.preventDefault(),
+          onclick: () => { input.value = `${c}: `; closeMenu(); input.focus(); } }))));
+    menu.hidden = false;
+    input.setAttribute("aria-expanded", "true");
+  };
+  const drawChips = () => {
+    setChildren(chipRow,
+      ...chips.map((c, i) => el("span", { class: "chip", role: "listitem" },
+        el("span", { text: `${c.column || "Filter"}: ${c.value}` }),
+        el("button", { type: "button", class: "chip-clear", "aria-label": `Remove filter ${c.column || ""} ${c.value}`.replace(/\s+/g, " "),
+          html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+          onclick: () => { chips.splice(i, 1); drawChips(); onChange(); input.focus(); } }))),
+      chips.length ? el("button", { type: "button", class: "chip-clear-all", text: "Clear filters",
+        onclick: () => { chips = []; drawChips(); onChange(); input.focus(); } }) : null);
+  };
+  input.addEventListener("focus", openMenu);
+  input.addEventListener("click", openMenu);
+  input.addEventListener("blur", () => setTimeout(closeMenu, 150));
+  input.addEventListener("input", () => { if (input.value.trim()) closeMenu(); else openMenu(); onChange(); });
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { closeMenu(); return; }
+    if (e.key === "ArrowDown" && !menu.hidden) {
+      e.preventDefault();
+      const first = menu.querySelector("button");
+      if (first) first.focus();
+      return;
+    }
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    const chip = parse(input.value);
+    if (!chip.value) return;
+    chips.push(chip);
+    input.value = "";
+    drawChips();
+    onChange();
+    announce(`Filter ${chip.column || ""} ${chip.value} added`);
+  });
+  menu.addEventListener("keydown", (e) => {
+    const items = [...menu.querySelectorAll("button")];
+    const at = items.indexOf(document.activeElement);
+    if (e.key === "ArrowDown" && at < items.length - 1) { e.preventDefault(); items[at + 1].focus(); }
+    if (e.key === "ArrowUp") { e.preventDefault(); if (at > 0) items[at - 1].focus(); else input.focus(); }
+    if (e.key === "Escape") { closeMenu(); input.focus(); }
+  });
+
+  const test = (chip, get) => {
+    const q = chip.value.toLowerCase();
+    if (!q) return true;
+    const values = chip.column ? [get(chip.column)] : get(null);
+    return values.some((v) => String(v || "").toLowerCase().includes(q));
+  };
+  return {
+    input,
+    node: el("div", { class: "filter-field" },
+      el("span", { class: "filter-icon", "aria-hidden": "true",
+        html: '<svg viewBox="0 0 24 24"><path d="M4 6h16M7 12h10M10 18h4"/></svg>' }),
+      el("div", { class: "filter-box" }, input, menu),
+      ...extra),
+    chips: chipRow,
+    matches: (get) => [...chips, parse(input.value)].every((c) => test(c, get)),
+    active: () => chips.length > 0 || Boolean(input.value.trim()),
+    text: () => [...chips.map((c) => `${c.column ? c.column + ": " : ""}${c.value}`), input.value.trim()]
+      .filter(Boolean).join(" AND "),
+    clear: () => { chips = []; input.value = ""; drawChips(); },
+  };
+}
+
+// viewOptions is the column chooser beside the filter (#1842), Google's
+// "View options" / "Column display options": a checkbox per data column,
+// remembered per service. hidden() is the set of columns turned off.
+const COLUMNS_KEY = "cloudburrow.columns";
+
+function viewOptions({ service, columns, onChange }) {
+  const stored = readStored(COLUMNS_KEY, {}) || {};
+  let off = new Set(Array.isArray(stored[service]) ? stored[service] : []);
+  const button = el("button", { type: "button", class: "icon-button view-options",
+    "aria-label": "View options", title: "View options", "aria-haspopup": "true", "aria-expanded": "false",
+    html: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M9 5v14M15 5v14"/></svg>' });
+  const panel = el("div", { class: "view-options-menu", role: "group", "aria-label": "Column display options", hidden: true });
+  const save = () => {
+    const all = readStored(COLUMNS_KEY, {}) || {};
+    all[service] = [...off];
+    writeStored(COLUMNS_KEY, all);
+  };
+  const draw = () => setChildren(panel,
+    el("p", { class: "view-options-title", text: "Column display options" }),
+    ...columns().map((c) => {
+      const id = `col-${c.replace(/[^A-Za-z0-9]+/g, "-")}`;
+      return el("label", { class: "view-options-item", for: id },
+        el("input", { type: "checkbox", id, checked: off.has(c) ? null : "checked",
+          onchange: (e) => {
+            if (e.target.checked) off.delete(c); else off.add(c);
+            save();
+            onChange();
+          } }),
+        el("span", { text: c }));
+    }));
+  const close = () => { panel.hidden = true; button.setAttribute("aria-expanded", "false"); };
+  button.addEventListener("click", () => {
+    if (!panel.hidden) return close();
+    draw();
+    panel.hidden = false;
+    button.setAttribute("aria-expanded", "true");
+    const first = panel.querySelector("input");
+    if (first) first.focus();
+  });
+  panel.addEventListener("keydown", (e) => { if (e.key === "Escape") { close(); button.focus(); } });
+  document.addEventListener("click", (e) => {
+    if (!panel.hidden && !panel.contains(e.target) && e.target !== button && !button.contains(e.target)) close();
+  });
+  return {
+    node: el("div", { class: "view-options-wrap" }, button, panel),
+    hidden: () => off,
+  };
+}
 
 // A cancel is not a failure: the user stopped it.
 //
@@ -2059,17 +2342,26 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   const operating = new Set();
 
   const nameColumn = () => data.nameColumn || "Name";
-  const dataColumns = () => data.columns || [];
+  const allDataColumns = () => data.columns || [];
+  // The data columns on screen: View options can turn any of them off
+  // (#1842). The filter still reads the hidden ones, as Google's does.
+  const chooser = opts.rowControls && route.service
+    ? viewOptions({ service: route.service, columns: allDataColumns, onChange: () => draw() })
+    : null;
+  const dataColumns = () => allDataColumns().filter((c) => !chooser || !chooser.hidden().has(c));
   const hasActions = () =>
     data.items.some((i) => (i.actions || []).length || i.object) || caps.delete;
+  // Declared by the provider, or inferred from the rows that happen to be
+  // present. Inference alone made the column come and go as the data
+  // changed, taking any sort applied to it with it.
+  const hasStatus = () => Boolean(data.alwaysStatus || data.items.some((i) => i.status));
+  // Status is the first column, as an icon, the way Google's lists draw it
+  // (#1842); the row menu's column has no header text.
   const columns = () => [
     ...(selectable ? ["select"] : []),
+    ...(hasStatus() ? ["Status"] : []),
     nameColumn(),
     ...dataColumns(),
-    // Declared by the provider, or inferred from the rows that happen to be
-    // present. Inference alone made the column come and go as the data
-    // changed, taking any sort applied to it with it.
-    ...(data.alwaysStatus || data.items.some((i) => i.status) ? ["Status"] : []),
     ...(hasActions() ? ["Actions"] : []),
   ];
 
@@ -2079,21 +2371,15 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
     return (item.fields || {})[column] || "";
   };
 
-  // The filter reads every column on screen, not only the name. A filter that
+  // The filter reads every column, not only the name. A filter that
   // silently ignored the columns beside it is worse than none: typing a
-  // location and getting nothing reads as "there are none".
-  const matches = (item, q) => {
-    if (!q) return true;
-    if ((item.name || "").toLowerCase().includes(q)) return true;
-    if ((item.status || "").toLowerCase().includes(q)) return true;
-    return dataColumns().some((c) =>
-      String((item.fields || {})[c] || "").toLowerCase().includes(q));
-  };
-
-  const filter = el("input", {
-    class: "filter", type: "search", placeholder: `Filter ${noun}`,
-    "aria-label": `Filter ${noun}`,
-  });
+  // location and getting nothing reads as "there are none". A chip names
+  // one column (#1842).
+  const filterColumns = () => [nameColumn(), ...allDataColumns(), ...(hasStatus() ? ["Status"] : [])];
+  const bar = filterBar({ noun, columns: filterColumns, onChange: () => { page = 0; draw(); } });
+  const matches = (item) => bar.matches((column) => column === null
+    ? filterColumns().map((c) => valueOf(item, c))
+    : valueOf(item, column));
 
   const body = el("tbody");
   const headRow = el("tr");
@@ -2118,8 +2404,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   }));
 
   const visibleRows = () => {
-    const q = filter.value.trim().toLowerCase();
-    let rows = data.items.filter((i) => matches(i, q));
+    let rows = data.items.filter((i) => matches(i));
     if (sortColumn) {
       // Compared numerically when both sides are numbers, so "10" does not
       // sort before "9", and case-insensitively otherwise.
@@ -2249,6 +2534,16 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
             },
           })));
       }
+      const busy = operating.has(item.name);
+      if (hasStatus()) {
+        // The status the row had is not the status it has: while a request is
+        // outstanding the cell says "working", not the value it is about to
+        // stop being.
+        cells.push(busy
+          ? el("td", { class: "status-cell" }, el("span", { class: "status is-working" },
+              spinner(`${item.name} is being changed`)))
+          : el("td", { class: "status-cell" }, statusIcon(item.status)));
+      }
       cells.push(el("td", {}, item.link
         ? el("a", { href: item.link, text: item.name })
         : (item.opens || []).length
@@ -2258,17 +2553,6 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
           : document.createTextNode(item.name)));
       for (const c of dataColumns()) {
         cells.push(el("td", { text: (item.fields || {})[c] || "—" }));
-      }
-      const busy = operating.has(item.name);
-      if (columns().includes("Status")) {
-        // The status the row had is not the status it has: while a request is
-        // outstanding the cell says "working", not the value it is about to
-        // stop being.
-        cells.push(busy
-          ? el("td", {}, el("span", { class: "status is-working" },
-              spinner(`${item.name} is being changed`)))
-          : el("td", {}, el("span", { class: "status", "data-state": stateOf(item.status) },
-              el("span", { text: item.status || "—" }))));
       }
       if (hasActions()) cells.push(rowActionsCell(item));
       const row = el("tr", {
@@ -2327,14 +2611,14 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
       // Which one this is depends on the filter, not on the row count. A
       // table emptied by deleting its last row was offering to clear a filter
       // nobody had typed, and calling nothing a non-match.
-      const query = filter.value.trim();
-      const state = query
+      const query = bar.text();
+      const state = bar.active()
         ? el("div", { class: "state state-inline" },
             el("h2", { text: `No matching ${noun}` }),
             el("p", { text: `Nothing matches “${query}”.` }),
             el("button", {
               class: "secondary", text: "Clear filter",
-              onclick: () => { filter.value = ""; page = 0; draw(); },
+              onclick: () => { bar.clear(); page = 0; draw(); },
             }))
         : el("div", { class: "state state-inline" },
             el("h2", { text: `No ${noun} yet` }),
@@ -2457,7 +2741,9 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
       }
       // Actions is a column of controls, not of values, so it does not sort:
       // offering it would be a control that does nothing.
-      if (c === "Actions") return el("th", { scope: "col", text: c });
+      if (c === "Actions") {
+        return el("th", { scope: "col", class: "actions-cell" }, el("span", { class: "sr-only", text: c }));
+      }
       const active = sortColumn === c;
       const arrow = active ? (sortAscending ? "↑" : "↓") : "";
       return el("th", {
@@ -2465,7 +2751,8 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
         "aria-sort": active ? (sortAscending ? "ascending" : "descending") : "none",
       },
         el("button", {
-          class: "sort-button" + (active ? " is-active" : ""),
+          class: "sort-button" + (active ? " is-active" : "") + (c === "Status" ? " is-status" : ""),
+          title: c === "Status" ? "Sort by status" : null,
           onclick: () => {
             if (sortColumn === c) sortAscending = !sortAscending;
             else { sortColumn = c; sortAscending = true; }
@@ -2473,7 +2760,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
             announce(`Sorted by ${c}, ${sortAscending ? "ascending" : "descending"}`);
           },
         },
-          el("span", { text: c }),
+          el("span", { class: c === "Status" ? "sr-only" : null, text: c }),
           el("span", { class: "sort-arrow", "aria-hidden": "true", text: arrow })));
     }));
   };
@@ -2525,11 +2812,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
 
   // The manual control says it is working for as long as it is, and clears
   // in a finally so a failure does not strand the spinner.
-  const refreshButton = el("button", { class: "secondary", text: "Refresh" });
-  refreshButton.addEventListener("click", async () => {
-    setBusy(refreshButton, true);
-    try { await refresh(); } finally { setBusy(refreshButton, false); }
-  });
+  const refreshControl = refreshButton(() => refresh());
 
   // The automatic poll. Registered so the router clears it, and suspended
   // for a hidden tab through the one visibility listener rather than a
@@ -2543,9 +2826,8 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   const infoToggle = () => {
     const open = infoPanelOpen();
     const button = el("button", {
-      class: "secondary", "aria-expanded": open ? "true" : "false",
+      class: "icon-button info-toggle", type: "button", "aria-expanded": open ? "true" : "false",
       "aria-controls": "info-panel",
-      text: open ? "Hide info panel" : "Show info panel",
       onclick: () => {
         if (infoPanelOpen()) return closeInfoPanel();
         writeStored(INFO_OPEN_KEY, true);
@@ -2553,12 +2835,13 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
         panel.hidden = false;
         document.documentElement.setAttribute("data-info", "open");
         button.setAttribute("aria-expanded", "true");
-        button.textContent = "Hide info panel";
+        labelInfoToggle(button, true);
         const item = data.items.find((i) => i.name === inspected);
         drawInfoPanel(item, dataColumns(), route, refresh);
         panel.focus();
       },
     });
+    labelInfoToggle(button, open);
     INFO_TOGGLE = button;
     return button;
   };
@@ -2578,28 +2861,36 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
     document.documentElement.removeAttribute("data-info");
   }
 
-  filter.addEventListener("input", () => { page = 0; draw(); });
   drawFreshness();
   draw();
 
+  // A list screen's Create, Refresh and info-panel toggle are on its title
+  // line, as Google's are (#1842); the bar under it keeps what acts on the
+  // product or on the checked rows. A table inside a resource page keeps its
+  // own bar, since the title line there belongs to the resource.
+  const slot = opts.rowControls ? headerActions(header) : null;
+  if (slot) {
+    setChildren(slot,
+      caps.create ? createButton(caps.create.label, () => startCreate(route, caps.create, refresh)) : null,
+      refreshControl,
+      infoToggle());
+  }
+  const listActions = opts.rowControls ? listActionButtons(route, data, refresh) : [];
   setChildren(view, ...header,
-    data.note ? el("p", { class: "unavailable", text: data.note }) : null,
+    noteBanner(data.note),
     // The page's actions and the table's filter are different things, so they
     // are different bars: one acts on the product, the other narrows the view.
     opts.rowControls
-      ? el("div", { class: "action-bar" },
-          caps.create
-            ? el("button", { class: "primary", text: caps.create.label,
-                onclick: () => startCreate(route, caps.create, refresh) })
-            : null,
-          ...listActionButtons(route, data, refresh),
-          selectable ? bulk : null,
-          selectionLabel,
-          refreshButton,
-          infoToggle())
+      ? (listActions.length || selectable
+          ? el("div", { class: "action-bar" },
+              ...listActions,
+              selectable ? bulk : null,
+              selectionLabel)
+          : null)
       : el("div", { class: "action-bar" }, ...selectionButtons,
-          selectActions.length ? selectionLabel : null, refreshButton),
-    el("div", { class: "filter-bar" }, filter, freshness),
+          selectActions.length ? selectionLabel : null, refreshControl),
+    el("div", { class: "filter-bar" }, bar.node, chooser ? chooser.node : null, freshness),
+    bar.chips,
     el("div", { class: "table-wrap" },
       el("table", {}, el("thead", {}, headRow), body)),
     footer);
@@ -2647,11 +2938,22 @@ async function renderDetail(view, route, resourcePath) {
       : el("a", { href: detailHref(route, segments.slice(0, i + 1)), text: segment }));
   });
 
+  // A top-level resource of a route that names its kind is titled as
+  // Google titles it, "<Kind> details", with its name under the title line
+  // (#1842); deeper pages (an object, a document) keep their own name. The
+  // back arrow goes one level up: the list, or the resource above.
+  const kindTitled = Boolean(route.kind) && segments.length === 1;
+  const up = segments.length > 1 ? detailHref(route, segments.slice(0, -1)) : back.pathname + back.search;
+  const nameLine = kindTitled ? el("p", { class: "resource-name", text: name }) : null;
   const crumb = el("div", { class: "page-header" },
     // A breadcrumb, because a screen you can only leave with the browser
     // button is a screen you are stuck in.
     el("nav", { class: "breadcrumb", "aria-label": "Breadcrumb" }, ...trail),
-    el("h1", { text: name }),
+    el("div", { class: "page-title-row" },
+      backArrow(up, segments.length > 1 ? "Back" : `Back to ${route.title}`),
+      el("h1", { text: kindTitled ? `${route.kind} details` : name }),
+      el("div", { class: "page-header-actions" })),
+    nameLine,
     el("p", { class: "subtitle", text: (project ? `Project ${project}` : "All projects") + scopeSubtitle(route.service) }));
   const header = [crumb];
   // A provider-drawn trail, for a page whose path is not its hierarchy: an
@@ -2698,7 +3000,7 @@ async function renderDetail(view, route, resourcePath) {
   if ((data.trail || []).length) drawTrail(data.trail);
   // A page addressed by something no reader recognises — a Datastore
   // entity's encoded key (#875) — says what it is in its heading.
-  if (data.title) crumb.querySelector("h1").textContent = data.title;
+  if (data.title) (nameLine || crumb.querySelector("h1")).textContent = data.title;
   const sections = (data.sections || []).slice();
   // The tab is offered only where the backend can actually answer, which is
   // the same rule the create button follows: a control appears when the
@@ -3173,8 +3475,9 @@ async function renderDetail(view, route, resourcePath) {
       onclick: () => openEditForm(route, segments, data.edit, reloadPage),
     }));
   }
+  // Beside the title, as Google's Edit and Delete are (#1842).
   if (pageActions.length) {
-    crumb.append(el("div", { class: "page-actions" }, ...pageActions));
+    setChildren(headerActions(crumb), el("div", { class: "page-actions" }, ...pageActions));
   }
 
   panel.setAttribute("aria-labelledby", `tab-${sections[current].id}`);
@@ -3898,12 +4201,7 @@ async function renderList(view, route) {
   const listURL = `/api/resources/${route.service}?project=${encodeURIComponent(project)}` +
     (serverFilter ? `&filter=${encodeURIComponent(serverFilter)}` : "");
 
-  const header = [
-    el("div", { class: "page-header" },
-      el("h1", { text: route.title }),
-      el("p", { class: "subtitle",
-                text: project ? `Project ${project}` : "All projects" })),
-  ];
+  const header = [pageHeader(route.title, project ? `Project ${project}` : "All projects")];
   const cancel = new AbortController();
   setChildren(view, ...header,
     loadingState(5, { what: route.title.toLowerCase(), onCancel: () => cancel.abort() }));
@@ -3973,9 +4271,13 @@ async function renderList(view, route) {
         onclick: () => startCreate(route, caps.create, () => renderList(view, route)) }));
     }
     empty.append(...listActionButtons(route, data, () => renderList(view, route)));
-    setChildren(view, ...header,
-      data.note ? el("p", { class: "unavailable", text: data.note }) : null,
-      empty);
+    // The title line carries the same Create, and Refresh, as a list with
+    // rows does (#1842).
+    setChildren(headerActions(header),
+      caps.create ? createButton(caps.create.label,
+        () => startCreate(route, caps.create, () => renderList(view, route))) : null,
+      refreshButton(() => renderList(view, route)));
+    setChildren(view, ...header, noteBanner(data.note), empty);
     announce(`No ${noun}`);
     return;
   }
@@ -4205,9 +4507,18 @@ function closeInfoPanel() {
   document.documentElement.removeAttribute("data-info");
   if (INFO_TOGGLE && INFO_TOGGLE.isConnected) {
     INFO_TOGGLE.setAttribute("aria-expanded", "false");
-    INFO_TOGGLE.textContent = "Show info panel";
+    labelInfoToggle(INFO_TOGGLE, false);
     INFO_TOGGLE.focus();
   }
+}
+
+// labelInfoToggle names the info-panel toggle for its state. It is an icon
+// on the title line (#1842); its name is the text Google's tooltip carries.
+function labelInfoToggle(button, open) {
+  const label = open ? "Hide info panel" : "Show info panel";
+  button.title = label;
+  button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg>';
+  button.append(el("span", { class: "sr-only", text: label }));
 }
 
 // drawInfoPanel fills the panel from one row, or says nothing is selected.
@@ -5065,15 +5376,15 @@ async function renderCreatePage(view, route) {
   carryScope(back, target.service);
   const listHref = back.pathname + back.search;
 
-  const header = [
-    el("div", { class: "page-header" },
-      el("nav", { class: "breadcrumb", "aria-label": "Breadcrumb" },
-        el("a", { href: listHref, text: target.title }),
-        el("span", { "aria-hidden": "true", text: "/" }),
-        el("span", { text: caps.create ? caps.create.label : "Create" })),
-      el("h1", { text: caps.create ? caps.create.label : "Create" }),
-      el("p", { class: "subtitle", text: project ? `Project ${project}` : "All projects" })),
-  ];
+  // A full page with a back arrow to the list, as Google's create flows are
+  // (#1842).
+  const header = [pageHeader(caps.create ? caps.create.label : "Create",
+    project ? `Project ${project}` : "All projects",
+    { back: listHref, backLabel: `Back to ${target.title}` })];
+  header[0].prepend(el("nav", { class: "breadcrumb", "aria-label": "Breadcrumb" },
+    el("a", { href: listHref, text: target.title }),
+    el("span", { "aria-hidden": "true", text: "/" }),
+    el("span", { text: caps.create ? caps.create.label : "Create" })));
 
   if (!caps.create) {
     setChildren(view, ...header,
@@ -5087,10 +5398,12 @@ async function renderCreatePage(view, route) {
   const cancel = el("a", { class: "button secondary", href: listHref, text: "Cancel" });
   const primary = el("button", { type: "submit", class: "primary", text: caps.create.label });
 
+  const steps = createSteps(fields.nodes);
+
   const submit = async (e) => {
     e.preventDefault();
     error.hidden = true;
-    if (!fields.validate()) return;
+    if (!fields.validate()) { steps.revealInvalid(); return; }
 
     setBusy(primary, true);
     try {
@@ -5107,13 +5420,82 @@ async function renderCreatePage(view, route) {
     }
   };
 
+  // Create, then Cancel, at the bottom, as Google's forms end.
   setChildren(view, ...header,
     el("form", { class: "create-page", novalidate: true, onsubmit: submit },
       error,
-      ...fields.nodes,
-      el("div", { class: "form-actions" }, cancel, primary)));
+      ...steps.nodes,
+      el("div", { class: "form-actions" }, primary, cancel)));
   fields.focusFirst();
   announce(`${caps.create.label} form`);
+}
+
+// createSteps lays a create form out as Google's create pages are (#1842):
+// numbered sections, each with Continue, which folds the finished section to
+// its title and opens the next. A folded section opens again from its title.
+// Every field stays in the form, folded or not, so Create submits them all
+// and a refusal opens the section holding the field it names.
+//
+// nodes are buildCreateForm's: its .form-section elements become the steps,
+// and fields before the first section become "Get started". A form with no
+// sections is one block, unnumbered, as a two-field form should be.
+//
+//   const steps = createSteps(fields.nodes);
+//   form.append(...steps.nodes);
+//   if (!fields.validate()) steps.revealInvalid();
+function createSteps(nodes) {
+  const sections = nodes.filter((n) => n.classList && n.classList.contains("form-section"));
+  if (!sections.length) return { nodes, revealInvalid() {} };
+  const lead = [];
+  const loose = [];
+  for (const n of nodes) {
+    if (n.classList.contains("form-required-note")) lead.push(n);
+    else if (!n.classList.contains("form-section")) loose.push(n);
+  }
+  const groups = [];
+  if (loose.length) groups.push({ title: "Get started", body: loose });
+  for (const sec of sections) {
+    const title = sec.querySelector(".form-section-title");
+    if (title) title.remove();
+    groups.push({ title: title ? title.textContent : "", body: [...sec.childNodes] });
+  }
+  const steps = groups.map((g, i) => {
+    const n = i + 1;
+    const bodyId = `create-step-${n}`;
+    const head = el("button", { type: "button", class: "create-step-head", "aria-expanded": "true",
+      "aria-controls": bodyId },
+      el("span", { class: "create-step-number", "aria-hidden": "true", text: String(n) }),
+      el("span", { class: "create-step-title", text: g.title }));
+    const body = el("div", { class: "create-step-body", id: bodyId }, ...g.body);
+    const step = el("section", { class: "create-step", "aria-label": `${n}. ${g.title}` }, head, body);
+    return { step, head, body };
+  });
+  const setOpen = (s, open) => {
+    s.body.hidden = !open;
+    s.head.setAttribute("aria-expanded", open ? "true" : "false");
+    s.step.classList.toggle("is-folded", !open);
+  };
+  steps.forEach((s, i) => {
+    s.head.addEventListener("click", () => setOpen(s, s.body.hidden));
+    if (i < steps.length - 1) {
+      s.body.append(el("div", { class: "create-step-continue" },
+        el("button", { type: "button", class: "secondary", text: "Continue",
+          onclick: () => {
+            setOpen(s, false);
+            s.step.classList.add("is-done");
+            const next = steps[i + 1];
+            setOpen(next, true);
+            const first = next.body.querySelector("input:not([disabled]), select:not([disabled]), textarea:not([disabled])");
+            (first || next.head).focus();
+          } })));
+    }
+  });
+  return {
+    nodes: [...lead, ...steps.map((s) => s.step)],
+    revealInvalid() {
+      for (const s of steps) if (s.body.querySelector(".is-invalid")) setOpen(s, true);
+    },
+  };
 }
 
 // KNOWN_PROJECTS is the registry as the picker last read it.
@@ -6020,34 +6402,76 @@ function syncStickyOffsets() {
   root.style.setProperty("--action-bar-h", height("#view .action-bar"));
 }
 
-// drawProductNav lists the pages of the product the current screen belongs to.
+// drawProductNav draws the left-hand menu of the product the current screen
+// belongs to (#1842): the product's mark and name at the top, its pages
+// listed below, and a control that collapses the pane to a rail.
 //
 // The drawer answers "which products exist"; this answers "which pages does
 // this product have", which is how somebody who uses the real console looks
-// for something — product first, page second. A product with one page shows
-// nothing, because a list of one is not navigation.
+// for something: product first, page second. It is drawn on a product's list
+// screens, on its resources' pages and on its create pages, so the menu stays
+// put while the developer works inside the product, as Google's does.
+//
+// A category screen adds nothing here: a product's pages are its ROUTES
+// entries sharing a `product` key, so a new page appears in the menu by being
+// declared there. `navTitle` names a page in the menu when its screen title
+// is the product's own name (Cloud Tasks' only page is "Queues").
+const PRODUCT_NAV_KEY = "cloudburrow.productnav";
+
+function productOfLocation() {
+  const { route: match } = routeFor(location.pathname);
+  if (!match) return null;
+  const owner = match.screen === "create" ? match.of : match;
+  return owner && owner.section ? owner : null;
+}
+
 function drawProductNav() {
   const host = document.getElementById("product-nav");
   if (!host) return;
 
-  const here = ROUTES.find((r) => r.path === location.pathname && r.section);
+  const here = productOfLocation();
   const pages = here ? pagesOf(productKey(here)) : [];
-  if (pages.length < 2) {
+  if (!pages.length) {
     host.hidden = true;
+    document.documentElement.removeAttribute("data-product-nav");
     setChildren(host);
     return;
   }
 
+  const collapsed = readStored(PRODUCT_NAV_KEY, "open") === "collapsed";
   host.hidden = false;
+  document.documentElement.setAttribute("data-product-nav", collapsed ? "collapsed" : "open");
+  const title = productTitle(here);
+  const toggle = el("button", {
+    class: "icon-button product-nav-toggle", type: "button",
+    "aria-expanded": collapsed ? "false" : "true", "aria-controls": "product-nav-pages",
+    "aria-label": collapsed ? `Expand ${title} navigation menu` : `Collapse ${title} navigation menu`,
+    title: collapsed ? "Expand left pane" : "Collapse left pane",
+    html: collapsed
+      ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>'
+      : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>',
+    onclick: () => {
+      writeStored(PRODUCT_NAV_KEY, collapsed ? "open" : "collapsed");
+      drawProductNav();
+      const again = host.querySelector(".product-nav-toggle");
+      if (again) again.focus();
+    },
+  });
+  // The page this screen is on: the list itself, or the list a resource or
+  // a create form belongs to.
+  const current = pages.find((page) => page.path === here.path);
   setChildren(host,
-    el("span", { class: "product-nav-title", text: productTitle(here) }),
-    el("ul", {}, ...pages.map((page) =>
+    el("div", { class: "product-nav-head" },
+      el("span", { class: "nav-icon", "aria-hidden": "true" }, markFor(here)),
+      el("span", { class: "product-nav-title", text: title }),
+      toggle),
+    el("ul", { id: "product-nav-pages", hidden: collapsed ? true : null }, ...pages.map((page) =>
       el("li", {},
         el("a", {
           href: page.path + scopeSearch(),
-          class: page.path === location.pathname ? "is-current" : null,
-          "aria-current": page.path === location.pathname ? "page" : null,
-          text: page.title,
+          class: page === current ? "is-current" : null,
+          "aria-current": page === current ? "page" : null,
+          text: page.navTitle || page.title,
         })))));
 }
 
@@ -6139,7 +6563,7 @@ async function initProjects() {
     history.pushState({}, "", url);
     rescopeLinks(selected, id);
     selected = id;
-    current.textContent = id || "All projects";
+    current.textContent = id || "Select a project";
     closePicker();
     route();
     // The terminal follows the toolbar's project (#781).
@@ -6152,14 +6576,9 @@ async function initProjects() {
     const shown = projects.filter((p) =>
       !q || p.id.toLowerCase().includes(q) || (p.name || "").toLowerCase().includes(q));
 
+    // No "All projects" entry: Google's console always works in one
+    // selected project (#1842).
     setChildren(list,
-      el("li", {},
-        el("button", {
-          class: "picker-item" + (selected === "" ? " is-selected" : ""),
-          onclick: () => select(""),
-        },
-          el("span", { class: "picker-item-name", text: "All projects" }),
-          el("span", { class: "picker-item-id", text: "no project scope" }))),
       ...shown.map((p) =>
         el("li", {},
           el("button", {
@@ -6209,12 +6628,12 @@ async function initProjects() {
     if (DEFAULT_PROJECT && DEFAULT_PROJECT !== selected) {
       select(DEFAULT_PROJECT);
     } else {
-      select("");
+      select(KNOWN_PROJECTS[0] || "");
     }
     button.classList.remove("is-invalid");
   };
 
-  current.textContent = selected || "All projects";
+  current.textContent = selected || "Select a project";
   filter.addEventListener("input", draw);
 
   // Re-checked whenever anything deletes a project, which is how the picker
@@ -6256,6 +6675,9 @@ async function initProjects() {
   });
 
   await load();
+  // A project is always selected (#1842): with no default project, the
+  // first in the registry is chosen, as Google's console opens on one.
+  if (!selected && KNOWN_PROJECTS.length) select(KNOWN_PROJECTS[0]);
 }
 
 // The toolbar search looks across every service.

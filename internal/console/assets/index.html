@@ -36,7 +36,7 @@
     <button id="project-button" class="picker-button" aria-haspopup="dialog"
             aria-expanded="false" aria-controls="project-panel">
       <span class="picker-label">Project</span>
-      <span class="picker-value" id="project-current">All projects</span>
+      <span class="picker-value" id="project-current">Select a project</span>
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10l5 5 5-5"/></svg>
     </button>
     <div id="project-panel" class="panel picker-panel" role="dialog"
@@ -203,11 +203,13 @@
     </div>
   </nav>
 
+  <!-- A product's own left-hand menu (#1842): its name, then its pages,
+       collapsible to a rail, as the console this mirrors draws every
+       product's. Filled by the router, so it is right on every screen of the
+       product and survives a screen re-rendering itself. -->
+  <nav id="product-nav" class="product-nav" aria-label="Pages in this product" hidden></nav>
+
   <main id="main" tabindex="-1">
-    <!-- A product's own pages, listed inside the product rather than as
-         siblings in the drawer. Filled by the router, so it is right on every
-         screen and survives a screen re-rendering itself. -->
-    <nav id="product-nav" class="product-nav" aria-label="Pages in this product" hidden></nav>
     <div id="view"></div>
   </main>
 

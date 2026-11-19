@@ -1795,6 +1795,10 @@ func (tasksProvider) CreateForm() (string, []console.Field) {
 	}
 }
 
+// CreateOnPage puts Create queue on a page of its own, as Google's console
+// opens it (#1842): a full page with a back arrow, not a dialog.
+func (tasksProvider) CreateOnPage() bool { return true }
+
 func (p tasksProvider) Create(ctx context.Context, project string, values map[string]string) (string, error) {
 	if project == "" {
 		return "", fmt.Errorf("choose a project before creating a queue")

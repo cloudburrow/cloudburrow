@@ -379,6 +379,10 @@ func (kmsProvider) CreateForm() (string, []console.Field) {
 	}
 }
 
+// CreateOnPage puts Create key ring on a page of its own, as Google's
+// console opens it (#1842).
+func (kmsProvider) CreateOnPage() bool { return true }
+
 // kmsLocations is what the Create key ring form offers as its Location: what
 // the service's own ListLocations answers for a project with no key rings
 // (#1291).
