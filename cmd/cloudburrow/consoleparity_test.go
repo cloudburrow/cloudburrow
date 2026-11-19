@@ -769,6 +769,11 @@ var parityRows = []parityRow{
 		Methods:  []string{"CloudRedisCluster/GetAclPolicyRevision", "CloudRedisCluster/ListAclPolicyRevisions"},
 		Excluded: "the ACL policies tab shows each policy's current revision; earlier revisions are history the API keeps, not settings"},
 
+	{Resource: "Memorystore Redis cluster maintenance", Service: "memorystore",
+		Methods:  []string{"CloudRedisCluster/RescheduleClusterMaintenance"},
+		Provider: "memorystore-clusters", Offers: "a cluster's page shows its maintenance window and scheduled maintenance; Set maintenance window (maintenance_policy); Reschedule maintenance (IMMEDIATE or SPECIFIC_TIME) while one is scheduled; CloudBurrow's own Schedule maintenance and Cancel maintenance, standing in for Memorystore scheduling an update (#1524)",
+		Tests: []string{"TestMemorystoreClusterAndValkeyMaintenanceThroughThePage"}},
+
 	// Memorystore for Valkey (#1519)
 	{Resource: "Memorystore for Valkey ACL policies", Service: "memorystore",
 		Methods: []string{"Memorystore/CreateAclPolicy", "Memorystore/GetAclPolicy", "Memorystore/ListAclPolicies", "Memorystore/UpdateAclPolicy",
@@ -791,6 +796,10 @@ var parityRows = []parityRow{
 		Methods:  []string{"Memorystore/ListInstances", "Memorystore/GetInstance", "Memorystore/CreateInstance", "Memorystore/UpdateInstance", "Memorystore/DeleteInstance"},
 		Provider: "memorystore-valkey", Offers: "Memorystore for Valkey page: instances list (location, mode, endpoint, shards, replicas, node type, engine version, state); Create instance (ID, region, cluster mode, shards, replicas per shard, node type, PSC network, engine configs), waiting for it to serve; an instance's page with its discovery or primary and reader endpoints and configuration; Edit (shards, replicas per shard, node type, deletion protection), each change waited for; Delete (#1519); Create instance's Engine version, Persistence, Customer-managed encryption key and Secondary of (cross-instance replication), Edit's Engine version (an upgrade), and the page's Encryption, key, key state, replication role, primary, secondaries and membership, with Switchover and Detach on a secondary (#1557)",
 		Tests: []string{"TestConsoleValkeyInstances", "TestConsoleValkeyReplicationMigrationVersions", "TestMemorystoreValkeySecondaryThroughThePage", "TestMemorystoreClusterServerCATabsThroughThePage"}},
+	{Resource: "Memorystore for Valkey maintenance", Service: "memorystore",
+		Methods:  []string{"Memorystore/RescheduleMaintenance"},
+		Provider: "memorystore-valkey", Offers: "an instance's page shows its maintenance window and scheduled maintenance; Set maintenance window (maintenance_policy); Reschedule maintenance (IMMEDIATE or SPECIFIC_TIME) while one is scheduled; CloudBurrow's own Schedule maintenance and Cancel maintenance, standing in for Memorystore scheduling an update (#1524)",
+		Tests: []string{"TestMemorystoreClusterAndValkeyMaintenanceThroughThePage"}},
 	{Resource: "Memorystore for Valkey migration", Service: "memorystore",
 		Methods:  []string{"Memorystore/StartMigration", "Memorystore/FinishMigration"},
 		Provider: "memorystore-valkey", Offers: "a CLUSTER_DISABLED instance's page has **Start migration** (source IP address, port, network attachment) and, while it is MIGRATING, **Finish migration**, each waited for; the page shows the migration's state and source (#1557)",

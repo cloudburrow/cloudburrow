@@ -5543,8 +5543,8 @@
     "Key": "memorystore",
     "Title": "Memorystore for Redis",
     "counts": {
-      "Unimplemented": 4,
-      "Verified": 69
+      "Unimplemented": 2,
+      "Verified": 71
     },
     "rows": [
       {
@@ -5724,6 +5724,7 @@
           "test/compat/memorystore1563_test.go:169 TestMemorystoreValkeyUpgradeKeepsWrites",
           "test/compat/memorystore1614_test.go:60 TestMemorystoreValkeyReaderAndFailover",
           "test/compat/memorystore1657_test.go:59 TestMemorystoreValkeyAutomaticFailover",
+          "test/compat/memorystoreclustermaintenance_test.go:194 TestValkeyRescheduleMaintenance",
           "test/compat/memorystorerestart1557_test.go:74 TestMemorystoreClustersAcrossRestart",
           "test/compat/memorystorevalkey_test.go:85 TestMemorystoreValkeyInstance",
           "test/compat/terraform_memorystore1563_test.go:21 TestTerraformMemorystore1563",
@@ -5796,8 +5797,10 @@
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/RescheduleMaintenance",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclustermaintenance_test.go:194 TestValkeyRescheduleMaintenance"
+        ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/StartMigration",
@@ -5974,6 +5977,7 @@
         "tests": [
           "test/compat/gcloudrediscluster_test.go:23 TestGcloudRedisCluster",
           "test/compat/memorystorecluster_test.go:136 TestMemorystoreRedisCluster",
+          "test/compat/memorystoreclustermaintenance_test.go:74 TestRedisClusterRescheduleMaintenance",
           "test/compat/memorystorerestart1557_test.go:74 TestMemorystoreClustersAcrossRestart",
           "test/compat/terraform_rediscluster_test.go:25 TestTerraformRedisCluster"
         ]
@@ -6051,8 +6055,10 @@
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/RescheduleClusterMaintenance",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreclustermaintenance_test.go:74 TestRedisClusterRescheduleMaintenance"
+        ]
       },
       {
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/UpdateAclPolicy",
@@ -6200,7 +6206,7 @@
         "method": "google.cloud.redis.v1.CloudRedis/RescheduleMaintenance",
         "status": "Verified",
         "tests": [
-          "test/compat/memorystoremaintenance_test.go:175 TestMemorystoreStandardTierMaintenanceFailsOver",
+          "test/compat/memorystoremaintenance_test.go:176 TestMemorystoreStandardTierMaintenanceFailsOver",
           "test/compat/memorystoremaintenance_test.go:68 TestMemorystoreRescheduleMaintenance",
           "test/compat/memorystoreops_test.go:34 TestMemorystoreLocationsOperationsMaintenance"
         ]

@@ -200,6 +200,7 @@ func (s *Server) EnableValkey(ctx context.Context, rt ClusterRuntime, dial Clust
 	s.valkey = &clusters{valkey: true, rt: rt, dial: dial, db: db, api: s, now: time.Now, bg: ctx,
 		byName: map[string]*clusterRecord{}, busy: map[string]string{}}
 	go s.valkey.autoBackups(ctx)
+	go s.valkey.maintenanceLoop(ctx)
 	// Both read here, not in the goroutine: tests swap them between runs.
 	go s.valkey.watchStandalone(ctx, healthEvery, tendEvery)
 }
@@ -303,6 +304,9 @@ func renderValkeyBase(r *clusterRecord) *memorystorepb.Instance {
 		if protojson.Unmarshal([]byte(v.Maintenance), mp) == nil {
 			out.MaintenancePolicy = mp
 		}
+	}
+	if m := r.Scheduled; m != nil {
+		out.MaintenanceSchedule = &memorystorepb.MaintenanceSchedule{StartTime: timestamppb.New(m.Start), EndTime: timestamppb.New(m.Start.Add(maintenanceWindow))}
 	}
 	if r.state == clusterpb.Cluster_UPDATING {
 		ui := &memorystorepb.Instance_StateInfo_UpdateInfo{}

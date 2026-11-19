@@ -50,7 +50,9 @@ import (
 	"time"
 
 	longrunningpb "cloud.google.com/go/longrunning/autogen/longrunningpb"
+	memorystorepb "cloud.google.com/go/memorystore/apiv1/memorystorepb"
 	redispb "cloud.google.com/go/redis/apiv1/redispb"
+	clusterpb "cloud.google.com/go/redis/cluster/apiv1/clusterpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
@@ -367,7 +369,10 @@ func (c *instances) maintain(name string) {
 // Memorystore API: POST
 // /cloudburrow/v1/projects/{project}/locations/{region}/instances/{instance}:scheduleMaintenance
 // with {"startTime"} (optional, RFC 3339) schedules an event on a created
-// instance and answers the instance; :cancelMaintenance removes it.
+// instance and answers the instance; :cancelMaintenance removes it. The
+// same on .../clusters/{cluster} is a Redis cluster's (#1524), and on an
+// instance with {"api":"memorystore"} a Memorystore for Valkey instance's
+// (also an instance name no Redis instance has).
 const MaintenanceControlPath = "/cloudburrow/v1/"
 
 // ServeMaintenanceControl serves MaintenanceControlPath.
@@ -378,13 +383,18 @@ func (s *Server) ServeMaintenanceControl(w http.ResponseWriter, r *http.Request)
 		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": code, "message": msg}})
 	}
 	name, verb, _ := strings.Cut(strings.TrimPrefix(r.URL.Path, MaintenanceControlPath), ":")
-	if r.Method != http.MethodPost || !instanceRE.MatchString(name) || (verb != "scheduleMaintenance" && verb != "cancelMaintenance") {
-		fail(http.StatusNotFound, fmt.Sprintf("%s %s is not a CloudBurrow maintenance control path: POST %sprojects/P/locations/R/instances/I:scheduleMaintenance or :cancelMaintenance",
+	isCluster := clusterRE.MatchString(name)
+	if r.Method != http.MethodPost || !(instanceRE.MatchString(name) || isCluster) || (verb != "scheduleMaintenance" && verb != "cancelMaintenance") {
+		fail(http.StatusNotFound, fmt.Sprintf("%s %s is not a CloudBurrow maintenance control path: POST %sprojects/P/locations/R/instances/I:scheduleMaintenance or :cancelMaintenance, or .../clusters/C:...",
 			r.Method, r.URL.Path, MaintenanceControlPath))
 		return
 	}
 	var body struct {
 		StartTime string `json:"startTime"`
+		// API is "memorystore" for a Memorystore for Valkey instance;
+		// otherwise an instance name is a Redis instance's when one has
+		// it, a Valkey instance's when not.
+		API string `json:"api"`
 	}
 	if r.Body != nil {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil && err.Error() != "EOF" {
@@ -392,26 +402,56 @@ func (s *Server) ServeMaintenanceControl(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
-	var inst *redispb.Instance
-	var err error
-	if verb == "cancelMaintenance" {
-		inst, err = s.CancelMaintenance(r.Context(), name)
-	} else {
-		var start time.Time
-		if body.StartTime != "" {
-			if start, err = time.Parse(time.RFC3339Nano, body.StartTime); err != nil {
-				fail(http.StatusBadRequest, fmt.Sprintf("startTime %q is not an RFC 3339 time", body.StartTime))
-				return
-			}
+	var start time.Time
+	if body.StartTime != "" {
+		var err error
+		if start, err = time.Parse(time.RFC3339Nano, body.StartTime); err != nil {
+			fail(http.StatusBadRequest, fmt.Sprintf("startTime %q is not an RFC 3339 time", body.StartTime))
+			return
 		}
-		inst, err = s.ScheduleMaintenance(r.Context(), name, start)
 	}
-	if err != nil {
+	failErr := func(err error) {
 		code := http.StatusBadRequest
 		if e, ok := err.(*apierror.Error); ok {
 			code = e.HTTPStatus()
 		}
 		fail(code, err.Error())
+	}
+	if !isCluster && body.API != "memorystore" {
+		if _, err := s.find(name); err != nil && s.valkey != nil {
+			body.API = "memorystore"
+		}
+	}
+	if isCluster || body.API == "memorystore" {
+		out, err := s.ControlClusterMaintenance(name, start, verb == "cancelMaintenance")
+		if err != nil {
+			failErr(err)
+			return
+		}
+		res := map[string]any{"name": name}
+		var st, et *timestamppb.Timestamp
+		switch o := out.(type) {
+		case *clusterpb.Cluster:
+			st, et = o.GetMaintenanceSchedule().GetStartTime(), o.GetMaintenanceSchedule().GetEndTime()
+		case *memorystorepb.Instance:
+			st, et = o.GetMaintenanceSchedule().GetStartTime(), o.GetMaintenanceSchedule().GetEndTime()
+		}
+		if st != nil {
+			res["maintenanceSchedule"] = map[string]any{"startTime": st.AsTime().Format(time.RFC3339Nano), "endTime": et.AsTime().Format(time.RFC3339Nano)}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(res)
+		return
+	}
+	var inst *redispb.Instance
+	var err error
+	if verb == "cancelMaintenance" {
+		inst, err = s.CancelMaintenance(r.Context(), name)
+	} else {
+		inst, err = s.ScheduleMaintenance(r.Context(), name, start)
+	}
+	if err != nil {
+		failErr(err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

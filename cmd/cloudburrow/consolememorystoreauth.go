@@ -167,7 +167,7 @@ func (p redisClusterProvider) DetailActions(ctx context.Context, project string,
 	if err != nil {
 		return nil
 	}
-	return memorystoreAuthActions(c.GetAuthorizationMode() == clusterpb.AuthorizationMode_AUTH_MODE_TOKEN_AUTH, true)
+	return append(memorystoreAuthActions(c.GetAuthorizationMode() == clusterpb.AuthorizationMode_AUTH_MODE_TOKEN_AUTH, true), redisClusterMaintenance(c).actions()...)
 }
 
 // ActAt implements console.PathActor, each operation waited for.
@@ -186,6 +186,10 @@ func (p redisClusterProvider) ActAt(ctx context.Context, project string, path []
 	}
 	user := name + "/tokenAuthUsers/" + strings.TrimSpace(values["user"])
 	backup := c.GetBackupCollection() + "/backups/" + strings.TrimSpace(values["backup"])
+	if ok, err := clusterMaintenanceAct(ctx, api, srv, name, action, values); ok {
+		// Maintenance (#1524).
+		return err
+	}
 	var op interface{ GetName() string }
 	switch action {
 	case "add-token-user":
@@ -304,7 +308,8 @@ func (p valkeyProvider) DetailActions(ctx context.Context, project string, path 
 	if err != nil {
 		return nil
 	}
-	return append(memorystoreAuthActions(i.GetAuthorizationMode() == memorystorepb.Instance_TOKEN_AUTH, false), valkeyReplicationActions(i)...)
+	acts := append(memorystoreAuthActions(i.GetAuthorizationMode() == memorystorepb.Instance_TOKEN_AUTH, false), valkeyReplicationActions(i)...)
+	return append(acts, valkeyMaintenance(i).actions()...)
 }
 
 // ActAt implements console.PathActor, each operation waited for.
@@ -324,6 +329,10 @@ func (p valkeyProvider) ActAt(ctx context.Context, project string, path []string
 	user := name + "/tokenAuthUsers/" + strings.TrimSpace(values["user"])
 	backup := i.GetBackupCollection() + "/backups/" + strings.TrimSpace(values["backup"])
 	var op interface{ GetName() string }
+	if ok, err := valkeyMaintenanceAct(ctx, api, srv, name, action, values); ok {
+		// Maintenance (#1524).
+		return err
+	}
 	if rop, ok, err := valkeyReplicationAct(ctx, api, i, action, values); ok {
 		// Cross-instance replication and migration (#1557).
 		if err != nil {

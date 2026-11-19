@@ -277,6 +277,7 @@ func (p redisClusterProvider) Detail(ctx context.Context, project string, path [
 		{Label: "Encryption", Value: c.GetEncryptionInfo().GetEncryptionType().String()},
 		{Label: "Customer-managed key", Value: orDash(c.GetKmsKey())},
 	}...)
+	props = append(props, redisClusterMaintenance(c).summary()...)
 	d := console.Detail{Sections: []console.Section{{ID: "config", Label: "Configuration", Kind: console.KindProperties,
 		Groups: []console.PropertyGroup{{Properties: props}}}}}
 	if c.GetTransitEncryptionMode() == clusterpb.TransitEncryptionMode_TRANSIT_ENCRYPTION_MODE_SERVER_AUTHENTICATION {

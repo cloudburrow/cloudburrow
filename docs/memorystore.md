@@ -165,9 +165,53 @@ read 2026-11-18):
   failover does). Then it is `READY` with no `maintenance_schedule`. An event that comes due while
   an operation is in progress runs once it is done.
 
-Not built: Memorystore for Redis Cluster's `RescheduleClusterMaintenance` and Memorystore for
-Valkey's `RescheduleMaintenance` stay 501 (§8, §9). Google documents no error wording for the
-refusals, and no operation for the update itself, so none is listed.
+Google documents no error wording for the refusals, and no operation for the update itself, so
+none is listed.
+
+### Redis Cluster and Valkey maintenance (#1524)
+
+Memorystore for Redis Cluster's `RescheduleClusterMaintenance` and Memorystore for Valkey's
+`RescheduleMaintenance` work the same way, with each product's own rules
+([cluster](https://docs.cloud.google.com/memorystore/docs/cluster/about-maintenance),
+[Valkey](https://docs.cloud.google.com/memorystore/docs/valkey/about-maintenance), and their
+find-and-set-maintenance-windows pages, read 2026-11-18). An event is scheduled through the same
+control endpoint, on a cluster's name, or on a Valkey instance's with `{"api": "memorystore"}`
+(an instance name that no Memorystore for Redis instance has is a Valkey instance's anyway):
+
+    POST /cloudburrow/v1/projects/P/locations/R/clusters/C:scheduleMaintenance   {"startTime": "optional"}
+    POST /cloudburrow/v1/projects/P/locations/R/instances/I:scheduleMaintenance  {"api": "memorystore"}
+    ... :cancelMaintenance
+
+or **Schedule maintenance (CloudBurrow)** on the cluster's or instance's page, where **Set
+maintenance window** sets `maintenance_policy`.
+
+- `maintenance_schedule` is `start_time` (the first one-hour weekly window a week away, or a week
+  on, to the hour, with no window) and `end_time` an hour on. Neither API has
+  `can_reschedule` or `schedule_deadline_time`.
+- `IMMEDIATE` ("Update now") applies it now; `SPECIFIC_TIME` ("Custom day and time") moves it to a
+  time between the original time and 14 days after it ("You can reschedule maintenance within 14
+  days of the originally scheduled time"), INVALID_ARGUMENT otherwise. Neither page limits how many
+  times. Not when less than an hour remains (FAILED_PRECONDITION); FAILED_PRECONDITION with nothing
+  scheduled. gcloud: `gcloud redis clusters reschedule-maintenance` and `gcloud memorystore
+  instances reschedule-maintenance`, `--reschedule-type=immediate|specific-time`.
+- At its start the update is "a gradual deployment and create-before-destroy lifecycle strategy":
+  shard by shard, node by node, replicas first, a new node joins the shard and replicates its
+  primary; a primary hands over to its new node in a coordinated failover (`CLUSTER FAILOVER`; on a
+  CLUSTER_DISABLED instance writes are paused, the replicas caught up, and the new node promoted,
+  so the primary and reader endpoints reach the new nodes); then the old node is removed. The data
+  is kept. A shard with no replica gets a new node first too. The state stays `ACTIVE` meanwhile
+  (neither State enum has MAINTENANCE), and `UpdateCluster`/`UpdateInstance` waits until it is
+  done.
+
+UNVERIFIED (re-read 2026-11-18, the pages above, which give none): the error codes and wording, the
+operations' verbs (`rescheduleClusterMaintenance`, `rescheduleMaintenance`), the state during the
+update, and the default window with no policy. Unlike Google's Private Service Connect endpoints,
+which "aren't affected by maintenance", a Redis cluster's or CLUSTER mode Valkey instance's
+discovery endpoint is its first primary's host address here, so it moves with the replaced node;
+cluster clients follow the topology. Tests: `TestRedisClusterRescheduleMaintenance`,
+`TestValkeyRescheduleMaintenance` (official Go clients and gcloud),
+`TestMemorystoreClusterAndValkeyMaintenanceThroughThePage` (browser), unit
+`TestValkeyMaintenanceRules`, all in the memorystore shard.
 
 ## 5. Standard tier, read replicas and failover (#1385)
 
