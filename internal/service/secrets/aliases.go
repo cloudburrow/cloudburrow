@@ -37,10 +37,10 @@ func ValidateVersionAlias(alias string) error {
 }
 
 // checkVersionAliases validates a whole alias map for a secret whose
-// versions are those numbered below next. A version that was never added
-// is refused: the alias would resolve to nothing. UNVERIFIED: the error
-// Google returns for an alias to a version that does not exist is not
-// documented; INVALID_ARGUMENT is CloudBurrow's choice.
+// versions exist where exists says so. A version that was never added
+// is refused: the alias would resolve to nothing. The error Google returns
+// for it is not documented; INVALID_ARGUMENT is CloudBurrow's choice,
+// UNVERIFIED (re-read 2026-11-19: assign-alias-to-secret-version).
 func checkVersionAliases(aliases map[string]int, exists func(int) bool) error {
 	if len(aliases) > MaxVersionAliases {
 		return apierror.InvalidArgument("a secret can have no more than %d version aliases, got %d",

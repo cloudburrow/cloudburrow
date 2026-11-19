@@ -211,6 +211,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/resterrorstatus_test.go:94 TestGcloudSecretManagerErrorStatus",
+          "test/compat/secretaliases_test.go:22 TestSecretManagerVersionAliases",
           "test/compat/secretcmek_test.go:246 TestTerraformSecretCMEK",
           "test/compat/secretcmek_test.go:74 TestSecretManagerCMEK",
           "test/compat/secretmanyversions_test.go:26 TestSecretTwoThousandVersions",
@@ -336,6 +337,7 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/GetSecret",
         "status": "Verified",
         "tests": [
+          "test/compat/secretaliases_test.go:22 TestSecretManagerVersionAliases",
           "test/compat/secretcmek_test.go:74 TestSecretManagerCMEK",
           "test/compat/secretexpiryfilter_test.go:35 TestSecretManagerExpiry",
           "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
@@ -359,6 +361,7 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/GetSecretVersion",
         "status": "Verified",
         "tests": [
+          "test/compat/secretaliases_test.go:22 TestSecretManagerVersionAliases",
           "test/compat/secretcmek_test.go:74 TestSecretManagerCMEK",
           "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secrets_test.go:119 TestSecretVersionLifecycle",
@@ -425,6 +428,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudsecrets_test.go:19 TestGcloudSecrets",
+          "test/compat/secretaliases_test.go:22 TestSecretManagerVersionAliases",
           "test/compat/secretcmek_test.go:202 TestGcloudSecretsCMEK",
           "test/compat/secretcmek_test.go:74 TestSecretManagerCMEK",
           "test/compat/secretexpiryfilter_test.go:35 TestSecretManagerExpiry",

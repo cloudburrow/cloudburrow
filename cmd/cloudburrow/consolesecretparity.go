@@ -202,7 +202,8 @@ func addSecretVersion(st *secrets.Store, project, id string, values map[string]s
 }
 
 // The Rotation period list (#1850). Google's page offers "default options
-// or Custom"; the docs do not name the defaults, so these are UNVERIFIED.
+// or Custom"; the docs do not name the defaults, so these are UNVERIFIED
+// (re-read 2026-11-19: https://docs.cloud.google.com/secret-manager/docs/secret-rotation).
 var secretRotationPresets = []struct {
 	label string
 	d     time.Duration
