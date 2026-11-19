@@ -15,9 +15,13 @@ import (
 // ungrouped samples, dequantization ((2c + 1 - steps) / steps, the
 // standard's C·(s'' + D)), intensity stereo above the bound, and the
 // polyphase synthesis filterbank go-mp3's Layer III uses
-// (third_party/go-mp3/polyphase). Written for CloudBurrow from the
-// standards' descriptions. Layer I stays UNIMPLEMENTED: no encoder at hand
-// writes it, so there is no stream to check a decode against.
+// (third_party/go-mp3/polyphase). Layer I (mp1Frame) too: 4-bit
+// allocations of 2 to 15 bits a sample, one scale factor a subband and 12
+// samples of each of 32 subbands a frame, intensity stereo above the
+// bound alike. Written for CloudBurrow from the standards' descriptions.
+// ffmpeg 9 encodes neither Layer I nor joint stereo, so their tests decode
+// frames of random parameters written to the standard's syntax
+// (decoders_test.go), against ffmpeg's decode of the same frames.
 
 const waveMPEG = 0x50
 
@@ -76,6 +80,8 @@ func mp2Table(which byte) []mp2Alloc {
 var (
 	mp2Bitrates1 = [15]int{0, 32, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384}
 	mp2Bitrates2 = [15]int{0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160}
+	mp1Bitrates1 = [15]int{0, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448}
+	mp1Bitrates2 = [15]int{0, 32, 48, 56, 64, 80, 96, 112, 128, 144, 160, 176, 192, 224, 256}
 	mp2Rates1    = [3]int{44100, 48000, 32000}
 	mp2Rates2    = [3]int{22050, 24000, 16000}
 )
@@ -108,6 +114,7 @@ func decodeWAVMPEG(data []byte) (wav, error) {
 		channels int
 		rate     int
 		synth    [2]polyphase.Synth
+		first    byte // the first frame's layer field
 	)
 	for p := 0; p+4 <= len(data); {
 		h := data[p:]
@@ -117,14 +124,16 @@ func decodeWAVMPEG(data []byte) (wav, error) {
 		}
 		version := h[1] >> 3 & 3 // 3 MPEG-1, 2 MPEG-2, 0 MPEG-2.5
 		layer := h[1] >> 1 & 3   // 3 Layer I, 2 Layer II, 1 Layer III
-		if layer == 3 {
-			return wav{}, notDecodedf("MPEG Audio Layer I in a WAV is not decoded; Layer II and Layer III are")
+		if layer != 2 && layer != 3 {
+			return wav{}, fmt.Errorf("its MPEG data mixes Layer III with Layers I and II")
 		}
-		if layer != 2 {
+		if first == 0 {
+			first = layer
+		} else if layer != first {
 			return wav{}, fmt.Errorf("its MPEG data mixes layers")
 		}
 		if version == 0 || version == 1 {
-			return wav{}, fmt.Errorf("its MPEG data is MPEG-2.5 or reserved, which Layer II is not")
+			return wav{}, fmt.Errorf("its MPEG data is MPEG-2.5 or reserved, which Layers I and II are not")
 		}
 		lsf := version == 2
 		crc := h[1]&1 == 0
@@ -139,6 +148,13 @@ func decodeWAVMPEG(data []byte) (wav, error) {
 			br, fs = mp2Bitrates2[bi], mp2Rates2[fi]
 		}
 		size := 144*br*1000/fs + padding
+		if layer == 3 {
+			br = mp1Bitrates1[bi]
+			if lsf {
+				br = mp1Bitrates2[bi]
+			}
+			size = (12*br*1000/fs + padding) * 4
+		}
 		if p+size > len(data) {
 			break // a cut frame at the end
 		}
@@ -150,6 +166,23 @@ func decodeWAVMPEG(data []byte) (wav, error) {
 			channels, rate = nch, fs
 		} else if channels != nch || rate != fs {
 			return wav{}, fmt.Errorf("its MPEG data changes channels or sample rate between frames")
+		}
+		bound := 32
+		if mode == 1 {
+			bound = 4 * (modeExt + 1) // intensity stereo above it
+		}
+		r := &mp2Bits{b: data[p : p+size], pos: 32}
+		if crc {
+			r.pos += 16
+		}
+		if layer == 3 {
+			pcm, err := mp1Frame(r, nch, bound, &synth)
+			if err != nil {
+				return wav{}, fmt.Errorf("its MPEG data: %v", err)
+			}
+			out = append(out, pcm...)
+			p += size
+			continue
 		}
 		var table []mp2Alloc
 		switch perCh := br / nch; {
@@ -164,22 +197,7 @@ func decodeWAVMPEG(data []byte) (wav, error) {
 		default:
 			table = mp2Table('b')
 		}
-		if mode == 1 {
-			// Intensity stereo is implemented below, but no encoder at
-			// hand writes it (ffmpeg 9's mp2 encoder writes plain
-			// stereo), so there is no stream to check a decode against.
-			return wav{}, notDecodedf("MPEG Layer II joint stereo in a WAV is not decoded; mono, stereo and dual channel are")
-		}
-		sblimit := len(table)
-		bound := sblimit
-		if mode == 1 {
-			bound = min(4*(modeExt+1), sblimit)
-		}
-		r := &mp2Bits{b: data[p : p+size], pos: 32}
-		if crc {
-			r.pos += 16
-		}
-		pcm, err := mp2Frame(r, table, nch, bound, &synth)
+		pcm, err := mp2Frame(r, table, nch, min(bound, len(table)), &synth)
 		if err != nil {
 			return wav{}, fmt.Errorf("its MPEG data: %v", err)
 		}
@@ -187,7 +205,7 @@ func decodeWAVMPEG(data []byte) (wav, error) {
 		p += size
 	}
 	if channels == 0 || len(out) == 0 {
-		return wav{}, errors.New("its MPEG data has no Layer II frames")
+		return wav{}, errors.New("its MPEG data has no Layer I or II frames")
 	}
 	return wav{samples: out, channels: channels, rate: rate, layout: defaultLayouts[channels]}, nil
 }
@@ -327,6 +345,82 @@ func mp2Frame(r *mp2Bits, table []mp2Alloc, nch, bound int, synth *[2]polyphase.
 				for k, v := range pcm {
 					out[(base+k)*nch+ch] = v
 				}
+			}
+		}
+	}
+	return out, nil
+}
+
+// mp1Frame decodes one Layer I frame's 384 samples a channel, interleaved:
+// for each of 32 subbands a 4-bit allocation a channel (one shared above
+// the intensity bound), allocation a coding a+1 bits a sample (15 is
+// forbidden), then a 6-bit scale factor for each allocated subband, then
+// 12 samples of each, dequantized as Layer II's are.
+func mp1Frame(r *mp2Bits, nch, bound int, synth *[2]polyphase.Synth) ([]float32, error) {
+	var alloc [2][32]int
+	for sb := range 32 {
+		for ch := 0; ch < nch; ch++ {
+			if sb >= bound && ch == 1 {
+				alloc[1][sb] = alloc[0][sb]
+				continue
+			}
+			v, err := r.get(4)
+			if err != nil {
+				return nil, err
+			}
+			if v == 15 {
+				return nil, errors.New("a Layer I allocation of 15")
+			}
+			alloc[ch][sb] = v
+		}
+	}
+	var scale [2][32]float64
+	for sb := range 32 {
+		for ch := 0; ch < nch; ch++ {
+			if alloc[ch][sb] == 0 {
+				continue
+			}
+			v, err := r.get(6)
+			if err != nil {
+				return nil, err
+			}
+			if v == 63 {
+				return nil, errors.New("a scale factor index of 63")
+			}
+			scale[ch][sb] = mp2Scale(v)
+		}
+	}
+	out := make([]float32, 384*nch)
+	var sub [2][32]float32
+	var pcm [32]float32
+	for s := range 12 {
+		var smp [2][32]float64
+		for sb := range 32 {
+			for ch := 0; ch < nch; ch++ {
+				if sb >= bound && ch == 1 {
+					smp[1][sb] = smp[0][sb]
+					continue
+				}
+				a := alloc[ch][sb]
+				if a == 0 {
+					continue
+				}
+				nb := uint(a + 1)
+				c, err := r.get(nb)
+				if err != nil {
+					return nil, err
+				}
+				steps := 1<<nb - 1
+				smp[ch][sb] = float64(2*c+1-steps) / float64(steps)
+			}
+		}
+		for ch := 0; ch < nch; ch++ {
+			for sb := range 32 {
+				sub[ch][sb] = float32(smp[ch][sb] * scale[ch][sb])
+			}
+			synth[ch].Synthesize(&sub[ch], pcm[:])
+			for k, v := range pcm {
+				out[(s*32+k)*nch+ch] = v
 			}
 		}
 	}

@@ -511,3 +511,13 @@ docker run --rm -v "$PWD:/models" \
 > (`TestEmbedContentEmbedsMPEGLayerIIWAVThroughThePredictionClient`). G.726, Layer I and Layer II
 > joint stereo WAVs stay `UNIMPLEMENTED` (no reference decode for the last two; the G.726 decoder
 > written is not bit-exact against ffmpeg).
+
+> **Update 2026-11-18 (#1651): G.726 WAV.** A mono WAV of G.726 ADPCM at 16, 24, 32 or 40 kbit/s
+> (`WAVE_FORMAT_G726_ADPCM`, 0x45 or 0x64) is decoded (`internal/embedding/g726.go`, the ITU-T
+> recommendation's fixed-point arithmetic after Sun's public-domain G.72x reference), sample for
+> sample as ffmpeg 9 decodes it: the step size keeps the slow scale factor's fraction bits and the
+> reconstructed signal wraps to 16 bits, as ffmpeg's decoder does. Embedded through the official
+> client by `TestEmbedContentEmbedsG726WAVThroughThePredictionClient`. So are MPEG Layer I and
+> Layer I and II joint stereo WAVs (`internal/embedding/mp2.go`), within 1.1 16-bit steps of
+> ffmpeg 9's decode of frames of random parameters written to the standard's syntax (ffmpeg
+> encodes neither): `TestEmbedContentEmbedsMPEGLayerIAndJointStereoWAVThroughThePredictionClient`.
