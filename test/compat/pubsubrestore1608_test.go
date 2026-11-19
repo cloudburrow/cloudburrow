@@ -87,10 +87,17 @@ func restartPubSubEmulator(t *testing.T) {
 // is gone (the emulator's memory, documented); and publishing and pulling
 // work on what came back.
 //
+// The Pub/Sub clock is advanced past a snapshot's 7 days first, as the
+// shard's expiration tests leave it, and a sweep runs after the restart
+// before anything is read: the snapshot created again keeps the
+// emulator's expiry, on the wall clock, and is not swept against the
+// advanced clock (#1899).
+//
 // covers: google.pubsub.v1.Publisher/GetTopic, google.pubsub.v1.Subscriber/GetSubscription, google.pubsub.v1.SchemaService/ListSchemaRevisions, google.pubsub.v1.Subscriber/GetSnapshot, google.pubsub.v1.Publisher/Publish, google.pubsub.v1.Subscriber/Pull
 func TestPubSubDefinitionsSurviveAnEmulatorRestart(t *testing.T) {
 	h := New(t)
 	c := pubsubClient(t, h)
+	advancePubSubClock(t, h, 8*24*time.Hour)
 	ctx := h.Context()
 	sch, err := apiv1.NewSchemaClient(ctx, option.WithEndpoint(h.Endpoint(EnvPubSub)), option.WithoutAuthentication(),
 		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
@@ -197,6 +204,14 @@ func TestPubSubDefinitionsSurviveAnEmulatorRestart(t *testing.T) {
 	}
 
 	restartPubSubEmulator(t)
+	// Once the definitions are back (a call waits for them), a sweep.
+	if err := untilServed(t, func() error {
+		_, err := c.TopicAdminClient.GetTopic(ctx, &pubsubpb.GetTopicRequest{Topic: topicName})
+		return err
+	}); err != nil {
+		t.Fatalf("GetTopic after the restart: %v", err)
+	}
+	advancePubSubClock(t, h, 0)
 
 	topicsAfter, subsAfter, revsAfter, snapAfter := read()
 	for i := range topicsBefore {
