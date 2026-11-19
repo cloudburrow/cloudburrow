@@ -113,6 +113,11 @@ function agentPlatformRoutes() {
 
 const AP_ROUTES = agentPlatformRoutes();
 
+// Kubernetes Engine's pages drawn as one page's tabs (#1857).
+const GKE_DISCOVERY = ["/kubernetes/gateways", "/kubernetes/services", "/kubernetes/ingress"];
+const GKE_STORAGE = ["/kubernetes/storage", "/kubernetes/storage-classes"];
+
+
 const ROUTES = [
   { path: "/", service: null, title: "Welcome" },
 
@@ -170,27 +175,42 @@ const ROUTES = [
   { path: "/functions", service: "functions", title: "Cloud Run functions", navTitle: "Functions", kind: "Function", logs: true,
     section: "Serverless computing", product: "functions", productTitle: "Cloud Run functions" },
 
-  // Kubernetes Engine is one product with five pages, not five products.
-  //
-  // The drawer lists products; a bare row called "Services" or "Jobs" sitting
-  // as a peer of Cloud Run is ambiguous with Cloud Run's own services and
-  // jobs, and someone who pinned "Jobs" could not tell from the drawer which
-  // product they had pinned. `product` is the drawer's row, `title` is the
-  // page inside it.
-  { path: "/kubernetes/workloads",  service: "workloads",   title: "Workloads", kind: "Workload", logs: true, section: "Containers",
-    product: "kubernetes", productTitle: "Kubernetes Engine" },
-  { path: "/kubernetes/pods",       service: "pods",        title: "Pods", kind: "Pod", logs: true,      section: "Containers",
-    product: "kubernetes", productTitle: "Kubernetes Engine" },
-  { path: "/kubernetes/services",   service: "k8sservices", title: "Services", kind: "Service", logs: true,  section: "Containers",
-    product: "kubernetes", productTitle: "Kubernetes Engine" },
-  { path: "/kubernetes/jobs",       service: "jobs",        title: "Jobs", kind: "Job", logs: true,      section: "Containers",
-    product: "kubernetes", productTitle: "Kubernetes Engine" },
-  { path: "/kubernetes/nodes",      service: "nodes",       title: "Nodes", kind: "Node",     section: "Containers",
-    product: "kubernetes", productTitle: "Kubernetes Engine" },
-  { path: "/kubernetes/storage",    service: "k8sstorage",  title: "Storage", kind: "Persistent volume claim",   section: "Containers",
-    product: "kubernetes", productTitle: "Kubernetes Engine" },
-  { path: "/kubernetes/events",     service: "events",      title: "Events", kind: "Event",    section: "Containers",
-    product: "kubernetes", productTitle: "Kubernetes Engine" },
+  // Kubernetes Engine is one product, its pages in Google's menu (#1857):
+  // Clusters, Workloads, Applications, Secrets & ConfigMaps, Gateways,
+  // Services & Ingress, Storage, Object Browser, Backup for GKE, Config,
+  // Policy and Security (https://docs.cloud.google.com/kubernetes-engine/docs/concepts/dashboards).
+  // The pages read the instance's own kind cluster through its Kubernetes
+  // API; CloudBurrow serves no Kubernetes Engine API (#1913), so the pages
+  // that need it say so in Google's place. Pods, Jobs, Nodes and Events,
+  // which Google's menu does not have, keep their pages (navHidden),
+  // reached from a workload's Managed pods, Workloads, a cluster's Nodes tab
+  // and Object Browser. `pageTabs` draws sibling list pages as one page's
+  // tabs (Gateways, Services and Ingress; Persistent volume claims and
+  // Storage classes), the menu marking the page whose `navAs` they name.
+  { path: "/kubernetes/clusters", service: "gkeclusters", title: "Kubernetes clusters", navTitle: "Clusters", kind: "Cluster", icon: "k8s", logs: true, section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine" },
+  { path: "/kubernetes/workloads", service: "workloads", title: "Workloads", kind: "Workload", logs: true, section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine" },
+  { path: "/kubernetes/applications", screen: "unavailable", icon: "k8s", title: "Applications", section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine",
+    unavailable: "Applications are the Kubernetes Applications that GKE's Marketplace and Application Manager install, which CloudBurrow does not serve. A workload deployed with kubectl, Helm or Deploy is on Workloads." },
+  { path: "/kubernetes/config", service: "k8sconfig", icon: "secrets", title: "Secrets & ConfigMaps", kind: "Configuration", section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine" },
+  { path: "/kubernetes/gateways", service: "k8sgateways", icon: "k8sservices", title: "Gateways, Services & Ingress", tabTitle: "Gateways", kind: "Gateway", navHidden: true, navAs: "/kubernetes/services", pageTabs: GKE_DISCOVERY, section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine" },
+  { path: "/kubernetes/services", service: "k8sservices", title: "Gateways, Services & Ingress", tabTitle: "Services", kind: "Service", logs: true, pageTabs: GKE_DISCOVERY, section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine" },
+  { path: "/kubernetes/ingress", service: "k8singress", icon: "k8sservices", title: "Gateways, Services & Ingress", tabTitle: "Ingress", kind: "Ingress", navHidden: true, navAs: "/kubernetes/services", pageTabs: GKE_DISCOVERY, section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine" },
+  { path: "/kubernetes/storage", service: "k8sstorage", title: "Storage", tabTitle: "Persistent volume claims", kind: "Persistent volume claim", pageTabs: GKE_STORAGE, section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine" },
+  { path: "/kubernetes/storage-classes", service: "k8sstorageclasses", icon: "k8sstorage", title: "Storage", tabTitle: "Storage classes", kind: "Storage class", navHidden: true, navAs: "/kubernetes/storage", pageTabs: GKE_STORAGE, section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine" },
+  { path: "/kubernetes/object-browser", service: "k8sobjects", title: "Object Browser", kind: "Resource type", icon: "k8s", section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine" },
+  { path: "/kubernetes/backup", screen: "unavailable", icon: "k8s", title: "Backup for GKE", section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine",
+    unavailable: "Backup for GKE's backup plans, backups and restores are the Backup for GKE API's (gkebackup.googleapis.com), which CloudBurrow does not serve. A persistent volume's data stays in the instance's state directory." },
+  { path: "/kubernetes/config-management", screen: "unavailable", icon: "k8s", title: "Config", section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine",
+    unavailable: "Config Sync is a GKE Enterprise fleet feature (the GKE Hub API), which CloudBurrow does not serve. Apply manifests to this instance's cluster with kubectl." },
+  { path: "/kubernetes/policy", screen: "unavailable", icon: "k8s", title: "Policy", section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine",
+    unavailable: "Policy Controller is a GKE Enterprise fleet feature (the GKE Hub API), which CloudBurrow does not serve." },
+  { path: "/kubernetes/security", screen: "unavailable", icon: "k8s", title: "Security", section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine",
+    unavailable: "GKE security posture (workload configuration and vulnerability scanning) reads the Container Security API, which CloudBurrow does not serve." },
+  // CloudBurrow's pages that Google reaches from elsewhere.
+  { path: "/kubernetes/pods", service: "pods", title: "Pods", kind: "Pod", logs: true, navHidden: true, section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine" },
+  { path: "/kubernetes/jobs", service: "jobs", title: "Jobs", kind: "Job", logs: true, navHidden: true, section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine" },
+  { path: "/kubernetes/nodes", service: "nodes", title: "Nodes", kind: "Node", navHidden: true, section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine" },
+  { path: "/kubernetes/events", service: "events", title: "Events", kind: "Event", navHidden: true, section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine" },
 
   // Cloud Storage is one product. Its menu follows Google's (#1843):
   // Buckets, Observability, Storage Intelligence's Configuration, Inventory
@@ -515,13 +535,13 @@ const ROUTES = [
   // organization's pages (liens, organization policies, app management,
   // Purge project now) and a tag key's page are here, and the lists still
   // answer by their address. `navHidden` keeps them out of the menu, and
-  // `navCurrent` marks the IAM & Admin page they belong to.
+  // `navAs` marks the IAM & Admin page they belong to.
   { path: "/projects", service: "projects", title: "Projects", kind: "Project", section: "IAM & Admin",
-    product: "iam", productTitle: "IAM & Admin", navHidden: true, navCurrent: "/cloud-resource-manager" },
+    product: "iam", productTitle: "IAM & Admin", navHidden: true, navAs: "/cloud-resource-manager" },
   { path: "/resource-hierarchy", service: "hierarchy", icon: "hierarchy", title: "Resource hierarchy", kind: "Folder", section: "IAM & Admin",
-    product: "iam", productTitle: "IAM & Admin", navHidden: true, navCurrent: "/cloud-resource-manager" },
+    product: "iam", productTitle: "IAM & Admin", navHidden: true, navAs: "/cloud-resource-manager" },
   { path: "/tags", service: "tags", title: "Tags", kind: "Tag key", section: "IAM & Admin",
-    product: "iam", productTitle: "IAM & Admin", navHidden: true, navCurrent: "/iam-admin/tags" },
+    product: "iam", productTitle: "IAM & Admin", navHidden: true, navAs: "/iam-admin/tags" },
   // APIs & Services (#1352, #1866), Google's menu in Google's order.
   // Enabled APIs & services (/apis, Google's /apis/dashboard) is the
   // dashboard's Traffic, Errors and Median latency charts over the table of
@@ -4095,6 +4115,11 @@ async function renderDetail(view, route, resourcePath) {
       el("button", {
         class: "secondary" + (a.destructive ? " danger" : ""),
         text: a.label,
+        // An action this instance cannot perform is drawn in Google's
+        // place, disabled, with its reason (#1857).
+        disabled: a.unavailable ? "disabled" : null,
+        title: a.unavailable || null,
+        "aria-description": a.unavailable || null,
         onclick: () => runAction(route, segments, a, leaves(a) ? leavePage : reloadPage, NO_ROW, data.title || null),
       })),
   ];
@@ -4963,6 +4988,17 @@ function openEditForm(route, segments, spec, onDone) {
   fields.focusFirst();
 }
 
+// pageTabStrip is a route's `pageTabs` as a tablist of links, the route
+// itself selected (#1857).
+function pageTabStrip(route) {
+  const tabs = route.pageTabs.map((path) => ROUTES.find((r) => r.path === path)).filter(Boolean);
+  return el("nav", { class: "tab-strip page-tabs", "aria-label": `${route.title} tabs` },
+    ...tabs.map((r) => el("a", {
+      class: "tab" + (r === route ? " is-selected" : ""), href: r.path + scopeSearch(),
+      "aria-current": r === route ? "page" : null, text: r.tabTitle || r.title,
+    })));
+}
+
 async function renderList(view, route) {
   const project = new URLSearchParams(location.search).get("project") || "";
   // A filter the service evaluates (#1228), kept in the URL so a filtered
@@ -4972,6 +5008,9 @@ async function renderList(view, route) {
     (serverFilter ? `&filter=${encodeURIComponent(serverFilter)}` : "");
 
   const header = [pageHeader(route.title, project ? `Project ${project}` : "All projects")];
+  // Sibling list pages drawn as one page's tabs (#1857): Google's
+  // Gateways, Services & Ingress has Gateways, Services and Ingress.
+  if (route.pageTabs) header.push(pageTabStrip(route));
   const cancel = new AbortController();
   setChildren(view, ...header,
     loadingState(5, { what: route.title.toLowerCase(), onCancel: () => cancel.abort() }));
@@ -8306,7 +8345,7 @@ function drawProductNav() {
   };
   const current = pages.find((page) => page.tabOf && here.path === page.tabOf.route &&
       location.pathname.startsWith(page.tabOf.route + "/") && tabHere === page.tabOf.tab) ||
-    pages.find((page) => page.path === (here.navCurrent || here.path) && !page.tabOf);
+    pages.find((page) => page.path === (here.navAs || here.path) && !page.tabOf);
   const hrefOf = (page) => page.tabOf
     ? `${page.tabOf.route}/${encodeURIComponent(resourceHere(page))}${scopeSearch()}${scopeSearch() ? "&" : "?"}tab=${page.tabOf.tab}`
     : page.path + scopeSearch();

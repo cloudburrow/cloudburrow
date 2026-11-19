@@ -58,6 +58,7 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 var clusterScreens = []string{
 	"projects", "hierarchy", "tags", "iam", "iam-roles", "iam-groups", "iam-service-accounts", "iam-audit", "iam-orgpolicies", "iam-labels", "iam-settings", "serviceusage", "serviceusage-operations", "ai",
 	"workloads", "pods", "k8sservices", "jobs", "nodes", "k8sstorage", "events",
+	"gkeclusters", "k8sconfig", "k8sgateways", "k8singress", "k8sstorageclasses", "k8sobjects",
 }
 
 // TestEveryServiceHasAParityRow enforces console parity §3 (#698): "The

@@ -931,7 +931,9 @@ jobs:
           # The memorystore shard's read back through the Memorystore admin API.
           if [ "$SHARD" = memorystore ]; then BROWSER_VARS+=,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT; fi
           # The Logs Explorer reads entries written through the Logging API (#1410).
-          if [ "$SHARD" = storage ]; then BROWSER_VARS+=,LOGGING,STORAGE,PUBSUB,TASKS,SCHEDULER,RESOURCEMANAGER,SERVICEUSAGE; fi
+          # And the kubeconfig, with which the Kubernetes Engine test removes the
+          # deployment its Deploy made (#1857).
+          if [ "$SHARD" = storage ]; then BROWSER_VARS+=,LOGGING,STORAGE,PUBSUB,TASKS,SCHEDULER,RESOURCEMANAGER,SERVICEUSAGE,KUBECONFIG; fi
           # The run shard's read back through Cloud Run, Cloud KMS, Secret Manager,
           # Cloud Logging and BigQuery's official clients.
           if [ "$SHARD" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT; fi

@@ -392,14 +392,26 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	providers = append(providers, aiProvider{})
 
 	kubeconfig := d.cfg.KubeconfigPath()
+	// Kubernetes Engine's pages follow Google's (#1857): Workloads, the
+	// Services and Ingress tabs and Storage's Persistent volume claims are
+	// the GKE screens over the same cluster; Pods, Jobs, Nodes and Events
+	// keep their pages, reached from a workload, a cluster's Nodes tab and
+	// Object Browser.
+	cluster, own := d.cfg.ClusterName(), d.cfg.Cluster.Namespace
 	providers = append(providers,
-		workloadsProvider(kubeconfig),
+		gkeClustersProvider{name: cluster, kubeconfig: kubeconfig, own: own},
+		gkeWorkloads(kubeconfig, cluster, own),
 		podsProvider(kubeconfig, metrics, series),
-		servicesProvider(kubeconfig),
+		gkeServices(kubeconfig, cluster, own),
 		jobsProvider(kubeconfig),
 		nodesProvider(kubeconfig),
-		clusterStorageProvider(kubeconfig),
+		gkeClaims(kubeconfig, cluster, own),
 		eventsProvider(kubeconfig),
+		gkeConfig(kubeconfig, cluster, own),
+		gkeGateways(kubeconfig, cluster, own),
+		gkeIngress(kubeconfig, cluster, own),
+		gkeStorageClasses(kubeconfig, cluster),
+		gkeObjectBrowser{kubeconfig: kubeconfig},
 	)
 	return providers
 }

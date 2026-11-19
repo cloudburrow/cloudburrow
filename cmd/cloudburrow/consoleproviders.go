@@ -9,6 +9,7 @@ import (
 	"io"
 	"maps"
 	"net/http"
+	"net/url"
 	urlpkg "net/url"
 	"slices"
 	"sort"
@@ -1456,8 +1457,8 @@ func workloadDetail(item map[string]any) console.Detail {
 		Groups: []console.PropertyGroup{
 			{Heading: "Selector", Properties: sortedPairs(labels)},
 		},
-		Note: "Read-only. This console does not edit cluster objects; CloudBurrow " +
-			"owns this cluster and workloads are created through Cloud Run or kubectl.",
+		Note: "This console does not edit cluster objects: a workload is made with Workloads' Deploy, " +
+			"through Cloud Run, or with kubectl.",
 	}
 
 	return console.Detail{
@@ -4864,6 +4865,9 @@ func (p kubeProvider) selectedPods(ctx context.Context, namespace, selector stri
 		}
 		out.Items = append(out.Items, console.Resource{
 			Name: str(m, "name"), Status: podStatus(item),
+			// A managed pod opens its own page (#1857): Google reaches
+			// pods through their workload, not a Pods page of their own.
+			Link: "/kubernetes/pods/" + url.PathEscape(str(m, "name")),
 			Fields: map[string]string{
 				"Ready":    fmt.Sprintf("%d/%d", ready, len(statuses)),
 				"Restarts": fmt.Sprint(restarts),
