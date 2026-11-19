@@ -82,6 +82,10 @@ type Resource struct {
 	// that implements ObjectStore: the row offers download, preview and
 	// delete for it.
 	Object []string `json:"object,omitempty"`
+	// Selectable lets a row of a resource page's listing be checked for the
+	// listing's SelectActions without being an Object: a key's versions,
+	// checked for Disable, Enable, Destroy and Restore (#1851).
+	Selectable bool `json:"selectable,omitempty"`
 	// Size and ContentType describe an Object row, so the page offers a
 	// preview only where the server would give one.
 	Size        int64  `json:"size,omitempty"`
@@ -510,6 +514,14 @@ type CreateChecker interface {
 type CreateSubmitter interface {
 	Creator
 	CreateSubmit() string
+}
+
+// CreateThener is a Creator whose create page goes on to an action of the
+// resource it made, opened on that resource's page: Create key ring goes on
+// to Create key, as Google's flow does (#1851).
+type CreateThener interface {
+	Creator
+	CreateThen() string
 }
 
 // Pager is a provider whose listings can be continued past their first page.
@@ -1679,6 +1691,8 @@ type createForm struct {
 	Layout string `json:"layout,omitempty"`
 	// Checks are CreateChecker's buttons.
 	Checks []CreateCheck `json:"checks,omitempty"`
+	// Then is CreateThener's: the action the made resource's page opens.
+	Then string `json:"then,omitempty"`
 }
 
 // createPageThreshold is the number of fields past which a create form stops
@@ -1706,6 +1720,9 @@ func (s *Server) capabilitiesOf(p Provider) capabilities {
 		}
 		if cs, ok := p.(CreateSubmitter); ok {
 			c.Create.Submit = cs.CreateSubmit()
+		}
+		if ct, ok := p.(CreateThener); ok {
+			c.Create.Then = ct.CreateThen()
 		}
 	}
 	if e, ok := p.(Executor); ok {

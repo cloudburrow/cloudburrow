@@ -45,7 +45,7 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 	config.ServiceCloudSQL:      {Providers: []string{"cloudsql", "cloudsql-instances"}},
 	config.ServiceBigQuery:      {Providers: []string{"bigquery", "bigquery-jobs"}},
 	config.ServiceScheduler:     {Providers: []string{"scheduler"}},
-	config.ServiceKMS:           {Providers: []string{"kms", "kms-ekm", "kms-autokey", "kms-hsm"}},
+	config.ServiceKMS:           {Providers: []string{"kms", "kms-ekm", "kms-autokey", "kms-inventory", "kms-hsm"}},
 	config.ServiceLogging:       {Providers: []string{"logging-metrics", "logging-sinks", "logging-exclusions", "logging-buckets", "logging-settings", "logging-saved-queries", "logging-log-scopes", "logging-analytics"}, Screen: "/logs"},
 	config.ServiceMemorystore:   {Providers: []string{"memorystore", "memorystore-clusters", "memorystore-valkey"}},
 	config.ServiceCloudSQLMySQL: {Providers: []string{"cloudsql-mysql", "cloudsql-instances"}},
