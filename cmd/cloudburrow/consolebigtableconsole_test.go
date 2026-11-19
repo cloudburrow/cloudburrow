@@ -68,9 +68,25 @@ func TestBigtableConsoleParity(t *testing.T) {
 	if d, _ := ti.ChangeStreamRetention.(time.Duration); d != 48*time.Hour {
 		t.Errorf("change stream retention = %v", ti.ChangeStreamRetention)
 	}
-	if code, out := bigtableInstancesAct(t, srv, []string{"shop-data"}, "createtable", map[string]string{"table": "bad",
-		"families": `[{"family":"m","type":"Max"}]`}); code == http.StatusOK || !strings.Contains(out, "only Sum") {
-		t.Errorf("Create table with a Max family = %d: %s", code, out)
+	// Min, Max and HyperLogLog families are made (the front computes them,
+	// #1893), each read back as its type.
+	if code, out := bigtableInstancesAct(t, srv, []string{"shop-data"}, "createtable", map[string]string{"table": "aggs",
+		"families": `[{"family":"m","type":"Max"},{"family":"n","type":"Min"},{"family":"h","type":"HyperLogLog"}]`}); code != http.StatusOK {
+		t.Errorf("Create table with Max, Min and HyperLogLog families = %d: %s", code, out)
+	}
+	if ai, err := admin.TableInfo(ctx, "aggs"); err != nil {
+		t.Errorf("TableInfo aggs: %v", err)
+	} else {
+		got := map[string]string{}
+		for _, f := range ai.FamilyInfos {
+			got[f.Name] = bigtableFamilyType(f.ValueType)
+		}
+		if got["m"] != "Max" || got["n"] != "Min" || got["h"] != "HyperLogLog" {
+			t.Errorf("the aggregate families read back as %v", got)
+		}
+	}
+	if err := admin.DeleteTable(ctx, "aggs"); err != nil {
+		t.Errorf("DeleteTable aggs: %v", err)
 	}
 	d, err := p.Detail(ctx, "demo", []string{"shop-data"})
 	if err != nil {

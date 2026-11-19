@@ -62,6 +62,14 @@ func TestBigtableInstanceAdminThroughTheBrowser(t *testing.T) {
 	setField(p, "form.create-page", "f-instance", id)
 	setField(p, "form.create-page", "f-cluster", cluster)
 	setField(p, "form.create-page", "f-nodes", "2")
+	// Show advanced options > Add cluster (#1858): a second cluster made
+	// with the instance, in a zone of its own.
+	p.eval(fmt.Sprintf(`(() => { const b = [...document.querySelectorAll("form.create-page .group-add")].find((b) => b.textContent === "Add cluster");
+		b.click();
+		const set = (label, v) => { const c = document.querySelector('form.create-page [aria-label="' + label + '"]');
+			c.value = v; c.dispatchEvent(new Event("input", { bubbles: true })); };
+		set("Cluster ID 1", %q); set("Zone 1", "us-east1-c"); set("Number of nodes 1", "1");
+		return true })()`, cluster+"-2"), nil)
 	p.run(chromedp.Click(chromedp.CSS(`form.create-page button[type="submit"].primary`)))
 	p.waitFor(fmt.Sprintf(`document.querySelector("#view").textContent.includes(%q)`, "Browser made"))
 	info, err := iac.InstanceInfo(ctx, id)
@@ -70,6 +78,9 @@ func TestBigtableInstanceAdminThroughTheBrowser(t *testing.T) {
 	}
 	if cl, err := iac.GetCluster(ctx, id, cluster); err != nil || cl.ServeNodes != 2 || cl.Zone != "us-central1-b" {
 		t.Fatalf("after Create instance, GetCluster = %+v, %v", cl, err)
+	}
+	if cl, err := iac.GetCluster(ctx, id, cluster+"-2"); err != nil || cl.ServeNodes != 1 || cl.Zone != "us-east1-c" {
+		t.Fatalf("after Create instance with Add cluster, GetCluster %s-2 = %+v, %v", cluster, cl, err)
 	}
 
 	p.navigate("/bigtable-instances/" + id + "?project=" + project)

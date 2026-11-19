@@ -66,6 +66,9 @@ func TestBigtableConsoleParity1858(t *testing.T) {
 	p.run(chromedp.Click(chromedp.CSS(`#tab-tables`)))
 	p.clickText("#view #section-actions-tables button", "Create table")
 	p.waitFor(`document.querySelector(".modal.is-open #f-table") !== null`)
+	// Define row key schema is drawn, disabled with its reason: the
+	// emulator keeps no row key schema.
+	p.waitFor(`document.querySelector(".modal.is-open #f-rowKeySchema")?.disabled === true && document.querySelector(".modal.is-open").textContent.includes("keeps no row key schema")`)
 	setField(p, ".modal.is-open", "f-table", "orders")
 	setField(p, ".modal.is-open", "f-changeStream", "true")
 	setField(p, ".modal.is-open", "f-retention", "3")
@@ -89,6 +92,15 @@ func TestBigtableConsoleParity1858(t *testing.T) {
 	p.run(chromedp.Click(chromedp.CSS(`#tab-appprofiles`)))
 	p.clickText("#view #section-actions-appprofiles button", "Create application profile")
 	p.waitFor(`document.querySelector(".modal.is-open #f-profile") !== null`)
+	// Google's first step is the profile's type; Next opens its details.
+	var first string
+	p.eval(`document.querySelector(".modal.is-open .create-step-title").textContent`, &first)
+	if first != "Choose an application profile type" {
+		t.Errorf("Create application profile's first step is %q; want Choose an application profile type", first)
+	}
+	p.waitFor(`document.querySelector(".modal.is-open #f-profile").closest("[hidden]") !== null`)
+	p.clickText(".modal.is-open .create-step-continue button", "Next")
+	p.waitFor(`document.querySelector(".modal.is-open #f-profile").closest("[hidden]") === null`)
 	setField(p, ".modal.is-open", "f-profile", "reports")
 	setField(p, ".modal.is-open", "f-description", "Reports")
 	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open #f-priority-2`)))
@@ -129,4 +141,11 @@ func TestBigtableConsoleParity1858(t *testing.T) {
 	setField(p, "#view", "bigtable-editor", "SELECT _key, CAST(cf1['v'] AS STRING) AS v FROM orders WHERE _key = 'b1'")
 	p.run(chromedp.Click(chromedp.CSS(`#bigtable-editor-run`)))
 	p.waitFor(`[...document.querySelectorAll("#bigtable-results-table td")].some((c) => c.textContent === "val-b1")`)
+
+	// Query tabs, as Google's Studio has them: New tab opens an empty
+	// query, and the first tab keeps its query and results.
+	p.run(chromedp.Click(chromedp.CSS(`#bigtable-new-tab`)))
+	p.waitFor(`document.querySelectorAll("#bigtable-query-tabs .tab").length === 2 && document.querySelector("#bigtable-results-table") === null`)
+	p.eval(`(() => { document.querySelector("#bigtable-query-tabs .tab").click(); return true })()`, nil)
+	p.waitFor(`[...document.querySelectorAll("#bigtable-results-table td")].some((c) => c.textContent === "val-b1") && document.querySelector("#bigtable-editor").value.includes("b1")`)
 }

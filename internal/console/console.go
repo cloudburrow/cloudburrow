@@ -997,6 +997,11 @@ type Action struct {
 	// subscription opens the Create subscription page with the topic filled
 	// in (#1847). The action route never receives it.
 	Href string `json:"href,omitempty"`
+	// Steps lays the action's form out as Google's numbered steps, its
+	// fields' Sections each a step, the later ones opened in turn by a
+	// button: "next" for Next, as Google's Create application profile
+	// asks for the profile's type first (#1858), "continue" for Continue.
+	Steps string `json:"steps,omitempty"`
 }
 
 // PathActor is a provider with actions on the resources inside a resource.
