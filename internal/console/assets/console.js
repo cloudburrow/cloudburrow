@@ -24,36 +24,36 @@
 //
 // The page title is the product; what the table holds is the listing's noun.
 const ROUTES = [
-  { path: "/", service: null, title: "Dashboard" },
+  { path: "/", service: null, title: "Welcome" },
 
   // Cloud Run is one product with two pages, as Google's console has them:
   // Services and Jobs (#785). The product key stays "run", so a pin made
   // before the second page existed keeps pointing at it. A service called
   // "jobs" is shadowed by the Jobs page, as one called "create" is by the
   // deploy form.
-  { path: "/run",      service: "run",      title: "Services", section: "Serverless computing",
+  { path: "/run",      service: "run",      title: "Services", kind: "Service", logs: true, section: "Serverless computing",
     product: "run", productTitle: "Cloud Run" },
-  { path: "/run/jobs", service: "run-jobs", title: "Jobs",     section: "Serverless computing",
+  { path: "/run/jobs", service: "run-jobs", title: "Jobs", kind: "Job", logs: true,     section: "Serverless computing",
     product: "run", productTitle: "Cloud Run" },
-  { path: "/run/worker-pools", service: "run-worker-pools", title: "Worker pools", section: "Serverless computing",
+  { path: "/run/worker-pools", service: "run-worker-pools", title: "Worker pools", kind: "Worker pool", logs: true, section: "Serverless computing",
     product: "run", productTitle: "Cloud Run" },
-  { path: "/run/instances", service: "run-instances", title: "Instances", section: "Serverless computing",
+  { path: "/run/instances", service: "run-instances", title: "Instances", kind: "Instance", section: "Serverless computing",
     product: "run", productTitle: "Cloud Run" },
   // Source builds and the repositories `gcloud run deploy --source` creates (#1347).
-  { path: "/run/builds", service: "run-builds", title: "Build history", section: "Serverless computing",
+  { path: "/run/builds", service: "run-builds", title: "Build history", kind: "Build", section: "Serverless computing",
     product: "run", productTitle: "Cloud Run" },
   // Cloud Build's triggers and private worker pools (#1422).
-  { path: "/cloud-build/triggers", service: "cloud-build-triggers", title: "Triggers", section: "CI/CD",
+  { path: "/cloud-build/triggers", service: "cloud-build-triggers", title: "Triggers", kind: "Trigger", section: "CI/CD",
     product: "cloud-build", productTitle: "Cloud Build" },
-  { path: "/cloud-build/worker-pools", service: "cloud-build-worker-pools", title: "Worker pools", section: "CI/CD",
+  { path: "/cloud-build/worker-pools", service: "cloud-build-worker-pools", title: "Worker pools", kind: "Worker pool", section: "CI/CD",
     product: "cloud-build", productTitle: "Cloud Build" },
   // Secure Source Manager's instances and repositories (#1527).
-  { path: "/secure-source-manager", service: "secure-source-manager", title: "Instances", section: "CI/CD",
+  { path: "/secure-source-manager", service: "secure-source-manager", title: "Instances", kind: "Instance", section: "CI/CD",
     product: "secure-source-manager", productTitle: "Secure Source Manager" },
-  { path: "/artifact-registry", service: "artifact-registry", title: "Repositories", section: "CI/CD",
+  { path: "/artifact-registry", service: "artifact-registry", title: "Repositories", kind: "Repository", section: "CI/CD",
     product: "artifact-registry", productTitle: "Artifact Registry" },
   // Cloud Functions v2, served on the Run port (#1377).
-  { path: "/functions", service: "functions", title: "Functions", section: "Serverless computing",
+  { path: "/functions", service: "functions", title: "Functions", kind: "Function", logs: true, section: "Serverless computing",
     product: "functions", productTitle: "Cloud Functions" },
 
   // Kubernetes Engine is one product with five pages, not five products.
@@ -63,19 +63,19 @@ const ROUTES = [
   // jobs, and someone who pinned "Jobs" could not tell from the drawer which
   // product they had pinned. `product` is the drawer's row, `title` is the
   // page inside it.
-  { path: "/kubernetes/workloads",  service: "workloads",   title: "Workloads", section: "Containers",
+  { path: "/kubernetes/workloads",  service: "workloads",   title: "Workloads", kind: "Workload", logs: true, section: "Containers",
     product: "kubernetes", productTitle: "Kubernetes Engine" },
-  { path: "/kubernetes/pods",       service: "pods",        title: "Pods",      section: "Containers",
+  { path: "/kubernetes/pods",       service: "pods",        title: "Pods", kind: "Pod", logs: true,      section: "Containers",
     product: "kubernetes", productTitle: "Kubernetes Engine" },
-  { path: "/kubernetes/services",   service: "k8sservices", title: "Services",  section: "Containers",
+  { path: "/kubernetes/services",   service: "k8sservices", title: "Services", kind: "Service", logs: true,  section: "Containers",
     product: "kubernetes", productTitle: "Kubernetes Engine" },
-  { path: "/kubernetes/jobs",       service: "jobs",        title: "Jobs",      section: "Containers",
+  { path: "/kubernetes/jobs",       service: "jobs",        title: "Jobs", kind: "Job", logs: true,      section: "Containers",
     product: "kubernetes", productTitle: "Kubernetes Engine" },
-  { path: "/kubernetes/nodes",      service: "nodes",       title: "Nodes",     section: "Containers",
+  { path: "/kubernetes/nodes",      service: "nodes",       title: "Nodes", kind: "Node",     section: "Containers",
     product: "kubernetes", productTitle: "Kubernetes Engine" },
-  { path: "/kubernetes/storage",    service: "k8sstorage",  title: "Storage",   section: "Containers",
+  { path: "/kubernetes/storage",    service: "k8sstorage",  title: "Storage", kind: "Persistent volume claim",   section: "Containers",
     product: "kubernetes", productTitle: "Kubernetes Engine" },
-  { path: "/kubernetes/events",     service: "events",      title: "Events",    section: "Containers",
+  { path: "/kubernetes/events",     service: "events",      title: "Events", kind: "Event",    section: "Containers",
     product: "kubernetes", productTitle: "Kubernetes Engine" },
 
   // Cloud Storage is one product with three pages: buckets; the project's
@@ -83,64 +83,66 @@ const ROUTES = [
   // Settings, with the project's service account and HMAC keys (#792).
   { path: "/storage/browser",  service: "storage",          title: "Buckets", kind: "Bucket",         section: "Storage",
     product: "storage", productTitle: "Cloud Storage" },
-  { path: "/storage/deleted",  service: "storage-deleted", icon: "storage",  title: "Deleted buckets", section: "Storage",
+  { path: "/storage/deleted",  service: "storage-deleted", icon: "storage",  title: "Deleted buckets", kind: "Deleted bucket", section: "Storage",
     product: "storage", productTitle: "Cloud Storage" },
   { path: "/storage/settings", service: "storage-settings", icon: "storage", title: "Settings",        section: "Storage",
     product: "storage", productTitle: "Cloud Storage" },
   { path: "/storage/intelligence", service: "storage-intelligence", icon: "storage", title: "Storage Intelligence", section: "Storage",
     product: "storage", productTitle: "Cloud Storage" },
 
-  { path: "/firestore", service: "firestore", title: "Data", section: "Databases",
+  // `crumb` names the breadcrumb's first link where the page's menu title
+  // ("Data") would not say which product a document is in (#1842).
+  { path: "/firestore", service: "firestore", title: "Data", crumb: "Firestore", section: "Databases",
     product: "firestore", productTitle: "Firestore" },
   // The project's Firestore databases, each with its settings, indexes and
   // field overrides (#1331, #1343). Not under /firestore/, where it would
   // shadow a collection named "databases".
-  { path: "/firestore-databases", service: "firestore-databases", icon: "firestore", title: "Databases", section: "Databases",
+  { path: "/firestore-databases", service: "firestore-databases", icon: "firestore", title: "Databases", kind: "Database", section: "Databases",
     product: "firestore", productTitle: "Firestore" },
   { path: "/datastore", service: "datastore", title: "Datastore", section: "Databases" },
-  { path: "/bigtable",  service: "bigtable",  title: "Tables",  section: "Databases",
+  { path: "/bigtable",  service: "bigtable",  title: "Tables", kind: "Table",  section: "Databases",
     product: "bigtable", productTitle: "Bigtable" },
   // The project's Bigtable instances, with their clusters, app profiles and
   // IAM policy (#1358). Not under /bigtable/, where it would shadow a table.
-  { path: "/bigtable-instances", service: "bigtable-instances", icon: "bigtable", title: "Instances", section: "Databases",
+  { path: "/bigtable-instances", service: "bigtable-instances", icon: "bigtable", title: "Instances", kind: "Instance", section: "Databases",
     product: "bigtable", productTitle: "Bigtable" },
-  { path: "/spanner",   service: "spanner",   title: "Spanner",   section: "Databases" },
+  { path: "/spanner",   service: "spanner",   title: "Spanner", kind: "Instance",   section: "Databases" },
   // Cloud SQL is one product with a page per engine, as the console this
   // mirrors lists PostgreSQL and MySQL instances under one product (#868).
   // MySQL's page is not under /cloudsql/, where it would shadow a PostgreSQL
   // database named "mysql".
-  { path: "/cloudsql",       service: "cloudsql",       title: "PostgreSQL", section: "Databases",
+  { path: "/cloudsql",       service: "cloudsql",       title: "PostgreSQL", kind: "Database", section: "Databases",
     product: "cloudsql", productTitle: "Cloud SQL" },
-  { path: "/cloudsql-mysql", service: "cloudsql-mysql", title: "MySQL",      section: "Databases",
+  { path: "/cloudsql-mysql", service: "cloudsql-mysql", title: "MySQL", kind: "Database",      section: "Databases",
     product: "cloudsql", productTitle: "Cloud SQL", icon: "cloudsql" },
   // Every instance the Admin API serves (#1330), with Create instance, its
   // backups, replicas, exports and imports, Run SQL and Upgrade. It had a
   // provider but no route, so /cloudsql-instances was "No such screen".
-  { path: "/cloudsql-instances", service: "cloudsql-instances", title: "Instances", section: "Databases",
+  { path: "/cloudsql-instances", service: "cloudsql-instances", title: "Instances", kind: "Instance", section: "Databases",
     product: "cloudsql", productTitle: "Cloud SQL", icon: "cloudsql" },
   // Memorystore for Redis (#1302) and the Backup and DR Service (#1433) had
   // providers, and console API pages, but no route: /memorystore and
   // /backupdr were "No such screen", so nothing of either was reachable from
   // the console (found by TestMemorystoreRotateServerCAThroughThePage).
-  { path: "/memorystore", service: "memorystore", title: "Redis", section: "Databases",
+  { path: "/memorystore", service: "memorystore", title: "Redis", kind: "Instance", section: "Databases",
     product: "memorystore", productTitle: "Memorystore" },
   // Memorystore for Redis Cluster (#1519), a page of its own beside the
   // instances, as the Memorystore console's Redis Cluster tab is.
-  { path: "/memorystore-clusters", service: "memorystore-clusters", icon: "memorystore", title: "Redis Cluster", section: "Databases",
+  { path: "/memorystore-clusters", service: "memorystore-clusters", icon: "memorystore", title: "Redis Cluster", kind: "Cluster", section: "Databases",
     product: "memorystore", productTitle: "Memorystore" },
   // Memorystore for Valkey (#1519), memorystore.googleapis.com's instances.
-  { path: "/memorystore-valkey", service: "memorystore-valkey", icon: "memorystore", title: "Valkey", section: "Databases",
+  { path: "/memorystore-valkey", service: "memorystore-valkey", icon: "memorystore", title: "Valkey", kind: "Instance", section: "Databases",
     product: "memorystore", productTitle: "Memorystore" },
-  { path: "/backupdr", service: "backupdr", icon: "storage", title: "Backup and DR", section: "Storage" },
+  { path: "/backupdr", service: "backupdr", icon: "storage", title: "Backup and DR", kind: "Backup vault", section: "Storage" },
   // Google files BigQuery under Analytics, a category with no vendored icon
   // here, so it sits with the other data stores rather than under a heading
   // drawn without one (#698). It is one product with two pages: datasets,
   // and Job history (#993). The product key stays "bigquery", so a pin made
   // before the second page existed keeps pointing at it. Job history is not
   // under /bigquery/, where it would shadow a dataset named "jobs".
-  { path: "/bigquery",      service: "bigquery",      title: "Datasets",    section: "Databases",
+  { path: "/bigquery",      service: "bigquery",      title: "Datasets", kind: "Dataset",    section: "Databases",
     product: "bigquery", productTitle: "BigQuery" },
-  { path: "/bigquery-jobs", service: "bigquery-jobs", icon: "bigquery", title: "Job history", section: "Databases",
+  { path: "/bigquery-jobs", service: "bigquery-jobs", icon: "bigquery", title: "Job history", kind: "Job", section: "Databases",
     product: "bigquery", productTitle: "BigQuery", icon: "bigquery" },
 
   // Pub/Sub is one product with three pages. A subscription is reached from its
@@ -151,11 +153,11 @@ const ROUTES = [
   { path: "/pubsub/subscriptions", service: "pubsub-subscriptions", title: "Subscriptions", kind: "Subscription",
     section: "Integration services", product: "pubsub", productTitle: "Pub/Sub" },
   // Snapshots are created from a subscription's page and listed here (#787).
-  { path: "/pubsub/snapshots",     service: "pubsub-snapshots", icon: "pubsub",     title: "Snapshots",
+  { path: "/pubsub/snapshots",     service: "pubsub-snapshots", icon: "pubsub",     title: "Snapshots", kind: "Snapshot",
     section: "Integration services", product: "pubsub", productTitle: "Pub/Sub" },
   // A schema's revisions, and a test of a message against it, are on its
   // page (#788).
-  { path: "/pubsub/schemas",       service: "pubsub-schemas", icon: "pubsub",       title: "Schemas",
+  { path: "/pubsub/schemas",       service: "pubsub-schemas", icon: "pubsub",       title: "Schemas", kind: "Schema",
     section: "Integration services", product: "pubsub", productTitle: "Pub/Sub" },
   { path: "/tasks/queues",  service: "tasks",  title: "Cloud Tasks", navTitle: "Queues", kind: "Queue",
     section: "Integration services" },
@@ -165,7 +167,7 @@ const ROUTES = [
   // Vertex AI is likewise one product with three pages. Online prediction
   // (#869) sends a custom prediction request to a deployed contract
   // container; it is offered only where Cloud Run runs one.
-  { path: "/ai/models",     service: "ai",         title: "Model Garden",
+  { path: "/ai/models",     service: "ai",         title: "Model Garden", kind: "Model",
     section: "AI and machine learning", product: "vertexai", productTitle: "Vertex AI" },
   { path: "/ai/playground", service: "playground", screen: "playground",
     title: "Studio",
@@ -188,32 +190,32 @@ const ROUTES = [
     product: "kms", productTitle: "Key Management" },
   // Cloud KMS EKM connections and Autokey (#1452): stored connections, and
   // the Autokey configurations a project resolves through, with its key handles.
-  { path: "/kms/ekm", service: "kms-ekm", icon: "kms", title: "EKM connections", section: "Security and identity",
+  { path: "/kms/ekm", service: "kms-ekm", icon: "kms", title: "EKM connections", kind: "EKM connection", section: "Security and identity",
     product: "kms", productTitle: "Key Management" },
-  { path: "/kms/autokey", service: "kms-autokey", icon: "kms", title: "Autokey", section: "Security and identity",
+  { path: "/kms/autokey", service: "kms-autokey", icon: "kms", title: "Autokey", kind: "Key handle", section: "Security and identity",
     product: "kms", productTitle: "Key Management" },
-  { path: "/kms/hsm", service: "kms-hsm", icon: "kms", title: "Single-tenant HSM", section: "Security and identity",
+  { path: "/kms/hsm", service: "kms-hsm", icon: "kms", title: "Single-tenant HSM", kind: "Single-tenant HSM instance", section: "Security and identity",
     product: "kms", productTitle: "Key Management" },
   // IAM & Admin > IAM (#1368): the selected project's IAM policy, stored and
   // never enforced (ADR-0006); Grant access and Remove principal on its
   // Permissions tab.
-  { path: "/iam-admin/iam", service: "iam", title: "IAM", section: "IAM & Admin",
+  { path: "/iam-admin/iam", service: "iam", title: "IAM", kind: "Principal", section: "IAM & Admin",
     product: "iam", productTitle: "IAM & Admin" },
   // IAM & Admin > Roles (#1743): the project's and the organization's
   // custom roles, with Create role, Edit role, Delete and Undelete.
-  { path: "/iam-admin/roles", service: "iam-roles", icon: "iam", title: "Roles", section: "IAM & Admin",
+  { path: "/iam-admin/roles", service: "iam-roles", icon: "iam", title: "Roles", kind: "Role", section: "IAM & Admin",
     product: "iam", productTitle: "IAM & Admin" },
-  { path: "/iam-admin/groups", service: "iam-groups", icon: "iam", title: "Groups", section: "IAM & Admin",
+  { path: "/iam-admin/groups", service: "iam-groups", icon: "iam", title: "Groups", kind: "Group", section: "IAM & Admin",
     product: "iam", productTitle: "IAM & Admin" },
   // IAM & Admin > Service accounts (#1747): the project's accounts, their
   // keys and Permissions tab, Create, Edit, Disable, Enable, Delete,
   // Undelete, Create key and Upload key.
-  { path: "/iam-admin/serviceaccounts", service: "iam-service-accounts", icon: "iam", title: "Service accounts", section: "IAM & Admin",
+  { path: "/iam-admin/serviceaccounts", service: "iam-service-accounts", icon: "iam", title: "Service accounts", kind: "Service account", section: "IAM & Admin",
     product: "iam", productTitle: "IAM & Admin" },
   // IAM & Admin > Audit Logs (#1756): the services that can write Data
   // Access audit logs (queryAuditableServices) and the project policy's
   // log types for each.
-  { path: "/iam-admin/audit", service: "iam-audit", icon: "iam", title: "Audit Logs", section: "IAM & Admin",
+  { path: "/iam-admin/audit", service: "iam-audit", icon: "iam", title: "Audit Logs", kind: "Service", section: "IAM & Admin",
     product: "iam", productTitle: "IAM & Admin" },
 
   { path: "/monitoring", service: null, screen: "monitoring", title: "Monitoring", section: "Operations" },
@@ -222,21 +224,21 @@ const ROUTES = [
   // Cloud Logging's admin resources (#1226), beside the Explorer: they are
   // stored and validated; a metric has no time series and a sink delivers
   // nothing, which each screen says.
-  { path: "/logs/metrics",    service: "logging-metrics",    icon: "logs", title: "Log-based metrics",
+  { path: "/logs/metrics",    service: "logging-metrics",    icon: "logs", title: "Log-based metrics", kind: "Log-based metric",
     section: "Operations", product: "logging", productTitle: "Cloud Logging" },
-  { path: "/logs/sinks",      service: "logging-sinks",      icon: "logs", title: "Log router",
+  { path: "/logs/sinks",      service: "logging-sinks",      icon: "logs", title: "Log router", kind: "Sink",
     section: "Operations", product: "logging", productTitle: "Cloud Logging" },
-  { path: "/logs/exclusions", service: "logging-exclusions", icon: "logs", title: "Exclusions",
+  { path: "/logs/exclusions", service: "logging-exclusions", icon: "logs", title: "Exclusions", kind: "Exclusion",
     section: "Operations", product: "logging", productTitle: "Cloud Logging" },
-  { path: "/logs/storage",    service: "logging-buckets",    icon: "logs", title: "Logs Storage",
+  { path: "/logs/storage",    service: "logging-buckets",    icon: "logs", title: "Logs Storage", kind: "Log bucket",
     section: "Operations", product: "logging", productTitle: "Cloud Logging" },
   // Logs Storage's Settings (#1311): GetSettings, UpdateSettings, GetCmekSettings.
   { path: "/logs/settings",   service: "logging-settings",   icon: "logs", title: "Logs Storage settings",
     section: "Operations", product: "logging", productTitle: "Cloud Logging" },
   // Saved queries and log scopes (#1519).
-  { path: "/logs/saved-queries", service: "logging-saved-queries", icon: "logs", title: "Saved queries",
+  { path: "/logs/saved-queries", service: "logging-saved-queries", icon: "logs", title: "Saved queries", kind: "Saved query",
     section: "Operations", product: "logging", productTitle: "Cloud Logging" },
-  { path: "/logs/log-scopes", service: "logging-log-scopes", icon: "logs", title: "Log scopes",
+  { path: "/logs/log-scopes", service: "logging-log-scopes", icon: "logs", title: "Log scopes", kind: "Log scope",
     section: "Operations", product: "logging", productTitle: "Cloud Logging" },
   { path: "/activity", service: null, screen: "activity", title: "Activity",      section: "Operations" },
   { path: "/requests", service: null, screen: "requests", title: "Request Log",   section: "Operations" },
@@ -247,25 +249,27 @@ const ROUTES = [
   // stays "projects", so a pin made before the other pages were routed keeps
   // pointing at it. Resource hierarchy and Tags had providers but no route,
   // so neither was reachable from the console.
-  { path: "/projects", service: "projects", title: "Projects", section: "Management tools",
+  { path: "/projects", service: "projects", title: "Projects", kind: "Project", section: "Management tools",
     product: "projects", productTitle: "Resource Manager" },
-  { path: "/resource-hierarchy", service: "hierarchy", icon: "hierarchy", title: "Resource hierarchy", section: "Management tools",
+  { path: "/resource-hierarchy", service: "hierarchy", icon: "hierarchy", title: "Resource hierarchy", kind: "Folder", section: "Management tools",
     product: "projects", productTitle: "Resource Manager" },
-  { path: "/tags", service: "tags", title: "Tags", section: "Management tools",
+  { path: "/tags", service: "tags", title: "Tags", kind: "Tag key", section: "Management tools",
     product: "projects", productTitle: "Resource Manager" },
   // APIs & Services (#1352): a project's APIs, Enable and Disable. It had a
   // provider but no route.
-  { path: "/apis", service: "serviceusage", title: "Enabled APIs & services", section: "Management tools",
+  { path: "/apis", service: "serviceusage", title: "Enabled APIs & services", kind: "API/Service", section: "Management tools",
     product: "serviceusage", productTitle: "APIs & Services" },
   // Service Usage operations (#1530): what operations.list answers, with
   // Delete.
-  { path: "/apis/operations", service: "serviceusage-operations", icon: "serviceusage", title: "Operations", section: "Management tools",
+  { path: "/apis/operations", service: "serviceusage-operations", icon: "serviceusage", title: "Operations", kind: "Operation", section: "Management tools",
     product: "serviceusage", productTitle: "APIs & Services" },
   // Connect (#802): what `env`, `gcloud-setup`, `terraform`, `version` and
   // `diagnose` give at a terminal. Not a Google Cloud product, so it carries
   // no product icon.
   { path: "/connect", service: null, screen: "connect", icon: "connect", title: "Connect", section: "Management tools" },
 
+  // The New project page (#1842), at the address Google's has.
+  { path: "/projectcreate", service: null, screen: "new-project", title: "New project" },
   { path: "/search", service: null, screen: "search", title: "Search results" },
   { path: "/products", service: null, screen: "products", title: "All products" },
   // The Instance page (#801): state save and load, reset and seed, as the
@@ -843,7 +847,9 @@ function showOverlay(node) {
   const pending = OVERLAY_TIMERS.get(node);
   if (pending) { clearTimeout(pending); OVERLAY_TIMERS.delete(node); }
   node.hidden = false;
-  requestAnimationFrame(() => node.classList.add("is-open"));
+  // Not if it was closed again before the frame came: a picker closed by
+  // the click that followed its opening stayed drawn open (#1842).
+  requestAnimationFrame(() => { if (!node.hidden && !OVERLAY_TIMERS.has(node)) node.classList.add("is-open"); });
 }
 
 function hideOverlay(node) {
@@ -1210,7 +1216,7 @@ function buildNav(services) {
   // Screens, not every address. A create form and the catalogue page both
   // have routes so they can be linked to; neither is a row in the menu.
   const entries = ROUTES.filter((r) =>
-    r.path !== "/search" && r.path !== "/products" && r.screen !== "create" &&
+    r.path !== "/search" && r.path !== "/projectcreate" && r.path !== "/products" && r.screen !== "create" &&
     (!r.service || available.has(r.service) || !r.section));
 
   const dashboard = entries.find((e) => e.path === "/");
@@ -2164,10 +2170,98 @@ function renderMetrics(target, m) {
       : el("p", { class: "panel-empty", text: `Updated ${relativeTime(at)}` }));
 }
 
+// QUICK_ACCESS is the Welcome page's products, in the order Google's Quick
+// access lists the ones CloudBurrow serves (#1842).
+const QUICK_ACCESS = ["/apis", "/iam-admin/iam", "/storage/browser", "/bigquery", "/kubernetes/workloads",
+  "/run", "/cloudsql-instances", "/pubsub/topics", "/logs", "/secrets", "/kms/keyrings", "/firestore-databases"];
+// WELCOME_RESOURCES are the resource counts the Resources card reads.
+const WELCOME_RESOURCES = ["storage", "bigquery", "run", "pubsub", "secrets", "cloudsql-instances",
+  "memorystore", "functions", "tasks", "spanner"];
+
+function welcomeCards(project) {
+  const served = new Set(SERVICES.map((sv) => sv.id));
+  const isServed = (r) => r && (!r.service || served.has(r.service));
+  const routeAt = (path) => ROUTES.find((r) => r.path === path);
+
+  const info = el("div", { class: "card welcome-project", id: "welcome-project" },
+    el("h2", { text: "Project info" }),
+    el("p", { class: "unavailable", text: project ? "reading…" : "No project is selected." }));
+  if (project) {
+    api("/api/resources/projects").then((data) => {
+      const it = (data.items || []).find((i) => i.name === project);
+      const f = (it && it.fields) || {};
+      setChildren(info,
+        el("h2", { text: "Project info" }),
+        el("dl", {},
+          el("dt", { text: "Project name" }), el("dd", { text: f.Name || project }),
+          el("dt", { text: "Project number" }), el("dd", { class: "mono", text: f.Number || "—" }),
+          el("dt", { text: "Project ID" }), el("dd", { class: "mono", text: project })),
+        el("div", { class: "card-actions" },
+          el("a", { href: `/projects/${encodeURIComponent(project)}${scopeSearch()}`, text: "Go to project settings" })));
+    }).catch((err) => {
+      setChildren(info, el("h2", { text: "Project info" }), el("p", { class: "unavailable", text: String(err.message) }));
+    });
+  }
+
+  const quick = QUICK_ACCESS.map(routeAt).filter(isServed);
+  const access = el("div", { class: "card welcome-quick" },
+    el("h2", { text: "Quick access" }),
+    el("ul", { class: "quick-access" },
+      ...quick.map((r) => el("li", {},
+        el("a", { href: r.path + scopeSearch(), class: "quick-tile" },
+          el("span", { text: productTitle(r) })))),
+      el("li", {}, el("a", { href: "/products", class: "quick-tile" }, el("span", { text: "View all products" })))));
+
+  const resources = el("ul", { class: "welcome-resources" });
+  const resourceCard = el("div", { class: "card welcome-resources-card" },
+    el("h2", { text: "Resources" }), resources);
+  const counted = WELCOME_RESOURCES.filter((id) => served.has(id));
+  if (!project || !counted.length) {
+    resources.replaceWith(el("p", { class: "unavailable", text: "No resources to count." }));
+  }
+  for (const id of project ? counted : []) {
+    const r = ROUTES.find((x) => x.service === id && !x.screen);
+    if (!r) continue;
+    const row = el("li", {},
+      el("a", { href: r.path + scopeSearch(), text: `${productTitle(r)}${r.productTitle ? ": " + r.title : ""}` }),
+      el("span", { class: "unavailable", text: " …" }));
+    resources.append(row);
+    api(`/api/resources/${id}?project=${encodeURIComponent(project)}`).then((data) => {
+      const n = data.prompt || data.unavailable ? null : (data.total ?? (data.items || []).length);
+      row.lastChild.textContent = n === null ? " —" : ` ${n}`;
+    }).catch(() => { row.lastChild.textContent = " —"; });
+  }
+
+  const activity = el("div", { class: "card welcome-activity" },
+    el("h2", { text: "Activity" }),
+    el("p", { class: "panel-empty", text: "What was created, changed and deleted on this instance." }),
+    el("div", { class: "card-actions" },
+      el("a", { href: "/activity" + scopeSearch(), text: "View all activity" }),
+      el("a", { href: "/requests" + scopeSearch(), text: "Request Log" })));
+
+  // APIs: the project's enabled APIs, from Service Usage, as Google's
+  // Dashboard links to the APIs overview.
+  const apisCount = el("span", { text: "…" });
+  const apis = served.has("serviceusage") && project
+    ? el("div", { class: "card welcome-apis" },
+        el("h2", { text: "APIs" }),
+        el("p", {}, apisCount, " enabled APIs and services"),
+        el("div", { class: "card-actions" },
+          el("a", { href: "/apis" + scopeSearch(), text: "Go to APIs overview" })))
+    : null;
+  if (apis) {
+    api(`/api/resources/serviceusage?project=${encodeURIComponent(project)}`).then((data) => {
+      apisCount.textContent = data.prompt || data.unavailable ? "—" : String(data.total ?? (data.items || []).length);
+    }).catch(() => { apisCount.textContent = "—"; });
+  }
+
+  return el("div", { class: "cards welcome-cards" }, info, resourceCard, access, apis, activity);
+}
+
 async function renderDashboard(view) {
   const cancel = new AbortController();
   setChildren(view, 
-    el("h1", { text: "Dashboard" }),
+    el("h1", { text: "Welcome" }),
     el("p", { class: "subtitle", text: "Live state of this CloudBurrow instance." }),
     loadingState(3, { what: "instance status", onCancel: () => cancel.abort() })
   );
@@ -2177,7 +2271,7 @@ async function renderDashboard(view) {
     status = await api("/api/status", { signal: cancel.signal });
   } catch (err) {
     setChildren(view, 
-      el("h1", { text: "Dashboard" }),
+      el("h1", { text: "Welcome" }),
       isCancelled(err)
         ? cancelledState("Dashboard not loaded", () => renderDashboard(view))
         : errorState("Instance status unavailable", String(err.message),
@@ -2267,10 +2361,17 @@ async function renderDashboard(view) {
   };
   drawComponents(status);
 
+  // Google's Welcome page (#1842): the project you are working in, quick
+  // access to products, the project's resources and its activity, before
+  // this instance's own state, which Google's console has no counterpart
+  // for. https://support.google.com/cloud/answer/3465889
+  const project = currentProject();
   setChildren(view,
     el("div", { class: "page-header" },
-      el("h1", { text: "Dashboard" }),
-      el("p", { class: "subtitle", text: "Live state of this CloudBurrow instance." })),
+      el("h1", { text: "Welcome" }),
+      el("p", { class: "subtitle", text: project ? `You're working in ${project}` : "Live state of this CloudBurrow instance." })),
+    welcomeCards(project),
+    el("h2", { class: "section-heading", text: "Instance" }),
     cards,
     el("div", { class: "cards", style: "margin-top:16px" },
       utilisation,
@@ -2306,7 +2407,7 @@ async function renderDashboard(view) {
   // its own, which would leave a listener behind on every navigation.
   METRICS_TICK = tick;
 
-  announce("Dashboard loaded");
+  announce("Welcome page loaded");
 }
 
 // renderTableInto draws a listing: action bar, filter, sortable table, footer.
@@ -2932,7 +3033,7 @@ async function renderDetail(view, route, resourcePath) {
   // nodes. A database, a table and a column are three levels, and every one
   // above the last is a working link back to it.
   const trail = [
-    el("a", { href: back.pathname + back.search, text: route.title }),
+    el("a", { href: back.pathname + back.search, text: route.crumb || route.title }),
   ];
   segments.forEach((segment, i) => {
     trail.push(el("span", { "aria-hidden": "true", text: "/" }));
@@ -2963,7 +3064,7 @@ async function renderDetail(view, route, resourcePath) {
   // object's crumbs are its bucket and folders (#790).
   const drawTrail = (crumbs) => {
     const nav = crumb.querySelector(".breadcrumb");
-    const nodes = [el("a", { href: back.pathname + back.search, text: route.title })];
+    const nodes = [el("a", { href: back.pathname + back.search, text: route.crumb || route.title })];
     crumbs.forEach((c, i) => {
       nodes.push(el("span", { "aria-hidden": "true", text: "/" }));
       nodes.push(i === crumbs.length - 1 || !(c.path || []).length
@@ -3005,19 +3106,21 @@ async function renderDetail(view, route, resourcePath) {
   // entity's encoded key (#875) — says what it is in its heading.
   if (data.title) (nameLine || crumb.querySelector("h1")).textContent = data.title;
   const sections = (data.sections || []).slice();
-  // The tab is offered only where the backend can actually answer, which is
-  // the same rule the create button follows: a control appears when the
-  // service behind it can perform the operation, and is absent otherwise.
-  // Every resource page gets its logs, filtered to that resource.
-  //
-  // The Logs Explorer could always filter by resource; nothing linked to it with
-  // the filter applied, so the path from "this pod is failing" to "here is what
-  // it said" ran through a screen the operator had to configure by hand.
+  // A Logs tab where Google's page has one (#1842, audit item 9): a Cloud
+  // Run service's, job's and worker pool's, a function's, and a GKE
+  // workload's, pod's, Service's and Job's ("Click the Logs tab to get the
+  // request and container logs for all revisions of this service",
+  // https://docs.cloud.google.com/run/docs/logging). The route says so with
+  // `logs`; a resource whose Google page has no Logs tab (a bucket, a topic)
+  // gets none, and reaches its lines from the Logs Explorer as there. The
+  // tab reads the instance's log store, which holds what is written to Cloud
+  // Logging when the instance serves it, and links to the Explorer with the
+  // same filter applied.
   //
   // A provider that draws its own Logs tab keeps it: a Cloud Run execution's
   // tasks are pods that finish before the log follower's next sweep, so their
   // output is read from the pods themselves (#785).
-  if (!sections.some((s) => s.id === "logs")) {
+  if (route.logs && segments.length === 1 && !sections.some((s) => s.id === "logs")) {
     sections.push({
       id: "logs", label: "Logs", kind: "logs",
       resource: name,
@@ -3044,16 +3147,19 @@ async function renderDetail(view, route, resourcePath) {
   //
   // The properties are the ones the list row already showed; clicking through
   // used to drop them, so the screen named after a resource said nothing
-  // about it. A provider that holds none renders no card rather than an empty
-  // one.
+  // about it. Google's pages carry them in the page's header, beside the
+  // title (a bucket's Location, Storage class, Public access), not in a
+  // "Details" card of their own between the header and the tabs (#1842,
+  // audit item 9), so they are a row of the header here, above the tab
+  // strip. A provider that holds none draws none.
   const summary = (data.summary || []).length
-    ? el("div", { class: "card properties" },
-        el("h2", { text: "Details" }),
-        el("dl", {}, ...(data.summary).flatMap((prop) => [
-          el("dt", { text: prop.label }),
-          propertyValue(prop),
-        ])))
+    ? el("dl", { class: "resource-summary", "aria-label": "Details" },
+        ...(data.summary).map((prop) =>
+          el("div", { class: "resource-summary-item" },
+            el("dt", { text: prop.label }),
+            propertyValue(prop))))
     : null;
+  if (summary) crumb.append(summary);
 
   const wanted = new URLSearchParams(location.search).get("tab");
   let current = Math.max(0, sections.findIndex((sec) => sec.id === wanted));
@@ -3125,6 +3231,12 @@ async function renderDetail(view, route, resourcePath) {
 
     api(`/api/logs?${query}`).then((data) => {
       const entries = data.entries || [];
+      // Which store the lines are from: with Cloud Logging served, what
+      // clients write through its API is here beside the pods' output.
+      if (data.cloudLogging === false && !note) {
+        note = el("p", { class: "unavailable",
+          text: "Cloud Logging is not served by this instance, so these are the containers' own lines only." });
+      }
       const link = el("a", { class: "button-link secondary",
         href: `/logs?${explorer}`,
         text: "Open in Logs Explorer" });
@@ -3484,7 +3596,7 @@ async function renderDetail(view, route, resourcePath) {
   }
 
   panel.setAttribute("aria-labelledby", `tab-${sections[current].id}`);
-  setChildren(view, ...header, summary, panel);
+  setChildren(view, ...header, panel);
   drawPanel();
   announce(`${data.title || name} opened`);
 }
@@ -5370,6 +5482,99 @@ function openCreateForm(route, spec, onDone) {
 // A dialog has no URL: a refresh, a back button or a link shared with a
 // colleague loses whatever was in it. A form long enough to be worth filling
 // in is a form worth being able to return to.
+// renderNewProject is Google's New project page (#1842): Project name
+// first, the Project ID made from it (editable until the project exists,
+// "It cannot be changed later"), and its Location, the organization or a
+// folder, or none. It creates through Resource Manager's own create form,
+// so its rules are that form's, and selects the new project.
+// https://docs.cloud.google.com/resource-manager/docs/creating-managing-projects
+function projectIdFrom(name, suffix) {
+  let id = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^[^a-z]+/, "").replace(/-+$/, "");
+  id = id.slice(0, 23).replace(/-+$/, "");
+  if (!id) id = "my-project";
+  if (id.length < 6 || suffix) id = `${id}-${suffix || "000000"}`;
+  return id.slice(0, 30);
+}
+
+async function renderNewProject(view) {
+  const route = ROUTES.find((r) => r.service === "projects");
+  const caps = capabilityOf("projects");
+  const listHref = "/projects" + scopeSearch();
+  const header = pageHeader("New project", "", { back: listHref, backLabel: "Back to Manage resources" });
+  if (!route || !caps.create) {
+    return setChildren(view, header,
+      emptyState("Projects cannot be created here", "This instance does not offer Resource Manager's Create project."));
+  }
+  const spec = caps.create;
+  const idField = (spec.fields || []).find((f) => f.name === "projectId") || {};
+  const parentField = (spec.fields || []).find((f) => f.name === "parent") || { options: [""] };
+  const suffix = String(100000 + Math.floor(Math.random() * 900000));
+
+  const name = el("input", { id: "new-project-name", type: "text", required: true, maxlength: "30",
+    value: `My Project ${suffix.slice(0, 5)}`, "aria-describedby": "new-project-id-line" });
+  const id = el("input", { id: "new-project-id", type: "text", required: true, maxlength: "30",
+    pattern: idField.pattern || "", spellcheck: "false", value: projectIdFrom(name.value, suffix) });
+  let idEdited = false;
+  const idText = el("strong", { class: "mono", text: id.value });
+  const idRow = el("div", { class: "form-row", hidden: true },
+    el("label", { for: "new-project-id", text: "Project ID" }), id,
+    el("p", { class: "form-help", text: idField.help || "" }));
+  const idLine = el("p", { class: "form-help", id: "new-project-id-line" },
+    "Project ID: ", idText, ". It cannot be changed later. ",
+    el("button", { type: "button", class: "link-button is-inline", text: "Edit",
+      onclick: (e) => { idRow.hidden = false; e.target.remove(); id.focus(); } }));
+  name.addEventListener("input", () => {
+    if (!idEdited) { id.value = projectIdFrom(name.value, suffix); idText.textContent = id.value; }
+  });
+  id.addEventListener("input", () => { idEdited = true; idText.textContent = id.value; });
+
+  const parentLabel = (v) => (v ? v : "No organization");
+  const parent = el("select", { id: "new-project-parent" },
+    ...(parentField.options || [""]).map((v) => el("option", { value: v, text: parentLabel(v) })));
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  const primary = el("button", { type: "submit", class: "primary", text: "Create" });
+
+  const submit = async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    if (!name.value.trim()) { error.textContent = "Enter a project name."; error.hidden = false; name.focus(); return; }
+    if (!id.checkValidity()) {
+      idRow.hidden = false;
+      error.textContent = idField.help || "The project ID is not valid.";
+      error.hidden = false;
+      id.focus();
+      return;
+    }
+    setBusy(primary, true);
+    try {
+      const made = await submitCreate(route, spec,
+        { projectId: id.value.trim(), displayName: name.value.trim(), parent: parent.value });
+      notify(`Created project ${made}`);
+      announce(`Created project ${made}`);
+      window.dispatchEvent(new CustomEvent("cb-project-select", { detail: made }));
+      navigate("/?project=" + encodeURIComponent(made));
+    } catch (err) {
+      setBusy(primary, false);
+      error.textContent = err.message;
+      error.hidden = false;
+    }
+  };
+
+  setChildren(view, header,
+    el("form", { class: "create-page new-project", novalidate: true, onsubmit: submit },
+      error,
+      el("div", { class: "form-row" },
+        el("label", { for: "new-project-name", text: "Project name *" }), name, idLine),
+      idRow,
+      el("div", { class: "form-row" },
+        el("label", { for: "new-project-parent", text: "Location *" }), parent,
+        el("p", { class: "form-help", text: "Parent organization or folder" })),
+      el("div", { class: "form-actions" }, primary,
+        el("a", { class: "button secondary", href: listHref, text: "Cancel" }))));
+  name.focus();
+  announce("New project form");
+}
+
 async function renderCreatePage(view, route) {
   const target = route.of;
   const project = currentProject();
@@ -5948,6 +6153,7 @@ function dispatch(view) {
   if (match.screen === "create") return renderCreatePage(view, match);
   if (match.screen === "products") return renderProducts(view);
   if (match.screen === "connect") return renderConnect(view);
+  if (match.screen === "new-project") return renderNewProject(view);
   if (!match.service) return renderDashboard(view);
   if (resourcePath.length) return renderDetail(view, match, resourcePath);
   // The old address still works, so a link someone saved keeps resolving.
@@ -6542,6 +6748,10 @@ function rescopeLinks(from, to) {
 // happen to exist. Scanning could not show a project with nothing in it, and
 // could not offer to make one — so the console could never answer "which
 // projects are there?" or "give me a new one".
+// The Select a project dialog's Recent and Starred views (#1842).
+const RECENT_PROJECTS_KEY = "cloudburrow.projects.recent";
+const STARRED_PROJECTS_KEY = "cloudburrow.projects.starred";
+
 async function initProjects() {
   const button = document.getElementById("project-button");
   const panel = document.getElementById("project-panel");
@@ -6558,12 +6768,17 @@ async function initProjects() {
     history.replaceState({}, "", url);
   }
 
+  // Each opening is numbered, so a list read that finishes after the picker
+  // was closed (New project, a choice, Escape) does not open it again.
+  let opening = 0;
   const closePicker = () => {
+    opening++;
     hideOverlay(panel);
     button.setAttribute("aria-expanded", "false");
   };
 
   const select = (id) => {
+    if (id) writeStored(RECENT_PROJECTS_KEY, [id, ...readStored(RECENT_PROJECTS_KEY, []).filter((x) => x !== id)].slice(0, 10));
     const url = new URL(location.href);
     if (id) url.searchParams.set("project", id);
     else url.searchParams.delete("project");
@@ -6578,25 +6793,60 @@ async function initProjects() {
   };
 
   let projects = [];
+  // Recent, Starred and All, as Google's dialog offers (#1842); recents and
+  // stars are this browser's own, kept in localStorage.
+  let view = "all";
+  const views = document.getElementById("project-views");
+  const starred = () => readStored(STARRED_PROJECTS_KEY, []);
+  const recent = () => readStored(RECENT_PROJECTS_KEY, []);
+  views.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-view]");
+    if (!b) return;
+    view = b.dataset.view;
+    views.querySelectorAll("[data-view]").forEach((x) =>
+      x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+    draw();
+  });
+  const toggleStar = (id) => {
+    const now = starred();
+    writeStored(STARRED_PROJECTS_KEY, now.includes(id) ? now.filter((x) => x !== id) : [...now, id]);
+    draw();
+  };
   const draw = () => {
     const q = filter.value.trim().toLowerCase();
-    const shown = projects.filter((p) =>
+    const stars = starred();
+    const recents = recent();
+    let pool = projects;
+    if (view === "starred") pool = projects.filter((p) => stars.includes(p.id));
+    if (view === "recent") {
+      pool = recents.map((id) => projects.find((p) => p.id === id)).filter(Boolean);
+    }
+    const shown = pool.filter((p) =>
       !q || p.id.toLowerCase().includes(q) || (p.name || "").toLowerCase().includes(q));
 
     // No "All projects" entry: Google's console always works in one
     // selected project (#1842).
     setChildren(list,
       ...shown.map((p) =>
-        el("li", {},
+        el("li", { class: "picker-row" },
           el("button", {
             class: "picker-item" + (selected === p.id ? " is-selected" : ""),
             onclick: () => select(p.id),
           },
             el("span", { class: "picker-item-name", text: p.name || p.id }),
-            el("span", { class: "picker-item-id", text: p.id })))));
+            el("span", { class: "picker-item-id", text: p.id })),
+          el("button", {
+            type: "button", class: "icon-button picker-star",
+            "aria-pressed": stars.includes(p.id) ? "true" : "false",
+            "aria-label": `Star ${p.name || p.id}`, title: stars.includes(p.id) ? "Unstar" : "Star",
+            html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/></svg>',
+            onclick: () => toggleStar(p.id),
+          }))));
 
-    if (!shown.length && q) {
-      list.append(el("li", {}, el("p", { class: "panel-empty", text: "No matching projects." })));
+    if (!shown.length) {
+      list.append(el("li", {}, el("p", { class: "panel-empty",
+        text: q ? "No matching projects."
+          : view === "starred" ? "No starred projects. Star a project from All." : "No recent projects." })));
     }
   };
 
@@ -6651,7 +6901,9 @@ async function initProjects() {
 
   button.addEventListener("click", async () => {
     if (overlayOpen(panel)) return closePicker();
+    const mine = ++opening;
     await load();
+    if (mine !== opening) return;
     showOverlay(panel);
     button.setAttribute("aria-expanded", "true");
     filter.focus();
@@ -6665,20 +6917,23 @@ async function initProjects() {
     }
   });
 
+  // Manage resources is a link; the picker closes behind it.
+  document.getElementById("project-manage").addEventListener("click", () => closePicker());
+  // New project opens the New project page, as Google's picker does
+  // (#1842); the page makes it through the same Resource Manager form, so
+  // there is one definition of what a project needs.
   newButton.addEventListener("click", () => {
     closePicker();
-    const route = ROUTES.find((r) => r.service === "projects");
-    const caps = capabilityOf("projects");
-    if (!route || !caps.create) {
+    if (!capabilityOf("projects").create) {
       announce("Creating projects is not available");
       return;
     }
-    // The same form the Resource Manager screen uses, so there is one
-    // definition of what a project needs and one set of rules.
-    openCreateForm(route, caps.create, async (created) => {
-      await load();
-      select(created || selected);
-    });
+    navigate("/projectcreate" + scopeSearch());
+  });
+  // The New project page selects what it made.
+  window.addEventListener("cb-project-select", async (e) => {
+    await load();
+    select(e.detail);
   });
 
   await load();
@@ -6700,6 +6955,31 @@ async function initProjects() {
 // is following the keyboard.
 const SUGGEST_DEBOUNCE_MS = 250;
 const SUGGEST_LIMIT = 8;
+
+// matchingPages lists the served pages whose page or product name holds q
+// (#1842), products' first pages first: "logs" finds Logs Explorer, Log
+// router and the rest of Cloud Logging's pages.
+function matchingPages(q) {
+  const needle = q.trim().toLowerCase();
+  if (!needle) return [];
+  const served = new Set(SERVICES.map((sv) => sv.id));
+  const out = [];
+  for (const r of ROUTES) {
+    if (!r.section && r.path !== "/activity") continue;
+    if (r.service && !served.has(r.service)) continue;
+    const page = r.navTitle || r.title;
+    const product = r.productTitle || "";
+    const words = `${page} ${product} ${r.title}`.toLowerCase();
+    if (!words.includes(needle)) continue;
+    out.push({
+      path: r.path,
+      label: product && product !== page ? `${page} – ${product}` : page,
+      kind: "Page",
+      rank: page.toLowerCase().startsWith(needle) ? 0 : 1,
+    });
+  }
+  return out.sort((a, b) => a.rank - b.rank).slice(0, 4);
+}
 
 function initSearch() {
   const search = document.getElementById("search");
@@ -6766,6 +7046,13 @@ function initSearch() {
     for (const product of data.products || []) {
       const r = ROUTES.find((x) => x.service === product.service);
       if (r) rows.push({ href: r.path + scopeSearch(), label: r.title, kind: "Product" });
+    }
+    // Pages across products (#1842): Google's search lists products and
+    // their pages ("Log router", "Key rings") beside resources. Matched here
+    // from the routes this instance serves, by page and product name.
+    for (const page of matchingPages(q)) {
+      if (rows.some((row) => row.href.split("?")[0] === page.path)) continue;
+      rows.push({ href: page.path + scopeSearch(), label: page.label, kind: page.kind });
     }
     for (const hit of (data.hits || []).slice(0, SUGGEST_LIMIT)) {
       const r = ROUTES.find((x) => x.service === hit.service);
@@ -7014,7 +7301,7 @@ async function renderSearch(view) {
 const SHORTCUTS = [
   { keys: "/", what: "Focus the search box" },
   { keys: "?", what: "Show this list" },
-  { keys: "g then d", what: "Go to the dashboard", go: "/" },
+  { keys: "g then d", what: "Go to the Welcome page", go: "/" },
   { keys: "g then l", what: "Go to the Logs Explorer", go: "/logs" },
   { keys: "g then a", what: "Go to Activity", go: "/activity" },
   { keys: "g then m", what: "Go to Monitoring", go: "/monitoring" },
@@ -7140,6 +7427,22 @@ async function main() {
   window.addEventListener("resize", syncStickyOffsets);
   initTheme();
   initPanel("settings", "settings-panel");
+  // Help (#1842): the keyboard shortcuts, Connect and All products. The
+  // shortcut list opens from it, from Settings at a width with no Help, and
+  // from "?".
+  initPanel("help", "help-panel");
+  document.getElementById("help-panel").addEventListener("click", (e) => {
+    if (e.target.closest("a")) {
+      hideOverlay(document.getElementById("help-panel"));
+      document.getElementById("help").setAttribute("aria-expanded", "false");
+    }
+  });
+  for (const id of ["help-shortcuts", "settings-shortcuts"]) {
+    document.getElementById(id).addEventListener("click", () => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      openShortcutHelp();
+    });
+  }
   initUploadSetting();
   initAbout();
   initPanel("account", "account-panel");

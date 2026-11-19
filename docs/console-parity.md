@@ -302,10 +302,44 @@ Logs Explorer interface); the layout below is what every category screen (#1843â
   project the first registered one is chosen.
 - [x] **Emulator notes are a dismissible banner** above the table instead of a paragraph, dismissed
   for the tab.
-- [ ] Not yet: the details card above every tab strip, and the Logs and Query tabs appended to every
-  resource (audit item 9); `/` to search with a results dropdown (10); the `?` shortcut list in a
-  Help menu (11); the project picker's Select a project dialog and the New project page (12);
-  Home's Welcome dashboard (13). Each is listed in #1842's follow-ups.
+- [x] **Details in the page header** (round 2). A resource's properties are a row of its page header
+  (`.resource-summary`, label over value) above the tab strip, as Google's bucket page carries
+  Location and Storage class beside its title, not a "Details" card between the header and the
+  tabs. Every detail route declares `kind`, so every top-level resource page is "<Kind> details"
+  with its name under the title; the data browsers (Firestore Data, Datastore), whose pages are a
+  collection or entity path rather than a resource, keep the path as their title, and Firestore's
+  breadcrumb starts at "Firestore" (`crumb`).
+- [x] **A Logs tab only where Google's page has one**: Cloud Run services, jobs and worker pools,
+  functions, and GKE workloads, pods, Services and Jobs (route `logs: true`; "Click the Logs tab to
+  get the request and container logs for all revisions of this service",
+  https://docs.cloud.google.com/run/docs/logging). It reads the instance's log store, which holds
+  what clients write to Cloud Logging when the instance serves it (`/api/logs` answers
+  `cloudLogging`), says so when it is not served, and links to the Logs Explorer with the filter
+  applied. A bucket, a topic or a secret has no Logs tab, as on Google's pages; their lines stay in
+  the Logs Explorer. A provider's own Logs tab (a Cloud Run task's) is kept. The Query tab stays
+  where the service has a query editor.
+- [x] **Search.** The toolbar search reads "Search (/) for resources, pages and products" and `/`
+  focuses it; its dropdown lists products, the pages of every served product matched by page or
+  product name ("deleted" finds Deleted buckets, "log" Cloud Logging's pages), and resources, with
+  "All results" for the results page. Google's search also finds documentation, which a local
+  console does not hold.
+- [x] **Help and keyboard shortcuts.** The toolbar's Help (question mark) menu holds Keyboard
+  shortcuts, Connect and All products; `?` opens the same shortcut list. Below 600px Help gives
+  up its place in the bar and Settings and utilities lists Keyboard shortcuts and Connect.
+- [x] **Select a project and New project.** The picker is "Select a project": a search over projects,
+  Recent, Starred and All (recents and stars are kept in this browser; each row has a star), their
+  Name and ID in two columns, New project and Manage resources (Resource Manager's list).
+  New project opens the New project page at `/projectcreate`: Project name first, the Project ID
+  made from it ("It cannot be changed later", Edit), and Location (No organization, the organization
+  or a folder); Create makes it through Resource Manager's create and selects it. The Resource
+  Manager list keeps its Create project dialog.
+- [x] **Welcome.** Home is "Welcome", "You're working in <project>": Project info (name, number, ID,
+  Go to project settings), Resources (the counts of the project's buckets, topics, secrets, queues
+  and the other served products' resources), Quick access to the served products, APIs (the
+  enabled APIs and services, linking to the APIs overview), and Activity
+  (View all activity, Request Log); the instance's own state (Instance, Cluster, Endpoints,
+  utilisation, components, services) follows under "Instance". Google's Recommendations card has
+  no counterpart: CloudBurrow serves no Recommender API.
 
 #### For category workers: the shared components (`internal/console/assets/console.js`)
 
@@ -318,6 +352,7 @@ Logs Explorer interface); the layout below is what every category screen (#1843â
 | `viewOptions({ service, columns, onChange })` | The column chooser; `.hidden()` is the set turned off. |
 | `statusIcon(status)` | A status cell's icon, colour from `stateOf`, text kept for assistive technology. |
 | `noteBanner(text)` | An emulation note as a dismissible banner. |
+| ROUTES `logs`, `crumb` | `logs: true` gives a resource page the shared Logs tab (only where Google's page has one); `crumb` names a breadcrumb's first link where the page title would not name the product. |
 | `createSteps(fields.nodes)` | Numbered sections with Continue, from the form's `Section`s; `renderCreatePage` uses it, so a provider gets it by declaring sections and `CreateOnPage() bool { return true }`. |
 
 ## 5. Routes, scoping, accessibility, viewports
