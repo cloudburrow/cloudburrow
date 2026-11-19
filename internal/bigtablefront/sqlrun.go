@@ -26,6 +26,9 @@ type source struct {
 	rows [][]any
 	// refused are columns the emulator's SQL cannot read, and why.
 	refused map[string]string
+	// pseudo are the columns SELECT * leaves out: _key, of a table with a
+	// row key schema (#1900).
+	pseudo map[string]bool
 }
 
 // plan is a checked query.
@@ -442,7 +445,7 @@ func build(q *query, src *source, params map[string]*btpb.Type) (*plan, error) {
 			return nil, fmt.Errorf("SELECT * must have a FROM clause")
 		}
 		for _, c := range src.cols {
-			if _, bad := src.refused[c.name]; bad {
+			if _, bad := src.refused[c.name]; bad || src.pseudo[c.name] {
 				continue
 			}
 			p.items = append(p.items, selectItem{e: &colRef{name: c.name}, alias: c.name})

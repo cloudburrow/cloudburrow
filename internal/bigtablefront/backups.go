@@ -55,8 +55,10 @@ const (
 // tableCopy is a table as it was when copied.
 type tableCopy struct {
 	families map[string]*btapb.ColumnFamily
-	rows     []*btpb.MutateRowsRequest_Entry
-	size     int64
+	// schema is the table's row key schema, if it had one (#1900).
+	schema *btapb.Type_Struct
+	rows   []*btpb.MutateRowsRequest_Entry
+	size   int64
 }
 
 type backupEntry struct {
@@ -79,6 +81,8 @@ type copies struct {
 	// deleted is the tables deleted through the front, kept for
 	// UndeleteTable (undelete.go).
 	deleted map[string]*deletedTable
+	// keys is the tables' row key schemas, which a copy keeps.
+	keys *rowKeySchemas
 }
 
 func newCopies(upstream *grpc.ClientConn, in *instances) *copies {
@@ -151,6 +155,9 @@ func (c *copies) read(ctx context.Context, name string) (*tableCopy, error) {
 		return nil, err
 	}
 	out := &tableCopy{families: map[string]*btapb.ColumnFamily{}}
+	if c.keys != nil {
+		out.schema = c.keys.get(name)
+	}
 	for id, f := range t.GetColumnFamilies() {
 		out.families[id] = proto.Clone(f).(*btapb.ColumnFamily)
 	}
@@ -185,6 +192,10 @@ func (c *copies) write(ctx context.Context, instance, tableID string, data *tabl
 	})
 	if err != nil {
 		return nil, err
+	}
+	if data.schema != nil && c.keys != nil {
+		c.keys.set(t.GetName(), data.schema)
+		t.RowKeySchema = proto.Clone(data.schema).(*btapb.Type_Struct)
 	}
 	d := btpb.NewBigtableClient(c.upstream)
 	for start := 0; start < len(data.rows); start += 1000 {

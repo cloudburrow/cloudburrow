@@ -53,7 +53,10 @@ var crc32c = crc32.MakeTable(crc32.Castagnoli)
 type sqlFront struct {
 	upstream *grpc.ClientConn
 	views    *sqlViews
-	now      func() time.Time
+	// keys is the tables' row key schemas, which the fields of the key
+	// are read by (rowkeyschema.go, #1900).
+	keys *rowKeySchemas
+	now  func() time.Time
 }
 
 func (q *sqlFront) methods() map[string]method {
@@ -167,13 +170,28 @@ func (q *sqlFront) source(ctx context.Context, instance string, qu *query, param
 		fams[id] = fi
 	}
 	cols, refused := tableColumns(fams, tp)
+	var rks *btapb.Type_Struct
+	if q.keys != nil {
+		rks = q.keys.get(instance + "/tables/" + qu.from)
+	}
 	src := &source{cols: cols, refused: refused}
+	if rks != nil {
+		// The key's fields follow _key, now a pseudocolumn, and come
+		// before the families.
+		src.cols = append(append([]column{cols[0]}, keyColumns(rks)...), cols[1:]...)
+		src.pseudo = map[string]bool{"_key": true}
+	}
 	if read {
 		rows, err := readAll(ctx, btpb.NewBigtableClient(q.upstream), &btpb.ReadRowsRequest{TableName: instance + "/tables/" + qu.from})
 		if err != nil {
 			return nil, err
 		}
 		src.rows = tableRows(rows, cols, tp)
+		if rks != nil {
+			for i, r := range src.rows {
+				src.rows[i] = append(append([]any{r[0]}, keyValues(qu.from, rks, r[0].([]byte))...), r[1:]...)
+			}
+		}
 	}
 	return src, nil
 }

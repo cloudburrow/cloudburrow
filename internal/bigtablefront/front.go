@@ -88,6 +88,8 @@ type Front struct {
 	persist persister
 	// seen is every instance a call has named (seen.go, #1550).
 	seen seenInstances
+	// keys is the tables' row key schemas (rowkeyschema.go, #1900).
+	keys *rowKeySchemas
 	// aggs serialises the writes to the aggregate families the front
 	// computes (aggregates.go, #1893).
 	aggs aggWrites
@@ -105,7 +107,7 @@ func New(upstream string, logf func(format string, args ...any)) (*Front, error)
 	if logf == nil {
 		logf = log.Printf
 	}
-	f := &Front{upstream: conn, addr: upstream, logf: logf, changes: newChangeStreams()}
+	f := &Front{upstream: conn, addr: upstream, logf: logf, changes: newChangeStreams(), keys: newRowKeySchemas()}
 	f.streams = f.streamMethods()
 	f.instances = newInstances(f.dropTables)
 	f.served = f.instances.methods()
@@ -113,9 +115,10 @@ func New(upstream string, logf func(format string, args ...any)) (*Front, error)
 		f.served[name] = m
 	}
 	f.copies = newCopies(conn, f.instances)
+	f.copies.keys = f.keys
 	f.views = &authViews{upstream: conn, byName: map[string]*btapb.AuthorizedView{}}
 	f.sqlViews = &sqlViews{instances: f.instances, byName: map[string]*sqlView{}}
-	sql := &sqlFront{upstream: conn, views: f.sqlViews, now: time.Now}
+	sql := &sqlFront{upstream: conn, views: f.sqlViews, keys: f.keys, now: time.Now}
 	f.sqlViews.checkQuery = func(instance, query string) error {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -145,6 +148,7 @@ func New(upstream string, logf func(format string, args ...any)) (*Front, error)
 			var req btapb.DeleteTableRequest
 			if proto.Unmarshal(in, &req) == nil {
 				f.changes.drop(req.GetName())
+				f.keys.drop(req.GetName())
 			}
 		}
 		return resp, err
@@ -470,6 +474,7 @@ func (f *Front) dropTables(ctx context.Context, instance string) error {
 	f.sqlViews.drop(instance)
 	f.bundles.drop(instance)
 	f.changes.drop(instance)
+	f.keys.drop(instance)
 	c := btapb.NewBigtableTableAdminClient(f.upstream)
 	var token string
 	for {

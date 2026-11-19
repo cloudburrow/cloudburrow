@@ -66,9 +66,9 @@ func TestBigtableConsoleParity1858(t *testing.T) {
 	p.run(chromedp.Click(chromedp.CSS(`#tab-tables`)))
 	p.clickText("#view #section-actions-tables button", "Create table")
 	p.waitFor(`document.querySelector(".modal.is-open #f-table") !== null`)
-	// Define row key schema is drawn, disabled with its reason: the
-	// emulator keeps no row key schema.
-	p.waitFor(`document.querySelector(".modal.is-open #f-rowKeySchema")?.disabled === true && document.querySelector(".modal.is-open").textContent.includes("keeps no row key schema")`)
+	// Define row key schema is offered (#1900, its own test in
+	// bigtablerowkeyschema1900_test.go).
+	p.waitFor(`document.querySelector(".modal.is-open #f-rowKeySchema")?.disabled === false`)
 	setField(p, ".modal.is-open", "f-table", "orders")
 	setField(p, ".modal.is-open", "f-changeStream", "true")
 	setField(p, ".modal.is-open", "f-retention", "3")
