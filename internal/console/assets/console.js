@@ -243,27 +243,67 @@ const ROUTES = [
     product: "kms", productTitle: "Key Management" },
   { path: "/kms/hsm", service: "kms-hsm", icon: "kms", title: "Single-tenant HSM", kind: "Single-tenant HSM instance", section: "Security and identity",
     product: "kms", productTitle: "Key Management" },
-  // IAM & Admin > IAM (#1368): the selected project's IAM policy, stored and
-  // never enforced (ADR-0006); Grant access and Remove principal on its
-  // Permissions tab.
-  { path: "/iam-admin/iam", service: "iam", title: "IAM", kind: "Principal", section: "IAM & Admin",
+  // IAM & Admin (#1864): Google's menu, in Google's order. A page whose API
+  // CloudBurrow does not serve is in Google's place and says so; Labels,
+  // Tags, Organization Policies, Settings and Manage resources are the local
+  // Resource Manager's, IAM, Service Accounts, Roles, Audit Logs and Groups
+  // the local IAM's.
+  // IAM (#1368, #1864): the selected project's principals, Google's IAM
+  // page (renderIAMPage); /iam-admin/iam/<project> keeps the policy's
+  // Permissions tab, with Test permissions and the condition linter.
+  { path: "/iam-admin/iam", service: "iam", screen: "iam-page", title: "IAM", kind: "Principal", section: "IAM & Admin",
     product: "iam", productTitle: "IAM & Admin" },
-  // IAM & Admin > Roles (#1743): the project's and the organization's
-  // custom roles, with Create role, Edit role, Delete and Undelete.
-  { path: "/iam-admin/roles", service: "iam-roles", icon: "iam", title: "Roles", kind: "Role", section: "IAM & Admin",
-    product: "iam", productTitle: "IAM & Admin" },
-  { path: "/iam-admin/groups", service: "iam-groups", icon: "iam", title: "Groups", kind: "Group", section: "IAM & Admin",
+  { path: "/iam-admin/cloudidentity", title: "Identity & Organization", service: null, requires: "iam", screen: "unavailable", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin",
+    unavailable: "Identity & Organization is Cloud Identity's sign-up and organization setup checklist, which a local instance has no counterpart for: its organization (organizations/100000000001) exists from the start. Groups are on the Groups page." },
+  { path: "/iam-admin/troubleshooter", title: "Policy Troubleshooter", service: null, requires: "iam", screen: "unavailable", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin",
+    unavailable: "Policy Troubleshooter is the Policy Troubleshooter API's troubleshootIamPolicy, which CloudBurrow does not serve: IAM policies here are stored and never enforced (ADR-0006), so there is no access decision to explain. The IAM page lists who holds which role, and a policy's Permissions tab has Test permissions." },
+  { path: "/iam-admin/analyzer", title: "Policy Analyzer", service: null, requires: "iam", screen: "unavailable", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin",
+    unavailable: "Policy Analyzer is the Cloud Asset API's analyzeIamPolicy, which CloudBurrow does not serve. View by roles on the IAM page lists each role's principals on the project, its folders and the organization." },
+  // Organization Policies (#1864): the selected project's constraints, the
+  // policy set on it and the effective one, over Resource Manager's v1
+  // org policy methods.
+  { path: "/iam-admin/orgpolicies", service: "iam-orgpolicies", icon: "iam", title: "Organization Policies", kind: "Constraint", section: "IAM & Admin",
     product: "iam", productTitle: "IAM & Admin" },
   // IAM & Admin > Service accounts (#1747): the project's accounts, their
   // keys and Permissions tab, Create, Edit, Disable, Enable, Delete,
   // Undelete, Create key and Upload key.
-  { path: "/iam-admin/serviceaccounts", service: "iam-service-accounts", icon: "iam", title: "Service accounts", kind: "Service account", section: "IAM & Admin",
+  { path: "/iam-admin/serviceaccounts", service: "iam-service-accounts", icon: "iam", title: "Service Accounts", kind: "Service account", section: "IAM & Admin", logs: true,
+    product: "iam", productTitle: "IAM & Admin" },
+  { path: "/iam-admin/workload-identity-pools", title: "Workload Identity Federation", service: null, requires: "iam", screen: "unavailable", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin",
+    unavailable: "Workload identity pools and providers are the IAM API's projects.locations.workloadIdentityPools, which CloudBurrow does not serve. A workload reaches this instance with a service account key, or with no credentials at all." },
+  { path: "/iam-admin/workforce-identity-pools", title: "Workforce Identity Federation", service: null, requires: "iam", screen: "unavailable", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin",
+    unavailable: "Workforce identity pools are the IAM API's locations.workforcePools, which CloudBurrow does not serve." },
+  // Labels (#1864): the selected project's labels, Resource Manager's.
+  { path: "/iam-admin/labels", service: "iam-labels", icon: "iam", title: "Labels", kind: "Label", section: "IAM & Admin",
+    product: "iam", productTitle: "IAM & Admin" },
+  // Settings (#1864): the selected project's name, ID and number.
+  { path: "/iam-admin/settings", service: "iam-settings", icon: "iam", title: "Settings", kind: "Project", section: "IAM & Admin",
+    product: "iam", productTitle: "IAM & Admin" },
+  { path: "/iam-admin/privacy", title: "Privacy & Security", service: null, requires: "iam", screen: "unavailable", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin",
+    unavailable: "Privacy & Security (Access Transparency, Access Approval and the data processing terms) concerns Google's own access to a project's data, which a local instance has none of." },
+  { path: "/iam-admin/iap", title: "Identity-Aware Proxy", service: null, requires: "iam", screen: "unavailable", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin",
+    unavailable: "Identity-Aware Proxy is the IAP API's, which CloudBurrow does not serve. A Cloud Run service is reached on its local URL directly." },
+  // IAM & Admin > Roles (#1743): the project's and the organization's
+  // custom roles, with Create role, Edit role, Delete and Undelete.
+  { path: "/iam-admin/roles", service: "iam-roles", icon: "iam", title: "Roles", kind: "Role", section: "IAM & Admin",
     product: "iam", productTitle: "IAM & Admin" },
   // IAM & Admin > Audit Logs (#1756): the services that can write Data
   // Access audit logs (queryAuditableServices) and the project policy's
   // log types for each.
   { path: "/iam-admin/audit", service: "iam-audit", icon: "iam", title: "Audit Logs", kind: "Service", section: "IAM & Admin",
     product: "iam", productTitle: "IAM & Admin" },
+  { path: "/iam-admin/groups", service: "iam-groups", icon: "iam", title: "Groups", kind: "Group", section: "IAM & Admin",
+    product: "iam", productTitle: "IAM & Admin" },
+  { path: "/iam-admin/essential-contacts", title: "Essential Contacts", service: null, requires: "iam", screen: "unavailable", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin",
+    unavailable: "Essential Contacts is the Essential Contacts API's, which CloudBurrow does not serve: a local instance sends no notifications." },
+  { path: "/iam-admin/asset-inventory", title: "Asset Inventory", service: null, requires: "iam", screen: "unavailable", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin",
+    unavailable: "Asset Inventory is the Cloud Asset API's, which CloudBurrow does not serve. The toolbar's search finds every served resource, and each product's list holds its own." },
+  { path: "/iam-admin/quotas", title: "Quotas & System Limits", service: null, requires: "iam", screen: "unavailable", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin",
+    unavailable: "Quotas are the Cloud Quotas API's, which CloudBurrow does not serve. The limits Google documents per API are enforced by the services themselves." },
+  { path: "/iam-admin/pam", title: "Privileged Access Manager", service: null, requires: "iam", screen: "unavailable", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin",
+    unavailable: "Privileged Access Manager (entitlements and grants) is the Privileged Access Manager API's, which CloudBurrow does not serve. Grant a role on the IAM page; an IAM condition on request.time makes it temporary." },
+  { path: "/iam-admin/principal-access-boundary", title: "Principal Access Boundary", service: null, requires: "iam", screen: "unavailable", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin",
+    unavailable: "Principal access boundary policies are the IAM v3 API's, which CloudBurrow does not serve." },
 
   { path: "/monitoring", service: null, screen: "monitoring", title: "Monitoring", section: "Operations" },
   { path: "/logs",     service: null, screen: "logs",     title: "Logs Explorer", section: "Operations",
@@ -323,6 +363,18 @@ const ROUTES = [
   // cloudburrow commands of those names. Also reached from Settings and
   // utilities.
   { path: "/instance", service: null, screen: "instance", title: "Instance", section: "Management tools" },
+  // Pages of another product's service that Google's IAM & Admin menu
+  // also lists (#1864). They come after the product's own routes, so a
+  // lookup by service still finds Resource Manager's page, and `navAfter`
+  // places each in the IAM & Admin menu after the page it names.
+  // Tags (#1295) is Resource Manager's tag keys page; Google files it under
+  // IAM & Admin, so it is in this menu too.
+  { path: "/iam-admin/tags", service: "tags", icon: "iam", title: "Tags", kind: "Tag key", section: "IAM & Admin",
+    product: "iam", productTitle: "IAM & Admin", navAfter: "/iam-admin/labels" },
+  // Manage resources (#1864): Resource Manager's projects, the page Google's
+  // IAM & Admin menu opens at /cloud-resource-manager.
+  { path: "/cloud-resource-manager", service: "projects", icon: "iam", title: "Manage resources", kind: "Project", section: "IAM & Admin",
+    product: "iam", productTitle: "IAM & Admin", navAfter: "/iam-admin/audit" },
 ];
 
 // Every product listing gets a matching create address.
@@ -349,7 +401,16 @@ const productKey = (entry) => entry.product || entry.service || entry.path;
 const productTitle = (entry) => entry.productTitle || entry.title;
 
 // pagesOf returns the pages a product owns, in declaration order.
-const pagesOf = (key) => ROUTES.filter((r) => r.section && productKey(r) === key);
+// A route with `navAfter` (#1864) is listed after the page it names.
+const pagesOf = (key) => {
+  const pages = ROUTES.filter((r) => r.section && productKey(r) === key && !r.navAfter);
+  for (const r of ROUTES) {
+    if (!r.navAfter || !r.section || productKey(r) !== key) continue;
+    const i = pages.findIndex((p) => p.path === r.navAfter);
+    pages.splice(i < 0 ? pages.length : i + 1, 0, r);
+  }
+  return pages;
+};
 
 // Product marks.
 //
@@ -2475,9 +2536,11 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   const caps = opts.rowControls ? capabilityOf(route.service) : {};
   // Actions on the page that take the checked rows, such as Compose on a
   // bucket's objects (#790). Only rows that are objects can be checked.
-  const selectActions = opts.pagePath ? (data.selectActions || []) : [];
+  // A top-level list's selection actions (#1864) are its ListActions,
+  // sent with an empty path: Roles' Create role from selection.
+  const selectActions = data.selectActions || [];
   const selectable = Boolean(opts.rowControls && caps.delete) || selectActions.length > 0;
-  const canSelect = (item) => !selectActions.length || Boolean(item.object);
+  const canSelect = (item) => !selectActions.length || !(opts.pagePath || []).length || Boolean(item.object);
 
   // All of the table's state lives here, so a refresh can put it back.
   let sortColumn = null;
@@ -2549,11 +2612,11 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
     onclick: () => {
       const byName = new Map(data.items.map((i) => [i.name, i]));
       const names = [...selected].map((n) => byName.get(n)).filter(Boolean)
-        .map((i) => i.object[i.object.length - 1]);
+        .map((i) => (i.object ? i.object[i.object.length - 1] : i.name));
       const fields = (a.fields || []).map((f) =>
         f.name === a.selectionField ? { ...f, default: names.join("\n") } : f);
       // The whole page again, whose summary counts the objects too.
-      runAction(route, opts.pagePath, { ...a, fields }, () => reload());
+      runAction(route, opts.pagePath || [], { ...a, fields }, () => reload());
     },
   }));
 
@@ -3039,6 +3102,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
       ? (listActions.length || selectable
           ? el("div", { class: "action-bar" },
               ...listActions,
+              ...selectionButtons,
               selectable ? bulk : null,
               selectionLabel)
           : null)
@@ -3846,7 +3910,10 @@ function openActionForm(route, segments, action, onDone, title = null) {
 // form and is sent with an empty path, which the upload route checks against
 // the listing's actions.
 function listActionButtons(route, data, onDone) {
-  return (data.actions || []).map((a) => el("button", {
+  // A list action the listing also offers on its selection (#1864) is
+  // drawn once, as the selection's button.
+  const onSelection = new Set((data.selectActions || []).map((a) => a.id));
+  return (data.actions || []).filter((a) => !onSelection.has(a.id)).map((a) => el("button", {
     type: "button", class: "secondary", id: `list-action-${a.id}`, text: a.label,
     onclick: () => openActionForm(route, [], a, onDone, data.noun || route.title),
   }));
@@ -5368,6 +5435,23 @@ function buildCreateForm(spec) {
     show();
   }
 
+  // A field made from another (#1864): until it is edited by hand it
+  // follows that field, lowercased, with every run of other characters a
+  // dash, as Google's Create service account makes the ID from the name.
+  for (const entry of entries) {
+    const from = byName.get(entry.field.deriveFrom || "");
+    if (!from) continue;
+    let edited = false;
+    entry.control.addEventListener("input", () => { edited = entry.control.value !== ""; });
+    from.control.addEventListener("input", () => {
+      if (edited) return;
+      let v = from.control.value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^[^a-z]+/, "").slice(0, 30)
+        .replace(/-+$/, "");
+      entry.control.value = v;
+      entry.control.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  }
+
   // Fields group under their section heading, in the order the backend gave
   // them. A form whose fields declare no section renders as one block, which
   // is what a two-field form should look like.
@@ -6608,6 +6692,7 @@ function dispatch(view) {
   if (match.screen === "bigquery-studio") return renderBigQueryStudio(view);
   if (match.screen === "new-project") return renderNewProject(view);
   if (!match.service) return renderDashboard(view);
+  if (match.screen === "iam-page" && !resourcePath.length) return renderIAMPage(view, match);
   if (resourcePath.length) return renderDetail(view, match, resourcePath);
   // The old address still works, so a link someone saved keeps resolving.
   const legacy = new URLSearchParams(location.search).get("resource");
@@ -12459,4 +12544,460 @@ function bqChartPNG(svg) {
   };
   img.onerror = () => notify("Could not draw the chart as a PNG", "error");
   img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(data);
+}
+
+// --- IAM & Admin > IAM (#1864) -----------------------------------------
+//
+// Google's IAM page: "Permissions for project <id>", View by principals and
+// View by roles, Grant access and Remove access on the title line, Include
+// Google-provided role grants, and each principal's Edit principal. The
+// roles a folder or the organization grants are listed with the
+// principal's, marked with where they come from, as Google's Inheritance
+// column marks them, and are changed on that folder's or the
+// organization's page. Every change is one SetIamPolicy with the etag the
+// page read (cmd/cloudburrow/consoleiampage.go).
+
+function iamCall(call, body = {}) {
+  return send(`/api/studio/iam?call=${encodeURIComponent(call)}&project=${encodeURIComponent(currentProject())}`,
+    "POST", body);
+}
+
+// iamGoogleProvided says whether a principal is a Google-managed service
+// agent, whose grants Google's page hides until Include Google-provided
+// role grants is checked.
+function iamGoogleProvided(member) {
+  return /^serviceAccount:(service-\d+@|\d+@cloudservices\.gserviceaccount\.com$|.*@gcp-sa-[^.]+\.iam\.gserviceaccount\.com$|.*@(container-engine-robot|compute-system|cloud-ml\.google|cloudbuild)\.(iam\.)?gserviceaccount\.com$)/.test(member)
+    || /@gcp-sa-[^.]+\.iam\.gserviceaccount\.com$/.test(member);
+}
+
+// iamPrincipalType is Google's Type column's word for a member's prefix.
+function iamPrincipalType(member) {
+  const kind = member.split(":")[0];
+  return ({ user: "User", group: "Group", serviceAccount: "Service account", domain: "Domain",
+    allUsers: "All users", allAuthenticatedUsers: "All authenticated users", principal: "Principal",
+    principalSet: "Principal set", deleted: "Deleted" })[kind] || kind;
+}
+
+function iamRoleLabel(roles, name) {
+  const r = (roles || []).find((x) => x.name === name);
+  return r && r.title ? r.title : name;
+}
+
+// iamRows is the policy by principal: each principal's own roles and the
+// roles it is granted above the project.
+function iamRows(data) {
+  const byMember = new Map();
+  const add = (member, entry) => {
+    if (!byMember.has(member)) byMember.set(member, { member, roles: [] });
+    byMember.get(member).roles.push(entry);
+  };
+  for (const b of data.bindings || []) {
+    for (const m of b.members || []) add(m, { role: b.role, condition: b.conditional || null, from: "" });
+  }
+  for (const a of data.inherited || []) {
+    for (const b of a.bindings || []) {
+      for (const m of b.members || []) {
+        add(m, { role: b.role, condition: b.conditional || null, from: a.display, fromResource: a.resource });
+      }
+    }
+  }
+  return [...byMember.values()].sort((a, b) => a.member.localeCompare(b.member));
+}
+
+function renderIAMPage(view, route) {
+  const project = currentProject();
+  if (!project) {
+    setChildren(view, pageHeader("IAM", ""), emptyState("No project is selected", "Choose a project in the toolbar."));
+    return;
+  }
+  let data = null;
+  let roles = null;
+  let byRoles = new URLSearchParams(location.search).get("view") === "roles";
+  let includeGoogle = false;
+  const selected = new Set();
+
+  const body = el("div", { id: "iam-body" }, el("p", { class: "unavailable", text: "reading…" }));
+  const grant = createButton("Grant access", () => openIAMGrantPanel(data, rolesNow, reload));
+  grant.id = "iam-grant-access";
+  const removeButton = el("button", { class: "header-button", type: "button", id: "iam-remove-access",
+    disabled: "disabled", text: "Remove access", onclick: () => removeSelected() });
+  const header = pageHeader("IAM", "", { actions: [grant, removeButton, refreshButton(() => reload())] });
+
+  const rolesNow = async () => {
+    if (!roles) roles = await iamCall("roles");
+    return roles;
+  };
+
+  const tabs = el("div", { class: "tab-strip", role: "tablist", "aria-label": "IAM views" });
+  const drawTabs = () => setChildren(tabs, ...[["principals", "View by principals"], ["roles", "View by roles"]].map(([id, label]) =>
+    el("button", { type: "button", role: "tab", id: `iam-tab-${id}`, class: "tab" + ((id === "roles") === byRoles ? " is-selected" : ""),
+      "aria-selected": String((id === "roles") === byRoles), text: label,
+      onclick: () => {
+        byRoles = id === "roles";
+        const u = new URL(location.href);
+        if (byRoles) u.searchParams.set("view", "roles"); else u.searchParams.delete("view");
+        history.replaceState(history.state, "", u.pathname + u.search);
+        drawTabs();
+        draw();
+      } })));
+  drawTabs();
+
+  const google = el("input", { type: "checkbox", id: "iam-include-google",
+    onchange: () => { includeGoogle = google.checked; draw(); } });
+  const bar = filterBar({ noun: "", columns: () => byRoles ? ["Role", "Principal"] : ["Type", "Principal", "Name", "Role", "Inheritance"],
+    onChange: () => draw() });
+  bar.node.querySelector("input.filter").placeholder = "Filter";
+  bar.node.querySelector("input.filter").setAttribute("aria-label", "Filter");
+
+  const removeSelected = () => {
+    const members = [...selected];
+    if (!members.length || !data) return;
+    const own = iamRows(data).filter((r) => members.includes(r.member));
+    confirmDestructive({
+      title: members.length === 1 ? `Remove access for ${members[0]}?` : `Remove access for ${members.length} principals?`,
+      detail: `Every role ${members.length === 1 ? "this principal holds" : "these principals hold"} on project ${project} is removed. ` +
+        "Roles inherited from a folder or the organization stay, and are removed there.",
+      confirmWord: members.length === 1 ? members[0] : "remove",
+      confirmLabel: "Remove",
+      consequence: "",
+      onConfirm: async () => {
+        for (const r of own) {
+          const removes = r.roles.filter((x) => !x.from).map((x) => ({ role: x.role, condition: x.condition }));
+          if (!removes.length) continue;
+          const op = recordOperation(`Remove access for ${r.member} on ${project}`);
+          try {
+            await iamCall("change", { etag: data.etag, members: [r.member], add: [], remove: removes });
+            op.succeeded("");
+          } catch (err) {
+            op.failed(err.message);
+            throw err;
+          }
+          data = await iamCall("policy");
+        }
+        selected.clear();
+        notify(`Removed access for ${members.join(", ")}`);
+        reload();
+      },
+    });
+  };
+
+  const roleCell = (r) => el("td", { class: "iam-roles" }, ...r.roles.map((x) =>
+    el("div", { class: "iam-role" },
+      el("span", { text: iamRoleLabel(roles, x.role) }),
+      x.condition ? el("span", { class: "form-help", text: ` (condition: ${x.condition.title})` }) : null)));
+  const inheritCell = (r) => el("td", {}, ...r.roles.map((x) =>
+    el("div", { class: "iam-role", text: x.from || "" })));
+
+  const draw = () => {
+    if (!data) return;
+    selected.clear();
+    removeButton.disabled = true;
+    let rows = iamRows(data).filter((r) => includeGoogle || !iamGoogleProvided(r.member));
+    const name = (m) => (data.names || {})[m] || "";
+    if (!byRoles) {
+      rows = rows.filter((r) => bar.matches((col) => {
+        const all = { Type: iamPrincipalType(r.member), Principal: r.member, Name: name(r.member),
+          Role: r.roles.map((x) => `${x.role} ${iamRoleLabel(roles, x.role)}`).join(" "),
+          Inheritance: r.roles.map((x) => x.from).join(" ") };
+        return col === null ? Object.values(all) : all[col] || "";
+      }));
+      const table = el("table", { id: "iam-principals-table" },
+        el("thead", {}, el("tr", {},
+          el("th", {}, el("span", { class: "sr-only", text: "Select" })),
+          el("th", { text: "Type" }), el("th", { text: "Principal" }), el("th", { text: "Name" }),
+          el("th", { text: "Role" }), el("th", { text: "Inheritance" }),
+          el("th", {}, el("span", { class: "sr-only", text: "Edit" })))),
+        el("tbody", {}, ...rows.map((r) => {
+          const own = r.roles.some((x) => !x.from);
+          const check = el("input", { type: "checkbox", "aria-label": `Select ${r.member}`,
+            disabled: own ? null : "disabled",
+            onchange: () => {
+              if (check.checked) selected.add(r.member); else selected.delete(r.member);
+              removeButton.disabled = selected.size === 0;
+            } });
+          return el("tr", { "data-member": r.member },
+            el("td", {}, check),
+            el("td", { text: iamPrincipalType(r.member) }),
+            el("td", { class: "mono", text: r.member.replace(/^[a-zA-Z]+:/, "") }),
+            el("td", { text: name(r.member) }),
+            roleCell(r), inheritCell(r),
+            el("td", { class: "row-actions" },
+              el("button", { type: "button", class: "secondary", text: "Edit principal",
+                "aria-label": `Edit principal ${r.member}`,
+                onclick: () => openIAMEditPanel(data, r, rolesNow, reload) })));
+        })));
+      setChildren(body, rows.length ? el("div", { class: "table-wrap" }, table)
+        : emptyState("No principals", "No principal matches. Grant access adds one."));
+      return;
+    }
+    // View by roles: each role, then its principals.
+    const byRole = new Map();
+    for (const r of rows) {
+      for (const x of r.roles) {
+        const key = x.role;
+        if (!byRole.has(key)) byRole.set(key, []);
+        byRole.get(key).push({ member: r.member, from: x.from, condition: x.condition });
+      }
+    }
+    const names = [...byRole.keys()].sort((a, b) => iamRoleLabel(roles, a).localeCompare(iamRoleLabel(roles, b)))
+      .filter((role) => bar.matches((col) => {
+        const all = { Role: `${role} ${iamRoleLabel(roles, role)}`, Principal: byRole.get(role).map((m) => m.member).join(" ") };
+        return col === null ? Object.values(all) : all[col] || "";
+      }));
+    const tbody = el("tbody");
+    for (const role of names) {
+      const members = byRole.get(role);
+      const sub = members.map((m) => el("tr", { class: "iam-role-member", hidden: true },
+        el("td", {}), el("td", { class: "mono", text: m.member }),
+        el("td", { text: (m.from ? `Inherited from ${m.from}` : "") + (m.condition ? ` (condition: ${m.condition.title})` : "") })));
+      const toggle = el("button", { type: "button", class: "secondary", "aria-expanded": "false",
+        "aria-label": `Show the principals of ${role}`, text: "▸",
+        onclick: () => {
+          const open = toggle.getAttribute("aria-expanded") !== "true";
+          toggle.setAttribute("aria-expanded", String(open));
+          toggle.textContent = open ? "▾" : "▸";
+          for (const s of sub) s.hidden = !open;
+        } });
+      tbody.append(el("tr", { "data-role": role },
+        el("td", {}, toggle),
+        el("td", {}, el("span", { text: `${iamRoleLabel(roles, role)} ` }), el("span", { class: "mono form-help", text: `(${members.length})` }),
+          el("div", { class: "mono form-help", text: role })),
+        el("td", { text: members.length === 1 ? "1 principal" : `${members.length} principals` })), ...sub);
+    }
+    setChildren(body, names.length
+      ? el("div", { class: "table-wrap" }, el("table", { id: "iam-roles-table" },
+          el("thead", {}, el("tr", {}, el("th", {}, el("span", { class: "sr-only", text: "Expand" })),
+            el("th", { text: "Role / Principal" }), el("th", { text: "Principals" }))), tbody))
+      : emptyState("No roles", "No role is granted. Grant access adds one."));
+  };
+
+  const reload = async () => {
+    try {
+      const [d, r] = await Promise.all([iamCall("policy"), rolesNow()]);
+      data = d;
+      roles = r;
+      draw();
+    } catch (err) {
+      setChildren(body, errorState("IAM unavailable", String(err.message), () => reload()));
+    }
+  };
+
+  setChildren(view, header,
+    el("h2", { id: "iam-scope-title", text: `Permissions for project "${project}"` }),
+    el("p", { class: "subtitle", text: "These permissions affect this project and all of its resources." }),
+    noteBanner(PROJECT_IAM_NOTE_TEXT()),
+    tabs,
+    el("div", { class: "action-bar" }, bar.node,
+      el("label", { class: "check-line" }, google, el("span", { text: "Include Google-provided role grants" }))),
+    bar.chips,
+    body,
+    el("p", { class: "form-help" },
+      el("span", { text: "Test permissions and the condition linter are on " }),
+      el("a", { href: `/iam-admin/iam/${encodeURIComponent(project)}?tab=permissions`, text: "the policy's Permissions tab" }),
+      el("span", { text: ". Policy Troubleshooter and Policy Analyzer are not available locally." })));
+  announce("IAM");
+  reload();
+}
+
+function PROJECT_IAM_NOTE_TEXT() {
+  return "The project's IAM policy, stored and never enforced (ADR-0006). Nothing inherits it: a resource's own " +
+    "Permissions tab shows only that resource's bindings. Google's Security insights (excess permissions) come from " +
+    "the Recommender API, which CloudBurrow does not serve, so the column is not drawn.";
+}
+
+// iamRolePicker is Select a role: a searchable list of every role, by
+// title and name, Google's role picker without its product groups.
+function iamRolePicker(roles, initial, id) {
+  let value = initial || "";
+  const button = el("button", { type: "button", class: "secondary iam-role-button", id,
+    "aria-haspopup": "listbox", "aria-expanded": "false" });
+  const label = () => { button.textContent = value ? iamRoleLabel(roles, value) : "Select a role"; button.title = value; };
+  label();
+  const search = el("input", { type: "search", class: "iam-role-search", placeholder: "Filter", "aria-label": "Filter roles", autocomplete: "off" });
+  const list = el("ul", { class: "iam-role-list", role: "listbox", "aria-label": "Roles" });
+  const pop = el("div", { class: "iam-role-pop", hidden: true }, search, list);
+  const drawList = () => {
+    const q = search.value.trim().toLowerCase();
+    const hits = roles.filter((r) => !q || r.name.toLowerCase().includes(q) || (r.title || "").toLowerCase().includes(q)
+      || (r.type || "").toLowerCase() === q).slice(0, 100);
+    setChildren(list, ...hits.map((r) => el("li", { role: "presentation" },
+      el("button", { type: "button", role: "option", class: "iam-role-option", "data-role": r.name,
+        "aria-selected": String(r.name === value),
+        onclick: () => { value = r.name; label(); close(); onChange(); } },
+        el("span", { class: "iam-role-title", text: r.title || r.name }),
+        el("span", { class: "mono form-help", text: ` ${r.name}` }),
+        el("span", { class: "form-help", text: r.type === "Custom" ? " Custom" : r.type === "Basic" ? " Basic" : "" })))),
+      hits.length ? null : el("li", { class: "unavailable", text: "No role matches." }));
+  };
+  const close = () => { pop.hidden = true; button.setAttribute("aria-expanded", "false"); };
+  let onChange = () => {};
+  button.addEventListener("click", () => {
+    pop.hidden = !pop.hidden;
+    button.setAttribute("aria-expanded", String(!pop.hidden));
+    if (!pop.hidden) { drawList(); search.focus(); }
+  });
+  search.addEventListener("input", drawList);
+  search.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.stopPropagation(); close(); button.focus(); } });
+  return { node: el("div", { class: "iam-role-picker" }, button, pop), value: () => value,
+    onChange: (fn) => { onChange = fn; } };
+}
+
+// iamRoleRow is one role of Grant access or Edit principal: Select a role,
+// Add IAM condition and the Delete control.
+function iamRoleRow(roles, entry, n, onDelete) {
+  const picker = iamRolePicker(roles, entry ? entry.role : "", `iam-role-${n}`);
+  const c = entry && entry.condition;
+  const title = el("input", { type: "text", id: `iam-cond-title-${n}`, value: c ? c.title : "" });
+  const desc = el("input", { type: "text", id: `iam-cond-desc-${n}`, value: c ? (c.description || "") : "" });
+  const expr = el("textarea", { id: `iam-cond-expr-${n}`, rows: 3 });
+  expr.value = c ? c.expression : "";
+  const condBox = el("div", { class: "iam-condition", hidden: !c },
+    el("label", { for: `iam-cond-title-${n}`, text: "Title" }), title,
+    el("label", { for: `iam-cond-desc-${n}`, text: "Description" }), desc,
+    el("label", { for: `iam-cond-expr-${n}`, text: "Condition editor (CEL)" }), expr,
+    el("p", { class: "form-help", text: 'Such as request.time < timestamp("2027-01-01T00:00:00Z"). Evaluated on resource.name, ' +
+      "resource.type, resource.service and request.time." }));
+  const condToggle = el("button", { type: "button", class: "link-button", text: c ? "Remove IAM condition" : "Add IAM condition",
+    onclick: () => {
+      condBox.hidden = !condBox.hidden;
+      condToggle.textContent = condBox.hidden ? "Add IAM condition" : "Remove IAM condition";
+      if (condBox.hidden) { title.value = ""; desc.value = ""; expr.value = ""; }
+    } });
+  const del = el("button", { type: "button", class: "secondary danger", "aria-label": `Delete role ${n + 1}`, text: "Delete",
+    onclick: () => onDelete(node) });
+  const node = el("div", { class: "iam-role-row card", "data-n": String(n) },
+    el("div", { class: "iam-role-line" }, el("span", { class: "form-label", text: "Role" }), picker.node, del),
+    condToggle, condBox);
+  return {
+    node,
+    value: () => {
+      const cond = condBox.hidden ? null : { title: title.value.trim(), description: desc.value.trim(), expression: expr.value.trim() };
+      return { role: picker.value(), condition: cond && (cond.title || cond.expression) ? cond : null };
+    },
+  };
+}
+
+// iamPanel draws Grant access or Edit principal as Google's side panel.
+function iamPanel({ title, intro, principals, entries, inherited, onSave }) {
+  MODAL_SIDE_NEXT = true;
+  let submitting = false;
+  const { dialog, close } = openModal({ labelledBy: "iam-panel-title", canClose: () => !submitting });
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  const rowsBox = el("div", { class: "iam-role-rows" });
+  let n = 0;
+  const rows = [];
+  const addRow = (entry) => {
+    const r = iamRoleRow(entry.roles, entry.entry, n++, (node) => {
+      const i = rows.indexOf(r);
+      if (i >= 0) rows.splice(i, 1);
+      node.remove();
+    });
+    rows.push(r);
+    rowsBox.append(r.node);
+  };
+  for (const e of entries.list) addRow({ roles: entries.roles, entry: e });
+  if (!entries.list.length) addRow({ roles: entries.roles, entry: null });
+  const another = el("button", { type: "button", class: "secondary", id: "iam-add-another-role", text: "Add another role",
+    onclick: () => addRow({ roles: entries.roles, entry: null }) });
+  const primary = el("button", { type: "submit", class: "primary", id: "iam-save", text: "Save" });
+  const cancel = el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() });
+  const submit = async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    if (submitting) return;
+    submitting = true;
+    primary.disabled = true;
+    try {
+      await onSave(rows.map((r) => r.value()));
+      submitting = false;
+      close();
+    } catch (err) {
+      error.textContent = err.message;
+      error.hidden = false;
+      submitting = false;
+      primary.disabled = false;
+    }
+  };
+  dialog.append(el("form", { class: "modal-body", novalidate: true, onsubmit: submit },
+    el("h2", { id: "iam-panel-title", text: title }),
+    intro ? el("p", { class: "form-help", text: intro }) : null,
+    error,
+    principals,
+    el("h3", { text: "Assign roles" }),
+    el("p", { class: "form-help", text: "Roles are composed of sets of permissions and determine what the principal can do with this resource." }),
+    rowsBox, another,
+    inherited,
+    el("div", { class: "modal-actions" }, cancel, primary)));
+  const first = dialog.querySelector("textarea, .iam-role-button");
+  if (first) first.focus();
+}
+
+async function openIAMGrantPanel(data, rolesNow, onDone) {
+  if (!data) return;
+  let roles;
+  try { roles = await rolesNow(); } catch (err) { notify(err.message, "error"); return; }
+  const members = el("textarea", { id: "iam-new-principals", rows: 2, required: true });
+  iamPanel({
+    title: `Grant access to "${data.project}"`,
+    intro: "Grant principals access to this resource and add roles to specify what actions the principals can take.",
+    principals: el("div", {},
+      el("h3", { text: "Add principals" }),
+      el("p", { class: "form-help", text: "Principals are users, groups, domains, or service accounts." }),
+      el("label", { for: "iam-new-principals", class: "form-label", text: "New principals" }), members,
+      el("p", { class: "form-help", text: "Such as user:ada@example.com, group:admins@example.com, " +
+        "serviceAccount:sa@PROJECT.iam.gserviceaccount.com or domain:example.com; separate several with commas." })),
+    entries: { roles, list: [] },
+    inherited: null,
+    onSave: async (entries) => {
+      const list = members.value.split(/[\s,]+/).map((m) => m.trim()).filter(Boolean);
+      if (!list.length) throw new Error("Add at least one principal.");
+      const add = entries.filter((e) => e.role);
+      if (!add.length) throw new Error("Select a role.");
+      const op = recordOperation(`Grant access to ${list.join(", ")} on ${data.project}`);
+      try {
+        await iamCall("change", { etag: data.etag, members: list, add, remove: [] });
+        op.succeeded("");
+      } catch (err) {
+        op.failed(err.message);
+        throw err;
+      }
+      notify(`Granted access to ${list.join(", ")}`);
+      onDone();
+    },
+  });
+}
+
+async function openIAMEditPanel(data, row, rolesNow, onDone) {
+  let roles;
+  try { roles = await rolesNow(); } catch (err) { notify(err.message, "error"); return; }
+  const own = row.roles.filter((x) => !x.from);
+  const inherited = row.roles.filter((x) => x.from);
+  iamPanel({
+    title: `Edit access to "${data.project}"`,
+    intro: "",
+    principals: el("div", {},
+      el("span", { class: "form-label", text: "Principal" }),
+      el("p", { class: "mono", id: "iam-edit-principal", text: row.member })),
+    entries: { roles, list: own },
+    inherited: inherited.length ? el("div", { class: "iam-inherited" },
+      el("h3", { text: "Inherited roles" }),
+      el("p", { class: "form-help", text: "Granted on a folder or the organization above the project; change them there." }),
+      el("ul", {}, ...inherited.map((x) => el("li", {},
+        el("span", { text: `${iamRoleLabel(roles, x.role)} ` }),
+        el("span", { class: "form-help", text: `(${x.role}), inherited from ${x.from}` }))))) : null,
+    onSave: async (entries) => {
+      const add = entries.filter((e) => e.role);
+      const op = recordOperation(`Edit principal ${row.member} on ${data.project}`);
+      try {
+        await iamCall("change", { etag: data.etag, members: [row.member], add,
+          remove: own.map((x) => ({ role: x.role, condition: x.condition })) });
+        op.succeeded("");
+      } catch (err) {
+        op.failed(err.message);
+        throw err;
+      }
+      notify(`Saved the roles of ${row.member}`);
+      onDone();
+    },
+  });
 }

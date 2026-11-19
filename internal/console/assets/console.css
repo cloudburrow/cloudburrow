@@ -1997,3 +1997,23 @@ svg.bq-chart { display: block; border: 1px solid var(--border); border-radius: v
 .bq-viz-config { display: grid; gap: 4px; }
 .bq-viz-config h3 { margin: 0 0 4px; font-size: var(--text-body-size, 14px); }
 .bq-viz-measures { border: 1px solid var(--border); border-radius: var(--radius); margin: 8px 0 0; padding: 4px 12px; }
+
+/* IAM & Admin > IAM (#1864): the principals table's stacked roles, and
+   Grant access's role rows and Select a role. */
+#iam-principals-table .iam-role { white-space: nowrap; line-height: 1.6; }
+.iam-role-rows { display: flex; flex-direction: column; gap: 12px; margin: 8px 0 12px; }
+.iam-role-row { padding: 12px; }
+.iam-role-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.iam-role-picker { position: relative; flex: 1 1 240px; min-width: 0; }
+.iam-role-button { width: 100%; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.iam-role-pop { position: absolute; z-index: 5; left: 0; right: 0; top: calc(100% + 4px);
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-control); padding: 8px;
+  box-shadow: var(--shadow-menu); }
+.iam-role-search { width: 100%; box-sizing: border-box; }
+.iam-role-list { list-style: none; margin: 8px 0 0; padding: 0; max-height: 280px; overflow-y: auto; }
+.iam-role-option { display: block; width: 100%; text-align: left; background: none; border: 0; padding: 6px 8px;
+  cursor: pointer; color: inherit; font: inherit; }
+.iam-role-option:hover, .iam-role-option:focus-visible, .iam-role-option[aria-selected="true"] { background: var(--surface-alt); }
+.iam-condition { display: grid; gap: 4px; margin-top: 8px; }
+.iam-condition[hidden], .iam-role-pop[hidden] { display: none; }
+.iam-condition input, .iam-condition textarea, #iam-new-principals { width: 100%; box-sizing: border-box; }

@@ -289,6 +289,10 @@ type Field struct {
 	// validated; it is still sent, so the provider reads it only when its
 	// condition holds.
 	ShowWhen string `json:"showWhen,omitempty"`
+	// DeriveFrom names another field this one follows until it is edited
+	// (#1864): its value lowercased, other characters made dashes, as
+	// Google's Create service account derives the ID from the name.
+	DeriveFrom string `json:"deriveFrom,omitempty"`
 	// Unavailable, on a checkbox, is why the choice cannot be made on this
 	// instance: the box is drawn as Google's page has it, unchecked and
 	// disabled, with the reason beside it, so the option stays visible and
