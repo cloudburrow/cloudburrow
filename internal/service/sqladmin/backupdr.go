@@ -30,6 +30,30 @@ type BackupDR interface {
 	BackupRunID(backup string) (string, error)
 }
 
+// BackupDRJobs is a BackupDR that logs its restore jobs to Cloud Logging
+// (#1924).
+type BackupDRJobs interface {
+	// RestoreStarted logs a restore job as RUNNING and returns its job ID.
+	// category is "RESTORE" (source is the Backup and DR backup's name) or
+	// "PITR" (source is the data source's name, recoveryPoint the RFC 3339
+	// time).
+	RestoreStarted(category, source, restoreProject, restoreInstance, recoveryPoint string) string
+	// RestoreFinished logs the job's end: SUCCESSFUL, or FAILED with err.
+	RestoreFinished(jobID string, err error)
+}
+
+// logRestore logs a restore job whose operation is opID: started now,
+// finished when the operation ends. Nothing is logged without a
+// BackupDRJobs.
+func (s *Server) logRestore(opID, category, source, project, instance, recoveryPoint string) {
+	jobs, ok := s.backupDR().(BackupDRJobs)
+	if !ok {
+		return
+	}
+	id := jobs.RestoreStarted(category, source, project, instance, recoveryPoint)
+	s.onFinish(opID, func(err error) { jobs.RestoreFinished(id, err) })
+}
+
 // SetBackupDR serves pointInTimeRestore and restoreBackup's backupdrBackup
 // through b. Without it they answer 501.
 func (s *Server) SetBackupDR(b BackupDR) {

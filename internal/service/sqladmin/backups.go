@@ -545,6 +545,9 @@ func (s *Server) restoreBackup(r *http.Request, base, project string, e Engine) 
 	prev := s.setState(e.Instance(), "MAINTENANCE")
 	op := s.pending(base, project, e.Instance(), "RESTORE_VOLUME")
 	id := op["name"].(string)
+	if body.BackupdrBackup != "" {
+		s.logRestore(id, "RESTORE", body.BackupdrBackup, project, e.Instance(), "")
+	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), startTimeout)
 		defer cancel()

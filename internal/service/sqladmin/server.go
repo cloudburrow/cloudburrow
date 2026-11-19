@@ -100,6 +100,8 @@ type Server struct {
 	ops map[string]map[string]any // by operation name
 	// opOrder is creation order, for operations.list.
 	opOrder []string
+	// opHooks run when finish ends their operation (#1924).
+	opHooks map[string]func(error)
 
 	srv *http.Server
 	ln  net.Listener
@@ -433,6 +435,11 @@ func (s *Server) route(r *http.Request, base string, p []string) (string, any, e
 			e = nil // another project's
 		}
 		s.emu.RUnlock()
+	}
+	if e == nil && len(rest) == 3 && rest[2] == "restoreBackup" && r.Method == http.MethodPost {
+		// A restore to a new instance (#1922): a backup by name makes it.
+		out, err := s.restoreToNewInstance(r, base, project, name)
+		return "sql.instances.restoreBackup", out, err
 	}
 	if e == nil {
 		return "sql.instances.get", nil, Errorf(http.StatusNotFound, "The Cloud SQL instance does not exist. "+

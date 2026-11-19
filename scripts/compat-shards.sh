@@ -353,8 +353,10 @@ compat_shard() {
       # stays in its own shard. Service Usage, always served, as
       # SQL_SERVICEUSAGE, for gcloud privateca roots create's
       # generateServiceIdentity of the CA service agent (#1834).
-      SERVICES=cloudsql,cloudsql-mysql,backupdr,storage,secretmanager,kms,privateca
-      TEST_VARS+=,MYSQL,MYSQL_PASSWORD,CLOUDSQL,SQLADMIN,BACKUPDR,CMEK_KMS,CLOUDSQL_SECRETS,NOPUBSUB_STORAGE,SQL_RESOURCEMANAGER,SQL_SERVICEUSAGE,SQL_PRIVATECA
+      # Cloud Logging as SQL_LOGGING, for Backup and DR's job logs (#1924);
+      # LOGGING is not in TEST_VARS, so the Logging suites stay in theirs.
+      SERVICES=cloudsql,cloudsql-mysql,backupdr,storage,secretmanager,kms,privateca,logging
+      TEST_VARS+=,MYSQL,MYSQL_PASSWORD,CLOUDSQL,SQLADMIN,BACKUPDR,CMEK_KMS,CLOUDSQL_SECRETS,NOPUBSUB_STORAGE,SQL_RESOURCEMANAGER,SQL_SERVICEUSAGE,SQL_PRIVATECA,SQL_LOGGING
       # Cloud SQL for PostgreSQL (#701): a table with a row.
       SETUP_TESTS="TestCloudSQLRestartSetup"
       PROBE_TESTS="TestCloudSQLMySQLAcrossRestart TestCloudSQLAcrossRestart"

@@ -144,24 +144,37 @@ func TestConsoleBackupDRGooglePages(t *testing.T) {
 			restore = a
 		}
 	}
-	if restore.ID == "" || restore.Fields[1].UnavailableOptions["new"] == "" || restore.Fields[1].UnavailableOptions["existing"] != "" ||
-		strings.Join(restore.Fields[2].Options, ",") != "pg-copy" {
-		t.Errorf("Restore: %+v; want a new instance refused and pg-copy, another Postgres instance, offered to overwrite", restore)
+	if restore.ID == "" || len(restore.Fields[1].UnavailableOptions) != 0 || strings.Join(restore.Fields[2].Options, ",") != "pg-copy" ||
+		restore.Fields[3].Name != "newinstance" || restore.Fields[3].ShowWhen != "destination=new" {
+		t.Errorf("Restore: %+v; want every destination offered, pg-copy, another Postgres instance, to overwrite, and a new instance's ID", restore)
 	}
 	if err := vaulted.ActAt(ctx, project, append(append([]string{}, path...), backup), "restore", map[string]string{"destination": "source"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := vaulted.ActAt(ctx, project, path, "restore", map[string]string{"backup": backup, "destination": "new"}); err == nil {
-		t.Errorf("Restore to a new instance was not refused")
+		t.Errorf("Restore to a new instance without its ID was accepted")
 	}
-	if len(restores) != 1 || !strings.Contains(restores[0], "/instances/pg/restoreBackup") || !strings.Contains(restores[0], "/backups/"+backup) {
+	if err := vaulted.ActAt(ctx, project, path, "restore", map[string]string{"backup": backup, "destination": "new", "newinstance": "pg-restored"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(restores) != 2 || !strings.Contains(restores[0], "/instances/pg/restoreBackup") || !strings.Contains(restores[0], "/backups/"+backup) ||
+		!strings.Contains(restores[1], "/instances/pg-restored/restoreBackup") || !strings.Contains(restores[1], "/backups/"+backup) {
 		t.Errorf("Cloud SQL restores: %q", restores)
 	}
 
 	// Jobs and the Overview.
 	jl, _ := jobs.List(ctx, project)
-	if len(jl.Items) != 1 || jl.Items[0].Fields["Job status"] != "Succeeded" || jl.Items[0].Fields["Job category"] != "On-demand backup" || len(jl.Summary) < 3 {
-		t.Errorf("Jobs: %+v, system jobs %d", jl.Items, len(jl.Summary))
+	if len(jl.Items) != 1 || jl.Items[0].Fields["Job status"] != "Succeeded" || jl.Items[0].Fields["Job category"] != "On-demand backup" ||
+		len(jl.Tabs) != 2 || len(jl.Tabs[1].Groups) < 3 || jl.Tabs[0].Groups[0].Heading != "Current failures" {
+		t.Errorf("Jobs: %+v, tabs %+v", jl.Items, jl.Tabs)
+	}
+	// Google's time ranges (#1924): an unknown one is refused, 1h still
+	// holds the job just taken.
+	if bad, _ := jobs.ListFiltered(ctx, project, "3d"); bad.ServerFilter == nil || bad.ServerFilter.Error == "" {
+		t.Errorf("time range 3d: %+v", bad.ServerFilter)
+	}
+	if hour, _ := jobs.ListFiltered(ctx, project, "1h"); len(hour.Items) != 1 {
+		t.Errorf("time range 1h: %d jobs", len(hour.Items))
 	}
 	ov, _ := overview.List(ctx, project)
 	if ov.Summary[0].Properties[0].Value != "1" || ov.Summary[0].Properties[2].Value != "2" || ov.Summary[1].Properties[0].Value != "1" {

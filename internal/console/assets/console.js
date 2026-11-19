@@ -340,7 +340,7 @@ const ROUTES = [
     product: "backupdr", productTitle: "Backup and DR" },
   { path: "/backupdr-reports", title: "Reports", service: null, requires: "backupdr", screen: "unavailable", icon: "storage",
     section: "Storage", product: "backupdr", productTitle: "Backup and DR",
-    unavailable: "Backup and DR reports are Looker Studio reports over the backup and job logs Google's Cloud Logging routes into a BigQuery dataset. CloudBurrow runs no Looker Studio, and its Backup and DR Service writes no job logs to Cloud Logging (#1924). The Jobs page lists the backup jobs and the system jobs from the service itself, and the Overview counts them." },
+    unavailable: "Backup and DR reports are Looker Studio reports over the backup and job logs Google's Cloud Logging routes into a BigQuery dataset. The Backup and DR Service writes its job logs (bdr_backup_restore_jobs, bdr_backup_plan_jobs) to this instance's Cloud Logging, and a sink routes them to BigQuery, but CloudBurrow runs no Looker Studio (#1924). The Jobs page lists the jobs, with their time range and Current failures." },
   // Google files BigQuery under Analytics, a category with no vendored icon
   // here, so it sits with the other data stores rather than under a heading
   // drawn without one (#698). It is one product with two pages: datasets,
@@ -5081,11 +5081,17 @@ async function renderList(view, route) {
         },
       })));
     header.push(strip);
+    // A tab may carry its own groups (#1924): Backup and DR's Jobs tab
+    // draws its Current failures over its rows, and its System Jobs tab a
+    // group per job, in place of the screen's summary.
+    const own = tabs[current].groups;
     if (tabs[current].id !== data.listTab) {
-      setChildren(view, ...header, noteBanner(tabs[current].note), ...listingSummary(data));
+      setChildren(view, ...header, noteBanner(tabs[current].note),
+        ...listingSummary(own ? { summary: own } : data));
       announce(`${tabs[current].label} selected`);
       return;
     }
+    if (own) header.push(...listingSummary({ summary: own }));
   } else if (!data.summaryOnly) {
     header.push(...listingSummary(data));
   }
