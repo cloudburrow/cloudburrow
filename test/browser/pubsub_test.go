@@ -323,7 +323,8 @@ func TestPubSubIdleTimeAndPushAttributesThroughTheForms(t *testing.T) {
 	p.clickText("#view .page-actions button", "Create subscription")
 	p.waitFor(`location.pathname === "/pubsub/subscriptions/create" && document.querySelector("#view #f-pushAttributes") !== null`)
 	// One page under headings, as Google's (#1847), with Write to BigQuery
-	// and Write to Cloud Storage drawn disabled, each with its reason.
+	// and Write to Cloud Storage enabled since #1874, each revealing its
+	// settings.
 	var page struct {
 		Steps    int
 		Choices  []string
@@ -335,8 +336,21 @@ func TestPubSubIdleTimeAndPushAttributesThroughTheForms(t *testing.T) {
 			Choices: r.map((x) => x.value), Disabled: r.map((x) => x.disabled),
 			Reasons: document.querySelectorAll("#view .is-radio .form-unavailable").length }; })()`, &page)
 	if page.Steps != 0 || strings.Join(page.Choices, ",") != "Pull,Push,Write to BigQuery,Write to Cloud Storage" ||
-		fmt.Sprint(page.Disabled) != "[false false true true]" || page.Reasons != 2 {
-		t.Errorf("Create subscription reads %+v; want one page, and the two exports disabled with their reasons", page)
+		fmt.Sprint(page.Disabled) != "[false false false false]" || page.Reasons != 0 {
+		t.Errorf("Create subscription reads %+v; want one page, and every delivery type enabled", page)
+	}
+	shown := func(id string) bool {
+		var h bool
+		p.eval(fmt.Sprintf(`!document.querySelector("#view #%s").closest(".form-row").hidden`, id), &h)
+		return h
+	}
+	p.run(chromedp.Click(chromedp.CSS(`#view #f-deliveryType-2`)))
+	if !shown("f-bigqueryTable") || !shown("f-bigquerySchema-0") || shown("f-storageBucket") || shown("f-pushEndpoint") {
+		t.Error("Write to BigQuery does not reveal only its table and schema configuration")
+	}
+	p.run(chromedp.Click(chromedp.CSS(`#view #f-deliveryType-3`)))
+	if !shown("f-storageBucket") || !shown("f-filenamePrefix") || !shown("f-maxDurationMinutes") || shown("f-bigqueryTable") {
+		t.Error("Write to Cloud Storage does not reveal only its bucket, file names and batching")
 	}
 	p.run(chromedp.Click(chromedp.CSS(`#view #f-deliveryType-1`)))
 	setField(p, "#view", "f-name", "browser-idle-push")

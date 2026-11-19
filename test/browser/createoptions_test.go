@@ -101,8 +101,9 @@ func TestPubSubCreateOptionsThroughTheForms(t *testing.T) {
 	}
 	setField(p, "#view", "f-useSchema", "false")
 	// Google's choices this instance cannot make are drawn disabled with
-	// their reasons (#1847): Enable ingestion, the two exports, a transform,
-	// and Cloud KMS key under Encryption.
+	// their reasons (#1847): Enable ingestion and a transform. The two
+	// exports and Cloud KMS key are served since #1874: enabled, each
+	// revealing what it needs.
 	var off struct {
 		Boxes    []bool
 		KMS      bool
@@ -114,10 +115,22 @@ func TestPubSubCreateOptionsThroughTheForms(t *testing.T) {
 		KMS: document.querySelector("#view #f-encryption-1").disabled, Google: document.querySelector("#view #f-encryption-0").checked,
 		Reasons: document.querySelectorAll("#view .form-unavailable").length,
 		Headings: [...document.querySelectorAll("#view .form-section-title")].map((h) => h.textContent) }))()`, &off)
-	if fmt.Sprint(off.Boxes) != "[true true true true]" || !off.KMS || !off.Google || off.Reasons != 5 ||
+	if fmt.Sprint(off.Boxes) != "[true false false true]" || off.KMS || !off.Google || off.Reasons != 2 ||
 		strings.Join(off.Headings, ",") != "Transforms,Encryption,Labels" {
-		t.Errorf("Create topic draws %+v; want the four boxes and Cloud KMS key disabled with five reasons, under Google's headings", off)
+		t.Errorf("Create topic draws %+v; want ingestion and a transform disabled with two reasons, the exports and Cloud KMS key enabled, under Google's headings", off)
 	}
+	if !hidden("f-exportTable") || !hidden("f-exportBucket") || !hidden("f-kmsKeyName") {
+		t.Error("Create topic shows an export's table or bucket, or the Cloud KMS key, before it is chosen")
+	}
+	setField(p, "#view", "f-exportBigQuery", "true")
+	setField(p, "#view", "f-exportStorage", "true")
+	p.run(chromedp.Click(chromedp.CSS(`#view #f-encryption-1`)))
+	if hidden("f-exportTable") || hidden("f-exportBucket") || hidden("f-kmsKeyName") {
+		t.Error("Export data to BigQuery, Backup message data to Cloud Storage or Cloud KMS key does not reveal its field")
+	}
+	setField(p, "#view", "f-exportBigQuery", "false")
+	setField(p, "#view", "f-exportStorage", "false")
+	p.run(chromedp.Click(chromedp.CSS(`#view #f-encryption-0`)))
 	setField(p, "#view", "f-name", "browser-opts")
 	setField(p, "#view", "f-defaultSubscription", "false")
 	setField(p, "#view", "f-enableRetention", "true")
