@@ -27,6 +27,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	redispb "cloud.google.com/go/redis/apiv1/redispb"
@@ -89,6 +90,10 @@ type Server struct {
 	redispb.UnimplementedCloudRedisServer
 	inst    Instance
 	backend Backend
+
+	// clockOffset is how far the Memorystore clock is ahead of the
+	// host's, in nanoseconds (release.go, #1909).
+	clockOffset atomic.Int64
 
 	// created are the instances CreateInstance made, when EnableCreate
 	// was called; nil otherwise, and CreateInstance is UNIMPLEMENTED.

@@ -382,6 +382,14 @@ func (s *Server) ServeMaintenanceControl(w http.ResponseWriter, r *http.Request)
 		w.WriteHeader(code)
 		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": code, "message": msg}})
 	}
+	if r.URL.Path == ClockAdvancePath {
+		s.serveClock(w, r, fail)
+		return
+	}
+	if p, ok := isRelease(strings.TrimPrefix(r.URL.Path, MaintenanceControlPath)); ok {
+		s.serveRelease(w, r, p, fail)
+		return
+	}
 	name, verb, _ := strings.Cut(strings.TrimPrefix(r.URL.Path, MaintenanceControlPath), ":")
 	isCluster := clusterRE.MatchString(name)
 	if r.Method != http.MethodPost || !(instanceRE.MatchString(name) || isCluster) || (verb != "scheduleMaintenance" && verb != "cancelMaintenance") {

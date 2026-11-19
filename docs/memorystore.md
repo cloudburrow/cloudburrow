@@ -160,7 +160,7 @@ a scheduled maintenance event (§4a). See
 ## 4a. Maintenance (#1524)
 
 Memorystore schedules maintenance updates itself; CloudBurrow's servers are pinned images, so no
-update ever comes, and an event is scheduled locally instead: CloudBurrow's own control endpoint
+update ever comes, and an event is scheduled locally instead (or by a release, below, #1909): CloudBurrow's own control endpoint
 (not a Memorystore API), on the admin port,
 
     POST /cloudburrow/v1/projects/P/locations/R/instances/I:scheduleMaintenance  {"startTime": "RFC 3339, optional"}
@@ -234,6 +234,32 @@ cluster clients follow the topology. Tests: `TestRedisClusterRescheduleMaintenan
 `TestValkeyRescheduleMaintenance` (official Go clients and gcloud),
 `TestMemorystoreClusterAndValkeyMaintenanceThroughThePage` (browser), unit
 `TestValkeyMaintenanceRules`, all in the memorystore shard.
+
+### Releases and the Memorystore clock (#1909)
+
+Google schedules maintenance on its own when it releases a version, "at least one week" after the
+notification, in each instance's maintenance window. A release is CloudBurrow's opt-in stand-in
+(not a Memorystore API), on the admin port:
+
+    POST /cloudburrow/v1/projects/P/locations/R:releaseUpdate        (R a region, or - for all)
+    POST /cloudburrow/v1/clock:advance  {"duration": "604800s"}
+
+`:releaseUpdate` schedules maintenance on every Memorystore for Redis instance, Redis cluster and
+Valkey instance of the project (and region) with none scheduled: at the first start of its weekly
+window at least a week away, or a week on, to the hour, with no window; one already scheduled is
+kept. It answers `{"scheduled": [names]}`. From then on it is the event the APIs report and
+reschedule, applied when due. `clock:advance` moves the Memorystore clock (what every event, and
+create, update and operation times, run by) forward, never back, so a test reaches a window a
+week away; each event whose start it passes is applied at once. The clock's offset is kept in
+memory: `cloudburrow up` starts at the host's time.
+
+A Redis cluster's and a Valkey instance's `maintenance_policy` is checked as the protos say:
+`weekly_maintenance_window` is one window ("Minimum 1", at most one), each with a `day` (not
+unspecified) and a UTC `start_time` (hours 0 to 23), INVALID_ARGUMENT otherwise; `create_time` and
+`update_time` are set. None of the three APIs has a deny period field, so there is none to keep.
+Tests: `TestMemorystoreMaintenanceWindowSchedules` (official Go clients: the refusals; a release
+schedules a Basic instance's maintenance in its Sunday 03:00 window, and the clock advanced to it
+applies it), unit `TestReleaseUpdate`, `TestClusterAndValkeyMaintenancePolicy`.
 
 ## 5. Standard tier, read replicas and failover (#1385)
 

@@ -261,7 +261,7 @@ func (s *Server) EnableClusters(ctx context.Context, rt ClusterRuntime, dial Clu
 	if s.created == nil {
 		panic("redisadmin: EnableClusters before EnableCreate")
 	}
-	s.clusters = &clusters{rt: rt, dial: dial, db: db, api: s, now: time.Now, bg: ctx,
+	s.clusters = &clusters{rt: rt, dial: dial, db: db, api: s, now: s.now, bg: ctx,
 		byName: map[string]*clusterRecord{}, busy: map[string]string{}}
 	go s.clusters.autoBackups(ctx)
 	go s.clusters.maintenanceLoop(ctx)
@@ -842,7 +842,11 @@ func (s *ClusterServer) CreateCluster(ctx context.Context, req *clusterpb.Create
 		return nil, err
 	}
 	keepJSON(&r.ZoneDistribution, in.GetZoneDistributionConfig())
-	keepJSON(&r.Maintenance, in.GetMaintenancePolicy())
+	mp, err := clusterMaintenancePolicy(in.GetMaintenancePolicy(), time.Time{}, r.Created)
+	if err != nil {
+		return nil, err
+	}
+	keepJSON(&r.Maintenance, mp)
 	for sh := 0; sh < int(r.ShardCount); sh++ {
 		for k := 0; k <= int(r.ReplicaCount); k++ {
 			r.Nodes = append(r.Nodes, &clusterNode{Server: clusterServerName(name, r.NextNode), Shard: sh, Primary: k == 0})
@@ -1552,8 +1556,19 @@ func (s *ClusterServer) UpdateCluster(ctx context.Context, req *clusterpb.Update
 		return nil, apierror.InvalidArgument("zone_distribution_config cannot be changed once a cluster is created")
 	}
 	if set["maintenance_policy"] {
+		var created time.Time
+		if r.Maintenance != "" {
+			kept := &clusterpb.ClusterMaintenancePolicy{}
+			if json.Unmarshal([]byte(r.Maintenance), kept) == nil && kept.GetCreateTime() != nil {
+				created = kept.GetCreateTime().AsTime()
+			}
+		}
+		mp, err := clusterMaintenancePolicy(in.GetMaintenancePolicy(), created, c.now())
+		if err != nil {
+			return nil, err
+		}
 		next.Maintenance = ""
-		keepJSON(&next.Maintenance, in.GetMaintenancePolicy())
+		keepJSON(&next.Maintenance, mp)
 	}
 	authChange, oldPassword := false, r.AdminPassword
 	if set["authorization_mode"] {

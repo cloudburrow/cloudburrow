@@ -223,7 +223,7 @@ func (s *Server) EnableCreate(ctx context.Context, p Provisioner, dial Dialer, d
 	if operations == nil {
 		operations = lro.NewStore(nil)
 	}
-	s.created = &instances{prov: p, dial: dial, db: db, ops: operations, now: time.Now, bg: ctx,
+	s.created = &instances{prov: p, dial: dial, db: db, ops: operations, now: s.now, bg: ctx,
 		byID: map[string]*record{}, busy: map[string]string{}, cancels: map[string]context.CancelFunc{}}
 	go s.created.watch(ctx, healthEvery)
 }
