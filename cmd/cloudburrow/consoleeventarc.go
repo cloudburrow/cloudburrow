@@ -20,6 +20,7 @@ import (
 	"google.golang.org/api/iterator"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
+	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/console"
 )
 
@@ -40,7 +41,15 @@ var eaEventTypes = []eaEventType{
 	{"google.cloud.storage.object.v1.deleted", "Cloud Storage"},
 	{"google.cloud.storage.object.v1.archived", "Cloud Storage"},
 	{"google.cloud.storage.object.v1.metadataUpdated", "Cloud Storage"},
+	{eaAuditLogType, "Cloud Audit Logs"},
 }
+
+// eaAuditLogType is Cloud Audit Logs' event type, whose provider is the
+// service that wrote the entry.
+const eaAuditLogType = "google.cloud.audit.log.v1.written"
+
+// eaResourceChoices are Google's Resource select for an audit-log trigger.
+var eaResourceChoices = []string{"Any resource", "Specific resource", "Path pattern"}
 
 func eaProviderOf(typ string) string {
 	for _, e := range eaEventTypes {
@@ -56,9 +65,9 @@ func eaProviderOf(typ string) string {
 var eaDestinations = []string{"Cloud Run"}
 
 const eventarcNote = "Triggers deliver each event to their destination as a CloudEvent in binary content mode, over a Pub/Sub " +
-	"push subscription Eventarc makes. Google sources' direct events of Cloud Pub/Sub and Cloud Storage are served; " +
-	"channels (third-party providers) are not. The columns follow Google's Triggers page (UNVERIFIED 2026-11-19: " +
-	"Google's docs name the page, not its columns)."
+	"push subscription Eventarc makes. Google sources' direct events of Cloud Pub/Sub and Cloud Storage, and the Cloud Audit Logs (Admin Activity) entries of the calls this instance serves over gRPC, are served; " +
+	"channels (third-party providers) are not. The columns follow Google's Triggers page (UNVERIFIED, re-read 2026-11-19: " +
+	"https://docs.cloud.google.com/eventarc/standard/docs/overview names the page, not its columns)."
 
 func (p eventarcProvider) project(project string) string { return p.run.projectOr(project) }
 
@@ -142,7 +151,7 @@ func (p eventarcProvider) List(ctx context.Context, project string) (console.Lis
 			source = "Third-party"
 		}
 		l.Items = append(l.Items, console.Resource{Name: lastSegment(t.GetName()), Status: "Active", Fields: map[string]string{
-			"Type": source, "Event provider": orDash(eaProviderOf(typ)), "Event type": typ,
+			"Type": source, "Event provider": orDash(eaProviderLabel(t)), "Event type": typ,
 			"Destination": orDash(strings.TrimSpace(kind + ": " + target)), "Region": eaRegion(t.GetName()),
 			"Created": stampAge(t.GetCreateTime())}})
 	}
@@ -202,6 +211,13 @@ func (p eventarcProvider) CreateForm() (string, []console.Field) {
 			Help: "Cloud Pub/Sub: the topic ID; empty to have Eventarc create one."},
 		{Name: "bucket", Label: "Bucket", Type: "text", Pattern: `^[a-z0-9][a-z0-9._\-]{1,221}[a-z0-9]$`, Section: "Event provider",
 			Help: "Cloud Storage: the bucket whose objects' events are delivered."},
+		{Name: "serviceName", Label: "Service name", Type: "select", Options: append([]string{""}, runadapter.AuditServiceNames()...),
+			Section: "Event provider", Help: "Cloud Audit Logs: the service whose Admin Activity audit log entries are delivered."},
+		{Name: "methodName", Label: "Method name", Type: "text", Section: "Event provider",
+			Help: "Cloud Audit Logs: the method, such as google.cloud.secretmanager.v1.SecretManagerService.CreateSecret."},
+		{Name: "resource", Label: "Resource", Type: "select", Options: eaResourceChoices, Default: eaResourceChoices[0], Section: "Event provider",
+			Help: "Cloud Audit Logs: every resource, one resource name, or a path pattern such as projects/_/secrets/{secret}."},
+		{Name: "resourceName", Label: "Resource name or path pattern", Type: "text", Section: "Event provider"},
 		{Name: "region", Label: "Region", Type: "select", Options: []string{p.run.location()}, Default: p.run.location(), Section: "Trigger"},
 		{Name: "serviceAccount", Label: "Service account", Type: "text", Section: "Trigger",
 			Help: "Optional. The account the delivery authenticates as; the default compute account when empty."},
@@ -270,6 +286,23 @@ func eaFormTrigger(project, region string, values map[string]string) (*eventarcp
 			return nil, errors.New("a Cloud Storage trigger takes a bucket, not a topic")
 		}
 		t.EventFilters = append(t.EventFilters, &eventarcpb.EventFilter{Attribute: "bucket", Value: bucket})
+	case "Cloud Audit Logs":
+		svc, method := strings.TrimSpace(values["serviceName"]), strings.TrimSpace(values["methodName"])
+		if svc == "" || method == "" {
+			return nil, errors.New("a Cloud Audit Logs trigger needs its service name and method name")
+		}
+		t.EventFilters = append(t.EventFilters, &eventarcpb.EventFilter{Attribute: "serviceName", Value: svc},
+			&eventarcpb.EventFilter{Attribute: "methodName", Value: method})
+		res := strings.TrimSpace(values["resourceName"])
+		switch values["resource"] {
+		case "", "Any resource":
+		case "Specific resource":
+			t.EventFilters = append(t.EventFilters, &eventarcpb.EventFilter{Attribute: "resourceName", Value: res})
+		case "Path pattern":
+			t.EventFilters = append(t.EventFilters, &eventarcpb.EventFilter{Attribute: "resourceName", Value: res, Operator: "match-path-pattern"})
+		default:
+			return nil, fmt.Errorf("resource %q is not one of %v", values["resource"], eaResourceChoices)
+		}
 	}
 	return t, nil
 }
@@ -330,7 +363,7 @@ func (p eventarcProvider) Detail(ctx context.Context, project string, path []str
 		{Label: "Trigger name", Value: lastSegment(t.GetName())},
 		{Label: "Resource name", Value: t.GetName()},
 		{Label: "Region", Value: eaRegion(t.GetName())},
-		{Label: "Event provider", Value: orDash(eaProviderOf(typ))},
+		{Label: "Event provider", Value: orDash(eaProviderLabel(t))},
 		{Label: "Event type", Value: typ},
 		{Label: "Event data content type", Value: orDash(t.GetEventDataContentType())},
 		{Label: "Event destination", Value: orDash(kind)},
@@ -423,3 +456,17 @@ var (
 	_ console.Editor          = eventarcProvider{}
 	_ console.Deleter         = eventarcProvider{}
 )
+
+// eaProviderLabel is a trigger's event provider as Google's page shows it:
+// for an audit-log trigger, the service whose entries it receives.
+func eaProviderLabel(t *eventarcpb.Trigger) string {
+	typ, _ := eaType(t)
+	if typ == eaAuditLogType {
+		for _, f := range t.GetEventFilters() {
+			if f.GetAttribute() == "serviceName" {
+				return "Cloud Audit Logs: " + f.GetValue()
+			}
+		}
+	}
+	return eaProviderOf(typ)
+}

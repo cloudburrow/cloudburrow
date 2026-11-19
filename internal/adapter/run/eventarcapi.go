@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -73,23 +74,71 @@ var eaState = struct {
 
 var eaTriggerIDRE = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
 
-// eaProviders are the providers served, with their event types.
-func eaProviders(location string) []*eventarcpb.Provider {
-	bucket := []*eventarcpb.FilteringAttribute{{Attribute: "type", Required: true}, {Attribute: "bucket", Required: true,
-		Description: "The bucket's name"}}
-	storage := &eventarcpb.Provider{Name: "storage.googleapis.com", DisplayName: "Cloud Storage"}
-	for _, t := range []string{"finalized", "deleted", "archived", "metadataUpdated"} {
-		storage.EventTypes = append(storage.EventTypes, &eventarcpb.EventType{Type: storageEventPrefix + t,
-			Description: "An object's " + t + " event", FilteringAttributes: bucket,
-			EventSchemaUri: "https://googleapis.github.io/google-cloudevents/jsonschema/google/events/cloud/storage/v1/StorageObjectData.json"})
+// eaProviderNames are the display names of the providers served.
+var eaProviderNames = map[string]string{
+	"pubsub.googleapis.com": "Cloud Pub/Sub", "storage.googleapis.com": "Cloud Storage",
+	"secretmanager.googleapis.com": "Secret Manager", "cloudkms.googleapis.com": "Cloud Key Management Service",
+	"cloudtasks.googleapis.com": "Cloud Tasks", "cloudscheduler.googleapis.com": "Cloud Scheduler",
+	"run.googleapis.com": "Cloud Run Admin API", "cloudfunctions.googleapis.com": "Cloud Functions",
+	"eventarc.googleapis.com": "Eventarc", "cloudbuild.googleapis.com": "Cloud Build",
+	"artifactregistry.googleapis.com": "Artifact Registry", "securesourcemanager.googleapis.com": "Secure Source Manager",
+	"developerconnect.googleapis.com": "Developer Connect", "logging.googleapis.com": "Cloud Logging",
+	"firestore.googleapis.com": "Cloud Firestore", "datastore.googleapis.com": "Cloud Datastore",
+	"bigtableadmin.googleapis.com": "Cloud Bigtable Admin", "bigtable.googleapis.com": "Cloud Bigtable",
+	"spanner.googleapis.com": "Cloud Spanner", "redis.googleapis.com": "Memorystore for Redis",
+	"memorystore.googleapis.com": "Memorystore", "cloudresourcemanager.googleapis.com": "Cloud Resource Manager",
+	"iam.googleapis.com": "Identity and Access Management", "backupdr.googleapis.com": "Backup and DR",
+}
+
+var eaTypeDescriptions = map[string]string{
+	pubsubPublished: "A message is published to the specified Pub/Sub topic",
+	auditLogWritten: "An audit log is created that matches the trigger's filter criteria",
+}
+
+var eaSchemaURIs = map[string]string{
+	pubsubPublished: "https://googleapis.github.io/google-cloudevents/jsonschema/google/events/cloud/pubsub/v1/MessagePublishedData.json",
+	auditLogWritten: "https://googleapis.github.io/google-cloudevents/jsonschema/google/events/cloud/audit/v1/LogEntryData.json",
+}
+
+// eaEventType describes one event type served, with its filtering
+// attributes.
+func eaEventType(typ string) *eventarcpb.EventType {
+	et := &eventarcpb.EventType{Type: typ, Description: eaTypeDescriptions[typ], EventSchemaUri: eaSchemaURIs[typ],
+		FilteringAttributes: []*eventarcpb.FilteringAttribute{{Attribute: "type", Required: true}}}
+	if strings.HasPrefix(typ, storageEventPrefix) {
+		et.Description = "An object's " + strings.TrimPrefix(typ, storageEventPrefix) + " event"
+		et.EventSchemaUri = "https://googleapis.github.io/google-cloudevents/jsonschema/google/events/cloud/storage/v1/StorageObjectData.json"
 	}
-	pubsub := &eventarcpb.Provider{Name: "pubsub.googleapis.com", DisplayName: "Cloud Pub/Sub", EventTypes: []*eventarcpb.EventType{{
-		Type: pubsubPublished, Description: "A message is published to the specified Pub/Sub topic",
-		FilteringAttributes: []*eventarcpb.FilteringAttribute{{Attribute: "type", Required: true}},
-		EventSchemaUri:      "https://googleapis.github.io/google-cloudevents/jsonschema/google/events/cloud/pubsub/v1/MessagePublishedData.json"}}}
-	out := []*eventarcpb.Provider{pubsub, storage}
-	for _, p := range out {
-		p.Name = location + "/providers/" + p.Name
+	for _, a := range eaTypeAttrs[typ] {
+		et.FilteringAttributes = append(et.FilteringAttributes, &eventarcpb.FilteringAttribute{Attribute: a.name,
+			Description: a.description, Required: a.required, PathPatternSupported: a.pattern})
+	}
+	return et
+}
+
+// eaProviders are the providers served, with their event types: Pub/Sub's
+// and Cloud Storage's direct events, Firestore's, and each served
+// service's audit-log event.
+func eaProviders(location string) []*eventarcpb.Provider {
+	direct := map[string][]string{
+		"pubsub.googleapis.com":  {pubsubPublished},
+		"storage.googleapis.com": {storageEventPrefix + "finalized", storageEventPrefix + "deleted", storageEventPrefix + "archived", storageEventPrefix + "metadataUpdated"},
+	}
+	for typ := range eaTypeAttrs {
+		if isFirestoreType(typ) {
+			direct["firestore.googleapis.com"] = append(direct["firestore.googleapis.com"], typ)
+		}
+	}
+	names := append(AuditServiceNames(), "storage.googleapis.com")
+	sort.Strings(names)
+	var out []*eventarcpb.Provider
+	for _, n := range slices.Compact(names) {
+		p := &eventarcpb.Provider{Name: location + "/providers/" + n, DisplayName: eaProviderNames[n]}
+		types := append([]string(nil), direct[n]...)
+		for _, typ := range append(types, auditLogWritten) {
+			p.EventTypes = append(p.EventTypes, eaEventType(typ))
+		}
+		out = append(out, p)
 	}
 	return out
 }
@@ -113,39 +162,31 @@ func eaSpec(t *eventarcpb.Trigger, region string) (*functionspb.EventTrigger, er
 	spec := &functionspb.EventTrigger{TriggerRegion: region, ServiceAccountEmail: t.GetServiceAccount(),
 		RetryPolicy: functionspb.EventTrigger_RETRY_POLICY_RETRY}
 	for _, f := range t.GetEventFilters() {
-		if f.GetOperator() != "" {
-			return nil, apierror.Unimplemented("event filter operator %q is not supported: only an exact match is", f.GetOperator())
+		if op := f.GetOperator(); op != "" && op != pathPatternOp {
+			return nil, apierror.InvalidArgument("event filter operator %q is not supported: an exact match (no operator) and %q are", op, pathPatternOp)
 		}
-		switch f.GetAttribute() {
-		case "type":
+		if f.GetAttribute() == "type" {
+			if f.GetOperator() != "" {
+				return nil, apierror.InvalidArgument("the event filter on \"type\" takes no operator")
+			}
 			spec.EventType = f.GetValue()
-		case "bucket":
-			spec.EventFilters = append(spec.EventFilters, &functionspb.EventFilter{Attribute: "bucket", Value: f.GetValue()})
-		default:
-			return nil, apierror.InvalidArgument("event filter attribute %q is not one of the event type's filtering attributes", f.GetAttribute())
+			continue
 		}
+		spec.EventFilters = append(spec.EventFilters, &functionspb.EventFilter{Attribute: f.GetAttribute(), Value: f.GetValue(), Operator: f.GetOperator()})
+	}
+	if err := eaCheckFilters(spec); err != nil {
+		return nil, err
 	}
 	switch typ := spec.GetEventType(); {
-	case typ == "":
-		return nil, apierror.InvalidArgument("the trigger's event filters must name its event type: attribute \"type\"")
 	case typ == pubsubPublished:
-		if len(spec.EventFilters) > 0 {
-			return nil, apierror.InvalidArgument("google.cloud.pubsub.topic.v1.messagePublished takes no bucket filter")
-		}
 		spec.PubsubTopic = t.GetTransport().GetPubsub().GetTopic()
 		if spec.PubsubTopic != "" && !strings.Contains(spec.PubsubTopic, "/topics/") {
 			return nil, apierror.InvalidArgument("transport.pubsub.topic %q must be projects/*/topics/*", spec.PubsubTopic)
 		}
-	case storageNotificationTypes[typ] != "":
-		if storageBucket(spec) == "" {
-			return nil, apierror.InvalidArgument("a Cloud Storage trigger's event filters must name the bucket: attribute \"bucket\"")
-		}
-		if t.GetTransport().GetPubsub().GetTopic() != "" {
-			return nil, apierror.InvalidArgument("transport.pubsub.topic is for Pub/Sub triggers; Eventarc makes a Cloud Storage trigger's")
-		}
 	default:
-		return nil, apierror.Unimplemented("event type %q is not supported: Pub/Sub's messagePublished and Cloud Storage's "+
-			"finalized, deleted, archived and metadataUpdated are; %s", typ, eventReason(typ))
+		if t.GetTransport().GetPubsub().GetTopic() != "" {
+			return nil, apierror.InvalidArgument("transport.pubsub.topic is for Pub/Sub triggers; Eventarc makes a %s trigger's", typ)
+		}
 	}
 	if t.GetRetryPolicy() != nil && t.GetRetryPolicy().GetMaxAttempts() == 1 {
 		spec.RetryPolicy = functionspb.EventTrigger_RETRY_POLICY_DO_NOT_RETRY
@@ -207,7 +248,12 @@ func (e *EventarcServer) CreateTrigger(ctx context.Context, req *eventarcpb.Crea
 		return e.op(name, "create", t)
 	}
 	spec.Trigger = name
-	if spec.GetEventType() == pubsubPublished && spec.GetPubsubTopic() == "" {
+	if sourcedEventType(spec.GetEventType()) {
+		if _, ok := e.f.publisher(); !ok {
+			return nil, apierror.FailedPrecondition("this instance cannot publish %s events to a trigger's topic", spec.GetEventType())
+		}
+	}
+	if (spec.GetEventType() == pubsubPublished || sourcedEventType(spec.GetEventType())) && spec.GetPubsubTopic() == "" {
 		spec.PubsubTopic = fmt.Sprintf("projects/%s/topics/eventarc-%s-%s-%03d", project, region, req.GetTriggerId(), rand.IntN(1000))
 		if err := e.f.events.Transport.CreateTopic(ctx, spec.PubsubTopic, map[string]string{"goog-managed-by": "eventarc"}); err != nil {
 			return nil, fmt.Errorf("create the trigger's topic %s: %w", spec.PubsubTopic, err)
@@ -217,7 +263,7 @@ func (e *EventarcServer) CreateTrigger(ctx context.Context, req *eventarcpb.Crea
 	if err != nil {
 		return nil, err
 	}
-	if in.GetTransport().GetPubsub().GetTopic() == "" && spec.GetEventType() == pubsubPublished {
+	if in.GetTransport().GetPubsub().GetTopic() == "" && (spec.GetEventType() == pubsubPublished || sourcedEventType(spec.GetEventType())) {
 		live.topic = spec.GetPubsubTopic() // Eventarc's own, removed with the trigger
 	}
 	now := timestamppb.Now()
@@ -228,7 +274,7 @@ func (e *EventarcServer) CreateTrigger(ctx context.Context, req *eventarcpb.Crea
 	}
 	t.Transport = &eventarcpb.Transport{Intermediary: &eventarcpb.Transport_Pubsub{Pubsub: &eventarcpb.Pubsub{
 		Topic: topic, Subscription: live.subscription}}}
-	t.EventDataContentType = "application/json"
+	t.EventDataContentType = eaContentType(spec.GetEventType())
 	t.Etag = eaEtag(t)
 	eaState.mu.Lock()
 	eaState.triggers[name] = &eaTrigger{t: t, live: live}
@@ -402,7 +448,7 @@ func (e *EventarcServer) GetProvider(_ context.Context, req *eventarcpb.GetProvi
 			return p, nil
 		}
 	}
-	return nil, apierror.NotFound("provider %s not found: this instance serves pubsub.googleapis.com and storage.googleapis.com", req.GetName())
+	return nil, apierror.NotFound("provider %s not found", req.GetName())
 }
 
 // ListProviders lists the providers served, by name.
@@ -536,4 +582,40 @@ func EventarcHandlerOr(register func(grpc.ServiceRegistrar), next http.Handler) 
 		r2.URL.RawPath = ""
 		t.ServeHTTP(w, r2)
 	})
+}
+
+// eaMatching are the topics of a project's triggers of one of types whose
+// filters (other than type) the event's attributes, read by value, match.
+func eaMatching(project string, types []string, value func(attribute string) (string, bool)) []string {
+	eaState.mu.Lock()
+	defer eaState.mu.Unlock()
+	var out []string
+	for _, n := range sortedKeys(eaState.triggers) {
+		x := eaState.triggers[n]
+		if !strings.HasPrefix(n, "projects/"+project+"/") || !slices.Contains(types, x.live.spec.GetEventType()) {
+			continue
+		}
+		if eaFiltersMatch(x.live.spec.GetEventFilters(), value) && x.live.topic != "" {
+			out = append(out, x.live.topic)
+		}
+	}
+	return out
+}
+
+// eaFiltersMatch reports whether every filter matches the event.
+func eaFiltersMatch(filters []*functionspb.EventFilter, value func(attribute string) (string, bool)) bool {
+	for _, f := range filters {
+		v, ok := value(f.GetAttribute())
+		if !ok {
+			return false
+		}
+		if f.GetOperator() == pathPatternOp {
+			if !matchPathPattern(f.GetValue(), v) {
+				return false
+			}
+		} else if f.GetValue() != v {
+			return false
+		}
+	}
+	return true
 }

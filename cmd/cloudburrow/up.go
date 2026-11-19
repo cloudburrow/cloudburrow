@@ -458,6 +458,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		runSvc.calls = callEvents(recorder, requestMetrics, "run")
 		runSvc.interpose = append(runSvc.interpose, grpctransport.LogInterceptor(logger, "run"), faults.Interceptor("run"))
 		runSvc.requests = requestEvents(recorder, requestMetrics, "run")
+		if runSvc.events != nil {
+			// Eventarc's Cloud Audit Logs events (#1877), from the calls
+			// the services' fronts record.
+			go feedAuditLogs(recorder, runSvc.functions.Load)
+		}
 	}
 	if schedulerSvc != nil {
 		schedulerSvc.calls = callEvents(recorder, requestMetrics, "scheduler")

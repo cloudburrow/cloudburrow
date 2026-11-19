@@ -35,7 +35,15 @@ func TestEventarcConsoleTriggers(t *testing.T) {
 	if err != nil || len(tr.GetEventFilters()) != 2 || tr.GetEventFilters()[1].GetValue() != "b1" {
 		t.Errorf("Cloud Storage trigger = %v, %v", tr, err)
 	}
+	tr, err = eaFormTrigger("demo", "us-central1", map[string]string{"eventType": eaAuditLogType, "service": "hello",
+		"serviceName": "secretmanager.googleapis.com", "methodName": "google.cloud.secretmanager.v1.SecretManagerService.CreateSecret",
+		"resource": "Path pattern", "resourceName": "projects/demo/secrets/{s}"})
+	if f := tr.GetEventFilters(); err != nil || len(f) != 4 || f[3].GetOperator() != "match-path-pattern" || f[3].GetValue() != "projects/demo/secrets/{s}" ||
+		eaProviderLabel(tr) != "Cloud Audit Logs: secretmanager.googleapis.com" {
+		t.Errorf("Cloud Audit Logs trigger = %v, %v", tr, err)
+	}
 	for _, bad := range []map[string]string{
+		{"eventType": eaAuditLogType, "service": "hello", "serviceName": "secretmanager.googleapis.com"},
 		{"eventType": "google.cloud.storage.object.v1.finalized", "service": "hello"},
 		{"eventType": "google.cloud.pubsub.topic.v1.messagePublished"},
 		{"eventType": "google.cloud.pubsub.topic.v1.messagePublished", "service": "hello", "bucket": "b"},

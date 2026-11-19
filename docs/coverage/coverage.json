@@ -2037,7 +2037,8 @@
         "method": "google.cloud.eventarc.v1.Eventarc/CreateTrigger",
         "status": "Verified",
         "tests": [
-          "test/compat/eventarc_test.go:42 TestEventarcTriggersToCloudRun"
+          "test/compat/eventarc_test.go:42 TestEventarcTriggersToCloudRun",
+          "test/compat/eventarcaudit_test.go:113 TestEventarcAuditLogTriggers"
         ]
       },
       {
@@ -2116,7 +2117,8 @@
         "method": "google.cloud.eventarc.v1.Eventarc/GetProvider",
         "status": "Verified",
         "tests": [
-          "test/compat/eventarc_test.go:42 TestEventarcTriggersToCloudRun"
+          "test/compat/eventarc_test.go:42 TestEventarcTriggersToCloudRun",
+          "test/compat/eventarcaudit_test.go:113 TestEventarcAuditLogTriggers"
         ]
       },
       {

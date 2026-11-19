@@ -21,7 +21,10 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
 
+	rpccode "google.golang.org/genproto/googleapis/rpc/code"
+
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
+	"github.com/cloudburrow/cloudburrow/internal/admin"
 	"github.com/cloudburrow/cloudburrow/internal/metadata"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 )
@@ -173,4 +176,40 @@ type eventsConfig struct {
 	tokens    *metadata.Credentials
 	// pushBase is the Run port as the cluster reaches it.
 	pushBase func() string
+}
+
+// Publish publishes one event Eventarc sources itself (audit logs,
+// Firestore) to its trigger's topic.
+func (e eventTransport) Publish(ctx context.Context, topic string, data []byte, attributes map[string]string) error {
+	c, err := e.pubsubClient(ctx, eventProject(topic))
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	_, err = c.TopicAdminClient.Publish(ctx, &pubsubpb.PublishRequest{Topic: topic,
+		Messages: []*pubsubpb.PubsubMessage{{Data: data, Attributes: attributes}}})
+	return err
+}
+
+// feedAuditLogs hands each gRPC call a service served, as /admin/events
+// records it, to Eventarc as the Cloud Audit Logs entry Google would write
+// (#1877). Calls over JSON are recorded by path, not method, and write no
+// entry.
+func feedAuditLogs(rec *admin.Recorder, functions func() *runadapter.FunctionsServer) {
+	events, _ := rec.Subscribe(4096)
+	for ev := range events {
+		if ev.Kind != requestKind || ev.Detail["transport"] != "grpc" {
+			continue
+		}
+		svc, method, ok := runadapter.GRPCAuditCall(ev.Target)
+		project := ev.Detail["project"]
+		f := functions()
+		if !ok || project == "" || f == nil {
+			continue
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		f.Eventarc().EmitAuditLog(ctx, runadapter.AuditCall{Project: project, ServiceName: svc, MethodName: method,
+			ResourceName: ev.Detail["resource"], Code: rpccode.Code_value[ev.Detail["code"]], Time: ev.Time})
+		cancel()
+	}
 }

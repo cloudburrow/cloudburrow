@@ -160,7 +160,7 @@ func (f *FunctionsServer) checkEventTrigger(t *functionspb.EventTrigger) error {
 func eventReason(typ string) string {
 	switch {
 	case strings.HasPrefix(typ, "google.cloud.audit.log."):
-		return "an audit log trigger fires on the Cloud Audit Logs Google's services write, and this instance's services write none"
+		return "Cloud Audit Logs events are served to Eventarc's own triggers (CreateTrigger), not yet to a function's event_trigger"
 	case strings.HasPrefix(typ, "google.cloud.firestore."), strings.HasPrefix(typ, "google.cloud.datastore."):
 		return "Firestore and Datastore run on Google's emulators, which emit no document change events"
 	case strings.HasPrefix(typ, "google.firebase."):
@@ -283,7 +283,7 @@ func (f *FunctionsServer) makeTransport(ctx context.Context, project, region, tr
 	live := &liveTrigger{spec: spec,
 		subscription: fmt.Sprintf("projects/%s/subscriptions/eventarc-%s-%s-sub-%03d", project, region, triggerID, rand.IntN(1000))}
 	topic := spec.GetPubsubTopic()
-	if bucket := storageBucket(spec); spec.GetEventType() != pubsubPublished {
+	if bucket := storageBucket(spec); storageNotificationTypes[spec.GetEventType()] != "" {
 		topic = fmt.Sprintf("projects/%s/topics/eventarc-%s-%s-%03d", project, region, triggerID, rand.IntN(1000))
 		if err := f.events.Transport.CreateTopic(ctx, topic, labels); err != nil {
 			return nil, fmt.Errorf("create the trigger's topic %s: %w", topic, err)
@@ -384,6 +384,9 @@ func ToCloudEvent(spec *functionspb.EventTrigger, body []byte) (*CloudEvent, err
 		return &CloudEvent{Headers: h, Data: data}, nil
 	}
 	attrs, _ := m["attributes"].(map[string]any)
+	if storageNotificationTypes[spec.GetEventType()] == "" {
+		return sourcedCloudEvent(spec, m, attrs)
+	}
 	bucket, object := str(attrs, "bucketId"), str(attrs, "objectId")
 	raw, err := base64.StdEncoding.DecodeString(str(m, "data"))
 	if err != nil {
@@ -505,4 +508,34 @@ func (f *FunctionsServer) deliver(ctx context.Context, fn *functionspb.Function,
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, resp.Body)
 	return resp.StatusCode, nil
+}
+
+// sourcedCloudEvent is the CloudEvent of an event Eventarc sources itself
+// (audit logs, Firestore): its message's attributes are the event's ce-*
+// attributes and content type, and its data the event's data.
+func sourcedCloudEvent(spec *functionspb.EventTrigger, m, attrs map[string]any) (*CloudEvent, error) {
+	raw, err := base64.StdEncoding.DecodeString(str(m, "data"))
+	if err != nil {
+		return nil, fmt.Errorf("the event's data is not base64: %w", err)
+	}
+	h := http.Header{}
+	for k, v := range attrs {
+		if s, ok := v.(string); ok && strings.HasPrefix(k, "ce-") {
+			h.Set(k, s)
+		}
+	}
+	h.Set("ce-specversion", cloudEventSpecVersion)
+	h.Set("ce-type", spec.GetEventType())
+	if h.Get("ce-id") == "" {
+		h.Set("ce-id", str(m, "messageId", "message_id"))
+	}
+	if h.Get("ce-time") == "" {
+		h.Set("ce-time", str(m, "publishTime", "publish_time"))
+	}
+	ct := str(attrs, "content-type")
+	if ct == "" {
+		ct = "application/json"
+	}
+	h.Set("Content-Type", ct)
+	return &CloudEvent{Headers: h, Data: raw}, nil
 }

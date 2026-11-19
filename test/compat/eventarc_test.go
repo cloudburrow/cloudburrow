@@ -97,11 +97,13 @@ func TestEventarcTriggersToCloudRun(t *testing.T) {
 		}
 		providers = append(providers, p.GetName())
 	}
-	if strings.Join(providers, ",") != parent+"/providers/pubsub.googleapis.com,"+parent+"/providers/storage.googleapis.com" {
+	if p := strings.Join(providers, ","); !strings.Contains(p, parent+"/providers/pubsub.googleapis.com,") ||
+		!strings.Contains(p, parent+"/providers/storage.googleapis.com") || !strings.Contains(p, parent+"/providers/secretmanager.googleapis.com,") {
 		t.Errorf("ListProviders = %v", providers)
 	}
 	if p, err := ec.GetProvider(ctx, &eventarcpb.GetProviderRequest{Name: parent + "/providers/storage.googleapis.com"}); err != nil ||
-		len(p.GetEventTypes()) != 4 || p.GetEventTypes()[0].GetType() != "google.cloud.storage.object.v1.finalized" {
+		len(p.GetEventTypes()) != 5 || p.GetEventTypes()[0].GetType() != "google.cloud.storage.object.v1.finalized" ||
+		p.GetEventTypes()[4].GetType() != "google.cloud.audit.log.v1.written" {
 		t.Errorf("GetProvider storage = %v, %v", p, err)
 	}
 
@@ -132,7 +134,7 @@ func TestEventarcTriggersToCloudRun(t *testing.T) {
 
 	// Refusals.
 	for name, bad := range map[string]*eventarcpb.Trigger{
-		"an unknown event type": {EventFilters: []*eventarcpb.EventFilter{typeFilter("google.cloud.audit.log.v1.written")}, Destination: dest("")},
+		"an unknown event type": {EventFilters: []*eventarcpb.EventFilter{typeFilter("google.cloud.example.v1.unknown")}, Destination: dest("")},
 		"a channel":             {Channel: parent + "/channels/c", EventFilters: []*eventarcpb.EventFilter{typeFilter("x")}, Destination: dest("")},
 	} {
 		if _, err := ec.CreateTrigger(ctx, &eventarcpb.CreateTriggerRequest{Parent: parent, TriggerId: "bad", Trigger: bad}); status.Code(err) != codes.Unimplemented {
