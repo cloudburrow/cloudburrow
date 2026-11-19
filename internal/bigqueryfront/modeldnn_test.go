@@ -1,6 +1,7 @@
 package bigqueryfront
 
 import (
+	"fmt"
 	"math"
 	"math/rand"
 	"strconv"
@@ -35,6 +36,13 @@ func TestDNNForwardByHand(t *testing.T) {
 	from, added := d.dnnFrom("src", []string{"a", "b"})
 	if len(added) != 3 || added[2] != "_cbml_o0" || !strings.Contains(from, "FROM src") {
 		t.Errorf("dnnFrom: %v, %s", added, from)
+	}
+	// Each layer is a subquery the engine does not flatten into the next
+	// (a window column, dropped by the layer after it, or at the end):
+	// flattened, a [64, 32] network's ML.PREDICT took 62 s on 1,200 rows.
+	if n := strings.Count(from, "ROW_NUMBER() OVER ()"); n != len(d.Layers) ||
+		!strings.HasPrefix(from, fmt.Sprintf("(SELECT * EXCEPT (_cbml_r%d) FROM ", len(d.Layers)-1)) {
+		t.Errorf("dnnFrom: %d window columns for %d layers, or the last kept: %s", n, len(d.Layers), from)
 	}
 }
 
