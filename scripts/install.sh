@@ -3,7 +3,7 @@
 # installed.
 #
 #   curl -fsSL https://raw.githubusercontent.com/cloudburrow/cloudburrow/main/scripts/install.sh | sh
-#   sh install.sh --version v0.3.0 --prefix /usr/local
+#   sh install.sh --version vX.Y.Z --prefix /usr/local
 #
 # The archive's SHA-256 must match the release's checksums.txt, or nothing is
 # installed. When the GitHub CLI is available, the archive's build attestation
