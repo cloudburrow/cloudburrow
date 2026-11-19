@@ -20,6 +20,7 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 	"github.com/cloudburrow/cloudburrow/internal/paging"
 )
 
@@ -144,6 +145,16 @@ func (d databases) CreateBackup(ctx context.Context, req *databasepb.CreateBacku
 			return nil, err
 		}
 	}
+	if orgpolicy.SourceSet() {
+		b := &databasepb.Backup{Name: req.GetParent() + "/backups/" + req.GetBackupId(), Database: in.GetDatabase(),
+			ExpireTime: in.GetExpireTime(), VersionTime: in.GetVersionTime()}
+		if b.VersionTime == nil {
+			b.VersionTime = timestamppb.New(s.now())
+		}
+		if err := checkCustom(ctx, b.GetName(), orgpolicy.TypeSpannerBackup, orgpolicy.MethodCreate, b); err != nil {
+			return nil, err
+		}
+	}
 	return s.takeBackup(ctx, req.GetParent()+"/backups/"+req.GetBackupId(), in.GetDatabase(), in.GetVersionTime(), in.GetExpireTime(), nil)
 }
 
@@ -241,6 +252,9 @@ func (d databases) CopyBackup(ctx context.Context, req *databasepb.CopyBackupReq
 	b := proto.Clone(src).(*databasepb.Backup)
 	b.Name, b.ExpireTime, b.CreateTime, b.BackupSchedules = name, req.GetExpireTime(), timestamppb.New(start), nil
 	b.ReferencingDatabases, b.ReferencingBackups = nil, nil
+	if err := checkCustom(ctx, name, orgpolicy.TypeSpannerBackup, orgpolicy.MethodCreate, b); err != nil {
+		return nil, err
+	}
 	s.mu.Lock()
 	if _, exists := s.backups[name]; exists {
 		s.mu.Unlock()
@@ -261,7 +275,7 @@ func (d databases) GetBackup(_ context.Context, req *databasepb.GetBackupRequest
 	return b, nil
 }
 
-func (d databases) UpdateBackup(_ context.Context, req *databasepb.UpdateBackupRequest) (*databasepb.Backup, error) {
+func (d databases) UpdateBackup(ctx context.Context, req *databasepb.UpdateBackupRequest) (*databasepb.Backup, error) {
 	s := d.s
 	in := req.GetBackup()
 	paths := req.GetUpdateMask().GetPaths()
@@ -278,6 +292,11 @@ func (d databases) UpdateBackup(_ context.Context, req *databasepb.UpdateBackupR
 		return nil, backupNotFound(in.GetName())
 	}
 	if err := s.checkExpire("UpdateBackup", in.GetExpireTime(), cur.GetMaxExpireTime().AsTime()); err != nil {
+		return nil, err
+	}
+	next := proto.Clone(cur).(*databasepb.Backup)
+	next.ExpireTime = in.GetExpireTime()
+	if err := checkCustom(ctx, in.GetName(), orgpolicy.TypeSpannerBackup, orgpolicy.MethodUpdate, next); err != nil {
 		return nil, err
 	}
 	s.mu.Lock()
@@ -432,6 +451,10 @@ func (d databases) RestoreDatabase(ctx context.Context, req *databasepb.RestoreD
 	src := req.GetBackup()
 	if src == "" {
 		return nil, status.Error(codes.InvalidArgument, "Invalid RestoreDatabase request: backup is required.")
+	}
+	restored := &databasepb.Database{Name: req.GetParent() + "/databases/" + req.GetDatabaseId()}
+	if err := checkCustom(ctx, restored.GetName(), orgpolicy.TypeSpannerDatabase, orgpolicy.MethodCreate, restored); err != nil {
+		return nil, err
 	}
 	b, snap, ok := s.backupCopy(src)
 	if !ok {

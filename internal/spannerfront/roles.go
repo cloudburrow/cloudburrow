@@ -9,6 +9,8 @@ import (
 	"cloud.google.com/go/spanner/admin/database/apiv1/databasepb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 )
 
 // Database roles and the database operations (#1498).
@@ -95,13 +97,22 @@ func (s *Instances) roles(database string) map[string]bool {
 	return out
 }
 
+// createDatabaseRe is a CREATE DATABASE statement, and the database's ID.
+var createDatabaseRe = regexp.MustCompile("(?is)^\\s*CREATE\\s+DATABASE\\s+[`\"]?([^`\"\\s]+)")
+
 func (d databases) CreateDatabase(ctx context.Context, req *databasepb.CreateDatabaseRequest) (*longrunningpb.Operation, error) {
+	if m := createDatabaseRe.FindStringSubmatch(req.GetCreateStatement()); m != nil {
+		db := &databasepb.Database{Name: req.GetParent() + "/databases/" + m[1]}
+		if customViolation(ctx, db.GetName(), orgpolicy.TypeSpannerDatabase, orgpolicy.MethodCreate, db) != nil {
+			return nil, status.Error(codes.PermissionDenied, databaseDenied)
+		}
+	}
 	op, err := d.s.emuDB.CreateDatabase(ctx, req)
 	if err != nil {
 		return nil, err
 	}
 	d.s.trackEmuOp(op.GetName())
-	if m := regexp.MustCompile("(?is)^\\s*CREATE\\s+DATABASE\\s+[`\"]?([^`\"\\s]+)").FindStringSubmatch(req.GetCreateStatement()); m != nil {
+	if m := createDatabaseRe.FindStringSubmatch(req.GetCreateStatement()); m != nil {
 		d.s.dropRoles(req.GetParent() + "/databases/" + m[1])
 		d.s.trackRoles(req.GetParent()+"/databases/"+m[1], req.GetExtraStatements())
 	}

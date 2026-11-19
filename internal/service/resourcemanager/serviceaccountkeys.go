@@ -246,20 +246,15 @@ func (r *Registry) CreateServiceAccountKey(req *adminpb.CreateServiceAccountKeyR
 	default:
 		return nil, apierror.InvalidArgument("Invalid key algorithm %s.", req.GetKeyAlgorithm())
 	}
-	// Custom constraints on iam.googleapis.com/ServiceAccountKey (#1891),
-	// asked before the registry is locked: a key made here is a
-	// GOOGLE_PROVIDED, USER_MANAGED one. Its key ID is not made yet, so
-	// resource.name ends at keys/ (UNVERIFIED: what Google names). Docs
-	// re-read 2026-11-19: https://docs.cloud.google.com/iam/docs/service-accounts-custom-constraints
-	r.mu.Lock()
-	cur, err := r.findSALocked(req.GetName(), false)
-	r.unlock()
-	if err != nil {
-		return nil, err
-	}
-	if err := checkSACustom("projects/"+cur.Project, orgpolicy.MethodCreate, saKeyResource{
-		Name:      "projects/" + cur.Project + "/serviceAccounts/" + cur.UniqueID + "/keys/",
-		KeyOrigin: "GOOGLE_PROVIDED", KeyType: "USER_MANAGED"}); err != nil {
+	// Custom constraints on iam.googleapis.com/ServiceAccountKey (#1891,
+	// #1895), asked before the registry is locked: a key made here is a
+	// GOOGLE_PROVIDED, USER_MANAGED one, and its resource.name is
+	// "projects/PROJECT_ID/serviceAccounts/UNIQUE_ID/keys/KEY_ID" ("Use
+	// custom organization policies for service accounts and service
+	// account keys", Supported resources, read 2026-11-19), with the ID
+	// the key is then made with.
+	keyID := newKeyID()
+	if err := r.checkKeyCustom(req.GetName(), keyID, "GOOGLE_PROVIDED"); err != nil {
 		return nil, err
 	}
 	r.mu.Lock()
@@ -275,6 +270,7 @@ func (r *Registry) CreateServiceAccountKey(req *adminpb.CreateServiceAccountKeyR
 	if err != nil {
 		return nil, err
 	}
+	k.ID = keyID
 	der, err := x509.MarshalPKCS8PrivateKey(priv)
 	if err != nil {
 		return nil, apierror.Internal(err, "encode key")
@@ -329,6 +325,13 @@ func (r *Registry) UploadServiceAccountKey(name string, data []byte) (*adminpb.S
 	if !ok || pub.N.BitLen() != 2048 {
 		return nil, apierror.InvalidArgument("The public key must be an RSA 2048-bit key.")
 	}
+	// Custom constraints (#1895): an uploaded key is a USER_PROVIDED,
+	// USER_MANAGED one (the page's "Disable service account key upload"
+	// example).
+	keyID := newKeyID()
+	if err := r.checkKeyCustom(name, keyID, "USER_PROVIDED"); err != nil {
+		return nil, err
+	}
 	r.mu.Lock()
 	defer r.unlock()
 	a, err := r.findSALocked(name, false)
@@ -343,7 +346,7 @@ func (r *Registry) UploadServiceAccountKey(name string, data []byte) (*adminpb.S
 			return nil, apierror.AlreadyExists("The key already exists for this service account.")
 		}
 	}
-	k := saKey{ID: newKeyID(), Uploaded: true, CertPEM: string(pem.EncodeToMemory(b)),
+	k := saKey{ID: keyID, Uploaded: true, CertPEM: string(pem.EncodeToMemory(b)),
 		ValidAfter: cert.NotBefore.UTC(), ValidBefore: cert.NotAfter.UTC()}
 	a.Keys = append(a.Keys, k)
 	if err := r.putSALocked(a); err != nil {
@@ -533,4 +536,18 @@ func saProjectOf(name string) string {
 		}
 	}
 	return ""
+}
+
+// checkKeyCustom checks a user-managed key of origin keyOrigin about to
+// be made, with ID keyID, on the account name names.
+func (r *Registry) checkKeyCustom(name, keyID, keyOrigin string) error {
+	r.mu.Lock()
+	cur, err := r.findSALocked(name, false)
+	r.unlock()
+	if err != nil {
+		return err
+	}
+	return checkSACustom("projects/"+cur.Project, orgpolicy.MethodCreate, saKeyResource{
+		Name:      "projects/" + cur.Project + "/serviceAccounts/" + cur.UniqueID + "/keys/" + keyID,
+		KeyOrigin: keyOrigin, KeyType: "USER_MANAGED"})
 }

@@ -6,6 +6,7 @@ import (
 	"cloud.google.com/go/kms/apiv1/kmspb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 )
 
 // Trusted key wrapping in a single-tenant HSM (#1521), as resources.proto,
@@ -248,6 +249,9 @@ func (s *Server) ImportTrustedKeyWrappedCryptoKeyVersion(_ context.Context, req 
 	n := k.Next
 	v := keyVersion{Name: versionName(k.Name, n), Created: now, Material: mat, Algorithm: storedAlgorithm(a),
 		Imported: now, ProtectionLevel: k.ProtectionLevel, TrustedWrapping: true}
+	if err := checkCustom(v.Name, orgpolicy.TypeKMSCryptoKeyVersion, orgpolicy.MethodCreate, s.toVersion(v)); err != nil {
+		return nil, err
+	}
 	if err := s.put(dbKey(versionPrefix, v.Name), v); err != nil {
 		return nil, apierror.Wrap(err)
 	}

@@ -48,6 +48,10 @@ const (
 	TypeSubscription      = "pubsub.googleapis.com/Subscription"
 	TypeSecret            = "secretmanager.googleapis.com/Secret"
 	TypeRunService        = "run.googleapis.com/Service"
+	TypeRunJob            = "run.googleapis.com/Job"
+	TypeRunWorkerPool     = "run.googleapis.com/WorkerPool"
+	TypeSchema            = "pubsub.googleapis.com/Schema"
+	TypeSnapshot          = "pubsub.googleapis.com/Snapshot"
 )
 
 // Method types.
@@ -269,7 +273,10 @@ func normalize(v any) any {
 
 // typed converts resourceType's duration and timestamp fields of obj.
 func typed(resourceType string, obj map[string]any) {
-	for path, kind := range typedFields[resourceType] {
+	fieldsMu.RLock()
+	kinds := typedFields[resourceType]
+	fieldsMu.RUnlock()
+	for path, kind := range kinds {
 		parts := strings.Split(path, ".")
 		m := obj
 		for _, p := range parts[:len(parts)-1] {
@@ -322,6 +329,9 @@ func evaluate(condition, resourceType string, resource any) (bool, error) {
 	obj, _ := normalize(decoded).(map[string]any)
 	if obj == nil {
 		obj = map[string]any{}
+	}
+	if paths := Fields(resourceType); len(paths) > 0 {
+		obj = restrict(obj, paths)
 	}
 	typed(resourceType, obj)
 	out, _, err := p.Eval(map[string]any{"resource": obj})

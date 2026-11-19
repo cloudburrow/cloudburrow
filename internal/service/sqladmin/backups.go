@@ -20,6 +20,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 )
 
 // DumpTarget names the server a dump is taken from or loaded into.
@@ -243,6 +245,13 @@ func (s *Server) backupRuns(r *http.Request, base, project string, e Engine, res
 		}
 		if body.Type == "AUTOMATED" {
 			return "sql.backupRuns.insert", nil, Errorf(http.StatusBadRequest, "Invalid request: only an ON_DEMAND backup can be requested.")
+		}
+		// Custom constraints on sqladmin.googleapis.com/BackupRun (#1895):
+		// an on-demand run is in the instance's region, as backupRunJSON
+		// answers it.
+		if err := checkCustom(r.Context(), project, orgpolicy.TypeSQLBackupRun, orgpolicy.MethodCreate,
+			map[string]any{"description": body.Description, "location": Region}); err != nil {
+			return "sql.backupRuns.insert", nil, err
 		}
 		if err := s.busy(e.Instance()); err != nil {
 			return "sql.backupRuns.insert", nil, err

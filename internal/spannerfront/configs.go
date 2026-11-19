@@ -15,6 +15,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/cloudburrow/cloudburrow/internal/locations"
+	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 )
 
 // Instance configurations, instance moves and partition updates (#1498).
@@ -211,6 +212,9 @@ func (s *Instances) CreateInstanceConfig(ctx context.Context, req *instancepb.Cr
 	in.LeaderOptions, in.OptionalReplicas, in.QuorumType = base.GetLeaderOptions(), nil, base.GetQuorumType()
 	in.FreeInstanceAvailability = instancepb.InstanceConfig_UNSUPPORTED
 	in.Etag = opID()
+	if err := checkCustom(ctx, name, orgpolicy.TypeSpannerInstanceConfig, orgpolicy.MethodCreate, in); err != nil {
+		return nil, err
+	}
 	start := s.now()
 	if !req.GetValidateOnly() {
 		s.mu.Lock()
@@ -275,6 +279,10 @@ func (s *Instances) UpdateInstanceConfig(ctx context.Context, req *instancepb.Up
 			s.mu.Unlock()
 			return nil, status.Errorf(codes.InvalidArgument, "Invalid %s request: field_mask path %q cannot be updated: display_name and labels can.", method, p)
 		}
+	}
+	if err := checkCustom(ctx, in.GetName(), orgpolicy.TypeSpannerInstanceConfig, orgpolicy.MethodUpdate, next); err != nil {
+		s.mu.Unlock()
+		return nil, err
 	}
 	next.Etag = opID()
 	if !req.GetValidateOnly() {

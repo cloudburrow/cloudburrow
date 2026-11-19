@@ -326,8 +326,8 @@ func toV1WorkerPool(wp *runpb.WorkerPool) *runv1.WorkerPool {
 	if st := wp.GetLaunchStage(); st != api.LaunchStage_LAUNCH_STAGE_UNSPECIFIED {
 		ann[v1LaunchStage] = st.String()
 	}
-	if c := wp.GetScaling().ManualInstanceCount; c != nil {
-		ann[v1ManualInstanceCount] = strconv.Itoa(int(*c))
+	if c := wp.GetScaling().GetManualInstanceCount(); wp.GetScaling() != nil && wp.GetScaling().ManualInstanceCount != nil {
+		ann[v1ManualInstanceCount] = strconv.Itoa(int(c))
 	}
 	if len(ann) == 0 {
 		ann = nil

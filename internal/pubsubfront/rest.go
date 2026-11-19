@@ -108,6 +108,14 @@ func (f *Front) serveREST(w http.ResponseWriter, r *http.Request, next http.Hand
 		f.serveRESTIAM(w, r, name, verb)
 		return
 	}
+	if parent, name, verb, ok := schemaPath(r.URL.Path); ok {
+		// Custom constraints on a schema created or committed (#1895,
+		// custom.go).
+		if err := customRESTSchema(r, parent, name, verb); err != nil {
+			writeRESTError(w, err)
+			return
+		}
+	}
 	if parent, name, verb, ok := schemaPath(r.URL.Path); ok && f.serveRESTSchema(w, r, parent, name, verb) {
 		// A Protocol Buffer schema is the front's (protobufschemas.go).
 		return
@@ -141,6 +149,13 @@ func (f *Front) serveREST(w http.ResponseWriter, r *http.Request, next http.Hand
 		return
 	}
 	if collection == "snapshots" {
+		if verb == "" {
+			// Custom constraints on a snapshot created (#1895, custom.go).
+			if err := f.customRESTSnapshot(r, name); err != nil {
+				writeRESTError(w, err)
+				return
+			}
+		}
 		if f.serveRESTSnapshot(w, r, name, verb) {
 			return
 		}

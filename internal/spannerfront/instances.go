@@ -52,6 +52,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/frontstate"
 	"github.com/cloudburrow/cloudburrow/internal/grpchttp"
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
+	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 )
 
 const instanceService = "/google.spanner.admin.instance.v1.InstanceAdmin/"
@@ -392,6 +393,16 @@ func (s *Instances) UpdateInstance(ctx context.Context, req *instancepb.UpdateIn
 	cur, err := s.emu.GetInstance(ctx, &instancepb.GetInstanceRequest{Name: in.GetName()})
 	if err != nil {
 		return nil, err
+	}
+	if orgpolicy.SourceSet() {
+		next := proto.Clone(cur).(*instancepb.Instance)
+		s.mu.Lock()
+		s.overlay(next)
+		apply(next, want, paths)
+		s.mu.Unlock()
+		if err := checkCustom(ctx, in.GetName(), orgpolicy.TypeSpannerInstance, orgpolicy.MethodUpdate, next); err != nil {
+			return nil, err
+		}
 	}
 	start := s.now()
 	s.mu.Lock()

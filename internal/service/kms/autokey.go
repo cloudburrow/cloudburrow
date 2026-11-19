@@ -23,6 +23,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 )
@@ -217,6 +218,9 @@ func (a *AutokeyAdminServer) UpdateAutokeyConfig(_ context.Context, req *kmspb.U
 	if c.mode() == kmspb.AutokeyConfig_DEDICATED_KEY_PROJECT && c.KeyProject == "" && setMode {
 		return nil, apierror.Wrap(apierror.InvalidArgument("autokey_config.key_project is required when key_project_resolution_mode is DEDICATED_KEY_PROJECT"))
 	}
+	if err := checkCustom(c.Name, orgpolicy.TypeKMSAutokeyConfig, orgpolicy.MethodUpdate, c.proto()); err != nil {
+		return nil, err
+	}
 	if err := s.put(dbKey(autokeyConfigPrefix, c.Name), c); err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -313,6 +317,10 @@ func (a *AutokeyServer) CreateKeyHandle(ctx context.Context, req *kmspb.CreateKe
 		return nil, apierror.Wrap(apierror.InvalidArgument("key_handle.resource_type_selector %q must be {SERVICE}.googleapis.com/{TYPE}", sel))
 	}
 	name := req.GetParent() + "/keyHandles/" + id
+	if err := checkCustom(name, orgpolicy.TypeKMSKeyHandle, orgpolicy.MethodCreate,
+		&kmspb.KeyHandle{Name: name, ResourceTypeSelector: sel}); err != nil {
+		return nil, err
+	}
 	parts := strings.Split(req.GetParent(), "/")
 	project, location := "projects/"+parts[1], parts[3]
 	var existing keyHandle

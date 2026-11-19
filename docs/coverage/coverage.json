@@ -571,6 +571,7 @@
         "method": "google.cloud.run.v2.Jobs/CreateJob",
         "status": "Verified",
         "tests": [
+          "test/compat/orgpolicycustom1895_test.go:158 TestOrgPolicyCustomConstraintsRunJobsWorkerPools",
           "test/compat/runcloudsql_test.go:140 TestRunJobCloudSQLVolume",
           "test/compat/rungcsfuse_test.go:49 TestRunCloudStorageFUSEVolumes",
           "test/compat/runjobs_test.go:73 TestRunJobLifecycle",
@@ -658,6 +659,7 @@
         "method": "google.cloud.run.v2.Jobs/UpdateJob",
         "status": "Verified",
         "tests": [
+          "test/compat/orgpolicycustom1895_test.go:158 TestOrgPolicyCustomConstraintsRunJobsWorkerPools",
           "test/compat/runjobs_test.go:73 TestRunJobLifecycle",
           "test/compat/terraform_run_more_test.go:28 TestTerraformRunVolumesAndServiceAccount"
         ]
@@ -833,6 +835,7 @@
         "method": "google.cloud.run.v2.WorkerPools/CreateWorkerPool",
         "status": "Verified",
         "tests": [
+          "test/compat/orgpolicycustom1895_test.go:158 TestOrgPolicyCustomConstraintsRunJobsWorkerPools",
           "test/compat/runcpuscaling_test.go:179 TestRunWorkerPoolCPUScaling",
           "test/compat/runnames_test.go:36 TestRunNamesPerProject",
           "test/compat/runworkerpoolgcs_test.go:22 TestRunWorkerPoolMountsACloudStorageVolume",
@@ -911,6 +914,7 @@
         "method": "google.cloud.run.v2.WorkerPools/UpdateWorkerPool",
         "status": "Verified",
         "tests": [
+          "test/compat/orgpolicycustom1895_test.go:158 TestOrgPolicyCustomConstraintsRunJobsWorkerPools",
           "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle",
           "test/compat/runworkerpoolscaling_test.go:187 TestTerraformRunWorkerPoolAutomaticScaling",
           "test/compat/runworkerpoolscaling_test.go:70 TestRunWorkerPoolAutomaticScaling",
@@ -953,6 +957,7 @@
           "test/compat/artifactregistry_remote_test.go:243 TestTerraformArtifactRegistryRemoteRepository",
           "test/compat/artifactregistry_remote_test.go:45 TestArtifactRegistryRemoteDockerRepository",
           "test/compat/gclouddeploysource_test.go:89 TestSourceDeployArtifactRegistryAndCloudBuild",
+          "test/compat/orgpolicycustom1895_artifactregistry_test.go:22 TestOrgPolicyCustomConstraintsArtifactRegistry",
           "test/compat/terraform_batch11_run_test.go:37 TestTerraformArtifactRegistryProjectConfigAndRepositories",
           "test/compat/terraform_cicd_test.go:30 TestTerraformArtifactRegistryRepository"
         ]
@@ -1310,6 +1315,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
+          "test/compat/orgpolicycustom1895_artifactregistry_test.go:22 TestOrgPolicyCustomConstraintsArtifactRegistry",
           "test/compat/terraform_batch11_run_test.go:264 TestTerraformArtifactRegistryPackageDataSources",
           "test/compat/terraform_batch7_test.go:37 TestTerraformArtifactRegistryRuleAndCleanupPolicies",
           "test/compat/terraform_cicd_test.go:30 TestTerraformArtifactRegistryRepository"
@@ -3003,6 +3009,7 @@
           "test/compat/kms_rotation_test.go:33 TestKMSRotationSchedule",
           "test/compat/kms_secp256k1_test.go:34 TestKMSSecp256k1SignsAndVerifiesWithThePublicKey",
           "test/compat/kms_test.go:47 TestKMSResources",
+          "test/compat/orgpolicycustom1895_kms_test.go:28 TestOrgPolicyCustomConstraintsKMS",
           "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
         ],
         "unverified": [
@@ -3105,6 +3112,7 @@
           "test/compat/kms_deletering_test.go:34 TestKMSDeleteKeyRing",
           "test/compat/kms_import_test.go:33 TestKMSImportManuallyWrappedKeys",
           "test/compat/kms_trusted_test.go:57 TestKMSTrustedKeyWrapping",
+          "test/compat/orgpolicycustom1895_kms_test.go:28 TestOrgPolicyCustomConstraintsKMS",
           "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
         ]
       },
@@ -3629,6 +3637,7 @@
           "test/compat/kms_hsm_ekm_autokey_test.go:54 TestKMSHSMKeysAndKeyAccessJustifications",
           "test/compat/kms_rotation_test.go:33 TestKMSRotationSchedule",
           "test/compat/kms_test.go:905 TestKMSUpdateCryptoKey",
+          "test/compat/orgpolicycustom1895_kms_test.go:28 TestOrgPolicyCustomConstraintsKMS",
           "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
         ],
         "unverified": [
@@ -3706,7 +3715,8 @@
           "test/compat/kms_external_test.go:39 TestKMSExternalKeys",
           "test/compat/kms_test.go:282 TestKMSUpdateCryptoKeyVersion",
           "test/compat/memorystore1557_test.go:270 TestMemorystoreValkeyKmsKey",
-          "test/compat/memorystorecmek_test.go:48 TestMemorystoreCustomerManagedKey"
+          "test/compat/memorystorecmek_test.go:48 TestMemorystoreCustomerManagedKey",
+          "test/compat/orgpolicycustom1895_kms_test.go:28 TestOrgPolicyCustomConstraintsKMS"
         ],
         "unverified": [
           {
@@ -3846,7 +3856,8 @@
         "tests": [
           "test/compat/orgpolicy1890_test.go:101 TestOrgPolicyV2",
           "test/compat/orgpolicycustom1891_test.go:319 TestOrgPolicyCustomConstraintRefusals",
-          "test/compat/orgpolicycustom1891_test.go:85 TestOrgPolicyCustomConstraintsStorage"
+          "test/compat/orgpolicycustom1891_test.go:85 TestOrgPolicyCustomConstraintsStorage",
+          "test/compat/orgpolicycustom1895_test.go:298 TestGcloudOrgPoliciesCustomConstraintsSchemaJob"
         ]
       },
       {
@@ -3958,6 +3969,7 @@
           "test/compat/iamserviceaccounts1747_test.go:256 TestIAMServiceAccountKeys",
           "test/compat/orgpolicy1890_test.go:269 TestOrgPolicyEnforcementIAM",
           "test/compat/orgpolicycustom1891_test.go:156 TestOrgPolicyCustomConstraintsIAM",
+          "test/compat/orgpolicycustom1895_test.go:252 TestOrgPolicyCustomConstraintsServiceAccountKeyName",
           "test/compat/storagesignediam_test.go:32 TestStorageSignedURLIAMServiceAccount"
         ],
         "unverified": [
@@ -4192,7 +4204,8 @@
         "method": "google.iam.admin.v1.IAM/UploadServiceAccountKey",
         "status": "Verified",
         "tests": [
-          "test/compat/iamserviceaccounts1747_test.go:256 TestIAMServiceAccountKeys"
+          "test/compat/iamserviceaccounts1747_test.go:256 TestIAMServiceAccountKeys",
+          "test/compat/orgpolicycustom1895_test.go:252 TestOrgPolicyCustomConstraintsServiceAccountKeyName"
         ]
       },
       {
@@ -6493,6 +6506,7 @@
         "method": "google.pubsub.v1.SchemaService/CommitSchema",
         "status": "Verified",
         "tests": [
+          "test/compat/orgpolicycustom1895_test.go:44 TestOrgPolicyCustomConstraintsPubSubSchemasSnapshots",
           "test/compat/pubsubadmin_test.go:320 TestPubSubSchemaService",
           "test/compat/pubsubfollowups_test.go:326 TestPubSubStateSaveAndLoad",
           "test/compat/pubsubprotobuf_test.go:38 TestPubSubProtobufSchemaService"
@@ -6503,6 +6517,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/iamenforcementpubsub1887_test.go:41 TestIAMEnforcementPubSubRESTAndSchemas",
+          "test/compat/orgpolicycustom1895_test.go:44 TestOrgPolicyCustomConstraintsPubSubSchemasSnapshots",
           "test/compat/pubsubadmin_test.go:320 TestPubSubSchemaService",
           "test/compat/pubsubfollowups_test.go:326 TestPubSubStateSaveAndLoad",
           "test/compat/pubsubiam_test.go:269 TestTerraformPubSubIAM",
@@ -6619,6 +6634,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/iamenforcementpubsub1879_test.go:59 TestIAMEnforcementPubSub",
+          "test/compat/orgpolicycustom1895_test.go:44 TestOrgPolicyCustomConstraintsPubSubSchemasSnapshots",
           "test/compat/pubsubdetached_test.go:33 TestPubSubDetachedSubscriptionCalls",
           "test/compat/pubsubfollowups_test.go:326 TestPubSubStateSaveAndLoad",
           "test/compat/pubsubprotobuf_test.go:260 TestGcloudPubSubDetachAndProtobufSchemas",
@@ -6795,6 +6811,7 @@
         "method": "google.pubsub.v1.Subscriber/UpdateSnapshot",
         "status": "Verified",
         "tests": [
+          "test/compat/orgpolicycustom1895_test.go:44 TestOrgPolicyCustomConstraintsPubSubSchemasSnapshots",
           "test/compat/pubsubadmin_test.go:132 TestPubSubUpdateSnapshot"
         ]
       },
@@ -8740,6 +8757,7 @@
         "tests": [
           "test/compat/bigtableinstances_test.go:138 TestBigtableAppProfilesAndInstanceIAM",
           "test/compat/gcloudbigtable_test.go:25 TestGcloudBigtableAppProfiles",
+          "test/compat/orgpolicycustom1895_bigtable_test.go:32 TestOrgPolicyCustomConstraintsBigtable",
           "test/compat/terraform_bigtable_rest_test.go:29 TestTerraformBigtableAppProfileAndIAM"
         ]
       },
@@ -8748,7 +8766,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigtableinstances_test.go:44 TestBigtableInstancesAndClusters",
-          "test/compat/orgpolicycustom1891_test.go:394 TestOrgPolicyEnforcementBigtableLocations"
+          "test/compat/orgpolicycustom1891_test.go:394 TestOrgPolicyEnforcementBigtableLocations",
+          "test/compat/orgpolicycustom1895_bigtable_test.go:32 TestOrgPolicyCustomConstraintsBigtable"
         ]
       },
       {
@@ -8756,7 +8775,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigtableinstances_test.go:44 TestBigtableInstancesAndClusters",
-          "test/compat/orgpolicycustom1891_test.go:394 TestOrgPolicyEnforcementBigtableLocations"
+          "test/compat/orgpolicycustom1891_test.go:394 TestOrgPolicyEnforcementBigtableLocations",
+          "test/compat/orgpolicycustom1895_bigtable_test.go:32 TestOrgPolicyCustomConstraintsBigtable"
         ]
       },
       {
@@ -8965,6 +8985,7 @@
         "tests": [
           "test/compat/bigtableinstances_test.go:138 TestBigtableAppProfilesAndInstanceIAM",
           "test/compat/gcloudbigtable_test.go:25 TestGcloudBigtableAppProfiles",
+          "test/compat/orgpolicycustom1895_bigtable_test.go:32 TestOrgPolicyCustomConstraintsBigtable",
           "test/compat/terraform_bigtable_rest_test.go:29 TestTerraformBigtableAppProfileAndIAM"
         ]
       },
@@ -9045,7 +9066,8 @@
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/CreateTable",
         "status": "Verified",
         "tests": [
-          "test/compat/optional_test.go:197 TestBigtableTableAndRows"
+          "test/compat/optional_test.go:197 TestBigtableTableAndRows",
+          "test/compat/orgpolicycustom1895_bigtable_test.go:32 TestOrgPolicyCustomConstraintsBigtable"
         ]
       },
       {
@@ -9428,6 +9450,7 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/CreateBackup",
         "status": "Verified",
         "tests": [
+          "test/compat/orgpolicycustom1895_spanner_test.go:38 TestOrgPolicyCustomConstraintsSpanner",
           "test/compat/spannerbackups_test.go:67 TestSpannerBackupAndRestore",
           "test/compat/spannerbackupstools_test.go:26 TestGcloudSpannerBackups"
         ]
@@ -9445,6 +9468,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/optional_test.go:264 TestSpannerSchemaAndQuery",
+          "test/compat/orgpolicycustom1895_spanner_test.go:38 TestOrgPolicyCustomConstraintsSpanner",
           "test/compat/spanner_test.go:104 TestSpannerReadWriteTransactionIsAtomic",
           "test/compat/spanner_test.go:202 TestSpannerDatabasesAreIsolated"
         ]
@@ -9601,6 +9625,7 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/UpdateBackup",
         "status": "Verified",
         "tests": [
+          "test/compat/orgpolicycustom1895_spanner_test.go:38 TestOrgPolicyCustomConstraintsSpanner",
           "test/compat/spannerbackups_test.go:67 TestSpannerBackupAndRestore",
           "test/compat/spannerbackupstools_test.go:26 TestGcloudSpannerBackups"
         ]
@@ -9617,6 +9642,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolespanneradmin_test.go:271 TestConsoleSpannerEditInstance",
+          "test/compat/orgpolicycustom1895_spanner_test.go:38 TestOrgPolicyCustomConstraintsSpanner",
           "test/compat/spanneradmin_test.go:385 TestSpannerDatabaseDropProtection"
         ]
       },
@@ -9632,6 +9658,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/optional_test.go:264 TestSpannerSchemaAndQuery",
+          "test/compat/orgpolicycustom1895_spanner_test.go:38 TestOrgPolicyCustomConstraintsSpanner",
           "test/compat/orgpolicylocations1890_test.go:83 TestOrgPolicyEnforcementSpanner",
           "test/compat/spanner_test.go:104 TestSpannerReadWriteTransactionIsAtomic",
           "test/compat/spanner_test.go:202 TestSpannerDatabasesAreIsolated"
@@ -9789,6 +9816,7 @@
         "tests": [
           "test/compat/consolespanneradmin_test.go:271 TestConsoleSpannerEditInstance",
           "test/compat/gcloudspannerfirestore_test.go:53 TestGcloudSpannerInstances",
+          "test/compat/orgpolicycustom1895_spanner_test.go:38 TestOrgPolicyCustomConstraintsSpanner",
           "test/compat/spanneradmin_test.go:320 TestSpannerUpdateInstance"
         ]
       },
@@ -10001,6 +10029,7 @@
           "test/compat/bigqueryrestart_test.go:50 TestBigQueryEmulatorRestartsPromptly",
           "test/compat/bigquerytimes_test.go:22 TestBigQueryResourceTimesInMilliseconds",
           "test/compat/bigquerytimezonecolumns_test.go:27 TestBigQueryDefaultTimeZoneOfColumns",
+          "test/compat/orgpolicycustom1895_bigquery_test.go:27 TestOrgPolicyCustomConstraintsBigQuery",
           "test/compat/orgpolicylocations1890_test.go:118 TestOrgPolicyEnforcementBigQuery",
           "test/compat/terraform_batch6_test.go:318 TestTerraformBigQueryDatasetCMEK",
           "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess",
@@ -10030,6 +10059,7 @@
           "test/compat/bigqueryiam1774_test.go:396 TestBigQueryPerProjectIAMViewsAndRoutines",
           "test/compat/bigquerymethods_test.go:177 TestBigQueryDatasetUpdatesAreSaved",
           "test/compat/cloudidentity1812_test.go:240 TestBigQueryGroupMembers1812",
+          "test/compat/orgpolicycustom1895_bigquery_test.go:27 TestOrgPolicyCustomConstraintsBigQuery",
           "test/compat/terraform_batch6_test.go:318 TestTerraformBigQueryDatasetCMEK",
           "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess",
           "test/compat/terraform_iam_more_test.go:271 TestTerraformBigQueryDatasetIAM"
@@ -10773,6 +10803,7 @@
           "test/compat/bigqueryquerydialect_test.go:97 TestBigQueryParametersModeOfAProcedure",
           "test/compat/bigquerytimes_test.go:22 TestBigQueryResourceTimesInMilliseconds",
           "test/compat/bigqueryundeleteroutines_test.go:43 TestBigQueryUndeleteKeepsRoutinesAndModels",
+          "test/compat/orgpolicycustom1895_bigquery_test.go:27 TestOrgPolicyCustomConstraintsBigQuery",
           "test/compat/terraform_iam_test.go:224 TestTerraformBigQueryIAM"
         ]
       },
@@ -11099,6 +11130,7 @@
           "test/compat/bigquerytimes_test.go:22 TestBigQueryResourceTimesInMilliseconds",
           "test/compat/bigquerytimezonecolumns_test.go:27 TestBigQueryDefaultTimeZoneOfColumns",
           "test/compat/logginganalyticsviews_test.go:266 TestLoggingLinkedDatasetAcrossRestarts",
+          "test/compat/orgpolicycustom1895_bigquery_test.go:27 TestOrgPolicyCustomConstraintsBigQuery",
           "test/compat/terraform_batch6_test.go:318 TestTerraformBigQueryDatasetCMEK",
           "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess",
           "test/compat/terraform_bigquery_tables_test.go:24 TestTerraformBigQueryPartitionedTableAndJob",
@@ -11303,7 +11335,8 @@
           "test/compat/cloudsqlbackups_test.go:248 TestGcloudSQLBackups",
           "test/compat/cloudsqlbackups_test.go:99 TestCloudSQLBackups",
           "test/compat/cloudsqlfields_test.go:65 TestCloudSQLFieldsNeverSilentlyDropped",
-          "test/compat/cloudsqlpitr_test.go:273 TestCloudSQLPointInTimeRetention"
+          "test/compat/cloudsqlpitr_test.go:273 TestCloudSQLPointInTimeRetention",
+          "test/compat/orgpolicycustom1895_sql_test.go:27 TestOrgPolicyCustomConstraintsCloudSQL"
         ]
       },
       {
@@ -11763,6 +11796,7 @@
           "test/compat/cloudsqlversions_test.go:444 TestTerraformSQLDatabaseVersion",
           "test/compat/consolecloudsqlinstances_test.go:236 TestConsoleCloudSQLReadReplicaPostgres96",
           "test/compat/consolecloudsqlinstances_test.go:493 TestConsoleCloudSQLHighAvailabilityPostgres11",
+          "test/compat/orgpolicycustom1895_sql_test.go:27 TestOrgPolicyCustomConstraintsCloudSQL",
           "test/compat/terraform_batch4_test.go:38 TestTerraformSQLSSLCertAndReplica",
           "test/compat/terraform_batch4_test.go:405 TestTerraformSQLSourceRepresentation",
           "test/compat/terraform_batch7_test.go:229 TestTerraformSQLPostgres12Upgrade",
@@ -11812,6 +11846,7 @@
           "test/compat/cloudsqlversions_test.go:204 TestCloudSQLMajorVersionUpgrade",
           "test/compat/cloudsqlversions_test.go:407 TestGcloudSQLDatabaseVersions",
           "test/compat/cloudsqlversions_test.go:444 TestTerraformSQLDatabaseVersion",
+          "test/compat/orgpolicycustom1895_sql_test.go:27 TestOrgPolicyCustomConstraintsCloudSQL",
           "test/compat/terraform_batch4_test.go:38 TestTerraformSQLSSLCertAndReplica",
           "test/compat/terraform_batch7_test.go:229 TestTerraformSQLPostgres12Upgrade"
         ]
