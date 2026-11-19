@@ -1832,11 +1832,30 @@ var parityRows = []parityRow{
 			"gallery, Enterprise Document OCR and Layout Parser Available (FetchProcessorTypes) with Create processor (name, region), " +
 			"each other type's page saying Not available locally and why); My processors (ListProcessors in us and eu: Processor ID, " +
 			"Name, Region, Type, Status), Create processor (type, name, region), Enable processor and Disable processor on each " +
-			"row and on its page, and Delete; a processor's page with its Overview (Name, ID, Type, Prediction endpoint), Manage " +
-			"versions (its pretrained default version, the one served) and Upload test document, which sends the file to " +
-			"ProcessDocument and shows the extracted text and its blocks, paragraphs and lines (confidence, bounding box), or the " +
-			"layout parser's blocks and chunks",
+			"row and on its page, and Delete; a processor's page with its Overview (Name, ID, Type, Prediction endpoint) and " +
+			"Upload test document, which sends the file to ProcessDocument and draws each page image it answers with the blocks, " +
+			"paragraphs and lines boxed over it, beside the extracted text and the elements' rows (confidence, bounding box), a " +
+			"row and its box lighting each other up, or the layout parser's blocks and chunks beside its text. The gallery is " +
+			"Google's cards under its category headings",
 		Tests: []string{"TestConsoleDocumentAIProcessors", "TestDocumentAIProcessorsThroughThePage"}},
+	{Resource: "Document AI: processor versions", Service: "vertexai",
+		Methods: []string{"DocumentProcessorService/ListProcessorVersions", "DocumentProcessorService/GetProcessorVersion",
+			"DocumentProcessorService/SetDefaultProcessorVersion", "DocumentProcessorService/DeployProcessorVersion",
+			"DocumentProcessorService/UndeployProcessorVersion", "DocumentProcessorService/DeleteProcessorVersion"},
+		Provider: "documentai", Offers: "A processor's Manage versions tab (#1930): ListProcessorVersions' versions (Version ID, " +
+			"Version name, Status, Default, Google managed, Created); Default version (SetDefaultProcessorVersion); and Deploy, " +
+			"Undeploy and Delete over the checked versions, each showing Google's refusal of a pretrained or default version",
+		Tests: []string{"TestConsoleDocumentAIProcessors", "TestDocumentAIProcessorsThroughThePage"}},
+	{Resource: "Document AI: batch processing", Service: "vertexai",
+		Methods:  []string{"DocumentProcessorService/BatchProcessDocuments"},
+		Provider: "documentai", Offers: "A processor's Batch process (#1930): a gs:// source (a folder, or one document) and a gs:// " +
+			"destination sent to BatchProcessDocuments, waited on, and each document's status and the folder its Document was " +
+			"written to shown",
+		Tests: []string{"TestConsoleDocumentAIProcessors", "TestDocumentAIBatchProcessThroughThePage"}},
+	{Resource: "Document AI: training", Service: "vertexai",
+		Methods: []string{"DocumentProcessorService/TrainProcessorVersion"},
+		Excluded: "TrainProcessorVersion creates versions of custom extractors, classifiers and splitters, which are not served; " +
+			"for the served types it is only ever refused, and Google's console offers no training for them"},
 	{Resource: "Speech-to-Text: recognizers", Service: "vertexai",
 		Methods: []string{"Speech/CreateRecognizer", "Speech/GetRecognizer", "Speech/ListRecognizers", "Speech/UpdateRecognizer",
 			"Speech/DeleteRecognizer", "Speech/UndeleteRecognizer", "Speech/Recognize"},
@@ -1847,6 +1866,21 @@ var parityRows = []parityRow{
 			"word-level confidence, automatic punctuation), a recognizer's page with its default recognition config, Edit " +
 			"(UpdateRecognizer), Transcribe (an uploaded audio file, its transcript), Delete, and Undelete on a deleted one",
 		Tests: []string{"TestConsoleSpeechRecognizers", "TestSpeechRecognizersThroughThePage"}},
+	{Resource: "Speech-to-Text: batch transcription", Service: "vertexai",
+		Methods:  []string{"Speech/BatchRecognize"},
+		Provider: "speech-transcriptions", Offers: "Transcriptions' Transcribe from Cloud Storage (#1930): a recognizer, a gs:// " +
+			"audio file and an optional gs:// output prefix sent to BatchRecognize; the transcript and results shown (inline) or " +
+			"the result object's gs:// URI, kept in the list with the uploads' transcriptions",
+		Tests: []string{"TestConsoleSpeechAdaptation", "TestSpeechBatchTranscriptionThroughThePage"}},
+	{Resource: "Speech-to-Text: custom classes and phrase sets", Service: "vertexai",
+		Methods: []string{"Speech/CreateCustomClass", "Speech/GetCustomClass", "Speech/ListCustomClasses", "Speech/UpdateCustomClass",
+			"Speech/DeleteCustomClass", "Speech/UndeleteCustomClass", "Speech/CreatePhraseSet", "Speech/GetPhraseSet",
+			"Speech/ListPhraseSets", "Speech/UpdatePhraseSet", "Speech/DeletePhraseSet", "Speech/UndeletePhraseSet"},
+		Provider: "speech-custom-classes", Offers: "Custom classes (speech-custom-classes) and Phrase sets (speech-phrase-sets), " +
+			"after Recognizers (#1930): each listed with deleted ones (ID, Display name, Region, Items or Phrases and Boost, " +
+			"Status), Create (ID, region, display name, items one a line; phrases one a line with an optional | boost, the " +
+			"set's boost), its page (summary, Items or Phrases with their boosts), Edit, Delete, and Undelete on a deleted one",
+		Tests: []string{"TestConsoleSpeechAdaptation", "TestSpeechAdaptationThroughThePage"}},
 	{Resource: "Starting the instance",
 		Commands: []string{"up"},
 		Excluded: "starts the process that serves the console, so the console cannot exist before it"},

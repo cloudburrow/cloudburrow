@@ -32,7 +32,7 @@ func TestParse(t *testing.T) {
 		{`{"model": "chirp", "languageCodes": ["en-US"]}`, 400, "autoDecodingConfig or explicitDecodingConfig"},
 		{`{"model": "chirp", "languageCodes": ["en-US"], "autoDecodingConfig": {}, "explicitDecodingConfig": {"encoding": "LINEAR16"}}`, 400, "one of"},
 		{`{"model": "chirp", "languageCodes": ["en-US"], "autoDecodingConfig": {}, "bogus": 1}`, 400, "unknown field"},
-		{`{"model": "long", "languageCodes": ["en-US"], "autoDecodingConfig": {}}`, 501, "only chirp"},
+		{`{"model": "medical_dictation", "languageCodes": ["en-US"], "autoDecodingConfig": {}}`, 501, "served: chirp, chirp_2"},
 		{`{"model": "chirp", "languageCodes": ["en-US", "de-DE"], "autoDecodingConfig": {}}`, 501, "several"},
 		{`{"model": "chirp", "languageCodes": ["en-US"], "autoDecodingConfig": {}, "features": {"profanityFilter": true}}`, 501, "profanityFilter"},
 		{`{"model": "chirp", "languageCodes": ["en-US"], "autoDecodingConfig": {}, "features": {"diarizationConfig": {}}}`, 501, "diarizationConfig"},

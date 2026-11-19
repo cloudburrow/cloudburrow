@@ -2291,3 +2291,26 @@ svg.bq-chart { display: block; border: 1px solid var(--border); border-radius: v
    transcript. Scrolls inside the dialog rather than stretching it. */
 .result-text { font-family: var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 40vh;
   overflow: auto; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-alt); }
+
+/* Section headings over a SummaryOnly screen's cards (#1930): Document AI's
+   Processor gallery, by category. */
+.summary-section { font-size: var(--text-heading-size); font-weight: 500; margin: 24px 0 12px; }
+.summary-section:first-of-type { margin-top: 8px; }
+
+/* An action's answer drawn over its document (#1930): Document AI's test
+   document, its page images with the layout's boxes, beside its text and
+   rows. Side by side when there is room, stacked in a narrow window. */
+.modal:has(.result-doc) { max-width: min(1280px, calc(100vw - 32px)); width: 100%; }
+.result-doc { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+.result-pages { flex: 1 1 320px; min-width: 0; max-height: 70vh; overflow: auto; }
+.result-side { flex: 1 1 320px; min-width: 0; max-height: 70vh; overflow: auto; }
+.result-page { margin: 0 0 12px; }
+.result-page figcaption { font-size: var(--text-caption-size); color: var(--text-muted); margin-top: 4px; }
+.result-page-frame { position: relative; width: 100%; border: 1px solid var(--border); }
+.result-page-frame img { display: block; width: 100%; height: auto; }
+.result-box { position: absolute; box-sizing: border-box; border: 1.5px solid var(--accent); pointer-events: auto; }
+.result-box.kind-block { border-color: #1a73e8; }
+.result-box.kind-paragraph { border-color: #188038; }
+.result-box.kind-line { border-color: #e37400; }
+.result-box.is-lit { background: rgba(26, 115, 232, 0.25); border-width: 2.5px; }
+#action-result-table tr.is-lit { background: var(--nav-selected); }

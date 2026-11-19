@@ -432,6 +432,11 @@ const ROUTES = [
     section: "AI and machine learning", product: "speech", productTitle: "Speech-to-Text" },
   { path: "/speech/recognizers", service: "speech-recognizers", icon: "ai", title: "Recognizers", kind: "Recognizer",
     section: "AI and machine learning", product: "speech", productTitle: "Speech-to-Text" },
+  // Model adaptation's custom classes and phrase sets (#1930).
+  { path: "/speech/custom-classes", service: "speech-custom-classes", icon: "ai", title: "Custom classes", kind: "Custom class",
+    section: "AI and machine learning", product: "speech", productTitle: "Speech-to-Text" },
+  { path: "/speech/phrase-sets", service: "speech-phrase-sets", icon: "ai", title: "Phrase sets", kind: "Phrase set",
+    section: "AI and machine learning", product: "speech", productTitle: "Speech-to-Text" },
 
   // Secret Manager (#1850): Google's menu, Secret Manager (the global
   // secrets), Regional secrets and Settings.
@@ -4678,24 +4683,73 @@ function resultTable(listing, at = null) {
     };
     return b;
   }));
+  const table = resultRows(listing, cols, items, acts, rowButtons);
+  // Page images with the answer's boxes drawn over them, beside its text
+  // and rows (#1930): Document AI's test document, its layout found.
+  if ((listing.pages || []).length) {
+    return el("div", { class: "result-doc" },
+      el("div", { class: "result-pages" }, ...listing.pages.map(resultPage)),
+      el("div", { class: "result-side" },
+        listing.note ? el("p", { class: "form-help", id: "action-result-note", text: listing.note }) : null,
+        listing.text ? el("pre", { class: "result-text", id: "action-result-text", tabindex: "0",
+          "aria-label": "Result text", text: listing.text }) : null,
+        table));
+  }
   return el("div", {},
     listing.note ? el("p", { class: "form-help", id: "action-result-note", text: listing.note }) : null,
     // An answer's text, line breaks kept: a test document's extracted
     // text, a transcript (#1930).
     listing.text ? el("pre", { class: "result-text", id: "action-result-text", tabindex: "0",
       "aria-label": "Result text", text: listing.text }) : null,
-    items.length
-      ? el("table", { class: "table", id: "action-result-table" },
-          el("thead", {}, el("tr", {},
-            el("th", { text: listing.nameColumn || "Name" }), ...cols.map((c) => el("th", { text: c })),
-            acts ? el("th", { "aria-label": "Actions" }) : null)),
-          el("tbody", {}, ...items.map((r) => el("tr", {},
-            // A row that names something with a page of its own links to
-            // it: a BigQuery load's job, in Job history (#993).
-            el("td", {}, r.link ? el("a", { href: r.link, text: r.name }) : r.name),
-            ...cols.map((c) => el("td", { text: (r.fields || {})[c] || "" })),
-            acts ? rowButtons(r) : null))))
-      : null);
+    table);
+}
+
+function resultRows(listing, cols, items, acts, rowButtons) {
+  if (!items.length) return null;
+  const boxed = new Set((listing.pages || []).flatMap((pg) => (pg.boxes || []).map((b) => b.row)));
+  return el("table", { class: "table", id: "action-result-table" },
+    el("thead", {}, el("tr", {},
+      el("th", { text: listing.nameColumn || "Name" }), ...cols.map((c) => el("th", { text: c })),
+      acts ? el("th", { "aria-label": "Actions" }) : null)),
+    el("tbody", {}, ...items.map((r) => {
+      const tr = el("tr", boxed.has(r.name) ? { "data-row": r.name, tabindex: "0" } : {},
+        // A row that names something with a page of its own links to
+        // it: a BigQuery load's job, in Job history (#993).
+        el("td", {}, r.link ? el("a", { href: r.link, text: r.name }) : r.name),
+        ...cols.map((c) => el("td", { text: (r.fields || {})[c] || "" })),
+        acts ? rowButtons(r) : null);
+      if (boxed.has(r.name)) {
+        const lit = (on) => {
+          tr.classList.toggle("is-lit", on);
+          for (const b of document.querySelectorAll(`.result-box[data-row="${CSS.escape(r.name)}"]`)) {
+            b.classList.toggle("is-lit", on);
+            if (on) b.scrollIntoView({ block: "nearest" });
+          }
+        };
+        tr.addEventListener("mouseenter", () => lit(true));
+        tr.addEventListener("mouseleave", () => lit(false));
+        tr.addEventListener("focus", () => lit(true));
+        tr.addEventListener("blur", () => lit(false));
+      }
+      return tr;
+    })));
+}
+
+// resultPage is a page image with its boxes over it; a box lights its row.
+function resultPage(pg) {
+  const pct = (v) => `${(v * 100).toFixed(3)}%`;
+  return el("figure", { class: "result-page" },
+    el("div", { class: "result-page-frame", style: `aspect-ratio: ${pg.width} / ${pg.height}` },
+      el("img", { src: pg.image, alt: pg.label, width: String(pg.width), height: String(pg.height) }),
+      ...(pg.boxes || []).map((b) => {
+        const box = el("div", { class: `result-box kind-${b.kind.toLowerCase()}`, "data-row": b.row, "aria-hidden": "true",
+          title: `${b.kind} ${b.row}`, style: `left:${pct(b.x)};top:${pct(b.y)};width:${pct(b.w)};height:${pct(b.h)}` });
+        const row = () => document.querySelector(`#action-result-table tr[data-row="${CSS.escape(b.row)}"]`);
+        box.addEventListener("mouseenter", () => { box.classList.add("is-lit"); const r = row(); if (r) { r.classList.add("is-lit"); r.scrollIntoView({ block: "nearest" }); } });
+        box.addEventListener("mouseleave", () => { box.classList.remove("is-lit"); const r = row(); if (r) r.classList.remove("is-lit"); });
+        return box;
+      })),
+    el("figcaption", { text: pg.label }));
 }
 
 // --- objects: upload, download, preview, delete (#295) ------------------
@@ -5178,8 +5232,18 @@ async function renderList(view, route) {
     // trial and protected resources actions (#1844).
     setChildren(headerActions(header), ...listActionButtons(route, data, () => renderList(view, route)),
       refreshButton(() => renderList(view, route)));
+    // Cards under section headings, when the provider names them, as
+    // Document AI's Processor gallery groups its types (#1930).
+    const cards = listingSummary(data), groups = (data.summary || []).filter((g) => (g.properties || []).length);
+    const runs = [];
+    groups.forEach((g, i) => {
+      if (!runs.length || g.section) runs.push({ section: g.section || "", cards: [] });
+      runs[runs.length - 1].cards.push(cards[i]);
+    });
     setChildren(view, ...header, noteBanner(data.note),
-      el("div", { class: "summary-cards" }, ...listingSummary(data)));
+      ...runs.flatMap((r) => [
+        r.section ? el("h2", { class: "summary-section", text: r.section }) : null,
+        el("div", { class: "summary-cards" }, ...r.cards)]).filter(Boolean));
     announce(`${data.summary.length} ${noun} loaded`);
     return;
   }

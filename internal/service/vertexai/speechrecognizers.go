@@ -48,7 +48,8 @@ import (
 //     replaces the recognizer's, messages merged field by field), as the
 //     reference describes config_mask's absence; config_mask itself is
 //     UNIMPLEMENTED. The merged config is then the default recognizer's
-//     (speech.go): chirp on local whisper.cpp, and the same refusals.
+//     (speech.go): Google's general models on local whisper.cpp, and the same
+//     refusals. Recognize's uri reads a gs:// object (speechbatch.go).
 //
 // UNVERIFIED (re-read 2026-11-19, the reference defines the fields, not
 // these): recognizer_id's exact rule (the reference: "4-63 characters, and
@@ -61,6 +62,10 @@ var recognizerIDPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{2,61}[a-z0-9]$`)
 type speechStore struct {
 	file        string
 	recognizers map[string]*speechpb.Recognizer
+	// classes and phraseSets are the custom classes and phrase sets
+	// (speechadaptation.go, #1930), kept beside file.
+	classes    map[string]*speechpb.CustomClass
+	phraseSets map[string]*speechpb.PhraseSet
 }
 
 // SetSpeechState keeps Speech-to-Text's recognizers in file, loading those it
@@ -77,12 +82,14 @@ func (s *Server) SetSpeechState(file string) {
 			}
 		}
 	}
+	s.speech.loadAdaptation()
 }
 
 // speechRecognizers returns the store; the caller holds s.mu.
 func (s *Server) speechRecognizers() *speechStore {
 	if s.speech == nil {
 		s.speech = &speechStore{recognizers: map[string]*speechpb.Recognizer{}}
+		s.speech.loadAdaptation()
 	}
 	if s.ops == nil {
 		s.ops = lro.NewStore(nil)
@@ -352,9 +359,6 @@ func (v *speechService) UndeleteRecognizer(_ context.Context, req *speechpb.Unde
 }
 
 func (v *speechService) Recognize(ctx context.Context, req *speechpb.RecognizeRequest) (*speechpb.RecognizeResponse, error) {
-	if req.GetUri() != "" {
-		return nil, grpcError(apierror.Unimplemented("RecognizeRequest.uri: send the audio as content"))
-	}
 	if len(req.GetConfigMask().GetPaths()) > 0 {
 		return nil, grpcError(apierror.Unimplemented("RecognizeRequest.config_mask: the request's config overrides each field it sets"))
 	}
@@ -365,7 +369,15 @@ func (v *speechService) Recognize(ctx context.Context, req *speechpb.RecognizeRe
 	if req.GetConfig() != nil {
 		config, _ = protojson.Marshal(req.GetConfig())
 	}
-	out, err := v.s.recognizeAudio(ctx, req.GetRecognizer(), config, req.GetContent())
+	content := req.GetContent()
+	if req.GetUri() != "" {
+		data, err := v.s.readAudioURI(ctx, req.GetUri(), recognizeMaxContent)
+		if err != nil {
+			return nil, grpcError(err)
+		}
+		content = data
+	}
+	out, err := v.s.recognizeAudio(ctx, req.GetRecognizer(), config, content)
 	if err != nil {
 		return nil, grpcError(err)
 	}

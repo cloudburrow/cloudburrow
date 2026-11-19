@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -70,8 +71,27 @@ func Parse(raw []byte) (c Config, code int, err error) {
 	return c, 0, nil
 }
 
-// speechModels are the recognition models served.
-var speechModels = map[string]bool{"chirp": true}
+// speechModels are the recognition models served: Google's v2 general
+// and telephony models, each read with the same local whisper.cpp model
+// (https://docs.cloud.google.com/speech-to-text/docs/speech-to-text-supported-languages
+// and .../transcription-model, read 2026-11-19), so what each recognises
+// is whisper's, not Google's model's. The medical models (medical_dictation,
+// medical_conversation) are not served: whisper has no medical vocabulary
+// or their spoken-punctuation dictation behaviour.
+var speechModels = map[string]bool{
+	"chirp": true, "chirp_2": true, "chirp_3": true, "chirp_telephony": true,
+	"long": true, "short": true, "telephony": true, "telephony_short": true,
+}
+
+// Models are the served model names, sorted.
+func Models() []string {
+	out := make([]string, 0, len(speechModels))
+	for m := range speechModels {
+		out = append(out, m)
+	}
+	sort.Strings(out)
+	return out
+}
 
 // whisperLanguage maps a BCP-47 code to whisper's: its primary subtag,
 // with the codes whisper names differently.
@@ -176,7 +196,7 @@ func parse(raw []byte) (Decoding, string, Options, int, error) {
 	case c.Model == "":
 		return d, "", opt, 400, errors.New("RecognitionConfig.model is required: the default recognizer has no model")
 	case !speechModels[c.Model]:
-		return unimpl("the " + strconv.Quote(c.Model) + " model (only chirp is served)")
+		return unimpl("the " + strconv.Quote(c.Model) + " model (served: " + strings.Join(Models(), ", ") + ")")
 	case len(c.LanguageCodes) == 0:
 		return d, "", opt, 400, errors.New("RecognitionConfig.languageCodes is required: the default recognizer has no language")
 	case len(c.LanguageCodes) > 1:

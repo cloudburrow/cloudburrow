@@ -213,6 +213,33 @@ type Listing struct {
 	// document extracted, the transcript Speech-to-Text's Transcribe
 	// recognised (#1930).
 	Text string `json:"text,omitempty"`
+	// Pages are an action's answer drawn as page images, each with boxes
+	// over it, beside its text and rows: Document AI's Upload test
+	// document draws the layout it found on the document (#1930).
+	Pages []ResultPage `json:"pages,omitempty"`
+}
+
+// ResultPage is one page image of an action's answer, and its boxes.
+type ResultPage struct {
+	// Label names the page for a screen reader: "Page 1".
+	Label string `json:"label"`
+	// Image is the page as a data: URL.
+	Image  string      `json:"image"`
+	Width  int         `json:"width"`
+	Height int         `json:"height"`
+	Boxes  []ResultBox `json:"boxes,omitempty"`
+}
+
+// ResultBox is a box over a page image, in fractions of its size, tied to
+// the answer's row of the same Row (its Resource.Name), which it lights up
+// and is lit up by.
+type ResultBox struct {
+	Row  string  `json:"row"`
+	Kind string  `json:"kind"`
+	X    float64 `json:"x"`
+	Y    float64 `json:"y"`
+	W    float64 `json:"w"`
+	H    float64 `json:"h"`
 }
 
 // Provider reads live state for one service.
@@ -933,6 +960,10 @@ func nonBlank(props []Property) []Property {
 // PropertyGroup is a headed block of label/value pairs.
 type PropertyGroup struct {
 	Heading string `json:"heading,omitempty"`
+	// Section, on a SummaryOnly screen's cards, heads the run of cards it
+	// begins: Document AI's Processor gallery groups its cards under
+	// Digitize, Extract and the rest, as Google's does (#1930).
+	Section string `json:"section,omitempty"`
 	// Properties are the pairs, in the order the provider gives them.
 	Properties []Property `json:"properties"`
 }

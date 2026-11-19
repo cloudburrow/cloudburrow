@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -419,6 +420,65 @@ func (o embedObjects) Read(ctx context.Context, bucket, object string, limit int
 		return nil, "", apierror.InvalidArgument("gs://%s/%s is larger than %d MiB, the most file_data reads", bucket, object, limit>>20)
 	}
 	return data, ct, nil
+}
+
+// Write writes an object to this instance's Cloud Storage, for the batch
+// methods' outputs (#1930).
+func (o embedObjects) Write(ctx context.Context, bucket, object, contentType string, data []byte) error {
+	if !o.hasEndpoint() {
+		return apierror.FailedPrecondition("gs://%s/%s: this instance's Cloud Storage has no endpoint", bucket, object)
+	}
+	w := storageObjectWriter{src: o.f, client: o.f.client}
+	if err := w.WriteObject(ctx, bucket, object, contentType, data); err != nil {
+		if o.bucketMissing(ctx, bucket) {
+			return apierror.NotFound("gs://%s/%s: bucket %q not found", bucket, object, bucket)
+		}
+		return apierror.FailedPrecondition("write %v", err)
+	}
+	return nil
+}
+
+// List names the objects under prefix in bucket, for Document AI's
+// gcs_prefix (#1930).
+func (o embedObjects) List(ctx context.Context, bucket, prefix string) ([]string, error) {
+	if !o.hasEndpoint() {
+		return nil, apierror.FailedPrecondition("gs://%s/%s: this instance's Cloud Storage has no endpoint", bucket, prefix)
+	}
+	var names []string
+	token := ""
+	for {
+		q := url.Values{"prefix": {prefix}, "fields": {"items(name),nextPageToken"}}
+		if token != "" {
+			q.Set("pageToken", token)
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, o.f.base()+"/storage/v1/b/"+url.PathEscape(bucket)+"/o?"+q.Encode(), nil)
+		if err != nil {
+			return nil, apierror.InvalidArgument("list gs://%s/%s: %v", bucket, prefix, err)
+		}
+		resp, err := o.f.client.Do(req)
+		if err != nil {
+			return nil, apierror.FailedPrecondition("list gs://%s/%s: %v", bucket, prefix, err)
+		}
+		var page struct {
+			Items         []struct{ Name string } `json:"items"`
+			NextPageToken string                  `json:"nextPageToken"`
+		}
+		err = json.NewDecoder(io.LimitReader(resp.Body, 32<<20)).Decode(&page)
+		resp.Body.Close()
+		if resp.StatusCode == http.StatusNotFound {
+			return nil, apierror.NotFound("gs://%s: bucket %q not found", bucket, bucket)
+		}
+		if resp.StatusCode != http.StatusOK || err != nil {
+			return nil, apierror.FailedPrecondition("list gs://%s/%s: HTTP %d", bucket, prefix, resp.StatusCode)
+		}
+		for _, it := range page.Items {
+			names = append(names, it.Name)
+		}
+		if page.NextPageToken == "" {
+			return names, nil
+		}
+		token = page.NextPageToken
+	}
 }
 
 // bucketMissing reports whether this instance's Cloud Storage answers 404

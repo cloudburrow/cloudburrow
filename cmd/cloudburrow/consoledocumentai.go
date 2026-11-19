@@ -16,15 +16,20 @@ package main
 //     columns (Name, Status, Region, Type), Create processor, Enable
 //     processor and Disable processor on each row, and Delete.
 //   - A processor's page: its Overview (Name, ID, Type, Prediction
-//     endpoint), Manage versions (its type's pretrained default version,
-//     the one version served), and Upload test document, which sends the
-//     file to ProcessDocument and shows the extracted text and the layout
-//     (blocks, paragraphs and lines with their confidence and bounding box;
-//     the layout parser's blocks and chunks).
+//     endpoint), Manage versions (ListProcessorVersions' pretrained
+//     versions, the Default version picker, SetDefaultProcessorVersion, and
+//     Deploy, Undeploy and Delete over the checked versions, which Google
+//     refuses for a pretrained or default version), and Upload test
+//     document, which sends the file to ProcessDocument and draws the page
+//     images it answers with the blocks, paragraphs and lines boxed over
+//     them, beside the extracted text and the elements' rows (the layout
+//     parser's blocks and chunks beside its text) (#1930).
+//   - The Processor gallery is Google's cards, under its category headings.
 
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -242,7 +247,8 @@ func (p docAIOverviewProvider) List(ctx context.Context, project string) (consol
 			{Label: "Layout Parser", Value: "Tesseract's paragraphs as layout blocks, and chunks of whole paragraphs"},
 			{Label: "Regions", Value: "us, eu"},
 			{Label: "Other processor types", Value: "Not available locally: Google's trained models have no local equivalent"},
-			{Label: "Processing", Value: "Online (ProcessDocument) only; batch processing, training and custom versions are not served"},
+			{Label: "Processing", Value: "Online (ProcessDocument) and batch (BatchProcessDocuments, Cloud Storage to Cloud Storage)"},
+			{Label: "Versions", Value: "Google's pretrained versions of each type, all read with Tesseract; training is for custom processors, which are not available"},
 		}},
 	}
 	out.Total = len(procs)
@@ -262,21 +268,35 @@ func (p docAIGalleryProvider) List(ctx context.Context, project string) (console
 	if err != nil {
 		return console.Listing{Unavailable: consoleErr(err)}, nil
 	}
+	// Google's gallery is a card per type under its category's heading,
+	// each card naming the type and what it does, with Create processor
+	// (#1930); the rows carry the same for a script.
 	out := console.Listing{Columns: []string{"Category", "Description", "Type"}, NameColumn: "Processor", Noun: "processor types",
-		AlwaysStatus: true, Note: "Enterprise Document OCR and Layout Parser run on this instance. Every other type is in Google's " +
-			"gallery and not available locally."}
+		AlwaysStatus: true, SummaryOnly: true, Note: "Enterprise Document OCR and Layout Parser run on this instance. Every other type " +
+			"is in Google's gallery and not available locally."}
 	q := "?project=" + url.QueryEscape(p.d.project(project))
+	category := ""
 	for _, g := range docAIGallery {
+		page := "/document-ai/processor-library/" + g.Type + q
 		r := console.Resource{Name: g.Name, Fields: map[string]string{"Category": g.Category, "Description": g.About, "Type": g.Type},
-			Link: "/document-ai/processor-library/" + g.Type + q}
+			Link: page}
+		card := console.PropertyGroup{Heading: g.Name, Properties: []console.Property{{Label: "Description", Value: g.About}}}
+		if g.Category != category {
+			card.Section, category = g.Category, g.Category
+		}
 		if _, ok := served[g.Type]; ok {
 			r.Status = "Available"
 			r.Actions = []console.Action{{ID: "create-processor", Label: "Create processor", Button: true,
-				Href: "/document-ai/processor-library/" + g.Type + q + "&action=create-processor"}}
+				Href: page + "&action=create-processor"}}
+			card.Properties = append(card.Properties, console.Property{Label: "Status", Value: "Available"},
+				console.Property{Label: "Create processor", Value: "Create " + g.Name + " processor", Link: page + "&action=create-processor"})
 		} else {
 			r.Status = "Not available locally"
+			card.Properties = append(card.Properties, console.Property{Label: "Status", Value: "Not available locally"},
+				console.Property{Label: "Details", Value: "Why " + g.Name + " is not available", Link: page})
 		}
 		out.Items = append(out.Items, r)
+		out.Summary = append(out.Summary, card)
 	}
 	out.Total = len(out.Items)
 	return out, nil
@@ -492,14 +512,31 @@ func (p docAIProcessorsProvider) Detail(ctx context.Context, project string, pat
 		{Label: "Prediction endpoint", Value: p.predictionEndpoint(pr), Copy: "Copy"},
 		{Label: "Resource name", Value: pr.GetName()}, {Label: "Created", Value: stampAge(pr.GetCreateTime())}}
 	d := console.Detail{Title: pr.GetDisplayName(), Summary: overview}
-	ver := lastSegment(pr.GetDefaultProcessorVersion())
+	vers, err := p.d.versions(ctx, pr.GetName())
+	if err != nil {
+		return console.Detail{Unavailable: consoleErr(err)}, nil
+	}
+	// Google's Manage versions tab: the versions with their state, the
+	// Default version picker, and Deploy, Undeploy and Delete over the
+	// checked versions (#1930).
 	versions := console.Section{ID: "versions", Label: "Manage versions", Listing: console.Listing{
-		Columns: []string{"Version name", "Default", "Google managed"}, NameColumn: "Version ID", Noun: "versions", AlwaysStatus: true},
-		Note: "The type's pretrained version, the default, is the one version served. Custom versions, training, Deploy and " +
-			"Undeploy are not available locally: they train and host a model on Google's servers."}
-	if ver != "" {
-		versions.Listing.Items = []console.Resource{{Name: ver, Status: "Deployed", Fields: map[string]string{
-			"Version name": "Google pretrained", "Default": "Yes", "Google managed": "Yes"}}}
+		Columns: []string{"Version name", "Default", "Google managed", "Created"}, NameColumn: "Version ID", Noun: "versions",
+		AlwaysStatus: true, SelectActions: docAIVersionSelectActions()},
+		Actions: []console.Action{docAIDefaultVersionAction(pr, vers)},
+		Note: "Google's pretrained versions of " + docAITypeLabel(pr.GetType()) + ", all read here with Tesseract. Google does not let " +
+			"a pretrained version or the default be deployed, undeployed or deleted; training creates versions of custom processors only."}
+	for _, v := range vers {
+		def := "No"
+		if v.GetName() == pr.GetDefaultProcessorVersion() {
+			def = "Yes"
+		}
+		gm := "No"
+		if v.GetGoogleManaged() {
+			gm = "Yes"
+		}
+		versions.Listing.Items = append(versions.Listing.Items, console.Resource{Name: lastSegment(v.GetName()), Selectable: true,
+			Status: stateWord(v.GetState().String()), Fields: map[string]string{"Version name": v.GetDisplayName(), "Default": def,
+				"Google managed": gm, "Created": stampAge(v.GetCreateTime())}})
 	}
 	versions.Listing.Total = len(versions.Listing.Items)
 	d.Sections = []console.Section{
@@ -524,6 +561,15 @@ func (p docAIProcessorsProvider) DetailActions(ctx context.Context, project stri
 	acts := []console.Action{{ID: "upload-test", Label: "Upload test document", Submit: "Upload", Fields: []console.Field{
 		{Name: "file", Label: "Document", Type: console.FileFieldType, Required: true,
 			Help: "PDF, PNG, JPEG, GIF, TIFF, BMP or WebP, at most 40 MB and 15 pages"}}}}
+	if vers, err := p.d.versions(ctx, pr.GetName()); err == nil {
+		acts = append(acts, docAIDefaultVersionAction(pr, vers))
+	}
+	acts = append(acts, docAIVersionSelectActions()...)
+	acts = append(acts, console.Action{ID: "batch-process", Label: "Batch process", Submit: "Process", Fields: []console.Field{
+		{Name: "input", Label: "Source path", Type: "text", Required: true, Pattern: `^gs://[^\/]+(\/.*)?$`,
+			Help: "gs://bucket/folder/ to process every document under it, or gs://bucket/file.pdf for one"},
+		{Name: "output", Label: "Destination path", Type: "text", Required: true, Pattern: `^gs://[^\/]+(\/.*)?$`,
+			Help: "gs://bucket/folder: each result is written under {operation ID}/{index}/"}}})
 	if pr.GetState() == documentaipb.Processor_ENABLED {
 		acts = append(acts, console.Action{ID: "disable", Label: "Disable processor"})
 	} else {
@@ -533,7 +579,62 @@ func (p docAIProcessorsProvider) DetailActions(ctx context.Context, project stri
 		Confirm: "the processor"})
 }
 
-func (p docAIProcessorsProvider) ActAt(ctx context.Context, project string, path []string, action string, _ map[string]string) error {
+// ActAtResult implements console.ResultActor: Batch process answers each
+// document's status and where its result was written; every other action
+// answers nothing.
+func (p docAIProcessorsProvider) ActAtResult(ctx context.Context, project string, path []string, action string, v map[string]string) (*console.Listing, error) {
+	if action != "batch-process" {
+		return nil, p.ActAt(ctx, project, path, action, v)
+	}
+	if len(path) != 1 {
+		return nil, fmt.Errorf("unknown action %q", action)
+	}
+	pr, err := p.d.processor(ctx, project, path[0])
+	if err != nil {
+		return nil, err
+	}
+	in := strings.TrimSpace(v["input"])
+	src := &documentaipb.BatchDocumentsInputConfig{Source: &documentaipb.BatchDocumentsInputConfig_GcsPrefix{
+		GcsPrefix: &documentaipb.GcsPrefix{GcsUriPrefix: in}}}
+	if mt := docAIMimeTypes[strings.ToLower(filepath.Ext(in))]; mt != "" && !strings.HasSuffix(in, "/") {
+		src = &documentaipb.BatchDocumentsInputConfig{Source: &documentaipb.BatchDocumentsInputConfig_GcsDocuments{
+			GcsDocuments: &documentaipb.GcsDocuments{Documents: []*documentaipb.GcsDocument{{GcsUri: in, MimeType: mt}}}}}
+	}
+	out := &console.Listing{Columns: []string{"Status", "Result"}, NameColumn: "Document", Noun: "documents"}
+	err = p.d.withClient(ctx, func(c *documentai.DocumentProcessorClient) error {
+		op, err := c.BatchProcessDocuments(ctx, &documentaipb.BatchProcessRequest{Name: pr.GetName(), InputDocuments: src,
+			DocumentOutputConfig: &documentaipb.DocumentOutputConfig{Destination: &documentaipb.DocumentOutputConfig_GcsOutputConfig_{
+				GcsOutputConfig: &documentaipb.DocumentOutputConfig_GcsOutputConfig{GcsUri: strings.TrimSpace(v["output"])}}}})
+		if err != nil {
+			return err
+		}
+		_, werr := op.Wait(ctx)
+		meta, _ := op.Metadata()
+		for _, st := range meta.GetIndividualProcessStatuses() {
+			state, res := "Succeeded", st.GetOutputGcsDestination()
+			if st.GetStatus().GetCode() != 0 {
+				state, res = "Failed", st.GetStatus().GetMessage()
+			}
+			out.Items = append(out.Items, console.Resource{Name: st.GetInputGcsSource(), Fields: map[string]string{"Status": state, "Result": res}})
+		}
+		out.Note = "Operation " + op.Name() + ": " + stateWord(meta.GetState().String()) + "."
+		if werr != nil && len(out.Items) == 0 {
+			return werr
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	out.Total = len(out.Items)
+	return out, nil
+}
+
+func (p docAIProcessorsProvider) ActAt(ctx context.Context, project string, path []string, action string, v map[string]string) error {
+	if action == "batch-process" {
+		_, err := p.ActAtResult(ctx, project, path, action, v)
+		return err
+	}
 	if len(path) != 1 {
 		return fmt.Errorf("unknown action %q", action)
 	}
@@ -544,7 +645,121 @@ func (p docAIProcessorsProvider) ActAt(ctx context.Context, project string, path
 	if err != nil {
 		return err
 	}
+	switch action {
+	case "set-default-version":
+		return p.d.setDefaultVersion(ctx, pr.GetName(), v["version"])
+	case "deploy-versions", "undeploy-versions", "delete-versions":
+		return p.d.changeVersions(ctx, pr.GetName(), strings.TrimSuffix(action, "-versions"), v[docAIVersionsField])
+	}
 	return p.d.setEnabled(ctx, pr.GetName(), action)
+}
+
+// docAIVersionsField is the selection field of Manage versions' actions.
+const docAIVersionsField = "versions"
+
+// docAIVersionSelectActions are Manage versions' Deploy, Undeploy and
+// Delete over the checked versions, as
+// https://docs.cloud.google.com/document-ai/docs/manage-processor-versions
+// describes them (read 2026-11-19).
+func docAIVersionSelectActions() []console.Action {
+	sel := []console.Field{{Name: docAIVersionsField, Type: "hidden"}}
+	return []console.Action{
+		{ID: "deploy-versions", Label: "Deploy", SelectionField: docAIVersionsField, Fields: sel,
+			Confirm: "The checked versions are deployed, so they can process documents."},
+		{ID: "undeploy-versions", Label: "Undeploy", SelectionField: docAIVersionsField, Fields: sel,
+			Confirm: "The checked versions are undeployed and stop processing documents."},
+		{ID: "delete-versions", Label: "Delete", Destructive: true, SelectionField: docAIVersionsField, Fields: sel,
+			Confirm: "The checked versions are deleted."},
+	}
+}
+
+// docAIDefaultVersionAction is Google's Default version picker.
+func docAIDefaultVersionAction(pr *documentaipb.Processor, vers []*documentaipb.ProcessorVersion) console.Action {
+	var ids []string
+	labels := map[string]string{}
+	for _, v := range vers {
+		id := lastSegment(v.GetName())
+		ids = append(ids, id)
+		labels[id] = v.GetDisplayName() + " (" + id + ")"
+	}
+	return console.Action{ID: "set-default-version", Label: "Default version", Submit: "Save", Fields: []console.Field{
+		{Name: "version", Label: "Default version", Type: "select", Options: ids, OptionLabels: labels,
+			Default: lastSegment(pr.GetDefaultProcessorVersion()), Required: true,
+			Help: "the version a request that names the processor uses"}}}
+}
+
+// versions are a processor's versions, ListProcessorVersions'.
+func (d docAI) versions(ctx context.Context, processor string) ([]*documentaipb.ProcessorVersion, error) {
+	var out []*documentaipb.ProcessorVersion
+	err := d.withClient(ctx, func(c *documentai.DocumentProcessorClient) error {
+		it := c.ListProcessorVersions(ctx, &documentaipb.ListProcessorVersionsRequest{Parent: processor})
+		for {
+			v, err := it.Next()
+			if err == iterator.Done {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			out = append(out, v)
+		}
+	})
+	return out, err
+}
+
+func (d docAI) setDefaultVersion(ctx context.Context, processor, id string) error {
+	if strings.TrimSpace(id) == "" {
+		return errors.New("choose a version")
+	}
+	return d.withClient(ctx, func(c *documentai.DocumentProcessorClient) error {
+		op, err := c.SetDefaultProcessorVersion(ctx, &documentaipb.SetDefaultProcessorVersionRequest{Processor: processor,
+			DefaultProcessorVersion: processor + "/processorVersions/" + strings.TrimSpace(id)})
+		if err != nil {
+			return err
+		}
+		_, err = op.Wait(ctx)
+		return err
+	})
+}
+
+// changeVersions deploys, undeploys or deletes the versions named one per
+// line, each through its own call, as the console sends one a version.
+func (d docAI) changeVersions(ctx context.Context, processor, verb, ids string) error {
+	var names []string
+	for _, id := range strings.Fields(ids) {
+		names = append(names, processor+"/processorVersions/"+id)
+	}
+	if len(names) == 0 {
+		return errors.New("check the versions to " + verb)
+	}
+	return d.withClient(ctx, func(c *documentai.DocumentProcessorClient) error {
+		for _, n := range names {
+			var err error
+			switch verb {
+			case "deploy":
+				var op *documentai.DeployProcessorVersionOperation
+				if op, err = c.DeployProcessorVersion(ctx, &documentaipb.DeployProcessorVersionRequest{Name: n}); err == nil {
+					_, err = op.Wait(ctx)
+				}
+			case "undeploy":
+				var op *documentai.UndeployProcessorVersionOperation
+				if op, err = c.UndeployProcessorVersion(ctx, &documentaipb.UndeployProcessorVersionRequest{Name: n}); err == nil {
+					_, err = op.Wait(ctx)
+				}
+			case "delete":
+				var op *documentai.DeleteProcessorVersionOperation
+				if op, err = c.DeleteProcessorVersion(ctx, &documentaipb.DeleteProcessorVersionRequest{Name: n}); err == nil {
+					err = op.Wait(ctx)
+				}
+			default:
+				return fmt.Errorf("unknown action %q", verb)
+			}
+			if err != nil {
+				return fmt.Errorf("%s %s: %w", verb, lastSegment(n), err)
+			}
+		}
+		return nil
+	})
 }
 
 // docAIMimeTypes are the documented file types by extension, for a browser
@@ -620,12 +835,26 @@ func docAIResult(doc *documentaipb.Document) *console.Listing {
 	}
 	out := &console.Listing{Columns: []string{"Page", "Element", "Text", "Confidence", "Bounding box"}, NameColumn: "#",
 		Noun: "layout elements", Text: doc.GetText()}
+	var rp *console.ResultPage
 	add := func(page int32, kind string, l *documentaipb.Document_Page_Layout) {
-		out.Items = append(out.Items, console.Resource{Name: strconv.Itoa(len(out.Items) + 1), Fields: map[string]string{
+		name := strconv.Itoa(len(out.Items) + 1)
+		out.Items = append(out.Items, console.Resource{Name: name, Fields: map[string]string{
 			"Page": strconv.Itoa(int(page)), "Element": kind, "Text": slice(l.GetTextAnchor()),
 			"Confidence": strconv.FormatFloat(float64(l.GetConfidence()), 'f', 2, 32), "Bounding box": box(l)}})
+		if v := l.GetBoundingPoly().GetNormalizedVertices(); rp != nil && len(v) >= 3 {
+			x0, y0, x1, y1 := float64(v[0].GetX()), float64(v[0].GetY()), float64(v[2].GetX()), float64(v[2].GetY())
+			rp.Boxes = append(rp.Boxes, console.ResultBox{Row: name, Kind: kind, X: x0, Y: y0, W: x1 - x0, H: y1 - y0})
+		}
 	}
 	for _, pg := range doc.GetPages() {
+		// The page's image, the boxes of its layout drawn over it (#1930).
+		rp = nil
+		if img := pg.GetImage(); len(img.GetContent()) > 0 && img.GetMimeType() != "" {
+			out.Pages = append(out.Pages, console.ResultPage{Label: fmt.Sprintf("Page %d", pg.GetPageNumber()),
+				Image: "data:" + img.GetMimeType() + ";base64," + base64.StdEncoding.EncodeToString(img.GetContent()),
+				Width: int(img.GetWidth()), Height: int(img.GetHeight())})
+			rp = &out.Pages[len(out.Pages)-1]
+		}
 		for _, b := range pg.GetBlocks() {
 			add(pg.GetPageNumber(), "Block", b.GetLayout())
 		}
@@ -654,8 +883,8 @@ func docAIResult(doc *documentaipb.Document) *console.Listing {
 		out.Text = strings.TrimSpace(lt.String())
 	}
 	out.Total = len(out.Items)
-	out.Note = fmt.Sprintf("%d pages; the text, then each layout element with its text, confidence and normalized bounding box.",
-		len(doc.GetPages()))
+	out.Note = fmt.Sprintf("%d pages; the text, then each layout element with its text, confidence and normalized bounding box, "+
+		"drawn over its page. Point at a row or a box to light up the other.", len(doc.GetPages()))
 	if len(doc.GetPages()) == 0 {
 		out.Note = "The document's layout blocks and chunks, as the layout parser answers them."
 	}
@@ -671,4 +900,5 @@ var (
 	_ console.Driller     = docAIProcessorsProvider{}
 	_ console.Actor       = docAIProcessorsProvider{}
 	_ console.FileActor   = docAIProcessorsProvider{}
+	_ console.ResultActor = docAIProcessorsProvider{}
 )

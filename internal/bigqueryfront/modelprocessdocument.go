@@ -95,7 +95,13 @@ func (f front) documentProcessor(ctx context.Context, v, project string, number 
 			return "", code, "Cannot read the document processor " + name + ": " + msg
 		}
 		if version != "" && version != p.DefaultProcessorVersion {
-			return "", 400, "The processor version " + version + " doesn't exist"
+			// Another of the processor's versions (#1930).
+			var v struct {
+				Name string `json:"name"`
+			}
+			if c, _ := f.documentAI(ctx, http.MethodGet, version, nil, &v); c != 0 {
+				return "", 400, "The processor version " + version + " doesn't exist"
+			}
 		}
 		if p.State != "ENABLED" {
 			return "", 400, "The processor " + p.Name + " exists but is not enabled: its state is " + p.State
