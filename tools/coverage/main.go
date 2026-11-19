@@ -76,6 +76,7 @@ import (
 	_ "cloud.google.com/go/functions/apiv2/functionspb"
 	_ "cloud.google.com/go/iam/admin/apiv1/adminpb"
 	_ "cloud.google.com/go/iam/apiv1/iampb"
+	_ "cloud.google.com/go/iam/apiv2/iampb"
 	_ "cloud.google.com/go/kms/apiv1/kmspb"
 	_ "cloud.google.com/go/logging/apiv2/loggingpb"
 	_ "cloud.google.com/go/memorystore/apiv1/memorystorepb"
@@ -148,7 +149,7 @@ var areas = []area{
 	// QueryTestablePermissions, service accounts, their keys and IAM
 	// policies; SignBlob and SignJwt (deprecated for IAM Credentials'),
 	// grantable roles, auditable services and lint are UNIMPLEMENTED.
-	{Key: "iam", Title: "IAM (custom roles, service accounts)", Own: true, Services: []string{"google.iam.admin.v1.IAM"}},
+	{Key: "iam", Title: "IAM (custom roles, service accounts, deny policies)", Own: true, Services: []string{"google.iam.admin.v1.IAM", "google.iam.v2.Policies"}},
 	// Liens (#1295) have no gRPC service: they are on resourcemanagerv1.
 	{Key: "resourcemanager", Title: "Resource Manager v3 (Projects, Folders, Organizations, Tags)", Own: true, Services: []string{"google.cloud.resourcemanager.v3.Projects",
 		"google.cloud.resourcemanager.v3.Folders", "google.cloud.resourcemanager.v3.Organizations", "google.cloud.resourcemanager.v3.TagKeys",

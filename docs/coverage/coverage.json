@@ -213,6 +213,7 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/AccessSecretVersion",
         "status": "Verified",
         "tests": [
+          "test/compat/iamdenypolicies1886_test.go:50 TestIAMEnforcementDenyPolicies",
           "test/compat/iamenforcement1879_test.go:119 TestIAMEnforcementSecretManager",
           "test/compat/iamenforcement1879_test.go:342 TestIAMEnforcementInherited",
           "test/compat/iamenforcement1879_test.go:499 TestIAMEnforcementJSON",
@@ -3828,9 +3829,9 @@
   },
   {
     "Key": "iam",
-    "Title": "IAM (custom roles, service accounts)",
+    "Title": "IAM (custom roles, service accounts, deny policies)",
     "counts": {
-      "Verified": 31
+      "Verified": 36
     },
     "rows": [
       {
@@ -4094,6 +4095,41 @@
         "status": "Verified",
         "tests": [
           "test/compat/iamserviceaccounts1747_test.go:256 TestIAMServiceAccountKeys"
+        ]
+      },
+      {
+        "method": "google.iam.v2.Policies/CreatePolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamdenypolicies1886_test.go:50 TestIAMEnforcementDenyPolicies"
+        ]
+      },
+      {
+        "method": "google.iam.v2.Policies/DeletePolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamdenypolicies1886_test.go:50 TestIAMEnforcementDenyPolicies"
+        ]
+      },
+      {
+        "method": "google.iam.v2.Policies/GetPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamdenypolicies1886_test.go:50 TestIAMEnforcementDenyPolicies"
+        ]
+      },
+      {
+        "method": "google.iam.v2.Policies/ListPolicies",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamdenypolicies1886_test.go:50 TestIAMEnforcementDenyPolicies"
+        ]
+      },
+      {
+        "method": "google.iam.v2.Policies/UpdatePolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamdenypolicies1886_test.go:50 TestIAMEnforcementDenyPolicies"
         ]
       }
     ]

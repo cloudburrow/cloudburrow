@@ -47,22 +47,23 @@ func (e *Enforcer) CheckRemote(in iamcheck.Request) iamcheck.Decision {
 		return out
 	case c.Owner:
 		out.Owner, out.Email = true, c.Email
-		out.Held = append(out.Held, in.Permissions...)
-		return out
 	}
-	out.Email = c.Email
-	out.Members = e.Eval.Members(c.Email)
+	email := e.email(c)
+	if !c.Owner {
+		out.Email = c.Email
+		out.Members = e.Eval.Members(c.Email)
+	}
 	project := in.Project
 	if project == "" {
 		project = Project(in.Resource)
 	}
-	req := Request{Email: c.Email, Resource: in.Resource, Type: in.Type, Service: in.Service, Project: project, Time: e.now()}
+	req := Request{Email: email, Resource: in.Resource, Type: in.Type, Service: in.Service, Project: project, Time: e.now()}
 	for _, p := range in.Own {
 		req.Own = append(req.Own, Attached{Resource: p.Resource, Policy: p.Policy})
 	}
 	for _, p := range in.Permissions {
 		req.Permission = p
-		if e.Eval.Check(req).Granted {
+		if c.Owner && !e.Eval.Denies(req) || !c.Owner && e.Eval.Check(req).Granted {
 			out.Held = append(out.Held, p)
 		}
 	}

@@ -72,9 +72,6 @@ type Decision struct {
 
 // Holds reports whether d grants permission.
 func (d Decision) Holds(permission string) bool {
-	if d.Owner {
-		return true
-	}
 	for _, p := range d.Held {
 		if p == permission {
 			return true

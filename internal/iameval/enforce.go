@@ -49,6 +49,28 @@ type Enforcer struct {
 	Policies map[string]PolicyGetter
 	// Now is the clock request.time reads; nil is time.Now.
 	Now func() time.Time
+	// OwnerEmail is the instance's own account, whom a request with no
+	// bearer token is served as: deny policies apply to it too (#1886).
+	OwnerEmail string
+}
+
+// email is the account c is checked as.
+func (e *Enforcer) email(c Caller) string {
+	if c.Owner && c.Email == "" {
+		return strings.ToLower(e.OwnerEmail)
+	}
+	return c.Email
+}
+
+// holds is whether c holds permission on resource in svc: the owner every
+// permission no deny policy denies it, anyone else what the evaluator
+// grants.
+func (e *Enforcer) holds(ctx context.Context, svc *Service, c Caller, permission, resource string) bool {
+	req := e.Request(ctx, svc, e.email(c), permission, resource)
+	if c.Owner {
+		return !e.Eval.Denies(req)
+	}
+	return e.Eval.Check(req).Granted
 }
 
 func (e *Enforcer) now() time.Time {
@@ -105,7 +127,7 @@ func (e *Enforcer) testPermissions(ctx context.Context, svc *Service, req any, h
 		return nil, Unauthenticated()
 	}
 	resp, err := handler(ctx, req)
-	if err != nil || c.Owner {
+	if err != nil {
 		return resp, err
 	}
 	out, ok := resp.(*iampb.TestIamPermissionsResponse)
@@ -114,7 +136,7 @@ func (e *Enforcer) testPermissions(ctx context.Context, svc *Service, req any, h
 	}
 	var held []string
 	for _, p := range out.GetPermissions() {
-		if e.Eval.Check(e.Request(ctx, svc, c.Email, p, in.GetResource())).Granted {
+		if e.holds(ctx, svc, c, p, in.GetResource()) {
 			held = append(held, p)
 		}
 	}
@@ -134,11 +156,7 @@ func (e *Enforcer) Authorize(ctx context.Context, svc *Service, bearer, permissi
 	if c.Invalid {
 		return Unauthenticated()
 	}
-	if c.Owner {
-		return nil
-	}
-	d := e.Eval.Check(e.Request(ctx, svc, c.Email, permission, resource))
-	if d.Granted {
+	if e.holds(ctx, svc, c, permission, resource) {
 		return nil
 	}
 	return svc.Deny(permission, resource)
@@ -311,10 +329,6 @@ func (e *Enforcer) testPermissionsJSON(w http.ResponseWriter, r *http.Request, s
 		WriteJSONStatus(w, Unauthenticated())
 		return
 	}
-	if c.Owner {
-		next.ServeHTTP(w, r)
-		return
-	}
 	rec := httptest.NewRecorder()
 	next.ServeHTTP(rec, r)
 	var out map[string]any
@@ -329,7 +343,7 @@ func (e *Enforcer) testPermissionsJSON(w http.ResponseWriter, r *http.Request, s
 	held := []any{}
 	if perms, ok := out["permissions"].([]any); ok {
 		for _, p := range perms {
-			if ps, ok := p.(string); ok && e.Eval.Check(e.Request(r.Context(), svc, c.Email, ps, resource)).Granted {
+			if ps, ok := p.(string); ok && e.holds(r.Context(), svc, c, ps, resource) {
 				held = append(held, ps)
 			}
 		}

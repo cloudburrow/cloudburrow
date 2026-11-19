@@ -8,9 +8,11 @@ import (
 	"time"
 
 	"cloud.google.com/go/iam/apiv1/iampb"
+	iamv2 "cloud.google.com/go/iam/apiv2/iampb"
 	"google.golang.org/genproto/googleapis/api/annotations"
 
 	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/iamcond"
 	"github.com/cloudburrow/cloudburrow/internal/iameval"
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 	"github.com/cloudburrow/cloudburrow/internal/metadata"
@@ -111,9 +113,43 @@ func (s registrySource) Principals(email string) []string {
 	return reg.Principals(email)
 }
 
+// DenyPolicies are the IAM v2 deny policies attached to resource (#1886).
+func (s registrySource) DenyPolicies(resource string) []*iamv2.Policy {
+	reg := s.registry()
+	if reg == nil {
+		return nil
+	}
+	return reg.DenyPolicies(resource)
+}
+
+// Tags are a resource's effective tags, which deny conditions read.
+func (s registrySource) Tags(full string) ([]iamcond.Tag, bool) {
+	reg := s.registry()
+	if reg == nil {
+		return nil, false
+	}
+	eff, err := reg.EffectiveTags(full)
+	if err != nil {
+		return nil, false
+	}
+	out := make([]iamcond.Tag, 0, len(eff))
+	for _, t := range eff {
+		short := t.GetNamespacedTagValue()
+		if i := strings.LastIndex(short, "/"); i >= 0 {
+			short = short[i+1:]
+		}
+		out = append(out, iamcond.Tag{NamespacedKey: t.GetNamespacedTagKey(), ShortValue: short, KeyID: t.GetTagKey(), ValueID: t.GetTagValue()})
+	}
+	return out, true
+}
+
 // newIAMEnforcer is the enforcer of cfg's instance.
 func newIAMEnforcer(cfg config.Config, creds *metadata.Credentials, reg func() *resourcemanager.Registry) *iameval.Enforcer {
 	on := cfg.IAMEnforced()
+	owner := ""
+	if creds != nil {
+		owner = creds.Email
+	}
 	return &iameval.Enforcer{
 		Eval: &iameval.Evaluator{Source: registrySource{reg: reg}},
 		On:   func() bool { return on },
@@ -127,7 +163,8 @@ func newIAMEnforcer(cfg config.Config, creds *metadata.Credentials, reg func() *
 			}
 			return iameval.Caller{Email: strings.ToLower(email)}
 		},
-		Policies: map[string]iameval.PolicyGetter{},
+		Policies:   map[string]iameval.PolicyGetter{},
+		OwnerEmail: owner,
 	}
 }
 

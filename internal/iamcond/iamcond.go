@@ -55,6 +55,7 @@
 package iamcond
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -211,6 +212,25 @@ func (e *Expr) Eval(attrs Attributes) bool {
 	}
 	b, ok := v.(bool)
 	return ok && b
+}
+
+// Evaluate is the condition's value under attrs, with the error when it
+// cannot be evaluated (an attribute the request does not have, such as
+// tags a check does not know): a deny policy's denialCondition denies
+// then, where an allow binding's grants nothing (#1886).
+func (e *Expr) Evaluate(attrs Attributes) (bool, error) {
+	if e == nil {
+		return false, errors.New("no expression")
+	}
+	v, err := e.root.eval(&attrs)
+	if err != nil {
+		return false, err
+	}
+	b, ok := v.(bool)
+	if !ok {
+		return false, errors.New("the expression is not a bool")
+	}
+	return b, nil
 }
 
 // Eval compiles src and evaluates it: false when it does not compile.

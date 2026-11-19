@@ -13,10 +13,12 @@ import (
 	"time"
 
 	"cloud.google.com/go/iam/admin/apiv1/adminpb"
+	iamv2 "cloud.google.com/go/iam/apiv2/iampb"
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
 	rmpb "cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
+	"google.golang.org/genproto/googleapis/api/annotations"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -653,6 +655,14 @@ func (s *Server) Start(ctx context.Context) error {
 	adminpb.RegisterIAMServer(g, iamAdmin)
 	iamREST := &rest.Transcoder{Packages: []string{"google.iam.admin.v1"}}
 	iamREST.RegisterService(iamAdminDesc, iamAdmin)
+	// IAM v2 deny policies (#1886), and their operations.
+	policies := NewPoliciesServer(s.projects.reg)
+	iamv2.RegisterPoliciesServer(g, policies)
+	iamV2REST := &rest.Transcoder{Packages: []string{"google.iam.v2"}, Mixins: []*annotations.HttpRule{{
+		Selector: "google.longrunning.Operations.GetOperation",
+		Pattern:  &annotations.HttpRule_Get{Get: "/v2/{name=policies/*/*/*/operations/*}"}}}}
+	iamV2REST.RegisterService(&iamv2.Policies_ServiceDesc, policies)
+	iamV2REST.RegisterService(&longrunningpb.Operations_ServiceDesc, OperationsServer{})
 
 	router := rest.NewRouter()
 	s.projects.restRoutes(router)
@@ -669,6 +679,10 @@ func (s *Server) Start(ctx context.Context) error {
 				x.h.ServeHTTP(w, r)
 				return
 			}
+		}
+		if isIAMv2Path(r.URL.Path) {
+			iamV2REST.ServeHTTP(w, r)
+			return
 		}
 		if isIAMAdminPath(r.URL.Path) {
 			iamREST.ServeHTTP(w, r)

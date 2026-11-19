@@ -18,6 +18,7 @@ import (
 	asset "google.golang.org/api/cloudasset/v1"
 	ptv1 "google.golang.org/api/policytroubleshooter/v1"
 	pt "google.golang.org/api/policytroubleshooter/v3"
+	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/config"
@@ -35,8 +36,9 @@ import (
 // fullResourceName and permission, and conditionContext.request.receiveTime
 // for request.time (now when absent). It explains every allow policy of the
 // resource's chain that is set, binding by binding, with Google's access
-// states and relevances; deny policies are not stored here, so
-// denyPolicyExplanation is always DENY_ACCESS_STATE_NOT_DENIED.
+// states and relevances, and every IAM v2 deny policy attached to the
+// resource's project, folders and organization, rule by rule (#1886): a
+// denied permission is CANNOT_ACCESS whatever the allow policies grant.
 //
 // analyzeIamPolicy (GET v1/{scope}:analyzeIamPolicy) answers from the
 // policies of the scope (a project, folder or organization) and of the
@@ -161,11 +163,12 @@ func (a iamAnalysis) troubleshoot(w http.ResponseWriter, r *http.Request) {
 		OverallAccessState: "CANNOT_ACCESS",
 		AllowPolicyExplanation: &pt.GoogleCloudPolicytroubleshooterIamV3AllowPolicyExplanation{
 			AllowAccessState: string(iameval.NotGranted), Relevance: "HEURISTIC_RELEVANCE_NORMAL"},
-		DenyPolicyExplanation: &pt.GoogleCloudPolicytroubleshooterIamV3DenyPolicyExplanation{
-			DenyAccessState: "DENY_ACCESS_STATE_NOT_DENIED", Relevance: "HEURISTIC_RELEVANCE_NORMAL", PermissionDeniable: true},
+		DenyPolicyExplanation: ptDeny(d, t.Permission),
 	}
 	if d.Granted {
 		out.OverallAccessState = "CAN_ACCESS"
+	}
+	if d.Allowed {
 		out.AllowPolicyExplanation.AllowAccessState = string(iameval.Granted)
 		out.AllowPolicyExplanation.Relevance = "HEURISTIC_RELEVANCE_HIGH"
 	}
@@ -249,6 +252,8 @@ func (a iamAnalysis) troubleshootV1(w http.ResponseWriter, r *http.Request) {
 		}
 		return "NOT_GRANTED"
 	}
+	// v1 and v2alpha1 explain allow policies only; a denied permission is
+	// NOT_GRANTED, as the caller cannot use it.
 	out := &ptv1.GoogleCloudPolicytroubleshooterV1TroubleshootIamPolicyResponse{Access: v1Access(d.Granted)}
 	for _, p := range d.Policies {
 		if p.Policy == nil {
@@ -287,6 +292,110 @@ func (a iamAnalysis) troubleshootV1(w http.ResponseWriter, r *http.Request) {
 		out.ExplainedPolicies = append(out.ExplainedPolicies, ep)
 	}
 	writeIAMJSON(w, out)
+}
+
+// ptDeny is v3's deny explanation (#1886): every resource of the chain
+// with deny policies attached, each policy and each rule, with the
+// permission and principal matches.
+func ptDeny(d iameval.Decision, permission string) *pt.GoogleCloudPolicytroubleshooterIamV3DenyPolicyExplanation {
+	state := func(denies bool) string {
+		if denies {
+			return iameval.Denied
+		}
+		return iameval.NotDenied
+	}
+	out := &pt.GoogleCloudPolicytroubleshooterIamV3DenyPolicyExplanation{DenyAccessState: state(d.Denied),
+		Relevance: relevance(d.Denied), PermissionDeniable: iameval.Deniable(permission)}
+	byRes := map[string]*pt.GoogleCloudPolicytroubleshooterIamV3ExplainedDenyResource{}
+	for _, p := range d.Deny {
+		res := byRes[p.Resource]
+		if res == nil {
+			res = &pt.GoogleCloudPolicytroubleshooterIamV3ExplainedDenyResource{FullResourceName: fullName(p.Resource),
+				DenyAccessState: iameval.NotDenied, Relevance: relevance(false)}
+			byRes[p.Resource] = res
+			out.ExplainedResources = append(out.ExplainedResources, res)
+		}
+		if p.Denies {
+			res.DenyAccessState, res.Relevance = iameval.Denied, relevance(true)
+		}
+		ep := &pt.GoogleCloudPolicytroubleshooterIamV3ExplainedDenyPolicy{DenyAccessState: state(p.Denies), Relevance: relevance(p.Denies),
+			Policy: ptV2Policy(p)}
+		for _, r := range p.Rules {
+			ep.RuleExplanations = append(ep.RuleExplanations, ptDenyRule(r))
+		}
+		res.ExplainedPolicies = append(res.ExplainedPolicies, ep)
+	}
+	return out
+}
+
+func ptV2Policy(p iameval.DenyPolicyResult) *pt.GoogleIamV2Policy {
+	var raw []byte
+	if p.Policy != nil {
+		raw, _ = protojson.Marshal(p.Policy)
+	}
+	out := &pt.GoogleIamV2Policy{}
+	_ = json.Unmarshal(raw, out)
+	return out
+}
+
+func ptDenyRule(r iameval.DenyRuleResult) *pt.GoogleCloudPolicytroubleshooterIamV3DenyRuleExplanation {
+	perm := func(matched bool) pt.GoogleCloudPolicytroubleshooterIamV3DenyRuleExplanationAnnotatedPermissionMatching {
+		st := "PERMISSION_PATTERN_NOT_MATCHED"
+		if matched {
+			st = "PERMISSION_PATTERN_MATCHED"
+		}
+		return pt.GoogleCloudPolicytroubleshooterIamV3DenyRuleExplanationAnnotatedPermissionMatching{PermissionMatchingState: st, Relevance: relevance(matched)}
+	}
+	member := func(matched bool) pt.GoogleCloudPolicytroubleshooterIamV3DenyRuleExplanationAnnotatedDenyPrincipalMatching {
+		st := "MEMBERSHIP_NOT_MATCHED"
+		if matched {
+			st = "MEMBERSHIP_MATCHED"
+		}
+		return pt.GoogleCloudPolicytroubleshooterIamV3DenyRuleExplanationAnnotatedDenyPrincipalMatching{Membership: st, Relevance: relevance(matched)}
+	}
+	ref := func(v pt.GoogleCloudPolicytroubleshooterIamV3DenyRuleExplanationAnnotatedPermissionMatching) *pt.GoogleCloudPolicytroubleshooterIamV3DenyRuleExplanationAnnotatedPermissionMatching {
+		return &v
+	}
+	refm := func(v pt.GoogleCloudPolicytroubleshooterIamV3DenyRuleExplanationAnnotatedDenyPrincipalMatching) *pt.GoogleCloudPolicytroubleshooterIamV3DenyRuleExplanationAnnotatedDenyPrincipalMatching {
+		return &v
+	}
+	st := iameval.NotDenied
+	if r.Denies {
+		st = iameval.Denied
+	}
+	out := &pt.GoogleCloudPolicytroubleshooterIamV3DenyRuleExplanation{DenyAccessState: st, Relevance: relevance(r.Denies),
+		CombinedDeniedPermission: ref(perm(r.Permission != "")), CombinedExceptionPermission: ref(perm(r.ExceptPermission != "")),
+		CombinedDeniedPrincipal: refm(member(r.Principal != "")), CombinedExceptionPrincipal: refm(member(r.ExceptPrincipal != "")),
+		DeniedPermissions:    map[string]pt.GoogleCloudPolicytroubleshooterIamV3DenyRuleExplanationAnnotatedPermissionMatching{},
+		ExceptionPermissions: map[string]pt.GoogleCloudPolicytroubleshooterIamV3DenyRuleExplanationAnnotatedPermissionMatching{},
+		DeniedPrincipals:     map[string]pt.GoogleCloudPolicytroubleshooterIamV3DenyRuleExplanationAnnotatedDenyPrincipalMatching{},
+		ExceptionPrincipals:  map[string]pt.GoogleCloudPolicytroubleshooterIamV3DenyRuleExplanationAnnotatedDenyPrincipalMatching{}}
+	for _, p := range r.Rule.GetDeniedPermissions() {
+		out.DeniedPermissions[p] = perm(p == r.Permission)
+	}
+	for _, p := range r.Rule.GetExceptionPermissions() {
+		out.ExceptionPermissions[p] = perm(p == r.ExceptPermission)
+	}
+	for _, p := range r.Rule.GetDeniedPrincipals() {
+		out.DeniedPrincipals[p] = member(p == r.Principal)
+	}
+	for _, p := range r.Rule.GetExceptionPrincipals() {
+		out.ExceptionPrincipals[p] = member(p == r.ExceptPrincipal)
+	}
+	if c := r.Rule.GetDenialCondition(); c != nil {
+		out.Condition = &pt.GoogleTypeExpr{Title: c.GetTitle(), Description: c.GetDescription(), Expression: c.GetExpression(), Location: c.GetLocation()}
+		ce := &pt.GoogleCloudPolicytroubleshooterIamV3ConditionExplanation{}
+		switch r.Condition {
+		case "true":
+			ce.Value = true
+		case "false":
+			ce.Value = false
+		default:
+			ce.Errors = []*pt.GoogleRpcStatus{{Code: 3, Message: "The condition could not be evaluated, so the rule denies the permission"}}
+		}
+		out.ConditionExplanation = ce
+	}
+	return out
 }
 
 func relevance(high bool) string {

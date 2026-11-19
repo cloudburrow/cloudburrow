@@ -20,8 +20,9 @@
 // custom roles, and, for the basic roles Google's pages list without their
 // permissions, through basicGrants. Conditions are internal/iamcond's.
 //
-// Deny policies (IAM v2) are not stored by CloudBurrow, so none is
-// evaluated: a Decision's deny explanation is always "not denied".
+// Deny policies (IAM v2, #1886) are evaluated first (deny.go): a
+// permission a deny policy in the ancestry denies is refused whatever the
+// allow policies grant.
 package iameval
 
 import (
@@ -131,8 +132,15 @@ type PolicyResult struct {
 
 // Decision is a check's answer and its explanation.
 type Decision struct {
-	Granted  bool
+	// Granted is the answer: allowed and not denied.
+	Granted bool
+	// Allowed is whether an allow policy grants the permission.
+	Allowed  bool
 	Policies []PolicyResult
+	// Denied is whether a deny policy denies it (#1886), Deny each deny
+	// policy that applies.
+	Denied bool
+	Deny   []DenyPolicyResult
 }
 
 // Evaluator evaluates allow policies over a Source.
@@ -159,7 +167,9 @@ func (e *Evaluator) Check(req Request) Decision {
 	}
 	members := e.members(req.Email)
 	attrs := req.Attributes()
+	attrs.Tags, attrs.TagsKnown = e.tags(req)
 	var d Decision
+	d.Denied, d.Deny = e.deny(req, members, attrs)
 	for _, a := range e.Chain(req) {
 		pr := PolicyResult{Resource: a.Resource, Policy: a.Policy}
 		if a.Policy != nil {
@@ -173,9 +183,42 @@ func (e *Evaluator) Check(req Request) Decision {
 				pr.Bindings = append(pr.Bindings, br)
 			}
 		}
-		d.Granted = d.Granted || pr.Grants
+		d.Allowed = d.Allowed || pr.Grants
 		d.Policies = append(d.Policies, pr)
 	}
+	d.Granted = d.Allowed && !d.Denied
+	return d
+}
+
+// tags are req's resource's effective tags: its own and inherited, or,
+// when the Source cannot name the resource (a bucket's name holds no
+// project), its project's, which it inherits.
+func (e *Evaluator) tags(req Request) ([]iamcond.Tag, bool) {
+	ts, ok := e.Source.(TagSource)
+	if !ok {
+		return nil, false
+	}
+	if req.Service != "" && req.Resource != "" {
+		if t, ok := ts.Tags("//" + req.Service + "/" + req.Resource); ok {
+			return t, true
+		}
+	}
+	if req.Project != "" {
+		return ts.Tags("//cloudresourcemanager.googleapis.com/projects/" + req.Project)
+	}
+	return nil, false
+}
+
+// Denies is whether a deny policy denies req's permission to req's
+// principal, whatever the allow policies grant: what the instance's own
+// account, an owner of everything, is still refused (#1886).
+func (e *Evaluator) Denies(req Request) bool {
+	if req.Time.IsZero() {
+		req.Time = time.Now()
+	}
+	attrs := req.Attributes()
+	attrs.Tags, attrs.TagsKnown = e.tags(req)
+	d, _ := e.deny(req, e.members(req.Email), attrs)
 	return d
 }
 
