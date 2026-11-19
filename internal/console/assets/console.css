@@ -371,8 +371,12 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
   background: none; border: 0; border-radius: var(--radius-control);
   font: inherit; font-weight: 500; color: var(--accent); cursor: pointer;
 }
-.header-button:hover { background: var(--state-hover); }
-.header-button:active { background: var(--state-press); }
+button.primary.header-button { height: 36px; padding: 0 12px; background: none; color: var(--accent); box-shadow: none; }
+button.header-button:hover, button.primary.header-button:hover { background: var(--state-hover); }
+button.header-button:active, button.primary.header-button:active { background: var(--state-press); }
+button.primary.header-button[disabled], button.primary.header-button.is-busy[disabled] {
+  background: none; color: var(--accent);
+}
 .resource-name { margin: 4px 0 0; font-size: var(--text-heading-size); overflow-wrap: anywhere; }
 
 /* An emulation note, as a banner the reader can dismiss (#1842). */
@@ -391,7 +395,8 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .status-icon[data-state="ok"] { color: var(--ok); }
 .status-icon[data-state="warn"] { color: var(--warn); }
 .status-icon[data-state="error"] { color: var(--error); }
-.sort-button.is-status { min-width: 24px; }
+.sort-button.is-status { display: inline-flex; align-items: center; min-width: 24px; min-height: 24px; }
+.status-head-icon { display: inline-flex; color: var(--text-muted); }
 
 /* The filter bar (#1842): a filter icon, the box with its property menu, and
    View options beside it. */

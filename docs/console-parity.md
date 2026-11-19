@@ -260,6 +260,66 @@ Fields and labels follow the documented forms, restricted to what CloudBurrow su
 
 ---
 
+### 4.7 The shared layout (#1842)
+
+Round 1 of the console-parity work (#1868). Google's console is described from its public
+documentation only (the BigQuery web UI page, Create a bucket, Create a topic, Create a queue, the
+Logs Explorer interface); the layout below is what every category screen (#1843–#1866) builds on.
+
+- [x] **A product's own left-hand menu.** Inside a product, `#product-nav` sits on the left of the
+  page: the product's mark and name, then its pages one per row, the current one marked
+  (`aria-current="page"`). It is drawn on the product's list screens, its resources' pages and its
+  create pages. Its control ("Collapse left pane" / "Expand left pane", named "Collapse
+  <product> navigation menu") folds it to a rail, remembered across screens. A narrow window shows
+  it as a strip above the page. It lists only the pages this instance serves. It replaces the
+  horizontal link bar above the page.
+- [x] **One drawer row per product.** Firestore (Data, Databases), Bigtable (Tables, Instances), Key
+  Management (Key rings, EKM connections, Autokey, Single-tenant HSM), Memorystore (Redis, Redis
+  Cluster, Valkey), Cloud Logging (Logs Explorer with the admin pages), APIs & Services (Enabled
+  APIs & services, Operations) and IAM & Admin (IAM, Roles, Groups, Service accounts, Audit Logs)
+  are each one product with their pages in its menu. Every address is unchanged, so no redirect is
+  needed; a pin made on a page that is now inside a product points at the product.
+- [x] **The title line carries the actions.** A list's Create (with its plus), Refresh and the
+  info-panel toggle (an icon, "Show info panel" / "Hide info panel") are on the title's line; the
+  bar under it keeps the product's list actions and the bulk Delete. A resource page has a back
+  arrow, its Edit / Delete / actions beside the title, and is titled "<Kind> details" with its name
+  under the title where its route declares `kind` (Bucket, Topic, Subscription, Queue, Job, Secret,
+  Key ring so far); a deeper page (an object, a document) keeps its own name as the title.
+- [x] **The filter bar.** Every list table's filter is the shared `filterBar`: focusing it lists
+  the table's properties; choosing one and typing a value, then Enter, makes a chip
+  ("Location: us-east1"); chips are joined by AND, plain text matches any column, and each chip has
+  a remove control, with "Clear filters". **View options** beside it turns columns off and on,
+  remembered per service.
+- [x] **Status first, as an icon**, with its text for assistive technology and in the tooltip; the
+  row menu's column has no header text.
+- [x] **Create flows are full pages.** The create page has a back arrow; a form whose fields declare
+  sections is laid out as numbered sections ("1 Get started", "2 Choose a storage class for your
+  data", …), each with Continue, which folds the finished section to its title and opens the next;
+  Create then Cancel at the bottom. Create a bucket and Create topic use it; Create queue and
+  Create key ring, dialogs before, are pages now (`CreateOnPage`). Other forms of three fields or
+  fewer are still dialogs until their category converts them.
+- [x] **A project is always selected.** The picker has no "All projects" entry; with no default
+  project the first registered one is chosen.
+- [x] **Emulator notes are a dismissible banner** above the table instead of a paragraph, dismissed
+  for the tab.
+- [ ] Not yet: the details card above every tab strip, and the Logs and Query tabs appended to every
+  resource (audit item 9); `/` to search with a results dropdown (10); the `?` shortcut list in a
+  Help menu (11); the project picker's Select a project dialog and the New project page (12);
+  Home's Welcome dashboard (13). Each is listed in #1842's follow-ups.
+
+#### For category workers: the shared components (`internal/console/assets/console.js`)
+
+| Component | Use |
+|---|---|
+| ROUTES `product`, `productTitle`, `navTitle`, `kind` | Give every page of a product the same `product` key and `productTitle`; the menu and the drawer follow. `navTitle` names a page in the menu when its title is the product's name; `kind` titles its resources' pages "<Kind> details". |
+| `pageHeader(title, subtitle, { back, backLabel, actions })` | A screen's header: back arrow, h1 and the title-line slot. `headerActions(header)` returns the slot of a header already drawn. |
+| `createButton(label, onclick)`, `refreshButton(run)` | The title line's Create (with its plus) and Refresh (busy while `run` runs). |
+| `filterBar({ noun, columns, onChange })` | `.node` (the bar), `.chips` (the chip row), `.matches(get)`, `.active()`, `.text()`, `.clear()`; `renderTableInto` already uses it for every list. |
+| `viewOptions({ service, columns, onChange })` | The column chooser; `.hidden()` is the set turned off. |
+| `statusIcon(status)` | A status cell's icon, colour from `stateOf`, text kept for assistive technology. |
+| `noteBanner(text)` | An emulation note as a dismissible banner. |
+| `createSteps(fields.nodes)` | Numbered sections with Continue, from the form's `Section`s; `renderCreatePage` uses it, so a provider gets it by declaring sections and `CreateOnPage() bool { return true }`. |
+
 ## 5. Routes, scoping, accessibility, viewports
 
 ### Routes

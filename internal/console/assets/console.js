@@ -1692,7 +1692,9 @@ function headerActions(header) {
 
 // createButton is a list's Create on the title line, with Google's plus.
 function createButton(label, onclick) {
-  const button = el("button", { class: "header-button primary-text", type: "button", onclick });
+  // "primary" marks it as the screen's main action for scripts and
+  // assistive tooling; it is drawn as Google's text button.
+  const button = el("button", { class: "header-button primary", type: "button", onclick });
   button.innerHTML = ICON_ADD;
   button.append(el("span", { text: label }));
   return button;
@@ -2760,6 +2762,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
             announce(`Sorted by ${c}, ${sortAscending ? "ascending" : "descending"}`);
           },
         },
+          c === "Status" ? el("span", { class: "status-head-icon", "aria-hidden": "true", html: STATUS_GLYPHS[""] }) : null,
           el("span", { class: c === "Status" ? "sr-only" : null, text: c }),
           el("span", { class: "sort-arrow", "aria-hidden": "true", text: arrow })));
     }));
@@ -6430,7 +6433,11 @@ function drawProductNav() {
   if (!host) return;
 
   const here = productOfLocation();
-  const pages = here ? pagesOf(productKey(here)) : [];
+  // Only the pages this instance serves, as the drawer lists only those.
+  const served = new Set(SERVICES.map((sv) => sv.id));
+  const pages = here
+    ? pagesOf(productKey(here)).filter((r) => !r.service || served.has(r.service) || r === here)
+    : [];
   if (!pages.length) {
     host.hidden = true;
     document.documentElement.removeAttribute("data-product-nav");
