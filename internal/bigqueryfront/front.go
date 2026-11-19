@@ -602,6 +602,12 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	// Per-project IAM of a caller with a token the instance minted
 	// (iamcheck.go, #1767).
 	iamChecks := &iamState{policies: iam}
+	if o.stateDir != "" {
+		iamChecks.keepCreators(jobCreatorsStateFile(o.stateDir), o.logf) // iamcheck.go, #1780
+	}
+	if o.restarts != nil {
+		o.restarts.onRestart(iamChecks.resetCreators)
+	}
 	engine := next
 	return iamChecks.handler(engine, async.handler(known.client(withRequestReads(jobErrors(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { // #1581, errorcodes.go; #1582, engineerrors.go
 		buffers.syncPending(next, r) // #1513: the clock a restarted front kept
@@ -1031,6 +1037,16 @@ func (f front) insertAll(w http.ResponseWriter, r *http.Request, dataset, table 
 	}
 	if f.refuseSnapshotWrite(w, r, dataset, table, "tabledata.insertAll") { // #1002, snapshots.go
 		return
+	}
+	if f.tables != nil { // #1778, autoembed.go
+		rows := make([]map[string]any, len(req.Rows))
+		for i, row := range req.Rows {
+			rows[i] = row.JSON
+		}
+		if msg := f.refuseGeneratedRows(projectOf(f.base), dataset, table, rows); msg != "" {
+			writeError(w, http.StatusBadRequest, "invalid", msg)
+			return
+		}
 	}
 
 	// A partition decorator, and an ingestion-time partitioned table's

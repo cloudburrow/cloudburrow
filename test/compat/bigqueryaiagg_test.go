@@ -3,9 +3,13 @@
 package compat
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
+
+	"cloud.google.com/go/bigquery"
+	"google.golang.org/api/iterator"
 )
 
 // TestBigQueryAIAgg (#1777): AI.AGG through the official
@@ -14,7 +18,8 @@ import (
 // STRUCT with output_schema, DISTINCT, NULL inputs ignored, the
 // a group larger than one call's
 // context batched and its batches' answers combined, the error ratio when
-// every call fails, and the calls refused before anything runs. The
+// every call fails, an instruction given as a named or a positional query
+// parameter (#1810), and the calls refused before anything runs. The
 // model's words are recorded, not asserted.
 //
 // covers: bigquery.jobs.query
@@ -86,6 +91,47 @@ func TestBigQueryAIAgg(t *testing.T) {
 	}
 	t.Logf("batched group (recorded): %v", rows)
 
+	// The instruction as a query parameter, "as either a string or query
+	// parameter" (#1810): named, beside another named parameter the query
+	// uses elsewhere, and positional, with one before and one after it. The
+	// job shows the client's own query and parameters.
+	named := fmt.Sprintf("SELECT movie, AI.AGG(review, @instruction, endpoint => '%s') AS s FROM `%s.reviews` WHERE movie = @movie GROUP BY movie", localModel, ds)
+	rows, job := aiParamRows(t, h, c, named, []bigquery.QueryParameter{{Name: "instruction", Value: "In one short sentence, summarize these movie reviews."},
+		{Name: "movie", Value: "Beta"}})
+	if len(rows) != 1 || rows[0]["movie"] != "Beta" {
+		t.Fatalf("named parameter: %v", rows)
+	}
+	if s, ok := rows[0]["s"].(string); !ok || strings.TrimSpace(s) == "" {
+		t.Errorf("named parameter: AI.AGG is not a STRING: %#v", rows[0]["s"])
+	}
+	if cfg, ok := job.(*bigquery.QueryConfig); !ok || cfg.Q != named || len(cfg.Parameters) != 2 {
+		t.Errorf("named parameter: the job's configuration %#v", job)
+	}
+	t.Logf("named parameter (recorded): %v", rows)
+	positional := fmt.Sprintf("SELECT movie, AI.AGG(CONCAT(?, review), ?, endpoint => '%s') AS s FROM `%s.reviews` WHERE movie = ? GROUP BY movie", localModel, ds)
+	rows, job = aiParamRows(t, h, c, positional, []bigquery.QueryParameter{{Value: "Review: "}, {Value: "In one short sentence, summarize these movie reviews."},
+		{Value: "Alpha"}})
+	if len(rows) != 1 || rows[0]["movie"] != "Alpha" {
+		t.Fatalf("positional parameters: %v", rows)
+	}
+	if s, ok := rows[0]["s"].(string); !ok || strings.TrimSpace(s) == "" {
+		t.Errorf("positional parameters: AI.AGG is not a STRING: %#v", rows[0]["s"])
+	}
+	if cfg, ok := job.(*bigquery.QueryConfig); !ok || cfg.Q != positional || len(cfg.Parameters) != 3 || cfg.Parameters[0].Name != "" {
+		t.Errorf("positional parameters: the job's configuration %#v", job)
+	}
+	t.Logf("positional parameters (recorded): %v", rows)
+	for _, tc := range []struct {
+		value any
+		want  string
+	}{{int64(3), "must be a STRING"}, {bigquery.NullString{}, "NULL"}} {
+		q := c.Query(fmt.Sprintf("SELECT AI.AGG(review, @instruction, endpoint => '%s') FROM `%s.reviews`", localModel, ds))
+		q.Parameters = []bigquery.QueryParameter{{Name: "instruction", Value: tc.value}}
+		if _, err := q.Read(h.Context()); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("instruction parameter %#v: %v, want %q", tc.value, err, tc.want)
+		}
+	}
+
 	for sql, want := range map[string]string{
 		// gemini-3.5-flash-lite has no alias locally: every call fails.
 		fmt.Sprintf("SELECT AI.AGG(review, 'Summarize.') FROM `%s.reviews`", ds):                                                  "exceeded their allowed error ratio",
@@ -102,4 +148,41 @@ func TestBigQueryAIAgg(t *testing.T) {
 			t.Errorf("%s: %v, want %q", sql, err, want)
 		}
 	}
+}
+
+// aiParamRows runs sql with params and returns its rows and the job's
+// configuration as jobs.get shows it.
+func aiParamRows(t *testing.T, h *Harness, c *bigquery.Client, sql string, params []bigquery.QueryParameter) ([]map[string]bigquery.Value, bigquery.JobConfig) {
+	t.Helper()
+	q := c.Query(sql)
+	q.Parameters = params
+	job, err := q.Run(h.Context())
+	if err != nil {
+		t.Fatalf("%s: %v", sql, err)
+	}
+	it, err := job.Read(h.Context())
+	if err != nil {
+		t.Fatalf("%s: %v", sql, err)
+	}
+	var out []map[string]bigquery.Value
+	for {
+		row := map[string]bigquery.Value{}
+		err := it.Next(&row)
+		if errors.Is(err, iterator.Done) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+		out = append(out, row)
+	}
+	got, err := c.JobFromID(h.Context(), job.ID())
+	if err != nil {
+		t.Fatalf("jobs.get %s: %v", job.ID(), err)
+	}
+	cfg, err := got.Config()
+	if err != nil {
+		t.Fatalf("job config: %v", err)
+	}
+	return out, cfg
 }

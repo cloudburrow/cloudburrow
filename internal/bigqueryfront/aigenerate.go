@@ -421,11 +421,12 @@ func (c aiCall) output(a aiResolved) ([]string, bool) {
 // rewriteAIGenerate evaluates text's AI function calls and writes their
 // answers into it: the scalar ones first, then AI.AGG (aiagg.go, #1777),
 // whose groups' rows may hold the scalars' answers; text is returned as it
-// was when it has none.
-func (f front) rewriteAIGenerate(r *http.Request, q queryOptions, text string) (string, int, string) {
+// was when it has none. The parameters returned are the ones the text
+// holds then (rewriteAIAgg, #1810).
+func (f front) rewriteAIGenerate(r *http.Request, q queryOptions, text string) (string, queryOptions, int, string) {
 	text, code, msg := f.rewriteAIScalars(r, q, text)
 	if code != 0 {
-		return "", code, msg
+		return "", q, code, msg
 	}
 	return f.rewriteAIAgg(r, q, text)
 }
@@ -716,7 +717,7 @@ func (f front) resolveAICall(r *http.Request, q queryOptions, project string, c 
 		if code != 0 {
 			return a, code, msg
 		}
-		if !bindingsGrant(proj, "serviceAccount:"+callerIdentity(project), permVertexPredict) {
+		if !bindingsGrant(proj, f.members(r.Context(), "serviceAccount:"+callerIdentity(project)), permVertexPredict) {
 			return a, 403, fmt.Sprintf("Access Denied: Project %s: The user %s does not have permission %s: "+
 				"grant the Vertex AI user role (roles/aiplatform.user), or pass a connection_id.", project, callerIdentity(project), permVertexPredict)
 		}

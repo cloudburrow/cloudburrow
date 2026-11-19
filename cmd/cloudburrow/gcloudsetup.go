@@ -81,6 +81,11 @@ var gcloudVerified = []struct {
 	// v1, served on the Resource Manager port. TestGcloudIAMCustomRoles
 	// drives create, describe, list, update, delete and undelete.
 	{resourceManagerService, "iam", "/", true, false},
+	// Cloud Identity groups (#1812): gcloud identity groups calls
+	// cloudidentity.googleapis.com v1, served on the Resource Manager port.
+	// TestGcloudIdentityGroups drives groups create, describe, list,
+	// delete and memberships add, list and delete.
+	{resourceManagerService, "cloudidentity", "/", true, false},
 	// Service Usage (#1352): gcloud services list, enable and disable call
 	// v1, which gcloud appends. TestGcloudServices drives them.
 	{serviceUsageService, "serviceusage", "/", true, false},

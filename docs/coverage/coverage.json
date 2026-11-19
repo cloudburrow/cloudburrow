@@ -691,8 +691,8 @@
           "test/compat/runnfsenv_test.go:114 TestRunNFSVolumesAndCloudRunEnv",
           "test/compat/runnfstools_test.go:108 TestConsoleRunNFSVolume",
           "test/compat/runnfstools_test.go:50 TestTerraformRunNFSVolume",
-          "test/compat/runscalinggaps_test.go:256 TestRunServiceCPUOnlyScaling",
-          "test/compat/runscalinggaps_test.go:349 TestTerraformRunServiceScalingControls",
+          "test/compat/runscalinggaps_test.go:258 TestRunServiceCPUOnlyScaling",
+          "test/compat/runscalinggaps_test.go:352 TestTerraformRunServiceScalingControls",
           "test/compat/runsecretcmek_test.go:28 TestRunMountsASecretUnderACustomerManagedKey",
           "test/compat/runserviceaccount_test.go:42 TestCloudRunWorkloadIsToldItsServiceAccount",
           "test/compat/runsettings_test.go:35 TestRunServiceStoredSettingsAndSubPath",
@@ -742,8 +742,8 @@
           "test/compat/runnfstools_test.go:108 TestConsoleRunNFSVolume",
           "test/compat/runnfstools_test.go:50 TestTerraformRunNFSVolume",
           "test/compat/runscalinggaps_test.go:121 TestRunServiceDisabledAnswersUnavailable",
-          "test/compat/runscalinggaps_test.go:256 TestRunServiceCPUOnlyScaling",
-          "test/compat/runscalinggaps_test.go:349 TestTerraformRunServiceScalingControls",
+          "test/compat/runscalinggaps_test.go:258 TestRunServiceCPUOnlyScaling",
+          "test/compat/runscalinggaps_test.go:352 TestTerraformRunServiceScalingControls",
           "test/compat/runserviceaccount_test.go:42 TestCloudRunWorkloadIsToldItsServiceAccount",
           "test/compat/runsettings_test.go:35 TestRunServiceStoredSettingsAndSubPath",
           "test/compat/runtraffic_test.go:26 TestRunTrafficSplitAndTags",
@@ -785,8 +785,8 @@
           "test/compat/run_test.go:320 TestRunUpdateServiceWithAMask",
           "test/compat/rundisabled_test.go:51 TestRunServiceDisabledByManualZero",
           "test/compat/runscalinggaps_test.go:121 TestRunServiceDisabledAnswersUnavailable",
-          "test/compat/runscalinggaps_test.go:185 TestRunServiceManualSplitLeavesOneAtZero",
-          "test/compat/runscalinggaps_test.go:349 TestTerraformRunServiceScalingControls",
+          "test/compat/runscalinggaps_test.go:186 TestRunServiceManualSplitLeavesOneAtZero",
+          "test/compat/runscalinggaps_test.go:352 TestTerraformRunServiceScalingControls",
           "test/compat/runservicescaling_test.go:54 TestRunServiceLevelScaling",
           "test/compat/runtraffic_test.go:26 TestRunTrafficSplitAndTags",
           "test/compat/terraform_cicd_test.go:218 TestTerraformRunServiceCloudSQLVolume",
@@ -816,11 +816,11 @@
         "method": "google.cloud.run.v2.WorkerPools/CreateWorkerPool",
         "status": "Verified",
         "tests": [
-          "test/compat/runcpuscaling_test.go:179 TestRunWorkerPoolCPUScaling",
+          "test/compat/runcpuscaling_test.go:180 TestRunWorkerPoolCPUScaling",
           "test/compat/runnames_test.go:36 TestRunNamesPerProject",
           "test/compat/runworkerpoolgcs_test.go:22 TestRunWorkerPoolMountsACloudStorageVolume",
           "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle",
-          "test/compat/runworkerpoolscaling_test.go:187 TestTerraformRunWorkerPoolAutomaticScaling",
+          "test/compat/runworkerpoolscaling_test.go:188 TestTerraformRunWorkerPoolAutomaticScaling",
           "test/compat/runworkerpoolscaling_test.go:70 TestRunWorkerPoolAutomaticScaling",
           "test/compat/terraform_run_more_test.go:205 TestTerraformRunWorkerPool"
         ],
@@ -838,7 +838,7 @@
         "tests": [
           "test/compat/runnames_test.go:36 TestRunNamesPerProject",
           "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle",
-          "test/compat/runworkerpoolscaling_test.go:187 TestTerraformRunWorkerPoolAutomaticScaling",
+          "test/compat/runworkerpoolscaling_test.go:188 TestTerraformRunWorkerPoolAutomaticScaling",
           "test/compat/terraform_run_more_test.go:205 TestTerraformRunWorkerPool"
         ]
       },
@@ -855,11 +855,11 @@
         "method": "google.cloud.run.v2.WorkerPools/GetWorkerPool",
         "status": "Verified",
         "tests": [
-          "test/compat/runcpuscaling_test.go:179 TestRunWorkerPoolCPUScaling",
+          "test/compat/runcpuscaling_test.go:180 TestRunWorkerPoolCPUScaling",
           "test/compat/runnames_test.go:36 TestRunNamesPerProject",
           "test/compat/runworkerpoolgcs_test.go:22 TestRunWorkerPoolMountsACloudStorageVolume",
           "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle",
-          "test/compat/runworkerpoolscaling_test.go:187 TestTerraformRunWorkerPoolAutomaticScaling",
+          "test/compat/runworkerpoolscaling_test.go:188 TestTerraformRunWorkerPoolAutomaticScaling",
           "test/compat/runworkerpoolscaling_test.go:70 TestRunWorkerPoolAutomaticScaling",
           "test/compat/runworkerpoolsplits_test.go:33 TestRunWorkerPoolUpdateMaskAndInstanceSplits",
           "test/compat/terraform_run_more_test.go:205 TestTerraformRunWorkerPool"
@@ -895,7 +895,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle",
-          "test/compat/runworkerpoolscaling_test.go:187 TestTerraformRunWorkerPoolAutomaticScaling",
+          "test/compat/runworkerpoolscaling_test.go:188 TestTerraformRunWorkerPoolAutomaticScaling",
           "test/compat/runworkerpoolscaling_test.go:70 TestRunWorkerPoolAutomaticScaling",
           "test/compat/runworkerpoolsplits_test.go:33 TestRunWorkerPoolUpdateMaskAndInstanceSplits",
           "test/compat/terraform_run_more_test.go:205 TestTerraformRunWorkerPool"
@@ -5454,7 +5454,7 @@
         "method": "google.cloud.aiplatform.v1.PredictionService/Explain",
         "status": "Verified",
         "tests": [
-          "test/compat/predictiongrpc_test.go:213 TestConsoleExplainMatchesThePredictionClient",
+          "test/compat/predictiongrpc_test.go:214 TestConsoleExplainMatchesThePredictionClient",
           "test/compat/predictiongrpc_test.go:63 TestPredictionClientReachesACustomEndpoint"
         ]
       },
@@ -5582,6 +5582,7 @@
           "test/compat/gcloudmemorystore1563_test.go:22 TestGcloudMemorystore1563",
           "test/compat/gcloudmemorystore_test.go:24 TestGcloudMemorystoreValkey",
           "test/compat/gcloudmemorystoretls_test.go:24 TestGcloudMemorystoreInTransitEncryption",
+          "test/compat/groupmembers1812_test.go:40 TestMemorystoreIAMAuthGroupMember1812",
           "test/compat/iamconditions1748_test.go:162 TestMemorystoreIAMConditions",
           "test/compat/memorystore1557_test.go:104 TestMemorystoreValkeyCrossInstanceReplication",
           "test/compat/memorystore1557_test.go:183 TestMemorystoreValkeyEngineVersions",
@@ -8237,7 +8238,8 @@
         "tests": [
           "test/compat/firestoreadmin_test.go:47 TestFirestoreAdminDatabases",
           "test/compat/firestorepersist1615_test.go:120 TestFirestoreRestartSetup",
-          "test/compat/firestorepersist1615_test.go:64 TestFirestoreSurvivesAPodRestart"
+          "test/compat/firestorepersist1615_test.go:64 TestFirestoreSurvivesAPodRestart",
+          "test/compat/groupmembers1812_test.go:99 TestFirestoreMongoDBGroupMember1812"
         ]
       },
       {
@@ -9837,6 +9839,7 @@
           "test/compat/bigquerychangehistory1503_test.go:101 TestBigQueryChangeHistoryRetention",
           "test/compat/bigqueryiam1774_test.go:396 TestBigQueryPerProjectIAMViewsAndRoutines",
           "test/compat/bigquerymethods_test.go:177 TestBigQueryDatasetUpdatesAreSaved",
+          "test/compat/cloudidentity1812_test.go:240 TestBigQueryGroupMembers1812",
           "test/compat/terraform_batch6_test.go:318 TestTerraformBigQueryDatasetCMEK",
           "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess",
           "test/compat/terraform_iam_more_test.go:271 TestTerraformBigQueryDatasetIAM"
@@ -9888,6 +9891,7 @@
           "test/compat/bigquerycharmap_test.go:30 TestBigQueryColumnNameCharacterMap",
           "test/compat/bigquerycloneddl_test.go:28 TestBigQueryCloneAndSnapshotDDL",
           "test/compat/bigquerycolumnbuffer_test.go:221 TestBigQueryPartitionColumnLeftOut",
+          "test/compat/bigquerycopykey1762_test.go:33 TestBigQueryCopyKey1762",
           "test/compat/bigquerycopylayout1759_test.go:43 TestBigQueryCopyLayout1759",
           "test/compat/bigquerycsvtimes_test.go:32 TestBigQueryCSVLoadTimeFormatsAndEncodings",
           "test/compat/bigquerydml_test.go:31 TestBigQueryPlainDMLThroughTheFront",
@@ -9901,6 +9905,7 @@
           "test/compat/bigqueryfromitems1459_test.go:31 TestBigQueryDMLFromSeveralItems",
           "test/compat/bigquerygeoparquet_test.go:62 TestBigQueryParquetExtractOfNativeGeography",
           "test/compat/bigqueryiam1774_test.go:42 TestBigQueryPerProjectIAMRest",
+          "test/compat/bigqueryiam1780_test.go:39 TestBigQueryPerProjectIAM1780",
           "test/compat/bigqueryiceberg_test.go:46 TestBigQueryIcebergTablesWriteIcebergFiles",
           "test/compat/bigqueryjobretry_test.go:29 TestBigQueryInsertOfAnExistingJobIs409",
           "test/compat/bigqueryjsonunknown_test.go:34 TestBigQueryLoadFieldsOutsideTheSchema",
@@ -9999,6 +10004,7 @@
           "test/compat/bigquerycolumns1490_test.go:29 TestBigQueryColumnsOfEveryType",
           "test/compat/bigquerycolumntypes_test.go:267 TestBigQueryParameterizedColumnsByDDL",
           "test/compat/bigquerycolumntypes_test.go:80 TestBigQueryRangeColumnsThroughTheAPI",
+          "test/compat/bigquerycopykey1762_test.go:33 TestBigQueryCopyKey1762",
           "test/compat/bigquerycopylayout1759_test.go:43 TestBigQueryCopyLayout1759",
           "test/compat/bigquerycorrectness_test.go:322 TestBigQueryCreateTableLikeAndCopy",
           "test/compat/bigquerycreateexisting_test.go:38 TestBigQueryCreateOfAnExistingName",
@@ -10168,6 +10174,7 @@
           "test/compat/bigqueryundelete1483_test.go:41 TestBigQueryUndeleteKeepsMore",
           "test/compat/bigqueryundelete_test.go:46 TestBigQueryUndeleteAndRestore",
           "test/compat/bigqueryundeleteroutines_test.go:43 TestBigQueryUndeleteKeepsRoutinesAndModels",
+          "test/compat/bigqueryvectorsearch_test.go:159 TestBigQueryVectorSearchAutonomousEmbeddings",
           "test/compat/bigqueryviewcolumns_test.go:145 TestBigQueryViewColumnListInAScriptAndColumnOptions",
           "test/compat/bigqueryviewcolumns_test.go:240 TestBigQueryViewColumnListInATempScriptAndADryRun",
           "test/compat/bigqueryviewcolumns_test.go:29 TestBigQueryCreateViewWithAColumnList",
@@ -10214,11 +10221,12 @@
           "test/compat/bigquery1562_test.go:235 TestBigQueryMLDNNOptions1562",
           "test/compat/bigquery1562_test.go:34 TestBigQueryTempScriptsUndropAndAlterSchema",
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
-          "test/compat/bigqueryaiagg_test.go:21 TestBigQueryAIAgg",
+          "test/compat/bigqueryaiagg_test.go:26 TestBigQueryAIAgg",
           "test/compat/bigqueryaifunctions_test.go:143 TestBigQueryAIManagedFunctions",
           "test/compat/bigqueryaifunctions_test.go:228 TestBigQueryAIEmbed",
           "test/compat/bigqueryaifunctions_test.go:47 TestBigQueryAIGenerateStructured",
           "test/compat/bigqueryaigenerate_test.go:28 TestBigQueryAIGenerate",
+          "test/compat/bigqueryaisearch_test.go:34 TestBigQueryAutonomousEmbeddingsAndAISearch",
           "test/compat/bigqueryalteratomic1612_test.go:108 TestBigQueryScriptDryRunStopsAtCallAndExecuteImmediate",
           "test/compat/bigqueryalteratomic1612_test.go:29 TestBigQueryAlterTableRefusedLeavesTheTable",
           "test/compat/bigqueryalterfields_test.go:34 TestBigQueryAlterTableFieldsKeysAndPolicies",
@@ -10248,6 +10256,7 @@
           "test/compat/bigquerycolumns1490_test.go:29 TestBigQueryColumnsOfEveryType",
           "test/compat/bigquerycolumntypes_test.go:267 TestBigQueryParameterizedColumnsByDDL",
           "test/compat/bigquerycolumntypes_test.go:80 TestBigQueryRangeColumnsThroughTheAPI",
+          "test/compat/bigqueryconnectiongroups1812_test.go:27 TestBigQueryConnectionGroupMembers1812",
           "test/compat/bigquerycorrectness_test.go:322 TestBigQueryCreateTableLikeAndCopy",
           "test/compat/bigquerycreateexisting_test.go:38 TestBigQueryCreateOfAnExistingName",
           "test/compat/bigquerycsvtimes_test.go:32 TestBigQueryCSVLoadTimeFormatsAndEncodings",
@@ -10292,6 +10301,7 @@
           "test/compat/bigqueryhistory1522_test.go:335 TestBigQueryAlterSchemaTimeTravelLetsGoFirst",
           "test/compat/bigqueryiam1767_test.go:34 TestBigQueryPerProjectIAM",
           "test/compat/bigqueryiam1774_test.go:396 TestBigQueryPerProjectIAMViewsAndRoutines",
+          "test/compat/bigqueryiam1780_test.go:39 TestBigQueryPerProjectIAM1780",
           "test/compat/bigqueryiceberg_test.go:46 TestBigQueryIcebergTablesWriteIcebergFiles",
           "test/compat/bigqueryicebergdefaultconnection_test.go:26 TestBigQueryIcebergDefaultConnection",
           "test/compat/bigqueryicebergdefaults1456_test.go:27 TestBigQueryStorageURIMakesIcebergTable",
@@ -10352,7 +10362,12 @@
           "test/compat/bigquerymlremoteiam_test.go:164 TestBigQueryMLRemoteConnectionPermissions",
           "test/compat/bigquerymlremoteiam_test.go:242 TestBigQueryMLRemoteDefaultConnection",
           "test/compat/bigquerymlremoteoptions_test.go:28 TestBigQueryMLRemoteGenerationOptions",
-          "test/compat/bigquerymlservice_test.go:33 TestBigQueryMLAnnotateImage",
+          "test/compat/bigquerymlservice_test.go:206 TestBigQueryMLAnnotateImageLabels",
+          "test/compat/bigquerymlservice_test.go:257 TestBigQueryMLAnnotateImageDetections",
+          "test/compat/bigquerymlservice_test.go:314 TestBigQueryMLTranscribe",
+          "test/compat/bigquerymlservice_test.go:37 TestBigQueryMLAnnotateImage",
+          "test/compat/bigquerymlservice_test.go:451 TestBigQueryMLTranslate",
+          "test/compat/bigquerymlservice_test.go:633 TestBigQueryMLUnderstandText",
           "test/compat/bigquerymltensorflow_test.go:41 TestBigQueryMLImportedTensorFlowModel",
           "test/compat/bigquerymltflite_test.go:35 TestBigQueryMLImportedTFLiteModel",
           "test/compat/bigquerymltflitegaps_test.go:29 TestBigQueryMLImportedTFLiteGaps",
@@ -10427,6 +10442,8 @@
           "test/compat/bigqueryundelete1483_test.go:41 TestBigQueryUndeleteKeepsMore",
           "test/compat/bigqueryundelete_test.go:46 TestBigQueryUndeleteAndRestore",
           "test/compat/bigqueryundeleteroutines_test.go:43 TestBigQueryUndeleteKeepsRoutinesAndModels",
+          "test/compat/bigqueryvectorsearch_test.go:159 TestBigQueryVectorSearchAutonomousEmbeddings",
+          "test/compat/bigqueryvectorsearch_test.go:31 TestBigQueryVectorSearch",
           "test/compat/bigqueryviewcolumns_test.go:145 TestBigQueryViewColumnListInAScriptAndColumnOptions",
           "test/compat/bigqueryviewcolumns_test.go:240 TestBigQueryViewColumnListInATempScriptAndADryRun",
           "test/compat/bigqueryviewcolumns_test.go:29 TestBigQueryCreateViewWithAColumnList",
@@ -10473,7 +10490,8 @@
           "test/compat/bigquerymlonnx_test.go:48 TestBigQueryMLImportedONNXModel",
           "test/compat/bigquerymlpreprocess_test.go:75 TestBigQueryMLTransformPreprocess",
           "test/compat/bigquerymlremote_test.go:94 TestBigQueryMLRemoteGenerateText",
-          "test/compat/bigquerymlservice_test.go:33 TestBigQueryMLAnnotateImage",
+          "test/compat/bigquerymlservice_test.go:37 TestBigQueryMLAnnotateImage",
+          "test/compat/bigquerymlservice_test.go:633 TestBigQueryMLUnderstandText",
           "test/compat/bigquerymltensorflow_test.go:41 TestBigQueryMLImportedTensorFlowModel",
           "test/compat/bigquerymltflite_test.go:35 TestBigQueryMLImportedTFLiteModel",
           "test/compat/bigquerymltflitegaps_test.go:29 TestBigQueryMLImportedTFLiteGaps",
@@ -10670,6 +10688,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
+          "test/compat/bigqueryaisearch_test.go:34 TestBigQueryAutonomousEmbeddingsAndAISearch",
           "test/compat/bigquerychangehistory_test.go:120 TestBigQueryChangeHistoryWritePaths",
           "test/compat/bigquerycolumnbuffer_test.go:34 TestBigQueryColumnStreamingBuffer",
           "test/compat/bigquerycolumndefaults_test.go:33 TestBigQueryColumnDefaults",
@@ -10706,6 +10725,7 @@
           "test/compat/bigquerycolumndefaults_test.go:33 TestBigQueryColumnDefaults",
           "test/compat/bigqueryddlmore_test.go:171 TestBigQueryRangeInARecordReadsBack",
           "test/compat/bigqueryfromitems1459_test.go:31 TestBigQueryDMLFromSeveralItems",
+          "test/compat/bigqueryiam1780_test.go:39 TestBigQueryPerProjectIAM1780",
           "test/compat/bigqueryingestiontime_test.go:32 TestBigQueryIngestionTime",
           "test/compat/bigqueryintervalarith_test.go:119 TestBigQueryStorageWriteArrowIntervalStrings",
           "test/compat/bigquerynumericrounding_test.go:34 TestBigQueryNumericRounding",
@@ -10721,6 +10741,7 @@
           "test/compat/bigquerystoragewritedefaults_test.go:136 TestBigQueryStorageWriteRanges",
           "test/compat/bigquerystoragewritedefaults_test.go:38 TestBigQueryStorageWriteMissingValueDefaults",
           "test/compat/bigquerystoragewriteinterval_test.go:183 TestBigQueryStorageWriteIntervals",
+          "test/compat/cloudidentity1812_test.go:240 TestBigQueryGroupMembers1812",
           "test/compat/consolebigquery_test.go:89 TestConsoleBigQueryDatasetsSchemaAndQuery"
         ]
       },
@@ -10744,6 +10765,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
+          "test/compat/bigqueryaisearch_test.go:34 TestBigQueryAutonomousEmbeddingsAndAISearch",
           "test/compat/bigqueryalteratomic1612_test.go:108 TestBigQueryScriptDryRunStopsAtCallAndExecuteImmediate",
           "test/compat/bigqueryalteratomic1612_test.go:29 TestBigQueryAlterTableRefusedLeavesTheTable",
           "test/compat/bigqueryalterfields_test.go:34 TestBigQueryAlterTableFieldsKeysAndPolicies",
@@ -10763,6 +10785,7 @@
           "test/compat/bigquerycolumnoptions_test.go:29 TestBigQueryCreateTableColumnOptions",
           "test/compat/bigquerycolumntypes_test.go:267 TestBigQueryParameterizedColumnsByDDL",
           "test/compat/bigquerycolumntypes_test.go:80 TestBigQueryRangeColumnsThroughTheAPI",
+          "test/compat/bigquerycopykey1762_test.go:33 TestBigQueryCopyKey1762",
           "test/compat/bigquerycopylayout1759_test.go:43 TestBigQueryCopyLayout1759",
           "test/compat/bigquerycreateexisting_test.go:38 TestBigQueryCreateOfAnExistingName",
           "test/compat/bigqueryddlcopy_test.go:472 TestBigQuerySnapshotAndRestore",
@@ -10931,6 +10954,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigqueryiam1774_test.go:42 TestBigQueryPerProjectIAMRest",
+          "test/compat/bigqueryiam1780_test.go:39 TestBigQueryPerProjectIAM1780",
           "test/compat/bigqueryiam_test.go:41 TestBigQueryTableIAMIsStoredNotEnforced",
           "test/compat/bigqueryobjectprivileges_test.go:26 TestBigQueryObjectPrivilegesAndSchemataLinks",
           "test/compat/bigqueryundelete1483_test.go:41 TestBigQueryUndeleteKeepsMore",
@@ -11002,6 +11026,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigqueryconnection_test.go:36 TestBigQueryConnectionAPI",
+          "test/compat/bigqueryconnectiongroups1812_test.go:27 TestBigQueryConnectionGroupMembers1812",
           "test/compat/bigquerymlremoteiam_test.go:164 TestBigQueryMLRemoteConnectionPermissions"
         ]
       },
@@ -12557,6 +12582,407 @@
         "tests": [
           "test/compat/backupdr1536_test.go:24 TestBackupDRFetchTrialCompliance"
         ]
+      }
+    ]
+  },
+  {
+    "Key": "cloudidentity",
+    "Title": "Cloud Identity API (v1)",
+    "counts": {
+      "Unimplemented": 52,
+      "Verified": 18
+    },
+    "rows": [
+      {
+        "method": "cloudidentity.allowlistedDomains.create",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.allowlistedDomains.delete",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.allowlistedDomains.get",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.allowlistedDomains.list",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.customers.userinvitations.cancel",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.customers.userinvitations.get",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.customers.userinvitations.isInvitableUser",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.customers.userinvitations.list",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.customers.userinvitations.send",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.devices.cancelWipe",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.devices.create",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.devices.delete",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.devices.deviceUsers.approve",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.devices.deviceUsers.block",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.devices.deviceUsers.cancelWipe",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.devices.deviceUsers.clientStates.get",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.devices.deviceUsers.clientStates.list",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.devices.deviceUsers.clientStates.patch",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.devices.deviceUsers.delete",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.devices.deviceUsers.get",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.devices.deviceUsers.list",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.devices.deviceUsers.lookup",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.devices.deviceUsers.wipe",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.devices.get",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.devices.list",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.devices.wipe",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.groups.create",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudidentity1812_test.go:64 TestCloudIdentityGroups1812",
+          "test/compat/cloudidentityrules_test.go:32 TestCloudIdentityMembershipRules",
+          "test/compat/cloudidentitysearch1812_test.go:178 TestCloudIdentityInitialOwner1812"
+        ]
+      },
+      {
+        "method": "cloudidentity.groups.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudidentity1812_test.go:64 TestCloudIdentityGroups1812"
+        ]
+      },
+      {
+        "method": "cloudidentity.groups.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudidentity1812_test.go:64 TestCloudIdentityGroups1812"
+        ]
+      },
+      {
+        "method": "cloudidentity.groups.getSecuritySettings",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.groups.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudidentity1812_test.go:64 TestCloudIdentityGroups1812"
+        ]
+      },
+      {
+        "method": "cloudidentity.groups.lookup",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudidentity1812_test.go:64 TestCloudIdentityGroups1812"
+        ]
+      },
+      {
+        "method": "cloudidentity.groups.memberships.checkTransitiveMembership",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudidentity1812_test.go:64 TestCloudIdentityGroups1812"
+        ]
+      },
+      {
+        "method": "cloudidentity.groups.memberships.create",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudidentity1812_test.go:64 TestCloudIdentityGroups1812",
+          "test/compat/cloudidentityrules_test.go:32 TestCloudIdentityMembershipRules"
+        ]
+      },
+      {
+        "method": "cloudidentity.groups.memberships.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudidentity1812_test.go:64 TestCloudIdentityGroups1812"
+        ]
+      },
+      {
+        "method": "cloudidentity.groups.memberships.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudidentity1812_test.go:64 TestCloudIdentityGroups1812"
+        ]
+      },
+      {
+        "method": "cloudidentity.groups.memberships.getMembershipGraph",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudidentitysearch1812_test.go:35 TestCloudIdentitySearch1812"
+        ]
+      },
+      {
+        "method": "cloudidentity.groups.memberships.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudidentity1812_test.go:64 TestCloudIdentityGroups1812"
+        ]
+      },
+      {
+        "method": "cloudidentity.groups.memberships.lookup",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudidentity1812_test.go:64 TestCloudIdentityGroups1812"
+        ]
+      },
+      {
+        "method": "cloudidentity.groups.memberships.modifyMembershipRoles",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudidentityrules_test.go:32 TestCloudIdentityMembershipRules",
+          "test/compat/cloudidentitysearch1812_test.go:35 TestCloudIdentitySearch1812"
+        ]
+      },
+      {
+        "method": "cloudidentity.groups.memberships.searchDirectGroups",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudidentitysearch1812_test.go:35 TestCloudIdentitySearch1812"
+        ]
+      },
+      {
+        "method": "cloudidentity.groups.memberships.searchTransitiveGroups",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudidentity1812_test.go:64 TestCloudIdentityGroups1812"
+        ]
+      },
+      {
+        "method": "cloudidentity.groups.memberships.searchTransitiveMemberships",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudidentitysearch1812_test.go:35 TestCloudIdentitySearch1812"
+        ]
+      },
+      {
+        "method": "cloudidentity.groups.patch",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudidentity1812_test.go:64 TestCloudIdentityGroups1812",
+          "test/compat/cloudidentityrules_test.go:32 TestCloudIdentityMembershipRules"
+        ]
+      },
+      {
+        "method": "cloudidentity.groups.search",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudidentitysearch1812_test.go:35 TestCloudIdentitySearch1812"
+        ]
+      },
+      {
+        "method": "cloudidentity.groups.updateSecuritySettings",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.inboundOidcSsoProfiles.create",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.inboundOidcSsoProfiles.delete",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.inboundOidcSsoProfiles.get",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.inboundOidcSsoProfiles.list",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.inboundOidcSsoProfiles.patch",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.inboundSamlSsoProfiles.create",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.inboundSamlSsoProfiles.delete",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.inboundSamlSsoProfiles.get",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.inboundSamlSsoProfiles.idpCredentials.add",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.inboundSamlSsoProfiles.idpCredentials.delete",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.inboundSamlSsoProfiles.idpCredentials.get",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.inboundSamlSsoProfiles.idpCredentials.list",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.inboundSamlSsoProfiles.list",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.inboundSamlSsoProfiles.patch",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.inboundSsoAssignments.create",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.inboundSsoAssignments.delete",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.inboundSsoAssignments.get",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.inboundSsoAssignments.list",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.inboundSsoAssignments.patch",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.policies.create",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.policies.delete",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.policies.get",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.policies.list",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "cloudidentity.policies.patch",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       }
     ]
   }

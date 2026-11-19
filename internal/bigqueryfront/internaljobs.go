@@ -51,7 +51,7 @@ const internalJobPrefix = "_cloudburrow_"
 // jobIDPrefixHeader is the header bigquery-emulator patch 0057 reads.
 const jobIDPrefixHeader = "X-Cloudburrow-Job-Id-Prefix"
 
-// jobIDHeader is the header bigquery-emulator patch 0097 reads: the ID of
+// jobIDHeader is the header bigquery-emulator patch 0101 reads: the ID of
 // the job a jobs.query makes.
 const jobIDHeader = "X-Cloudburrow-Job-Id"
 
@@ -62,6 +62,11 @@ type internalJobKey struct{}
 func asInternal(ctx context.Context) context.Context {
 	return context.WithValue(ctx, internalJobKey{}, true)
 }
+
+// jobPrefixKey names, in a request of the front's own, the prefix its
+// jobs' IDs take instead of internalJobPrefix: a job so named is listed as
+// any of the project's (autoembed.go's gc_ background jobs, #1778).
+type jobPrefixKey struct{}
 
 // isInternalRequest reports whether ctx is the front's own.
 func isInternalRequest(ctx context.Context) bool {
@@ -88,7 +93,12 @@ func jobIDFor(ctx context.Context) string {
 // header the engine reads; a client's own header is dropped.
 func JobIDPrefix(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if isInternalRequest(r.Context()) {
+		if p, _ := r.Context().Value(jobPrefixKey{}).(string); p != "" && isInternalRequest(r.Context()) {
+			// A background job of the front's that BigQuery lists as a
+			// job of the project (autoembed.go's gc_ jobs, #1778).
+			r = r.Clone(r.Context())
+			r.Header.Set(jobIDPrefixHeader, p)
+		} else if isInternalRequest(r.Context()) {
 			r = r.Clone(r.Context())
 			r.Header.Set(jobIDPrefixHeader, internalJobPrefix)
 			r.Header.Del(jobIDHeader)
@@ -98,7 +108,7 @@ func JobIDPrefix(next http.Handler) http.Handler {
 			r.Header.Del(jobIDHeader)
 		}
 		// A client's jobs.query's job takes the ID asyncjobs.go gave it
-		// (bigquery-emulator patch 0097, #1819).
+		// (bigquery-emulator patch 0101, #1819).
 		if !isInternalRequest(r.Context()) && r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/queries") {
 			if id := takeQueryJobID(r.Context()); id != "" {
 				r = r.Clone(r.Context())

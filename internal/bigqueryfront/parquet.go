@@ -170,6 +170,13 @@ func (f front) parquetSchema(w http.ResponseWriter, r *http.Request, job *jobBod
 		writeError(w, status, "notFound", msg)
 		return false
 	}
+	fileFields := make([]field, len(cols))
+	for i, c := range cols {
+		fileFields[i] = c.field
+	}
+	if m := f.refuseGeneratedLoad(*dest, fileFields); m != "" { // #1778, autoembed.go
+		return invalid(m + ".")
+	}
 	if ref := el.ReferenceFileSchemaURI; ref != "" {
 		// The table's schema is the reference file's (#1457,
 		// referencefile.go).

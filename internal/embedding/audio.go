@@ -377,6 +377,56 @@ func decodeWAV(b []byte) (wav, error) {
 	return wav{samples: out, channels: int(channels), rate: int(rate), layout: layout}, nil
 }
 
+// MuLaw decodes one G.711 mu-law sample to [-1, 1].
+func MuLaw(b byte) float32 { return float32(g711(b, false)) / 32768 }
+
+// ALaw decodes one G.711 A-law sample to [-1, 1].
+func ALaw(b byte) float32 { return float32(g711(b, true)) / 32768 }
+
+// DecodeWAVSpeech decodes a WAV file of any length and of up to 8 channels
+// (or as many as its channel mask names) to mono samples at
+// AudioSampleRate, the channels averaged: speech recognition's reading
+// (internal/speech, #1799), which has no embedding limit.
+func DecodeWAVSpeech(data []byte) ([]float32, error) {
+	w, err := decodeWAV(data)
+	if err != nil {
+		return nil, fmt.Errorf("the data is not a valid WAV file: %v", err)
+	}
+	return Resample(Average(w.samples, w.channels), w.rate, AudioSampleRate), nil
+}
+
+// Average makes interleaved samples of channels channels mono, averaging
+// them.
+func Average(s []float32, channels int) []float32 {
+	if channels <= 1 {
+		return s
+	}
+	out := make([]float32, len(s)/channels)
+	for i := range out {
+		var sum float32
+		for c := 0; c < channels; c++ {
+			sum += s[i*channels+c]
+		}
+		out[i] = sum / float32(channels)
+	}
+	return out
+}
+
+// Resample converts mono samples from one rate to another, as DecodeAudio
+// does.
+func Resample(in []float32, from, to int) []float32 {
+	if from == to {
+		return in
+	}
+	return resample(in, from, to)
+}
+
+// IsTooLong reports whether err is a clip longer than MaxAudioSeconds.
+func IsTooLong(err error) bool {
+	var long *tooLongError
+	return errors.As(err, &long)
+}
+
 // downmix makes stereo mono as Transformers.js's load_audio does (after
 // Hugging Face's ffmpeg_read): sqrt(2) * (left + right) / 2. More channels
 // (a video's 3- to 8-channel PCM track) are downmixed as ffmpeg's default

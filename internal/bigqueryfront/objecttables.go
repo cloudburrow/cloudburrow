@@ -574,7 +574,7 @@ func (f front) checkConnectionCaller(ctx context.Context, connProject, project s
 	if code != 0 {
 		return code, msg
 	}
-	caller := "serviceAccount:" + callerIdentity(project)
+	caller := f.members(ctx, "serviceAccount:"+callerIdentity(project))
 	if !bindingsGrant(cn.bindings(), caller, permConnectionsUse) && !bindingsGrant(proj, caller, permConnectionsUse) {
 		return 403, fmt.Sprintf("Access Denied: Connection %s: Permission %s denied on connection %s (or it may not exist).",
 			cn.name(), permConnectionsUse, cn.name())
@@ -719,7 +719,7 @@ const permObjectsList = "storage.objects.list"
 // checkBucketAccess checks that sa may list bucket's objects: through the
 // project's policy or the bucket's.
 func (f front) checkBucketAccess(r *http.Request, project, sa, bucket string) (int, string) {
-	member := "serviceAccount:" + sa
+	member := f.members(r.Context(), "serviceAccount:"+sa)
 	proj, code, msg := f.projectBindings(r.Context(), project)
 	if code != 0 {
 		return code, msg

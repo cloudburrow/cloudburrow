@@ -11,7 +11,7 @@ import (
 // A copy job's partitioning and clustering (#1759).
 //
 // BigQuery's documentation (managing-partitioned-tables, "Copy a
-// partitioned table", read 2026-11-17,
+// partitioned table", re-read 2026-11-18,
 // https://docs.cloud.google.com/bigquery/docs/managing-partitioned-tables):
 //
 //   - "Copying a partitioned table to a new destination table": "All of
@@ -33,7 +33,8 @@ import (
 //     its partitioning).
 //   - "Copying multiple partitioned tables": "the source tables can't
 //     contain a mixture of partitioned and non-partitioned tables", and
-//     "the partition specifications for all source tables must match";
+//     "the partition specifications for all source tables must match the
+//     destination table's partition specification";
 //     managing-tables: "all source tables must have identical schemas,
 //     including any partitioning or clustering".
 //   - "Copying a partitioned table that has a clustering specification":
@@ -54,10 +55,14 @@ import (
 // the destination dataset's default partition expiration instead"
 // (https://docs.cloud.google.com/bigquery/docs/table-snapshots-intro).
 //
-// UNVERIFIED (docs re-read 2026-11-17: managing-partitioned-tables,
-// managing-tables, bq-cli-reference's bq cp, the copy samples, the Job
-// resource's JobConfigurationTableCopy, error-messages, table-clones-intro,
-// table-clones-create, table-snapshots-intro, table-snapshots-restore,
+// UNVERIFIED (docs re-read 2026-11-18, #1762: managing-partitioned-tables,
+// managing-tables, partitioned-tables, clustered-tables,
+// manage-clustered-tables, bq-cli-reference's bq cp, the copy samples, the
+// Job resource's JobConfigurationTableCopy, error-messages,
+// table-clones-intro, table-clones-create, table-snapshots-intro,
+// table-snapshots-create, table-snapshots-restore,
+// customer-managed-encryption, and a search of docs.cloud.google.com for
+// "Incompatible table partitioning specification", which found none,
 // https://docs.cloud.google.com/bigquery/docs/managing-partitioned-tables):
 // none defines "partition specification" or gives the message of a
 // mismatch. CloudBurrow compares the partitioning type, its unit, column and
@@ -67,7 +72,9 @@ import (
 // non-partitioned clustered source into a table neither partitioned nor
 // clustered is copied, the clustering rule naming partitioned sources only.
 // CLONE and RESTORE, which no page gives a layout rule for, make their new
-// table the same way. A table's description and labels are not copied by a
+// table the same way (table-clones-intro says only that a clone is used
+// "in the same way as you use standard tables", partitioning and
+// clustering included). A table's description and labels are not copied by a
 // copy job: no copy page names them (DDL's CREATE TABLE COPY inherits "the
 // table options metadata", but it is a statement, not a copy job).
 
@@ -92,7 +99,7 @@ func layoutOf(got []byte) map[string]json.RawMessage {
 }
 
 // layoutSpec is what of a table's layout two tables must share
-// (UNVERIFIED, docs re-read 2026-11-17, above): partitioning and clustering.
+// (UNVERIFIED, docs re-read 2026-11-18, above): partitioning and clustering.
 type layoutSpec struct {
 	partition string // "" when not partitioned
 	cluster   string // "" when not clustered
@@ -153,13 +160,13 @@ func layoutMismatch(project string, sources []tableRef, layouts []map[string]jso
 	for i := 1; i < len(sources); i++ {
 		s := specOf(layouts[i])
 		if (s.partition == "") != (first.partition == "") {
-			// UNVERIFIED wording (docs re-read 2026-11-17, above).
+			// UNVERIFIED wording (docs re-read 2026-11-18, above).
 			return fmt.Sprintf("Invalid copy job: the source tables can't contain a mixture of partitioned and "+
 				"non-partitioned tables, and %s is %s but %s is %s.", tableName(project, sources[0]),
 				partitionedWord(first), tableName(project, sources[i]), partitionedWord(s))
 		}
 		if s != first {
-			// UNVERIFIED wording (docs re-read 2026-11-17, above).
+			// UNVERIFIED wording (docs re-read 2026-11-18, above).
 			return fmt.Sprintf("Invalid copy job: the source tables must have identical schemas, including any "+
 				"partitioning or clustering; %s has partitioning %s and clustering %s, and %s has partitioning %s "+
 				"and clustering %s.", tableName(project, sources[0]), specText(first.partition), specText(first.cluster),
@@ -173,12 +180,12 @@ func layoutMismatch(project string, sources []tableRef, layouts []map[string]jso
 	ingestion := strings.HasSuffix(d.partition, "field:_partitiontime)")
 	switch {
 	case first.partition == "" && d.partition != "" && !ingestion:
-		// UNVERIFIED wording (docs re-read 2026-11-17, above).
+		// UNVERIFIED wording (docs re-read 2026-11-18, above).
 		return fmt.Sprintf("Incompatible table partitioning specification. Copying a non-partitioned table into "+
 			"%s, which is partitioned by %s, is only supported for ingestion-time partitioning.",
 			tableName(project, dest), d.partition)
 	case first.partition != "" && d.partition != "" && first.partition != d.partition:
-		// UNVERIFIED wording (docs re-read 2026-11-17, above).
+		// UNVERIFIED wording (docs re-read 2026-11-18, above).
 		return fmt.Sprintf("Incompatible table partitioning specification. Expects partitioning specification %s, "+
 			"but input partitioning specification is %s.", d.partition, first.partition)
 	case first.cluster != "" && first.cluster != d.cluster && (first.partition != "" || d.partition != "" || d.cluster != ""):
@@ -186,7 +193,7 @@ func layoutMismatch(project string, sources []tableRef, layouts []map[string]jso
 		// the source and destination tables must match", into a table not
 		// clustered too (#1762). A non-partitioned one into a table neither
 		// partitioned nor clustered is not compared: UNVERIFIED (docs
-		// re-read 2026-11-17, above), the rule naming partitioned sources
+		// re-read 2026-11-18, above), the rule naming partitioned sources
 		// only. UNVERIFIED wording.
 		return fmt.Sprintf("Incompatible table clustering specification. Expects clustering specification %s, but "+
 			"input clustering specification is %s.", specText(d.cluster), first.cluster)

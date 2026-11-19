@@ -63,7 +63,9 @@
         "patches/bigquery-emulator/0092-writes-into-another-projects-table.patch",
         "patches/bigquery-emulator/0094-repeated-json-column-insert.patch",
         "patches/bigquery-emulator/0096-names-in-the-default-datasets-project.patch",
-        "patches/bigquery-emulator/0097-exact-query-job-id.patch",
+        "patches/bigquery-emulator/0098-typed-scalar-parameters.patch",
+        "patches/bigquery-emulator/0100-typed-null-array-struct-parameters.patch",
+        "patches/bigquery-emulator/0101-exact-query-job-id.patch",
         "patches/bigquery-emulator/0102-reads-beside-a-running-statement.patch"
       ]
     },
@@ -135,6 +137,8 @@
         "patches/googlesqlite/0090-kept-change-records.patch",
         "patches/googlesqlite/0093-json-text-bound-in-a-struct.patch",
         "patches/googlesqlite/0095-names-of-the-project.patch",
+        "patches/googlesqlite/0097-typed-positional-parameters.patch",
+        "patches/googlesqlite/0099-typed-null-array-struct-parameters.patch",
         "patches/googlesqlite/0103-catalog-sync-on-an-older-snapshot.patch"
       ]
     },

@@ -18,6 +18,7 @@ import (
 	"google.golang.org/api/option"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 )
 
 // --- BigQuery -------------------------------------------------------------
@@ -47,6 +48,9 @@ type bigqueryProvider struct {
 	// project is the project the provider reads: the instance's default,
 	// and in each call the one chosen in the toolbar (in).
 	project string
+	// registry is Resource Manager's, for a dataset's and a table's tags
+	// (consolebigquerytags.go, #1780); nil leaves them out.
+	registry *resourcemanager.Registry
 }
 
 func (bigqueryProvider) ID() string    { return "bigquery" }
@@ -198,6 +202,9 @@ func (p bigqueryProvider) Detail(ctx context.Context, project string, path []str
 	d, err := p.detailAt(ctx, path)
 	if err == nil && strings.Contains(d.Unavailable, "project "+project+" is not found") {
 		return console.Detail{Prompt: notServed(project)}, nil // #1764
+	}
+	if err == nil {
+		d = p.withTags(d, path) // consolebigquerytags.go, #1780
 	}
 	return d, err
 }

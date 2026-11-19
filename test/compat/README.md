@@ -147,6 +147,8 @@ neither list.
 | `CLOUDBURROW_TEST_FUNCTIONS` | `TestFunctionsFrameworkBuiltWithBuildpacks`, `TestFunctionsRebuildReusesLayers` and `TestFunctionsBuildBrokenModulePathFails`, which run only when it is `1` |
 | `CLOUDBURROW_TEST_STEP_IMAGE` | the Cloud Build arbitrary-step tests (#1382): the shell image their steps run, instead of `alpine:3.20`, for one already on the host |
 | `CLOUDBURROW_TEST_CLOUD_SQL_PROXY` | `TestCloudSQLAuthProxyBinary` (#1421): Google's `cloud-sql-proxy` binary, pinned by SHA-256, as `make -s cloud-sql-proxy` downloads it and prints its path; CI's sql shard sets it |
+| `CLOUDBURROW_TEST_VISION_LABELS` | `TestBigQueryMLAnnotateImageLabels` (#1799): when set, runs ML.ANNOTATE_IMAGE's `LABEL_DETECTION`, for which the instance downloads MediaPipe's EfficientNet-Lite0 classifier (18.6 MB, pinned by SHA-256) from storage.googleapis.com the first time; needs `CLOUDBURROW_TEST_LOCALAI` and `CLOUDBURROW_TEST_BIGQUERY` |
+| `CLOUDBURROW_TEST_VISION_DETECT` | `TestBigQueryMLAnnotateImageDetections` (#1799): when set, runs ML.ANNOTATE_IMAGE's `FACE_DETECTION` and `OBJECT_LOCALIZATION`, for which the instance downloads MediaPipe's EfficientDet-Lite0 object detector (13.8 MB) and BlazeFace short-range face detector (0.2 MB), pinned by SHA-256, from storage.googleapis.com the first time; needs `CLOUDBURROW_TEST_LOCALAI` and `CLOUDBURROW_TEST_BIGQUERY` |
 | `CLOUDBURROW_TEST_SKIP_RUN_PULL` | `TestArtifactRegistryDockerRegistry` (#1383): when set, skips deploying a Cloud Run service from the pushed image, the slower part of the test |
 | `CLOUDBURROW_TEST_NAMESPACE` | the Spanner restart and in-cluster tests; defaults to `cloudburrow`, the namespace every instance uses |
 

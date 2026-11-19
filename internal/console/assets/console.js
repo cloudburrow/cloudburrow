@@ -187,6 +187,7 @@ const ROUTES = [
   // IAM & Admin > Roles (#1743): the project's and the organization's
   // custom roles, with Create role, Edit role, Delete and Undelete.
   { path: "/iam-admin/roles", service: "iam-roles", icon: "iam", title: "Roles", section: "IAM & Admin" },
+  { path: "/iam-admin/groups", service: "iam-groups", icon: "iam", title: "Groups", section: "IAM & Admin" },
   // IAM & Admin > Service accounts (#1747): the project's accounts, their
   // keys and Permissions tab, Create, Edit, Disable, Enable, Delete,
   // Undelete, Create key and Upload key.

@@ -578,3 +578,37 @@ func TestBigQuerySnapshotCloneAndRestoreSendTheirOperation(t *testing.T) {
 		t.Errorf("a refused Snapshot was sent: %v", sent)
 	}
 }
+
+// TestBigQueryCopyTableSendsTheKey (#1762): Copy table's
+// Customer-managed encryption key is the copy job's
+// destinationEncryptionConfiguration; left empty, none is sent.
+func TestBigQueryCopyTableSendsTheKey(t *testing.T) {
+	var sent []string
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/jobs") {
+			b, _ := io.ReadAll(r.Body)
+			sent = append(sent, string(b))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"jobReference":{"projectId":"p","jobId":"c1","location":"US"},"status":{"state":"DONE"}}`)
+	}))
+	defer api.Close()
+	p := bigqueryProvider{endpoint: strings.TrimPrefix(api.URL, "http://"), project: "p"}
+	ctx := context.Background()
+	const key = "projects/p/locations/us/keyRings/r/cryptoKeys/k"
+	for _, v := range []string{"  " + key + " ", ""} {
+		if _, err := p.ActAtResult(ctx, "p", []string{"d", "t"}, actCopyTable, map[string]string{
+			"datasetId": "d2", "tableId": "t2", "kmsKeyName": v}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(sent) != 2 {
+		t.Fatalf("%d jobs sent, want two", len(sent))
+	}
+	if !strings.Contains(sent[0], `"destinationEncryptionConfiguration":{"kmsKeyName":"`+key+`"}`) {
+		t.Errorf("with a key: %s", sent[0])
+	}
+	if strings.Contains(sent[1], "destinationEncryptionConfiguration") {
+		t.Errorf("with no key: %s", sent[1])
+	}
+}

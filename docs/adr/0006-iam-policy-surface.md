@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-09-25
 - Issue: #308
-- **Amended by:** #421 (Cloud KMS), #504 (Cloud Storage), #1233 (Cloud Storage ACLs, 2026-10-15), #1216 (Cloud Run), #1231 (BigQuery), #1367 (Pub/Sub), #1368 (Resource Manager projects, folders and the organization, 2026-10-15), #1304 (Artifact Registry repositories, 2026-10-16), #1486 (Spanner, Bigtable tables, tags and audit configs, 2026-10-16), #1527 (Secure Source Manager instances and repositories, 2026-10-17), #1614 (Memorystore IAM auth, 2026-11-17), #1738, #1747 and #1751 (Firestore with MongoDB compatibility's sign-ins and IAM Credentials, 2026-11-17; recorded 2026-11-18), #1765 (BigQuery remote models' connection permissions, 2026-11-17), #1767 (BigQuery per-project IAM of a minted token, 2026-11-17), #1774 (the rest of BigQuery's per-project IAM, 2026-11-18)
+- **Amended by:** #421 (Cloud KMS), #504 (Cloud Storage), #1233 (Cloud Storage ACLs, 2026-10-15), #1216 (Cloud Run), #1231 (BigQuery), #1367 (Pub/Sub), #1368 (Resource Manager projects, folders and the organization, 2026-10-15), #1304 (Artifact Registry repositories, 2026-10-16), #1486 (Spanner, Bigtable tables, tags and audit configs, 2026-10-16), #1527 (Secure Source Manager instances and repositories, 2026-10-17), #1614 (Memorystore IAM auth, 2026-11-17), #1738, #1747 and #1751 (Firestore with MongoDB compatibility's sign-ins and IAM Credentials, 2026-11-17; recorded 2026-11-18), #1765 (BigQuery remote models' connection permissions, 2026-11-17), #1767 (BigQuery per-project IAM of a minted token, 2026-11-17), #1774 (the rest of BigQuery's per-project IAM, 2026-11-18), #1812 (Cloud Identity groups and domain members, 2026-11-18)
 - **Reaffirms:** the no-authorization clause of [ADR-0004](0004-local-access-and-no-authentication.md).
   It supersedes nothing.
 
@@ -496,9 +496,37 @@ and never read, now grants on that resource to a minted token's caller: the firs
 BigQuery's creator rule: the front records which minted caller ran each job, and that caller reads,
 lists and cancels it with `bigquery.jobs.create`; anyone else needs `bigquery.jobs.get`,
 `listAll` or `update`. The tables a view or a SQL routine reads are checked for the caller unless
-the source dataset authorizes the view, the routine or the view's dataset. Still not read (#1780):
-tags in conditions, `group:` and `domain:` members, and the creators of jobs run before the front
-last started.
+the source dataset authorizes the view, the routine or the view's dataset.
+
+Amended 2026-11-18 by #1780: a condition on resource tags (`resource.matchTag`, `hasTagKey`, and
+their ID forms) is evaluated over a dataset's or a table's effective tags: Resource Manager tag
+bindings on `//bigquery.googleapis.com/projects/P/datasets/D[/tables/T]` and the resource's
+`resourceTags`, a nearer value of a key replacing a farther one, down from the project's effective
+tags (its folders' and organization's). The front keeps each job's creator in its state directory,
+so a caller's jobs stay its own across a restart of the front (the emulator's reset forgets them,
+as it does the jobs). The host gives the front every custom role with `bigquery.` permissions of
+each project and the organization, so a custom role named only in a table's or a routine's own
+policy grants. A routine called by a two-part name is checked as one called by three parts, and a
+stored procedure's body is checked for the tables it reads and the routines it calls.
+
+Amended 2026-11-18 by #1812: the instance serves Cloud Identity's groups (`cloudidentity.googleapis.com`
+v1, on Resource Manager's port) under its organization's customer, `customers/C0cloudburrow`, in
+its domain, `cloudburrow.local`. A `group:G` member names every account that is a member of G,
+directly or through groups nested in it (Google: a group is "a named collection of Google
+Accounts", and members of a nested group inherit the outer group's roles), and
+`domain:cloudburrow.local` names every account whose email is in the domain (a service account's
+never is); any other domain names nobody, as the instance has no other Cloud Identity account. A
+dataset's `groupByEmail` and `domain` entries match the same way. This holds in the BigQuery
+per-project IAM above (project, folder and organization policies, table and routine policies,
+dataset entries), Memorystore's IAM auth, Firestore with MongoDB compatibility and IAM Credentials.
+BigQuery remote models' connection checks (#1765) expand `group:` members too: the front asks
+Cloud Identity (on Resource Manager's port) for the transitive groups of the account it checks.
+Since #1812 the groups' own API also serves groups.search, searchDirectGroups,
+searchTransitiveMemberships, getMembershipGraph and modifyMembershipRoles; a MEMBER role's
+expiryDetail ends the membership, and so the grants through the group, when it passes; and
+WITH_INITIAL_OWNER makes the account the bearer token was minted for the new group's owner.
+Official-client compat tests show the expansion in IAM Credentials, Memorystore's IAM auth and
+Firestore with MongoDB compatibility; BigQuery's connection checks' test is gated on local AI.
 
 ### Firestore with MongoDB compatibility and IAM Credentials (#1738, #1747, #1751)
 

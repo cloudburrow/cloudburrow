@@ -16,8 +16,10 @@ import (
 // tagsProvider is the Tags screen of the Resource hierarchy (#1295): tag keys
 // under the organization or a project, their values, over the registry the
 // v3 TagKeys and TagValues APIs use. Bindings are made on the page of the
-// project or folder they tag (tagSection, tagActions). Tags are stored, not
-// enforced: no IAM condition or organization policy reads them here.
+// project or folder they tag (tagSection, tagActions), and on a BigQuery
+// dataset's or table's (consolebigquerytags.go, #1780). The IAM conditions
+// of Memorystore's IAM auth and BigQuery's per-project IAM read them; no
+// organization policy does.
 type tagsProvider struct {
 	registry *resourcemanager.Registry
 }

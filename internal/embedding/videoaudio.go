@@ -11,7 +11,7 @@ import (
 	"github.com/Eyevinn/mp4ff/mp4"
 	"github.com/cloudburrow/cloudburrow/internal/ac3"
 	aacdec "github.com/cloudburrow/cloudburrow/third_party/aac-go"
-	"github.com/kazzmir/opus-go/opus"
+	"github.com/darui3018823/opus"
 )
 
 // A video's audio track (#1732), for embed_content_config's
@@ -30,9 +30,10 @@ import (
 // third_party/aac-go, where #1739 added HE-AAC v1 and v2), MP3 (mp4a
 // with the MPEG-1/2 audio object types, or .mp3) with third_party/go-mp3, and
 // QuickTime linear PCM (lpcm, sowt, twos, in24, in32, fl32, fl64), and
-// (#1739) Opus with github.com/kazzmir/opus-go (libopus transpiled to Go,
-// BSD 3-Clause), and AC-3 and E-AC-3 with internal/ac3 (written from ATSC
-// A/52); the audio formats Google lists are MP3 and WAV. Other codecs
+// (#1739) Opus with github.com/darui3018823/opus (pure Go, BSD 2-Clause;
+// #1811 replaced the transpiled github.com/kazzmir/opus-go, whose decoder
+// kept addresses of stack variables that a growing goroutine stack moves),
+// and AC-3 and E-AC-3 with internal/ac3 (written from ATSC A/52); the audio formats Google lists are MP3 and WAV. Other codecs
 // (ALAC, FLAC...) are refused naming them.
 
 // DecodeVideoAudio decodes the audio track of an MP4 or MOV video to mono
@@ -486,13 +487,16 @@ func decodeOpusTrack(tr *soundTrack, e *mp4.AudioSampleEntryBox, edited bool) (p
 	dops := e.Dops
 	channels = int(dops.OutputChannelCount)
 	const opusRate = 48000
-	var d *opus.Decoder
+	var d interface {
+		DecodeFloat32(packet []byte) ([]float32, error)
+		DecodePLCFloat32(frameSize int) ([]float32, error)
+	}
 	switch {
 	case dops.ChannelMappingFamily == 0 && channels >= 1 && channels <= 2:
 		d, err = opus.NewDecoder(opusRate, channels)
 	case dops.ChannelMappingFamily == 1 && channels >= 1 && channels <= 8:
 		// #1739: surround (RFC 7845's Vorbis channel order), several
-		// streams through libopus's multistream decoder.
+		// streams through a multistream decoder.
 		if len(dops.ChannelMapping) != channels || int(dops.StreamCount) < 1 || dops.CoupledCount > dops.StreamCount {
 			return nil, 0, 0, fmt.Errorf("the Opus track's channel mapping (%d streams, %d coupled, %d entries) does not fit its %d channels",
 				dops.StreamCount, dops.CoupledCount, len(dops.ChannelMapping), channels)
@@ -505,15 +509,20 @@ func decodeOpusTrack(tr *soundTrack, e *mp4.AudioSampleEntryBox, edited bool) (p
 	if err != nil {
 		return nil, 0, 0, fmt.Errorf("the Opus track: %v", err)
 	}
-	defer d.Close()
 	gain := float32(math.Pow(10, float64(dops.OutputGain)/(20*256)))
-	buf := make([]float32, 5760*channels) // 120 ms, the longest packet
 	for i, packet := range tr.samples {
-		n, err := d.DecodeF32(packet, buf, 5760, false)
+		var out []float32
+		if len(packet) == 0 {
+			// An empty sample is a lost packet: concealed as libopus's
+			// opus_decode_float conceals a missing packet given 120 ms of room.
+			out, err = d.DecodePLCFloat32(5760)
+		} else {
+			out, err = d.DecodeFloat32(packet)
+		}
 		if err != nil {
 			return nil, 0, 0, fmt.Errorf("the Opus track's packet %d: %v", i+1, err)
 		}
-		for _, v := range buf[:n*channels] {
+		for _, v := range out {
 			pcm = append(pcm, v*gain)
 		}
 		if len(pcm) > (MaxAudioSeconds+60)*opusRate*channels {

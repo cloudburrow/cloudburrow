@@ -1,4 +1,4 @@
-CloudBurrow patch 97 to github.com/goccy/bigquery-emulator v0.8.1
+CloudBurrow patch 101 to github.com/goccy/bigquery-emulator v0.8.1
 (cloudburrow/cloudburrow#1819).
 
 The bug: on BigQuery a jobs.query waits at most timeoutMs (10 s by

@@ -771,6 +771,12 @@ func memorystoreIAM(creds *metadata.Credentials, registry func() *resourcemanage
 			}
 			return out
 		},
+		Principals: func(email string) []string {
+			if registry == nil {
+				return nil
+			}
+			return registry().Principals(email)
+		},
 		Members: func(project, resource, role string) []string {
 			var reg *resourcemanager.Registry
 			if registry != nil {

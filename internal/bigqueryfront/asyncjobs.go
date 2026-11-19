@@ -67,7 +67,7 @@ import (
 //
 // A jobs.query names no job ID, and the job it makes is named deep in the
 // front or by the engine. So each one is given an ID first (queryJobID),
-// which its job takes: the engine's (bigquery-emulator patch 0097, the
+// which its job takes: the engine's (bigquery-emulator patch 0101, the
 // header JobIDPrefix sends with the request's first jobs.query to the
 // engine), or where the front names it (a failed query, recorded by
 // failedjobs.go). A slow jobs.query answers with that ID. When the job it
@@ -144,7 +144,7 @@ func stoppedError() rowError {
 type queryJobIDKey struct{}
 
 // queryJobRef is the job ID this layer gave a jobs.query, which one job
-// takes: the engine's (bigquery-emulator patch 0097, JobIDPrefix sends it
+// takes: the engine's (bigquery-emulator patch 0101, JobIDPrefix sends it
 // with the request's first jobs.query to the engine) or the one the front
 // names (a failed query, failedjobs.go), whichever comes first.
 type queryJobRef struct {

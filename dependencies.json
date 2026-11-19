@@ -702,6 +702,49 @@
         "digest": "sha256:a8dbf8b8c8ee427ff6ad1d99116502feaf59440af1adb893caf60a6576826cf4",
         "notes": "Vertex AI EmbedContent's document_ocr on scanned PDF pages (#1733, internal/ocr): Tesseract (Google's LSTM OCR engine) and Leptonica 1.87.0 (BSD-2-Clause, https://github.com/DanBloomberg/leptonica, sha256:c73363397f96eb1295602bf44d708a994ad42046c791bf03ea0505d829bdb6a7), compiled by third_party/tesseract-wasm/build.sh with wasi-sdk 34 (https://github.com/WebAssembly/wasi-sdk, Apache-2.0 WITH LLVM-exception; the release's host-independent wasi-sysroot-34.0 and libclang_rt-34.0 archives, sha256:9d813544eeebe38b7b8f2244ed591de46b6db812c6dd1a257ff9f0d2a905a2be and sha256:eee3e634dcf71aa22b1333391623cf5c9965a637dc428a27b1a858c026c587f1, linked in: wasi-libc and musl MIT, libc++ Apache-2.0 WITH LLVM-exception), byte-identical on macOS and Linux arm64 and x86_64 to a WASI module run on wazero, so no cgo. With tessdata_fast 4.1.0 eng and osd (Apache-2.0, https://github.com/tesseract-ocr/tessdata_fast) embedded. Its script models (script/*.traineddata, commit 65727574dfcd264acbb0c3e07860e4e9e9b22185, Apache-2.0) are fetched on demand into <state-dir>/models, each pinned by SHA-256 in internal/localai/tessdata.go, for a page in a script other than Latin. The module's SHA-256 is in tesseract.wasm.sha256 and CI's tesseract-wasm job rebuilds it (third_party/tesseract-wasm/PROVENANCE.md)."
       },
+      "mediapipeLanguageDetector": {
+        "version": "float32/1",
+        "source": "https://storage.googleapis.com/mediapipe-models/language_detector/language_detector/float32/1/language_detector.tflite",
+        "license": "Apache-2.0",
+        "verification": "checksum",
+        "digest": "sha256:7db4f23dfe1ad8966b050b419a865da451143fd43eb6b606a256aadeeb1e5417",
+        "notes": "BigQuery ML.TRANSLATE's DETECT_LANGUAGE and TRANSLATE_TEXT's detected_language_code (#1799, internal/langid): Google's MediaPipe Language Detector (Learn2Compress and Google Research, Apache-2.0 per its model card, https://storage.googleapis.com/mediapipe-assets/LanguageDetector%20Model%20Card.pdf; 110 languages, the label set of CLD3), as linked from https://ai.google.dev/edge/mediapipe/solutions/text/language_detector. Embedded (315294 bytes, third_party/mediapipe-langid), run in pure Go on internal/tflitemodel with Go ports of MediaPipe's NGramHash and KmeansEmbeddingLookup custom operators (mediapipe/tasks/cc/text/language_detector/custom_ops, Apache-2.0), so no cgo and no download at run time (third_party/mediapipe-langid/PROVENANCE.md)."
+      },
+      "whisperWasm": {
+        "version": "1.9.5",
+        "source": "https://github.com/ggml-org/whisper.cpp",
+        "license": "MIT",
+        "verification": "release-checksum",
+        "digest": "sha256:ff1a9053feb509ff9d7729703355541ae9690073a6b1c40eb692c962e0dc1720",
+        "notes": "BigQuery ML.TRANSCRIBE over a CLOUD_AI_SPEECH_TO_TEXT_V2 remote model (#1799, internal/speech): whisper.cpp and its ggml (MIT), compiled by third_party/whisper-wasm/build.sh with wasi-sdk 34 (the same pinned archives as tesseractWasm; linked in: wasi-libc and musl MIT, libc++, libc++abi and libunwind Apache-2.0 WITH LLVM-exception) to a single-threaded WASI module run on wazero with its exception-handling feature, so no cgo. Google publishes no locally runnable speech model. The model, OpenAI's multilingual Whisper base in ggml q8_0 (MIT, https://huggingface.co/ggerganov/whisper.cpp revision 5359861c739e955e79d9a303bcbc70fb988958b1, ggml-base-q8_0.bin, sha256:c577b9a86e7e048a0b7eada054f4dd79a56bbfa911fbdacf900ac5b567cbb7d9, 81768585 bytes), is fetched on first use into <state-dir>/models, pinned in internal/localai/whisper.go. The module's SHA-256 is in whisper.wasm.sha256 and CI's whisper-wasm job rebuilds it (third_party/whisper-wasm/PROVENANCE.md)."
+      },
+      "mediapipeEfficientNetLite0": {
+        "version": "float32/1",
+        "source": "https://storage.googleapis.com/mediapipe-models/image_classifier/efficientnet_lite0/float32/1/efficientnet_lite0.tflite",
+        "license": "Apache-2.0",
+        "verification": "checksum",
+        "digest": "sha256:6c7ab0a6e5dcbf38a8c33b960996a55a3b4300b36a018c4545801de3a3c8bde0",
+        "skipDiscovery": "A model file at a versioned path in MediaPipe's bucket, not a release depcheck can compare; re-pinned by hand when MediaPipe publishes a new version.",
+        "notes": "Vision LABEL_DETECTION for ML.ANNOTATE_IMAGE and the local images:annotate (#1799, internal/imagelabel), approved by the maintainer 2026-11-18: Google's MediaPipe EfficientNet-Lite0 image classifier (18,582,189 bytes), run on the pure-Go internal/tflitemodel, so no cgo. Not shipped in the binary: fetched once from storage.googleapis.com (a file download, never a call to a Google Cloud API) the first time an image is labelled, into <state-dir>/models, and checked against the SHA-256 pinned in internal/localai/imageclassifier.go. Its 1,000 ImageNet labels (labels_without_background.txt) are carried in the file."
+      },
+      "mediapipeEfficientDetLite0": {
+        "version": "float32/1",
+        "source": "https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float32/1/efficientdet_lite0.tflite",
+        "license": "Apache-2.0",
+        "verification": "checksum",
+        "digest": "sha256:40338edf5ec70d43e318b0a716a84d4564cd1802759a7a07170c7e43796dbf58",
+        "skipDiscovery": "A model file at a versioned path in MediaPipe's bucket, not a release depcheck can compare; re-pinned by hand when MediaPipe publishes a new version.",
+        "notes": "Vision OBJECT_LOCALIZATION for ML.ANNOTATE_IMAGE and the local images:annotate (#1799, internal/imagedetect), approved by the maintainer 2026-11-18: Google's MediaPipe EfficientDet-Lite0 object detector (13,836,895 bytes), run on the pure-Go internal/tflitemodel, so no cgo. Not shipped in the binary: fetched once from storage.googleapis.com (a file download, never a call to a Google Cloud API) the first time an image needs it, into <state-dir>/models, and checked against the SHA-256 pinned in internal/localai/imagedetector.go. Its COCO labels (labels.txt, 90 class IDs of which 80 are named) and its 19,206 fixed anchors (DETECTOR_METADATA) are carried in the file."
+      },
+      "mediapipeBlazeFaceShortRange": {
+        "version": "float16/1",
+        "source": "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite",
+        "license": "Apache-2.0",
+        "verification": "checksum",
+        "digest": "sha256:b4578f35940bf5a1a655214a1cce5cab13eba73c1297cd78e1a04c2380b0152f",
+        "skipDiscovery": "A model file at a versioned path in MediaPipe's bucket, not a release depcheck can compare; re-pinned by hand when MediaPipe publishes a new version.",
+        "notes": "Vision FACE_DETECTION for ML.ANNOTATE_IMAGE and the local images:annotate (#1799, internal/imagedetect), approved by the maintainer 2026-11-18: Google's MediaPipe BlazeFace short-range face detector (229,746 bytes; MediaPipe publishes it in float16 only), run on the pure-Go internal/tflitemodel, so no cgo. Not shipped in the binary: fetched once from storage.googleapis.com (a file download, never a call to a Google Cloud API) the first time an image needs it, into <state-dir>/models, and checked against the SHA-256 pinned in internal/localai/imagedetector.go."
+      },
       "goH265": {
         "module": "github.com/gen2brain/h265",
         "version": "v0.2.5",
@@ -751,11 +794,14 @@
         "notes": "Vertex AI EmbedContent's audio_track_extraction (#1732, internal/embedding/videoaudio.go), under the maintainer's approval of media decoder modules (2026-11-17): a pure Go AAC-LC decoder, no cgo and no dependencies, fed each MP4 access unit behind an ADTS header. Within one 16-bit step of ffmpeg 9 here. Copied into third_party/aac-go since #1739 (import path github.com/cloudburrow/cloudburrow/third_party/aac-go; non-test sources without cmd/ and scripts/, imports rewritten; third_party/aac-go/PROVENANCE.md) so CloudBurrow owns its fixes: one release, no activity since. Chosen over tphakala/go-aac (LGPL-2.1) and thesyncim/goaac (GPL) (docs/upstream-evaluation.md). Its HE-AAC tables (sbr_tables.go) are taken from PacketVideo's OpenCORE AAC decoder (Apache-2.0, Android platform/frameworks/av android-4.1.1_r1, media/libstagefright/codecs/aacdec; downloaded 2026-11-17), attributed in third_party/aac-go/NOTICE."
       },
       "goOpus": {
-        "module": "github.com/kazzmir/opus-go",
-        "version": "v1.7.0",
-        "license": "BSD-3-Clause",
-        "verification": "go.sum",
-        "notes": "Vertex AI EmbedContent's audio_track_extraction of an Opus track (#1739, internal/embedding/videoaudio.go), under the maintainer's approval of media decoder modules (2026-11-17): libopus (BSD-3-Clause) transpiled to Go with ccgo, no cgo and no dependencies. Within 0.71 of a 16-bit step of ffmpeg 9's libopus decode here. Chosen over thesyncim/gopus (BSD-3-Clause, but its go.mod needs Go 1.27.3) and pion/opus (SILK only) (docs/upstream-evaluation.md)."
+        "module": "github.com/darui3018823/opus",
+        "version": "v1.8.0",
+        "sum": "h1:EMvPScorjJNK5cu9s+V+kgt1ilRVVAuNeY5xI+FpxNI=",
+        "pinnedCommit": "28d4cc3a1ede19ca5a3e96c3f7598a9f4b6989d1",
+        "source": "https://github.com/darui3018823/opus",
+        "license": "BSD-2-Clause",
+        "verification": "commit-sha",
+        "notes": "Vertex AI EmbedContent's audio_track_extraction of an Opus track (#1739, internal/embedding/videoaudio.go): a pure Go Opus decoder (RFC 6716 / RFC 8251; CELT, SILK, hybrid; multistream mapping family 1), standard library only, no cgo and no unsafe in the packages linked (its libopus comparison harness is cgo behind the opusref build tag, not built here), go 1.24.11. #1811 replaced github.com/kazzmir/opus-go v1.7.0 with it: opus-go (libopus transpiled) kept uintptrs to goroutine-stack variables and grew its libc shim's pseudo-stack by copying (kazzmir/opus-go#79, unfixed on its master), so a stack that moved mid-decode corrupted the samples (0.76 of full scale from ffmpeg under -d=maymorestack=runtime.mayMoreStackMove), and -race needed checkptr off for it (#1808). This decoder is within 1.9e-7 of opus-go's samples on every test track and its 5.1 and 7.1 downmixes within 6e-5 of ffmpeg 9's libopus decode at 48 kHz, and gives identical samples with the stack moved at every function entry (TestDecodeOpusOnMovingStacks). Chosen over thesyncim/gopus and tphakala/go-opus (both need Go 1.27; CI builds with 1.26) and pion/opus (SILK only) (docs/upstream-evaluation.md)."
       },
       "govpx": {
         "module": "github.com/thesyncim/govpx",

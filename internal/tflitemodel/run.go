@@ -144,7 +144,13 @@ func (m *Model) runGraph(g *graph, vals []*Tensor, depth int) error {
 		if len(o.out) != 1 {
 			return &UnsupportedError{fmt.Sprintf("operator %s has %d outputs", o.name, len(o.out))}
 		}
-		r, err := m.eval(o, args)
+		var r *Tensor
+		var err error
+		if o.custom != nil {
+			r, err = o.custom(o.customOpts, args)
+		} else {
+			r, err = m.eval(o, args)
+		}
 		if err != nil {
 			return err
 		}

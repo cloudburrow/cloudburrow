@@ -612,7 +612,9 @@ func TestCopyJobs(t *testing.T) {
 		{"CLONE of two tables", []string{"ds.s", "ds.s"}, "ds.new", `,"operationType":"CLONE"`, 501},
 		{"RESTORE of a table", []string{"ds.s"}, "ds.new", `,"operationType":"RESTORE"`, 200}, // a failed job, #1002
 		{"a bad operationType", []string{"ds.s"}, "ds.new", `,"operationType":"MOVE"`, 400},
-		{"an encryption key", []string{"ds.s"}, "ds.new", `,"destinationEncryptionConfiguration":{"kmsKeyName":"k"}`, 501},
+		{"a key not in the form", []string{"ds.s"}, "ds.new", `,"destinationEncryptionConfiguration":{"kmsKeyName":"k"}`, 400},
+		{"a key version", []string{"ds.s"}, "ds.new", `,"destinationEncryptionConfiguration":{"kmsKeyName":"` + testKey + `/cryptoKeyVersions/1"}`, 400},
+		{"a key into a partition", []string{"ds.s"}, "ds.new$20250101", `,"destinationEncryptionConfiguration":{"kmsKeyName":"` + testKey + `"}`, 501},
 		{"an expiration of a table that exists", []string{"ds.s"}, "ds.full", `,"destinationExpirationTime":"2030-01-01T00:00:00Z","writeDisposition":"WRITE_APPEND"`, 501},
 		{"a bad expiration", []string{"ds.s"}, "ds.new", `,"destinationExpirationTime":"soon"`, 400},
 		{"schemas that differ", []string{"ds.s", "ds.other"}, "ds.new", "", 200}, // a failed job, #1002

@@ -1,0 +1,301 @@
+CloudBurrow patch 100 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1816). Applies after patch 0098; needs
+googlesqlite patch 0099.
+
+A NULL query parameter was bound as a Go nil, which has no type, so
+`SELECT @p` with a NULL STRING, DATE or NUMERIC was an INTEGER. An ARRAY
+parameter's elements were bound as their REST text, so an ARRAY<DATE>,
+ARRAY<NUMERIC> or ARRAY<BYTES> was an ARRAY of STRING, and a STRUCT as a
+Go map, typed STRING, its fields in no order. BigQuery types each as
+declared (https://cloud.google.com/bigquery/docs/parameterized-queries).
+They are bound as googlesqlite.TypedParameter (googlesqlite patch 0099):
+a NULL of its type, an ARRAY of its element type, a STRUCT of its fields'
+types in their order (a missing field, or a scalar with no value but a
+STRING or BYTES, a NULL). A type with a RANGE in it, or a STRUCT field
+with no name, is bound as before.
+
+server/cloudburrow_typed_null_array_struct_parameters_test.go
+(TestTypedNullArrayStructParameters: a NULL of every scalar type, an
+ARRAY, a STRUCT and an ARRAY of STRUCTs, positional and named, in the
+select list; a STRUCT's fields; a NULL STRUCT).
+
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- a/internal/contentdata/repository.go
++++ b/internal/contentdata/repository.go
+@@ -271,6 +271,11 @@
+ 		if param.ParameterType != nil {
+ 			value = coerceScalarParameterValue(value, param.ParameterType.Type)
+ 		}
++		// CloudBurrow patch (cloudburrow/cloudburrow#1816): a NULL, an
++		// ARRAY and a STRUCT of their declared type.
++		if typed, ok := typedQueryParameter(param.ParameterType, param.ParameterValue, value == nil); ok {
++			value = typed
++		}
+ 		if param.Name != "" {
+ 			values = append(values, sql.Named(param.Name, value))
+ 		} else {
+@@ -454,6 +459,116 @@
+ 	return value
+ }
+ 
++// typedQueryParameter is a query parameter of type t and value v (null:
++// a NULL, as Query reads it) bound as a value of its declared type, when it
++// is a NULL, an ARRAY or a STRUCT: a NULL had no type, so `SELECT @p` was
++// an INT64, and an ARRAY's elements and a STRUCT's fields were the Go
++// values queryParameterValueToGoValue gives them, a DATE or a NUMERIC a
++// STRING and a STRUCT's fields in no order. BigQuery types each as
++// declared (https://cloud.google.com/bigquery/docs/parameterized-queries).
++// A type with a RANGE, or a STRUCT field with no name, is left as it was.
++// CloudBurrow patch (cloudburrow/cloudburrow#1816).
++func typedQueryParameter(t *bigqueryv2.QueryParameterType, v *bigqueryv2.QueryParameterValue, null bool) (googlesqlite.TypedParameter, bool) {
++	if t == nil {
++		return googlesqlite.TypedParameter{}, false
++	}
++	switch strings.ToUpper(t.Type) {
++	case "ARRAY", "STRUCT":
++		return typedParameterValue(t, v)
++	}
++	if !null {
++		return googlesqlite.TypedParameter{}, false
++	}
++	typ, ok := parameterType(t)
++	if !ok {
++		return googlesqlite.TypedParameter{}, false
++	}
++	return googlesqlite.TypedParameter{Type: typ.Type, Null: true}, true
++}
++
++// parameterType is t as googlesqlite's, when every type in it is one a
++// TypedParameter binds. CloudBurrow patch (cloudburrow/cloudburrow#1816).
++func parameterType(t *bigqueryv2.QueryParameterType) (googlesqlite.ParameterType, bool) {
++	if t == nil {
++		return googlesqlite.ParameterType{}, false
++	}
++	upper := strings.ToUpper(t.Type)
++	switch upper {
++	case "ARRAY":
++		elem, ok := parameterType(t.ArrayType)
++		if !ok {
++			return googlesqlite.ParameterType{}, false
++		}
++		return googlesqlite.ParameterType{Type: upper, ArrayType: &elem}, true
++	case "STRUCT":
++		if len(t.StructTypes) == 0 {
++			return googlesqlite.ParameterType{}, false
++		}
++		fields := make([]googlesqlite.ParameterField, 0, len(t.StructTypes))
++		for _, f := range t.StructTypes {
++			ft, ok := parameterType(f.Type)
++			if !ok || f.Name == "" {
++				return googlesqlite.ParameterType{}, false
++			}
++			fields = append(fields, googlesqlite.ParameterField{Name: f.Name, Type: ft})
++		}
++		return googlesqlite.ParameterType{Type: upper, StructTypes: fields}, true
++	case "STRING", "BYTES", "INT64", "INTEGER", "INT", "FLOAT64", "FLOAT", "DOUBLE", "BOOL", "BOOLEAN",
++		"NUMERIC", "DECIMAL", "BIGNUMERIC", "BIGDECIMAL", "DATE", "TIME", "DATETIME", "TIMESTAMP",
++		"GEOGRAPHY", "JSON", "INTERVAL":
++		return googlesqlite.ParameterType{Type: upper}, true
++	}
++	return googlesqlite.ParameterType{}, false
++}
++
++// typedParameterValue is v, a value of type t (nil for NULL), as a
++// TypedParameter. A STRUCT with no structValues is a NULL, as is a scalar
++// with no value but a STRING or BYTES.
++// CloudBurrow patch (cloudburrow/cloudburrow#1816).
++func typedParameterValue(t *bigqueryv2.QueryParameterType, v *bigqueryv2.QueryParameterValue) (googlesqlite.TypedParameter, bool) {
++	typ, ok := parameterType(t)
++	if !ok {
++		return googlesqlite.TypedParameter{}, false
++	}
++	p := googlesqlite.TypedParameter{Type: typ.Type, ArrayType: typ.ArrayType, StructTypes: typ.StructTypes}
++	switch {
++	case v == nil:
++		p.Null = true
++	case typ.Type == "ARRAY":
++		p.ArrayValues = make([]googlesqlite.TypedParameter, 0, len(v.ArrayValues))
++		for _, e := range v.ArrayValues {
++			ev, ok := typedParameterValue(t.ArrayType, e)
++			if !ok {
++				return googlesqlite.TypedParameter{}, false
++			}
++			p.ArrayValues = append(p.ArrayValues, ev)
++		}
++	case typ.Type == "STRUCT":
++		if v.StructValues == nil {
++			p.Null = true
++			break
++		}
++		p.StructValues = make([]googlesqlite.TypedParameter, 0, len(t.StructTypes))
++		for _, f := range t.StructTypes {
++			var fv *bigqueryv2.QueryParameterValue
++			if x, ok := v.StructValues[f.Name]; ok {
++				fv = &x
++			}
++			ev, ok := typedParameterValue(f.Type, fv)
++			if !ok {
++				return googlesqlite.TypedParameter{}, false
++			}
++			p.StructValues = append(p.StructValues, ev)
++		}
++	default:
++		p.Value = v.Value
++		// No value is a NULL, but for a STRING or BYTES, whose empty text
++		// is a value.
++		p.Null = v.Value == "" && typ.Type != "STRING" && typ.Type != "BYTES"
++	}
++	return p, true
++}
++
+ func (r *Repository) queryParameterValueToGoValue(ptype *bigqueryv2.QueryParameterType, value *bigqueryv2.QueryParameterValue) (interface{}, error) {
+ 	// A nil parameter value denotes an explicit NULL: the handler clears it
+ 	// when the request JSON carried `null` (or no value) for the parameter.
+--- /dev/null
++++ b/server/cloudburrow_typed_null_array_struct_parameters_test.go
+@@ -0,0 +1,140 @@
++package server_test
++
++import (
++	"context"
++	"fmt"
++	"math/big"
++	"testing"
++
++	"cloud.google.com/go/bigquery"
++	"cloud.google.com/go/civil"
++	"github.com/goccy/bigquery-emulator/server"
++	"github.com/goccy/bigquery-emulator/types"
++	"google.golang.org/api/option"
++)
++
++// TestTypedNullArrayStructParameters is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1816): a NULL parameter, positional or named,
++// alone in the select list is a column of its declared type (it was an
++// INTEGER), and an ARRAY's elements and a STRUCT's fields are of theirs (an
++// ARRAY<DATE> was an ARRAY of STRING, a STRUCT one STRING), as in BigQuery.
++func TestTypedNullArrayStructParameters(t *testing.T) {
++	ctx := context.Background()
++	bqServer, err := server.New(server.TempStorage)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err := bqServer.Load(server.StructSource(types.NewProject("test"))); err != nil {
++		t.Fatal(err)
++	}
++	ts := bqServer.TestServer()
++	defer func() {
++		ts.Close()
++		bqServer.Stop(ctx)
++	}()
++	client, err := bigquery.NewClient(ctx, "test", option.WithEndpoint(ts.URL), option.WithoutAuthentication())
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer client.Close()
++	null := func(kind string) *bigquery.QueryParameterValue {
++		// A NULL of the type: the client sends {"value": null}.
++		return &bigquery.QueryParameterValue{Type: bigquery.StandardSQLDataType{TypeKind: kind}, Value: bigquery.NullString{}}
++	}
++	type inner struct {
++		N *big.Rat
++		D civil.Date
++	}
++	type rec struct {
++		S string
++		B []byte
++		I inner
++		L []civil.Date
++	}
++	d1, d2 := civil.Date{Year: 2024, Month: 1, Day: 2}, civil.Date{Year: 2024, Month: 1, Day: 3}
++	rv := rec{S: "s", B: []byte{0xff, 0x00, 0x61}, I: inner{N: big.NewRat(5, 4), D: d1}, L: []civil.Date{d1, d2}}
++	for _, tc := range []struct {
++		name   string
++		value  any
++		schema string // the column's type, and its fields'
++		want   string
++	}{
++		{"a NULL STRING", null("STRING"), "STRING", "<nil>"},
++		{"a NULL INT64", null("INT64"), "INTEGER", "<nil>"},
++		{"a NULL FLOAT64", null("FLOAT64"), "FLOAT", "<nil>"},
++		{"a NULL BOOL", null("BOOL"), "BOOLEAN", "<nil>"},
++		{"a NULL BYTES", null("BYTES"), "BYTES", "<nil>"},
++		{"a NULL NUMERIC", null("NUMERIC"), "NUMERIC", "<nil>"},
++		{"a NULL BIGNUMERIC", null("BIGNUMERIC"), "BIGNUMERIC", "<nil>"},
++		{"a NULL DATE", null("DATE"), "DATE", "<nil>"},
++		{"a NULL TIME", null("TIME"), "TIME", "<nil>"},
++		{"a NULL DATETIME", null("DATETIME"), "DATETIME", "<nil>"},
++		{"a NULL TIMESTAMP", null("TIMESTAMP"), "TIMESTAMP", "<nil>"},
++		{"a NULL GEOGRAPHY", null("GEOGRAPHY"), "GEOGRAPHY", "<nil>"},
++		{"a NULL JSON", null("JSON"), "JSON", "<nil>"},
++		{"a NULL INTERVAL", null("INTERVAL"), "INTERVAL", "<nil>"},
++		{"an ARRAY<DATE>", []civil.Date{d1, d2}, "DATE REPEATED", "[2024-01-02 2024-01-03]"},
++		{"an ARRAY<NUMERIC>", []*big.Rat{big.NewRat(1, 2)}, "NUMERIC REPEATED", "[1/2]"},
++		{"an ARRAY<BYTES>", [][]byte{[]byte("ab")}, "BYTES REPEATED", "[[97 98]]"},
++		{"a STRUCT", rv, "RECORD(S STRING, B BYTES, I RECORD(N NUMERIC, D DATE), L DATE REPEATED)",
++			"[s [255 0 97] [5/4 2024-01-02] [2024-01-02 2024-01-03]]"},
++		{"an ARRAY of STRUCTs", []inner{{N: big.NewRat(3, 1), D: d2}}, "RECORD REPEATED(N NUMERIC, D DATE)", "[[3/1 2024-01-03]]"},
++	} {
++		for _, named := range []bool{false, true} {
++			sql, p := "SELECT ? AS a", bigquery.QueryParameter{Value: tc.value}
++			if named {
++				sql, p.Name = "SELECT @p AS a", "p"
++			}
++			q := client.Query(sql)
++			q.Parameters = []bigquery.QueryParameter{p}
++			it, err := q.Read(ctx)
++			if err != nil {
++				t.Errorf("%s with %s: %v", sql, tc.name, err)
++				continue
++			}
++			var row []bigquery.Value
++			if err := it.Next(&row); err != nil {
++				t.Errorf("%s with %s: %v", sql, tc.name, err)
++				continue
++			}
++			if got := fieldType(it.Schema[0]); got != tc.schema {
++				t.Errorf("%s with %s: column type %s, want %s", sql, tc.name, got, tc.schema)
++			}
++			if got := fmt.Sprint(row[0]); got != tc.want {
++				t.Errorf("%s with %s = %s, want %s", sql, tc.name, got, tc.want)
++			}
++		}
++	}
++	// A field of a STRUCT parameter, and a NULL STRUCT.
++	q := client.Query("SELECT @p.I.N + 1 AS n, DATE_ADD(@p.L[OFFSET(1)], INTERVAL 1 DAY) AS d, @q IS NULL AS z")
++	q.Parameters = []bigquery.QueryParameter{{Name: "p", Value: rv}, {Name: "q", Value: (*inner)(nil)}}
++	it, err := q.Read(ctx)
++	if err != nil {
++		t.Fatalf("fields of a STRUCT: %v", err)
++	}
++	var row []bigquery.Value
++	if err := it.Next(&row); err != nil {
++		t.Fatalf("fields of a STRUCT: %v", err)
++	}
++	if got := fmt.Sprint(row); got != "[9/4 2024-01-04 true]" {
++		t.Errorf("fields of a STRUCT = %s", got)
++	}
++}
++
++func fieldType(f *bigquery.FieldSchema) string {
++	s := string(f.Type)
++	if f.Repeated {
++		s += " REPEATED"
++	}
++	if len(f.Schema) > 0 {
++		s += "("
++		for i, sub := range f.Schema {
++			if i > 0 {
++				s += ", "
++			}
++			s += sub.Name + " " + fieldType(sub)
++		}
++		s += ")"
++	}
++	return s
++}

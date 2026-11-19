@@ -145,11 +145,15 @@ func parseRemote(stmt []token, i int, d *modelDDL) (int, string) {
 				return code, msg
 			}
 			rd.serviceType = strings.ToUpper(v)
-		case "DOCUMENT_PROCESSOR", "SPEECH_RECOGNIZER":
-			// Only CLOUD_AI_DOCUMENT_V1's and CLOUD_AI_SPEECH_TO_TEXT_V2's,
-			// which are refused (modelservice.go).
-			return 501, "Not implemented here: the " + name + " option of a remote model: " + serviceTypeRefusals[map[string]string{
-				"DOCUMENT_PROCESSOR": "CLOUD_AI_DOCUMENT_V1", "SPEECH_RECOGNIZER": "CLOUD_AI_SPEECH_TO_TEXT_V2"}[name]] + " Nothing was run."
+		case "DOCUMENT_PROCESSOR":
+			// Only CLOUD_AI_DOCUMENT_V1's, which is refused (modelservice.go).
+			return 501, "Not implemented here: the " + name + " option of a remote model: " + serviceTypeRefusals["CLOUD_AI_DOCUMENT_V1"] + " Nothing was run."
+		case "SPEECH_RECOGNIZER":
+			// CLOUD_AI_SPEECH_TO_TEXT_V2's (#1799): CloudBurrow serves no
+			// Speech-to-Text API, so no recognizer exists to name.
+			return 501, "Not implemented here: the SPEECH_RECOGNIZER option of a remote model: CloudBurrow serves no Speech-to-Text " +
+				"API, so no recognizer can exist for it to name; create the model without it and pass ML.TRANSCRIBE a " +
+				"recognition_config, which configures the default recognizer (#1799). Nothing was run."
 		case "MAX_BATCHING_ROWS", "PROMPT_COL", "INPUT_LABEL_COLS",
 			"MODEL_TYPE", "AI_SERVICE_TYPE":
 			return 501, "Not implemented here: the " + name + " option of a remote model: CloudBurrow's remote models are LLM " +
@@ -373,8 +377,8 @@ func (f front) remoteSubquery(r *http.Request, q queryOptions, md bqModel, c mlC
 	if rm.ServiceType != "" {
 		return f.serviceSubquery(r, q, md, c, fname) // modelservice.go, #1773
 	}
-	if c.fn == "ANNOTATE_IMAGE" {
-		return "", 400, fmt.Sprintf("Function %s is not supported for the remote model with endpoint %s: it takes a remote model whose REMOTE_SERVICE_TYPE is CLOUD_AI_VISION_V1", fname, rm.Endpoint)
+	if t := map[string]string{"ANNOTATE_IMAGE": "CLOUD_AI_VISION_V1", "TRANSCRIBE": "CLOUD_AI_SPEECH_TO_TEXT_V2", "TRANSLATE": "CLOUD_AI_TRANSLATE_V3", "UNDERSTAND_TEXT": "CLOUD_AI_NATURAL_LANGUAGE_V1"}[c.fn]; t != "" {
+		return "", 400, fmt.Sprintf("Function %s is not supported for the remote model with endpoint %s: it takes a remote model whose REMOTE_SERVICE_TYPE is %s", fname, rm.Endpoint, t)
 	}
 	switch {
 	case (c.fn == "GENERATE_TEXT" || c.fn == "GENERATE_TABLE") && rm.Embedding, c.fn == "GENERATE_EMBEDDING" && !rm.Embedding:
@@ -708,8 +712,8 @@ func aiFunction(sql string) string {
 			if (toks[i+2].is("GENERATE_TEXT") || toks[i+2].is("GENERATE_TABLE") || toks[i+2].is("GENERATE_EMBEDDING")) && i+4 < len(toks) && toks[i+4].is("MODEL") {
 				continue // served with the ML functions of a model (#1765, #1771, #1772)
 			}
-			if _, ok := aiScalars[strings.ToUpper(toks[i+2].text)]; ok || toks[i+2].is("AGG") {
-				continue // evaluated row by row (aigenerate.go) or group by group (aiagg.go, #1777)
+			if _, ok := aiScalars[strings.ToUpper(toks[i+2].text)]; ok || toks[i+2].is("AGG") || toks[i+2].is("SEARCH") {
+				continue // evaluated row by row (aigenerate.go), group by group (aiagg.go, #1777) or as a subquery (aisearch.go, #1778)
 			}
 			return "AI." + strings.ToUpper(toks[i+2].text)
 		}
