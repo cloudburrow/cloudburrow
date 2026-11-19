@@ -207,6 +207,9 @@ func (f *Front) checkBigQueryConfig(ctx context.Context, s *pubsubpb.Subscriptio
 	}
 	cols, err := f.exp.tableSchema(ctx, t)
 	if st, ok := destinationState(err); ok {
+		if stateLoad(ctx) {
+			return nil // restored as saved; its delivery reports the state
+		}
 		switch st {
 		case int32(pubsubpb.BigQueryConfig_NOT_FOUND):
 			return apierror.NotFound("Cannot find the BigQuery table %s.", t)

@@ -175,6 +175,9 @@ func (f *Front) checkStorageConfig(ctx context.Context, s *pubsubpb.Subscription
 	f.exp.init()
 	err := f.exp.bucket(ctx, cfg.GetBucket())
 	if st, ok := destinationState(err); ok {
+		if stateLoad(ctx) {
+			return nil // restored as saved; its delivery reports the state
+		}
 		if st == int32(pubsubpb.CloudStorageConfig_NOT_FOUND) {
 			return apierror.NotFound("Cannot find the Cloud Storage bucket %s.", cfg.GetBucket())
 		}

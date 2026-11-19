@@ -219,12 +219,13 @@ const snapshotLifetime = 7 * 24 * time.Hour
 // customCreateSnapshot checks the snapshot a CreateSnapshot would make:
 // its name, its subscription's topic, and its expiry, 7 days from now
 // (its lifetime less the age of the subscription's oldest unacked
-// message, which the front does not read before the create).
+// message, which the front does not read before the create), on the wall
+// clock, as the emulator gives it.
 func (f *Front) customCreateSnapshot(ctx context.Context, req *pubsubpb.CreateSnapshotRequest) error {
 	if !orgpolicy.SourceSet() || req.GetName() == "" {
 		return nil
 	}
-	res := &pubsubpb.Snapshot{Name: req.GetName(), ExpireTime: timestamppb.New(f.clock.Now().Add(snapshotLifetime))}
+	res := &pubsubpb.Snapshot{Name: req.GetName(), ExpireTime: timestamppb.New(f.clock.Wall().Add(snapshotLifetime))}
 	if sub, err := f.admin.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: req.GetSubscription()}); err == nil {
 		res.Topic = sub.GetTopic()
 	}
