@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"time"
 
-	"cloud.google.com/go/security/privateca/apiv1/privatecapb"
 	"cloud.google.com/go/kms/apiv1/kmspb"
+	"cloud.google.com/go/security/privateca/apiv1/privatecapb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
