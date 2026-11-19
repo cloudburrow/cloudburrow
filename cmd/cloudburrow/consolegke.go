@@ -897,6 +897,12 @@ func (p gkeClustersProvider) gkeConnectCommands() string {
 }
 
 func (p gkeClustersProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
+	if len(path) == 3 {
+		if c := p.servedCluster(ctx, project, path[0]); c != nil {
+			return p.servedSubActions(ctx, project, c, path[1], path[2])
+		}
+		return nil
+	}
 	if len(path) == 1 {
 		if c := p.servedCluster(ctx, project, path[0]); c != nil {
 			return p.servedActions(ctx, project, c)
@@ -923,6 +929,11 @@ func (p gkeClustersProvider) DetailActions(ctx context.Context, project string, 
 }
 
 func (p gkeClustersProvider) ActAt(ctx context.Context, project string, path []string, action string, v map[string]string) error {
+	if len(path) == 3 {
+		if c := p.servedCluster(ctx, project, path[0]); c != nil {
+			return p.servedSubAct(ctx, project, c, path[1], path[2], action, v)
+		}
+	}
 	if len(path) == 1 {
 		if c := p.servedCluster(ctx, project, path[0]); c != nil {
 			return p.servedAct(ctx, project, c, action, v)

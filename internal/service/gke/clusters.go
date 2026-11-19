@@ -31,6 +31,14 @@ var (
 func isZone(l string) bool   { return zoneRE.MatchString(l) }
 func isRegion(l string) bool { return regionRE.MatchString(l) }
 
+// regionOf is a zone's region, or a region itself.
+func regionOf(l string) string {
+	if isZone(l) {
+		return l[:strings.LastIndex(l, "-")]
+	}
+	return l
+}
+
 // zonesOf is the zones a cluster's nodes run in: its zone, or three of its
 // region's, as Google picks by default.
 func zonesOf(location string) []string {
@@ -261,14 +269,28 @@ func (s *Server) CreateCluster(_ context.Context, req *containerpb.CreateCluster
 		return nil, status.Error(codes.InvalidArgument, "Basic authentication was removed for GKE cluster versions >= 1.19.")
 	}
 	c.MasterAuth = &containerpb.MasterAuth{ClientCertificateConfig: &containerpb.ClientCertificateConfig{IssueClientCertificate: issue}}
-	c.InitialNodeCount = 0
+	// initial_node_count is kept as it was given, as Google returns it
+	// (Terraform reads it back, and a 0 would replace the cluster); the
+	// deprecated node_config is default-pool's.
 	c.NodeConfig = nil
+	// The network's and subnetwork's full names, which clients read from
+	// networkConfig rather than the short network and subnetwork.
+	if c.NetworkConfig == nil {
+		c.NetworkConfig = &containerpb.NetworkConfig{}
+	}
+	if c.NetworkConfig.Network == "" {
+		c.NetworkConfig.Network = "projects/" + p.project + "/global/networks/" + c.Network
+	}
+	if c.NetworkConfig.Subnetwork == "" {
+		c.NetworkConfig.Subnetwork = "projects/" + p.project + "/regions/" + regionOf(p.location) + "/subnetworks/" + c.Subnetwork
+	}
 	if c.ResourceLabels == nil {
 		c.ResourceLabels = map[string]string{}
 	}
 	c.LabelFingerprint = fingerprint(c.ResourceLabels)
 	for _, np := range c.NodePools {
 		np.SelfLink = c.SelfLink + "/nodePools/" + np.Name
+		setInstanceGroups(p.project, c.Name, np)
 	}
 	c.CurrentNodeCount = int32(clusterNodes(c))
 	e := &entry{cluster: c, project: p.project, kind: KindName(s.opts.Instance, name)}

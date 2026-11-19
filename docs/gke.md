@@ -31,10 +31,18 @@ gcloud container clusters get-credentials demo --zone us-central1-a
 kubectl get nodes
 ```
 
+## Terraform
+
+`cloudburrow terraform` gives the provider `container_custom_endpoint`, and `compute_custom_endpoint` at the same port: the provider reads a node pool's size from its Compute Engine instance group managers, which this port answers for its own pools (every other Compute Engine call is 501). Google's recommended layout, a `google_container_cluster` with `remove_default_node_pool = true` and a separately managed `google_container_node_pool`, applies, plans clean and updates labels and `node_count` in place (`TestTerraformContainerClusterAndNodePool`). Set `deletion_protection = false` to destroy, as on Google.
+
+## Console
+
+Kubernetes clusters lists the project's clusters beside the instance's own. **Create cluster** makes an Autopilot or Standard cluster; a cluster's page has **Edit**, **Upgrade** and **Delete**, the Node pools tab **Add node pool** and, on each pool, **Resize**, **Edit** and **Delete** (#1925), and the Operations tab each operation, a running one with **Cancel**.
+
 ## Lifetime
 
 An ephemeral instance deletes its clusters when it stops; a persistent one keeps their records (`gke.json` in the instance directory) and `cloudburrow delete` deletes the kind clusters with the instance. `cloudburrow reset` deletes them too. Kubeconfigs are in the instance directory's `gke/`.
 
 ## Not yet
 
-Node pool autoscaling, choosing zones, upgrades between versions (only one is served), IP rotation, maintenance and network policies answer 501. Terraform's `google_container_cluster` is pointed at this API (`container_custom_endpoint`) but no test drives it. The console's node pool actions are #1925.
+Node pool autoscaling, choosing zones, upgrades between versions (only one is served), IP rotation, maintenance and network policies answer 501. Node pool Kubernetes labels and taints, machine type changes and disk size changes answer 501 (`UpdateNodePool` takes the image type and resource labels).

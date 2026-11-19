@@ -312,6 +312,10 @@ func TestGKEClustersNodePoolsAndOperations(t *testing.T) {
 func TestGcloudContainerClusters(t *testing.T) {
 	h := New(t)
 	g, _ := gkeClients(t, h) // skips without CLOUDBURROW_TEST_GKE
+	// gcloud container clusters create asks Service Usage whether
+	// container.googleapis.com is enabled: the served shard's own name for
+	// it, so the Service Usage suite does not run there too.
+	shardEndpoint(h, "CLOUDBURROW_TEST_GKE_SERVICEUSAGE", EnvServiceUsage)
 	gcloud := gcloudBinary(t)
 	cli := os.Getenv(EnvCLI)
 	if cli == "" {

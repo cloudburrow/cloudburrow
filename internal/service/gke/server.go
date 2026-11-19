@@ -182,7 +182,14 @@ func Routes() []rest.Route { return Transcoder().Routes() }
 func NewRESTHandler(s *Server) http.Handler {
 	t := Transcoder()
 	s.Register(t)
-	return t
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// A node pool's instance group managers (compute.go).
+		if strings.HasPrefix(r.URL.Path, "/compute/") {
+			s.serveCompute(w, r)
+			return
+		}
+		t.ServeHTTP(w, r)
+	})
 }
 
 // Close stops the operations still running and waits for them.

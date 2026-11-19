@@ -145,16 +145,10 @@ func (p gkeClustersProvider) servedDetail(ctx context.Context, project string, c
 		{Label: "Cluster pod IPv4 range", Value: c.GetClusterIpv4Cidr()}, {Label: "Service IPv4 range", Value: c.GetServicesIpv4Cidr()},
 	}}
 	details := console.Section{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{basics, networking}}
-	pools := console.Listing{Columns: []string{"Number of nodes", "Machine type", "Image type", "Version"}, NameColumn: "Name", Noun: "node pools", AlwaysStatus: true}
-	for _, np := range c.GetNodePools() {
-		pools.Items = append(pools.Items, console.Resource{Name: np.GetName(), Status: gkeTitle(np.GetStatus().String()), Fields: map[string]string{
-			"Number of nodes": strconv.Itoa(int(np.GetInitialNodeCount()) * len(np.GetLocations())),
-			"Machine type":    np.GetConfig().GetMachineType(), "Image type": np.GetConfig().GetImageType(), "Version": np.GetVersion(),
-		}})
-	}
-	pools.Total = len(pools.Items)
-	if c.GetAutopilot().GetEnabled() {
-		pools.Note = "Autopilot manages this cluster's nodes."
+	pools := p.poolListing(c)
+	poolsSection := console.Section{ID: "nodepools", Label: "Node pools", Listing: pools}
+	if a := p.addPoolAction(c); a.ID != "" {
+		poolsSection.Actions = []console.Action{a}
 	}
 	nodes := console.Listing{Columns: []string{"Roles", "Version"}, NameColumn: "Name", Noun: "nodes", AlwaysStatus: true}
 	if c.GetStatus() == containerpb.Cluster_RUNNING || c.GetStatus() == containerpb.Cluster_RECONCILING {
@@ -175,8 +169,8 @@ func (p gkeClustersProvider) servedDetail(ctx context.Context, project string, c
 			console.Property{Label: "Location", Value: c.GetLocation()},
 			console.Property{Label: "Version", Value: c.GetCurrentMasterVersion()},
 		),
-		Sections: []console.Section{details, {ID: "nodepools", Label: "Node pools", Listing: pools}, {ID: "nodes", Label: "Nodes", Listing: nodes},
-			gkeObservability(), gkeLogs()},
+		Sections: []console.Section{details, poolsSection, {ID: "nodes", Label: "Nodes", Listing: nodes},
+			p.operationsSection(ctx, project, c), gkeObservability(), gkeLogs()},
 	}
 }
 
@@ -242,6 +236,7 @@ func (p gkeClustersProvider) servedActions(ctx context.Context, project string, 
 		}},
 		upgrade,
 		{ID: "delete", Label: "Delete", Destructive: true, Confirm: c.GetName(), Leaves: true},
+		p.addPoolAction(c),
 	}
 }
 
@@ -258,6 +253,8 @@ func (p gkeClustersProvider) servedAct(ctx context.Context, project string, c *c
 	switch action {
 	case "connect":
 		return nil
+	case "addpool":
+		return p.addPool(ctx, name, c, v)
 	case "delete":
 		_, err := api.DeleteCluster(ctx, &containerpb.DeleteClusterRequest{Name: name})
 		return gkeStatusErr(err)

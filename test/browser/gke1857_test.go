@@ -4,7 +4,9 @@ package browser
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"strings"
@@ -12,8 +14,8 @@ import (
 	"time"
 )
 
-// TestKubernetesEnginePagesThroughTheBrowser (#1857), in the storage
-// shard (every instance has its cluster): Kubernetes Engine as Google's
+// TestKubernetesEnginePagesThroughTheBrowser (#1857), in the storage and
+// served shards (every instance has its cluster): Kubernetes Engine as Google's
 // console has it, over the instance's own kind cluster.
 //   - The menu is Clusters, Workloads, Applications, Secrets & ConfigMaps,
 //     Gateways, Services & Ingress, Storage, Object Browser, Backup for GKE,
@@ -23,7 +25,9 @@ import (
 //     page is "Cluster details" with Details, Nodes, Storage, Observability
 //     and Logs, Connect giving the kubectl commands, and Edit, Upgrade and
 //     Delete disabled with the reason. Create cluster offers Autopilot and
-//     Standard, both disabled with the reason.
+//     Standard, both disabled with the reason, or both enabled where the
+//     instance serves the Kubernetes Engine API (#1913): the test also runs
+//     in the served shard, whose instance does.
 //   - Workloads hides Kubernetes system objects until they are Shown, and
 //     Deploy makes a Deployment, whose page has Google's tabs.
 //   - Gateways, Services & Ingress and Storage are one page each with
@@ -35,6 +39,7 @@ func TestKubernetesEnginePagesThroughTheBrowser(t *testing.T) {
 	if cluster == "" {
 		t.Skipf("%s is not set: the cluster's name is its row on Kubernetes clusters", envCluster)
 	}
+	served := gkeAPIServed(t)
 	p := open(t)
 
 	// The menu, in Google's order.
@@ -75,14 +80,25 @@ func TestKubernetesEnginePagesThroughTheBrowser(t *testing.T) {
 	p.clickText("#view [role=tab]", "Nodes")
 	p.waitFor(`[...document.querySelectorAll("#detail-panel a")].some((a) => new URL(a.href).pathname.startsWith("/kubernetes/nodes/"))`)
 
-	// Create cluster: Autopilot or Standard, refused with the reason.
+	// Create cluster: Autopilot or Standard, refused with the reason, unless
+	// this instance serves the Kubernetes Engine API (the served shard's),
+	// when both are offered (TestGKEServedClusterThroughTheBrowser makes
+	// one).
 	p.navigate("/kubernetes/clusters/create")
 	p.waitFor(`document.querySelector("#view form") !== null && [...document.querySelectorAll("#view input[type=radio][name=f-mode-choice]")].length === 2`)
-	var refused bool
-	p.eval(`[...document.querySelectorAll("#view input[type=radio][name=f-mode-choice]")].every((r) => r.disabled) &&
-		document.querySelector("#view form").textContent.includes("#1913")`, &refused)
-	if !refused {
-		t.Error("Create cluster's Autopilot and Standard are not drawn disabled with the reason")
+	if served {
+		var offered bool
+		p.eval(`[...document.querySelectorAll("#view input[type=radio][name=f-mode-choice]")].every((r) => !r.disabled)`, &offered)
+		if !offered {
+			t.Error("Create cluster's Autopilot and Standard are disabled on an instance that serves the Kubernetes Engine API")
+		}
+	} else {
+		var refused bool
+		p.eval(`[...document.querySelectorAll("#view input[type=radio][name=f-mode-choice]")].every((r) => r.disabled) &&
+			document.querySelector("#view form").textContent.includes("#1913")`, &refused)
+		if !refused {
+			t.Error("Create cluster's Autopilot and Standard are not drawn disabled with the reason")
+		}
 	}
 
 	// Workloads: system objects hidden, then shown.
@@ -155,4 +171,19 @@ func TestKubernetesEnginePagesThroughTheBrowser(t *testing.T) {
 	// A page CloudBurrow does not serve.
 	p.navigate("/kubernetes/backup")
 	p.waitFor(`document.querySelector("#view h2") && document.querySelector("#view h2").textContent === "Not available locally"`)
+}
+
+// gkeAPIServed reports whether this instance serves the Kubernetes Engine
+// API (#1913), from what Kubernetes clusters says of its clusters.
+func gkeAPIServed(t *testing.T) bool {
+	t.Helper()
+	code, body := consoleDo(t, http.MethodGet, "/api/resources/gkeclusters", "")
+	if code != http.StatusOK {
+		t.Fatalf("list Kubernetes clusters = %d: %s", code, body)
+	}
+	var l struct{ Note string }
+	if err := json.Unmarshal([]byte(body), &l); err != nil {
+		t.Fatalf("decode Kubernetes clusters: %v", err)
+	}
+	return strings.Contains(l.Note, "Kubernetes Engine clusters of this project")
 }

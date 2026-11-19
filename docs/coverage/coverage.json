@@ -14405,14 +14405,16 @@
         "status": "Verified",
         "tests": [
           "test/compat/gke_test.go:125 TestGKEClustersNodePoolsAndOperations",
-          "test/compat/gke_test.go:312 TestGcloudContainerClusters"
+          "test/compat/gke_test.go:312 TestGcloudContainerClusters",
+          "test/compat/terraform_gke_test.go:24 TestTerraformContainerClusterAndNodePool"
         ]
       },
       {
         "method": "google.container.v1.ClusterManager/CreateNodePool",
         "status": "Verified",
         "tests": [
-          "test/compat/gke_test.go:125 TestGKEClustersNodePoolsAndOperations"
+          "test/compat/gke_test.go:125 TestGKEClustersNodePoolsAndOperations",
+          "test/compat/terraform_gke_test.go:24 TestTerraformContainerClusterAndNodePool"
         ]
       },
       {
@@ -14420,14 +14422,16 @@
         "status": "Verified",
         "tests": [
           "test/compat/gke_test.go:125 TestGKEClustersNodePoolsAndOperations",
-          "test/compat/gke_test.go:312 TestGcloudContainerClusters"
+          "test/compat/gke_test.go:312 TestGcloudContainerClusters",
+          "test/compat/terraform_gke_test.go:24 TestTerraformContainerClusterAndNodePool"
         ]
       },
       {
         "method": "google.container.v1.ClusterManager/DeleteNodePool",
         "status": "Verified",
         "tests": [
-          "test/compat/gke_test.go:125 TestGKEClustersNodePoolsAndOperations"
+          "test/compat/gke_test.go:125 TestGKEClustersNodePoolsAndOperations",
+          "test/compat/terraform_gke_test.go:24 TestTerraformContainerClusterAndNodePool"
         ]
       },
       {
@@ -14445,7 +14449,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/gke_test.go:125 TestGKEClustersNodePoolsAndOperations",
-          "test/compat/gke_test.go:312 TestGcloudContainerClusters"
+          "test/compat/gke_test.go:312 TestGcloudContainerClusters",
+          "test/compat/terraform_gke_test.go:24 TestTerraformContainerClusterAndNodePool"
         ]
       },
       {
@@ -14457,7 +14462,8 @@
         "method": "google.container.v1.ClusterManager/GetNodePool",
         "status": "Verified",
         "tests": [
-          "test/compat/gke_test.go:125 TestGKEClustersNodePoolsAndOperations"
+          "test/compat/gke_test.go:125 TestGKEClustersNodePoolsAndOperations",
+          "test/compat/terraform_gke_test.go:24 TestTerraformContainerClusterAndNodePool"
         ]
       },
       {
@@ -14465,14 +14471,16 @@
         "status": "Verified",
         "tests": [
           "test/compat/gke_test.go:125 TestGKEClustersNodePoolsAndOperations",
-          "test/compat/gke_test.go:312 TestGcloudContainerClusters"
+          "test/compat/gke_test.go:312 TestGcloudContainerClusters",
+          "test/compat/terraform_gke_test.go:24 TestTerraformContainerClusterAndNodePool"
         ]
       },
       {
         "method": "google.container.v1.ClusterManager/GetServerConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/gke_test.go:125 TestGKEClustersNodePoolsAndOperations"
+          "test/compat/gke_test.go:125 TestGKEClustersNodePoolsAndOperations",
+          "test/compat/terraform_gke_test.go:24 TestTerraformContainerClusterAndNodePool"
         ]
       },
       {
@@ -14516,7 +14524,8 @@
         "method": "google.container.v1.ClusterManager/SetLabels",
         "status": "Verified",
         "tests": [
-          "test/compat/gke_test.go:125 TestGKEClustersNodePoolsAndOperations"
+          "test/compat/gke_test.go:125 TestGKEClustersNodePoolsAndOperations",
+          "test/compat/terraform_gke_test.go:24 TestTerraformContainerClusterAndNodePool"
         ]
       },
       {
@@ -14568,7 +14577,8 @@
         "method": "google.container.v1.ClusterManager/SetNodePoolSize",
         "status": "Verified",
         "tests": [
-          "test/compat/gke_test.go:125 TestGKEClustersNodePoolsAndOperations"
+          "test/compat/gke_test.go:125 TestGKEClustersNodePoolsAndOperations",
+          "test/compat/terraform_gke_test.go:24 TestTerraformContainerClusterAndNodePool"
         ]
       },
       {

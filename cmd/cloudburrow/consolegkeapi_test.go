@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
 	"cloud.google.com/go/container/apiv1/containerpb"
 
+	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/service/gke"
 )
 
@@ -99,5 +101,133 @@ func TestGKEServedClustersOnTheConsole(t *testing.T) {
 	}
 	if len(be.deleted) != 1 {
 		t.Errorf("deleted kind clusters = %v", be.deleted)
+	}
+}
+
+// TestGKENodePoolsAndOperationsOnTheConsole (#1925): a served Standard
+// cluster's Node pools tab has Add node pool, and each pool Resize, Edit
+// and Delete, at [cluster, nodePools, pool]; its Operations tab lists what
+// was done to the cluster and its pools; an Autopilot cluster's pools are
+// refused with the reason.
+func TestGKENodePoolsAndOperationsOnTheConsole(t *testing.T) {
+	ctx := context.Background()
+	api, err := gke.NewServer(&consoleGKEBackend{}, gke.Options{Instance: "cloudburrow-t", Versions: []gke.Version{{GKE: "1.36.4-gke.0", Image: "kindest/node:v1.36.4"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer api.Close()
+	p := gkeClustersProvider{name: "cloudburrow-t", kubeconfig: "/nonexistent", svc: &gkeService{api: api}, gkeDir: t.TempDir()}
+	const name = "projects/pc/locations/us-central1-a/clusters/np-1"
+	get := func() *containerpb.Cluster {
+		c, err := api.GetCluster(ctx, &containerpb.GetClusterRequest{Name: name})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	idle := func() {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			if get().GetStatus() == containerpb.Cluster_RUNNING {
+				ops, _ := api.ListOperations(ctx, &containerpb.ListOperationsRequest{Parent: "projects/pc/locations/-"})
+				busy := false
+				for _, o := range ops.GetOperations() {
+					busy = busy || o.GetStatus() != containerpb.Operation_DONE
+				}
+				if !busy {
+					return
+				}
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatal("the cluster stayed busy")
+	}
+	if _, err := p.Create(ctx, "pc", map[string]string{"mode": "Standard", "name": "np-1", "locationType": "Zonal", "zone": "us-central1-a",
+		"channel": "Regular channel", "nodes": "1", "machine": "e2-medium"}); err != nil {
+		t.Fatal(err)
+	}
+	idle()
+	d, _ := p.Detail(ctx, "pc", []string{"np-1"})
+	var pools, ops *console.Section
+	for i := range d.Sections {
+		switch d.Sections[i].ID {
+		case "nodepools":
+			pools = &d.Sections[i]
+		case "operations":
+			ops = &d.Sections[i]
+		}
+	}
+	if pools == nil || ops == nil {
+		t.Fatalf("sections = %v", d.Sections)
+	}
+	if len(pools.Actions) != 1 || pools.Actions[0].ID != "addpool" || pools.Actions[0].Unavailable != "" {
+		t.Errorf("the Node pools tab's actions = %v", pools.Actions)
+	}
+	if len(pools.Listing.Items) != 1 || strings.Join(pools.Listing.Items[0].Target, "/") != "np-1/nodePools/default-pool" {
+		t.Fatalf("pools = %+v", pools.Listing.Items)
+	}
+	ids := map[string]bool{}
+	for _, a := range p.DetailActions(ctx, "pc", []string{"np-1", "nodePools", "default-pool"}) {
+		ids[a.ID] = true
+	}
+	if !ids["resize"] || !ids["edit"] || !ids["delete"] {
+		t.Errorf("a pool's actions = %v", ids)
+	}
+	if len(ops.Listing.Items) != 1 || ops.Listing.Items[0].Fields["Type"] != "Create cluster" {
+		t.Errorf("operations after create = %+v", ops.Listing.Items)
+	}
+
+	if err := p.ActAt(ctx, "pc", []string{"np-1"}, "addpool", map[string]string{"name": "pool-2", "nodes": "2", "machine": "e2-small", "image": "UBUNTU_CONTAINERD"}); err != nil {
+		t.Fatalf("Add node pool: %v", err)
+	}
+	idle()
+	if err := p.ActAt(ctx, "pc", []string{"np-1", "nodePools", "pool-2"}, "resize", map[string]string{"nodes": "1"}); err != nil {
+		t.Fatalf("Resize: %v", err)
+	}
+	idle()
+	if err := p.ActAt(ctx, "pc", []string{"np-1", "nodePools", "pool-2"}, "edit", map[string]string{"image": "COS_CONTAINERD", "labels": "team=a"}); err != nil {
+		t.Fatalf("Edit: %v", err)
+	}
+	idle()
+	np, err := api.GetNodePool(ctx, &containerpb.GetNodePoolRequest{Name: name + "/nodePools/pool-2"})
+	if err != nil || np.GetInitialNodeCount() != 1 || np.GetConfig().GetImageType() != "COS_CONTAINERD" || np.GetConfig().GetResourceLabels()["team"] != "a" {
+		t.Fatalf("pool-2 after Resize and Edit = %v, %v", np, err)
+	}
+	if err := p.ActAt(ctx, "pc", []string{"np-1", "nodePools", "pool-2"}, "delete", nil); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	idle()
+	if len(get().GetNodePools()) != 1 {
+		t.Errorf("pools after Delete = %v", get().GetNodePools())
+	}
+	if err := p.ActAt(ctx, "pc", []string{"np-1", "nodePools", "nope"}, "delete", nil); err == nil {
+		t.Error("deleting a pool that does not exist succeeded")
+	}
+	d, _ = p.Detail(ctx, "pc", []string{"np-1"})
+	var types []string
+	for _, s := range d.Sections {
+		if s.ID == "operations" {
+			for _, r := range s.Listing.Items {
+				types = append(types, r.Fields["Type"]+" "+r.Fields["Target"])
+			}
+		}
+	}
+	want := "Delete node pool np-1/pool-2,Upgrade nodes np-1/pool-2,Set node pool size np-1/pool-2,Create node pool np-1/pool-2,Create cluster np-1"
+	if strings.Join(types, ",") != want {
+		t.Errorf("operations = %q, want %q", strings.Join(types, ","), want)
+	}
+
+	// Autopilot: refused with the reason.
+	if _, err := p.Create(ctx, "pc", map[string]string{"mode": "Autopilot", "name": "ap-2", "locationType": "Regional", "region": "us-central1", "channel": "Regular channel"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range p.DetailActions(ctx, "pc", []string{"ap-2"}) {
+		if a.ID == "addpool" && a.Unavailable != gkeAutopilotPools {
+			t.Errorf("Autopilot's Add node pool = %+v", a)
+		}
+	}
+	if err := p.ActAt(ctx, "pc", []string{"ap-2", "nodePools", "default-pool"}, "resize", map[string]string{"nodes": "3"}); err == nil {
+		t.Error("resizing an Autopilot pool succeeded")
 	}
 }

@@ -109,6 +109,7 @@ func (s *Server) CreateNodePool(_ context.Context, req *containerpb.CreateNodePo
 		return nil, err
 	}
 	np.SelfLink = c.SelfLink + "/nodePools/" + np.Name
+	setInstanceGroups(p.project, c.Name, np)
 	c.NodePools = append(c.NodePools, np)
 	c.Status = containerpb.Cluster_RECONCILING
 	kind, image, name := e.kind, s.NodeImage(np.Version), np.Name
