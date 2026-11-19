@@ -49,6 +49,9 @@ var apiLibrary = map[string]apiLibraryInfo{
 	"redis.googleapis.com":                {"Databases", "Creates and manages Redis instances.", "memorystore"},
 	"sqladmin.googleapis.com":             {"Databases", "Administers Cloud SQL instances, databases, users and backups.", ""},
 	"backupdr.googleapis.com":             {"Storage", "Manages backup vaults, backup plans and the backups in them.", ""},
+	"privateca.googleapis.com":            {"Security", "Creates and manages private certificate authorities and the certificates they issue.", ""},
+	"containeranalysis.googleapis.com":    {"Developer tools", "Stores and reads the notes and occurrences of software artifacts, vulnerabilities among them.", ""},
+	"containerscanning.googleapis.com":    {"Security", "Scans the container images pushed to Artifact Registry for vulnerabilities.", ""},
 }
 
 // apiTotals is an API's calls since the instance started, from the request
