@@ -62,40 +62,35 @@ func (p storageProvider) List(ctx context.Context, project string) (console.List
 	// screen says so rather than inventing one.
 	if project == "" {
 		return console.Listing{
-			Columns: []string{"Location", "Storage class"},
+			Columns: bucketListColumns,
 			Noun:    "buckets",
 			Prompt:  "Cloud Storage lists buckets per project. Choose one in the toolbar.",
 		}, nil
 	}
 
+	// View options: Soft deleted buckets only (#1843), the buckets.list
+	// softDeleted=true the Deleted buckets page read, which now leads here.
+	if console.ScopeValue(ctx, bucketViewKey) == bucketViewSoftDeleted {
+		return p.softDeletedBuckets(ctx, project)
+	}
 	var body struct {
-		Items []struct {
-			Name         string `json:"name"`
-			Location     string `json:"location"`
-			StorageClass string `json:"storageClass"`
-			TimeCreated  string `json:"timeCreated"`
-		} `json:"items"`
+		Items []bucketMeta `json:"items"`
 	}
 	url := fmt.Sprintf("http://%s/storage/v1/b?project=%s", p.endpoint, project)
 	if err := getJSON(ctx, url, &body); err != nil {
 		return console.Listing{}, err
 	}
 
+	// Google's Buckets list columns (#1843).
 	items := make([]console.Resource, 0, len(body.Items))
 	for _, b := range body.Items {
-		items = append(items, console.Resource{
-			Name: b.Name,
-			Fields: map[string]string{
-				"Location":      b.Location,
-				"Storage class": b.StorageClass,
-				"Created":       shortTime(b.TimeCreated),
-			},
-		})
+		items = append(items, bucketListRow(b))
 	}
 	return console.Listing{
-		Columns: []string{"Location", "Storage class", "Created"},
+		Columns: bucketListColumns,
 		Noun:    "buckets",
 		Items:   items, Total: len(items),
+		Scope: bucketViewScope(bucketViewLive),
 	}, nil
 }
 
@@ -1588,48 +1583,76 @@ func kubectlJSON(ctx context.Context, kubeconfig, namespace, kind string) ([]byt
 // Storage: create and delete buckets.
 
 func (storageProvider) CreateForm() (string, []console.Field) {
-	// The field names follow the documented Create a bucket form, restricted
-	// to what the local backend accepts. Location is absent because the
-	// backend has one and offering a choice it ignores would be a control
-	// that does nothing. The rest are the bucket fields the backend keeps
-	// and acts on (docs/compatibility.md, "Bucket fields"; #852), under the
-	// documented form's section names.
-	const class, access, protect = "Choose a storage class for your data", "Choose how to control access to objects",
-		"Choose how to protect object data"
+	// Google's Create a bucket page (#1843): five numbered steps, in its
+	// order and with its defaults, ending in Create. Every field is one the
+	// backend keeps (docs/compatibility.md, "Bucket fields"); turbo
+	// replication, public access prevention and the default key are stored
+	// with no effect, as that table says. Autoclass, cross-bucket replication
+	// and IP filtering's VPC settings are not on the form: IP filtering is
+	// Edit IP filtering on the bucket's page, and Rapid Cache is its Create
+	// Rapid Cache.
+	const where, how, access, protect = "Choose where to store your data", "Choose how to store your data",
+		"Choose how to control access to objects", "Choose how to protect object data"
 	return "Create", []console.Field{
 		{
-			Name: "name", Label: "Bucket name", Type: "text", Required: true,
-			Help:    "Lowercase letters, numbers, hyphens and underscores; 3-63 characters.",
+			Name: "name", Label: "Name your bucket", Type: "text", Required: true,
+			Help:    "A globally unique name: lowercase letters, numbers, hyphens, underscores and dots; 3-63 characters.",
 			Pattern: `^[a-z0-9][a-z0-9._\-]{1,61}[a-z0-9]$`,
 		},
-		{Name: "labels", Label: "Labels", Type: "map", Help: "Optional. One key=value per line."},
-		{Name: "storageClass", Label: "Default storage class", Type: "select", Section: class, Default: "STANDARD",
+		{Name: "labels", Label: "Labels", Type: "map", Help: "Optional. Add label: one key=value per line."},
+		{Name: "locationType", Label: "Location type", Type: "select", Section: where, Default: locMulti,
+			Options: []string{locMulti, locDual, locRegion},
+			Help: "Multi-region (the default), Dual-region or Region. The location is recorded; this instance keeps " +
+				"every object in one place."},
+		{Name: "location", Label: "Location", Type: "text", Section: where, Default: "US",
+			Pattern: `^[A-Za-z0-9\-]+$`,
+			Help:    "A multi-region such as US, EU or ASIA, a dual-region such as NAM4, or a region such as us-central1."},
+		{Name: "turboReplication", Label: "Add turbo replication", Type: "checkbox", Section: where, Default: "false",
+			Help: "Dual-region only: sets the recovery point objective to ASYNC_TURBO. Stored; there is no replication here."},
+		// Google's choice between a default class and Autoclass (#1843).
+		// Autoclass is stored (docs/compatibility.md, "Bucket fields"):
+		// no object changes class by itself on this instance.
+		{Name: "storageClassChoice", Label: "Choose how to store your data", Type: "radio", Section: how,
+			Default: classChoiceDefault, Options: []string{classChoiceDefault, classChoiceAutoclass},
+			Help: "Set a default class (the default) applies the class below to new objects. Autoclass is stored as " +
+				"autoclass enabled and shown on the bucket; this instance does not move objects between classes."},
+		{Name: "storageClass", Label: "Set a default class", Type: "select", Section: how, Default: "STANDARD",
 			Options: []string{"STANDARD", "NEARLINE", "COLDLINE", "ARCHIVE", "RAPID"},
-			Help: "The class a new object gets when it names none. Classes are recorded, not priced: nothing is billed here. " +
-				"RAPID (Rapid storage) needs a zone below, and holds appendable objects."},
+			Help: "Standard (the default), Nearline, Coldline or Archive: the class a new object gets when it names none. " +
+				"Classes are recorded, not priced. RAPID (Rapid storage) needs a zone below, and holds appendable objects."},
 		// A zone makes a zonal bucket (#1443): its location is the zone's
 		// region and customPlacementConfig names the zone.
-		{Name: "zone", Label: "Zone (Rapid storage)", Type: "text", Section: class, Pattern: `^([a-z]+-[a-z]+[0-9]+-[a-z])?$`,
-			Help: "Optional. A zone such as us-central1-a places the bucket in that zone, as Rapid storage needs. " +
-				"It can be set only when the bucket is created."},
+		{Name: "zone", Label: "Zone (Rapid storage)", Type: "text", Section: how, Pattern: `^([a-z]+-[a-z]+[0-9]+-[a-z])?$`,
+			Help: "Optional. A zone such as us-central1-a places the bucket in that zone, as Rapid storage needs; " +
+				"it takes the place of the location above. It can be set only when the bucket is created."},
 		// Hierarchical namespace (#1203) needs uniform bucket-level access
 		// and excludes versioning, so checking it turns the one on and the
 		// other off, and holds them there.
-		{Name: "hierarchicalNamespace", Label: "Enable hierarchical namespace", Type: "checkbox", Section: class,
-			Default: "false", Requires: []string{"uniformAccess"}, Excludes: []string{"versioning"},
-			Help: "The bucket has real folders, which can be created, renamed and deleted as folders. It can be " +
-				"enabled only when the bucket is created, needs uniform bucket-level access and excludes object versioning."},
-		{Name: "uniformAccess", Label: "Uniform bucket-level access", Type: "checkbox", Section: access, Default: "true",
-			Help: "On, access is granted by IAM alone, as a managed folder requires. Off, the bucket has " +
-				"fine-grained access: its ACLs are on its Access control tab, stored and not enforced (#1233)."},
-		{Name: "versioning", Label: "Object versioning", Type: "checkbox", Section: protect, Default: "false",
+		{Name: "hierarchicalNamespace", Label: "Enable Hierarchical namespace on this bucket", Type: "checkbox", Section: how,
+			Default: "false", Requires: []string{"uniformAccess=" + accessUniform}, Excludes: []string{"versioning"},
+			Help: "Optimize storage for data-intensive workloads: the bucket has real folders, which can be created, renamed and " +
+				"deleted as folders. It can be enabled only when the bucket is created, needs uniform access control and " +
+				"excludes object versioning."},
+		{Name: "publicAccessPrevention", Label: "Enforce public access prevention on this bucket", Type: "checkbox",
+			Section: access, Default: "true",
+			Help: "Prevent public access: stored as publicAccessPrevention enforced. Nothing is public on this instance either way."},
+		{Name: "uniformAccess", Label: "Access control", Type: "radio", Section: access, Default: accessUniform,
+			Options: []string{accessUniform, accessFineGrained},
+			Help: "Uniform (recommended): access is granted by IAM alone, as a managed folder and hierarchical namespace " +
+				"require. Fine-grained: objects also carry ACLs, edited with Edit access, stored and not enforced (#1233)."},
+		{Name: "softDelete", Label: "Soft delete policy (for data recovery)", Type: "checkbox", Section: protect, Default: "true",
+			Help: "A deleted object can be restored for the retention duration. Cleared, soft delete is off."},
+		{Name: "softDeleteDays", Label: "Set custom retention duration (days)", Type: "text", Section: protect,
+			Default: "7", Pattern: `^[0-9]+$`,
+			Help: "7 days by default, at most 90."},
+		{Name: "versioning", Label: "Object versioning (for version control)", Type: "checkbox", Section: protect, Default: "false",
 			Help: "An overwritten or deleted object is kept as a noncurrent version."},
-		{Name: "softDeleteSeconds", Label: "Soft delete retention (seconds)", Type: "text", Section: protect,
-			Default: "604800", Pattern: `^[0-9]+$`,
-			Help: "How long a deleted object can be restored: 0 turns soft delete off, otherwise 604800 (7 days, " +
-				"the default) to 7776000 (90 days)."},
-		{Name: "objectRetention", Label: "Enable object retention", Type: "checkbox", Section: protect, Default: "false",
-			Help: "Lets each object carry its own retention configuration. It can be enabled only when the bucket is created."},
+		{Name: "objectRetention", Label: "Retention (for compliance): enable object retention", Type: "checkbox", Section: protect,
+			Default: "false",
+			Help:    "Lets each object carry its own retention configuration. It can be enabled only when the bucket is created."},
+		{Name: "kmsKey", Label: "Data encryption: Cloud KMS key", Type: "text", Section: protect,
+			Help: "Optional. Empty, the bucket uses a Google-managed encryption key (the default). A key name, " +
+				"projects/P/locations/L/keyRings/R/cryptoKeys/K, is stored as the default key; objects are not encrypted with it here."},
 	}
 }
 
@@ -1675,7 +1698,10 @@ func bucketCreateRequest(name string, values map[string]string) ([]byte, string,
 		b["customPlacementConfig"] = map[string]any{"dataLocations": []string{z}}
 	}
 	if v, ok := values["uniformAccess"]; ok {
-		b["iamConfiguration"] = map[string]any{"uniformBucketLevelAccess": map[string]any{"enabled": v == "true"}}
+		b["iamConfiguration"] = map[string]any{"uniformBucketLevelAccess": map[string]any{"enabled": v == "true" || v == accessUniform}}
+	}
+	if values["storageClassChoice"] == classChoiceAutoclass {
+		b["autoclass"] = map[string]any{"enabled": true}
 	}
 	if values["versioning"] == "true" {
 		b["versioning"] = map[string]any{"enabled": true}
@@ -1683,8 +1709,30 @@ func bucketCreateRequest(name string, values map[string]string) ([]byte, string,
 	if values["hierarchicalNamespace"] == "true" {
 		b["hierarchicalNamespace"] = map[string]any{"enabled": true}
 	}
-	if v := strings.TrimSpace(values["softDeleteSeconds"]); v != "" {
+	if v, ok, err := softDeleteSecondsFrom(values); err != nil {
+		return nil, "", err
+	} else if ok {
 		b["softDeletePolicy"] = map[string]any{"retentionDurationSeconds": v}
+	}
+	// Google's step 2 location, unless a zone has placed the bucket.
+	if _, zoned := b["location"]; !zoned {
+		if v := strings.TrimSpace(values["location"]); v != "" {
+			b["location"] = strings.ToUpper(v)
+		}
+	}
+	if values["turboReplication"] == "true" {
+		b["rpo"] = "ASYNC_TURBO"
+	}
+	if k := strings.TrimSpace(values["kmsKey"]); k != "" {
+		b["encryption"] = map[string]any{"defaultKmsKeyName": k}
+	}
+	if v, ok := values["publicAccessPrevention"]; ok {
+		iam, _ := b["iamConfiguration"].(map[string]any)
+		if iam == nil {
+			iam = map[string]any{}
+			b["iamConfiguration"] = iam
+		}
+		iam["publicAccessPrevention"] = map[bool]string{true: "enforced", false: "inherited"}[v == "true"]
 	}
 	query := ""
 	if values["objectRetention"] == "true" {
@@ -3537,10 +3585,13 @@ func modelStatus(m localai.Model) (status, detail string) {
 // own address and can be linked to.
 func (p storageProvider) Detail(ctx context.Context, project string, path []string) (console.Detail, error) {
 	if path[0] == objectPage {
-		return p.objectDetail(ctx, path)
+		return p.objectDetail(ctx, project, path)
 	}
 	if path[0] == operationPage {
 		return p.operationDetail(ctx, path)
+	}
+	if path[0] == softBucketPage {
+		return p.softBucketDetail(ctx, path)
 	}
 	if b, id, ok := notificationPath(path); ok {
 		return p.notificationDetail(ctx, b, id)
@@ -3575,42 +3626,47 @@ func (p storageProvider) Detail(ctx context.Context, project string, path []stri
 	// Compose acts on the objects checked in this listing (#790), not on the
 	// page, so the page draws no button of its own for it.
 	objects.SelectActions = []console.Action{composeAction(prefix)}
-	sections := []console.Section{{ID: "objects", Label: "Objects", Listing: objects,
-		UploadTo: append([]string{}, path...)}}
-
-	// A bucket's own settings, which nothing showed, what can be changed
-	// about them, and its soft-deleted objects (#789). Only the prefix root
-	// carries them: a folder is not a resource and has no configuration.
-	// Every page can make a managed folder under it (#828), and, in a
-	// bucket with hierarchical namespace, a folder (#1203).
-	actions := []console.Action{createManagedFolderAction(bucket, prefix)}
 	meta, metaErr := p.readBucket(ctx, bucket)
 	hns := metaErr == nil && meta.hierarchical()
-	if hns {
-		actions = append(actions, createFolderAction(bucket, prefix))
-	}
+	// The Objects tab's own buttons, after Upload files and Upload folder:
+	// Create folder, and Create managed folder (#828, #1203, #1843).
+	sections := []console.Section{{ID: "objects", Label: "Objects", Listing: objects,
+		UploadTo: append([]string{}, path...), Actions: objectsTabActions(bucket, prefix, hns)}}
+
+	// The bucket's own tabs, in Google's order (#1843): Configuration,
+	// Permissions (drawn by the console where the placeholder is),
+	// Protection, Lifecycle and Operations; then what CloudBurrow also
+	// serves: soft-deleted objects (#789), ACLs while access is fine-grained
+	// (#1233), Anywhere Caches (#1444), Rapid Caches (#1505), notifications
+	// (#791) and channels (#1281). Only the prefix root carries them: a
+	// folder is not a resource and has no configuration.
+	var actions []console.Action
 	var edit *console.EditForm
 	if prefix == "" {
 		if metaErr == nil {
-			sections = append(sections, bucketConfigSection(meta), p.deletedObjects(ctx, meta))
-			// Its ACLs, while uniform access is off (#1233).
-			if acl, ok := p.bucketACLSection(ctx, meta); ok {
-				sections = append(sections, acl)
+			// Each tab's own actions (#1843): Edit Autoclass on
+			// Configuration, Switch to on Permissions, Edit object
+			// versioning on Protection.
+			config, protection := bucketConfigSection(meta), protectionSection(meta)
+			config.Actions = append(config.Actions, editAutoclassAction(meta))
+			if !meta.hierarchical() {
+				protection.Actions = append([]console.Action{editVersioningAction(meta)}, protection.Actions...)
 			}
-			actions = append(actions, bucketACLActions(meta)...)
-			edit = bucketEditForm(meta)
-			actions = append(actions, lockRetentionAction(meta)...)
-			actions = append(actions, bulkRestoreAction(), filterOperationsAction())
+			sections = append(sections, config, permissionsPlaceholder(meta), protection, lifecycleSection(meta))
 			// The Operations tab, on an HNS bucket always, and on any
 			// other once it has an operation, a bulk restore (#1279).
 			if ops := p.operationsSection(ctx, bucket); hns || len(ops.Listing.Items) > 0 || ops.Listing.Unavailable != "" {
 				sections = append(sections, ops)
 			}
-			// Its Anywhere Caches, and the cache, relocation and cancel
-			// actions (#1444).
+			sections = append(sections, p.deletedObjects(ctx, meta))
+			if acl, ok := p.bucketACLSection(ctx, meta); ok {
+				sections = append(sections, acl)
+			}
+			actions = append(actions, bucketACLActions(meta)...)
+			edit = bucketEditForm(meta)
+			actions = append(actions, bulkRestoreAction(), filterOperationsAction())
 			sections = append(sections, p.cachesSection(ctx, bucket))
 			actions = append(actions, cacheActions()...)
-			// Its Rapid Caches and IP filtering (#1505).
 			sections = append(sections, p.rapidSection(ctx, bucket))
 			actions = append(actions, createRapidAction(), ipFilterAction(meta))
 		}
@@ -3817,6 +3873,7 @@ func bucketConfigSection(b bucketMeta) console.Section {
 				{Label: "Location type", Value: b.LocationType},
 				{Label: "Placement", Value: b.placement()},
 				{Label: "Storage class", Value: b.StorageClass},
+				{Label: "Autoclass", Value: autoclassText(b)},
 			}},
 			{Heading: "Protection", Properties: protection},
 			{Heading: "Lifecycle", Properties: []console.Property{

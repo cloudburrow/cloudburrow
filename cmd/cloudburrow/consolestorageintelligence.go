@@ -116,6 +116,20 @@ func (p storageIntelligenceProvider) List(ctx context.Context, project string) (
 		if c.TrialConfig != nil {
 			trial = shortTime(c.TrialConfig.ExpireTime)
 		}
+		// Google's Configuration page's Overview: the project's Status,
+		// Enabled or Disabled by its effective edition (#1843).
+		if scope == "projects/"+project {
+			status := "Disabled"
+			if e := c.Effective.EffectiveEdition; e == "STANDARD" || e == "TRIAL" {
+				status = "Enabled"
+			}
+			listing.Summary = []console.PropertyGroup{{Heading: "Overview", Properties: []console.Property{
+				{Label: "Resource", Value: scope},
+				{Label: "Status", Value: status},
+				{Label: "Edition", Value: orDash(c.Effective.EffectiveEdition)},
+				{Label: "Bucket filters", Value: orDash(filterText(c))},
+			}}}
+		}
 		listing.Items = append(listing.Items, console.Resource{
 			Name:   scope,
 			Status: c.EditionConfig,
@@ -134,7 +148,7 @@ func (p storageIntelligenceProvider) List(ctx context.Context, project string) (
 
 // intelligenceEditions are the editions a row can be set to, by action ID.
 var intelligenceEditions = []struct{ id, label, edition string }{
-	{"standard", "Enable (Standard)", "STANDARD"},
+	{"standard", "Enable Storage Intelligence", "STANDARD"},
 	{"trial", "Start trial", "TRIAL"},
 	{"disable", "Disable", "DISABLED"},
 	{"inherit", "Inherit from parent", "INHERIT"},

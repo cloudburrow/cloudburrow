@@ -19,7 +19,7 @@ import (
 )
 
 // TestStorageIntelligenceThroughThePage (#1591), in the storage shard. On
-// the Storage Intelligence page, Enable (Standard) from the project's row
+// the Storage Intelligence page, Enable Storage Intelligence from the project's row
 // sets the edition the official StorageControl client's
 // GetProjectIntelligenceConfig reads; on the configuration's page, Edit
 // filter with an excluded bucket regex sets the filter it reads; Inherit
@@ -67,7 +67,7 @@ func TestStorageIntelligenceThroughThePage(t *testing.T) {
 	p := open(t)
 	q := "?project=" + project
 	p.navigate("/storage/intelligence" + q)
-	p.cellMenu(scope, "Enable (Standard)")
+	p.cellMenu(scope, "Enable Storage Intelligence")
 	waitEdition(controlpb.IntelligenceConfig_STANDARD)
 
 	p.navigate("/storage/intelligence" + q)
