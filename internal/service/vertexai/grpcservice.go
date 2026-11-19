@@ -73,6 +73,8 @@ func (s *Server) RegisterGRPC(srv *grpc.Server) {
 	// Speech-to-Text v1's Recognize, LongRunningRecognize and
 	// StreamingRecognize (speechv1.go, #1930).
 	speechv1pb.RegisterSpeechServer(srv, &speechV1Service{s: s})
+	// countTokens and computeTokens (#1937, tokens.go).
+	s.registerTokens(srv)
 }
 
 // grpcError renders err as a status: an *apierror.Error keeps its code, a
@@ -297,11 +299,9 @@ func (p *predictionService) StreamGenerateContent(req *aiplatformpb.GenerateCont
 		return grpcError(err)
 	}
 	for c := range chunks {
-		var resp *GenerateContentResponse
-		if c.Last {
-			resp = textResponse(actual, "", c.FinishReason)
-		} else {
-			resp = textResponse(actual, c.Text, "")
+		resp := chunkResponse(actual, c)
+		if resp == nil {
+			continue
 		}
 		pb, err := toProto(resp)
 		if err != nil {

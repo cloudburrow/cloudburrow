@@ -1054,7 +1054,7 @@
         "notes": "Debian 13 rather than 12: Abseil needs C++20 <source_location>, absent from bookworm's default clang 14 and present in trixie's default clang 19.1.7. Measured from the shipped image on arm64 CPU, warm cache, 144-token generation: 78.43 tok/s prefill, 31.98 tok/s decode, 0.39 s to first token. Build: 6m17s from a cold Docker cache on an Apple M4 Max with 16 CPUs; image 274 MB.",
         "skipDiscovery": "Pinned by commit, not by release tag: releases publish no Linux artifact, so the tag is not what is consumed.",
         "runtimeLibraries": "litert_lm_main links libGemmaModelConstraintProvider.so, which upstream ships prebuilt under prebuilt/linux_{arm64,x86_64}/ and locates through a RUNPATH into Bazel's output tree. The runtime image must stage those libraries explicitly; copying only the binary builds an image that fails on first run.",
-        "binaries": "cloudburrow_generate (generation, verified: deploy/litert-lm/runner, CloudBurrow's Apache-2.0 derivative of litert_lm_main.cc on LiteRT-LM's C++ API, setting the sampler, the token limit and llguidance constraints per request, #1797, #1779), litert_lm_main (upstream's, kept in the image) and embedding_litert_lm_main (embeddings, runs but has no compatible model)",
+        "binaries": "cloudburrow_generate (generation, verified: deploy/litert-lm/runner, CloudBurrow's Apache-2.0 derivative of litert_lm_main.cc on LiteRT-LM's C++ API, setting the sampler, the token limit and llguidance constraints per request, #1797, #1779; whole conversations with tools, images, presence/frequency penalties and token counts over --request_stdin, #1937, built with --define=LITERT_LM_FST_CONSTRAINTS_DISABLED=1 so the LLGuidance tool-call grammar applies tool_choice), litert_lm_main (upstream's, kept in the image) and embedding_litert_lm_main (embeddings, runs but has no compatible model)",
         "transitive": "Constrained decoding links upstream's own llguidance dependency (guidance-ai/llguidance, MIT), which LiteRT-LM's Bazel workspace fetches and builds; CloudBurrow adds no dependency of its own"
       },
       "litertLMBase": {
@@ -1112,7 +1112,7 @@
         "gated": false,
         "license": "gemma",
         "redistribution": "downloaded by the developer; not redistributed",
-        "verification": "downloaded-and-run",
+        "verification": "downloaded-and-run; #1937 ran it at Hugging Face revision 2d74ac41a33d7da82f39f7d5720a04c68514a103 (SHA-256 181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c, 2026-11-19; the repository then listed license apache-2.0), text, tool calls and its bundled vision encoder",
         "skipDiscovery": "Hugging Face repository, not a GitHub release.",
         "artifactVerification": "Filename listed from the Hugging Face API rather than inferred: this repository does not use the google/ repositories' -int4 suffix, and the inferred name returned 404. Re-checked by TestCatalogArtifactsExistUpstream."
       },

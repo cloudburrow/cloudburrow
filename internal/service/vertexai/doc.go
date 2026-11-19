@@ -11,15 +11,17 @@
 //     response's modelVersion, and an alias must be configured explicitly
 //     before it resolves to anything.
 //
-//  2. **Unsupported options are refused, not ignored.** The LiteRT-LM runtime
-//     exposes no temperature, topP, topK, seed or stopSequences control, so a
-//     request carrying them cannot be honoured. Accepting one and generating
-//     anyway would report compliance that did not happen, which is worse than
-//     an error because the caller cannot see it.
+//  2. **Unsupported options are refused, not ignored.** An option the runtime
+//     does not apply (logprobs, safetySettings, a Google-hosted tool, …) is
+//     refused naming it. Accepting one and generating anyway would report
+//     compliance that did not happen, which is worse than an error because
+//     the caller cannot see it.
 //
-//  3. **No fabricated accounting.** usageMetadata is omitted rather than
-//     estimated. A token count we did not measure is a number the caller would
-//     reasonably trust.
+//  3. **No fabricated accounting.** usageMetadata and countTokens are the
+//     model's own tokenizer's counts, measured inside the runtime
+//     (cloudburrow_generate, #1937); a runtime that cannot measure them
+//     reports none. A token count we did not measure is a number the caller
+//     would reasonably trust.
 //
 // What the model produces is not a claim of this package. Protocol behaviour
 // is deterministic and tested as such; model output is not asserted beyond

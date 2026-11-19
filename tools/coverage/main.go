@@ -200,13 +200,17 @@ var areas = []area{
 	// port.
 	{Key: "vertexai", Title: "Vertex AI PredictionService", Own: true, Services: []string{"google.cloud.aiplatform.v1.PredictionService",
 		"google.cloud.aiplatform.v1.ModelGardenService", "google.cloud.aiplatform.v1.EndpointService", "google.cloud.aiplatform.v1.ModelService",
-		"google.cloud.documentai.v1.DocumentProcessorService", "google.cloud.speech.v2.Speech"}},
+		"google.cloud.documentai.v1.DocumentProcessorService", "google.cloud.speech.v2.Speech",
+		// countTokens and computeTokens (#1937).
+		"google.cloud.aiplatform.v1.LlmUtilityService"}},
 	// v1beta1's PredictionService, for ChatCompletions on those endpoints
-	// (#1840): a page of its own, since its method names repeat v1's.
+	// (#1840) and v1's methods bridged (#1937): a page of its own, since
+	// its method names repeat v1's.
 	// Speech-to-Text v1 on the same port (#1930): a page of its own, since
 	// its method names repeat v2's.
 	{Key: "speechv1", Title: "Speech-to-Text v1", Own: true, Services: []string{"google.cloud.speech.v1.Speech"}},
-	{Key: "vertexaiv1beta1", Title: "Vertex AI PredictionService v1beta1", Own: true, Services: []string{"google.cloud.aiplatform.v1beta1.PredictionService"}},
+	{Key: "vertexaiv1beta1", Title: "Vertex AI PredictionService v1beta1", Own: true, Services: []string{"google.cloud.aiplatform.v1beta1.PredictionService",
+		"google.cloud.aiplatform.v1beta1.LlmUtilityService"}},
 	// The Memorystore for Redis admin API (#1302), over the one Valkey
 	// server --services memorystore runs, and Memorystore for Redis
 	// Cluster and Memorystore for Valkey (#1519) on the same port.

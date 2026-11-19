@@ -6052,7 +6052,7 @@
     "Title": "Vertex AI PredictionService",
     "counts": {
       "Unimplemented": 28,
-      "Verified": 61
+      "Verified": 63
     },
     "rows": [
       {
@@ -6107,6 +6107,20 @@
         "method": "google.cloud.aiplatform.v1.EndpointService/UpdateEndpointLongRunning",
         "status": "Unimplemented",
         "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.LlmUtilityService/ComputeTokens",
+        "status": "Verified",
+        "tests": [
+          "test/compat/generationconversation_test.go:247 TestV1Beta1PredictionClientServesWhatV1Serves"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.LlmUtilityService/CountTokens",
+        "status": "Verified",
+        "tests": [
+          "test/compat/generationconversation_test.go:247 TestV1Beta1PredictionClientServesWhatV1Serves"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.ModelGardenService/Deploy",
@@ -6687,10 +6701,15 @@
     "Key": "vertexaiv1beta1",
     "Title": "Vertex AI PredictionService v1beta1",
     "counts": {
-      "Unimplemented": 15,
-      "Verified": 1
+      "Implemented": 12,
+      "Verified": 5
     },
     "rows": [
+      {
+        "method": "google.cloud.aiplatform.v1beta1.LlmUtilityService/ComputeTokens",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
       {
         "method": "google.cloud.aiplatform.v1beta1.PredictionService/ChatCompletions",
         "status": "Verified",
@@ -6700,78 +6719,86 @@
       },
       {
         "method": "google.cloud.aiplatform.v1beta1.PredictionService/CountTokens",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/generationconversation_test.go:198 TestCountTokensAndComputeTokensThroughTheOfficialSDK"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1beta1.PredictionService/DirectPredict",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "google.cloud.aiplatform.v1beta1.PredictionService/DirectRawPredict",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "google.cloud.aiplatform.v1beta1.PredictionService/EmbedContent",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "google.cloud.aiplatform.v1beta1.PredictionService/Explain",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "google.cloud.aiplatform.v1beta1.PredictionService/GenerateContent",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/generationconversation_test.go:47 TestGenerateContentMultiTurnChatThroughTheOfficialSDK"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1beta1.PredictionService/Predict",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/generationconversation_test.go:247 TestV1Beta1PredictionClientServesWhatV1Serves"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1beta1.PredictionService/RawPredict",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "google.cloud.aiplatform.v1beta1.PredictionService/ServerStreamingPredict",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "google.cloud.aiplatform.v1beta1.PredictionService/StreamDirectPredict",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "google.cloud.aiplatform.v1beta1.PredictionService/StreamDirectRawPredict",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "google.cloud.aiplatform.v1beta1.PredictionService/StreamGenerateContent",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/generationconversation_test.go:247 TestV1Beta1PredictionClientServesWhatV1Serves"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1beta1.PredictionService/StreamRawPredict",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "google.cloud.aiplatform.v1beta1.PredictionService/StreamingPredict",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "google.cloud.aiplatform.v1beta1.PredictionService/StreamingRawPredict",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       }
     ]
   },

@@ -83,7 +83,8 @@ RUN case "${TARGETARCH}" in \
       arm64) prebuilt=linux_arm64 ;; \
       *) echo "no upstream prebuilt libraries for ${TARGETARCH}" >&2; exit 1 ;; \
     esac \
-    && bazel build //runtime/engine:litert_lm_main //runtime/engine:embedding_litert_lm_main \
+    && bazel build --define=LITERT_LM_FST_CONSTRAINTS_DISABLED=1 \
+      //runtime/engine:litert_lm_main //runtime/engine:embedding_litert_lm_main \
       //cloudburrow:cloudburrow_generate \
     && cp bazel-bin/runtime/engine/litert_lm_main /usr/local/bin/litert_lm_main \
     && cp bazel-bin/cloudburrow/cloudburrow_generate /usr/local/bin/cloudburrow_generate \
