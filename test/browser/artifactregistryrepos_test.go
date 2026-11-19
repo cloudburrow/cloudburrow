@@ -74,11 +74,6 @@ func TestCloudRunArtifactRegistryCreateAndEditRepositoryThroughThePage(t *testin
 	p := open(t)
 	p.navigate("/artifact-registry?project=" + project)
 	p.waitFor(`[...document.querySelectorAll("#product-nav a")].map((a) => a.textContent.trim()).join(",").includes("Repositories,Settings")`)
-	var heads string
-	p.eval(`[...document.querySelectorAll("#view thead th")].map((h) => h.textContent.trim()).filter(Boolean).join(",")`, &heads)
-	if !strings.Contains(heads, "Name,Format,Mode,Description,Location,Labels,Encryption,Cleanup policies,Size,Created,Updated") {
-		t.Errorf("the Repositories columns are %q; want Google's", heads)
-	}
 
 	openCreateRepository(p, project)
 	hidden := func(id string) bool {
@@ -132,6 +127,11 @@ func TestCloudRunArtifactRegistryCreateAndEditRepositoryThroughThePage(t *testin
 		r.GetCleanupPolicies()["untagged"].GetCondition().GetTagState() != arpb.CleanupPolicyCondition_UNTAGGED ||
 		r.GetCleanupPolicies()["untagged"].GetCondition().GetOlderThan().GetSeconds() != 30*86400 {
 		t.Fatalf("GetRepository after Create Repository = %v, %v; want the page's settings", r, err)
+	}
+	var heads string
+	p.eval(`[...document.querySelectorAll("#view thead th")].map((h) => h.textContent.trim()).filter(Boolean).join(",")`, &heads)
+	if !strings.Contains(heads, "Name,Format,Mode,Description,Location,Labels,Encryption,Cleanup policies,Size,Created,Updated") {
+		t.Errorf("the Repositories columns are %q; want Google's", heads)
 	}
 
 	p.navigate("/artifact-registry/" + id + "?project=" + project)
