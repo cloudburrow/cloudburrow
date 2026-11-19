@@ -137,7 +137,9 @@ compat_shard() {
       # privateca for the console's Certificate Authority Service page
       # (TestPrivateCAThroughThePage, #1834): PRIVATECA is not exported,
       # so its compat suite stays in served.
-      SERVICES=storage,pubsub,tasks,secretmanager,scheduler,logging,privateca
+      # monitoring for the Metrics explorer (TestMonitoringThroughThePage,
+      # #1939), whose browser step alone is given MONITORING.
+      SERVICES=storage,pubsub,tasks,secretmanager,scheduler,logging,privateca,monitoring
       # The hooks are the #285 fixtures (two ready.d scripts, the second
       # creating a bucket, and a shutdown.d script checked after stop), and
       # the seed file names tasks and storage.
@@ -165,7 +167,9 @@ compat_shard() {
       PROBE_TESTS="TestSecretManagerAcrossRestart TestTasksAcrossRestart TestSchedulerAcrossRestart TestStorageAcrossRestart"
       PROBE_VARS=SECRETS,TASKS,SCHEDULER,STORAGE ;;
     served)
-      SERVICES=kms,logging,privateca
+      SERVICES=kms,logging,privateca,monitoring
+      # Cloud Monitoring (#1939), in process, beside the Cloud Logging its
+      # log-based metrics read.
       # Certificate Authority Service (#1834), in process like KMS.
       # Cloud KMS (#309) and Cloud Logging (#304). Resource Manager's tests
       # run in the storage shard; the Logging folder and organization tests
@@ -174,7 +178,7 @@ compat_shard() {
       # 38910752877: in storage gcloud had no logging override).
       # Cloud KMS Autokey's folder and project tests (#1568) make their
       # folder with it too.
-      TEST_VARS+=,KMS,LOGGING,LOGGING_RESOURCEMANAGER,PRIVATECA
+      TEST_VARS+=,KMS,LOGGING,LOGGING_RESOURCEMANAGER,PRIVATECA,MONITORING
       # Cloud KMS (#418): a key with ENABLED, DISABLED and
       # DESTROY_SCHEDULED versions and a ciphertext.
       SETUP_TESTS="TestKMSRestartSetup"

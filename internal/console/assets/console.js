@@ -463,7 +463,14 @@ const ROUTES = [
   { path: "/iam-admin/principal-access-boundary", title: "Principal Access Boundary", service: null, requires: "iam", screen: "unavailable", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin",
     unavailable: "Principal access boundary policies are the IAM v3 API's, which CloudBurrow does not serve." },
 
-  { path: "/monitoring", service: null, screen: "monitoring", title: "Monitoring", section: "Operations" },
+  { path: "/monitoring", service: null, screen: "monitoring", title: "Monitoring", section: "Operations",
+    product: "monitoring", productTitle: "Monitoring" },
+  // Cloud Monitoring's Metrics explorer and Metrics management (#1939),
+  // over the Monitoring API v3 this instance serves.
+  { path: "/monitoring/metrics-explorer", service: "monitoring-explorer", screen: "metrics-explorer", icon: "monitoring",
+    title: "Metrics explorer", section: "Operations", product: "monitoring", productTitle: "Monitoring" },
+  { path: "/monitoring/metrics-management", service: "monitoring-metrics", icon: "monitoring", title: "Metrics management",
+    kind: "Metric descriptor", section: "Operations", product: "monitoring", productTitle: "Monitoring" },
   // Cloud Logging's menu in Google's order (#1863): Logs Explorer, Log
   // Analytics, Logs Dashboard, Log-based Metrics, Log Router, Logs Storage,
   // then the pages Google keeps elsewhere that CloudBurrow serves here
@@ -7355,6 +7362,7 @@ const DELETE_DETAIL = {
   "pubsub-snapshots": "Subscriptions can no longer seek to this snapshot. " +
             "No message is removed, and no subscription's delivery changes.",
   "logging-metrics": "The metric's definition is deleted. No log entry is removed.",
+  "monitoring-metrics": "The metric descriptor and every time series written to it are deleted.",
   "logging-sinks": "The sink's definition is deleted. It delivered nothing, so nothing downstream changes.",
   "logging-exclusions": "Entries it matches are stored again from now on. Entries it dropped are not brought back.",
   "logging-saved-queries": "The saved query is deleted. No log entry is removed.",
@@ -7688,6 +7696,7 @@ function dispatch(view) {
   if (match.screen === "ap-overview") return renderAgentPlatformOverview(view);
   if (match.screen === "instance") return renderInstance(view);
   if (match.screen === "monitoring") return renderMonitoring(view);
+  if (match.screen === "metrics-explorer") return renderMetricsExplorer(view, match);
   if (match.screen === "logs") return renderLogs(view);
   if (match.screen === "logs-dashboard") return renderLogsDashboard(view);
   if (match.screen === "log-analytics") return renderLogAnalytics(view, match);
@@ -9835,6 +9844,219 @@ async function productActivity() {
       foot: "Counted from the entries this instance still holds; the Logs " +
             "Explorer's timeline uses the same buckets.",
     })));
+}
+
+// --- Metrics explorer (#1939) -------------------------------------------
+//
+// Google's builder (docs.cloud.google.com/monitoring/charts/metrics-explorer):
+// Select a metric (a resource type, then a metric of it), Filter, and
+// Aggregation (the aligner and its alignment period applied to each series,
+// then the reducer that combines series and the labels it keeps), with a
+// time range above a line chart and the table of its series. Each Apply is
+// one ListTimeSeries, run by the server's builder query.
+
+const EXPLORER_RANGES = [
+  { label: "5 min", seconds: 300 }, { label: "15 min", seconds: 900 }, { label: "1 hour", seconds: 3600 },
+  { label: "6 hours", seconds: 21600 }, { label: "1 day", seconds: 86400 }, { label: "1 week", seconds: 604800 },
+];
+const EXPLORER_ALIGNERS = ["ALIGN_NONE", "ALIGN_DELTA", "ALIGN_RATE", "ALIGN_INTERPOLATE", "ALIGN_NEXT_OLDER", "ALIGN_MIN",
+  "ALIGN_MAX", "ALIGN_MEAN", "ALIGN_COUNT", "ALIGN_SUM", "ALIGN_STDDEV", "ALIGN_COUNT_TRUE", "ALIGN_COUNT_FALSE",
+  "ALIGN_FRACTION_TRUE", "ALIGN_PERCENTILE_99", "ALIGN_PERCENTILE_95", "ALIGN_PERCENTILE_50", "ALIGN_PERCENTILE_05",
+  "ALIGN_PERCENT_CHANGE"];
+const EXPLORER_REDUCERS = ["REDUCE_NONE", "REDUCE_MEAN", "REDUCE_MIN", "REDUCE_MAX", "REDUCE_SUM", "REDUCE_STDDEV",
+  "REDUCE_COUNT", "REDUCE_COUNT_TRUE", "REDUCE_COUNT_FALSE", "REDUCE_FRACTION_TRUE", "REDUCE_PERCENTILE_99",
+  "REDUCE_PERCENTILE_95", "REDUCE_PERCENTILE_50", "REDUCE_PERCENTILE_05"];
+
+// explorerChart draws every series against one time axis.
+function explorerChart(rows, label) {
+  const NS = "http://www.w3.org/2000/svg";
+  const W = 720, H = 260, L = 56, R = 12, T = 12, B = 28;
+  const series = rows.map((r) => {
+    let pts = [];
+    try { pts = JSON.parse((r.fields || {}).points || "[]"); } catch { pts = []; }
+    return { name: r.name, pts: pts.map((p) => ({ t: new Date(p.at).getTime(), v: p.value })) };
+  });
+  const all = series.flatMap((s) => s.pts.filter((p) => Number.isFinite(p.v)));
+  if (!all.length) return el("p", { class: "unavailable", text: "No data is available for the selected time frame." });
+  let tMin = Math.min(...all.map((p) => p.t)), tMax = Math.max(...all.map((p) => p.t));
+  if (tMax === tMin) { tMin -= 30000; tMax += 30000; }
+  let yMin = Math.min(0, ...all.map((p) => p.v)), yMax = Math.max(...all.map((p) => p.v));
+  if (yMax === yMin) yMax = yMin + 1;
+  const sx = (t) => L + (t - tMin) / (tMax - tMin) * (W - L - R);
+  const sy = (v) => T + (1 - (v - yMin) / (yMax - yMin)) * (H - T - B);
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("class", "explorer-chart");
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", `${label}: ${series.length} time series, ${all.length} points`);
+  const add = (tag, attrs, text) => {
+    const n = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, String(v));
+    if (text !== undefined) n.textContent = text;
+    svg.append(n);
+    return n;
+  };
+  for (let i = 0; i <= 4; i++) {
+    const v = yMin + (yMax - yMin) * i / 4;
+    add("line", { x1: L, x2: W - R, y1: sy(v), y2: sy(v), class: "explorer-grid" });
+    add("text", { x: L - 6, y: sy(v) + 4, "text-anchor": "end", "font-size": 11, class: "explorer-axis" }, bqShortNumber(v));
+  }
+  for (let i = 0; i <= 4; i++) {
+    const t = tMin + (tMax - tMin) * i / 4;
+    add("text", { x: sx(t), y: H - 8, "text-anchor": "middle", "font-size": 11, class: "explorer-axis" },
+      new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+  }
+  series.forEach((s, k) => {
+    const colour = BQ_SERIES_COLOURS[k % BQ_SERIES_COLOURS.length];
+    const pts = s.pts.filter((p) => Number.isFinite(p.v));
+    if (pts.length > 1) {
+      add("polyline", { points: pts.map((p) => `${sx(p.t).toFixed(1)},${sy(p.v).toFixed(1)}`).join(" "),
+        fill: "none", stroke: colour, "stroke-width": 2, class: "explorer-line" });
+    }
+    pts.forEach((p) => add("circle", { cx: sx(p.t), cy: sy(p.v), r: 2.5, fill: colour })
+      .append(Object.assign(document.createElementNS(NS, "title"),
+        { textContent: `${s.name}: ${p.v} at ${new Date(p.t).toLocaleString()}` })));
+  });
+  return el("div", { class: "explorer-chart-wrap" }, svg,
+    el("ul", { class: "bq-chart-legend" }, ...series.map((s, k) => el("li", {},
+      el("span", { class: "bq-swatch", style: `background:${BQ_SERIES_COLOURS[k % BQ_SERIES_COLOURS.length]}` }),
+      el("span", { text: " " + s.name })))));
+}
+
+async function renderMetricsExplorer(view, match) {
+  const caps = capabilityOf("monitoring-explorer");
+  if (!caps.id) return renderUnavailable(view, { ...match, unavailable:
+    "Metrics explorer reads Cloud Monitoring, which this instance does not serve. Start it with --services including monitoring." });
+  const project = currentProject();
+  const header = pageHeader("Metrics explorer", project ? `Project ${project}` : "All projects");
+  setChildren(view, header, loadingState(3, { what: "metrics" }));
+  let metrics, resources;
+  try {
+    [metrics, resources] = await Promise.all([
+      api(`/api/resources/monitoring-explorer?project=${encodeURIComponent(project)}`),
+      project
+        ? send(`/api/query/monitoring-explorer?project=${encodeURIComponent(project)}`, "POST", { Path: ["resource-types"], Values: {} })
+            .then((r) => r.listing || {})
+        : Promise.resolve({ items: [] }),
+    ]);
+  } catch (err) {
+    return setChildren(view, header, errorState("Metrics unavailable", String(err.message),
+      () => renderMetricsExplorer(view, match)));
+  }
+  if (metrics.prompt) return setChildren(view, header, emptyState("Choose a project", metrics.prompt));
+  const descriptors = metrics.items || [];
+  const resourceTypes = (resources.items || []).map((r) => r.name);
+  const params = new URLSearchParams(location.search);
+
+  const select = (id, label, options, value) => {
+    const s = el("select", { id, "aria-label": label },
+      ...options.map((o) => el("option", { value: o.value, text: o.label, selected: o.value === value })));
+    return s;
+  };
+  // Select a metric: the resource type narrows the metrics to those written
+  // against it; "" is every resource type.
+  const resourceSelect = select("explorer-resource", "Resource type",
+    [{ value: "", label: "All resource types" }, ...resourceTypes.map((r) => ({ value: r, label: r }))], params.get("resource") || "");
+  const metricSelect = el("select", { id: "explorer-metric", "aria-label": "Metric" });
+  const fillMetrics = () => {
+    const r = resourceSelect.value;
+    const shown = descriptors.filter((d) => {
+      const types = ((d.fields || {})["Resource types"] || "").split(", ").filter(Boolean);
+      return !r || !types.length || types.includes(r);
+    });
+    const want = metricSelect.value || params.get("metric") || "";
+    setChildren(metricSelect, el("option", { value: "", text: "Select a metric" }),
+      ...shown.map((d) => el("option", { value: d.name, selected: d.name === want,
+        text: (d.fields || {})["Display name"] && d.fields["Display name"] !== "—" ? `${d.fields["Display name"]} (${d.name})` : d.name })));
+  };
+  fillMetrics();
+  resourceSelect.addEventListener("change", fillMetrics);
+  const filterInput = el("input", { id: "explorer-filter", type: "text", "aria-label": "Filter",
+    placeholder: 'metric.labels.env = "prod"', value: params.get("filter") || "" });
+  const alignerSelect = select("explorer-aligner", "Aligner",
+    EXPLORER_ALIGNERS.map((a) => ({ value: a, label: a })), params.get("aligner") || "ALIGN_NONE");
+  const periodInput = el("input", { id: "explorer-period", type: "number", min: "1", "aria-label": "Alignment period (seconds)",
+    value: params.get("period") || "60" });
+  const reducerSelect = select("explorer-reducer", "Reducer",
+    EXPLORER_REDUCERS.map((r) => ({ value: r, label: r })), params.get("reducer") || "REDUCE_NONE");
+  const groupInput = el("input", { id: "explorer-groupby", type: "text", "aria-label": "Group by",
+    placeholder: "metric.labels.env", value: params.get("groupBy") || "" });
+  let range = Number(params.get("range") || 3600);
+  const rangeGroup = el("div", { class: "actions", role: "group", "aria-label": "Time range" });
+  const drawRanges = () => setChildren(rangeGroup, ...EXPLORER_RANGES.map((r) => el("button", {
+    type: "button", class: r.seconds === range ? "primary" : "secondary", "aria-pressed": String(r.seconds === range),
+    text: r.label, onclick: () => { range = r.seconds; drawRanges(); run(); } })));
+  drawRanges();
+
+  const chartHost = el("div", { class: "explorer-chart-host", "aria-live": "polite" });
+  const tableHost = el("div", { class: "explorer-table-host" });
+  const apply = el("button", { type: "button", class: "primary", text: "Apply" });
+
+  const field = (label, control, help) => el("div", { class: "explorer-field" },
+    el("label", { for: control.id, text: label }), control, help ? el("p", { class: "field-help", text: help }) : null);
+  const builder = el("aside", { class: "card explorer-builder", "aria-label": "Builder" },
+    el("h2", { text: "Select a metric" }),
+    field("Resource type", resourceSelect), field("Metric", metricSelect),
+    el("h2", { text: "Filter" }),
+    field("Filter", filterInput, "ANDed terms on metric.labels.* and resource.labels.*, with = != starts_with() …"),
+    el("h2", { text: "Aggregation" }),
+    field("Aligner", alignerSelect, "Applied to each time series over the alignment period."),
+    field("Alignment period (seconds)", periodInput),
+    field("Reducer", reducerSelect, "Combines the aligned time series."),
+    field("Group by", groupInput, "Comma separated labels the reducer keeps."),
+    apply);
+
+  async function run() {
+    const metric = metricSelect.value;
+    if (!metric) {
+      setChildren(chartHost, el("p", { class: "unavailable", text: "Select a metric to chart it." }));
+      setChildren(tableHost);
+      return;
+    }
+    const values = { metric, resource: resourceSelect.value, filter: filterInput.value, aligner: alignerSelect.value,
+      alignmentPeriod: periodInput.value, reducer: reducerSelect.value, groupBy: groupInput.value, range: String(range) };
+    const q = new URLSearchParams(location.search);
+    for (const [k, v] of Object.entries({ metric, resource: values.resource, filter: values.filter, aligner: values.aligner,
+      period: values.alignmentPeriod, reducer: values.reducer, groupBy: values.groupBy, range: values.range })) {
+      if (v) q.set(k, v); else q.delete(k);
+    }
+    history.replaceState(history.state, "", location.pathname + "?" + q.toString());
+    setChildren(chartHost, loadingState(2, { what: "time series" }));
+    let data;
+    try {
+      data = (await send(`/api/query/monitoring-explorer?project=${encodeURIComponent(project)}`, "POST",
+        { Path: ["time-series"], Values: values })).listing || {};
+    } catch (err) {
+      setChildren(chartHost, errorState("Time series unavailable", String(err.message), run));
+      setChildren(tableHost);
+      return;
+    }
+    const rows = data.items || [];
+    setChildren(chartHost,
+      el("div", { class: "chart-head" }, el("h3", { text: metric }),
+        el("span", { class: "chart-now", text: `${rows.length} time series` })),
+      explorerChart(rows, metric),
+      data.note ? el("p", { class: "chart-foot unavailable mono", text: data.note }) : null);
+    const cols = ["Time series", ...(data.columns || [])];
+    setChildren(tableHost, rows.length
+      ? el("table", { class: "explorer-table", "aria-label": "Time series" },
+          el("thead", {}, el("tr", {}, ...cols.map((c) => el("th", { scope: "col", text: c })))),
+          el("tbody", {}, ...rows.map((r) => el("tr", {},
+            el("td", { class: "mono", text: r.name }),
+            ...(data.columns || []).map((c) => el("td", { text: (r.fields || {})[c] || "" }))))))
+      : el("p", { class: "unavailable", text: "No time series match." }));
+    announce(`Metrics explorer: ${rows.length} time series`);
+  }
+  apply.addEventListener("click", run);
+  metricSelect.addEventListener("change", run);
+
+  setChildren(view, header,
+    el("div", { class: "explorer-toolbar" }, rangeGroup),
+    descriptors.length ? null : el("p", { class: "unavailable",
+      text: "This project has no metrics yet. Write a time series, create a metric in Metrics management, or create a log-based metric." }),
+    el("div", { class: "explorer" }, builder, el("section", { class: "card explorer-results", "aria-label": "Chart" }, chartHost, tableHost)));
+  announce("Metrics explorer");
+  run();
 }
 
 async function renderMonitoring(view) {

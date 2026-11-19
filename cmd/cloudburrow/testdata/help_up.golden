@@ -104,6 +104,8 @@ Flags:
     	Memorystore admin API (redis.googleapis.com) host port (0 = OS-assigned; default 9021)
   -port-metadata int
     	host port for the local metadata server (0 = OS-assigned)
+  -port-monitoring int
+    	Cloud Monitoring API host port (0 = OS-assigned; default 9033)
   -port-onnx int
     	ONNX runner host port, for BigQuery ML's imported ONNX models in the onnx build (0 = OS-assigned; default 9025)
   -port-privateca int
@@ -139,7 +141,7 @@ Flags:
   -seed-file string
     	seed document (the /admin/seed body) applied when up starts
   -services string
-    	comma-separated services to start (default storage,pubsub,tasks,run,secretmanager; opt-in: firestore,datastore,bigtable,spanner,cloudsql,bigquery,memorystore,cloudsql-mysql,scheduler,logging,kms,backupdr,privateca)
+    	comma-separated services to start (default storage,pubsub,tasks,run,secretmanager; opt-in: firestore,datastore,bigtable,spanner,cloudsql,bigquery,memorystore,cloudsql-mysql,scheduler,logging,kms,backupdr,privateca,monitoring)
   -shutdown-timeout duration
     	bounded time to drain on shutdown
   -state-dir string

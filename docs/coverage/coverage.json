@@ -14111,5 +14111,82 @@
         ]
       }
     ]
+  },
+  {
+    "Key": "monitoring",
+    "Title": "Cloud Monitoring API (v3)",
+    "counts": {
+      "Unimplemented": 1,
+      "Verified": 8
+    },
+    "rows": [
+      {
+        "method": "google.monitoring.v3.MetricService/CreateMetricDescriptor",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_test.go:365 TestTerraformMonitoringMetricDescriptor",
+          "test/compat/monitoring_test.go:88 TestMonitoringCustomMetrics"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.MetricService/CreateServiceTimeSeries",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.monitoring.v3.MetricService/CreateTimeSeries",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_test.go:88 TestMonitoringCustomMetrics"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.MetricService/DeleteMetricDescriptor",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_test.go:365 TestTerraformMonitoringMetricDescriptor",
+          "test/compat/monitoring_test.go:88 TestMonitoringCustomMetrics"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.MetricService/GetMetricDescriptor",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_test.go:242 TestMonitoringLogBasedMetrics",
+          "test/compat/monitoring_test.go:365 TestTerraformMonitoringMetricDescriptor",
+          "test/compat/monitoring_test.go:88 TestMonitoringCustomMetrics"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.MetricService/GetMonitoredResourceDescriptor",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_test.go:88 TestMonitoringCustomMetrics"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.MetricService/ListMetricDescriptors",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_test.go:88 TestMonitoringCustomMetrics"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.MetricService/ListMonitoredResourceDescriptors",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_test.go:88 TestMonitoringCustomMetrics"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.MetricService/ListTimeSeries",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_test.go:242 TestMonitoringLogBasedMetrics",
+          "test/compat/monitoring_test.go:324 TestMonitoringRequestCounts",
+          "test/compat/monitoring_test.go:88 TestMonitoringCustomMetrics"
+        ]
+      }
+    ]
   }
 ]

@@ -478,6 +478,16 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 				"Certificate Authority Service v1, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint"})
 	}
 
+	// Cloud Monitoring (#1939): gcloud monitoring, and Terraform's
+	// google_monitoring_* through monitoring_custom_endpoint.
+	if monitoringEnabled(cfg) && cfg.Endpoints.Monitoring != 0 {
+		mo := addr(cfg.Endpoints.Monitoring)
+		vars = append(vars,
+			envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_MONITORING", "http://" + mo + "/", "read by gcloud; gcloud monitoring"},
+			envVar{cliEndpointVar("monitoring"), mo,
+				"Cloud Monitoring API v3, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint"})
+	}
+
 	// Service Usage (#1352): gcloud services, and Terraform's
 	// google_project_service through service_usage_custom_endpoint.
 	if cfg.Endpoints.ServiceUsage > 0 {
@@ -610,6 +620,7 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 		"serviceusage":      &e.ServiceUsage,
 		"backupdr":          &e.BackupDR,
 		"privateca":         &e.PrivateCA,
+		"monitoring":        &e.Monitoring,
 		"onnx":              &e.ONNX,
 		"tfconvert":         &e.TFConvert,
 		// The ingress gateway, which kind publishes where `up` configured

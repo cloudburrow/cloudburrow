@@ -933,7 +933,8 @@ jobs:
           # The memorystore shard's read back through the Memorystore admin API.
           if [ "$SHARD" = memorystore ]; then BROWSER_VARS+=,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT; fi
           # The Logs Explorer reads entries written through the Logging API (#1410).
-          if [ "$SHARD" = storage ]; then BROWSER_VARS+=,LOGGING,STORAGE,PUBSUB,TASKS,SCHEDULER,RESOURCEMANAGER,SERVICEUSAGE; fi
+          # And Cloud Monitoring, which the Metrics explorer test writes to (#1939).
+          if [ "$SHARD" = storage ]; then BROWSER_VARS+=,LOGGING,STORAGE,PUBSUB,TASKS,SCHEDULER,RESOURCEMANAGER,SERVICEUSAGE,MONITORING; fi
           # The run shard's read back through Cloud Run, Cloud KMS, Secret Manager,
           # Cloud Logging and BigQuery's official clients.
           if [ "$SHARD" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT; fi

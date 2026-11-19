@@ -79,6 +79,8 @@ type consoleDeps struct {
 	backupdr *backupdr.Server
 	// privateCA is Certificate Authority Service (#1834), nil unless enabled.
 	privateCA *privateCAService
+	// monitoring is Cloud Monitoring (#1939), nil unless enabled.
+	monitoring *monitoringService
 	// sqlAdmin is the Cloud SQL Admin API, which restores Backup and DR
 	// backups; nil unless a Cloud SQL service is enabled.
 	sqlAdmin *sqladmin.Server
@@ -271,6 +273,12 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	// Certificate Authority Service (#1834) runs in this process too.
 	if enabled[config.ServicePrivateCA] && d.privateCA != nil {
 		providers = append(providers, privateCAProvider{svc: d.privateCA}, privateCATemplatesProvider{svc: d.privateCA})
+	}
+	// Cloud Monitoring (#1939) runs in this process too: Metrics explorer
+	// and Metrics management.
+	if enabled[config.ServiceMonitoring] && d.monitoring != nil {
+		screen := monitoringScreen{api: monitoringAPIOf(d.monitoring)}
+		providers = append(providers, monitoringExplorerProvider{screen}, monitoringMetricsProvider{screen})
 	}
 	if enabled[config.ServiceScheduler] && d.scheduler != nil {
 		providers = append(providers, schedulerProvider{svc: d.scheduler, faults: d.faults})
@@ -596,6 +604,7 @@ var serviceTitles = map[config.Service]string{
 	config.ServiceKMS:           "Cloud KMS",
 	config.ServiceBackupDR:      "Backup and DR",
 	config.ServicePrivateCA:     "Certificate Authority Service",
+	config.ServiceMonitoring:    "Cloud Monitoring",
 }
 
 func serviceTitle(s config.Service) string {

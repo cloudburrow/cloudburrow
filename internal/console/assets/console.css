@@ -2017,6 +2017,21 @@ dd.has-copy .property-copy { padding: 2px 8px; font-size: var(--text-badge-size)
 .log-view-list .link-button { word-break: break-all; text-align: left; }
 @media (max-width: 720px) { .log-analytics { grid-template-columns: minmax(0, 1fr); } }
 
+/* Metrics explorer (#1939): the builder on the leading edge, the chart and
+   its table beside it, as Google's page lays them out. */
+.explorer { display: grid; grid-template-columns: minmax(220px, 320px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.explorer-builder h2 { font-size: var(--text-body-size); margin: 12px 0 8px; }
+.explorer-builder h2:first-child { margin-top: 0; }
+.explorer-field { display: grid; gap: 4px; margin-bottom: 8px; }
+.explorer-field select, .explorer-field input { width: 100%; box-sizing: border-box; }
+.explorer-toolbar { margin-bottom: 12px; }
+.explorer-chart { display: block; width: 100%; height: auto; }
+.explorer-grid { stroke: var(--border); }
+.explorer-axis { fill: var(--text-muted); }
+.explorer-table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+.explorer-table th, .explorer-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); word-break: break-word; }
+@media (max-width: 720px) { .explorer { grid-template-columns: minmax(0, 1fr); } }
+
 /* A repeatable group of fields (Field.Group, #1863): a row per exclusion filter. */
 .group-rows { display: grid; gap: 8px; margin-bottom: 8px; }
 .group-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; padding: 8px; border: 1px solid var(--border, var(--text-muted)); border-radius: var(--radius-control); }

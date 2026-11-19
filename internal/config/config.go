@@ -107,6 +107,11 @@ const (
 	// pools, CAs whose keys are generated locally, and the certificates
 	// they sign. Google publishes no emulator.
 	ServicePrivateCA Service = "privateca"
+	// ServiceMonitoring is the Cloud Monitoring API v3
+	// (monitoring.googleapis.com, #1939), served in the CLI process:
+	// metric descriptors, user-defined time series, and the built-in
+	// metrics of the instance's log-based metrics and API requests.
+	ServiceMonitoring Service = "monitoring"
 )
 
 // AllServices lists the default services in a stable order, so startup
@@ -119,7 +124,7 @@ func AllServices() []Service {
 
 // OptionalServices lists the opt-in services, in a stable order.
 func OptionalServices() []Service {
-	return []Service{ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceCloudSQL, ServiceBigQuery, ServiceMemorystore, ServiceCloudSQLMySQL, ServiceScheduler, ServiceLogging, ServiceKMS, ServiceBackupDR, ServicePrivateCA}
+	return []Service{ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceCloudSQL, ServiceBigQuery, ServiceMemorystore, ServiceCloudSQLMySQL, ServiceScheduler, ServiceLogging, ServiceKMS, ServiceBackupDR, ServicePrivateCA, ServiceMonitoring}
 }
 
 // KnownServices lists every selectable service.
@@ -180,7 +185,7 @@ func (s Service) Persistence() Persistence {
 		// Key material is in Kubernetes Secrets, like Secret Manager's
 		// payloads, which the cluster keeps.
 		return PersistenceVolume
-	case ServiceStorage, ServiceTasks, ServiceSecrets, ServiceScheduler, ServiceBackupDR, ServicePrivateCA:
+	case ServiceStorage, ServiceTasks, ServiceSecrets, ServiceScheduler, ServiceBackupDR, ServicePrivateCA, ServiceMonitoring:
 		return PersistenceVolume
 	case ServiceRun:
 		// Workload definitions live in the Kubernetes API, which the cluster
@@ -328,6 +333,9 @@ type Endpoints struct {
 	// PrivateCA is the host port of Certificate Authority Service
 	// (privateca.googleapis.com, #1834): gRPC and JSON on one port.
 	PrivateCA int `json:"privateca"`
+	// Monitoring is the host port of the Cloud Monitoring API v3
+	// (monitoring.googleapis.com, #1939): gRPC and JSON on one port.
+	Monitoring int `json:"monitoring"`
 	// ONNX is the host port of the ONNX runner (#1711), which runs BigQuery
 	// ML's imported ONNX models for the BigQuery front, published to the
 	// cluster through cloudburrow-host. CloudBurrow's own API, not a
@@ -399,6 +407,7 @@ func (e *Endpoints) fields() []endpointField {
 		{"serviceusage", &e.ServiceUsage},
 		{"backupdr", &e.BackupDR},
 		{"privateca", &e.PrivateCA},
+		{"monitoring", &e.Monitoring},
 		{"onnx", &e.ONNX},
 		{"tfconvert", &e.TFConvert},
 	}
@@ -468,6 +477,8 @@ func (e Endpoints) OptionalPort(s Service) int {
 		return e.BackupDR
 	case ServicePrivateCA:
 		return e.PrivateCA
+	case ServiceMonitoring:
+		return e.Monitoring
 	default:
 		return 0
 	}
@@ -770,6 +781,9 @@ func Default() Config {
 			TFConvert: 9027,
 			// Certificate Authority Service (#1834): the next free port.
 			PrivateCA: 9028,
+			// Cloud Monitoring (#1939): after 9029-9030 (API Keys, GKE)
+			// and the ports other open branches took.
+			Monitoring: 9033,
 			// OS-assigned. The port is not what enables local AI —
 			// LocalAI.ModelPath is. A configured port with no model binds
 			// nothing, so there is no endpoint answering every request with

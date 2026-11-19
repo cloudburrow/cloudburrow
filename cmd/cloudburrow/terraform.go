@@ -141,6 +141,8 @@ var terraformEndpoints = []terraformEndpoint{
 	// and _certificate apply, plan clean and destroy in
 	// TestTerraformPrivateCA.
 	{config.ServicePrivateCA, "privateca_custom_endpoint", "GOOGLE_PRIVATECA_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	// Cloud Monitoring (#1939): google_monitoring_metric_descriptor.
+	{config.ServiceMonitoring, "monitoring_custom_endpoint", "GOOGLE_MONITORING_CUSTOM_ENDPOINT", "/", true, ""},
 	// Firestore (#1331): google_firestore_document applies, plans clean,
 	// updates its fields and destroys in TestTerraformFirestoreDocument,
 	// over the documents REST API the emulator serves on its port. On the
@@ -260,6 +262,7 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 		memorystoreAdminEndpoint: cfg.Endpoints.MemorystoreAdmin,
 		config.ServiceBackupDR:   cfg.Endpoints.BackupDR,
 		config.ServicePrivateCA:  cfg.Endpoints.PrivateCA,
+		config.ServiceMonitoring: cfg.Endpoints.Monitoring,
 	}
 	enabled := map[config.Service]bool{resourceManagerEndpoint: true, serviceUsageService: true, sqlAdminEndpoint: sqlAdminEnabled(cfg),
 		memorystoreAdminEndpoint: serviceEnabled(cfg, config.ServiceMemorystore)}
@@ -268,6 +271,7 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 	}
 	enabled[config.ServiceBackupDR] = backupDREnabled(cfg)
 	enabled[config.ServicePrivateCA] = privateCAEnabled(cfg)
+	enabled[config.ServiceMonitoring] = monitoringEnabled(cfg)
 	var set []terraformURL
 	var skipped []config.Service
 	for _, e := range terraformEndpoints {

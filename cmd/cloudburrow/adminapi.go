@@ -66,6 +66,8 @@ type adminDeps struct {
 	backupDR func() *backupdr.Server
 	// privateCA is Certificate Authority Service (#1834), nil unless enabled.
 	privateCA *privateCAService
+	// monitoring is Cloud Monitoring (#1939), nil unless enabled.
+	monitoring *monitoringService
 }
 
 // mountAdmin attaches the admin API to the control server.
@@ -160,6 +162,9 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 	}
 	if d.privateCA != nil {
 		api.RegisterResetter(&privateCAResetter{svc: d.privateCA})
+	}
+	if d.monitoring != nil {
+		api.RegisterResetter(&monitoringResetter{svc: d.monitoring})
 	}
 	// Backup and DR before the Admin API it takes its backups through.
 	if d.backupDR != nil && backupDREnabled(cfg) {
