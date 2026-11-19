@@ -69,6 +69,7 @@ func waitRunV2Op(t *testing.T, s *runv2.Service, op *runv2.GoogleLongrunningOper
 // Docs re-read 2026-11-18, still unanswered: https://docs.cloud.google.com/run/docs/reference/rest/v2/projects.locations.workerPools
 func TestRunWorkerPoolAutomaticScaling(t *testing.T) {
 	h := New(t)
+	scaleShardEndpoint(h, envScaleRun, EnvRun) // the scale shard only (#1821)
 	s := runV2REST(t, h)
 	ctx := runWait(t)
 	kubeconfig := strings.TrimSpace(os.Getenv(envKubeconfig))
@@ -186,7 +187,8 @@ func TestRunWorkerPoolAutomaticScaling(t *testing.T) {
 // covers: google.cloud.run.v2.WorkerPools/CreateWorkerPool, google.cloud.run.v2.WorkerPools/GetWorkerPool, google.cloud.run.v2.WorkerPools/UpdateWorkerPool, google.cloud.run.v2.WorkerPools/DeleteWorkerPool
 func TestTerraformRunWorkerPoolAutomaticScaling(t *testing.T) {
 	h := New(t)
-	_ = runClient(t, h) // skips without CLOUDBURROW_TEST_RUN
+	scaleShardEndpoint(h, envScaleRun, EnvRun) // the scale shard only (#1821)
+	_ = runClient(t, h)
 	s := runV2REST(t, h)
 	m := newTFModule(t)
 	id := "tfauto-" + strings.TrimPrefix(h.Project(), "cb-test-")

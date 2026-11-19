@@ -32,6 +32,7 @@ import (
 // add up to 100%, are INVALID_ARGUMENT.
 func TestRunWorkerPoolUpdateMaskAndInstanceSplits(t *testing.T) {
 	h := New(t)
+	scaleShardEndpoint(h, envScaleRun, EnvRun) // the scale shard only (#1821)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 	c, err := run.NewWorkerPoolsClient(ctx, runClientOptions(h)...)
