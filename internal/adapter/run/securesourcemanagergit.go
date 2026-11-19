@@ -19,6 +19,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/encoding/protojson"
 	"gopkg.in/yaml.v3"
 )
@@ -35,8 +36,10 @@ import (
 // devConnectGitRepositoryLink (a Developer Connect link to this repository,
 // developerconnect.go; a trigger whose link is missing, disabled or names
 // another repository is skipped and logged), an eventType
-// (push by default; pull_request triggers do not run: a pull request's
-// builds are not served), RE2 includedGitRefs and ignoredGitRefs (ignored first; an empty
+// (push by default; pull_request triggers run when a pull request into a
+// branch the ref filters accept is opened, reopened, has its base changed
+// or its head branch pushed, and build the head: #1927,
+// securesourcemanagerpullevents.go), RE2 includedGitRefs and ignoredGitRefs (ignored first; an empty
 // filter does not restrict), includedFiles and ignoredFiles over the
 // push's changed files, a required serviceAccount, disabled, and
 // substitutions. Each pushed ref a trigger accepts runs one build of the
@@ -105,17 +108,45 @@ func (m *SecureSourceManagerServer) serveGit(builds *CloudBuildServer, w http.Re
 		Env:  []string{"GIT_PROJECT_ROOT=" + strings.TrimSuffix(dir, "/"+id+".git"), "GIT_HTTP_EXPORT_ALL=1"},
 	}
 	h.ServeHTTP(w, r)
-	if !push || builds == nil {
+	if !push {
 		return
 	}
 	after := gitRefs(r.Context(), dir)
 	ctx := context.WithoutCancel(withCaller(r).Context())
-	for ref, sha := range after {
+	pusher := ssmGitCaller(r)
+	for _, ref := range sortedKeys(after) {
+		sha := after[ref]
 		if before[ref] == sha {
 			continue
 		}
-		m.runPushTriggers(ctx, builds, repo, dir, ref, before[ref], sha)
+		m.deliverPush(ctx, repo.GetName(), dir, ref, before[ref], sha, pusher)
+		if builds != nil {
+			m.runPushTriggers(ctx, builds, repo, dir, ref, before[ref], sha)
+		}
+		m.headPushed(ctx, repo.GetName(), ref)
 	}
+	for ref, sha := range before { // deleted refs
+		if _, ok := after[ref]; !ok {
+			m.deliverPush(ctx, repo.GetName(), dir, ref, sha, strings.Repeat("0", 40), pusher)
+		}
+	}
+}
+
+// ssmGitCaller is a git request's caller: its bearer token, or the
+// password of its basic credentials (git's credential helpers send the
+// access token so).
+func ssmGitCaller(r *http.Request) string {
+	tok := ""
+	if k, t, ok := strings.Cut(r.Header.Get("Authorization"), " "); ok && strings.EqualFold(k, "bearer") {
+		tok = strings.TrimSpace(t)
+	} else if _, pw, ok := r.BasicAuth(); ok {
+		tok = pw
+	}
+	if tok == "" {
+		return ssmOwnerAccount
+	}
+	ctx := metadata.NewIncomingContext(r.Context(), metadata.Pairs("authorization", "Bearer "+tok))
+	return ssmCallerOf(ctx)
 }
 
 // gitRefs is a repository's refs and the commits they name.
@@ -206,7 +237,18 @@ func refMatches(re, ref string) bool {
 // accepts reports whether a push trigger runs for a ref and its changed
 // files; the ignore filters are checked first.
 func (t ssmTrigger) accepts(ref string, files []string) bool {
-	if t.Disabled || (t.EventType != "" && t.EventType != "push") {
+	return t.acceptsEvent("push", ref, files)
+}
+
+// acceptsEvent reports whether a trigger runs for an event (push or
+// pull_request) on a ref (a pull request's base branch) and its changed
+// files.
+func (t ssmTrigger) acceptsEvent(event, ref string, files []string) bool {
+	ev := t.EventType
+	if ev == "" {
+		ev = "push"
+	}
+	if t.Disabled || ev != event {
 		return false
 	}
 	if t.IgnoredGitRefs != "" && refMatches(t.IgnoredGitRefs, ref) {
@@ -284,25 +326,25 @@ func (m *SecureSourceManagerServer) runPushTriggers(ctx context.Context, builds 
 				continue
 			}
 		}
-		if err := m.runPushTrigger(ctx, builds, repo, dir, project, location, id, ref, sha, t); err != nil {
+		if _, err := m.runPushTrigger(ctx, builds, repo, dir, project, location, id, ref, sha, t); err != nil {
 			slog.Warn("securesourcemanager: trigger's build was refused", "repository", repo.GetName(), "trigger", t.Name, "err", err)
 		}
 	}
 }
 
 func (m *SecureSourceManagerServer) runPushTrigger(ctx context.Context, builds *CloudBuildServer, repo *ssmpb.Repository,
-	dir, project, location, id, ref, sha string, t ssmTrigger) error {
+	dir, project, location, id, ref, sha string, t ssmTrigger) (string, error) {
 	config := t.ConfigFilePath
 	if config == "" {
 		config = ".cloudbuild/cloudbuild.yaml"
 	}
 	raw, err := exec.CommandContext(ctx, "git", "-C", dir, "show", sha+":"+config).Output()
 	if err != nil {
-		return fmt.Errorf("config file %s not found at %s", config, sha)
+		return "", fmt.Errorf("config file %s not found at %s", config, sha)
 	}
 	b, err := parseBuildConfig(raw)
 	if err != nil {
-		return fmt.Errorf("config file %s: %w", config, err)
+		return "", fmt.Errorf("config file %s: %w", config, err)
 	}
 	if t.Project != "" {
 		project = t.Project
@@ -330,9 +372,13 @@ func (m *SecureSourceManagerServer) runPushTrigger(ctx context.Context, builds *
 		return io.NopCloser(bytes.NewReader(out)), nil
 	}
 	src := &cbpb.Source{Source: &cbpb.Source_GitSource{GitSource: &cbpb.GitSource{Url: m.gitURL(repo.GetName()), Revision: sha}}}
-	_, err = builds.createBuild(ctx, project, location, false, b,
+	op, err := builds.createBuild(ctx, project, location, false, b,
 		&triggerContext{name: t.Name, subs: subs, archive: archive, source: src})
-	return err
+	if err != nil {
+		return "", err
+	}
+	// The operation is {parent}/operations/{id}, the build {parent}/builds/{id}.
+	return strings.Replace(op.Name, "/operations/", "/builds/", 1), nil
 }
 
 // parseBuildConfig reads a Cloud Build config file, YAML or JSON.
@@ -365,6 +411,7 @@ func SourceManagerHandlerOr(m *SecureSourceManagerServer, builds *CloudBuildServ
 	t := &rest.Transcoder{Packages: []string{"google.cloud.securesourcemanager.v1"}, Mixins: ssmIAMMixins}
 	register(t)
 	iampb.RegisterIAMPolicyServer(t, ssmInstanceIAM{})
+	m.builds = builds // pull requests' triggers and merges run builds (#1927)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case IsSourceManagerGitPath(r.URL.Path):

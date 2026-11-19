@@ -295,6 +295,13 @@ func (p sourceManagerProvider) Detail(ctx context.Context, project string, path 
 		d, err := p.repositoryDetail(ctx, project, in, path[1])
 		d.OpenTab = path[2]
 		return d, err
+	case len(path) == 3 && path[2] == ssmHooksSegment:
+		// The level above a webhook, which its Delete goes up to.
+		d, err := p.repositoryDetail(ctx, project, in, path[1])
+		d.OpenTab = "settings"
+		return d, err
+	case len(path) == 4 && path[2] == ssmHooksSegment:
+		return p.hookDetail(ctx, in, path)
 	case len(path) >= 4 && path[2] == ssmTreeSegment:
 		return p.codeDetail(ctx, in, path)
 	case len(path) == 4 && path[2] == ssmIssuesSegment:

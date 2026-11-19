@@ -27,7 +27,10 @@ import (
 // fast-forwards the base branch instead, and refuses a head that is not
 // ahead of it. ListPullRequestFileDiffs is the change from the branches'
 // merge base to the head, one entry per file with its git patch.
-// Reviews and pull request comments are not served.
+// Reviews and comments are securesourcemanagerreviews.go's; the hooks a
+// pull request's changes notify and the triggers they run are
+// securesourcemanagerhooks.go's and securesourcemanagerpullevents.go's
+// (#1927).
 
 // ssmMergeIdentity is the merge commit's author and committer: the
 // instance authenticates no caller, so it names none.
@@ -58,9 +61,10 @@ func (m *SecureSourceManagerServer) CreatePullRequest(ctx context.Context, req *
 			return nil, apierror.NotFound("branch %q not found in the repository", b)
 		}
 	}
+	author := ssmCallerOf(ctx)
 	ssmState.mu.Lock()
-	defer ssmState.mu.Unlock()
 	if _, _, err := ssmRepoLocked(req.GetParent()); err != nil {
+		ssmState.mu.Unlock()
 		return nil, err
 	}
 	now := timestamppb.Now()
@@ -68,7 +72,12 @@ func (m *SecureSourceManagerServer) CreatePullRequest(ctx context.Context, req *
 		Title: in.GetTitle(), Body: in.GetBody(), Base: &ssmpb.PullRequest_Branch{Ref: base}, Head: &ssmpb.PullRequest_Branch{Ref: head},
 		State: ssmpb.PullRequest_OPEN, CreateTime: now, UpdateTime: now}
 	ssmState.pulls[pr.Name] = pr
+	ssmState.authors[pr.Name] = author
 	saveSSMLocked()
+	pr = proto.Clone(pr).(*ssmpb.PullRequest)
+	ssmState.mu.Unlock()
+	m.deliverPull(ctx, pr, "opened", author)
+	m.runPullTriggers(context.WithoutCancel(ctx), pr.GetName())
 	return m.done(req.GetParent(), pr.Name, "create", withTips(ctx, dir, pr))
 }
 
@@ -143,8 +152,14 @@ func (m *SecureSourceManagerServer) UpdatePullRequest(ctx context.Context, req *
 	if err != nil {
 		return nil, err
 	}
+	caller := ssmCallerOf(ctx)
 	ssmState.mu.Lock()
-	defer ssmState.mu.Unlock()
+	locked := true
+	defer func() {
+		if locked {
+			ssmState.mu.Unlock()
+		}
+	}()
 	pr, dir, err := ssmPullLocked(in.GetName())
 	if err != nil {
 		return nil, err
@@ -176,7 +191,15 @@ func (m *SecureSourceManagerServer) UpdatePullRequest(ctx context.Context, req *
 	next.UpdateTime = timestamppb.Now()
 	ssmState.pulls[pr.GetName()] = next
 	saveSSMLocked()
-	return m.done(ssmRepoOf(pr.GetName()), pr.GetName(), "update", withTips(ctx, dir, next))
+	baseChanged := next.GetBase().GetRef() != pr.GetBase().GetRef()
+	next = proto.Clone(next).(*ssmpb.PullRequest)
+	ssmState.mu.Unlock()
+	locked = false
+	m.deliverPull(ctx, next, "edited", caller)
+	if baseChanged {
+		m.runPullTriggers(context.WithoutCancel(ctx), next.GetName())
+	}
+	return m.done(ssmRepoOf(next.GetName()), next.GetName(), "update", withTips(ctx, dir, next))
 }
 
 // OpenPullRequest reopens a closed pull request.
@@ -190,23 +213,27 @@ func (m *SecureSourceManagerServer) ClosePullRequest(ctx context.Context, req *s
 }
 
 func (m *SecureSourceManagerServer) setPullState(ctx context.Context, name string, st ssmpb.PullRequest_State) (*longrunningpb.Operation, error) {
+	caller := ssmCallerOf(ctx)
 	ssmState.mu.Lock()
-	defer ssmState.mu.Unlock()
 	pr, dir, err := ssmPullLocked(name)
 	if err != nil {
+		ssmState.mu.Unlock()
 		return nil, err
 	}
 	if pr.GetState() == ssmpb.PullRequest_MERGED {
+		ssmState.mu.Unlock()
 		return nil, apierror.FailedPrecondition("pull request %q is merged", name)
 	}
 	if st == ssmpb.PullRequest_OPEN && pr.GetState() == ssmpb.PullRequest_CLOSED {
 		for _, b := range []string{pr.GetBase().GetRef(), pr.GetHead().GetRef()} {
 			if branchSHA(ctx, dir, b) == "" {
+				ssmState.mu.Unlock()
 				return nil, apierror.FailedPrecondition("branch %q no longer exists", b)
 			}
 		}
 	}
-	if pr.GetState() != st {
+	changed := pr.GetState() != st
+	if changed {
 		now := timestamppb.Now()
 		if st == ssmpb.PullRequest_CLOSED {
 			tipped := withTips(ctx, dir, pr)
@@ -218,13 +245,28 @@ func (m *SecureSourceManagerServer) setPullState(ctx context.Context, name strin
 		pr.State, pr.UpdateTime = st, now
 		saveSSMLocked()
 	}
-	return m.done(ssmRepoOf(name), name, "update", withTips(ctx, dir, pr))
+	out := proto.Clone(pr).(*ssmpb.PullRequest)
+	ssmState.mu.Unlock()
+	if changed && st == ssmpb.PullRequest_CLOSED {
+		m.deliverPull(ctx, out, "closed", caller)
+	}
+	if changed && st == ssmpb.PullRequest_OPEN {
+		m.deliverPull(ctx, out, "reopened", caller)
+		m.runPullTriggers(context.WithoutCancel(ctx), name)
+	}
+	return m.done(ssmRepoOf(name), name, "update", withTips(ctx, dir, out))
 }
 
 // MergePullRequest merges an open pull request's head into its base.
 func (m *SecureSourceManagerServer) MergePullRequest(ctx context.Context, req *ssmpb.MergePullRequestRequest) (*longrunningpb.Operation, error) {
+	caller := ssmCallerOf(ctx)
 	ssmState.mu.Lock()
-	defer ssmState.mu.Unlock()
+	locked := true
+	defer func() {
+		if locked {
+			ssmState.mu.Unlock()
+		}
+	}()
 	pr, dir, err := ssmPullLocked(req.GetName())
 	if err != nil {
 		return nil, err
@@ -241,7 +283,7 @@ func (m *SecureSourceManagerServer) MergePullRequest(ctx context.Context, req *s
 		return nil, apierror.FailedPrecondition("nothing to merge: %s is already in %s", headRef, baseRef)
 	}
 	rule := effectiveBranchRuleLocked(ssmRepoOf(pr.GetName()), baseRef)
-	if err := ruleAllowsMerge(rule, baseRef); err != nil {
+	if err := ruleAllowsMergeLocked(rule, pr.GetName(), head, baseRef); err != nil {
 		return nil, err
 	}
 	merged := head
@@ -277,7 +319,20 @@ func (m *SecureSourceManagerServer) MergePullRequest(ctx context.Context, req *s
 	pr.State, pr.UpdateTime, pr.CloseTime = ssmpb.PullRequest_MERGED, now, now
 	pr.Base.Sha, pr.Head.Sha = merged, head
 	saveSSMLocked()
-	return m.done(ssmRepoOf(pr.GetName()), pr.GetName(), "update", proto.Clone(pr))
+	out := proto.Clone(pr).(*ssmpb.PullRequest)
+	repoName := ssmRepoOf(pr.GetName())
+	repo := proto.Clone(ssmState.repos[repoName]).(*ssmpb.Repository)
+	ssmState.mu.Unlock()
+	locked = false
+	// The merge moved the base branch as a push does: its push hooks and
+	// push triggers run, then the pull request's hooks hear it closed.
+	bg := context.WithoutCancel(ctx)
+	m.deliverPush(bg, repoName, dir, "refs/heads/"+baseRef, base, merged, caller)
+	if m.builds != nil {
+		m.runPushTriggers(bg, m.builds, repo, dir, "refs/heads/"+baseRef, base, merged)
+	}
+	m.deliverPull(bg, out, "closed", caller)
+	return m.done(repoName, out.GetName(), "update", out)
 }
 
 // isAncestor reports whether commit a is an ancestor of (or is) b.

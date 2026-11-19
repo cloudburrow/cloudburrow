@@ -40,8 +40,9 @@ import (
 // with git (securesourcemanagercontent.go); its issues, pull requests and
 // branch rules are served too (securesourcemanagerissues.go,
 // securesourcemanagerpulls.go, securesourcemanagerbranchrules.go, #1856).
-// Hooks and pull request comments and reviews are UNIMPLEMENTED; so are
-// private instances (they need Private Service Connect) and a
+// So are its webhooks, and pull requests' comments and reviews
+// (securesourcemanagerhooks.go, securesourcemanagerreviews.go, #1927).
+// Private instances are UNIMPLEMENTED (they need Private Service Connect) and a
 // repository's gitignores and license templates, which are Google's.
 
 // SecureSourceManagerServer serves Secure Source Manager's instances and
@@ -51,6 +52,8 @@ type SecureSourceManagerServer struct {
 	s *Server
 	// gitBase is this port's http://host:port, or "" before it listens.
 	gitBase func() string
+	// builds runs the triggers file's builds, nil when none can run.
+	builds *CloudBuildServer
 }
 
 // SecureSourceManager returns the Secure Source Manager service; gitBase is
@@ -79,12 +82,25 @@ var ssmState = struct {
 	issueComments map[string]*ssmpb.IssueComment
 	pulls         map[string]*ssmpb.PullRequest
 	rules         map[string]*ssmpb.BranchRule
+	// prComments are pull requests' comments and reviews, hooks the
+	// repositories' webhooks, and authors the account that created each
+	// pull request and comment, by name (securesourcemanagerreviews.go,
+	// securesourcemanagerhooks.go, #1927). hookSecrets are the hooks'
+	// sensitive query strings, which no read returns.
+	prComments  map[string]*ssmpb.PullRequestComment
+	hooks       map[string]*ssmpb.Hook
+	authors     map[string]string
+	hookSecrets map[string]string
+	// prBuilds are the builds a pull request's pull_request triggers ran,
+	// by pull request (#1927).
+	prBuilds map[string][]ssmPullBuild
 	// counters are the last number given out under a collection, by
 	// parent and collection ("{repository}/issues").
 	counters map[string]int
 }{instances: map[string]*ssmpb.Instance{}, repos: map[string]*ssmpb.Repository{}, policies: map[string]iampolicy.Stored{},
 	issues: map[string]*ssmpb.Issue{}, issueComments: map[string]*ssmpb.IssueComment{}, pulls: map[string]*ssmpb.PullRequest{},
-	rules: map[string]*ssmpb.BranchRule{}, counters: map[string]int{}}
+	rules: map[string]*ssmpb.BranchRule{}, counters: map[string]int{}, prComments: map[string]*ssmpb.PullRequestComment{},
+	hooks: map[string]*ssmpb.Hook{}, authors: map[string]string{}, hookSecrets: map[string]string{}, prBuilds: map[string][]ssmPullBuild{}}
 
 // ssmIDRE is the instance and repository ID shape Google documents: lower
 // case letters, digits and hyphens, starting with a letter, at most 63.

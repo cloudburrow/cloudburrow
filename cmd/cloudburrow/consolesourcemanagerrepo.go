@@ -6,8 +6,10 @@ package main
 // read 2026-11-19): Code (the tree at a ref, a file's content), Branches,
 // Issues (New issue; an issue's page with its comments, Close and Reopen),
 // Pull requests (New pull request from a branch into another; its
-// Conversation and Files changed, Merge pull request, Close and Reopen) and
-// Settings with its General and Branch rules tabs (Add branch rule), then
+// Conversation and Files changed with their reviews and comments, Merge
+// pull request, Close and Reopen; consolesourcemanagerreview.go) and
+// Settings with its General, Branch rules (Add branch rule) and Webhooks
+// tabs, then
 // CloudBurrow's Triggers, Builds, Git repository links and Permissions.
 // Everything is read and changed through the official client on the Run
 // port; the branches, which no Secure Source Manager method lists, are read
@@ -41,10 +43,6 @@ const (
 	ssmPullsSegment       = "pulls"
 	ssmBranchRulesSegment = "branchrules"
 )
-
-// ssmWebhooksUnavailable is why the Webhooks tab has no webhooks.
-const ssmWebhooksUnavailable = "a repository's webhooks are the hooks of the Secure Source Manager API (CreateHook and the rest), " +
-	"which CloudBurrow does not serve. A push runs the push triggers of " + runadapter.SourceManagerTriggersFile + " instead."
 
 // ssmMaxBlob is the largest file the Code tab shows.
 const ssmMaxBlob = 1 << 20
@@ -511,34 +509,15 @@ func (p sourceManagerProvider) pullDetail(ctx context.Context, in *ssmpb.Instanc
 			{Label: "Merge into", Value: pr.GetBase().GetRef()}, {Label: "Pull from", Value: pr.GetHead().GetRef()},
 			{Label: "Head commit", Value: shortSHA(pr.GetHead().GetSha())},
 			{Label: "Created", Value: stampAge(pr.GetCreateTime())}, {Label: "Updated", Value: stampAge(pr.GetUpdateTime())}})}
-	body := pr.GetBody()
-	if strings.TrimSpace(body) == "" {
-		body = "No description provided."
-	}
-	files := console.Section{ID: "files", Label: "Files changed", Kind: console.KindText}
-	var patches []string
-	err = p.withClient(ctx, func(c *securesourcemanager.Client) error {
-		it := c.ListPullRequestFileDiffs(ctx, &ssmpb.ListPullRequestFileDiffsRequest{Name: name})
-		for {
-			fd, err := it.Next()
-			if err == iterator.Done {
-				return nil
-			}
-			if err != nil {
-				return err
-			}
-			patches = append(patches, fmt.Sprintf("%s (%s)\n%s", fd.GetName(), strings.ToLower(fd.GetAction().String()), fd.GetPatch()))
-		}
-	})
-	switch {
-	case err != nil:
-		files.Unavailable = consoleErr(err)
-	case len(patches) == 0:
-		files.Text = "No files changed."
-	default:
-		files.Text = strings.Join(patches, "\n")
-	}
-	d.Sections = []console.Section{{ID: "conversation", Label: "Conversation", Kind: console.KindText, Text: body}, files}
+	diffs, derr := p.fileDiffs(ctx, name)
+	cms, cerr := p.prComments(ctx, name)
+	conv := p.conversationSection(pr, cms, cerr, diffNames(diffs))
+	// Comment and Review on Conversation; Add line comment and Review on
+	// Files changed, as Google's has them.
+	all := conv.Actions
+	conv.Actions = append([]console.Action{all[0]}, all[2:]...)
+	fileActs := all[1:]
+	d.Sections = []console.Section{conv, filesSection(diffs, derr, cms, fileActs)}
 	return d, nil
 }
 
@@ -655,7 +634,7 @@ func (p sourceManagerProvider) settingsSection(ctx context.Context, r *ssmpb.Rep
 			Actions: branchRuleRowActions(br)})
 	}
 	rules.Listing.Total = len(rules.Listing.Items)
-	webhooks := console.Section{ID: "webhooks", Label: "Webhooks", Kind: console.KindText, Text: "Not available locally: " + ssmWebhooksUnavailable}
+	webhooks := p.webhooksSection(ctx, r)
 	return console.Section{ID: "settings", Label: "Settings", Tabs: []console.Section{general, rules, webhooks},
 		Actions: []console.Action{ssmEditRepositoryAction(r)}}
 }
@@ -736,7 +715,7 @@ func (p sourceManagerProvider) repoActions(ctx context.Context, project string, 
 		if names := p.branchNames(ctx, r.GetName()); len(names) > 0 {
 			acts = append(acts, newPullAction(names, ssmDefaultBranch(r)))
 		}
-		acts = append(acts, addBranchRuleAction(), ssmEditRepositoryAction(r),
+		acts = append(acts, addBranchRuleAction(), addHookAction(), ssmEditRepositoryAction(r),
 			console.Action{ID: "delete-repo", Label: "Delete repository", Destructive: true, Leaves: true,
 				Confirm: "the repository and every commit pushed to it"})
 		return append(acts, p.linkActions(project, in, r)...)
@@ -767,9 +746,10 @@ func (p sourceManagerProvider) repoActions(ctx context.Context, project string, 
 		if err != nil {
 			return nil
 		}
-		acts := []console.Action{{ID: "edit-pull", Label: "Edit", Submit: "Save", Fields: []console.Field{
+		diffs, _ := p.fileDiffs(ctx, pr.GetName())
+		acts := append(prCommentActions(pr, diffNames(diffs)), console.Action{ID: "edit-pull", Label: "Edit", Submit: "Save", Fields: []console.Field{
 			{Name: "title", Label: "Title", Type: "text", Required: true, Default: pr.GetTitle()},
-			{Name: "body", Label: "Description", Type: "textarea", Default: pr.GetBody()}}}}
+			{Name: "body", Label: "Description", Type: "textarea", Default: pr.GetBody()}}})
 		switch pr.GetState() {
 		case ssmpb.PullRequest_OPEN:
 			acts = append(acts, console.Action{ID: "merge-pull", Label: "Merge pull request"},
@@ -778,6 +758,18 @@ func (p sourceManagerProvider) repoActions(ctx context.Context, project string, 
 			acts = append(acts, console.Action{ID: "reopen-pull", Label: "Reopen pull request"})
 		}
 		return acts
+	case len(apath) == 5 && apath[2] == ssmPullsSegment:
+		var cm *ssmpb.PullRequestComment
+		if p.withClient(ctx, func(c *securesourcemanager.Client) error {
+			var e error
+			cm, e = c.GetPullRequestComment(ctx, &ssmpb.GetPullRequestCommentRequest{Name: r.GetName() + "/pullRequests/" + apath[3] + "/pullRequestComments/" + apath[4]})
+			return e
+		}) != nil {
+			return nil
+		}
+		return prCommentRowActions(cm)
+	case len(apath) == 4 && apath[2] == ssmHooksSegment:
+		return p.hookActions(ctx, r.GetName()+"/hooks/"+apath[3])
 	case len(apath) == 4 && apath[2] == ssmBranchRulesSegment:
 		var br *ssmpb.BranchRule
 		if p.withClient(ctx, func(c *securesourcemanager.Client) error {
@@ -828,6 +820,22 @@ func (p sourceManagerProvider) repoAct(ctx context.Context, in *ssmpb.Instance, 
 			}
 			_, err = op.Wait(ctx)
 			return err
+		case len(apath) == 2 && action == "add-hook":
+			h, err := hookFrom(v)
+			if err != nil {
+				return err
+			}
+			op, err := c.CreateHook(ctx, &ssmpb.CreateHookRequest{Parent: repo, HookId: strings.TrimSpace(v["id"]), Hook: h})
+			if err != nil {
+				return err
+			}
+			_, err = op.Wait(ctx)
+			return err
+		case len(apath) == 4 && apath[2] == ssmHooksSegment:
+			return hookAct(ctx, c, repo+"/hooks/"+apath[3], action, v)
+		case len(apath) == 5 && apath[2] == ssmPullsSegment:
+			pr := repo + "/pullRequests/" + apath[3]
+			return prCommentRowAct(ctx, c, pr, pr+"/pullRequestComments/"+apath[4], action, v)
 		case len(apath) == 2 && action == "add-branch-rule":
 			br, err := branchRuleFrom(v)
 			if err != nil {
@@ -922,6 +930,9 @@ func (p sourceManagerProvider) issueAct(ctx context.Context, c *securesourcemana
 }
 
 func (p sourceManagerProvider) pullAct(ctx context.Context, c *securesourcemanager.Client, name, action string, v map[string]string) error {
+	if ok, err := prCommentAct(ctx, c, name, action, v); ok {
+		return err
+	}
 	var err error
 	switch action {
 	case "edit-pull":

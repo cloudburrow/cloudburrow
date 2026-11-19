@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"net"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
@@ -176,7 +177,7 @@ func TestConsoleSourceManagerInstancesAndRepositories(t *testing.T) {
 	if !linked {
 		t.Error("the repository's page does not list the link")
 	}
-	if acts := p.DetailActions(ctx, "", []string{"inst", "app"}); len(acts) != 7 || acts[6].ID != "delete-link" {
+	if acts := p.DetailActions(ctx, "", []string{"inst", "app"}); len(acts) != 8 || acts[7].ID != "delete-link" {
 		t.Errorf("the linked repository's actions = %+v", acts)
 	}
 	if err := p.ActAt(ctx, "", []string{"inst", "app"}, "delete-link", map[string]string{"link": link}); err != nil {
@@ -187,7 +188,7 @@ func TestConsoleSourceManagerInstancesAndRepositories(t *testing.T) {
 	}
 
 	acts = p.DetailActions(ctx, "", []string{"inst", "app"})
-	if ids := ssmActionIDs(acts); ids != "new-issue new-pull add-branch-rule edit-description delete-repo" || acts[3].Fields[0].Default != "first" || !acts[4].Leaves {
+	if ids := ssmActionIDs(acts); ids != "new-issue new-pull add-branch-rule add-hook edit-description delete-repo" || acts[4].Fields[0].Default != "first" || !acts[5].Leaves {
 		t.Fatalf("the repository's actions = %+v", acts)
 	}
 	if err := p.ActAt(ctx, "", []string{"inst", "app"}, "edit-description", map[string]string{"description": "second"}); err != nil {
@@ -325,6 +326,8 @@ func testSourceManagerRepositoryPages(t *testing.T, ctx context.Context, p sourc
 	if _, s := sections(prs[0].Opens...); !strings.Contains(s["files"].Text, "README.md") || !strings.Contains(s["files"].Text, "+# app") {
 		t.Errorf("Files changed = %+v", s["files"])
 	}
+	testSourceManagerReviews(t, ctx, p, prs[0].Opens, sections)
+	testSourceManagerWebhooks(t, ctx, p, sections)
 	if err := p.ActAt(ctx, "", prs[0].Opens, "merge-pull", nil); err != nil {
 		t.Fatalf("merge-pull: %v", err)
 	}
@@ -355,4 +358,146 @@ func testSourceManagerRepositoryPages(t *testing.T, ctx context.Context, p sourc
 	}
 	git("checkout", "--quiet", "main")
 	git("pull", "--quiet", "origin", "main")
+}
+
+// testSourceManagerReviews (#1927): a pull request's Comment, Add line
+// comment, Reply, Resolve conversation, Review (Comment: the caller opened
+// the pull request, so it cannot approve it), Edit and Delete, as the
+// Conversation and Files changed tabs show them.
+func testSourceManagerReviews(t *testing.T, ctx context.Context, p sourceManagerProvider, pp []string,
+	sections func(path ...string) (console.Detail, map[string]console.Section)) {
+	t.Helper()
+	if ids := ssmActionIDs(p.DetailActions(ctx, "", pp)); !strings.HasPrefix(ids, "add-pr-comment add-line-comment review edit-pull merge-pull") {
+		t.Errorf("an open pull request's actions = %s", ids)
+	}
+	for _, a := range []struct {
+		id string
+		v  map[string]string
+	}{
+		{"add-pr-comment", map[string]string{"body": "looks fine"}},
+		{"add-line-comment", map[string]string{"path": "README.md", "line": "1", "lineBody": "a title?"}},
+		{"review", map[string]string{"decision": "COMMENT", "body": "one note", "path": "README.md", "line": "1", "lineBody": "and here"}},
+	} {
+		if err := p.ActAt(ctx, "", pp, a.id, a.v); err != nil {
+			t.Fatalf("%s: %v", a.id, err)
+		}
+	}
+	if err := p.ActAt(ctx, "", pp, "review", map[string]string{"decision": "APPROVED"}); err == nil {
+		t.Error("Approve on the caller's own pull request was accepted")
+	}
+	_, s := sections(pp...)
+	conv := s["conversation"].Listing.Items
+	byType := map[string]console.Resource{}
+	for _, it := range conv {
+		byType[it.Fields["Type"]] = it
+	}
+	if len(conv) != 5 || conv[0].Name != "description" || byType["Comment"].Fields["Comment"] != "looks fine" ||
+		byType["Review"].Status != "Commented" || byType["Code comment"].Fields["File"] != "README.md:1" || byType["Code comment"].Status != "Unresolved" {
+		t.Fatalf("the Conversation tab = %+v (%s)", conv, s["conversation"].Unavailable)
+	}
+	if !strings.Contains(s["files"].Text, "Comments on README.md:") || !strings.Contains(s["files"].Text, "a title?") {
+		t.Errorf("Files changed does not show the line comments: %s", s["files"].Text)
+	}
+	code := append(append([]string{}, pp...), byType["Code comment"].Name)
+	if ids := ssmActionIDs(p.DetailActions(ctx, "", code)); ids != "reply-comment resolve-comment edit-pr-comment delete-pr-comment" {
+		t.Errorf("a code comment's actions = %s", ids)
+	}
+	for _, a := range []struct{ id, body string }{{"reply-comment", "done"}, {"resolve-comment", ""}, {"edit-pr-comment", "a heading?"}} {
+		if err := p.ActAt(ctx, "", code, a.id, map[string]string{"body": a.body}); err != nil {
+			t.Fatalf("%s: %v", a.id, err)
+		}
+	}
+	_, s = sections(pp...)
+	conv = s["conversation"].Listing.Items
+	var reply console.Resource
+	for i, it := range conv {
+		if it.Name == byType["Code comment"].Name {
+			if it.Status != "Resolved" || it.Fields["Comment"] != "a heading?" || i+1 >= len(conv) {
+				t.Fatalf("the code comment after Reply, Resolve and Edit = %+v", it)
+			}
+			reply = conv[i+1]
+		}
+	}
+	if reply.Fields["Type"] != "Reply to "+byType["Code comment"].Name || reply.Status != "Resolved" {
+		t.Errorf("the reply, right after its conversation's first comment = %+v", reply)
+	}
+	if err := p.ActAt(ctx, "", code, "unresolve-comment", nil); err != nil {
+		t.Fatalf("unresolve-comment: %v", err)
+	}
+	gen := append(append([]string{}, pp...), byType["Comment"].Name)
+	if err := p.ActAt(ctx, "", gen, "delete-pr-comment", nil); err != nil {
+		t.Fatalf("delete-pr-comment: %v", err)
+	}
+	if _, s := sections(pp...); len(s["conversation"].Listing.Items) != 5 {
+		t.Errorf("the Conversation tab after Delete = %+v", s["conversation"].Listing.Items)
+	}
+}
+
+// testSourceManagerWebhooks (#1927): Settings › Webhooks' Add webhook,
+// the hook's row and page, Test delivery, which the target receives with
+// Google's headers and the page lists under Recent deliveries, Edit and
+// Delete.
+func testSourceManagerWebhooks(t *testing.T, ctx context.Context, p sourceManagerProvider,
+	sections func(path ...string) (console.Detail, map[string]console.Section)) {
+	t.Helper()
+	got := make(chan http.Header, 4)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			got <- r.Header.Clone()
+		}
+	}))
+	t.Cleanup(target.Close)
+	if err := p.ActAt(ctx, "", []string{"inst", "app"}, "add-hook", map[string]string{"id": "ci", "targetUri": target.URL + "/hook",
+		"sensitiveQueryString": "key=k&secret=s", "onPush": "true", "branchFilter": "{main,dev}", "active": "true"}); err != nil {
+		t.Fatalf("add-hook: %v", err)
+	}
+	webhooks := func() console.Section {
+		_, secs := sections("inst", "app")
+		for _, tab := range secs["settings"].Tabs {
+			if tab.ID == "webhooks" {
+				return tab
+			}
+		}
+		t.Fatal("Settings has no Webhooks tab")
+		return console.Section{}
+	}
+	wh := webhooks()
+	if h := wh.Listing.Items; len(h) != 1 || h[0].Name != "ci" || h[0].Status != "Active" || h[0].Fields["Trigger on"] != "Push" ||
+		h[0].Fields["Branch filter"] != "{main,dev}" || h[0].Fields["Target URL"] != target.URL+"/hook" {
+		t.Fatalf("the Webhooks tab = %+v (%s)", h, wh.Unavailable)
+	}
+	hp := wh.Listing.Items[0].ActsOn
+	if err := p.ActAt(ctx, "", hp, "test-hook", nil); err != nil {
+		t.Fatalf("test-hook: %v", err)
+	}
+	select {
+	case h := <-got:
+		if h.Get("X-SecureSourceManager-Event") != "push" || h.Get("X-SecureSourceManager-Delivery") == "" || h.Get("Content-Type") != "application/json" {
+			t.Errorf("Test delivery's headers = %v", h)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Test delivery reached no target")
+	}
+	d, s := sections(hp...)
+	if d.Title != "ci" || len(s["deliveries"].Listing.Items) == 0 || s["deliveries"].Listing.Items[0].Status != "Succeeded" {
+		t.Errorf("the webhook's page = %+v", d)
+	}
+	for _, p := range d.Summary {
+		if strings.Contains(p.Value, "secret=s") {
+			t.Errorf("the webhook's page shows its sensitive query string: %+v", p)
+		}
+	}
+	if err := p.ActAt(ctx, "", hp, "edit-hook", map[string]string{"targetUri": target.URL + "/other", "onPullRequest": "true",
+		"onPullRequestComment": "true", "active": "false"}); err != nil {
+		t.Fatalf("edit-hook: %v", err)
+	}
+	if h := webhooks().Listing.Items; len(h) != 1 || h[0].Status != "Inactive" || h[0].Fields["Trigger on"] != "Pull request state changed, Pull request comment" {
+		t.Errorf("the Webhooks tab after Edit = %+v", h)
+	}
+	if err := p.ActAt(ctx, "", hp, "delete-hook", nil); err != nil {
+		t.Fatalf("delete-hook: %v", err)
+	}
+	if h := webhooks().Listing.Items; len(h) != 0 {
+		t.Errorf("the Webhooks tab after Delete = %+v", h)
+	}
 }

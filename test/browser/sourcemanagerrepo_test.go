@@ -5,6 +5,8 @@ package browser
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -90,7 +92,10 @@ func ssmPush(t *testing.T, clone, branch string, files map[string]string) {
 //   - New pull request from a pushed branch into main, its Files changed,
 //     and Merge pull request, after which GetPullRequest reads MERGED;
 //   - Settings' Branch rules tab's Add branch rule makes the rule
-//     GetBranchRule reads.
+//     GetBranchRule reads;
+//   - a pull request's Comment, Add line comment, Resolve conversation and
+//     Review, and Settings' Webhooks tab's Add webhook and a webhook's
+//     Test delivery (#1927).
 func TestCloudRunSourceManagerRepositoryPagesThroughThePage(t *testing.T) {
 	c := ssmClient(t)
 	ctx := context.Background()
@@ -206,6 +211,7 @@ func TestCloudRunSourceManagerRepositoryPagesThroughThePage(t *testing.T) {
 	p.waitFor(`location.pathname.includes("/app/pulls/")`)
 	p.clickText(`#view [role="tab"]`, "Files changed")
 	p.waitFor(`document.querySelector("#view [role=tabpanel]").textContent.includes("NOTES.md")`)
+	ssmReviewThroughThePage(t, p, c, pr.GetName())
 	p.clickText("#view .page-actions button", "Merge pull request")
 	p.waitFor(`[...document.querySelectorAll("#view .page-actions button")].every((b) => b.textContent.trim() !== "Merge pull request")`)
 	if got, err := c.GetPullRequest(ctx, &ssmpb.GetPullRequestRequest{Name: pr.GetName()}); err != nil || got.GetState() != ssmpb.PullRequest_MERGED {
@@ -218,6 +224,103 @@ func TestCloudRunSourceManagerRepositoryPagesThroughThePage(t *testing.T) {
 	if err != nil || br.GetIncludePattern() != "main" || !br.GetRequirePullRequest() {
 		t.Errorf("GetBranchRule after Add branch rule = %v, %v", br, err)
 	}
+	ssmWebhookThroughThePage(t, p, c, repo, func() { repoPage("settings") }, "/secure-source-manager/"+inst+"/app/hooks/ci?project="+project)
+}
+
+// ssmReviewThroughThePage (#1927), on a pull request's page: Comment on
+// the Conversation tab, Add line comment on Files changed, Resolve
+// conversation on the line comment's row, and Review with Comment (the
+// page's caller opened the pull request, so Approve and Request changes
+// are refused, as Google refuses them on your own pull request); each
+// read back through ListPullRequestComments.
+func ssmReviewThroughThePage(t *testing.T, p *tab, c *securesourcemanager.Client, pr string) {
+	t.Helper()
+	ctx := context.Background()
+	comments := func() []*ssmpb.PullRequestComment {
+		var out []*ssmpb.PullRequestComment
+		it := c.ListPullRequestComments(ctx, &ssmpb.ListPullRequestCommentsRequest{Parent: pr})
+		for {
+			cm, err := it.Next()
+			if err == iterator.Done {
+				return out
+			}
+			if err != nil {
+				t.Fatalf("ListPullRequestComments: %v", err)
+			}
+			out = append(out, cm)
+		}
+	}
+	p.pageAction("Add line comment", map[string]string{"path": "NOTES.md", "line": "1", "lineBody": "why notes?"}, "")
+	cms := comments()
+	if len(cms) != 1 || cms[0].GetCode().GetBody() != "why notes?" || cms[0].GetCode().GetPosition().GetPath() != "NOTES.md" ||
+		cms[0].GetCode().GetPosition().GetLine() != 1 {
+		t.Fatalf("ListPullRequestComments after Add line comment = %v", cms)
+	}
+	code := cms[0].GetName()
+	p.clickText(`#view [role="tab"]`, "Conversation")
+	p.pageAction("Comment", map[string]string{"body": "looks fine"}, "")
+	p.rowAction("Conversation", lastPart(code), "Resolve conversation", nil, "")
+	// A row action with no form opens no dialog to wait for: the page
+	// shows the conversation resolved once it is.
+	p.waitFor(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes("why notes?") && r.textContent.includes("Resolved"))`)
+	if got, err := c.GetPullRequestComment(ctx, &ssmpb.GetPullRequestCommentRequest{Name: code}); err != nil || !got.GetCode().GetResolved() {
+		t.Errorf("GetPullRequestComment after Resolve conversation = %v, %v", got, err)
+	}
+	p.pageAction("Review", map[string]string{"body": "one note"}, "")
+	var review, general *ssmpb.PullRequestComment
+	for _, cm := range comments() {
+		switch {
+		case cm.GetReview() != nil:
+			review = cm
+		case cm.GetComment() != nil:
+			general = cm
+		}
+	}
+	if general.GetComment().GetBody() != "looks fine" {
+		t.Errorf("Comment made %v", general)
+	}
+	if review.GetReview().GetActionType() != ssmpb.PullRequestComment_Review_COMMENT || review.GetReview().GetBody() != "one note" {
+		t.Errorf("Review made %v", review)
+	}
+	p.waitFor(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes("Commented") && r.textContent.includes("one note"))`)
+	p.waitFor(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes("NOTES.md:1") && r.textContent.includes("Resolved"))`)
+}
+
+// ssmWebhookThroughThePage (#1927): Settings › Webhooks' Add webhook makes
+// the hook GetHook reads; its page's Test delivery reaches the target URL
+// with Google's headers, and Recent deliveries lists it.
+func ssmWebhookThroughThePage(t *testing.T, p *tab, c *securesourcemanager.Client, repo string, settings func(), hookPage string) {
+	t.Helper()
+	got := make(chan http.Header, 4)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			got <- r.Header.Clone()
+		}
+	}))
+	t.Cleanup(target.Close)
+	settings()
+	p.clickText(`#view [role="tab"]`, "Webhooks")
+	p.waitFor(`new URLSearchParams(location.search).get("subtab") === "webhooks"`)
+	p.pageAction("Add webhook", map[string]string{"id": "ci", "targetUri": target.URL + "/hook", "sensitiveQueryString": "key=k&secret=s",
+		"branchFilter": "main"}, "")
+	h, err := c.GetHook(context.Background(), &ssmpb.GetHookRequest{Name: repo + "/hooks/ci"})
+	if err != nil || h.GetTargetUri() != target.URL+"/hook" || h.GetDisabled() || len(h.GetEvents()) != 1 || h.GetEvents()[0] != ssmpb.Hook_PUSH ||
+		h.GetPushOption().GetBranchFilter() != "main" {
+		t.Fatalf("GetHook after Add webhook = %v, %v", h, err)
+	}
+	p.waitFor(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes("ci") && r.textContent.includes("Active"))`)
+	p.navigate(hookPage)
+	p.clickText("#view .page-actions button", "Test delivery")
+	select {
+	case hd := <-got:
+		if hd.Get("X-SecureSourceManager-Event") != "push" || hd.Get("X-SecureSourceManager-Delivery") == "" {
+			t.Errorf("Test delivery's headers = %v", hd)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("Test delivery reached no target")
+	}
+	p.navigate(hookPage)
+	p.waitFor(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes("push") && r.textContent.includes("Succeeded"))`)
 }
 
 func lastPart(name string) string { return name[strings.LastIndex(name, "/")+1:] }
@@ -225,7 +328,9 @@ func lastPart(name string) string { return name[strings.LastIndex(name, "/")+1:]
 // TestCloudRunSourceManagerScreensMeetWCAG (#1856), in the run shard: the
 // Instances page, Create instance, an instance's page, a repository's
 // Code, Branches, Issues, Pull requests and Settings tabs, a file's page,
-// an issue's and a pull request's, audited as every other screen is.
+// an issue's and a pull request's (its Conversation with a review and a
+// line comment, and its Files changed), Settings' Webhooks tab and a
+// webhook's page (#1927), audited as every other screen is.
 func TestCloudRunSourceManagerScreensMeetWCAG(t *testing.T) {
 	c := ssmClient(t)
 	ctx := context.Background()
@@ -275,6 +380,28 @@ func TestCloudRunSourceManagerScreensMeetWCAG(t *testing.T) {
 	if _, err := c.ListBranchRules(ctx, &ssmpb.ListBranchRulesRequest{Parent: r.GetName()}).Next(); err != nil && err != iterator.Done {
 		t.Fatal(err)
 	}
+	// A comment, a line comment and a review on the pull request, and a
+	// webhook, so their tabs and the webhook's page are audited with rows.
+	cop, err := c.BatchCreatePullRequestComments(ctx, &ssmpb.BatchCreatePullRequestCommentsRequest{Parent: pr.GetName(),
+		Requests: []*ssmpb.CreatePullRequestCommentRequest{
+			{Parent: pr.GetName(), PullRequestComment: &ssmpb.PullRequestComment{CommentDetail: &ssmpb.PullRequestComment_Review_{
+				Review: &ssmpb.PullRequestComment_Review{ActionType: ssmpb.PullRequestComment_Review_COMMENT, Body: "a review"}}}},
+			{Parent: pr.GetName(), PullRequestComment: &ssmpb.PullRequestComment{CommentDetail: &ssmpb.PullRequestComment_Code_{
+				Code: &ssmpb.PullRequestComment_Code{Body: "a line comment", Position: &ssmpb.PullRequestComment_Position{Path: "NOTES.md", Line: 1}}}}}}})
+	if err == nil {
+		_, err = cop.Wait(ctx)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	hop, err := c.CreateHook(ctx, &ssmpb.CreateHookRequest{Parent: r.GetName(), HookId: "ci",
+		Hook: &ssmpb.Hook{TargetUri: "http://127.0.0.1:9/hook", Events: []ssmpb.Hook_HookEventType{ssmpb.Hook_PUSH}}})
+	if err == nil {
+		_, err = hop.Wait(ctx)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
 	base := "/secure-source-manager/" + inst
 	pages := listAndCreate("Secure Source Manager instances", "/secure-source-manager", project)
 	pages = append(pages, screen("an instance", base, project))
@@ -283,6 +410,9 @@ func TestCloudRunSourceManagerScreensMeetWCAG(t *testing.T) {
 	}
 	pages = append(pages, screen("a file", base+"/app/tree/main/README.md", project),
 		screen("an issue", base+"/app/issues/"+lastPart(is.GetName()), project),
-		screen("a pull request", base+"/app/pulls/"+lastPart(pr.GetName()), project))
+		screen("a pull request", base+"/app/pulls/"+lastPart(pr.GetName()), project),
+		screen("a pull request's Files changed", base+"/app/pulls/"+lastPart(pr.GetName())+"?tab=files", project),
+		screen("a repository's webhooks", base+"/app?tab=settings&subtab=webhooks", project),
+		screen("a webhook", base+"/app/hooks/ci", project))
 	auditScreens(t, pages)
 }
