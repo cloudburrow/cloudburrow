@@ -322,6 +322,22 @@ func TestPubSubIdleTimeAndPushAttributesThroughTheForms(t *testing.T) {
 	p.clickText("#view tbody a", topic)
 	p.clickText("#view .page-actions button", "Create subscription")
 	p.waitFor(`location.pathname === "/pubsub/subscriptions/create" && document.querySelector("#view #f-pushAttributes") !== null`)
+	// One page under headings, as Google's (#1847), with Write to BigQuery
+	// and Write to Cloud Storage drawn disabled, each with its reason.
+	var page struct {
+		Steps    int
+		Choices  []string
+		Disabled []bool
+		Reasons  int
+	}
+	p.eval(`(() => { const r = [...document.querySelectorAll("#view input[name='f-deliveryType-choice']")];
+		return { Steps: document.querySelectorAll("#view .create-step").length,
+			Choices: r.map((x) => x.value), Disabled: r.map((x) => x.disabled),
+			Reasons: document.querySelectorAll("#view .is-radio .form-unavailable").length }; })()`, &page)
+	if page.Steps != 0 || strings.Join(page.Choices, ",") != "Pull,Push,Write to BigQuery,Write to Cloud Storage" ||
+		fmt.Sprint(page.Disabled) != "[false false true true]" || page.Reasons != 2 {
+		t.Errorf("Create subscription reads %+v; want one page, and the two exports disabled with their reasons", page)
+	}
 	p.run(chromedp.Click(chromedp.CSS(`#view #f-deliveryType-1`)))
 	setField(p, "#view", "f-name", "browser-idle-push")
 	setField(p, "#view", "f-pushEndpoint", "http://127.0.0.1:1/push")
@@ -340,6 +356,14 @@ func TestPubSubIdleTimeAndPushAttributesThroughTheForms(t *testing.T) {
 	// The Details tab (#1847) holds the push attributes and the expiry.
 	p.navigate("/pubsub/subscriptions?project=" + project)
 	p.clickText("#view tbody a", sub)
+	// The page opens on Details, not Metrics: Google's guide opens the page,
+	// then says to click the Metrics tab.
+	p.waitFor(`document.querySelector("#tab-details") !== null`)
+	var opened string
+	p.eval(`document.querySelector("#view [role=tab][aria-selected=true]").id`, &opened)
+	if opened != "tab-details" {
+		t.Errorf("the subscription page opens on %s, want tab-details", opened)
+	}
 	p.run(chromedp.Click(chromedp.CSS(`#tab-details`)))
 	p.waitFor(`document.querySelector("#view").textContent.includes("Attribute x-goog-version")`)
 	p.waitFor(`document.querySelector("#view").textContent.includes("Deleted by expiration")`)

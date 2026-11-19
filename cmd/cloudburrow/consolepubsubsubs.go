@@ -146,6 +146,11 @@ func (p pubsubSubscriptionsProvider) Detail(ctx context.Context, project string,
 		Summary:  summary,
 		Actions:  headerActions(actions, subscriptionTabActions),
 		Sections: subscriptionTabs(s, activity, snaps, actionsWith(actions, actPull)),
+		// Google's subscription page does not open on Metrics: its monitoring
+		// guide opens the page, then says "click the Metrics tab"
+		// (https://docs.cloud.google.com/pubsub/docs/monitor-subscription,
+		// re-read 2026-11-19). It opens on Details here (#1847).
+		OpenTab: "details",
 	}, nil
 }
 

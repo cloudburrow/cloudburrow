@@ -3191,7 +3191,8 @@ async function renderDetail(view, route, resourcePath) {
     : null;
   if (summary) { crumb.append(summary); crumb.classList.add("has-summary"); }
 
-  const wanted = new URLSearchParams(location.search).get("tab");
+  // The tab the address names, else the one Google's page opens on (#1847).
+  const wanted = new URLSearchParams(location.search).get("tab") || data.openTab;
   let current = Math.max(0, sections.findIndex((sec) => sec.id === wanted));
 
   const panel = el("div", { class: "tab-panel", id: "detail-panel", role: "tabpanel" });
@@ -5161,7 +5162,7 @@ function buildCreateForm(spec) {
           // elsewhere would be a constraint nothing applies.
           pattern: isCheck || isArea ? null : (f.pattern || null),
         });
-    if (isCheck) control.checked = f.default === "true";
+    if (isCheck) control.checked = f.default === "true" && !f.unavailable;
     else if (isSelect) control.value = f.default || (f.options || [])[0] || "";
     else control.value = f.default || "";
     if (helpId) control.setAttribute("aria-describedby", helpId);
@@ -5173,6 +5174,14 @@ function buildCreateForm(spec) {
       control.disabled = true;
       control.setAttribute("aria-readonly", "true");
     }
+    // A choice Google's page offers that this instance cannot make (#1847):
+    // drawn where Google draws it, disabled, with the reason, rather than
+    // left out.
+    const unavailableId = isCheck && f.unavailable ? `u-${f.name}` : null;
+    if (unavailableId) {
+      control.disabled = true;
+      control.setAttribute("aria-describedby", [helpId, unavailableId].filter(Boolean).join(" "));
+    }
 
     const label = el("label", { for: id },
       el("span", { text: f.label }),
@@ -5182,10 +5191,12 @@ function buildCreateForm(spec) {
       f.required ? el("span", { class: "required-mark", "aria-hidden": "true", text: "*" }) : null);
     const help = f.help ? el("p", { id: helpId, class: "form-help", text: f.help }) : null;
     const error = el("p", { id: errorId, class: "form-field-error", hidden: true });
+    const unavailable = unavailableId
+      ? el("p", { id: unavailableId, class: "form-help form-unavailable", text: f.unavailable }) : null;
 
     const node = isCheck
-      ? el("div", { class: "form-row is-check" },
-          el("div", { class: "check-line" }, control, label), help, error)
+      ? el("div", { class: "form-row is-check" + (unavailableId ? " is-unavailable" : "") },
+          el("div", { class: "check-line" }, control, label), help, unavailable, error)
       : el("div", { class: "form-row" }, label, control, help, error);
 
     return { field: f, control, node, error, helpId, errorId, isCheck };
@@ -5389,9 +5400,16 @@ function buildCreateForm(spec) {
 function radioEntry(f, id, errorId, helpId) {
   const control = el("input", { type: "hidden", id, name: f.name });
   control.value = f.default || (f.options || [])[0] || "";
+  // A choice this instance cannot make is drawn disabled with its reason
+  // (#1847), never chosen.
+  const off = f.unavailableOptions || {};
   const radios = (f.options || []).map((o, i) => {
     const r = el("input", { type: "radio", id: `${id}-${i}`, name: `${id}-choice`, value: o });
     r.checked = o === control.value;
+    if (off[o]) {
+      r.disabled = true;
+      r.setAttribute("aria-describedby", `${id}-${i}-unavailable`);
+    }
     r.addEventListener("change", () => {
       if (!r.checked) return;
       control.value = o;
@@ -5406,15 +5424,17 @@ function radioEntry(f, id, errorId, helpId) {
                                 "aria-describedby": helpId || null },
     el("legend", { text: f.label }),
     control,
-    ...radios.map((r, i) => el("div", { class: "check-line" }, r,
-      el("label", { for: r.id, text: f.options[i] }))),
+    ...radios.map((r, i) => el("div", { class: "check-line" + (off[f.options[i]] ? " is-unavailable" : "") }, r,
+      el("label", { for: r.id, text: f.options[i] }),
+      off[f.options[i]] ? el("p", { id: `${r.id}-unavailable`, class: "form-help form-unavailable",
+                                    text: off[f.options[i]] }) : null)),
     help, error);
   const choose = (value) => {
     control.value = value;
     for (const r of radios) r.checked = r.value === value;
   };
   return { field: f, control, node, error, helpId, errorId, isCheck: false, isRadio: true,
-           choose, hold: (on) => { for (const r of radios) r.disabled = on || !!f.immutable; },
+           choose, hold: (on) => { for (const r of radios) r.disabled = on || !!f.immutable || !!off[r.value]; },
            focus: () => (radios.find((r) => r.checked) || radios[0] || control).focus() };
 }
 
@@ -5854,7 +5874,12 @@ async function renderCreatePage(view, route) {
   const cancel = el("a", { class: "button secondary", href: listHref, text: "Cancel" });
   const primary = el("button", { type: "submit", class: "primary", text: caps.create.label });
 
-  const steps = createSteps(fields.nodes);
+  // Numbered steps, as Google's Cloud Storage and Cloud SQL create pages
+  // are, or one page under headings, as Pub/Sub's are (#1847).
+  const steps = caps.create.layout === "page"
+    ? { nodes: fields.nodes, revealInvalid() {} }
+    : createSteps(fields.nodes);
+  const checks = createChecks(target, caps.create, fields);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -5878,12 +5903,72 @@ async function renderCreatePage(view, route) {
 
   // Create, then Cancel, at the bottom, as Google's forms end.
   setChildren(view, ...header,
-    el("form", { class: "create-page", novalidate: true, onsubmit: submit },
+    el("form", { class: "create-page" + (caps.create.layout === "page" ? " is-single-page" : ""),
+                 novalidate: true, onsubmit: submit },
       error,
       ...steps.nodes,
+      checks,
       el("div", { class: "form-actions" }, primary, cancel)));
   fields.focusFirst();
   announce(`${caps.create.title || caps.create.label} form`);
+}
+
+// createChecks draws a create page's checks (#1847): buttons that send
+// what the form holds to the provider without creating anything, as
+// Google's Create schema has Validate definition and Test message. A check
+// with fields asks for them in a dialog, whose button sends them with the
+// form's values; the verdict, or the API's refusal, is shown under the
+// buttons (or in the dialog). Null when the page has none.
+function createChecks(target, spec, fields) {
+  if (!(spec.checks || []).length) return null;
+  const verdict = el("p", { class: "create-check-result", id: "create-check-result", role: "status", hidden: true });
+  const show = (node, ok, text) => {
+    node.textContent = text;
+    node.hidden = false;
+    node.classList.toggle("is-error", !ok);
+  };
+  const run = (check, extra) => send(
+    `/api/resources/${target.service}/check?project=${encodeURIComponent(currentProject())}`,
+    "POST", { check: check.id, values: { ...fields.values(), ...extra } });
+  const open = (check) => {
+    const own = buildCreateForm({ label: check.label, fields: check.fields });
+    const result = el("p", { class: "create-check-result", role: "status", hidden: true });
+    const { dialog, close } = openModal({ labelledBy: "create-check-title" });
+    const go = el("button", { type: "submit", class: "primary", text: check.submit || check.label });
+    dialog.append(el("form", { class: "modal-body", novalidate: true, onsubmit: async (e) => {
+      e.preventDefault();
+      if (!own.validate()) return;
+      setBusy(go, true);
+      try {
+        show(result, true, (await run(check, own.values())).message);
+      } catch (err) {
+        show(result, false, err.message);
+      }
+      setBusy(go, false);
+    } },
+      el("h2", { id: "create-check-title", text: check.label }),
+      ...own.nodes,
+      result,
+      el("div", { class: "modal-actions" },
+        el("button", { type: "button", class: "secondary", text: "Close", onclick: () => close() }), go)));
+    own.focusFirst();
+  };
+  const buttons = spec.checks.map((check) => el("button", {
+    type: "button", class: "secondary", id: `create-check-${check.id}`, text: check.label,
+    onclick: async (e) => {
+      if ((check.fields || []).length) { open(check); return; }
+      verdict.hidden = true;
+      setBusy(e.currentTarget, true);
+      const b = e.currentTarget;
+      try {
+        show(verdict, true, (await run(check, {})).message);
+      } catch (err) {
+        show(verdict, false, err.message);
+      }
+      setBusy(b, false);
+    },
+  }));
+  return el("div", { class: "create-checks" }, el("div", { class: "create-check-buttons" }, ...buttons), verdict);
 }
 
 // createSteps lays a create form out as Google's create pages are (#1842):

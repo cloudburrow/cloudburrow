@@ -952,6 +952,19 @@ td a { color: var(--accent); }
    but not full-bleed: a text field the width of a monitor is unreadable. */
 .create-page { max-width: 720px; }
 .create-page .form-error { max-width: none; }
+/* One page under headings, as Google's Pub/Sub create pages are (#1847):
+   each section's heading a little larger than a step's title would be. */
+.create-page.is-single-page .form-section-title { font-size: var(--text-title-size, 16px); }
+/* A create page's checks (#1847): Validate definition and Test message. */
+.create-checks { margin-top: 8px; }
+.create-check-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+.create-check-result { margin: 8px 0 0; color: var(--text); overflow-wrap: anywhere; }
+.create-check-result.is-error { color: var(--error); }
+/* A choice this instance cannot make, drawn disabled with its reason. */
+.form-unavailable { font-style: italic; }
+.check-line.is-unavailable { flex-wrap: wrap; }
+.check-line.is-unavailable .form-unavailable { flex-basis: 100%; margin-left: 24px; }
+.is-unavailable label { color: var(--text-muted); }
 .form-actions {
   display: flex; gap: 8px; margin-top: 24px;
   padding-top: 16px; border-top: 1px solid var(--border);

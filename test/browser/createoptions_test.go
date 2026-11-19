@@ -95,6 +95,24 @@ func TestPubSubCreateOptionsThroughTheForms(t *testing.T) {
 		t.Error("Use a schema does not reveal the schema and its encoding")
 	}
 	setField(p, "#view", "f-useSchema", "false")
+	// Google's choices this instance cannot make are drawn disabled with
+	// their reasons (#1847): Enable ingestion, the two exports, a transform,
+	// and Cloud KMS key under Encryption.
+	var off struct {
+		Boxes    []bool
+		KMS      bool
+		Google   bool
+		Reasons  int
+		Headings []string
+	}
+	p.eval(`(() => ({ Boxes: ["enableIngestion", "exportBigQuery", "exportStorage", "addTransform"].map((n) => document.querySelector("#view #f-" + n).disabled),
+		KMS: document.querySelector("#view #f-encryption-1").disabled, Google: document.querySelector("#view #f-encryption-0").checked,
+		Reasons: document.querySelectorAll("#view .form-unavailable").length,
+		Headings: [...document.querySelectorAll("#view .form-section-title")].map((h) => h.textContent) }))()`, &off)
+	if fmt.Sprint(off.Boxes) != "[true true true true]" || !off.KMS || !off.Google || off.Reasons != 5 ||
+		strings.Join(off.Headings, ",") != "Transforms,Encryption,Labels" {
+		t.Errorf("Create topic draws %+v; want the four boxes and Cloud KMS key disabled with five reasons, under Google's headings", off)
+	}
 	setField(p, "#view", "f-name", "browser-opts")
 	setField(p, "#view", "f-defaultSubscription", "false")
 	setField(p, "#view", "f-enableRetention", "true")

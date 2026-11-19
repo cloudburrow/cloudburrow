@@ -48,8 +48,13 @@ const (
 	replayToTime     = "To a previous time point"
 	replayToSnapshot = "To a snapshot"
 
-	deliveryPull = "Pull"
-	deliveryPush = "Push"
+	deliveryPull     = "Pull"
+	deliveryPush     = "Push"
+	deliveryBigQuery = "Write to BigQuery"
+	deliveryStorage  = "Write to Cloud Storage"
+
+	encryptionGoogle = "Google-owned and Google-managed encryption key"
+	encryptionKMS    = "Cloud KMS key"
 
 	retryImmediately = "Retry immediately"
 	retryBackoff     = "Retry after exponential backoff delay"
@@ -76,6 +81,23 @@ const pubsubIngestionNote = "Not available locally: an import topic ingests from
 const pubsubPullHelp = "Click Pull to view messages. A pulled message is not acknowledged until you click its Ack: " +
 	"the others are delivered again once their acknowledgement deadline passes. Pull is for looking; at most " +
 	"10 messages are shown at a time."
+
+// The reasons Google's choices that this instance cannot make are drawn
+// disabled (#1847). The emulator takes an export configuration and writes
+// nothing, so offering one would create a subscription that silently never
+// delivers; it takes no key either.
+const (
+	pubsubNoExport = "Not available locally: this instance's Pub/Sub accepts a BigQuery or Cloud Storage " +
+		"export configuration but writes nothing to the table or bucket, so the console does not create one " +
+		"that would never deliver. Use Pull or Push."
+	pubsubNoTopicExport = "Not available locally: the export is a BigQuery or Cloud Storage subscription, " +
+		"which this instance's Pub/Sub accepts but never delivers to."
+	pubsubNoIngestion = "Not available locally: CloudBurrow runs no ingestion from Amazon Kinesis Data Streams, " +
+		"Cloud Storage, Azure Event Hubs, Amazon MSK or Confluent Cloud. Publish to the topic instead."
+	pubsubNoTransforms = "Not available locally: CloudBurrow runs no single message transforms."
+	pubsubNoKMS        = "Not available locally: the Pub/Sub emulator encrypts nothing with a customer-managed key " +
+		"and checks none, so a topic here uses the default encryption."
+)
 
 // --- lists ------------------------------------------------------------------
 
@@ -195,10 +217,13 @@ func expirationWords(p *pubsubpb.ExpirationPolicy) string {
 // --- Create topic -------------------------------------------------------
 
 // topicCreatePageFields are Google's Create topic, in its order: Topic ID,
-// Add a default subscription, Use a schema, Enable message retention. Enable
-// ingestion, the exports and Cloud KMS key are not offered: CloudBurrow runs
-// no ingestion, no export subscriptions write anywhere, and the emulator
-// encrypts nothing with a key (docs/console-parity.md, Pub/Sub).
+// Add a default subscription, Use a schema, Enable ingestion, Enable
+// message retention, Export data to BigQuery, Backup message data to Cloud
+// Storage, Transforms, Encryption. Enable ingestion, the exports, a
+// transform and Cloud KMS key are drawn disabled with the reason:
+// CloudBurrow runs no ingestion or transforms, no export subscription
+// writes anywhere, and the emulator encrypts nothing with a key
+// (docs/console-parity.md, Pub/Sub).
 func topicCreatePageFields() []console.Field {
 	return []console.Field{
 		{Name: "name", Label: "Topic ID", Type: "text", Required: true,
@@ -212,13 +237,24 @@ func topicCreatePageFields() []console.Field {
 			Help: "A schema ID of this project, or projects/{project}/schemas/{schema}, that exists."},
 		{Name: "schemaEncoding", Label: "Message encoding", Type: "radio", ShowWhen: "useSchema",
 			Options: []string{encodingJSON, encodingBinary}, Default: encodingJSON},
+		{Name: "enableIngestion", Label: "Enable ingestion", Type: "checkbox", Default: "false",
+			Unavailable: pubsubNoIngestion},
 		{Name: "enableRetention", Label: "Enable message retention", Type: "checkbox", Default: "false",
 			Help: "The topic keeps every message published to it, acknowledged or not, so a subscription can " +
 				"seek back to it: from 10 minutes to 31 days."},
 		{Name: "retentionDays", Label: "Days", Type: "number", Default: "7", ShowWhen: "enableRetention"},
 		{Name: "retentionHours", Label: "Hours", Type: "number", Default: "0", ShowWhen: "enableRetention"},
 		{Name: "retentionMinutes", Label: "Minutes", Type: "number", Default: "0", ShowWhen: "enableRetention"},
-		pubsubLabelsField("", "", pubsubCreateLabelsHelp),
+		{Name: "exportBigQuery", Label: "Export data to BigQuery", Type: "checkbox", Default: "false",
+			Unavailable: pubsubNoTopicExport},
+		{Name: "exportStorage", Label: "Backup message data to Cloud Storage", Type: "checkbox", Default: "false",
+			Unavailable: pubsubNoTopicExport},
+		{Name: "addTransform", Label: "Add a transform", Type: "checkbox", Default: "false", Section: "Transforms",
+			Unavailable: pubsubNoTransforms},
+		{Name: "encryption", Label: "Encryption", Type: "radio", Section: "Encryption",
+			Options: []string{encryptionGoogle, encryptionKMS}, Default: encryptionGoogle,
+			UnavailableOptions: map[string]string{encryptionKMS: pubsubNoKMS}},
+		pubsubLabelsField("", "Labels", pubsubCreateLabelsHelp),
 	}
 }
 
@@ -227,6 +263,9 @@ func topicCreatePageFields() []console.Field {
 // retention from days, hours and minutes only while Enable message
 // retention is.
 func topicPageValues(values map[string]string) (map[string]string, error) {
+	if err := refuseUnavailable(values, topicCreatePageFields()); err != nil {
+		return nil, err
+	}
 	out := make(map[string]string, len(values))
 	for k, v := range values {
 		out[k] = v
@@ -268,6 +307,25 @@ func topicPageValues(values map[string]string) (map[string]string, error) {
 	return out, nil
 }
 
+// refuseUnavailable refuses a form that chose what its page draws disabled
+// (#1847): the page cannot send one, and a request that does is not given
+// a topic or subscription that silently lacks it.
+func refuseUnavailable(values map[string]string, fields []console.Field) error {
+	for _, f := range fields {
+		v, ok := values[f.Name]
+		if !ok {
+			continue
+		}
+		if f.Unavailable != "" && v == "true" {
+			return fmt.Errorf("%s: %s", f.Label, f.Unavailable)
+		}
+		if why := f.UnavailableOptions[v]; why != "" {
+			return fmt.Errorf("%s %s: %s", f.Label, v, why)
+		}
+	}
+	return nil
+}
+
 // --- Create subscription ------------------------------------------------
 
 // subscriptionPageFields are Google's Create subscription, in its order:
@@ -297,9 +355,9 @@ func subscriptionPageFields(withTopic bool) []console.Field {
 	}
 	return append(fields,
 		console.Field{Name: "deliveryType", Label: "Delivery type", Type: "radio",
-			Options: []string{deliveryPull, deliveryPush}, Default: deliveryPull,
-			Help: "Pull: subscribers ask for messages. Push: Pub/Sub sends each message to an endpoint as an HTTP POST. " +
-				"Write to BigQuery and Write to Cloud Storage are not offered: this instance's Pub/Sub writes to neither."},
+			Options: []string{deliveryPull, deliveryPush, deliveryBigQuery, deliveryStorage}, Default: deliveryPull,
+			UnavailableOptions: map[string]string{deliveryBigQuery: pubsubNoExport, deliveryStorage: pubsubNoExport},
+			Help:               "Pull: subscribers ask for messages. Push: Pub/Sub sends each message to an endpoint as an HTTP POST."},
 		console.Field{Name: "pushEndpoint", Label: "Endpoint URL", Type: "url", ShowWhen: "deliveryType=" + deliveryPush,
 			Required: true, Help: "The URL each message is POSTed to."},
 		console.Field{Name: "pushAttributes", Label: "Push attributes", Type: "map", ShowWhen: "deliveryType=" + deliveryPush,
@@ -337,6 +395,8 @@ func subscriptionPageFields(withTopic bool) []console.Field {
 		console.Field{Name: "expirationDays", Label: "Days", Type: "number", Default: "31", Section: expirySec,
 			ShowWhen: "expirationMode=" + expireAfterDays,
 			Help:     "At least 1, and no shorter than the message retention duration."},
+		console.Field{Name: "addTransform", Label: "Add a transform", Type: "checkbox", Default: "false",
+			Section: "Transforms", Unavailable: pubsubNoTransforms},
 		pubsubLabelsField("", labelSection, pubsubCreateLabelsHelp),
 	)
 }
@@ -402,14 +462,18 @@ func (pubsubSubscriptionsProvider) CreateForm() (string, []console.Field) {
 	return "Create subscription", subscriptionPageFields(true)
 }
 
-func (pubsubSubscriptionsProvider) CreateOnPage() bool  { return true }
-func (pubsubSubscriptionsProvider) CreateTitle() string { return "Create subscription" }
+func (pubsubSubscriptionsProvider) CreateOnPage() bool   { return true }
+func (pubsubSubscriptionsProvider) CreateLayout() string { return console.CreateLayoutPage }
+func (pubsubSubscriptionsProvider) CreateTitle() string  { return "Create subscription" }
 
 // Create makes the subscription through CreateSubscription, as the topic
 // page's form does.
 func (p pubsubSubscriptionsProvider) Create(ctx context.Context, project string, values map[string]string) (string, error) {
 	if project == "" {
 		return "", errors.New("choose a project before creating a subscription")
+	}
+	if err := refuseUnavailable(values, subscriptionPageFields(true)); err != nil {
+		return "", err
 	}
 	topic, err := subscriptionTopicName(project, values["topic"])
 	if err != nil {

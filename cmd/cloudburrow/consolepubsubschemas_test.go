@@ -290,3 +290,69 @@ func TestSchemaFormsShowTheAPIsRefusal(t *testing.T) {
 		t.Errorf("testing an invalid message = %d %s; want 400 with ValidateMessage's message", code, out)
 	}
 }
+
+// TestCreateSchemaChecksTheFormWithoutCreating (#1847): Create schema is
+// one page, with Google's Validate definition and Test message, served by
+// POST /api/resources/pubsub-schemas/check: ValidateSchema of the form's
+// definition and ValidateMessage of a message against it, given inline.
+// Each answers with its verdict or the API's refusal, and neither creates
+// the schema.
+func TestCreateSchemaChecksTheFormWithoutCreating(t *testing.T) {
+	srv, c := schemasConsole(t)
+	const project = "checks"
+	refusing, _ := schemasConsole(t,
+		pstest.WithErrorInjection("ValidateSchema", codes.InvalidArgument, "Could not parse schema definition"),
+		pstest.WithErrorInjection("ValidateMessage", codes.InvalidArgument, "Could not parse JSON Avro message"))
+	checkAt := func(base, id string, values map[string]string) (int, string) {
+		t.Helper()
+		return consolePost(t, base+"/api/resources/pubsub-schemas/check?project="+project,
+			map[string]any{"check": id, "values": values})
+	}
+	check := func(id string, values map[string]string) (int, string) {
+		t.Helper()
+		return checkAt(srv.URL, id, values)
+	}
+	good := `{"type":"record","name":"Burrow","fields":[{"name":"name","type":"string"}]}`
+	form := func(def string, extra ...string) map[string]string {
+		v := map[string]string{"name": "checked", "type": schemaAvro, "definition": def}
+		for i := 0; i+1 < len(extra); i += 2 {
+			v[extra[i]] = extra[i+1]
+		}
+		return v
+	}
+
+	if code, body := checkAt(refusing.URL, checkValidateDefinition, form(`{"type":"record"`)); code != http.StatusBadRequest ||
+		!strings.Contains(body, "InvalidArgument: Could not parse schema definition") {
+		t.Errorf("Validate definition of a broken definition = %d %s, want ValidateSchema's refusal", code, body)
+	}
+	if code, body := check(checkValidateDefinition, form(good)); code != http.StatusOK || !strings.Contains(body, "is valid") {
+		t.Errorf("Validate definition of a valid definition = %d %s", code, body)
+	}
+	if code, body := check(checkTestMessage, form(good, "testEncoding", encodingJSON, "testMessage", `{"name":"burrow"}`)); code != http.StatusOK ||
+		!strings.Contains(body, "valid for this schema") {
+		t.Errorf("Test message of a fitting message = %d %s", code, body)
+	}
+	if code, body := checkAt(refusing.URL, checkTestMessage, form(good, "testEncoding", encodingJSON, "testMessage", `{"nope":1}`)); code != http.StatusBadRequest ||
+		!strings.Contains(body, "Could not parse JSON Avro message") {
+		t.Errorf("Test message of a message the schema does not fit = %d %s, want 400", code, body)
+	}
+	if code, body := check("create", form(good)); code != http.StatusBadRequest || !strings.Contains(body, "no check") {
+		t.Errorf("an unknown check = %d %s", code, body)
+	}
+	it := c.ListSchemas(context.Background(), &pubsubpb.ListSchemasRequest{Parent: "projects/" + project})
+	if s, err := it.Next(); err != iterator.Done {
+		t.Errorf("a check created a schema: %v %v", s, err)
+	}
+
+	// The capabilities say one page, and name the checks.
+	resp, err := http.Get(srv.URL + "/api/services")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	out, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(out), `"layout":"page"`) || !strings.Contains(string(out), `"id":"validate-definition"`) ||
+		!strings.Contains(string(out), `"submit":"Test"`) {
+		t.Errorf("the services do not give Create schema its page layout and checks: %s", out)
+	}
+}

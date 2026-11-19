@@ -1757,8 +1757,9 @@ func (pubsubProvider) CreateForm() (string, []console.Field) {
 	return "Create topic", topicCreatePageFields()
 }
 
-func (pubsubProvider) CreateOnPage() bool  { return true }
-func (pubsubProvider) CreateTitle() string { return "Create topic" }
+func (pubsubProvider) CreateOnPage() bool   { return true }
+func (pubsubProvider) CreateTitle() string  { return "Create topic" }
+func (pubsubProvider) CreateLayout() string { return console.CreateLayoutPage }
 
 func (p pubsubProvider) client(ctx context.Context, project string) (*pubsub.Client, error) {
 	return pubsub.NewClient(ctx, project,

@@ -164,14 +164,100 @@ func (pubsubSchemasProvider) CreateForm() (string, []console.Field) {
 		{
 			Name: "definition", Label: "Schema definition", Type: "textarea", Required: true,
 			Help: "An Avro schema, in JSON, or a Protocol Buffer definition (proto2 or proto3, one top-level message, " +
-				"no imports). The definition is checked with ValidateSchema first, and one it refuses is not created; " +
-				"Test message is on the schema's page once it exists.",
+				"no imports). Validate definition checks it with ValidateSchema, and Create checks it again: one it " +
+				"refuses is not created.",
 		},
 	}
 }
 
-func (pubsubSchemasProvider) CreateOnPage() bool  { return true }
-func (pubsubSchemasProvider) CreateTitle() string { return "Create schema" }
+func (pubsubSchemasProvider) CreateOnPage() bool   { return true }
+func (pubsubSchemasProvider) CreateTitle() string  { return "Create schema" }
+func (pubsubSchemasProvider) CreateLayout() string { return console.CreateLayoutPage }
+
+// Create schema's in-form checks (#1847), as Google's page has them
+// (https://docs.cloud.google.com/pubsub/docs/create-schemas, re-read
+// 2026-11-19): Validate definition, and Test message, whose window asks for
+// a Message encoding and a Message body and has Test.
+const (
+	checkValidateDefinition = "validate-definition"
+	checkTestMessage        = "test-message"
+)
+
+// CreateChecks implements console.CreateChecker.
+func (pubsubSchemasProvider) CreateChecks() []console.CreateCheck {
+	return []console.CreateCheck{
+		{ID: checkValidateDefinition, Label: "Validate definition"},
+		{ID: checkTestMessage, Label: "Test message", Submit: "Test", Fields: []console.Field{
+			{Name: "testEncoding", Label: "Message encoding", Type: "radio",
+				Options: []string{encodingJSON, encodingBinary}, Default: encodingJSON},
+			{Name: "testMessage", Label: "Message body", Type: "textarea", Required: true,
+				Help: "Checked with ValidateMessage against the definition on the form. A Binary message is given " +
+					"in base64. Nothing is published."},
+		}},
+	}
+}
+
+// CheckCreate implements console.CreateChecker: Validate definition is
+// ValidateSchema of the form's type and definition; Test message is
+// ValidateMessage of the message against that definition, given inline,
+// so the schema need not exist. Neither creates anything. The verdicts'
+// wording is CloudBurrow's: Google's docs do not quote the console's.
+func (p pubsubSchemasProvider) CheckCreate(ctx context.Context, project, check string, values map[string]string) (string, error) {
+	if project == "" {
+		return "", errors.New("choose a project first")
+	}
+	typ, err := schemaTypeOf(values["type"])
+	if err != nil {
+		return "", err
+	}
+	definition := values["definition"]
+	if strings.TrimSpace(definition) == "" {
+		return "", errors.New("schema definition is required")
+	}
+	c, err := p.client(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = c.Close() }()
+	switch check {
+	case checkValidateDefinition:
+		if err := validateSchema(ctx, c, project, typ, definition); err != nil {
+			return "", err
+		}
+		return "The schema definition is valid. The check does not test it against the messages to be published.", nil
+	case checkTestMessage:
+		enc, msg, err := testMessageOf(values["testEncoding"], values["testMessage"])
+		if err != nil {
+			return "", err
+		}
+		if _, err := c.ValidateMessage(ctx, &pubsubpb.ValidateMessageRequest{
+			Parent:     "projects/" + project,
+			SchemaSpec: &pubsubpb.ValidateMessageRequest_Schema{Schema: &pubsubpb.Schema{Type: typ, Definition: definition}},
+			Message:    msg, Encoding: enc,
+		}); err != nil {
+			return "", err
+		}
+		return "The message is valid for this schema. Nothing was published.", nil
+	}
+	return "", fmt.Errorf("unknown check %q", check)
+}
+
+// testMessageOf is a test message as ValidateMessage takes it: JSON as
+// typed, Binary decoded from base64. Google's words and the API's both
+// name the encodings.
+func testMessageOf(encoding, message string) (pubsubpb.Encoding, []byte, error) {
+	switch strings.TrimSpace(encoding) {
+	case encodingJSON:
+		return pubsubpb.Encoding_JSON, []byte(message), nil
+	case "BINARY", encodingBinary:
+		b, err := base64.StdEncoding.DecodeString(strings.TrimSpace(message))
+		if err != nil {
+			return 0, nil, fmt.Errorf("message: a binary message is given in base64: %w", err)
+		}
+		return pubsubpb.Encoding_BINARY, b, nil
+	}
+	return 0, nil, errors.New("encoding: JSON or BINARY")
+}
 
 // Google's names for the two schema types (#1847).
 const (
@@ -463,20 +549,9 @@ func (p pubsubSchemasProvider) ActAtResult(ctx context.Context, project string, 
 		return nil, err
 
 	case actTestMessage:
-		var enc pubsubpb.Encoding
-		var msg []byte
-		switch strings.TrimSpace(values["encoding"]) {
-		case "JSON":
-			enc, msg = pubsubpb.Encoding_JSON, []byte(values["message"])
-		case "BINARY":
-			enc = pubsubpb.Encoding_BINARY
-			b, err := base64.StdEncoding.DecodeString(strings.TrimSpace(values["message"]))
-			if err != nil {
-				return nil, fmt.Errorf("message: a BINARY message is given in base64: %w", err)
-			}
-			msg = b
-		default:
-			return nil, errors.New("encoding: JSON or BINARY")
+		enc, msg, err := testMessageOf(values["encoding"], values["message"])
+		if err != nil {
+			return nil, err
 		}
 		cur, err := c.GetSchema(ctx, &pubsubpb.GetSchemaRequest{Name: name, View: pubsubpb.SchemaView_BASIC})
 		if err != nil {
@@ -510,4 +585,7 @@ var (
 	_ console.Creator     = pubsubSchemasProvider{}
 	_ console.Deleter     = pubsubSchemasProvider{}
 	_ console.ResultActor = pubsubSchemasProvider{}
+
+	_ console.CreateChecker  = pubsubSchemasProvider{}
+	_ console.CreateLayouter = pubsubSchemasProvider{}
 )
