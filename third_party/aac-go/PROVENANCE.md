@@ -88,27 +88,8 @@ API: `NewDecoderASC(asc []byte) (*Decoder, error)` for raw access units; `Decode
 SBR (an AudioSpecificConfig whose SBR rate is the core's) decodes at the core rate through a
 32-band synthesis bank.
 
-Refused with `ErrUnsupported`, frame by frame (so a stream that switches to one mid-way fails
-with an error from `DecodeAU`/`Decode`): HE-AAC v2 parametric stereo with 34 stereo bands
-(`iid_mode` or `icc_mode` 2 or 5), mixing procedure B (`icc_mode` 3 to 5), and IPD/OPD (a
-`ps_extension` with id 0 and `enable_ipdopd`). Their normative tables (the 34-band hybrid
-filterbank's prototype filters and band maps, the IPD/OPD Huffman books, mixing B's details) had
-no allowed source. With the whole OpenCORE directory read (2026-11-17), it still has none of them:
-for 34-band streams it averages the 34 IID/ICC indices down to 20 (`map34IndexTo20` in
-`ps_decode_bs_utils.cpp`) and filters with the 20-band bank, which is not the normative output and
-would not match ffmpeg; `ps_init_stereo_mixing.cpp` says "type Rb is not supported"; and
-`ps_read_data.cpp` skips the whole `ps_extension` by its byte count, so no IPD/OPD books or
-dequantisation. 3GPP's enhanced aacPlus is baseline PS only too, a search for a permissively
-licensed decoder with full PS found none (FDK AAC, under its own non-permissive licence and not
-read, is described as baseline as well), and ATSC A/52 is unrelated. What is missing, all in
-ISO/IEC 14496-3 subpart 8 (§8.6.4 and Annex 8.B), not available here: the IPD and OPD Huffman
-books (time and frequency) and their quantisation, the 34-band hybrid analysis and synthesis
-filters (the 12-, 8- and 4-band splits of QMF bands 0 to 4) with the 34-band parameter-to-band
-map and the decorrelator's 34-band settings, and mixing procedure B's angle tables and rotation.
-They were not written from memory, and no encoder at hand emits them
-(`aac_at` always sends `iid_mode` and `icc_mode` 1 without extensions, at every bitrate tried), so
-they could not have been checked against ffmpeg either. Also refused, out of scope: 960-sample
-frames and channel configuration 0 (a program_config_element).
+Full parametric stereo (#1754) is decoded too: see below. Refused, out of scope: 960-sample
+frames.
 
 Tests (`hev2_test.go`, `testdata/`, about 1.1 MB): five AudioToolbox fixtures (HE-AAC mono 44.1
 kHz and stereo 48 kHz in MP4, HE-AAC v2 in MP4, and HE-AAC and HE-AAC v2 in ADTS with implicit
@@ -141,6 +122,82 @@ of them were the interpolated window, and the odd coefficients, still interpolat
 off), are the one known remaining source. `TestHEAACImplicitADTS` checks that `Decode` matches `DecodeAU` on the ADTS
 fixtures; `TestDecodeAUMatchesDecodeLC` checks that plain AAC-LC through `DecodeAU` matches
 `Decode`; `TestPSRefusals` checks the refusals above.
+
+### Full parametric stereo (#1754)
+
+`ps.go` now decodes the whole PS tool: 34 stereo bands (`iid_mode`/`icc_mode` 2 and 5) with the
+34-band hybrid filterbank (QMF band 0 into 12, band 1 into 8, bands 2 to 4 into 4 each), mapping
+10- and 20-band parameters to 34 when the other parameter has 34, and switching configurations
+mid-stream (the decorrelator cleared, the last mixing coefficients mapped); IPD/OPD (`ps_extension`
+id 0, `enable_ipdopd`) with modulo-8 delta decoding, phase smoothing over the current and two
+previous envelopes (weights 1, 1/2, 1/4) and the phases applied to the mixing coefficients
+(conjugated for negative-frequency hybrid bands); and mixing procedure B (`icc_mode` 3 to 5),
+the rotation by the principal-axis angle alpha and the eigenvalue split gamma, with rho floored
+at 0.05. Fine IID (`iid_mode` 3 to 5) was already decoded. New file `ps_tables.go`: the 12-, 8-
+(34-band) and 4-band hybrid prototype filters, the 34-band sub-subband-to-parameter map and
+centre frequencies, the QMF-band-to-parameter map, the 20-to-34 map, and the four IPD/OPD Huffman
+codes.
+
+Where they come from: no source with these tables was allowed (#1754's text), so they were written
+from knowledge of ISO/IEC 14496-3 Annex 8.B (not copied from any decoder's source; no ffmpeg, FAAD2
+or FDK source was read) and accepted only because the result matches ISO's own conformance
+references. Two details were found by that check rather than recalled: mixing B floors rho at
+0.05 (without it the SNR is 8 dB; with it 102 dB), and the hybrid centre frequencies of the odd
+QMF bands are a band higher than their filters' outputs (as the table says).
+
+Also fixed: an SBR extension before the first SBR header is now skipped to its byte count
+(it was left unread, so the rest of the frame was misparsed; ISO's streams start that way).
+
+Checked against the ISO/IEC 14496-26:2024 (2nd edition) audio conformance package on ISO's
+Publicly Available Standards server, `https://standards.iso.org/iso-iec/14496/-26/ed-2/en/`
+(`compressedMp4.zip`, and `referencesWav.zip`'s `add-opt/*_ur.wav`, the unrestricted-PS references,
+24-bit 32 kHz). **ISO's files are not in the repository** (they are ISO's copyright): the tests fetch
+them at test time with `internal/isoconformance`, which reads each member out of its zip by HTTP
+range requests (the zips are 1.2 and 9.8 GB; the six members about 5.3 MB, about 8 MB fetched with
+the zips' directories) into the user's cache directory, `os.UserCacheDir()/cloudburrow-test/iso-14496-26-ed2`
+(`~/.cache/...` on Linux, `~/Library/Caches/...` on macOS), the place the other pinned test downloads
+use, outside the repository. A file is downloaded only when `CLOUDBURROW_TEST_DOWNLOADS` is set;
+otherwise a test that needs a file not cached skips, naming it and the variable. Each file is checked
+against its pinned size, SHA-256 and ISO's MD5 (from the package's
+`mpeg4audio-conformance2ndEd_20230125.md5`) before it is cached and each time it is read, and the zips'
+sizes are pinned too. The pins are in `internal/isoconformance/isoconformance.go` and in
+`dependencies.json` (`components.testOracles.iso14496_26Conformance`), held equal by
+`TestDependenciesRecordThePins`. SHA-256s measured on the members fetched 2026-11-19:
+
+| file | bytes | SHA-256 | ISO's MD5 | PS tools |
+|---|---|---|---|---|
+| al_sbr_ps_00.mp4 to _02, _05 | | (not pinned) | | baseline: 10/20 bands, IID and ICC |
+| al_sbr_ps_03.mp4 | 28612 | 717153ee39f505e897e3dc22357b39dbf0470c8033c7e0c76d5b3b68d6d8e238 | 17f7d06f1c0dee51e7ca4a01d06b453b | fine IID, mixing B, 20 bands |
+| al_sbr_ps_03_ur.wav | 1302716 | 3b905534a0e90922dcde26048a0023f405bd1f496d6e35586fddda5502dbaafa | 0f4d0ddcd52d8ca7ea4de16a3c6aefd1 | |
+| al_sbr_ps_04.mp4 | 28612 | 89669b9f796678db2a9bf13cc33a0617e6864bf1b0152fa717ba3616d869a749 | 596100860fe4ed5e53fcfcd5a1648f73 | IPD/OPD, 20 bands |
+| al_sbr_ps_04_ur.wav | 1302716 | d00d6d52a362a31b362010e30f422898eb48ecd8829cfdbbbe0fabd927c41d35 | 8d885cbc26f0a2764f83d17522de6562 | |
+| al_sbr_ps_06.mp4 | 56598 | 42d273c6260d2541d07e297257aa3238ebbcc1cb9eac5cf71bbfba69a6238132 | 726dd94f7c29da1dc11314c837c37400 | 34-band ICC, then 34-band IID; 20/34 switching |
+| al_sbr_ps_06_ur.wav | 2605244 | e2ef76b498971db8871190e2102eadc747870ca00c83d0e9add7fb9be7d4e817 | a170700536bd15130a58d2cbe22ee99d | |
+
+All seven streams (every access unit, whole files) decode to their `_ur` WAVs within a max of
+3.6e-6 and an RMS of 5e-7 (102.4 dB SNR, the 24-bit references' rounding plus float
+differences), the four baseline ones as before. `TestPSFullConformance` decodes the three full-PS
+streams and compares them, over windows where the `_ur` and `_bl` (baseline) references differ, with
+the reference's samples, cut at test time from the WAV's `data` chunk (raw 24-bit little-endian
+stereo): al_sbr_ps_03 from sample frame 126976 for 32000 frames, al_sbr_ps_04 from 118784 for 20000,
+al_sbr_ps_06 from 229376 and from 344064 for 16000 each (max 1e-5, RMS 1e-6; measured 2026-11-19:
+max 3.5e-6, RMS 5.2e-7, 102.4 to 102.6 dB SNR). These are the windows an earlier branch cut with
+Python and committed; cut here, they are byte for byte the same. It also checks that each stream
+decodes to the reference's length. `TestPSFullSyntax` replaces `TestPSRefusals`. CI's check job
+fetches the files into its cache (`actions/cache`) before `make test-race`, so the test runs there.
+
+ISO's PS streams signal their mono core with a program_config_element (channel configuration 0, one
+SCE). `ChannelNames` named that program's one channel while PS made the output stereo, so
+`internal/embedding` downmixed the stereo samples as one channel (the audio twice as long); it now
+returns nil for any mono or stereo output (`TestFullParametricStereoTrack` in `internal/embedding`,
+and the EmbedContent compat test
+`TestEmbedContentEmbedsAFullParametricStereoTrackThroughThePredictionClient`, which muxes al_sbr_ps_06
+as the audio track of `test/compat/testdata/turtle-jfk.mp4` at test time).
+
+AudioToolbox could not be the reference: its decoder implements baseline PS only (an ADTS remux
+of these streams, `afconvert -f WAVE -d LEI24`, matches the `_bl` references at 122 dB and the `_ur`
+ones at 11 to 28 dB), and its encoder (`aac_at`) emits only `iid_mode`/`icc_mode` 1 without
+extensions. No GPL tool made any expected output.
 
 ### Channel configurations 0, 3 to 7, 11 and 12, and multichannel SBR (#1651)
 

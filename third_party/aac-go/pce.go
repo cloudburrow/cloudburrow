@@ -160,8 +160,13 @@ func (d *Decoder) programOrder(pcm [][]float64, elems []frameElement) ([][]float
 // ChannelNames are the decoded channels' speakers in output order, as
 // ffmpeg names them, for channel configuration 0 (a program_config_element)
 // and 3 to 7, 11 and 12 (ISO/IEC 14496-3 Table 1.19), and nil for mono and
-// stereo.
+// stereo output. A program of one SCE with parametric stereo is stereo
+// output (#1754: ISO's PS conformance streams signal their mono core with a
+// program_config_element), so nil, not the SCE's one name.
 func (d *Decoder) ChannelNames() []string {
+	if d.OutputChannels() <= 2 {
+		return nil
+	}
 	if d.pce != nil {
 		var names []string
 		for _, e := range d.pce.elems {

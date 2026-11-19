@@ -189,7 +189,12 @@ func (e *sbrElement) parseExtension(r *bits.BitReader, crc bool, payloadBits int
 		}
 	}
 	if !e.haveHeader || !e.tablesOK {
-		return nil // no header yet: the frame is skipped
+		// No header yet: the frame's SBR data is skipped (a stream may
+		// start without one; #1754's conformance streams do).
+		for range payloadBits - (b.pos() - start) {
+			b.u(1)
+		}
+		return b.err
 	}
 	e.psHit = false
 	var err error

@@ -164,10 +164,10 @@ func (e *sbrElement) process(ch int, in []float64, haveData bool) *[sbrSlots][64
 // ahead returns QMF bands 0 to 2 of the six slots after the SBR matrix
 // process returned (its slots 32 to 37), which parametric stereo's hybrid
 // filters look ahead to.
-func (c *sbrChannel) ahead() *[6][3]complex128 {
-	var a [6][3]complex128
+func (c *sbrChannel) ahead() *[6][5]complex128 {
+	var a [6][5]complex128
 	for n := range 6 {
-		copy(a[n][:], c.xLow[sbrSlots+sbrHFAdj+n][:3])
+		copy(a[n][:], c.xLow[sbrSlots+sbrHFAdj+n][:5])
 	}
 	return &a
 }
