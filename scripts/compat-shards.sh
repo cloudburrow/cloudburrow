@@ -325,8 +325,10 @@ compat_shard() {
       # keys too. Certificate Authority Service as SQL_PRIVATECA, for
       # CUSTOMER_MANAGED_CAS_CA's CA pools (#1834), so the privateca suite
       # stays in its own shard.
-      SERVICES=cloudsql,cloudsql-mysql,backupdr,storage,secretmanager,kms,privateca
-      TEST_VARS+=,MYSQL,MYSQL_PASSWORD,CLOUDSQL,SQLADMIN,BACKUPDR,CMEK_KMS,CLOUDSQL_SECRETS,NOPUBSUB_STORAGE,SQL_RESOURCEMANAGER,SQL_PRIVATECA
+      # Cloud Logging as SQL_LOGGING, for Backup and DR's job logs (#1924);
+      # LOGGING is not in TEST_VARS, so the Logging suites stay in theirs.
+      SERVICES=cloudsql,cloudsql-mysql,backupdr,storage,secretmanager,kms,privateca,logging
+      TEST_VARS+=,MYSQL,MYSQL_PASSWORD,CLOUDSQL,SQLADMIN,BACKUPDR,CMEK_KMS,CLOUDSQL_SECRETS,NOPUBSUB_STORAGE,SQL_RESOURCEMANAGER,SQL_PRIVATECA,SQL_LOGGING
       # Cloud SQL for PostgreSQL (#701): a table with a row.
       SETUP_TESTS="TestCloudSQLRestartSetup"
       PROBE_TESTS="TestCloudSQLMySQLAcrossRestart TestCloudSQLAcrossRestart"

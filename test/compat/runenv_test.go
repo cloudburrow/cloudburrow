@@ -234,6 +234,8 @@ const (
 	// Resource Manager for the sql shard's tests that make a folder or
 	// purge a project (#1568).
 	envSQLResourceManager = "CLOUDBURROW_TEST_SQL_RESOURCEMANAGER"
+	// Cloud Logging for the sql shard's Backup and DR job log test (#1924).
+	envSQLLogging = "CLOUDBURROW_TEST_SQL_LOGGING"
 	// Resource Manager for the memorystore shard's IAM auth tests, which
 	// grant a principal the connect role (#1614).
 	envMemorystoreResourceManager = "CLOUDBURROW_TEST_MEMORYSTORE_RESOURCEMANAGER"

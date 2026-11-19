@@ -37,6 +37,11 @@ func (s *Server) ResetProject(_ context.Context, project string) error {
 	// A trial is by its location's name, projects/{p}/locations/{l}.
 	dropIn(s.st.Trials, func(n string) bool { return in(n + "/") })
 	dropIn(s.ops, in)
+	for id, j := range s.st.Jobs {
+		if project == "" || j.Project == project {
+			delete(s.st.Jobs, id)
+		}
+	}
 	err := s.saveLocked()
 	s.mu.Unlock()
 	var errs []error

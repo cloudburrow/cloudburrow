@@ -168,7 +168,8 @@ func camel(s string) string {
 }
 
 func (s *Server) patchVault(r *http.Request, name string) (any, error) {
-	mask, err := updateMask(r, "description", "labels", "backupMinimumEnforcedRetentionDuration", "accessRestriction", "effectiveTime")
+	mask, err := updateMask(r, "description", "labels", "backupMinimumEnforcedRetentionDuration", "accessRestriction", "effectiveTime",
+		"backupRetentionInheritance")
 	if err != nil {
 		return nil, err
 	}
@@ -177,6 +178,8 @@ func (s *Server) patchVault(r *http.Request, name string) (any, error) {
 		Labels            map[string]string `json:"labels"`
 		MinRetention      string            `json:"backupMinimumEnforcedRetentionDuration"`
 		AccessRestriction string            `json:"accessRestriction"`
+		EffectiveTime     string            `json:"effectiveTime"`
+		Inheritance       string            `json:"backupRetentionInheritance"`
 	}
 	if err := decode(r, &body); err != nil {
 		return nil, err
@@ -196,8 +199,16 @@ func (s *Server) patchVault(r *http.Request, name string) (any, error) {
 		case "labels":
 			next.Labels = body.Labels
 		case "backupMinimumEnforcedRetentionDuration":
-			if d, err := parseDuration(body.MinRetention); err != nil || d < 0 {
-				return nil, invalid("backupVault.backupMinimumEnforcedRetentionDuration %q is not a duration such as \"100000s\".", body.MinRetention)
+			if err := checkMinRetention(body.MinRetention); err != nil {
+				return nil, err
+			}
+			// A locked retention can only be increased (#1921).
+			if s.locked(v) {
+				was, _ := parseDuration(v.MinRetention)
+				if d, _ := parseDuration(body.MinRetention); d < was {
+					return nil, precondition("Backup vault %s's minimum enforced retention is locked since %s: it can be increased, "+
+						"not reduced below %s.", name, v.EffectiveTime, v.MinRetention)
+				}
 			}
 			next.MinRetention = body.MinRetention
 		case "accessRestriction":
@@ -208,7 +219,37 @@ func (s *Server) patchVault(r *http.Request, name string) (any, error) {
 			}
 			next.AccessRestriction = body.AccessRestriction
 		case "effectiveTime":
-			// The time the retention takes effect; it is applied at once.
+			// The retention lock's date (#1921). Before it, the lock can
+			// be moved or removed (an empty effectiveTime, or the zero
+			// time 0001-01-01T00:00:00Z that `gcloud backup-dr
+			// backup-vaults update --unlock-backup-min-enforced-retention`
+			// sends); from it on, it cannot.
+			if t, err := time.Parse(time.RFC3339Nano, body.EffectiveTime); err == nil && t.Year() <= 1 {
+				body.EffectiveTime = ""
+			}
+			if s.locked(v) {
+				if body.EffectiveTime == "" {
+					return nil, precondition("Backup vault %s's retention lock took effect on %s and cannot be removed.", name, v.EffectiveTime)
+				}
+				if t, err := time.Parse(time.RFC3339Nano, body.EffectiveTime); err != nil || !t.Equal(mustTime(v.EffectiveTime)) {
+					return nil, precondition("Backup vault %s's retention lock took effect on %s and cannot be changed.", name, v.EffectiveTime)
+				}
+				continue
+			}
+			if body.EffectiveTime == "" {
+				next.EffectiveTime = ""
+				continue
+			}
+			t, err := s.checkLockTime(body.EffectiveTime)
+			if err != nil {
+				return nil, err
+			}
+			next.EffectiveTime = t
+		case "backupRetentionInheritance":
+			// Set at creation; "Once set, it cannot be changed."
+			if body.Inheritance != v.Inheritance && !(v.Inheritance == "" && body.Inheritance == "INHERIT_VAULT_RETENTION") {
+				return nil, invalid("backupVault.backupRetentionInheritance cannot be changed after the backup vault is created.")
+			}
 		}
 	}
 	if param(r, "validateOnly") == "true" {
@@ -223,7 +264,7 @@ func (s *Server) patchVault(r *http.Request, name string) (any, error) {
 }
 
 func (s *Server) patchPlan(r *http.Request, name string) (any, error) {
-	mask, err := updateMask(r, "description", "labels", "backupRules", "logRetentionDays")
+	mask, err := updateMask(r, "description", "labels", "backupRules", "logRetentionDays", "maxCustomOnDemandRetentionDays")
 	if err != nil {
 		return nil, err
 	}
@@ -232,6 +273,7 @@ func (s *Server) patchPlan(r *http.Request, name string) (any, error) {
 		Labels           map[string]string `json:"labels"`
 		Rules            []rule            `json:"backupRules"`
 		LogRetentionDays json.RawMessage   `json:"logRetentionDays"`
+		MaxOnDemandDays  int64             `json:"maxCustomOnDemandRetentionDays"`
 	}
 	if err := decode(r, &body); err != nil {
 		return nil, err
@@ -252,10 +294,9 @@ func (s *Server) patchPlan(r *http.Request, name string) (any, error) {
 		case "labels":
 			next.Labels = body.Labels
 		case "backupRules":
-			if err := checkRules(body.Rules); err != nil {
-				return nil, err
-			}
 			next.Rules = body.Rules
+		case "maxCustomOnDemandRetentionDays":
+			next.MaxOnDemandDays = body.MaxOnDemandDays
 		case "logRetentionDays":
 			n, err := parseLogDays(body.LogRetentionDays)
 			if err != nil {
@@ -264,10 +305,17 @@ func (s *Server) patchPlan(r *http.Request, name string) (any, error) {
 			next.LogRetentionDays = n
 		}
 	}
+	if v := s.st.Vaults[p.Vault]; v != nil {
+		if err := checkPlanRetention(next.Rules, next.LogRetentionDays, next.MaxOnDemandDays, v); err != nil {
+			return nil, err
+		}
+	}
+	prev := *p
 	next.Revision++
 	next.UpdateTime = s.stamp()
 	*p = next
 	s.addRevisionLocked(p)
+	s.planJobLocked("UPDATE_BACKUP_PLAN", name, &prev, p, nil, nil)
 	if err := s.saveLocked(); err != nil {
 		return nil, err
 	}
@@ -325,6 +373,7 @@ func (s *Server) patchAssociation(r *http.Request, name string) (any, error) {
 		ds.Association, ds.UpdateTime = name, now
 		a.DataSource = ds.Name
 	}
+	s.planJobLocked("UPDATE_BACKUP_PLAN_ASSOCIATION", name, s.st.Plans[a.Plan], p, a, nil)
 	a.Plan, a.UpdateTime = p.Name, now
 	// The new plan's rules start over.
 	a.LastBackup = map[string]lastBackup{}
@@ -598,4 +647,9 @@ func (s *Server) deleteOperation(name string) (any, error) {
 	}
 	delete(s.ops, name)
 	return map[string]any{}, nil
+}
+
+func mustTime(v string) time.Time {
+	t, _ := time.Parse(time.RFC3339Nano, v)
+	return t
 }

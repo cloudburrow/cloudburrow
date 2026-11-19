@@ -37,7 +37,7 @@ func TestConsoleBackupDRTriggerBackupOffersTheAssociationsPlanRules(t *testing.T
 	var opts []string
 	for _, a := range assocs.DetailActions(ctx, project, []string{"assoc-a"}) {
 		if a.ID == "ondemand" {
-			opts = a.Fields[0].Options
+			opts = a.Fields[1].Options
 		}
 	}
 	if strings.Join(opts, ",") != "daily" {

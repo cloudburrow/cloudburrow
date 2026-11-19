@@ -722,6 +722,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			// this instance's Cloud KMS, in process.
 			backupDRSrv.UseKMS(memorystoreKMS{svc: kmsSvc})
 		}
+		if loggingSvc != nil {
+			// Its backup, restore and backup plan job logs (#1924) go to
+			// this instance's Cloud Logging, as Google's go to Cloud
+			// Logging, so a sink routes them to BigQuery.
+			backupDRSrv.UseJobLogs(backupDRJobLogger(loggingSvc.api))
+		}
 		coord.Register(backupDRSrv)
 	}
 

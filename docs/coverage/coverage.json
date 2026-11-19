@@ -5720,6 +5720,7 @@
         "method": "google.logging.v2.LoggingServiceV2/ListLogEntries",
         "status": "Verified",
         "tests": [
+          "test/compat/backupdr1921_test.go:252 TestBackupDRJobLogsStoredBytesAndOnDemandRetention",
           "test/compat/consoleloggingviews_test.go:58 TestConsoleLogsExplorerThroughView",
           "test/compat/gcloudschedulerlogging_test.go:79 TestGcloudLogging",
           "test/compat/logging1521_test.go:63 TestLoggingInterceptingSinks",
@@ -12229,6 +12230,7 @@
         "method": "sql.instances.delete",
         "status": "Verified",
         "tests": [
+          "test/compat/backupdr1922_test.go:31 TestBackupDRRestoreToANewInstance",
           "test/compat/cloudsqladminverbs_test.go:137 TestCloudSQLDataAPIAndFinalBackup",
           "test/compat/cloudsqlcustomerca_test.go:210 TestCloudSQLCustomerManagedCA",
           "test/compat/cloudsqldemote_test.go:177 TestCloudSQLDemoteSkipReplicationSetup",
@@ -12325,6 +12327,7 @@
         "method": "sql.instances.get",
         "status": "Verified",
         "tests": [
+          "test/compat/backupdr1922_test.go:31 TestBackupDRRestoreToANewInstance",
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
           "test/compat/cloudsqlbackups_test.go:248 TestGcloudSQLBackups",
           "test/compat/cloudsqlbluegreen_test.go:31 TestCloudSQLBlueGreenDeployment",
@@ -12395,6 +12398,7 @@
         "method": "sql.instances.insert",
         "status": "Verified",
         "tests": [
+          "test/compat/backupdr1922_test.go:31 TestBackupDRRestoreToANewInstance",
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
           "test/compat/cloudsqladminverbs_test.go:137 TestCloudSQLDataAPIAndFinalBackup",
           "test/compat/cloudsqlbluegreen_test.go:31 TestCloudSQLBlueGreenDeployment",
@@ -12582,6 +12586,8 @@
         "method": "sql.instances.restoreBackup",
         "status": "Verified",
         "tests": [
+          "test/compat/backupdr1921_test.go:252 TestBackupDRJobLogsStoredBytesAndOnDemandRetention",
+          "test/compat/backupdr1922_test.go:31 TestBackupDRRestoreToANewInstance",
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
           "test/compat/cloudsqladminverbs_test.go:25 TestCloudSQLProjectBackups",
           "test/compat/cloudsqlbackups_test.go:248 TestGcloudSQLBackups",
@@ -13035,6 +13041,8 @@
         "method": "backupdr.projects.locations.backupPlanAssociations.triggerBackup",
         "status": "Verified",
         "tests": [
+          "test/compat/backupdr1921_test.go:252 TestBackupDRJobLogsStoredBytesAndOnDemandRetention",
+          "test/compat/backupdr1922_test.go:31 TestBackupDRRestoreToANewInstance",
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
           "test/compat/backupdrcmek_test.go:26 TestBackupDRVaultEncryptionConfig"
@@ -13044,6 +13052,9 @@
         "method": "backupdr.projects.locations.backupPlans.create",
         "status": "Verified",
         "tests": [
+          "test/compat/backupdr1921_test.go:143 TestBackupDRPlanRuleChecks",
+          "test/compat/backupdr1921_test.go:36 TestBackupDRVaultLocationsAndRetentionLock",
+          "test/compat/backupdr1921_test.go:435 TestGcloudBackupDRRetentionLockAndPlanDays",
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
@@ -13055,6 +13066,9 @@
         "method": "backupdr.projects.locations.backupPlans.delete",
         "status": "Verified",
         "tests": [
+          "test/compat/backupdr1921_test.go:143 TestBackupDRPlanRuleChecks",
+          "test/compat/backupdr1921_test.go:36 TestBackupDRVaultLocationsAndRetentionLock",
+          "test/compat/backupdr1921_test.go:435 TestGcloudBackupDRRetentionLockAndPlanDays",
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
@@ -13065,6 +13079,8 @@
         "method": "backupdr.projects.locations.backupPlans.get",
         "status": "Verified",
         "tests": [
+          "test/compat/backupdr1921_test.go:143 TestBackupDRPlanRuleChecks",
+          "test/compat/backupdr1921_test.go:435 TestGcloudBackupDRRetentionLockAndPlanDays",
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
@@ -13083,6 +13099,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/backupdr1462_test.go:34 TestBackupDRUpdatesAndViews",
+          "test/compat/backupdr1921_test.go:143 TestBackupDRPlanRuleChecks",
           "test/compat/terraform_batch8_test.go:279 TestTerraformBackupDRVaultAndPlanUpdates"
         ]
       },
@@ -13104,6 +13121,9 @@
         "method": "backupdr.projects.locations.backupVaults.create",
         "status": "Verified",
         "tests": [
+          "test/compat/backupdr1921_test.go:143 TestBackupDRPlanRuleChecks",
+          "test/compat/backupdr1921_test.go:36 TestBackupDRVaultLocationsAndRetentionLock",
+          "test/compat/backupdr1921_test.go:435 TestGcloudBackupDRRetentionLockAndPlanDays",
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
@@ -13137,6 +13157,7 @@
         "method": "backupdr.projects.locations.backupVaults.dataSources.backups.get",
         "status": "Verified",
         "tests": [
+          "test/compat/backupdr1921_test.go:252 TestBackupDRJobLogsStoredBytesAndOnDemandRetention",
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore"
         ]
       },
@@ -13144,6 +13165,7 @@
         "method": "backupdr.projects.locations.backupVaults.dataSources.backups.list",
         "status": "Verified",
         "tests": [
+          "test/compat/backupdr1922_test.go:31 TestBackupDRRestoreToANewInstance",
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
           "test/compat/terraform_batch12_sql_test.go:207 TestTerraformBackupDRDataSources"
@@ -13184,6 +13206,7 @@
         "method": "backupdr.projects.locations.backupVaults.dataSources.get",
         "status": "Verified",
         "tests": [
+          "test/compat/backupdr1921_test.go:252 TestBackupDRJobLogsStoredBytesAndOnDemandRetention",
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
           "test/compat/terraform_batch12_sql_test.go:207 TestTerraformBackupDRDataSources"
         ]
@@ -13232,6 +13255,9 @@
         "method": "backupdr.projects.locations.backupVaults.delete",
         "status": "Verified",
         "tests": [
+          "test/compat/backupdr1921_test.go:143 TestBackupDRPlanRuleChecks",
+          "test/compat/backupdr1921_test.go:36 TestBackupDRVaultLocationsAndRetentionLock",
+          "test/compat/backupdr1921_test.go:435 TestGcloudBackupDRRetentionLockAndPlanDays",
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
@@ -13249,6 +13275,9 @@
         "method": "backupdr.projects.locations.backupVaults.get",
         "status": "Verified",
         "tests": [
+          "test/compat/backupdr1921_test.go:252 TestBackupDRJobLogsStoredBytesAndOnDemandRetention",
+          "test/compat/backupdr1921_test.go:36 TestBackupDRVaultLocationsAndRetentionLock",
+          "test/compat/backupdr1921_test.go:435 TestGcloudBackupDRRetentionLockAndPlanDays",
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
@@ -13269,6 +13298,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/backupdr1462_test.go:34 TestBackupDRUpdatesAndViews",
+          "test/compat/backupdr1921_test.go:36 TestBackupDRVaultLocationsAndRetentionLock",
+          "test/compat/backupdr1921_test.go:435 TestGcloudBackupDRRetentionLockAndPlanDays",
           "test/compat/terraform_batch8_test.go:279 TestTerraformBackupDRVaultAndPlanUpdates"
         ]
       },
@@ -13320,6 +13351,7 @@
         "method": "backupdr.projects.locations.list",
         "status": "Verified",
         "tests": [
+          "test/compat/backupdr1921_test.go:36 TestBackupDRVaultLocationsAndRetentionLock",
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore"
         ]
       },

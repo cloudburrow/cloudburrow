@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
@@ -160,18 +161,23 @@ func (backupDRProvider) CreateForm() (string, []console.Field) {
 		{Name: "labels", Label: "Labels", Type: "map", Section: "Name your backup vault"},
 		{Name: "locationType", Label: "Location type", Type: "radio", Required: true, Section: "Choose where to store your data",
 			Options: []string{"region", "multi-region"}, Default: "region",
-			OptionLabels: map[string]string{"region": "Region", "multi-region": "Multi-region"},
-			UnavailableOptions: map[string]string{"multi-region": "Not available locally: the Backup and DR Service here serves the regions its " +
-				"locations.list names, so a vault is regional (#1921)."}},
+			OptionLabels: map[string]string{"region": "Region", "multi-region": "Multi-region"}},
 		{Name: "region", Label: "Region", Type: "select", Required: true, Section: "Choose where to store your data",
-			Options: backupdr.Locations, OptionLabels: bdrRegionLabels(), Default: "us-central1", ShowWhen: "locationType=region"},
+			Options: backupdr.Regions, OptionLabels: bdrRegionLabels(), Default: "us-central1", ShowWhen: "locationType=region"},
+		{Name: "multiRegion", Label: "Multi-region", Type: "select", Section: "Choose where to store your data",
+			Options: []string{"us", "eu", "asia"}, Default: "us", ShowWhen: "locationType=multi-region",
+			OptionLabels: map[string]string{"us": "us (multiple regions in United States)", "eu": "eu (multiple regions in European Union)",
+				"asia": "asia (multiple regions in Asia)"},
+			Help: "A Cloud SQL instance is backed up to the multi-region whose regions share its region's prefix: us-central1 to us."},
 		{Name: "retentionDays", Label: "Minimum enforced retention (days)", Type: "text", Required: true, Default: "1",
 			Pattern: `[0-9]{1,5}`, Section: "Prevent backup deletion",
 			Help: "0 days to 99 years (36135 days): no backup in the vault can be deleted before it is this old."},
 		{Name: "inherit", Label: "Prevent deletion for duration specified in backup rule", Type: "checkbox", Section: "Prevent backup deletion",
-			Unavailable: "Not available locally: the vault's backupRetentionInheritance is not served yet (#1921)."},
+			Help: "Each backup's enforced retention ends at its expire time, the backup rule's Delete backups after. It cannot be changed later."},
 		{Name: "lock", Label: "Lock the enforced retention", Type: "checkbox", Section: "Prevent backup deletion",
-			Unavailable: "Not available locally: a retention lock (the vault's effectiveTime) is not kept yet (#1921)."},
+			Help: "From the lock's date on, the minimum enforced retention can only be increased, and the lock cannot be removed."},
+		{Name: "lockDate", Label: "Lock takes effect on", Type: "datetime-local", Section: "Prevent backup deletion", ShowWhen: "lock",
+			Help: "A future date and time, UTC."},
 		{Name: "encryption", Label: "Encryption", Type: "radio", Required: true, Section: "Encryption", Default: "google",
 			Options: []string{"google", "cmek"}, OptionLabels: map[string]string{"google": "Google-managed encryption key",
 				"cmek": "Customer-managed encryption key (CMEK)"}},
@@ -205,14 +211,28 @@ func (p backupDRProvider) Create(ctx context.Context, project string, v map[stri
 	if !bdrIDRe.MatchString(v["id"]) {
 		return "", fmt.Errorf("the backup vault name must be %s", bdrIDHelp)
 	}
+	loc := v["region"]
 	if v["locationType"] == "multi-region" {
-		return "", errors.New("a multi-region backup vault is not served yet (#1921)")
+		loc = v["multiRegion"]
+		if !backupdr.IsMultiRegion(loc) {
+			return "", errors.New("choose the multi-region: us, eu or asia")
+		}
 	}
 	retention, err := bdrRetentionSeconds(v["retentionDays"])
 	if err != nil {
 		return "", err
 	}
 	body := map[string]any{"backupMinimumEnforcedRetentionDuration": retention}
+	if v["inherit"] == "true" || v["inherit"] == "on" {
+		body["backupRetentionInheritance"] = "MATCH_BACKUP_EXPIRE_TIME"
+	}
+	if v["lock"] == "true" || v["lock"] == "on" {
+		t, err := bdrLockTime(v["lockDate"])
+		if err != nil {
+			return "", err
+		}
+		body["effectiveTime"] = t
+	}
 	if v["description"] != "" {
 		body["description"] = v["description"]
 	}
@@ -229,7 +249,7 @@ func (p backupDRProvider) Create(ctx context.Context, project string, v map[stri
 	} else if v["encryption"] == "cmek" {
 		return "", errors.New("choose the customer-managed encryption key")
 	}
-	_, err = p.call(ctx, p.bdr, http.MethodPost, "/v1/projects/"+project+"/locations/"+url.PathEscape(v["region"])+
+	_, err = p.call(ctx, p.bdr, http.MethodPost, "/v1/projects/"+project+"/locations/"+url.PathEscape(loc)+
 		"/backupVaults?backupVaultId="+url.QueryEscape(v["id"]), body)
 	return v["id"], err
 }
@@ -259,10 +279,11 @@ func (p backupDRProvider) Detail(ctx context.Context, project string, path []str
 	d := console.Detail{Summary: []console.Property{
 		{Label: "Created", Value: str(v, "createTime")}, {Label: "Last updated", Value: str(v, "updateTime")},
 		{Label: "Description", Value: str(v, "description")}, {Label: "Status", Value: str(v, "state")},
-		{Label: "Location type", Value: "Region"}, {Label: "Location", Value: bdrRegionLabel(locationOf(vault))},
+		{Label: "Location type", Value: bdrLocationType(locationOf(vault))}, {Label: "Location", Value: bdrRegionLabel(locationOf(vault))},
 		{Label: "Stored bytes", Value: str(v, "totalStoredBytes")}, {Label: "Backups", Value: str(v, "backupCount")},
 		{Label: "Enforced retention", Value: "Minimum for backups: " + bdrDuration(str(v, "backupMinimumEnforcedRetentionDuration"))},
-		{Label: "Retention lock status", Value: "Unlocked"},
+		{Label: "Retention lock status", Value: bdrLockStatus(v)},
+		{Label: "Retention inheritance", Value: bdrInheritanceLabel(str(v, "backupRetentionInheritance"))},
 		{Label: "Encryption type", Value: enc}}}
 	if ec != nil {
 		d.Summary = append(d.Summary, console.Property{Label: "Encryption key", Value: str(ec, "kmsKeyName")})
@@ -425,11 +446,8 @@ func (p backupDRProvider) DetailActions(ctx context.Context, project string, pat
 	if v, err := p.get(ctx, vault); err == nil {
 		days := strings.TrimSuffix(bdrDuration(str(v, "backupMinimumEnforcedRetentionDuration")), " days")
 		days = strings.TrimSuffix(days, " day")
-		acts = append(acts, console.Action{ID: "editretention", Label: "Edit minimum enforced retention", Submit: "Save", Fields: []console.Field{
-			{Name: "retentionDays", Label: "New minimum enforced retention period (days)", Type: "text", Required: true, Default: days,
-				Pattern: `[0-9]{1,5}`, Help: "0 days to 99 years (36135 days). While the retention is unlocked it can be increased or decreased."},
-			{Name: "lock", Label: "Lock the enforced retention", Type: "checkbox",
-				Unavailable: "Not available locally: a retention lock (the vault's effectiveTime) is not kept yet (#1921)."}}},
+		acts = append(acts, console.Action{ID: "editretention", Label: "Edit minimum enforced retention", Submit: "Save",
+			Fields: bdrRetentionFields(v, days)},
 			console.Action{ID: "editvault", Label: "Edit vault", Fields: []console.Field{
 				{Name: "description", Label: "Description", Type: "text", Default: str(v, "description")},
 				{Name: "labels", Label: "Labels", Type: "text", Default: bdrLabelsText(v["labels"]), Help: "key=value pairs, comma-separated."},
@@ -497,9 +515,15 @@ func (p backupDRProvider) editPlan(ctx context.Context, loc string, v map[string
 				if sch == nil {
 					sch = map[string]any{"timeZone": "UTC"}
 				}
-				sch["recurrenceType"] = v["recurrence"]
-				if v["recurrence"] == "HOURLY" && sch["hourlyFrequency"] == nil {
-					sch["hourlyFrequency"] = 6
+				if sch["recurrenceType"] != v["recurrence"] {
+					sch["recurrenceType"] = v["recurrence"]
+					delete(sch, "hourlyFrequency")
+					if v["recurrence"] == "HOURLY" {
+						sch["hourlyFrequency"] = 6
+					}
+					if err := bdrApplyDays(sch, v["recurrence"], "", "", "", true); err != nil {
+						return err
+					}
 				}
 				r["standardSchedule"] = sch
 			}
@@ -547,6 +571,9 @@ func (p backupDRProvider) ActAt(ctx context.Context, project string, path []stri
 		if v["recurrence"] == "HOURLY" {
 			sch["hourlyFrequency"] = 6
 		}
+		if err := bdrApplyDays(sch, v["recurrence"], "", "", "", true); err != nil {
+			return err
+		}
 		var ret, logDays int
 		if _, e := fmt.Sscan(v["retention"], &ret); e != nil {
 			return fmt.Errorf("retention %q is not a number of days", v["retention"])
@@ -568,8 +595,18 @@ func (p backupDRProvider) ActAt(ctx context.Context, project string, path []stri
 		if e != nil {
 			return e
 		}
-		_, err = p.call(ctx, p.bdr, http.MethodPatch, "/v1/"+vault+"?updateMask=backupMinimumEnforcedRetentionDuration",
-			map[string]any{"backupMinimumEnforcedRetentionDuration": retention})
+		mask, body := "backupMinimumEnforcedRetentionDuration", map[string]any{"backupMinimumEnforcedRetentionDuration": retention}
+		switch v["lock"] {
+		case "lock":
+			t, e := bdrLockTime(v["lockDate"])
+			if e != nil {
+				return e
+			}
+			mask, body["effectiveTime"] = mask+",effectiveTime", t
+		case "remove":
+			mask, body["effectiveTime"] = mask+",effectiveTime", ""
+		}
+		_, err = p.call(ctx, p.bdr, http.MethodPatch, "/v1/"+vault+"?updateMask="+mask, body)
 	case "editvault":
 		labels, e := bdrParseLabels(v["labels"])
 		if e != nil {
@@ -658,4 +695,76 @@ func (p backupDRProvider) checkTriggerRule(ctx context.Context, loc, assoc, rule
 	}
 	return fmt.Errorf("rule %q is not in backup plan %s, which association %s applies; its rules are %s",
 		rule, lastSegment(str(a, "backupPlan")), assoc, strings.Join(ids, ", "))
+}
+
+// bdrLockTime reads a retention lock's date, a datetime-local in UTC
+// ("2026-12-01T00:00") or RFC 3339, as the API's effectiveTime.
+func bdrLockTime(v string) (string, error) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return "", errors.New("choose the date the retention lock takes effect")
+	}
+	for _, layout := range []string{time.RFC3339, "2006-01-02T15:04", "2006-01-02T15:04:05", "2006-01-02"} {
+		if t, err := time.Parse(layout, v); err == nil {
+			return t.UTC().Format(time.RFC3339), nil
+		}
+	}
+	return "", fmt.Errorf("the lock date %q is not a date and time such as 2026-12-01T00:00", v)
+}
+
+// bdrLockStatus is Google's Retention lock status: Unlocked, Lock takes
+// effect on …, or Locked.
+func bdrLockStatus(v map[string]any) string {
+	e := str(v, "effectiveTime")
+	if e == "" {
+		return "Unlocked"
+	}
+	if t, err := time.Parse(time.RFC3339Nano, e); err == nil && t.After(time.Now()) {
+		return "Lock takes effect on " + t.UTC().Format("2006-01-02 15:04 UTC")
+	}
+	return "Locked"
+}
+
+func bdrLocationType(loc string) string {
+	if backupdr.IsMultiRegion(loc) {
+		return "Multi-region"
+	}
+	return "Region"
+}
+
+func bdrInheritanceLabel(v string) string {
+	if v == "MATCH_BACKUP_EXPIRE_TIME" {
+		return "Prevent deletion for duration specified in backup rule"
+	}
+	return "Minimum enforced retention of the vault"
+}
+
+// bdrRetentionFields are Edit minimum enforced retention's fields: the
+// days, and the retention lock as Google's states allow it (#1921). While
+// Unlocked, a lock can be set; while it is pending, moved or removed; once
+// Locked, the retention can only be increased.
+func bdrRetentionFields(v map[string]any, days string) []console.Field {
+	status := bdrLockStatus(v)
+	help := "0 days to 99 years (36135 days). While the retention is unlocked it can be increased or decreased."
+	if status == "Locked" {
+		help = "The retention is locked: it can only be increased."
+	}
+	fields := []console.Field{{Name: "retentionDays", Label: "New minimum enforced retention period (days)", Type: "text", Required: true,
+		Default: days, Pattern: `[0-9]{1,5}`, Help: help}}
+	switch {
+	case status == "Unlocked":
+		fields = append(fields,
+			console.Field{Name: "lock", Label: "Retention lock", Type: "radio", Options: []string{"keep", "lock"}, Default: "keep",
+				OptionLabels: map[string]string{"keep": "Leave unlocked", "lock": "Lock the enforced retention"}},
+			console.Field{Name: "lockDate", Label: "Lock takes effect on", Type: "datetime-local", ShowWhen: "lock=lock",
+				Help: "A future date and time, UTC. From then on the lock cannot be removed."})
+	case status != "Locked":
+		fields = append(fields,
+			console.Field{Name: "lock", Label: "Retention lock", Type: "radio", Options: []string{"keep", "lock", "remove"}, Default: "keep",
+				OptionLabels: map[string]string{"keep": status, "lock": "Change the lock date", "remove": "Remove the lock"},
+				Help:         "The lock can be removed until its date; removing it clears the date."},
+			console.Field{Name: "lockDate", Label: "Lock takes effect on", Type: "datetime-local", ShowWhen: "lock=lock",
+				Help: "A future date and time, UTC."})
+	}
+	return fields
 }

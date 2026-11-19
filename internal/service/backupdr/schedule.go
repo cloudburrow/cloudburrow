@@ -112,11 +112,11 @@ func isDue(sch map[string]any, last, now time.Time) bool {
 			return false
 		}
 	case "MONTHLY":
-		if !numbers(sch["daysOfMonth"], now.Day()) {
+		if !onDayOfMonth(sch, now) {
 			return false
 		}
 	case "YEARLY":
-		if !names(sch["months"], strings.ToUpper(now.Month().String())) || !numbers(sch["daysOfMonth"], now.Day()) {
+		if !names(sch["months"], strings.ToUpper(now.Month().String())) || !onDayOfMonth(sch, now) {
 			return false
 		}
 	}
@@ -142,4 +142,22 @@ func numbers(v any, want int) bool {
 		}
 	}
 	return false
+}
+
+// onDayOfMonth is whether now is one of daysOfMonth, or the
+// weekDayOfMonth (such as the LAST SUNDAY) (#1923).
+func onDayOfMonth(sch map[string]any, now time.Time) bool {
+	w, ok := sch["weekDayOfMonth"].(map[string]any)
+	if !ok {
+		return numbers(sch["daysOfMonth"], now.Day())
+	}
+	if d, _ := w["dayOfWeek"].(string); d != strings.ToUpper(now.Weekday().String()) {
+		return false
+	}
+	week, _ := w["weekOfMonth"].(string)
+	if week == "LAST" {
+		return now.AddDate(0, 0, 7).Month() != now.Month()
+	}
+	n := map[string]int{"FIRST": 1, "SECOND": 2, "THIRD": 3, "FOURTH": 4}[week]
+	return n > 0 && (now.Day()-1)/7+1 == n
 }

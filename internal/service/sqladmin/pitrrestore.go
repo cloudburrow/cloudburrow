@@ -77,7 +77,13 @@ func (s *Server) pointInTimeRestore(r *http.Request, base, project string) (any,
 	}
 	// The clone-to-a-time path (#1330): a new instance with the source's
 	// settings, recovered to pointInTime from its bases and its log.
-	return s.cloneInstance(cloneRequest(body.TargetInstance, body.PointInTime), base, project, e)
+	out, err := s.cloneInstance(cloneRequest(body.TargetInstance, body.PointInTime), base, project, e)
+	if op, ok := out.(map[string]any); ok && err == nil {
+		if id, _ := op["name"].(string); id != "" {
+			s.logRestore(id, "PITR", body.Datasource, project, body.TargetInstance, body.PointInTime)
+		}
+	}
+	return out, err
 }
 
 // engineIsCreated is whether instance is a created instance (of any project).

@@ -203,8 +203,9 @@ type Listing struct {
 	// Tabs, when set, draw the list screen as tabs, as Google's Cloud
 	// Storage Settings page has Project access and Interoperability (#1843):
 	// the tab whose ID is ListTab holds the rows, with the screen's create
-	// and actions, and any other shows Summary. Only ID, Label and Note of
-	// each are read.
+	// and actions, and any other shows Summary. Only ID, Label, Note and
+	// Groups of each are read: a tab with Groups draws them in place of
+	// Summary, and the list tab draws its Groups over its rows (#1924).
 	Tabs    []Section `json:"tabs,omitempty"`
 	ListTab string    `json:"listTab,omitempty"`
 }

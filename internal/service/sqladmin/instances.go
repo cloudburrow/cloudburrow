@@ -1220,7 +1220,43 @@ func (s *Server) pending(base, project, instance, opType string) map[string]any 
 
 func (s *Server) finish(id string, err error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	hook := s.opHooks[id]
+	delete(s.opHooks, id)
+	s.finishLocked(id, err)
+	s.mu.Unlock()
+	if hook != nil {
+		hook(err)
+	}
+}
+
+// onFinish runs fn with the operation's error once finish ends it, at
+// once if it has ended.
+func (s *Server) onFinish(id string, fn func(error)) {
+	s.mu.Lock()
+	op := s.ops[id]
+	if op != nil && op["status"] == "DONE" {
+		var err error
+		if e, ok := op["error"].(map[string]any); ok {
+			msg := "the operation failed"
+			if l, _ := e["errors"].([]any); len(l) > 0 {
+				if m, _ := l[0].(map[string]any)["message"].(string); m != "" {
+					msg = m
+				}
+			}
+			err = errors.New(msg)
+		}
+		s.mu.Unlock()
+		fn(err)
+		return
+	}
+	if s.opHooks == nil {
+		s.opHooks = map[string]func(error){}
+	}
+	s.opHooks[id] = fn
+	s.mu.Unlock()
+}
+
+func (s *Server) finishLocked(id string, err error) {
 	op := s.ops[id]
 	if op == nil {
 		return
