@@ -265,3 +265,63 @@ func TestEventarcDeliversToAFunction(t *testing.T) {
 		}
 	}
 }
+
+// A 2nd-gen function's own audit-log and Firestore triggers (#1853): its
+// event_trigger is checked as Eventarc's are, its transport is a topic
+// Eventarc makes, and the events Eventarc sources reach that topic.
+func TestFunctionSourcedTriggersAreServed(t *testing.T) {
+	pub := &fakePublisher{}
+	f := (&FunctionsServer{}).WithEvents(Events{Transport: pub, PushBase: func() string { return "http://push" }})
+	audit := &functionspb.EventTrigger{EventType: auditLogWritten, TriggerRegion: "us-central1", EventFilters: []*functionspb.EventFilter{
+		{Attribute: "serviceName", Value: "secretmanager.googleapis.com"},
+		{Attribute: "methodName", Value: "google.cloud.secretmanager.v1.SecretManagerService.CreateSecret"}}}
+	if err := f.checkEventTrigger(audit); err != nil {
+		t.Fatalf("checkEventTrigger(audit log) = %v", err)
+	}
+	if err := f.checkEventTrigger(&functionspb.EventTrigger{EventType: auditLogWritten}); err == nil {
+		t.Error("an audit-log trigger without serviceName and methodName was accepted")
+	}
+	if err := f.checkEventTrigger(&functionspb.EventTrigger{EventType: auditLogWritten, PubsubTopic: "projects/p/topics/t",
+		EventFilters: audit.GetEventFilters()}); err == nil {
+		t.Error("an audit-log trigger with a pubsub_topic was accepted")
+	}
+	fsSpec := &functionspb.EventTrigger{EventType: firestorePrefix + "written", TriggerRegion: "us-central1",
+		EventFilters: []*functionspb.EventFilter{{Attribute: "database", Value: "(default)"}}}
+	if err := f.checkEventTrigger(fsSpec); err != nil {
+		t.Fatalf("checkEventTrigger(Firestore) = %v", err)
+	}
+	live, err := f.makeTrigger(context.Background(), "projects/fnsp/locations/us-central1/functions/aud", audit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(live.topic, "projects/fnsp/topics/eventarc-us-central1-aud-") ||
+		len(pub.calls) != 2 || !strings.HasPrefix(pub.calls[0], "topic "+live.topic) || !strings.Contains(pub.calls[1], " "+live.topic+" ") {
+		t.Fatalf("the trigger made topic %q with %v", live.topic, pub.calls)
+	}
+	fs, err := f.makeTrigger(context.Background(), "projects/fnsp/locations/us-central1/functions/docs", fsSpec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	functions.mu.Lock()
+	functions.fns["projects/fnsp/locations/us-central1/functions/aud"] = &storedFunction{fn: &functionspb.Function{}, trigger: live}
+	functions.fns["projects/fnsp/locations/us-central1/functions/docs"] = &storedFunction{fn: &functionspb.Function{}, trigger: fs}
+	functions.mu.Unlock()
+	t.Cleanup(func() {
+		functions.mu.Lock()
+		delete(functions.fns, "projects/fnsp/locations/us-central1/functions/aud")
+		delete(functions.fns, "projects/fnsp/locations/us-central1/functions/docs")
+		functions.mu.Unlock()
+	})
+	call := AuditCall{Project: "fnsp", ServiceName: "secretmanager.googleapis.com",
+		MethodName: "google.cloud.secretmanager.v1.SecretManagerService.CreateSecret", ResourceName: "projects/fnsp/secrets/s"}
+	if n := f.Eventarc().EmitAuditLog(context.Background(), call); n != 1 || pub.topics[len(pub.topics)-1] != live.topic {
+		t.Errorf("EmitAuditLog = %d to %v; want the function's topic %s", n, pub.topics, live.topic)
+	}
+	found := false
+	for _, w := range FirestoreWatches() {
+		found = found || w == (FirestoreWatch{"fnsp", "(default)", ""})
+	}
+	if !found {
+		t.Errorf("FirestoreWatches = %v; want the function's database watched", FirestoreWatches())
+	}
+}

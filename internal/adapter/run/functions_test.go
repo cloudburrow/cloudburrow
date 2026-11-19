@@ -236,12 +236,12 @@ func TestV1FailedCreateAnswer(t *testing.T) {
 }
 
 // TestOtherEventTypesSayWhy (#1464): an event type no served service emits
-// is refused with the reason.
+// is refused with the reason. Audit logs and Firestore are served (#1853).
 func TestOtherEventTypesSayWhy(t *testing.T) {
 	on := (&FunctionsServer{}).WithEvents(Events{})
 	for typ, want := range map[string]string{
-		"google.cloud.audit.log.v1.written":              "Cloud Audit Logs",
-		"google.cloud.firestore.document.v1.written":     "emulators",
+		"google.cloud.audit.log.v1.created":              "the one Cloud Audit Logs event type",
+		"google.cloud.datastore.entity.v1.written":       "Datastore mode",
 		"google.firebase.auth.user.v1.created":           "Firebase",
 		"google.cloud.cloudbuild.build.v1.statusChanged": "not served",
 	} {
