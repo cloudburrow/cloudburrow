@@ -2,6 +2,7 @@ package bigtablefront
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"io"
 	"regexp"
@@ -28,8 +29,18 @@ import (
 // Apply calls the configuration's session_load names through sessions
 // instead of ReadRows and MutateRow.
 //
-// The front answers a configuration with session_load 1, so such a client
-// sends every point read and write through a session, and serves the
+// The front answers the session_load Google's client ships as its own
+// default (internal/transport/default_client_config.go, SessionLoad 0 in
+// v1.58.0 and on main, re-read 2026-11-18): every call stays on the
+// classic data plane, as it does against Google until Google's control
+// plane raises it. Google does not document the share it serves today.
+// The client's one opt-in is CBT_FORCE_SESSION=true, which sets
+// sessions_required in the bigtable-features header of every call,
+// GetClientConfiguration's polls included (feature_flags.go: "server gates
+// the actual capability"); to such a client the front answers session_load
+// 1, so it sends every point read and write through a session (#1824: a
+// load of 1 to every client exposed them all to the client's own
+// cold-pool lost wake-up, fixed upstream after v1.58.0). It serves the
 // sessions: the OpenSession handshake, the session parameters (the
 // heartbeat interval), heartbeats while a vRPC runs, and each vRPC (V1:
 // one at a time per session, ReadRow and MutateRow) as the classic call it
@@ -62,13 +73,14 @@ var (
 	sessionMatViewRe  = regexp.MustCompile(`^projects/[^/]+/instances/[^/]+/materializedViews/[^/]+$`)
 )
 
-// clientConfiguration is the configuration the front gives every client:
-// every point call through a session, a small pool (one server to talk
+// clientConfiguration is the configuration the front gives a client:
+// session_load 0, Google's client default, unless the client requires
+// sessions (sessionsRequired), then 1; a small pool (one server to talk
 // to), and a poll every five minutes, as Google's default does.
-func clientConfiguration() *btpb.ClientConfiguration {
+func clientConfiguration(load float32) *btpb.ClientConfiguration {
 	return &btpb.ClientConfiguration{
 		SessionConfiguration: &btpb.SessionClientConfiguration{
-			SessionLoad: 1,
+			SessionLoad: load,
 			ChannelConfiguration: &btpb.SessionClientConfiguration_ChannelPoolConfiguration{
 				MinServerCount: 1, MaxServerCount: 1, PerServerSessionCount: 10,
 				Mode: &btpb.SessionClientConfiguration_ChannelPoolConfiguration_CloudPathOnly_{
@@ -93,11 +105,15 @@ func clientConfiguration() *btpb.ClientConfiguration {
 
 // sessionMethods are the session data plane's methods.
 func (f *Front) sessionMethods() (map[string]method, map[string]func(grpc.ServerStream) error) {
-	config := func(_ context.Context, req *btpb.GetClientConfigurationRequest) (proto.Message, error) {
+	config := func(ctx context.Context, req *btpb.GetClientConfigurationRequest) (proto.Message, error) {
 		if !sessionInstanceRe.MatchString(req.GetInstanceName()) {
 			return nil, status.Errorf(codes.InvalidArgument, "Invalid instance_name %q: want projects/<project>/instances/<instance>.", req.GetInstanceName())
 		}
-		return clientConfiguration(), nil
+		var load float32
+		if sessionsRequired(ctx) {
+			load = 1
+		}
+		return clientConfiguration(load), nil
 	}
 	served := map[string]method{
 		getClientConfiguration: unary(func() *btpb.GetClientConfigurationRequest { return &btpb.GetClientConfigurationRequest{} }, config),
@@ -108,6 +124,32 @@ func (f *Front) sessionMethods() (map[string]method, map[string]func(grpc.Server
 		openMaterializedView: func(ss grpc.ServerStream) error { return f.serveSession(ss, matViewScope) },
 	}
 	return served, streams
+}
+
+// featureFlagsHeader is the metadata key the Go client sends its
+// FeatureFlags in, base64 (URL alphabet) of the encoded proto
+// (internal/transport/feature_flags.go, FeatureFlagsHeader).
+const featureFlagsHeader = "bigtable-features"
+
+// sessionsRequired reports whether the call's bigtable-features header
+// sets sessions_required: the Go client sets it when CBT_FORCE_SESSION is
+// true. A header that does not decode requires nothing.
+func sessionsRequired(ctx context.Context) bool {
+	md, _ := metadata.FromIncomingContext(ctx)
+	for _, v := range md.Get(featureFlagsHeader) {
+		for _, enc := range []*base64.Encoding{base64.URLEncoding, base64.RawURLEncoding, base64.StdEncoding, base64.RawStdEncoding} {
+			b, err := enc.DecodeString(v)
+			if err != nil {
+				continue
+			}
+			var ff btpb.FeatureFlags
+			if proto.Unmarshal(b, &ff) == nil && ff.GetSessionsRequired() {
+				return true
+			}
+			break
+		}
+	}
+	return false
 }
 
 type sessionScope int

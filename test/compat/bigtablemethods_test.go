@@ -3,6 +3,8 @@
 package compat
 
 import (
+	"context"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -21,6 +23,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 )
@@ -234,7 +237,11 @@ func TestBigtablePingAndWarm(t *testing.T) {
 // builds a session client when it dials the endpoint itself, not through
 // BIGTABLE_EMULATOR_HOST, polls GetClientConfiguration, and sends the share
 // of its ReadRow and Apply calls session_load names through sessions. The
-// front answers session_load 1 and serves the sessions: the client's writes
+// front answers Google's client default, session_load 0, to a client that
+// does not ask for sessions: its calls stay classic (#1824). With
+// CBT_FORCE_SESSION=true, the client's one opt-in, the client sends
+// sessions_required and the front answers session_load 1 and serves the
+// sessions: the client's writes
 // and reads of a table and of an authorized view go through OpenTable and
 // OpenAuthorizedView, with no classic ReadRows or MutateRow, and read and
 // write what those do (an authorized view's subset applies:
@@ -243,6 +250,10 @@ func TestBigtablePingAndWarm(t *testing.T) {
 // read on a write session PERMISSION_DENIED, and a materialized view's
 // session, whose ReadRow is UNIMPLEMENTED as ReadRows of one is (the
 // client then reads it the classic way).
+//
+// The first session call on each table and view warms its session pool,
+// with a short deadline and one retry if the client lost its own cold-pool
+// wake-up (bigtableLostWakeup); the retry must succeed.
 //
 // covers: google.bigtable.v2.Bigtable/GetClientConfiguration, google.bigtable.v2.Bigtable/OpenTable, google.bigtable.v2.Bigtable/OpenAuthorizedView
 // covers: google.bigtable.v2.Bigtable/OpenMaterializedView (unimplemented)
@@ -276,6 +287,8 @@ func TestBigtableSessions(t *testing.T) {
 
 	// The client dials the endpoint itself, as against Google.
 	t.Setenv("BIGTABLE_EMULATOR_HOST", "")
+	bigtableDefaultClientStaysClassic(t, h, endpoint, table)
+	t.Setenv("CBT_FORCE_SESSION", "true")
 	c, err := bigtable.NewClientWithConfig(ctx, h.Project(), bigtableInstance,
 		bigtable.ClientConfig{MetricsProvider: bigtable.NoopMetricsProvider{}, DisableDirectAccess: true},
 		option.WithEndpoint(endpoint), option.WithoutAuthentication(),
@@ -292,11 +305,20 @@ func TestBigtableSessions(t *testing.T) {
 	tbl := c.Open("sessions")
 	start := bigtableLastCall(t, endpoint)
 	// Until the client's first poll lands, its writes are classic.
+	retried := false
 	for i := 0; ; i++ {
 		seq := bigtableLastCall(t, endpoint)
 		m := bigtable.NewMutation()
 		m.Set("info", "q", bigtable.Timestamp(1000), []byte("v1"))
-		if err := tbl.Apply(ctx, "r1", m); err != nil {
+		actx, acancel := context.WithTimeout(ctx, 10*time.Second)
+		err := tbl.Apply(actx, "r1", m)
+		acancel()
+		if bigtableLostWakeup(err) && !retried {
+			t.Logf("the client lost its cold-pool wake-up (#1824); retrying once: %v", err)
+			retried = true
+			continue
+		}
+		if err != nil {
 			t.Fatalf("Apply: %v", err)
 		}
 		if bigtableCalls(t, endpoint, seq, "/google.bigtable.v2.Bigtable/MutateRow", table) == 0 {
@@ -343,7 +365,14 @@ func TestBigtableSessions(t *testing.T) {
 	view := c.OpenAuthorizedView("sessions", "v")
 	vm := bigtable.NewMutation()
 	vm.Set("info", "q", bigtable.Timestamp(3000), []byte("in"))
-	if err := view.Apply(ctx, "v#1", vm); err != nil {
+	vctx, vcancel := context.WithTimeout(ctx, 10*time.Second)
+	err = view.Apply(vctx, "v#1", vm)
+	vcancel()
+	if bigtableLostWakeup(err) {
+		t.Logf("the client lost its cold-pool wake-up (#1824); retrying once: %v", err)
+		err = view.Apply(ctx, "v#1", vm)
+	}
+	if err != nil {
 		t.Errorf("Apply inside the view: %v", err)
 	}
 	if r, err := view.ReadRow(ctx, "v#1"); err != nil || len(r["info"]) != 1 || string(r["info"][0].Value) != "in" {
@@ -380,6 +409,65 @@ func TestBigtableSessions(t *testing.T) {
 	bigtableSessionsByHand(t, h, inst, table)
 }
 
+// bigtableLostWakeup reports whether err is the Go client's own session
+// pool giving up on a checkout: cloud.google.com/go/bigtable v1.58.0 can
+// miss the wake-up of a caller that reaches a cold pool as its first
+// session turns Ready, and leave it parked beside the idle session until
+// its deadline (#1824; fixed upstream after v1.58.0 by
+// googleapis/google-cloud-go#20832). The client raises it before it sends
+// the vRPC, so the front never saw the call.
+func bigtableLostWakeup(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "bigtable: no sessions available")
+}
+
+// bigtableDefaultClientStaysClassic: a client without CBT_FORCE_SESSION,
+// once its configuration poll has landed, writes and reads the classic
+// way: it is told session_load 0, Google's client default (#1824).
+func bigtableDefaultClientStaysClassic(t *testing.T, h *Harness, endpoint, table string) {
+	t.Helper()
+	ctx := h.Context()
+	start := bigtableLastCall(t, endpoint)
+	c, err := bigtable.NewClientWithConfig(ctx, h.Project(), bigtableInstance,
+		bigtable.ClientConfig{MetricsProvider: bigtable.NoopMetricsProvider{}, DisableDirectAccess: true},
+		option.WithEndpoint(endpoint), option.WithoutAuthentication(),
+		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
+	if err != nil {
+		t.Fatalf("NewClientWithConfig: %v", err)
+	}
+	defer c.Close()
+	deadline := time.Now().Add(30 * time.Second)
+	for bigtableCalls(t, endpoint, start, "/google.bigtable.v2.Bigtable/GetClientConfiguration", "") == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the default client never polled GetClientConfiguration")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	time.Sleep(200 * time.Millisecond)
+	seq := bigtableLastCall(t, endpoint)
+	tbl := c.Open("sessions")
+	const n = 3
+	for i := 0; i < n; i++ {
+		m := bigtable.NewMutation()
+		m.Set("info", "d", bigtable.Timestamp(100), []byte("default"))
+		if err := tbl.Apply(ctx, "d1", m); err != nil {
+			t.Fatalf("Apply from the default client: %v", err)
+		}
+		if _, err := tbl.ReadRow(ctx, "d1"); err != nil {
+			t.Fatalf("ReadRow from the default client: %v", err)
+		}
+	}
+	for _, method := range []string{"ReadRows", "MutateRow"} {
+		if got := bigtableCalls(t, endpoint, seq, "/google.bigtable.v2.Bigtable/"+method, table); got != n {
+			t.Errorf("the default client's classic %s calls = %d, want %d (session_load 0)", method, got, n)
+		}
+	}
+	del := bigtable.NewMutation()
+	del.DeleteRow()
+	if err := tbl.Apply(ctx, "d1", del); err != nil {
+		t.Fatalf("Apply DeleteRow: %v", err)
+	}
+}
+
 // bigtableSessionsByHand drives the protocol through the generated stub.
 func bigtableSessionsByHand(t *testing.T, h *Harness, inst, table string) {
 	t.Helper()
@@ -392,8 +480,13 @@ func bigtableSessionsByHand(t *testing.T, h *Harness, inst, table string) {
 	d := bigtablepb.NewBigtableClient(conn)
 
 	cfg, err := d.GetClientConfiguration(ctx, &bigtablepb.GetClientConfigurationRequest{InstanceName: inst})
-	if err != nil || cfg.GetSessionConfiguration().GetSessionLoad() != 1 || cfg.GetPollingConfiguration().GetPollingInterval().AsDuration() <= 0 {
-		t.Fatalf("GetClientConfiguration = %v, %v, want session_load 1 and a polling interval", cfg, err)
+	if err != nil || cfg.GetSessionConfiguration().GetSessionLoad() != 0 || cfg.GetPollingConfiguration().GetPollingInterval().AsDuration() <= 0 {
+		t.Fatalf("GetClientConfiguration = %v, %v, want session_load 0 (Google's client default) and a polling interval", cfg, err)
+	}
+	ff, _ := proto.Marshal(&bigtablepb.FeatureFlags{SessionsCompatible: true, SessionsRequired: true})
+	fctx := metadata.AppendToOutgoingContext(ctx, "bigtable-features", base64.URLEncoding.EncodeToString(ff))
+	if cfg, err := d.GetClientConfiguration(fctx, &bigtablepb.GetClientConfigurationRequest{InstanceName: inst}); err != nil || cfg.GetSessionConfiguration().GetSessionLoad() != 1 {
+		t.Errorf("GetClientConfiguration with sessions_required = %v, %v, want session_load 1", cfg, err)
 	}
 	if _, err := d.GetClientConfiguration(ctx, &bigtablepb.GetClientConfigurationRequest{InstanceName: "cb-instance"}); status.Code(err) != codes.InvalidArgument {
 		t.Errorf("GetClientConfiguration of a malformed name = %v, want InvalidArgument", err)

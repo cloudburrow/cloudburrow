@@ -8831,7 +8831,7 @@
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/CheckConsistency",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:161 TestBigtableTableMaintenance"
+          "test/compat/bigtablemethods_test.go:164 TestBigtableTableMaintenance"
         ]
       },
       {
@@ -8914,7 +8914,7 @@
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/DeleteTable",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:161 TestBigtableTableMaintenance",
+          "test/compat/bigtablemethods_test.go:164 TestBigtableTableMaintenance",
           "test/compat/storediam_test.go:220 TestBigtableTableIAM"
         ]
       },
@@ -8922,14 +8922,14 @@
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/DropRowRange",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:161 TestBigtableTableMaintenance"
+          "test/compat/bigtablemethods_test.go:164 TestBigtableTableMaintenance"
         ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/GenerateConsistencyToken",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:161 TestBigtableTableMaintenance"
+          "test/compat/bigtablemethods_test.go:164 TestBigtableTableMaintenance"
         ]
       },
       {
@@ -9104,14 +9104,14 @@
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/UpdateTable",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:161 TestBigtableTableMaintenance"
+          "test/compat/bigtablemethods_test.go:164 TestBigtableTableMaintenance"
         ]
       },
       {
         "method": "google.bigtable.v2.Bigtable/CheckAndMutateRow",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:85 TestBigtableBulkAndConditionalWrites"
+          "test/compat/bigtablemethods_test.go:88 TestBigtableBulkAndConditionalWrites"
         ]
       },
       {
@@ -9135,7 +9135,7 @@
         "method": "google.bigtable.v2.Bigtable/GetClientConfiguration",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:249 TestBigtableSessions"
+          "test/compat/bigtablemethods_test.go:260 TestBigtableSessions"
         ]
       },
       {
@@ -9149,21 +9149,21 @@
         "method": "google.bigtable.v2.Bigtable/MutateRows",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:85 TestBigtableBulkAndConditionalWrites"
+          "test/compat/bigtablemethods_test.go:88 TestBigtableBulkAndConditionalWrites"
         ]
       },
       {
         "method": "google.bigtable.v2.Bigtable/OpenAuthorizedView",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:249 TestBigtableSessions"
+          "test/compat/bigtablemethods_test.go:260 TestBigtableSessions"
         ]
       },
       {
         "method": "google.bigtable.v2.Bigtable/OpenMaterializedView",
         "status": "Refused",
         "tests": [
-          "test/compat/bigtablemethods_test.go:249 TestBigtableSessions"
+          "test/compat/bigtablemethods_test.go:260 TestBigtableSessions"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -9171,14 +9171,14 @@
         "method": "google.bigtable.v2.Bigtable/OpenTable",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:249 TestBigtableSessions"
+          "test/compat/bigtablemethods_test.go:260 TestBigtableSessions"
         ]
       },
       {
         "method": "google.bigtable.v2.Bigtable/PingAndWarm",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:221 TestBigtablePingAndWarm"
+          "test/compat/bigtablemethods_test.go:224 TestBigtablePingAndWarm"
         ]
       },
       {
@@ -9204,7 +9204,7 @@
         "method": "google.bigtable.v2.Bigtable/ReadModifyWriteRow",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:85 TestBigtableBulkAndConditionalWrites"
+          "test/compat/bigtablemethods_test.go:88 TestBigtableBulkAndConditionalWrites"
         ]
       },
       {
@@ -9221,7 +9221,7 @@
         "method": "google.bigtable.v2.Bigtable/SampleRowKeys",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:85 TestBigtableBulkAndConditionalWrites"
+          "test/compat/bigtablemethods_test.go:88 TestBigtableBulkAndConditionalWrites"
         ]
       }
     ]

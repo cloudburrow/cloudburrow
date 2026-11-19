@@ -2,8 +2,10 @@ package bigtablefront
 
 import (
 	"context"
+	"encoding/base64"
 	"io"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/wrapperspb"
@@ -57,11 +60,31 @@ func classicCalls(f *Front, seq uint64, method, resource string) int {
 	return n
 }
 
+// lostWakeup reports whether err is the Go client's own session pool
+// giving up on a checkout: cloud.google.com/go/bigtable v1.58.0 can miss
+// the wake-up of a caller that reaches a cold pool as its first session
+// turns Ready, and leave it parked beside the idle session until its
+// deadline (#1824; fixed upstream after v1.58.0 by
+// googleapis/google-cloud-go#20832). The error is raised before the
+// client sends the vRPC, so the front never saw the call.
+func lostWakeup(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "bigtable: no sessions available")
+}
+
 // TestSessionsServeTheGoClient (#1523): the official client, dialling the
-// front itself, polls GetClientConfiguration, is told session_load 1, and
-// sends its point reads and writes through OpenTable sessions; they read
-// and write the table the classic calls do.
+// front itself with CBT_FORCE_SESSION=true, polls GetClientConfiguration
+// with sessions_required, is told session_load 1, and sends its point
+// reads and writes through OpenTable sessions; they read and write the
+// table the classic calls do.
+//
+// The first session call warms the table's session pool. It runs with a
+// short deadline and, if the client lost its own wake-up on the cold pool
+// (lostWakeup), runs once more: the retry must succeed, so a front that
+// never opens or never answers a session still fails here. Every later
+// call is sequential on a warm pool, where the client's fast path finds
+// the idle session and the race cannot arise, so it gets no retry.
 func TestSessionsServeTheGoClient(t *testing.T) {
+	t.Setenv("CBT_FORCE_SESSION", "true")
 	addr, f := serveFront(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -84,11 +107,20 @@ func TestSessionsServeTheGoClient(t *testing.T) {
 	tbl := c.Open("t")
 	name := "projects/p/instances/i/tables/t"
 	// Until the client's first poll lands its writes are classic.
+	retried := false
 	for i := 0; ; i++ {
 		seq := lastSeq(f)
 		m := bigtable.NewMutation()
 		m.Set("f", "q", bigtable.Timestamp(1000), []byte("v1"))
-		if err := tbl.Apply(ctx, "r1", m); err != nil {
+		actx, acancel := context.WithTimeout(ctx, 10*time.Second)
+		err := tbl.Apply(actx, "r1", m)
+		acancel()
+		if lostWakeup(err) && !retried {
+			t.Logf("the client lost its cold-pool wake-up (#1824); retrying once: %v", err)
+			retried = true
+			continue
+		}
+		if err != nil {
 			t.Fatalf("Apply: %v", err)
 		}
 		if classicCalls(f, seq, data+"MutateRow", name) == 0 {
@@ -130,6 +162,72 @@ func TestSessionsServeTheGoClient(t *testing.T) {
 	}
 }
 
+// TestSessionsDefaultClientStaysClassic (#1824): a client without
+// CBT_FORCE_SESSION is told Google's default session_load 0, so after its
+// configuration poll its point reads and writes stay ReadRows and
+// MutateRow, and it opens no session.
+func TestSessionsDefaultClientStaysClassic(t *testing.T) {
+	addr, f := serveFront(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	ac, err := bigtable.NewAdminClient(ctx, "p", "i", option.WithGRPCConn(dial(t, addr)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ac.CreateTable(ctx, "t"); err != nil {
+		t.Fatal(err)
+	}
+	if err := ac.CreateColumnFamily(ctx, "t", "f"); err != nil {
+		t.Fatal(err)
+	}
+	c, err := bigtable.NewClientWithConfig(ctx, "p", "i", bigtable.ClientConfig{MetricsProvider: bigtable.NoopMetricsProvider{}, DisableDirectAccess: true},
+		option.WithEndpoint(addr), option.WithoutAuthentication(),
+		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for !configPolled(f) {
+		if ctx.Err() != nil {
+			t.Fatal("the client never polled GetClientConfiguration")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	// The poll's listeners run as its answer lands; leave them a moment.
+	time.Sleep(200 * time.Millisecond)
+	seq := lastSeq(f)
+	tbl := c.Open("t")
+	name := "projects/p/instances/i/tables/t"
+	const n = 5
+	for i := 0; i < n; i++ {
+		m := bigtable.NewMutation()
+		m.Set("f", "q", bigtable.Timestamp(1000), []byte("v"))
+		if err := tbl.Apply(ctx, "r", m); err != nil {
+			t.Fatal(err)
+		}
+		if r, err := tbl.ReadRow(ctx, "r"); err != nil || len(r["f"]) != 1 {
+			t.Fatalf("ReadRow = %v, %v", r, err)
+		}
+	}
+	if w, r := classicCalls(f, seq, data+"MutateRow", name), classicCalls(f, seq, data+"ReadRows", name); w != n || r != n {
+		t.Errorf("classic calls = %d MutateRow, %d ReadRows, want %d each", w, r, n)
+	}
+	_ = c.Close()
+	// A session is logged as its handler returns, after the client's Close.
+	time.Sleep(200 * time.Millisecond)
+	if openTableLogged(f) {
+		t.Error("a client without CBT_FORCE_SESSION opened a session")
+	}
+}
+
+func configPolled(f *Front) bool {
+	for _, call := range f.Calls(0) {
+		if call.Method == getClientConfiguration {
+			return true
+		}
+	}
+	return false
+}
+
 func openTableLogged(f *Front) bool {
 	for _, call := range f.Calls(0) {
 		if call.Method == openTable {
@@ -167,8 +265,22 @@ func TestSessionsProtocol(t *testing.T) {
 	}
 	d := bigtablepb.NewBigtableClient(conn)
 	cfg, err := d.GetClientConfiguration(ctx, &bigtablepb.GetClientConfigurationRequest{InstanceName: "projects/p/instances/i"})
-	if err != nil || cfg.GetSessionConfiguration().GetSessionLoad() != 1 {
-		t.Fatalf("GetClientConfiguration = %v, %v", cfg, err)
+	if err != nil || cfg.GetSessionConfiguration().GetSessionLoad() != 0 {
+		t.Fatalf("GetClientConfiguration = %v, %v, want session_load 0 (Google's client default)", cfg, err)
+	}
+	for _, tc := range []struct {
+		flags *bigtablepb.FeatureFlags
+		want  float32
+	}{
+		{&bigtablepb.FeatureFlags{SessionsCompatible: true}, 0},
+		{&bigtablepb.FeatureFlags{SessionsCompatible: true, SessionsRequired: true}, 1},
+	} {
+		b, _ := proto.Marshal(tc.flags)
+		mctx := metadata.AppendToOutgoingContext(ctx, featureFlagsHeader, base64.URLEncoding.EncodeToString(b))
+		cfg, err := d.GetClientConfiguration(mctx, &bigtablepb.GetClientConfigurationRequest{InstanceName: "projects/p/instances/i"})
+		if err != nil || cfg.GetSessionConfiguration().GetSessionLoad() != tc.want {
+			t.Errorf("GetClientConfiguration with %v = %v, %v, want session_load %v", tc.flags, cfg, err, tc.want)
+		}
 	}
 	if _, err := d.GetClientConfiguration(ctx, &bigtablepb.GetClientConfigurationRequest{InstanceName: "p/i"}); status.Code(err) != codes.InvalidArgument {
 		t.Errorf("GetClientConfiguration of a malformed name = %v", err)
