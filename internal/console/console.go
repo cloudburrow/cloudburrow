@@ -299,6 +299,70 @@ type Field struct {
 	// submit what the API refuses.
 	Requires []string `json:"requires,omitempty"`
 	Excludes []string `json:"excludes,omitempty"`
+	// ShowWhen shows the field only while another field of the form holds
+	// a value: "name" for a checkbox that is checked, "name=value" for a
+	// radio or select choice, as Google's Create topic reveals the retention
+	// period under Enable message retention (#1847). A hidden field is not
+	// validated; it is still sent, so the provider reads it only when its
+	// condition holds. Conditions joined by "&" must all hold:
+	// "type=Distribution&bucket_type=Linear" (#1863).
+	ShowWhen string `json:"showWhen,omitempty"`
+	// Unavailable, on a checkbox, is why the choice cannot be made on this
+	// instance: the box is drawn as Google's page has it, unchecked and
+	// disabled, with the reason beside it, so the option stays visible and
+	// says why rather than vanishing (#1847: Create topic's Export data to
+	// BigQuery). The form sends it unchecked.
+	Unavailable string `json:"unavailable,omitempty"`
+	// UnavailableOptions, on a radio, are the choices that cannot be made on
+	// this instance, each with its reason: drawn disabled where Google's page
+	// has them, as Create subscription's Write to BigQuery (#1847).
+	UnavailableOptions map[string]string `json:"unavailableOptions,omitempty"`
+	// Group, on a "group" field (GroupFieldType), is the fields of one row
+	// of a repeatable group, as Google's Create sink has a row per
+	// exclusion filter, each with its name, filter and Disable (#1863).
+	// AddLabel is the button that adds a row ("Add exclusion"). The value
+	// is a JSON array of one object per row, each subfield's name to its
+	// value ("true" or "false" for a checkbox); ParseGroup reads it.
+	Group    []Field `json:"group,omitempty"`
+	AddLabel string  `json:"addLabel,omitempty"`
+}
+
+// GroupFieldType is the Type of a repeatable group of fields (Field.Group).
+const GroupFieldType = "group"
+
+// ParseGroup decodes a "group" field's value: one map per row, rows with
+// every subfield empty or "false" left out. An empty value is no rows.
+func ParseGroup(value string) ([]map[string]string, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return nil, nil
+	}
+	var rows []map[string]string
+	if err := json.Unmarshal([]byte(trimmed), &rows); err != nil {
+		return nil, fmt.Errorf("expected a JSON array of objects of string keys and values: %w", err)
+	}
+	out := rows[:0]
+	for _, r := range rows {
+		for _, v := range r {
+			if v != "" && v != "false" {
+				out = append(out, r)
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
+// FormatGroup encodes rows for a "group" field's prefilled value.
+func FormatGroup(rows []map[string]string) string {
+	if len(rows) == 0 {
+		return ""
+	}
+	encoded, err := json.Marshal(rows)
+	if err != nil {
+		return ""
+	}
+	return string(encoded)
 }
 
 // ParseMap decodes a "map" field's value.
@@ -392,6 +456,50 @@ type PageCreator interface {
 type CreateTitler interface {
 	Creator
 	CreateTitle() string
+}
+
+// CreateLayouter is a Creator whose create page is laid out other than as
+// numbered steps. CreateLayout returns "page" for one page with the
+// sections under headings, as Google's Pub/Sub Create topic, Create
+// subscription and Create schema are (#1847); "steps" (or a provider that
+// does not implement this) keeps the numbered sections with Continue that
+// Google's Cloud Storage and Cloud SQL create pages use.
+type CreateLayouter interface {
+	Creator
+	CreateLayout() string
+}
+
+// CreateLayoutPage is CreateLayout's single-page layout.
+const CreateLayoutPage = "page"
+
+// CreateLayoutNext is the numbered steps with Next where Continue would be,
+// as Google's Create log bucket has (#1863).
+const CreateLayoutNext = "next"
+
+// CreateCheck is a button on a create page that checks what the form holds
+// without creating anything: Google's Validate definition and Test message
+// on Create schema (#1847). A check with fields asks for them in a dialog
+// first, as Test message asks for the message encoding and body.
+type CreateCheck struct {
+	ID     string  `json:"id"`
+	Label  string  `json:"label"`
+	Fields []Field `json:"fields,omitempty"`
+	// Submit is the dialog's button, "Test" for Test message.
+	Submit string `json:"submit,omitempty"`
+	// Opens means the check's answer is a console address, opened in a new
+	// tab rather than shown: Create sink's Preview logs opens the Logs
+	// Explorer on the inclusion filter (#1863).
+	Opens bool `json:"opens,omitempty"`
+}
+
+// CreateChecker is a Creator whose create page has CreateChecks. CheckCreate
+// gets the form's values with the check's own fields merged over them, and
+// returns what the page says when the check passes; an error is the
+// refusal, shown as the API gave it.
+type CreateChecker interface {
+	Creator
+	CreateChecks() []CreateCheck
+	CheckCreate(ctx context.Context, project, check string, values map[string]string) (string, error)
 }
 
 // CreateSubmitter is a Creator whose create page's submit button has a
@@ -496,6 +604,11 @@ type Detail struct {
 	// what it holds now. Nil means it cannot be edited, which is why the
 	// button is absent rather than present and refusing.
 	Edit *EditForm `json:"edit,omitempty"`
+	// OpenTab is the ID of the section the page opens on when the address
+	// names none, for a resource whose Google page does not open on its
+	// first tab: a Pub/Sub subscription's opens on Details, Metrics being a
+	// tab clicked to (#1847). Empty opens the first.
+	OpenTab string `json:"openTab,omitempty"`
 	// Trail is the breadcrumb, for a resource whose path is not its
 	// hierarchy. An object's page is addressed apart from its bucket's
 	// folders, which share the path space with it (#790), so the provider
@@ -805,6 +918,22 @@ type Deleter interface {
 	Delete(ctx context.Context, project, name string) error
 }
 
+// DeleteLabeler is a Deleter whose rows' menus and pages name the resource
+// in Delete, as Google's Log Router has Delete sink and Logs Storage Delete
+// bucket (#1863).
+type DeleteLabeler interface {
+	Deleter
+	DeleteLabel() string
+}
+
+// RowEditor is an Editor whose list rows' menus open the edit form too,
+// under this label, as Google's Log Router has Edit sink in each sink's
+// menu (#1863). The form is the one the resource's page offers.
+type RowEditor interface {
+	Editor
+	RowEditLabel() string
+}
+
 // Actor is a provider with named per-resource actions, such as pausing a
 // queue.
 type Actor interface {
@@ -851,6 +980,11 @@ type Action struct {
 	// Submit is the dialog's submit label when it is not the action's own:
 	// Google's Manage traffic dialog ends in Save (#1852).
 	Submit string `json:"submit,omitempty"`
+	// Href, when set, makes the action a link: it opens this console
+	// route instead of being performed, as a topic row's Create
+	// subscription opens the Create subscription page with the topic filled
+	// in (#1847). The action route never receives it.
+	Href string `json:"href,omitempty"`
 }
 
 // PathActor is a provider with actions on the resources inside a resource.
@@ -1123,6 +1257,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/resources/{service}", s.handleResources)
 	mux.HandleFunc("GET /api/detail/{service}", s.handleDetail)
 	mux.HandleFunc("POST /api/resources/{service}", s.handleCreate)
+	mux.HandleFunc("POST /api/resources/{service}/check", s.handleCreateCheck)
 	mux.HandleFunc("DELETE /api/resources/{service}", s.handleDelete)
 	mux.HandleFunc("POST /api/actions/{service}", s.handleAction)
 	mux.HandleFunc("POST /api/actions/{service}/upload", s.handleActionUpload)
@@ -1307,6 +1442,7 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 			"id": p.ID(), "title": p.Title(),
 			"create": caps.Create, "delete": caps.Delete, "detail": caps.Detail,
 			"query": caps.Query, "edit": caps.Edit, "reveal": caps.Reveal,
+			"deleteLabel": caps.DeleteLabel, "editRow": caps.EditRow,
 			"page": caps.Page, "scope": caps.Scope,
 		})
 	}
@@ -1486,6 +1622,11 @@ type capabilities struct {
 	// Query means a statement can be run against this service's resources.
 	Query  *queryCapability `json:"query,omitempty"`
 	Delete bool             `json:"delete,omitempty"`
+	// DeleteLabel is the Delete item's label where the provider names it
+	// (DeleteLabeler), and EditRow the label of the rows' Edit item
+	// (RowEditor), empty for none.
+	DeleteLabel string `json:"deleteLabel,omitempty"`
+	EditRow     string `json:"editRow,omitempty"`
 	// Detail means a row can be opened to show what is inside it.
 	Detail bool `json:"detail,omitempty"`
 	// Edit means a resource's detail page can offer an edit form. The form
@@ -1539,6 +1680,10 @@ type createForm struct {
 	// dialog. Decided here rather than in the client so that "long enough to
 	// deserve a page" has one definition.
 	Page bool `json:"page,omitempty"`
+	// Layout is CreateLayouter's: "page", or empty for numbered steps.
+	Layout string `json:"layout,omitempty"`
+	// Checks are CreateChecker's buttons.
+	Checks []CreateCheck `json:"checks,omitempty"`
 }
 
 // createPageThreshold is the number of fields past which a create form stops
@@ -1557,6 +1702,12 @@ func (s *Server) capabilitiesOf(p Provider) capabilities {
 		}
 		if ct, ok := p.(CreateTitler); ok {
 			c.Create.Title = ct.CreateTitle()
+		}
+		if cl, ok := p.(CreateLayouter); ok && (cl.CreateLayout() == CreateLayoutPage || cl.CreateLayout() == CreateLayoutNext) {
+			c.Create.Layout = cl.CreateLayout()
+		}
+		if cc, ok := p.(CreateChecker); ok {
+			c.Create.Checks = cc.CreateChecks()
 		}
 		if cs, ok := p.(CreateSubmitter); ok {
 			c.Create.Submit = cs.CreateSubmit()
@@ -1577,6 +1728,12 @@ func (s *Server) capabilitiesOf(p Provider) capabilities {
 	}
 	if _, ok := p.(Deleter); ok {
 		c.Delete = true
+	}
+	if dl, ok := p.(DeleteLabeler); ok {
+		c.DeleteLabel = dl.DeleteLabel()
+	}
+	if re, ok := p.(RowEditor); ok {
+		c.EditRow = re.RowEditLabel()
 	}
 	// Asked of the instance when it can answer, because the interface alone
 	// speaks for the type.
@@ -1664,6 +1821,50 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"name": name, "operation": opID})
+}
+
+// handleCreateCheck runs one of a create page's checks (CreateChecker): it
+// creates nothing, so it is not an operation, and answers with the check's
+// verdict, or its refusal as a 400 with the API's message.
+func (s *Server) handleCreateCheck(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.providers[r.PathValue("service")]
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such service"})
+		return
+	}
+	checker, ok := p.(CreateChecker)
+	if !ok {
+		writeJSON(w, http.StatusNotImplemented, map[string]string{
+			"error": p.Title() + " offers no checks on its create page",
+		})
+		return
+	}
+	var req struct {
+		Check  string            `json:"check"`
+		Values map[string]string `json:"values"`
+	}
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "malformed request: " + err.Error()})
+		return
+	}
+	known := false
+	for _, c := range checker.CreateChecks() {
+		known = known || c.ID == req.Check
+	}
+	if !known {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("no check %q on this create page", req.Check)})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), budgetFor(p))
+	defer cancel()
+	msg, err := checker.CheckCreate(ctx, r.URL.Query().Get("project"), req.Check, req.Values)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": userMessage(err)})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": msg})
 }
 
 // handleDelete removes a resource.

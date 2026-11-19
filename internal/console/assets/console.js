@@ -110,7 +110,7 @@ const ROUTES = [
       "copied between buckets with an object's Copy, or uploaded with Upload files and Upload folder." },
   { path: "/storage/settings", service: "storage-settings", icon: "storage", title: "Settings",        section: "Storage",
     product: "storage", productTitle: "Cloud Storage" },
-  { path: "/storage/deleted",  service: "storage-deleted", icon: "storage",  title: "Deleted buckets", section: "Storage",
+  { path: "/storage/deleted",  service: "storage-deleted", icon: "storage",  title: "Deleted buckets", kind: "Deleted bucket", section: "Storage",
     navTitle: "Soft-deleted buckets", navHidden: true, redirect: "/storage/browser?view=softdeleted",
     product: "storage", productTitle: "Cloud Storage" },
 
@@ -243,26 +243,42 @@ const ROUTES = [
     product: "iam", productTitle: "IAM & Admin" },
 
   { path: "/monitoring", service: null, screen: "monitoring", title: "Monitoring", section: "Operations" },
+  // Cloud Logging's menu in Google's order (#1863): Logs Explorer, Log
+  // Analytics, Logs Dashboard, Log-based Metrics, Log Router, Logs Storage,
+  // then the pages Google keeps elsewhere that CloudBurrow serves here
+  // (saved queries are the Explorer's Query library, log scopes and
+  // Settings Google's Observability settings, exclusions part of a sink).
   { path: "/logs",     service: null, screen: "logs",     title: "Logs Explorer", section: "Operations",
+    product: "logging", productTitle: "Cloud Logging" },
+  // Log Analytics (#1863): SQL over the log views of buckets upgraded to
+  // use it, run in the instance's BigQuery over each bucket's linked
+  // dataset; without BigQuery served the page says why it is unavailable,
+  // so the entry has no service (which would hide it) but names its
+  // provider.
+  { path: "/logs/analytics", service: null, provider: "logging-analytics", screen: "log-analytics", icon: "logs", title: "Log Analytics", section: "Operations",
+    product: "logging", productTitle: "Cloud Logging",
+    unavailable: "Log Analytics runs SQL over a bucket's linked BigQuery dataset, in this instance's BigQuery, " +
+      "which this instance does not serve: start it with bigquery among its --services." },
+  { path: "/logs/dashboard", service: null, screen: "logs-dashboard", icon: "logs", title: "Logs Dashboard", section: "Operations",
     product: "logging", productTitle: "Cloud Logging" },
   // Cloud Logging's admin resources (#1226), beside the Explorer: they are
   // stored and validated; a metric has no time series and a sink delivers
   // nothing, which each screen says.
-  { path: "/logs/metrics",    service: "logging-metrics",    icon: "logs", title: "Log-based metrics", kind: "Log-based metric",
+  { path: "/logs/metrics",    service: "logging-metrics",    icon: "logs", title: "Log-based Metrics", kind: "Log-based metric",
     section: "Operations", product: "logging", productTitle: "Cloud Logging" },
-  { path: "/logs/sinks",      service: "logging-sinks",      icon: "logs", title: "Log router", kind: "Sink",
-    section: "Operations", product: "logging", productTitle: "Cloud Logging" },
-  { path: "/logs/exclusions", service: "logging-exclusions", icon: "logs", title: "Exclusions", kind: "Exclusion",
+  { path: "/logs/sinks",      service: "logging-sinks",      icon: "logs", title: "Log Router", kind: "Sink",
     section: "Operations", product: "logging", productTitle: "Cloud Logging" },
   { path: "/logs/storage",    service: "logging-buckets",    icon: "logs", title: "Logs Storage", kind: "Log bucket",
-    section: "Operations", product: "logging", productTitle: "Cloud Logging" },
-  // Logs Storage's Settings (#1311): GetSettings, UpdateSettings, GetCmekSettings.
-  { path: "/logs/settings",   service: "logging-settings",   icon: "logs", title: "Logs Storage settings",
     section: "Operations", product: "logging", productTitle: "Cloud Logging" },
   // Saved queries and log scopes (#1519).
   { path: "/logs/saved-queries", service: "logging-saved-queries", icon: "logs", title: "Saved queries", kind: "Saved query",
     section: "Operations", product: "logging", productTitle: "Cloud Logging" },
   { path: "/logs/log-scopes", service: "logging-log-scopes", icon: "logs", title: "Log scopes", kind: "Log scope",
+    section: "Operations", product: "logging", productTitle: "Cloud Logging" },
+  { path: "/logs/exclusions", service: "logging-exclusions", icon: "logs", title: "Exclusions", kind: "Exclusion",
+    section: "Operations", product: "logging", productTitle: "Cloud Logging" },
+  // Logging's Settings (#1311): GetSettings, UpdateSettings, GetCmekSettings.
+  { path: "/logs/settings",   service: "logging-settings",   icon: "logs", title: "Settings",
     section: "Operations", product: "logging", productTitle: "Cloud Logging" },
   { path: "/activity", service: null, screen: "activity", title: "Activity",      section: "Operations" },
   { path: "/requests", service: null, screen: "requests", title: "Request Log",   section: "Operations" },
@@ -2623,8 +2639,13 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
         run: () => runAction(route, rowTarget(item), a, refresh, rowBusy(item.name),
           (item.actsOn || []).length ? item.name : null),
       })),
+      // Edit sink in a sink's menu (#1863): the form its page offers.
+      ...(caps.editRow ? [{
+        label: caps.editRow,
+        run: () => editFromRow(route, (item.opens || []).length ? item.opens : [item.name], refresh),
+      }] : []),
       ...(caps.delete ? [{
-        label: "Delete", destructive: true,
+        label: caps.deleteLabel || "Delete", destructive: true,
         run: () => deleteResource(route, item.name, refresh, rowBusy(item.name)),
       }] : []),
       ...(item.object ? objectActions(route, item, refresh, rowBusy(item.name)) : []),
@@ -3207,7 +3228,8 @@ async function renderDetail(view, route, resourcePath) {
     : null;
   if (summary) { crumb.append(summary); crumb.classList.add("has-summary"); }
 
-  const wanted = new URLSearchParams(location.search).get("tab");
+  // The tab the address names, else the one Google's page opens on (#1847).
+  const wanted = new URLSearchParams(location.search).get("tab") || data.openTab;
   let current = Math.max(0, sections.findIndex((sec) => sec.id === wanted));
 
   const panel = el("div", { class: "tab-panel", id: "detail-panel", role: "tabpanel" });
@@ -3792,7 +3814,7 @@ function openActionForm(route, segments, action, onDone, title = null) {
       if (res.result) {
         setChildren(dialog, el("div", { class: "modal-body", id: "action-result" },
           el("h2", { id: "action-title", text: `${action.label}: ${name}` }),
-          resultTable(res.result),
+          resultTable(res.result, { route, path: segments }),
           el("div", { class: "modal-actions" },
             el("button", { type: "button", class: "primary", text: "Close", onclick: () => close() }))));
         return null;
@@ -4089,20 +4111,39 @@ function openTestPermissionsForm(view, name, ask) {
 }
 
 // resultTable draws the rows an action answered with.
-function resultTable(listing) {
+//
+// at, when given, is { route, path }: where a row's own actions are sent, as
+// a pulled message's Ack is sent to its subscription with the message's ack
+// ID (#1847). Each is performed once, its button then saying so.
+function resultTable(listing, at = null) {
   const cols = listing.columns || [];
   const items = listing.items || [];
+  const acts = at && items.some((r) => (r.actions || []).length);
+  const rowButtons = (r) => el("td", { class: "row-actions" }, ...(r.actions || []).map((a) => {
+    const b = el("button", { type: "button", class: "secondary", text: a.label,
+      "aria-label": `${a.label} ${r.name}` });
+    b.onclick = async () => {
+      b.disabled = true;
+      try {
+        await runAction(at.route, at.path, a, () => {}, NO_ROW, r.name);
+        b.textContent = a.done || `${a.label}ed`;
+      } catch { b.disabled = false; }
+    };
+    return b;
+  }));
   return el("div", {},
     listing.note ? el("p", { class: "form-help", id: "action-result-note", text: listing.note }) : null,
     items.length
       ? el("table", { class: "table", id: "action-result-table" },
           el("thead", {}, el("tr", {},
-            el("th", { text: listing.nameColumn || "Name" }), ...cols.map((c) => el("th", { text: c })))),
+            el("th", { text: listing.nameColumn || "Name" }), ...cols.map((c) => el("th", { text: c })),
+            acts ? el("th", { "aria-label": "Actions" }) : null)),
           el("tbody", {}, ...items.map((r) => el("tr", {},
             // A row that names something with a page of its own links to
             // it: a BigQuery load's job, in Job history (#993).
             el("td", {}, r.link ? el("a", { href: r.link, text: r.name }) : r.name),
-            ...cols.map((c) => el("td", { text: (r.fields || {})[c] || "" }))))))
+            ...cols.map((c) => el("td", { text: (r.fields || {})[c] || "" })),
+            acts ? rowButtons(r) : null))))
       : null);
 }
 
@@ -4383,6 +4424,20 @@ function showOneTime(once) {
       el("button", { type: "button", class: "primary", text: "Done",
                      onclick: () => close() }))));
   dialog.querySelector(".modal-actions button").focus();
+}
+
+// editFromRow opens a row's edit form from its menu (#1863): the form is
+// the one the resource's page offers, read from its detail.
+async function editFromRow(route, segments, onDone) {
+  const project = currentProject();
+  try {
+    const data = await api(`/api/detail/${route.service}?project=${encodeURIComponent(project)}` +
+      segments.map((sg) => `&name=${encodeURIComponent(sg)}`).join(""));
+    if (!data.edit) throw new Error("This resource has nothing that can be edited.");
+    openEditForm(route, segments, data.edit, onDone);
+  } catch (err) {
+    notify(String(err.message), "error");
+  }
 }
 
 // openEditForm changes a resource in place.
@@ -5147,6 +5202,9 @@ function buildCreateForm(spec) {
     // Google's inline source editor (#1852): files, one open at a time in a
     // code editor, submitted as a JSON object of file name to contents.
     if (f.type === "sourcefiles") return sourceFilesEntry(f, id, errorId, helpId);
+    // A repeatable group of fields (#1863): Google's exclusion filters,
+    // a row each with its name, filter and Disable.
+    if (f.type === "group") return groupEntry(f, id, errorId, helpId);
 
     // A textarea rather than an input wherever the value can hold newlines:
     // Enter inserts one instead of submitting the form, which is the whole
@@ -5165,7 +5223,7 @@ function buildCreateForm(spec) {
           // elsewhere would be a constraint nothing applies.
           pattern: isCheck || isArea ? null : (f.pattern || null),
         });
-    if (isCheck) control.checked = f.default === "true";
+    if (isCheck) control.checked = f.default === "true" && !f.unavailable;
     else if (isSelect) control.value = f.default || (f.options || [])[0] || "";
     else control.value = f.default || "";
     if (helpId) control.setAttribute("aria-describedby", helpId);
@@ -5177,6 +5235,14 @@ function buildCreateForm(spec) {
       control.disabled = true;
       control.setAttribute("aria-readonly", "true");
     }
+    // A choice Google's page offers that this instance cannot make (#1847):
+    // drawn where Google draws it, disabled, with the reason, rather than
+    // left out.
+    const unavailableId = isCheck && f.unavailable ? `u-${f.name}` : null;
+    if (unavailableId) {
+      control.disabled = true;
+      control.setAttribute("aria-describedby", [helpId, unavailableId].filter(Boolean).join(" "));
+    }
 
     const label = el("label", { for: id },
       el("span", { text: f.label }),
@@ -5186,10 +5252,12 @@ function buildCreateForm(spec) {
       f.required ? el("span", { class: "required-mark", "aria-hidden": "true", text: "*" }) : null);
     const help = f.help ? el("p", { id: helpId, class: "form-help", text: f.help }) : null;
     const error = el("p", { id: errorId, class: "form-field-error", hidden: true });
+    const unavailable = unavailableId
+      ? el("p", { id: unavailableId, class: "form-help form-unavailable", text: f.unavailable }) : null;
 
     const node = isCheck
-      ? el("div", { class: "form-row is-check" },
-          el("div", { class: "check-line" }, control, label), help, error)
+      ? el("div", { class: "form-row is-check" + (unavailableId ? " is-unavailable" : "") },
+          el("div", { class: "check-line" }, control, label), help, unavailable, error)
       : el("div", { class: "form-row" }, label, control, help, error);
 
     return { field: f, control, node, error, helpId, errorId, isCheck };
@@ -5243,7 +5311,8 @@ function buildCreateForm(spec) {
   };
 
   const check = (entry) => {
-    if (entry.control.checkValidity()) { markValid(entry); return true; }
+    // A field its ShowWhen hides is not asked for (#1847).
+    if (entry.node.hidden || entry.control.checkValidity()) { markValid(entry); return true; }
     markInvalid(entry);
     return false;
   };
@@ -5299,6 +5368,35 @@ function buildCreateForm(spec) {
     if (!other || !entry.follow) continue;
     other.control.addEventListener("change", () => entry.follow(other.control.value));
     entry.follow(other.control.value);
+  }
+
+  // A field shown only while another holds a value (#1847): "name" for a
+  // checked checkbox, "name=value" for a radio or select choice, as Google's
+  // Create topic reveals the retention period under Enable message retention.
+  // Conditions joined by "&" must all hold (#1863): a distribution
+  // metric's linear bounds show for "type=Distribution&bucket_type=Linear",
+  // a bucket's dataset name for "analytics&link".
+  const radioValue = (other) => other.control.value;
+  for (const entry of entries) {
+    const cond = entry.field.showWhen;
+    if (!cond) continue;
+    const terms = cond.split("&").map((t) => {
+      const [name, choice] = t.split("=");
+      return { other: byName.get(name), choice };
+    }).filter((t) => t.other);
+    if (!terms.length) continue;
+    const show = () => {
+      const on = terms.every(({ other, choice }) => choice === undefined
+        ? (other.isCheck ? other.control.checked : !!other.control.value)
+        : radioValue(other) === choice);
+      entry.node.hidden = !on;
+      if (!on) markValid(entry);
+    };
+    for (const { other } of terms) {
+      other.control.addEventListener("change", show);
+      other.control.addEventListener("input", show);
+    }
+    show();
   }
 
   // Fields group under their section heading, in the order the backend gave
@@ -5433,9 +5531,16 @@ function formTabs(section, entries) {
 function radioEntry(f, id, errorId, helpId) {
   const control = el("input", { type: "hidden", id, name: f.name });
   control.value = f.default || (f.options || [])[0] || "";
+  // A choice this instance cannot make is drawn disabled with its reason
+  // (#1847), never chosen.
+  const off = f.unavailableOptions || {};
   const radios = (f.options || []).map((o, i) => {
     const r = el("input", { type: "radio", id: `${id}-${i}`, name: `${id}-choice`, value: o });
     r.checked = o === control.value;
+    if (off[o]) {
+      r.disabled = true;
+      r.setAttribute("aria-describedby", `${id}-${i}-unavailable`);
+    }
     r.addEventListener("change", () => {
       if (!r.checked) return;
       control.value = o;
@@ -5450,15 +5555,17 @@ function radioEntry(f, id, errorId, helpId) {
                                 "aria-describedby": helpId || null },
     el("legend", { text: f.label }),
     control,
-    ...radios.map((r, i) => el("div", { class: "check-line" }, r,
-      el("label", { for: r.id, text: f.options[i] }))),
+    ...radios.map((r, i) => el("div", { class: "check-line" + (off[f.options[i]] ? " is-unavailable" : "") }, r,
+      el("label", { for: r.id, text: f.options[i] }),
+      off[f.options[i]] ? el("p", { id: `${r.id}-unavailable`, class: "form-help form-unavailable",
+                                    text: off[f.options[i]] }) : null)),
     help, error);
   const choose = (value) => {
     control.value = value;
     for (const r of radios) r.checked = r.value === value;
   };
   return { field: f, control, node, error, helpId, errorId, isCheck: false, isRadio: true,
-           choose, hold: (on) => { for (const r of radios) r.disabled = on || !!f.immutable; },
+           choose, hold: (on) => { for (const r of radios) r.disabled = on || !!f.immutable || !!off[r.value]; },
            focus: () => (radios.find((r) => r.checked) || radios[0] || control).focus() };
 }
 
@@ -5753,6 +5860,82 @@ function schemaEntry(f, id, errorId, helpId) {
   if (helpId) top.rows[0].name.setAttribute("aria-describedby", helpId);
   return { field: f, control, node, error, helpId, errorId, isCheck: false,
            focus: () => top.rows[0].name.focus() };
+}
+
+// groupEntry is a repeatable group of fields (Field.Group, #1863): a row
+// of controls per item, Add (its addLabel) for another and Remove on each,
+// as Google's Create sink has a row per exclusion filter with its name,
+// filter and Disable. The value is a hidden textarea holding the JSON
+// array of rows, so validation, dirtiness and submission are every other
+// field's; a row's own text fields are checked against their patterns.
+function groupEntry(f, id, errorId, helpId) {
+  const control = el("textarea", { id, name: f.name, hidden: true, class: "group-value" });
+  const sub = f.group || [];
+  const rows = [];
+  let initial = [];
+  try { initial = f.default ? JSON.parse(f.default) : []; } catch { initial = []; }
+  if (!Array.isArray(initial)) initial = [];
+  const list = el("div", { class: "group-rows", role: "list" });
+  const rowValue = (r) => Object.fromEntries(sub.map((s, i) =>
+    [s.name, s.type === "checkbox" ? String(r.controls[i].checked) : r.controls[i].value.trim()]));
+  const blank = (v) => Object.values(v).every((x) => x === "" || x === "false");
+  const sync = () => {
+    const values = rows.map(rowValue).filter((v) => !blank(v));
+    control.value = values.length ? JSON.stringify(values) : "";
+    let problem = "";
+    rows.forEach((r, n) => {
+      if (problem || blank(rowValue(r))) return;
+      sub.forEach((s, i) => {
+        const c = r.controls[i];
+        if (problem || s.type === "checkbox") return;
+        if (s.required && !c.value.trim()) problem = `${f.label} ${n + 1}: ${s.label} is required.`;
+        else if (s.pattern && c.value && !new RegExp(`^(?:${s.pattern})$`, "v").test(c.value)) {
+          problem = `${f.label} ${n + 1}: ${s.label} ${s.help ? `must be ${s.help}` : "is not valid"}.`;
+        }
+      });
+    });
+    control.setCustomValidity(problem);
+    control.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  const addRow = (value = {}) => {
+    const n = rows.length + 1;
+    const r = { controls: [] };
+    const cells = sub.map((s) => {
+      const label = `${s.label} ${n}`;
+      const c = s.type === "textarea"
+        ? el("textarea", { rows: "2", "aria-label": label, spellcheck: "false" })
+        : el("input", { type: s.type === "checkbox" ? "checkbox" : "text", "aria-label": label,
+                        autocomplete: "off", spellcheck: "false" });
+      if (s.type === "checkbox") c.checked = value[s.name] === "true";
+      else c.value = value[s.name] || s.default || "";
+      c.addEventListener("input", sync);
+      c.addEventListener("change", sync);
+      r.controls.push(c);
+      return s.type === "checkbox"
+        ? el("label", { class: "group-check" }, c, el("span", { text: s.label }))
+        : el("label", { class: "group-cell" }, el("span", { class: "group-cell-label", text: s.label }), c);
+    });
+    const remove = el("button", { type: "button", class: "secondary group-remove", text: "Remove",
+      "aria-label": `Remove ${f.label.toLowerCase()} ${n}`,
+      onclick: () => { rows.splice(rows.indexOf(r), 1); r.node.remove(); sync(); } });
+    r.node = el("div", { class: "group-row", role: "listitem" }, ...cells, remove);
+    rows.push(r);
+    list.append(r.node);
+    return r;
+  };
+  for (const v of initial) addRow(v);
+  const add = el("button", { type: "button", class: "secondary group-add", text: f.addLabel || "Add",
+    onclick: () => { const r = addRow(); r.controls[0].focus(); sync(); } });
+  const help = f.help ? el("p", { id: helpId, class: "form-help", text: f.help }) : null;
+  const error = el("p", { id: errorId, class: "form-field-error", hidden: true });
+  const node = el("fieldset", { class: "form-row group-field" },
+    el("legend", {}, el("span", { text: f.label })), list, add, control, help, error);
+  control.value = f.default || "";
+  sync();
+  // The value as drawn is the default, so an untouched group is not dirty.
+  f.default = control.value;
+  return { field: f, control, node, error, helpId, errorId, isCheck: false,
+           focus: () => (rows[0] ? rows[0].controls[0] : add).focus() };
 }
 
 // mapToLines renders a map field's JSON value as one "key=value" per line.
@@ -6064,12 +6247,21 @@ async function renderCreatePage(view, route) {
     return;
   }
 
-  const fields = buildCreateForm(caps.create);
+  // A field named in the address starts with that value: a topic row's
+  // Create subscription opens this page with ?topic= (#1847).
+  const given = new URLSearchParams(location.search);
+  const fields = buildCreateForm({ ...caps.create, fields: caps.create.fields.map((f) =>
+    f.type !== "hidden" && f.name !== "project" && given.has(f.name) ? { ...f, default: given.get(f.name) } : f) });
   const error = el("p", { class: "form-error", role: "alert", hidden: true });
   const cancel = el("a", { class: "button secondary", href: listHref, text: "Cancel" });
   const primary = el("button", { type: "submit", class: "primary", text: caps.create.submit || caps.create.label });
 
-  const steps = createSteps(fields.nodes);
+  // Numbered steps, as Google's Cloud Storage and Cloud SQL create pages
+  // are, or one page under headings, as Pub/Sub's are (#1847).
+  const steps = caps.create.layout === "page"
+    ? { nodes: fields.nodes, revealInvalid() {} }
+    : createSteps(fields.nodes, caps.create.layout === "next" ? "Next" : "Continue");
+  const checks = createChecks(target, caps.create, fields);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -6093,12 +6285,85 @@ async function renderCreatePage(view, route) {
 
   // Create, then Cancel, at the bottom, as Google's forms end.
   setChildren(view, ...header,
-    el("form", { class: "create-page", novalidate: true, onsubmit: submit },
+    el("form", { class: "create-page" + (caps.create.layout === "page" ? " is-single-page" : ""),
+                 novalidate: true, onsubmit: submit },
       error,
       ...steps.nodes,
+      checks,
       el("div", { class: "form-actions" }, primary, cancel)));
   fields.focusFirst();
   announce(`${caps.create.title || caps.create.label} form`);
+}
+
+// createChecks draws a create page's checks (#1847): buttons that send
+// what the form holds to the provider without creating anything, as
+// Google's Create schema has Validate definition and Test message. A check
+// with fields asks for them in a dialog, whose button sends them with the
+// form's values; the verdict, or the API's refusal, is shown under the
+// buttons (or in the dialog). Null when the page has none.
+function createChecks(target, spec, fields) {
+  if (!(spec.checks || []).length) return null;
+  const verdict = el("p", { class: "create-check-result", id: "create-check-result", role: "status", hidden: true });
+  const show = (node, ok, text) => {
+    node.textContent = text;
+    node.hidden = false;
+    node.classList.toggle("is-error", !ok);
+  };
+  const run = (check, extra) => send(
+    `/api/resources/${target.service}/check?project=${encodeURIComponent(currentProject())}`,
+    "POST", { check: check.id, values: { ...fields.values(), ...extra } });
+  const open = (check) => {
+    const own = buildCreateForm({ label: check.label, fields: check.fields });
+    const result = el("p", { class: "create-check-result", role: "status", hidden: true });
+    const { dialog, close } = openModal({ labelledBy: "create-check-title" });
+    const go = el("button", { type: "submit", class: "primary", text: check.submit || check.label });
+    dialog.append(el("form", { class: "modal-body", novalidate: true, onsubmit: async (e) => {
+      e.preventDefault();
+      if (!own.validate()) return;
+      setBusy(go, true);
+      try {
+        show(result, true, (await run(check, own.values())).message);
+      } catch (err) {
+        show(result, false, err.message);
+      }
+      setBusy(go, false);
+    } },
+      el("h2", { id: "create-check-title", text: check.label }),
+      ...own.nodes,
+      result,
+      el("div", { class: "modal-actions" },
+        el("button", { type: "button", class: "secondary", text: "Close", onclick: () => close() }), go)));
+    own.focusFirst();
+  };
+  const buttons = spec.checks.map((check) => el("button", {
+    type: "button", class: "secondary", id: `create-check-${check.id}`, text: check.label,
+    onclick: async (e) => {
+      if ((check.fields || []).length) { open(check); return; }
+      verdict.hidden = true;
+      setBusy(e.currentTarget, true);
+      const b = e.currentTarget;
+      try {
+        const answer = (await run(check, {})).message;
+        // A check that opens a page (#1863): Preview logs opens the Logs
+        // Explorer on the form's filter in a new tab, and says so with a
+        // link, in case the browser held the tab back.
+        if (check.opens && answer.startsWith("/")) {
+          window.open(answer, "_blank", "noopener");
+          setChildren(verdict, document.createTextNode(`${check.label} opened in a new tab: `),
+            el("a", { href: answer, target: "_blank", rel: "noopener", text: answer }));
+          verdict.hidden = false;
+          verdict.classList.remove("is-error");
+          setBusy(b, false);
+          return;
+        }
+        show(verdict, true, answer);
+      } catch (err) {
+        show(verdict, false, err.message);
+      }
+      setBusy(b, false);
+    },
+  }));
+  return el("div", { class: "create-checks" }, el("div", { class: "create-check-buttons" }, ...buttons), verdict);
 }
 
 // createSteps lays a create form out as Google's create pages are (#1842):
@@ -6114,7 +6379,9 @@ async function renderCreatePage(view, route) {
 //   const steps = createSteps(fields.nodes);
 //   form.append(...steps.nodes);
 //   if (!fields.validate()) steps.revealInvalid();
-function createSteps(nodes) {
+// The button is Continue, or Next where Google's page says Next, as
+// Create log bucket does (CreateLayoutNext, #1863).
+function createSteps(nodes, continueLabel = "Continue") {
   const sections = nodes.filter((n) => n.classList && n.classList.contains("form-section"));
   if (!sections.length) return { nodes, revealInvalid() {} };
   const lead = [];
@@ -6150,7 +6417,7 @@ function createSteps(nodes) {
     s.head.addEventListener("click", () => setOpen(s, s.body.hidden));
     if (i < steps.length - 1) {
       s.body.append(el("div", { class: "create-step-continue" },
-        el("button", { type: "button", class: "secondary", text: "Continue",
+        el("button", { type: "button", class: "secondary", text: continueLabel,
           onclick: () => {
             setOpen(s, false);
             s.step.classList.add("is-done");
@@ -6293,7 +6560,13 @@ function overflowMenu(actions, name) {
       el("button", {
         class: "overflow-item" + (a.destructive ? " is-destructive" : ""),
         role: "menuitem", text: a.label,
-        onclick: () => { menu.hidden = true; a.run(); },
+        // An item Google's menu has that this instance cannot perform is
+        // drawn disabled with its reason, rather than left out (#1863:
+        // Create log alert without Cloud Monitoring).
+        disabled: a.unavailable ? "disabled" : null,
+        title: a.unavailable || null,
+        "aria-description": a.unavailable || null,
+        onclick: () => { menu.hidden = true; if (!a.unavailable) a.run(); },
       })));
 
   const button = el("button", {
@@ -6417,17 +6690,20 @@ const hiddenValues = (fields) => fields.map((f) => [f.name, f.default || ""]);
 
 // showActionResult opens a dialog with the rows an action performed on
 // click answered (#1592), as openActionForm shows a form's.
-function showActionResult(title, result) {
+function showActionResult(title, result, at = null) {
   const { dialog, close } = openModal({ labelledBy: "action-title" });
   const done = el("button", { type: "button", class: "primary", text: "Close", onclick: () => close() });
   dialog.append(el("div", { class: "modal-body", id: "action-result" },
     el("h2", { id: "action-title", text: title }),
-    resultTable(result),
+    resultTable(result, at),
     el("div", { class: "modal-actions" }, done)));
   done.focus();
 }
 
 async function runAction(route, target, action, onDone, row = NO_ROW, title = null) {
+  // An action that is a link opens its page (#1847): a topic row's Create
+  // subscription.
+  if (action.href) return navigate(action.href);
   const path = Array.isArray(target) ? target : null;
   // A page's own heading, when its last segment is an address no reader
   // recognises: a Datastore entity's encoded key (#875). A delete is
@@ -6465,7 +6741,9 @@ async function runAction(route, target, action, onDone, row = NO_ROW, title = nu
       // is its operation, which the notification and the Operations tab
       // already say: Google's console opens no dialog after Delete folder
       // and contents, so only an action whose answer is data opens one.
-      if (res.result && !action.destructive) showActionResult(`${action.label}: ${name}`, res.result);
+      if (res.result && !action.destructive) {
+        showActionResult(`${action.label}: ${name}`, res.result, path ? { route, path } : null);
+      }
     } catch (err) {
       op.failed(err.message, err.operation);
       row.end();
@@ -6562,6 +6840,54 @@ function route() {
 
 // renderUnavailable is a page Google's console has whose service
 // CloudBurrow does not run (#1843): its place in the menu, and why.
+// Log Analytics (#1863), as Google's page: the Log views panel beside a
+// SQL editor whose FROM names a view as PROJECT_ID.LOCATION.BUCKET_ID.
+// LOG_VIEW_ID. The logging-analytics provider runs it over the bucket's
+// linked dataset in this instance's BigQuery; a view's name in the panel
+// puts Google's default query on it in the editor.
+async function renderLogAnalytics(view, match) {
+  const caps = capabilityOf("logging-analytics");
+  if (!caps.id) return renderUnavailable(view, match);
+  const project = currentProject();
+  const route = { service: "logging-analytics", title: "Log Analytics" };
+  const header = pageHeader("Log Analytics", project ? `Project ${project}` : "All projects");
+  setChildren(view, header, loadingState(3, { what: "log views" }));
+  let data;
+  try {
+    data = await api(`/api/resources/logging-analytics?project=${encodeURIComponent(project)}`);
+  } catch (err) {
+    return setChildren(view, header, errorState("Log views unavailable", String(err.message),
+      () => renderLogAnalytics(view, match)));
+  }
+  const views = data.items || [];
+  // The query route asks for a resource: the page's is the project's log
+  // views, which the statement itself names.
+  const pane = queryPane(route, ["log-views"], caps.query, () => {});
+  const editor = pane.querySelector("textarea.query-editor");
+  editor.setAttribute("aria-label", "Query");
+  const run = [...pane.querySelectorAll("button")].find((b) => b.textContent === "Run");
+  if (run) run.textContent = "Run query";
+  const defaultQuery = (name) => "SELECT\n  timestamp, severity, log_name, resource.type, text_payload, json_payload\n" +
+    `FROM\n  \`${name}\`\nORDER BY timestamp DESC\nLIMIT 1000`;
+  if (!editor.value && views.length) {
+    const first = views.find((v) => v.name.endsWith("._Default._AllLogs")) || views[0];
+    editor.value = defaultQuery(first.name);
+  }
+  const panel = el("aside", { class: "card log-views", "aria-label": "Log views" },
+    el("h2", { text: "Log views" }),
+    data.note ? el("p", { class: "unavailable", text: data.note }) : null,
+    views.length
+      ? el("ul", { class: "log-view-list" }, ...views.map((v) => el("li", {},
+          el("button", { type: "button", class: "link-button mono", text: v.name,
+            title: `Query ${v.name}`,
+            onclick: () => { editor.value = defaultQuery(v.name); editor.dispatchEvent(new Event("input")); editor.focus(); } }),
+          el("span", { class: "unavailable", text: ` Linked dataset: ${(v.fields || {})["Linked dataset in BigQuery"] || "—"}` }))))
+      : el("p", { class: "unavailable", text: data.prompt ||
+          "No bucket of this project is upgraded to use Log Analytics. Upgrade one in Logs Storage, and Create link to query it here." }));
+  setChildren(view, header, el("div", { class: "log-analytics" }, panel, pane));
+  announce("Log Analytics");
+}
+
 function renderUnavailable(view, route) {
   setChildren(view, pageHeader(route.title, "Not available locally"),
     el("div", { class: "state" },
@@ -6628,6 +6954,8 @@ function dispatch(view) {
   if (match.screen === "instance") return renderInstance(view);
   if (match.screen === "monitoring") return renderMonitoring(view);
   if (match.screen === "logs") return renderLogs(view);
+  if (match.screen === "logs-dashboard") return renderLogsDashboard(view);
+  if (match.screen === "log-analytics") return renderLogAnalytics(view, match);
   if (match.screen === "activity") return renderActivity(view);
   if (match.screen === "requests") return renderRequests(view);
   if (match.screen === "faults") return renderFaults(view);
@@ -8821,9 +9149,50 @@ const MAX_RENDERED_LINES = 1000;
 // states say opposite things about whether the application is running.
 const STREAM_SILENCE_MS = 45000;
 
+// The Query results columns (#1863), as Google's Logs Explorer draws each
+// entry: severity, timestamp and summary, the entry expanding to its fields.
 // The Resource column is what makes an unattributed entry legible: a line
 // with no project still says which pod or service produced it.
-const LOG_COLUMNS = ["Time", "Severity", "Source", "Resource", "Message"];
+const LOG_COLUMNS = ["Severity", "Timestamp", "Resource", "Summary"];
+
+// The time-range picker's presets, as Google's Logs Explorer offers them
+// ("Last 1 hour" first shown), in minutes.
+const LOG_TIME_RANGES = [["5m", "Last 5 minutes", 5], ["15m", "Last 15 minutes", 15], ["30m", "Last 30 minutes", 30],
+  ["1h", "Last 1 hour", 60], ["3h", "Last 3 hours", 180], ["6h", "Last 6 hours", 360], ["12h", "Last 12 hours", 720],
+  ["1d", "Last 1 day", 1440], ["2d", "Last 2 days", 2880], ["7d", "Last 7 days", 10080], ["14d", "Last 14 days", 20160],
+  ["30d", "Last 30 days", 43200]];
+
+// The Severity menu's levels, the Logging query language's.
+const LOG_SEVERITIES = ["DEFAULT", "DEBUG", "INFO", "NOTICE", "WARNING", "ERROR", "CRITICAL", "ALERT", "EMERGENCY"];
+
+// logQueryValue quotes a value for the Logging query language.
+const logQueryValue = (v) => JSON.stringify(String(v));
+
+// logJSONTree draws an entry's LogEntry as Google's expanded entry does:
+// nested fields that fold, each value with Show matching entries and Hide
+// matching entries.
+function logJSONTree(value, path, onMatch) {
+  if (value && typeof value === "object") {
+    const keys = Object.keys(value).sort();
+    return el("ul", { class: "log-json" }, ...keys.map((k) => {
+      const child = value[k];
+      const p = path ? `${path}.${k}` : k;
+      if (child && typeof child === "object") {
+        return el("li", {}, el("details", { class: "log-json-node", open: true },
+          el("summary", {}, el("span", { class: "log-json-key", text: k }), el("span", { text: ": {…}" })),
+          logJSONTree(child, p, onMatch)));
+      }
+      return el("li", { class: "log-json-leaf", "data-field": p },
+        el("span", { class: "log-json-key", text: k }), el("span", { text: ": " }),
+        el("span", { class: "log-json-value mono", text: String(child) }),
+        overflowMenu([
+          { label: "Show matching entries", run: () => onMatch(`${p}=${logQueryValue(child)}`) },
+          { label: "Hide matching entries", run: () => onMatch(`-${p}=${logQueryValue(child)}`) },
+        ], `${p} ${child}`));
+    }));
+  }
+  return el("span", { class: "mono", text: String(value) });
+}
 
 async function renderLogs(view) {
   const params = new URLSearchParams(location.search);
@@ -8850,9 +9219,11 @@ async function renderLogs(view) {
   // instance.
   let operation = params.get("operation") || "";
 
-  const scopeSelect = el("select", { id: "log-scope", "aria-label": "Log scope" },
+  // Google's Refine scope: Project logs, a log view, or (CloudBurrow's own,
+  // for the pod lines no project can be claimed for) every source.
+  const scopeSelect = el("select", { id: "log-scope", "aria-label": "Refine scope" },
     el("option", { value: "all", text: "All sources" }),
-    el("option", { value: "project", text: project ? `Project ${project}` : "This project",
+    el("option", { value: "project", text: project ? `Project logs (${project})` : "Project logs",
                    disabled: project ? null : "disabled" }),
     el("option", { value: "parent", text: "A folder or organization" }),
     el("option", { value: "view", text: "Through a log view" }));
@@ -8914,18 +9285,150 @@ async function renderLogs(view) {
   parentInput.value = params.get("parent") || "";
   parentInput.hidden = scope !== "parent";
 
-  const severity = el("select", { id: "severity", "aria-label": "Minimum severity" },
-    ...["", "INFO", "WARNING", "ERROR"].map((v) =>
-      el("option", { value: v, text: v || "All severities" })));
-  const source = el("input", { class: "filter", type: "search", id: "source",
-    placeholder: "Source, e.g. run/my-service", "aria-label": "Filter by source" });
-  // The server has always supported a resource filter and the screen never
-  // offered one, so "show me only this pod's lines" — the reason anyone opens a
-  // log viewer from a resource — could not be expressed.
-  const resource = el("input", { class: "filter", type: "search", id: "resource",
-    placeholder: "Resource, e.g. api-00002-deployment", "aria-label": "Filter by resource" });
+  // The query pane (#1863), as Google's Logs Explorer lays it out: Search
+  // all fields, the Resource, Log name and Severity menus that write their
+  // clause into the query, the query editor in the Logging query language
+  // (internal/console/logquery.go says which fields and operators), and Run
+  // query. Source and resource are the address's own filters, from a
+  // resource's Logs tab, shown as chips.
+  const source = el("input", { type: "hidden", id: "source" });
+  const resource = el("input", { type: "hidden", id: "resource" });
   const contains = el("input", { class: "filter", type: "search", id: "contains",
-    placeholder: "Message contains", "aria-label": "Filter by message text" });
+    placeholder: "Search all fields", "aria-label": "Search all fields" });
+  const queryEditor = el("textarea", { id: "log-query", class: "mono log-query-editor", rows: "3", spellcheck: "false",
+    "aria-label": "Query editor", placeholder: 'severity>=WARNING\nresource.type="run"\ntextPayload:"timeout"' });
+  const queryError = el("p", { class: "form-error", id: "log-query-error", role: "alert", hidden: true });
+  const severity = el("select", { id: "severity", "aria-label": "Severity" },
+    el("option", { value: "", text: "All severities" }),
+    ...LOG_SEVERITIES.map((v) => el("option", { value: v, text: v })));
+  const resourceType = el("select", { id: "log-resource-type", "aria-label": "Resource" },
+    el("option", { value: "", text: "All resources" }));
+  const timeRange = el("select", { id: "log-time-range", "aria-label": "Time range" },
+    ...LOG_TIME_RANGES.map(([v, label]) => el("option", { value: v, text: label })),
+    el("option", { value: "custom", text: "Custom", hidden: true }));
+  // One clause per menu, on a line of its own, replaced when the menu
+  // changes: the editor stays the one statement of the query.
+  const setClause = (field, clause) => {
+    const lines = queryEditor.value.split("\n").filter((l) => !new RegExp(`^\\s*${field.replace(".", "\\.")}\\s*(>=|=)`).test(l));
+    if (clause) lines.push(clause);
+    queryEditor.value = lines.filter((l, i) => l.trim() || i < lines.length - 1).join("\n").trim();
+  };
+  const addClause = (clause) => {
+    queryEditor.value = queryEditor.value.trim() ? `${queryEditor.value.trim()}\n${clause}` : clause;
+  };
+
+  // Query autocomplete (#1863): the field paths the entries read so far
+  // carry, and, after a path and = or :, the values they hold for it,
+  // offered under the editor as the word at the caret is typed.
+  const knownFields = new Map(); // path -> Set of values
+  const learnFields = (obj, prefix) => {
+    if (!obj || typeof obj !== "object" || knownFields.size > 2000) return;
+    for (const [k, v] of Object.entries(obj)) {
+      const path = prefix ? `${prefix}.${k}` : k;
+      if (v && typeof v === "object" && !Array.isArray(v)) { learnFields(v, path); continue; }
+      if (Array.isArray(v)) continue;
+      if (!knownFields.has(path)) knownFields.set(path, new Set());
+      const vals = knownFields.get(path);
+      if (vals.size < 50 && v !== "" && v !== null && v !== undefined) vals.add(String(v));
+    }
+  };
+  const suggestions = el("ul", { class: "log-suggestions", id: "log-query-suggestions", role: "listbox",
+    "aria-label": "Query suggestions", hidden: true });
+  queryEditor.setAttribute("aria-autocomplete", "list");
+  queryEditor.setAttribute("aria-controls", "log-query-suggestions");
+  const wordAtCaret = () => {
+    const upto = queryEditor.value.slice(0, queryEditor.selectionStart);
+    const m = /[^\s()]*$/.exec(upto);
+    return { word: m ? m[0] : "", start: upto.length - (m ? m[0].length : 0) };
+  };
+  const insertSuggestion = (text) => {
+    const { start } = wordAtCaret();
+    const end = queryEditor.selectionStart;
+    queryEditor.value = queryEditor.value.slice(0, start) + text + queryEditor.value.slice(end);
+    const caret = start + text.length;
+    queryEditor.setSelectionRange(caret, caret);
+    suggestions.hidden = true;
+    queryEditor.focus();
+  };
+  const suggest = () => {
+    const { word } = wordAtCaret();
+    let items = [];
+    const op = /^([A-Za-z0-9_."\/-]+?)(=|:|!=|>=|<=)(.*)$/.exec(word);
+    if (op) {
+      const vals = knownFields.get(op[1]);
+      const typed = op[3].replace(/^"/, "");
+      if (vals) items = [...vals].filter((v) => v.startsWith(typed) && v !== typed).sort().slice(0, 12)
+        .map((v) => ({ label: v, text: `${op[1]}${op[2]}${logQueryValue(v)}` }));
+    } else if (word.length >= 1) {
+      items = [...knownFields.keys()].filter((k) => k.startsWith(word) && k !== word).sort().slice(0, 12)
+        .map((k) => ({ label: k, text: k }));
+    }
+    if (!items.length) { suggestions.hidden = true; return; }
+    setChildren(suggestions, ...items.map((it, i) => el("li", { role: "option", id: `log-suggestion-${i}`,
+      class: "log-suggestion mono", text: it.label, tabindex: "-1",
+      onmousedown: (e) => { e.preventDefault(); insertSuggestion(it.text); },
+      onkeydown: (e) => {
+        if (e.key === "Enter") { e.preventDefault(); insertSuggestion(it.text); }
+        else if (e.key === "ArrowDown") { e.preventDefault(); (e.target.nextElementSibling || e.target).focus(); }
+        else if (e.key === "ArrowUp") { e.preventDefault(); (e.target.previousElementSibling || queryEditor).focus(); }
+        else if (e.key === "Escape") { e.preventDefault(); suggestions.hidden = true; queryEditor.focus(); }
+      } })));
+    suggestions.hidden = false;
+  };
+  queryEditor.addEventListener("input", suggest);
+  queryEditor.addEventListener("blur", () => setTimeout(() => {
+    if (!suggestions.contains(document.activeElement)) suggestions.hidden = true;
+  }, 150));
+  queryEditor.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown" && !suggestions.hidden) { e.preventDefault(); suggestions.firstElementChild.focus(); }
+    else if (e.key === "Escape" && !suggestions.hidden) { e.preventDefault(); e.stopPropagation(); suggestions.hidden = true; }
+  });
+
+  // Summary fields (#1863), Google's Preferences > Manage summary fields:
+  // custom fields drawn as chips at the start of each entry's summary,
+  // optionally truncated; and Show summary chips. Per viewer.
+  const SUMMARY_KEY = "cloudburrow.logs.summary";
+  let summary = { fields: [], truncate: false, chars: 30, fromEnd: false, show: true };
+  try { summary = { ...summary, ...JSON.parse(readStored(SUMMARY_KEY, "{}")) }; } catch { /* the defaults */ }
+  const saveSummary = () => writeStored(SUMMARY_KEY, JSON.stringify(summary));
+  const fieldValue = (entry, path) => path.split(".").map((k) => k.replace(/^"|"$/g, ""))
+    .reduce((o, k) => (o && typeof o === "object" ? o[k] : undefined), entry.logEntry || {});
+  const summaryChips = (entry) => {
+    if (!summary.show) return [];
+    return summary.fields.map((f) => {
+      let v = fieldValue(entry, f);
+      if (v === undefined || v === null || v === "") return null;
+      v = typeof v === "object" ? JSON.stringify(v) : String(v);
+      if (summary.truncate && v.length > summary.chars) {
+        v = summary.fromEnd ? `…${v.slice(v.length - summary.chars)}` : `${v.slice(0, summary.chars)}…`;
+      }
+      return el("span", { class: "log-summary-chip", title: f, text: v });
+    }).filter(Boolean);
+  };
+
+  // Highlight in results (#1863): the text is marked wherever an entry's
+  // summary holds it.
+  let highlight = "";
+  const highlighted = (text) => {
+    if (!highlight) return [document.createTextNode(text)];
+    const out = [];
+    const lower = text.toLowerCase(), h = highlight.toLowerCase();
+    let i = 0;
+    for (let j = lower.indexOf(h); j >= 0; j = lower.indexOf(h, i)) {
+      if (j > i) out.push(document.createTextNode(text.slice(i, j)));
+      out.push(el("mark", { class: "log-highlight", text: text.slice(j, j + h.length) }));
+      i = j + h.length;
+    }
+    if (i < text.length) out.push(document.createTextNode(text.slice(i)));
+    return out;
+  };
+
+  // Pinned entries (#1863): Pin on an entry darkens it and puts a pin on
+  // the Timeline at its time, whose menu has Scroll to log entry, Zoom to
+  // log entry and Unpin; the entry's own pin menu has Same resource.type,
+  // Same resource.labels, Same trace and Show all.
+  const pinned = new Map();
+  const pinStrip = el("div", { class: "log-pins", id: "log-pins", "aria-label": "Pinned log entries" });
   // The Log name picker (#1554), as Google's Logs Explorer lists the scope's
   // log names: Cloud Logging's ListLogs of the project, folder or
   // organization in scope. A log's full name is its entries' resource, so
@@ -8962,6 +9465,7 @@ async function renderLogs(view) {
   logName.addEventListener("change", () => {
     resource.value = logName.value;
     writeFilters();
+    drawScope();
     connect();
     announce(logName.value ? `Showing log ${logName.value}` : "Showing every log name");
   });
@@ -8972,21 +9476,40 @@ async function renderLogs(view) {
   // bookmarked or sent to a colleague — and the one thing a person does with a
   // log query they got right is send it to someone else.
   const FILTER_CONTROLS = [
-    { control: severity, param: "severity" },
     { control: source, param: "source" },
     { control: resource, param: "resource" },
     { control: contains, param: "contains" },
+    { control: queryEditor, param: "query" },
+    { control: timeRange, param: "timeRange" },
   ];
+  timeRange.value = "1h";
   for (const { control, param } of FILTER_CONTROLS) {
     const initial = params.get(param);
     if (initial) control.value = initial;
   }
+  // A custom range is the timeline's Zoom to time, carried in the address.
+  let customFrom = params.get("from") || "", customTo = params.get("to") || "";
+  if (customFrom) timeRange.value = "custom";
+  // An address from before the query editor (?severity=ERROR) is its clause.
+  if (params.get("severity") && !queryEditor.value) {
+    setClause("severity", `severity>=${params.get("severity").toUpperCase()}`);
+  }
+  severity.value = (/^\s*severity\s*>=\s*(\w+)/m.exec(queryEditor.value) || [])[1] || "";
 
   const writeFilters = () => {
     const url = new URL(location.href);
     for (const { control, param } of FILTER_CONTROLS) {
-      if (control.value) url.searchParams.set(param, control.value);
+      if (control.value && !(param === "timeRange" && control.value === "1h")) url.searchParams.set(param, control.value);
       else url.searchParams.delete(param);
+    }
+    url.searchParams.delete("severity");
+    if (timeRange.value === "custom") {
+      url.searchParams.set("from", customFrom);
+      url.searchParams.set("to", customTo);
+      url.searchParams.delete("timeRange");
+    } else {
+      url.searchParams.delete("from");
+      url.searchParams.delete("to");
     }
     history.replaceState({}, "", url);
   };
@@ -8997,7 +9520,118 @@ async function renderLogs(view) {
   // which is the first question anyone brings to a log viewer. The counts come
   // from the server over the same filtered set the table is showing, so the
   // histogram and the rows can never disagree about what is being looked at.
-  const timeline = el("div", { class: "card log-timeline" });
+  const timeline = el("div", { class: "card log-timeline", id: "log-timeline" });
+  let timelineCollapsed = false;
+  // The Fields pane (#1863): the values of the entries the query matches,
+  // each with its count, as Google's Log fields pane lists them; choosing one
+  // adds its clause to the query and runs it.
+  const fieldsPane = el("aside", { class: "card log-fields", id: "log-fields", "aria-label": "Log fields" });
+  const LOG_FIELD_GROUPS = [["resource.type", "Resource type"], ["severity", "Severity"],
+    ["logName", "Log name"], ["resource.labels.project_id", "Project ID"]];
+  const drawFields = (entries) => {
+    const groups = LOG_FIELD_GROUPS.map(([path, label]) => {
+      const counts = new Map();
+      for (const e of entries) {
+        const v = path.split(".").reduce((o, k) => (o && typeof o === "object" ? o[k] : undefined), e.logEntry || {});
+        if (v !== undefined && v !== "") counts.set(v, (counts.get(v) || 0) + 1);
+      }
+      return { path, label, values: [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 20) };
+    });
+    const types = groups[0].values.map(([v]) => v);
+    const keep = resourceType.value;
+    setChildren(resourceType, el("option", { value: "", text: "All resources" }),
+      ...[...new Set([...types, ...(keep ? [keep] : [])])].sort().map((v) => el("option", { value: v, text: v })));
+    resourceType.value = keep;
+    setChildren(fieldsPane,
+      el("div", { class: "log-fields-head" }, el("h2", { text: "Log fields" }),
+        el("button", { class: "link-button is-inline", text: "Clear", onclick: () => {
+          queryEditor.value = ""; severity.value = ""; resourceType.value = ""; runQuery(); } })),
+      ...groups.map((g) => el("section", { class: "log-field-group", "data-field": g.path },
+        el("h3", { text: g.label }),
+        g.values.length
+          ? el("ul", {}, ...g.values.map(([v, n]) => el("li", {},
+              el("button", { class: "log-field-value", "data-value": v,
+                title: `Add ${g.path}=${logQueryValue(v)} to the query`,
+                onclick: () => { addClause(`${g.path}=${logQueryValue(v)}`); runQuery(); } },
+                el("span", { class: "mono", text: g.path === "logName" ? decodeURIComponent(v.slice(v.indexOf("/logs/") + 6)) : v }),
+                el("span", { class: "log-field-count", text: String(n) })))))
+          : el("p", { class: "unavailable", text: "No values" }))));
+  };
+
+  // The Timeline's drag handles (#1863): the start and end of the range,
+  // dragged (or moved with the arrow keys) inward to narrow it or outward
+  // to widen it, then Run, as on Google's Timeline.
+  const timelineHandles = (buckets, width) => {
+    const n = buckets.length;
+    if (!n) return null;
+    const start = el("input", { type: "range", min: "0", max: String(n), value: "0", step: "1",
+      class: "timeline-handle", id: "timeline-start", "aria-label": "Start of the time range" });
+    const end = el("input", { type: "range", min: "0", max: String(n), value: String(n), step: "1",
+      class: "timeline-handle", id: "timeline-end", "aria-label": "End of the time range" });
+    const at = (i) => new Date(new Date(buckets[0].at).getTime() + i * width);
+    const label = el("span", { class: "unavailable", id: "timeline-selection" });
+    const run = el("button", { type: "button", class: "secondary", id: "timeline-run", text: "Run", disabled: true });
+    const shade = el("div", { class: "timeline-selection-shade", "aria-hidden": "true" });
+    const update = () => {
+      if (+start.value >= +end.value) {
+        if (document.activeElement === start) start.value = String(+end.value - 1);
+        else end.value = String(+start.value + 1);
+      }
+      start.setAttribute("aria-valuetext", at(+start.value).toLocaleTimeString());
+      end.setAttribute("aria-valuetext", at(+end.value).toLocaleTimeString());
+      label.textContent = `${at(+start.value).toLocaleTimeString()} to ${at(+end.value).toLocaleTimeString()}`;
+      shade.style.left = `${(+start.value / n) * 100}%`;
+      shade.style.width = `${((+end.value - +start.value) / n) * 100}%`;
+      run.disabled = +start.value === 0 && +end.value === n;
+    };
+    start.addEventListener("input", update);
+    end.addEventListener("input", update);
+    run.addEventListener("click", () => {
+      customFrom = at(+start.value).toISOString();
+      customTo = at(+end.value).toISOString();
+      timeRange.value = "custom";
+      runQuery();
+      announce(`Time range ${label.textContent}`);
+    });
+    update();
+    return el("div", { class: "timeline-range" },
+      el("div", { class: "timeline-handles" }, shade, start, end),
+      el("div", { class: "actions" }, label, run));
+  };
+
+  const drawPins = () => {
+    if (!pinned.size) return setChildren(pinStrip);
+    setChildren(pinStrip, el("span", { class: "unavailable", text: "Pinned:" }),
+      ...[...pinned.values()].map((entry) => {
+        const when = new Date(entry.timestamp);
+        const menu = overflowMenu([
+          { label: "Scroll to log entry", run: () => {
+            const row = body.querySelector(`tr.log-entry[data-insert-id="${CSS.escape(String(entry.id))}"]`);
+            if (row) { row.scrollIntoView({ block: "center" }); row.querySelector("button").focus(); }
+          } },
+          { label: "Zoom to log entry", run: () => {
+            customFrom = new Date(when.getTime() - 30000).toISOString();
+            customTo = new Date(when.getTime() + 30000).toISOString();
+            timeRange.value = "custom";
+            runQuery();
+          } },
+          { label: "Unpin", run: () => togglePin(entry) },
+        ], `pinned entry at ${when.toLocaleTimeString()}`);
+        return el("span", { class: "log-pin-mark" },
+          el("span", { class: "mono", text: when.toLocaleTimeString() }), menu);
+      }));
+  };
+  const togglePin = (entry) => {
+    const id = String(entry.id);
+    if (pinned.has(id)) pinned.delete(id); else pinned.set(id, entry);
+    for (const row of body.querySelectorAll(`tr.log-entry[data-insert-id="${CSS.escape(id)}"]`)) {
+      row.classList.toggle("is-pinned", pinned.has(id));
+      const b = row.querySelector(".log-pin");
+      if (b) b.setAttribute("aria-pressed", pinned.has(id) ? "true" : "false");
+    }
+    drawPins();
+    announce(pinned.has(id) ? "Pinned the log entry" : "Unpinned the log entry");
+  };
 
   const drawTimeline = async () => {
     const query = filterQuery();
@@ -9008,11 +9642,24 @@ async function renderLogs(view) {
     } catch {
       // The stream's own status already says whether the instance is
       // reachable; a second red box here would be saying it twice.
+      drawFields([]);
       return setChildren(timeline);
     }
+    drawFields(data.entries || []);
     const buckets = data.histogram || [];
     const total = buckets.reduce((n, b) => n + (b.total || 0), 0);
-    if (!total) return setChildren(timeline);
+    const collapse = el("button", { class: "link-button is-inline", id: "log-timeline-toggle",
+      "aria-expanded": timelineCollapsed ? "false" : "true",
+      text: timelineCollapsed ? "Expand timeline" : "Collapse timeline",
+      onclick: () => { timelineCollapsed = !timelineCollapsed; drawTimeline(); } });
+    const head = el("div", { class: "log-timeline-head" }, el("h2", { text: "Timeline" }), collapse,
+      timeRange.value === "custom"
+        ? el("button", { class: "link-button is-inline", text: "Jump to now", onclick: () => {
+            timeRange.value = "1h"; runQuery(); } })
+        : null);
+    if (!total) return setChildren(timeline, head, el("p", { class: "unavailable", text: "No entries in this time range" }));
+    if (timelineCollapsed) return setChildren(timeline, head);
+    const width = buckets.length > 1 ? new Date(buckets[1].at) - new Date(buckets[0].at) : 60000;
 
     const peak = Math.max(...buckets.map((b) => b.total || 0));
     const first = buckets[0] && new Date(buckets[0].at);
@@ -9020,14 +9667,22 @@ async function renderLogs(view) {
     const errors = buckets.reduce((n, b) => n + ((b.counts || {}).ERROR || 0), 0);
 
     setChildren(timeline,
-      el("h2", { text: "Over time" }),
+      head,
       el("div", { class: "timeline-bars", role: "img",
         "aria-label": `${total} entries over ${first && last ? relativeTime(first) : "the retained window"}` +
                       `, ${errors} of them errors` },
         ...buckets.map((b) => {
           const counts = b.counts || {};
+          // Zoom to time: a column's click narrows the range to it.
           const column = el("div", { class: "timeline-column",
-            title: `${new Date(b.at).toLocaleTimeString()} · ${b.total || 0} entries` });
+            title: `${new Date(b.at).toLocaleTimeString()} · ${b.total || 0} entries · click to zoom to time`,
+            onclick: () => {
+              customFrom = new Date(b.at).toISOString();
+              customTo = new Date(new Date(b.at).getTime() + Math.max(width, 1000)).toISOString();
+              timeRange.value = "custom";
+              runQuery();
+              announce(`Zoomed to ${new Date(b.at).toLocaleTimeString()}`);
+            } });
           // Stacked in severity order with the worst on top, so a column that
           // contains an error is unmistakable however few of them there are.
           for (const [name, state] of [["ERROR", "error"], ["WARNING", "warn"],
@@ -9043,6 +9698,8 @@ async function renderLogs(view) {
           }
           return column;
         })),
+      timelineHandles(buckets, width),
+      pinStrip,
       el("p", { class: "unavailable",
         text: `${total} entries in the retained window` +
               (first && last ? `, from ${first.toLocaleTimeString()} to ${last.toLocaleTimeString()}` : "") +
@@ -9057,10 +9714,19 @@ async function renderLogs(view) {
     if (scope === "parent" && parentInput.value.trim()) query.set("parent", parentInput.value.trim());
     if (scope === "view" && viewSelect.value) query.set("view", viewSelect.value);
     if (operation) query.set("operation", operation);
-    if (severity.value) query.set("severity", severity.value);
     if (source.value) query.set("source", source.value);
     if (resource.value) query.set("resource", resource.value);
-    if (contains.value) query.set("contains", contains.value);
+    // Search all fields is the query's global restriction, a quoted value.
+    const text = [queryEditor.value.trim(), contains.value.trim() ? logQueryValue(contains.value.trim()) : ""]
+      .filter(Boolean).join("\n");
+    if (text) query.set("query", text);
+    if (timeRange.value === "custom" && customFrom) {
+      query.set("from", customFrom);
+      if (customTo) query.set("to", customTo);
+    } else {
+      const preset = LOG_TIME_RANGES.find(([v]) => v === timeRange.value) || LOG_TIME_RANGES[3];
+      query.set("from", new Date(Date.now() - preset[2] * 60000).toISOString());
+    }
     return query;
   };
 
@@ -9071,9 +9737,12 @@ async function renderLogs(view) {
   try {
     logDelete = !!(await api("/api/logs?limit=1")).logDelete;
   } catch { /* the stream's own state reports an unreachable instance */ }
-  const columns = logDelete ? LOG_COLUMNS.length + 1 : LOG_COLUMNS.length;
+  const columns = (logDelete ? LOG_COLUMNS.length + 1 : LOG_COLUMNS.length) + 1;
 
-  const pauseButton = el("button", { class: "secondary", text: "Pause" });
+  // Stream logs / Stop stream (#1863), as Google's toolbar: the query's
+  // results are drawn when it runs, and later entries only while streaming;
+  // stopped, they are held and shown when streaming starts again.
+  const pauseButton = el("button", { class: "secondary", id: "log-stream", text: "Stream logs" });
   const reconnectButton = el("button", { class: "secondary", text: "Reconnect",
                                          hidden: true, onclick: () => connect() });
   // A .status, like every other state in this console. A muted grey string
@@ -9085,11 +9754,13 @@ async function renderLogs(view) {
   const body = el("tbody");
   const table = el("table", {},
     el("thead", {}, el("tr", {},
+      el("th", { scope: "col" }, el("span", { class: "sr-only", text: "Expand" })),
       LOG_COLUMNS.map((c) => el("th", { scope: "col", text: c })),
       logDelete ? el("th", { scope: "col" }, el("span", { class: "sr-only", text: "Actions" })) : null)),
     body);
 
-  let paused = false;
+  let paused = true;
+  let ready = false;
   let buffered = [];
   let attempt = 0;
   let rows = 0;
@@ -9212,31 +9883,95 @@ async function renderLogs(view) {
     }], `log ${id}`);
   };
 
+  // Copy link: this entry's own address, its insertId as the query over
+  // the minute around it, in the scope it was read in.
+  const entryLink = (entry) => {
+    const url = new URL(location.href);
+    url.searchParams.set("query", `insertId=${logQueryValue(entry.id)}`);
+    const at = new Date(entry.timestamp).getTime();
+    url.searchParams.set("from", new Date(at - 30000).toISOString());
+    url.searchParams.set("to", new Date(at + 30000).toISOString());
+    for (const p of ["contains", "timeRange", "severity"]) url.searchParams.delete(p);
+    return url.toString();
+  };
+  const copy = async (value, what) => {
+    try { await navigator.clipboard.writeText(value); notify(`Copied ${what}`); } catch (err) {
+      notify(`Could not copy: ${err.message}`, "error");
+    }
+  };
+  const onMatch = (clause) => { addClause(clause); runQuery(); };
+
   const append = (entry) => {
     if (!rows) body.replaceChildren();
     rows++;
-    const row = el("tr", {},
-      el("td", { class: "mono", text: new Date(entry.timestamp).toLocaleTimeString() }),
+    learnFields(entry.logEntry, "");
+    const isPinned = pinned.has(String(entry.id));
+    const pin = el("button", { class: "icon-button log-pin", "aria-pressed": isPinned ? "true" : "false",
+      "aria-label": `Pin entry ${entry.id}`, title: "Pin",
+      html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3l7 7-3 1-4 4 1 5-2 1-4-5-5 5-1-1 5-5-5-4 1-2 5 1 4-4z"/></svg>',
+      onclick: () => togglePin(entry) });
+    // The pinned entry's menu: queries for its neighbours.
+    const le = entry.logEntry || {};
+    const pinMenu = overflowMenu([
+      { label: "Same resource.type", run: () => onMatch(`resource.type=${logQueryValue((le.resource || {}).type || "")}`) },
+      { label: "Same resource.labels", run: () => onMatch(Object.entries((le.resource || {}).labels || {})
+          .map(([k, v]) => `resource.labels.${k}=${logQueryValue(String(v))}`).join("\n") || `resource.type=${logQueryValue((le.resource || {}).type || "")}`) },
+      { label: "Same trace", unavailable: le.trace ? "" : "This entry has no trace.",
+        run: () => onMatch(`trace=${logQueryValue(le.trace || "")}`) },
+      { label: "Show all", run: () => { queryEditor.value = ""; runQuery(); } },
+    ], `pinned entry ${entry.id}`);
+    pinMenu.classList.add("log-pin-menu");
+    const expand = el("button", { class: "icon-button log-expand", "aria-expanded": "false",
+      "aria-label": `Expand entry ${entry.id}`,
+      html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>' });
+    let detail = null;
+    expand.addEventListener("click", () => {
+      if (detail) {
+        detail.remove();
+        detail = null;
+        expand.setAttribute("aria-expanded", "false");
+        return;
+      }
+      const tree = logJSONTree(entry.logEntry || {}, "", onMatch);
+      const setOpen = (open) => { for (const d of tree.querySelectorAll("details")) d.open = open; };
+      detail = el("tr", { class: "log-detail" }, el("td", { colspan: String(columns) },
+        el("div", { class: "log-detail-actions" },
+          el("button", { class: "link-button is-inline", text: "Expand nested fields", onclick: () => setOpen(true) }),
+          el("button", { class: "link-button is-inline", text: "Collapse nested fields", onclick: () => setOpen(false) }),
+          el("button", { class: "link-button is-inline", text: "Copy link", onclick: () => copy(entryLink(entry), "link to the entry") }),
+          el("button", { class: "link-button is-inline", text: "Copy as JSON",
+            onclick: () => copy(JSON.stringify(entry.logEntry || {}, null, 2), "entry as JSON") })),
+        tree));
+      row.after(detail);
+      expand.setAttribute("aria-expanded", "true");
+    });
+    const row = el("tr", { class: "log-entry" + (isPinned ? " is-pinned" : ""), "data-insert-id": String(entry.id) },
+      el("td", { class: "log-entry-controls" }, expand, pin, pinMenu),
       el("td", {}, el("span", { class: "status",
         "data-state": entry.severity === "ERROR" ? "error"
           : entry.severity === "WARNING" ? "warn" : "ok" },
         el("span", { text: entry.severity }))),
-      el("td", { class: "mono", text: entry.source || "—" }),
+      el("td", { class: "mono", text: new Date(entry.timestamp).toLocaleString() }),
       // Project and operation ride along in the title, so an entry that
       // carries them can be traced without a column per field.
       el("td", { class: "mono", text: entry.resource || "—",
                  title: [entry.project ? `project ${entry.project}` : "no project",
                          entry.operationId ? `operation ${entry.operationId}` : null]
                    .filter(Boolean).join(" · ") }),
-      el("td", { class: "mono", text: entry.message }),
+      el("td", { class: "mono log-summary", "data-message": entry.message || "" },
+        ...summaryChips(entry), ...highlighted(entry.message || "")),
       logDelete ? el("td", {}, logRowActions(entry)) : null);
+    row.logEntryData = entry;
     body.append(row);
     // Bounded: an unbounded log view eventually becomes the reason the tab
     // stops responding.
-    while (body.childElementCount > MAX_RENDERED_LINES) {
-      body.firstElementChild.remove();
+    while (body.querySelectorAll("tr.log-entry").length > MAX_RENDERED_LINES) {
+      const first = body.querySelector("tr.log-entry");
+      if (first.nextElementSibling && first.nextElementSibling.classList.contains("log-detail")) first.nextElementSibling.remove();
+      first.remove();
       rows--;
     }
+    resultsCount.textContent = `${rows} entr${rows === 1 ? "y" : "ies"}`;
   };
 
   // Any traffic at all — an entry or a heartbeat — means the stream is alive.
@@ -9251,8 +9986,17 @@ async function renderLogs(view) {
     }, STREAM_SILENCE_MS);
   };
 
+  // The address's own filters, each a chip with a remove control.
+  const filterChip = (label, clear) => el("span", { class: "chip" },
+    el("span", { text: label }),
+    el("button", { class: "chip-clear", "aria-label": `Clear the ${label} filter`, onclick: clear,
+      html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>' }));
   const drawScope = () => {
-    setChildren(chips, operation
+    setChildren(chips,
+      source.value ? filterChip(`source ${source.value}`, () => { source.value = ""; writeFilters(); drawScope(); connect(); }) : null,
+      resource.value ? filterChip(`resource ${resource.value}`, () => {
+        resource.value = ""; syncLogName(); writeFilters(); drawScope(); connect(); }) : null,
+      operation
       ? el("span", { class: "chip" },
           el("span", { text: `operation ${operation}` }),
           el("button", {
@@ -9274,17 +10018,17 @@ async function renderLogs(view) {
 
   pauseButton.addEventListener("click", () => {
     paused = !paused;
-    pauseButton.textContent = paused ? "Resume" : "Pause";
+    pauseButton.textContent = paused ? "Stream logs" : "Stop stream";
     if (paused) {
-      setStatus(`paused — ${buffered.length} buffered`, "warn");
-      announce("Log stream paused");
+      setStatus(`stream stopped — ${buffered.length} new`, "warn");
+      announce("Log stream stopped");
     } else {
       // Resume shows what happened while paused rather than skipping it:
       // the lines you paused to read are usually next to the ones you need.
       for (const e of buffered) append(e);
       buffered = [];
       setStatus("streaming", "ok");
-      announce("Log stream resumed");
+      announce("Streaming logs");
     }
   });
 
@@ -9293,6 +10037,10 @@ async function renderLogs(view) {
     if (silenceTimer) clearTimeout(silenceTimer);
     body.replaceChildren();
     rows = 0;
+    resultsCount.textContent = "";
+    ready = false;
+    buffered = [];
+    queryError.hidden = true;
     stalled = false;
     reconnectButton.hidden = true;
     drawEmpty();
@@ -9314,9 +10062,11 @@ async function renderLogs(view) {
       // moment later is genuinely empty and worth explaining.
       setTimeout(takeCensus, 500);
       attempt = 0;
-      setStatus(paused ? `paused — ${buffered.length} buffered` : "streaming", "ok");
+      setStatus(paused ? "query results" : "streaming", "ok");
       heard();
     });
+    // The end of the backlog: what follows is new, drawn while streaming.
+    stream.addEventListener("ready", () => { ready = true; });
     stream.addEventListener("keepalive", heard);
     // A read the Logging API refused (a view filter it does not evaluate, a
     // parent that does not exist): its own message, and no reconnect.
@@ -9325,16 +10075,21 @@ async function renderLogs(view) {
       try { msg = JSON.parse(e.data).error || msg; } catch { /* shown as is */ }
       stream.close();
       setStatus("refused", "error");
-      drawViewNote(msg);
+      if (msg.startsWith("Invalid query")) {
+        queryError.textContent = msg;
+        queryError.hidden = false;
+      } else {
+        drawViewNote(msg);
+      }
     });
     stream.addEventListener("log", (e) => {
       heard();
       let entry;
       try { entry = JSON.parse(e.data); } catch { return; }
-      if (paused) {
+      if (paused && ready) {
         buffered.push(entry);
         if (buffered.length > MAX_RENDERED_LINES) buffered.shift();
-        setStatus(`paused — ${buffered.length} buffered`, "warn");
+        setStatus(`stream stopped — ${buffered.length} new`, "warn");
         return;
       }
       append(entry);
@@ -9355,26 +10110,146 @@ async function renderLogs(view) {
     });
   };
 
-  for (const { control } of FILTER_CONTROLS) {
-    control.addEventListener("change", () => { writeFilters(); connect(); });
-  }
-  resource.addEventListener("change", syncLogName);
+  // Run query: the editor, the menus and the time range, read once.
+  const runQuery = () => {
+    severity.value = (/^\s*severity\s*>=\s*(\w+)/m.exec(queryEditor.value) || [])[1] || "";
+    writeFilters();
+    connect();
+    announce("Query run");
+  };
+  const runButton = el("button", { class: "primary", id: "log-run-query", text: "Run query", onclick: runQuery });
+  queryEditor.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); runQuery(); }
+  });
+  contains.addEventListener("change", runQuery);
+  severity.addEventListener("change", () => { setClause("severity", severity.value ? `severity>=${severity.value}` : ""); runQuery(); });
+  resourceType.addEventListener("change", () => {
+    setClause("resource.type", resourceType.value ? `resource.type=${logQueryValue(resourceType.value)}` : "");
+    runQuery();
+  });
+  timeRange.addEventListener("change", runQuery);
+  const resultsCount = el("span", { class: "unavailable", id: "log-results-count" });
+
+  // The query's Actions, as Google's: Create metric and Create sink take the
+  // query as their filter, Download the results.
+  const queryActions = overflowMenu([
+    { label: "Create metric", run: () => navigate(`/logs/metrics/create?${new URLSearchParams({ filter: queryEditor.value.trim() })}`) },
+    { label: "Create sink", run: () => navigate(`/logs/sinks/create?${new URLSearchParams({ filter: queryEditor.value.trim() })}`) },
+    // Google's Create log alert makes a Cloud Monitoring alerting policy,
+    // which this instance does not serve (#1863).
+    { label: "Create log alert", run: () => {},
+      unavailable: "Not available locally: a log alert is a Cloud Monitoring alerting policy, and this instance does not serve Cloud Monitoring." },
+    { label: "Highlight in results", run: () => openHighlight() },
+    { label: "Download", run: async () => {
+      const query = filterQuery();
+      query.set("limit", "1000");
+      const data = await api(`/api/logs?${query}`);
+      const blob = new Blob([JSON.stringify((data.entries || []).map((e) => e.logEntry), null, 2)], { type: "application/json" });
+      const a = el("a", { href: URL.createObjectURL(blob), download: "downloaded-logs.json" });
+      document.body.append(a);
+      a.click();
+      a.remove();
+    } },
+  ], "the query results");
+  queryActions.querySelector(".overflow-trigger").setAttribute("aria-label", "Actions");
+
+  const redrawSummaries = () => {
+    for (const row of body.querySelectorAll("tr.log-entry")) {
+      const cell = row.querySelector("td.log-summary");
+      if (cell && row.logEntryData) setChildren(cell, ...summaryChips(row.logEntryData), ...highlighted(cell.dataset.message));
+    }
+  };
+  const openHighlight = () => {
+    const { dialog, close } = openModal({ labelledBy: "log-highlight-title" });
+    const input = el("input", { type: "text", id: "log-highlight-text", value: highlight, "aria-label": "Text to highlight" });
+    dialog.append(el("form", { class: "modal-body", onsubmit: (e) => {
+        e.preventDefault(); highlight = input.value.trim(); redrawSummaries(); close();
+        announce(highlight ? `Highlighting ${highlight}` : "Highlight cleared"); } },
+      el("h2", { id: "log-highlight-title", text: "Highlight in results" }),
+      el("label", { for: "log-highlight-text", text: "Text to highlight" }), input,
+      el("div", { class: "modal-actions" },
+        el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }),
+        el("button", { type: "submit", class: "primary", text: "Highlight" }))));
+    input.focus();
+  };
+  const openSummaryFields = () => {
+    const { dialog, close } = openModal({ labelledBy: "log-summary-title" });
+    const fields = [...summary.fields];
+    const list = el("div", { class: "filter-chips", id: "log-summary-fields" });
+    const drawList = () => setChildren(list, ...fields.map((f) => el("span", { class: "chip" },
+      el("span", { class: "mono", text: f }),
+      el("button", { type: "button", class: "chip-remove", "aria-label": `Remove ${f}`, text: "×",
+        onclick: () => { fields.splice(fields.indexOf(f), 1); drawList(); } }))));
+    const options = el("datalist", { id: "log-summary-options" },
+      ...[...knownFields.keys()].sort().map((k) => el("option", { value: k })));
+    const input = el("input", { type: "text", id: "log-summary-input", list: "log-summary-options",
+      class: "mono", placeholder: "jsonPayload.method" });
+    const quote = (path) => path.split(".").map((p) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(p) || /^".*"$/.test(p) ? p : `"${p}"`).join(".");
+    const add = el("button", { type: "button", class: "secondary", text: "Add", onclick: () => {
+      const v = quote(input.value.trim());
+      if (v && !fields.includes(v)) fields.push(v);
+      input.value = ""; drawList(); input.focus(); } });
+    const truncate = el("input", { type: "checkbox", id: "log-summary-truncate" });
+    truncate.checked = summary.truncate;
+    const chars = el("input", { type: "number", id: "log-summary-chars", min: "1", max: "1000", value: String(summary.chars),
+      "aria-label": "Characters" });
+    const fromEnd = el("select", { id: "log-summary-from", "aria-label": "Truncate from" },
+      el("option", { value: "start", text: "Show the beginning" }), el("option", { value: "end", text: "Show the end" }));
+    fromEnd.value = summary.fromEnd ? "end" : "start";
+    drawList();
+    dialog.append(el("form", { class: "modal-body", onsubmit: (e) => {
+        e.preventDefault();
+        summary = { ...summary, fields, truncate: truncate.checked, chars: Math.max(1, +chars.value || 30), fromEnd: fromEnd.value === "end" };
+        saveSummary(); redrawSummaries(); close(); announce("Summary fields applied"); } },
+      el("h2", { id: "log-summary-title", text: "Manage summary fields" }),
+      el("h3", { text: "Custom summary fields" }), list,
+      el("div", { class: "actions" },
+        el("label", { for: "log-summary-input", class: "sr-only", text: "Field name" }), input, options, add),
+      el("div", { class: "check-line" }, truncate, el("label", { for: "log-summary-truncate", text: "Truncate custom summary fields" })),
+      el("div", { class: "actions" }, chars, fromEnd),
+      el("div", { class: "modal-actions" },
+        el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }),
+        el("button", { type: "submit", class: "primary", text: "Apply" }))));
+    input.focus();
+  };
+  const preferences = overflowMenu([
+    { label: "Manage summary fields", run: () => openSummaryFields() },
+    { label: "Show summary chips", run: () => {
+      summary.show = !summary.show; saveSummary(); redrawSummaries();
+      notify(summary.show ? "Summary chips shown" : "Summary chips hidden"); } },
+  ], "the query results' preferences");
+  preferences.querySelector(".overflow-trigger").setAttribute("aria-label", "Preferences");
 
   drawScope();
+  const shareLink = el("button", { class: "secondary", text: "Share link",
+    onclick: () => copy(location.href, "link to this query") });
+  const queryLibrary = el("a", { class: "button secondary", href: "/logs/saved-queries", text: "Query library",
+    onclick: (e) => { e.preventDefault(); navigate("/logs/saved-queries"); } });
   setChildren(view,
     pageHeader("Logs Explorer",
-      "Live from the local stack. Credentials are redacted before an entry is stored."),
+      "Live from the local stack. Credentials are redacted before an entry is stored.",
+      { actions: [queryLibrary, shareLink] }),
     logDelete
       ? el("p", { class: "unavailable", id: "log-delete-note",
           text: "Delete log is on the Cloud Logging entries (source logging/…) of the selected project. " +
                 "Pod logs and CloudBurrow's own request log are not held by the Logging API, so they cannot be deleted here." })
       : null,
-    el("div", { class: "actions" }, scopeSelect, parentInput, viewControls, logName, severity, source, resource, contains,
+    el("div", { class: "actions log-toolbar" }, scopeSelect, parentInput, viewControls, timeRange,
        pauseButton, reconnectButton, status),
     viewNote,
+    el("section", { class: "card log-query", "aria-label": "Query" },
+      el("div", { class: "actions" }, contains, resourceType, logName, severity, source, resource),
+      queryEditor,
+      suggestions,
+      queryError,
+      el("div", { class: "actions" }, runButton)),
     chips,
     timeline,
-    el("div", { class: "table-wrap" }, table));
+    el("div", { class: "log-panes" },
+      fieldsPane,
+      el("section", { class: "log-results", "aria-label": "Query results" },
+        el("div", { class: "log-results-head" }, el("h2", { text: "Query results" }), resultsCount, queryActions, preferences),
+        el("div", { class: "table-wrap" }, table))));
 
   showViewControls();
   if (scope === "view") await loadBuckets(initialView);
@@ -9382,6 +10257,71 @@ async function renderLogs(view) {
   connect();
   announce(operation ? `Logs Explorer opened, scoped to operation ${operation}`
                      : "Logs Explorer opened");
+}
+
+// --- Logs Dashboard (#1863) ------------------------------------------
+//
+// Google's Logs Dashboard charts the project's entries by severity and by
+// resource type. Here they are the entries the console's log store holds in
+// the time range, from the same /api/logs the Logs Explorer reads; each row
+// opens the Explorer with its query.
+async function renderLogsDashboard(view) {
+  const range = el("select", { id: "logs-dashboard-range", "aria-label": "Time range" },
+    ...LOG_TIME_RANGES.map(([v, label]) => el("option", { value: v, text: label })));
+  range.value = new URLSearchParams(location.search).get("timeRange") || "1h";
+  const body = el("div", { class: "logs-dashboard" });
+  const explore = (query) => {
+    const q = new URLSearchParams({ query });
+    if (range.value !== "1h") q.set("timeRange", range.value);
+    return `/logs?${q}`;
+  };
+  const draw = async () => {
+    const preset = LOG_TIME_RANGES.find(([v]) => v === range.value) || LOG_TIME_RANGES[3];
+    const q = new URLSearchParams({ limit: "1000", from: new Date(Date.now() - preset[2] * 60000).toISOString() });
+    let data;
+    try {
+      data = await api(`/api/logs?${q}`);
+    } catch (err) {
+      return setChildren(body, el("div", { class: "state" }, el("h2", { text: "The log store could not be read" }),
+        el("p", { text: err.message })));
+    }
+    const entries = data.entries || [];
+    const count = (key) => {
+      const m = new Map();
+      for (const e of entries) {
+        const k = key(e);
+        m.set(k, (m.get(k) || 0) + 1);
+      }
+      return [...m.entries()].sort((a, b) => b[1] - a[1]);
+    };
+    const bySeverity = count((e) => e.severity);
+    const byType = count((e) => (e.logEntry || {}).resource ? e.logEntry.resource.type : "unattributed");
+    const errorsByType = count((e) => e.severity === "ERROR" ? ((e.logEntry || {}).resource || {}).type || "unattributed" : null)
+      .filter(([k]) => k !== null);
+    const card = (title, rows, query, empty) => el("section", { class: "card", "aria-label": title },
+      el("h2", { text: title }),
+      rows.length
+        ? el("table", {}, el("tbody", {}, ...rows.map(([k, n]) => el("tr", {},
+            el("td", {}, el("a", { href: explore(query(k)), text: k,
+              onclick: (e) => { e.preventDefault(); navigate(explore(query(k))); } })),
+            el("td", { class: "mono", text: String(n) })))))
+        : el("p", { class: "unavailable", text: empty }));
+    setChildren(body,
+      card("Log entries by severity", bySeverity, (k) => `severity=${k}`, "No entries in this time range"),
+      card("Log entries by resource type", byType, (k) => `resource.type=${logQueryValue(k)}`, "No entries in this time range"),
+      card("Errors by resource type", errorsByType, (k) => `severity>=ERROR\nresource.type=${logQueryValue(k)}`, "No errors in this time range"));
+  };
+  range.addEventListener("change", () => {
+    const url = new URL(location.href);
+    if (range.value === "1h") url.searchParams.delete("timeRange"); else url.searchParams.set("timeRange", range.value);
+    history.replaceState({}, "", url);
+    draw();
+  });
+  setChildren(view, pageHeader("Logs Dashboard", "The entries this instance's log store holds, by severity and resource type.",
+    { actions: [refreshButton(draw)] }),
+    el("div", { class: "actions" }, range), body);
+  await draw();
+  announce("Logs Dashboard opened");
 }
 
 // --- Activity ---------------------------------------------------------

@@ -104,6 +104,9 @@ func parseAdvance(raw string) (time.Duration, error) {
 // ActAtResult implements console.ResultActor: Advance clock answers with
 // the subscriptions it expired; every other action with nothing.
 func (p pubsubSubscriptionsProvider) ActAtResult(ctx context.Context, project string, path []string, action string, values map[string]string) (*console.Listing, error) {
+	if action == actPull {
+		return p.pullMessages(ctx, project, path)
+	}
 	if action != actAdvanceClock {
 		return nil, p.ActAt(ctx, project, path, action, values)
 	}

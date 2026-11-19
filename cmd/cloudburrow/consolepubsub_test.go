@@ -82,10 +82,11 @@ func TestATopicPageDeletesItsSubscriptionRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Subscriptions, then the topic's snapshots (#787), then its
-	// Permissions tab (#1367; pstest serves no IAM, so the tab says so).
-	if len(detail.Sections) != 3 || detail.Sections[0].ID != "subscriptions" || len(detail.Sections[0].Listing.Items) != 1 ||
-		detail.Sections[1].ID != "snapshots" || detail.Sections[1].Listing.Unavailable != "" || detail.Sections[2].ID != "permissions" {
+	// Google's tabs (#1847): Subscriptions, the topic's snapshots (#787),
+	// Metrics, Details, Messages, Ingestion, then its Permissions tab
+	// (#1367; pstest serves no IAM, so the tab says so).
+	if len(detail.Sections) != 7 || detail.Sections[0].ID != "subscriptions" || len(detail.Sections[0].Listing.Items) != 1 ||
+		detail.Sections[1].ID != "snapshots" || detail.Sections[1].Listing.Unavailable != "" || detail.Sections[6].ID != "permissions" {
 		t.Fatalf("topic page sections = %+v, want one subscription row, the snapshots and the permissions", detail.Sections)
 	}
 	row := detail.Sections[0].Listing.Items[0]
@@ -275,7 +276,7 @@ func TestTheSubscriptionsScreenListsOpensAndDeletes(t *testing.T) {
 	// The list: this project's subscriptions only, with their columns.
 	var listing console.Listing
 	getJSON200(t, srv.URL+"/api/resources/pubsub-subscriptions?project="+project, &listing)
-	if strings.Join(listing.Columns, ",") != "Topic,Delivery type,Ack deadline" || listing.NameColumn != "Subscription" {
+	if strings.Join(listing.Columns, ",") != strings.Join(subscriptionListColumns, ",") || listing.NameColumn != "Subscription name" {
 		t.Errorf("columns = %q named %q", listing.Columns, listing.NameColumn)
 	}
 	rows := map[string]map[string]string{}
@@ -283,9 +284,9 @@ func TestTheSubscriptionsScreenListsOpensAndDeletes(t *testing.T) {
 		rows[it.Name] = it.Fields
 	}
 	want := map[string]map[string]string{
-		pull:   {"Topic": orders, "Delivery type": "Pull", "Ack deadline": "20s"},
-		push:   {"Topic": orders, "Delivery type": "Push", "Ack deadline": "30s"},
-		orphan: {"Topic": "(topic deleted)", "Delivery type": "Pull"},
+		pull:   {"Topic name": orders, "Delivery type": "Pull", "Ack deadline": "20 seconds"},
+		push:   {"Topic name": orders, "Delivery type": "Push", "Ack deadline": "30 seconds"},
+		orphan: {"Topic name": "(topic deleted)", "Delivery type": "Pull"},
 	}
 	if len(rows) != len(want) || listing.Total != len(want) {
 		t.Errorf("listed %v, want exactly %d subscriptions of %s", rows, len(want), project)
@@ -321,20 +322,20 @@ func TestTheSubscriptionsScreenListsOpensAndDeletes(t *testing.T) {
 	if props[""]["Topic"] != orders || props[""]["Delivery type"] != "Push" || props[""]["Ack deadline"] != "30s" {
 		t.Errorf("push summary = %v", props[""])
 	}
-	if props["delivery"]["Endpoint"] != "https://example.invalid/push" || props["delivery"]["Attribute x-goog-version"] != "v1" {
-		t.Errorf("push delivery = %v", props["delivery"])
+	if props["details"]["Endpoint"] != "https://example.invalid/push" || props["details"]["Attribute x-goog-version"] != "v1" {
+		t.Errorf("push delivery = %v", props["details"])
 	}
-	if props["dead-lettering"]["Dead-letter topic"] != "None" {
-		t.Errorf("push dead lettering = %v, want None", props["dead-lettering"])
+	if props["details"]["Dead-letter topic"] != "None" {
+		t.Errorf("push dead lettering = %v, want None", props["details"])
 	}
 
 	// The dead-lettered one shows its policy.
 	props = detailProps(detail(pull))
-	if props["dead-lettering"]["Dead-letter topic"] != dead || props["dead-lettering"]["Maximum delivery attempts"] != "7" {
-		t.Errorf("dead-letter policy = %v, want %s after 7", props["dead-lettering"], dead)
+	if props["details"]["Dead-letter topic"] != dead || props["details"]["Maximum delivery attempts"] != "7" {
+		t.Errorf("dead-letter policy = %v, want %s after 7", props["details"], dead)
 	}
-	if props["delivery"]["Push endpoint"] == "" {
-		t.Errorf("pull delivery = %v", props["delivery"])
+	if props["details"]["Push endpoint"] == "" {
+		t.Errorf("pull delivery = %v", props["details"])
 	}
 
 	// Another project's subscription has no page here, and nothing deeper.

@@ -11,12 +11,11 @@ import (
 	"testing"
 )
 
-// TestLogsExplorerPauseBuffersAndResumeShowsWhatHappened (#1576), in the
-// storage shard. The Logs Explorer streams a project's entries; Pause
-// stops drawing new ones and counts them as buffered, and Resume draws
-// what arrived while paused rather than skipping it, beside the lines
-// that were there before.
-func TestLogsExplorerPauseBuffersAndResumeShowsWhatHappened(t *testing.T) {
+// TestLogsExplorerStreamLogsAndStopStream (#1215, #1863): as Google's Logs
+// Explorer, a query's results are drawn when it runs and later entries only
+// while Stream logs is on; Stop stream holds what arrives, and Stream logs
+// shows it, so nothing written in between is skipped.
+func TestLogsExplorerStreamLogsAndStopStream(t *testing.T) {
 	needService(t, "logging-buckets")
 	logAddr := strings.TrimPrefix(strings.TrimSpace(os.Getenv(envLogging)), "http://")
 	if logAddr == "" {
@@ -39,27 +38,33 @@ func TestLogsExplorerPauseBuffersAndResumeShowsWhatHappened(t *testing.T) {
 	}
 	status := `((document.querySelector("#view .status") || {}).textContent || "")`
 
-	write("before-pause")
+	write("before-the-query")
 	p := open(t)
 	p.navigate("/logs?scope=project&project=" + project)
-	p.waitFor(shown("before-pause"))
-	p.waitFor(status + ` === "streaming"`)
+	p.waitFor(shown("before-the-query"))
+	p.waitFor(status + ` === "query results"`)
+	p.waitFor(button("Stream logs") + ` !== undefined`)
 
-	p.waitFor(button("Pause") + ` !== undefined`)
-	p.eval(button("Pause")+`.click(), true`, nil)
-	p.waitFor(button("Resume") + ` !== undefined`)
-	write("while-paused-one")
-	write("while-paused-two")
-	p.waitFor(status + ` === "paused — 2 buffered"`)
+	// Not streaming: a new entry is held, not drawn.
+	write("held-one")
+	write("held-two")
+	p.waitFor(status + ` === "stream stopped — 2 new"`)
 	var drawn bool
-	p.eval(shown("while-paused-one")+` || `+shown("while-paused-two"), &drawn)
+	p.eval(shown("held-one")+` || `+shown("held-two"), &drawn)
 	if drawn {
-		t.Fatal("a line that arrived while paused was drawn before Resume")
+		t.Fatal("an entry written after the query ran was drawn before Stream logs")
 	}
 
-	p.eval(button("Resume")+`.click(), true`, nil)
-	p.waitFor(shown("while-paused-one") + ` && ` + shown("while-paused-two") + ` && ` + shown("before-pause"))
-	p.waitFor(button("Pause") + ` !== undefined`)
-	write("after-resume")
-	p.waitFor(shown("after-resume"))
+	p.eval(button("Stream logs")+`.click(), true`, nil)
+	p.waitFor(shown("held-one") + ` && ` + shown("held-two") + ` && ` + shown("before-the-query"))
+	p.waitFor(status + ` === "streaming"`)
+	write("while-streaming")
+	p.waitFor(shown("while-streaming"))
+
+	p.eval(button("Stop stream")+`.click(), true`, nil)
+	p.waitFor(button("Stream logs") + ` !== undefined`)
+	write("after-stop")
+	p.waitFor(status + ` === "stream stopped — 1 new"`)
+	p.eval(button("Stream logs")+`.click(), true`, nil)
+	p.waitFor(shown("after-stop"))
 }

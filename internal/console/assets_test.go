@@ -2401,7 +2401,8 @@ func TestTheLogsScreenDoesNotHideUnattributedEntries(t *testing.T) {
 	}
 	// And an entry's own resource is visible, so an unattributed line is
 	// still traceable.
-	if !strings.Contains(src, `const LOG_COLUMNS = ["Time", "Severity", "Source", "Resource", "Message"];`) {
+	// Google's Query results columns since #1863, the Resource kept.
+	if !strings.Contains(src, `const LOG_COLUMNS = ["Severity", "Timestamp", "Resource", "Summary"];`) {
 		t.Error("the logs table has no Resource column")
 	}
 }

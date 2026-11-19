@@ -980,6 +980,19 @@ td a { color: var(--accent); }
    but not full-bleed: a text field the width of a monitor is unreadable. */
 .create-page { max-width: 720px; }
 .create-page .form-error { max-width: none; }
+/* One page under headings, as Google's Pub/Sub create pages are (#1847):
+   each section's heading a little larger than a step's title would be. */
+.create-page.is-single-page .form-section-title { font-size: var(--text-title-size, 16px); }
+/* A create page's checks (#1847): Validate definition and Test message. */
+.create-checks { margin-top: 8px; }
+.create-check-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+.create-check-result { margin: 8px 0 0; color: var(--text); overflow-wrap: anywhere; }
+.create-check-result.is-error { color: var(--error); }
+/* A choice this instance cannot make, drawn disabled with its reason. */
+.form-unavailable { font-style: italic; }
+.check-line.is-unavailable { flex-wrap: wrap; }
+.check-line.is-unavailable .form-unavailable { flex-basis: 100%; margin-left: 24px; }
+.is-unavailable label { color: var(--text-muted); }
 .form-actions {
   display: flex; gap: 8px; margin-top: 24px;
   padding-top: 16px; border-top: 1px solid var(--border);
@@ -1914,3 +1927,71 @@ dd.has-copy .property-copy { padding: 2px 8px; font-size: var(--text-badge-size)
 .picker-star svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linejoin: round; }
 .picker-star[aria-pressed="true"] svg { fill: currentColor; color: var(--accent); }
 .picker-columns { padding-right: 46px; }
+
+/* Logs Explorer (#1863): the query pane, the Fields pane beside the Query
+   results, and an entry expanded to its fields. */
+.log-query { display: grid; gap: 8px; margin-bottom: 12px; }
+.log-query-editor { width: 100%; box-sizing: border-box; min-height: 72px; resize: vertical;
+  border: 1px solid var(--text-muted); border-radius: var(--radius-control); padding: 8px;
+  background: var(--surface); color: var(--text); }
+.log-timeline-head, .log-results-head, .log-fields-head { display: flex; align-items: center; gap: 12px; }
+.log-timeline-head h2, .log-results-head h2, .log-fields-head h2 { margin-right: auto; }
+.log-panes { display: grid; grid-template-columns: minmax(180px, 240px) minmax(0, 1fr); gap: 12px; align-items: start; }
+.log-fields h3 { font-size: var(--text-caption-size); color: var(--text-muted); margin: 12px 0 4px; }
+.log-fields ul { list-style: none; margin: 0; padding: 0; }
+.log-field-value { display: flex; justify-content: space-between; gap: 8px; width: 100%; padding: 4px 6px;
+  border: 0; background: none; color: var(--text); text-align: left; border-radius: var(--radius-control); cursor: pointer; }
+.log-field-value:hover { background: var(--state-hover); }
+.log-field-value .mono { overflow-wrap: anywhere; }
+.log-field-count { color: var(--text-muted); }
+.log-results { min-width: 0; }
+.log-expand svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; }
+.log-expand[aria-expanded="true"] svg { transform: rotate(90deg); }
+.log-detail-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.log-json { list-style: none; margin: 0; padding-left: 16px; }
+.log-json-key { color: var(--accent); }
+.log-json-leaf { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.log-json-value { overflow-wrap: anywhere; }
+.timeline-column { cursor: pointer; }
+.logs-dashboard { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+@media (max-width: 700px) { .log-panes { grid-template-columns: minmax(0, 1fr); } }
+.log-toolbar > *, .log-query .actions > *, .log-view-controls > * { max-width: 100%; min-width: 0; }
+
+/* Log Analytics (#1863): the Log views panel beside the editor. */
+.log-analytics { display: grid; grid-template-columns: minmax(200px, 300px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.log-analytics .log-views h2 { font-size: var(--text-body-size); margin: 0 0 8px; }
+.log-view-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.log-view-list .link-button { word-break: break-all; text-align: left; }
+@media (max-width: 720px) { .log-analytics { grid-template-columns: minmax(0, 1fr); } }
+
+/* A repeatable group of fields (Field.Group, #1863): a row per exclusion filter. */
+.group-rows { display: grid; gap: 8px; margin-bottom: 8px; }
+.group-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; padding: 8px; border: 1px solid var(--border, var(--text-muted)); border-radius: var(--radius-control); }
+.group-cell { display: grid; gap: 4px; flex: 1 1 200px; min-width: 0; }
+.group-cell textarea, .group-cell input { width: 100%; box-sizing: border-box; }
+.group-cell-label { font-size: var(--text-caption-size); color: var(--text-muted); }
+.group-check { display: inline-flex; align-items: center; gap: 6px; }
+
+/* Logs Explorer (#1863, round 2): query suggestions, summary chips,
+   highlight, pinned entries and the Timeline's drag handles. */
+.log-suggestions { list-style: none; margin: 0; padding: 4px; max-height: 220px; overflow-y: auto;
+  border: 1px solid var(--text-muted); border-radius: var(--radius-control); background: var(--surface); }
+.log-suggestion { padding: 4px 8px; cursor: pointer; border-radius: var(--radius-control); overflow-wrap: anywhere; }
+.log-suggestion:hover, .log-suggestion:focus { background: var(--state-hover); outline: 2px solid var(--accent); }
+.log-summary-chip { display: inline-block; margin-right: 6px; padding: 0 6px; border-radius: 10px;
+  border: 1px solid var(--text-muted); font-size: var(--text-caption-size); }
+mark.log-highlight { background: var(--warn); color: var(--on-warn); }
+.log-entry-controls { white-space: nowrap; }
+.log-entry-controls .overflow { display: inline-block; }
+.log-pin svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6; }
+.log-pin[aria-pressed="true"] svg { fill: currentColor; }
+.log-pin-menu { display: none; }
+tr.is-pinned .log-pin-menu { display: inline-block; }
+tr.log-entry.is-pinned { background: var(--state-hover); }
+.log-pins { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; }
+.log-pin-mark { display: inline-flex; align-items: center; gap: 2px; }
+.timeline-handles { position: relative; height: 24px; }
+.timeline-handle { position: absolute; left: 0; top: 0; width: 100%; margin: 0; pointer-events: none; background: transparent; }
+.timeline-handle::-webkit-slider-thumb { pointer-events: auto; }
+.timeline-handle::-moz-range-thumb { pointer-events: auto; }
+.timeline-selection-shade { position: absolute; top: 8px; height: 8px; background: var(--accent); opacity: .3; border-radius: var(--radius-control); }

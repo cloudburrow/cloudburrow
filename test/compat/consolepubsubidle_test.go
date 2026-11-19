@@ -116,7 +116,7 @@ func TestConsolePubSubIdleTimeAndPushAttributes(t *testing.T) {
 	got := map[string]string{}
 	for _, sec := range page.Sections {
 		for _, g := range sec.Groups {
-			if sec.ID == "configuration" && g.Heading == "Expiration" {
+			if sec.ID == "details" && g.Heading == "Expiration" {
 				for _, p := range g.Properties {
 					got[p.Label] = p.Value
 				}

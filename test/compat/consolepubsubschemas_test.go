@@ -110,8 +110,9 @@ func TestConsolePubSubSchemas(t *testing.T) {
 		t.Errorf("ValidateSchema(PROTOCOL_BUFFER) = %v, want it served by the front", err)
 	}
 	code, body := consoleDo(t, addr, http.MethodGet, "/api/services", "")
-	if code != http.StatusOK || !strings.Contains(body, `"label":"Create schema"`) || !strings.Contains(body, "PROTOCOL_BUFFER") {
-		t.Fatalf("the console's services = %d %s; want pubsub-schemas' Create schema offering PROTOCOL_BUFFER", code, body)
+	// Offered in Google's words (#1847): Protocol Buffer.
+	if code != http.StatusOK || !strings.Contains(body, `"label":"Create schema"`) || !strings.Contains(body, `"Protocol Buffer"`) {
+		t.Fatalf("the console's services = %d %s; want pubsub-schemas' Create schema offering Protocol Buffer", code, body)
 	}
 
 	// An invalid definition: ValidateSchema's own refusal, and nothing made.
