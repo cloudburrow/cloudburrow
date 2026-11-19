@@ -76,6 +76,7 @@ func (p firestoreProvider) List(ctx context.Context, project string) (console.Li
 		base.Prompt = "Firestore holds collections per project. Choose one in the toolbar."
 		return base, nil
 	}
+	base.Scope = p.databaseScope(ctx, project)
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
 
@@ -87,7 +88,7 @@ func (p firestoreProvider) List(ctx context.Context, project string) (console.Li
 	// sent per call instead.
 	opts := append(localOpts(p.endpoint),
 		option.WithGRPCDialOption(grpc.WithPerRPCCredentials(emulatorOwner{})))
-	c, err := firestore.NewClient(ctx, project, opts...)
+	c, err := firestore.NewClientWithDatabase(ctx, project, firestoreDatabaseIn(ctx), opts...)
 	if err != nil {
 		base.Unavailable = "cannot reach Firestore: " + err.Error()
 		return base, nil
@@ -616,7 +617,7 @@ func (p firestoreProvider) documentsPage(ctx context.Context, project, name, aft
 
 	opts := append(localOpts(p.endpoint),
 		option.WithGRPCDialOption(grpc.WithPerRPCCredentials(emulatorOwner{})))
-	c, err := firestore.NewClient(ctx, project, opts...)
+	c, err := firestore.NewClientWithDatabase(ctx, project, firestoreDatabaseIn(ctx), opts...)
 	if err != nil {
 		out.Unavailable = "cannot reach Firestore: " + err.Error()
 		return out, nil
@@ -1909,7 +1910,7 @@ func (p firestoreProvider) documentDetail(ctx context.Context, project, collecti
 
 	opts := append(localOpts(p.endpoint),
 		option.WithGRPCDialOption(grpc.WithPerRPCCredentials(emulatorOwner{})))
-	c, err := firestore.NewClient(ctx, project, opts...)
+	c, err := firestore.NewClientWithDatabase(ctx, project, firestoreDatabaseIn(ctx), opts...)
 	if err != nil {
 		return console.Detail{Unavailable: "cannot reach Firestore: " + err.Error()}, nil
 	}
@@ -2047,7 +2048,7 @@ func (p firestoreProvider) Build(ctx context.Context, project string, path []str
 
 	opts := append(localOpts(p.endpoint),
 		option.WithGRPCDialOption(grpc.WithPerRPCCredentials(emulatorOwner{})))
-	c, err := firestore.NewClient(ctx, project, opts...)
+	c, err := firestore.NewClientWithDatabase(ctx, project, firestoreDatabaseIn(ctx), opts...)
 	if err != nil {
 		out.Unavailable = "cannot reach Firestore: " + err.Error()
 		return out, nil

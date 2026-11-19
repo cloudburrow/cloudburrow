@@ -2069,3 +2069,26 @@ svg.bq-chart { display: block; border: 1px solid var(--border); border-radius: v
 .bq-viz-config { display: grid; gap: 4px; }
 .bq-viz-config h3 { margin: 0 0 4px; font-size: var(--text-body-size, 14px); }
 .bq-viz-measures { border: 1px solid var(--border); border-radius: var(--radius); margin: 8px 0 0; padding: 4px 12px; }
+
+/* Firestore's Data panel (#1845): three columns, collections | documents |
+   fields, as Google's Firestore Studio draws them; one column under another
+   on a narrow screen. */
+.fs-panel { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; margin-top: 8px; }
+.fs-panel .fs-column { margin: 0; border-radius: 0; min-height: 320px; overflow: auto; }
+.fs-panel .fs-column + .fs-column { border-left: none; }
+.fs-column-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.fs-column-title { font-size: var(--text-body-size); margin: 0; overflow-wrap: anywhere; }
+.fs-column-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.fs-rows { list-style: none; margin: 0; padding: 0; }
+.fs-row { display: flex; align-items: center; justify-content: space-between; gap: 4px; }
+.fs-row.is-selected { background: var(--selected, rgba(26, 115, 232, 0.12)); }
+.fs-row.is-absent .fs-row-link { font-style: italic; }
+.fs-row-link { background: none; border: none; color: inherit; cursor: pointer; text-align: left; padding: 6px 8px;
+  flex: 1; overflow-wrap: anywhere; font: inherit; }
+.fs-field-type { opacity: 0.7; }
+.fs-path { margin: 8px 0; }
+.fs-menu { width: auto; }
+@media (max-width: 720px) {
+  .fs-panel { grid-template-columns: minmax(0, 1fr); }
+  .fs-panel .fs-column + .fs-column { border-left: 1px solid var(--border, #dadce0); border-top: none; }
+}

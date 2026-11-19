@@ -3726,8 +3726,12 @@ async function renderDetail(view, route, resourcePath) {
     navigate(route.path);
   };
   const leaves = (a) => a.leaves || (a.destructive && a.id.startsWith("delete") && segments.length > 1);
+  // An action a tab draws at its top (Section.Actions) is drawn there only,
+  // not beside the title as well (#1845): Google's Create Index is on the
+  // Indexes tab, not on the database's title line.
+  const onTabs = new Set(sections.flatMap((s) => (s.actions || []).map((a) => a.id)));
   const pageActions = [
-    ...(data.actions || []).map((a) =>
+    ...(data.actions || []).filter((a) => !onTabs.has(a.id)).map((a) =>
       el("button", {
         class: "secondary" + (a.destructive ? " danger" : ""),
         text: a.label,
@@ -6904,6 +6908,7 @@ function dispatch(view) {
   if (match.screen === "new-project") return renderNewProject(view);
   if (!match.service) return renderDashboard(view);
   if (resourcePath.length) return renderDetail(view, match, resourcePath);
+  if (match.service === "firestore") return renderFirestoreData(view, match);
   // The old address still works, so a link someone saved keeps resolving.
   const legacy = new URLSearchParams(location.search).get("resource");
   if (legacy) return renderDetail(view, match, [legacy]);
@@ -12007,6 +12012,302 @@ async function requestCharts(samples = []) {
           el("li", { text: `${s}: ${data.unmeasured_label}` })))
       : null);
 }
+
+// --- Firestore's Data panel (#1845, round 2) ------------------------------
+//
+// Google's Firestore Studio Data viewer is a panel of three columns
+// (https://docs.cloud.google.com/firestore/native/docs/using-console, read
+// 2026-11-19): the database's collections (or, inside a subcollection, the
+// parent document's), the selected collection's documents, and the selected
+// document's subcollections and fields. Start collection, Add document and
+// Add field are at the top of their columns; a collection's menu has Delete
+// collection and its filter button Add filters; a document's menu has Delete
+// document and Delete document fields; a field is edited by clicking it and
+// deleted with the icon beside it. Edit path opens any path, and Panel
+// settings is Google's Project panel settings dialog (Show non-existent
+// parents, Realtime updates enabled). The database travels as ?database=,
+// so every database of the project is browsed here, and the selection as
+// ?path=. Each read and change goes through the routes the drill-down pages
+// use, which stay reachable from each column's Open link.
+const FS_PANEL_SETTINGS_KEY = "cb-firestore-panel-settings";
+const FS_PANEL_FILTERS = new Map();
+let FS_PANEL_TIMER = null;
+
+function fsPanelSettings() {
+  try {
+    return { showMissing: true, realtime: true,
+      ...JSON.parse(localStorage.getItem(FS_PANEL_SETTINGS_KEY) || "{}") };
+  } catch { return { showMissing: true, realtime: true }; }
+}
+
+function fsPanelPath() {
+  const raw = new URLSearchParams(location.search).get("path") || "";
+  return raw.split("/").filter(Boolean);
+}
+
+function fsPanelGo(segments) {
+  const url = new URL(location.href);
+  if (segments.length) url.searchParams.set("path", segments.join("/"));
+  else url.searchParams.delete("path");
+  history.pushState(history.state, "", url.pathname + url.search);
+}
+
+async function renderFirestoreData(view, route) {
+  if (FS_PANEL_TIMER) { clearInterval(FS_PANEL_TIMER); FS_PANEL_TIMER = null; }
+  const project = currentProject();
+  const settings = fsPanelSettings();
+  const redraw = () => renderFirestoreData(view, route);
+  const q = (segments) => `?project=${encodeURIComponent(project)}` +
+    segments.map((s) => `&name=${encodeURIComponent(s)}`).join("");
+
+  const editPath = el("button", { class: "header-button", type: "button", id: "fs-edit-path", text: "Edit path",
+    onclick: () => fsEditPath(redraw) });
+  const panelSettings = el("button", { class: "header-button", type: "button", id: "fs-panel-settings",
+    text: "Panel settings", onclick: () => fsPanelSettingsDialog(redraw) });
+  const header = pageHeader("Data", project ? `Project ${project}` + scopeSubtitle(route.service) : "All projects",
+    { actions: [editPath, panelSettings, refreshButton(async () => redraw())] });
+  setChildren(view, header, loadingState(4, { what: "collections" }));
+
+  let list;
+  try {
+    list = await api(`/api/resources/${route.service}?project=${encodeURIComponent(project)}`);
+  } catch (err) {
+    return setChildren(view, header, errorState("Data unavailable", String(err.message), redraw));
+  }
+  if (list.prompt) return setChildren(view, header, emptyState("Choose a project", list.prompt));
+  if (list.unavailable) return setChildren(view, header, errorState("Data unavailable", list.unavailable, redraw));
+  const picker = list.scope ? scopePicker(list.scope, redraw) : null;
+  const database = (list.scope && list.scope.selected) || "(default)";
+
+  // The selection: P alternates collection and document IDs. The middle
+  // column is the deepest collection selected, the right one its document.
+  const P = fsPanelPath();
+  const colEnd = P.length % 2 === 1 ? P.length : P.length - 1;
+  const colPath = colEnd > 0 ? P.slice(0, colEnd).join("/") : "";
+  const docId = P.length % 2 === 0 && P.length ? P[P.length - 1] : "";
+  const parentDoc = colEnd >= 3 ? [P.slice(0, colEnd - 2).join("/"), P[colEnd - 2]] : null;
+
+  const visible = (items) => (items || []).filter((i) => settings.showMissing || !i.absent);
+  const column = (id, title, actions, body, menu) => el("section", { class: "fs-column card", id, "aria-label": title },
+    el("div", { class: "fs-column-head" },
+      el("h2", { class: "fs-column-title", text: title }),
+      menu || null),
+    actions ? el("div", { class: "fs-column-actions" }, ...actions) : null,
+    body);
+  const rowList = (items, selected, onPick, extra) => el("ul", { class: "fs-rows", role: "list" },
+    ...items.map((item) => el("li", { class: "fs-row" + (item.name === selected ? " is-selected" : "") +
+        (item.absent ? " is-absent" : "") },
+      el("button", { type: "button", class: "fs-row-link", text: item.name, "aria-current": item.name === selected ? "true" : null,
+        onclick: () => onPick(item) }),
+      extra ? extra(item) : null)));
+  const menuOf = (label, entries) => {
+    const sel = el("select", { class: "fs-menu", "aria-label": label },
+      el("option", { value: "", text: "⋮" }),
+      ...entries.map((e) => el("option", { value: e.id, text: e.label })));
+    sel.addEventListener("change", () => {
+      const e = entries.find((x) => x.id === sel.value);
+      sel.value = "";
+      if (e) e.run();
+    });
+    return sel;
+  };
+  const act = (path, action, after) => runAction(route, path, action, after || redraw, NO_ROW);
+
+  // Left: the database's collections, or the parent document's subcollections.
+  let leftItems, leftTitle, leftStart;
+  if (parentDoc) {
+    const d = await api(`/api/detail/${route.service}${q(parentDoc)}`).catch((err) => ({ unavailable: err.message }));
+    const subs = (d.sections || []).find((s) => s.id === "collections");
+    leftItems = ((subs && subs.listing && subs.listing.items) || []).map((i) => ({ name: i.name }));
+    leftTitle = parentDoc[1];
+    leftStart = (d.actions || []).find((a) => a.id === "startcollection");
+  } else {
+    leftItems = list.items || [];
+    leftTitle = database;
+  }
+  const selectedCol = colPath ? colPath.split("/").pop() : "";
+  const startRoot = capabilityOf(route.service).create;
+  const left = column("fs-collections", leftTitle, [
+    el("button", { type: "button", class: "secondary", id: "fs-start-collection", text: "Start collection",
+      onclick: () => parentDoc && leftStart
+        ? act(parentDoc, leftStart, (name) => { redraw(); })
+        : startRoot && openCreateForm(route, startRoot, (name) => { if (name) fsPanelGo([name]); redraw(); }) }),
+  ], leftItems.length
+    ? rowList(leftItems, selectedCol, (item) => {
+        fsPanelGo(parentDoc ? [...P.slice(0, colEnd - 1), item.name] : [item.name]);
+        redraw();
+      })
+    : el("p", { class: "unavailable", text: parentDoc ? "This document has no subcollections." : "This database has no collections." }));
+
+  const columns = [left];
+  // Middle: the collection's documents, with its filter and its menu.
+  if (colPath) {
+    const filter = FS_PANEL_FILTERS.get(database + "|" + colPath);
+    let docs = [];
+    let failure = "";
+    let addDoc = null;
+    try {
+      const d = await api(`/api/detail/${route.service}${q([colPath])}`);
+      if (d.unavailable) failure = d.unavailable;
+      const sec = (d.sections || []).find((s) => s.id === "documents");
+      docs = (sec && sec.listing && sec.listing.items) || [];
+      addDoc = (d.actions || []).find((a) => a.id === "adddocument");
+      if (filter) {
+        const res = await send(`/api/query/${route.service}?project=${encodeURIComponent(project)}`, "POST",
+          { Path: [colPath], Values: { field: filter.field, op: filter.op, value: filter.value, limit: "500" } });
+        const names = new Set(((res.listing || {}).items || []).map((i) => i.name));
+        docs = docs.filter((x) => names.has(x.name));
+      }
+    } catch (err) { failure = String(err.message); }
+    const filterButton = el("button", { type: "button", class: "header-button" + (filter ? " is-active" : ""),
+      id: "fs-filter", text: filter ? `Filter: ${filter.field} ${filter.op} ${filter.value}` : "Filter",
+      "aria-label": "Filter list", onclick: () => fsFilterDialog(database + "|" + colPath, filter, redraw) });
+    const deleteCollection = { id: "deletecollection", label: "Delete collection", destructive: true,
+      confirm: "Every document in the collection, and in each of their subcollections, is deleted." };
+    const menu = menuOf(`Collection ${selectedCol} menu`, [
+      { id: "deletecollection", label: "Delete collection",
+        run: () => act([colPath], deleteCollection, () => { fsPanelGo(P.slice(0, colEnd - 1)); redraw(); }) },
+      { id: "open", label: "Open collection page", run: () => navigate(detailHref(route, [colPath])) },
+    ]);
+    const docsShown = visible(docs);
+    columns.push(column("fs-documents", selectedCol,
+      [addDoc ? el("button", { type: "button", class: "secondary", id: "fs-add-document", text: "Add document",
+        onclick: () => act([colPath], addDoc) }) : null, filterButton].filter(Boolean),
+      failure ? el("p", { class: "form-error", text: failure })
+        : docsShown.length ? rowList(docsShown, docId, (item) => { fsPanelGo([...P.slice(0, colEnd), item.name]); redraw(); })
+          : el("p", { class: "unavailable", text: filter ? "No documents match the filter." : "This collection has no documents." }),
+      menu));
+  }
+
+  // Right: the document's subcollections and fields.
+  if (colPath && docId) {
+    const docPath = [colPath, docId];
+    let d;
+    try { d = await api(`/api/detail/${route.service}${q(docPath)}`); } catch (err) { d = { unavailable: String(err.message) }; }
+    const fields = ((d.sections || []).find((s) => s.id === "fields") || {}).listing || {};
+    const subs = ((d.sections || []).find((s) => s.id === "collections") || {}).listing || {};
+    const acts = d.actions || [];
+    const find = (id) => acts.find((a) => a.id === id);
+    const menu = menuOf(`Document ${docId} menu`, [
+      find("deletedocument") && { id: "deletedocument", label: "Delete document",
+        run: () => act(docPath, find("deletedocument"), () => { fsPanelGo(P.slice(0, colEnd)); redraw(); }) },
+      find("deletefields") && { id: "deletefields", label: "Delete document fields", run: () => act(docPath, find("deletefields")) },
+      { id: "open", label: "Open document page", run: () => navigate(detailHref(route, docPath)) },
+    ].filter(Boolean));
+    const editField = async (name) => {
+      try {
+        const f = await api(`/api/detail/${route.service}${q([...docPath, name])}`);
+        if (f.edit) return openEditForm(route, [...docPath, name], f.edit, redraw);
+        navigate(detailHref(route, [...docPath, name]));
+      } catch (err) { notify(`Cannot edit ${name}: ${err.message}`, "error"); }
+    };
+    const fieldRows = (fields.items || []).map((item) => el("li", { class: "fs-row fs-field" },
+      el("button", { type: "button", class: "fs-row-link", title: "Edit field", "aria-label": `Edit field ${item.name}`,
+        onclick: () => editField(item.name) },
+        el("span", { class: "fs-field-name", text: item.name + ": " }),
+        el("span", { class: "fs-field-value", text: (item.fields || {}).Value || "" }),
+        el("span", { class: "fs-field-type", text: ` (${(item.fields || {}).Type || ""})` })),
+      el("button", { type: "button", class: "icon-button danger fs-field-delete", "aria-label": `Delete field ${item.name}`,
+        text: "✕", onclick: () => act([...docPath, item.name],
+          { id: "deletefield", label: "Delete field", destructive: true }) })));
+    columns.push(column("fs-document", docId, [
+      find("startcollection") ? el("button", { type: "button", class: "secondary", id: "fs-start-subcollection",
+        text: "Start collection", onclick: () => act(docPath, find("startcollection")) }) : null,
+      find("addfield") ? el("button", { type: "button", class: "secondary", id: "fs-add-field", text: "Add field",
+        onclick: () => act(docPath, find("addfield")) }) : null,
+    ].filter(Boolean),
+    d.unavailable ? el("p", { class: "form-error", text: d.unavailable }) : el("div", {},
+      (subs.items || []).length
+        ? rowList(subs.items, "", (item) => { fsPanelGo([...P.slice(0, colEnd), docId, item.name]); redraw(); })
+        : null,
+      fieldRows.length ? el("ul", { class: "fs-rows fs-fields", role: "list" }, ...fieldRows)
+        : el("p", { class: "unavailable", text: fields.note || "This document has no fields." })),
+    menu));
+  }
+
+  const crumbs = el("nav", { class: "breadcrumb fs-path", "aria-label": "Path" },
+    el("button", { type: "button", class: "fs-row-link", text: database, onclick: () => { fsPanelGo([]); redraw(); } }),
+    ...P.flatMap((s, i) => [el("span", { "aria-hidden": "true", text: " > " }),
+      el("button", { type: "button", class: "fs-row-link", text: s, onclick: () => { fsPanelGo(P.slice(0, i + 1)); redraw(); } })]));
+  setChildren(view, header, picker, crumbs, el("div", { class: "fs-panel", id: "fs-panel" }, ...columns));
+  announce(`${database} data opened`);
+  // Realtime updates (Panel settings): the panel is read again every few
+  // seconds while it is on screen, as Google's listens for changes.
+  if (settings.realtime) {
+    const panel = view.querySelector("#fs-panel");
+    FS_PANEL_TIMER = setInterval(() => {
+      if (!panel.isConnected) { clearInterval(FS_PANEL_TIMER); FS_PANEL_TIMER = null; return; }
+      if (document.querySelector(".modal") || document.hidden) return;
+      redraw();
+    }, 10000);
+  }
+}
+
+function fsEditPath(redraw) {
+  const { dialog, close } = openModal({ labelledBy: "fs-edit-path-title" });
+  const input = el("input", { type: "text", id: "fs-path-input", value: fsPanelPath().join("/"),
+    "aria-label": "Path", placeholder: "users/alice" });
+  dialog.append(el("form", { class: "modal-body", onsubmit: (e) => {
+    e.preventDefault();
+    fsPanelGo(input.value.split("/").filter(Boolean));
+    close();
+    redraw();
+  } },
+  el("h2", { id: "fs-edit-path-title", text: "Edit path" }),
+  el("p", { class: "form-help", text: "A collection or document path, such as users or users/alice/orders/o1." }),
+  input,
+  el("div", { class: "modal-actions" },
+    el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }),
+    el("button", { type: "submit", class: "primary", text: "Go" }))));
+  input.focus();
+}
+
+function fsPanelSettingsDialog(redraw) {
+  const s = fsPanelSettings();
+  const { dialog, close } = openModal({ labelledBy: "fs-settings-title" });
+  const box = (id, label, on) => el("label", { class: "checkbox-row" },
+    el("input", { type: "checkbox", id, checked: on }), el("span", { text: " " + label }));
+  dialog.append(el("form", { class: "modal-body", onsubmit: (e) => {
+    e.preventDefault();
+    const next = { showMissing: dialog.querySelector("#fs-show-missing").checked,
+      realtime: dialog.querySelector("#fs-realtime").checked };
+    try { localStorage.setItem(FS_PANEL_SETTINGS_KEY, JSON.stringify(next)); } catch { /* storage refused */ }
+    close();
+    redraw();
+  } },
+  el("h2", { id: "fs-settings-title", text: "Project panel settings" }),
+  box("fs-show-missing", "Show non-existent parents", s.showMissing),
+  box("fs-realtime", "Realtime updates enabled", s.realtime),
+  el("div", { class: "modal-actions" },
+    el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }),
+    el("button", { type: "submit", class: "primary", text: "Save" }))));
+}
+
+function fsFilterDialog(key, current, redraw) {
+  const { dialog, close } = openModal({ labelledBy: "fs-filter-title" });
+  const field = el("input", { type: "text", id: "fs-filter-field", value: (current || {}).field || "", "aria-label": "Field" });
+  const op = el("select", { id: "fs-filter-op", "aria-label": "Operator" },
+    ...["==", "!=", "<", "<=", ">", ">=", "in", "array-contains"].map((o) =>
+      el("option", { value: o, text: o, selected: o === ((current || {}).op || "==") })));
+  const value = el("input", { type: "text", id: "fs-filter-value", value: (current || {}).value || "", "aria-label": "Value" });
+  dialog.append(el("form", { class: "modal-body", onsubmit: (e) => {
+    e.preventDefault();
+    if (field.value.trim()) FS_PANEL_FILTERS.set(key, { field: field.value.trim(), op: op.value, value: value.value });
+    else FS_PANEL_FILTERS.delete(key);
+    close();
+    redraw();
+  } },
+  el("h2", { id: "fs-filter-title", text: "Add filters" }),
+  el("label", { for: "fs-filter-field", text: "Filter by field" }), field,
+  el("label", { for: "fs-filter-op", text: "Condition" }), op,
+  el("label", { for: "fs-filter-value", text: "Value" }), value,
+  el("div", { class: "modal-actions" },
+    el("button", { type: "button", class: "secondary", id: "fs-filter-clear", text: "Clear filter",
+      onclick: () => { FS_PANEL_FILTERS.delete(key); close(); redraw(); } }),
+    el("button", { type: "submit", class: "primary", text: "Apply" }))));
+  field.focus();
+}
+
 
 // --- Connect and About (#802) -----------------------------------------
 //

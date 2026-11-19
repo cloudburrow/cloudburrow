@@ -753,10 +753,9 @@ func TestDatastoreKeyValueEditPropertyIsANoOp(t *testing.T) {
 	}
 }
 
-// TestFirestoreCollectionCountIncludesMissingDocuments (#882). The Firestore
-// screen's Documents column counts a document that does not exist but has
-// subcollections, as the collection's page lists it, and the screen's note
-// says so.
+// TestFirestoreCollectionCountIncludesMissingDocuments (#882). A collection
+// lists a document that does not exist but has subcollections, as the
+// collection's page does: in Google's Data panel (#1845), in italics.
 func TestFirestoreCollectionCountIncludesMissingDocuments(t *testing.T) {
 	needService(t, "firestore")
 	p := open(t)
@@ -771,17 +770,15 @@ func TestFirestoreCollectionCountIncludesMissingDocuments(t *testing.T) {
 		t.Fatalf("start a subcollection under a missing document = %d: %s", code, body)
 	}
 
-	p.navigate("/firestore" + q)
-	usersRow := `[...document.querySelectorAll("#view tbody tr")].find((r) => r.querySelector("a") && r.querySelector("a").textContent === "users")`
-	p.waitFor(usersRow + ` !== undefined`)
-	var got struct{ Count, Page string }
-	p.eval(`(() => {
-		const header = [...document.querySelectorAll("#view thead th")].map((th) => th.textContent.trim());
-		const r = `+usersRow+`;
-		return { Count: r.children[header.indexOf("Documents")].textContent.trim(), Page: document.querySelector("#view").textContent };
-	})()`, &got)
-	if got.Count != "2" || !strings.Contains(got.Page, "does not exist but has subcollections") {
-		t.Errorf("users counts %q documents; want 2, alice and the missing ghost, and a note saying so", got.Count)
+	// Google's Data panel (#1845) lists a document that does not exist but
+	// has subcollections in italics, beside the ones that do.
+	p.navigate("/firestore" + q + "&path=users")
+	p.waitFor(`document.querySelector("#fs-documents") !== null && document.querySelector("#fs-documents").textContent.includes("ghost")`)
+	var got struct{ Docs, Absent []string }
+	p.eval(`({ Docs: [...document.querySelectorAll("#fs-documents .fs-row-link")].map((b) => b.textContent),
+		Absent: [...document.querySelectorAll("#fs-documents .fs-row.is-absent .fs-row-link")].map((b) => b.textContent) })`, &got)
+	if strings.Join(got.Docs, ",") != "alice,ghost" || strings.Join(got.Absent, ",") != "ghost" {
+		t.Errorf("users lists %v with %v in italics; want alice and ghost, the missing ghost in italics", got.Docs, got.Absent)
 	}
 }
 

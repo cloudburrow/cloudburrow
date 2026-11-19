@@ -102,7 +102,7 @@ func (p firestoreDatabasesProvider) List(ctx context.Context, project string) (c
 		}})
 	}
 	base.Total = len(base.Items)
-	base.Note = "Data browses (default)'s collections; each database's Query builder runs against its own documents. Every database is served by the one emulator, " +
+	base.Note = "Data browses any database, chosen in its Database picker; each database's Query builder runs against its own documents. Every database is served by the one emulator, " +
 		"each with its own documents; deleting a database deletes its documents."
 	return base, nil
 }
