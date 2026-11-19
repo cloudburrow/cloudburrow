@@ -273,8 +273,15 @@ it moves to `GOOGLE_MANAGED_CAS_CA` with `serverCaPool` `""`, and a pool left se
 (`service-PROJECT@gcp-sa-cloud-sql.iam.gserviceaccount.com`) and its
 `roles/privateca.certificateRequester` on the pool, as no call here is authorized (ADR-0004) and the
 pool's IAM policy is stored, not enforced (ADR-0006). `serverCertificateRotationMode`
-`AUTOMATIC_ROTATION_DURING_MAINTENANCE` is recorded and never acts, as no maintenance event is
-scheduled here; rotate with `addServerCertificate`. Disabling the pool's CA later does not revoke the
+`AUTOMATIC_ROTATION_DURING_MAINTENANCE` rotates the server certificate in a maintenance run
+(§ maintenance, #1524) when the active one expires within 180 days, as Google's authorize-ssl
+page says ("automatic server certificate rotation to run during maintenance updates up to 180 days
+before expiry", shared CA and customer-managed CA instances only): to the upcoming version
+`addServerCertificate` added, or to one issued then; the old one stays listed as the previous
+version. A skipped maintenance (a deny period, a stopped instance) rotates nothing, as "If
+maintenance is skipped, rotation doesn't happen automatically in that window". UNVERIFIED
+(re-read 2026-11-18): that the rotated-out version stays listed and that an upcoming one is used.
+Manual rotation is `addServerCertificate` and `rotateServerCertificate`. Disabling the pool's CA later does not revoke the
 certificate the server already presents.
 
 The servers are reached through the connector path, so the certificates
@@ -801,7 +808,11 @@ cross major versions, so its `MAJOR_VERSION_UPGRADE` replaces its server with an
 newer version. The replica stays the primary's, `RUNNABLE`, at the new version, and replicates
 nothing until the primary is upgraded to that version. The primary's upgrade, with or without
 `includeReplicasForMajorVersionUpgrade`, then rebuilds it from the upgraded primary with
-`pg_basebackup`, and it replicates again. `includeReplicasForMajorVersionUpgrade` on the replica
+`pg_basebackup`, and it replicates again. The primary is not upgraded to an older version than a
+replica upgraded on its own (400, with or without `includeReplicasForMajorVersionUpgrade`): its
+rebuild would roll the replica back, and "After you upgrade a replica, you can't roll back the
+database version of the replica" (upgrade-major-db-version-inplace, re-read 2026-11-18; the
+refusal's wording is UNVERIFIED, re-read 2026-11-18). `includeReplicasForMajorVersionUpgrade` on the replica
 does the same to its own cascading replicas. In between, `promoteReplica`, `stopReplica`,
 `startReplica` and a `switchover` to it are 501: Google does not document what they do then.
 An external replica (of a source representation instance) cannot be upgraded in place, as Cloud

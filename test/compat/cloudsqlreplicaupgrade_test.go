@@ -102,10 +102,11 @@ func TestCloudSQLMySQLReplicaUpgradedOnItsOwn(t *testing.T) {
 
 // TestCloudSQLPostgresOldVersionsAndRefusals (#1462): a POSTGRES_10
 // instance is upgraded to POSTGRES_12 keeping its rows; a read replica of
-// it is created and upgraded to POSTGRES_13 on its own (#1524), which
-// leaves it an empty POSTGRES_13 server until its primary is upgraded to
-// POSTGRES_13 too, after which it replicates the primary's rows, old and
-// new; promoting it in between is 501. Changing a
+// it is created and upgraded to POSTGRES_14 on its own (#1524), which
+// leaves it an empty POSTGRES_14 server until its primary is upgraded to
+// POSTGRES_14 too, after which it replicates the primary's rows, old and
+// new; promoting it in between is 501, and upgrading the primary to
+// POSTGRES_13, older than its replica, is 400. Changing a
 // PostgreSQL database's charset is 400, as Cloud SQL documents it is not
 // set through the API; a BAK import is 501 (SQL Server's); a legacy
 // failover replica is 400, as Cloud SQL refuses one since 2025.
@@ -155,7 +156,7 @@ func TestCloudSQLPostgresOldVersionsAndRefusals(t *testing.T) {
 	// The replica is upgraded on its own (#1524), before its primary, as
 	// Cloud SQL documents; its replicated databases are available only
 	// after the primary's upgrade.
-	op, err = svc.Instances.Patch(project, rep.Name, &sqladmin.DatabaseInstance{DatabaseVersion: "POSTGRES_13"}).Do()
+	op, err = svc.Instances.Patch(project, rep.Name, &sqladmin.DatabaseInstance{DatabaseVersion: "POSTGRES_14"}).Do()
 	if err != nil {
 		t.Fatalf("upgrade the PostgreSQL replica on its own: %v", err)
 	}
@@ -165,7 +166,7 @@ func TestCloudSQLPostgresOldVersionsAndRefusals(t *testing.T) {
 	if op = waitSQLOpDone(t, svc, project, op); op.Error != nil {
 		t.Fatalf("upgrade the PostgreSQL replica: %+v", op.Error.Errors[0])
 	}
-	if r, err := svc.Instances.Get(project, rep.Name).Do(); err != nil || r.DatabaseVersion != "POSTGRES_13" || r.State != "RUNNABLE" ||
+	if r, err := svc.Instances.Get(project, rep.Name).Do(); err != nil || r.DatabaseVersion != "POSTGRES_14" || r.State != "RUNNABLE" ||
 		!strings.HasSuffix(r.MasterInstanceName, ":"+name) {
 		t.Fatalf("the replica after its upgrade: %+v %v", r, err)
 	}
@@ -174,9 +175,18 @@ func TestCloudSQLPostgresOldVersionsAndRefusals(t *testing.T) {
 	}
 	_, err = svc.Instances.PromoteReplica(project, rep.Name).Do()
 	wantHTTP(t, "promoting a replica waiting for its primary's upgrade", err, 501)
-	// The primary's upgrade, without includeReplicasForMajorVersionUpgrade
-	// (its replica is already at POSTGRES_13), rebuilds the replica from it.
-	op, err = svc.Instances.Patch(project, name, &sqladmin.DatabaseInstance{DatabaseVersion: "POSTGRES_13"}).Do()
+	// The primary's upgrade to an older version than its replica's would
+	// roll the replica back, which Cloud SQL does not do ("you can't roll
+	// back the database version of the replica"): 400, with or without
+	// includeReplicasForMajorVersionUpgrade.
+	_, err = svc.Instances.Patch(project, name, &sqladmin.DatabaseInstance{DatabaseVersion: "POSTGRES_13"}).Do()
+	wantHTTP(t, "upgrading the primary to an older version than its replica's", err, 400)
+	_, err = svc.Instances.Patch(project, name, &sqladmin.DatabaseInstance{DatabaseVersion: "POSTGRES_13",
+		IncludeReplicasForMajorVersionUpgrade: true}).Do()
+	wantHTTP(t, "upgrading the primary and its replicas to an older version than its replica's", err, 400)
+	// The primary's upgrade to the replica's version, without
+	// includeReplicasForMajorVersionUpgrade, rebuilds the replica from it.
+	op, err = svc.Instances.Patch(project, name, &sqladmin.DatabaseInstance{DatabaseVersion: "POSTGRES_14"}).Do()
 	if err != nil {
 		t.Fatalf("upgrade the primary after its replica: %v", err)
 	}
@@ -196,7 +206,7 @@ func TestCloudSQLPostgresOldVersionsAndRefusals(t *testing.T) {
 		return nil
 	})
 	if r, err := svc.Instances.Get(project, rep.Name).Do(); err != nil || r.DatabaseInstalledVersion == "" ||
-		!strings.HasPrefix(r.DatabaseInstalledVersion, "POSTGRES_13_") || r.State != "RUNNABLE" {
+		!strings.HasPrefix(r.DatabaseInstalledVersion, "POSTGRES_14_") || r.State != "RUNNABLE" {
 		t.Errorf("the replica after its primary's upgrade: %+v %v", r, err)
 	}
 
