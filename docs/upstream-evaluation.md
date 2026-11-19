@@ -334,6 +334,8 @@ behaviour in Google's docs and protos, finishing the draft on the `feat/309-kms`
 can be shown to run KMS-only, or if Google publishes a KMS emulator.
 gcp-kms-emulator was re-read at v0.10.2 on 2026-11-17
 ([amendment](#amendment-gcp-kms-emulator-v0102-re-evaluated-1712)).
+It was built and run against CloudBurrow's KMS compat suite on 2026-11-19
+([amendment](#amendment-gcp-kms-emulator-v0102-run-against-cloudburrows-kms-compat-suite-1712)).
 
 ### fakekms as a differential oracle (#419)
 
@@ -457,6 +459,8 @@ measured evidence.
 Recorded 2026-11-17. **This records evidence and a recommendation; the decision is the
 user's, and the [Cloud KMS amendment](#amendment-cloud-kms-is-built-not-reused-309) stands
 until the user changes it.**
+
+*Superseded in part on 2026-11-19 by a measured run ([amendment](#amendment-gcp-kms-emulator-v0102-run-against-cloudburrows-kms-compat-suite-1712)); it corrects the `UpdateCryptoKeyPrimaryVersion` agreement below and answers the "not measured" items.*
 
 **Why.** The KMS amendment's only recorded departure for `blackwell-systems/gcp-kms-emulator`
 was that caller errors became INTERNAL. Its maintainer fixed that in v0.10.1 and v0.10.2
@@ -632,6 +636,132 @@ snapshots.
 [g-primary]: https://github.com/googleapis/googleapis/blob/0b8cd308f11dda6e1adb1a6df69e82e3227dc361/google/cloud/kms/v1/resources.proto#L130-L133
 [g-dsd]: https://github.com/googleapis/googleapis/blob/0b8cd308f11dda6e1adb1a6df69e82e3227dc361/google/cloud/kms/v1/resources.proto#L199-L200
 [g-kms127]: https://github.com/googleapis/google-cloud-go/blob/kms/v1.27.0/kms/apiv1/kmspb/service_grpc.pb.go
+
+## Amendment: gcp-kms-emulator v0.10.2 run against CloudBurrow's KMS compat suite (#1712)
+
+Recorded 2026-11-19. **Evidence and a recommendation; the decision is the user's.** The
+[Cloud KMS amendment](#amendment-cloud-kms-is-built-not-reused-309) stands until the user
+changes it.
+
+**Why a second pass.** The [2026-11-17 amendment](#amendment-gcp-kms-emulator-v0102-re-evaluated-1712)
+read their code without running it, and left three questions open: does the server behave
+as read when the official client drives it; how big and how heavy is it; does its import
+accept Google's AES-KWP envelope. Running third-party code is now allowed for parity work,
+so this pass builds the server, runs it and answers all three.
+
+**Method.**
+- Source: the `v0.10.2` tag tarball from the project's own GitHub (commit [`5372c004`][kmsemu],
+  the newest commit on its default branch on 2026-11-19), unpacked into an empty scratch
+  directory. `LICENSE` is Apache-2.0. The Makefile, Dockerfile and `cmd/server-dual` were
+  read before building. Nothing in them runs scripts, uses cgo or `go:generate`, or
+  calls the network at start-up. `IAM_MODE` defaults to `off`.
+- Build: `go build ./cmd/server-dual` (Go 1.27, darwin/arm64). Run on loopback ports 29200
+  (gRPC) and 29201 (REST), with `GCP_KMS_DATA_DIR` set to a scratch directory.
+- Tests: CloudBurrow's own official-SDK suite, `go test -tags compat -run '^TestKMS'
+  ./test/compat/` with `CLOUDBURROW_TEST_KMS` pointed at their gRPC port. A second run pointed
+  the `rest` subtests at their REST port, because their server splits the two protocols
+  across two ports and CloudBurrow serves both on one. No other `CLOUDBURROW_TEST_*`
+  variable was set, so tests that need Resource Manager, the control plane, the CLI or a
+  restart skipped. No gcloud or Terraform test ran.
+- Baseline: the same 52 `TestKMS*` tests on CloudBurrow in CI
+  ([run 44560144998](https://github.com/cloudburrow/cloudburrow/actions/runs/44560144998),
+  main `6f115532`, "served" shard). 50 passed. The two restart tests skip in that step
+  because CI runs them in its own stop-and-start step. No KMS test failed.
+- Afterwards, the download, the binary and the state directory were deleted. No container
+  or image was made: the image facts below come from the registry manifest.
+
+### Test results
+
+| Run | Passed | Failed | Skipped (no endpoint) |
+|---|---|---|---|
+| CloudBurrow, CI baseline | 50 top-level tests | 0 | 2 (restart tests run in their own CI step) |
+| gcp-kms-emulator, gRPC cases (49) | 9 | 33 | 7 |
+| gcp-kms-emulator, REST cases (29) | 2 | 18, plus 9 that could not run | — |
+
+The 9 REST cases that could not run do gRPC setup on the REST port, so they time out.
+That is the two-port split, not a measured difference. Two of the 18 REST failures
+(`TestKMSReadsAgreeOverREST`, `TestKMSJSONIsServedOnTheSamePort`) fail only because REST
+is on a second port.
+
+**Passed against it:** `TestKMSResources` (gRPC create, get, list, primary move),
+`TestKMSGetCryptoKeyVersion`, `TestKMSRestoreCryptoKeyVersion` (gRPC and REST),
+`TestKMSMacSignAndVerify` (gRPC and REST), `TestKMSTinkEnvelopeEncryption` (gRPC),
+`TestKMSFullViewAddsNothingForSoftwareKeys`, `TestKMSOtherServicesAreUnimplemented`,
+`TestKMSUnimplementedContract`.
+
+**Failed, by cause** (their error first, then what the test expects; CloudBurrow passes each):
+
+| Cause | Tests | Their response → expected |
+|---|---|---|
+| Service not served | `EkmConnectionsAreStored`, `EkmIamPolicyIsStoredNotEnforced`, `SingleTenantHsm`, `TrustedKeyWrapping`, `IamPolicyIsStoredNotEnforced`, `Locations` | gRPC UNIMPLEMENTED "unknown service google.cloud.kms.v1.EkmService" (likewise `HsmManagement`, `google.iam.v1.IAMPolicy`, `google.cloud.location.Locations`); REST 404 "Not Found" |
+| Method not served | `DeleteKeyRing`, `DeleteCryptoKeyLeavesARetiredResource` | UNIMPLEMENTED; REST **501 "Method Not Allowed"** |
+| Algorithm not served | `AsymmetricSignVerifiesWithThePublicKeyPEM` (PSS), `RawEncryptAndDecrypt` (CBC, CTR), `DecapsulateMLKEM`, `ExternalKeys`, `OutOfScopeKeyOptionsAreUnimplemented` (ML-DSA, X-Wing) | **INTERNAL** / REST 500 "failed to generate key material: unsupported algorithm: …" → created, or UNIMPLEMENTED or INVALID_ARGUMENT naming it |
+| Requested state ignored | `VersionCanStartDisabled`, `PrimaryMustBeEnabled`, `VersionStateFilter` | `CreateCryptoKeyVersion` with `state: DISABLED` returns ENABLED ([storage.go:461][kmsemu-createversion]). So "make a DISABLED version primary" succeeds and moves the primary. Their `UpdateCryptoKeyPrimaryVersion` does check state ([storage.go:508][kmsemu-primary]); it never sees a DISABLED version. |
+| Destroy scheduling | `DestroyCryptoKeyVersion` (gRPC and REST) | `destroy_time` is 30 days out, not the key's 24 h `destroy_scheduled_duration`; destroying again succeeds → FAILED_PRECONDITION |
+| Versions start ENABLED | `AsymmetricVersionsStartPendingGeneration` (gRPC and REST) | ENABLED with `generate_time` → PENDING_GENERATION |
+| Create fields dropped | `CreateCryptoKeyFields`, `RotationSchedule` (gRPC and REST), `OutOfScopeKeyOptionsAreUnimplemented` (`import_only`, `crypto_key_backend`, `AES_WRAPPING`) | Accepted and dropped: `destroy_scheduled_duration` reads back as 30 days, `rotation_period` 12 h is accepted and reads back empty, `ASYMMETRIC_SIGN` with no algorithm succeeds |
+| Protection level | `HSMKeysAndKeyAccessJustifications` (gRPC and REST), `Secp256k1SignsAndVerifiesWithThePublicKey` (gRPC and REST) | An HSM key reports SOFTWARE, and its `key_access_justifications_policy` is dropped. A SOFTWARE or unspecified secp256k1 key is created; Google offers secp256k1 at HSM only → INVALID_ARGUMENT |
+| `Encrypt`/`Decrypt` | `Encrypt`, `Decrypt`, `DecryptFollowsTheVersionLifecycle` | CRC32C mismatch: INVALID_ARGUMENT "request corrupted in transit", a message that does not name the field; Decrypt given a version name → NOT_FOUND; a DISABLED or DESTROY_SCHEDULED version's ciphertext → INVALID_ARGUMENT "Decryption failed: the ciphertext is invalid." instead of FAILED_PRECONDITION |
+| Caller errors still INTERNAL | `AsymmetricDecryptOpensWhatThePublicKeyEncrypted` (gRPC and REST) | Junk ciphertext → **INTERNAL "crypto/rsa: decryption error"** / REST 500 → INVALID_ARGUMENT |
+| Codes that differ | `UpdateCryptoKeyVersion` (gRPC and REST), `UpdateCryptoKey` (gRPC and REST), `GenerateRandomBytes`, `NamesAreValidatedBeforeLookup` | A mask without `state` → FAILED_PRECONDITION; `destroy_scheduled_duration` updated although IMMUTABLE; 4 bytes and SOFTWARE random accepted; a malformed name → NOT_FOUND |
+| Import | `ImportManuallyWrappedKeys` (gRPC and REST) | A key wrapped as `RSA_OAEP_3072_SHA1_AES_256` documents (RSA-OAEP-SHA1 of an AES key, then AES-KWP) → INVALID_ARGUMENT "failed to unwrap key". Their import does plain RSA-OAEP-SHA256 of the target key, whatever the job's `import_method` says ([importjob.go:152][kmsemu-unwrap]). So keys wrapped as Google documents, or by `gcloud kms keys versions import`, do not import. |
+| Lists | `NameAndLabelFilters`, `OrderByName` | `filter` and `order_by` ignored. A list reports `"totalSize":0` beside two rings. |
+
+The three open questions from 2026-11-17 are now answered. The server behaves as read,
+with one correction: the earlier amendment listed `UpdateCryptoKeyPrimaryVersion` to a
+non-ENABLED version among the cases where the two agree. The check is there, but a version
+created DISABLED is stored ENABLED, so in practice the call succeeds. Import does not
+accept Google's envelope. Footprint is in the table below.
+
+### Comparison
+
+| Criterion | gcp-kms-emulator v0.10.2 (measured 2026-11-19) | CloudBurrow built-in |
+|---|---|---|
+| Services | `KeyManagementService` only | All seven KMS services, 63 methods ([coverage/kms.md](coverage/kms.md)) |
+| Methods | 28 of the 36 `KeyManagementService` methods; delete, retired resources, Decapsulate and trusted wrapping missing | All 36 |
+| Purposes and algorithms | Symmetric, RSA PKCS#1 sign, EC P-256, P-384, secp256k1 (at any protection level), Ed25519, RSA-OAEP decrypt, HMAC, raw AES-GCM. Anything else is INTERNAL at create. | All of those, plus PSS, raw PKCS#1, AES-CBC and CTR, ML-KEM-768, AES-256-KWP wrapping; secp256k1 at HSM only (#1719) |
+| Versions | Created ENABLED whatever is asked; no PENDING_GENERATION; destroy fixed at 30 days and never reaches DESTROYED | Requested state honoured; PENDING_GENERATION; key's duration; swept to DESTROYED |
+| Import | Plain RSA-OAEP-SHA256 only; Google's AES-KWP envelope refused | Google's envelope (Verified) |
+| MAC | Passes CloudBurrow's test, gRPC and REST | Verified |
+| Raw encryption | GCM only | GCM, CBC, CTR |
+| EKM, Autokey, HSM management | Not served | Verified |
+| Errors | NOT_FOUND, ALREADY_EXISTS, the purpose and version-state FAILED_PRECONDITIONs match. Unsupported algorithms and RSA decrypt failures are INTERNAL/500; unserved REST methods are 501 "Method Not Allowed" | Per the dated rows in [coverage/kms.md](coverage/kms.md#unverified-error-codes) |
+| Persistence | Measured: state survived a restart through `GCP_KMS_DATA_DIR`. One `state.json` (0600), rewritten whole after each change, with 22 `privateKeyDer` fields in plaintext after the run. No reset and no snapshot. | Kubernetes Secrets, restart Verified, `/admin/reset` per project, `state save`/`load` |
+| Protocols | gRPC and REST on two ports; both listen on all interfaces (`[::]:29200`, `:29201`), with no bind-address flag | One port, the instance's bind address |
+| Licence | Apache-2.0 (checked in the tarball's `LICENSE`) | — |
+| Maintenance | No commits since v0.10.2 (2026-11-04); 2 contributors, one in practice; 9 stars, 0 open issues; it answered #1690 with a fix | — |
+| Architectures and footprint | Registry manifest for `0.10.2`: `linux/amd64` and `linux/arm64`, Alpine, 22.1 MB compressed (arm64). The published image is the **gRPC-only** variant (the Dockerfile's default `VARIANT=grpc`); REST needs a custom build. No release binaries. The darwin/arm64 dual binary is 21.9 MB; RSS was 18 MB after the run and 23 MB after a restart that loaded state; it was ready in under a second. | Inside the CloudBurrow binary, every platform it ships |
+| Embedding | Public API is `Register(*grpc.Server)` and `NewGatewayHandler(grpcAddr)`; storage is `internal/`. In process: a new module (plus `gcp-emulator-auth` and `grpc-gateway`) and a second store beside CloudBurrow's. Out of process: a container or child process on two more ports. Either way, no reset, save/load, Kubernetes storage, fake clock, fault injection or in-process access for the console and CMEK callers. | Called in process (`cmd/cloudburrow`): the console's KMS pages, Secret Manager CMEK, Private CA's KMS-backed keys and IAM enforcement |
+
+### Recommendation: keep the built-in
+
+1. **Measured coverage.** Against CloudBurrow's KMS suite it passes 9 of 49 gRPC cases and
+   2 of 20 REST cases that could run. CloudBurrow passes every one. Each failure has a
+   cause in the table above, and none comes from the harness alone, apart from the 9 REST
+   cases noted.
+2. **The departures a user would inherit are now observed, not inferred.** Requested
+   version states are ignored, destroy scheduling is fixed and never completes, HSM keys
+   say SOFTWARE, and create fields are dropped with success. Google-wrapped imports are
+   refused, and three classes of caller error are INTERNAL. The #309 amendment's claim
+   that each candidate departs from Google's documented behaviour holds on measured
+   evidence.
+3. **Adopting it would not remove any CloudBurrow code.** Six services, eight methods,
+   the algorithms it lacks, reset, snapshots and the in-process CMEK callers would all stay
+   CloudBurrow's. Adoption would add a second store, a second port and a new dependency.
+4. **Adopt for parts: nothing left to take.** Its one unique feature, secp256k1, has been
+   CloudBurrow's since #1719, and CloudBurrow serves it at HSM only, as Google documents.
+   MAC and the basic symmetric path, the parts that pass, are already Verified in
+   CloudBurrow. Its error wording ("… is not enabled, current state is: DISABLED.") is
+   still unconfirmed against Google, so there is nothing to copy there either.
+
+**For the user to decide:** keep (recommended), adopt, or adopt for parts. **Revisit** if a
+release serves the EKM, Autokey and HSM management services, honours requested version
+states and `destroy_scheduled_duration`, accepts Google's import envelope and exposes its
+store for reset and snapshots.
+
+[kmsemu-createversion]: https://github.com/blackwell-systems/gcp-kms-emulator/blob/5372c0046ce0c253717a0d77a127b01e70a9658d/internal/storage/storage.go#L455-L466
+[kmsemu-primary]: https://github.com/blackwell-systems/gcp-kms-emulator/blob/5372c0046ce0c253717a0d77a127b01e70a9658d/internal/storage/storage.go#L508-L510
+[kmsemu-unwrap]: https://github.com/blackwell-systems/gcp-kms-emulator/blob/5372c0046ce0c253717a0d77a127b01e70a9658d/internal/storage/importjob.go#L152
 
 ## Amendment: an ORC reader module for BigQuery's ORC loads (#1713)
 
