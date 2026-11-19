@@ -220,21 +220,30 @@ test:
 # decoder is pure Go without unsafe, so no exemption is needed (#1808 had
 # turned checkptr off for the transpiled github.com/kazzmir/opus-go).
 RACE_PKGS ?= ./...
-# internal/speech gets SPEECH_TEST_TIMEOUT instead (#1841): TestTranscribe
-# runs whisper.cpp's encoder three times (English with word offsets, then
-# language detection, which encodes the window again before transcribing
-# it), single-threaded wasm on wazero. That is 70 s on an M-series Mac with
-# or without -race (97% of it in compiled wasm, which -race does not
-# instrument), and 165 to over 300 s on CI's macos-latest runner beside
-# the other packages' tests. Every check stays; the package runs on its
-# own, after the rest, with twice its worst measured time.
-SPEECH_PKG          := ./internal/speech/
-SPEECH_TEST_TIMEOUT ?= 10m
+# The packages that run WebAssembly on wazero get WASM_TEST_TIMEOUT
+# instead, after the rest, on their own; every check stays.
+#  - internal/speech (#1841): TestTranscribe runs whisper.cpp's encoder
+#    three times (English with word offsets, then language detection, which
+#    encodes the window again before transcribing it), single-threaded wasm.
+#    That is 70 s on an M-series Mac with or without -race (97% of it in
+#    compiled wasm, which -race does not instrument), and 165 to over 300 s
+#    on CI's macos-latest runner beside the other packages' tests.
+#  - internal/embedding and internal/service/vertexai (#1896): each process
+#    compiles PDFium's and Tesseract's wasm with wazero's compiler, which is
+#    Go and so is instrumented by -race: on an M-series Mac the embedding
+#    package takes 9 s without -race and 77 s with it (its four PDF tests
+#    wait 28 s on the compile, 8x; CPU profile: tsan and the compiler's
+#    register allocator), vertexai 35 s and 97 s; on macos-latest beside the
+#    other packages, 236 s and 261 s, and TestDecodePDFOCRSixPages past the
+#    5 m timeout on macOS and Linux.
+# The timeout is twice the worst measured time.
+WASM_PKGS         := ./internal/speech/ ./internal/embedding/ ./internal/service/vertexai/
+WASM_TEST_TIMEOUT ?= 10m
 .PHONY: test-race
 test-race:
 ifeq ($(RACE_PKGS),./...)
-	go test -race -timeout $(TEST_TIMEOUT) $$(go list ./... | grep -vx 'github.com/cloudburrow/cloudburrow/internal/speech')
-	go test -race -timeout $(SPEECH_TEST_TIMEOUT) $(SPEECH_PKG)
+	go test -race -timeout $(TEST_TIMEOUT) $$(go list ./... | grep -vxF -e "$$(go list $(WASM_PKGS))")
+	go test -race -timeout $(WASM_TEST_TIMEOUT) $(WASM_PKGS)
 else
 	go test -race -timeout $(TEST_TIMEOUT) $(RACE_PKGS)
 endif
