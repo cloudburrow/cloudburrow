@@ -76,8 +76,8 @@ func TestStorageHierarchicalFoldersThroughTheBrowser(t *testing.T) {
 
 	// Create folder.
 	p.navigate("/storage/browser/" + bucket + "?project=" + project)
-	p.waitFor(`[...document.querySelectorAll("#view .page-actions button")].some((b) => b.textContent === "Create folder")`)
-	p.clickText("#view .page-actions button", "Create folder")
+	p.waitFor(sectionButton("Create folder"))
+	p.clickText("#view .section-actions button", "Create folder")
 	p.waitFor(`document.querySelector(".modal.is-open #f-name") !== null`)
 	p.run(chromedp.SendKeys(chromedp.CSS(`.modal.is-open #f-name`), "reports"))
 	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))

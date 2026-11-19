@@ -91,8 +91,8 @@ func TestStorageHierarchicalFoldersThroughTheConsole(t *testing.T) {
 	if err != nil || d.Unavailable != "" {
 		t.Fatalf("the HNS bucket's page: %v %s", err, d.Unavailable)
 	}
-	if !hasAction(d.Actions, "createfolder") || !hasAction(p.DetailActions(ctx, "p", []string{"hns"}), "createfolder") {
-		t.Errorf("the HNS bucket's page offers %+v", d.Actions)
+	if !hasAction(tabActions(d, "objects"), "createfolder") || !hasAction(p.DetailActions(ctx, "p", []string{"hns"}), "createfolder") {
+		t.Errorf("the HNS bucket's page offers %+v", pageAndTabActions(d))
 	}
 	if sectionNamed(d, "operations") == nil {
 		t.Error("the HNS bucket's page has no Operations tab")
@@ -132,7 +132,7 @@ func TestStorageHierarchicalFoldersThroughTheConsole(t *testing.T) {
 		t.Fatalf("the empty folder is listed as %+v", y)
 	}
 	fd, _ := p.Detail(ctx, "p", []string{"hns", "logs"})
-	if !hasAction(fd.Actions, "createfolder") || !strings.Contains(propsText(fd.Summary), "Folder (hierarchical namespace)") {
+	if !hasAction(tabActions(fd, "objects"), "createfolder") || !strings.Contains(propsText(fd.Summary), "Folder (hierarchical namespace)") {
 		t.Errorf("a folder's page: actions %+v, summary %+v", fd.Actions, fd.Summary)
 	}
 

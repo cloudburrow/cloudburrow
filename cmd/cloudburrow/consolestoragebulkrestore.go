@@ -22,7 +22,7 @@ import (
 // bulkRestoreAction is Bulk restore deleted objects, on a bucket's page.
 func bulkRestoreAction() console.Action {
 	return console.Action{
-		ID: "bulkrestore", Label: "Bulk restore deleted objects",
+		ID: "bulkrestore", Label: "Create restore job",
 		Fields: []console.Field{
 			{Name: "matchGlobs", Label: "Match globs", Type: "text",
 				Help: "Comma-separated globs in objects.list's matchGlob syntax (logs/**, *.png); empty restores every soft-deleted object."},

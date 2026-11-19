@@ -203,8 +203,8 @@ func TestKMSCreateKeyOptionsThroughTheForm(t *testing.T) {
 
 // TestStorageCreateBucketOptionsThroughTheForm (#852), in the storage shard:
 // Create, on its own page, offers the storage classes the backend keeps, uniform access on as
-// the documented form defaults it, versioning, the soft delete retention and
-// object retention; a bucket created there with NEARLINE and versioning
+// the documented form defaults it, versioning, the soft delete policy with its
+// 7-day default (#1843) and object retention; a bucket created there with NEARLINE and versioning
 // reads both back through the console API.
 func TestStorageCreateBucketOptionsThroughTheForm(t *testing.T) {
 	p := open(t)
@@ -221,13 +221,14 @@ func TestStorageCreateBucketOptionsThroughTheForm(t *testing.T) {
 		Classes                      []string
 		Uniform, Versioning, Objects bool
 		SoftDelete                   string
+		SoftOn                       bool
 	}
 	p.eval(`(() => { const q = (s) => document.querySelector("#view " + s);
 		return { Classes: [...q("#f-storageClass").options].map((o) => o.value), Uniform: q("#f-uniformAccess").checked,
 		         Versioning: q("#f-versioning").checked, Objects: q("#f-objectRetention").checked,
-		         SoftDelete: q("#f-softDeleteSeconds").value }; })()`, &form)
+		         SoftDelete: q("#f-softDeleteDays").value, SoftOn: q("#f-softDelete").checked }; })()`, &form)
 	if strings.Join(form.Classes, ",") != "STANDARD,NEARLINE,COLDLINE,ARCHIVE,RAPID" || !form.Uniform || form.Versioning ||
-		form.Objects || form.SoftDelete != "604800" {
+		form.Objects || form.SoftDelete != "7" || !form.SoftOn {
 		t.Errorf("Create opened with %+v", form)
 	}
 	setField(p, "#view", "f-name", bucket)

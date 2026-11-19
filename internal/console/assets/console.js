@@ -78,17 +78,19 @@ const ROUTES = [
   { path: "/kubernetes/events",     service: "events",      title: "Events",    section: "Containers",
     product: "kubernetes", productTitle: "Kubernetes Engine" },
 
-  // Cloud Storage is one product with three pages: buckets; the project's
-  // soft-deleted buckets, which the bucket list no longer holds (#789); and
-  // Settings, with the project's service account and HMAC keys (#792).
+  // Cloud Storage is one product. Its menu follows Google's (#1843):
+  // Buckets, Storage Intelligence, Settings (Overview and Monitoring are
+  // not served: Cloud Monitoring is not emulated). Deleted buckets, the
+  // project's soft-deleted buckets (#789), which Google shows on Buckets
+  // through View options, comes last.
   { path: "/storage/browser",  service: "storage",          title: "Buckets", kind: "Bucket",         section: "Storage",
-    product: "storage", productTitle: "Cloud Storage" },
-  { path: "/storage/deleted",  service: "storage-deleted", icon: "storage",  title: "Deleted buckets", section: "Storage",
-    product: "storage", productTitle: "Cloud Storage" },
-  { path: "/storage/settings", service: "storage-settings", icon: "storage", title: "Settings",        section: "Storage",
     product: "storage", productTitle: "Cloud Storage" },
   { path: "/storage/intelligence", service: "storage-intelligence", icon: "storage", title: "Storage Intelligence", section: "Storage",
     product: "storage", productTitle: "Cloud Storage" },
+  { path: "/storage/settings", service: "storage-settings", icon: "storage", title: "Settings",        section: "Storage",
+    product: "storage", productTitle: "Cloud Storage" },
+  { path: "/storage/deleted",  service: "storage-deleted", icon: "storage",  title: "Deleted buckets", section: "Storage",
+    navTitle: "Soft-deleted buckets", product: "storage", productTitle: "Cloud Storage" },
 
   { path: "/firestore", service: "firestore", title: "Data", section: "Databases",
     product: "firestore", productTitle: "Firestore" },
@@ -3079,9 +3081,19 @@ async function renderDetail(view, route, resourcePath) {
         errorState(`${section.label} unavailable`, failure, reload));
     }
 
-    const note = section.note
+    let note = section.note
       ? el("p", { class: "unavailable", text: section.note })
       : null;
+    // A tab's own actions, at the top of the tab rather than beside the
+    // page title: Google's Lifecycle tab has Add a rule (#1843).
+    if ((section.actions || []).length) {
+      const bar = el("div", { class: "action-bar section-actions", id: `section-actions-${section.id}` },
+        ...section.actions.map((a) => el("button", {
+          type: "button", class: "secondary" + (a.destructive ? " danger" : ""), text: a.label,
+          onclick: () => runAction(route, segments, a, reload, NO_ROW, data.title || null),
+        })));
+      note = note ? el("div", {}, bar, note) : bar;
+    }
 
     // The provider says what the section holds. Inferring it from whichever
     // field happened to be populated would put the decision in the client,
@@ -4007,31 +4019,34 @@ async function previewObject(route, q, label) {
 }
 
 function uploadControl(route, prefix, reload) {
-  const input = el("input", { type: "file", id: "object-upload-input", hidden: true,
-    "aria-label": "Choose a file to upload" });
+  // Google's Objects tab offers Upload files and Upload folder (#1843). A
+  // folder's files keep their paths under it; each file is its own upload,
+  // through the same route, so the limit and the ledger are per file.
+  const input = el("input", { type: "file", id: "object-upload-input", hidden: true, multiple: true,
+    "aria-label": "Choose files to upload" });
+  const folderInput = el("input", { type: "file", id: "object-upload-folder-input", hidden: true,
+    "aria-label": "Choose a folder to upload" });
+  folderInput.setAttribute("webkitdirectory", "");
   const status = el("span", { class: "status", id: "object-upload-status" });
   const button = el("button", { type: "button", class: "secondary", id: "object-upload",
-    text: "Upload file", onclick: () => input.click() });
-  input.addEventListener("change", async () => {
-    const file = input.files && input.files[0];
-    if (!file) return;
-    const where = [...prefix, file.name].join("/");
-    // Checked here so an oversized file is refused before it is sent; the
-    // server refuses it regardless.
-    let limit = null;
-    try { limit = (await api("/api/settings")).uploadLimitBytes; } catch { /* the server checks */ }
+    text: "Upload files", onclick: () => input.click() });
+  const folderButton = el("button", { type: "button", class: "secondary", id: "object-upload-folder",
+    text: "Upload folder", onclick: () => folderInput.click() });
+  const uploadOne = async (file, limit) => {
+    const rel = (file.webkitRelativePath || "").split("/").filter(Boolean);
+    const dirs = rel.length > 1 ? rel.slice(0, -1) : [];
+    const into = [...prefix, ...dirs];
+    const where = [...into, file.name].join("/");
     if (limit && file.size > limit) {
       notify(`${file.name} is larger than the upload limit of ${formatBytes(limit)}; change it in Settings`, "error");
-      input.value = "";
-      return;
+      return false;
     }
     const form = new FormData();
     form.append("file", file, file.name);
     const op = recordOperation(`Upload ${where}`);
-    button.disabled = true;
     status.textContent = `Uploading ${file.name}…`;
     try {
-      const res = await fetch(`/api/objects/${route.service}/upload?${objectQuery(prefix)}`,
+      const res = await fetch(`/api/objects/${route.service}/upload?${objectQuery(into)}`,
         { method: "POST", body: form, credentials: "same-origin" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -4041,17 +4056,36 @@ function uploadControl(route, prefix, reload) {
       }
       op.succeeded("", data.operation);
       notify(`Uploaded ${data.uploaded}`);
-      reload();
+      return true;
     } catch (err) {
       op.failed(err.message, err.operation);
       notify(`Could not upload ${file.name}: ${err.message}`, "error");
+      return false;
+    }
+  };
+  const uploadAll = async (from) => {
+    const files = [...(from.files || [])];
+    if (!files.length) return;
+    // Checked here so an oversized file is refused before it is sent; the
+    // server refuses it regardless.
+    let limit = null;
+    try { limit = (await api("/api/settings")).uploadLimitBytes; } catch { /* the server checks */ }
+    button.disabled = true;
+    folderButton.disabled = true;
+    let any = false;
+    try {
+      for (const file of files) any = (await uploadOne(file, limit)) || any;
     } finally {
       button.disabled = false;
+      folderButton.disabled = false;
       status.textContent = "";
-      input.value = "";
+      from.value = "";
     }
-  });
-  return el("div", { class: "card-actions" }, button, input, status);
+    if (any) reload();
+  };
+  input.addEventListener("change", () => uploadAll(input));
+  folderInput.addEventListener("change", () => uploadAll(folderInput));
+  return el("div", { class: "card-actions" }, button, folderButton, input, folderInput, status);
 }
 
 // The upload limit, a server-side setting: it is what the server enforces,
@@ -5381,13 +5415,13 @@ async function renderCreatePage(view, route) {
 
   // A full page with a back arrow to the list, as Google's create flows are
   // (#1842).
-  const header = [pageHeader(caps.create ? caps.create.label : "Create",
+  const header = [pageHeader(caps.create ? (caps.create.title || caps.create.label) : "Create",
     project ? `Project ${project}` : "All projects",
     { back: listHref, backLabel: `Back to ${target.title}` })];
   header[0].prepend(el("nav", { class: "breadcrumb", "aria-label": "Breadcrumb" },
     el("a", { href: listHref, text: target.title }),
     el("span", { "aria-hidden": "true", text: "/" }),
-    el("span", { text: caps.create ? caps.create.label : "Create" })));
+    el("span", { text: caps.create ? (caps.create.title || caps.create.label) : "Create" })));
 
   if (!caps.create) {
     setChildren(view, ...header,
@@ -5430,7 +5464,7 @@ async function renderCreatePage(view, route) {
       ...steps.nodes,
       el("div", { class: "form-actions" }, primary, cancel)));
   fields.focusFirst();
-  announce(`${caps.create.label} form`);
+  announce(`${caps.create.title || caps.create.label} form`);
 }
 
 // createSteps lays a create form out as Google's create pages are (#1842):

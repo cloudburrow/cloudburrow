@@ -129,9 +129,11 @@ func TestStorageBucketSettingsThroughTheForm(t *testing.T) {
 		t.Errorf("after the browser's edit the bucket reads %v, %v", edit, config)
 	}
 
-	// Lock retention policy: permanent, said so, and confirmed by name.
-	p.waitFor(pageButton("Lock retention policy"))
-	p.clickText("#view .page-actions button", "Lock retention policy")
+	// Lock retention policy, on the Protection tab as Google's is (#1843):
+	// permanent, said so, and confirmed by name.
+	p.navigate("/storage/browser/" + bucket + "?project=" + project + "&tab=protection")
+	p.waitFor(sectionButton("Lock retention policy"))
+	p.clickText("#view .section-actions button", "Lock retention policy")
 	p.waitFor(`document.querySelector(".modal.is-open #confirm-input") !== null`)
 	var warning string
 	p.eval(`document.querySelector(".modal:has(#confirm-input) .confirm-detail").textContent`, &warning)
@@ -143,7 +145,7 @@ func TestStorageBucketSettingsThroughTheForm(t *testing.T) {
 	if n := actionPosts(); n != 0 {
 		t.Fatalf("cancelling the lock sent %d requests", n)
 	}
-	p.clickText("#view .page-actions button", "Lock retention policy")
+	p.clickText("#view .section-actions button", "Lock retention policy")
 	p.waitFor(`document.querySelector(".modal.is-open #confirm-input") !== null`)
 	p.run(chromedp.SendKeys(chromedp.CSS(`#confirm-input`), bucket))
 	p.clickText(".modal:has(#confirm-input) .modal-actions button", "Lock retention policy")
@@ -154,7 +156,7 @@ func TestStorageBucketSettingsThroughTheForm(t *testing.T) {
 	if _, config := bucketPage(); config["Retention policy"] != "60 s, locked" {
 		t.Errorf("after the browser's lock the retention policy reads %q", config["Retention policy"])
 	}
-	p.waitFor(`!` + pageButton("Lock retention policy") + ` && ` + pageButton("Edit bucket"))
+	p.waitFor(`!` + sectionButton("Lock retention policy") + ` && ` + pageButton("Edit bucket"))
 }
 
 // TestStorageManagedFoldersThroughTheBrowser (#828), in the storage shard. In
@@ -224,8 +226,8 @@ func TestStorageManagedFoldersThroughTheBrowser(t *testing.T) {
 	listed := `[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes("reports/") && r.textContent.includes("Managed folder"))`
 
 	p.navigate("/storage/browser/" + bucket + "?project=" + project)
-	p.waitFor(`[...document.querySelectorAll("#view .page-actions button")].some((b) => b.textContent === "Create managed folder")`)
-	p.clickText("#view .page-actions button", "Create managed folder")
+	p.waitFor(sectionButton("Create managed folder"))
+	p.clickText("#view .section-actions button", "Create managed folder")
 	p.waitFor(`document.querySelector(".modal.is-open #f-name") !== null`)
 	p.run(chromedp.SendKeys(chromedp.CSS(`.modal.is-open #f-name`), "reports"))
 	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))

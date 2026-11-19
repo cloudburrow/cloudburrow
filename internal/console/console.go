@@ -362,6 +362,14 @@ type PageCreator interface {
 	CreateOnPage() bool
 }
 
+// CreateTitler is a Creator whose create page has a title of its own,
+// apart from the label of its buttons: Google's "Create a bucket" page and
+// its Create button (#1843).
+type CreateTitler interface {
+	Creator
+	CreateTitle() string
+}
+
 // Pager is a provider whose listings can be continued past their first page.
 //
 // Separate from Provider and Driller because paging is a property of a specific
@@ -554,6 +562,10 @@ type Section struct {
 	// Permissions is the content when Kind is KindPermissions, set by the
 	// server from the provider's PolicyEditor (#793).
 	Permissions *PermissionsView `json:"permissions,omitempty"`
+	// Actions are drawn at the top of this tab rather than beside the page
+	// title, as Google's Lifecycle tab has Add a rule (#1843). The provider's
+	// DetailActions must offer them too, as for the page's own actions.
+	Actions []Action `json:"actions,omitempty"`
 }
 
 // dropBlankProperties removes every Property whose Value is empty or
@@ -1464,6 +1476,9 @@ type queryCapability = QuerySpec
 type createForm struct {
 	Label  string  `json:"label"`
 	Fields []Field `json:"fields"`
+	// Title is the create page's heading when it differs from the button,
+	// as Google's "Create a bucket" page ends in Create (CreateTitler).
+	Title string `json:"title,omitempty"`
 	// Page means the form is rendered at its own address instead of in a
 	// dialog. Decided here rather than in the client so that "long enough to
 	// deserve a page" has one definition.
@@ -1483,6 +1498,9 @@ func (s *Server) capabilitiesOf(p Provider) capabilities {
 		c.Create.Page = len(fields) > createPageThreshold
 		if pc, ok := p.(PageCreator); ok && pc.CreateOnPage() {
 			c.Create.Page = true
+		}
+		if ct, ok := p.(CreateTitler); ok {
+			c.Create.Title = ct.CreateTitle()
 		}
 	}
 	if e, ok := p.(Executor); ok {
@@ -2310,11 +2328,31 @@ func (s *Server) handleDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	// The IAM policy's tab, read here so that every one carries the note
 	// that nothing is enforced, whichever provider serves it (#793).
+	// A provider can place the tab among its own with a placeholder
+	// section (ID "permissions", Kind KindPermissions, no content), as
+	// Google's bucket page puts Permissions third (#1843); otherwise it is
+	// appended. A placeholder with no policy behind it is dropped.
+	slot := -1
+	for i, sec := range detail.Sections {
+		if sec.ID == "permissions" && sec.Kind == KindPermissions && sec.Permissions == nil {
+			slot = i
+			break
+		}
+	}
+	placed := false
 	if pe, ok := p.(PolicyEditor); ok && detail.Unavailable == "" && detail.Prompt == "" {
 		if target := pe.PolicyOn(ctx, path); target != nil {
-			detail.Sections = append(detail.Sections,
-				permissionsSection(ctx, pe, r.URL.Query().Get("project"), path, target))
+			sec := permissionsSection(ctx, pe, r.URL.Query().Get("project"), path, target)
+			if slot >= 0 {
+				detail.Sections[slot] = sec
+			} else {
+				detail.Sections = append(detail.Sections, sec)
+			}
+			placed = true
 		}
+	}
+	if slot >= 0 && !placed {
+		detail.Sections = append(detail.Sections[:slot], detail.Sections[slot+1:]...)
 	}
 	// Collections are arrays rather than null, so a client that iterates
 	// before checking does not fall over on top of the failure it was about
