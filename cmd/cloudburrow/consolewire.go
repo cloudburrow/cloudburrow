@@ -377,6 +377,9 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			// saying why.
 			versions = append(append(versions, "MYSQL_5_6", "MYSQL_5_7"), sqladmin.EngineVersions("MYSQL")...)
 		}
+		// SQL Server (#1916): created through the Admin API, on Microsoft's
+		// image, once its user accepts Microsoft's licence.
+		versions = append(versions, sqladmin.SQLServerVersions()...)
 		host := d.cfg.BindAddress
 		if host == "" || host == "0.0.0.0" || host == "::" {
 			host = "127.0.0.1"

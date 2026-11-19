@@ -90,8 +90,8 @@ func (s *Server) demoteInstance(r *http.Request, base, project, name, verb strin
 	if err != nil {
 		return nil, err
 	}
-	if legacyMySQL(c.spec.DatabaseVersion) {
-		return nil, legacyUnimplemented("instances." + verb)
+	if err := limitedUnimplemented(c.spec.DatabaseVersion, "instances."+verb); err != nil {
+		return nil, err
 	}
 	master, err = masterName(project, master)
 	if err != nil {

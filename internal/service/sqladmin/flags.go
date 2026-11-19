@@ -10,7 +10,7 @@ import (
 )
 
 func listFlags(version string) (any, error) {
-	if version != "" && !SupportedVersions[version] {
+	if version != "" && !SupportedVersions[version] && !IsSQLServer(version) {
 		if strings.HasPrefix(version, "POSTGRES_") || strings.HasPrefix(version, "MYSQL_") || strings.HasPrefix(version, "SQLSERVER_") {
 			return map[string]any{"kind": "sql#flagsList", "items": []any{}}, nil
 		}

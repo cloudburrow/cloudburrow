@@ -629,6 +629,14 @@ type Config struct {
 	// default) when policies are stored and never enforced (ADR-0006).
 	IAMEnforcement string `json:"iamEnforcement,omitempty"`
 
+	// AcceptMSSQLEULA is the user's acceptance of Microsoft's SQL Server
+	// licence for the Cloud SQL for SQL Server instances this instance
+	// creates (#1916): set only by `up --accept-mssql-eula` or
+	// CLOUDBURROW_ACCEPT_MSSQL_EULA=Y, never by a configuration file, which
+	// a repository can ship and the developer has not necessarily read, so
+	// nobody accepts it on the user's behalf. Source.MSSQLEULA says which.
+	AcceptMSSQLEULA bool `json:"-"`
+
 	// HooksDir holds ready.d and shutdown.d, scripts run on the host when
 	// the instance becomes ready and before it stops (#285). A missing
 	// directory runs nothing. Relative paths are taken from the working
@@ -704,6 +712,9 @@ type Source struct {
 	// file chose, which would let a repository vouch for itself; empty when
 	// there is no home directory to use.
 	TrustDir string
+	// MSSQLEULA is how AcceptMSSQLEULA was set: "flag" or "env", "" when
+	// it was not.
+	MSSQLEULA string
 }
 
 // DefaultNodeImage is the pinned Kubernetes node image. It is duplicated from

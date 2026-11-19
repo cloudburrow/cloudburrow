@@ -65,6 +65,9 @@ type statusReport struct {
 	Error  string                     `json:"error,omitempty"`
 	// Hooks are the lifecycle hooks' outcomes by stage, when any ran.
 	Hooks map[string][]hooks.Result `json:"hooks,omitempty"`
+	// MSSQLEULA is who accepted Microsoft's SQL Server licence, when and
+	// how (#1916): for every instance at `up`, and per SQL Server instance.
+	MSSQLEULA *mssqlEULAStatus `json:"mssql_eula,omitempty"`
 }
 
 type statusCluster struct {
@@ -154,6 +157,7 @@ func buildStatusReport(cfg config.Config, live *liveState, clusterState, kuberne
 		Project:        cfg.DefaultProject(),
 		Mode:           string(cfg.Mode),
 		IAMEnforcement: iamEnforcementMode(cfg),
+		MSSQLEULA:      mssqlEULAReport(cfg),
 		Bind:           cfg.BindAddress,
 		Cluster: statusCluster{Name: cfg.ClusterName(), State: clusterState, Kubernetes: kubernetes,
 			Pinned: statusPinned{NodeImage: cfg.Cluster.NodeImage, Knative: components.KnativeVersion}},

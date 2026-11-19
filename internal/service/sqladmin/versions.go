@@ -75,9 +75,11 @@ func unservedVersionWhy(version string) string {
 	return "CloudBurrow runs the MySQL versions " + strings.Join(engineVersions["MYSQL"], ", ")
 }
 
-// sqlServerVersionWhy is why no SQL Server version is served (#1462).
-const sqlServerVersionWhy = "SQL Server has no Docker Hub official image; Microsoft's own (mcr.microsoft.com/mssql/server, " +
-	"2017, 2019 and 2022) is linux/amd64 only, so a linux/arm64 node cannot run it; CloudBurrow runs PostgreSQL and MySQL"
+// sqlServerVersionWhy is why a SQL Server version is not served where
+// the provisioner cannot say whether its node runs linux/amd64 images
+// (#1916, sqlserver.go).
+const sqlServerVersionWhy = "Microsoft's SQL Server image (mcr.microsoft.com/mssql/server, 2017, 2019, 2022 and 2025) is " +
+	"linux/amd64 only, and this server's provisioner cannot run a linux/amd64 image"
 
 // pgBefore12 is whether version is a PostgreSQL version before 12 (#1462),
 // whose servers have no pg_promote() and no standby.signal or
@@ -116,8 +118,8 @@ type Upgrader interface {
 // with no read replicas that is not one.
 func (s *Server) checkUpgrade(c *created, version string, includeReplicas bool) error {
 	cur := c.spec.DatabaseVersion
-	if legacyMySQL(cur) {
-		return legacyUnimplemented("a major version upgrade")
+	if err := limitedUnimplemented(cur, "a major version upgrade"); err != nil {
+		return err
 	}
 	if !SupportedVersions[version] {
 		if strings.HasPrefix(version, "POSTGRES_") || strings.HasPrefix(version, "MYSQL_") {

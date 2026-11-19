@@ -12,6 +12,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
 )
 
 // legacyProbe prints the node's machine, then, for each x86-64 handler
@@ -40,8 +42,13 @@ func (p *sqlProvisioner) LegacyUnrunnable(version string) string {
 		return ""
 	}
 	image := "mysql:5.7, 5.7.44"
-	if version == "MYSQL_5_6" {
+	switch {
+	case version == "MYSQL_5_6":
 		image = "mysql:5.6, 5.6.51"
+	case sqladmin.IsSQLServer(version):
+		// Microsoft supports it only on x86-64 hosts, and runs no tests
+		// under Rosetta 2 or QEMU (#1916).
+		image = "Microsoft's mcr.microsoft.com/mssql/server:" + sqladmin.SQLServerYear(version) + "-latest"
 	}
 	return version + "'s official image (" + image + ") is linux/amd64 only, and " + p.legacyWhy
 }

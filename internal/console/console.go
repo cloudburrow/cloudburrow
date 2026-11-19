@@ -249,6 +249,12 @@ type Provider interface {
 // so that a field only ever appears when the service behind it can actually
 // accept it — a form offering something the API refuses is the working-looking
 // control the parity specification forbids.
+// Link is a document a Field names: its label and its https URL.
+type Link struct {
+	Label string `json:"label"`
+	URL   string `json:"url"`
+}
+
 type Field struct {
 	Name  string `json:"name"`
 	Label string `json:"label"`
@@ -370,6 +376,10 @@ type Field struct {
 	// choosable: SQL Server on Cloud SQL's engine choice, which CloudBurrow
 	// does not run (#1860).
 	DisabledOptions []string `json:"disabledOptions,omitempty"`
+	// Links are documents the field is about, drawn as links under its
+	// help: Microsoft's licence terms beside Cloud SQL for SQL Server's
+	// licence checkbox (#1916). Each opens in a new tab.
+	Links []Link `json:"links,omitempty"`
 	// VisibleWhen shows the field only while each named field of the same
 	// form holds the given value ("true"/"false" for a checkbox); a hidden
 	// field is neither checked nor submitted. Cloud SQL's Database version

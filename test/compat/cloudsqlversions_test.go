@@ -138,7 +138,9 @@ func TestCloudSQLDatabaseVersions(t *testing.T) {
 	if os.Getenv(EnvMySQL) != "" {
 		versions = append(versions, version{"MYSQL_8_0", "MYSQL_8_0_46", "8.0.46", 1})
 	}
-	for _, bad := range []string{"MYSQL_5_5", "SQLSERVER_2022_STANDARD", "POSTGRES_8_4"} {
+	// SQLSERVER_2022_STANDARD is served once its user accepts Microsoft's
+	// licence (#1916, TestCloudSQLServerRefusedWithoutEULA).
+	for _, bad := range []string{"MYSQL_5_5", "MYSQL_8_0_31", "POSTGRES_8_4"} {
 		_, err := svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: "bad-" + suffix, DatabaseVersion: bad,
 			Settings: &sqladmin.Settings{Tier: "db-custom-1-3840"}}).Do()
 		wantHTTP(t, "insert "+bad, err, 501)

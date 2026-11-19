@@ -18,6 +18,7 @@ import (
 	sqladminapi "google.golang.org/api/sqladmin/v1"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
 )
 
 // sqlVersionLabel is a databaseVersion as Google's console names it:
@@ -36,6 +37,28 @@ func sqlVersionLabel(v string) string {
 		return "SQL Server " + strings.ReplaceAll(strings.ToLower(rest), "_", " ")
 	}
 	return v
+}
+
+// sqlServerVersionLabel is a SQL Server version as Google's console names
+// it, "SQL Server 2022 Standard", with the local edition that runs it.
+func sqlServerVersionLabel(v string) string {
+	ed := sqladmin.SQLServerEdition(v)
+	label := "SQL Server " + sqladmin.SQLServerYear(v) + " " + strings.ToUpper(ed[:1]) + strings.ToLower(ed[1:])
+	pid, _ := sqladmin.MSSQLPID(v)
+	if pid != "Express" {
+		label += " (runs " + sqlServerPIDLabel(pid) + " locally)"
+	}
+	return label
+}
+
+func sqlServerPIDLabel(pid string) string {
+	switch pid {
+	case "StandardDeveloper":
+		return "Standard Developer"
+	case "EnterpriseDeveloper":
+		return "Enterprise Developer"
+	}
+	return pid
 }
 
 // sqlEditionLabel is a Cloud SQL edition as the console names it.
@@ -114,10 +137,15 @@ func zipLabels(options, labels []string) map[string]string {
 // its preset, the instance info, the region and zonal availability, then
 // "Customize your instance".
 func (p cloudSQLInstancesProvider) sqlCreateForm() []console.Field {
-	var pg, my, pgLabels, myLabels []string
-	pgDef, myDef := "", ""
+	var pg, my, ms, pgLabels, myLabels, msLabels []string
+	pgDef, myDef, msDef := "", "", ""
 	for _, v := range p.versions {
 		switch {
+		case strings.HasPrefix(v, "SQLSERVER_"):
+			ms, msLabels = append(ms, v), append(msLabels, sqlServerVersionLabel(v))
+			if v == "SQLSERVER_2022_STANDARD" || msDef == "" {
+				msDef = v
+			}
 		case strings.HasPrefix(v, "POSTGRES_"):
 			pg, pgLabels = append(pg, v), append(pgLabels, sqlVersionLabel(v))
 			if v == "POSTGRES_17" || pgDef == "" {
@@ -135,6 +163,14 @@ func (p cloudSQLInstancesProvider) sqlCreateForm() []console.Field {
 	const machineSec, storageSec, connSec, protectSec, maintSec, flagsSec, labelsSec, externalSec = "Machine configuration", "Storage",
 		"Connections", "Data protection", "Maintenance", "Flags", "Labels", "Source representation (external server)"
 	pgOnly := map[string]string{"engine": sqlEnginePostgres}
+	msOnly := map[string]string{"engine": sqlEngineSQLServer}
+	engineLabels := []string{"MySQL", "PostgreSQL", "SQL Server"}
+	var disabled []string
+	engineHelp := "SQL Server runs Microsoft's SQL Server image, which needs you to accept Microsoft's licence."
+	if len(ms) == 0 {
+		engineLabels[2], disabled = "SQL Server (not available locally)", []string{sqlEngineSQLServer}
+		engineHelp = "SQL Server is not available on this instance: its Cloud SQL Admin API is not served."
+	}
 	myOnly := map[string]string{"engine": sqlEngineMySQL}
 	days := []string{"", "1", "2", "3", "4", "5", "6", "7"}
 	dayLabels := []string{"Any window", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"}
@@ -146,9 +182,9 @@ func (p cloudSQLInstancesProvider) sqlCreateForm() []console.Field {
 	return withPasswordPolicy(infoSec, []console.Field{
 		{Name: "engine", Label: "Database engine", Type: "radio", Section: engineSec, Default: sqlEnginePostgres,
 			Options:         []string{sqlEngineMySQL, sqlEnginePostgres, sqlEngineSQLServer},
-			OptionLabels:    zipLabels([]string{sqlEngineMySQL, sqlEnginePostgres, sqlEngineSQLServer}, []string{"MySQL", "PostgreSQL", "SQL Server (not available locally)"}),
-			DisabledOptions: []string{sqlEngineSQLServer},
-			Help:            "SQL Server is not available locally: CloudBurrow runs MySQL and PostgreSQL servers only."},
+			OptionLabels:    zipLabels([]string{sqlEngineMySQL, sqlEnginePostgres, sqlEngineSQLServer}, engineLabels),
+			DisabledOptions: disabled,
+			Help:            engineHelp},
 		{Name: "edition", Label: "Cloud SQL edition", Type: "radio", Section: editionSec, Default: "ENTERPRISE_PLUS",
 			Options: []string{"ENTERPRISE_PLUS", "ENTERPRISE"}, OptionLabels: map[string]string{"ENTERPRISE_PLUS": "Enterprise Plus", "ENTERPRISE": "Enterprise"},
 			Help: "Recorded and reported, and Enterprise Plus allows 35 days of transaction logs; the server is the same either way."},
@@ -161,10 +197,22 @@ func (p cloudSQLInstancesProvider) sqlCreateForm() []console.Field {
 		{Name: "mysqlVersion", Label: "Database version", Type: "select", Required: true, Section: infoSec,
 			Options: my, OptionLabels: zipLabels(my, myLabels), Default: myDef, VisibleWhen: myOnly,
 			Help: "Each version is the official image of that major version, pulled when an instance of it is first created."},
+		{Name: "sqlserverVersion", Label: "Database version", Type: "select", Required: true, Section: infoSec,
+			Options: ms, OptionLabels: zipLabels(ms, msLabels), Default: msDef, VisibleWhen: msOnly,
+			Help: "Each release is Microsoft's image of it, linux/amd64 only (on Apple silicon, Docker Desktop's Rosetta or QEMU runs it, " +
+				"which Microsoft does not support). Express runs as Express; Web, Standard and Enterprise run Microsoft's Developer edition " +
+				"(Standard Developer or Enterprise Developer on 2025), licensed for development and test only, because Google holds " +
+				"those editions' licences on Cloud SQL and nobody does here."},
+		{Name: "mssqlEula", Label: "I accept Microsoft's licence terms for SQL Server", Type: "checkbox", Section: infoSec, VisibleWhen: msOnly,
+			Help: "Microsoft's SQL Server image starts only once its End-User Licensing Agreement is accepted, and CloudBurrow never " +
+				"accepts it for you. Checking this accepts it, as you, for this instance; who accepted and when is recorded on the " +
+				"instance and shown by cloudburrow status. Not needed when cloudburrow up was started with --accept-mssql-eula.",
+			Links: []console.Link{{Label: "Microsoft SQL Server End-User Licensing Agreement", URL: sqladmin.MSSQLEULAURL},
+				{Label: "SQL Server licensing terms, by edition", URL: sqladmin.MSSQLLicensesURL}}},
 		{Name: "name", Label: "Instance ID", Type: "text", Required: true, Section: infoSec, Pattern: "^[a-z][a-z0-9\\-]{0,53}[a-z0-9]$",
 			Help: "Use lowercase letters, numbers, and hyphens. Start with a letter."},
 		{Name: "rootPassword", Label: "Password", Type: "password", Section: infoSec,
-			Help: "The password of the default user: postgres on PostgreSQL, root on MySQL. Empty leaves MySQL's root without one."},
+			Help: "The password of the default user: postgres on PostgreSQL, root on MySQL, sqlserver on SQL Server (required there). Empty leaves MySQL's root without one."},
 		{Name: "region", Label: "Region", Type: "select", Section: regionSec, Options: sqlRegions, Default: "us-central1",
 			Help: "Reported, and part of the connection name; every server runs in this cluster."},
 		{Name: "availabilityType", Label: "Zonal availability", Type: "radio", Section: regionSec, Default: "ZONAL",
@@ -216,7 +264,13 @@ func sqlCreateValues(v map[string]string) (map[string]string, error) {
 	}
 	switch v["engine"] {
 	case sqlEngineSQLServer:
-		return nil, fmt.Errorf("SQL Server is not available locally: CloudBurrow runs MySQL and PostgreSQL servers only")
+		out["databaseVersion"] = v["sqlserverVersion"]
+		if out["databaseVersion"] == "" {
+			return nil, fmt.Errorf("choose a SQL Server version")
+		}
+		// Not served on SQL Server here (#1916): the create page's
+		// defaults are left out rather than refused.
+		out["backupsEnabled"], out["pitr"] = "false", "false"
 	case sqlEngineMySQL:
 		out["databaseVersion"] = v["mysqlVersion"]
 	}

@@ -71,6 +71,9 @@ func (p *sqlProvisioner) logf(format string, args ...any) {
 }
 
 func (p *sqlProvisioner) port(spec sqladmin.Spec) int {
+	if sqladmin.IsSQLServer(spec.DatabaseVersion) {
+		return components.CloudSQLServerPort
+	}
 	if spec.MySQL() {
 		return components.CloudSQLMySQLPort
 	}
@@ -104,6 +107,10 @@ func (p *sqlProvisioner) hostAddr(name string) func() string {
 }
 
 func (p *sqlProvisioner) Engine(spec sqladmin.Spec) sqladmin.Engine {
+	if sqladmin.IsSQLServer(spec.DatabaseVersion) {
+		return &sqladmin.SQLServer{Name: spec.Name, Version: spec.DatabaseVersion, SAPassword: spec.SAPassword,
+			HostAddr: p.hostAddr(spec.ServerName())}
+	}
 	if spec.MySQL() {
 		return &sqladmin.MySQL{Name: spec.Name, Version: spec.DatabaseVersion,
 			RootPassword: spec.RootPassword, HostAddr: p.hostAddr(spec.ServerName())}
@@ -143,6 +150,9 @@ func primaryHost(spec sqladmin.Spec) string {
 }
 
 func (p *sqlProvisioner) backend(spec sqladmin.Spec) components.Backend {
+	if sqladmin.IsSQLServer(spec.DatabaseVersion) {
+		return sqlServerBackend(spec)
+	}
 	var flags []components.SQLInstanceFlag
 	for _, f := range spec.Flags {
 		flags = append(flags, components.SQLInstanceFlag{Name: f.Name, Value: f.Value})
@@ -268,6 +278,9 @@ func (p *sqlProvisioner) Start(ctx context.Context, spec sqladmin.Spec) error {
 	if err := p.serves(ctx, spec); err != nil {
 		return err
 	}
+	if sqladmin.IsSQLServer(spec.DatabaseVersion) {
+		return p.sqlServerSetup(ctx, spec)
+	}
 	return p.standby(ctx, spec)
 }
 
@@ -279,7 +292,27 @@ func (p *sqlProvisioner) Restart(ctx context.Context, spec sqladmin.Spec) error 
 	if err := p.rolloutDeployment(ctx, d); err != nil {
 		return err
 	}
-	return p.serves(ctx, spec)
+	if err := p.serves(ctx, spec); err != nil {
+		return err
+	}
+	if sqladmin.IsSQLServer(spec.DatabaseVersion) {
+		// Trace flags last until the server stops.
+		return p.sqlServerSetup(ctx, spec)
+	}
+	return nil
+}
+
+// sqlServerSetup gives a SQL Server instance's server its sqlserver user
+// and its database flags (#1916), each time it starts.
+func (p *sqlProvisioner) sqlServerSetup(ctx context.Context, spec sqladmin.Spec) error {
+	ss, ok := p.Engine(spec).(*sqladmin.SQLServer)
+	if !ok {
+		return nil
+	}
+	if err := ss.Setup(ctx, spec.RootPassword, spec.Flags); err != nil {
+		return fmt.Errorf("set up the sqlserver user and flags of %s: %w", spec.Name, err)
+	}
+	return nil
 }
 
 // Stop shuts a stopped instance's server down (#1875): its tunnel goes,
