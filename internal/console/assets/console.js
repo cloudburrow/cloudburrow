@@ -4820,7 +4820,11 @@ function openModal({ labelledBy, canClose = () => true }) {
     dialog.classList.add("is-closing");
     dialog.inert = true;
     setTimeout(() => dialog.remove(), OVERLAY_EXIT_MS);
-    for (const n of inerted) n.inert = false;
+    // A dialog that closed while this one was over it (a form that opened
+    // this one from its submit, as Rotate key opens the new key's) stays
+    // inert for the rest of its exit: woken, it would take the clicks meant
+    // for the page under it until it is removed.
+    for (const n of inerted) if (!n.classList.contains("is-closing")) n.inert = false;
     // Back to the button that opened it, not to the top of the page: a
     // keyboard user who cancels a create should be where they started.
     if (opener && opener.isConnected && opener.focus) opener.focus();
