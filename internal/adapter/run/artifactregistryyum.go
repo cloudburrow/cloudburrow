@@ -113,7 +113,7 @@ func rpmInfoOf(f fmtFile) *rpmInfo {
 	if st == nil {
 		return nil
 	}
-	rc, err := st.OpenBlob(f.Digest)
+	rc, err := f.blob(st)
 	if err != nil {
 		return nil
 	}

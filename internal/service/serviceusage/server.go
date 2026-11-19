@@ -54,6 +54,9 @@ type API struct {
 	Name string
 	// Title is the API's display name, as Google titles it.
 	Title string
+	// Disabled marks an API a project starts without, as Google's
+	// Container Scanning API is until enabled (#1912).
+	Disabled bool
 }
 
 // Unserved is an API CloudBurrow can serve but this instance does not: the
@@ -363,7 +366,26 @@ func (s *Server) state(st states, name string) string {
 	if v := st[name]; v != "" {
 		return v
 	}
+	if s.byName[name].Disabled {
+		return "DISABLED"
+	}
 	return "ENABLED"
+}
+
+// Enabled reports whether an API is enabled in a project, for the services
+// that act on it (Artifact Registry's scanning reads the Container
+// Scanning API's state, #1912).
+func (s *Server) Enabled(project, name string) bool {
+	if _, ok := s.byName[name]; !ok {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st, err := s.load(project)
+	if err != nil {
+		return false
+	}
+	return s.state(st, name) == "ENABLED"
 }
 
 func parent(project string) string {
@@ -530,7 +552,8 @@ func (s *Server) set(project string, names []string, state string) ([]any, error
 		return nil, err
 	}
 	for _, a := range apis {
-		if state == "ENABLED" {
+		// What differs from the API's default is stored.
+		if (state == "ENABLED") != a.Disabled {
 			delete(st, a.Name)
 		} else {
 			st[a.Name] = state

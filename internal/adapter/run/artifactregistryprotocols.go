@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hash"
 	"html"
@@ -26,6 +27,7 @@ import (
 	"time"
 
 	arpb "cloud.google.com/go/artifactregistry/apiv1/artifactregistrypb"
+	"github.com/cloudburrow/cloudburrow/internal/registry"
 	"github.com/google/uuid"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
@@ -58,7 +60,7 @@ var arServer atomic.Pointer[ArtifactRegistryServer]
 // one serves them from its cache, then its upstream, keeping what it read
 // (#1546, artifactregistryremote.go).
 
-var pkgHostRE = regexp.MustCompile(`^([a-z0-9-]+)-(python|npm|maven|apt|yum)\.pkg\.(dev|localhost)$`)
+var pkgHostRE = regexp.MustCompile(`^([a-z0-9-]+)-(python|npm|maven|apt|yum|go|kfp)\.pkg\.(dev|localhost)$`)
 
 // pkgRequest is a protocol request resolved to its repository.
 type pkgRequest struct {
@@ -137,6 +139,10 @@ func servePackages(w http.ResponseWriter, r *http.Request) bool {
 		serveApt(w, r, pr)
 	case arpb.Repository_YUM:
 		serveYum(w, r, pr)
+	case arpb.Repository_GO:
+		serveGo(w, r, pr)
+	case arpb.Repository_KFP:
+		serveKfp(w, r, pr)
 	}
 	return true
 }
@@ -147,7 +153,11 @@ func serveBlob(w http.ResponseWriter, r *http.Request, f fmtFile, contentType st
 		http.Error(w, "this instance has no registry store", http.StatusServiceUnavailable)
 		return
 	}
-	rc, err := st.OpenBlob(f.Digest)
+	rc, err := f.blob(st)
+	if errors.Is(err, registry.ErrKeyUnavailable) {
+		http.Error(w, err.Error(), http.StatusForbidden)
+		return
+	}
 	if err != nil {
 		http.Error(w, "file content is missing", http.StatusNotFound)
 		return
@@ -601,7 +611,7 @@ func mavenBytes(p *pkgRequest, path string) ([]byte, bool) {
 	for _, repo := range p.readRepos() {
 		if f, ok := fileByID(repo, path); ok {
 			if st := RegistryStore(); st != nil {
-				if b, err := st.ReadBlob(f.Digest); err == nil {
+				if b, err := f.bytes(st); err == nil {
 					return b, true
 				}
 			}
@@ -659,6 +669,9 @@ func apiError(w http.ResponseWriter, status int, code, msg string) {
 }
 
 func serveMediaAPI(w http.ResponseWriter, r *http.Request) bool {
+	if serveFormatUploads(w, r) {
+		return true
+	}
 	if m := genericUploadRE.FindStringSubmatch(r.URL.Path); m != nil && (r.Method == http.MethodPost || r.Method == http.MethodPut) {
 		genericUpload(w, r, m[1])
 		return true
@@ -814,7 +827,7 @@ func downloadFile(w http.ResponseWriter, r *http.Request, name string) {
 			apiError(w, http.StatusNotFound, "NOT_FOUND", "Requested entity was not found.")
 			return
 		}
-		rc, err := st.OpenBlob(id)
+		rc, err := st.OpenRepoBlob(repoOf(repoName), id)
 		if err != nil {
 			apiError(w, http.StatusNotFound, "NOT_FOUND", "Requested entity was not found.")
 			return

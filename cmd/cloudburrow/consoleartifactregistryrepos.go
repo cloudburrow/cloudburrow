@@ -45,17 +45,15 @@ func (p artifactRegistryProvider) withClient(ctx context.Context, fn func(*artif
 }
 
 // The formats Google's Format list offers, in its order, and the words it
-// shows them as. Go and Kubeflow Pipelines are drawn disabled: this
-// instance serves neither (CreateRepository refuses them).
+// shows them as. Every one is served (Go and Kubeflow Pipelines since
+// #1897); a format this instance did not serve would be drawn disabled
+// with its reason in arFormatsUnavailable.
 var (
 	arFormats      = []string{"DOCKER", "MAVEN", "NPM", "PYTHON", "APT", "YUM", "KFP", "GO", "GENERIC"}
 	arFormatLabels = map[string]string{"DOCKER": "Docker", "MAVEN": "Maven", "NPM": "npm", "PYTHON": "Python",
 		"APT": "Apt", "YUM": "Yum", "KFP": "Kubeflow Pipelines", "GO": "Go", "GENERIC": "Generic"}
-	arFormatsUnavailable = map[string]string{
-		"KFP": "Not available locally: this instance serves no Kubeflow Pipelines template registry.",
-		"GO":  "Not available locally: this instance serves no Go module proxy.",
-	}
-	arModeLabels = map[string]string{"STANDARD_REPOSITORY": "Standard", "REMOTE_REPOSITORY": "Remote", "VIRTUAL_REPOSITORY": "Virtual"}
+	arFormatsUnavailable = map[string]string{}
+	arModeLabels         = map[string]string{"STANDARD_REPOSITORY": "Standard", "REMOTE_REPOSITORY": "Remote", "VIRTUAL_REPOSITORY": "Virtual"}
 )
 
 // The create page's choices, as Google words them.
@@ -83,8 +81,9 @@ const (
 	arNoEgress = "Not available locally: an upstream outside this instance (a preset such as Docker Hub, PyPI, npmjs or " +
 		"Maven Central, or a custom URL) needs the internet, and this instance makes no calls off the machine."
 	arNoUpstreamAuth = "Not available locally: an Artifact Registry upstream of this instance is read without credentials."
-	arNoScanning     = "Not available locally: vulnerability scanning is Artifact Analysis (the Container Scanning API), " +
-		"which CloudBurrow does not run."
+	arScanningHelp   = "Artifact Analysis scans each image pushed to the repository, on this machine with OSV-Scanner and the OSV " +
+		"database `cloudburrow prefetch --vulnerability-scanning` downloads, while the project's Container Scanning API " +
+		"(containerscanning.googleapis.com) is enabled (#1912)."
 )
 
 // arMultiRegionLabels name the multi-regions as Google's Multi-region list does.
@@ -167,7 +166,7 @@ func (artifactRegistryProvider) CreateForm() (string, []console.Field) {
 			UnavailableOptions: arFormatsUnavailable},
 		{Name: "mode", Label: "Mode", Type: "radio", Options: []string{"STANDARD_REPOSITORY", "REMOTE_REPOSITORY", "VIRTUAL_REPOSITORY"},
 			OptionLabels: arModeLabels, Default: "STANDARD_REPOSITORY",
-			Help: "Remote: Docker, Maven, npm and Python, caching another repository of this instance. Virtual: Maven, npm and Python."},
+			Help: "Remote: Docker, Maven, npm and Python, caching another repository of this instance. Virtual: Docker, Maven, npm and Python."},
 		// Maven's version policy (maven_config).
 		{Name: "versionPolicy", Label: "Version policy", Type: "radio", ShowWhen: "format=MAVEN&mode=STANDARD_REPOSITORY",
 			Options:      []string{"VERSION_POLICY_UNSPECIFIED", "RELEASE", "SNAPSHOT"},
@@ -204,14 +203,32 @@ func (artifactRegistryProvider) CreateForm() (string, []console.Field) {
 		{Name: "kmsKey", Label: "Select a customer-managed key", Type: "text", Section: "Encryption", Required: true,
 			ShowWhen: "encryption=" + arEncCMEK,
 			Help: "A Cloud KMS key of this instance in the repository's location, projects/P/locations/L/keyRings/R/cryptoKeys/K. " +
-				"It cannot be changed later. The key is stored on the repository; nothing is encrypted with it locally (#1897)."},
+				"It cannot be changed later. The repository's content is encrypted with it through this instance's Cloud KMS; while its key version is disabled or destroyed, nothing can be pushed or pulled (#1897)."},
 		withSection(arImmutableField(false, "format=DOCKER"), "Immutable image tags"),
 		arCleanupModeField(true),
 		arCleanupGroup(""),
-		{Name: "vulnerabilityScanning", Label: "Vulnerability scanning", Type: "radio", Section: "Artifact Analysis",
-			Options: []string{arEnabled, arDisabled}, Default: arDisabled,
-			UnavailableOptions: map[string]string{arEnabled: arNoScanning}},
+		arScanningField(true, "format=DOCKER"),
 	}
+}
+
+// arScanningField is Artifact Analysis's Vulnerability scanning choice.
+func arScanningField(on bool, showWhen string) console.Field {
+	def := arDisabled
+	if on {
+		def = arEnabled
+	}
+	return console.Field{Name: "vulnerabilityScanning", Label: "Vulnerability scanning", Type: "radio", Section: "Artifact Analysis",
+		Options: []string{arEnabled, arDisabled}, Default: def, ShowWhen: showWhen, Help: arScanningHelp}
+}
+
+// arScanningConfig is the repository's vulnerability_scanning_config for
+// the choice: Enabled inherits the project's Container Scanning API.
+func arScanningConfig(choice string) *arpb.Repository_VulnerabilityScanningConfig {
+	c := arpb.Repository_VulnerabilityScanningConfig_INHERITED
+	if choice == arDisabled {
+		c = arpb.Repository_VulnerabilityScanningConfig_DISABLED
+	}
+	return &arpb.Repository_VulnerabilityScanningConfig{EnablementConfig: c}
 }
 
 func withSection(f console.Field, s string) console.Field {
@@ -310,9 +327,8 @@ func (p artifactRegistryProvider) Create(ctx context.Context, project string, v 
 		repo.CleanupPolicies = pols
 		repo.CleanupPolicyDryRun = v["cleanupMode"] != arCleanupDelete
 	}
-	if _, ok := v["vulnerabilityScanning"]; ok {
-		repo.VulnerabilityScanningConfig = &arpb.Repository_VulnerabilityScanningConfig{
-			EnablementConfig: arpb.Repository_VulnerabilityScanningConfig_DISABLED}
+	if choice, ok := v["vulnerabilityScanning"]; ok && repo.GetFormat() == arpb.Repository_DOCKER {
+		repo.VulnerabilityScanningConfig = arScanningConfig(choice)
 	}
 	err = p.withClient(ctx, func(c *artifactregistry.Client) error {
 		op, err := c.CreateRepository(ctx, &arpb.CreateRepositoryRequest{Parent: parent, RepositoryId: id, Repository: repo})
@@ -411,6 +427,9 @@ func editRepositoryAction(r *arpb.Repository) console.Action {
 	}
 	if r.GetFormat() == arpb.Repository_DOCKER {
 		fields = append(fields, withSection(arImmutableField(r.GetDockerConfig().GetImmutableTags(), ""), "Immutable image tags"))
+		if r.GetMode() != arpb.Repository_VIRTUAL_REPOSITORY {
+			fields = append(fields, arScanningField(r.GetVulnerabilityScanningConfig().GetEnablementConfig() != arpb.Repository_VulnerabilityScanningConfig_DISABLED, ""))
+		}
 	}
 	if r.GetMode() == arpb.Repository_STANDARD_REPOSITORY || r.GetMode() == arpb.Repository_REMOTE_REPOSITORY {
 		fields = append(fields, arCleanupModeField(r.GetCleanupPolicyDryRun()), arCleanupGroup(arCleanupToGroup(r)))
@@ -446,6 +465,10 @@ func (p artifactRegistryProvider) editRepository(ctx context.Context, r *arpb.Re
 		}
 		in.CleanupPolicies, in.CleanupPolicyDryRun = pols, v["cleanupMode"] != arCleanupDelete
 		mask = append(mask, "cleanup_policies", "cleanup_policy_dry_run")
+	}
+	if choice, ok := v["vulnerabilityScanning"]; ok && r.GetFormat() == arpb.Repository_DOCKER {
+		in.VulnerabilityScanningConfig = arScanningConfig(choice)
+		mask = append(mask, "vulnerability_scanning_config.enablement_config")
 	}
 	return p.withClient(ctx, func(c *artifactregistry.Client) error {
 		_, err := c.UpdateRepository(ctx, &arpb.UpdateRepositoryRequest{Repository: in, UpdateMask: &fieldmaskpb.FieldMask{Paths: mask}})

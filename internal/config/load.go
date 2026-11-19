@@ -236,6 +236,7 @@ type rawFlags struct {
 	services         string
 	shutdownTimeout  time.Duration
 	readyTimeout     time.Duration
+	arCleanup        time.Duration
 	logLevel         string
 	iamEnforcement   string
 	corsOrigins      listFlag
@@ -317,6 +318,7 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.StringVar(&r.services, "services", "", servicesUsage())
 	fs.DurationVar(&r.shutdownTimeout, "shutdown-timeout", 0, "bounded time to drain on shutdown")
 	fs.DurationVar(&r.readyTimeout, "ready-timeout", 0, "bounded time to wait for cluster components to become ready")
+	fs.DurationVar(&r.arCleanup, "artifact-registry-cleanup-interval", 0, "how often Artifact Registry's cleanup policies run (default 24h, about daily as Google's)")
 	fs.StringVar(&r.logLevel, "log-level", "", "log level: trace, debug, info, warn, error")
 	fs.StringVar(&r.iamEnforcement, "iam-enforcement", "", "IAM enforcement: off (policies are stored, never checked) or on (mapped API methods check the caller's permissions, as on Google) (default off)")
 	fs.BoolVar(&r.cbHostSteps, "cloudbuild-host-steps", false, "let Cloud Build run steps other than docker build, docker push and pack, for builds submitted from this machine's loopback only; each runs as a container with the host's Docker socket, which gives it control of the host (unsafe)")
@@ -570,6 +572,13 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 		}
 		cfg.BigQueryHeapMiB = n
 	}
+	if v := getenv(EnvPrefix + "ARTIFACT_REGISTRY_CLEANUP_INTERVAL"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d < 0 {
+			return fmt.Errorf("%sARTIFACT_REGISTRY_CLEANUP_INTERVAL: must be a duration such as 24h (got %q)", EnvPrefix, v)
+		}
+		cfg.ArtifactRegistryCleanupInterval = Duration(d)
+	}
 	if v := getenv(EnvPrefix + "CLOUDBUILD_HOST_STEPS"); v != "" {
 		b, err := strconv.ParseBool(v)
 		if err != nil {
@@ -700,6 +709,9 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 	}
 	if set["iam-enforcement"] {
 		cfg.IAMEnforcement = raw.iamEnforcement
+	}
+	if set["artifact-registry-cleanup-interval"] {
+		cfg.ArtifactRegistryCleanupInterval = Duration(raw.arCleanup)
 	}
 	if set["cloudbuild-host-steps"] {
 		cfg.CloudBuildHostSteps = raw.cbHostSteps

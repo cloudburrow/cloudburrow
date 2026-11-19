@@ -40,6 +40,7 @@ func UseRegistry(st *registry.Store) {
 	registryState.mu.Unlock()
 	if st != nil {
 		st.Immutable = immutableTags
+		st.Encryption = repositoryCipher
 		loadRepositories(st)
 	}
 }
@@ -68,7 +69,7 @@ func RegistryHandler() http.Handler {
 	if st == nil {
 		return nil
 	}
-	return &registry.Handler{Store: st, Lookup: lookupRegistryRepo, Remote: lookupRegistryUpstream}
+	return &registry.Handler{Store: st, Lookup: lookupRegistryRepo, Remote: lookupRegistryUpstream, Virtual: lookupRegistryVirtual}
 }
 
 // RegistryHandlerOr serves the registry's /v2/ paths and passes every other
@@ -190,7 +191,7 @@ func storeErr(err error) error {
 		return apierror.NotFound("Requested entity was not found.")
 	case errors.Is(err, registry.ErrTagInvalid):
 		return apierror.InvalidArgument("%v", err)
-	case errors.Is(err, registry.ErrTagImmutable):
+	case errors.Is(err, registry.ErrTagImmutable), errors.Is(err, registry.ErrKeyUnavailable):
 		return apierror.FailedPrecondition("%v", err)
 	}
 	return err

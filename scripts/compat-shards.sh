@@ -218,6 +218,11 @@ compat_shard() {
       # (#1568): the customer-managed and regional secrets, Terraform's data
       # sources, Cloud Storage volumes and Pub/Sub build triggers.
       FIXTURES=(--cloudbuild-host-steps --appengine-url http://127.0.0.1:18506)
+      # Artifact Registry's cleanup policies run every minute rather than
+      # Google's "approximately one day" (#1897): `up` reads the variable,
+      # and TestArtifactRegistryCleanupPolicies, which skips without one
+      # of 2m or less, reads the same, so it runs here.
+      export CLOUDBURROW_ARTIFACT_REGISTRY_CLEANUP_INTERVAL=1m
       TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_FIRESTORE,RUN_KMS,RUN_SCHEDULER,RUN_LOGGING,RUN_BIGQUERY,RUN_SQLADMIN,RUN_RESOURCEMANAGER,RUN_SERVICEUSAGE,RUN_MYSQL,MYSQL_PASSWORD,BIGQUERY_PROJECT,APPENGINE_URL ;;
     scale)
       # The tests that take minutes each (#1821), split from run: Cloud

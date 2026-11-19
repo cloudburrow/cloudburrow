@@ -3,6 +3,7 @@ package run
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"regexp"
 	"sort"
 	"strings"
@@ -837,7 +838,10 @@ func (a *ArtifactRegistryServer) ExportArtifact(ctx context.Context, req *arpb.E
 			continue
 		}
 		_, id, _ := splitChild(f.GetName(), "files")
-		b, err := st.ReadBlob(id)
+		b, err := st.ReadRepoBlob(repoOf(req.GetRepository()), id)
+		if errors.Is(err, registry.ErrKeyUnavailable) {
+			return nil, storeErr(err)
+		}
 		if err != nil {
 			if mb, _, _, merr := st.GetManifest(repoOf(req.GetRepository()), registry.UnescapePackage(pkgIDOf(version)), id); merr == nil {
 				b = mb
@@ -895,9 +899,9 @@ func (a *ArtifactRegistryServer) exportPackageVersion(ctx context.Context, w Obj
 		if x.GetOwner() != version {
 			continue
 		}
-		b, err := st.ReadBlob(f.Digest)
+		b, err := f.bytes(st)
 		if err != nil {
-			return nil, apierror.Internal(err, "read file %s", x.GetName())
+			return nil, storeErr(err)
 		}
 		object := f.ID
 		if dir != "" {

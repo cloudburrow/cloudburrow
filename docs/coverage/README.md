@@ -18,6 +18,7 @@ Do not edit these files by hand.
 | [Secure Source Manager](securesourcemanager.md) | 53 | 12 | 0 | 41 | 0 | 0 | 0 | 0 |
 | [Developer Connect](developerconnect.md) | 26 | 11 | 0 | 15 | 0 | 0 | 0 | 0 |
 | [Eventarc](eventarc.md) | 39 | 7 | 0 | 32 | 0 | 0 | 0 | 0 |
+| [Container Analysis](containeranalysis.md) | 18 | 18 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Functions v2](functions.md) | 8 | 8 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Functions v1](functionsv1.md) | 11 | 11 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Run v1 (Knative API)](runv1.md) | 76 | 76 | 0 | 0 | 0 | 0 | 0 | 0 |

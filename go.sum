@@ -207,6 +207,8 @@ cloud.google.com/go/compute/metadata v0.10.0/go.mod h1:rGFHRrIif570kSibjFTMbt6/4
 cloud.google.com/go/contactcenterinsights v1.23.0/go.mod h1:uB/kygbfYH/gWEq3NEgq3QRI7/MvpjFyX81ajcW5YAI=
 cloud.google.com/go/container v1.51.0/go.mod h1:EvqoT2eXfxLweXXUlhAMGR0sOAB00XPzEjoL01esSDs=
 cloud.google.com/go/containeranalysis v0.19.0/go.mod h1:Zq0XHzUIa0oTa7H6aSR8HWqeJnoRI9syUcYJzfozjZQ=
+cloud.google.com/go/containeranalysis v0.21.1 h1:mz3R+r3LBlUtoe8pb8XEiLm4Qht3LiWKHEkWkET+29U=
+cloud.google.com/go/containeranalysis v0.21.1/go.mod h1:8bbEFPp+S+6609AAIAIZo0MbHCOEYwbDtZ/Azu3vr9o=
 cloud.google.com/go/datacatalog v1.32.0/go.mod h1:DE272tynQUwheJeQAyVfV+nO8yrdkuDyOgH2LtOrkWM=
 cloud.google.com/go/datacatalog v1.33.0 h1:8V80PpoAGdOOr2QhBrp4wZ66MDCbATdAB/fmVmo5rlU=
 cloud.google.com/go/datacatalog v1.33.0/go.mod h1:/EMN04S73fZcPdtNg86VYLDrhi2HheMehQtMCS86Klk=
@@ -248,6 +250,8 @@ cloud.google.com/go/gkeconnect v1.0.0/go.mod h1:5iWSBQzMIRLwUHUWVhxxcNK45ZPE8nty
 cloud.google.com/go/gkehub v0.22.0/go.mod h1:WiXX1w9ZHwKZVUDwL//YQfjfWS7yE0I/ym3smZn9iwE=
 cloud.google.com/go/gkemulticloud v1.12.0/go.mod h1:vLNCxGah7pPIoNSX4Yx+hb8klqA0lzzXTWBSut9KzRo=
 cloud.google.com/go/grafeas v0.3.17/go.mod h1:MLYFFap01tm1Rbcd0AT6V2NW1ho45dbX+AxNEcprExY=
+cloud.google.com/go/grafeas v0.6.1 h1:7Vxpf+pV6CKCTPiiV0hpizaabrbOj3jNNttxUR2dQbw=
+cloud.google.com/go/grafeas v0.6.1/go.mod h1:3zHxo1cx37qugBjbZ5CYfKiAwWqIQhn7GCY7OvPRgrU=
 cloud.google.com/go/gsuiteaddons v1.12.0/go.mod h1:rm/XT7wmwOFGn7jmWtVV65QmZCakzTbHLSojIC4Hskg=
 cloud.google.com/go/iam v0.3.0/go.mod h1:XzJPvDayI+9zsASAFO68Hk07u3z+f+JrT2xXNdp4bnY=
 cloud.google.com/go/iam v0.6.0/go.mod h1:+1AH33ueBne5MzYccyMHtEKqLE4/kJOibtffMHDMFMc=

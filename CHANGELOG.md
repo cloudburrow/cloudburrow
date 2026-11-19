@@ -32,6 +32,27 @@ tagging `vX.Y.Z` by hand, move the entries under **Unreleased** into a new
   included, now needs main's full push run (`scripts/require-ci-green.sh --main-push`), not only a
   pull request's `ci-green`. [docs/ci.md](docs/ci.md#releasing) says how to dry-run, force, choose
   the version or pause.
+- Artifact Registry accuracy (#1897): cleanup policies run in the background about daily
+  (`--artifact-registry-cleanup-interval`), with Delete and Keep conditions, keep most recent
+  versions and dry runs written to Cloud Logging as BatchDeleteVersions Data Access audit
+  entries; a repository's `kms_key_name` encrypts its content through the instance's Cloud KMS,
+  and pulls and pushes fail while the key version is disabled or destroyed; virtual `DOCKER`
+  repositories read their upstreams by priority; `GO` repositories are a Go module proxy with
+  `goModules:create` uploads, and `KFP` repositories serve the Kubeflow Pipelines template
+  protocol. Remote repositories over public or custom upstreams stay refused by design: the
+  instance makes no calls off the machine.
+- Container Analysis and Artifact Registry vulnerability scanning (#1912): the Grafeas v1 API
+  (notes, occurrences, batch creates, `ListNoteOccurrences`, IAM) and Container Analysis's
+  `GetVulnerabilityOccurrencesSummary` on the Run port (JSON under `/containeranalysis/`, which
+  `gcloud-setup` writes as the `containeranalysis` override). With the project's Container
+  Scanning API enabled (`containerscanning.googleapis.com`, disabled by default as on Google), each
+  image pushed to a `DOCKER` repository is scanned on this machine by Google's OSV-Scanner
+  against a pinned snapshot of the OSV database, both downloaded by
+  `cloudburrow prefetch --vulnerability-scanning` and checked by SHA-256; the results are
+  `DISCOVERY`, `PACKAGE` and `VULNERABILITY` occurrences in Artifact Analysis's shape, with
+  continuous analysis (inactive after 30 days unpulled, archived after 90). A repository's
+  `vulnerability_scanning_config` is served, and the console's Create repository Vulnerability
+  scanning option and an image's Vulnerabilities tab are on.
 - BigQuery jobs outlive their request (#1819): `jobs.query` and `jobs.getQueryResults` wait at
   most `timeoutMs` (10 s by default) and then answer `jobComplete: false` with the job's
   reference; `jobs.insert` answers a job still running `RUNNING`, `jobs.get` reports it so, and

@@ -348,6 +348,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// Logging through its own WriteLogEntries (#1256), so exclusions
 		// apply to them as to any write.
 		api := loggingSvc.api
+		// Artifact Registry's cleanup runs write their audit entries the
+		// same way (#1897).
+		runadapter.UseCleanupLogging(func(ctx context.Context, e *loggingpb.LogEntry) error {
+			_, err := api.WriteLogEntries(ctx, &loggingpb.WriteLogEntriesRequest{Entries: []*loggingpb.LogEntry{e}})
+			return err
+		})
 		tasksSvc.useLogging(func(ctx context.Context, e *loggingpb.LogEntry) error {
 			_, err := api.WriteLogEntries(ctx, &loggingpb.WriteLogEntriesRequest{Entries: []*loggingpb.LogEntry{e}})
 			return err
@@ -687,6 +693,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	serviceUsageSrv := newServiceUsageServer(cfg, projects, projects.Backing())
 	if serviceUsageSrv != nil {
 		serviceUsageRef = serviceUsageSrv
+		// Artifact Registry's scanning reads the Container Scanning API's
+		// state in each project (#1912).
+		scanningServiceUsage.Store(serviceUsageSrv)
 		coord.Register(serviceUsageSrv)
 	}
 

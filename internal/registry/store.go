@@ -14,7 +14,9 @@
 //	    tags/<tag>                           a tag; its content is the digest it names
 //
 // Blobs are shared across repositories, as a content-addressed store's are;
-// a manifest belongs to an image only once it is pushed there.
+// a manifest belongs to an image only once it is pushed there. A
+// repository encrypted with a customer-managed key keeps its own, sealed,
+// under _blobs/ (encrypt.go).
 package registry
 
 import (
@@ -70,6 +72,19 @@ type Store struct {
 	// takes the repositories' lock, which is held around store calls), and
 	// must not call back into the store.
 	Immutable func(Repo) bool
+	// Encryption is a repository's Cipher when its content is encrypted
+	// with a customer-managed key (encrypt.go), nil for plaintext, or an
+	// error when its key cannot be used. Like Immutable, it must not call
+	// back into the store; nil encrypts nothing.
+	Encryption func(Repo) (Cipher, error)
+	// Pushed, when set, is called after a manifest is stored, outside the
+	// store's lock, with its digest and media type: Artifact Registry's
+	// vulnerability scanning scans a pushed image (#1912).
+	Pushed func(r Repo, image, digest, mediaType string)
+	// Pulled, when set, is called after a manifest is read through the
+	// registry's HTTP API, outside the lock: a pull keeps an image's
+	// continuous analysis active (#1912).
+	Pulled func(r Repo, image, digest string)
 }
 
 // immutable reports whether r's tags are immutable.
@@ -412,6 +427,15 @@ func ParseManifest(contentType string, b []byte) (*ManifestDoc, string, error) {
 // ref is a tag, that tag. Every blob or manifest it references must
 // already be stored. It returns the manifest's digest.
 func (s *Store) PutManifest(r Repo, image, ref, contentType string, b []byte) (string, error) {
+	d, err := s.putManifest(r, image, ref, contentType, b)
+	if err == nil && s.Pushed != nil {
+		_, mt, _ := ParseManifest(contentType, b)
+		s.Pushed(r, image, d, mt)
+	}
+	return d, err
+}
+
+func (s *Store) putManifest(r Repo, image, ref, contentType string, b []byte) (string, error) {
 	if !ValidImage(image) {
 		return "", ErrNameInvalid
 	}
@@ -433,9 +457,17 @@ func (s *Store) PutManifest(r Repo, image, ref, contentType string, b []byte) (s
 	}
 	refs = append(refs, m.Layers...)
 	for _, x := range refs {
-		if _, err := s.BlobSize(x.Digest); err != nil {
+		if _, err := s.RepoBlobSize(r, x.Digest); err != nil {
+			if errors.Is(err, ErrKeyUnavailable) {
+				return "", err
+			}
 			return "", &BlobUnknownError{x.Digest}
 		}
+	}
+	// The manifest's own content is written before the lock, as sealing
+	// it asks Encryption, which must not run under it.
+	if _, err := s.PutRepoBlob(r, b); err != nil {
+		return "", err
 	}
 	imm := s.immutable(r)
 	s.mu.Lock()
@@ -449,9 +481,6 @@ func (s *Store) PutManifest(r Repo, image, ref, contentType string, b []byte) (s
 		if _, err := os.Stat(s.revisionPath(r, image, x.Digest)); err != nil {
 			return "", &ManifestBlobUnknownError{x.Digest}
 		}
-	}
-	if _, err := s.PutBlob(b); err != nil {
-		return "", err
 	}
 	rev := s.revisionPath(r, image, d)
 	if err := os.MkdirAll(filepath.Dir(rev), 0o755); err != nil {
@@ -493,6 +522,25 @@ func (s *Store) CopyManifest(from, to Repo, image, ref string) error {
 		}
 	} else if _, _, err := s.Resolve(to, image, ref); err == nil {
 		return nil
+	}
+	// Each repository holds its own copy of an encrypted repository's
+	// blobs; between plaintext ones they are shared and nothing is copied.
+	if !IsIndex(mt) {
+		m, _, err := ParseManifest(mt, b)
+		if err != nil {
+			return err
+		}
+		refs := m.Layers
+		if m.Config != nil {
+			refs = append([]Descriptor{*m.Config}, refs...)
+		}
+		for _, x := range refs {
+			if _, err := s.RepoBlobSize(to, x.Digest); err != nil {
+				if err := s.MountBlob(from, to, x.Digest); err != nil {
+					return err
+				}
+			}
+		}
 	}
 	_, err = s.PutManifest(to, image, ref, mt, b)
 	return err
@@ -551,7 +599,10 @@ func (s *Store) GetManifest(r Repo, image, ref string) (b []byte, digest, mediaT
 	if err != nil {
 		return nil, "", "", err
 	}
-	b, err = s.ReadBlob(digest)
+	b, err = s.ReadRepoBlob(r, digest)
+	if errors.Is(err, ErrKeyUnavailable) {
+		return nil, "", "", err
+	}
 	if err != nil {
 		return nil, "", "", ErrManifestUnknown
 	}
@@ -815,7 +866,16 @@ func (s *Store) manifestInfo(r Repo, image, digest string) (ManifestInfo, error)
 		return ManifestInfo{}, ErrManifestUnknown
 	}
 	fi, _ := os.Stat(rev)
-	b, err := s.ReadBlob(digest)
+	b, err := s.ReadRepoBlob(r, digest)
+	if errors.Is(err, ErrKeyUnavailable) {
+		// Metadata stays readable while the key cannot be used: the
+		// version, its media type, time and size, not its content.
+		n, ok := s.SealedSize(r, digest)
+		if !ok {
+			return ManifestInfo{}, err
+		}
+		return ManifestInfo{Digest: digest, MediaType: string(mt), Size: n, ImageSize: n, Uploaded: fi.ModTime()}, nil
+	}
 	if err != nil {
 		return ManifestInfo{}, ErrManifestUnknown
 	}

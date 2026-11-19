@@ -111,6 +111,12 @@ var gcloudVerified = []struct {
 	// TestGcloudRunDeploySource and TestGcloudBuildsSubmit drive them.
 	{config.ServiceRun, "artifactregistry", "/", false, false},
 	{config.ServiceRun, "cloudbuild", "/", false, false},
+	// Container Analysis (#1912), on the Run port under
+	// /containeranalysis/, as its v1 paths are beside Artifact Registry's
+	// and Cloud Run v1's; gcloud appends v1/. `gcloud artifacts docker
+	// images list --show-occurrences` and `describe
+	// --show-package-vulnerability` read it: TestGcloudArtifactsVulnerabilityScanning.
+	{config.ServiceRun, "containeranalysis", "/containeranalysis/", false, false},
 	// Cloud Functions v2 (#1377), on the Run port; gcloud functions appends
 	// v2/. TestGcloudFunctions drives deploy --gen2, describe, list and
 	// delete, gated as the Functions tests are.
