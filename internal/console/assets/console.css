@@ -378,6 +378,18 @@ button.primary.header-button[disabled], button.primary.header-button.is-busy[dis
   background: none; color: var(--accent);
 }
 .resource-name { margin: 4px 0 0; font-size: var(--text-heading-size); overflow-wrap: anywhere; }
+/* A resource's details in its page header, above the tabs (#1842): one
+   label over its value per item, wrapping to as many rows as it needs.
+   Such a header, with its actions, details and tabs, is too tall to stay
+   pinned over the tab's table, so it scrolls with the page. */
+.page-header.has-summary { position: static; }
+.resource-summary {
+  display: flex; flex-wrap: wrap; gap: 8px 32px; margin: 12px 0 4px; padding: 0;
+  min-width: 0;
+}
+.resource-summary-item { min-width: 0; max-width: 100%; }
+.resource-summary dt { color: var(--text-muted); font-size: 0.875em; }
+.resource-summary dd { margin: 2px 0 0; overflow-wrap: anywhere; }
 
 /* An emulation note, as a banner the reader can dismiss (#1842). */
 .note-banner {
@@ -385,8 +397,12 @@ button.primary.header-button[disabled], button.primary.header-button.is-busy[dis
   background: var(--surface-alt); border: 1px solid var(--border); border-radius: var(--radius);
 }
 .note-banner .note-icon { flex: none; padding-top: 8px; color: var(--accent); display: inline-flex; }
-.note-banner .note-text { flex: 1 1 auto; margin: 8px 0; }
-.note-banner .note-dismiss { width: 36px; height: 36px; }
+.note-banner { min-width: 0; max-width: 100%; box-sizing: border-box; }
+/* A note may hold a long unbroken name (a sink's destination, a filter):
+   it wraps inside the banner rather than pushing Dismiss off a 320px
+   screen (the run shard's reflow audit). */
+.note-banner .note-text { flex: 1 1 auto; min-width: 0; margin: 8px 0; overflow-wrap: anywhere; }
+.note-banner .note-dismiss { flex: none; width: 36px; height: 36px; }
 
 /* Status, first, as an icon (#1842). */
 .status-cell { width: 40px; }
@@ -764,6 +780,9 @@ td a { color: var(--accent); }
   /* Settings and utilities links to Connect too, so the bar can give it up
      here and nothing becomes unreachable (#802). */
   .connect-link { display: none; }
+  /* Help goes too: Settings and utilities lists the keyboard shortcuts,
+     and Connect, so both stay reachable (#1842). */
+  .help-button { display: none; }
   .avatar { width: 28px; height: 28px; }
   /* The picker gives up width before anything gives up its place: the
      project name ellipsises, and the control stays where it is. */
@@ -798,6 +817,10 @@ td a { color: var(--accent); }
               transform var(--motion-fast) var(--ease-decelerate);
 }
 .panel.is-open, .picker-panel.is-open { opacity: 1; transform: none; }
+/* A panel on its way out (or not yet in) is see-through and must not take
+   the click meant for the page under it: the New project page's first
+   control sat under the closing project picker for its 200ms exit (#1842). */
+.panel.is-closing, .picker-panel.is-closing { pointer-events: none; }
 
 .modal {
   position: fixed; inset: 0; z-index: 40;
@@ -1139,7 +1162,7 @@ td.mono { word-break: break-word; }
 .project-picker { position: relative; }
 .picker-panel {
   left: 0; right: auto; top: calc(100% + 6px);
-  min-width: 340px; max-width: 420px; padding: 12px;
+  min-width: 340px; max-width: 560px; width: 520px; padding: 12px;
 }
 
 /* The same anchoring for the panels that do belong at the right-hand end:
@@ -1164,6 +1187,21 @@ td.mono { word-break: break-word; }
 .picker-item-name { font-weight: 500; }
 .picker-item-id { font-family: var(--mono); font-size: var(--text-caption-size); color: var(--text-muted); }
 .picker-item.is-selected .picker-item-id { color: inherit; }
+/* Select a project lists Name and ID in two columns (#1842). */
+.picker-columns, .picker-item {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 2px 12px; align-items: baseline;
+}
+.picker-columns { padding: 4px 10px; font-size: var(--text-caption-size); color: var(--text-muted); border-bottom: 1px solid var(--border); }
+.picker-item-name, .picker-item-id { min-width: 0; overflow-wrap: anywhere; }
+.picker-manage { display: inline-block; margin-top: 8px; }
+/* Narrower windows: the dialog gives up width rather than run past the
+   window's right edge (the reflow audit at 640px). */
+@media (max-width: 959px) {
+  .picker-panel { width: auto; max-width: min(420px, calc(100vw - 160px)); }
+}
+@media (max-width: 599px) {
+  .picker-panel { width: auto; }
+}
 
 .account-button { padding: 0; }
 .avatar {
@@ -1803,3 +1841,44 @@ dd.has-copy { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 dd.has-copy .property-copy-value { overflow-wrap: anywhere; min-width: 0; }
 dd.has-copy .property-copy { padding: 2px 8px; font-size: var(--text-badge-size); }
 .objects-show { display: inline-flex; align-items: center; gap: 6px; }
+
+/* Help (#1842): the toolbar's question-mark menu. */
+.help-panel { min-width: 260px; }
+.help-panel .help-list li { padding: 0; }
+.help-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%;
+  padding: 10px 4px; background: none; border: 0; font: inherit; color: var(--text);
+  text-align: left; text-decoration: none; cursor: pointer;
+}
+.help-item:hover, .help-item:focus-visible { background: var(--surface-alt); }
+.link-button {
+  display: block; margin-top: 6px; padding: 0; background: none; border: 0; font: inherit;
+  color: var(--accent); text-decoration: underline; cursor: pointer;
+}
+.link-button.is-inline { display: inline; margin: 0; }
+.new-project { max-width: 560px; }
+
+/* The Welcome page (#1842). */
+.section-heading { margin: 24px 0 12px; font-size: var(--text-heading-size); }
+.quick-access { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+.quick-tile {
+  display: flex; align-items: center; min-height: 44px; padding: 8px 12px; box-sizing: border-box;
+  border: 1px solid var(--border); border-radius: var(--radius); text-decoration: none; overflow-wrap: anywhere;
+}
+.quick-tile:hover { background: var(--state-hover); }
+.welcome-resources { list-style: none; margin: 0; padding: 0; }
+.welcome-resources li { padding: 4px 0; }
+.welcome-cards .card-actions { flex-wrap: wrap; }
+
+/* Select a project: Recent / Starred / All, and each row's star (#1842). */
+.picker-views { display: flex; gap: 4px; margin-bottom: 8px; }
+.picker-view {
+  padding: 4px 12px; background: none; border: 1px solid var(--border); border-radius: 16px;
+  font: inherit; color: var(--text); cursor: pointer;
+}
+.picker-view[aria-pressed="true"] { background: var(--nav-selected); color: var(--nav-selected-text); border-color: transparent; }
+.picker-list .picker-row { display: flex; align-items: center; gap: 4px; padding: 0; }
+.picker-row .picker-item { flex: 1 1 auto; min-width: 0; }
+.picker-star svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linejoin: round; }
+.picker-star[aria-pressed="true"] svg { fill: currentColor; color: var(--accent); }
+.picker-columns { padding-right: 46px; }

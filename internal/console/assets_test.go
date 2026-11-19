@@ -1820,7 +1820,8 @@ func TestOverlaysAnimateFromOneScale(t *testing.T) {
 	for _, want := range []string{
 		"function showOverlay(node)",
 		"function hideOverlay(node)",
-		`requestAnimationFrame(() => node.classList.add("is-open"))`,
+		// Only if it was not closed again before the frame came (#1842).
+		`requestAnimationFrame(() => { if (!node.hidden && !OVERLAY_TIMERS.has(node)) node.classList.add("is-open"); })`,
 		`const overlayOpen = (node) => node.classList.contains("is-open");`,
 	} {
 		if !strings.Contains(src, want) {
