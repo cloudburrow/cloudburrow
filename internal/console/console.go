@@ -375,6 +375,12 @@ type Field struct {
 	// field is neither checked nor submitted. Cloud SQL's Database version
 	// lists the chosen engine's versions only (#1860).
 	VisibleWhen map[string]string `json:"visibleWhen,omitempty"`
+	// CheckedWhen, on a checkbox, checks it and holds it checked while
+	// another field of the form holds a value, in ShowWhen's "name=value"
+	// form ("a|b" for either): Memorystore's Security choice of IAM Auth or
+	// Token Auth checks and locks Enable In-Transit Encryption (TLS)
+	// (#1862). Held, the box is still sent.
+	CheckedWhen string `json:"checkedWhen,omitempty"`
 	// Upload, on a textarea, is the label of a file chooser beside it whose
 	// text file is read into the textarea, as Google's Create secret takes
 	// the Secret value typed or from Upload file (#1850). The value is still

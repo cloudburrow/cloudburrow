@@ -10,7 +10,9 @@ import (
 	"time"
 
 	clusterpb "cloud.google.com/go/redis/cluster/apiv1/clusterpb"
+	"google.golang.org/genproto/googleapis/type/timeofday"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
@@ -44,7 +46,7 @@ const redisClusterNote = "Each cluster is a real Redis Cluster: shard_count prim
 
 // List implements console.Provider: the project's clusters.
 func (p redisClusterProvider) List(ctx context.Context, project string) (console.Listing, error) {
-	l := console.Listing{Columns: []string{"Location", "Discovery endpoint", "Shards", "Replicas", "Node type", "Capacity"},
+	l := console.Listing{Columns: []string{"Location", "Shards", "Replicas", "Node type", "Capacity", "Discovery endpoint"},
 		NameColumn: "Cluster ID", Noun: "clusters", Note: redisClusterNote}
 	api, _, err := p.api()
 	if err != nil {
@@ -63,7 +65,7 @@ func (p redisClusterProvider) List(ctx context.Context, project string) (console
 				"Discovery endpoint": redisClusterEndpoint(c),
 				"Shards":             strconv.Itoa(int(c.GetShardCount())),
 				"Replicas":           strconv.Itoa(int(c.GetReplicaCount())),
-				"Node type":          c.GetNodeType().String(),
+				"Node type":          memorystoreOption(redisClusterNodeTypeLabels, c.GetNodeType().String()),
 				"Capacity":           fmt.Sprintf("%g GB", c.GetPreciseSizeGb()),
 			}})
 	}
@@ -90,34 +92,55 @@ func redisClusterName(project, id string) (string, error) {
 
 var redisClusterNodeTypes = []string{"REDIS_SHARED_CORE_NANO", "REDIS_STANDARD_SMALL", "REDIS_HIGHMEM_MEDIUM", "REDIS_HIGHMEM_XLARGE"}
 
-// CreateForm implements console.Creator.
+// redisClusterNodeTypeLabels are the node types as Google's page names them.
+var redisClusterNodeTypeLabels = map[string]string{"REDIS_SHARED_CORE_NANO": "redis-shared-core-nano",
+	"REDIS_STANDARD_SMALL": "redis-standard-small", "REDIS_HIGHMEM_MEDIUM": "redis-highmem-medium", "REDIS_HIGHMEM_XLARGE": "redis-highmem-xlarge"}
+
+// CreateForm implements console.Creator: Google's Create cluster page, in
+// its order (#1862): Cluster ID, Region, Zonal availability, Node type,
+// Cluster size, Replicas (default 1), Set up connection, Security,
+// Certificate authority management, Encryption, ACL policy, Data
+// persistence strategy, Automated backups and Maintenance, then this
+// console's advanced options (Redis configs, Restore from backup).
 func (redisClusterProvider) CreateForm() (string, []console.Field) {
-	return "Create cluster", []console.Field{
+	fields := []console.Field{
 		{Name: "id", Label: "Cluster ID", Type: "text", Required: true, Pattern: `^[a-z][a-z0-9\-]{2,61}[a-z0-9]$`,
-			Help: "4 to 63 lowercase letters, digits and hyphens, starting with a letter."},
+			Help: "4 to 63 lowercase letters, digits and hyphens, starting with a letter; unique in its region."},
 		{Name: "region", Label: "Region", Type: "text", Required: true, Default: redisadmin.Region},
-		{Name: "shardCount", Label: "Shards", Type: "number", Required: true, Default: "3", Pattern: `^[0-9]{1,3}$`,
-			Help: "Primaries the 16384 slots are spread over."},
-		{Name: "replicaCount", Label: "Replicas per shard", Type: "number", Default: "0", Pattern: `^[0-5]$`},
-		{Name: "nodeType", Label: "Node type", Type: "select", Default: "REDIS_HIGHMEM_MEDIUM", Options: redisClusterNodeTypes,
-			Help: "Each node's maxmemory: 1.4, 6.5, 13 or 58 GB."},
-		{Name: "network", Label: "Network (PSC)", Type: "text", Help: "Optional. projects/{project}/global/networks/{network}, kept and returned."},
-		{Name: "redisConfigs", Label: "Redis configs", Type: "map", Help: "Optional. One key=value per line, such as maxmemory-policy."},
-		{Name: "transitEncryption", Label: "Enable in-transit encryption", Type: "checkbox",
-			Help: "SERVER_AUTHENTICATION: every node serves TLS only, with a certificate of the cluster's own CA, which its page shows. It cannot be changed later."},
-		{Name: "iamAuth", Label: "IAM authentication", Type: "checkbox",
-			Help: "AUTH_MODE_IAM_AUTH: clients send an access token as the AUTH string, taken only when this instance minted it for a principal granted " + redisClusterConnectRole + " on the project (IAM & Admin)."},
-		{Name: "tokenAuth", Label: "Token authentication", Type: "checkbox",
-			Help: "AUTH_MODE_TOKEN_AUTH: clients log in as a token auth user with a token the service generates, which the cluster's page adds and shows."},
-		{Name: "aclPolicy", Label: "ACL policy", Type: "text", Help: "Optional. projects/{project}/locations/{location}/aclPolicies/{policy}: its rules become ACL users on every node."},
-		{Name: "kmsKey", Label: "Customer-managed encryption key", Type: "text",
-			Help: "Optional. projects/{project}/locations/{region}/keyRings/{ring}/cryptoKeys/{key}, a Cloud KMS key in the cluster's region (#1557)."},
-		{Name: "persistence", Label: "Persistence", Type: "select", Default: "DISABLED", Options: []string{"DISABLED", "RDB", "AOF"},
-			Help: "RDB snapshots or the append-only file keep the data across a restart of CloudBurrow; without, it is lost."},
-		{Name: "restoreBackup", Label: "Restore from backup", Type: "text",
-			Help: "Optional. projects/{project}/locations/{location}/backupCollections/{collection}/backups/{backup}: the cluster starts with its keys."},
 	}
+	fields = append(fields, memorystoreZonalFields()...)
+	fields = append(fields,
+		console.Field{Name: "nodeType", Label: "Node type", Type: "select", Default: "REDIS_HIGHMEM_MEDIUM", Options: redisClusterNodeTypes,
+			OptionLabels: redisClusterNodeTypeLabels,
+			Help:         "Each node's maxmemory: 1.4, 6.5, 13 or 58 GB. redis-shared-core-nano has no SLA on Google: for development and testing."},
+		console.Field{Name: "shardCount", Label: "Cluster size", Type: "number", Required: true, Default: "3", Pattern: `^[0-9]{1,3}$`,
+			Help: "The number of shards (primaries the 16384 slots are spread over), which sets the cluster's capacity."},
+		console.Field{Name: "replicaCount", Label: "Replicas", Type: "number", Default: "1", Pattern: `^[0-5]$`, Help: "0 to 5 replicas per shard."},
+		console.Field{Name: "network", Label: "Network", Type: "text", Section: msSectionConnection,
+			Help: "Optional. projects/{project}/global/networks/{network}: the network your applications connect from (PSC), kept and returned."},
+	)
+	fields = append(fields, memorystoreSecurityFields("cluster")...)
+	fields = append(fields, memorystoreEncryptionFields("cluster")...)
+	fields = append(fields,
+		console.Field{Name: "aclPolicy", Label: "Policy", Type: "text", Section: msSectionACL,
+			Help: "Optional. projects/{project}/locations/{location}/aclPolicies/{policy}, in the cluster's region: its rules become ACL users on every node."},
+		memorystorePersistenceField("Redis Database (RDB)"))
+	fields = append(fields, memorystoreBackupFields()...)
+	fields = append(fields, memorystoreMaintenanceFields()...)
+	fields = append(fields,
+		console.Field{Name: "redisConfigs", Label: "Redis configs", Type: "map", Section: msSectionAdvanced,
+			Help: "Optional. One key=value per line, such as maxmemory-policy."},
+		console.Field{Name: "restoreBackup", Label: "Restore from backup", Type: "text", Section: msSectionAdvanced,
+			Help: "Optional. projects/{project}/locations/{location}/backupCollections/{collection}/backups/{backup}: the cluster starts with its keys."})
+	return "Create cluster", fields
 }
+
+// CreateTitle implements console.CreateTitler.
+func (redisClusterProvider) CreateTitle() string { return "Create a Redis cluster" }
+
+// CreateLayout implements console.CreateLayouter: one page under
+// headings, as Google's.
+func (redisClusterProvider) CreateLayout() string { return console.CreateLayoutPage }
 
 // CreateOnPage implements console.PageCreator.
 func (redisClusterProvider) CreateOnPage() bool { return true }
@@ -154,18 +177,41 @@ func (p redisClusterProvider) Create(ctx context.Context, project string, values
 	}
 	in := &clusterpb.Cluster{ShardCount: proto.Int32(shards), ReplicaCount: proto.Int32(replicas), RedisConfigs: configs,
 		NodeType: clusterpb.NodeType(clusterpb.NodeType_value[values["nodeType"]])}
-	if values["transitEncryption"] == "true" {
+	if memorystoreTLS(values) {
 		in.TransitEncryptionMode = clusterpb.TransitEncryptionMode_TRANSIT_ENCRYPTION_MODE_SERVER_AUTHENTICATION
 	}
-	if values["iamAuth"] == "true" {
+	switch memorystoreAuthMode(values) {
+	case "IAM_AUTH":
 		in.AuthorizationMode = clusterpb.AuthorizationMode_AUTH_MODE_IAM_AUTH
-	}
-	if values["tokenAuth"] == "true" {
+	case "TOKEN_AUTH":
 		in.AuthorizationMode = clusterpb.AuthorizationMode_AUTH_MODE_TOKEN_AUTH
 	}
 	in.AclPolicy = strings.TrimSpace(values["aclPolicy"])
-	if k := strings.TrimSpace(values["kmsKey"]); k != "" {
+	if k := memorystoreKMSKey(values); k != "" {
 		in.KmsKey = proto.String(k)
+	}
+	if values["zoneDistribution"] == "SINGLE_ZONE" {
+		in.ZoneDistributionConfig = &clusterpb.ZoneDistributionConfig{Mode: clusterpb.ZoneDistributionConfig_SINGLE_ZONE,
+			Zone: strings.TrimSpace(values["zone"])}
+	} else if values["zoneDistribution"] == "MULTI_ZONE" {
+		in.ZoneDistributionConfig = &clusterpb.ZoneDistributionConfig{Mode: clusterpb.ZoneDistributionConfig_MULTI_ZONE}
+	}
+	on, hour, retention, err := memorystoreAutoBackup(values)
+	if err != nil {
+		return "", err
+	}
+	if on {
+		in.AutomatedBackupConfig = &clusterpb.AutomatedBackupConfig{AutomatedBackupMode: clusterpb.AutomatedBackupConfig_ENABLED,
+			Retention: durationpb.New(retention),
+			Schedule: &clusterpb.AutomatedBackupConfig_FixedFrequencySchedule_{FixedFrequencySchedule: &clusterpb.AutomatedBackupConfig_FixedFrequencySchedule{
+				StartTime: &timeofday.TimeOfDay{Hours: hour}}}}
+	}
+	day, start, has, err := memorystoreCreateWindow(values)
+	if err != nil {
+		return "", err
+	}
+	if has {
+		in.MaintenancePolicy = &clusterpb.ClusterMaintenancePolicy{WeeklyMaintenanceWindow: []*clusterpb.ClusterWeeklyMaintenanceWindow{{Day: day, StartTime: start}}}
 	}
 	if m := values["persistence"]; m != "" && m != "DISABLED" {
 		in.PersistenceConfig = &clusterpb.ClusterPersistenceConfig{Mode: clusterpb.ClusterPersistenceConfig_PersistenceMode(clusterpb.ClusterPersistenceConfig_PersistenceMode_value[m])}
@@ -252,34 +298,47 @@ func (p redisClusterProvider) Detail(ctx context.Context, project string, path [
 	for _, pc := range c.GetPscConfigs() {
 		nets = append(nets, pc.GetNetwork())
 	}
-	props := []console.Property{
+	// Google's cluster page (#1862): Overview, Configuration,
+	// Connections, the Server CA, Token auth, Backups and ACL policies,
+	// Maintenance, and Monitoring, which reads Cloud Monitoring's metrics.
+	overview := []console.Property{
 		{Label: "State", Value: c.GetState().String()},
-		{Label: "Discovery endpoint", Value: redisClusterEndpoint(c)},
 		{Label: "Shards", Value: strconv.Itoa(int(c.GetShardCount()))},
 		{Label: "Replicas per shard", Value: strconv.Itoa(int(c.GetReplicaCount()))},
-		{Label: "Node type", Value: c.GetNodeType().String()},
+		{Label: "Node type", Value: memorystoreOption(redisClusterNodeTypeLabels, c.GetNodeType().String())},
 		{Label: "Capacity", Value: fmt.Sprintf("%g GB", c.GetPreciseSizeGb())},
+		{Label: "Zonal availability", Value: memorystoreZones(c.GetZoneDistributionConfig().GetMode().String(), c.GetZoneDistributionConfig().GetZone())},
+		{Label: "Deletion protection", Value: strconv.FormatBool(c.GetDeletionProtectionEnabled())},
+		{Label: "Encryption", Value: c.GetEncryptionInfo().GetEncryptionType().String()},
+		{Label: "Customer-managed key", Value: orDash(c.GetKmsKey())},
+	}
+	config := []console.Property{
 		{Label: "Authorization", Value: c.GetAuthorizationMode().String()},
 		{Label: "In-transit encryption", Value: c.GetTransitEncryptionMode().String()},
 	}
 	if c.GetAuthorizationMode() == clusterpb.AuthorizationMode_AUTH_MODE_IAM_AUTH {
 		// IAM auth checks the token (#1614): who may connect is the
 		// project's IAM policy, granted on the IAM page.
-		props = append(props, console.Property{Label: "IAM connect role", Value: redisClusterConnectRole + " on the project, granted on IAM & Admin; a client's AUTH is an access token minted for the principal"})
+		config = append(config, console.Property{Label: "IAM connect role", Value: redisClusterConnectRole + " on the project, granted on IAM & Admin; a client's AUTH is an access token minted for the principal"})
 	}
-	props = append(props, []console.Property{
-		{Label: "PSC networks", Value: orDash(strings.Join(nets, ", "))},
+	ab := c.GetAutomatedBackupConfig()
+	config = append(config, []console.Property{
 		{Label: "Redis configs", Value: orDash(memorystorePairs(c.GetRedisConfigs()))},
-		{Label: "Deletion protection", Value: strconv.FormatBool(c.GetDeletionProtectionEnabled())},
 		{Label: "ACL policy", Value: orDash(c.GetAclPolicy())},
-		{Label: "Backup collection", Value: orDash(c.GetBackupCollection())},
 		{Label: "Persistence", Value: c.GetPersistenceConfig().GetMode().String()},
-		{Label: "Encryption", Value: c.GetEncryptionInfo().GetEncryptionType().String()},
-		{Label: "Customer-managed key", Value: orDash(c.GetKmsKey())},
+		{Label: "Automated backups", Value: memorystoreAutoBackupText(ab.GetAutomatedBackupMode() == clusterpb.AutomatedBackupConfig_ENABLED,
+			ab.GetFixedFrequencySchedule().GetStartTime().GetHours(), ab.GetRetention().AsDuration())},
+		{Label: "Backup collection", Value: orDash(c.GetBackupCollection())},
 	}...)
-	props = append(props, redisClusterMaintenance(c).summary()...)
-	d := console.Detail{Sections: []console.Section{{ID: "config", Label: "Configuration", Kind: console.KindProperties,
-		Groups: []console.PropertyGroup{{Properties: props}}}}}
+	conns := []console.Property{
+		{Label: "Discovery endpoint", Value: redisClusterEndpoint(c)},
+		{Label: "PSC networks", Value: orDash(strings.Join(nets, ", "))},
+	}
+	d := console.Detail{Sections: []console.Section{
+		memorystorePropsTab("overview", "Overview", overview),
+		memorystorePropsTab("configuration", "Configuration", config),
+		memorystorePropsTab("connections", "Connections", conns),
+	}}
 	if c.GetTransitEncryptionMode() == clusterpb.TransitEncryptionMode_TRANSIT_ENCRYPTION_MODE_SERVER_AUTHENTICATION {
 		// The CA its clients trust (#1549), as GetClusterCertificateAuthority
 		// returns it.
@@ -294,14 +353,15 @@ func (p redisClusterProvider) Detail(ctx context.Context, project string, path [
 		}
 	}
 	d.Sections = append(d.Sections, p.authSections(ctx, api, c)...)
+	d.Sections = append(d.Sections, memorystorePropsTab("maintenance", "Maintenance", redisClusterMaintenance(c).summary()), memorystoreMonitoring("cluster"))
 	d.Edit = &console.EditForm{
-		Label: "Edit cluster",
+		Label: "Edit", Title: "Edit cluster", Submit: "Save",
 		Fields: []console.Field{
 			{Name: "shardCount", Label: "Shards", Type: "number", Required: true, Pattern: `^[0-9]{1,3}$`,
 				Default: strconv.Itoa(int(c.GetShardCount())), Help: "Slots and their keys move to or off the primaries added or removed."},
 			{Name: "replicaCount", Label: "Replicas per shard", Type: "number", Required: true, Pattern: `^[0-5]$`,
 				Default: strconv.Itoa(int(c.GetReplicaCount()))},
-			{Name: "nodeType", Label: "Node type", Type: "select", Default: c.GetNodeType().String(), Options: redisClusterNodeTypes},
+			{Name: "nodeType", Label: "Node type", Type: "select", Default: c.GetNodeType().String(), Options: redisClusterNodeTypes, OptionLabels: redisClusterNodeTypeLabels},
 			{Name: "deletionProtection", Label: "Deletion protection", Type: "checkbox", Default: strconv.FormatBool(c.GetDeletionProtectionEnabled())},
 		},
 		Note: "Saved through UpdateCluster, shards or replicas one change at a time.",

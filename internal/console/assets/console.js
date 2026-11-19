@@ -305,15 +305,23 @@ const ROUTES = [
   // providers, and console API pages, but no route: /memorystore and
   // /backupdr were "No such screen", so nothing of either was reachable from
   // the console (found by TestMemorystoreRotateServerCAThroughThePage).
-  { path: "/memorystore", service: "memorystore", title: "Redis", kind: "Instance", section: "Databases",
-    product: "memorystore", productTitle: "Memorystore" },
-  // Memorystore for Redis Cluster (#1519), a page of its own beside the
-  // instances, as the Memorystore console's Redis Cluster tab is.
-  { path: "/memorystore-clusters", service: "memorystore-clusters", icon: "memorystore", title: "Redis Cluster", kind: "Cluster", section: "Databases",
-    product: "memorystore", productTitle: "Memorystore" },
+  // Google's Memorystore menu (#1862): Valkey, Redis Cluster, Redis and
+  // Memcached, each page titled "Memorystore for <product>". Memcached
+  // (memcache.googleapis.com) is not served: its page says so in Google's
+  // place.
   // Memorystore for Valkey (#1519), memorystore.googleapis.com's instances.
-  { path: "/memorystore-valkey", service: "memorystore-valkey", icon: "memorystore", title: "Valkey", kind: "Instance", section: "Databases",
-    product: "memorystore", productTitle: "Memorystore" },
+  { path: "/memorystore-valkey", service: "memorystore-valkey", icon: "memorystore", title: "Memorystore for Valkey",
+    navTitle: "Valkey", kind: "Instance", section: "Databases", product: "memorystore", productTitle: "Memorystore" },
+  // Memorystore for Redis Cluster (#1519), a page of its own beside the
+  // instances, as the Memorystore console's Redis Cluster page is.
+  { path: "/memorystore-clusters", service: "memorystore-clusters", icon: "memorystore", title: "Memorystore for Redis Cluster",
+    navTitle: "Redis Cluster", kind: "Cluster", section: "Databases", product: "memorystore", productTitle: "Memorystore" },
+  { path: "/memorystore", service: "memorystore", title: "Memorystore for Redis", navTitle: "Redis", kind: "Instance",
+    section: "Databases", product: "memorystore", productTitle: "Memorystore" },
+  { path: "/memorystore-memcached", screen: "unavailable", service: null, requires: "memorystore", icon: "memorystore",
+    title: "Memorystore for Memcached", navTitle: "Memcached", section: "Databases", product: "memorystore", productTitle: "Memorystore",
+    unavailable: "Memorystore for Memcached is the Memcache API (memcache.googleapis.com), which CloudBurrow does not serve. " +
+      "Memorystore for Valkey, Redis Cluster and Redis are served: their pages are in this menu." },
   { path: "/backupdr", service: "backupdr", icon: "storage", title: "Backup and DR", kind: "Backup vault", section: "Storage" },
   // Google files BigQuery under Analytics, a category with no vendored icon
   // here, so it sits with the other data stores rather than under a heading
@@ -6054,6 +6062,30 @@ function buildCreateForm(spec) {
       if (other) other.control.addEventListener("change", show);
     }
     show();
+  }
+
+  // A checkbox checked and held while another field holds a value
+  // (checkedWhen, #1862): Memorystore's Security choice of IAM Auth or Token
+  // Auth checks and locks Enable In-Transit Encryption (TLS), as Google's
+  // Create instance does. Released, it keeps its state and is free again.
+  for (const entry of entries) {
+    const cond = entry.field.checkedWhen;
+    if (!cond || !entry.isCheck) continue;
+    const [name, choice = ""] = cond.split("=");
+    const other = byName.get(name);
+    if (!other) continue;
+    const hold = () => {
+      const on = choice.split("|").includes(valueText(other));
+      if (on && !entry.control.checked) {
+        entry.control.checked = true;
+        entry.control.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      entry.control.disabled = on || !!entry.field.immutable;
+      entry.node.classList.toggle("is-held", on);
+      entry.control.title = on ? `Held on by ${other.field.label}` : "";
+    };
+    other.control.addEventListener("change", hold);
+    hold();
   }
 
   // A field made from another (#1864): until it is edited by hand it
