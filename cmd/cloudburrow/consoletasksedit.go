@@ -231,6 +231,21 @@ func (p tasksProvider) Edit(ctx context.Context, project string, path []string, 
 		return err
 	}
 
+	q, err := tasksQueueFromForm(name, values)
+	if err != nil {
+		return err
+	}
+	_, err = api.UpdateQueue(ctx, &cloudtaskspb.UpdateQueueRequest{
+		Queue:      q,
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: tasksEditPaths},
+	})
+	return err
+}
+
+// tasksQueueFromForm is the queue Edit queue and Create queue send (#1848):
+// the rate limits, retry parameters, logging, HTTP target and App Engine
+// routing override the form holds.
+func tasksQueueFromForm(name string, values map[string]string) (*cloudtaskspb.Queue, error) {
 	var errs []error
 	rate := parseFloatField(values, "maxDispatchesPerSecond", "Max dispatches per second", &errs)
 	concurrent := parseInt32Field(values, "maxConcurrentDispatches", "Max concurrent dispatches", &errs)
@@ -249,30 +264,26 @@ func (p tasksProvider) Edit(ctx context.Context, project string, path []string, 
 		errs = append(errs, err)
 	}
 	if len(errs) > 0 {
-		return errors.Join(errs...)
+		return nil, errors.Join(errs...)
 	}
 
-	_, err = api.UpdateQueue(ctx, &cloudtaskspb.UpdateQueueRequest{
-		Queue: &cloudtaskspb.Queue{
-			Name: name,
-			RateLimits: &cloudtaskspb.RateLimits{
-				MaxDispatchesPerSecond:  rate,
-				MaxConcurrentDispatches: concurrent,
-			},
-			RetryConfig: &cloudtaskspb.RetryConfig{
-				MaxAttempts:      attempts,
-				MinBackoff:       durationpb.New(minBackoff),
-				MaxBackoff:       durationpb.New(maxBackoff),
-				MaxDoublings:     doublings,
-				MaxRetryDuration: durationpb.New(retryFor),
-			},
-			StackdriverLoggingConfig: logging,
-			HttpTarget:               target,
-			AppEngineRoutingOverride: tasksRoutingFromForm(values),
+	return &cloudtaskspb.Queue{
+		Name: name,
+		RateLimits: &cloudtaskspb.RateLimits{
+			MaxDispatchesPerSecond:  rate,
+			MaxConcurrentDispatches: concurrent,
 		},
-		UpdateMask: &fieldmaskpb.FieldMask{Paths: tasksEditPaths},
-	})
-	return err
+		RetryConfig: &cloudtaskspb.RetryConfig{
+			MaxAttempts:      attempts,
+			MinBackoff:       durationpb.New(minBackoff),
+			MaxBackoff:       durationpb.New(maxBackoff),
+			MaxDoublings:     doublings,
+			MaxRetryDuration: durationpb.New(retryFor),
+		},
+		StackdriverLoggingConfig: logging,
+		HttpTarget:               target,
+		AppEngineRoutingOverride: tasksRoutingFromForm(values),
+	}, nil
 }
 
 // tasksRoutingFromForm is the queue's app_engine_routing_override from Edit

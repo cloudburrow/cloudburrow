@@ -36,19 +36,17 @@ func (schedulerProvider) Title() string { return "Cloud Scheduler" }
 
 const schedulerNotStarted = "Cloud Scheduler has not started"
 
-var schedulerColumns = []string{"Schedule", "Time zone", "Target", "Last run", "Last result", "Next run"}
-
 func (p schedulerProvider) List(ctx context.Context, project string) (console.Listing, error) {
 	st := p.svc.Store()
 	if st == nil {
 		return console.Listing{}, errors.New(schedulerNotStarted)
 	}
 	listing := console.Listing{
-		Columns:      schedulerColumns,
-		NameColumn:   "Job",
+		Columns:      schedulerListColumns,
 		Noun:         "jobs",
 		AlwaysStatus: true,
 	}
+	schedulerListTabs(&listing)
 	if project == "" {
 		listing.Prompt = "Cloud Scheduler lists jobs per project. Choose one in the toolbar."
 		return listing, nil
@@ -64,18 +62,12 @@ func (p schedulerProvider) List(ctx context.Context, project string) (console.Li
 		listing.Items = append(listing.Items, console.Resource{
 			Name:   j.Name,
 			Status: string(j.State),
-			Fields: map[string]string{
-				"Schedule":    j.Schedule,
-				"Time zone":   j.TimeZone,
-				"Target":      schedulerTargetType(j),
-				"Last run":    schedulerTime(j.LastAttemptTime),
-				"Last result": schedulerResult(j),
-				"Next run":    schedulerNext(j),
-			},
+			Fields: schedulerRow(j),
 		})
 	}
 	listing.Total = len(listing.Items)
 	listing.RowsOpenable = true
+	listing.SelectActions = p.ListActions(ctx, project)
 	return listing, nil
 }
 
@@ -277,6 +269,9 @@ func (p schedulerProvider) Act(ctx context.Context, project, name, action string
 
 func (p schedulerProvider) DetailActions(_ context.Context, project string, path []string) []console.Action {
 	st := p.svc.Store()
+	if len(path) == 0 {
+		return p.ListActions(context.Background(), project)
+	}
 	if st == nil || len(path) != 1 || schedulerJob(project, path[0]) != nil {
 		return nil
 	}
@@ -287,7 +282,10 @@ func (p schedulerProvider) DetailActions(_ context.Context, project string, path
 	return schedulerActions(string(j.State))
 }
 
-func (p schedulerProvider) ActAt(ctx context.Context, project string, path []string, action string, _ map[string]string) error {
+func (p schedulerProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
+	if len(path) == 0 {
+		return p.actOnSelection(ctx, project, action, values)
+	}
 	if len(path) != 1 {
 		return fmt.Errorf("Cloud Scheduler actions apply to a job")
 	}
@@ -328,106 +326,18 @@ func (p schedulerProvider) Delete(ctx context.Context, project, name string) err
 	return err
 }
 
-// CreateForm is the Create job form: an HTTP, Pub/Sub or App Engine target.
-// An App Engine job is stored and its attempts fail, as the help says: there
-// is no App Engine on an instance (#1447).
+// CreateForm is Create job, in Google's three steps (#1849): an HTTP,
+// Pub/Sub or App Engine HTTP target. An App Engine job is stored and its
+// attempts fail, as the help says: there is no App Engine on an instance
+// (#1447).
 func (schedulerProvider) CreateForm() (string, []console.Field) {
-	return "Create job", append([]console.Field{
-		{Name: "name", Label: "Name", Type: "text", Required: true,
-			Help: "Letters, numbers, hyphens and underscores.", Pattern: `^[A-Za-z0-9_\-]{1,500}$`},
-		{Name: "location", Label: "Region", Type: "select", Required: true, Default: "us-central1", Options: schedulerRegions(),
-			Help: "The regions Locations.ListLocations lists (#1237); CloudBurrow does not place resources geographically. " +
-				"An SDK may name any other location."},
-		{Name: "description", Label: "Description", Type: "text"},
-		{Name: "schedule", Label: "Frequency", Type: "text", Required: true, Default: "*/5 * * * *",
-			Help: "unix-cron format, e.g. \"0 9 * * 1\" for 09:00 every Monday."},
-		{Name: "timeZone", Label: "Time zone", Type: "text", Default: "Etc/UTC",
-			Help: "An IANA time zone name."},
-		{Name: "uri", Label: "HTTP URL", Type: "text", Section: "Target",
-			Help: "For an HTTP target: an http or https URL, reached from this machine with POST. " +
-				"Give either this or a Pub/Sub topic."},
-		{Name: "topic", Label: "Pub/Sub topic", Type: "text", Section: "Target",
-			Help: "For a Pub/Sub target: projects/{project}/topics/{topic}, published to the local emulator."},
-		{Name: "body", Label: "Body or message", Type: "textarea", Section: "Target",
-			Help: "The HTTP or App Engine body, or the Pub/Sub message data (required for a Pub/Sub target)."},
-		{Name: "appEngineRelativeUri", Label: "App Engine relative URI", Type: "text", Section: "Target", Pattern: `^/.*$`,
-			Help: "For an App Engine target: the path, beginning with /, sent with POST. This instance has no App Engine, " +
-				"so each attempt fails with NOT_FOUND (HTTP 404). Give one of the URL, the topic or this."},
-		{Name: "appEngineService", Label: "App Engine service", Type: "text", Section: "Target",
-			Help: "For an App Engine target: optional; empty is the default service."},
-		{Name: "appEngineVersion", Label: "App Engine version", Type: "text", Section: "Target",
-			Help: "For an App Engine target: optional; empty is the default version."},
-	}, authTokenFields("Target")...)
+	return "Create job", schedulerCreateFields()
 }
 
 func (p schedulerProvider) CreateOnPage() bool { return true }
 
 func (p schedulerProvider) Create(ctx context.Context, project string, values map[string]string) (string, error) {
-	api := p.svc.API()
-	if api == nil {
-		return "", errors.New(schedulerNotStarted)
-	}
-	if project == "" {
-		return "", fmt.Errorf("choose a project before creating a job")
-	}
-	location := strings.TrimSpace(values["location"])
-	if location == "" {
-		location = "us-central1"
-	}
-	parent := "projects/" + project + "/locations/" + location
-	job := &schedulerpb.Job{
-		Name:        parent + "/jobs/" + strings.TrimSpace(values["name"]),
-		Description: values["description"],
-		Schedule:    strings.TrimSpace(values["schedule"]),
-		TimeZone:    strings.TrimSpace(values["timeZone"]),
-	}
-	uri, topic := strings.TrimSpace(values["uri"]), strings.TrimSpace(values["topic"])
-	aeURI := strings.TrimSpace(values["appEngineRelativeUri"])
-	auth, err := parseAuthToken(values)
-	if err != nil {
-		return "", err
-	}
-	if auth.kind != "" && uri == "" {
-		return "", fmt.Errorf("an auth header is for an HTTP target; a Pub/Sub or App Engine target takes none")
-	}
-	given := 0
-	for _, v := range []string{uri, topic, aeURI} {
-		if v != "" {
-			given++
-		}
-	}
-	switch {
-	case given > 1:
-		return "", fmt.Errorf("give one of an HTTP URL, a Pub/Sub topic or an App Engine relative URI, not several")
-	case aeURI != "":
-		job.Target = &schedulerpb.Job_AppEngineHttpTarget{AppEngineHttpTarget: &schedulerpb.AppEngineHttpTarget{
-			HttpMethod: schedulerpb.HttpMethod_POST, RelativeUri: aeURI, Body: []byte(values["body"]),
-			AppEngineRouting: &schedulerpb.AppEngineRouting{
-				Service: strings.TrimSpace(values["appEngineService"]), Version: strings.TrimSpace(values["appEngineVersion"])},
-		}}
-	case uri != "":
-		h := &schedulerpb.HttpTarget{Uri: uri, HttpMethod: schedulerpb.HttpMethod_POST, Body: []byte(values["body"])}
-		switch auth.kind {
-		case "oidc":
-			h.AuthorizationHeader = &schedulerpb.HttpTarget_OidcToken{OidcToken: &schedulerpb.OidcToken{
-				ServiceAccountEmail: auth.email, Audience: auth.audience}}
-		case "oauth":
-			h.AuthorizationHeader = &schedulerpb.HttpTarget_OauthToken{OauthToken: &schedulerpb.OAuthToken{
-				ServiceAccountEmail: auth.email, Scope: auth.scope}}
-		}
-		job.Target = &schedulerpb.Job_HttpTarget{HttpTarget: h}
-	case topic != "":
-		job.Target = &schedulerpb.Job_PubsubTarget{PubsubTarget: &schedulerpb.PubsubTarget{
-			TopicName: topic, Data: []byte(values["body"]),
-		}}
-	default:
-		return "", fmt.Errorf("a job needs a target: an HTTP URL, a Pub/Sub topic or an App Engine relative URI")
-	}
-	created, err := api.CreateJob(ctx, &schedulerpb.CreateJobRequest{Parent: parent, Job: job})
-	if err != nil {
-		return "", err
-	}
-	return created.GetName(), nil
+	return p.createJob(ctx, project, values)
 }
 
 // schedulerRegions is what the Create job form offers as its Region: what the

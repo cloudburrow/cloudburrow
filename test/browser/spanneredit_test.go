@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -166,18 +167,42 @@ func TestSpannerCreateInstanceThroughTheListScreen(t *testing.T) {
 		consoleDo(t, http.MethodPost, "/api/actions/spanner"+q, string(b))
 	})
 
+	// Google's Create instance page (#1859): Select an edition, Name your
+	// instance (the ID made from the name), Configure your instance,
+	// Allocate compute capacity, Backups, ending in Create.
 	p := open(t)
 	p.navigate("/spanner" + q)
 	p.clickText("#view button", "Create instance")
-	p.waitFor(`document.querySelector(".modal.is-open #f-instance") !== null`)
-	setField(p, ".modal.is-open", "f-instance", inst)
-	setField(p, ".modal.is-open", "f-displayName", "Made in browser")
-	setField(p, ".modal.is-open", "f-processingUnits", "300")
-	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
-	p.waitFor(`document.querySelector(".modal") === null`)
-	got, err := instAdmin.GetInstance(ctx, &instancepb.GetInstanceRequest{Name: "projects/" + project + "/instances/" + inst})
-	if err != nil || got.GetDisplayName() != "Made in browser" || got.GetProcessingUnits() != 300 {
-		t.Fatalf("GetInstance after Create instance = %v, %v; want the form's display name and 300 processing units", got, err)
+	p.waitFor(`location.pathname === "/spanner/create" && document.querySelector("#view #f-displayName") !== null`)
+	var steps []string
+	p.eval(`[...document.querySelectorAll(".create-step-title")].map((s) => s.textContent)`, &steps)
+	want := []string{"Select an edition", "Name your instance", "Configure your instance", "Allocate compute capacity", "Backups"}
+	if len(steps) < len(want) {
+		t.Fatalf("the Create instance page's steps are %v; want %v first", steps, want)
 	}
-	p.waitFor(fmt.Sprintf(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q))`, inst))
+	for i, w := range want {
+		if !strings.Contains(steps[i], w) {
+			t.Errorf("step %d is %q; want %q", i+1, steps[i], w)
+		}
+	}
+	var disabled []string
+	p.eval(`[...document.querySelectorAll("#view input[type=radio]:disabled, #view input[type=checkbox]:disabled")].map((r) => r.value || r.id)`, &disabled)
+	for _, w := range []string{"Enterprise", "Enterprise Plus", "Dual-region", "Autoscaling"} {
+		if !slices.Contains(disabled, w) {
+			t.Errorf("%s is not drawn disabled (not available locally); disabled are %v", w, disabled)
+		}
+	}
+	setField(p, "#view", "f-displayName", "Made in browser")
+	setField(p, "#view", "f-instance", inst)
+	p.run(chromedp.Click(chromedp.CSS(`#view #f-unit-1`)))
+	setField(p, "#view", "f-processingUnits", "300")
+	p.run(chromedp.Click(chromedp.CSS(`#view form button[type="submit"].primary`)))
+	p.waitFor(`location.pathname !== "/spanner/create"`)
+	got, err := instAdmin.GetInstance(ctx, &instancepb.GetInstanceRequest{Name: "projects/" + project + "/instances/" + inst})
+	if err != nil || got.GetDisplayName() != "Made in browser" || got.GetProcessingUnits() != 300 ||
+		got.GetConfig() != "projects/"+project+"/instanceConfigs/regional-us-central1" {
+		t.Fatalf("GetInstance after Create instance = %v, %v; want the page's name, 300 processing units and regional-us-central1", got, err)
+	}
+	p.navigate("/spanner" + q)
+	p.waitFor(fmt.Sprintf(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q) && r.textContent.includes("300 processing units"))`, inst))
 }

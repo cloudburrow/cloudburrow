@@ -38,11 +38,13 @@ func TestSpannerBackupsThroughThePage(t *testing.T) {
 		consoleDo(t, http.MethodPost, "/api/actions/spanner"+q, string(c))
 	})
 
-	// Create backup on the instance's page.
+	// Create backup at the top of the instance's Backup/Restore tab (#1859).
 	p.navigate("/spanner" + q)
 	p.clickText("#view tbody a", inst)
 	p.waitFor(`document.querySelector(".modal") === null`)
-	p.clickText("#view .page-actions button", "Create backup")
+	p.waitFor(`document.querySelector("#tab-backups") !== null`)
+	p.run(chromedp.Click(chromedp.CSS(`#tab-backups`)))
+	p.clickText("#view #section-actions-backups button", "Create backup")
 	p.waitFor(`document.querySelector(".modal.is-open #f-backup") !== null`)
 	var dbChoice string
 	p.eval(`document.querySelector(".modal.is-open #f-database").value`, &dbChoice)

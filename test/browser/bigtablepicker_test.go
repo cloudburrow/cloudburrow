@@ -79,12 +79,15 @@ func TestBigtableInstancePickerThroughTheBrowser(t *testing.T) {
 		t.Errorf("after choosing %s the picker shows %q", id, selected)
 	}
 
+	// Google's Create table (#1858) is a page: the Table ID, then a row per
+	// column family.
 	p.clickText(`#view .state button.primary`, "Create table")
-	p.waitFor(`document.querySelector(".modal #f-table") !== null`)
-	p.setField(".modal #f-table", table)
-	p.setField(".modal #f-families", "cf")
-	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
-	p.waitFor(`document.querySelector(".modal") === null`)
+	p.waitFor(`document.querySelector("#view #f-table") !== null`)
+	setField(p, "#view", "f-table", table)
+	p.eval(`(() => { const c = document.querySelector("#view .group-row input"); c.value = "cf";
+		c.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`, nil)
+	p.run(chromedp.Click(chromedp.CSS(`#view form button[type="submit"].primary`)))
+	p.waitFor(`location.pathname !== "/bigtable/create"`)
 	if tables, err := admin.Tables(ctx); err != nil || strings.Join(tables, ",") != table {
 		t.Fatalf("after Create table in %s, its tables are %v, %v", id, tables, err)
 	}

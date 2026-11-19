@@ -173,14 +173,15 @@ func (p tasksProvider) ListFiltered(ctx context.Context, project, filter string)
 	if err != nil {
 		return console.Listing{}, err
 	}
-	columns := []string{"Tasks in queue", "Due now", "Created"}
+	columns := tasksListColumns
 	sf := &console.ServerFilter{Value: filter, Placeholder: "state: PAUSED AND name: orders", Help: tasksFilterHelp}
 	keep, err := tasks.QueueFilter(filter)
 	if err != nil {
 		// A refused filter is reported on the box, with no rows, so the
 		// screen keeps the box to correct it in.
 		sf.Error = err.Error()
-		return console.Listing{Columns: columns, Noun: "queues", ServerFilter: sf, AlwaysStatus: true}, nil
+		return console.Listing{Columns: columns, Noun: "queues", ServerFilter: sf, AlwaysStatus: true,
+			SelectActions: p.ListActions(ctx, project)}, nil
 	}
 
 	items := make([]console.Resource, 0, len(queues))
@@ -195,35 +196,24 @@ func (p tasksProvider) ListFiltered(ctx context.Context, project, filter string)
 		// that cannot say how much is in the queue is answering the wrong
 		// question: "paused" and "paused with four hundred tasks waiting" are
 		// very different facts.
-		depth, due := "—", "—"
+		fields := tasksQueueRow(q, p.svc.running(q.Name))
 		if tasks, err := st.ListTasks(q.Name); err == nil {
-			depth = fmt.Sprint(len(tasks))
-			ready := 0
-			now := time.Now()
-			for _, t := range tasks {
-				if !t.ScheduleTime.After(now) {
-					ready++
-				}
-			}
-			due = fmt.Sprint(ready)
+			tasksDepthFields(fields, tasks, time.Now())
 		}
 		items = append(items, console.Resource{
 			Name:   q.Name,
 			Status: string(q.State),
-			Fields: map[string]string{
-				"Tasks in queue": depth,
-				"Due now":        due,
-				"Created":        q.Created.Format(time.RFC3339),
-			},
+			Fields: fields,
 		})
 	}
 	return console.Listing{
-		Columns:      columns,
-		Noun:         "queues",
-		Items:        items,
-		Total:        len(items),
-		AlwaysStatus: true,
-		ServerFilter: sf,
+		Columns:       columns,
+		Noun:          "queues",
+		Items:         items,
+		Total:         len(items),
+		AlwaysStatus:  true,
+		ServerFilter:  sf,
+		SelectActions: p.ListActions(ctx, project),
 	}, nil
 }
 
@@ -272,7 +262,8 @@ func (p tasksProvider) Detail(_ context.Context, project string, path []string) 
 				last = fmt.Sprint(t.LastResponseCode)
 			}
 			listing.Items = append(listing.Items, console.Resource{
-				Name: t.Name,
+				Name:    t.Name,
+				Actions: tasksTaskActions(),
 				Fields: map[string]string{
 					"Scheduled":     t.ScheduleTime.Format(time.RFC3339),
 					"Attempts":      fmt.Sprint(t.DispatchCount),
@@ -311,11 +302,18 @@ func (p tasksProvider) Detail(_ context.Context, project string, path []string) 
 
 	return console.Detail{
 		Summary: summary,
+		// Google's queue page: Tasks, Metrics, Logs, Configuration and
+		// Permissions (#1848). Metrics are Cloud Monitoring's, not run here;
+		// the Logs tab is where the queue's logging is turned on or off.
 		Sections: []console.Section{
 			{ID: "tasks", Label: "Tasks", Listing: listing},
+			tasksMetricsSection(),
+			tasksLogsSection(queue),
 			config,
+			{ID: "permissions", Kind: console.KindPermissions},
 		},
-		Edit: tasksQueueEditForm(queue),
+		Actions: p.titleActions(name),
+		Edit:    tasksQueueEditForm(queue),
 	}, nil
 }
 
@@ -438,10 +436,7 @@ func (p tasksProvider) taskDetail(queue, task string) (console.Detail, error) {
 			{Label: "Last response", Value: last},
 		},
 		Sections: sections,
-		Actions: []console.Action{
-			{ID: "runtask", Label: "Run now"},
-			{ID: "deletetask", Label: "Delete task", Destructive: true},
-		},
+		Actions:  tasksTaskActions(),
 	}, nil
 }
 
@@ -1841,18 +1836,7 @@ func (p pubsubProvider) Delete(ctx context.Context, project, name string) error 
 // Cloud Tasks: create queues, and pause, resume or purge them.
 
 func (tasksProvider) CreateForm() (string, []console.Field) {
-	return "Create queue", []console.Field{
-		{
-			Name: "name", Label: "Queue name", Type: "text", Required: true,
-			Help:    "Letters, numbers and hyphens.",
-			Pattern: `^[A-Za-z][A-Za-z0-9\-]{0,99}$`,
-		},
-		{
-			Name: "location", Label: "Region", Type: "text", Required: true,
-			Default: "us-central1",
-			Help:    "Any location string; CloudBurrow does not place resources geographically.",
-		},
-	}
+	return "Create queue", tasksCreateQueueFields()
 }
 
 // CreateOnPage puts Create queue on a page of its own, as Google's console
@@ -1867,24 +1851,7 @@ func (p tasksProvider) Create(ctx context.Context, project string, values map[st
 	if st == nil {
 		return "", fmt.Errorf("Cloud Tasks has not started")
 	}
-	id := strings.TrimSpace(values["name"])
-	location := strings.TrimSpace(values["location"])
-	if location == "" {
-		location = "us-central1"
-	}
-	name := fmt.Sprintf("projects/%s/locations/%s/queues/%s", project, location, id)
-	// The defaults are the service's own, so a queue created here behaves
-	// exactly like one created through the API with no overrides.
-	q, err := st.CreateQueue(tasks.Queue{
-		Name:        name,
-		State:       tasks.StateRunning,
-		RetryConfig: tasks.DefaultRetryConfig(),
-		RateLimits:  tasks.DefaultRateLimits(),
-	})
-	if err != nil {
-		return "", err
-	}
-	return q.Name, nil
+	return p.createQueue(ctx, project, values)
 }
 
 func (p tasksProvider) Delete(_ context.Context, _ string, name string) error {
@@ -1899,18 +1866,7 @@ func (tasksProvider) Actions(r console.Resource) []console.Action {
 	// The available actions depend on the queue's own state, so a paused
 	// queue is not offered "Pause" — an action that would do nothing is
 	// indistinguishable from one that is broken.
-	switch strings.ToUpper(r.Status) {
-	case "PAUSED":
-		return []console.Action{
-			{ID: "resume", Label: "Resume"},
-			{ID: "purge", Label: "Purge", Destructive: true},
-		}
-	default:
-		return []console.Action{
-			{ID: "pause", Label: "Pause"},
-			{ID: "purge", Label: "Purge", Destructive: true},
-		}
-	}
+	return tasksQueueActions(r.Status)
 }
 
 func (p tasksProvider) Act(_ context.Context, _ string, name, action string) error {
@@ -5453,8 +5409,10 @@ func (p tasksProvider) DetailActions(_ context.Context, _ string, path []string)
 		return nil
 	}
 	switch len(path) {
+	case 0:
+		return p.ListActions(context.Background(), "")
 	case 1:
-		return []console.Action{{ID: "createtask", Label: "Create task", Fields: tasksCreateTaskFields()}}
+		return p.queuePageActions(path[0])
 	case 2:
 		// Run now is RunTask (#1215): dispatched on the next pass, even on a
 		// paused queue or one at its rate limits.
@@ -5472,6 +5430,10 @@ func (p tasksProvider) ActAt(ctx context.Context, project string, path []string,
 		return fmt.Errorf("Cloud Tasks has not started")
 	}
 	switch {
+	case len(path) == 0:
+		return p.actOnSelection(ctx, project, action, values)
+	case len(path) == 1 && tasksQueuePageAction(action):
+		return p.actOnQueue(ctx, project, path[0], action, values)
 	case action == "createtask" && len(path) == 1:
 		return p.createTask(ctx, project, path[0], values)
 	case action == "deletetask" && len(path) == 2:

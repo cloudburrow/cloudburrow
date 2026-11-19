@@ -2222,3 +2222,28 @@ svg.bq-chart { display: block; border: 1px solid var(--border); border-radius: v
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15); font-family: var(--mono, monospace); }
 .completions li { padding: 4px 12px; cursor: pointer; }
 .completions li.active, .completions li:hover { background: var(--hover, #e8f0fe); }
+
+/* Spanner's instance and database pages (#1859) use the side menu of
+   #1860 above (.is-side-nav, .detail-with-nav); .side-nav and
+   .side-nav-layout name the same strip and layout. */
+/* Spanner Studio: the Explorer beside the editor and its results. */
+/* Bigtable Studio (#1858): the query builder's rows and the Row details pane. */
+.bigtable-builder { display: grid; gap: 8px; max-width: 560px; }
+.bigtable-key-inputs { display: flex; gap: 8px; flex-wrap: wrap; }
+.bigtable-row-details { border-top: 1px solid var(--border, #dadce0); margin-top: 12px; padding-top: 8px; }
+#bigtable-results-table tr.is-clickable { cursor: pointer; }
+.spanner-studio { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 16px; align-items: start; }
+.spanner-explorer { border-right: 1px solid var(--border, #dadce0); padding-right: 12px; font-size: var(--text-body-size); }
+.spanner-explorer h3 { margin: 0 0 8px; font-size: inherit; }
+.spanner-explorer ul { list-style: none; margin: 4px 0; padding-left: 12px; }
+.spanner-explorer summary { cursor: pointer; display: flex; align-items: center; gap: 4px; }
+.spanner-explorer .bq-menu { position: absolute; }
+.spanner-explorer-table summary { justify-content: space-between; }
+.spanner-editor { width: 100%; box-sizing: border-box; min-height: 160px; }
+.spanner-editor-tab { display: inline-flex; align-items: center; }
+.spanner-editor-actions { margin: 8px 0; }
+.spanner-plan { font-family: var(--font-mono, monospace); }
+.form-templates { margin: 6px 0; }
+.form-template { display: flex; gap: 8px; align-items: flex-start; margin: 6px 0; }
+.form-template pre { margin: 0; flex: 1; overflow-x: auto; }
+@media (max-width: 720px) { .spanner-studio { grid-template-columns: minmax(0, 1fr); } .spanner-explorer { border-right: 0; } }

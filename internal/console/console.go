@@ -673,7 +673,8 @@ type Detail struct {
 	// SideNav draws the sections as a menu on the left of the page rather
 	// than a tab strip, as Google's Cloud SQL instance has Overview,
 	// Connections, Users, Databases and the rest in a menu of its own
-	// (#1860).
+	// (#1860), and Google's Spanner instance and database pages have
+	// Overview, Spanner Studio, Backup/Restore and the rest (#1859).
 	SideNav bool `json:"sideNav,omitempty"`
 }
 
@@ -741,6 +742,11 @@ const (
 	// has its Query builder first (#1845). The form is the provider's
 	// QueryForm for the page; a page with none drops it.
 	KindQuery SectionKind = "query"
+	// KindStudio is a provider's workspace drawn in the tab by console.js's
+	// renderer for the service (STUDIO_SECTIONS), whose calls go to the
+	// provider's Studio: Spanner Studio on a database's page (#1859). The
+	// page then has no separate Query tab, the Studio's editor being it.
+	KindStudio SectionKind = "studio"
 )
 
 // Section is one aspect of a resource, rendered as a tab.

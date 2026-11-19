@@ -546,3 +546,14 @@ func (w *Worker) reschedule(task Task) {
 	current.ScheduleTime = w.clock.Now().Add(b.Delay(current.DispatchCount))
 	_ = w.store.UpdateTask(current)
 }
+
+// Running is how many of queue's tasks have an attempt out now: the
+// console's Tasks running column (#1848). A nil worker has none.
+func (w *Worker) Running(queue string) int {
+	if w == nil {
+		return 0
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return max(0, w.perQueue[queue])
+}

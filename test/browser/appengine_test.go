@@ -155,20 +155,23 @@ func TestSchedulerCreateAppEngineJobThroughTheForm(t *testing.T) {
 	t.Cleanup(func() { _ = c.DeleteJob(context.Background(), &schedulerpb.DeleteJobRequest{Name: name}) })
 
 	p.navigate("/scheduler/jobs/create?project=" + project)
-	p.waitFor(`document.querySelector("#view #f-appEngineRelativeUri") !== null`)
+	// Configure the execution's Target type shows App Engine HTTP's own
+	// fields (#1849).
+	p.waitFor(`document.querySelector("#view #f-relativeUri") !== null`)
 	p.setField("#view #f-name", "browser-ae")
 	p.setField("#view #f-schedule", "0 0 1 1 *")
-	p.setField("#view #f-body", "tick")
-	p.setField("#view #f-appEngineRelativeUri", "cron/no-slash")
+	p.setField("#view #f-targetType", "App Engine HTTP")
+	p.setField("#view #f-aeBody", "tick")
+	p.setField("#view #f-relativeUri", "cron/no-slash")
 	p.setField("#view #f-appEngineService", "cron")
 	p.setField("#view #f-appEngineVersion", "v2")
 	p.run(chromedp.Click(chromedp.CSS(`#view button[type="submit"]`)))
-	p.waitFor(`document.querySelector("#view #f-appEngineRelativeUri").getAttribute("aria-invalid") === "true"`)
+	p.waitFor(`document.querySelector("#view #f-relativeUri").getAttribute("aria-invalid") === "true"`)
 	if posts := p.posts("/api/resources/scheduler"); len(posts) != 0 {
 		t.Fatalf("a relative URI not beginning with / was posted: %v", posts)
 	}
 
-	p.setField("#view #f-appEngineRelativeUri", "/cron/tick")
+	p.setField("#view #f-relativeUri", "/cron/tick")
 	p.run(chromedp.Click(chromedp.CSS(`#view button[type="submit"]`)))
 	p.waitFor(`location.pathname === "/scheduler/jobs" &&
 		[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes("browser-ae"))`)
