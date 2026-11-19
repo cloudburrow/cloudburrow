@@ -291,6 +291,15 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	schedulerSvc := newSchedulerService(cfg, func() *netfwd.Forwarder { return forwarderFor(forwarders, "pubsub") })
 	schedulerSvc.useTokens(creds)
 	schedulerSvc.register(coord)
+	// Certificate Authority Service (#1834), in process.
+	privateCASvc := newPrivateCAService(cfg)
+	if privateCASvc != nil {
+		// A CA key held in Cloud KMS and a CMEK pool use this instance's
+		// Cloud KMS, and a CA's gcs_bucket its Cloud Storage, in process.
+		privateCASvc.kms = kmsSvc
+		privateCASvc.storage = func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") }
+	}
+	privateCASvc.register(coord)
 	// The Memorystore admin API (#1302), over the Valkey server's tunnel.
 	memorystoreAdminSvc := newMemorystoreAdminService(cfg, func() *netfwd.Forwarder { return forwarderFor(forwarders, "memorystore") })
 	if memorystoreAdminSvc != nil {
@@ -379,6 +388,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		kms:          kmsSvc,
 		mysql:        mysqlCreds,
 		scheduler:    schedulerSvc,
+		privateCA:    privateCASvc,
 		logging:      loggingSvc,
 		run:          runSvc,
 		memorystore:  memorystoreAdminSvc,
@@ -446,6 +456,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if schedulerSvc != nil {
 		schedulerSvc.tracing = tracing
 	}
+	if privateCASvc != nil {
+		privateCASvc.tracing = tracing
+	}
 	if loggingSvc != nil {
 		loggingSvc.tracing = tracing
 	}
@@ -463,6 +476,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		schedulerSvc.calls = callEvents(recorder, requestMetrics, "scheduler")
 		schedulerSvc.interpose = append(schedulerSvc.interpose, grpctransport.LogInterceptor(logger, "scheduler"), faults.Interceptor("scheduler"))
 		schedulerSvc.requests = requestEvents(recorder, requestMetrics, "scheduler")
+	}
+	if privateCASvc != nil {
+		privateCASvc.calls = callEvents(recorder, requestMetrics, "privateca")
+		privateCASvc.interpose = append(privateCASvc.interpose, grpctransport.LogInterceptor(logger, "privateca"), faults.Interceptor("privateca"))
+		privateCASvc.requests = requestEvents(recorder, requestMetrics, "privateca")
 	}
 	if memorystoreAdminSvc != nil {
 		memorystoreAdminSvc.calls = callEvents(recorder, requestMetrics, "memorystore")
@@ -619,6 +637,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if kmsSvc != nil {
 			sqlAdminSrv.UseKMS(sqlAdminKMS{svc: kmsSvc})
 		}
+		// CUSTOMER_MANAGED_CAS_CA (#1834) has this instance's Certificate
+		// Authority Service issue the server certificates, in process.
+		if privateCASvc != nil {
+			sqlAdminSrv.UseCertificateAuthorityService(sqlAdminCAS{svc: privateCASvc})
+		}
 		coord.Register(sqlAdminSrv)
 	}
 	// The Backup and DR Service (#1433), over the Admin API's backups.
@@ -694,6 +717,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		serviceUsage: serviceUsageSrv,
 		backupdr:     backupDRSrv,
 		sqlAdmin:     sqlAdminSrv,
+		privateCA:    privateCASvc,
 	})
 	if consoleSrv != nil {
 		// The Request Log reads the same recorder /admin/events does.
@@ -772,6 +796,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		if a := serviceUsageSrv.Addr(); a != "" {
 			live["serviceusage"] = a
+		}
+		if a := privateCASvc.Addr(); a != "" {
+			live["privateca"] = a
 		}
 		if backupDRSrv != nil && backupDRSrv.Addr() != "" {
 			live["backupdr"] = backupDRSrv.Addr()

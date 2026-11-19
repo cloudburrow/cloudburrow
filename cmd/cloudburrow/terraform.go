@@ -134,6 +134,11 @@ var terraformEndpoints = []terraformEndpoint{
 	// _backup_plan and _backup_plan_association apply, plan clean and
 	// destroy in TestTerraformBackupDR.
 	{config.ServiceBackupDR, "backup_dr_custom_endpoint", "GOOGLE_BACKUP_DR_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	// Certificate Authority Service (#1834): google_privateca_ca_pool,
+	// _certificate_authority (root and subordinate), _certificate_template
+	// and _certificate apply, plan clean and destroy in
+	// TestTerraformPrivateCA.
+	{config.ServicePrivateCA, "privateca_custom_endpoint", "GOOGLE_PRIVATECA_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	// Firestore (#1331): google_firestore_document applies, plans clean,
 	// updates its fields and destroys in TestTerraformFirestoreDocument,
 	// over the documents REST API the emulator serves on its port. On the
@@ -252,6 +257,7 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 		// The admin API's port, not the RESP one.
 		memorystoreAdminEndpoint: cfg.Endpoints.MemorystoreAdmin,
 		config.ServiceBackupDR:   cfg.Endpoints.BackupDR,
+		config.ServicePrivateCA:  cfg.Endpoints.PrivateCA,
 	}
 	enabled := map[config.Service]bool{resourceManagerEndpoint: true, serviceUsageService: true, sqlAdminEndpoint: sqlAdminEnabled(cfg),
 		memorystoreAdminEndpoint: serviceEnabled(cfg, config.ServiceMemorystore)}
@@ -259,6 +265,7 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 		enabled[s] = true
 	}
 	enabled[config.ServiceBackupDR] = backupDREnabled(cfg)
+	enabled[config.ServicePrivateCA] = privateCAEnabled(cfg)
 	var set []terraformURL
 	var skipped []config.Service
 	for _, e := range terraformEndpoints {

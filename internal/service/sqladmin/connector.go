@@ -465,8 +465,11 @@ func (c *connector) serve(s *Server, raw net.Conn) {
 			}
 			var crt *tls.Certificate
 			var err error
-			if s.serverCaMode(instance) == casCA {
-				crt, err = c.casServerCert(s.regionOf(instance), project, instance)
+			if isCASMode(s.serverCaMode(instance)) {
+				var iss *certIssuer
+				if iss, err = s.serverIssuer(instance); err == nil {
+					crt, err = c.casServerCert(iss, project, instance)
+				}
 			} else {
 				crt, err = c.serverCert(project, instance)
 			}

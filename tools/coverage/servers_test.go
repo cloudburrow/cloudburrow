@@ -13,6 +13,7 @@ import (
 
 	iamadminpb "cloud.google.com/go/iam/admin/apiv1/adminpb"
 	rmpb "cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
+	"cloud.google.com/go/security/privateca/apiv1/privatecapb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -25,6 +26,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
 	"github.com/cloudburrow/cloudburrow/internal/service/kms"
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
+	"github.com/cloudburrow/cloudburrow/internal/service/privateca"
 	"github.com/cloudburrow/cloudburrow/internal/service/redisadmin"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/scheduler"
@@ -52,6 +54,13 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	tasks.NewGRPCServer(tasks.NewStore(store.NewMemory())).Register(srv)
 	secrets.NewGRPCServer(secrets.NewStore(store.NewMemory())).Register(srv)
 	kms.NewServer(store.NewMemory()).Register(srv)
+	// Certificate Authority Service alone: its IAM, Locations and
+	// Operations mixins are other services' rows, registered by them.
+	pca, err := privateca.NewServer("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	privatecapb.RegisterCertificateAuthorityServiceServer(srv, pca.API())
 	rmReg := resourcemanager.New(store.NewMemory())
 	rmpb.RegisterProjectsServer(srv, resourcemanager.NewProjectsServer(rmReg))
 	rmpb.RegisterFoldersServer(srv, resourcemanager.NewFoldersServer(rmReg))

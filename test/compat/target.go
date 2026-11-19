@@ -87,6 +87,7 @@ var targetEndpoints = []targetEndpoint{
 	{"CLOUDSQL_CONNECTOR", envKey("CLOUDBURROW_CLOUDSQL_CONNECTOR_ENDPOINT")},
 	{"MEMORYSTORE_ADMIN", envKey("CLOUDBURROW_MEMORYSTORE_ENDPOINT")},
 	{"BACKUPDR", envKey("CLOUDBURROW_BACKUPDR_ENDPOINT")},
+	{"PRIVATECA", envKey("CLOUDBURROW_PRIVATECA_ENDPOINT")},
 }
 
 // normalizeEndpoint reduces an address to host:port, so that
@@ -218,6 +219,7 @@ var gcloudOverrides = []struct {
 	{"redis", []string{"MEMORYSTORE_ADMIN"}},
 	{"memorystore", []string{"MEMORYSTORE_ADMIN"}},
 	{"backupdr", []string{"BACKUPDR"}},
+	{"privateca", []string{"PRIVATECA"}},
 	// Bigtable's admin REST API, on the Bigtable front's port (#1440).
 	{"bigtableadmin", []string{"BIGTABLE"}},
 	// Spanner's admin REST API and the Firestore Admin API (#1461).

@@ -87,6 +87,7 @@ import (
 	_ "cloud.google.com/go/scheduler/apiv1/schedulerpb"
 	_ "cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
 	_ "cloud.google.com/go/securesourcemanager/apiv1/securesourcemanagerpb"
+	_ "cloud.google.com/go/security/privateca/apiv1/privatecapb"
 	_ "cloud.google.com/go/spanner/admin/database/apiv1/databasepb"
 	_ "cloud.google.com/go/spanner/admin/instance/apiv1/instancepb"
 	_ "cloud.google.com/go/spanner/apiv1/spannerpb"
@@ -226,6 +227,10 @@ var areas = []area{
 	// Resource Manager's port. Its methods are the official generated
 	// client's (google.golang.org/api/cloudidentity/v1).
 	{Key: "cloudidentity", Title: "Cloud Identity API (v1)", Own: true, Methods: cloudidentityMethods()},
+	// Certificate Authority Service (#1834): CloudBurrow's own, gRPC and
+	// JSON on one port. Its Locations, Operations and IAMPolicy mixins are
+	// the rows the scheduler and kms areas list (mixin keys are global).
+	{Key: "privateca", Title: "Certificate Authority Service (v1)", Own: true, Services: []string{"google.cloud.security.privateca.v1.CertificateAuthorityService"}},
 }
 
 // cloudidentityMethods is every method of the cloudidentity v1 discovery

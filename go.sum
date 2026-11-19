@@ -1,3 +1,5 @@
+cel.dev/cel-go v0.33.4 h1:9hd5BRPQZwj81qOddEXh0WhE1N3shkG3ad89pSqk+iU=
+cel.dev/cel-go v0.33.4/go.mod h1:DnVip7tpJSsgZymwfT+m1tnEVy3ivAjSMXPx12YrMkU=
 cel.dev/expr v0.15.0/go.mod h1:TRSuuV7DlVCE/uwv5QbAiW/v8l5O8C4eEPHeu7gf7Sg=
 cel.dev/expr v0.16.0/go.mod h1:TRSuuV7DlVCE/uwv5QbAiW/v8l5O8C4eEPHeu7gf7Sg=
 cel.dev/expr v0.16.1/go.mod h1:AsGA5zb3WruAEQeQng1RZdGEXmBj0jvMWh6l5SnNuC8=
@@ -389,6 +391,8 @@ cloud.google.com/go/secretmanager v1.22.0/go.mod h1:aDN9cW5x6Y8QVj32snakZv96vYyW
 cloud.google.com/go/securesourcemanager v1.12.0 h1:YDZ7QQkBNnPBhqekZC0wgue1ZrzzmO2DjOdRzzrLPOg=
 cloud.google.com/go/securesourcemanager v1.12.0/go.mod h1:rrSpMArn9f5mpbFJXzn/gJrb78AUPFpuR5SZemLe3E4=
 cloud.google.com/go/security v1.26.0/go.mod h1:nd0i5OHXtJduMt0n6UnEojy7fiTfnfj/PSDeD7LAD+c=
+cloud.google.com/go/security v1.29.1 h1:irh7axea3e1bgtMa5TGQhbXr7ikZzY5hFicCRKYxfdw=
+cloud.google.com/go/security v1.29.1/go.mod h1:Y0eV8RDggumXx3Aq3l92z/fq+4AFDr0pH/gTqEV88Q4=
 cloud.google.com/go/securitycenter v1.45.0/go.mod h1:7mAlzsCsKlEVmciAFORl431laDGpoKGFkSQndAzFs30=
 cloud.google.com/go/servicedirectory v1.17.0/go.mod h1:CtgjXS1idj3s9Q6tB68021Rzk8Q6decV6+ldXC1BoBk=
 cloud.google.com/go/shell v1.13.0/go.mod h1:9WWf3xHQUElP5fL/lB9IJ/MMMnN2W/T86cBp+pXFFWo=

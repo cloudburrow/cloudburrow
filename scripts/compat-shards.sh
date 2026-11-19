@@ -22,7 +22,8 @@
 #              restart probes, and Resource Manager, which every instance
 #              serves, for TestOneProjectNumberEverywhere, which compares
 #              its project number with Cloud Storage's service agent;
-#   served:    the remaining CloudBurrow-served APIs (kms, logging) and the
+#   served:    the remaining CloudBurrow-served APIs (kms, logging,
+#              privateca) and the
 #              KMS restart probe, with Resource Manager as
 #              LOGGING_RESOURCEMANAGER for the Logging folder tests;
 #   run:       Cloud Run with its Knative install; secretmanager too, for
@@ -118,7 +119,10 @@ compat_shard() {
   TEST_VARS=CREDENTIALS,KUBECONFIG,CLUSTER,CONTROL,METADATA,CONSOLE,ADMIN_TOKEN,CLI,CLI_ARGS
   case "$1" in
     storage)
-      SERVICES=storage,pubsub,tasks,secretmanager,scheduler,logging
+      # privateca for the console's Certificate Authority Service page
+      # (TestPrivateCAThroughThePage, #1834): PRIVATECA is not exported,
+      # so its compat suite stays in served.
+      SERVICES=storage,pubsub,tasks,secretmanager,scheduler,logging,privateca
       # The hooks are the #285 fixtures (two ready.d scripts, the second
       # creating a bucket, and a shutdown.d script checked after stop), and
       # the seed file names tasks and storage.
@@ -146,7 +150,8 @@ compat_shard() {
       PROBE_TESTS="TestSecretManagerAcrossRestart TestTasksAcrossRestart TestSchedulerAcrossRestart TestStorageAcrossRestart"
       PROBE_VARS=SECRETS,TASKS,SCHEDULER,STORAGE ;;
     served)
-      SERVICES=kms,logging
+      SERVICES=kms,logging,privateca
+      # Certificate Authority Service (#1834), in process like KMS.
       # Cloud KMS (#309) and Cloud Logging (#304). Resource Manager's tests
       # run in the storage shard; the Logging folder and organization tests
       # (#1395) make their folder with it, which every instance serves, as
@@ -154,7 +159,7 @@ compat_shard() {
       # 38910752877: in storage gcloud had no logging override).
       # Cloud KMS Autokey's folder and project tests (#1568) make their
       # folder with it too.
-      TEST_VARS+=,KMS,LOGGING,LOGGING_RESOURCEMANAGER
+      TEST_VARS+=,KMS,LOGGING,LOGGING_RESOURCEMANAGER,PRIVATECA
       # Cloud KMS (#418): a key with ENABLED, DISABLED and
       # DESTROY_SCHEDULED versions and a ciphertext.
       SETUP_TESTS="TestKMSRestartSetup"
@@ -291,9 +296,11 @@ compat_shard() {
       # which every instance serves, as SQL_RESOURCEMANAGER, for the purged
       # project's Cloud SQL and Backup and DR and for Backup and DR's
       # folder fetch (#1568); CMEK_KMS for Cloud SQL's customer-managed
-      # keys too.
-      SERVICES=cloudsql,cloudsql-mysql,backupdr,storage,secretmanager,kms
-      TEST_VARS+=,MYSQL,MYSQL_PASSWORD,CLOUDSQL,SQLADMIN,BACKUPDR,CMEK_KMS,CLOUDSQL_SECRETS,NOPUBSUB_STORAGE,SQL_RESOURCEMANAGER
+      # keys too. Certificate Authority Service as SQL_PRIVATECA, for
+      # CUSTOMER_MANAGED_CAS_CA's CA pools (#1834), so the privateca suite
+      # stays in its own shard.
+      SERVICES=cloudsql,cloudsql-mysql,backupdr,storage,secretmanager,kms,privateca
+      TEST_VARS+=,MYSQL,MYSQL_PASSWORD,CLOUDSQL,SQLADMIN,BACKUPDR,CMEK_KMS,CLOUDSQL_SECRETS,NOPUBSUB_STORAGE,SQL_RESOURCEMANAGER,SQL_PRIVATECA
       # Cloud SQL for PostgreSQL (#701): a table with a row.
       SETUP_TESTS="TestCloudSQLRestartSetup"
       PROBE_TESTS="TestCloudSQLMySQLAcrossRestart TestCloudSQLAcrossRestart"

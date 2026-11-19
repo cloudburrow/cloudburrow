@@ -318,12 +318,17 @@ func TestSQLFieldsNeverSilentlyDropped(t *testing.T) {
 	if code != 400 || !strings.Contains(resp, "diskSizeGb") {
 		t.Errorf("an unknown settings field = %d %s", code, resp)
 	}
-	// A customer-managed CAS server CA is refused by name (#1614); the
-	// Google-managed one is served.
+	// A customer-managed CAS server CA needs its pool (#1834,
+	// TestSQLCustomerManagedCA); an unknown mode is refused by name.
 	code, resp = call(t, "POST", base, `{"name":"cas","databaseVersion":"POSTGRES_17","settings":{"tier":"t",`+
 		`"ipConfiguration":{"serverCaMode":"CUSTOMER_MANAGED_CAS_CA"}}}`)
-	if code != 501 || !strings.Contains(resp, "serverCaMode") {
-		t.Errorf("serverCaMode CUSTOMER_MANAGED_CAS_CA = %d %s", code, resp)
+	if code != 400 || !strings.Contains(resp, "serverCaPool") {
+		t.Errorf("serverCaMode CUSTOMER_MANAGED_CAS_CA without a pool = %d %s", code, resp)
+	}
+	code, resp = call(t, "POST", base, `{"name":"cas","databaseVersion":"POSTGRES_17","settings":{"tier":"t",`+
+		`"ipConfiguration":{"serverCaMode":"SELF_SIGNED"}}}`)
+	if code != 400 || !strings.Contains(resp, "serverCaMode") {
+		t.Errorf("serverCaMode SELF_SIGNED = %d %s", code, resp)
 	}
 }
 

@@ -2,7 +2,9 @@ package main
 
 // Cloud SQL server CA modes, server certificates and DNS names on the
 // console (#1614): Server CA mode on Create instance and Edit instance; on
-// a GOOGLE_MANAGED_CAS_CA instance's page its server certificates, Add
+// a GOOGLE_MANAGED_CAS_CA or CUSTOMER_MANAGED_CAS_CA (#1834, with its CA
+// pool of Certificate Authority Service) instance's page its server
+// certificates, Add
 // server certificate and Rotate server certificate (to the upcoming
 // version, or back to the previous one); and Resolve DNS name, which
 // answers connect.resolve's connect settings.
@@ -18,31 +20,83 @@ import (
 const (
 	internalCAMode = "GOOGLE_MANAGED_INTERNAL_CA"
 	casCAMode      = "GOOGLE_MANAGED_CAS_CA"
+	customerCAMode = "CUSTOMER_MANAGED_CAS_CA"
 )
+
+// casSigned is whether the instance's server certificate is rotated, not
+// its CA: a shared or customer-managed CAS CA signs it.
+func casSigned(in *sqladminapi.DatabaseInstance) bool {
+	m := serverCAMode(in)
+	return m == casCAMode || m == customerCAMode
+}
 
 // serverCAModeField is the Server CA mode choice of Create instance and
 // Edit instance.
 func serverCAModeField(def string) console.Field {
 	return console.Field{Name: "serverCaMode", Label: "Server CA mode", Type: "select", Required: true,
-		Options: []string{internalCAMode, casCAMode}, Default: def,
+		Options: []string{internalCAMode, casCAMode, customerCAMode}, Default: def,
 		Help: "GOOGLE_MANAGED_INTERNAL_CA signs the server's certificate with a CA of the instance's own, rotated with Add server CA. " +
 			"GOOGLE_MANAGED_CAS_CA signs it with the region's shared CA hierarchy (here CloudBurrow's own, local CAs), and gives the instance a DNS name; " +
-			"its server certificate is rotated with Add server certificate."}
+			"its server certificate is rotated with Add server certificate. CUSTOMER_MANAGED_CAS_CA has a CA of your CA pool (Server CA pool) issue it. " +
+			"An instance on CUSTOMER_MANAGED_CAS_CA cannot go back to GOOGLE_MANAGED_INTERNAL_CA."}
+}
+
+// serverCAPoolFields are Server CA pool and Rotate server certificates
+// automatically, of Create instance and Edit instance.
+func serverCAPoolFields(in *sqladminapi.DatabaseInstance) []console.Field {
+	pool, rot := "", "NO_AUTOMATIC_ROTATION"
+	if in != nil && in.Settings != nil && in.Settings.IpConfiguration != nil {
+		pool = in.Settings.IpConfiguration.ServerCaPool
+		if m := in.Settings.IpConfiguration.ServerCertificateRotationMode; m != "" {
+			rot = m
+		}
+	}
+	return []console.Field{
+		{Name: "serverCaPool", Label: "Server CA pool (CUSTOMER_MANAGED_CAS_CA)", Type: "text", Default: pool,
+			Help: "projects/P/locations/REGION/caPools/POOL, a CA pool of this instance's Certificate Authority Service (needs privateca in --services) " +
+				"in the instance's region, with at least one enabled CA; it must allow configuration-based requests and DNS names in SANs. " +
+				"Leave it empty for the other modes."},
+		{Name: "serverCertificateRotationMode", Label: "Rotate server certificates automatically", Type: "select",
+			Options: []string{"NO_AUTOMATIC_ROTATION", "AUTOMATIC_ROTATION_DURING_MAINTENANCE"}, Default: rot,
+			Help: "Recorded. Cloud SQL rotates during maintenance; no maintenance event is scheduled here, so rotate with Add server certificate."},
+	}
 }
 
 // serverCAMode is the instance's server CA mode.
 func serverCAMode(in *sqladminapi.DatabaseInstance) string {
-	if in.Settings != nil && in.Settings.IpConfiguration != nil && in.Settings.IpConfiguration.ServerCaMode == casCAMode {
-		return casCAMode
+	if in.Settings != nil && in.Settings.IpConfiguration != nil {
+		if m := in.Settings.IpConfiguration.ServerCaMode; m == casCAMode || m == customerCAMode {
+			return m
+		}
 	}
 	return internalCAMode
+}
+
+// serverCAPool is a customer-managed instance's CA pool.
+func serverCAPool(in *sqladminapi.DatabaseInstance) string {
+	if in.Settings != nil && in.Settings.IpConfiguration != nil {
+		return in.Settings.IpConfiguration.ServerCaPool
+	}
+	return ""
 }
 
 // withServerCAMode sets st's server CA mode to mode, keeping the rest of
 // cur, the instance's ipConfiguration; it sets nothing when mode is
 // already the instance's.
-func withServerCAMode(st *sqladminapi.Settings, cur *sqladminapi.DatabaseInstance, mode string) {
-	if mode == "" || (cur == nil && mode == internalCAMode) || (cur != nil && serverCAMode(cur) == mode) {
+func withServerCAMode(st *sqladminapi.Settings, cur *sqladminapi.DatabaseInstance, v map[string]string) {
+	mode, pool, rot := v["serverCaMode"], strings.TrimSpace(v["serverCaPool"]), v["serverCertificateRotationMode"]
+	if mode != customerCAMode {
+		pool = ""
+	}
+	curRot := ""
+	if cur != nil && cur.Settings != nil && cur.Settings.IpConfiguration != nil {
+		curRot = cur.Settings.IpConfiguration.ServerCertificateRotationMode
+	}
+	if curRot == "" {
+		curRot = "NO_AUTOMATIC_ROTATION"
+	}
+	same := cur != nil && (mode == "" || serverCAMode(cur) == mode) && serverCAPool(cur) == pool && (rot == "" || rot == curRot)
+	if same || (cur == nil && (mode == "" || mode == internalCAMode) && (rot == "" || rot == "NO_AUTOMATIC_ROTATION")) {
 		return
 	}
 	ic := &sqladminapi.IpConfiguration{}
@@ -50,7 +104,18 @@ func withServerCAMode(st *sqladminapi.Settings, cur *sqladminapi.DatabaseInstanc
 		c := *cur.Settings.IpConfiguration
 		ic = &c
 	}
-	ic.ServerCaMode = mode
+	if mode != "" {
+		ic.ServerCaMode = mode
+	}
+	ic.ServerCaPool = pool
+	if pool == "" && cur != nil && serverCAPool(cur) != "" {
+		// Leaving a customer's pool takes serverCaPool "", as Google
+		// documents.
+		ic.ForceSendFields = append(ic.ForceSendFields, "ServerCaPool")
+	}
+	if rot != "" {
+		ic.ServerCertificateRotationMode = rot
+	}
 	st.IpConfiguration = ic
 }
 
@@ -58,7 +123,7 @@ func withServerCAMode(st *sqladminapi.Settings, cur *sqladminapi.DatabaseInstanc
 // the active one, the upcoming one and the previous one marked, and
 // returns the fingerprints of those that are not active, newest first.
 func serverCertSummary(ctx context.Context, svc *sqladminapi.Service, project string, in *sqladminapi.DatabaseInstance, d *console.Detail) []string {
-	if serverCAMode(in) != casCAMode {
+	if !casSigned(in) {
 		return nil
 	}
 	list, err := svc.Instances.ListServerCertificates(project, in.Name).Context(ctx).Do()
@@ -94,12 +159,16 @@ func serverCertSummary(ctx context.Context, svc *sqladminapi.Service, project st
 // server certificate, and Resolve DNS name on an instance with a DNS name.
 func serverCertActions(in *sqladminapi.DatabaseInstance, others []string) []console.Action {
 	var acts []console.Action
-	if serverCAMode(in) == casCAMode {
+	if casSigned(in) {
+		issuer := "the region's CA"
+		if serverCAMode(in) == customerCAMode {
+			issuer = "a CA of the instance's CA pool, " + serverCAPool(in)
+		}
 		acts = append(acts, console.Action{ID: "add-server-cert", Label: "Add server certificate",
-			Confirm: "A new upcoming server certificate is issued by the region's CA; one added before and never rotated in is replaced."})
+			Confirm: "A new upcoming server certificate is issued by " + issuer + "; one added before and never rotated in is replaced."})
 		if len(others) > 0 {
 			acts = append(acts, console.Action{ID: "rotate-server-cert", Label: "Rotate server certificate",
-				Confirm: "The server presents the chosen certificate from the next connection on; clients trust it already, as it is signed by the same CA.",
+				Confirm: "The server presents the chosen certificate from the next connection on; clients that trust its CA chain (listServerCertificates' caCerts) reach it.",
 				Fields: []console.Field{{Name: "nextVersion", Label: "Certificate (SHA-1 fingerprint)", Type: "select", Required: true,
 					Options: others, Default: others[0], Help: "The upcoming certificate, or the previous one to roll back to."}}})
 		}

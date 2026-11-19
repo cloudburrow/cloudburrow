@@ -638,6 +638,17 @@ func (s *Server) insertInstance(r *http.Request, base, project string) (any, err
 	if err := checkReplicationSetting(b.raw, spec); err != nil {
 		return nil, err
 	}
+	// A customer's CA pool issues the server certificate now (#1834).
+	s.emu.RLock()
+	cas, exists := s.privateca, s.engineLocked(b.Name) != nil || s.writes.sources[b.Name] != nil
+	s.emu.RUnlock()
+	if exists {
+		return nil, Errorf(http.StatusConflict, "The Cloud SQL instance already exists.")
+	}
+	firstCert, err := checkServerCA(r.Context(), cas, nil, spec)
+	if err != nil {
+		return nil, err
+	}
 	s.emu.Lock()
 	if s.engineLocked(b.Name) != nil || s.writes.sources[b.Name] != nil {
 		s.emu.Unlock()
@@ -652,6 +663,9 @@ func (s *Server) insertInstance(r *http.Request, base, project string) (any, err
 	}
 	if s.conn != nil {
 		if err := s.conn.addInstance(b.Name); err != nil {
+			return nil, err
+		}
+		if err := s.conn.installServerCert(b.Name, firstCert); err != nil {
 			return nil, err
 		}
 	}
@@ -797,6 +811,16 @@ func (s *Server) patchInstance(r *http.Request, base, project, name string, repl
 		s.emu.Unlock()
 		return nil, Errorf(http.StatusBadRequest, "Invalid request: Invalid request since instance settings are missing tier.")
 	}
+	if !replace {
+		keepCASettings(c.spec, &next, b.raw)
+	}
+	// A new customer's CA pool issues the server certificate now (#1834).
+	prevSpec := c.spec
+	newCert, err := checkServerCA(r.Context(), s.privateca, &prevSpec, next)
+	if err != nil {
+		s.emu.Unlock()
+		return nil, err
+	}
 	// A DR replica's designation, and what a DR replica cannot be (#1614).
 	if next.FailoverDR, err = s.drDesignationLocked(b, project, next); err == nil {
 		err = s.checkDRReplicaPatchLocked(next, b.raw)
@@ -842,6 +866,11 @@ func (s *Server) patchInstance(r *http.Request, base, project, name string, repl
 	s.emu.Unlock()
 	if err != nil {
 		return nil, err
+	}
+	if s.conn != nil {
+		if err := s.conn.installServerCert(name, newCert); err != nil {
+			return nil, err
+		}
 	}
 	opType := "UPDATE"
 	if !restart {

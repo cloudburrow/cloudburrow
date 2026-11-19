@@ -240,4 +240,8 @@ const (
 	// compatibility tests, which grant the roles a sign-in's principal
 	// needs (#1738, #1742, #1743; #1761).
 	envFirestoreResourceManager = "CLOUDBURROW_TEST_FIRESTORE_RESOURCEMANAGER"
+	// Certificate Authority Service for the sql shard's
+	// CUSTOMER_MANAGED_CAS_CA instances, whose CA pools issue their server
+	// certificates (#1834).
+	envSQLPrivateCA = "CLOUDBURROW_TEST_SQL_PRIVATECA"
 )

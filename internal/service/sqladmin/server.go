@@ -124,8 +124,12 @@ type Server struct {
 	secrets SecretAccessor
 	// kms is Cloud KMS, for diskEncryptionConfiguration (#1538), nil unless
 	// UseKMS was called; emu guards it.
-	kms      KeyService
-	stopAuto chan struct{}
+	kms KeyService
+	// privateca is Certificate Authority Service, for
+	// CUSTOMER_MANAGED_CAS_CA (#1834), nil unless
+	// UseCertificateAuthorityService was called; emu guards it.
+	privateca CertificateAuthorityService
+	stopAuto  chan struct{}
 	// advances are the retention clock's Advances (#1330), oldest first.
 	clockMu  sync.Mutex
 	advances []clockAdvance
