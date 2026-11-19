@@ -23,9 +23,14 @@
 #              serves, for TestOneProjectNumberEverywhere, which compares
 #              its project number with Cloud Storage's service agent;
 #   served:    the remaining CloudBurrow-served APIs (kms, logging,
-#              privateca) and the
+#              privateca, gke) and the
 #              KMS restart probe, with Resource Manager as
-#              LOGGING_RESOURCEMANAGER for the Logging folder tests;
+#              LOGGING_RESOURCEMANAGER for the Logging folder tests and
+#              Service Usage as GKE_SERVICEUSAGE for gcloud container; the
+#              Kubernetes Engine API's tests make kind clusters beside the
+#              instance's (about 5 minutes on a laptop, and 20 GiB free,
+#              which ci.yml makes room for), and its console test runs in
+#              this shard's browser step;
 #   run:       Cloud Run with its Knative install; secretmanager too, for
 #              the two tests that read a secret from a revision, so its
 #              tests run here and in storage;
