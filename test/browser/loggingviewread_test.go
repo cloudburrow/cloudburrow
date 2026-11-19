@@ -75,6 +75,8 @@ func TestLogsExplorerThroughViewAndParentPicker(t *testing.T) {
 	if shown {
 		t.Error("the Explorer shows an INFO entry through a severity>=ERROR view")
 	}
+	// Later entries are drawn while streaming (#1863).
+	p.eval(`[...document.querySelectorAll("#view button")].find((b) => b.textContent === "Stream logs").click(), true`, nil)
 	time.Sleep(time.Second)
 	write("ERROR", "browser-tailed")
 	p.waitFor(`[...document.querySelectorAll("#view tbody td")].some((td) => td.textContent === "browser-tailed")`)

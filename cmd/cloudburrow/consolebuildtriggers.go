@@ -7,17 +7,26 @@ package main
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
+	"time"
 
 	cloudbuild "cloud.google.com/go/cloudbuild/apiv1/v2"
 	cbpb "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
+	"google.golang.org/protobuf/proto"
 
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 )
 
 // buildTriggersProvider is the Triggers page.
-type buildTriggersProvider struct{ b runBuildsProvider }
+type buildTriggersProvider struct {
+	b runBuildsProvider
+	// registry lists the project's IAM service accounts, the Service
+	// account drop-down's choices (#1854); nil offers the default only.
+	registry *resourcemanager.Registry
+}
 
 func (buildTriggersProvider) ID() string    { return "cloud-build-triggers" }
 func (buildTriggersProvider) Title() string { return "Cloud Build triggers" }
@@ -30,32 +39,58 @@ func (p buildTriggersProvider) project(project string) string {
 }
 
 func (p buildTriggersProvider) List(ctx context.Context, project string) (console.Listing, error) {
-	out := console.Listing{Columns: []string{"Region", "Event", "Description", "Pool", "Approval", "Age"},
-		NameColumn: "Trigger", Noun: "triggers", AlwaysStatus: true,
-		Note: "Manual, webhook and Pub/Sub triggers run an inline build; a Pub/Sub trigger subscribes to its topic on this " +
-			"instance's Pub/Sub, and its builds, which arrive from the cluster, run docker build, docker push and pack steps only. " +
-			"GitHub, GitLab, Bitbucket and Cloud Source Repositories events, and builds read from a repository, need a hosted " +
-			"git service and are refused."}
+	out := console.Listing{Columns: []string{"Description", "Region", "Repository", "Event", "Build configuration", "Pool", "Approval", "Age"},
+		NameColumn: "Name", Noun: "triggers", AlwaysStatus: true, RowsOpenable: true,
+		Note: "Push to a branch and Push new tag triggers run on a Developer Connect link to one of this instance's Secure Source Manager " +
+			"repositories; manual, webhook and Pub/Sub triggers run an inline build. A Pub/Sub trigger's builds, which arrive from the " +
+			"cluster, run docker build, docker push and pack steps only. GitHub, GitLab and Bitbucket need a hosted git service."}
 	for _, t := range runadapter.Triggers(p.project(project), "") {
 		region := strings.Split(t.GetResourceName(), "/")[3]
-		event, st := "Manual invocation", "Enabled"
-		if t.GetWebhookConfig() != nil {
-			event = "Webhook event"
-		}
-		if pc := t.GetPubsubConfig(); pc != nil {
-			event = "Pub/Sub message: " + pc.GetTopic()
-		}
+		st := "Enabled"
 		if t.GetDisabled() {
 			st = "Disabled"
 		}
+		repo := "-"
+		if r := t.GetRepositoryEventConfig().GetRepository(); r != "" {
+			repo = r[strings.LastIndex(r, "/")+1:]
+		}
 		out.Items = append(out.Items, console.Resource{Name: t.GetName(), Status: st, Fields: map[string]string{
-			"Region": region, "Event": event, "Description": orDash(t.GetDescription()),
-			"Pool": orDash(t.GetBuild().GetOptions().GetPool().GetName()), "Approval": approvalLabel(t.GetResourceName()),
+			"Region": region, "Event": triggerEvent(t), "Description": orDash(t.GetDescription()), "Repository": repo,
+			"Build configuration": triggerConfigLabel(t),
+			"Pool":                orDash(t.GetBuild().GetOptions().GetPool().GetName()), "Approval": approvalLabel(t.GetResourceName()),
 			"Age": stampAge(t.GetCreateTime())}})
 	}
 	out.Total = len(out.Items)
-	out.Summary = p.defaultServiceAccount(ctx, project)
 	return out, nil
+}
+
+// triggerEvent is the Event column, in Google's words.
+func triggerEvent(t *cbpb.BuildTrigger) string {
+	switch {
+	case t.GetPubsubConfig() != nil:
+		return "Pub/Sub message: " + t.GetPubsubConfig().GetTopic()
+	case t.GetWebhookConfig() != nil:
+		return "Webhook event"
+	}
+	// A trigger on a Developer Connect link (#1852).
+	if push := t.GetRepositoryEventConfig().GetPush(); push != nil {
+		if push.GetTag() != "" {
+			return "Push new tag: " + push.GetTag()
+		}
+		return "Push to branch: " + push.GetBranch()
+	}
+	return "Manual invocation"
+}
+
+// triggerConfigLabel is the Build configuration column.
+func triggerConfigLabel(t *cbpb.BuildTrigger) string {
+	switch {
+	case t.GetAutodetect():
+		return "Autodetected"
+	case t.GetFilename() != "":
+		return "Cloud Build configuration file: " + t.GetFilename()
+	}
+	return "Inline"
 }
 
 // find resolves a trigger by its name, which may be in any region.
@@ -75,23 +110,30 @@ func (p buildTriggersProvider) find(project, name string) (*cbpb.BuildTrigger, e
 	return nil, fmt.Errorf("trigger %q is in %d regions; use gcloud builds triggers --region", name, len(match))
 }
 
-func (buildTriggersProvider) CreateForm() (string, []console.Field) {
-	return "Create trigger", []console.Field{
-		{Name: "name", Label: "Name", Type: "text", Required: true, Pattern: "^[a-zA-Z0-9][\\-a-zA-Z0-9_]{0,62}$"},
-		{Name: "region", Label: "Region", Type: "text", Default: "global", Help: "global, or a region such as us-central1"},
-		{Name: "description", Label: "Description", Type: "text"},
-		{Name: "image", Label: "Step image", Type: "text", Required: true, Default: "alpine:3.20",
-			Help: "the build's one step; a step other than docker build, docker push or pack runs only with --cloudbuild-host-steps"},
-		{Name: "command", Label: "Command", Type: "text", Required: true, Default: "echo triggered by $TRIGGER_NAME",
-			Help: "run with sh -c; $TRIGGER_NAME, $BUILD_ID and _NAME substitutions apply"},
-		{Name: "pool", Label: "Worker pool", Type: "text", Help: "optional: projects/PROJECT/locations/REGION/workerPools/POOL"},
-		{Name: "secret", Label: "Webhook secret", Type: "text",
-			Help: "optional: a Secret Manager version, projects/PROJECT/secrets/SECRET/versions/N, which makes a webhook trigger"},
-		{Name: "topic", Label: "Pub/Sub topic", Type: "text",
-			Help: "optional: projects/PROJECT/topics/TOPIC, which makes a Pub/Sub trigger; $(body.message.data.KEY) in a substitution reads the message"},
-		{Name: "approval", Label: "Require approval", Type: "checkbox",
-			Help: "approvalConfig.approvalRequired: each build waits, PENDING, until it is approved on its build page"},
-	}
+// CreateForm is Google's Create trigger page (consolebuildtriggerform.go).
+func (p buildTriggersProvider) CreateForm() (string, []console.Field) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	return "Create trigger", p.triggerFields(ctx, "", nil)
+}
+
+// CreateOnPage, CreateLayout and CreateSubmit draw Create trigger as one
+// page under its headings, ending in Create, as Google's is.
+func (buildTriggersProvider) CreateOnPage() bool   { return true }
+func (buildTriggersProvider) CreateLayout() string { return console.CreateLayoutPage }
+func (buildTriggersProvider) CreateSubmit() string { return "Create" }
+func (buildTriggersProvider) DeleteLabel() string  { return "Delete" }
+func (buildTriggersProvider) RowEditLabel() string { return "Edit" }
+
+// RowEditFirst begins the row's menu with Edit: Google's reads Edit,
+// Disable, Delete (#1854).
+func (buildTriggersProvider) RowEditFirst() bool { return true }
+
+// CreateFormFor is Create trigger for the selected project (#1854): its
+// Repository lists that project's linked repositories, its Private pool
+// that project's pools and its Service account that project's accounts.
+func (p buildTriggersProvider) CreateFormFor(ctx context.Context, project string) []console.Field {
+	return p.triggerFields(ctx, project, nil)
 }
 
 // approvalLabel is the Approval column: whether the trigger's builds wait
@@ -109,18 +151,11 @@ func (p buildTriggersProvider) Create(ctx context.Context, project string, v map
 	if region == "" {
 		region = "global"
 	}
-	b := &cbpb.Build{Steps: []*cbpb.BuildStep{{Name: strings.TrimSpace(v["image"]), Entrypoint: "sh", Args: []string{"-c", v["command"]}}}}
-	if pool := strings.TrimSpace(v["pool"]); pool != "" {
-		b.Options = &cbpb.BuildOptions{Pool: &cbpb.BuildOptions_PoolOption{Name: pool}}
+	t, err := triggerFromValues(v)
+	if err != nil {
+		return "", err
 	}
-	t := &cbpb.BuildTrigger{Name: strings.TrimSpace(v["name"]), Description: v["description"], BuildTemplate: &cbpb.BuildTrigger_Build{Build: b}}
-	if s := strings.TrimSpace(v["secret"]); s != "" {
-		t.WebhookConfig = &cbpb.WebhookConfig{AuthMethod: &cbpb.WebhookConfig_Secret{Secret: s}}
-	}
-	if topic := strings.TrimSpace(v["topic"]); topic != "" {
-		t.PubsubConfig = &cbpb.PubsubConfig{Topic: topic}
-	}
-	err := p.b.withClient(ctx, func(c *cloudbuild.Client) error {
+	err = p.b.withClient(ctx, func(c *cloudbuild.Client) error {
 		made, err := c.CreateBuildTrigger(ctx, &cbpb.CreateBuildTriggerRequest{ProjectId: project,
 			Parent: "projects/" + project + "/locations/" + region, Trigger: t})
 		if err != nil || (v["approval"] != "true" && v["approval"] != "on") {
@@ -136,13 +171,24 @@ func (p buildTriggersProvider) Create(ctx context.Context, project string, v map
 // Actions offers Run on an enabled manual trigger, as Google's Triggers
 // page does; a webhook trigger runs from its URL.
 func (p buildTriggersProvider) Actions(r console.Resource) []console.Action {
-	if r.Status == "Enabled" && r.Fields["Event"] == "Manual invocation" {
-		return []console.Action{{ID: "run", Label: "Run", Confirm: "a build runs from the trigger's build config"}}
+	var acts []console.Action
+	ev := r.Fields["Event"]
+	if r.Status == "Enabled" && (ev == "Manual invocation" || strings.HasPrefix(ev, "Push ")) {
+		// A button on the row, as Google's (#1854).
+		acts = append(acts, console.Action{ID: "run", Label: "Run", Button: true, Confirm: "a build runs from the trigger's build config"})
 	}
-	return nil
+	// Disable and Enable in the row's menu (#1854), as Google's.
+	if r.Status == "Disabled" {
+		return append(acts, console.Action{ID: "enable-trigger", Label: "Enable"})
+	}
+	return append(acts, console.Action{ID: "disable-trigger", Label: "Disable",
+		Confirm: "A disabled trigger starts no build, from Run, a push, its topic or its webhook, until it is enabled."})
 }
 
 func (p buildTriggersProvider) Act(ctx context.Context, project, name, action string) error {
+	if action == "enable-trigger" || action == "disable-trigger" {
+		return p.ActAt(ctx, project, []string{name}, action, nil)
+	}
 	if action != "run" {
 		return fmt.Errorf("unknown action %q", action)
 	}
@@ -202,21 +248,128 @@ func (p buildWorkerPoolsProvider) List(_ context.Context, project string) (conso
 	return out, nil
 }
 
+// Create private pool (#1854), as Google's "Create and manage private
+// pools" page draws it: Name and Region; Machine configuration (Series,
+// Machine type, Disk size, Nested virtualization for C3); Worker release
+// (a release channel or a release); Network type (Default network or a
+// Private network's project, network and IP range); Assign external IPs.
+// The pool is stored as CreateWorkerPool takes it; a build on it runs on
+// the host's Docker, whatever its machine or network.
 func (buildWorkerPoolsProvider) CreateForm() (string, []console.Field) {
-	return "Create worker pool", []console.Field{
-		{Name: "name", Label: "Name", Type: "text", Required: true, Pattern: "^[a-z]([\\-a-z0-9]{0,61}[a-z0-9])?$"},
-		{Name: "region", Label: "Region", Type: "text", Required: true, Default: "us-central1"},
-		{Name: "machineType", Label: "Machine type", Type: "text", Default: "e2-standard-2"},
+	fields := []console.Field{
+		{Name: "name", Label: "Name", Type: "text", Required: true, Pattern: "^[a-z]([\\-a-z0-9]{0,61}[a-z0-9])?$",
+			Help: "Can only contain alphanumeric characters [a-z][0-9] or dashes -; 1 to 63 characters."},
+		{Name: "region", Label: "Region", Type: "select", Required: true, Options: poolRegions, Default: "us-central1"},
+		{Name: "series", Label: "Series", Type: "select", Section: "Machine configuration", Options: []string{"e2", "n1", "c3"},
+			OptionLabels: map[string]string{"e2": "E2", "n1": "N1", "c3": "C3"}, Default: "e2"},
 	}
+	for _, series := range []string{"e2", "n1", "c3"} {
+		fields = append(fields, console.Field{Name: "machineType-" + series, Label: "Machine type", Type: "select",
+			Section: "Machine configuration", Options: poolMachineTypes[series], Default: poolMachineTypes[series][0],
+			ShowWhen: "series=" + series})
+	}
+	return "Create private pool", append(fields,
+		console.Field{Name: "diskSizeGb", Label: "Disk size", Type: "number", Section: "Machine configuration",
+			Pattern: `^$|^([1-9][0-9]{2}|[1-3][0-9]{3}|4000)$`, Help: "100 to 4000 GB. Left blank, Cloud Build uses 100."},
+		console.Field{Name: "nestedVirtualization", Label: "Nested virtualization", Type: "checkbox", Section: "Machine configuration",
+			ShowWhen: "series=c3", Help: "Run VMs inside the build's VM. C3 machines only."},
+		console.Field{Name: "release", Label: "Worker release", Type: "radio", Section: "Worker release",
+			Options: []string{"channel", "version"}, OptionLabels: map[string]string{"channel": "Release channel", "version": "Release"}, Default: "channel"},
+		console.Field{Name: "channel", Label: "Release channel", Type: "select", Section: "Worker release", ShowWhen: "release=channel",
+			Options: []string{"regular", "stable", "rapid"}, Default: "regular"},
+		console.Field{Name: "version", Label: "Release", Type: "text", Section: "Worker release", ShowWhen: "release=version",
+			Help: "A worker release version number."},
+		console.Field{Name: "network", Label: "Network type", Type: "radio", Section: "Network type",
+			Options: []string{"default", "private"}, OptionLabels: map[string]string{"default": "Default network", "private": "Private network"},
+			Default: "default", Help: "Default network: the pool uses the service producer network. Private network: workers peer to a VPC network of yours."},
+		console.Field{Name: "networkProject", Label: "Project", Type: "text", Section: "Network type", ShowWhen: "network=private"},
+		console.Field{Name: "networkName", Label: "Network", Type: "text", Section: "Network type", ShowWhen: "network=private",
+			Pattern: `^$|^[a-z]([a-z0-9\-]*[a-z0-9])?$`},
+		console.Field{Name: "ipRange", Label: "IP range", Type: "text", Section: "Network type", ShowWhen: "network=private",
+			Pattern: `^$|^([0-9]{1,3}(\.[0-9]{1,3}){3})?/([0-9]|1[0-9]|2[0-9])$`,
+			Help:    "Optional. CIDR notation, such as 192.0.2.0/24; the prefix can't exceed /29, and /24 is assigned if empty."},
+		console.Field{Name: "externalIPs", Label: "Assign external IPs", Type: "checkbox", Section: "Network type", Default: "true",
+			Help: "Lets the pool reach the public internet. Clear it to restrict access to your private network."},
+	)
+}
+
+// poolRegions are the regions Create private pool offers.
+var poolRegions = []string{"us-central1", "us-east1", "us-west1", "europe-west1", "europe-west2", "asia-east1", "asia-northeast1"}
+
+// poolMachineTypes are each series' machine types, as Google's drop-down
+// lists them.
+var poolMachineTypes = map[string][]string{
+	"e2": {"e2-standard-2", "e2-standard-4", "e2-standard-8", "e2-standard-16", "e2-standard-32", "e2-medium",
+		"e2-highcpu-2", "e2-highcpu-4", "e2-highcpu-8", "e2-highcpu-16", "e2-highcpu-32", "e2-highmem-2", "e2-highmem-4", "e2-highmem-8", "e2-highmem-16"},
+	"n1": {"n1-standard-1", "n1-standard-2", "n1-standard-4", "n1-standard-8", "n1-standard-16", "n1-standard-32", "n1-standard-64", "n1-standard-96",
+		"n1-highcpu-8", "n1-highcpu-32"},
+	"c3": {"c3-standard-4", "c3-standard-8", "c3-standard-22", "c3-standard-44", "c3-standard-88", "c3-standard-176"},
+}
+
+// CreateOnPage, CreateLayout and CreateSubmit draw Create private pool as
+// one page under its headings, ending in Create, as Google's is.
+func (buildWorkerPoolsProvider) CreateOnPage() bool   { return true }
+func (buildWorkerPoolsProvider) CreateLayout() string { return console.CreateLayoutPage }
+func (buildWorkerPoolsProvider) CreateSubmit() string { return "Create" }
+
+// poolFromValues is the pool Create private pool describes.
+func poolFromValues(v map[string]string) (*cbpb.WorkerPool, error) {
+	on := func(k string) bool { return v[k] == "true" || v[k] == "on" }
+	series := orText(strings.TrimSpace(v["series"]), "e2")
+	mt := strings.TrimSpace(v["machineType-"+series])
+	if mt == "" {
+		// The API callers' older form names the machine type alone.
+		mt = strings.TrimSpace(v["machineType"])
+	}
+	wc := &cbpb.PrivatePoolV1Config_WorkerConfig{MachineType: mt}
+	if d := strings.TrimSpace(v["diskSizeGb"]); d != "" {
+		n, err := strconv.ParseInt(d, 10, 64)
+		if err != nil || n < 100 || n > 4000 {
+			return nil, fmt.Errorf("disk size %q: enter a value from 100 to 4000", d)
+		}
+		wc.DiskSizeGb = n
+	}
+	if series == "c3" && on("nestedVirtualization") {
+		wc.EnableNestedVirtualization = proto.Bool(true)
+	}
+	switch v["release"] {
+	case "version":
+		wc.WorkerRelease = strings.TrimSpace(v["version"])
+	case "channel":
+		wc.WorkerRelease = orText(strings.TrimSpace(v["channel"]), "regular")
+	}
+	cfg := &cbpb.PrivatePoolV1Config{WorkerConfig: wc}
+	egress := cbpb.PrivatePoolV1Config_NetworkConfig_PUBLIC_EGRESS
+	if _, set := v["externalIPs"]; set && !on("externalIPs") {
+		egress = cbpb.PrivatePoolV1Config_NetworkConfig_NO_PUBLIC_EGRESS
+	}
+	nc := &cbpb.PrivatePoolV1Config_NetworkConfig{EgressOption: egress}
+	if v["network"] == "private" {
+		project, network := strings.TrimSpace(v["networkProject"]), strings.TrimSpace(v["networkName"])
+		if project == "" || network == "" {
+			return nil, fmt.Errorf("a private network needs its project and network")
+		}
+		nc.PeeredNetwork = "projects/" + project + "/global/networks/" + network
+		nc.PeeredNetworkIpRange = strings.TrimSpace(v["ipRange"])
+	} else if strings.TrimSpace(v["ipRange"]) != "" {
+		return nil, fmt.Errorf("an IP range is set only after choosing a private network")
+	}
+	if v["network"] != "" || v["externalIPs"] != "" {
+		cfg.NetworkConfig = nc
+	}
+	return &cbpb.WorkerPool{Config: &cbpb.WorkerPool_PrivatePoolV1Config{PrivatePoolV1Config: cfg}}, nil
 }
 
 func (p buildWorkerPoolsProvider) Create(ctx context.Context, project string, v map[string]string) (string, error) {
 	project = p.project(project)
 	name := strings.TrimSpace(v["name"])
-	err := p.b.withClient(ctx, func(c *cloudbuild.Client) error {
+	pool, err := poolFromValues(v)
+	if err != nil {
+		return "", err
+	}
+	err = p.b.withClient(ctx, func(c *cloudbuild.Client) error {
 		op, err := c.CreateWorkerPool(ctx, &cbpb.CreateWorkerPoolRequest{Parent: "projects/" + project + "/locations/" + strings.TrimSpace(v["region"]),
-			WorkerPoolId: name, WorkerPool: &cbpb.WorkerPool{Config: &cbpb.WorkerPool_PrivatePoolV1Config{PrivatePoolV1Config: &cbpb.PrivatePoolV1Config{
-				WorkerConfig: &cbpb.PrivatePoolV1Config_WorkerConfig{MachineType: strings.TrimSpace(v["machineType"])}}}}})
+			WorkerPoolId: name, WorkerPool: pool})
 		if err != nil {
 			return err
 		}
@@ -246,9 +399,17 @@ func (p buildWorkerPoolsProvider) Delete(ctx context.Context, project, name stri
 }
 
 var (
-	_ console.Creator = buildTriggersProvider{}
-	_ console.Actor   = buildTriggersProvider{}
-	_ console.Deleter = buildTriggersProvider{}
-	_ console.Creator = buildWorkerPoolsProvider{}
-	_ console.Deleter = buildWorkerPoolsProvider{}
+	_ console.CreateLayouter      = buildTriggersProvider{}
+	_ console.PageCreator         = buildTriggersProvider{}
+	_ console.CreateSubmitter     = buildTriggersProvider{}
+	_ console.Actor               = buildTriggersProvider{}
+	_ console.DeleteLabeler       = buildTriggersProvider{}
+	_ console.RowEditor           = buildTriggersProvider{}
+	_ console.RowEditLeader       = buildTriggersProvider{}
+	_ console.ProjectCreateFormer = buildTriggersProvider{}
+	_ console.Creator             = buildWorkerPoolsProvider{}
+	_ console.PageCreator         = buildWorkerPoolsProvider{}
+	_ console.CreateLayouter      = buildWorkerPoolsProvider{}
+	_ console.CreateSubmitter     = buildWorkerPoolsProvider{}
+	_ console.Deleter             = buildWorkerPoolsProvider{}
 )

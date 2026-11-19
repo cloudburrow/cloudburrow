@@ -54,6 +54,9 @@ import (
 
 const ssmGitPrefix = "/sourcemanager/git/"
 
+// ssmMaxPush bounds a chunked push's body, which is read into memory.
+const ssmMaxPush = 2 << 30
+
 // IsSourceManagerGitPath reports whether a path is a repository's git URL.
 func IsSourceManagerGitPath(p string) bool { return strings.HasPrefix(p, ssmGitPrefix) }
 
@@ -81,6 +84,19 @@ func (m *SecureSourceManagerServer) serveGit(builds *CloudBuildServer, w http.Re
 	var before map[string]string
 	if push {
 		before = gitRefs(r.Context(), dir)
+	}
+	// git sends a pack larger than its http.postBuffer (1 MiB) chunked,
+	// with no Content-Length, and git http-backend reads CONTENT_LENGTH:
+	// without it the push is refused with a 400 (#1852). The body is read
+	// first, so the backend is given its length.
+	if r.Method == http.MethodPost && r.ContentLength < 0 {
+		body, err := io.ReadAll(io.LimitReader(r.Body, ssmMaxPush+1))
+		if err != nil || int64(len(body)) > ssmMaxPush {
+			http.Error(w, "the request body could not be read, or is larger than 2 GiB", http.StatusRequestEntityTooLarge)
+			return
+		}
+		r.Body, r.ContentLength = io.NopCloser(bytes.NewReader(body)), int64(len(body))
+		r.TransferEncoding = nil
 	}
 	h := &cgi.Handler{
 		Path: gitExe,
@@ -235,6 +251,9 @@ func (m *SecureSourceManagerServer) runPushTriggers(ctx context.Context, builds 
 	if strings.Trim(sha, "0") == "" || (!strings.HasPrefix(ref, "refs/heads/") && !strings.HasPrefix(ref, "refs/tags/")) {
 		return // a deleted ref, or not a branch or tag
 	}
+	// The Cloud Build triggers on a Developer Connect link to the
+	// repository run too (#1852, cloudbuilddevconnect.go).
+	runDevConnectPushTriggers(ctx, builds, repo.GetName(), dir, ref, sha)
 	raw, err := exec.CommandContext(ctx, "git", "-C", dir, "show", "HEAD:"+ssmTriggersFile).Output()
 	if err != nil {
 		return // no triggers file on the default branch

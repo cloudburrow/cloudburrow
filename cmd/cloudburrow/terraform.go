@@ -92,6 +92,7 @@ var terraformEndpoints = []terraformEndpoint{
 	// official client updates in place and destroys, in
 	// TestTerraformDeveloperConnect.
 	{config.ServiceRun, "developer_connect_custom_endpoint", "GOOGLE_DEVELOPER_CONNECT_CUSTOM_ENDPOINT", "/developerconnect/v1/", true, ""},
+	{config.ServiceRun, "eventarc_custom_endpoint", "GOOGLE_EVENTARC_CUSTOM_ENDPOINT", "/eventarc/v1/", true, ""},
 	// Cloud Functions v2 (#1377), on the Run port: a function is a
 	// buildpacks build and a Cloud Run service. google_cloudfunctions2_function
 	// applies, plans clean, updates in place and destroys in

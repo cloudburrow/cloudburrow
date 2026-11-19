@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
@@ -21,6 +22,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -471,6 +473,16 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		runSvc.calls = callEvents(recorder, requestMetrics, "run")
 		runSvc.interpose = append(runSvc.interpose, grpctransport.LogInterceptor(logger, "run"), faults.Interceptor("run"))
 		runSvc.requests = requestEvents(recorder, requestMetrics, "run")
+		if runSvc.events != nil {
+			// Eventarc's Cloud Audit Logs events (#1877), from the calls
+			// the services' fronts record.
+			go feedAuditLogs(recorder, runSvc.functions.Load)
+			if slices.Contains(cfg.EnabledServices(), config.ServiceFirestore) {
+				// Firestore events (#1877), from Firestore's Listen.
+				go feedFirestoreEvents(func() *netfwd.Forwarder { return forwarderFor(forwarders, "firestore") },
+					runSvc.functions.Load, "us-central1")
+			}
+		}
 	}
 	if schedulerSvc != nil {
 		schedulerSvc.calls = callEvents(recorder, requestMetrics, "scheduler")
@@ -611,6 +623,14 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	rmSrv.Interpose(grpctransport.LogInterceptor(logger, "resourcemanager"))
 	rmSrv.Interpose(faults.Interceptor("resourcemanager"))
 	coord.Register(rmSrv)
+	// A build's serviceAccount names an IAM account of this registry (#1854).
+	runadapter.UseServiceAccounts(func(name string) (string, bool, bool) {
+		sa, err := projects.GetServiceAccount(name)
+		if err != nil {
+			return "", false, false
+		}
+		return sa.GetEmail(), sa.GetDisabled(), true
+	})
 	// Its folders and organization are Logging parents (#1395).
 	loggingSvc.useHierarchy(projects)
 	// And Autokey resolves folder configs through them (#1452).
@@ -885,6 +905,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// the tunnelled backends' Service names, known now, and the CLI-hosted
 	// services' cloudburrow-host name, known once hostComp has started —
 	// after the adapter — so the table is read per request, not at Start.
+	if runSvc != nil {
+		// A build step reaches the metadata server as its build's account (#1854).
+		runSvc.stepMetadata = func() string { return hostComp.HostAddr("metadata") }
+	}
 	runSvc.useEnvironment(func() map[string]string {
 		return podEnvMap(podAddresses(forwarders, hostComp))
 	})

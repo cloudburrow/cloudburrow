@@ -139,7 +139,7 @@ func TestConsoleSourceManagerInstancesAndRepositories(t *testing.T) {
 		time.Sleep(200 * time.Millisecond)
 		_, secs = repoPage()
 	}
-	if b := secs["builds"].Listing.Items; len(b) != 1 || len(b[0].Fields["Commit"]) != 7 || !strings.HasPrefix(b[0].Link, "/run/builds/") {
+	if b := secs["builds"].Listing.Items; len(b) != 1 || len(b[0].Fields["Commit"]) != 7 || !strings.HasPrefix(b[0].Link, "/cloud-build/builds/") {
 		t.Errorf("the repository's builds = %+v (%s)", b, secs["builds"].Unavailable)
 	}
 

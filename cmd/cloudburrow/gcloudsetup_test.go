@@ -105,6 +105,8 @@ func testGcloudSetup(t *testing.T, gdir, stateDir string) string {
 		"securesourcemanager": "http://127.0.0.1:9004/securesourcemanager/",
 		// Developer Connect under its prefix on the Run port (#1546).
 		"developerconnect": "http://127.0.0.1:9004/developerconnect/",
+		// Eventarc under its prefix on the Run port (#1877).
+		"eventarc": "http://127.0.0.1:9004/eventarc/",
 	}
 	if got := sections["api_endpoint_overrides"]; !reflect.DeepEqual(got, wantOverrides) {
 		t.Errorf("api_endpoint_overrides = %v, want %v:\n%s", got, wantOverrides, conf)

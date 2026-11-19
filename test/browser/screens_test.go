@@ -20,11 +20,12 @@ import (
 // instance the rest of this suite runs against, so CI runs the tests named
 // TestKMS* and TestCloudRun* in the run shard, whose instance serves both.
 
-// TestKMSCreateKeyRingThroughTheForm: from the empty Cloud KMS screen of a
-// new project, Create key ring opens its dialog with focus on the name and the
-// location prefilled; the ring created through it is listed, exactly one
-// POST was sent, the console API lists it, and its row opens the ring's page,
-// where keys are created.
+// TestKMSCreateKeyRingThroughTheForm: from the empty Key rings screen of a
+// new project, Create key ring opens its own page, as Google's console opens
+// it (#1842), with a back arrow, focus on the name and the location
+// prefilled; the ring created through it is listed, exactly one POST was
+// sent, the console API lists it, and its row opens the ring's page, where
+// keys are created.
 func TestKMSCreateKeyRingThroughTheForm(t *testing.T) {
 	needService(t, "kms")
 	p := open(t)
@@ -34,16 +35,21 @@ func TestKMSCreateKeyRingThroughTheForm(t *testing.T) {
 	p.navigate("/kms/keyrings?project=" + project)
 	p.waitFor(`[...document.querySelectorAll("#view .state button.primary")].some((b) => b.textContent === "Create key ring")`)
 	p.run(chromedp.Click(chromedp.CSS(`#view .state button.primary`)))
-	p.run(chromedp.WaitVisible(chromedp.CSS(`.modal #f-keyRingId`)))
-	var form struct{ Focus, Location string }
-	p.eval(`({ Focus: document.activeElement.id, Location: document.querySelector(".modal #f-location").value })`, &form)
-	if form.Focus != "f-keyRingId" || form.Location != "global" {
-		t.Errorf("the Create key ring dialog opened with focus on #%s and location %q; want the name focused and global", form.Focus, form.Location)
+	p.run(chromedp.WaitVisible(chromedp.CSS(`#view form.create-page #f-keyRingId`)))
+	var form struct {
+		Focus, Location, Path string
+		Back, Dialog          bool
+	}
+	p.eval(`({ Focus: document.activeElement.id, Location: document.querySelector("#view #f-location").value,
+	           Path: location.pathname, Back: document.querySelector("#view .page-header .back-arrow") !== null,
+	           Dialog: document.querySelector(".modal") !== null })`, &form)
+	if form.Focus != "f-keyRingId" || form.Location != "global" || form.Path != "/kms/keyrings/create" || !form.Back || form.Dialog {
+		t.Errorf("Create key ring opened %+v; want its page at /kms/keyrings/create with a back arrow, the name focused and global", form)
 	}
 
-	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #f-keyRingId`), "browser-ring"),
-		chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
-	p.waitFor(fmt.Sprintf(`document.querySelector(".modal") === null &&
+	p.run(chromedp.SendKeys(chromedp.CSS(`#view #f-keyRingId`), "browser-ring"),
+		chromedp.Click(chromedp.CSS(`#view form.create-page button[type="submit"]`)))
+	p.waitFor(fmt.Sprintf(`location.pathname === "/kms/keyrings" &&
 		[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q))`, ring))
 	if posts := p.posts("/api/resources/kms"); len(posts) != 1 {
 		t.Errorf("the create was posted %d times, want once: %v", len(posts), posts)

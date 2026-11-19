@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -159,34 +160,54 @@ func workerPoolRow(wp *runpb.WorkerPool) console.Resource {
 
 // --- create, edit, scale and delete -------------------------------------------
 
-func (runWorkerPoolsProvider) CreateForm() (string, []console.Field) {
-	return "Deploy worker pool", append(append([]console.Field{
-		{
-			Name: "name", Label: "Worker pool name", Type: "text", Required: true,
-			Help:    "Lowercase letters, numbers and hyphens, starting with a letter; at most 63 characters.",
-			Pattern: `^[a-z]([a-z0-9\-]{0,61}[a-z0-9])?$`,
-			Section: "Worker pool settings",
-		},
-		runLabelsField("Worker pool settings"),
-	}, workerPoolScalingFields(runadapter.WorkerPoolScaling{}, "Scaling")...), []console.Field{
+// CreateForm is Google's Create worker pool page, in its order (#1852):
+// Container image URL, Worker pool name, Region, Scaling, then
+// Containers, Networking, Security.
+func (p runWorkerPoolsProvider) CreateForm() (string, []console.Field) {
+	region := p.jobs().location()
+	fields := []console.Field{
 		{
 			Name: "image", Label: "Container image URL", Type: "text", Required: true,
 			Help: "A tagged image, such as docker.io/library/busybox:1.36. A locally built one " +
 				"is rewritten to dev.local/ and never pulled; an untagged reference is refused.",
-			Section: "Container",
+			Section: "Configure",
 		},
+		{
+			Name: "name", Label: "Worker pool name", Type: "text", Required: true,
+			Help:    "Lowercase letters, numbers and hyphens, starting with a letter; at most 49 characters.",
+			Pattern: `^[a-z]([a-z0-9\-]{0,47}[a-z0-9])?$`,
+			Section: "Configure",
+		},
+		{
+			Name: "region", Label: "Region", Type: "select", Options: []string{region}, Default: region,
+			Section: "Configure", Help: "This instance serves one region, " + region + ", as its Cloud Run location.",
+		},
+	}
+	fields = append(fields, workerPoolScalingFields(runadapter.WorkerPoolScaling{}, "Scaling")...)
+	return "Deploy container", append(fields, []console.Field{
 		{Name: "command", Label: "Container command", Type: "text",
-			Help: "Optional. Overrides the image's entrypoint. Quoted as a shell would: sh -c", Section: "Container"},
+			Help: "Optional. Overrides the image's entrypoint. Quoted as a shell would: sh -c", Section: runWorkerPoolMore},
 		{Name: "args", Label: "Container arguments", Type: "text",
-			Help: `Optional. Quoted as a shell would: 'echo "hello, world"'`, Section: "Container"},
-		{Name: "env", Label: "Environment variables", Type: "map", Help: "Optional. One KEY=value per line.", Section: "Container"},
+			Help: `Optional. Quoted as a shell would: 'echo "hello, world"'`, Section: runWorkerPoolMore},
+		{Name: "env", Label: "Environment variables", Type: "map", Help: "Optional. One KEY=value per line.", Section: runWorkerPoolMore},
 		{Name: "cpu", Label: "CPU limit", Type: "text", Help: `Optional, as Kubernetes quantities: "1", "500m".`,
-			Pattern: `^[0-9]+(\.[0-9]+)?m?$`, Section: "Resources"},
+			Pattern: `^[0-9]+(\.[0-9]+)?m?$`, Section: runWorkerPoolMore},
 		{Name: "memory", Label: "Memory limit", Type: "text",
 			Help:    `Optional, as Kubernetes quantities: "512Mi", "1Gi". ` + runWorkerPoolNotOffered,
-			Pattern: `^[0-9]+(Ki|Mi|Gi|K|M|G)?$`, Section: "Resources"},
+			Pattern: `^[0-9]+(Ki|Mi|Gi|K|M|G)?$`, Section: runWorkerPoolMore},
+		runLabelsField(runWorkerPoolMore),
 	}...)
 }
+
+// runWorkerPoolMore is Google's last section of the worker pool forms.
+const runWorkerPoolMore = "Containers, Networking, Security"
+
+// CreateTitle implements console.CreateTitler: Deploy container opens the
+// Create worker pool page.
+func (runWorkerPoolsProvider) CreateTitle() string { return "Create worker pool" }
+
+// CreateSubmit implements console.CreateSubmitter: it ends in Create.
+func (runWorkerPoolsProvider) CreateSubmit() string { return "Create" }
 
 // workerPoolScalingFields are a pool's scaling settings (#1788), as the
 // discovery document defines them: Manual runs the number of instances;
@@ -343,6 +364,9 @@ func (p runWorkerPoolsProvider) Create(ctx context.Context, project string, valu
 	labels, _, err := runLabels(values)
 	if err != nil {
 		return "", err
+	}
+	if r := strings.TrimSpace(values["region"]); r != "" && r != p.jobs().location() {
+		return "", fmt.Errorf("region %q is not served: this instance's Cloud Run location is %s", r, p.jobs().location())
 	}
 	var name string
 	err = p.withClients(ctx, func(wc *runclient.WorkerPoolsClient, _ *runclient.RevisionsClient) error {
@@ -673,6 +697,7 @@ func workerPoolEditForm(wp *runpb.WorkerPool) *console.EditForm {
 		prefill[f.Name] = f.Default
 	}
 	_, fields := runWorkerPoolsProvider{}.CreateForm()
+	fields = slices.DeleteFunc(fields, func(f console.Field) bool { return f.Name == "region" })
 	for i := range fields {
 		fields[i].Default = prefill[fields[i].Name]
 		if fields[i].Name == "name" {
@@ -680,7 +705,7 @@ func workerPoolEditForm(wp *runpb.WorkerPool) *console.EditForm {
 			fields[i].Help = runWorkerPoolNameImmutable
 		}
 	}
-	return &console.EditForm{Label: "Edit worker pool", Fields: fields,
+	return &console.EditForm{Label: "Edit and deploy new revision", Title: "Deploy worker pool revision", Submit: "Deploy", Fields: fields,
 		Note: "Saved with UpdateWorkerPool. A changed container deploys a new revision; the old one is retired."}
 }
 

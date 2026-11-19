@@ -20,7 +20,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -35,7 +34,7 @@ import (
 type loggingSinksProvider struct{ loggingAdminScreen }
 
 func (loggingSinksProvider) ID() string    { return "logging-sinks" }
-func (loggingSinksProvider) Title() string { return "Log router sinks" }
+func (loggingSinksProvider) Title() string { return "Log Router" }
 
 // ScopeKey implements console.Scoper: the Parent picker (#1572).
 func (loggingSinksProvider) ScopeKey() string { return bucketScopeKey }
@@ -117,7 +116,7 @@ func (s loggingAdminScreen) sinksOf(ctx context.Context, parent string) ([]*logg
 }
 
 func (p loggingSinksProvider) List(ctx context.Context, project string) (console.Listing, error) {
-	out := console.Listing{Columns: []string{"Destination", "Filter", "State", "Delivery", "Last error", "Updated"}, NameColumn: "Sink", Noun: "sinks", Note: sinkNote}
+	out := console.Listing{Columns: sinkColumns, NameColumn: "Name", Noun: "sinks", Note: sinkNote}
 	if _, err := p.admin(); err != nil {
 		return console.Listing{}, err
 	}
@@ -129,7 +128,7 @@ func (p loggingSinksProvider) List(ctx context.Context, project string) (console
 	}
 	children := hasChildren(parent)
 	if children {
-		out.Columns = []string{"Destination", "Filter", "Include children", "Intercept children", "State", "Delivery", "Last error", "Updated"}
+		out.Columns = append(append([]string{}, sinkColumns[:5]...), append([]string{"Include children", "Intercept children"}, sinkColumns[5:]...)...)
 		out.Note = sinkChildrenNote + " " + sinkNote
 	}
 	sinks, err := p.sinksOf(ctx, parent)
@@ -140,8 +139,9 @@ func (p loggingSinksProvider) List(ctx context.Context, project string) (console
 		name := parent + "/sinks/" + s.GetName()
 		delivery, lastErr := p.sinkDelivery(name)
 		f := map[string]string{
-			"Destination": s.GetDestination(), "Filter": orDash(s.GetFilter()), "State": enabledWord(s.GetDisabled()),
-			"Delivery": delivery, "Last error": orDash(lastErr), "Updated": loggingTime(s.GetUpdateTime()),
+			"Enabled": enabledWord(s.GetDisabled()), "Type": sinkTypeOf(s.GetDestination()), "Description": orDash(s.GetDescription()),
+			"Destination": s.GetDestination(), "Created": loggingTime(s.GetCreateTime()), "Last updated": loggingTime(s.GetUpdateTime()),
+			"Filter": orDash(s.GetFilter()), "Delivery": delivery, "Last error": orDash(lastErr),
 		}
 		if children {
 			f["Include children"] = yesNo(s.GetIncludeChildren())
@@ -160,15 +160,54 @@ type sinkService struct {
 	label, prefix, rest string
 }
 
+// sinkServices are Google's Select sink service choices, in its order
+// (docs.cloud.google.com/logging/docs/export/configure_export_v2, re-read
+// 2026-11-19): Splunk is drawn disabled (sinkNoSplunk), and Other resource
+// takes the whole destination as the API names it.
 var sinkServices = []sinkService{
 	{"Cloud Logging bucket", "logging.googleapis.com/", "projects/[P]/locations/[L]/buckets/[B]"},
 	{"BigQuery dataset", "bigquery.googleapis.com/", "projects/[P]/datasets/[D]"},
 	{"Cloud Storage bucket", "storage.googleapis.com/", "[BUCKET]"},
 	{"Pub/Sub topic", "pubsub.googleapis.com/", "projects/[P]/topics/[T]"},
-	{"Other project", "logging.googleapis.com/", "projects/[P]"},
+	{sinkSplunk, "", ""},
+	{otherProject, "logging.googleapis.com/", "projects/[P]"},
+	{otherResource, "", "[SERVICE].googleapis.com/[PATH]"},
 }
 
-const otherProject = "Other project"
+// otherProject is Google's "Google Cloud project" sink service: that
+// project's _Default bucket and sinks. "Other project", its label before
+// #1863, is still accepted.
+const (
+	otherProject  = "Google Cloud project"
+	otherResource = "Other resource"
+	sinkSplunk    = "Splunk"
+	// sinkNoSplunk is why Splunk cannot be chosen: Google's Splunk sink
+	// is a Pub/Sub topic read by a Dataflow job that sends to Splunk's HTTP
+	// Event Collector, and no Dataflow runs locally.
+	sinkNoSplunk = "Not available locally: Google routes to Splunk through a Pub/Sub topic that a Dataflow job forwards, and CloudBurrow runs no Dataflow. Route to a Pub/Sub topic and read it instead."
+)
+
+// sinkColumns are Google's Log Router columns, then CloudBurrow's
+// delivery status (Volume, Google's last column, is ingested bytes from
+// Cloud Monitoring, which no instance has).
+var sinkColumns = []string{"Enabled", "Type", "Description", "Destination", "Created", "Last updated", "Delivery"}
+
+// sinkTypeOf is the Log Router's Type column: the destination's service.
+func sinkTypeOf(dest string) string {
+	switch sinkServiceOf(dest) {
+	case "Cloud Logging bucket":
+		return "Logging bucket"
+	case "BigQuery dataset":
+		return "BigQuery dataset"
+	case "Cloud Storage bucket":
+		return "Cloud Storage bucket"
+	case "Pub/Sub topic":
+		return "Pub/Sub topic"
+	case otherProject:
+		return "Google Cloud project"
+	}
+	return "Other"
+}
 
 // sinkServiceOf is the service a stored destination is of.
 func sinkServiceOf(dest string) string {
@@ -179,11 +218,14 @@ func sinkServiceOf(dest string) string {
 		return sinkServices[0].label
 	}
 	for _, s := range sinkServices {
-		if strings.HasPrefix(dest, s.prefix) {
+		if s.prefix != "" && strings.HasPrefix(dest, s.prefix) {
 			return s.label
 		}
 	}
-	return sinkServices[0].label
+	if dest == "" {
+		return sinkServices[0].label
+	}
+	return otherResource
 }
 
 // sinkDestination is the destination a form names: the whole destination
@@ -193,8 +235,15 @@ func sinkDestination(service, dest string) (string, error) {
 	if strings.Contains(dest, ".googleapis.com/") {
 		return dest, nil
 	}
-	if service == "" {
+	switch service {
+	case "":
 		service = sinkServices[0].label
+	case "Other project":
+		service = otherProject
+	case sinkSplunk:
+		return "", errors.New(sinkNoSplunk)
+	case otherResource:
+		return "", fmt.Errorf("an Other resource destination is the whole destination, such as pubsub.googleapis.com/projects/[P]/topics/[T]; %q is not", dest)
 	}
 	for _, s := range sinkServices {
 		if s.label != service {
@@ -221,34 +270,57 @@ func sinkFields(s *loggingpb.LogSink) []console.Field {
 	var help []string
 	for _, sv := range sinkServices {
 		services = append(services, sv.label)
-		help = append(help, sv.label+": "+sv.rest)
+		if sv.rest != "" {
+			help = append(help, sv.label+": "+sv.rest)
+		}
 	}
-	exclusions := map[string]string{}
+	var exclusions []map[string]string
 	for _, e := range s.GetExclusions() {
-		exclusions[e.GetName()] = e.GetFilter()
+		exclusions = append(exclusions, map[string]string{"name": e.GetName(), "filter": e.GetFilter(),
+			"disabled": strconv.FormatBool(e.GetDisabled())})
 	}
-	return []console.Field{
-		{Name: "name", Label: "Sink name", Type: "text", Required: true, Default: s.GetName(), Immutable: s.GetName() != "",
+	const (
+		details = "Sink details"
+		dest    = "Sink destination"
+		include = "Choose logs to include in sink"
+		exclude = "Choose logs to filter out of sink"
+	)
+	fields := []console.Field{
+		{Name: "name", Label: "Sink name", Type: "text", Required: true, Default: s.GetName(), Immutable: s.GetName() != "", Section: details,
 			Pattern: `^[A-Za-z0-9][A-Za-z0-9_\-.]{0,99}$`, Help: "Up to 100 letters, digits, _, - and ., starting with a letter or digit."},
-		{Name: "description", Label: "Description", Type: "text", Default: s.GetDescription()},
-		{Name: "service", Label: "Sink service", Type: "select", Options: services, Default: sinkServiceOf(s.GetDestination()), Section: "Sink destination",
-			Help: "Where the sink routes entries. Other project is that project's _Default bucket and sinks; it is the one destination an intercepting sink takes."},
-		{Name: "destination", Label: "Destination", Type: "text", Required: true, Default: s.GetDestination(), Section: "Sink destination",
+		{Name: "description", Label: "Sink description", Type: "text", Default: s.GetDescription(), Section: details},
+		{Name: "service", Label: "Select sink service", Type: "radio", Options: services, Default: sinkServiceOf(s.GetDestination()), Section: dest,
+			UnavailableOptions: map[string]string{sinkSplunk: sinkNoSplunk},
+			Help:               "Where the sink routes entries. Google Cloud project is that project's _Default bucket and sinks; it is the one destination an intercepting sink takes."},
+		{Name: "destination", Label: "Destination", Type: "text", Required: true, Default: s.GetDestination(), Section: dest,
 			Help: "What follows the service's prefix (" + strings.Join(help, "; ") + "), or the whole destination, such as " +
 				"logging.googleapis.com/projects/[P]. " + sinkNote},
-		{Name: "filter", Label: "Inclusion filter", Type: "textarea", Default: s.GetFilter(), Section: "Logs to include",
-			Help: "Optional; empty matches every entry."},
+		{Name: "filter", Label: "Build inclusion filter", Type: "textarea", Default: s.GetFilter(), Section: include,
+			Help: "In the Logging query language; empty includes every entry."},
 		{Name: "include_children", Label: "Include logs ingested by this resource and all child resources", Type: "checkbox",
-			Default: strconv.FormatBool(s.GetIncludeChildren()), Section: "Logs to include",
+			Default: strconv.FormatBool(s.GetIncludeChildren()), Section: include,
 			Help: "Folder and organization sinks only (include_children)."},
 		{Name: "intercept_children", Label: "Intercept logs ingested by child resources", Type: "checkbox",
-			Default: strconv.FormatBool(logging.SinkIntercepts(s)), Section: "Logs to include",
-			Help: "Folder and organization sinks only (intercept_children). It requires include children and a project destination (Other project); the entries it matches are kept out of the sinks under it."},
-		{Name: "exclusions", Label: "Exclusion filters", Type: "map", Default: console.FormatMap(exclusions), Section: "Logs to filter out",
-			KeyPattern: `^[A-Za-z0-9][A-Za-z0-9_\-.]{0,99}$`, KeyHelp: "an exclusion name: up to 100 letters, digits, _, - and ., starting with a letter or digit",
-			Help: "Each exclusion's name and its filter; an entry an exclusion matches is not routed by this sink."},
-		{Name: "disabled", Label: "Disabled", Type: "checkbox", Default: strconv.FormatBool(s.GetDisabled())},
+			Default: strconv.FormatBool(logging.SinkIntercepts(s)), Section: include,
+			Help: "Folder and organization sinks only (intercept_children). It requires include children and a Google Cloud project destination; the entries it matches are kept out of the sinks under it."},
+		// A row per exclusion filter, as Google's: its name, its filter,
+		// and Disable, which keeps it on the sink without applying it
+		// (#1863).
+		{Name: "exclusions", Label: "Exclusion filter", Type: console.GroupFieldType, Default: console.FormatGroup(exclusions), Section: exclude,
+			AddLabel: "Add exclusion", Group: []console.Field{
+				{Name: "name", Label: "Exclusion filter name", Type: "text", Required: true, Pattern: `[A-Za-z0-9][A-Za-z0-9_\-.]{0,99}`,
+					Help: "up to 100 letters, digits, _, - and ., starting with a letter or digit"},
+				{Name: "filter", Label: "Build an exclusion filter", Type: "textarea", Required: true},
+				{Name: "disabled", Label: "Disable", Type: "checkbox"},
+			},
+			Help: "An entry an enabled exclusion filter matches is not routed by this sink."},
 	}
+	// Disabled is the edit form's; Google's Create sink has none, and a
+	// row's Disable sink and Enable sink change it too.
+	if s.GetName() != "" {
+		fields = append(fields, console.Field{Name: "disabled", Label: "Disable sink", Type: "checkbox", Default: strconv.FormatBool(s.GetDisabled())})
+	}
+	return fields
 }
 
 func (loggingSinksProvider) CreateForm() (string, []console.Field) {
@@ -258,6 +330,65 @@ func (loggingSinksProvider) CreateForm() (string, []console.Field) {
 // CreateOnPage implements console.PageCreator: the form is grouped.
 func (loggingSinksProvider) CreateOnPage() bool { return true }
 
+// CreateLayout implements console.CreateLayouter: Google's Create sink is
+// one page of four panels, not numbered steps.
+func (loggingSinksProvider) CreateLayout() string { return console.CreateLayoutPage }
+
+// Actions implements console.Actor: a Log Router row's More actions, as
+// Google's: View sink details, then Disable sink or Enable sink (Edit sink
+// is on the sink's page; Delete is the row menu's own).
+func (loggingSinksProvider) Actions(r console.Resource) []console.Action {
+	out := []console.Action{{ID: "view", Label: "View sink details", Href: "/logs/sinks/" + url.PathEscape(r.Name)}}
+	return append(out, sinkToggle(r.Fields["Enabled"] != "Disabled"))
+}
+
+func sinkToggle(enabled bool) console.Action {
+	if enabled {
+		return console.Action{ID: "disable", Label: "Disable sink"}
+	}
+	return console.Action{ID: "enable", Label: "Enable sink"}
+}
+
+// Act performs Disable sink and Enable sink through UpdateSink.
+func (p loggingSinksProvider) Act(ctx context.Context, project, name, action string) error {
+	if action != "disable" && action != "enable" {
+		return fmt.Errorf("unknown action %q", action)
+	}
+	if _, err := p.get(ctx, project, name); err != nil {
+		return err
+	}
+	if err := p.fault(ctx, loggingpb.ConfigServiceV2_UpdateSink_FullMethodName, name); err != nil {
+		return err
+	}
+	a, err := p.admin()
+	if err != nil {
+		return err
+	}
+	_, err = a.ConfigServer().UpdateSink(ctx, &loggingpb.UpdateSinkRequest{SinkName: name,
+		Sink: &loggingpb.LogSink{Disabled: action == "disable"}, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"disabled"}}})
+	return err
+}
+
+// DetailActions offers the sink's page the same Disable sink or Enable sink.
+func (p loggingSinksProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
+	if len(path) != 1 {
+		return nil
+	}
+	s, err := p.get(ctx, project, path[0])
+	if err != nil {
+		return nil
+	}
+	return []console.Action{sinkToggle(!s.GetDisabled())}
+}
+
+// ActAt performs a sink page's action.
+func (p loggingSinksProvider) ActAt(ctx context.Context, project string, path []string, action string, _ map[string]string) error {
+	if len(path) != 1 {
+		return fmt.Errorf("unknown action %q", action)
+	}
+	return p.Act(ctx, project, path[0], action)
+}
+
 // sinkFromForm builds the sink a form describes. old, on edit, is the
 // stored sink, whose exclusions keep their order, description and state.
 func sinkFromForm(id string, v map[string]string, old *loggingpb.LogSink) (*loggingpb.LogSink, error) {
@@ -265,26 +396,27 @@ func sinkFromForm(id string, v map[string]string, old *loggingpb.LogSink) (*logg
 	if err != nil {
 		return nil, err
 	}
-	ex, err := console.ParseMap(v["exclusions"])
+	rows, err := console.ParseGroup(v["exclusions"])
 	if err != nil {
 		return nil, fmt.Errorf("exclusion filters: %w", err)
 	}
 	sk := &loggingpb.LogSink{Name: id, Destination: dest, Filter: v["filter"],
 		Description: v["description"], Disabled: v["disabled"] == "true", IncludeChildren: v["include_children"] == "true"}
+	// In the form's order; an exclusion the stored sink has keeps its
+	// description, which the form does not show.
+	described := map[string]string{}
 	for _, e := range old.GetExclusions() {
-		if f, ok := ex[e.GetName()]; ok {
-			sk.Exclusions = append(sk.Exclusions, &loggingpb.LogExclusion{Name: e.GetName(), Filter: f,
-				Description: e.GetDescription(), Disabled: e.GetDisabled()})
-			delete(ex, e.GetName())
+		described[e.GetName()] = e.GetDescription()
+	}
+	seen := map[string]bool{}
+	for _, r := range rows {
+		n := strings.TrimSpace(r["name"])
+		if seen[n] {
+			return nil, fmt.Errorf("exclusion filters: %q is named twice", n)
 		}
-	}
-	names := make([]string, 0, len(ex))
-	for n := range ex {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	for _, n := range names {
-		sk.Exclusions = append(sk.Exclusions, &loggingpb.LogExclusion{Name: n, Filter: ex[n]})
+		seen[n] = true
+		sk.Exclusions = append(sk.Exclusions, &loggingpb.LogExclusion{Name: n, Filter: r["filter"],
+			Description: described[n], Disabled: r["disabled"] == "true"})
 	}
 	logging.SetSinkIntercept(sk, v["intercept_children"] == "true")
 	return sk, nil
@@ -345,8 +477,9 @@ func (p loggingSinksProvider) Detail(ctx context.Context, project string, path [
 		{Label: "Parent", Value: parent},
 		{Label: "Destination", Value: s.GetDestination()},
 		{Label: "Filter", Value: orDash(s.GetFilter())},
-		{Label: "Description", Value: orDash(s.GetDescription())},
-		{Label: "State", Value: enabledWord(s.GetDisabled())},
+		{Label: "Sink description", Value: orDash(s.GetDescription())},
+		{Label: "Type", Value: sinkTypeOf(s.GetDestination())},
+		{Label: "Enabled", Value: enabledWord(s.GetDisabled())},
 	}
 	note := sinkNote
 	if hasChildren(parent) {
@@ -359,9 +492,9 @@ func (p loggingSinksProvider) Detail(ctx context.Context, project string, path [
 		console.Property{Label: "Delivery", Value: delivery},
 		console.Property{Label: "Last error", Value: orDash(lastErr)},
 		console.Property{Label: "Created", Value: loggingTime(s.GetCreateTime())},
-		console.Property{Label: "Updated", Value: loggingTime(s.GetUpdateTime())},
+		console.Property{Label: "Last updated", Value: loggingTime(s.GetUpdateTime())},
 	)
-	exclusions := console.Listing{Columns: []string{"Filter", "State", "Description"}, NameColumn: "Exclusion", Noun: "exclusions"}
+	exclusions := console.Listing{Columns: []string{"Filter", "State", "Description"}, NameColumn: "Exclusion filter name", Noun: "exclusion filters"}
 	for _, e := range s.GetExclusions() {
 		exclusions.Items = append(exclusions.Items, console.Resource{Name: e.GetName(), Fields: map[string]string{
 			"Filter": e.GetFilter(), "State": enabledWord(e.GetDisabled()), "Description": orDash(e.GetDescription())}})
@@ -453,6 +586,19 @@ func (s loggingAdminScreen) sinkSection(ctx context.Context, parent string) cons
 
 var _ console.Scoper = loggingSinksProvider{}
 var _ console.PageCreator = loggingSinksProvider{}
+var _ console.CreateLayouter = loggingSinksProvider{}
+var _ console.Actor = loggingSinksProvider{}
+var _ console.PathActor = loggingSinksProvider{}
 var _ console.Editor = loggingSinksProvider{}
 var _ console.Deleter = loggingSinksProvider{}
 var _ console.Driller = loggingSinksProvider{}
+
+// Google's Log Router names the sink in each row's menu: Edit sink,
+// Delete sink (#1863).
+func (loggingSinksProvider) DeleteLabel() string  { return "Delete sink" }
+func (loggingSinksProvider) RowEditLabel() string { return "Edit sink" }
+
+var (
+	_ console.DeleteLabeler = loggingSinksProvider{}
+	_ console.RowEditor     = loggingSinksProvider{}
+)

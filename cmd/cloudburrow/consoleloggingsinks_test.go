@@ -67,7 +67,7 @@ func TestConsoleFolderAndOrganizationSinks(t *testing.T) {
 	sinks := srv.URL + "/api/resources/logging-sinks?project=" + project + "&parent=" + url.QueryEscape(folder)
 	base := map[string]string{"name": "central", "service": otherProject, "destination": project,
 		"filter": "severity>=ERROR", "include_children": "true", "intercept_children": "true",
-		"exclusions": `{"no-debug":"severity=DEBUG"}`}
+		"exclusions": `[{"name":"no-debug","filter":"severity=DEBUG","disabled":"false"}]`}
 	with := func(k, v string) map[string]string {
 		m := map[string]string{}
 		for a, b := range base {
@@ -126,12 +126,14 @@ func TestConsoleFolderAndOrganizationSinks(t *testing.T) {
 	edit := with("intercept_children", "false")
 	edit["service"] = "Cloud Logging bucket"
 	edit["destination"] = "projects/" + project + "/locations/global/buckets/_Default"
-	edit["exclusions"] = `{"no-debug":"severity=DEBUG","no-info":"severity=INFO"}`
+	// A row per exclusion filter, the second disabled (#1863).
+	edit["exclusions"] = `[{"name":"no-debug","filter":"severity=DEBUG","disabled":"false"},{"name":"no-info","filter":"severity=INFO","disabled":"true"}]`
 	if code, out := consolePatch(t, sinks, []string{name}, edit); code != http.StatusOK {
 		t.Fatalf("edit = %d %s", code, out)
 	}
 	sk, _ = svc.admin.ConfigServer().GetSink(ctx, &loggingpb.GetSinkRequest{SinkName: name})
-	if logging.SinkIntercepts(sk) || sk.GetDestination() != "logging.googleapis.com/"+edit["destination"] || len(sk.GetExclusions()) != 2 {
+	if logging.SinkIntercepts(sk) || sk.GetDestination() != "logging.googleapis.com/"+edit["destination"] || len(sk.GetExclusions()) != 2 ||
+		sk.GetExclusions()[0].GetDisabled() || !sk.GetExclusions()[1].GetDisabled() {
 		t.Fatalf("after edit the API reads %v (intercept %v)", sk, logging.SinkIntercepts(sk))
 	}
 	// Turning it back on with a bucket destination is refused on the form.

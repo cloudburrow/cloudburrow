@@ -110,6 +110,7 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	fns := runSrv.Functions(runSrv.Builds(nil, nil), func() string { return "" })
 	functionspb.RegisterFunctionServiceServer(srv, fns)
 	fns.V1().Register(srv)
+	fns.Eventarc().Register(srv) // Eventarc (#1877), on the functions' event transport
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

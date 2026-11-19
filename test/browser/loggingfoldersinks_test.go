@@ -20,7 +20,7 @@ import (
 // Log router with the folder chosen in its Parent picker. Create sink there
 // (a page of its own) with Intercept children and not Include children is
 // refused on the open form with CreateSink's own message; with both, and the
-// Other project service, the sink is created and listed with both columns
+// Google Cloud project service, the sink is created and listed with both columns
 // Yes, and the folder's Log router tab lists it, linking to its page, which
 // shows Intercept children.
 func TestLogRouterFolderSinksThroughTheBrowser(t *testing.T) {
@@ -56,7 +56,7 @@ func TestLogRouterFolderSinksThroughTheBrowser(t *testing.T) {
 	p.waitFor(fmt.Sprintf(`new URLSearchParams(location.search).get("parent") === %q`, folder))
 	p.eval(fmt.Sprintf(`(() => { const q = (s) => document.querySelector("form.create-page " + s);
 		const set = (id, v) => { const f = q("#f-" + id); f.value = v; f.dispatchEvent(new Event("input", { bubbles: true })); f.dispatchEvent(new Event("change", { bubbles: true })); };
-		set("name", "browser-central"); set("service", "Other project"); set("destination", %q);
+		set("name", "browser-central"); set("service", "Google Cloud project"); set("destination", %q);
 		q("#f-intercept_children").checked = true; q("#f-intercept_children").dispatchEvent(new Event("change", { bubbles: true }));
 		return true; })()`, project), nil)
 	p.run(chromedp.Click(chromedp.CSS(`form.create-page button[type="submit"]`)))

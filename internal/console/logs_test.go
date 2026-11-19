@@ -229,6 +229,11 @@ func TestStreamSendsBacklogThenLiveEntries(t *testing.T) {
 		t.Errorf("the event carries no id: %q", backlog)
 	}
 
+	// The backlog ends with a ready event (#1863), which the Logs Explorer
+	// takes as the end of its query's results.
+	if ready := readEvent(t, reader); !strings.Contains(ready, "event: ready") {
+		t.Errorf("the backlog was not followed by a ready event: %q", ready)
+	}
 	s.logs.Log(Entry{Message: "after the client connected"})
 	live := readEvent(t, reader)
 	if !strings.Contains(live, "after the client connected") {

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path"
@@ -172,6 +173,7 @@ func (w *hostWorkspace) RunStep(ctx context.Context, spec runadapter.StepSpec) e
 		}
 		args = append(args, "-v", w.prefix+"-vol-"+v.Name+":"+v.Path)
 	}
+	args = append(args, stepMetadataArgs(w.b.metadataHost, spec.MetadataLabel)...)
 	for _, e := range spec.Env {
 		args = append(args, "-e", e)
 	}
@@ -330,4 +332,26 @@ func copyScript(ctx context.Context, container, script string) error {
 		return fmt.Errorf("docker cp: %v: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+// stepMetadataArgs are the docker create flags that give a step the
+// metadata server as its build's account (#1854): GCE_METADATA_HOST names
+// the account's host label, which --add-host resolves to the address
+// cloudburrow-host publishes the metadata server at. The server answers a
+// request under that Host as the account (metadataaccount.go), as Google's
+// worker answers a step as the build's service account. Without a
+// published metadata server a step gets none, as before.
+func stepMetadataArgs(addr func() string, label string) []string {
+	if addr == nil || label == "" {
+		return nil
+	}
+	host, port, err := net.SplitHostPort(addr())
+	if err != nil || port == "" {
+		return nil
+	}
+	target := host
+	if net.ParseIP(host) == nil {
+		target = "host-gateway"
+	}
+	return []string{"--add-host", label + ":" + target, "-e", "GCE_METADATA_HOST=" + net.JoinHostPort(label, port)}
 }

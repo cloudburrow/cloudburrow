@@ -109,7 +109,12 @@ func (s *Server) handleViewLogs(w http.ResponseWriter, r *http.Request, view str
 		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "Cloud Logging is not enabled on this instance, so no log view can be read"})
 		return
 	}
-	entries, err := s.viewEntries(r.Context(), view, filterFrom(r))
+	f := filterFrom(r)
+	if f.QueryError != "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": f.QueryError})
+		return
+	}
+	entries, err := s.viewEntries(r.Context(), view, f)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": userMessage(err)})
 		return
@@ -143,6 +148,7 @@ func (s *Server) streamView(w http.ResponseWriter, r *http.Request, flusher http
 		}
 		next = e.ID
 	}
+	fmt.Fprint(w, "event: ready\ndata: {}\n\n")
 	flusher.Flush()
 
 	ctx, cancel := context.WithCancel(r.Context())

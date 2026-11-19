@@ -195,17 +195,29 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		// executions (#785).
 		// The storage tunnel's bound address, not the configured port, which
 		// is 0 when the OS assigns it (--port-storage 0).
-		var runStorage string
+		var runStorage, runPubSub string
 		if enabled[config.ServiceStorage] && storageAddr != "" {
 			runStorage = hostURL(storageAddr)
 		}
+		if enabled[config.ServicePubSub] {
+			runPubSub = pubsubAddr
+		}
+		functions := &functionsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run),
+			storage: enabled[config.ServiceStorage]}
 		providers = append(providers, runProvider{
 			kubeconfig:     d.cfg.KubeconfigPath(),
 			namespace:      runadapter.WorkloadNamespace,
 			runAddr:        runAddrOf(d.run),
 			defaultProject: d.cfg.DefaultProject(),
 			storageAddr:    runStorage,
-		}, runJobsProvider{
+			pubsubAddr:     runPubSub,
+			functions:      functions,
+		}, runDomainsProvider{run: runProvider{
+			kubeconfig:     d.cfg.KubeconfigPath(),
+			namespace:      runadapter.WorkloadNamespace,
+			runAddr:        runAddrOf(d.run),
+			defaultProject: d.cfg.DefaultProject(),
+		}}, runJobsProvider{
 			kubeconfig:     d.cfg.KubeconfigPath(),
 			namespace:      runadapter.WorkloadNamespace,
 			runAddr:        runAddrOf(d.run),
@@ -220,15 +232,24 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			readyTimeout:   time.Duration(d.cfg.ReadyTimeout),
 		}, runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run), hostSteps: d.cfg.CloudBuildHostSteps},
 			// Cloud Build's triggers and worker pools (#1422).
-			buildTriggersProvider{b: runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)}},
+			buildTriggersProvider{b: runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)}, registry: d.projects},
 			buildWorkerPoolsProvider{b: runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)}},
+			// Cloud Build's Dashboard, Repositories and Settings (#1854).
+			buildDashboardProvider{b: runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)}},
+			buildRepositoriesProvider{ssm: sourceManagerProvider{b: runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)}}},
+			buildSettingsProvider{b: runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)}, registry: d.projects},
 			// Secure Source Manager's instances and repositories (#1527).
 			sourceManagerProvider{b: runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)}},
 			// Artifact Registry's repositories are served on the Run port (#1347).
 			artifactRegistryProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)},
 			// Cloud Functions v2 is served on the Run port too (#1377).
-			functionsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run),
-				storage: enabled[config.ServiceStorage]})
+			*functions)
+		if runPubSub != "" {
+			// Eventarc's own Triggers page (#1877), on the Run port, over
+			// Pub/Sub, its transport.
+			providers = append(providers, eventarcProvider{run: runProvider{runAddr: runAddrOf(d.run),
+				defaultProject: d.cfg.DefaultProject(), pubsubAddr: runPubSub}})
+		}
 	}
 	if enabled[config.ServiceSecrets] && d.secrets != nil {
 		providers = append(providers, secretsProvider{svc: d.secrets, faults: d.faults})
@@ -264,6 +285,13 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			loggingSettingsProvider{screen},
 			// Saved queries and log scopes (#1519).
 			loggingSavedQueriesProvider{screen}, loggingLogScopesProvider{screen})
+		// Log Analytics (#1863), over the buckets' linked datasets in the
+		// instance's BigQuery; without BigQuery the page says it is not
+		// available.
+		if addr := forwardedAddr(d.forwarders, string(config.ServiceBigQuery)); enabled[config.ServiceBigQuery] && addr != "" {
+			providers = append(providers, loggingAnalyticsProvider{screen,
+				bigqueryProvider{endpoint: addr, project: d.cfg.DefaultProject(), registry: d.projects}})
+		}
 	}
 	// The opt-in databases. Each had a working backend and no screen, which
 	// reads as "not implemented" to anyone looking at the console. The

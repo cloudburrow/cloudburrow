@@ -21,7 +21,7 @@ func expiryGroup(t *testing.T, d console.Detail) map[string]string {
 	t.Helper()
 	for _, sec := range d.Sections {
 		for _, g := range sec.Groups {
-			if sec.ID == "configuration" && g.Heading == "Expiration" {
+			if sec.ID == "details" && g.Heading == "Expiration" {
 				out := map[string]string{}
 				for _, p := range g.Properties {
 					out[p.Label] = p.Value

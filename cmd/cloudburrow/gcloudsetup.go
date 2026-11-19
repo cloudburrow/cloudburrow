@@ -117,6 +117,11 @@ var gcloudVerified = []struct {
 	// --secure-source-manager-instance-config, describe, list and delete,
 	// and git-repository-links create, describe, list and delete.
 	{config.ServiceRun, "developerconnect", "/developerconnect/", false, false},
+	// Eventarc (#1877), on the Run port under /eventarc/, since its v1
+	// trigger paths are Cloud Build's; gcloud eventarc appends v1/.
+	// TestGcloudEventarcTriggers drives triggers create, describe, list,
+	// update and delete, and providers list.
+	{config.ServiceRun, "eventarc", "/eventarc/", false, false},
 	// The Cloud SQL Admin API (#1301): gcloud sql appends sql/v1beta4/.
 	// TestGcloudSQL drives instances list and describe, and databases and
 	// users create, list and delete, with either Cloud SQL service.

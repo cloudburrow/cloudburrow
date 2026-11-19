@@ -226,6 +226,7 @@ func runEditForm(service string, tmpl knTemplate, source string) *console.EditFo
 	}
 
 	_, fields := runProvider{}.CreateForm()
+	fields = withoutCreateOnly(fields)
 	for i := range fields {
 		f := &fields[i]
 		f.Default = defaults[f.Name]

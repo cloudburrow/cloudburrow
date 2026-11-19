@@ -34,10 +34,6 @@ func listAndCreate(name, path, project string) []a11yPage {
 	return []a11yPage{screen(name, path, project), screen("create in "+name, path+"/create", project)}
 }
 
-// openCreateDialog presses a list's primary Create button, whichever product
-// it is, so the dialog (or the form page) it opens is what is measured.
-const openCreateDialog = `[...document.querySelectorAll("#view button, #view a")].find((b) => /^(Create|Deploy)/.test(b.textContent.trim())).click()`
-
 // openDeleteDialog opens the first row's actions menu and chooses Delete,
 // whose confirmation is a dialog.
 const openDeleteDialog = `document.querySelector("#view tbody tr .overflow-trigger:not(:disabled)").click();
@@ -260,9 +256,9 @@ func TestCloudRunAndCICDScreensMeetWCAG(t *testing.T) {
 	for _, l := range []struct{ name, path string }{
 		{"Cloud Run services", "/run"}, {"Cloud Run jobs", "/run/jobs"},
 		{"Cloud Run worker pools", "/run/worker-pools"}, {"Cloud Run instances", "/run/instances"},
-		{"Cloud Run builds", "/run/builds"}, {"Cloud Functions", "/functions"},
+		{"Cloud Build history", "/cloud-build/builds"}, {"Cloud Functions", "/functions"},
 		{"Artifact Registry", "/artifact-registry"}, {"Cloud Build triggers", "/cloud-build/triggers"},
-		{"Cloud Build worker pools", "/cloud-build/worker-pools"},
+		{"Cloud Build worker pools", "/cloud-build/worker-pools"}, {"Cloud Build dashboard", "/cloud-build/dashboard"}, {"Cloud Build repositories", "/cloud-build/repositories"}, {"Cloud Build settings", "/cloud-build/settings"},
 		{"Secure Source Manager", "/secure-source-manager"},
 		{"KMS key rings", "/kms/keyrings"}, {"KMS EKM", "/kms/ekm"},
 		{"KMS Autokey", "/kms/autokey"}, {"KMS HSM", "/kms/hsm"},
@@ -379,7 +375,9 @@ func TestSecretsSchedulerTasksProjectsIAMAndAIScreensMeetWCAG(t *testing.T) {
 		a11yPage{"secret row menu", "/secrets?project=" + project, rowReady("a11y-secret"),
 			`document.querySelector("#view tbody tr .overflow-trigger").click()`},
 		a11yPage{"delete secret dialog", "/secrets?project=" + project, rowReady("a11y-secret"), openDeleteDialog},
-		a11yPage{"create queue dialog", "/tasks/queues?project=" + project, rowReady("a11y-queue"), openCreateDialog},
+		// Create queue is a page of its own since #1842.
+		a11yPage{"create queue page", "/tasks/queues/create?project=" + project,
+			`document.querySelector("#view form.create-page #f-name") !== null`, ""},
 	)
 	auditScreens(t, pages)
 }

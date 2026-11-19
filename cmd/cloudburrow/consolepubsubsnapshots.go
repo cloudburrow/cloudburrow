@@ -87,8 +87,8 @@ func snapshotLink(project, name string) string {
 
 func (p pubsubSnapshotsProvider) List(ctx context.Context, project string) (console.Listing, error) {
 	out := console.Listing{
-		Columns:    []string{"Topic", "Expires"},
-		NameColumn: "Snapshot",
+		Columns:    []string{"Snapshot ID", "Topic name", "Expiration"},
+		NameColumn: "Snapshot name",
 		Noun:       "snapshots",
 	}
 	if project == "" {
@@ -111,13 +111,14 @@ func (p pubsubSnapshotsProvider) List(ctx context.Context, project string) (cons
 			return console.Listing{}, fmt.Errorf("list snapshots: %w", err)
 		}
 		out.Items = append(out.Items, console.Resource{Name: s.GetName(), Fields: map[string]string{
-			"Topic":   s.GetTopic(),
-			"Expires": snapshotExpiry(s),
+			"Snapshot ID": lastSegment(s.GetName()),
+			"Topic name":  s.GetTopic(),
+			"Expiration":  snapshotExpiry(s),
 		}})
 	}
 	out.Total = len(out.Items)
 	if out.Total == 0 {
-		out.Note = "A snapshot is created from a subscription's page, with Create snapshot."
+		out.Note = "Create snapshot takes one of a subscription, here or on the subscription's page."
 	}
 	return out, nil
 }
@@ -287,10 +288,17 @@ func (p pubsubSubscriptionsProvider) DetailActions(ctx context.Context, project 
 			pubsubSnapshotLabelsDropped,
 	}}}}
 
+	// Google's Messages tab (#1847): Pull, then Ack on each message, on a
+	// pull subscription.
+	if deliveryType(s) == "Pull" {
+		actions = append(actions, console.Action{ID: actPull, Label: "Pull"}, console.Action{ID: actAckMessage, Label: "Ack"})
+	}
+
 	// Seek to a snapshot only when the topic has one: a Seek to a snapshot of
 	// another topic is refused.
+	var ids []string
 	if snaps, err := topicSnapshots(ctx, c.TopicAdminClient, s.GetTopic()); err == nil && len(snaps) > 0 {
-		ids := make([]string, len(snaps))
+		ids = make([]string, len(snaps))
 		for i, n := range snaps {
 			ids[i] = lastSegment(n)
 		}
@@ -304,8 +312,10 @@ func (p pubsubSubscriptionsProvider) DetailActions(ctx context.Context, project 
 		})
 	}
 
-	actions = append(actions, console.Action{
-		ID: actDetachSubscription, Label: "Detach from topic", Destructive: true, Confirm: detachConfirm,
+	// Google's one Replay messages dialog (#1847); the two Seek actions it
+	// stands for are still served.
+	actions = append(actions, replayAction(s.GetRetainAckedMessages(), ids), console.Action{
+		ID: actDetachSubscription, Label: "Detach", Destructive: true, Confirm: detachConfirm,
 	})
 
 	retained := "This subscription does not retain acknowledged messages, so seeking back replays only the unacknowledged ones."
@@ -341,6 +351,16 @@ func (p pubsubSubscriptionsProvider) ActAt(ctx context.Context, project string, 
 	defer func() { _ = c.Close() }()
 
 	switch action {
+	case actReplayMessages:
+		seek, v, err := replayAsSeek(values)
+		if err != nil {
+			return err
+		}
+		return p.ActAt(ctx, project, path, seek, v)
+
+	case actAckMessage:
+		return ackMessage(ctx, c.SubscriptionAdminClient, sub, values["ackId"])
+
 	case actDetachSubscription:
 		_, err := c.TopicAdminClient.DetachSubscription(ctx, &pubsubpb.DetachSubscriptionRequest{Subscription: sub})
 		return err

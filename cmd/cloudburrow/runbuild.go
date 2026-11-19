@@ -143,6 +143,10 @@ func (f storageSourceFetcher) Put(ctx context.Context, project, bucket, object s
 type localImageBuilder struct {
 	cfg    config.Config
 	loader *images.Loader
+	// metadataHost is the address (IP:port) a step container reaches the
+	// metadata server at, or "" (#1854): cloudburrow-host's published
+	// address for it.
+	metadataHost func() string
 }
 
 func newLocalImageBuilder(cfg config.Config) *localImageBuilder {
