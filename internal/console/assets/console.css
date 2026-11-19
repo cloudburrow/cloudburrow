@@ -1895,3 +1895,32 @@ dd.has-copy .property-copy { padding: 2px 8px; font-size: var(--text-badge-size)
 .picker-star svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linejoin: round; }
 .picker-star[aria-pressed="true"] svg { fill: currentColor; color: var(--accent); }
 .picker-columns { padding-right: 46px; }
+
+/* Logs Explorer (#1863): the query pane, the Fields pane beside the Query
+   results, and an entry expanded to its fields. */
+.log-query { display: grid; gap: 8px; margin-bottom: 12px; }
+.log-query-editor { width: 100%; box-sizing: border-box; min-height: 72px; resize: vertical;
+  border: 1px solid var(--text-muted); border-radius: var(--radius-control); padding: 8px;
+  background: var(--surface); color: var(--text); }
+.log-timeline-head, .log-results-head, .log-fields-head { display: flex; align-items: center; gap: 12px; }
+.log-timeline-head h2, .log-results-head h2, .log-fields-head h2 { margin-right: auto; }
+.log-panes { display: grid; grid-template-columns: minmax(180px, 240px) minmax(0, 1fr); gap: 12px; align-items: start; }
+.log-fields h3 { font-size: var(--text-caption-size); color: var(--text-muted); margin: 12px 0 4px; }
+.log-fields ul { list-style: none; margin: 0; padding: 0; }
+.log-field-value { display: flex; justify-content: space-between; gap: 8px; width: 100%; padding: 4px 6px;
+  border: 0; background: none; color: var(--text); text-align: left; border-radius: var(--radius-control); cursor: pointer; }
+.log-field-value:hover { background: var(--state-hover); }
+.log-field-value .mono { overflow-wrap: anywhere; }
+.log-field-count { color: var(--text-muted); }
+.log-results { min-width: 0; }
+.log-expand svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; }
+.log-expand[aria-expanded="true"] svg { transform: rotate(90deg); }
+.log-detail-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.log-json { list-style: none; margin: 0; padding-left: 16px; }
+.log-json-key { color: var(--accent); }
+.log-json-leaf { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.log-json-value { overflow-wrap: anywhere; }
+.timeline-column { cursor: pointer; }
+.logs-dashboard { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+@media (max-width: 700px) { .log-panes { grid-template-columns: minmax(0, 1fr); } }
+.log-toolbar > *, .log-query .actions > *, .log-view-controls > * { max-width: 100%; min-width: 0; }

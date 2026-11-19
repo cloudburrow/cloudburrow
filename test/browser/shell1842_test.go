@@ -88,8 +88,8 @@ func TestProductNavIsOnTheLeftAndCollapses(t *testing.T) {
 	p.waitFor(`document.querySelector("#product-nav .product-nav-title") !== null && document.querySelector("#product-nav .product-nav-title").textContent === "Cloud Logging"`)
 	var logging []string
 	p.eval(`[...document.querySelectorAll("#product-nav a")].map((a) => a.textContent)`, &logging)
-	if len(logging) < 2 || logging[0] != "Logs Explorer" || !strings.Contains(strings.Join(logging, ","), "Log router") {
-		t.Errorf("Cloud Logging's menu lists %v; want Logs Explorer first, with Log router", logging)
+	if len(logging) < 2 || logging[0] != "Logs Explorer" || !strings.Contains(strings.Join(logging, ","), "Log Router") {
+		t.Errorf("Cloud Logging's menu lists %v; want Logs Explorer first, with Log Router (#1863)", logging)
 	}
 	var rows int
 	p.eval(`[...document.querySelectorAll("#nav-list a")].filter((a) => a.textContent.includes("Logs Explorer")).length`, &rows)

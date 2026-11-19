@@ -237,26 +237,38 @@ const ROUTES = [
     product: "iam", productTitle: "IAM & Admin" },
 
   { path: "/monitoring", service: null, screen: "monitoring", title: "Monitoring", section: "Operations" },
+  // Cloud Logging's menu in Google's order (#1863): Logs Explorer, Log
+  // Analytics, Logs Dashboard, Log-based Metrics, Log Router, Logs Storage,
+  // then the pages Google keeps elsewhere that CloudBurrow serves here
+  // (saved queries are the Explorer's Query library, log scopes and
+  // Settings Google's Observability settings, exclusions part of a sink).
   { path: "/logs",     service: null, screen: "logs",     title: "Logs Explorer", section: "Operations",
+    product: "logging", productTitle: "Cloud Logging" },
+  { path: "/logs/analytics", service: null, screen: "unavailable", icon: "logs", title: "Log Analytics", section: "Operations",
+    product: "logging", productTitle: "Cloud Logging",
+    unavailable: "Log Analytics runs SQL over a log bucket upgraded to use Log Analytics, through BigQuery's engine, " +
+      "which this page does not hold. A bucket's linked dataset (Logs Storage, the bucket's Linked dataset) opens in " +
+      "the local BigQuery's query editor, where its _AllLogs view can be queried." },
+  { path: "/logs/dashboard", service: null, screen: "logs-dashboard", icon: "logs", title: "Logs Dashboard", section: "Operations",
     product: "logging", productTitle: "Cloud Logging" },
   // Cloud Logging's admin resources (#1226), beside the Explorer: they are
   // stored and validated; a metric has no time series and a sink delivers
   // nothing, which each screen says.
-  { path: "/logs/metrics",    service: "logging-metrics",    icon: "logs", title: "Log-based metrics", kind: "Log-based metric",
+  { path: "/logs/metrics",    service: "logging-metrics",    icon: "logs", title: "Log-based Metrics", kind: "Log-based metric",
     section: "Operations", product: "logging", productTitle: "Cloud Logging" },
-  { path: "/logs/sinks",      service: "logging-sinks",      icon: "logs", title: "Log router", kind: "Sink",
-    section: "Operations", product: "logging", productTitle: "Cloud Logging" },
-  { path: "/logs/exclusions", service: "logging-exclusions", icon: "logs", title: "Exclusions", kind: "Exclusion",
+  { path: "/logs/sinks",      service: "logging-sinks",      icon: "logs", title: "Log Router", kind: "Sink",
     section: "Operations", product: "logging", productTitle: "Cloud Logging" },
   { path: "/logs/storage",    service: "logging-buckets",    icon: "logs", title: "Logs Storage", kind: "Log bucket",
-    section: "Operations", product: "logging", productTitle: "Cloud Logging" },
-  // Logs Storage's Settings (#1311): GetSettings, UpdateSettings, GetCmekSettings.
-  { path: "/logs/settings",   service: "logging-settings",   icon: "logs", title: "Logs Storage settings",
     section: "Operations", product: "logging", productTitle: "Cloud Logging" },
   // Saved queries and log scopes (#1519).
   { path: "/logs/saved-queries", service: "logging-saved-queries", icon: "logs", title: "Saved queries", kind: "Saved query",
     section: "Operations", product: "logging", productTitle: "Cloud Logging" },
   { path: "/logs/log-scopes", service: "logging-log-scopes", icon: "logs", title: "Log scopes", kind: "Log scope",
+    section: "Operations", product: "logging", productTitle: "Cloud Logging" },
+  { path: "/logs/exclusions", service: "logging-exclusions", icon: "logs", title: "Exclusions", kind: "Exclusion",
+    section: "Operations", product: "logging", productTitle: "Cloud Logging" },
+  // Logging's Settings (#1311): GetSettings, UpdateSettings, GetCmekSettings.
+  { path: "/logs/settings",   service: "logging-settings",   icon: "logs", title: "Settings",
     section: "Operations", product: "logging", productTitle: "Cloud Logging" },
   { path: "/activity", service: null, screen: "activity", title: "Activity",      section: "Operations" },
   { path: "/requests", service: null, screen: "requests", title: "Request Log",   section: "Operations" },
@@ -6503,6 +6515,7 @@ function dispatch(view) {
   if (match.screen === "instance") return renderInstance(view);
   if (match.screen === "monitoring") return renderMonitoring(view);
   if (match.screen === "logs") return renderLogs(view);
+  if (match.screen === "logs-dashboard") return renderLogsDashboard(view);
   if (match.screen === "activity") return renderActivity(view);
   if (match.screen === "requests") return renderRequests(view);
   if (match.screen === "faults") return renderFaults(view);
@@ -8696,9 +8709,50 @@ const MAX_RENDERED_LINES = 1000;
 // states say opposite things about whether the application is running.
 const STREAM_SILENCE_MS = 45000;
 
+// The Query results columns (#1863), as Google's Logs Explorer draws each
+// entry: severity, timestamp and summary, the entry expanding to its fields.
 // The Resource column is what makes an unattributed entry legible: a line
 // with no project still says which pod or service produced it.
-const LOG_COLUMNS = ["Time", "Severity", "Source", "Resource", "Message"];
+const LOG_COLUMNS = ["Severity", "Timestamp", "Resource", "Summary"];
+
+// The time-range picker's presets, as Google's Logs Explorer offers them
+// ("Last 1 hour" first shown), in minutes.
+const LOG_TIME_RANGES = [["5m", "Last 5 minutes", 5], ["15m", "Last 15 minutes", 15], ["30m", "Last 30 minutes", 30],
+  ["1h", "Last 1 hour", 60], ["3h", "Last 3 hours", 180], ["6h", "Last 6 hours", 360], ["12h", "Last 12 hours", 720],
+  ["1d", "Last 1 day", 1440], ["2d", "Last 2 days", 2880], ["7d", "Last 7 days", 10080], ["14d", "Last 14 days", 20160],
+  ["30d", "Last 30 days", 43200]];
+
+// The Severity menu's levels, the Logging query language's.
+const LOG_SEVERITIES = ["DEFAULT", "DEBUG", "INFO", "NOTICE", "WARNING", "ERROR", "CRITICAL", "ALERT", "EMERGENCY"];
+
+// logQueryValue quotes a value for the Logging query language.
+const logQueryValue = (v) => JSON.stringify(String(v));
+
+// logJSONTree draws an entry's LogEntry as Google's expanded entry does:
+// nested fields that fold, each value with Show matching entries and Hide
+// matching entries.
+function logJSONTree(value, path, onMatch) {
+  if (value && typeof value === "object") {
+    const keys = Object.keys(value).sort();
+    return el("ul", { class: "log-json" }, ...keys.map((k) => {
+      const child = value[k];
+      const p = path ? `${path}.${k}` : k;
+      if (child && typeof child === "object") {
+        return el("li", {}, el("details", { class: "log-json-node", open: true },
+          el("summary", {}, el("span", { class: "log-json-key", text: k }), el("span", { text: ": {…}" })),
+          logJSONTree(child, p, onMatch)));
+      }
+      return el("li", { class: "log-json-leaf", "data-field": p },
+        el("span", { class: "log-json-key", text: k }), el("span", { text: ": " }),
+        el("span", { class: "log-json-value mono", text: String(child) }),
+        overflowMenu([
+          { label: "Show matching entries", run: () => onMatch(`${p}=${logQueryValue(child)}`) },
+          { label: "Hide matching entries", run: () => onMatch(`-${p}=${logQueryValue(child)}`) },
+        ], `${p} ${child}`));
+    }));
+  }
+  return el("span", { class: "mono", text: String(value) });
+}
 
 async function renderLogs(view) {
   const params = new URLSearchParams(location.search);
@@ -8725,9 +8779,11 @@ async function renderLogs(view) {
   // instance.
   let operation = params.get("operation") || "";
 
-  const scopeSelect = el("select", { id: "log-scope", "aria-label": "Log scope" },
+  // Google's Refine scope: Project logs, a log view, or (CloudBurrow's own,
+  // for the pod lines no project can be claimed for) every source.
+  const scopeSelect = el("select", { id: "log-scope", "aria-label": "Refine scope" },
     el("option", { value: "all", text: "All sources" }),
-    el("option", { value: "project", text: project ? `Project ${project}` : "This project",
+    el("option", { value: "project", text: project ? `Project logs (${project})` : "Project logs",
                    disabled: project ? null : "disabled" }),
     el("option", { value: "parent", text: "A folder or organization" }),
     el("option", { value: "view", text: "Through a log view" }));
@@ -8789,18 +8845,37 @@ async function renderLogs(view) {
   parentInput.value = params.get("parent") || "";
   parentInput.hidden = scope !== "parent";
 
-  const severity = el("select", { id: "severity", "aria-label": "Minimum severity" },
-    ...["", "INFO", "WARNING", "ERROR"].map((v) =>
-      el("option", { value: v, text: v || "All severities" })));
-  const source = el("input", { class: "filter", type: "search", id: "source",
-    placeholder: "Source, e.g. run/my-service", "aria-label": "Filter by source" });
-  // The server has always supported a resource filter and the screen never
-  // offered one, so "show me only this pod's lines" — the reason anyone opens a
-  // log viewer from a resource — could not be expressed.
-  const resource = el("input", { class: "filter", type: "search", id: "resource",
-    placeholder: "Resource, e.g. api-00002-deployment", "aria-label": "Filter by resource" });
+  // The query pane (#1863), as Google's Logs Explorer lays it out: Search
+  // all fields, the Resource, Log name and Severity menus that write their
+  // clause into the query, the query editor in the Logging query language
+  // (internal/console/logquery.go says which fields and operators), and Run
+  // query. Source and resource are the address's own filters, from a
+  // resource's Logs tab, shown as chips.
+  const source = el("input", { type: "hidden", id: "source" });
+  const resource = el("input", { type: "hidden", id: "resource" });
   const contains = el("input", { class: "filter", type: "search", id: "contains",
-    placeholder: "Message contains", "aria-label": "Filter by message text" });
+    placeholder: "Search all fields", "aria-label": "Search all fields" });
+  const queryEditor = el("textarea", { id: "log-query", class: "mono log-query-editor", rows: "3", spellcheck: "false",
+    "aria-label": "Query editor", placeholder: 'severity>=WARNING\nresource.type="run"\ntextPayload:"timeout"' });
+  const queryError = el("p", { class: "form-error", id: "log-query-error", role: "alert", hidden: true });
+  const severity = el("select", { id: "severity", "aria-label": "Severity" },
+    el("option", { value: "", text: "All severities" }),
+    ...LOG_SEVERITIES.map((v) => el("option", { value: v, text: v })));
+  const resourceType = el("select", { id: "log-resource-type", "aria-label": "Resource" },
+    el("option", { value: "", text: "All resources" }));
+  const timeRange = el("select", { id: "log-time-range", "aria-label": "Time range" },
+    ...LOG_TIME_RANGES.map(([v, label]) => el("option", { value: v, text: label })),
+    el("option", { value: "custom", text: "Custom", hidden: true }));
+  // One clause per menu, on a line of its own, replaced when the menu
+  // changes: the editor stays the one statement of the query.
+  const setClause = (field, clause) => {
+    const lines = queryEditor.value.split("\n").filter((l) => !new RegExp(`^\\s*${field.replace(".", "\\.")}\\s*(>=|=)`).test(l));
+    if (clause) lines.push(clause);
+    queryEditor.value = lines.filter((l, i) => l.trim() || i < lines.length - 1).join("\n").trim();
+  };
+  const addClause = (clause) => {
+    queryEditor.value = queryEditor.value.trim() ? `${queryEditor.value.trim()}\n${clause}` : clause;
+  };
   // The Log name picker (#1554), as Google's Logs Explorer lists the scope's
   // log names: Cloud Logging's ListLogs of the project, folder or
   // organization in scope. A log's full name is its entries' resource, so
@@ -8837,6 +8912,7 @@ async function renderLogs(view) {
   logName.addEventListener("change", () => {
     resource.value = logName.value;
     writeFilters();
+    drawScope();
     connect();
     announce(logName.value ? `Showing log ${logName.value}` : "Showing every log name");
   });
@@ -8847,21 +8923,40 @@ async function renderLogs(view) {
   // bookmarked or sent to a colleague — and the one thing a person does with a
   // log query they got right is send it to someone else.
   const FILTER_CONTROLS = [
-    { control: severity, param: "severity" },
     { control: source, param: "source" },
     { control: resource, param: "resource" },
     { control: contains, param: "contains" },
+    { control: queryEditor, param: "query" },
+    { control: timeRange, param: "timeRange" },
   ];
+  timeRange.value = "1h";
   for (const { control, param } of FILTER_CONTROLS) {
     const initial = params.get(param);
     if (initial) control.value = initial;
   }
+  // A custom range is the timeline's Zoom to time, carried in the address.
+  let customFrom = params.get("from") || "", customTo = params.get("to") || "";
+  if (customFrom) timeRange.value = "custom";
+  // An address from before the query editor (?severity=ERROR) is its clause.
+  if (params.get("severity") && !queryEditor.value) {
+    setClause("severity", `severity>=${params.get("severity").toUpperCase()}`);
+  }
+  severity.value = (/^\s*severity\s*>=\s*(\w+)/m.exec(queryEditor.value) || [])[1] || "";
 
   const writeFilters = () => {
     const url = new URL(location.href);
     for (const { control, param } of FILTER_CONTROLS) {
-      if (control.value) url.searchParams.set(param, control.value);
+      if (control.value && !(param === "timeRange" && control.value === "1h")) url.searchParams.set(param, control.value);
       else url.searchParams.delete(param);
+    }
+    url.searchParams.delete("severity");
+    if (timeRange.value === "custom") {
+      url.searchParams.set("from", customFrom);
+      url.searchParams.set("to", customTo);
+      url.searchParams.delete("timeRange");
+    } else {
+      url.searchParams.delete("from");
+      url.searchParams.delete("to");
     }
     history.replaceState({}, "", url);
   };
@@ -8872,7 +8967,43 @@ async function renderLogs(view) {
   // which is the first question anyone brings to a log viewer. The counts come
   // from the server over the same filtered set the table is showing, so the
   // histogram and the rows can never disagree about what is being looked at.
-  const timeline = el("div", { class: "card log-timeline" });
+  const timeline = el("div", { class: "card log-timeline", id: "log-timeline" });
+  let timelineCollapsed = false;
+  // The Fields pane (#1863): the values of the entries the query matches,
+  // each with its count, as Google's Log fields pane lists them; choosing one
+  // adds its clause to the query and runs it.
+  const fieldsPane = el("aside", { class: "card log-fields", id: "log-fields", "aria-label": "Log fields" });
+  const LOG_FIELD_GROUPS = [["resource.type", "Resource type"], ["severity", "Severity"],
+    ["logName", "Log name"], ["resource.labels.project_id", "Project ID"]];
+  const drawFields = (entries) => {
+    const groups = LOG_FIELD_GROUPS.map(([path, label]) => {
+      const counts = new Map();
+      for (const e of entries) {
+        const v = path.split(".").reduce((o, k) => (o && typeof o === "object" ? o[k] : undefined), e.logEntry || {});
+        if (v !== undefined && v !== "") counts.set(v, (counts.get(v) || 0) + 1);
+      }
+      return { path, label, values: [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 20) };
+    });
+    const types = groups[0].values.map(([v]) => v);
+    const keep = resourceType.value;
+    setChildren(resourceType, el("option", { value: "", text: "All resources" }),
+      ...[...new Set([...types, ...(keep ? [keep] : [])])].sort().map((v) => el("option", { value: v, text: v })));
+    resourceType.value = keep;
+    setChildren(fieldsPane,
+      el("div", { class: "log-fields-head" }, el("h2", { text: "Log fields" }),
+        el("button", { class: "link-button is-inline", text: "Clear", onclick: () => {
+          queryEditor.value = ""; severity.value = ""; resourceType.value = ""; runQuery(); } })),
+      ...groups.map((g) => el("section", { class: "log-field-group", "data-field": g.path },
+        el("h3", { text: g.label }),
+        g.values.length
+          ? el("ul", {}, ...g.values.map(([v, n]) => el("li", {},
+              el("button", { class: "log-field-value", "data-value": v,
+                title: `Add ${g.path}=${logQueryValue(v)} to the query`,
+                onclick: () => { addClause(`${g.path}=${logQueryValue(v)}`); runQuery(); } },
+                el("span", { class: "mono", text: g.path === "logName" ? decodeURIComponent(v.slice(v.indexOf("/logs/") + 6)) : v }),
+                el("span", { class: "log-field-count", text: String(n) })))))
+          : el("p", { class: "unavailable", text: "No values" }))));
+  };
 
   const drawTimeline = async () => {
     const query = filterQuery();
@@ -8883,11 +9014,24 @@ async function renderLogs(view) {
     } catch {
       // The stream's own status already says whether the instance is
       // reachable; a second red box here would be saying it twice.
+      drawFields([]);
       return setChildren(timeline);
     }
+    drawFields(data.entries || []);
     const buckets = data.histogram || [];
     const total = buckets.reduce((n, b) => n + (b.total || 0), 0);
-    if (!total) return setChildren(timeline);
+    const collapse = el("button", { class: "link-button is-inline", id: "log-timeline-toggle",
+      "aria-expanded": timelineCollapsed ? "false" : "true",
+      text: timelineCollapsed ? "Expand timeline" : "Collapse timeline",
+      onclick: () => { timelineCollapsed = !timelineCollapsed; drawTimeline(); } });
+    const head = el("div", { class: "log-timeline-head" }, el("h2", { text: "Timeline" }), collapse,
+      timeRange.value === "custom"
+        ? el("button", { class: "link-button is-inline", text: "Jump to now", onclick: () => {
+            timeRange.value = "1h"; runQuery(); } })
+        : null);
+    if (!total) return setChildren(timeline, head, el("p", { class: "unavailable", text: "No entries in this time range" }));
+    if (timelineCollapsed) return setChildren(timeline, head);
+    const width = buckets.length > 1 ? new Date(buckets[1].at) - new Date(buckets[0].at) : 60000;
 
     const peak = Math.max(...buckets.map((b) => b.total || 0));
     const first = buckets[0] && new Date(buckets[0].at);
@@ -8895,14 +9039,22 @@ async function renderLogs(view) {
     const errors = buckets.reduce((n, b) => n + ((b.counts || {}).ERROR || 0), 0);
 
     setChildren(timeline,
-      el("h2", { text: "Over time" }),
+      head,
       el("div", { class: "timeline-bars", role: "img",
         "aria-label": `${total} entries over ${first && last ? relativeTime(first) : "the retained window"}` +
                       `, ${errors} of them errors` },
         ...buckets.map((b) => {
           const counts = b.counts || {};
+          // Zoom to time: a column's click narrows the range to it.
           const column = el("div", { class: "timeline-column",
-            title: `${new Date(b.at).toLocaleTimeString()} · ${b.total || 0} entries` });
+            title: `${new Date(b.at).toLocaleTimeString()} · ${b.total || 0} entries · click to zoom to time`,
+            onclick: () => {
+              customFrom = new Date(b.at).toISOString();
+              customTo = new Date(new Date(b.at).getTime() + Math.max(width, 1000)).toISOString();
+              timeRange.value = "custom";
+              runQuery();
+              announce(`Zoomed to ${new Date(b.at).toLocaleTimeString()}`);
+            } });
           // Stacked in severity order with the worst on top, so a column that
           // contains an error is unmistakable however few of them there are.
           for (const [name, state] of [["ERROR", "error"], ["WARNING", "warn"],
@@ -8932,10 +9084,19 @@ async function renderLogs(view) {
     if (scope === "parent" && parentInput.value.trim()) query.set("parent", parentInput.value.trim());
     if (scope === "view" && viewSelect.value) query.set("view", viewSelect.value);
     if (operation) query.set("operation", operation);
-    if (severity.value) query.set("severity", severity.value);
     if (source.value) query.set("source", source.value);
     if (resource.value) query.set("resource", resource.value);
-    if (contains.value) query.set("contains", contains.value);
+    // Search all fields is the query's global restriction, a quoted value.
+    const text = [queryEditor.value.trim(), contains.value.trim() ? logQueryValue(contains.value.trim()) : ""]
+      .filter(Boolean).join("\n");
+    if (text) query.set("query", text);
+    if (timeRange.value === "custom" && customFrom) {
+      query.set("from", customFrom);
+      if (customTo) query.set("to", customTo);
+    } else {
+      const preset = LOG_TIME_RANGES.find(([v]) => v === timeRange.value) || LOG_TIME_RANGES[3];
+      query.set("from", new Date(Date.now() - preset[2] * 60000).toISOString());
+    }
     return query;
   };
 
@@ -8946,9 +9107,12 @@ async function renderLogs(view) {
   try {
     logDelete = !!(await api("/api/logs?limit=1")).logDelete;
   } catch { /* the stream's own state reports an unreachable instance */ }
-  const columns = logDelete ? LOG_COLUMNS.length + 1 : LOG_COLUMNS.length;
+  const columns = (logDelete ? LOG_COLUMNS.length + 1 : LOG_COLUMNS.length) + 1;
 
-  const pauseButton = el("button", { class: "secondary", text: "Pause" });
+  // Stream logs / Stop stream (#1863), as Google's toolbar: the query's
+  // results are drawn when it runs, and later entries only while streaming;
+  // stopped, they are held and shown when streaming starts again.
+  const pauseButton = el("button", { class: "secondary", id: "log-stream", text: "Stream logs" });
   const reconnectButton = el("button", { class: "secondary", text: "Reconnect",
                                          hidden: true, onclick: () => connect() });
   // A .status, like every other state in this console. A muted grey string
@@ -8960,11 +9124,13 @@ async function renderLogs(view) {
   const body = el("tbody");
   const table = el("table", {},
     el("thead", {}, el("tr", {},
+      el("th", { scope: "col" }, el("span", { class: "sr-only", text: "Expand" })),
       LOG_COLUMNS.map((c) => el("th", { scope: "col", text: c })),
       logDelete ? el("th", { scope: "col" }, el("span", { class: "sr-only", text: "Actions" })) : null)),
     body);
 
-  let paused = false;
+  let paused = true;
+  let ready = false;
   let buffered = [];
   let attempt = 0;
   let rows = 0;
@@ -9087,16 +9253,58 @@ async function renderLogs(view) {
     }], `log ${id}`);
   };
 
+  // Copy link: this entry's own address, its insertId as the query over
+  // the minute around it, in the scope it was read in.
+  const entryLink = (entry) => {
+    const url = new URL(location.href);
+    url.searchParams.set("query", `insertId=${logQueryValue(entry.id)}`);
+    const at = new Date(entry.timestamp).getTime();
+    url.searchParams.set("from", new Date(at - 30000).toISOString());
+    url.searchParams.set("to", new Date(at + 30000).toISOString());
+    for (const p of ["contains", "timeRange", "severity"]) url.searchParams.delete(p);
+    return url.toString();
+  };
+  const copy = async (value, what) => {
+    try { await navigator.clipboard.writeText(value); notify(`Copied ${what}`); } catch (err) {
+      notify(`Could not copy: ${err.message}`, "error");
+    }
+  };
+  const onMatch = (clause) => { addClause(clause); runQuery(); };
+
   const append = (entry) => {
     if (!rows) body.replaceChildren();
     rows++;
-    const row = el("tr", {},
-      el("td", { class: "mono", text: new Date(entry.timestamp).toLocaleTimeString() }),
+    const expand = el("button", { class: "icon-button log-expand", "aria-expanded": "false",
+      "aria-label": `Expand entry ${entry.id}`,
+      html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>' });
+    let detail = null;
+    expand.addEventListener("click", () => {
+      if (detail) {
+        detail.remove();
+        detail = null;
+        expand.setAttribute("aria-expanded", "false");
+        return;
+      }
+      const tree = logJSONTree(entry.logEntry || {}, "", onMatch);
+      const setOpen = (open) => { for (const d of tree.querySelectorAll("details")) d.open = open; };
+      detail = el("tr", { class: "log-detail" }, el("td", { colspan: String(columns) },
+        el("div", { class: "log-detail-actions" },
+          el("button", { class: "link-button is-inline", text: "Expand nested fields", onclick: () => setOpen(true) }),
+          el("button", { class: "link-button is-inline", text: "Collapse nested fields", onclick: () => setOpen(false) }),
+          el("button", { class: "link-button is-inline", text: "Copy link", onclick: () => copy(entryLink(entry), "link to the entry") }),
+          el("button", { class: "link-button is-inline", text: "Copy as JSON",
+            onclick: () => copy(JSON.stringify(entry.logEntry || {}, null, 2), "entry as JSON") })),
+        tree));
+      row.after(detail);
+      expand.setAttribute("aria-expanded", "true");
+    });
+    const row = el("tr", { class: "log-entry", "data-insert-id": String(entry.id) },
+      el("td", {}, expand),
       el("td", {}, el("span", { class: "status",
         "data-state": entry.severity === "ERROR" ? "error"
           : entry.severity === "WARNING" ? "warn" : "ok" },
         el("span", { text: entry.severity }))),
-      el("td", { class: "mono", text: entry.source || "—" }),
+      el("td", { class: "mono", text: new Date(entry.timestamp).toLocaleString() }),
       // Project and operation ride along in the title, so an entry that
       // carries them can be traced without a column per field.
       el("td", { class: "mono", text: entry.resource || "—",
@@ -9108,10 +9316,13 @@ async function renderLogs(view) {
     body.append(row);
     // Bounded: an unbounded log view eventually becomes the reason the tab
     // stops responding.
-    while (body.childElementCount > MAX_RENDERED_LINES) {
-      body.firstElementChild.remove();
+    while (body.querySelectorAll("tr.log-entry").length > MAX_RENDERED_LINES) {
+      const first = body.querySelector("tr.log-entry");
+      if (first.nextElementSibling && first.nextElementSibling.classList.contains("log-detail")) first.nextElementSibling.remove();
+      first.remove();
       rows--;
     }
+    resultsCount.textContent = `${rows} entr${rows === 1 ? "y" : "ies"}`;
   };
 
   // Any traffic at all — an entry or a heartbeat — means the stream is alive.
@@ -9126,8 +9337,17 @@ async function renderLogs(view) {
     }, STREAM_SILENCE_MS);
   };
 
+  // The address's own filters, each a chip with a remove control.
+  const filterChip = (label, clear) => el("span", { class: "chip" },
+    el("span", { text: label }),
+    el("button", { class: "chip-clear", "aria-label": `Clear the ${label} filter`, onclick: clear,
+      html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>' }));
   const drawScope = () => {
-    setChildren(chips, operation
+    setChildren(chips,
+      source.value ? filterChip(`source ${source.value}`, () => { source.value = ""; writeFilters(); drawScope(); connect(); }) : null,
+      resource.value ? filterChip(`resource ${resource.value}`, () => {
+        resource.value = ""; syncLogName(); writeFilters(); drawScope(); connect(); }) : null,
+      operation
       ? el("span", { class: "chip" },
           el("span", { text: `operation ${operation}` }),
           el("button", {
@@ -9149,17 +9369,17 @@ async function renderLogs(view) {
 
   pauseButton.addEventListener("click", () => {
     paused = !paused;
-    pauseButton.textContent = paused ? "Resume" : "Pause";
+    pauseButton.textContent = paused ? "Stream logs" : "Stop stream";
     if (paused) {
-      setStatus(`paused — ${buffered.length} buffered`, "warn");
-      announce("Log stream paused");
+      setStatus(`stream stopped — ${buffered.length} new`, "warn");
+      announce("Log stream stopped");
     } else {
       // Resume shows what happened while paused rather than skipping it:
       // the lines you paused to read are usually next to the ones you need.
       for (const e of buffered) append(e);
       buffered = [];
       setStatus("streaming", "ok");
-      announce("Log stream resumed");
+      announce("Streaming logs");
     }
   });
 
@@ -9168,6 +9388,10 @@ async function renderLogs(view) {
     if (silenceTimer) clearTimeout(silenceTimer);
     body.replaceChildren();
     rows = 0;
+    resultsCount.textContent = "";
+    ready = false;
+    buffered = [];
+    queryError.hidden = true;
     stalled = false;
     reconnectButton.hidden = true;
     drawEmpty();
@@ -9189,9 +9413,11 @@ async function renderLogs(view) {
       // moment later is genuinely empty and worth explaining.
       setTimeout(takeCensus, 500);
       attempt = 0;
-      setStatus(paused ? `paused — ${buffered.length} buffered` : "streaming", "ok");
+      setStatus(paused ? "query results" : "streaming", "ok");
       heard();
     });
+    // The end of the backlog: what follows is new, drawn while streaming.
+    stream.addEventListener("ready", () => { ready = true; });
     stream.addEventListener("keepalive", heard);
     // A read the Logging API refused (a view filter it does not evaluate, a
     // parent that does not exist): its own message, and no reconnect.
@@ -9200,16 +9426,21 @@ async function renderLogs(view) {
       try { msg = JSON.parse(e.data).error || msg; } catch { /* shown as is */ }
       stream.close();
       setStatus("refused", "error");
-      drawViewNote(msg);
+      if (msg.startsWith("Invalid query")) {
+        queryError.textContent = msg;
+        queryError.hidden = false;
+      } else {
+        drawViewNote(msg);
+      }
     });
     stream.addEventListener("log", (e) => {
       heard();
       let entry;
       try { entry = JSON.parse(e.data); } catch { return; }
-      if (paused) {
+      if (paused && ready) {
         buffered.push(entry);
         if (buffered.length > MAX_RENDERED_LINES) buffered.shift();
-        setStatus(`paused — ${buffered.length} buffered`, "warn");
+        setStatus(`stream stopped — ${buffered.length} new`, "warn");
         return;
       }
       append(entry);
@@ -9230,26 +9461,73 @@ async function renderLogs(view) {
     });
   };
 
-  for (const { control } of FILTER_CONTROLS) {
-    control.addEventListener("change", () => { writeFilters(); connect(); });
-  }
-  resource.addEventListener("change", syncLogName);
+  // Run query: the editor, the menus and the time range, read once.
+  const runQuery = () => {
+    severity.value = (/^\s*severity\s*>=\s*(\w+)/m.exec(queryEditor.value) || [])[1] || "";
+    writeFilters();
+    connect();
+    announce("Query run");
+  };
+  const runButton = el("button", { class: "primary", id: "log-run-query", text: "Run query", onclick: runQuery });
+  queryEditor.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); runQuery(); }
+  });
+  contains.addEventListener("change", runQuery);
+  severity.addEventListener("change", () => { setClause("severity", severity.value ? `severity>=${severity.value}` : ""); runQuery(); });
+  resourceType.addEventListener("change", () => {
+    setClause("resource.type", resourceType.value ? `resource.type=${logQueryValue(resourceType.value)}` : "");
+    runQuery();
+  });
+  timeRange.addEventListener("change", runQuery);
+  const resultsCount = el("span", { class: "unavailable", id: "log-results-count" });
+
+  // The query's Actions, as Google's: Create metric and Create sink take the
+  // query as their filter, Download the results.
+  const queryActions = overflowMenu([
+    { label: "Create metric", run: () => navigate(`/logs/metrics/create?${new URLSearchParams({ filter: queryEditor.value.trim() })}`) },
+    { label: "Create sink", run: () => navigate(`/logs/sinks/create?${new URLSearchParams({ filter: queryEditor.value.trim() })}`) },
+    { label: "Download", run: async () => {
+      const query = filterQuery();
+      query.set("limit", "1000");
+      const data = await api(`/api/logs?${query}`);
+      const blob = new Blob([JSON.stringify((data.entries || []).map((e) => e.logEntry), null, 2)], { type: "application/json" });
+      const a = el("a", { href: URL.createObjectURL(blob), download: "downloaded-logs.json" });
+      document.body.append(a);
+      a.click();
+      a.remove();
+    } },
+  ], "the query results");
+  queryActions.querySelector(".overflow-trigger").setAttribute("aria-label", "Actions");
 
   drawScope();
+  const shareLink = el("button", { class: "secondary", text: "Share link",
+    onclick: () => copy(location.href, "link to this query") });
+  const queryLibrary = el("a", { class: "button secondary", href: "/logs/saved-queries", text: "Query library",
+    onclick: (e) => { e.preventDefault(); navigate("/logs/saved-queries"); } });
   setChildren(view,
     pageHeader("Logs Explorer",
-      "Live from the local stack. Credentials are redacted before an entry is stored."),
+      "Live from the local stack. Credentials are redacted before an entry is stored.",
+      { actions: [queryLibrary, shareLink] }),
     logDelete
       ? el("p", { class: "unavailable", id: "log-delete-note",
           text: "Delete log is on the Cloud Logging entries (source logging/…) of the selected project. " +
                 "Pod logs and CloudBurrow's own request log are not held by the Logging API, so they cannot be deleted here." })
       : null,
-    el("div", { class: "actions" }, scopeSelect, parentInput, viewControls, logName, severity, source, resource, contains,
+    el("div", { class: "actions log-toolbar" }, scopeSelect, parentInput, viewControls, timeRange,
        pauseButton, reconnectButton, status),
     viewNote,
+    el("section", { class: "card log-query", "aria-label": "Query" },
+      el("div", { class: "actions" }, contains, resourceType, logName, severity, source, resource),
+      queryEditor,
+      queryError,
+      el("div", { class: "actions" }, runButton)),
     chips,
     timeline,
-    el("div", { class: "table-wrap" }, table));
+    el("div", { class: "log-panes" },
+      fieldsPane,
+      el("section", { class: "log-results", "aria-label": "Query results" },
+        el("div", { class: "log-results-head" }, el("h2", { text: "Query results" }), resultsCount, queryActions),
+        el("div", { class: "table-wrap" }, table))));
 
   showViewControls();
   if (scope === "view") await loadBuckets(initialView);
@@ -9257,6 +9535,71 @@ async function renderLogs(view) {
   connect();
   announce(operation ? `Logs Explorer opened, scoped to operation ${operation}`
                      : "Logs Explorer opened");
+}
+
+// --- Logs Dashboard (#1863) ------------------------------------------
+//
+// Google's Logs Dashboard charts the project's entries by severity and by
+// resource type. Here they are the entries the console's log store holds in
+// the time range, from the same /api/logs the Logs Explorer reads; each row
+// opens the Explorer with its query.
+async function renderLogsDashboard(view) {
+  const range = el("select", { id: "logs-dashboard-range", "aria-label": "Time range" },
+    ...LOG_TIME_RANGES.map(([v, label]) => el("option", { value: v, text: label })));
+  range.value = new URLSearchParams(location.search).get("timeRange") || "1h";
+  const body = el("div", { class: "logs-dashboard" });
+  const explore = (query) => {
+    const q = new URLSearchParams({ query });
+    if (range.value !== "1h") q.set("timeRange", range.value);
+    return `/logs?${q}`;
+  };
+  const draw = async () => {
+    const preset = LOG_TIME_RANGES.find(([v]) => v === range.value) || LOG_TIME_RANGES[3];
+    const q = new URLSearchParams({ limit: "1000", from: new Date(Date.now() - preset[2] * 60000).toISOString() });
+    let data;
+    try {
+      data = await api(`/api/logs?${q}`);
+    } catch (err) {
+      return setChildren(body, el("div", { class: "state" }, el("h2", { text: "The log store could not be read" }),
+        el("p", { text: err.message })));
+    }
+    const entries = data.entries || [];
+    const count = (key) => {
+      const m = new Map();
+      for (const e of entries) {
+        const k = key(e);
+        m.set(k, (m.get(k) || 0) + 1);
+      }
+      return [...m.entries()].sort((a, b) => b[1] - a[1]);
+    };
+    const bySeverity = count((e) => e.severity);
+    const byType = count((e) => (e.logEntry || {}).resource ? e.logEntry.resource.type : "unattributed");
+    const errorsByType = count((e) => e.severity === "ERROR" ? ((e.logEntry || {}).resource || {}).type || "unattributed" : null)
+      .filter(([k]) => k !== null);
+    const card = (title, rows, query, empty) => el("section", { class: "card", "aria-label": title },
+      el("h2", { text: title }),
+      rows.length
+        ? el("table", {}, el("tbody", {}, ...rows.map(([k, n]) => el("tr", {},
+            el("td", {}, el("a", { href: explore(query(k)), text: k,
+              onclick: (e) => { e.preventDefault(); navigate(explore(query(k))); } })),
+            el("td", { class: "mono", text: String(n) })))))
+        : el("p", { class: "unavailable", text: empty }));
+    setChildren(body,
+      card("Log entries by severity", bySeverity, (k) => `severity=${k}`, "No entries in this time range"),
+      card("Log entries by resource type", byType, (k) => `resource.type=${logQueryValue(k)}`, "No entries in this time range"),
+      card("Errors by resource type", errorsByType, (k) => `severity>=ERROR\nresource.type=${logQueryValue(k)}`, "No errors in this time range"));
+  };
+  range.addEventListener("change", () => {
+    const url = new URL(location.href);
+    if (range.value === "1h") url.searchParams.delete("timeRange"); else url.searchParams.set("timeRange", range.value);
+    history.replaceState({}, "", url);
+    draw();
+  });
+  setChildren(view, pageHeader("Logs Dashboard", "The entries this instance's log store holds, by severity and resource type.",
+    { actions: [refreshButton(draw)] }),
+    el("div", { class: "actions" }, range), body);
+  await draw();
+  announce("Logs Dashboard opened");
 }
 
 // --- Activity ---------------------------------------------------------

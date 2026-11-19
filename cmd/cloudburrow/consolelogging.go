@@ -17,6 +17,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -88,7 +89,7 @@ func enabledWord(disabled bool) string {
 type loggingMetricsProvider struct{ loggingAdminScreen }
 
 func (loggingMetricsProvider) ID() string    { return "logging-metrics" }
-func (loggingMetricsProvider) Title() string { return "Log-based metrics" }
+func (loggingMetricsProvider) Title() string { return "Log-based Metrics" }
 
 func metricKindWord(m *loggingpb.LogMetric) string {
 	if m.GetMetricDescriptor().GetValueType() == metric.MetricDescriptor_DISTRIBUTION {
@@ -98,7 +99,7 @@ func metricKindWord(m *loggingpb.LogMetric) string {
 }
 
 func (p loggingMetricsProvider) List(ctx context.Context, project string) (console.Listing, error) {
-	out := console.Listing{Columns: []string{"Type", "Filter", "State", "Updated"}, NameColumn: "Metric", Noun: "log-based metrics"}
+	out := console.Listing{Columns: []string{"Description", "Type", "Units", "Filter", "State", "Updated"}, NameColumn: "Name", Noun: "user-defined metrics"}
 	a, err := p.admin()
 	if err != nil {
 		return console.Listing{}, err
@@ -116,7 +117,8 @@ func (p loggingMetricsProvider) List(ctx context.Context, project string) (conso
 	}
 	for _, m := range ms {
 		out.Items = append(out.Items, console.Resource{Name: logging.MetricName(project, m.GetName()), Fields: map[string]string{
-			"Type": metricKindWord(m), "Filter": m.GetFilter(), "State": enabledWord(m.GetDisabled()), "Updated": loggingTime(m.GetUpdateTime()),
+			"Description": orDash(m.GetDescription()), "Type": metricKindWord(m), "Units": orDash(m.GetMetricDescriptor().GetUnit()),
+			"Filter": m.GetFilter(), "State": enabledWord(m.GetDisabled()), "Updated": loggingTime(m.GetUpdateTime()),
 		}})
 	}
 	out.Total = len(out.Items)
@@ -124,36 +126,138 @@ func (p loggingMetricsProvider) List(ctx context.Context, project string) (conso
 	return out, nil
 }
 
-// metricFields are the create and edit form's fields. Type is shown on edit
-// and cannot change, as the API refuses a changed value_type.
+// metricFields are the create and edit form's fields, in the order of
+// Google's Create logs metric panel
+// (docs.cloud.google.com/logging/docs/logs-based-metrics/distribution-metrics,
+// re-read 2026-11-19): Metric type, Details, Filter selection (with a
+// distribution's Field name, Regular expression and Advanced (Histogram
+// buckets)), then Labels. Type is shown on edit and cannot change, as the
+// API refuses a changed value_type.
 func metricFields(m *loggingpb.LogMetric) []console.Field {
 	if m == nil {
 		m = &loggingpb.LogMetric{}
 	}
-	bucketKind, bucketValues := bucketFormValues(m.GetBucketOptions())
+	const (
+		typeSec    = "Metric type"
+		detailsSec = "Details"
+		filterSec  = "Filter selection"
+		labelsSec  = "Labels"
+		dist       = "type=Distribution"
+	)
+	field, regex := extractorParts(m.GetValueExtractor())
+	b := metricBucketValues(m.GetBucketOptions())
 	labels := ""
 	if len(m.GetLabelExtractors()) > 0 {
 		labels = console.FormatMap(m.GetLabelExtractors())
 	}
-	return []console.Field{
-		{Name: "name", Label: "Metric name", Type: "text", Required: true, Default: m.GetName(), Immutable: m.GetName() != "",
+	fields := []console.Field{
+		{Name: "type", Label: "Metric type", Type: "radio", Options: []string{"Counter", "Distribution"}, Default: metricKindWord(m),
+			Immutable: m.GetName() != "", Section: typeSec,
+			Help: "Counter counts the log entries that match the filter; Distribution records the values a field of them holds."},
+		{Name: "name", Label: "Log metric name", Type: "text", Required: true, Default: m.GetName(), Immutable: m.GetName() != "", Section: detailsSec,
 			Pattern: `^[A-Za-z0-9_\-.,+!*'\(\)%][A-Za-z0-9_\-.,+!*'\(\)%\/]{0,99}$`,
 			Help:    "Up to 100 of A-Z a-z 0-9 _-.,+!*',()%/, not starting with /."},
-		{Name: "description", Label: "Description", Type: "text", Default: m.GetDescription()},
-		{Name: "filter", Label: "Filter", Type: "textarea", Required: true, Default: m.GetFilter(),
-			Help: "ANDed logName, severity, resource.type, timestamp, resource.labels.* and labels.* terms, as the Logs Explorer's query takes them."},
-		{Name: "type", Label: "Type", Type: "select", Options: []string{"Counter", "Distribution"}, Default: metricKindWord(m),
-			Immutable: m.GetName() != "", Help: "A counter counts matching entries; a distribution records the values its value extractor takes from them."},
-		{Name: "unit", Label: "Unit", Type: "text", Default: m.GetMetricDescriptor().GetUnit(), Help: "Optional; 1 when empty."},
-		{Name: "value_extractor", Label: "Value extractor", Type: "text", Default: m.GetValueExtractor(), Section: "Distribution",
-			Help: `Distribution only: EXTRACT(field) or REGEXP_EXTRACT(field, "regex") with one capture group.`},
-		{Name: "buckets", Label: "Buckets", Type: "select", Options: []string{"explicit", "linear", "exponential"}, Default: bucketKind, Section: "Distribution"},
-		{Name: "bucket_values", Label: "Bucket values", Type: "text", Default: bucketValues, Section: "Distribution",
-			Help: "explicit: the bounds, comma separated (10,100,1000); linear: count,width,offset; exponential: count,growth factor,scale."},
-		{Name: "labels", Label: "Labels", Type: "map", Default: labels,
+		{Name: "description", Label: "Description", Type: "text", Default: m.GetDescription(), Section: detailsSec},
+		{Name: "unit", Label: "Units", Type: "text", Default: m.GetMetricDescriptor().GetUnit(), Section: detailsSec,
+			Help: "Optional, such as s or ms; 1 when empty."},
+		{Name: "bucket_name", Label: "Select project or log bucket", Type: "text", Default: m.GetBucketName(), Section: filterSec,
+			Help: "Empty counts the project's log entries; or a log bucket's name, projects/[P]/locations/[L]/buckets/[B], to count only the entries in it."},
+		{Name: "filter", Label: "Build filter", Type: "textarea", Required: true, Default: m.GetFilter(), Section: filterSec,
+			Help: "In the Logging query language: ANDed logName, severity, resource.type, timestamp, resource.labels.* and labels.* terms, as the Logs Explorer's query takes them."},
+		{Name: "field_name", Label: "Field name", Type: "text", Required: true, Default: field, Section: filterSec, ShowWhen: dist,
+			Help: "The log entry field holding the value, such as jsonPayload.latency or textPayload."},
+		{Name: "regex", Label: "Regular expression", Type: "text", Default: regex, Section: filterSec, ShowWhen: dist,
+			Help: "Optional: leave it empty when the field is always a number; otherwise one capture group around the number, such as ([0-9.]+)ms."},
+		{Name: "bucket_type", Label: "Advanced (Histogram buckets)", Type: "radio", Options: []string{"Linear", "Explicit", "Exponential"},
+			Default: b.kind, Section: filterSec, ShowWhen: dist},
+		{Name: "linear_start", Label: "Start value (a)", Type: "number", Default: b.linearStart, Section: filterSec, ShowWhen: "bucket_type=Linear"},
+		{Name: "linear_count", Label: "Number of buckets (N)", Type: "number", Default: b.linearCount, Section: filterSec, ShowWhen: "bucket_type=Linear"},
+		{Name: "linear_width", Label: "Bucket width (b)", Type: "number", Default: b.linearWidth, Section: filterSec, ShowWhen: "bucket_type=Linear",
+			Help: "Greater than 0."},
+		{Name: "explicit_bounds", Label: "Bounds (b)", Type: "text", Default: b.bounds, Section: filterSec, ShowWhen: "bucket_type=Explicit",
+			Help: "Comma separated, increasing: 10,100,1000."},
+		{Name: "exp_count", Label: "Number of buckets (N)", Type: "number", Default: b.expCount, Section: filterSec, ShowWhen: "bucket_type=Exponential"},
+		{Name: "exp_scale", Label: "Linear scale (a)", Type: "number", Default: b.expScale, Section: filterSec, ShowWhen: "bucket_type=Exponential",
+			Help: "Greater than 0."},
+		{Name: "exp_growth", Label: "Exponential growth factor (b)", Type: "number", Default: b.expGrowth, Section: filterSec, ShowWhen: "bucket_type=Exponential",
+			Help: "Greater than 1."},
+		{Name: "labels", Label: "Labels", Type: "map", Default: labels, Section: labelsSec,
 			Help: "Each label's key and its extractor, EXTRACT(field) or REGEXP_EXTRACT(field, \"regex\"). Labels are strings."},
-		{Name: "disabled", Label: "Disabled", Type: "checkbox", Default: strconv.FormatBool(m.GetDisabled())},
 	}
+	// Disabled is the edit form's: Google's Create logs metric has none.
+	if m.GetName() != "" {
+		fields = append(fields, console.Field{Name: "disabled", Label: "Disabled", Type: "checkbox", Default: strconv.FormatBool(m.GetDisabled())})
+	}
+	return fields
+}
+
+// extractorRe reads a value extractor back into the form's Field name and
+// Regular expression, as the service's own grammar writes it.
+var extractorRe = regexp.MustCompile(`^\s*(EXTRACT|REGEXP_EXTRACT)\s*\(\s*([^,\s)]+)\s*(?:,\s*"((?:[^"\\]|\\.)*)"\s*)?\)\s*$`)
+
+func extractorParts(e string) (field, regex string) {
+	m := extractorRe.FindStringSubmatch(e)
+	if m == nil {
+		return "", ""
+	}
+	return m[2], strings.ReplaceAll(m[3], `\"`, `"`)
+}
+
+// extractorOf is the value extractor a Field name and Regular expression
+// make: EXTRACT(field), or REGEXP_EXTRACT(field, "regex").
+func extractorOf(field, regex string) string {
+	field, regex = strings.TrimSpace(field), strings.TrimSpace(regex)
+	if field == "" {
+		return ""
+	}
+	if regex == "" {
+		return "EXTRACT(" + field + ")"
+	}
+	return "REGEXP_EXTRACT(" + field + `, "` + strings.ReplaceAll(regex, `"`, `\"`) + `")`
+}
+
+// metricBuckets are a distribution's bucket options as the form's fields
+// hold them.
+type metricBuckets struct {
+	kind                                  string
+	linearStart, linearCount, linearWidth string
+	bounds                                string
+	expCount, expScale, expGrowth         string
+}
+
+func metricBucketValues(b *distribution.Distribution_BucketOptions) metricBuckets {
+	f := func(v float64) string { return strconv.FormatFloat(v, 'g', -1, 64) }
+	out := metricBuckets{kind: "Linear"}
+	switch o := b.GetOptions().(type) {
+	case *distribution.Distribution_BucketOptions_LinearBuckets:
+		l := o.LinearBuckets
+		out.linearStart, out.linearCount, out.linearWidth = f(l.GetOffset()), strconv.Itoa(int(l.GetNumFiniteBuckets())), f(l.GetWidth())
+	case *distribution.Distribution_BucketOptions_ExponentialBuckets:
+		e := o.ExponentialBuckets
+		out.kind = "Exponential"
+		out.expCount, out.expScale, out.expGrowth = strconv.Itoa(int(e.GetNumFiniteBuckets())), f(e.GetScale()), f(e.GetGrowthFactor())
+	case *distribution.Distribution_BucketOptions_ExplicitBuckets:
+		out.kind = "Explicit"
+		_, out.bounds = bucketFormValues(b)
+	}
+	return out
+}
+
+// bucketsFromForm is the bucket options the form's Advanced (Histogram
+// buckets) fields name; the older buckets and bucket_values pair is still
+// read when bucket_type is absent.
+func bucketsFromForm(v map[string]string) (*distribution.Distribution_BucketOptions, error) {
+	switch v["bucket_type"] {
+	case "":
+		return parseBuckets(v["buckets"], v["bucket_values"])
+	case "Linear":
+		return parseBuckets("linear", v["linear_count"]+","+v["linear_width"]+","+v["linear_start"])
+	case "Explicit":
+		return parseBuckets("explicit", v["explicit_bounds"])
+	case "Exponential":
+		return parseBuckets("exponential", v["exp_count"]+","+v["exp_growth"]+","+v["exp_scale"])
+	}
+	return nil, fmt.Errorf("histogram buckets %q are not Linear, Explicit or Exponential", v["bucket_type"])
 }
 
 func bucketFormValues(b *distribution.Distribution_BucketOptions) (kind, values string) {
@@ -215,6 +319,9 @@ func metricFromForm(id string, values map[string]string, old *loggingpb.LogMetri
 		MetricDescriptor: &metric.MetricDescriptor{MetricKind: metric.MetricDescriptor_DELTA, ValueType: metric.MetricDescriptor_INT64,
 			Unit: strings.TrimSpace(values["unit"])},
 	}
+	if b, ok := values["bucket_name"]; ok {
+		m.BucketName = strings.TrimSpace(b)
+	}
 	kind := values["type"]
 	if old != nil {
 		kind = metricKindWord(old)
@@ -222,7 +329,10 @@ func metricFromForm(id string, values map[string]string, old *loggingpb.LogMetri
 	if kind == "Distribution" {
 		m.MetricDescriptor.ValueType = metric.MetricDescriptor_DISTRIBUTION
 		m.ValueExtractor = strings.TrimSpace(values["value_extractor"])
-		b, err := parseBuckets(values["buckets"], values["bucket_values"])
+		if m.ValueExtractor == "" {
+			m.ValueExtractor = extractorOf(values["field_name"], values["regex"])
+		}
+		b, err := bucketsFromForm(values)
 		if err != nil {
 			return nil, err
 		}
@@ -255,6 +365,14 @@ func metricFromForm(id string, values map[string]string, old *loggingpb.LogMetri
 func (loggingMetricsProvider) CreateForm() (string, []console.Field) {
 	return "Create metric", metricFields(nil)
 }
+
+// CreateTitle implements console.CreateTitler: Google's panel is Create
+// logs metric, its button Create metric.
+func (loggingMetricsProvider) CreateTitle() string { return "Create logs metric" }
+
+// CreateLayout implements console.CreateLayouter: one page under its
+// section headings, as Google's panel is.
+func (loggingMetricsProvider) CreateLayout() string { return console.CreateLayoutPage }
 
 func (p loggingMetricsProvider) Create(ctx context.Context, project string, values map[string]string) (string, error) {
 	a, err := p.admin()
@@ -548,16 +666,18 @@ func (p loggingExclusionsProvider) Delete(ctx context.Context, project, name str
 }
 
 var (
-	_ console.Driller = loggingMetricsProvider{}
-	_ console.Creator = loggingMetricsProvider{}
-	_ console.Editor  = loggingMetricsProvider{}
-	_ console.Deleter = loggingMetricsProvider{}
-	_ console.Driller = loggingSinksProvider{}
-	_ console.Creator = loggingSinksProvider{}
-	_ console.Editor  = loggingSinksProvider{}
-	_ console.Deleter = loggingSinksProvider{}
-	_ console.Driller = loggingExclusionsProvider{}
-	_ console.Creator = loggingExclusionsProvider{}
-	_ console.Editor  = loggingExclusionsProvider{}
-	_ console.Deleter = loggingExclusionsProvider{}
+	_ console.Driller        = loggingMetricsProvider{}
+	_ console.Creator        = loggingMetricsProvider{}
+	_ console.CreateTitler   = loggingMetricsProvider{}
+	_ console.CreateLayouter = loggingMetricsProvider{}
+	_ console.Editor         = loggingMetricsProvider{}
+	_ console.Deleter        = loggingMetricsProvider{}
+	_ console.Driller        = loggingSinksProvider{}
+	_ console.Creator        = loggingSinksProvider{}
+	_ console.Editor         = loggingSinksProvider{}
+	_ console.Deleter        = loggingSinksProvider{}
+	_ console.Driller        = loggingExclusionsProvider{}
+	_ console.Creator        = loggingExclusionsProvider{}
+	_ console.Editor         = loggingExclusionsProvider{}
+	_ console.Deleter        = loggingExclusionsProvider{}
 )

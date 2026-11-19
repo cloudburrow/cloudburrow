@@ -220,11 +220,12 @@ func TestConsoleLoggingBuckets(t *testing.T) {
 	offered := false
 	for _, it := range l.Items {
 		if it.Name == name {
-			offered = it.Fields["State"] == bucketDeleteRequested && len(it.Actions) == 1 && it.Actions[0].ID == "undelete"
+			offered = it.Fields["State"] == bucketDeleteRequested && len(it.Actions) == 2 && it.Actions[1].ID == "undelete" &&
+				it.Actions[1].Label == "Restore deleted bucket"
 		}
 	}
 	if !offered {
-		t.Errorf("a deleted bucket's row = %+v; want Delete requested with Undelete", l.Items)
+		t.Errorf("a deleted bucket's row = %+v; want Delete requested with Restore deleted bucket", l.Items)
 	}
 	if code, out := consolePost(t, srv.URL+"/api/actions/logging-buckets?project="+project, map[string]string{"Name": name, "Action": "undelete"}); code != http.StatusOK {
 		t.Fatalf("undelete = %d %s", code, out)
