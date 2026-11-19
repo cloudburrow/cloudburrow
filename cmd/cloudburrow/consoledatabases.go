@@ -704,6 +704,9 @@ func (p datastoreProvider) Detail(ctx context.Context, project string, path []st
 	// (datastoreScope), and a child entity is addressed by its whole key path
 	// (datastoreEntityKey), so the three levels hold in every namespace and
 	// at every depth of ancestry (#854).
+	if len(path) == 1 && path[0] == datastoreIndexesSegment {
+		return p.indexesDetail(ctx, project)
+	}
 	scope, rest := parseDatastorePath(path)
 	var (
 		d   console.Detail
@@ -2404,10 +2407,28 @@ func datastoreKey(kind, id string) (*datastore.Key, error) {
 func (p datastoreProvider) QueryForm(path []string) (string, []console.Field) {
 	// A namespace's own pages list kinds, not entities: there is nothing on
 	// them to query.
-	if scope, rest := parseDatastorePath(path); scope.index || (scope.namespaced && len(rest) == 0) {
+	scope, rest := parseDatastorePath(path)
+	if scope.index || (scope.namespaced && len(rest) == 0) || (len(path) == 1 && path[0] == datastoreIndexesSegment) {
 		return "", nil
 	}
-	return "Run query", []console.Field{
+	kind := ""
+	if len(rest) == 1 {
+		kind = rest[0]
+	}
+	byKind := datastoreQueryFields()
+	for i := range byKind {
+		byKind[i].ShowWhen = "queryBy=" + datastoreQueryByKind
+	}
+	fields := []console.Field{{Name: "queryBy", Label: "Query", Type: "select",
+		Options: []string{datastoreQueryByKind, datastoreQueryByGQL}, Default: datastoreQueryByKind,
+		Help: "Query by kind builds the query from a filter and an order; Query by GQL runs a GQL query you write."}}
+	fields = append(fields, byKind...)
+	return "Run query", append(fields, datastoreGQLFields(kind)...)
+}
+
+// datastoreQueryFields are the query tab's Query by kind controls.
+func datastoreQueryFields() []console.Field {
+	return []console.Field{
 		{Name: "property", Label: "Property", Type: "text",
 			Help: "The property to filter on. Leave empty to list in order."},
 		{Name: "op", Label: "Operator", Type: "text", Default: "=",
@@ -2521,6 +2542,9 @@ func (p datastoreProvider) Build(ctx context.Context, project string, path []str
 		return out, nil
 	}
 	defer done()
+	if values["queryBy"] == datastoreQueryByGQL {
+		return p.buildGQL(ctx, c, project, scope, values["gql"])
+	}
 
 	q := &datastorepb.Query{Kind: []*datastorepb.KindExpression{{Name: kind}}}
 	if prop := strings.TrimSpace(values["property"]); prop != "" {

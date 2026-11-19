@@ -1703,6 +1703,11 @@ func (p datastoreProvider) DetailActions(ctx context.Context, project string, fu
 	if project == "" {
 		return nil
 	}
+	if len(full) == 1 && full[0] == datastoreIndexesSegment {
+		return []console.Action{{ID: "deleteindex", Label: "Delete index", Destructive: true,
+			Fields: []console.Field{{Name: "index", Label: "Index ID", Type: "text", Required: true,
+				Help: "The ID of the composite index to delete, as the Index ID column shows it."}}}}
+	}
 	scope, path := parseDatastorePath(full)
 	if scope.index {
 		return nil

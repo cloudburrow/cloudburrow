@@ -3948,7 +3948,9 @@ function openActionForm(route, segments, action, onDone, title = null) {
 function listActionButtons(route, data, onDone) {
   return (data.actions || []).map((a) => el("button", {
     type: "button", class: "secondary", id: `list-action-${a.id}`, text: a.label,
-    onclick: () => openActionForm(route, [], a, onDone, data.noun || route.title),
+    // One that is a link opens its page: the Datastore page's Indexes
+    // (#1846).
+    onclick: () => (a.href ? navigate(a.href) : openActionForm(route, [], a, onDone, data.noun || route.title)),
   }));
 }
 
