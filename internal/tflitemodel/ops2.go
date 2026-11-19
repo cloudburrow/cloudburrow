@@ -6,14 +6,13 @@ import (
 )
 
 // More of LiteRT's builtin operators (#1775): rounding and trigonometric
-// functions, ELU and HARD_SWISH, LOG_SOFTMAX, L2_NORMALIZATION (#1799), the max, min and product
+// functions, ELU and HARD_SWISH, LOG_SOFTMAX, the max, min and product
 // reductions, ARG_MAX and ARG_MIN, SLICE, TILE, PAD and PADV2, FLOOR_DIV
 // and FLOOR_MOD, ADD_N, SHAPE, FILL and ZEROS_LIKE, and the operators of
 // several outputs SPLIT, SPLIT_V and UNPACK, each as LiteRT's reference
 // kernel computes it.
 const (
 	opFloor      = 8
-	opL2Norm     = 11
 	opPad        = 34
 	opSplit      = 49
 	opLogSoftmax = 50
@@ -46,7 +45,7 @@ func init() {
 		opPadV2: "PADV2", opSlice: "SLICE", opSin: "SIN", opTile: "TILE", opShape: "SHAPE", opArgMin: "ARG_MIN", opReduceProd: "REDUCE_PROD",
 		opReduceMax: "REDUCE_MAX", opUnpack: "UNPACK", opReduceMin: "REDUCE_MIN", opFloorDiv: "FLOOR_DIV", opZerosLike: "ZEROS_LIKE",
 		opFill: "FILL", opFloorMod: "FLOOR_MOD", opSplitV: "SPLIT_V", opCeil: "CEIL", opAddN: "ADD_N", opCos: "COS", opElu: "ELU",
-		opRound: "ROUND", opHardSwish: "HARD_SWISH", opL2Norm: "L2_NORMALIZATION"} {
+		opRound: "ROUND", opHardSwish: "HARD_SWISH"} {
 		opNames[code] = name
 	}
 }
@@ -95,8 +94,6 @@ func (m *Model) eval2(o op, a []*Tensor) (*Tensor, error) {
 		return unary(func(v float64) float64 { return v * math.Min(6, math.Max(0, v+3)) / 6 })
 	case opLogSoftmax:
 		return logSoftmax(o, x)
-	case opL2Norm:
-		return l2Norm(o, x)
 	case opReduceMax, opReduceMin, opReduceProd:
 		return reduceOp(o, x, axes(arg(1)), o.bool(4))
 	case opArgMax, opArgMin:
@@ -243,31 +240,6 @@ func (m *Model) evalMulti(o op, a []*Tensor, n int) ([]*Tensor, error) {
 		start += s
 	}
 	return outs, nil
-}
-
-// l2Norm is L2_NORMALIZATION over the last axis, as LiteRT's reference
-// kernel computes it (tensorflow/lite/kernels/internal/reference/
-// l2normalization.h): each value divided by the vector's L2 norm, the norm
-// at least 1e-6 (l2norm.cc's epsilon), then the fused activation
-// (L2NormOptions' only field).
-func l2Norm(o op, x *Tensor) (*Tensor, error) {
-	if !x.Type.IsFloat() || len(x.Shape) == 0 {
-		return nil, &UnsupportedError{"operator " + o.name + " on " + x.Type.String() + " tensors is not supported"}
-	}
-	act := o.i8(4, 0)
-	n := x.Shape[len(x.Shape)-1]
-	r := &Tensor{Type: x.Type, Shape: x.Shape, F: make([]float32, len(x.F))}
-	for s := 0; n > 0 && s+n <= len(x.F); s += n {
-		sq := 0.0
-		for _, v := range x.F[s : s+n] {
-			sq += float64(v) * float64(v)
-		}
-		norm := math.Max(math.Sqrt(sq), 1e-6)
-		for i, v := range x.F[s : s+n] {
-			r.F[s+i] = activation(act, float32(float64(v)/norm))
-		}
-	}
-	return r, nil
 }
 
 func logSoftmax(o op, x *Tensor) (*Tensor, error) {

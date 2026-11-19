@@ -43,8 +43,7 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
   (`CLOUD_AI_TRANSLATE_V3`) with MediaPipe's Language Detector and the local Gemma model,
   `ML.UNDERSTAND_TEXT` (`CLOUD_AI_NATURAL_LANGUAGE_V1`, `ANALYZE_SYNTAX` 501) on the local Gemma
   model, and Vision's `IMAGE_PROPERTIES`, text boxes, `LABEL_DETECTION`, `OBJECT_LOCALIZATION`
-  and `FACE_DETECTION` on Google's MediaPipe models, and `LANDMARK_DETECTION` on Google's six
-  on-device landmark classifiers (no `mid`, location or box). Models are downloaded once into
+  and `FACE_DETECTION` on Google's MediaPipe models. Models are downloaded once into
   `<state-dir>/models` and checked against pinned SHA-256s.
 
 ### Fixed

@@ -38,9 +38,10 @@ func TestAnnotateImagesText(t *testing.T) {
 	}
 	req := `{"requests":[{"image":{"content":"` + base64.StdEncoding.EncodeToString(png) + `"},"features":[{"type":"DOCUMENT_TEXT_DETECTION"}]},` +
 		`{"image":{"content":"bm90IGFuIGltYWdl"},"features":[{"type":"TEXT_DETECTION"}]},` +
-		`{"image":{"content":"bm90IGFuIGltYWdl"},"features":[{"type":"LOGO_DETECTION"}]}]}`
+		`{"image":{"content":"bm90IGFuIGltYWdl"},"features":[{"type":"LOGO_DETECTION"}]},` +
+		`{"image":{"content":"bm90IGFuIGltYWdl"},"features":[{"type":"LANDMARK_DETECTION"}]}]}`
 	rs := annotate(t, req)
-	if len(rs) != 3 {
+	if len(rs) != 4 {
 		t.Fatalf("%d responses", len(rs))
 	}
 	full, _ := rs[0]["fullTextAnnotation"].(map[string]any)
@@ -85,5 +86,10 @@ func TestAnnotateImagesText(t *testing.T) {
 	}
 	if e, _ := rs[2]["error"].(map[string]any); e["code"] != 12.0 || !strings.Contains(e["message"].(string), "LOGO_DETECTION") {
 		t.Errorf("logo: %v", rs[2])
+	}
+	// No local model answers "no landmark" as Vision does (docs/gaps.md):
+	// LANDMARK_DETECTION is UNIMPLEMENTED before the image is read.
+	if e, _ := rs[3]["error"].(map[string]any); e["code"] != 12.0 || !strings.Contains(e["message"].(string), "LANDMARK_DETECTION") {
+		t.Errorf("landmark: %v", rs[3])
 	}
 }
