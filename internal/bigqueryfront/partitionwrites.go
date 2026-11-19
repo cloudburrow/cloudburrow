@@ -249,7 +249,7 @@ func (f front) partitionQueryWrite(w http.ResponseWriter, r *http.Request, job j
 	if dryRun(r, true) {
 		return f.partitionDryRun(w, r, c.queryOptions, c.WriteDisposition, dest)
 	}
-	lq, _, _, _ := bytesParameters(c.queryOptions) // as runQuery sends them (#1078)
+	lq, _, _, _ := rangeParameters(c.queryOptions) // as runQuery sends them (#1111)
 	opts := c.SchemaUpdateOptions
 	if write == "" || write == "WRITE_EMPTY" {
 		opts = nil // schemaUpdateOptions are for WRITE_APPEND and WRITE_TRUNCATE (above)
@@ -388,6 +388,7 @@ func (f front) partitionCopy(w http.ResponseWriter, r *http.Request, c *copyConf
 	}
 	op := strings.ToUpper(c.OperationType)
 	plain := op == "" || op == "COPY" || op == "OPERATION_TYPE_UNSPECIFIED"
+	key, _ := copyKeyName(c.DestinationEncryptionConfiguration) // copyJob has refused a bad one
 	if !some {
 		// A copy of ingestion-time partitioned tables keeps each row's
 		// _PARTITIONTIME (#1273), which copyJob's INSERT of the columns
@@ -483,6 +484,9 @@ func (f front) partitionCopy(w http.ResponseWriter, r *http.Request, c *copyConf
 		// in the destination's project (#1767).
 		in := of(*c.DestinationTable)
 		extra := in.newTableLayout(r, f.copyTableMeta(r, sources[0].base).layout, false, c.DestinationTable.DatasetID)
+		if key != "" { // #1762, copykey.go
+			extra["encryptionConfiguration"] = map[string]any{"kmsKeyName": key}
+		}
 		if why := in.makeCopyTable(r, *c.DestinationTable, schema, extra); why != "" {
 			writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not make the copy's destination: "+why)
 			return true
@@ -511,6 +515,14 @@ func (f front) partitionCopy(w http.ResponseWriter, r *http.Request, c *copyConf
 		}
 		f.finishOwnJob(w, r, j, "COPY", "copy", nil, &rowError{Reason: reason, Message: msg})
 		return true
+	}
+	if key != "" { // #1762, copykey.go: a key comes here with no decorator
+		if why := keyRegionMismatch(key, of(dest.base).datasetLocation(r, dest.base.DatasetID)); why != "" {
+			return fail("invalid", why)
+		}
+		if !made && write != "WRITE_TRUNCATE" && f.copyTableMeta(r, dest.base).key != key {
+			return fail("invalid", keyMismatchMessage)
+		}
 	}
 	cols := make([]string, len(dest.meta.Schema.Fields))
 	for i, fl := range dest.meta.Schema.Fields {
@@ -566,6 +578,11 @@ func (f front) partitionCopy(w http.ResponseWriter, r *http.Request, c *copyConf
 	}
 	if msg := f.runDML(r, sql); msg != "" {
 		return fail("backendError", "CloudBurrow could not copy the rows: "+msg)
+	}
+	if write == "WRITE_TRUNCATE" && !made && dest.dec == "" {
+		// The table is encrypted by the key given, or by default
+		// encryption, as copyJob's WRITE_TRUNCATE (#1762, copykey.go).
+		of(dest.base).setTableKey(r, dest.base.DatasetID, dest.base.TableID, key)
 	}
 	f.finishOwnJob(w, r, j, "COPY", "copy", map[string]any{"copiedRows": strconv.FormatInt(n, 10)}, nil)
 	return true
@@ -955,7 +972,7 @@ func (f front) partitionDryRun(w http.ResponseWriter, r *http.Request, q queryOp
 		if json.Unmarshal(rec.body.Bytes(), &resp) == nil {
 			st, _ := resp["statistics"].(map[string]any)
 			qs, _ := st["query"].(map[string]any)
-			lq, _, _, _ := bytesParameters(q) // as runQuery sends them (#1078)
+			lq, _, _, _ := rangeParameters(q) // as runQuery sends them (#1111)
 			if fields, status, _ := f.lone(r, lq, lq.Query); qs != nil && qs["schema"] == nil && status == http.StatusOK {
 				qs["schema"] = map[string]any{"fields": fields}
 				if b, err := json.Marshal(resp); err == nil {

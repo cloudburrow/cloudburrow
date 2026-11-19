@@ -1,6 +1,7 @@
 package bigqueryfront
 
 import (
+	"bytes"
 	"fmt"
 	"math"
 	"net/http"
@@ -32,7 +33,7 @@ var mlFunctionsServed = map[string]bool{"PREDICT": true, "EVALUATE": true, "WEIG
 	"CONFUSION_MATRIX": true, "ROC_CURVE": true, "CENTROIDS": true, "PRINCIPAL_COMPONENTS": true, "PRINCIPAL_COMPONENT_INFO": true, "RECOMMEND": true, "FEATURE_IMPORTANCE": true,
 	"FORECAST": true, "EXPLAIN_FORECAST": true, "DETECT_ANOMALIES": true, "ARIMA_EVALUATE": true, "ARIMA_COEFFICIENTS": true, "HOLIDAY_INFO": true,
 	"EXPLAIN_PREDICT": true, "GLOBAL_EXPLAIN": true, "RECONSTRUCTION_LOSS": true, "GENERATE_TEXT": true, "GENERATE_EMBEDDING": true,
-	"ANNOTATE_IMAGE": true} // modelservice.go, #1773
+	"ANNOTATE_IMAGE": true, "TRANSCRIBE": true, "TRANSLATE": true, "UNDERSTAND_TEXT": true} // modelservice.go, #1773, #1799
 
 // mlCall is one ML.<fn>(MODEL ...) call in a query's text.
 type mlCall struct {
@@ -43,6 +44,9 @@ type mlCall struct {
 	// object table, modelservice.go).
 	table []string
 	struc map[string]string
+	// named are the named arguments (name => value), by lower-case name,
+	// each value's SQL text: ML.TRANSCRIBE's recognition_config (#1799).
+	named map[string]string
 	// thresholds are ML.ROC_CURVE's GENERATE_ARRAY argument.
 	thresholds []float64
 	pos, end   int
@@ -110,6 +114,11 @@ func findMLCalls(sql string) ([]mlCall, string) {
 					return nil, msg
 				}
 				c.struc = m
+			case len(a) > 3 && a[0].kind == tokWord && a[1].punct("=") && a[2].punct(">"):
+				if c.named == nil {
+					c.named = map[string]string{}
+				}
+				c.named[strings.ToLower(a[0].text)] = strings.TrimSpace(sql[a[3].pos:a[len(a)-1].end])
 			case a[0].punct("("):
 				c.input = strings.TrimSpace(sql[a[0].end:a[len(a)-1].pos])
 			case a[0].is("GENERATE_ARRAY"):
@@ -243,7 +252,41 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 	}
 	// The scalar AI functions, evaluated row by row here (aigenerate.go,
 	// #1765, #1771, #1772).
-	if text, code, msg = f.rewriteAIGenerate(r, q, text); code != 0 {
+	client := jobText{query: q.Query}
+	paramsChanged := false
+	var aq queryOptions
+	if text, aq, code, msg = f.rewriteAIGenerate(r, q, text); code != 0 {
+		reason := map[int]string{400: "invalidQuery", 403: "accessDenied", 404: "notFound", 500: "internalError", 501: "notImplemented"}[code]
+		if code == 501 || code == 500 {
+			writeError(w, code, reason, msg)
+			return true
+		}
+		f.failBeforeRun(w, r, q, insert, "_cloudburrow", code, rowError{Reason: reason, Message: msg})
+		return true
+	}
+	if aq.ParameterMode != q.ParameterMode || !bytes.Equal(aq.QueryParameters, q.QueryParameters) {
+		// AI.AGG named positional parameters or dropped an instruction's
+		// (#1810): the engine is sent those, the client's job shows its own.
+		client.params, client.paramMode, client.paramsSet = q.QueryParameters, q.ParameterMode, true
+		q.QueryParameters, q.ParameterMode = aq.QueryParameters, aq.ParameterMode
+		paramsChanged = true
+	}
+	// AI.SEARCH, over a table's generated embeddings (aisearch.go, #1778).
+	if text, code, msg = f.rewriteAISearch(r, q, text); code != 0 {
+		reason := map[int]string{400: "invalidQuery", 403: "accessDenied", 404: "notFound", 500: "internalError", 501: "notImplemented"}[code]
+		if code == 501 || code == 500 {
+			writeError(w, code, reason, msg)
+			return true
+		}
+		f.failBeforeRun(w, r, q, insert, "_cloudburrow", code, rowError{Reason: reason, Message: msg})
+		return true
+	}
+	if msg := vectorIndexStatement(text); msg != "" { // vectorsearch.go, #1778
+		writeError(w, http.StatusNotImplemented, "notImplemented", msg)
+		return true
+	}
+	// VECTOR_SEARCH, brute force (vectorsearch.go, #1778).
+	if text, code, msg = f.rewriteVectorSearch(r, q, text); code != 0 {
 		reason := map[int]string{400: "invalidQuery", 403: "accessDenied", 404: "notFound", 500: "internalError", 501: "notImplemented"}[code]
 		if code == 501 || code == 500 {
 			writeError(w, code, reason, msg)
@@ -256,11 +299,10 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 		why := map[string]string{
 			"AI.COUNT_TOKENS": "the tokenizer is inside the local LiteRT-LM runtime, which publishes no count (its :countTokens is UNIMPLEMENTED, docs/generation.md), " +
 				"and a count made any other way would not be the model's",
-			"AI.SEARCH": "it searches tables with autonomous embedding generation, which CloudBurrow does not serve yet (#1778)",
 		}[fn]
 		if why == "" {
 			why = "not one of BigQuery's AI functions CloudBurrow serves: AI.GENERATE, AI.GENERATE_BOOL, AI.GENERATE_INT, AI.GENERATE_DOUBLE, AI.GENERATE_TEXT, " +
-				"AI.GENERATE_TABLE, AI.GENERATE_EMBEDDING, AI.EMBED, AI.SIMILARITY, AI.IF, AI.SCORE, AI.CLASSIFY and AI.AGG run on the instance's local Vertex AI (#1765, #1771, #1772, #1777)"
+				"AI.GENERATE_TABLE, AI.GENERATE_EMBEDDING, AI.EMBED, AI.SIMILARITY, AI.IF, AI.SCORE, AI.CLASSIFY, AI.AGG and AI.SEARCH run on the instance's local Vertex AI (#1765, #1771, #1772, #1777, #1778)"
 		}
 		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: "+fn+": "+why+". Nothing was run.")
 		return true
@@ -281,7 +323,7 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 				". CloudBurrow answers ML.PREDICT, ML.EVALUATE, ML.WEIGHTS, ML.FEATURE_INFO, ML.TRAINING_INFO, ML.CONFUSION_MATRIX, "+
 				"ML.ROC_CURVE, ML.CENTROIDS, ML.PRINCIPAL_COMPONENTS, ML.PRINCIPAL_COMPONENT_INFO, ML.RECOMMEND, ML.FEATURE_IMPORTANCE, ML.FORECAST, "+
 				"ML.EXPLAIN_FORECAST, ML.DETECT_ANOMALIES, ML.ARIMA_EVALUATE, ML.ARIMA_COEFFICIENTS, ML.HOLIDAY_INFO, ML.EXPLAIN_PREDICT, ML.GLOBAL_EXPLAIN, ML.RECONSTRUCTION_LOSS, "+
-				"ML.GENERATE_TEXT, ML.GENERATE_EMBEDDING and ML.ANNOTATE_IMAGE. Nothing was run.")
+				"ML.GENERATE_TEXT, ML.GENERATE_EMBEDDING, ML.ANNOTATE_IMAGE, ML.TRANSCRIBE, ML.TRANSLATE and ML.UNDERSTAND_TEXT. Nothing was run.")
 			return true
 		}
 		project, dataset, id, ok := f.resolveModel(c.path, q)
@@ -312,11 +354,14 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 	}
 	b.WriteString(text[last:])
 	sql := b.String()
-	if !setQueryText(r, insert, sql) {
+	set := setQueryText(r, insert, sql)
+	if paramsChanged {
+		set = setQueryParameters(r, insert, queryOptions{Query: sql, ParameterMode: q.ParameterMode, QueryParameters: q.QueryParameters})
+	}
+	if !set {
 		writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not rewrite the query")
 		return true
 	}
-	client := jobText{query: q.Query}
 	q.Query = sql
 	rec := newRecorder()
 	f.runQuery(rec, r, q, insert)
@@ -588,7 +633,7 @@ func (f front) mlSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall)
 	if c.ai && c.fn == "GENERATE_EMBEDDING" {
 		return "", 501, "Not implemented here: AI.GENERATE_EMBEDDING of a " + typ + " model: CloudBurrow serves it on remote embedding models (#1772). Nothing was run."
 	}
-	if c.fn == "GENERATE_TEXT" || c.fn == "GENERATE_EMBEDDING" || c.fn == "GENERATE_TABLE" || c.fn == "ANNOTATE_IMAGE" {
+	if c.fn == "GENERATE_TEXT" || c.fn == "GENERATE_EMBEDDING" || c.fn == "GENERATE_TABLE" || c.fn == "ANNOTATE_IMAGE" || c.fn == "TRANSCRIBE" || c.fn == "TRANSLATE" || c.fn == "UNDERSTAND_TEXT" {
 		fname := "ML." + c.fn
 		if c.ai {
 			fname = "AI." + c.fn

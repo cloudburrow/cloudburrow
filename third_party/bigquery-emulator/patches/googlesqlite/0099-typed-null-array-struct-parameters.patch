@@ -1,0 +1,578 @@
+CloudBurrow patch 99 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1816). Applies after patch 0097.
+
+A NULL query parameter, positional or named, had no type: a nil arg is
+left undeclared (and with one, every positional parameter of the
+statement), and an undeclared parameter with no type from its context is
+an INT64, so `SELECT @p` with a NULL STRING or DATE was an INT64. An
+ARRAY's type came from its first element's Go value and a STRUCT's from
+none (a STRING), so an ARRAY<DATE> or ARRAY<NUMERIC> given as text was an
+ARRAY<STRING>, and `@p.x` of a STRUCT failed. BigQuery types each as
+declared (https://cloud.google.com/bigquery/docs/parameterized-queries).
+
+TypedParameter (patch 0097) is now also a NULL (Null), an ARRAY
+(ArrayType, ArrayValues) or a STRUCT (StructTypes, StructValues, in the
+fields' order) of its declared type, each element and field a
+TypedParameter of its own. Conn.CheckNamedValue keeps a TypedParameter's
+declared type with its encoded value (typedArg, a driver.Valuer), the
+analyzer declares the parameter, positional or named, with it, and the
+statement is run with the encoded value; an INSERT leaves it as it is
+rather than reshaping it to the column at its position (VALUES (1, @p,
+@a) read an ARRAY<STRUCT> @a as the STRUCT column after id). A BYTES
+TypedParameter reads URL-safe and unpadded base64 too, as clients send
+it.
+
+typed_null_array_struct_parameter_test.go
+(TestTypedNullArrayStructParameters).
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch is
+offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- a/internal/analyzer.go
++++ b/internal/analyzer.go
+@@ -1838,7 +1838,8 @@
+ 			if zoned { // CloudBurrow patch (cloudburrow/cloudburrow#1456), coerced_timestamp_literal.go
+ 				ctx = withQueryText(ctx, query)
+ 			}
+-			action, err := a.newStmtAction(ctx, query, stmtArgs, stmtNode)
++			ctx = withTypedArgs(ctx, stmtArgs)                                        // CloudBurrow patch (#1816)
++			action, err := a.newStmtAction(ctx, query, plainArgs(stmtArgs), stmtNode) // CloudBurrow patch (#1816)
+ 			if err != nil {
+ 				return nil, err
+ 			}
+@@ -1898,7 +1899,12 @@
+ 		if v.Name == "" {
+ 			continue
+ 		}
+-		typ, ok := googleSQLTypeForValue(v.Value)
++		// CloudBurrow patch (cloudburrow/cloudburrow#1816): a TypedParameter
++		// with its declared type.
++		typ, ok, typed := declaredArgType(v.Value)
++		if !typed {
++			typ, ok = googleSQLTypeForValue(v.Value)
++		}
+ 		if !ok {
+ 			continue
+ 		}
+@@ -1949,6 +1955,9 @@
+ // analyzer infers its type from its context, as it did.
+ // CloudBurrow patch (cloudburrow/cloudburrow#1814).
+ func positionalParameterType(v any) (googlesql.Googlesql_TypeNode, bool) {
++	if typ, ok, typed := declaredArgType(v); typed { // CloudBurrow patch (#1816)
++		return typ, ok
++	}
+ 	switch x := v.(type) {
+ 	case nil:
+ 		return nil, false
+@@ -2471,7 +2480,7 @@
+ 	// For INSERT statements, reshape struct-valued args against the
+ 	// target InsertColumnList types so sparse Go maps expand to match
+ 	// the declared STRUCT field order. See reshapeInsertArgs.
+-	args = reshapeInsertArgs(args, node)
++	args = reshapeInsertArgs(args, node, typedArgPositions(ctx)) // CloudBurrow patch (#1816)
+ 	formattedQuery, params, err := collectFormatParams(ctx, node)
+ 	if err != nil {
+ 		return nil, fmt.Errorf("failed to format query %s: %w", query, err)
+@@ -2522,7 +2531,10 @@
+ // with nil, fields in declaration order). Go callers sometimes pass
+ // sparse maps that don't enumerate every declared field; without this,
+ // downstream STRUCT_FIELD(value, index) reads land out-of-range.
+-func reshapeInsertArgs(args []driver.NamedValue, node googlesql.ResolvedNode) []driver.NamedValue {
++//
++// CloudBurrow patch (cloudburrow/cloudburrow#1816): an arg at a position in
++// typed, a TypedParameter of its declared type, is left as it is.
++func reshapeInsertArgs(args []driver.NamedValue, node googlesql.ResolvedNode, typed map[int]bool) []driver.NamedValue {
+ 	if len(args) == 0 {
+ 		return args
+ 	}
+@@ -2541,6 +2553,9 @@
+ 	copy(out, args)
+ 	n := min(len(cols), len(out))
+ 	for i := 0; i < n; i++ {
++		if typed[i] {
++			continue
++		}
+ 		colType, err := cols[i].Type()
+ 		if err != nil || colType == nil {
+ 			continue
+--- a/driver.go
++++ b/driver.go
+@@ -423,7 +423,9 @@
+ 	// always sees the same shape. Primitives that the underlying
+ 	// SQLite driver can store natively (int64, float64, bool) are
+ 	// returned unchanged by EncodeValue.
+-	return internal.CheckNamedValue(value)
++	// CloudBurrow patch (cloudburrow/cloudburrow#1816): a TypedParameter
++	// keeps its declared type for the analyzer.
++	return internal.CheckConnNamedValue(value)
+ }
+ 
+ func (c *Conn) Prepare(query string) (driver.Stmt, error) {
+--- a/internal/value/typed_parameter.go
++++ b/internal/value/typed_parameter.go
+@@ -27,12 +27,91 @@
+ 	// Value is the value's text: BYTES base64-encoded, the others in
+ 	// their canonical text form.
+ 	Value string
++
++	// CloudBurrow patch (cloudburrow/cloudburrow#1816): a NULL, an ARRAY
++	// and a STRUCT of the declared type. Type is then also ARRAY or
++	// STRUCT.
++
++	// Null is a NULL of the type.
++	Null bool
++	// ArrayType is an ARRAY's element type.
++	ArrayType *ParameterType
++	// StructTypes are a STRUCT's fields, in their order.
++	StructTypes []ParameterField
++	// ArrayValues are an ARRAY's elements, each of ArrayType.
++	ArrayValues []TypedParameter
++	// StructValues are a STRUCT's field values, one for each of
++	// StructTypes, in its order.
++	StructValues []TypedParameter
+ }
+ 
++// ParameterType is a query parameter's GoogleSQL type, as BigQuery's REST
++// API gives it (QueryParameterType): a scalar type name, or an ARRAY of
++// ArrayType, or a STRUCT of StructTypes. CloudBurrow patch
++// (cloudburrow/cloudburrow#1816).
++type ParameterType struct {
++	Type        string
++	ArrayType   *ParameterType
++	StructTypes []ParameterField
++}
++
++// ParameterField is a field of a STRUCT ParameterType. CloudBurrow patch
++// (cloudburrow/cloudburrow#1816).
++type ParameterField struct {
++	Name string
++	Type ParameterType
++}
++
++// DeclaredType is p's type. CloudBurrow patch (cloudburrow/cloudburrow#1816).
++func (p TypedParameter) DeclaredType() ParameterType {
++	return ParameterType{Type: p.Type, ArrayType: p.ArrayType, StructTypes: p.StructTypes}
++}
++
++// decodeBytesParameter reads a BYTES parameter's base64 text: standard or
++// URL-safe, padded or not, as clients send it.
++func decodeBytesParameter(s string) ([]byte, error) {
++	var err error
++	for _, enc := range []*base64.Encoding{base64.StdEncoding, base64.URLEncoding, base64.RawStdEncoding, base64.RawURLEncoding} {
++		var b []byte
++		if b, err = enc.DecodeString(s); err == nil {
++			return b, nil
++		}
++	}
++	return nil, err
++}
++
+ // value is the parameter's value of its own type.
+ func (p TypedParameter) value() (Value, error) {
++	if p.Null { // CloudBurrow patch (cloudburrow/cloudburrow#1816)
++		return nil, nil
++	}
+ 	s := p.Value
+ 	switch strings.ToUpper(p.Type) {
++	case "ARRAY": // CloudBurrow patch (cloudburrow/cloudburrow#1816)
++		ret := &ArrayValue{Values: []Value{}}
++		for i, e := range p.ArrayValues {
++			v, err := e.value()
++			if err != nil {
++				return nil, fmt.Errorf("element %d: %w", i, err)
++			}
++			ret.Values = append(ret.Values, v)
++		}
++		return ret, nil
++	case "STRUCT": // CloudBurrow patch (cloudburrow/cloudburrow#1816)
++		if len(p.StructValues) != len(p.StructTypes) {
++			return nil, fmt.Errorf("STRUCT parameter value has %d fields, its type %d", len(p.StructValues), len(p.StructTypes))
++		}
++		ret := &StructValue{M: map[string]Value{}}
++		for i, f := range p.StructTypes {
++			v, err := p.StructValues[i].value()
++			if err != nil {
++				return nil, fmt.Errorf("field %s: %w", f.Name, err)
++			}
++			ret.Keys = append(ret.Keys, f.Name)
++			ret.Values = append(ret.Values, v)
++			ret.M[f.Name] = v
++		}
++		return ret, nil
+ 	case "STRING":
+ 		return StringValue(s), nil
+ 	case "INT64", "INTEGER", "INT":
+@@ -54,7 +133,7 @@
+ 		}
+ 		return BoolValue(b), nil
+ 	case "BYTES":
+-		b, err := base64.StdEncoding.DecodeString(s)
++		b, err := decodeBytesParameter(s) // CloudBurrow patch (#1816): URL-safe and unpadded too
+ 		if err != nil {
+ 			return nil, fmt.Errorf("invalid BYTES parameter value %q: not base64", s)
+ 		}
+--- a/typed_parameter.go
++++ b/typed_parameter.go
+@@ -8,3 +8,15 @@
+ // or INTERVAL bound as one is a value of that type, where a Go string is a
+ // STRING. CloudBurrow patch (cloudburrow/cloudburrow#1814).
+ type TypedParameter = value.TypedParameter
++
++// ParameterType is a TypedParameter's type: a scalar type name, an ARRAY
++// of ArrayType or a STRUCT of StructTypes. A NULL, ARRAY or STRUCT
++// TypedParameter is a value of its declared type, so `SELECT @p` with a
++// NULL is a column of that type and an ARRAY's elements and a STRUCT's
++// fields are values of theirs. CloudBurrow patch
++// (cloudburrow/cloudburrow#1816).
++type ParameterType = value.ParameterType
++
++// ParameterField is a field of a STRUCT ParameterType. CloudBurrow patch
++// (cloudburrow/cloudburrow#1816).
++type ParameterField = value.ParameterField
+--- /dev/null
++++ b/internal/typed_args.go
+@@ -0,0 +1,149 @@
++package internal
++
++import (
++	"context"
++	"database/sql/driver"
++	"fmt"
++	"strings"
++
++	"github.com/goccy/go-googlesql"
++
++	"github.com/goccy/googlesqlite/internal/value"
++)
++
++// typedArg is a query argument that was bound as a value.TypedParameter:
++// its encoded value, as CheckNamedValue encodes every argument, and the
++// type the parameter is declared with. Conn.CheckNamedValue makes it, so
++// the analyzer declares the parameter with its type: a NULL has no type of
++// its own, and an ARRAY's or STRUCT's encoded value says little of its
++// elements' or fields'. Analyze declares it and hands the statement its
++// encoded value (plainArgs). A driver.Valuer, should it reach SQLite.
++//
++// CloudBurrow patch (cloudburrow/cloudburrow#1816).
++type typedArg struct {
++	encoded any
++	typ     value.ParameterType
++}
++
++// Value is the encoded value.
++func (a typedArg) Value() (driver.Value, error) { return a.encoded, nil }
++
++// CheckConnNamedValue is CheckNamedValue for Conn: a TypedParameter keeps
++// its declared type (typedArg). CloudBurrow patch
++// (cloudburrow/cloudburrow#1816).
++func CheckConnNamedValue(nv *driver.NamedValue) error {
++	p, typed := nv.Value.(value.TypedParameter)
++	if err := CheckNamedValue(nv); err != nil {
++		return err
++	}
++	if typed {
++		nv.Value = typedArg{encoded: nv.Value, typ: p.DeclaredType()}
++	}
++	return nil
++}
++
++// plainArgs is args with each typedArg's encoded value in its place.
++func plainArgs(args []driver.NamedValue) []driver.NamedValue {
++	var out []driver.NamedValue
++	for i, a := range args {
++		t, ok := a.Value.(typedArg)
++		if !ok {
++			continue
++		}
++		if out == nil {
++			out = make([]driver.NamedValue, len(args))
++			copy(out, args)
++		}
++		out[i].Value = t.encoded
++	}
++	if out == nil {
++		return args
++	}
++	return out
++}
++
++type typedArgsKey struct{}
++
++// withTypedArgs is ctx with the positions of args that are typedArgs,
++// which reshapeInsertArgs leaves as they are: each is a value of its
++// declared type already, and the INSERT's columns are not the parameters
++// (VALUES (1, @p, @a) lines @a up with the second column).
++func withTypedArgs(ctx context.Context, args []driver.NamedValue) context.Context {
++	var typed map[int]bool
++	for i, a := range args {
++		if _, ok := a.Value.(typedArg); ok {
++			if typed == nil {
++				typed = map[int]bool{}
++			}
++			typed[i] = true
++		}
++	}
++	if typed == nil {
++		return ctx
++	}
++	return context.WithValue(ctx, typedArgsKey{}, typed)
++}
++
++// typedArgPositions are the positions withTypedArgs recorded in ctx.
++func typedArgPositions(ctx context.Context) map[int]bool {
++	typed, _ := ctx.Value(typedArgsKey{}).(map[int]bool)
++	return typed
++}
++
++// declaredArgType is the GoogleSQL type a typedArg is declared with.
++func declaredArgType(v any) (googlesql.Googlesql_TypeNode, bool, bool) {
++	t, ok := v.(typedArg)
++	if !ok {
++		return nil, false, false
++	}
++	spec, err := parameterTypeSpec(t.typ)
++	if err != nil {
++		return nil, false, true
++	}
++	node, err := spec.ToGoogleSQLType()
++	if err != nil || node == nil {
++		return nil, false, true
++	}
++	return node, true, true
++}
++
++// parameterTypeSpec is t as a Type.
++func parameterTypeSpec(t value.ParameterType) (*Type, error) {
++	upper := strings.ToUpper(t.Type)
++	switch upper {
++	case "ARRAY":
++		if t.ArrayType == nil {
++			return nil, fmt.Errorf("ARRAY parameter type with no element type")
++		}
++		elem, err := parameterTypeSpec(*t.ArrayType)
++		if err != nil {
++			return nil, err
++		}
++		return &Type{Kind: int(googlesql.TypeKindTypeArray), ElementType: elem}, nil
++	case "STRUCT":
++		fields := make([]*NameWithType, 0, len(t.StructTypes))
++		for _, f := range t.StructTypes {
++			ft, err := parameterTypeSpec(f.Type)
++			if err != nil {
++				return nil, err
++			}
++			fields = append(fields, &NameWithType{Name: f.Name, Type: ft})
++		}
++		return &Type{Kind: int(googlesql.TypeKindTypeStruct), FieldTypes: fields}, nil
++	}
++	kind, ok := map[string]googlesql.TypeKind{
++		"STRING": googlesql.TypeKindTypeString, "BYTES": googlesql.TypeKindTypeBytes,
++		"INT64": googlesql.TypeKindTypeInt64, "INTEGER": googlesql.TypeKindTypeInt64, "INT": googlesql.TypeKindTypeInt64,
++		"FLOAT64": googlesql.TypeKindTypeDouble, "FLOAT": googlesql.TypeKindTypeDouble, "DOUBLE": googlesql.TypeKindTypeDouble,
++		"BOOL": googlesql.TypeKindTypeBool, "BOOLEAN": googlesql.TypeKindTypeBool,
++		"NUMERIC": googlesql.TypeKindTypeNumeric, "DECIMAL": googlesql.TypeKindTypeNumeric,
++		"BIGNUMERIC": googlesql.TypeKindTypeBignumeric, "BIGDECIMAL": googlesql.TypeKindTypeBignumeric,
++		"DATE": googlesql.TypeKindTypeDate, "TIME": googlesql.TypeKindTypeTime, "DATETIME": googlesql.TypeKindTypeDatetime,
++		"TIMESTAMP": googlesql.TypeKindTypeTimestamp, "GEOGRAPHY": googlesql.TypeKindTypeGeography,
++		"JSON": googlesql.TypeKindTypeJson, "INTERVAL": googlesql.TypeKindTypeInterval,
++	}[upper]
++	if !ok {
++		return nil, fmt.Errorf("unsupported parameter type %q", t.Type)
++	}
++	return &Type{Kind: int(kind)}, nil
++}
+--- /dev/null
++++ b/typed_null_array_struct_parameter_test.go
+@@ -0,0 +1,189 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"encoding/json"
++	"testing"
++
++	"github.com/goccy/googlesqlite"
++)
++
++// TestTypedNullArrayStructParameters is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1816): a NULL parameter, positional or named,
++// was left undeclared, so `SELECT ? AS a` with a NULL was an INT64; and an
++// ARRAY's elements and a STRUCT's fields took the types of their Go values,
++// a DATE or NUMERIC one a STRING. A TypedParameter that is a NULL, an ARRAY
++// or a STRUCT is of its declared type, and so are its elements and fields.
++func TestTypedNullArrayStructParameters(t *testing.T) {
++	db, err := sql.Open("googlesqlite", ":memory:?_test=typed_null_array_struct_parameters")
++	if err != nil {
++		t.Fatalf("sql.Open: %v", err)
++	}
++	defer db.Close()
++	db.SetMaxOpenConns(1)
++	ctx := context.Background()
++	scalar := func(typ, v string) googlesqlite.TypedParameter {
++		return googlesqlite.TypedParameter{Type: typ, Value: v}
++	}
++	null := func(typ string) googlesqlite.TypedParameter {
++		return googlesqlite.TypedParameter{Type: typ, Null: true}
++	}
++	date := googlesqlite.ParameterType{Type: "DATE"}
++	dates := googlesqlite.TypedParameter{Type: "ARRAY", ArrayType: &date,
++		ArrayValues: []googlesqlite.TypedParameter{scalar("DATE", "2024-01-02"), scalar("DATE", "2024-01-03")}}
++	fields := []googlesqlite.ParameterField{
++		{Name: "n", Type: googlesqlite.ParameterType{Type: "NUMERIC"}},
++		{Name: "b", Type: googlesqlite.ParameterType{Type: "BYTES"}},
++		{Name: "d", Type: googlesqlite.ParameterType{Type: "ARRAY", ArrayType: &date}},
++		{Name: "s", Type: googlesqlite.ParameterType{Type: "STRING"}},
++	}
++	st := googlesqlite.TypedParameter{Type: "STRUCT", StructTypes: fields,
++		StructValues: []googlesqlite.TypedParameter{scalar("NUMERIC", "1.25"), scalar("BYTES", "_wBh"), dates, null("STRING")}}
++
++	type want struct{ typ, value string }
++	for _, tc := range []struct {
++		name  string
++		sql   string // a ? or @p in it
++		arg   any
++		wants []want // a column each
++	}{
++		{"a NULL STRING", "SELECT {} AS a", null("STRING"), []want{{"STRING", "<NULL>"}}},
++		{"a NULL DATE", "SELECT {} AS a", null("DATE"), []want{{"DATE", "<NULL>"}}},
++		{"a NULL NUMERIC", "SELECT {} AS a", null("NUMERIC"), []want{{"NUMERIC", "<NULL>"}}},
++		{"a NULL BOOL", "SELECT {} AS a", null("BOOL"), []want{{"BOOL", "<NULL>"}}},
++		{"a NULL JSON", "SELECT {} AS a", null("JSON"), []want{{"JSON", "<NULL>"}}},
++		{"an ARRAY<DATE>", "SELECT {}[OFFSET(1)] AS a, ARRAY_LENGTH({}) AS n", dates,
++			[]want{{"DATE", "2024-01-03"}, {"INT64", "2"}}},
++		{"an empty ARRAY<DATE>", "SELECT ARRAY_LENGTH({}) AS n",
++			googlesqlite.TypedParameter{Type: "ARRAY", ArrayType: &date}, []want{{"INT64", "0"}}},
++		{"a NULL ARRAY<DATE>", "SELECT {} IS NULL AS a",
++			googlesqlite.TypedParameter{Type: "ARRAY", ArrayType: &date, Null: true}, []want{{"BOOL", "true"}}},
++		{"a STRUCT's fields", "SELECT {}.n AS n, TO_HEX({}.b) AS b, {}.d[OFFSET(0)] AS d, {}.s IS NULL AS s", st,
++			[]want{{"NUMERIC", "1.25"}, {"STRING", "ff0061"}, {"DATE", "2024-01-02"}, {"BOOL", "true"}}},
++		{"a NULL STRUCT", "SELECT {} IS NULL AS a",
++			googlesqlite.TypedParameter{Type: "STRUCT", StructTypes: fields, Null: true}, []want{{"BOOL", "true"}}},
++		{"an ARRAY of STRUCTs", "SELECT {}[OFFSET(0)].n AS n",
++			googlesqlite.TypedParameter{Type: "ARRAY", ArrayType: &googlesqlite.ParameterType{Type: "STRUCT", StructTypes: fields},
++				ArrayValues: []googlesqlite.TypedParameter{st}}, []want{{"NUMERIC", "1.25"}}},
++	} {
++		for _, named := range []bool{false, true} {
++			q, ref := tc.sql, "?"
++			if named {
++				ref = "@p"
++			}
++			var args []any
++			for {
++				i := indexOf(q, "{}")
++				if i < 0 {
++					break
++				}
++				q = q[:i] + ref + q[i+2:]
++				if !named {
++					args = append(args, tc.arg)
++				}
++			}
++			if named {
++				args = []any{sql.Named("p", tc.arg)}
++			}
++			rows, err := db.QueryContext(ctx, q, args...)
++			if err != nil {
++				t.Errorf("%s: %s: %v", tc.name, q, err)
++				continue
++			}
++			cts, err := rows.ColumnTypes()
++			if err != nil {
++				t.Fatal(err)
++			}
++			if !rows.Next() {
++				t.Errorf("%s: %s: no row: %v", tc.name, q, rows.Err())
++				rows.Close()
++				continue
++			}
++			got := make([]any, len(cts))
++			ptrs := make([]any, len(cts))
++			for i := range got {
++				ptrs[i] = &got[i]
++			}
++			if err := rows.Scan(ptrs...); err != nil {
++				t.Errorf("%s: %s: scan: %v", tc.name, q, err)
++				rows.Close()
++				continue
++			}
++			rows.Close()
++			if len(cts) != len(tc.wants) {
++				t.Errorf("%s: %s: %d columns, want %d", tc.name, q, len(cts), len(tc.wants))
++				continue
++			}
++			for i, w := range tc.wants {
++				var typ struct{ Name string }
++				if err := json.Unmarshal([]byte(cts[i].DatabaseTypeName()), &typ); err != nil {
++					t.Fatalf("column type %q: %v", cts[i].DatabaseTypeName(), err)
++				}
++				if typ.Name != w.typ {
++					t.Errorf("%s: %s: column %d type %s, want %s", tc.name, q, i, typ.Name, w.typ)
++				}
++				v := "<NULL>"
++				if got[i] != nil {
++					v = toText(got[i])
++				}
++				if v != w.value {
++					t.Errorf("%s: %s: column %d = %q, want %q", tc.name, q, i, v, w.value)
++				}
++			}
++		}
++	}
++
++	// Inserted into a RECORD and a REPEATED RECORD column, not lined up
++	// with the INSERT's columns by position (VALUES (1, @p, @a) put @a
++	// against r, and read its ARRAY as a STRUCT).
++	if _, err := db.ExecContext(ctx, "CREATE TABLE rt (id INT64, r STRUCT<z BYTES, n INT64>, rr ARRAY<STRUCT<z BYTES, n INT64>>)"); err != nil {
++		t.Fatal(err)
++	}
++	zn := []googlesqlite.ParameterField{{Name: "z", Type: googlesqlite.ParameterType{Type: "BYTES"}},
++		{Name: "n", Type: googlesqlite.ParameterType{Type: "INT64"}}}
++	znValue := func(z, n string) googlesqlite.TypedParameter {
++		return googlesqlite.TypedParameter{Type: "STRUCT", StructTypes: zn,
++			StructValues: []googlesqlite.TypedParameter{scalar("BYTES", z), scalar("INT64", n)}}
++	}
++	znType := googlesqlite.ParameterType{Type: "STRUCT", StructTypes: zn}
++	if _, err := db.ExecContext(ctx, "INSERT INTO rt (id, r, rr) VALUES (1, @p, @a)", sql.Named("p", znValue("/wBh", "5")),
++		sql.Named("a", googlesqlite.TypedParameter{Type: "ARRAY", ArrayType: &znType,
++			ArrayValues: []googlesqlite.TypedParameter{znValue("AQ==", "6"), znValue("/wBh", "7")}})); err != nil {
++		t.Fatalf("INSERT of STRUCTs: %v", err)
++	}
++	var got string
++	if err := db.QueryRowContext(ctx, "SELECT FORMAT('%s %d %s %d', TO_HEX(r.z), r.n, TO_HEX(rr[OFFSET(0)].z), rr[OFFSET(1)].n) FROM rt").Scan(&got); err != nil {
++		t.Fatalf("the inserted STRUCTs: %v", err)
++	} else if got != "ff0061 5 01 7" {
++		t.Errorf("the inserted STRUCTs = %q, want %q", got, "ff0061 5 01 7")
++	}
++
++	// A value that is not base64 in a STRUCT's BYTES field is refused.
++	bad := googlesqlite.TypedParameter{Type: "STRUCT", StructTypes: fields[1:2],
++		StructValues: []googlesqlite.TypedParameter{scalar("BYTES", "not base64!")}}
++	if rows, err := db.QueryContext(ctx, "SELECT @p.b", sql.Named("p", bad)); err == nil {
++		rows.Close()
++		t.Errorf("a STRUCT with a BYTES field that is not base64 was not refused")
++	}
++}
++
++func indexOf(s, sub string) int {
++	for i := 0; i+len(sub) <= len(s); i++ {
++		if s[i:i+len(sub)] == sub {
++			return i
++		}
++	}
++	return -1
++}
++
++func toText(v any) string {
++	switch x := v.(type) {
++	case []byte:
++		return string(x)
++	case string:
++		return x
++	}
++	b, _ := json.Marshal(v)
++	return string(b)
++}

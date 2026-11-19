@@ -225,6 +225,12 @@ func (f front) checkJob(w http.ResponseWriter, r *http.Request, job jobBody, pro
 		if d := c.Load.DestinationTable; msg == "" && f.refuseObjectTableJob(w, r, d, nil) { // #1783, objecttables.go
 			return
 		}
+		if d := c.Load.DestinationTable; msg == "" && d != nil && c.Load.Schema != nil { // #1778, autoembed.go
+			if m := f.refuseGeneratedLoad(*d, c.Load.Schema.Fields); m != "" {
+				writeError(w, http.StatusBadRequest, "invalid", m)
+				return
+			}
+		}
 		if msg == "" && !f.parquetSchema(w, r, &job) { // #970
 			return
 		}

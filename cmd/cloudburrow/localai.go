@@ -19,9 +19,12 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/embedding"
+	"github.com/cloudburrow/cloudburrow/internal/imagedetect"
+	"github.com/cloudburrow/cloudburrow/internal/imagelabel"
 	"github.com/cloudburrow/cloudburrow/internal/localai"
 	"github.com/cloudburrow/cloudburrow/internal/ocr"
 	"github.com/cloudburrow/cloudburrow/internal/service/vertexai"
+	"github.com/cloudburrow/cloudburrow/internal/speech"
 )
 
 // buildLocalAI returns the local generation endpoint, or nil when no model is
@@ -31,6 +34,7 @@ import (
 // build and the model a multi-gigabyte download; a developer using Cloud
 // Storage should not be made to acquire either.
 func buildLocalAI(cfg config.Config) (*vertexai.Server, error) {
+	attachLabelModel(cfg)
 	if strings.TrimSpace(cfg.LocalAI.ModelPath) == "" {
 		if !cfg.LocalAI.Embeddings {
 			return nil, nil
@@ -64,6 +68,7 @@ func buildLocalAI(cfg config.Config) (*vertexai.Server, error) {
 
 	addr := net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Endpoints.LocalAI))
 	srv := vertexai.NewServerOn(addr, gen)
+	attachSpeechModel(cfg) // ML.TRANSCRIBE's route is on every local AI endpoint (#1799)
 	for _, a := range cfg.LocalAI.Aliases {
 		srv.Alias(a)
 	}
@@ -108,7 +113,9 @@ func withPredictionEndpoints(cfg config.Config, srv *vertexai.Server, run interf
 		return srv
 	}
 	if srv == nil {
+		attachLabelModel(cfg)
 		srv = vertexai.NewServerOn(net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Endpoints.LocalAI)), nil)
+		attachSpeechModel(cfg)
 	}
 	srv.SetEndpoints(endpointResolver{src: predictionSource{run: runProvider{
 		kubeconfig:     cfg.KubeconfigPath(),
@@ -149,8 +156,48 @@ func attachScriptModels(cfg config.Config) {
 	})
 }
 
+// attachSpeechModel lets ML.TRANSCRIBE read audio (#1799): whisper.cpp's
+// ggml Whisper base model is fetched the first time audio is transcribed,
+// into <state-dir>/models, and checked against its pinned SHA-256.
+func attachSpeechModel(cfg config.Config) {
+	cache := embeddingCache(cfg)
+	speech.SetModelSource(func(ctx context.Context) (string, error) {
+		f := localai.Whisper.Pin.Files[0]
+		if _, err := os.Stat(cache.PinnedPath(localai.Whisper, f)); err != nil {
+			fmt.Fprintf(os.Stderr, "fetching %s (%s @ %s, MIT) for ML.TRANSCRIBE...\n",
+				f.Path, localai.WhisperRepo, localai.Whisper.Pin.Revision[:12])
+		}
+		return cache.FetchPinnedFile(ctx, localai.Whisper, f)
+	})
+}
+
+// attachLabelModel lets Vision's LABEL_DETECTION label an image (#1799):
+// MediaPipe's EfficientNet-Lite0 classifier is fetched from
+// storage.googleapis.com the first time one is labelled, into
+// <state-dir>/models, and checked against its pinned SHA-256.
+//
+// It does the same for OBJECT_LOCALIZATION and FACE_DETECTION, whose
+// MediaPipe EfficientDet-Lite0 and BlazeFace detectors are fetched the
+// first time an image needs one.
+func attachLabelModel(cfg config.Config) {
+	cache := embeddingCache(cfg)
+	pinned := func(m localai.Model, feature string) func(ctx context.Context) (string, error) {
+		f := m.Pin.Files[0]
+		return func(ctx context.Context) (string, error) {
+			if _, err := os.Stat(cache.PinnedPath(m, f)); err != nil {
+				fmt.Fprintf(os.Stderr, "fetching MediaPipe %s (%s, Apache-2.0) for Vision %s...\n", f.Path, m.Repo, feature)
+			}
+			return cache.FetchPinnedFile(ctx, m, f)
+		}
+	}
+	imagelabel.SetSource(pinned(localai.EfficientNetLite0, "LABEL_DETECTION"))
+	imagedetect.SetObjectSource(pinned(localai.EfficientDetLite0, "OBJECT_LOCALIZATION"))
+	imagedetect.SetFaceSource(pinned(localai.BlazeFaceShortRange, "FACE_DETECTION"))
+}
+
 func attachEmbedder(srv *vertexai.Server, cfg config.Config) {
 	attachScriptModels(cfg)
+	attachSpeechModel(cfg)
 	m, err := localai.Lookup(localai.EmbeddingGemmaONNXID)
 	if err != nil {
 		srv.SetEmbedder(nil, err)

@@ -145,8 +145,9 @@
 > offsets and embedded as an audio clip right after the video's frames, as EmbeddingGemma 2's
 > processor loads a video's audio; it counts against the 180 seconds of audio a request. Opus,
 > AC-3 and HE-AAC tracks are refused naming the codec. Since #1739 a mono or stereo Opus track is
-> decoded too (`github.com/kazzmir/opus-go`, libopus transpiled to Go), within 0.71 of a 16-bit
-> step of ffmpeg's libopus decode; `aac-go` is copied into `third_party/aac-go`. See
+> decoded too (`github.com/kazzmir/opus-go`, libopus transpiled to Go, until #1811 replaced it with
+> the pure Go `github.com/darui3018823/opus`), within 0.71 of a 16-bit step of ffmpeg's libopus
+> decode; `aac-go` is copied into `third_party/aac-go`. See
 > [upstream-evaluation.md](upstream-evaluation.md).
 >
 > **Update 2026-11-17 (#1731): VP9 and AV1 video.** The four codecs Google lists for video are
@@ -163,8 +164,8 @@
 > profiles 1, 2 and 3. A video's HE-AAC (SBR, and SBR with parametric stereo), AC-3, E-AC-3 and
 > surround Opus tracks are decoded: SBR and PS added to `third_party/aac-go` from ISO/IEC 14496-3
 > (with PacketVideo's Apache 2.0 OpenCORE decoder as a reference), AC-3 and E-AC-3 by
-> `internal/ac3`, written here from ATSC A/52, and surround Opus through `opus-go`'s multistream
-> decoder; each is downmixed to mono as ffmpeg's resampler does (the AC-3 bitstream's centre and
+> `internal/ac3`, written here from ATSC A/52, and surround Opus through a multistream Opus
+> decoder (since #1811 `darui3018823/opus`'s); each is downmixed to mono as ffmpeg's resampler does (the AC-3 bitstream's centre and
 > surround mix levels included) and is within 6e-4 of ffmpeg 9's decode. Still refused, naming
 > them: parametric stereo with 34 bands, IPD/OPD or mixing procedure B (no permissively licensed
 > source for their normative tables, and no encoder at hand emits them), 960-sample AAC frames,

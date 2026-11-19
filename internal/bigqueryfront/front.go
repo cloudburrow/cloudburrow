@@ -155,6 +155,7 @@ package bigqueryfront
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -238,6 +239,34 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	wireJobsTable(texts, records, own, jobRows)
 	numbers := &projectNumbers{} // projectnumbers.go, #1551
 	known.numbers = numbers
+	// Jobs that outlive their request (asyncjobs.go, #1819).
+	async := &asyncJobs{location: settings.defaultLocation, made: jobRows.noteMade, clock: func() time.Time { return buffers.clock() }}
+	async.stopped = func(r *http.Request, j *asyncJob, e rowError) {
+		r = r.WithContext(context.WithoutCancel(r.Context()))
+		if job, ok := own.get(j.project, j.id); ok {
+			c := map[string]any{}
+			for k, v := range job {
+				c[k] = v
+			}
+			failJob(c, e)
+			own.add(j.project, j.id, c)
+			return
+		}
+		f := front{next: next, base: j.base, records: records, jobs: own, failed: failed, buffers: buffers}
+		if st, _ := f.get(r, "/jobs/"+url.PathEscape(j.id)); st == http.StatusOK {
+			failed.add(j.project, j.id, e)
+			return
+		}
+		conf := map[string]any{}
+		for k, v := range j.conf {
+			conf[k] = v
+		}
+		job := f.recordFailedJob(r, j.project, j.id, j.location, conf, e, j.created)
+		if c, _ := job["configuration"].(map[string]any); c != nil {
+			delete(c, "jobType")
+			c["jobType"] = jobTypeOf(c)
+		}
+	}
 	if o.logf != nil {
 		frontLogf.Store(&o.logf) // serviceclient.go, #1628
 	}
@@ -299,6 +328,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			jobRows.reset()
 			newest.reset()
 			open.reset()
+			async.reset()
 			tables.reset()
 			linked.reset()
 			models.reset()
@@ -317,7 +347,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		base := j[1] + "/projects/" + j[2]
 		project := projectOf("/" + j[2])
 		l := records.listJobs(r, project, func() jobListing {
-			return own.listed(r, project, failed.listed(engineListing(next, r, project, newest, open)))
+			return own.listed(r, project, failed.listed(async.listed(r, project, engineListing(next, r, project, newest, open)))) // asyncjobs.go, #1819
 		})
 		return texts.listed(configs.listed(r, next, base, l))
 	}
@@ -572,8 +602,14 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	// Per-project IAM of a caller with a token the instance minted
 	// (iamcheck.go, #1767).
 	iamChecks := &iamState{policies: iam}
+	if o.stateDir != "" {
+		iamChecks.keepCreators(jobCreatorsStateFile(o.stateDir), o.logf) // iamcheck.go, #1780
+	}
+	if o.restarts != nil {
+		o.restarts.onRestart(iamChecks.resetCreators)
+	}
 	engine := next
-	return iamChecks.handler(engine, known.client(withRequestReads(jobErrors(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { // #1581, errorcodes.go; #1582, engineerrors.go
+	return iamChecks.handler(engine, async.handler(known.client(withRequestReads(jobErrors(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { // #1581, errorcodes.go; #1582, engineerrors.go
 		buffers.syncPending(next, r) // #1513: the clock a restarted front kept
 		// The files of the tables for Apache Iceberg whose rows the
 		// request changed are written before it is answered; a failure is
@@ -597,7 +633,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		if !serveJobLocations(w, r, next, settings, func(w http.ResponseWriter) { inner.ServeHTTP(w, r) }) {
 			inner.ServeHTTP(w, r)
 		}
-	}), next, settings, failed))))
+	}), next, settings, failed)))))
 }
 
 // now is the instance's clock (#1487): the front's, which the CloudBurrow
@@ -1001,6 +1037,16 @@ func (f front) insertAll(w http.ResponseWriter, r *http.Request, dataset, table 
 	}
 	if f.refuseSnapshotWrite(w, r, dataset, table, "tabledata.insertAll") { // #1002, snapshots.go
 		return
+	}
+	if f.tables != nil { // #1778, autoembed.go
+		rows := make([]map[string]any, len(req.Rows))
+		for i, row := range req.Rows {
+			rows[i] = row.JSON
+		}
+		if msg := f.refuseGeneratedRows(projectOf(f.base), dataset, table, rows); msg != "" {
+			writeError(w, http.StatusBadRequest, "invalid", msg)
+			return
+		}
 	}
 
 	// A partition decorator, and an ingestion-time partitioned table's

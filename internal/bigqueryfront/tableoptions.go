@@ -219,12 +219,15 @@ type tableSetting struct {
 	// GovernanceTags are each top-level column's data governance tags,
 	// by its name in lower case (governancetags.go, #1456).
 	GovernanceTags map[string]map[string]string `json:"governanceTags,omitempty"`
+	// Embedding is the table's autonomous embedding generation column
+	// (autoembed.go, #1778), or nil.
+	Embedding *genEmbedding `json:"embedding,omitempty"`
 }
 
 // zero reports whether t keeps nothing.
 func (t tableSetting) zero() bool {
 	return t.Created == "" && t.ChangeHistory == nil && t.FineGrainedMutations == nil && t.PrivacyPolicy == nil && !t.MVChanged &&
-		len(t.Transactions) == 0 && len(t.GovernanceTags) == 0
+		len(t.Transactions) == 0 && len(t.GovernanceTags) == 0 && t.Embedding == nil
 }
 
 // tableSettings are the settings of every table, by project, dataset and
@@ -236,6 +239,8 @@ type tableSettings struct {
 	watch map[string]bool
 	path  string
 	logf  func(string, ...any)
+	// gen keeps the generated embedding columns up to date (autoembed.go).
+	gen embedGenerator
 }
 
 type savedTableSettings struct {

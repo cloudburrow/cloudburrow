@@ -122,6 +122,9 @@ type Registry struct {
 	saTokenURI string
 	// now is the clock deletion and purging read; a test sets it.
 	now func() time.Time
+	// callerOf is the account a bearer token was minted for, which Cloud
+	// Identity's WITH_INITIAL_OWNER makes a new group's owner (#1812).
+	callerOf func(bearer string) (string, bool)
 }
 
 // New returns a registry backed by st.

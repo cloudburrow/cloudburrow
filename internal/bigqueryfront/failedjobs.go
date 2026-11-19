@@ -129,7 +129,7 @@ func (f front) recordFailedQuery(r *http.Request, raw []byte, status int, got []
 		conf["labels"] = l
 	}
 	location, _ := body["location"].(string)
-	f.recordFailedJob(r, projectOf(f.base), newJobID(), location, conf, e, created)
+	f.recordFailedJob(r, projectOf(f.base), queryJobID(r.Context()), location, conf, e, created) // #1819: the ID a slow jobs.query answered
 }
 
 // recordFailedInsert answers w with rec, the answer to a query job's

@@ -117,7 +117,9 @@ type wav struct {
 
 // decodeWAV reads a RIFF WAVE file of integer PCM (8, 16, 24 or 32 bits) or
 // IEEE float (32 or 64 bits), plain or WAVE_FORMAT_EXTENSIBLE.
-func decodeWAV(b []byte) (wav, error) {
+func decodeWAV(b []byte) (wav, error) { return decodeWAVChannels(b, 2) }
+
+func decodeWAVChannels(b []byte, maxChannels int) (wav, error) {
 	if len(b) < 12 || string(b[0:4]) != "RIFF" || string(b[8:12]) != "WAVE" {
 		return wav{}, fmt.Errorf("no RIFF WAVE header")
 	}
@@ -164,8 +166,11 @@ func decodeWAV(b []byte) (wav, error) {
 	if data == nil {
 		return wav{}, fmt.Errorf("no data chunk")
 	}
-	if channels != 1 && channels != 2 {
-		return wav{}, fmt.Errorf("%d channels; mono and stereo are embedded", channels)
+	if channels < 1 || int(channels) > maxChannels {
+		if maxChannels == 2 {
+			return wav{}, fmt.Errorf("%d channels; mono and stereo are embedded", channels)
+		}
+		return wav{}, fmt.Errorf("%d channels; at most %d are read", channels, maxChannels)
 	}
 	if rate < 8000 || rate > 192000 {
 		return wav{}, fmt.Errorf("a sample rate of %d Hz; 8000 to 192000 Hz are embedded", rate)
@@ -174,8 +179,9 @@ func decodeWAV(b []byte) (wav, error) {
 	switch {
 	case format == 1 && (bits == 8 || bits == 16 || bits == 24 || bits == 32):
 	case format == 3 && (bits == 32 || bits == 64):
+	case (format == 6 || format == 7) && bits == 8: // G.711 A-law and mu-law (#1799)
 	default:
-		return wav{}, fmt.Errorf("format %d with %d bits per sample; integer PCM of 8, 16, 24 or 32 bits and float of 32 or 64 bits are embedded", format, bits)
+		return wav{}, fmt.Errorf("format %d with %d bits per sample; integer PCM of 8, 16, 24 or 32 bits, float of 32 or 64 bits and 8-bit A-law and mu-law are decoded", format, bits)
 	}
 	frame := width * int(channels)
 	n := len(data) / frame * int(channels)
@@ -187,6 +193,10 @@ func decodeWAV(b []byte) (wav, error) {
 			out[i] = math.Float32frombits(binary.LittleEndian.Uint32(s))
 		case format == 3:
 			out[i] = float32(math.Float64frombits(binary.LittleEndian.Uint64(s)))
+		case format == 6:
+			out[i] = ALaw(s[0])
+		case format == 7:
+			out[i] = MuLaw(s[0])
 		case bits == 8:
 			out[i] = (float32(s[0]) - 128) / 128
 		case bits == 16:
@@ -199,6 +209,78 @@ func decodeWAV(b []byte) (wav, error) {
 		}
 	}
 	return wav{samples: out, channels: int(channels), rate: int(rate)}, nil
+}
+
+// MuLaw decodes one G.711 mu-law sample to [-1, 1].
+func MuLaw(b byte) float32 {
+	b = ^b
+	t := (int(b&0x0f)<<3 + 0x84) << (int(b&0x70) >> 4)
+	if b&0x80 != 0 {
+		return float32(0x84-t) / 32768
+	}
+	return float32(t-0x84) / 32768
+}
+
+// ALaw decodes one G.711 A-law sample to [-1, 1].
+func ALaw(b byte) float32 {
+	b ^= 0x55
+	t := int(b&0x0f) << 4
+	switch seg := int(b&0x70) >> 4; seg {
+	case 0:
+		t += 8
+	case 1:
+		t += 0x108
+	default:
+		t = (t + 0x108) << (seg - 1)
+	}
+	if b&0x80 != 0 {
+		return float32(t) / 32768
+	}
+	return float32(-t) / 32768
+}
+
+// DecodeWAVSpeech decodes a WAV file of any length and of up to 8 channels
+// to mono samples at AudioSampleRate, the channels averaged: speech
+// recognition's reading (internal/speech, #1799), which has no embedding
+// limit.
+func DecodeWAVSpeech(data []byte) ([]float32, error) {
+	w, err := decodeWAVChannels(data, 8)
+	if err != nil {
+		return nil, fmt.Errorf("the data is not a valid WAV file: %v", err)
+	}
+	return Resample(Average(w.samples, w.channels), w.rate, AudioSampleRate), nil
+}
+
+// Average makes interleaved samples of channels channels mono, averaging
+// them.
+func Average(s []float32, channels int) []float32 {
+	if channels <= 1 {
+		return s
+	}
+	out := make([]float32, len(s)/channels)
+	for i := range out {
+		var sum float32
+		for c := 0; c < channels; c++ {
+			sum += s[i*channels+c]
+		}
+		out[i] = sum / float32(channels)
+	}
+	return out
+}
+
+// Resample converts mono samples from one rate to another, as DecodeAudio
+// does.
+func Resample(in []float32, from, to int) []float32 {
+	if from == to {
+		return in
+	}
+	return resample(in, from, to)
+}
+
+// IsTooLong reports whether err is a clip longer than MaxAudioSeconds.
+func IsTooLong(err error) bool {
+	var long *tooLongError
+	return errors.As(err, &long)
 }
 
 // downmix makes stereo mono as Transformers.js's load_audio does (after

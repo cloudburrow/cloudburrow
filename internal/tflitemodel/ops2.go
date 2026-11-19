@@ -147,6 +147,8 @@ func (m *Model) eval2(o op, a []*Tensor) (*Tensor, error) {
 			at(r, i, v, 0)
 		}
 		return r, nil
+	case opResizeNearestNeighbor, opResizeBilinear:
+		return resizeOp(o, x, arg(1)) // resize.go, #1799
 	}
 	return nil, &UnsupportedError{"operator " + o.name + " is not supported"}
 }

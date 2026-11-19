@@ -56,6 +56,7 @@ import (
 	crmv1 "google.golang.org/api/cloudresourcemanager/v1"
 	runv1 "google.golang.org/api/run/v1"
 
+	rmsvc "github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	serviceusagesvc "github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
 	sqladminsvc "github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -221,6 +222,21 @@ var areas = []area{
 	// Cloud SQL. Its methods are the official generated client's
 	// (google.golang.org/api/backupdr/v1).
 	{Key: "backupdr", Title: "Backup and DR Service API (v1)", Own: true, Methods: backupdrMethods()},
+	// Cloud Identity's groups (#1812): CloudBurrow's own, JSON only, on
+	// Resource Manager's port. Its methods are the official generated
+	// client's (google.golang.org/api/cloudidentity/v1).
+	{Key: "cloudidentity", Title: "Cloud Identity API (v1)", Own: true, Methods: cloudidentityMethods()},
+}
+
+// cloudidentityMethods is every method of the cloudidentity v1 discovery
+// document, from the server's own table.
+func cloudidentityMethods() []string {
+	var out []string
+	for id := range rmsvc.CloudIdentityMethodStatuses() {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // backupdrStatuses is every method of the backupdr v1 discovery document,
@@ -675,7 +691,8 @@ func loadRegistry(root string) (map[string]string, error) {
 	}
 	// The Cloud SQL Admin API's too (#1301), and Service Usage's (#1352).
 	// And Cloud Run v1's (#1533).
-	for _, statuses := range []map[string]bool{sqladminsvc.MethodStatuses(), serviceusagesvc.MethodStatuses(), backupdrStatuses, runadapter.V1MethodStatuses()} {
+	for _, statuses := range []map[string]bool{sqladminsvc.MethodStatuses(), serviceusagesvc.MethodStatuses(), backupdrStatuses, runadapter.V1MethodStatuses(),
+		rmsvc.CloudIdentityMethodStatuses()} {
 		for id, isBuilt := range statuses {
 			if isBuilt {
 				r[id] = regImplemented

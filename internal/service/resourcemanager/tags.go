@@ -861,6 +861,31 @@ func (r *Registry) bindingsOnLocked(target string) ([]*rmpb.TagBinding, error) {
 	return out, nil
 }
 
+// TagBindingsUnder lists the bindings whose parent starts with prefix
+// (another service's resources, such as "//bigquery.googleapis.com/"),
+// sorted by parent and value (#1780).
+func (r *Registry) TagBindingsUnder(prefix string) ([]*rmpb.TagBinding, error) {
+	r.mu.Lock()
+	defer r.unlock()
+	all, err := listProtos(r, tagBindingPrefix, func() *rmpb.TagBinding { return &rmpb.TagBinding{} })
+	if err != nil {
+		return nil, err
+	}
+	out := all[:0]
+	for _, b := range all {
+		if strings.HasPrefix(b.GetParent(), prefix) {
+			out = append(out, b)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].GetParent() != out[j].GetParent() {
+			return out[i].GetParent() < out[j].GetParent()
+		}
+		return out[i].GetTagValue() < out[j].GetTagValue()
+	})
+	return out, nil
+}
+
 // DeleteTagBinding detaches a value.
 func (r *Registry) DeleteTagBinding(name string) error {
 	parent, value, err := ParseTagBindingName(name)

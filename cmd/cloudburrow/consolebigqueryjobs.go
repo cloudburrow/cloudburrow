@@ -503,6 +503,8 @@ func bigqueryCopyFields() []console.Field {
 			Help: "WRITE_EMPTY refuses a destination that has rows."},
 		{Name: "moreSources", Label: "More source tables", Type: "textarea",
 			Help: "Optional: dataset.table, one per line, copied with this one into the destination (a multi-source copy). Every source must have the same schema."},
+		{Name: "kmsKeyName", Label: "Customer-managed encryption key", Type: "text",
+			Help: "Optional (#1762): projects/PROJECT/locations/LOCATION/keyRings/RING/cryptoKeys/KEY, in the destination dataset's location, to encrypt the destination with; empty for default encryption. A table that exists and is kept takes only its own key."},
 	}
 }
 
@@ -588,6 +590,9 @@ func (p bigqueryProvider) copyJob(ctx context.Context, project, datasetID, table
 	copier.WriteDisposition = bigquery.TableWriteDisposition(write)
 	if op != "COPY" {
 		copier.OperationType = bigquery.TableCopyOperationType(op)
+	}
+	if key := strings.TrimSpace(values["kmsKeyName"]); key != "" {
+		copier.DestinationEncryptionConfig = &bigquery.EncryptionConfig{KMSKeyName: key}
 	}
 	job, err := copier.Run(ctx)
 	if err != nil {

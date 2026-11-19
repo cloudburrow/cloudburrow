@@ -11,6 +11,57 @@ to publish a tag that has no section here. Before tagging `vX.Y.Z`, move the ent
 
 ## [Unreleased]
 
+### Added
+
+- BigQuery jobs outlive their request (#1819): `jobs.query` and `jobs.getQueryResults` wait at
+  most `timeoutMs` (10 s by default) and then answer `jobComplete: false` with the job's
+  reference; `jobs.insert` answers a job still running `RUNNING`, `jobs.get` reports it so, and
+  `jobs.list` and `INFORMATION_SCHEMA.JOBS` list it; `jobs.cancel` ends a running job, which then
+  fails with reason `stopped`. Every kind of job runs this way, `CREATE MODEL`, loads, copies and
+  extracts included. bigquery-emulator patch 0101 gives a `jobs.query`'s job the ID the front
+  answered with.
+- BigQuery `AI.SEARCH`, `VECTOR_SEARCH` and autonomous embedding generation (#1778): a column
+  `GENERATED ALWAYS AS (AI.EMBED(...)) STORED OPTIONS (asynchronous = TRUE)` is filled in the
+  background by the local embedding model, `AI.SEARCH` searches it, and `VECTOR_SEARCH` runs
+  brute force (exact) over `ARRAY<FLOAT64>` or generated columns. `CREATE VECTOR INDEX`, `HYBRID`
+  mode, `rerank` and `lexical_search_columns` are 501.
+- BigQuery `AI.AGG` takes its instruction as a named or positional query parameter (#1810), as
+  its reference allows; it failed 400 before.
+- BigQuery copy jobs take `destinationEncryptionConfiguration` (#1762), on the ingestion-time
+  partition path too; a key of another region, or one that differs from a kept destination's,
+  fails the job.
+- Cloud Identity groups (#1812, #1780, #1817): groups and memberships, `groups.search`, the member
+  searches, the membership graph, role changes and a MEMBER role's expiry, with Google's
+  documented group and membership rules. `group:` and `domain:` members are evaluated wherever a
+  policy is, in BigQuery, Memorystore, Firestore with MongoDB compatibility and IAM Credentials;
+  `gcloud identity groups` works through `gcloud-setup`; the console's IAM & Admin > Groups
+  searches groups, changes roles and shows transitive members and the membership graph. BigQuery
+  also evaluates `resource.matchTag` conditions, keeps job creators across restarts, and reads
+  custom roles in table and routine policies (#1780).
+- BigQuery ML over Cloud AI remote models, all run locally (#1799): `ML.TRANSCRIBE`
+  (`CLOUD_AI_SPEECH_TO_TEXT_V2`) on whisper.cpp compiled to WebAssembly, `ML.TRANSLATE`
+  (`CLOUD_AI_TRANSLATE_V3`) with MediaPipe's Language Detector and the local Gemma model,
+  `ML.UNDERSTAND_TEXT` (`CLOUD_AI_NATURAL_LANGUAGE_V1`, `ANALYZE_SYNTAX` 501) on the local Gemma
+  model, and Vision's `IMAGE_PROPERTIES`, text boxes, `LABEL_DETECTION`, `OBJECT_LOCALIZATION`
+  and `FACE_DETECTION` on Google's MediaPipe models. Models are downloaded once into
+  `<state-dir>/models` and checked against pinned SHA-256s.
+
+### Fixed
+
+- BigQuery query parameters keep their declared type (#1814, #1816): `SELECT ? AS a` with a
+  STRING no longer fails, and a NULL, an `ARRAY` or a `STRUCT` parameter, and a BYTES, NUMERIC,
+  DATE, DATETIME or other typed scalar alone in the select list, has its declared type.
+  googlesqlite patches 0097 and 0099, bigquery-emulator patches 0098 and 0100.
+- Embedding: Opus audio in videos is decoded by github.com/darui3018823/opus (BSD-2-Clause, pure Go
+  without unsafe) instead of github.com/kazzmir/opus-go, whose transpiled decoder was
+  memory-unsafe when a goroutine stack moved (#1811, #1808); `make test-race` no longer turns
+  checkptr off for it.
+- Console: Bigtable data clients use the classic data plane, so a console read no longer waits out
+  a cold session pool and fails "no sessions available" (#1820).
+- Console: the Spanner, Bigtable and Storage clients the console builds no longer reach Google
+  (Spanner's built-in metrics export and metadata-server probes, and the other clients' defaults);
+  `TestNoGoogleEgress` checks a whole instance's binary for any non-loopback dial (#1825).
+
 ## [0.3.0] - 2026-11-18
 
 A fix release for v0.2.0, with one new BigQuery function. The generated coverage is unchanged:

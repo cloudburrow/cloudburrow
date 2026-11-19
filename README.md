@@ -121,8 +121,11 @@ Worth reading before you rely on it — the full list is in [docs/status.md](doc
   compatibility's sign-ins and per-command permissions (#1738), IAM Credentials' (and the IAM
   API's) token minting and signing on a service account the IAM API created (#1747), and
   BigQuery's per-project IAM of a caller with such a token: jobs, datasets, tables, routines,
-  models and their own policies, with folder and organization inheritance and conditions
-  (#1767, #1774). The fifth, BigQuery remote models' connection permissions (#1765), checks
+  models and their own policies, with folder and organization inheritance and conditions,
+  tag conditions included (#1767, #1774, #1780). In all four, a `group:` member names the
+  members of a Cloud Identity group the instance serves (nested groups too), and `domain:cloudburrow.local`
+  every account of the instance's domain; so do a BigQuery dataset's `groupByEmail` and `domain`
+  entries (#1812). The fifth, BigQuery remote models' connection permissions (#1765), checks
   `bigquery.connections.use` on the connection and its service account's Vertex AI User role.
   They prove this instance applies its own rule, not that your policy is right on Google.
 - **Knative is not Cloud Run.** Mapped configuration is mapped and tested; anything the adapter
@@ -214,7 +217,7 @@ or from a clone:
 | `make vet` | `go vet` |
 | `make cross` | Build and vet every package for darwin and linux on amd64 and arm64 |
 | `make test` | Unit tests |
-| `make test-race` | Unit tests with the race detector |
+| `make test-race` | Unit tests with the race detector; `RACE_PKGS=./internal/x/` for one package |
 | `make test-compat` | Official-SDK compatibility tests (build tag `compat`), against a running instance: `eval "$(scripts/compat-env.sh <its flags>)"` first; see [test/compat/README.md](test/compat/README.md) |
 | `make test-e2e` | The acceptance workflow end to end (build tag `e2e`) |
 | `make test-integration` | Tests that create a real cluster (build tag `integration`; needs Docker, kind, kubectl) |
