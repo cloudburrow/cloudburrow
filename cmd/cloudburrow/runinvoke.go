@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"html"
 	"net"
@@ -90,7 +91,7 @@ func (a runInvokeAuthz) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	email := ""
 	if bearer := iameval.Bearer(r.Header.Get("Authorization")); bearer != "" {
 		e, aud, ok := a.creds.IDTokenClaims(bearer, time.Now())
-		if !ok || !audienceMatches(aud, r.Host) {
+		if !ok || !audienceMatches(aud, r.Host) && !sameService(r.Context(), srv, aud, name) {
 			w.Header().Set("WWW-Authenticate", `Bearer error="invalid_token" error_description="The access token could not be verified"`)
 			writeRunPage(w, http.StatusUnauthorized, runUnauthorizedPage, path)
 			return
@@ -115,6 +116,20 @@ func writeRunPage(w http.ResponseWriter, code int, page, path string) {
 	w.Header().Set("Content-Type", "text/html; charset=UTF-8")
 	w.WriteHeader(code)
 	_, _ = fmt.Fprintf(w, page, html.EscapeString(path))
+}
+
+// sameService is whether an ID token's audience is a URL of the service
+// name (its own or a tag's): a request through a domain mapping reaches
+// the gateway with the domain's Host and again with the service's, and
+// Google takes the service's URL as the audience there.
+func sameService(ctx context.Context, srv interface {
+	ServiceAt(context.Context, string) string
+}, aud, name string) bool {
+	u, err := url.Parse(aud)
+	if err != nil || u.Hostname() == "" {
+		return false
+	}
+	return srv.ServiceAt(ctx, u.Hostname()) == name
 }
 
 // audienceMatches is whether an ID token's audience is the URL of the

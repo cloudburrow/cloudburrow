@@ -13,8 +13,10 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"testing"
 
 	"golang.org/x/oauth2/google"
+	"google.golang.org/grpc"
 )
 
 // With `up --iam-enforcement=on` (#1879) a request to a Cloud Run service
@@ -24,7 +26,8 @@ import (
 // is that account there): ownerInvokeTransport, which TestMain puts in
 // http.DefaultTransport when the instance enforces, adds that account's ID
 // token, for the service's URL, to a request for a service's host
-// (*.cloudburrow.localhost) that carries no Authorization. The enforcement
+// (*.cloudburrow.localhost, or any Host through the gateway's port-forward)
+// that carries no Authorization. The enforcement
 // tests that mean to send none use a transport of their own.
 type ownerInvokeTransport struct {
 	base http.RoundTripper
@@ -34,6 +37,19 @@ type ownerInvokeTransport struct {
 }
 
 const runServiceDomain = ".cloudburrow.localhost"
+
+// ingressAddrs are the gateway port-forwards ingress opened: a request to
+// one is for a service whatever its Host (a domain mapping's).
+var ingressAddrs sync.Map
+
+// invokeAudiences are the service URLs to mint for a domain mapping's host
+// (ownerInvokeAudience): Google's audience for a custom domain is the
+// service's own URL.
+var invokeAudiences sync.Map
+
+// ownerInvokeAudience makes requests for domain carry the instance's ID
+// token for serviceURL when the instance enforces IAM.
+func ownerInvokeAudience(domain, serviceURL string) { invokeAudiences.Store(domain, serviceURL) }
 
 func useOwnerInvokeTokens() {
 	if v := os.Getenv(envIAMEnforcement); v == "" || v != "on" {
@@ -50,10 +66,15 @@ func (o *ownerInvokeTransport) RoundTrip(req *http.Request) (*http.Response, err
 	if h, _, err := net.SplitHostPort(host); err == nil {
 		host = h
 	}
-	if req.Header.Get("Authorization") != "" || !strings.HasSuffix(host, runServiceDomain) {
+	_, viaIngress := ingressAddrs.Load(req.URL.Host)
+	if req.Header.Get("Authorization") != "" || !strings.HasSuffix(host, runServiceDomain) && !viaIngress {
 		return o.base.RoundTrip(req)
 	}
-	tok, err := o.token(req.Context(), "http://"+host)
+	audience := "http://" + host
+	if a, ok := invokeAudiences.Load(host); ok {
+		audience = a.(string)
+	}
+	tok, err := o.token(req.Context(), audience)
 	if err != nil {
 		return nil, fmt.Errorf("the instance's ID token for %s: %w", host, err)
 	}
@@ -118,4 +139,20 @@ func (o *ownerInvokeTransport) token(ctx context.Context, audience string) (stri
 	}
 	o.tokens[audience] = out.Token
 	return out.Token, nil
+}
+
+// ownerInvokeDialOptions are a gRPC client's options to call a Cloud Run
+// service at host as the instance's own account when the instance enforces
+// IAM (none otherwise): its ID token for the service's URL.
+func ownerInvokeDialOptions(t *testing.T, host string) []grpc.DialOption {
+	t.Helper()
+	o, ok := http.DefaultTransport.(*ownerInvokeTransport)
+	if !ok {
+		return nil
+	}
+	tok, err := o.token(context.Background(), "http://"+host)
+	if err != nil {
+		t.Fatalf("the instance's ID token for %s: %v", host, err)
+	}
+	return []grpc.DialOption{grpc.WithPerRPCCredentials(bearerCreds(tok))}
 }

@@ -553,6 +553,8 @@ type Server struct {
 	// extra are JSON APIs served on this port beside Resource Manager's
 	// (Policy Troubleshooter and Cloud Asset's analyzeIamPolicy, #1879).
 	extra []extraJSON
+	// unguarded are served before the Host check (HandleUnguarded).
+	unguarded []extraJSON
 
 	mu   sync.Mutex
 	ln   net.Listener
@@ -588,6 +590,16 @@ type extraJSON struct {
 // Resource Manager's own routes. It must be called before Start.
 func (s *Server) HandleJSON(match func(*http.Request) bool, h http.Handler) {
 	s.extra = append(s.extra, extraJSON{match: match, h: h})
+}
+
+// HandleUnguarded serves the requests match accepts before the server's
+// Host check (hostguard), for a caller that cannot choose the Host it
+// sends: Kourier's external authorization forwards the Host of the request
+// it asks about, which for a domain mapping is any name (#1879). h must
+// change nothing and reveal nothing a request to the service itself would
+// not. It must be called before Start.
+func (s *Server) HandleUnguarded(match func(*http.Request) bool, h http.Handler) {
+	s.unguarded = append(s.unguarded, extraJSON{match: match, h: h})
 }
 
 // Interpose adds a unary interceptor inside the call observer, such as the
@@ -689,7 +701,18 @@ func (s *Server) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("bind Resource Manager address %s: %w", s.addr, err)
 	}
-	srv := &http.Server{Handler: h2c.NewHandler(hostguard.Wrap(both), &http2.Server{}), ReadHeaderTimeout: 10 * time.Second}
+	guarded := hostguard.Wrap(both)
+	unguarded := s.unguarded
+	top := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for _, e := range unguarded {
+			if e.match(r) {
+				e.h.ServeHTTP(w, r)
+				return
+			}
+		}
+		guarded.ServeHTTP(w, r)
+	})
+	srv := &http.Server{Handler: h2c.NewHandler(top, &http2.Server{}), ReadHeaderTimeout: 10 * time.Second}
 	done := make(chan struct{})
 	s.mu.Lock()
 	s.ln, s.srv, s.grpc, s.done = ln, srv, g, done
