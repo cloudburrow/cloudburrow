@@ -150,6 +150,16 @@ func (c *OffsetClock) Now() time.Time {
 	return now().Add(c.offset)
 }
 
+// Wall returns the wall clock, without the offset: the emulator's clock.
+func (c *OffsetClock) Wall() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.now != nil {
+		return c.now()
+	}
+	return time.Now()
+}
+
 // Advance moves the clock forward by d.
 func (c *OffsetClock) Advance(d time.Duration) {
 	c.mu.Lock()
