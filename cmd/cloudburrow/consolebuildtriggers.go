@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	cloudbuild "cloud.google.com/go/cloudbuild/apiv1/v2"
 	cbpb "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
@@ -30,40 +31,58 @@ func (p buildTriggersProvider) project(project string) string {
 }
 
 func (p buildTriggersProvider) List(ctx context.Context, project string) (console.Listing, error) {
-	out := console.Listing{Columns: []string{"Region", "Event", "Description", "Pool", "Approval", "Age"},
-		NameColumn: "Trigger", Noun: "triggers", AlwaysStatus: true,
-		Note: "Manual, webhook, Pub/Sub and push (a Developer Connect link to a Secure Source Manager repository) triggers run an inline build; a Pub/Sub trigger subscribes to its topic on this " +
-			"instance's Pub/Sub, and its builds, which arrive from the cluster, run docker build, docker push and pack steps only. " +
-			"GitHub, GitLab, Bitbucket and Cloud Source Repositories events, and builds read from a repository, need a hosted " +
-			"git service and are refused."}
+	out := console.Listing{Columns: []string{"Description", "Region", "Repository", "Event", "Build configuration", "Pool", "Approval", "Age"},
+		NameColumn: "Name", Noun: "triggers", AlwaysStatus: true, RowsOpenable: true,
+		Note: "Push to a branch and Push new tag triggers run on a Developer Connect link to one of this instance's Secure Source Manager " +
+			"repositories; manual, webhook and Pub/Sub triggers run an inline build. A Pub/Sub trigger's builds, which arrive from the " +
+			"cluster, run docker build, docker push and pack steps only. GitHub, GitLab and Bitbucket need a hosted git service."}
 	for _, t := range runadapter.Triggers(p.project(project), "") {
 		region := strings.Split(t.GetResourceName(), "/")[3]
-		event, st := "Manual invocation", "Enabled"
-		if t.GetWebhookConfig() != nil {
-			event = "Webhook event"
-		}
-		if pc := t.GetPubsubConfig(); pc != nil {
-			event = "Pub/Sub message: " + pc.GetTopic()
-		}
-		// A trigger on a Developer Connect link (#1852): Google's "Push to
-		// branch" or "Push new tag".
-		if push := t.GetRepositoryEventConfig().GetPush(); push != nil {
-			event = "Push to branch: " + push.GetBranch()
-			if push.GetTag() != "" {
-				event = "Push new tag: " + push.GetTag()
-			}
-		}
+		st := "Enabled"
 		if t.GetDisabled() {
 			st = "Disabled"
 		}
+		repo := "-"
+		if r := t.GetRepositoryEventConfig().GetRepository(); r != "" {
+			repo = r[strings.LastIndex(r, "/")+1:]
+		}
 		out.Items = append(out.Items, console.Resource{Name: t.GetName(), Status: st, Fields: map[string]string{
-			"Region": region, "Event": event, "Description": orDash(t.GetDescription()),
-			"Pool": orDash(t.GetBuild().GetOptions().GetPool().GetName()), "Approval": approvalLabel(t.GetResourceName()),
+			"Region": region, "Event": triggerEvent(t), "Description": orDash(t.GetDescription()), "Repository": repo,
+			"Build configuration": triggerConfigLabel(t),
+			"Pool":                orDash(t.GetBuild().GetOptions().GetPool().GetName()), "Approval": approvalLabel(t.GetResourceName()),
 			"Age": stampAge(t.GetCreateTime())}})
 	}
 	out.Total = len(out.Items)
-	out.Summary = p.defaultServiceAccount(ctx, project)
 	return out, nil
+}
+
+// triggerEvent is the Event column, in Google's words.
+func triggerEvent(t *cbpb.BuildTrigger) string {
+	switch {
+	case t.GetPubsubConfig() != nil:
+		return "Pub/Sub message: " + t.GetPubsubConfig().GetTopic()
+	case t.GetWebhookConfig() != nil:
+		return "Webhook event"
+	}
+	// A trigger on a Developer Connect link (#1852).
+	if push := t.GetRepositoryEventConfig().GetPush(); push != nil {
+		if push.GetTag() != "" {
+			return "Push new tag: " + push.GetTag()
+		}
+		return "Push to branch: " + push.GetBranch()
+	}
+	return "Manual invocation"
+}
+
+// triggerConfigLabel is the Build configuration column.
+func triggerConfigLabel(t *cbpb.BuildTrigger) string {
+	switch {
+	case t.GetAutodetect():
+		return "Autodetected"
+	case t.GetFilename() != "":
+		return "Cloud Build configuration file: " + t.GetFilename()
+	}
+	return "Inline"
 }
 
 // find resolves a trigger by its name, which may be in any region.
@@ -83,24 +102,20 @@ func (p buildTriggersProvider) find(project, name string) (*cbpb.BuildTrigger, e
 	return nil, fmt.Errorf("trigger %q is in %d regions; use gcloud builds triggers --region", name, len(match))
 }
 
-func (buildTriggersProvider) CreateForm() (string, []console.Field) {
-	return "Create trigger", []console.Field{
-		{Name: "name", Label: "Name", Type: "text", Required: true, Pattern: "^[a-zA-Z0-9][\\-a-zA-Z0-9_]{0,62}$"},
-		{Name: "region", Label: "Region", Type: "text", Default: "global", Help: "global, or a region such as us-central1"},
-		{Name: "description", Label: "Description", Type: "text"},
-		{Name: "image", Label: "Step image", Type: "text", Required: true, Default: "alpine:3.20",
-			Help: "the build's one step; a step other than docker build, docker push or pack runs only with --cloudbuild-host-steps"},
-		{Name: "command", Label: "Command", Type: "text", Required: true, Default: "echo triggered by $TRIGGER_NAME",
-			Help: "run with sh -c; $TRIGGER_NAME, $BUILD_ID and _NAME substitutions apply"},
-		{Name: "pool", Label: "Worker pool", Type: "text", Help: "optional: projects/PROJECT/locations/REGION/workerPools/POOL"},
-		{Name: "secret", Label: "Webhook secret", Type: "text",
-			Help: "optional: a Secret Manager version, projects/PROJECT/secrets/SECRET/versions/N, which makes a webhook trigger"},
-		{Name: "topic", Label: "Pub/Sub topic", Type: "text",
-			Help: "optional: projects/PROJECT/topics/TOPIC, which makes a Pub/Sub trigger; $(body.message.data.KEY) in a substitution reads the message"},
-		{Name: "approval", Label: "Require approval", Type: "checkbox",
-			Help: "approvalConfig.approvalRequired: each build waits, PENDING, until it is approved on its build page"},
-	}
+// CreateForm is Google's Create trigger page (consolebuildtriggerform.go).
+func (p buildTriggersProvider) CreateForm() (string, []console.Field) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	return "Create trigger", p.triggerFields(ctx, "", nil)
 }
+
+// CreateOnPage, CreateLayout and CreateSubmit draw Create trigger as one
+// page under its headings, ending in Create, as Google's is.
+func (buildTriggersProvider) CreateOnPage() bool   { return true }
+func (buildTriggersProvider) CreateLayout() string { return console.CreateLayoutPage }
+func (buildTriggersProvider) CreateSubmit() string { return "Create" }
+func (buildTriggersProvider) DeleteLabel() string  { return "Delete" }
+func (buildTriggersProvider) RowEditLabel() string { return "Edit" }
 
 // approvalLabel is the Approval column: whether the trigger's builds wait
 // for approval (#1449).
@@ -117,18 +132,11 @@ func (p buildTriggersProvider) Create(ctx context.Context, project string, v map
 	if region == "" {
 		region = "global"
 	}
-	b := &cbpb.Build{Steps: []*cbpb.BuildStep{{Name: strings.TrimSpace(v["image"]), Entrypoint: "sh", Args: []string{"-c", v["command"]}}}}
-	if pool := strings.TrimSpace(v["pool"]); pool != "" {
-		b.Options = &cbpb.BuildOptions{Pool: &cbpb.BuildOptions_PoolOption{Name: pool}}
+	t, err := triggerFromValues(v)
+	if err != nil {
+		return "", err
 	}
-	t := &cbpb.BuildTrigger{Name: strings.TrimSpace(v["name"]), Description: v["description"], BuildTemplate: &cbpb.BuildTrigger_Build{Build: b}}
-	if s := strings.TrimSpace(v["secret"]); s != "" {
-		t.WebhookConfig = &cbpb.WebhookConfig{AuthMethod: &cbpb.WebhookConfig_Secret{Secret: s}}
-	}
-	if topic := strings.TrimSpace(v["topic"]); topic != "" {
-		t.PubsubConfig = &cbpb.PubsubConfig{Topic: topic}
-	}
-	err := p.b.withClient(ctx, func(c *cloudbuild.Client) error {
+	err = p.b.withClient(ctx, func(c *cloudbuild.Client) error {
 		made, err := c.CreateBuildTrigger(ctx, &cbpb.CreateBuildTriggerRequest{ProjectId: project,
 			Parent: "projects/" + project + "/locations/" + region, Trigger: t})
 		if err != nil || (v["approval"] != "true" && v["approval"] != "on") {
@@ -144,13 +152,23 @@ func (p buildTriggersProvider) Create(ctx context.Context, project string, v map
 // Actions offers Run on an enabled manual trigger, as Google's Triggers
 // page does; a webhook trigger runs from its URL.
 func (p buildTriggersProvider) Actions(r console.Resource) []console.Action {
-	if r.Status == "Enabled" && r.Fields["Event"] == "Manual invocation" {
-		return []console.Action{{ID: "run", Label: "Run", Confirm: "a build runs from the trigger's build config"}}
+	var acts []console.Action
+	ev := r.Fields["Event"]
+	if r.Status == "Enabled" && (ev == "Manual invocation" || strings.HasPrefix(ev, "Push ")) {
+		acts = append(acts, console.Action{ID: "run", Label: "Run", Confirm: "a build runs from the trigger's build config"})
 	}
-	return nil
+	// Disable and Enable in the row's menu (#1854), as Google's.
+	if r.Status == "Disabled" {
+		return append(acts, console.Action{ID: "enable-trigger", Label: "Enable"})
+	}
+	return append(acts, console.Action{ID: "disable-trigger", Label: "Disable",
+		Confirm: "A disabled trigger starts no build, from Run, a push, its topic or its webhook, until it is enabled."})
 }
 
 func (p buildTriggersProvider) Act(ctx context.Context, project, name, action string) error {
+	if action == "enable-trigger" || action == "disable-trigger" {
+		return p.ActAt(ctx, project, []string{name}, action, nil)
+	}
 	if action != "run" {
 		return fmt.Errorf("unknown action %q", action)
 	}
@@ -254,9 +272,12 @@ func (p buildWorkerPoolsProvider) Delete(ctx context.Context, project, name stri
 }
 
 var (
-	_ console.Creator = buildTriggersProvider{}
-	_ console.Actor   = buildTriggersProvider{}
-	_ console.Deleter = buildTriggersProvider{}
-	_ console.Creator = buildWorkerPoolsProvider{}
-	_ console.Deleter = buildWorkerPoolsProvider{}
+	_ console.CreateLayouter  = buildTriggersProvider{}
+	_ console.PageCreator     = buildTriggersProvider{}
+	_ console.CreateSubmitter = buildTriggersProvider{}
+	_ console.Actor           = buildTriggersProvider{}
+	_ console.DeleteLabeler   = buildTriggersProvider{}
+	_ console.RowEditor       = buildTriggersProvider{}
+	_ console.Creator         = buildWorkerPoolsProvider{}
+	_ console.Deleter         = buildWorkerPoolsProvider{}
 )

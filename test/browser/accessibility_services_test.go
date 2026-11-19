@@ -256,9 +256,9 @@ func TestCloudRunAndCICDScreensMeetWCAG(t *testing.T) {
 	for _, l := range []struct{ name, path string }{
 		{"Cloud Run services", "/run"}, {"Cloud Run jobs", "/run/jobs"},
 		{"Cloud Run worker pools", "/run/worker-pools"}, {"Cloud Run instances", "/run/instances"},
-		{"Cloud Run builds", "/run/builds"}, {"Cloud Functions", "/functions"},
+		{"Cloud Build history", "/cloud-build/builds"}, {"Cloud Functions", "/functions"},
 		{"Artifact Registry", "/artifact-registry"}, {"Cloud Build triggers", "/cloud-build/triggers"},
-		{"Cloud Build worker pools", "/cloud-build/worker-pools"},
+		{"Cloud Build worker pools", "/cloud-build/worker-pools"}, {"Cloud Build dashboard", "/cloud-build/dashboard"}, {"Cloud Build repositories", "/cloud-build/repositories"}, {"Cloud Build settings", "/cloud-build/settings"},
 		{"Secure Source Manager", "/secure-source-manager"},
 		{"KMS key rings", "/kms/keyrings"}, {"KMS EKM", "/kms/ekm"},
 		{"KMS Autokey", "/kms/autokey"}, {"KMS HSM", "/kms/hsm"},

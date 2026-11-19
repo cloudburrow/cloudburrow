@@ -42,14 +42,24 @@ const ROUTES = [
     product: "run", productTitle: "Cloud Run" },
   { path: "/run/instances", service: "run-instances", title: "Instances", kind: "Instance", section: "Serverless computing",
     product: "run", productTitle: "Cloud Run" },
-  // Source builds and the repositories `gcloud run deploy --source` creates (#1347).
-  { path: "/run/builds", service: "run-builds", title: "Build history", kind: "Build", section: "Serverless computing",
-    product: "run", productTitle: "Cloud Run" },
-  // Cloud Build's triggers and private worker pools (#1422).
+  // Cloud Build is its own product (#1854), its menu in Google's order:
+  // Dashboard, History, Triggers, Repositories, Worker pools, Settings.
+  // History is the build history Cloud Run's menu held (#1347); its old
+  // address, and a build's under it, lead here.
+  { path: "/cloud-build/dashboard", service: "cloud-build-dashboard", title: "Dashboard", section: "CI/CD",
+    product: "cloud-build", productTitle: "Cloud Build" },
+  { path: "/cloud-build/builds", service: "run-builds", title: "History", kind: "Build", section: "CI/CD",
+    product: "cloud-build", productTitle: "Cloud Build" },
   { path: "/cloud-build/triggers", service: "cloud-build-triggers", title: "Triggers", kind: "Trigger", section: "CI/CD",
+    product: "cloud-build", productTitle: "Cloud Build" },
+  { path: "/cloud-build/repositories", service: "cloud-build-repositories", title: "Repositories", section: "CI/CD",
     product: "cloud-build", productTitle: "Cloud Build" },
   { path: "/cloud-build/worker-pools", service: "cloud-build-worker-pools", title: "Worker pools", kind: "Worker pool", section: "CI/CD",
     product: "cloud-build", productTitle: "Cloud Build" },
+  { path: "/cloud-build/settings", service: "cloud-build-settings", title: "Settings", section: "CI/CD",
+    product: "cloud-build", productTitle: "Cloud Build" },
+  { path: "/run/builds", service: "run-builds", title: "History", kind: "Build", section: "CI/CD", navHidden: true,
+    redirect: "/cloud-build/builds", redirectTree: true, product: "cloud-build", productTitle: "Cloud Build" },
   // Secure Source Manager's instances and repositories (#1527).
   { path: "/secure-source-manager", service: "secure-source-manager", title: "Instances", kind: "Instance", section: "CI/CD",
     product: "secure-source-manager", productTitle: "Secure Source Manager" },
@@ -363,6 +373,9 @@ const ICONS = {
   // Eventarc: an event routed from a source to a destination.
   eventarc: '<circle cx="5" cy="12" r="2.5"/><circle cx="19" cy="6" r="2.5"/><circle cx="19" cy="18" r="2.5"/><path d="M7.5 12h4l5-5M11.5 12l5 5"/>',
   "cloud-build-triggers": '<path d="M13 3L5 13h6l-1 8 8-10h-6z"/>',
+  "cloud-build-dashboard": '<rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="5" rx="1"/><rect x="13" y="10" width="8" height="11" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/>',
+  "cloud-build-repositories": '<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7v10M18 10c0 4-6 3-12 7"/>',
+  "cloud-build-settings": '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/>',
   "cloud-build-worker-pools": '<rect x="3" y="4" width="8" height="7" rx="1.5"/><rect x="13" y="4" width="8" height="7" rx="1.5"/><rect x="3" y="13" width="8" height="7" rx="1.5"/><rect x="13" y="13" width="8" height="7" rx="1.5"/>',
   // Secure Source Manager: a branch.
   "secure-source-manager": '<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7v10M18 10c0 4-6 3-12 7"/>',
@@ -6923,9 +6936,12 @@ function routeFor(pathname) {
 function dispatch(view) {
   // A page that moved (#1843): /storage/deleted is Buckets' View options
   // now. The project, and anything else in the address, comes along.
-  const moved = ROUTES.find((r) => r.redirect && r.path === location.pathname);
+  // A moved product's pages keep their resources' addresses below the
+  // old path (redirectTree): /run/builds/ID is /cloud-build/builds/ID (#1854).
+  const moved = ROUTES.find((r) => r.redirect && (r.path === location.pathname ||
+    (r.redirectTree && location.pathname.startsWith(r.path + "/"))));
   if (moved) {
-    const to = new URL(moved.redirect, location.origin);
+    const to = new URL(moved.redirect + location.pathname.slice(moved.path.length), location.origin);
     for (const [k, v] of new URLSearchParams(location.search)) to.searchParams.set(k, v);
     history.replaceState(history.state, "", to.pathname + to.search);
   }

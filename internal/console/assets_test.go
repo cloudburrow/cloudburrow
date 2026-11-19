@@ -2150,8 +2150,21 @@ func TestTheDrawerListsProductsNotPages(t *testing.T) {
 			cloudRun = append(cloudRun, r["title"]+" "+r["path"]+" "+r["service"])
 		}
 	}
-	if want := []string{"Services /run run", "Jobs /run/jobs run-jobs", "Worker pools /run/worker-pools run-worker-pools", "Domain mappings /run/domains run-domains", "Instances /run/instances run-instances", "Build history /run/builds run-builds"}; strings.Join(cloudRun, "|") != strings.Join(want, "|") {
+	if want := []string{"Services /run run", "Jobs /run/jobs run-jobs", "Worker pools /run/worker-pools run-worker-pools", "Domain mappings /run/domains run-domains", "Instances /run/instances run-instances"}; strings.Join(cloudRun, "|") != strings.Join(want, "|") {
 		t.Errorf("Cloud Run pages = %q, want %q", cloudRun, want)
+	}
+	// Cloud Build is its own product in Google's order (#1854); its old
+	// History address, under Cloud Run, is a hidden redirect, last.
+	var build []string
+	for _, r := range routes {
+		if r["product"] == "cloud-build" {
+			build = append(build, r["title"]+" "+r["path"])
+		}
+	}
+	if want := []string{"Dashboard /cloud-build/dashboard", "History /cloud-build/builds", "Triggers /cloud-build/triggers",
+		"Repositories /cloud-build/repositories", "Worker pools /cloud-build/worker-pools", "Settings /cloud-build/settings",
+		"History /run/builds"}; strings.Join(build, "|") != strings.Join(want, "|") {
+		t.Errorf("Cloud Build pages = %q, want %q", build, want)
 	}
 	// Cloud Storage's menu is Google's order (#1843), with Deleted buckets
 	// (#789), now a redirect to Buckets' View options and not in the menu,

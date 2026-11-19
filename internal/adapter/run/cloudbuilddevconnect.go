@@ -127,7 +127,10 @@ func (c *CloudBuildServer) runDevConnectTrigger(ctx context.Context, t *cbpb.Bui
 		cloneURI = l.GetCloneUri()
 	}
 	ssmState.mu.Unlock()
-	b := proto.Clone(t.GetBuild()).(*cbpb.Build)
+	b, configPath, err := triggerRepoBuild(ctx, t, dir, sha)
+	if err != nil {
+		return nil, err
+	}
 	if b.Substitutions == nil {
 		b.Substitutions = map[string]string{}
 	}
@@ -139,7 +142,7 @@ func (c *CloudBuildServer) runDevConnectTrigger(ctx context.Context, t *cbpb.Bui
 	}
 	id := repo[strings.LastIndex(repo, "/")+1:]
 	subs := map[string]string{"TRIGGER_NAME": t.GetName(), "COMMIT_SHA": sha, "REVISION_ID": sha, "SHORT_SHA": sha[:7],
-		"REPO_NAME": id, "REPO_FULL_NAME": repo, "TRIGGER_BUILD_CONFIG_PATH": ""}
+		"REPO_NAME": id, "REPO_FULL_NAME": repo, "TRIGGER_BUILD_CONFIG_PATH": configPath}
 	if short, ok := strings.CutPrefix(ref, "refs/heads/"); ok {
 		subs["BRANCH_NAME"], subs["REF_NAME"] = short, short
 	} else if short, ok := strings.CutPrefix(ref, "refs/tags/"); ok {
@@ -195,3 +198,58 @@ func (c *CloudBuildServer) runDevConnectManual(ctx context.Context, t *cbpb.Buil
 	}
 	return c.runDevConnectTrigger(ctx, t, dir, ref, sha, source.GetSubstitutions())
 }
+
+// onDevConnectLink reports whether a trigger's events come from a Developer
+// Connect git repository link, whose commits this instance holds.
+func onDevConnectLink(t *cbpb.BuildTrigger) bool {
+	rc := t.GetRepositoryEventConfig()
+	return rc != nil && devConnectLinkRE.MatchString(rc.GetRepository())
+}
+
+// triggerRepoBuild is the build a trigger runs at a commit (#1854): its
+// inline build; its filename, the Cloud Build config file read from the
+// commit; or, autodetected as Google does, cloudbuild.yaml or
+// cloudbuild.json at the repository's root, else its Dockerfile, built and
+// pushed as gcr.io/$PROJECT_ID/$REPO_NAME:$COMMIT_SHA. configPath is
+// TRIGGER_BUILD_CONFIG_PATH.
+func triggerRepoBuild(ctx context.Context, t *cbpb.BuildTrigger, dir, sha string) (*cbpb.Build, string, error) {
+	if b := t.GetBuild(); b != nil {
+		return proto.Clone(b).(*cbpb.Build), "", nil
+	}
+	show := func(path string) ([]byte, bool) {
+		out, err := exec.CommandContext(ctx, "git", "-C", dir, "show", sha+":"+path).Output()
+		return out, err == nil
+	}
+	parse := func(path string, raw []byte) (*cbpb.Build, string, error) {
+		b, err := parseBuildConfig(raw)
+		if err != nil {
+			return nil, "", apierror.InvalidArgument("build config file %s: %v", path, err)
+		}
+		if err := unsupportedCreate(b); err != nil {
+			return nil, "", err
+		}
+		return b, path, nil
+	}
+	if f := strings.TrimPrefix(t.GetFilename(), "/"); f != "" {
+		raw, ok := show(f)
+		if !ok {
+			return nil, "", apierror.FailedPrecondition("build config file %s not found at commit %s", f, sha)
+		}
+		return parse(f, raw)
+	}
+	for _, f := range []string{"cloudbuild.yaml", "cloudbuild.json"} {
+		if raw, ok := show(f); ok {
+			return parse(f, raw)
+		}
+	}
+	if _, ok := show("Dockerfile"); ok {
+		image := "gcr.io/$PROJECT_ID/$REPO_NAME:$COMMIT_SHA"
+		return &cbpb.Build{Steps: []*cbpb.BuildStep{{Name: "gcr.io/cloud-builders/docker", Args: []string{"build", "-t", image, "."}}},
+			Images: []string{image}}, "", nil
+	}
+	return nil, "", apierror.FailedPrecondition("autodetect found no cloudbuild.yaml, cloudbuild.json or Dockerfile at the root of commit %s", sha)
+}
+
+// ParseBuildConfig reads a Cloud Build config file, YAML or JSON, as a
+// trigger's inline build (the console's Inline configuration, #1854).
+func ParseBuildConfig(raw []byte) (*cbpb.Build, error) { return parseBuildConfig(raw) }

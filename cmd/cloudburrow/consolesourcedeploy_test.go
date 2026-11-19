@@ -112,7 +112,7 @@ func TestConsoleSourceDeployScreens(t *testing.T) {
 	}
 	builds, _ := runBuildsProvider{}.List(ctx, proj)
 	if len(builds.Items) != 1 || builds.Items[0].Status != "Succeeded" || builds.Items[0].Fields["Image"] != image+":latest" ||
-		!strings.HasPrefix(builds.Items[0].Fields["Digest"], "sha256:") || builds.Items[0].Fields["Source"] != "gs://b/o.zip" {
+		builds.Items[0].Fields["Region"] != "us-central1" || builds.Items[0].Fields["Source"] != "gs://b/o.zip" {
 		t.Errorf("builds = %+v", builds.Items)
 	}
 
@@ -133,10 +133,27 @@ func TestConsoleSourceDeployScreens(t *testing.T) {
 	}
 	id := op.GetName()[strings.LastIndex(op.GetName(), "/")+1:]
 	d, err := runBuildsProvider{}.Detail(ctx, proj, []string{id})
-	if err != nil || len(d.Sections) != 2 || len(d.Sections[0].Listing.Items) != 2 ||
+	// Google's views (#1854): Build summary, Build log, Execution details,
+	// Build artifacts, the last with the pushed image's digest.
+	var labels []string
+	for _, sec := range d.Sections {
+		labels = append(labels, sec.Label)
+	}
+	if err != nil || strings.Join(labels, ",") != "Build summary,Build log,Execution details,Build artifacts" ||
+		len(d.Sections[0].Listing.Items) != 2 ||
 		d.Sections[0].Listing.Items[0].Status != "Succeeded" || d.Sections[0].Listing.Items[0].Name != "#0 img" ||
-		!strings.Contains(d.Sections[1].Text, "Starting Step #0") || !strings.Contains(d.Sections[1].Text, "DONE") {
+		!strings.Contains(d.Sections[1].Text, "Starting Step #0") || !strings.Contains(d.Sections[1].Text, "DONE") ||
+		len(d.Sections[3].Listing.Items) != 1 || !strings.HasPrefix(d.Sections[3].Listing.Items[0].Fields["Digest"], "sha256:") {
 		t.Errorf("build detail = %+v, %v", d, err)
+	}
+	// A step opens its own log: its lines only.
+	step, _ := runBuildsProvider{}.Detail(ctx, proj, []string{id, "1"})
+	if len(step.Sections) != 1 || !strings.Contains(step.Sections[0].Text, "Step #1: The push") ||
+		strings.Contains(step.Sections[0].Text, "Step #0") {
+		t.Errorf("step 1's page = %+v", step)
+	}
+	if bad, _ := (runBuildsProvider{}).Detail(ctx, proj, []string{id, "9"}); bad.Unavailable == "" {
+		t.Error("a step the build does not have opened a page")
 	}
 }
 

@@ -143,13 +143,13 @@ func unsupportedTrigger(t *cbpb.BuildTrigger) error {
 		return devConnectEventError(t.GetRepositoryEventConfig())
 	case t.GetPubsubConfig() != nil && validPubsubConfig(t.GetPubsubConfig()) != nil:
 		return validPubsubConfig(t.GetPubsubConfig())
-	case t.GetFilename() != "":
+	case t.GetFilename() != "" && !onDevConnectLink(t):
 		return repo("filename")
 	case t.GetGitFileSource() != nil:
 		return repo("gitFileSource")
 	case t.GetSourceToBuild() != nil:
 		return repo("sourceToBuild")
-	case t.GetAutodetect():
+	case t.GetAutodetect() && !onDevConnectLink(t):
 		return repo("autodetect")
 	case t.GetFilter() != "":
 		return apierror.Unimplemented("BuildTrigger field filter (a CEL expression over the event) is not supported")
@@ -158,11 +158,16 @@ func unsupportedTrigger(t *cbpb.BuildTrigger) error {
 	case len(t.GetIncludedFiles()) > 0 || len(t.GetIgnoredFiles()) > 0:
 		return apierror.Unimplemented("BuildTrigger fields includedFiles and ignoredFiles filter repository pushes, which no trigger here has")
 	}
-	if t.GetBuild() == nil {
+	// A trigger on a Developer Connect link reads its config file from the
+	// pushed commit (#1854): there is no inline build to check until then.
+	repoConfig := onDevConnectLink(t) && (t.GetFilename() != "" || t.GetAutodetect())
+	if t.GetBuild() == nil && !repoConfig {
 		return apierror.InvalidArgument("invalid trigger: a trigger needs a build (an inline build config)")
 	}
-	if err := unsupportedCreate(t.GetBuild()); err != nil {
-		return err
+	if !repoConfig {
+		if err := unsupportedCreate(t.GetBuild()); err != nil {
+			return err
+		}
 	}
 	if wc := t.GetWebhookConfig(); wc != nil && !secretVersionRE.MatchString(wc.GetSecret()) {
 		return apierror.InvalidArgument("invalid trigger: webhookConfig.secret %q is not a Secret Manager version, "+
