@@ -59,7 +59,10 @@ type nodeHealth struct {
 // watchClusters checks every cluster-mode cluster of c every every.
 func (c *clusters) watchClusters(ctx context.Context, every time.Duration) {
 	hs := map[string]map[string]*nodeHealth{}
-	repairing := map[string]bool{}
+	// running are the clusters being checked or repaired: each in a
+	// goroutine of its own, so a cluster whose nodes time out never
+	// delays another's checks.
+	running := map[string]bool{}
 	done := make(chan string, 16)
 	t := time.NewTicker(every)
 	defer t.Stop()
@@ -70,27 +73,27 @@ func (c *clusters) watchClusters(ctx context.Context, every time.Duration) {
 		case name := <-done:
 			// What the checks learned is kept: a repair that did not finish
 			// is tried again at the next check.
-			delete(repairing, name)
+			delete(running, name)
 			continue
 		case <-t.C:
 		}
 		for _, name := range c.clusterModeNames() {
-			if repairing[name] {
+			if running[name] {
 				continue
 			}
 			if hs[name] == nil {
 				hs[name] = map[string]*nodeHealth{}
 			}
-			if c.checkCluster(ctx, name, hs[name], every) {
-				repairing[name] = true
-				go func(name string, h map[string]*nodeHealth) {
-					defer func() { done <- name }()
+			running[name] = true
+			go func(name string, h map[string]*nodeHealth) {
+				defer func() { done <- name }()
+				if c.checkCluster(ctx, name, h, every) {
 					c.repairCluster(ctx, name, h)
-				}(name, hs[name])
-			}
+				}
+			}(name, hs[name])
 		}
 		for name := range hs {
-			if _, ok := c.lookup(name); !ok && !repairing[name] {
+			if _, ok := c.lookup(name); !ok && !running[name] {
 				delete(hs, name)
 			}
 		}
