@@ -190,7 +190,7 @@ func (m *Model) eval3(o op, a []*Tensor) (*Tensor, error) {
 	case opSegmentSum, opUnsortedSegmentSum, opUnsortedSegmentProd, opUnsortedSegmentMax, opUnsortedSegmentMin:
 		return segment(o, x, arg(1), arg(2))
 	}
-	return nil, &UnsupportedError{"operator " + o.name + " is not supported"}
+	return m.eval4(o, a) // ops4.go
 }
 
 // arity is the number of inputs an operator of this file needs.
@@ -203,6 +203,13 @@ func (o op) arity() int {
 		return 3
 	case opOneHot:
 		return 4
+	case opLSTM, opUnidirectionalSequenceLSTM, opRNN, opUnidirectionalSequenceRNN, opRandomUniform, opRandomNormal, opReal, opImag, opComplexAbs,
+		opWhere, opDynamicUpdateSlice, opMatrixSetDiag, opReverseSequence, opSparseToDense, opBroadcastArgs, opL2Pool2D, opBitwiseXor,
+		opRightShift, opStablehloAdd, opStablehloMultiply, opStablehloMaximum, opStablehloMinimum, opStablehloAnd, opStablehloShiftLeft,
+		opStablehloPad, opDilate, opFakeQuant, opSVDF:
+		return 1 // ops4.go and rnn.go check the rest
+	case opConv3DTranspose:
+		return 3
 	}
 	return 2
 }

@@ -81,6 +81,8 @@ type Tensor struct {
 	I     []int64
 	B     []bool
 	S     []string
+	// C holds a COMPLEX64 tensor's elements (RFFT2D, ops4.go, #1775).
+	C []complex64
 }
 
 // Len is the number of elements the shape holds.
@@ -115,6 +117,10 @@ type tensorDef struct {
 	// are carried as float32, typ is FLOAT32, and stored is its own type.
 	q      *quant
 	stored Type
+	// variable is schema.fbs's is_variable: a recurrent kernel's state,
+	// zero at the start of each Run unless the model gives it a value
+	// (#1775).
+	variable bool
 }
 
 type op struct {
@@ -417,6 +423,7 @@ func loadGraph(sg *flatbuffers.Table, codes, bufs []*flatbuffers.Table, custom m
 		if sh := ints(t, 18); sh != nil {
 			d.shape = sh
 		}
+		d.variable = t.GetBoolSlot(14, false)
 		if qt := sub(t, 12); qt != nil && !d.typ.IsFloat() {
 			q, err := readQuant(qt, d)
 			if err != nil {
@@ -475,6 +482,9 @@ func loadGraph(sg *flatbuffers.Table, codes, bufs []*flatbuffers.Table, custom m
 		}
 		op := op{code: code, name: name, in: ints(o, 6), out: ints(o, 8)}
 		op.opts = sub(o, 12)
+		if op.opts == nil {
+			op.opts = sub(o, 28) // builtin_options_2: the StableHLO operators' (#1775)
+		}
 		m.ops = append(m.ops, op)
 	}
 	return m, nil
