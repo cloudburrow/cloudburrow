@@ -400,9 +400,15 @@ func (s *Server) runMaintenance(name string, now time.Time) {
 		return
 	}
 	op := s.pending("http://"+s.Addr()+"/v1/", spec.Project, name, "MAINTENANCE")
-	ctx, cancel := context.WithTimeout(context.Background(), startTimeout)
-	defer cancel()
-	err := s.writes.prov.Restart(ctx, spec)
+	// The server certificate, with AUTOMATIC_ROTATION_DURING_MAINTENANCE
+	// (certrotation.go): the restarted server's connections present the
+	// new one.
+	_, err := s.rotateDuringMaintenance(spec, now)
+	if err == nil {
+		ctx, cancel := context.WithTimeout(context.Background(), startTimeout)
+		defer cancel()
+		err = s.writes.prov.Restart(ctx, spec)
+	}
 	s.emu.Lock()
 	if s.writes.byName[name] == c && c.state == "MAINTENANCE" {
 		c.state = "RUNNABLE"
