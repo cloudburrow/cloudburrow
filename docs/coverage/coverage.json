@@ -7646,6 +7646,7 @@
           "test/compat/storage_test.go:65 TestStorageBucketLifecycle",
           "test/compat/storageacl_test.go:40 TestStorageBucketACL",
           "test/compat/storagebucketfields_test.go:21 TestStorageBucketLabelsAndStorageClassRoundTrip",
+          "test/compat/storagecmek1938_test.go:116 TestStorageCMEK",
           "test/compat/storagecors_test.go:77 TestStorageCORSRoundTrip",
           "test/compat/storagehardpause_test.go:59 TestStorageHardDeletePause",
           "test/compat/storageipfilter_test.go:102 TestStorageIPFilterGRPC",
@@ -7689,6 +7690,8 @@
           "test/compat/storage_test.go:65 TestStorageBucketLifecycle",
           "test/compat/storageacl_test.go:128 TestStoragePredefinedACL",
           "test/compat/storagebucketfields_test.go:21 TestStorageBucketLabelsAndStorageClassRoundTrip",
+          "test/compat/storagecmek1938_test.go:116 TestStorageCMEK",
+          "test/compat/storagecmek1938_test.go:229 TestStorageEncryptionEnforcement",
           "test/compat/storagehardpause_test.go:59 TestStorageHardDeletePause",
           "test/compat/storageipfilter_test.go:44 TestStorageIPFilterJSON",
           "test/compat/storageipfiltertools_test.go:145 TestTerraformStorageBucketIPFilter",
@@ -7788,6 +7791,7 @@
           "test/compat/storageacl_test.go:128 TestStoragePredefinedACL",
           "test/compat/storageacl_test.go:186 TestGcloudStorageACL",
           "test/compat/storagebucketfields_test.go:21 TestStorageBucketLabelsAndStorageClassRoundTrip",
+          "test/compat/storagecmek1938_test.go:229 TestStorageEncryptionEnforcement",
           "test/compat/storagecors_test.go:77 TestStorageCORSRoundTrip",
           "test/compat/storagehardpause_test.go:59 TestStorageHardDeletePause",
           "test/compat/storageipfilter_test.go:102 TestStorageIPFilterGRPC",
@@ -7824,7 +7828,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/storageanywherecache_test.go:310 TestStorageRelocate",
-          "test/compat/storageanywherecache_test.go:395 TestGcloudStorageAnywhereCachesRelocate"
+          "test/compat/storageanywherecache_test.go:395 TestGcloudStorageAnywhereCachesRelocate",
+          "test/compat/storagecmek1938_test.go:419 TestStorageRelocateCMEK"
         ],
         "unverified": [
           {
@@ -8223,6 +8228,7 @@
         "tests": [
           "test/compat/gcloudstorage_test.go:163 TestGcloudStorageParallelCompositeUpload",
           "test/compat/storage_test.go:267 TestStorageCompose",
+          "test/compat/storagecmek1938_test.go:116 TestStorageCMEK",
           "test/compat/storagecontexts_test.go:37 TestStorageObjectContexts"
         ]
       },
@@ -8256,6 +8262,7 @@
           "test/compat/cloudbuilddefaultlogs_test.go:47 TestCloudBuildDefaultLogsBucket",
           "test/compat/iamenforcementstorage1879_test.go:102 TestIAMEnforcementStorage",
           "test/compat/storage_test.go:92 TestStorageObjectRoundTrip",
+          "test/compat/storagecmek1938_test.go:116 TestStorageCMEK",
           "test/compat/storagegrpccsek_test.go:28 TestStorageCSEKParity",
           "test/compat/storagesoftdelete_test.go:59 TestStorageSoftDeleteAndRestore",
           "test/compat/storageversioning_test.go:63 TestStorageVersioningKeepsNoncurrent",
@@ -8286,6 +8293,8 @@
           "test/compat/iamenforcementstorage1879_test.go:102 TestIAMEnforcementStorage",
           "test/compat/storage_test.go:92 TestStorageObjectRoundTrip",
           "test/compat/storageacl_test.go:128 TestStoragePredefinedACL",
+          "test/compat/storagecmek1938_test.go:116 TestStorageCMEK",
+          "test/compat/storagecmek1938_test.go:229 TestStorageEncryptionEnforcement",
           "test/compat/storagecontexts_test.go:37 TestStorageObjectContexts",
           "test/compat/storagegrpccsek_test.go:28 TestStorageCSEKParity",
           "test/compat/storageipfilter_test.go:44 TestStorageIPFilterJSON",
@@ -8370,6 +8379,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/remaining_test.go:70 TestObjectCopyAndRewrite",
+          "test/compat/storagecmek1938_test.go:116 TestStorageCMEK",
           "test/compat/storagecontexts_test.go:37 TestStorageObjectContexts",
           "test/compat/storagegrpccsek_test.go:28 TestStorageCSEKParity"
         ]
@@ -8602,6 +8612,7 @@
         "method": "google.storage.v2.Storage/GetObject",
         "status": "Verified",
         "tests": [
+          "test/compat/storagecmek1938_test.go:116 TestStorageCMEK",
           "test/compat/storagecontexts_test.go:37 TestStorageObjectContexts",
           "test/compat/storagegrpc_test.go:153 TestStorageGRPCObjects",
           "test/compat/storagegrpcacl_test.go:33 TestStorageGRPCACLs",
@@ -8649,6 +8660,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/iamenforcementstorage1879_test.go:102 TestIAMEnforcementStorage",
+          "test/compat/storagecmek1938_test.go:116 TestStorageCMEK",
           "test/compat/storagegrpc_test.go:153 TestStorageGRPCObjects",
           "test/compat/storagegrpccsek_test.go:28 TestStorageCSEKParity",
           "test/compat/storagegrpcread_test.go:31 TestStorageGRPCReadObjectMessagesHandleAndRange"
@@ -8715,6 +8727,7 @@
         "method": "google.storage.v2.Storage/WriteObject",
         "status": "Verified",
         "tests": [
+          "test/compat/storagecmek1938_test.go:116 TestStorageCMEK",
           "test/compat/storagecontexts_test.go:37 TestStorageObjectContexts",
           "test/compat/storagegrpccsek_test.go:28 TestStorageCSEKParity"
         ]

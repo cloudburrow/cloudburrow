@@ -36,6 +36,7 @@ type cmekFixture struct {
 	kms     kmspb.KeyManagementServiceClient
 	blobs   string
 	kmsAddr string
+	url     string
 }
 
 func newCMEKFixture(t *testing.T, check ...*iamcheck.Client) *cmekFixture {
@@ -78,13 +79,18 @@ func newCMEKFixture(t *testing.T, check ...*iamcheck.Client) *cmekFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
-	return &cmekFixture{client: c, kms: kmspb.NewKeyManagementServiceClient(conn), blobs: dir, kmsAddr: ln.Addr().String()}
+	return &cmekFixture{client: c, kms: kmspb.NewKeyManagementServiceClient(conn), blobs: dir, kmsAddr: ln.Addr().String(), url: h.URL}
 }
 
 func (f *cmekFixture) key(t *testing.T, ring, name string) string {
 	t.Helper()
+	return f.keyIn(t, "us", ring, name)
+}
+
+func (f *cmekFixture) keyIn(t *testing.T, location, ring, name string) string {
+	t.Helper()
 	ctx := context.Background()
-	parent := "projects/proj-cmek/locations/us"
+	parent := "projects/proj-cmek/locations/" + location
 	if _, err := f.kms.CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: parent, KeyRingId: ring}); err != nil && !strings.Contains(err.Error(), "AlreadyExists") {
 		t.Fatal(err)
 	}
@@ -458,5 +464,46 @@ func TestCMEKServiceAgentPermission(t *testing.T) {
 	}
 	if _, err := get(b.Object("o")); code(err) != 403 {
 		t.Errorf("read after the grant is removed = %v; want 403", err)
+	}
+}
+
+// A relocation with destinationKmsKeyName re-encrypts the bucket's CMEK
+// objects with it; one of a bucket with a default key needs it, in the
+// destination location.
+func TestCMEKRelocation(t *testing.T) {
+	f := newCMEKFixture(t)
+	ctx := context.Background()
+	src := f.keyIn(t, "us-central1", "ring", "src")
+	dst := f.keyIn(t, "us-east1", "ring", "dst")
+	b := f.client.Bucket("moving")
+	if err := b.Create(ctx, "proj-cmek", &gcs.BucketAttrs{Location: "US-CENTRAL1", Encryption: &gcs.BucketEncryption{DefaultKMSKeyName: src}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cmekPut(t, b.Object("o"), "", []byte("moved bytes")); err != nil {
+		t.Fatal(err)
+	}
+	relocate := func(body string) int {
+		resp, err := http.Post(f.url+"/storage/v1/b/moving/relocate", "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		return resp.StatusCode
+	}
+	if c := relocate(`{"destinationLocation":"US-EAST1"}`); c != 400 {
+		t.Errorf("relocating a CMEK bucket without destinationKmsKeyName = %d; want 400", c)
+	}
+	if c := relocate(`{"destinationLocation":"US-EAST1","destinationKmsKeyName":"` + src + `"}`); c != 400 {
+		t.Errorf("relocating with a key outside the destination = %d; want 400", c)
+	}
+	if c := relocate(`{"destinationLocation":"US-EAST1","destinationKmsKeyName":"` + dst + `"}`); c != 200 {
+		t.Fatalf("relocate with destinationKmsKeyName = %d; want 200", c)
+	}
+	a, err := b.Object("o").Attrs(ctx)
+	if err != nil || a.KMSKeyName != dst+"/cryptoKeyVersions/1" {
+		t.Fatalf("relocated object = %+v, %v; want kmsKeyName %s/cryptoKeyVersions/1", a, err, dst)
+	}
+	if got, err := get(b.Object("o")); err != nil || string(got) != "moved bytes" {
+		t.Errorf("relocated object = %q, %v", got, err)
 	}
 }

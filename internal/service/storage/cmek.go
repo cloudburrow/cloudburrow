@@ -45,6 +45,7 @@ package storage
 import (
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"io"
 	"net/http"
 	"regexp"
@@ -580,4 +581,60 @@ func kmsPolicy(p *iampb.Policy) iampolicy.Stored {
 		out.Bindings = append(out.Bindings, sb)
 	}
 	return out
+}
+
+// reencryptBucket seals every version of bucket's objects that has a
+// customer-managed key anew with key (a relocation's
+// destinationKmsKeyName). A version that changed meanwhile is left to the
+// change; one whose key cannot be used fails the call.
+func (s *Server) reencryptBucket(ctx context.Context, bucket, key string) error {
+	var project string
+	var todo []objectRecord
+	if err := s.meta.View(func(tx Tx) error {
+		b, ok, err := s.getBucket(tx, bucket)
+		if err != nil || !ok {
+			return err
+		}
+		project = b.Project
+		for _, prefix := range []string{objectPrefix, noncurrentPrefix} {
+			for _, k := range tx.List(prefix + bucket + "/") {
+				raw, _ := tx.Get(k)
+				if prefix == objectPrefix {
+					var o objectRecord
+					if json.Unmarshal(raw, &o) == nil && o.KMSKeyVersion != "" {
+						todo = append(todo, o)
+					}
+					continue
+				}
+				var vs []objectRecord
+				if json.Unmarshal(raw, &vs) == nil {
+					for _, v := range vs {
+						if v.KMSKeyVersion != "" {
+							todo = append(todo, v)
+						}
+					}
+				}
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	for _, o := range todo {
+		blob, sk, err := s.reseal(ctx, o, project, key)
+		if err != nil {
+			return err
+		}
+		if err := s.meta.Update(func(tx Tx) error {
+			cur, live, ok, err := findVersion(tx, o.Bucket, o.Name, strconv.FormatInt(o.Generation, 10))
+			if err != nil || !ok || cur.Metageneration != o.Metageneration || cur.Blob != o.Blob {
+				return err
+			}
+			cur.Blob, cur.KMSKeyVersion, cur.WrappedKey = blob.ID, sk.Version, sk.Wrapped
+			return putVersion(tx, cur, live)
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }

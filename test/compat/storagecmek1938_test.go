@@ -19,6 +19,7 @@ import (
 	"cloud.google.com/go/kms/apiv1/kmspb"
 	"cloud.google.com/go/storage"
 	"google.golang.org/api/googleapi"
+	storagev1 "google.golang.org/api/storage/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -30,9 +31,14 @@ import (
 // --authorize-cmek`).
 func storageCMEKKeys(t *testing.T, h *Harness, c *storage.Client, ring string, names ...string) (*kms.KeyManagementClient, []string) {
 	t.Helper()
+	return storageCMEKKeysIn(t, h, c, "us", ring, names...)
+}
+
+func storageCMEKKeysIn(t *testing.T, h *Harness, c *storage.Client, location, ring string, names ...string) (*kms.KeyManagementClient, []string) {
+	t.Helper()
 	ctx := h.Context()
 	k := kmsClients(t, h)["grpc"]
-	r, err := k.CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: "projects/" + h.Project() + "/locations/us", KeyRingId: ring})
+	r, err := k.CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: "projects/" + h.Project() + "/locations/" + location, KeyRingId: ring})
 	if err != nil {
 		t.Fatalf("CreateKeyRing: %v", err)
 	}
@@ -191,7 +197,7 @@ func TestStorageCMEK(t *testing.T) {
 	setVersionState(t, h, k, v2, kmspb.CryptoKeyVersion_ENABLED)
 	// A rewrite to another key, over both transports.
 	for tr, b := range map[string]*storage.BucketHandle{"JSON": jb, "gRPC": gb} {
-		c := b.Object("rekeyed-"+tr).CopierFrom(b.Object("default-JSON"))
+		c := b.Object("rekeyed-" + tr).CopierFrom(b.Object("default-JSON"))
 		c.DestinationKMSKeyName = other
 		a, err := c.Run(ctx)
 		if err != nil || a.KMSKeyName != other+"/cryptoKeyVersions/1" {
@@ -400,5 +406,74 @@ func TestIAMEnforcementStorageCMEK(t *testing.T) {
 	}
 	if _, err := cmekRead(h, b.Object("o")); refusedCode(err) != fmt.Sprint(http.StatusForbidden) {
 		t.Errorf("read after the grant is removed = %v; want 403", err)
+	}
+}
+
+// TestStorageRelocateCMEK (#1938): buckets.relocate with
+// destinationKmsKeyName, through Google's generated JSON API client: the
+// key must be in the destination location and is required for a bucket
+// with a default key; the bucket's CMEK objects are re-encrypted with it,
+// and it is the bucket's default key once the relocation is done.
+//
+// covers: storage.buckets.relocate
+func TestStorageRelocateCMEK(t *testing.T) {
+	h := New(t)
+	h.Endpoint(EnvStorage)
+	shardEndpoint(h, envCMEKKMS, EnvKMS)
+	j := storageClient(t, h)
+	sv := storageJSON(t, h)
+	ctx := h.Context()
+	_, src := storageCMEKKeysIn(t, h, j, "us-central1", "reloc-src", "k")
+	_, dst := storageCMEKKeysIn(t, h, j, "us-east1", "reloc-dst", "k")
+	name := h.Project() + "-relocmek"
+	b := j.Bucket(name)
+	if err := b.Create(ctx, h.Project(), &storage.BucketAttrs{Location: "US-CENTRAL1", Encryption: &storage.BucketEncryption{DefaultKMSKeyName: src[0]}}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { emptyAndDelete(ctx, b) })
+	if _, err := cmekWrite(h, b.Object("o"), "", "relocated"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sv.Buckets.Relocate(name, &storagev1.RelocateBucketRequest{DestinationLocation: "US-EAST1"}).Do(); httpCode(err) != http.StatusBadRequest {
+		t.Errorf("relocating a CMEK bucket with no destinationKmsKeyName = %v; want 400", err)
+	}
+	if _, err := sv.Buckets.Relocate(name, &storagev1.RelocateBucketRequest{DestinationLocation: "US-EAST1", DestinationKmsKeyName: src[0]}).Do(); httpCode(err) != http.StatusBadRequest {
+		t.Errorf("relocating with a key outside the destination = %v; want 400", err)
+	}
+	op, err := sv.Buckets.Relocate(name, &storagev1.RelocateBucketRequest{DestinationLocation: "US-EAST1", DestinationKmsKeyName: dst[0]}).Do()
+	if err != nil {
+		t.Fatalf("relocate with destinationKmsKeyName: %v", err)
+	}
+	if a, err := b.Object("o").Attrs(ctx); err != nil || a.KMSKeyName != dst[0]+"/cryptoKeyVersions/1" {
+		t.Errorf("object after relocate = %+v, %v; want kmsKeyName %s/cryptoKeyVersions/1", a, err, dst[0])
+	}
+	if got, err := cmekRead(h, b.Object("o")); err != nil || got != "relocated" {
+		t.Errorf("relocated object = %q, %v", got, err)
+	}
+	opID := lastSegment(op.Name)
+	deadline := time.Now().Add(60 * time.Second)
+	advanced := false
+	for {
+		o, err := sv.Operations.Get(name, opID).Do()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if o.Done {
+			break
+		}
+		if opMetadata(t, o)["finalizationState"] == "READY" && !advanced {
+			advanced = true
+			if err := sv.Operations.AdvanceRelocateBucket(name, opID, &storagev1.AdvanceRelocateBucketOperationRequest{}).Do(); err != nil {
+				t.Fatalf("advanceRelocateBucket: %v", err)
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("relocation not done: %s", o.Metadata)
+		}
+		time.Sleep(time.Second)
+	}
+	a, err := b.Attrs(ctx)
+	if err != nil || a.Encryption == nil || a.Encryption.DefaultKMSKeyName != dst[0] || a.Location != "US-EAST1" {
+		t.Errorf("bucket after relocation = %+v %+v, %v; want US-EAST1 with default key %s", a.Location, a.Encryption, err, dst[0])
 	}
 }
