@@ -111,6 +111,13 @@ const (
 	// #1913), served in the CLI process: each cluster it makes is a local
 	// kind cluster of its own. Opt-in, since every cluster costs disk.
 	ServiceGKE Service = "gke"
+	// ServiceCompute is the Compute Engine API's VPC networking
+	// (compute.googleapis.com, #1936): networks, subnetworks, firewall
+	// rules, routes, addresses and their operations, served in the CLI
+	// process. Opt-in: with it, Memorystore, Kubernetes Engine and Cloud
+	// SQL check their network fields against its networks and subnets, as
+	// Google does; without it they keep accepting any network.
+	ServiceCompute Service = "compute"
 )
 
 // AllServices lists the default services in a stable order, so startup
@@ -123,7 +130,7 @@ func AllServices() []Service {
 
 // OptionalServices lists the opt-in services, in a stable order.
 func OptionalServices() []Service {
-	return []Service{ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceCloudSQL, ServiceBigQuery, ServiceMemorystore, ServiceCloudSQLMySQL, ServiceScheduler, ServiceLogging, ServiceKMS, ServiceBackupDR, ServicePrivateCA, ServiceGKE}
+	return []Service{ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceCloudSQL, ServiceBigQuery, ServiceMemorystore, ServiceCloudSQLMySQL, ServiceScheduler, ServiceLogging, ServiceKMS, ServiceBackupDR, ServicePrivateCA, ServiceGKE, ServiceCompute}
 }
 
 // KnownServices lists every selectable service.
@@ -184,7 +191,7 @@ func (s Service) Persistence() Persistence {
 		// Key material is in Kubernetes Secrets, like Secret Manager's
 		// payloads, which the cluster keeps.
 		return PersistenceVolume
-	case ServiceStorage, ServiceTasks, ServiceSecrets, ServiceScheduler, ServiceBackupDR, ServicePrivateCA, ServiceGKE:
+	case ServiceStorage, ServiceTasks, ServiceSecrets, ServiceScheduler, ServiceBackupDR, ServicePrivateCA, ServiceGKE, ServiceCompute:
 		return PersistenceVolume
 	case ServiceRun:
 		// Workload definitions live in the Kubernetes API, which the cluster
@@ -339,6 +346,11 @@ type Endpoints struct {
 	// GKE is the host port of the Kubernetes Engine API
 	// (container.googleapis.com, #1913): gRPC and JSON on one port.
 	GKE int `json:"gke"`
+	// Compute is the host port of the Compute Engine API's VPC networking
+	// (compute.googleapis.com, #1936), JSON under /compute/v1/. With it
+	// enabled it also answers the Kubernetes Engine node pools' instance
+	// group managers, which the GKE port answers without it.
+	Compute int `json:"compute"`
 	// ONNX is the host port of the ONNX runner (#1711), which runs BigQuery
 	// ML's imported ONNX models for the BigQuery front, published to the
 	// cluster through cloudburrow-host. CloudBurrow's own API, not a
@@ -412,6 +424,7 @@ func (e *Endpoints) fields() []endpointField {
 		{"backupdr", &e.BackupDR},
 		{"privateca", &e.PrivateCA},
 		{"gke", &e.GKE},
+		{"compute", &e.Compute},
 		{"onnx", &e.ONNX},
 		{"tfconvert", &e.TFConvert},
 	}
@@ -483,6 +496,8 @@ func (e Endpoints) OptionalPort(s Service) int {
 		return e.PrivateCA
 	case ServiceGKE:
 		return e.GKE
+	case ServiceCompute:
+		return e.Compute
 	default:
 		return 0
 	}
@@ -806,6 +821,10 @@ func Default() Config {
 			// The Kubernetes Engine API (#1913): the next free port after the
 			// API Keys API's 9029.
 			GKE: 9030,
+			// The Compute Engine API (#1936): its own port, as
+			// compute.googleapis.com is its own API, the next free one
+			// after Kubernetes Engine's 9030.
+			Compute: 9031,
 			// OS-assigned. The port is not what enables local AI —
 			// LocalAI.ModelPath is. A configured port with no model binds
 			// nothing, so there is no endpoint answering every request with

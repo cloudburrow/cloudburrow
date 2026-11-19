@@ -178,7 +178,9 @@ compat_shard() {
       PROBE_TESTS="TestSecretManagerAcrossRestart TestTasksAcrossRestart TestSchedulerAcrossRestart TestStorageAcrossRestart"
       PROBE_VARS=SECRETS,TASKS,SCHEDULER,STORAGE ;;
     served)
-      SERVICES=kms,logging,privateca,gke
+      SERVICES=kms,logging,privateca,gke,compute
+      # The Compute Engine API's VPC networking (#1936), in process,
+      # beside Kubernetes Engine, whose cluster networks it checks.
       # The Kubernetes Engine API (#1913): its clusters are kind clusters
       # beside the instance's. Service Usage as GKE_SERVICEUSAGE, which
       # `gcloud container clusters create` asks whether
@@ -192,7 +194,7 @@ compat_shard() {
       # 38910752877: in storage gcloud had no logging override).
       # Cloud KMS Autokey's folder and project tests (#1568) make their
       # folder with it too.
-      TEST_VARS+=,KMS,LOGGING,LOGGING_RESOURCEMANAGER,PRIVATECA,GKE,GKE_SERVICEUSAGE
+      TEST_VARS+=,KMS,LOGGING,LOGGING_RESOURCEMANAGER,PRIVATECA,GKE,GKE_SERVICEUSAGE,COMPUTE
       # Cloud KMS (#418): a key with ENABLED, DISABLED and
       # DESTROY_SCHEDULED versions and a ciphertext.
       SETUP_TESTS="TestKMSRestartSetup"

@@ -150,8 +150,14 @@ var terraformEndpoints = []terraformEndpoint{
 	// it: a pool's node_count is its instance group managers' targetSize,
 	// which the Kubernetes Engine port answers for its own pools' groups
 	// (internal/service/gke/compute.go), and every other Compute call 501,
-	// so a google_compute_* resource never reaches Google either.
+	// so a google_compute_* resource never reaches Google either. With
+	// the compute service enabled the next row sets it instead.
 	{config.ServiceGKE, "compute_custom_endpoint", "GOOGLE_COMPUTE_CUSTOM_ENDPOINT", "/compute/v1/", true, ""},
+	// The Compute Engine API's VPC networking (#1936), on its own port,
+	// which also answers the node pools' instance group managers:
+	// google_compute_network and google_compute_subnetwork apply, plan
+	// clean, update and destroy in TestTerraformComputeNetworkAndSubnetwork.
+	{config.ServiceCompute, "compute_custom_endpoint", "GOOGLE_COMPUTE_CUSTOM_ENDPOINT", "/compute/v1/", true, ""},
 	// Firestore (#1331): google_firestore_document applies, plans clean,
 	// updates its fields and destroys in TestTerraformFirestoreDocument,
 	// over the documents REST API the emulator serves on its port. On the
@@ -277,6 +283,7 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 		config.ServiceBackupDR:   cfg.Endpoints.BackupDR,
 		config.ServicePrivateCA:  cfg.Endpoints.PrivateCA,
 		config.ServiceGKE:        cfg.Endpoints.GKE,
+		config.ServiceCompute:    cfg.Endpoints.Compute,
 	}
 	enabled := map[config.Service]bool{resourceManagerEndpoint: true, serviceUsageService: true, apiKeysService: true, sqlAdminEndpoint: sqlAdminEnabled(cfg),
 		memorystoreAdminEndpoint: serviceEnabled(cfg, config.ServiceMemorystore)}
@@ -289,6 +296,11 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 	var skipped []config.Service
 	for _, e := range terraformEndpoints {
 		if !enabled[e.service] {
+			continue
+		}
+		// Compute Engine's own port, when served, answers what the GKE
+		// port's stub does (#1936).
+		if e.service == config.ServiceGKE && e.attr == "compute_custom_endpoint" && enabled[config.ServiceCompute] && ports[config.ServiceCompute] != 0 {
 			continue
 		}
 		if !e.verified || ports[e.service] == 0 {

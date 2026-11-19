@@ -166,6 +166,11 @@ var gcloudVerified = []struct {
 	// TestGcloudContainerClusters drives clusters create, list, describe,
 	// get-credentials and delete.
 	{config.ServiceGKE, "container", "/", false, false},
+	// The Compute Engine API's VPC networking (#1936): gcloud compute
+	// takes the override with its version, and sends its calls in
+	// batches to /batch/compute/v1 beside it. TestGcloudComputeNetworks
+	// drives networks, subnets, firewall-rules and addresses.
+	{config.ServiceCompute, "compute", "/compute/v1/", false, false},
 	// Bigtable's admin REST API (#1440), on the Bigtable port beside gRPC;
 	// gcloud bigtable appends v2/. TestGcloudBigtableAppProfiles creates,
 	// lists, updates and deletes app profiles.
@@ -240,7 +245,7 @@ func gcloudConfiguration(cfg config.Config, adcPath string) string {
 		apiKeysService:         cfg.Endpoints.APIKeys,
 		config.ServiceBigtable: cfg.Endpoints.Bigtable, spannerRESTEndpoint: cfg.Endpoints.SpannerREST,
 		config.ServiceFirestore: cfg.Endpoints.Firestore, config.ServicePrivateCA: cfg.Endpoints.PrivateCA, config.ServiceDatastore: cfg.Endpoints.Datastore,
-		config.ServiceGKE: cfg.Endpoints.GKE}
+		config.ServiceGKE: cfg.Endpoints.GKE, config.ServiceCompute: cfg.Endpoints.Compute}
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n# Instance %q.\n", gcloudMarker, cfg.Name)
 	// should_prompt_to_enable_api is off because gcloud would otherwise ask

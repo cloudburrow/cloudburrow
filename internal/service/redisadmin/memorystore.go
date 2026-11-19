@@ -660,6 +660,11 @@ func (s *MemorystoreServer) CreateInstance(ctx context.Context, req *memorystore
 	if err != nil {
 		return nil, err
 	}
+	for _, n := range nets {
+		if err := s.api.checkPSCNetworks("psc_auto_connections.network", n.Network); err != nil {
+			return nil, err
+		}
+	}
 	if err := valkeyZoneDist(in.GetZoneDistributionConfig()).check(m[2]); err != nil {
 		return nil, err
 	}

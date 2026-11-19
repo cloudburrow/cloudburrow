@@ -481,6 +481,16 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 	// The Kubernetes Engine API (#1913): gcloud container clusters and
 	// node-pools, and Terraform's google_container_* through
 	// container_custom_endpoint.
+	// The Compute Engine API's VPC networking (#1936): gcloud compute
+	// networks, subnets, firewall-rules, routes and addresses, the Go
+	// client's REST endpoint, and Terraform's google_compute_*.
+	if computeEnabled(cfg) && cfg.Endpoints.Compute != 0 {
+		ce := addr(cfg.Endpoints.Compute)
+		vars = append(vars,
+			envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_COMPUTE", "http://" + ce + "/compute/v1/", "read by gcloud; gcloud compute networks, subnets, firewall-rules, routes and addresses"},
+			envVar{cliEndpointVar("compute"), ce,
+				"the Compute Engine API v1's VPC networking, JSON, plaintext; read by no client library: pass http://ADDR to option.WithEndpoint"})
+	}
 	if gkeEnabled(cfg) && cfg.Endpoints.GKE != 0 {
 		ge := addr(cfg.Endpoints.GKE)
 		vars = append(vars,
@@ -634,6 +644,7 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 		"backupdr":          &e.BackupDR,
 		"privateca":         &e.PrivateCA,
 		"gke":               &e.GKE,
+		"compute":           &e.Compute,
 		"onnx":              &e.ONNX,
 		"tfconvert":         &e.TFConvert,
 		// The ingress gateway, which kind publishes where `up` configured

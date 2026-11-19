@@ -111,6 +111,9 @@ type Server struct {
 	// was given for every SQL Server instance (#1916), nil for none;
 	// guarded by emu.
 	mssqlEULA *EULAAcceptance
+	// networks are the Compute Engine networks private IP settings are
+	// checked against (vpc.go, #1936), nil for none; guarded by emu.
+	networks func() Networks
 	// writes are the created instances, nil unless EnableInstanceWrites
 	// was called; emu guards them.
 	emu    sync.RWMutex

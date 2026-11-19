@@ -415,6 +415,19 @@ const ROUTES = [
     section: "AI and machine learning", product: "vertexai", productTitle: "Agent Platform" },
   ...AP_ROUTES.slice(AP_ROUTES.findIndex((r) => r.path === AP_PATHS.predict)),
 
+  // VPC network (#1936): Google's menu, at Google's paths: VPC networks
+  // (a network's page has its subnets, firewall rules and routes),
+  // Firewall, Routes and IP addresses, over the Compute Engine API's VPC
+  // networking in process.
+  { path: "/networking/networks/list", service: "vpc-networks", icon: "vpc", title: "VPC networks", kind: "VPC network",
+    section: "Networking", product: "vpc", productTitle: "VPC network" },
+  { path: "/networking/firewalls/list", service: "vpc-firewalls", icon: "vpc", title: "Firewall", kind: "Firewall rule",
+    section: "Networking", product: "vpc", productTitle: "VPC network" },
+  { path: "/networking/routes/list", service: "vpc-routes", icon: "vpc", title: "Routes", kind: "Route",
+    section: "Networking", product: "vpc", productTitle: "VPC network" },
+  { path: "/networking/addresses/list", service: "vpc-addresses", icon: "vpc", title: "IP addresses", kind: "IP address",
+    section: "Networking", product: "vpc", productTitle: "VPC network" },
+
   // Secret Manager (#1850): Google's menu, Secret Manager (the global
   // secrets), Regional secrets and Settings.
   { path: "/secrets", service: "secrets", title: "Secret Manager", navTitle: "Secret Manager", kind: "Secret",
@@ -706,6 +719,8 @@ const ICONS = {
   // Cloud KMS: a key inside a shield.
   kms:       '<path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6z"/><circle cx="10" cy="11" r="2"/><path d="M12 11h4M15 11v2"/>',
   // Certificate Authority Service: a certificate with a seal.
+  // VPC network: three connected nodes.
+  vpc: '<circle cx="12" cy="5" r="2.5"/><circle cx="5" cy="18" r="2.5"/><circle cx="19" cy="18" r="2.5"/><path d="M11 7.2L6.2 15.8M13 7.2l4.8 8.6M7.5 18h9"/>',
   privateca: '<rect x="3" y="4" width="18" height="12" rx="1"/><path d="M7 8h10M7 11h6"/><circle cx="17" cy="16" r="3"/><path d="M15.5 18.5L15 22l2-1 2 1-.5-3.5"/>',
   // BigQuery: a magnifier over a bar chart.
   bigquery:  '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.2 15.2L21 21"/><path d="M8 12.5v-2M10.5 12.5v-4M13 12.5v-3"/>',
@@ -783,6 +798,8 @@ const CATEGORY_ICONS = {
   // A person: who may do what.
   "IAM & Admin": '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
   // A wrench.
+  // A network: nodes joined by links.
+  "Networking": '<circle cx="12" cy="5" r="2.5"/><circle cx="5" cy="18" r="2.5"/><circle cx="19" cy="18" r="2.5"/><path d="M11 7.2L6.2 15.8M13 7.2l4.8 8.6M7.5 18h9"/>',
   "Management tools": '<path d="M14.5 6.5a4 4 0 0 0 5 5L21 13l-2 2-1.5-1.5a4 4 0 0 1-5-5L5 16v3h3l7.5-7.5"/>',
 };
 

@@ -55,6 +55,8 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 	// The Kubernetes Engine API (#1913): its clusters are on Kubernetes
 	// clusters, beside the instance's own.
 	config.ServiceGKE: {Providers: []string{"gkeclusters"}},
+	// VPC network (#1936): the Compute Engine API's networking.
+	config.ServiceCompute: {Providers: []string{"vpc-networks", "vpc-firewalls", "vpc-routes", "vpc-addresses"}},
 }
 
 // clusterScreens are the registry's screens that belong to no selectable
@@ -149,6 +151,7 @@ func coverageDeps(t *testing.T) consoleDeps {
 		secrets:   &secretsService{},
 		kms:       &kmsService{},
 		privateCA: &privateCAService{},
+		compute:   &computeService{},
 		scheduler: &schedulerService{},
 		logging:   &loggingService{},
 		// The APIs & Services page (#1352) reads the Service Usage server.

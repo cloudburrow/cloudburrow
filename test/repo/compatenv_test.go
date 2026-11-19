@@ -254,6 +254,7 @@ func compatEnvFixture(t *testing.T, edit func(env map[string]string)) (dir, envF
 		"CLOUDBURROW_BACKUPDR_ENDPOINT":           "127.0.0.1:9024",
 		"CLOUDBURROW_PRIVATECA_ENDPOINT":          "127.0.0.1:9028",
 		"CLOUDBURROW_GKE_ENDPOINT":                "127.0.0.1:9030",
+		"CLOUDBURROW_COMPUTE_ENDPOINT":            "127.0.0.1:9031",
 		"CLOUDBURROW_BIGQUERY_ENDPOINT":           "http://127.0.0.1:9014",
 		"CLOUDBURROW_BIGQUERY_STORAGE_ENDPOINT":   "127.0.0.1:9015",
 	}
@@ -367,6 +368,7 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"BACKUPDR":                 "127.0.0.1:9024",
 		"PRIVATECA":                "127.0.0.1:9028",
 		"GKE":                      "127.0.0.1:9030",
+		"COMPUTE":                  "127.0.0.1:9031",
 		"BIGQUERY":                 "http://127.0.0.1:9014",
 		"BIGQUERY_STORAGE":         "127.0.0.1:9015",
 		"BIGQUERY_PROJECT":         "ct-local",

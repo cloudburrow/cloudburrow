@@ -87,6 +87,27 @@ func TestTerraformGetsTheKubernetesEngineAPI(t *testing.T) {
 	}
 }
 
+// TestTerraformComputeEndpointFollowsTheComputeService (#1936): with gke
+// alone compute_custom_endpoint is the GKE port's instance group managers;
+// with compute it is the Compute Engine port, named once.
+func TestTerraformComputeEndpointFollowsTheComputeService(t *testing.T) {
+	for _, tc := range []struct {
+		services []config.Service
+		want     string
+	}{
+		{[]config.Service{config.ServiceGKE}, `compute_custom_endpoint = "http://127.0.0.1:9030/compute/v1/"`},
+		{[]config.Service{config.ServiceGKE, config.ServiceCompute}, `compute_custom_endpoint = "http://127.0.0.1:9031/compute/v1/"`},
+		{[]config.Service{config.ServiceCompute}, `compute_custom_endpoint = "http://127.0.0.1:9031/compute/v1/"`},
+	} {
+		cfg := config.Default()
+		cfg.Services = tc.services
+		body, _ := terraformProvider(cfg, false)
+		if !strings.Contains(body, tc.want) || strings.Count(body, "compute_custom_endpoint") != 1 {
+			t.Errorf("%v: want %s once:\n%s", tc.services, tc.want, body)
+		}
+	}
+}
+
 func TestTerraformArguments(t *testing.T) {
 	ours, theirs, bin, err := terraformArgs([]string{"--name", "x", "--binary", "tofu", "--", "-chdir=infra", "apply", "-auto-approve"})
 	if err != nil || strings.Join(ours, " ") != "--name x" || bin != "tofu" || strings.Join(theirs, " ") != "-chdir=infra apply -auto-approve" {

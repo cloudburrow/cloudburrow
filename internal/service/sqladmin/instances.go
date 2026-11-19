@@ -587,6 +587,9 @@ func (s *Server) insertInstance(r *http.Request, base, project string) (any, err
 	if b.Name == "" {
 		return nil, Errorf(http.StatusBadRequest, "Missing parameter: name.")
 	}
+	if err := s.checkPrivateNetwork(project, b.raw); err != nil {
+		return nil, err
+	}
 	if !instanceNameRE.MatchString(b.Name) || len(b.Name) > maxInstanceName {
 		return nil, Errorf(http.StatusBadRequest, "Invalid request: instance name %q must be lowercase letters, digits and hyphens, "+
 			"start with a letter, not end with a hyphen, and be at most %d characters in CloudBurrow.", b.Name, maxInstanceName)
@@ -817,6 +820,9 @@ func (s *Server) patchInstance(r *http.Request, base, project, name string, repl
 		return nil, err
 	}
 	if err := b.unsupported(); err != nil {
+		return nil, err
+	}
+	if err := s.checkPrivateNetwork(project, b.raw); err != nil {
 		return nil, err
 	}
 	upgrade := b.DatabaseVersion != "" && b.DatabaseVersion != c.spec.DatabaseVersion

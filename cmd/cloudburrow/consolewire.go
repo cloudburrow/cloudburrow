@@ -88,6 +88,8 @@ type consoleDeps struct {
 	privateCA *privateCAService
 	// gke is the Kubernetes Engine API (#1913), nil unless enabled.
 	gke *gkeService
+	// compute is the Compute Engine API (#1936), nil unless enabled.
+	compute *computeService
 	// sqlAdmin is the Cloud SQL Admin API, which restores Backup and DR
 	// backups; nil unless a Cloud SQL service is enabled.
 	sqlAdmin *sqladmin.Server
@@ -280,6 +282,13 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	// Certificate Authority Service (#1834) runs in this process too.
 	if enabled[config.ServicePrivateCA] && d.privateCA != nil {
 		providers = append(providers, privateCAProvider{svc: d.privateCA}, privateCATemplatesProvider{svc: d.privateCA})
+	}
+	// VPC network (#1936): the Compute Engine API's networks, subnets,
+	// firewall rules, routes and addresses, in this process.
+	if enabled[config.ServiceCompute] && d.compute != nil {
+		screen := computeScreen{svc: d.compute}
+		providers = append(providers, computeNetworksProvider{screen}, computeFirewallsProvider{screen},
+			computeRoutesProvider{screen}, computeAddressesProvider{screen})
 	}
 	if enabled[config.ServiceScheduler] && d.scheduler != nil {
 		providers = append(providers, schedulerProvider{svc: d.scheduler, faults: d.faults})
@@ -624,6 +633,7 @@ var serviceTitles = map[config.Service]string{
 	config.ServiceBackupDR:      "Backup and DR",
 	config.ServicePrivateCA:     "Certificate Authority Service",
 	config.ServiceGKE:           "Kubernetes Engine",
+	config.ServiceCompute:       "VPC network",
 }
 
 func serviceTitle(s config.Service) string {

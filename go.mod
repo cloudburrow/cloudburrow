@@ -13,6 +13,7 @@ require (
 	cloud.google.com/go/cloudbuild v1.35.0
 	cloud.google.com/go/cloudsqlconn v1.24.0
 	cloud.google.com/go/cloudtasks v1.20.0
+	cloud.google.com/go/compute v1.62.0
 	cloud.google.com/go/compute/metadata v0.10.0
 	cloud.google.com/go/container v1.56.1
 	cloud.google.com/go/containeranalysis v0.21.1

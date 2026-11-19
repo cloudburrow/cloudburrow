@@ -90,6 +90,7 @@ var targetEndpoints = []targetEndpoint{
 	{"BACKUPDR", envKey("CLOUDBURROW_BACKUPDR_ENDPOINT")},
 	{"PRIVATECA", envKey("CLOUDBURROW_PRIVATECA_ENDPOINT")},
 	{"GKE", envKey("CLOUDBURROW_GKE_ENDPOINT")},
+	{"COMPUTE", envKey("CLOUDBURROW_COMPUTE_ENDPOINT")},
 }
 
 // normalizeEndpoint reduces an address to host:port, so that
@@ -229,6 +230,7 @@ var gcloudOverrides = []struct {
 	{"backupdr", []string{"BACKUPDR"}},
 	{"privateca", []string{"PRIVATECA"}},
 	{"container", []string{"GKE"}},
+	{"compute", []string{"COMPUTE"}},
 	// Bigtable's admin REST API, on the Bigtable front's port (#1440).
 	{"bigtableadmin", []string{"BIGTABLE"}},
 	// Spanner's admin REST API and the Firestore Admin API (#1461).

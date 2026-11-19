@@ -92,6 +92,8 @@ Flags:
     	Cloud SQL for PostgreSQL host port (0 = OS-assigned; default 9019)
   -port-cloudsql-mysql int
     	Cloud SQL for MySQL host port (0 = OS-assigned; default 9017)
+  -port-compute int
+    	Compute Engine API (VPC networking) host port (0 = OS-assigned; default 9031)
   -port-console int
     	host port for the web console (0 = OS-assigned)
   -port-control int
@@ -153,7 +155,7 @@ Flags:
   -seed-file string
     	seed document (the /admin/seed body) applied when up starts
   -services string
-    	comma-separated services to start (default storage,pubsub,tasks,run,secretmanager; opt-in: firestore,datastore,bigtable,spanner,cloudsql,bigquery,memorystore,cloudsql-mysql,scheduler,logging,kms,backupdr,privateca,gke)
+    	comma-separated services to start (default storage,pubsub,tasks,run,secretmanager; opt-in: firestore,datastore,bigtable,spanner,cloudsql,bigquery,memorystore,cloudsql-mysql,scheduler,logging,kms,backupdr,privateca,gke,compute)
   -shutdown-timeout duration
     	bounded time to drain on shutdown
   -state-dir string
