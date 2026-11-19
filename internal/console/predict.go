@@ -136,7 +136,7 @@ type PredictStatus struct {
 }
 
 // predictDeploy is the empty state's instruction.
-const predictDeploy = "Deploy a container that honours the Vertex AI custom prediction contract " +
+const predictDeploy = "Deploy a container that honours the Agent Platform (formerly Vertex AI) custom prediction contract " +
 	"as a Cloud Run service, with AIP_HTTP_PORT, AIP_HEALTH_ROUTE and AIP_PREDICT_ROUTE set in its " +
 	"environment: from Cloud Run's Deploy container here, or CreateService through the Cloud Run " +
 	"API. A service with no AIP_* variable is not a prediction endpoint and is not listed. " +
@@ -145,7 +145,7 @@ const predictDeploy = "Deploy a container that honours the Vertex AI custom pred
 // predictNotServed are the Vertex surfaces that are not implemented, named
 // on the screen rather than silently absent.
 var predictNotServed = []string{
-	"Vertex AI Endpoint and DeployedModel resources (the container is called directly), so no explanation " +
+	"Agent Platform Endpoint and DeployedModel resources (the container is called directly), so no explanation " +
 		"spec is stored on a deployed model: Explain sends it as explanation_spec_override",
 	"Explain with integrated gradients or XRAI attributions: Vertex supports them only for TensorFlow models " +
 		"served from a prebuilt TensorFlow container, and refuses them for a custom container, as the API here does " +

@@ -293,7 +293,7 @@ func TestNavigationNamesTheProductsBeingEmulated(t *testing.T) {
 			t.Errorf("the navigation does not name %q", product)
 		}
 	}
-	for _, product := range []string{"Vertex AI", "Kubernetes Engine", "Pub/Sub", "Cloud Run", "Cloud Storage", "Resource Manager"} {
+	for _, product := range []string{"Agent Platform", "Kubernetes Engine", "Pub/Sub", "Cloud Run", "Cloud Storage", "Resource Manager"} {
 		if !strings.Contains(js, `productTitle: "`+product+`"`) {
 			t.Errorf("the navigation does not name the product %q", product)
 		}
@@ -1855,7 +1855,7 @@ func TestEveryScreenOpensWithThePageHeader(t *testing.T) {
 	if strings.Contains(src, `text: "AI Playground"`) {
 		t.Error("the playground heading still disagrees with its route title")
 	}
-	if !strings.Contains(src, `const PLAYGROUND_TITLE = "Vertex AI Studio";`) {
+	if !strings.Contains(src, `const PLAYGROUND_TITLE = "Agent Studio";`) {
 		t.Error("the playground has no single definition of its own name")
 	}
 }

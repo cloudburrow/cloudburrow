@@ -106,8 +106,8 @@ func TestStudioReachesModelManagementAndTheEmbeddingView(t *testing.T) {
 	}
 	card := js[strings.Index(js, "async function playgroundModelsCard("):]
 	card = card[:strings.Index(card, "\n}\n")]
-	for _, want := range []string{`api("/api/ai/local-models")`, `href: "/ai/local-models"`,
-		`href: "/ai/embeddings"`, "LOCAL_MODEL_STATES[m.state]", `m.state === "downloading"`, "m.loaded"} {
+	for _, want := range []string{`api("/api/ai/local-models")`, `href: AP_PATHS.localModels`,
+		`href: AP_PATHS.embeddings`, "LOCAL_MODEL_STATES[m.state]", `m.state === "downloading"`, "m.loaded"} {
 		if !strings.Contains(card, want) {
 			t.Errorf("the Studio's local models card lacks %s", want)
 		}

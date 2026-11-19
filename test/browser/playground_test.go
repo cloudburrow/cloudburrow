@@ -81,7 +81,7 @@ func TestPlaygroundStreamsShowsProvenanceAndRecordsCancelled(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	p := openAt(t, strings.TrimPrefix(srv.URL, "http://"))
-	p.navigate("/ai/playground")
+	p.navigate("/agent-platform/studio")
 	p.waitFor(`document.querySelector("#pg-output") !== null && document.querySelector("#pg-prompt") !== null`)
 	// The shell's project picker asks for /api/resources/projects, which a
 	// console with no providers answers 404: expected here.

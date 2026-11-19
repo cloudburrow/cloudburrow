@@ -3446,7 +3446,7 @@ func eventsProvider(kubeconfig string) kubeProvider {
 type aiProvider struct{}
 
 func (aiProvider) ID() string    { return "ai" }
-func (aiProvider) Title() string { return "Vertex AI Model Garden" }
+func (aiProvider) Title() string { return "Agent Platform local model catalogue" }
 
 func (aiProvider) List(context.Context, string) (console.Listing, error) {
 	models := localai.Models()
@@ -3503,7 +3503,7 @@ func modelStatus(m localai.Model) (status, detail string) {
 		if ok, why := m.Runnable(); !ok {
 			return "Unavailable", why
 		}
-		return "Available", "runs on ONNX Runtime with up -local-ai-embeddings (Vertex AI → Embeddings); " +
+		return "Available", "runs on ONNX Runtime with up -local-ai-embeddings (Agent Platform → Studio → Embeddings); " +
 			"a COMMUNITY conversion, NOT an official Google artifact"
 	case m.Runtime == "" && m.Modality == localai.ModalityEmbedding:
 		// The embedding runtime exists and builds; what is missing is a model

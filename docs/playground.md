@@ -108,16 +108,16 @@ request refuses rather than producing anything.
 
 ## 7. Not done
 
-- **Model download / load / unload on this screen.** They are on Vertex AI → **Local
+- **Model download / load / unload on this screen.** They are on Agent Platform → **Local
   models** (#1306): this screen lists each pinned or served model's state — not downloaded,
   downloading with its progress, downloaded, loaded — and links there (#1396), rather than
   repeating the download's size confirmation here. The same operations are
   `/admin/local-models` on the control port, with the admin token ([embeddings.md](embeddings.md)).
-- **An embedding view on this screen.** It is Vertex AI → **Embeddings** (#1305), linked from
+- **An embedding view on this screen.** It is Agent Platform → **Embeddings** (#1305), linked from
   this screen's Local models card when embeddings are served: each vector's dimension, first
   values, token count and `truncated` flag as the API returns them, and the pairwise cosine
   similarity (#1396).
-- **Prediction on this screen.** Custom prediction is its own page, Vertex AI → **Online
+- **Prediction on this screen.** Custom prediction is its own page, Agent Platform → **Online
   prediction** (§8), not a mode of the generation playground: the two call different things —
   this screen the generation API, that one a deployed contract container — and a single form for
   both would offer each one controls the other ignores.
@@ -132,7 +132,7 @@ request refuses rather than producing anything.
 
 ## 8. Online prediction (#869)
 
-Vertex AI → **Online prediction** (`/ai/predict`) sends a custom prediction request to a
+Agent Platform → **Online prediction** (`/agent-platform/online-prediction/endpoints`) sends a custom prediction request to a
 container CloudBurrow actually runs, and shows what came back. What CloudBurrow serves for
 prediction is the **serving contract** ([prediction.md](prediction.md)): a container reading
 `AIP_HTTP_PORT`, `AIP_HEALTH_ROUTE` and `AIP_PREDICT_ROUTE`, deployed as a Cloud Run service

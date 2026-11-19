@@ -1086,6 +1086,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/ai/embeddings", s.handleEmbeddingsStatus)
 	mux.HandleFunc("POST /api/ai/embeddings", s.handleEmbeddingsPredict)
 	mux.HandleFunc("GET /api/ai/local-models", s.handleLocalModels)
+	mux.HandleFunc("GET /api/ai/model-garden", s.handleModelGarden)
+	mux.HandleFunc("GET /api/ai/agent-garden", s.handleAgentGarden)
 	mux.HandleFunc("POST /api/ai/local-models/{id}/{action}", s.handleLocalModelAction)
 	mux.HandleFunc("GET /api/ai/predict", s.handlePredictStatus)
 	mux.HandleFunc("POST /api/ai/predict", s.handlePredict)
@@ -1124,6 +1126,15 @@ func (s *Server) Handler() http.Handler {
 		// the path.
 		if isAsset(r.URL.Path) {
 			files.ServeHTTP(w, r)
+			return
+		}
+		// Vertex AI's pages moved when Google renamed it Agent Platform
+		// (#1839); an address saved before then still lands on its page.
+		if to, ok := RenamedAIPath(r.URL.Path); ok {
+			if r.URL.RawQuery != "" {
+				to += "?" + r.URL.RawQuery
+			}
+			http.Redirect(w, r, to, http.StatusMovedPermanently)
 			return
 		}
 		s.serveShell(w, r)
