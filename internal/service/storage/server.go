@@ -353,6 +353,10 @@ func (s *Server) serveJSON(w http.ResponseWriter, r *http.Request, rest string, 
 	// objects.watchAll and channels.stop are no longer in the discovery
 	// document (channels.go).
 	if !upload && r.Method == http.MethodPost && watchAllRE.MatchString(rest) {
+		if err := s.authorizeJSON(r, "storage.objects.watchAll", jsonPrefix, rest); err != nil {
+			writeError(w, err)
+			return
+		}
 		s.objectsWatchAll(w, r)
 		return
 	}
@@ -362,6 +366,10 @@ func (s *Server) serveJSON(w http.ResponseWriter, r *http.Request, rest string, 
 	}
 	// Nor is anywhereCaches.pause since revision 20261107 (anywherecache.go).
 	if !upload && r.Method == http.MethodPost && anywhereCachesPauseRE.MatchString(rest) {
+		if err := s.authorizeJSON(r, "storage.anywhereCaches.pause", jsonPrefix, rest); err != nil {
+			writeError(w, err)
+			return
+		}
 		s.anywhereCachesState(cachePaused, cacheRunning)(w, r)
 		return
 	}

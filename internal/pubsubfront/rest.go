@@ -84,6 +84,12 @@ func (f *Front) serveREST(w http.ResponseWriter, r *http.Request, next http.Hand
 		writeRESTError(w, err)
 		return
 	}
+	// IAM enforcement (#1887), as over gRPC (restenforce.go).
+	r = withBearer(r)
+	if err := f.restAuthorize(r); err != nil {
+		writeRESTError(w, err)
+		return
+	}
 	if kind, name := restMutationTarget(r.Method, r.URL.Path, r.URL.Query().Get("schemaId")); kind != "" {
 		// A request that changes a definition: the front keeps it as the
 		// emulator then holds it, before the answer goes (restore.go, #1608).

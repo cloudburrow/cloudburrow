@@ -6311,6 +6311,7 @@
         "method": "google.pubsub.v1.Publisher/DetachSubscription",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcementpubsub1887_test.go:41 TestIAMEnforcementPubSubRESTAndSchemas",
           "test/compat/pubsubadmin_test.go:234 TestPubSubDetachSubscription",
           "test/compat/pubsubdetached_test.go:33 TestPubSubDetachedSubscriptionCalls",
           "test/compat/pubsubprotobuf_test.go:260 TestGcloudPubSubDetachAndProtobufSchemas",
@@ -6399,6 +6400,7 @@
         "method": "google.pubsub.v1.SchemaService/CreateSchema",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcementpubsub1887_test.go:41 TestIAMEnforcementPubSubRESTAndSchemas",
           "test/compat/pubsubadmin_test.go:320 TestPubSubSchemaService",
           "test/compat/pubsubfollowups_test.go:326 TestPubSubStateSaveAndLoad",
           "test/compat/pubsubiam_test.go:269 TestTerraformPubSubIAM",
@@ -6414,6 +6416,7 @@
         "method": "google.pubsub.v1.SchemaService/DeleteSchema",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcementpubsub1887_test.go:41 TestIAMEnforcementPubSubRESTAndSchemas",
           "test/compat/pubsubadmin_test.go:320 TestPubSubSchemaService",
           "test/compat/pubsubiam_test.go:269 TestTerraformPubSubIAM",
           "test/compat/pubsubprotobuf_test.go:260 TestGcloudPubSubDetachAndProtobufSchemas",
@@ -6434,6 +6437,7 @@
         "method": "google.pubsub.v1.SchemaService/GetSchema",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcementpubsub1887_test.go:41 TestIAMEnforcementPubSubRESTAndSchemas",
           "test/compat/pubsubadmin_test.go:320 TestPubSubSchemaService",
           "test/compat/pubsubiam_test.go:269 TestTerraformPubSubIAM",
           "test/compat/pubsubprotobuf_test.go:260 TestGcloudPubSubDetachAndProtobufSchemas",
@@ -6490,6 +6494,7 @@
         "method": "google.pubsub.v1.SchemaService/ValidateSchema",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcementpubsub1887_test.go:41 TestIAMEnforcementPubSubRESTAndSchemas",
           "test/compat/pubsubadmin_test.go:320 TestPubSubSchemaService",
           "test/compat/pubsubprotobuf_test.go:260 TestGcloudPubSubDetachAndProtobufSchemas",
           "test/compat/pubsubprotobuf_test.go:38 TestPubSubProtobufSchemaService"
@@ -7033,7 +7038,8 @@
         "method": "storage.buckets.getStorageLayout",
         "status": "Verified",
         "tests": [
-          "test/compat/gcloudstorage_test.go:163 TestGcloudStorageParallelCompositeUpload"
+          "test/compat/gcloudstorage_test.go:163 TestGcloudStorageParallelCompositeUpload",
+          "test/compat/iamenforcementstorage1887_test.go:92 TestIAMEnforcementStorageSignersAndBatch"
         ]
       },
       {
@@ -7805,6 +7811,7 @@
         "method": "storage.projects.serviceAccount.get",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcementstorage1887_test.go:92 TestIAMEnforcementStorageSignersAndBatch",
           "test/compat/storagehmac_test.go:33 TestStorageHMACKeyLifecycle",
           "test/compat/terraform_batch10_test.go:164 TestTerraformDataSourcesBatch10"
         ]

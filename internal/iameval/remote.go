@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/cloudburrow/cloudburrow/internal/iamcheck"
 )
@@ -34,6 +35,12 @@ func (e *Enforcer) CheckRemote(in iamcheck.Request) iamcheck.Decision {
 	out := iamcheck.Decision{Held: []string{}}
 	var c Caller
 	switch {
+	case in.Signer != "":
+		// The server verified the signature; the signer is checked.
+		c = Caller{Email: strings.ToLower(in.Signer)}
+		if e.OwnerEmail != "" && strings.EqualFold(in.Signer, e.OwnerEmail) {
+			c.Owner = true
+		}
 	case in.Bearer != "" && e.CallerOf != nil:
 		c = e.CallerOf(in.Bearer)
 	case in.Bearer != "":
@@ -60,6 +67,9 @@ func (e *Enforcer) CheckRemote(in iamcheck.Request) iamcheck.Decision {
 	req := Request{Email: email, Resource: in.Resource, Type: in.Type, Service: in.Service, Project: project, Time: e.now()}
 	for _, p := range in.Own {
 		req.Own = append(req.Own, Attached{Resource: p.Resource, Policy: p.Policy})
+	}
+	if project != "" {
+		out.Teams = e.Eval.ProjectTeams(project, email, req.Time)
 	}
 	for _, p := range in.Permissions {
 		req.Permission = p

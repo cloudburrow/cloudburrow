@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"html"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -58,13 +59,19 @@ const runForbiddenPage = `<html><head>
 </body></html>
 `
 
+// runUnauthorizedPage carries the 401's text as Google's Cloud Run
+// troubleshooting page gives it ("HTTP 401: The request was not authorized
+// to invoke this service", https://docs.cloud.google.com/run/docs/troubleshooting,
+// read 2026-11-19, #1887) in the 403 page's frame; the frame itself is
+// UNVERIFIED, as that page shows only the text (re-read 2026-11-19:
+// https://docs.cloud.google.com/run/docs/troubleshooting).
 const runUnauthorizedPage = `<html><head>
 <meta http-equiv="content-type" content="text/html;charset=utf-8">
 <title>401 Unauthorized</title>
 </head>
 <body text=#000000 bgcolor=#ffffff>
 <h1>Error: Unauthorized</h1>
-<h2>Your client does not have permission to the requested URL <code>%s</code>.</h2>
+<h2>The request was not authorized to invoke this service.</h2>
 <h2></h2>
 </body></html>
 `
@@ -115,7 +122,11 @@ func (a runInvokeAuthz) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func writeRunPage(w http.ResponseWriter, code int, page, path string) {
 	w.Header().Set("Content-Type", "text/html; charset=UTF-8")
 	w.WriteHeader(code)
-	_, _ = fmt.Fprintf(w, page, html.EscapeString(path))
+	if strings.Contains(page, "%s") {
+		_, _ = fmt.Fprintf(w, page, html.EscapeString(path))
+		return
+	}
+	_, _ = io.WriteString(w, page)
 }
 
 // sameService is whether an ID token's audience is a URL of the service

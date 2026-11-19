@@ -25,7 +25,10 @@ import (
 // organization's; a create or a list is checked on the project. A denial is
 // PERMISSION_DENIED "User not authorized to perform this action.", Google's
 // Pub/Sub text; a bearer token the instance did not mint is UNAUTHENTICATED.
-// DetachSubscription and the schema service are not checked.
+// DetachSubscription is checked on the topic the subscription is attached
+// to, and the schema service's methods on the schema or its project, as
+// that page names them (#1887); the REST transport's calls are checked as
+// their gRPC methods (restAuthorize).
 
 // psCheck is one permission a method needs, on the resource its request
 // field names (on that name's project when project is set).
@@ -34,33 +37,48 @@ type psCheck struct {
 	project     bool
 }
 
+// onTopic are the methods whose subscription field is checked on the
+// topic the subscription is attached to.
+var onTopic = map[string]bool{publisher + "DetachSubscription": true}
+
 var psChecks = map[string][]psCheck{
-	publisher + "CreateTopic":            {{"pubsub.topics.create", "name", true}},
-	publisher + "UpdateTopic":            {{"pubsub.topics.update", "topic.name", false}},
-	publisher + "Publish":                {{"pubsub.topics.publish", "topic", false}},
-	publisher + "GetTopic":               {{"pubsub.topics.get", "topic", false}},
-	publisher + "ListTopics":             {{"pubsub.topics.list", "project", true}},
-	publisher + "ListTopicSubscriptions": {{"pubsub.topics.get", "topic", false}},
-	publisher + "ListTopicSnapshots":     {{"pubsub.topics.get", "topic", false}},
-	publisher + "DeleteTopic":            {{"pubsub.topics.delete", "topic", false}},
-	subscriber + "CreateSubscription":    {{"pubsub.subscriptions.create", "name", true}, {"pubsub.topics.attachSubscription", "topic", false}},
-	subscriber + "GetSubscription":       {{"pubsub.subscriptions.get", "subscription", false}},
-	subscriber + "UpdateSubscription":    {{"pubsub.subscriptions.update", "subscription.name", false}},
-	subscriber + "ListSubscriptions":     {{"pubsub.subscriptions.list", "project", true}},
-	subscriber + "DeleteSubscription":    {{"pubsub.subscriptions.delete", "subscription", false}},
-	subscriber + "ModifyAckDeadline":     {{"pubsub.subscriptions.consume", "subscription", false}},
-	subscriber + "Acknowledge":           {{"pubsub.subscriptions.consume", "subscription", false}},
-	subscriber + "Pull":                  {{"pubsub.subscriptions.consume", "subscription", false}},
-	subscriber + "StreamingPull":         {{"pubsub.subscriptions.consume", "subscription", false}},
-	subscriber + "ModifyPushConfig":      {{"pubsub.subscriptions.update", "subscription", false}},
-	subscriber + "GetSnapshot":           {{"pubsub.snapshots.get", "snapshot", false}},
-	subscriber + "ListSnapshots":         {{"pubsub.snapshots.list", "project", true}},
-	subscriber + "CreateSnapshot":        {{"pubsub.snapshots.create", "name", true}, {"pubsub.subscriptions.consume", "subscription", false}},
-	subscriber + "UpdateSnapshot":        {{"pubsub.snapshots.update", "snapshot.name", false}},
-	subscriber + "DeleteSnapshot":        {{"pubsub.snapshots.delete", "snapshot", false}},
-	subscriber + "Seek":                  {{"pubsub.subscriptions.consume", "subscription", false}, {"pubsub.snapshots.seek", "snapshot", false}},
-	iamService + "GetIamPolicy":          {{"getIamPolicy", "resource", false}},
-	iamService + "SetIamPolicy":          {{"setIamPolicy", "resource", false}},
+	publisher + "CreateTopic":              {{"pubsub.topics.create", "name", true}},
+	publisher + "UpdateTopic":              {{"pubsub.topics.update", "topic.name", false}},
+	publisher + "Publish":                  {{"pubsub.topics.publish", "topic", false}},
+	publisher + "GetTopic":                 {{"pubsub.topics.get", "topic", false}},
+	publisher + "ListTopics":               {{"pubsub.topics.list", "project", true}},
+	publisher + "ListTopicSubscriptions":   {{"pubsub.topics.get", "topic", false}},
+	publisher + "ListTopicSnapshots":       {{"pubsub.topics.get", "topic", false}},
+	publisher + "DeleteTopic":              {{"pubsub.topics.delete", "topic", false}},
+	subscriber + "CreateSubscription":      {{"pubsub.subscriptions.create", "name", true}, {"pubsub.topics.attachSubscription", "topic", false}},
+	subscriber + "GetSubscription":         {{"pubsub.subscriptions.get", "subscription", false}},
+	subscriber + "UpdateSubscription":      {{"pubsub.subscriptions.update", "subscription.name", false}},
+	subscriber + "ListSubscriptions":       {{"pubsub.subscriptions.list", "project", true}},
+	subscriber + "DeleteSubscription":      {{"pubsub.subscriptions.delete", "subscription", false}},
+	subscriber + "ModifyAckDeadline":       {{"pubsub.subscriptions.consume", "subscription", false}},
+	subscriber + "Acknowledge":             {{"pubsub.subscriptions.consume", "subscription", false}},
+	subscriber + "Pull":                    {{"pubsub.subscriptions.consume", "subscription", false}},
+	subscriber + "StreamingPull":           {{"pubsub.subscriptions.consume", "subscription", false}},
+	subscriber + "ModifyPushConfig":        {{"pubsub.subscriptions.update", "subscription", false}},
+	subscriber + "GetSnapshot":             {{"pubsub.snapshots.get", "snapshot", false}},
+	subscriber + "ListSnapshots":           {{"pubsub.snapshots.list", "project", true}},
+	subscriber + "CreateSnapshot":          {{"pubsub.snapshots.create", "name", true}, {"pubsub.subscriptions.consume", "subscription", false}},
+	subscriber + "UpdateSnapshot":          {{"pubsub.snapshots.update", "snapshot.name", false}},
+	subscriber + "DeleteSnapshot":          {{"pubsub.snapshots.delete", "snapshot", false}},
+	subscriber + "Seek":                    {{"pubsub.subscriptions.consume", "subscription", false}, {"pubsub.snapshots.seek", "snapshot", false}},
+	publisher + "DetachSubscription":       {{"pubsub.topics.detachSubscription", "subscription", false}},
+	schemaService + "CreateSchema":         {{"pubsub.schemas.create", "parent", true}},
+	schemaService + "GetSchema":            {{"pubsub.schemas.get", "name", false}},
+	schemaService + "ListSchemas":          {{"pubsub.schemas.list", "parent", true}},
+	schemaService + "ListSchemaRevisions":  {{"pubsub.schemas.listRevisions", "name", false}},
+	schemaService + "CommitSchema":         {{"pubsub.schemas.commit", "name", false}},
+	schemaService + "RollbackSchema":       {{"pubsub.schemas.rollback", "name", false}},
+	schemaService + "DeleteSchemaRevision": {{"pubsub.schemas.delete", "name", false}},
+	schemaService + "DeleteSchema":         {{"pubsub.schemas.delete", "name", false}},
+	schemaService + "ValidateSchema":       {{"pubsub.schemas.validate", "parent", true}},
+	schemaService + "ValidateMessage":      {{"pubsub.schemas.validate", "parent", true}},
+	iamService + "GetIamPolicy":            {{"getIamPolicy", "resource", false}},
+	iamService + "SetIamPolicy":            {{"setIamPolicy", "resource", false}},
 }
 
 // denied is Pub/Sub's refusal.
@@ -179,8 +197,23 @@ func (f *Front) authorize(ctx context.Context, method string, fr frame) error {
 	}
 	for _, c := range checks {
 		name := stringField(m, c.field)
+		if i := strings.IndexByte(name, '@'); i > 0 {
+			// A schema revision, projects/p/schemas/s@rev: the schema's.
+			name = name[:i]
+		}
 		if name == "" {
 			continue
+		}
+		if onTopic[method] {
+			if _, gone := f.detachedSub(name); gone {
+				continue
+			}
+			sub, err := f.subscription(ctx, name)
+			if err != nil {
+				// The method answers NOT_FOUND itself.
+				continue
+			}
+			name = sub.GetTopic()
 		}
 		perm := c.perm
 		if !strings.Contains(perm, ".") {

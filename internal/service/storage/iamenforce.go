@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/cloudburrow/cloudburrow/internal/iamcheck"
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
+	"github.com/cloudburrow/cloudburrow/internal/resource"
 )
 
 // IAM enforcement (#1879). With `up --iam-enforcement=on` the server is
@@ -28,8 +30,12 @@ import (
 // 403 "<principal> does not have <permission> access to the Google Cloud
 // Storage object. Permission '<permission>' denied on resource (or it may
 // not exist).", as JSON, as XML AccessDenied with the text in Details, and
-// as gRPC PERMISSION_DENIED. A signed URL is served as its signature's
-// account was checked when it was verified (not enforced yet).
+// as gRPC PERMISSION_DENIED. A signed URL is checked as its signer (#1887):
+// the service account whose key signed it, or the HMAC key's account, as
+// Google checks the signing account holds the permission. The ACLs'
+// project-owners-, project-editors- and project-viewers- entities are the
+// principals holding the basic roles Owner, Editor and Viewer on the
+// project their number names (#1887).
 
 // target is what a request is checked on: a bucket, an object in it, or,
 // for buckets.list and insert and the HMAC keys, a project.
@@ -95,6 +101,9 @@ func (s *Server) authorize(r *http.Request, t target, all ...string) error {
 	if !s.enforcing() || len(all) == 0 {
 		return nil
 	}
+	if signer := s.signerOf(r); signer != "" {
+		return s.authorizeCaller(r, "", signer, t, all...)
+	}
 	bearer := iamcheck.Bearer(r.Header.Get("Authorization"))
 	if bearer == "" {
 		// No bearer token is the instance's own account, as the host
@@ -102,12 +111,14 @@ func (s *Server) authorize(r *http.Request, t target, all ...string) error {
 		// the instance's own components need no round trip.
 		return nil
 	}
-	return s.authorizeBearer(r, bearer, t, all...)
+	return s.authorizeCaller(r, bearer, "", t, all...)
 }
 
-func (s *Server) authorizeBearer(r *http.Request, bearer string, t target, all ...string) error {
+// authorizeCaller checks the caller of bearer, or signer, the account a
+// verified signed URL names.
+func (s *Server) authorizeCaller(r *http.Request, bearer, signer string, t target, all ...string) error {
 	req, b, hasBucket, objACL := s.checkRequest(t)
-	req.Bearer, req.Permissions = bearer, all
+	req.Bearer, req.Signer, req.Permissions = bearer, signer, all
 	d, err := s.iamCheck.Check(r.Context(), req)
 	if err != nil {
 		return errorf(http.StatusServiceUnavailable, "backendError", "IAM check unavailable: %v", err)
@@ -116,7 +127,7 @@ func (s *Server) authorizeBearer(r *http.Request, bearer string, t target, all .
 		return unauthenticated()
 	}
 	for _, p := range all {
-		if d.Holds(p) || (hasBucket && !uniformAccess(b) && aclGrants(p, t, b, objACL, d.Members)) {
+		if d.Holds(p) || (hasBucket && !uniformAccess(b) && aclGrants(p, t, b, objACL, aclMembers(d, b))) {
 			continue
 		}
 		return iamDenied(d.Email, p, t)
@@ -203,6 +214,8 @@ func aclGrants(permission string, t target, b bucketRecord, objACL []aclEntry, m
 	entities := map[string]bool{}
 	for _, m := range members {
 		switch {
+		case strings.HasPrefix(m, "project-"):
+			entities[m] = true
 		case m == "allusers":
 			entities["allusers"] = true
 		case m == "allauthenticatedusers":
@@ -248,6 +261,61 @@ func aclGrants(permission string, t target, b bucketRecord, objACL []aclEntry, m
 		return role == "OWNER"
 	}
 	return false
+}
+
+// aclMembers are d's members and its project teams' ACL entities on b's
+// project (project-owners-NUMBER, ...).
+func aclMembers(d iamcheck.Decision, b bucketRecord) []string {
+	out := append([]string(nil), d.Members...)
+	for _, team := range d.Teams {
+		out = append(out, "project-"+team+"-"+strconv.FormatInt(resource.ProjectNumber(b.Project), 10))
+	}
+	return out
+}
+
+// signerOf is the account a signed request's signature names, "" for an
+// unsigned request: V4's credential's account (an HMAC key's service
+// account for an HMAC signature), V2's GoogleAccessId. It is read only
+// after verifySignedURL accepted the signature.
+func (s *Server) signerOf(r *http.Request) string {
+	q := r.URL.Query()
+	if !isSigned(q) {
+		return ""
+	}
+	if id := q.Get("GoogleAccessId"); id != "" {
+		return id
+	}
+	for _, p := range []string{"X-Goog-", "X-Amz-"} {
+		cred := q.Get(p + "Credential")
+		if cred == "" {
+			continue
+		}
+		id, _, _ := strings.Cut(cred, "/")
+		if alg := q.Get(p + "Algorithm"); strings.Contains(alg, "HMAC") {
+			return s.hmacAccount(id)
+		}
+		return id
+	}
+	return ""
+}
+
+// hmacAccount is the service account of the HMAC key accessID.
+func (s *Server) hmacAccount(accessID string) string {
+	email := ""
+	_ = s.meta.View(func(tx Tx) error {
+		for _, key := range tx.List(hmacPrefix) {
+			if !strings.HasSuffix(key, "/"+accessID) {
+				continue
+			}
+			raw, _ := tx.Get(key)
+			var k hmacKey
+			if json.Unmarshal(raw, &k) == nil && k.AccessID == accessID {
+				email = k.Email
+			}
+		}
+		return nil
+	})
+	return email
 }
 
 func rank(role string) int {
@@ -307,6 +375,21 @@ var jsonPermissions = map[string][]string{
 	"storage.folders.rename":              {"storage.folders.rename"},
 	"storage.folders.delete":              {"storage.folders.delete"},
 	"storage.folders.deleteRecursive":     {"storage.folders.delete"},
+	// #1887: the rest of the built methods, as the same table names them
+	// (anywhereCaches.*, projects.serviceAccount.get, objects.watchAll),
+	// and getStorageLayout as its own reference does
+	// (https://docs.cloud.google.com/storage/docs/json_api/v1/buckets/getStorageLayout,
+	// read 2026-11-19).
+	"storage.buckets.getStorageLayout":    {"storage.objects.list"},
+	"storage.projects.serviceAccount.get": {"resourcemanager.projects.get"},
+	"storage.anywhereCaches.insert":       {"storage.anywhereCaches.create"},
+	"storage.anywhereCaches.get":          {"storage.anywhereCaches.get"},
+	"storage.anywhereCaches.list":         {"storage.anywhereCaches.list"},
+	"storage.anywhereCaches.update":       {"storage.anywhereCaches.update"},
+	"storage.anywhereCaches.pause":        {"storage.anywhereCaches.pause"},
+	"storage.anywhereCaches.resume":       {"storage.anywhereCaches.resume"},
+	"storage.anywhereCaches.disable":      {"storage.anywhereCaches.disable"},
+	"storage.objects.watchAll":            {"storage.buckets.update"},
 }
 
 var (
@@ -384,7 +467,7 @@ func (s *Server) authorizeJSON(r *http.Request, id, prefix, rest string) error {
 			return s.authorize(r, target{bucket: t.bucket, object: pathVar(r, prefix, 6)}, "storage.objects.create")
 		}
 		return nil
-	case "storage.objects.list", "storage.objects.insert", "storage.objects.bulkRestore", "storage.managedFolders.list",
+	case "storage.objects.list", "storage.objects.insert", "storage.objects.bulkRestore", "storage.objects.watchAll", "storage.managedFolders.list",
 		"storage.managedFolders.insert", "storage.folders.list", "storage.folders.insert", "storage.notifications.list",
 		"storage.notifications.insert":
 		t.object = ""
@@ -455,7 +538,7 @@ func xmlPermission(r *http.Request, bucket, object string) (target, string) {
 // authorizeXML checks an XML API request; it writes the denial and
 // returns false when the request may not run.
 func (s *Server) authorizeXML(w http.ResponseWriter, r *http.Request, bucket, object string) bool {
-	if !s.enforcing() || isSigned(r.URL.Query()) {
+	if !s.enforcing() {
 		return true
 	}
 	t, perm := xmlPermission(r, bucket, object)
@@ -511,7 +594,7 @@ func (s *Server) heldPermissions(r *http.Request, t target, perms []string) []st
 	}
 	held := []string{}
 	for _, p := range perms {
-		if d.Holds(p) || (hasBucket && !uniformAccess(b) && aclGrants(p, t, b, objACL, d.Members)) {
+		if d.Holds(p) || (hasBucket && !uniformAccess(b) && aclGrants(p, t, b, objACL, aclMembers(d, b))) {
 			held = append(held, p)
 		}
 	}

@@ -143,7 +143,8 @@ func TestIAMEnforcementRunInvoke(t *testing.T) {
 	idt := idTokenFor(t, h, p.email, svc.GetUri())
 	code, body = invokeAs(t, base, host, "/", idt)
 	forbidden("GET with an ID token of an account without run.invoker", code, body)
-	if code, body := invokeAs(t, base, host, "/", p.token); code != http.StatusUnauthorized {
+	if code, body := invokeAs(t, base, host, "/", p.token); code != http.StatusUnauthorized ||
+		!strings.Contains(body, "The request was not authorized to invoke this service.") {
 		t.Fatalf("GET with an access token = %d %q; want 401", code, body)
 	}
 	if code, body := invokeAs(t, base, host, "/", idTokenFor(t, h, p.email, "http://elsewhere.example")); code != http.StatusUnauthorized {

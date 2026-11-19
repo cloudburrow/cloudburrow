@@ -38,6 +38,10 @@ type Policy struct {
 type Request struct {
 	// Bearer is the request's bearer token, "" for none.
 	Bearer string `json:"bearer,omitempty"`
+	// Signer is the account whose signature the server verified (a
+	// Cloud Storage signed URL's, #1887), checked in the bearer's place:
+	// Google checks a signed URL against its signer's permissions.
+	Signer string `json:"signer,omitempty"`
 	// Anonymous makes a request with no bearer token allUsers alone,
 	// rather than the instance's own account (Cloud Run invoke).
 	Anonymous bool `json:"anonymous,omitempty"`
@@ -68,6 +72,11 @@ type Decision struct {
 	// group:, domain:, allAuthenticatedUsers, allUsers), lower-cased, for
 	// a server's ACLs.
 	Members []string `json:"members,omitempty"`
+	// Teams are the caller's project teams on Project, for Cloud
+	// Storage's project-owners-, project-editors- and project-viewers-
+	// ACL entities (#1887): "owners", "editors" and "viewers", for the
+	// basic roles Owner, Editor and Viewer it holds on the project.
+	Teams []string `json:"teams,omitempty"`
 }
 
 // Holds reports whether d grants permission.

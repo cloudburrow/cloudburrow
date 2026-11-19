@@ -222,6 +222,39 @@ func (e *Evaluator) Denies(req Request) bool {
 	return d
 }
 
+// ProjectTeams are the project teams email is on (#1887): "owners",
+// "editors" and "viewers" for the basic roles Owner, Editor and Viewer the
+// project's own policy grants it (unconditionally, or under a condition
+// that holds at at), which Cloud Storage's project- ACL entities name.
+func (e *Evaluator) ProjectTeams(project, email string, at time.Time) []string {
+	if e.Source == nil || project == "" {
+		return nil
+	}
+	pol := e.Source.Policy("projects/" + project)
+	if pol == nil && len(e.Source.Ancestry(project)) > 0 {
+		pol = e.Source.Policy(e.Source.Ancestry(project)[0])
+	}
+	if pol == nil {
+		return nil
+	}
+	members := e.members(email)
+	attrs := iamcond.Attributes{ResourceName: "projects/" + project, ResourceType: "cloudresourcemanager.googleapis.com/Project",
+		ResourceService: "cloudresourcemanager.googleapis.com", RequestTime: at}
+	team := map[string]string{"roles/owner": "owners", "roles/editor": "editors", "roles/viewer": "viewers"}
+	seen := map[string]bool{}
+	var out []string
+	for _, b := range pol.Bindings {
+		t, ok := team[b.Role]
+		if !ok || seen[t] || matchMember(b.Members, members) == "" || !b.Grants(attrs) {
+			continue
+		}
+		seen[t] = true
+		out = append(out, t)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // Members are the policy members that name email: its own, its groups'
 // and domain's, allAuthenticatedUsers and allUsers; only allUsers for "".
 func (e *Evaluator) members(email string) map[string]bool {

@@ -32,7 +32,8 @@ package resourcemanager
 //     denialCondition may use resource tag functions only.
 //
 // The wording of the INVALID_ARGUMENT and NOT_FOUND messages is
-// UNVERIFIED: Google's pages do not quote them (docs read 2026-11-19).
+// UNVERIFIED: Google's pages do not quote them (re-read 2026-11-19:
+// https://docs.cloud.google.com/iam/docs/reference/rest/v2/policies).
 
 import (
 	"context"
