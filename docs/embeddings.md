@@ -472,3 +472,16 @@ docker run --rm -v "$PWD:/models" \
 > `UNIMPLEMENTED` (501): multichannel Microsoft ADPCM (no layout to verify: ffmpeg 9 decodes a
 > packet of several such blocks as one block), AAC Main and SSR, 960-sample frames, and
 > HE-AACv2's full parametric stereo (#1754).
+
+> **Update 2026-11-18 (#1651): 2- and 5-bit IMA ADPCM, and MP3 in a WAV.** 2- and 5-bit IMA
+> ADPCM WAVs (format 0x11, 16 samples in 4 bytes and 32 in 20 a channel) are decoded as ffmpeg 9's
+> `adpcm_ima_wav` decodes them, sample for sample (`internal/embedding/adpcm.go`; the fixtures were
+> written by a scratch encoder, since ffmpeg writes neither). A WAV of MP3 frames
+> (`WAVE_FORMAT_MPEGLAYER3`, as `ffmpeg -c:a libmp3lame -f wav` writes) is decoded whole, as
+> ffmpeg's wav demuxer passes every frame to its decoder (nothing trimmed: only the mp3 demuxer
+> reads an Info tag), within one or two 16-bit steps of ffmpeg 9 as the MP3 path is. Embedded
+> through the official client by
+> `TestEmbedContentEmbeds2And5BitADPCMAndMP3WAVsThroughThePredictionClient`. Still
+> `UNIMPLEMENTED` (501): multichannel Microsoft ADPCM, other non-PCM WAV formats (GSM 6.10,
+> G.726, MPEG Layer I or II), AAC Main and SSR, 960-sample frames, HE-AACv2's full parametric
+> stereo (#1754) and video frames over 8K UHD.

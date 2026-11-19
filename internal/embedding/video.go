@@ -56,7 +56,17 @@ const DefaultVideoFPS = 1.0
 
 // maxVideoPixels bounds a video's frame size: 8K UHD. Google documents no
 // frame size, so a larger one is ErrNotDecoded (UNIMPLEMENTED), not invalid.
+// The decoders take frames up to 16384 x 16384, the image limit (measured
+// for #1651: H.264 16384x2048, H.265 16384x8192, AV1 16384x8704, VP9
+// 8704x4352), but DecodeVideo holds every sampled frame at full size, up
+// to 120 of them, so larger frames wait for a pipeline that patches each
+// frame as it is decoded.
 const maxVideoPixels = 8192 * 4320
+
+// maxVideoSide is the widest or tallest frame a decoder reads before the
+// maxVideoPixels check: a frame over 8K UHD is then ErrNotDecoded, not a
+// decoder's refusal (a VP9 frame wider than 8192 was INVALID_ARGUMENT).
+const maxVideoSide = 16384
 
 // VideoOptions are a part's video_metadata.
 type VideoOptions struct {
@@ -511,7 +521,7 @@ func decodeH265(tr *videoTrack, from, stop int) (pics map[int]image.Image, err e
 		}
 	}()
 	d := hevc.Decoder{}
-	d.FrameSizeLimit(maxVideoPixels)
+	d.FrameSizeLimit(maxVideoSide * maxVideoSide)
 	var out []*hevc.Picture
 	feed := func(raw []byte, tag uint64) error {
 		nal, ok := hevc.ParseNAL(raw)
@@ -520,6 +530,11 @@ func decodeH265(tr *videoTrack, from, stop int) (pics map[int]image.Image, err e
 		}
 		nal.Tag = tag
 		ps, err := d.DecodeNAL(nal)
+		for _, p := range ps {
+			if p.Width*p.Height > maxVideoPixels {
+				return notDecodedf("the video is %dx%d; at most %d pixels a frame are decoded", p.Width, p.Height, maxVideoPixels)
+			}
+		}
 		out = append(out, ps...)
 		return err
 	}
@@ -535,11 +550,19 @@ func decodeH265(tr *videoTrack, from, stop int) (pics map[int]image.Image, err e
 		}
 		for _, n := range nals {
 			if err := feed(n, uint64(s)); err != nil {
+				if errors.Is(err, ErrNotDecoded) {
+					return nil, err
+				}
 				return nil, fmt.Errorf("decoding the H.265 video: %v", err)
 			}
 		}
 	}
 	out = append(out, d.Flush()...)
+	for _, p := range out {
+		if p.Width*p.Height > maxVideoPixels {
+			return nil, notDecodedf("the video is %dx%d; at most %d pixels a frame are decoded", p.Width, p.Height, maxVideoPixels)
+		}
+	}
 	pics = make(map[int]image.Image, len(out))
 	for _, p := range out {
 		if p.Corrupt {
@@ -581,7 +604,7 @@ func decodeVP9(tr *videoTrack, from, stop int) (pics map[int]image.Image, err er
 			pics, err = nil, fmt.Errorf("decoding the VP9 video: %v", r)
 		}
 	}()
-	d, err := govpx.NewVP9Decoder(govpx.VP9DecoderOptions{MaxWidth: 8192, MaxHeight: 8192})
+	d, err := govpx.NewVP9Decoder(govpx.VP9DecoderOptions{MaxWidth: maxVideoSide, MaxHeight: maxVideoSide})
 	if err != nil {
 		return nil, fmt.Errorf("decoding the VP9 video: %v", err)
 	}
@@ -678,7 +701,7 @@ func decodeAV1(tr *videoTrack, from, stop int) (pics map[int]image.Image, err er
 			pics, err = nil, fmt.Errorf("decoding the AV1 video: %v", r)
 		}
 	}()
-	d := &av1.Decoder{FrameSizeLimit: maxVideoPixels, FrameThreads: 1}
+	d := &av1.Decoder{FrameSizeLimit: maxVideoSide * maxVideoSide, FrameThreads: 1}
 	defer d.Flush()
 	// The sequence header av1C carries, ahead of the first temporal unit
 	// (a sync sample repeats it).
@@ -697,6 +720,12 @@ func decodeAV1(tr *videoTrack, from, stop int) (pics map[int]image.Image, err er
 			continue
 		}
 		p := ps[len(ps)-1]
+		if p.Width*p.Height > maxVideoPixels {
+			for _, q := range ps {
+				q.Release()
+			}
+			return nil, notDecodedf("the video is %dx%d; at most %d pixels a frame are decoded", p.Width, p.Height, maxVideoPixels)
+		}
 		img, err := av1Picture(p)
 		for _, q := range ps {
 			q.Release()

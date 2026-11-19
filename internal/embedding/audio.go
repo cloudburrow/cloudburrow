@@ -90,6 +90,10 @@ func DecodeAudio(mimeType string, data []byte) ([]float32, error) {
 	} else {
 		w, err := decodeWAV(data)
 		if err != nil {
+			var long *tooLongError
+			if errors.As(err, &long) {
+				return nil, err
+			}
 			if errors.Is(err, ErrNotDecoded) {
 				return nil, fmt.Errorf("the WAV file: %w", err)
 			}
@@ -128,6 +132,8 @@ const (
 	waveFloat = 3
 	waveALaw  = 6
 	waveMuLaw = 7
+	// waveMP3 is MPEG Layer III in a WAV (WAVE_FORMAT_MPEGLAYER3).
+	waveMP3 = 0x55
 )
 
 // waveSpeakers are WAVE_FORMAT_EXTENSIBLE's dwChannelMask bits, in order,
@@ -256,8 +262,8 @@ func g711(b byte, alaw bool) int {
 }
 
 // decodeWAV reads a RIFF WAVE file of integer PCM (1 to 32 bits), IEEE
-// float (32 or 64 bits) or (#1651) G.711 A-law or µ-law or IMA or Microsoft
-// ADPCM (adpcm.go), plain or
+// float (32 or 64 bits) or (#1651) G.711 A-law or µ-law, IMA or Microsoft
+// ADPCM (adpcm.go) or MP3 (WAVE_FORMAT_MPEGLAYER3), plain or
 // WAVE_FORMAT_EXTENSIBLE, of up to 8 channels (or as many as its channel
 // mask names).
 func decodeWAV(b []byte) (wav, error) {
@@ -322,6 +328,9 @@ func decodeWAV(b []byte) (wav, error) {
 	if rate < 8000 || rate > 192000 {
 		return wav{}, notDecodedf("a sample rate of %d Hz is not decoded; 8000 to 192000 Hz are", rate)
 	}
+	if format == waveMP3 {
+		return decodeWAVMP3(data)
+	}
 	if format == waveIMAADPCM || format == waveMSADPCM {
 		dec := decodeIMAADPCM
 		if format == waveMSADPCM {
@@ -349,7 +358,7 @@ func decodeWAV(b []byte) (wav, error) {
 	case format == waveFloat && (bits == 32 || bits == 64):
 	case (format == waveALaw || format == waveMuLaw) && bits == 8:
 	default:
-		return wav{}, notDecodedf("WAVE format %d with %d bits per sample is not decoded; integer PCM of 1 to 32 bits, float of 32 or 64 bits, 8-bit A-law and µ-law and 4-bit IMA and Microsoft ADPCM are", format, bits)
+		return wav{}, notDecodedf("WAVE format %d with %d bits per sample is not decoded; integer PCM of 1 to 32 bits, float of 32 or 64 bits, 8-bit A-law and µ-law, 2- to 5-bit IMA ADPCM, 4-bit Microsoft ADPCM and MP3 are", format, bits)
 	}
 	frame := width * int(channels)
 	n := len(data) / frame * int(channels)
@@ -375,6 +384,45 @@ func decodeWAV(b []byte) (wav, error) {
 		}
 	}
 	return wav{samples: out, channels: int(channels), rate: int(rate), layout: layout}, nil
+}
+
+// decodeWAVMP3 decodes a WAV's MPEG Layer III data chunk (#1651) as
+// ffmpeg's wav demuxer and mp3 decoder do: every frame decoded, nothing
+// trimmed (only the mp3 demuxer reads an Info tag's delay and padding),
+// at the stream's own rate and channel count.
+func decodeWAVMP3(data []byte) (wav, error) {
+	s, err := parseMP3Stream(data)
+	if err != nil {
+		return wav{}, fmt.Errorf("its MP3 data: %v", err)
+	}
+	pcm, rate, err := decodeMP3PCM(data)
+	if err != nil {
+		var long *tooLongError
+		if errors.As(err, &long) {
+			return wav{}, err
+		}
+		return wav{}, fmt.Errorf("its MP3 data: %v", err)
+	}
+	if rate < 8000 || rate > 48000 {
+		return wav{}, fmt.Errorf("its MP3 data has a sample rate of %d Hz", rate)
+	}
+	if len(pcm) < 2 {
+		return wav{}, errors.New("its MP3 data has no audio samples")
+	}
+	channels := 2
+	if s.mono {
+		channels = 1
+		mono := make([]float32, len(pcm)/2)
+		for i := range mono {
+			mono[i] = pcm[2*i]
+		}
+		pcm = mono
+	}
+	layout, err := wavLayout(channels, 0)
+	if err != nil {
+		return wav{}, err
+	}
+	return wav{samples: pcm, channels: channels, rate: rate, layout: layout}, nil
 }
 
 // MuLaw decodes one G.711 mu-law sample to [-1, 1].

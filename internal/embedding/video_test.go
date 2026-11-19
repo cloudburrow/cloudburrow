@@ -1,6 +1,7 @@
 package embedding
 
 import (
+	"errors"
 	"image"
 	"math"
 	"os"
@@ -195,5 +196,20 @@ func TestVideoFramesAndPrompt(t *testing.T) {
 	ip, err := PatchVideoFrame(image.NewRGBA(image.Rect(0, 0, 1280, 720)))
 	if err != nil || ip.SoftTokens > videoSoftTokens || ip.SoftTokens < videoSoftTokens-20 {
 		t.Errorf("a 720p frame is %d soft tokens (%v), want at most %d", ip.SoftTokens, err, videoSoftTokens)
+	}
+}
+
+// TestVideoOver8KIsNotDecoded (#1651): a valid video whose frames are over
+// 8K UHD is ErrNotDecoded (UNIMPLEMENTED) in every codec, naming its size;
+// a VP9 frame wider than 8192, and H.265 and AV1 frames over the decoders'
+// own limits, were invalid data (INVALID_ARGUMENT) before. One blue
+// 8704x4352 frame each, made with ffmpeg 9 (libx264, libx265, libvpx-vp9,
+// libsvtav1 -preset 12): testdata/over8k-*.mp4.
+func TestVideoOver8KIsNotDecoded(t *testing.T) {
+	for _, c := range []string{"h264", "h265", "vp9", "av1"} {
+		_, err := DecodeVideo("video/mp4", readTestdata(t, "over8k-"+c+".mp4"), VideoOptions{})
+		if !errors.Is(err, ErrNotDecoded) || !strings.Contains(err.Error(), "8704x4352") {
+			t.Errorf("%s: %v; want ErrNotDecoded naming 8704x4352", c, err)
+		}
 	}
 }

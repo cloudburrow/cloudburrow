@@ -43,9 +43,12 @@ func maxAbsDiff(t *testing.T, name string, got, want []float32) float64 {
 // small encoder made for the fixtures (scratch, not kept): a 1-second
 // signal of S1's kind, mono in 260-byte blocks (four bytes of padding
 // after 21 groups) and stereo in 512-byte blocks, wav-ima3.wav and
-// wav-ima3-st.wav; ffmpeg's decode (`-f f32le`) is the reference.
+// wav-ima3-st.wav; ffmpeg's decode (`-f f32le`) is the reference. 2- and
+// 5-bit IMA ADPCM (#1651) the same way, mono in 258- and 256-byte blocks
+// (2 and 12 bytes of padding) and stereo in 512-byte blocks:
+// wav-ima2.wav, wav-ima2-st.wav, wav-ima5.wav, wav-ima5-st.wav.
 func TestDecodeADPCMWAV(t *testing.T) {
-	for _, name := range []string{"wav-ima", "wav-ima-st", "wav-ms", "wav-ms-st", "wav-ima3", "wav-ima3-st"} {
+	for _, name := range []string{"wav-ima", "wav-ima-st", "wav-ms", "wav-ms-st", "wav-ima3", "wav-ima3-st", "wav-ima2", "wav-ima2-st", "wav-ima5", "wav-ima5-st"} {
 		w, err := decodeWAV(readTestdata(t, name+".wav"))
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
@@ -246,5 +249,45 @@ func TestDecodeMultichannelAACTracks(t *testing.T) {
 	t.Logf("5.1 HE-AAC: max %.2e from ffmpeg", d)
 	if d > 1e-3 {
 		t.Errorf("5.1 HE-AAC: %.2e from ffmpeg's decode, want at most 1e-3", d)
+	}
+}
+
+// TestDecodeMP3WAV (#1651) decodes MP3 in a WAV (WAVE_FORMAT_MPEGLAYER3) as
+// ffmpeg 9 does (`ffmpeg -i f.wav -f s16le`, testdata/*.ffmpeg.s16): every
+// frame, nothing trimmed, mono within one 16-bit step and joint stereo
+// within two a channel, as TestDecodeMPEG25MP3. Made with ffmpeg 9 (S1 and
+// S2 of TestDecodeADPCMWAV, S2 at 44.1 kHz):
+//
+//	ffmpeg -f lavfi -i "$S1" -c:a libmp3lame -b:a 32k -map_metadata -1 -fflags +bitexact -flags +bitexact -f wav wav-mp3.wav
+//	ffmpeg -f lavfi -i "$S2" -c:a libmp3lame -b:a 96k ... -f wav wav-mp3-st.wav
+func TestDecodeMP3WAV(t *testing.T) {
+	for _, c := range []struct {
+		file           string
+		rate, channels int
+		tol            float64
+	}{
+		{"wav-mp3", 16000, 1, 1},
+		{"wav-mp3-st", 44100, 2, 2},
+	} {
+		w, err := decodeWAV(readTestdata(t, c.file+".wav"))
+		if err != nil {
+			t.Fatalf("%s: %v", c.file, err)
+		}
+		ref := readTestdata(t, c.file+".ffmpeg.s16")
+		if w.rate != c.rate || w.channels != c.channels || len(w.samples) != len(ref)/2 {
+			t.Fatalf("%s: %d samples, %d channels at %d Hz; want ffmpeg's %d, %d at %d Hz",
+				c.file, len(w.samples), w.channels, w.rate, len(ref)/2, c.channels, c.rate)
+		}
+		var d float64
+		for i, v := range w.samples {
+			want := float64(int16(binary.LittleEndian.Uint16(ref[2*i:])))
+			d = max(d, math.Abs(math.Round(float64(v)*32768)-want))
+		}
+		if d > c.tol {
+			t.Errorf("%s: %v 16-bit steps from ffmpeg's decode, want at most %v", c.file, d, c.tol)
+		}
+		if _, err := DecodeAudio("audio/wav", readTestdata(t, c.file+".wav")); err != nil {
+			t.Errorf("%s: DecodeAudio: %v", c.file, err)
+		}
 	}
 }
