@@ -447,6 +447,9 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 		// instance serves the Cloud Logging API, so the page never offers a
 		// Delete log that the backend would refuse.
 		"logDelete": s.logDeleter != nil,
+		// Whether the instance serves Cloud Logging (#1842), so a resource's
+		// Logs tab can say its lines are the containers' own when it does not.
+		"cloudLogging": s.logViews != nil,
 	})
 }
 
