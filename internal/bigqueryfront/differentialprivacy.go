@@ -585,6 +585,14 @@ func dpParseItem(sql string, t []token, d []int) (it dpItem, msg string, unsuppo
 	for _, arg := range args {
 		if len(arg) >= 3 && arg[0].kind == tokWord && arg[1].punct("=") && arg[2].punct(">") {
 			opt := strings.ToLower(arg[0].text)
+			if opt == "report_format" && name != "PERCENTILE_CONT" {
+				// GoogleSQL documents report_format => 'JSON' | 'PROTO' for
+				// AVG, COUNT and SUM (aggregate-dp-functions, since
+				// 2026-10-20); BigQuery's reference (re-read 2026-11-18)
+				// lists neither the argument nor a JSON or PROTO return
+				// type (#1589).
+				return it, "the report_format argument of " + name + ", which GoogleSQL documents but BigQuery's reference does not", true
+			}
 			if len(arg) < 4 {
 				return it, "Syntax error: expected (lower_bound, upper_bound) after " + opt, false
 			}
