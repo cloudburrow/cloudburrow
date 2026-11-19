@@ -157,6 +157,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/k8s/` | The one kubectl Runner (#599): kubeconfig, context and namespace fixed at construction, typed not-found and forbidden errors, the ownership labels, long-running port-forwards, streamed exec and log following, and an interactive exec on a pseudo-terminal for the console's terminal (#781). Every kubectl CloudBurrow runs outside `internal/cluster` goes through it: Secret Manager, Cloud KMS, the Cloud Run adapter, `internal/netfwd`, `internal/images`, `internal/components`, and in `cmd/cloudburrow` the console's reads and log follower, `logs`, `diagnose`, the Cloud SQL snapshots and the cluster-host Service; and `internal/terminal`. |
 | `internal/lifecycle/` | Startup ordering, readiness, bounded shutdown, ownership of background workers, and the narrow interfaces by which one service reaches another. |
 | `internal/localai/` | Acquisition of local AI model artifacts, kept apart from their execution. |
+| `internal/hfmodels/` | Hugging Face model downloads for Model Garden's Hugging Face section (#1840): model info (licence, gated status, revision, files), a free-disk floor, SHA-256-checked download with progress, delete. |
 | `internal/localhost/` | Dials any name under `.localhost` on loopback without a DNS lookup, for the dispatchers the CLI runs (#714). |
 | `internal/locations/` | The `google.cloud.location.Locations` mixin Cloud KMS and Cloud Scheduler serve (#1237, #1291). |
 | `internal/lro/` | Long-running operations: pending, completed and failed. |

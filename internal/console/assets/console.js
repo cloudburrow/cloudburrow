@@ -9094,6 +9094,7 @@ let GARDEN_POLL = null;
 
 function stopGardenPoll() {
   if (GARDEN_POLL) { clearTimeout(GARDEN_POLL); GARDEN_POLL = null; }
+  if (HF_POLL) { clearTimeout(HF_POLL); HF_POLL = null; }
 }
 
 const GARDEN_FILTER_KEY = { "Model collections": "collection", Tasks: "tasks", Providers: "provider" };
@@ -9158,6 +9159,111 @@ function gardenStatusOf(m) {
   return null;
 }
 
+// The Hugging Face section of Model Garden (#1840): look up a model ID on
+// huggingface.co, see its licence, gated status and size against the free
+// disk, download it with a progress bar, and delete it. A gated model needs
+// HF_TOKEN in CloudBurrow's own environment; there is no token field here.
+let HF_POLL = null;
+
+async function hfAction(action, id) {
+  const resp = await fetch(`/api/ai/hf-models/${action}`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }),
+  });
+  const text = await resp.text();
+  if (!resp.ok) throw new Error(errorMessageOf(text) || `HTTP ${resp.status}`);
+  return JSON.parse(text);
+}
+
+async function drawHFPanel(host) {
+  if (HF_POLL) { clearTimeout(HF_POLL); HF_POLL = null; }
+  let data;
+  try {
+    data = await api("/api/ai/hf-models");
+  } catch (err) {
+    return setChildren(host, el("h2", { text: "Deploy from Hugging Face" }), el("p", { class: "unavailable", text: String(err.message) }));
+  }
+  if (!data.configured) {
+    return setChildren(host, el("h2", { text: "Deploy from Hugging Face" }), el("p", { class: "unavailable", text: data.note }));
+  }
+  const again = () => { if (host.isConnected) drawHFPanel(host); };
+  const message = el("p", { id: "hf-message", class: "unavailable", role: "status" });
+  const fail = (err) => { message.textContent = `[error] ${err.message}`; announce(err.message); };
+  const input = el("input", { type: "text", id: "hf-model-id", placeholder: "author/model, e.g. Qwen/Qwen2.5-0.5B-Instruct",
+    "aria-label": "Hugging Face model ID", autocomplete: "off" });
+  const details = el("div", { id: "hf-lookup" });
+  const lookup = el("button", { class: "secondary", type: "submit", text: "Check model" });
+  const form = el("form", { class: "garden-actions", onsubmit: async (e) => {
+    e.preventDefault();
+    const id = input.value.trim();
+    if (!id) return;
+    setChildren(details, el("p", { class: "unavailable", text: `Reading ${id} from huggingface.co…` }));
+    try {
+      const r = await api("/api/ai/hf-models/lookup?" + new URLSearchParams({ id }));
+      const m = r.model;
+      const fits = r.free < 0 || r.free - m.bytes >= r.floor;
+      const download = el("button", { class: "primary", text: "Download", "data-action": "download",
+        disabled: fits ? null : true });
+      download.addEventListener("click", () => confirmDestructive({
+        title: `Download ${m.id}?`,
+        detail: `${formatBytes(m.bytes)} in ${m.files.length} files from huggingface.co/${m.id} at revision ` +
+          `${m.revision.slice(0, 12)}. Licence: ${m.license}.`,
+        confirmWord: m.id, confirmLabel: "Download",
+        consequence: "Each LFS file is checked against its SHA-256 before it is kept.",
+        onConfirm: async () => { await hfAction("download", m.id); again(); },
+      }).catch(fail));
+      setChildren(details, el("dl", { id: "hf-facts" },
+        el("dt", { text: "Model" }), el("dd", { text: m.id }),
+        el("dt", { text: "Licence" }), el("dd", { text: m.license }),
+        el("dt", { text: "Access" }), el("dd", { text: m.gated ? `Gated (${m.gated} approval): accept the licence on huggingface.co and set HF_TOKEN in CloudBurrow's environment` : "Public" }),
+        el("dt", { text: "Task" }), el("dd", { text: m.pipelineTag || "not stated" }),
+        el("dt", { text: "Size" }), el("dd", { text: `${formatBytes(m.bytes)} in ${m.files.length} files` }),
+        el("dt", { text: "Free disk" }), el("dd", { text: r.free < 0 ? "unknown" : `${formatBytes(r.free)} (a download must leave ${formatBytes(r.floor)})` })),
+        fits ? null : el("p", { class: "unavailable", text: "Does not fit: downloading it would leave less than the free space a download must leave. Delete a model or free disk space." }),
+        download);
+    } catch (err) {
+      setChildren(details, el("p", { class: "unavailable", text: `[error] ${err.message}` }));
+    }
+  } }, input, lookup);
+
+  const rows = data.models.map((m) => {
+    const pct = m.bytes ? Math.floor((100 * m.downloaded) / m.bytes) : 0;
+    const actions = [];
+    if (m.state === "downloading") {
+      actions.push(el("button", { class: "secondary", text: "Cancel", "data-action": "cancel",
+        onclick: () => hfAction("cancel", m.id).then(again, fail) }));
+    } else {
+      actions.push(el("button", { class: "secondary danger", text: "Delete", "data-action": "delete",
+        onclick: () => confirmDestructive({
+          title: `Delete ${m.id}?`, detail: `${formatBytes(m.bytes)} in this instance's model cache. It can be downloaded again.`,
+          confirmWord: m.id, consequence: "",
+          onConfirm: async () => { await hfAction("delete", m.id); again(); },
+        }).catch(fail) }));
+    }
+    return el("tr", { "data-hf-model": m.id },
+      el("td", { class: "mono", text: m.id }),
+      el("td", { text: m.license }),
+      el("td", { text: m.gated ? "Gated" : "Public" }),
+      el("td", { class: "mono", text: formatBytes(m.bytes) }),
+      el("td", { "data-state": m.state },
+        el("span", { text: m.state === "downloading" ? `Downloading ${pct}%` : m.state === "failed" ? `Failed: ${m.error}` : "Downloaded" }),
+        m.state === "downloading" ? el("progress", { max: String(m.bytes || 1), value: String(m.downloaded),
+          "aria-label": `${m.id} download progress` }) : null),
+      el("td", {}, ...actions));
+  });
+  // A redraw while a download runs keeps what was typed and looked up.
+  const keep = host.querySelector("#hf-keep") || el("div", { id: "hf-keep" }, form, details, message);
+  setChildren(host,
+    el("h2", { text: "Deploy from Hugging Face" }),
+    el("p", { class: "unavailable", text: data.note }),
+    keep,
+    rows.length ? el("div", { class: "table-wrap" }, el("table", { id: "hf-models" },
+      el("thead", {}, el("tr", {}, ...["Model", "Licence", "Access", "Size", "State", "Actions"].map((c) => el("th", { scope: "col", text: c })))),
+      el("tbody", {}, ...rows))) : null);
+  if (data.models.some((m) => m.state === "downloading")) {
+    HF_POLL = setTimeout(again, 1000);
+  }
+}
+
 async function renderModelGarden(view) {
   stopGardenPoll();
   const header = () => pageHeader("Model Garden",
@@ -9182,6 +9288,7 @@ async function renderModelGarden(view) {
     "aria-label": "Search models", value: params.get("q") || "" });
   const grid = el("div", { class: "garden-cards", id: "garden-cards" });
   const count = el("p", { class: "unavailable", id: "garden-count", role: "status" });
+  const hfPanel = el("section", { class: "card", id: "hf-panel", "aria-label": "Deploy from Hugging Face" });
 
   const card = (m) => {
     const deploy = gardenDeployAction(m, again, fail);
@@ -9244,8 +9351,10 @@ async function renderModelGarden(view) {
     el("div", { class: "card" }, el("p", { class: "unavailable", id: "garden-note", text: data.note })),
     message,
     el("div", { class: "garden" }, filters,
-      el("div", { class: "garden-main" }, search, count, grid)));
+      el("div", { class: "garden-main" }, search, count, grid)),
+    hfPanel);
   draw();
+  drawHFPanel(hfPanel);
 
   if (data.models.some((m) => m.localState && m.localState.state === "downloading")) {
     GARDEN_POLL = setTimeout(() => {

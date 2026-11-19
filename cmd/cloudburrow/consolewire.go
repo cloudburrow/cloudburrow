@@ -15,6 +15,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
+	"github.com/cloudburrow/cloudburrow/internal/hfmodels"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/localai"
 	"github.com/cloudburrow/cloudburrow/internal/metadata"
@@ -109,6 +110,9 @@ func buildConsole(d consoleDeps) *console.Server {
 		d.localModels = localModelsFor(d.cfg, d.localAI)
 	}
 	srv.SetLocalModels(d.localModels)
+	// Model Garden's Hugging Face downloads (#1840), into the state dir's
+	// model cache beside the pinned local models.
+	srv.SetHFModels(&hfmodels.Manager{Dir: filepath.Join(d.cfg.StateDir, "models", "huggingface")})
 	srv.SetMetrics(metrics)
 	// The history is the console's, not a browser tab's. Kept server-side so
 	// it survives a reload and so the sampling rate does not depend on how

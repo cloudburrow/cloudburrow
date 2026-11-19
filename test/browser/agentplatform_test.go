@@ -4,13 +4,20 @@ package browser
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/hfmodels"
 	"github.com/cloudburrow/cloudburrow/internal/localai"
 )
 
@@ -191,5 +198,69 @@ func TestAgentGardenOffersOnlyRealActions(t *testing.T) {
 		if !strings.HasPrefix(a.Code, "https://github.com/") || !a.Disabled || !strings.Contains(a.Why, "Agent Runtime") {
 			t.Errorf("a sample reads %+v; want its source and a disabled Deploy with the reason", a)
 		}
+	}
+}
+
+// TestModelGardenDownloadsAHuggingFaceModel (#1840): Model Garden's
+// Hugging Face section reads a model's licence, access and size, refuses a
+// download that would leave too little disk free, downloads one that fits
+// with its progress, and deletes it. The hub is a local stand-in serving the
+// two routes huggingface.co answers.
+func TestModelGardenDownloadsAHuggingFaceModel(t *testing.T) {
+	const rev = "0123456789abcdef0123456789abcdef01234567"
+	weights := []byte("weights!")
+	sum := sha256.Sum256(weights)
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/models/org/tiny", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `{"id":"org/tiny","sha":%q,"gated":false,"pipeline_tag":"text-generation","cardData":{"license":"apache-2.0"},
+			"siblings":[{"rfilename":"model.safetensors","size":8,"lfs":{"sha256":%q,"size":8}}]}`, rev, hex.EncodeToString(sum[:]))
+	})
+	mux.HandleFunc("GET /org/tiny/resolve/"+rev+"/model.safetensors", func(w http.ResponseWriter, r *http.Request) { w.Write(weights) })
+	hub := httptest.NewServer(mux)
+	t.Cleanup(hub.Close)
+
+	var free atomic.Int64
+	free.Store(50<<30 + 4) // too little: 8 bytes would leave under 50 GB
+	hf := &hfmodels.Manager{Dir: t.TempDir(), Base: hub.URL, Token: func() string { return "" },
+		FreeBytes: func(string) (int64, error) { return free.Load(), nil }}
+	s := console.New("", func(context.Context) console.Status { return console.Status{} })
+	s.SetHFModels(hf)
+	srv := httptest.NewServer(s.Handler())
+	t.Cleanup(srv.Close)
+	p := openAt(t, strings.TrimPrefix(srv.URL, "http://"))
+	t.Cleanup(p.forgive)
+
+	p.navigate("/agent-platform/model-garden")
+	p.waitFor(`document.querySelector("#hf-model-id") !== null`)
+	check := func() {
+		p.setField("#hf-model-id", "org/tiny")
+		p.clickText("#hf-panel button", "Check model")
+		p.waitFor(`document.querySelector("#hf-facts") !== null`)
+	}
+	check()
+	var facts string
+	p.eval(`document.querySelector("#hf-facts").textContent`, &facts)
+	if !strings.Contains(facts, "apache-2.0") || !strings.Contains(facts, "Public") || !strings.Contains(facts, "text-generation") {
+		t.Errorf("the model's facts read %q", facts)
+	}
+	var disabled bool
+	p.eval(`document.querySelector('#hf-lookup button[data-action="download"]').disabled`, &disabled)
+	if !disabled {
+		t.Error("Download is enabled for a model that would leave under 50 GB free")
+	}
+
+	free.Store(60 << 30)
+	check()
+	p.clickText("#hf-lookup button", "Download")
+	p.confirmByName("org/tiny")
+	p.waitFor(`document.querySelector('#hf-models tr[data-hf-model="org/tiny"] td[data-state="downloaded"]') !== null`)
+	if _, err := os.Stat(filepath.Join(hf.Dir, "org--tiny", "model.safetensors")); err != nil {
+		t.Fatalf("the download is not on disk: %v", err)
+	}
+	p.clickText(`#hf-models tr[data-hf-model="org/tiny"] button`, "Delete")
+	p.confirmByName("org/tiny")
+	p.waitFor(`document.querySelector('#hf-models') === null`)
+	if _, err := os.Stat(filepath.Join(hf.Dir, "org--tiny")); err == nil {
+		t.Error("Delete left the model on disk")
 	}
 }

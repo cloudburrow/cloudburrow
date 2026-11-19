@@ -28,6 +28,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/cloudburrow/cloudburrow/internal/hfmodels"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 )
 
@@ -956,6 +957,7 @@ type Server struct {
 	prediction *Prediction
 	// localModels, when set, offers the Local models page (#1306).
 	localModels LocalModels
+	hfModels    *hfmodels.Manager
 	metrics     MetricsSource
 	// series is the retained history the charts draw. Nil means this
 	// instance keeps none, which the endpoint says rather than returning an
@@ -1088,6 +1090,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/ai/local-models", s.handleLocalModels)
 	mux.HandleFunc("GET /api/ai/model-garden", s.handleModelGarden)
 	mux.HandleFunc("GET /api/ai/agent-garden", s.handleAgentGarden)
+	mux.HandleFunc("GET /api/ai/hf-models", s.handleHFModels)
+	mux.HandleFunc("GET /api/ai/hf-models/lookup", s.handleHFLookup)
+	mux.HandleFunc("POST /api/ai/hf-models/{action}", s.handleHFAction)
 	mux.HandleFunc("POST /api/ai/local-models/{id}/{action}", s.handleLocalModelAction)
 	mux.HandleFunc("GET /api/ai/predict", s.handlePredictStatus)
 	mux.HandleFunc("POST /api/ai/predict", s.handlePredict)
