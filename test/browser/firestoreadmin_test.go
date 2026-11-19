@@ -78,7 +78,9 @@ func TestFirestoreDatabaseEditAndIndexFormsThroughTheBrowser(t *testing.T) {
 	}
 
 	id := idx.Name[strings.LastIndex(idx.Name, "/")+1:]
-	p.navigate("/firestore-databases/(default)" + q)
+	// The page opens on the Query builder, as Google's database opens on
+	// Firestore Studio (#1845); the index is on Composite indexes.
+	p.navigate("/firestore-databases/(default)" + q + "&tab=indexes")
 	p.cellMenu(id, "Delete index")
 	p.confirmByName(id)
 	p.waitFor(`document.querySelector(".modal") === null`)
