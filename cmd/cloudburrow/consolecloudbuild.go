@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"time"
 
 	cbpb "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
 	iampb "cloud.google.com/go/iam/apiv1/iampb"
@@ -25,73 +26,170 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 )
 
-// buildDashboardProvider is the Dashboard: a summary per trigger of its
-// latest build and its recent history, and how many builds await approval.
+// buildDashboardProvider is the Dashboard, as Google's "View build results
+// for build triggers" page describes it (#1854): a card per trigger,
+// ordered by repository name and then trigger name, titled by its latest
+// build's outcome, the repository and the trigger, with Latest build,
+// Duration, Source, Commit, Failed step (when the latest build failed),
+// Build history, Average duration and Pass - Fail % of the 20 most recent
+// builds; and how many builds await approval, with View Builds.
 type buildDashboardProvider struct{ b runBuildsProvider }
 
 func (buildDashboardProvider) ID() string    { return "cloud-build-dashboard" }
 func (buildDashboardProvider) Title() string { return "Cloud Build dashboard" }
 
+// dashboardRecent is how many of a trigger's builds its card summarizes.
+const dashboardRecent = 20
+
+// buildOutcome is a card's title word for its latest build.
+func buildOutcome(b *cbpb.Build) string {
+	switch b.GetStatus() {
+	case cbpb.Build_SUCCESS:
+		return "Successful"
+	case cbpb.Build_FAILURE, cbpb.Build_INTERNAL_ERROR:
+		return "Failed"
+	case cbpb.Build_TIMEOUT:
+		return "Timed out"
+	case cbpb.Build_CANCELLED, cbpb.Build_EXPIRED:
+		return "Cancelled"
+	case cbpb.Build_WORKING:
+		return "Running"
+	case cbpb.Build_PENDING:
+		return "Awaiting approval"
+	}
+	return "Queued"
+}
+
+// hms is a duration as HH:MM:SS.
+func hms(d time.Duration) string {
+	d = d.Round(time.Second)
+	return fmt.Sprintf("%02d:%02d:%02d", int(d.Hours()), int(d.Minutes())%60, int(d.Seconds())%60)
+}
+
+// finishedDuration is a finished build's runtime.
+func finishedDuration(b *cbpb.Build) (time.Duration, bool) {
+	if b.GetStartTime() == nil || b.GetFinishTime() == nil {
+		return 0, false
+	}
+	return b.GetFinishTime().AsTime().Sub(b.GetStartTime().AsTime()), true
+}
+
 func (p buildDashboardProvider) List(_ context.Context, project string) (console.Listing, error) {
 	if project == "" {
 		project = p.b.defaultProject
 	}
-	out := console.Listing{Columns: []string{"Repository", "Event", "Latest build", "Latest build status", "Duration", "Build history", "Pass rate"},
-		NameColumn: "Trigger", Noun: "triggers", AlwaysStatus: true}
-	builds := runadapter.CloudBuilds(project, "")
+	out := console.Listing{NameColumn: "Trigger", Noun: "triggers", SummaryOnly: true}
 	byTrigger := map[string][]*cbpb.Build{}
 	pending := 0
-	for _, b := range builds {
+	for _, b := range runadapter.CloudBuilds(project, "") {
 		byTrigger[b.GetBuildTriggerId()] = append(byTrigger[b.GetBuildTriggerId()], b)
-		if b.GetStatus() == cbpb.Build_PENDING && b.GetApproval().GetState() == cbpb.BuildApproval_PENDING {
+		if awaitingApproval(b) {
 			pending++
 		}
 	}
-	for _, t := range runadapter.Triggers(project, "") {
-		bs := byTrigger[t.GetId()]
-		sort.Slice(bs, func(i, j int) bool { return bs[i].GetCreateTime().AsTime().After(bs[j].GetCreateTime().AsTime()) })
-		st := "Enabled"
-		if t.GetDisabled() {
-			st = "Disabled"
-		}
-		repo := "-"
-		if r := t.GetRepositoryEventConfig().GetRepository(); r != "" {
-			repo = r[strings.LastIndex(r, "/")+1:]
-		}
-		f := map[string]string{"Repository": repo, "Event": triggerEvent(t), "Latest build": "-", "Latest build status": "-",
-			"Duration": "-", "Build history": "-", "Pass rate": "-"}
-		if len(bs) > 0 {
-			f["Latest build"], f["Latest build status"] = bs[0].GetId(), buildStatus(bs[0])
-			f["Duration"] = orDash(buildDuration(bs[0]))
-			var hist []string
-			passed, done := 0, 0
-			for i, b := range bs {
-				if i < 10 {
-					hist = append(hist, buildStatus(b))
-				}
-				switch b.GetStatus() {
-				case cbpb.Build_SUCCESS:
-					passed++
-					done++
-				case cbpb.Build_FAILURE, cbpb.Build_TIMEOUT, cbpb.Build_INTERNAL_ERROR:
-					done++
-				}
-			}
-			f["Build history"] = strings.Join(hist, ", ")
-			if done > 0 {
-				f["Pass rate"] = fmt.Sprintf("%d%% (%d of %d)", passed*100/done, passed, done)
-			}
-		}
-		out.Items = append(out.Items, console.Resource{Name: t.GetName(), Status: st, Fields: f,
-			Link: "/cloud-build/triggers/" + url.PathEscape(t.GetName())})
-	}
-	out.Total = len(out.Items)
 	if pending > 0 {
 		filter := url.QueryEscape(`status="PENDING"`)
-		out.Summary = []console.PropertyGroup{{Heading: fmt.Sprintf("%d builds awaiting approval", pending), Properties: []console.Property{
-			{Label: "Approval", Value: "View Builds", Link: "/cloud-build/builds?filter=" + filter}}}}
+		out.Summary = append(out.Summary, console.PropertyGroup{Heading: fmt.Sprintf("%d builds awaiting approval", pending),
+			Properties: []console.Property{{Label: "Approval", Value: "View Builds", Link: "/cloud-build/builds?filter=" + filter}}})
 	}
-	if len(out.Items) == 0 {
+	q := "?project=" + url.QueryEscape(project)
+	triggers := runadapter.Triggers(project, "")
+	repoOf := func(t *cbpb.BuildTrigger) string {
+		r := t.GetRepositoryEventConfig().GetRepository()
+		return r[strings.LastIndex(r, "/")+1:]
+	}
+	sort.SliceStable(triggers, func(i, j int) bool {
+		if ri, rj := repoOf(triggers[i]), repoOf(triggers[j]); ri != rj {
+			return ri < rj
+		}
+		return triggers[i].GetName() < triggers[j].GetName()
+	})
+	for _, t := range triggers {
+		bs := byTrigger[t.GetId()]
+		sort.Slice(bs, func(i, j int) bool { return bs[i].GetCreateTime().AsTime().After(bs[j].GetCreateTime().AsTime()) })
+		if len(bs) > dashboardRecent {
+			bs = bs[:dashboardRecent]
+		}
+		repo := repoOf(t)
+		title := []string{"No builds yet"}
+		if len(bs) > 0 {
+			title[0] = buildOutcome(bs[0])
+		}
+		if repo != "" {
+			title = append(title, repo)
+		}
+		title = append(title, t.GetName())
+		props := []console.Property{{Label: "Trigger", Value: t.GetName(), Link: "/cloud-build/triggers/" + url.PathEscape(t.GetName()) + q}}
+		if t.GetDisabled() {
+			props = append(props, console.Property{Label: "State", Value: "Disabled"})
+		}
+		if len(bs) == 0 {
+			props = append(props, console.Property{Label: "Latest build", Value: "-"})
+			out.Summary = append(out.Summary, console.PropertyGroup{Heading: strings.Join(title, " · "), Properties: props})
+			continue
+		}
+		latest := bs[0]
+		buildLink := "/cloud-build/builds/" + url.PathEscape(latest.GetId()) + q
+		props = append(props, console.Property{Label: "Latest build", Value: latest.GetCreateTime().AsTime().Local().Format("Jan 2, 2006, 3:04:05 PM"), Link: buildLink})
+		if d, ok := finishedDuration(latest); ok {
+			props = append(props, console.Property{Label: "Duration", Value: hms(d)})
+		} else if latest.GetStartTime() != nil {
+			props = append(props, console.Property{Label: "Duration", Value: hms(time.Since(latest.GetStartTime().AsTime()))})
+		}
+		if repo != "" {
+			props = append(props, console.Property{Label: "Source", Value: repo, Link: "/cloud-build/repositories" + q})
+		} else if src := buildSource(latest); src != "" {
+			props = append(props, console.Property{Label: "Source", Value: src})
+		}
+		if sha := latest.GetSubstitutions()["COMMIT_SHA"]; sha != "" {
+			props = append(props, console.Property{Label: "Commit", Value: sha[:min(7, len(sha))], Link: buildLink})
+		}
+		if latest.GetStatus() == cbpb.Build_FAILURE || latest.GetStatus() == cbpb.Build_TIMEOUT {
+			for i, st := range latest.GetSteps() {
+				if st.GetStatus() == cbpb.Build_FAILURE || st.GetStatus() == cbpb.Build_TIMEOUT {
+					name := st.GetId()
+					if name == "" {
+						name = fmt.Sprintf("Step #%d", i)
+					}
+					props = append(props, console.Property{Label: "Failed step", Value: name, Link: buildLink})
+					break
+				}
+			}
+		}
+		// Build history: each recent build's duration, oldest first, as
+		// the bar chart's bars run.
+		var hist []string
+		var total time.Duration
+		finished, passed, failed := 0, 0, 0
+		for i := len(bs) - 1; i >= 0; i-- {
+			b := bs[i]
+			d, ok := finishedDuration(b)
+			if ok {
+				total += d
+				finished++
+				hist = append(hist, buildOutcome(b)+" "+hms(d))
+			} else {
+				hist = append(hist, buildOutcome(b))
+			}
+			switch b.GetStatus() {
+			case cbpb.Build_SUCCESS:
+				passed++
+			case cbpb.Build_FAILURE, cbpb.Build_TIMEOUT, cbpb.Build_INTERNAL_ERROR:
+				failed++
+			}
+		}
+		props = append(props, console.Property{Label: "Build history", Value: strings.Join(hist, ", ")})
+		if finished > 0 {
+			props = append(props, console.Property{Label: "Average duration", Value: hms(total / time.Duration(finished))})
+		}
+		if passed+failed > 0 {
+			props = append(props, console.Property{Label: "Pass - Fail %",
+				Value: fmt.Sprintf("%d%% - %d%%", passed*100/(passed+failed), 100-passed*100/(passed+failed))})
+		}
+		out.Summary = append(out.Summary, console.PropertyGroup{Heading: strings.Join(title, " · "), Properties: props})
+	}
+	out.Total = len(triggers)
+	if len(triggers) == 0 {
 		out.Note = "The dashboard summarizes each trigger's builds: create a trigger on Triggers."
 	}
 	return out, nil

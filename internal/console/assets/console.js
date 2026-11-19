@@ -2486,7 +2486,9 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   // bucket's objects (#790). Only rows that are objects can be checked.
   const selectActions = opts.pagePath ? (data.selectActions || []) : [];
   const selectable = Boolean(opts.rowControls && caps.delete) || selectActions.length > 0;
-  const canSelect = (item) => !selectActions.length || Boolean(item.object);
+  // Or a list screen's rows marked selectable: History's builds awaiting
+  // approval, which its Approve takes (#1854).
+  const canSelect = (item) => !selectActions.length || Boolean(item.object) || Boolean(item.selectable);
 
   // All of the table's state lives here, so a refresh can put it back.
   let sortColumn = null;
@@ -2558,7 +2560,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
     onclick: () => {
       const byName = new Map(data.items.map((i) => [i.name, i]));
       const names = [...selected].map((n) => byName.get(n)).filter(Boolean)
-        .map((i) => i.object[i.object.length - 1]);
+        .map((i) => (i.object ? i.object[i.object.length - 1] : i.name));
       const fields = (a.fields || []).map((f) =>
         f.name === a.selectionField ? { ...f, default: names.join("\n") } : f);
       // The whole page again, whose summary counts the objects too.
@@ -2642,8 +2644,22 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
 
   const rowActionsCell = (item) => {
     const busy = operating.has(item.name);
+    const rowAction = (a) => () => runAction(route, rowTarget(item), a, refresh, rowBusy(item.name),
+      (item.actsOn || []).length ? item.name : null);
+    // Edit sink in a sink's menu (#1863): the form its page offers; first
+    // where Google's menu begins with it, as a trigger's Edit, Disable,
+    // Delete (#1854).
+    const edit = caps.editRow ? [{
+      label: caps.editRow,
+      run: () => editFromRow(route, (item.opens || []).length ? item.opens : [item.name], refresh),
+    }] : [];
+    // A row's own buttons, before its menu: a trigger's Run (#1854).
+    const buttons = (item.actions || []).filter((a) => a.button).map((a) =>
+      el("button", { type: "button", class: "secondary row-button", text: a.label,
+        disabled: busy ? "disabled" : null, "aria-label": `${a.label} ${item.name}`, onclick: rowAction(a) }));
     const actions = [
-      ...(item.actions || []).map((a) => ({
+      ...(caps.editRowFirst ? edit : []),
+      ...(item.actions || []).filter((a) => !a.button).map((a) => ({
         label: a.label, destructive: a.destructive,
         // A row whose actions address a path of their own is named by its
         // row, not the path's last segment: a value inside a Datastore
@@ -2652,18 +2668,15 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
         run: () => runAction(route, rowTarget(item), a, refresh, rowBusy(item.name),
           (item.actsOn || []).length ? item.name : null),
       })),
-      // Edit sink in a sink's menu (#1863): the form its page offers.
-      ...(caps.editRow ? [{
-        label: caps.editRow,
-        run: () => editFromRow(route, (item.opens || []).length ? item.opens : [item.name], refresh),
-      }] : []),
+      ...(caps.editRowFirst ? [] : edit),
       ...(caps.delete ? [{
         label: caps.deleteLabel || "Delete", destructive: true,
         run: () => deleteResource(route, item.name, refresh, rowBusy(item.name)),
       }] : []),
       ...(item.object ? objectActions(route, item, refresh, rowBusy(item.name)) : []),
     ];
-    if (!actions.length) return el("td", {});
+    if (!actions.length && !buttons.length) return el("td", {});
+    if (!actions.length) return el("td", { class: "row-actions" }, ...buttons);
     // Suppressed rather than merely ignored while the row is busy: a live
     // menu over an in-flight request is an invitation to issue a second one,
     // and Pause has no confirmation step to catch it.
@@ -2675,7 +2688,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
     }
     // Behind an overflow menu: a row of buttons competes with the data for
     // attention, and the console this mirrors puts them behind one control.
-    return el("td", { class: "row-actions" }, overflowMenu(actions, item.name));
+    return el("td", { class: "row-actions" }, ...buttons, overflowMenu(actions, item.name));
   };
 
   const draw = () => {
@@ -4567,7 +4580,7 @@ async function renderList(view, route) {
       announce(`${tabs[current].label} selected`);
       return;
     }
-  } else {
+  } else if (!data.summaryOnly) {
     header.push(...listingSummary(data));
   }
   if (data.serverFilter) header.push(serverFilterBox(data.serverFilter, () => renderList(view, route)));
@@ -4588,6 +4601,16 @@ async function renderList(view, route) {
     setChildren(view, ...header,
       errorState(`${route.title} unavailable`, data.unavailable, () => renderList(view, route)));
     announce(`${route.title} unavailable`);
+    return;
+  }
+
+  // A screen that is its summary cards alone, as Google's Cloud Build
+  // Dashboard is a card per trigger (#1854).
+  if (data.summaryOnly && (data.summary || []).length) {
+    setChildren(headerActions(header), refreshButton(() => renderList(view, route)));
+    setChildren(view, ...header, noteBanner(data.note),
+      el("div", { class: "summary-cards" }, ...listingSummary(data)));
+    announce(`${data.summary.length} ${noun} loaded`);
     return;
   }
 
@@ -6263,7 +6286,18 @@ async function renderCreatePage(view, route) {
   // A field named in the address starts with that value: a topic row's
   // Create subscription opens this page with ?topic= (#1847).
   const given = new URLSearchParams(location.search);
-  const fields = buildCreateForm({ ...caps.create, fields: caps.create.fields.map((f) =>
+  // Fields that follow the selected project (#1854): Create trigger's
+  // Repository lists this project's linked repositories, read now rather
+  // than once per console load.
+  let formFields = caps.create.fields;
+  if (caps.create.perProject) {
+    try {
+      formFields = (await api(`/api/createform/${target.service}?project=${encodeURIComponent(project)}`)).fields || formFields;
+    } catch (err) {
+      notify(`The form's choices could not be read for ${project}: ${err.message}`, "error");
+    }
+  }
+  const fields = buildCreateForm({ ...caps.create, fields: formFields.map((f) =>
     f.type !== "hidden" && f.name !== "project" && given.has(f.name) ? { ...f, default: given.get(f.name) } : f) });
   const error = el("p", { class: "form-error", role: "alert", hidden: true });
   const cancel = el("a", { class: "button secondary", href: listHref, text: "Cancel" });

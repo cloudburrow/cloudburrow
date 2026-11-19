@@ -95,10 +95,10 @@ func (p buildTriggersProvider) triggerFields(ctx context.Context, project string
 			UnavailableOptions: map[string]string{evPullRequest: "No pull request is served: this instance's Secure Source Manager has no pull requests (its pull request methods are UNIMPLEMENTED), so it takes pushes only."},
 			Help:               "Repository event that invokes trigger, or another event."},
 		{Name: "topic", Label: "Subscription", Type: "text", Section: "Event", ShowWhen: "event=" + evPubsub,
-			Pattern: `^projects/[^/]+/topics/[^/]+$`,
+			Pattern: `^projects/[^\/]+/topics/[^\/]+$`,
 			Help:    "The Pub/Sub topic, projects/PROJECT/topics/TOPIC, on this instance's Pub/Sub; $(body.message.data.KEY) in a substitution reads the message."},
 		{Name: "secret", Label: "Secret", Type: "text", Section: "Event", ShowWhen: "event=" + evWebhook,
-			Pattern: `^projects/[^/]+/secrets/[^/]+/versions/[^/]+$`,
+			Pattern: `^projects/[^\/]+/secrets/[^\/]+/versions/[^\/]+$`,
 			Help:    "A Secret Manager version, projects/PROJECT/secrets/SECRET/versions/N: the webhook URL's secret."},
 
 		{Name: "repository", Label: "Repository", Type: "select", Options: append([]string{""}, links...), Section: "Source", Help: repoHelp},

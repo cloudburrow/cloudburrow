@@ -86,6 +86,10 @@ type Resource struct {
 	// preview only where the server would give one.
 	Size        int64  `json:"size,omitempty"`
 	ContentType string `json:"contentType,omitempty"`
+	// Selectable marks a list screen's row its selection actions take
+	// (SelectionLister): a build awaiting approval, which History's
+	// Approve takes with the others checked (#1854).
+	Selectable bool `json:"selectable,omitempty"`
 }
 
 // Listing is a page of resources.
@@ -174,6 +178,10 @@ type Listing struct {
 	// drawn as headed cards above the table: the Cloud Storage Settings
 	// screen names the project's service account over its HMAC keys (#792).
 	Summary []PropertyGroup `json:"summary,omitempty"`
+	// SummaryOnly draws the screen as its Summary cards alone, with no
+	// table, as Google's Cloud Build Dashboard is a card per trigger
+	// (#1854). With no card, the screen's empty state shows.
+	SummaryOnly bool `json:"summaryOnly,omitempty"`
 	// Scope is the picker a Scoper's list screen draws above its rows: the
 	// Bigtable instance whose tables these are (#1360).
 	Scope *Scope `json:"scope,omitempty"`
@@ -926,6 +934,31 @@ type DeleteLabeler interface {
 	DeleteLabel() string
 }
 
+// RowEditLeader is a RowEditor whose rows' menus begin with Edit, as
+// Google's Triggers menu reads Edit, Disable, Delete (#1854).
+type RowEditLeader interface {
+	RowEditor
+	RowEditFirst() bool
+}
+
+// SelectionLister is a list screen whose rows marked Selectable can be
+// checked and acted on together (#1854): History's Approve takes every
+// checked build awaiting approval. Its actions reach ActAt with an empty
+// path, the checked rows' names one per line in the field each action's
+// SelectionField names.
+type SelectionLister interface {
+	PathActor
+	ListSelectActions(ctx context.Context, project string) []Action
+}
+
+// listSelectActions are a provider's list-screen selection actions.
+func listSelectActions(ctx context.Context, p Provider, project string) []Action {
+	if sl, ok := p.(SelectionLister); ok {
+		return sl.ListSelectActions(ctx, project)
+	}
+	return nil
+}
+
 // RowEditor is an Editor whose list rows' menus open the edit form too,
 // under this label, as Google's Log Router has Edit sink in each sink's
 // menu (#1863). The form is the one the resource's page offers.
@@ -985,6 +1018,9 @@ type Action struct {
 	// subscription opens the Create subscription page with the topic filled
 	// in (#1847). The action route never receives it.
 	Href string `json:"href,omitempty"`
+	// Button draws a row's action as a button on the row, before its
+	// menu, as Google's Triggers rows carry Run (#1854).
+	Button bool `json:"button,omitempty"`
 }
 
 // PathActor is a provider with actions on the resources inside a resource.
@@ -1258,6 +1294,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/detail/{service}", s.handleDetail)
 	mux.HandleFunc("POST /api/resources/{service}", s.handleCreate)
 	mux.HandleFunc("POST /api/resources/{service}/check", s.handleCreateCheck)
+	mux.HandleFunc("GET /api/createform/{service}", s.handleCreateFormFor)
 	mux.HandleFunc("DELETE /api/resources/{service}", s.handleDelete)
 	mux.HandleFunc("POST /api/actions/{service}", s.handleAction)
 	mux.HandleFunc("POST /api/actions/{service}/upload", s.handleActionUpload)
@@ -1442,7 +1479,7 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 			"id": p.ID(), "title": p.Title(),
 			"create": caps.Create, "delete": caps.Delete, "detail": caps.Detail,
 			"query": caps.Query, "edit": caps.Edit, "reveal": caps.Reveal,
-			"deleteLabel": caps.DeleteLabel, "editRow": caps.EditRow,
+			"deleteLabel": caps.DeleteLabel, "editRow": caps.EditRow, "editRowFirst": caps.EditRowFirst,
 			"page": caps.Page, "scope": caps.Scope,
 		})
 	}
@@ -1529,6 +1566,7 @@ func (s *Server) handleResources(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	listing.Actions = listActions(ctx, p, project)
+	listing.SelectActions = append(listing.SelectActions, listSelectActions(ctx, p, project)...)
 	writeJSON(w, http.StatusOK, listing)
 }
 
@@ -1627,6 +1665,8 @@ type capabilities struct {
 	// (RowEditor), empty for none.
 	DeleteLabel string `json:"deleteLabel,omitempty"`
 	EditRow     string `json:"editRow,omitempty"`
+	// EditRowFirst puts the rows' Edit first in their menus (RowEditLeader).
+	EditRowFirst bool `json:"editRowFirst,omitempty"`
 	// Detail means a row can be opened to show what is inside it.
 	Detail bool `json:"detail,omitempty"`
 	// Edit means a resource's detail page can offer an edit form. The form
@@ -1684,6 +1724,35 @@ type createForm struct {
 	Layout string `json:"layout,omitempty"`
 	// Checks are CreateChecker's buttons.
 	Checks []CreateCheck `json:"checks,omitempty"`
+	// PerProject means the fields are the selected project's: the page
+	// reads them from /api/createform/{service}?project= each time it
+	// opens (ProjectCreateFormer), not from these, read once per load.
+	PerProject bool `json:"perProject,omitempty"`
+}
+
+// ProjectCreateFormer is a Creator whose fields depend on the project, as
+// Create trigger's Repository lists the selected project's linked
+// repositories (#1854).
+type ProjectCreateFormer interface {
+	Creator
+	CreateFormFor(ctx context.Context, project string) []Field
+}
+
+// handleCreateFormFor is a ProjectCreateFormer's fields for a project.
+func (s *Server) handleCreateFormFor(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.providers[r.PathValue("service")]
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such service"})
+		return
+	}
+	pf, ok := p.(ProjectCreateFormer)
+	if !ok {
+		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": p.Title() + " has no per-project create form"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), budgetFor(p))
+	defer cancel()
+	writeJSON(w, http.StatusOK, map[string]any{"fields": pf.CreateFormFor(ctx, r.URL.Query().Get("project"))})
 }
 
 // createPageThreshold is the number of fields past which a create form stops
@@ -1712,6 +1781,9 @@ func (s *Server) capabilitiesOf(p Provider) capabilities {
 		if cs, ok := p.(CreateSubmitter); ok {
 			c.Create.Submit = cs.CreateSubmit()
 		}
+		if _, ok := p.(ProjectCreateFormer); ok {
+			c.Create.PerProject = true
+		}
 	}
 	if e, ok := p.(Executor); ok {
 		c.Query = &queryCapability{Hint: e.QueryHint()}
@@ -1731,6 +1803,9 @@ func (s *Server) capabilitiesOf(p Provider) capabilities {
 	}
 	if dl, ok := p.(DeleteLabeler); ok {
 		c.DeleteLabel = dl.DeleteLabel()
+	}
+	if rl, ok := p.(RowEditLeader); ok {
+		c.EditRowFirst = rl.RowEditFirst()
 	}
 	if re, ok := p.(RowEditor); ok {
 		c.EditRow = re.RowEditLabel()
@@ -2012,7 +2087,7 @@ func (s *Server) actAtPath(w http.ResponseWriter, r *http.Request, p Provider, p
 	// The action must be one the page would have offered. Without this check
 	// the route is a way to invoke any action name the provider happens to
 	// understand on any path, which is wider than the UI it serves.
-	offers := listActions(ctx, p, project)
+	offers := append(listActions(ctx, p, project), listSelectActions(ctx, p, project)...)
 	if len(path) > 0 {
 		offers = actor.DetailActions(ctx, project, path)
 	}

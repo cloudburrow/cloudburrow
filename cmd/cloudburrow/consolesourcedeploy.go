@@ -195,13 +195,8 @@ func (p runBuildsProvider) DetailActions(_ context.Context, project string, path
 	switch {
 	case b == nil:
 		return nil
-	case b.GetStatus() == cbpb.Build_PENDING && b.GetApproval().GetState() == cbpb.BuildApproval_PENDING:
-		// Google's Approve and Reject dialogs: an optional message, and a
-		// URL under "Show additional options" (#1854).
-		decision := []console.Field{
-			{Name: "comment", Label: "Message", Type: "textarea", Help: "Optional: recorded on the build's approval."},
-			{Name: "url", Label: "URL", Type: "text", Pattern: `^https?://\S+$`, Section: "Show additional options",
-				Help: "Optional: a link to more on the decision, such as a review."}}
+	case awaitingApproval(b):
+		decision := approvalFields()
 		return []console.Action{
 			{ID: "approve", Label: "Approve", Fields: decision},
 			{ID: "reject", Label: "Reject", Fields: decision, Destructive: true},
@@ -215,9 +210,83 @@ func (p runBuildsProvider) DetailActions(_ context.Context, project string, path
 	return nil
 }
 
+// awaitingApproval reports whether a build waits for ApproveBuild.
+func awaitingApproval(b *cbpb.Build) bool {
+	return b.GetStatus() == cbpb.Build_PENDING && b.GetApproval().GetState() == cbpb.BuildApproval_PENDING
+}
+
+// approvalFields are Google's Approve and Reject dialogs: an optional
+// message, and a URL under "Show additional options" (#1854).
+func approvalFields() []console.Field {
+	return []console.Field{
+		{Name: "comment", Label: "Message", Type: "textarea", Help: "Optional: recorded on the build's approval."},
+		{Name: "url", Label: "URL", Type: "text", Pattern: `^https?://\S+$`, Section: "Show additional options",
+			Help: "Optional: a link to more on the decision, such as a review."}}
+}
+
+// ListSelectActions is History's Approve (#1854): the builds awaiting
+// approval checked on the page, approved together with one message, as
+// Google's History approves the builds selected.
+// It is offered while some build awaits approval.
+func (p runBuildsProvider) ListSelectActions(_ context.Context, project string) []console.Action {
+	if project == "" {
+		project = p.defaultProject
+	}
+	waiting := false
+	for _, b := range runadapter.CloudBuilds(project, "") {
+		waiting = waiting || awaitingApproval(b)
+	}
+	if !waiting {
+		return nil
+	}
+	return []console.Action{{ID: "approve-selected", Label: "Approve", SelectionField: "builds", Submit: "Approve",
+		Fields: append([]console.Field{{Name: "builds", Label: "Builds", Type: "textarea", Required: true,
+			Help: "The builds checked on History, one ID per line; each must be awaiting approval."}}, approvalFields()...)}}
+}
+
+// approveSelected approves each checked build through ApproveBuild.
+func (p runBuildsProvider) approveSelected(ctx context.Context, project string, values map[string]string) error {
+	var ids []string
+	for _, l := range strings.Split(values["builds"], "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			ids = append(ids, l)
+		}
+	}
+	if len(ids) == 0 {
+		return fmt.Errorf("select the builds to approve")
+	}
+	var builds []*cbpb.Build
+	for _, id := range ids {
+		b := p.build(project, id)
+		switch {
+		case b == nil:
+			return fmt.Errorf("build %s not found", id)
+		case !awaitingApproval(b):
+			return fmt.Errorf("build %s is not awaiting approval", id)
+		}
+		builds = append(builds, b)
+	}
+	return p.withClient(ctx, func(c *cloudbuild.Client) error {
+		for _, b := range builds {
+			op, err := c.ApproveBuild(ctx, &cbpb.ApproveBuildRequest{Name: b.GetName(), ApprovalResult: &cbpb.ApprovalResult{
+				Decision: cbpb.ApprovalResult_APPROVED, Comment: values["comment"], Url: strings.TrimSpace(values["url"])}})
+			if err != nil {
+				return fmt.Errorf("approve %s: %w", b.GetId(), err)
+			}
+			if _, err := op.Wait(ctx); err != nil {
+				return fmt.Errorf("approve %s: %w", b.GetId(), err)
+			}
+		}
+		return nil
+	})
+}
+
 // ActAt cancels the build through CancelBuild, or reruns it through
-// RetryBuild.
+// RetryBuild; on History itself, approves the checked builds.
 func (p runBuildsProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
+	if len(path) == 0 && action == "approve-selected" {
+		return p.approveSelected(ctx, project, values)
+	}
 	if (action != "cancel" && action != "retry" && action != "approve" && action != "reject") || len(path) != 1 {
 		return fmt.Errorf("unknown action %q", action)
 	}
@@ -302,7 +371,7 @@ func (p runBuildsProvider) ListFiltered(_ context.Context, project, filter strin
 		if ref == "" {
 			ref = subs["TAG_NAME"]
 		}
-		out.Items = append(out.Items, console.Resource{Name: b.GetId(), Status: buildStatus(b), Fields: map[string]string{
+		out.Items = append(out.Items, console.Resource{Name: b.GetId(), Status: buildStatus(b), Selectable: awaitingApproval(b), Fields: map[string]string{
 			"Source": orDash(buildSource(b)), "Ref": orDash(ref), "Commit": orDash(subs["SHORT_SHA"]),
 			"Trigger name": orDash(triggers[b.GetBuildTriggerId()]), "Created": stampAge(b.GetCreateTime()),
 			"Duration": orDash(buildDuration(b)), "Region": buildRegion(b), "Image": orDash(image)}})
@@ -438,14 +507,32 @@ func buildStepPage(b *cbpb.Build, step, log string) console.Detail {
 		Sections: []console.Section{{ID: "log", Label: "Step log", Kind: console.KindText, Text: text}}}
 }
 
+// buildAccountLabel is the account a build runs as (#1854): its own, or
+// the project's default Cloud Build account.
+func buildAccountLabel(b *cbpb.Build) string {
+	if sa := b.GetServiceAccount(); sa != "" {
+		return sa[strings.LastIndex(sa, "/")+1:]
+	}
+	return runadapter.DefaultBuildAccount(b.GetProjectId())
+}
+
 // buildExecution is the Execution details view: what the build ran with.
 func buildExecution(b *cbpb.Build) []console.PropertyGroup {
 	o := b.GetOptions()
 	run := []console.Property{{Label: "Build ID", Value: b.GetId()}, {Label: "Region", Value: buildRegion(b)},
 		{Label: "Trigger", Value: b.GetBuildTriggerId()}, {Label: "Created", Value: stampAge(b.GetCreateTime())},
 		{Label: "Duration", Value: buildDuration(b)}, {Label: "Logs bucket", Value: b.GetLogsBucket()},
-		{Label: "Service account", Value: b.GetServiceAccount()}, {Label: "Private pool", Value: o.GetPool().GetName()},
+		{Label: "Service account", Value: buildAccountLabel(b)}, {Label: "Private pool", Value: o.GetPool().GetName()},
 		{Label: "Machine type", Value: o.GetMachineType().String()}, {Label: "Logging", Value: o.GetLogging().String()}}
+	// A property the build does not have is left out, never shown blank:
+	// a build no trigger ran, one with no logs bucket, one on no pool.
+	kept := run[:0]
+	for _, pr := range run {
+		if pr.Value != "" {
+			kept = append(kept, pr)
+		}
+	}
+	run = kept
 	if b.GetTimeout() != nil {
 		run = append(run, console.Property{Label: "Timeout", Value: b.GetTimeout().AsDuration().String()})
 	}
@@ -512,10 +599,11 @@ func buildStatus(b *cbpb.Build) string {
 }
 
 var (
-	_ console.Provider     = artifactRegistryProvider{}
-	_ console.Provider     = runBuildsProvider{}
-	_ console.Driller      = runBuildsProvider{}
-	_ console.Creator      = runBuildsProvider{}
-	_ console.PathActor    = runBuildsProvider{}
-	_ console.FilterLister = runBuildsProvider{}
+	_ console.Provider        = artifactRegistryProvider{}
+	_ console.Provider        = runBuildsProvider{}
+	_ console.Driller         = runBuildsProvider{}
+	_ console.Creator         = runBuildsProvider{}
+	_ console.PathActor       = runBuildsProvider{}
+	_ console.FilterLister    = runBuildsProvider{}
+	_ console.SelectionLister = runBuildsProvider{}
 )
