@@ -281,7 +281,7 @@ func TestWhileBounded(t *testing.T) {
 			in: []int{1}, out: []int{0}},
 		{tensors: []tensorDef{{name: "x", typ: Float32}}, in: []int{0}, out: []int{0}},
 	}}
-	_, err := m.while(0, 1, []*Tensor{{Type: Float32, Shape: []int{1}, F: []float32{1}}}, 0)
+	_, err := m.while(0, 1, []*Tensor{{Type: Float32, Shape: []int{1}, F: []float32{1}}}, 0, newRunState())
 	if err == nil {
 		t.Fatal("an endless WHILE returned")
 	}

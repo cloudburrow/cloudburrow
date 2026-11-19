@@ -81,6 +81,8 @@ type Tensor struct {
 	I     []int64
 	B     []bool
 	S     []string
+	// C holds a COMPLEX64 tensor's elements (RFFT2D, ops4.go, #1775).
+	C []complex64
 }
 
 // Len is the number of elements the shape holds.
@@ -115,6 +117,10 @@ type tensorDef struct {
 	// are carried as float32, typ is FLOAT32, and stored is its own type.
 	q      *quant
 	stored Type
+	// variable is schema.fbs's is_variable: a recurrent kernel's state,
+	// zero at the start of each Run unless the model gives it a value
+	// (#1775).
+	variable bool
 }
 
 type op struct {
@@ -126,6 +132,9 @@ type op struct {
 	// custom_options (a FlexBuffer), when the caller supplied one (LoadWith).
 	custom     CustomOp
 	customOpts []byte
+	// outType is its first output tensor's type, as stored (BITCAST's
+	// target).
+	outType Type
 }
 
 // CustomOp runs one custom operator: its custom_options, as the model
@@ -417,6 +426,7 @@ func loadGraph(sg *flatbuffers.Table, codes, bufs []*flatbuffers.Table, custom m
 		if sh := ints(t, 18); sh != nil {
 			d.shape = sh
 		}
+		d.variable = t.GetBoolSlot(14, false)
 		if qt := sub(t, 12); qt != nil && !d.typ.IsFloat() {
 			q, err := readQuant(qt, d)
 			if err != nil {
@@ -424,14 +434,18 @@ func loadGraph(sg *flatbuffers.Table, codes, bufs []*flatbuffers.Table, custom m
 			}
 			d.q = q
 		}
-		if field(t, 16) != 0 {
-			return nil, &UnsupportedError{"tensor " + d.name + " is sparse: sparse tensors are not supported"}
-		}
+		sp := sub(t, 16) // a sparse constant's SparsityParameters (sparse.go)
 		if b := int(t.GetUint32Slot(8, 0)); b > 0 && b < len(bufs) {
 			bp := field(bufs[b], 4)
 			if bp != 0 {
 				raw := bufs[b].ByteVector(bufs[b].Pos + bp)
-				c, err := constant(d.typ, ints(t, 4), raw)
+				var c *Tensor
+				var err error
+				if sp != nil {
+					c, err = sparseConstant(d.typ, ints(t, 4), raw, sp)
+				} else {
+					c, err = constant(d.typ, ints(t, 4), raw)
+				}
 				if err != nil {
 					return nil, fmt.Errorf("tensor %s: %w", d.name, err)
 				}
@@ -442,6 +456,9 @@ func loadGraph(sg *flatbuffers.Table, codes, bufs []*flatbuffers.Table, custom m
 			} else if bufs[b].GetUint64Slot(6, 0) > 1 {
 				return nil, &UnsupportedError{"tensor " + d.name + " keeps its data outside the FlatBuffer: CloudBurrow reads models under 2 GB"}
 			}
+		}
+		if sp != nil && d.data == nil {
+			return nil, &UnsupportedError{"tensor " + d.name + " is sparse and not a constant: only sparse constants are supported"}
 		}
 		if d.q != nil {
 			d.stored, d.typ = d.typ, Float32
@@ -467,6 +484,14 @@ func loadGraph(sg *flatbuffers.Table, codes, bufs []*flatbuffers.Table, custom m
 				m.ops = append(m.ops, op{code: code, name: str(c, 6), in: ints(o, 6), out: ints(o, 8), custom: k, customOpts: opts})
 				continue
 			}
+			if bc, ok := builtinCustom[str(c, 6)]; ok { // detect.go
+				var opts []byte
+				if f := field(o, 14); f != 0 {
+					opts = o.ByteVector(o.Pos + f)
+				}
+				m.ops = append(m.ops, op{code: bc, name: str(c, 6), in: ints(o, 6), out: ints(o, 8), customOpts: opts})
+				continue
+			}
 			return nil, &UnsupportedError{"the model uses the custom operator " + str(c, 6) + ": only TensorFlow core operations are supported"}
 		}
 		name, ok := opNames[code]
@@ -474,7 +499,16 @@ func loadGraph(sg *flatbuffers.Table, codes, bufs []*flatbuffers.Table, custom m
 			return nil, &UnsupportedError{fmt.Sprintf("the model uses TensorFlow Lite builtin operator %d, which CloudBurrow's interpreter does not run (it runs %v)", code, Ops())}
 		}
 		op := op{code: code, name: name, in: ints(o, 6), out: ints(o, 8)}
+		if outs := op.out; len(outs) > 0 && outs[0] >= 0 && outs[0] < len(m.tensors) {
+			op.outType = m.tensors[outs[0]].typ
+			if m.tensors[outs[0]].q != nil {
+				op.outType = m.tensors[outs[0]].stored
+			}
+		}
 		op.opts = sub(o, 12)
+		if op.opts == nil {
+			op.opts = sub(o, 28) // builtin_options_2: the StableHLO operators' (#1775)
+		}
 		m.ops = append(m.ops, op)
 	}
 	return m, nil
