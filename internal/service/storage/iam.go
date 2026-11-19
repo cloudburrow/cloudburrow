@@ -361,5 +361,6 @@ func (s *Server) bucketsTestIamPermissions(w http.ResponseWriter, r *http.Reques
 		writeError(w, err)
 		return
 	}
+	perms = s.heldPermissions(r, target{bucket: name}, perms)
 	writeResponse(w, r, http.StatusOK, map[string]any{"kind": "storage#testIamPermissionsResponse", "permissions": perms})
 }

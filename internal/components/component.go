@@ -51,6 +51,10 @@ type LifecycleComponent struct {
 	// from (#1392), and the storage server a project's and a folder's
 	// parents (#1532), or "".
 	resourceManager string
+	// iamCheck is whether the in-cluster servers ask the host's evaluator,
+	// at resourceManager's address, before serving (up
+	// --iam-enforcement=on, #1879).
+	iamCheck bool
 	// onnxRunner is the ONNX runner's in-cluster address (host:port),
 	// which BigQuery's front runs imported ONNX models on (#1711), or "".
 	onnxRunner string
@@ -110,6 +114,11 @@ func (c *LifecycleComponent) SetEarlierStorage(m EarlierStorage) { c.earlierStor
 // SetResourceManager records Resource Manager's in-cluster address, for
 // BigQuery's front (#1392) and the storage server (#1532).
 func (c *LifecycleComponent) SetResourceManager(addr string) { c.resourceManager = addr }
+
+// SetIAMCheck makes the storage server and Pub/Sub's front check each
+// request with the host's evaluator, at Resource Manager's in-cluster
+// address (#1879).
+func (c *LifecycleComponent) SetIAMCheck(on bool) { c.iamCheck = on }
 
 // SetStoragePublic records the address clients reach Cloud Storage at
 // (http://host:port), which BigQuery's signed URLs name (#1786): the
@@ -205,7 +214,18 @@ func (c *LifecycleComponent) Backends() []Backend {
 	for _, s := range c.services {
 		switch s {
 		case config.ServicePubSub:
-			out = append(out, PubSubBackend("cloudburrow", c.storageImage))
+			b := PubSubBackend("cloudburrow", c.storageImage)
+			// IAM enforcement asks the host's one evaluator, through
+			// cloudburrow-host (#1879).
+			if c.iamCheck && c.resourceManager != "" && b.Front != nil {
+				b.Front.Args = append(append([]string{}, b.Front.Args...), "--iam-check", "http://"+c.resourceManager)
+				if _, p, err := net.SplitHostPort(c.resourceManager); err == nil {
+					if port, err := strconv.Atoi(p); err == nil {
+						b.EgressPorts = append(b.EgressPorts, port)
+					}
+				}
+			}
+			out = append(out, b)
 		default:
 			// The Google emulators serve any project, so the name they are
 			// started with is only a default. BigQuery's serves the one it
@@ -312,6 +332,10 @@ func (c *LifecycleComponent) Backends() []Backend {
 			// folders of Resource Manager, through cloudburrow-host (#1532).
 			if c.resourceManager != "" {
 				b.Args = append(b.Args, "--resourcemanager", "http://"+c.resourceManager)
+				// IAM enforcement asks the host's one evaluator (#1879).
+				if c.iamCheck {
+					b.Args = append(b.Args, "--iam-check", "http://"+c.resourceManager)
+				}
 				if _, p, err := net.SplitHostPort(c.resourceManager); err == nil {
 					if port, err := strconv.Atoi(p); err == nil {
 						b.EgressPorts = append(b.EgressPorts, port)

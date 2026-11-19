@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
+	"github.com/cloudburrow/cloudburrow/internal/iamcheck"
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
@@ -163,7 +164,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	comps.SetStorageSigningKeys(signingKeys)
 	comps.SetEarlierStorage(&earlierStorage{kubeconfig: cfg.KubeconfigPath(), namespace: cfg.Cluster.Namespace,
 		instance: cfg.InstanceDir(), project: cfg.DefaultProject(), out: stdout})
-	if serviceEnabled(cfg, config.ServiceBigQuery) || serviceEnabled(cfg, config.ServiceStorage) {
+	if serviceEnabled(cfg, config.ServiceBigQuery) || serviceEnabled(cfg, config.ServiceStorage) ||
+		(cfg.IAMEnforced() && serviceEnabled(cfg, config.ServicePubSub)) {
 		// BigQuery's front reads a project's folders and organization
 		// from Resource Manager, through cloudburrow-host (#1392,
 		// INFORMATION_SCHEMA.JOBS_BY_FOLDER and JOBS_BY_ORGANIZATION),
@@ -171,6 +173,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// Storage Intelligence inheritance (#1532).
 		comps.SetResourceManager(fmt.Sprintf("%s.%s.svc.cluster.local:%d", ClusterHostService, cfg.Cluster.Namespace,
 			cfg.Endpoints.ResourceManager))
+		// With --iam-enforcement=on the storage server (and Pub/Sub's
+		// front) ask the host's evaluator there (#1879).
+		comps.SetIAMCheck(cfg.IAMEnforced())
 	}
 	if serviceEnabled(cfg, config.ServiceStorage) && cfg.Endpoints.Metadata > 0 {
 		// Cloud Storage verifies a URL an IAM service account signed
@@ -600,6 +605,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// Policy Troubleshooter and Policy Analyzer (#1879) on the same port,
 	// over the enforcement's evaluator.
 	rmSrv.HandleJSON(isIAMAnalysisPath, iamAnalysis{e: iamEnforcer})
+	// The in-cluster servers' checks (Cloud Storage, Pub/Sub's front,
+	// internal/iamcheck), through cloudburrow-host, so every decision is
+	// this evaluator's.
+	rmSrv.HandleJSON(func(r *http.Request) bool { return r.URL.Path == iamcheck.Path }, http.HandlerFunc(iamEnforcer.ServeCheck))
 	coord.Register(rmSrv)
 	// Its folders and organization are Logging parents (#1395).
 	loggingSvc.useHierarchy(projects)

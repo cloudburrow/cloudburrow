@@ -634,5 +634,6 @@ func (s *Server) managedFoldersTestIamPermissions(w http.ResponseWriter, r *http
 		writeError(w, err)
 		return
 	}
+	perms = s.heldPermissions(r, target{bucket: bucket, object: strings.TrimSuffix(name, "/") + "/"}, perms)
 	writeResponse(w, r, http.StatusOK, map[string]any{"kind": "storage#testIamPermissionsResponse", "permissions": perms})
 }
