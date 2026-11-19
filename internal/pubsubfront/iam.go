@@ -139,7 +139,8 @@ func (f *Front) GetIamPolicy(ctx context.Context, req *iampb.GetIamPolicyRequest
 }
 
 // SetIamPolicy stores a policy, which is written to the state file before it
-// is answered. Stored, never enforced.
+// is answered; with `up --iam-enforcement=on` the front's checks read it
+// (enforce.go, #1879).
 func (f *Front) SetIamPolicy(ctx context.Context, req *iampb.SetIamPolicyRequest) (*iampb.Policy, error) {
 	if _, err := f.iamTarget(ctx, req.GetResource()); err != nil {
 		return nil, apierror.Wrap(err)
@@ -181,6 +182,8 @@ func (f *Front) TestIamPermissions(ctx context.Context, req *iampb.TestIamPermis
 			out.Permissions = append(out.Permissions, p)
 		}
 	}
+	// With IAM enforcement, only those the caller holds (#1879).
+	out.Permissions = f.held(ctx, req.GetResource(), out.Permissions)
 	return out, nil
 }
 

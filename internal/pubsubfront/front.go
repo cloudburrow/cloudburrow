@@ -107,6 +107,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/calllog"
 	"github.com/cloudburrow/cloudburrow/internal/frontready"
 	"github.com/cloudburrow/cloudburrow/internal/grpchttp"
+	"github.com/cloudburrow/cloudburrow/internal/iamcheck"
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 )
 
@@ -185,6 +186,9 @@ type subState struct {
 // Front proxies to the emulator and expires idle subscriptions.
 type Front struct {
 	upstream *grpc.ClientConn
+	// iamCheck is the host's evaluator, nil unless `up
+	// --iam-enforcement=on` (enforce.go, #1879).
+	iamCheck *iamcheck.Client
 	// rest is the emulator's address for its REST API, which it serves on
 	// the same port as gRPC.
 	rest   string
@@ -692,6 +696,11 @@ func (f *Front) handle(_ any, ss grpc.ServerStream) (err error) {
 		return f.handleProjects(ss)
 	}
 	if err := f.waitServing(ss.Context()); err != nil {
+		return err
+	}
+	// IAM enforcement checks the call before anything serves it
+	// (enforce.go, #1879).
+	if ss, err = f.enforce(ss, method); err != nil {
 		return err
 	}
 	if kind, _ := mutationTarget(method, nil); kind != "" {
@@ -1480,6 +1489,9 @@ func (r *replayStream) RecvMsg(m any) error {
 	r.done = true
 	fr, ok := m.(*frame)
 	if !ok {
+		if pm, isProto := m.(proto.Message); isProto {
+			return proto.Unmarshal(r.first, pm)
+		}
 		return r.ServerStream.RecvMsg(m)
 	}
 	*fr = append((*fr)[:0], r.first...)
