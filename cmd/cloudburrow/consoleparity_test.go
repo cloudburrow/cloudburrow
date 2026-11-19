@@ -823,7 +823,8 @@ var parityRows = []parityRow{
 		Tests: []string{"TestConsoleMemorystoreStandardTier"}},
 	{Resource: "Memorystore maintenance reschedule", Service: "memorystore",
 		Methods:  []string{"CloudRedis/RescheduleMaintenance"},
-		Excluded: "CloudBurrow never schedules maintenance, so RescheduleMaintenance always answers FAILED_PRECONDITION: a Reschedule button would only ever fail (#1386)"},
+		Provider: "memorystore", Offers: "Edit's maintenance window day and hour (maintenance_policy); a created instance's page with its window, scheduled maintenance and reschedule deadline; Reschedule maintenance (IMMEDIATE, NEXT_AVAILABLE_WINDOW or SPECIFIC_TIME) while one is scheduled, and CloudBurrow's own Schedule maintenance and Cancel maintenance (#1524)",
+		Tests: []string{"TestMemorystoreMaintenanceThroughThePage"}},
 	// Cloud Scheduler
 	{Resource: "Cloud Scheduler jobs", Service: "scheduler",
 		Methods:  []string{"CloudScheduler/CreateJob", "CloudScheduler/DeleteJob", "CloudScheduler/GetJob", "CloudScheduler/ListJobs", "CloudScheduler/PauseJob", "CloudScheduler/ResumeJob", "CloudScheduler/RunJob"},

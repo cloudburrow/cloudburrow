@@ -49,6 +49,7 @@ func (c *instances) watch(ctx context.Context, every time.Duration) {
 		case <-t.C:
 		}
 		c.rotateDue()
+		c.maintenanceDue()
 		for _, name := range c.checkPrimaries(ctx, failed, every) {
 			delete(failed, name)
 			c.autoFailover(ctx, name)

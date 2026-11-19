@@ -119,6 +119,8 @@ type record struct {
 	Version string `json:"version,omitempty"`
 	// Maintenance is maintenance_policy, as protojson; "" for none (#1386).
 	Maintenance string `json:"maintenance,omitempty"`
+	// Scheduled is the maintenance event scheduled, or nil (#1524).
+	Scheduled *scheduledMaintenance `json:"scheduledMaintenance,omitempty"`
 	// Persistence is persistence_config, as last set; nil when never set.
 	Persistence *persistence `json:"persistence,omitempty"`
 
@@ -443,6 +445,7 @@ func (c *instances) render(r *record) *redispb.Instance {
 		Nodes:                 []*redispb.NodeInfo{{Id: "node-0", Zone: r.LocationID}},
 		PersistenceConfig:     r.Persistence.render(c.now()),
 		MaintenancePolicy:     renderPolicy(r.Maintenance),
+		MaintenanceSchedule:   r.Scheduled.render(c.now()),
 	}
 	if r.tlsOn() {
 		inst.TransitEncryptionMode = redispb.Instance_SERVER_AUTHENTICATION

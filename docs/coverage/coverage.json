@@ -6156,6 +6156,7 @@
           "test/compat/memorystorecmek_test.go:48 TestMemorystoreCustomerManagedKey",
           "test/compat/memorystorecreate_test.go:195 TestMemorystoreCreatedAcrossRestart",
           "test/compat/memorystorecreate_test.go:206 TestMemorystoreRDBAcrossRestart",
+          "test/compat/memorystoremaintenance_test.go:68 TestMemorystoreRescheduleMaintenance",
           "test/compat/memorystoretls1768_test.go:142 TestGcloudRedisInTransitEncryptionBefore60",
           "test/compat/memorystoretls1768_test.go:184 TestTerraformRedisInTransitEncryptionBefore60",
           "test/compat/memorystoretls1768_test.go:33 TestMemorystoreInTransitEncryptionBefore60",
@@ -6199,6 +6200,8 @@
         "method": "google.cloud.redis.v1.CloudRedis/RescheduleMaintenance",
         "status": "Verified",
         "tests": [
+          "test/compat/memorystoremaintenance_test.go:175 TestMemorystoreStandardTierMaintenanceFailsOver",
+          "test/compat/memorystoremaintenance_test.go:68 TestMemorystoreRescheduleMaintenance",
           "test/compat/memorystoreops_test.go:34 TestMemorystoreLocationsOperationsMaintenance"
         ]
       },

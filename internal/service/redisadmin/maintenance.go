@@ -1,10 +1,8 @@
 package redisadmin
 
 import (
-	"context"
 	"time"
 
-	longrunningpb "cloud.google.com/go/longrunning/autogen/longrunningpb"
 	redispb "cloud.google.com/go/redis/apiv1/redispb"
 	"google.golang.org/genproto/googleapis/type/timeofday"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -17,9 +15,8 @@ import (
 
 // The maintenance policy (#1386) is stored and read back as Memorystore
 // documents it: at most one weekly window, a day and a UTC start hour,
-// one hour long, with its create and update times. CloudBurrow never
-// schedules maintenance, so an instance has no maintenance_schedule and
-// RescheduleMaintenance is FAILED_PRECONDITION: there is nothing to move.
+// one hour long, with its create and update times. Maintenance events
+// (#1524) are in maintenanceevents.go.
 
 // maintenancePolicy checks p and returns it as kept: output-only fields
 // set, created at created (now for a new policy) and updated now.
@@ -65,22 +62,4 @@ func policyCreated(kept string, now time.Time) time.Time {
 		return p.GetCreateTime().AsTime()
 	}
 	return now
-}
-
-// RescheduleMaintenance is FAILED_PRECONDITION for every instance: no
-// maintenance is ever scheduled here, so there is none to reschedule.
-func (s *Server) RescheduleMaintenance(ctx context.Context, req *redispb.RescheduleMaintenanceRequest) (*longrunningpb.Operation, error) {
-	if _, err := s.find(req.GetName()); err != nil {
-		return nil, err
-	}
-	switch req.GetRescheduleType() {
-	case redispb.RescheduleMaintenanceRequest_IMMEDIATE, redispb.RescheduleMaintenanceRequest_NEXT_AVAILABLE_WINDOW:
-	case redispb.RescheduleMaintenanceRequest_SPECIFIC_TIME:
-		if req.GetScheduleTime() == nil {
-			return nil, apierror.InvalidArgument("schedule_time is required with reschedule_type SPECIFIC_TIME")
-		}
-	default:
-		return nil, apierror.InvalidArgument("reschedule_type is required: IMMEDIATE, NEXT_AVAILABLE_WINDOW or SPECIFIC_TIME")
-	}
-	return nil, apierror.FailedPrecondition("instance %s has no scheduled maintenance to reschedule: CloudBurrow schedules none", req.GetName())
 }
