@@ -21,8 +21,11 @@ func slowQuery(n int) string {
 	return fmt.Sprintf("SELECT COUNT(*) AS n FROM UNNEST(GENERATE_ARRAY(1, %d)) a, UNNEST(GENERATE_ARRAY(1, %d)) b, UNNEST(GENERATE_ARRAY(1, %d)) c", n, n, n)
 }
 
-// slowN sizes slowQuery to run for several seconds on an instance.
-const slowN = 380
+// slowN sizes slowQuery to run for several seconds on an instance: about
+// 6 s on an M-series Mac, longer on CI's runners, so it outlasts the calls
+// the test makes while it runs (#1873, main run 44438624783:
+// at 380, 23 s here, and two of them overran one 60 s context on CI).
+const slowN = 240
 
 // TestBigQueryAsyncJobs (#1819): a job outlives the request that started
 // it, as on BigQuery.
@@ -134,7 +137,9 @@ func TestBigQueryAsyncJobs(t *testing.T) {
 		t.Fatalf("jobs.get of the ended job: %+v, %v; want DONE", job, err)
 	}
 
-	// jobs.insert, through the Go client.
+	// jobs.insert, through the Go client. Each phase has its own deadline:
+	// the harness's 60 s bounds a hanging call, not the test's slow queries.
+	ctx = h.Context()
 	j, err := c.Query(slowQuery(slowN)).Run(ctx)
 	if err != nil {
 		t.Fatalf("Query.Run: %v", err)
@@ -158,6 +163,7 @@ func TestBigQueryAsyncJobs(t *testing.T) {
 	}
 
 	// jobs.cancel of a running query, and of a running INSERT.
+	ctx = h.Context()
 	ds := c.Dataset(strings.ReplaceAll(h.Project(), "-", "_") + "_async")
 	if err := ds.Create(ctx, nil); err != nil {
 		t.Fatal(err)
