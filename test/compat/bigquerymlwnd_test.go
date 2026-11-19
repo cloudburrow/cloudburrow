@@ -142,24 +142,21 @@ func TestBigQueryMLWideAndDeep(t *testing.T) {
 	}
 }
 
-// TestBigQueryMLHostedModelsRefused (#1562): what stays 501, each with the
-// reason measured on CloudBurrow, nothing run and no model left behind.
-// AutoML trains on Vertex AI's hosted service, whose model search Google
-// does not document (an imported TensorFlow SavedModel converts on the
-// CLI's TensorFlow converter since #1775,
-// TestBigQueryMLImportedTensorFlowModel; a TensorFlow Lite one runs on
-// internal/tflitemodel since #1755, TestBigQueryMLImportedTFLiteModel; an
-// XGBoost one runs on internal/xgbmodel since #1711,
-// TestBigQueryMLImportedXGBoostModel; an ONNX one in the `-tags onnx`
-// build since #1711,
-// TestBigQueryMLImportedONNXModel, and the default build's refusal is
-// TestBigQueryMLONNXNeedsTheOnnxBuild); holiday_region reads
-// Google's holiday calendar
-// (bigquery-public-data.ml_datasets.holidays_and_events_for_forecasting),
-// which CloudBurrow does not have. A remote model is no longer refused
-// (#1760, #1765): on the DEFAULT connection, with no default connection
-// and no bigquery.connections.create, it is 403 as Google documents
-// (wantDefaultConnectionRefused).
+// TestBigQueryMLHostedModelsRefused (#1562): no hosted model is refused
+// any more, and nothing is left behind by the refusals there are. AutoML
+// trains locally since #1776 (TestBigQueryMLAutoML), and here its
+// documented minimum of 1,000 input rows is 400; holiday_region reads
+// CloudBurrow's own calendar since #1776 (TestBigQueryMLHolidayRegion).
+// An imported TensorFlow SavedModel converts on the CLI's TensorFlow
+// converter since #1775 (TestBigQueryMLImportedTensorFlowModel); a
+// TensorFlow Lite one runs on internal/tflitemodel since #1755
+// (TestBigQueryMLImportedTFLiteModel); an XGBoost one on internal/xgbmodel
+// since #1711 (TestBigQueryMLImportedXGBoostModel); an ONNX one in the
+// `-tags onnx` build since #1711 (TestBigQueryMLImportedONNXModel, the
+// default build's refusal TestBigQueryMLONNXNeedsTheOnnxBuild). A remote
+// model is no longer refused (#1760, #1765): on the DEFAULT connection,
+// with no default connection and no bigquery.connections.create, it is 403
+// as Google documents (wantDefaultConnectionRefused).
 //
 // covers: bigquery.jobs.query, bigquery.models.get
 func TestBigQueryMLHostedModelsRefused(t *testing.T) {
@@ -167,18 +164,14 @@ func TestBigQueryMLHostedModelsRefused(t *testing.T) {
 	c, _ := bigqueryClient(t, h)
 	ctx := h.Context()
 	name := mlDataset(t, h, c, map[string]string{
-		"two":  "SELECT 0.0 AS x, 1.0 AS y UNION ALL SELECT 2.0, -2.0",
-		"walk": "SELECT DATE_ADD(DATE '2024-01-01', INTERVAL n DAY) AS d, CAST(n AS FLOAT64) AS v FROM UNNEST(GENERATE_ARRAY(0, 59)) AS n",
+		"two": "SELECT 0.0 AS x, 1.0 AS y UNION ALL SELECT 2.0, -2.0",
 	})
-	for what, c2 := range map[string]struct{ sql, want string }{
-		"AUTOML_REGRESSOR": {"CREATE MODEL `%s.no` OPTIONS(model_type='automl_regressor', input_label_cols=['y'], budget_hours=1.0) AS SELECT x, y FROM `%[1]s.two`",
-			"AutoML"},
-		"AUTOML_CLASSIFIER": {"CREATE MODEL `%s.no` OPTIONS(model_type='automl_classifier', input_label_cols=['y']) AS SELECT x, y FROM `%[1]s.two`", "AutoML"},
-		"holiday_region": {"CREATE MODEL `%s.no` OPTIONS(model_type='arima_plus', time_series_timestamp_col='d', time_series_data_col='v', " +
-			"holiday_region='US') AS SELECT d, v FROM `%[1]s.walk`", "holiday calendar"},
+	for what, sql := range map[string]string{
+		"AUTOML_REGRESSOR":  "CREATE MODEL `%s.no` OPTIONS(model_type='automl_regressor', input_label_cols=['y'], budget_hours=1.0) AS SELECT x, y FROM `%[1]s.two`",
+		"AUTOML_CLASSIFIER": "CREATE MODEL `%s.no` OPTIONS(model_type='automl_classifier', input_label_cols=['y']) AS SELECT x, y FROM `%[1]s.two`",
 	} {
-		_, err := c.Query(fmt.Sprintf(c2.sql, name)).Read(ctx)
-		wantAPIError(t, what, err, http.StatusNotImplemented, c2.want)
+		_, err := c.Query(fmt.Sprintf(sql, name)).Read(ctx)
+		wantAPIError(t, what, err, http.StatusBadRequest, "1000")
 	}
 	// A remote model is no hosted model CloudBurrow lacks: it runs on the
 	// local Vertex AI since #1760, on the DEFAULT connection since #1765.

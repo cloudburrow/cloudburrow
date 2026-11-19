@@ -95,3 +95,9 @@ operators (https://github.com/google-ai-edge/mediapipe,
 mediapipe/tasks/cc/text/language_detector/custom_ops), Copyright 2023 The
 MediaPipe Authors, under the Apache License, Version 2.0;
 third_party/mediapipe-langid/PROVENANCE.md records the source and digest.
+
+The binary embeds a holiday calendar (internal/bigqueryfront/holidaycal.tsv.gz)
+generated from the holidays package 0.84 (https://github.com/vacanza/holidays),
+Copyright (c) Vacanza Team and individual contributors, Copyright (c)
+dr-prodigy 2017-2023, Copyright (c) ryanss 2014-2017, under the MIT License;
+the licence text and the source's digest are in third_party/python-holidays/.

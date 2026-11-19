@@ -183,7 +183,7 @@ func TestBigQueryModelPageResults(t *testing.T) {
 		"bt":  {"Feature importance", "Splits:20", "Mean gain:3.5", "Mean cover:10"},
 		"rf":  {"Feature importance", "Splits:20", "Global explanation", "Attribution:1.25"},
 		"ar": {"Forecast", "Name:2024-01-11T00:00:00Z", "Forecast:19.5", "Interval:18 – 21", "Candidate models", "AIC:23", "Seasonal periods:WEEKLY", "Spikes and dips:true", "Step changes:false",
-			"Holiday effect:true", "Custom holidays", "Name:Fest", "Region:XX", "Primary date:2024-02-10", "Days before:1", "Days after:2"},
+			"Holiday effect:true", "Holidays", "Name:Fest", "Region:XX", "Primary date:2024-02-10", "Days before:1", "Days after:2"},
 		"mf": {"Recommendations", "Name:4.5", "user:7", "item:film", "Factors", "Intercept:0.25", "Factor weights:1.5, -2"},
 	} {
 		d, err := p.Detail(context.Background(), "p", []string{"d", "models", id})

@@ -38,6 +38,17 @@
         "updateFeed": "pypi",
         "verification": "built-and-run",
         "skipDiscovery": "PyPI; depcheck only discovers GitHub-sourced components."
+      },
+      "pythonHolidays": {
+        "$comment": "BigQuery ML HOLIDAY_REGION's built-in calendar (#1776): tools/bqholidays/generate.py runs on this wheel to write internal/bigqueryfront/holidaycal.tsv.gz, an UNVERIFIED stand-in for Google's calendar, which is published only as a BigQuery public dataset (third_party/python-holidays/PROVENANCE.md).",
+        "version": "0.84",
+        "source": "https://pypi.org/project/holidays/0.84/",
+        "license": "MIT",
+        "digest": "sha256:bca376e3becb36ea8e370d08268520934d8a9bd897ae5007ba51b3d7b4e34988",
+        "redistribution": "derived data only: the generated calendar is embedded in the CLI with the MIT notice (NOTICE, third_party/python-holidays/LICENSE); no code of the package",
+        "updateFeed": "pypi",
+        "verification": "checksum",
+        "skipDiscovery": "PyPI; depcheck only discovers GitHub-sourced components."
       }
     },
     "cluster": {

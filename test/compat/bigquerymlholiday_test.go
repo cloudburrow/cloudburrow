@@ -27,8 +27,8 @@ import (
 // model without the holidays; ML.ARIMA_EVALUATE's has_holiday_effect and
 // the model's hasHolidayEffect are TRUE. A data_frequency other than DAILY
 // or AUTO_FREQUENCY, a TRANSFORM, a window over 30 days or one that
-// differs between a holiday's rows is 400; holiday_region with custom
-// holidays stays 501.
+// differs between a holiday's rows is 400 (holiday_region, with or
+// without custom holidays, is TestBigQueryMLHolidayRegion's).
 //
 // covers: bigquery.jobs.query, bigquery.models.get
 func TestBigQueryMLCustomHolidays(t *testing.T) {
@@ -189,8 +189,6 @@ func TestBigQueryMLCustomHolidays(t *testing.T) {
 		"window differs": {fmt.Sprintf("CREATE MODEL `%s.no` OPTIONS(model_type='ARIMA_PLUS', time_series_timestamp_col='d', time_series_data_col='y') "+
 			"AS (training_data AS (SELECT d, y FROM `%[1]s.train`), custom_holiday AS (SELECT 'XX' AS region, 'Big' AS holiday_name, DATE '2024-03-01' AS primary_date, "+
 			"1 AS preholiday_days, 1 AS postholiday_days UNION ALL SELECT 'XX', 'Big', DATE '2024-06-01', 2, 1))", name), http.StatusBadRequest},
-		"holiday_region": {fmt.Sprintf("CREATE MODEL `%s.no` OPTIONS(model_type='ARIMA_PLUS', time_series_timestamp_col='d', time_series_data_col='y', "+
-			"holiday_region='US') AS (training_data AS (SELECT d, y FROM `%[1]s.train`), custom_holiday AS (SELECT * FROM `%[1]s.holidays`))", name), http.StatusNotImplemented},
 	} {
 		_, err := c.Query(tc.sql).Read(ctx)
 		wantHTTPStatus(t, what, err, tc.code)
