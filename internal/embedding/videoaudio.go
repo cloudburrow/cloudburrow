@@ -67,7 +67,7 @@ func DecodeVideoAudio(mimeType string, data []byte, opt VideoOptions) (samples [
 		if errors.As(err, &long) {
 			return nil, err
 		}
-		return nil, fmt.Errorf("the video's audio track: %v", err)
+		return nil, fmt.Errorf("the video's audio track: %w", err)
 	}
 	// The interval video_metadata asks for.
 	from := int(math.Round(opt.Start.Seconds() * float64(rate)))
@@ -180,7 +180,7 @@ func decodeSoundTrack(f *mp4.File, trak *mp4.TrakBox, data []byte) ([]float32, i
 			pcm, rate, err = decodeAC3Track(tr)
 			channels = 1
 		default:
-			return nil, 0, fmt.Errorf("its codec (MPEG-4 object type 0x%02x) is not decoded; AAC, MP3, Opus, AC-3, E-AC-3 and PCM audio tracks are", dcd.ObjectType)
+			return nil, 0, notDecodedf("its codec (MPEG-4 object type 0x%02x) is not decoded; AAC, MP3, Opus, AC-3, E-AC-3 and PCM audio tracks are", dcd.ObjectType)
 		}
 	case ".mp3":
 		pcm, channels, rate, err = decodeMP3Track(tr)
@@ -192,7 +192,7 @@ func decodeSoundTrack(f *mp4.File, trak *mp4.TrakBox, data []byte) ([]float32, i
 		pcm, rate, err = decodeAC3Track(tr)
 		channels = 1
 	default:
-		return nil, 0, fmt.Errorf("its codec %q is not decoded; AAC, MP3, Opus, AC-3, E-AC-3 and PCM audio tracks are", entry.Type())
+		return nil, 0, notDecodedf("its codec %q is not decoded; AAC, MP3, Opus, AC-3, E-AC-3 and PCM audio tracks are", entry.Type())
 	}
 	if err != nil {
 		return nil, 0, err
@@ -222,7 +222,7 @@ func decodeSoundTrack(f *mp4.File, trak *mp4.TrakBox, data []byte) ([]float32, i
 // stereo).
 func decodeAACTrack(tr *soundTrack, dcd *mp4.DecoderConfigDescriptor) (pcm []float32, channels, rate int, err error) {
 	if dcd.ObjectType != 0x40 && dcd.ObjectType != 0x67 {
-		return nil, 0, 0, fmt.Errorf("its MPEG-2 AAC profile (object type 0x%02x) is not decoded; AAC-LC is", dcd.ObjectType)
+		return nil, 0, 0, notDecodedf("its MPEG-2 AAC profile (object type 0x%02x) is not decoded; AAC-LC is", dcd.ObjectType)
 	}
 	if dcd.DecSpecificInfo == nil || len(dcd.DecSpecificInfo.DecConfig) == 0 {
 		return nil, 0, 0, fmt.Errorf("the AAC track has no AudioSpecificConfig")
@@ -233,16 +233,16 @@ func decodeAACTrack(tr *soundTrack, dcd *mp4.DecoderConfigDescriptor) (pcm []flo
 	}
 	switch {
 	case asc.ObjectType != aac.AAClc && asc.ObjectType != aac.HEAACv1 && asc.ObjectType != aac.HEAACv2:
-		return nil, 0, 0, fmt.Errorf("its AAC audio object type %d is not decoded; AAC-LC and HE-AAC (v1, v2) are", asc.ObjectType)
+		return nil, 0, 0, notDecodedf("its AAC audio object type %d is not decoded; AAC-LC and HE-AAC (v1, v2) are", asc.ObjectType)
 	case asc.FrameLengthFlag:
-		return nil, 0, 0, errors.New("its AAC frames are 960 samples, which are not decoded")
+		return nil, 0, 0, notDecodedf("its AAC frames are 960 samples, which are not decoded")
 	case asc.ChannelConfiguration != 1 && asc.ChannelConfiguration != 2:
-		return nil, 0, 0, fmt.Errorf("its AAC channel configuration %d is not decoded; mono and stereo are", asc.ChannelConfiguration)
+		return nil, 0, 0, notDecodedf("its AAC channel configuration %d is not decoded; mono and stereo are", asc.ChannelConfiguration)
 	}
 	d, err := aacdec.NewDecoderASC(dcd.DecSpecificInfo.DecConfig)
 	if err != nil {
 		if errors.Is(err, aacdec.ErrUnsupported) {
-			return nil, 0, 0, fmt.Errorf("its AAC uses a feature that is not decoded (%v)", err)
+			return nil, 0, 0, notDecodedf("its AAC uses a feature that is not decoded (%v)", err)
 		}
 		return nil, 0, 0, fmt.Errorf("the AAC track's AudioSpecificConfig: %v", err)
 	}
@@ -250,7 +250,7 @@ func decodeAACTrack(tr *soundTrack, dcd *mp4.DecoderConfigDescriptor) (pcm []flo
 		p, err := d.DecodeAU(au)
 		if err != nil {
 			if errors.Is(err, aacdec.ErrUnsupported) {
-				return nil, 0, 0, fmt.Errorf("its AAC uses a feature that is not decoded (%v)", err)
+				return nil, 0, 0, notDecodedf("its AAC uses a feature that is not decoded (%v)", err)
 			}
 			return nil, 0, 0, fmt.Errorf("the AAC track's access unit %d: %v", i, err)
 		}
@@ -383,10 +383,10 @@ func decodePCMTrack(tr *soundTrack, e *mp4.AudioSampleEntryBox) (pcm []float32, 
 		bits = int(v1.BytesPerSample) * 8
 	}
 	if channels < 1 || channels > 8 || rate < 1 || rate > 192000 {
-		return nil, 0, 0, fmt.Errorf("its PCM format (%d channels at %d Hz) is not decoded", channels, rate)
+		return nil, 0, 0, notDecodedf("its PCM format (%d channels at %d Hz) is not decoded", channels, rate)
 	}
 	if !(bits == 8 || bits == 16 || bits == 24 || bits == 32 || (float && bits == 64)) || (float && bits < 32) {
-		return nil, 0, 0, fmt.Errorf("its %d-bit PCM is not decoded", bits)
+		return nil, 0, 0, notDecodedf("its %d-bit PCM is not decoded", bits)
 	}
 	raw := bytes.Join(tr.samples, nil)
 	bps := bits / 8

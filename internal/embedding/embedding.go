@@ -26,6 +26,21 @@ import (
 // ErrNotCompiled means this binary was built without the onnx tag.
 var ErrNotCompiled = errors.New("embedding runtime not compiled in: rebuild with -tags onnx (see docs/embeddings.md)")
 
+// ErrNotDecoded marks media that is valid and of a type Google takes, but
+// uses a feature this build does not decode (an AAC profile, a codec inside
+// a video's audio track, a PCM sample format...). EmbedContent answers it
+// UNIMPLEMENTED (501), not INVALID_ARGUMENT: Google would embed it.
+var ErrNotDecoded = errors.New("not decoded by this build")
+
+// notDecoded is an error that matches ErrNotDecoded.
+type notDecoded struct{ msg string }
+
+func (e *notDecoded) Error() string        { return e.msg }
+func (e *notDecoded) Is(target error) bool { return target == ErrNotDecoded }
+
+// notDecodedf formats an error that matches ErrNotDecoded.
+func notDecodedf(format string, a ...any) error { return &notDecoded{fmt.Sprintf(format, a...)} }
+
 // Dimensions is the model's native output size.
 const Dimensions = 768
 

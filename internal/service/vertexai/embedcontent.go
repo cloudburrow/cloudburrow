@@ -271,7 +271,7 @@ func embedParts(ctx context.Context, c *aiplatformpb.Content, m mediaSupport, na
 		case strings.HasPrefix(strings.ToLower(strings.TrimSpace(mt)), "image/"):
 			img, err := embedding.DecodeImage(mt, data)
 			if err != nil {
-				return nil, 0, apierror.InvalidArgument("content.parts[%d].%s: %v", i, field, err)
+				return nil, 0, mediaError(i, field, "", err)
 			}
 			parts = append(parts, embedding.Part{Image: img})
 			images++
@@ -282,7 +282,7 @@ func embedParts(ctx context.Context, c *aiplatformpb.Content, m mediaSupport, na
 		case m.audio && embedding.IsAudioMIMEType(mt):
 			clip, err := embedding.DecodeAudio(mt, data)
 			if err != nil {
-				return nil, 0, apierror.InvalidArgument("content.parts[%d].%s: %v", i, field, err)
+				return nil, 0, mediaError(i, field, "", err)
 			}
 			parts = append(parts, embedding.Part{Audio: clip})
 			clips++
@@ -301,7 +301,7 @@ func embedParts(ctx context.Context, c *aiplatformpb.Content, m mediaSupport, na
 			}
 			frames, err := embedding.DecodeVideo(mt, data, opt)
 			if err != nil {
-				return nil, 0, apierror.InvalidArgument("content.parts[%d].%s: %v", i, field, err)
+				return nil, 0, mediaError(i, field, "", err)
 			}
 			parts = append(parts, embedding.Part{Video: frames})
 			if m.audioTrack {
@@ -310,8 +310,7 @@ func embedParts(ctx context.Context, c *aiplatformpb.Content, m mediaSupport, na
 				// (load_audio_from_video); within the request's audio limit.
 				clip, err := embedding.DecodeVideoAudio(mt, data, opt)
 				if err != nil {
-					return nil, 0, apierror.InvalidArgument(
-						"content.parts[%d].%s: embed_content_config.audio_track_extraction: %v", i, field, err)
+					return nil, 0, mediaError(i, field, "embed_content_config.audio_track_extraction: ", err)
 				}
 				if len(clip) > 0 {
 					parts = append(parts, embedding.Part{Audio: clip})
@@ -329,7 +328,7 @@ func embedParts(ctx context.Context, c *aiplatformpb.Content, m mediaSupport, na
 			}
 			pages, err := embedding.DecodePDF(mt, data, m.ocr)
 			if err != nil {
-				return nil, 0, apierror.InvalidArgument("content.parts[%d].%s: %v", i, field, err)
+				return nil, 0, mediaError(i, field, "", err)
 			}
 			// Each page is an image, followed with document_ocr by its text.
 			for _, pg := range pages {
@@ -359,6 +358,17 @@ func embedParts(ctx context.Context, c *aiplatformpb.Content, m mediaSupport, na
 		return nil, 0, apierror.InvalidArgument("content.parts: the text to embed is empty")
 	}
 	return parts, images + clips + videos, nil
+}
+
+// mediaError is a part's media that did not decode: UNIMPLEMENTED when it is
+// valid media of a type Google takes that uses a feature this build does not
+// decode (embedding.ErrNotDecoded), since Google would embed it, and
+// INVALID_ARGUMENT otherwise.
+func mediaError(i int, field, prefix string, err error) error {
+	if errors.Is(err, embedding.ErrNotDecoded) {
+		return apierror.Unimplemented("content.parts[%d].%s: %s%v", i, field, prefix, err)
+	}
+	return apierror.InvalidArgument("content.parts[%d].%s: %s%v", i, field, prefix, err)
 }
 
 // videoOptions are a video part's video_metadata: its interval and its
@@ -400,6 +410,13 @@ func videoOptions(i int, vm *aiplatformpb.VideoMetadata) (embedding.VideoOptions
 // part has none.
 func readFileData(ctx context.Context, i int, fd *aiplatformpb.FileData, objs Objects) (string, []byte, error) {
 	uri := fd.GetFileUri()
+	if scheme, _, ok := strings.Cut(uri, "://"); ok && (strings.EqualFold(scheme, "http") || strings.EqualFold(scheme, "https")) {
+		// Vertex AI's file_data also takes HTTP URLs; an instance reaches
+		// nothing outside the machine, so it reads only its own Cloud
+		// Storage.
+		return "", nil, apierror.Unimplemented(
+			"content.parts[%d].file_data.file_uri %q: only gs:// objects in this instance's Cloud Storage are read; HTTP URLs are not fetched (send the bytes as inline_data)", i, uri)
+	}
 	rest, ok := strings.CutPrefix(uri, "gs://")
 	bucket, object, _ := strings.Cut(rest, "/")
 	if !ok || bucket == "" || object == "" {
