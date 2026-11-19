@@ -185,7 +185,7 @@ func TestKMSAutokeyThroughTheBrowser(t *testing.T) {
 
 	p.navigate("/kms/autokey?project=" + project)
 	p.clickText("#view tbody a", cfgName)
-	p.clickText("#view .page-actions button", "Edit configuration")
+	p.clickText("#view .page-actions button", "Configure")
 	p.waitFor(`document.querySelector(".modal.is-open #f-keyProject") !== null`)
 	setField(p, ".modal.is-open", "f-keyProjectResolutionMode", "DEDICATED_KEY_PROJECT")
 	setField(p, ".modal.is-open", "f-keyProject", "projects/"+project)

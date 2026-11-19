@@ -102,6 +102,9 @@ type Secret struct {
 	// ScheduledDestroys maps a version number to its scheduled_destroy_time,
 	// so the sweep finds the versions due without reading every version.
 	ScheduledDestroys map[string]time.Time `json:"scheduledDestroys,omitempty"`
+	// VersionAliases is version_aliases (#1850): an alias to the number of
+	// the version it names, set by UpdateSecret (aliases.go).
+	VersionAliases map[string]int `json:"versionAliases,omitempty"`
 }
 
 // Expired reports whether the secret's expire_time has come at now.
@@ -248,10 +251,12 @@ func ParseVersionName(name string) (project, secret, version string, err error) 
 	if err != nil {
 		return "", "", "", err
 	}
-	if version != LatestAlias {
+	if version != LatestAlias && !aliasPattern.MatchString(version) {
+		// A version alias (#1850) is a name starting with a letter; which
+		// calls take one is the store's to say.
 		if n, convErr := strconv.Atoi(version); convErr != nil || n < 1 {
 			return "", "", "", apierror.InvalidArgument(
-				"secret version must be a positive integer or %q, got %q", LatestAlias, version)
+				"secret version must be a positive integer, %q or a version alias, got %q", LatestAlias, version)
 		}
 	}
 	return project, secret, version, nil
@@ -592,6 +597,10 @@ type SecretUpdate struct {
 	Schedule                                 Schedule
 	UpdateNextRotation, UpdateRotationPeriod bool
 	UpdateVersionDestroyTTL                  bool
+	// VersionAliases replace the secret's aliases when
+	// UpdateVersionAliases; empty clears them (#1850).
+	VersionAliases       map[string]int
+	UpdateVersionAliases bool
 }
 
 // UpdateSecretFields applies u to a secret.
@@ -675,6 +684,21 @@ func (s *Store) UpdateSecretFields(project, id string, u SecretUpdate) (Secret, 
 		// Versions already scheduled keep their schedule, as Google
 		// documents; the new ttl applies to later destroys.
 		sec.VersionDestroyTTL = u.Schedule.VersionDestroyTTL
+	}
+	if u.UpdateVersionAliases {
+		if err := checkVersionAliases(u.VersionAliases, func(n int) bool {
+			_, err := s.getVersion(project, id, n)
+			return err == nil
+		}); err != nil {
+			return Secret{}, err
+		}
+		sec.VersionAliases = nil
+		if len(u.VersionAliases) > 0 {
+			sec.VersionAliases = make(map[string]int, len(u.VersionAliases))
+			for a, n := range u.VersionAliases {
+				sec.VersionAliases[a] = n
+			}
+		}
 	}
 	if updateLabels {
 		sec.Labels = labels
@@ -907,8 +931,28 @@ func (s *Store) ResolveVersion(project, id, version string) (int, error) {
 }
 
 func (s *Store) resolveVersion(project, id, version string) (int, error) {
-	if _, err := s.getSecret(project, id); err != nil {
+	if version != LatestAlias && !isVersionNumber(version) && aliasPattern.MatchString(version) {
+		if _, err := s.getSecret(project, id); err != nil {
+			return 0, err
+		}
+		return 0, apierror.InvalidArgument("version alias %q is accepted only by GetSecretVersion and "+
+			"AccessSecretVersion; name the version by its number", version)
+	}
+	return s.resolveVersionOrAlias(project, id, version)
+}
+
+// resolveVersionOrAlias is resolveVersion that also takes a version alias
+// (#1850), for GetSecretVersion and AccessSecretVersion only.
+func (s *Store) resolveVersionOrAlias(project, id, version string) (int, error) {
+	sec, err := s.getSecret(project, id)
+	if err != nil {
 		return 0, err
+	}
+	if version != LatestAlias && !isVersionNumber(version) {
+		if n, ok := sec.VersionAliases[version]; ok {
+			return n, nil
+		}
+		return 0, apierror.NotFound("secret %s has no version alias %q", SecretName(project, id), version)
 	}
 	if version != LatestAlias {
 		n, err := strconv.Atoi(version)
@@ -943,7 +987,7 @@ func (s *Store) GetVersion(project, id string, version string) (Version, error) 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	number, err := s.resolveVersion(project, id, version)
+	number, err := s.resolveVersionOrAlias(project, id, version)
 	if err != nil {
 		return Version{}, err
 	}
@@ -971,7 +1015,7 @@ func (s *Store) AccessVersion(project, id, version string) (Version, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	number, err := s.resolveVersion(project, id, version)
+	number, err := s.resolveVersionOrAlias(project, id, version)
 	if err != nil {
 		return Version{}, err
 	}

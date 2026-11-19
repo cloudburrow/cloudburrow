@@ -77,19 +77,51 @@ func (p kmsEkmProvider) List(ctx context.Context, project string) (console.Listi
 	return listing, nil
 }
 
+// CreateForm is Google's Create connection
+// (https://docs.cloud.google.com/kms/docs/create-ekm-connection): Connection
+// name, Region, Service resource ID (self_link), Hostname, Certificates, EKM
+// management mode (Manual or Cloud KMS, which shows the Crypto space path)
+// and Set connection as the default (#1851).
 func (kmsEkmProvider) CreateForm() (string, []console.Field) {
-	return "Create EKM connection", []console.Field{
+	modes := []string{"MANUAL", "CLOUD_KMS"}
+	return "Create connection", []console.Field{
 		{Name: "ekmConnectionId", Label: "Connection name", Type: "text", Required: true, Pattern: `^[A-Za-z0-9_\-]{1,63}$`,
 			Help: "1-63 letters, digits, hyphens and underscores. " + kmsEkmNote},
-		{Name: "location", Label: "Location", Type: "select", Required: true, Default: "us-central1", Options: kmsLocations()},
-		{Name: "serviceDirectoryService", Label: "Service Directory service", Type: "text", Required: true,
-			Help: "projects/PROJECT/locations/LOCATION/namespaces/NAMESPACE/services/SERVICE: where the EKM replica would be resolved."},
+		{Name: "location", Label: "Region", Type: "select", Required: true, Default: "us-central1", Options: kmsLocations()},
+		{Name: "serviceDirectoryService", Label: "Service resource ID (self_link)", Type: "text", Required: true,
+			Help: "The Service Directory service: projects/PROJECT/locations/LOCATION/namespaces/NAMESPACE/services/SERVICE, where the EKM replica would be resolved."},
 		{Name: "hostname", Label: "Hostname", Type: "text", Required: true, Help: "The EKM replica's hostname at the TLS and HTTP layers."},
-		{Name: "certificate", Label: "Server certificate (PEM)", Type: "textarea", Required: true,
-			Help: "The replica's leaf certificate. It is parsed as Cloud KMS parses it: issuer, subject, SANs, validity, serial number and fingerprint."},
-		{Name: "keyManagementMode", Label: "Key management mode", Type: "select", Default: "MANUAL", Options: []string{"MANUAL", "CLOUD_KMS"}},
-		{Name: "cryptoSpacePath", Label: "Crypto space path", Type: "text", Help: "Required when the key management mode is CLOUD_KMS."},
+		{Name: "certificate", Label: "Certificates", Type: "textarea", Required: true,
+			Help: "The replica's leaf certificates: one or more PEM blocks, or one X.509 DER certificate base64-encoded. Each is parsed as " +
+				"Cloud KMS parses it: issuer, subject, SANs, validity, serial number and fingerprint."},
+		{Name: "keyManagementMode", Label: "EKM management mode", Type: "radio", Default: "MANUAL", Options: modes,
+			OptionLabels: map[string]string{"MANUAL": "Manual", "CLOUD_KMS": "Cloud KMS"}},
+		{Name: "cryptoSpacePath", Label: "Crypto space path", Type: "text", ShowWhen: "keyManagementMode=CLOUD_KMS",
+			Help: "Required for Cloud KMS management: the crypto space on the EKM, such as v0/longlived/a1-example."},
+		{Name: "setDefault", Label: "Set connection as the default", Type: "checkbox",
+			Help: "The region's EkmConfig names it as the default connection for its External via VPC keys."},
 	}
+}
+
+// kmsCertificatesDER reads one or more PEM certificates, or one base64 DER.
+func kmsCertificatesDER(raw string) ([][]byte, error) {
+	rest := []byte(strings.TrimSpace(raw))
+	var out [][]byte
+	for {
+		b, r := pem.Decode(rest)
+		if b == nil {
+			break
+		}
+		out, rest = append(out, b.Bytes), r
+	}
+	if len(out) > 0 {
+		return out, nil
+	}
+	der, err := kmsCertificateDER(raw)
+	if err != nil {
+		return nil, err
+	}
+	return [][]byte{der}, nil
 }
 
 // kmsCertificateDER reads one PEM certificate, or base64 DER.
@@ -112,21 +144,32 @@ func (p kmsEkmProvider) Create(ctx context.Context, project string, values map[s
 	if project == "" {
 		return "", fmt.Errorf("choose a project before creating an EKM connection")
 	}
-	der, err := kmsCertificateDER(values["certificate"])
+	ders, err := kmsCertificatesDER(values["certificate"])
 	if err != nil {
 		return "", err
+	}
+	certs := make([]*kmspb.Certificate, 0, len(ders))
+	for _, der := range ders {
+		certs = append(certs, &kmspb.Certificate{RawDer: der})
 	}
 	location := strings.TrimSpace(values["location"])
 	c, err := e.CreateEkmConnection(ctx, &kmspb.CreateEkmConnectionRequest{
 		Parent: "projects/" + project + "/locations/" + location, EkmConnectionId: strings.TrimSpace(values["ekmConnectionId"]),
 		EkmConnection: &kmspb.EkmConnection{
 			ServiceResolvers: []*kmspb.EkmConnection_ServiceResolver{{ServiceDirectoryService: strings.TrimSpace(values["serviceDirectoryService"]),
-				Hostname: strings.TrimSpace(values["hostname"]), ServerCertificates: []*kmspb.Certificate{{RawDer: der}}}},
+				Hostname: strings.TrimSpace(values["hostname"]), ServerCertificates: certs}},
 			KeyManagementMode: kmsEkmMode(values["keyManagementMode"]),
 			CryptoSpacePath:   strings.TrimSpace(values["cryptoSpacePath"]),
 		}})
 	if err != nil {
 		return "", err
+	}
+	if checked(values, "setDefault") {
+		if _, err := e.UpdateEkmConfig(ctx, &kmspb.UpdateEkmConfigRequest{
+			EkmConfig:  &kmspb.EkmConfig{Name: kmsLocationOf(c.GetName()) + "/ekmConfig", DefaultEkmConnection: c.GetName()},
+			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"default_ekm_connection"}}}); err != nil {
+			return "", fmt.Errorf("the connection %s was created, but it could not be set as the default: %w", c.GetName(), err)
+		}
 	}
 	return c.GetName(), nil
 }
@@ -413,12 +456,21 @@ func (p kmsAutokeyProvider) DetailActions(_ context.Context, project string, pat
 	if len(path) != 1 || !p.inChain(project, path[0]) {
 		return nil
 	}
-	return []console.Action{{ID: "editconfig", Label: "Edit configuration", Fields: []console.Field{
-		{Name: "keyProjectResolutionMode", Label: "Resolution mode", Type: "select", Default: "DEDICATED_KEY_PROJECT",
-			Options: []string{"DEDICATED_KEY_PROJECT", "RESOURCE_PROJECT", "DISABLED"},
-			Help:    "Where keys are made: a dedicated key project, the resource's own project, or nowhere (Autokey off below here)."},
-		{Name: "keyProject", Label: "Key project", Type: "text",
-			Help: "projects/PROJECT, for DEDICATED_KEY_PROJECT; empty otherwise. Empty with DEDICATED_KEY_PROJECT clears the configuration."},
+	// Google's Configure (https://docs.cloud.google.com/kms/docs/enable-autokey):
+	// the Configuration in words, the key project for dedicated-project
+	// storage, Submit; turning Autokey off is confirmed (#1851). The
+	// enums stay the values, as UpdateAutokeyConfig takes them.
+	modes := []string{"DEDICATED_KEY_PROJECT", "RESOURCE_PROJECT", "DISABLED"}
+	return []console.Action{{ID: "editconfig", Label: "Configure", Fields: []console.Field{
+		{Name: "keyProjectResolutionMode", Label: "Configuration", Type: "radio", Default: "DEDICATED_KEY_PROJECT", Options: modes,
+			OptionLabels: map[string]string{"DEDICATED_KEY_PROJECT": "Enable dedicated-project key storage",
+				"RESOURCE_PROJECT": "Enable same-project key storage", "DISABLED": "Disable autokey"},
+			Help: "Where Autokey makes keys: a dedicated key project, the resource's own project, or nowhere (Autokey off below here)."},
+		{Name: "keyProject", Label: "Key project", Type: "text", ShowWhen: "keyProjectResolutionMode=DEDICATED_KEY_PROJECT",
+			Help: "projects/PROJECT, the dedicated key project. Empty clears the configuration, so the parent's applies (Google's Inherit)."},
+		{Name: "confirmDisable", Label: "Confirm: resources created from now on get no Autokey key", Type: "checkbox",
+			ShowWhen: "keyProjectResolutionMode=DISABLED",
+			Help:     "Disabling Autokey needs this confirmation, as Google's Confirm; existing keys and key handles stay."},
 	}}}
 }
 
@@ -432,6 +484,13 @@ func (p kmsAutokeyProvider) ActAt(ctx context.Context, project string, path []st
 	}
 	mode := kmspb.AutokeyConfig_KeyProjectResolutionMode(kmspb.AutokeyConfig_KeyProjectResolutionMode_value[strings.TrimSpace(values["keyProjectResolutionMode"])])
 	kp := strings.TrimSpace(values["keyProject"])
+	if mode == kmspb.AutokeyConfig_DISABLED && values["confirmDisable"] != "" && !checked(values, "confirmDisable") {
+		return fmt.Errorf("check the confirmation to disable Autokey")
+	}
+	if mode != kmspb.AutokeyConfig_DEDICATED_KEY_PROJECT {
+		// The key project is hidden for the other choices.
+		kp = ""
+	}
 	paths := []string{"key_project"}
 	if mode != kmspb.AutokeyConfig_DEDICATED_KEY_PROJECT || kp != "" {
 		paths = append(paths, "key_project_resolution_mode")

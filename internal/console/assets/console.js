@@ -357,15 +357,31 @@ const ROUTES = [
     section: "AI and machine learning", product: "vertexai", productTitle: "Agent Platform" },
   ...AP_ROUTES.slice(AP_ROUTES.findIndex((r) => r.path === AP_PATHS.predict)),
 
-  { path: "/secrets", service: "secrets", title: "Secret Manager", navTitle: "Secrets", kind: "Secret",
-    section: "Security and identity" },
-  { path: "/kms/keyrings", service: "kms", title: "Key rings", kind: "Key ring", section: "Security and identity",
-    product: "kms", productTitle: "Key Management" },
+  // Secret Manager (#1850): Google's menu, Secret Manager (the global
+  // secrets), Regional secrets and Settings.
+  { path: "/secrets", service: "secrets", title: "Secret Manager", navTitle: "Secret Manager", kind: "Secret",
+    section: "Security and identity", product: "secrets", productTitle: "Secret Manager" },
+  { path: "/secrets-regional", service: "secrets-regional", icon: "secrets", title: "Regional secrets", kind: "Secret",
+    section: "Security and identity", product: "secrets", productTitle: "Secret Manager" },
+  { path: "/secrets-settings", service: null, requires: "secrets", screen: "unavailable", icon: "secrets", title: "Settings",
+    section: "Security and identity", product: "secrets", productTitle: "Secret Manager",
+    unavailable: "Google's Secret Manager settings are the project's own Google Cloud configuration, which Google's documentation does not describe and a local instance does not hold. A secret's replication, encryption, rotation, expiration and destruction delay are set on the secret itself, with Create secret and Edit secret." },
+  // Key Management (#1851), in Google's menu order: Key management (the key
+  // rings), Autokey, EKM connections, KMS config, Key inventory; then
+  // CloudBurrow's Single-tenant HSM, whose instances Google manages with
+  // gcloud only.
+  { path: "/kms/keyrings", service: "kms", title: "Key management", navTitle: "Key management", kind: "Key ring",
+    section: "Security and identity", product: "kms", productTitle: "Key Management" },
   // Cloud KMS EKM connections and Autokey (#1452): stored connections, and
   // the Autokey configurations a project resolves through, with its key handles.
+  { path: "/kms/autokey", service: "kms-autokey", icon: "kms", title: "Autokey", kind: "Key handle", section: "Security and identity",
+    product: "kms", productTitle: "Key Management" },
   { path: "/kms/ekm", service: "kms-ekm", icon: "kms", title: "EKM connections", kind: "EKM connection", section: "Security and identity",
     product: "kms", productTitle: "Key Management" },
-  { path: "/kms/autokey", service: "kms-autokey", icon: "kms", title: "Autokey", kind: "Key handle", section: "Security and identity",
+  { path: "/kms/config", title: "KMS config", service: null, requires: "kms", screen: "unavailable", icon: "kms",
+    section: "Security and identity", product: "kms", productTitle: "Key Management",
+    unavailable: "KMS config holds a project's and an organization's Cloud KMS settings, such as the default Key Access Justifications policy for new keys, which Google serves through an API CloudBurrow does not run. Autokey's configuration is on the Autokey page, the default EKM connection on EKM connections, and a key's own settings on its page." },
+  { path: "/kms/inventory", service: "kms-inventory", icon: "kms", title: "Key inventory", section: "Security and identity",
     product: "kms", productTitle: "Key Management" },
   { path: "/kms/hsm", service: "kms-hsm", icon: "kms", title: "Single-tenant HSM", kind: "Single-tenant HSM instance", section: "Security and identity",
     product: "kms", productTitle: "Key Management" },
@@ -4018,8 +4034,11 @@ async function renderDetail(view, route, resourcePath) {
   // not beside the title as well (#1845): Google's Create Index is on the
   // Indexes tab, not on the database's title line.
   const onTabs = new Set(sections.flatMap((s) => (s.actions || []).map((a) => a.id)));
+  // An action a tab's table offers on its checked rows is that table's
+  // button, not the header's (#1851): a key's Disable over its versions.
+  const onRows = new Set(sections.flatMap((s) => ((s.listing || {}).selectActions || []).map((a) => a.id)));
   const pageActions = [
-    ...(data.actions || []).filter((a) => !onTabs.has(a.id)).map((a) =>
+    ...(data.actions || []).filter((a) => !onTabs.has(a.id) && !onRows.has(a.id)).map((a) =>
       el("button", {
         class: "secondary" + (a.destructive ? " danger" : ""),
         text: a.label,
@@ -4065,6 +4084,16 @@ async function renderDetail(view, route, resourcePath) {
       class: "secondary", text: data.reveal,
       onclick: () => revealValue(route, segments, data.reveal),
     }));
+    // A version row's View secret value (#1850) opens this page with
+    // reveal=1: the value is shown as if the button were pressed, recorded
+    // the same way, and the address loses the flag so a reload shows nothing.
+    const asked = new URLSearchParams(location.search);
+    if (asked.get("reveal") === "1") {
+      asked.delete("reveal");
+      const rest = asked.toString();
+      history.replaceState(history.state, "", location.pathname + (rest ? "?" + rest : ""));
+      setTimeout(() => revealValue(route, segments, data.reveal), 0);
+    }
   }
   if (data.edit) {
     pageActions.unshift(el("button", {
@@ -4082,6 +4111,17 @@ async function renderDetail(view, route, resourcePath) {
     ? el("div", { class: "detail-with-nav side-nav-layout" }, strip, panel) : panel);
   drawPanel();
   announce(`${data.title || name} opened`);
+  // An address naming one of the page's actions opens it once (#1851):
+  // Create key ring goes on to the ring's Create key. The action is taken
+  // off the address, so a reload or Back does not open it again.
+  const asked = new URLSearchParams(location.search).get("action");
+  const opened = asked && (data.actions || []).find((a) => a.id === asked);
+  if (asked) {
+    const here = new URL(location.href);
+    here.searchParams.delete("action");
+    history.replaceState(history.state, "", here.pathname + here.search);
+  }
+  if (opened) runAction(route, segments, opened, reloadPage, NO_ROW, data.title || null);
 }
 
 // openActionForm collects an action's inputs and then performs it.
@@ -5733,6 +5773,9 @@ function buildCreateForm(spec) {
                 control.focus();
               } }))))
       : null;
+    // Upload file beside a textarea (Field.Upload, #1850): the chosen text
+    // file is read into the textarea, which stays the value.
+    const upload = isArea && !isMap && f.upload ? uploadIntoTextarea(f, control) : null;
     const node = isCheck
       ? el("div", { class: "form-row is-check" + (unavailableId ? " is-unavailable" : "") },
           el("div", { class: "check-line" }, control, label), help, unavailable, error)
@@ -5748,7 +5791,7 @@ function buildCreateForm(spec) {
           : f.browse === "kms" ? el("div", { class: "browse-row" }, control,
             el("button", { type: "button", class: "secondary", id: `browse-${f.name}`, text: "Browse",
               onclick: () => browseKeys(control, formKMSLocation(entries)) })) : control,
-          templates, help, error);
+          templates, upload, help, error);
 
     return { field: f, control, node, error, helpId, errorId, isCheck };
   });
@@ -6011,6 +6054,27 @@ function buildCreateForm(spec) {
         })]);
     },
   };
+}
+
+// uploadIntoTextarea is a textarea's Upload file control (Field.Upload,
+// #1850): a file chooser whose text file replaces the textarea's value.
+function uploadIntoTextarea(f, control) {
+  const input = el("input", { type: "file", id: `up-${f.name}`, class: "upload-into-input",
+    "aria-label": `${f.upload} for ${f.label}` });
+  const status = el("span", { class: "form-help", role: "status" });
+  input.addEventListener("change", () => {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    const r = new FileReader();
+    r.onload = () => {
+      control.value = String(r.result);
+      control.dispatchEvent(new Event("input", { bubbles: true }));
+      status.textContent = `Read ${file.name}`;
+    };
+    r.onerror = () => { status.textContent = `Could not read ${file.name}`; };
+    r.readAsText(file);
+  });
+  return el("div", { class: "upload-into" }, el("span", { class: "upload-into-label", text: f.upload }), input, status);
 }
 
 // formTabs lays out one form section's fields: those with no tab, then a
@@ -6888,7 +6952,13 @@ async function renderCreatePage(view, route) {
       const name = await submitCreate(target, caps.create, fields.values(), (o) => { once = o; });
       notify(`Created ${name}`);
       announce(`Created ${name}`);
-      navigate(target.path);
+      // A create that goes on to an action of what it made (#1851): Create
+      // key ring opens the ring's page with Create key.
+      if (caps.create.then && name) {
+        const next = new URL(detailHref(target, [name]), location.origin);
+        next.searchParams.set("action", caps.create.then);
+        navigate(next.pathname + next.search);
+      } else navigate(target.path);
       if (once) showOneTime(once);
     } catch (err) {
       setBusy(primary, false);

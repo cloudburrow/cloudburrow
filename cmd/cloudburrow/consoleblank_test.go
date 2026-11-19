@@ -358,6 +358,12 @@ func blankCheckDeps(t *testing.T) consoleDeps {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// A regional secret, for the Regional secrets page (#1850).
+	if _, err := (secretsProvider{svc: d.secrets}).Create(ctx, blankProject, map[string]string{
+		"secretId": "blank-regional", "payload": "x", "location": "us-central1",
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	// Cloud KMS: a key ring holding one key, through the running API.
 	d.kms = &kmsService{cfg: cfg, db: store.NewMemory()}

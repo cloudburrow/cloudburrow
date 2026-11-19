@@ -2247,3 +2247,8 @@ svg.bq-chart { display: block; border: 1px solid var(--border); border-radius: v
 .form-template { display: flex; gap: 8px; align-items: flex-start; margin: 6px 0; }
 .form-template pre { margin: 0; flex: 1; overflow-x: auto; }
 @media (max-width: 720px) { .spanner-studio { grid-template-columns: minmax(0, 1fr); } .spanner-explorer { border-right: 0; } }
+
+/* Upload file beside a textarea (Field.Upload, #1850). */
+.upload-into { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; }
+.upload-into-label { font-size: var(--text-caption-size); color: var(--text-muted); }
+.upload-into-input { max-width: 100%; }

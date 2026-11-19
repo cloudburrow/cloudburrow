@@ -84,14 +84,17 @@ type Resource struct {
 	// that implements ObjectStore: the row offers download, preview and
 	// delete for it.
 	Object []string `json:"object,omitempty"`
+	// Selectable lets a row of a resource page's listing be checked for the
+	// listing's SelectActions without being an Object: a key's versions,
+	// checked for Disable, Enable, Destroy and Restore (#1851); and a list
+	// screen's row its selection actions take (SelectionLister): a build
+	// awaiting approval, which History's Approve takes with the others
+	// checked (#1854).
+	Selectable bool `json:"selectable,omitempty"`
 	// Size and ContentType describe an Object row, so the page offers a
 	// preview only where the server would give one.
 	Size        int64  `json:"size,omitempty"`
 	ContentType string `json:"contentType,omitempty"`
-	// Selectable marks a list screen's row its selection actions take
-	// (SelectionLister): a build awaiting approval, which History's
-	// Approve takes with the others checked (#1854).
-	Selectable bool `json:"selectable,omitempty"`
 }
 
 // Listing is a page of resources.
@@ -372,6 +375,11 @@ type Field struct {
 	// field is neither checked nor submitted. Cloud SQL's Database version
 	// lists the chosen engine's versions only (#1860).
 	VisibleWhen map[string]string `json:"visibleWhen,omitempty"`
+	// Upload, on a textarea, is the label of a file chooser beside it whose
+	// text file is read into the textarea, as Google's Create secret takes
+	// the Secret value typed or from Upload file (#1850). The value is still
+	// the textarea's, so nothing else about the form changes.
+	Upload string `json:"upload,omitempty"`
 }
 
 // GroupFieldType is the Type of a repeatable group of fields (Field.Group).
@@ -555,6 +563,14 @@ type CreateChecker interface {
 type CreateSubmitter interface {
 	Creator
 	CreateSubmit() string
+}
+
+// CreateThener is a Creator whose create page goes on to an action of the
+// resource it made, opened on that resource's page: Create key ring goes on
+// to Create key, as Google's flow does (#1851).
+type CreateThener interface {
+	Creator
+	CreateThen() string
 }
 
 // Pager is a provider whose listings can be continued past their first page.
@@ -1847,6 +1863,8 @@ type createForm struct {
 	// reads them from /api/createform/{service}?project= each time it
 	// opens (ProjectCreateFormer), not from these, read once per load.
 	PerProject bool `json:"perProject,omitempty"`
+	// Then is CreateThener's: the action the made resource's page opens.
+	Then string `json:"then,omitempty"`
 }
 
 // ProjectCreateFormer is a Creator whose fields depend on the project, as
@@ -1902,6 +1920,9 @@ func (s *Server) capabilitiesOf(p Provider) capabilities {
 		}
 		if _, ok := p.(ProjectCreateFormer); ok {
 			c.Create.PerProject = true
+		}
+		if ct, ok := p.(CreateThener); ok {
+			c.Create.Then = ct.CreateThen()
 		}
 	}
 	if e, ok := p.(Executor); ok {
@@ -2768,7 +2789,7 @@ func (s *Server) handleDetail(w http.ResponseWriter, r *http.Request) {
 	// the same call the reveal route makes — so the button and the route agree
 	// by construction rather than by two lists being kept in step.
 	if revealer, ok := p.(Revealer); ok && detail.Reveal == "" && revealer.CanReveal(path) {
-		detail.Reveal = "Show value"
+		detail.Reveal = "View secret value"
 	}
 	// The form for this resource, from the same call the query route validates
 	// against — so a control the page draws is one the route will accept.

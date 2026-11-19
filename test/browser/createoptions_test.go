@@ -24,6 +24,8 @@ func editDefaults(t *testing.T, service, project string, path ...string) map[str
 		Edit struct {
 			Fields []struct{ Name, Default string }
 		}
+		// The page header's properties too (#1851: a key's).
+		Summary  []struct{ Label, Value string }
 		Sections []struct {
 			Groups []struct {
 				Properties []struct{ Label, Value string }
@@ -36,6 +38,9 @@ func editDefaults(t *testing.T, service, project string, path ...string) map[str
 	out := map[string]string{}
 	for _, f := range d.Edit.Fields {
 		out[f.Name] = f.Default
+	}
+	for _, pr := range d.Summary {
+		out[pr.Label] = pr.Value
 	}
 	for _, s := range d.Sections {
 		for _, g := range s.Groups {
@@ -194,10 +199,10 @@ func TestPubSubCreateOptionsThroughTheForms(t *testing.T) {
 	}
 }
 
-// TestKMSCreateKeyOptionsThroughTheForm (#852), in the run shard, whose
-// instance serves Cloud KMS: Create key on a ring's page offers the destroy
-// scheduled duration, defaulted to Cloud KMS's 30 days, and the rotation
-// schedule; a key created there with 3 days and a 30-day period reads both
+// TestKMSCreateKeyOptionsThroughTheForm (#852, #1851), in the run shard,
+// whose instance serves Cloud KMS: Create key on a ring's page offers the
+// Duration of 'scheduled for destruction' state, defaulted to Cloud KMS's
+// 30 days, and the Rotation period, defaulted to 90 days as Google's is; a key created there with 3 days and a 30-day period reads both
 // back through the console API.
 func TestKMSCreateKeyOptionsThroughTheForm(t *testing.T) {
 	needService(t, "kms")
@@ -211,24 +216,25 @@ func TestKMSCreateKeyOptionsThroughTheForm(t *testing.T) {
 	p.navigate("/kms/keyrings?project=" + project)
 	p.clickText("#view tbody a", ring)
 	p.clickText("#view .page-actions button", "Create key")
-	p.waitFor(`document.querySelector(".modal.is-open #f-destroyScheduledDuration") !== null`)
+	p.waitFor(`document.querySelector(".modal.is-open #f-destroyScheduledDays") !== null`)
 	var defaults struct{ Destroy, Period string }
-	p.eval(`({ Destroy: document.querySelector(".modal.is-open #f-destroyScheduledDuration").value,
+	p.eval(`({ Destroy: document.querySelector(".modal.is-open #f-destroyScheduledDays").value,
 	           Period: document.querySelector(".modal.is-open #f-rotationPeriod").value })`, &defaults)
-	if defaults.Destroy != "30d" || defaults.Period != "" {
-		t.Errorf("Create key opened with destroy %q, period %q; want 30d and none", defaults.Destroy, defaults.Period)
+	if defaults.Destroy != "30" || defaults.Period != "90d" {
+		t.Errorf("Create key opened with destroy %q, period %q; want 30 days and 90d", defaults.Destroy, defaults.Period)
 	}
 	next := time.Now().UTC().Add(10 * 24 * time.Hour).Truncate(time.Second).Format(time.RFC3339)
 	setField(p, ".modal.is-open", "f-cryptoKeyId", "k")
-	setField(p, ".modal.is-open", "f-destroyScheduledDuration", "3d")
+	setField(p, ".modal.is-open", "f-destroyScheduledDays", "3")
 	setField(p, ".modal.is-open", "f-rotationPeriod", "30d")
 	setField(p, ".modal.is-open", "f-nextRotationTime", next)
 	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	got := editDefaults(t, "kms", project, ring, "k")
-	if got["Destroy scheduled duration"] != "72h0m0s" || got["rotationPeriod"] != "30d" || got["nextRotationTime"] != next {
+	const destroy = "Duration of 'scheduled for destruction' state"
+	if got[destroy] != "3 days" || got["rotationPeriod"] != "30d" || got["nextRotationTime"] != next {
 		t.Errorf("the key created in the browser reads destroy %q, period %q, next %q",
-			got["Destroy scheduled duration"], got["rotationPeriod"], got["nextRotationTime"])
+			got[destroy], got["rotationPeriod"], got["nextRotationTime"])
 	}
 }
 
@@ -346,13 +352,13 @@ func TestCloudRunJobExecuteWithOverridesThroughTheForm(t *testing.T) {
 
 func lastPathSegment(s string) string { return s[strings.LastIndex(s, "/")+1:] }
 
-// TestSecretCreateReplicationPolicyThroughTheForm (#857): Create secret, on
+// TestSecretManagerCreateReplicationPolicyThroughTheForm (#857): Create secret, on
 // its own page, offers the replication policy, Automatic by default or
 // User-managed, and its locations; User-managed with no location is refused
 // on the form with the console's explanation, and a secret created there
 // with two locations reads the policy and both locations back through the
 // console API.
-func TestSecretCreateReplicationPolicyThroughTheForm(t *testing.T) {
+func TestSecretManagerCreateReplicationPolicyThroughTheForm(t *testing.T) {
 	needService(t, "secrets")
 	p := open(t)
 	project := uniqueProject(t)
@@ -367,23 +373,20 @@ func TestSecretCreateReplicationPolicyThroughTheForm(t *testing.T) {
 		Policy   string
 		Location bool
 	}
+	// Google's two choices, as radio buttons (#1850).
 	p.eval(`(() => { const q = (s) => document.querySelector("#view " + s);
-		return { Policies: [...q("#f-replication").options].map((o) => o.value), Policy: q("#f-replication").value,
-		         Location: q("#f-locations") !== null }; })()`, &form)
+		return { Policies: [...document.querySelectorAll('#view input[name="f-replication-choice"]')].map((o) => o.value),
+		         Policy: q("#f-replication").value, Location: q("#f-locations") !== null }; })()`, &form)
 	if strings.Join(form.Policies, ",") != "Automatic,User-managed" || form.Policy != "Automatic" || !form.Location {
 		t.Errorf("Create secret opened with %+v; want Automatic or User-managed, Automatic chosen, and a locations field", form)
 	}
 	setField(p, "#view", "f-secretId", id)
 	setField(p, "#view", "f-payload", "value")
-	setField(p, "#view", "f-replication", "User-managed")
+	p.clickText("#view label", "Manually manage locations for this secret")
+	p.waitFor(`!document.querySelector("#view #f-locations").closest(".form-row").hidden`)
+	// Locations is required once shown, so the form refuses it unsent.
 	p.run(chromedp.Click(chromedp.CSS(`#view button[type="submit"]`)))
-	p.waitFor(`!document.querySelector("#view .form-error").hidden`)
-	var refusal string
-	p.eval(`document.querySelector("#view .form-error").textContent`, &refusal)
-	if !strings.Contains(refusal, "needs at least one location") {
-		t.Errorf("User-managed with no location was refused on the form with %q", refusal)
-	}
-	p.forgive()
+	p.waitFor(`document.querySelector("#view #f-locations").getAttribute("aria-invalid") === "true"`)
 
 	setField(p, "#view", "f-locations", "us-east1, europe-west1")
 	p.run(chromedp.Click(chromedp.CSS(`#view button[type="submit"]`)))

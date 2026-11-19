@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	urlpkg "net/url"
 	"slices"
@@ -506,69 +507,13 @@ const secretsFilterHelp = "Secret Manager's filter syntax: name:app, labels.env=
 // ListFiltered lists the project's secrets that match filter, in the API's
 // own filter syntax, evaluated by the same code as ListSecrets (#1228).
 func (p secretsProvider) ListFiltered(ctx context.Context, project, filter string) (console.Listing, error) {
-	st := p.svc.Store()
-	if st == nil {
-		return console.Listing{}, fmt.Errorf("Secret Manager has not started")
-	}
-	if project == "" {
-		return console.Listing{
-			Columns: []string{"Versions"},
-			Noun:    "secrets",
-			Prompt:  "Secret Manager lists secrets per project. Choose one in the toolbar.",
-		}, nil
-	}
-	if err := p.faults.Apply(ctx, "secretmanager", secretmanagerpb.SecretManagerService_ListSecrets_FullMethodName, projectResource(project)); err != nil {
-		return console.Listing{}, err
-	}
-
-	sf := &console.ServerFilter{Value: filter, Placeholder: "labels.env=prod AND name:app", Help: secretsFilterHelp}
-	all, err := st.ListSecretsFiltered(project, filter)
-	if err == nil {
-		// The project's regional secrets (#1519), location by location,
-		// under the same filter.
-		var regional []secrets.Secret
-		if regional, err = st.ListRegionalSecretsFiltered(project, filter); err == nil {
-			all = append(all, regional...)
-		}
-	}
-	if err != nil {
-		if filter == "" {
+	if project != "" {
+		if err := p.faults.Apply(ctx, "secretmanager", secretmanagerpb.SecretManagerService_ListSecrets_FullMethodName, projectResource(project)); err != nil {
 			return console.Listing{}, err
 		}
-		// A refused filter is reported on the box, with no rows, so the
-		// screen keeps the box to correct it in.
-		sf.Error = err.Error()
-		return console.Listing{Columns: []string{"Location", "Versions", "Created", "Expires"}, Noun: "secrets", ServerFilter: sf}, nil
 	}
-	items := make([]console.Resource, 0, len(all))
-	for _, s := range all {
-		expires := "Never"
-		if !s.Expire.IsZero() {
-			expires = s.Expire.Format(time.RFC3339)
-		}
-		versions, vErr := st.ListVersions(secretAt(project, s.Name))
-		count := "—"
-		if vErr == nil {
-			count = fmt.Sprint(len(versions))
-		}
-		location := "global"
-		if _, l := secrets.SplitScope(secretScope(project, s.Name)); l != "" {
-			location = l
-		}
-		items = append(items, console.Resource{
-			Name: s.Name,
-			Fields: map[string]string{
-				"Location": location,
-				"Versions": count,
-				"Created":  s.Created.Format(time.RFC3339),
-				"Expires":  expires,
-			},
-		})
-	}
-	return console.Listing{
-		Columns: []string{"Location", "Versions", "Created", "Expires"}, Noun: "secrets", Items: items, Total: len(items),
-		ServerFilter: sf,
-	}, nil
+	// The global secrets; the regional ones are on Regional secrets (#1850).
+	return p.secretsListing(ctx, project, filter, false)
 }
 
 // secretAt is the Store scope and ID of the secret a console path names
@@ -3897,7 +3842,7 @@ func (p secretsProvider) Detail(_ context.Context, project string, path []string
 	}
 
 	versions := console.Listing{
-		Columns:      []string{"State", "Created", "Destroyed"},
+		Columns:      []string{"State", "Aliases", "Created", "Scheduled for destruction", "Destroyed"},
 		NameColumn:   "Version",
 		Noun:         "versions",
 		AlwaysStatus: true,
@@ -3908,19 +3853,31 @@ func (p secretsProvider) Detail(_ context.Context, project string, path []string
 	} else {
 		// Newest first: the current version is what someone came to check.
 		sort.Slice(all, func(i, j int) bool { return all[i].Number > all[j].Number })
+		aliases := secretVersionAliases(secret)
 		for _, v := range all {
-			destroyed := "—"
+			destroyed, scheduled := "—", "—"
 			if !v.Destroyed.IsZero() {
 				destroyed = v.Destroyed.Format(time.RFC3339)
 			}
+			if !v.ScheduledDestroy.IsZero() {
+				scheduled = v.ScheduledDestroy.Format(time.RFC3339)
+			}
+			va := "—"
+			if a := aliases[v.Number]; len(a) > 0 {
+				va = strings.Join(a, ", ")
+			}
+			href := "/secrets/" + urlpkg.PathEscape(path[0]) + "/" + strconv.Itoa(v.Number) + "?reveal=1"
 			versions.Items = append(versions.Items, console.Resource{
 				Name:   fmt.Sprint(v.Number),
 				Status: string(v.State),
 				Fields: map[string]string{
-					"State":     string(v.State),
-					"Created":   v.Created.Format(time.RFC3339),
-					"Destroyed": destroyed,
+					"State":                     string(v.State),
+					"Aliases":                   va,
+					"Created":                   v.Created.Format(time.RFC3339),
+					"Scheduled for destruction": scheduled,
+					"Destroyed":                 destroyed,
 				},
+				Actions: secretVersionRowActions(secret, v, st.Now(), href),
 			})
 		}
 		versions.Total = len(versions.Items)
@@ -3930,67 +3887,29 @@ func (p secretsProvider) Detail(_ context.Context, project string, path []string
 		// holds to anyone who opened a page. A value is shown only from the
 		// version's own page, only when asked for, and the asking is recorded.
 		versions.RowsOpenable = true
-		versions.Note = "Open a version to see its state, or to show its value. " +
+		versions.Note = "Each version's Actions menu has View secret value, Disable, Enable and Destroy. " +
 			"Payloads are never included in this list."
-	}
-
-	config := console.Section{
-		ID: "configuration", Label: "Configuration", Kind: console.KindProperties,
-		Groups: []console.PropertyGroup{
-			{Heading: "Replication", Properties: replicationProperties(secret)},
-			{Heading: "Encryption", Properties: secretEncryptionProperties(secret)},
-			{Heading: "Expiration", Properties: []console.Property{{Label: "Expire time", Value: secretExpiry(secret)}}},
-			{Heading: "Notifications", Properties: []console.Property{{Label: "Pub/Sub topics", Value: secretTopicsText(secret)}}},
-		},
-		// Replication is fixed at creation in the real API, so the edit form
-		// covers labels and annotations and says so rather than offering a
-		// field the API would refuse.
-		Note: "Labels, annotations, the expiry, the notification topics, the rotation and the destruction delay can be " +
-			"edited. Replication is fixed when the secret is created, except for its customer-managed encryption keys " +
-			"(Change encryption keys).",
-	}
-	config.Groups = append(config.Groups, secretScheduleProperties(secret)...)
-	if len(secret.Labels) > 0 {
-		config.Groups = append(config.Groups, console.PropertyGroup{
-			Heading: "Labels", Properties: sortedPairs(secret.Labels),
-		})
-	}
-	if len(secret.Annotations) > 0 {
-		config.Groups = append(config.Groups, console.PropertyGroup{
-			Heading: "Annotations", Properties: sortedPairs(secret.Annotations),
-		})
 	}
 
 	return console.Detail{
 		Summary: []console.Property{
+			{Label: "Location", Value: secretLocationText(secret)},
+			{Label: "Encryption", Value: secretEncryptionText(secret)},
 			{Label: "Created", Value: secret.Created.Format(time.RFC3339)},
-			{Label: "Expires", Value: secretExpiry(secret)},
-			{Label: "Versions", Value: fmt.Sprint(len(versions.Items))},
-			{Label: "Next version", Value: fmt.Sprint(secret.NextVersion)},
+			{Label: "Expiration", Value: secretExpiry(secret)},
 		},
+		// Google's tabs: Overview, Versions, Permissions, Logs (#1850).
 		Sections: []console.Section{
+			secretOverview(secret, len(versions.Items)),
 			{ID: "versions", Label: "Versions", Listing: versions},
-			config,
+			{ID: "permissions", Kind: console.KindPermissions},
+			{ID: "logs", Label: "Logs", Kind: console.KindLogs},
 		},
 		Edit: &console.EditForm{
-			Label: "Edit secret",
-			Fields: append([]console.Field{
-				{Name: "labels", Label: "Labels", Type: "map",
-					Default: console.FormatMap(secret.Labels),
-					Help:    "One key=value per line. Replaces the whole set."},
-				{Name: "annotations", Label: "Annotations", Type: "map",
-					Default: console.FormatMap(secret.Annotations),
-					Help:    "One key=value per line. Replaces the whole set."},
-				{Name: "expireTime", Label: "Expire time", Type: "text", Section: "Expiration",
-					Default: expireDefault(secret), Pattern: secretExpireTimePattern,
-					Help: secretExpireTimeHelp + " Clear it, and the TTL, to remove the expiry."},
-				{Name: "ttl", Label: "TTL", Type: "text", Section: "Expiration", Pattern: secretTTLPattern,
-					Help: secretTTLHelp + " It replaces the expire time."},
-				{Name: "topics", Label: "Pub/Sub topics", Type: "textarea", Section: "Notifications",
-					Default: strings.Join(secret.Topics, "\n"), Help: secretTopicsHelp + " Clear it to stop the notifications."},
-			}, secretScheduleFields(&secret)...),
-			Note: "Replication cannot be changed after a secret is created, so it " +
-				"is not offered here.",
+			Label:  "Edit secret",
+			Fields: secretOptionalFields(&secret),
+			Note: "Replication cannot be changed after a secret is created, so it is not offered here; " +
+				"Change encryption keys changes its customer-managed keys.",
 		},
 	}, nil
 }
@@ -4086,14 +4005,7 @@ func (p secretsProvider) DetailActions(_ context.Context, project string, path [
 		if err != nil {
 			return nil
 		}
-		return []console.Action{{
-			ID: "addversion", Label: "Add version",
-			Fields: []console.Field{{
-				Name: "payload", Label: "Secret value", Type: "textarea", Required: true,
-				Help: "Stored as UTF-8 bytes. This becomes the new enabled version; " +
-					"earlier versions keep the state they have.",
-			}},
-		}, secretAdvanceClockAction(), secretKeysAction(sec)}
+		return []console.Action{secretAddVersionAction(), secretAdvanceClockAction(), secretKeysAction(sec)}
 	case 2:
 		// What is offered depends on the version's current state. Enabling an
 		// enabled version and destroying a destroyed one are both buttons that
@@ -4137,15 +4049,10 @@ func (p secretsProvider) ActAt(_ context.Context, project string, path []string,
 	project, id := secretAt(project, path[0])
 
 	switch action {
-	case "addversion":
-		payload := values["payload"]
-		if payload == "" {
-			// Refused here rather than stored: an empty version is
-			// indistinguishable from a mistake, and the API would accept it.
-			return fmt.Errorf("a version needs a value")
-		}
-		_, err := st.AddVersion(project, id, []byte(payload))
-		return err
+	case actSecretAddVersion:
+		// An empty value is refused rather than stored: an empty version
+		// is indistinguishable from a mistake, and the API would accept it.
+		return addSecretVersion(st, project, id, values)
 	case "enable":
 		_, err := st.SetVersionState(project, id, path[1], secrets.StateEnabled)
 		return err
@@ -4214,6 +4121,7 @@ func (p secretsProvider) Edit(_ context.Context, project string, path []string, 
 	if len(path) != 1 {
 		return fmt.Errorf("only a secret can be edited, not a version")
 	}
+	values = secretFormValues(values)
 	labels, err := console.ParseMap(values["labels"])
 	if err != nil {
 		return fmt.Errorf("labels: %w", err)
@@ -4241,9 +4149,14 @@ func (p secretsProvider) Edit(_ context.Context, project string, path []string, 
 	if err != nil {
 		return err
 	}
+	aliases, err := secretAliasesValue(values["versionAliases"])
+	if err != nil {
+		return err
+	}
 	// The rotation and the delay go only when changed too: an unchanged
 	// next rotation time under 5 minutes away would be refused (#1278).
 	_, err = st.UpdateSecretFields(project, id, secrets.SecretUpdate{
+		VersionAliases: aliases, UpdateVersionAliases: !maps.Equal(aliases, current.VersionAliases),
 		Labels: labels, Annotations: annotations, UpdateLabels: true, UpdateAnnotations: true,
 		Expire: expire, UpdateExpire: true,
 		Topics: topics, UpdateTopics: !slices.Equal(topics, current.Topics),
@@ -4336,37 +4249,7 @@ func secretExpireValue(values map[string]string, st *secrets.Store) (time.Time, 
 // real console asks for the first value in the same step, and a two-step
 // create would leave an empty secret behind whenever the second step failed.
 func (p secretsProvider) CreateForm() (string, []console.Field) {
-	return "Create secret", []console.Field{
-		{Name: "secretId", Label: "Name", Type: "text", Required: true,
-			Help:    "Up to 255 characters: letters, digits, hyphens and underscores.",
-			Pattern: `^[A-Za-z0-9_\-]{1,255}$`},
-		{Name: "payload", Label: "Secret value", Type: "textarea", Required: true,
-			Help: "Stored as UTF-8 bytes and becomes version 1."},
-		{Name: "labels", Label: "Labels", Type: "map",
-			Help: "Optional. One key=value per line."},
-		{Name: "annotations", Label: "Annotations", Type: "map",
-			Help: "Optional. One key=value per line."},
-		{Name: "expireTime", Label: "Expire time", Type: "text", Section: "Expiration",
-			Pattern: secretExpireTimePattern, Help: secretExpireTimeHelp},
-		{Name: "ttl", Label: "TTL", Type: "text", Section: "Expiration",
-			Pattern: secretTTLPattern, Help: secretTTLHelp},
-		{Name: "topics", Label: "Pub/Sub topics", Type: "textarea", Section: "Notifications",
-			Help: secretTopicsHelp},
-		secretScheduleFields(nil)[0], secretScheduleFields(nil)[1], secretScheduleFields(nil)[2],
-		{Name: "replication", Label: "Replication policy", Type: "select", Section: "Replication policy",
-			Options: []string{replicationAutomatic, replicationUserManaged}, Default: replicationAutomatic,
-			Help: "Recorded and returned as set; there is one local store either way. It cannot be changed " +
-				"after the secret is created."},
-		{Name: "locations", Label: "Locations", Type: "text", Section: "Replication policy",
-			Pattern: `^[a-z0-9\-]+(\s*,\s*[a-z0-9\-]+)*$`,
-			Help:    "User-managed only: the replica locations, comma-separated, for example us-east1, europe-west1."},
-		{Name: "location", Label: "Location", Type: "text", Section: "Replication policy",
-			Pattern: `^[a-z0-9\-]*$`,
-			Help: "Optional. A region, for example us-central1, makes a regional secret (#1519), served as " +
-				"secretmanager.{location}.rep.googleapis.com serves it: its data stays in that location, it has no " +
-				"replication policy, and its customer-managed key must be in that location. Empty is a global secret."},
-		secretKMSKeysField(),
-	}
+	return "Create secret", secretCreateFields(false)
 }
 
 // The Create secret form's replication choices (#857).
@@ -4434,9 +4317,14 @@ func (p secretsProvider) Create(_ context.Context, project string, values map[st
 	if project == "" {
 		return "", fmt.Errorf("choose a project first")
 	}
+	values = secretFormValues(values)
 	labels, err := console.ParseMap(values["labels"])
 	if err != nil {
 		return "", fmt.Errorf("labels: %w", err)
+	}
+	aliases, err := secretAliasesValue(values["versionAliases"])
+	if err != nil {
+		return "", err
 	}
 	annotations, err := console.ParseMap(values["annotations"])
 	if err != nil {
@@ -4483,6 +4371,14 @@ func (p secretsProvider) Create(_ context.Context, project string, values map[st
 		}
 		return "", fmt.Errorf("adding the first version failed, so the secret was "+
 			"not created: %w", err)
+	}
+	if len(aliases) > 0 {
+		// Version aliases are set by an update once version 1 exists, as
+		// CreateSecret takes none here; a refused alias undoes the create.
+		if _, err := st.UpdateSecretFields(project, id, secrets.SecretUpdate{VersionAliases: aliases, UpdateVersionAliases: true}); err != nil {
+			_ = st.DeleteSecret(project, id)
+			return "", fmt.Errorf("the version aliases were refused, so the secret was not created: %w", err)
+		}
 	}
 	return sec.Name, nil
 }

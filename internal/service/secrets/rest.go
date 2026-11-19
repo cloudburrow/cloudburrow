@@ -400,7 +400,7 @@ func (h *RESTServer) patchSecret(w http.ResponseWriter, r *http.Request) error {
 			Annotations: body.GetAnnotations(), Etag: body.GetEtag(), Replication: body.GetReplication(),
 			Expiration: body.GetExpiration(), Topics: body.GetTopics(),
 			Rotation: body.GetRotation(), VersionDestroyTtl: body.GetVersionDestroyTtl(),
-			CustomerManagedEncryption: body.GetCustomerManagedEncryption()},
+			CustomerManagedEncryption: body.GetCustomerManagedEncryption(), VersionAliases: body.GetVersionAliases()},
 		UpdateMask: &fieldmaskpb.FieldMask{Paths: paths},
 	}); err != nil {
 		return err
