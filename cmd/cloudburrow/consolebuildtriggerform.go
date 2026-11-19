@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	cbpb "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
+	"cloud.google.com/go/iam/admin/apiv1/adminpb"
 	"google.golang.org/protobuf/encoding/protojson"
 	"gopkg.in/yaml.v3"
 
@@ -71,6 +72,15 @@ func (p buildTriggersProvider) triggerFields(ctx context.Context, project string
 	if groups := p.defaultServiceAccount(ctx, project); len(groups) > 0 && len(groups[0].Properties) > 0 {
 		sa = groups[0].Properties[0].Value
 	}
+	// The project's IAM service accounts (#1854), by email, as Google lists them.
+	saOptions, saLabels := []string{defaultServiceAccountChoice}, map[string]string{defaultServiceAccountChoice: sa}
+	for _, email := range p.serviceAccounts(project) {
+		name := "projects/" + project + "/serviceAccounts/" + email
+		saOptions, saLabels[name] = append(saOptions, name), email
+	}
+	if t != nil && t.GetServiceAccount() != "" && saLabels[t.GetServiceAccount()] == "" {
+		saOptions, saLabels[t.GetServiceAccount()] = append(saOptions, t.GetServiceAccount()), t.GetServiceAccount()
+	}
 	fileShown := "config=" + cfgFile
 	fields := []console.Field{
 		{Name: "name", Label: "Name", Type: "text", Required: true, Pattern: "^[a-zA-Z0-9][\\-a-zA-Z0-9_]{0,62}$",
@@ -82,7 +92,7 @@ func (p buildTriggersProvider) triggerFields(ctx context.Context, project string
 
 		{Name: "event", Label: "Event", Type: "radio", Section: "Event", Default: evPushBranch,
 			Options:            []string{evPushBranch, evPushTag, evPullRequest, evManual, evPubsub, evWebhook},
-			UnavailableOptions: map[string]string{evPullRequest: "No pull request is served: Secure Source Manager here takes pushes only."},
+			UnavailableOptions: map[string]string{evPullRequest: "No pull request is served: this instance's Secure Source Manager has no pull requests (its pull request methods are UNIMPLEMENTED), so it takes pushes only."},
 			Help:               "Repository event that invokes trigger, or another event."},
 		{Name: "topic", Label: "Subscription", Type: "text", Section: "Event", ShowWhen: "event=" + evPubsub,
 			Pattern: `^projects/[^/]+/topics/[^/]+$`,
@@ -129,8 +139,9 @@ func (p buildTriggersProvider) triggerFields(ctx context.Context, project string
 			OptionLabels: map[string]string{"": "Default pool"},
 			Help:         "A worker pool on Worker pools; a build that names one runs on the host's Docker, with the pool recorded."},
 		{Name: "serviceAccount", Label: "Service account", Type: "select", Section: "Advanced", Default: defaultServiceAccountChoice,
-			Options: []string{defaultServiceAccountChoice}, OptionLabels: map[string]string{defaultServiceAccountChoice: sa},
-			Help: "Builds run as the project's default build service account: this instance runs no user-specified account."},
+			Options: saOptions, OptionLabels: saLabels,
+			Help: "The account the trigger's builds run as: the metadata server names it to every step, and its tokens are its. " +
+				"A user-specified account's build must log to its own bucket (logsBucket) or to Cloud Logging only (options.logging: CLOUD_LOGGING_ONLY)."},
 	}
 	if t == nil {
 		return fields
@@ -155,6 +166,9 @@ func triggerValues(t *cbpb.BuildTrigger) map[string]string {
 	v := map[string]string{"name": t.GetName(), "region": strings.Split(t.GetResourceName(), "/")[3],
 		"description": t.GetDescription(), "tags": strings.Join(t.GetTags(), ", "), "event": evManual,
 		"pool": t.GetBuild().GetOptions().GetPool().GetName(), "substitutions": console.FormatMap(t.GetSubstitutions())}
+	if t.GetServiceAccount() != "" {
+		v["serviceAccount"] = t.GetServiceAccount()
+	}
 	switch {
 	case t.GetPubsubConfig() != nil:
 		v["event"], v["topic"] = evPubsub, t.GetPubsubConfig().GetTopic()
@@ -186,7 +200,11 @@ func triggerValues(t *cbpb.BuildTrigger) map[string]string {
 		v["config"], v["location"] = cfgFile, locInline
 		if b := t.GetBuild(); b != nil {
 			plain := &cbpb.Build{Steps: b.GetSteps(), Images: b.GetImages(), Substitutions: b.GetSubstitutions(),
-				Timeout: b.GetTimeout(), Tags: b.GetTags()}
+				Timeout: b.GetTimeout(), Tags: b.GetTags(), LogsBucket: b.GetLogsBucket()}
+			if l := b.GetOptions().GetLogging(); l != cbpb.BuildOptions_LOGGING_UNSPECIFIED {
+				// A user-specified account's build keeps its logging (#1854).
+				plain.Options = &cbpb.BuildOptions{Logging: l}
+			}
 			if j, err := protojson.Marshal(plain); err == nil {
 				var doc any
 				if json.Unmarshal(j, &doc) == nil {
@@ -220,7 +238,7 @@ func triggerFromValues(v map[string]string) (*cbpb.BuildTrigger, error) {
 		t.Substitutions = subs
 	}
 	if sa := strings.TrimSpace(v["serviceAccount"]); sa != "" && sa != defaultServiceAccountChoice {
-		return nil, fmt.Errorf("service account %q: builds here run as the default build service account only", sa)
+		t.ServiceAccount = sa
 	}
 	event := v["event"]
 	if event == "" {
@@ -368,4 +386,26 @@ func orText(s, d string) string {
 		return d
 	}
 	return s
+}
+
+// serviceAccounts are the project's live IAM service accounts' emails, in
+// the registry's order, or none without a registry.
+func (p buildTriggersProvider) serviceAccounts(project string) []string {
+	if p.registry == nil {
+		return nil
+	}
+	var out []string
+	resp, err := p.registry.ListServiceAccounts(&adminpb.ListServiceAccountsRequest{Name: "projects/" + project, PageSize: 100})
+	for err == nil {
+		for _, a := range resp.GetAccounts() {
+			if !a.GetDisabled() {
+				out = append(out, a.GetEmail())
+			}
+		}
+		if resp.GetNextPageToken() == "" {
+			break
+		}
+		resp, err = p.registry.ListServiceAccounts(&adminpb.ListServiceAccountsRequest{Name: "projects/" + project, PageSize: 100, PageToken: resp.GetNextPageToken()})
+	}
+	return out
 }

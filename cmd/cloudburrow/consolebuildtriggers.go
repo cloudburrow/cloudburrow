@@ -15,10 +15,16 @@ import (
 
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 )
 
 // buildTriggersProvider is the Triggers page.
-type buildTriggersProvider struct{ b runBuildsProvider }
+type buildTriggersProvider struct {
+	b runBuildsProvider
+	// registry lists the project's IAM service accounts, the Service
+	// account drop-down's choices (#1854); nil offers the default only.
+	registry *resourcemanager.Registry
+}
 
 func (buildTriggersProvider) ID() string    { return "cloud-build-triggers" }
 func (buildTriggersProvider) Title() string { return "Cloud Build triggers" }

@@ -153,8 +153,8 @@ func unsupportedTrigger(t *cbpb.BuildTrigger) error {
 		return repo("autodetect")
 	case t.GetFilter() != "":
 		return apierror.Unimplemented("BuildTrigger field filter (a CEL expression over the event) is not supported")
-	case t.GetServiceAccount() != "":
-		return apierror.Unimplemented("BuildTrigger field serviceAccount is not supported: builds run as the host's Docker, under no account")
+	case t.GetServiceAccount() != "" && checkServiceAccountName("trigger.service_account", t.GetServiceAccount()) != nil:
+		return checkServiceAccountName("trigger.service_account", t.GetServiceAccount())
 	case len(t.GetIncludedFiles()) > 0 || len(t.GetIgnoredFiles()) > 0:
 		return apierror.Unimplemented("BuildTrigger fields includedFiles and ignoredFiles filter repository pushes, which no trigger here has")
 	}
@@ -505,6 +505,8 @@ func (c *CloudBuildServer) runTrigger(ctx context.Context, name, project, trigge
 	for k, v := range extra {
 		b.Substitutions[k] = v
 	}
+	// The trigger's account, never the build config's (#1854).
+	b.ServiceAccount = t.GetServiceAccount()
 	p, l, _ := resource.ParseLocation(strings.SplitN(t.GetResourceName(), "/triggers/", 2)[0])
 	return c.createBuild(ctx, p, l, l == "global", b, &triggerContext{id: t.GetId(), name: t.GetName(), approval: approval})
 }

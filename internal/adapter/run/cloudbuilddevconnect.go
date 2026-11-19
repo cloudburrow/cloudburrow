@@ -35,7 +35,10 @@ import (
 // REVISION_ID, REPO_NAME, REPO_FULL_NAME, REF_NAME, BRANCH_NAME or
 // TAG_NAME). RunBuildTrigger runs one at the head of source.branchName
 // (or tagName, or commitSha), else of the repository's default branch.
-// Pull request filters are refused: no pull request is served.
+// Pull request filters are refused (#1854): this instance's Secure Source
+// Manager serves no pull requests (CreatePullRequest, MergePullRequest and
+// the other pull request methods are UNIMPLEMENTED), so no pull request
+// event can ever happen.
 
 var devConnectLinkRE = regexp.MustCompile(`^projects/[^/]+/locations/[^/]+/connections/[^/]+/gitRepositoryLinks/[^/]+$`)
 
@@ -48,7 +51,7 @@ func devConnectEventError(rc *cbpb.RepositoryEventConfig) error {
 			"of this instance's Secure Source Manager; %q is not one", rc.GetRepository())
 	}
 	if rc.GetPullRequest() != nil {
-		return apierror.Unimplemented("BuildTrigger field repositoryEventConfig.pullRequest is not supported: no pull request is served")
+		return apierror.Unimplemented("BuildTrigger field repositoryEventConfig.pullRequest is not supported: this instance's Secure Source Manager serves no pull requests (its pull request methods are UNIMPLEMENTED)")
 	}
 	push := rc.GetPush()
 	if push == nil || (push.GetBranch() == "" && push.GetTag() == "") {
@@ -159,6 +162,8 @@ func (c *CloudBuildServer) runDevConnectTrigger(ctx context.Context, t *cbpb.Bui
 	triggerStore.mu.Lock()
 	approval := triggerApprovals[t.GetResourceName()]
 	triggerStore.mu.Unlock()
+	// The trigger's account, never the build config's (#1854).
+	b.ServiceAccount = t.GetServiceAccount()
 	p, l, _ := resource.ParseLocation(strings.SplitN(t.GetResourceName(), "/triggers/", 2)[0])
 	return c.createBuild(ctx, p, l, l == "global", b,
 		&triggerContext{id: t.GetId(), name: t.GetName(), approval: approval, subs: subs, archive: archive, source: src})

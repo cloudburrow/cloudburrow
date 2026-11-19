@@ -216,7 +216,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			readyTimeout:   time.Duration(d.cfg.ReadyTimeout),
 		}, runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run), hostSteps: d.cfg.CloudBuildHostSteps},
 			// Cloud Build's triggers and worker pools (#1422).
-			buildTriggersProvider{b: runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)}},
+			buildTriggersProvider{b: runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)}, registry: d.projects},
 			buildWorkerPoolsProvider{b: runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)}},
 			// Cloud Build's Dashboard, Repositories and Settings (#1854).
 			buildDashboardProvider{b: runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)}},

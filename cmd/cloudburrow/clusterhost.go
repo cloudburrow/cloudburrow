@@ -127,6 +127,23 @@ func (h *clusterHost) Address() string {
 	return h.address
 }
 
+// HostAddr is the address, IP:port, at which a container on the host's
+// Docker reaches a published service (#1854): the address pods reach this
+// machine at, and the service's bound port, which a relay listens on too.
+// It is "" before Start or for a service not published.
+func (h *clusterHost) HostAddr(service string) string {
+	if h == nil {
+		return ""
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	port, ok := h.ports[service]
+	if !ok || h.address == "" {
+		return ""
+	}
+	return net.JoinHostPort(h.address, strconv.Itoa(port))
+}
+
 // InClusterAll is every published service's in-cluster address.
 func (h *clusterHost) InClusterAll() map[string]string {
 	if h == nil {

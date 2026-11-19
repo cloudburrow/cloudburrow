@@ -29,6 +29,9 @@ import (
 // Like Cloud Tasks it runs in the CLI process, because the adapter is ours
 // even though the execution engine is the cluster's.
 type runService struct {
+	// stepMetadata is where a build step reaches the metadata server
+	// (#1854), IP:port, or "": set once cloudburrow-host is known.
+	stepMetadata func() string
 	// tracing, when on, spans calls (#313).
 	tracing *telemetry.Tracing
 	// calls reports each completed API call to the admin event log.
@@ -205,7 +208,14 @@ func (r *runService) Start(ctx context.Context) error {
 		runadapter.UseImportReader(sf)
 	}
 	// Arbitrary steps run only with --cloudbuild-host-steps, from loopback (#1382).
-	builds := adapter.Builds(fetch, newLocalImageBuilder(r.cfg)).AllowHostSteps(r.cfg.CloudBuildHostSteps)
+	builder := newLocalImageBuilder(r.cfg)
+	builder.metadataHost = func() string {
+		if r.stepMetadata == nil {
+			return ""
+		}
+		return r.stepMetadata()
+	}
+	builds := adapter.Builds(fetch, builder).AllowHostSteps(r.cfg.CloudBuildHostSteps)
 	builds = builds.WithBuildSecrets(r.buildSecretManager, r.buildKMS)
 	// Pub/Sub triggers subscribe on the instance's Pub/Sub (#1506).
 	if r.events != nil {

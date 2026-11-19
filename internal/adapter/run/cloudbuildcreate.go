@@ -77,7 +77,11 @@ type StepSpec struct {
 	// The runner must pass them without putting a value on a command line
 	// or in a log.
 	Secrets map[string]string
-	Log     io.Writer
+	// ServiceAccount is the email of the account the build runs as
+	// (#1854), and MetadataLabel the metadata server's host label for it
+	// (metadataaccount.go): the runner points GCE_METADATA_HOST at it.
+	ServiceAccount, MetadataLabel string
+	Log                           io.Writer
 }
 
 // ScriptPath is where a step's script is written in its container.
@@ -487,7 +491,6 @@ func unsupportedCreate(b *cbpb.Build) error {
 		}
 	}
 	add(b.GetArtifacts() != nil, "artifacts")
-	add(b.GetServiceAccount() != "", "serviceAccount")
 	add(b.GetGitConfig() != nil, "gitConfig")
 	if o := b.GetOptions(); o != nil {
 		add(len(o.GetSourceProvenanceHash()) > 0, "options.sourceProvenanceHash")
@@ -577,6 +580,10 @@ func (c *CloudBuildServer) createBuild(ctx context.Context, project, location st
 		return nil, apierror.InvalidArgument("invalid build: build must have at least one step")
 	}
 	if err := unsupportedCreate(in); err != nil {
+		return nil, err
+	}
+	account, err := buildAccount(project, in)
+	if err != nil {
 		return nil, err
 	}
 	pool, err := buildPool(location, in.GetOptions())
@@ -708,6 +715,14 @@ func (c *CloudBuildServer) createBuild(ctx context.Context, project, location st
 			}
 		}
 		plan[i] = p
+	}
+	// Each step runs as the build's account (#1854).
+	label := metadataAliasLabel(account)
+	for i := range plan {
+		plan[i].step.ServiceAccount, plan[i].step.MetadataLabel = account, label
+	}
+	if containers && c.builds.s != nil {
+		c.builds.s.aliases.remember(label, account)
 	}
 	var runner StepRunner
 	if containers {
