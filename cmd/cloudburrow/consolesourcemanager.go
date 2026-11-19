@@ -11,7 +11,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
 	"sort"
 	"strings"
 
@@ -23,7 +22,6 @@ import (
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/console"
@@ -107,22 +105,30 @@ func (p sourceManagerProvider) instance(ctx context.Context, project, id string)
 }
 
 func (p sourceManagerProvider) List(ctx context.Context, project string) (console.Listing, error) {
-	out := console.Listing{Columns: []string{"Location", "Git host", "Age"}, NameColumn: "Instance", Noun: "instances",
+	out := console.Listing{Columns: []string{"Region", "Instance URL", "Encryption", "Created"}, NameColumn: "Instance ID", Noun: "instances",
 		AlwaysStatus: true, RowsOpenable: true,
 		Note: "Each instance is ACTIVE when created, and serves its repositories over git's HTTP protocol on this instance's " +
-			"Run port. A push runs the push triggers of the repository's .cloudbuild/triggers.yaml as Cloud Builds. " +
-			"Private instances, pull requests, issues, hooks and branch rules are not served."}
+			"Run port, its web interface being the instance's page here. A push runs the push triggers of the repository's " +
+			".cloudbuild/triggers.yaml as Cloud Builds. Private instances and webhooks are not served."}
 	ins, err := p.instances(ctx, project)
 	if err != nil {
 		return console.Listing{Unavailable: consoleErr(err)}, nil
 	}
 	for _, in := range ins {
 		out.Items = append(out.Items, console.Resource{Name: lastSegment(in.GetName()), Status: stateWord(in.GetState().String()),
-			Fields: map[string]string{"Location": locationOf(in.GetName()), "Git host": orDash(in.GetHostConfig().GetGitHttp()),
-				"Age": stampAge(in.GetCreateTime())}})
+			Fields: map[string]string{"Region": locationOf(in.GetName()), "Instance URL": orDash(in.GetHostConfig().GetHtml()),
+				"Encryption": ssmEncryption(in), "Created": stampAge(in.GetCreateTime())}})
 	}
 	out.Total = len(out.Items)
 	return out, nil
+}
+
+// ssmEncryption is an instance's encryption as the list names it.
+func ssmEncryption(in *ssmpb.Instance) string {
+	if in.GetKmsKey() != "" {
+		return "Customer-managed key"
+	}
+	return "Google-managed key"
 }
 
 // stateWord is an enum value as the list's status: ACTIVE is Active.
@@ -133,23 +139,82 @@ func stateWord(s string) string {
 	return s[:1] + strings.ToLower(strings.ReplaceAll(s[1:], "_", " "))
 }
 
+// ssmRegions are the regions Google's Secure Source Manager locations page
+// lists (https://docs.cloud.google.com/secure-source-manager/docs/locations,
+// read 2026-11-19), each with its city.
+var ssmRegions = []string{"us-central1", "northamerica-northeast1", "us-east1", "asia-east1", "asia-northeast1",
+	"asia-northeast3", "australia-southeast1", "europe-west2", "europe-west4", "me-west1", "me-central2"}
+
+var ssmRegionLabels = map[string]string{"us-central1": "us-central1 (Iowa)", "northamerica-northeast1": "northamerica-northeast1 (Montréal)",
+	"us-east1": "us-east1 (South Carolina)", "asia-east1": "asia-east1 (Taiwan)", "asia-northeast1": "asia-northeast1 (Tokyo)",
+	"asia-northeast3": "asia-northeast3 (Seoul)", "australia-southeast1": "australia-southeast1 (Sydney)",
+	"europe-west2": "europe-west2 (London)", "europe-west4": "europe-west4 (Netherlands)", "me-west1": "me-west1 (Tel Aviv)",
+	"me-central2": "me-central2 (Dammam)"}
+
+const (
+	ssmEncGoogle = "google"
+	ssmEncCMEK   = "cmek"
+)
+
+// ssmPrivateUnavailable is why a private instance cannot be made here.
+const ssmPrivateUnavailable = "A private instance is reached through Private Service Connect, which no CloudBurrow instance provides."
+
+// CreateForm is Create instance, as Google's create-instance page documents
+// it: an Instance ID, its Region, and its encryption, Google-managed or a
+// customer-managed Cloud KMS key in the instance's region.
 func (sourceManagerProvider) CreateForm() (string, []console.Field) {
 	return "Create instance", []console.Field{
-		{Name: "name", Label: "Instance ID", Type: "text", Required: true, Pattern: "^[a-z]([\\-a-z0-9]{0,61}[a-z0-9])?$"},
-		{Name: "region", Label: "Region", Type: "text", Required: true, Default: "us-central1"},
+		{Name: "name", Label: "Instance ID", Type: "text", Required: true, Pattern: "^[a-z]([\\-a-z0-9]{0,61}[a-z0-9])?$",
+			Help: "Lowercase letters, numbers and hyphens, starting with a letter. It cannot be changed later."},
+		{Name: "region", Label: "Region", Type: "select", Required: true, Options: ssmRegions, OptionLabels: ssmRegionLabels, Default: "us-central1"},
+		{Name: "labels", Label: "Labels", Type: "map", KeyPattern: `^\p{Ll}[\p{Ll}\p{Lo}\p{N}_\-]{0,62}$`, ValuePattern: `^[\p{Ll}\p{Lo}\p{N}_\-]{0,63}$`,
+			KeyHelp: "A key is 1 to 63 lowercase letters, digits, _ and -, starting with a lowercase letter.", ValueHelp: "A value is 0 to 63 lowercase letters, digits, _ and -.", MaxEntries: 64},
+		{Name: "private", Label: "Private instance", Type: "checkbox", Default: "false", Unavailable: ssmPrivateUnavailable},
+		{Name: "encryption", Label: "Encryption", Type: "radio", Section: "Encryption", Options: []string{ssmEncGoogle, ssmEncCMEK}, Default: ssmEncGoogle,
+			OptionLabels: map[string]string{ssmEncGoogle: "Google-managed encryption key", ssmEncCMEK: "Customer-managed encryption key (CMEK)"}},
+		{Name: "kmsKey", Label: "Cloud KMS key", Type: "text", Section: "Encryption", Pattern: kmsKeyPattern, Browse: "kms", Required: true,
+			ShowWhen: "encryption=" + ssmEncCMEK,
+			Help:     "A key in the instance's region; it can be in another project. Stored on the instance; the local repositories are not encrypted with it."},
 	}
 }
 
+// CreateOnPage, CreateTitle and CreateSubmit make Create instance a page of
+// its own, ending in Create.
+func (sourceManagerProvider) CreateOnPage() bool   { return true }
+func (sourceManagerProvider) CreateTitle() string  { return "Create instance" }
+func (sourceManagerProvider) CreateSubmit() string { return "Create" }
+
 func (p sourceManagerProvider) Create(ctx context.Context, project string, v map[string]string) (string, error) {
 	project = p.project(project)
+	_, fields := p.CreateForm()
+	if err := refuseUnavailable(v, fields); err != nil {
+		return "", err
+	}
 	id := strings.TrimSpace(v["name"])
 	region := strings.TrimSpace(v["region"])
 	if region == "" {
 		region = "us-central1"
 	}
+	in := &ssmpb.Instance{}
+	if strings.TrimSpace(v["labels"]) != "" {
+		labels, err := arFormLabels(v["labels"])
+		if err != nil {
+			return "", err
+		}
+		in.Labels = labels
+	}
+	if v["encryption"] == ssmEncCMEK {
+		in.KmsKey = strings.TrimSpace(v["kmsKey"])
+		if in.KmsKey == "" {
+			return "", errors.New("a customer-managed encryption key needs its Cloud KMS key")
+		}
+		if loc := locationOf(in.KmsKey); loc != region {
+			return "", fmt.Errorf("the key is in %s: it must be in the instance's region, %s", loc, region)
+		}
+	}
 	err := p.withClient(ctx, func(c *securesourcemanager.Client) error {
 		op, err := c.CreateInstance(ctx, &ssmpb.CreateInstanceRequest{Parent: "projects/" + project + "/locations/" + region,
-			InstanceId: id, Instance: &ssmpb.Instance{}})
+			InstanceId: id, Instance: in})
 		if err != nil {
 			return err
 		}
@@ -211,35 +276,79 @@ func (p sourceManagerProvider) repository(ctx context.Context, in *ssmpb.Instanc
 }
 
 // Detail implements console.Driller: an instance's page, with its
-// repositories, and a repository's page.
+// repositories; a repository's page; and the pages inside a repository:
+// its code at a ref (tree/REF/PATH...), an issue (issues/N) and a pull
+// request (pulls/N).
 func (p sourceManagerProvider) Detail(ctx context.Context, project string, path []string) (console.Detail, error) {
-	if len(path) > 2 {
-		return console.DeeperThan(2, path), nil
-	}
 	in, err := p.instance(ctx, project, path[0])
 	if err != nil {
 		return console.Detail{Unavailable: consoleErr(err)}, nil
 	}
-	if len(path) == 2 {
+	switch {
+	case len(path) == 1:
+		return p.instanceDetail(ctx, project, in)
+	case len(path) == 2:
 		return p.repositoryDetail(ctx, project, in, path[1])
+	case len(path) == 3 && (path[2] == ssmIssuesSegment || path[2] == ssmPullsSegment):
+		// The level above an issue or a pull request, which Delete issue
+		// goes up to: the repository's page on that tab.
+		d, err := p.repositoryDetail(ctx, project, in, path[1])
+		d.OpenTab = path[2]
+		return d, err
+	case len(path) >= 4 && path[2] == ssmTreeSegment:
+		return p.codeDetail(ctx, in, path)
+	case len(path) == 4 && path[2] == ssmIssuesSegment:
+		return p.issueDetail(ctx, in, path)
+	case len(path) == 4 && path[2] == ssmPullsSegment:
+		return p.pullDetail(ctx, in, path)
 	}
+	return console.DeeperThan(2, path), nil
+}
+
+// instanceDetail is an instance's page: its details, with its web
+// interface's URL, then its repositories (Google's web interface's My
+// repositories) and its Developer Connect connections.
+func (p sourceManagerProvider) instanceDetail(ctx context.Context, project string, in *ssmpb.Instance) (console.Detail, error) {
 	hc := in.GetHostConfig()
+	labels := make([]string, 0, len(in.GetLabels()))
+	for k, v := range in.GetLabels() {
+		labels = append(labels, k+": "+v)
+	}
+	sort.Strings(labels)
 	d := console.Detail{Summary: dropDashes([]console.Property{{Label: "Name", Value: in.GetName()},
-		{Label: "State", Value: in.GetState().String()}, {Label: "Git host", Value: hc.GetGitHttp()},
-		{Label: "API host", Value: hc.GetApi()}, {Label: "Created", Value: stampAge(in.GetCreateTime())}})}
+		{Label: "Region", Value: locationOf(in.GetName())},
+		{Label: "State", Value: stateWord(in.GetState().String())},
+		{Label: "Web interface", Value: orDash(httpURL(hc.GetHtml())), Copy: "Copy URL"},
+		{Label: "Git host", Value: hc.GetGitHttp()},
+		{Label: "API host", Value: hc.GetApi()},
+		{Label: "Encryption", Value: ssmEncryption(in)},
+		{Label: "Cloud KMS key", Value: in.GetKmsKey()},
+		{Label: "Labels", Value: strings.Join(labels, ", ")},
+		{Label: "Created", Value: stampAge(in.GetCreateTime())},
+		{Label: "Updated", Value: stampAge(in.GetUpdateTime())}})}
 	repos, err := p.repositories(ctx, in)
 	sec := console.Section{ID: "repositories", Label: "Repositories", Listing: console.Listing{
-		Columns: []string{"Description", "Clone URL", "Age"}, NameColumn: "Repository", Noun: "repositories", RowsOpenable: true}}
+		Columns: []string{"Description", "Clone URL", "Created"}, NameColumn: "Repository", Noun: "repositories", RowsOpenable: true},
+		Note:    "The instance's repositories, as its web interface's My repositories lists them; this console is that web interface here.",
+		Actions: []console.Action{createRepositoryAction()}}
 	if err != nil {
 		sec.Unavailable = consoleErr(err)
 	}
 	for _, r := range repos {
 		sec.Listing.Items = append(sec.Listing.Items, console.Resource{Name: lastSegment(r.GetName()), Fields: map[string]string{
-			"Description": orDash(r.GetDescription()), "Clone URL": r.GetUris().GetGitHttps(), "Age": stampAge(r.GetCreateTime())}})
+			"Description": orDash(r.GetDescription()), "Clone URL": r.GetUris().GetGitHttps(), "Created": stampAge(r.GetCreateTime())}})
 	}
 	sec.Listing.Total = len(sec.Listing.Items)
-	d.Sections = []console.Section{sec, p.connectionsSection(project, in)}
+	d.Sections = []console.Section{sec, p.connectionsSection(project, in), {ID: "permissions", Kind: console.KindPermissions}}
 	return d, nil
+}
+
+// httpURL is a host as a URL a browser opens.
+func httpURL(host string) string {
+	if host == "" || strings.Contains(host, "://") {
+		return host
+	}
+	return "http://" + host
 }
 
 func dropDashes(props []console.Property) []console.Property {
@@ -252,14 +361,29 @@ func dropDashes(props []console.Property) []console.Property {
 	return out
 }
 
-// pushHelp is the repository page's How to push section.
+// ssmInitializeUnavailable is why Initialize repository cannot be chosen.
+const ssmInitializeUnavailable = "The .gitignore, license and README templates are Google's own, which a local instance does not hold: push the files instead."
+
+// createRepositoryAction is the web interface's Create repository form, as
+// Google's create-repository page documents it.
+func createRepositoryAction() console.Action {
+	return console.Action{ID: "create-repo", Label: "Create repository", Submit: "Create repository", Fields: []console.Field{
+		{Name: "id", Label: "Repository ID", Type: "text", Required: true, Pattern: "^[a-z]([\\-a-z0-9]{0,61}[a-z0-9])?$",
+			Help: "Lowercase letters, numbers and dashes, starting with a letter. It cannot be changed later."},
+		{Name: "description", Label: "Description", Type: "text"},
+		{Name: "branch", Label: "Default branch", Type: "text", Default: "main",
+			Help: "the branch a clone checks out, and whose " + runadapter.SourceManagerTriggersFile + " a push's triggers are read from"},
+		{Name: "serviceAccount", Label: "Service account", Type: "text", Pattern: `^[^@\s]+@[^@\s]+$`,
+			Help: "A user-managed service account for integrations such as Cloud Build (optional)."},
+		{Name: "initialize", Label: "Initialize repository", Type: "checkbox", Default: "false", Unavailable: ssmInitializeUnavailable},
+	}}
+}
+
+// pushHelp is how to push to a repository: an empty repository's Code tab.
 func pushHelp(r *ssmpb.Repository) string {
 	clone := r.GetUris().GetGitHttps()
-	branch := r.GetInitialConfig().GetDefaultBranch()
-	if branch == "" {
-		branch = "main"
-	}
-	return "Clone it, or add it as a remote of a repository you have, and push:\n\n" +
+	branch := ssmDefaultBranch(r)
+	return "This repository is empty. Clone it, or add it as a remote of a repository you have, and push:\n\n" +
 		"  git clone " + clone + "\n\n" +
 		"  git remote add google " + clone + "\n" +
 		"  git push google " + branch + "\n\n" +
@@ -268,59 +392,12 @@ func pushHelp(r *ssmpb.Repository) string {
 		"each as a Cloud Build of its configFilePath at the pushed commit."
 }
 
-func (p sourceManagerProvider) repositoryDetail(ctx context.Context, project string, in *ssmpb.Instance, id string) (console.Detail, error) {
-	r, err := p.repository(ctx, in, id)
-	if err != nil {
-		return console.Detail{Unavailable: consoleErr(err)}, nil
+// ssmDefaultBranch is a repository's default branch.
+func ssmDefaultBranch(r *ssmpb.Repository) string {
+	if b := r.GetInitialConfig().GetDefaultBranch(); b != "" {
+		return b
 	}
-	branch := r.GetInitialConfig().GetDefaultBranch()
-	if branch == "" {
-		branch = "main"
-	}
-	d := console.Detail{Summary: dropDashes([]console.Property{{Label: "Name", Value: r.GetName()},
-		{Label: "Description", Value: r.GetDescription()}, {Label: "Clone URL", Value: r.GetUris().GetGitHttps()},
-		{Label: "Default branch", Value: branch}, {Label: "Instance", Value: lastSegment(r.GetInstance())},
-		{Label: "Etag", Value: r.GetEtag()}, {Label: "Created", Value: stampAge(r.GetCreateTime())},
-		{Label: "Updated", Value: stampAge(r.GetUpdateTime())}})}
-	d.Sections = append(d.Sections, console.Section{ID: "push", Label: "How to push", Kind: console.KindText, Text: pushHelp(r)})
-
-	trig := console.Section{ID: "triggers", Label: "Triggers", Listing: console.Listing{
-		Columns: []string{"Event", "Config file", "Branches", "Ignored", "Service account", "Link"}, NameColumn: "Trigger", Noun: "triggers",
-		AlwaysStatus: true}, Note: "Read from " + runadapter.SourceManagerTriggersFile + " on " + branch + "; change them by pushing it."}
-	ts, err := runadapter.SourceManagerTriggers(ctx, r.GetName())
-	if err != nil {
-		trig.Unavailable = consoleErr(err)
-	}
-	for _, t := range ts {
-		st := "Enabled"
-		if t.Disabled {
-			st = "Disabled"
-		}
-		if t.ServiceAccount == "" {
-			st = "No service account"
-		}
-		trig.Listing.Items = append(trig.Listing.Items, console.Resource{Name: t.Name, Status: st, Fields: map[string]string{
-			"Event": t.EventType, "Config file": t.ConfigFilePath, "Branches": orDash(t.IncludedGitRefs),
-			"Ignored": orDash(t.IgnoredGitRefs), "Service account": orDash(t.ServiceAccount), "Link": orDash(lastSegment(t.GitRepositoryLink))}})
-	}
-	trig.Listing.Total = len(trig.Listing.Items)
-	d.Sections = append(d.Sections, trig, p.linksSection(project, in, r))
-
-	builds := console.Section{ID: "builds", Label: "Builds", Listing: console.Listing{
-		Columns: []string{"Commit", "Created"}, NameColumn: "Build", Noun: "builds", AlwaysStatus: true},
-		Note: "The builds pushes to this repository ran, newest first; each opens on Cloud Build's Build history."}
-	bs, err := p.pushBuilds(ctx, project, r)
-	if err != nil {
-		builds.Unavailable = consoleErr(err)
-	}
-	for _, b := range bs {
-		builds.Listing.Items = append(builds.Listing.Items, console.Resource{Name: b.GetId(), Status: stateWord(b.GetStatus().String()),
-			Link:   "/cloud-build/builds/" + url.PathEscape(b.GetId()) + "?project=" + url.QueryEscape(p.project(project)),
-			Fields: map[string]string{"Commit": orDash(shortSHA(b.GetSource().GetGitSource().GetRevision())), "Created": stampAge(b.GetCreateTime())}})
-	}
-	builds.Listing.Total = len(builds.Listing.Items)
-	d.Sections = append(d.Sections, builds)
-	return d, nil
+	return "main"
 }
 
 // shortSHA is a commit's first seven hex digits, as SHORT_SHA is.
@@ -356,34 +433,17 @@ func (p sourceManagerProvider) pushBuilds(ctx context.Context, project string, r
 }
 
 // DetailActions implements console.PathActor: Create repository on an
-// instance's page; Edit description and Delete repository on a
-// repository's.
+// instance's page; a repository's, an issue's, a pull request's, a branch
+// rule's and an issue comment's own actions (consolesourcemanagerrepo.go).
 func (p sourceManagerProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
 	in, err := p.instance(ctx, project, path[0])
 	if err != nil {
 		return nil
 	}
-	switch len(path) {
-	case 1:
-		return append([]console.Action{{ID: "create-repo", Label: "Create repository", Fields: []console.Field{
-			{Name: "id", Label: "Repository ID", Type: "text", Required: true, Pattern: "^[a-z]([\\-a-z0-9]{0,61}[a-z0-9])?$"},
-			{Name: "description", Label: "Description", Type: "text"},
-			{Name: "branch", Label: "Default branch", Type: "text", Default: "main",
-				Help: "the branch a clone checks out, and whose " + runadapter.SourceManagerTriggersFile + " a push's triggers are read from"},
-		}}}, p.connectionActions(project, in)...)
-	case 2:
-		r, err := p.repository(ctx, in, path[1])
-		if err != nil {
-			return nil
-		}
-		return append([]console.Action{
-			{ID: "edit-description", Label: "Edit description", Fields: []console.Field{
-				{Name: "description", Label: "Description", Type: "text", Default: r.GetDescription()}}},
-			{ID: "delete-repo", Label: "Delete repository", Destructive: true, Leaves: true,
-				Confirm: "the repository and every commit pushed to it"},
-		}, p.linkActions(project, in, r)...)
+	if len(path) == 1 {
+		return append([]console.Action{createRepositoryAction()}, p.connectionActions(project, in)...)
 	}
-	return nil
+	return p.repoActions(ctx, project, in, path)
 }
 
 // ActAt implements console.PathActor.
@@ -396,9 +456,12 @@ func (p sourceManagerProvider) ActAt(ctx context.Context, project string, path [
 		return err
 	}
 	parent := in.GetName()[:strings.Index(in.GetName(), "/instances/")]
-	switch {
-	case len(path) == 1 && action == "create-repo":
-		r := &ssmpb.Repository{Instance: in.GetName(), Description: strings.TrimSpace(v["description"])}
+	if len(path) == 1 && action == "create-repo" {
+		if err := refuseUnavailable(v, createRepositoryAction().Fields); err != nil {
+			return err
+		}
+		r := &ssmpb.Repository{Instance: in.GetName(), Description: strings.TrimSpace(v["description"]),
+			ServiceAccount: strings.TrimSpace(v["serviceAccount"])}
 		if b := strings.TrimSpace(v["branch"]); b != "" {
 			r.InitialConfig = &ssmpb.Repository_InitialConfig{DefaultBranch: b}
 		}
@@ -410,32 +473,19 @@ func (p sourceManagerProvider) ActAt(ctx context.Context, project string, path [
 			_, err = op.Wait(ctx)
 			return err
 		})
-	case len(path) == 2 && action == "edit-description":
-		return p.withClient(ctx, func(c *securesourcemanager.Client) error {
-			op, err := c.UpdateRepository(ctx, &ssmpb.UpdateRepositoryRequest{
-				Repository: &ssmpb.Repository{Name: parent + "/repositories/" + path[1], Description: strings.TrimSpace(v["description"])},
-				UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"description"}}})
-			if err != nil {
-				return err
-			}
-			_, err = op.Wait(ctx)
-			return err
-		})
-	case len(path) == 2 && action == "delete-repo":
-		return p.withClient(ctx, func(c *securesourcemanager.Client) error {
-			op, err := c.DeleteRepository(ctx, &ssmpb.DeleteRepositoryRequest{Name: parent + "/repositories/" + path[1]})
-			if err != nil {
-				return err
-			}
-			return op.Wait(ctx)
-		})
+	}
+	if len(path) >= 2 {
+		return p.repoAct(ctx, in, path, action, v)
 	}
 	return fmt.Errorf("unknown action %q", action)
 }
 
 var (
-	_ console.Creator   = sourceManagerProvider{}
-	_ console.Deleter   = sourceManagerProvider{}
-	_ console.Driller   = sourceManagerProvider{}
-	_ console.PathActor = sourceManagerProvider{}
+	_ console.Creator         = sourceManagerProvider{}
+	_ console.PageCreator     = sourceManagerProvider{}
+	_ console.CreateTitler    = sourceManagerProvider{}
+	_ console.CreateSubmitter = sourceManagerProvider{}
+	_ console.Deleter         = sourceManagerProvider{}
+	_ console.Driller         = sourceManagerProvider{}
+	_ console.PathActor       = sourceManagerProvider{}
 )

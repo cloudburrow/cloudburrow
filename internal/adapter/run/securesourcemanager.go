@@ -36,10 +36,13 @@ import (
 // An instance is ACTIVE when its create returns, since nothing is
 // provisioned. Its host_config names this port rather than
 // {instance}-{project number}-git.{location}.sourcemanager.dev, which
-// resolves only on Google. Hooks, branch rules, pull requests, issues and
-// the Fetch* reads are UNIMPLEMENTED; so are private instances (they need
-// Private Service Connect) and a repository's gitignores and license
-// templates, which are Google's.
+// resolves only on Google. A repository's tree, blobs and refs are read
+// with git (securesourcemanagercontent.go); its issues, pull requests and
+// branch rules are served too (securesourcemanagerissues.go,
+// securesourcemanagerpulls.go, securesourcemanagerbranchrules.go, #1856).
+// Hooks and pull request comments and reviews are UNIMPLEMENTED; so are
+// private instances (they need Private Service Connect) and a
+// repository's gitignores and license templates, which are Google's.
 
 // SecureSourceManagerServer serves Secure Source Manager's instances and
 // repositories.
@@ -69,7 +72,19 @@ var ssmState = struct {
 	// policies are the instances' and repositories' IAM policies, by
 	// resource name (securesourcemanageriam.go).
 	policies map[string]iampolicy.Stored
-}{instances: map[string]*ssmpb.Instance{}, repos: map[string]*ssmpb.Repository{}, policies: map[string]iampolicy.Stored{}}
+	// children are a repository's issues, issue comments, pull requests
+	// and branch rules, by resource name (securesourcemanagerissues.go,
+	// securesourcemanagerpulls.go, securesourcemanagerbranchrules.go).
+	issues        map[string]*ssmpb.Issue
+	issueComments map[string]*ssmpb.IssueComment
+	pulls         map[string]*ssmpb.PullRequest
+	rules         map[string]*ssmpb.BranchRule
+	// counters are the last number given out under a collection, by
+	// parent and collection ("{repository}/issues").
+	counters map[string]int
+}{instances: map[string]*ssmpb.Instance{}, repos: map[string]*ssmpb.Repository{}, policies: map[string]iampolicy.Stored{},
+	issues: map[string]*ssmpb.Issue{}, issueComments: map[string]*ssmpb.IssueComment{}, pulls: map[string]*ssmpb.PullRequest{},
+	rules: map[string]*ssmpb.BranchRule{}, counters: map[string]int{}}
 
 // ssmIDRE is the instance and repository ID shape Google documents: lower
 // case letters, digits and hyphens, starting with a letter, at most 63.
@@ -94,6 +109,7 @@ func UseSourceManagerRoot(dir string) error {
 		Instances    []json.RawMessage           `json:"instances"`
 		Repositories []json.RawMessage           `json:"repositories"`
 		Policies     map[string]iampolicy.Stored `json:"policies,omitempty"`
+		ssmSavedChildren
 	}
 	if json.Unmarshal(b, &saved) != nil {
 		return nil
@@ -115,6 +131,7 @@ func UseSourceManagerRoot(dir string) error {
 			ssmState.policies[name] = p
 		}
 	}
+	loadSSMChildrenLocked(saved.ssmSavedChildren)
 	return nil
 }
 
@@ -139,8 +156,10 @@ func saveSSMLocked() {
 		Instances    []json.RawMessage           `json:"instances"`
 		Repositories []json.RawMessage           `json:"repositories"`
 		Policies     map[string]iampolicy.Stored `json:"policies,omitempty"`
+		ssmSavedChildren
 	}
 	saved.Policies = ssmState.policies
+	saved.ssmSavedChildren = saveSSMChildrenLocked()
 	for _, name := range sortedKeys(ssmState.instances) {
 		b, _ := protojson.Marshal(ssmState.instances[name])
 		saved.Instances = append(saved.Instances, b)
@@ -289,6 +308,7 @@ func (m *SecureSourceManagerServer) DeleteInstance(_ context.Context, req *ssmpb
 	for _, name := range held {
 		delete(ssmState.repos, name)
 		delete(ssmState.policies, name)
+		deleteSSMChildrenLocked(name)
 		_ = os.RemoveAll(repoDir(root, name))
 	}
 	delete(ssmState.instances, req.GetName())
@@ -399,6 +419,10 @@ func (m *SecureSourceManagerServer) CreateRepository(ctx context.Context, req *s
 		_ = os.RemoveAll(dir)
 		return nil, apierror.Internal(err, "git config: %s", out)
 	}
+	if err := installSSMPreReceive(dir); err != nil {
+		_ = os.RemoveAll(dir)
+		return nil, apierror.Internal(err, "pre-receive hook")
+	}
 	ssmState.repos[name] = r
 	saveSSMLocked()
 	return m.done(req.GetParent(), name, "create", proto.Clone(r))
@@ -456,6 +480,7 @@ func (m *SecureSourceManagerServer) DeleteRepository(_ context.Context, req *ssm
 	root, _ := ssmRootLocked()
 	delete(ssmState.repos, req.GetName())
 	delete(ssmState.policies, req.GetName())
+	deleteSSMChildrenLocked(req.GetName())
 	_ = os.RemoveAll(repoDir(root, req.GetName()))
 	saveSSMLocked()
 	ssmState.mu.Unlock()

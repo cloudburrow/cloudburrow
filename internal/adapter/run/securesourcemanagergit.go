@@ -35,8 +35,8 @@ import (
 // devConnectGitRepositoryLink (a Developer Connect link to this repository,
 // developerconnect.go; a trigger whose link is missing, disabled or names
 // another repository is skipped and logged), an eventType
-// (push by default; pull_request triggers never run, as no pull request is
-// served), RE2 includedGitRefs and ignoredGitRefs (ignored first; an empty
+// (push by default; pull_request triggers do not run: a pull request's
+// builds are not served), RE2 includedGitRefs and ignoredGitRefs (ignored first; an empty
 // filter does not restrict), includedFiles and ignoredFiles over the
 // push's changed files, a required serviceAccount, disabled, and
 // substitutions. Each pushed ref a trigger accepts runs one build of the
