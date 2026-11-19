@@ -35,6 +35,17 @@ Every long-running method answers an operation that is already done. Not served,
 
 `cloudburrow gcloud-setup` writes the `privateca` override, so `gcloud privateca` pools, roots, subordinates, templates and certificates reach this instance (`TestGcloudPrivateCA`). `cloudburrow terraform` sets `privateca_custom_endpoint` for the `google_privateca_*` resources (`TestTerraformPrivateCA`).
 
+## Cloud SQL's customer-managed CAs
+
+A Cloud SQL instance with `serverCaMode` `CUSTOMER_MANAGED_CAS_CA` and `serverCaPool` naming a pool
+of this service, in the instance's region, has the pool issue its server certificates (#1834): each
+is a configuration-based `certificates.create` with an EC P-384 key and the instance's DNS name, so
+the pool must allow configuration-based requests and DNS names in SANs and have an enabled CA, and
+the certificates (`cloudsql-INSTANCE-...`) are listed in an Enterprise pool. Run both services:
+`cloudburrow up --services cloudsql,privateca`. The service agent's
+`roles/privateca.certificateRequester` on the pool is not checked. See
+[cloudsql.md](cloudsql.md#client-certificates-tiers-and-flags-1380).
+
 ## Console
 
 The console's Certificate Authority Service page (`/security/cas`, under Security and identity) lists a project's CA pools in every region and creates them; a pool's page lists its CAs and certificates and its trust anchors, and offers Create CA, Request certificate (from a CSR or from a subject and public key), Edit labels, Delete pool and the pool's Permissions tab. Create CA makes a subordinate too, signed and activated by an issuing CA of this instance, or awaiting a third-party issuer, its page then showing its CSR and offering Activate. A CA's page offers Enable, Disable, Delete (with or without the grace period) and Undelete, and lists its revocation lists; a certificate's page Revoke and Edit labels. The Certificate templates page creates, edits and deletes templates, which Request certificate takes.

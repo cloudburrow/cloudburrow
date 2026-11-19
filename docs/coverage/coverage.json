@@ -11139,6 +11139,7 @@
           "test/compat/cloudsqlbluegreen_test.go:31 TestCloudSQLBlueGreenDeployment",
           "test/compat/cloudsqlbluegreenha_test.go:28 TestCloudSQLBlueGreenDeploymentHA",
           "test/compat/cloudsqlconnector_test.go:58 TestCloudSQLConnectorDialsBothServers",
+          "test/compat/cloudsqlcustomerca_test.go:203 TestCloudSQLCustomerManagedCA",
           "test/compat/cloudsqldemote_test.go:177 TestCloudSQLDemoteSkipReplicationSetup",
           "test/compat/cloudsqldemote_test.go:26 TestCloudSQLDemote",
           "test/compat/cloudsqldemotepg_test.go:23 TestCloudSQLDemotePostgres",
@@ -11167,6 +11168,7 @@
           "test/compat/cloudsqlbluegreen_test.go:31 TestCloudSQLBlueGreenDeployment",
           "test/compat/cloudsqlbluegreenha_test.go:28 TestCloudSQLBlueGreenDeploymentHA",
           "test/compat/cloudsqlconnector_test.go:58 TestCloudSQLConnectorDialsBothServers",
+          "test/compat/cloudsqlcustomerca_test.go:203 TestCloudSQLCustomerManagedCA",
           "test/compat/cloudsqldemote_test.go:177 TestCloudSQLDemoteSkipReplicationSetup",
           "test/compat/cloudsqldemote_test.go:26 TestCloudSQLDemote",
           "test/compat/cloudsqldemotepg_test.go:23 TestCloudSQLDemotePostgres",
@@ -11280,6 +11282,7 @@
         "method": "sql.instances.ListServerCertificates",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudsqlcustomerca_test.go:203 TestCloudSQLCustomerManagedCA",
           "test/compat/cloudsqlservercerts_test.go:81 TestCloudSQLServerCertificates"
         ]
       },
@@ -11295,6 +11298,7 @@
         "method": "sql.instances.RotateServerCertificate",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudsqlcustomerca_test.go:203 TestCloudSQLCustomerManagedCA",
           "test/compat/cloudsqlservercerts_test.go:81 TestCloudSQLServerCertificates"
         ]
       },
@@ -11326,6 +11330,7 @@
         "method": "sql.instances.addServerCertificate",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudsqlcustomerca_test.go:203 TestCloudSQLCustomerManagedCA",
           "test/compat/cloudsqlservercerts_test.go:81 TestCloudSQLServerCertificates"
         ]
       },
@@ -11347,6 +11352,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqladminverbs_test.go:137 TestCloudSQLDataAPIAndFinalBackup",
+          "test/compat/cloudsqlcustomerca_test.go:203 TestCloudSQLCustomerManagedCA",
           "test/compat/cloudsqldemote_test.go:177 TestCloudSQLDemoteSkipReplicationSetup",
           "test/compat/cloudsqldemote_test.go:26 TestCloudSQLDemote",
           "test/compat/cloudsqldemotepg_test.go:23 TestCloudSQLDemotePostgres",
@@ -11443,6 +11449,7 @@
           "test/compat/cloudsqlbackups_test.go:248 TestGcloudSQLBackups",
           "test/compat/cloudsqlbluegreen_test.go:31 TestCloudSQLBlueGreenDeployment",
           "test/compat/cloudsqlbluegreenha_test.go:28 TestCloudSQLBlueGreenDeploymentHA",
+          "test/compat/cloudsqlcustomerca_test.go:203 TestCloudSQLCustomerManagedCA",
           "test/compat/cloudsqldemote_test.go:177 TestCloudSQLDemoteSkipReplicationSetup",
           "test/compat/cloudsqldemote_test.go:26 TestCloudSQLDemote",
           "test/compat/cloudsqldemotepg_test.go:23 TestCloudSQLDemotePostgres",
@@ -11509,6 +11516,7 @@
           "test/compat/cloudsqladminverbs_test.go:137 TestCloudSQLDataAPIAndFinalBackup",
           "test/compat/cloudsqlbluegreen_test.go:31 TestCloudSQLBlueGreenDeployment",
           "test/compat/cloudsqlbluegreenha_test.go:28 TestCloudSQLBlueGreenDeploymentHA",
+          "test/compat/cloudsqlcustomerca_test.go:203 TestCloudSQLCustomerManagedCA",
           "test/compat/cloudsqldemote_test.go:177 TestCloudSQLDemoteSkipReplicationSetup",
           "test/compat/cloudsqldemote_test.go:26 TestCloudSQLDemote",
           "test/compat/cloudsqldemotepg_test.go:23 TestCloudSQLDemotePostgres",
@@ -11576,6 +11584,7 @@
         "method": "sql.instances.listServerCas",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudsqlcustomerca_test.go:203 TestCloudSQLCustomerManagedCA",
           "test/compat/cloudsqltransfers_test.go:581 TestSQLAdminServerCARotation",
           "test/compat/terraform_batch12_sql_test.go:29 TestTerraformSQLDataSources"
         ]
@@ -11584,6 +11593,7 @@
         "method": "sql.instances.patch",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudsqlcustomerca_test.go:203 TestCloudSQLCustomerManagedCA",
           "test/compat/cloudsqldemotepg_test.go:23 TestCloudSQLDemotePostgres",
           "test/compat/cloudsqlexternalpg_test.go:28 TestCloudSQLExternalPostgresPrimary",
           "test/compat/cloudsqlfields_test.go:65 TestCloudSQLFieldsNeverSilentlyDropped",
@@ -12648,6 +12658,7 @@
         "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/FetchCaCerts",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudsqlcustomerca_test.go:203 TestCloudSQLCustomerManagedCA",
           "test/compat/privateca_test.go:102 TestPrivateCAPoolsRootsAndCertificates"
         ]
       },
@@ -12731,6 +12742,7 @@
         "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/ListCertificates",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudsqlcustomerca_test.go:203 TestCloudSQLCustomerManagedCA",
           "test/compat/privateca_test.go:102 TestPrivateCAPoolsRootsAndCertificates"
         ]
       },

@@ -365,6 +365,7 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"SINK_PUBSUB":              "127.0.0.1:50004",
 		"FIRESTORE_STORAGE":        "http://127.0.0.1:50003",
 		"CMEK_KMS":                 "127.0.0.1:9018",
+		"SQL_PRIVATECA":            "127.0.0.1:9028",
 		"CLOUDSQL_SECRETS":         "127.0.0.1:9006",
 		"NOPUBSUB_STORAGE":         "http://127.0.0.1:50003",
 		"APPENGINE_URL":            "http://127.0.0.1:18506",

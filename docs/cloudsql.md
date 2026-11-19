@@ -152,7 +152,6 @@ Refused with 501, each naming what is missing:
 
 | Methods | Why |
 |---|---|
-| `serverCaMode` `CUSTOMER_MANAGED_CAS_CA` | its server certificates are issued by the customer's CA pool in Certificate Authority Service, which is not served |
 | Entra ID certificates, `acquireSsrsLease`, `releaseSsrsLease` | SQL Server features; CloudBurrow runs PostgreSQL and MySQL |
 | `rescheduleMaintenance` | no Google-managed maintenance is ever scheduled: an instance's server is its version's pinned image, replaced when CloudBurrow itself is upgraded, so `scheduledMaintenance` is never set. The request is checked first (#1524): no `reschedule`, no `rescheduleType`, or `SPECIFIC_TIME` without an RFC 3339 `scheduleTime` is 400 |
 
@@ -231,6 +230,35 @@ messages). The console has Server CA mode on Create instance and Edit instance, 
 instance's page its server certificates, Add server certificate, Rotate server certificate and
 Resolve DNS name. Client certificates are still signed by the instance's own CA.
 
+**Customer-managed CAs (#1834).** `serverCaMode` `CUSTOMER_MANAGED_CAS_CA` with `serverCaPool`
+`projects/PROJECT/locations/REGION/caPools/POOL` (`gcloud sql instances create|patch
+--server-ca-mode=CUSTOMER_MANAGED_CAS_CA --server-ca-pool=...`, the console's Server CA pool) has a
+CA of a pool of this instance's Certificate Authority Service ([privateca.md](privateca.md)) issue
+the server certificate, so it needs `privateca` in `--services` (412 otherwise). As
+[Google documents](https://docs.cloud.google.com/sql/docs/postgres/customer-managed-ca), Cloud SQL
+requests it as a configuration-based certificate with an EC P-384 key and the instance's DNS name in
+the subject alternative names: it is a `certificates.create` on the pool, listed among the pool's
+certificates (`cloudsql-INSTANCE-...`, Enterprise tier), signed by the pool's first enabled CA. The
+listener presents it with the CAs between it and the root, so it verifies to the pool's root
+(a subordinate CA under a root of another pool works). `connect.get` answers the mode and the issuing
+CA chains as `serverCaCert`, `listServerCertificates` each version's issuing CA in `caCerts`, and
+`listServerCas` those chains; `addServerCertificate` has the pool issue an upcoming certificate and
+`rotateServerCertificate` (gcloud's `server-certs rotate` and `rollback`) makes it the presented one.
+The pool is checked as Google documents, each with its words: the format ("Invalid format for server
+CA pool"), its region ("The instance's server CA pool must be in the same region as the instance."),
+that it exists (404, "parent resource ... not found") and has an enabled CA ("There are no enabled
+CAs in the CaPool"), and the pool's own issuance policy (configuration-based requests and DNS names in
+SANs allowed, the key type) through the issuance itself. MySQL 5.7 is 400 ("supported only on MySQL
+8.0.30 and later"). Such an instance cannot be patched back to `GOOGLE_MANAGED_INTERNAL_CA` (400);
+it moves to `GOOGLE_MANAGED_CAS_CA` with `serverCaPool` `""`, and a pool left set with another mode is
+400. Changing the pool issues a certificate from the new one. Not enforced: the service agent
+(`service-PROJECT@gcp-sa-cloud-sql.iam.gserviceaccount.com`) and its
+`roles/privateca.certificateRequester` on the pool, as no call here is authorized (ADR-0004) and the
+pool's IAM policy is stored, not enforced (ADR-0006). `serverCertificateRotationMode`
+`AUTOMATIC_ROTATION_DURING_MAINTENANCE` is recorded and never acts, as no maintenance event is
+scheduled here; rotate with `addServerCertificate`. Disabling the pool's CA later does not revoke the
+certificate the server already presents.
+
 The servers are reached through the connector path, so the certificates
 are records the servers do not check on a direct connection. `tiers.list` and `flags.list`
 answer the lists Google documents for each version served (`POSTGRES_13` to `POSTGRES_18`,
@@ -283,7 +311,7 @@ request), or **refused** with 400 or 501 naming it. A field the discovery docume
 | `settings.finalBackupConfig` | `enabled` makes a `delete` without `enableFinalBackup` take a `FINAL` backup, kept `retentionDays` (30 when not given). |
 | `settings.databaseReplicationEnabled` | A read replica's replication state, set by `stopReplica` and `startReplica`; a different value in a patch is 400 naming those methods, and `true` on a primary is 400. |
 | `settings.dataApiAccess`, `edition`, `dataDiskSizeGb`, `backupConfiguration`, `activationPolicy`, `availabilityType` | Applied: see the sections on the Data API, point-in-time recovery, storage shrink, backups and high availability. |
-| `settings.ipConfiguration` | Recorded (authorized networks, `ipv4Enabled`, `sslMode`, private network). `serverCaMode` `GOOGLE_MANAGED_INTERNAL_CA` and `GOOGLE_MANAGED_CAS_CA` are served (#1614); `CUSTOMER_MANAGED_CAS_CA` and `serverCaPool` are 501: the customer's CA pool is Certificate Authority Service's. |
+| `settings.ipConfiguration` | Recorded (authorized networks, `ipv4Enabled`, `sslMode`, private network). `serverCaMode` `GOOGLE_MANAGED_INTERNAL_CA` and `GOOGLE_MANAGED_CAS_CA` are served (#1614), and `CUSTOMER_MANAGED_CAS_CA` with `serverCaPool` (#1834, below); `serverCertificateRotationMode` is checked and recorded. A patch whose `ipConfiguration` names none of the three keeps them. |
 | `settings.maintenanceWindow`, `denyMaintenancePeriods`, `autoUpgradeEnabled`, `insightsConfig`, `performanceCaptureConfig`, `dataCacheConfig`, `dataDiskType`, `dataDiskProvisionedIops`, `dataDiskProvisionedThroughput`, `storageAutoResize`, `storageAutoResizeLimit`, `locationPreference`, `pricingPlan`, `replicationType`, `replicationLagMaxSeconds`, `crashSafeReplicationEnabled`, `acceleratedReplicaMode`, `enableDataplexIntegration`, `authorizedGaeApplications` | Recorded and answered. They describe the machine, maintenance and monitoring Cloud SQL would give the instance; nothing here acts on them. |
 | `settings.connectorEnforcement` `REQUIRED` | 501: the server is reached through its host tunnel as well as the connectors, and direct connections are not refused. `NOT_REQUIRED` is taken. |
 | `settings.passwordValidationPolicy`, `connectionPoolConfig`, `enableGoogleMlIntegration`, `readPoolAutoScaleConfig` | 501 when enabled: no password policy, managed pooling, Vertex AI integration or read pools. |
