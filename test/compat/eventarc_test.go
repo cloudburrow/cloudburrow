@@ -356,4 +356,36 @@ func TestGcloudEventarcTriggers(t *testing.T) {
 	if _, err := ec.GetTrigger(ctx, &eventarcpb.GetTriggerRequest{Name: parent + "/triggers/gcloud-pubsub"}); status.Code(err) != codes.NotFound {
 		t.Errorf("GetTrigger after triggers delete: %v; want NotFound", err)
 	}
+
+	// Cloud Audit Logs, with a path pattern (#1877).
+	g.must("eventarc", "triggers", "create", "gcloud-audit", "--location=us-central1",
+		"--destination-run-service="+service, "--destination-run-region=us-central1",
+		"--event-filters=type=google.cloud.audit.log.v1.written", "--event-filters=serviceName=pubsub.googleapis.com",
+		"--event-filters=methodName=google.pubsub.v1.Publisher.CreateTopic",
+		"--event-filters-path-pattern=resourceName=projects/"+g.project+"/topics/audited-*")
+	t.Cleanup(func() {
+		if op, err := ec.DeleteTrigger(context.Background(), &eventarcpb.DeleteTriggerRequest{Name: parent + "/triggers/gcloud-audit", AllowMissing: true}); err == nil {
+			_, _ = op.Wait(context.Background())
+		}
+	})
+	if tr, err := ec.GetTrigger(ctx, &eventarcpb.GetTriggerRequest{Name: parent + "/triggers/gcloud-audit"}); err != nil || len(tr.GetEventFilters()) != 4 {
+		t.Errorf("the audit-log trigger = %v, %v", tr, err)
+	} else {
+		for _, f := range tr.GetEventFilters() {
+			if f.GetAttribute() == "resourceName" && f.GetOperator() != "match-path-pattern" {
+				t.Errorf("resourceName's operator = %q; want match-path-pattern", f.GetOperator())
+			}
+		}
+	}
+	if out := g.must("eventarc", "providers", "describe", "pubsub.googleapis.com", "--location=us-central1"); !strings.Contains(out, "google.cloud.audit.log.v1.written") ||
+		!strings.Contains(out, "pathPatternSupported: true") {
+		t.Errorf("providers describe pubsub.googleapis.com:\n%s", out)
+	}
+	g.must("eventarc", "triggers", "delete", "gcloud-audit", "--location=us-central1", "--quiet")
+	if out, err := g.run(nil, "eventarc", "triggers", "create", "gcloud-bad", "--location=us-central1",
+		"--destination-run-service="+service, "--destination-run-region=us-central1",
+		"--event-filters=type=google.cloud.audit.log.v1.written", "--event-filters=serviceName=pubsub.googleapis.com"); err == nil ||
+		!strings.Contains(out, "methodName") {
+		t.Errorf("an audit-log trigger with no methodName: %v\n%s", err, out)
+	}
 }

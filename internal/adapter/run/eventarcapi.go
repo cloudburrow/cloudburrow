@@ -46,9 +46,12 @@ import (
 // ce-specversion, ce-type, ce-time (and ce-subject for Cloud Storage) and
 // the documented data (MessagePublishedData; the object), with an ID token
 // for the trigger's service account. Triggers are kept in memory, as the
-// functions' are. Channels, other providers, other destinations and
-// operators other than an exact match are UNIMPLEMENTED, and
-// ListProviders names the two providers served.
+// functions' are. Cloud Audit Logs (eventarcaudit.go) and Firestore
+// (eventarcfirestore.go) events are published by this process to a topic
+// Eventarc makes; a destination can also be a Cloud Run function or an
+// HTTP endpoint; match-path-pattern (eventarcpath.go) is the one operator
+// beyond an exact match. Channels (eventarcchannels.go), GKE and Workflows
+// destinations are UNIMPLEMENTED with the reason.
 
 // EventarcServer serves Eventarc's triggers and providers.
 type EventarcServer struct {
@@ -157,7 +160,7 @@ func (e *EventarcServer) op(target, verb string, response proto.Message) (*longr
 // cannot be served.
 func eaSpec(t *eventarcpb.Trigger, region string) (*functionspb.EventTrigger, error) {
 	if t.GetChannel() != "" {
-		return nil, apierror.Unimplemented("trigger channel is not supported: only Google sources (direct events) are served")
+		return nil, apierror.Unimplemented("the trigger's channel: %s", channelReason)
 	}
 	spec := &functionspb.EventTrigger{TriggerRegion: region, ServiceAccountEmail: t.GetServiceAccount(),
 		RetryPolicy: functionspb.EventTrigger_RETRY_POLICY_RETRY}
@@ -201,8 +204,27 @@ func eaSpec(t *eventarcpb.Trigger, region string) (*functionspb.EventTrigger, er
 		if p := d.GetCloudRun().GetPath(); p != "" && !strings.HasPrefix(p, "/") {
 			return nil, apierror.InvalidArgument("destination.cloudRun.path %q must begin with /", p)
 		}
+	case d.GetCloudFunction() != "":
+		if _, _, err := parseFunctionName(d.GetCloudFunction()); err != nil {
+			return nil, apierror.InvalidArgument("destination.cloudFunction %q must be projects/*/locations/*/functions/*", d.GetCloudFunction())
+		}
+	case d.GetHttpEndpoint() != nil:
+		u, err := url.Parse(d.GetHttpEndpoint().GetUri())
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return nil, apierror.InvalidArgument("destination.httpEndpoint.uri %q must be an http or https URI", d.GetHttpEndpoint().GetUri())
+		}
+		if d.GetNetworkConfig().GetNetworkAttachment() == "" {
+			return nil, apierror.InvalidArgument("destination.networkConfig.networkAttachment is required for an HTTP endpoint destination")
+		}
+	case d.GetGke() != nil:
+		return nil, apierror.Unimplemented("destination.gke is not supported: this instance serves no Google Kubernetes Engine " +
+			"(its cluster is a local kind cluster, not a GKE cluster the Kubernetes Engine API names); route to a Cloud Run " +
+			"service, a function or an HTTP endpoint")
+	case d.GetWorkflow() != "":
+		return nil, apierror.Unimplemented("destination.workflow is not supported: this instance does not serve Workflows")
 	default:
-		return nil, apierror.Unimplemented("only a Cloud Run destination (destination.cloudRun) is supported")
+		return nil, apierror.InvalidArgument("the trigger's destination must name a cloudRun service, a cloudFunction, " +
+			"a gke service, a workflow or an httpEndpoint")
 	}
 	return spec, nil
 }
@@ -232,6 +254,11 @@ func (e *EventarcServer) CreateTrigger(ctx context.Context, req *eventarcpb.Crea
 		return nil, err
 	}
 	name := req.GetParent() + "/triggers/" + req.GetTriggerId()
+	if fn := t.GetDestination().GetCloudFunction(); fn != "" {
+		if _, ok := eaFunction(fn); !ok {
+			return nil, apierror.InvalidArgument("destination.cloudFunction %q not found", fn)
+		}
+	}
 	if run := t.GetDestination().GetCloudRun(); run != nil {
 		if _, err := e.f.s.GetService(ctx, &runpb.GetServiceRequest{Name: "projects/" + project + "/locations/" +
 			run.GetRegion() + "/services/" + run.GetService()}); err != nil {
@@ -506,31 +533,65 @@ func (f *FunctionsServer) deliverEventarc(ctx context.Context, t *eventarcpb.Tri
 	if err != nil {
 		return http.StatusBadRequest, err
 	}
-	run := t.GetDestination().GetCloudRun()
 	project := strings.Split(t.GetName(), "/")[1]
-	svc, err := f.s.GetService(ctx, &runpb.GetServiceRequest{Name: "projects/" + project + "/locations/" + run.GetRegion() + "/services/" + run.GetService()})
-	if err != nil {
-		return 0, fmt.Errorf("the destination service: %w", err)
+	d := t.GetDestination()
+	if he := d.GetHttpEndpoint(); he != nil {
+		// An internal HTTP endpoint: sent to its URI as it is, from this
+		// host, with no token, as Eventarc sends to one.
+		ctx, cancel := context.WithTimeout(ctx, time.Minute)
+		defer cancel()
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, he.GetUri(), strings.NewReader(string(ev.Data)))
+		if err != nil {
+			return 0, err
+		}
+		for k, v := range ev.Headers {
+			req.Header[k] = v
+		}
+		resp, err := f.events.Client.Do(req)
+		if err != nil {
+			return 0, err
+		}
+		defer resp.Body.Close()
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return resp.StatusCode, nil
 	}
-	target := svc.GetUri()
+	var target, path string
+	timeout := time.Minute
+	if name := d.GetCloudFunction(); name != "" {
+		fn, ok := eaFunction(name)
+		if !ok {
+			return 0, fmt.Errorf("the destination function %s is not found", name)
+		}
+		target = fn.GetServiceConfig().GetUri()
+		if s := fn.GetServiceConfig().GetTimeoutSeconds(); s > 0 {
+			timeout = time.Duration(s) * time.Second
+		}
+	} else {
+		run := d.GetCloudRun()
+		path = run.GetPath()
+		svc, err := f.s.GetService(ctx, &runpb.GetServiceRequest{Name: "projects/" + project + "/locations/" + run.GetRegion() + "/services/" + run.GetService()})
+		if err != nil {
+			return 0, fmt.Errorf("the destination service: %w", err)
+		}
+		target = svc.GetUri()
+		if d := svc.GetTemplate().GetTimeout(); d != nil && d.AsDuration() > 0 {
+			timeout = d.AsDuration()
+		}
+	}
 	u, err := url.Parse(target)
 	if err != nil || u.Host == "" {
-		return 0, fmt.Errorf("the destination service has no URL")
+		return 0, fmt.Errorf("the destination has no URL")
 	}
 	if f.events.Ingress == "" {
-		return 0, fmt.Errorf("no ingress port is published on this machine, so the service cannot be reached")
-	}
-	timeout := time.Minute
-	if d := svc.GetTemplate().GetTimeout(); d != nil && d.AsDuration() > 0 {
-		timeout = d.AsDuration()
+		return 0, fmt.Errorf("no ingress port is published on this machine, so the destination cannot be reached")
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+f.events.Ingress+run.GetPath(), strings.NewReader(string(ev.Data)))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+f.events.Ingress+path, strings.NewReader(string(ev.Data)))
 	if err != nil {
 		return 0, err
 	}
-	if run.GetPath() == "" {
+	if path == "" {
 		req.URL.Path = "/"
 	}
 	req.Host = u.Host
@@ -618,4 +679,15 @@ func eaFiltersMatch(filters []*functionspb.EventFilter, value func(attribute str
 		}
 	}
 	return true
+}
+
+// eaFunction is a Cloud Run function a trigger delivers to.
+func eaFunction(name string) (*functionspb.Function, bool) {
+	functions.mu.Lock()
+	defer functions.mu.Unlock()
+	sf, ok := functions.fns[name]
+	if !ok {
+		return nil, false
+	}
+	return cloneFunction(sf.fn), true
 }

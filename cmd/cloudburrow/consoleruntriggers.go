@@ -55,8 +55,8 @@ func runEventProvider(typ string) string {
 // runTriggersNote says what a trigger is here.
 const runTriggersNote = "An Eventarc trigger delivers each event to the service as a CloudEvent (binary content " +
 	"mode, the ce-* headers), over a Pub/Sub push subscription Eventarc makes. This instance's Eventarc serves " +
-	"Cloud Pub/Sub's and Cloud Storage's direct events; audit-log, Firestore and Firebase events, and channels, " +
-	"are not served."
+	"Cloud Pub/Sub's and Cloud Storage's direct events here; Eventarc's Triggers page also makes Cloud Audit Logs and " +
+	"Firestore triggers. Firebase events and channels are not served."
 
 // eventarcClient is the official Eventarc client on the Run port.
 func (p runProvider) eventarcClient(ctx context.Context) (*eventarc.Client, error) {

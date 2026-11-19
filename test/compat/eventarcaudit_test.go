@@ -192,7 +192,7 @@ func TestEventarcAuditLogTriggers(t *testing.T) {
 	}
 	// The other topic's entry, written at the same time, never matched.
 	time.Sleep(5 * time.Second)
-	_, all = probedEvents(t, f.base, f.host, func(e probedEvent) bool { return true })
+	_, all = probedEvents(t, f.base, f.host, func(probedEvent) bool { return true })
 	for _, e := range all {
 		if e.Headers["ce-resourcename"] == other || e.Headers["ce-methodname"] == "google.pubsub.v1.Publisher.GetTopic" {
 			t.Errorf("an unmatched call reached the service: %v", e.Headers)

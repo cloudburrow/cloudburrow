@@ -42,7 +42,23 @@ func TestEventarcConsoleTriggers(t *testing.T) {
 		eaProviderLabel(tr) != "Cloud Audit Logs: secretmanager.googleapis.com" {
 		t.Errorf("Cloud Audit Logs trigger = %v, %v", tr, err)
 	}
+	tr, err = eaFormTrigger("demo", "us-central1", map[string]string{"eventType": "google.cloud.firestore.document.v1.written", "service": "hello",
+		"document": "users/{userId}"})
+	if f := tr.GetEventFilters(); err != nil || len(f) != 3 || f[1].GetValue() != "(default)" || f[2].GetOperator() != "match-path-pattern" {
+		t.Errorf("Cloud Firestore trigger = %v, %v", tr, err)
+	}
+	tr, err = eaFormTrigger("demo", "us-central1", map[string]string{"eventType": "google.cloud.pubsub.topic.v1.messagePublished",
+		"destination": "Cloud Run functions", "function": "fn"})
+	if err != nil || tr.GetDestination().GetCloudFunction() != "projects/demo/locations/us-central1/functions/fn" {
+		t.Errorf("function destination = %v, %v", tr, err)
+	}
+	tr, err = eaFormTrigger("demo", "us-central1", map[string]string{"eventType": "google.cloud.pubsub.topic.v1.messagePublished",
+		"destination": "HTTP endpoint", "uri": "http://10.0.0.1/e", "networkAttachment": "projects/demo/regions/us-central1/networkAttachments/a"})
+	if err != nil || tr.GetDestination().GetHttpEndpoint().GetUri() != "http://10.0.0.1/e" || tr.GetDestination().GetNetworkConfig() == nil {
+		t.Errorf("HTTP endpoint destination = %v, %v", tr, err)
+	}
 	for _, bad := range []map[string]string{
+		{"eventType": "google.cloud.pubsub.topic.v1.messagePublished", "destination": "HTTP endpoint", "uri": "http://x"},
 		{"eventType": eaAuditLogType, "service": "hello", "serviceName": "secretmanager.googleapis.com"},
 		{"eventType": "google.cloud.storage.object.v1.finalized", "service": "hello"},
 		{"eventType": "google.cloud.pubsub.topic.v1.messagePublished"},

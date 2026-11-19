@@ -4,13 +4,18 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	eventarcpb "cloud.google.com/go/eventarc/apiv1/eventarcpb"
+	firestorepb "cloud.google.com/go/firestore/apiv1/firestorepb"
 	functionspb "cloud.google.com/go/functions/apiv2/functionspb"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/protobuf/encoding/protowire"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 )
@@ -144,5 +149,119 @@ func TestAuditLogEventsReachMatchingTriggers(t *testing.T) {
 	if s, m, ok := GRPCAuditCall("/google.cloud.secretmanager.v1.SecretManagerService/CreateSecret"); !ok || s != "secretmanager.googleapis.com" ||
 		m != "google.cloud.secretmanager.v1.SecretManagerService.CreateSecret" {
 		t.Errorf("GRPCAuditCall = %q, %q, %v", s, m, ok)
+	}
+}
+
+// A document change reaches the triggers of its kind and the written ones
+// whose database and document pattern match, as DocumentEventData in
+// protobuf with the old value and the update mask.
+func TestFirestoreEventsReachMatchingTriggers(t *testing.T) {
+	pub := &fakePublisher{}
+	f := (&FunctionsServer{}).WithEvents(Events{Transport: pub})
+	add := func(id, typ string, filters ...*functionspb.EventFilter) {
+		name := "projects/fsp/locations/us-central1/triggers/" + id
+		eaState.mu.Lock()
+		eaState.triggers[name] = &eaTrigger{t: &eventarcpb.Trigger{Name: name}, live: &liveTrigger{
+			spec: &functionspb.EventTrigger{EventType: typ, EventFilters: filters}, topic: "projects/fsp/topics/" + id}}
+		eaState.mu.Unlock()
+		t.Cleanup(func() { eaState.mu.Lock(); delete(eaState.triggers, name); eaState.mu.Unlock() })
+	}
+	db := &functionspb.EventFilter{Attribute: "database", Value: "(default)"}
+	add("upd", firestorePrefix+"updated", db, &functionspb.EventFilter{Attribute: "document", Value: "users/{u}", Operator: pathPatternOp})
+	add("all", firestorePrefix+"written", db)
+	add("other-db", firestorePrefix+"written", &functionspb.EventFilter{Attribute: "database", Value: "other"})
+	add("posts", firestorePrefix+"updated", db, &functionspb.EventFilter{Attribute: "document", Value: "posts/{p}", Operator: pathPatternOp})
+	if w := FirestoreWatches(); len(w) != 4 || w[0] != (FirestoreWatch{"fsp", "(default)", ""}) || w[1] != (FirestoreWatch{"fsp", "(default)", "posts"}) ||
+		w[2] != (FirestoreWatch{"fsp", "(default)", "users"}) || w[3] != (FirestoreWatch{"fsp", "other", ""}) {
+		t.Errorf("FirestoreWatches = %v", w)
+	}
+	name := "projects/fsp/databases/(default)/documents/users/alice"
+	old := &firestorepb.Document{Name: name, Fields: map[string]*firestorepb.Value{"a": {ValueType: &firestorepb.Value_IntegerValue{IntegerValue: 1}},
+		"b": {ValueType: &firestorepb.Value_StringValue{StringValue: "x"}}}}
+	cur := &firestorepb.Document{Name: name, Fields: map[string]*firestorepb.Value{"a": {ValueType: &firestorepb.Value_IntegerValue{IntegerValue: 2}},
+		"b": {ValueType: &firestorepb.Value_StringValue{StringValue: "x"}}}}
+	n := f.Eventarc().EmitFirestore(context.Background(), FirestoreChange{Project: "fsp", Database: "(default)", Name: name, Old: old, New: cur})
+	if n != 2 || strings.Join(pub.topics, ",") != "projects/fsp/topics/upd,projects/fsp/topics/all" {
+		t.Fatalf("EmitFirestore = %d to %v", n, pub.topics)
+	}
+	for k, want := range map[string]string{"ce-source": "//firestore.googleapis.com/projects/fsp/databases/(default)",
+		"ce-subject": "documents/users/alice", "ce-document": "users/alice", "ce-database": "(default)", "content-type": "application/protobuf"} {
+		if pub.attrs[k] != want {
+			t.Errorf("%s = %q; want %q", k, pub.attrs[k], want)
+		}
+	}
+	var gotNew, gotOld firestorepb.Document
+	var mask []string
+	for b := pub.data; len(b) > 0; {
+		num, typ, n := protowire.ConsumeTag(b)
+		b = b[n:]
+		v, n := protowire.ConsumeBytes(b)
+		b = b[n:]
+		if typ != protowire.BytesType {
+			t.Fatalf("field %d is not bytes", num)
+		}
+		switch num {
+		case 1:
+			_ = proto.Unmarshal(v, &gotNew)
+		case 2:
+			_ = proto.Unmarshal(v, &gotOld)
+		case 3:
+			for len(v) > 0 {
+				_, _, n := protowire.ConsumeTag(v)
+				v = v[n:]
+				s, n := protowire.ConsumeString(v)
+				v = v[n:]
+				mask = append(mask, s)
+			}
+		}
+	}
+	if !proto.Equal(&gotNew, cur) || !proto.Equal(&gotOld, old) || strings.Join(mask, ",") != "a" {
+		t.Errorf("DocumentEventData = value %v, old %v, mask %v", &gotNew, &gotOld, mask)
+	}
+	pub.topics = nil
+	if n := f.Eventarc().EmitFirestore(context.Background(), FirestoreChange{Project: "fsp", Database: "(default)", Name: name, New: cur}); n != 1 ||
+		pub.topics[0] != "projects/fsp/topics/all" {
+		t.Errorf("a create reached %v", pub.topics)
+	}
+}
+
+// A trigger whose destination is a Cloud Run function delivers to the
+// function's service through the ingress, with a token for its URL.
+func TestEventarcDeliversToAFunction(t *testing.T) {
+	var host, path, auth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host, path, auth = r.Host, r.URL.Path, r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+	tokens := &fakeTokens{}
+	f := (&FunctionsServer{}).WithEvents(Events{Transport: &fakeTransport{}, Tokens: tokens, Ingress: strings.TrimPrefix(srv.URL, "http://")})
+	fnName := "projects/proj-ea/locations/us-central1/functions/ea-fn"
+	functions.mu.Lock()
+	functions.fns[fnName] = &storedFunction{fn: &functionspb.Function{Name: fnName,
+		ServiceConfig: &functionspb.ServiceConfig{Uri: "http://ea-fn.ns.cloudburrow.localhost"}}}
+	functions.mu.Unlock()
+	t.Cleanup(func() { functions.mu.Lock(); delete(functions.fns, fnName); functions.mu.Unlock() })
+	tr := &eventarcpb.Trigger{Name: "projects/proj-ea/locations/us-central1/triggers/t", ServiceAccount: "sa@proj-ea.iam.gserviceaccount.com",
+		Destination: &eventarcpb.Destination{Descriptor_: &eventarcpb.Destination_CloudFunction{CloudFunction: fnName}}}
+	if _, err := eaSpec(&eventarcpb.Trigger{EventFilters: []*eventarcpb.EventFilter{{Attribute: "type", Value: pubsubPublished}},
+		Destination: tr.GetDestination()}, "us-central1"); err != nil {
+		t.Fatalf("eaSpec: %v", err)
+	}
+	spec := &functionspb.EventTrigger{EventType: pubsubPublished, PubsubTopic: "projects/p/topics/t"}
+	body := `{"message":{"data":"aGk=","messageId":"1"},"subscription":"s"}`
+	code, err := f.deliverEventarc(context.Background(), tr, spec, []byte(body))
+	if err != nil || code != http.StatusNoContent || host != "ea-fn.ns.cloudburrow.localhost" || path != "/" || auth != "Bearer tok" ||
+		tokens.audience != "http://ea-fn.ns.cloudburrow.localhost" {
+		t.Errorf("delivery = %d, %v; host %q path %q auth %q audience %q", code, err, host, path, auth, tokens.audience)
+	}
+	for _, d := range []*eventarcpb.Destination{
+		{Descriptor_: &eventarcpb.Destination_Gke{Gke: &eventarcpb.GKE{Cluster: "c", Service: "s"}}},
+		{Descriptor_: &eventarcpb.Destination_Workflow{Workflow: "projects/p/locations/us-central1/workflows/w"}},
+	} {
+		_, err := eaSpec(&eventarcpb.Trigger{EventFilters: []*eventarcpb.EventFilter{{Attribute: "type", Value: pubsubPublished}}, Destination: d}, "us-central1")
+		if apierror.From(err).Code != codes.Unimplemented {
+			t.Errorf("destination %v = %v; want Unimplemented", d, err)
+		}
 	}
 }

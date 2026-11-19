@@ -21,6 +21,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -462,6 +463,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			// Eventarc's Cloud Audit Logs events (#1877), from the calls
 			// the services' fronts record.
 			go feedAuditLogs(recorder, runSvc.functions.Load)
+			if slices.Contains(cfg.EnabledServices(), config.ServiceFirestore) {
+				// Firestore events (#1877), from Firestore's Listen.
+				go feedFirestoreEvents(func() *netfwd.Forwarder { return forwarderFor(forwarders, "firestore") },
+					runSvc.functions.Load, "us-central1")
+			}
 		}
 	}
 	if schedulerSvc != nil {

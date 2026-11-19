@@ -2038,7 +2038,9 @@
         "status": "Verified",
         "tests": [
           "test/compat/eventarc_test.go:42 TestEventarcTriggersToCloudRun",
-          "test/compat/eventarcaudit_test.go:113 TestEventarcAuditLogTriggers"
+          "test/compat/eventarcaudit_test.go:113 TestEventarcAuditLogTriggers",
+          "test/compat/eventarcdest_test.go:33 TestEventarcDestinations",
+          "test/compat/eventarcfirestore_test.go:67 TestEventarcFirestoreTriggers"
         ]
       },
       {
@@ -2075,7 +2077,8 @@
         "method": "google.cloud.eventarc.v1.Eventarc/DeleteTrigger",
         "status": "Verified",
         "tests": [
-          "test/compat/eventarc_test.go:42 TestEventarcTriggersToCloudRun"
+          "test/compat/eventarc_test.go:42 TestEventarcTriggersToCloudRun",
+          "test/compat/eventarcdest_test.go:33 TestEventarcDestinations"
         ]
       },
       {
@@ -2228,8 +2231,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/functionsapi_test.go:76 TestFunctionsAPI",
-          "test/compat/functionsevents_test.go:213 TestFunctionsEventTriggers",
-          "test/compat/functionsevents_test.go:517 TestGcloudFunctionsEventTriggers",
+          "test/compat/functionsevents_test.go:215 TestFunctionsEventTriggers",
+          "test/compat/functionsevents_test.go:519 TestGcloudFunctionsEventTriggers",
           "test/compat/functionsfields_test.go:265 TestFunctionsSecretsBuildsAndMounts",
           "test/compat/functionsfields_test.go:62 TestFunctionsFields",
           "test/compat/terraform_batch9_test.go:127 TestTerraformCloudFunctions2FunctionIAM"
@@ -2241,8 +2244,8 @@
         "tests": [
           "test/compat/consolefunctionsv1_test.go:96 TestConsoleFunctionsV1",
           "test/compat/functionsapi_test.go:76 TestFunctionsAPI",
-          "test/compat/functionsevents_test.go:213 TestFunctionsEventTriggers",
-          "test/compat/functionsevents_test.go:517 TestGcloudFunctionsEventTriggers",
+          "test/compat/functionsevents_test.go:215 TestFunctionsEventTriggers",
+          "test/compat/functionsevents_test.go:519 TestGcloudFunctionsEventTriggers",
           "test/compat/functionsfields_test.go:265 TestFunctionsSecretsBuildsAndMounts",
           "test/compat/functionsfields_test.go:62 TestFunctionsFields",
           "test/compat/terraform_batch9_test.go:127 TestTerraformCloudFunctions2FunctionIAM"
@@ -2269,8 +2272,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/functionsapi_test.go:76 TestFunctionsAPI",
-          "test/compat/functionsevents_test.go:213 TestFunctionsEventTriggers",
-          "test/compat/functionsevents_test.go:517 TestGcloudFunctionsEventTriggers",
+          "test/compat/functionsevents_test.go:215 TestFunctionsEventTriggers",
+          "test/compat/functionsevents_test.go:519 TestGcloudFunctionsEventTriggers",
           "test/compat/functionsfields_test.go:62 TestFunctionsFields",
           "test/compat/terraform_batch9_test.go:127 TestTerraformCloudFunctions2FunctionIAM"
         ]
@@ -2294,8 +2297,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/functionsapi_test.go:76 TestFunctionsAPI",
-          "test/compat/functionsevents_test.go:213 TestFunctionsEventTriggers",
-          "test/compat/functionsevents_test.go:517 TestGcloudFunctionsEventTriggers",
+          "test/compat/functionsevents_test.go:215 TestFunctionsEventTriggers",
+          "test/compat/functionsevents_test.go:519 TestGcloudFunctionsEventTriggers",
           "test/compat/functionsfields_test.go:62 TestFunctionsFields"
         ]
       }

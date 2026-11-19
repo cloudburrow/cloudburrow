@@ -67,6 +67,8 @@ type probedEvent struct {
 	Headers map[string]string `json:"headers"`
 	Data    string            `json:"data"`
 	Path    string            `json:"path"`
+	// DataBase64 is the data as sent, for a binary one (#1877).
+	DataBase64 string `json:"dataBase64"`
 }
 
 // probedEvents polls the probe's /events until want reports one matches,

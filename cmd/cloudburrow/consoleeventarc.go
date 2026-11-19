@@ -42,6 +42,14 @@ var eaEventTypes = []eaEventType{
 	{"google.cloud.storage.object.v1.archived", "Cloud Storage"},
 	{"google.cloud.storage.object.v1.metadataUpdated", "Cloud Storage"},
 	{eaAuditLogType, "Cloud Audit Logs"},
+	{"google.cloud.firestore.document.v1.created", "Cloud Firestore"},
+	{"google.cloud.firestore.document.v1.updated", "Cloud Firestore"},
+	{"google.cloud.firestore.document.v1.deleted", "Cloud Firestore"},
+	{"google.cloud.firestore.document.v1.written", "Cloud Firestore"},
+	{"google.cloud.firestore.document.v1.created.withAuthContext", "Cloud Firestore"},
+	{"google.cloud.firestore.document.v1.updated.withAuthContext", "Cloud Firestore"},
+	{"google.cloud.firestore.document.v1.deleted.withAuthContext", "Cloud Firestore"},
+	{"google.cloud.firestore.document.v1.written.withAuthContext", "Cloud Firestore"},
 }
 
 // eaAuditLogType is Cloud Audit Logs' event type, whose provider is the
@@ -62,10 +70,10 @@ func eaProviderOf(typ string) string {
 
 // eaDestinations are the event destinations Create trigger offers, as
 // Google's select names them.
-var eaDestinations = []string{"Cloud Run"}
+var eaDestinations = []string{"Cloud Run", "Cloud Run functions", "HTTP endpoint"}
 
 const eventarcNote = "Triggers deliver each event to their destination as a CloudEvent in binary content mode, over a Pub/Sub " +
-	"push subscription Eventarc makes. Google sources' direct events of Cloud Pub/Sub and Cloud Storage, and the Cloud Audit Logs (Admin Activity) entries of the calls this instance serves over gRPC, are served; " +
+	"push subscription Eventarc makes. Google sources' direct events of Cloud Pub/Sub and Cloud Storage, the Cloud Audit Logs (Admin Activity) entries of the calls this instance serves over gRPC, and Cloud Firestore's document events, are served; " +
 	"channels (third-party providers) are not. The columns follow Google's Triggers page (UNVERIFIED, re-read 2026-11-19: " +
 	"https://docs.cloud.google.com/eventarc/standard/docs/overview names the page, not its columns)."
 
@@ -197,6 +205,12 @@ func (p eventarcProvider) destinationFields(d *eventarcpb.Destination) []console
 			Pattern: `^[a-z]([a-z0-9\-]{0,47}[a-z0-9])?$`, Help: "Cloud Run: the service, in the trigger's region, the events are sent to."},
 		{Name: "path", Label: "Service URL path", Type: "text", Default: path, Pattern: `^/.*$`, Section: sec,
 			Help: "Optional. The path on the destination the events are sent to, beginning with /."},
+		{Name: "function", Label: "Select a Cloud Run function", Type: "text", Default: lastSegment(d.GetCloudFunction()), Section: sec,
+			Help: "Cloud Run functions: the function, in the trigger's region, the events are sent to."},
+		{Name: "uri", Label: "Destination URI", Type: "text", Default: d.GetHttpEndpoint().GetUri(), Pattern: `^https?://.+$`, Section: sec,
+			Help: "HTTP endpoint: the internal endpoint's URI, such as http://10.10.10.8:80/route; reached from this machine."},
+		{Name: "networkAttachment", Label: "Network attachment", Type: "text", Default: d.GetNetworkConfig().GetNetworkAttachment(), Section: sec,
+			Help: "HTTP endpoint: the network attachment, projects/P/regions/R/networkAttachments/NAME, as Google requires; recorded, not used."},
 	}
 }
 
@@ -218,6 +232,12 @@ func (p eventarcProvider) CreateForm() (string, []console.Field) {
 		{Name: "resource", Label: "Resource", Type: "select", Options: eaResourceChoices, Default: eaResourceChoices[0], Section: "Event provider",
 			Help: "Cloud Audit Logs: every resource, one resource name, or a path pattern such as projects/_/secrets/{secret}."},
 		{Name: "resourceName", Label: "Resource name or path pattern", Type: "text", Section: "Event provider"},
+		{Name: "database", Label: "Database", Type: "text", Default: "(default)", Section: "Event provider",
+			Help: "Cloud Firestore: the database whose documents' events are delivered."},
+		{Name: "document", Label: "Document", Type: "text", Section: "Event provider",
+			Help: "Cloud Firestore: optional. A document path, or a path pattern such as users/{userId}; empty for every document."},
+		{Name: "documentMatch", Label: "Document match", Type: "select", Options: []string{"Path pattern", "Exact"}, Default: "Path pattern",
+			Section: "Event provider", Help: "Cloud Firestore: whether Document is a path pattern (match-path-pattern) or one document."},
 		{Name: "region", Label: "Region", Type: "select", Options: []string{p.run.location()}, Default: p.run.location(), Section: "Trigger"},
 		{Name: "serviceAccount", Label: "Service account", Type: "text", Section: "Trigger",
 			Help: "Optional. The account the delivery authenticates as; the default compute account when empty."},
@@ -243,6 +263,22 @@ func eaFormDestination(project, region string, values map[string]string) (*event
 		}
 		return &eventarcpb.Destination{Descriptor_: &eventarcpb.Destination_CloudRun{CloudRun: &eventarcpb.CloudRun{
 			Service: svc, Region: region, Path: path}}}, nil
+	case "Cloud Run functions":
+		fn := strings.TrimSpace(values["function"])
+		if fn == "" {
+			return nil, errors.New("choose the Cloud Run function the events are sent to")
+		}
+		if !strings.HasPrefix(fn, "projects/") {
+			fn = "projects/" + project + "/locations/" + region + "/functions/" + fn
+		}
+		return &eventarcpb.Destination{Descriptor_: &eventarcpb.Destination_CloudFunction{CloudFunction: fn}}, nil
+	case "HTTP endpoint":
+		uri, na := strings.TrimSpace(values["uri"]), strings.TrimSpace(values["networkAttachment"])
+		if uri == "" || na == "" {
+			return nil, errors.New("an HTTP endpoint destination needs its URI and network attachment")
+		}
+		return &eventarcpb.Destination{Descriptor_: &eventarcpb.Destination_HttpEndpoint{HttpEndpoint: &eventarcpb.HttpEndpoint{Uri: uri}},
+			NetworkConfig: &eventarcpb.NetworkConfig{NetworkAttachment: na}}, nil
 	default:
 		return nil, fmt.Errorf("event destination %q is not served", kind)
 	}
@@ -286,6 +322,19 @@ func eaFormTrigger(project, region string, values map[string]string) (*eventarcp
 			return nil, errors.New("a Cloud Storage trigger takes a bucket, not a topic")
 		}
 		t.EventFilters = append(t.EventFilters, &eventarcpb.EventFilter{Attribute: "bucket", Value: bucket})
+	case "Cloud Firestore":
+		db := strings.TrimSpace(values["database"])
+		if db == "" {
+			db = "(default)"
+		}
+		t.EventFilters = append(t.EventFilters, &eventarcpb.EventFilter{Attribute: "database", Value: db})
+		if doc := strings.TrimSpace(values["document"]); doc != "" {
+			f := &eventarcpb.EventFilter{Attribute: "document", Value: doc}
+			if values["documentMatch"] != "Exact" {
+				f.Operator = "match-path-pattern"
+			}
+			t.EventFilters = append(t.EventFilters, f)
+		}
 	case "Cloud Audit Logs":
 		svc, method := strings.TrimSpace(values["serviceName"]), strings.TrimSpace(values["methodName"])
 		if svc == "" || method == "" {

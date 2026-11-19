@@ -93,7 +93,7 @@ func TestEventarcTriggersPageThroughTheBrowser(t *testing.T) {
 		t.Errorf("Delete = %d: %s", code, body)
 	}
 	p.navigate("/eventarc/triggers?project=" + project)
-	p.waitFor(`document.querySelector("#view table, #view .empty") !== null`)
+	p.waitFor(`document.querySelector("#view tbody") !== null || document.querySelector("#view").textContent.includes("No triggers yet")`)
 	var text string
 	p.eval(`document.querySelector("#view").textContent`, &text)
 	if strings.Contains(text, trigger) {

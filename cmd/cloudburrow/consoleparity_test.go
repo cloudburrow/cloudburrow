@@ -98,7 +98,7 @@ var parityRows = []parityRow{
 		Tests: []string{"TestRunAddTriggerIsAnEventarcTrigger", "TestCloudRunEventarcTriggersThroughTheBrowser"}},
 	{Resource: "Eventarc's Triggers page", Service: "eventarc",
 		Methods:  []string{"Eventarc/GetTrigger", "Eventarc/UpdateTrigger"},
-		Provider: "eventarc", Offers: "Eventarc's own Triggers page (/eventarc/triggers, #1877): every trigger of the project (type, event provider, event type, destination, region, created), Create trigger as Google's page (trigger name and type, event provider and event type with its filters, region, service account, event destination, labels), the trigger's page with what GetTrigger reads and its event filters, Edit (service account, destination, labels) and Delete",
+		Provider: "eventarc", Offers: "Eventarc's own Triggers page (/eventarc/triggers, #1877): every trigger of the project (type, event provider, event type, destination, region, created), Create trigger as Google's page (trigger name and type; Cloud Pub/Sub, Cloud Storage, Cloud Audit Logs with service name, method name and Resource as any, one or a path pattern, and Cloud Firestore with database and document path pattern; region, service account; event destination Cloud Run, Cloud Run functions or HTTP endpoint; labels), the trigger's page with what GetTrigger reads and its event filters, Edit (service account, destination, labels) and Delete",
 		Tests: []string{"TestEventarcConsoleTriggers", "TestEventarcTriggersPageThroughTheBrowser"}},
 	{Resource: "Eventarc providers", Service: "eventarc",
 		Methods:  []string{"Eventarc/GetProvider", "Eventarc/ListProviders"},
