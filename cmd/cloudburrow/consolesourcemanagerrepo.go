@@ -157,7 +157,7 @@ func (p sourceManagerProvider) codeDetail(ctx context.Context, in *ssmpb.Instanc
 		return console.Detail{Unavailable: consoleErr(err)}, nil
 	}
 	ref, file := cpath[3], strings.Join(cpath[4:], "/")
-	trail := []console.Crumb{{Label: lastSegment(r.GetName()), Path: cpath[:2]}, {Label: ref, Path: cpath[:4]}}
+	trail := []console.Crumb{{Label: cpath[0], Path: cpath[:1]}, {Label: lastSegment(r.GetName()), Path: cpath[:2]}, {Label: ref, Path: cpath[:4]}}
 	for i := 4; i < len(cpath)-1; i++ {
 		trail = append(trail, console.Crumb{Label: cpath[i], Path: cpath[:i+1]})
 	}
@@ -319,7 +319,7 @@ func (p sourceManagerProvider) issueDetail(ctx context.Context, in *ssmpb.Instan
 	if err != nil {
 		return console.Detail{Unavailable: consoleErr(err)}, nil
 	}
-	d := console.Detail{Title: x.GetTitle() + " #" + ipath[3], Trail: []console.Crumb{{Label: ipath[1], Path: ipath[:2]},
+	d := console.Detail{Title: x.GetTitle() + " #" + ipath[3], Trail: []console.Crumb{{Label: ipath[0], Path: ipath[:1]}, {Label: ipath[1], Path: ipath[:2]},
 		{Label: "Issues", Path: ipath[:3]}, {Label: "#" + ipath[3]}},
 		Summary: dropDashes([]console.Property{{Label: "State", Value: stateWord(x.GetState().String())},
 			{Label: "Created", Value: stampAge(x.GetCreateTime())}, {Label: "Updated", Value: stampAge(x.GetUpdateTime())},
@@ -505,10 +505,10 @@ func (p sourceManagerProvider) pullDetail(ctx context.Context, in *ssmpb.Instanc
 	if err != nil {
 		return console.Detail{Unavailable: consoleErr(err)}, nil
 	}
-	d := console.Detail{Title: pr.GetTitle() + " #" + ppath[3], Trail: []console.Crumb{{Label: ppath[1], Path: ppath[:2]},
+	d := console.Detail{Title: pr.GetTitle() + " #" + ppath[3], Trail: []console.Crumb{{Label: ppath[0], Path: ppath[:1]}, {Label: ppath[1], Path: ppath[:2]},
 		{Label: "Pull requests", Path: ppath[:3]}, {Label: "#" + ppath[3]}},
 		Summary: dropDashes([]console.Property{{Label: "State", Value: stateWord(pr.GetState().String())},
-			{Label: "merge into", Value: pr.GetBase().GetRef()}, {Label: "pull from", Value: pr.GetHead().GetRef()},
+			{Label: "Merge into", Value: pr.GetBase().GetRef()}, {Label: "Pull from", Value: pr.GetHead().GetRef()},
 			{Label: "Head commit", Value: shortSHA(pr.GetHead().GetSha())},
 			{Label: "Created", Value: stampAge(pr.GetCreateTime())}, {Label: "Updated", Value: stampAge(pr.GetUpdateTime())}})}
 	body := pr.GetBody()
@@ -772,8 +772,7 @@ func (p sourceManagerProvider) repoActions(ctx context.Context, project string, 
 			{Name: "body", Label: "Description", Type: "textarea", Default: pr.GetBody()}}}}
 		switch pr.GetState() {
 		case ssmpb.PullRequest_OPEN:
-			acts = append(acts, console.Action{ID: "merge-pull", Label: "Merge pull request",
-				Confirm: "the base branch " + pr.GetBase().GetRef() + ", which gets a merge commit of " + pr.GetHead().GetRef()},
+			acts = append(acts, console.Action{ID: "merge-pull", Label: "Merge pull request"},
 				console.Action{ID: "close-pull", Label: "Close pull request"})
 		case ssmpb.PullRequest_CLOSED:
 			acts = append(acts, console.Action{ID: "reopen-pull", Label: "Reopen pull request"})

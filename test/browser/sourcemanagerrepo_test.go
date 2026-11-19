@@ -207,8 +207,7 @@ func TestCloudRunSourceManagerRepositoryPagesThroughThePage(t *testing.T) {
 	p.clickText(`#view [role="tab"]`, "Files changed")
 	p.waitFor(`document.querySelector("#view [role=tabpanel]").textContent.includes("NOTES.md")`)
 	p.clickText("#view .page-actions button", "Merge pull request")
-	p.confirmByName(lastPart(pr.GetName()))
-	p.waitFor(`document.querySelector(".modal") === null`)
+	p.waitFor(`[...document.querySelectorAll("#view .page-actions button")].every((b) => b.textContent.trim() !== "Merge pull request")`)
 	if got, err := c.GetPullRequest(ctx, &ssmpb.GetPullRequestRequest{Name: pr.GetName()}); err != nil || got.GetState() != ssmpb.PullRequest_MERGED {
 		t.Errorf("GetPullRequest after Merge pull request = %v, %v", got, err)
 	}
