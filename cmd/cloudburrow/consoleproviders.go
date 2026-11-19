@@ -1749,7 +1749,6 @@ func (p storageProvider) Delete(ctx context.Context, _ string, name string) erro
 
 // Pub/Sub: create and delete topics.
 
-//
 // Google's Create topic page (#1847): Topic ID, Add a default subscription
 // (checked: a topic with no subscription drops every message published to
 // it, a confusing first experience for someone testing a publisher), Use a

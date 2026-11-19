@@ -387,8 +387,8 @@ func TestConsolePubSubSubscriptionsScreen(t *testing.T) {
 		}
 	}
 	for k, v := range map[string]string{
-		"Topic":                            tp,
-		"Delivery type":                    "Push",
+		"Topic":                             tp,
+		"Delivery type":                     "Push",
 		"details.Endpoint":                  endpoint,
 		"details.Dead-letter topic":         dead,
 		"details.Maximum delivery attempts": "6",

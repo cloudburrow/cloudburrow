@@ -127,8 +127,9 @@ func TestTheSchemasScreenCreatesCommitsRollsBackAndDeletes(t *testing.T) {
 		t.Fatalf("pubsub-schemas is not advertised with detail, delete and Create schema: %+v", services)
 	}
 	label, fields := pubsubSchemasProvider{}.CreateForm()
-	if label != "Create schema" || len(fields) != 3 || fields[2].Name != "type" || len(fields[2].Options) != 2 {
-		t.Errorf("the create form = %q %+v; want an ID, a definition and a type, AVRO or PROTOCOL_BUFFER", label, fields)
+	if label != "Create schema" || len(fields) != 3 || fields[1].Name != "type" || fields[1].Type != "radio" ||
+		strings.Join(fields[1].Options, ",") != "Avro,Protocol Buffer" || fields[2].Name != "definition" {
+		t.Errorf("the create form = %q %+v; want Google's ID, type (Avro or Protocol Buffer), then definition", label, fields)
 	}
 
 	if code, out := consolePost(t, srv.URL+"/api/resources/pubsub-schemas?project="+project,
@@ -143,7 +144,7 @@ func TestTheSchemasScreenCreatesCommitsRollsBackAndDeletes(t *testing.T) {
 
 	var listing console.Listing
 	getJSON200(t, srv.URL+"/api/resources/pubsub-schemas?project="+project, &listing)
-	if len(listing.Items) != 1 || listing.Items[0].Name != name || listing.Items[0].Fields["Type"] != "AVRO" ||
+	if len(listing.Items) != 1 || listing.Items[0].Name != name || listing.Items[0].Fields["Schema type"] != "Avro" ||
 		listing.Items[0].Fields["Latest revision"] != v1 {
 		t.Fatalf("schemas listing = %+v; want %s, AVRO, at %s", listing.Items, name, v1)
 	}

@@ -336,7 +336,7 @@ func subscriptionPageFields(withTopic bool) []console.Field {
 				"does a successful push."},
 		console.Field{Name: "expirationDays", Label: "Days", Type: "number", Default: "31", Section: expirySec,
 			ShowWhen: "expirationMode=" + expireAfterDays,
-			Help: "At least 1, and no shorter than the message retention duration."},
+			Help:     "At least 1, and no shorter than the message retention duration."},
 		pubsubLabelsField("", labelSection, pubsubCreateLabelsHelp),
 	)
 }
@@ -571,7 +571,7 @@ func replayAction(retainsAcked bool, snapshots []string) console.Action {
 		{Name: "time", Label: "Time point (RFC 3339)", Type: "text", Required: true, ShowWhen: "seek=" + replayToTime,
 			Default: time.Now().UTC().Truncate(time.Second).Format(time.RFC3339),
 			Help: "Such as 2026-01-02T15:04:05Z. Messages published before it are marked acknowledged, and those " +
-				"after it that the subscription still retains are delivered again. " + retained},
+				"after it that the subscription still retains are redelivered. " + retained},
 	}
 	if len(snapshots) > 0 {
 		fields = append(fields, console.Field{Name: "snapshot", Label: "Snapshot", Type: "select", Options: snapshots,

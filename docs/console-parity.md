@@ -373,6 +373,19 @@ Logs Explorer interface); the layout below is what every category screen (#1843â
 - [x] Storage Intelligence: the Configuration page, with the project's Overview (Status, Edition, Bucket filters) over each resource's configuration, Enable Storage Intelligence and Disable.
 - [ ] Not yet: View options is a picker, where Google's is a dialog with Save that also holds the column choices; the bucket keeps its separate Deleted objects tab beside the Show list; a bucket's own ACLs are edited on its Access control tab, which Google's console does not offer (only gcloud does).
 
+#### Pub/Sub (#1847)
+
+Shared additions: `Field.ShowWhen` ("name" for a checked checkbox, "name=value" for a radio or select choice) shows a field only while its choice holds, and a hidden field is not validated; `Action.Href` makes an action a link (a topic row's Create subscription); an action's result rows may carry their own actions (a pulled message's Ack), sent to the page's path; a create page takes a field's starting value from its address (`/pubsub/subscriptions/create?topic=â€¦`).
+
+- [x] Menu: Topics, Subscriptions, Snapshots, Schemas, in Google's order (Pub/Sub Lite is shut down).
+- [x] Lists: Topics (Topic name, Topic ID, Encryption key, Retention, Schema, Labels; the row menu has Create subscription); Subscriptions (Subscription ID, Delivery type, Topic name, Ack deadline, Retention, Message ordering, Exactly once delivery, Expiration, Dead lettering) with Create subscription; Snapshots (Snapshot ID, Topic name, Expiration) with Create snapshot; Schemas (Schema ID, Schema type, Latest revision, Revision created).
+- [x] Create topic: Topic ID, Add a default subscription (checked), Use a schema (reveals the schema and its encoding), Enable message retention (reveals days, hours, minutes), Labels.
+- [x] Create subscription: Subscription ID, Pub/Sub topic, Delivery type (Pull or Push, Push revealing the endpoint and attributes), Filter, Retry policy (Retry immediately, or exponential backoff with its minimum and maximum), Dead lettering, Delivery properties (exactly once, ordering), Acknowledgement deadline (10 s), Lifetime options (7 days, Retain acknowledged messages), Expiration period (31 days of inactivity, or Never expire), Labels.
+- [x] Topic page tabs: Subscriptions, Snapshots, Metrics (not available locally: Cloud Monitoring), Details, Messages (Publish message; Pull from one of its subscriptions, each message with an Ack; Pull and ack and Pull without ack kept), Ingestion (not available locally), Permissions; Create subscription beside the title opens the page with the topic.
+- [x] Subscription page tabs: Metrics, Details, Messages (Pull, then Ack on each message), Snapshots, Permissions; Edit, Create snapshot, Replay messages (Seek: To a previous time point or To a snapshot), Detach and Advance clock beside the title. Seek to snapshot and Seek to time are still served by the action route.
+- [x] Create schema: Schema ID, Schema type (Avro or Protocol Buffer), Schema definition.
+- [ ] Not yet: Create topic's Enable ingestion, Export data to BigQuery, Backup message data to Cloud Storage, Transforms and Cloud KMS key, and Create subscription's Write to BigQuery / Write to Cloud Storage delivery and Transforms, are not offered (nothing local runs them, and the emulator encrypts nothing); the create pages are numbered steps, where Google's are one page under headings; Create schema's in-form Validate definition and Test message (Test message is on the schema's page); the Topics list's checkbox-and-header Delete uses the shell's bulk Delete; the subscription page opens on Metrics, as its first tab; list column order and the Snapshots and Schemas columns are from the console as remembered, the docs naming none (UNVERIFIED).
+
 ## 5. Routes, scoping, accessibility, viewports
 
 ### Routes
