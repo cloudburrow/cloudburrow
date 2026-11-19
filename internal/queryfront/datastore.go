@@ -77,7 +77,8 @@ func newDatastoreWith(emulator string, opts ...grpc.ServerOption) *Datastore {
 func (d *Datastore) Stop(ctx context.Context) error { return grpchttp.Stop(ctx, d.grpc) }
 
 // Claims reports whether r is a RunAggregationQuery call, or a RunQuery
-// call with explain_options (explain.go), over gRPC or REST.
+// call with explain_options (explain.go) or a filter the emulator does
+// not serve (operators.go), over gRPC or REST.
 func (d *Datastore) Claims(r *http.Request) bool {
 	if d.databases && namesDatabase(r) != "" {
 		return true
@@ -102,22 +103,9 @@ func (d *Datastore) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		d.grpc.ServeHTTP(w, r)
 		return
 	}
-	if d.databases && namesDatabase(r) != "" {
-		d.serveDatabaseREST(w, r)
-		return
-	}
-	if datastoreRunQueryREST.MatchString(r.URL.Path) {
-		d.serveRunQueryREST(w, r)
-		return
-	}
-	req := &pb.RunAggregationQueryRequest{}
-	if err := readJSON(r, req); err != nil {
-		writeError(w, err)
-		return
-	}
-	req.ProjectId = datastoreAggregationREST.FindStringSubmatch(r.URL.Path)[1]
-	resp, err := d.runAggregation(forwardHTTP(r.Context(), r), req)
-	writeReply(w, resp, err)
+	// Every REST call the front claims, JSON or the protobuf the Java
+	// client sends, in a named database or the default one.
+	d.serveDatabaseREST(w, r)
 }
 
 func (d *Datastore) emulator() (pb.DatastoreClient, error) {
@@ -349,10 +337,16 @@ func (d *Datastore) runAggregation(ctx context.Context, req *pb.RunAggregationQu
 		if bound >= 0 && seen >= bound {
 			break
 		}
-		resp, err := client.RunQuery(ctx, &pb.RunQueryRequest{
+		rq := &pb.RunQueryRequest{
 			ProjectId: req.GetProjectId(), DatabaseId: req.GetDatabaseId(), PartitionId: req.GetPartitionId(),
 			ReadOptions: ro, QueryType: &pb.RunQueryRequest_Query{Query: q},
-		})
+		}
+		var resp *pb.RunQueryResponse
+		if needsOperators(q) {
+			resp, err = d.runOperators(ctx, client, rq)
+		} else {
+			resp, err = client.RunQuery(ctx, rq)
+		}
 		if err != nil {
 			return nil, err
 		}

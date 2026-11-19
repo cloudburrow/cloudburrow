@@ -87,6 +87,17 @@ func (d *Datastore) fromGQL(ctx context.Context, req *pb.RunAggregationQueryRequ
 	}
 	gq := proto.Clone(g).(*pb.GqlQuery)
 	gq.QueryString = inner
+	if gqlNeedsOperators(inner) {
+		// !=, IN, NOT IN and OR (operatorsgql.go).
+		nested, err := parseOperatorGQL(forward(ctx), client, req, req.GetPartitionId(), gq)
+		if err != nil {
+			return nil, err
+		}
+		out := proto.Clone(req).(*pb.RunAggregationQueryRequest)
+		out.QueryType = &pb.RunAggregationQueryRequest_AggregationQuery{AggregationQuery: &pb.AggregationQuery{
+			QueryType: &pb.AggregationQuery_NestedQuery{NestedQuery: nested}, Aggregations: aggs}}
+		return out, nil
+	}
 	// Parsed outside any transaction: the aggregation runs in the
 	// request's own.
 	resp, err := client.RunQuery(forward(ctx), &pb.RunQueryRequest{ProjectId: req.GetProjectId(), DatabaseId: req.GetDatabaseId(),

@@ -275,6 +275,11 @@ type Field struct {
 	// project's topics this way (#791), so the form cannot name one that
 	// does not exist.
 	Options []string `json:"options,omitempty"`
+	// Completions, on a text or textarea field, are the words Ctrl+Space
+	// offers at the cursor, those beginning with the word being typed, as
+	// Google's Query by GQL offers the namespace's kinds (#1846): choosing
+	// one with Enter or a click puts it in place of that word.
+	Completions []string `json:"completions,omitempty"`
 	// KeyPattern and ValuePattern, on a "map" field, are what the API
 	// accepts as each entry's key and value, and MaxEntries how many entries
 	// it takes (0: any number). The browser checks every line against them
@@ -1663,6 +1668,12 @@ type QuerySpec struct {
 	Hint   string  `json:"hint,omitempty"`
 	Fields []Field `json:"fields,omitempty"`
 	Label  string  `json:"label,omitempty"`
+	// TabLabels name the run button while a tab of the form's tab strip
+	// shows, as Google's Query by GQL runs with Run query where Query by
+	// kind runs with Run (#1846); Label otherwise. ClearLabel names the
+	// button that clears the results, "Clear results" when empty.
+	TabLabels  map[string]string `json:"tabLabels,omitempty"`
+	ClearLabel string            `json:"clearLabel,omitempty"`
 	// Write is the statement box's read-write mode, where this resource has
 	// one. Set per resource by the server from the provider's WriteSpec, so a
 	// page offers the mode exactly where the query route will accept it.

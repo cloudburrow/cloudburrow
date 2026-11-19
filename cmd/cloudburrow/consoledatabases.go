@@ -857,7 +857,47 @@ func (p datastoreProvider) kindDetail(ctx context.Context, project string, scope
 		return console.Detail{}, err
 	}
 	summary := []console.Property{{Label: "Namespace", Value: namespaceLabel(scope.ns)}}
-	return singleSection("entities", "Entities", list, summary), nil
+	d := singleSection("entities", "Entities", list, summary)
+	// Query by GQL's Ctrl+Space offers the namespace's kinds (#1846).
+	if label, fields := p.QueryForm(scope.at(kind)); len(fields) > 0 {
+		if kinds := p.kindCompletions(ctx, project, scope.ns); len(kinds) > 0 {
+			for i := range fields {
+				if fields[i].Name == "gql" {
+					fields[i].Completions = kinds
+				}
+			}
+		}
+		// Google's buttons: Run and Clear on Query by kind, Run query on
+		// Query by GQL.
+		d.Query = &console.QuerySpec{Label: label, Fields: fields, ClearLabel: "Clear",
+			TabLabels: map[string]string{datastoreQueryByGQL: "Run query"}}
+	}
+	return d, nil
+}
+
+// kindCompletions are the kinds of namespace ns, as GQL names them
+// (backquoted where a bare name would not parse), for Query by GQL's
+// Ctrl+Space; none when they cannot be listed.
+func (p datastoreProvider) kindCompletions(ctx context.Context, project, ns string) []string {
+	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
+	defer cancel()
+	c, err := p.client(ctx, project)
+	if err != nil {
+		return nil
+	}
+	defer c.Close()
+	kinds, err := datastoreKinds(ctx, c, ns)
+	if err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(kinds))
+	for _, k := range kinds {
+		if !datastoreBareGQLNameRe.MatchString(k) {
+			k = "`" + strings.ReplaceAll(k, "`", "``") + "`"
+		}
+		out = append(out, k)
+	}
+	return out
 }
 
 // namespacesDetail lists the namespaces other than the default, whose kinds
@@ -2548,11 +2588,11 @@ const (
 	datastoreQueryTabField = "tab:" + datastoreQuerySection
 )
 
-// datastoreClauseOps are a query clause's operators: a WHERE clause's
-// comparisons, and an ORDER BY clause's directions. Google's != , IN and
-// NOT_IN are not offered: the Datastore emulator refuses them (measured:
-// IN "Filter has 2 properties, expected 1", != an empty UNKNOWN; #1888).
-var datastoreClauseOps = []string{"==", "<", "<=", ">", ">=", "Ascending", "Descending"}
+// datastoreClauseOps are a query clause's operators, Google's: a WHERE
+// clause's comparisons, and an ORDER BY clause's directions. != , IN and
+// NOT_IN are served by the Datastore front (#1888); IN and NOT_IN take
+// their values separated by commas.
+var datastoreClauseOps = []string{"==", "!=", "<", "<=", ">", ">=", "IN", "NOT_IN", "Ascending", "Descending"}
 
 // datastoreQueryFields are the query tab's Query by kind controls.
 func datastoreQueryFields() []console.Field {
@@ -2565,7 +2605,7 @@ func datastoreQueryFields() []console.Field {
 				{Name: "type", Label: "Value type", Type: "select", Options: datastoreCreateTypes, OptionLabels: datastoreCreateTypeLabels, Default: "string"},
 				{Name: "value", Label: "Value", Type: "text"},
 			},
-			Help: "Each WHERE clause filters on a property: ==, <, <=, > or >= (the Datastore emulator does not serve !=, IN or NOT_IN). " +
+			Help: "Each WHERE clause filters on a property: ==, !=, <, <=, >, >=, IN or NOT_IN; IN and NOT_IN take their values separated by commas. " +
 				"An ORDER BY clause orders by a property, Ascending or Descending. With no clause the kind's entities are listed in key order. " +
 				"Datastore needs a composite index for some combinations, and names the one it needs."},
 		{Name: "limit", Label: "Limit", Type: "text", Default: "50",
@@ -2586,6 +2626,7 @@ var datastoreClauseOperators = map[string]datastorepb.PropertyFilter_Operator{
 	"==": datastorepb.PropertyFilter_EQUAL, "=": datastorepb.PropertyFilter_EQUAL,
 	"<": datastorepb.PropertyFilter_LESS_THAN, "<=": datastorepb.PropertyFilter_LESS_THAN_OR_EQUAL,
 	">": datastorepb.PropertyFilter_GREATER_THAN, ">=": datastorepb.PropertyFilter_GREATER_THAN_OR_EQUAL,
+	"!=": datastorepb.PropertyFilter_NOT_EQUAL, "IN": datastorepb.PropertyFilter_IN, "NOT_IN": datastorepb.PropertyFilter_NOT_IN,
 }
 
 // datastoreClauseValue is a WHERE clause's value of its chosen type.
@@ -2633,10 +2674,21 @@ func datastoreClauses(raw string) (*datastorepb.Filter, []*datastorepb.PropertyO
 		}
 		o, ok := datastoreClauseOperators[op]
 		if !ok {
-			return nil, nil, fmt.Errorf("WHERE %s takes ==, <, <=, >, or >=, not %s", prop, op)
+			return nil, nil, fmt.Errorf("WHERE %s takes ==, !=, <, <=, >, >=, IN or NOT_IN, not %s", prop, op)
 		}
-		v, err := datastoreClauseValue(r["type"], r["value"])
-		if err != nil {
+		var v *datastorepb.Value
+		if o == datastorepb.PropertyFilter_IN || o == datastorepb.PropertyFilter_NOT_IN {
+			// The values, separated by commas, each of the value type.
+			arr := &datastorepb.ArrayValue{}
+			for _, part := range strings.Split(r["value"], ",") {
+				e, err := datastoreClauseValue(r["type"], strings.TrimSpace(part))
+				if err != nil {
+					return nil, nil, fmt.Errorf("WHERE %s %s: %w", prop, op, err)
+				}
+				arr.Values = append(arr.Values, e)
+			}
+			v = &datastorepb.Value{ValueType: &datastorepb.Value_ArrayValue{ArrayValue: arr}}
+		} else if v, err = datastoreClauseValue(r["type"], r["value"]); err != nil {
 			return nil, nil, fmt.Errorf("WHERE %s: %w", prop, err)
 		}
 		filters = append(filters, &datastorepb.Filter{FilterType: &datastorepb.Filter_PropertyFilter{PropertyFilter: &datastorepb.PropertyFilter{

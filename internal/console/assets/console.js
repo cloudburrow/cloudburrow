@@ -5231,6 +5231,7 @@ function queryFormPane(route, segments, spec, onDone) {
   const results = el("div", { class: "query-results" });
   const error = el("p", { class: "form-error", role: "alert", hidden: true });
   const run = el("button", { class: "primary", type: "submit", text: spec.label || "Run" });
+  followTabLabels(fields.nodes, run, spec);
 
   const execute = async (e) => {
     if (e) e.preventDefault();
@@ -5272,10 +5273,24 @@ function queryFormPane(route, segments, spec, onDone) {
     el("form", { class: "card query-form", novalidate: true, onsubmit: execute },
       ...fields.nodes,
       el("div", { class: "card-actions" }, run,
-        el("button", { class: "secondary", type: "button", text: "Clear results",
+        el("button", { class: "secondary", type: "button", text: spec.clearLabel || "Clear results",
           onclick: () => { setChildren(results); error.hidden = true; } }))),
     error,
     results);
+}
+
+// followTabLabels names the run button for the tab showing in the form's
+// tab strip, as Google's Query by GQL is run with Run query (#1846).
+function followTabLabels(nodes, run, spec) {
+  const labels = spec.tabLabels || {};
+  if (!Object.keys(labels).length) return;
+  const strips = nodes.flatMap((n) => (n.querySelectorAll ? [...n.querySelectorAll(".form-tabs")] : []));
+  const name = () => {
+    const shown = strips.map((s) => labels[s.dataset.selected]).find(Boolean);
+    run.textContent = shown || spec.label || "Run";
+  };
+  for (const s of strips) new MutationObserver(name).observe(s, { attributes: true, attributeFilter: ["data-selected"] });
+  name();
 }
 
 // --- create form ------------------------------------------------------
@@ -5287,6 +5302,69 @@ function queryFormPane(route, segments, spec, onDone) {
 // of one description would drift, and validation is the part that would drift
 // silently — the half that still looked right while accepting what the API
 // refuses.
+
+// attachCompletions has Ctrl+Space in a text control open a list of the
+// words that begin with the word at the cursor (all of them at a word's
+// start); Up and Down move through it, Enter or a click puts the chosen
+// word in place of the one typed, and Escape closes it (#1846).
+function attachCompletions(control, words) {
+  const list = el("ul", { class: "completions", role: "listbox", hidden: true, "aria-label": "Completions" });
+  list.id = `${control.id || control.name}-completions`;
+  control.setAttribute("aria-autocomplete", "list");
+  control.setAttribute("aria-controls", list.id);
+  let shown = [], active = 0;
+  const wordAt = () => {
+    const end = control.selectionStart ?? control.value.length;
+    let start = end;
+    while (start > 0 && /[A-Za-z0-9_$`]/.test(control.value[start - 1])) start--;
+    return { start, end, typed: control.value.slice(start, end) };
+  };
+  const close = () => { list.hidden = true; shown = []; control.setAttribute("aria-expanded", "false"); };
+  const choose = (w) => {
+    const { start, end } = wordAt();
+    control.value = control.value.slice(0, start) + w + control.value.slice(end);
+    const at = start + w.length;
+    control.setSelectionRange(at, at);
+    control.dispatchEvent(new Event("input", { bubbles: true }));
+    close();
+    control.focus();
+  };
+  const draw = () => {
+    setChildren(list, ...shown.map((w, i) => {
+      const item = el("li", { role: "option", text: w, class: i === active ? "active" : "" });
+      item.setAttribute("aria-selected", String(i === active));
+      item.addEventListener("mousedown", (e) => { e.preventDefault(); choose(w); });
+      return item;
+    }));
+  };
+  const open = () => {
+    const typed = wordAt().typed.replace(/^`/, "").toLowerCase();
+    shown = words.filter((w) => w.replace(/^`/, "").toLowerCase().startsWith(typed));
+    active = 0;
+    if (!list.isConnected) control.after(list);
+    if (!shown.length) { close(); return; }
+    draw();
+    list.hidden = false;
+    control.setAttribute("aria-expanded", "true");
+  };
+  control.addEventListener("keydown", (e) => {
+    if (e.ctrlKey && (e.key === " " || e.code === "Space")) { e.preventDefault(); open(); return; }
+    if (list.hidden) return;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      active = (active + (e.key === "ArrowDown" ? 1 : shown.length - 1)) % shown.length;
+      draw();
+    } else if (e.key === "Enter" || e.key === "Tab") {
+      e.preventDefault();
+      choose(shown[active]);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      close();
+    }
+  });
+  control.addEventListener("input", () => { if (!list.hidden) open(); });
+  control.addEventListener("blur", () => setTimeout(close, 150));
+}
 
 function buildCreateForm(spec) {
   // A hidden field is what the form was drawn from, sent back unchanged so
@@ -5339,6 +5417,9 @@ function buildCreateForm(spec) {
     else if (isSelect) control.value = f.default || (f.options || [])[0] || "";
     else control.value = f.default || "";
     if (helpId) control.setAttribute("aria-describedby", helpId);
+    // Ctrl+Space offers the field's completions at the cursor, as Google's
+    // Query by GQL offers the namespace's kinds (#1846).
+    if ((f.completions || []).length && !isCheck && !isSelect) attachCompletions(control, f.completions);
     // An immutable field is shown so the operator can see which resource they
     // are editing, and refused so the form does not accept a change the API
     // will not apply. Disabled rather than hidden: hiding it would read as

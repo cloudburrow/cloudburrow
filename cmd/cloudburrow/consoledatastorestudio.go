@@ -457,3 +457,6 @@ func datastoreIndexSize(n int64) string {
 	}
 	return formatBytes(n)
 }
+
+// datastoreBareGQLNameRe is a name GQL reads without backquotes (#1846).
+var datastoreBareGQLNameRe = regexp.MustCompile(`^[A-Za-z_$][A-Za-z0-9_$]*$`)

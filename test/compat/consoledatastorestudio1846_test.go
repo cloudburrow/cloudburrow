@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"testing"
 
@@ -73,6 +74,8 @@ func TestConsoleDatastoreStudio(t *testing.T) {
 	if err := dc.Get(ctx, datastore.NameKey("Made", "m1", nil), &made); err != nil {
 		t.Fatalf("the created entity: %v", err)
 	}
+	// A property list comes back in no fixed order.
+	sort.Slice(made, func(i, j int) bool { return made[i].Name < made[j].Name })
 	if len(made) != 2 || made[0].Name != "hours" || made[0].Value != int64(3) || !made[0].NoIndex || made[1].NoIndex {
 		t.Errorf("Create entity wrote %+v", made)
 	}
