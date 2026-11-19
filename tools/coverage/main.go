@@ -70,6 +70,7 @@ import (
 	_ "cloud.google.com/go/bigtable/apiv2/bigtablepb"
 	_ "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
 	_ "cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
+	_ "cloud.google.com/go/container/apiv1/containerpb"
 	_ "cloud.google.com/go/datastore/admin/apiv1/adminpb"
 	_ "cloud.google.com/go/datastore/apiv1/datastorepb"
 	_ "cloud.google.com/go/developerconnect/apiv1/developerconnectpb"
@@ -260,6 +261,9 @@ var areas = []area{
 	// JSON on one port. Its Locations, Operations and IAMPolicy mixins are
 	// the rows the scheduler and kms areas list (mixin keys are global).
 	{Key: "privateca", Title: "Certificate Authority Service (v1)", Own: true, Services: []string{"google.cloud.security.privateca.v1.CertificateAuthorityService"}},
+	// The Kubernetes Engine API (#1913): CloudBurrow's own, gRPC and JSON
+	// on one port, each cluster a kind cluster of its own.
+	{Key: "gke", Title: "Kubernetes Engine API (v1)", Own: true, Services: []string{"google.container.v1.ClusterManager"}},
 }
 
 // cloudidentityMethods is every method of the cloudidentity v1 discovery

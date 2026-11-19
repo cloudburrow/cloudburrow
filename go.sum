@@ -206,6 +206,8 @@ cloud.google.com/go/compute/metadata v0.10.0 h1:pyKMUQSwchgkIBBJGdILqQbs/BNJXqwS
 cloud.google.com/go/compute/metadata v0.10.0/go.mod h1:rGFHRrIif570kSibjFTMbt6/4/tzgJWFGI/HVol4GIk=
 cloud.google.com/go/contactcenterinsights v1.23.0/go.mod h1:uB/kygbfYH/gWEq3NEgq3QRI7/MvpjFyX81ajcW5YAI=
 cloud.google.com/go/container v1.51.0/go.mod h1:EvqoT2eXfxLweXXUlhAMGR0sOAB00XPzEjoL01esSDs=
+cloud.google.com/go/container v1.56.1 h1:qhXiBO+eV5nX8Bkdwnp7173QtupzrZGi8YpBdi5K2BI=
+cloud.google.com/go/container v1.56.1/go.mod h1:TRic4llPJD8368zGAEUrasA0C0gc0J869W6W1XAeXkU=
 cloud.google.com/go/containeranalysis v0.19.0/go.mod h1:Zq0XHzUIa0oTa7H6aSR8HWqeJnoRI9syUcYJzfozjZQ=
 cloud.google.com/go/containeranalysis v0.21.1 h1:mz3R+r3LBlUtoe8pb8XEiLm4Qht3LiWKHEkWkET+29U=
 cloud.google.com/go/containeranalysis v0.21.1/go.mod h1:8bbEFPp+S+6609AAIAIZo0MbHCOEYwbDtZ/Azu3vr9o=

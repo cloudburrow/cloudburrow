@@ -442,7 +442,8 @@ browser_suite() {  # <shard> <dir> <flags...>
     emulators) select=-run pattern="$COMPAT_BROWSER_EMULATORS_SHARD_TESTS" ;;
     memorystore) select=-run pattern="$COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS" ;;
     sql) select=-run pattern="$COMPAT_BROWSER_SQL_SHARD_TESTS" ;;
-    *) select=-skip pattern="$COMPAT_BROWSER_RUN_SHARD_TESTS|$COMPAT_BROWSER_EMULATORS_SHARD_TESTS|$COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS|$COMPAT_BROWSER_SQL_SHARD_TESTS|$COMPAT_BROWSER_NEVER_TESTS"
+    served) select=-run pattern="$COMPAT_BROWSER_SERVED_SHARD_TESTS" ;;
+    *) select=-skip pattern="$COMPAT_BROWSER_RUN_SHARD_TESTS|$COMPAT_BROWSER_EMULATORS_SHARD_TESTS|$COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS|$COMPAT_BROWSER_SQL_SHARD_TESTS|$COMPAT_BROWSER_SERVED_ONLY_TESTS|$COMPAT_BROWSER_NEVER_TESTS"
       skip=() ;;
   esac
   for c in "${CLOUDBURROW_TEST_CHROME:-}" "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
@@ -474,6 +475,8 @@ browser_suite() {  # <shard> <dir> <flags...>
   # The sql shard's read back through the Cloud SQL Admin API, the Backup
   # and DR Service and Secret Manager, which holds Run SQL's password.
   if [ "$shard" = sql ]; then BROWSER_VARS+=,SQLADMIN,BACKUPDR,SECRETS; fi
+  # The served shard's: the Kubernetes Engine API and the kubeconfig (#1913).
+  if [ "$shard" = served ]; then BROWSER_VARS+=,GKE,KUBECONFIG; fi
   BROWSER_ENV=$(scripts/compat-env.sh --only "$BROWSER_VARS" --cli "$CLI" -- "$@" 2>/dev/null)
   (
     eval "$BROWSER_ENV"

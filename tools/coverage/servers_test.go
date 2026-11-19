@@ -30,6 +30,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
 	"github.com/cloudburrow/cloudburrow/internal/grafeas"
 	"github.com/cloudburrow/cloudburrow/internal/modelgarden"
+	"github.com/cloudburrow/cloudburrow/internal/service/gke"
 	"github.com/cloudburrow/cloudburrow/internal/service/kms"
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
 	"github.com/cloudburrow/cloudburrow/internal/service/privateca"
@@ -67,6 +68,11 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		t.Fatal(err)
 	}
 	privatecapb.RegisterCertificateAuthorityServiceServer(srv, pca.API())
+	gkeSrv, err := gke.NewServer(nil, gke.Options{Versions: []gke.Version{{GKE: "1.36.4-gke.0", Image: "kindest/node:v1.36.4"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gkeSrv.Register(srv)
 	rmReg := resourcemanager.New(store.NewMemory())
 	rmpb.RegisterProjectsServer(srv, resourcemanager.NewProjectsServer(rmReg))
 	rmpb.RegisterFoldersServer(srv, resourcemanager.NewFoldersServer(rmReg))

@@ -634,6 +634,10 @@ func gkeStorageClasses(kubeconfig, cluster string) kubeProvider {
 // those columns say "—".
 type gkeClustersProvider struct {
 	name, kubeconfig, own string
+	// svc is the Kubernetes Engine API (#1913), nil unless served, and
+	// gkeDir where its clusters' kubeconfigs are.
+	svc    *gkeService
+	gkeDir string
 }
 
 func (p gkeClustersProvider) ID() string    { return "gkeclusters" }
@@ -730,7 +734,7 @@ func (f gkeClusterFacts) status() string {
 	return "Error"
 }
 
-func (p gkeClustersProvider) List(ctx context.Context, _ string) (console.Listing, error) {
+func (p gkeClustersProvider) List(ctx context.Context, project string) (console.Listing, error) {
 	f := p.facts(ctx)
 	columns := []string{"Location", "Tier", "Mode", "Number of nodes", "Total vCPUs", "Total memory", "Notifications", "Labels"}
 	row := console.Resource{Name: p.name, Status: f.status(), Fields: map[string]string{
@@ -742,6 +746,17 @@ func (p gkeClustersProvider) List(ctx context.Context, _ string) (console.Listin
 		row.Fields["Total vCPUs"] = "—"
 		row.Fields["Total memory"] = "—"
 	}
+	if p.gkeAPI() != nil {
+		items := []console.Resource{row}
+		for _, c := range p.served(ctx, project) {
+			if c.GetName() != p.name {
+				items = append(items, p.servedRow(c))
+			}
+		}
+		return console.Listing{Columns: columns, Items: items, Total: len(items), AlwaysStatus: true, Noun: "clusters",
+			Note: "The first cluster is this instance's own, a kind cluster made by `cloudburrow up`; the others are Kubernetes Engine " +
+				"clusters of this project, each a kind cluster of its own, which Create cluster makes."}, nil
+	}
 	return console.Listing{
 		Columns: columns, Items: []console.Resource{row}, Total: 1, AlwaysStatus: true, Noun: "clusters",
 		Note: "This instance's own Kubernetes cluster, a kind cluster made by `cloudburrow up`. CloudBurrow does not serve the " +
@@ -751,9 +766,12 @@ func (p gkeClustersProvider) List(ctx context.Context, _ string) (console.Listin
 
 func (p gkeClustersProvider) CanDrill() bool { return true }
 
-func (p gkeClustersProvider) Detail(ctx context.Context, _ string, path []string) (console.Detail, error) {
+func (p gkeClustersProvider) Detail(ctx context.Context, project string, path []string) (console.Detail, error) {
 	if len(path) > 1 {
 		return console.DeeperThan(1, path), nil
+	}
+	if c := p.servedCluster(ctx, project, path[0]); c != nil {
+		return p.servedDetail(ctx, project, c), nil
 	}
 	if path[0] != p.name {
 		return console.Detail{Unavailable: "no cluster named " + path[0] + ": this instance has one, " + p.name}, nil
@@ -878,9 +896,24 @@ func (p gkeClustersProvider) gkeConnectCommands() string {
 	return "export KUBECONFIG=" + p.kubeconfig + "\nkubectl config use-context kind-" + p.name + "\nkubectl get nodes"
 }
 
-func (p gkeClustersProvider) DetailActions(_ context.Context, _ string, path []string) []console.Action {
+func (p gkeClustersProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
+	if len(path) == 3 {
+		if c := p.servedCluster(ctx, project, path[0]); c != nil {
+			return p.servedSubActions(ctx, project, c, path[1], path[2])
+		}
+		return nil
+	}
+	if len(path) == 1 {
+		if c := p.servedCluster(ctx, project, path[0]); c != nil {
+			return p.servedActions(ctx, project, c)
+		}
+	}
 	if len(path) != 1 || path[0] != p.name {
 		return nil
+	}
+	refusal := gkeNoAPI
+	if p.gkeAPI() != nil {
+		refusal = gkeOwnClusterNote
 	}
 	return []console.Action{
 		{ID: "connect", Label: "Connect", Submit: "OK", Fields: []console.Field{
@@ -889,18 +922,31 @@ func (p gkeClustersProvider) DetailActions(_ context.Context, _ string, path []s
 					"CloudBurrow does not serve it (#1913), so point kubectl at this instance's kubeconfig instead. The API server is " +
 					unsetAs(gkeKubeServer(p.kubeconfig), "not started") + "."},
 		}},
-		{ID: "edit", Label: "Edit", Unavailable: gkeNoAPI},
-		{ID: "upgrade", Label: "Upgrade", Unavailable: gkeNoAPI},
-		{ID: "delete", Label: "Delete", Destructive: true, Unavailable: gkeNoAPI},
+		{ID: "edit", Label: "Edit", Unavailable: refusal},
+		{ID: "upgrade", Label: "Upgrade", Unavailable: refusal},
+		{ID: "delete", Label: "Delete", Destructive: true, Unavailable: refusal},
 	}
 }
 
-func (p gkeClustersProvider) ActAt(_ context.Context, _ string, path []string, action string, _ map[string]string) error {
+func (p gkeClustersProvider) ActAt(ctx context.Context, project string, path []string, action string, v map[string]string) error {
+	if len(path) == 3 {
+		if c := p.servedCluster(ctx, project, path[0]); c != nil {
+			return p.servedSubAct(ctx, project, c, path[1], path[2], action, v)
+		}
+	}
+	if len(path) == 1 {
+		if c := p.servedCluster(ctx, project, path[0]); c != nil {
+			return p.servedAct(ctx, project, c, action, v)
+		}
+	}
 	if len(path) != 1 || path[0] != p.name {
 		return fmt.Errorf("no cluster named %s", strings.Join(path, "/"))
 	}
 	if action == "connect" {
 		return nil
+	}
+	if p.gkeAPI() != nil {
+		return errors.New(gkeOwnClusterNote)
 	}
 	return errors.New(gkeNoAPI)
 }
@@ -909,13 +955,18 @@ func (p gkeClustersProvider) ActAt(_ context.Context, _ string, path []string, a
 // Cluster basics, Fleet registration, Networking and, for Standard, the
 // default-pool node pool. Both modes are drawn and refused with the reason.
 func (p gkeClustersProvider) CreateForm() (string, []console.Field) {
+	var refused map[string]string
+	if p.gkeAPI() == nil {
+		refused = map[string]string{"Autopilot": gkeNoAPI, "Standard": gkeNoAPI}
+	}
 	return "Create", []console.Field{
 		{Name: "mode", Label: "Cluster mode", Type: "radio", Options: []string{"Autopilot", "Standard"}, Default: "Autopilot",
-			Section: "Cluster mode", UnavailableOptions: map[string]string{"Autopilot": gkeNoAPI, "Standard": gkeNoAPI},
+			Section: "Cluster mode", UnavailableOptions: refused,
 			OptionLabels: map[string]string{"Autopilot": "Autopilot: Google manages your cluster (Recommended)", "Standard": "Standard: You manage your cluster"}},
 		{Name: "name", Label: "Name", Type: "text", Default: "autopilot-cluster-1", Section: "Cluster basics", Pattern: `^[a-z]([a-z0-9\-]{0,38}[a-z0-9])?$`},
 		{Name: "locationType", Label: "Location type", Type: "radio", Options: []string{"Regional", "Zonal"}, Default: "Regional", Section: "Cluster basics"},
-		{Name: "region", Label: "Region", Type: "text", Default: "us-central1", Section: "Cluster basics"},
+		{Name: "region", Label: "Region", Type: "text", Default: "us-central1", Section: "Cluster basics", ShowWhen: "locationType=Regional"},
+		{Name: "zone", Label: "Zone", Type: "text", Default: "us-central1-a", Section: "Cluster basics", ShowWhen: "locationType=Zonal"},
 		{Name: "channel", Label: "Release channel", Type: "select", Options: []string{"Rapid channel", "Regular channel", "Stable channel", "Extended channel"}, Default: "Regular channel", Section: "Cluster basics"},
 		{Name: "version", Label: "Version", Type: "text", Section: "Cluster basics", Help: "The control plane version; the channel's default when empty."},
 		{Name: "fleet", Label: "Register to the fleet of this project", Type: "checkbox", Section: "Fleet registration",
@@ -924,6 +975,8 @@ func (p gkeClustersProvider) CreateForm() (string, []console.Field) {
 		{Name: "subnet", Label: "Node subnet", Type: "text", Default: "default", Section: "Networking"},
 		{Name: "nodes", Label: "Number of nodes", Type: "text", Default: "3", Section: "Node pools: default-pool", ShowWhen: "mode=Standard", Pattern: `^[0-9]+$`},
 		{Name: "machine", Label: "Machine type", Type: "text", Default: "e2-medium", Section: "Node pools: default-pool", ShowWhen: "mode=Standard"},
+		{Name: "clientCert", Label: "Issue a client certificate", Type: "checkbox", Section: "Security",
+			Help: "The legacy admin client certificate, in the cluster's masterAuth: what kubectl authenticates with locally, since gke-gcloud-auth-plugin mints Google tokens."},
 	}
 }
 
@@ -931,7 +984,10 @@ func (p gkeClustersProvider) CreateOnPage() bool   { return true }
 func (p gkeClustersProvider) CreateTitle() string  { return "Create cluster" }
 func (p gkeClustersProvider) CreateLayout() string { return "page" }
 
-func (p gkeClustersProvider) Create(context.Context, string, map[string]string) (string, error) {
+func (p gkeClustersProvider) Create(ctx context.Context, project string, v map[string]string) (string, error) {
+	if p.gkeAPI() != nil {
+		return p.servedCreate(ctx, project, v)
+	}
 	return "", errors.New(gkeNoAPI)
 }
 

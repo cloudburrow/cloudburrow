@@ -141,6 +141,17 @@ var terraformEndpoints = []terraformEndpoint{
 	// and _certificate apply, plan clean and destroy in
 	// TestTerraformPrivateCA.
 	{config.ServicePrivateCA, "privateca_custom_endpoint", "GOOGLE_PRIVATECA_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	// The Kubernetes Engine API (#1913): a google_container_cluster with
+	// remove_default_node_pool and a google_container_node_pool apply, plan
+	// clean, update in place and destroy in
+	// TestTerraformContainerClusterAndNodePool.
+	{config.ServiceGKE, "container_custom_endpoint", "GOOGLE_CONTAINER_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	// Compute Engine, for the one read google_container_node_pool makes of
+	// it: a pool's node_count is its instance group managers' targetSize,
+	// which the Kubernetes Engine port answers for its own pools' groups
+	// (internal/service/gke/compute.go), and every other Compute call 501,
+	// so a google_compute_* resource never reaches Google either.
+	{config.ServiceGKE, "compute_custom_endpoint", "GOOGLE_COMPUTE_CUSTOM_ENDPOINT", "/compute/v1/", true, ""},
 	// Firestore (#1331): google_firestore_document applies, plans clean,
 	// updates its fields and destroys in TestTerraformFirestoreDocument,
 	// over the documents REST API the emulator serves on its port. On the
@@ -265,6 +276,7 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 		memorystoreAdminEndpoint: cfg.Endpoints.MemorystoreAdmin,
 		config.ServiceBackupDR:   cfg.Endpoints.BackupDR,
 		config.ServicePrivateCA:  cfg.Endpoints.PrivateCA,
+		config.ServiceGKE:        cfg.Endpoints.GKE,
 	}
 	enabled := map[config.Service]bool{resourceManagerEndpoint: true, serviceUsageService: true, apiKeysService: true, sqlAdminEndpoint: sqlAdminEnabled(cfg),
 		memorystoreAdminEndpoint: serviceEnabled(cfg, config.ServiceMemorystore)}

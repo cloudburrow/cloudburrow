@@ -247,6 +247,7 @@ func compatEnvFixture(t *testing.T, edit func(env map[string]string)) (dir, envF
 		"CLOUDBURROW_CLOUDSQL_CONNECTOR_ENDPOINT": "127.0.0.1:3307",
 		"CLOUDBURROW_BACKUPDR_ENDPOINT":           "127.0.0.1:9024",
 		"CLOUDBURROW_PRIVATECA_ENDPOINT":          "127.0.0.1:9028",
+		"CLOUDBURROW_GKE_ENDPOINT":                "127.0.0.1:9030",
 		"CLOUDBURROW_BIGQUERY_ENDPOINT":           "http://127.0.0.1:9014",
 		"CLOUDBURROW_BIGQUERY_STORAGE_ENDPOINT":   "127.0.0.1:9015",
 	}
@@ -344,6 +345,7 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"RUN_MYSQL":                "127.0.0.1:9017",
 		"RUN_SERVICEUSAGE":         "127.0.0.1:9023",
 		"SQL_SERVICEUSAGE":         "127.0.0.1:9023",
+		"GKE_SERVICEUSAGE":         "127.0.0.1:9023",
 		"SPANNER":                  "127.0.0.1:9013",
 		"DATASTORE":                "127.0.0.1:9011",
 		"FIRESTORE":                "127.0.0.1:9010",
@@ -358,6 +360,7 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"CLOUDSQL_CONNECTOR":       "127.0.0.1:3307",
 		"BACKUPDR":                 "127.0.0.1:9024",
 		"PRIVATECA":                "127.0.0.1:9028",
+		"GKE":                      "127.0.0.1:9030",
 		"BIGQUERY":                 "http://127.0.0.1:9014",
 		"BIGQUERY_STORAGE":         "127.0.0.1:9015",
 		"BIGQUERY_PROJECT":         "ct-local",

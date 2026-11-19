@@ -89,6 +89,10 @@ func runDelete(args []string, stdout, stderr io.Writer) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
+	// The Kubernetes Engine API's clusters (#1913) go with the instance.
+	if err := deleteGKEClusters(ctx, cfg, stdout); err != nil {
+		return err
+	}
 	if err := c.Delete(ctx); err != nil {
 		return describeClusterError(err)
 	}

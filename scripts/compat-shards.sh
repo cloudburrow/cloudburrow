@@ -23,9 +23,14 @@
 #              serves, for TestOneProjectNumberEverywhere, which compares
 #              its project number with Cloud Storage's service agent;
 #   served:    the remaining CloudBurrow-served APIs (kms, logging,
-#              privateca) and the
+#              privateca, gke) and the
 #              KMS restart probe, with Resource Manager as
-#              LOGGING_RESOURCEMANAGER for the Logging folder tests;
+#              LOGGING_RESOURCEMANAGER for the Logging folder tests and
+#              Service Usage as GKE_SERVICEUSAGE for gcloud container; the
+#              Kubernetes Engine API's tests make kind clusters beside the
+#              instance's (about 5 minutes on a laptop, and 20 GiB free,
+#              which ci.yml makes room for), and its console test runs in
+#              this shard's browser step;
 #   run:       Cloud Run with its Knative install; secretmanager too, for
 #              the two tests that read a secret from a revision, so its
 #              tests run here and in storage;
@@ -89,7 +94,14 @@ COMPAT_SHARDS="storage served run scale emulators memorystore sql acceptance iam
 # TestMemorystoreScreensMeetWCAG (memorystore) and
 # TestSecretsSchedulerTasksProjectsIAMAndAIScreensMeetWCAG (storage, which
 # serves Secret Manager, Cloud Scheduler and Cloud Tasks).
-COMPAT_BROWSER_SHARDS="storage run emulators memorystore sql"
+# The served shard's instance serves the Kubernetes Engine API (#1913), so
+# the test that makes a cluster through the pages runs there, and
+# TestKubernetesEnginePagesThroughTheBrowser, which holds with and without
+# the API, runs there as well as in storage. Only the first is kept out of
+# storage (COMPAT_BROWSER_SERVED_ONLY_TESTS), where it would skip.
+COMPAT_BROWSER_SHARDS="storage served run emulators memorystore sql"
+COMPAT_BROWSER_SERVED_SHARD_TESTS='^Test(GKEServed|KubernetesEnginePages)'
+COMPAT_BROWSER_SERVED_ONLY_TESTS='^TestGKEServed'
 COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|LoggingAdmin|SecretManager|Eventarc)'
 COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|Bigtable|Spanner)'
 COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS='^TestMemorystore'
@@ -166,7 +178,12 @@ compat_shard() {
       PROBE_TESTS="TestSecretManagerAcrossRestart TestTasksAcrossRestart TestSchedulerAcrossRestart TestStorageAcrossRestart"
       PROBE_VARS=SECRETS,TASKS,SCHEDULER,STORAGE ;;
     served)
-      SERVICES=kms,logging,privateca
+      SERVICES=kms,logging,privateca,gke
+      # The Kubernetes Engine API (#1913): its clusters are kind clusters
+      # beside the instance's. Service Usage as GKE_SERVICEUSAGE, which
+      # `gcloud container clusters create` asks whether
+      # container.googleapis.com is enabled, so the Service Usage suite
+      # stays in storage.
       # Certificate Authority Service (#1834), in process like KMS.
       # Cloud KMS (#309) and Cloud Logging (#304). Resource Manager's tests
       # run in the storage shard; the Logging folder and organization tests
@@ -175,7 +192,7 @@ compat_shard() {
       # 38910752877: in storage gcloud had no logging override).
       # Cloud KMS Autokey's folder and project tests (#1568) make their
       # folder with it too.
-      TEST_VARS+=,KMS,LOGGING,LOGGING_RESOURCEMANAGER,PRIVATECA
+      TEST_VARS+=,KMS,LOGGING,LOGGING_RESOURCEMANAGER,PRIVATECA,GKE,GKE_SERVICEUSAGE
       # Cloud KMS (#418): a key with ENABLED, DISABLED and
       # DESTROY_SCHEDULED versions and a ciphertext.
       SETUP_TESTS="TestKMSRestartSetup"

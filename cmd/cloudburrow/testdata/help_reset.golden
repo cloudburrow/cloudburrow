@@ -94,6 +94,8 @@ Flags:
     	Firestore emulator host port (0 = OS-assigned; default 9010)
   -port-firestore-mongodb int
     	Firestore with MongoDB compatibility host port, the MongoDB wire protocol (0 = OS-assigned; default 9026)
+  -port-gke int
+    	Kubernetes Engine API host port (0 = OS-assigned; default 9030)
   -port-ingress int
     	host port for the cluster ingress gateway (0 = OS-assigned; fixed at cluster creation)
   -port-kms int
@@ -143,7 +145,7 @@ Flags:
   -seed-file string
     	seed document (the /admin/seed body) applied when up starts
   -services string
-    	comma-separated services to start (default storage,pubsub,tasks,run,secretmanager; opt-in: firestore,datastore,bigtable,spanner,cloudsql,bigquery,memorystore,cloudsql-mysql,scheduler,logging,kms,backupdr,privateca)
+    	comma-separated services to start (default storage,pubsub,tasks,run,secretmanager; opt-in: firestore,datastore,bigtable,spanner,cloudsql,bigquery,memorystore,cloudsql-mysql,scheduler,logging,kms,backupdr,privateca,gke)
   -shutdown-timeout duration
     	bounded time to drain on shutdown
   -state-dir string

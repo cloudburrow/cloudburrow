@@ -71,6 +71,22 @@ func TestTheTerraformProviderNeverPointsAtGoogle(t *testing.T) {
 	}
 }
 
+// TestTerraformGetsTheKubernetesEngineAPI (#1913): with gke enabled the
+// provider's container_custom_endpoint is the API's port, not skipped (it
+// was, with no port, so google_container_* went to Google, where egress
+// blocking refused it).
+func TestTerraformGetsTheKubernetesEngineAPI(t *testing.T) {
+	cfg := config.Default()
+	cfg.Services = []config.Service{config.ServiceGKE}
+	body, skipped := terraformProvider(cfg, false)
+	if want := `container_custom_endpoint = "http://127.0.0.1:9030/v1/"`; !strings.Contains(body, want) {
+		t.Errorf("provider lacks %s:\n%s", want, body)
+	}
+	if slices.Contains(skipped, config.ServiceGKE) {
+		t.Errorf("gke is named as skipped: %v", skipped)
+	}
+}
+
 func TestTerraformArguments(t *testing.T) {
 	ours, theirs, bin, err := terraformArgs([]string{"--name", "x", "--binary", "tofu", "--", "-chdir=infra", "apply", "-auto-approve"})
 	if err != nil || strings.Join(ours, " ") != "--name x" || bin != "tofu" || strings.Join(theirs, " ") != "-chdir=infra apply -auto-approve" {
