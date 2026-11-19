@@ -12,7 +12,7 @@ import (
 // console can delete through says how Google's console confirms that kind's
 // delete, in console.DeleteConfirmRules, so a new product cannot ship with
 // a confirmation nobody checked. A row is either documented (a style and
-// the Google doc whose console steps describe the dialog) or UNVERIFIED,
+// the Google doc whose console steps describe the dialog) or `UNVERIFIED`,
 // which keeps the name typed back.
 func TestEveryDeleterHasADeleteConfirmRule(t *testing.T) {
 	d := coverageDeps(t)
@@ -38,10 +38,10 @@ func TestEveryDeleterHasADeleteConfirmRule(t *testing.T) {
 			t.Errorf("%s: style %q is none of %v", id, r.Style, styles)
 		}
 		if r.Verified != strings.HasPrefix(r.Source, "https://docs.cloud.google.com/") {
-			t.Errorf("%s: a verified row names its Google doc, an UNVERIFIED one none: verified %v, source %q", id, r.Verified, r.Source)
+			t.Errorf("%s: a verified row names its Google doc, an `UNVERIFIED` one none: verified %v, source %q", id, r.Verified, r.Source)
 		}
 		if !r.Verified && r.Style != console.DeleteConfirmName {
-			t.Errorf("%s: UNVERIFIED, so it keeps the name typed back, not %q", id, r.Style)
+			t.Errorf("%s: `UNVERIFIED`, so it keeps the name typed back, not %q", id, r.Style)
 		}
 	}
 }
