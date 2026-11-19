@@ -499,3 +499,11 @@ docker run --rm -v "$PWD:/models" \
 > 5.5 GB (holding every frame at full size was 570 MB of RGB a frame, 68 GB for 120); each frame's
 > patches are within a mean 0.06 of 255 of ffmpeg 9's BT.709 RGB conversion's. Embedded through
 > the official client by `TestEmbedContentEmbeds16KVideoThroughThePredictionClient`.
+
+> **Update 2026-11-18 (#1651): GSM 6.10 WAV.** A WAV of GSM 6.10 full-rate speech
+> (`WAVE_FORMAT_GSM610`, Microsoft's 65-byte blocks) is decoded as ETSI GSM 06.10 specifies
+> (`internal/embedding/gsm.go`), sample for sample as ffmpeg 9 decodes it, an out-of-range lag
+> clamped as ffmpeg does (where the synthesis overflows, this decoder saturates as the
+> specification says and ffmpeg wraps). Embedded through the official client by
+> `TestEmbedContentEmbedsGSM610WAVThroughThePredictionClient`. G.726 and MPEG Layer I/II WAVs
+> stay `UNIMPLEMENTED`.

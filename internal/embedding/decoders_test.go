@@ -47,8 +47,16 @@ func maxAbsDiff(t *testing.T, name string, got, want []float32) float64 {
 // 5-bit IMA ADPCM (#1651) the same way, mono in 258- and 256-byte blocks
 // (2 and 12 bytes of padding) and stereo in 512-byte blocks:
 // wav-ima2.wav, wav-ima2-st.wav, wav-ima5.wav, wav-ima5-st.wav.
+//
+// GSM 6.10 (#1651), which ffmpeg does not encode: Microsoft-packed blocks
+// of frames of random parameters written by a scratch generator (not
+// kept), xmaxc at most 36 so the synthesis does not overflow (there this
+// decoder saturates as GSM 06.10 specifies and ffmpeg 9 wraps): wav-gsm.wav
+// (50 blocks, lags 40 to 120) and wav-gsm-lags.wav (24 blocks, any lag,
+// out-of-range ones clamped as ffmpeg does). wav-gsm-ffmpeg.wav is ffmpeg's
+// decode as 16-bit PCM, for the compat test.
 func TestDecodeADPCMWAV(t *testing.T) {
-	for _, name := range []string{"wav-ima", "wav-ima-st", "wav-ms", "wav-ms-st", "wav-ima3", "wav-ima3-st", "wav-ima2", "wav-ima2-st", "wav-ima5", "wav-ima5-st"} {
+	for _, name := range []string{"wav-ima", "wav-ima-st", "wav-ms", "wav-ms-st", "wav-ima3", "wav-ima3-st", "wav-ima2", "wav-ima2-st", "wav-ima5", "wav-ima5-st", "wav-gsm", "wav-gsm-lags"} {
 		w, err := decodeWAV(readTestdata(t, name+".wav"))
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
