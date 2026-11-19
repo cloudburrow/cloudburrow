@@ -98,11 +98,30 @@ func TestDocumentAIProcessorsThroughThePage(t *testing.T) {
 
 	p := open(t)
 	p.navigate("/document-ai/processor-library" + q)
-	p.waitFor(rowReady("Invoice Parser"))
+	p.waitFor(`[...document.querySelectorAll("#view .summary-cards h2")].some((h) => h.textContent === "Invoice Parser")`)
 	var menu []string
 	p.eval(`[...document.querySelectorAll("#product-nav a")].map((a) => a.textContent.trim())`, &menu)
 	if strings.Join(menu, "|") != "Overview|Processor gallery|My processors" {
 		t.Errorf("Document AI's menu is %q", menu)
+	}
+	// Google's gallery: a card per type, under its category's heading.
+	cardText := func(s string) string {
+		var r string
+		p.eval(fmt.Sprintf(`(() => { const c = [...document.querySelectorAll("#view .summary-cards .listing-summary")].find((n) => n.querySelector("h2")?.textContent === %q);
+			return c ? c.textContent : ""; })()`, s), &r)
+		return r
+	}
+	if r := cardText("Enterprise Document OCR"); !strings.Contains(r, "Available") || strings.Contains(r, "Not available") ||
+		!strings.Contains(r, "Create Enterprise Document OCR processor") {
+		t.Errorf("the OCR card reads %q", r)
+	}
+	if r := cardText("Invoice Parser"); !strings.Contains(r, "Not available locally") {
+		t.Errorf("the Invoice Parser card reads %q", r)
+	}
+	var sections []string
+	p.eval(`[...document.querySelectorAll("#view .summary-section")].map((h) => h.textContent)`, &sections)
+	if len(sections) < 3 || sections[0] != "Digitize" {
+		t.Errorf("the gallery's category headings are %q", sections)
 	}
 	rowText := func(s string) string {
 		var r string
@@ -110,14 +129,8 @@ func TestDocumentAIProcessorsThroughThePage(t *testing.T) {
 			return r ? r.textContent : ""; })()`, s), &r)
 		return r
 	}
-	if r := rowText("Enterprise Document OCR"); !strings.Contains(r, "Available") || strings.Contains(r, "Not available") {
-		t.Errorf("the OCR card reads %q", r)
-	}
-	if r := rowText("Invoice Parser"); !strings.Contains(r, "Not available locally") {
-		t.Errorf("the Invoice Parser card reads %q", r)
-	}
 
-	p.clickText("#view tbody a", "Enterprise Document OCR")
+	p.navigate("/document-ai/processor-library/OCR_PROCESSOR" + q)
 	p.waitFor(`location.pathname === "/document-ai/processor-library/OCR_PROCESSOR"`)
 	created := p.pageAction("Create processor", map[string]string{"name": name, "region": "us"}, "")
 	var proc *documentaipb.Processor
@@ -158,7 +171,10 @@ func TestDocumentAIProcessorsThroughThePage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	text, rows := p.fileAction("Upload test document", scan)
+	text, rows, boxes := p.documentFileAction("Upload test document", scan)
+	if boxes == 0 {
+		t.Error("Upload test document drew no box over the page image")
+	}
 	content, _ := os.ReadFile(scan)
 	r, err := c.ProcessDocument(ctx, &documentaipb.ProcessRequest{Name: proc.GetName(),
 		Source: &documentaipb.ProcessRequest_RawDocument{RawDocument: &documentaipb.RawDocument{Content: content, MimeType: "image/png"}}})
@@ -171,6 +187,34 @@ func TestDocumentAIProcessorsThroughThePage(t *testing.T) {
 	if !strings.Contains(rows, "Line") || !strings.Contains(rows, "Block") {
 		t.Errorf("the layout rows read %q", rows)
 	}
+
+	// Manage versions: Google's pretrained versions; Default version
+	// changes the default GetProcessor reads; Delete of a checked
+	// pretrained version is refused, as Google refuses it.
+	p.clickText("#view [role=tab]", "Manage versions")
+	p.waitFor(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes("pretrained-ocr-v1.2-2022-11-10"))`)
+	p.pageAction("Default version", map[string]string{"version": "pretrained-ocr-v2.1-2024-08-07"}, "")
+	if got, err := c.GetProcessor(ctx, &documentaipb.GetProcessorRequest{Name: proc.GetName()}); err != nil ||
+		!strings.HasSuffix(got.GetDefaultProcessorVersion(), "/pretrained-ocr-v2.1-2024-08-07") {
+		t.Errorf("GetProcessor after Default version: %v %v", got.GetDefaultProcessorVersion(), err)
+	}
+	p.clickText("#view [role=tab]", "Manage versions")
+	p.run(chromedp.Click(chromedp.CSS(`#view tbody input[aria-label="Select pretrained-ocr-v1.2-2022-11-10"]`)))
+	p.eval(`[...document.querySelectorAll("#view button")].find((b) => b.textContent === "Delete" && !b.closest(".page-actions") && !b.disabled).click()`, nil)
+	p.waitFor(`document.querySelector(".modal.is-open") !== null`)
+	var needsName bool
+	p.eval(`document.querySelector(".modal.is-open #confirm-input") !== null`, &needsName)
+	if needsName {
+		p.confirmByName(id)
+	} else {
+		p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
+	}
+	if msg := p.modalRefusal(); !strings.Contains(msg, "pretrained") {
+		t.Errorf("Delete of a pretrained version said %q", msg)
+	}
+	p.forgive() // the refusal's 400, provoked on purpose
+	p.eval(`document.querySelector(".modal.is-open .modal-actions button:not([type=submit])")?.click()`, nil)
+	p.waitFor(`document.querySelector(".modal") === null`)
 
 	p.clickAction("Disable processor", "")
 	p.waitFor(`[...document.querySelectorAll("#view button")].some((b) => b.textContent.trim() === "Enable processor")`)
@@ -188,6 +232,41 @@ func TestDocumentAIProcessorsThroughThePage(t *testing.T) {
 	if _, err := c.GetProcessor(ctx, &documentaipb.GetProcessorRequest{Name: proc.GetName()}); err == nil {
 		t.Errorf("GetProcessor still reads the processor after Delete processor")
 	}
+}
+
+// documentFileAction is fileAction for Upload test document, which also
+// counts the boxes drawn over the page images beside the rows (#1930).
+func (p *tab) documentFileAction(label, file string) (text, rows string, boxes int) {
+	p.t.Helper()
+	p.waitFor(`document.querySelector(".modal") === null`)
+	where := p.findAction(label)
+	if where == "" {
+		p.t.Fatalf("the page offers no %s", label)
+	}
+	p.clickText(where, label)
+	p.waitFor(`document.querySelector(".modal.is-open #f-file") !== null`)
+	p.run(chromedp.SetUploadFiles(chromedp.CSS(`.modal.is-open #f-file`), []string{file}))
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
+	p.waitFor(`document.querySelector("#action-result-text") !== null ||
+		[...document.querySelectorAll(".modal.is-open .form-error")].some((e) => !e.hidden && e.textContent)`)
+	var res struct {
+		Text, Rows, Error string
+		Boxes, Images     int
+	}
+	p.eval(`(() => { const x = document.querySelector("#action-result-text"), t = document.querySelector("#action-result-table");
+		const e = [...document.querySelectorAll(".modal.is-open .form-error")].filter((e) => !e.hidden).map((e) => e.textContent).join(" ");
+		const imgs = [...document.querySelectorAll(".modal.is-open .result-page img")].filter((i) => i.complete && i.naturalWidth > 0);
+		return { Text: x ? x.textContent : "", Rows: t ? t.textContent : "", Error: e,
+			Boxes: document.querySelectorAll(".modal.is-open .result-box").length, Images: imgs.length }; })()`, &res)
+	if res.Error != "" {
+		p.t.Fatalf("%s was refused: %s", label, res.Error)
+	}
+	if res.Images == 0 {
+		p.t.Errorf("%s drew no page image", label)
+	}
+	p.clickText(".modal.is-open .modal-actions button", "Close")
+	p.waitFor(`document.querySelector(".modal") === null`)
+	return res.Text, res.Rows, res.Boxes
 }
 
 // TestSpeechRecognizersThroughThePage (#1930), in the run shard:
@@ -218,7 +297,7 @@ func TestSpeechRecognizersThroughThePage(t *testing.T) {
 	p.waitFor(settled)
 	var menu []string
 	p.eval(`[...document.querySelectorAll("#product-nav a")].map((a) => a.textContent.trim())`, &menu)
-	if strings.Join(menu, "|") != "Transcriptions|Recognizers" {
+	if strings.Join(menu, "|") != "Transcriptions|Recognizers|Custom classes|Phrase sets" {
 		t.Errorf("Speech-to-Text's menu is %q", menu)
 	}
 	p.navigate("/speech/recognizers/create" + q)
@@ -322,7 +401,9 @@ func TestDocumentAIAndSpeechScreensMeetWCAG(t *testing.T) {
 		screen("Invoice Parser type", "/document-ai/processor-library/INVOICE_PROCESSOR", project),
 	}
 	pages = append(pages, listAndCreate("my processors", "/document-ai/processors", project)...)
-	pages = append(pages, screen("processor", "/document-ai/processors/"+id, project),
+	versions := screen("processor's Manage versions", "/document-ai/processors/"+id, project)
+	versions.then = `[...document.querySelectorAll("#view [role=tab]")].find((t) => t.textContent.trim() === "Manage versions").click()`
+	pages = append(pages, screen("processor", "/document-ai/processors/"+id, project), versions,
 		screen("transcriptions", "/speech/transcriptions", project))
 	pages = append(pages, listAndCreate("recognizers", "/speech/recognizers", project)...)
 	pages = append(pages, screen("recognizer", "/speech/recognizers/a11y-rec", project))

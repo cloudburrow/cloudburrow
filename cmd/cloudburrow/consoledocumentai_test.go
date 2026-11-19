@@ -41,7 +41,8 @@ func TestConsoleDocumentAIProcessors(t *testing.T) {
 	procs := docAIProcessorsProvider{d: d}
 
 	l, _ := gallery.List(ctx, "p1")
-	if l.Unavailable != "" || len(l.Items) != len(docAIGallery) {
+	if l.Unavailable != "" || len(l.Items) != len(docAIGallery) || !l.SummaryOnly || len(l.Summary) != len(docAIGallery) ||
+		l.Summary[0].Section != "Digitize" || l.Summary[1].Section != "" || l.Summary[0].Properties[2].Link == "" {
 		t.Fatalf("gallery: %+v", l)
 	}
 	for _, r := range l.Items {
@@ -70,16 +71,28 @@ func TestConsoleDocumentAIProcessors(t *testing.T) {
 	if err := procs.Act(ctx, "p1", id, "disable"); err != nil {
 		t.Fatal(err)
 	}
-	if acts := procs.DetailActions(ctx, "p1", []string{id}); acts[1].ID != "enable" {
+	if acts := procs.DetailActions(ctx, "p1", []string{id}); acts[len(acts)-2].ID != "enable" || acts[1].ID != "set-default-version" {
 		t.Errorf("a disabled processor's actions: %+v", acts)
 	}
 	if err := procs.ActAt(ctx, "p1", []string{id}, "enable", nil); err != nil {
 		t.Fatal(err)
 	}
 	page, _ := procs.Detail(ctx, "p1", []string{id})
-	if page.Unavailable != "" || len(page.Sections) != 2 || len(page.Sections[1].Listing.Items) != 1 ||
-		!strings.HasPrefix(page.Sections[1].Listing.Items[0].Name, "pretrained-ocr") {
+	if page.Unavailable != "" || len(page.Sections) != 2 || len(page.Sections[1].Listing.Items) != 3 ||
+		page.Sections[1].Listing.Items[0].Name != "pretrained-ocr-v2.1-2024-08-07" || len(page.Sections[1].Listing.SelectActions) != 3 {
 		t.Errorf("the processor's page: %+v", page)
+	}
+	// Manage versions: the default changes; Google refuses to undeploy or
+	// delete a pretrained version.
+	if err := procs.ActAt(ctx, "p1", []string{id}, "set-default-version", map[string]string{"version": "pretrained-ocr-v2.1-2024-08-07"}); err != nil {
+		t.Fatal(err)
+	}
+	if page, _ = procs.Detail(ctx, "p1", []string{id}); page.Sections[1].Listing.Items[0].Fields["Default"] != "Yes" {
+		t.Errorf("after Default version: %+v", page.Sections[1].Listing.Items)
+	}
+	if err := procs.ActAt(ctx, "p1", []string{id}, "delete-versions", map[string]string{"versions": "pretrained-ocr-v1.2-2022-11-10"}); err == nil ||
+		!strings.Contains(err.Error(), "pretrained") {
+		t.Errorf("Delete of a pretrained version: %v", err)
 	}
 	scan, err := os.ReadFile("../../internal/ocr/testdata/scan.png")
 	if err != nil {
@@ -91,7 +104,9 @@ func TestConsoleDocumentAIProcessors(t *testing.T) {
 		t.Fatalf("Upload test document: %v", err)
 	}
 	first := strings.Fields(string(want))[0]
-	if !strings.Contains(out.Text, first) || len(out.Items) == 0 || out.Items[0].Fields["Bounding box"] == "" {
+	if !strings.Contains(out.Text, first) || len(out.Items) == 0 || out.Items[0].Fields["Bounding box"] == "" ||
+		len(out.Pages) != 1 || !strings.HasPrefix(out.Pages[0].Image, "data:image/png;base64,") || len(out.Pages[0].Boxes) != len(out.Items) ||
+		out.Pages[0].Boxes[0].W <= 0 || out.Pages[0].Boxes[0].Row != out.Items[0].Name {
 		t.Errorf("Upload test document answered %q and %d rows", out.Text, len(out.Items))
 	}
 	if _, err := procs.ActAtFile(ctx, "p1", []string{id}, "upload-test", nil, console.UploadedFile{Name: "a.docx", Reader: strings.NewReader("x")}); err == nil {
@@ -152,7 +167,8 @@ func TestConsoleSpeechRecognizers(t *testing.T) {
 		propValue(cfg, "Automatic punctuation") != "On" || propValue(cfg, "Word timestamps") != "Off" {
 		t.Errorf("after Edit: %+v %+v", page.Summary, cfg)
 	}
-	if acts := tr.ListActions(ctx, "p1"); len(acts) != 1 || len(acts[0].Fields) != 2 || acts[0].Fields[0].Options[0] != "rec-one" {
+	if acts := tr.ListActions(ctx, "p1"); len(acts) != 2 || len(acts[0].Fields) != 2 || acts[0].Fields[0].Options[0] != "rec-one" ||
+		acts[1].ID != "batch" {
 		t.Errorf("New transcription: %+v", acts)
 	}
 	if err := recs.ActAt(ctx, "p1", []string{"rec-one"}, "delete", nil); err != nil {

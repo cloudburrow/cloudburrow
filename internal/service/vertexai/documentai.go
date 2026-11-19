@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"image"
+	"image/png"
 	"os"
 	"path/filepath"
 	"sort"
@@ -67,7 +68,8 @@ import (
 //   - OCR_PROCESSOR answers Document.text and, a page each, pageNumber,
 //     dimension (pixels), layout, blocks, paragraphs, lines and tokens
 //     (each with textAnchor, confidence and boundingPoly, vertices and
-//     normalizedVertices), from Tesseract's layout. LAYOUT_PARSER_PROCESSOR
+//     normalizedVertices), from Tesseract's layout, and the page's image
+//     (PNG; none in imageless_mode, #1930). LAYOUT_PARSER_PROCESSOR
 //     answers documentLayout (a paragraph textBlock a Tesseract paragraph,
 //     with blockId and pageSpan) and chunkedDocument (chunks of whole
 //     paragraphs of at most chunk_size words, 500 by default, with
@@ -313,22 +315,31 @@ func cloneProcessor(p *documentaipb.Processor) *documentaipb.Processor {
 }
 
 // processor looks a processor up by its name, or a processor version's
-// (its default version alone is served).
+// (one of its type's served versions, documentaiversions.go); a version's
+// lookup answers the processor with DefaultProcessorVersion set to that
+// version, the one to read with.
 func (s *Server) processor(name string) (*documentaipb.Processor, error) {
 	pname, version, hasVersion := strings.Cut(name, "/processorVersions/")
 	if _, _, _, err := parseChild("name", "processors", pname); err != nil {
 		return nil, err
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	p, ok := s.docAI().processors[pname]
+	if ok {
+		p = cloneProcessor(p)
+	}
+	s.mu.Unlock()
 	if !ok {
 		return nil, apierror.NotFound("Processor %s not found", pname)
 	}
-	if hasVersion && name != p.GetDefaultProcessorVersion() {
-		return nil, apierror.NotFound("Processor version %s/processorVersions/%s not found: this processor serves %s alone", pname, version, p.GetDefaultProcessorVersion())
+	if hasVersion {
+		id := resolveVersion(p.GetType(), version)
+		if id == "" {
+			return nil, apierror.NotFound("Processor version %s not found", name)
+		}
+		p.DefaultProcessorVersion = pname + "/processorVersions/" + id
 	}
-	return cloneProcessor(p), nil
+	return p, nil
 }
 
 func (d *documentAIService) GetProcessor(_ context.Context, req *documentaipb.GetProcessorRequest) (*documentaipb.Processor, error) {
@@ -478,7 +489,13 @@ func (s *Server) processDocument(ctx context.Context, req *documentaipb.ProcessR
 	if req.GetImagelessMode() && p.GetType() == "OCR_PROCESSOR" {
 		limit = docAIMaxImagelessPages
 	}
-	pages, err := docAIPages(content, mimeType, limit, req.GetImagelessMode())
+	return readDocument(ctx, p, content, mimeType, opts, limit, req.GetImagelessMode())
+}
+
+// readDocument reads a document's pages, at most limit, with p's type.
+func readDocument(ctx context.Context, p *documentaipb.Processor, content []byte, mimeType string, opts *documentaipb.ProcessOptions,
+	limit int, imageless bool) (*documentaipb.Document, error) {
+	pages, err := docAIPages(content, mimeType, limit, imageless)
 	if err != nil {
 		return nil, err
 	}
@@ -501,7 +518,7 @@ func (s *Server) processDocument(ctx context.Context, req *documentaipb.ProcessR
 		}
 		return layoutDocument(mimeType, numbers, read, size), nil
 	}
-	return ocrDocument(mimeType, numbers, pages, read, opts.GetOcrConfig().GetEnableSymbol()), nil
+	return ocrDocument(mimeType, numbers, pages, read, opts.GetOcrConfig().GetEnableSymbol(), !imageless), nil
 }
 
 // checkProcessOptions refuses the options that are not served.
@@ -592,6 +609,9 @@ func docAIPages(content []byte, mimeType string, limit int, imageless bool) ([]i
 			if imageless {
 				return nil, apierror.InvalidArgument("Document pages in imageless mode exceed the limit: %d got %d.", limit, count)
 			}
+			if limit > docAIMaxImagelessPages {
+				return nil, apierror.InvalidArgument("Document pages exceed the limit: %d got %d.", limit, count)
+			}
 			return nil, apierror.InvalidArgument("Document pages in non-imageless mode exceed the limit: %d got %d. "+
 				"Try using imageless mode to increase the limit to %d.", limit, count, docAIMaxImagelessPages)
 		}
@@ -658,7 +678,7 @@ func wordText(w ocr.Word) (string, bool) {
 }
 
 // ocrDocument is the OCR processor's Document.
-func ocrDocument(mimeType string, numbers []int, imgs []image.Image, read []ocr.Result, symbols bool) *documentaipb.Document {
+func ocrDocument(mimeType string, numbers []int, imgs []image.Image, read []ocr.Result, symbols, images bool) *documentaipb.Document {
 	doc := &documentaipb.Document{MimeType: mimeType}
 	t := &docText{}
 	for _, n := range numbers {
@@ -708,6 +728,14 @@ func ocrDocument(mimeType string, numbers []int, imgs []image.Image, read []ocr.
 		if symbols {
 			page.Symbols = docSymbols(r, pageStart, w, h)
 		}
+		if images {
+			// The page's image, as Google's OCR answers it unless
+			// imageless_mode is set (#1930).
+			var png bytes.Buffer
+			if pngEncoder.Encode(&png, img) == nil {
+				page.Image = &documentaipb.Document_Page_Image{Content: png.Bytes(), MimeType: "image/png", Width: int32(w), Height: int32(h)}
+			}
+		}
 		doc.Pages = append(doc.Pages, page)
 	}
 	doc.Text = t.b.String()
@@ -733,6 +761,8 @@ func docSymbols(r ocr.Result, start int64, w, h int) []*documentaipb.Document_Pa
 	}
 	return out
 }
+
+var pngEncoder = png.Encoder{CompressionLevel: png.BestSpeed}
 
 // unionQuad grows a box by q; first starts it.
 func unionQuad(a, q ocr.Quad, first bool) ocr.Quad {
