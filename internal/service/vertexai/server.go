@@ -136,9 +136,10 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if strings.HasPrefix(r.URL.Path, "/v1/") && verb != "predict" && verb != "embedContent" && verb != "rawPredict" && verb != "streamRawPredict" {
+	if strings.HasPrefix(r.URL.Path, "/v1/") && verb != "predict" && verb != "embedContent" && verb != "rawPredict" && verb != "streamRawPredict" &&
+		verb != "countTokens" && verb != "computeTokens" {
 		apierror.WriteJSON(w, apierror.Unimplemented(
-			"only :predict, :embedContent, :rawPredict and :streamRawPredict are served under /v1; generation is served under /%s", APIVersion))
+			"only :predict, :embedContent, :rawPredict, :streamRawPredict, :countTokens and :computeTokens are served under /v1; generation is served under /%s", APIVersion))
 		return
 	}
 
@@ -177,11 +178,9 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		s.streamRawPredictREST(w, r, target{project: r.PathValue("project"), location: r.PathValue("location"),
 			publisher: "google", model: model}, body)
-	case "countTokens":
-		// Refused rather than estimated. See the package doc.
-		apierror.WriteJSON(w, apierror.Unimplemented(
-			"countTokens is not implemented: the runtime exposes no tokenizer to this service, "+
-				"and a count computed by any other means would not be the model's"))
+	case "countTokens", "computeTokens":
+		// Counted by the model's tokenizer in the runtime (tokens.go).
+		s.tokensREST(w, r, model, verb)
 	default:
 		apierror.WriteJSON(w, apierror.Unimplemented("method %q is not implemented", verb))
 	}
@@ -245,10 +244,16 @@ func (s *Server) startGeneration(ctx context.Context, requested string, body io.
 	if err != nil {
 		return "", nil, nil, err
 	}
+	greq := generatorRequest(req)
+	if honoursOptions(s.gen) {
+		if greq.Conversation, greq.Vision, err = toRunner(ctx, req, s.objects); err != nil {
+			return "", nil, nil, err
+		}
+	}
 	// The generation runs under its own context so a stop sequence can end
 	// it without ending the request.
 	gctx, cancel := context.WithCancel(ctx)
-	chunks, errFn, err := s.gen.Generate(gctx, generatorRequest(req))
+	chunks, errFn, err := s.gen.Generate(gctx, greq)
 	if err != nil {
 		cancel()
 		return "", nil, nil, apierror.Internal(err, "starting the local runtime failed")
@@ -257,7 +262,28 @@ func (s *Server) startGeneration(ctx context.Context, requested string, body io.
 	if req.GenerationConfig != nil {
 		stops = req.GenerationConfig.StopSequences
 	}
+	if greq.Vision {
+		chunks = markImages(chunks)
+	}
 	return model, applyStops(ctx, cancel, chunks, stops), errFn, nil
+}
+
+// markImages flags the usage of a prompt with images, whose per-modality
+// split the runtime does not report, so no TEXT-only breakdown is claimed.
+func markImages(in <-chan Chunk) <-chan Chunk {
+	out := make(chan Chunk)
+	go func() {
+		defer close(out)
+		for c := range in {
+			if c.Usage != nil {
+				u := *c.Usage
+				u.Images = true
+				c.Usage = &u
+			}
+			out <- c
+		}
+	}()
+	return out
 }
 
 // generateUnary serves one generateContent, for the JSON route and the gRPC
@@ -269,13 +295,19 @@ func (s *Server) generateUnary(ctx context.Context, requested string, body io.Re
 		return nil, err
 	}
 	var text strings.Builder
+	var calls []FunctionCall
+	var usage *Usage
 	finish := FinishReasonStop
 	for c := range chunks {
+		if c.Usage != nil {
+			usage = c.Usage
+		}
 		if c.Last {
 			finish = c.FinishReason
 			continue
 		}
 		text.WriteString(c.Text)
+		calls = append(calls, c.ToolCalls...)
 	}
 	if err := generationError(ctx, errFn); err != nil {
 		return nil, err
@@ -283,7 +315,33 @@ func (s *Server) generateUnary(ctx context.Context, requested string, body io.Re
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
-	return textResponse(model, strings.TrimRight(text.String(), "\n"), finish), nil
+	t := strings.TrimRight(text.String(), "\n")
+	if len(calls) > 0 {
+		// Text around a call is whitespace the template leaves; a call
+		// alone is answered as Gemini answers one, with no text part.
+		t = strings.TrimSpace(t)
+	}
+	return candidateResponse(model, t, calls, finish, usage), nil
+}
+
+// chunkResponse frames one streamed chunk, or returns nil for a chunk that
+// carries only the prompt's token count. A final event with an empty text
+// part carries the finish reason and usageMetadata: Vertex sends one, and the
+// SDK expects to see the reason on a candidate rather than inferring it from
+// the stream ending. UNVERIFIED (re-read 2026-11-19, the v1beta1
+// GenerateContentResponse proto in cloud.google.com/go/aiplatform v1.127.0,
+// which does not say): what Vertex's intermediate events carry as
+// usageMetadata; here only the final one has it, with every count.
+func chunkResponse(model string, c Chunk) *GenerateContentResponse {
+	switch {
+	case c.Last:
+		return candidateResponse(model, "", nil, c.FinishReason, c.Usage)
+	case len(c.ToolCalls) > 0:
+		return candidateResponse(model, "", c.ToolCalls, "", nil)
+	case c.Usage != nil && c.Text == "":
+		return nil
+	}
+	return textResponse(model, c.Text, "")
 }
 
 // writeStream writes server-sent events in the shape the SDK parses.
@@ -307,15 +365,9 @@ func (s *Server) writeStream(w http.ResponseWriter, r *http.Request, model strin
 
 	wrote := false
 	for c := range chunks {
-		var resp *GenerateContentResponse
-		if c.Last {
-			// A final event with an empty text part carries the finish
-			// reason. Vertex sends one; the SDK expects to see the reason
-			// on a candidate rather than inferring it from the stream
-			// ending.
-			resp = textResponse(model, "", c.FinishReason)
-		} else {
-			resp = textResponse(model, c.Text, "")
+		resp := chunkResponse(model, c)
+		if resp == nil {
+			continue
 		}
 		b, err := json.Marshal(resp)
 		if err != nil {

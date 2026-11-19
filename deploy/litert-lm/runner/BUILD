@@ -12,6 +12,8 @@ cc_binary(
     deps = [
         "//runtime/components/constrained_decoding:constraint_provider_config",
         "//runtime/components/constrained_decoding:llg_constraint_config",
+        "//runtime/components/constrained_decoding:repetition_penalty_config",
+        "//runtime/components/constrained_decoding:tool_choice",
         "//runtime/conversation",
         "//runtime/conversation:end_of_turn",
         "//runtime/conversation:io_types",
@@ -24,6 +26,7 @@ cc_binary(
         "//runtime/executor:executor_settings_base",
         "//runtime/executor:llm_executor_settings",
         "//runtime/proto:sampler_params_cc_proto",
+        "//support/tokenizer",
         "@com_google_absl//absl/base:log_severity",
         "@com_google_absl//absl/flags:flag",
         "@com_google_absl//absl/flags:parse",
@@ -34,6 +37,7 @@ cc_binary(
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/time",
+        "@com_google_absl//absl/types:span",
         "@nlohmann_json//:json",
     ],
 )

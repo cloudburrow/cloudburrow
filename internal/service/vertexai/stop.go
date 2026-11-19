@@ -37,7 +37,25 @@ func applyStops(ctx context.Context, cancel context.CancelFunc, in <-chan Chunk,
 			}
 		}
 		var pending string
+		var usage *Usage // the prompt's count, for a generation cut short
 		for c := range in {
+			if !c.Last && (c.Usage != nil || len(c.ToolCalls) > 0) {
+				// Not text: the held text goes first, then the chunk as is.
+				if c.Usage != nil {
+					usage = c.Usage
+				}
+				if pending != "" && !send(Chunk{Text: pending}) {
+					drain(in)
+					return
+				}
+				pending = ""
+				c.Text = ""
+				if !send(c) {
+					drain(in)
+					return
+				}
+				continue
+			}
 			if c.Last {
 				if pending != "" && !send(Chunk{Text: pending}) {
 					drain(in)
@@ -58,7 +76,15 @@ func applyStops(ctx context.Context, cancel context.CancelFunc, in <-chan Chunk,
 				}
 				cancel()
 				drain(in)
-				send(Chunk{Last: true, FinishReason: FinishReasonStop})
+				// The runtime was stopped before it counted what it
+				// decoded, so only the prompt's count is known.
+				var u *Usage
+				if usage != nil {
+					cp := *usage
+					cp.CandidateTokens = -1
+					u = &cp
+				}
+				send(Chunk{Last: true, FinishReason: FinishReasonStop, Usage: u})
 				return
 			}
 			// Everything but the tail that could begin a sequence is safe.

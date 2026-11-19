@@ -1739,6 +1739,21 @@ var parityRows = []parityRow{
 			"endpoint and its model, keeping the downloaded files, which Model Garden's Delete files removes; the details show the " +
 			"model's container image (the Model's containerSpec)",
 		Tests: []string{"TestModelGardenDeploysADownloadedHuggingFaceModel", "TestModelGardenDeploysHuggingFaceModels"}},
+	// countTokens and computeTokens (#1937); Studio's surface is #1962.
+	{Resource: "Vertex AI LlmUtilityService: token counts", Service: "vertexai",
+		Methods: []string{"LlmUtilityService/CountTokens", "LlmUtilityService/ComputeTokens"},
+		Issue:   1962},
+	// v1beta1 serves v1's methods by converting to them (#1937): the console
+	// reaches the same handlers through the v1 rows above.
+	{Resource: "Vertex AI PredictionService v1beta1: v1's methods", Service: "vertexaiv1beta1",
+		Methods: []string{"PredictionService/GenerateContent", "PredictionService/StreamGenerateContent", "PredictionService/CountTokens",
+			"PredictionService/Predict", "PredictionService/RawPredict", "PredictionService/StreamRawPredict",
+			"PredictionService/DirectPredict", "PredictionService/DirectRawPredict", "PredictionService/ServerStreamingPredict",
+			"PredictionService/StreamingPredict", "PredictionService/StreamDirectPredict", "PredictionService/StreamDirectRawPredict",
+			"PredictionService/StreamingRawPredict", "PredictionService/Explain", "PredictionService/EmbedContent",
+			"LlmUtilityService/ComputeTokens"},
+		Excluded: "the v1beta1 forms of the v1 methods in the rows above, converted to them and answered by the same handlers; " +
+			"a protocol version is the client library's choice, and the console's surfaces send those handlers' requests (#1937)"},
 	{Resource: "Model Garden: chat completions", Service: "vertexaiv1beta1",
 		Methods: []string{"PredictionService/ChatCompletions"},
 		Screen:  "/agent-platform/endpoints", Offers: "Endpoints' Test your model: Predict sends Model Garden's prompt instance (or TEI's " +

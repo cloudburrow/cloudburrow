@@ -2,9 +2,13 @@ package vertexai
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
@@ -131,6 +135,20 @@ func runnerFlags(req Request) []string {
 	if req.JSONSchema != "" {
 		out = append(out, "--constraint_json_schema="+req.JSONSchema)
 	}
+	if req.PresencePenalty != nil {
+		out = append(out, "--presence_penalty="+f32(*req.PresencePenalty))
+	}
+	if req.FrequencyPenalty != nil {
+		out = append(out, "--frequency_penalty="+f32(*req.FrequencyPenalty))
+	}
+	if req.Conversation != nil {
+		out = append(out, "--request_stdin")
+		if req.Vision {
+			// The vision encoder is loaded only for a request with an
+			// image: it costs memory and start-up time otherwise.
+			out = append(out, "--vision_backend=cpu")
+		}
+	}
 	return out
 }
 
@@ -169,12 +187,27 @@ func (g *ExecGenerator) Generate(ctx context.Context, req Request) (<-chan Chunk
 	if g.ArgsFor != nil {
 		args = g.ArgsFor(id)
 	}
+	conversation := g.Runner && req.Conversation != nil
+	if !g.Runner {
+		req.Conversation = nil
+	}
 	if g.Runner {
 		args = append(args, runnerFlags(req)...)
 	}
-	args = append(args, "--input_prompt="+req.Prompt)
+	var stdin []byte
+	if conversation {
+		var err error
+		if stdin, err = json.Marshal(req.Conversation); err != nil {
+			return nil, nil, fmt.Errorf("encoding the conversation: %w", err)
+		}
+	} else {
+		args = append(args, "--input_prompt="+req.Prompt)
+	}
 
 	cmd := exec.CommandContext(ctx, g.Command, args...)
+	if conversation {
+		cmd.Stdin = bytes.NewReader(stdin)
+	}
 	// Cancellation sends SIGTERM rather than the default SIGKILL.
 	//
 	// This matters more than it looks. When the command is `docker run`, the
@@ -214,10 +247,13 @@ func (g *ExecGenerator) Generate(ctx context.Context, req Request) (<-chan Chunk
 		}()
 	}
 
+	usage := &Usage{PromptTokens: -1, CandidateTokens: -1, Images: req.Vision}
 	go func() {
 		defer close(finished)
 		defer close(out)
-		if g.Runner {
+		if conversation {
+			streamJSONLines(ctx, stdout, out, usage)
+		} else if g.Runner {
 			streamRaw(ctx, stdout, out)
 		} else {
 			scanGeneration(ctx, stdout, out, req.Prompt)
@@ -235,20 +271,185 @@ func (g *ExecGenerator) Generate(ctx context.Context, req Request) (<-chan Chunk
 			return
 		}
 		finish := FinishReasonStop
+		decoded := decodedTokens(stderr.String())
 		// The limit was reached when the engine decoded as many tokens as
 		// it was allowed: Vertex's MAX_TOKENS.
 		if g.Runner && req.MaxOutputTokens != nil {
-			if n := decodedTokens(stderr.String()); n >= int(*req.MaxOutputTokens) {
+			if decoded >= int(*req.MaxOutputTokens) {
 				finish = FinishReasonMaxTokens
 			}
 		}
+		var last *Usage
+		if conversation && usage.PromptTokens >= 0 {
+			u := *usage
+			u.CandidateTokens = decoded
+			last = &u
+		}
 		select {
-		case out <- Chunk{Last: true, FinishReason: finish}:
+		case out <- Chunk{Last: true, FinishReason: finish, Usage: last}:
 		case <-ctx.Done():
 		}
 	}()
 
 	return out, func() error { return genErr }, nil
+}
+
+// runnerLine is one line of cloudburrow_generate's --request_stdin output.
+type runnerLine struct {
+	PromptTokens *int              `json:"prompt_tokens"`
+	Text         *string           `json:"text"`
+	ToolCalls    []json.RawMessage `json:"tool_calls"`
+	Compute      []struct {
+		IDs    []int64  `json:"ids"`
+		Tokens []string `json:"tokens"`
+	} `json:"compute"`
+}
+
+// streamJSONLines forwards cloudburrow_generate's JSON lines as chunks:
+// the prompt's token count first, then text and tool calls as they decode.
+// A line that is not JSON is a runtime fault, reported as text would hide it,
+// so it ends the stream (the process's exit status then carries the error).
+func streamJSONLines(ctx context.Context, r io.Reader, out chan<- Chunk, usage *Usage) {
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 0, 64*1024), 16<<20)
+	for sc.Scan() {
+		var l runnerLine
+		if err := json.Unmarshal(sc.Bytes(), &l); err != nil {
+			return
+		}
+		var c Chunk
+		switch {
+		case l.PromptTokens != nil:
+			usage.PromptTokens = *l.PromptTokens
+			u := *usage
+			c.Usage = &u
+		case l.Text != nil:
+			c.Text = *l.Text
+		case len(l.ToolCalls) > 0:
+			c.ToolCalls = parseToolCalls(l.ToolCalls)
+		default:
+			continue
+		}
+		select {
+		case out <- c:
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+// parseToolCalls converts LiteRT-LM's OpenAI-style tool calls to Gemini's
+// functionCall: {"type":"function","function":{"name","arguments"}}, the
+// arguments an object (or, from some processors, a JSON string).
+func parseToolCalls(raw []json.RawMessage) []FunctionCall {
+	var out []FunctionCall
+	for _, r := range raw {
+		var tc struct {
+			Function struct {
+				Name      string          `json:"name"`
+				Arguments json.RawMessage `json:"arguments"`
+			} `json:"function"`
+		}
+		if json.Unmarshal(r, &tc) != nil || tc.Function.Name == "" {
+			continue
+		}
+		args := map[string]any{}
+		a := tc.Function.Arguments
+		var s string
+		if json.Unmarshal(a, &s) == nil {
+			a = json.RawMessage(s)
+		}
+		_ = json.Unmarshal(a, &args)
+		out = append(out, FunctionCall{Name: tc.Function.Name, Args: args})
+	}
+	return out
+}
+
+// runOnce runs cloudburrow_generate's count_only or compute mode and returns
+// its one JSON line.
+func (g *ExecGenerator) runOnce(ctx context.Context, rr *RunnerRequest, vision bool) (*runnerLine, error) {
+	if !g.Runner {
+		return nil, errNoTokenizer
+	}
+	id := requestID()
+	args := append([]string(nil), g.Args...)
+	if g.ArgsFor != nil {
+		args = g.ArgsFor(id)
+	}
+	args = append(args, runnerFlags(Request{Conversation: rr, Vision: vision})...)
+	body, err := json.Marshal(rr)
+	if err != nil {
+		return nil, err
+	}
+	cmd := exec.CommandContext(ctx, g.Command, args...)
+	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+	cmd.WaitDelay = 10 * time.Second
+	cmd.Stdin = bytes.NewReader(body)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if g.OnCancel != nil {
+		done := make(chan struct{})
+		defer close(done)
+		go func() {
+			select {
+			case <-ctx.Done():
+				g.OnCancel(id)
+			case <-done:
+			}
+		}()
+	}
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, fmt.Errorf("%s failed: %w: %s", g.Command, err, lastLines(stderr.String(), 5))
+	}
+	var l runnerLine
+	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &l); err != nil {
+		return nil, fmt.Errorf("%s wrote %q, not a JSON line", g.Command, lastLines(stdout.String(), 2))
+	}
+	return &l, nil
+}
+
+// errNoTokenizer: only cloudburrow_generate exposes the tokenizer.
+var errNoTokenizer = errors.New("this runtime exposes no tokenizer: token counts need cloudburrow_generate")
+
+// CountTokens implements TokenCounter.
+func (g *ExecGenerator) CountTokens(ctx context.Context, req Request) (int, error) {
+	rr := *req.Conversation
+	rr.CountOnly = true
+	l, err := g.runOnce(ctx, &rr, req.Vision)
+	if err != nil {
+		return 0, err
+	}
+	if l.PromptTokens == nil {
+		return 0, fmt.Errorf("%s reported no token count", g.Command)
+	}
+	return *l.PromptTokens, nil
+}
+
+// ComputeTokens implements TokenCounter.
+func (g *ExecGenerator) ComputeTokens(ctx context.Context, texts []string) ([]TokenInfo, error) {
+	rr := &RunnerRequest{Preface: []map[string]any{}, Message: map[string]any{"role": "user", "content": []any{}}, Compute: texts}
+	l, err := g.runOnce(ctx, rr, false)
+	if err != nil {
+		return nil, err
+	}
+	if len(l.Compute) != len(texts) {
+		return nil, fmt.Errorf("%s tokenized %d of %d texts", g.Command, len(l.Compute), len(texts))
+	}
+	out := make([]TokenInfo, len(texts))
+	for i, c := range l.Compute {
+		out[i].IDs = c.IDs
+		for _, t := range c.Tokens {
+			b, err := base64.StdEncoding.DecodeString(t)
+			if err != nil {
+				return nil, fmt.Errorf("token %q is not base64: %w", t, err)
+			}
+			out[i].Tokens = append(out[i].Tokens, b)
+		}
+	}
+	return out, nil
 }
 
 // streamRaw forwards cloudburrow_generate's standard output as it arrives.

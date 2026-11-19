@@ -19,35 +19,41 @@ const (
 	GeminiAPIVersion = "v1beta"
 )
 
-// Part is one piece of a message. Only text is supported.
+// Part is one piece of a message: text, an image (inlineData, or fileData
+// from this instance's Cloud Storage), a function call or a function
+// response (#1937, conversation.go).
 //
-// The other fields exist so that a request carrying them can be *refused*. If
-// they were absent, encoding/json would discard them silently and an image
-// would be answered as though it had been read.
+// The code-execution fields exist so that a request carrying them can be
+// *refused* by name. If they were absent, encoding/json would reject them as
+// unknown fields, which says less.
 type Part struct {
 	Text string `json:"text,omitempty"`
 
-	InlineData       json.RawMessage `json:"inlineData,omitempty"`
-	FileData         json.RawMessage `json:"fileData,omitempty"`
-	FunctionCall     json.RawMessage `json:"functionCall,omitempty"`
-	FunctionResponse json.RawMessage `json:"functionResponse,omitempty"`
-	ExecutableCode   json.RawMessage `json:"executableCode,omitempty"`
-	Thought          *bool           `json:"thought,omitempty"`
+	InlineData          *Blob             `json:"inlineData,omitempty"`
+	FileData            *FileData         `json:"fileData,omitempty"`
+	FunctionCall        *FunctionCall     `json:"functionCall,omitempty"`
+	FunctionResponse    *FunctionResponse `json:"functionResponse,omitempty"`
+	ExecutableCode      json.RawMessage   `json:"executableCode,omitempty"`
+	CodeExecutionResult json.RawMessage   `json:"codeExecutionResult,omitempty"`
+	Thought             *bool             `json:"thought,omitempty"`
 }
 
-// unsupported returns the name of a populated field this runtime cannot honour.
+// unsupported returns the name of a populated field a text-only runtime
+// (litert_lm_main, which takes one prompt) cannot honour.
 func (p Part) unsupported() string {
 	switch {
-	case len(p.InlineData) > 0:
+	case p.InlineData != nil:
 		return "inlineData"
-	case len(p.FileData) > 0:
+	case p.FileData != nil:
 		return "fileData"
-	case len(p.FunctionCall) > 0:
+	case p.FunctionCall != nil:
 		return "functionCall"
-	case len(p.FunctionResponse) > 0:
+	case p.FunctionResponse != nil:
 		return "functionResponse"
 	case len(p.ExecutableCode) > 0:
 		return "executableCode"
+	case len(p.CodeExecutionResult) > 0:
+		return "codeExecutionResult"
 	case p.Thought != nil:
 		return "thought"
 	}
@@ -121,8 +127,10 @@ func (g *GenerationConfig) unsupportedConfig(options bool) []string {
 	add("responseMimeType", g.ResponseMIMEType != "" && !(options && (g.ResponseMIMEType == "application/json" || g.ResponseMIMEType == "text/plain")))
 	add("responseSchema", !options && len(g.ResponseSchema) > 0)
 	add("responseJsonSchema", !options && len(g.ResponseJSONSchema) > 0)
-	add("presencePenalty", g.PresencePenalty != nil)
-	add("frequencyPenalty", g.FrequencyPenalty != nil)
+	// LiteRT-LM's RepetitionPenaltyConfig, through cloudburrow_generate
+	// (#1937).
+	add("presencePenalty", !options && g.PresencePenalty != nil)
+	add("frequencyPenalty", !options && g.FrequencyPenalty != nil)
 	add("responseLogprobs", g.ResponseLogprobs != nil)
 	add("logprobs", g.Logprobs != nil)
 	add("thinkingConfig", len(g.ThinkingConfig) > 0)
@@ -161,6 +169,11 @@ func (g *GenerationConfig) rangeError() error {
 		return apierror.InvalidArgument("Unable to submit request because it has a topK value of %g; topK must be a whole number of at least 1. Update the value and try again.", *g.TopK)
 	case g.MaxOutputTokens != nil && *g.MaxOutputTokens < 1:
 		return apierror.InvalidArgument("Unable to submit request because it has a maxOutputTokens value of %d; maxOutputTokens must be at least 1. Update the value and try again.", *g.MaxOutputTokens)
+	case g.PresencePenalty != nil && !(*g.PresencePenalty >= -2 && *g.PresencePenalty < 2):
+		// The reference: "Range: -2.0 to 2.0 (exclusive)".
+		return apierror.InvalidArgument("Unable to submit request because it has a presencePenalty value of %g but the supported range is from -2 (inclusive) to 2 (exclusive). Update the value and try again.", *g.PresencePenalty)
+	case g.FrequencyPenalty != nil && !(*g.FrequencyPenalty >= -2 && *g.FrequencyPenalty < 2):
+		return apierror.InvalidArgument("Unable to submit request because it has a frequencyPenalty value of %g but the supported range is from -2 (inclusive) to 2 (exclusive). Update the value and try again.", *g.FrequencyPenalty)
 	case len(g.StopSequences) > maxStopSequences:
 		return apierror.InvalidArgument("Unable to submit request because it has %d stopSequences; the maximum is %d. Update the value and try again.", len(g.StopSequences), maxStopSequences)
 	}
@@ -298,7 +311,8 @@ func generatorRequest(req *GenerateContentRequest) Request {
 			out.TopK = &k
 		}
 		out.JSONSchema, _ = g.jsonSchema() // validated by rangeError
-
+		out.PresencePenalty = g.PresencePenalty
+		out.FrequencyPenalty = g.FrequencyPenalty
 	}
 	return out
 }
@@ -309,8 +323,8 @@ type GenerateContentRequest struct {
 
 	GenerationConfig *GenerationConfig `json:"generationConfig,omitempty"`
 
-	Tools             json.RawMessage `json:"tools,omitempty"`
-	ToolConfig        json.RawMessage `json:"toolConfig,omitempty"`
+	Tools             []Tool          `json:"tools,omitempty"`
+	ToolConfig        *ToolConfig     `json:"toolConfig,omitempty"`
 	SafetySettings    json.RawMessage `json:"safetySettings,omitempty"`
 	SystemInstruction *Content        `json:"systemInstruction,omitempty"`
 	CachedContent     string          `json:"cachedContent,omitempty"`
@@ -326,25 +340,49 @@ const (
 )
 
 // Candidate is one generated result.
+//
+// safetyRatings is omitted: no safety classifier runs locally, and a rating
+// nothing measured would be a fabricated one.
 type Candidate struct {
 	Content      Content `json:"content"`
 	FinishReason string  `json:"finishReason,omitempty"`
 	Index        int32   `json:"index"`
 }
 
+// ModalityTokenCount is one entry of usageMetadata's per-modality details.
+type ModalityTokenCount struct {
+	Modality   string `json:"modality"`
+	TokenCount int32  `json:"tokenCount"`
+}
+
+// UsageMetadata is the response's token accounting, every count measured by
+// the model's own tokenizer (#1937): promptTokenCount is LiteRT-LM's
+// Conversation::CountTokens of the rendered conversation (template, tools and
+// image tokens included), candidatesTokenCount the tokens the engine decoded.
+type UsageMetadata struct {
+	PromptTokenCount        int32                `json:"promptTokenCount"`
+	CandidatesTokenCount    int32                `json:"candidatesTokenCount,omitempty"`
+	TotalTokenCount         int32                `json:"totalTokenCount"`
+	PromptTokensDetails     []ModalityTokenCount `json:"promptTokensDetails,omitempty"`
+	CandidatesTokensDetails []ModalityTokenCount `json:"candidatesTokensDetails,omitempty"`
+}
+
 // GenerateContentResponse is the response body.
-//
-// UsageMetadata is deliberately absent. See the package doc: a token count we
-// did not measure is worse than no token count.
 type GenerateContentResponse struct {
-	Candidates   []Candidate `json:"candidates"`
-	ModelVersion string      `json:"modelVersion,omitempty"`
-	ResponseID   string      `json:"responseId,omitempty"`
+	Candidates    []Candidate    `json:"candidates"`
+	UsageMetadata *UsageMetadata `json:"usageMetadata,omitempty"`
+	ModelVersion  string         `json:"modelVersion,omitempty"`
+	ResponseID    string         `json:"responseId,omitempty"`
 }
 
 // maxRequestBytes bounds a request body. A local service still should not be
 // made to buffer an arbitrary amount because a client got a loop wrong.
-const maxRequestBytes = 1 << 20
+//
+// 20 MiB leaves room for inline images (base64 in JSON). UNVERIFIED
+// (re-read 2026-11-19, the v1beta1 Blob and GenerateContentRequest protos in
+// cloud.google.com/go/aiplatform v1.127.0, which state no size): Vertex AI's
+// own request limit.
+const maxRequestBytes = 20 << 20
 
 // decodeRequest reads and validates a request.
 //
@@ -370,19 +408,25 @@ func decodeRequest(r io.Reader, options bool) (*GenerateContentRequest, error) {
 	return &req, nil
 }
 
-// validate enforces the documented subset.
+// validate enforces the documented subset. options marks a runtime that
+// takes whole conversations (cloudburrow_generate); without it only a single
+// text turn can be served, as litert_lm_main takes one prompt.
 func validate(req *GenerateContentRequest, options bool) error {
 	switch {
-	case len(req.Tools) > 0:
-		return unsupportedField("tools")
-	case len(req.ToolConfig) > 0:
-		return unsupportedField("toolConfig")
 	case len(req.SafetySettings) > 0:
 		return unsupportedField("safetySettings")
-	case req.SystemInstruction != nil:
-		return unsupportedField("systemInstruction")
 	case req.CachedContent != "":
 		return unsupportedField("cachedContent")
+	}
+	if !options {
+		switch {
+		case len(req.Tools) > 0:
+			return unsupportedField("tools")
+		case req.ToolConfig != nil:
+			return unsupportedField("toolConfig")
+		case req.SystemInstruction != nil:
+			return unsupportedField("systemInstruction")
+		}
 	}
 
 	if names := req.GenerationConfig.unsupportedConfig(options); len(names) > 0 {
@@ -395,19 +439,23 @@ func validate(req *GenerateContentRequest, options bool) error {
 	if err := req.GenerationConfig.rangeError(); err != nil {
 		return err
 	}
+	if options {
+		if err := validateTools(req.Tools, req.ToolConfig); err != nil {
+			return err
+		}
+		return validateConversation(req, true)
+	}
 
 	if len(req.Contents) == 0 {
 		return apierror.InvalidArgument("contents is required and must contain one user turn")
 	}
-	// Multi-turn needs a chat template to join the turns, and inventing one
-	// would change what the model sees in a way the caller cannot inspect.
-	// The runtime applies the template bundled with the model to a single
-	// prompt, so a single turn is what can be served faithfully.
+	// Multi-turn needs the conversation runner (cloudburrow_generate); the
+	// bare litert_lm_main takes one prompt.
 	if len(req.Contents) > 1 {
 		return apierror.Unimplemented(
-			"multi-turn conversations are not supported: the runtime takes one prompt and applies "+
-				"the model's own template to it, and joining %d turns would require a chat template "+
-				"this service would be inventing", len(req.Contents))
+			"multi-turn conversations are not supported by this runtime: litert_lm_main takes one prompt, and joining "+
+				"%d turns would need a chat template this service would be inventing; cloudburrow_generate (the default "+
+				"runtime) applies the model's own", len(req.Contents))
 	}
 
 	c := req.Contents[0]
@@ -436,13 +484,15 @@ func unsupportedField(name string) error {
 			"and refuses what it cannot perform rather than ignoring it", name)
 }
 
-// promptOf joins the text parts of the single supported turn.
+// promptOf joins the text parts of the last turn: the single turn a
+// one-prompt runtime serves, and what a generator that reads only Prompt
+// (the scripted one, the language and translation helpers) is given.
 func promptOf(req *GenerateContentRequest) string {
 	if len(req.Contents) == 0 {
 		return ""
 	}
 	var b strings.Builder
-	for _, p := range req.Contents[0].Parts {
+	for _, p := range req.Contents[len(req.Contents)-1].Parts {
 		b.WriteString(p.Text)
 	}
 	return b.String()
@@ -458,4 +508,47 @@ func textResponse(model, text, finish string) *GenerateContentResponse {
 		}},
 		ModelVersion: model,
 	}
+}
+
+// candidateResponse frames text and function calls: the text part first
+// (when there is text), then one functionCall part per call, as Gemini
+// orders them.
+func candidateResponse(model, text string, calls []FunctionCall, finish string, usage *Usage) *GenerateContentResponse {
+	var parts []Part
+	if text != "" || len(calls) == 0 {
+		parts = append(parts, Part{Text: text})
+	}
+	for i := range calls {
+		c := calls[i]
+		parts = append(parts, Part{FunctionCall: &c})
+	}
+	r := &GenerateContentResponse{
+		Candidates: []Candidate{{
+			Content:      Content{Role: "model", Parts: parts},
+			FinishReason: finish,
+		}},
+		ModelVersion: model,
+	}
+	r.UsageMetadata = usage.metadata()
+	return r
+}
+
+// metadata renders measured counts as usageMetadata, or nil when the
+// generator measured nothing (a runtime without cloudburrow_generate).
+// candidatesTokenCount is omitted when it was not measured: a generation
+// ended by a stop sequence is killed before the engine reports its count.
+func (u *Usage) metadata() *UsageMetadata {
+	if u == nil || u.PromptTokens < 0 {
+		return nil
+	}
+	m := &UsageMetadata{PromptTokenCount: int32(u.PromptTokens), TotalTokenCount: int32(u.PromptTokens)}
+	if !u.Images {
+		m.PromptTokensDetails = []ModalityTokenCount{{Modality: "TEXT", TokenCount: int32(u.PromptTokens)}}
+	}
+	if u.CandidateTokens >= 0 {
+		m.CandidatesTokenCount = int32(u.CandidateTokens)
+		m.TotalTokenCount += int32(u.CandidateTokens)
+		m.CandidatesTokensDetails = []ModalityTokenCount{{Modality: "TEXT", TokenCount: int32(u.CandidateTokens)}}
+	}
+	return m
 }

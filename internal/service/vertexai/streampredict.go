@@ -448,9 +448,9 @@ func (s *Server) rawStream(ctx context.Context, t target, body []byte, contentTy
 		return err
 	}
 	for c := range chunks {
-		resp := textResponse(actual, c.Text, "")
-		if c.Last {
-			resp = textResponse(actual, "", c.FinishReason)
+		resp := chunkResponse(actual, c)
+		if resp == nil {
+			continue
 		}
 		b, err := json.Marshal(resp)
 		if err == nil {
