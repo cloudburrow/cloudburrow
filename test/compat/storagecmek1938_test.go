@@ -67,6 +67,27 @@ func storageCMEKKeysIn(t *testing.T, h *Harness, c *storage.Client, location, ri
 	return k, keys
 }
 
+// grantStorageAgent grants project's Cloud Storage service agent
+// cryptoKeyEncrypterDecrypter on keys.
+func grantStorageAgent(t *testing.T, h *Harness, c *storage.Client, k *kms.KeyManagementClient, project string, keys ...string) {
+	t.Helper()
+	agent, err := c.ServiceAccount(h.Context(), project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range keys {
+		ih := k.ResourceIAM(key)
+		p, err := ih.Policy(h.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		p.Add("serviceAccount:"+agent, iam.RoleName("roles/cloudkms.cryptoKeyEncrypterDecrypter"))
+		if err := ih.SetPolicy(h.Context(), p); err != nil {
+			t.Fatalf("grant %s on %s: %v", agent, key, err)
+		}
+	}
+}
+
 func cmekWrite(h *Harness, o *storage.ObjectHandle, key, body string) (*storage.ObjectAttrs, error) {
 	w := o.NewWriter(h.Context())
 	w.KMSKeyName = key
@@ -282,8 +303,11 @@ func TestGcloudStorageCMEK(t *testing.T) {
 	h.Endpoint(EnvStorage)
 	shardEndpoint(h, envCMEKKMS, EnvKMS)
 	j := storageClient(t, h)
-	_, keys := storageCMEKKeys(t, h, j, "gcloud-cmek", "default", "other")
+	k, keys := storageCMEKKeys(t, h, j, "gcloud-cmek", "default", "other")
 	g := newGcloudSession(t, h)
+	// gcloud works in the instance's own project, whose Cloud Storage
+	// service agent is another account.
+	grantStorageAgent(t, h, j, k, g.project, keys...)
 	name := h.Project() + "-gcmek"
 	g.must("storage", "buckets", "create", "gs://"+name, "--location=US", "--default-encryption-key="+keys[0])
 	t.Cleanup(func() { _, _ = g.run(nil, "storage", "rm", "-r", "gs://"+name) })
@@ -320,8 +344,9 @@ func TestTerraformStorageBucketCMEK(t *testing.T) {
 	h.Endpoint(EnvStorage)
 	shardEndpoint(h, envCMEKKMS, EnvKMS)
 	j := storageClient(t, h)
-	_, keys := storageCMEKKeys(t, h, j, "tf-cmek", "k")
+	k, keys := storageCMEKKeys(t, h, j, "tf-cmek", "k")
 	m := newTFModule(t)
+	grantStorageAgent(t, h, j, k, m.project, keys...)
 	name := m.project + "-tfcmek-" + fmt.Sprint(time.Now().UnixNano()%1e6)
 	m.write(fmt.Sprintf(`
 resource "google_storage_bucket" "b" {
@@ -399,6 +424,9 @@ func TestIAMEnforcementStorageCMEK(t *testing.T) {
 	}
 	if got, err := cmekRead(h, b.Object("o")); err != nil || got != "granted" {
 		t.Errorf("read with the grant = %q, %v", got, err)
+	}
+	if p, err = ih.Policy(ctx); err != nil {
+		t.Fatal(err)
 	}
 	p.Remove("serviceAccount:"+agent, iam.RoleName("roles/cloudkms.cryptoKeyEncrypterDecrypter"))
 	if err := ih.SetPolicy(ctx, p); err != nil {
