@@ -193,7 +193,11 @@ func (s *Server) ExportTrustedKeyWrappedCryptoKeyVersion(_ context.Context, req 
 	return &kmspb.ExportTrustedKeyWrappedCryptoKeyVersionResponse{WrappedKey: wrapped, WrappedKeyCrc32C: crc(wrapped)}, nil
 }
 
-func (s *Server) ImportTrustedKeyWrappedCryptoKeyVersion(_ context.Context, req *kmspb.ImportTrustedKeyWrappedCryptoKeyVersionRequest) (*kmspb.CryptoKeyVersion, error) {
+func (s *Server) ImportTrustedKeyWrappedCryptoKeyVersion(ctx context.Context, req *kmspb.ImportTrustedKeyWrappedCryptoKeyVersionRequest) (*kmspb.CryptoKeyVersion, error) {
+	return retryChanged(func() (*kmspb.CryptoKeyVersion, error) { return s.importTrustedKeyWrappedCryptoKeyVersion(ctx, req) })
+}
+
+func (s *Server) importTrustedKeyWrappedCryptoKeyVersion(_ context.Context, req *kmspb.ImportTrustedKeyWrappedCryptoKeyVersionRequest) (*kmspb.CryptoKeyVersion, error) {
 	if err := parseCryptoKey("parent", req.GetParent()); err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -249,7 +253,7 @@ func (s *Server) ImportTrustedKeyWrappedCryptoKeyVersion(_ context.Context, req 
 	n := k.Next
 	v := keyVersion{Name: versionName(k.Name, n), Created: now, Material: mat, Algorithm: storedAlgorithm(a),
 		Imported: now, ProtectionLevel: k.ProtectionLevel, TrustedWrapping: true}
-	if err := checkCustom(v.Name, orgpolicy.TypeKMSCryptoKeyVersion, orgpolicy.MethodCreate, s.toVersion(v)); err != nil {
+	if err := s.checkUnlocked([]string{dbKey(keyPrefix, k.Name), dbKey(versionPrefix, w.Name), dbKey(versionPrefix, v.Name)}, v.Name, orgpolicy.TypeKMSCryptoKeyVersion, orgpolicy.MethodCreate, s.toVersion(v)); err != nil {
 		return nil, err
 	}
 	if err := s.put(dbKey(versionPrefix, v.Name), v); err != nil {

@@ -505,17 +505,21 @@ const ROUTES = [
   { path: "/requests", service: null, screen: "requests", title: "Request Log",   section: "Operations" },
   { path: "/faults",   service: null, screen: "faults",   title: "Fault injection", section: "Operations" },
 
-  // Resource Manager is one product with three pages here: projects, the
-  // organization and its folders (#1294), and tags (#1295). The product key
-  // stays "projects", so a pin made before the other pages were routed keeps
-  // pointing at it. Resource hierarchy and Tags had providers but no route,
-  // so neither was reachable from the console.
-  { path: "/projects", service: "projects", title: "Projects", kind: "Project", section: "Management tools",
-    product: "projects", productTitle: "Resource Manager" },
-  { path: "/resource-hierarchy", service: "hierarchy", icon: "hierarchy", title: "Resource hierarchy", kind: "Folder", section: "Management tools",
-    product: "projects", productTitle: "Resource Manager" },
-  { path: "/tags", service: "tags", title: "Tags", kind: "Tag key", section: "Management tools",
-    product: "projects", productTitle: "Resource Manager" },
+  // Resource Manager's own pages (#1294, #1295) are IAM & Admin's since
+  // #1865, as Google's console has them: Manage resources
+  // (/cloud-resource-manager) is the tree of the organization, folders and
+  // projects, and Tags is /iam-admin/tags, so the drawer has no Resource
+  // Manager row. These addresses stay: a project's, a folder's and the
+  // organization's pages (liens, organization policies, app management,
+  // Purge project now) and a tag key's page are here, and the lists still
+  // answer by their address. `navHidden` keeps them out of the menu, and
+  // `navCurrent` marks the IAM & Admin page they belong to.
+  { path: "/projects", service: "projects", title: "Projects", kind: "Project", section: "IAM & Admin",
+    product: "iam", productTitle: "IAM & Admin", navHidden: true, navCurrent: "/cloud-resource-manager" },
+  { path: "/resource-hierarchy", service: "hierarchy", icon: "hierarchy", title: "Resource hierarchy", kind: "Folder", section: "IAM & Admin",
+    product: "iam", productTitle: "IAM & Admin", navHidden: true, navCurrent: "/cloud-resource-manager" },
+  { path: "/tags", service: "tags", title: "Tags", kind: "Tag key", section: "IAM & Admin",
+    product: "iam", productTitle: "IAM & Admin", navHidden: true, navCurrent: "/iam-admin/tags" },
   // APIs & Services (#1352): a project's APIs, Enable and Disable. It had a
   // provider but no route.
   { path: "/apis", service: "serviceusage", title: "Enabled APIs & services", kind: "API/Service", section: "Management tools",
@@ -545,9 +549,10 @@ const ROUTES = [
   // IAM & Admin, so it is in this menu too.
   { path: "/iam-admin/tags", service: "tags", icon: "iam", title: "Tags", kind: "Tag key", section: "IAM & Admin",
     product: "iam", productTitle: "IAM & Admin", navAfter: "/iam-admin/labels" },
-  // Manage resources (#1864): Resource Manager's projects, the page Google's
-  // IAM & Admin menu opens at /cloud-resource-manager.
-  { path: "/cloud-resource-manager", service: "projects", icon: "iam", title: "Manage resources", kind: "Project", section: "IAM & Admin",
+  // Manage resources (#1864, #1865): the page Google's IAM & Admin menu
+  // opens at /cloud-resource-manager, the organization's tree of folders
+  // and projects (renderManageResources).
+  { path: "/cloud-resource-manager", service: "projects", screen: "manage-resources", icon: "iam", title: "Manage resources", kind: "Project", section: "IAM & Admin",
     product: "iam", productTitle: "IAM & Admin", navAfter: "/iam-admin/audit" },
 ];
 
@@ -1893,7 +1898,7 @@ async function renderProducts(view) {
               el("span", {}, el("span", { class: "catalogue-name", text: productTitle(entry) }),
                 pagesOf(key).length > 1
                   ? el("span", { class: "catalogue-pages",
-                                 text: pagesOf(key).map((pg) => pg.title).join(" · ") })
+                                 text: pagesOf(key).filter((pg) => !pg.navHidden).map((pg) => pg.title).join(" · ") })
                   : null)),
             el("button", {
               class: "nav-pin" + (pinned ? " is-pinned" : ""),
@@ -6853,7 +6858,7 @@ function projectIdFrom(name, suffix) {
 async function renderNewProject(view) {
   const route = ROUTES.find((r) => r.service === "projects");
   const caps = capabilityOf("projects");
-  const listHref = "/projects" + scopeSearch();
+  const listHref = "/cloud-resource-manager" + scopeSearch();
   const header = pageHeader("New project", "", { back: listHref, backLabel: "Back to Manage resources" });
   if (!route || !caps.create) {
     return setChildren(view, header,
@@ -7704,6 +7709,7 @@ function dispatch(view) {
   if (match.screen === "new-project") return renderNewProject(view);
   if (!match.service) return renderDashboard(view);
   if (match.screen === "iam-page" && !resourcePath.length) return renderIAMPage(view, match);
+  if (match.screen === "manage-resources" && !resourcePath.length) return renderManageResources(view, match);
   // Custom constraints (#1891): the list, Create custom constraint, and
   // each one's edit page.
   if (match.service === "iam-orgpolicies" && resourcePath[0] === "custom-constraints") {
@@ -8257,7 +8263,7 @@ function drawProductNav() {
   };
   const current = pages.find((page) => page.tabOf && here.path === page.tabOf.route &&
       location.pathname.startsWith(page.tabOf.route + "/") && tabHere === page.tabOf.tab) ||
-    pages.find((page) => page.path === here.path && !page.tabOf);
+    pages.find((page) => page.path === (here.navCurrent || here.path) && !page.tabOf);
   const hrefOf = (page) => page.tabOf
     ? `${page.tabOf.route}/${encodeURIComponent(resourceHere(page))}${scopeSearch()}${scopeSearch() ? "&" : "?"}tab=${page.tabOf.tab}`
     : page.path + scopeSearch();
@@ -8904,7 +8910,7 @@ const SHORTCUTS = [
   { keys: "g then l", what: "Go to the Logs Explorer", go: "/logs" },
   { keys: "g then a", what: "Go to Activity", go: "/activity" },
   { keys: "g then m", what: "Go to Monitoring", go: "/monitoring" },
-  { keys: "g then p", what: "Go to Resource Manager", go: "/projects" },
+  { keys: "g then p", what: "Go to Manage resources", go: "/cloud-resource-manager" },
   { keys: "Enter", what: "Inspect the focused table row" },
   { keys: "⌘/Ctrl + Enter", what: "Run the statement in a query editor" },
   { keys: "Escape", what: "Close a dialog, menu or panel" },
@@ -16739,3 +16745,418 @@ function renderSpannerStudio(panel, route, segments, project) {
       results)));
   loadExplorer();
 }
+// Manage resources (#1865), Google's page of that name: the organization,
+// its folders and the projects under each in one tree table (Name, ID,
+// Status, Labels, Tags, Actions), Create project (the New project page)
+// and Create folder on the title line, Move and Delete for the checked
+// row, Resources pending deletion with Restore and the date each is
+// deleted, and the info panel: the row's Permissions (Add principal,
+// Remove), Labels (a project's) and Tags (Add tag, Remove). The screen's
+// calls are the projects provider's Studio (consolemanageresources.go);
+// Permissions are the row's page's own (/api/permissions/iam for a
+// project, /api/permissions/hierarchy for a folder or the organization).
+function mrCall(call, body = {}) {
+  return send(`/api/studio/projects?call=${encodeURIComponent(call)}`, "POST", body);
+}
+
+// mrForm is a small dialog form: title, its fields (buildCreateForm's),
+// and submit, which gets the values and throws to show an error.
+function mrForm({ id, title, label, fields, note, submit, destructive = false }) {
+  const form = buildCreateForm({ label, fields });
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  let submitting = false;
+  const { dialog, close } = openModal({ labelledBy: `${id}-title`, canClose: () => !submitting });
+  const primary = el("button", { type: "submit", class: destructive ? "primary danger" : "primary", text: label });
+  const cancel = el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() });
+  const onsubmit = async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    if (submitting || !form.validate()) return;
+    submitting = true;
+    primary.disabled = true;
+    try {
+      await submit(form.values());
+      submitting = false;
+      close();
+    } catch (err) {
+      error.textContent = err.message;
+      error.hidden = false;
+      submitting = false;
+      primary.disabled = false;
+    }
+  };
+  dialog.append(el("form", { class: "modal-body", id, novalidate: true, onsubmit },
+    el("h2", { id: `${id}-title`, text: title }),
+    note ? el("p", { class: "form-help", text: note }) : null,
+    error, ...form.nodes,
+    el("div", { class: "modal-actions" }, cancel, primary)));
+  form.focusFirst();
+}
+
+function renderManageResources(view) {
+  let tree = null;
+  let pending = new URLSearchParams(location.search).get("view") === "pending";
+  const collapsed = new Set();
+  let selected = null;
+  let panelOpen = false;
+  const body = el("div", { id: "mr-body" }, loadingState(4, { what: "resources" }));
+
+  const key = (n) => `${n.kind}:${n.id}`;
+  const byKey = () => new Map((tree ? tree.nodes : []).map((n) => [key(n), n]));
+  const parentKey = (n) => {
+    if (!n.parent) return n.kind === "organization" ? null : "none";
+    const [kind, id] = n.parent.split("/");
+    return `${kind === "organizations" ? "organization" : "folder"}:${id}`;
+  };
+  const label = (n) => n.kind === "organization" ? n.name : `${n.name}`;
+  const kindWord = (n) => n.kind === "organization" ? "Organization" : n.kind === "folder" ? "Folder" : "Project";
+  const pageOf = (n) => n.kind === "project" ? `/projects/${encodeURIComponent(n.id)}`
+    : n.kind === "folder" ? `/resource-hierarchy/${encodeURIComponent(n.id)}` : "/resource-hierarchy/organization";
+  // Where Move can put a row: the organization, or an active folder that is
+  // not the row itself or under it; a project may also have no organization.
+  const destinations = (n) => {
+    const nodes = tree.nodes.filter((x) => x.state === "ACTIVE" && (x.kind === "organization" || x.kind === "folder"));
+    const map = byKey();
+    const under = (x) => {
+      for (let k = key(x), i = 0; k && i < 12; i++) {
+        if (k === key(n)) return true;
+        const node = map.get(k);
+        if (!node) return false;
+        k = parentKey(node);
+      }
+      return false;
+    };
+    const out = nodes.filter((x) => n.kind !== "folder" || !under(x)).map((x) => x.kind === "organization" ? `organizations/${x.id}` : `folders/${x.id}`);
+    return out;
+  };
+  const destLabels = () => {
+    const out = {};
+    for (const x of tree.nodes) {
+      if (x.kind === "organization") out[`organizations/${x.id}`] = `${x.name} (organization)`;
+      if (x.kind === "folder") out[`folders/${x.id}`] = `${x.name} (folder ${x.id})`;
+    }
+    return out;
+  };
+
+  const run = async (what, call, req) => {
+    const op = recordOperation(what);
+    try {
+      const res = await mrCall(call, req);
+      op.succeeded("", res.operation);
+      notify(what);
+      await reload();
+      return res;
+    } catch (err) {
+      op.failed(err.message, err.operation);
+      throw err;
+    }
+  };
+
+  const createFolder = () => mrForm({
+    id: "mr-create-folder", title: "Create folder", label: "Create",
+    note: "A folder groups projects and other folders under the organization.",
+    fields: [
+      { name: "displayName", label: "Folder name", type: "text", required: true,
+        pattern: "^[\\p{L}\\p{N}]([\\p{L}\\p{N} _\\-]{0,28}[\\p{L}\\p{N}])?$",
+        help: "Up to 30 letters, numbers, spaces, hyphens and underscores, starting and ending with a letter or number; unique among the folders beside it." },
+      { name: "parent", label: "Location", type: "select", required: true, options: destinations({ kind: "project", id: "" }),
+        optionLabels: destLabels(), default: tree.nodes.find((x) => x.kind === "organization") ? `organizations/${tree.nodes.find((x) => x.kind === "organization").id}` : "",
+        help: "The organization or folder to create it in." },
+    ],
+    submit: (v) => run(`Created folder ${v.displayName}`, "folder", { displayName: v.displayName, parent: v.parent }),
+  });
+
+  const move = (n) => mrForm({
+    id: "mr-move", title: `Move "${label(n)}"`, label: "Move",
+    note: n.kind === "project"
+      ? "Moving a project changes the policies it inherits: the folders' and the organization's."
+      : "Moving a folder moves everything in it, and changes the policies they inherit.",
+    fields: [{ name: "parent", label: "Destination", type: "select", required: true,
+      options: destinations(n).filter((d) => d !== n.parent), optionLabels: destLabels(),
+      help: "Select a destination: the organization, or a folder." }],
+    submit: (v) => run(`Moved ${kindWord(n).toLowerCase()} ${label(n)}`, "move", { kind: n.kind, id: n.id, parent: v.parent }),
+  });
+
+  const remove = (n) => confirmDestructive(n.kind === "project" ? {
+    title: `Shut down ${label(n)}?`,
+    detail: `This shuts down project ${n.id}: all billing and traffic serving stop, and every resource in it is scheduled for deletion. ` +
+      "The project is kept for 30 days, when Restore under Resources pending deletion brings it back; then it is deleted.",
+    confirmWord: n.id, confirmLabel: "Shut down", consequence: "",
+    onConfirm: () => run(`Shut down project ${n.id}`, "delete", { kind: n.kind, id: n.id }),
+  } : {
+    title: `Delete folder ${label(n)}?`,
+    detail: "Only an empty folder is deleted. It is kept for 30 days, when Restore under Resources pending deletion brings it back.",
+    confirmWord: n.name, confirmLabel: "Delete", consequence: "",
+    onConfirm: () => run(`Deleted folder ${label(n)}`, "delete", { kind: n.kind, id: n.id }),
+  });
+
+  const restore = (n) => run(`Restored ${kindWord(n).toLowerCase()} ${label(n)}`, "restore", { kind: n.kind, id: n.id });
+
+  const editLabels = (n) => mrForm({
+    id: "mr-labels", title: `Labels of ${label(n)}`, label: "Save",
+    note: "A label is a key and a value: lowercase letters, numbers, underscores and dashes, up to 63 characters; at most 64 labels.",
+    fields: [{ name: "labels", label: "Labels", type: "map", default: JSON.stringify(n.labels || {}),
+      help: "One per line: key=value." }],
+    submit: (v) => run(`Saved the labels of ${n.id}`, "labels", { id: n.id, labels: v.labels ? JSON.parse(v.labels) : {} }),
+  });
+
+  const addTag = (n) => mrForm({
+    id: "mr-add-tag", title: `Add tag to ${label(n)}`, label: "Save",
+    note: "Each resource carries one value of a tag key. Tag keys and values are made on the Tags page.",
+    fields: [{ name: "value", label: "Value", type: "select", required: true, options: tree.tagValues,
+      help: "The tag key and its value, as KEY_NAMESPACE/KEY/VALUE." }],
+    submit: (v) => run(`Added tag ${v.value} to ${label(n)}`, "tag", { kind: n.kind, id: n.id, value: v.value }),
+  });
+
+  // The info panel: the selected row's Permissions, Labels and Tags.
+  const openPanel = async (n) => {
+    MODAL_SIDE_NEXT = true;
+    const { dialog, close } = openModal({ labelledBy: "mr-panel-title" });
+    const service = n.kind === "project" ? "iam" : "hierarchy";
+    const segment = n.kind === "project" ? n.id : n.kind === "folder" ? n.id : "organization";
+    // A project's IAM page is scoped to that project, not the selected one.
+    const scope = n.kind === "project" ? n.id : currentProject();
+    const content = el("div", { id: "mr-panel-content" }, el("p", { class: "unavailable", text: "reading…" }));
+    const tabs = ["permissions", ...(n.kind === "project" ? ["labels"] : []), "tags"];
+    let tab = "permissions";
+    const strip = el("div", { class: "tab-strip", role: "tablist", "aria-label": "Info panel" });
+    const drawStrip = () => setChildren(strip, ...tabs.map((t) => el("button", {
+      type: "button", role: "tab", id: `mr-panel-tab-${t}`, class: "tab" + (t === tab ? " is-selected" : ""),
+      "aria-selected": String(t === tab), text: t === "permissions" ? "Permissions" : t === "labels" ? "Labels" : "Tags",
+      onclick: () => { tab = t; drawStrip(); draw(); } })));
+    const refreshRow = () => (tree.nodes.find((x) => key(x) === key(n)) || n);
+    // Each draw has a number: a Permissions read that answers after the
+    // panel moved to another tab, or was drawn again, is dropped.
+    let drawn = 0;
+    // A form opened over the panel returns focus to the button that
+    // opened it; a redraw replaces that button, so focus goes back to the
+    // selected tab rather than the page behind the dialog.
+    const keepFocus = () => setTimeout(() => {
+      const other = [...document.querySelectorAll(".modal.is-open")].some((m) => !m.contains(dialog) && !dialog.contains(m));
+      if (dialog.isConnected && !dialog.contains(document.activeElement) && !other) {
+        document.getElementById(`mr-panel-tab-${tab}`)?.focus();
+      }
+    }, 0);
+    const draw = async () => {
+      const row = refreshRow();
+      const mine = ++drawn;
+      keepFocus();
+      if (tab === "labels") {
+        const entries = Object.entries(row.labels || {});
+        return setChildren(content,
+          el("div", { class: "section-actions" }, el("button", { type: "button", class: "secondary", id: "mr-panel-edit-labels",
+            text: "Edit labels", onclick: () => editLabels(row) })),
+          entries.length ? el("table", { id: "mr-panel-labels" }, el("thead", {}, el("tr", {}, el("th", { text: "Key" }), el("th", { text: "Value" }))),
+            el("tbody", {}, ...entries.map(([k, v]) => el("tr", {}, el("td", { class: "mono", text: k }), el("td", { class: "mono", text: v })))))
+            : el("p", { class: "form-help", text: "No labels." }));
+      }
+      if (tab === "tags") {
+        return setChildren(content,
+          el("div", { class: "section-actions" }, el("button", { type: "button", class: "secondary", id: "mr-panel-add-tag",
+            text: "Add tag", disabled: tree.tagValues.length ? null : "disabled", onclick: () => addTag(row) })),
+          tree.tagValues.length ? null : el("p", { class: "form-help", text: "No tag values exist yet: create a tag key and its values on the Tags page." }),
+          (row.tags || []).length ? el("table", { id: "mr-panel-tags" }, el("thead", {}, el("tr", {}, el("th", { text: "Tag" }), el("th", {}, el("span", { class: "sr-only", text: "Remove" })))),
+            el("tbody", {}, ...row.tags.map((t) => el("tr", {}, el("td", { class: "mono", text: t }),
+              el("td", {}, el("button", { type: "button", class: "secondary", "aria-label": `Remove tag ${t}`, text: "Remove",
+                onclick: async () => { try { await run(`Removed tag ${t} from ${label(row)}`, "untag", { kind: row.kind, id: row.id, value: t }); draw(); } catch (err) { notify(err.message, "error"); } } }))))))
+            : el("p", { class: "form-help", text: "No tags are bound here." }));
+      }
+      let section;
+      try {
+        const d = await api(`/api/detail/${service}?project=${encodeURIComponent(scope)}&name=${encodeURIComponent(segment)}`);
+        section = (d.sections || []).find((s) => s.kind === "permissions");
+      } catch (err) {
+        if (mine !== drawn) return;
+        return setChildren(content, el("p", { class: "form-error", role: "alert", text: err.message }));
+      }
+      if (mine !== drawn) return;
+      if (!section || !section.permissions) {
+        return setChildren(content, el("p", { class: "form-help", text: section && section.unavailable ? section.unavailable : "This resource has no IAM policy to show." }));
+      }
+      const pview = section.permissions;
+      const change = (b) => send(`/api/permissions/${service}?project=${encodeURIComponent(scope)}`, "POST",
+        { Path: [segment], Etag: pview.etag, ...b });
+      const rows = (pview.bindings || []).flatMap((b) => (b.members || []).map((m) => ({ member: m, role: b.role, conditional: b.conditional || null })))
+        .sort((a, b) => a.member.localeCompare(b.member) || a.role.localeCompare(b.role));
+      setChildren(content,
+        el("div", { class: "section-actions" }, el("button", { type: "button", class: "primary", id: "mr-panel-add-principal",
+          text: "Add principal", onclick: () => openGrantForm(pview, label(row), change, () => draw()) })),
+        pview.note ? el("p", { class: "form-help", text: pview.note }) : null,
+        rows.length ? el("table", { id: "mr-panel-permissions" },
+          el("thead", {}, el("tr", {}, el("th", { text: "Principal" }), el("th", { text: "Role" }), el("th", {}, el("span", { class: "sr-only", text: "Remove" })))),
+          el("tbody", {}, ...rows.map((r) => el("tr", {},
+            el("td", { class: "mono", text: r.member }), el("td", { class: "mono", text: r.role }),
+            el("td", {}, el("button", { type: "button", class: "secondary", "aria-label": `Remove ${r.member} from ${r.role}`, text: "Remove",
+              onclick: () => confirmDestructive({
+                title: `Remove ${r.member} from ${r.role}?`, detail: `${r.member} will no longer hold ${r.role} on ${label(row)}.`,
+                confirmWord: r.member, confirmLabel: "Remove", consequence: "",
+                onConfirm: async () => {
+                  const op = recordOperation(`Remove ${r.member} from ${r.role} on ${label(row)}`);
+                  try { const res = await change({ Remove: { Member: r.member, Role: r.role, Condition: r.conditional } }); op.succeeded("", res.operation); }
+                  catch (err) { op.failed(err.message, err.operation); throw err; }
+                  notify(`Removed ${r.member} from ${r.role}`);
+                  draw();
+                } }) }))))))
+          : el("p", { class: "form-help", text: "No principals hold a role here." }));
+    };
+    drawStrip();
+    dialog.append(el("div", { class: "modal-body", id: "mr-panel" },
+      el("h2", { id: "mr-panel-title", text: `${kindWord(n)} "${label(n)}"` }),
+      el("p", { class: "form-help mono", text: n.resource }),
+      strip, content,
+      el("div", { class: "modal-actions" }, el("button", { type: "button", class: "secondary", text: "Close", onclick: () => close() }))));
+    dialog.addEventListener("cb-closed", () => { panelOpen = false; drawBar(); });
+    panelOpen = true;
+    drawBar();
+    draw();
+  };
+
+  const moveButton = el("button", { type: "button", class: "header-button", id: "mr-move", text: "Move", disabled: "disabled",
+    onclick: () => selected && move(selected) });
+  const deleteButton = el("button", { type: "button", class: "header-button", id: "mr-delete", text: "Delete", disabled: "disabled",
+    onclick: () => selected && remove(selected) });
+  const infoButton = el("button", { type: "button", class: "header-button", id: "mr-info-panel", disabled: "disabled",
+    onclick: () => selected && openPanel(selected) });
+  const pendingLink = el("a", { id: "mr-pending", href: "#" });
+  pendingLink.addEventListener("click", (e) => {
+    e.preventDefault();
+    pending = !pending;
+    const u = new URL(location.href);
+    if (pending) u.searchParams.set("view", "pending"); else u.searchParams.delete("view");
+    history.replaceState(history.state, "", u.pathname + u.search);
+    selected = null;
+    drawBar();
+    draw();
+  });
+  const filterInput = el("input", { type: "search", class: "filter", id: "mr-filter", placeholder: "Filter", "aria-label": "Filter resources",
+    oninput: () => draw() });
+  const bar = el("div", { class: "list-actions", id: "mr-actions" });
+  const drawBar = () => {
+    const live = selected && selected.state === "ACTIVE" && selected.kind !== "organization";
+    moveButton.disabled = !live;
+    deleteButton.disabled = !live;
+    infoButton.disabled = !selected || pending;
+    infoButton.textContent = panelOpen ? "Hide info panel" : "Show info panel";
+    pendingLink.textContent = pending ? "Back to Manage resources" : "Resources pending deletion";
+    moveButton.hidden = pending;
+    deleteButton.hidden = pending;
+    infoButton.hidden = pending;
+    setChildren(bar, moveButton, deleteButton, infoButton, filterInput, pendingLink);
+  };
+
+  const statusText = (n) => n.state === "ACTIVE" ? "Active" : n.state === "DELETE_REQUESTED" ? "Pending deletion" : n.state;
+  const labelText = (n) => Object.entries(n.labels || {}).map(([k, v]) => `${k}: ${v}`).join(", ");
+  const rowActions = (n) => {
+    const acts = [];
+    if (n.state === "DELETE_REQUESTED") {
+      acts.push({ label: "Restore", run: () => restore(n).catch((err) => notify(err.message, "error")) });
+    } else {
+      if (n.kind === "project") acts.push({ label: "Settings", run: () => navigate(`/iam-admin/settings/${encodeURIComponent(n.id)}?project=${encodeURIComponent(n.id)}`) });
+      if (n.kind !== "organization") acts.push({ label: "Move", run: () => move(n) });
+      acts.push({ label: "Permissions", run: () => { selected = n; openPanel(n); } });
+      if (n.kind === "project") acts.push({ label: "Labels", run: () => editLabels(n) });
+      acts.push({ label: "Tags", run: () => { selected = n; openPanel(n).then(() => document.getElementById("mr-panel-tab-tags")?.click()); } });
+      if (n.kind !== "organization") acts.push({ label: "Delete", destructive: true, run: () => remove(n) });
+    }
+    return overflowMenu(acts, label(n));
+  };
+
+  const draw = () => {
+    if (!tree) return;
+    const q = filterInput.value.trim().toLowerCase();
+    const matches = (n) => !q || [n.name, n.id, statusText(n), labelText(n), ...(n.tags || [])].some((s) => (s || "").toLowerCase().includes(q));
+    if (pending) {
+      const rows = tree.nodes.filter((n) => n.state === "DELETE_REQUESTED" && matches(n));
+      if (!rows.length) return setChildren(body, emptyState("No resources pending deletion", "A project you shut down, or a folder you delete, is listed here for 30 days, when it can be restored."));
+      return setChildren(body, el("div", { class: "table-wrap" }, el("table", { id: "mr-pending-table" },
+        el("thead", {}, el("tr", {}, el("th", { text: "Name" }), el("th", { text: "ID" }), el("th", { text: "Type" }),
+          el("th", { text: "Deletion requested" }), el("th", { text: "Deletion date" }), el("th", {}, el("span", { class: "sr-only", text: "Restore" })))),
+        el("tbody", {}, ...rows.map((n) => el("tr", { "data-resource": key(n) },
+          el("td", { text: n.name }), el("td", { class: "mono", text: n.id }), el("td", { text: kindWord(n) }),
+          el("td", { text: n.deleteTime ? new Date(n.deleteTime).toLocaleString() : "" }), el("td", { text: n.purgeTime || "" }),
+          el("td", {}, el("button", { type: "button", class: "secondary", "aria-label": `Restore ${n.name}`, text: "Restore",
+            onclick: () => restore(n).catch((err) => notify(err.message, "error")) }))))))));
+    }
+    const live = tree.nodes.filter((n) => n.state !== "DELETE_REQUESTED");
+    const children = new Map();
+    for (const n of live) {
+      const p = parentKey(n);
+      if (!children.has(p)) children.set(p, []);
+      children.get(p).push(n);
+    }
+    for (const list of children.values()) list.sort((a, b) => (a.kind === b.kind ? 0 : a.kind === "folder" ? -1 : 1) || a.name.localeCompare(b.name));
+    // A row is shown when it matches, or when something under it does.
+    const shown = new Map();
+    const visit = (n) => {
+      let any = matches(n);
+      for (const c of children.get(key(n)) || []) any = visit(c) || any;
+      shown.set(key(n), any);
+      return any;
+    };
+    const roots = [...(children.get(null) || []), ...(children.get("none") || [])];
+    for (const r of roots) visit(r);
+    const rows = [];
+    const walk = (n, depth) => {
+      if (!shown.get(key(n))) return;
+      const kids = (children.get(key(n)) || []).filter((c) => shown.get(key(c)));
+      const open = q || !collapsed.has(key(n));
+      const toggle = kids.length ? el("button", { type: "button", class: "icon-button mr-toggle", "aria-expanded": String(!!open),
+        "aria-label": `${open ? "Collapse" : "Expand"} ${label(n)}`, text: open ? "▾" : "▸",
+        onclick: () => { if (collapsed.has(key(n))) collapsed.delete(key(n)); else collapsed.add(key(n)); draw(); } })
+        : el("span", { class: "mr-toggle-space", "aria-hidden": "true" });
+      // A checkbox per row, as Google's tree has; Move, Delete and the info
+      // panel act on one row, so checking one clears the others.
+      const check = el("input", { type: "checkbox", class: "mr-select", "aria-label": `Select ${label(n)}`,
+        checked: selected && key(selected) === key(n) ? true : null,
+        onchange: (e) => {
+          selected = e.target.checked ? n : null;
+          for (const other of body.querySelectorAll("input.mr-select")) if (other !== e.target) other.checked = false;
+          drawBar();
+        } });
+      rows.push(el("tr", { "data-resource": key(n), "data-kind": n.kind, "aria-level": String(depth + 1) },
+        el("td", {}, check),
+        el("td", { class: "mr-name" },
+          el("span", { style: `display:inline-block;width:${depth * 20}px`, "aria-hidden": "true" }), toggle,
+          el("span", { class: "mr-kind", text: `${kindWord(n)} ` }),
+          el("a", { href: pageOf(n) + scopeSearch(), text: label(n) })),
+        el("td", { class: "mono", text: n.id }),
+        el("td", { text: statusText(n) }),
+        el("td", { text: labelText(n) }),
+        el("td", { text: (n.tags || []).join(", ") }),
+        el("td", { class: "row-actions" }, rowActions(n))));
+      if (open) for (const c of kids) walk(c, depth + 1);
+    };
+    for (const r of roots) walk(r, 0);
+    if (!rows.length) return setChildren(body, emptyState("No resources match", "Clear the filter to see every resource."));
+    setChildren(body, el("div", { class: "table-wrap" }, el("table", { id: "mr-tree", role: "treegrid", "aria-label": "Resources" },
+      el("thead", {}, el("tr", {},
+        el("th", {}, el("span", { class: "sr-only", text: "Select" })),
+        el("th", { text: "Name" }), el("th", { text: "ID" }), el("th", { text: "Status" }),
+        el("th", { text: "Labels" }), el("th", { text: "Tags" }),
+        el("th", {}, el("span", { class: "sr-only", text: "Actions" })))),
+      el("tbody", {}, ...rows))));
+  };
+
+  const reload = async () => {
+    try {
+      tree = await mrCall("tree");
+    } catch (err) {
+      setChildren(body, errorState("Resources unavailable", String(err.message), () => reload()));
+      return;
+    }
+    if (selected) selected = tree.nodes.find((x) => key(x) === key(selected)) || null;
+    drawBar();
+    draw();
+  };
+
+  const header = pageHeader("Manage resources", "", { actions: [
+    Object.assign(createButton("Create project", () => navigate("/projectcreate")), { id: "mr-create-project" }),
+    Object.assign(createButton("Create folder", () => tree && createFolder()), { id: "mr-create-folder-button" }),
+    refreshButton(() => reload())] });
+  drawBar();
+  setChildren(view, header, noteBanner(mrNoteText), bar, body);
+  reload();
+}
+
+const mrNoteText = "One local organization; a project you shut down is kept 30 days, when Restore brings it back, then purged. " +
+  "IAM policies are stored, and enforced only with up --iam-enforcement=on.";

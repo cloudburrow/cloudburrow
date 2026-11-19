@@ -369,6 +369,7 @@ func TestSecretsSchedulerTasksProjectsIAMAndAIScreensMeetWCAG(t *testing.T) {
 		{"Model Garden", "/agent-platform/model-garden"}, {"Studio", "/agent-platform/studio"}, {"Embeddings", "/agent-platform/studio/embeddings"},
 		{"Local models", "/agent-platform/model-garden/local-models"}, {"Online prediction", "/agent-platform/online-prediction/endpoints"},
 		{"Monitoring", "/monitoring"}, {"Fault injection", "/faults"}, {"Instance", "/instance"},
+		{"Manage resources", "/cloud-resource-manager"}, {"IAM tags", "/iam-admin/tags"}, {"IAM settings", "/iam-admin/settings"},
 		{"secret", "/secrets/a11y-secret"}, {"queue", "/tasks/queues/us-central1/a11y-queue"},
 		{"scheduler job", "/scheduler/jobs/us-central1/a11y-job"}, {"project", "/projects/" + project},
 	} {

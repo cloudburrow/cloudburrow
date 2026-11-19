@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -68,24 +69,63 @@ func (p tagsProvider) parentOptions() []string {
 	return out
 }
 
+// CreateForm is Google's Create tag key (#1865, "Creating and managing
+// tags", read 2026-11-19): Tag key, Tag key description, the purpose
+// (For use with network firewall, GCE_FIREWALL, with its network), then
+// the Tag values, each a value and its description, made with the key.
+// The key is made in the organization or a project, as the resource
+// selector names it on Google's page.
 func (p tagsProvider) CreateForm() (string, []console.Field) {
 	return "Create tag key", []console.Field{
-		{Name: "parent", Label: "Parent", Type: "select", Required: true, Options: p.parentOptions(), Default: resourcemanager.OrganizationName,
-			Help: "The organization, or a project: the key's namespace."},
-		{Name: "shortName", Label: "Short name", Type: "text", Required: true, Pattern: tagShortNamePattern,
-			Help: "1 to 256 characters, starting and ending with a letter or digit; unique under its parent."},
-		{Name: "description", Label: "Description", Type: "text", Help: "Optional, at most 256 characters."},
+		{Name: "shortName", Label: "Tag key", Type: "text", Required: true, Pattern: tagShortNamePattern,
+			Help: "Up to 256 characters, starting and ending with a letter or digit; it can contain dashes, underscores and dots. It cannot be changed later."},
+		{Name: "description", Label: "Tag key description", Type: "text", Help: "Optional, at most 256 characters."},
+		{Name: "purpose", Label: "For use with network firewall", Type: "checkbox",
+			Help: "A key for network firewall policies (purpose GCE_FIREWALL): its values can be bound to the VPC network below only."},
+		{Name: "network", Label: "Network", Type: "text", ShowWhen: "purpose",
+			Help: "The VPC network the key's values apply to, as PROJECT_ID/NETWORK or projects/PROJECT_ID/global/networks/NETWORK."},
+		{Name: "values", Label: "Tag values", Type: "map",
+			Help: "One per line: the tag value, then = and its tag value description, such as production=Serving traffic. Values can also be added later on the key's page."},
+		{Name: "parent", Label: "Organization or project", Type: "select", Required: true, Options: p.parentOptions(), Default: resourcemanager.OrganizationName,
+			Help: "The key's namespace: the organization, or a project."},
 	}
 }
 
 func (p tagsProvider) Create(_ context.Context, _ string, values map[string]string) (string, error) {
-	k, err := p.registry.CreateTagKey(&rmpb.TagKey{Parent: values["parent"], ShortName: strings.TrimSpace(values["shortName"]),
-		Description: values["description"]}, false)
+	in := &rmpb.TagKey{Parent: values["parent"], ShortName: strings.TrimSpace(values["shortName"]), Description: values["description"]}
+	if values["purpose"] == "true" {
+		in.Purpose = rmpb.Purpose_GCE_FIREWALL
+		in.PurposeData = map[string]string{"network": strings.TrimSpace(values["network"])}
+	}
+	tagValues, err := console.ParseMap(values["values"])
+	if err != nil {
+		return "", fmt.Errorf("tag values: %w", err)
+	}
+	// Every value is checked before the key is made, so a bad one leaves
+	// nothing behind.
+	for v := range tagValues {
+		if !tagShortNameRE.MatchString(v) {
+			return "", fmt.Errorf("tag value %q: up to 256 characters, starting and ending with a letter or digit", v)
+		}
+	}
+	k, err := p.registry.CreateTagKey(in, false)
 	if err != nil {
 		return "", err
 	}
+	short := make([]string, 0, len(tagValues))
+	for v := range tagValues {
+		short = append(short, v)
+	}
+	sort.Strings(short)
+	for _, v := range short {
+		if _, err := p.registry.CreateTagValue(&rmpb.TagValue{Parent: k.GetName(), ShortName: v, Description: tagValues[v]}, false); err != nil {
+			return tagID(k.GetName()), fmt.Errorf("tag key %s was created, but its value %s was not: %w", k.GetNamespacedName(), v, err)
+		}
+	}
 	return tagID(k.GetName()), nil
 }
+
+var tagShortNameRE = regexp.MustCompile(tagShortNamePattern)
 
 func (p tagsProvider) Delete(_ context.Context, _ string, name string) error {
 	_, err := p.registry.DeleteTagKey("tagKeys/"+name, "", false)

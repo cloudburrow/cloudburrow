@@ -261,8 +261,8 @@ func TestConsoleTagsAndLiens(t *testing.T) {
 	if _, err := p.Create(ctx, "", map[string]string{"projectId": "tagged-proj", "parent": "folders/" + eng}); err != nil {
 		t.Fatal(err)
 	}
-	if _, fields := tg.CreateForm(); len(fields[0].Options) != 2 {
-		t.Errorf("Create tag key's parents = %v; want the organization and the project", fields[0].Options)
+	if _, fields := tg.CreateForm(); len(fields[len(fields)-1].Options) != 2 || fields[len(fields)-1].Name != "parent" {
+		t.Errorf("Create tag key's parents = %v; want the organization and the project", fields[len(fields)-1].Options)
 	}
 	env, err := tg.Create(ctx, "", map[string]string{"parent": resourcemanager.OrganizationName, "shortName": "env", "description": "Environment"})
 	if err != nil {

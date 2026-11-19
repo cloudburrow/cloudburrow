@@ -198,7 +198,10 @@ func (f *Front) customREST(r *http.Request) error {
 // pubsub.googleapis.com/Snapshot (#1895), whose documented fields are
 // resource.definition, .name and .type, and resource.expireTime, .name
 // and .topic (internal/orgpolicy/fields_pubsub.go): CreateSchema is a
-// CREATE, CommitSchema (a new revision of the definition) an UPDATE;
+// CREATE, CommitSchema (a new revision of the definition) an UPDATE, and
+// so is RollbackSchema (#1902), which "creates a new schema revision that
+// is a copy of the provided revision_id" (schema.proto): it is checked on
+// that revision's type and definition;
 // CreateSnapshot a CREATE, UpdateSnapshot an UPDATE.
 
 // customSchema checks a schema as CreateSchema or CommitSchema would
@@ -217,9 +220,23 @@ func customSchema(ctx context.Context, name string, s *pubsubpb.Schema, method s
 const snapshotLifetime = 7 * 24 * time.Hour
 
 // customCreateSnapshot checks the snapshot a CreateSnapshot would make:
-// its name, its subscription's topic, and its expiry, 7 days from now
-// (its lifetime less the age of the subscription's oldest unacked
-// message, which the front does not read before the create).
+// its name, its subscription's topic, and its expiry.
+//
+// Google computes the expiry as "7 days - (age of oldest unacked message
+// in the subscription)" (pubsub.proto, Snapshot.expire_time). The front
+// checks 7 days from now, the expiry exactly for a subscription with no
+// backlog and the latest one for any other, because it cannot learn the
+// oldest unacked message's age (#1902): the emulator reports no backlog
+// or message age (no oldest_unacked_message_age, no publish time without
+// delivering the message); a Pull to look would lease the messages, count
+// a delivery attempt and reorder them (restore.go says the same of
+// reading a backlog); and the front does not see every ack, since a
+// StreamingPull's acks travel inside a stream it reads only the first
+// frame of, and a lapsed ack deadline redelivers inside the emulator. Nor
+// can the check run on the emulator's answer: the emulator holds the
+// snapshot as soon as it answers, and every client could read or seek to
+// it before a refusal took it away. A condition on resource.expireTime
+// is therefore read on the latest expiry the snapshot may have.
 func (f *Front) customCreateSnapshot(ctx context.Context, req *pubsubpb.CreateSnapshotRequest) error {
 	if !orgpolicy.SourceSet() || req.GetName() == "" {
 		return nil
@@ -231,14 +248,42 @@ func (f *Front) customCreateSnapshot(ctx context.Context, req *pubsubpb.CreateSn
 	return checkCustom(ctx, req.GetName(), orgpolicy.TypeSnapshot, orgpolicy.MethodCreate, res)
 }
 
-// customFirstFrame checks a CreateSchema, CommitSchema or CreateSnapshot
+// customRollbackSchema checks a RollbackSchema on the schema it would
+// leave: name, with the type and definition of its revision revisionID,
+// read from the front's Protocol Buffer schemas or the emulator's AVRO
+// ones. A revision that cannot be read is left to the call to answer
+// (NOT_FOUND, or INVALID_ARGUMENT for an empty revision_id).
+func (f *Front) customRollbackSchema(ctx context.Context, name, revisionID string) error {
+	if !orgpolicy.SourceSet() || name == "" || revisionID == "" {
+		return nil
+	}
+	var rev *pubsubpb.Schema
+	if revs, ok := f.keptSchema(name); ok {
+		if rev, ok = revision(revs, revisionID); !ok {
+			return nil
+		}
+	} else if f.upstream != nil {
+		s, err := pubsubpb.NewSchemaServiceClient(f.upstream).GetSchema(ctx,
+			&pubsubpb.GetSchemaRequest{Name: name + "@" + revisionID, View: pubsubpb.SchemaView_FULL})
+		if err != nil {
+			return nil
+		}
+		rev = s
+	}
+	if rev == nil {
+		return nil
+	}
+	return customSchema(ctx, name, rev, orgpolicy.MethodUpdate)
+}
+
+// customFirstFrame checks a CreateSchema, CommitSchema, RollbackSchema or CreateSnapshot
 // over gRPC, answering a stream that replays its first frame.
 func (f *Front) customFirstFrame(ctx context.Context, ss grpc.ServerStream, method string) (grpc.ServerStream, error) {
 	if !orgpolicy.SourceSet() {
 		return ss, nil
 	}
 	switch method {
-	case schemaService + "CreateSchema", schemaService + "CommitSchema", subscriber + "CreateSnapshot":
+	case schemaService + "CreateSchema", schemaService + "CommitSchema", schemaService + "RollbackSchema", subscriber + "CreateSnapshot":
 	default:
 		return ss, nil
 	}
@@ -258,6 +303,11 @@ func (f *Front) customFirstFrame(ctx context.Context, ss grpc.ServerStream, meth
 		if proto.Unmarshal(first, &req) == nil {
 			err = customSchema(ctx, req.GetName(), req.GetSchema(), orgpolicy.MethodUpdate)
 		}
+	case schemaService + "RollbackSchema":
+		var req pubsubpb.RollbackSchemaRequest
+		if proto.Unmarshal(first, &req) == nil {
+			err = f.customRollbackSchema(ctx, req.GetName(), req.GetRevisionId())
+		}
 	default:
 		var req pubsubpb.CreateSnapshotRequest
 		if proto.Unmarshal(first, &req) == nil {
@@ -271,9 +321,9 @@ func (f *Front) customFirstFrame(ctx context.Context, ss grpc.ServerStream, meth
 }
 
 // customRESTSchema checks a REST CreateSchema (POST
-// /v1/projects/{p}/schemas?schemaId=) or CommitSchema (POST
-// /v1/{name}:commit).
-func customRESTSchema(r *http.Request, parent, name, verb string) error {
+// /v1/projects/{p}/schemas?schemaId=), CommitSchema (POST
+// /v1/{name}:commit) or RollbackSchema (POST /v1/{name}:rollback).
+func (f *Front) customRESTSchema(r *http.Request, parent, name, verb string) error {
 	if r.Method != http.MethodPost || !orgpolicy.SourceSet() {
 		return nil
 	}
@@ -302,6 +352,16 @@ func customRESTSchema(r *http.Request, parent, name, verb string) error {
 			return nil
 		}
 		return customSchema(r.Context(), name, req.GetSchema(), orgpolicy.MethodUpdate)
+	case name != "" && verb == "rollback":
+		body, err := readBody(r)
+		if err != nil {
+			return err
+		}
+		var req pubsubpb.RollbackSchemaRequest
+		if restJSON.Unmarshal(body, &req) != nil {
+			return nil
+		}
+		return f.customRollbackSchema(r.Context(), name, req.GetRevisionId())
 	}
 	return nil
 }

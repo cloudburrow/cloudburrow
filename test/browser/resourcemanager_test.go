@@ -109,10 +109,13 @@ func (p *tab) submitForm(values map[string]string, first string) {
 
 // TestResourceHierarchyAndTagsThroughTheDrawer, in the storage shard. The
 // Resource hierarchy and Tags screens (#1294, #1295) had providers but no
-// route. Reached from the drawer's Resource Manager row and the product's
-// page list: Create folder there makes a folder the v3 Folders API lists
-// under the organization, and Create tag key and Create tag value make a key
-// and value the TagKeys and TagValues APIs read back.
+// route. Since #1865 they are IAM & Admin's, as Google's are: the drawer
+// has no Resource Manager row, and IAM & Admin's menu holds Manage
+// resources and Tags. The Resource hierarchy list still answers at its
+// address: Create folder there makes a folder the v3 Folders API lists
+// under the organization, and Google's Create tag key (Tag key, Tag key
+// description) and Create tag value make a key and value the TagKeys and
+// TagValues APIs read back.
 func TestResourceHierarchyAndTagsThroughTheDrawer(t *testing.T) {
 	needService(t, "hierarchy")
 	needService(t, "tags")
@@ -141,20 +144,34 @@ func TestResourceHierarchyAndTagsThroughTheDrawer(t *testing.T) {
 	}
 
 	p := open(t)
-	p.navigateByDrawer("Management tools", "/projects", "Resource Manager")
-	// The product's pages, Projects, Resource hierarchy and Tags.
+	p.navigateByDrawer("IAM & Admin", "/iam-admin/iam", "IAM & Admin")
+	var rows []string
+	p.eval(`[...document.querySelectorAll("#nav-list a")].map((a) => a.textContent.trim())`, &rows)
+	for _, r := range rows {
+		if strings.Contains(r, "Resource Manager") {
+			t.Errorf("the drawer still has a Resource Manager row (%q): its pages are IAM & Admin's", r)
+		}
+	}
+	// IAM & Admin's pages hold Manage resources and Tags, and not the old
+	// Projects or Resource hierarchy lists.
 	var pages []string
 	p.waitFor(`document.querySelectorAll("#product-nav a").length > 0`)
 	p.eval(`[...document.querySelectorAll("#product-nav a")].map((a) => a.textContent.trim())`, &pages)
-	for _, want := range []string{"Projects", "Resource hierarchy", "Tags"} {
+	for _, want := range []string{"Manage resources", "Tags"} {
 		if !contains(pages, want) {
-			t.Errorf("Resource Manager's pages are %q; want %s among them", pages, want)
+			t.Errorf("IAM & Admin's pages are %q; want %s among them", pages, want)
+		}
+	}
+	for _, gone := range []string{"Projects", "Resource hierarchy"} {
+		if contains(pages, gone) {
+			t.Errorf("IAM & Admin's pages are %q; %s is Manage resources now", pages, gone)
 		}
 	}
 
-	// Resource hierarchy: Create folder.
-	p.clickText("#product-nav a", "Resource hierarchy")
-	p.waitFor(`location.pathname === "/resource-hierarchy"`)
+	// Resource hierarchy: Create folder, at the list's address, which marks
+	// Manage resources in the menu.
+	p.navigate("/resource-hierarchy")
+	p.waitFor(`(document.querySelector("#product-nav [aria-current=page]") || {}).textContent?.trim() === "Manage resources"`)
 	folder := fmt.Sprintf("Browser %d", time.Now().UnixNano()%1e8)
 	p.clickText("#view button", "Create folder")
 	p.submitForm(map[string]string{"displayName": folder}, "displayName")
@@ -188,7 +205,17 @@ func TestResourceHierarchyAndTagsThroughTheDrawer(t *testing.T) {
 
 	// Tags: Create tag key, then Create tag value on its page.
 	p.clickText("#product-nav a", "Tags")
-	p.waitFor(`location.pathname === "/tags"`)
+	p.waitFor(`location.pathname === "/iam-admin/tags"`)
+	var tagLabels []string
+	p.clickText("#view button", "Create tag key")
+	p.waitFor(`document.querySelector("#f-shortName") !== null`)
+	p.eval(`[...document.querySelectorAll("label[for^=f-] > span:first-child")].map((s) => s.textContent.trim())`, &tagLabels)
+	for _, want := range []string{"Tag key", "Tag key description", "For use with network firewall", "Tag values"} {
+		if !contains(tagLabels, want) {
+			t.Errorf("Create tag key's fields are %q; want Google's %q among them", tagLabels, want)
+		}
+	}
+	p.navigate("/iam-admin/tags")
 	short := fmt.Sprintf("browser-env-%d", time.Now().UnixNano()%1e8)
 	p.clickText("#view button", "Create tag key")
 	p.submitForm(map[string]string{"shortName": short, "description": "made in the browser"}, "shortName")

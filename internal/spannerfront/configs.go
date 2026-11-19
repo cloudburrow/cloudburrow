@@ -258,37 +258,51 @@ func (s *Instances) UpdateInstanceConfig(ctx context.Context, req *instancepb.Up
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid %s request: update_mask must name display_name or labels.", method)
 	}
 	start := s.now()
-	s.mu.Lock()
-	cur, err := s.customConfig(method, in.GetName(), in.GetEtag())
-	if err != nil {
+	// The custom-constraint check runs outside s.mu (#1902): it may call
+	// the host's evaluator, which is slow and may call back into this
+	// front. The update is applied only if the configuration is still the
+	// one it was built from; one changed or deleted meanwhile is read
+	// again (a request with an etag then gets the etag's ABORTED, one
+	// deleted NOT_FOUND).
+	var next *instancepb.InstanceConfig
+	for attempt := 0; ; attempt++ {
+		s.mu.Lock()
+		cur, err := s.customConfig(method, in.GetName(), in.GetEtag())
 		s.mu.Unlock()
-		return nil, err
-	}
-	next := proto.Clone(cur).(*instancepb.InstanceConfig)
-	for _, p := range paths {
-		switch snake(p) {
-		case "display_name":
-			if n := utf8.RuneCountInString(in.GetDisplayName()); n < 1 || n > 30 {
-				s.mu.Unlock()
-				return nil, status.Errorf(codes.InvalidArgument, "Invalid %s request: display_name must be 1 to 30 characters long.", method)
+		if err != nil {
+			return nil, err
+		}
+		next = proto.Clone(cur).(*instancepb.InstanceConfig)
+		for _, p := range paths {
+			switch snake(p) {
+			case "display_name":
+				if n := utf8.RuneCountInString(in.GetDisplayName()); n < 1 || n > 30 {
+					return nil, status.Errorf(codes.InvalidArgument, "Invalid %s request: display_name must be 1 to 30 characters long.", method)
+				}
+				next.DisplayName = in.GetDisplayName()
+			case "labels":
+				next.Labels = in.GetLabels()
+			default:
+				return nil, status.Errorf(codes.InvalidArgument, "Invalid %s request: field_mask path %q cannot be updated: display_name and labels can.", method, p)
 			}
-			next.DisplayName = in.GetDisplayName()
-		case "labels":
-			next.Labels = in.GetLabels()
-		default:
+		}
+		if err := checkCustom(ctx, in.GetName(), orgpolicy.TypeSpannerInstanceConfig, orgpolicy.MethodUpdate, next); err != nil {
+			return nil, err
+		}
+		s.mu.Lock()
+		if s.configs[in.GetName()] == cur {
+			next.Etag = opID()
+			if !req.GetValidateOnly() {
+				s.configs[in.GetName()] = next
+			}
 			s.mu.Unlock()
-			return nil, status.Errorf(codes.InvalidArgument, "Invalid %s request: field_mask path %q cannot be updated: display_name and labels can.", method, p)
+			break
+		}
+		s.mu.Unlock()
+		if attempt == changedRetries {
+			return nil, status.Errorf(codes.Aborted, "%s: %s kept changing while the request was checked against custom organization policy constraints; retry.", method, in.GetName())
 		}
 	}
-	if err := checkCustom(ctx, in.GetName(), orgpolicy.TypeSpannerInstanceConfig, orgpolicy.MethodUpdate, next); err != nil {
-		s.mu.Unlock()
-		return nil, err
-	}
-	next.Etag = opID()
-	if !req.GetValidateOnly() {
-		s.configs[in.GetName()] = next
-	}
-	s.mu.Unlock()
 	meta := &instancepb.UpdateInstanceConfigMetadata{InstanceConfig: next,
 		Progress: &instancepb.OperationProgress{ProgressPercent: 100, StartTime: timestamppb.New(start), EndTime: timestamppb.New(s.now())}}
 	return s.doneOp(in.GetName(), meta, next)

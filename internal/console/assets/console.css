@@ -2256,3 +2256,11 @@ svg.bq-chart { display: block; border: 1px solid var(--border); border-radius: v
 /* A create field's dialog (#1859): Spanner's Compare editions. */
 .field-dialog { max-width: min(880px, calc(100vw - 32px)); }
 .field-dialog-table th[scope="row"] { font-weight: 500; text-align: left; }
+/* Manage resources (#1865): the tree's indent and toggles, and the info
+   panel's tabs, which sit inside a dialog rather than under a header. */
+#mr-tree .mr-name { white-space: nowrap; }
+#mr-tree .mr-toggle, #mr-tree .mr-toggle-space { display: inline-block; width: 28px; }
+#mr-tree .mr-kind { color: var(--text-muted); }
+#mr-panel .tab-strip { margin: 12px 0 16px; border-bottom: 1px solid var(--border); }
+#mr-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; }
+#mr-actions .filter { flex: 1 1 200px; min-width: 0; }
