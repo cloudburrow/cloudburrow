@@ -271,13 +271,11 @@ func TestBigQueryMLLinearAndLogisticModels(t *testing.T) {
 	_ = project
 }
 
-// TestBigQueryMLRefusals: the model types and clauses CloudBurrow does not
-// train are 501 naming them, and nothing is made. AutoML models are trained
-// since #1776 (TestBigQueryMLAutoML), so CONTRIBUTION_ANALYSIS stands for
-// the refused model types. A remote model on the
-// DEFAULT connection is served since #1765: with no default connection and
-// no bigquery.connections.create it is 403, as Google documents
-// (wantDefaultConnectionRefused), and nothing is made either.
+// TestBigQueryMLRefusals: the model types (CONTRIBUTION_ANALYSIS; AutoML is
+// trained since #1776) and clauses CloudBurrow does not train are 501 naming
+// them, and nothing is made. A remote model on the DEFAULT connection is
+// served since #1765: with no default connection and no bigquery.connections.
+// create it is 403, as Google documents (wantDefaultConnectionRefused).
 //
 // covers: bigquery.jobs.query
 func TestBigQueryMLRefusals(t *testing.T) {
