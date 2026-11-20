@@ -13,7 +13,8 @@ import (
 // Chirp 2's feature table: "return only the first letter followed by
 // asterisks in the transcript (for example, f***)", read 2026-11-20).
 //
-// UNVERIFIED: Google does not publish its word list. The list here is
+// UNVERIFIED (re-read 2026-11-20: the RecognitionConfig reference and Chirp 2's
+// page): Google does not publish its word list. The list here is
 // CloudBurrow's own, English only (strong profanities and their inflected
 // forms), so a word Google's filter masks may be left, or the reverse, and
 // a transcript in another language is not filtered.

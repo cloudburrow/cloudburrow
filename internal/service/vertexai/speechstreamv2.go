@@ -117,8 +117,8 @@ func (s *Server) streamSettingsV2(ctx context.Context, first *speechpb.Streaming
 		return st, apierror.Unimplemented("Not implemented here: SEPARATE_RECOGNITION_PER_CHANNEL in StreamingRecognize: CloudBurrow's " +
 			"stream transcribes one mixed channel (Recognize and BatchRecognize read each channel), and never calls Google")
 	}
-	if len(cfg.Candidates) > 0 || cfg.TranslateTo != "" {
-		return st, apierror.Unimplemented("Not implemented here: several languageCodes and translationConfig in StreamingRecognize: " +
+	if len(cfg.Candidates) > 0 || cfg.TranslateTo != "" || cfg.Denoise {
+		return st, apierror.Unimplemented("Not implemented here: several languageCodes, translationConfig and denoiserConfig in StreamingRecognize: " +
 			"CloudBurrow's stream transcribes each utterance in one language (Recognize and BatchRecognize read both), and never calls Google")
 	}
 	opt, err := s.transcribeOptions(cfg)

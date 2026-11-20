@@ -40,8 +40,8 @@ func TestParse(t *testing.T) {
 		{`{"model": "chirp", "languageCodes": ["en-US"], "autoDecodingConfig": {}, "translationConfig": {"targetLanguage": "de-DE"}}`, 400, "chirp_2"},
 		{`{"model": "chirp_2", "languageCodes": ["en-US"], "autoDecodingConfig": {}, "translationConfig": {}}`, 400, "targetLanguage is required"},
 		{`{"model": "chirp_2", "languageCodes": ["en-US"], "autoDecodingConfig": {}, "translationConfig": {"targetLanguage": "fr-FR"}}`, 400, "not supported by chirp_2"},
-		{`{"model": "chirp_2", "languageCodes": ["en-US"], "autoDecodingConfig": {}, "denoiserConfig": {"denoiseAudio": true}}`, 501, "denoiserConfig"},
-		{`{"model": "chirp", "languageCodes": ["en-US"], "explicitDecodingConfig": {"encoding": "AMR_WB"}}`, 501, "AMR_WB"},
+		{`{"model": "chirp_2", "languageCodes": ["en-US"], "autoDecodingConfig": {}, "denoiserConfig": {"denoiseAudio": true, "snrThreshold": 20}}`, 501, "snrThreshold"},
+		{`{"model": "chirp_2", "languageCodes": ["en-US"], "autoDecodingConfig": {}, "denoiserConfig": {"snrThreshold": -1}}`, 400, "out of range"},
 		{`{"model": "chirp", "languageCodes": ["en-US"], "explicitDecodingConfig": {"encoding": "WAV"}}`, 400, "invalid explicitDecodingConfig.encoding"},
 		{`{"model": "chirp", "languageCodes": ["en-US"], "autoDecodingConfig": {}, "features": {"maxAlternatives": 31}}`, 400, "maxAlternatives"},
 		{`[1]`, 400, "JSON object"},
@@ -102,6 +102,10 @@ func TestParseFeatures(t *testing.T) {
 	if code != 0 || err != nil || c.TranslateTo != "en-US" {
 		t.Errorf("translationConfig: %+v %d %v", c, code, err)
 	}
+	c, code, err = Parse([]byte(`{"model": "chirp_2", "languageCodes": ["en-US"], "autoDecodingConfig": {}, "denoiser_config": {"denoise_audio": true, "snr_threshold": 0}}`))
+	if code != 0 || err != nil || !c.Denoise {
+		t.Errorf("denoiserConfig: %+v %d %v", c, code, err)
+	}
 	c, code, err = Parse([]byte(`{"model": "chirp", "languageCodes": ["en-US"], "autoDecodingConfig": {},
 		"features": {"profanityFilter": true, "enableSpokenPunctuation": true, "enableSpokenEmojis": true}}`))
 	if code != 0 || err != nil || !c.ProfanityFilter || !c.SpokenPunctuation || !c.SpokenEmojis {
@@ -125,5 +129,14 @@ func TestFormat(t *testing.T) {
 	}
 	if got := MaskWord("Fucking,"); got != "F******," {
 		t.Errorf("MaskWord = %q", got)
+	}
+}
+
+// TestParseEnumNumbers: the REST clients' enums as numbers read as names.
+func TestParseEnumNumbers(t *testing.T) {
+	c, code, err := Parse([]byte(`{"model": "chirp", "languageCodes": ["en-US"], "explicitDecodingConfig": {"encoding": 4, "sampleRateHertz": 8000},
+		"features": {"multiChannelMode": 1}}`))
+	if code != 0 || err != nil || c.Decoding.Encoding != "AMR" || !c.PerChannel {
+		t.Errorf("numbers: %+v %d %v", c, code, err)
 	}
 }

@@ -39,8 +39,10 @@ func TestDecode(t *testing.T) {
 	if _, err := Decode(speechconfig.Decoding{Encoding: "LINEAR16", SampleRate: 4000, Channels: 1}, pcm); err == nil {
 		t.Error("4 kHz LINEAR16 accepted")
 	}
+	// AMR and AMR-WB are decoded (#1799, amr_test.go): a truncated
+	// frame is bad data, not unsupported audio.
 	for name, data := range map[string][]byte{"AMR": []byte("#!AMR\n\x3c"), "AMR_WB": []byte("#!AMR-WB\n\x3c")} {
-		if _, err := Decode(speechconfig.Decoding{Auto: true}, data); !errors.Is(err, ErrUnsupported) {
+		if _, err := Decode(speechconfig.Decoding{Auto: true}, data); err == nil || errors.Is(err, ErrUnsupported) {
 			t.Errorf("%s: %v", name, err)
 		}
 	}

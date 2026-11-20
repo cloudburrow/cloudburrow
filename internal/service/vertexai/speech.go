@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"net/http"
@@ -49,14 +50,17 @@ import (
 //     rewrite each final transcript (speechconfig's Format, #1799), and
 //     translationConfig (chirp_2) translates it with the served
 //     Translation API's model (translateSegments, #1799);
-//     diarizationConfig and denoiserConfig are UNIMPLEMENTED (no
-//     permissive local model, docs/compatibility.md);
+//     denoiserConfig.denoiseAudio denoises the audio first (RNNoise,
+//     internal/speech/denoise.go, #1799), a non-zero snrThreshold is
+//     UNIMPLEMENTED; diarizationConfig is UNIMPLEMENTED (no permissive
+//     local model, docs/compatibility.md);
 //     adaptation biases whisper (speechbias.go), and transcriptNormalization
 //     rewrites each final transcript (speechconfig's Normalize, #1799).
 //   - decoding (speech/audio.go): WAV, headerless LINEAR16, MULAW and ALAW,
 //     MP3, AAC in MP4, M4A or MOV, FLAC (internal/speech/flac.go, #1799),
-//     and Opus in Ogg or WebM (internal/speech/opus.go, #1799); AMR and
-//     AMR-WB are UNIMPLEMENTED.
+//     Opus in Ogg or WebM (internal/speech/opus.go, #1799), and AMR and
+//     AMR-WB (internal/speech/amr.go, opencore-amr's decoders in
+//     WebAssembly, #1799).
 //   - each whisper segment is one result, its resultEndOffset the segment's
 //     end; metadata.totalBilledDuration is the audio's length rounded up to
 //     a second.
@@ -66,9 +70,18 @@ import (
 // lower-case languageCode.
 
 // protoDuration writes a google.protobuf.Duration in JSON: "1.500s".
+// It is written from the integer nanoseconds: d.Seconds()'s float would
+// write 2.97 s as "2.9699999999999998s", which protojson refuses.
 func protoDuration(d time.Duration) string {
-	s := strconv.FormatFloat(d.Seconds(), 'f', -1, 64)
-	return s + "s"
+	sign := ""
+	if d < 0 {
+		sign, d = "-", -d
+	}
+	s := strconv.FormatInt(int64(d/time.Second), 10)
+	if ns := int64(d % time.Second); ns != 0 {
+		s += strings.TrimRight(fmt.Sprintf(".%09d", ns), "0")
+	}
+	return sign + s + "s"
 }
 
 // recognize serves POST /v2/projects/{p}/locations/{l}/recognizers/{r}:recognize
@@ -199,6 +212,9 @@ func (s *Server) transcribeAudioMax(ctx context.Context, name string, config jso
 	if err != nil {
 		return none, nil, cfg, decodeError(err)
 	}
+	if samples, err = denoise(ctx, cfg, samples); err != nil {
+		return none, nil, cfg, err
+	}
 	if err := checkLanguage(ctx, cfg); err != nil {
 		return none, nil, cfg, err
 	}
@@ -225,7 +241,7 @@ func (s *Server) transcribeAudioMax(ctx context.Context, name string, config jso
 // them, else the one whose transcript whisper is most confident of (its
 // segments' mean token probability, weighted by their length).
 //
-// UNVERIFIED (the multiple-languages page, read 2026-11-20, says "the
+// UNVERIFIED (re-read 2026-11-20: the multiple-languages page says "the
 // best-fit language from the list", not how it is chosen): this choice,
 // which is whisper's, not Google's.
 func transcribeBestFit(ctx context.Context, samples []float32, opt speech.Options, cfg speechconfig.Config) (speech.Result, speechconfig.Config, error) {
@@ -286,6 +302,19 @@ func transcribeBestFit(ctx context.Context, samples []float32, opt speech.Option
 	return best, cfg, nil
 }
 
+// denoise is samples denoised when the config's denoiserConfig asks for it
+// (denoiseAudio, #1799; internal/speech's Denoise, RNNoise).
+func denoise(ctx context.Context, cfg speechconfig.Config, samples []float32) ([]float32, error) {
+	if !cfg.Denoise {
+		return samples, nil
+	}
+	out, err := speech.Denoise(ctx, samples)
+	if err != nil {
+		return nil, apierror.Internal(err, "denoising the audio failed: %v", err)
+	}
+	return out, nil
+}
+
 // resultLanguage is the language code results are labelled with: the
 // config's, else the detected one.
 func resultLanguage(cfg speechconfig.Config, res speech.Result) string {
@@ -302,7 +331,7 @@ func resultLanguage(cfg speechconfig.Config, res speech.Result) string {
 // Chirp 2's page says of translation ("confidence scores are not
 // returned").
 //
-// UNVERIFIED (Chirp 2's page, read 2026-11-20, shows the translated
+// UNVERIFIED (re-read 2026-11-20: Chirp 2's page shows the translated
 // transcript only): that each result is translated on its own, that words
 // are dropped, and that results keep the spoken languageCode.
 func (s *Server) translateSegments(ctx context.Context, segs []speech.Segment, cfg speechconfig.Config, code string) error {
@@ -396,6 +425,9 @@ func (s *Server) transcribeChannels(ctx context.Context, cfg speechconfig.Config
 		samples []float32
 	)
 	for c, ch := range chans {
+		if ch, err = denoise(ctx, cfg, ch); err != nil {
+			return none, nil, cfg, err
+		}
 		res, chCfg, err := transcribeBestFit(ctx, ch, opt, cfg)
 		if err != nil {
 			return none, nil, cfg, err

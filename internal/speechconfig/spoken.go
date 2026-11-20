@@ -26,7 +26,8 @@ import (
 // none (spoken emoji are listed for English and French only) is left as it
 // was recognised.
 //
-// UNVERIFIED (the pages list the forms, not how the result is spaced): a
+// UNVERIFIED (re-read 2026-11-20: the pages list the forms, not how the
+// result is spaced): a
 // closing mark (. , ? ! : ; ) ] } and the like) is written against the
 // word before it, an opening one ( [ { against the word after it, new line
 // and new paragraph as "\n" and "\n\n", and an emoji as a word of its own;

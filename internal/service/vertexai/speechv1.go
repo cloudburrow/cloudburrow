@@ -29,8 +29,8 @@ import (
 //   - encoding: ENCODING_UNSPECIFIED (WAV or FLAC, their headers read) is
 //     v2's autoDecodingConfig; LINEAR16, MULAW, FLAC and MP3 are
 //     decoded, and OGG_OPUS and WEBM_OPUS (#1799) at one of Opus's
-//     sample_rate_hertz values; AMR, AMR_WB and SPEEX_WITH_HEADER_BYTE
-//     are UNIMPLEMENTED, as in v2.
+//     sample_rate_hertz values, and AMR and AMR_WB (#1799, opencore-amr's
+//     decoders); SPEEX_WITH_HEADER_BYTE is UNIMPLEMENTED, as in v2.
 //   - model: "" (default), default, latest_long, video and phone_call read
 //     as v2's long and telephony, latest_short and command_and_search as
 //     short; medical models are UNIMPLEMENTED. use_enhanced is accepted.
@@ -113,6 +113,17 @@ func v1Config(c *speechv1pb.RecognitionConfig) (json.RawMessage, error) {
 		}
 		out["explicitDecodingConfig"] = map[string]any{"encoding": enc.String(), "sampleRateHertz": rate,
 			"audioChannelCount": max(c.GetAudioChannelCount(), 1)}
+	case speechv1pb.RecognitionConfig_AMR, speechv1pb.RecognitionConfig_AMR_WB:
+		// opencore-amr's decoders (internal/speech/amr.go, #1799): "AMR ...
+		// sample_rate_hertz must be 8000", AMR_WB's 16000.
+		want := int32(8000)
+		if enc == speechv1pb.RecognitionConfig_AMR_WB {
+			want = 16000
+		}
+		if rate := c.GetSampleRateHertz(); rate != 0 && rate != want {
+			return nil, apierror.InvalidArgument("sample_rate_hertz %d is invalid for %s: it must be %d", rate, enc, want)
+		}
+		out["explicitDecodingConfig"] = map[string]any{"encoding": enc.String(), "sampleRateHertz": want}
 	case speechv1pb.RecognitionConfig_OGG_OPUS, speechv1pb.RecognitionConfig_WEBM_OPUS:
 		// Opus in its container (internal/speech/opus.go, #1799); v1 asks
 		// for one of Opus's rates.
@@ -239,6 +250,8 @@ func v1Results(res speech.Result, cfg speechconfig.Config) []*speechv1pb.SpeechR
 	if code == "" {
 		code = strings.ToLower(res.Language)
 	}
+	// The profanity filter and spoken punctuation and emojis (#1799).
+	normalize(res.Segments, cfg, code)
 	var out []*speechv1pb.SpeechRecognitionResult
 	for _, seg := range res.Segments {
 		out = append(out, &speechv1pb.SpeechRecognitionResult{Alternatives: []*speechv1pb.SpeechRecognitionAlternative{v1Alternative([]speech.Segment{seg}, cfg)},

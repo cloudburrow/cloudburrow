@@ -73,3 +73,36 @@ func checkTranslation(model string, codes []string, raw json.RawMessage) (int, e
 	}
 	return 0, nil
 }
+
+// Denoising (denoiserConfig, #1799), as the v2 reference documents it
+// (DenoiserConfig, read 2026-11-20): denoiseAudio "Denoise audio before
+// sending to the transcription model", and snrThreshold, "Signal-to-Noise
+// Ratio (SNR) threshold for the denoiser ... If snrThreshold=0, no
+// filtering will be applied"; Chirp 2's page: "A reasonable snr_threshold
+// value can be set from 0 - 1000". The audio is denoised locally
+// (internal/speech's Denoise, RNNoise); a non-zero snrThreshold is
+// UNIMPLEMENTED: the SNR it is compared with is Google's model's own
+// measure ("Here SNR means the loudness of the speech signal"), which
+// nothing local reproduces, so which segments it filters would differ.
+type denoiserConfig struct {
+	DenoiseAudio bool    `json:"denoiseAudio"`
+	SnrThreshold float64 `json:"snrThreshold"`
+}
+
+func checkDenoiser(raw json.RawMessage) (int, error) {
+	var dc denoiserConfig
+	dec := json.NewDecoder(strings.NewReader(string(raw)))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&dc); err != nil {
+		return 400, fmt.Errorf("invalid denoiserConfig: %v", err)
+	}
+	switch {
+	case dc.SnrThreshold < 0 || dc.SnrThreshold > 1000:
+		return 400, fmt.Errorf("denoiserConfig.snrThreshold %g is out of range: valid values are 0-1000", dc.SnrThreshold)
+	case dc.SnrThreshold != 0:
+		return 501, errors.New("Not implemented here: denoiserConfig.snrThreshold of Speech-to-Text: the SNR it filters by is Google's " +
+			"model's own measure, which CloudBurrow's local denoiser does not reproduce, and CloudBurrow never calls Google " +
+			"(denoiseAudio is served; set snrThreshold to 0)")
+	}
+	return 0, nil
+}

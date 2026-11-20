@@ -24,7 +24,7 @@ const MaxSeconds = 30 * 60
 
 func unsupported(format string) error {
 	return fmt.Errorf("%w: %s audio has no local decoder in CloudBurrow (WAV of LINEAR16, MULAW or ALAW, headerless "+
-		"LINEAR16, MULAW and ALAW, FLAC, MP3, Opus in Ogg or WebM, and AAC in MP4, M4A or MOV are decoded)", ErrUnsupported, format)
+		"LINEAR16, MULAW and ALAW, FLAC, MP3, Opus in Ogg or WebM, AMR, AMR-WB, and AAC in MP4, M4A or MOV are decoded)", ErrUnsupported, format)
 }
 
 // sniff names the container of data as autoDecodingConfig detects it.
@@ -38,9 +38,9 @@ func sniff(b []byte) string {
 		return "OGG_OPUS"
 	case len(b) >= 4 && bytes.Equal(b[0:4], []byte{0x1a, 0x45, 0xdf, 0xa3}):
 		return "WEBM_OPUS"
-	case bytes.HasPrefix(b, []byte("#!AMR-WB\n")):
+	case bytes.HasPrefix(b, []byte("#!AMR-WB\n")), bytes.HasPrefix(b, []byte("#!AMR-WB_MC1.0\n")):
 		return "AMR_WB"
-	case bytes.HasPrefix(b, []byte("#!AMR\n")):
+	case bytes.HasPrefix(b, []byte("#!AMR\n")), bytes.HasPrefix(b, []byte("#!AMR_MC1.0\n")):
 		return "AMR"
 	case len(b) >= 12 && string(b[4:8]) == "ftyp":
 		if string(b[8:12]) == "qt  " {
@@ -73,7 +73,7 @@ func DecodeMax(d speechconfig.Decoding, data []byte, maxSeconds int) ([]float32,
 		}
 	}
 	switch format {
-	case "WAV", "LINEAR16", "MULAW", "ALAW", "FLAC", "OGG_OPUS", "WEBM_OPUS":
+	case "WAV", "LINEAR16", "MULAW", "ALAW", "FLAC", "OGG_OPUS", "WEBM_OPUS", "AMR", "AMR_WB":
 		// MultiChannelMode's default: "If the audio contains multiple
 		// channels, only the first channel will be transcribed; other
 		// channels will be ignored" (the v2 reference, read 2026-11-20).
@@ -159,6 +159,9 @@ func DecodeChannelsMax(d speechconfig.Decoding, data []byte, maxSeconds int) ([]
 		if err == nil {
 			pcm, channels, rate = p.pcm, p.h.channels, opusRate
 		}
+	case "AMR", "AMR_WB":
+		pcm, rate, err = amrPCM(data, format == "AMR_WB", maxSeconds)
+		channels = 1
 	case "MP3", "MP4_AAC", "M4A_AAC", "MOV_AAC":
 		return nil, fmt.Errorf("%w: recognising each channel of %s audio: CloudBurrow's MP3 and AAC decoders mix to mono "+
 			"(WAV, headerless audio, FLAC and Opus are read per channel)", ErrUnsupported, format)

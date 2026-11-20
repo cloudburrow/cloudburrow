@@ -44,7 +44,7 @@ type Options struct {
 var Encodings = map[string]bool{
 	"LINEAR16": true, "MULAW": true, "ALAW": true, "MP3": true, "FLAC": true,
 	"MP4_AAC": true, "M4A_AAC": true, "MOV_AAC": true,
-	"AMR": false, "AMR_WB": false, "OGG_OPUS": true, "WEBM_OPUS": true,
+	"AMR": true, "AMR_WB": true, "OGG_OPUS": true, "WEBM_OPUS": true,
 }
 
 // Config is a checked RecognitionConfig.
@@ -69,6 +69,9 @@ type Config struct {
 	// three): each code in lower case and whisper's code for it. The
 	// audio is recognised in the best-fit one, which the results name.
 	Candidates []Candidate
+	// Denoise is denoiserConfig.denoiseAudio: the audio is denoised
+	// before it is transcribed (internal/speech's Denoise).
+	Denoise bool
 	// TranslateTo is translationConfig.targetLanguage, "" for none: each
 	// final transcript is translated to it with the served Translation
 	// API's model.
@@ -184,6 +187,11 @@ func Parse(raw []byte) (c Config, code int, err error) {
 			c.Candidates = append(c.Candidates, Candidate{Code: strings.ToLower(l), Whisper: whisperLanguage(l)})
 		}
 	}
+	if len(rc.DenoiserConfig) > 0 && string(rc.DenoiserConfig) != "null" {
+		var dc denoiserConfig
+		_ = json.Unmarshal(rc.DenoiserConfig, &dc)
+		c.Denoise = dc.DenoiseAudio
+	}
 	if len(rc.TranslationConfig) > 0 && string(rc.TranslationConfig) != "null" {
 		var tc struct {
 			TargetLanguage string `json:"targetLanguage"`
@@ -252,13 +260,45 @@ func camelKeys(v any) any {
 					parts[i] = strings.ToUpper(parts[i][:1]) + parts[i][1:]
 				}
 			}
-			out[strings.Join(parts, "")] = camelKeys(e)
+			key := strings.Join(parts, "")
+			out[key] = enumName(key, camelKeys(e))
 		}
 		return out
 	case []any:
 		for i := range x {
 			x[i] = camelKeys(x[i])
 		}
+	}
+	return v
+}
+
+// The enums a RecognitionConfig carries, by number: the official REST
+// clients write enums as numbers (protojson's UseEnumNumbers), which
+// protobuf's JSON parser accepts as well as names
+// (google.cloud.speech.v2's ExplicitDecodingConfig.AudioEncoding and
+// RecognitionFeatures.MultiChannelMode).
+var (
+	audioEncodingNames = []string{"AUDIO_ENCODING_UNSPECIFIED", "LINEAR16", "MULAW", "ALAW", "AMR", "AMR_WB", "FLAC", "MP3",
+		"OGG_OPUS", "WEBM_OPUS", "MP4_AAC", "M4A_AAC", "MOV_AAC"}
+	multiChannelModeNames = []string{"MULTI_CHANNEL_MODE_UNSPECIFIED", "SEPARATE_RECOGNITION_PER_CHANNEL"}
+)
+
+// enumName is v, an enum field's JSON value, as its name when it is a
+// known number.
+func enumName(key string, v any) any {
+	n, ok := v.(float64)
+	if !ok || n != float64(int(n)) || n < 0 {
+		return v
+	}
+	var names []string
+	switch key {
+	case "encoding":
+		names = audioEncodingNames
+	case "multiChannelMode":
+		names = multiChannelModeNames
+	}
+	if int(n) < len(names) {
+		return names[int(n)]
 	}
 	return v
 }
@@ -334,8 +374,10 @@ func parse(raw []byte) (Decoding, string, Options, int, error) {
 		if code, err := checkTranslation(c.Model, c.LanguageCodes, c.TranslationConfig); err != nil {
 			return d, "", opt, code, err
 		}
-	case c.DenoiserConfig != nil:
-		return unimpl("denoiserConfig")
+	case c.DenoiserConfig != nil && string(c.DenoiserConfig) != "null":
+		if code, err := checkDenoiser(c.DenoiserConfig); err != nil {
+			return d, "", opt, code, err
+		}
 	case c.AutoDecodingConfig != nil && c.ExplicitDecodingConfig != nil:
 		return d, "", opt, 400, errors.New("RecognitionConfig takes one of autoDecodingConfig and explicitDecodingConfig")
 	case c.AutoDecodingConfig == nil && c.ExplicitDecodingConfig == nil:
@@ -375,6 +417,13 @@ func parse(raw []byte) (Decoding, string, Options, int, error) {
 			return d, "", opt, 400, fmt.Errorf("invalid explicitDecodingConfig.encoding %q", e.Encoding)
 		case !served:
 			return d, "", opt, 501, fmt.Errorf("Not implemented here: %s audio has no local decoder in CloudBurrow, and it never calls Google", e.Encoding)
+		case e.Encoding == "AMR" && e.SampleRateHertz != 0 && e.SampleRateHertz != 8000:
+			// "AMR: Adaptive Multi-Rate Narrowband codec. sample_rate_hertz
+			// must be 8000." (ExplicitDecodingConfig.AudioEncoding, read
+			// 2026-11-20), and AMR_WB's 16000.
+			return d, "", opt, 400, fmt.Errorf("explicitDecodingConfig.sampleRateHertz must be 8000 for AMR, not %d", e.SampleRateHertz)
+		case e.Encoding == "AMR_WB" && e.SampleRateHertz != 0 && e.SampleRateHertz != 16000:
+			return d, "", opt, 400, fmt.Errorf("explicitDecodingConfig.sampleRateHertz must be 16000 for AMR_WB, not %d", e.SampleRateHertz)
 		}
 		d = Decoding{Encoding: e.Encoding, SampleRate: e.SampleRateHertz, Channels: e.AudioChannelCount}
 	} else {

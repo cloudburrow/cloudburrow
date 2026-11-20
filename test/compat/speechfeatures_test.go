@@ -3,7 +3,10 @@
 package compat
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
+	"math/rand/v2"
 	"os"
 	"strings"
 	"testing"
@@ -39,7 +42,13 @@ import (
 //     transcript in English, with no confidence; with no local generation
 //     model, UNIMPLEMENTED. A pair Chirp 2 does not list, or another
 //     model, is INVALID_ARGUMENT.
-//   - diarizationConfig and denoiserConfig stay UNIMPLEMENTED.
+//   - AMR and AMR-WB audio (opencore-amr's decoders in WebAssembly): JFK's
+//     sample as AMR 12.2 kbit/s and AMR-WB 23.85 kbit/s, detected by its
+//     magic and as an explicit AMR / AMR_WB config, reads the sentence; v1's
+//     AMR encoding too; AMR at 16000 Hz is INVALID_ARGUMENT.
+//   - denoiserConfig.denoiseAudio (RNNoise in WebAssembly): JFK's sample
+//     with seeded white noise added, denoised first, reads the sentence;
+//     a non-zero snrThreshold and diarizationConfig stay UNIMPLEMENTED.
 //
 // Speech-to-Text v1's Recognize (cloud.google.com/go/speech/apiv1) takes
 // enable_spoken_punctuation, enable_spoken_emojis and profanity_filter too.
@@ -62,6 +71,14 @@ func TestSpeechRecognitionFeatures1799(t *testing.T) {
 		t.Fatal(err)
 	}
 	german, err := os.ReadFile("../../internal/speech/testdata/german.wav")
+	if err != nil {
+		t.Fatal(err)
+	}
+	amrNB, err := os.ReadFile("../../internal/speech/testdata/jfk.amr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	amrWB, err := os.ReadFile("../../internal/speech/testdata/jfk.awb")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,6 +183,49 @@ func TestSpeechRecognitionFeatures1799(t *testing.T) {
 		}
 	}
 
+	// AMR and AMR-WB.
+	for name, c := range map[string]struct {
+		data []byte
+		dec  *speechv2pb.RecognitionConfig
+	}{
+		"AMR auto":        {amrNB, &speechv2pb.RecognitionConfig{DecodingConfig: auto}},
+		"AMR_WB auto":     {amrWB, &speechv2pb.RecognitionConfig{DecodingConfig: auto}},
+		"AMR explicit":    {amrNB, &speechv2pb.RecognitionConfig{DecodingConfig: &speechv2pb.RecognitionConfig_ExplicitDecodingConfig{ExplicitDecodingConfig: &speechv2pb.ExplicitDecodingConfig{Encoding: speechv2pb.ExplicitDecodingConfig_AMR, SampleRateHertz: 8000, AudioChannelCount: 1}}}},
+		"AMR_WB explicit": {amrWB, &speechv2pb.RecognitionConfig{DecodingConfig: &speechv2pb.RecognitionConfig_ExplicitDecodingConfig{ExplicitDecodingConfig: &speechv2pb.ExplicitDecodingConfig{Encoding: speechv2pb.ExplicitDecodingConfig_AMR_WB, SampleRateHertz: 16000, AudioChannelCount: 1}}}},
+	} {
+		c.dec.Model, c.dec.LanguageCodes = "chirp", []string{"en-US"}
+		res, err := r.Recognize(ctx, &speechv2pb.RecognizeRequest{Recognizer: recognizer("global"), Config: c.dec,
+			AudioSource: &speechv2pb.RecognizeRequest_Content{Content: c.data}})
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		if text := strings.ToLower(transcript(res)); !strings.Contains(text, "what your country can do for you") ||
+			res.GetMetadata().GetTotalBilledDuration().GetSeconds() != 11 {
+			t.Errorf("%s: %q %v", name, text, res.GetMetadata())
+		}
+	}
+	if _, err := g.Recognize(ctx, &speechv2pb.RecognizeRequest{Recognizer: recognizer("global"), AudioSource: &speechv2pb.RecognizeRequest_Content{Content: amrNB},
+		Config: &speechv2pb.RecognitionConfig{Model: "chirp", LanguageCodes: []string{"en-US"}, DecodingConfig: &speechv2pb.RecognitionConfig_ExplicitDecodingConfig{
+			ExplicitDecodingConfig: &speechv2pb.ExplicitDecodingConfig{Encoding: speechv2pb.ExplicitDecodingConfig_AMR, SampleRateHertz: 16000, AudioChannelCount: 1}}}}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("AMR at 16000 Hz: %v", err)
+	}
+	v1amr, err := v1.Recognize(ctx, &speechpb.RecognizeRequest{Audio: &speechpb.RecognitionAudio{AudioSource: &speechpb.RecognitionAudio_Content{Content: amrNB}},
+		Config: &speechpb.RecognitionConfig{LanguageCode: "en-US", Encoding: speechpb.RecognitionConfig_AMR, SampleRateHertz: 8000}})
+	if err != nil || len(v1amr.GetResults()) == 0 || !strings.Contains(strings.ToLower(v1amr.GetResults()[0].GetAlternatives()[0].GetTranscript()), "what your country can do for you") {
+		t.Errorf("v1 AMR: %v %v", v1amr, err)
+	}
+
+	// denoiseAudio on noisy audio.
+	res, err = g.Recognize(ctx, &speechv2pb.RecognizeRequest{Recognizer: recognizer("us-central1"), AudioSource: &speechv2pb.RecognizeRequest_Content{Content: noisyJFK(t)},
+		Config: &speechv2pb.RecognitionConfig{Model: "chirp_2", LanguageCodes: []string{"en-US"}, DecodingConfig: auto,
+			DenoiserConfig: &speechv2pb.DenoiserConfig{DenoiseAudio: true}}})
+	if err != nil {
+		t.Errorf("Recognize with denoiseAudio: %v", err)
+	} else if text := strings.ToLower(transcript(res)); !strings.Contains(text, "what your country can do for you") {
+		t.Errorf("denoised: %q", text)
+	}
+
 	// Still not served.
 	for name, cfg := range map[string]*speechv2pb.RecognitionConfig{
 		"diarization": {Model: "chirp_3", LanguageCodes: []string{"en-US"}, DecodingConfig: auto,
@@ -178,4 +238,25 @@ func TestSpeechRecognitionFeatures1799(t *testing.T) {
 			t.Errorf("%s: %v, want Unimplemented", name, err)
 		}
 	}
+}
+
+// noisyJFK is JFK's sample (16 kHz LINEAR16 WAV) with seeded white noise
+// added, as a WAV.
+func noisyJFK(t *testing.T) []byte {
+	t.Helper()
+	b, err := os.ReadFile("../../internal/speech/testdata/jfk.wav")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := append([]byte(nil), b...)
+	at := bytes.Index(out, []byte("data"))
+	if at < 0 {
+		t.Fatal("jfk.wav has no data chunk")
+	}
+	r := rand.New(rand.NewPCG(1, 2))
+	for i := at + 8; i+1 < len(out); i += 2 {
+		v := float64(int16(binary.LittleEndian.Uint16(out[i:]))) + r.NormFloat64()*1000
+		binary.LittleEndian.PutUint16(out[i:], uint16(int16(max(-32768, min(32767, v)))))
+	}
+	return out
 }
