@@ -168,13 +168,11 @@ func TestEnvResolvesNoGoogleName(t *testing.T) {
 		if withEnv {
 			a = append(a, "--env-file", filepath.Join(dir, "env"))
 		} else {
-			// A copy, so the gcloud the container runs as root writes
-			// nothing into the test's directory.
-			cp := t.TempDir()
-			if b, err := exec.Command("cp", "-R", gdir+"/.", cp).CombinedOutput(); err != nil {
-				t.Fatalf("copy the configuration: %v\n%s", err, b)
-			}
-			a = append(a, "-v", cp+":/gcloud", "-e", "EGRESS_GCLOUD_CONFIG=/gcloud", "-e", "EGRESS_GCLOUD_NAME="+name)
+			// Read-only: run.sh copies it into the container, so the
+			// gcloud the container runs as root (iptables needs it) writes
+			// its logs and caches there, never as root into the test's
+			// directory, which TempDir's cleanup could not then remove.
+			a = append(a, "-v", gdir+":/gcloud-src:ro", "-e", "EGRESS_GCLOUD_CONFIG=/gcloud-src", "-e", "EGRESS_GCLOUD_NAME="+name)
 		}
 		a = append(a, "--entrypoint", "bash", image, "/egress/run.sh", "self", client)
 		b, err := exec.CommandContext(ctx, "docker", a...).CombinedOutput()

@@ -59,10 +59,15 @@ for client in "$@"; do
       export CLOUDSDK_CONFIG=$(mktemp -d) CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE=$GOOGLE_APPLICATION_CREDENTIALS
       g storage-ls "$gcloud" storage ls
       ;;
-    # Under gcloud-setup's configuration alone (EGRESS_GCLOUD_CONFIG, a
-    # copy written by the test), with no `cloudburrow env` variable.
+    # Under gcloud-setup's configuration alone (EGRESS_GCLOUD_CONFIG, as
+    # the test wrote it, mounted read-only), with no `cloudburrow env`
+    # variable. gcloud writes logs and caches into its configuration
+    # directory, so it runs on a copy inside the container: as root on a
+    # Linux host's mount, they could not be removed after the test.
     gcloud-setup)
-      export CLOUDSDK_CONFIG=$EGRESS_GCLOUD_CONFIG CLOUDSDK_ACTIVE_CONFIG_NAME=$EGRESS_GCLOUD_NAME
+      CLOUDSDK_CONFIG=$(mktemp -d)
+      cp -R "$EGRESS_GCLOUD_CONFIG/." "$CLOUDSDK_CONFIG" || { echo "FAIL setup: copy the gcloud configuration"; exit 1; }
+      export CLOUDSDK_CONFIG CLOUDSDK_ACTIVE_CONFIG_NAME=$EGRESS_GCLOUD_NAME
       g version "$gcloud" version
       g storage-ls "$gcloud" storage ls
       g pubsub-topics "$gcloud" pubsub topics list

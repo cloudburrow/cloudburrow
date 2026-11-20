@@ -162,13 +162,21 @@ func TestStopNeverSignalsAReusedPid(t *testing.T) {
 // process with a runtime file and a control server of its own, which is all
 // the three commands read.
 func TestTheCLIUnderAnotherNameFindsTheInstance(t *testing.T) {
-	if testing.Short() {
-		t.Skip("builds the CLI")
+	// The CLI as cb-other: this test binary under that name, which runs
+	// main() under runCLIEnv. It once ran `go build` here, which under make
+	// test-race compiled every package again without -race, then linked a
+	// 275 MB binary: 70 s on an M-series Mac with a cold cache, and past
+	// 2m15s on CI's macos-latest runner beside the other packages' tests,
+	// which put the package over its 5 m timeout (main's run 44788959812).
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
 	}
 	bin := filepath.Join(t.TempDir(), "cb-other")
-	build := exec.Command("go", "build", "-o", bin, ".")
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build the CLI as cb-other: %v\n%s", err, out)
+	if err := os.Link(self, bin); err != nil {
+		if out, err := exec.Command("cp", self, bin).CombinedOutput(); err != nil {
+			t.Fatalf("copy the test binary to cb-other: %v\n%s", err, out)
+		}
 	}
 
 	control := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -196,7 +204,7 @@ func TestTheCLIUnderAnotherNameFindsTheInstance(t *testing.T) {
 	emptyPath := t.TempDir()
 	cli := func(args ...string) (string, error) {
 		cmd := exec.Command(bin, append(args, "--name", name, "--state-dir", dir)...)
-		cmd.Env = append(os.Environ(), "PATH="+emptyPath, "HOME="+t.TempDir())
+		cmd.Env = append(os.Environ(), "PATH="+emptyPath, "HOME="+t.TempDir(), runCLIEnv+"=1")
 		var stdout, stderr strings.Builder
 		cmd.Stdout, cmd.Stderr = &stdout, &stderr
 		err := cmd.Run()
