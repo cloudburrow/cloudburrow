@@ -49,7 +49,9 @@ type SourceUploadServer struct {
 func (b *BuildsServer) SourceUpload() *SourceUploadServer { return &SourceUploadServer{b: b} }
 
 // Register adds the SourceUpload service to a gRPC server or a transcoder.
-func (u *SourceUploadServer) Register(g grpc.ServiceRegistrar) { runpb.RegisterSourceUploadServer(g, u) }
+func (u *SourceUploadServer) Register(g grpc.ServiceRegistrar) {
+	runpb.RegisterSourceUploadServer(g, u)
+}
 
 // maxUploadSourceBytes is the upload's limit in Google's discovery
 // document (maxSize 262144000).
@@ -118,11 +120,11 @@ func (u *SourceUploadServer) upload(r *http.Request, parent string) (*runpb.Uplo
 	var data []byte
 	switch typ := r.URL.Query().Get("uploadType"); typ {
 	case "multipart":
-		mt, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-		if err != nil || !strings.HasPrefix(mt, "multipart/") || params["boundary"] == "" {
-			return nil, apierror.InvalidArgument("uploadType=multipart takes a multipart/related body")
+		boundary := uploadBoundary(r.Header.Get("Content-Type"))
+		if boundary == "" {
+			return nil, apierror.InvalidArgument("uploadType=multipart takes a multipart/related body, not %q", r.Header.Get("Content-Type"))
 		}
-		mr := multipart.NewReader(r.Body, params["boundary"])
+		mr := multipart.NewReader(r.Body, boundary)
 		part, err := mr.NextPart()
 		if err != nil {
 			return nil, apierror.InvalidArgument("the upload has no metadata part: %v", err)
@@ -196,6 +198,37 @@ func (u *SourceUploadServer) upload(r *http.Request, parent string) (*runpb.Uplo
 		return nil, &apierror.Error{Code: codes.Unavailable, Message: fmt.Sprintf("write the source to gs://%s/%s: %v", bucket, object, err)}
 	}
 	return &runpb.UploadSourceResponse{CloudStorageSource: &runpb.SourceCode_CloudStorageSource{Bucket: bucket, Object: object}}, nil
+}
+
+// uploadBoundary is a multipart Content-Type's boundary. gcloud's
+// apitools quotes it with single quotes (boundary='===...=='), which
+// mime.ParseMediaType keeps or, with '=' inside, refuses: the quotes are
+// dropped, and the refused form is read by hand.
+func uploadBoundary(ct string) string {
+	if mt, params, err := mime.ParseMediaType(ct); err == nil {
+		if !strings.HasPrefix(mt, "multipart/") {
+			return ""
+		}
+		b := params["boundary"]
+		if len(b) >= 2 && b[0] == '\'' && b[len(b)-1] == '\'' {
+			b = b[1 : len(b)-1]
+		}
+		return b
+	}
+	mt, rest, _ := strings.Cut(ct, ";")
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(mt)), "multipart/") {
+		return ""
+	}
+	for _, p := range strings.Split(rest, ";") {
+		k, v, ok := strings.Cut(strings.TrimSpace(p), "=")
+		if ok && strings.EqualFold(k, "boundary") {
+			if len(v) >= 2 && (v[0] == '\'' || v[0] == '"') && v[len(v)-1] == v[0] {
+				v = v[1 : len(v)-1]
+			}
+			return v
+		}
+	}
+	return ""
 }
 
 func readUploadSource(r io.Reader) ([]byte, error) {

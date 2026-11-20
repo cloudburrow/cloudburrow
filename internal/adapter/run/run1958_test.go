@@ -189,7 +189,8 @@ func TestUploadSourceMedia(t *testing.T) {
 	h := u.Handler(http.NotFoundHandler())
 	body := "--b\r\nContent-Type: application/json\r\n\r\n{\"service\":\"svc\"}\r\n--b\r\nContent-Type: application/gzip\r\n\r\n\x1f\x8bsource\r\n--b--\r\n"
 	req := httptest.NewRequest(http.MethodPost, "/upload/v2/projects/googleproj/locations/us-central1:uploadSource?uploadType=multipart", strings.NewReader(body))
-	req.Header.Set("Content-Type", "multipart/related; boundary=b")
+	// gcloud's apitools quotes the boundary with single quotes.
+	req.Header.Set("Content-Type", "multipart/related; boundary='b'")
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 	var resp struct {

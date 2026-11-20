@@ -12,7 +12,7 @@ Do not edit these files by hand.
 |---|---|---|---|---|---|---|---|---|
 | [Cloud Tasks](tasks.md) | 20 | 20 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Secret Manager](secretmanager.md) | 17 | 15 | 0 | 2 | 0 | 0 | 0 | 2 |
-| [Cloud Run v2](run.md) | 46 | 41 | 0 | 2 | 3 | 0 | 0 | 1 |
+| [Cloud Run v2](run.md) | 46 | 46 | 0 | 0 | 0 | 0 | 0 | 1 |
 | [Artifact Registry](artifactregistry.md) | 50 | 50 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Build](cloudbuild.md) | 19 | 19 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Secure Source Manager](securesourcemanager.md) | 53 | 53 | 0 | 0 | 0 | 0 | 0 | 0 |

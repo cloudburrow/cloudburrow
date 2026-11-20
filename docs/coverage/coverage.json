@@ -462,9 +462,7 @@
     "Key": "run",
     "Title": "Cloud Run v2",
     "counts": {
-      "Implemented": 3,
-      "Unimplemented": 2,
-      "Verified": 41
+      "Verified": 46
     },
     "rows": [
       {
@@ -523,8 +521,10 @@
       },
       {
         "method": "google.cloud.run.v2.Instances/GetIamPolicy",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/run1958_test.go:46 TestRunUpdateInstance"
+        ]
       },
       {
         "method": "google.cloud.run.v2.Instances/GetInstance",
@@ -544,8 +544,10 @@
       },
       {
         "method": "google.cloud.run.v2.Instances/SetIamPolicy",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/run1958_test.go:46 TestRunUpdateInstance"
+        ]
       },
       {
         "method": "google.cloud.run.v2.Instances/StartInstance",
@@ -563,13 +565,17 @@
       },
       {
         "method": "google.cloud.run.v2.Instances/TestIamPermissions",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/run1958_test.go:46 TestRunUpdateInstance"
+        ]
       },
       {
         "method": "google.cloud.run.v2.Instances/UpdateInstance",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/run1958_test.go:46 TestRunUpdateInstance"
+        ]
       },
       {
         "method": "google.cloud.run.v2.Jobs/CreateJob",
@@ -818,8 +824,11 @@
       },
       {
         "method": "google.cloud.run.v2.SourceUpload/UploadSource",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/run1958_test.go:204 TestRunUploadSource",
+          "test/compat/run1958_test.go:263 TestGcloudBetaRunDeployRunUpload"
+        ]
       },
       {
         "method": "google.cloud.run.v2.Tasks/GetTask",
@@ -2165,7 +2174,8 @@
           "test/compat/eventarc_test.go:42 TestEventarcTriggersToCloudRun",
           "test/compat/eventarcaudit_test.go:113 TestEventarcAuditLogTriggers",
           "test/compat/eventarcdest_test.go:33 TestEventarcDestinations",
-          "test/compat/eventarcfirestore_test.go:67 TestEventarcFirestoreTriggers"
+          "test/compat/eventarcfirestore_test.go:67 TestEventarcFirestoreTriggers",
+          "test/compat/run1958_test.go:514 TestCallEventTriggeredFunctions"
         ]
       },
       {
@@ -2537,6 +2547,7 @@
           "test/compat/functionsevents_test.go:215 TestFunctionsEventTriggers",
           "test/compat/functionsevents_test.go:519 TestGcloudFunctionsEventTriggers",
           "test/compat/functionsfields_test.go:62 TestFunctionsFields",
+          "test/compat/run1958_test.go:320 TestV1FunctionVersionsAndV2ListPaging",
           "test/compat/terraform_batch9_test.go:127 TestTerraformCloudFunctions2FunctionIAM"
         ]
       },
@@ -2544,7 +2555,8 @@
         "method": "google.cloud.functions.v2.FunctionService/ListFunctions",
         "status": "Verified",
         "tests": [
-          "test/compat/functionsapi_test.go:76 TestFunctionsAPI"
+          "test/compat/functionsapi_test.go:76 TestFunctionsAPI",
+          "test/compat/run1958_test.go:320 TestV1FunctionVersionsAndV2ListPaging"
         ]
       },
       {
@@ -2579,7 +2591,8 @@
         "tests": [
           "test/compat/consolefunctionsv1_test.go:96 TestConsoleFunctionsV1",
           "test/compat/functionsv1_test.go:250 TestFunctionsV1BuildsAndServes",
-          "test/compat/functionsv1_test.go:56 TestFunctionsV1API"
+          "test/compat/functionsv1_test.go:56 TestFunctionsV1API",
+          "test/compat/run1958_test.go:514 TestCallEventTriggeredFunctions"
         ]
       },
       {
@@ -2609,7 +2622,8 @@
         "method": "google.cloud.functions.v1.CloudFunctionsService/GenerateDownloadUrl",
         "status": "Verified",
         "tests": [
-          "test/compat/functionsv1_test.go:56 TestFunctionsV1API"
+          "test/compat/functionsv1_test.go:56 TestFunctionsV1API",
+          "test/compat/run1958_test.go:320 TestV1FunctionVersionsAndV2ListPaging"
         ]
       },
       {
@@ -2630,6 +2644,7 @@
           "test/compat/functionsfields_test.go:182 TestFunctionsV1Fields",
           "test/compat/functionsv1_test.go:322 TestGcloudFunctionsV1",
           "test/compat/functionsv1_test.go:56 TestFunctionsV1API",
+          "test/compat/run1958_test.go:320 TestV1FunctionVersionsAndV2ListPaging",
           "test/compat/terraformfunctionsv1_test.go:31 TestTerraformCloudFunctionsFunction"
         ]
       },
