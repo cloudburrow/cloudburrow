@@ -14,7 +14,8 @@ package main
 //	policy  the project's policy (version 3), its ancestors' bindings, the
 //	        display names of the project's service accounts
 //	roles   every role the role picker offers: the project's and the
-//	        organization's custom roles, then Google's predefined roles
+//	        organization's custom roles, then Google's predefined roles,
+//	        each with its product, Select a role's group (#2013)
 //	change  {etag, members, add: [{role, condition}], remove: [...]}
 
 import (
@@ -58,7 +59,14 @@ type iamPageRole struct {
 	Stage       string `json:"stage,omitempty"`
 	// Type is Predefined, Custom or Basic.
 	Type string `json:"type"`
+	// Product is Select a role's group (#2013): the product Google's
+	// docs list a predefined role under, "Basic" for a basic role and
+	// "Custom" for a custom role.
+	Product string `json:"product"`
 }
+
+// customRoleProduct is the custom roles' group in Select a role.
+const customRoleProduct = "Custom"
 
 type iamPageRoleChange struct {
 	Role      string             `json:"role"`
@@ -155,15 +163,15 @@ func (p projectIAMProvider) pageRoles(project string) ([]iamPageRole, error) {
 			continue
 		}
 		out = append(out, iamPageRole{Name: r.GetName(), Title: r.GetTitle(), Description: r.GetDescription(),
-			Stage: r.GetStage().String(), Type: "Custom"})
+			Stage: r.GetStage().String(), Type: "Custom", Product: customRoleProduct})
 	}
 	for _, n := range iamroles.PredefinedNames() {
 		r := iamroles.Predefined(n)
-		kind := "Predefined"
+		kind, product := "Predefined", r.Product
 		if basicRoles[n] {
-			kind = "Basic"
+			kind, product = "Basic", iamroles.BasicProduct
 		}
-		out = append(out, iamPageRole{Name: n, Title: r.Title, Description: r.Description, Stage: r.Stage, Type: kind})
+		out = append(out, iamPageRole{Name: n, Title: r.Title, Description: r.Description, Stage: r.Stage, Type: kind, Product: product})
 	}
 	return out, nil
 }

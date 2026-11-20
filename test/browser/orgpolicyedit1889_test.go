@@ -60,7 +60,10 @@ func TestIAMOrgPolicyEditThroughThePage(t *testing.T) {
 	p.run(chromedp.Click(chromedp.CSS(`#orgpolicy-add-rule`)))
 	p.waitFor(`document.querySelector('.orgpolicy-rule[data-rule="0"]') !== null`)
 	p.run(chromedp.Click(chromedp.CSS(`#orgpolicy-values-0-custom`)))
-	setIn(p, `.orgpolicy-rule[data-rule="0"] .orgpolicy-custom-values`, "in:us-locations\neurope-west1")
+	// Google's Custom value, then Add value for a second (#2013).
+	setIn(p, `.orgpolicy-rule[data-rule="0"] .orgpolicy-custom-value`, "in:us-locations")
+	p.run(chromedp.Click(chromedp.CSS(`.orgpolicy-rule[data-rule="0"] .orgpolicy-add-value`)))
+	setIn(p, `.orgpolicy-rule[data-rule="0"] .orgpolicy-custom-line:nth-child(2) .orgpolicy-custom-value`, "europe-west1")
 	p.run(chromedp.Click(chromedp.CSS(`.orgpolicy-rule[data-rule="0"] summary`)))
 	setIn(p, `.orgpolicy-rule[data-rule="0"] .orgpolicy-condition-title`, "prod")
 	setIn(p, `.orgpolicy-rule[data-rule="0"] .orgpolicy-condition`, "resource.matchTag('123456789012/env', 'prod')")

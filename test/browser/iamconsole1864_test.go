@@ -248,8 +248,10 @@ func TestIAMCreateServiceAccountInThreeSteps(t *testing.T) {
 	}
 }
 
-// TestIAMCreateRoleFromSelection (#1864): two predefined roles checked on
-// the Roles page make a custom role holding their permissions.
+// TestIAMCreateRoleFromSelection (#1864, #2013): a predefined role checked
+// on the Roles page opens Create custom role with its permissions listed,
+// each checked, as Google's Create custom role from selection does; one
+// unchecked is left out of the role made.
 func TestIAMCreateRoleFromSelection(t *testing.T) {
 	needService(t, "iam-roles")
 	ctx := context.Background()
@@ -271,22 +273,34 @@ func TestIAMCreateRoleFromSelection(t *testing.T) {
 	}
 	check("predefined:storage.objectViewer")
 	p.clickText("#view .action-bar button", "Create custom role from selection")
-	p.waitFor(`document.querySelector(".modal.is-open #f-roles") !== null`)
+	p.waitFor(`location.pathname === "/iam-admin/roles/create" && document.querySelector('#view input[data-value="storage.objects.get"]') !== null`)
 	var roles string
-	p.eval(`document.querySelector(".modal.is-open #f-roles").value`, &roles)
+	p.eval(`new URLSearchParams(location.search).get("roles")`, &roles)
 	if roles != "predefined:storage.objectViewer" {
 		t.Errorf("the selection's roles are %q", roles)
 	}
-	setField(p, ".modal.is-open", "f-title", "Object readers")
-	setField(p, ".modal.is-open", "f-roleId", "objectReaders")
-	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
-	p.waitFor(`document.querySelector(".modal.is-open") === null`)
+	var note string
+	p.eval(`document.querySelector("#view .picklist-seed").textContent`, &note)
+	if !strings.Contains(note, "roles/storage.objectViewer") {
+		t.Errorf("the permissions' note reads %q; want the selected role named", note)
+	}
+	var allChecked bool
+	p.eval(`[...document.querySelectorAll("#view .picklist-field > .picklist-rows input")].every((c) => c.checked)`, &allChecked)
+	if !allChecked {
+		t.Error("the selected role's permissions are not all checked")
+	}
+	p.run(chromedp.Click(chromedp.CSS(`#view input[data-value="storage.objects.list"]`)))
+	setField(p, "#view", "f-title", "Object readers")
+	setField(p, "#view", "f-roleId", "objectReaders")
+	p.run(chromedp.Click(chromedp.CSS(`#view form button[type="submit"].primary`)))
+	p.waitFor(`location.pathname === "/iam-admin/roles" || location.pathname.startsWith("/iam-admin/roles/objectReaders")`)
 	r, err := iamc.GetRole(ctx, &adminpb.GetRoleRequest{Name: "projects/" + project + "/roles/objectReaders"})
 	if err != nil {
 		t.Fatalf("GetRole: %v", err)
 	}
-	if !slices.Contains(r.GetIncludedPermissions(), "storage.objects.get") || r.GetTitle() != "Object readers" {
-		t.Errorf("the role made from the selection is %q with %v", r.GetTitle(), r.GetIncludedPermissions())
+	if !slices.Contains(r.GetIncludedPermissions(), "storage.objects.get") || slices.Contains(r.GetIncludedPermissions(), "storage.objects.list") ||
+		r.GetTitle() != "Object readers" {
+		t.Errorf("the role made from the selection is %q with %v; want storage.objects.list unchecked", r.GetTitle(), r.GetIncludedPermissions())
 	}
 }
 

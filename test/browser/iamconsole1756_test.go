@@ -195,6 +195,18 @@ func TestIAMAuditLogsPage(t *testing.T) {
 	}
 }
 
+// addAuditExemption opens the Audit Logs info panel's Exempted Principals
+// tab, adds exempted principal n with Add exempted principal, and checks
+// logType in its Disabled Log Types (#2013).
+func addAuditExemption(p *tab, n int, principal, logType string) {
+	p.t.Helper()
+	p.run(chromedp.Click(chromedp.CSS(`#action-panel-exempted-principals-tab`)))
+	p.clickText("#action-panel button", "Add exempted principal")
+	p.waitFor(fmt.Sprintf(`document.querySelector('#action-panel input[aria-label="Principal %d"]') !== null`, n))
+	setIn(p, fmt.Sprintf(`#action-panel input[aria-label="Principal %d"]`, n), principal)
+	p.run(chromedp.Click(chromedp.CSS(fmt.Sprintf(`#action-panel input[aria-label="%s %d"]`, logType, n))))
+}
+
 // auditConfigOf is the policy's audit config of service, or nil.
 func auditConfigOf(pol *iampb.Policy, service string) *iampb.AuditConfig {
 	for _, c := range pol.GetAuditConfigs() {
@@ -261,15 +273,16 @@ func TestIAMAuditLogsFolder(t *testing.T) {
 	p.eval(`(() => { const f = document.querySelector("#view input.filter"); f.value = "storage.googleapis.com";
 		f.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`, nil)
 	p.waitFor(`[...document.querySelectorAll("#view tbody tr")].length < 25`)
-	p.run(chromedp.Click(chromedp.CSS(`#view button[aria-label="Actions for storage.googleapis.com"]`)))
-	p.clickText(".overflow-menu .overflow-item", "Edit log types")
-	p.waitFor(`document.querySelector(".modal.is-open #f-dataRead") !== null`)
-	p.eval(`(() => { const m = document.querySelector(".modal.is-open");
-		m.querySelector("#f-dataRead").click();
-		const e = m.querySelector("#f-dataReadExempted"); e.value = "user:ada@example.com\nuser:bo@example.com";
-		e.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`, nil)
-	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
-	p.waitFor(`document.querySelector(".modal") === null`)
+	// Google's info panel (#2013): checking the service opens it, Log
+	// Types first; Exempted Principals' Add exempted principal takes each
+	// principal with its Disabled Log Types; Save.
+	p.run(chromedp.Click(chromedp.CSS(`#view input[aria-label="Select storage.googleapis.com"]`)))
+	p.waitFor(`document.querySelector("#action-panel #f-dataRead") !== null`)
+	p.run(chromedp.Click(chromedp.CSS(`#action-panel #f-dataRead`)))
+	addAuditExemption(p, 1, "user:ada@example.com", "Data Read")
+	addAuditExemption(p, 2, "user:bo@example.com", "Data Read")
+	p.run(chromedp.Click(chromedp.CSS(`#action-panel-save`)))
+	p.waitFor(`document.querySelector("#action-panel") === null`)
 	for _, u := range p.posts("/api/actions/iam-audit") {
 		if !strings.Contains(u, "auditResource="+strings.ReplaceAll(f.GetName(), "/", "%2F")) {
 			t.Errorf("Edit log types was sent to %s; want the folder's resource in the address", u)
@@ -347,10 +360,10 @@ func TestIAMAuditLogsOrganization(t *testing.T) {
 		t.Errorf("the first row reads %q; queryAuditableServices answers %s first", first, want.GetServices()[0].GetName())
 	}
 	p.clickText("#view button", "Set Default Configuration")
-	p.waitFor(`document.querySelector(".modal.is-open #f-adminRead") !== null`)
-	p.eval(`(() => { const b = document.querySelector(".modal.is-open #f-adminRead"); if (!b.checked) b.click(); return true; })()`, nil)
-	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
-	p.waitFor(`document.querySelector(".modal") === null`)
+	p.waitFor(`document.querySelector("#action-panel #f-adminRead") !== null`)
+	p.eval(`(() => { const b = document.querySelector("#action-panel #f-adminRead"); if (!b.checked) b.click(); return true; })()`, nil)
+	p.run(chromedp.Click(chromedp.CSS(`#action-panel-save`)))
+	p.waitFor(`document.querySelector("#action-panel") === null`)
 	got, err := orgs.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: org.GetName()})
 	if err != nil {
 		t.Fatal(err)

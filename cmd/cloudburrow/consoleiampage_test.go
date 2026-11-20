@@ -200,26 +200,49 @@ func TestConsoleIAMResourcePages(t *testing.T) {
 	}
 }
 
-// Create role from selection (#1864): two predefined roles combined into
-// a project role holding their supported permissions.
+// Create custom role from selection (#2013): the checked roles open
+// Create custom role with their supported permissions listed, each
+// checked; what is created holds the permissions the form kept.
 func TestConsoleIAMCreateRoleFromSelection(t *testing.T) {
 	reg := iamPageRegistry(t)
 	p := iamRolesProvider{registry: reg}
 	ctx := context.Background()
 	l, _ := p.List(ctx, "iam-page")
-	if len(l.SelectActions) != 2 || l.SelectActions[0].SelectionField != "roles" || l.SelectActions[1].Label != "Disable" {
+	if len(l.SelectActions) != 2 || l.SelectActions[0].SelectionField != "roles" || l.SelectActions[0].Href != "/iam-admin/roles/create" ||
+		l.SelectActions[1].Label != "Disable" {
 		t.Fatalf("the Roles list's selection actions are %+v", l.SelectActions)
 	}
-	if err := p.ActAt(ctx, "iam-page", nil, roleFromSelection, map[string]string{
-		"roles": "predefined:storage.objectViewer\npredefined:pubsub.viewer", "title": "Readers", "roleId": "readers", "stage": "GA"}); err != nil {
+	out, err := p.StudioCall(ctx, "iam-page", "permissions",
+		json.RawMessage(`{"seed":"predefined:storage.objectViewer,predefined:pubsub.viewer"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed := out.(map[string]any)
+	var values []string
+	for _, it := range seed["items"].([]iamPickItem) {
+		values = append(values, it.Value)
+	}
+	if !slices.Contains(values, "storage.objects.get") || !slices.Contains(values, "pubsub.topics.list") || !slices.IsSorted(values) {
+		t.Errorf("the seeded permissions are %v", values)
+	}
+	if note := seed["note"].(string); !strings.Contains(note, "roles/storage.objectViewer") || !strings.Contains(note, "Uncheck") {
+		t.Errorf("the seed's note is %q", note)
+	}
+	// storage.objects.list unchecked: the role holds the rest.
+	kept := slices.DeleteFunc(slices.Clone(values), func(v string) bool { return v == "storage.objects.list" })
+	if _, err := p.Create(ctx, "iam-page", map[string]string{"title": "Readers", "roleId": "readers", "stage": "GA",
+		"permissions": strings.Join(kept, "\n")}); err != nil {
 		t.Fatal(err)
 	}
 	r, err := reg.GetRole("projects/iam-page/roles/readers")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Contains(r.GetIncludedPermissions(), "storage.objects.get") || !slices.Contains(r.GetIncludedPermissions(), "pubsub.topics.list") {
+	if !slices.Contains(r.GetIncludedPermissions(), "storage.objects.get") || slices.Contains(r.GetIncludedPermissions(), "storage.objects.list") {
 		t.Errorf("the role holds %v", r.GetIncludedPermissions())
+	}
+	if _, err := p.StudioCall(ctx, "iam-page", "permissions", json.RawMessage(`{"seed":"no-such-role"}`)); err == nil {
+		t.Error("a seed naming no role was answered")
 	}
 	_, fields := p.CreateForm()
 	var names []string

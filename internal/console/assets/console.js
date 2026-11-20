@@ -2972,7 +2972,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
     : null;
   const dataColumns = () => allDataColumns().filter((c) => !chooser || !chooser.hidden().has(c));
   const hasActions = () =>
-    data.items.some((i) => (i.actions || []).length || i.object) || caps.delete;
+    data.items.some((i) => (i.actions || []).some((a) => !a.panel) || i.object) || caps.delete;
   // Declared by the provider, or inferred from the rows that happen to be
   // present. Inference alone made the column come and go as the data
   // changed, taking any sort applied to it with it.
@@ -3012,12 +3012,24 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   });
   const selectionLabel = el("span", { class: "selection-count unavailable", text: "" });
   // In the order they were checked, which is the order Compose joins them.
-  const selectionButtons = selectActions.map((a) => el("button", {
+  // A selection action drawn in the info panel (Action.Panel, #2013) has
+  // no button: checking rows opens it, as Google's Audit Logs does.
+  const panelSelect = selectActions.find((a) => a.panel);
+  const selectionButtons = selectActions.filter((a) => !a.panel).map((a) => el("button", {
     class: "secondary", text: a.label, disabled: "disabled",
     onclick: () => {
       const byName = new Map(data.items.map((i) => [i.name, i]));
       const names = [...selected].map((n) => byName.get(n)).filter(Boolean)
         .map((i) => (i.object ? i.object[i.object.length - 1] : i.name));
+      // A selection action that is a link (#2013): Roles' Create custom
+      // role from selection opens Create custom role with ?roles=.
+      if (a.href) {
+        const to = new URL(a.href, location.origin);
+        const project = currentProject();
+        if (project) to.searchParams.set("project", project);
+        to.searchParams.set(a.selectionField, names.join(","));
+        return navigate(to.pathname + to.search);
+      }
       const fields = (a.fields || []).map((f) =>
         f.name === a.selectionField ? { ...f, default: names.join("\n") } : f);
       // The whole page again, whose summary counts the objects too. On a
@@ -3121,7 +3133,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
         disabled: busy ? "disabled" : null, "aria-label": `${a.label} ${item.name}`, onclick: rowAction(a) }));
     const actions = [
       ...(caps.editRowFirst ? edit : []),
-      ...(item.actions || []).filter((a) => !a.button).map((a) => ({
+      ...(item.actions || []).filter((a) => !a.button && !a.panel).map((a) => ({
         label: a.label, destructive: a.destructive,
         // A row whose actions address a path of their own is named by its
         // row, not the path's last segment: a value inside a Datastore
@@ -3343,12 +3355,33 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
     return button;
   };
 
+  // The info panel of the checked rows (#2013): one row's own Panel
+  // action, with its values, or the selection's for several; closed when
+  // none is checked. Redrawn only when the checked rows change.
+  let panelFor = "";
+  const drawSelectionPanel = () => {
+    const byName = new Map(data.items.map((i) => [i.name, i]));
+    const items = [...selected].map((x) => byName.get(x)).filter(Boolean);
+    const key = items.map((i) => i.name).join("\n");
+    if (key === panelFor) return;
+    panelFor = key;
+    if (!items.length) return closeActionPanel();
+    const own = items.length === 1 ? (items[0].actions || []).find((a) => a.panel) : null;
+    if (own) return openActionPanel(route, rowTarget(items[0]), own, refresh, items[0].name, { keepFocus: true });
+    const names = items.map((i) => (i.object ? i.object[i.object.length - 1] : i.name));
+    const fields = (panelSelect.fields || []).map((f) =>
+      f.name === panelSelect.selectionField ? { ...f, default: names.join("\n") } : f);
+    openActionPanel(route, [], { ...panelSelect, fields }, refresh,
+      names.length === 1 ? names[0] : `${names.length} ${data.noun || "rows"}`, { keepFocus: true });
+  };
+
   const drawSelection = () => {
     if (!selectable) return;
     const n = selected.size;
     bulk.disabled = n === 0;
     for (const b of selectionButtons) b.disabled = n === 0;
     selectionLabel.textContent = n ? `${n} selected` : "";
+    if (panelSelect) drawSelectionPanel();
     const boxes = [...body.querySelectorAll('input[type="checkbox"]')];
     const head = headRow.querySelector('input[type="checkbox"]');
     if (head) {
@@ -4515,8 +4548,116 @@ function listActionButtons(route, data, onDone) {
     type: "button", class: "secondary", id: `list-action-${a.id}`, text: a.label,
     // One that is a link opens its page: the Datastore page's Indexes
     // (#1846).
-    onclick: () => (a.href ? navigate(a.href) : openActionForm(route, [], a, onDone, data.noun || route.title)),
+    onclick: () => (a.href ? navigate(a.href)
+      : a.panel ? openActionPanel(route, [], a, onDone, a.label)
+      : openActionForm(route, [], a, onDone, data.noun || route.title)),
   }));
+}
+
+// openActionPanel draws an action's form in the info panel (Action.Panel,
+// #2013), as Google's Audit Logs edits the checked services in its
+// information panel: the panel titled by what it acts on, the fields'
+// Sections as its tabs (Log Types, Exempted Principals), then the
+// action's submit (Save). It is sent as a dialog's form is.
+function openActionPanel(route, segments, action, onDone, title, { keepFocus = false } = {}) {
+  const panel = infoPanelHost();
+  if (!panel) return openActionForm(route, segments, action, onDone, title);
+  const name = title || segments[segments.length - 1] || action.label;
+  const fields = buildCreateForm({ label: action.label, fields: action.fields });
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  const primary = el("button", { type: "submit", class: "primary", id: "action-panel-save", text: action.submit || action.label });
+  const slug = (n) => n.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const sections = fields.nodes.filter((n) => n.classList && n.classList.contains("form-section"));
+  const loose = fields.nodes.filter((n) => !sections.includes(n));
+  const buttons = [];
+  const select = (i) => {
+    buttons.forEach((b, j) => {
+      b.classList.toggle("is-selected", i === j);
+      b.setAttribute("aria-selected", i === j ? "true" : "false");
+      b.tabIndex = i === j ? 0 : -1;
+    });
+    sections.forEach((x, j) => { x.hidden = i !== j; });
+  };
+  sections.forEach((x, i) => {
+    const h = x.querySelector(".form-section-title");
+    const label = h ? h.textContent : `Tab ${i + 1}`;
+    if (h) h.remove();
+    x.id = `action-panel-${slug(label)}`;
+    x.setAttribute("role", "tabpanel");
+    x.setAttribute("aria-labelledby", `${x.id}-tab`);
+    buttons.push(el("button", { type: "button", class: "tab", role: "tab", id: `${x.id}-tab`, "aria-controls": x.id, text: label,
+      onclick: () => select(i),
+      onkeydown: (ev) => {
+        const step = ev.key === "ArrowRight" ? 1 : ev.key === "ArrowLeft" ? -1 : 0;
+        if (!step) return;
+        ev.preventDefault();
+        const j = (i + step + sections.length) % sections.length;
+        select(j);
+        buttons[j].focus();
+      } }));
+  });
+  const strip = buttons.length > 1 ? el("div", { class: "tab-strip action-panel-tabs", role: "tablist", "aria-label": action.label }, ...buttons) : null;
+  if (buttons.length) select(0);
+  let submitting = false;
+  const submit = async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    if (submitting) return;
+    if (!fields.validate()) {
+      // The first tab holding an invalid field is shown.
+      const bad = sections.findIndex((x) => x.querySelector(":invalid, [aria-invalid=\"true\"]"));
+      if (bad >= 0) select(bad);
+      return;
+    }
+    submitting = true;
+    primary.disabled = true;
+    const op = recordOperation(`${action.label} ${name}`);
+    try {
+      const res = await send(`/api/actions/${route.service}?project=${encodeURIComponent(currentProject())}`,
+        "POST", { Path: segments, Action: action.id, Values: fields.values() });
+      op.succeeded("", res.operation);
+      notify(`${action.label}: saved for ${name}`);
+      announce(`Saved ${name}`);
+      closeActionPanel();
+      onDone();
+    } catch (err) {
+      op.failed(err.message, err.operation);
+      error.textContent = err.message;
+      error.hidden = false;
+    } finally {
+      submitting = false;
+      primary.disabled = false;
+    }
+  };
+  panel.hidden = false;
+  panel.dataset.actionPanel = action.id;
+  document.documentElement.setAttribute("data-info", "open");
+  setChildren(panel,
+    el("form", { class: "action-panel", id: "action-panel", novalidate: true, onsubmit: submit, "aria-labelledby": "action-panel-title" },
+      el("div", { class: "info-head" },
+        el("h2", { id: "action-panel-title", text: segments.length || title !== action.label ? `${action.label}: ${name}` : action.label }),
+        el("button", { type: "button", class: "icon-button", "aria-label": "Close info panel", onclick: () => closeActionPanel(true),
+          html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>' })),
+      error, ...loose, strip, ...sections,
+      el("div", { class: "modal-actions" },
+        el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => closeActionPanel(true) }), primary)));
+  if (!keepFocus) (buttons[0] || primary).focus();
+}
+
+// closeActionPanel takes an action's form out of the info panel: the
+// panel goes back to the row the viewer keeps open, or hides.
+function closeActionPanel(fromPanel = false) {
+  const panel = infoPanelHost();
+  if (!panel || !panel.dataset.actionPanel) return;
+  delete panel.dataset.actionPanel;
+  setChildren(panel);
+  if (infoPanelOpen()) {
+    setChildren(panel, el("div", { class: "info-empty" }, el("h2", { text: "Select a resource" })));
+  } else {
+    panel.hidden = true;
+    document.documentElement.removeAttribute("data-info");
+  }
+  if (fromPanel) { const v = document.getElementById("view"); if (v) v.focus(); }
 }
 
 // sendActionWithFile performs an action whose form holds a file (#999):
@@ -5700,7 +5841,7 @@ function drawInfoPanel(item, columns, route, onDone) {
 
   const caps = capabilityOf(route.service);
   const actions = [
-    ...(item.actions || []).map((a) => ({
+    ...(item.actions || []).filter((a) => !a.panel).map((a) => ({
       label: a.label, destructive: a.destructive,
       run: () => runAction(route, (item.target || []).length ? item.target : item.name, a, onDone),
     })),
@@ -7043,8 +7184,9 @@ function groupEntry(f, id, errorId, helpId) {
         ? el("label", { class: "group-check" }, c, el("span", { text: s.label }))
         : el("label", { class: "group-cell" }, el("span", { class: "group-cell-label", text: s.label }), c);
     });
-    const remove = el("button", { type: "button", class: "secondary group-remove", text: "Remove",
-      "aria-label": `Remove ${f.label.toLowerCase()} ${n}`,
+    const removeLabel = f.removeLabel || "Remove";
+    const remove = el("button", { type: "button", class: "secondary group-remove", text: removeLabel,
+      "aria-label": `${removeLabel} ${f.label.toLowerCase()} ${n}`,
       onclick: () => { rows.splice(rows.indexOf(r), 1); r.node.remove(); sync(); } });
     r.node = el("div", { class: "group-row", role: "listitem" }, ...cells, remove);
     rows.push(r);
@@ -7081,6 +7223,7 @@ function picklistEntry(f, id, errorId, helpId) {
   const [service, call] = (f.pickFrom || "").split(":");
   const addLabel = f.addLabel || "Add";
   const chosen = new Map();
+  const notes = new Map();
   for (const v of (f.default || "").split(/[\n,]/).map((x) => x.trim()).filter(Boolean)) chosen.set(v, true);
   const count = el("p", { class: "form-help picklist-count", "aria-live": "polite" });
   const list = el("ul", { class: "picklist-rows", role: "list", "aria-label": f.label });
@@ -7096,13 +7239,25 @@ function picklistEntry(f, id, errorId, helpId) {
       box.checked = chosen.get(v);
       box.addEventListener("change", () => { chosen.set(v, box.checked); sync(); });
       return el("li", { class: "picklist-row" }, el("label", { class: "group-check", for: box.id }, box,
-        el("span", { class: "mono", text: v })));
+        el("span", { class: "mono", text: v }), notes.get(v) ? el("span", { class: "form-help", text: ` ${notes.get(v)}` }) : null));
     }));
     list.hidden = chosen.size === 0;
   };
 
   const pickerId = `${id}-picker`;
   const serviceSelect = el("select", { id: `${id}-service` }, el("option", { value: "", text: "All Services" }));
+  // All Types (#2013): a permission's type is its resource type, the
+  // middle of service.resource.verb, as the Permission's name holds it.
+  const typeSelect = el("select", { id: `${id}-type` }, el("option", { value: "", text: "All Types" }));
+  const typeOf = (v) => { const parts = v.split("."); return parts.length >= 3 ? parts.slice(1, -1).join(".") : ""; };
+  const drawTypes = () => {
+    const svc = serviceSelect.value;
+    const was = typeSelect.value;
+    const types = [...new Set((items || []).filter((it) => !svc || it.value.startsWith(`${svc}.`))
+      .map((it) => typeOf(it.value)).filter(Boolean))].sort();
+    setChildren(typeSelect, el("option", { value: "", text: "All Types" }), ...types.map((x) => el("option", { value: x, text: x })));
+    typeSelect.value = types.includes(was) ? was : "";
+  };
   const filterInput = el("input", { type: "text", id: `${id}-filter`, autocomplete: "off", spellcheck: "false" });
   const results = el("ul", { class: "picklist-rows picklist-results", role: "list", "aria-label": `${addLabel}: results` });
   const status = el("p", { class: "form-help", "aria-live": "polite" });
@@ -7111,8 +7266,10 @@ function picklistEntry(f, id, errorId, helpId) {
   const drawResults = () => {
     const q = filterInput.value.trim().toLowerCase();
     const svc = serviceSelect.value;
+    const type = typeSelect.value;
     const match = (items || []).filter((it) => !chosen.get(it.value) &&
-      (!svc || it.value.startsWith(`${svc}.`)) && (!q || it.value.toLowerCase().includes(q)));
+      (!svc || it.value.startsWith(`${svc}.`)) && (!type || typeOf(it.value) === type) &&
+      (!q || it.value.toLowerCase().includes(q)));
     status.textContent = match.length > PICKLIST_SHOWN
       ? `${match.length} match; the first ${PICKLIST_SHOWN} are shown. Filter to narrow them.`
       : `${match.length} match.`;
@@ -7133,6 +7290,7 @@ function picklistEntry(f, id, errorId, helpId) {
       items = (res && res.items) || [];
       const services = [...new Set(items.map((it) => it.value.split(".")[0]))].sort();
       serviceSelect.append(...services.map((x) => el("option", { value: x, text: x })));
+      drawTypes();
       drawResults();
     } catch (err) {
       status.textContent = err.message;
@@ -7141,7 +7299,8 @@ function picklistEntry(f, id, errorId, helpId) {
   // Enter in the filter must not submit the form.
   filterInput.addEventListener("keydown", (e) => { if (e.key === "Enter") e.preventDefault(); });
   filterInput.addEventListener("input", drawResults);
-  serviceSelect.addEventListener("change", drawResults);
+  serviceSelect.addEventListener("change", () => { drawTypes(); drawResults(); });
+  typeSelect.addEventListener("change", drawResults);
   const toggle = el("button", { type: "button", class: "secondary picklist-add", id: `${id}-add`, text: addLabel,
     "aria-expanded": "false", "aria-controls": pickerId });
   const closePicker = () => {
@@ -7157,7 +7316,9 @@ function picklistEntry(f, id, errorId, helpId) {
     closePicker();
   } });
   const picker = el("div", { class: "picklist-picker", id: pickerId, role: "group", "aria-label": `${addLabel} to ${f.label.toLowerCase()}`, hidden: true },
-    el("div", { class: "form-row" }, el("label", { for: serviceSelect.id, text: "Service" }), serviceSelect),
+    el("div", { class: "picklist-filters" },
+      el("div", { class: "form-row" }, el("label", { for: serviceSelect.id, text: "Service" }), serviceSelect),
+      el("div", { class: "form-row" }, el("label", { for: typeSelect.id, text: "Type" }), typeSelect)),
     el("div", { class: "form-row" }, el("label", { for: filterInput.id, text: "Filter permissions" }), filterInput),
     status, results,
     el("div", { class: "picklist-actions" }, addButton,
@@ -7171,11 +7332,32 @@ function picklistEntry(f, id, errorId, helpId) {
   });
   const help = f.help ? el("p", { id: helpId, class: "form-help", text: f.help }) : null;
   const error = el("p", { id: errorId, class: "form-field-error", hidden: true });
+  // SeedFrom (#2013): the address names what to start from, as Create
+  // custom role from selection lists the selected roles' permissions,
+  // each checked. The seeded value is the form's starting one, so a
+  // Cancel after it asks nothing.
+  const seedNote = el("p", { class: "form-help picklist-seed", hidden: true });
   const node = el("fieldset", { class: "form-row picklist-field" },
-    el("legend", {}, el("span", { text: f.label })), count, list, toggle, picker, control, help, error);
+    el("legend", {}, el("span", { text: f.label })), seedNote, count, list, toggle, picker, control, help, error);
   drawChosen();
   sync();
   f.default = control.value;
+  const seed = f.seedFrom ? new URLSearchParams(location.search).get(f.seedFrom) : "";
+  if (seed) {
+    seedNote.hidden = false;
+    seedNote.textContent = "Reading the selected roles' permissions…";
+    send(`/api/studio/${encodeURIComponent(service)}?call=${encodeURIComponent(call)}&project=${encodeURIComponent(currentProject())}`,
+      "POST", { seed }).then((res) => {
+      for (const it of (res && res.items) || []) {
+        chosen.set(it.value, true);
+        if (it.note) notes.set(it.value, it.note);
+      }
+      seedNote.textContent = (res && res.note) || "";
+      drawChosen();
+      sync();
+      f.default = control.value;
+    }).catch((err) => { seedNote.textContent = err.message; seedNote.classList.add("form-field-error"); });
+  }
   return { field: f, control, node, error, helpId, errorId, isCheck: false, focus: () => toggle.focus() };
 }
 
@@ -8150,6 +8332,8 @@ function notFound(view, path) {
 // throw inside a render function left the skeleton on screen permanently.
 function route() {
   const view = document.getElementById("view");
+  // An action's info panel (#2013) belongs to the screen that opened it.
+  closeActionPanel();
   const title = () => {
     const match = ROUTES.find((r) => r.path === location.pathname);
     return match ? match.title : "This screen";
@@ -16670,7 +16854,11 @@ function renderIAMPage(view, route) {
         el("thead", {}, el("tr", {},
           el("th", {}, el("span", { class: "sr-only", text: "Select" })),
           el("th", { text: "Type" }), el("th", { text: "Principal" }), el("th", { text: "Name" }),
-          el("th", { text: "Role" }), el("th", { text: "Inheritance" }),
+          el("th", { text: "Role" }),
+          // Security insights (#2013): Google's column of the Recommender
+          // API's policy insights, which CloudBurrow does not serve.
+          el("th", { text: "Security insights" }),
+          el("th", { text: "Inheritance" }),
           el("th", {}, el("span", { class: "sr-only", text: "Edit" })))),
         el("tbody", {}, ...rows.map((r) => {
           const own = r.roles.some((x) => !x.from);
@@ -16685,7 +16873,10 @@ function renderIAMPage(view, route) {
             el("td", { text: iamPrincipalType(r.member) }),
             el("td", { class: "mono", text: r.member.replace(/^[a-zA-Z]+:/, "") }),
             el("td", { text: name(r.member) }),
-            roleCell(r), inheritCell(r),
+            roleCell(r),
+            el("td", { class: "iam-insights" }, el("span", { class: "form-help", text: "Not available locally",
+              title: IAM_INSIGHTS_UNAVAILABLE })),
+            inheritCell(r),
             el("td", { class: "row-actions" },
               el("button", { type: "button", class: "secondary", text: "Edit principal",
                 "aria-label": `Edit principal ${r.member}`,
@@ -16998,8 +17189,22 @@ function renderOrgPolicyEdit(view, constraint) {
       r = r || { enforce: true, values: "allowAll", type: "allow", custom: [] };
       const i = n++;
       const entry = {};
-      const custom = el("textarea", { class: "orgpolicy-custom-values", rows: 2, "aria-label": "Custom values" });
-      custom.value = (r.custom || []).join("\n");
+      // Google's Custom value boxes, one value each, and Add value for
+      // another (#2013).
+      const valuesBox = el("div", { class: "orgpolicy-custom-values" });
+      const addValue = (v) => {
+        const k = valuesBox.children.length + 1;
+        const input = el("input", { type: "text", class: "orgpolicy-custom-value", "aria-label": `Custom value ${k}`,
+          autocomplete: "off", spellcheck: "false", value: v || "" });
+        const line = el("div", { class: "orgpolicy-custom-line" }, input,
+          el("button", { type: "button", class: "secondary", text: "Delete", "aria-label": `Delete custom value ${k}`,
+            onclick: () => { line.remove(); if (!valuesBox.children.length) addValue(""); } }));
+        valuesBox.append(line);
+        return input;
+      };
+      for (const v of r.custom || []) addValue(v);
+      if (!valuesBox.children.length) addValue("");
+      const customValues = () => [...valuesBox.querySelectorAll(".orgpolicy-custom-value")].map((x) => x.value.trim()).filter(Boolean);
       const c = r.condition || {};
       const ctitle = el("input", { type: "text", class: "orgpolicy-condition-title", "aria-label": "Condition title", value: c.title || "" });
       const cexpr = el("textarea", { class: "orgpolicy-condition", rows: 2, "aria-label": "Condition" });
@@ -17007,8 +17212,10 @@ function renderOrgPolicyEdit(view, constraint) {
       const customBox = el("div", { class: "orgpolicy-custom" },
         el("span", { class: "form-label", text: "Policy type" }),
         radios(`orgpolicy-type-${i}`, [["allow", "Allow"], ["deny", "Deny"]], r.type || "allow"),
-        el("label", { class: "form-label" }, el("span", { text: "Custom values" }), custom,
-          el("span", { class: "form-help", text: "One per line, such as in:us-locations or us-east1." })));
+        el("span", { class: "form-label", text: "Custom value" }), valuesBox,
+        el("span", { class: "form-help", text: "A value each, such as in:us-locations or us-east1." }),
+        el("button", { type: "button", class: "secondary orgpolicy-add-value", text: "Add value",
+          onclick: () => addValue("").focus() }));
       const showCustom = () => { customBox.hidden = picked(`orgpolicy-values-${i}`) !== "custom"; };
       const kind = d.boolean
         ? el("div", {}, el("span", { class: "form-label", text: "Enforcement" }),
@@ -17028,7 +17235,7 @@ function renderOrgPolicyEdit(view, constraint) {
       entry.value = () => ({
         enforce: picked(`orgpolicy-enforce-${i}`) === "on",
         values: picked(`orgpolicy-values-${i}`), type: picked(`orgpolicy-type-${i}`),
-        custom: iamDenyLines(custom.value),
+        custom: customValues(),
         condition: cexpr.value.trim() ? { title: ctitle.value, expression: cexpr.value } : null,
       });
       rules.push(entry);
@@ -17345,44 +17552,88 @@ function renderIAMAnalyzer(view) {
   fields.focusFirst();
 }
 
+const IAM_INSIGHTS_UNAVAILABLE = "Security insights are the Recommender API's policy insights (excess permissions), " +
+  "which CloudBurrow does not serve.";
+
 function PROJECT_IAM_NOTE_TEXT() {
   return "The project's IAM policy, stored and never enforced (ADR-0006). Nothing inherits it: a resource's own " +
-    "Permissions tab shows only that resource's bindings. Google's Security insights (excess permissions) come from " +
-    "the Recommender API, which CloudBurrow does not serve, so the column is not drawn.";
+    "Permissions tab shows only that resource's bindings. Google's Security insights column (excess permissions) comes " +
+    "from the Recommender API, which CloudBurrow does not serve: it says Not available locally.";
 }
 
-// iamRolePicker is Select a role: a searchable list of every role, by
-// title and name, Google's role picker without its product groups.
+// iamRolePicker is Select a role (#2013): Google's role picker, its roles
+// grouped by product. Down the left are the groups (Basic, Custom, then
+// each product as Google's role index names it), a group chosen listing
+// its roles on the right; the filter searches every role by title, name,
+// product or type, the hits under their products' headings.
+const IAM_ROLE_SHOWN = 100;
+
+function iamRoleProducts(roles) {
+  const first = ["Basic", "Custom"];
+  const names = [...new Set(roles.map((r) => r.product || "Other"))];
+  return [...first.filter((x) => names.includes(x)),
+    ...names.filter((x) => !first.includes(x)).sort((a, b) => a.localeCompare(b))];
+}
+
 function iamRolePicker(roles, initial, id) {
   let value = initial || "";
   const button = el("button", { type: "button", class: "secondary iam-role-button", id,
-    "aria-haspopup": "listbox", "aria-expanded": "false" });
+    "aria-haspopup": "dialog", "aria-expanded": "false" });
   const label = () => { button.textContent = value ? iamRoleLabel(roles, value) : "Select a role"; button.title = value; };
   label();
   const search = el("input", { type: "search", class: "iam-role-search", placeholder: "Filter", "aria-label": "Filter roles", autocomplete: "off" });
+  const products = iamRoleProducts(roles);
+  const current = roles.find((r) => r.name === value);
+  let product = current ? (current.product || "Other") : products[0];
+  const groups = el("ul", { class: "iam-role-products", role: "list", "aria-label": "By product or service" });
   const list = el("ul", { class: "iam-role-list", role: "listbox", "aria-label": "Roles" });
-  const pop = el("div", { class: "iam-role-pop", hidden: true }, search, list);
-  const drawList = () => {
-    const q = search.value.trim().toLowerCase();
-    const hits = roles.filter((r) => !q || r.name.toLowerCase().includes(q) || (r.title || "").toLowerCase().includes(q)
-      || (r.type || "").toLowerCase() === q).slice(0, 100);
-    setChildren(list, ...hits.map((r) => el("li", { role: "presentation" },
-      el("button", { type: "button", role: "option", class: "iam-role-option", "data-role": r.name,
-        "aria-selected": String(r.name === value),
-        onclick: () => { value = r.name; label(); close(); onChange(); } },
-        el("span", { class: "iam-role-title", text: r.title || r.name }),
-        el("span", { class: "mono form-help", text: ` ${r.name}` }),
-        el("span", { class: "form-help", text: r.type === "Custom" ? " Custom" : r.type === "Basic" ? " Basic" : "" })))),
-      hits.length ? null : el("li", { class: "unavailable", text: "No role matches." }));
+  const status = el("p", { class: "form-help iam-role-status", "aria-live": "polite" });
+  const option = (r) => el("li", { role: "presentation" },
+    el("button", { type: "button", role: "option", class: "iam-role-option", "data-role": r.name,
+      "aria-selected": String(r.name === value),
+      onclick: () => { value = r.name; label(); close(); onChange(); } },
+      el("span", { class: "iam-role-title", text: r.title || r.name }),
+      el("span", { class: "mono form-help", text: ` ${r.name}` })));
+  const drawGroups = (q) => {
+    setChildren(groups, ...products.map((x) => el("li", {},
+      el("button", { type: "button", class: "iam-role-product", "data-product": x,
+        "aria-pressed": String(!q && x === product),
+        onclick: () => { product = x; search.value = ""; draw(); } }, x))));
   };
+  const draw = () => {
+    const q = search.value.trim().toLowerCase();
+    drawGroups(q);
+    if (!q) {
+      const mine = roles.filter((r) => (r.product || "Other") === product);
+      status.textContent = `${product}: ${mine.length} roles`;
+      setChildren(list, ...mine.map(option), mine.length ? null : el("li", { class: "unavailable", text: "No role in this group." }));
+      return;
+    }
+    const hits = roles.filter((r) => r.name.toLowerCase().includes(q) || (r.title || "").toLowerCase().includes(q)
+      || (r.product || "").toLowerCase().includes(q) || (r.type || "").toLowerCase() === q);
+    const shown = hits.slice(0, IAM_ROLE_SHOWN);
+    status.textContent = hits.length > IAM_ROLE_SHOWN
+      ? `${hits.length} roles match; the first ${IAM_ROLE_SHOWN} are shown. Filter to narrow them.` : `${hits.length} roles match`;
+    const items = [];
+    for (const x of products) {
+      const inGroup = shown.filter((r) => (r.product || "Other") === x);
+      if (!inGroup.length) continue;
+      items.push(el("li", { role: "presentation", class: "iam-role-group", text: x }), ...inGroup.map(option));
+    }
+    setChildren(list, ...items, hits.length ? null : el("li", { class: "unavailable", text: "No role matches." }));
+  };
+  const pop = el("div", { class: "iam-role-pop", role: "dialog", "aria-label": "Select a role", hidden: true }, search, status,
+    el("div", { class: "iam-role-panes" }, groups, list));
   const close = () => { pop.hidden = true; button.setAttribute("aria-expanded", "false"); };
   let onChange = () => {};
   button.addEventListener("click", () => {
     pop.hidden = !pop.hidden;
     button.setAttribute("aria-expanded", String(!pop.hidden));
-    if (!pop.hidden) { drawList(); search.focus(); }
+    if (!pop.hidden) { draw(); search.focus(); }
   });
-  search.addEventListener("input", drawList);
+  search.addEventListener("input", draw);
+  // Escape in the filter closes the picker; elsewhere it closes the
+  // dialog, as every dialog's Escape does.
   search.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.stopPropagation(); close(); button.focus(); } });
   return { node: el("div", { class: "iam-role-picker" }, button, pop), value: () => value,
     onChange: (fn) => { onChange = fn; } };

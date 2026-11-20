@@ -409,6 +409,9 @@ type Field struct {
 	// value ("true" or "false" for a checkbox); ParseGroup reads it.
 	Group    []Field `json:"group,omitempty"`
 	AddLabel string  `json:"addLabel,omitempty"`
+	// RemoveLabel names each row's remove button where Google's is not
+	// "Remove": Audit Logs' exempted principals have Delete (#2013).
+	RemoveLabel string `json:"removeLabel,omitempty"`
 	// DisabledOptions, on a "radio" field, are options drawn but not
 	// choosable: SQL Server on Cloud SQL's engine choice, which CloudBurrow
 	// does not run (#1860).
@@ -446,6 +449,13 @@ type Field struct {
 	// {"filter": "<the picker's Filter by role>"} and answers
 	// {"items": [{"value": "...", "note": "..."}]}.
 	PickFrom string `json:"pickFrom,omitempty"`
+	// SeedFrom, on a "picklist" field, names the address parameter whose
+	// value seeds the chosen items (#2013): Google's Create custom role
+	// from selection opens Create custom role with the selected roles'
+	// permissions listed, each checked, unchecked to exclude it. The
+	// PickFrom call gets {"seed": "<the parameter's value>"} and answers
+	// {"items": [...], "note": "..."}, every item then chosen.
+	SeedFrom string `json:"seedFrom,omitempty"`
 }
 
 // PicklistFieldType is the Type of a list of items chosen from a picker
@@ -1250,7 +1260,10 @@ type Action struct {
 	// Href, when set, makes the action a link: it opens this console
 	// route instead of being performed, as a topic row's Create
 	// subscription opens the Create subscription page with the topic filled
-	// in (#1847). The action route never receives it.
+	// in (#1847). The action route never receives it. On a selection
+	// action, the checked rows go in the address as SelectionField's
+	// parameter, comma-separated: Roles' Create custom role from selection
+	// opens Create custom role with ?roles= (#2013).
 	Href string `json:"href,omitempty"`
 	// Button draws a row's action as a button on the row, before its
 	// menu, as Google's Triggers rows carry Run (#1854).
@@ -1260,6 +1273,15 @@ type Action struct {
 	// button: "next" for Next, as Google's Create application profile
 	// asks for the profile's type first (#1858), "continue" for Continue.
 	Steps string `json:"steps,omitempty"`
+	// Panel draws the action's form in the info panel beside the list
+	// instead of a dialog, its fields' Sections as the panel's tabs, as
+	// Google's Audit Logs edits the services checked in its table in an
+	// information panel (#2013). A selection action with Panel opens as
+	// rows are checked; when one row is checked and that row carries a
+	// Panel action of its own, the row's is drawn (its own values), and a
+	// row's Panel actions are not in its menu. A list action with Panel
+	// opens the panel from its button, as Set Default Configuration does.
+	Panel bool `json:"panel,omitempty"`
 }
 
 // PathActor is a provider with actions on the resources inside a resource.

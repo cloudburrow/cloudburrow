@@ -221,9 +221,9 @@ func TestIAMServiceAccountDetailsNameAndAuditTitle(t *testing.T) {
 	p.navigate("/iam-admin/audit?project=" + project)
 	p.waitFor(`(document.querySelector("#view .table-title") || {}).textContent === "Data Access audit logs configuration"`)
 	p.clickText("#view button", "Set Default Configuration")
-	p.waitFor(`document.querySelector(".modal.is-open") !== null`)
+	p.waitFor(`document.querySelector("#action-panel") !== null`)
 	var submit string
-	p.eval(`document.querySelector('.modal.is-open button[type="submit"]').textContent`, &submit)
+	p.eval(`document.querySelector("#action-panel-save").textContent`, &submit)
 	if submit != "Save" {
 		t.Errorf("Set Default Configuration ends in %q, want Save", submit)
 	}
