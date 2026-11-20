@@ -331,9 +331,11 @@ if [ -n "$dbs" ]; then
 else
   mysql $MYSQL_LOCAL -e "SET GLOBAL gtid_purged = '$(src mysql -N -e 'SELECT @@GLOBAL.gtid_executed')'"
 fi
-users=$(src mysql -N -e "SELECT CONCAT(QUOTE(user), '@', QUOTE(host)) FROM mysql.user WHERE user NOT IN ('root', 'mysql.sys', 'mysql.session', 'mysql.infoschema')")
+users=$(src mysql -N -e "SELECT CONCAT(QUOTE(user), '@', QUOTE(host)) FROM mysql.user WHERE user NOT IN ('root', '` + sqladmin.MySQLAdminUser + `', 'mysql.sys', 'mysql.session', 'mysql.infoschema')")
 {
   echo 'SET SESSION sql_log_bin = 0;'
+  # A primary whose 'root'@'%' the user deleted (#1993) has a standby without one.
+  [ "$(src mysql -N -e "SELECT COUNT(*) FROM mysql.user WHERE user = 'root' AND host = '%'")" != 0 ] || echo "DROP USER IF EXISTS 'root'@'%';"
   for u in $users; do
     src mysql -N --init-command='SET SESSION print_identified_with_as_hex = ON' -e "SHOW CREATE USER $u" | sed 's/^CREATE USER /CREATE USER IF NOT EXISTS /; s/$/;/'
     src mysql -N -e "SHOW GRANTS FOR $u" | sed 's/$/;/'
@@ -399,6 +401,9 @@ func (p *sqlProvisioner) mysqlStandby(ctx context.Context, spec sqladmin.Spec) e
 		return err
 	}
 	if err := p.rolloutDeployment(ctx, sb); err != nil {
+		return err
+	}
+	if err := p.mysqlSystemAccounts(ctx, sb, spec); err != nil {
 		return err
 	}
 	if out, err := p.mysqlScript(ctx, sb, mysqlStandbySetup); err != nil {

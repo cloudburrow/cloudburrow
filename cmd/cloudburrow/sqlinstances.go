@@ -113,7 +113,7 @@ func (p *sqlProvisioner) Engine(spec sqladmin.Spec) sqladmin.Engine {
 	}
 	if spec.MySQL() {
 		return &sqladmin.MySQL{Name: spec.Name, Version: spec.DatabaseVersion,
-			RootPassword: spec.RootPassword, HostAddr: p.hostAddr(spec.ServerName())}
+			RootPassword: spec.RootPassword, Admin: sqladmin.MySQLAdminUser, HostAddr: p.hostAddr(spec.ServerName())}
 	}
 	user := "postgres"
 	if spec.MasterUp && !spec.AwaitingPrimary {
@@ -213,6 +213,37 @@ mysql $MYSQL_LOCAL -e "CHANGE REPLICATION SOURCE TO SOURCE_HOST = '$CLOUDSQL_PRI
 	components.SQLReplicaUser + `}', SOURCE_PASSWORD = '$CLOUDSQL_REPLICATION_PASSWORD', SOURCE_AUTO_POSITION = 1, SOURCE_SSL = 1; START REPLICA; SET PERSIST super_read_only = ON"
 `
 
+// mysqlSystemAccountsScript gives a MySQL server CloudBurrow's own
+// account (sqladmin.MySQLAdminUser, #1993), reading the statements on its
+// standard input so the password never is on a command line. It signs in
+// as that account, or as root over TCP or over the socket on a server
+// that has none yet: a new one, whose 'root'@'%' no client has had the
+// time to delete, or one made before #1993, whose root could not be
+// deleted. A read replica's or a standby's super_read_only is lifted
+// while it runs; the statements turn the binary log off.
+const mysqlSystemAccountsScript = `set -e
+sql=$(cat)
+` + mysqlRootEnv + `mysql $MYSQL_LOCAL -N -e 'SELECT 1' >/dev/null 2>&1 || MYSQL_LOCAL="-uroot"
+sro=$(mysql $MYSQL_LOCAL -N -e 'SELECT @@GLOBAL.super_read_only' 2>/dev/null || echo 0)
+{
+  if [ "$sro" = 1 ]; then echo 'SET GLOBAL super_read_only = OFF;'; fi
+  printf '%s\n' "$sql"
+  if [ "$sro" = 1 ]; then echo 'SET GLOBAL super_read_only = ON;'; fi
+} | mysql $MYSQL_LOCAL
+`
+
+// mysqlSystemAccounts runs mysqlSystemAccountsScript in deployment's
+// server, each time it starts: an instance made before #1993 gets the
+// account at its first start after it.
+func (p *sqlProvisioner) mysqlSystemAccounts(ctx context.Context, deployment string, spec sqladmin.Spec) error {
+	var out strings.Builder
+	sql := sqladmin.MySQLSystemAccountsSQL(spec.DatabaseVersion, spec.RootPassword)
+	if err := nodeExec(p.cfg, deployment)(ctx, strings.NewReader(sql), &out, "sh", "-c", mysqlSystemAccountsScript); err != nil {
+		return fmt.Errorf("create CloudBurrow's account on %s: %w %s", deployment, err, strings.TrimSpace(out.String()))
+	}
+	return nil
+}
+
 func (p *sqlProvisioner) rollout(ctx context.Context, name string) error {
 	return p.rolloutDeployment(ctx, components.SQLInstancePrefix+name)
 }
@@ -258,6 +289,11 @@ func (p *sqlProvisioner) Start(ctx context.Context, spec sqladmin.Spec) error {
 	}
 	if err := p.rolloutDeployment(ctx, b.Name); err != nil {
 		return err
+	}
+	if spec.MySQL() {
+		if err := p.mysqlSystemAccounts(ctx, b.Name, spec); err != nil {
+			return err
+		}
 	}
 	if script := replicaSetup(spec); script != "" {
 		// A replica of a source representation instance runs idle until

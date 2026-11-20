@@ -96,6 +96,28 @@ type apiError struct {
 
 func (e *apiError) Error() string { return e.msg }
 
+// statusError is another service's error that carries its HTTP and Google
+// statuses: Cloud SQL's, when a backup it takes is refused.
+type statusError interface {
+	error
+	HTTPStatus() int
+	GoogleStatus() string
+}
+
+// asAPIError is err as an apiError: its own, another service's with its
+// statuses, or INTERNAL.
+func asAPIError(err error) *apiError {
+	var ae *apiError
+	if errors.As(err, &ae) {
+		return ae
+	}
+	var se statusError
+	if errors.As(err, &se) {
+		return &apiError{code: se.HTTPStatus(), status: se.GoogleStatus(), msg: se.Error()}
+	}
+	return &apiError{code: http.StatusInternalServerError, status: "INTERNAL", msg: err.Error()}
+}
+
 func errorf(code int, status, format string, args ...any) error {
 	return &apiError{code: code, status: status, msg: fmt.Sprintf(format, args...)}
 }
@@ -316,10 +338,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) fail(w http.ResponseWriter, method string, err error) {
-	var ae *apiError
-	if !errors.As(err, &ae) {
-		ae = &apiError{code: http.StatusInternalServerError, status: "INTERNAL", msg: err.Error()}
-	}
+	ae := asAPIError(err)
 	if s.Observe != nil {
 		s.Observe(method, ae.code)
 	}
@@ -675,12 +694,7 @@ func (s *Server) finishOp(op map[string]any, resp map[string]any, typ string, er
 	op["done"] = true
 	op["metadata"].(map[string]any)["endTime"] = s.stamp()
 	if err != nil {
-		code := 13
-		var ae *apiError
-		if errors.As(err, &ae) {
-			code = grpcCode(ae.code)
-		}
-		op["error"] = map[string]any{"code": code, "message": err.Error()}
+		op["error"] = map[string]any{"code": grpcCode(asAPIError(err).code), "message": err.Error()}
 		return
 	}
 	if resp == nil {
@@ -702,6 +716,14 @@ func grpcCode(httpCode int) int {
 		return 6
 	case http.StatusNotImplemented:
 		return 12
+	case http.StatusPreconditionFailed:
+		return 9
+	case http.StatusForbidden:
+		return 7
+	case http.StatusUnauthorized:
+		return 16
+	case http.StatusServiceUnavailable:
+		return 14
 	}
 	return 13
 }

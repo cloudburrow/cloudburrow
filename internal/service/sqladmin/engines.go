@@ -335,14 +335,79 @@ func (p *Postgres) DeleteUser(ctx context.Context, u User) error {
 
 func quotePGString(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
 
-// MySQL is the MySQL server, reached as root.
+// MySQL is the MySQL server, reached as its administrative account:
+// MySQLAdminUser on a created instance (#1993), whose root the user may
+// delete, as Cloud SQL's 'root'@'%' can be; root on `up`'s server.
 type MySQL struct {
-	Name         string
-	Version      string // MYSQL_8_4
-	AppUser      string // the application's user, granted each new database
-	Database     string
+	Name     string
+	Version  string // MYSQL_8_4
+	AppUser  string // the application's user, granted each new database
+	Database string
+	// RootPassword is the password the instance was created with: root's
+	// then, and its system accounts' for good (MySQLSystemAccountsSQL).
 	RootPassword string
-	HostAddr     func() string
+	// Admin is the account CloudBurrow signs in as; "" is root.
+	Admin    string
+	HostAddr func() string
+}
+
+// MySQLAdminUser is CloudBurrow's own account on a created MySQL
+// instance (#1993), as Cloud SQL manages its instances through system
+// accounts of its own (root@localhost, root@127.0.0.1 and root@::1 in
+// docs.cloud.google.com/sql/docs/mysql/users), not through 'root'@'%',
+// which the user may delete and the hashicorp/google provider does delete.
+// It is a name of its own, not root at a loopback host: MySQL picks the
+// most specific host first, so a root@127.0.0.1 would shadow 'root'@'%'
+// for every client the tunnel (a kubectl port-forward, from the pod's
+// loopback) brings, and refuse root's new password after users.update.
+// It exists at the loopback hosts only, so no other pod reaches it, and
+// users.list hides it, as gcloud cannot display Cloud SQL's system users.
+const MySQLAdminUser = "cloudsqladmin"
+
+// mysqlAdminHosts are MySQLAdminUser's hosts: a TCP sign-in from the
+// pod's loopback is 127.0.0.1 or ::1 (the image skips name resolution),
+// and localhost is the unix socket.
+var mysqlAdminHosts = []string{"localhost", "127.0.0.1", "::1"}
+
+// MySQLSystemAccountsSQL creates or refreshes MySQLAdminUser with every
+// privilege, signing in with the instance's creation password, with the
+// binary log off: each server has its own, as a read replica's or a
+// standby's mysql schema is never copied from its primary's binary log,
+// and a logged CREATE USER would stop a replica that has one already.
+func MySQLSystemAccountsSQL(version, password string) string {
+	pw := myString(password)
+	var sb strings.Builder
+	sb.WriteString("SET SESSION sql_log_bin = 0;\n")
+	for _, h := range mysqlAdminHosts {
+		acct := myString(MySQLAdminUser) + "@" + myString(h)
+		if version == "MYSQL_5_6" {
+			// 5.6 has no CREATE USER IF NOT EXISTS; its GRANT creates.
+			fmt.Fprintf(&sb, "GRANT ALL PRIVILEGES ON *.* TO %s IDENTIFIED BY %s WITH GRANT OPTION;\n", acct, pw)
+			continue
+		}
+		fmt.Fprintf(&sb, "CREATE USER IF NOT EXISTS %s IDENTIFIED BY %s;\nALTER USER %s IDENTIFIED BY %s;\nGRANT ALL PRIVILEGES ON *.* TO %s WITH GRANT OPTION;\n",
+			acct, pw, acct, pw, acct)
+	}
+	return sb.String()
+}
+
+// mysqlHidden is whether users.list leaves the account out: MySQL's own
+// (mysql.*), CloudBurrow's, the replication users (cloudsqlreplica, a
+// system user in Cloud SQL's list, and the standby's), and root at a
+// loopback host, which Cloud SQL lists as system users "used to provide
+// the managed database service".
+func mysqlHidden(name, host string) bool {
+	if strings.HasPrefix(name, "mysql.") || name == MySQLAdminUser || name == "cloudsqlreplica" || name == "cloudsqlstandby" {
+		return true
+	}
+	return name == "root" && (host == "localhost" || host == "127.0.0.1" || host == "::1")
+}
+
+func (m *MySQL) admin() string {
+	if m.Admin == "" {
+		return "root"
+	}
+	return m.Admin
 }
 
 func (m *MySQL) Instance() string        { return m.Name }
@@ -354,8 +419,32 @@ func (m *MySQL) db() (*sql.DB, error) {
 	if addr == "" {
 		return nil, Errorf(http.StatusServiceUnavailable, "the MySQL tunnel is not up")
 	}
+	db, err := m.open(addr, m.admin())
+	if err != nil || m.admin() == "root" {
+		return db, err
+	}
+	// An instance made before #1993 has no MySQLAdminUser until its next
+	// start makes one (sqlinstances.go); until then, root, which it could
+	// not delete, still signs in.
+	ctx, cancel := context.WithTimeout(context.Background(), engineTimeout)
+	defer cancel()
+	perr := db.PingContext(ctx)
+	var me *mysql.MySQLError
+	if perr == nil || !asMySQL(perr, &me) || me.Number != 1045 {
+		return db, nil
+	}
+	if rdb, rerr := m.open(addr, "root"); rerr == nil && rdb.PingContext(ctx) == nil {
+		db.Close()
+		return rdb, nil
+	} else if rerr == nil {
+		rdb.Close()
+	}
+	return db, nil
+}
+
+func (m *MySQL) open(addr, user string) (*sql.DB, error) {
 	cfg := mysql.NewConfig()
-	cfg.User, cfg.Passwd, cfg.Net, cfg.Addr = "root", m.RootPassword, "tcp", addr
+	cfg.User, cfg.Passwd, cfg.Net, cfg.Addr = user, m.RootPassword, "tcp", addr
 	cfg.Timeout = engineTimeout
 	db, err := sql.Open("mysql", cfg.FormatDSN())
 	if err != nil {
@@ -550,8 +639,7 @@ func (m *MySQL) ListUsers(ctx context.Context) ([]User, error) {
 		}
 		irows.Close()
 	}
-	rows, err := db.QueryContext(ctx, `SELECT User, Host FROM mysql.user
-		WHERE User NOT LIKE 'mysql.%' ORDER BY User, Host`)
+	rows, err := db.QueryContext(ctx, `SELECT User, Host FROM mysql.user ORDER BY User, Host`)
 	if err != nil {
 		return nil, myError(err)
 	}
@@ -561,6 +649,9 @@ func (m *MySQL) ListUsers(ctx context.Context) ([]User, error) {
 		var u User
 		if err := rows.Scan(&u.Name, &u.Host); err != nil {
 			return nil, err
+		}
+		if mysqlHidden(u.Name, u.Host) {
+			continue
 		}
 		if t, ok := iam[u.Name]; ok && u.Host == "%" {
 			u.Type, u.IAMEmail = t[0], t[1]
@@ -601,12 +692,28 @@ func (m *MySQL) CreateUser(ctx context.Context, u User, password string) error {
 	if err := checkName("user", u.Name); err != nil {
 		return err
 	}
+	if err := m.system(u); err != nil {
+		return err
+	}
 	acct := myString(u.Name) + "@" + myString(hostOr(u.Host))
 	return m.exec(ctx, "CREATE USER "+acct+" IDENTIFIED BY "+myString(password),
 		"GRANT ALL PRIVILEGES ON *.* TO "+acct)
 }
 
+// system refuses a write to a system account: Cloud SQL's "You can't
+// delete, modify, or assign database roles to these users" (users page).
+// root is one only on `up`'s server, which CloudBurrow reaches as root.
+func (m *MySQL) system(u User) error {
+	if mysqlHidden(u.Name, hostOr(u.Host)) || (u.Name == "root" && m.admin() == "root") {
+		return Errorf(http.StatusBadRequest, "Invalid request: %s is a system user of the instance, which cannot be created, modified or deleted.", u.Name)
+	}
+	return nil
+}
+
 func (m *MySQL) UpdateUser(ctx context.Context, u User, password string) error {
+	if mysqlHidden(u.Name, hostOr(u.Host)) {
+		return m.system(u)
+	}
 	acct := myString(u.Name) + "@" + myString(hostOr(u.Host))
 	if m.Version == "MYSQL_5_6" {
 		// MySQL 5.6's ALTER USER only expires a password (#1524).
@@ -616,8 +723,11 @@ func (m *MySQL) UpdateUser(ctx context.Context, u User, password string) error {
 }
 
 func (m *MySQL) DeleteUser(ctx context.Context, u User) error {
-	if u.Name == "root" || u.Name == m.AppUser {
+	if u.Name == m.AppUser && m.AppUser != "" {
 		return Errorf(http.StatusBadRequest, "Invalid request: %s is an account CloudBurrow itself uses and cannot be deleted.", u.Name)
+	}
+	if err := m.system(u); err != nil {
+		return err
 	}
 	stmts := []string{"DROP USER " + myString(u.Name) + "@" + myString(hostOr(u.Host))}
 	if u.Type != "" && u.Type != TypeBuiltIn {

@@ -187,7 +187,8 @@ echo "restored the backup at GTIDs $gtid"
 `
 
 // physicalInitSQL sets the root accounts back to the instance's password,
-// unlogged, so the server CloudBurrow reaches as root answers again.
+// and gives the restored copy CloudBurrow's own account (#1993), unlogged,
+// so the server CloudBurrow reaches answers again.
 func physicalInitSQL(rootPassword string) string {
 	pw := "'" + strings.NewReplacer(`\`, `\\`, `'`, `''`).Replace(rootPassword) + "'"
 	var sb strings.Builder
@@ -197,6 +198,8 @@ func physicalInitSQL(rootPassword string) string {
 		fmt.Fprintf(&sb, "CREATE USER IF NOT EXISTS %s IDENTIFIED BY %s;\nALTER USER %s IDENTIFIED BY %s;\nGRANT ALL PRIVILEGES ON *.* TO %s WITH GRANT OPTION;\n",
 			u, pw, u, pw, u)
 	}
+	// XtraBackup's servers are MySQL 8.0 and later.
+	sb.WriteString(strings.TrimPrefix(sqladmin.MySQLSystemAccountsSQL("MYSQL_8_0", rootPassword), "SET SESSION sql_log_bin = 0;\n"))
 	return sb.String()
 }
 
