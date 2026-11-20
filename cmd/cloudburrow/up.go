@@ -734,7 +734,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// The Cloud Storage companion APIs (#1957): batch operations,
 	// inventory reports and transfers over the instance's buckets.
 	storageJobsSrv := newStorageJobs(cfg, func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") },
-		func() *netfwd.Forwarder { return forwarderFor(forwarders, "pubsub") })
+		func() *netfwd.Forwarder { return forwarderFor(forwarders, "pubsub") },
+		func() *netfwd.Forwarder { return forwarderFor(forwarders, "bigquery") }, projects)
 	if storageJobsSrv != nil {
 		storageJobsRef = storageJobsSrv
 		for _, s := range storageJobsSrv.servers() {

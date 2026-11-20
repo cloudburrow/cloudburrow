@@ -73,6 +73,12 @@ func (f *fakeCompanions) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(p, "/v1/projects/p1/locations/global/jobs/j1"):
 		write(map[string]any{})
 	// Storage Insights.
+	case p == "/v1/projects/p1/locations/us-central1/datasetConfigs" && r.Method == http.MethodGet:
+		write(map[string]any{"datasetConfigs": []any{map[string]any{
+			"name": "projects/p1/locations/us-central1/datasetConfigs/d1", "uid": "u1", "retentionPeriodDays": 30,
+			"datasetConfigState": "CONFIG_STATE_ACTIVE", "sourceProjects": map[string]any{"projectNumbers": []string{"12"}},
+			"identity": map[string]any{"type": "IDENTITY_TYPE_PER_PROJECT", "name": "service-12@gcp-sa-storageinsights.iam.gserviceaccount.com"},
+			"link":     map[string]any{"dataset": "p1.d1u1", "linked": true}}}})
 	case p == "/v1/projects/p1/locations/us-central1/reportConfigs" && r.Method == http.MethodGet:
 		write(map[string]any{"reportConfigs": []any{map[string]any{
 			"name": "projects/p1/locations/us-central1/reportConfigs/c1", "displayName": "nightly",
@@ -349,10 +355,68 @@ func TestConsoleStorageJobsProvidersFollowThePorts(t *testing.T) {
 		}
 		return strings.Join(out, ",")
 	}
-	if got := ids(storageJobsProviders("s", "b", "i", "t")); got != "storage-batch-operations,storage-inventory-reports,storage-transfer,storage-transfer-agent-pools" {
+	if got := ids(storageJobsProviders("s", "b", "i", "t")); got != "storage-batch-operations,storage-inventory-reports,storage-insights-datasets,storage-transfer,storage-transfer-agent-pools" {
 		t.Errorf("providers = %s", got)
 	}
-	if got := ids(storageJobsProviders("s", "", "i", "")); got != "storage-inventory-reports" {
+	if got := ids(storageJobsProviders("s", "", "i", "")); got != "storage-inventory-reports,storage-insights-datasets" {
 		t.Errorf("providers with only Storage Insights = %s", got)
+	}
+}
+
+func TestConsoleStorageInsightsDatasets(t *testing.T) {
+	ctx := context.Background()
+	f, addr := newFakeCompanions(t)
+	p := storageInsightsDatasetsProvider{endpoint: addr}
+	l, err := p.List(ctx, "p1")
+	if err != nil || len(l.Items) != 1 {
+		t.Fatalf("List = %+v, %v", l, err)
+	}
+	if r := l.Items[0]; r.Name != "d1" || r.Fields["Linked dataset"] != "p1.d1u1" || r.Fields["Scope"] != "Projects 12" || r.Fields["Location"] != "us-central1" {
+		t.Errorf("row = %+v", r)
+	}
+	d, err := p.Detail(ctx, "p1", []string{"d1"})
+	if err != nil || d.Unavailable != "" || d.Edit == nil {
+		t.Fatalf("Detail = %+v, %v", d, err)
+	}
+	if a := p.DetailActions(ctx, "p1", []string{"d1"}); len(a) != 1 || a[0].ID != actInsightsUnlink {
+		t.Errorf("a linked configuration's actions = %+v, want Unlink dataset", a)
+	}
+	id, err := p.Create(ctx, "p1", map[string]string{"id": "mine", "location": "eu", "scope": "folders", "folders": "7\n8",
+		"bucketFilter": "exclude", "buckets": "gs://skip/\nregex:tmp-", "locationFilter": "include", "locations": "EU, us",
+		"retention": "10", "activity": "0", "identity": "IDENTITY_TYPE_PER_CONFIG", "newBuckets": "true"})
+	if err != nil || id != "mine" {
+		t.Fatalf("Create = %q, %v", id, err)
+	}
+	c, _ := f.called("POST /v1/projects/p1/locations/eu/datasetConfigs?datasetConfigId=mine")
+	for _, want := range []string{`"folderNumbers":["7","8"]`, `"bucketName":"skip"`, `"bucketPrefixRegex":"tmp-"`,
+		`"includeCloudStorageLocations":{"locations":["eu","us"]}`, `"retentionPeriodDays":10`, `"activityDataRetentionPeriodDays":0`} {
+		if !strings.Contains(c, want) {
+			t.Errorf("create sent %s, want %s in it", c, want)
+		}
+	}
+	for _, bad := range []map[string]string{{"id": "bad-id", "projects": "1", "retention": "10"},
+		{"id": "ok", "projects": "x", "retention": "10"}, {"id": "ok", "projects": "1", "retention": "91"},
+		{"id": "ok", "scope": "organization", "retention": "10"}} {
+		if _, err := p.Create(ctx, "p1", bad); err == nil {
+			t.Errorf("Create(%v) was accepted", bad)
+		}
+	}
+	if err := p.Edit(ctx, "p1", []string{"d1"}, map[string]string{"description": "x", "retention": "5"}); err != nil {
+		t.Fatal(err)
+	}
+	if c, ok := f.called("PATCH /v1/projects/p1/locations/us-central1/datasetConfigs/d1?updateMask=description%2CretentionPeriodDays"); !ok || !strings.Contains(c, `"retentionPeriodDays":5`) {
+		t.Errorf("Edit sent %q", c)
+	}
+	if err := p.ActAt(ctx, "p1", []string{"d1"}, actInsightsUnlink, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := f.called("POST /v1/projects/p1/locations/us-central1/datasetConfigs/d1:unlinkDataset"); !ok {
+		t.Error("Unlink dataset did not call datasetConfigs.unlinkDataset")
+	}
+	if err := p.Delete(ctx, "p1", "d1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := f.called("DELETE /v1/projects/p1/locations/us-central1/datasetConfigs/d1"); !ok {
+		t.Error("Delete did not call datasetConfigs.delete")
 	}
 }

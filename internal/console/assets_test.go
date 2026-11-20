@@ -2195,6 +2195,7 @@ func TestTheDrawerListsProductsNotPages(t *testing.T) {
 		"Configuration /storage/intelligence storage-intelligence Cloud Storage",
 		"Batch operations /storage/batch-operations storage-batch-operations Cloud Storage",
 		"Inventory reports /storage/inventory-reports storage-inventory-reports Cloud Storage",
+		"Insights datasets /storage/insights-datasets storage-insights-datasets Cloud Storage",
 		"Transfer data /storage/transfer storage-transfer Cloud Storage",
 		"Settings /storage/settings storage-settings Cloud Storage",
 		"Deleted buckets /storage/deleted storage-deleted Cloud Storage",

@@ -234,6 +234,8 @@ const ROUTES = [
     kind: "Job", section: "Storage", product: "storage", productTitle: "Cloud Storage" },
   { path: "/storage/inventory-reports", service: "storage-inventory-reports", icon: "storage", title: "Inventory reports",
     kind: "Inventory report configuration", section: "Storage", product: "storage", productTitle: "Cloud Storage" },
+  { path: "/storage/insights-datasets", service: "storage-insights-datasets", icon: "storage", title: "Insights datasets",
+    kind: "Dataset configuration", section: "Storage", product: "storage", productTitle: "Cloud Storage" },
   { path: "/storage/transfer", service: "storage-transfer", icon: "storage", title: "Transfer data", section: "Storage", redirect: "/transfer/jobs",
     product: "storage", productTitle: "Cloud Storage" },
   { path: "/storage/settings", service: "storage-settings", icon: "storage", title: "Settings",        section: "Storage",

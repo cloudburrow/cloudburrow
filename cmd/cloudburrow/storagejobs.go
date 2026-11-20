@@ -19,6 +19,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
+	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/storagejobs"
 )
 
@@ -45,8 +46,10 @@ func storageJobsEnabled(cfg config.Config) bool {
 }
 
 // newStorageJobs builds the three servers. storage is the Cloud Storage
-// tunnel and pubsub Pub/Sub's, read at each call.
-func newStorageJobs(cfg config.Config, storage, pubsubTunnel func() *netfwd.Forwarder) *storageJobs {
+// tunnel, pubsub Pub/Sub's and bq BigQuery's, read at each call; projects
+// scopes Storage Insights dataset configurations (#1976), nil for none.
+func newStorageJobs(cfg config.Config, storage, pubsubTunnel, bq func() *netfwd.Forwarder,
+	projects *resourcemanager.Registry) *storageJobs {
 	if !storageJobsEnabled(cfg) {
 		return nil
 	}
@@ -69,6 +72,12 @@ func newStorageJobs(cfg config.Config, storage, pubsubTunnel func() *netfwd.Forw
 		state = filepath.Join(cfg.StateDir, "storagejobs")
 	}
 	rt := storagejobs.NewRuntime(gcs, pub, state)
+	if serviceEnabled(cfg, config.ServiceBigQuery) && bq != nil {
+		rt.Linked = insightsLinks{tunnel: bq}
+	}
+	if projects != nil {
+		rt.Projects = insightsProjects{r: projects}
+	}
 	addr := func(port int) string { return net.JoinHostPort(cfg.BindAddress, strconv.Itoa(port)) }
 	j := &storageJobs{rt: rt}
 	if cfg.Endpoints.StorageBatchOperations >= 0 {

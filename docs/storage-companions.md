@@ -6,7 +6,7 @@ the CLI process whenever `storage` is enabled, each on its own port, JSON only:
 | API | Port flag | Default | `env` exports |
 |---|---|---|---|
 | Storage Batch Operations v1 (`storagebatchoperations.googleapis.com`) | `--port-storagebatchoperations` | `9035` | `CLOUDBURROW_STORAGEBATCHOPERATIONS_ENDPOINT`, `CLOUDSDK_API_ENDPOINT_OVERRIDES_STORAGEBATCHOPERATIONS` |
-| Storage Insights v1, inventory reports (`storageinsights.googleapis.com`) | `--port-storageinsights` | `9036` | `CLOUDBURROW_STORAGEINSIGHTS_ENDPOINT`, `CLOUDSDK_API_ENDPOINT_OVERRIDES_STORAGEINSIGHTS` |
+| Storage Insights v1, inventory reports and datasets (`storageinsights.googleapis.com`) | `--port-storageinsights` | `9036` | `CLOUDBURROW_STORAGEINSIGHTS_ENDPOINT`, `CLOUDSDK_API_ENDPOINT_OVERRIDES_STORAGEINSIGHTS` |
 | Storage Transfer Service v1 (`storagetransfer.googleapis.com`) | `--port-storagetransfer` | `9037` | `CLOUDBURROW_STORAGETRANSFER_ENDPOINT`, `CLOUDSDK_API_ENDPOINT_OVERRIDES_STORAGETRANSFER` |
 
 Use the official clients' REST transports with the endpoint and no credentials:
@@ -18,7 +18,8 @@ c, err := storagetransfer.NewRESTClient(ctx,
 ```
 
 `cloudburrow terraform` sets `storage_transfer_custom_endpoint` and `storage_insights_custom_endpoint`,
-so `google_storage_transfer_job` and `google_storage_insights_report_config` apply locally.
+so `google_storage_transfer_job`, `google_storage_insights_report_config` and
+`google_storage_insights_dataset_config` apply locally.
 
 Every object is read and written through the instance's Cloud Storage JSON API, so versioning, holds,
 retention, soft delete and CMEK behave as they do for any other caller. Records are kept under the
@@ -35,7 +36,8 @@ curl -X POST http://$CLOUDBURROW_STORAGETRANSFER_ENDPOINT/cloudburrow/v1/clock:a
 ```
 
 The call runs every transfer and writes every report that the new time makes due before it answers.
-The console's Storage Transfer Service and Inventory reports pages offer it as Advance clock.
+The console's Storage Transfer Service, Inventory reports and Insights datasets pages offer it as
+Advance clock.
 
 ## Storage Batch Operations
 
@@ -69,10 +71,54 @@ names:
 ```
 
 The destination bucket must be in the source bucket's project and location, and a bucket takes at most
-100 configurations. `reportDetails` records each report. Dataset configurations, which are BigQuery
-linked datasets of Google's views over the buckets' metadata refreshed daily, are not served and
-answer 501, as do the operations only they make: building and refreshing those views in the
-instance's BigQuery is its own work (#1976).
+100 configurations. `reportDetails` records each report.
+
+## Storage Insights datasets
+
+A dataset configuration (`datasetConfigs`, #1976) takes a snapshot of its scope's project, bucket and
+object metadata when it is made and every 24 hours after on the shared clock (Google takes the first
+within 24 to 48 hours), and keeps the snapshots of the last `retentionPeriodDays` days (1 to 90;
+`activityDataRetentionPeriodDays`, 0 to 365, is kept). Every change answers a long-running operation
+that is already done; `operations` get, list, cancel and delete them.
+
+- **Location**: one of Google's linked-dataset locations: `us`, `eu`, `asia-south1`, `asia-south2`,
+  `asia-southeast1`, `europe-west1`, `us-central1`, `us-east1`, `us-east4`. Source buckets can be
+  anywhere.
+- **Name**: up to 128 letters, numbers and underscores, starting with a letter.
+- **Scope**: `sourceProjects` (project numbers), `sourceFolders` (every project under them),
+  `organizationScope` (with `organizationNumber`), or `cloudStorageObjectPath`, a `gs://` file of
+  `projects/N` or `folders/N` lines (not both), which becomes the projects or folders it names. With
+  `organizationNumber`, projects outside it are left out with an `error_attributes_view` row (code 1);
+  a source project without Storage Intelligence is left out with code 4. At most 10,000 projects or
+  folders.
+- **Filters**: include or exclude bucket locations, and include or exclude buckets by `bucketName` or
+  `bucketPrefixRegex` (RE2, matched from the start of the name). Without
+  `includeNewlyCreatedBuckets`, only the buckets that existed when the configuration was made.
+- **Identity**: `IDENTITY_TYPE_PER_CONFIG` (the default) or `IDENTITY_TYPE_PER_PROJECT`, whose service
+  agent is `service-PROJECT_NUMBER@gcp-sa-storageinsights.iam.gserviceaccount.com`, as Google documents.
+  The per-configuration agent's form is not documented; CloudBurrow names it
+  `service-PROJECT_NUMBER-UIDPREFIX@gcp-sa-storageinsights.iam.gserviceaccount.com`.
+- The configuration's project needs Storage Intelligence (STANDARD, TRIAL or ESSENTIALS).
+
+`linkDataset` makes the linked dataset in the instance's BigQuery (`--services bigquery`), in the
+configuration's project and location, named after the configuration's ID and its uid (as Google's
+example, `my_dataset276daa7e_2991_...`, shows); `link.dataset` is `PROJECT.DATASET`. It holds Google's
+views with Google's columns:
+
+| View | Rows |
+|---|---|
+| `bucket_attributes_view`, `bucket_attributes_latest_snapshot_view` | each bucket, with `objectCount` and `totalSize` |
+| `object_attributes_view`, `object_attributes_latest_snapshot_view` | each live object (no checksums for a Cloud KMS-encrypted object) |
+| `project_attributes_view` | each project in scope |
+| `object_contexts_catalog_view` | the latest snapshot's objects that have contexts |
+| `events_view` | `eventCode` 1 per view refreshed and 2 per snapshot |
+| `error_attributes_view` | the projects and buckets left out, and why |
+| `object_events_view`, `project_activity_view`, `bucket_activity_view`, `bucket_region_activity_view` | empty: the instance keeps no request log to aggregate (#1979) |
+
+Each snapshot refreshes the dataset. It is read-only to every client: the views read tables that
+`tables.list` does not show, and the BigQuery front refuses writes into the dataset (403
+`accessDenied`). `unlinkDataset` deletes it; a configuration cannot be deleted while it is linked, as
+Google documents, so with Terraform set `link_dataset = false` before `destroy`.
 
 ## Storage Transfer Service
 

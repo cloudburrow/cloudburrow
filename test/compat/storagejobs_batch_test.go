@@ -73,7 +73,13 @@ func storageJobsClock(t *testing.T, endpoint string, d time.Duration) time.Time 
 // batch operations require an enrolled project.
 func setStorageIntelligence(t *testing.T, h *Harness, edition string) {
 	t.Helper()
-	u := h.Endpoint(EnvStorage) + "/v2/projects/" + h.Project() + "/locations/global/intelligenceConfig?updateMask=edition_config"
+	setStorageIntelligenceOf(t, h, h.Project(), edition)
+}
+
+// setStorageIntelligenceOf sets another project's edition.
+func setStorageIntelligenceOf(t *testing.T, h *Harness, project, edition string) {
+	t.Helper()
+	u := h.Endpoint(EnvStorage) + "/v2/projects/" + project + "/locations/global/intelligenceConfig?updateMask=edition_config"
 	req, err := http.NewRequest(http.MethodPatch, u, bytes.NewReader([]byte(`{"editionConfig":"`+edition+`"}`)))
 	if err != nil {
 		t.Fatal(err)

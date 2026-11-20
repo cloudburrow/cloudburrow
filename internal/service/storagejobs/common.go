@@ -105,6 +105,12 @@ type Runtime struct {
 	Clock *Clock
 	// StateDir is where the records are kept; "" keeps them in memory.
 	StateDir string
+	// Linked makes Storage Insights linked datasets in the instance's
+	// BigQuery; nil when BigQuery is not served (#1976).
+	Linked LinkedDatasets
+	// Projects lists the instance's projects for a dataset configuration's
+	// scope; nil scopes each configuration to its own project.
+	Projects ProjectLister
 
 	once    sync.Once
 	cancel  context.CancelFunc

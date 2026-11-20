@@ -21,9 +21,8 @@ package storagejobs
 // The destination bucket must be in the source bucket's project and
 // location; a bucket takes at most 100 configurations.
 //
-// Dataset configurations (BigQuery linked datasets of Storage Insights)
-// are not served: CloudBurrow's BigQuery has no linked datasets, so they
-// answer UNIMPLEMENTED with that reason.
+// Dataset configurations, which link BigQuery datasets of the buckets'
+// metadata, are datasets.go's.
 
 import (
 	"bytes"
@@ -87,6 +86,8 @@ type InsightsServer struct {
 	configs map[string]*reportConfig
 	// gen serializes report generation.
 	gen sync.Mutex
+	// ds is the dataset configurations (datasets.go), under mu.
+	ds datasets
 }
 
 // NewInsightsServer serves the API on addr over rt.
@@ -109,6 +110,7 @@ func NewInsightsServer(addr string, rt *Runtime) *InsightsServer {
 		s.configs[c.Config.Name] = c
 	}
 	rt.onTick(s.writeDue)
+	s.restoreDatasets()
 	return s
 }
 
@@ -136,6 +138,7 @@ func (s *InsightsServer) ResetProject(project string) error {
 		}
 	}
 	s.saveLocked()
+	s.resetDatasetsLocked(project)
 	return nil
 }
 
@@ -202,14 +205,8 @@ func (s *InsightsServer) route(r *http.Request) (string, any, error) {
 			out, err := s.detail(name, strings.Join(p[7:], "/"))
 			return pre + "reportConfigs.reportDetails.get", out, err
 		}
-	case "datasetConfigs":
-		return pre + "datasetConfigs", nil, unimplemented("Storage Insights dataset configurations are not available in CloudBurrow: " +
-			"each links a BigQuery dataset of Google's views over the buckets' metadata, refreshed daily, which needs this service to " +
-			"build and refresh them in the instance's BigQuery (#1976). Inventory reports (reportConfigs) are served.")
-	case "operations":
-		// Only dataset configurations make operations.
-		return pre + "operations", nil, unimplemented("Storage Insights operations are not available in CloudBurrow: only dataset " +
-			"configurations, which are not served (#1976), make them. Inventory report configurations answer at once.")
+	case "datasetConfigs", "operations":
+		return s.routeDatasets(r, p, parent)
 	}
 	return "", nil, notFound("%s not found", r.URL.Path)
 }

@@ -61,7 +61,8 @@ func storageJobsProviders(storage, batch, insights, transfer string) []console.P
 		out = append(out, storageBatchProvider{endpoint: batch})
 	}
 	if insights != "" {
-		out = append(out, storageInventoryProvider{endpoint: insights, storage: storage})
+		out = append(out, storageInventoryProvider{endpoint: insights, storage: storage},
+			storageInsightsDatasetsProvider{endpoint: insights})
 	}
 	if transfer != "" {
 		out = append(out, storageTransferProvider{endpoint: transfer}, storageAgentPoolsProvider{endpoint: transfer})

@@ -1,8 +1,7 @@
 package storagejobs
 
 // MethodStatuses is every method of the three APIs' discovery documents
-// (Storage Insights: its REST mapping), true where it is served. The
-// dataset configurations of Storage Insights answer UNIMPLEMENTED.
+// (Storage Insights: its REST mapping), true where it is served.
 func MethodStatuses() map[string]bool {
 	out := map[string]bool{}
 	for _, m := range []string{
@@ -20,6 +19,12 @@ func MethodStatuses() map[string]bool {
 		"storageinsights.projects.locations.reportConfigs.delete",
 		"storageinsights.projects.locations.reportConfigs.reportDetails.get",
 		"storageinsights.projects.locations.reportConfigs.reportDetails.list",
+		"storageinsights.projects.locations.datasetConfigs.create", "storageinsights.projects.locations.datasetConfigs.get",
+		"storageinsights.projects.locations.datasetConfigs.list", "storageinsights.projects.locations.datasetConfigs.patch",
+		"storageinsights.projects.locations.datasetConfigs.delete", "storageinsights.projects.locations.datasetConfigs.linkDataset",
+		"storageinsights.projects.locations.datasetConfigs.unlinkDataset",
+		"storageinsights.projects.locations.operations.get", "storageinsights.projects.locations.operations.list",
+		"storageinsights.projects.locations.operations.cancel", "storageinsights.projects.locations.operations.delete",
 		"storagetransfer.googleServiceAccounts.get",
 		"storagetransfer.transferJobs.create", "storagetransfer.transferJobs.get", "storagetransfer.transferJobs.list",
 		"storagetransfer.transferJobs.patch", "storagetransfer.transferJobs.run", "storagetransfer.transferJobs.delete",
@@ -31,16 +36,6 @@ func MethodStatuses() map[string]bool {
 		"storagetransfer.projects.agentPools.delete",
 	} {
 		out[m] = true
-	}
-	for _, m := range []string{
-		"storageinsights.projects.locations.datasetConfigs.create", "storageinsights.projects.locations.datasetConfigs.get",
-		"storageinsights.projects.locations.datasetConfigs.list", "storageinsights.projects.locations.datasetConfigs.patch",
-		"storageinsights.projects.locations.datasetConfigs.delete", "storageinsights.projects.locations.datasetConfigs.linkDataset",
-		"storageinsights.projects.locations.datasetConfigs.unlinkDataset",
-		"storageinsights.projects.locations.operations.get", "storageinsights.projects.locations.operations.list",
-		"storageinsights.projects.locations.operations.cancel", "storageinsights.projects.locations.operations.delete",
-	} {
-		out[m] = false
 	}
 	return out
 }

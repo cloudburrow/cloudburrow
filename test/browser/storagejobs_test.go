@@ -349,9 +349,101 @@ func TestStorageCompanionScreensMeetWCAG(t *testing.T) {
 	var pages []a11yPage
 	for _, l := range []struct{ name, path string }{
 		{"Batch operations", "/storage/batch-operations"}, {"Inventory reports", "/storage/inventory-reports"},
+		{"Insights datasets", "/storage/insights-datasets"},
 		{"Transfer jobs", "/transfer/jobs"}, {"Agent pools", "/transfer/agent-pools"},
 	} {
 		pages = append(pages, listAndCreate(l.name, l.path, project)...)
 	}
 	auditScreens(t, pages)
+}
+
+// TestStorageInsightsDatasetsThroughThePage (#1976), in the storage shard.
+// Create dataset configuration on Cloud Storage > Insights datasets, over
+// the project's number with a bucket regex, makes a configuration the
+// official Storage Insights client reads; with BigQuery served, Link
+// dataset on its page links it, and the page names the dataset. Delete
+// from the row, once unlinked, deletes it.
+func TestStorageInsightsDatasetsThroughThePage(t *testing.T) {
+	needService(t, "storage-insights-datasets")
+	ctx := context.Background()
+	c, err := insights.NewRESTClient(ctx, option.WithEndpoint("http://"+endpoint(t, envStorageInsights)), option.WithoutAuthentication())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+	gcs, _ := storageSDK(t)
+	// The linked dataset is made in the configuration's project, which
+	// BigQuery must serve.
+	project := strings.TrimSpace(os.Getenv("CLOUDBURROW_TEST_BIGQUERY_PROJECT"))
+	link := project != ""
+	if !link {
+		project = uniqueProject(t)
+	}
+	enableIntelligence(t, project)
+	suffix := fmt.Sprint(time.Now().UnixNano() % 1e9)
+	bucket := "cb-ds-" + suffix
+	regionalBucket(t, gcs, project, bucket)
+	writeObjects(t, gcs, bucket, "one")
+	t.Cleanup(func() { _ = gcs.Bucket(bucket).Object("one").Delete(context.Background()) })
+	attrs, err := gcs.Bucket(bucket).Attrs(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := "browser_" + suffix
+	name := "projects/" + project + "/locations/us-central1/datasetConfigs/" + id
+	t.Cleanup(func() {
+		if op, err := c.UnlinkDataset(context.Background(), &storageinsightspb.UnlinkDatasetRequest{Name: name}); err == nil {
+			_ = op.Wait(context.Background())
+		}
+		if op, err := c.DeleteDatasetConfig(context.Background(), &storageinsightspb.DeleteDatasetConfigRequest{Name: name}); err == nil {
+			_ = op.Wait(context.Background())
+		}
+	})
+
+	p := open(t)
+	p.navigate("/storage/insights-datasets/create?project=" + project)
+	p.submitForm(map[string]string{"id": id, "description": "from the page", "location": "us-central1",
+		"projects": fmt.Sprint(attrs.ProjectNumber), "bucketFilter": "include", "buckets": "regex:cb-ds-" + suffix,
+		"retention": "14"}, "id")
+	var cfg *storageinsightspb.DatasetConfig
+	eventually(t, "the configuration", func() bool {
+		cfg, err = c.GetDatasetConfig(ctx, &storageinsightspb.GetDatasetConfigRequest{Name: name})
+		return err == nil
+	})
+	if cfg.GetRetentionPeriodDays() != 14 || cfg.GetDescription() != "from the page" ||
+		len(cfg.GetIncludeCloudStorageBuckets().GetCloudStorageBuckets()) != 1 {
+		t.Errorf("the configuration made on the page = %v", cfg)
+	}
+	p.navigate("/storage/insights-datasets/" + id + "?project=" + project)
+	p.waitFor(`document.querySelector("#detail-panel") !== null && document.querySelector("#detail-panel").textContent.includes("14 days")`)
+	if link && serviceServed(t, "bigquery") {
+		p.clickAction("Link dataset", "")
+		eventually(t, "the link", func() bool {
+			cfg, err = c.GetDatasetConfig(ctx, &storageinsightspb.GetDatasetConfigRequest{Name: name})
+			return err == nil && cfg.GetLink().GetLinked()
+		})
+		p.navigate("/storage/insights-datasets/" + id + "?project=" + project)
+		p.waitFor(fmt.Sprintf(`document.querySelector("#detail-panel") !== null && document.body.textContent.includes(%q)`, cfg.GetLink().GetDataset()))
+		op, err := c.UnlinkDataset(ctx, &storageinsightspb.UnlinkDatasetRequest{Name: name})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := op.Wait(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p.navigate("/storage/insights-datasets?project=" + project)
+	p.openRowDelete(id, "Delete")
+	p.confirmByName(id)
+	eventually(t, "the configuration to be deleted", func() bool {
+		_, err := c.GetDatasetConfig(ctx, &storageinsightspb.GetDatasetConfigRequest{Name: name})
+		return err != nil
+	})
+}
+
+// serviceServed reports whether the console has the screen id.
+func serviceServed(t *testing.T, id string) bool {
+	t.Helper()
+	_, body := consoleDo(t, http.MethodGet, "/api/services", "")
+	return strings.Contains(body, `"id":"`+id+`"`)
 }

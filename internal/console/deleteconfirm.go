@@ -70,6 +70,8 @@ var DeleteConfirmRules = map[string]DeleteConfirmRule{
 	"storage-batch-operations": unverified,
 	// UNVERIFIED: "On the Report configuration details page, click Delete." No dialog described (docs re-read 2026-11-19).
 	"storage-inventory-reports": unverified,
+	// UNVERIFIED: "Select the dataset configuration ... click Delete." No dialog described (docs re-read 2026-11-19).
+	"storage-insights-datasets": unverified,
 	// UNVERIFIED: no console steps for deleting a transfer job read (docs re-read 2026-11-19)
 	"storage-transfer": unverified,
 	// UNVERIFIED: no console steps for deleting an agent pool read (docs re-read 2026-11-19)
