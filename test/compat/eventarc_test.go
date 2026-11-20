@@ -37,7 +37,7 @@ import (
 // finalized trigger filtered on a bucket delivers an upload with
 // ce-subject objects/NAME and the object. Get, List and an Update of the
 // labels read and change them; a change of the event filters, an unknown
-// event type, a channel and a missing service are refused. Delete removes
+// event type, a missing channel and a missing service are refused. Delete removes
 // what each trigger made, and leaves the user's topic.
 func TestEventarcTriggersToCloudRun(t *testing.T) {
 	h := New(t)
@@ -135,11 +135,16 @@ func TestEventarcTriggersToCloudRun(t *testing.T) {
 	// Refusals.
 	for name, bad := range map[string]*eventarcpb.Trigger{
 		"an unknown event type": {EventFilters: []*eventarcpb.EventFilter{typeFilter("google.cloud.example.v1.unknown")}, Destination: dest("")},
-		"a channel":             {Channel: parent + "/channels/c", EventFilters: []*eventarcpb.EventFilter{typeFilter("x")}, Destination: dest("")},
 	} {
 		if _, err := ec.CreateTrigger(ctx, &eventarcpb.CreateTriggerRequest{Parent: parent, TriggerId: "bad", Trigger: bad}); status.Code(err) != codes.Unimplemented {
 			t.Errorf("CreateTrigger with %s: %v; want Unimplemented", name, err)
 		}
+	}
+	// Channels are served since #1947 (TestEventarcChannelsToCloudRun): a
+	// trigger on one that does not exist is INVALID_ARGUMENT.
+	if _, err := ec.CreateTrigger(ctx, &eventarcpb.CreateTriggerRequest{Parent: parent, TriggerId: "bad", Trigger: &eventarcpb.Trigger{
+		Channel: parent + "/channels/c", EventFilters: []*eventarcpb.EventFilter{typeFilter("x")}, Destination: dest("")}}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("CreateTrigger with a missing channel: %v; want InvalidArgument", err)
 	}
 	missing := &eventarcpb.Trigger{EventFilters: []*eventarcpb.EventFilter{typeFilter("google.cloud.pubsub.topic.v1.messagePublished")},
 		Destination: &eventarcpb.Destination{Descriptor_: &eventarcpb.Destination_CloudRun{CloudRun: &eventarcpb.CloudRun{Service: "no-such-service"}}}}

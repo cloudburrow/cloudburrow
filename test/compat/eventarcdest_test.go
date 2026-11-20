@@ -27,9 +27,9 @@ import (
 // HTTP endpoint (destination.httpEndpoint.uri with the network attachment
 // Google requires) delivers a published message to the URI as a
 // binary-mode CloudEvent; without the network attachment, or to a
-// function that does not exist, CreateTrigger is INVALID_ARGUMENT. A GKE
-// or Workflows destination, a channel and the channel and channel
-// connection methods are UNIMPLEMENTED with the reason.
+// function that does not exist, or on a channel that does not exist,
+// CreateTrigger is INVALID_ARGUMENT. A GKE or Workflows destination is
+// UNIMPLEMENTED with the reason.
 func TestEventarcDestinations(t *testing.T) {
 	h := New(t)
 	pubsubAddr := runShardEndpoint(h, "CLOUDBURROW_TEST_RUN_PUBSUB", EnvPubSub)
@@ -76,21 +76,14 @@ func TestEventarcDestinations(t *testing.T) {
 			Gke: &eventarcpb.GKE{Cluster: "c", Location: "us-central1", Namespace: "default", Service: "s"}}}}, codes.Unimplemented},
 		"a workflow": {&eventarcpb.Trigger{EventFilters: typ, Destination: &eventarcpb.Destination{
 			Descriptor_: &eventarcpb.Destination_Workflow{Workflow: parent + "/workflows/w"}}}, codes.Unimplemented},
-		"a channel": {&eventarcpb.Trigger{EventFilters: typ, Channel: parent + "/channels/c", Destination: http1}, codes.Unimplemented},
+		// Channels are served since #1947 (TestEventarcChannelsToCloudRun);
+		// a trigger on one that does not exist is INVALID_ARGUMENT.
+		"a missing channel": {&eventarcpb.Trigger{EventFilters: typ, Channel: parent + "/channels/c", Destination: http1}, codes.InvalidArgument},
 	} {
 		_, err := ec.CreateTrigger(ctx, &eventarcpb.CreateTriggerRequest{Parent: parent, TriggerId: "bad", Trigger: c.tr})
 		if status.Code(err) != c.code {
 			t.Errorf("CreateTrigger with %s: %v; want %v", name, err, c.code)
 		}
-	}
-	if _, err := ec.CreateChannel(ctx, &eventarcpb.CreateChannelRequest{Parent: parent, ChannelId: "c",
-		Channel: &eventarcpb.Channel{Provider: parent + "/providers/datadog"}}); status.Code(err) != codes.Unimplemented ||
-		!strings.Contains(err.Error(), "third-party provider") {
-		t.Errorf("CreateChannel: %v; want UNIMPLEMENTED naming why", err)
-	}
-	if _, err := ec.CreateChannelConnection(ctx, &eventarcpb.CreateChannelConnectionRequest{Parent: parent, ChannelConnectionId: "c",
-		ChannelConnection: &eventarcpb.ChannelConnection{Channel: parent + "/channels/c"}}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("CreateChannelConnection: %v; want UNIMPLEMENTED", err)
 	}
 
 	op, err := ec.CreateTrigger(ctx, &eventarcpb.CreateTriggerRequest{Parent: parent, TriggerId: "to-http-endpoint",
