@@ -18,6 +18,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/k8s"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
+	"github.com/cloudburrow/cloudburrow/internal/pubsubfront"
 	"github.com/cloudburrow/cloudburrow/internal/registry"
 	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
@@ -295,6 +296,9 @@ func (r *runService) Start(ctx context.Context) error {
 	}
 	functions.WithIngress(ingress, tokens)
 	r.functions.Store(functions)
+	// A pipeline's Protobuf payload formats (#1947) read their schema as
+	// a Pub/Sub schema is read.
+	runadapter.UseEventarcProtoSchemas(pubsubfront.ParseProtoSchema)
 	if r.events != nil {
 		functions.WithEvents(runadapter.Events{Transport: r.events.transport, Tokens: r.events.tokens,
 			PushBase: r.events.pushBase, Ingress: ingress})
@@ -316,8 +320,11 @@ func (r *runService) Start(ctx context.Context) error {
 			// Eventarc (#1877) under /eventarc/v1/: its trigger paths are
 			// Cloud Build's.
 			runadapter.EventarcHandlerOr(func(g grpc.ServiceRegistrar) { functions.Eventarc().Register(g); ops.Register(g) },
-				functions.FunctionsHandler(runadapter.SourceDeployHandler(sourceDeploy,
-					adapter.V1Handler(runadapter.NewRESTHandler(register))))))))
+				// The Eventarc Publishing API (#1947) under
+				// /eventarcpublishing/v1/: its bus paths are Eventarc's.
+				runadapter.EventarcPublishingHandlerOr(functions.EventarcPublisher(),
+					functions.FunctionsHandler(runadapter.SourceDeployHandler(sourceDeploy,
+						adapter.V1Handler(runadapter.NewRESTHandler(register)))))))))
 	// Artifact Registry's own prefix (#1578): its Locations mixin, whose
 	// /v1/ path is Cloud Run v1's, and its other calls through the above.
 	jsonAPI = runadapter.ArtifactRegistryHandlerOr(jsonAPI)
@@ -341,6 +348,7 @@ func (r *runService) Start(ctx context.Context) error {
 		functions.Register(g)
 		// Eventarc (#1877), on the functions' event transport.
 		functions.Eventarc().Register(g)
+		functions.EventarcPublisher().Register(g)
 	}); err != nil {
 		return err
 	}

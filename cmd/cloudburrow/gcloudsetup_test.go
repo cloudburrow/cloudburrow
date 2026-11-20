@@ -116,7 +116,8 @@ func testGcloudSetup(t *testing.T, gdir, stateDir string) string {
 		"developerconnect":  "http://127.0.0.1:9004/developerconnect/",
 		"containeranalysis": "http://127.0.0.1:9004/containeranalysis/",
 		// Eventarc under its prefix on the Run port (#1877).
-		"eventarc": "http://127.0.0.1:9004/eventarc/",
+		"eventarc":           "http://127.0.0.1:9004/eventarc/",
+		"eventarcpublishing": "http://127.0.0.1:9004/eventarcpublishing/",
 	}
 	// Every other override of the pinned gcloud is the local refusal on the
 	// Resource Manager port (#1975), so none is left at googleapis.com.

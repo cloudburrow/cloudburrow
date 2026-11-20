@@ -409,6 +409,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			_, err := api.WriteLogEntries(ctx, &loggingpb.WriteLogEntriesRequest{Entries: []*loggingpb.LogEntry{e}})
 			return err
 		})
+		// Eventarc Advanced's platform logs (#1947).
+		runadapter.UseEventarcLogging(func(ctx context.Context, e *loggingpb.LogEntry) error {
+			_, err := api.WriteLogEntries(ctx, &loggingpb.WriteLogEntriesRequest{Entries: []*loggingpb.LogEntry{e}})
+			return err
+		})
 		tasksSvc.useLogging(func(ctx context.Context, e *loggingpb.LogEntry) error {
 			_, err := api.WriteLogEntries(ctx, &loggingpb.WriteLogEntriesRequest{Entries: []*loggingpb.LogEntry{e}})
 			return err

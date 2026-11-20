@@ -108,6 +108,12 @@ var DeleteConfirmRules = map[string]DeleteConfirmRule{
 	"functions": unverified,
 	// UNVERIFIED: "Select the trigger and click Delete." No dialog described (docs re-read 2026-11-19).
 	"eventarc": unverified,
+	// Eventarc Advanced and channels (#1947).
+	"eventarc-buses":              unverified,
+	"eventarc-pipelines":          unverified,
+	"eventarc-enrollments":        unverified,
+	"eventarc-google-api-sources": unverified,
+	"eventarc-channels":           unverified,
 	// "enter the name of the secret, and then click Delete secret."
 	"secrets": {Style: DeleteConfirmName, Source: "https://docs.cloud.google.com/secret-manager/docs/delete-secrets", Verified: true},
 	// "enter the name of the secret, and then click Delete secret."

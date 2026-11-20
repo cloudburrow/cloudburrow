@@ -74,7 +74,7 @@ var eaDestinations = []string{"Cloud Run", "Cloud Run functions", "HTTP endpoint
 
 const eventarcNote = "Triggers deliver each event to their destination as a CloudEvent in binary content mode, over a Pub/Sub " +
 	"push subscription Eventarc makes. Google sources' direct events of Cloud Pub/Sub and Cloud Storage, the Cloud Audit Logs (Admin Activity) entries of the calls this instance serves over gRPC, and Cloud Firestore's document events, are served; " +
-	"channels (third-party providers) are not. The columns follow Google's Triggers page (UNVERIFIED, re-read 2026-11-19: " +
+	"a trigger on a channel delivers the custom or third-party events published to it (#1947). The columns follow Google's Triggers page (UNVERIFIED, re-read 2026-11-19: " +
 	"https://docs.cloud.google.com/eventarc/standard/docs/overview names the page, not its columns)."
 
 func (p eventarcProvider) project(project string) string { return p.run.projectOr(project) }
@@ -218,8 +218,12 @@ func (p eventarcProvider) CreateForm() (string, []console.Field) {
 	fields := []console.Field{
 		{Name: "name", Label: "Trigger name", Type: "text", Required: true, Pattern: `^[a-z][a-z0-9\-]{0,62}$`, Section: "Trigger",
 			Help: "1 to 63 lowercase letters, digits and hyphens, starting with a letter."},
-		{Name: "triggerType", Label: "Trigger type", Type: "select", Options: []string{"Google sources"}, Default: "Google sources",
-			Section: "Trigger", Help: "Third-party sources need a channel, which this instance does not serve."},
+		{Name: "triggerType", Label: "Trigger type", Type: "select", Options: []string{"Google sources", "Third-party"}, Default: "Google sources",
+			Section: "Trigger", Help: "Third-party: the events published to a channel (#1947), your own custom events or a provider's."},
+		{Name: "channel", Label: "Channel", Type: "text", Section: "Event provider",
+			Help: "Third-party: the channel ID in the trigger's region, or projects/P/locations/L/channels/C."},
+		{Name: "customEventType", Label: "Event type (third-party)", Type: "text", Section: "Event provider",
+			Help: "Third-party: the CloudEvents type the trigger delivers, such as order.created."},
 		eaEventTypeField(),
 		{Name: "topic", Label: "Select a Cloud Pub/Sub topic", Type: "text", Section: "Event provider",
 			Help: "Cloud Pub/Sub: the topic ID; empty to have Eventarc create one."},
@@ -286,6 +290,9 @@ func eaFormDestination(project, region string, values map[string]string) (*event
 
 // eaFormTrigger is Create trigger's trigger.
 func eaFormTrigger(project, region string, values map[string]string) (*eventarcpb.Trigger, error) {
+	if values["triggerType"] == "Third-party" {
+		return eaFormChannelTrigger(project, region, values)
+	}
 	typ := strings.TrimSpace(values["eventType"])
 	if eaProviderOf(typ) == "" {
 		return nil, fmt.Errorf("event type %q is not offered locally", typ)
@@ -352,6 +359,32 @@ func eaFormTrigger(project, region string, values map[string]string) (*eventarcp
 		default:
 			return nil, fmt.Errorf("resource %q is not one of %v", values["resource"], eaResourceChoices)
 		}
+	}
+	return t, nil
+}
+
+// eaFormChannelTrigger is a third-party trigger: a channel's events of
+// one type (#1947).
+func eaFormChannelTrigger(project, region string, values map[string]string) (*eventarcpb.Trigger, error) {
+	ch := strings.TrimSpace(values["channel"])
+	typ := strings.TrimSpace(values["customEventType"])
+	if ch == "" || typ == "" {
+		return nil, errors.New("a third-party trigger needs its channel and event type")
+	}
+	if !strings.HasPrefix(ch, "projects/") {
+		ch = "projects/" + project + "/locations/" + region + "/channels/" + ch
+	}
+	t := &eventarcpb.Trigger{Channel: ch, EventFilters: []*eventarcpb.EventFilter{{Attribute: "type", Value: typ}},
+		ServiceAccount: strings.TrimSpace(values["serviceAccount"])}
+	labels, err := console.ParseMap(values["labels"])
+	if err != nil {
+		return nil, err
+	}
+	if len(labels) > 0 {
+		t.Labels = labels
+	}
+	if t.Destination, err = eaFormDestination(project, region, values); err != nil {
+		return nil, err
 	}
 	return t, nil
 }

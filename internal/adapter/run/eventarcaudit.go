@@ -199,7 +199,8 @@ func (e *EventarcServer) EmitAuditLog(ctx context.Context, c AuditCall) int {
 		c.Time = time.Now()
 	}
 	matched := eaMatching(c.Project, []string{auditLogWritten}, func(attr string) (string, bool) { return auditFilterValue(c, attr) })
-	if len(matched) == 0 {
+	sources := eaSourcesFor(c.Project)
+	if len(matched) == 0 && len(sources) == 0 {
 		return 0
 	}
 	insertID := strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
@@ -220,7 +221,23 @@ func (e *EventarcServer) EmitAuditLog(ctx context.Context, c AuditCall) int {
 		"ce-recordedtime": ts,
 		"content-type":    "application/json; charset=utf-8",
 	}
-	return e.f.publishSourced(ctx, matched, data, attrs)
+	n := 0
+	if len(sources) > 0 {
+		// Eventarc Advanced (#1947): each Google API source receiving
+		// the project's events puts the entry on its bus.
+		ev := eaEvent{attrs: map[string]any{"specversion": cloudEventSpecVersion, "type": auditLogWritten,
+			"datacontenttype": attrs["content-type"]}, data: data, set: true}
+		for k, v := range attrs {
+			if a, ok := strings.CutPrefix(k, "ce-"); ok {
+				ev.attrs[a] = v
+			}
+		}
+		n += e.f.emitToSources(c.Project, ev)
+	}
+	if len(matched) == 0 {
+		return n
+	}
+	return n + e.f.publishSourced(ctx, matched, data, attrs)
 }
 
 // publishSourced publishes one sourced event to each trigger's topic.

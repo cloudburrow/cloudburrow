@@ -142,7 +142,8 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	fns := runSrv.Functions(runSrv.Builds(nil, nil), func() string { return "" })
 	functionspb.RegisterFunctionServiceServer(srv, fns)
 	fns.V1().Register(srv)
-	fns.Eventarc().Register(srv) // Eventarc (#1877), on the functions' event transport
+	fns.Eventarc().Register(srv)          // Eventarc (#1877), on the functions' event transport
+	fns.EventarcPublisher().Register(srv) // the Eventarc Publishing API (#1947)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

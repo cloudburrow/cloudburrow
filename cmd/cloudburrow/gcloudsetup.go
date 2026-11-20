@@ -154,6 +154,9 @@ var gcloudVerified = []struct {
 	// TestGcloudEventarcTriggers drives triggers create, describe, list,
 	// update and delete, and providers list.
 	{config.ServiceRun, "eventarc", "/eventarc/", false, false},
+	// The Eventarc Publishing API (#1947), under /eventarcpublishing/:
+	// gcloud eventarc message-buses publish and channels publish.
+	{config.ServiceRun, "eventarcpublishing", "/eventarcpublishing/", false, false},
 	// The Cloud SQL Admin API (#1301): gcloud sql appends sql/v1beta4/.
 	// TestGcloudSQL drives instances list and describe, and databases and
 	// users create, list and delete, with either Cloud SQL service.
