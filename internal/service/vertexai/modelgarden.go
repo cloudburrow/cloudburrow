@@ -615,6 +615,12 @@ func (s *Server) restTranscoder() *rest.Transcoder {
 			opRule("/v1beta1/{name=projects/*/locations/*/operations/*}"),
 			opRule("/v1beta1/{name=projects/*/locations/*/endpoints/*/operations/*}"),
 			opRule("/v1beta1/{name=projects/*/locations/*/models/*/operations/*}"),
+			// The Python SDK (google-cloud-aiplatform) polls under /ui,
+			// the first binding aiplatform_v1.yaml gives GetOperation
+			// (#1940); it is the same operation.
+			opRule("/ui/{name=projects/*/locations/*/operations/*}"),
+			opRule("/ui/{name=projects/*/locations/*/endpoints/*/operations/*}"),
+			opRule("/ui/{name=projects/*/locations/*/models/*/operations/*}"),
 		}}
 		s.registerModelGarden(t)
 		documentaipb.RegisterDocumentProcessorServiceServer(t, &documentAIService{s: s}) // documentai.go, #1799
@@ -639,7 +645,9 @@ func (s *Server) serveREST(w http.ResponseWriter, r *http.Request, body []byte) 
 		strings.Contains(r.URL.Path, "/phraseSets") || strings.Contains(r.URL.Path, "/operations/"))
 	// gcloud ai endpoints deploy-model polls its operation under v1beta1
 	// (#1940).
-	beta := r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1beta1/") && strings.Contains(r.URL.Path, "/operations/")
+	// The Python SDK polls its operations under /ui (#1940).
+	beta := r.Method == http.MethodGet && (strings.HasPrefix(r.URL.Path, "/v1beta1/") || strings.HasPrefix(r.URL.Path, "/ui/")) &&
+		strings.Contains(r.URL.Path, "/operations/")
 	if !v2 && ((!strings.HasPrefix(r.URL.Path, "/v1/") && !beta) ||
 		(s.modelGarden() == nil && s.registry() == nil && !documentAIPath(r.URL.Path))) {
 		s.notFound(w, r)

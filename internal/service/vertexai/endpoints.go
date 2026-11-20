@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
 	"google.golang.org/grpc/codes"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
@@ -67,8 +68,10 @@ type endpointAnswer struct {
 	status      int
 	contentType string
 	body        []byte
-	// deployedModel is the registry's deployed model that answered (#1940).
+	// deployedModel is the registry's deployed model that answered (#1940),
+	// and model the model version it serves.
 	deployedModel string
+	model         *aiplatformpb.Model
 }
 
 // relay sends body to endpoint's predict route and returns what came back.
@@ -82,13 +85,13 @@ func (s *Server) relay(ctx context.Context, project, location, endpoint string, 
 		}
 		return &endpointAnswer{status: status, contentType: ct, body: out}, nil
 	}
-	if target, dm, ok, err := s.regTarget(project, location, endpoint); ok {
+	if target, dm, model, ok, err := s.regTarget(project, location, endpoint); ok {
 		if err != nil {
 			return nil, err
 		}
 		a, err := s.forward(ctx, endpoint, target, body, contentType)
 		if a != nil {
-			a.deployedModel = dm
+			a.deployedModel, a.model = dm, model
 		}
 		return a, err
 	}
@@ -249,7 +252,7 @@ func (s *Server) endpointPredict(ctx context.Context, project, location, endpoin
 		return nil, apierror.Internal(err, "endpoint %s broke the prediction contract: %v", endpoint, err)
 	}
 	if a.deployedModel != "" {
-		return withDeployedModelID(a.body, a.deployedModel), nil
+		return withDeployedModelID(a.body, a.deployedModel, a.model), nil
 	}
 	return a.body, nil
 }

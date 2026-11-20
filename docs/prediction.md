@@ -75,8 +75,14 @@ sets itself; nothing is copied for it, and nothing is fetched from Google.
 Model Registry and Endpoints in the console) keep models with versions and aliases and endpoints with
 a traffic split. `DeployModel` runs the version's serving container as a Cloud Run service in the
 instance's cluster with Google's `AIP_*` variables and its health route as the startup probe; Predict,
-RawPredict and Explain reach the deployed model the traffic split picks. The methods and their limits
-are in [compatibility.md](compatibility.md#model-registry-and-endpoints-1940).
+RawPredict and Explain reach the deployed model the traffic split picks. `ExportModel` copies a
+version's artifacts to Cloud Storage and its serving image (`image_destination`) into this
+instance's Artifact Registry. Google's prebuilt prediction containers
+(`us-docker.pkg.dev/vertex-ai/prediction/...`) are never downloaded: such a URI names the image of
+the local `DOCKER` repository `projects/vertex-ai/locations/us/repositories/prediction`, which you
+push it (or a server of the same contract) to, and `DeployModel` refuses it until that repository
+holds it. The methods and their limits are in
+[compatibility.md](compatibility.md#model-registry-and-endpoints-1940).
 
 ## Deploying a predictor
 
@@ -177,10 +183,9 @@ own log line.
 
 ## Versus Vertex AI's own APIs
 
-Nothing in the Vertex **management** plane is implemented. There is no model registry, no
-`Endpoint` resource, no `DeployedModel`. Those calls do not reach CloudBurrow at all — they are
-not served, so a client pointed at CloudBurrow fails to connect rather than receiving a
-plausible stub.
+Since #1940 the Model Registry and Endpoints are served (above). A Cloud Run service deployed
+directly, as below, is still an endpoint for Predict by its service ID, without a registry
+`Endpoint` or `DeployedModel` behind it.
 
 Online prediction is served (#1193): with Cloud Run enabled, the local AI endpoint (the
 `local AI:` line `up` prints) serves `google.cloud.aiplatform.v1.PredictionService` over gRPC,

@@ -273,8 +273,9 @@ func (ms *modelService) CopyModel(ctx context.Context, req *aiplatformpb.CopyMod
 		&aiplatformpb.CopyModelResponse{Model: resp.GetModel(), ModelVersionId: resp.GetModelVersionId()})
 }
 
-// ExportModel exports a version's artifacts to a gs:// prefix, in the
-// "custom-trained" format: the artifact directory, as it was uploaded.
+// ExportModel exports a version in the "custom-trained" format: its
+// artifacts, the directory as it was uploaded, to a gs:// prefix, and its
+// serving image to an Artifact Registry path in this instance's registry.
 func (ms *modelService) ExportModel(ctx context.Context, req *aiplatformpb.ExportModelRequest) (*longrunningpb.Operation, error) {
 	r, err := ms.s.needRegistry()
 	if err != nil {
@@ -289,28 +290,53 @@ func (ms *modelService) ExportModel(ctx context.Context, req *aiplatformpb.Expor
 		return nil, grpcError(apierror.InvalidArgument("output_config.export_format_id %q is not supported for this model; "+
 			"its supported_export_formats is [custom-trained]", f))
 	}
-	if oc.GetImageDestination() != nil {
-		return nil, grpcError(apierror.Unimplemented("output_config.image_destination is not supported: export the artifacts to " +
-			"artifact_destination, and push the serving image with docker"))
-	}
-	dst := strings.TrimSuffix(oc.GetArtifactDestination().GetOutputUriPrefix(), "/")
-	if !strings.HasPrefix(dst, "gs://") {
-		return nil, grpcError(apierror.InvalidArgument("output_config.artifact_destination.output_uri_prefix must be a gs:// URI"))
+	if oc.GetArtifactDestination() == nil && oc.GetImageDestination() == nil {
+		return nil, grpcError(apierror.InvalidArgument("output_config must set artifact_destination or image_destination"))
 	}
 	p, l, id, _, _ := parseModelName("name", v.GetName())
+	info := &aiplatformpb.ExportModelOperationMetadata_OutputInfo{}
+	var dst, src string
+	if oc.GetArtifactDestination() != nil {
+		dst = strings.TrimSuffix(oc.GetArtifactDestination().GetOutputUriPrefix(), "/")
+		if !strings.HasPrefix(dst, "gs://") {
+			return nil, grpcError(apierror.InvalidArgument("output_config.artifact_destination.output_uri_prefix must be a gs:// URI"))
+		}
+		r.mu.Lock()
+		src = r.storageURI(p, l, id, v.GetVersionId())
+		r.mu.Unlock()
+		if src == "" {
+			return nil, grpcError(apierror.FailedPrecondition("Model %s@%s has no artifacts to export (it was uploaded without artifact_uri; "+
+				"its supported_export_formats' exportable_contents is [IMAGE])", v.GetName(), v.GetVersionId()))
+		}
+	}
+	image := ""
+	if d := oc.GetImageDestination(); d != nil {
+		if image = strings.TrimSpace(d.GetOutputUri()); image == "" {
+			return nil, grpcError(apierror.InvalidArgument("output_config.image_destination.output_uri is required"))
+		}
+	}
 	r.mu.Lock()
-	src := r.storageURI(p, l, id, v.GetVersionId())
+	images := r.images
 	r.mu.Unlock()
-	if src == "" {
-		return nil, grpcError(apierror.FailedPrecondition("Model %s@%s has no artifacts to export (it was uploaded without artifact_uri)",
-			v.GetName(), v.GetVersionId()))
+	if image != "" && images == nil {
+		return nil, grpcError(apierror.FailedPrecondition("output_config.image_destination needs Artifact Registry, which is not " +
+			"served on this instance (start with --services including run)"))
 	}
-	out := dst + "/model-" + id + "/custom-trained/" + time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
-	if err := r.artifacts.Copy(ctx, p, src, out); err != nil {
-		return nil, grpcError(err)
+	if src != "" {
+		out := dst + "/model-" + id + "/custom-trained/" + time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
+		if err := r.artifacts.Copy(ctx, p, src, out); err != nil {
+			return nil, grpcError(err)
+		}
+		info.ArtifactOutputUri = out
 	}
-	return ms.s.opDone(v.GetName(), &aiplatformpb.ExportModelOperationMetadata{GenericMetadata: nowMeta(),
-		OutputInfo: &aiplatformpb.ExportModelOperationMetadata_OutputInfo{ArtifactOutputUri: out}},
+	if image != "" {
+		out, err := images.Export(ctx, v.GetContainerSpec().GetImageUri(), image)
+		if err != nil {
+			return nil, grpcError(err)
+		}
+		info.ImageOutputUri = out
+	}
+	return ms.s.opDone(v.GetName(), &aiplatformpb.ExportModelOperationMetadata{GenericMetadata: nowMeta(), OutputInfo: info},
 		&aiplatformpb.ExportModelResponse{})
 }
 
@@ -459,28 +485,42 @@ func (es *endpointService) MutateDeployedModel(_ context.Context, req *aiplatfor
 // ---- prediction
 
 // regTarget returns where a request to a registry endpoint goes: the
-// predict URL of the deployed model the traffic split picks.
-func (s *Server) regTarget(project, location, endpoint string) (string, string, bool, error) {
+// predict URL of the deployed model the traffic split picks, its ID, and
+// the model version it serves (nil if it is gone).
+func (s *Server) regTarget(project, location, endpoint string) (string, string, *aiplatformpb.Model, bool, error) {
 	r := s.registry()
 	if r == nil || !r.hasEndpoint(project, location, endpoint) {
-		return "", "", false, nil
+		return "", "", nil, false, nil
 	}
 	dm, sv, err := r.pick(project, location, endpoint)
 	if err != nil {
-		return "", "", true, err
+		return "", "", nil, true, err
 	}
-	return sv.URL + sv.PredictRoute, dm, true, nil
+	model, _ := r.get(sv.Model)
+	return sv.URL + sv.PredictRoute, dm, model, true, nil
 }
 
-// withDeployedModelID adds deployedModelId to a prediction response, as
-// Vertex does before returning it to the client.
-func withDeployedModelID(body []byte, id string) []byte {
+// withDeployedModelID adds deployedModelId, and the model, modelVersionId
+// and modelDisplayName of the version it serves, to a prediction
+// response, as Vertex does before returning it to the client
+// (PredictResponse's fields).
+func withDeployedModelID(body []byte, id string, model *aiplatformpb.Model) []byte {
 	var m map[string]json.RawMessage
 	if json.Unmarshal(body, &m) != nil {
 		return body
 	}
-	b, _ := json.Marshal(id)
-	m["deployedModelId"] = b
+	set := func(k, v string) {
+		if v != "" {
+			b, _ := json.Marshal(v)
+			m[k] = b
+		}
+	}
+	set("deployedModelId", id)
+	if model != nil {
+		set("model", model.GetName())
+		set("modelVersionId", model.GetVersionId())
+		set("modelDisplayName", model.GetDisplayName())
+	}
 	out, err := json.Marshal(m)
 	if err != nil {
 		return body

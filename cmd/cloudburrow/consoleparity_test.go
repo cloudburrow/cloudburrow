@@ -1950,7 +1950,7 @@ var parityRows = []parityRow{
 			"ModelService/MergeVersionAliases", "ModelService/DeleteModelVersion", "ModelService/CopyModel", "ModelService/ExportModel"},
 		Provider: "vertex-models", Offers: "Model Registry: Import uploads a custom container model (or a new version of one, with " +
 			"aliases, an artifact location, routes, port and environment); a model's page lists its versions with their aliases, " +
-			"artifacts and endpoints, and offers Edit, Edit version aliases, Delete version, Copy and Export",
+			"artifacts and endpoints, and offers Edit, Edit version aliases, Delete version, Copy and Export (to a Cloud Storage prefix, an Artifact Registry image destination, or both)",
 		Tests: []string{"TestModelRegistryAndEndpointsThroughThePages", "TestModelRegistryDeploysACustomContainer"}},
 	{Resource: "Model Registry: evaluations", Service: "vertexai",
 		Methods:  []string{"ModelService/ImportModelEvaluation", "ModelService/ListModelEvaluations", "ModelService/GetModelEvaluation"},

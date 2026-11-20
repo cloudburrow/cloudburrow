@@ -1877,8 +1877,37 @@ startup probe), with Google's `AIP_*` variables (`AIP_HTTP_PORT`, `AIP_HEALTH_RO
 `AIP_PROJECT_NUMBER`, `AIP_MACHINE_TYPE`, `AIP_FRAMEWORK`), min and max replicas as its scaling, and
 the operation completes when the container answers its health route. Predict, RawPredict and
 Explain go to the deployed model the traffic split picks. Model Garden's models and endpoints
-(above) share the same methods. Prebuilt prediction container images are accepted but are not
-fetched or tested (each is several GB from Google's registry); a locally built `dev.local/` image is.
+(above) share the same methods. The Python SDK's documented flow, `aiplatform.Model.upload(...)`
+then `model.deploy(...)` and `endpoint.predict(...)`, runs against it over REST
+(`TestPythonAIPlatformUploadAndDeploy`, google-cloud-aiplatform 2.9.0 in a container on an internal
+Docker network, with the ADC fixture in the `cloudburrow.localhost` universe); it polls its
+operations under `/ui/{name=projects/*/locations/*/…/operations/*}`, the first binding Google's
+service config gives `GetOperation`, which is served beside `/v1` and `/v1beta1`.
+
+**Prebuilt prediction containers.** Google's prebuilt images
+([pre-built containers](https://docs.cloud.google.com/vertex-ai/docs/predictions/pre-built-containers),
+re-read 2026-11-20) are `{us,europe,asia}-docker.pkg.dev/vertex-ai/prediction/IMAGE:latest` (and
+`vertex-ai-restricted/prediction/` for the optimized TensorFlow runtime), several GB each, and this
+instance never downloads them. `UploadModel` accepts any of those URIs, as Google does. Locally, such
+a URI names an image of this instance's Artifact Registry: `us-docker.pkg.dev/vertex-ai/prediction/sklearn-cpu.1-6:latest`
+is the image `sklearn-cpu.1-6:latest` of the `DOCKER` repository
+`projects/vertex-ai/locations/us/repositories/prediction`. `DeployModel` of a model with a prebuilt
+URI the local registry does not hold is **`FAILED_PRECONDITION`**, naming the repository to push it
+to, before anything is started or pulled; once the image is pushed there (with `docker push`, or by
+`ExportModel` of another model's image), it is deployed from the local registry, pulled through the
+nodes' registry mirror (`/etc/containerd/certs.d/{location}-docker.pkg.dev`, written at `up` for
+every Artifact Registry location, the `us`, `europe` and `asia` multi-regions included since #1940,
+so a pull of those hosts is never sent to Google). Whatever is pushed there runs as a custom
+container: it must serve the custom container contract itself (`AIP_HTTP_PORT`, the health and
+predict routes, its artifacts from `AIP_STORAGE_URI`); none of Google's prebuilt servers (TensorFlow
+Serving, scikit-learn, XGBoost, PyTorch) is reimplemented. The older `gcr.io/cloud-aiplatform/...`
+paths are refused at `DeployModel` the same way, as this instance serves no Container Registry.
+`TestModelRegistryExportsTheImageToArtifactRegistry` deploys a model whose image is
+`us-docker.pkg.dev/vertex-ai/prediction/sklearn-cpu.1-6:latest`, refused, then served from the image
+exported there, and Predict answers from it. A locally built `dev.local/` image is loaded into the
+cluster as before; on Docker Desktop with its containerd image store, the kubelet was measured
+(2026-11-20) not to see a kind-loaded image (`ErrImageNeverPull`), so the tests push the fixture to
+the instance's Artifact Registry, which avoids that.
 Console: Agent Platform → Model Registry and Endpoints (`TestModelRegistryAndEndpointsThroughThePages`).
 
 | Method | Status | Notes |
@@ -1891,17 +1920,17 @@ Console: Agent Platform → Model Registry and Endpoints (`TestModelRegistryAndE
 | `ModelService.DeleteModelVersion` | **Verified** | Same test: the default version, the only version and a deployed version are FAILED_PRECONDITION. |
 | `ModelService.DeleteModel` | **Verified** | Same tests: FAILED_PRECONDITION while any version is deployed. |
 | `ModelService.CopyModel` | **Verified** | Same test: to a new model or as a new version of another, with the artifacts copied. An `encryption_spec` (CMEK) is UNIMPLEMENTED. |
-| `ModelService.ExportModel` | **Verified** (artifacts) | Same test: a custom model's artifacts to a `gs://` prefix; `image_destination` is UNIMPLEMENTED (no Artifact Registry push). |
+| `ModelService.ExportModel` | **Verified** | `TestModelRegistryDeploysACustomContainer`: a custom model's artifacts to a `gs://` prefix (`model-{id}/custom-trained/{time}`). `TestModelRegistryExportsTheImageToArtifactRegistry` (#1940), official `aiplatform` and `artifactregistry` clients: `output_config.image_destination` copies the version's serving image into this instance's Artifact Registry, as the reference describes it (an Artifact Registry path, `{location}-docker.pkg.dev/{project}/{repository}/{image}[:tag]`, `latest` when no tag is given): an image the registry holds is copied by digest (from a remote or virtual repository too), a locally built image is read back from Docker (`docker save`, never a pull) and pushed, and `image_output_uri` names the image with its tag. Every uploaded version lists `supported_export_formats` `custom-trained` with `exportable_contents` `[ARTIFACT, IMAGE]`, or `[IMAGE]` without `artifact_uri` (whose artifact export is FAILED_PRECONDITION). A `gcr.io` destination is UNIMPLEMENTED (no Container Registry here), a missing repository NOT_FOUND, a remote, virtual or non-`DOCKER` one FAILED_PRECONDITION, another registry INVALID_ARGUMENT; a source image found neither in the registry nor in Docker is FAILED_PRECONDITION (nothing is pulled from another registry). UNVERIFIED (the `ExportModelRequest.OutputConfig`, `ContainerRegistryDestination` and `OutputInfo` field descriptions re-read 2026-11-20 in googleapis' `model_service.proto` and `io.proto`, which the reference at <https://docs.cloud.google.com/vertex-ai/docs/reference/rest/v1/projects.locations.models/export> renders): the exact form of Google's `image_output_uri` ("the full path of the image created") and the refusals' codes, which they do not give. |
 | `ModelService.ImportModelEvaluation`, `GetModelEvaluation`, `ListModelEvaluations` | **Verified** | Same test: stored and read back as given. |
 | `EndpointService.CreateEndpoint` | **Verified** | Same tests and `TestTerraformVertexAIEndpoint` (`google_vertex_ai_endpoint`, hashicorp/google): numeric or lowercase IDs, labels, description. |
 | `EndpointService.UpdateEndpoint` | **Verified** | Same tests: `display_name`, `description`, `labels` and `traffic_split` (must name deployed models and sum to 100). |
 | `EndpointService.UpdateEndpointLongRunning` | Implemented | The same code as `UpdateEndpoint`, answered as an operation; no official-client test calls it. |
-| `EndpointService.DeployModel` | **Verified** | `TestModelRegistryDeploysACustomContainer` and `gcloud ai endpoints deploy-model`: dedicated or automatic resources, `traffic_split` with `0` for the model being deployed (the default gives it 100% on an empty endpoint, else none); a version by `@id` or `@alias`. |
+| `EndpointService.DeployModel` | **Verified** | `TestModelRegistryDeploysACustomContainer` and `gcloud ai endpoints deploy-model`: dedicated or automatic resources, `traffic_split` with `0` for the model being deployed (the default gives it 100% on an empty endpoint, else none); a version by `@id` or `@alias`. Through the Python SDK's `model.deploy(...)` too (`TestPythonAIPlatformUploadAndDeploy`). A prebuilt container this instance's registry does not hold is FAILED_PRECONDITION (see Prebuilt prediction containers above, `TestModelRegistryExportsTheImageToArtifactRegistry`). |
 | `EndpointService.MutateDeployedModel` | **Verified** | Same test: replica counts by mask, applied to the running service. |
 | `EndpointService.UndeployModel` | **Verified** | Same tests: removes the service; a model still taking traffic is FAILED_PRECONDITION unless `traffic_split` moves it or it is the last one. |
 | `EndpointService.DeleteEndpoint` | **Verified** | Same tests: FAILED_PRECONDITION while a model is deployed. |
 | `ModelGardenService.GetPublisherModel` | **Verified** | `TestGetPublisherModelDescribesTheServedModels`, official `ModelGardenClient`: `publishers/google/models/{model}` for the local catalogue's models with a runtime (the embedding and generation models above), named, versioned `001`, with their runtime as `frameworks` and their provenance as `openSourceCategory` (a community conversion is `THIRD_PARTY_OWNED_OSS`); any other model is NOT_FOUND, as Predict on it is; `is_hugging_face_model` is UNIMPLEMENTED (Model Garden's Deploy takes Hugging Face models). gRPC only. |
-| `PredictionService.Predict`, `RawPredict`, `Explain` on a registry endpoint | **Verified** | Same tests: relayed to the picked deployed model's predict route, `deployedModelId` in the answer; `Explain` with the model's or deployed model's explanation spec. |
+| `PredictionService.Predict`, `RawPredict`, `Explain` on a registry endpoint | **Verified** | Same tests: relayed to the picked deployed model's predict route, `deployedModelId` in the answer, and Predict's `model`, `modelVersionId` and `modelDisplayName`, the version it serves (#1940, `TestModelRegistryExportsTheImageToArtifactRegistry`; the Python SDK's `Prediction.model_version_id`, `TestPythonAIPlatformUploadAndDeploy`); `Explain` with the model's or deployed model's explanation spec. |
 
 ### Document AI: processors (#1799)
 

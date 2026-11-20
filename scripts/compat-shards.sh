@@ -276,9 +276,13 @@ compat_shard() {
       # (#1596). Cloud Run as SCALE_RUN and Secret Manager as SCALE_SECRETS,
       # which only these tests read, so neither suite runs a second time
       # here; RUN_RESOURCEMANAGER and RUN_SERVICEUSAGE for gcloud's
-      # overrides, as in run.
-      SERVICES=run,secretmanager
-      TEST_VARS+=,SCALE_RUN,SCALE_SECRETS,PREDICTION,RUN_RESOURCEMANAGER,RUN_SERVICEUSAGE ;;
+      # overrides, as in run. storage as RUN_STORAGE for the Model
+      # Registry's artifacts (#1940: TestModelRegistryDeploysACustomContainer,
+      # TestModelRegistryExportsTheImageToArtifactRegistry,
+      # TestPythonAIPlatformUploadAndDeploy); STORAGE is not exported, so
+      # the storage suite does not run here.
+      SERVICES=run,secretmanager,storage
+      TEST_VARS+=,SCALE_RUN,SCALE_SECRETS,PREDICTION,RUN_STORAGE,RUN_RESOURCEMANAGER,RUN_SERVICEUSAGE ;;
     acceptance)
       # The acceptance workflow uploads, publishes and runs a Cloud Run
       # worker; test/k8s needs the cluster and Knative.

@@ -207,3 +207,128 @@ func waitOp(t *testing.T, s *Server, name string) {
 		t.Fatalf("operation %s = %v, %v", name, op, err)
 	}
 }
+
+type fakeImages struct {
+	held    map[string]bool
+	exports [][2]string
+}
+
+func (f *fakeImages) Export(_ context.Context, src, dst string) (string, error) {
+	f.exports = append(f.exports, [2]string{src, dst})
+	if !strings.Contains(dst[strings.LastIndex(dst, "/"):], ":") {
+		dst += ":latest"
+	}
+	return dst, nil
+}
+func (f *fakeImages) Held(ref string) bool { return f.held[ref] }
+
+// ExportModel's image_destination (#1940) exports the version's serving
+// image, alone or with its artifacts; a model without artifacts exports
+// its image only, as its supported_export_formats says. Deploying one of
+// Google's prebuilt containers is refused unless the local registry holds
+// it, and a gcr.io one always.
+func TestRegistryExportImageAndPrebuilt(t *testing.T) {
+	s := NewServer(nil)
+	s.SetEndpoints(nil, func() string { return "127.0.0.1:1" }, nil)
+	run, art, img := &fakeRunner{}, &fakeArtifacts{}, &fakeImages{held: map[string]bool{}}
+	s.SetRegistry(filepath.Join(t.TempDir(), "registry.json"), run, art)
+	ms, es := &modelService{s: s}, &endpointService{s: s}
+	ctx := context.Background()
+	parent := "projects/p/locations/us-central1"
+	upload := func(id, image, artifacts string) *aiplatformpb.Model {
+		t.Helper()
+		if _, err := ms.UploadModel(ctx, &aiplatformpb.UploadModelRequest{Parent: parent, ModelId: id, Model: &aiplatformpb.Model{
+			DisplayName: id, ArtifactUri: artifacts, ContainerSpec: &aiplatformpb.ModelContainerSpec{ImageUri: image}}}); err != nil {
+			t.Fatal(err)
+		}
+		m, err := ms.GetModel(ctx, &aiplatformpb.GetModelRequest{Name: parent + "/models/" + id})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+	export := func(name string, oc *aiplatformpb.ExportModelRequest_OutputConfig) (*aiplatformpb.ExportModelOperationMetadata, error) {
+		op, err := ms.ExportModel(ctx, &aiplatformpb.ExportModelRequest{Name: name, OutputConfig: oc})
+		if err != nil {
+			return nil, err
+		}
+		md := &aiplatformpb.ExportModelOperationMetadata{}
+		if err := op.GetMetadata().UnmarshalTo(md); err != nil {
+			t.Fatal(err)
+		}
+		return md, nil
+	}
+	imageDst := &aiplatformpb.ContainerRegistryDestination{OutputUri: "us-central1-docker.pkg.dev/p/r/exported"}
+
+	m := upload("withart", "dev.local/m:1", "gs://b/model")
+	if f := m.GetSupportedExportFormats(); len(f) != 1 || f[0].GetId() != "custom-trained" || len(f[0].GetExportableContents()) != 2 {
+		t.Errorf("supported_export_formats = %v; want custom-trained [ARTIFACT IMAGE]", f)
+	}
+	if _, err := export(m.GetName(), &aiplatformpb.ExportModelRequest_OutputConfig{ExportFormatId: "custom-trained",
+		ImageDestination: imageDst}); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("image export with no registry = %v; want FAILED_PRECONDITION", err)
+	}
+	s.SetModelImages(img)
+	md, err := export(m.GetName(), &aiplatformpb.ExportModelRequest_OutputConfig{ExportFormatId: "custom-trained",
+		ArtifactDestination: &aiplatformpb.GcsDestination{OutputUriPrefix: "gs://out/"}, ImageDestination: imageDst})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := md.GetOutputInfo(); got.GetImageOutputUri() != imageDst.GetOutputUri()+":latest" ||
+		!strings.HasPrefix(got.GetArtifactOutputUri(), "gs://out/model-withart/custom-trained/") {
+		t.Errorf("output_info = %v", got)
+	}
+	if len(img.exports) != 1 || img.exports[0][0] != "dev.local/m:1" {
+		t.Errorf("exports = %v", img.exports)
+	}
+	if _, err := export(m.GetName(), &aiplatformpb.ExportModelRequest_OutputConfig{ExportFormatId: "custom-trained"}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("no destination = %v; want INVALID_ARGUMENT", err)
+	}
+
+	bare := upload("bare", "us-central1-docker.pkg.dev/p/r/server:1", "")
+	if f := bare.GetSupportedExportFormats(); len(f) != 1 || len(f[0].GetExportableContents()) != 1 ||
+		f[0].GetExportableContents()[0] != aiplatformpb.Model_ExportFormat_IMAGE {
+		t.Errorf("supported_export_formats without artifacts = %v; want [IMAGE]", f)
+	}
+	if _, err := export(bare.GetName(), &aiplatformpb.ExportModelRequest_OutputConfig{ExportFormatId: "custom-trained",
+		ArtifactDestination: &aiplatformpb.GcsDestination{OutputUriPrefix: "gs://out"}}); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("artifact export without artifacts = %v; want FAILED_PRECONDITION", err)
+	}
+	if md, err := export(bare.GetName(), &aiplatformpb.ExportModelRequest_OutputConfig{ExportFormatId: "custom-trained",
+		ImageDestination: imageDst}); err != nil || md.GetOutputInfo().GetArtifactOutputUri() != "" {
+		t.Errorf("image export without artifacts = %v, %v", md, err)
+	}
+
+	if _, err := es.CreateEndpoint(ctx, &aiplatformpb.CreateEndpointRequest{Parent: parent, EndpointId: "ep",
+		Endpoint: &aiplatformpb.Endpoint{DisplayName: "ep"}}); err != nil {
+		t.Fatal(err)
+	}
+	deploy := func(model string) error {
+		_, err := es.DeployModel(ctx, &aiplatformpb.DeployModelRequest{Endpoint: parent + "/endpoints/ep",
+			DeployedModel: &aiplatformpb.DeployedModel{Model: parent + "/models/" + model,
+				PredictionResources: &aiplatformpb.DeployedModel_DedicatedResources{DedicatedResources: &aiplatformpb.DedicatedResources{
+					MachineSpec: &aiplatformpb.MachineSpec{MachineType: "n1-standard-2"}, MinReplicaCount: 1}}}})
+		return err
+	}
+	sk := "us-docker.pkg.dev/vertex-ai/prediction/sklearn-cpu.1-6:latest"
+	upload("sk", sk, "")
+	upload("old", "gcr.io/cloud-aiplatform/prediction/sklearn-cpu.1-0:latest", "")
+	for _, id := range []string{"sk", "old"} {
+		if err := deploy(id); status.Code(err) != codes.FailedPrecondition {
+			t.Errorf("deploying prebuilt %s not held = %v; want FAILED_PRECONDITION", id, err)
+		}
+	}
+	if len(run.runs) != 0 {
+		t.Errorf("a prebuilt container was started: %v", run.runs)
+	}
+	img.held[sk] = true
+	if err := deploy("sk"); err != nil {
+		t.Errorf("deploying a prebuilt container the registry holds: %v", err)
+	}
+	for uri, want := range map[string]bool{sk: true, "europe-docker.pkg.dev/vertex-ai-restricted/prediction/tf_opt-gpu.2-17:latest": true,
+		"us-docker.pkg.dev/myproj/prediction/x:1": false, "dev.local/m:1": false, "us-central1-docker.pkg.dev/vertex-ai/prediction/x:1": false} {
+		if IsPrebuiltImage(uri) != want {
+			t.Errorf("IsPrebuiltImage(%s) = %v", uri, !want)
+		}
+	}
+}
