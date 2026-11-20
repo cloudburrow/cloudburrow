@@ -138,14 +138,14 @@ func computeDeny(permission, resource string) error {
 // "authorization requires one or more of the following IAM permissions",
 // read 2026-11-20), the permission named for the method itself checked on
 // the project for an insert, list or aggregatedList and on the resource
-// otherwise. Where a page lists further permissions (a patch's get, a
-// firewall's compute.networks.updatePolicy, an insert's field-level
-// permissions such as compute.subnetworks.use, compute.images.useReadOnly
-// and iam.serviceAccounts.actAs on serviceAccounts[].email), only the
-// method's own is checked. Compute keeps no resource-level policies on
-// what is served, so the project's and its ancestors' apply. Public images
-// (debian-cloud, ubuntu-os-cloud, rocky-linux-cloud) are readable by
-// every caller, as Google's are (the caller's wrapper skips them).
+// otherwise; an insert's field-level permissions (compute.subnetworks.use,
+// compute.images.useReadOnly, iam.serviceAccounts.actAs on
+// serviceAccounts[].email, ...) are ComputeFieldChecks'. A patch's get and
+// a firewall patch's compute.networks.updatePolicy are not checked.
+// Compute keeps no resource-level policies on what is served, so the
+// project's and its ancestors' apply. Public images (debian-cloud,
+// ubuntu-os-cloud, rocky-linux-cloud) are readable by every caller, as
+// Google's are (the caller's wrapper skips them).
 var Compute = &Service{
 	Name: "compute.googleapis.com",
 	Deny: computeDeny,
@@ -243,7 +243,8 @@ func gkeDeny(permission, resource string) error {
 // deprecated form (project_id, zone, cluster_id) is checked on its
 // project. CreateCluster also needs "iam.serviceAccounts.actAs on the
 // specified service account": its node config's and each node pool's
-// (which fields Google reads is UNVERIFIED). Get's and list's
+// (which fields Google reads is UNVERIFIED, re-read 2026-11-20). Get's
+// and list's
 // container.clusters.getCredentials, which only reveals credentials, is
 // not checked. Kubernetes Engine keeps no resource-level policies.
 var GKE = &Service{
@@ -284,12 +285,11 @@ var GKE = &Service{
 // routes): each method's REST reference
 // (https://docs.cloud.google.com/api-keys/docs/reference/rest/v2/projects.locations.keys,
 // and "Access control", https://docs.cloud.google.com/api-keys/docs/access-control,
-// read 2026-11-20). Not checked: keys.lookupKey, whose apikeys.keys.lookup
-// is "on the parent project" of a key the request names only by its
-// string, and operations.get, whose serviceusage.operations.get names no
-// resource an operation's name carries. API keys keep no resource-level
-// policies. Google's wording of a denial is UNVERIFIED (re-read
-// 2026-11-20: the pages give none): the newer APIs'.
+// read 2026-11-20); keys.lookupKey and operations.get, which name no
+// resource in their paths, are checked by the caller's wrapper
+// (APIKeysLookup, ServiceUsageOperationsGet). API keys keep no resource-level
+// policies. Google's wording of a denial is UNVERIFIED (re-read 2026-11-20:
+// the pages give none): the newer APIs'.
 var APIKeys = &Service{Name: "apikeys.googleapis.com", Deny: newerDenyOf}
 
 // APIKeysJSON are API Keys' methods by path.
@@ -310,10 +310,10 @@ var APIKeysJSON = func() []JSONMethod {
 // ServiceUsage is the Service Usage API's table, over JSON: each method's
 // REST reference (https://docs.cloud.google.com/service-usage/docs/reference/rest/v1/services,
 // read 2026-11-20); batchEnable is serviceusage.services.enable and
-// batchGet serviceusage.services.get, on the parent. Not checked: the
-// operations' methods (only operations.get has a permission,
-// serviceusage.operations.get, on no resource an operation's name
-// carries), v1beta1's generateServiceIdentity (no page names one), and
+// batchGet serviceusage.services.get, on the parent; operations.get is
+// checked by the caller's wrapper (ServiceUsageOperationsGet). Not
+// checked: operations.list, cancel and delete (no permission names them),
+// v1beta1's generateServiceIdentity (no page names one), and
 // the servicemanagement.services.bind "Service Usage audit logging" lists
 // beside an enable, which names the service producer's project. Services
 // keep no resource-level policies. Google's wording of a denial is
@@ -379,8 +379,8 @@ var RunPortListLocations = []string{"run.locations.list", "cloudfunctions.locati
 
 // ArtifactRegistryLocationsJSON are Artifact Registry's Locations mixin
 // under its own prefix on the Cloud Run port: artifactregistry.locations.list
-// and .get, as the permission index names them (UNVERIFIED, re-read
-// 2026-11-20: the audit page lists both methods among those that produce
+// and .get, as the permission index names them (UNVERIFIED, re-read 2026-11-20:
+// the audit page lists both methods among those that produce
 // no audit logs and names no permission).
 var ArtifactRegistryLocationsJSON = []JSONMethod{
 	{Method: "GET", Pattern: regexp.MustCompile(`^/artifactregistry/v1/(projects/[^/]+)/locations$`), Permission: "artifactregistry.locations.list"},

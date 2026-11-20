@@ -392,9 +392,11 @@ compat_shard() {
       # Logging, Cloud Monitoring, Memorystore and the Cloud SQL Admin API
       # since the fifth; Certificate Authority Service, Kubernetes Engine
       # (no cluster is made), Compute Engine, API Keys and Service Usage
-      # since the seventh.
+      # since the seventh; the local AI endpoint (Vertex AI, Document AI,
+      # Speech-to-Text, Translation), which Cloud Run starts with no
+      # model, since the eighth.
       SERVICES=storage,pubsub,tasks,secretmanager,kms,run,bigquery,scheduler,workflows,logging,monitoring,memorystore,cloudsql,privateca,gke,compute
-      TEST_VARS+=,STORAGE,PUBSUB,TASKS,SECRETS,KMS,RUN,RESOURCEMANAGER,ANALYTICSHUB,BIGQUERY,BIGQUERY_PROJECT,SCHEDULER,WORKFLOWS,LOGGING,MONITORING,MEMORYSTORE_ADMIN,SQLADMIN,PRIVATECA,GKE,COMPUTE,APIKEYS,SERVICEUSAGE,IAM_ENFORCEMENT
+      TEST_VARS+=,STORAGE,PUBSUB,TASKS,SECRETS,KMS,RUN,RESOURCEMANAGER,ANALYTICSHUB,BIGQUERY,BIGQUERY_PROJECT,SCHEDULER,WORKFLOWS,LOGGING,MONITORING,MEMORYSTORE_ADMIN,SQLADMIN,PRIVATECA,GKE,COMPUTE,APIKEYS,SERVICEUSAGE,LOCALAI,IAM_ENFORCEMENT
       UP_FLAGS=(--iam-enforcement=on)
       COMPAT_RUN='^TestIAMEnforcement' ;;
     localai)

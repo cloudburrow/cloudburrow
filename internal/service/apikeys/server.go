@@ -200,6 +200,9 @@ type Server struct {
 	// to the store key it is under; nil until first built.
 	byString map[string]string
 	ops      map[string]map[string]any
+	// opProjects is each operation's project, which IAM enforcement
+	// checks operations.get on (#1879).
+	opProjects map[string]string
 
 	srv *http.Server
 	ln  net.Listener
@@ -1081,8 +1084,39 @@ func (s *Server) done(k *Key, withKeyString bool) map[string]any {
 	op := map[string]any{"name": name, "done": true, "response": resp}
 	s.mu.Lock()
 	s.ops[name] = op
+	if s.opProjects == nil {
+		s.opProjects = map[string]string{}
+	}
+	s.opProjects[name] = k.Project
 	s.mu.Unlock()
 	return op
+}
+
+// OperationProject is the project of the operation name made, "" for an
+// operation this server did not make (IAM enforcement, #1879).
+func (s *Server) OperationProject(name string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.opProjects[name]
+}
+
+// KeyProject is the project of the key whose key string is keyString,
+// ok false for none (IAM enforcement of keys.lookupKey, #1879).
+func (s *Server) KeyProject(keyString string) (project string, ok bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.index() != nil {
+		return "", false
+	}
+	sk, found := s.byString[keyString]
+	if !found {
+		return "", false
+	}
+	k, err := s.load(sk)
+	if err != nil {
+		return "", false
+	}
+	return k.Project, true
 }
 
 func (s *Server) operation(name string) (any, error) {
@@ -1120,6 +1154,7 @@ func (s *Server) ResetProject(project string) error {
 	for n := range s.ops {
 		if strings.HasPrefix(n, opPrefix) {
 			delete(s.ops, n)
+			delete(s.opProjects, n)
 		}
 	}
 	return nil

@@ -703,6 +703,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	useIAMEnforcement(iamEnforcer, secretsSvc, kmsSvc, tasksSvc, analyticsHub, schedulerSvc, workflowsSvc,
 		iamEnforced{logging: loggingSvc, monitoring: monitoringSvc, memorystore: memorystoreAdminSvc, run: runSvc})
 	iamEnforced7{privateCA: privateCASvc, gke: gkeSvc, compute: computeSvc, run: runSvc}.use(iamEnforcer)
+	iamEnforced8{compute: computeSvc}.use(iamEnforcer)
 	// Log buckets' customer-managed keys (#1950).
 	if loggingSvc != nil {
 		keys := cmekKeys(kmsSvc, iamEnforcer)
@@ -893,6 +894,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	apiKeysSrv := newAPIKeysServer(cfg, projects, projects.Backing())
 	// IAM enforcement (#1879) of Service Usage and API Keys.
 	iamEnforced7{serviceUsage: serviceUsageSrv, apiKeys: apiKeysSrv}.use(iamEnforcer)
+	iamEnforced8{serviceUsage: serviceUsageSrv, apiKeys: apiKeysSrv}.use(iamEnforcer)
 	if apiKeysSrv != nil {
 		apiKeysRef = apiKeysSrv
 		coord.Register(apiKeysSrv)
@@ -1005,6 +1007,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		localAISrv.SetSpeechState(filepath.Join(cfg.StateDir, "speech", "recognizers.json"))
 		// Their customer-managed keys (#1950), through Cloud KMS.
 		localAISrv.UseCMEK(cmekKeys(kmsSvc, iamEnforcer))
+		// IAM enforcement (#1879) of Vertex AI, Document AI, Speech-to-Text
+		// and Translation.
+		iamEnforced8{localAI: localAISrv}.use(iamEnforcer)
 	}
 	// The Model Registry and Endpoints (#1940): deployed models run as
 	// Cloud Run services; artifacts are copied in this Cloud Storage.

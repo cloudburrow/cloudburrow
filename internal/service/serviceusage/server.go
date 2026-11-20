@@ -92,6 +92,9 @@ type Server struct {
 	// opOrder is ops' names in the order they were made, which
 	// operations.list answers in.
 	opOrder []string
+	// opProjects is each operation's project, which IAM enforcement
+	// checks operations.get on (#1879).
+	opProjects map[string]string
 
 	srv *http.Server
 	ln  net.Listener
@@ -752,8 +755,20 @@ func (s *Server) done(project, target, respType string, resp map[string]any) map
 	s.mu.Lock()
 	s.ops[name] = op
 	s.opOrder = append(s.opOrder, name)
+	if s.opProjects == nil {
+		s.opProjects = map[string]string{}
+	}
+	s.opProjects[name] = project
 	s.mu.Unlock()
 	return op
+}
+
+// OperationProject is the project of the operation name made, "" for an
+// operation this server did not make (IAM enforcement, #1879).
+func (s *Server) OperationProject(name string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.opProjects[name]
 }
 
 // listOperations is operations.list (#1530): every operation this instance
