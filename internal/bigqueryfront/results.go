@@ -226,9 +226,9 @@ func (q *queryResults) makeDataset(r *http.Request, base, project string) {
 	}
 }
 
-// makesScratch sends on a request that makes a scratch table in
-// resultsDataset (scratch.go), having made the dataset first, and reports
-// whether it was one.
+// makesScratch sends on a request that makes or reads something in
+// resultsDataset (namesResultsDataset), having made the dataset first, and
+// reports whether it was one.
 func (q *queryResults) makesScratch(w http.ResponseWriter, r *http.Request, path string) bool {
 	if r.Method != http.MethodPost {
 		return false
@@ -258,8 +258,7 @@ func (q *queryResults) makesScratch(w http.ResponseWriter, r *http.Request, path
 			return true
 		}
 	}
-	if !bytes.Contains(body, []byte(resultsDataset+"`.`"+scratchPrefix)) && !bytes.Contains(body, []byte(resultsDataset+"."+scratchPrefix)) &&
-		!strings.Contains(path, "/datasets/"+resultsDataset+"/") {
+	if !namesResultsDataset(body) && !strings.Contains(path, "/datasets/"+resultsDataset+"/") {
 		q.next.ServeHTTP(w, r)
 		return true
 	}
@@ -281,6 +280,16 @@ func (q *queryResults) makesScratch(w http.ResponseWriter, r *http.Request, path
 	}
 	rec.copyTo(w)
 	return true
+}
+
+// namesResultsDataset reports whether a query body names an object in
+// resultsDataset, as `ds`.`x`, `ds.x` or ds.x: a scratch table (scratch.go),
+// a vector index's tables (vectorindex.go), an ML vocabulary function
+// (modelvocab.go), and the like. Any of them may be the first thing a
+// fresh instance's project asks of the dataset, so each has it made first
+// (#2045: a CREATE VECTOR INDEX run first failed "dataset not found").
+func namesResultsDataset(body []byte) bool {
+	return bytes.Contains(body, []byte(resultsDataset+"`.")) || bytes.Contains(body, []byte(resultsDataset+"."))
 }
 
 // withResultsTable returns the jobs.insert body job with a destination
