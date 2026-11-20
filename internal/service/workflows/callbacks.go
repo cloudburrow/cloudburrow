@@ -41,7 +41,26 @@ type CallbackInfo struct {
 	Waiters           int64    `json:"waiters,string"`
 }
 
-func (x *machine) createCallback(method any) (any, error) {
+// createCallback is events.create_callback_endpoint. The endpoint's ID is
+// journaled, so a resumed execution has the same endpoint again.
+func (f *frame) createCallback(method any) (any, error) {
+	v, err := f.x.effect(f, "callback", func() (any, error) { return f.x.newCallback(method) })
+	if err != nil {
+		return nil, err
+	}
+	m, _ := v.(map[string]any)
+	id, _ := m["id"].(string)
+	verb, _ := m["method"].(string)
+	c := f.x.callbacks
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.byID[id] == nil {
+		c.byID[id] = &callback{id: id, method: verb, signal: make(chan struct{}, 1)}
+	}
+	return map[string]any{"url": c.url(c.base + "/callbacks/" + id)}, nil
+}
+
+func (x *machine) newCallback(method any) (any, error) {
 	m := "POST"
 	if method != nil {
 		s, err := str(method, "http_callback_method")
@@ -62,7 +81,7 @@ func (x *machine) createCallback(method any) (any, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.byID[id] = &callback{id: id, method: m, signal: make(chan struct{}, 1)}
-	return map[string]any{"url": c.url(c.base + "/callbacks/" + id)}, nil
+	return map[string]any{"id": id, "method": m}, nil
 }
 
 // deliver hands a callback request to its endpoint. ok is false for an

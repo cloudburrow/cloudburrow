@@ -75,6 +75,21 @@ type machine struct {
 	currentMu  sync.Mutex
 	current    [2]string // routine, step
 	maxHistory int
+
+	// The journal of effects (journal.go).
+	journalMu sync.Mutex
+	journal   []journalEntry
+	replay    map[string]journalEntry
+	seq       map[string]int
+	onJournal func()
+
+	// callLevel is the execution's call log level (calllog.go); emit
+	// writes a log entry to logID.
+	callLevel string
+	emit      func(logID, severity string, payload any)
+	execID    string
+	// children starts and waits for experimental.executions' executions.
+	children ChildRunner
 }
 
 type scope struct {
@@ -96,6 +111,12 @@ type frame struct {
 	parent   int64
 	// locked is set while this frame holds the machine's assignMu.
 	locked bool
+	// caller is the call step that called this frame's routine, when it is
+	// call-logged.
+	caller *loggedCall
+	// pendingCall is the call step being run, which a routine it calls
+	// takes as its caller.
+	pendingCall *loggedCall
 }
 
 func (f *frame) child(isolate bool, shared []string) *frame {
@@ -304,7 +325,7 @@ func (f *frame) callRoutine(r *routine, positional []any, named map[string]any) 
 		return nil, raiseErr("RecursionError", "maximum call stack depth of %d exceeded", MaxCallDepth)
 	}
 	g := &frame{x: f.x, routine: r, depth: f.depth + 1, parDepth: f.parDepth, thread: f.thread, parent: f.parent, locked: f.locked,
-		sc: &scope{vars: map[string]any{}}}
+		sc: &scope{vars: map[string]any{}}, caller: f.pendingCall}
 	if named == nil && len(positional) > len(r.params) {
 		return nil, raiseErr("TypeError", "%s takes %d arguments, not %d", r.name, len(r.params), len(positional))
 	}
@@ -860,7 +881,7 @@ func (f *frame) runTry(s *step) (ctrl, error) {
 			}
 			if b, _ := ok.(bool); b {
 				wait := math.Min(delay*math.Pow(mult, float64(attempt)), maxDelay)
-				if err := f.x.sleep(time.Duration(wait * float64(time.Second))); err != nil {
+				if err := f.sleepFor(time.Duration(wait * float64(time.Second))); err != nil {
 					return ctrl{}, err
 				}
 				continue
@@ -869,6 +890,7 @@ func (f *frame) runTry(s *step) (ctrl, error) {
 		if s.except == nil {
 			return ctrl{}, err
 		}
+		f.logHandled(we)
 		if s.except.as != "" {
 			if err := f.set(s.except.as, func(any, bool) (any, error) { return we.val, nil }); err != nil {
 				return ctrl{}, err
@@ -892,7 +914,7 @@ func (x *machine) sleep(d time.Duration) error {
 	}
 }
 
-// call runs a call step.
+// call runs a call step, call-logged at the execution's level.
 func (f *frame) call(s *step) (any, error) {
 	named := map[string]any{}
 	for _, a := range s.args {
@@ -902,6 +924,15 @@ func (f *frame) call(s *step) (any, error) {
 		}
 		named[a.name] = v
 	}
+	lc := f.logBegun(s, named)
+	g := *f
+	g.pendingCall = lc
+	v, err := g.callBody(s, named)
+	f.logEnd(lc, v, err)
+	return v, err
+}
+
+func (f *frame) callBody(s *step, named map[string]any) (any, error) {
 	name := s.call
 	if r := f.x.prog.routines[name]; r != nil {
 		return f.callRoutine(r, nil, named)
@@ -911,9 +942,25 @@ func (f *frame) call(s *step) (any, error) {
 		if stdlib[name] != nil {
 			break
 		}
-		return f.x.rt.HTTP().httpStep(f.x.ctx, strings.TrimPrefix(name, "http."), named)
+		return f.x.effect(f, "http", func() (any, error) {
+			return f.x.rt.HTTP().httpStep(f.x.ctx, strings.TrimPrefix(name, "http."), named)
+		})
+	case name == "googleapis.workflowexecutions.v1.projects.locations.workflows.executions.run":
+		// The connector's run helper, which experimental.executions.run's
+		// page points to: start an execution and wait for its result.
+		args := map[string]any{}
+		for k, v := range named {
+			if k != "connector_params" {
+				args[k] = v
+			}
+		}
+		return f.experimental("run", args)
 	case strings.HasPrefix(name, "googleapis."):
-		return f.x.rt.HTTP().connector(f.x.ctx, name, named)
+		return f.x.effect(f, "connector", func() (any, error) {
+			return f.x.rt.HTTP().connector(f.x.ctx, name, named)
+		})
+	case strings.HasPrefix(name, "experimental.executions."):
+		return f.experimental(strings.TrimPrefix(name, "experimental.executions."), named)
 	}
 	switch name {
 	case "sys.sleep":
@@ -921,7 +968,7 @@ func (f *frame) call(s *step) (any, error) {
 		if !ok || sec < 0 {
 			return nil, raiseErr("TypeError", "sys.sleep needs seconds, a non-negative number")
 		}
-		return nil, f.x.sleep(time.Duration(sec * float64(time.Second)))
+		return nil, f.sleepFor(time.Duration(sec * float64(time.Second)))
 	case "sys.sleep_until":
 		ts, err := str(named["time"], "time")
 		if err != nil {
@@ -948,10 +995,13 @@ func (f *frame) call(s *step) (any, error) {
 		if err := checkEncodable(payload); err != nil {
 			return nil, err
 		}
-		f.x.rt.Log(sev, payload)
-		return nil, nil
+		_, err := f.x.effect(f, "log", func() (any, error) {
+			f.x.rt.Log(sev, payload)
+			return nil, nil
+		})
+		return nil, err
 	case "events.await_callback":
-		return f.x.awaitCallback(named)
+		return f.x.effect(f, "await", func() (any, error) { return f.x.awaitCallback(named) })
 	}
 	d := stdlib[name]
 	if d == nil {

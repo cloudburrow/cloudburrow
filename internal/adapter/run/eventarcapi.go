@@ -51,9 +51,10 @@ import (
 // functions' are. Cloud Audit Logs (eventarcaudit.go) and Firestore
 // (eventarcfirestore.go) events are published by this process to a topic
 // Eventarc makes; a destination can also be a Cloud Run function or an
-// HTTP endpoint; match-path-pattern (eventarcpath.go) is the one operator
-// beyond an exact match. Channels (eventarcchannels.go), GKE and Workflows
-// destinations are UNIMPLEMENTED with the reason.
+// HTTP endpoint, or a workflow (#1986); match-path-pattern (eventarcpath.go)
+// is the one operator beyond an exact match. Channels (eventarcchannels.go)
+// and GKE destinations are UNIMPLEMENTED with the reason. Eventarc
+// Advanced's buses, pipelines and enrollments are eventarcadvanced.go.
 
 // EventarcServer serves Eventarc's triggers and providers.
 type EventarcServer struct {

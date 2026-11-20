@@ -276,7 +276,12 @@ compat_shard() {
       # without a model, for the Document AI and Speech-to-Text
       # customer-managed key tests (with RUN_KMS); LOCALAI, which the
       # generation tests read, is not exported, so they still skip.
-      TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_FIRESTORE,RUN_KMS,RUN_LOCALAI,RUN_SCHEDULER,RUN_LOGGING,RUN_BIGQUERY,RUN_SQLADMIN,RUN_RESOURCEMANAGER,RUN_SERVICEUSAGE,RUN_APIKEYS,RUN_MYSQL,MYSQL_PASSWORD,BIGQUERY_PROJECT,APPENGINE_URL,WORKFLOWS ;;
+      TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_FIRESTORE,RUN_KMS,RUN_LOCALAI,RUN_SCHEDULER,RUN_LOGGING,RUN_BIGQUERY,RUN_SQLADMIN,RUN_RESOURCEMANAGER,RUN_SERVICEUSAGE,RUN_APIKEYS,RUN_MYSQL,MYSQL_PASSWORD,BIGQUERY_PROJECT,APPENGINE_URL,WORKFLOWS
+      # Workflows (#1996): an execution waiting on a callback when the
+      # instance stops carries on after it starts again.
+      SETUP_TESTS="TestWorkflowsRestartSetup"
+      PROBE_TESTS="TestWorkflowsAcrossRestart"
+      PROBE_VARS=WORKFLOWS ;;
     scale)
       # The tests that take minutes each (#1821), split from run: Cloud
       # Run's CPU, automatic and manual scaling and instance splits, through
@@ -428,6 +433,7 @@ compat_setup_exports() {
                CLOUDBURROW_TEST_TASKS_PROBE="$2/tasks-probe.json" \
                CLOUDBURROW_TEST_SCHEDULER_PROBE="$2/scheduler-probe.json" \
                CLOUDBURROW_TEST_STORAGE_RESTART_PROBE="setup:$2/storage-restart-probe.json" ;;
+    run) export CLOUDBURROW_TEST_WORKFLOWS_PROBE="$2/workflows-probe.json" ;;
     sql) export CLOUDBURROW_TEST_CLOUDSQL_SETUP=1 ;;
     emulators) export CLOUDBURROW_TEST_FIRESTORE_SETUP=1 ;;
   esac
@@ -438,7 +444,7 @@ compat_setup_exports() {
 # fixture in <dir>.
 compat_probe_expect() {
   local v
-  for v in MEMORYSTORE MYSQL CLOUDSQL DATASTORE FIRESTORE KMS SECRETS TASKS SCHEDULER; do
+  for v in MEMORYSTORE MYSQL CLOUDSQL DATASTORE FIRESTORE KMS SECRETS TASKS SCHEDULER WORKFLOWS; do
     echo "CLOUDBURROW_TEST_${v}_EXPECT=$1"
   done
   echo "CLOUDBURROW_TEST_STORAGE_RESTART_PROBE=$1:$2/storage-restart-probe.json"

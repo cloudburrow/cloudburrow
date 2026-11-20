@@ -17,7 +17,7 @@ Do not edit these files by hand.
 | [Cloud Build](cloudbuild.md) | 19 | 19 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Secure Source Manager](securesourcemanager.md) | 53 | 53 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Developer Connect](developerconnect.md) | 26 | 11 | 0 | 15 | 0 | 0 | 0 | 0 |
-| [Eventarc](eventarc.md) | 39 | 7 | 0 | 32 | 0 | 0 | 0 | 0 |
+| [Eventarc](eventarc.md) | 42 | 18 | 0 | 18 | 6 | 0 | 0 | 0 |
 | [Container Analysis](containeranalysis.md) | 18 | 18 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Functions v2](functions.md) | 8 | 8 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Functions v1](functionsv1.md) | 11 | 11 | 0 | 0 | 0 | 0 | 0 | 0 |

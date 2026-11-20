@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strconv"
 	"time"
@@ -35,8 +36,11 @@ type workflowsService struct {
 	interpose []grpc.UnaryServerInterceptor
 	requests  func(rest.Request)
 	tokens    workflows.TokenMinter
-	server    *grpctransport.Server
-	api       *workflows.Server
+	// kms is the instance's Cloud KMS, for workflows' customer-managed
+	// keys; nil without it.
+	kms    *kmsService
+	server *grpctransport.Server
+	api    *workflows.Server
 }
 
 func newWorkflowsService(cfg config.Config) *workflowsService {
@@ -109,6 +113,7 @@ func (s *workflowsService) Start(ctx context.Context) error {
 		Addr:    s.Addr,
 		Log:     workflowsLogger(local),
 		Ingress: workflowsIngress(s.cfg),
+		KMS:     s.kmsAPI,
 	})
 	if err != nil {
 		return err
@@ -130,7 +135,23 @@ func (s *workflowsService) Start(ctx context.Context) error {
 	if err := s.server.Register(func(g *grpc.Server) { api.Register(g) }); err != nil {
 		return err
 	}
-	return s.server.Start(ctx)
+	if err := s.server.Start(ctx); err != nil {
+		return err
+	}
+	// Executions that were running when the instance stopped carry on.
+	api.Resume()
+	return nil
+}
+
+// kmsAPI is Cloud KMS for a workflow's key, or nil.
+func (s *workflowsService) kmsAPI() workflows.KMS {
+	if s.kms == nil {
+		return nil
+	}
+	if api := s.kms.API(); api != nil {
+		return api
+	}
+	return nil
 }
 
 func (s *workflowsService) Stop(ctx context.Context) error {
@@ -156,27 +177,36 @@ func workflowsIngress(cfg config.Config) string {
 	return net.JoinHostPort(host, strconv.Itoa(cfg.Endpoints.Ingress))
 }
 
-// workflowsLogger writes an execution's sys.log entries to the instance's
-// Cloud Logging when it serves it, as Google writes them to the
-// workflows.googleapis.com/Workflow resource; otherwise to the CLI's log.
-func workflowsLogger(local func(string) string) func(project, location, workflow, execution, severity string, payload any) {
+// workflowsLogger writes an execution's log entries (sys.log's, its start
+// and end, call logs) to the instance's Cloud Logging when it serves it, as
+// Google writes them to the workflows.googleapis.com/Workflow resource;
+// otherwise to the CLI's log.
+func workflowsLogger(local func(string) string) func(project, location, workflow, execution, logID, severity string, payload any) {
 	client := &http.Client{Timeout: 10 * time.Second}
-	return func(project, location, workflow, execution, severity string, payload any) {
+	return func(project, location, workflow, execution, logID, severity string, payload any) {
 		entry := map[string]any{
-			"logName":  "projects/" + project + "/logs/Workflows",
+			"logName":  "projects/" + project + "/logs/" + url.PathEscape(logID),
 			"severity": severity,
 			"resource": map[string]any{"type": "workflows.googleapis.com/Workflow",
 				"labels": map[string]string{"project_id": project, "location": location, "workflow_id": workflow}},
 			"labels": map[string]string{"workflows.googleapis.com/execution_id": execution},
 		}
+		// The entry's time is when it happened, so entries written from
+		// different goroutines still list in order.
+		entry["timestamp"] = time.Now().UTC().Format(time.RFC3339Nano)
 		if s, ok := payload.(string); ok {
 			entry["textPayload"] = s
 		} else {
 			entry["jsonPayload"] = payload
+			if m, ok := payload.(map[string]any); ok {
+				if at, ok := m["activityTime"].(string); ok {
+					entry["timestamp"] = at
+				}
+			}
 		}
 		base := local("logging")
 		if base == "" {
-			slog.Info("workflows: sys.log", "execution", execution, "severity", severity, "payload", payload)
+			slog.Info("workflows: log entry", "log", logID, "execution", execution, "severity", severity, "payload", payload)
 			return
 		}
 		b, err := json.Marshal(map[string]any{"entries": []any{entry}})

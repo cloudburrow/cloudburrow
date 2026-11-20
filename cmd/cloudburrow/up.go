@@ -337,6 +337,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	workflowsSvc := newWorkflowsService(cfg)
 	if workflowsSvc != nil {
 		workflowsSvc.tokens = creds
+		workflowsSvc.kms = kmsSvc
 		// Eventarc's workflow destination (#1986).
 		if runSvc != nil && runSvc.events != nil {
 			runSvc.events.workflows = workflowsSvc

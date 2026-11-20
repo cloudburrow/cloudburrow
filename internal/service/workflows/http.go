@@ -565,7 +565,14 @@ func (h *HTTPCaller) connector(ctx context.Context, name string, args map[string
 		return nil, err
 	}
 	var auth any
-	if h.Tokens != nil {
+	switch {
+	case api == "firestore":
+		// The local Firestore is Google's emulator, which parses a bearer
+		// token as a JWT and takes "owner" as the admin's, as the admin
+		// SDKs' emulator mode sends: the workflow's service account acts
+		// as a server client does, not under security rules.
+		hdr["Authorization"] = "Bearer owner"
+	case h.Tokens != nil:
 		auth = map[string]any{"type": "OAuth2"}
 	}
 	resp, err := h.send(ctx, m.httpMethod, base+p, hdr, params, body, auth, timeout, hasBody)

@@ -316,8 +316,11 @@ func (r *runService) Start(ctx context.Context) error {
 			// Eventarc (#1877) under /eventarc/v1/: its trigger paths are
 			// Cloud Build's.
 			runadapter.EventarcHandlerOr(func(g grpc.ServiceRegistrar) { functions.Eventarc().Register(g); ops.Register(g) },
-				functions.FunctionsHandler(runadapter.SourceDeployHandler(sourceDeploy,
-					adapter.V1Handler(runadapter.NewRESTHandler(register))))))))
+				// Eventarc Advanced's Publishing API (#1996), POST
+				// /v1/{message_bus}:publish.
+				runadapter.PublisherHandlerOr(functions.EventarcPublisher().Register,
+					functions.FunctionsHandler(runadapter.SourceDeployHandler(sourceDeploy,
+						adapter.V1Handler(runadapter.NewRESTHandler(register)))))))))
 	// Artifact Registry's own prefix (#1578): its Locations mixin, whose
 	// /v1/ path is Cloud Run v1's, and its other calls through the above.
 	jsonAPI = runadapter.ArtifactRegistryHandlerOr(jsonAPI)
@@ -341,6 +344,8 @@ func (r *runService) Start(ctx context.Context) error {
 		functions.Register(g)
 		// Eventarc (#1877), on the functions' event transport.
 		functions.Eventarc().Register(g)
+		// Eventarc Advanced's Publishing API (#1996): Publish to a bus.
+		functions.EventarcPublisher().Register(g)
 	}); err != nil {
 		return err
 	}

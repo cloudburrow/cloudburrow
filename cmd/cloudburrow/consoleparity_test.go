@@ -219,6 +219,10 @@ var parityRows = []parityRow{
 		Methods:  []string{"Eventarc/GetTrigger", "Eventarc/UpdateTrigger"},
 		Provider: "eventarc", Offers: "Eventarc's own Triggers page (/eventarc/triggers, #1877): every trigger of the project (type, event provider, event type, destination, region, created), Create trigger as Google's page (trigger name and type; Cloud Pub/Sub, Cloud Storage, Cloud Audit Logs with service name, method name and Resource as any, one or a path pattern, and Cloud Firestore with database and document path pattern; region, service account; event destination Cloud Run, Cloud Run functions or HTTP endpoint; labels), the trigger's page with what GetTrigger reads and its event filters, Edit (service account, destination, labels) and Delete",
 		Tests: []string{"TestEventarcConsoleTriggers", "TestEventarcTriggersPageThroughTheBrowser"}},
+	// Eventarc Advanced (#1996): no console page yet.
+	{Resource: "Eventarc Advanced message buses, pipelines and enrollments", Service: "eventarc",
+		Methods: []string{"Eventarc/CreateMessageBus", "Eventarc/GetMessageBus", "Eventarc/ListMessageBuses", "Eventarc/UpdateMessageBus", "Eventarc/DeleteMessageBus", "Eventarc/CreatePipeline", "Eventarc/GetPipeline", "Eventarc/ListPipelines", "Eventarc/UpdatePipeline", "Eventarc/DeletePipeline", "Eventarc/CreateEnrollment", "Eventarc/GetEnrollment", "Eventarc/ListEnrollments", "Eventarc/UpdateEnrollment", "Eventarc/DeleteEnrollment", "Eventarc/ListMessageBusEnrollments", "Publisher/Publish"},
+		Issue:   2006},
 	{Resource: "Eventarc providers", Service: "eventarc",
 		Methods:  []string{"Eventarc/GetProvider", "Eventarc/ListProviders"},
 		Excluded: "the providers, whose event types Create trigger's Event type select lists"},

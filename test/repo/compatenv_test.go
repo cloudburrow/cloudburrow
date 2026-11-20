@@ -35,6 +35,7 @@ var compatEnvExceptions = map[string]string{
 	"CLOUDBURROW_TEST_SECRETS_PROBE":            "restart probe fixture file",
 	"CLOUDBURROW_TEST_TASKS_PROBE":              "restart probe fixture file",
 	"CLOUDBURROW_TEST_SCHEDULER_PROBE":          "restart probe fixture file",
+	"CLOUDBURROW_TEST_WORKFLOWS_PROBE":          "restart probe fixture file",
 	"CLOUDBURROW_TEST_STORAGE_RESTART_PROBE":    "restart probe mode and fixture file",
 	"CLOUDBURROW_TEST_STORAGE_VERSIONING_PROBE": "builtin storage-server restart probe mode and file",
 	"CLOUDBURROW_TEST_CLOUDSQL_SETUP":           "restart probe setup switch",
@@ -48,6 +49,7 @@ var compatEnvExceptions = map[string]string{
 	"CLOUDBURROW_TEST_SECRETS_EXPECT":           "restart probe expectation (present or absent)",
 	"CLOUDBURROW_TEST_TASKS_EXPECT":             "restart probe expectation (present or absent)",
 	"CLOUDBURROW_TEST_SCHEDULER_EXPECT":         "restart probe expectation (present or absent)",
+	"CLOUDBURROW_TEST_WORKFLOWS_EXPECT":         "restart probe expectation (present or absent)",
 	// The image the Cloud Build arbitrary-step tests run (#1382), when the
 	// default alpine:3.20 is not to be pulled; a host choice, not an
 	// instance's.
