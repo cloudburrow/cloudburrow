@@ -3020,8 +3020,12 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
         .map((i) => (i.object ? i.object[i.object.length - 1] : i.name));
       const fields = (a.fields || []).map((f) =>
         f.name === a.selectionField ? { ...f, default: names.join("\n") } : f);
-      // The whole page again, whose summary counts the objects too.
-      runAction(route, opts.pagePath || [], { ...a, fields }, () => reload());
+      // The whole page again, whose summary counts the objects too. On a
+      // top-level list there is no page to name: a confirmation names the
+      // checked row, or how many there are (#1864: Roles' Disable).
+      const top = !(opts.pagePath || []).length && !(a.fields || []).some((f) => f.type !== "hidden");
+      const what = top ? (names.length === 1 ? names[0] : `${names.length} ${data.noun || "rows"}`) : null;
+      runAction(route, opts.pagePath || [], { ...a, fields }, () => reload(), NO_ROW, what);
     },
   }));
 
@@ -3533,8 +3537,11 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
           selectActions.length ? selectionLabel : null, refreshControl),
     el("div", { class: "filter-bar" }, bar.node, chooser ? chooser.node : null, freshness),
     bar.chips,
+    // Listing.TableTitle (#1864): the table's own heading, as Google's
+    // Audit Logs titles its table "Data Access audit logs configuration".
+    data.tableTitle ? el("h2", { class: "table-title", id: "table-title", text: data.tableTitle }) : null,
     el("div", { class: "table-wrap" },
-      el("table", {}, el("thead", {}, headRow), body)),
+      el("table", { "aria-labelledby": data.tableTitle ? "table-title" : null }, el("thead", {}, headRow), body)),
     footer);
   if (opts.rowControls) openAskedListAction(route, data, refresh);
 }
@@ -3788,6 +3795,12 @@ async function renderDetail(view, route, resourcePath) {
           onclick: () => runAction(route, segments, a, reload, NO_ROW, data.title || null),
         })));
       note = note ? el("div", {}, bar, note) : bar;
+    }
+    // Section.Edit (#1864): a form drawn in the tab itself, as Google's
+    // service account Details tab has its Name box and Save.
+    if (section.edit) {
+      const form = inlineEditForm(route, segments, section, reload);
+      note = note ? el("div", {}, form, note) : form;
     }
 
     // A grouped section's own strip, its siblings' labels (#1845).
@@ -5208,6 +5221,45 @@ function openEditForm(route, segments, spec, onDone) {
   fields.focusFirst();
 }
 
+// inlineEditForm is a section's own edit form (Section.Edit, #1864), sent
+// as the page's Edit is, through PATCH /api/resources/{service}.
+function inlineEditForm(route, segments, section, onDone) {
+  const spec = section.edit;
+  const name = segments[segments.length - 1];
+  const fields = buildCreateForm(spec);
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  const titleId = `inline-edit-${section.id}`;
+  const primary = el("button", { type: "submit", class: "primary", id: `${titleId}-save`, text: spec.submit || "Save" });
+  let submitting = false;
+  const submit = async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    if (submitting || !fields.validate()) return;
+    submitting = true;
+    primary.disabled = true;
+    const op = recordOperation(`Update ${name}`);
+    try {
+      const res = await send(`/api/resources/${route.service}?project=${encodeURIComponent(currentProject())}`,
+        "PATCH", { Path: segments, Values: fields.values() });
+      op.succeeded("", res.operation);
+      notify(`Updated ${name}`);
+      onDone();
+    } catch (err) {
+      op.failed(err.message, err.operation);
+      error.textContent = err.message;
+      error.hidden = false;
+    } finally {
+      submitting = false;
+      primary.disabled = false;
+    }
+  };
+  return el("form", { class: "inline-edit", novalidate: true, onsubmit: submit, "aria-labelledby": titleId },
+    el("h2", { class: "table-title", id: titleId, text: spec.title || spec.label || "Edit" }),
+    spec.note ? el("p", { class: "form-help", text: spec.note }) : null,
+    error, ...fields.nodes,
+    el("div", { class: "picklist-actions" }, primary));
+}
+
 // pageTabStrip is a route's `pageTabs` as a tablist of links, the route
 // itself selected (#1857).
 function pageTabStrip(route) {
@@ -6055,6 +6107,9 @@ function buildCreateForm(spec) {
     // A repeatable group of fields (#1863): Google's exclusion filters,
     // a row each with its name, filter and Disable.
     if (f.type === "group") return groupEntry(f, id, errorId, helpId);
+    // Items chosen from a picker (#1864): Google's Create role and Edit
+    // role permissions, each with a checkbox, and Add permissions.
+    if (f.type === "picklist") return picklistEntry(f, id, errorId, helpId);
 
     // A textarea rather than an input wherever the value can hold newlines:
     // Enter inserts one instead of submitting the form, which is the whole
@@ -7011,6 +7066,119 @@ function groupEntry(f, id, errorId, helpId) {
            focus: () => (rows[0] ? rows[0].controls[0] : add).focus() };
 }
 
+// picklistEntry is a "picklist" field (Field.PickFrom, #1864), as Google's
+// Create role and Edit role hold a role's permissions: the chosen items
+// listed with a checkbox each, unchecked to take one out, and Add
+// Permissions, which opens a picker under the list (All Services, a
+// filter, a checkbox per item, Add Permissions). The picker's items come
+// from the Studio call PickFrom names, read once. The value is the checked
+// items, one per line, in a hidden textarea, so validation, dirtiness and
+// submission are every other field's.
+const PICKLIST_SHOWN = 100;
+
+function picklistEntry(f, id, errorId, helpId) {
+  const control = el("textarea", { id, name: f.name, hidden: true, class: "picklist-value" });
+  const [service, call] = (f.pickFrom || "").split(":");
+  const addLabel = f.addLabel || "Add";
+  const chosen = new Map();
+  for (const v of (f.default || "").split(/[\n,]/).map((x) => x.trim()).filter(Boolean)) chosen.set(v, true);
+  const count = el("p", { class: "form-help picklist-count", "aria-live": "polite" });
+  const list = el("ul", { class: "picklist-rows", role: "list", "aria-label": f.label });
+  const sync = () => {
+    const kept = [...chosen].filter(([, on]) => on).map(([v]) => v);
+    control.value = kept.join("\n");
+    count.textContent = `${kept.length} assigned`;
+    control.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  const drawChosen = () => {
+    setChildren(list, ...[...chosen.keys()].sort().map((v, n) => {
+      const box = el("input", { type: "checkbox", id: `${id}-item-${n}`, "data-value": v });
+      box.checked = chosen.get(v);
+      box.addEventListener("change", () => { chosen.set(v, box.checked); sync(); });
+      return el("li", { class: "picklist-row" }, el("label", { class: "group-check", for: box.id }, box,
+        el("span", { class: "mono", text: v })));
+    }));
+    list.hidden = chosen.size === 0;
+  };
+
+  const pickerId = `${id}-picker`;
+  const serviceSelect = el("select", { id: `${id}-service` }, el("option", { value: "", text: "All Services" }));
+  const filterInput = el("input", { type: "text", id: `${id}-filter`, autocomplete: "off", spellcheck: "false" });
+  const results = el("ul", { class: "picklist-rows picklist-results", role: "list", "aria-label": `${addLabel}: results` });
+  const status = el("p", { class: "form-help", "aria-live": "polite" });
+  const picked = new Set();
+  let items = null;
+  const drawResults = () => {
+    const q = filterInput.value.trim().toLowerCase();
+    const svc = serviceSelect.value;
+    const match = (items || []).filter((it) => !chosen.get(it.value) &&
+      (!svc || it.value.startsWith(`${svc}.`)) && (!q || it.value.toLowerCase().includes(q)));
+    status.textContent = match.length > PICKLIST_SHOWN
+      ? `${match.length} match; the first ${PICKLIST_SHOWN} are shown. Filter to narrow them.`
+      : `${match.length} match.`;
+    setChildren(results, ...match.slice(0, PICKLIST_SHOWN).map((it, n) => {
+      const box = el("input", { type: "checkbox", id: `${id}-pick-${n}`, "data-value": it.value });
+      box.checked = picked.has(it.value);
+      box.addEventListener("change", () => { if (box.checked) picked.add(it.value); else picked.delete(it.value); });
+      return el("li", { class: "picklist-row" }, el("label", { class: "group-check", for: box.id }, box,
+        el("span", { class: "mono", text: it.value }), it.note ? el("span", { class: "form-help", text: ` ${it.note}` }) : null));
+    }));
+  };
+  const load = async () => {
+    if (items) return drawResults();
+    status.textContent = "Loading…";
+    try {
+      const res = await send(`/api/studio/${encodeURIComponent(service)}?call=${encodeURIComponent(call)}&project=${encodeURIComponent(currentProject())}`,
+        "POST", {});
+      items = (res && res.items) || [];
+      const services = [...new Set(items.map((it) => it.value.split(".")[0]))].sort();
+      serviceSelect.append(...services.map((x) => el("option", { value: x, text: x })));
+      drawResults();
+    } catch (err) {
+      status.textContent = err.message;
+    }
+  };
+  // Enter in the filter must not submit the form.
+  filterInput.addEventListener("keydown", (e) => { if (e.key === "Enter") e.preventDefault(); });
+  filterInput.addEventListener("input", drawResults);
+  serviceSelect.addEventListener("change", drawResults);
+  const toggle = el("button", { type: "button", class: "secondary picklist-add", id: `${id}-add`, text: addLabel,
+    "aria-expanded": "false", "aria-controls": pickerId });
+  const closePicker = () => {
+    picker.hidden = true;
+    toggle.setAttribute("aria-expanded", "false");
+    picked.clear();
+    toggle.focus();
+  };
+  const addButton = el("button", { type: "button", class: "primary", id: `${id}-pick-add`, text: addLabel, onclick: () => {
+    for (const v of picked) chosen.set(v, true);
+    drawChosen();
+    sync();
+    closePicker();
+  } });
+  const picker = el("div", { class: "picklist-picker", id: pickerId, role: "group", "aria-label": `${addLabel} to ${f.label.toLowerCase()}`, hidden: true },
+    el("div", { class: "form-row" }, el("label", { for: serviceSelect.id, text: "Service" }), serviceSelect),
+    el("div", { class: "form-row" }, el("label", { for: filterInput.id, text: "Filter permissions" }), filterInput),
+    status, results,
+    el("div", { class: "picklist-actions" }, addButton,
+      el("button", { type: "button", class: "secondary", text: "Cancel", onclick: closePicker })));
+  toggle.addEventListener("click", () => {
+    if (!picker.hidden) return closePicker();
+    picker.hidden = false;
+    toggle.setAttribute("aria-expanded", "true");
+    filterInput.focus();
+    load();
+  });
+  const help = f.help ? el("p", { id: helpId, class: "form-help", text: f.help }) : null;
+  const error = el("p", { id: errorId, class: "form-field-error", hidden: true });
+  const node = el("fieldset", { class: "form-row picklist-field" },
+    el("legend", {}, el("span", { text: f.label })), count, list, toggle, picker, control, help, error);
+  drawChosen();
+  sync();
+  f.default = control.value;
+  return { field: f, control, node, error, helpId, errorId, isCheck: false, focus: () => toggle.focus() };
+}
+
 // mapToLines renders a map field's JSON value as one "key=value" per line.
 function mapToLines(value) {
   if (!value) return "";
@@ -7347,9 +7515,31 @@ async function renderCreatePage(view, route) {
 
   // Numbered steps, as Google's Cloud Storage and Cloud SQL create pages
   // are, or one page under headings, as Pub/Sub's are (#1847).
+  // A create that makes the resource at a step's Continue (#1864):
+  // Google's Create service account creates the account at Create and
+  // continue, then grants. The rest is sent with the name it answered.
+  let created = "";
+  const commit = caps.create.commitStep ? {
+    step: caps.create.commitStep,
+    label: "Create and continue",
+    run: async (body) => {
+      error.hidden = true;
+      if (!fields.validate()) { steps.revealInvalid(); return false; }
+      try {
+        created = await submitCreate(target, caps.create, { ...fields.values(), _commit: "true" });
+        notify(`Created ${created}`);
+        for (const c of body.querySelectorAll("input, select, textarea")) c.disabled = true;
+        return true;
+      } catch (err) {
+        error.textContent = err.message;
+        error.hidden = false;
+        return false;
+      }
+    },
+  } : null;
   const steps = caps.create.layout === "page"
     ? { nodes: fields.nodes, revealInvalid() {} }
-    : createSteps(fields.nodes, caps.create.layout === "next" ? "Next" : "Continue");
+    : createSteps(fields.nodes, caps.create.layout === "next" ? "Next" : "Continue", { commit });
   const checks = createChecks(target, caps.create, fields);
 
   const submit = async (e) => {
@@ -7360,7 +7550,8 @@ async function renderCreatePage(view, route) {
     setBusy(primary, true);
     try {
       let once = null;
-      const name = await submitCreate(target, caps.create, fields.values(), (o) => { once = o; });
+      const name = await submitCreate(target, caps.create,
+        created ? { ...fields.values(), _created: created } : fields.values(), (o) => { once = o; });
       notify(`Created ${name}`);
       announce(`Created ${name}`);
       // A create that goes on to an action of what it made (#1851): Create
@@ -7476,7 +7667,11 @@ function createChecks(target, spec, fields) {
 //   if (!fields.validate()) steps.revealInvalid();
 // The button is Continue, or Next where Google's page says Next, as
 // Create log bucket does (CreateLayoutNext, #1863).
-function createSteps(nodes, continueLabel = "Continue", { foldRest = false } = {}) {
+// commit, when given, is the step ({ step, label, run }) whose Continue
+// creates the resource (CreateCommitter, #1864): its button reads label,
+// and the step is left only when run(body) resolves true; then it is
+// done, and its title no longer reopens it.
+function createSteps(nodes, continueLabel = "Continue", { foldRest = false, commit = null } = {}) {
   const sections = nodes.filter((n) => n.classList && n.classList.contains("form-section"));
   if (!sections.length) return { nodes, revealInvalid() {} };
   const lead = [];
@@ -7512,9 +7707,18 @@ function createSteps(nodes, continueLabel = "Continue", { foldRest = false } = {
   steps.forEach((s, i) => {
     s.head.addEventListener("click", () => setOpen(s, s.body.hidden));
     if (i < steps.length - 1) {
+      const commits = commit && commit.step === i + 1;
       s.body.append(el("div", { class: "create-step-continue" },
-        el("button", { type: "button", class: "secondary", text: continueLabel,
-          onclick: () => {
+        el("button", { type: "button", class: commits ? "primary" : "secondary", text: commits ? commit.label : continueLabel,
+          onclick: async (e) => {
+            if (commits) {
+              const b = e.currentTarget;
+              setBusy(b, true);
+              const ok = await commit.run(s.body);
+              setBusy(b, false);
+              if (!ok) return;
+              b.disabled = true;
+            }
             setOpen(s, false);
             s.step.classList.add("is-done");
             const next = steps[i + 1];

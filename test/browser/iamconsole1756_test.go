@@ -346,7 +346,7 @@ func TestIAMAuditLogsOrganization(t *testing.T) {
 	if !strings.HasPrefix(first, want.GetServices()[0].GetName()) {
 		t.Errorf("the first row reads %q; queryAuditableServices answers %s first", first, want.GetServices()[0].GetName())
 	}
-	p.clickText("#view button", "Set default configuration")
+	p.clickText("#view button", "Set Default Configuration")
 	p.waitFor(`document.querySelector(".modal.is-open #f-adminRead") !== null`)
 	p.eval(`(() => { const b = document.querySelector(".modal.is-open #f-adminRead"); if (!b.checked) b.click(); return true; })()`, nil)
 	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))

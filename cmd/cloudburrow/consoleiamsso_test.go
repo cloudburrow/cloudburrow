@@ -62,10 +62,10 @@ func TestConsoleIAMSSO1959(t *testing.T) {
 	if err := groups.Edit(ctx, "", []string{"eng" + d}, map[string]string{"memberRestriction": "member.type == 1 && member.customer_id == groupCustomerId()"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := groups.Edit(ctx, "", []string{"eng" + d}, map[string]string{"add": "bot@p.iam.gserviceaccount.com"}); err == nil {
+	if err := groups.ActAt(ctx, "", []string{"eng" + d}, "add-members", map[string]string{"members": "bot@p.iam.gserviceaccount.com"}); err == nil {
 		t.Error("Add member took a service account under a users-only restriction")
 	}
-	if err := groups.Edit(ctx, "", []string{"eng" + d}, map[string]string{"add": "ada" + d}); err != nil {
+	if err := groups.ActAt(ctx, "", []string{"eng" + d}, "add-members", map[string]string{"members": "ada" + d}); err != nil {
 		t.Fatal(err)
 	}
 	if err := groups.Edit(ctx, "", []string{"eng" + d}, map[string]string{"memberRestriction": "member.type == 9"}); err == nil {

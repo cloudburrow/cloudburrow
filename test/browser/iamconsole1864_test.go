@@ -215,12 +215,18 @@ func TestIAMCreateServiceAccountInThreeSteps(t *testing.T) {
 	if id != "build-runner" {
 		t.Errorf("the ID made from the name is %q; want build-runner", id)
 	}
-	p.clickText(".create-step-continue button", "Continue")
+	// Google makes the account at Create and continue (#1864), before
+	// its roles and users are granted.
+	p.clickText(".create-step-continue button", "Create and continue")
+	email := "build-runner@" + project + ".iam.gserviceaccount.com"
+	p.waitFor(`document.querySelector("#f-displayName").disabled`)
+	if _, err := iamc.GetServiceAccount(ctx, &adminpb.GetServiceAccountRequest{Name: "projects/" + project + "/serviceAccounts/" + email}); err != nil {
+		t.Fatalf("after Create and continue the account is not there: %v", err)
+	}
 	setField(p, "#view", "f-roles", "roles/viewer")
 	p.clickText(".create-step-continue button", "Continue")
 	setField(p, "#view", "f-users", "user:ada@example.com")
 	p.run(chromedp.Click(chromedp.CSS(`#view form button[type="submit"].primary`)))
-	email := "build-runner@" + project + ".iam.gserviceaccount.com"
 	// Done returns to the list, as Google's does.
 	p.waitFor(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes("build-runner@"))`)
 	if got := iamRolesOf(t, projects, project, "serviceAccount:"+email); strings.Join(got, ",") != "roles/viewer" {
@@ -264,7 +270,7 @@ func TestIAMCreateRoleFromSelection(t *testing.T) {
 		p.eval(`(() => { const c = `+sel+`; c.click(); return true; })()`, nil)
 	}
 	check("predefined:storage.objectViewer")
-	p.clickText("#view .action-bar button", "Create role from selection")
+	p.clickText("#view .action-bar button", "Create custom role from selection")
 	p.waitFor(`document.querySelector(".modal.is-open #f-roles") !== null`)
 	var roles string
 	p.eval(`document.querySelector(".modal.is-open #f-roles").value`, &roles)

@@ -47,7 +47,7 @@ func (iamAuditProvider) ScopeKey() string { return iamAuditScopeKey }
 
 const iamAuditNote = "The services that can write Data Access audit logs, from the IAM API's queryAuditableServices, with the log types " +
 	"the selected resource's allow policy enables for each (its auditConfigs; allServices, the default configuration, applies to every service). " +
-	"Edit log types and Set default configuration save through SetIamPolicy with the update mask auditConfigs. " +
+	"Edit log types and Set Default Configuration save through SetIamPolicy with the update mask auditConfigs. " +
 	"The configuration is stored and returned, never acted on: no audit log is written or withheld because of it."
 
 // allServices is the audit config that applies to every service: the
@@ -124,7 +124,7 @@ func (p iamAuditProvider) scopeOptions(project string) []console.ScopeOption {
 
 func (p iamAuditProvider) List(ctx context.Context, project string) (console.Listing, error) {
 	l := console.Listing{NameColumn: "Service", Columns: []string{"Admin Read", "Data Read", "Data Write", "Exempted principals"},
-		Noun: "services", Note: iamAuditNote}
+		Noun: "services", Note: iamAuditNote, TableTitle: "Data Access audit logs configuration"}
 	resource, err := auditResource(ctx, project)
 	sc := &console.Scope{Key: iamAuditScopeKey, Label: "Resource", Selected: resource, Options: p.scopeOptions(project)}
 	if project != "" {
@@ -224,7 +224,9 @@ func auditConfigAction(id, label, service string, c *iampb.AuditConfig, etag str
 				Help:    "Principals whose " + t.column + " accesses are not logged, one per line or separated by commas, such as user:ada@example.com. Only for a log type that is enabled."})
 	}
 	fields = append(fields, console.Field{Name: "etag", Type: "hidden", Default: etag})
-	return console.Action{ID: id, Label: label, Fields: fields}
+	// Each of Google's audit log forms ends in Save
+	// (docs.cloud.google.com/logging/docs/audit/configure-data-access, #1864).
+	return console.Action{ID: id, Label: label, Fields: fields, Submit: "Save"}
 }
 
 // DetailActions implements console.PathActor: a service row's Edit log
@@ -245,7 +247,7 @@ func (p iamAuditProvider) DetailActions(ctx context.Context, project string, pat
 		base64.StdEncoding.EncodeToString(pol.GetEtag()))}
 }
 
-// ListActions implements console.ListActor: Set default configuration.
+// ListActions implements console.ListActor: Set Default Configuration.
 func (p iamAuditProvider) ListActions(ctx context.Context, project string) []console.Action {
 	resource, err := auditResource(ctx, project)
 	if err != nil {
@@ -263,7 +265,7 @@ func (p iamAuditProvider) ListActions(ctx context.Context, project string) []con
 	sel.SelectionField = "services"
 	sel.Fields = append([]console.Field{{Name: "services", Label: "Services", Type: "textarea", Required: true,
 		Help: "The services checked in the table, one per line. Each gets the log types and exempted principals below."}}, sel.Fields...)
-	return []console.Action{auditConfigAction(auditDefaultAction, "Set default configuration", allServices, auditConfigsByService(pol)[allServices], etag), sel}
+	return []console.Action{auditConfigAction(auditDefaultAction, "Set Default Configuration", allServices, auditConfigsByService(pol)[allServices], etag), sel}
 }
 
 const auditSelectAction = "edit-selected"

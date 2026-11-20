@@ -147,6 +147,12 @@ func (p iamGroupsProvider) member(path []string) (*resourcemanager.Group, resour
 }
 
 func (p iamGroupsProvider) DetailActions(_ context.Context, _ string, path []string) []console.Action {
+	if len(path) == 1 {
+		if g, err := p.group(path[0]); err == nil {
+			return groupPageActions(g)
+		}
+		return nil
+	}
 	if len(path) != 2 {
 		return nil
 	}
@@ -157,6 +163,13 @@ func (p iamGroupsProvider) DetailActions(_ context.Context, _ string, path []str
 }
 
 func (p iamGroupsProvider) ActAt(_ context.Context, _ string, path []string, action string, values map[string]string) error {
+	if len(path) == 1 {
+		g, err := p.group(path[0])
+		if err != nil {
+			return err
+		}
+		return p.actOnGroup(g, action, values)
+	}
 	g, m, ok, err := p.member(path)
 	if err != nil {
 		return err

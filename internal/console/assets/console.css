@@ -2088,6 +2088,13 @@ dd.has-copy .property-copy { padding: 2px 8px; font-size: var(--text-badge-size)
 .group-cell textarea, .group-cell input { width: 100%; box-sizing: border-box; }
 .group-cell-label { font-size: var(--text-caption-size); color: var(--text-muted); }
 .group-check { display: inline-flex; align-items: center; gap: 6px; }
+/* A picklist (#1864): Create role's and Edit role's permissions, each with
+   a checkbox, and the Add permissions picker under them. */
+.picklist-rows { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 4px; max-height: 240px; overflow-y: auto; }
+.picklist-row .mono { overflow-wrap: anywhere; }
+.picklist-picker { border: 1px solid var(--border); border-radius: var(--radius-control); padding: 12px; margin-top: 8px; }
+.picklist-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.table-title { font-size: var(--text-heading-size); font-weight: 500; margin: 16px 0 8px; }
 
 /* Logs Explorer (#1863, round 2): query suggestions, summary chips,
    highlight, pinned entries and the Timeline's drag handles. */

@@ -121,12 +121,6 @@ func (iamGroupsProvider) CreateTitle() string  { return "Create group" }
 // (checkGroupEmail has the length and the sources).
 var groupEmailPattern = `[^\s.=&<>+,!@]+(\.[^\s.=&<>+,!@]+)*@` + regexp.QuoteMeta(resourcemanager.OrganizationDomain)
 
-// groupDisplayNameField is the display name, "up to 73 characters".
-func groupDisplayNameField(def string) console.Field {
-	return console.Field{Name: "displayName", Label: "Display name", Type: "text", Default: def, Pattern: `.{0,73}`,
-		Help: "At most 73 characters."}
-}
-
 // addMemberHelp explains who the group can take: a security group holds
 // users, service accounts and security groups only.
 func addMemberHelp(g *resourcemanager.Group) string {
@@ -181,7 +175,7 @@ func (p iamGroupsProvider) Detail(_ context.Context, _ string, path []string) (c
 		members.Items = append(members.Items, console.Resource{Name: m.Email,
 			Fields: map[string]string{"Type": m.Type, "Roles": strings.Join(m.Roles, ", "), "Expires": memberExpiry(m),
 				"Restriction": orDash(p.registry.MemberEvaluation(g, m.Email))},
-			Actions: memberActions(m)})
+			Actions: memberActions(m), Selectable: true})
 	}
 	members.Total = len(members.Items)
 	var labels []string
@@ -211,26 +205,104 @@ func (p iamGroupsProvider) Detail(_ context.Context, _ string, path []string) (c
 	if ss, err := p.registry.GetSecuritySettings(g.Name() + "/securitySettings"); err == nil && ss.Evaluation != "" {
 		security = append(security, console.Property{Label: "Restriction state", Value: ss.Evaluation})
 	}
+	// Google's group page (#1864): Add members over the Members table,
+	// Remove members on its checked rows, and Edit group's Group name and
+	// Group description, then Save
+	// (docs.cloud.google.com/iam/docs/groups-in-cloud-console).
+	members.SelectActions = groupSelectActions(g)
 	return console.Detail{Summary: props[:2], Sections: []console.Section{
-		{ID: "members", Label: "Members", Listing: members},
+		{ID: "members", Label: "Members", Listing: members, Actions: []console.Action{addMembersAction(g)}},
 		p.transitiveSection(g),
 		{ID: "member-of", Label: "Member of", Listing: parents},
 		{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Heading: "Group", Properties: props},
 			{Heading: "Security settings", Properties: security}}},
-	}, Edit: &console.EditForm{Label: "Edit group", Fields: []console.Field{
-		groupDisplayNameField(g.DisplayName),
-		{Name: "description", Label: "Description", Type: "text", Default: g.Description, Help: "At most 4,096 characters."},
+	}, Edit: &console.EditForm{Label: "Edit group", Submit: "Save", Fields: []console.Field{
+		{Name: "displayName", Label: "Group name", Type: "text", Default: g.DisplayName, Pattern: `.{0,73}`, Help: "At most 73 characters."},
+		{Name: "description", Label: "Group description", Type: "text", Default: g.Description, Help: "At most 4,096 characters."},
 		{Name: "memberRestriction", Label: "Member restriction", Type: "text", Default: g.MemberRestriction,
 			Help: "Who can be added directly, in CEL: member.type == 1 (users), 2 (service accounts) or 3 (groups), and " +
 				"member.customer_id == groupCustomerId() (only the organization's), joined by && and ||; for example " +
 				"member.type == 1 && member.customer_id == groupCustomerId(). Empty for no restriction. Existing members stay; the state says whether they adhere."},
-		{Name: "add", Label: "Add member", Type: "text",
-			Help: addMemberHelp(g)},
-		{Name: "role", Label: "Role", Type: "select", Options: []string{"MEMBER", "MANAGER", "OWNER"}, Default: "MEMBER"},
+	}, Note: "The group email cannot change. Add members and Remove members are on the Members tab."}}, nil
+}
+
+const groupMembersField = "members"
+
+// addMembersAction is Google's Add members: member emails and their
+// Google Groups role.
+func addMembersAction(g *resourcemanager.Group) console.Action {
+	return console.Action{ID: "add-members", Label: "Add members", Submit: "Add", Fields: []console.Field{
+		{Name: "members", Label: "Member email", Type: "textarea", Required: true,
+			Help: addMemberHelp(g) + " Separate several with commas or lines."},
+		{Name: "role", Label: "Google Groups role", Type: "select", Options: []string{"MEMBER", "MANAGER", "OWNER"}, Default: "MEMBER"},
 		{Name: "expire", Label: "Member expiry", Type: "text",
-			Help: "Optional: when the added member's MEMBER role expires, RFC 3339 (2027-01-31T00:00:00Z), in the future. Only the MEMBER role takes an expiry."},
-		{Name: "remove", Label: "Remove member", Type: "text", Help: "The email of a member to remove."},
-	}, Note: "Add member and Remove member are optional. Change a member's roles or expiry from its row in Members."}}, nil
+			Help: "Optional: when the added members' MEMBER role expires, RFC 3339 (2027-01-31T00:00:00Z), in the future. Only the MEMBER role takes an expiry."},
+	}}
+}
+
+// groupSelectActions is Remove members, over the checked member rows.
+func groupSelectActions(g *resourcemanager.Group) []console.Action {
+	return []console.Action{{ID: "remove-members", Label: "Remove members", Destructive: true, SelectionField: groupMembersField,
+		Fields:  []console.Field{{Name: groupMembersField, Type: "hidden"}},
+		Confirm: "the checked members' memberships of " + g.Email + ": they lose every role the group grants"}}
+}
+
+// groupPageActions are the group page's Add members, Remove members,
+// View in Google Groups (not served) and Delete group.
+func groupPageActions(g *resourcemanager.Group) []console.Action {
+	out := []console.Action{addMembersAction(g)}
+	out = append(out, groupSelectActions(g)...)
+	return append(out,
+		console.Action{ID: "view-in-groups", Label: "View in Google Groups",
+			Unavailable: "Not available locally: Google Groups (groups.google.com) is not part of CloudBurrow; the group's members and settings are on this page."},
+		console.Action{ID: "delete-group", Label: "Delete group", Destructive: true, Leaves: true,
+			Confirm: "the group " + g.Email + " and every membership in it"})
+}
+
+// actOnGroup performs a group page's action.
+func (p iamGroupsProvider) actOnGroup(g *resourcemanager.Group, action string, values map[string]string) error {
+	split := func(v string) []string {
+		return strings.FieldsFunc(v, func(r rune) bool { return r == ',' || r == '\n' || r == '\r' || r == ' ' || r == '\t' })
+	}
+	switch action {
+	case "delete-group":
+		return p.registry.DeleteGroup(g.Name())
+	case "remove-members":
+		ms := split(values[groupMembersField])
+		if len(ms) == 0 {
+			return errors.New("check the members to remove")
+		}
+		for _, m := range ms {
+			name, err := p.registry.LookupMembership(g.Name(), m, "")
+			if err != nil {
+				return err
+			}
+			if err := p.registry.DeleteMembership(name); err != nil {
+				return err
+			}
+		}
+		return nil
+	case "add-members":
+		ms := split(values["members"])
+		if len(ms) == 0 {
+			return errors.New("give a member email")
+		}
+		roles := []string{"MEMBER"}
+		if r := values["role"]; r == "MANAGER" || r == "OWNER" {
+			roles = []string{r, "MEMBER"}
+		}
+		expire, err := parseMemberExpiry(values["expire"])
+		if err != nil {
+			return err
+		}
+		for _, m := range ms {
+			if _, _, err := p.registry.CreateMembershipExpiring(g.Name(), m, "", roles, expire); err != nil {
+				return fmt.Errorf("could not add %s: %w", m, err)
+			}
+		}
+		return nil
+	}
+	return fmt.Errorf("unknown action %q", action)
 }
 
 func (p iamGroupsProvider) Edit(_ context.Context, _ string, path []string, values map[string]string) error {
@@ -241,10 +313,6 @@ func (p iamGroupsProvider) Edit(_ context.Context, _ string, path []string, valu
 	if err != nil {
 		return err
 	}
-	add, remove := strings.TrimSpace(values["add"]), strings.TrimSpace(values["remove"])
-	if add == "" && strings.TrimSpace(values["expire"]) != "" {
-		return errors.New("a member expiry needs a member to add; change an existing member's expiry from its row in Members")
-	}
 	restriction, restrictionChanged := values["memberRestriction"]
 	restrictionChanged = restrictionChanged && strings.TrimSpace(restriction) != g.MemberRestriction
 	if restrictionChanged {
@@ -253,34 +321,11 @@ func (p iamGroupsProvider) Edit(_ context.Context, _ string, path []string, valu
 		}
 	}
 	if dn, ok := values["displayName"]; ok && (dn != g.DisplayName || values["description"] != g.Description) {
-		if _, err := p.registry.UpdateGroup(g.Name(), resourcemanager.GroupInput{DisplayName: dn, Description: values["description"]},
-			[]string{"display_name", "description"}); err != nil {
-			return err
-		}
-	} else if add == "" && remove == "" && !restrictionChanged {
-		return errors.New("change the display name or description, or give a member to add or to remove")
-	}
-	if remove != "" {
-		name, err := p.registry.LookupMembership(g.Name(), remove, "")
-		if err != nil {
-			return err
-		}
-		if err := p.registry.DeleteMembership(name); err != nil {
-			return err
-		}
-	}
-	if add != "" {
-		roles := []string{"MEMBER"}
-		if r := values["role"]; r != "" && r != "MEMBER" {
-			roles = []string{r, "MEMBER"}
-		}
-		expire, err := parseMemberExpiry(values["expire"])
-		if err != nil {
-			return err
-		}
-		if _, _, err := p.registry.CreateMembershipExpiring(g.Name(), add, "", roles, expire); err != nil {
-			return err
-		}
+		_, err := p.registry.UpdateGroup(g.Name(), resourcemanager.GroupInput{DisplayName: dn, Description: values["description"]},
+			[]string{"display_name", "description"})
+		return err
+	} else if !restrictionChanged {
+		return errors.New("change the group name, the description or the member restriction")
 	}
 	return nil
 }

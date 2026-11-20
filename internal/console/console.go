@@ -108,6 +108,10 @@ type Listing struct {
 	// up with two columns headed "Name": the implicit one and a field of the
 	// same label. The screen decides what its identifier is called.
 	NameColumn string `json:"nameColumn,omitempty"`
+	// TableTitle heads the table, and names it, where Google's page titles
+	// its table apart from the page: Audit Logs' "Data Access audit logs
+	// configuration" (#1864). Empty draws no heading.
+	TableTitle string `json:"tableTitle,omitempty"`
 	// Noun is the plural word for these resources, used in the filter and the
 	// empty state. Empty falls back to the screen's title, which reads badly
 	// when the title is not a noun for the rows — "Filter resource manager".
@@ -433,7 +437,20 @@ type Field struct {
 	// Google's Spanner Create instance has Compare editions beside the
 	// edition (#1859).
 	Dialog *FieldDialog `json:"dialog,omitempty"`
+	// PickFrom, on a "picklist" field (PicklistFieldType), is the
+	// "service:call" of the Studio call that answers what the field's
+	// picker offers, as Google's Create role and Edit role have Add
+	// permissions (#1864). The value is the chosen items, one per line; the
+	// form lists them with a checkbox each, cleared to remove one, and
+	// AddLabel names the button that opens the picker. The call gets
+	// {"filter": "<the picker's Filter by role>"} and answers
+	// {"items": [{"value": "...", "note": "..."}]}.
+	PickFrom string `json:"pickFrom,omitempty"`
 }
+
+// PicklistFieldType is the Type of a list of items chosen from a picker
+// (Field.PickFrom): one per line in the value.
+const PicklistFieldType = "picklist"
 
 // FieldDialog is a Field's Dialog: Button opens a dialog titled Title, an
 // Intro above a table of Columns, each of Rows headed by its first cell.
@@ -645,6 +662,28 @@ type CreateThener interface {
 	Creator
 	CreateThen() string
 }
+
+// CreateCommitter is a Creator whose create page makes the resource
+// partway through its steps, as Google's Create service account makes the
+// account at the first step's Create and continue, before its roles and
+// users are granted (#1864). CreateCommitStep is that step's number (1 for
+// the first). Its Continue reads Create and continue and sends the form's
+// values with CreateCommitKey set to "true", the Create answering with the
+// name; the step's fields are then fixed, and the page's submit sends every
+// value with CreateCreatedKey holding that name, for the Create to finish
+// the resource it already made. Submitting before the step creates it all
+// at once, as Google's Done on the first step does.
+type CreateCommitter interface {
+	Creator
+	CreateCommitStep() int
+}
+
+// CreateCommitKey and CreateCreatedKey are the values a CreateCommitter's
+// page adds (see CreateCommitter).
+const (
+	CreateCommitKey  = "_commit"
+	CreateCreatedKey = "_created"
+)
 
 // Pager is a provider whose listings can be continued past their first page.
 //
@@ -895,6 +934,10 @@ type Section struct {
 	// Actions over the strip, and each tab its own content; the tab
 	// chosen is the address's subtab.
 	Tabs []Section `json:"tabs,omitempty"`
+	// Edit is a form drawn in the tab itself, above its content, sent as
+	// the page's Edit is (the provider's Editor): Google's service account
+	// Details tab has its Name box and Save (#1864). Its Label heads it.
+	Edit *EditForm `json:"edit,omitempty"`
 }
 
 // dropBlankProperties removes every Property whose Value is empty or
@@ -1968,6 +2011,8 @@ type createForm struct {
 	Then string `json:"then,omitempty"`
 	// Href is CreateHrefer's: the console page the create button opens.
 	Href string `json:"href,omitempty"`
+	// CommitStep is CreateCommitter's: the step whose Continue creates.
+	CommitStep int `json:"commitStep,omitempty"`
 }
 
 // ProjectCreateFormer is a Creator whose fields depend on the project, as
@@ -2026,6 +2071,9 @@ func (s *Server) capabilitiesOf(p Provider) capabilities {
 		}
 		if ct, ok := p.(CreateThener); ok {
 			c.Create.Then = ct.CreateThen()
+		}
+		if cc, ok := p.(CreateCommitter); ok {
+			c.Create.CommitStep = cc.CreateCommitStep()
 		}
 		if ch, ok := p.(CreateHrefer); ok && ch.CreateHref() != "" {
 			c.Create.Href = ch.CreateHref()
