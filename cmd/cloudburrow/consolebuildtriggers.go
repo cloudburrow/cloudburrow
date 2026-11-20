@@ -322,6 +322,9 @@ func poolOptionsByRegion(of func(region string) []string) []console.ConditionalO
 	index := map[string]int{}
 	for _, r := range runadapter.PoolRegions() {
 		opts := of(r)
+		if opts == nil {
+			opts = []string{}
+		}
 		key := strings.Join(opts, ",")
 		if i, ok := index[key]; ok {
 			out[i].When += "|" + r

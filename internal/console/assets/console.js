@@ -6998,7 +6998,7 @@ function buildCreateForm(spec) {
     if (!(f.optionsWhen || []).length || entry.control.tagName !== "SELECT") continue;
     const refresh = () => {
       const match = f.optionsWhen.find((o) => holds(o.when));
-      const options = match ? match.options : (f.options || []);
+      const options = (match ? match.options : f.options) || [];
       const before = entry.control.value;
       const now = [...entry.control.options].map((o) => o.value);
       if (now.length === options.length && now.every((v, i) => v === options[i])) return;
