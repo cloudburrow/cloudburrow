@@ -36,7 +36,13 @@ import (
 // are Spanner's optimizer's decisions, and nothing local makes them (the
 // emulator runs a query on ZetaSQL's reference evaluator, which has no
 // plan), so a plan written here from the query's text could look right and
-// differ from the one Spanner runs. The modes whose answer is a plan, PLAN,
+// differ from the one Spanner runs. Read in its source for #2029
+// (cloud-spanner-emulator d357ec1d): EvaluateQuery hands the resolved AST
+// to googlesql::PreparedQuery, every table is read whole from its base
+// table (QueryableTable::CreateEvaluatorTableIterator, KeySet::All),
+// FORCE_INDEX is only validated and JOIN_METHOD validated and dropped, so
+// no shape (scan, filter, join, index read) runs as Spanner's plan would,
+// and none is given one. The modes whose answer is a plan, PLAN,
 // PROFILE and WITH_PLAN_AND_STATS, are refused UNIMPLEMENTED, rather than
 // answered with the emulator's placeholder node. WITH_STATS, which has no
 // plan, is served: the front runs the query in PROFILE mode on the

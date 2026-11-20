@@ -11522,6 +11522,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/optional_test.go:264 TestSpannerSchemaAndQuery",
+          "test/compat/spannerplans2029_test.go:35 TestSpannerQueryPlansRefusedForEveryShape",
           "test/compat/spannerprofile_test.go:35 TestSpannerQueryModes"
         ]
       },
