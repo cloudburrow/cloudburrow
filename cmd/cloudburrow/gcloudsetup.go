@@ -327,7 +327,14 @@ func gcloudConfiguration(cfg config.Config, adcPath string) string {
 	// deploy` (#1297), and offer to enable it. Service Usage is served since
 	// #1352, but a disable there is recorded, not enforced, so the prompt
 	// would only stand between a command and an API that answers anyway.
-	fmt.Fprintf(&b, "[core]\nproject = %s\ndisable_usage_reporting = true\nshould_prompt_to_enable_api = false\n", cfg.DefaultProject())
+	//
+	// check_gce_metadata is off, and metrics/environment named, so gcloud
+	// never asks metadata.google.internal (#2038): every request's
+	// User-Agent asks gce_cache whether gcloud runs on GCE unless the
+	// environment is named (metrics.py), and that probe resolves
+	// GCE_METADATA_ROOT, which a configuration file cannot set.
+	fmt.Fprintf(&b, "[core]\nproject = %s\ndisable_usage_reporting = true\nshould_prompt_to_enable_api = false\ncheck_gce_metadata = false\n", cfg.DefaultProject())
+	b.WriteString("\n[metrics]\nenvironment = cloudburrow\n")
 	b.WriteString("\n[api_endpoint_overrides]\n")
 	written := map[string]bool{}
 	for _, v := range gcloudVerified {

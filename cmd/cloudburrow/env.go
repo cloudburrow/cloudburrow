@@ -303,6 +303,25 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 			"the project every local resource lives under"},
 		{"GCE_METADATA_HOST", addr(cfg.Endpoints.Metadata),
 			"points Google's metadata lookups at this instance, not 169.254.169.254"},
+		// No Google name is resolved off the machine (#2038). gcloud reads
+		// the metadata server at GCE_METADATA_ROOT, never GCE_METADATA_HOST
+		// (gce_read.py), and its default is metadata.google.internal; every
+		// gcloud request's User-Agent asks gce_cache whether it is on GCE
+		// unless metrics/environment is set (metrics.py), whatever
+		// core/check_gce_metadata says. Python's google-auth and Node's
+		// gcp-metadata ping GCE_METADATA_IP (default 169.254.169.254).
+		{"GCE_METADATA_ROOT", addr(cfg.Endpoints.Metadata),
+			"read by gcloud and older libraries for the metadata server: this instance, so metadata.google.internal is never looked up"},
+		{"GCE_METADATA_IP", addr(cfg.Endpoints.Metadata),
+			"read by Python's google-auth and Node's gcp-metadata for their metadata ping: this instance, not 169.254.169.254"},
+		{"CLOUDSDK_METRICS_ENVIRONMENT", "cloudburrow",
+			"read by gcloud: names its environment, so it never probes metadata.google.internal to find out"},
+		{"CLOUDSDK_CORE_CHECK_GCE_METADATA", "false",
+			"read by gcloud: takes no account or project from a metadata server"},
+		{"CLOUDSDK_CORE_DISABLE_USAGE_REPORTING", "true",
+			"read by gcloud: sends no usage statistics to Google"},
+		{"CLOUDSDK_COMPONENT_MANAGER_DISABLE_UPDATE_CHECK", "true",
+			"read by gcloud: does not ask Google for component updates"},
 		{"CLOUDSDK_API_ENDPOINT_OVERRIDES_IAMCREDENTIALS", "http://" + addr(cfg.Endpoints.Metadata) + "/",
 			"read by gcloud for --impersonate-service-account (docs/credentials.md)"},
 		// gcloud refreshes a credential_file_override service account at

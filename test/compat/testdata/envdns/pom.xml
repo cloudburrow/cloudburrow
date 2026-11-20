@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Java's google-auth for TestEnvResolvesNoGoogleName; never published. -->
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>com.cloudburrow.compat</groupId>
+  <artifactId>envdns</artifactId>
+  <version>0</version>
+  <dependencies>
+    <dependency>
+      <groupId>com.google.auth</groupId>
+      <artifactId>google-auth-library-oauth2-http</artifactId>
+      <version>1.58.0</version>
+    </dependency>
+  </dependencies>
+</project>

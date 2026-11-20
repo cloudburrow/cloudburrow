@@ -142,6 +142,10 @@ func testGcloudSetup(t *testing.T, gdir, stateDir string) string {
 	if p := sections["core"]["project"]; p == "" {
 		t.Errorf("configuration sets no core/project:\n%s", conf)
 	}
+	// Without both, gcloud probes metadata.google.internal (#2038).
+	if sections["core"]["check_gce_metadata"] != "false" || sections["metrics"]["environment"] == "" {
+		t.Errorf("configuration leaves gcloud's GCE probe on (core/check_gce_metadata, metrics/environment):\n%s", conf)
+	}
 	auth := sections["auth"]
 	if auth["disable_credentials"] != "true" {
 		t.Errorf("auth/disable_credentials = %q:\n%s", auth["disable_credentials"], conf)

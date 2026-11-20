@@ -121,6 +121,30 @@ func TestMetadataTreeAnswersTheStandardKeys(t *testing.T) {
 	}
 }
 
+// Python's google-auth reads the account with ?recursive=true before every
+// compute_engine refresh and indexes the JSON (#2038); GCE answers it so.
+func TestServiceAccountRecursiveIsJSON(t *testing.T) {
+	t.Parallel()
+	c, _ := testCreds(t)
+	srv := serve(t, c)
+
+	code, body, hdr := getMeta(t, srv, "/computeMetadata/v1/instance/service-accounts/default/?recursive=true")
+	if code != http.StatusOK || !strings.HasPrefix(hdr.Get("Content-Type"), "application/json") {
+		t.Fatalf("GET ?recursive=true = %d, %s", code, hdr.Get("Content-Type"))
+	}
+	var got struct {
+		Aliases []string `json:"aliases"`
+		Email   string   `json:"email"`
+		Scopes  []string `json:"scopes"`
+	}
+	if err := json.Unmarshal([]byte(body), &got); err != nil {
+		t.Fatalf("not JSON: %v: %q", err, body)
+	}
+	if got.Email != c.Email || len(got.Aliases) != 1 || got.Aliases[0] != "default" || len(got.Scopes) == 0 {
+		t.Errorf("GET ?recursive=true = %+v", got)
+	}
+}
+
 // Clients parse the last path segment out of the zone, so a bare zone name
 // breaks them.
 func TestZoneIsFullyQualified(t *testing.T) {
