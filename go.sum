@@ -463,6 +463,8 @@ cloud.google.com/go/vpcaccess v1.14.0/go.mod h1:MxbVgr+2fpIFIEIdSmgnb8ykNWRPVtsl
 cloud.google.com/go/webrisk v1.17.0/go.mod h1:ypwCZ+G/SXyUZ+x3ppxn1hu+6tDifGNd/OpwPtCdJHI=
 cloud.google.com/go/websecurityscanner v1.12.0/go.mod h1:cZSc9HqoFdccL1mqZtPIInOd4R8PBGwI20wdnrz6AO8=
 cloud.google.com/go/workflows v1.20.0/go.mod h1:TC9yx7VpjGdBBeKM8FG2EMtms5Q9nyTqI+2uV9bDNs4=
+cloud.google.com/go/workflows v1.22.1 h1:L8jaKQE/APrFzkXdG97sMz3qZoQGTEmofeYSob0QBYY=
+cloud.google.com/go/workflows v1.22.1/go.mod h1:ZwOblJ0nYnqoL5wUx6FUMiRPeh733Qm2j4pVsBY85q4=
 codeberg.org/go-fonts/dejavu v0.4.0/go.mod h1:abni088lmhQJvso2Lsb7azCKzwkfcnttl6tL1UTWKzg=
 codeberg.org/go-fonts/latin-modern v0.4.0/go.mod h1:BF68mZznJ9QHn+hic9ks2DaFl4sR5YhfM6xTYaP9vNw=
 codeberg.org/go-fonts/liberation v0.4.1/go.mod h1:Gu6FTZHMMpGxPBfc8WFL8RfwMYFTvG7TIFOMx8oM4B8=
