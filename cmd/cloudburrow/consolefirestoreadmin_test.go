@@ -347,4 +347,26 @@ func TestConsoleFirestoreBackupSchedules(t *testing.T) {
 	if daily, weekly, err = drSchedules(ctx, c, db); err != nil || daily != nil || weekly != nil {
 		t.Errorf("after turning both off: %v, %v, %v", daily, weekly, err)
 	}
+	// Enable point-in-time recovery (#1942): the tab shows its status,
+	// retention period and earliest version time, as Google's page does.
+	if err := p.ActAt(ctx, "p", at, editDisasterRecovery, map[string]string{"pitr": "true", "daily": "false", "weekly": "false"}); err != nil {
+		t.Fatalf("Edit, point-in-time recovery on: %v", err)
+	}
+	got, err := c.GetDatabase(ctx, &adminpb.GetDatabaseRequest{Name: db})
+	if err != nil || got.GetPointInTimeRecoveryEnablement() != adminpb.Database_POINT_IN_TIME_RECOVERY_ENABLED {
+		t.Fatalf("after Edit: %v, %v; want PITR enabled", got, err)
+	}
+	d, err = p.Detail(ctx, "p", at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sec = fsSection(d, "schedules")
+	if !strings.Contains(sec.Note, "Point-in-time recovery: on. Retention period: 7 days. Earliest version time: ") {
+		t.Errorf("the Disaster recovery tab's note = %q", sec.Note)
+	}
+	for _, f := range sec.Actions[0].Fields {
+		if f.Name == "pitr" && f.Default != "true" {
+			t.Errorf("Edit opens with pitr = %q", f.Default)
+		}
+	}
 }

@@ -41,6 +41,9 @@ type savedState struct {
 	OpOrder    []string             `json:"opOrder,omitempty"`
 	Backups    map[string][]byte    `json:"backups,omitempty"`
 	LastBackup map[string]time.Time `json:"lastBackup,omitempty"`
+	// PITRSince is when each database's point-in-time recovery was last
+	// enabled (pitr.go, #1942), by database name.
+	PITRSince map[string]time.Time `json:"pitrSince,omitempty"`
 	// BackupKeys are the backups' customer-managed encryption, by backup
 	// name (#1881).
 	BackupKeys map[string][]byte `json:"backupKeys,omitempty"`
@@ -190,6 +193,10 @@ func (a *Admin) restore(st *frontstate.Store, s *savedState) error {
 	for n, t := range s.LastBackup {
 		a.lastBackup[n] = t
 	}
+	a.pitrSince = map[string]time.Time{}
+	for n, t := range s.PITRSince {
+		a.pitrSince[n] = t
+	}
 	a.seen = map[string]bool{}
 	for _, n := range s.Seen {
 		if db := databaseOf(n); db != "" {
@@ -294,6 +301,12 @@ func (a *Admin) save() error {
 			s.LastBackup[n] = t
 		}
 	}
+	if len(a.pitrSince) > 0 {
+		s.PITRSince = make(map[string]time.Time, len(a.pitrSince))
+		for n, t := range a.pitrSince {
+			s.PITRSince[n] = t
+		}
+	}
 	s.Seen = a.seenList("")
 	a.mu.Unlock()
 	if err != nil {
@@ -325,6 +338,7 @@ func (a *Admin) ResetState() error {
 	a.opOrder = nil
 	a.backups = map[string]*backup{}
 	a.lastBackup = map[string]time.Time{}
+	a.pitrSince = map[string]time.Time{}
 	a.userCreds = map[string]*creds{}
 	a.mongoIndexNames = map[string]string{}
 	st := a.state
