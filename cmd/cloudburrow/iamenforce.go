@@ -23,8 +23,10 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/metadata"
 	"github.com/cloudburrow/cloudburrow/internal/service/kms"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
+	"github.com/cloudburrow/cloudburrow/internal/service/scheduler"
 	"github.com/cloudburrow/cloudburrow/internal/service/secrets"
 	"github.com/cloudburrow/cloudburrow/internal/service/tasks"
+	"github.com/cloudburrow/cloudburrow/internal/service/workflows"
 	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
 )
 
@@ -181,7 +183,21 @@ func newIAMEnforcer(cfg config.Config, creds *metadata.Credentials, reg func() *
 
 // useIAMEnforcement interposes the enforcer on the in-process services
 // whose methods it maps, and gives it their policies.
-func useIAMEnforcement(e *iameval.Enforcer, secretsSvc *secretsService, kmsSvc *kmsService, tasksSvc *tasksService, hub *analyticsHubSvc) {
+func useIAMEnforcement(e *iameval.Enforcer, secretsSvc *secretsService, kmsSvc *kmsService, tasksSvc *tasksService, hub *analyticsHubSvc,
+	schedulerSvc *schedulerService, workflowsSvc *workflowsService) {
+	// Cloud Scheduler and Workflows keep no resource-level policies, so
+	// only the project's and its ancestors' apply: no policy reader.
+	if schedulerSvc != nil {
+		schedulerSvc.interpose = append(schedulerSvc.interpose, e.Interceptor(iameval.Scheduler))
+		schedulerSvc.wrapJSON = jsonEnforcer(e, iameval.Scheduler, scheduler.Transcoder().Mixins)
+	}
+	if workflowsSvc != nil {
+		workflowsSvc.interpose = append(workflowsSvc.interpose, e.Interceptor(iameval.Workflows))
+		bound := jsonEnforcer(e, iameval.Workflows, workflows.Transcoder().Mixins)
+		workflowsSvc.wrapJSON = func(next http.Handler) http.Handler {
+			return e.HTTPPaths(iameval.Workflows, iameval.WorkflowsJSON, bound(next))
+		}
+	}
 	if hub != nil {
 		// BigQuery sharing (#1989): the table's checks, then those it
 		// cannot express, on gRPC and JSON alike.

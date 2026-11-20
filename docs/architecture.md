@@ -70,7 +70,8 @@ Out of contract, not merely unscheduled:
   against this instance's own minted tokens and the project's stored policy (`internal/iamcond`,
   `internal/iamroles`), and BigQuery remote models' connection permissions; and, with
   `up --iam-enforcement=on` (#1879, off by default), the methods `internal/iameval` maps on Secret
-  Manager, Cloud KMS and Cloud Tasks ([compatibility.md](compatibility.md#iam-enforcement)).
+  Manager, Cloud KMS, Cloud Tasks, Cloud Storage, Pub/Sub, Cloud Run invoke, BigQuery sharing, Cloud
+  Scheduler and Workflows ([compatibility.md](compatibility.md#iam-enforcement)).
 - **GKE-specific APIs**, Google-managed load balancing, storage classes and identity.
 - **BigQuery beyond what its community emulator does.** Firestore, Spanner, Bigtable and
   Datastore now ship as opt-in Google emulators. BigQuery ships as `goccy/bigquery-emulator`,
