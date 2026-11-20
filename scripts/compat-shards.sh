@@ -98,6 +98,7 @@ COMPAT_LOCALAI_TEST_NAMES="
   BigQueryMLRemoteGenerateEmbedding BigQueryMLRemoteGenerateText
   BigQueryMLRemoteGenerationOptions BigQueryMLTranscribe
   BigQueryMLTranslate BigQueryMLUnderstandText
+  BigQueryObjectRefAIFunctions BigQueryObjectRefEmbeddingsAndSearch
   BigQueryVectorSearchAutonomousEmbeddings
   ConsoleEmbeddingsPlaygroundMatchesTheOfficialSDK
   ConsoleLocalModelsLoadEmbedUnload

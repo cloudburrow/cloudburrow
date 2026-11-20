@@ -53,8 +53,9 @@ import (
 // changed, while the embedding column exists (400). The refusals' words
 // are CloudBurrow's (UNVERIFIED, re-read 2026-11-18: the page quotes none).
 //
-// Not served (named, 501): an ObjectRef source (multimodal embeddings);
-// a statement that makes one inside a script. UNVERIFIED (re-read 2026-11-18, the
+// An ObjectRef source (#1983) is read and matched as its TO_JSON_STRING
+// and each object embedded by :embedContent through its authorizer
+// (embedPieces). Not served (named, 501): a statement that makes one inside a script. UNVERIFIED (re-read 2026-11-18, the
 // page does not say): whether a failed row is retried (here it is not,
 // until its source changes); the exact text of generation_expression;
 // that the default task_type is written into it for every model but
@@ -82,6 +83,9 @@ type genEmbedding struct {
 	// Connection is the connection_id, PROJECT.LOCATION.ID, or "" for
 	// model => 'embeddinggemma-300m'.
 	Connection string `json:"connection,omitempty"`
+	// SourceRef is set when the source column is an ObjectRef (#1983):
+	// each object is embedded by :embedContent of its fileData part.
+	SourceRef bool `json:"sourceRef,omitempty"`
 	// renaming is set while an ALTER TABLE RENAME COLUMN of the column
 	// runs, so the background job does not take the column for dropped.
 	renaming bool
@@ -309,7 +313,9 @@ func (f front) resolveGenerated(r *http.Request, q queryOptions, project string,
 	switch {
 	case typ == "STRING":
 	case strings.Contains(typ, "URI") && strings.Contains(typ, "AUTHORIZER"): // ObjectRef
-		return g, 501, "Not implemented here: an ObjectRef source column of a generated embedding column (multimodal embeddings, #1798). Nothing was run."
+		// Multimodal embeddings (#1983): each object is embedded through
+		// its authorizer, as AI.EMBED of an ObjectRef is.
+		g.SourceRef = true
 	default:
 		return g, 400, "The source column " + ctoks[0].text + " of a generated embedding column must be a STRING or ObjectRef, not " + typ
 	}
@@ -779,7 +785,12 @@ func (g *embedGenerator) pass() {
 func (g *embedGenerator) update(f front, r *http.Request, wkey string, e genEmbedding) {
 	f = f.inProject(e.Project)
 	ref := quotePath([]string{e.Project, e.Dataset, e.Table})
-	read := "SELECT s, e FROM (SELECT " + sqlIdent(e.Source) + " AS s, TO_JSON_STRING(" + sqlIdent(e.Column) + ") AS e FROM " + ref + ") GROUP BY s, e"
+	// An ObjectRef source is read, and matched, as its TO_JSON_STRING.
+	src := sqlIdent(e.Source)
+	if e.SourceRef {
+		src = "TO_JSON_STRING(" + src + ")"
+	}
+	read := "SELECT s, e FROM (SELECT " + src + " AS s, TO_JSON_STRING(" + sqlIdent(e.Column) + ") AS e FROM " + ref + ") GROUP BY s, e"
 	_, rows, code, _ := f.queryAllRows(r, queryOptions{}, read)
 	if code != 0 {
 		return
@@ -795,6 +806,9 @@ func (g *embedGenerator) update(f front, r *http.Request, wkey string, e genEmbe
 	}
 	todo := map[string]*string{}
 	for _, row := range rows {
+		if e.SourceRef && row[0] != nil && *row[0] == "null" {
+			row[0] = nil // TO_JSON_STRING of a NULL ObjectRef
+		}
 		key := "\x00"
 		if row[0] != nil {
 			key = "s" + *row[0]
@@ -819,7 +833,6 @@ func (g *embedGenerator) update(f front, r *http.Request, wkey string, e genEmbe
 		return
 	}
 	a := aiResolved{rm: &remoteModel{Model: e.Model, Endpoint: e.Endpoint, Location: e.Location, Embedding: true}, taskType: e.TaskType, title: e.Title, dims: e.Dims}
-	ctx := r.Context()
 	// One background DML job a pass, its ID prefixed gc_ as BigQuery's
 	// ("Background embedding jobs all have a prefix of gc_"), listed in
 	// INFORMATION_SCHEMA.JOBS as the page reads them.
@@ -831,7 +844,17 @@ func (g *embedGenerator) update(f front, r *http.Request, wkey string, e genEmbe
 			continue
 		}
 		var value string
-		v, status := f.embedVector(ctx, e.Project, a, *s)
+		var v []float64
+		var status string
+		if e.SourceRef {
+			if o, ok := parseObjRef([]byte(*s)); ok {
+				v, status = f.embedPieces(r, e.Project, a, []promptPiece{{ref: &o}})
+			} else {
+				status = "cloudburrow: unreadable ObjectRef " + *s
+			}
+		} else {
+			v, status = f.embedVector(r.Context(), e.Project, a, *s)
+		}
 		if status != "" {
 			value = "STRUCT(CAST(NULL AS ARRAY<FLOAT64>) AS result, " + sqlString(status) + " AS status)"
 		} else {
@@ -841,8 +864,8 @@ func (g *embedGenerator) update(f front, r *http.Request, wkey string, e genEmbe
 			}
 			value = "STRUCT(ARRAY<FLOAT64>[" + strings.Join(lits, ", ") + "] AS result, '' AS status)"
 		}
-		cases = append(cases, "WHEN "+sqlIdent(e.Source)+" = "+sqlString(*s)+" THEN "+value)
-		wheres = append(wheres, sqlIdent(e.Source)+" = "+sqlString(*s))
+		cases = append(cases, "WHEN "+src+" = "+sqlString(*s)+" THEN "+value)
+		wheres = append(wheres, src+" = "+sqlString(*s))
 	}
 	gc := r.WithContext(context.WithValue(r.Context(), jobPrefixKey{}, "gc_"))
 	update := "UPDATE " + ref + " SET " + sqlIdent(e.Column) + " = CASE " + strings.Join(cases, " ") + " ELSE " + sqlIdent(e.Column) + " END WHERE " + strings.Join(wheres, " OR ")
@@ -852,7 +875,7 @@ func (g *embedGenerator) update(f front, r *http.Request, wkey string, e genEmbe
 	for key, s := range todo {
 		where := sqlIdent(e.Source) + " IS NULL"
 		if s != nil {
-			where = sqlIdent(e.Source) + " = " + sqlString(*s)
+			where = src + " = " + sqlString(*s)
 		}
 		readBack := "SELECT TO_JSON_STRING(" + sqlIdent(e.Column) + ") FROM " + ref + " WHERE " + where + " LIMIT 1"
 		if _, got, code, _ := f.queryAllRows(r, queryOptions{}, readBack); code == 0 && len(got) == 1 && got[0][0] != nil {

@@ -60,8 +60,8 @@ import (
 // images, audio, video and PDF only with EmbeddingGemma 2), and that
 // refusal is the row's status.
 //
-// 501: OBJ.LIST (a table function over a listing), and an
-// OBJ.GET_ACCESS_URL mode or duration that is not a literal.
+// OBJ.LIST (objListSQL) and an OBJ.GET_ACCESS_URL mode or duration that
+// is an expression are served since #1983.
 //
 // UNVERIFIED (docs re-read 2026-11-19, the pages above): the wording of
 // the errors beyond the documented "Connection credential for ... cannot

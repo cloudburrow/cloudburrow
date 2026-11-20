@@ -36,7 +36,7 @@ import (
 func rerankCandidates(options string, topK int64, fields []map[string]any, column string) (int64, int, string) {
 	for _, fl := range fields {
 		if strings.EqualFold(str(fl, "name"), column) && !strings.EqualFold(str(fl, "type"), "STRING") {
-			return 0, 400, "With rerank => TRUE, the column_to_search of AI.SEARCH must be a STRING column; " + column + " is not"
+			return 0, 400, "With rerank => TRUE, the column_to_search of AI.SEARCH must be a STRING column; " + column + " is not (ObjectRef values aren't supported)"
 		}
 	}
 	n := topK * 5

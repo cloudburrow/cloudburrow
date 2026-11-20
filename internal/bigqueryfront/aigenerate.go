@@ -74,9 +74,9 @@ import (
 //
 // 501, naming why: model_params fields other than generationConfig, and of
 // the embedding functions other than outputDimensionality; embeddings
-// (optimized mode's distilled model); ObjectRef content of AI.EMBED,
-// AI.SIMILARITY and AI.COUNT_TOKENS (ObjectRef prompt fields of the
-// generating functions are sent as parts, objref.go, #1980); and a call whose prompts the front cannot read (outside a
+// (optimized mode's distilled model); STRUCT content of AI.EMBED and
+// AI.SIMILARITY (gemini-embedding-2's, #1772); and a call whose prompts
+// the front cannot read (outside a
 // SELECT block, or inside its FROM clause, such as a JOIN's ON).
 //
 // UNVERIFIED (re-read 2026-11-17: the pages above, which describe no
@@ -787,22 +787,28 @@ func (f front) literalRows(r *http.Request, q queryOptions, expr string) ([][]js
 // aiRow is one distinct key's value literals and failure status; ok is
 // false for a key whose row is NULL (a NULL prompt).
 func (f front) aiRow(r *http.Request, project string, c aiCall, a aiResolved, key string) ([]string, string, bool, int, string) {
-	ctx := r.Context()
 	if c.fn == "SIMILARITY" {
+		// Each content is a STRING or an ObjectRef (#1983), embedded on the
+		// same model; a STRUCT is gemini-embedding-2's multimodal content.
 		var pair struct {
-			A *string `json:"_0"`
-			B *string `json:"_1"`
+			A json.RawMessage `json:"_0"`
+			B json.RawMessage `json:"_1"`
 		}
 		if json.Unmarshal([]byte(key), &pair) != nil {
-			return nil, "", false, 501, "Not implemented here: AI.SIMILARITY of content that is not a STRING (ObjectRef or STRUCT multimodal content, #1772). Nothing was run."
+			return nil, "", false, 500, "cloudburrow: unreadable AI.SIMILARITY contents " + key
 		}
-		if pair.A == nil || pair.B == nil {
+		pa, okA, structA := contentPieces(pair.A)
+		pb, okB, structB := contentPieces(pair.B)
+		if structA || structB {
+			return nil, "", false, 501, "Not implemented here: AI.SIMILARITY of a STRUCT (gemini-embedding-2 multimodal content, #1772). Nothing was run."
+		}
+		if !okA || !okB {
 			return nil, "", false, 0, ""
 		}
-		va, status := f.embedVector(ctx, project, a, *pair.A)
+		va, status := f.embedPieces(r, project, a, pa)
 		if status == "" {
 			var vb []float64
-			vb, status = f.embedVector(ctx, project, a, *pair.B)
+			vb, status = f.embedPieces(r, project, a, pb)
 			if status == "" {
 				if s, ok := cosine(va, vb); ok {
 					return []string{sqlF(s)}, "", true, 0, ""
@@ -813,25 +819,19 @@ func (f front) aiRow(r *http.Request, project string, c aiCall, a aiResolved, ke
 		return []string{"CAST(NULL AS FLOAT64)"}, status, true, 0, ""
 	}
 	if c.fn == "COUNT_TOKENS" && strings.HasPrefix(strings.TrimSpace(key), "{") {
-		return nil, "", false, 400, "AI.COUNT_TOKENS's input must be a STRING"
-	}
-	pieces, ok, code, msg := promptPieces(key)
-	if code != 0 || !ok {
-		return nil, "", false, code, strings.ReplaceAll(msg, "AI.GENERATE", c.name())
-	}
-	prompt := joinText(pieces)
-	if hasRef(pieces) && (c.fn == "COUNT_TOKENS" || c.fn == "EMBED") {
-		return nil, "", false, 501, "Not implemented here: " + c.name() + " of an ObjectRef (multimodal content, #1980): CloudBurrow sends ObjectRefs " +
-			"to AI.GENERATE, AI.GENERATE_BOOL/INT/DOUBLE, AI.IF, AI.SCORE, AI.CLASSIFY, ML.GENERATE_TEXT and AI/ML.GENERATE_EMBEDDING. Nothing was run."
-	}
-	if c.fn == "COUNT_TOKENS" {
-		return f.countTokensRow(r.Context(), project, a, prompt)
+		// The page documents a STRING input only ("INPUT: a STRING value
+		// that contains the input text prompt").
+		return nil, "", false, 400, "No matching signature for function AI.COUNT_TOKENS: its input must be a STRING, not an ObjectRef or STRUCT"
 	}
 	if c.fn == "EMBED" {
-		if strings.HasPrefix(strings.TrimSpace(key), "{") {
+		ps, ok, isStruct := contentPieces(json.RawMessage(key))
+		if isStruct {
 			return nil, "", false, 501, "Not implemented here: AI.EMBED of a STRUCT (gemini-embedding-2 multimodal content, #1772). Nothing was run."
 		}
-		v, status := f.embedVector(ctx, project, a, prompt)
+		if !ok {
+			return nil, "", false, 0, ""
+		}
+		v, status := f.embedPieces(r, project, a, ps)
 		if status != "" {
 			return []string{"CAST(NULL AS ARRAY<FLOAT64>)", sqlString(status)}, status, true, 0, ""
 		}
@@ -840,6 +840,14 @@ func (f front) aiRow(r *http.Request, project string, c aiCall, a aiResolved, ke
 			lits[i] = sqlF(x)
 		}
 		return []string{"ARRAY<FLOAT64>[" + strings.Join(lits, ", ") + "]", sqlString("")}, "", true, 0, ""
+	}
+	pieces, ok, code, msg := promptPieces(key)
+	if code != 0 || !ok {
+		return nil, "", false, code, strings.ReplaceAll(msg, "AI.GENERATE", c.name())
+	}
+	prompt := joinText(pieces)
+	if c.fn == "COUNT_TOKENS" {
+		return f.countTokensRow(r.Context(), project, a, prompt)
 	}
 	full := prompt + aiInstruction(c, a)
 	if c.fn == "CLASSIFY" {
@@ -1144,4 +1152,66 @@ func (f front) embedVector(ctx context.Context, project string, a aiResolved, co
 		return nil, "The response had no prediction"
 	}
 	return resp.Predictions[0].Embeddings.Values, ""
+}
+
+// embedPieces is the embedding of content pieces (#1983): text alone is
+// embedVector's; with ObjectRefs, one :embedContent of their parts in
+// order, after each ref's access is checked (refPart), which the local
+// embedder reads when its model embeds that modality and refuses, naming
+// it, otherwise. The failure is the status.
+func (f front) embedPieces(r *http.Request, project string, a aiResolved, ps []promptPiece) ([]float64, string) {
+	if !hasRef(ps) {
+		return f.embedVector(r.Context(), project, a, joinText(ps))
+	}
+	if a.embedNoCheck {
+		return nil, "The model embeddinggemma-300m embeds text only; embed an ObjectRef with a multimodal embedding endpoint"
+	}
+	parts, status := f.pieceParts(r, ps, "")
+	if status != "" {
+		return nil, status
+	}
+	body := map[string]any{"content": map[string]any{"role": "user", "parts": parts}}
+	if a.taskType != "" {
+		body["taskType"] = a.taskType
+	}
+	if a.title != "" {
+		body["title"] = a.title
+	}
+	if a.dims > 0 {
+		body["outputDimensionality"] = a.dims
+	}
+	out, status := f.vertexCall(r.Context(), project, a.rm, "embedContent", body)
+	if status != "" {
+		return nil, status
+	}
+	var ec struct {
+		Embedding struct {
+			Values []float64 `json:"values"`
+		} `json:"embedding"`
+	}
+	if json.Unmarshal(out, &ec) != nil || len(ec.Embedding.Values) == 0 {
+		return nil, "The response had no embedding"
+	}
+	return ec.Embedding.Values, ""
+}
+
+// contentPieces reads one embedding content TO_JSON_STRING wrote: a
+// STRING or an ObjectRef (or ObjectRefRuntime); a STRUCT is ok false with
+// struct set. ok is false for a NULL.
+func contentPieces(raw json.RawMessage) (ps []promptPiece, ok, isStruct bool) {
+	raw = bytes.TrimSpace(raw)
+	switch {
+	case len(raw) == 0 || string(raw) == "null":
+		return nil, false, false
+	case raw[0] == '"':
+		var s string
+		if json.Unmarshal(raw, &s) != nil {
+			return nil, false, false
+		}
+		return []promptPiece{{text: s}}, true, false
+	}
+	if o, isRef := parseObjRef(raw); isRef {
+		return []promptPiece{{ref: &o}}, true, false
+	}
+	return nil, false, true
 }

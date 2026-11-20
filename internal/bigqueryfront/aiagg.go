@@ -18,8 +18,9 @@ import (
 //	  one value per GROUP BY group (one for the whole input without one).
 //
 // INPUT is a STRING or a STRUCT of STRING and ARRAY<STRING> fields
-// (concatenated, as AI.GENERATE's prompt; ObjectRef fields are 501, as
-// for the scalar functions: object tables, #1798); INSTRUCTION a STRING
+// (concatenated, as AI.GENERATE's prompt), ObjectRef (or ObjectRefRuntime)
+// values and STRUCT fields of them, sent as parts inside the row's tags
+// (aggCall, #1983; "Rows can contain at most 10 images"); INSTRUCTION a STRING
 // literal or a query parameter, named (@name) or positional (?), "as
 // either a string or query parameter" (aggInstruction). The front
 // evaluates a call before the engine runs the query, block by block, the
@@ -51,8 +52,8 @@ import (
 // the local model's whole context is 4,096 tokens (measured below), so
 // the cap the front sends is aiAggOutputTokens.
 //
-// 501, naming why: an OVER clause; AI.AGG outside a SELECT block; ObjectRef
-// input (object tables, #1798); an instruction that is neither a STRING
+// 501, naming why: an OVER clause; AI.AGG outside a SELECT block; an
+// instruction that is neither a STRING
 // literal nor a query parameter.
 //
 // UNVERIFIED (re-read 2026-11-18: the page above documents none of these): the
@@ -326,20 +327,35 @@ func (f front) rewriteAIAgg(r *http.Request, q queryOptions, text string) (strin
 				if *row[0] != "null" && json.Unmarshal([]byte(*row[0]), &keys) != nil {
 					return "", q, 500, "cloudburrow: unreadable AI.AGG group " + *row[0]
 				}
-				var inputs []string
+				var inputs []aggItem
+				tooMany := 0
 				for _, k := range keys {
-					p, ok, code, msg := promptText(k)
+					ps, ok, code, msg := promptPieces(k)
 					if code != 0 {
 						return "", q, code, strings.ReplaceAll(msg, "AI.GENERATE", "AI.AGG")
 					}
-					if ok {
-						inputs = append(inputs, p)
+					if !ok {
+						continue
 					}
+					if len(refPieces(ps)) > aiAggMaxObjects {
+						// "Rows can contain at most 10 images": the row fails.
+						tooMany++
+						continue
+					}
+					it := aggItem{text: joinText(ps), rows: 1}
+					if hasRef(ps) {
+						it.pieces = ps
+					}
+					inputs = append(inputs, it)
+				}
+				total += len(inputs) + tooMany
+				failed += tooMany
+				if tooMany > 0 && firstStatus == "" {
+					firstStatus = "A row of AI.AGG's input holds more than " + strconv.Itoa(aiAggMaxObjects) + " ObjectRefs: rows can contain at most 10 images, or 1 audio, video, or PDF file"
 				}
 				if len(inputs) == 0 {
 					continue
 				}
-				total += len(inputs)
 				lit, ok, nfail, status := f.aggGroup(r, project, a, instruction, inputs)
 				failed += nfail
 				if firstStatus == "" {
@@ -567,8 +583,23 @@ func paramsOf(q queryOptions, sql string) queryOptions {
 // aggItem is one input of an aggregation call: a row, or a batch's answer
 // standing for the rows it read.
 type aggItem struct {
-	text string
-	rows int
+	text   string
+	rows   int
+	pieces []promptPiece // a row with ObjectRefs (#1983): its pieces in order
+}
+
+// aiAggMaxObjects is the most ObjectRefs a row of AI.AGG's input holds:
+// "Rows can contain at most 10 images, or 1 audio, video, or PDF file"
+// (https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-ai-agg).
+const aiAggMaxObjects = 10
+
+// aiAggRefBytes is what one ObjectRef counts for in a batch's budget: an
+// image is about 256 of the local model's tokens.
+const aiAggRefBytes = 1024
+
+// size is it's share of a batch's budget.
+func (it aggItem) size() int {
+	return len(it.text) + len("<row></row>\n") + aiAggRefBytes*len(refPieces(it.pieces))
 }
 
 // packAgg groups items into batches of at most budget bytes, in order; an
@@ -578,7 +609,7 @@ func packAgg(items []aggItem, budget int) [][]aggItem {
 	var cur []aggItem
 	size := 0
 	for _, it := range items {
-		n := len(it.text) + len("<row></row>\n")
+		n := it.size()
 		if len(cur) > 0 && size+n > budget {
 			out = append(out, cur)
 			cur, size = nil, 0
@@ -614,11 +645,7 @@ func aggPrompt(instruction string, items []aggItem, combine bool) string {
 
 // aggGroup answers one group: its value's SQL literal and whether it has
 // one, the rows that failed and the first failure's status.
-func (f front) aggGroup(r *http.Request, project string, a aiResolved, instruction string, rows []string) (string, bool, int, string) {
-	items := make([]aggItem, len(rows))
-	for i, s := range rows {
-		items[i] = aggItem{s, 1}
-	}
+func (f front) aggGroup(r *http.Request, project string, a aiResolved, instruction string, items []aggItem) (string, bool, int, string) {
 	budget := max(aiAggBatchBytes-len(instruction), 1)
 	failed := 0
 	first := ""
@@ -644,11 +671,11 @@ func (f front) aggGroup(r *http.Request, project string, a aiResolved, instructi
 			for _, it := range items {
 				n += it.rows
 			}
-			prompt := aggPrompt(instruction, items, combine)
+			suffix := ""
 			if a.schema != nil {
-				prompt += aiSchemaInstruction(a.schema)
+				suffix = aiSchemaInstruction(a.schema)
 			}
-			text, _, status := f.aiGenerateText(r, project, a.rm, prompt, aiResponseSchema("GENERATE", a.schema), map[string]any{"maxOutputTokens": aiAggOutputTokens})
+			text, status := f.aggCall(r, project, a, instruction, items, combine, suffix, aiResponseSchema("GENERATE", a.schema), aiAggOutputTokens)
 			if status != "" {
 				fail(n, status)
 				return "", false, failed, first
@@ -669,16 +696,49 @@ func (f front) aggGroup(r *http.Request, project string, a aiResolved, instructi
 			for _, it := range b {
 				n += it.rows
 			}
-			text, _, status := f.aiGenerateText(r, project, a.rm, aggPrompt(instruction, b, combine), nil, map[string]any{"maxOutputTokens": aiAggPartialTokens})
+			text, status := f.aggCall(r, project, a, instruction, b, combine, "", nil, aiAggPartialTokens)
 			if status != "" {
 				fail(n, status)
 				continue
 			}
-			next = append(next, aggItem{text, n})
+			next = append(next, aggItem{text: text, rows: n})
 		}
 		if len(next) == 0 {
 			return "", false, failed, first
 		}
 		items, combine = next, true
 	}
+}
+
+// aggCall is one aggregation call over items: aggPrompt's text, or, when
+// a row holds ObjectRefs (#1983), the same prompt as parts with each
+// row's objects inside its <row> tags, which the local model reads when
+// it reads that modality.
+func (f front) aggCall(r *http.Request, project string, a aiResolved, instruction string, items []aggItem, combine bool, suffix string, schema map[string]any, maxTokens int) (string, string) {
+	cfg := map[string]any{"maxOutputTokens": maxTokens}
+	multimodal := false
+	for _, it := range items {
+		multimodal = multimodal || it.pieces != nil
+	}
+	if !multimodal {
+		text, _, status := f.aiGenerateText(r, project, a.rm, aggPrompt(instruction, items, combine)+suffix, schema, cfg)
+		return text, status
+	}
+	head := aggPrompt(instruction, nil, combine)
+	ps := []promptPiece{{text: head}}
+	for _, it := range items {
+		if it.pieces == nil {
+			ps = append(ps, promptPiece{text: "<row>" + it.text + "</row>\n"})
+			continue
+		}
+		ps = append(ps, promptPiece{text: "<row>"})
+		ps = append(ps, it.pieces...)
+		ps = append(ps, promptPiece{text: "</row>\n"})
+	}
+	parts, status := f.pieceParts(r, ps, suffix)
+	if status != "" {
+		return "", status
+	}
+	text, _, status := f.aiGenerateParts(r, project, a.rm, parts, schema, cfg)
+	return text, status
 }
