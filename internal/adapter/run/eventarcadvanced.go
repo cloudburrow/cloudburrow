@@ -207,7 +207,7 @@ func eaGet[T eaRecord](k *eaKind[T], name string) (T, error) {
 // eaList lists a location's resources (every location's for -), by name,
 // as order_by "name" lists them; a filter is not supported.
 func eaList[T eaRecord](k *eaKind[T], parent string, size int32, token, filter, orderBy string) ([]T, string, error) {
-	if _, _, err := resource.ParseLocation(parent); err != nil {
+	if _, _, err := resource.ParseLocation(strings.TrimSuffix(parent, "/-") + map[bool]string{true: "/x"}[strings.HasSuffix(parent, "/-")]); err != nil {
 		return nil, "", apierror.InvalidArgument("%v", err)
 	}
 	if filter != "" {

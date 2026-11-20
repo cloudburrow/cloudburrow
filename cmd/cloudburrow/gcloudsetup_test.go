@@ -110,7 +110,8 @@ func testGcloudSetup(t *testing.T, gdir, stateDir string) string {
 		"developerconnect":  "http://127.0.0.1:9004/developerconnect/",
 		"containeranalysis": "http://127.0.0.1:9004/containeranalysis/",
 		// Eventarc under its prefix on the Run port (#1877).
-		"eventarc": "http://127.0.0.1:9004/eventarc/",
+		"eventarc":           "http://127.0.0.1:9004/eventarc/",
+		"eventarcpublishing": "http://127.0.0.1:9004/eventarcpublishing/",
 	}
 	if got := sections["api_endpoint_overrides"]; !reflect.DeepEqual(got, wantOverrides) {
 		t.Errorf("api_endpoint_overrides = %v, want %v:\n%s", got, wantOverrides, conf)

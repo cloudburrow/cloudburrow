@@ -221,7 +221,7 @@ func (p eaBusesProvider) busFields(b *eventarcpb.MessageBus) []console.Field {
 		{Name: "displayName", Label: "Display name", Type: "text", Default: b.GetDisplayName(), Section: "Details"},
 		eaSeverityField(b.GetLoggingConfig().GetLogSeverity()),
 		{Name: "cryptoKey", Label: "Cloud KMS key", Type: "text", Default: b.GetCryptoKeyName(), Section: "Encryption",
-			Pattern: `^(projects/[^/]+/locations/[^/]+/keyRings/[^/]+/cryptoKeys/[^/]+)?$`,
+			Pattern: `^(projects/[^\/]+/locations/[^\/]+/keyRings/[^\/]+/cryptoKeys/[^\/]+)?$`,
 			Help:    "Optional. A customer-managed key, projects/P/locations/L/keyRings/R/cryptoKeys/K; empty for a Google-managed key."},
 		eaLabelsField(b.GetLabels()),
 	}
@@ -1162,7 +1162,7 @@ func (p eaChannelsProvider) CreateForm() (string, []console.Field) {
 		{Name: "provider", Label: "Provider", Type: "text", Section: "Details",
 			Help: "Optional. The third-party provider, projects/P/locations/L/providers/ID; empty for your own custom events."},
 		{Name: "cryptoKey", Label: "Cloud KMS key", Type: "text", Section: "Encryption",
-			Pattern: `^(projects/[^/]+/locations/[^/]+/keyRings/[^/]+/cryptoKeys/[^/]+)?$`, Help: "Optional. A customer-managed key."},
+			Pattern: `^(projects/[^\/]+/locations/[^\/]+/keyRings/[^\/]+/cryptoKeys/[^\/]+)?$`, Help: "Optional. A customer-managed key."},
 		eaLabelsField(nil),
 	}
 }

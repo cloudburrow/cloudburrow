@@ -342,7 +342,7 @@ eval "$(cloudburrow gcloud-teardown)"  # unset CLOUDSDK_ACTIVE_CONFIG_NAME
 gcloud's configuration directory (`CLOUDSDK_CONFIG`, or `~/.config/gcloud`). It sets
 `core/project`, turns on `auth/disable_credentials` and names the ADC fixture. It writes
 `api_endpoint_overrides` **only** for the services whose gcloud use is Verified below.
-Overrides written: `storage`, `pubsub`, `cloudkms`, `secretmanager`, `cloudtasks`, `cloudscheduler`, `logging`, `run`, `artifactregistry`, `cloudbuild`, `cloudfunctions`, `securesourcemanager`, `cloudresourcemanager`, `iam`, `cloudidentity`, `policytroubleshooter`, `orgpolicy`, `serviceusage`, `apikeys`, `sql`, `redis`, `memorystore`, `bigtableadmin`, `spanner`, `firestore`, `datastore`, `developerconnect`, `eventarc`, `containeranalysis`, `privateca`, `container` and `backupdr` (`container`, the Kubernetes Engine API, with `gke`, #1913; `privateca`, Certificate Authority Service, with `privateca`, #1834; `backupdr`, the Backup and DR Service, with `backupdr` and a Cloud SQL service, #1433)
+Overrides written: `storage`, `pubsub`, `cloudkms`, `secretmanager`, `cloudtasks`, `cloudscheduler`, `logging`, `run`, `artifactregistry`, `cloudbuild`, `cloudfunctions`, `securesourcemanager`, `cloudresourcemanager`, `iam`, `cloudidentity`, `policytroubleshooter`, `orgpolicy`, `serviceusage`, `apikeys`, `sql`, `redis`, `memorystore`, `bigtableadmin`, `spanner`, `firestore`, `datastore`, `developerconnect`, `eventarc`, `eventarcpublishing`, `containeranalysis`, `privateca`, `container` and `backupdr` (`container`, the Kubernetes Engine API, with `gke`, #1913; `privateca`, Certificate Authority Service, with `privateca`, #1834; `backupdr`, the Backup and DR Service, with `backupdr` and a Cloud SQL service, #1433)
 (written whatever `--services` selects, since Resource Manager and Service Usage are always served; `sql` with either Cloud SQL service; `redis`, the Memorystore admin API, and `memorystore`, its Memorystore for Valkey JSON under `/memorystore/` (#1519), with `memorystore`; `bigtableadmin`, Bigtable's admin REST API on the Bigtable port, with `bigtable`, #1440; `spanner`, Spanner's admin REST port, with `spanner`, and `firestore`, the Firestore Admin API on the Firestore port, with `firestore`, #1461). `run` (#1293) is
 `http://run.localhost:<port>/` on a loopback bind: gcloud run calls `{region}-{host}` for a
 command given `--region`, and `us-central1-run.localhost` is still loopback. `cloudresourcemanager`
@@ -361,7 +361,8 @@ under `/securesourcemanager/`, since Secure Source Manager's v1 paths are Artifa
 `gcloud source-manager instances` and `repos`. `developerconnect` (#1546) is the Run port under
 `/developerconnect/`, beside it, for `gcloud developer-connect connections` and their
 `git-repository-links`. `eventarc` (#1877) is the Run port under `/eventarc/`, since Eventarc's v1
-trigger paths are Cloud Build's, for `gcloud eventarc triggers` and `providers`.
+trigger paths are Cloud Build's, for `gcloud eventarc triggers` and `providers`; `eventarcpublishing`
+(#1947) is the Run port under `/eventarcpublishing/`, for `gcloud eventarc message-buses publish` and `channels publish`.
 `git-repository-links`. `containeranalysis` (#1912) is the Run port under `/containeranalysis/`,
 as Container Analysis's v1 paths are beside Artifact Registry's, for
 `gcloud artifacts docker images list --show-occurrences` and `describe --show-package-vulnerability`.
