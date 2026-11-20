@@ -89,6 +89,9 @@ type PlaygroundStatus struct {
 	// backend would reject.
 	Supported []string `json:"supported"`
 	Refused   []string `json:"refused"`
+	// Features are the request fields the screen sends beside
+	// generationConfig (playgroundFeatures).
+	Features []string `json:"features"`
 	// Note is displayed above the form.
 	Note string `json:"note,omitempty"`
 }
@@ -98,20 +101,27 @@ type PlaygroundStatus struct {
 //
 // A control that is absent with no explanation reads as an oversight; one that
 // is absent with a reason reads as a decision. The API is the authority and
-// TestPlaygroundRefusalsMatchTheAPI holds these in step with it.
-var refusedOptions = []string{
-	"candidateCount", "tools", "safetySettings",
-	"systemInstruction", "multi-turn", "countTokens",
-}
+// TestPlaygroundRefusalsMatchTheAPI holds these in step with it. Since #1937
+// the runtime serves system instructions, multi-turn chat, function calling
+// and token counts, which the screen offers (#1962).
+var refusedOptions = []string{"candidateCount", "safetySettings"}
 
 // supportedOptions are the generationConfig fields the screen offers: the
-// runtime's cloudburrow_generate applies the sampler, the token limit and a
-// JSON response schema, and the API ends a stream at a stop sequence
-// (#1797, #1779). TestPlaygroundSupportedOptionsAreHonoured holds them in
-// step with the API.
+// runtime's cloudburrow_generate applies the sampler, the token limit, the
+// repetition penalties and a JSON response schema, and the API ends a stream
+// at a stop sequence (#1797, #1779, #1937). TestPlaygroundSupportedOptionsAreHonoured
+// holds them in step with the API.
 var supportedOptions = []string{
 	"temperature", "topP", "topK", "seed", "maxOutputTokens", "stopSequences",
-	"responseMimeType", "responseSchema",
+	"presencePenalty", "frequencyPenalty", "responseMimeType", "responseSchema",
+}
+
+// Features are the request fields beside generationConfig the screen sends
+// (#1962): a conversation's earlier turns, a system instruction, function
+// declarations with their mode, image parts and the token counts.
+var playgroundFeatures = []string{
+	"contents", "systemInstruction", "tools", "toolConfig", "inlineData", "fileData",
+	"countTokens", "computeTokens", "usageMetadata",
 }
 
 // Status probes the endpoint and reports what the screen may offer.
@@ -131,6 +141,7 @@ func (p *Playground) Status(ctx context.Context) PlaygroundStatus {
 		Endpoint:   p.endpoint(),
 		Supported:  supportedOptions,
 		Refused:    refusedOptions,
+		Features:   playgroundFeatures,
 	}
 	if p.Community {
 		st.Note = "This model is a COMMUNITY conversion, not published by Google. " +
@@ -174,7 +185,18 @@ func (s *Server) handlePlayground(w http.ResponseWriter, r *http.Request) {
 
 // playgroundRequest is what the screen sends.
 type playgroundRequest struct {
+	// Prompt is a single user turn's text, sent when Contents is empty.
 	Prompt string `json:"prompt"`
+	// Contents is the whole conversation (#1962): the earlier user and
+	// model turns, function calls and responses, and the new turn with its
+	// image parts, relayed as the request's contents for the API to
+	// validate.
+	Contents []json.RawMessage `json:"contents,omitempty"`
+	// SystemInstruction, Tools and ToolConfig are relayed as the request's
+	// own fields (#1962).
+	SystemInstruction json.RawMessage `json:"systemInstruction,omitempty"`
+	Tools             json.RawMessage `json:"tools,omitempty"`
+	ToolConfig        json.RawMessage `json:"toolConfig,omitempty"`
 	// Stream picks the method: true (the default, when absent) relays
 	// :streamGenerateContent, as StreamGenerateContent streams it, and false
 	// relays the unary :generateContent, as GenerateContent answers (#1257).
@@ -186,6 +208,36 @@ type playgroundRequest struct {
 	// GenerationConfig is relayed as the request's generationConfig, for
 	// the API to apply or refuse (supportedOptions).
 	GenerationConfig map[string]any `json:"generationConfig,omitempty"`
+}
+
+// maxPlaygroundRequest bounds what the screen sends: Vertex AI's own
+// request limit, which an inline image counts against.
+const maxPlaygroundRequest = 20 << 20
+
+// body is the API request the screen's fields make: the same body the SDK
+// sends.
+func (b playgroundRequest) body() (map[string]any, string) {
+	req := map[string]any{}
+	if len(b.Contents) > 0 {
+		req["contents"] = b.Contents
+	} else {
+		if strings.TrimSpace(b.Prompt) == "" {
+			return nil, "a prompt is required"
+		}
+		req["contents"] = []map[string]any{{
+			"role":  "user",
+			"parts": []map[string]any{{"text": b.Prompt}},
+		}}
+	}
+	for k, v := range map[string]json.RawMessage{"systemInstruction": b.SystemInstruction, "tools": b.Tools, "toolConfig": b.ToolConfig} {
+		if len(v) > 0 && string(v) != "null" {
+			req[k] = v
+		}
+	}
+	if len(b.GenerationConfig) > 0 {
+		req["generationConfig"] = b.GenerationConfig
+	}
+	return req, ""
 }
 
 // maxRelayBytes bounds a relayed unary answer or refusal.
@@ -207,25 +259,16 @@ func (s *Server) handlePlaygroundGenerate(w http.ResponseWriter, r *http.Request
 	}
 
 	var body playgroundRequest
-	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
+	if err := json.NewDecoder(io.LimitReader(r.Body, maxPlaygroundRequest)).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "malformed request: " + err.Error()})
 		return
 	}
-	if strings.TrimSpace(body.Prompt) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "a prompt is required"})
-		return
-	}
-
 	// The exact body the SDK sends, built here so the screen exercises the
 	// same request shape the compatibility tests do.
-	req := map[string]any{
-		"contents": []map[string]any{{
-			"role":  "user",
-			"parts": []map[string]any{{"text": body.Prompt}},
-		}},
-	}
-	if len(body.GenerationConfig) > 0 {
-		req["generationConfig"] = body.GenerationConfig
+	req, msg := body.body()
+	if msg != "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": msg})
+		return
 	}
 	payload, err := json.Marshal(req)
 	if err != nil {
@@ -299,4 +342,61 @@ func (s *Server) handlePlaygroundGenerate(w http.ResponseWriter, r *http.Request
 			return
 		}
 	}
+}
+
+// handlePlaygroundTokens relays the prompt's countTokens or computeTokens
+// (#1962), the call the SDK's models.count_tokens and compute_tokens make,
+// to the same publisher model path, and the API's answer back unchanged:
+// the screen's token count and its tokenizer pane.
+func (s *Server) handlePlaygroundTokens(w http.ResponseWriter, r *http.Request) {
+	p := s.playground
+	if !p.Configured() {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "local AI is not configured"})
+		return
+	}
+	verb := r.URL.Query().Get("verb")
+	if verb != "countTokens" && verb != "computeTokens" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "verb must be countTokens or computeTokens"})
+		return
+	}
+	var body playgroundRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, maxPlaygroundRequest)).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "malformed request: " + err.Error()})
+		return
+	}
+	req, msg := body.body()
+	if msg != "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": msg})
+		return
+	}
+	// CountTokensRequest takes contents, systemInstruction, tools and
+	// generationConfig; ComputeTokensRequest contents alone.
+	delete(req, "toolConfig")
+	if verb == "computeTokens" {
+		req = map[string]any{"contents": req["contents"]}
+	}
+	payload, err := json.Marshal(req)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	upstream, err := http.NewRequestWithContext(r.Context(), http.MethodPost,
+		"http://"+p.endpoint()+p.generatePath(verb), strings.NewReader(string(payload)))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	upstream.Header.Set("Content-Type", "application/json")
+	resp, err := p.client().Do(upstream)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{
+			"error": "the local generation endpoint is not answering: " + err.Error(),
+		})
+		return
+	}
+	defer resp.Body.Close()
+	out, _ := io.ReadAll(io.LimitReader(resp.Body, maxRelayBytes))
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	_, _ = w.Write(out)
 }

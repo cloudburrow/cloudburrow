@@ -109,10 +109,13 @@ func (p *tab) submitForm(values map[string]string, first string) {
 
 // TestResourceHierarchyAndTagsThroughTheDrawer, in the storage shard. The
 // Resource hierarchy and Tags screens (#1294, #1295) had providers but no
-// route. Reached from the drawer's Resource Manager row and the product's
-// page list: Create folder there makes a folder the v3 Folders API lists
-// under the organization, and Create tag key and Create tag value make a key
-// and value the TagKeys and TagValues APIs read back.
+// route. Since #1865 they are IAM & Admin's, as Google's are: the drawer
+// has no Resource Manager row, and IAM & Admin's menu holds Manage
+// resources and Tags. The Resource hierarchy list still answers at its
+// address: Create folder there makes a folder the v3 Folders API lists
+// under the organization, and Google's Create tag key (Tag key, Tag key
+// description) and Create tag value make a key and value the TagKeys and
+// TagValues APIs read back.
 func TestResourceHierarchyAndTagsThroughTheDrawer(t *testing.T) {
 	needService(t, "hierarchy")
 	needService(t, "tags")
@@ -141,20 +144,34 @@ func TestResourceHierarchyAndTagsThroughTheDrawer(t *testing.T) {
 	}
 
 	p := open(t)
-	p.navigateByDrawer("Management tools", "/projects", "Resource Manager")
-	// The product's pages, Projects, Resource hierarchy and Tags.
+	p.navigateByDrawer("IAM & Admin", "/iam-admin/iam", "IAM & Admin")
+	var rows []string
+	p.eval(`[...document.querySelectorAll("#nav-list a")].map((a) => a.textContent.trim())`, &rows)
+	for _, r := range rows {
+		if strings.Contains(r, "Resource Manager") {
+			t.Errorf("the drawer still has a Resource Manager row (%q): its pages are IAM & Admin's", r)
+		}
+	}
+	// IAM & Admin's pages hold Manage resources and Tags, and not the old
+	// Projects or Resource hierarchy lists.
 	var pages []string
 	p.waitFor(`document.querySelectorAll("#product-nav a").length > 0`)
 	p.eval(`[...document.querySelectorAll("#product-nav a")].map((a) => a.textContent.trim())`, &pages)
-	for _, want := range []string{"Projects", "Resource hierarchy", "Tags"} {
+	for _, want := range []string{"Manage resources", "Tags"} {
 		if !contains(pages, want) {
-			t.Errorf("Resource Manager's pages are %q; want %s among them", pages, want)
+			t.Errorf("IAM & Admin's pages are %q; want %s among them", pages, want)
+		}
+	}
+	for _, gone := range []string{"Projects", "Resource hierarchy"} {
+		if contains(pages, gone) {
+			t.Errorf("IAM & Admin's pages are %q; %s is Manage resources now", pages, gone)
 		}
 	}
 
-	// Resource hierarchy: Create folder.
-	p.clickText("#product-nav a", "Resource hierarchy")
-	p.waitFor(`location.pathname === "/resource-hierarchy"`)
+	// Resource hierarchy: Create folder, at the list's address, which marks
+	// Manage resources in the menu.
+	p.navigate("/resource-hierarchy")
+	p.waitFor(`(document.querySelector("#product-nav [aria-current=page]") || {}).textContent?.trim() === "Manage resources"`)
 	folder := fmt.Sprintf("Browser %d", time.Now().UnixNano()%1e8)
 	p.clickText("#view button", "Create folder")
 	p.submitForm(map[string]string{"displayName": folder}, "displayName")
@@ -188,7 +205,17 @@ func TestResourceHierarchyAndTagsThroughTheDrawer(t *testing.T) {
 
 	// Tags: Create tag key, then Create tag value on its page.
 	p.clickText("#product-nav a", "Tags")
-	p.waitFor(`location.pathname === "/tags"`)
+	p.waitFor(`location.pathname === "/iam-admin/tags"`)
+	var tagLabels []string
+	p.clickText("#view button", "Create tag key")
+	p.waitFor(`document.querySelector("#f-shortName") !== null`)
+	p.eval(`[...document.querySelectorAll("label[for^=f-] > span:first-child")].map((s) => s.textContent.trim())`, &tagLabels)
+	for _, want := range []string{"Tag key", "Tag key description", "For use with network firewall", "Tag values"} {
+		if !contains(tagLabels, want) {
+			t.Errorf("Create tag key's fields are %q; want Google's %q among them", tagLabels, want)
+		}
+	}
+	p.navigate("/iam-admin/tags")
 	short := fmt.Sprintf("browser-env-%d", time.Now().UnixNano()%1e8)
 	p.clickText("#view button", "Create tag key")
 	p.submitForm(map[string]string{"shortName": short, "description": "made in the browser"}, "shortName")
@@ -235,15 +262,20 @@ func tagNamespace(parent string) string {
 	return strings.TrimPrefix(parent, "organizations/")
 }
 
-// TestServiceUsageDisableAndEnableThroughThePage, in the storage shard. The
-// APIs & Services screen (#1352) had a provider but no route. Reached from
-// the drawer, a project's Pub/Sub API is Disabled from its row, only once
-// its name is typed back, and Service Usage's services.get answers DISABLED;
-// Enable, which asks nothing, makes it ENABLED again.
+// TestServiceUsageDisableAndEnableThroughThePage, in the storage shard.
+// APIs & Services (#1352, #1866) as Google's console has it: reached from
+// the drawer, Enabled APIs & services shows the Traffic, Errors and Median
+// latency charts over the enabled APIs with their Requests, Errors and
+// Latency. A project's Pub/Sub API is opened from the table to its Metrics
+// tab, Disable API (confirmed) makes Service Usage's services.get answer
+// DISABLED and drops it from the table, and the Library's search finds it,
+// whose Enable makes it ENABLED again and offers Manage.
 func TestServiceUsageDisableAndEnableThroughThePage(t *testing.T) {
 	needService(t, "serviceusage")
+	hc := &http.Client{Transport: &http.Transport{}}
+	t.Cleanup(hc.CloseIdleConnections)
 	c, err := su.NewService(context.Background(), option.WithEndpoint("http://"+endpoint(t, envServiceUsage)+"/"),
-		option.WithoutAuthentication(), option.WithHTTPClient(http.DefaultClient))
+		option.WithoutAuthentication(), option.WithHTTPClient(hc))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,45 +298,122 @@ func TestServiceUsageDisableAndEnableThroughThePage(t *testing.T) {
 
 	p := open(t)
 	p.navigateByDrawer("Management tools", "/apis", "APIs & Services")
-	p.navigate("/apis?project=" + project)
-	menu := func(item string) {
-		trigger := fmt.Sprintf(`button[aria-label=%q]`, "Actions for "+api)
-		p.waitFor(fmt.Sprintf(`document.querySelector(%q) !== null`, trigger))
-		p.run(chromedp.Click(chromedp.CSS(trigger)))
-		p.clickText(`[role="menuitem"]`, item)
-	}
-	menu("Disable")
-	p.confirmByName("wrong")
-	p.waitFor(`!document.querySelector(".modal .form-error").hidden`)
-	if sent := p.posts("/api/actions/serviceusage"); len(sent) != 0 {
-		t.Fatalf("Disable confirmed with the wrong name was sent: %v", sent)
-	}
-	p.eval(`(() => { document.querySelector(".modal #confirm-input").value = ""; return true; })()`, nil)
-	p.confirmByName(api)
-	p.waitFor(`document.querySelector(".modal") === null`)
-	if got := state(); got != "DISABLED" {
-		t.Fatalf("after Disable in the browser, services.get says %s, want DISABLED", got)
+	// Google's menu, in Google's order.
+	var menu []string
+	p.waitFor(`document.querySelectorAll("#product-nav a").length >= 6`)
+	p.eval(`[...document.querySelectorAll("#product-nav a")].map((a) => a.textContent.trim())`, &menu)
+	want := []string{"Enabled APIs & services", "Library", "Credentials", "OAuth consent screen", "Page usage agreements", "Domain verification", "Operations"}
+	if strings.Join(menu, "|") != strings.Join(want, "|") {
+		t.Errorf("APIs & Services menu = %q, want %q", menu, want)
 	}
 
 	p.navigate("/apis?project=" + project)
-	menu("Enable")
+	row := fmt.Sprintf(`#apis-table tr[data-api=%q]`, api)
+	p.waitFor(fmt.Sprintf(`document.querySelector(%q) !== null`, row))
+	p.waitFor(`document.querySelector("#apis-dashboard-charts") !== null`)
+	var heads, charts []string
+	p.eval(`[...document.querySelectorAll("#apis-table th")].map((n) => n.textContent)`, &heads)
+	if strings.Join(heads, "|") != "Name|Requests|Errors|Latency, median|Latency, 95%" {
+		t.Errorf("Enabled APIs & services columns = %q", heads)
+	}
+	p.eval(`[...document.querySelectorAll("#apis-dashboard-charts .chart-card h3")].map((n) => n.textContent)`, &charts)
+	if strings.Join(charts, "|") != "Traffic|Errors|Median latency" {
+		t.Errorf("dashboard charts = %q, want Traffic, Errors, Median latency", charts)
+	}
+
+	// The API's page, from its row: Metrics, then Disable API.
+	p.clickExpr(fmt.Sprintf(`document.querySelector(%q)`, row+" a"))
+	p.waitFor(`document.querySelector("#api-tab-metrics.is-selected") !== null`)
+	var tabs []string
+	p.eval(`[...document.querySelectorAll('[role="tab"]')].map((n) => n.textContent)`, &tabs)
+	if strings.Join(tabs, "|") != "Overview|Metrics|Quotas & System Limits|Credentials" {
+		t.Errorf("API page tabs = %q", tabs)
+	}
+	p.clickExpr(`document.querySelector("#api-disable-button")`)
+	p.waitFor(`document.querySelector(".modal #api-disable") !== null`)
+	p.clickExpr(`document.querySelector('.modal #api-disable button[type="submit"]')`)
+	p.waitFor(`document.querySelector(".modal") === null`)
+	if got := state(); got != "DISABLED" {
+		t.Fatalf("after Disable API in the browser, services.get says %s, want DISABLED", got)
+	}
+	p.waitFor(`location.pathname === "/apis" && document.querySelector("#apis-table") !== null`)
+	var listed bool
+	p.eval(fmt.Sprintf(`document.querySelector(%q) !== null`, row), &listed)
+	if listed {
+		t.Errorf("%s is still in the enabled APIs after Disable API", api)
+	}
+
+	// The Library finds it by search, and its Enable enables it.
+	p.navigate("/apis/library?project=" + project)
+	p.waitFor(`document.querySelector("#library-search") !== null`)
+	p.setField("#library-search", "Cloud Pub/Sub API")
+	card := fmt.Sprintf(`#library-results [data-api=%q]`, api)
+	p.waitFor(fmt.Sprintf(`document.querySelector(%q) !== null && document.querySelectorAll("#library-results [data-api]").length === 1`, card))
+	p.clickExpr(fmt.Sprintf(`document.querySelector(%q)`, card))
+	p.clickExpr(`document.querySelector("#library-enable")`)
 	deadline := time.Now().Add(15 * time.Second)
 	for state() != "ENABLED" {
 		if time.Now().After(deadline) {
-			t.Fatalf("after Enable in the browser, services.get still says %s", state())
+			t.Fatalf("after Enable in the Library, services.get still says %s", state())
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	// The service reads ENABLED as soon as the server applies the action, which
-	// can be before the browser's request log holds it (main's CI run
-	// 38997107027 counted one), so the count is waited for too.
-	sent := p.posts("/api/actions/serviceusage")
-	for deadline := time.Now().Add(5 * time.Second); len(sent) < 2 && time.Now().Before(deadline); {
-		time.Sleep(100 * time.Millisecond)
-		sent = p.posts("/api/actions/serviceusage")
+	p.waitFor(`document.querySelector("#api-tab-metrics.is-selected") !== null`)
+	p.navigate("/apis/library/" + api + "?project=" + project)
+	p.waitFor(`document.querySelector("#library-manage") !== null`)
+	// Disable API and Enable were one Studio call each, through the console.
+	var changes []string
+	for _, u := range p.posts("/api/studio/serviceusage") {
+		if strings.Contains(u, "call=disable") || strings.Contains(u, "call=enable") {
+			changes = append(changes, u)
+		}
 	}
-	if len(sent) != 2 {
-		t.Errorf("Disable and Enable sent %d actions, want 2: %v", len(sent), sent)
+	if len(changes) != 2 {
+		t.Errorf("Disable API and Enable sent %d changes, want 2: %v", len(changes), changes)
+	}
+}
+
+// TestAPIsCredentialsAndUnservedPages (#1866), in the storage shard.
+// Credentials has Create credentials, whose Service account opens IAM's
+// form and whose API key and OAuth client ID say they are not available
+// locally, and lists API Keys and OAuth 2.0 Client IDs as not served; the
+// OAuth consent screen, Page usage agreements and Domain verification say
+// why a local instance has none; a library entry this instance does not
+// serve has Enable disabled with the --services value that would serve it.
+func TestAPIsCredentialsAndUnservedPages(t *testing.T) {
+	needService(t, "serviceusage")
+	project := uniqueProject(t)
+	p := open(t)
+	p.navigate("/apis/credentials?project=" + project)
+	p.waitFor(`document.querySelector("#credentials-create") !== null`)
+	p.clickExpr(`document.querySelector("#credentials-create")`)
+	var items []string
+	p.eval(`[...document.querySelectorAll("#credentials-create-menu [role=menuitem]")].map((n) => n.textContent + (n.disabled ? " (disabled)" : ""))`, &items)
+	// API key is served since #1915 (TestAPIKeysThroughTheCredentialsPage).
+	if len(items) != 3 || items[0] != "API key" ||
+		!strings.HasPrefix(items[1], "OAuth client ID") || !strings.HasPrefix(items[2], "Service account") {
+		t.Errorf("Create credentials = %q", items)
+	}
+	for _, id := range []string{"#credentials-oauth"} {
+		var text string
+		p.eval(fmt.Sprintf(`document.querySelector(%q).textContent`, id), &text)
+		if !strings.Contains(text, "Not available locally") {
+			t.Errorf("%s = %q, want not available locally", id, text)
+		}
+	}
+	for _, path := range []string{"/apis/credentials/consent", "/apis/credentials/agreements", "/apis/credentials/domainverification"} {
+		p.navigate(path + "?project=" + project)
+		p.waitFor(`[...document.querySelectorAll(".state h2")].some((n) => n.textContent === "Not available locally")`)
+	}
+	// Spanner is not in the storage shard's --services.
+	p.navigate("/apis/library/spanner.googleapis.com?project=" + project)
+	p.waitFor(`document.querySelector("#library-unavailable") !== null`)
+	var disabled bool
+	var why string
+	p.eval(`document.querySelector("#library-enable").disabled`, &disabled)
+	p.eval(`document.querySelector("#library-unavailable").textContent`, &why)
+	if !disabled || !strings.Contains(why, "--services spanner") {
+		t.Errorf("Spanner's Library page: Enable disabled %v, reason %q", disabled, why)
 	}
 }
 

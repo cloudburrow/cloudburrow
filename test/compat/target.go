@@ -72,6 +72,7 @@ var targetEndpoints = []targetEndpoint{
 	{"LOGGING", envKey("CLOUDBURROW_LOGGING_ENDPOINT")},
 	{"RESOURCEMANAGER", envKey("CLOUDBURROW_RESOURCEMANAGER_ENDPOINT")},
 	{"SERVICEUSAGE", envKey("CLOUDBURROW_SERVICEUSAGE_ENDPOINT")},
+	{"APIKEYS", envKey("CLOUDBURROW_APIKEYS_ENDPOINT")},
 	{"SPANNER", envKey("SPANNER_EMULATOR_HOST")},
 	{"SPANNER_REST", envKey("CLOUDBURROW_SPANNER_REST_ENDPOINT")},
 	{"DATASTORE", envKey("DATASTORE_EMULATOR_HOST")},
@@ -88,6 +89,7 @@ var targetEndpoints = []targetEndpoint{
 	{"MEMORYSTORE_ADMIN", envKey("CLOUDBURROW_MEMORYSTORE_ENDPOINT")},
 	{"BACKUPDR", envKey("CLOUDBURROW_BACKUPDR_ENDPOINT")},
 	{"PRIVATECA", envKey("CLOUDBURROW_PRIVATECA_ENDPOINT")},
+	{"GKE", envKey("CLOUDBURROW_GKE_ENDPOINT")},
 }
 
 // normalizeEndpoint reduces an address to host:port, so that
@@ -211,10 +213,12 @@ var gcloudOverrides = []struct {
 	// The Organization Policy API v2 (#1890), on the Resource Manager port.
 	{"orgpolicy", []string{"RESOURCEMANAGER"}},
 	{"serviceusage", []string{"SERVICEUSAGE", "RUN_SERVICEUSAGE"}},
+	{"apikeys", []string{"APIKEYS"}},
 	{"run", []string{"RUN"}},
 	// Served on the Run port (#1347).
 	{"artifactregistry", []string{"RUN"}},
 	{"cloudbuild", []string{"RUN"}},
+	{"containeranalysis", []string{"RUN"}},
 	{"cloudfunctions", []string{"RUN"}},
 	{"securesourcemanager", []string{"RUN"}},
 	{"developerconnect", []string{"RUN"}},
@@ -224,6 +228,7 @@ var gcloudOverrides = []struct {
 	{"memorystore", []string{"MEMORYSTORE_ADMIN"}},
 	{"backupdr", []string{"BACKUPDR"}},
 	{"privateca", []string{"PRIVATECA"}},
+	{"container", []string{"GKE"}},
 	// Bigtable's admin REST API, on the Bigtable front's port (#1440).
 	{"bigtableadmin", []string{"BIGTABLE"}},
 	// Spanner's admin REST API and the Firestore Admin API (#1461).

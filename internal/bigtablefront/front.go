@@ -40,6 +40,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/cloudburrow/cloudburrow/internal/apienable"
 	"github.com/cloudburrow/cloudburrow/internal/calllog"
 	"github.com/cloudburrow/cloudburrow/internal/frontready"
 	"github.com/cloudburrow/cloudburrow/internal/frontstate"
@@ -88,6 +89,8 @@ type Front struct {
 	persist persister
 	// seen is every instance a call has named (seen.go, #1550).
 	seen seenInstances
+	// keys is the tables' row key schemas (rowkeyschema.go, #1900).
+	keys *rowKeySchemas
 	// aggs serialises the writes to the aggregate families the front
 	// computes (aggregates.go, #1893).
 	aggs aggWrites
@@ -105,7 +108,7 @@ func New(upstream string, logf func(format string, args ...any)) (*Front, error)
 	if logf == nil {
 		logf = log.Printf
 	}
-	f := &Front{upstream: conn, addr: upstream, logf: logf, changes: newChangeStreams()}
+	f := &Front{upstream: conn, addr: upstream, logf: logf, changes: newChangeStreams(), keys: newRowKeySchemas()}
 	f.streams = f.streamMethods()
 	f.instances = newInstances(f.dropTables)
 	f.served = f.instances.methods()
@@ -113,9 +116,10 @@ func New(upstream string, logf func(format string, args ...any)) (*Front, error)
 		f.served[name] = m
 	}
 	f.copies = newCopies(conn, f.instances)
+	f.copies.keys = f.keys
 	f.views = &authViews{upstream: conn, byName: map[string]*btapb.AuthorizedView{}}
 	f.sqlViews = &sqlViews{instances: f.instances, byName: map[string]*sqlView{}}
-	sql := &sqlFront{upstream: conn, views: f.sqlViews, now: time.Now}
+	sql := &sqlFront{upstream: conn, views: f.sqlViews, keys: f.keys, now: time.Now}
 	f.sqlViews.checkQuery = func(instance, query string) error {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -145,6 +149,7 @@ func New(upstream string, logf func(format string, args ...any)) (*Front, error)
 			var req btapb.DeleteTableRequest
 			if proto.Unmarshal(in, &req) == nil {
 				f.changes.drop(req.GetName())
+				f.keys.drop(req.GetName())
 			}
 		}
 		return resp, err
@@ -182,7 +187,14 @@ func (f *Front) Server() *grpc.Server {
 	return grpc.NewServer(
 		grpc.ForceServerCodec(rawCodec{}),
 		grpc.UnknownServiceHandler(f.handle),
-		grpc.StreamInterceptor(calllog.StreamInterceptor(&f.calls, firstName, streaming)),
+		grpc.ChainStreamInterceptor(calllog.StreamInterceptor(&f.calls, firstName, streaming),
+			// Disabled APIs (#1914), by the call's routing headers.
+			apienable.StreamInterceptorFor(nil, func(m string) string {
+				if strings.HasPrefix(m, "/google.bigtable.v2.") {
+					return "bigtable.googleapis.com"
+				}
+				return "bigtableadmin.googleapis.com"
+			})),
 		grpc.MaxRecvMsgSize(math.MaxInt32), grpc.MaxSendMsgSize(math.MaxInt32),
 		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{MinTime: 10 * time.Second, PermitWithoutStream: true}),
 	)
@@ -198,7 +210,7 @@ func (f *Front) Serve(ctx context.Context, l net.Listener) error {
 	// so the Host and Origin checks are here (#1587). Pods name the
 	// Service; a kubelet probe the pod's address.
 	srv := &http.Server{
-		Handler:           hostguard.WrapService(frontready.Wrap(f.httpHandler(), f.addr), "bigtable"),
+		Handler:           hostguard.WrapService(frontready.Wrap(apienable.Gate(nil, "bigtableadmin.googleapis.com", f.httpHandler(), apienable.Options{ServiceOf: bigtableAPI}), f.addr), "bigtable"),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	grpcL, httpL := pubsubfront.Split(l)
@@ -470,6 +482,7 @@ func (f *Front) dropTables(ctx context.Context, instance string) error {
 	f.sqlViews.drop(instance)
 	f.bundles.drop(instance)
 	f.changes.drop(instance)
+	f.keys.drop(instance)
 	c := btapb.NewBigtableTableAdminClient(f.upstream)
 	var token string
 	for {
@@ -506,4 +519,13 @@ func streaming(method string) bool {
 		return true
 	}
 	return false
+}
+
+// bigtableAPI is the API a call is to (#1914): the data API's gRPC
+// service is bigtable.googleapis.com, everything else the admin API.
+func bigtableAPI(r *http.Request) string {
+	if strings.HasPrefix(r.URL.Path, "/google.bigtable.v2.") {
+		return "bigtable.googleapis.com"
+	}
+	return ""
 }

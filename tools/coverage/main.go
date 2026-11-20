@@ -56,6 +56,7 @@ import (
 	crmv1 "google.golang.org/api/cloudresourcemanager/v1"
 	runv1 "google.golang.org/api/run/v1"
 
+	apikeyssvc "github.com/cloudburrow/cloudburrow/internal/service/apikeys"
 	rmsvc "github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	serviceusagesvc "github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
 	sqladminsvc "github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
@@ -69,9 +70,11 @@ import (
 	_ "cloud.google.com/go/bigtable/apiv2/bigtablepb"
 	_ "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
 	_ "cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
+	_ "cloud.google.com/go/container/apiv1/containerpb"
 	_ "cloud.google.com/go/datastore/admin/apiv1/adminpb"
 	_ "cloud.google.com/go/datastore/apiv1/datastorepb"
 	_ "cloud.google.com/go/developerconnect/apiv1/developerconnectpb"
+	_ "cloud.google.com/go/documentai/apiv1/documentaipb"
 	_ "cloud.google.com/go/eventarc/apiv1/eventarcpb"
 	_ "cloud.google.com/go/firestore/apiv1/admin/adminpb"
 	_ "cloud.google.com/go/firestore/apiv1/firestorepb"
@@ -95,7 +98,11 @@ import (
 	_ "cloud.google.com/go/spanner/admin/database/apiv1/databasepb"
 	_ "cloud.google.com/go/spanner/admin/instance/apiv1/instancepb"
 	_ "cloud.google.com/go/spanner/apiv1/spannerpb"
+	_ "cloud.google.com/go/speech/apiv1/speechpb"
+	_ "cloud.google.com/go/speech/apiv2/speechpb"
 	_ "google.golang.org/genproto/googleapis/cloud/location"
+	_ "google.golang.org/genproto/googleapis/devtools/containeranalysis/v1"
+	_ "google.golang.org/genproto/googleapis/grafeas/v1"
 )
 
 // area is one generated page.
@@ -131,6 +138,9 @@ var areas = []area{
 	// Eventarc (#1877), on the Run port: triggers delivering Pub/Sub and
 	// Cloud Storage events to Cloud Run as CloudEvents.
 	{Key: "eventarc", Title: "Eventarc", Own: true, Services: []string{"google.cloud.eventarc.v1.Eventarc"}},
+	// Container Analysis (#1912), on the Run port: Grafeas's notes and
+	// occurrences, which Artifact Registry's vulnerability scanning writes.
+	{Key: "containeranalysis", Title: "Container Analysis", Own: true, Services: []string{"grafeas.v1.Grafeas", "google.devtools.containeranalysis.v1.ContainerAnalysis"}},
 	// Cloud Functions v2 (#1377), on the Run port: a function is a
 	// SubmitBuild buildpacks build and a Cloud Run service. Its IAM and
 	// Locations mixins are KMS's keys, which are global.
@@ -185,12 +195,22 @@ var areas = []area{
 	{Key: "logging", Title: "Cloud Logging", Own: true, Services: []string{"google.logging.v2.LoggingServiceV2", "google.logging.v2.MetricsServiceV2", "google.logging.v2.ConfigServiceV2"}},
 	// The local AI endpoint's PredictionService (#1193).
 	// Model Garden's Hugging Face deployments on the same port (#1840):
-	// Deploy, and the Endpoint and Model it creates.
+	// Deploy, and the Endpoint and Model it creates. Document AI's
+	// processors and Speech-to-Text v2's recognizers (#1799) on the same
+	// port.
 	{Key: "vertexai", Title: "Vertex AI PredictionService", Own: true, Services: []string{"google.cloud.aiplatform.v1.PredictionService",
-		"google.cloud.aiplatform.v1.ModelGardenService", "google.cloud.aiplatform.v1.EndpointService", "google.cloud.aiplatform.v1.ModelService"}},
+		"google.cloud.aiplatform.v1.ModelGardenService", "google.cloud.aiplatform.v1.EndpointService", "google.cloud.aiplatform.v1.ModelService",
+		"google.cloud.documentai.v1.DocumentProcessorService", "google.cloud.speech.v2.Speech",
+		// countTokens and computeTokens (#1937).
+		"google.cloud.aiplatform.v1.LlmUtilityService"}},
 	// v1beta1's PredictionService, for ChatCompletions on those endpoints
-	// (#1840): a page of its own, since its method names repeat v1's.
-	{Key: "vertexaiv1beta1", Title: "Vertex AI PredictionService v1beta1", Own: true, Services: []string{"google.cloud.aiplatform.v1beta1.PredictionService"}},
+	// (#1840) and v1's methods bridged (#1937): a page of its own, since
+	// its method names repeat v1's.
+	// Speech-to-Text v1 on the same port (#1930): a page of its own, since
+	// its method names repeat v2's.
+	{Key: "speechv1", Title: "Speech-to-Text v1", Own: true, Services: []string{"google.cloud.speech.v1.Speech"}},
+	{Key: "vertexaiv1beta1", Title: "Vertex AI PredictionService v1beta1", Own: true, Services: []string{"google.cloud.aiplatform.v1beta1.PredictionService",
+		"google.cloud.aiplatform.v1beta1.LlmUtilityService"}},
 	// The Memorystore for Redis admin API (#1302), over the one Valkey
 	// server --services memorystore runs, and Memorystore for Redis
 	// Cluster and Memorystore for Valkey (#1519) on the same port.
@@ -238,6 +258,10 @@ var areas = []area{
 	// official generated client's.
 	{Key: "serviceusage", Title: "Service Usage API (v1)", Own: true,
 		Methods: serviceusageMethods()},
+	// The API Keys API (#1915): CloudBurrow's own, JSON only, as gcloud and
+	// Terraform call it. Its methods are the official generated client's
+	// (google.golang.org/api/apikeys/v2), from the server's own table.
+	{Key: "apikeys", Title: "API Keys API (v2)", Own: true, Methods: apikeysMethods()},
 	// The Backup and DR Service (#1433): CloudBurrow's own, JSON only, for
 	// Cloud SQL. Its methods are the official generated client's
 	// (google.golang.org/api/backupdr/v1).
@@ -250,6 +274,9 @@ var areas = []area{
 	// JSON on one port. Its Locations, Operations and IAMPolicy mixins are
 	// the rows the scheduler and kms areas list (mixin keys are global).
 	{Key: "privateca", Title: "Certificate Authority Service (v1)", Own: true, Services: []string{"google.cloud.security.privateca.v1.CertificateAuthorityService"}},
+	// The Kubernetes Engine API (#1913): CloudBurrow's own, gRPC and JSON
+	// on one port, each cluster a kind cluster of its own.
+	{Key: "gke", Title: "Kubernetes Engine API (v1)", Own: true, Services: []string{"google.container.v1.ClusterManager"}},
 }
 
 // cloudidentityMethods is every method of the cloudidentity v1 discovery
@@ -365,6 +392,17 @@ func pubsubIAMMethods() []string {
 func serviceusageMethods() []string {
 	var out []string
 	for id := range serviceusagesvc.MethodStatuses() {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// apikeysMethods is every method of the apikeys v2 discovery document, from
+// the server's own table (internal/service/apikeys).
+func apikeysMethods() []string {
+	var out []string
+	for id := range apikeyssvc.MethodStatuses() {
 		out = append(out, id)
 	}
 	sort.Strings(out)
@@ -715,7 +753,7 @@ func loadRegistry(root string) (map[string]string, error) {
 	}
 	// The Cloud SQL Admin API's too (#1301), and Service Usage's (#1352).
 	// And Cloud Run v1's (#1533).
-	for _, statuses := range []map[string]bool{sqladminsvc.MethodStatuses(), serviceusagesvc.MethodStatuses(), backupdrStatuses, runadapter.V1MethodStatuses(),
+	for _, statuses := range []map[string]bool{sqladminsvc.MethodStatuses(), serviceusagesvc.MethodStatuses(), apikeyssvc.MethodStatuses(), backupdrStatuses, runadapter.V1MethodStatuses(),
 		rmsvc.CloudIdentityMethodStatuses()} {
 		for id, isBuilt := range statuses {
 			if isBuilt {

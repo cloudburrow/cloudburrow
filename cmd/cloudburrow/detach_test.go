@@ -17,6 +17,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 )
@@ -35,6 +36,7 @@ const fakeUpEnv = "CLOUDBURROW_TEST_FAKE_UP"
 const runCLIEnv = "CLOUDBURROW_TEST_RUN_CLI"
 
 func TestMain(m *testing.M) {
+	runadapter.RunSourceManagerPresubmitIfAsked() // a repository's pre-receive hook (#1928)
 	if delay := os.Getenv(fakeUpEnv); delay != "" && len(os.Args) > 1 && os.Args[1] == "up" {
 		os.Exit(fakeUp(os.Args[2:], delay))
 	}

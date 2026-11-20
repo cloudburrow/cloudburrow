@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 
 	flatbuffers "github.com/google/flatbuffers/go"
@@ -20,10 +21,7 @@ func (m *Model) Run(inputs []Tensor) (out []Tensor, err error) {
 	if len(inputs) != len(m.Inputs) {
 		return nil, fmt.Errorf("the model takes %d inputs, not %d", len(m.Inputs), len(inputs))
 	}
-	vals := make([]*Tensor, len(m.tensors))
-	for i, d := range m.tensors {
-		vals[i] = d.data
-	}
+	vals := initial(m.tensors)
 	for k, p := range m.Inputs {
 		in := inputs[k]
 		if len(in.Shape) != len(p.Shape) {
@@ -40,7 +38,7 @@ func (m *Model) Run(inputs []Tensor) (out []Tensor, err error) {
 		}
 		vals[p.index] = &t
 	}
-	if err := m.runGraph(&graph{tensors: m.tensors, ops: m.ops}, vals, 0); err != nil {
+	if err := m.runGraph(&graph{tensors: m.tensors, ops: m.ops}, vals, 0, newRunState()); err != nil {
 		return nil, err
 	}
 	for _, p := range m.Outputs {
@@ -61,7 +59,7 @@ func (m *Model) Run(inputs []Tensor) (out []Tensor, err error) {
 func convert(t Tensor, typ Type) Tensor {
 	r := Tensor{Type: typ, Shape: t.Shape}
 	n := t.Len()
-	if typ == String || t.Type == String {
+	if typ == String || t.Type == String || typ == Complex || t.Type == Complex {
 		if typ == t.Type {
 			return t
 		}
@@ -108,8 +106,22 @@ const (
 	maxIterations = 1 << 20
 )
 
+// initial is a graph's tensors' values before its operators run: its
+// constants, and its variable tensors' zeros.
+func initial(tensors []tensorDef) []*Tensor {
+	vals := make([]*Tensor, len(tensors))
+	for i, d := range tensors {
+		vals[i] = d.data
+		if d.data == nil && d.variable && !slices.Contains(d.shape, -1) {
+			z := convert(Tensor{Type: Float32, Shape: d.shape, F: make([]float32, prod(d.shape))}, d.typ)
+			vals[i] = &z
+		}
+	}
+	return vals
+}
+
 // runGraph runs g's operators on vals, its tensors' values, in order.
-func (m *Model) runGraph(g *graph, vals []*Tensor, depth int) error {
+func (m *Model) runGraph(g *graph, vals []*Tensor, depth int, st *runState) error {
 	for _, o := range g.ops {
 		args := make([]*Tensor, len(o.in))
 		for j, i := range o.in {
@@ -120,13 +132,16 @@ func (m *Model) runGraph(g *graph, vals []*Tensor, depth int) error {
 				args[j] = vals[i]
 			}
 		}
-		if o.code == opWhile || o.code == opIf || multiOutput(o.code) {
+		if o.code == opWhile || o.code == opIf || multiOutput(o.code) || listOutput(o.code) {
 			var outs []*Tensor
 			var err error
-			if multiOutput(o.code) {
+			switch {
+			case multiOutput(o.code):
 				outs, err = m.evalMulti(o, args, len(o.out)) // ops2.go
-			} else {
-				outs, err = m.control(o, args, depth)
+			case listOutput(o.code):
+				outs, err = m.evalList(o, args, len(o.out), depth, st) // ops4.go
+			default:
+				outs, err = m.control(o, args, depth, st)
 			}
 			if err != nil {
 				return err
@@ -169,7 +184,7 @@ func (m *Model) runGraph(g *graph, vals []*Tensor, depth int) error {
 
 // call runs subgraph k on args, one per its inputs, and returns its
 // outputs.
-func (m *Model) call(k int, args []*Tensor, depth int) ([]*Tensor, error) {
+func (m *Model) call(k int, args []*Tensor, depth int, st *runState) ([]*Tensor, error) {
 	if depth >= maxDepth {
 		return nil, fmt.Errorf("control flow nests deeper than %d calls", maxDepth)
 	}
@@ -177,10 +192,7 @@ func (m *Model) call(k int, args []*Tensor, depth int) ([]*Tensor, error) {
 	if len(args) != len(g.in) {
 		return nil, fmt.Errorf("subgraph %d takes %d inputs, not %d", k, len(g.in), len(args))
 	}
-	vals := make([]*Tensor, len(g.tensors))
-	for i, d := range g.tensors {
-		vals[i] = d.data
-	}
+	vals := initial(g.tensors)
 	for j, i := range g.in {
 		a := args[j]
 		if want := g.tensors[i].typ; a != nil && a.Type != want && !(a.Type.IsFloat() && want.IsFloat()) {
@@ -189,7 +201,7 @@ func (m *Model) call(k int, args []*Tensor, depth int) ([]*Tensor, error) {
 		}
 		vals[i] = a
 	}
-	if err := m.runGraph(g, vals, depth+1); err != nil {
+	if err := m.runGraph(g, vals, depth+1, st); err != nil {
 		return nil, err
 	}
 	out := make([]*Tensor, len(g.out))
@@ -213,7 +225,7 @@ func truth(t *Tensor) (bool, error) {
 // control runs WHILE (WhileOptions: cond_subgraph_index,
 // body_subgraph_index) and IF (IfOptions: then_subgraph_index,
 // else_subgraph_index), as LiteRT's kernels do.
-func (m *Model) control(o op, args []*Tensor, depth int) ([]*Tensor, error) {
+func (m *Model) control(o op, args []*Tensor, depth int, st *runState) ([]*Tensor, error) {
 	a, b := int(o.i32(4, -1)), int(o.i32(6, -1))
 	if o.code == opIf {
 		if len(args) == 0 {
@@ -224,21 +236,21 @@ func (m *Model) control(o op, args []*Tensor, depth int) ([]*Tensor, error) {
 			return nil, fmt.Errorf("operator IF: %w", err)
 		}
 		if c {
-			return m.call(a, args[1:], depth)
+			return m.call(a, args[1:], depth, st)
 		}
-		return m.call(b, args[1:], depth)
+		return m.call(b, args[1:], depth, st)
 	}
-	return m.while(a, b, args, depth)
+	return m.while(a, b, args, depth, st)
 }
 
 // while runs WHILE: body subgraph b on its state for as long as cond
 // subgraph a says.
-func (m *Model) while(a, b int, state []*Tensor, depth int) ([]*Tensor, error) {
+func (m *Model) while(a, b int, state []*Tensor, depth int, st *runState) ([]*Tensor, error) {
 	for n := 0; ; n++ {
 		if n >= maxIterations {
 			return nil, fmt.Errorf("operator WHILE ran %d iterations without its condition turning false", maxIterations)
 		}
-		cond, err := m.call(a, state, depth)
+		cond, err := m.call(a, state, depth, st)
 		if err != nil {
 			return nil, err
 		}
@@ -252,7 +264,7 @@ func (m *Model) while(a, b int, state []*Tensor, depth int) ([]*Tensor, error) {
 		if !c {
 			return state, nil
 		}
-		if state, err = m.call(b, state, depth); err != nil {
+		if state, err = m.call(b, state, depth, st); err != nil {
 			return nil, err
 		}
 	}
@@ -429,7 +441,7 @@ func (m *Model) eval(o op, a []*Tensor) (*Tensor, error) {
 	if x.Type == String {
 		switch o.code {
 		case opReshape, opSqueeze, opExpandDims, opTranspose, opConcatenation, opPack, opStridedSlice, opGather,
-			opEqual, opNotEqual, opLess, opLessEqual, opGreater, opGreaterEqual:
+			opEqual, opNotEqual, opLess, opLessEqual, opGreater, opGreaterEqual, opSkipGram:
 		default:
 			return nil, &UnsupportedError{fmt.Sprintf("operator %s on STRING tensors is not supported", o.name)}
 		}
@@ -847,6 +859,8 @@ func at(dst *Tensor, j int, src *Tensor, i int) {
 		dst.B[j] = src.B[i]
 	case src.S != nil:
 		dst.S[j] = src.S[i]
+	case src.C != nil:
+		dst.C[j] = src.C[i]
 	}
 }
 
@@ -862,6 +876,8 @@ func alloc(like *Tensor, shape []int) *Tensor {
 		r.B = make([]bool, n)
 	case like.S != nil:
 		r.S = make([]string, n)
+	case like.C != nil:
+		r.C = make([]complex64, n)
 	}
 	return r
 }

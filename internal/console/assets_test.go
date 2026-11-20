@@ -296,8 +296,9 @@ func TestNavigationNamesTheProductsBeingEmulated(t *testing.T) {
 	}
 	// One drawer row per product (#1842): Key Management, Memorystore,
 	// Firestore, Bigtable, Cloud Logging, APIs & Services and IAM & Admin
-	// each hold their pages rather than appearing once per page.
-	for _, product := range []string{"Agent Platform", "Kubernetes Engine", "Pub/Sub", "Cloud Run", "Cloud Storage", "Resource Manager",
+	// each hold their pages rather than appearing once per page. Resource
+	// Manager's pages are IAM & Admin's, as Google's are (#1865).
+	for _, product := range []string{"Agent Platform", "Kubernetes Engine", "Pub/Sub", "Cloud Run", "Cloud Storage",
 		"Key Management", "Memorystore", "Firestore", "Bigtable", "Cloud Logging", "APIs & Services", "IAM & Admin"} {
 		if !strings.Contains(js, `productTitle: "`+product+`"`) {
 			t.Errorf("the navigation does not name the product %q", product)
@@ -902,11 +903,24 @@ func TestDestructiveActionsAskForTheName(t *testing.T) {
 	if strings.Contains(js, "return window.confirm(") {
 		t.Error("deletes still go through window.confirm")
 	}
-	if !strings.Contains(js, "function confirmDestructive({ title, detail, confirmWord, onConfirm, confirmLabel = \"Delete\", consequence = \"This cannot be undone.\" })") {
-		t.Fatal("there is no typed-name confirmation")
+	if !strings.Contains(js, "function confirmDestructive({ title, detail, confirmWord, onConfirm, confirmLabel = \"Delete\", consequence = \"This cannot be undone.\", style = \"name\" })") {
+		t.Fatal("there is no typed-name confirmation, the name typed back by default")
 	}
 	if !strings.Contains(js, `Type ${confirmWord} exactly to confirm.`) {
 		t.Error("the confirmation does not require the name back")
+	}
+	// #1931: each kind's delete is confirmed as Google's console confirms
+	// it, the word delete or DELETE, or the button alone, which leaves
+	// focus on Cancel so one Enter does not delete.
+	if !strings.Contains(js, `if (style === "delete" || style === "DELETE") confirmWord = style;`) {
+		t.Error("a delete confirmed by the word delete does not ask for that word")
+	}
+	if !strings.Contains(js, "(input || cancel).focus();") {
+		t.Error("a confirmation with nothing to type does not leave focus on Cancel")
+	}
+	if strings.Count(js, `style: capabilityOf(route.service).deleteConfirm || "name",`) != 1 ||
+		strings.Count(js, `style: caps.deleteConfirm || "name",`) != 1 {
+		t.Error("a row's Delete or the bulk Delete does not confirm as its kind's capability says")
 	}
 	if !strings.Contains(js, "is-destructive") {
 		t.Error("destructive row actions are not marked apart from the others")
@@ -1010,7 +1024,7 @@ func TestEveryDialogSharesOneModalShell(t *testing.T) {
 		`if (opener && opener.isConnected && opener.focus) opener.focus();`,
 		`if (e.key !== "Tab") return;`,
 		`for (const n of inerted) n.inert = true;`,
-		`for (const n of inerted) n.inert = false;`,
+		`for (const n of inerted) if (!n.classList.contains("is-closing")) n.inert = false;`,
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("openModal is missing %q", want)
@@ -1264,6 +1278,8 @@ func TestALongFormHasAnAddress(t *testing.T) {
 	// project picker is the one deliberate exception: it opens the dialog
 	// from the toolbar because it acts on what was created — navigating away
 	// to a page would abandon the selection it exists to make.
+	// An empty list screen is drawn by renderTableInto too (#1868), so the
+	// title line's Create and the empty table's are both there.
 	for _, fn := range []string{"async function renderList(view, route)",
 		"function renderTableInto(view, header, data, noun, reload, route, opts = {})"} {
 		body := functionBody(t, src, fn)
@@ -1271,13 +1287,11 @@ func TestALongFormHasAnAddress(t *testing.T) {
 			t.Errorf("%s calls openCreateForm directly, so it opens a dialog for a "+
 				"form the backend routed to a page", fn)
 		}
-		if !strings.Contains(body, "startCreate(route, caps.create") {
-			t.Errorf("%s has no create button routed through startCreate", fn)
-		}
 	}
-	if n := strings.Count(src, "startCreate(route, caps.create"); n < 3 {
-		t.Errorf("only %d create buttons route through startCreate; the action bar, "+
-			"the screen's empty state and the emptied table all have one", n)
+	body := functionBody(t, src, "function renderTableInto(view, header, data, noun, reload, route, opts = {})")
+	if n := strings.Count(body, "startCreate(route, caps.create"); n < 2 {
+		t.Errorf("only %d create buttons route through startCreate; the title line "+
+			"and the empty table both have one", n)
 	}
 	// The threshold is the server's.
 	if !strings.Contains(consoleSource(t, "console.go"), "createPageThreshold") {

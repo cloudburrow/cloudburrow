@@ -159,7 +159,11 @@ func (a *AutokeyAdminServer) GetAutokeyConfig(_ context.Context, req *kmspb.GetA
 
 // UpdateAutokeyConfig sets the fields update_mask names: key_project and
 // key_project_resolution_mode.
-func (a *AutokeyAdminServer) UpdateAutokeyConfig(_ context.Context, req *kmspb.UpdateAutokeyConfigRequest) (*kmspb.AutokeyConfig, error) {
+func (a *AutokeyAdminServer) UpdateAutokeyConfig(ctx context.Context, req *kmspb.UpdateAutokeyConfigRequest) (*kmspb.AutokeyConfig, error) {
+	return retryChanged(func() (*kmspb.AutokeyConfig, error) { return a.updateAutokeyConfig(ctx, req) })
+}
+
+func (a *AutokeyAdminServer) updateAutokeyConfig(_ context.Context, req *kmspb.UpdateAutokeyConfigRequest) (*kmspb.AutokeyConfig, error) {
 	s := a.s
 	in := req.GetAutokeyConfig()
 	parent, err := parseAutokeyConfig("autokey_config.name", in.GetName())
@@ -218,7 +222,7 @@ func (a *AutokeyAdminServer) UpdateAutokeyConfig(_ context.Context, req *kmspb.U
 	if c.mode() == kmspb.AutokeyConfig_DEDICATED_KEY_PROJECT && c.KeyProject == "" && setMode {
 		return nil, apierror.Wrap(apierror.InvalidArgument("autokey_config.key_project is required when key_project_resolution_mode is DEDICATED_KEY_PROJECT"))
 	}
-	if err := checkCustom(c.Name, orgpolicy.TypeKMSAutokeyConfig, orgpolicy.MethodUpdate, c.proto()); err != nil {
+	if err := s.checkUnlocked([]string{dbKey(autokeyConfigPrefix, c.Name)}, c.Name, orgpolicy.TypeKMSAutokeyConfig, orgpolicy.MethodUpdate, c.proto()); err != nil {
 		return nil, err
 	}
 	if err := s.put(dbKey(autokeyConfigPrefix, c.Name), c); err != nil {

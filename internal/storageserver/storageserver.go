@@ -21,6 +21,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
+	"github.com/cloudburrow/cloudburrow/internal/apienable"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/iamcheck"
 	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
@@ -59,6 +60,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	relayChannels := fs.Bool("relay-channels", false, "hand object change notification messages to a relay at "+storage.ChannelOutboxPath+" instead of POSTing them (what `up` passes: the CLI delivers them on the host, #1290)")
 	resourceManager := fs.String("resourcemanager", "", "http://host:port of Resource Manager, whose projects and folders Storage Intelligence inheritance walks (what `up` passes, #1532; default: what inherits inherits the local organization's configuration)")
 	iamCheck := fs.String("iam-check", "", "http://host:port of the host's IAM evaluator, which checks every request's caller when set (what `up --iam-enforcement=on` passes, #1879; default: nothing is checked)")
+	kmsAddr := fs.String("kms", "", "host:port of the instance's Cloud KMS (gRPC), which objects with customer-managed keys are encrypted through (what `up` passes, #1938; default: kmsKeyName and default Cloud KMS keys are refused)")
 	if err := fs.Parse(args); err != nil {
 		return ErrUsage
 	}
@@ -79,12 +81,23 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if *iamCheck != "" {
 		opts.IAMCheck = &iamcheck.Client{Base: *iamCheck}
 	}
+	if *kmsAddr != "" {
+		keys, conn, err := storage.DialKMS(*kmsAddr)
+		if err != nil {
+			return fmt.Errorf("--kms %s: %w", *kmsAddr, err)
+		}
+		defer conn.Close()
+		opts.KMS = keys
+	}
 	if *resourceManager != "" {
 		opts.Hierarchy = storage.ResourceManagerHierarchy{Base: *resourceManager}
 		// Organization policies are the host's, enforced whatever IAM
 		// enforcement (#1890).
 		orgpolicy.Use(orgpolicy.Remote{Base: *resourceManager})
 		defer orgpolicy.Use(nil)
+		// Disabled APIs (#1914) are the host's too.
+		apienable.Use(&apienable.Remote{Base: *resourceManager})
+		defer apienable.Use(nil)
 	}
 	if *mode != "persistent" && *mode != "ephemeral" {
 		return fmt.Errorf("--mode %q: want persistent or ephemeral", *mode)
@@ -161,7 +174,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	var protocols http.Protocols
 	protocols.SetHTTP1(true)
 	protocols.SetUnencryptedHTTP2(true)
-	hs := &http.Server{Handler: hostguard.WrapHost(srv, AllowedHosts(names)...), ReadHeaderTimeout: 30 * time.Second, Protocols: &protocols}
+	hs := &http.Server{Handler: hostguard.WrapHost(apienable.Gate(nil, "storage.googleapis.com", srv, srv.APIEnableOptions()), AllowedHosts(names)...), ReadHeaderTimeout: 30 * time.Second, Protocols: &protocols}
 	fmt.Fprintf(stdout, "Cloud Storage (builtin, in development) listening on http://%s\n", ln.Addr())
 	errc := make(chan error, 1)
 	go func() { errc <- hs.Serve(ln) }()

@@ -16,7 +16,7 @@ func valkeyPageProps(t *testing.T, p valkeyProvider, id string) (console.Detail,
 		t.Fatalf("Detail %s = %+v, %v", id, d, err)
 	}
 	props := map[string]string{}
-	for _, pr := range d.Sections[0].Groups[0].Properties {
+	for _, pr := range memorystoreAllProps(d) {
 		props[pr.Label] = pr.Value
 	}
 	return d, props

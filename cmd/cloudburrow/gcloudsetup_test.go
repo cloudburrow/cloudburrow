@@ -93,6 +93,7 @@ func testGcloudSetup(t *testing.T, gdir, stateDir string) string {
 		"secretmanager":        "http://127.0.0.1:9006/",
 		"cloudresourcemanager": "http://cloudresourcemanager.localhost:9007/",
 		"serviceusage":         "http://127.0.0.1:9023/",
+		"apikeys":              "http://127.0.0.1:9029/",
 		"iam":                  "http://127.0.0.1:9007/",
 		"cloudidentity":        "http://127.0.0.1:9007/",
 		"policytroubleshooter": "http://127.0.0.1:9007/",
@@ -106,7 +107,8 @@ func testGcloudSetup(t *testing.T, gdir, stateDir string) string {
 		// Secure Source Manager under its prefix on the Run port (#1527).
 		"securesourcemanager": "http://127.0.0.1:9004/securesourcemanager/",
 		// Developer Connect under its prefix on the Run port (#1546).
-		"developerconnect": "http://127.0.0.1:9004/developerconnect/",
+		"developerconnect":  "http://127.0.0.1:9004/developerconnect/",
+		"containeranalysis": "http://127.0.0.1:9004/containeranalysis/",
 		// Eventarc under its prefix on the Run port (#1877).
 		"eventarc": "http://127.0.0.1:9004/eventarc/",
 	}

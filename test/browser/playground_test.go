@@ -37,6 +37,11 @@ func TestPlaygroundStreamsShowsProvenanceAndRecordsCancelled(t *testing.T) {
 			_, _ = w.Write([]byte(`{"error":{"code":404,"message":"model not served"}}`))
 			return
 		}
+		if strings.HasSuffix(r.URL.Path, model+":countTokens") {
+			// The Studio's token count (#1962).
+			_, _ = w.Write([]byte(`{"totalTokens":3,"promptTokensDetails":[{"modality":"TEXT","tokenCount":3}]}`))
+			return
+		}
 		if !strings.HasSuffix(r.URL.Path, model+":streamGenerateContent") {
 			http.Error(w, "unexpected "+r.URL.Path, http.StatusNotFound)
 			return
@@ -116,7 +121,7 @@ func TestPlaygroundStreamsShowsProvenanceAndRecordsCancelled(t *testing.T) {
 		document.querySelector("#pg-stream").checked = true;
 		document.querySelector("#pg-stream").dispatchEvent(new Event("change"));
 		document.querySelector("#pg-prompt").value = "count to five";
-		[...document.querySelectorAll("#view button")].find((b) => b.textContent === "Run").click();
+		[...document.querySelectorAll("#view button")].find((b) => b.textContent === "Submit").click();
 		return true;
 	})()`, nil)
 	want := strings.Join(chunks, "")
@@ -132,7 +137,7 @@ func TestPlaygroundStreamsShowsProvenanceAndRecordsCancelled(t *testing.T) {
 	// Cancelled mid-generation: recorded as Cancelled, and the runtime's
 	// request is ended.
 	p.eval(`(() => { document.querySelector("#pg-prompt").value = "count forever";
-		[...document.querySelectorAll("#view button")].find((b) => b.textContent === "Run").click(); return true; })()`, nil)
+		[...document.querySelectorAll("#view button")].find((b) => b.textContent === "Submit").click(); return true; })()`, nil)
 	p.waitFor(`document.querySelector("#pg-output").textContent === "one "`)
 	p.eval(`[...document.querySelectorAll("#view button")].find((b) => b.textContent === "Cancel").click(), true`, nil)
 	p.waitFor(historyState + ` === "Cancelled"`)

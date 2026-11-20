@@ -58,6 +58,13 @@ func newSQLAdminServer(cfg config.Config, fwds []*netfwd.Forwarder, creds compon
 	// Instance writes (#1330): each created instance is a server of its
 	// own in the cluster, kept across `up` when the instance is persistent.
 	srv.EnableInstanceWrites(newSQLProvisioner(cfg, logw), sqlInstancesStatePath(cfg))
+	// Microsoft's SQL Server licence (#1916), when the user accepted it
+	// for every instance; recorded for `status`.
+	eula := mssqlEULAOf(cfg, time.Now().UTC().Format(time.RFC3339))
+	srv.AcceptMSSQLEULA(eula)
+	if err := recordMSSQLEULA(cfg, eula); err != nil && logw != nil {
+		fmt.Fprintf(logw, "cloudsql: recording the SQL Server licence acceptance: %v\n", err)
+	}
 	// A blue-green switchover moves an instance's name to another server (#1614).
 	sqlServerOf = srv.ServerOf
 	// Backups (#1330): dumps kept on the host, with their records when the

@@ -96,8 +96,16 @@ func privateCALocations() []string {
 
 const privateCAIDPattern = `^[A-Za-z0-9_\-]{1,63}$`
 
+// CreateSubmit implements console.CreateSubmitter: the create flow ends
+// in Done, as docs.cloud.google.com/certificate-authority-service/docs/creating-ca-pool words it (#1933).
+func (privateCAProvider) CreateSubmit() string { return "Done" }
+
+// CreateTitle implements console.CreateTitler: the page the create button
+// opens is headed Create CA pool (#1933).
+func (privateCAProvider) CreateTitle() string { return "Create CA pool" }
+
 func (privateCAProvider) CreateForm() (string, []console.Field) {
-	return "Create CA pool", []console.Field{
+	return "Create pool", []console.Field{
 		{Name: "caPoolId", Label: "Pool ID", Type: "text", Required: true, Pattern: privateCAIDPattern,
 			Help: "1 to 63 letters, digits, hyphens and underscores. Fixed at creation."},
 		{Name: "location", Label: "Region", Type: "select", Required: true, Default: "us-central1", Options: privateCALocations()},

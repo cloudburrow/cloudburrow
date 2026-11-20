@@ -35,7 +35,7 @@ import (
 // is interpolated as the data is; ML.FORECAST and ML.EXPLAIN_FORECAST
 // forecast only the horizon's points whose timestamp the input has (on
 // the model's grid), a NULL future feature taken as its training mean;
-// ML.DETECT_ANOMALIES of an ARIMA_PLUS_XREG model is 501. Custom
+// ML.DETECT_ANOMALIES is modelxreganomaly.go's. Custom
 // holidays (modelholiday.go, #1776) are a stage of the residuals'
 // ARIMA_PLUS pipeline, their columns before the attributions.
 
@@ -102,7 +102,12 @@ func sum(v []float64) float64 {
 func trainXreg(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *mlFail) {
 	var t mlTrained
 	ts := opts.TS
-	ti, di, ii := -1, -1, -1
+	ti, di := -1, -1
+	idx, missing := findTSIDs(cols, ts)
+	isID := map[int]bool{}
+	for _, i := range idx {
+		isID[i] = true
+	}
 	var fi []int
 	for i, c := range cols {
 		switch {
@@ -110,13 +115,12 @@ func trainXreg(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *m
 			ti = i
 		case strings.EqualFold(c.Name, ts.DataCol):
 			di = i
-		case ts.IDCol != "" && strings.EqualFold(c.Name, ts.IDCol):
-			ii = i
+		case isID[i]:
 		default:
 			fi = append(fi, i)
 		}
 	}
-	if ti < 0 || di < 0 {
+	if ti < 0 || di < 0 || missing != "" {
 		return trainArima(opts, cols, rows) // its error names the column
 	}
 	if len(fi) == 0 {
@@ -265,8 +269,10 @@ func trainXreg(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *m
 			if row[ti] == nil || row[di] == nil {
 				continue
 			}
-			if ii >= 0 && (row[ii] == nil || s.ID == nil || *row[ii] != *s.ID) {
-				continue
+			if len(idx) > 0 {
+				if key, ok := rowSeriesKey(row, idx); !ok || s.ID == nil || key != *s.ID {
+					continue
+				}
 			}
 			tm, ok := parseTSValue(*row[ti], tt)
 			if !ok {
@@ -350,17 +356,15 @@ func (f front) tsInput(r *http.Request, q queryOptions, md bqModel, input string
 		}
 		return -1
 	}
-	ti, di, ii := find(ts.TimestampCol), find(ts.DataCol), -1
-	if ts.IDCol != "" {
-		ii = find(ts.IDCol)
-	}
+	ti, di := find(ts.TimestampCol), find(ts.DataCol)
+	idx, missing := findTSIDs(qcols, ts)
 	switch {
 	case ti < 0:
 		return nil, 400, "The input data must have the model's time_series_timestamp_col " + ts.TimestampCol
 	case needData && di < 0:
 		return nil, 400, "The input data must have the model's time_series_data_col " + ts.DataCol
-	case ts.IDCol != "" && ii < 0:
-		return nil, 400, "The input data must have the model's time_series_id_col " + ts.IDCol
+	case missing != "":
+		return nil, 400, "The input data must have the model's time_series_id_col " + missing
 	}
 	var fi []int
 	if x != nil {
@@ -386,12 +390,9 @@ func (f front) tsInput(r *http.Request, q queryOptions, md bqModel, input string
 	}
 	out := map[string]*tsFuture{}
 	for _, row := range qrows {
-		key := ""
-		if ii >= 0 {
-			if row[ii] == nil {
-				continue
-			}
-			key = *row[ii]
+		key, ok := rowSeriesKey(row, idx)
+		if !ok {
+			continue
 		}
 		s, ok := series[key]
 		if !ok || row[ti] == nil {
@@ -436,11 +437,7 @@ func (f front) tsInput(r *http.Request, q queryOptions, md bqModel, input string
 // model md.
 func (f front) xregSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall) (string, int, string) {
 	a, ts, x := md.Trained.Arima, md.Options.TS, md.Trained.Xreg
-	idCol, idVal := "", func(arimaSeries) string { return "" }
-	if a.IDType != "" {
-		idCol = sqlIdent(ts.IDCol) + " " + a.IDType + ", "
-		idVal = func(s arimaSeries) string { return sqlLabel(*s.ID, a.IDType) + ", " }
-	}
+	idCol, idVal := tsIDDecl(ts, a), func(s arimaSeries) string { return tsIDSQL(a, s) }
 	key := func(s arimaSeries) string {
 		if s.ID != nil {
 			return *s.ID
@@ -453,7 +450,7 @@ func (f front) xregSubquery(r *http.Request, q queryOptions, md bqModel, c mlCal
 	case "ARIMA_EVALUATE", "HOLIDAY_INFO":
 		return f.arimaSubquery(r, q, md, c)
 	case "DETECT_ANOMALIES":
-		return "", 501, "Not implemented here: ML.DETECT_ANOMALIES of an ARIMA_PLUS_XREG model (#1766). Nothing was run."
+		return f.xregDetect(r, q, md, c) // modelxreganomaly.go
 	case "ARIMA_COEFFICIENTS":
 		if c.input != "" {
 			return "", 400, "ML.ARIMA_COEFFICIENTS takes no input data"
@@ -663,11 +660,7 @@ func (f front) tsEvaluate(r *http.Request, q queryOptions, md bqModel, c mlCall)
 	if code != 0 {
 		return "", code, msg
 	}
-	idCol, idVal := "", func(arimaSeries) string { return "" }
-	if a.IDType != "" {
-		idCol = sqlIdent(ts.IDCol) + " " + a.IDType + ", "
-		idVal = func(s arimaSeries) string { return sqlLabel(*s.ID, a.IDType) + ", " }
-	}
+	idCol, idVal := tsIDDecl(ts, a), func(s arimaSeries) string { return tsIDSQL(a, s) }
 	var rows []string
 	for si, s := range a.Series {
 		if len(s.Cands) == 0 {

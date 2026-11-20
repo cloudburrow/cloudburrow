@@ -203,10 +203,43 @@ type Listing struct {
 	// Tabs, when set, draw the list screen as tabs, as Google's Cloud
 	// Storage Settings page has Project access and Interoperability (#1843):
 	// the tab whose ID is ListTab holds the rows, with the screen's create
-	// and actions, and any other shows Summary. Only ID, Label and Note of
-	// each are read.
+	// and actions, and any other shows Summary. Only ID, Label, Note and
+	// Groups of each are read: a tab with Groups draws them in place of
+	// Summary, and the list tab draws its Groups over its rows (#1924).
 	Tabs    []Section `json:"tabs,omitempty"`
 	ListTab string    `json:"listTab,omitempty"`
+	// Text is what an action's answer says before its rows, kept as it
+	// came, line breaks and all: the text Document AI's Upload test
+	// document extracted, the transcript Speech-to-Text's Transcribe
+	// recognised (#1930).
+	Text string `json:"text,omitempty"`
+	// Pages are an action's answer drawn as page images, each with boxes
+	// over it, beside its text and rows: Document AI's Upload test
+	// document draws the layout it found on the document (#1930).
+	Pages []ResultPage `json:"pages,omitempty"`
+}
+
+// ResultPage is one page image of an action's answer, and its boxes.
+type ResultPage struct {
+	// Label names the page for a screen reader: "Page 1".
+	Label string `json:"label"`
+	// Image is the page as a data: URL.
+	Image  string      `json:"image"`
+	Width  int         `json:"width"`
+	Height int         `json:"height"`
+	Boxes  []ResultBox `json:"boxes,omitempty"`
+}
+
+// ResultBox is a box over a page image, in fractions of its size, tied to
+// the answer's row of the same Row (its Resource.Name), which it lights up
+// and is lit up by.
+type ResultBox struct {
+	Row  string  `json:"row"`
+	Kind string  `json:"kind"`
+	X    float64 `json:"x"`
+	Y    float64 `json:"y"`
+	W    float64 `json:"w"`
+	H    float64 `json:"h"`
 }
 
 // Provider reads live state for one service.
@@ -249,6 +282,12 @@ type Provider interface {
 // so that a field only ever appears when the service behind it can actually
 // accept it — a form offering something the API refuses is the working-looking
 // control the parity specification forbids.
+// Link is a document a Field names: its label and its https URL.
+type Link struct {
+	Label string `json:"label"`
+	URL   string `json:"url"`
+}
+
 type Field struct {
 	Name  string `json:"name"`
 	Label string `json:"label"`
@@ -370,11 +409,21 @@ type Field struct {
 	// choosable: SQL Server on Cloud SQL's engine choice, which CloudBurrow
 	// does not run (#1860).
 	DisabledOptions []string `json:"disabledOptions,omitempty"`
+	// Links are documents the field is about, drawn as links under its
+	// help: Microsoft's licence terms beside Cloud SQL for SQL Server's
+	// licence checkbox (#1916). Each opens in a new tab.
+	Links []Link `json:"links,omitempty"`
 	// VisibleWhen shows the field only while each named field of the same
 	// form holds the given value ("true"/"false" for a checkbox); a hidden
 	// field is neither checked nor submitted. Cloud SQL's Database version
 	// lists the chosen engine's versions only (#1860).
 	VisibleWhen map[string]string `json:"visibleWhen,omitempty"`
+	// CheckedWhen, on a checkbox, checks it and holds it checked while
+	// another field of the form holds a value, in ShowWhen's "name=value"
+	// form ("a|b" for either): Memorystore's Security choice of IAM Auth or
+	// Token Auth checks and locks Enable In-Transit Encryption (TLS)
+	// (#1862). Held, the box is still sent.
+	CheckedWhen string `json:"checkedWhen,omitempty"`
 	// Upload, on a textarea, is the label of a file chooser beside it whose
 	// text file is read into the textarea, as Google's Create secret takes
 	// the Secret value typed or from Upload file (#1850). The value is still
@@ -577,6 +626,16 @@ type CreateChecker interface {
 type CreateSubmitter interface {
 	Creator
 	CreateSubmit() string
+}
+
+// CreateHrefer is a Creator whose create flow is a page of the console's
+// own rather than the generated one: the Projects list's Create project
+// opens the New project page (/projectcreate), as the project picker's New
+// project and Manage resources' Create project do on Google's console
+// (#1932).
+type CreateHrefer interface {
+	Creator
+	CreateHref() string
 }
 
 // CreateThener is a Creator whose create page goes on to an action of the
@@ -901,6 +960,10 @@ func nonBlank(props []Property) []Property {
 // PropertyGroup is a headed block of label/value pairs.
 type PropertyGroup struct {
 	Heading string `json:"heading,omitempty"`
+	// Section, on a SummaryOnly screen's cards, heads the run of cards it
+	// begins: Document AI's Processor gallery groups its cards under
+	// Digitize, Extract and the rest, as Google's does (#1930).
+	Section string `json:"section,omitempty"`
 	// Properties are the pairs, in the order the provider gives them.
 	Properties []Property `json:"properties"`
 }
@@ -1096,9 +1159,19 @@ type Actor interface {
 type Action struct {
 	ID    string `json:"id"`
 	Label string `json:"label"`
+	// Unavailable, when set, is why the action cannot be performed on this
+	// instance: the page draws it disabled in Google's place with the reason
+	// (#1857: a GKE cluster's Edit, Upgrade and Delete), and the provider
+	// refuses it.
+	Unavailable string `json:"unavailable,omitempty"`
 	// Destructive marks an action that discards data, so the client can
 	// confirm it and name what is about to be affected.
 	Destructive bool `json:"destructive,omitempty"`
+	// ConfirmStyle is how a Destructive action is confirmed where Google's
+	// console confirms it otherwise than by the name typed back (#1931): a
+	// DeleteConfirm style, as BigQuery's Delete table asks for the word
+	// delete and a Datastore entity's Delete for nothing typed.
+	ConfirmStyle string `json:"confirmStyle,omitempty"`
 	// Confirm is what performing the action changes or puts at stake, and
 	// asks for the resource's name back before anything is sent.
 	//
@@ -1446,6 +1519,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/search", s.handleSearch)
 	mux.HandleFunc("GET /api/ai/playground", s.handlePlayground)
 	mux.HandleFunc("POST /api/ai/playground", s.handlePlaygroundGenerate)
+	mux.HandleFunc("POST /api/ai/playground/tokens", s.handlePlaygroundTokens)
 	mux.HandleFunc("GET /api/ai/embeddings", s.handleEmbeddingsStatus)
 	mux.HandleFunc("POST /api/ai/embeddings", s.handleEmbeddingsPredict)
 	mux.HandleFunc("GET /api/ai/local-models", s.handleLocalModels)
@@ -1621,7 +1695,7 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 			"id": p.ID(), "title": p.Title(),
 			"create": caps.Create, "delete": caps.Delete, "detail": caps.Detail,
 			"query": caps.Query, "edit": caps.Edit, "reveal": caps.Reveal,
-			"deleteLabel": caps.DeleteLabel, "editRow": caps.EditRow, "editRowFirst": caps.EditRowFirst,
+			"deleteLabel": caps.DeleteLabel, "deleteConfirm": caps.DeleteConfirm, "editRow": caps.EditRow, "editRowFirst": caps.EditRowFirst,
 			"page": caps.Page, "scope": caps.Scope, "filters": caps.Filters,
 		})
 	}
@@ -1809,7 +1883,11 @@ type capabilities struct {
 	// (DeleteLabeler), and EditRow the label of the rows' Edit item
 	// (RowEditor), empty for none.
 	DeleteLabel string `json:"deleteLabel,omitempty"`
-	EditRow     string `json:"editRow,omitempty"`
+	// DeleteConfirm is how the delete dialog is confirmed, as Google's
+	// console confirms this kind's (deleteconfirm.go): "delete", "DELETE",
+	// "confirm" (Delete alone), or empty for the name typed back.
+	DeleteConfirm string `json:"deleteConfirm,omitempty"`
+	EditRow       string `json:"editRow,omitempty"`
 	// EditRowFirst puts the rows' Edit first in their menus (RowEditLeader).
 	EditRowFirst bool `json:"editRowFirst,omitempty"`
 	// Detail means a row can be opened to show what is inside it.
@@ -1884,6 +1962,8 @@ type createForm struct {
 	PerProject bool `json:"perProject,omitempty"`
 	// Then is CreateThener's: the action the made resource's page opens.
 	Then string `json:"then,omitempty"`
+	// Href is CreateHrefer's: the console page the create button opens.
+	Href string `json:"href,omitempty"`
 }
 
 // ProjectCreateFormer is a Creator whose fields depend on the project, as
@@ -1943,6 +2023,10 @@ func (s *Server) capabilitiesOf(p Provider) capabilities {
 		if ct, ok := p.(CreateThener); ok {
 			c.Create.Then = ct.CreateThen()
 		}
+		if ch, ok := p.(CreateHrefer); ok && ch.CreateHref() != "" {
+			c.Create.Href = ch.CreateHref()
+			c.Create.Page = true
+		}
 	}
 	if e, ok := p.(Executor); ok {
 		c.Query = &queryCapability{Hint: e.QueryHint()}
@@ -1962,6 +2046,9 @@ func (s *Server) capabilitiesOf(p Provider) capabilities {
 	}
 	if dl, ok := p.(DeleteLabeler); ok {
 		c.DeleteLabel = dl.DeleteLabel()
+	}
+	if c.Delete {
+		c.DeleteConfirm = deleteConfirmOf(p)
 	}
 	if rl, ok := p.(RowEditLeader); ok {
 		c.EditRowFirst = rl.RowEditFirst()

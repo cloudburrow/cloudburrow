@@ -29,8 +29,13 @@ import (
 // caRotateAfter is when Memorystore makes a new CA available.
 const caRotateAfter = 5 * 365 * 24 * time.Hour
 
-// caCreated is when r's newest CA was created; zero if it does not parse.
+// caCreated is when r's newest CA was created, by the Memorystore clock
+// (CACreated); for a record kept before CACreated, its certificate's
+// start, and zero if that does not parse.
 func (r *record) caCreated() time.Time {
+	if !r.CACreated.IsZero() {
+		return r.CACreated
+	}
 	b, _ := pem.Decode([]byte(r.TransitCA))
 	if b == nil {
 		return time.Time{}
@@ -45,13 +50,13 @@ func (r *record) caCreated() time.Time {
 // rotateCA gives r a new CA, keeping the old ones listed until they
 // expire. Call with mu held.
 func (c *instances) rotateCA(r *record) error {
-	cert, key, err := newCA(r.Name, c.now())
+	cert, key, err := newCA(r.Name)
 	if err != nil {
 		return err
 	}
 	next := *r
 	next.PreviousCAs = r.caPEM()
-	next.TransitCA, next.TransitCAKey = cert, key
+	next.TransitCA, next.TransitCAKey, next.CACreated = cert, key, c.now()
 	if err := c.save(&next); err != nil {
 		return err
 	}

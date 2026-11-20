@@ -63,6 +63,11 @@ type objectRecord struct {
 	// KeySHA256 is the SHA-256 of the customer-supplied key the object is
 	// encrypted with (csek.go); nil means none.
 	KeySHA256 []byte `json:"keySha256,omitempty"`
+	// KMSKeyVersion is the Cloud KMS key version the object's bytes are
+	// encrypted with, and WrappedKey its data key as Cloud KMS encrypted it
+	// (cmek.go, #1938); empty means Google-managed encryption.
+	KMSKeyVersion string `json:"kmsKeyVersion,omitempty"`
+	WrappedKey    []byte `json:"wrappedKey,omitempty"`
 	// Contexts are the object's contexts.custom (contexts.go).
 	Contexts map[string]objectContext `json:"contexts,omitempty"`
 	// Unfinalized is an appendable object still open for appends
@@ -183,6 +188,9 @@ func (s *Server) objectJSONWith(r *http.Request, o objectRecord, b bucketRecord)
 			delete(out, "crc32c")
 		}
 	}
+	if o.KMSKeyVersion != "" {
+		out["kmsKeyName"] = o.KMSKeyVersion
+	}
 	if len(o.MD5) > 0 && requestOpens(r, o) {
 		out["md5Hash"] = base64.StdEncoding.EncodeToString(o.MD5)
 	}
@@ -286,6 +294,10 @@ type uploadMeta struct {
 	// KeySHA256 is the request's customer-supplied key (csek.go), which
 	// persists with a resumable session; it is never read from the body.
 	KeySHA256 []byte `json:"keySha256,omitempty"`
+	// KMSKeyName is the request's Cloud KMS key (cmek.go), which persists
+	// with a resumable session; sealed is how its bytes were encrypted.
+	KMSKeyName string `json:"kmsKeyName,omitempty"`
+	sealed     sealedKey
 	// Contexts is the metadata's contexts (contexts.go), kept raw so it
 	// persists with a resumable session.
 	Contexts json.RawMessage `json:"contexts,omitempty"`
@@ -309,7 +321,7 @@ var uploadFields = map[string]string{
 	"restoreToken": "output",
 	"acl":          "kept", "owner": "output",
 	"temporaryHold": "kept", "eventBasedHold": "kept", "retention": "kept", "retentionExpirationTime": "output",
-	"customTime": "kept", "kmsKeyName": "customer-managed keys are not implemented",
+	"customTime": "kept", "kmsKeyName": "kept",
 	"customerEncryption": "output", "contexts": "kept",
 }
 
@@ -414,10 +426,6 @@ func (s *Server) objectsInsertUpload(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(r.URL.EscapedPath(), resumablePrefix) {
 		bucket = pathVar(r, resumablePrefix, 1)
 	}
-	if q.Get("kmsKeyName") != "" {
-		writeError(w, errorf(http.StatusNotImplemented, "notImplemented", "kmsKeyName is not implemented"))
-		return
-	}
 	if err := checkProjection(r); err != nil {
 		writeError(w, err)
 		return
@@ -488,15 +496,20 @@ func (s *Server) objectsInsertUpload(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	if err := s.bucketExists(bucket); err != nil {
-		writeError(w, err)
-		return
+	if k := q.Get("kmsKeyName"); k != "" {
+		meta.KMSKeyName = k
 	}
-	blob, err := s.blobs.Write(media)
+	t, err := s.writeTarget(bucket, meta.KMSKeyName, meta.KeySHA256)
 	if err != nil {
 		writeError(w, err)
 		return
 	}
+	blob, sealed, err := t.write(r.Context(), s, media)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	meta.sealed = sealed
 	o, err := s.finalizeObject(bucket, meta, blob, pre, wantMD5, wantCRC)
 	if err != nil {
 		writeError(w, err)
@@ -537,7 +550,8 @@ func (s *Server) finalizeObject(bucket string, meta uploadMeta, blob Blob, pre o
 		Blob: blob.ID, Size: blob.Size, MD5: blob.MD5, CRC32C: blob.CRC32C,
 		ContentType: meta.ContentType, ContentEncoding: meta.ContentEncoding, ContentDisposition: meta.ContentDisposition,
 		ContentLanguage: meta.ContentLanguage, CacheControl: meta.CacheControl, Metadata: meta.Metadata,
-		StorageClass: class, Created: now, Updated: now, KeySHA256: meta.KeySHA256}
+		StorageClass: class, Created: now, Updated: now, KeySHA256: meta.KeySHA256,
+		KMSKeyVersion: meta.sealed.Version, WrappedKey: meta.sealed.Wrapped}
 	if o.ContentType == "" {
 		o.ContentType = "application/octet-stream"
 	}
@@ -754,7 +768,25 @@ func (s *Server) objectsDelete(w http.ResponseWriter, r *http.Request) {
 // XML API's headers. The x-goog-* headers are what the Go client reads the
 // object's identity and checksums from.
 func (s *Server) serveMedia(w http.ResponseWriter, r *http.Request, o objectRecord, xml bool) {
+	// The bytes are opened first: an object whose Cloud KMS key cannot be
+	// used is refused before any header is set (cmek.go).
+	var f io.ReadSeekCloser
+	if r.Method != http.MethodHead {
+		var err error
+		if f, err = s.openObject(r.Context(), o); err != nil {
+			if xml {
+				writeXMLFromError(w, r, err, o.Bucket)
+				return
+			}
+			writeError(w, err)
+			return
+		}
+		defer f.Close()
+	}
 	h := w.Header()
+	if o.KMSKeyVersion != "" {
+		h.Set("X-Goog-Encryption-Kms-Key-Name", o.KMSKeyVersion)
+	}
 	h.Set("Content-Type", o.ContentType)
 	h.Set("X-Goog-Generation", strconv.FormatInt(o.Generation, 10))
 	h.Set("X-Goog-Metageneration", strconv.FormatInt(o.Metageneration, 10))
@@ -808,12 +840,6 @@ func (s *Server) serveMedia(w http.ResponseWriter, r *http.Request, o objectReco
 		w.WriteHeader(status)
 		return
 	}
-	f, err := s.blobs.Open(o.Blob)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	defer f.Close()
 	if _, err := f.Seek(start, io.SeekStart); err != nil {
 		writeError(w, err)
 		return

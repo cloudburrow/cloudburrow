@@ -218,3 +218,59 @@ func renderPage(inst pdfium.Pdfium, page requests.Page, wPt, hPt float64, dpi, m
 	r.Cleanup()
 	return img, nil
 }
+
+// RenderPDFForOCR renders every page of a PDF at the resolution OCR reads
+// (300 DPI, capped as DecodePDF caps a scan), for Document AI's processors
+// (internal/service/vertexai/documentai.go, #1799). count is the PDF's page
+// count, set even when it is over maxPages, which returns no pages and
+// ErrTooManyPages.
+func RenderPDFForOCR(data []byte, maxPages int) (pages []image.Image, count int, err error) {
+	if len(data) == 0 || !bytes.Contains(data[:min(len(data), 1024)], []byte("%PDF-")) {
+		return nil, 0, fmt.Errorf("the data is not a PDF")
+	}
+	inst, err := pdfInstance()
+	if err != nil {
+		return nil, 0, err
+	}
+	defer inst.Close()
+	defer func() {
+		if r := recover(); r != nil {
+			pages, err = nil, fmt.Errorf("the data is not a valid PDF: %v", r)
+		}
+	}()
+	doc, err := inst.OpenDocument(&requests.OpenDocument{File: &data})
+	if err != nil {
+		return nil, 0, fmt.Errorf("the data is not a valid PDF: %v", err)
+	}
+	defer inst.FPDF_CloseDocument(&requests.FPDF_CloseDocument{Document: doc.Document})
+	pc, err := inst.FPDF_GetPageCount(&requests.FPDF_GetPageCount{Document: doc.Document})
+	if err != nil {
+		return nil, 0, fmt.Errorf("the data is not a valid PDF: %v", err)
+	}
+	count = pc.PageCount
+	if count == 0 {
+		return nil, 0, fmt.Errorf("the PDF has no pages")
+	}
+	if count > maxPages {
+		return nil, count, ErrTooManyPages
+	}
+	for i := 0; i < count; i++ {
+		size, err := inst.FPDF_GetPageSizeByIndex(&requests.FPDF_GetPageSizeByIndex{Document: doc.Document, Index: i})
+		if err != nil {
+			return nil, count, fmt.Errorf("page %d: %v", i+1, err)
+		}
+		img, err := renderPage(inst, requests.Page{ByIndex: &requests.PageByIndex{Document: doc.Document, Index: i}},
+			size.Width, size.Height, ocrDPI, ocrMaxPixels)
+		if err != nil {
+			return nil, count, fmt.Errorf("page %d: %v", i+1, err)
+		}
+		pages = append(pages, img)
+	}
+	return pages, count, nil
+}
+
+// ErrTooManyPages is RenderPDFForOCR's refusal of a PDF over its limit.
+var ErrTooManyPages = errors.New("the PDF has too many pages")
+
+// OCRDPI is the resolution RenderPDFForOCR renders at.
+const OCRDPI = ocrDPI

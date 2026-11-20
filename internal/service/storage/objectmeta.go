@@ -20,7 +20,7 @@ var objectMutable = map[string]string{
 	"storageClass":  "the storage class changes only by rewrite (#495)",
 	"temporaryHold": "kept", "eventBasedHold": "kept", "retention": "kept",
 	"acl": "kept", "contexts": "kept",
-	"kmsKeyName": "customer-managed keys are not implemented", "customerEncryption": "an object's customer-supplied key changes only by rewrite",
+	"kmsKeyName": "an object's Cloud KMS key changes only by rewrite (#1938)", "customerEncryption": "an object's customer-supplied key changes only by rewrite",
 }
 
 // objectOutput are read-only Object properties; a body may carry them, and
@@ -159,6 +159,12 @@ func (s *Server) objectsModify(replace bool) http.HandlerFunc {
 		if csekStated {
 			delete(body, "customerEncryption")
 		}
+		// And its Cloud KMS key (cmek.go): "You cannot encrypt an object
+		// with a CMEK by updating the object's metadata".
+		kmsKey, kmsStated := body["kmsKeyName"]
+		if kmsStated {
+			delete(body, "kmsKeyName")
+		}
 		if err := checkObjectBody(body); err != nil {
 			writeError(w, err)
 			return
@@ -189,6 +195,10 @@ func (s *Server) objectsModify(replace bool) http.HandlerFunc {
 			if csekStated && !empty(csek) && !sameCSEK(csek, o) {
 				return badRequest("The object field %q cannot be changed here (%s); it is refused rather than dropped",
 					"customerEncryption", objectMutable["customerEncryption"])
+			}
+			if kmsStated && !empty(kmsKey) && !sameKMSKey(kmsKey, o) {
+				return badRequest("The object field %q cannot be changed here (%s); it is refused rather than dropped",
+					"kmsKeyName", objectMutable["kmsKeyName"])
 			}
 			before := o
 			now := s.now()

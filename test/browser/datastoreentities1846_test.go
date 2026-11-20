@@ -12,7 +12,6 @@ import (
 
 	"cloud.google.com/go/datastore"
 	"github.com/chromedp/chromedp"
-	"github.com/chromedp/chromedp/kb"
 )
 
 // TestDatastoreEntitiesPageAndQueryClausesThroughTheBrowser (#1846), in
@@ -55,9 +54,17 @@ func TestDatastoreEntitiesPageAndQueryClausesThroughTheBrowser(t *testing.T) {
 	for _, n := range []string{"name=t2", "name=t3"} {
 		p.run(chromedp.Click(chromedp.CSS(`#view tbody input[type=checkbox][aria-label="Select ` + n + `"]`)))
 	}
+	// Confirmed as Google's entity delete is, nothing typed (#1931); the
+	// dialog names both.
 	p.clickText("#view button", "Delete")
-	p.waitFor(`document.activeElement === document.querySelector(".modal #confirm-input")`)
-	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #confirm-input`), "2"), chromedp.KeyEvent(kb.Enter))
+	p.waitFor(`document.querySelector(".modal.is-open form[data-confirm]") !== null`)
+	p.confirmOnlyDialog()
+	var detail string
+	p.eval(`document.querySelector(".modal.is-open .confirm-detail").textContent`, &detail)
+	if !strings.Contains(detail, "name=t2, name=t3") {
+		t.Errorf("the delete dialog names %q; want name=t2 and name=t3", detail)
+	}
+	p.pressDelete()
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		var e task

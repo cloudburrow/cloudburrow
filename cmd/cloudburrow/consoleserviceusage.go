@@ -1,12 +1,15 @@
 package main
 
 import (
+	"github.com/cloudburrow/cloudburrow/internal/service/apikeys"
+
 	"context"
 	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/metrics"
 	"github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
 )
 
@@ -14,13 +17,21 @@ import (
 // APIs and their state, read and changed through the same
 // serviceusage.Server the Service Usage API serves, so an API disabled here
 // is one gcloud and Terraform see DISABLED.
-type serviceUsageProvider struct{ api *serviceusage.Server }
+type serviceUsageProvider struct {
+	api *serviceusage.Server
+	// metrics are the request counters the APIs & Services pages count
+	// calls from (#1866); nil shows no counts.
+	metrics *metrics.Registry
+	// apiKeys is the API Keys API (#1915), whose keys the Credentials page
+	// lists and edits; nil says it is not served.
+	apiKeys *apikeys.Server
+}
 
 func (serviceUsageProvider) ID() string    { return "serviceusage" }
 func (serviceUsageProvider) Title() string { return "APIs & Services" }
 
 const serviceUsageNote = "Every API this instance serves, as Service Usage lists it. " +
-	"Disabling one is recorded and reported, not enforced: the API keeps answering (docs/serviceusage.md)."
+	"Disabling one makes its calls in the project fail with Google's SERVICE_DISABLED, as on Google (docs/serviceusage.md)."
 
 // List implements console.Provider.
 func (p serviceUsageProvider) List(_ context.Context, project string) (console.Listing, error) {

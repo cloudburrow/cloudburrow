@@ -20,8 +20,10 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/localai"
 	"github.com/cloudburrow/cloudburrow/internal/metadata"
+	"github.com/cloudburrow/cloudburrow/internal/metrics"
 	"github.com/cloudburrow/cloudburrow/internal/modelgarden"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
+	"github.com/cloudburrow/cloudburrow/internal/service/apikeys"
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
@@ -75,10 +77,17 @@ type consoleDeps struct {
 	// serviceUsage is the Service Usage API (#1352), whose APIs & Services
 	// page reads and changes the same server.
 	serviceUsage *serviceusage.Server
+	// apiKeys is the API Keys API (#1915), whose keys Credentials lists.
+	apiKeys *apikeys.Server
+	// requestMetrics are the request counters, which APIs & Services
+	// counts each API's calls from (#1866).
+	requestMetrics *metrics.Registry
 	// backupdr is the Backup and DR Service (#1433), nil unless enabled.
 	backupdr *backupdr.Server
 	// privateCA is Certificate Authority Service (#1834), nil unless enabled.
 	privateCA *privateCAService
+	// gke is the Kubernetes Engine API (#1913), nil unless enabled.
+	gke *gkeService
 	// sqlAdmin is the Cloud SQL Admin API, which restores Backup and DR
 	// backups; nil unless a Cloud SQL service is enabled.
 	sqlAdmin *sqladmin.Server
@@ -277,7 +286,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	}
 	// APIs & Services (#1352): always served, as projects are.
 	if d.serviceUsage != nil {
-		providers = append(providers, serviceUsageProvider{api: d.serviceUsage}, serviceUsageOperationsProvider{api: d.serviceUsage})
+		providers = append(providers, serviceUsageProvider{api: d.serviceUsage, metrics: d.requestMetrics, apiKeys: d.apiKeys}, serviceUsageOperationsProvider{api: d.serviceUsage})
 	}
 	// Backup and DR (#1433), in process, restoring through Cloud SQL.
 	if enabled[config.ServiceBackupDR] && d.backupdr != nil {
@@ -285,7 +294,10 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		if d.sqlAdmin != nil {
 			p.sql = d.sqlAdmin
 		}
-		providers = append(providers, p)
+		// Google's menu (#1844): Overview, Vaulted backups, Backup plans,
+		// Backup plan associations, Backup vaults (p) and Jobs.
+		providers = append(providers, bdrOverviewProvider{api: p}, bdrVaultedProvider{api: p}, bdrPlansProvider{api: p},
+			bdrAssocsProvider{api: p}, p, bdrJobsProvider{api: p})
 	}
 	// Cloud Logging's admin screens, beside the Logs Explorer (#1226).
 	if enabled[config.ServiceLogging] && d.logging != nil {
@@ -370,6 +382,9 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			// saying why.
 			versions = append(append(versions, "MYSQL_5_6", "MYSQL_5_7"), sqladmin.EngineVersions("MYSQL")...)
 		}
+		// SQL Server (#1916): created through the Admin API, on Microsoft's
+		// image, once its user accepts Microsoft's licence.
+		versions = append(versions, sqladmin.SQLServerVersions()...)
 		host := d.cfg.BindAddress
 		if host == "" || host == "0.0.0.0" || host == "::" {
 			host = "127.0.0.1"
@@ -386,16 +401,37 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	// The AI area is always listed and never operational, so its absence is
 	// explained rather than silently missing.
 	providers = append(providers, aiProvider{})
+	// Document AI and Speech-to-Text (#1930), on the local AI endpoint's
+	// DocumentProcessorService and Speech v2 (#1799), when it runs.
+	if d.localAI != nil {
+		docs := docAI{defaultProject: d.cfg.DefaultProject(), addr: d.localAI.Addr}
+		sp := speechSvc{defaultProject: d.cfg.DefaultProject(), addr: d.localAI.Addr}
+		providers = append(providers, docAIOverviewProvider{d: docs}, docAIGalleryProvider{d: docs}, docAIProcessorsProvider{d: docs},
+			speechTranscriptionsProvider{s: sp, held: &speechTranscriptions{}}, speechRecognizersProvider{s: sp},
+			speechCustomClassesProvider{s: sp}, speechPhraseSetsProvider{s: sp})
+	}
 
 	kubeconfig := d.cfg.KubeconfigPath()
+	// Kubernetes Engine's pages follow Google's (#1857): Workloads, the
+	// Services and Ingress tabs and Storage's Persistent volume claims are
+	// the GKE screens over the same cluster; Pods, Jobs, Nodes and Events
+	// keep their pages, reached from a workload, a cluster's Nodes tab and
+	// Object Browser.
+	cluster, own := d.cfg.ClusterName(), d.cfg.Cluster.Namespace
 	providers = append(providers,
-		workloadsProvider(kubeconfig),
+		gkeClustersProvider{name: cluster, kubeconfig: kubeconfig, own: own, svc: d.gke, gkeDir: gkeDir(d.cfg)},
+		gkeWorkloads(kubeconfig, cluster, own),
 		podsProvider(kubeconfig, metrics, series),
-		servicesProvider(kubeconfig),
+		gkeServices(kubeconfig, cluster, own),
 		jobsProvider(kubeconfig),
 		nodesProvider(kubeconfig),
-		clusterStorageProvider(kubeconfig),
+		gkeClaims(kubeconfig, cluster, own),
 		eventsProvider(kubeconfig),
+		gkeConfig(kubeconfig, cluster, own),
+		gkeGateways(kubeconfig, cluster, own),
+		gkeIngress(kubeconfig, cluster, own),
+		gkeStorageClasses(kubeconfig, cluster),
+		gkeObjectBrowser{kubeconfig: kubeconfig},
 	)
 	return providers
 }
@@ -541,6 +577,13 @@ func consoleStatus(d consoleDeps) console.StatusSource {
 				st.Endpoints["ingress"] = addr
 			}
 		}
+		// The local AI endpoint (#1799), which Document AI's and
+		// Speech-to-Text's pages read (#1930).
+		if d.localAI != nil {
+			if addr := d.localAI.Addr(); addr != "" {
+				st.Endpoints["localai"] = addr
+			}
+		}
 
 		// A service is listed whether or not it is enabled, and a disabled
 		// one carries its reason: a greyed-out entry with no explanation is
@@ -596,6 +639,7 @@ var serviceTitles = map[config.Service]string{
 	config.ServiceKMS:           "Cloud KMS",
 	config.ServiceBackupDR:      "Backup and DR",
 	config.ServicePrivateCA:     "Certificate Authority Service",
+	config.ServiceGKE:           "Kubernetes Engine",
 }
 
 func serviceTitle(s config.Service) string {

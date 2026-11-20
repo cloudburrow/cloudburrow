@@ -114,7 +114,6 @@ func TestTerraformRedisStandardTier(t *testing.T) {
 	h := New(t)
 	c, _ := memorystoreAdminClient(t, h)
 	m := newTFModule(t)
-	ctx := h.Context()
 	id := fmt.Sprintf("tf-ha-%d", time.Now().UnixNano()%1e8)
 	name := "projects/" + m.project + "/locations/us-central1/instances/" + id
 	module := func(replicas int) string {
@@ -143,7 +142,7 @@ output "read_endpoint" {
 	m.write(module(2))
 	m.must("init", "-input=false", "-no-color")
 	m.apply()
-	inst, err := c.GetInstance(ctx, &redispb.GetInstanceRequest{Name: name})
+	inst, err := c.GetInstance(h.Context(), &redispb.GetInstanceRequest{Name: name})
 	if err != nil {
 		t.Fatalf("GetInstance after apply: %v", err)
 	}
@@ -156,11 +155,11 @@ output "read_endpoint" {
 	m.planClean()
 	m.write(module(3))
 	m.apply()
-	if inst, err = c.GetInstance(ctx, &redispb.GetInstanceRequest{Name: name}); err != nil || inst.GetReplicaCount() != 3 || len(inst.GetNodes()) != 4 {
+	if inst, err = c.GetInstance(h.Context(), &redispb.GetInstanceRequest{Name: name}); err != nil || inst.GetReplicaCount() != 3 || len(inst.GetNodes()) != 4 {
 		t.Errorf("after replica_count 3, GetInstance = %v, %v", inst, err)
 	}
 	m.must("destroy", "-auto-approve", "-input=false", "-no-color")
-	if _, err := c.GetInstance(ctx, &redispb.GetInstanceRequest{Name: name}); status.Code(err) != codes.NotFound {
+	if _, err := c.GetInstance(h.Context(), &redispb.GetInstanceRequest{Name: name}); status.Code(err) != codes.NotFound {
 		t.Errorf("GetInstance after destroy = %v, want NOT_FOUND", err)
 	}
 }

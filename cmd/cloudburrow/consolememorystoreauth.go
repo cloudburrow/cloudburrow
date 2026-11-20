@@ -167,7 +167,14 @@ func (p redisClusterProvider) DetailActions(ctx context.Context, project string,
 	if err != nil {
 		return nil
 	}
-	return append(memorystoreAuthActions(c.GetAuthorizationMode() == clusterpb.AuthorizationMode_AUTH_MODE_TOKEN_AUTH, true), redisClusterMaintenance(c).actions()...)
+	acts := append(memorystoreAuthActions(c.GetAuthorizationMode() == clusterpb.AuthorizationMode_AUTH_MODE_TOKEN_AUTH, true), redisClusterMaintenance(c).actions()...)
+	if c.GetServerCaMode() == clusterpb.ServerCaMode_SERVER_CA_MODE_CUSTOMER_MANAGED_CAS_CA {
+		// On-demand rotation, customer-managed CAs only (#1918), as gcloud
+		// redis clusters update --rotate-server-certificate.
+		acts = append(acts, console.Action{ID: "rotate-server-certificate", Label: "Rotate server certificates",
+			Confirm: "Every node gets a new server certificate from the CA pool now (UpdateCluster rotate_server_certificate). New connections get the new certificate; open connections stay. Memorystore also rotates them every week."})
+	}
+	return acts
 }
 
 // ActAt implements console.PathActor, each operation waited for.
@@ -231,6 +238,9 @@ func (p redisClusterProvider) ActAt(ctx context.Context, project string, path []
 		default:
 			op, err = api.DeleteAclPolicy(ctx, &clusterpb.DeleteAclPolicyRequest{Name: pname})
 		}
+	case "rotate-server-certificate":
+		op, err = api.UpdateCluster(ctx, &clusterpb.UpdateClusterRequest{UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"rotate_server_certificate"}},
+			Cluster: &clusterpb.Cluster{Name: name, RotateServerCertificate: proto.Bool(true)}})
 	case "acl-policy":
 		op, err = api.UpdateCluster(ctx, &clusterpb.UpdateClusterRequest{UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"acl_policy"}},
 			Cluster: &clusterpb.Cluster{Name: name, AclPolicy: strings.TrimSpace(values["policy"])}})
@@ -309,7 +319,14 @@ func (p valkeyProvider) DetailActions(ctx context.Context, project string, path 
 		return nil
 	}
 	acts := append(memorystoreAuthActions(i.GetAuthorizationMode() == memorystorepb.Instance_TOKEN_AUTH, false), valkeyReplicationActions(i)...)
-	return append(acts, valkeyMaintenance(i).actions()...)
+	acts = append(acts, valkeyMaintenance(i).actions()...)
+	if i.GetServerCaMode() == memorystorepb.Instance_SERVER_CA_MODE_CUSTOMER_MANAGED_CAS_CA {
+		// On-demand rotation, customer-managed CAs only (#1918), as gcloud
+		// memorystore instances update --rotate-server-certificate.
+		acts = append(acts, console.Action{ID: "rotate-server-certificate", Label: "Rotate server certificates",
+			Confirm: "Every node gets a new server certificate from the CA pool now (UpdateInstance rotate_server_certificate). New connections get the new certificate; open connections stay. Memorystore also rotates them every week."})
+	}
+	return acts
 }
 
 // ActAt implements console.PathActor, each operation waited for.
@@ -384,6 +401,9 @@ func (p valkeyProvider) ActAt(ctx context.Context, project string, path []string
 		default:
 			op, err = api.DeleteAclPolicy(ctx, &memorystorepb.DeleteAclPolicyRequest{Name: pname})
 		}
+	case "rotate-server-certificate":
+		op, err = api.UpdateInstance(ctx, &memorystorepb.UpdateInstanceRequest{UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"rotate_server_certificate"}},
+			Instance: &memorystorepb.Instance{Name: name, RotateServerCertificate: proto.Bool(true)}})
 	case "acl-policy":
 		op, err = api.UpdateInstance(ctx, &memorystorepb.UpdateInstanceRequest{UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"acl_policy"}},
 			Instance: &memorystorepb.Instance{Name: name, AclPolicy: proto.String(strings.TrimSpace(values["policy"]))}})

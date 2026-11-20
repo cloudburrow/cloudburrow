@@ -11,6 +11,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
+	"github.com/cloudburrow/cloudburrow/internal/service/vertexai"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 )
 
@@ -49,15 +50,24 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 	config.ServiceLogging:       {Providers: []string{"logging-metrics", "logging-sinks", "logging-exclusions", "logging-buckets", "logging-settings", "logging-saved-queries", "logging-log-scopes", "logging-analytics"}, Screen: "/logs"},
 	config.ServiceMemorystore:   {Providers: []string{"memorystore", "memorystore-clusters", "memorystore-valkey"}},
 	config.ServiceCloudSQLMySQL: {Providers: []string{"cloudsql-mysql", "cloudsql-instances", "cloudsql-backups"}},
-	config.ServiceBackupDR:      {Providers: []string{"backupdr"}},
-	config.ServicePrivateCA:     {Providers: []string{"privateca", "privateca-templates"}},
+	config.ServiceBackupDR: {Providers: []string{"backupdr-overview", "backupdr-vaulted", "backupdr-plans", "backupdr-associations",
+		"backupdr", "backupdr-jobs"}},
+	config.ServicePrivateCA: {Providers: []string{"privateca", "privateca-templates"}},
+	// The Kubernetes Engine API (#1913): its clusters are on Kubernetes
+	// clusters, beside the instance's own.
+	config.ServiceGKE: {Providers: []string{"gkeclusters"}},
 }
 
 // clusterScreens are the registry's screens that belong to no selectable
-// service: Resource Manager, the AI catalogue and CloudBurrow's own cluster.
+// service: Resource Manager, the AI catalogue, Document AI and
+// Speech-to-Text on the local AI endpoint (#1930), and CloudBurrow's own
+// cluster.
 var clusterScreens = []string{
 	"projects", "hierarchy", "tags", "iam", "iam-roles", "iam-groups", "iam-service-accounts", "iam-audit", "iam-orgpolicies", "iam-labels", "iam-settings", "serviceusage", "serviceusage-operations", "ai",
+	"documentai-overview", "documentai-gallery", "documentai", "speech-transcriptions", "speech-recognizers",
+	"speech-custom-classes", "speech-phrase-sets",
 	"workloads", "pods", "k8sservices", "jobs", "nodes", "k8sstorage", "events",
+	"gkeclusters", "k8sconfig", "k8sgateways", "k8singress", "k8sstorageclasses", "k8sobjects",
 }
 
 // TestEveryServiceHasAParityRow enforces console parity §3 (#698): "The
@@ -150,6 +160,9 @@ func coverageDeps(t *testing.T) consoleDeps {
 		serviceUsage: newServiceUsageServer(cfg, projects, store.NewMemory()),
 		// The Backup and DR page (#1433) reads the Backup and DR server.
 		backupdr: backupdr.NewServer("127.0.0.1:0", nil, ""),
+		// Document AI and Speech-to-Text (#1930) read the local AI
+		// endpoint, never started here.
+		localAI: vertexai.NewServerOn("127.0.0.1:0", nil),
 	}
 	for _, s := range config.KnownServices() {
 		d.forwarders = append(d.forwarders, namedForwarder(t, string(s), "127.0.0.1:1"))

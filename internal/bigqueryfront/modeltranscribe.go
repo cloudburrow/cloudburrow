@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -31,19 +32,28 @@ import (
 // RecognizeResponse) and ml_transcribe_status (STRING, empty on success,
 // else the row's error), then the object table's columns.
 //
-//   - The model has no recognizer (SPEECH_RECOGNIZER is refused 501 at
-//     CREATE MODEL: CloudBurrow serves no recognizers), so
-//     recognition_config is required, and its model must be chirp, as the
-//     page says of the default recognizer. The rest of the config is
-//     checked as the recognize route checks it (internal/speechconfig):
-//     what has no local equivalent is refused 501 before anything is read.
+//   - Without SPEECH_RECOGNIZER, recognition_config is required: it
+//     configures the default recognizer. With it (a recognizer created on
+//     the instance's local Speech-to-Text API,
+//     internal/service/vertexai/speechrecognizers.go, checked to exist at
+//     CREATE MODEL), recognition_config is optional and, when given,
+//     overrides the recognizer's default_recognition_config field by
+//     field, as the page's example "override the recognizer's default
+//     configuration" does. Either way the model must be chirp, as the page
+//     says, and the config is checked as the recognize route checks it
+//     (internal/speechconfig): what has no local equivalent is refused 501
+//     before anything is read.
 //   - The page's locations alone: asia-southeast1, europe-west4,
 //     us-central1, US and EU; the query runs in the model's location.
 //   - A file longer than 30 minutes is its row's error, as the page's
 //     "INVALID_ARGUMENT: The audio file cannot be processed in time."
 //
-// UNVERIFIED (re-read 2026-11-18: the page shows them only in its sample
-// output, truncated, or not at all): ml_transcribe_result's shape, written as the sample's is,
+// UNVERIFIED (re-read 2026-11-19: the page shows them only in its sample
+// output, truncated, or not at all): whether recognition_config may be
+// given with SPEECH_RECOGNIZER (the page says "If you specify
+// SPEECH_RECOGNIZER, you can't specify a RECOGNITION_CONFIG value", yet its
+// example does, to override the recognizer's configuration; CloudBurrow
+// follows the example); ml_transcribe_result's shape, written as the sample's is,
 // with snake_case keys and durations as {"seconds", "nanos"} objects;
 // transcripts as the results' first alternatives joined with a space; the
 // texts of the errors.
@@ -85,18 +95,25 @@ func (f front) transcribeSubquery(r *http.Request, q queryOptions, md bqModel, c
 		}
 		raw = s
 	}
-	if raw == "" {
+	effective := raw
+	if rec := md.Remote.Recognizer; rec != "" {
+		merged, code, msg := f.recognizerConfig(r.Context(), rec, raw)
+		if code != 0 {
+			return "", code, msg
+		}
+		effective = merged
+	} else if raw == "" {
 		return "", 400, fname + " requires recognition_config when the remote model specifies no SPEECH_RECOGNIZER: " +
 			"recognition_config => (JSON '{\"model\": \"chirp\", \"language_codes\": [...], \"auto_decoding_config\": {}}')"
 	}
-	cfg, code, err := speechconfig.Parse([]byte(raw))
+	cfg, code, err := speechconfig.Parse([]byte(effective))
 	switch {
 	case code == 501:
 		return "", 501, err.Error() + ". Nothing was run."
 	case code != 0:
 		return "", 400, "Invalid recognition_config: " + err.Error()
 	case cfg.Model != "chirp":
-		return "", 400, "Invalid recognition_config: only the chirp transcription model can be used with the default recognizer, not " + strconv.Quote(cfg.Model)
+		return "", 400, "Invalid recognition_config: only the chirp transcription model can be used in the speech recognizer or recognition_config, not " + strconv.Quote(cfg.Model)
 	}
 	if !transcribeLocations[strings.ToLower(md.Remote.Location)] {
 		return "", 400, fmt.Sprintf("%s is not supported in location %s: it runs in asia-southeast1, europe-west4, us-central1, US and EU", fname, md.Remote.Location)
@@ -111,7 +128,11 @@ func (f front) transcribeSubquery(r *http.Request, q queryOptions, md bqModel, c
 		var res []byte
 		transcripts, status := "", o.status
 		if o.data != nil {
-			transcripts, res, status = f.transcribe(r.Context(), md.Project, loc, raw, o.data)
+			rec := md.Remote.Recognizer
+			if rec == "" {
+				rec = "projects/" + md.Project + "/locations/" + loc + "/recognizers/_"
+			}
+			transcripts, res, status = f.transcribe(r.Context(), rec, raw, o.data)
 		}
 		t := "NULL"
 		if res != nil {
@@ -127,11 +148,15 @@ func (f front) transcribeSubquery(r *http.Request, q queryOptions, md bqModel, c
 
 // transcribe sends one audio file to the local endpoint's recognize route:
 // the row's transcripts, its ml_transcribe_result and its status.
-func (f front) transcribe(ctx context.Context, project, location, config string, data []byte) (string, []byte, string) {
-	body, _ := json.Marshal(map[string]any{"config": json.RawMessage(config), "content": base64.StdEncoding.EncodeToString(data)})
+func (f front) transcribe(ctx context.Context, recognizer, config string, data []byte) (string, []byte, string) {
+	msg := map[string]any{"content": base64.StdEncoding.EncodeToString(data)}
+	if config != "" {
+		msg["config"] = json.RawMessage(config)
+	}
+	body, _ := json.Marshal(msg)
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Hour)
 	defer cancel()
-	u := strings.TrimSuffix(f.vertexai, "/") + "/v2/projects/" + project + "/locations/" + location + "/recognizers/_:recognize"
+	u := strings.TrimSuffix(f.vertexai, "/") + "/v2/" + recognizer + ":recognize"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(body))
 	if err != nil {
 		return "", nil, err.Error()
@@ -180,6 +205,84 @@ func (f front) transcribe(ctx context.Context, project, location, config string,
 	}
 	result, _ := json.Marshal(snakeResult(generic, ""))
 	return strings.Join(parts, " "), result, ""
+}
+
+// recognizerPattern is SPEECH_RECOGNIZER's documented format.
+var recognizerPattern = regexp.MustCompile(`^projects/[^/]+/locations/[^/]+/recognizers/[^/]+$`)
+
+// speechRecognizer checks a SPEECH_RECOGNIZER at CREATE MODEL: its format,
+// and that the recognizer exists, active, on the instance's local
+// Speech-to-Text API.
+func (f front) speechRecognizer(ctx context.Context, name string) (int, string) {
+	if !recognizerPattern.MatchString(name) || strings.HasSuffix(name, "/recognizers/_") {
+		return 400, "Invalid SPEECH_RECOGNIZER " + strconv.Quote(name) + ": expected projects/PROJECT_NUMBER/locations/LOCATION/recognizers/RECOGNIZER_ID"
+	}
+	_, code, msg := f.getRecognizer(ctx, name)
+	return code, msg
+}
+
+// getRecognizer reads a recognizer from the local Speech-to-Text API: its
+// JSON, or 400 and why it cannot be used.
+func (f front) getRecognizer(ctx context.Context, name string) (map[string]any, int, string) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSuffix(f.vertexai, "/")+"/v2/"+name, nil)
+	if err != nil {
+		return nil, 500, err.Error()
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, 503, "A retryable error occurred: the local Speech-to-Text endpoint did not answer: " + err.Error()
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+	var rec map[string]any
+	switch {
+	case resp.StatusCode == http.StatusNotFound:
+		return nil, 400, "The speech recognizer " + name + " doesn't exist"
+	case resp.StatusCode != http.StatusOK || json.Unmarshal(b, &rec) != nil:
+		return nil, 500, fmt.Sprintf("Cannot read the speech recognizer %s: the local Speech-to-Text endpoint answered %d", name, resp.StatusCode)
+	case rec["state"] == "DELETED":
+		return nil, 400, "The speech recognizer " + name + " is deleted"
+	}
+	return rec, 0, ""
+}
+
+// recognizerConfig is a recognizer's default_recognition_config with
+// recognition_config, if any, merged over it field by field, as JSON.
+func (f front) recognizerConfig(ctx context.Context, name, raw string) (string, int, string) {
+	rec, code, msg := f.getRecognizer(ctx, name)
+	if code != 0 {
+		return "", code, msg
+	}
+	base, _ := rec["defaultRecognitionConfig"].(map[string]any)
+	if base == nil {
+		base = map[string]any{}
+	}
+	if raw != "" {
+		var over any
+		if json.Unmarshal([]byte(raw), &over) != nil {
+			return "", 400, "Invalid recognition_config: it is not a JSON object"
+		}
+		m, ok := speechconfig.CamelKeys(over).(map[string]any)
+		if !ok {
+			return "", 400, "Invalid recognition_config: it is not a JSON object"
+		}
+		mergeJSONObjects(base, m)
+	}
+	b, _ := json.Marshal(base)
+	return string(b), 0, ""
+}
+
+// mergeJSONObjects sets each field of src over dst, merging objects.
+func mergeJSONObjects(dst, src map[string]any) {
+	for k, v := range src {
+		if sm, ok := v.(map[string]any); ok {
+			if dm, ok := dst[k].(map[string]any); ok {
+				mergeJSONObjects(dm, sm)
+				continue
+			}
+		}
+		dst[k] = v
+	}
 }
 
 // durationKeys are the RecognizeResponse fields that are Durations.

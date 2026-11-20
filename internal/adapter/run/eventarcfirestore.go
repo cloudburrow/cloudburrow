@@ -75,11 +75,18 @@ func documentCollection(f *functionspb.EventFilter) string {
 // CLI watches.
 func FirestoreWatches() []FirestoreWatch {
 	eaState.mu.Lock()
-	defer eaState.mu.Unlock()
+	specs := map[string]*functionspb.EventTrigger{}
+	for name, x := range eaState.triggers {
+		specs[name] = x.live.spec
+	}
+	eaState.mu.Unlock()
+	// A 2nd-gen function's own Firestore trigger is watched too (#1853).
+	for _, live := range functionTriggers() {
+		specs[live.spec.GetTrigger()] = live.spec
+	}
 	seen := map[FirestoreWatch]bool{}
 	var out []FirestoreWatch
-	for name, x := range eaState.triggers {
-		spec := x.live.spec
+	for name, spec := range specs {
 		if !isFirestoreType(spec.GetEventType()) {
 			continue
 		}

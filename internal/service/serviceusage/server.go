@@ -16,9 +16,11 @@
 // CloudBurrow serves no such API. Answering ENABLED for an API nothing
 // serves would let a module apply and then fail at its first call.
 //
-// Disabling an API in the catalogue is stored and reported (state DISABLED)
-// but not enforced: the API keeps answering, as IAM policies are stored and
-// not enforced (ADR-0006). docs/serviceusage.md says so.
+// Disabling an API in the catalogue is stored, reported (state DISABLED)
+// and enforced (#1914): Disabled is the decision internal/apienable's
+// gates ask, so a call to the API in that project fails with Google's
+// SERVICE_DISABLED. An API that enabled APIs depend on (Dependents) is
+// disabled only with disableDependentServices, and then with them.
 //
 // Every change happens before the call returns, so each operation is
 // returned done, and operations.get answers it afterwards; operations.list
@@ -43,6 +45,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cloudburrow/cloudburrow/internal/apienable"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"github.com/cloudburrow/cloudburrow/internal/store"
@@ -54,6 +57,9 @@ type API struct {
 	Name string
 	// Title is the API's display name, as Google titles it.
 	Title string
+	// Disabled marks an API a project starts without, as Google's
+	// Container Scanning API is until enabled (#1912).
+	Disabled bool
 }
 
 // Unserved is an API CloudBurrow can serve but this instance does not: the
@@ -91,6 +97,10 @@ type Server struct {
 	// Observe, if set, is called once per request with the method name and
 	// the answer's HTTP status.
 	Observe func(method string, code int)
+	// Dependents names, for an API, the catalogued APIs that depend on it
+	// (Google's service dependencies), which disabling it disables too
+	// with disableDependentServices, and refuses without.
+	Dependents map[string][]string
 }
 
 // NewServer serves catalog at addr once started. unserved names the APIs
@@ -298,7 +308,7 @@ func (s *Server) route(r *http.Request) (string, any, error) {
 		default:
 			return "serviceusage.services.disable", nil, invalid("Invalid value at 'check_if_service_has_usage' (%q)", req.CheckIfServiceHasUsage)
 		}
-		out, err := s.disable(project, svc)
+		out, err := s.disableWith(project, svc, req.DisableDependentServices)
 		return "serviceusage.services.disable", out, err
 	}
 	return "", nil, errorf(http.StatusNotFound, "NOT_FOUND", "%s %s is not a Service Usage API v1 method", r.Method, r.URL.Path)
@@ -363,7 +373,26 @@ func (s *Server) state(st states, name string) string {
 	if v := st[name]; v != "" {
 		return v
 	}
+	if s.byName[name].Disabled {
+		return "DISABLED"
+	}
 	return "ENABLED"
+}
+
+// Enabled reports whether an API is enabled in a project, for the services
+// that act on it (Artifact Registry's scanning reads the Container
+// Scanning API's state, #1912).
+func (s *Server) Enabled(project, name string) bool {
+	if _, ok := s.byName[name]; !ok {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st, err := s.load(project)
+	if err != nil {
+		return false
+	}
+	return s.state(st, name) == "ENABLED"
 }
 
 func parent(project string) string {
@@ -530,7 +559,8 @@ func (s *Server) set(project string, names []string, state string) ([]any, error
 		return nil, err
 	}
 	for _, a := range apis {
-		if state == "ENABLED" {
+		// What differs from the API's default is stored.
+		if (state == "ENABLED") != a.Disabled {
 			delete(st, a.Name)
 		} else {
 			st[a.Name] = state
@@ -571,6 +601,14 @@ func (s *Server) batchEnable(project string, ids []string) (any, error) {
 }
 
 func (s *Server) disable(project, svc string) (any, error) {
+	return s.disableWith(project, svc, false)
+}
+
+// disableWith is services.disable. An API that enabled APIs depend on is
+// refused FAILED_PRECONDITION naming them, as Google refuses it, unless
+// dependents is set: then it and every enabled API that depends on it,
+// directly or through another, are disabled together.
+func (s *Server) disableWith(project, svc string, dependents bool) (any, error) {
 	if _, ok := s.byName[svc]; !ok {
 		// Not enabled, as nothing outside the catalogue ever is: Google
 		// answers a disable of a disabled service with a done operation.
@@ -581,11 +619,108 @@ func (s *Server) disable(project, svc string) (any, error) {
 		_, err := s.lookup(svc)
 		return nil, err
 	}
-	out, err := s.set(project, []string{svc}, "DISABLED")
+	s.mu.Lock()
+	st, err := s.load(project)
+	s.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	active := s.activeDependents(st, svc)
+	if len(active) > 0 && !dependents {
+		return nil, errorf(http.StatusBadRequest, "FAILED_PRECONDITION",
+			"The service %s is depended on by the following active service(s): %s; Please specify disable_dependent_services=true if you want to proceed with disabling all services.",
+			svc, strings.Join(active, ","))
+	}
+	out, err := s.set(project, append([]string{svc}, active...), "DISABLED")
 	if err != nil {
 		return nil, err
 	}
 	return s.done(project, svc, "DisableServiceResponse", map[string]any{"service": out[0]}), nil
+}
+
+// activeDependents is every enabled catalogued API that depends on svc,
+// directly or through another, sorted.
+func (s *Server) activeDependents(st states, svc string) []string {
+	seen := map[string]bool{svc: true}
+	var out []string
+	queue := []string{svc}
+	for len(queue) > 0 {
+		next := queue[0]
+		queue = queue[1:]
+		for _, d := range s.Dependents[next] {
+			if seen[d] {
+				continue
+			}
+			seen[d] = true
+			if _, ok := s.byName[d]; !ok || s.state(st, d) != "ENABLED" {
+				continue
+			}
+			out = append(out, d)
+			queue = append(queue, d)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// Disabled is whether svc is disabled in project, an ID or a number
+// (apienable.Decider): the decision every gate asks (#1914). A project
+// nothing knows by its number, and an API outside the catalogue (which
+// no gate serves), are never disabled here.
+func (s *Server) Disabled(_ context.Context, project, svc string) (apienable.Denial, bool) {
+	a, ok := s.byName[svc]
+	if !ok || project == "" {
+		return apienable.Denial{}, false
+	}
+	id, err := s.project(project)
+	if err != nil {
+		return apienable.Denial{}, false
+	}
+	s.mu.Lock()
+	st, err := s.load(id)
+	s.mu.Unlock()
+	if err != nil || s.state(st, svc) != "DISABLED" {
+		return apienable.Denial{}, false
+	}
+	return apienable.Denial{Service: svc, Title: a.Title, Number: resource.ProjectNumber(id)}, true
+}
+
+// DisabledSnapshot is every project with a disabled API, which the
+// servers in the cluster ask for (apienable.Path).
+func (s *Server) DisabledSnapshot() (apienable.Snapshot, error) {
+	snap := apienable.Snapshot{Projects: []apienable.Project{}, Titles: map[string]string{}}
+	for _, a := range s.catalog {
+		snap.Titles[a.Name] = a.Title
+	}
+	if s.st == nil {
+		return snap, nil
+	}
+	keys, err := s.st.List(keyPrefix)
+	if err != nil {
+		return snap, err
+	}
+	sort.Strings(keys)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, k := range keys {
+		id := strings.TrimPrefix(k, keyPrefix)
+		st, err := s.load(id)
+		if err != nil {
+			return snap, err
+		}
+		var off []string
+		for name, state := range st {
+			if state == "DISABLED" {
+				off = append(off, name)
+			}
+		}
+		if len(off) == 0 {
+			continue
+		}
+		sort.Strings(off)
+		snap.Projects = append(snap.Projects, apienable.Project{ID: id, Number: resource.ProjectNumber(id), Disabled: off})
+	}
+	return snap, nil
 }
 
 // done records a finished operation and returns it.
@@ -714,6 +849,17 @@ func (s *Server) operation(name string) (any, error) {
 		return op, nil
 	}
 	return nil, errorf(http.StatusNotFound, "NOT_FOUND", "Operation %s not found", name)
+}
+
+// Unserved returns the APIs CloudBurrow could serve with another
+// configuration, by name, with the reason this instance does not: the
+// console's API Library shows them as not available here.
+func (s *Server) Unserved() map[string]string {
+	out := make(map[string]string, len(s.unserved))
+	for k, v := range s.unserved {
+		out[k] = v
+	}
+	return out
 }
 
 // Catalog returns the served APIs, sorted by name.

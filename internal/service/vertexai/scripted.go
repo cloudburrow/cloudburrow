@@ -30,6 +30,11 @@ type ScriptedGenerator struct {
 	Seen    func(Request)
 	// Finish, if set, is the final chunk's finish reason instead of STOP.
 	Finish string
+	// Calls, if set, are function calls emitted after the chunks, as the
+	// runtime parses them from the model's tool-call syntax (#1937).
+	Calls []FunctionCall
+	// Usage, if set, is the final chunk's token accounting.
+	Usage *Usage
 }
 
 // Model implements Generator.
@@ -66,12 +71,19 @@ func (g *ScriptedGenerator) Generate(ctx context.Context, req Request) (<-chan C
 				return
 			}
 		}
+		if len(g.Calls) > 0 {
+			select {
+			case out <- Chunk{ToolCalls: g.Calls}:
+			case <-ctx.Done():
+				return
+			}
+		}
 		if g.Err != nil {
 			genErr = g.Err
 			return
 		}
 		select {
-		case out <- Chunk{Last: true, FinishReason: finish}:
+		case out <- Chunk{Last: true, FinishReason: finish, Usage: g.Usage}:
 		case <-ctx.Done():
 		}
 	}()
@@ -103,4 +115,58 @@ func (g *EchoGenerator) Generate(ctx context.Context, req Request) (<-chan Chunk
 	}
 	g2 := &ScriptedGenerator{ID: g.ID, Chunks: chunks}
 	return g2.Generate(ctx, req)
+}
+
+// CountingGenerator is a ScriptedGenerator with a tokenizer, so a test can
+// reach countTokens and computeTokens (#1937, #1962) without a model. Its
+// count is Count's, or one token per whitespace-separated word of the
+// conversation's text; computeTokens gives each word a token, numbered from
+// one in order. Options must be set for the API to use it.
+type CountingGenerator struct {
+	*ScriptedGenerator
+	Count func(Request) int
+}
+
+// CountTokens implements TokenCounter.
+func (g *CountingGenerator) CountTokens(_ context.Context, req Request) (int, error) {
+	if g.Count != nil {
+		return g.Count(req), nil
+	}
+	n := 0
+	var walk func(v any)
+	walk = func(v any) {
+		switch x := v.(type) {
+		case string:
+			n += len(strings.Fields(x))
+		case map[string]any:
+			for _, e := range x {
+				walk(e)
+			}
+		case []any:
+			for _, e := range x {
+				walk(e)
+			}
+		case []map[string]any:
+			for _, e := range x {
+				walk(e)
+			}
+		}
+	}
+	if c := req.Conversation; c != nil {
+		walk(c.Preface)
+		walk(c.Message)
+	}
+	return n, nil
+}
+
+// ComputeTokens implements TokenCounter.
+func (g *CountingGenerator) ComputeTokens(_ context.Context, texts []string) ([]TokenInfo, error) {
+	out := make([]TokenInfo, len(texts))
+	for i, t := range texts {
+		for j, w := range strings.Fields(t) {
+			out[i].IDs = append(out[i].IDs, int64(j+1))
+			out[i].Tokens = append(out[i].Tokens, []byte(w))
+		}
+	}
+	return out, nil
 }

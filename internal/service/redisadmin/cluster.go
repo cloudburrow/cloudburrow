@@ -154,6 +154,14 @@ type clusterRecord struct {
 	// encryption (#1549); "" for none.
 	TransitCA    string `json:"transitCa,omitempty"`
 	TransitCAKey string `json:"transitCaKey,omitempty"`
+	// ServerCAMode is server_ca_mode as asked, "" for the default;
+	// ServerCAPool the customer's CA pool, whose certificates TransitCA
+	// then holds, with no TransitCAKey (clusterca.go, #1907).
+	ServerCAMode string `json:"serverCaMode,omitempty"`
+	ServerCAPool string `json:"serverCaPool,omitempty"`
+	// CertsIssued is when the nodes' server certificates were last
+	// rotated, by the Memorystore clock (clustercertrotation.go, #1918).
+	CertsIssued time.Time `json:"certsIssued,omitempty"`
 	// AdminPassword is the nodes' default user's password with token auth
 	// (clusterauth.go) or IAM auth (iamauth.go): only the admin plane's;
 	// "" for none.
@@ -227,6 +235,14 @@ type clusters struct {
 	// iam is IAM auth's token source and bookkeeping (iamauth.go); nil
 	// until UseIAM.
 	iam *iamState
+	// cas is Certificate Authority Service, for customer-managed CAs, nil
+	// until UseClusterCAS; shared are the shared CAs, by project/region
+	// (clusterca.go).
+	cas    ClusterCAS
+	shared map[string]sharedRecord
+	// rotating are the clusters whose certificates are being rotated
+	// (clustercertrotation.go).
+	rotating map[string]bool
 }
 
 // ClusterServer implements clusterpb.CloudRedisClusterServer.
@@ -251,10 +267,11 @@ func (s *Server) EnableClusters(ctx context.Context, rt ClusterRuntime, dial Clu
 	if s.created == nil {
 		panic("redisadmin: EnableClusters before EnableCreate")
 	}
-	s.clusters = &clusters{rt: rt, dial: dial, db: db, api: s, now: time.Now, bg: ctx,
+	s.clusters = &clusters{rt: rt, dial: dial, db: db, api: s, now: s.now, bg: ctx,
 		byName: map[string]*clusterRecord{}, busy: map[string]string{}}
 	go s.clusters.autoBackups(ctx)
 	go s.clusters.maintenanceLoop(ctx)
+	go s.clusters.watchClusters(ctx, healthEvery)
 }
 
 const clusterPrefix = "clusters/"
@@ -502,8 +519,11 @@ func (s *ClusterServer) GetClusterCertificateAuthority(ctx context.Context, req 
 	if err != nil {
 		return nil, err
 	}
-	ca := r.TransitCA
+	ca, pool := r.TransitCA, r.ServerCAPool
 	c.mu.Unlock()
+	if pool != "" {
+		return nil, apierror.FailedPrecondition("GetClusterCertificateAuthority not supported for customer-managed CAs")
+	}
 	if ca == "" {
 		return nil, apierror.FailedPrecondition("cluster %s has no certificate authority: its transit_encryption_mode is TRANSIT_ENCRYPTION_MODE_DISABLED", name)
 	}
@@ -536,6 +556,9 @@ func (c *clusters) render(r *clusterRecord) *clusterpb.Cluster {
 	}
 	if r.TransitCA != "" {
 		out.TransitEncryptionMode = clusterpb.TransitEncryptionMode_TRANSIT_ENCRYPTION_MODE_SERVER_AUTHENTICATION
+	}
+	if r.Valkey == nil {
+		r.renderServerCA(out)
 	}
 	if r.KmsKey != "" {
 		out.KmsKey = proto.String(r.KmsKey)
@@ -655,6 +678,7 @@ func (r *clusterRecord) spec(server string) Spec {
 	cfg := serverConfigs(r.RedisConfigs)
 	tls := func(s Spec) Spec {
 		s.TransitCA, s.TransitCAKey, s.TransitTrust = r.TransitCA, r.TransitCAKey, r.TransitCA
+		s.ServerCAPool = r.ServerCAPool
 		if s.TransitCA != "" {
 			// Cross-instance replication's members' CAs (crossinstance.go).
 			s.TransitTrust += r.peerCAs()
@@ -813,17 +837,22 @@ func (s *ClusterServer) CreateCluster(ctx context.Context, req *clusterpb.Create
 	if err != nil {
 		return nil, err
 	}
-	if tlsOn {
-		if r.TransitCA, r.TransitCAKey, err = newCA(id, c.now()); err != nil {
-			return nil, apierror.Internal(err, "create the CA of cluster %s", name)
-		}
+	if err := c.serverCA(ctx, r, in, m[1], m[2], tlsOn, "cluster"); err != nil {
+		return nil, err
 	}
 	for _, p := range in.GetPscConfigs() {
 		r.PscConfigs = append(r.PscConfigs, p.GetNetwork())
 	}
 	keepJSON(&r.Persistence, in.GetPersistenceConfig())
+	if err := clusterZoneDist(in.GetZoneDistributionConfig()).check(m[2]); err != nil {
+		return nil, err
+	}
 	keepJSON(&r.ZoneDistribution, in.GetZoneDistributionConfig())
-	keepJSON(&r.Maintenance, in.GetMaintenancePolicy())
+	mp, err := clusterMaintenancePolicy(in.GetMaintenancePolicy(), time.Time{}, r.Created)
+	if err != nil {
+		return nil, err
+	}
+	keepJSON(&r.Maintenance, mp)
 	for sh := 0; sh < int(r.ShardCount); sh++ {
 		for k := 0; k <= int(r.ReplicaCount); k++ {
 			r.Nodes = append(r.Nodes, &clusterNode{Server: clusterServerName(name, r.NextNode), Shard: sh, Primary: k == 0})
@@ -1025,6 +1054,13 @@ func (c *clusters) startNodes(ctx context.Context, r *clusterRecord, nodes []*cl
 			_, err = cl.Do(ctx, "CONFIG", "SET", "cluster-announce-hostname", host)
 			if err == nil {
 				_, err = cl.Do(ctx, "CONFIG", "SET", "cluster-preferred-endpoint-type", "hostname")
+			}
+		}
+		if z := r.nodeZone(n); err == nil && z != "" {
+			// The node's zone (zones.go, #1908), which HELLO returns;
+			// Valkey 7.2 has no availability-zone.
+			if _, zerr := cl.Do(ctx, "CONFIG", "SET", "availability-zone", z); zerr != nil && !strings.Contains(strings.ToLower(zerr.Error()), "unknown option") && !strings.Contains(strings.ToLower(zerr.Error()), "unsupported") {
+				err = zerr
 			}
 		}
 		if err == nil {
@@ -1465,6 +1501,8 @@ func (s *ClusterServer) UpdateCluster(ctx context.Context, req *clusterpb.Update
 			return nil, checkCrossCluster(true)
 		case "labels":
 			// Set by ClusterLabels, beside the transcoder.
+		case "rotate_server_certificate", "rotateServerCertificate":
+			set["rotate_server_certificate"] = in.GetRotateServerCertificate()
 		case "authorization_mode", "authorizationMode", "transit_encryption_mode", "transitEncryptionMode":
 			if p == "transit_encryption_mode" || p == "transitEncryptionMode" {
 				return nil, apierror.InvalidArgument("transit_encryption_mode cannot be changed once a cluster is created")
@@ -1521,13 +1559,24 @@ func (s *ClusterServer) UpdateCluster(ctx context.Context, req *clusterpb.Update
 		next.Persistence = ""
 		keepJSON(&next.Persistence, in.GetPersistenceConfig())
 	}
-	if set["zone_distribution_config"] {
-		next.ZoneDistribution = ""
-		keepJSON(&next.ZoneDistribution, in.GetZoneDistributionConfig())
+	if set["zone_distribution_config"] && !sameClusterZones(next.ZoneDistribution, in.GetZoneDistributionConfig()) {
+		// Immutable (#1908): a cluster's nodes stay in their zones.
+		return nil, apierror.InvalidArgument("zone_distribution_config cannot be changed once a cluster is created")
 	}
 	if set["maintenance_policy"] {
+		var created time.Time
+		if r.Maintenance != "" {
+			kept := &clusterpb.ClusterMaintenancePolicy{}
+			if json.Unmarshal([]byte(r.Maintenance), kept) == nil && kept.GetCreateTime() != nil {
+				created = kept.GetCreateTime().AsTime()
+			}
+		}
+		mp, err := clusterMaintenancePolicy(in.GetMaintenancePolicy(), created, c.now())
+		if err != nil {
+			return nil, err
+		}
 		next.Maintenance = ""
-		keepJSON(&next.Maintenance, in.GetMaintenancePolicy())
+		keepJSON(&next.Maintenance, mp)
 	}
 	authChange, oldPassword := false, r.AdminPassword
 	if set["authorization_mode"] {
@@ -1588,6 +1637,15 @@ func (s *ClusterServer) UpdateCluster(ctx context.Context, req *clusterpb.Update
 	if reshape && authChange {
 		return nil, apierror.InvalidArgument("authorization_mode is changed in an update of its own, not with shard_count or replica_count")
 	}
+	rotate := set["rotate_server_certificate"]
+	if rotate {
+		if r.ServerCAMode != clusterpb.ServerCaMode_SERVER_CA_MODE_CUSTOMER_MANAGED_CAS_CA.String() || r.TransitCA == "" {
+			return nil, errRotateNotCustomer
+		}
+		if reshape {
+			return nil, apierror.InvalidArgument("rotate_server_certificate is updated without shard_count or replica_count")
+		}
+	}
 	shards, replicas := next.ShardCount, next.ReplicaCount
 	next.ShardCount, next.ReplicaCount = r.ShardCount, r.ReplicaCount // until the nodes are
 	if err := c.save(&next); err != nil {
@@ -1595,7 +1653,7 @@ func (s *ClusterServer) UpdateCluster(ctx context.Context, req *clusterpb.Update
 	}
 	*r = next
 	op := c.newOperation(r.Name, "update")
-	if (syncACL || authChange) && !reshape {
+	if (syncACL || authChange || rotate) && !reshape {
 		// The policy's users on every node (aclpolicy.go), and the
 		// default user's password when IAM auth was turned on or off
 		// (iamauth.go), then done.
@@ -1605,7 +1663,15 @@ func (s *ClusterServer) UpdateCluster(ctx context.Context, req *clusterpb.Update
 		return s.api.launch(op, func() {
 			ctx, cancel := context.WithTimeout(c.bg, clusterWait)
 			defer cancel()
-			err := c.switchAuth(ctx, &snap, oldPassword, authChange, users, nodes)
+			var err error
+			if syncACL || authChange {
+				err = c.switchAuth(ctx, &snap, oldPassword, authChange, users, nodes)
+			}
+			if err == nil && rotate {
+				// On demand (clustercertrotation.go, #1918).
+				snap.Nodes = nodes
+				err = c.rotateCerts(ctx, &snap)
+			}
 			c.mu.Lock()
 			delete(c.busy, snap.Name)
 			out := c.render(r)

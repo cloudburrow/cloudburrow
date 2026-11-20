@@ -478,6 +478,17 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 				"Certificate Authority Service v1, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint"})
 	}
 
+	// The Kubernetes Engine API (#1913): gcloud container clusters and
+	// node-pools, and Terraform's google_container_* through
+	// container_custom_endpoint.
+	if gkeEnabled(cfg) && cfg.Endpoints.GKE != 0 {
+		ge := addr(cfg.Endpoints.GKE)
+		vars = append(vars,
+			envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_CONTAINER", "http://" + ge + "/", "read by gcloud; gcloud container clusters, node-pools and operations"},
+			envVar{cliEndpointVar("gke"), ge,
+				"the Kubernetes Engine API v1, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint"})
+	}
+
 	// Service Usage (#1352): gcloud services, and Terraform's
 	// google_project_service through service_usage_custom_endpoint.
 	if cfg.Endpoints.ServiceUsage > 0 {
@@ -487,6 +498,17 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 				"read by gcloud; gcloud services list, enable and disable"},
 			envVar{cliEndpointVar("serviceusage"), su,
 				"the Service Usage API v1, REST, plaintext; read by no client library: pass http://" + su + "/ to option.WithEndpoint"})
+	}
+
+	// The API Keys API (#1915): gcloud services api-keys, and Terraform's
+	// google_apikeys_key through apikeys_custom_endpoint.
+	if cfg.Endpoints.APIKeys > 0 {
+		ak := addr(cfg.Endpoints.APIKeys)
+		vars = append(vars,
+			envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_APIKEYS", "http://" + ak + "/",
+				"read by gcloud; gcloud services api-keys"},
+			envVar{cliEndpointVar("apikeys"), ak,
+				"the API Keys API v2, REST, plaintext; read by no client library: pass http://" + ak + "/ to option.WithEndpoint"})
 	}
 
 	// Resource Manager (#298). gcloud reads the override; the client
@@ -608,8 +630,10 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 		// started with --port-base exported the default 9021.
 		"memorystore-admin": &e.MemorystoreAdmin,
 		"serviceusage":      &e.ServiceUsage,
+		"apikeys":           &e.APIKeys,
 		"backupdr":          &e.BackupDR,
 		"privateca":         &e.PrivateCA,
+		"gke":               &e.GKE,
 		"onnx":              &e.ONNX,
 		"tfconvert":         &e.TFConvert,
 		// The ingress gateway, which kind publishes where `up` configured

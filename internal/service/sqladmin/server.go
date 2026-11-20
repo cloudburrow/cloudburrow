@@ -100,11 +100,17 @@ type Server struct {
 	ops map[string]map[string]any // by operation name
 	// opOrder is creation order, for operations.list.
 	opOrder []string
+	// opHooks run when finish ends their operation (#1924).
+	opHooks map[string]func(error)
 
 	srv *http.Server
 	ln  net.Listener
 	// conn is the connector path, nil unless EnableConnector was called.
 	conn *connector
+	// mssqlEULA is the acceptance of Microsoft's SQL Server licence `up`
+	// was given for every SQL Server instance (#1916), nil for none;
+	// guarded by emu.
+	mssqlEULA *EULAAcceptance
 	// writes are the created instances, nil unless EnableInstanceWrites
 	// was called; emu guards them.
 	emu    sync.RWMutex
@@ -143,6 +149,9 @@ type Server struct {
 	servers sync.Map
 	// bgs are the blue-green deployments (#1614); emu guards them.
 	bgs map[string]*blueGreen
+	// Wrap, when set before Start, wraps the API's handler: the gate
+	// refusing calls in a project where the API is disabled (#1914).
+	Wrap func(http.Handler) http.Handler
 }
 
 // ServerOf is the name of instance name's server in the cluster: its own
@@ -193,7 +202,11 @@ func (s *Server) Start(context.Context) error {
 	}
 	// Loopback-only, but a rebound or cross-site page reaches
 	// loopback too (#676, #1586).
-	s.srv = &http.Server{Handler: hostguard.Wrap(s), ReadHeaderTimeout: 10 * time.Second}
+	var h http.Handler = s
+	if s.Wrap != nil {
+		h = s.Wrap(h)
+	}
+	s.srv = &http.Server{Handler: hostguard.Wrap(h), ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = s.srv.Serve(ln) }()
 	return nil
 }
@@ -334,16 +347,17 @@ const instanceWhy = "this server was started without instance writes (docs/cloud
 // The reasons the instance methods CloudBurrow cannot serve faithfully are
 // refused (#1462): each names what is missing.
 const (
-	sqlServerWhy = "it is a SQL Server feature, and CloudBurrow runs PostgreSQL and MySQL servers only"
+	sqlServerFeatureWhy = "it is a SQL Server feature that CloudBurrow's SQL Server instances (#1916) do not have: " +
+		"they run Microsoft's container image with SQL authentication only"
 )
 
 // verbWhy is why an instance method other than restart is not served.
 func verbWhy(verb string) string {
 	switch verb {
 	case "acquireSsrsLease", "releaseSsrsLease":
-		return "SQL Server Reporting Services leases: " + sqlServerWhy
+		return "SQL Server Reporting Services leases: " + sqlServerFeatureWhy
 	case "listEntraIdCertificates", "addEntraIdCertificate", "rotateEntraIdCertificate":
-		return "Microsoft Entra ID authentication: " + sqlServerWhy
+		return "Microsoft Entra ID authentication: " + sqlServerFeatureWhy
 	}
 	return "beneath an instance only databases, users, backupRuns, connectSettings, restart, restoreBackup and clone are served; " +
 		"see docs/cloudsql.md for what is served"
@@ -421,6 +435,11 @@ func (s *Server) route(r *http.Request, base string, p []string) (string, any, e
 			e = nil // another project's
 		}
 		s.emu.RUnlock()
+	}
+	if e == nil && len(rest) == 3 && rest[2] == "restoreBackup" && r.Method == http.MethodPost {
+		// A restore to a new instance (#1922): a backup by name makes it.
+		out, err := s.restoreToNewInstance(r, base, project, name)
+		return "sql.instances.restoreBackup", out, err
 	}
 	if e == nil {
 		return "sql.instances.get", nil, Errorf(http.StatusNotFound, "The Cloud SQL instance does not exist. "+

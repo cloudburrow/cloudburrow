@@ -337,6 +337,9 @@ func (s *Server) takeBackup(base, project string, e Engine, typ, description str
 // takeBackupRun is takeBackup, returning the run's ID and, with backupDR,
 // marking it the Backup and DR Service's.
 func (s *Server) takeBackupRun(base, project string, e Engine, typ, description string, backupDR bool) (map[string]any, string, error) {
+	if err := sqlServerEngine(e, "a backup"); err != nil {
+		return nil, "", err
+	}
 	b := s.backups
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	b.mu.Lock()
@@ -466,6 +469,9 @@ func retainedBackups(spec Spec) int {
 // restoreBackup is instances.restoreBackup: the backup run, of this
 // instance or another of the same engine, is loaded into this instance.
 func (s *Server) restoreBackup(r *http.Request, base, project string, e Engine) (any, error) {
+	if err := sqlServerEngine(e, "restoring a backup"); err != nil {
+		return nil, err
+	}
 	b := s.backups
 	if b == nil {
 		return nil, s.noBackups("instances.restoreBackup")
@@ -539,6 +545,9 @@ func (s *Server) restoreBackup(r *http.Request, base, project string, e Engine) 
 	prev := s.setState(e.Instance(), "MAINTENANCE")
 	op := s.pending(base, project, e.Instance(), "RESTORE_VOLUME")
 	id := op["name"].(string)
+	if body.BackupdrBackup != "" {
+		s.logRestore(id, "RESTORE", body.BackupdrBackup, project, e.Instance(), "")
+	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), startTimeout)
 		defer cancel()
@@ -615,8 +624,8 @@ func (s *Server) cloneInstance(r *http.Request, base, project string, e Engine) 
 	s.emu.RUnlock()
 	spec.Name, spec.Project, spec.DatabaseVersion = dest, project, e.DatabaseVersion()
 	spec.CreateTime, spec.SettingsVersion, spec.DeletionProtection = time.Now().UTC().Format(time.RFC3339Nano), 1, false
-	if legacyMySQL(spec.DatabaseVersion) {
-		return nil, legacyUnimplemented("instances.clone")
+	if err := limitedUnimplemented(spec.DatabaseVersion, "instances.clone"); err != nil {
+		return nil, err
 	}
 	if !SupportedVersions[spec.DatabaseVersion] {
 		return nil, unimplemented("cloning a "+spec.DatabaseVersion+" instance", unservedVersionWhy(spec.DatabaseVersion))

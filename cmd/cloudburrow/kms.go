@@ -15,6 +15,7 @@ import (
 
 	"google.golang.org/grpc"
 
+	"github.com/cloudburrow/cloudburrow/internal/apienable"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/k8s"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
@@ -40,6 +41,9 @@ type kmsService struct {
 	// (#314), then fault injection (#306), so the log sees injected faults
 	// (#392).
 	interpose []grpc.UnaryServerInterceptor
+	// apiGate refuses calls in a project where the API is disabled
+	// (#1914); nil refuses none.
+	apiGate apienable.Decider
 	// requests reports each JSON request to the admin event log (#414).
 	requests func(rest.Request)
 	// wrapJSON wraps the JSON API (IAM enforcement, #1879); nil is none.
@@ -178,6 +182,7 @@ func (s *kmsService) Start(ctx context.Context) error {
 	}
 	addr := net.JoinHostPort(s.cfg.BindAddress, strconv.Itoa(s.cfg.Endpoints.KMS))
 	s.server = grpctransport.New(addr)
+	s.server.Gate(s.apiGate, "cloudkms.googleapis.com")
 	s.server.Observe(s.calls)
 	for _, i := range s.interpose {
 		s.server.Interpose(i)
@@ -333,6 +338,12 @@ func printKMSWarning(w io.Writer, s *kmsService) {
 // keys against this process's Cloud KMS (#1881): both are served.
 func firestoreKMS(cfg config.Config) bool {
 	return serviceEnabled(cfg, config.ServiceFirestore) && serviceEnabled(cfg, config.ServiceKMS)
+}
+
+// storageKMS reports whether Cloud Storage's customer-managed keys (#1938)
+// encrypt through this instance's Cloud KMS.
+func storageKMS(cfg config.Config) bool {
+	return serviceEnabled(cfg, config.ServiceStorage) && serviceEnabled(cfg, config.ServiceKMS)
 }
 
 // pinKMSPort chooses Cloud KMS's port now when it is OS-assigned (0), so

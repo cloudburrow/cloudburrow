@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
 )
 
 // allOf is detailAll's page, every action in d.Actions, for the tests that
@@ -128,8 +129,10 @@ func TestCloudSQLConsoleCreatePage(t *testing.T) {
 	defer ts.Close()
 	p := cloudSQLInstancesProvider{endpoint: strings.TrimPrefix(ts.URL, "http://"), versions: []string{"POSTGRES_16", "POSTGRES_17", "MYSQL_8_0", "MYSQL_8_4"}}
 	label, fields := p.CreateForm()
-	if label != "Create Instance" || p.CreateTitle() != "Create an instance" {
-		t.Errorf("label %q, title %q", label, p.CreateTitle())
+	// Google's Instances page has Create instance, its page ends in Create
+	// Instance (docs.cloud.google.com/sql/docs/mysql/create-instance, #1933).
+	if label != "Create instance" || p.CreateTitle() != "Create an instance" || p.CreateSubmit() != "Create Instance" {
+		t.Errorf("label %q, title %q, submit %q", label, p.CreateTitle(), p.CreateSubmit())
 	}
 	by := map[string]console.Field{}
 	for _, f := range fields {
@@ -158,8 +161,60 @@ func TestCloudSQLConsoleCreatePage(t *testing.T) {
 			t.Errorf("instances.insert body %s lacks %s", body, want)
 		}
 	}
-	if _, err := p.Create(ctx, "proj", map[string]string{"engine": "SQL Server", "name": "ss"}); err == nil || !strings.Contains(err.Error(), "not available locally") {
-		t.Errorf("SQL Server create = %v", err)
+	if _, err := p.Create(ctx, "proj", map[string]string{"engine": "SQL Server", "name": "ss"}); err == nil || !strings.Contains(err.Error(), "SQL Server version") {
+		t.Errorf("SQL Server create with no version = %v", err)
+	}
+}
+
+// TestCloudSQLConsoleSQLServer (#1916): with the Admin API served, SQL
+// Server is choosable, its versions name the local edition, and the
+// licence checkbox links Microsoft's terms; a create sends the acceptance
+// header only when the checkbox is checked.
+func TestCloudSQLConsoleSQLServer(t *testing.T) {
+	var header, body string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		body, header = string(b), r.Header.Get(sqladmin.EULAHeader)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"name":"op","status":"DONE"}`)
+	}))
+	defer ts.Close()
+	p := cloudSQLInstancesProvider{endpoint: strings.TrimPrefix(ts.URL, "http://"),
+		versions: append([]string{"POSTGRES_17"}, sqladmin.SQLServerVersions()...)}
+	_, fields := p.CreateForm()
+	by := map[string]console.Field{}
+	for _, f := range fields {
+		by[f.Name] = f
+	}
+	if f := by["engine"]; len(f.DisabledOptions) != 0 || f.OptionLabels["SQL Server"] != "SQL Server" {
+		t.Errorf("engine %+v", f)
+	}
+	v := by["sqlserverVersion"]
+	if len(v.Options) != 15 || v.Default != "SQLSERVER_2022_STANDARD" || v.VisibleWhen["engine"] != "SQL Server" ||
+		v.OptionLabels["SQLSERVER_2022_STANDARD"] != "SQL Server 2022 Standard (runs Developer locally)" ||
+		v.OptionLabels["SQLSERVER_2019_EXPRESS"] != "SQL Server 2019 Express" ||
+		v.OptionLabels["SQLSERVER_2025_ENTERPRISE"] != "SQL Server 2025 Enterprise (runs Enterprise Developer locally)" {
+		t.Errorf("SQL Server versions %+v", v)
+	}
+	eula := by["mssqlEula"]
+	if eula.Type != "checkbox" || eula.Default == "true" || len(eula.Links) != 2 || eula.Links[0].URL != sqladmin.MSSQLEULAURL {
+		t.Errorf("licence checkbox %+v", eula)
+	}
+	ctx := context.Background()
+	in := map[string]string{"engine": "SQL Server", "sqlserverVersion": "SQLSERVER_2019_WEB", "name": "ss", "rootPassword": "Str0ng!pw",
+		"pitr": "true", "backupsEnabled": "true"}
+	if _, err := p.Create(ctx, "proj", in); err != nil {
+		t.Fatal(err)
+	}
+	if header != "" || !strings.Contains(body, `"databaseVersion":"SQLSERVER_2019_WEB"`) || strings.Contains(body, "backupConfiguration") {
+		t.Errorf("unchecked: header %q, body %s", header, body)
+	}
+	in["mssqlEula"] = "true"
+	if _, err := p.Create(ctx, "proj", in); err != nil {
+		t.Fatal(err)
+	}
+	if header != "Y" {
+		t.Errorf("checked: header %q", header)
 	}
 }
 

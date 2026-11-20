@@ -65,6 +65,7 @@ var emulatorOnly = map[string]string{
 	"memorystore-clusters": "a Redis Cluster of Valkey servers; there is no in-process one (TestConsoleRedisCluster drives the page)",
 	"memorystore-valkey":   "Valkey servers per instance; there is no in-process one (TestConsoleValkeyInstances drives the page over fake nodes)",
 	"bigquery":             "goccy/bigquery-emulator is a container built on ZetaSQL; there is no in-process fake",
+	"k8sobjects":           "Object Browser lists kubectl api-resources, which the fake kubectl does not serve (TestGKEObjectBrowserParsesAPIResources)",
 	"bigquery-jobs":        "BigQuery's Job history reads the same emulator, through the validating front",
 	"eventarc":             "a trigger needs Pub/Sub, its transport, which this test does not run (TestEventarcTriggersPageThroughTheBrowser drives the page)",
 	"run-domains":          "the Cloud Run Admin API v1's domain mappings, which this test's in-process adapter does not serve over HTTP (TestCloudRunGooglePagesThroughTheBrowser drives the page)",
@@ -615,7 +616,7 @@ var kubeFixtures = map[string]string{
 	     "labels":{"serving.knative.dev/service":"pending-svc"}},
 	   "spec":{"containers":[{"image":"example.invalid/app:1"}]},
 	   "status":{}}]}`,
-	"deployments,statefulsets,daemonsets,replicasets": `{"items":[
+	"deployments,statefulsets,daemonsets,replicasets,jobs,cronjobs": `{"items":[
 	  {"kind":"Deployment","metadata":{"name":"web","namespace":"default","creationTimestamp":"2026-01-01T00:00:00Z"},
 	   "spec":{"replicas":1,"strategy":{"type":"RollingUpdate"},"selector":{"matchLabels":{"app":"web"}},
 	     "template":{"spec":{"containers":[{"name":"web","image":"example.invalid/web:1"}]}}},
@@ -644,6 +645,21 @@ var kubeFixtures = map[string]string{
 	  {"kind":"PersistentVolumeClaim","metadata":{"name":"data","namespace":"default","creationTimestamp":"2026-01-01T00:00:00Z"},
 	   "spec":{"accessModes":["ReadWriteOnce"],"resources":{"requests":{"storage":"1Gi"}}},
 	   "status":{"phase":"Pending"}}]}`,
+	"secrets,configmaps": `{"items":[
+	  {"kind":"Secret","type":"Opaque","metadata":{"name":"creds","namespace":"default","creationTimestamp":"2026-01-01T00:00:00Z"},
+	   "data":{"password":"c2VjcmV0"}},
+	  {"kind":"ConfigMap","metadata":{"name":"settings","namespace":"default","creationTimestamp":"2026-01-01T00:00:00Z"},
+	   "data":{"mode":"fast"}}]}`,
+	"gateways.gateway.networking.k8s.io": `{"items":[
+	  {"kind":"Gateway","metadata":{"name":"edge","namespace":"default","creationTimestamp":"2026-01-01T00:00:00Z"},
+	   "spec":{"gatewayClassName":"example"}}]}`,
+	"ingresses": `{"items":[
+	  {"kind":"Ingress","metadata":{"name":"front","namespace":"default","creationTimestamp":"2026-01-01T00:00:00Z"},
+	   "spec":{"rules":[{"http":{"paths":[{"path":"/","backend":{"service":{"name":"web","port":{"number":80}}}}]}}]}}]}`,
+	"storageclasses": `{"items":[
+	  {"kind":"StorageClass","metadata":{"name":"standard","creationTimestamp":"2026-01-01T00:00:00Z"},
+	   "provisioner":"rancher.io/local-path","reclaimPolicy":"Delete","volumeBindingMode":"WaitForFirstConsumer"}]}`,
+	"persistentvolumes": `{"items":[]}`,
 	"events": `{"items":[
 	  {"kind":"Event","metadata":{"name":"web-1.1","namespace":"default","creationTimestamp":"2026-01-01T00:00:00Z"},
 	   "involvedObject":{"kind":"Pod","name":"web-1","namespace":"default"},

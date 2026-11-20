@@ -3,6 +3,12 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"encoding/hex"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -18,9 +24,13 @@ import (
 
 	kmspb "cloud.google.com/go/kms/apiv1/kmspb"
 	rmpb "cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
+	privatecapb "cloud.google.com/go/security/privateca/apiv1/privatecapb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/durationpb"
 
+	"github.com/cloudburrow/cloudburrow/internal/apienable"
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/components"
 	"github.com/cloudburrow/cloudburrow/internal/config"
@@ -46,7 +56,10 @@ type memorystoreAdminService struct {
 	storage   func() *netfwd.Forwarder
 	calls     grpctransport.Observer
 	interpose []grpc.UnaryServerInterceptor
-	requests  func(rest.Request)
+	// apiGate refuses calls in a project where the API is disabled
+	// (#1914); nil refuses none.
+	apiGate  apienable.Decider
+	requests func(rest.Request)
 	// events records what the service does on its own (an automatic
 	// failover, #1657) in /admin/events; nil records nothing.
 	events redisadmin.EventRecorder
@@ -56,6 +69,9 @@ type memorystoreAdminService struct {
 	prov   *memorystoreProvisioner
 	// kms is Cloud KMS, for customer_managed_key (#1463); nil without it.
 	kms *kmsService
+	// privateca is Certificate Authority Service, for a Redis cluster's
+	// customer-managed CA (#1907); nil without it.
+	privateca *privateCAService
 	// creds and registry are what IAM auth (#1614) checks a token
 	// against: the access tokens the instance minted, and the project's
 	// IAM policy; nil refuses every token.
@@ -137,7 +153,6 @@ func (s *memorystoreAdminService) Start(ctx context.Context) error {
 	s.prov = newMemorystoreProvisioner(s.cfg, bg)
 	s.prov.frontImage = s.frontImage
 	s.api.EnableCreate(bg, s.prov, redisadmin.Dial, db, nil)
-	s.api.PersistentMode(s.cfg.Mode == config.ModePersistent)
 	// Memorystore for Redis Cluster (#1519): a real Redis Cluster per
 	// cluster, its nodes Valkey servers in cluster mode.
 	s.api.EnableClusters(bg, s.prov, redisadmin.DialCluster, db)
@@ -160,6 +175,11 @@ func (s *memorystoreAdminService) Start(ctx context.Context) error {
 	}
 	// customer_managed_key (#1463) wraps each instance's data key with
 	// this instance's Cloud KMS, in process.
+	if s.privateca != nil {
+		cas := sqlAdminCAS{svc: s.privateca}
+		s.prov.cas = &cas
+		s.api.UseClusterCAS(memorystoreCAS{cas})
+	}
 	if s.kms != nil {
 		s.api.UseKMS(memorystoreKMS{svc: s.kms})
 	}
@@ -185,6 +205,7 @@ func (s *memorystoreAdminService) Start(ctx context.Context) error {
 	}()
 	addr := net.JoinHostPort(s.cfg.BindAddress, strconv.Itoa(s.cfg.Endpoints.MemorystoreAdmin))
 	s.server = grpctransport.New(addr)
+	s.server.Gate(s.apiGate, "redis.googleapis.com")
 	s.server.Observe(s.calls)
 	for _, i := range s.interpose {
 		s.server.Interpose(i)
@@ -273,6 +294,10 @@ type memorystoreProvisioner struct {
 	// clusterIPs are the cluster nodes' Services' cluster IPs, by server,
 	// the address a node announces to in-cluster clients (#1614).
 	clusterIPs map[string]string
+	// cas issues a Redis cluster's node certificates from its
+	// customer-managed CA pool (#1907); nil without Certificate Authority
+	// Service.
+	cas *sqlAdminCAS
 }
 
 func newMemorystoreProvisioner(cfg config.Config, bg context.Context) *memorystoreProvisioner {
@@ -327,7 +352,7 @@ func (p *memorystoreProvisioner) Provision(ctx context.Context, spec redisadmin.
 	}
 	settings := components.MemorystoreSettings{Name: spec.Server, Persistent: p.cfg.Mode == config.ModePersistent,
 		MaxMemory: spec.MaxMemory, Password: spec.Password, Settings: spec.Configs, RDBSeconds: spec.RDBSeconds,
-		ReplicaOf: spec.ReplicaOf, Image: memorystoreImages[spec.Version]}
+		NoPersistence: spec.NoPersistence, ReplicaOf: spec.ReplicaOf, Image: memorystoreImages[spec.Version]}
 	port := components.MemorystorePort
 	if tlsFiles != nil {
 		settings.TLSCert, settings.TLSKey, settings.TLSCA = tlsFiles.Cert, tlsFiles.Key, tlsFiles.CA
@@ -418,23 +443,7 @@ func (p *memorystoreProvisioner) StartClusterNode(ctx context.Context, spec redi
 		// In-transit encryption (#1549): TLS only, on the node's one port,
 		// with a certificate of the cluster's CA for the host's address,
 		// where clients reach the node, and the node's Service.
-		ns := p.cfg.Cluster.Namespace
-		services := []string{spec.Server}
-		if spec.PortName == redisadmin.ValkeyPortName {
-			// A CLUSTER_DISABLED node is also reached at its instance's
-			// role Services (#1614): a secondary of cross-instance
-			// replication replicates the primary Service.
-			base := memorystoreNodeNumber.ReplaceAllString(spec.Server, "")
-			services = append(services, base+"-primary", base+"-reader")
-		}
-		names := []string{p.cfg.BindAddress}
-		if clusterIP != "" {
-			names = append(names, "::1", clusterIP)
-		}
-		for _, n := range services {
-			names = append(names, n+"."+ns, n+"."+ns+".svc", n+"."+ns+".svc.cluster.local")
-		}
-		files, err := redisadmin.ServerTLS(spec, time.Now(), names...)
+		files, err := p.nodeTLS(ctx, spec, clusterIP)
 		if err != nil {
 			return "", "", 0, fmt.Errorf("issue %s a server certificate: %w", spec.Server, err)
 		}
@@ -467,6 +476,56 @@ func (p *memorystoreProvisioner) StartClusterNode(ctx context.Context, spec redi
 		_ = old.Stop(ctx)
 	}
 	return f.HostAddr(), strings.TrimSpace(ip), port, nil
+}
+
+// nodeTLS issues a cluster node a server certificate (#1549): of its
+// cluster's CA, or its customer-managed CA pool's (#1907), for the host's
+// address, where clients reach the node, its Service's cluster IP and its
+// Services' names.
+func (p *memorystoreProvisioner) nodeTLS(ctx context.Context, spec redisadmin.Spec, clusterIP string) (*redisadmin.TLSFiles, error) {
+	ns := p.cfg.Cluster.Namespace
+	services := []string{spec.Server}
+	if spec.PortName == redisadmin.ValkeyPortName {
+		// A CLUSTER_DISABLED node is also reached at its instance's
+		// role Services (#1614): a secondary of cross-instance
+		// replication replicates the primary Service.
+		base := memorystoreNodeNumber.ReplaceAllString(spec.Server, "")
+		services = append(services, base+"-primary", base+"-reader")
+	}
+	names := []string{p.cfg.BindAddress}
+	if clusterIP != "" {
+		names = append(names, "::1", clusterIP)
+	}
+	for _, n := range services {
+		names = append(names, n+"."+ns, n+"."+ns+".svc", n+"."+ns+".svc.cluster.local")
+	}
+	if spec.ServerCAPool != "" {
+		return p.poolTLS(ctx, spec, names)
+	}
+	return redisadmin.ServerTLS(spec, time.Now(), names...)
+}
+
+// StageNodeCert implements redisadmin.ClusterCertRotator (#1918): a running
+// node's next server certificate, issued as when it started, written into
+// its pod beside the first, for the node to load on CONFIG SET. The
+// certificates an earlier rotation wrote are removed first.
+func (p *memorystoreProvisioner) StageNodeCert(ctx context.Context, spec redisadmin.Spec) (string, string, error) {
+	p.mu.Lock()
+	clusterIP := p.clusterIPs[spec.Server]
+	p.mu.Unlock()
+	files, err := p.nodeTLS(ctx, spec, clusterIP)
+	if err != nil {
+		return "", "", fmt.Errorf("issue %s a server certificate: %w", spec.Server, err)
+	}
+	stamp := strconv.FormatInt(time.Now().UnixNano(), 36)
+	certFile := components.MemorystoreTLSDir + "/rotated-" + stamp + ".crt"
+	keyFile := components.MemorystoreTLSDir + "/rotated-" + stamp + ".key"
+	script := `set -e; umask 022; rm -f "$(dirname "$3")"/rotated-*; printf '%s' "$1" > "$3"; printf '%s' "$2" > "$4"; chmod 0644 "$3" "$4"`
+	if _, err := p.installer.Kubectl(ctx, "-n", p.cfg.Cluster.Namespace, "exec", "deploy/"+spec.Server, "--",
+		"sh", "-c", script, "sh", files.Cert, files.Key, certFile, keyFile); err != nil {
+		return "", "", fmt.Errorf("write %s's new server certificate: %w", spec.Server, err)
+	}
+	return certFile, keyFile, nil
 }
 
 // byFamily is whether cluster nodes serve host clients and in-cluster
@@ -851,4 +910,89 @@ func condTags(tags []*rmpb.EffectiveTag) []iamcond.Tag {
 		out = append(out, iamcond.Tag{NamespacedKey: t.GetNamespacedTagKey(), ShortValue: short, KeyID: t.GetTagKey(), ValueID: t.GetTagValue()})
 	}
 	return out
+}
+
+// memorystoreCAS is redisadmin.ClusterCAS over this instance's Certificate
+// Authority Service (#1907).
+type memorystoreCAS struct{ sqlAdminCAS }
+
+func (c memorystoreCAS) CACerts(ctx context.Context, pool string) ([]string, error) {
+	api, err := c.api()
+	if err != nil {
+		return nil, err
+	}
+	resp, err := api.FetchCaCerts(ctx, &privatecapb.FetchCaCertsRequest{CaPool: pool})
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, ch := range resp.GetCaCerts() {
+		out = append(out, ch.GetCertificates()...)
+	}
+	return out, nil
+}
+
+// poolTLS is a node's TLS files with a certificate its cluster's
+// customer-managed CA pool issued (#1907): a configuration-based request
+// for a fresh P-256 key, the node's names and addresses in the SANs; the
+// nodes trust the pool's CAs (spec.TransitCA).
+func (p *memorystoreProvisioner) poolTLS(ctx context.Context, spec redisadmin.Spec, names []string) (*redisadmin.TLSFiles, error) {
+	if p.cas == nil {
+		return nil, fmt.Errorf("node %s: its CA pool %s needs Certificate Authority Service, which this instance does not serve", spec.Server, spec.ServerCAPool)
+	}
+	k, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, err
+	}
+	pub, err := x509.MarshalPKIXPublicKey(&k.PublicKey)
+	if err != nil {
+		return nil, err
+	}
+	der, err := x509.MarshalPKCS8PrivateKey(k)
+	if err != nil {
+		return nil, err
+	}
+	dns := []string{"localhost", spec.Server}
+	ips := []string{"127.0.0.1", "::1"}
+	for _, n := range names {
+		if net.ParseIP(n) != nil {
+			ips = append(ips, n)
+		} else if n != "" {
+			dns = append(dns, n)
+		}
+	}
+	api, err := p.cas.api()
+	if err != nil {
+		return nil, err
+	}
+	b := make([]byte, 6)
+	_, _ = rand.Read(b)
+	cert, err := api.CreateCertificate(ctx, &privatecapb.CreateCertificateRequest{
+		Parent: spec.ServerCAPool, CertificateId: "memorystore-" + spec.Server + "-" + hex.EncodeToString(b),
+		Certificate: &privatecapb.Certificate{
+			Lifetime: durationpb.New(30 * 24 * time.Hour),
+			CertificateConfig: &privatecapb.Certificate_Config{Config: &privatecapb.CertificateConfig{
+				PublicKey: &privatecapb.PublicKey{Key: pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pub}), Format: privatecapb.PublicKey_PEM},
+				SubjectConfig: &privatecapb.CertificateConfig_SubjectConfig{
+					Subject:        &privatecapb.Subject{CommonName: spec.Server, Organization: "CloudBurrow"},
+					SubjectAltName: &privatecapb.SubjectAltNames{DnsNames: dns, IpAddresses: ips},
+				},
+				X509Config: &privatecapb.X509Parameters{
+					CaOptions: &privatecapb.X509Parameters_CaOptions{IsCa: proto.Bool(false)},
+					KeyUsage: &privatecapb.KeyUsage{
+						BaseKeyUsage:     &privatecapb.KeyUsage_KeyUsageOptions{DigitalSignature: true},
+						ExtendedKeyUsage: &privatecapb.KeyUsage_ExtendedKeyUsageOptions{ServerAuth: true, ClientAuth: true},
+					},
+				},
+			}},
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("node %s: issue its certificate from %s: %w", spec.Server, spec.ServerCAPool, err)
+	}
+	chain := cert.GetPemCertificate()
+	for _, c := range cert.GetPemCertificateChain() {
+		chain += c
+	}
+	return &redisadmin.TLSFiles{Cert: chain, Key: string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})), CA: spec.TransitCA}, nil
 }

@@ -10,9 +10,12 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
 )
 
 // backupDRProvider is the Backup and DR page (#1433): a project's backup
@@ -32,7 +35,7 @@ type backupDRProvider struct {
 }
 
 func (backupDRProvider) ID() string    { return "backupdr" }
-func (backupDRProvider) Title() string { return "Backup and DR" }
+func (backupDRProvider) Title() string { return "Backup vaults" }
 
 const backupDRNote = "Backup vaults hold the backups of the Cloud SQL instances their backup plans protect. " +
 	"A backup is a real dump of the instance's databases, restored by Cloud SQL; " +
@@ -114,12 +117,13 @@ func locationOf(name string) string {
 	return ""
 }
 
-// List implements console.Provider: the project's backup vaults.
+// List implements console.Provider: the project's backup vaults, Google's
+// Backup vaults page (#1844).
 func (p backupDRProvider) List(ctx context.Context, project string) (console.Listing, error) {
 	l := console.Listing{Columns: []string{"Location", "Backups", "Minimum enforced retention", "Access restriction"},
-		NameColumn: "Backup vault", Noun: "backup vaults", Note: backupDRNote}
+		NameColumn: "Backup vault", Noun: "backup vaults", Note: backupDRNote, AlwaysStatus: true}
 	if project == "" {
-		l.Prompt = "Backup and DR lists vaults per project. Choose one in the toolbar."
+		l.Prompt = "Backup vaults lists a project's vaults. Choose one in the toolbar."
 		return l, nil
 	}
 	out, err := p.get(ctx, "projects/"+project+"/locations/-/backupVaults")
@@ -131,25 +135,72 @@ func (p backupDRProvider) List(ctx context.Context, project string) (console.Lis
 		name := str(v, "name")
 		l.Items = append(l.Items, console.Resource{Name: lastSegment(name), Status: str(v, "state"), Fields: map[string]string{
 			"Location": locationOf(name), "Backups": str(v, "backupCount"),
-			"Minimum enforced retention": str(v, "backupMinimumEnforcedRetentionDuration"),
-			"Access restriction":         str(v, "accessRestriction")}})
+			"Minimum enforced retention": bdrDuration(str(v, "backupMinimumEnforcedRetentionDuration")),
+			"Access restriction":         bdrAccessLabels[str(v, "accessRestriction")]}})
 	}
 	l.Total = len(l.Items)
 	return l, nil
 }
 
-// CreateForm implements console.Creator: Create backup vault.
+// bdrAccessLabels are the access restrictions as Google's vault page words
+// them (https://docs.cloud.google.com/backup-disaster-recovery/docs/cloud-console/backup-vault-create).
+var bdrAccessLabels = map[string]string{"WITHIN_ORGANIZATION": "Restrict access to current organization",
+	"WITHIN_PROJECT": "Restrict access to current project", "UNRESTRICTED": "No restrictions",
+	"WITHIN_ORG_BUT_UNRESTRICTED_FOR_BA": "Restrict access to current organization, except for backup appliances"}
+
+// bdrMaxRetentionDays is Google's limit on the minimum enforced retention:
+// 0 days to 99 years.
+const bdrMaxRetentionDays = 99 * 365
+
+// CreateForm implements console.Creator: Google's Create a backup vault page.
 func (backupDRProvider) CreateForm() (string, []console.Field) {
 	return "Create backup vault", []console.Field{
-		{Name: "id", Label: "Backup vault ID", Type: "text", Required: true, Pattern: `[a-z][a-z0-9\-]{0,61}[a-z0-9]`},
-		{Name: "location", Label: "Region", Type: "text", Required: true, Default: "us-central1"},
-		{Name: "retention", Label: "Minimum enforced retention", Type: "text", Required: true, Default: "86400s",
-			Help: "A duration in seconds, such as 86400s (one day)."},
-		{Name: "description", Label: "Description", Type: "text"},
-		{Name: "kmsKeyName", Label: "Customer-managed encryption key (Cloud KMS)", Type: "text",
-			Help: "projects/P/locations/REGION/keyRings/R/cryptoKeys/K, a key of this instance's Cloud KMS in the vault's region. " +
-				"Backups into the vault, and restores from it, work only while the key can be used."},
+		{Name: "id", Label: "Backup vault name", Type: "text", Required: true, Pattern: bdrIDPattern, Section: "Name your backup vault",
+			Help: bdrIDHelp + "."},
+		{Name: "description", Label: "Description", Type: "text", Section: "Name your backup vault"},
+		{Name: "labels", Label: "Labels", Type: "map", Section: "Name your backup vault"},
+		{Name: "locationType", Label: "Location type", Type: "radio", Required: true, Section: "Choose where to store your data",
+			Options: []string{"region", "multi-region"}, Default: "region",
+			OptionLabels: map[string]string{"region": "Region", "multi-region": "Multi-region"}},
+		{Name: "region", Label: "Region", Type: "select", Required: true, Section: "Choose where to store your data",
+			Options: backupdr.Regions, OptionLabels: bdrRegionLabels(), Default: "us-central1", ShowWhen: "locationType=region"},
+		{Name: "multiRegion", Label: "Multi-region", Type: "select", Section: "Choose where to store your data",
+			Options: []string{"us", "eu", "asia"}, Default: "us", ShowWhen: "locationType=multi-region",
+			OptionLabels: map[string]string{"us": "us (multiple regions in United States)", "eu": "eu (multiple regions in European Union)",
+				"asia": "asia (multiple regions in Asia)"},
+			Help: "A Cloud SQL instance is backed up to the multi-region whose regions share its region's prefix: us-central1 to us."},
+		{Name: "retentionDays", Label: "Minimum enforced retention (days)", Type: "text", Required: true, Default: "1",
+			Pattern: `[0-9]{1,5}`, Section: "Prevent backup deletion",
+			Help: "0 days to 99 years (36135 days): no backup in the vault can be deleted before it is this old."},
+		{Name: "inherit", Label: "Prevent deletion for duration specified in backup rule", Type: "checkbox", Section: "Prevent backup deletion",
+			Help: "Each backup's enforced retention ends at its expire time, the backup rule's Delete backups after. It cannot be changed later."},
+		{Name: "lock", Label: "Lock the enforced retention", Type: "checkbox", Section: "Prevent backup deletion",
+			Help: "From the lock's date on, the minimum enforced retention can only be increased, and the lock cannot be removed."},
+		{Name: "lockDate", Label: "Lock takes effect on", Type: "datetime-local", Section: "Prevent backup deletion", ShowWhen: "lock",
+			Help: "A future date and time, UTC."},
+		{Name: "encryption", Label: "Encryption", Type: "radio", Required: true, Section: "Encryption", Default: "google",
+			Options: []string{"google", "cmek"}, OptionLabels: map[string]string{"google": "Google-managed encryption key",
+				"cmek": "Customer-managed encryption key (CMEK)"}},
+		{Name: "kmsKeyName", Label: "Customer-managed encryption key", Type: "text", Section: "Encryption", ShowWhen: "encryption=cmek",
+			Browse: "kms", Help: "A key of this instance's Cloud KMS in the vault's region. Backups into the vault, and restores from it, " +
+				"work only while the key can be used. It can be set only when the vault is created."},
+		{Name: "access", Label: "Define access to your backup vault", Type: "radio", Required: true, Section: "Define access to your backup vault",
+			Options: []string{"WITHIN_ORGANIZATION", "WITHIN_PROJECT", "UNRESTRICTED"}, Default: "WITHIN_ORGANIZATION", OptionLabels: bdrAccessLabels},
 	}
+}
+
+func (backupDRProvider) CreateOnPage() bool   { return true }
+func (backupDRProvider) CreateTitle() string  { return "Create a backup vault" }
+func (backupDRProvider) CreateSubmit() string { return "Create" }
+
+// bdrRetentionSeconds reads Minimum enforced retention (days) as the API's
+// duration.
+func bdrRetentionSeconds(days string) (string, error) {
+	n, err := strconv.Atoi(strings.TrimSpace(days))
+	if err != nil || n < 0 || n > bdrMaxRetentionDays {
+		return "", fmt.Errorf("the minimum enforced retention is 0 days to 99 years (%d days)", bdrMaxRetentionDays)
+	}
+	return strconv.Itoa(n*86400) + "s", nil
 }
 
 // Create implements console.Creator.
@@ -157,20 +208,54 @@ func (p backupDRProvider) Create(ctx context.Context, project string, v map[stri
 	if project == "" {
 		return "", errors.New("choose a project first")
 	}
-	body := map[string]any{"backupMinimumEnforcedRetentionDuration": v["retention"]}
+	if !bdrIDRe.MatchString(v["id"]) {
+		return "", fmt.Errorf("the backup vault name must be %s", bdrIDHelp)
+	}
+	loc := v["region"]
+	if v["locationType"] == "multi-region" {
+		loc = v["multiRegion"]
+		if !backupdr.IsMultiRegion(loc) {
+			return "", errors.New("choose the multi-region: us, eu or asia")
+		}
+	}
+	retention, err := bdrRetentionSeconds(v["retentionDays"])
+	if err != nil {
+		return "", err
+	}
+	body := map[string]any{"backupMinimumEnforcedRetentionDuration": retention}
+	if v["inherit"] == "true" || v["inherit"] == "on" {
+		body["backupRetentionInheritance"] = "MATCH_BACKUP_EXPIRE_TIME"
+	}
+	if v["lock"] == "true" || v["lock"] == "on" {
+		t, err := bdrLockTime(v["lockDate"])
+		if err != nil {
+			return "", err
+		}
+		body["effectiveTime"] = t
+	}
 	if v["description"] != "" {
 		body["description"] = v["description"]
 	}
-	if k := strings.TrimSpace(v["kmsKeyName"]); k != "" {
-		body["encryptionConfig"] = map[string]any{"kmsKeyName": k}
+	if labels, err := console.ParseMap(v["labels"]); err != nil {
+		return "", err
+	} else if len(labels) > 0 {
+		body["labels"] = labels
 	}
-	_, err := p.call(ctx, p.bdr, http.MethodPost, "/v1/projects/"+project+"/locations/"+url.PathEscape(v["location"])+
+	if a := v["access"]; a != "" {
+		body["accessRestriction"] = a
+	}
+	if k := strings.TrimSpace(v["kmsKeyName"]); k != "" && v["encryption"] != "google" {
+		body["encryptionConfig"] = map[string]any{"kmsKeyName": k}
+	} else if v["encryption"] == "cmek" {
+		return "", errors.New("choose the customer-managed encryption key")
+	}
+	_, err = p.call(ctx, p.bdr, http.MethodPost, "/v1/projects/"+project+"/locations/"+url.PathEscape(loc)+
 		"/backupVaults?backupVaultId="+url.QueryEscape(v["id"]), body)
 	return v["id"], err
 }
 
 // Detail implements console.Driller: a vault's page ([vault]) and a data
-// source's ([vault, data source]).
+// source's ([vault, data source]), the latter now Vaulted backups' page.
 func (p backupDRProvider) Detail(ctx context.Context, project string, path []string) (console.Detail, error) {
 	if len(path) > 2 {
 		return console.DeeperThan(2, path), nil
@@ -186,12 +271,28 @@ func (p backupDRProvider) Detail(ctx context.Context, project string, path []str
 	if err != nil {
 		return console.Detail{Unavailable: err.Error()}, nil
 	}
-	d := console.Detail{Summary: []console.Property{{Label: "Name", Value: vault}, {Label: "State", Value: str(v, "state")},
-		{Label: "Backups", Value: str(v, "backupCount")},
-		{Label: "Minimum enforced retention", Value: str(v, "backupMinimumEnforcedRetentionDuration")},
-		{Label: "Created", Value: str(v, "createTime")}}}
-	if ec, _ := v["encryptionConfig"].(map[string]any); ec != nil {
+	enc := "Google-managed encryption key"
+	ec, _ := v["encryptionConfig"].(map[string]any)
+	if ec != nil {
+		enc = "Customer-managed encryption key (CMEK)"
+	}
+	d := console.Detail{Summary: []console.Property{
+		{Label: "Created", Value: str(v, "createTime")}, {Label: "Last updated", Value: str(v, "updateTime")},
+		{Label: "Description", Value: str(v, "description")}, {Label: "Status", Value: str(v, "state")},
+		{Label: "Location type", Value: bdrLocationType(locationOf(vault))}, {Label: "Location", Value: bdrRegionLabel(locationOf(vault))},
+		{Label: "Stored bytes", Value: str(v, "totalStoredBytes")}, {Label: "Backups", Value: str(v, "backupCount")},
+		{Label: "Enforced retention", Value: "Minimum for backups: " + bdrDuration(str(v, "backupMinimumEnforcedRetentionDuration"))},
+		{Label: "Retention lock status", Value: bdrLockStatus(v)},
+		{Label: "Retention inheritance", Value: bdrInheritanceLabel(str(v, "backupRetentionInheritance"))},
+		{Label: "Encryption type", Value: enc}}}
+	if ec != nil {
 		d.Summary = append(d.Summary, console.Property{Label: "Encryption key", Value: str(ec, "kmsKeyName")})
+	}
+	d.Summary = append(d.Summary, console.Property{Label: "Access restriction", Value: bdrAccessLabels[str(v, "accessRestriction")]},
+		console.Property{Label: "Service agent", Value: str(v, "serviceAccount"), Copy: "Copy service agent email"},
+		console.Property{Label: "Name", Value: vault})
+	if labels := bdrLabelsText(v["labels"]); labels != "" {
+		d.Summary = append(d.Summary, console.Property{Label: "Labels", Value: labels})
 	}
 
 	ds := console.Listing{Columns: []string{"Instance", "Version", "Backups", "Last backup", "Configuration"}, NameColumn: "Data source", Noun: "data sources"}
@@ -203,7 +304,7 @@ func (p backupDRProvider) Detail(ctx context.Context, project string, path []str
 			props, _ := res["cloudSqlInstanceDatasourceProperties"].(map[string]any)
 			cfg, _ := x["backupConfigInfo"].(map[string]any)
 			ds.Items = append(ds.Items, console.Resource{Name: lastSegment(str(x, "name")), Status: str(x, "state"),
-				Opens: []string{path[0], lastSegment(str(x, "name"))},
+				Link: "/backupdr-vaulted-backups/" + url.PathEscape(path[0]) + "/" + url.PathEscape(lastSegment(str(x, "name"))),
 				Fields: map[string]string{"Instance": str(props, "name"), "Version": str(props, "databaseInstalledVersion"),
 					"Backups": str(x, "backupCount"), "Last backup": str(cfg, "lastBackupState"), "Configuration": str(x, "configState")}})
 		}
@@ -211,7 +312,7 @@ func (p backupDRProvider) Detail(ctx context.Context, project string, path []str
 	ds.Total = len(ds.Items)
 
 	loc := vault[:strings.Index(vault, "/backupVaults/")]
-	plans := console.Listing{Columns: []string{"Resource type", "Rules", "Log retention (days)"}, NameColumn: "Backup plan", Noun: "backup plans"}
+	plans := console.Listing{Columns: []string{"Resource type", "Backup rules", "Log retention (days)"}, NameColumn: "Backup plan", Noun: "backup plans"}
 	if out, err := p.get(ctx, loc+"/backupPlans"); err != nil {
 		plans.Unavailable = err.Error()
 	} else {
@@ -220,46 +321,12 @@ func (p backupDRProvider) Detail(ctx context.Context, project string, path []str
 				continue
 			}
 			plans.Items = append(plans.Items, console.Resource{Name: lastSegment(str(x, "name")), Status: str(x, "state"),
-				Fields: map[string]string{"Resource type": str(x, "resourceType"), "Rules": rulesText(x),
+				Link: "/backupdr-plans/" + url.PathEscape(lastSegment(str(x, "name"))),
+				Fields: map[string]string{"Resource type": bdrTypeLabel(str(x, "resourceType")), "Backup rules": rulesText(x),
 					"Log retention (days)": str(x, "logRetentionDays")}})
 		}
 	}
 	plans.Total = len(plans.Items)
-
-	assocs := console.Listing{Columns: []string{"Resource", "Backup plan", "Data source", "Last backup"}, NameColumn: "Association", Noun: "associations"}
-	if out, err := p.get(ctx, loc+"/backupPlanAssociations"); err != nil {
-		assocs.Unavailable = err.Error()
-	} else {
-		for _, x := range bdrItems(out, "backupPlanAssociations") {
-			if !strings.HasPrefix(str(x, "dataSource"), vault+"/") {
-				continue
-			}
-			var last []string
-			for _, r := range bdrItems(x, "rulesConfigInfo") {
-				last = append(last, str(r, "ruleId")+": "+str(r, "lastBackupState"))
-			}
-			assocs.Items = append(assocs.Items, console.Resource{Name: lastSegment(str(x, "name")), Status: str(x, "state"),
-				Fields: map[string]string{"Resource": str(x, "resource"), "Backup plan": lastSegment(str(x, "backupPlan")),
-					"Data source": lastSegment(str(x, "dataSource")), "Last backup": strings.Join(last, ", ")}})
-		}
-	}
-	assocs.Total = len(assocs.Items)
-
-	revs := console.Listing{Columns: []string{"Backup plan", "Revision", "Created", "Rules"}, NameColumn: "Revision", Noun: "revisions"}
-	for _, pl := range plans.Items {
-		out, err := p.get(ctx, loc+"/backupPlans/"+pl.Name+"/revisions")
-		if err != nil {
-			revs.Unavailable = err.Error()
-			break
-		}
-		for _, r := range bdrItems(out, "backupPlanRevisions") {
-			snap, _ := r["backupPlanSnapshot"].(map[string]any)
-			revs.Items = append(revs.Items, console.Resource{Name: pl.Name + "/" + str(r, "revisionId"), Status: str(r, "state"),
-				Fields: map[string]string{"Backup plan": pl.Name, "Revision": str(r, "revisionId"), "Created": str(r, "createTime"),
-					"Rules": rulesText(snap)}})
-		}
-	}
-	revs.Total = len(revs.Items)
 
 	// Protected resources (#1501): resourceBackupConfigs.list, the
 	// resources whose backups this vault holds.
@@ -284,8 +351,6 @@ func (p backupDRProvider) Detail(ctx context.Context, project string, path []str
 	d.Sections = []console.Section{
 		{ID: "datasources", Label: "Data sources", Listing: ds},
 		{ID: "plans", Label: "Backup plans", Listing: plans},
-		{ID: "revisions", Label: "Plan revisions", Listing: revs},
-		{ID: "associations", Label: "Associations", Listing: assocs},
 		{ID: "protected", Label: "Protected resources", Listing: prot},
 	}
 	return d, nil
@@ -373,90 +438,24 @@ func (p backupDRProvider) DetailActions(ctx context.Context, project string, pat
 		}
 		return acts
 	}
-	var plans, allPlans, assocs, rules, triggers []string
-	planRules := map[string][]string{}
-	if out, err := p.get(ctx, loc+"/backupPlans"); err == nil {
-		for _, x := range bdrItems(out, "backupPlans") {
-			allPlans = append(allPlans, lastSegment(str(x, "name")))
-			for _, r := range bdrItems(x, "backupRules") {
-				planRules[str(x, "name")] = append(planRules[str(x, "name")], str(r, "ruleId"))
-			}
-			if str(x, "backupVault") == vault {
-				plans = append(plans, lastSegment(str(x, "name")))
-				rules = append(rules, planRules[str(x, "name")]...)
-			}
-		}
-	}
-	if out, err := p.get(ctx, loc+"/backupPlanAssociations"); err == nil {
-		for _, x := range bdrItems(out, "backupPlanAssociations") {
-			if strings.HasPrefix(str(x, "dataSource"), vault+"/") {
-				a := lastSegment(str(x, "name"))
-				assocs = append(assocs, a)
-				// Trigger backup offers each association with its own
-				// plan's rules only (#1491): another plan's rule fails.
-				for _, r := range planRules[str(x, "backupPlan")] {
-					triggers = append(triggers, a+bdrTriggerSep+r)
-				}
-			}
-		}
-	}
-	sort.Strings(rules)
-	rules = compactStrings(rules)
-	acts := []console.Action{{ID: "createplan", Label: "Create backup plan", Fields: []console.Field{
-		{Name: "id", Label: "Backup plan ID", Type: "text", Required: true},
-		{Name: "rule", Label: "Rule ID", Type: "text", Required: true, Default: "daily"},
-		{Name: "recurrence", Label: "Recurrence", Type: "select", Required: true, Default: "DAILY",
-			Options: []string{"HOURLY", "DAILY", "WEEKLY", "MONTHLY", "YEARLY"}},
-		{Name: "retention", Label: "Retention (days)", Type: "number", Required: true, Default: "7"},
-		{Name: "logdays", Label: "Log retention (days)", Type: "number", Default: "7",
-			Help: "How long the instance's transaction logs are kept for point-in-time restore."},
-	}}}
-	if len(plans) > 0 {
-		acts = append(acts, console.Action{ID: "associate", Label: "Associate an instance", Fields: []console.Field{
-			{Name: "id", Label: "Association ID", Type: "text", Required: true},
-			{Name: "plan", Label: "Backup plan", Type: "select", Required: true, Options: plans},
-			{Name: "instance", Label: "Cloud SQL instance", Type: "text", Required: true}}})
-	}
-	if len(plans) > 0 {
-		acts = append(acts, console.Action{ID: "editplan", Label: "Edit backup plan", Fields: []console.Field{
-			{Name: "plan", Label: "Backup plan", Type: "select", Required: true, Options: plans,
-				Help: "Each edit makes a new revision of the plan, listed in Plan revisions."},
-			{Name: "rule", Label: "Rule", Type: "select", Required: true, Options: rules},
-			{Name: "recurrence", Label: "Recurrence", Type: "select", Options: []string{"", "HOURLY", "DAILY", "WEEKLY", "MONTHLY", "YEARLY"},
-				Help: "Empty keeps the rule's."},
-			{Name: "retention", Label: "Retention (days)", Type: "number", Help: "Empty keeps the rule's."},
-			{Name: "description", Label: "Description", Type: "text", Help: "Empty keeps the plan's."}}})
-	}
-	if len(assocs) > 0 {
-		acts = append(acts, console.Action{ID: "moveassoc", Label: "Move association", Fields: []console.Field{
-			{Name: "association", Label: "Association", Type: "select", Required: true, Options: assocs},
-			{Name: "plan", Label: "New backup plan", Type: "select", Required: true, Options: allPlans,
-				Help: "A plan storing into another vault gives the instance a data source there."}}})
-	}
-	if len(triggers) > 0 {
-		acts = append(acts, console.Action{ID: "trigger", Label: "Trigger backup", Fields: []console.Field{
-			{Name: "target", Label: "Association and rule", Type: "select", Required: true, Options: triggers,
-				Help: "Each association with the rules of the backup plan it applies."}}})
-	}
-	if len(assocs) > 0 {
-		acts = append(acts, console.Action{ID: "assocdelete", Label: "Delete association", Destructive: true,
-			Confirm: "The association is deleted: its instance is no longer backed up. Its data source and backups stay in the vault.",
-			Fields:  []console.Field{{Name: "association", Label: "Association", Type: "select", Required: true, Options: assocs}}})
-	}
-	if len(plans) > 0 {
-		acts = append(acts, console.Action{ID: "plandelete", Label: "Delete backup plan", Destructive: true,
-			Confirm: "The backup plan is deleted. A plan an association uses cannot be.",
-			Fields:  []console.Field{{Name: "plan", Label: "Backup plan", Type: "select", Required: true, Options: plans}}})
-	}
+	// A vault's page has Google's Edit minimum enforced retention and
+	// Delete (#1844); plans and associations are acted on from their own
+	// pages, and Edit vault keeps the description and labels editable.
+	_ = loc
+	acts := []console.Action{}
 	if v, err := p.get(ctx, vault); err == nil {
-		acts = append(acts, console.Action{ID: "editvault", Label: "Edit vault", Fields: []console.Field{
-			{Name: "description", Label: "Description", Type: "text", Default: str(v, "description")},
-			{Name: "labels", Label: "Labels", Type: "text", Default: bdrLabelsText(v["labels"]), Help: "key=value pairs, comma-separated."},
-			{Name: "retention", Label: "Minimum enforced retention", Type: "text", Required: true,
-				Default: str(v, "backupMinimumEnforcedRetentionDuration"), Help: "A duration in seconds, such as 86400s (one day)."}}})
+		days := strings.TrimSuffix(bdrDuration(str(v, "backupMinimumEnforcedRetentionDuration")), " days")
+		days = strings.TrimSuffix(days, " day")
+		acts = append(acts, console.Action{ID: "editretention", Label: "Edit minimum enforced retention", Submit: "Save",
+			Fields: bdrRetentionFields(v, days)},
+			console.Action{ID: "editvault", Label: "Edit vault", Fields: []console.Field{
+				{Name: "description", Label: "Description", Type: "text", Default: str(v, "description")},
+				{Name: "labels", Label: "Labels", Type: "text", Default: bdrLabelsText(v["labels"]), Help: "key=value pairs, comma-separated."},
+				{Name: "retention", Label: "Minimum enforced retention", Type: "text", Required: true,
+					Default: str(v, "backupMinimumEnforcedRetentionDuration"), Help: "A duration in seconds, such as 86400s (one day)."}}})
 	}
 	acts = append(acts, console.Action{ID: "delete", Label: "Delete", Destructive: true, Leaves: true,
-		Confirm: "The vault is deleted. A vault holding data sources or used by a plan cannot be."})
+		Confirm: "The vault is deleted. A vault holding backups that have not expired, or used by a plan, cannot be."})
 	return acts
 }
 
@@ -516,9 +515,15 @@ func (p backupDRProvider) editPlan(ctx context.Context, loc string, v map[string
 				if sch == nil {
 					sch = map[string]any{"timeZone": "UTC"}
 				}
-				sch["recurrenceType"] = v["recurrence"]
-				if v["recurrence"] == "HOURLY" && sch["hourlyFrequency"] == nil {
-					sch["hourlyFrequency"] = 6
+				if sch["recurrenceType"] != v["recurrence"] {
+					sch["recurrenceType"] = v["recurrence"]
+					delete(sch, "hourlyFrequency")
+					if v["recurrence"] == "HOURLY" {
+						sch["hourlyFrequency"] = 6
+					}
+					if err := bdrApplyDays(sch, v["recurrence"], "", "", "", true); err != nil {
+						return err
+					}
 				}
 				r["standardSchedule"] = sch
 			}
@@ -566,6 +571,9 @@ func (p backupDRProvider) ActAt(ctx context.Context, project string, path []stri
 		if v["recurrence"] == "HOURLY" {
 			sch["hourlyFrequency"] = 6
 		}
+		if err := bdrApplyDays(sch, v["recurrence"], "", "", "", true); err != nil {
+			return err
+		}
 		var ret, logDays int
 		if _, e := fmt.Sscan(v["retention"], &ret); e != nil {
 			return fmt.Errorf("retention %q is not a number of days", v["retention"])
@@ -582,6 +590,23 @@ func (p backupDRProvider) ActAt(ctx context.Context, project string, path []stri
 		_, err = p.call(ctx, p.bdr, http.MethodPost, "/v1/"+loc+"/backupPlanAssociations?backupPlanAssociationId="+url.QueryEscape(v["id"]),
 			map[string]any{"backupPlan": loc + "/backupPlans/" + v["plan"], "resourceType": "sqladmin.googleapis.com/Instance",
 				"resource": "projects/" + project + "/instances/" + v["instance"]})
+	case "editretention":
+		retention, e := bdrRetentionSeconds(v["retentionDays"])
+		if e != nil {
+			return e
+		}
+		mask, body := "backupMinimumEnforcedRetentionDuration", map[string]any{"backupMinimumEnforcedRetentionDuration": retention}
+		switch v["lock"] {
+		case "lock":
+			t, e := bdrLockTime(v["lockDate"])
+			if e != nil {
+				return e
+			}
+			mask, body["effectiveTime"] = mask+",effectiveTime", t
+		case "remove":
+			mask, body["effectiveTime"] = mask+",effectiveTime", ""
+		}
+		_, err = p.call(ctx, p.bdr, http.MethodPatch, "/v1/"+vault+"?updateMask="+mask, body)
 	case "editvault":
 		labels, e := bdrParseLabels(v["labels"])
 		if e != nil {
@@ -670,4 +695,76 @@ func (p backupDRProvider) checkTriggerRule(ctx context.Context, loc, assoc, rule
 	}
 	return fmt.Errorf("rule %q is not in backup plan %s, which association %s applies; its rules are %s",
 		rule, lastSegment(str(a, "backupPlan")), assoc, strings.Join(ids, ", "))
+}
+
+// bdrLockTime reads a retention lock's date, a datetime-local in UTC
+// ("2026-12-01T00:00") or RFC 3339, as the API's effectiveTime.
+func bdrLockTime(v string) (string, error) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return "", errors.New("choose the date the retention lock takes effect")
+	}
+	for _, layout := range []string{time.RFC3339, "2006-01-02T15:04", "2006-01-02T15:04:05", "2006-01-02"} {
+		if t, err := time.Parse(layout, v); err == nil {
+			return t.UTC().Format(time.RFC3339), nil
+		}
+	}
+	return "", fmt.Errorf("the lock date %q is not a date and time such as 2026-12-01T00:00", v)
+}
+
+// bdrLockStatus is Google's Retention lock status: Unlocked, Lock takes
+// effect on …, or Locked.
+func bdrLockStatus(v map[string]any) string {
+	e := str(v, "effectiveTime")
+	if e == "" {
+		return "Unlocked"
+	}
+	if t, err := time.Parse(time.RFC3339Nano, e); err == nil && t.After(time.Now()) {
+		return "Lock takes effect on " + t.UTC().Format("2006-01-02 15:04 UTC")
+	}
+	return "Locked"
+}
+
+func bdrLocationType(loc string) string {
+	if backupdr.IsMultiRegion(loc) {
+		return "Multi-region"
+	}
+	return "Region"
+}
+
+func bdrInheritanceLabel(v string) string {
+	if v == "MATCH_BACKUP_EXPIRE_TIME" {
+		return "Prevent deletion for duration specified in backup rule"
+	}
+	return "Minimum enforced retention of the vault"
+}
+
+// bdrRetentionFields are Edit minimum enforced retention's fields: the
+// days, and the retention lock as Google's states allow it (#1921). While
+// Unlocked, a lock can be set; while it is pending, moved or removed; once
+// Locked, the retention can only be increased.
+func bdrRetentionFields(v map[string]any, days string) []console.Field {
+	status := bdrLockStatus(v)
+	help := "0 days to 99 years (36135 days). While the retention is unlocked it can be increased or decreased."
+	if status == "Locked" {
+		help = "The retention is locked: it can only be increased."
+	}
+	fields := []console.Field{{Name: "retentionDays", Label: "New minimum enforced retention period (days)", Type: "text", Required: true,
+		Default: days, Pattern: `[0-9]{1,5}`, Help: help}}
+	switch {
+	case status == "Unlocked":
+		fields = append(fields,
+			console.Field{Name: "lock", Label: "Retention lock", Type: "radio", Options: []string{"keep", "lock"}, Default: "keep",
+				OptionLabels: map[string]string{"keep": "Leave unlocked", "lock": "Lock the enforced retention"}},
+			console.Field{Name: "lockDate", Label: "Lock takes effect on", Type: "datetime-local", ShowWhen: "lock=lock",
+				Help: "A future date and time, UTC. From then on the lock cannot be removed."})
+	case status != "Locked":
+		fields = append(fields,
+			console.Field{Name: "lock", Label: "Retention lock", Type: "radio", Options: []string{"keep", "lock", "remove"}, Default: "keep",
+				OptionLabels: map[string]string{"keep": status, "lock": "Change the lock date", "remove": "Remove the lock"},
+				Help:         "The lock can be removed until its date; removing it clears the date."},
+			console.Field{Name: "lockDate", Label: "Lock takes effect on", Type: "datetime-local", ShowWhen: "lock=lock",
+				Help: "A future date and time, UTC."})
+	}
+	return fields
 }

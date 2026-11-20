@@ -38,6 +38,34 @@
 //   --sampler_top_k=K, --sampler_top_p=P, --sampler_seed=S
 //   --constraint_regex=R        output must match R (#1779)
 //   --constraint_json_schema=J  output must be JSON valid against schema J
+//   --presence_penalty=P, --frequency_penalty=F   LiteRT-LM's
+//                               RepetitionPenaltyConfig (OpenAI semantics)
+//   --vision_backend=cpu        load the model's vision encoder (image parts)
+//   --request_stdin             read a whole conversation from standard input
+//
+// With --request_stdin the runner takes one JSON object on standard input
+// (#1937) instead of --input_prompt:
+//   {"preface": [messages...],      system turn and earlier turns
+//    "tools": [{"type":"function","function":{...}}],   optional
+//    "tool_choice": {"type":"auto"|"none"|"required"|"allowed",
+//                    "names":[...]},                     optional
+//    "message": {...},              the turn the model answers
+//    "count_only": false,
+//    "compute": ["text", ...]}       optional: tokenize only (computeTokens)
+// in LiteRT-LM's Conversation message format, so the model's own chat
+// template (Gemma 4's, with its native tool-call syntax) frames every turn.
+// Its standard output is JSON lines instead of raw text:
+//   {"prompt_tokens":N}             Conversation::CountTokens of the turn,
+//                                   preface, tools and image tokens included
+//   {"text":"..."}                  each decoded chunk
+//   {"tool_calls":[...]}            parsed calls, arguments as JSON objects
+// and with count_only only the first line is written and nothing decodes.
+// With "compute" the model's tokenizer splits each text (no template) and the
+// one line written is {"compute":[{"ids":[...],"tokens":["<base64>",...]}]},
+// each token the bytes its id decodes to.
+// Tool choice is applied by the Gemma 4 processor's LLGuidance tool-call
+// grammar (the image builds with --define=LITERT_LM_FST_CONSTRAINTS_DISABLED=1;
+// the FST provider supports only "auto").
 //
 // Constraints are LiteRT-LM's llguidance provider, applied to the decode of
 // this conversation's message, so the model's chat template still frames the
@@ -48,10 +76,12 @@
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "absl/base/log_severity.h"  // from @com_google_absl
 #include "absl/flags/flag.h"  // from @com_google_absl
@@ -61,11 +91,15 @@
 #include "absl/status/status.h"  // from @com_google_absl
 #include "absl/status/status_macros.h"  // from @com_google_absl
 #include "absl/status/statusor.h"  // from @com_google_absl
+#include "absl/strings/escaping.h"  // from @com_google_absl
 #include "absl/strings/str_cat.h"  // from @com_google_absl
 #include "absl/time/time.h"  // from @com_google_absl
+#include "absl/types/span.h"  // from @com_google_absl
 #include "nlohmann/json.hpp"  // from @nlohmann_json
 #include "runtime/components/constrained_decoding/constraint_provider_config.h"
 #include "runtime/components/constrained_decoding/llg_constraint_config.h"
+#include "runtime/components/constrained_decoding/repetition_penalty_config.h"
+#include "runtime/components/constrained_decoding/tool_choice.h"
 #include "runtime/conversation/conversation.h"
 #include "runtime/conversation/end_of_turn.h"
 #include "runtime/conversation/io_types.h"
@@ -77,12 +111,15 @@
 #include "runtime/executor/executor_settings_base.h"
 #include "runtime/executor/llm_executor_settings.h"
 #include "runtime/proto/sampler_params.pb.h"
+#include "support/tokenizer/tokenizer.h"
 
 ABSL_FLAG(std::string, backend, "cpu", "Executor backend (cpu, gpu, ...).");
 ABSL_FLAG(std::string, model_path, "", "Path of the .litertlm model.");
 ABSL_FLAG(std::string, input_prompt, "", "The prompt.");
 ABSL_FLAG(std::string, constraint_json_schema, "",
           "Constrain the output to JSON valid against this JSON schema.");
+ABSL_FLAG(bool, request_stdin, false,
+          "Read the conversation as JSON from standard input (#1937).");
 
 namespace {
 
@@ -93,6 +130,7 @@ using ::litert::lm::EngineSettings;
 using ::litert::lm::Message;
 using ::litert::lm::ModelAssets;
 using ::litert::lm::OptionalArgs;
+using ::litert::lm::ToolChoice;
 using ::litert::lm::proto::SamplerParameters;
 using ::nlohmann::json;
 
@@ -161,6 +199,37 @@ absl::StatusOr<SamplerParameters> RequestSampler(
   return p;
 }
 
+// ToolChoiceOf reads the request's tool_choice object.
+absl::StatusOr<ToolChoice> ToolChoiceOf(const Message& tc) {
+  ToolChoice out;
+  const std::string type = tc.value("type", "auto");
+  std::vector<std::string> names;
+  if (tc.contains("names")) {
+    for (const auto& n : tc["names"]) names.push_back(n.get<std::string>());
+  }
+  if (type == "auto") {
+    out.choice = ToolChoice::Auto{};
+  } else if (type == "none") {
+    out.choice = ToolChoice::None{};
+  } else if (type == "required") {
+    if (names.size() == 1) {
+      out.choice = ToolChoice::ForcedFunction{.name = names[0]};
+    } else if (!names.empty()) {
+      out.choice = ToolChoice::AllowedTools{.names = names, .required = true};
+    } else {
+      out.choice = ToolChoice::Required{};
+    }
+  } else if (type == "allowed") {
+    out.choice = ToolChoice::AllowedTools{.names = names, .required = false};
+  } else {
+    return absl::InvalidArgumentError(
+        absl::StrCat("unknown tool_choice type ", type));
+  }
+  return out;
+}
+
+void JsonLine(const json& j) { std::cout << j.dump() << "\n" << std::flush; }
+
 absl::Status Run(int argc, char** argv) {
   absl::ParseCommandLine(argc, argv);
   absl::SetMinLogLevel(absl::LogSeverityAtLeast::kError);
@@ -170,9 +239,30 @@ absl::Status Run(int argc, char** argv) {
   if (model_path.empty()) {
     return absl::InvalidArgumentError("--model_path is empty");
   }
+  const bool request_stdin = absl::GetFlag(FLAGS_request_stdin);
   const std::string prompt = absl::GetFlag(FLAGS_input_prompt);
-  if (prompt.empty()) {
+  Message request;
+  if (request_stdin) {
+    std::string body((std::istreambuf_iterator<char>(std::cin)),
+                     std::istreambuf_iterator<char>());
+    // Parsed in order: a tool's parameters keep the caller's property
+    // order when the template renders them.
+    request = Message::parse(body, nullptr, /*allow_exceptions=*/false);
+    if (request.is_discarded() || !request.is_object() ||
+        !request.contains("message")) {
+      return absl::InvalidArgumentError(
+          "--request_stdin: standard input is not a request object");
+    }
+  } else if (prompt.empty()) {
     return absl::InvalidArgumentError("--input_prompt is empty");
+  }
+  const std::optional<std::string> vision_flag =
+      absl::GetFlag(FLAGS_vision_backend);
+  std::optional<Backend> vision_backend;
+  if (vision_flag.has_value() && !vision_flag->empty()) {
+    ABSL_ASSIGN_OR_RETURN(Backend vb,
+                          litert::lm::GetBackendFromString(*vision_flag));
+    vision_backend = vb;
   }
   ABSL_ASSIGN_OR_RETURN(ModelAssets assets, ModelAssets::Create(model_path));
   ABSL_ASSIGN_OR_RETURN(
@@ -180,7 +270,8 @@ absl::Status Run(int argc, char** argv) {
       litert::lm::GetBackendFromString(absl::GetFlag(FLAGS_backend)));
   ABSL_ASSIGN_OR_RETURN(
       EngineSettings engine_settings,
-      EngineSettings::CreateDefault(std::move(assets), backend));
+      EngineSettings::CreateDefault(std::move(assets), backend,
+                                    vision_backend));
   // Benchmark counters on, as litert_lm_main has them: they are what reports
   // how many tokens the decode produced.
   engine_settings.GetMutableBenchmarkParams() =
@@ -197,7 +288,32 @@ absl::Status Run(int argc, char** argv) {
   ABSL_ASSIGN_OR_RETURN(auto engine, litert::lm::EngineFactory::CreateDefault(
                                          std::move(engine_settings)));
 
+  if (request_stdin && request.contains("compute")) {
+    auto& tokenizer =
+        const_cast<litert::support::Tokenizer&>(engine->GetTokenizer());
+    json out = json::array();
+    for (const auto& text : request["compute"]) {
+      ABSL_ASSIGN_OR_RETURN(auto ids,
+                            tokenizer.TextToTokenIds(text.get<std::string>()));
+      json id_list = json::array();
+      json tokens = json::array();
+      for (int id : ids) {
+        id_list.push_back(id);
+        std::vector<int> one = {id};
+        ABSL_ASSIGN_OR_RETURN(std::string piece, tokenizer.TokenIdsToText(
+                                                     absl::MakeConstSpan(one)));
+        tokens.push_back(absl::Base64Escape(piece));
+      }
+      out.push_back({{"ids", id_list}, {"tokens", tokens}});
+    }
+    JsonLine({{"compute", out}});
+    return absl::OkStatus();
+  }
+
   auto session_config = litert::lm::SessionConfig::CreateDefault();
+  if (vision_backend.has_value()) {
+    session_config.SetVisionModalityEnabled(true);
+  }
   if (AnySamplerFlag()) {
     ABSL_ASSIGN_OR_RETURN(SamplerParameters sampler,
                           RequestSampler(engine->GetEngineSettings()));
@@ -215,7 +331,23 @@ absl::Status Run(int argc, char** argv) {
   }
   ConversationConfig::Builder builder;
   builder.SetSessionConfig(session_config);
-  if (!regex.empty() || !schema.empty()) {
+  const bool has_tools = request_stdin && request.contains("tools") &&
+                         request["tools"].is_array() &&
+                         !request["tools"].empty();
+  if (request_stdin) {
+    litert::lm::JsonPreface preface;
+    preface.messages = request.contains("preface")
+                           ? request["preface"]
+                           : Message::array();
+    if (has_tools) {
+      preface.tools = request["tools"];
+      // The tool-call grammar parses the calls' arguments against their
+      // declared schemas and applies tool_choice (#1937).
+      builder.SetEnableConstrainedDecoding(true);
+    }
+    builder.SetPreface(preface);
+  }
+  if (!regex.empty() || !schema.empty() || has_tools) {
     // Without a provider the conversation drops decoding_constraint silently.
     builder.SetConstraintProviderConfig(litert::lm::LlGuidanceConfig());
   }
@@ -224,6 +356,18 @@ absl::Status Run(int argc, char** argv) {
                         Conversation::Create(*engine, conversation_config));
 
   OptionalArgs args;
+  const double presence = absl::GetFlag(FLAGS_presence_penalty);
+  const double frequency = absl::GetFlag(FLAGS_frequency_penalty);
+  if (presence != 0.0 || frequency != 0.0) {
+    args.repetition_penalty_config = litert::lm::RepetitionPenaltyConfig(
+        1.0f, static_cast<float>(presence), static_cast<float>(frequency),
+        /*window_size=*/0);
+  }
+  if (has_tools && request.contains("tool_choice")) {
+    ABSL_ASSIGN_OR_RETURN(ToolChoice choice,
+                          ToolChoiceOf(request["tool_choice"]));
+    args.tool_choice = std::move(choice);
+  }
   if (const int n = absl::GetFlag(FLAGS_max_output_tokens); n > 0) {
     args.max_output_tokens = n;
   }
@@ -238,16 +382,44 @@ absl::Status Run(int argc, char** argv) {
   }
 
   absl::Status failure = absl::OkStatus();
-  json content = json::array();
-  content.push_back({{"type", "text"}, {"text", prompt}});
+  Message message;
+  if (request_stdin) {
+    message = request["message"];
+    ABSL_ASSIGN_OR_RETURN(int prompt_tokens,
+                          conversation->CountTokens({message}, args));
+    JsonLine({{"prompt_tokens", prompt_tokens}});
+    if (request.value("count_only", false)) {
+      return absl::OkStatus();
+    }
+  } else {
+    json content = json::array();
+    content.push_back({{"type", "text"}, {"text", prompt}});
+    message = Message(json::object({{"role", "user"}, {"content", content}}));
+  }
   ABSL_RETURN_IF_ERROR(conversation->SendMessageAsync(
-      json::object({{"role", "user"}, {"content", content}}),
-      [&failure](absl::StatusOr<Message> message) {
+      message,
+      [&failure, request_stdin](absl::StatusOr<Message> message) {
         if (!message.ok()) {
           failure = message.status();
           return;
         }
         if (::litert::lm::IsEndOfTurnMessage(*message)) {
+          return;
+        }
+        if (request_stdin) {
+          if (message->contains("content") &&
+              (*message)["content"].is_array()) {
+            for (const auto& part : (*message)["content"]) {
+              if (part.contains("text") &&
+                  !part["text"].get<std::string>().empty()) {
+                JsonLine({{"text", part["text"].get<std::string>()}});
+              }
+            }
+          }
+          if (message->contains("tool_calls") &&
+              !(*message)["tool_calls"].empty()) {
+            JsonLine({{"tool_calls", json::parse((*message)["tool_calls"].dump())}});
+          }
           return;
         }
         for (const auto& part : (*message)["content"]) {

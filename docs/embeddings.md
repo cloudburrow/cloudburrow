@@ -486,6 +486,19 @@ docker run --rm -v "$PWD:/models" \
 > G.726, MPEG Layer I or II), AAC Main and SSR, 960-sample frames, HE-AACv2's full parametric
 > stereo (#1754) and video frames over 8K UHD.
 
+> **Update 2026-11-19 (#1754): HE-AACv2's full parametric stereo.** A video's HE-AACv2 track
+> using 34 stereo bands, IPD/OPD or mixing procedure B is now decoded instead of answered with
+> `UNIMPLEMENTED` (`third_party/aac-go/ps.go`, `ps_tables.go`): checked against ISO/IEC 14496-26's
+> conformance streams `al_sbr_ps_03`, `_04` and `_06` and their unrestricted-PS reference decodes,
+> within 3.6e-6 (102 dB SNR; `TestPSFullConformance`, provenance in
+> `third_party/aac-go/PROVENANCE.md`). ISO's files are not in the repository: the tests fetch them
+> at test time into the user's cache directory, pinned by SHA-256 and ISO's MD5, when
+> `CLOUDBURROW_TEST_DOWNLOADS` is set, and skip otherwise (`internal/isoconformance`). A track
+> whose mono core is signalled by a program_config_element, as ISO's are, is now downmixed as the
+> stereo pair PS makes of it (it was read as one channel, twice as long);
+> `TestEmbedContentEmbedsAFullParametricStereoTrackThroughThePredictionClient` embeds
+> `al_sbr_ps_06` as a video's audio track and matches ISO's reference decode sent as a WAV part.
+
 > **Update 2026-11-18 (#1651): video frames over 8K UHD.** Each sampled frame is now patched for
 > the vision encoder as soon as it is decoded and its full-size RGB released, and only the frames
 > the video processor keeps (32 of up to 120) are converted at all, so a video's frames are

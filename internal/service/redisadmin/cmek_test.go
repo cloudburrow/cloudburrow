@@ -3,6 +3,8 @@ package redisadmin
 import (
 	"bytes"
 	"context"
+	"crypto/x509"
+	"encoding/pem"
 	"strings"
 	"testing"
 	"time"
@@ -243,5 +245,70 @@ func TestRotateServerCA(t *testing.T) {
 	wait(t, s, plain)
 	if err := s.RotateServerCA(ctx, parent+"/instances/plain"); status.Code(err) != codes.FailedPrecondition {
 		t.Errorf("rotation without in-transit encryption: %v", err)
+	}
+}
+
+// TestCAFollowsTheWallClock: with the Memorystore clock a week ahead
+// (clock:advance, #1909), an instance's CA is valid now by the wall clock,
+// which TLS clients and servers check it against; its rotation is still
+// due five years on by the Memorystore clock, once.
+func TestCAFollowsTheWallClock(t *testing.T) {
+	s, _, _ := newCreating(t, nil)
+	ctx := context.Background()
+	ahead := 7 * 24 * time.Hour
+	s.created.mu.Lock()
+	s.created.now = func() time.Time { return time.Now().Add(ahead) }
+	s.created.mu.Unlock()
+	op, err := s.CreateInstance(ctx, &redispb.CreateInstanceRequest{Parent: parent, InstanceId: "ahead",
+		Instance: &redispb.Instance{Tier: redispb.Instance_BASIC, MemorySizeGb: 1, TransitEncryptionMode: redispb.Instance_SERVER_AUTHENTICATION}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wait(t, s, op)
+	name := parent + "/instances/ahead"
+	inst, _ := s.GetInstance(ctx, &redispb.GetInstanceRequest{Name: name})
+	if len(inst.GetServerCaCerts()) != 1 {
+		t.Fatalf("server_ca_certs: %d", len(inst.GetServerCaCerts()))
+	}
+	b, _ := pem.Decode([]byte(inst.GetServerCaCerts()[0].GetCert()))
+	if b == nil {
+		t.Fatal("the CA is not PEM")
+	}
+	ca, err := x509.ParseCertificate(b.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if now := time.Now(); now.Before(ca.NotBefore) || now.After(ca.NotAfter) {
+		t.Fatalf("the CA is valid %v to %v, not now (%v)", ca.NotBefore, ca.NotAfter, now)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		s.created.mu.Lock()
+		_, busy := s.created.busy[name]
+		if !busy {
+			s.created.now = func() time.Time { return time.Now().Add(ahead + caRotateAfter + time.Hour) }
+		}
+		s.created.mu.Unlock()
+		if !busy {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the instance stayed busy")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	s.created.rotateDue()
+	for time.Now().Before(deadline) {
+		s.created.mu.Lock()
+		_, busy := s.created.busy[name]
+		s.created.mu.Unlock()
+		if !busy {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	s.created.rotateDue()
+	if got, _ := s.GetInstance(ctx, &redispb.GetInstanceRequest{Name: name}); len(got.GetServerCaCerts()) != 2 {
+		t.Errorf("five years on by the Memorystore clock, twice checked: %d CAs, want 2", len(got.GetServerCaCerts()))
 	}
 }

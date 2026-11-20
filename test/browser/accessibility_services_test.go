@@ -141,12 +141,19 @@ func (p *tab) keyboardFailures() []string {
 // subtest outlives one browser's deadline.
 func auditScreens(t *testing.T, pages []a11yPage) {
 	t.Helper()
+	auditScreensAt(t, open, pages)
+}
+
+// auditScreensAt is auditScreens on the tabs opener opens: a console the
+// test serves in process (openAt), as the Studio's (#1962).
+func auditScreensAt(t *testing.T, opener func(*testing.T) *tab, pages []a11yPage) {
+	t.Helper()
 	each := func(t *testing.T, setup func(p *tab), fn func(p *tab, pg a11yPage)) {
 		t.Helper()
 		var p *tab
 		for i, pg := range pages {
 			if i%10 == 0 {
-				p = open(t)
+				p = opener(t)
 				setup(p)
 			}
 			p.showAsked(pg)
@@ -214,16 +221,18 @@ func (p *tab) showAsked(pg a11yPage) {
 	before := len(p.errors)
 	p.mu.Unlock()
 	p.show(pg)
-	if !strings.HasPrefix(pg.path, "/instance") && !strings.HasPrefix(pg.path, "/faults") {
+	asks := strings.HasPrefix(pg.path, "/instance") || strings.HasPrefix(pg.path, "/faults")
+	if !asks && len(p.expected) == 0 {
 		return
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	kept := p.errors[:before]
 	for _, e := range p.errors[before:] {
-		if !strings.Contains(e, "401 (Unauthorized)") {
-			kept = append(kept, e)
+		if asks && strings.Contains(e, "401 (Unauthorized)") || p.expectedError(e) {
+			continue
 		}
+		kept = append(kept, e)
 	}
 	p.errors = kept
 }
@@ -285,7 +294,9 @@ func TestCloudSQLAndBackupDRScreensMeetWCAG(t *testing.T) {
 	var pages []a11yPage
 	for _, l := range []struct{ name, path string }{
 		{"PostgreSQL", "/cloudsql"}, {"MySQL", "/cloudsql-mysql"},
-		{"Cloud SQL instances", "/cloudsql-instances"}, {"Backup and DR", "/backupdr"},
+		{"Cloud SQL instances", "/cloudsql-instances"}, {"Backup vaults", "/backupdr"},
+		// Backup and DR's pages in Google's menu (#1844).
+		{"Vaulted backups", "/backupdr-vaulted-backups"}, {"Backup plans", "/backupdr-plans"},
 	} {
 		pages = append(pages, listAndCreate(l.name, l.path, project)...)
 	}
@@ -294,6 +305,10 @@ func TestCloudSQLAndBackupDRScreensMeetWCAG(t *testing.T) {
 		// Google's Backups page and an instance's page with its own menu (#1860).
 		screen("Cloud SQL backups", "/cloudsql-backups", project),
 		screen("postgres instance", "/cloudsql-instances/postgres", project),
+		screen("Backup and DR overview", "/backupdr-overview", project),
+		screen("Backup plan associations", "/backupdr-associations", project),
+		screen("Backup and DR jobs", "/backupdr-jobs", project),
+		screen("Backup and DR reports", "/backupdr-reports", project),
 		a11yPage{"delete database dialog", "/cloudsql?project=" + project, rowReady("postgres"), openDeleteDialog},
 	)
 	auditScreens(t, pages)
@@ -355,7 +370,7 @@ func TestSecretsSchedulerTasksProjectsIAMAndAIScreensMeetWCAG(t *testing.T) {
 	for _, l := range []struct{ name, path string }{
 		{"Secret Manager", "/secrets"}, {"Cloud Scheduler", "/scheduler/jobs"}, {"Cloud Tasks", "/tasks/queues"},
 		{"projects", "/projects"}, {"resource hierarchy", "/resource-hierarchy"}, {"tags", "/tags"},
-		{"IAM", "/iam-admin/iam"}, {"IAM roles", "/iam-admin/roles"}, {"IAM service accounts", "/iam-admin/serviceaccounts"}, {"APIs & Services", "/apis"},
+		{"IAM", "/iam-admin/iam"}, {"IAM roles", "/iam-admin/roles"}, {"IAM service accounts", "/iam-admin/serviceaccounts"},
 		{"Kubernetes workloads", "/kubernetes/workloads"}, {"pods", "/kubernetes/pods"},
 		{"Kubernetes services", "/kubernetes/services"}, {"Kubernetes jobs", "/kubernetes/jobs"},
 		{"deleted buckets", "/storage/deleted"},
@@ -363,12 +378,18 @@ func TestSecretsSchedulerTasksProjectsIAMAndAIScreensMeetWCAG(t *testing.T) {
 		pages = append(pages, listAndCreate(l.name, l.path, project)...)
 	}
 	for _, l := range []struct{ name, path string }{
+		{"APIs & Services", "/apis"}, {"API Library", "/apis/library"}, {"API Library entry", "/apis/library/storage.googleapis.com"},
+		{"API metrics", "/apis/api/storage.googleapis.com/metrics"}, {"API credentials tab", "/apis/api/storage.googleapis.com/credentials"},
+		{"Credentials", "/apis/credentials"},
 		{"Service Usage operations", "/apis/operations"}, {"nodes", "/kubernetes/nodes"},
 		{"Kubernetes storage", "/kubernetes/storage"}, {"events", "/kubernetes/events"},
+		{"Kubernetes clusters", "/kubernetes/clusters"}, {"Secrets & ConfigMaps", "/kubernetes/config"},
+		{"Object Browser", "/kubernetes/object-browser"}, {"Storage classes", "/kubernetes/storage-classes"},
 		{"Storage Intelligence", "/storage/intelligence"},
 		{"Model Garden", "/agent-platform/model-garden"}, {"Studio", "/agent-platform/studio"}, {"Embeddings", "/agent-platform/studio/embeddings"},
 		{"Local models", "/agent-platform/model-garden/local-models"}, {"Online prediction", "/agent-platform/online-prediction/endpoints"},
 		{"Monitoring", "/monitoring"}, {"Fault injection", "/faults"}, {"Instance", "/instance"},
+		{"Manage resources", "/cloud-resource-manager"}, {"IAM tags", "/iam-admin/tags"}, {"IAM settings", "/iam-admin/settings"},
 		{"secret", "/secrets/a11y-secret"}, {"queue", "/tasks/queues/us-central1/a11y-queue"},
 		{"scheduler job", "/scheduler/jobs/us-central1/a11y-job"}, {"project", "/projects/" + project},
 	} {

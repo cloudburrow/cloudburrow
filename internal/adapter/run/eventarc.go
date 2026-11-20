@@ -149,9 +149,19 @@ func (f *FunctionsServer) checkEventTrigger(t *functionspb.EventTrigger) error {
 				return apierror.Unimplemented("event_trigger.event_filters other than an exact \"bucket\" are not supported")
 			}
 		}
+	case sourcedEventType(typ):
+		// Cloud Audit Logs and Firestore (#1853): events Eventarc sources
+		// itself, filtered as its own triggers are, on a topic it makes.
+		if t.GetPubsubTopic() != "" {
+			return apierror.InvalidArgument("event_trigger.pubsub_topic is for Pub/Sub triggers; Eventarc makes a %s trigger's topic", typ)
+		}
+		if _, ok := f.publisher(); !ok {
+			return apierror.FailedPrecondition("this instance cannot publish %s events to a trigger's topic", typ)
+		}
+		return eaCheckFilters(t)
 	default:
-		return apierror.Unimplemented("event_trigger.event_type %q is not supported: Pub/Sub's messagePublished and Cloud Storage's "+
-			"finalized, deleted, archived and metadataUpdated are; %s", typ, eventReason(typ))
+		return apierror.Unimplemented("event_trigger.event_type %q is not supported: Pub/Sub's messagePublished, Cloud Storage's "+
+			"finalized, deleted, archived and metadataUpdated, Cloud Audit Logs' written and Firestore's document events are; %s", typ, eventReason(typ))
 	}
 	return nil
 }
@@ -160,9 +170,11 @@ func (f *FunctionsServer) checkEventTrigger(t *functionspb.EventTrigger) error {
 func eventReason(typ string) string {
 	switch {
 	case strings.HasPrefix(typ, "google.cloud.audit.log."):
-		return "Cloud Audit Logs events are served to Eventarc's own triggers (CreateTrigger), not yet to a function's event_trigger"
-	case strings.HasPrefix(typ, "google.cloud.firestore."), strings.HasPrefix(typ, "google.cloud.datastore."):
-		return "Firestore and Datastore run on Google's emulators, which emit no document change events"
+		return "google.cloud.audit.log.v1.written is the one Cloud Audit Logs event type"
+	case strings.HasPrefix(typ, "google.cloud.firestore."):
+		return "Firestore's are the google.cloud.firestore.document.v1 created, updated, deleted and written events and their withAuthContext variants"
+	case strings.HasPrefix(typ, "google.cloud.datastore."):
+		return "Datastore mode's entity events are not sourced: Firestore in Native mode's document events are"
 	case strings.HasPrefix(typ, "google.firebase."):
 		return "Firebase's need Firebase services, which this instance does not serve"
 	}
@@ -283,6 +295,16 @@ func (f *FunctionsServer) makeTransport(ctx context.Context, project, region, tr
 	live := &liveTrigger{spec: spec,
 		subscription: fmt.Sprintf("projects/%s/subscriptions/eventarc-%s-%s-sub-%03d", project, region, triggerID, rand.IntN(1000))}
 	topic := spec.GetPubsubTopic()
+	if sourcedEventType(spec.GetEventType()) && topic == "" {
+		// A function's audit-log or Firestore trigger (#1853): Eventarc's
+		// own topic, which the events are published to and which goes
+		// with the trigger.
+		topic = fmt.Sprintf("projects/%s/topics/eventarc-%s-%s-%03d", project, region, triggerID, rand.IntN(1000))
+		if err := f.events.Transport.CreateTopic(ctx, topic, labels); err != nil {
+			return nil, fmt.Errorf("create the trigger's topic %s: %w", topic, err)
+		}
+		live.topic = topic
+	}
 	if bucket := storageBucket(spec); storageNotificationTypes[spec.GetEventType()] != "" {
 		topic = fmt.Sprintf("projects/%s/topics/eventarc-%s-%s-%03d", project, region, triggerID, rand.IntN(1000))
 		if err := f.events.Transport.CreateTopic(ctx, topic, labels); err != nil {

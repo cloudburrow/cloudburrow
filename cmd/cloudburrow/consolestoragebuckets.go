@@ -92,7 +92,10 @@ type bucketMeta struct {
 	} `json:"autoclass"`
 	RPO        string `json:"rpo"`
 	Encryption *struct {
-		DefaultKmsKeyName string `json:"defaultKmsKeyName"`
+		DefaultKmsKeyName string             `json:"defaultKmsKeyName"`
+		GoogleManaged     *bucketEnforcement `json:"googleManagedEncryptionEnforcementConfig"`
+		CustomerManaged   *bucketEnforcement `json:"customerManagedEncryptionEnforcementConfig"`
+		CustomerSupplied  *bucketEnforcement `json:"customerSuppliedEncryptionEnforcementConfig"`
 	} `json:"encryption"`
 	RetentionPolicy *struct {
 		RetentionPeriod string `json:"retentionPeriod"`
@@ -722,3 +725,33 @@ var (
 	_ console.Editor    = storageProvider{}
 	_ console.PathActor = storageDeletedProvider{}
 )
+
+// bucketEnforcement is one of a bucket's encryption enforcement configs
+// (#1938).
+type bucketEnforcement struct {
+	RestrictionMode string `json:"restrictionMode"`
+}
+
+// bucketEncryptionProperties are the bucket's default key and which
+// encryption types new objects may use (#1938).
+func bucketEncryptionProperties(b bucketMeta) []console.Property {
+	key, gm, cm, cs := "Google-managed", "Allowed", "Allowed", "Allowed"
+	mode := func(c *bucketEnforcement) string {
+		if c != nil && c.RestrictionMode == "FullyRestricted" {
+			return "Restricted"
+		}
+		return "Allowed"
+	}
+	if e := b.Encryption; e != nil {
+		if e.DefaultKmsKeyName != "" {
+			key = e.DefaultKmsKeyName
+		}
+		gm, cm, cs = mode(e.GoogleManaged), mode(e.CustomerManaged), mode(e.CustomerSupplied)
+	}
+	return []console.Property{
+		{Label: "Default encryption key", Value: key},
+		{Label: "Google-managed encryption", Value: gm},
+		{Label: "Customer-managed encryption keys", Value: cm},
+		{Label: "Customer-supplied encryption keys", Value: cs},
+	}
+}

@@ -187,15 +187,21 @@ func TestRDBPersistence(t *testing.T) {
 		t.Errorf("next snapshot %v", got)
 	}
 
-	s.PersistentMode(true)
 	op, err = s.UpdateInstance(ctx, &redispb.UpdateInstanceRequest{UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"persistenceConfig"}},
 		Instance: &redispb.Instance{Name: name, PersistenceConfig: &redispb.PersistenceConfig{PersistenceMode: redispb.PersistenceConfig_DISABLED}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	wait(t, s, op)
-	if (*set)["save"] != "" || (*set)["appendonly"] != "yes" {
+	// DISABLED keeps no file, whatever the mode (#1911).
+	if (*set)["save"] != "" || (*set)["appendonly"] != "no" {
 		t.Errorf("server settings after DISABLED %v", *set)
+	}
+	s.created.mu.Lock()
+	spec = s.created.byID[name].spec()
+	s.created.mu.Unlock()
+	if spec.RDBSeconds != 0 || !spec.NoPersistence {
+		t.Errorf("next start after DISABLED: RDB seconds %d, no persistence %v", spec.RDBSeconds, spec.NoPersistence)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -33,9 +34,9 @@ type Options struct {
 // Encodings are ExplicitDecodingConfig's AudioEncoding values, true for
 // those decoded locally (internal/speech's Decode).
 var Encodings = map[string]bool{
-	"LINEAR16": true, "MULAW": true, "ALAW": true, "MP3": true,
+	"LINEAR16": true, "MULAW": true, "ALAW": true, "MP3": true, "FLAC": true,
 	"MP4_AAC": true, "M4A_AAC": true, "MOV_AAC": true,
-	"AMR": false, "AMR_WB": false, "FLAC": false, "OGG_OPUS": false, "WEBM_OPUS": false,
+	"AMR": false, "AMR_WB": false, "OGG_OPUS": false, "WEBM_OPUS": false,
 }
 
 // Config is a checked RecognitionConfig.
@@ -49,6 +50,10 @@ type Config struct {
 	Options
 	// Model is the recognition model asked for.
 	Model string
+	// Adaptation is the config's SpeechAdaptation in JSON, nil for none:
+	// the Speech-to-Text front resolves its phrase sets and custom
+	// classes and biases whisper with them (#1930).
+	Adaptation json.RawMessage
 }
 
 // Parse reads a RecognitionConfig in JSON (camelCase or snake_case keys)
@@ -64,14 +69,36 @@ func Parse(raw []byte) (c Config, code int, err error) {
 	var rc recognitionConfig
 	_ = json.Unmarshal(norm, &rc)
 	c = Config{Decoding: d, Language: lang, Options: opt, Model: rc.Model}
+	if len(rc.Adaptation) > 0 && string(rc.Adaptation) != "null" {
+		c.Adaptation = rc.Adaptation
+	}
 	if !strings.EqualFold(rc.LanguageCodes[0], "auto") {
 		c.LanguageCode = strings.ToLower(rc.LanguageCodes[0])
 	}
 	return c, 0, nil
 }
 
-// speechModels are the recognition models served.
-var speechModels = map[string]bool{"chirp": true}
+// speechModels are the recognition models served: Google's v2 general
+// and telephony models, each read with the same local whisper.cpp model
+// (https://docs.cloud.google.com/speech-to-text/docs/speech-to-text-supported-languages
+// and .../transcription-model, read 2026-11-19), so what each recognises
+// is whisper's, not Google's model's. The medical models (medical_dictation,
+// medical_conversation) are not served: whisper has no medical vocabulary
+// or their spoken-punctuation dictation behaviour.
+var speechModels = map[string]bool{
+	"chirp": true, "chirp_2": true, "chirp_3": true, "chirp_telephony": true,
+	"long": true, "short": true, "telephony": true, "telephony_short": true,
+}
+
+// Models are the served model names, sorted.
+func Models() []string {
+	out := make([]string, 0, len(speechModels))
+	for m := range speechModels {
+		out = append(out, m)
+	}
+	sort.Strings(out)
+	return out
+}
 
 // whisperLanguage maps a BCP-47 code to whisper's: its primary subtag,
 // with the codes whisper names differently.
@@ -94,6 +121,10 @@ func whisperLanguage(code string) string {
 
 // camelKeys rewrites a JSON value's snake_case keys as lowerCamelCase, as
 // protobuf's JSON parser accepts both.
+// CamelKeys rewrites a decoded JSON value's snake_case keys as protojson's
+// lowerCamelCase, so configs written either way compare and merge.
+func CamelKeys(v any) any { return camelKeys(v) }
+
 func camelKeys(v any) any {
 	switch x := v.(type) {
 	case map[string]any:
@@ -172,13 +203,11 @@ func parse(raw []byte) (Decoding, string, Options, int, error) {
 	case c.Model == "":
 		return d, "", opt, 400, errors.New("RecognitionConfig.model is required: the default recognizer has no model")
 	case !speechModels[c.Model]:
-		return unimpl("the " + strconv.Quote(c.Model) + " model (only chirp is served)")
+		return unimpl("the " + strconv.Quote(c.Model) + " model (served: " + strings.Join(Models(), ", ") + ")")
 	case len(c.LanguageCodes) == 0:
 		return d, "", opt, 400, errors.New("RecognitionConfig.languageCodes is required: the default recognizer has no language")
 	case len(c.LanguageCodes) > 1:
 		return unimpl("recognising one of several languageCodes")
-	case c.Adaptation != nil:
-		return unimpl("adaptation")
 	case c.TranscriptNormalization != nil:
 		return unimpl("transcriptNormalization")
 	case c.TranslationConfig != nil:

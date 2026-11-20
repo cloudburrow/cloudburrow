@@ -117,10 +117,36 @@ gcloud redis instances create cache --region=us-central1 --size=2 --tier=basic -
 and configs are set on the running server with `CONFIG SET`, so it keeps its keys, and a config
 removed goes back to its default. `DeleteInstance` removes the server, its Service and its volume.
 
+**Network** (#1906). `authorized_network` (default the project's `default` network; a bare name
+is taken as one of the instance's project), `connect_mode` (`DIRECT_PEERING`, the default, or
+`PRIVATE_SERVICE_ACCESS`) and `reserved_ip_range` are kept and returned. With `DIRECT_PEERING` the
+range is an IPv4 CIDR block of internal addresses of at least `/29` (`/28` with read replicas), as
+Google documents; with `PRIVATE_SERVICE_ACCESS` it may also be the name of an allocated range;
+unset, a `/29` (`/28`) in 10.0.0.0/8 is chosen, the same for the same instance. Anything else is
+INVALID_ARGUMENT, and none of the three can be updated. Refused too (#1919): a range that
+overlaps one of the "Restricted ranges" the networking page links to (the VPC's prohibited
+ranges: `0.0.0.0/8`, `127.0.0.0/8`, `169.254.0.0/16`, `224.0.0.0/4`, `255.255.255.255/32`, and
+the Private Google Access addresses `199.36.153.4/30` and `199.36.153.8/30`), one not wholly in a
+private range, and one overlapping another instance's range on the same authorized network (the
+field's reference: "Range must be unique and non-overlapping with existing subnets in an
+authorized network"); a chosen range skips the blocks the network's other instances use.
+**What they cannot change here:** there is no VPC, so they are stored and checked only. Every
+local client reaches the instance at its `host` and `port`, the host's address (not one of the
+range), whatever network it is authorized on; the network and its Compute Engine subnets are not
+looked up (Compute Engine's networks are not served to this API).
+
 **Modes.** A created instance follows the instance's mode, as the server `up` runs does. In
-persistent mode its record is kept in `<state-dir>/<name>/memorystore`, its server keeps an
-append-only file on a volume of its own, and after `stop` and `up` it is READY again (REPAIRING
-while its server starts), with its AUTH string and its keys. In ephemeral mode nothing is kept:
+persistent mode its record is kept in `<state-dir>/<name>/memorystore`, its server has a volume
+of its own, and after `stop` and `up` it is READY again (REPAIRING while its server starts), with
+its AUTH string. **Its keys follow its `persistence_config`, as on Memorystore (#1911)**: without
+persistence (`DISABLED`, the default) the server keeps no file (`--save "" --appendonly no`, and
+whatever a previous run left on the volume is removed before it starts), so a Basic tier
+instance's data is lost whenever its server restarts (a maintenance, a failed pod, `stop` and
+`up`), as Google documents of an instance without RDB snapshots; with RDB the data comes back
+from the last snapshot, written at the snapshot period (`save <period> 1`) and, as Valkey and
+Redis do, when the server stops gracefully. A Standard tier instance's node that restarts syncs
+from the current primary (§5), so only a restart of every node at once (`stop` and `up`) loses
+the data of an instance without persistence. In ephemeral mode nothing is kept:
 `up` removes the servers a previous run left, keeping their volumes as the server `up` runs keeps
 its own, so a later persistent run has them back.
 
@@ -129,7 +155,9 @@ The console's Memorystore page lists the instances and has **Create instance**, 
 the instance `up` runs; the API itself has no flush. `ExportInstance` writes a `BGSAVE` snapshot
 to a `gs://` object; `ImportInstance` replaces the instance's data with an RDB file's, loaded by
 the server itself (`--services memorystore,storage`). `persistence_config` RDB sets the server's
-save point to the snapshot period, in place of the append-only file. `UpgradeInstance` moves an instance to a later version (REDIS_3_2 is Redis 3.2, REDIS_4_0 Redis 4.0, REDIS_5_0 Redis 5.0, REDIS_6_X Redis 6.2, REDIS_7_0 Redis
+save point to the snapshot period; `DISABLED` removes it (tests:
+`TestMemorystoreDataAcrossServerRestart`, `TestMemorystoreCreatedAcrossRestart`,
+`TestMemorystoreRDBAcrossRestart`). `UpgradeInstance` moves an instance to a later version (REDIS_3_2 is Redis 3.2, REDIS_4_0 Redis 4.0, REDIS_5_0 Redis 5.0, REDIS_6_X Redis 6.2, REDIS_7_0 Redis
 7.0, REDIS_7_2 Valkey 8.1) with its data, and **Upgrade** on its page does too (#1386).
 `FailoverInstance` promotes a Standard tier instance's replica (§5); `RescheduleMaintenance` moves
 a scheduled maintenance event (§4a). See
@@ -138,7 +166,7 @@ a scheduled maintenance event (§4a). See
 ## 4a. Maintenance (#1524)
 
 Memorystore schedules maintenance updates itself; CloudBurrow's servers are pinned images, so no
-update ever comes, and an event is scheduled locally instead: CloudBurrow's own control endpoint
+update ever comes, and an event is scheduled locally instead (or by a release, below, #1909): CloudBurrow's own control endpoint
 (not a Memorystore API), on the admin port,
 
     POST /cloudburrow/v1/projects/P/locations/R/instances/I:scheduleMaintenance  {"startTime": "RFC 3339, optional"}
@@ -212,6 +240,39 @@ cluster clients follow the topology. Tests: `TestRedisClusterRescheduleMaintenan
 `TestValkeyRescheduleMaintenance` (official Go clients and gcloud),
 `TestMemorystoreClusterAndValkeyMaintenanceThroughThePage` (browser), unit
 `TestValkeyMaintenanceRules`, all in the memorystore shard.
+
+### Releases and the Memorystore clock (#1909)
+
+Google schedules maintenance on its own when it releases a version, "at least one week" after the
+notification, in each instance's maintenance window. A release is CloudBurrow's opt-in stand-in
+(not a Memorystore API), on the admin port:
+
+    POST /cloudburrow/v1/projects/P/locations/R:releaseUpdate        (R a region, or - for all)
+    POST /cloudburrow/v1/clock:advance  {"duration": "604800s"}
+
+`:releaseUpdate` schedules maintenance on every Memorystore for Redis instance, Redis cluster and
+Valkey instance of the project (and region) with none scheduled: at the first start of its weekly
+window at least a week away, or a week on, to the hour, with no window; one already scheduled is
+kept. It answers `{"scheduled": [names]}`. From then on it is the event the APIs report and
+reschedule, applied when due. `clock:advance` moves the Memorystore clock (what every event, and
+create, update and operation times, run by) forward, never back, so a test reaches a window a
+week away; each event whose start it passes is applied at once. The clock's offset is kept in
+memory: `cloudburrow up` starts at the host's time.
+
+In the console (#1919), the Memorystore for Redis, Redis Cluster and Valkey list pages offer both
+as **Release an update (CloudBurrow extension)** (a region, or `-`) and **Advance Memorystore
+clock (CloudBurrow extension)** (`7d`, `1d12h`, ...), confirmed, each answering with what it did.
+Google's Memorystore console has neither (Google releases updates itself, and its clock is the
+real one), so they are labelled as local-only extensions rather than placed among Google's
+controls. Test: `TestMemorystoreReleaseAndClockThroughThePage`.
+
+A Redis cluster's and a Valkey instance's `maintenance_policy` is checked as the protos say:
+`weekly_maintenance_window` is one window ("Minimum 1", at most one), each with a `day` (not
+unspecified) and a UTC `start_time` (hours 0 to 23), INVALID_ARGUMENT otherwise; `create_time` and
+`update_time` are set. None of the three APIs has a deny period field, so there is none to keep.
+Tests: `TestMemorystoreMaintenanceWindowSchedules` (official Go clients: the refusals; a release
+schedules a Basic instance's maintenance in its Sunday 03:00 window, and the clock advanced to it
+applies it), unit `TestReleaseUpdate`, `TestClusterAndValkeyMaintenancePolicy`.
 
 ## 5. Standard tier, read replicas and failover (#1385)
 
@@ -413,6 +474,92 @@ rc := redis.NewClusterClient(&redis.ClusterOptions{Addrs: []string{discovery},
 
 It cannot be changed after the cluster is created, as Google's cannot.
 
+**Server CA modes** (#1907): `server_ca_mode` and `server_ca_pool`, with in-transit encryption.
+`SERVER_CA_MODE_GOOGLE_MANAGED_PER_INSTANCE_CA` (the default) is the cluster's own CA above.
+`SERVER_CA_MODE_GOOGLE_MANAGED_SHARED_CA` is one CA per project and region, made with the first
+such cluster and kept: every such cluster's node certificates are its, and
+`GetSharedRegionalCertificateAuthority` (`projects/P/locations/R/sharedRegionalCertificateAuthority`)
+returns it, as each cluster's `GetClusterCertificateAuthority` does, so one bundle trusts every
+cluster of the region. `SERVER_CA_MODE_CUSTOMER_MANAGED_CAS_CA` with
+`server_ca_pool=projects/P/locations/R/caPools/POOL` has this instance's Certificate Authority
+Service (`--services ...,privateca`, in process) issue each node's certificate when the node
+starts (a configuration-based request for a fresh P-256 key, the node's names and addresses in the
+SANs), so it is listed among the pool's certificates and chains to the pool's CAs, which the
+nodes trust; `GetClusterCertificateAuthority` is `FAILED_PRECONDITION` ("not supported for
+customer-managed CAs") and clients trust the pool's root, as Google documents. Refused as Google
+documents: a customer-managed mode without a pool ("server_ca_pool must be provided ..."), a pool
+with another mode, a pool outside the cluster's region, a pool that does not exist (`NOT_FOUND`,
+"Resource ... not found."), one with no enabled CA (`FAILED_PRECONDITION`), and either non-default
+mode without in-transit encryption. The mode and pool cannot be changed. Not enforced: the
+service agent `service-PROJECT_NUMBER@cloud-redis.iam.gserviceaccount.com` and its
+`roles/privateca.certificateRequester` on the pool, as no call here is authorized. A
+Memorystore for Valkey instance takes the same three modes (#1918, below). Tests:
+`TestRedisClusterServerCAModes` (official clients and go-redis over TLS), unit
+`TestClusterServerCA`.
+
+**Memorystore for Valkey server CA modes** (#1918), as Google documents them
+(<https://docs.cloud.google.com/memorystore/docs/valkey/about-in-transit-encryption>,
+`/valkey/use-customer-managed-ca`): an instance's `server_ca_mode` and `server_ca_pool` work as a
+Redis cluster's above. `SERVER_CA_MODE_GOOGLE_MANAGED_SHARED_CA` instances share one CA per project
+and region (Memorystore for Valkey's own, not Redis Cluster's), which
+`Memorystore.GetSharedRegionalCertificateAuthority` and each instance's `GetCertificateAuthority`
+return; `SERVER_CA_MODE_CUSTOMER_MANAGED_CAS_CA` has the pool issue each node's certificate, and
+`GetCertificateAuthority` is `FAILED_PRECONDITION` (Google: "Memorystore for Valkey can't retrieve
+these certificates"; they are the pool's, from CA Service). Refusals carry Google's texts:
+"server_ca_pool must be provided when ...", "server_ca_pool must not be provided when ...",
+"Invalid format for server CA pool: ...", "The instance's server CA pool must be in the same
+region as the instance.", "Resource ... not found.", "There are no enabled CAs in the CaPool ...".
+Create instance (and Create cluster) offer **Certificate authority management** with each mode and
+a **CA pool**, and the pages show the mode and pool. Not enforced: the service agent
+`service-PROJECT_NUMBER@cloud-memorystore.iam.gserviceaccount.com`'s
+`roles/privateca.certificateRequester`. Tests: `TestMemorystoreValkeyServerCA` (official
+`memorystore/apiv1` and `security/privateca/apiv1` clients, go-redis over TLS), unit
+`TestValkeyServerCA`.
+
+**Server certificate rotation** (#1918). "Every week, Memorystore for Redis Cluster conducts
+server-side certificate rotation" in every CA mode (Memorystore for Valkey too): a week after a
+cluster's creation or its last rotation, by the Memorystore clock (so `clock:advance` of a week
+reaches it), each running node is issued a new server certificate of the same CA, or by the
+customer's CA pool, written into its pod and loaded with `CONFIG SET tls-cert-file`, with no
+restart: "new server certificates apply to new connections only, and existing connections remain
+alive". The CA does not change, so clients keep connecting with the CA they downloaded. On demand,
+`UpdateCluster` with `update_mask` `rotate_server_certificate` (`gcloud redis clusters update
+--rotate-server-certificate`; the cluster page's **Rotate server certificates**) rotates every
+node's, for a customer-managed CA only: any other mode is `FAILED_PRECONDITION`, "Server
+certificate rotation can only be triggered for customer-managed CAs." (Google documents the text,
+not the code). Memorystore for Valkey's `UpdateInstance` does the same (`gcloud memorystore
+instances update --rotate-server-certificate`; the instance page's **Rotate server
+certificates**): a customer-managed CA instance's node gets another certificate from the pool, and
+any other mode is refused with the same text. CloudBurrow's
+choices: not in the same update as a shard or replica change (`INVALID_ARGUMENT`); a weekly
+rotation that cannot issue a certificate (the pool deleted, no enabled CA) is logged and retried,
+the nodes keeping their certificates; Valkey's on-demand rotation is an update of its own
+(`INVALID_ARGUMENT` with any other path). Tests: `TestRedisClusterServerCertRotation`,
+`TestMemorystoreValkeyServerCA` (official clients, go-redis over TLS), unit
+`TestClusterCertRotation`.
+
+**Automatic failover** (#1910). Google: when a shard's primary fails, a replica is promoted
+automatically, and the failed node is replaced. Valkey's own cluster failover needs the votes of
+a majority of the primaries, so a cluster of one or two shards never fails over on its own; so
+CloudBurrow checks every node of a Redis cluster (and of a Valkey instance in `CLUSTER` mode)
+every second, `CLUSTER MYID` and `ROLE` through its tunnel. A primary that has not answered three
+checks in a row, or answers with another node ID (its pod started again, empty: a node's cluster
+configuration is not kept), has failed: unless a replica of its shard already serves as the
+primary, the replica with the greatest replication offset is promoted (`CLUSTER FAILOVER
+TAKEOVER`, which needs no votes), and `discovery_endpoints` moves to it when it is the first
+shard's. A node that started again rejoins: its settings are set again, its old identity is
+forgotten on every other node, it `MEET`s the cluster and replicates its shard's primary (emptied
+first), so the shard keeps its replica count; a shard with no replica takes the node back as its
+primary, with the slots its old identity had and what it loaded from its persistence. The cluster
+stays `ACTIVE`; writes the replica had not received are lost, as with Google's asynchronous
+replication. Roles changed in the cluster itself (Valkey's own failover, a client's `CLUSTER
+FAILOVER`) are taken into the record. Measured: failed over 3 to 4 seconds after the primary's pod
+was deleted, the node back as a replica about 10 seconds later. Tests:
+`TestRedisClusterAutomaticFailover`, `TestValkeyClusterModeAutomaticFailover` (one shard, one
+replica; official clients and go-redis), and for a Standard tier instance
+`TestMemorystoreAutomaticFailoverReadEndpoint` (its read endpoint keeps serving reads at the same
+address after the failover).
+
 **IAM auth** (#1614): with `AUTH_MODE_IAM_AUTH` a client sends an access token as its AUTH
 password, with no username, `default` or the principal's email, as Google documents. The token is
 checked: the nodes take it only when this instance minted it (its metadata server, its token
@@ -596,7 +743,17 @@ An instance is built as a Redis cluster is (§8), of the same Valkey 8.1 image:
 `UpdateInstance` changes `shard_count` (slots and keys move), `replica_count`, `node_type` (1.4,
 6.5, 13 or 58 GB of `maxmemory`), `engine_configs` and `persistence_config`, set on every running
 node, and keeps `labels`, `deletion_protection_enabled`, `endpoints`, zone distribution and
-maintenance policy. `persistence_config` RDB is `save <period> 1`, AOF `appendonly yes` with its
+maintenance policy.
+
+**Zone distribution (#1908).** A Redis cluster's and a Valkey instance's
+`zone_distribution_config` is kept and checked: `SINGLE_ZONE` needs `zone`, a zone of the
+instance's region, and a Valkey instance's `zones` (MULTI_ZONE) are zones of its region, each
+once; it is immutable (an update that changes it is `INVALID_ARGUMENT`). There are no zones
+locally, so each node's server has Valkey's `availability-zone` set to its zone, which `HELLO`
+returns to clients: `SINGLE_ZONE` puts every node in `zone`; `MULTI_ZONE` spreads each shard's
+nodes over region-a, -b and -c (or `zones`), its first node in zone *shard mod 3*, and a Valkey
+instance's `active_zones` lists the zones its nodes are in. A Memorystore for Redis instance's
+`location_id` must be a zone of its region. `persistence_config` RDB is `save <period> 1`, AOF `appendonly yes` with its
 `appendfsync`; after a restart of CloudBurrow an instance comes back with its data when it has
 RDB or AOF persistence, and empty without, as a Redis cluster does (§8, Across a restart). The
 console's **Memorystore for Valkey** page lists, creates (either mode), edits and deletes
@@ -692,8 +849,8 @@ migrating, **Finish migration**; **Enable in-transit encryption** with **Seconda
 TLS secondary (`TestConsoleValkeyReplicationMigrationVersions`, `TestConsoleValkeySecondaryWithTLS`,
 `TestMemorystoreValkeySecondaryThroughThePage`).
 
-Not served: node types whose size is not modelled here and server CA modes, each 501 with the
-reason.
+Not served: node types whose size is not modelled here, 501 with the reason. Server CA modes are
+served since #1918 (§8).
 
 `TOKEN_AUTH`, backups (`BackupInstance`, `ListBackupCollections`, `GetBackupCollection`,
 `ListBackups`, `GetBackup`, `DeleteBackup`, `ExportBackup`, `automated_backup_config`) and

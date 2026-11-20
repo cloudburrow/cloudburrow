@@ -458,6 +458,74 @@
         "updateFeed": "docker-hub-tags",
         "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect`."
       },
+      "cloudSQLServer2017": {
+        "$comment": "SQL Server 2017 14.0.3570.2, the server of a Cloud SQL for SQL Server instance of a SQLSERVER_2017_* version (#1916); pulled by a node only when one is created by a user who accepted Microsoft's licence. NOT a Google-published component. The digest is the tag's one linux/amd64 OCI manifest, read from the registry's manifest API without pulling (2026-11-19).",
+        "image": "mcr.microsoft.com/mssql/server:2017-latest",
+        "version": "14.0.3570.2",
+        "digest": "sha256:5f6fd78f8752390dbd3584b91dee463f1f4b2b30beef9af3fd35753d32940c52",
+        "source": "https://mcr.microsoft.com/en-us/artifact/mar/mssql/server",
+        "license": "Proprietary: Microsoft SQL Server End-User Licensing Agreement (https://go.microsoft.com/fwlink/?LinkId=746388), which the user who provisions an instance accepts; CloudBurrow never accepts it",
+        "redistribution": "not-redistributed",
+        "redistributionPlan": "Pulled from Microsoft's registry by digest at run time, and started only with the user's own acceptance of the licence.",
+        "platforms": [
+          "linux/amd64"
+        ],
+        "provides": "A real SQL Server for a created Cloud SQL for SQL Server instance. NOT the Cloud SQL Admin API.",
+        "verification": "image-digest",
+        "updateFeed": "mcr-tags",
+        "skipDiscovery": "Microsoft Container Registry tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest from https://mcr.microsoft.com/v2/mssql/server/manifests/2017-latest."
+      },
+      "cloudSQLServer2019": {
+        "$comment": "SQL Server 2019 15.0.4510.2, the server of a Cloud SQL for SQL Server instance of a SQLSERVER_2019_* version (#1916); pulled by a node only when one is created by a user who accepted Microsoft's licence. NOT a Google-published component. The digest is the tag's one linux/amd64 OCI manifest, read from the registry's manifest API without pulling (2026-11-19).",
+        "image": "mcr.microsoft.com/mssql/server:2019-latest",
+        "version": "15.0.4510.2",
+        "digest": "sha256:debdc21628cddd1a4433371c601c8dee9bad3533ae8b18fe9dc8c5596368b10d",
+        "source": "https://mcr.microsoft.com/en-us/artifact/mar/mssql/server",
+        "license": "Proprietary: Microsoft SQL Server End-User Licensing Agreement (https://go.microsoft.com/fwlink/?LinkId=746388), which the user who provisions an instance accepts; CloudBurrow never accepts it",
+        "redistribution": "not-redistributed",
+        "redistributionPlan": "Pulled from Microsoft's registry by digest at run time, and started only with the user's own acceptance of the licence.",
+        "platforms": [
+          "linux/amd64"
+        ],
+        "provides": "A real SQL Server for a created Cloud SQL for SQL Server instance. NOT the Cloud SQL Admin API.",
+        "verification": "image-digest",
+        "updateFeed": "mcr-tags",
+        "skipDiscovery": "Microsoft Container Registry tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest from https://mcr.microsoft.com/v2/mssql/server/manifests/2019-latest."
+      },
+      "cloudSQLServer2022": {
+        "$comment": "SQL Server 2022 16.0.4325.4, the server of a Cloud SQL for SQL Server instance of a SQLSERVER_2022_* version (#1916); pulled by a node only when one is created by a user who accepted Microsoft's licence. NOT a Google-published component. The digest is the tag's one linux/amd64 OCI manifest, read from the registry's manifest API without pulling (2026-11-19).",
+        "image": "mcr.microsoft.com/mssql/server:2022-latest",
+        "version": "16.0.4325.4",
+        "digest": "sha256:4525e3efac9f3e241cb003bb2ff2a82818b502f37e12049d788b1a9fa7e13b7f",
+        "source": "https://mcr.microsoft.com/en-us/artifact/mar/mssql/server",
+        "license": "Proprietary: Microsoft SQL Server End-User Licensing Agreement (https://go.microsoft.com/fwlink/?LinkId=746388), which the user who provisions an instance accepts; CloudBurrow never accepts it",
+        "redistribution": "not-redistributed",
+        "redistributionPlan": "Pulled from Microsoft's registry by digest at run time, and started only with the user's own acceptance of the licence.",
+        "platforms": [
+          "linux/amd64"
+        ],
+        "provides": "A real SQL Server for a created Cloud SQL for SQL Server instance. NOT the Cloud SQL Admin API.",
+        "verification": "image-digest",
+        "updateFeed": "mcr-tags",
+        "skipDiscovery": "Microsoft Container Registry tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest from https://mcr.microsoft.com/v2/mssql/server/manifests/2022-latest."
+      },
+      "cloudSQLServer2025": {
+        "$comment": "SQL Server 2025 17.0.5065.9, the server of a Cloud SQL for SQL Server instance of a SQLSERVER_2025_* version (#1916); pulled by a node only when one is created by a user who accepted Microsoft's licence. NOT a Google-published component. The digest is the tag's one linux/amd64 OCI manifest, read from the registry's manifest API without pulling (2026-11-19).",
+        "image": "mcr.microsoft.com/mssql/server:2025-latest",
+        "version": "17.0.5065.9",
+        "digest": "sha256:05644dad1266ca3d445d1e8f6d2ebb9a6a03df9a39376e0f7b48917356dca9d9",
+        "source": "https://mcr.microsoft.com/en-us/artifact/mar/mssql/server",
+        "license": "Proprietary: Microsoft SQL Server End-User Licensing Agreement (https://go.microsoft.com/fwlink/?LinkId=746388), which the user who provisions an instance accepts; CloudBurrow never accepts it",
+        "redistribution": "not-redistributed",
+        "redistributionPlan": "Pulled from Microsoft's registry by digest at run time, and started only with the user's own acceptance of the licence.",
+        "platforms": [
+          "linux/amd64"
+        ],
+        "provides": "A real SQL Server for a created Cloud SQL for SQL Server instance. NOT the Cloud SQL Admin API.",
+        "verification": "image-digest",
+        "updateFeed": "mcr-tags",
+        "skipDiscovery": "Microsoft Container Registry tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest from https://mcr.microsoft.com/v2/mssql/server/manifests/2025-latest."
+      },
       "cloudSQLMySQL80": {
         "$comment": "MySQL 8.0.46, the server of a Cloud SQL Admin API instance created with that databaseVersion (#1381); pulled by a node only when one is created. NOT a Google-published component.",
         "image": "mysql:8.0",
@@ -652,6 +720,13 @@
         "license": "BSD-3-Clause",
         "verification": "go.sum",
         "notes": "Promoted from indirect to direct for h2c, which lets Secret Manager serve gRPC and JSON on one port. Same version as before; no new dependency was added."
+      },
+      "goMSSQL": {
+        "module": "github.com/microsoft/go-mssqldb",
+        "version": "1.10.0",
+        "license": "BSD-3-Clause",
+        "verification": "go.sum",
+        "notes": "Cloud SQL for SQL Server (#1916): internal/service/sqladmin reaches a SQL Server instance's server as sa, to make its sqlserver user, databases, users and flags, as pgx and go-sql-driver/mysql reach PostgreSQL and MySQL. Microsoft's own pure-Go driver; Google publishes none. Only its root package is imported (no Azure or Kerberos packages)."
       },
       "goCreackPty": {
         "module": "github.com/creack/pty",
@@ -979,7 +1054,7 @@
         "notes": "Debian 13 rather than 12: Abseil needs C++20 <source_location>, absent from bookworm's default clang 14 and present in trixie's default clang 19.1.7. Measured from the shipped image on arm64 CPU, warm cache, 144-token generation: 78.43 tok/s prefill, 31.98 tok/s decode, 0.39 s to first token. Build: 6m17s from a cold Docker cache on an Apple M4 Max with 16 CPUs; image 274 MB.",
         "skipDiscovery": "Pinned by commit, not by release tag: releases publish no Linux artifact, so the tag is not what is consumed.",
         "runtimeLibraries": "litert_lm_main links libGemmaModelConstraintProvider.so, which upstream ships prebuilt under prebuilt/linux_{arm64,x86_64}/ and locates through a RUNPATH into Bazel's output tree. The runtime image must stage those libraries explicitly; copying only the binary builds an image that fails on first run.",
-        "binaries": "cloudburrow_generate (generation, verified: deploy/litert-lm/runner, CloudBurrow's Apache-2.0 derivative of litert_lm_main.cc on LiteRT-LM's C++ API, setting the sampler, the token limit and llguidance constraints per request, #1797, #1779), litert_lm_main (upstream's, kept in the image) and embedding_litert_lm_main (embeddings, runs but has no compatible model)",
+        "binaries": "cloudburrow_generate (generation, verified: deploy/litert-lm/runner, CloudBurrow's Apache-2.0 derivative of litert_lm_main.cc on LiteRT-LM's C++ API, setting the sampler, the token limit and llguidance constraints per request, #1797, #1779; whole conversations with tools, images, presence/frequency penalties and token counts over --request_stdin, #1937, built with --define=LITERT_LM_FST_CONSTRAINTS_DISABLED=1 so the LLGuidance tool-call grammar applies tool_choice), litert_lm_main (upstream's, kept in the image) and embedding_litert_lm_main (embeddings, runs but has no compatible model)",
         "transitive": "Constrained decoding links upstream's own llguidance dependency (guidance-ai/llguidance, MIT), which LiteRT-LM's Bazel workspace fetches and builds; CloudBurrow adds no dependency of its own"
       },
       "litertLMBase": {
@@ -1037,7 +1112,7 @@
         "gated": false,
         "license": "gemma",
         "redistribution": "downloaded by the developer; not redistributed",
-        "verification": "downloaded-and-run",
+        "verification": "downloaded-and-run; #1937 ran it at Hugging Face revision 2d74ac41a33d7da82f39f7d5720a04c68514a103 (SHA-256 181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c, 2026-11-19; the repository then listed license apache-2.0), text, tool calls and its bundled vision encoder",
         "skipDiscovery": "Hugging Face repository, not a GitHub release.",
         "artifactVerification": "Filename listed from the Hugging Face API rather than inferred: this repository does not use the google/ repositories' -int4 suffix, and the inferred name returned 404. Re-checked by TestCatalogArtifactsExistUpstream."
       },
@@ -1165,6 +1240,26 @@
         "updateFeed": "github-releases",
         "verification": "image-digest",
         "digestNote": "The registry lists this manifest under infrastructure-public-image-f1fbebc, v0.64.0 and latest; upstream cloudbuild.yaml:17-29 tags each build infrastructure-public-image-$SHORT_SHA."
+      },
+      "iso14496_26Conformance": {
+        "version": "ISO/IEC 14496-26:2024 (2nd edition), mpeg4audio-conformance2ndEd_20230125",
+        "source": "https://standards.iso.org/iso-iec/14496/-26/ed-2/en/",
+        "license": "ISO copyright; published on ISO's Publicly Available Standards server for conformance testing",
+        "redistribution": "never committed, never shipped: fetched at test time into the user's cache directory (os.UserCacheDir()/cloudburrow-test/iso-14496-26-ed2), by HTTP range requests out of the zips, only when CLOUDBURROW_TEST_DOWNLOADS is set",
+        "scope": "test-only",
+        "usedBy": "third_party/aac-go TestPSFullConformance and test/compat TestEmbedContentEmbedsAFullParametricStereoTrackThroughThePredictionClient (#1754), through internal/isoconformance",
+        "verification": "checksum",
+        "skipDiscovery": "A dated conformance package on ISO's server, not a release depcheck can compare; re-pinned by hand if ISO republishes it (the zips' sizes are pinned too).",
+        "zipBytes": {"compressedMp4.zip": 1207540409, "referencesWav.zip": 9849662301},
+        "files": [
+          {"zip": "compressedMp4.zip", "member": "../mpeg4audio-conformance2ndEd_20230125/compressedMp4/al_sbr_ps_03.mp4", "bytes": 28612, "sha256": "717153ee39f505e897e3dc22357b39dbf0470c8033c7e0c76d5b3b68d6d8e238", "md5": "17f7d06f1c0dee51e7ca4a01d06b453b"},
+          {"zip": "compressedMp4.zip", "member": "../mpeg4audio-conformance2ndEd_20230125/compressedMp4/al_sbr_ps_04.mp4", "bytes": 28612, "sha256": "89669b9f796678db2a9bf13cc33a0617e6864bf1b0152fa717ba3616d869a749", "md5": "596100860fe4ed5e53fcfcd5a1648f73"},
+          {"zip": "compressedMp4.zip", "member": "../mpeg4audio-conformance2ndEd_20230125/compressedMp4/al_sbr_ps_06.mp4", "bytes": 56598, "sha256": "42d273c6260d2541d07e297257aa3238ebbcc1cb9eac5cf71bbfba69a6238132", "md5": "726dd94f7c29da1dc11314c837c37400"},
+          {"zip": "referencesWav.zip", "member": "../mpeg4audio-conformance2ndEd_20230125/referencesWav/add-opt/al_sbr_ps_03_ur.wav", "bytes": 1302716, "sha256": "3b905534a0e90922dcde26048a0023f405bd1f496d6e35586fddda5502dbaafa", "md5": "0f4d0ddcd52d8ca7ea4de16a3c6aefd1"},
+          {"zip": "referencesWav.zip", "member": "../mpeg4audio-conformance2ndEd_20230125/referencesWav/add-opt/al_sbr_ps_04_ur.wav", "bytes": 1302716, "sha256": "d00d6d52a362a31b362010e30f422898eb48ecd8829cfdbbbe0fabd927c41d35", "md5": "8d885cbc26f0a2764f83d17522de6562"},
+          {"zip": "referencesWav.zip", "member": "../mpeg4audio-conformance2ndEd_20230125/referencesWav/add-opt/al_sbr_ps_06_ur.wav", "bytes": 2605244, "sha256": "e2ef76b498971db8871190e2102eadc747870ca00c83d0e9add7fb9be7d4e817", "md5": "a170700536bd15130a58d2cbe22ee99d"}
+        ],
+        "notes": "HE-AAC v2 streams with parametric stereo beyond baseline (fine IID and mixing B; IPD/OPD; 34 bands) and their unrestricted-PS reference decodes. md5 is ISO's own (mpeg4audio-conformance2ndEd_20230125.md5); sha256 was measured on the members downloaded 2026-11-19. internal/isoconformance holds the same pins (TestDependenciesRecordThePins)."
       }
     },
     "realTools": {
@@ -1204,6 +1299,78 @@
         "verification": "lock-file-hashes",
         "digest": null,
         "notes": "The lock file carries each registry's hashes for linux_amd64, linux_arm64, darwin_amd64 and darwin_arm64; OpenTofu's registry serves different packages, so its hashes differ from Terraform's. init installs the provider only if its package matches a locked hash."
+      }
+    },
+    "scanning": {
+      "$comment": "Artifact Registry's vulnerability scanning (#1912): downloaded by `cloudburrow prefetch --vulnerability-scanning`, each file checked against these SHA-256s (internal/osvscan/pins.go holds the same values; a test compares them), and run offline. Since #1917 each release mirrors the four scanner binaries and the snapshots of internal/osvscan's Mirrored ecosystems as its own assets (release.yml osv-mirror, tools/osvmirror stage), and prefetch tries that release, then the latest one, before upstream; whichever serves a file, it must match the SHA-256 here.",
+      "osvScanner": {
+        "version": "v2.7.1",
+        "source": "https://github.com/google/osv-scanner",
+        "license": "Apache-2.0",
+        "redistribution": "mirrored unmodified as release assets osv-scanner-v2.7.1-<os>_<arch> (#1917), with osv-mirror-NOTICE.txt (Apache-2.0, a copy in LICENSE); prefetch tries the CloudBurrow release first and the project's GitHub release after",
+        "updateFeed": "github-releases",
+        "verification": "release-checksum",
+        "digest": null,
+        "checksums": {
+          "osv-scanner_darwin_amd64": "sha256:b8420d5485ba792626315f1bf9a5a2046e971d38eea75bf9090c38852dbc3b1b",
+          "osv-scanner_darwin_arm64": "sha256:b22c02877a811c8f78956e8643efa554932b7378f590d13f8e97d4e9448a29f3",
+          "osv-scanner_linux_amd64": "sha256:fb7dab19a8bd9bbe5c3189f09d4b7ee1820c9553a23bac202648a56efd2f6ee8",
+          "osv-scanner_linux_arm64": "sha256:983d22fbad9724514e3fcc6acc83b5fa64c5ffa6b0d9f510028f22c1b223ff81"
+        },
+        "sizes": {
+          "osv-scanner_darwin_amd64": 59352784,
+          "osv-scanner_darwin_arm64": 55745714,
+          "osv-scanner_linux_amd64": 58187936,
+          "osv-scanner_linux_arm64": 54198432
+        },
+        "notes": "SHA-256s are the release's osv-scanner_SHA256SUMS entries, which match the assets' GitHub digests. Run as `scan image --archive --offline --all-packages` with OSV_SCANNER_LOCAL_DB_CACHE_DIRECTORY at the prefetched snapshot and every proxy variable at 127.0.0.1:9."
+      },
+      "osvDatabase": {
+        "version": "2026-11-19",
+        "source": "https://google.github.io/osv.dev/data/#data-dumps",
+        "license": "mixed: each OSV record keeps its source database's licence (for example CC-BY-4.0 for the GitHub Advisory Database, the Go vulnerability database and PyPA's advisory database); the distributions' trackers (Alpine secdb, Debian security tracker, Ubuntu CVE tracker) set their own terms",
+        "redistribution": "Alpine, Debian, Go, Maven, npm and PyPI are mirrored unmodified as release assets osv-db-<ecosystem>-<sha256 prefix>.zip (#1917), with osv-mirror-NOTICE.txt naming the sources and their licences; Ubuntu (820 MB) is fetched from OSV's bucket only. Prefetch tries the CloudBurrow release first and OSV's bucket after",
+        "updateFeed": "none",
+        "skipDiscovery": "A data snapshot, not a release: OSV rewrites each ecosystem's all.zip several times a day. The pin is an object generation of the versioned bucket osv-vulnerabilities, which keeps old generations for about a week, so .github/workflows/osv-pins.yml moves the pin (pins.go and here together, by tools/osvmirror bump) once it is three days old and proposes the change on a branch auto/osv-pins-<date>; each release mirrors its pins so they outlive the week.",
+        "verification": "sha256-on-download",
+        "digest": null,
+        "snapshots": {
+          "Alpine": {
+            "url": "https://osv-vulnerabilities.storage.googleapis.com/Alpine/all.zip?generation=1795080781716943",
+            "sha256": "sha256:82c1e6b3a170cdc7e663061fc3a766a6c90ec73ac071aa34403bebaed0cca457",
+            "size": 9276935
+          },
+          "Debian": {
+            "url": "https://osv-vulnerabilities.storage.googleapis.com/Debian/all.zip?generation=1795096995130005",
+            "sha256": "sha256:6005ba6323158727283dac884ff01b5693fc57861afb046c85ce2bffe79bc576",
+            "size": 82263485
+          },
+          "Go": {
+            "url": "https://osv-vulnerabilities.storage.googleapis.com/Go/all.zip?generation=1795050195126703",
+            "sha256": "sha256:525f77fa536859d59215442f6ba98caf100ca7f1bef2dd9a242d9f3fb0f89757",
+            "size": 12956844
+          },
+          "Maven": {
+            "url": "https://osv-vulnerabilities.storage.googleapis.com/Maven/all.zip?generation=1795051974553992",
+            "sha256": "sha256:fd1c96321a41c535c3f4cab7fc4db24f46c659e143eb62493c1a634a917f1c97",
+            "size": 10547334
+          },
+          "PyPI": {
+            "url": "https://osv-vulnerabilities.storage.googleapis.com/PyPI/all.zip?generation=1795082587433272",
+            "sha256": "sha256:51d4295bbe14768b99f0b8b91b01b708d8230ac296c8722cc5e29e66d28e8ee4",
+            "size": 38075455
+          },
+          "npm": {
+            "url": "https://osv-vulnerabilities.storage.googleapis.com/npm/all.zip?generation=1795095210470062",
+            "sha256": "sha256:0601339e91c58525433117f107327a55c96a060534c5614ee6375f6f7bf366f9",
+            "size": 221817800
+          },
+          "Ubuntu": {
+            "url": "https://osv-vulnerabilities.storage.googleapis.com/Ubuntu/all.zip?generation=1795077206037621",
+            "sha256": "sha256:7490ea001180541e8bb10acae93aff85ca368842986cd4d22e68b9ce82d7fb6a",
+            "size": 819766997
+          }
+        }
       }
     }
   },

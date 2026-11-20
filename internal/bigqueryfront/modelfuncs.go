@@ -33,7 +33,8 @@ var mlFunctionsServed = map[string]bool{"PREDICT": true, "EVALUATE": true, "WEIG
 	"CONFUSION_MATRIX": true, "ROC_CURVE": true, "CENTROIDS": true, "PRINCIPAL_COMPONENTS": true, "PRINCIPAL_COMPONENT_INFO": true, "RECOMMEND": true, "FEATURE_IMPORTANCE": true,
 	"FORECAST": true, "EXPLAIN_FORECAST": true, "DETECT_ANOMALIES": true, "ARIMA_EVALUATE": true, "ARIMA_COEFFICIENTS": true, "HOLIDAY_INFO": true,
 	"EXPLAIN_PREDICT": true, "GLOBAL_EXPLAIN": true, "RECONSTRUCTION_LOSS": true, "GENERATE_TEXT": true, "GENERATE_EMBEDDING": true,
-	"ANNOTATE_IMAGE": true, "TRANSCRIBE": true, "TRANSLATE": true, "UNDERSTAND_TEXT": true} // modelservice.go, #1773, #1799
+	"ANNOTATE_IMAGE": true, "TRANSCRIBE": true, "TRANSLATE": true, "UNDERSTAND_TEXT": true, "PROCESS_DOCUMENT": true, // modelservice.go, #1773, #1799
+	"GET_INSIGHTS": true, "TRANSFORM": true} // modelcontrib.go, modeltransformonly.go, #1929
 
 // mlCall is one ML.<fn>(MODEL ...) call in a query's text.
 type mlCall struct {
@@ -43,7 +44,10 @@ type mlCall struct {
 	// table is the TABLE argument's path, or nil (ML.ANNOTATE_IMAGE's
 	// object table, modelservice.go).
 	table []string
-	struc map[string]string
+	// objectQuery is ML.PROCESS_DOCUMENT's query over its object table
+	// (modelprocessdocument.go), whose table is then table.
+	objectQuery string
+	struc       map[string]string
 	// named are the named arguments (name => value), by lower-case name,
 	// each value's SQL text: ML.TRANSCRIBE's recognition_config (#1799).
 	named map[string]string
@@ -296,15 +300,19 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 		return true
 	}
 	if fn := aiFunction(text); fn != "" {
-		why := map[string]string{
-			"AI.COUNT_TOKENS": "the tokenizer is inside the local LiteRT-LM runtime, which publishes no count (its :countTokens is UNIMPLEMENTED, docs/generation.md), " +
-				"and a count made any other way would not be the model's",
-		}[fn]
-		if why == "" {
-			why = "not one of BigQuery's AI functions CloudBurrow serves: AI.GENERATE, AI.GENERATE_BOOL, AI.GENERATE_INT, AI.GENERATE_DOUBLE, AI.GENERATE_TEXT, " +
-				"AI.GENERATE_TABLE, AI.GENERATE_EMBEDDING, AI.EMBED, AI.SIMILARITY, AI.IF, AI.SCORE, AI.CLASSIFY, AI.AGG and AI.SEARCH run on the instance's local Vertex AI (#1765, #1771, #1772, #1777, #1778)"
-		}
+		why := "not one of BigQuery's AI functions CloudBurrow serves: AI.GENERATE, AI.GENERATE_BOOL, AI.GENERATE_INT, AI.GENERATE_DOUBLE, AI.GENERATE_TEXT, " +
+			"AI.GENERATE_TABLE, AI.GENERATE_EMBEDDING, AI.EMBED, AI.SIMILARITY, AI.IF, AI.SCORE, AI.CLASSIFY, AI.AGG, AI.SEARCH and AI.COUNT_TOKENS run on the instance's local Vertex AI (#1765, #1771, #1772, #1777, #1778, #1962)"
 		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: "+fn+": "+why+". Nothing was run.")
+		return true
+	}
+	// ML.TRANSFORM wherever it is, an ML.PREDICT's input among them
+	// (modeltransformonly.go, #1929).
+	if text, code, msg = f.expandMLTransform(r, q, text); code != 0 {
+		if code == 501 || code == 500 {
+			writeError(w, code, map[int]string{500: "internalError", 501: "notImplemented"}[code], msg)
+			return true
+		}
+		f.failBeforeRun(w, r, q, insert, "_cloudburrow", code, rowError{Reason: map[int]string{400: "invalidQuery", 403: "accessDenied", 404: "notFound"}[code], Message: msg})
 		return true
 	}
 	calls, msg := findMLCalls(text)
@@ -323,7 +331,7 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 				". CloudBurrow answers ML.PREDICT, ML.EVALUATE, ML.WEIGHTS, ML.FEATURE_INFO, ML.TRAINING_INFO, ML.CONFUSION_MATRIX, "+
 				"ML.ROC_CURVE, ML.CENTROIDS, ML.PRINCIPAL_COMPONENTS, ML.PRINCIPAL_COMPONENT_INFO, ML.RECOMMEND, ML.FEATURE_IMPORTANCE, ML.FORECAST, "+
 				"ML.EXPLAIN_FORECAST, ML.DETECT_ANOMALIES, ML.ARIMA_EVALUATE, ML.ARIMA_COEFFICIENTS, ML.HOLIDAY_INFO, ML.EXPLAIN_PREDICT, ML.GLOBAL_EXPLAIN, ML.RECONSTRUCTION_LOSS, "+
-				"ML.GENERATE_TEXT, ML.GENERATE_EMBEDDING, ML.ANNOTATE_IMAGE, ML.TRANSCRIBE, ML.TRANSLATE and ML.UNDERSTAND_TEXT. Nothing was run.")
+				"ML.GENERATE_TEXT, ML.GENERATE_EMBEDDING, ML.ANNOTATE_IMAGE, ML.TRANSCRIBE, ML.TRANSLATE, ML.UNDERSTAND_TEXT, ML.GET_INSIGHTS and ML.TRANSFORM. Nothing was run.")
 			return true
 		}
 		project, dataset, id, ok := f.resolveModel(c.path, q)
@@ -453,7 +461,19 @@ func (t mlTrained) encodedSQL(ref func(string) string) []string {
 			out = append(out, fmt.Sprintf("(CASE CAST(%s AS STRING)%s ELSE 0.0 END)", col, whens))
 			continue
 		}
-		for _, cat := range ft.Categories {
+		if ft.TargetEncoded {
+			whens := ""
+			for i, cat := range ft.Categories {
+				whens += fmt.Sprintf(" WHEN %s THEN %s", sqlString(cat), sqlF(ft.Targets[i]))
+			}
+			out = append(out, fmt.Sprintf("(CASE CAST(%s AS STRING)%s ELSE %s END)", col, whens, sqlF(ft.TargetPrior)))
+			continue
+		}
+		for i, cat := range ft.Categories {
+			if i+1 == ft.Dropped {
+				out = append(out, "0.0")
+				continue
+			}
 			out = append(out, fmt.Sprintf("IF(CAST(%s AS STRING) = %s, 1.0, 0.0)", col, sqlString(cat)))
 		}
 		if ft.NullSeen {
@@ -627,6 +647,12 @@ func (f front) mlSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall)
 	needInput := func() (string, int, string) {
 		return "", 400, "ML." + c.fn + " requires an input: a query in parentheses or TABLE name"
 	}
+	if c.fn == "TRANSFORM" && !c.ai {
+		return f.mlTransform(r, q, md, c) // modeltransformonly.go, #1929
+	}
+	if typ == "TRANSFORM_ONLY" && c.fn != "FEATURE_INFO" {
+		return unsupported()
+	}
 	if md.Remote != nil {
 		return f.remoteSubquery(r, q, md, c) // modelremote.go, #1760
 	}
@@ -642,12 +668,15 @@ func (f front) mlSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall)
 	if c.ai && c.fn == "GENERATE_EMBEDDING" {
 		return "", 501, "Not implemented here: AI.GENERATE_EMBEDDING of a " + typ + " model: CloudBurrow serves it on remote embedding models (#1772). Nothing was run."
 	}
-	if c.fn == "GENERATE_TEXT" || c.fn == "GENERATE_EMBEDDING" || c.fn == "GENERATE_TABLE" || c.fn == "ANNOTATE_IMAGE" || c.fn == "TRANSCRIBE" || c.fn == "TRANSLATE" || c.fn == "UNDERSTAND_TEXT" {
+	if c.fn == "GENERATE_TEXT" || c.fn == "GENERATE_EMBEDDING" || c.fn == "GENERATE_TABLE" || c.fn == "ANNOTATE_IMAGE" || c.fn == "TRANSCRIBE" || c.fn == "TRANSLATE" || c.fn == "UNDERSTAND_TEXT" || c.fn == "PROCESS_DOCUMENT" {
 		fname := "ML." + c.fn
 		if c.ai {
 			fname = "AI." + c.fn
 		}
 		return "", 400, "Function " + fname + " is only supported for remote models"
+	}
+	if typ == "CONTRIBUTION_ANALYSIS" || c.fn == "GET_INSIGHTS" {
+		return f.contribSubquery(r, q, md, c) // modelcontrib.go, #1929
 	}
 	if md.ONNX != nil {
 		return f.onnxSubquery(r, q, md, c) // modelonnx.go, #1711
@@ -670,6 +699,9 @@ func (f front) mlSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall)
 		}
 		return f.arimaSubquery(r, q, md, c)
 	}
+	if c.fn == "DETECT_ANOMALIES" && anomalyModel(typ) {
+		return f.detectAnomalies(r, q, md, c) // modelanomaly.go, #1929
+	}
 	if typ == "AUTOENCODER" && c.fn != "TRAINING_INFO" && c.fn != "FEATURE_INFO" {
 		return f.autoencoderSubquery(r, q, md, c) // modeldnn.go
 	}
@@ -678,12 +710,7 @@ func (f front) mlSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall)
 		return unsupported()
 	case "EXPLAIN_PREDICT", "GLOBAL_EXPLAIN":
 		return f.explainSubquery(r, q, md, c)
-	case "DETECT_ANOMALIES":
-		if typ == "KMEANS" || typ == "PCA" {
-			return "", 501, "Not implemented here: ML.DETECT_ANOMALIES of a " + typ + " model: CloudBurrow detects anomalies with ARIMA_PLUS models. Nothing was run."
-		}
-		return unsupported()
-	case "RECOMMEND", "FORECAST", "EXPLAIN_FORECAST", "ARIMA_EVALUATE", "ARIMA_COEFFICIENTS", "HOLIDAY_INFO":
+	case "RECOMMEND", "DETECT_ANOMALIES", "FORECAST", "EXPLAIN_FORECAST", "ARIMA_EVALUATE", "ARIMA_COEFFICIENTS", "HOLIDAY_INFO":
 		return unsupported()
 	case "FEATURE_IMPORTANCE":
 		if !isTreeModel(typ) {
@@ -1032,38 +1059,21 @@ func (f front) mlSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall)
 		if typ == "KMEANS" || typ == "PCA" || isTreeModel(typ) || isDNN(typ) {
 			return unsupported()
 		}
-		if t.multiclass() {
-			return "", 501, "Not implemented here: ML.WEIGHTS of a multiclass LOGISTIC_REG model: BigQuery does not document its output's " +
-				"per-class layout in the detail a faithful result needs. ML.PREDICT, ML.EVALUATE and ML.CONFUSION_MATRIX serve it. Nothing was run."
-		}
 		std := strings.EqualFold(c.struc["standardize"], "TRUE")
-		var rows []string
-		intercept := t.Intercept
-		for _, ft := range t.Features {
-			if ft.numeric() {
-				wt := ft.Weight
-				if !std {
-					if ft.Stddev == 0 {
-						wt = 0
-					} else {
-						wt = ft.Weight / ft.Stddev
-						intercept -= wt * ft.Mean
-					}
-				}
-				rows = append(rows, fmt.Sprintf("(%s, %s, %s[])", sqlString(ft.Name), sqlF(wt), categoryWeightsType))
-				continue
-			}
-			var cw []string
-			for i, cat := range ft.Categories {
-				cw = append(cw, fmt.Sprintf("(%s, %s)", sqlString(cat), sqlF(ft.CategoryWeights[i])))
-			}
-			if ft.NullSeen {
-				cw = append(cw, fmt.Sprintf("(NULL, %s)", sqlF(ft.CategoryWeights[len(ft.CategoryWeights)-1])))
-			}
-			rows = append(rows, fmt.Sprintf("(%s, NULL, %s[%s])", sqlString(ft.Name), categoryWeightsType, strings.Join(cw, ", ")))
+		if !t.multiclass() {
+			return mlRowsSubquery("STRUCT<processed_input STRING, weight FLOAT64, category_weights "+categoryWeightsType+">",
+				t.weightRows(t.weightVector(), std, "")), 0, ""
 		}
-		rows = append(rows, fmt.Sprintf("('__INTERCEPT__', %s, %s[])", sqlF(intercept), categoryWeightsType))
-		return mlRowsSubquery("STRUCT<processed_input STRING, weight FLOAT64, category_weights ARRAY<STRUCT<category STRING, weight FLOAT64>>>", rows), 0, ""
+		// A multiclass model's: a row per class and processed_input, the
+		// class in class_label (bigqueryml-syntax-weights, #1929). The rows
+		// of each class in the model's class order, each class's
+		// __INTERCEPT__ last, as a binary model's are (UNVERIFIED, docs
+		// re-read 2026-11-19: they give no order and no intercept row).
+		var rows []string
+		for k, w := range t.ClassWeights {
+			rows = append(rows, t.weightRows(w, std, ", "+sqlString(t.Classes[k]))...)
+		}
+		return mlRowsSubquery("STRUCT<processed_input STRING, weight FLOAT64, category_weights "+categoryWeightsType+", class_label STRING>", rows), 0, ""
 	case "FEATURE_INFO":
 		var rows []string
 		for _, ft := range t.Features {
@@ -1101,6 +1111,43 @@ func (f front) mlSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall)
 		return mlRowsSubquery("STRUCT<training_run INT64, iteration INT64, loss FLOAT64, eval_loss FLOAT64, learning_rate FLOAT64, duration_ms INT64>", rows), 0, ""
 	}
 	return "", 501, "Not implemented here: ML." + c.fn
+}
+
+// weightRows are ML.WEIGHTS' rows of the weight vector w (laid out as the
+// encoded row, the intercept first), each ended by extra: a feature's
+// weight, made per original unit unless std, or its category weights; then
+// __INTERCEPT__.
+func (t mlTrained) weightRows(w []float64, std bool, extra string) []string {
+	var rows []string
+	intercept := w[0]
+	j := 1
+	for _, ft := range t.Features {
+		if ft.numeric() {
+			wt := w[j]
+			j++
+			if !std {
+				if ft.Stddev == 0 {
+					wt = 0
+				} else {
+					wt /= ft.Stddev
+					intercept -= wt * ft.Mean
+				}
+			}
+			rows = append(rows, fmt.Sprintf("(%s, %s, %s[]%s)", sqlString(ft.Name), sqlF(wt), categoryWeightsType, extra))
+			continue
+		}
+		var cw []string
+		for _, cat := range ft.Categories {
+			cw = append(cw, fmt.Sprintf("(%s, %s)", sqlString(cat), sqlF(w[j])))
+			j++
+		}
+		if ft.NullSeen {
+			cw = append(cw, fmt.Sprintf("(NULL, %s)", sqlF(w[j])))
+			j++
+		}
+		rows = append(rows, fmt.Sprintf("(%s, NULL, %s[%s]%s)", sqlString(ft.Name), categoryWeightsType, strings.Join(cw, ", "), extra))
+	}
+	return append(rows, fmt.Sprintf("('__INTERCEPT__', %s, %s[]%s)", sqlF(intercept), categoryWeightsType, extra))
 }
 
 // distanceSQL is the SQL of the distance from the encoded row enc to the

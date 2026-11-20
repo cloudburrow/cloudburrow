@@ -48,8 +48,8 @@ func TestTheTerraformProviderNeverPointsAtGoogle(t *testing.T) {
 				}
 			}
 			// The Resource Manager rows are always set: the project registry
-			// always runs, whichever services are enabled: v1, Cloud Billing, IAM and IAM beta (#1743), v3, v3 (resource_manager3_), tags and tags_location (#1578), and so does Service Usage.
-			if set+len(skipped) != rows+9 {
+			// always runs, whichever services are enabled: v1, Cloud Billing, IAM and IAM beta (#1743), v3, v3 (resource_manager3_), tags and tags_location (#1578), and so do Service Usage and the API Keys API (#1915).
+			if set+len(skipped) != rows+10 {
 				t.Errorf("%v: %d set and %d named as skipped, want every enabled service accounted for", services, set, len(skipped))
 			}
 			if override != strings.Contains(body, "credentials  = null") {
@@ -68,6 +68,22 @@ func TestTheTerraformProviderNeverPointsAtGoogle(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("provider lacks %s:\n%s", want, body)
 		}
+	}
+}
+
+// TestTerraformGetsTheKubernetesEngineAPI (#1913): with gke enabled the
+// provider's container_custom_endpoint is the API's port, not skipped (it
+// was, with no port, so google_container_* went to Google, where egress
+// blocking refused it).
+func TestTerraformGetsTheKubernetesEngineAPI(t *testing.T) {
+	cfg := config.Default()
+	cfg.Services = []config.Service{config.ServiceGKE}
+	body, skipped := terraformProvider(cfg, false)
+	if want := `container_custom_endpoint = "http://127.0.0.1:9030/v1/"`; !strings.Contains(body, want) {
+		t.Errorf("provider lacks %s:\n%s", want, body)
+	}
+	if slices.Contains(skipped, config.ServiceGKE) {
+		t.Errorf("gke is named as skipped: %v", skipped)
 	}
 }
 

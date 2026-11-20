@@ -28,7 +28,9 @@ import (
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/callfront"
 	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
+	"github.com/cloudburrow/cloudburrow/internal/grafeas"
 	"github.com/cloudburrow/cloudburrow/internal/modelgarden"
+	"github.com/cloudburrow/cloudburrow/internal/service/gke"
 	"github.com/cloudburrow/cloudburrow/internal/service/kms"
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
 	"github.com/cloudburrow/cloudburrow/internal/service/privateca"
@@ -66,6 +68,11 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		t.Fatal(err)
 	}
 	privatecapb.RegisterCertificateAuthorityServiceServer(srv, pca.API())
+	gkeSrv, err := gke.NewServer(nil, gke.Options{Versions: []gke.Version{{GKE: "1.36.4-gke.0", Image: "kindest/node:v1.36.4"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gkeSrv.Register(srv)
 	rmReg := resourcemanager.New(store.NewMemory())
 	rmpb.RegisterProjectsServer(srv, resourcemanager.NewProjectsServer(rmReg))
 	rmpb.RegisterFoldersServer(srv, resourcemanager.NewFoldersServer(rmReg))
@@ -112,6 +119,7 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	runSrv.CloudBuild().Register(srv)
 	runSrv.SecureSourceManager(func() string { return "" }).Register(srv)
 	runSrv.DeveloperConnect().Register(srv)
+	grafeas.NewServer(grafeas.NewStore(nil)).Register(srv)
 	// FunctionService alone: its IAM and Locations mixins are KMS's above;
 	// and Cloud Functions v1 (#1428) over the same functions.
 	fns := runSrv.Functions(runSrv.Builds(nil, nil), func() string { return "" })
@@ -144,7 +152,7 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		// Cloud Identity's (#1812) is groups_methods.go's table, and
 		// TestCloudIdentityUnservedAre501 checks its 501s over HTTP
 		// (internal/service/resourcemanager).
-		if strings.HasPrefix(m, "sql.") || strings.HasPrefix(m, "serviceusage.") || strings.HasPrefix(m, "backupdr.") ||
+		if strings.HasPrefix(m, "sql.") || strings.HasPrefix(m, "serviceusage.") || strings.HasPrefix(m, "apikeys.") || strings.HasPrefix(m, "backupdr.") ||
 			strings.HasPrefix(m, "cloudidentity.") {
 			continue
 		}

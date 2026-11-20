@@ -19,8 +19,9 @@ import (
 
 var bdrTrialLocations = []string{"us", "eu", "asia"}
 
-// ListActions implements console.ListActor.
-func (backupDRProvider) ListActions(_ context.Context, project string) []console.Action {
+// overviewActions are the Overview page's own actions (#1844), which were
+// the Backup and DR page's (#1536).
+func (backupDRProvider) overviewActions(project string) []console.Action {
 	if project == "" {
 		return nil
 	}

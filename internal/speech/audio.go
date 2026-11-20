@@ -14,8 +14,8 @@ import (
 // the caller answers it 501.
 var ErrUnsupported = errors.New("unsupported audio")
 
-// ErrTooLong is audio longer than MaxSeconds, in the words ML.TRANSCRIBE's
-// page quotes for it.
+// ErrTooLong is audio longer than allowed (MaxSeconds unless the caller
+// names another limit), in the words ML.TRANSCRIBE's page quotes for it.
 var ErrTooLong = errors.New("The audio file cannot be processed in time.")
 
 // MaxSeconds is the longest audio BigQuery's ML.TRANSCRIBE processes: 30
@@ -24,7 +24,7 @@ const MaxSeconds = 30 * 60
 
 func unsupported(format string) error {
 	return fmt.Errorf("%w: %s audio has no local decoder in CloudBurrow (WAV of LINEAR16, MULAW or ALAW, headerless "+
-		"LINEAR16, MULAW and ALAW, MP3, and AAC in MP4, M4A or MOV are decoded)", ErrUnsupported, format)
+		"LINEAR16, MULAW and ALAW, FLAC, MP3, and AAC in MP4, M4A or MOV are decoded)", ErrUnsupported, format)
 }
 
 // sniff names the container of data as autoDecodingConfig detects it.
@@ -57,6 +57,11 @@ func sniff(b []byte) string {
 // ErrUnsupported is a format no local decoder reads; any other is data
 // that is not what the config says.
 func Decode(d speechconfig.Decoding, data []byte) ([]float32, error) {
+	return DecodeMax(d, data, MaxSeconds)
+}
+
+// DecodeMax is Decode for audio of at most maxSeconds.
+func DecodeMax(d speechconfig.Decoding, data []byte, maxSeconds int) ([]float32, error) {
 	if len(data) == 0 {
 		return nil, errors.New("the audio is empty")
 	}
@@ -82,6 +87,8 @@ func Decode(d speechconfig.Decoding, data []byte) ([]float32, error) {
 			break
 		}
 		mono, err = headerless(format, d.SampleRate, d.Channels, data)
+	case "FLAC":
+		mono, err = DecodeFLAC(data) // flac.go, #1799
 	case "MP3":
 		mono, err = embedding.DecodeAudio("audio/mpeg", data)
 	case "MP4_AAC", "M4A_AAC", "MOV_AAC":
@@ -98,12 +105,12 @@ func Decode(d speechconfig.Decoding, data []byte) ([]float32, error) {
 	}
 	if embedding.IsTooLong(err) {
 		return nil, fmt.Errorf("%w: %s audio longer than %d seconds: CloudBurrow's MP3 and AAC decoders stop there "+
-			"(WAV and headerless audio are read up to %d minutes)", ErrUnsupported, format, embedding.MaxAudioSeconds, MaxSeconds/60)
+			"(WAV and headerless audio are read up to %d minutes)", ErrUnsupported, format, embedding.MaxAudioSeconds, maxSeconds/60)
 	}
 	if err != nil {
 		return nil, err
 	}
-	if len(mono) > MaxSeconds*SampleRate {
+	if len(mono) > maxSeconds*SampleRate {
 		return nil, ErrTooLong
 	}
 	return mono, nil

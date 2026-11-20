@@ -23,9 +23,14 @@
 #              serves, for TestOneProjectNumberEverywhere, which compares
 #              its project number with Cloud Storage's service agent;
 #   served:    the remaining CloudBurrow-served APIs (kms, logging,
-#              privateca) and the
+#              privateca, gke) and the
 #              KMS restart probe, with Resource Manager as
-#              LOGGING_RESOURCEMANAGER for the Logging folder tests;
+#              LOGGING_RESOURCEMANAGER for the Logging folder tests and
+#              Service Usage as GKE_SERVICEUSAGE for gcloud container; the
+#              Kubernetes Engine API's tests make kind clusters beside the
+#              instance's (about 5 minutes on a laptop, and 20 GiB free,
+#              which ci.yml makes room for), and its console test runs in
+#              this shard's browser step;
 #   run:       Cloud Run with its Knative install; secretmanager too, for
 #              the two tests that read a secret from a revision, so its
 #              tests run here and in storage;
@@ -70,7 +75,9 @@ COMPAT_SHARDS="storage served run scale emulators memorystore sql acceptance iam
 # Logging's admin screens (TestLoggingAdmin*, #1226), and Secret Manager's
 # screens (TestSecretManager*, #1850), whose regional secrets and CMEK need
 # its Cloud KMS, and Eventarc's (TestEventarc*, #1877), whose triggers
-# deliver to a Cloud Run service; the BigQuery,
+# deliver to a Cloud Run service, and Document AI's and Speech-to-Text's
+# (TestDocumentAI*, TestSpeech*, #1930), served by the local AI
+# endpoint Cloud Run starts; the BigQuery,
 # Firestore, Datastore (#854) and Spanner screens and the Bigtable screen's
 # actions (#1198) only by the emulators shard's; the Memorystore screens
 # only by the memorystore shard's (#1568); and the Cloud SQL screens, MySQL
@@ -84,13 +91,22 @@ COMPAT_SHARDS="storage served run scale emulators memorystore sql acceptance iam
 # Pub/Sub and Logs Explorer pages run in storage, and
 # TestBigQueryScreensAreNamedAndLegible in emulators; the rest of the
 # console's screens are TestCloudRunAndCICDScreensMeetWCAG (run),
+# TestDocumentAIAndSpeechScreensMeetWCAG and
+# TestSpeechAdaptationScreensMeetWCAG (run),
 # TestCloudSQLAndBackupDRScreensMeetWCAG (sql),
 # TestSpannerAndTheEmulatorScreensMeetWCAG (emulators),
 # TestMemorystoreScreensMeetWCAG (memorystore) and
 # TestSecretsSchedulerTasksProjectsIAMAndAIScreensMeetWCAG (storage, which
 # serves Secret Manager, Cloud Scheduler and Cloud Tasks).
-COMPAT_BROWSER_SHARDS="storage run emulators memorystore sql"
-COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|LoggingAdmin|SecretManager|Eventarc)'
+# The served shard's instance serves the Kubernetes Engine API (#1913), so
+# the test that makes a cluster through the pages runs there, and
+# TestKubernetesEnginePagesThroughTheBrowser, which holds with and without
+# the API, runs there as well as in storage. Only the first is kept out of
+# storage (COMPAT_BROWSER_SERVED_ONLY_TESTS), where it would skip.
+COMPAT_BROWSER_SHARDS="storage served run emulators memorystore sql"
+COMPAT_BROWSER_SERVED_SHARD_TESTS='^Test(GKEServed|KubernetesEnginePages)'
+COMPAT_BROWSER_SERVED_ONLY_TESTS='^TestGKEServed'
+COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|LoggingAdmin|SecretManager|Eventarc|DocumentAI|Speech)'
 COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|Bigtable|Spanner)'
 COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS='^TestMemorystore'
 COMPAT_BROWSER_SQL_SHARD_TESTS='^Test(CloudSQL|BackupDR|PrivateCAKMS)'
@@ -137,7 +153,9 @@ compat_shard() {
       # privateca for the console's Certificate Authority Service page
       # (TestPrivateCAThroughThePage, #1834): PRIVATECA is not exported,
       # so its compat suite stays in served.
-      SERVICES=storage,pubsub,tasks,secretmanager,scheduler,logging,privateca
+      # kms for Cloud Storage's customer-managed keys (#1938), exported as
+      # CMEK_KMS only, so the KMS suite stays in served.
+      SERVICES=storage,pubsub,tasks,secretmanager,scheduler,logging,privateca,kms
       # The hooks are the #285 fixtures (two ready.d scripts, the second
       # creating a bucket, and a shutdown.d script checked after stop), and
       # the seed file names tasks and storage.
@@ -153,8 +171,9 @@ compat_shard() {
       # Cloud Logging as TASKS_LOGGING (#1256): only the Cloud Tasks
       # dispatch log test reads it, so the Logging tests run in served.
       # Service Usage (#1352), always served, with the Terraform and gcloud
-      # tests that need Cloud Storage beside it.
-      TEST_VARS+=,STORAGE,CORS_ORIGIN,PUBSUB,TASKS,SECRETS,SCHEDULER,TOFU,RESOURCEMANAGER,SERVICEUSAGE,TASKS_LOGGING
+      # tests that need Cloud Storage beside it; and the API Keys API
+      # (#1915), always served too.
+      TEST_VARS+=,STORAGE,CORS_ORIGIN,PUBSUB,TASKS,SECRETS,SCHEDULER,TOFU,RESOURCEMANAGER,SERVICEUSAGE,APIKEYS,TASKS_LOGGING,CMEK_KMS
       # The restart probes' fixtures, left just before stop so no
       # suite-level reset wipes them: Secret Manager (#483), a secret and a
       # version; Cloud Tasks and Cloud Scheduler (#596), a paused queue with
@@ -165,7 +184,12 @@ compat_shard() {
       PROBE_TESTS="TestSecretManagerAcrossRestart TestTasksAcrossRestart TestSchedulerAcrossRestart TestStorageAcrossRestart"
       PROBE_VARS=SECRETS,TASKS,SCHEDULER,STORAGE ;;
     served)
-      SERVICES=kms,logging,privateca
+      SERVICES=kms,logging,privateca,gke
+      # The Kubernetes Engine API (#1913): its clusters are kind clusters
+      # beside the instance's. Service Usage as GKE_SERVICEUSAGE, which
+      # `gcloud container clusters create` asks whether
+      # container.googleapis.com is enabled, so the Service Usage suite
+      # stays in storage.
       # Certificate Authority Service (#1834), in process like KMS.
       # Cloud KMS (#309) and Cloud Logging (#304). Resource Manager's tests
       # run in the storage shard; the Logging folder and organization tests
@@ -174,7 +198,7 @@ compat_shard() {
       # 38910752877: in storage gcloud had no logging override).
       # Cloud KMS Autokey's folder and project tests (#1568) make their
       # folder with it too.
-      TEST_VARS+=,KMS,LOGGING,LOGGING_RESOURCEMANAGER,PRIVATECA
+      TEST_VARS+=,KMS,LOGGING,LOGGING_RESOURCEMANAGER,PRIVATECA,GKE,GKE_SERVICEUSAGE
       # Cloud KMS (#418): a key with ENABLED, DISABLED and
       # DESTROY_SCHEDULED versions and a ciphertext.
       SETUP_TESTS="TestKMSRestartSetup"
@@ -218,6 +242,11 @@ compat_shard() {
       # (#1568): the customer-managed and regional secrets, Terraform's data
       # sources, Cloud Storage volumes and Pub/Sub build triggers.
       FIXTURES=(--cloudbuild-host-steps --appengine-url http://127.0.0.1:18506)
+      # Artifact Registry's cleanup policies run every minute rather than
+      # Google's "approximately one day" (#1897): `up` reads the variable,
+      # and TestArtifactRegistryCleanupPolicies, which skips without one
+      # of 2m or less, reads the same, so it runs here.
+      export CLOUDBURROW_ARTIFACT_REGISTRY_CLEANUP_INTERVAL=1m
       TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_FIRESTORE,RUN_KMS,RUN_SCHEDULER,RUN_LOGGING,RUN_BIGQUERY,RUN_SQLADMIN,RUN_RESOURCEMANAGER,RUN_SERVICEUSAGE,RUN_MYSQL,MYSQL_PASSWORD,BIGQUERY_PROJECT,APPENGINE_URL ;;
     scale)
       # The tests that take minutes each (#1821), split from run: Cloud
@@ -293,8 +322,11 @@ compat_shard() {
       # MEMORYSTORE_RESOURCEMANAGER, for the principals the IAM auth tests
       # grant the connect roles to (#1614), so the Resource Manager suite
       # stays in storage.
-      SERVICES=memorystore,storage,kms
-      TEST_VARS+=,MEMORYSTORE,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT,CMEK_KMS,MEMORYSTORE_RESOURCEMANAGER
+      # Certificate Authority Service as MEMORYSTORE_PRIVATECA, for a Redis
+      # cluster's customer-managed CA (#1907), so the privateca suite stays
+      # in its own shard.
+      SERVICES=memorystore,storage,kms,privateca
+      TEST_VARS+=,MEMORYSTORE,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT,CMEK_KMS,MEMORYSTORE_RESOURCEMANAGER,MEMORYSTORE_PRIVATECA
       # A created Memorystore instance follows the mode too (#1302), with RDB
       # persistence as well (#1384), and Redis clusters and Valkey instances
       # with and without persistence_config (#1557).
@@ -327,8 +359,10 @@ compat_shard() {
       # stays in its own shard. Service Usage, always served, as
       # SQL_SERVICEUSAGE, for gcloud privateca roots create's
       # generateServiceIdentity of the CA service agent (#1834).
-      SERVICES=cloudsql,cloudsql-mysql,backupdr,storage,secretmanager,kms,privateca
-      TEST_VARS+=,MYSQL,MYSQL_PASSWORD,CLOUDSQL,SQLADMIN,BACKUPDR,CMEK_KMS,CLOUDSQL_SECRETS,NOPUBSUB_STORAGE,SQL_RESOURCEMANAGER,SQL_SERVICEUSAGE,SQL_PRIVATECA
+      # Cloud Logging as SQL_LOGGING, for Backup and DR's job logs (#1924);
+      # LOGGING is not in TEST_VARS, so the Logging suites stay in theirs.
+      SERVICES=cloudsql,cloudsql-mysql,backupdr,storage,secretmanager,kms,privateca,logging
+      TEST_VARS+=,MYSQL,MYSQL_PASSWORD,CLOUDSQL,SQLADMIN,BACKUPDR,CMEK_KMS,CLOUDSQL_SECRETS,NOPUBSUB_STORAGE,SQL_RESOURCEMANAGER,SQL_SERVICEUSAGE,SQL_PRIVATECA,SQL_LOGGING
       # Cloud SQL for PostgreSQL (#701): a table with a row.
       SETUP_TESTS="TestCloudSQLRestartSetup"
       PROBE_TESTS="TestCloudSQLMySQLAcrossRestart TestCloudSQLAcrossRestart"

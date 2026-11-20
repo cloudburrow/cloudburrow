@@ -68,6 +68,9 @@ type Run struct {
 	Status  string // RUNNING, SUCCESSFUL or FAILED
 	Error   string
 	EndTime string
+	// SizeBytes is the size of the run's dump: what the backup stores
+	// (#1921).
+	SizeBytes int64
 }
 
 // CloudSQL is the Cloud SQL Admin API this service backs up.
@@ -136,6 +139,12 @@ type Server struct {
 	// hierarchy is Resource Manager's folders and organization, for their
 	// resourceBackupConfigs.fetch (#1536); nil refuses it. mu guards it.
 	hierarchy Hierarchy
+	// Wrap, when set before Start, wraps the API's handler: the gate
+	// refusing calls in a project where the API is disabled (#1914).
+	Wrap func(http.Handler) http.Handler
+	// jobLog writes a job's log entry to Cloud Logging (#1924); nil when
+	// it is not served. mu guards it.
+	jobLog func(JobLog)
 }
 
 // state is every record, as it is kept.
@@ -147,6 +156,8 @@ type state struct {
 	Backups      map[string]*backup      `json:"backups"`
 	// Trials are by location name (#1536).
 	Trials map[string]*trial `json:"trials,omitempty"`
+	// Jobs are the last 14 days' jobs, by jobId (#1924).
+	Jobs map[string]*Job `json:"jobs,omitempty"`
 }
 
 type vault struct {
@@ -156,6 +167,12 @@ type vault struct {
 	// vault's data key, wrapped by it.
 	KMSKey     string `json:",omitempty"`
 	WrappedKey []byte `json:",omitempty"`
+	// EffectiveTime is the retention lock's date (#1921): from then on
+	// the minimum enforced retention can only be increased, and the lock
+	// cannot be removed. Inheritance is backupRetentionInheritance, set
+	// at creation only.
+	EffectiveTime string `json:",omitempty"`
+	Inheritance   string `json:",omitempty"`
 }
 
 type rule struct {
@@ -168,8 +185,10 @@ type rule struct {
 type plan struct {
 	Name, Description, Vault, ResourceType, CreateTime, UpdateTime string
 	LogRetentionDays                                               int64
-	Rules                                                          []rule
-	Labels                                                         map[string]string
+	// MaxOnDemandDays is maxCustomOnDemandRetentionDays (#1923).
+	MaxOnDemandDays int64 `json:",omitempty"`
+	Rules           []rule
+	Labels          map[string]string
 	// Revision is the current revision's number: v0 at creation, one
 	// more per patch. Revisions are every revision's snapshot, oldest
 	// first.
@@ -234,7 +253,11 @@ func (s *Server) Start(context.Context) error {
 	s.ln = ln
 	// Loopback-only, but a rebound or cross-site page reaches
 	// loopback too (#676, #1586).
-	s.srv = &http.Server{Handler: hostguard.Wrap(s), ReadHeaderTimeout: 10 * time.Second}
+	var h http.Handler = s
+	if s.Wrap != nil {
+		h = s.Wrap(h)
+	}
+	s.srv = &http.Server{Handler: hostguard.Wrap(h), ReadHeaderTimeout: 10 * time.Second}
 	s.stop = make(chan struct{})
 	go func() { _ = s.srv.Serve(ln) }()
 	go s.schedule(s.stop)
@@ -589,8 +612,32 @@ func locationJSON(project, loc string) map[string]any {
 	return map[string]any{"name": "projects/" + project + "/locations/" + loc, "locationId": loc, "displayName": loc}
 }
 
-// Locations are the regions the service lists.
-var Locations = []string{"us-central1", "us-east1", "us-west1", "europe-west1", "asia-east1"}
+// Locations are the regions the service lists, then the multi-regions a
+// backup vault can be in (#1921): Google's backup vaults are in a region or
+// in the asia, eu or us multi-region, and Cloud SQL instances can be backed
+// up to a multi-region vault whose regions share their prefix
+// (https://docs.cloud.google.com/backup-disaster-recovery/docs/concepts/backup-vault).
+var Locations = append(append([]string{}, Regions...), "us", "eu", "asia")
+
+// Regions are the regions among Locations.
+var Regions = []string{"us-central1", "us-east1", "us-west1", "europe-west1", "asia-east1"}
+
+// MultiRegions are the multi-region locations, by the prefix of the
+// regions they span.
+var MultiRegions = map[string]string{"us": "us-", "eu": "europe-", "asia": "asia-"}
+
+// IsMultiRegion is whether loc is a multi-region.
+func IsMultiRegion(loc string) bool { _, ok := MultiRegions[loc]; return ok }
+
+// vaultServes is whether a vault in vaultLoc can hold the backups of a
+// plan in planLoc: the same region, or the multi-region spanning it.
+func vaultServes(vaultLoc, planLoc string) bool {
+	if vaultLoc == planLoc {
+		return true
+	}
+	pre, ok := MultiRegions[vaultLoc]
+	return ok && strings.HasPrefix(planLoc, pre)
+}
 
 func (s *Server) listLocations(project string) any {
 	out := []any{}
@@ -711,7 +758,13 @@ func (s *Server) vaultJSON(v *vault) map[string]any {
 		"state": "ACTIVE", "uid": v.UID, "deletable": deletable, "backupCount": strconv.Itoa(count),
 		"backupMinimumEnforcedRetentionDuration": v.MinRetention, "etag": strconv.Quote(v.UpdateTime),
 		"serviceAccount":    "service-backupdr@cloudburrow.iam.gserviceaccount.com",
-		"accessRestriction": v.AccessRestriction, "totalStoredBytes": "0"}
+		"accessRestriction": v.AccessRestriction, "totalStoredBytes": strconv.FormatInt(s.storedBytes(v.Name+"/"), 10)}
+	if v.EffectiveTime != "" {
+		out["effectiveTime"] = v.EffectiveTime
+	}
+	if v.Inheritance != "" {
+		out["backupRetentionInheritance"] = v.Inheritance
+	}
 	if v.Description != "" {
 		out["description"] = v.Description
 	}
@@ -735,6 +788,8 @@ func (s *Server) createVault(r *http.Request, loc string) (any, error) {
 		MinRetention      string            `json:"backupMinimumEnforcedRetentionDuration"`
 		AccessRestriction string            `json:"accessRestriction"`
 		EncryptionConfig  json.RawMessage   `json:"encryptionConfig"`
+		EffectiveTime     string            `json:"effectiveTime"`
+		Inheritance       string            `json:"backupRetentionInheritance"`
 	}
 	if err := decode(r, &body); err != nil {
 		return nil, err
@@ -742,8 +797,22 @@ func (s *Server) createVault(r *http.Request, loc string) (any, error) {
 	if body.MinRetention == "" {
 		return nil, invalid("backupVault.backupMinimumEnforcedRetentionDuration is required.")
 	}
-	if d, err := parseDuration(body.MinRetention); err != nil || d < 0 {
-		return nil, invalid("backupVault.backupMinimumEnforcedRetentionDuration %q is not a duration such as \"100000s\".", body.MinRetention)
+	if err := checkMinRetention(body.MinRetention); err != nil {
+		return nil, err
+	}
+	if body.EffectiveTime != "" {
+		t, err := s.checkLockTime(body.EffectiveTime)
+		if err != nil {
+			return nil, err
+		}
+		body.EffectiveTime = t
+	}
+	switch body.Inheritance {
+	case "", "BACKUP_RETENTION_INHERITANCE_UNSPECIFIED":
+		body.Inheritance = "INHERIT_VAULT_RETENTION"
+	case "INHERIT_VAULT_RETENTION", "MATCH_BACKUP_EXPIRE_TIME":
+	default:
+		return nil, invalid("backupVault.backupRetentionInheritance %q is not one of INHERIT_VAULT_RETENTION, MATCH_BACKUP_EXPIRE_TIME.", body.Inheritance)
 	}
 	switch body.AccessRestriction {
 	case "":
@@ -770,7 +839,8 @@ func (s *Server) createVault(r *http.Request, loc string) (any, error) {
 	}
 	now := s.stamp()
 	v := &vault{Name: name, Description: body.Description, Labels: body.Labels, CreateTime: now, UpdateTime: now,
-		UID: newID(), MinRetention: body.MinRetention, AccessRestriction: body.AccessRestriction, KMSKey: key, WrappedKey: wrapped}
+		UID: newID(), MinRetention: body.MinRetention, AccessRestriction: body.AccessRestriction, KMSKey: key, WrappedKey: wrapped,
+		EffectiveTime: body.EffectiveTime, Inheritance: body.Inheritance}
 	s.st.Vaults[name] = v
 	err = s.saveLocked()
 	out := s.vaultJSON(v)
@@ -893,4 +963,62 @@ func parseDuration(s string) (time.Duration, error) {
 		return 0, err
 	}
 	return time.Duration(f * float64(time.Second)), nil
+}
+
+// maxMinRetention is the longest minimum enforced retention: 99 years
+// (https://docs.cloud.google.com/backup-disaster-recovery/docs/cloud-console/backup-vault-create).
+const maxMinRetention = 99 * 365 * 24 * time.Hour
+
+func checkMinRetention(v string) error {
+	d, err := parseDuration(v)
+	switch {
+	case err != nil || d < 0:
+		return invalid("backupVault.backupMinimumEnforcedRetentionDuration %q is not a duration such as \"100000s\".", v)
+	case d > maxMinRetention:
+		return invalid("backupVault.backupMinimumEnforcedRetentionDuration %q is longer than 99 years, the maximum.", v)
+	}
+	return nil
+}
+
+// checkLockTime checks a retention lock's effectiveTime: an RFC 3339 time
+// in the future. It returns it in UTC.
+func (s *Server) checkLockTime(v string) (string, error) {
+	t, err := time.Parse(time.RFC3339Nano, v)
+	if err != nil {
+		return "", invalid("backupVault.effectiveTime %q is not an RFC 3339 time.", v)
+	}
+	if !t.After(s.now()) {
+		return "", invalid("backupVault.effectiveTime %s must be in the future.", v)
+	}
+	return t.UTC().Format(time.RFC3339Nano), nil
+}
+
+// locked is whether the vault's retention lock has taken effect.
+func (s *Server) locked(v *vault) bool {
+	if v.EffectiveTime == "" {
+		return false
+	}
+	t, err := time.Parse(time.RFC3339Nano, v.EffectiveTime)
+	return err == nil && !t.After(s.now())
+}
+
+// minRetentionDays is the vault's minimum enforced retention in whole
+// days, rounded up.
+func (v *vault) minRetentionDays() int64 {
+	d, _ := parseDuration(v.MinRetention)
+	return int64((d + 24*time.Hour - 1) / (24 * time.Hour))
+}
+
+// storedBytes is the size of the successful backups named under prefix
+// (a vault's or a data source's name and "/"), with s.mu held.
+func (s *Server) storedBytes(prefix string) int64 {
+	var n int64
+	for _, b := range s.st.Backups {
+		if strings.HasPrefix(b.Name, prefix) {
+			if r, ok := s.sql.Run(b.RunID); ok && r.Status == "SUCCESSFUL" {
+				n += r.SizeBytes
+			}
+		}
+	}
+	return n
 }

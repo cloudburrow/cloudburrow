@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/cloudburrow/cloudburrow/internal/apienable"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"log/slog"
 	"net"
@@ -39,6 +40,9 @@ type runService struct {
 	// interpose run inside the call observer, in order: the request log
 	// (#314), then fault injection (#306), so the log sees injected faults.
 	interpose []grpc.UnaryServerInterceptor
+	// apiGate refuses calls in a project where the API is disabled
+	// (#1914); nil refuses none.
+	apiGate apienable.Decider
 	// requests reports each JSON request to the admin event log (#591).
 	requests func(rest.Request)
 	cfg      config.Config
@@ -169,6 +173,17 @@ func (r *runService) Start(ctx context.Context) error {
 		return fmt.Errorf("open the Artifact Registry store: %w", err)
 	}
 	runadapter.UseRegistry(regStore)
+	// Container Analysis (#1912): notes and occurrences beside the
+	// registry, and the scanning of pushed images with the OSV-Scanner
+	// and database `cloudburrow prefetch` keeps in the cache.
+	caSrv, err := openContainerAnalysis(r.cfg)
+	if err != nil {
+		return err
+	}
+	go runadapter.RunContinuousAnalysis(cpuCtx, time.Hour)
+	// Cleanup policies run in the background, about daily (#1897), for as
+	// long as the adapter.
+	runadapter.StartCleanupPolicies(cpuCtx, time.Duration(r.cfg.ArtifactRegistryCleanupInterval))
 	// Secure Source Manager's repositories (#1521), bare git directories
 	// beside it.
 	if err := runadapter.UseSourceManagerRoot(filepath.Join(r.cfg.InstanceDir(), "securesourcemanager")); err != nil {
@@ -177,6 +192,7 @@ func (r *runService) Start(ctx context.Context) error {
 
 	addr := net.JoinHostPort(r.cfg.BindAddress, strconv.Itoa(r.cfg.Endpoints.Run))
 	r.server = grpctransport.New(addr)
+	r.server.Gate(r.apiGate, "run.googleapis.com")
 	r.server.Observe(r.calls)
 	if r.tracing != nil {
 		r.server.ServerOptions(r.tracing.ServerOptions()...)
@@ -302,6 +318,10 @@ func (r *runService) Start(ctx context.Context) error {
 	// Artifact Registry's own prefix (#1578): its Locations mixin, whose
 	// /v1/ path is Cloud Run v1's, and its other calls through the above.
 	jsonAPI = runadapter.ArtifactRegistryHandlerOr(jsonAPI)
+	// Container Analysis's JSON under /containeranalysis/ (#1912): its v1
+	// paths, /v1/projects/{p}/occurrences and /notes, are beside Cloud
+	// Run v1's and Artifact Registry's.
+	jsonAPI = containerAnalysisHandlerOr(caSrv, jsonAPI)
 	if r.requests != nil {
 		jsonAPI = rest.Observe(jsonAPI, r.requests)
 	}
@@ -309,6 +329,7 @@ func (r *runService) Start(ctx context.Context) error {
 	if err := r.server.Register(func(g *grpc.Server) {
 		register(g)
 		adapter.ArtifactRegistry().Register(g)
+		caSrv.Register(g)
 		builds.CloudBuild().Register(g)
 		ssm.Register(g)
 		devConnect.Register(g)
@@ -353,6 +374,7 @@ func (r *runVolumesResetter) ResetProject(ctx context.Context, project string) e
 	var errs []error
 	if project != "" {
 		errs = append(errs, a.ResetProject(ctx, project, r.svc.functions.Load()))
+		runadapter.ResetContainerAnalysisProject(project)
 	}
 	_, err := a.CollectVolumes(ctx)
 	return errors.Join(append(errs, err)...)

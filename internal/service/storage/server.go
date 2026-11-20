@@ -75,6 +75,9 @@ type Server struct {
 	// iamCheck is the host's evaluator, nil unless `up
 	// --iam-enforcement=on` (iamenforce.go, #1879).
 	iamCheck *iamcheck.Client
+	// kms is the instance's Cloud KMS, for customer-managed keys (cmek.go,
+	// #1938), or nil.
+	kms KeyService
 }
 
 // Options configure a Server.
@@ -121,6 +124,9 @@ type Options struct {
 	// IAMCheck, when set, checks every request with the host's evaluator
 	// (#1879).
 	IAMCheck *iamcheck.Client
+	// KMS is the instance's Cloud KMS, which objects with customer-managed
+	// keys are encrypted through (#1938); nil refuses those keys.
+	KMS KeyService
 
 	// grpcOptions are extra options for the gRPC server (tests: a stats
 	// handler).
@@ -140,7 +146,7 @@ func NewServer(o Options) (*Server, error) {
 		s.certSources[strings.ToLower(d)] = base
 	}
 	s.relayChannels, s.hierarchy = o.RelayChannels, o.Hierarchy
-	s.iamCheck = o.IAMCheck
+	s.iamCheck, s.kms = o.IAMCheck, o.KMS
 	s.allowOrigins = map[string]bool{}
 	for _, v := range o.CORSAllowOrigins {
 		origin, err := hostguard.ParseOrigin(v)

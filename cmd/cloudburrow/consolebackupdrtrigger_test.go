@@ -9,8 +9,8 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
 )
 
-// TestConsoleBackupDRTriggerBackupOffersTheAssociationsPlanRules (#1491):
-// in a vault with two plans, Trigger backup offers each association with
+// TestConsoleBackupDRTriggerBackupOffersTheAssociationsPlanRules (#1491,
+// #1844): with two plans, an association's Create on-demand backup offers
 // the rules of its own plan only, and a rule of another plan is refused
 // before triggerBackup is sent.
 func TestConsoleBackupDRTriggerBackupOffersTheAssociationsPlanRules(t *testing.T) {
@@ -18,7 +18,7 @@ func TestConsoleBackupDRTriggerBackupOffersTheAssociationsPlanRules(t *testing.T
 	p := backupDRProvider{bdr: srv, sql: http.NotFoundHandler()}
 	ctx := context.Background()
 	const project = "bdr-trigger"
-	if _, err := p.Create(ctx, project, map[string]string{"id": "vault-1", "location": "us-central1", "retention": "86400s"}); err != nil {
+	if _, err := p.Create(ctx, project, map[string]string{"id": "vault-1", "region": "us-central1", "retentionDays": "1"}); err != nil {
 		t.Fatal(err)
 	}
 	for _, step := range []struct {
@@ -33,20 +33,21 @@ func TestConsoleBackupDRTriggerBackupOffersTheAssociationsPlanRules(t *testing.T
 			t.Fatalf("%s: %v", step.action, err)
 		}
 	}
+	assocs := bdrAssocsProvider{api: p}
 	var opts []string
-	for _, a := range p.DetailActions(ctx, project, []string{"vault-1"}) {
-		if a.ID == "trigger" {
-			opts = a.Fields[0].Options
+	for _, a := range assocs.DetailActions(ctx, project, []string{"assoc-a"}) {
+		if a.ID == "ondemand" {
+			opts = a.Fields[1].Options
 		}
 	}
-	if strings.Join(opts, ",") != "assoc-a / daily" {
-		t.Errorf("Trigger backup offers %q; want assoc-a with plan-a's rule only", opts)
+	if strings.Join(opts, ",") != "daily" {
+		t.Errorf("Create on-demand backup offers %q; want plan-a's rule only", opts)
 	}
-	err := p.ActAt(ctx, project, []string{"vault-1"}, "trigger", map[string]string{"association": "assoc-a", "rule": "weekly"})
+	err := assocs.ActAt(ctx, project, []string{"assoc-a"}, "ondemand", map[string]string{"rule": "weekly"})
 	if err == nil || !strings.Contains(err.Error(), "not in backup plan plan-a") {
-		t.Errorf("Trigger backup with another plan's rule = %v; want it refused naming the plan", err)
+		t.Errorf("Create on-demand backup with another plan's rule = %v; want it refused naming the plan", err)
 	}
-	if err := p.ActAt(ctx, project, []string{"vault-1"}, "trigger", map[string]string{"target": "assoc-a / daily"}); err != nil {
-		t.Errorf("Trigger backup of assoc-a / daily: %v", err)
+	if err := assocs.ActAt(ctx, project, []string{"assoc-a"}, "ondemand", map[string]string{"rule": "daily"}); err != nil {
+		t.Errorf("Create on-demand backup of assoc-a under daily: %v", err)
 	}
 }

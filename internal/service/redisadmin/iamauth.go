@@ -201,7 +201,10 @@ func (c *clusters) iamUsers(r *clusterRecord) map[string][]any {
 		return false
 	}
 	byEmail := map[string][]any{}
-	for _, t := range c.iam.src.Tokens(c.now()) {
+	// Tokens expire by the wall clock, which minted them, not the
+	// Memorystore clock (clock:advance, #1909): a week's advance would
+	// otherwise expire every token at once (#1918).
+	for _, t := range c.iam.src.Tokens(time.Now()) {
 		email := strings.ToLower(t.Email)
 		if email == "" || !allowed(email) {
 			continue

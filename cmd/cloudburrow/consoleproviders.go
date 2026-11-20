@@ -9,6 +9,7 @@ import (
 	"io"
 	"maps"
 	"net/http"
+	"net/url"
 	urlpkg "net/url"
 	"slices"
 	"sort"
@@ -1456,8 +1457,8 @@ func workloadDetail(item map[string]any) console.Detail {
 		Groups: []console.PropertyGroup{
 			{Heading: "Selector", Properties: sortedPairs(labels)},
 		},
-		Note: "Read-only. This console does not edit cluster objects; CloudBurrow " +
-			"owns this cluster and workloads are created through Cloud Run or kubectl.",
+		Note: "This console does not edit cluster objects: a workload is made with Workloads' Deploy, " +
+			"through Cloud Run, or with kubectl.",
 	}
 
 	return console.Detail{
@@ -1601,7 +1602,8 @@ func (storageProvider) CreateForm() (string, []console.Field) {
 			Help:    "Lets each object carry its own retention configuration. It can be enabled only when the bucket is created."},
 		{Name: "kmsKey", Label: "Data encryption: Cloud KMS key", Type: "text", Section: protect,
 			Help: "Optional. Empty, the bucket uses a Google-managed encryption key (the default). A key name, " +
-				"projects/P/locations/L/keyRings/R/cryptoKeys/K, is stored as the default key; objects are not encrypted with it here."},
+				"projects/P/locations/L/keyRings/R/cryptoKeys/K, of this instance's Cloud KMS in the bucket's location, is the default key: " +
+				"new objects are encrypted with it, and its service agent needs the Cloud KMS CryptoKey Encrypter/Decrypter role on it."},
 	}
 }
 
@@ -1779,6 +1781,10 @@ func (p pubsubProvider) Delete(ctx context.Context, project, name string) error 
 }
 
 // Cloud Tasks: create queues, and pause, resume or purge them.
+
+// CreateSubmit implements console.CreateSubmitter: the create flow ends
+// in Create, as docs.cloud.google.com/tasks/docs/creating-queues words it (#1933).
+func (tasksProvider) CreateSubmit() string { return "Create" }
 
 func (tasksProvider) CreateForm() (string, []console.Field) {
 	return "Create queue", tasksCreateQueueFields()
@@ -3800,6 +3806,7 @@ func bucketConfigSection(b bucketMeta) console.Section {
 				{Label: "Autoclass", Value: autoclassText(b)},
 			}},
 			{Heading: "Protection", Properties: protection},
+			{Heading: "Encryption", Properties: bucketEncryptionProperties(b)},
 			{Heading: "Lifecycle", Properties: []console.Property{
 				{Label: "Created", Value: shortTime(b.TimeCreated)},
 				{Label: "Updated", Value: shortTime(b.Updated)},
@@ -4864,6 +4871,9 @@ func (p kubeProvider) selectedPods(ctx context.Context, namespace, selector stri
 		}
 		out.Items = append(out.Items, console.Resource{
 			Name: str(m, "name"), Status: podStatus(item),
+			// A managed pod opens its own page (#1857): Google reaches
+			// pods through their workload, not a Pods page of their own.
+			Link: "/kubernetes/pods/" + url.PathEscape(str(m, "name")),
 			Fields: map[string]string{
 				"Ready":    fmt.Sprintf("%d/%d", ready, len(statuses)),
 				"Restarts": fmt.Sprint(restarts),

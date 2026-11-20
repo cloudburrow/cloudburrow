@@ -596,6 +596,7 @@ func (p storageProvider) objectDetail(ctx context.Context, project string, path 
 			"Cache-Control", a.CacheControl,
 			"Content-Disposition", a.ContentDisposition,
 			"Storage class", a.StorageClass,
+			"Encryption", objectEncryptionText(a),
 			"Created", stamp(a.Created),
 			"Updated", stamp(a.Updated),
 			"Finalized", finalizedText(a.Finalized),
@@ -671,4 +672,16 @@ func finalizedText(t time.Time) string {
 		return "Not finalized: an appendable object, open for appends over gRPC"
 	}
 	return stamp(t)
+}
+
+// objectEncryptionText is how an object is encrypted (#1938): its Cloud
+// KMS key version, a customer-supplied key, or Google-managed.
+func objectEncryptionText(a *storage.ObjectAttrs) string {
+	switch {
+	case a.KMSKeyName != "":
+		return "Customer-managed: " + a.KMSKeyName
+	case a.CustomerKeySHA256 != "":
+		return "Customer-supplied (SHA-256 " + a.CustomerKeySHA256 + ")"
+	}
+	return "Google-managed"
 }

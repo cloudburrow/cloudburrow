@@ -135,7 +135,7 @@ func TestSelectAProjectAndTheNewProjectPage(t *testing.T) {
 	var cols, manage string
 	p.eval(`document.querySelector("#project-panel .picker-columns").textContent`, &cols)
 	p.eval(`new URL(document.getElementById("project-manage").href).pathname`, &manage)
-	if cols != "NameID" || manage != "/projects" {
+	if cols != "NameID" || manage != "/cloud-resource-manager" {
 		t.Errorf("the picker's columns read %q and Manage resources goes to %q", cols, manage)
 	}
 	// Star the project, and Starred lists it; Recent lists the selected one.

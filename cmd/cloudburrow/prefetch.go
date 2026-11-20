@@ -20,10 +20,12 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/components"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/images"
+	"github.com/cloudburrow/cloudburrow/internal/osvscan"
 	"github.com/cloudburrow/cloudburrow/internal/prefetch"
 	"github.com/cloudburrow/cloudburrow/internal/storageimage"
 	"github.com/cloudburrow/cloudburrow/internal/terminal"
 	"github.com/cloudburrow/cloudburrow/internal/tfconvert"
+	"github.com/cloudburrow/cloudburrow/internal/version"
 )
 
 // offlinePlan is what `up` with this configuration downloads (#604): the
@@ -95,6 +97,7 @@ func daemonArch(ctx context.Context, r prefetch.Runner) string {
 // directory everything `up` with the same flags would download.
 func runPrefetch(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	args, tensorflow := takeFlag(args, "tensorflow-converter")
+	args, scanning, ecosystems := takeScanningFlag(args)
 	cfg, err := config.Load(config.Options{Args: args, Output: stderr})
 	if err != nil {
 		return err
@@ -131,6 +134,18 @@ func runPrefetch(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		return err
 	}
 	printStored(stdout, stored)
+	if scanning {
+		if !serviceEnabled(cfg, config.ServiceRun) {
+			return errors.New("--vulnerability-scanning: Artifact Registry's scanning is served with Cloud Run, which this configuration does not enable")
+		}
+		fetcher := osvscan.Fetcher{Logf: func(f string, a ...any) { fmt.Fprintf(stdout, f, a...) }, Mirrors: osvMirrors(os.Getenv("CLOUDBURROW_OSV_MIRROR"))}
+		n, err := fetcher.Prefetch(ctx, osvscan.Dir(cache.Dir), ecosystems...)
+		if err != nil {
+			return fmt.Errorf("vulnerability scanning: %w", err)
+		}
+		fmt.Fprintf(stdout, "OSV-Scanner %s and the OSV database of %s are in %s (%d bytes downloaded); Artifact Registry's scanning needs no network.\n",
+			osvscan.Version, osvscan.SnapshotDate, osvscan.Dir(cache.Dir).DBDir(), n)
+	}
 	if tensorflow {
 		// Asked for only: the converter image is 2.3 GB, which `up`
 		// otherwise builds on the first CREATE MODEL … TENSORFLOW
@@ -145,6 +160,25 @@ func runPrefetch(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		fmt.Fprintf(stdout, "TensorFlow converter image %s is in Docker; BigQuery ML's TENSORFLOW imports need no network.\n", engine.Image)
 	}
 	return nil
+}
+
+// osvMirrors are the release download bases the scanner and its database
+// are fetched from before upstream (#1917): CLOUDBURROW_OSV_MIRROR's
+// comma-separated bases when it is set (an organisation's own copy of a
+// release's assets, or "none" for upstream only), else this CLI's own
+// release and the latest one.
+func osvMirrors(env string) []string {
+	env = strings.TrimSpace(env)
+	if env == "" {
+		return osvscan.DefaultMirrors(version.Get().Version)
+	}
+	var m []string
+	for _, b := range strings.Split(env, ",") {
+		if b = strings.TrimSpace(b); b != "" && b != "none" {
+			m = append(m, b)
+		}
+	}
+	return m
 }
 
 // takeFlag removes a boolean flag (-name, --name, -name=true or
@@ -319,3 +353,30 @@ func (n offlineNodesComponent) Start(ctx context.Context) error {
 	return n.c.loader().LoadNodes(ctx, n.c.arts)
 }
 func (n offlineNodesComponent) Stop(context.Context) error { return nil }
+
+// takeScanningFlag removes --vulnerability-scanning, alone or with
+// =Ecosystem,Ecosystem, from args (#1912).
+func takeScanningFlag(args []string) ([]string, bool, []string) {
+	var out, ecosystems []string
+	set := false
+	for i, a := range args {
+		if a == "--" {
+			out = append(out, args[i:]...)
+			break
+		}
+		name, value, hasValue := strings.Cut(strings.TrimLeft(a, "-"), "=")
+		if strings.HasPrefix(a, "-") && name == "vulnerability-scanning" {
+			set = true
+			if hasValue {
+				for _, e := range strings.Split(value, ",") {
+					if e = strings.TrimSpace(e); e != "" {
+						ecosystems = append(ecosystems, e)
+					}
+				}
+			}
+			continue
+		}
+		out = append(out, a)
+	}
+	return out, set, ecosystems
+}

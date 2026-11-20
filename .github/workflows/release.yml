@@ -763,6 +763,13 @@ jobs:
             echo "gh attestation verify cloudburrow_${VERSION}_<os>_<arch>.tar.gz --repo ${GITHUB_REPOSITORY}"
             echo '```'
             echo
+            echo "### Vulnerability scanning downloads"
+            echo
+            echo "The \`osv-*\` assets (added by the osv-mirror job just after this release is created)"
+            echo "are unmodified copies of OSV-Scanner and of the OSV database snapshots this release pins,"
+            echo "which \`cloudburrow prefetch --vulnerability-scanning\` downloads first and checks against"
+            echo "its pinned SHA-256s. See \`osv-mirror-NOTICE.txt\` for their sources and licences."
+            echo
             echo "### macOS Gatekeeper"
             echo
             if [ "${MACOS_SIGNED}" = true ]; then
@@ -869,6 +876,46 @@ jobs:
       version: ${{ inputs.release_tag || github.ref_name }}
       # The action at the tag, not at a calling workflow's ref.
       ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || '' }}
+
+  # Artifact Registry's vulnerability scanning (#1912) as this release's own
+  # assets (#1917): the four OSV-Scanner binaries and the pinned OSV
+  # database snapshots of the ecosystems internal/osvscan's Mirrored lists
+  # (Alpine, Debian, Go, Maven, npm, PyPI: about 375 MB; the scanners
+  # about 228 MB). OSV keeps a pinned database generation for about a week;
+  # a release's assets stay, and `cloudburrow prefetch
+  # --vulnerability-scanning` tries its own release first. Ubuntu (820 MB)
+  # is not mirrored: docs/install.md says why. Each file is checked against
+  # the SHA-256 pinned at this tag before it is uploaded, and the CLI checks
+  # it again when it downloads it, so the mirror adds no trust. Upstream
+  # first, then the newest earlier releases, whose assets have the same
+  # names for the same bytes, so pins older than OSV's week are still
+  # mirrored if an earlier release has them. Only this workflow's
+  # GITHUB_TOKEN. Not a gate on promote: without the mirror the release
+  # still prefetches from upstream while OSV serves its pins, and this job
+  # failing says the pins need the bump osv-pins.yml prepares.
+  osv-mirror:
+    name: mirror the vulnerability scanner and its database
+    needs: publish
+    if: startsWith(github.ref, 'refs/tags/v') || startsWith(inputs.release_tag, 'v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_REF }}
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27.4"
+      - name: Stage the mirror, checking every file against its pin
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: sh scripts/osv-mirror.sh stage "${RELEASE_TAG}" "${RUNNER_TEMP}/osv-mirror"
+      - name: Upload the mirror to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: sh scripts/osv-mirror.sh upload "${RELEASE_TAG}" "${RUNNER_TEMP}/osv-mirror"
 
   # Only once smoke has passed on every OS in its matrix does the release
   # stop being a prerelease and become "latest" (#680). Until then

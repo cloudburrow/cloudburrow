@@ -197,12 +197,13 @@ func (s *Server) EnableValkey(ctx context.Context, rt ClusterRuntime, dial Clust
 	if s.created == nil {
 		panic("redisadmin: EnableValkey before EnableCreate")
 	}
-	s.valkey = &clusters{valkey: true, rt: rt, dial: dial, db: db, api: s, now: time.Now, bg: ctx,
+	s.valkey = &clusters{valkey: true, rt: rt, dial: dial, db: db, api: s, now: s.now, bg: ctx,
 		byName: map[string]*clusterRecord{}, busy: map[string]string{}}
 	go s.valkey.autoBackups(ctx)
 	go s.valkey.maintenanceLoop(ctx)
 	// Both read here, not in the goroutine: tests swap them between runs.
 	go s.valkey.watchStandalone(ctx, healthEvery, tendEvery)
+	go s.valkey.watchClusters(ctx, healthEvery)
 }
 
 func (s *MemorystoreServer) instances() (*clusters, error) {
@@ -263,6 +264,12 @@ func renderValkeyBase(r *clusterRecord) *memorystorepb.Instance {
 	if r.TransitCA != "" {
 		out.TransitEncryptionMode = memorystorepb.Instance_SERVER_AUTHENTICATION
 	}
+	ca := &clusterpb.Cluster{}
+	r.renderServerCA(ca)
+	if ca.ServerCaMode != nil {
+		out.ServerCaMode = memorystorepb.Instance_ServerCaMode(ca.GetServerCaMode()).Enum()
+	}
+	out.ServerCaPool = ca.ServerCaPool
 	if r.KmsKey != "" {
 		out.KmsKey = proto.String(r.KmsKey)
 		out.EncryptionInfo = convert(r.encryptionInfo(), &memorystorepb.EncryptionInfo{})
@@ -299,6 +306,7 @@ func renderValkeyBase(r *clusterRecord) *memorystorepb.Instance {
 			out.ZoneDistributionConfig = z
 		}
 	}
+	out.ZoneDistributionConfig.ActiveZones = r.activeZones()
 	if v.Maintenance != "" {
 		mp := &memorystorepb.MaintenancePolicy{}
 		if protojson.Unmarshal([]byte(v.Maintenance), mp) == nil {
@@ -468,14 +476,42 @@ func (s *MemorystoreServer) GetCertificateAuthority(ctx context.Context, req *me
 	if err != nil {
 		return nil, err
 	}
-	ca := r.TransitCA
+	ca, pool := r.TransitCA, r.ServerCAPool
 	c.mu.Unlock()
+	if pool != "" {
+		// Google: "Memorystore for Valkey can't retrieve these
+		// certificates"; they are the CA pool's, from CA Service.
+		return nil, apierror.FailedPrecondition("GetCertificateAuthority not supported for customer-managed CAs")
+	}
 	if ca == "" {
 		return nil, apierror.FailedPrecondition("instance %s has no certificate authority: its transit_encryption_mode is TRANSIT_ENCRYPTION_DISABLED", name)
 	}
 	return &memorystorepb.CertificateAuthority{Name: name,
 		ServerCa: &memorystorepb.CertificateAuthority_ManagedServerCa{ManagedServerCa: &memorystorepb.CertificateAuthority_ManagedCertificateAuthority{
 			CaCerts: []*memorystorepb.CertificateAuthority_ManagedCertificateAuthority_CertChain{{Certificates: []string{ca}}}}}}, nil
+}
+
+// GetSharedRegionalCertificateAuthority returns the CA of a project's and
+// region's SERVER_CA_MODE_GOOGLE_MANAGED_SHARED_CA instances (#1918):
+// Google's "single CA certificate bundle" per region, "valid for all
+// instances located in a region that you configure to use the shared CA",
+// made on first use as Google's exists in every region (clusterca.go).
+func (s *MemorystoreServer) GetSharedRegionalCertificateAuthority(ctx context.Context, req *memorystorepb.GetSharedRegionalCertificateAuthorityRequest) (*memorystorepb.SharedRegionalCertificateAuthority, error) {
+	c, err := s.instances()
+	if err != nil {
+		return nil, err
+	}
+	m := sharedCANameRE.FindStringSubmatch(req.GetName())
+	if m == nil {
+		return nil, apierror.InvalidArgument("name must be projects/{project}/locations/{location}/sharedRegionalCertificateAuthority, not %q", req.GetName())
+	}
+	ca, _, err := c.sharedCA(m[1], m[2])
+	if err != nil {
+		return nil, err
+	}
+	return &memorystorepb.SharedRegionalCertificateAuthority{Name: req.GetName(),
+		ServerCa: &memorystorepb.SharedRegionalCertificateAuthority_ManagedServerCa{ManagedServerCa: &memorystorepb.SharedRegionalCertificateAuthority_RegionalManagedCertificateAuthority{
+			CaCerts: []*memorystorepb.SharedRegionalCertificateAuthority_RegionalManagedCertificateAuthority_RegionalCertChain{{Certificates: []string{ca}}}}}}, nil
 }
 
 // valkeyConfigs are the engine_configs an instance takes, as Memorystore
@@ -633,10 +669,6 @@ func (s *MemorystoreServer) CreateInstance(ctx context.Context, req *memorystore
 	default:
 		return nil, apierror.InvalidArgument("transit_encryption_mode %s is not a transit encryption mode", tm)
 	}
-	if in.GetServerCaPool() != "" ||
-		(in.ServerCaMode != nil && in.GetServerCaMode() != memorystorepb.Instance_SERVER_CA_MODE_UNSPECIFIED) {
-		return nil, apierror.Unimplemented("server CA modes are not served for a Memorystore for Valkey instance here")
-	}
 	primary, err := cirPrimary(in, mode)
 	if err != nil {
 		return nil, err
@@ -658,14 +690,21 @@ func (s *MemorystoreServer) CreateInstance(ctx context.Context, req *memorystore
 	if err != nil {
 		return nil, err
 	}
+	if err := valkeyZoneDist(in.GetZoneDistributionConfig()).check(m[2]); err != nil {
+		return nil, err
+	}
 	name := req.GetParent() + "/instances/" + id
 	now := c.now()
+	mp, err := valkeyMaintenancePolicy(in.GetMaintenancePolicy(), time.Time{}, now)
+	if err != nil {
+		return nil, err
+	}
 	r := &clusterRecord{Name: name, UID: newUID(), Created: now, ShardCount: shards, ReplicaCount: in.GetReplicaCount(),
 		RedisConfigs: copyMap(in.GetEngineConfigs()), DeletionProtect: in.GetDeletionProtectionEnabled(),
 		Labels: copyMap(in.GetLabels()), state: clusterpb.Cluster_CREATING, pendingReplicas: -1,
 		Valkey: &valkeyFields{Mode: mode.String(), NodeType: nt.String(), EngineVersion: version, AuthMode: auth.String(),
 			Updated: now, Persistence: protoJSON(in.GetPersistenceConfig()), Networks: nets, Endpoints: asEndpoints,
-			ZoneDistribution: protoJSON(in.GetZoneDistributionConfig()), Maintenance: protoJSON(in.GetMaintenancePolicy())}}
+			ZoneDistribution: protoJSON(in.GetZoneDistributionConfig()), Maintenance: protoJSON(mp)}}
 	if auth == memorystorepb.Instance_TOKEN_AUTH || auth == memorystorepb.Instance_IAM_AUTH {
 		// IAM auth's allowed tokens are the default user's passwords
 		// beside this one (iamauth.go).
@@ -692,10 +731,15 @@ func (s *MemorystoreServer) CreateInstance(ctx context.Context, req *memorystore
 	if err != nil {
 		return nil, err
 	}
-	if tlsOn {
-		if r.TransitCA, r.TransitCAKey, err = newCA(id, now); err != nil {
-			return nil, apierror.Internal(err, "create the CA of instance %s", name)
-		}
+	// server_ca_mode and server_ca_pool (#1918), as a Redis cluster's
+	// (clusterca.go): Google documents the same three modes for
+	// Memorystore for Valkey.
+	caIn := &clusterpb.Cluster{ServerCaPool: in.ServerCaPool}
+	if in.ServerCaMode != nil {
+		caIn.ServerCaMode = clusterpb.ServerCaMode(in.GetServerCaMode()).Enum()
+	}
+	if err := c.serverCA(ctx, r, caIn, m[1], m[2], tlsOn, "instance"); err != nil {
+		return nil, err
 	}
 	for sh := 0; sh < int(r.ShardCount); sh++ {
 		for k := 0; k <= int(r.ReplicaCount); k++ {
@@ -777,6 +821,12 @@ func (s *MemorystoreServer) UpdateInstance(ctx context.Context, req *memorystore
 			set["cross_instance_replication_config"] = true
 		case "acl_policy", "aclPolicy":
 			set["acl_policy"] = true
+		case "rotate_server_certificate", "rotateServerCertificate":
+			// Only a customer-managed CA's are rotated on demand
+			// (clustercertrotation.go, #1918); false asks for nothing.
+			if in.GetRotateServerCertificate() {
+				set["rotate_server_certificate"] = true
+			}
 		case "authorization_mode", "authorizationMode", "transit_encryption_mode", "transitEncryptionMode", "mode",
 			"psc_auto_connections", "pscAutoConnections":
 			return nil, apierror.InvalidArgument("update_mask path %q is an immutable field of Instance", p)
@@ -794,6 +844,15 @@ func (s *MemorystoreServer) UpdateInstance(ctx context.Context, req *memorystore
 	}
 	if r.state != clusterpb.Cluster_ACTIVE {
 		return nil, apierror.FailedPrecondition("instance %s is %s: an instance is updated only when ACTIVE", r.Name, r.state)
+	}
+	rotate := set["rotate_server_certificate"]
+	if rotate && (r.ServerCAMode != clusterpb.ServerCaMode_SERVER_CA_MODE_CUSTOMER_MANAGED_CAS_CA.String() || r.TransitCA == "") {
+		return nil, errRotateNotCustomer
+	}
+	if rotate && len(set) > 1 {
+		// Not documented, chosen here as for a Redis cluster: the
+		// rotation is an update of its own.
+		return nil, apierror.InvalidArgument("rotate_server_certificate is updated alone, not with other fields")
 	}
 	if r.Valkey.Migration.migrating() {
 		return nil, apierror.FailedPrecondition("instance %s is migrating: an instance is updated once FinishMigration completes", r.Name)
@@ -871,11 +930,20 @@ func (s *MemorystoreServer) UpdateInstance(ctx context.Context, req *memorystore
 		}
 		vf.Networks, vf.Endpoints = nets, true
 	}
-	if set["zone_distribution_config"] {
-		vf.ZoneDistribution = protoJSON(in.GetZoneDistributionConfig())
+	if set["zone_distribution_config"] && !r.zoneDist().same(valkeyZoneDist(in.GetZoneDistributionConfig())) {
+		// Immutable, as the API documents it (#1908).
+		return nil, apierror.InvalidArgument("zone_distribution_config is immutable")
 	}
 	if set["maintenance_policy"] {
-		vf.Maintenance = protoJSON(in.GetMaintenancePolicy())
+		var created time.Time
+		if kept := renderValkeyBase(r).GetMaintenancePolicy(); kept.GetCreateTime() != nil {
+			created = kept.GetCreateTime().AsTime()
+		}
+		mp, err := valkeyMaintenancePolicy(in.GetMaintenancePolicy(), created, c.now())
+		if err != nil {
+			return nil, err
+		}
+		vf.Maintenance = protoJSON(mp)
 	}
 	if set["automated_backup_config"] {
 		next.AutoBackup = ""
@@ -931,6 +999,22 @@ func (s *MemorystoreServer) UpdateInstance(ctx context.Context, req *memorystore
 		r.state, r.message = clusterpb.Cluster_UPDATING, "upgrading the engine to "+upgradeTo
 		c.busy[r.Name] = op
 		return s.api.launch(op, func() { c.upgrade(r.Name, op, upgradeTo) })
+	}
+	if rotate {
+		// On demand, every node (clustercertrotation.go, #1918).
+		c.busy[r.Name] = op
+		snap := *r
+		snap.Nodes = append([]*clusterNode(nil), r.Nodes...)
+		return s.api.launch(op, func() {
+			ctx, cancel := context.WithTimeout(c.bg, clusterWait)
+			defer cancel()
+			err := c.rotateCerts(ctx, &snap)
+			c.mu.Lock()
+			delete(c.busy, snap.Name)
+			out := c.renderValkey(r)
+			c.mu.Unlock()
+			c.finish(op, out, err)
+		})
 	}
 	if syncACL {
 		// The policy's users on every node, and the users of the policy

@@ -75,8 +75,8 @@ func TestMemorystoreClusterServerCATabsThroughThePage(t *testing.T) {
 		for f, v := range fields {
 			p.setField("form.create-page #f-"+f, v)
 		}
-		p.run(chromedp.Click(chromedp.CSS(`form.create-page #f-transitEncryption`)),
-			chromedp.Click(chromedp.CSS(`form.create-page #f-iamAuth`)),
+		// Security's IAM Auth checks and locks TLS (#1862).
+		p.run(chromedp.Click(chromedp.CSS(`form.create-page label[for="f-security-0"]`)),
 			chromedp.Click(chromedp.CSS(`form.create-page button[type="submit"]`)))
 		p.waitFor(fmt.Sprintf(`document.querySelector("#view").textContent.includes(%q) && document.querySelector("form.create-page") === null`, fields["id"]))
 	}
@@ -85,7 +85,7 @@ func TestMemorystoreClusterServerCATabsThroughThePage(t *testing.T) {
 		p.navigate("/" + screen + q)
 		p.clickText("#view tbody a", id)
 		p.waitFor(`document.querySelector("#tab-server-ca") !== null`)
-		p.eval(`document.querySelector("#view").textContent`, &page)
+		page = memorystoreTabsText(p)
 		p.clickText("#tab-server-ca", "Server CA")
 		p.eval(`[...document.querySelectorAll("#view [role=tabpanel]")].filter((e) => !e.hidden).map((e) => e.textContent).join(" ")`, &tab)
 		return page, tab

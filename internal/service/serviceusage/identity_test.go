@@ -70,6 +70,7 @@ func TestGenerateServiceIdentityThroughTheOfficialClient(t *testing.T) {
 func TestGenerateServiceIdentityEveryEntry(t *testing.T) {
 	want := map[string]string{
 		"privateca.googleapis.com":            "gcp-sa-privateca.iam.gserviceaccount.com",
+		"container.googleapis.com":            "container-engine-robot.iam.gserviceaccount.com",
 		"cloudkms.googleapis.com":             "gcp-sa-ekms.iam.gserviceaccount.com",
 		"pubsub.googleapis.com":               "gcp-sa-pubsub.iam.gserviceaccount.com",
 		"secretmanager.googleapis.com":        "gcp-sa-secretmanager.iam.gserviceaccount.com",
@@ -82,6 +83,9 @@ func TestGenerateServiceIdentityEveryEntry(t *testing.T) {
 		"spanner.googleapis.com":              "gcp-sa-spanner.iam.gserviceaccount.com",
 		"redis.googleapis.com":                "cloud-redis.iam.gserviceaccount.com",
 		"backupdr.googleapis.com":             "gcp-sa-backupdr.iam.gserviceaccount.com",
+		"apikeys.googleapis.com":              "gcp-sa-apikeys.iam.gserviceaccount.com",
+		"containeranalysis.googleapis.com":    "container-analysis.iam.gserviceaccount.com",
+		"containerscanning.googleapis.com":    "gcp-sa-containerscanning.iam.gserviceaccount.com",
 		"logging.googleapis.com":              "",
 		"storage.googleapis.com":              "",
 		"bigquery.googleapis.com":             "",

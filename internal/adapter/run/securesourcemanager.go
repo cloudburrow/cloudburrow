@@ -36,10 +36,14 @@ import (
 // An instance is ACTIVE when its create returns, since nothing is
 // provisioned. Its host_config names this port rather than
 // {instance}-{project number}-git.{location}.sourcemanager.dev, which
-// resolves only on Google. Hooks, branch rules, pull requests, issues and
-// the Fetch* reads are UNIMPLEMENTED; so are private instances (they need
-// Private Service Connect) and a repository's gitignores and license
-// templates, which are Google's.
+// resolves only on Google. A repository's tree, blobs and refs are read
+// with git (securesourcemanagercontent.go); its issues, pull requests and
+// branch rules are served too (securesourcemanagerissues.go,
+// securesourcemanagerpulls.go, securesourcemanagerbranchrules.go, #1856).
+// So are its webhooks, and pull requests' comments and reviews
+// (securesourcemanagerhooks.go, securesourcemanagerreviews.go, #1927).
+// Private instances are UNIMPLEMENTED (they need Private Service Connect) and a
+// repository's gitignores and license templates, which are Google's.
 
 // SecureSourceManagerServer serves Secure Source Manager's instances and
 // repositories.
@@ -48,6 +52,8 @@ type SecureSourceManagerServer struct {
 	s *Server
 	// gitBase is this port's http://host:port, or "" before it listens.
 	gitBase func() string
+	// builds runs the triggers file's builds, nil when none can run.
+	builds *CloudBuildServer
 }
 
 // SecureSourceManager returns the Secure Source Manager service; gitBase is
@@ -69,7 +75,32 @@ var ssmState = struct {
 	// policies are the instances' and repositories' IAM policies, by
 	// resource name (securesourcemanageriam.go).
 	policies map[string]iampolicy.Stored
-}{instances: map[string]*ssmpb.Instance{}, repos: map[string]*ssmpb.Repository{}, policies: map[string]iampolicy.Stored{}}
+	// children are a repository's issues, issue comments, pull requests
+	// and branch rules, by resource name (securesourcemanagerissues.go,
+	// securesourcemanagerpulls.go, securesourcemanagerbranchrules.go).
+	issues        map[string]*ssmpb.Issue
+	issueComments map[string]*ssmpb.IssueComment
+	pulls         map[string]*ssmpb.PullRequest
+	rules         map[string]*ssmpb.BranchRule
+	// prComments are pull requests' comments and reviews, hooks the
+	// repositories' webhooks, and authors the account that created each
+	// pull request and comment, by name (securesourcemanagerreviews.go,
+	// securesourcemanagerhooks.go, #1927). hookSecrets are the hooks'
+	// sensitive query strings, which no read returns.
+	prComments  map[string]*ssmpb.PullRequestComment
+	hooks       map[string]*ssmpb.Hook
+	authors     map[string]string
+	hookSecrets map[string]string
+	// prBuilds are the builds a pull request's pull_request triggers ran,
+	// by pull request (#1927).
+	prBuilds map[string][]ssmPullBuild
+	// counters are the last number given out under a collection, by
+	// parent and collection ("{repository}/issues").
+	counters map[string]int
+}{instances: map[string]*ssmpb.Instance{}, repos: map[string]*ssmpb.Repository{}, policies: map[string]iampolicy.Stored{},
+	issues: map[string]*ssmpb.Issue{}, issueComments: map[string]*ssmpb.IssueComment{}, pulls: map[string]*ssmpb.PullRequest{},
+	rules: map[string]*ssmpb.BranchRule{}, counters: map[string]int{}, prComments: map[string]*ssmpb.PullRequestComment{},
+	hooks: map[string]*ssmpb.Hook{}, authors: map[string]string{}, hookSecrets: map[string]string{}, prBuilds: map[string][]ssmPullBuild{}}
 
 // ssmIDRE is the instance and repository ID shape Google documents: lower
 // case letters, digits and hyphens, starting with a letter, at most 63.
@@ -94,6 +125,7 @@ func UseSourceManagerRoot(dir string) error {
 		Instances    []json.RawMessage           `json:"instances"`
 		Repositories []json.RawMessage           `json:"repositories"`
 		Policies     map[string]iampolicy.Stored `json:"policies,omitempty"`
+		ssmSavedChildren
 	}
 	if json.Unmarshal(b, &saved) != nil {
 		return nil
@@ -115,6 +147,7 @@ func UseSourceManagerRoot(dir string) error {
 			ssmState.policies[name] = p
 		}
 	}
+	loadSSMChildrenLocked(saved.ssmSavedChildren)
 	return nil
 }
 
@@ -139,8 +172,10 @@ func saveSSMLocked() {
 		Instances    []json.RawMessage           `json:"instances"`
 		Repositories []json.RawMessage           `json:"repositories"`
 		Policies     map[string]iampolicy.Stored `json:"policies,omitempty"`
+		ssmSavedChildren
 	}
 	saved.Policies = ssmState.policies
+	saved.ssmSavedChildren = saveSSMChildrenLocked()
 	for _, name := range sortedKeys(ssmState.instances) {
 		b, _ := protojson.Marshal(ssmState.instances[name])
 		saved.Instances = append(saved.Instances, b)
@@ -289,6 +324,7 @@ func (m *SecureSourceManagerServer) DeleteInstance(_ context.Context, req *ssmpb
 	for _, name := range held {
 		delete(ssmState.repos, name)
 		delete(ssmState.policies, name)
+		deleteSSMChildrenLocked(name)
 		_ = os.RemoveAll(repoDir(root, name))
 	}
 	delete(ssmState.instances, req.GetName())
@@ -399,6 +435,10 @@ func (m *SecureSourceManagerServer) CreateRepository(ctx context.Context, req *s
 		_ = os.RemoveAll(dir)
 		return nil, apierror.Internal(err, "git config: %s", out)
 	}
+	if err := installSSMPreReceive(dir); err != nil {
+		_ = os.RemoveAll(dir)
+		return nil, apierror.Internal(err, "pre-receive hook")
+	}
 	ssmState.repos[name] = r
 	saveSSMLocked()
 	return m.done(req.GetParent(), name, "create", proto.Clone(r))
@@ -456,6 +496,7 @@ func (m *SecureSourceManagerServer) DeleteRepository(_ context.Context, req *ssm
 	root, _ := ssmRootLocked()
 	delete(ssmState.repos, req.GetName())
 	delete(ssmState.policies, req.GetName())
+	deleteSSMChildrenLocked(req.GetName())
 	_ = os.RemoveAll(repoDir(root, req.GetName()))
 	saveSSMLocked()
 	ssmState.mu.Unlock()

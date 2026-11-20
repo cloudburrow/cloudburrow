@@ -8,9 +8,25 @@ import (
 // Chunk is one increment of generated text.
 type Chunk struct {
 	Text string
+	// ToolCalls are function calls the model made, parsed by the runtime
+	// from the model's native tool-call syntax (#1937).
+	ToolCalls []FunctionCall
 	// Last marks the final chunk, carrying the finish reason.
 	Last         bool
 	FinishReason string
+	// Usage is the measured token accounting: on the final chunk, and on an
+	// earlier chunk of its own carrying only the prompt's count, sent before
+	// decoding starts so a generation cut short still reports it.
+	Usage *Usage
+}
+
+// Usage is what the runtime measured. A count of -1 was not measured.
+type Usage struct {
+	PromptTokens    int
+	CandidateTokens int
+	// Images marks a prompt with image tokens, whose per-modality split the
+	// runtime does not report.
+	Images bool
 }
 
 // Generator produces text for a prompt.
@@ -47,6 +63,33 @@ type Request struct {
 	// JSONSchema, when set, constrains the output to JSON valid against it
 	// (responseMimeType application/json, #1779).
 	JSONSchema string
+	// PresencePenalty and FrequencyPenalty are LiteRT-LM's
+	// RepetitionPenaltyConfig (#1937).
+	PresencePenalty  *float32
+	FrequencyPenalty *float32
+
+	// Conversation, when set, is the whole request in LiteRT-LM's message
+	// format (#1937, conversation.go), sent to cloudburrow_generate on
+	// standard input; Prompt then holds only the last turn's text, for
+	// generators that read nothing else. Vision loads the model's vision
+	// encoder for image parts.
+	Conversation *RunnerRequest
+	Vision       bool
+}
+
+// TokenInfo is one content's tokens, as computeTokens reports them.
+type TokenInfo struct {
+	IDs    []int64
+	Tokens [][]byte
+}
+
+// TokenCounter is a generator whose runtime exposes the model's tokenizer:
+// cloudburrow_generate's count_only and compute modes (#1937).
+type TokenCounter interface {
+	// CountTokens is the prompt tokens req.Conversation renders to.
+	CountTokens(ctx context.Context, req Request) (int, error)
+	// ComputeTokens tokenizes each text with the model's tokenizer.
+	ComputeTokens(ctx context.Context, texts []string) ([]TokenInfo, error)
 }
 
 // OptionsGenerator is a Generator whose runtime applies Request's sampling

@@ -107,6 +107,8 @@ func pool2D(o op, x *Tensor) (*Tensor, error) {
 	oh, ph := window(ih, fh, sh, 1, same)
 	ow, pw := window(iw, fw, sw, 1, same)
 	avg := o.code == opAveragePool2D
+	l2 := o.code == opL2Pool2D // L2_POOL_2D (#1775): sqrt of the mean square
+	avg = avg || l2
 	r := &Tensor{Type: Float32, Shape: []int{n, oh, ow, ch}, F: make([]float32, n*oh*ow*ch)}
 	for bi := range n {
 		for y := range oh {
@@ -122,6 +124,9 @@ func pool2D(o op, x *Tensor) (*Tensor, error) {
 					for iy := y0; iy < y1; iy++ {
 						for ix := x0; ix < x1; ix++ {
 							v := x.F[((bi*ih+iy)*iw+ix)*ch+c]
+							if l2 {
+								v *= v
+							}
 							if avg {
 								s += v
 							} else {
@@ -132,6 +137,9 @@ func pool2D(o op, x *Tensor) (*Tensor, error) {
 					}
 					if avg && cnt > 0 {
 						s /= float32(cnt)
+					}
+					if l2 {
+						s = float32(math.Sqrt(float64(s)))
 					}
 					r.F[((bi*oh+y)*ow+xx)*ch+c] = activation(act, s)
 				}

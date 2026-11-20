@@ -32,8 +32,10 @@ func TestTerminalEnvIsGcloudSetupAtInClusterAddresses(t *testing.T) {
 		"memorystore":       "memorystore.cloudburrow.svc.cluster.local:6379",
 		"memorystore-admin": "cloudburrow-host.cloudburrow.svc.cluster.local:9021",
 		"serviceusage":      "cloudburrow-host.cloudburrow.svc.cluster.local:9023",
+		"apikeys":           "cloudburrow-host.cloudburrow.svc.cluster.local:9029",
 		"backupdr":          "cloudburrow-host.cloudburrow.svc.cluster.local:9024",
 		"privateca":         "cloudburrow-host.cloudburrow.svc.cluster.local:9025",
+		"gke":               "cloudburrow-host.cloudburrow.svc.cluster.local:9026",
 		// The Bigtable front, which serves the admin REST API (#1440).
 		"bigtable": "bigtable.cloudburrow.svc.cluster.local:8086",
 		// Spanner's REST port and Firestore, with the admin APIs (#1461).

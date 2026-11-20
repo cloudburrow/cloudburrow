@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"log"
 	"net"
 	"path/filepath"
 	"strconv"
@@ -8,8 +10,15 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
+	"github.com/cloudburrow/cloudburrow/internal/service/logging"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
+
+	"cloud.google.com/go/logging/apiv2/loggingpb"
+	"google.golang.org/genproto/googleapis/api/monitoredres"
+	ltype "google.golang.org/genproto/googleapis/logging/type"
+	"google.golang.org/protobuf/types/known/structpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // newBackupDRServer serves the Backup and DR Service (#1433) over the
@@ -47,7 +56,11 @@ func (b backupDRSQL) Backup(project, instance, description string) (string, <-ch
 
 func (b backupDRSQL) Run(id string) (backupdr.Run, bool) {
 	r, ok := b.s.BackupDRRun(id)
-	return backupdr.Run{Status: r.Status, Error: r.Error, EndTime: r.EndTime}, ok
+	out := backupdr.Run{Status: r.Status, Error: r.Error, EndTime: r.EndTime}
+	if ok && r.Status == "SUCCESSFUL" {
+		out.SizeBytes = b.s.BackupDRRunSize(id)
+	}
+	return out, ok
 }
 
 func (b backupDRSQL) DeleteRun(id string) error { return b.s.DeleteBackupDRRun(id) }
@@ -94,4 +107,33 @@ func (h backupDRHierarchy) ProjectsUnder(parent string) ([]string, error) {
 		}
 	}
 	return out, nil
+}
+
+// backupDRJobLogger writes the Backup and DR Service's job logs (#1924)
+// through api's own WriteLogEntries, so exclusions and sinks apply to
+// them as to any write.
+func backupDRJobLogger(api *logging.Server) func(backupdr.JobLog) {
+	return func(j backupdr.JobLog) {
+		payload, err := structpb.NewStruct(j.Payload)
+		if err != nil {
+			log.Printf("backupdr: job log: %v", err)
+			return
+		}
+		sev := ltype.LogSeverity_INFO
+		if j.Severity == "ERROR" {
+			sev = ltype.LogSeverity_ERROR
+		}
+		e := &loggingpb.LogEntry{
+			LogName:   "projects/" + j.Project + "/logs/" + strings.ReplaceAll(j.LogID, "/", "%2F"),
+			Resource:  &monitoredres.MonitoredResource{Type: j.ResourceType, Labels: j.ResourceLabels},
+			Payload:   &loggingpb.LogEntry_JsonPayload{JsonPayload: payload},
+			Timestamp: timestamppb.New(j.Time), Severity: sev, InsertId: j.InsertID,
+		}
+		// The write runs beside the job, not under the service's lock.
+		go func() {
+			if _, err := api.WriteLogEntries(context.Background(), &loggingpb.WriteLogEntriesRequest{Entries: []*loggingpb.LogEntry{e}}); err != nil {
+				log.Printf("backupdr: job log: %v", err)
+			}
+		}()
+	}
 }

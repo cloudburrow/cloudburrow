@@ -330,6 +330,10 @@ func (p schedulerProvider) Delete(ctx context.Context, project, name string) err
 // Pub/Sub or App Engine HTTP target. An App Engine job is stored and its
 // attempts fail, as the help says: there is no App Engine on an instance
 // (#1447).
+// CreateSubmit implements console.CreateSubmitter: the create flow ends
+// in Create, as docs.cloud.google.com/scheduler/docs/creating words it (#1933).
+func (schedulerProvider) CreateSubmit() string { return "Create" }
+
 func (schedulerProvider) CreateForm() (string, []console.Field) {
 	return "Create job", schedulerCreateFields()
 }

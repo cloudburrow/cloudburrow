@@ -42,7 +42,26 @@ type Options struct {
 	Language string
 	// Words computes each word's offsets and confidence.
 	Words bool
+	// Prompt is whisper's initial prompt, prepended to every decoding
+	// window: text the speech is likely to contain.
+	Prompt string
+	// Phrases bias the decoder towards each phrase (speech adaptation).
+	Phrases []Phrase
 }
+
+// Phrase is a phrase the decoder is biased towards.
+type Phrase struct {
+	Text string
+	// Bias is added to the logit of each of the phrase's tokens where
+	// the text decoded so far could continue with it.
+	Bias float64
+}
+
+// ChunkSeconds is the longest stretch of audio given to whisper.cpp at
+// once: longer audio is cut, at its quietest point near the limit, into
+// pieces transcribed one after another, so a file of hours never needs
+// all its samples inside the module's 4 GB memory.
+const ChunkSeconds = 10 * 60
 
 // Word is one recognised word.
 type Word struct {
@@ -140,7 +159,7 @@ type engine struct {
 	ctx uint64
 }
 
-var exports = []string{"cb_malloc", "cb_free", "cb_init", "cb_free_ctx", "cb_lang_id", "cb_full", "cb_lang",
+var exports = []string{"cb_malloc", "cb_free", "cb_init", "cb_free_ctx", "cb_lang_id", "cb_full", "cb_full_adapt", "cb_lang",
 	"cb_n_segments", "cb_segment_text", "cb_segment_times", "cb_n_tokens", "cb_token_text", "cb_token_data"}
 
 func newEngine(ctx context.Context, path string) (*engine, error) {
@@ -264,8 +283,69 @@ func withEngine(ctx context.Context, f func(*engine) error) error {
 
 func centis(v int64) time.Duration { return time.Duration(v) * 10 * time.Millisecond }
 
-// Transcribe recognises the speech in samples (mono, SampleRate).
+// Transcribe recognises the speech in samples (mono, SampleRate), in
+// pieces of at most ChunkSeconds.
 func Transcribe(ctx context.Context, samples []float32, opt Options) (Result, error) {
+	var res Result
+	for off := 0; off < len(samples); {
+		end := CutPoint(samples, off, ChunkSeconds*SampleRate)
+		part, err := transcribeChunk(ctx, samples[off:end], opt)
+		if err != nil {
+			return res, err
+		}
+		if res.Language == "" {
+			res.Language = part.Language
+		}
+		shift := time.Duration(off) * time.Second / SampleRate
+		for _, seg := range part.Segments {
+			seg.Start += shift
+			seg.End += shift
+			for i := range seg.Words {
+				seg.Words[i].Start += shift
+				seg.Words[i].End += shift
+			}
+			res.Segments = append(res.Segments, seg)
+		}
+		off = end
+	}
+	return res, nil
+}
+
+// CutPoint is where the piece of samples starting at off ends: off+max, or
+// the end, or, in the last tenth of the piece, the start of its quietest
+// 100 ms, so a cut falls between words.
+func CutPoint(samples []float32, off, max int) int {
+	if len(samples)-off <= max {
+		return len(samples)
+	}
+	const win = SampleRate / 10
+	best, bestE := off+max, math.Inf(1)
+	for at := off + max - max/10; at+win <= off+max; at += win / 2 {
+		var e float64
+		for _, v := range samples[at : at+win] {
+			e += float64(v) * float64(v)
+		}
+		if e < bestE {
+			best, bestE = at+win/2, e
+		}
+	}
+	return best
+}
+
+// biasSpec writes phrases as cb_full_adapt's lines.
+func biasSpec(phrases []Phrase) string {
+	var b strings.Builder
+	for _, p := range phrases {
+		text := strings.Join(strings.Fields(p.Text), " ")
+		if text == "" || p.Bias == 0 {
+			continue
+		}
+		fmt.Fprintf(&b, "%g\t%s\n", p.Bias, text)
+	}
+	return b.String()
+}
+
+func transcribeChunk(ctx context.Context, samples []float32, opt Options) (Result, error) {
 	var res Result
 	if len(samples) == 0 {
 		return res, nil
@@ -293,7 +373,20 @@ func Transcribe(ctx context.Context, samples []float32, opt Options) (Result, er
 		if opt.Words {
 			words = 1
 		}
-		rc, err := e.call(ctx, "cb_full", e.ctx, sp, uint64(len(samples)), lp, words)
+		var pp, bp uint64
+		if opt.Prompt != "" {
+			if pp, err = e.bytes(ctx, append([]byte(opt.Prompt), 0)); err != nil {
+				return err
+			}
+			defer e.call(ctx, "cb_free", pp)
+		}
+		if spec := biasSpec(opt.Phrases); spec != "" {
+			if bp, err = e.bytes(ctx, append([]byte(spec), 0)); err != nil {
+				return err
+			}
+			defer e.call(ctx, "cb_free", bp)
+		}
+		rc, err := e.call(ctx, "cb_full_adapt", e.ctx, sp, uint64(len(samples)), lp, words, pp, bp)
 		if err != nil {
 			return err
 		}

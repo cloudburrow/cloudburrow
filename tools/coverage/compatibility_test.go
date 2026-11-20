@@ -30,6 +30,7 @@ var compatSections = map[string]string{
 	// Served on the Run port beside them (#1521).
 	"securesourcemanager": "## Cloud Run — `google.cloud.run.v2`",
 	"developerconnect":    "## Cloud Run — `google.cloud.run.v2`",
+	"containeranalysis":   "## Cloud Run — `google.cloud.run.v2`",
 	"eventarc":            "## Cloud Run — `google.cloud.run.v2`",
 	"functions":           "## Functions and source builds",
 	"functionsv1":         "## Functions and source builds",
@@ -44,6 +45,7 @@ var compatSections = map[string]string{
 	// (`cloudresourcemanager.projects.getOrgPolicy`).
 	"resourcemanagerv1": "## Resource Manager — `google.cloud.resourcemanager.v3`",
 	"vertexai":          "## Vertex AI PredictionService — `google.cloud.aiplatform.v1`",
+	"speechv1":          "## Speech-to-Text v1 — `google.cloud.speech.v1`",
 	"vertexaiv1beta1":   "## Vertex AI PredictionService v1beta1 — `google.cloud.aiplatform.v1beta1`",
 	"memorystore":       "## Memorystore for Redis — `google.cloud.redis.v1`",
 	// The opt-in emulators share one section (#717). Its per-service rows
@@ -66,12 +68,16 @@ var compatSections = map[string]string{
 	"sqladmin": "## Optional services",
 	// The Service Usage API (#1352), named by whole discovery ID.
 	"serviceusage": "## Service Usage — `serviceusage.googleapis.com` v1",
+	// The API Keys API (#1915), named by whole discovery ID.
+	"apikeys": "## API Keys — `apikeys.googleapis.com` v2",
 	// The Backup and DR Service (#1433), named by whole discovery ID.
 	"backupdr": "## Backup and DR Service — `backupdr.googleapis.com` v1",
 	// Cloud Identity's groups (#1812), named by whole discovery ID.
 	"cloudidentity": "## Cloud Identity groups — `cloudidentity.googleapis.com` v1",
 	// Certificate Authority Service (#1834), named by gRPC method.
 	"privateca": "## Certificate Authority Service — `google.cloud.security.privateca.v1`",
+	// The Kubernetes Engine API (#1913), named by gRPC method.
+	"gke": "## Kubernetes Engine API — `google.container.v1`",
 }
 
 // acceptedStatuses maps a status cell of docs/compatibility.md to the
@@ -162,7 +168,7 @@ func namedMethods(key, op string, report map[string]string) (ids, ambiguous []st
 	// Discovery-ID pages: BigQuery, the Cloud Run v1 API (#1293), the
 	// Cloud SQL Admin API (#1301), Resource Manager v1 REST (#1296) and
 	// Service Usage (#1352).
-	if key == "bigquery" || key == "runv1" || key == "sqladmin" || key == "resourcemanagerv1" || key == "serviceusage" || key == "backupdr" ||
+	if key == "bigquery" || key == "runv1" || key == "sqladmin" || key == "resourcemanagerv1" || key == "serviceusage" || key == "apikeys" || key == "backupdr" ||
 		key == "cloudidentity" {
 		for _, tok := range storageToken.FindAllStringSubmatch(op, -1) {
 			if _, ok := report[tok[1]]; ok {

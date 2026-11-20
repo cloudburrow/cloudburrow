@@ -14,7 +14,7 @@ import (
 	"io"
 	"net/http"
 	"regexp"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -119,14 +119,26 @@ func (p functionsProvider) withV1Client(ctx context.Context, fn func(*functionsv
 	return fn(c)
 }
 
-func (p functionsProvider) List(_ context.Context, project string) (console.Listing, error) {
-	out := console.Listing{Columns: []string{"Environment", "Region", "Runtime", "Trigger", "URL", "Last deployed"},
-		NameColumn: "Function", Noun: "functions", AlwaysStatus: true}
+// functionColumns are Google's functions list columns (#1853), then
+// CloudBurrow's URL.
+var functionColumns = []string{"Environment", "Region", "Trigger", "Runtime", "Memory allocated", "Executed function",
+	"Last deployed", "Deployed by", "Authentication", "URL"}
+
+func (p functionsProvider) List(ctx context.Context, project string) (console.Listing, error) {
+	out := console.Listing{Columns: functionColumns, NameColumn: "Name", Noun: "functions", AlwaysStatus: true,
+		Note: "Deployed by is the account that deployed the function on Google's console; calls here are not authenticated " +
+			"(ADR-0006), so none is recorded and the column shows the API the function was deployed through."}
 	for _, fn := range runadapter.Functions(p.project(project)) {
 		parts := strings.Split(fn.GetName(), "/")
+		by := "Cloud Functions v2 API"
+		if fn.GetEnvironment() == functionspb.Environment_GEN_1 {
+			by = "Cloud Functions v1 API"
+		}
 		out.Items = append(out.Items, console.Resource{Name: parts[5], Status: functionStatus(fn), Fields: map[string]string{
 			"Environment": functionGeneration(fn), "Region": parts[3], "Runtime": fn.GetBuildConfig().GetRuntime(),
-			"Trigger": functionTrigger(fn), "URL": orDash(fn.GetUrl()), "Last deployed": stampAge(fn.GetUpdateTime())}})
+			"Trigger": functionTrigger(fn), "Memory allocated": orDash(functionMemoryLabel(fn.GetServiceConfig().GetAvailableMemory())),
+			"Executed function": orDash(fn.GetBuildConfig().GetEntryPoint()), "Last deployed": stampAge(fn.GetUpdateTime()),
+			"Deployed by": by, "Authentication": orDash(p.functionAuthentication(ctx, fn)), "URL": orDash(fn.GetUrl())}})
 	}
 	out.Total = len(out.Items)
 	return out, nil
@@ -233,15 +245,8 @@ func (p functionsProvider) Detail(ctx context.Context, project string, path []st
 	for _, m := range fn.GetStateMessages() {
 		add("Status detail", m.GetMessage())
 	}
-	env := console.Listing{Columns: []string{"Value"}, NameColumn: "Name", Noun: "variables"}
-	for k, v := range sc.GetEnvironmentVariables() {
-		env.Items = append(env.Items, console.Resource{Name: k, Fields: map[string]string{"Value": v}})
-	}
-	env.Total = len(env.Items)
-	return console.Detail{Summary: summary, Sections: []console.Section{
-		{ID: "variables", Label: "Runtime environment variables", Listing: env},
-		{ID: "secrets", Label: "Secrets", Listing: functionSecretsListing(sc)},
-	}}, nil
+	return console.Detail{Summary: summary, Sections: p.functionTabs(ctx, fn, summary, bc.GetRuntime(), bc.GetEntryPoint(), fn.GetUrl(),
+		sc.GetEnvironmentVariables(), bc.GetEnvironmentVariables(), fn.GetEventTrigger())}, nil
 }
 
 // functionSecretsListing is a function's secrets, each exposed as an
@@ -336,16 +341,8 @@ func (p functionsProvider) gen1Detail(ctx context.Context, v2 *functionspb.Funct
 	for _, m := range v2.GetStateMessages() {
 		add("Status detail", m.GetMessage())
 	}
-	env := console.Listing{Columns: []string{"Value"}, NameColumn: "Name", Noun: "variables"}
-	for k, v := range fn.GetEnvironmentVariables() {
-		env.Items = append(env.Items, console.Resource{Name: k, Fields: map[string]string{"Value": v}})
-	}
-	sort.Slice(env.Items, func(i, j int) bool { return env.Items[i].Name < env.Items[j].Name })
-	env.Total = len(env.Items)
-	return console.Detail{Summary: summary, Sections: []console.Section{
-		{ID: "variables", Label: "Runtime environment variables", Listing: env},
-		{ID: "secrets", Label: "Secrets", Listing: functionSecretsListing(v2.GetServiceConfig())},
-	}}, nil
+	return console.Detail{Summary: summary, Sections: p.functionTabs(ctx, v2, summary, fn.GetRuntime(), fn.GetEntryPoint(),
+		fn.GetHttpsTrigger().GetUrl(), fn.GetEnvironmentVariables(), fn.GetBuildEnvironmentVariables(), v1EventTrigger(fn))}, nil
 }
 
 // Delete deletes the function and its Cloud Run service, as
@@ -369,24 +366,13 @@ func (p functionsProvider) createAction() console.Action {
 	for _, r := range runadapter.Runtimes {
 		runtimes = append(runtimes, r.Name)
 	}
-	events := make([]string, 0, len(functionStorageEvents))
-	for _, e := range functionStorageEvents {
-		events = append(events, e.v1)
-	}
-	return console.Action{ID: functionsCreateAction, Label: "Create function", Fields: []console.Field{
+	return console.Action{ID: functionsCreateAction, Label: "Create from a ZIP upload", Submit: "Deploy", Fields: withTriggerFields([]console.Field{
 		{Name: "environment", Label: "Environment", Type: "select", Options: []string{functionGen2, functionGen1}, Default: functionGen2,
 			Help: "2nd gen is created through the Cloud Functions v2 API; 1st gen through the v1 API, as gcloud functions deploy --no-gen2 does"},
 		{Name: "name", Label: "Function name", Type: "text", Required: true, Pattern: functionNamePattern.String(),
 			Help: "Lower case letters, digits and hyphens, starting with a letter, at most 63"},
 		{Name: "region", Label: "Region", Type: "select", Options: runadapter.FunctionRegions, Default: "us-central1"},
-		{Name: "trigger", Label: "Trigger type", Type: "select", Options: []string{functionTriggerHTTP, functionTriggerPubSub, functionTriggerStorage},
-			Default: functionTriggerHTTP, Section: "Trigger"},
-		{Name: "topic", Label: "Cloud Pub/Sub topic", Type: "text", Section: "Trigger",
-			Help: "For a Cloud Pub/Sub trigger: a topic ID in this project, or projects/{project}/topics/{topic}"},
-		{Name: "bucket", Label: "Bucket", Type: "text", Section: "Trigger",
-			Help: "For a Cloud Storage trigger: the bucket whose objects' events are delivered"},
-		{Name: "storageEvent", Label: "Event type", Type: "select", Options: events, Default: events[0], Section: "Trigger",
-			Help: "For a Cloud Storage trigger: finalize is an object created or overwritten"},
+		{Name: "trigger"}, // functionTriggerFields, below
 		{Name: "runtime", Label: "Runtime", Type: "select", Options: runtimes, Default: "nodejs22"},
 		{Name: "entryPoint", Label: "Entry point", Type: "text", Required: true,
 			Help: "The function the Functions Framework serves, such as Hello"},
@@ -403,16 +389,18 @@ func (p functionsProvider) createAction() console.Action {
 			Help: "projects/{project}/locations/{region}/workerPools/{pool}: one of Cloud Build's private pools in the function's region; the build runs on this machine"},
 		{Name: "file", Label: "Source (.zip)", Type: console.FileFieldType, Required: true,
 			Help: "A .zip of the function's source, uploaded as gcloud functions deploy uploads it, and built here with Google's buildpacks (linux/amd64 images only)"},
-	}}
+	})}
 }
 
-// ListActions implements console.ListActor: Create function, offered when
-// Cloud Storage, where the source is uploaded, runs here.
+// ListActions implements console.ListActor, where Cloud Storage, where
+// the source is uploaded, runs here: Create function, which opens Cloud
+// Run's Write a function as Google's does (#1853), and Create from a ZIP
+// upload, the source given as an archive (1st gen's ZIP upload).
 func (p functionsProvider) ListActions(context.Context, string) []console.Action {
 	if !p.storage {
 		return nil
 	}
-	return []console.Action{p.createAction()}
+	return []console.Action{{ID: "write-function", Label: "Create function", Href: "/run?action=" + runWriteFunction}, p.createAction()}
 }
 
 // DetailActions offers Edit function and Download source on every
@@ -427,14 +415,29 @@ func (p functionsProvider) DetailActions(ctx context.Context, project string, pa
 	if err != nil {
 		return nil
 	}
+	// Edit, Copy function and Download source beside the title; the tabs'
+	// own actions after them (#1853).
 	acts := p.functionDetailActions(ctx, fn)
-	if fn.GetEnvironment() != functionspb.Environment_GEN_1 || fn.GetEventTrigger() != nil {
-		return acts
+	parts := strings.Split(fn.GetName(), "/")
+	acts = append(acts[:1], append([]console.Action{copyAction(parts[5], parts[3])}, acts[1:]...)...)
+	acts = append(acts, console.Action{ID: functionsDeleteAction, Label: "Delete", Destructive: true, Leaves: true,
+		Confirm: "The function, its Cloud Run service and its trigger are deleted."})
+	for _, sec := range p.functionActionTabs(ctx, fn) {
+		acts = append(acts, sec.Actions...)
 	}
-	return append(acts, console.Action{ID: functionsTestAction, Label: "Test function", Fields: []console.Field{
-		{Name: "data", Label: "Triggering event", Type: "textarea", Default: "{}",
-			Help: "The request body sent to the function, as gcloud functions call --data sends it; JSON is sent as application/json"},
-	}})
+	return acts
+}
+
+// functionActionTabs are the tabs that carry actions, read for
+// DetailActions.
+func (p functionsProvider) functionActionTabs(ctx context.Context, fn *functionspb.Function) []console.Section {
+	runtime, entry := fn.GetBuildConfig().GetRuntime(), fn.GetBuildConfig().GetEntryPoint()
+	out := []console.Section{{Actions: p.triggerActions(fn)}, {Actions: []console.Action{testAction()}}}
+	if a, ok := editSourceAction(fn, runtime, entry, nil); ok {
+		// The files are the Source tab's; DetailActions only names it.
+		out = append(out, console.Section{Actions: []console.Action{a}})
+	}
+	return out
 }
 
 func (p functionsProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
@@ -460,12 +463,22 @@ func (p functionsProvider) ActAtResult(ctx context.Context, project string, path
 		return nil, p.editFunction(ctx, fn, values)
 	case functionsDownloadAction:
 		return p.downloadSource(ctx, fn)
+	case functionsCopyAction:
+		return nil, p.copyFunction(ctx, fn, values)
+	case functionsDeleteAction:
+		return nil, p.Delete(ctx, project, path[0])
+	case functionsEditSourceAction:
+		return nil, p.saveAndRedeploy(ctx, fn, values)
+	case functionsEditTriggerAction:
+		return nil, p.editTrigger(ctx, fn, values)
+	case functionsAddTriggerAction, functionsDeleteTriggerAction:
+		return nil, p.actOnEventarc(ctx, fn, action, values)
 	case functionsTestAction:
 	default:
 		return nil, fmt.Errorf("unknown action %q", action)
 	}
 	if fn.GetEnvironment() != functionspb.Environment_GEN_1 {
-		return nil, errors.New("Test function calls a 1st gen function; a 2nd gen function is reached at its URL")
+		return testFunction(ctx, fn, values["data"])
 	}
 	var out *fv1.CallFunctionResponse
 	if err := p.withV1Client(ctx, func(c *functionsv1.CloudFunctionsClient) error {
@@ -563,6 +576,9 @@ func (s functionSecrets) setV1(fn *fv1.CloudFunction) {
 // functionTriggerSpec is the trigger the form chose, validated.
 type functionTriggerSpec struct {
 	kind, topic, bucket, event string
+	// Cloud Firestore's database and document, Cloud Audit Logs' service,
+	// method and resource names (#1853).
+	database, document, service, method, resource string
 }
 
 func functionTriggerOf(project string, values map[string]string) (functionTriggerSpec, error) {
@@ -595,6 +611,24 @@ func functionTriggerOf(project string, values map[string]string) (functionTrigge
 		if !known {
 			return t, fmt.Errorf("unknown Cloud Storage event type %q", t.event)
 		}
+	case functionTriggerFirestore:
+		t.event = strings.TrimSpace(values["firestoreEvent"])
+		if t.event == "" {
+			t.event = "written"
+		}
+		if !slices.Contains(functionFirestoreEvents, t.event) {
+			return t, fmt.Errorf("unknown Cloud Firestore event type %q", t.event)
+		}
+		t.database, t.document = strings.TrimSpace(values["database"]), strings.TrimSpace(values["document"])
+		if t.database == "" {
+			t.database = "(default)"
+		}
+	case functionTriggerAudit:
+		t.service, t.method = strings.TrimSpace(values["serviceName"]), strings.TrimSpace(values["methodName"])
+		t.resource = strings.TrimSpace(values["resourceName"])
+		if t.service == "" || t.method == "" {
+			return t, errors.New("a Cloud Audit Logs trigger needs its service name and method name")
+		}
 	default:
 		return t, fmt.Errorf("unknown trigger type %q", t.kind)
 	}
@@ -615,6 +649,20 @@ func (t functionTriggerSpec) v2() *functionspb.EventTrigger {
 			}
 		}
 		return &functionspb.EventTrigger{EventType: typ, EventFilters: []*functionspb.EventFilter{{Attribute: "bucket", Value: t.bucket}},
+			RetryPolicy: functionspb.EventTrigger_RETRY_POLICY_DO_NOT_RETRY}
+	case functionTriggerFirestore:
+		filters := []*functionspb.EventFilter{{Attribute: "database", Value: t.database}}
+		if t.document != "" {
+			filters = append(filters, pathFilter("document", t.document))
+		}
+		return &functionspb.EventTrigger{EventType: functionFirestorePrefix + t.event, EventFilters: filters,
+			RetryPolicy: functionspb.EventTrigger_RETRY_POLICY_DO_NOT_RETRY}
+	case functionTriggerAudit:
+		filters := []*functionspb.EventFilter{{Attribute: "serviceName", Value: t.service}, {Attribute: "methodName", Value: t.method}}
+		if t.resource != "" {
+			filters = append(filters, pathFilter("resourceName", t.resource))
+		}
+		return &functionspb.EventTrigger{EventType: functionAuditEvent, EventFilters: filters,
 			RetryPolicy: functionspb.EventTrigger_RETRY_POLICY_DO_NOT_RETRY}
 	}
 	return nil
@@ -695,6 +743,9 @@ func (p functionsProvider) ActAtFile(ctx context.Context, project string, path [
 	data, err := io.ReadAll(file)
 	if err != nil {
 		return nil, err
+	}
+	if values["environment"] == functionGen1 && (trigger.kind == functionTriggerFirestore || trigger.kind == functionTriggerAudit) {
+		return nil, fmt.Errorf("a 1st gen function's %s trigger is not served (the v1 API's legacy providers); choose 2nd gen, whose trigger is an Eventarc trigger", trigger.kind)
 	}
 	switch env := values["environment"]; env {
 	case functionGen1:

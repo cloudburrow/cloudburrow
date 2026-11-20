@@ -35,7 +35,7 @@ func TestConsoleBackupDRVaultEncryptionKey(t *testing.T) {
 	if !found {
 		t.Fatal("Create backup vault has no encryption key field")
 	}
-	if _, err := p.Create(ctx, project, map[string]string{"id": "vault-k", "location": "us-central1", "retention": "86400s",
+	if _, err := p.Create(ctx, project, map[string]string{"id": "vault-k", "region": "us-central1", "retentionDays": "1",
 		"kmsKeyName": key}); err != nil {
 		t.Fatal(err)
 	}

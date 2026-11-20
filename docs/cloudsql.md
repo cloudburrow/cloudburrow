@@ -152,7 +152,7 @@ Refused with 501, each naming what is missing:
 
 | Methods | Why |
 |---|---|
-| Entra ID certificates, `acquireSsrsLease`, `releaseSsrsLease` | SQL Server features; CloudBurrow runs PostgreSQL and MySQL |
+| Entra ID certificates, `acquireSsrsLease`, `releaseSsrsLease` | SQL Server features its SQL Server instances (#1916) do not have: Microsoft's image, SQL authentication only |
 
 ### Maintenance (#1524)
 
@@ -302,7 +302,7 @@ and an address the connectors reach through 3307.
 
 | Field | What happens |
 |---|---|
-| `databaseVersion` | `POSTGRES_9_6` to `POSTGRES_18`, `MYSQL_5_6` and `MYSQL_5_7` (#1524, where the node runs linux/amd64), `MYSQL_8_0` or `MYSQL_8_4` (#1381, #1462): see [Database versions](#database-versions-and-major-version-upgrades-1381). The engine's service must be enabled (412 otherwise). `MYSQL_5_6`, `MYSQL_5_7`, `MYSQL_8_0_*` minor pins, `SQLSERVER_*` and any other `POSTGRES_*` or `MYSQL_*` are 501 saying why; another value is 400. |
+| `databaseVersion` | `POSTGRES_9_6` to `POSTGRES_18`, `MYSQL_5_6` and `MYSQL_5_7` (#1524, where the node runs linux/amd64), `MYSQL_8_0` or `MYSQL_8_4` (#1381, #1462): see [Database versions](#database-versions-and-major-version-upgrades-1381). The engine's service must be enabled (412 otherwise). `MYSQL_5_6`, `MYSQL_5_7`, `MYSQL_8_0_*` minor pins and any other `POSTGRES_*` or `MYSQL_*` are 501 saying why; another value is 400. `SQLSERVER_*` (#1916) is 412 FAILED_PRECONDITION until you accept Microsoft's licence, then served where the node runs linux/amd64: see [Cloud SQL for SQL Server](#cloud-sql-for-sql-server). |
 | `region` | Recorded and answered, and in the connection name (`us-central1` when left out). Every server runs in the one cluster. |
 | `rootPassword` | MySQL's `root` password (empty leaves `root` with none, as Cloud SQL does). PostgreSQL's user is `postgres`, trusted locally like the server `up` runs. |
 | `settings.tier` | Required, recorded and answered. The server is not sized by it. |
@@ -790,7 +790,7 @@ What is 501, each checked with `docker buildx imagetools inspect` on 2026-10-16 
 |---|---|
 | `MYSQL_5_7`, `MYSQL_5_6` | Only on a node that runs no linux/amd64 binaries (see above): `mysql:5.7` and `mysql:5.6` are linux/amd64 only |
 | `MYSQL_8_0_18` to `MYSQL_8_0_4x` | one 8.0 minor runs, `MYSQL_8_0` (8.0.46, the official image's); the 501 says to use it |
-| `SQLSERVER_2017_*`, `SQLSERVER_2019_*`, `SQLSERVER_2022_*` | SQL Server has no Docker Hub official image; Microsoft's `mcr.microsoft.com/mssql/server` (2017, 2019, 2022) is linux/amd64 only |
+| `SQLSERVER_*` | Served once its user accepts Microsoft's licence (412 until then), on a node that runs linux/amd64 images: see [Cloud SQL for SQL Server](#cloud-sql-for-sql-server) |
 
 A created primary or read replica answers `upgradableDatabaseVersions`, every newer served version of its
 engine, and **`instances.patch` with a newer `databaseVersion` is a major version upgrade**, as
@@ -1409,3 +1409,116 @@ and afterwards the read-only mode still refuses an `INSERT` and a `CREATE TABLE`
 - **Creating or changing instances, and the connector path, through the Cloud SQL Admin API**,
   for either engine; instance reads, databases, users and operations are served (#1301, see
   section 3).
+
+## 8. Cloud SQL for SQL Server
+
+<a id="cloud-sql-for-sql-server"></a>
+Cloud SQL for SQL Server (#1916) runs **Microsoft's SQL Server container image**,
+`mcr.microsoft.com/mssql/server` of the instance's release (2017, 2019, 2022 or 2025), pinned by
+the digest of each tag's one linux/amd64 manifest. Every version Google lists is accepted:
+`SQLSERVER_2017_*`, `SQLSERVER_2019_*` and `SQLSERVER_2022_*` in `EXPRESS`, `WEB`, `STANDARD` and
+`ENTERPRISE`, and `SQLSERVER_2025_EXPRESS`, `STANDARD` and `ENTERPRISE` (Google lists no 2025 Web).
+SQL Server instances are created through the Cloud SQL Admin API, which is served with
+`--services cloudsql` or `cloudsql-mysql`.
+
+### You accept Microsoft's licence, nobody else
+
+The image starts only with `ACCEPT_EULA` set, which "confirm[s] your acceptance of the
+[End-User Licensing Agreement](https://go.microsoft.com/fwlink/?LinkId=746388)"
+([Microsoft](https://learn.microsoft.com/sql/linux/configure/environment-variables)). On Cloud SQL
+Google holds the licence; here **the user who provisions SQL Server accepts it**, and CloudBurrow
+never sets it by default or on anyone's behalf, its tests and CI included. You accept it either:
+
+- **for every SQL Server instance** this CloudBurrow instance creates: `cloudburrow up
+  --accept-mssql-eula`, or `CLOUDBURROW_ACCEPT_MSSQL_EULA=Y` (exactly `Y`). A configuration file
+  cannot accept it: a repository can ship `./cloudburrow.json`, and you have not necessarily read it.
+- **for one instance**: the console's Create instance page, SQL Server engine, check
+  *I accept Microsoft's licence terms for SQL Server*, which links Microsoft's End-User Licensing
+  Agreement and [the editions' licensing terms](https://www.microsoft.com/licensing/terms/productoffering/SQLServer).
+  It sends `X-CloudBurrow-Accept-MSSQL-EULA: Y` with that one `instances.insert`.
+
+Who accepted (the user running CloudBurrow), when, and how is recorded on the instance
+(`mssqlEulaAcceptance` in `cloudsql-instances.json`), and `cloudburrow status` shows it, for `up` and
+for each SQL Server instance (`mssql_eula` in `status --format json`). The server is given
+`ACCEPT_EULA=Y` only for an instance with that record.
+
+Without an acceptance, `instances.insert` of a `SQLSERVER_*` version is **412 FAILED_PRECONDITION**
+naming the licence and how to accept it, and nothing is created. UNVERIFIED (re-read 2026-11-19,
+docs.cloud.google.com/sql/docs/sqlserver/create-instance): Google documents no such refusal, as it
+holds the licence; 412 FAILED_PRECONDITION is what this API answers for another missing precondition
+of the local server (an engine whose service is not enabled), and the wording is CloudBurrow's.
+
+### Which edition runs locally, and why
+
+Cloud SQL licenses Standard, Enterprise and Web through Google. Locally nobody holds those licences,
+so those editions run Microsoft's free **Developer** edition, which has Enterprise's features and is
+licensed for development and test only, which is what a local emulator is for. Do not use these
+instances in production. `MSSQL_PID`, per Microsoft's
+[edition table](https://learn.microsoft.com/sql/linux/configure/environment-variables#sql-server-editions):
+
+| Google edition | 2017, 2019, 2022 | 2025 |
+|---|---|---|
+| `EXPRESS` | `Express` (free for any use) | `Express` |
+| `WEB` | `Developer` | (not offered) |
+| `STANDARD` | `Developer` (Enterprise's features: a Standard instance here allows features Standard lacks) | `StandardDeveloper` (Standard's features) |
+| `ENTERPRISE` | `Developer` | `EnterpriseDeveloper` |
+
+The console's version picker names the local edition beside each version.
+
+### linux/amd64 only
+
+Microsoft supports the image only on x86-64 hosts: "Emulation or translation environments (for
+example, Rosetta 2, Prism, or QEMU) aren't tested or supported"
+([Microsoft](https://learn.microsoft.com/sql/linux/install-upgrade/quickstart-install-docker)). As for
+MySQL 5.7 and 5.6, an instance is served where the cluster's node runs linux/amd64 binaries, natively
+or through the binfmt_misc emulation Docker Desktop registers on Apple silicon (*Use Rosetta for
+x86_64/amd64 emulation*, or qemu-user-static), which the provisioner checks on the node; elsewhere it
+is 501 saying why. Under emulation it runs unsupported by Microsoft, and slower.
+
+### What a SQL Server instance serves
+
+- `instances.insert` (with `rootPassword`, required, as `gcloud sql instances create --root-password`
+  is for SQL Server), `get`, `list`, `patch` of its database flags, `restart`, stop and start, `delete`.
+- **The `sqlserver` user**, with `rootPassword`, a member of the `CustomerDbRootRole` server role, as
+  on Cloud SQL. UNVERIFIED (re-read 2026-11-19, docs.cloud.google.com/sql/docs/sqlserver/users): the
+  role's exact permissions; it is granted `CREATE ANY DATABASE`, `ALTER ANY LOGIN`, `ALTER ANY SERVER
+  ROLE`, `ALTER ANY CONNECTION`, `VIEW ANY DATABASE`, `VIEW ANY DEFINITION`, `VIEW SERVER STATE`,
+  `ALTER TRACE` and `ALTER SERVER STATE`. CloudBurrow reaches the server as `sa`, with a password it
+  generates, keeps in the record and never answers.
+- **Databases**: `databases.insert` (with `collation`), `list`, `get`, `patch` of the collation,
+  `delete`; the system databases are not listed and cannot be deleted; `charset` is 400.
+- **Users**: `users.insert` (a SQL login in `CustomerDbRootRole`), `list`, `update` of the
+  password, `delete`.
+- **Flags**: [Google's SQL Server flags](https://docs.cloud.google.com/sql/docs/sqlserver/flags),
+  checked against Google's ranges (another flag, or a value out of range, is 400), answered by
+  `flags.list`. sp_configure options are set with `sp_configure` and `RECONFIGURE`, trace flags with
+  `DBCC TRACEON(n, -1)` at each start; Cloud SQL's own settings (`cloud sql xe *`, `cloudsql enable
+  linked servers`, `cloud sql enable polybase`, `cloud sql enable sp_help_revlogin`) are recorded only.
+- **The Cloud SQL connectors and the Auth Proxy**: the instance's tunnel is SQL Server's port 1433,
+  reached through the connector listener at 3307 like the other engines.
+
+501, saying why: read replicas, `REGIONAL` high availability, backups (on demand, automated and
+final), restores, point-in-time recovery, clones, imports and exports, major version upgrades,
+demotion, blue-green deployments, source representation instances and customer-managed keys.
+CloudBurrow's steps for those are `pg_dump`, `mysqldump` and PostgreSQL's and MySQL's statements,
+and none is built yet for SQL Server's `BACKUP DATABASE` and its replication.
+
+### Running the SQL Server tests
+
+The compat tests that start SQL Server run only for a person who has accepted Microsoft's licence.
+To run them, accept it yourself for both the instance and the test:
+
+```sh
+export CLOUDBURROW_ACCEPT_MSSQL_EULA=Y   # you accept Microsoft's SQL Server licence
+cloudburrow up --name mssql --services cloudsql,cloudsql-mysql,storage --state-dir /tmp/mssql-state
+eval "$(scripts/compat-env.sh mssql 2>/dev/null)"
+go test -tags compat -run 'TestCloudSQLServer' -v ./test/compat/
+```
+
+`TestCloudSQLServerInstance` then creates a `SQLSERVER_2022_EXPRESS` instance (its first pull is
+about 460 MB), checks it becomes `RUNNABLE`, makes a database and a user, and queries the server as
+`sqlserver` through the official Go connector, reading back a database flag. Without the variable it
+skips, and `TestCloudSQLServerRefusedWithoutEULA` checks the refusal instead; the unit tests in
+`internal/service/sqladmin`, `internal/config` and `cmd/cloudburrow` always check the refusal and that
+`ACCEPT_EULA` is never set without an acceptance on record.
+

@@ -141,7 +141,15 @@ func (s *Server) objectsList(w http.ResponseWriter, r *http.Request) {
 					full = true
 					break
 				}
-				items = append(items, s.objectJSONWith(r, v, b))
+				item := s.objectJSONWith(r, v, b)
+				if v.KMSKeyVersion != "" {
+					// customer-managed-keys: "The CRC32C and MD5 values of
+					// CMEK-encrypted objects are not returned when listing
+					// with the JSON API" (#1938).
+					delete(item, "crc32c")
+					delete(item, "md5Hash")
+				}
+				items = append(items, item)
 				if !emitPrefix {
 					last = listToken{After: name}
 					if versions {

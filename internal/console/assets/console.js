@@ -113,6 +113,11 @@ function agentPlatformRoutes() {
 
 const AP_ROUTES = agentPlatformRoutes();
 
+// Kubernetes Engine's pages drawn as one page's tabs (#1857).
+const GKE_DISCOVERY = ["/kubernetes/gateways", "/kubernetes/services", "/kubernetes/ingress"];
+const GKE_STORAGE = ["/kubernetes/storage", "/kubernetes/storage-classes"];
+
+
 const ROUTES = [
   { path: "/", service: null, title: "Welcome" },
 
@@ -165,30 +170,47 @@ const ROUTES = [
   { path: "/artifact-registry-settings", service: "artifact-registry-settings", icon: "artifact-registry", title: "Settings",
     section: "CI/CD", product: "artifact-registry", productTitle: "Artifact Registry" },
   // Cloud Functions v2, served on the Run port (#1377).
-  { path: "/functions", service: "functions", title: "Functions", kind: "Function", logs: true, section: "Serverless computing",
-    product: "functions", productTitle: "Cloud Functions" },
+  // Google merged Cloud Functions into Cloud Run: the page is Cloud Run
+  // functions, listing both generations (#1853).
+  { path: "/functions", service: "functions", title: "Cloud Run functions", navTitle: "Functions", kind: "Function", logs: true,
+    section: "Serverless computing", product: "functions", productTitle: "Cloud Run functions" },
 
-  // Kubernetes Engine is one product with five pages, not five products.
-  //
-  // The drawer lists products; a bare row called "Services" or "Jobs" sitting
-  // as a peer of Cloud Run is ambiguous with Cloud Run's own services and
-  // jobs, and someone who pinned "Jobs" could not tell from the drawer which
-  // product they had pinned. `product` is the drawer's row, `title` is the
-  // page inside it.
-  { path: "/kubernetes/workloads",  service: "workloads",   title: "Workloads", kind: "Workload", logs: true, section: "Containers",
-    product: "kubernetes", productTitle: "Kubernetes Engine" },
-  { path: "/kubernetes/pods",       service: "pods",        title: "Pods", kind: "Pod", logs: true,      section: "Containers",
-    product: "kubernetes", productTitle: "Kubernetes Engine" },
-  { path: "/kubernetes/services",   service: "k8sservices", title: "Services", kind: "Service", logs: true,  section: "Containers",
-    product: "kubernetes", productTitle: "Kubernetes Engine" },
-  { path: "/kubernetes/jobs",       service: "jobs",        title: "Jobs", kind: "Job", logs: true,      section: "Containers",
-    product: "kubernetes", productTitle: "Kubernetes Engine" },
-  { path: "/kubernetes/nodes",      service: "nodes",       title: "Nodes", kind: "Node",     section: "Containers",
-    product: "kubernetes", productTitle: "Kubernetes Engine" },
-  { path: "/kubernetes/storage",    service: "k8sstorage",  title: "Storage", kind: "Persistent volume claim",   section: "Containers",
-    product: "kubernetes", productTitle: "Kubernetes Engine" },
-  { path: "/kubernetes/events",     service: "events",      title: "Events", kind: "Event",    section: "Containers",
-    product: "kubernetes", productTitle: "Kubernetes Engine" },
+  // Kubernetes Engine is one product, its pages in Google's menu (#1857):
+  // Clusters, Workloads, Applications, Secrets & ConfigMaps, Gateways,
+  // Services & Ingress, Storage, Object Browser, Backup for GKE, Config,
+  // Policy and Security (https://docs.cloud.google.com/kubernetes-engine/docs/concepts/dashboards).
+  // The pages read the instance's own kind cluster through its Kubernetes
+  // API; CloudBurrow serves no Kubernetes Engine API (#1913), so the pages
+  // that need it say so in Google's place. Pods, Jobs, Nodes and Events,
+  // which Google's menu does not have, keep their pages (navHidden),
+  // reached from a workload's Managed pods, Workloads, a cluster's Nodes tab
+  // and Object Browser. `pageTabs` draws sibling list pages as one page's
+  // tabs (Gateways, Services and Ingress; Persistent volume claims and
+  // Storage classes), the menu marking the page whose `navAs` they name.
+  { path: "/kubernetes/clusters", service: "gkeclusters", title: "Kubernetes clusters", navTitle: "Clusters", kind: "Cluster", icon: "k8s", logs: true, section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine" },
+  { path: "/kubernetes/workloads", service: "workloads", title: "Workloads", kind: "Workload", logs: true, section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine" },
+  { path: "/kubernetes/applications", screen: "unavailable", icon: "k8s", title: "Applications", section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine",
+    unavailable: "Applications are the Kubernetes Applications that GKE's Marketplace and Application Manager install, which CloudBurrow does not serve. A workload deployed with kubectl, Helm or Deploy is on Workloads." },
+  { path: "/kubernetes/config", service: "k8sconfig", icon: "secrets", title: "Secrets & ConfigMaps", kind: "Configuration", section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine" },
+  { path: "/kubernetes/gateways", service: "k8sgateways", icon: "k8sservices", title: "Gateways, Services & Ingress", tabTitle: "Gateways", kind: "Gateway", navHidden: true, navAs: "/kubernetes/services", pageTabs: GKE_DISCOVERY, section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine" },
+  { path: "/kubernetes/services", service: "k8sservices", title: "Gateways, Services & Ingress", tabTitle: "Services", kind: "Service", logs: true, pageTabs: GKE_DISCOVERY, section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine" },
+  { path: "/kubernetes/ingress", service: "k8singress", icon: "k8sservices", title: "Gateways, Services & Ingress", tabTitle: "Ingress", kind: "Ingress", navHidden: true, navAs: "/kubernetes/services", pageTabs: GKE_DISCOVERY, section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine" },
+  { path: "/kubernetes/storage", service: "k8sstorage", title: "Storage", tabTitle: "Persistent volume claims", kind: "Persistent volume claim", pageTabs: GKE_STORAGE, section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine" },
+  { path: "/kubernetes/storage-classes", service: "k8sstorageclasses", icon: "k8sstorage", title: "Storage", tabTitle: "Storage classes", kind: "Storage class", navHidden: true, navAs: "/kubernetes/storage", pageTabs: GKE_STORAGE, section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine" },
+  { path: "/kubernetes/object-browser", service: "k8sobjects", title: "Object Browser", kind: "Resource type", icon: "k8s", section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine" },
+  { path: "/kubernetes/backup", screen: "unavailable", icon: "k8s", title: "Backup for GKE", section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine",
+    unavailable: "Backup for GKE's backup plans, backups and restores are the Backup for GKE API's (gkebackup.googleapis.com), which CloudBurrow does not serve. A persistent volume's data stays in the instance's state directory." },
+  { path: "/kubernetes/config-management", screen: "unavailable", icon: "k8s", title: "Config", section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine",
+    unavailable: "Config Sync is a GKE Enterprise fleet feature (the GKE Hub API), which CloudBurrow does not serve. Apply manifests to this instance's cluster with kubectl." },
+  { path: "/kubernetes/policy", screen: "unavailable", icon: "k8s", title: "Policy", section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine",
+    unavailable: "Policy Controller is a GKE Enterprise fleet feature (the GKE Hub API), which CloudBurrow does not serve." },
+  { path: "/kubernetes/security", screen: "unavailable", icon: "k8s", title: "Security", section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine",
+    unavailable: "GKE security posture (workload configuration and vulnerability scanning) reads the Container Security API, which CloudBurrow does not serve." },
+  // CloudBurrow's pages that Google reaches from elsewhere.
+  { path: "/kubernetes/pods", service: "pods", title: "Pods", kind: "Pod", logs: true, navHidden: true, section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine" },
+  { path: "/kubernetes/jobs", service: "jobs", title: "Jobs", kind: "Job", logs: true, navHidden: true, section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine" },
+  { path: "/kubernetes/nodes", service: "nodes", title: "Nodes", kind: "Node", navHidden: true, section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine" },
+  { path: "/kubernetes/events", service: "events", title: "Events", kind: "Event", navHidden: true, section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine" },
 
   // Cloud Storage is one product. Its menu follows Google's (#1843):
   // Buckets, Observability, Storage Intelligence's Configuration, Inventory
@@ -283,16 +305,42 @@ const ROUTES = [
   // providers, and console API pages, but no route: /memorystore and
   // /backupdr were "No such screen", so nothing of either was reachable from
   // the console (found by TestMemorystoreRotateServerCAThroughThePage).
-  { path: "/memorystore", service: "memorystore", title: "Redis", kind: "Instance", section: "Databases",
-    product: "memorystore", productTitle: "Memorystore" },
-  // Memorystore for Redis Cluster (#1519), a page of its own beside the
-  // instances, as the Memorystore console's Redis Cluster tab is.
-  { path: "/memorystore-clusters", service: "memorystore-clusters", icon: "memorystore", title: "Redis Cluster", kind: "Cluster", section: "Databases",
-    product: "memorystore", productTitle: "Memorystore" },
+  // Google's Memorystore menu (#1862): Valkey, Redis Cluster, Redis and
+  // Memcached, each page titled "Memorystore for <product>". Memcached
+  // (memcache.googleapis.com) is not served: its page says so in Google's
+  // place.
   // Memorystore for Valkey (#1519), memorystore.googleapis.com's instances.
-  { path: "/memorystore-valkey", service: "memorystore-valkey", icon: "memorystore", title: "Valkey", kind: "Instance", section: "Databases",
-    product: "memorystore", productTitle: "Memorystore" },
-  { path: "/backupdr", service: "backupdr", icon: "storage", title: "Backup and DR", kind: "Backup vault", section: "Storage" },
+  { path: "/memorystore-valkey", service: "memorystore-valkey", icon: "memorystore", title: "Memorystore for Valkey",
+    navTitle: "Valkey", kind: "Instance", section: "Databases", product: "memorystore", productTitle: "Memorystore" },
+  // Memorystore for Redis Cluster (#1519), a page of its own beside the
+  // instances, as the Memorystore console's Redis Cluster page is.
+  { path: "/memorystore-clusters", service: "memorystore-clusters", icon: "memorystore", title: "Memorystore for Redis Cluster",
+    navTitle: "Redis Cluster", kind: "Cluster", section: "Databases", product: "memorystore", productTitle: "Memorystore" },
+  { path: "/memorystore", service: "memorystore", title: "Memorystore for Redis", navTitle: "Redis", kind: "Instance",
+    section: "Databases", product: "memorystore", productTitle: "Memorystore" },
+  { path: "/memorystore-memcached", screen: "unavailable", service: null, requires: "memorystore", icon: "memorystore",
+    title: "Memorystore for Memcached", navTitle: "Memcached", section: "Databases", product: "memorystore", productTitle: "Memorystore",
+    unavailable: "Memorystore for Memcached is the Memcache API (memcache.googleapis.com), which CloudBurrow does not serve. " +
+      "Memorystore for Valkey, Redis Cluster and Redis are served: their pages are in this menu." },
+  // Backup and DR's menu (#1844), Google's pages: Overview, Vaulted backups
+  // (the protected resources, Schedule backup), Backup plans, Backup plan
+  // associations, Backup vaults (at /backupdr, its address before), Jobs and
+  // Reports. The product key stays "backupdr", so a pin keeps pointing here.
+  { path: "/backupdr-overview", service: "backupdr-overview", icon: "storage", title: "Overview", section: "Storage",
+    product: "backupdr", productTitle: "Backup and DR" },
+  { path: "/backupdr-vaulted-backups", service: "backupdr-vaulted", icon: "storage", title: "Vaulted backups", kind: "Resource",
+    section: "Storage", product: "backupdr", productTitle: "Backup and DR" },
+  { path: "/backupdr-plans", service: "backupdr-plans", icon: "storage", title: "Backup plans", kind: "Backup plan", section: "Storage",
+    product: "backupdr", productTitle: "Backup and DR" },
+  { path: "/backupdr-associations", service: "backupdr-associations", icon: "storage", title: "Backup plan associations",
+    kind: "Backup plan association", section: "Storage", product: "backupdr", productTitle: "Backup and DR" },
+  { path: "/backupdr", service: "backupdr", icon: "storage", title: "Backup vaults", kind: "Backup vault", section: "Storage",
+    product: "backupdr", productTitle: "Backup and DR" },
+  { path: "/backupdr-jobs", service: "backupdr-jobs", icon: "storage", title: "Jobs", section: "Storage",
+    product: "backupdr", productTitle: "Backup and DR" },
+  { path: "/backupdr-reports", title: "Reports", service: null, requires: "backupdr", screen: "unavailable", icon: "storage",
+    section: "Storage", product: "backupdr", productTitle: "Backup and DR",
+    unavailable: "Backup and DR reports are Looker Studio reports over the backup and job logs Google's Cloud Logging routes into a BigQuery dataset. The Backup and DR Service writes its job logs (bdr_backup_restore_jobs, bdr_backup_plan_jobs) to this instance's Cloud Logging, and a sink routes them to BigQuery, but CloudBurrow runs no Looker Studio (#1924). The Jobs page lists the jobs, with their time range and Current failures." },
   // Google files BigQuery under Analytics, a category with no vendored icon
   // here, so it sits with the other data stores rather than under a heading
   // drawn without one (#698). It is one product with two pages: datasets,
@@ -366,6 +414,29 @@ const ROUTES = [
   { path: "/agent-platform/local-catalogue", service: "ai", title: "Local catalogue", kind: "Model", icon: "ai", group: "Models",
     section: "AI and machine learning", product: "vertexai", productTitle: "Agent Platform" },
   ...AP_ROUTES.slice(AP_ROUTES.findIndex((r) => r.path === AP_PATHS.predict)),
+
+  // Document AI (#1930), its menu in Google's order: Overview, Processor
+  // gallery (Google's /ai/document-ai/processor-library) and My processors
+  // (/ai/document-ai/processors). Served by the local AI endpoint (#1799):
+  // Enterprise Document OCR and Layout Parser run here, every other type
+  // in the gallery says it is not available locally.
+  { path: "/document-ai/overview", service: "documentai-overview", icon: "ai", title: "Overview",
+    section: "AI and machine learning", product: "documentai", productTitle: "Document AI" },
+  { path: "/document-ai/processor-library", service: "documentai-gallery", icon: "ai", title: "Processor gallery",
+    section: "AI and machine learning", product: "documentai", productTitle: "Document AI" },
+  { path: "/document-ai/processors", service: "documentai", icon: "ai", title: "My processors", kind: "Processor",
+    section: "AI and machine learning", product: "documentai", productTitle: "Document AI" },
+  // Speech-to-Text (#1930): Transcriptions, where Google's console opens,
+  // and Recognizers, Speech-to-Text v2's, on the local AI endpoint.
+  { path: "/speech/transcriptions", service: "speech-transcriptions", icon: "ai", title: "Transcriptions",
+    section: "AI and machine learning", product: "speech", productTitle: "Speech-to-Text" },
+  { path: "/speech/recognizers", service: "speech-recognizers", icon: "ai", title: "Recognizers", kind: "Recognizer",
+    section: "AI and machine learning", product: "speech", productTitle: "Speech-to-Text" },
+  // Model adaptation's custom classes and phrase sets (#1930).
+  { path: "/speech/custom-classes", service: "speech-custom-classes", icon: "ai", title: "Custom classes", kind: "Custom class",
+    section: "AI and machine learning", product: "speech", productTitle: "Speech-to-Text" },
+  { path: "/speech/phrase-sets", service: "speech-phrase-sets", icon: "ai", title: "Phrase sets", kind: "Phrase set",
+    section: "AI and machine learning", product: "speech", productTitle: "Speech-to-Text" },
 
   // Secret Manager (#1850): Google's menu, Secret Manager (the global
   // secrets), Regional secrets and Settings.
@@ -505,23 +576,52 @@ const ROUTES = [
   { path: "/requests", service: null, screen: "requests", title: "Request Log",   section: "Operations" },
   { path: "/faults",   service: null, screen: "faults",   title: "Fault injection", section: "Operations" },
 
-  // Resource Manager is one product with three pages here: projects, the
-  // organization and its folders (#1294), and tags (#1295). The product key
-  // stays "projects", so a pin made before the other pages were routed keeps
-  // pointing at it. Resource hierarchy and Tags had providers but no route,
-  // so neither was reachable from the console.
-  { path: "/projects", service: "projects", title: "Projects", kind: "Project", section: "Management tools",
-    product: "projects", productTitle: "Resource Manager" },
-  { path: "/resource-hierarchy", service: "hierarchy", icon: "hierarchy", title: "Resource hierarchy", kind: "Folder", section: "Management tools",
-    product: "projects", productTitle: "Resource Manager" },
-  { path: "/tags", service: "tags", title: "Tags", kind: "Tag key", section: "Management tools",
-    product: "projects", productTitle: "Resource Manager" },
-  // APIs & Services (#1352): a project's APIs, Enable and Disable. It had a
-  // provider but no route.
-  { path: "/apis", service: "serviceusage", title: "Enabled APIs & services", kind: "API/Service", section: "Management tools",
+  // Resource Manager's own pages (#1294, #1295) are IAM & Admin's since
+  // #1865, as Google's console has them: Manage resources
+  // (/cloud-resource-manager) is the tree of the organization, folders and
+  // projects, and Tags is /iam-admin/tags, so the drawer has no Resource
+  // Manager row. These addresses stay: a project's, a folder's and the
+  // organization's pages (liens, organization policies, app management,
+  // Purge project now) and a tag key's page are here, and the lists still
+  // answer by their address. `navHidden` keeps them out of the menu, and
+  // `navAs` marks the IAM & Admin page they belong to.
+  { path: "/projects", service: "projects", title: "Projects", kind: "Project", section: "IAM & Admin",
+    product: "iam", productTitle: "IAM & Admin", navHidden: true, navAs: "/cloud-resource-manager" },
+  { path: "/resource-hierarchy", service: "hierarchy", icon: "hierarchy", title: "Resource hierarchy", kind: "Folder", section: "IAM & Admin",
+    product: "iam", productTitle: "IAM & Admin", navHidden: true, navAs: "/cloud-resource-manager" },
+  { path: "/tags", service: "tags", title: "Tags", kind: "Tag key", section: "IAM & Admin",
+    product: "iam", productTitle: "IAM & Admin", navHidden: true, navAs: "/iam-admin/tags" },
+  // APIs & Services (#1352, #1866), Google's menu in Google's order.
+  // Enabled APIs & services (/apis, Google's /apis/dashboard) is the
+  // dashboard's Traffic, Errors and Median latency charts over the table of
+  // enabled APIs (renderAPIsDashboard); an API's page is
+  // /apis/api/<name>/<tab> (Overview, Metrics, Quotas & System Limits,
+  // Credentials) with Disable API. Library is /apis/library, an API's
+  // Library page /apis/library/<name> with Enable or Manage. Credentials
+  // holds Create credentials, the API keys (#1915: Create, each key's page
+  // /apis/credentials/key/<id> with its restrictions, Show key, Rotate key
+  // and Delete, and Restore deleted credentials at
+  // /apis/credentials/restore) and the service accounts; OAuth clients are
+  // not served, which it says. Their calls are the serviceusage provider's
+  // Studio (consoleapis.go, consoleapikeys.go).
+  { path: "/apis", service: "serviceusage", screen: "apis-dashboard", title: "Enabled APIs & services", kind: "API/Service", section: "Management tools",
     product: "serviceusage", productTitle: "APIs & Services" },
+  { path: "/apis/dashboard", redirect: "/apis", title: "Enabled APIs & services" },
+  { path: "/apis/library", service: "serviceusage", screen: "apis-library", icon: "serviceusage", title: "Library", kind: "API", section: "Management tools",
+    product: "serviceusage", productTitle: "APIs & Services" },
+  { path: "/apis/credentials", service: "serviceusage", screen: "apis-credentials", icon: "serviceusage", title: "Credentials", section: "Management tools",
+    product: "serviceusage", productTitle: "APIs & Services" },
+  { path: "/apis/credentials/consent", title: "OAuth consent screen", service: null, requires: "serviceusage", screen: "unavailable", icon: "serviceusage",
+    section: "Management tools", product: "serviceusage", productTitle: "APIs & Services",
+    unavailable: "The OAuth consent screen is Google Auth Platform's (Branding, Audience, Clients, Data Access, Verification Center), which CloudBurrow does not serve: a local instance signs no user in with OAuth, and its APIs take a service account key or no credentials at all." },
+  { path: "/apis/credentials/agreements", title: "Page usage agreements", service: null, requires: "serviceusage", screen: "unavailable", icon: "serviceusage",
+    section: "Management tools", product: "serviceusage", productTitle: "APIs & Services",
+    unavailable: "Page usage agreements are the terms of service a project has accepted for Google's APIs. A local instance has no terms to accept." },
+  { path: "/apis/credentials/domainverification", title: "Domain verification", service: null, requires: "serviceusage", screen: "unavailable", icon: "serviceusage",
+    section: "Management tools", product: "serviceusage", productTitle: "APIs & Services",
+    unavailable: "Domain verification proves to Google that a project owns a domain, for push notifications and OAuth redirects. A local instance reaches no outside domain, so there is nothing to verify." },
   // Service Usage operations (#1530): what operations.list answers, with
-  // Delete.
+  // Delete. Google's menu has no such page; it is kept after Google's.
   { path: "/apis/operations", service: "serviceusage-operations", icon: "serviceusage", title: "Operations", kind: "Operation", section: "Management tools",
     product: "serviceusage", productTitle: "APIs & Services" },
   // Connect (#802): what `env`, `gcloud-setup`, `terraform`, `version` and
@@ -545,9 +645,10 @@ const ROUTES = [
   // IAM & Admin, so it is in this menu too.
   { path: "/iam-admin/tags", service: "tags", icon: "iam", title: "Tags", kind: "Tag key", section: "IAM & Admin",
     product: "iam", productTitle: "IAM & Admin", navAfter: "/iam-admin/labels" },
-  // Manage resources (#1864): Resource Manager's projects, the page Google's
-  // IAM & Admin menu opens at /cloud-resource-manager.
-  { path: "/cloud-resource-manager", service: "projects", icon: "iam", title: "Manage resources", kind: "Project", section: "IAM & Admin",
+  // Manage resources (#1864, #1865): the page Google's IAM & Admin menu
+  // opens at /cloud-resource-manager, the organization's tree of folders
+  // and projects (renderManageResources).
+  { path: "/cloud-resource-manager", service: "projects", screen: "manage-resources", icon: "iam", title: "Manage resources", kind: "Project", section: "IAM & Admin",
     product: "iam", productTitle: "IAM & Admin", navAfter: "/iam-admin/audit" },
 ];
 
@@ -1893,7 +1994,7 @@ async function renderProducts(view) {
               el("span", {}, el("span", { class: "catalogue-name", text: productTitle(entry) }),
                 pagesOf(key).length > 1
                   ? el("span", { class: "catalogue-pages",
-                                 text: pagesOf(key).map((pg) => pg.title).join(" · ") })
+                                 text: pagesOf(key).filter((pg) => !pg.navHidden).map((pg) => pg.title).join(" · ") })
                   : null)),
             el("button", {
               class: "nav-pin" + (pinned ? " is-pinned" : ""),
@@ -2721,6 +2822,17 @@ async function renderDashboard(view) {
 // the screen being rebuilt around it.
 const PAGE_SIZES = [25, 50, 100];
 
+// emptyListHint is the line under an empty list's "No <noun> yet": what this
+// screen can do about it. A list screen without a create control says it is
+// read-only rather than naming a button that is not there; a table inside a
+// resource page offers its own actions above it.
+function emptyListHint(caps, listScreen) {
+  if (caps.create) return "Create one here, or with an SDK, the CLI or gcloud — it will appear either way.";
+  if (!listScreen) return "Nothing here yet.";
+  return "Nothing here yet. This screen is read-only, so anything that appears " +
+    "will have been created by an SDK, the CLI, or CloudBurrow itself.";
+}
+
 function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   const caps = opts.rowControls ? capabilityOf(route.service) : {};
   // Actions on the page that take the checked rows, such as Compose on a
@@ -2837,6 +2949,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
       title: `Delete ${names.length} ${names.length === 1 ? noun.replace(/s$/, "") : noun}?`,
       detail: [names.join(", "), DELETE_DETAIL[route.service]].filter(Boolean).join("\n\n"),
       confirmWord: names.length === 1 ? names[0] : String(names.length),
+      style: caps.deleteConfirm || "name",
       onConfirm: async () => {
         for (const name of names) operating.add(name);
         draw();
@@ -3048,8 +3161,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
             }))
         : el("div", { class: "state state-inline" },
             el("h2", { text: `No ${noun} yet` }),
-            el("p", { text: "Create one here, or with an SDK, the CLI or gcloud — " +
-                            "it will appear either way." }),
+            el("p", { text: emptyListHint(caps, opts.rowControls) }),
             caps.create
               ? el("button", { class: "primary", text: caps.create.label,
                   onclick: () => startCreate(route, caps.create, refresh) })
@@ -3324,6 +3436,20 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
     el("div", { class: "table-wrap" },
       el("table", {}, el("thead", {}, headRow), body)),
     footer);
+  if (opts.rowControls) openAskedListAction(route, data, refresh);
+}
+
+// openAskedListAction opens, once, the list action the address names, as
+// a resource page's does (#1853): the functions list's Create function
+// opens Cloud Run's Write a function. The action is taken off the address.
+function openAskedListAction(route, data, onDone) {
+  const asked = new URLSearchParams(location.search).get("action");
+  if (!asked) return;
+  const here = new URL(location.href);
+  here.searchParams.delete("action");
+  history.replaceState(history.state, "", here.pathname + here.search);
+  const opened = (data.actions || []).find((a) => a.id === asked && !a.href);
+  if (opened) openActionForm(route, [], opened, onDone, data.noun || route.title);
 }
 
 // detailHref is the address of one row's contents.
@@ -4052,6 +4178,11 @@ async function renderDetail(view, route, resourcePath) {
       el("button", {
         class: "secondary" + (a.destructive ? " danger" : ""),
         text: a.label,
+        // An action this instance cannot perform is drawn in Google's
+        // place, disabled, with its reason (#1857).
+        disabled: a.unavailable ? "disabled" : null,
+        title: a.unavailable || null,
+        "aria-description": a.unavailable || null,
         onclick: () => runAction(route, segments, a, leaves(a) ? leavePage : reloadPage, NO_ROW, data.title || null),
       })),
   ];
@@ -4552,20 +4683,73 @@ function resultTable(listing, at = null) {
     };
     return b;
   }));
+  const table = resultRows(listing, cols, items, acts, rowButtons);
+  // Page images with the answer's boxes drawn over them, beside its text
+  // and rows (#1930): Document AI's test document, its layout found.
+  if ((listing.pages || []).length) {
+    return el("div", { class: "result-doc" },
+      el("div", { class: "result-pages" }, ...listing.pages.map(resultPage)),
+      el("div", { class: "result-side" },
+        listing.note ? el("p", { class: "form-help", id: "action-result-note", text: listing.note }) : null,
+        listing.text ? el("pre", { class: "result-text", id: "action-result-text", tabindex: "0",
+          "aria-label": "Result text", text: listing.text }) : null,
+        table));
+  }
   return el("div", {},
     listing.note ? el("p", { class: "form-help", id: "action-result-note", text: listing.note }) : null,
-    items.length
-      ? el("table", { class: "table", id: "action-result-table" },
-          el("thead", {}, el("tr", {},
-            el("th", { text: listing.nameColumn || "Name" }), ...cols.map((c) => el("th", { text: c })),
-            acts ? el("th", { "aria-label": "Actions" }) : null)),
-          el("tbody", {}, ...items.map((r) => el("tr", {},
-            // A row that names something with a page of its own links to
-            // it: a BigQuery load's job, in Job history (#993).
-            el("td", {}, r.link ? el("a", { href: r.link, text: r.name }) : r.name),
-            ...cols.map((c) => el("td", { text: (r.fields || {})[c] || "" })),
-            acts ? rowButtons(r) : null))))
-      : null);
+    // An answer's text, line breaks kept: a test document's extracted
+    // text, a transcript (#1930).
+    listing.text ? el("pre", { class: "result-text", id: "action-result-text", tabindex: "0",
+      "aria-label": "Result text", text: listing.text }) : null,
+    table);
+}
+
+function resultRows(listing, cols, items, acts, rowButtons) {
+  if (!items.length) return null;
+  const boxed = new Set((listing.pages || []).flatMap((pg) => (pg.boxes || []).map((b) => b.row)));
+  return el("table", { class: "table", id: "action-result-table" },
+    el("thead", {}, el("tr", {},
+      el("th", { text: listing.nameColumn || "Name" }), ...cols.map((c) => el("th", { text: c })),
+      acts ? el("th", { "aria-label": "Actions" }) : null)),
+    el("tbody", {}, ...items.map((r) => {
+      const tr = el("tr", boxed.has(r.name) ? { "data-row": r.name, tabindex: "0" } : {},
+        // A row that names something with a page of its own links to
+        // it: a BigQuery load's job, in Job history (#993).
+        el("td", {}, r.link ? el("a", { href: r.link, text: r.name }) : r.name),
+        ...cols.map((c) => el("td", { text: (r.fields || {})[c] || "" })),
+        acts ? rowButtons(r) : null);
+      if (boxed.has(r.name)) {
+        const lit = (on) => {
+          tr.classList.toggle("is-lit", on);
+          for (const b of document.querySelectorAll(`.result-box[data-row="${CSS.escape(r.name)}"]`)) {
+            b.classList.toggle("is-lit", on);
+            if (on) b.scrollIntoView({ block: "nearest" });
+          }
+        };
+        tr.addEventListener("mouseenter", () => lit(true));
+        tr.addEventListener("mouseleave", () => lit(false));
+        tr.addEventListener("focus", () => lit(true));
+        tr.addEventListener("blur", () => lit(false));
+      }
+      return tr;
+    })));
+}
+
+// resultPage is a page image with its boxes over it; a box lights its row.
+function resultPage(pg) {
+  const pct = (v) => `${(v * 100).toFixed(3)}%`;
+  return el("figure", { class: "result-page" },
+    el("div", { class: "result-page-frame", style: `aspect-ratio: ${pg.width} / ${pg.height}` },
+      el("img", { src: pg.image, alt: pg.label, width: String(pg.width), height: String(pg.height) }),
+      ...(pg.boxes || []).map((b) => {
+        const box = el("div", { class: `result-box kind-${b.kind.toLowerCase()}`, "data-row": b.row, "aria-hidden": "true",
+          title: `${b.kind} ${b.row}`, style: `left:${pct(b.x)};top:${pct(b.y)};width:${pct(b.w)};height:${pct(b.h)}` });
+        const row = () => document.querySelector(`#action-result-table tr[data-row="${CSS.escape(b.row)}"]`);
+        box.addEventListener("mouseenter", () => { box.classList.add("is-lit"); const r = row(); if (r) { r.classList.add("is-lit"); r.scrollIntoView({ block: "nearest" }); } });
+        box.addEventListener("mouseleave", () => { box.classList.remove("is-lit"); const r = row(); if (r) r.classList.remove("is-lit"); });
+        return box;
+      })),
+    el("figcaption", { text: pg.label }));
 }
 
 // --- objects: upload, download, preview, delete (#295) ------------------
@@ -4920,6 +5104,17 @@ function openEditForm(route, segments, spec, onDone) {
   fields.focusFirst();
 }
 
+// pageTabStrip is a route's `pageTabs` as a tablist of links, the route
+// itself selected (#1857).
+function pageTabStrip(route) {
+  const tabs = route.pageTabs.map((path) => ROUTES.find((r) => r.path === path)).filter(Boolean);
+  return el("nav", { class: "tab-strip page-tabs", "aria-label": `${route.title} tabs` },
+    ...tabs.map((r) => el("a", {
+      class: "tab" + (r === route ? " is-selected" : ""), href: r.path + scopeSearch(),
+      "aria-current": r === route ? "page" : null, text: r.tabTitle || r.title,
+    })));
+}
+
 async function renderList(view, route) {
   const project = new URLSearchParams(location.search).get("project") || "";
   // A filter the service evaluates (#1228), kept in the URL so a filtered
@@ -4929,6 +5124,9 @@ async function renderList(view, route) {
     (serverFilter ? `&filter=${encodeURIComponent(serverFilter)}` : "");
 
   const header = [pageHeader(route.title, project ? `Project ${project}` : "All projects")];
+  // Sibling list pages drawn as one page's tabs (#1857): Google's
+  // Gateways, Services & Ingress has Gateways, Services and Ingress.
+  if (route.pageTabs) header.push(pageTabStrip(route));
   const cancel = new AbortController();
   setChildren(view, ...header,
     loadingState(5, { what: route.title.toLowerCase(), onCancel: () => cancel.abort() }));
@@ -4937,6 +5135,14 @@ async function renderList(view, route) {
   try {
     data = await api(listURL, { signal: cancel.signal });
   } catch (err) {
+    // A page whose service this instance was not started with is not a
+    // failure to read it: it is drawn as every other page CloudBurrow does
+    // not serve here is, in the "Not available locally" style (#1868), not
+    // as a red error naming an internal "no such service".
+    if (!isCancelled(err) && /^no such service/.test(String(err.message))) {
+      renderNotStarted(view, route);
+      return;
+    }
     setChildren(view, ...header,
       isCancelled(err)
         ? cancelledState(`${route.title} not loaded`, () => renderList(view, route))
@@ -4970,11 +5176,17 @@ async function renderList(view, route) {
         },
       })));
     header.push(strip);
+    // A tab may carry its own groups (#1924): Backup and DR's Jobs tab
+    // draws its Current failures over its rows, and its System Jobs tab a
+    // group per job, in place of the screen's summary.
+    const own = tabs[current].groups;
     if (tabs[current].id !== data.listTab) {
-      setChildren(view, ...header, noteBanner(tabs[current].note), ...listingSummary(data));
+      setChildren(view, ...header, noteBanner(tabs[current].note),
+        ...listingSummary(own ? { summary: own } : data));
       announce(`${tabs[current].label} selected`);
       return;
     }
+    if (own) header.push(...listingSummary({ summary: own }));
   } else if (!data.summaryOnly) {
     header.push(...listingSummary(data));
   }
@@ -4995,6 +5207,18 @@ async function renderList(view, route) {
   // An unreachable backend is an error state, never an empty table: an empty
   // table says "you have none", which sends a developer to debug their code.
   if (data.unavailable) {
+    // A provider saying what this instance does not serve is the "Not
+    // available locally" state every such page draws (#1868), not a red
+    // read failure with a Retry that can never succeed.
+    const notLocal = /^Not available locally:\s*/.exec(data.unavailable);
+    if (notLocal) {
+      setChildren(view, ...header,
+        el("div", { class: "state", id: "not-available-locally" },
+          el("h2", { text: "Not available locally" }),
+          el("p", { text: data.unavailable.slice(notLocal[0].length) })));
+      announce(`${route.title}: not available locally`);
+      return;
+    }
     setChildren(view, ...header,
       errorState(`${route.title} unavailable`, data.unavailable, () => renderList(view, route)));
     announce(`${route.title} unavailable`);
@@ -5004,9 +5228,22 @@ async function renderList(view, route) {
   // A screen that is its summary cards alone, as Google's Cloud Build
   // Dashboard is a card per trigger (#1854).
   if (data.summaryOnly && (data.summary || []).length) {
-    setChildren(headerActions(header), refreshButton(() => renderList(view, route)));
+    // With the screen's own actions, as Backup and DR's Overview has its
+    // trial and protected resources actions (#1844).
+    setChildren(headerActions(header), ...listActionButtons(route, data, () => renderList(view, route)),
+      refreshButton(() => renderList(view, route)));
+    // Cards under section headings, when the provider names them, as
+    // Document AI's Processor gallery groups its types (#1930).
+    const cards = listingSummary(data), groups = (data.summary || []).filter((g) => (g.properties || []).length);
+    const runs = [];
+    groups.forEach((g, i) => {
+      if (!runs.length || g.section) runs.push({ section: g.section || "", cards: [] });
+      runs[runs.length - 1].cards.push(cards[i]);
+    });
     setChildren(view, ...header, noteBanner(data.note),
-      el("div", { class: "summary-cards" }, ...listingSummary(data)));
+      ...runs.flatMap((r) => [
+        r.section ? el("h2", { class: "summary-section", text: r.section }) : null,
+        el("div", { class: "summary-cards" }, ...r.cards)]).filter(Boolean));
     announce(`${data.summary.length} ${noun} loaded`);
     return;
   }
@@ -5027,25 +5264,13 @@ async function renderList(view, route) {
       announce(data.serverFilter.error ? `Filter refused` : `No ${noun} match the filter`);
       return;
     }
-    const empty = emptyState(`No ${noun} yet`,
-      caps.create
-        ? "Create one here, or with an SDK, the CLI or gcloud — it will appear either way."
-        : "Nothing here yet. This screen is read-only, so anything that appears " +
-          "will have been created by an SDK, the CLI, or CloudBurrow itself.");
-    if (caps.create) {
-      empty.append(el("button", { class: "primary", text: caps.create.label,
-        onclick: () => startCreate(route, caps.create, () => renderList(view, route)) }));
-    }
-    empty.append(...listActionButtons(route, data, () => renderList(view, route)));
-    // The title line carries the same Create, and Refresh, as a list with
-    // rows does (#1842).
-    setChildren(headerActions(header),
-      caps.create ? createButton(caps.create.label,
-        () => startCreate(route, caps.create, () => renderList(view, route))) : null,
-      refreshButton(() => renderList(view, route)));
-    setChildren(view, ...header, noteBanner(data.note), empty);
-    announce(`No ${noun}`);
-    return;
+    // Otherwise an empty list is the same table as a full one (cross-product
+    // consistency, #1868): Google's lists keep their filter bar, column
+    // headers, column chooser, info-panel toggle and pager with no rows, the
+    // empty state drawn inside the table. Drawing a bare card instead made
+    // a product's toolbar change shape with its row count, and an empty
+    // list was never polled, so a resource made with an SDK did not appear.
+    // The table's own empty row says what this screen can do (emptyListHint).
   }
 
   renderTableInto(view, header, data, noun, () => renderList(view, route), route,
@@ -5168,7 +5393,11 @@ function openModal({ labelledBy, canClose = () => true }) {
     dialog.classList.add("is-closing");
     dialog.inert = true;
     setTimeout(() => dialog.remove(), OVERLAY_EXIT_MS);
-    for (const n of inerted) n.inert = false;
+    // A dialog that closed while this one was over it (a form that opened
+    // this one from its submit, as Rotate key opens the new key's) stays
+    // inert for the rest of its exit: woken, it would take the clicks meant
+    // for the page under it until it is removed.
+    for (const n of inerted) if (!n.classList.contains("is-closing")) n.inert = false;
     // Back to the button that opened it, not to the top of the page: a
     // keyboard user who cancels a create should be where they started.
     if (opener && opener.isConnected && opener.focus) opener.focus();
@@ -5770,7 +5999,15 @@ function buildCreateForm(spec) {
       // from the control's own `required`, so announcing "star" as well would
       // be saying it twice.
       f.required ? el("span", { class: "required-mark", "aria-hidden": "true", text: "*" }) : null);
-    const help = f.help ? el("p", { id: helpId, class: "form-help", text: f.help }) : null;
+    // Field.Links (#1916): the documents a field is about, such as the
+    // licence a checkbox accepts, under its help. Only https links are drawn.
+    const links = (f.links || []).filter((l) => /^https:\/\//.test(l.url || ""));
+    const helpText = f.help ? el("p", { id: helpId, class: "form-help", text: f.help }) : null;
+    const help = links.length
+      ? el("div", { class: "form-links" }, helpText, el("p", { class: "form-help" },
+          ...links.flatMap((l, i) => [i ? " · " : null,
+            el("a", { href: l.url, target: "_blank", rel: "noopener noreferrer", text: l.label })]).filter(Boolean)))
+      : helpText;
     const error = el("p", { id: errorId, class: "form-field-error", hidden: true });
     const unavailable = unavailableId
       ? el("p", { id: unavailableId, class: "form-help form-unavailable", text: f.unavailable }) : null;
@@ -5971,6 +6208,30 @@ function buildCreateForm(spec) {
       if (other) other.control.addEventListener("change", show);
     }
     show();
+  }
+
+  // A checkbox checked and held while another field holds a value
+  // (checkedWhen, #1862): Memorystore's Security choice of IAM Auth or Token
+  // Auth checks and locks Enable In-Transit Encryption (TLS), as Google's
+  // Create instance does. Released, it keeps its state and is free again.
+  for (const entry of entries) {
+    const cond = entry.field.checkedWhen;
+    if (!cond || !entry.isCheck) continue;
+    const [name, choice = ""] = cond.split("=");
+    const other = byName.get(name);
+    if (!other) continue;
+    const hold = () => {
+      const on = choice.split("|").includes(valueText(other));
+      if (on && !entry.control.checked) {
+        entry.control.checked = true;
+        entry.control.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      entry.control.disabled = on || !!entry.field.immutable;
+      entry.node.classList.toggle("is-held", on);
+      entry.control.title = on ? `Held on by ${other.field.label}` : "";
+    };
+    other.control.addEventListener("change", hold);
+    hold();
   }
 
   // A field made from another (#1864): until it is edited by hand it
@@ -6747,6 +7008,9 @@ async function submitCreate(route, spec, values, onOneTime = () => {}) {
 // The threshold is the server's, not the client's, so "long enough to deserve
 // a page" has one definition rather than one per caller.
 function startCreate(route, create, onDone) {
+  // A create flow that is a page of its own (#1932): the Projects list's
+  // Create project is the New project page, as the picker's New project is.
+  if (create.href) return navigate(create.href + scopeSearch());
   if (create.page) return navigate(`${route.path}/create`);
   openCreateForm(route, create, onDone);
 }
@@ -6788,7 +7052,7 @@ function openCreateForm(route, spec, onDone) {
 
   const cancel = el("button", { type: "button", class: "secondary", text: "Cancel",
                                 onclick: () => { discarding = true; close(); } });
-  const primary = el("button", { type: "submit", class: "primary", text: spec.label });
+  const primary = el("button", { type: "submit", class: "primary", text: spec.submit || spec.label });
 
   const submit = async (e) => {
     e.preventDefault();
@@ -6853,7 +7117,7 @@ function projectIdFrom(name, suffix) {
 async function renderNewProject(view) {
   const route = ROUTES.find((r) => r.service === "projects");
   const caps = capabilityOf("projects");
-  const listHref = "/projects" + scopeSearch();
+  const listHref = "/cloud-resource-manager" + scopeSearch();
   const header = pageHeader("New project", "", { back: listHref, backLabel: "Back to Manage resources" });
   if (!route || !caps.create) {
     return setChildren(view, header,
@@ -6933,6 +7197,8 @@ async function renderCreatePage(view, route) {
   const target = route.of;
   const project = currentProject();
   const caps = capabilityOf(target.service);
+  // A create flow that is a page of the console's own (#1932) is that page.
+  if (caps.create && caps.create.href) return navigate(caps.create.href + scopeSearch());
   const back = new URL(target.path, location.origin);
   if (project) back.searchParams.set("project", project);
   carryScope(back, target.service);
@@ -7222,10 +7488,18 @@ function notify(message, kind = "info") {
 // `consequence` is the closing sentence. A Seek passes none: it is not a
 // delete, and another Seek can move the subscription again (#787); nor does
 // removing a principal from a role, which can be granted back (#793).
-function confirmDestructive({ title, detail, confirmWord, onConfirm, confirmLabel = "Delete", consequence = "This cannot be undone." }) {
+//
+// `style` is how Google's console confirms this kind (#1931): "name" (the
+// default) asks for confirmWord typed back, "delete" or "DELETE" for that
+// word, as a Pub/Sub topic's or a BigQuery dataset's delete does, and
+// "confirm" for nothing typed, the dialog's button alone, as a Cloud Storage
+// bucket's or a Cloud Run service's does.
+function confirmDestructive({ title, detail, confirmWord, onConfirm, confirmLabel = "Delete", consequence = "This cannot be undone.", style = "name" }) {
+  if (style === "delete" || style === "DELETE") confirmWord = style;
+  const typed = style !== "confirm";
   return new Promise((settle) => {
     const error = el("p", { class: "form-error", role: "alert", hidden: true });
-    const input = el("input", { type: "text", autocomplete: "off", id: "confirm-input" });
+    const input = typed ? el("input", { type: "text", autocomplete: "off", id: "confirm-input" }) : null;
 
     let running = false;
     const { dialog, close } = openModal({
@@ -7240,7 +7514,7 @@ function confirmDestructive({ title, detail, confirmWord, onConfirm, confirmLabe
 
     const submit = async (e) => {
       e.preventDefault();
-      if (input.value.trim() !== confirmWord) {
+      if (typed && input.value.trim() !== confirmWord) {
         error.textContent = `Type ${confirmWord} exactly to confirm.`;
         error.hidden = false;
         input.focus();
@@ -7262,21 +7536,31 @@ function confirmDestructive({ title, detail, confirmWord, onConfirm, confirmLabe
       }
     };
 
-    dialog.append(el("form", { class: "modal-body", onsubmit: submit },
+    dialog.append(el("form", { class: "modal-body", onsubmit: submit, "data-confirm": typed ? style : "confirm" },
       el("h2", { id: "confirm-title", text: title }),
       detail ? el("p", { class: "confirm-detail", text: detail }) : null,
       consequence ? el("p", { text: consequence }) : null,
       error,
-      el("label", { for: "confirm-input" },
+      typed ? el("label", { for: "confirm-input" },
         el("span", { text: `Type ` }),
         el("strong", { text: confirmWord }),
-        el("span", { text: ` to confirm` })),
+        el("span", { text: ` to confirm` })) : null,
       input,
       el("div", { class: "modal-actions" }, cancel, confirm)));
 
     dialog.addEventListener("cb-closed", () => settle());
-    input.focus();
+    // With nothing to type, focus is on Cancel: one reflexive Enter must
+    // not delete.
+    (input || cancel).focus();
   });
+}
+
+// unavailableMenuItem is a menu item Google's menu has that this instance
+// cannot perform: drawn disabled under Google's own label, the reason in its
+// tooltip and accessible description, as overflowMenu draws one (#1863).
+function unavailableMenuItem(label, reason) {
+  return el("button", { type: "button", class: "overflow-item", role: "menuitem", disabled: "disabled",
+    "aria-disabled": "true", title: reason, "aria-description": reason, text: label });
 }
 
 // overflowMenu puts a row's actions behind one control.
@@ -7377,6 +7661,7 @@ async function deleteResource(route, name, onDone, row = NO_ROW) {
     title: `Delete ${name}?`,
     detail: DELETE_DETAIL[route.service],
     confirmWord: name,
+    style: capabilityOf(route.service).deleteConfirm || "name",
     onConfirm: async () => {
       const op = recordOperation(`Delete ${name}`);
       row.start();
@@ -7494,6 +7779,10 @@ async function runAction(route, target, action, onDone, row = NO_ROW, title = nu
     confirmWord: name,
     confirmLabel: action.confirm ? action.label : undefined,
     consequence: action.destructive ? undefined : "",
+    // As Google's console confirms this action (#1931): BigQuery's Delete
+    // table asks for the word delete, a Datastore entity's Delete for
+    // nothing typed.
+    style: action.confirmStyle || "name",
     onConfirm: apply,
   });
 }
@@ -7622,6 +7911,22 @@ function renderUnavailable(view, route) {
   announce(`${route.title}: not available locally`);
 }
 
+// renderNotStarted is a page CloudBurrow serves whose service this instance
+// was not started with (#1868). Drawn as renderUnavailable draws a page
+// CloudBurrow never serves, so the two read alike, with what to do about it
+// and a link to the API Library, which marks what this instance was not
+// started with — the local counterpart of Google's "enable the API" page.
+function renderNotStarted(view, route) {
+  const product = route.productTitle || route.title;
+  setChildren(view, pageHeader(route.title, "Not available locally"),
+    el("div", { class: "state", id: "not-started" },
+      el("h2", { text: "Not available locally" }),
+      el("p", { text: `This instance was not started with ${product}. ` +
+        "Start an instance with it in up's --services to use this page." }),
+      el("a", { class: "button secondary", href: `/apis/library${scopeSearch()}`, text: "Open the API Library" })));
+  announce(`${route.title}: not available locally`);
+}
+
 // routeFor resolves an address to a screen and, past it, a resource path.
 //
 // docs/console-parity.md section 5 promises /storage/browser/{bucket} and
@@ -7703,7 +8008,14 @@ function dispatch(view) {
   if (match.screen === "bigquery-studio") return renderBigQueryStudio(view);
   if (match.screen === "new-project") return renderNewProject(view);
   if (!match.service) return renderDashboard(view);
+  if (match.screen === "apis-dashboard" && !resourcePath.length) return renderAPIsDashboard(view);
+  if (match.screen === "apis-dashboard" && resourcePath[0] === "api" && resourcePath[1]) return renderAPIPage(view, resourcePath[1], resourcePath[2] || "overview");
+  if (match.screen === "apis-library") return renderAPILibrary(view, resourcePath[0] || "");
+  if (match.screen === "apis-credentials" && !resourcePath.length) return renderAPICredentials(view);
+  if (match.screen === "apis-credentials" && resourcePath[0] === "key" && resourcePath[1]) return renderAPIKeyPage(view, resourcePath[1]);
+  if (match.screen === "apis-credentials" && resourcePath[0] === "restore") return renderAPIKeysRestore(view);
   if (match.screen === "iam-page" && !resourcePath.length) return renderIAMPage(view, match);
+  if (match.screen === "manage-resources" && !resourcePath.length) return renderManageResources(view, match);
   // Custom constraints (#1891): the list, Create custom constraint, and
   // each one's edit page.
   if (match.service === "iam-orgpolicies" && resourcePath[0] === "custom-constraints") {
@@ -8257,7 +8569,7 @@ function drawProductNav() {
   };
   const current = pages.find((page) => page.tabOf && here.path === page.tabOf.route &&
       location.pathname.startsWith(page.tabOf.route + "/") && tabHere === page.tabOf.tab) ||
-    pages.find((page) => page.path === here.path && !page.tabOf);
+    pages.find((page) => page.path === (here.navAs || here.path) && !page.tabOf);
   const hrefOf = (page) => page.tabOf
     ? `${page.tabOf.route}/${encodeURIComponent(resourceHere(page))}${scopeSearch()}${scopeSearch() ? "&" : "?"}tab=${page.tabOf.tab}`
     : page.path + scopeSearch();
@@ -8904,7 +9216,7 @@ const SHORTCUTS = [
   { keys: "g then l", what: "Go to the Logs Explorer", go: "/logs" },
   { keys: "g then a", what: "Go to Activity", go: "/activity" },
   { keys: "g then m", what: "Go to Monitoring", go: "/monitoring" },
-  { keys: "g then p", what: "Go to Resource Manager", go: "/projects" },
+  { keys: "g then p", what: "Go to Manage resources", go: "/cloud-resource-manager" },
   { keys: "Enter", what: "Inspect the focused table row" },
   { keys: "⌘/Ctrl + Enter", what: "Run the statement in a query editor" },
   { keys: "Escape", what: "Close a dialog, menu or panel" },
@@ -11358,9 +11670,107 @@ let PLAYGROUND_HISTORY = [];
 let PLAYGROUND_ABORT = null;
 let PLAYGROUND_STREAM = true;
 let PLAYGROUND_RAW = false;
+// The conversation (#1962): every turn sent and answered, as the request's
+// contents, held in memory for this page only, as the history is. A turn's
+// image is kept by name beside it for display; its bytes are in the part.
+let PLAYGROUND_CHAT = [];
+let PLAYGROUND_SYSTEM = "";
+let PLAYGROUND_TOOLS = "";
+let PLAYGROUND_TOOL_MODE = "AUTO";
+
+// The image types Agent Studio's Insert Media takes for Gemini (Google's
+// image understanding page: image/png, image/jpeg, image/webp, image/heic,
+// image/heif), which the local endpoint serves too (#1937).
+const PLAYGROUND_IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp", "image/heic", "image/heif"];
 
 function stopGeneration() {
   if (PLAYGROUND_ABORT) { PLAYGROUND_ABORT.abort(); PLAYGROUND_ABORT = null; }
+}
+
+// playgroundImageType is the MIME type of a Cloud Storage object's name, by
+// its extension, or "".
+function playgroundImageType(name) {
+  const ext = (name.split(".").pop() || "").toLowerCase();
+  return { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", heic: "image/heic", heif: "image/heif" }[ext] || "";
+}
+
+// playgroundPartText is how a part reads in the chat.
+function playgroundPartText(p) {
+  if (p.text !== undefined) return p.text;
+  if (p.inlineData) return `[image ${p.inlineData.mimeType}${p._name ? ": " + p._name : ""}]`;
+  if (p.fileData) return `[image ${p.fileData.mimeType}: ${p.fileData.fileUri}]`;
+  if (p.functionCall) return `Function call: ${p.functionCall.name}(${JSON.stringify(p.functionCall.args || {})})`;
+  if (p.functionResponse) return `Function response: ${p.functionResponse.name} → ${JSON.stringify(p.functionResponse.response || {})}`;
+  return JSON.stringify(p);
+}
+
+// playgroundStrip is a content as the API takes it: the display-only names
+// dropped.
+function playgroundStrip(content) {
+  return { role: content.role, parts: content.parts.map((p) => {
+    const { _name, ...rest } = p;
+    return rest;
+  }) };
+}
+
+// playgroundCode is Get code's text for a request (#1962): the same body the
+// page sends, as the Google Gen AI SDK for Python or a curl command (the two
+// Google's Text generation page names), pointed at this instance's local
+// endpoint, never Google's.
+function playgroundCode(lang, status, body) {
+  const json = JSON.stringify(body, null, 2);
+  const shown = json.length > 65536 ? json.slice(0, 65536) + "\n… (truncated: the request holds inline image bytes)" : json;
+  const path = `/v1beta1/projects/PROJECT_ID/locations/us-central1/publishers/google/models/${status.model}:generateContent`;
+  if (lang === "curl") {
+    return `curl -X POST \\\n  -H "Content-Type: application/json" \\\n  "http://${status.endpoint}${path}" \\\n  -d @- <<'EOF'\n${shown}\nEOF`;
+  }
+  const cfg = {};
+  const gc = body.generationConfig || {};
+  const snake = { maxOutputTokens: "max_output_tokens", topP: "top_p", topK: "top_k", stopSequences: "stop_sequences",
+    presencePenalty: "presence_penalty", frequencyPenalty: "frequency_penalty", responseMimeType: "response_mime_type",
+    responseSchema: "response_schema" };
+  for (const [k, v] of Object.entries(gc)) cfg[snake[k] || k] = v;
+  if (body.systemInstruction) cfg.system_instruction = body.systemInstruction;
+  if (body.tools) cfg.tools = body.tools;
+  if (body.toolConfig) cfg.tool_config = { function_calling_config: body.toolConfig.functionCallingConfig };
+  const py = (v) => JSON.stringify(v, null, 4).replace(/\btrue\b/g, "True").replace(/\bfalse\b/g, "False").replace(/\bnull\b/g, "None");
+  const contents = json.length > 65536 ? "json.loads(open('request.json').read())['contents']" : py(body.contents);
+  return [
+    "import json",
+    "",
+    "from google import genai",
+    "from google.genai import types",
+    "",
+    "# This instance's local Agent Platform endpoint; no credentials are sent.",
+    "client = genai.Client(",
+    "    vertexai=True,",
+    '    project="PROJECT_ID",',
+    '    location="us-central1",',
+    `    http_options=types.HttpOptions(base_url="http://${status.endpoint}", api_version="v1beta1"),`,
+    ")",
+    "",
+    "response = client.models.generate_content(",
+    `    model="${status.model}",`,
+    `    contents=${contents},`,
+    `    config=${py(cfg)},`,
+    ")",
+    "print(response.text)",
+  ].join("\n");
+}
+
+// playgroundDisclosure is a button that shows and hides a section, so a
+// closed section's controls are out of the Tab order and an open one's in
+// it (a closed <details> keeps them in the accessibility tree).
+function playgroundDisclosure(id, label, ...children) {
+  const body = el("div", { id: id + "-body", class: "pg-stack" }, ...children);
+  body.hidden = true;
+  const button = el("button", { type: "button", id, class: "secondary pg-disclosure", "aria-expanded": "false",
+    "aria-controls": id + "-body", text: label });
+  button.addEventListener("click", () => {
+    body.hidden = !body.hidden;
+    button.setAttribute("aria-expanded", String(!body.hidden));
+  });
+  return el("div", { class: "pg-section" }, button, body);
 }
 
 async function renderPlayground(view) {
@@ -11371,13 +11781,13 @@ async function renderPlayground(view) {
   try {
     status = await api("/api/ai/playground");
   } catch (err) {
-    return setChildren(view, 
+    return setChildren(view,
       pageHeader(PLAYGROUND_TITLE, PLAYGROUND_SUBTITLE),
       errorState("Playground unavailable", String(err.message), () => renderPlayground(view)));
   }
 
   if (!status.configured) {
-    return setChildren(view, 
+    return setChildren(view,
       pageHeader(PLAYGROUND_TITLE, PLAYGROUND_SUBTITLE),
       emptyState("Local AI is not configured", status.note || ""));
   }
@@ -11401,65 +11811,87 @@ async function renderPlayground(view) {
     header.append(el("p", { class: "unavailable", text: status.note }));
   }
 
-  const prompt = el("textarea", { id: "pg-prompt", rows: "4",
-    placeholder: "Ask the local model something…", "aria-label": "Prompt" });
-  const send = el("button", { text: "Run" });
-  const cancel = el("button", { class: "secondary", text: "Cancel", disabled: "disabled" });
-  // Stream (#1257): on, the answer arrives as streamGenerateContent sends it
-  // (StreamGenerateContent over gRPC); off, it is one generateContent answer
-  // (GenerateContent). Kept for the page's lifetime, as the history is.
+  // --- Model settings (Google's panel beside the prompt) -------------
+  const supported = new Set(status.supported || []);
+  const optInput = (id, label, attrs) => {
+    const input = el("input", Object.assign({ id: "pg-opt-" + id }, attrs));
+    return { id, input, field: el("label", { for: "pg-opt-" + id, class: "pg-field" }, el("span", { text: label }), input) };
+  };
+  // Google's labels (Text generation's console steps): Temperature, Output
+  // token limit and Add stop sequence on the panel, Top-K and Top-P under
+  // Advanced; Seed is on Agent Studio's Model settings list. Frequency and
+  // presence penalty are the API's fields, which Google's console pages do
+  // not label (UNVERIFIED, re-read 2026-11-19:
+  // https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/capabilities/send-chat-prompts-gemini).
+  const basic = [
+    optInput("temperature", "Temperature", { type: "number", step: "0.05", min: "0", max: "2" }),
+    optInput("maxOutputTokens", "Output token limit", { type: "number", step: "1", min: "1" }),
+  ].filter((o) => supported.has(o.id));
+  const advanced = [
+    optInput("topK", "Top-K", { type: "number", step: "1", min: "1" }),
+    optInput("topP", "Top-P", { type: "number", step: "0.05", min: "0", max: "1" }),
+    optInput("seed", "Seed", { type: "number", step: "1" }),
+    optInput("frequencyPenalty", "Frequency penalty", { type: "number", step: "0.1", min: "-2", max: "2" }),
+    optInput("presencePenalty", "Presence penalty", { type: "number", step: "0.1", min: "-2", max: "2" }),
+  ].filter((o) => supported.has(o.id));
+  const numOpts = [...basic, ...advanced];
+  const stops = optInput("stopSequences", "Add stop sequence (comma-separated)", { type: "text" });
+  const schema = el("textarea", { id: "pg-opt-responseSchema", rows: "2", class: "mono",
+    placeholder: '{"type":"BOOLEAN"}' });
+  const jsonOut = el("input", { type: "checkbox", id: "pg-opt-json" });
+
+  // Function calling (#1962): the declarations as the API takes them, a
+  // JSON array of FunctionDeclaration, and the mode (AUTO, ANY, NONE,
+  // VALIDATED: Google's function calling page). Agent Studio lists
+  // Function calling among its model settings; the editor's own layout is
+  // not documented (UNVERIFIED, re-read 2026-11-19:
+  // https://docs.cloud.google.com/gemini-enterprise-agent-platform/agent-studio/agent-studio-capabilities).
+  const fcOn = el("input", { type: "checkbox", id: "pg-fc" });
+  fcOn.checked = PLAYGROUND_TOOLS.trim() !== "";
+  const decls = el("textarea", { id: "pg-fc-decls", rows: "6", class: "mono",
+    placeholder: '[{"name":"get_weather","description":"The weather in a city","parameters":{"type":"OBJECT","properties":{"city":{"type":"STRING"}},"required":["city"]}}]' });
+  decls.value = PLAYGROUND_TOOLS;
+  const mode = el("select", { id: "pg-fc-mode" },
+    ...["AUTO", "ANY", "NONE", "VALIDATED"].map((m) => el("option", { value: m, text: m })));
+  mode.value = PLAYGROUND_TOOL_MODE;
+  const fcBody = el("div", { id: "pg-fc-body", class: "pg-stack" },
+    el("label", { for: "pg-fc-decls", class: "pg-field" }, el("span", { text: "Function declarations (JSON array)" }), decls),
+    el("label", { for: "pg-fc-mode", class: "pg-field" }, el("span", { text: "Mode" }), mode));
+  fcBody.hidden = !fcOn.checked;
+  fcOn.addEventListener("change", () => { fcBody.hidden = !fcOn.checked; countSoon(); });
+  decls.addEventListener("input", () => { PLAYGROUND_TOOLS = decls.value; countSoon(); });
+  mode.addEventListener("change", () => { PLAYGROUND_TOOL_MODE = mode.value; });
+
+  // Stream model responses (#1257): on, streamGenerateContent; off,
+  // generateContent. Raw (#1284, #1285): the same body to :streamRawPredict
+  // or :rawPredict.
   const stream = el("input", { type: "checkbox", id: "pg-stream" });
   stream.checked = PLAYGROUND_STREAM;
   stream.addEventListener("change", () => { PLAYGROUND_STREAM = stream.checked; });
-  const streamLabel = el("label", { for: "pg-stream", title:
+  const streamLabel = el("label", { for: "pg-stream", class: "pg-check", title:
     "On: streamGenerateContent, shown as each chunk arrives. Off: generateContent, one answer." },
-    stream, " Stream");
-  // Raw (#1284, #1285): the same body sent as RawPredict sends it, to
-  // :streamRawPredict (StreamRawPredict) or :rawPredict (RawPredict).
+    stream, " Stream model responses");
   const raw = el("input", { type: "checkbox", id: "pg-raw" });
   raw.checked = PLAYGROUND_RAW;
   raw.addEventListener("change", () => { PLAYGROUND_RAW = raw.checked; });
-  const rawLabel = el("label", { for: "pg-raw", title:
+  const rawLabel = el("label", { for: "pg-raw", class: "pg-check", title:
     "On: the body is sent as RawPredict sends it, to :streamRawPredict (Stream on) or :rawPredict (Stream off)." },
     raw, " Raw");
-  const timing = el("span", { class: "unavailable", text: "" });
-  const output = el("pre", { class: "mono pg-output", id: "pg-output", "aria-live": "polite" });
-  const historyBody = el("tbody");
 
-  const refused = el("details", { class: "card" },
-    el("summary", { text: `Options the endpoint refuses rather than ignores (${status.refused.length})` }),
-    el("p", { text:
-      "The runtime applies none of these, and a request carrying one is rejected rather than " +
-      "answered as though it applied:" }),
-    el("p", { class: "mono", text: status.refused.join(", ") }));
+  const settings = el("section", { class: "card pg-settings", id: "pg-options", "aria-labelledby": "pg-settings-h" },
+    el("h2", { id: "pg-settings-h", text: "Model settings" }),
+    el("p", { class: "pg-field" }, el("span", { text: "Model" }), el("span", { class: "mono", text: status.model })),
+    ...basic.map((o) => o.field),
+    ...(supported.has("stopSequences") ? [stops.field] : []),
+    playgroundDisclosure("pg-advanced", "Advanced", ...advanced.map((o) => o.field)),
+    ...(supported.has("responseMimeType") ? [playgroundDisclosure("pg-output-format", "Output format",
+      el("label", { for: "pg-opt-json", class: "pg-check", title: "responseMimeType application/json; the schema, if given, constrains the answer" },
+        jsonOut, " JSON (application/json)"),
+      el("label", { for: "pg-opt-responseSchema", class: "pg-field" }, el("span", { text: "Response schema" }), schema))] : []),
+    el("label", { for: "pg-fc", class: "pg-check" }, fcOn, " Function calling"),
+    fcBody,
+    streamLabel, rawLabel);
 
-  // Generation options (#1797, #1779): sent as generationConfig, only the
-  // fields given. An empty field is absent, not zero: temperature 0 must be
-  // typed to mean greedy decoding.
-  const supported = new Set(status.supported || []);
-  const optInput = (id, label, attrs) => {
-    const input = el("input", Object.assign({ id: "pg-opt-" + id, "aria-label": label }, attrs));
-    return { id, input, field: el("label", { for: "pg-opt-" + id }, label + " ", input) };
-  };
-  const numOpts = [
-    optInput("temperature", "Temperature", { type: "number", step: "0.05", min: "0", max: "2" }),
-    optInput("topP", "Top-p", { type: "number", step: "0.05", min: "0", max: "1" }),
-    optInput("topK", "Top-k", { type: "number", step: "1", min: "1" }),
-    optInput("seed", "Seed", { type: "number", step: "1" }),
-    optInput("maxOutputTokens", "Max output tokens", { type: "number", step: "1", min: "1" }),
-  ].filter((o) => supported.has(o.id));
-  const stops = optInput("stopSequences", "Stop sequences (comma-separated)", { type: "text" });
-  const schema = el("textarea", { id: "pg-opt-responseSchema", rows: "2", class: "mono",
-    placeholder: '{"type":"BOOLEAN"}', "aria-label": "Response schema" });
-  const jsonOut = el("input", { type: "checkbox", id: "pg-opt-json" });
-  const options = el("details", { class: "card", id: "pg-options" },
-    el("summary", { text: "Generation options" }),
-    el("div", { class: "card-actions" }, ...numOpts.map((o) => o.field),
-      ...(supported.has("stopSequences") ? [stops.field] : [])),
-    ...(supported.has("responseMimeType") ? [el("div", {},
-      el("label", { for: "pg-opt-json", title: "responseMimeType application/json; the schema, if given, constrains the answer" },
-        jsonOut, " JSON response (application/json)"),
-      el("label", { for: "pg-opt-responseSchema" }, " Response schema "), schema)] : []));
   const generationConfig = () => {
     const cfg = {};
     for (const o of numOpts) {
@@ -11475,6 +11907,252 @@ async function renderPlayground(view) {
     }
     return cfg;
   };
+
+  // --- System instructions --------------------------------------------
+  const system = el("textarea", { id: "pg-system", rows: "2",
+    placeholder: "Add instructions for the model to follow, such as its tone or role" });
+  system.value = PLAYGROUND_SYSTEM;
+  system.addEventListener("input", () => { PLAYGROUND_SYSTEM = system.value; countSoon(); });
+  const systemCard = el("section", { class: "card", "aria-labelledby": "pg-system-h" },
+    el("h2", { id: "pg-system-h" }, el("label", { for: "pg-system", text: "System instructions" })),
+    system);
+
+  // --- Chat -----------------------------------------------------------
+  const chat = el("div", { id: "pg-chat", class: "pg-chat", role: "log", "aria-label": "Conversation" });
+  const fnResp = el("div", { id: "pg-fnresp", class: "pg-stack" });
+  const roleName = (c) => {
+    if (c.parts.some((p) => p.functionResponse)) return "Function response";
+    if (c.parts.some((p) => p.functionCall)) return "Function call";
+    return c.role === "model" ? "Model" : "User";
+  };
+  const renderChat = () => {
+    chat.replaceChildren();
+    if (!PLAYGROUND_CHAT.length) {
+      chat.append(el("p", { class: "unavailable", text: "No messages yet. Each turn you send, and the model's answer, is kept here and sent again with the next one." }));
+    }
+    for (const c of PLAYGROUND_CHAT) {
+      chat.append(el("div", { class: "pg-turn", "data-role": c.role },
+        el("p", { class: "pg-turn-role", text: roleName(c) }),
+        ...c.parts.map((p) => el("p", { class: p.text !== undefined ? "pg-turn-text" : "pg-turn-text mono", text: playgroundPartText(p) }))));
+    }
+    // The model's function calls wait for the user's function responses.
+    fnResp.replaceChildren();
+    const last = PLAYGROUND_CHAT[PLAYGROUND_CHAT.length - 1];
+    const calls = last && last.role === "model" ? last.parts.filter((p) => p.functionCall).map((p) => p.functionCall) : [];
+    if (!calls.length) return;
+    const boxes = calls.map((fc, i) => {
+      const box = el("textarea", { id: "pg-fnresp-" + i, rows: "2", class: "mono", placeholder: '{"result": ...}' });
+      box.value = "{}";
+      return { fc, box, field: el("label", { for: "pg-fnresp-" + i, class: "pg-field" },
+        el("span", { text: `Function response for ${fc.name} (JSON object)` }), box) };
+    });
+    const sendResp = el("button", { type: "button", id: "pg-fnresp-send", text: "Send function response" });
+    sendResp.addEventListener("click", () => {
+      const parts = [];
+      for (const b of boxes) {
+        let response;
+        try { response = JSON.parse(b.box.value || "{}"); } catch (err) {
+          announce(`The response for ${b.fc.name} is not JSON: ${err.message}`); b.box.focus(); return;
+        }
+        if (response === null || typeof response !== "object" || Array.isArray(response)) {
+          announce(`The response for ${b.fc.name} must be a JSON object`); b.box.focus(); return;
+        }
+        parts.push({ functionResponse: Object.assign(b.fc.id ? { id: b.fc.id } : {}, { name: b.fc.name, response }) });
+      }
+      run(parts);
+    });
+    fnResp.append(el("p", { text: "The model asked to call a function. Run it yourself, then send its result back as the function response." }),
+      ...boxes.map((b) => b.field), el("div", { class: "card-actions" }, sendResp));
+  };
+
+  // --- Prompt ---------------------------------------------------------
+  const prompt = el("textarea", { id: "pg-prompt", rows: "4",
+    placeholder: "Enter a prompt for the local model" });
+  prompt.addEventListener("input", () => countSoon());
+  prompt.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); run(); }
+  });
+  let attachments = [];
+  const attachList = el("ul", { id: "pg-attachments", class: "pg-attachments", "aria-label": "Inserted media" });
+  const renderAttachments = () => {
+    setChildren(attachList, ...attachments.map((a, i) => el("li", {},
+      el("span", { class: "mono", text: a._name || (a.fileData && a.fileData.fileUri) || "image" }),
+      el("button", { type: "button", class: "secondary", "aria-label": "Remove " + (a._name || "image"), text: "Remove",
+        onclick: () => { attachments.splice(i, 1); renderAttachments(); countSoon(); } }))));
+    attachList.hidden = !attachments.length;
+  };
+  // Insert Media: Upload and Cloud Storage (Google's sources; By URL and
+  // Google Drive reach outside the instance and are not offered).
+  const upload = el("input", { type: "file", id: "pg-upload", accept: PLAYGROUND_IMAGE_TYPES.join(","), multiple: "multiple", class: "pg-file" });
+  upload.addEventListener("change", async () => {
+    for (const f of upload.files) {
+      if (!PLAYGROUND_IMAGE_TYPES.includes(f.type)) { announce(`${f.name}: ${f.type || "unknown type"} is not an image type the model takes`); continue; }
+      const data = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(String(r.result).split(",", 2)[1] || "");
+        r.onerror = () => reject(r.error);
+        r.readAsDataURL(f);
+      });
+      attachments.push({ inlineData: { mimeType: f.type, data }, _name: f.name });
+    }
+    upload.value = "";
+    renderAttachments();
+    countSoon();
+  });
+  const gcs = el("input", { type: "text", id: "pg-gcs", class: "mono", placeholder: "gs://bucket/image.png" });
+  const gcsAdd = el("button", { type: "button", class: "secondary", text: "Insert", id: "pg-gcs-insert" });
+  gcsAdd.addEventListener("click", () => {
+    const uri = gcs.value.trim();
+    const type = playgroundImageType(uri);
+    if (!uri.startsWith("gs://") || !type) { announce("Enter a gs:// URI of a PNG, JPEG, WebP, HEIC or HEIF object"); gcs.focus(); return; }
+    attachments.push({ fileData: { mimeType: type, fileUri: uri } });
+    gcs.value = "";
+    renderAttachments();
+    countSoon();
+  });
+  const media = playgroundDisclosure("pg-media", "Insert Media",
+    el("label", { for: "pg-upload", class: "pg-field" }, el("span", { text: "Upload" }), upload),
+    el("div", { class: "pg-field" },
+      el("label", { for: "pg-gcs", text: "Cloud Storage" }),
+      el("div", { class: "card-actions" }, gcs, gcsAdd)));
+
+  // The request the page sends: the conversation, then the new turn.
+  const turnParts = () => {
+    const parts = [];
+    const text = prompt.value.trim();
+    if (text) parts.push({ text });
+    return parts.concat(attachments);
+  };
+  const requestBody = (pending) => {
+    const contents = PLAYGROUND_CHAT.concat(pending && pending.length ? [{ role: "user", parts: pending }] : []).map(playgroundStrip);
+    const body = { contents };
+    const si = system.value.trim();
+    if (si) body.systemInstruction = { parts: [{ text: si }] };
+    if (fcOn.checked && decls.value.trim()) {
+      body.tools = [{ functionDeclarations: JSON.parse(decls.value) }];
+      body.toolConfig = { functionCallingConfig: { mode: mode.value } };
+    }
+    const cfg = generationConfig();
+    if (Object.keys(cfg).length) body.generationConfig = cfg;
+    return body;
+  };
+
+  // --- Token count (Google: "<count> tokens", opening the prompt
+  // tokenizer, with Token ID to text and Token ID) -------------------
+  const tokens = el("button", { type: "button", id: "pg-tokens", class: "secondary", "aria-expanded": "false",
+    "aria-controls": "pg-tokenizer", text: "0 tokens" });
+  const tokenizer = el("section", { id: "pg-tokenizer", class: "card pg-tokenizer", "aria-label": "Prompt tokenizer" });
+  tokenizer.hidden = true;
+  let countTimer = null;
+  let countSeq = 0;
+  const countNow = async () => {
+    const seq = ++countSeq;
+    let body;
+    try { body = requestBody(turnParts()); } catch (err) { tokens.textContent = "Token count unavailable"; tokens.title = err.message; return; }
+    if (!body.contents.length) { tokens.textContent = "0 tokens"; tokens.title = ""; return; }
+    try {
+      const resp = await fetch("/api/ai/playground/tokens?verb=countTokens", { method: "POST",
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const text = await resp.text();
+      if (seq !== countSeq) return;
+      if (!resp.ok) { tokens.textContent = "Token count unavailable"; tokens.title = errorMessageOf(text) || `HTTP ${resp.status}`; return; }
+      const n = JSON.parse(text).totalTokens || 0;
+      tokens.textContent = `${n} ${n === 1 ? "token" : "tokens"}`;
+      tokens.title = "countTokens of the conversation, the system instructions, the declarations and this prompt";
+    } catch (err) {
+      if (seq === countSeq) { tokens.textContent = "Token count unavailable"; tokens.title = err.message; }
+    }
+  };
+  const countSoon = () => { clearTimeout(countTimer); countTimer = setTimeout(countNow, 300); };
+  let tokenView = "text";
+  const drawTokenizer = async () => {
+    const text = prompt.value.trim();
+    const close = el("button", { type: "button", class: "secondary", "aria-label": "Close the tokenizer", text: "Close",
+      onclick: () => { tokenizer.hidden = true; tokens.setAttribute("aria-expanded", "false"); tokens.focus(); } });
+    const pick = (v, label) => el("button", { type: "button", class: tokenView === v ? "" : "secondary", "aria-pressed": String(tokenView === v),
+      text: label, onclick: () => { tokenView = v; drawTokenizer(); } });
+    const out = el("div", { id: "pg-tokenizer-out", class: "pg-tokens" });
+    setChildren(tokenizer, el("div", { class: "card-actions" },
+      el("h2", { text: tokens.textContent }), pick("text", "Token ID to text"), pick("id", "Token ID"), close),
+      el("p", { class: "unavailable", text: "The prompt's text, tokenized by the model's tokenizer (computeTokens). Media tokens aren't supported." }),
+      out);
+    if (!text) { out.append(el("p", { class: "unavailable", text: "Enter a prompt to see its tokens." })); return; }
+    try {
+      const resp = await fetch("/api/ai/playground/tokens?verb=computeTokens", { method: "POST",
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: text }) });
+      const body = await resp.text();
+      if (!resp.ok) throw new Error(errorMessageOf(body) || `HTTP ${resp.status}`);
+      const info = (JSON.parse(body).tokensInfo || [])[0] || { tokens: [], tokenIds: [] };
+      const decode = (b64) => { try { return new TextDecoder().decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))); } catch { return b64; } };
+      (info.tokens || []).forEach((tk, i) => {
+        out.append(el("span", { class: "pg-token", "data-n": String(i % 4), title: "Token ID " + (info.tokenIds || [])[i],
+          text: tokenView === "id" ? String((info.tokenIds || [])[i]) : decode(tk) }));
+      });
+    } catch (err) {
+      out.append(el("p", { class: "unavailable", text: "computeTokens failed: " + err.message }));
+    }
+  };
+  tokens.addEventListener("click", () => {
+    const open = tokenizer.hidden;
+    tokenizer.hidden = !open;
+    tokens.setAttribute("aria-expanded", String(open));
+    if (open) drawTokenizer();
+  });
+
+  // --- Get code (Google: Build with code > Get code) ---------------
+  const codeLang = el("select", { id: "pg-code-lang" },
+    el("option", { value: "python", text: "Python (Google Gen AI SDK)" }), el("option", { value: "curl", text: "REST (curl)" }));
+  const codeText = el("pre", { id: "pg-code-text", class: "mono pg-output", tabindex: "0", "aria-label": "Code" });
+  const codePane = el("section", { id: "pg-code", class: "card", "aria-labelledby": "pg-code-h" });
+  codePane.hidden = true;
+  const getCode = el("button", { type: "button", class: "secondary", id: "pg-get-code", text: "Get code",
+    "aria-expanded": "false", "aria-controls": "pg-code" });
+  const drawCode = () => {
+    let body;
+    try { body = requestBody(turnParts()); } catch (err) { codeText.textContent = "The request is not valid: " + err.message; return; }
+    codeText.textContent = playgroundCode(codeLang.value, status, body);
+  };
+  codeLang.addEventListener("change", drawCode);
+  const copy = el("button", { type: "button", class: "secondary", text: "Copy", onclick: async () => {
+    try { await navigator.clipboard.writeText(codeText.textContent); announce("Copied"); } catch { announce("Copy is not available here"); }
+  } });
+  const closeCode = el("button", { type: "button", class: "secondary", text: "Close", "aria-label": "Close Get code", onclick: () => {
+    codePane.hidden = true; getCode.setAttribute("aria-expanded", "false"); getCode.focus();
+  } });
+  setChildren(codePane, el("h2", { id: "pg-code-h", text: "Get code" }),
+    el("p", { class: "unavailable", text: "The request this page sends, as code. It calls this instance's local endpoint; on Google Cloud, drop base_url (or use https://us-central1-aiplatform.googleapis.com) and authenticate." }),
+    el("div", { class: "card-actions" }, el("label", { for: "pg-code-lang", text: "Language " }), codeLang, copy, closeCode),
+    codeText);
+  getCode.addEventListener("click", () => {
+    const open = codePane.hidden;
+    codePane.hidden = !open;
+    getCode.setAttribute("aria-expanded", String(open));
+    if (open) drawCode();
+  });
+
+  const send = el("button", { type: "button", id: "pg-submit", text: "Submit" });
+  const cancel = el("button", { type: "button", class: "secondary", text: "Cancel", disabled: "disabled" });
+  const clear = el("button", { type: "button", class: "secondary", id: "pg-clear", text: "Clear conversation" });
+  clear.addEventListener("click", () => {
+    stopGeneration();
+    PLAYGROUND_CHAT = [];
+    output.textContent = "";
+    usage.textContent = "";
+    renderChat();
+    countSoon();
+    announce("Conversation cleared");
+  });
+  const timing = el("span", { class: "unavailable", text: "" });
+  const usage = el("p", { id: "pg-usage", class: "unavailable" });
+  const output = el("pre", { class: "mono pg-output", id: "pg-output", "aria-live": "polite", "aria-label": "Response" });
+  const historyBody = el("tbody");
+
+  const refused = el("details", { class: "card" },
+    el("summary", { text: `Options the endpoint refuses rather than ignores (${status.refused.length})` }),
+    el("p", { text:
+      "The runtime applies none of these, and a request carrying one is rejected rather than " +
+      "answered as though it applied:" }),
+    el("p", { class: "mono", text: status.refused.join(", ") }));
 
   const renderHistory = () => {
     historyBody.replaceChildren();
@@ -11496,12 +12174,19 @@ async function renderPlayground(view) {
     }
   };
 
-  const run = async () => {
-    const text = prompt.value.trim();
-    if (!text) { announce("A prompt is required"); prompt.focus(); return; }
+  // run sends the conversation with a new user turn: the prompt and its
+  // media, or the function responses given.
+  const run = async (responseParts) => {
+    const pending = responseParts || turnParts();
+    if (!pending.length) { announce("A prompt is required"); prompt.focus(); return; }
+    let body;
+    try { body = requestBody(pending); } catch (err) {
+      announce("The request is not valid: " + err.message); output.textContent = `[error] ${err.message}`; return;
+    }
 
     stopGeneration();
     output.textContent = "";
+    usage.textContent = "";
     timing.textContent = "running…";
     send.disabled = true;
     cancel.disabled = false;
@@ -11514,52 +12199,60 @@ async function renderPlayground(view) {
     let firstAt = null;
     let ok = true;
     let cancelled = false;
+    let text = "";
+    const calls = [];
+    let meta = null;
+    const take = (event) => {
+      if (event.usageMetadata) meta = event.usageMetadata;
+      for (const p of event.candidates?.[0]?.content?.parts || []) {
+        if (p.functionCall) calls.push(p.functionCall);
+        if (p.text) {
+          if (firstAt === null) firstAt = performance.now();
+          text += p.text;
+          output.textContent += p.text;
+        }
+      }
+      if (calls.length && firstAt === null) firstAt = performance.now();
+    };
 
     try {
       const resp = await fetch("/api/ai/playground", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: text, stream: streaming, raw: rawBody, generationConfig: generationConfig() }),
+        body: JSON.stringify(Object.assign({ stream: streaming, raw: rawBody }, body)),
         signal: controller.signal,
       });
       if (!resp.ok) {
-        const body = await resp.text();
-        throw new Error(errorMessageOf(body) || `HTTP ${resp.status}`);
+        const msg = await resp.text();
+        throw new Error(errorMessageOf(msg) || `HTTP ${resp.status}`);
       }
       if (!streaming) {
-        // One GenerateContentResponse: its first token is the whole answer.
-        const answer = await resp.json();
-        firstAt = performance.now();
-        output.textContent = (answer.candidates?.[0]?.content?.parts || []).map((p) => p.text || "").join("");
-        return;
-      }
-
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        // Server-sent events are separated by a blank line; a partial event
-        // is kept in the buffer rather than parsed as truncated JSON.
-        let split;
-        while ((split = buffer.indexOf("\n\n")) !== -1) {
-          const chunk = buffer.slice(0, split);
-          buffer = buffer.slice(split + 2);
-          for (const line of chunk.split("\n")) {
-            if (!line.startsWith("data: ")) continue;
-            let event;
-            try { event = JSON.parse(line.slice(6)); } catch { continue; }
-            if (event.error) { ok = false; throw new Error(event.error.message || "generation failed"); }
-            const part = event.candidates?.[0]?.content?.parts?.[0]?.text;
-            if (part) {
-              if (firstAt === null) firstAt = performance.now();
-              output.textContent += part;
+        take(await resp.json());
+      } else {
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          // Server-sent events are separated by a blank line; a partial event
+          // is kept in the buffer rather than parsed as truncated JSON.
+          let split;
+          while ((split = buffer.indexOf("\n\n")) !== -1) {
+            const chunk = buffer.slice(0, split);
+            buffer = buffer.slice(split + 2);
+            for (const line of chunk.split("\n")) {
+              if (!line.startsWith("data: ")) continue;
+              let event;
+              try { event = JSON.parse(line.slice(6)); } catch { continue; }
+              if (event.error) { ok = false; throw new Error(event.error.message || "generation failed"); }
+              take(event);
             }
           }
         }
       }
+      if (calls.length) output.textContent += (text ? "\n" : "") + calls.map((fc) => playgroundPartText({ functionCall: fc })).join("\n");
     } catch (err) {
       ok = false;
       if (err.name === "AbortError") {
@@ -11578,9 +12271,24 @@ async function renderPlayground(view) {
       send.disabled = false;
       cancel.disabled = true;
       PLAYGROUND_ABORT = null;
-
+      if (meta) {
+        usage.textContent = `Tokens: prompt ${meta.promptTokenCount ?? "—"} · response ${meta.candidatesTokenCount ?? "—"} · total ${meta.totalTokenCount ?? "—"} (usageMetadata)`;
+      }
+      if (ok) {
+        // The turn and its answer join the conversation; the prompt box
+        // empties for the next turn, as a chat's does.
+        const answer = [];
+        if (text) answer.push({ text });
+        for (const fc of calls) answer.push({ functionCall: fc });
+        PLAYGROUND_CHAT.push({ role: "user", parts: pending });
+        if (answer.length) PLAYGROUND_CHAT.push({ role: "model", parts: answer });
+        if (!responseParts) { prompt.value = ""; attachments = []; renderAttachments(); }
+        renderChat();
+        countSoon();
+      }
+      const what = pending.map((p) => playgroundPartText(p)).join(" ");
       PLAYGROUND_HISTORY.unshift({
-        at: new Date().toLocaleTimeString(), prompt: text, method: (rawBody ? "Raw " : "") + (streaming ? "Stream" : "Unary"),
+        at: new Date().toLocaleTimeString(), prompt: what, method: (rawBody ? "Raw " : "") + (streaming ? "Stream" : "Unary"),
         ttft, total: `${Math.round(total)} ms`, ok, cancelled,
       });
       PLAYGROUND_HISTORY = PLAYGROUND_HISTORY.slice(0, PLAYGROUND_HISTORY_LIMIT);
@@ -11588,31 +12296,43 @@ async function renderPlayground(view) {
     }
   };
 
-  send.addEventListener("click", run);
+  send.addEventListener("click", () => run());
   cancel.addEventListener("click", stopGeneration);
 
   renderHistory();
+  renderChat();
+  renderAttachments();
+  countSoon();
   const models = await playgroundModelsCard();
-  setChildren(view, 
+  setChildren(view,
     pageHeader(PLAYGROUND_TITLE, PLAYGROUND_SUBTITLE),
     header,
     ...(models ? [models] : []),
     refused,
-    options,
-    el("div", { class: "card" },
-      prompt,
-      el("div", { class: "card-actions" }, send, cancel, streamLabel, rawLabel, timing),
-      output),
+    el("div", { class: "pg-layout" },
+      el("div", { class: "pg-main" },
+        systemCard,
+        el("section", { class: "card", "aria-labelledby": "pg-chat-h" },
+          el("h2", { id: "pg-chat-h", text: "Chat" }), chat, fnResp),
+        el("section", { class: "card", "aria-labelledby": "pg-prompt-h" },
+          el("h2", { id: "pg-prompt-h" }, el("label", { for: "pg-prompt", text: "Prompt" })),
+          prompt, attachList, media,
+          el("div", { class: "card-actions" }, send, cancel, tokens, getCode, clear, timing),
+          tokenizer,
+          el("h3", { id: "pg-response-h", text: "Response" }),
+          output, usage),
+        codePane),
+      settings),
     el("div", { class: "card" },
       el("h2", { text: "This session" }),
       el("p", { class: "unavailable", text:
         `Bounded to ${PLAYGROUND_HISTORY_LIMIT} entries, held in memory for this page only. ` +
         "Nothing is written to storage and nothing leaves the browser." }),
-      el("table", {},
+      el("div", { class: "table-wrap" }, el("table", {},
         el("thead", {}, el("tr", {},
           ["Time", "Prompt", "Method", "First token", "Total", "Result"].map((c) =>
             el("th", { scope: "col", text: c })))),
-        historyBody)));
+        historyBody))));
 }
 
 // errorMessageOf pulls the API's own message out of an error body, so the
@@ -12001,7 +12721,7 @@ async function renderLocalModels(view) {
           `at revision ${m.revision.slice(0, 12)}: ${m.files.map((f) => f.path).join(", ")}. ` +
           (m.official ? "" : "This is a COMMUNITY conversion, NOT an official Google artifact. ") +
           `Licence: ${m.license}.`,
-        confirmWord: m.id, confirmLabel: "Download",
+        confirmWord: m.id, confirmLabel: "Download", style: "confirm",
         consequence: "Each file is checked against its pinned SHA-256 before it is kept.",
         onConfirm: async () => { await localModelAction(m.id, "download", { confirmBytes: m.bytes }); again(); },
       }), "primary");
@@ -12118,7 +12838,7 @@ function gardenDeployAction(m, again, fail) {
         `cache, then serves it from the local endpoint. ` +
         (st.official ? "" : "The file is a COMMUNITY conversion, NOT an official Google artifact. ") +
         `Licence: ${st.license}.`,
-      confirmWord: st.id, confirmLabel: "Deploy",
+      confirmWord: st.id, confirmLabel: "Deploy", style: "confirm",
       consequence: "Each file is checked against its pinned SHA-256 before it is kept.",
       onConfirm: async () => { await localModelAction(st.id, "download", { confirmBytes: st.bytes }); again(); },
     }).catch(fail);
@@ -12200,7 +12920,7 @@ async function drawHFPanel(host) {
         title: `Download ${m.id}?`,
         detail: `${formatBytes(m.bytes)} in ${m.files.length} files from huggingface.co/${m.id} at revision ` +
           `${m.revision.slice(0, 12)}. Licence: ${m.license}.`,
-        confirmWord: m.id, confirmLabel: "Download",
+        confirmWord: m.id, confirmLabel: "Download", style: "confirm",
         consequence: "Each LFS file is checked against its SHA-256 before it is kept.",
         onConfirm: async () => { await hfAction("download", m.id); again(); },
       }).catch(fail));
@@ -12281,7 +13001,7 @@ async function hfDeploy(m) {
   if (!m.gated) return go();
   return confirmDestructive({
     title: `Deploy ${m.id}?`, detail: `${m.id} is gated on Hugging Face. Deploying accepts its licence (${m.license}).`,
-    confirmWord: m.id, confirmLabel: "Deploy", consequence: `It is served by ${engine} on a local endpoint.`, onConfirm: go,
+    confirmWord: m.id, confirmLabel: "Deploy", style: "confirm", consequence: `It is served by ${engine} on a local endpoint.`, onConfirm: go,
   });
 }
 
@@ -14246,7 +14966,7 @@ async function bqDetailAction(path, actionID, onDone, side = false) {
     if (action.destructive) {
       await confirmDestructive({
         title: `${action.label}?`, detail: path[path.length - 1], confirmWord: path[path.length - 1],
-        confirmLabel: action.label,
+        confirmLabel: action.label, style: action.confirmStyle || "name",
         onConfirm: () => send(`/api/actions/bigquery?project=${encodeURIComponent(currentProject())}`,
           "POST", { Path: path, Action: action.id }),
       });
@@ -14278,7 +14998,7 @@ function bqCreateDataset(onDone) {
 
 async function bqDeleteDataset(id, onDone) {
   await confirmDestructive({
-    title: "Delete dataset?", detail: id, confirmWord: id,
+    title: "Delete dataset?", detail: id, confirmWord: id, style: capabilityOf("bigquery").deleteConfirm || "name",
     consequence: "Every table in the dataset, and every row in them, is deleted with it.",
     onConfirm: () => send(`/api/resources/bigquery?project=${encodeURIComponent(currentProject())}&name=${encodeURIComponent(id)}`,
       "DELETE"),
@@ -16738,4 +17458,967 @@ function renderSpannerStudio(panel, route, segments, project) {
       resultTabs,
       results)));
   loadExplorer();
+}
+// Manage resources (#1865), Google's page of that name: the organization,
+// its folders and the projects under each in one tree table (Name, ID,
+// Status, Labels, Tags, Actions), Create project (the New project page)
+// and Create folder on the title line, Move and Delete for the checked
+// row, Resources pending deletion with Restore and the date each is
+// deleted, and the info panel: the row's Permissions (Add principal,
+// Remove), Labels (a project's) and Tags (Add tag, Remove). The screen's
+// calls are the projects provider's Studio (consolemanageresources.go);
+// Permissions are the row's page's own (/api/permissions/iam for a
+// project, /api/permissions/hierarchy for a folder or the organization).
+function mrCall(call, body = {}) {
+  return send(`/api/studio/projects?call=${encodeURIComponent(call)}`, "POST", body);
+}
+
+// mrForm is a small dialog form: title, its fields (buildCreateForm's),
+// and submit, which gets the values and throws to show an error.
+function mrForm({ id, title, label, fields, note, submit, destructive = false }) {
+  const form = buildCreateForm({ label, fields });
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  let submitting = false;
+  const { dialog, close } = openModal({ labelledBy: `${id}-title`, canClose: () => !submitting });
+  const primary = el("button", { type: "submit", class: destructive ? "primary danger" : "primary", text: label });
+  const cancel = el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() });
+  const onsubmit = async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    if (submitting || !form.validate()) return;
+    submitting = true;
+    primary.disabled = true;
+    try {
+      await submit(form.values());
+      submitting = false;
+      close();
+    } catch (err) {
+      error.textContent = err.message;
+      error.hidden = false;
+      submitting = false;
+      primary.disabled = false;
+    }
+  };
+  dialog.append(el("form", { class: "modal-body", id, novalidate: true, onsubmit },
+    el("h2", { id: `${id}-title`, text: title }),
+    note ? el("p", { class: "form-help", text: note }) : null,
+    error, ...form.nodes,
+    el("div", { class: "modal-actions" }, cancel, primary)));
+  form.focusFirst();
+}
+
+function renderManageResources(view) {
+  let tree = null;
+  let pending = new URLSearchParams(location.search).get("view") === "pending";
+  const collapsed = new Set();
+  let selected = null;
+  let panelOpen = false;
+  const body = el("div", { id: "mr-body" }, loadingState(4, { what: "resources" }));
+
+  const key = (n) => `${n.kind}:${n.id}`;
+  const byKey = () => new Map((tree ? tree.nodes : []).map((n) => [key(n), n]));
+  const parentKey = (n) => {
+    if (!n.parent) return n.kind === "organization" ? null : "none";
+    const [kind, id] = n.parent.split("/");
+    return `${kind === "organizations" ? "organization" : "folder"}:${id}`;
+  };
+  const label = (n) => n.kind === "organization" ? n.name : `${n.name}`;
+  const kindWord = (n) => n.kind === "organization" ? "Organization" : n.kind === "folder" ? "Folder" : "Project";
+  const pageOf = (n) => n.kind === "project" ? `/projects/${encodeURIComponent(n.id)}`
+    : n.kind === "folder" ? `/resource-hierarchy/${encodeURIComponent(n.id)}` : "/resource-hierarchy/organization";
+  // Where Move can put a row: the organization, or an active folder that is
+  // not the row itself or under it; a project may also have no organization.
+  const destinations = (n) => {
+    const nodes = tree.nodes.filter((x) => x.state === "ACTIVE" && (x.kind === "organization" || x.kind === "folder"));
+    const map = byKey();
+    const under = (x) => {
+      for (let k = key(x), i = 0; k && i < 12; i++) {
+        if (k === key(n)) return true;
+        const node = map.get(k);
+        if (!node) return false;
+        k = parentKey(node);
+      }
+      return false;
+    };
+    const out = nodes.filter((x) => n.kind !== "folder" || !under(x)).map((x) => x.kind === "organization" ? `organizations/${x.id}` : `folders/${x.id}`);
+    return out;
+  };
+  const destLabels = () => {
+    const out = {};
+    for (const x of tree.nodes) {
+      if (x.kind === "organization") out[`organizations/${x.id}`] = `${x.name} (organization)`;
+      if (x.kind === "folder") out[`folders/${x.id}`] = `${x.name} (folder ${x.id})`;
+    }
+    return out;
+  };
+
+  const run = async (what, call, req) => {
+    const op = recordOperation(what);
+    try {
+      const res = await mrCall(call, req);
+      op.succeeded("", res.operation);
+      notify(what);
+      await reload();
+      return res;
+    } catch (err) {
+      op.failed(err.message, err.operation);
+      throw err;
+    }
+  };
+
+  const createFolder = () => mrForm({
+    id: "mr-create-folder", title: "Create folder", label: "Create",
+    note: "A folder groups projects and other folders under the organization.",
+    fields: [
+      { name: "displayName", label: "Folder name", type: "text", required: true,
+        pattern: "^[\\p{L}\\p{N}]([\\p{L}\\p{N} _\\-]{0,28}[\\p{L}\\p{N}])?$",
+        help: "Up to 30 letters, numbers, spaces, hyphens and underscores, starting and ending with a letter or number; unique among the folders beside it." },
+      { name: "parent", label: "Location", type: "select", required: true, options: destinations({ kind: "project", id: "" }),
+        optionLabels: destLabels(), default: tree.nodes.find((x) => x.kind === "organization") ? `organizations/${tree.nodes.find((x) => x.kind === "organization").id}` : "",
+        help: "The organization or folder to create it in." },
+    ],
+    submit: (v) => run(`Created folder ${v.displayName}`, "folder", { displayName: v.displayName, parent: v.parent }),
+  });
+
+  const move = (n) => mrForm({
+    id: "mr-move", title: `Move "${label(n)}"`, label: "Move",
+    note: n.kind === "project"
+      ? "Moving a project changes the policies it inherits: the folders' and the organization's."
+      : "Moving a folder moves everything in it, and changes the policies they inherit.",
+    fields: [{ name: "parent", label: "Destination", type: "select", required: true,
+      options: destinations(n).filter((d) => d !== n.parent), optionLabels: destLabels(),
+      help: "Select a destination: the organization, or a folder." }],
+    submit: (v) => run(`Moved ${kindWord(n).toLowerCase()} ${label(n)}`, "move", { kind: n.kind, id: n.id, parent: v.parent }),
+  });
+
+  const remove = (n) => confirmDestructive(n.kind === "project" ? {
+    title: `Shut down ${label(n)}?`,
+    detail: `This shuts down project ${n.id}: all billing and traffic serving stop, and every resource in it is scheduled for deletion. ` +
+      "The project is kept for 30 days, when Restore under Resources pending deletion brings it back; then it is deleted.",
+    confirmWord: n.id, confirmLabel: "Shut down", consequence: "",
+    onConfirm: () => run(`Shut down project ${n.id}`, "delete", { kind: n.kind, id: n.id }),
+  } : {
+    title: `Delete folder ${label(n)}?`,
+    detail: "Only an empty folder is deleted. It is kept for 30 days, when Restore under Resources pending deletion brings it back.",
+    confirmWord: n.name, confirmLabel: "Delete", consequence: "",
+    onConfirm: () => run(`Deleted folder ${label(n)}`, "delete", { kind: n.kind, id: n.id }),
+  });
+
+  const restore = (n) => run(`Restored ${kindWord(n).toLowerCase()} ${label(n)}`, "restore", { kind: n.kind, id: n.id });
+
+  const editLabels = (n) => mrForm({
+    id: "mr-labels", title: `Labels of ${label(n)}`, label: "Save",
+    note: "A label is a key and a value: lowercase letters, numbers, underscores and dashes, up to 63 characters; at most 64 labels.",
+    fields: [{ name: "labels", label: "Labels", type: "map", default: JSON.stringify(n.labels || {}),
+      help: "One per line: key=value." }],
+    submit: (v) => run(`Saved the labels of ${n.id}`, "labels", { id: n.id, labels: v.labels ? JSON.parse(v.labels) : {} }),
+  });
+
+  const addTag = (n) => mrForm({
+    id: "mr-add-tag", title: `Add tag to ${label(n)}`, label: "Save",
+    note: "Each resource carries one value of a tag key. Tag keys and values are made on the Tags page.",
+    fields: [{ name: "value", label: "Value", type: "select", required: true, options: tree.tagValues,
+      help: "The tag key and its value, as KEY_NAMESPACE/KEY/VALUE." }],
+    submit: (v) => run(`Added tag ${v.value} to ${label(n)}`, "tag", { kind: n.kind, id: n.id, value: v.value }),
+  });
+
+  // The info panel: the selected row's Permissions, Labels and Tags.
+  const openPanel = async (n) => {
+    MODAL_SIDE_NEXT = true;
+    const { dialog, close } = openModal({ labelledBy: "mr-panel-title" });
+    const service = n.kind === "project" ? "iam" : "hierarchy";
+    const segment = n.kind === "project" ? n.id : n.kind === "folder" ? n.id : "organization";
+    // A project's IAM page is scoped to that project, not the selected one.
+    const scope = n.kind === "project" ? n.id : currentProject();
+    const content = el("div", { id: "mr-panel-content" }, el("p", { class: "unavailable", text: "reading…" }));
+    const tabs = ["permissions", ...(n.kind === "project" ? ["labels"] : []), "tags"];
+    let tab = "permissions";
+    const strip = el("div", { class: "tab-strip", role: "tablist", "aria-label": "Info panel" });
+    const drawStrip = () => setChildren(strip, ...tabs.map((t) => el("button", {
+      type: "button", role: "tab", id: `mr-panel-tab-${t}`, class: "tab" + (t === tab ? " is-selected" : ""),
+      "aria-selected": String(t === tab), text: t === "permissions" ? "Permissions" : t === "labels" ? "Labels" : "Tags",
+      onclick: () => { tab = t; drawStrip(); draw(); } })));
+    const refreshRow = () => (tree.nodes.find((x) => key(x) === key(n)) || n);
+    // Each draw has a number: a Permissions read that answers after the
+    // panel moved to another tab, or was drawn again, is dropped.
+    let drawn = 0;
+    // A form opened over the panel returns focus to the button that
+    // opened it; a redraw replaces that button, so focus goes back to the
+    // selected tab rather than the page behind the dialog.
+    const keepFocus = () => setTimeout(() => {
+      const other = [...document.querySelectorAll(".modal.is-open")].some((m) => !m.contains(dialog) && !dialog.contains(m));
+      if (dialog.isConnected && !dialog.contains(document.activeElement) && !other) {
+        document.getElementById(`mr-panel-tab-${tab}`)?.focus();
+      }
+    }, 0);
+    const draw = async () => {
+      const row = refreshRow();
+      const mine = ++drawn;
+      keepFocus();
+      if (tab === "labels") {
+        const entries = Object.entries(row.labels || {});
+        return setChildren(content,
+          el("div", { class: "section-actions" }, el("button", { type: "button", class: "secondary", id: "mr-panel-edit-labels",
+            text: "Edit labels", onclick: () => editLabels(row) })),
+          entries.length ? el("table", { id: "mr-panel-labels" }, el("thead", {}, el("tr", {}, el("th", { text: "Key" }), el("th", { text: "Value" }))),
+            el("tbody", {}, ...entries.map(([k, v]) => el("tr", {}, el("td", { class: "mono", text: k }), el("td", { class: "mono", text: v })))))
+            : el("p", { class: "form-help", text: "No labels." }));
+      }
+      if (tab === "tags") {
+        return setChildren(content,
+          el("div", { class: "section-actions" }, el("button", { type: "button", class: "secondary", id: "mr-panel-add-tag",
+            text: "Add tag", disabled: tree.tagValues.length ? null : "disabled", onclick: () => addTag(row) })),
+          tree.tagValues.length ? null : el("p", { class: "form-help", text: "No tag values exist yet: create a tag key and its values on the Tags page." }),
+          (row.tags || []).length ? el("table", { id: "mr-panel-tags" }, el("thead", {}, el("tr", {}, el("th", { text: "Tag" }), el("th", {}, el("span", { class: "sr-only", text: "Remove" })))),
+            el("tbody", {}, ...row.tags.map((t) => el("tr", {}, el("td", { class: "mono", text: t }),
+              el("td", {}, el("button", { type: "button", class: "secondary", "aria-label": `Remove tag ${t}`, text: "Remove",
+                onclick: async () => { try { await run(`Removed tag ${t} from ${label(row)}`, "untag", { kind: row.kind, id: row.id, value: t }); draw(); } catch (err) { notify(err.message, "error"); } } }))))))
+            : el("p", { class: "form-help", text: "No tags are bound here." }));
+      }
+      let section;
+      try {
+        const d = await api(`/api/detail/${service}?project=${encodeURIComponent(scope)}&name=${encodeURIComponent(segment)}`);
+        section = (d.sections || []).find((s) => s.kind === "permissions");
+      } catch (err) {
+        if (mine !== drawn) return;
+        return setChildren(content, el("p", { class: "form-error", role: "alert", text: err.message }));
+      }
+      if (mine !== drawn) return;
+      if (!section || !section.permissions) {
+        return setChildren(content, el("p", { class: "form-help", text: section && section.unavailable ? section.unavailable : "This resource has no IAM policy to show." }));
+      }
+      const pview = section.permissions;
+      const change = (b) => send(`/api/permissions/${service}?project=${encodeURIComponent(scope)}`, "POST",
+        { Path: [segment], Etag: pview.etag, ...b });
+      const rows = (pview.bindings || []).flatMap((b) => (b.members || []).map((m) => ({ member: m, role: b.role, conditional: b.conditional || null })))
+        .sort((a, b) => a.member.localeCompare(b.member) || a.role.localeCompare(b.role));
+      setChildren(content,
+        el("div", { class: "section-actions" }, el("button", { type: "button", class: "primary", id: "mr-panel-add-principal",
+          text: "Add principal", onclick: () => openGrantForm(pview, label(row), change, () => draw()) })),
+        pview.note ? el("p", { class: "form-help", text: pview.note }) : null,
+        rows.length ? el("table", { id: "mr-panel-permissions" },
+          el("thead", {}, el("tr", {}, el("th", { text: "Principal" }), el("th", { text: "Role" }), el("th", {}, el("span", { class: "sr-only", text: "Remove" })))),
+          el("tbody", {}, ...rows.map((r) => el("tr", {},
+            el("td", { class: "mono", text: r.member }), el("td", { class: "mono", text: r.role }),
+            el("td", {}, el("button", { type: "button", class: "secondary", "aria-label": `Remove ${r.member} from ${r.role}`, text: "Remove",
+              onclick: () => confirmDestructive({
+                title: `Remove ${r.member} from ${r.role}?`, detail: `${r.member} will no longer hold ${r.role} on ${label(row)}.`,
+                confirmWord: r.member, confirmLabel: "Remove", consequence: "",
+                onConfirm: async () => {
+                  const op = recordOperation(`Remove ${r.member} from ${r.role} on ${label(row)}`);
+                  try { const res = await change({ Remove: { Member: r.member, Role: r.role, Condition: r.conditional } }); op.succeeded("", res.operation); }
+                  catch (err) { op.failed(err.message, err.operation); throw err; }
+                  notify(`Removed ${r.member} from ${r.role}`);
+                  draw();
+                } }) }))))))
+          : el("p", { class: "form-help", text: "No principals hold a role here." }));
+    };
+    drawStrip();
+    dialog.append(el("div", { class: "modal-body", id: "mr-panel" },
+      el("h2", { id: "mr-panel-title", text: `${kindWord(n)} "${label(n)}"` }),
+      el("p", { class: "form-help mono", text: n.resource }),
+      strip, content,
+      el("div", { class: "modal-actions" }, el("button", { type: "button", class: "secondary", text: "Close", onclick: () => close() }))));
+    dialog.addEventListener("cb-closed", () => { panelOpen = false; drawBar(); });
+    panelOpen = true;
+    drawBar();
+    draw();
+  };
+
+  const moveButton = el("button", { type: "button", class: "header-button", id: "mr-move", text: "Move", disabled: "disabled",
+    onclick: () => selected && move(selected) });
+  const deleteButton = el("button", { type: "button", class: "header-button", id: "mr-delete", text: "Delete", disabled: "disabled",
+    onclick: () => selected && remove(selected) });
+  const infoButton = el("button", { type: "button", class: "header-button", id: "mr-info-panel", disabled: "disabled",
+    onclick: () => selected && openPanel(selected) });
+  const pendingLink = el("a", { id: "mr-pending", href: "#" });
+  pendingLink.addEventListener("click", (e) => {
+    e.preventDefault();
+    pending = !pending;
+    const u = new URL(location.href);
+    if (pending) u.searchParams.set("view", "pending"); else u.searchParams.delete("view");
+    history.replaceState(history.state, "", u.pathname + u.search);
+    selected = null;
+    drawBar();
+    draw();
+  });
+  const filterInput = el("input", { type: "search", class: "filter", id: "mr-filter", placeholder: "Filter", "aria-label": "Filter resources",
+    oninput: () => draw() });
+  const bar = el("div", { class: "list-actions", id: "mr-actions" });
+  const drawBar = () => {
+    const live = selected && selected.state === "ACTIVE" && selected.kind !== "organization";
+    moveButton.disabled = !live;
+    deleteButton.disabled = !live;
+    infoButton.disabled = !selected || pending;
+    infoButton.textContent = panelOpen ? "Hide info panel" : "Show info panel";
+    pendingLink.textContent = pending ? "Back to Manage resources" : "Resources pending deletion";
+    moveButton.hidden = pending;
+    deleteButton.hidden = pending;
+    infoButton.hidden = pending;
+    setChildren(bar, moveButton, deleteButton, infoButton, filterInput, pendingLink);
+  };
+
+  const statusText = (n) => n.state === "ACTIVE" ? "Active" : n.state === "DELETE_REQUESTED" ? "Pending deletion" : n.state;
+  const labelText = (n) => Object.entries(n.labels || {}).map(([k, v]) => `${k}: ${v}`).join(", ");
+  const rowActions = (n) => {
+    const acts = [];
+    if (n.state === "DELETE_REQUESTED") {
+      acts.push({ label: "Restore", run: () => restore(n).catch((err) => notify(err.message, "error")) });
+    } else {
+      if (n.kind === "project") acts.push({ label: "Settings", run: () => navigate(`/iam-admin/settings/${encodeURIComponent(n.id)}?project=${encodeURIComponent(n.id)}`) });
+      if (n.kind !== "organization") acts.push({ label: "Move", run: () => move(n) });
+      acts.push({ label: "Permissions", run: () => { selected = n; openPanel(n); } });
+      if (n.kind === "project") acts.push({ label: "Labels", run: () => editLabels(n) });
+      acts.push({ label: "Tags", run: () => { selected = n; openPanel(n).then(() => document.getElementById("mr-panel-tab-tags")?.click()); } });
+      if (n.kind !== "organization") acts.push({ label: "Delete", destructive: true, run: () => remove(n) });
+    }
+    return overflowMenu(acts, label(n));
+  };
+
+  const draw = () => {
+    if (!tree) return;
+    const q = filterInput.value.trim().toLowerCase();
+    const matches = (n) => !q || [n.name, n.id, statusText(n), labelText(n), ...(n.tags || [])].some((s) => (s || "").toLowerCase().includes(q));
+    if (pending) {
+      const rows = tree.nodes.filter((n) => n.state === "DELETE_REQUESTED" && matches(n));
+      if (!rows.length) return setChildren(body, emptyState("No resources pending deletion", "A project you shut down, or a folder you delete, is listed here for 30 days, when it can be restored."));
+      return setChildren(body, el("div", { class: "table-wrap" }, el("table", { id: "mr-pending-table" },
+        el("thead", {}, el("tr", {}, el("th", { text: "Name" }), el("th", { text: "ID" }), el("th", { text: "Type" }),
+          el("th", { text: "Deletion requested" }), el("th", { text: "Deletion date" }), el("th", {}, el("span", { class: "sr-only", text: "Restore" })))),
+        el("tbody", {}, ...rows.map((n) => el("tr", { "data-resource": key(n) },
+          el("td", { text: n.name }), el("td", { class: "mono", text: n.id }), el("td", { text: kindWord(n) }),
+          el("td", { text: n.deleteTime ? new Date(n.deleteTime).toLocaleString() : "" }), el("td", { text: n.purgeTime || "" }),
+          el("td", {}, el("button", { type: "button", class: "secondary", "aria-label": `Restore ${n.name}`, text: "Restore",
+            onclick: () => restore(n).catch((err) => notify(err.message, "error")) }))))))));
+    }
+    const live = tree.nodes.filter((n) => n.state !== "DELETE_REQUESTED");
+    const children = new Map();
+    for (const n of live) {
+      const p = parentKey(n);
+      if (!children.has(p)) children.set(p, []);
+      children.get(p).push(n);
+    }
+    for (const list of children.values()) list.sort((a, b) => (a.kind === b.kind ? 0 : a.kind === "folder" ? -1 : 1) || a.name.localeCompare(b.name));
+    // A row is shown when it matches, or when something under it does.
+    const shown = new Map();
+    const visit = (n) => {
+      let any = matches(n);
+      for (const c of children.get(key(n)) || []) any = visit(c) || any;
+      shown.set(key(n), any);
+      return any;
+    };
+    const roots = [...(children.get(null) || []), ...(children.get("none") || [])];
+    for (const r of roots) visit(r);
+    const rows = [];
+    const walk = (n, depth) => {
+      if (!shown.get(key(n))) return;
+      const kids = (children.get(key(n)) || []).filter((c) => shown.get(key(c)));
+      const open = q || !collapsed.has(key(n));
+      const toggle = kids.length ? el("button", { type: "button", class: "icon-button mr-toggle", "aria-expanded": String(!!open),
+        "aria-label": `${open ? "Collapse" : "Expand"} ${label(n)}`, text: open ? "▾" : "▸",
+        onclick: () => { if (collapsed.has(key(n))) collapsed.delete(key(n)); else collapsed.add(key(n)); draw(); } })
+        : el("span", { class: "mr-toggle-space", "aria-hidden": "true" });
+      // A checkbox per row, as Google's tree has; Move, Delete and the info
+      // panel act on one row, so checking one clears the others.
+      const check = el("input", { type: "checkbox", class: "mr-select", "aria-label": `Select ${label(n)}`,
+        checked: selected && key(selected) === key(n) ? true : null,
+        onchange: (e) => {
+          selected = e.target.checked ? n : null;
+          for (const other of body.querySelectorAll("input.mr-select")) if (other !== e.target) other.checked = false;
+          drawBar();
+        } });
+      rows.push(el("tr", { "data-resource": key(n), "data-kind": n.kind, "aria-level": String(depth + 1) },
+        el("td", {}, check),
+        el("td", { class: "mr-name" },
+          el("span", { style: `display:inline-block;width:${depth * 20}px`, "aria-hidden": "true" }), toggle,
+          el("span", { class: "mr-kind", text: `${kindWord(n)} ` }),
+          el("a", { href: pageOf(n) + scopeSearch(), text: label(n) })),
+        el("td", { class: "mono", text: n.id }),
+        el("td", { text: statusText(n) }),
+        el("td", { text: labelText(n) }),
+        el("td", { text: (n.tags || []).join(", ") }),
+        el("td", { class: "row-actions" }, rowActions(n))));
+      if (open) for (const c of kids) walk(c, depth + 1);
+    };
+    for (const r of roots) walk(r, 0);
+    if (!rows.length) return setChildren(body, emptyState("No resources match", "Clear the filter to see every resource."));
+    setChildren(body, el("div", { class: "table-wrap" }, el("table", { id: "mr-tree", role: "treegrid", "aria-label": "Resources" },
+      el("thead", {}, el("tr", {},
+        el("th", {}, el("span", { class: "sr-only", text: "Select" })),
+        el("th", { text: "Name" }), el("th", { text: "ID" }), el("th", { text: "Status" }),
+        el("th", { text: "Labels" }), el("th", { text: "Tags" }),
+        el("th", {}, el("span", { class: "sr-only", text: "Actions" })))),
+      el("tbody", {}, ...rows))));
+  };
+
+  const reload = async () => {
+    try {
+      tree = await mrCall("tree");
+    } catch (err) {
+      setChildren(body, errorState("Resources unavailable", String(err.message), () => reload()));
+      return;
+    }
+    if (selected) selected = tree.nodes.find((x) => key(x) === key(selected)) || null;
+    drawBar();
+    draw();
+  };
+
+  const header = pageHeader("Manage resources", "", { actions: [
+    Object.assign(createButton("Create project", () => navigate("/projectcreate")), { id: "mr-create-project" }),
+    Object.assign(createButton("Create folder", () => tree && createFolder()), { id: "mr-create-folder-button" }),
+    refreshButton(() => reload())] });
+  drawBar();
+  setChildren(view, header, noteBanner(mrNoteText), bar, body);
+  reload();
+}
+
+const mrNoteText = "One local organization; a project you shut down is kept 30 days, when Restore brings it back, then purged. " +
+  "IAM policies are stored, and enforced only with up --iam-enforcement=on.";
+
+// --- APIs & Services (#1866) -------------------------------------------
+//
+// Google's APIs & Services pages over the local Service Usage API: the
+// Enabled APIs & services dashboard (Traffic, Errors and Median latency
+// charts above the enabled APIs, with Requests, Errors and Latency), the
+// Library (search and categories over every API CloudBurrow serves, the
+// ones this instance does not serve marked so), each API's page (Overview,
+// Metrics, Quotas & System Limits, Credentials, Disable API) and
+// Credentials. Counts are the instance's own request counters, which are
+// kept per API for every project together; an API whose calls are not
+// counted says so rather than showing a zero.
+
+function apisCall(call, body = {}) {
+  const project = currentProject();
+  return send(`/api/studio/serviceusage?call=${encodeURIComponent(call)}&project=${encodeURIComponent(project || "")}`, "POST", body);
+}
+
+function apisNeedProject(view, title) {
+  setChildren(view, pageHeader(title, ""),
+    emptyState("Select a project", "APIs are enabled per project. Choose one in the toolbar."));
+}
+
+const apisNumber = (n) => Number(n || 0).toLocaleString("en-US");
+const apisErrors = (t) => !t.measured ? "Not counted" : t.requests ? `${((t.errors / t.requests) * 100).toFixed(1)}%` : "0%";
+const apisLatency = (v, t) => !t.measured ? "Not counted" : v === null || v === undefined ? "—" : `${v.toFixed(1)} ms`;
+
+// apisSeries adds up the request charts' series of the given services,
+// sample by sample: calls per second, the share that failed, and the
+// call-weighted median latency.
+function apisSeries(data, names) {
+  const byAt = new Map();
+  for (const svc of (data && data.services) || []) {
+    if (!names.has(svc.service)) continue;
+    for (const p of svc.points || []) {
+      const at = p.at;
+      const acc = byAt.get(at) || { at, rate: 0, failed: 0, weighted: 0, weight: 0 };
+      acc.rate += p.rate;
+      if (p.error_rate !== null && p.error_rate !== undefined) acc.failed += p.rate * p.error_rate;
+      if (p.p50_ms !== null && p.p50_ms !== undefined && p.rate > 0) { acc.weighted += p.rate * p.p50_ms; acc.weight += p.rate; }
+      byAt.set(at, acc);
+    }
+  }
+  return [...byAt.values()].sort((a, b) => (a.at < b.at ? -1 : 1)).map((a) => ({
+    at: a.at, rate: a.rate,
+    errorPct: a.rate > 0 ? (a.failed / a.rate) * 100 : null,
+    p50: a.weight > 0 ? a.weighted / a.weight : null,
+  }));
+}
+
+async function apisCharts(names, idPrefix) {
+  let data = null;
+  try { data = await api("/api/metrics/requests"); } catch (err) {
+    return el("p", { class: "unavailable", id: `${idPrefix}-charts`, text: `Request charts unavailable: ${err.message}` });
+  }
+  if (!names.size) {
+    return el("p", { class: "unavailable", id: `${idPrefix}-charts`, text: "Not available locally: this API's calls are not counted by this instance." });
+  }
+  const pts = apisSeries(data, names);
+  const last = pts.length ? pts[pts.length - 1] : null;
+  return el("div", { class: "charts", id: `${idPrefix}-charts` },
+    chartCard("Traffic", pts.map((p) => ({ value: p.rate })), {
+      label: "Requests per second", current: last ? `${last.rate.toFixed(2)}/s` : "",
+      foot: "Requests per second, every project on this instance",
+    }),
+    chartCard("Errors", pts.map((p) => ({ value: p.errorPct })), {
+      label: "Errors as a percentage of requests", max: 100,
+      current: last && last.errorPct !== null ? `${last.errorPct.toFixed(1)}%` : "",
+      foot: "Percent of requests that failed (any code but OK, or HTTP 4xx and 5xx)",
+    }),
+    chartCard("Median latency", pts.map((p) => ({ value: p.p50 })), {
+      label: "Median latency in milliseconds",
+      current: last && last.p50 !== null ? `${last.p50.toFixed(1)} ms` : "",
+      foot: "Median estimated from the latency histogram",
+    }));
+}
+
+function apisDisable(name, title, project, after) {
+  mrForm({
+    id: "api-disable", title: `Disable ${title}?`, label: "Disable", destructive: true, fields: [],
+    note: `${name} is recorded as disabled for project ${project}: Service Usage, gcloud and Terraform report it DISABLED. ` +
+      "Re-enable it from the Library.",
+    submit: async () => {
+      const op = recordOperation(`Disable ${name} on ${project}`);
+      try { await apisCall("disable", { service: name }); op.succeeded(""); } catch (err) { op.failed(err.message); throw err; }
+      notify(`Disabled ${title}`);
+      after();
+    },
+  });
+}
+
+async function apisEnable(name, title, project) {
+  const op = recordOperation(`Enable ${name} on ${project}`);
+  try { await apisCall("enable", { service: name }); op.succeeded(""); } catch (err) { op.failed(err.message); throw err; }
+  notify(`Enabled ${title}`);
+}
+
+function renderAPIsDashboard(view) {
+  const project = currentProject();
+  if (!project) return apisNeedProject(view, "APIs & Services");
+  const body = el("div", { id: "apis-dashboard-body" }, loadingState(5, { what: "APIs" }));
+  const filter = el("input", { type: "search", class: "filter", id: "apis-filter", placeholder: "Filter", "aria-label": "Filter enabled APIs and services" });
+  let list = [];
+  const draw = () => {
+    const q = filter.value.trim().toLowerCase();
+    const rows = list.filter((a) => a.state === "ENABLED" && (!q || a.title.toLowerCase().includes(q) || a.name.includes(q)));
+    setChildren(body, el("div", { class: "table-wrap" },
+      el("table", { class: "table", id: "apis-table" },
+        el("thead", {}, el("tr", {}, ...["Name", "Requests", "Errors", "Latency, median", "Latency, 95%"].map((h) => el("th", { scope: "col", text: h })))),
+        el("tbody", {}, ...(rows.length ? rows.map((a) => el("tr", { "data-api": a.name },
+          el("td", {}, el("a", { href: `/apis/api/${encodeURIComponent(a.name)}/metrics${scopeSearch()}`, text: a.title })),
+          el("td", { text: a.totals.measured ? apisNumber(a.totals.requests) : "Not counted" }),
+          el("td", { text: apisErrors(a.totals) }),
+          el("td", { text: apisLatency(a.totals.p50Ms, a.totals) }),
+          el("td", { text: apisLatency(a.totals.p95Ms, a.totals) })))
+          : [el("tr", {}, el("td", { colspan: "5", text: q ? "No enabled API matches the filter." : "No API is enabled in this project." }))])))));
+  };
+  filter.addEventListener("input", draw);
+  const charts = el("div", { id: "apis-dashboard-charts-slot" });
+  const reload = async () => {
+    try {
+      const data = await apisCall("apis");
+      list = data.apis || [];
+      draw();
+      const names = new Set(list.filter((a) => a.state === "ENABLED" && a.metricsService).map((a) => a.metricsService));
+      setChildren(charts, await apisCharts(names, "apis-dashboard"));
+    } catch (err) {
+      setChildren(body, errorState("Could not list the project's APIs", err.message, reload));
+    }
+  };
+  const enable = el("a", { class: "header-button primary", id: "apis-enable", href: "/apis/library" + scopeSearch(), html: ICON_ADD },
+    el("span", { text: "Enable APIs and services" }));
+  setChildren(view, pageHeader("APIs & Services", "", { actions: [enable, refreshButton(() => reload())] }),
+    noteBanner(apiCountersNote), charts, el("div", { class: "filter-bar" }, filter), body);
+  reload();
+}
+
+const apiCountersNote = "Requests, errors and latency are this instance's own request counters (/metrics), " +
+  "for every project together: CloudBurrow does not keep them per project.";
+
+const API_TABS = [["overview", "Overview"], ["metrics", "Metrics"], ["quotas", "Quotas & System Limits"], ["credentials", "Credentials"]];
+
+async function renderAPIPage(view, name, tab) {
+  const project = currentProject();
+  if (!project) return apisNeedProject(view, "API/Service details");
+  if (!API_TABS.some(([id]) => id === tab)) tab = "overview";
+  setChildren(view, pageHeader("API/Service details", "", { back: "/apis" + scopeSearch() }), loadingState(4, { what: name }));
+  let data;
+  try { data = await apisCall("api", { service: name }); } catch (err) {
+    setChildren(view, pageHeader("API/Service details", "", { back: "/apis" + scopeSearch() }), errorState(`Could not read ${name}`, err.message));
+    return;
+  }
+  const a = data.api;
+  const redraw = () => renderAPIPage(view, name, tab);
+  const actions = [];
+  if (a.state === "ENABLED") {
+    actions.push(el("button", { type: "button", class: "header-button", id: "api-disable-button", text: "Disable API",
+      onclick: () => apisDisable(a.name, a.title, project, () => navigate("/apis")) }));
+  } else if (a.state === "DISABLED") {
+    actions.push(el("button", { type: "button", class: "header-button primary", id: "api-enable-button", text: "Enable",
+      onclick: async () => { await apisEnable(a.name, a.title, project); redraw(); } }));
+  }
+  const strip = el("div", { class: "tab-strip", role: "tablist", "aria-label": `${a.title} sections` },
+    ...API_TABS.map(([id, label]) => el("a", { role: "tab", id: `api-tab-${id}`, class: "tab" + (id === tab ? " is-selected" : ""),
+      "aria-selected": String(id === tab), href: `/apis/api/${encodeURIComponent(a.name)}/${id}${scopeSearch()}`, text: label })));
+  const panel = el("div", { role: "tabpanel", id: "api-tab-panel", "aria-labelledby": `api-tab-${tab}` });
+  const dl = (pairs) => el("dl", { class: "api-facts" }, ...pairs.flatMap(([k, v]) => [el("dt", { text: k }), el("dd", { text: v })]));
+  if (tab === "overview") {
+    setChildren(panel,
+      el("p", { text: a.summary || "" }),
+      dl([["Service name", a.name], ["Type", "Public API"], ["Status", a.state === "ENABLED" ? "Enabled" : a.state === "DISABLED" ? "Disabled" : "Not available locally"],
+        ["Category", a.category || ""], ["Served by", "This CloudBurrow instance"]]),
+      a.unavailable ? el("p", { class: "unavailable", text: `Not available locally: ${a.unavailable}.` }) : null,
+      el("h2", { text: "Traffic" }), await apisCharts(new Set(a.metricsService ? [a.metricsService] : []), "api-overview"));
+  } else if (tab === "metrics") {
+    const methods = data.methods || [];
+    setChildren(panel,
+      a.sharedWith && a.sharedWith.length ? el("p", { class: "form-help", text: `Counted together with ${a.sharedWith.join(", ")}, which the same local server serves.` }) : null,
+      await apisCharts(new Set(a.metricsService ? [a.metricsService] : []), "api-metrics"),
+      el("h2", { text: "Methods" }),
+      !a.totals.measured ? el("p", { class: "unavailable", id: "api-methods", text: "Not available locally: this API's calls are not counted by this instance." })
+        : el("div", { class: "table-wrap" }, el("table", { class: "table", id: "api-methods" },
+          el("thead", {}, el("tr", {}, ...["Method", "Requests", "Errors", "Latency, median", "Latency, 95%"].map((h) => el("th", { scope: "col", text: h })))),
+          el("tbody", {}, ...(methods.length ? methods.map((m) => el("tr", {},
+            el("td", { class: "mono", text: m.method }), el("td", { text: apisNumber(m.requests) }), el("td", { text: apisErrors(m) }),
+            el("td", { text: apisLatency(m.p50Ms, m) }), el("td", { text: apisLatency(m.p95Ms, m) })))
+            : [el("tr", {}, el("td", { colspan: "5", text: "No calls yet." }))])))));
+  } else if (tab === "quotas") {
+    setChildren(panel, el("div", { class: "state", id: "api-quotas" },
+      el("h2", { text: "Not available locally" }),
+      el("p", { text: "Quotas are the Cloud Quotas and Service Usage consumer quota APIs', which CloudBurrow does not serve. " +
+        "The per-request limits Google documents for this API, such as sizes and counts, are enforced by the local service itself." })));
+  } else {
+    setChildren(panel, apisCredentialSections("api-credentials"));
+  }
+  setChildren(view, pageHeader(a.title, `${a.name} · project ${project}`, { back: "/apis" + scopeSearch(), actions }), strip, panel);
+  announce(`${a.title}: ${API_TABS.find(([id]) => id === tab)[1]}`);
+}
+
+const API_CATEGORIES = ["Big data", "Compute", "Databases", "Developer tools", "Management tools", "Security", "Storage"];
+
+async function renderAPILibrary(view, name) {
+  const project = currentProject();
+  if (!project) return apisNeedProject(view, name ? "API Library" : "API Library");
+  let data;
+  setChildren(view, pageHeader("API Library", ""), loadingState(4, { what: "the API Library" }));
+  try { data = await apisCall("apis"); } catch (err) {
+    setChildren(view, pageHeader("API Library", ""), errorState("Could not read the API Library", err.message));
+    return;
+  }
+  const list = data.apis || [];
+  if (name) {
+    const a = list.find((x) => x.name === name);
+    if (!a) {
+      setChildren(view, pageHeader("API Library", "", { back: "/apis/library" + scopeSearch() }),
+        emptyState("Not available locally", `CloudBurrow does not serve ${name}.`));
+      return;
+    }
+    const action = a.unavailable
+      ? el("button", { type: "button", class: "primary", id: "library-enable", disabled: "disabled", text: "Enable" })
+      : a.state === "ENABLED"
+        ? el("a", { class: "button primary", id: "library-manage", href: `/apis/api/${encodeURIComponent(a.name)}/metrics${scopeSearch()}`, text: "Manage" })
+        : el("button", { type: "button", class: "primary", id: "library-enable", text: "Enable",
+          onclick: async (e) => {
+            e.currentTarget.disabled = true;
+            try { await apisEnable(a.name, a.title, project); navigate(`/apis/api/${encodeURIComponent(a.name)}/metrics`); }
+            catch (err) { notify(err.message, "error"); e.currentTarget.disabled = false; }
+          } });
+    setChildren(view, pageHeader(a.title, a.name, { back: "/apis/library" + scopeSearch() }),
+      el("div", { class: "card", id: "library-api" },
+        el("p", { text: a.summary || "" }),
+        el("div", { class: "page-header-actions" }, action,
+          a.state === "ENABLED" ? el("span", { class: "status ok", id: "library-api-enabled", text: "API Enabled" }) : null),
+        a.unavailable ? el("p", { class: "unavailable", id: "library-unavailable", text: `Not available locally: ${a.unavailable}.` }) : null,
+        el("dl", { class: "api-facts" }, el("dt", { text: "Category" }), el("dd", { text: a.category || "" }),
+          el("dt", { text: "Service name" }), el("dd", { class: "mono", text: a.name }))));
+    announce(`${a.title} in the API Library`);
+    return;
+  }
+  const params = new URLSearchParams(location.search);
+  const search = el("input", { type: "search", id: "library-search", class: "filter", placeholder: "Search for APIs & Services",
+    "aria-label": "Search for APIs & Services", value: params.get("q") || "" });
+  let category = params.get("filter") || "";
+  const cats = el("div", { class: "library-categories", role: "group", "aria-label": "Category" });
+  const grid = el("div", { class: "library-grid", id: "library-results" });
+  const draw = () => {
+    setChildren(cats, ...["", ...API_CATEGORIES].map((c) => el("button", { type: "button",
+      class: "chip" + (c === category ? " is-selected" : ""), "aria-pressed": String(c === category), "data-category": c || "all",
+      text: c || "All", onclick: () => { category = c; draw(); } })));
+    const q = search.value.trim().toLowerCase();
+    const rows = list.filter((a) => (!category || a.category === category) &&
+      (!q || a.title.toLowerCase().includes(q) || a.name.includes(q) || (a.summary || "").toLowerCase().includes(q)));
+    setChildren(grid, ...(rows.length ? rows.map((a) => el("a", { class: "card library-card", "data-api": a.name,
+      href: `/apis/library/${encodeURIComponent(a.name)}${scopeSearch()}` },
+      el("h3", { text: a.title }),
+      el("p", { class: "form-help", text: a.category || "" }),
+      el("p", { text: a.summary || "" }),
+      a.unavailable ? el("p", { class: "unavailable", text: "Not available locally" })
+        : a.state === "ENABLED" ? el("p", { class: "status ok", text: "Enabled" }) : el("p", { class: "status", text: "Disabled" })))
+      : [emptyState("No results", "No API CloudBurrow serves matches the search.")]));
+  };
+  search.addEventListener("input", draw);
+  draw();
+  setChildren(view, pageHeader("Welcome to the API Library", "The APIs CloudBurrow serves, with those this instance was not started with marked not available locally.",
+    { back: "/apis" + scopeSearch() }), el("div", { class: "filter-bar" }, search), cats, grid);
+}
+
+// apisCredentialSections is the Credentials page's lists, also an API's
+// Credentials tab: API keys and OAuth 2.0 client IDs are not served, the
+// service accounts are IAM's.
+function apisCredentialSections(idPrefix) {
+  const served = new Set(SERVICES.map((sv) => sv.id));
+  const accounts = el("div", { id: `${idPrefix}-service-accounts` });
+  if (served.has("iam-service-accounts") && currentProject()) {
+    setChildren(accounts, loadingState(2));
+    api(`/api/resources/iam-service-accounts?project=${encodeURIComponent(currentProject())}`).then((data) => {
+      const items = data.items || [];
+      setChildren(accounts, el("div", { class: "table-wrap" }, el("table", { class: "table" },
+        el("thead", {}, el("tr", {}, el("th", { scope: "col", text: "Email" }), el("th", { scope: "col", text: "Name" }))),
+        el("tbody", {}, ...(items.length ? items.map((r) => el("tr", {},
+          el("td", {}, el("a", { href: `/iam-admin/serviceaccounts/${encodeURIComponent(r.name)}${scopeSearch()}`, text: r.name })),
+          el("td", { text: (r.fields && (r.fields["Display name"] || r.fields.Name)) || "" })))
+          : [el("tr", {}, el("td", { colspan: "2", text: "No service accounts to display" }))])))),
+        el("p", {}, el("a", { href: "/iam-admin/serviceaccounts" + scopeSearch(), text: "Manage service accounts" })));
+    }).catch((err) => setChildren(accounts, el("p", { class: "unavailable", text: err.message })));
+  } else {
+    setChildren(accounts, el("p", { class: "unavailable", text: "Service accounts are IAM's, which this instance does not serve." }));
+  }
+  return el("div", { class: "api-credentials", id: idPrefix },
+    el("h2", { text: "API Keys" }), apiKeysTable(idPrefix),
+    el("h2", { text: "OAuth 2.0 Client IDs" }),
+    el("p", { class: "unavailable", id: `${idPrefix}-oauth`, text: "Not available locally: OAuth clients are Google Auth Platform's, which CloudBurrow does not serve." }),
+    el("h2", { text: "Service Accounts" }), accounts);
+}
+
+function renderAPICredentials(view) {
+  const project = currentProject();
+  if (!project) return apisNeedProject(view, "Credentials");
+  const served = new Set(SERVICES.map((sv) => sv.id));
+  const trigger = el("button", { type: "button", class: "header-button primary", id: "credentials-create", "aria-haspopup": "menu",
+    "aria-expanded": "false", html: ICON_ADD }, el("span", { text: "Create credentials" }));
+  const menu = el("div", { class: "overflow-menu", role: "menu", id: "credentials-create-menu", hidden: true },
+    el("button", { type: "button", class: "overflow-item", role: "menuitem", id: "credentials-create-api-key", text: "API key",
+      onclick: () => { menu.hidden = true; trigger.setAttribute("aria-expanded", "false"); apiKeyCreate(project); } }),
+    // Google's label, its reason as the tooltip and description, as every
+    // row menu draws an item this instance cannot perform (#1868).
+    unavailableMenuItem("OAuth client ID", "Not available locally: OAuth clients are Google Auth Platform's, which CloudBurrow does not serve."),
+    served.has("iam-service-accounts")
+      ? el("a", { class: "overflow-item", role: "menuitem", href: "/iam-admin/serviceaccounts/create" + scopeSearch(), text: "Service account" })
+      : unavailableMenuItem("Service account", "Not available locally: this instance was not started with IAM service accounts."));
+  trigger.addEventListener("click", () => {
+    menu.hidden = !menu.hidden;
+    trigger.setAttribute("aria-expanded", String(!menu.hidden));
+  });
+  const restore = el("a", { class: "header-button", id: "credentials-restore", href: "/apis/credentials/restore" + scopeSearch(), text: "Restore deleted credentials" });
+  setChildren(view, pageHeader("Credentials", "", { actions: [el("div", { class: "menu-anchor" }, trigger, menu), restore] }),
+    el("p", { class: "subtitle", text: "Create credentials to access your enabled APIs." }),
+    apisCredentialSections("credentials"));
+}
+
+// API keys (#1915): the Credentials page's table, Create credentials > API
+// key, each key's page (Name, Application restrictions, API restrictions,
+// Show key, Rotate key, Delete, and Delete the previous key after a
+// rotation) and Restore deleted credentials, over the local API Keys API.
+
+function apiKeyShow(title, keyString, id, extra) {
+  const { dialog, close } = openModal({ labelledBy: "api-key-shown-title" });
+  const field = el("input", { type: "text", id: "api-key-string", class: "mono", readonly: "readonly", value: keyString, "aria-label": "Your API key" });
+  const copy = el("button", { type: "button", class: "secondary", id: "api-key-copy", text: "Copy",
+    onclick: async () => { try { await navigator.clipboard.writeText(keyString); notify("Copied the API key"); } catch { field.select(); } } });
+  dialog.append(el("div", { class: "modal-body", id: "api-key-shown" },
+    el("h2", { id: "api-key-shown-title", text: title }),
+    extra ? el("p", { class: "form-help", text: extra }) : null,
+    el("label", { class: "form-field" }, el("span", { class: "form-label", text: "Your API key" }), field),
+    el("div", { class: "modal-actions" }, copy,
+      id ? el("a", { class: "button secondary", id: "api-key-edit-link", href: `/apis/credentials/key/${encodeURIComponent(id)}${scopeSearch()}`, text: "Edit API key", onclick: () => close() }) : null,
+      el("button", { type: "button", class: "primary", id: "api-key-close", text: "Close", onclick: () => close() }))));
+  field.focus();
+  field.select();
+}
+
+async function apiKeyCreate(project, after) {
+  const op = recordOperation(`Create an API key in ${project}`);
+  let k;
+  try { k = await apisCall("key-create", {}); op.succeeded(""); } catch (err) { op.failed(err.message); notify(err.message, "error"); return; }
+  apiKeyShow("API key created", k.keyString, k.id, "Use this key in your application by passing it with the key=API_KEY parameter or the x-goog-api-key header. " +
+    "It has no restrictions: restrict it on its page.");
+  notify("Created API key");
+  if (after) after(); else if (location.pathname === "/apis/credentials") navigate("/apis/credentials");
+}
+
+async function apiKeyReveal(id) {
+  try {
+    const d = await apisCall("key-string", { id });
+    apiKeyShow("API key", d.keyString, null, "");
+  } catch (err) { notify(err.message, "error"); }
+}
+
+function apiKeyDelete(k, after) {
+  mrForm({
+    id: "api-key-delete", title: `Delete API key ${k.displayName || k.id}?`, label: "Delete", destructive: true, fields: [],
+    note: "Applications using this key stop working. You can restore it from Restore deleted credentials for 30 days, after which it is purged.",
+    submit: async () => {
+      const op = recordOperation(`Delete API key ${k.id}`);
+      try { await apisCall("key-delete", { id: k.id }); op.succeeded(""); } catch (err) { op.failed(err.message); throw err; }
+      notify("Deleted API key");
+      after();
+    },
+  });
+}
+
+function apiKeysTable(idPrefix) {
+  const box = el("div", { id: `${idPrefix}-api-keys` }, loadingState(2, { what: "API keys" }));
+  const load = async () => {
+    let data;
+    try { data = await apisCall("keys", {}); } catch (err) {
+      setChildren(box, el("p", { class: "unavailable", text: err.message }));
+      return;
+    }
+    const keys = data.keys || [];
+    setChildren(box, el("div", { class: "table-wrap" }, el("table", { class: "table", id: `${idPrefix}-api-keys-table` },
+      el("thead", {}, el("tr", {}, ...["Name", "Creation date", "Restrictions", "Actions"].map((h) => el("th", { scope: "col", text: h })))),
+      el("tbody", {}, ...(keys.length ? keys.map((k) => el("tr", { "data-key": k.id },
+        el("td", {}, el("a", { href: `/apis/credentials/key/${encodeURIComponent(k.id)}${scopeSearch()}`, text: k.displayName || k.id })),
+        el("td", { text: new Date(k.createTime).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" }) }),
+        el("td", { text: k.summary }),
+        el("td", {},
+          el("button", { type: "button", class: "link-button", "data-action": "show-key", text: "Show key", onclick: () => apiKeyReveal(k.id) }),
+          el("a", { class: "link-button", "data-action": "edit-key", href: `/apis/credentials/key/${encodeURIComponent(k.id)}${scopeSearch()}`, text: "Edit API key" }),
+          el("button", { type: "button", class: "link-button", "data-action": "delete-key", text: "Delete API key", onclick: () => apiKeyDelete(k, load) }))))
+        : [el("tr", {}, el("td", { colspan: "4", text: "No API keys to display" }))])))));
+  };
+  load();
+  return box;
+}
+
+// apiKeyLines are a textarea's non-empty lines.
+const apiKeyLines = (v) => v.split("\n").map((l) => l.trim()).filter(Boolean);
+
+async function renderAPIKeyPage(view, id) {
+  const project = currentProject();
+  const back = "/apis/credentials" + scopeSearch();
+  if (!project) return apisNeedProject(view, "Edit API key");
+  setChildren(view, pageHeader("Edit API key", "", { back }), loadingState(4, { what: id }));
+  let k, apis;
+  try {
+    k = await apisCall("key", { id });
+    apis = ((await apisCall("apis")).apis || []).filter((a) => a.state === "ENABLED");
+  } catch (err) {
+    setChildren(view, pageHeader("Edit API key", "", { back }), errorState(`Could not read API key ${id}`, err.message));
+    return;
+  }
+  const r = k.restrictions || {};
+  const app = r.browserKeyRestrictions ? "browser" : r.serverKeyRestrictions ? "server" : r.androidKeyRestrictions ? "android" : r.iosKeyRestrictions ? "ios" : "none";
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  const field = (label, input, help) => el("label", { class: "form-field" }, el("span", { class: "form-label", text: label }), input,
+    help ? el("span", { class: "form-help", text: help }) : null);
+  const name = el("input", { type: "text", id: "api-key-name", value: k.displayName || "", maxlength: 63 });
+  const lines = (id, values, help, label) => {
+    const t = el("textarea", { id, rows: 4, class: "mono" });
+    t.value = (values || []).join("\n");
+    return { node: field(label, t, help), t };
+  };
+  const browser = lines("api-key-referrers", (r.browserKeyRestrictions || {}).allowedReferrers, "One website per line, such as *.example.com/* or www.example.com/path.", "Website restrictions");
+  const server = lines("api-key-ips", (r.serverKeyRestrictions || {}).allowedIps, "One IPv4 or IPv6 address or subnet (CIDR) per line.", "IP address restrictions");
+  const android = lines("api-key-android", ((r.androidKeyRestrictions || {}).allowedApplications || []).map((a) => `${a.packageName},${a.sha1Fingerprint}`),
+    "One app per line: package name, comma, SHA-1 certificate fingerprint.", "Android restrictions");
+  const ios = lines("api-key-ios", (r.iosKeyRestrictions || {}).allowedBundleIds, "One bundle ID per line, such as com.example.app.", "iOS restrictions");
+  const appBoxes = { browser: browser.node, server: server.node, android: android.node, ios: ios.node };
+  const show = () => {
+    const v = (view.querySelector('input[name="api-key-app"]:checked') || {}).value;
+    for (const [kname, node] of Object.entries(appBoxes)) node.hidden = kname !== v;
+    const restrict = (view.querySelector('input[name="api-key-api"]:checked') || {}).value === "restrict";
+    apiList.hidden = !restrict;
+  };
+  const radio = (group, value, label, current) => el("label", { class: "check-line", for: `${group}-${value}` },
+    el("input", { type: "radio", name: group, value, id: `${group}-${value}`, checked: value === current ? "checked" : null, onchange: show }),
+    el("span", { text: label }));
+  const targets = new Set((r.apiTargets || []).map((t) => t.service.toLowerCase()));
+  const apiList = el("fieldset", { class: "check-list", id: "api-key-api-list" }, el("legend", { text: "Selected APIs" }),
+    ...apis.map((a) => el("label", { class: "check-line", for: `api-key-target-${a.name}` },
+      el("input", { type: "checkbox", id: `api-key-target-${a.name}`, value: a.name, checked: targets.has(a.name) ? "checked" : null }),
+      el("span", { text: `${a.title} (${a.name})` }))));
+  const restrictions = () => {
+    const out = {};
+    const v = (view.querySelector('input[name="api-key-app"]:checked') || {}).value;
+    if (v === "browser") out.browserKeyRestrictions = { allowedReferrers: apiKeyLines(browser.t.value) };
+    if (v === "server") out.serverKeyRestrictions = { allowedIps: apiKeyLines(server.t.value) };
+    if (v === "android") out.androidKeyRestrictions = { allowedApplications: apiKeyLines(android.t.value).map((l) => {
+      const [packageName, sha1Fingerprint] = l.split(",").map((x) => (x || "").trim());
+      return { packageName, sha1Fingerprint };
+    }) };
+    if (v === "ios") out.iosKeyRestrictions = { allowedBundleIds: apiKeyLines(ios.t.value) };
+    if ((view.querySelector('input[name="api-key-api"]:checked') || {}).value === "restrict") {
+      const picked = [...apiList.querySelectorAll("input:checked")].map((c) => ({ service: c.value }));
+      // Methods already on a kept target stay as they were.
+      out.apiTargets = picked.map((t) => (r.apiTargets || []).find((o) => o.service.toLowerCase() === t.service) || t);
+    }
+    return out;
+  };
+  const save = el("button", { type: "submit", class: "primary", id: "api-key-save", text: "Save" });
+  const form = el("form", { class: "create-form", id: "api-key-form", novalidate: true, onsubmit: async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    const rs = restrictions();
+    if (rs.apiTargets && !rs.apiTargets.length) { error.textContent = "Select at least one API, or choose Don't restrict key."; error.hidden = false; return; }
+    save.disabled = true;
+    const op = recordOperation(`Update API key ${id}`);
+    try {
+      await apisCall("key-update", { id, displayName: name.value.trim(), restrictions: rs });
+      op.succeeded("");
+      notify("Saved API key");
+      navigate("/apis/credentials");
+    } catch (err) {
+      op.failed(err.message);
+      error.textContent = err.message;
+      error.hidden = false;
+      save.disabled = false;
+    }
+  } },
+  error,
+  field("Name", name, "A display name, at most 63 characters."),
+  el("h2", { text: "Key restrictions" }),
+  el("h3", { text: "Application restrictions" }),
+  el("div", { class: "radio-group", role: "radiogroup", "aria-label": "Application restrictions" },
+    radio("api-key-app", "none", "None", app), radio("api-key-app", "browser", "Websites", app), radio("api-key-app", "server", "IP addresses", app),
+    radio("api-key-app", "android", "Android apps", app), radio("api-key-app", "ios", "iOS apps", app)),
+  browser.node, server.node, android.node, ios.node,
+  el("h3", { text: "API restrictions" }),
+  el("div", { class: "radio-group", role: "radiogroup", "aria-label": "API restrictions" },
+    radio("api-key-api", "none", "Don't restrict key", (r.apiTargets || []).length ? "restrict" : "none"),
+    radio("api-key-api", "restrict", "Restrict key", (r.apiTargets || []).length ? "restrict" : "none")),
+  apiList,
+  el("p", { class: "form-help", text: "Restrictions apply to the APIs this instance serves, which refuse a request the key does not allow with Google's error." }),
+  el("div", { class: "form-actions" }, save, el("a", { class: "button secondary", href: back, text: "Cancel" })));
+  const actions = [
+    el("button", { type: "button", class: "header-button", id: "api-key-show", text: "Show key", onclick: () => apiKeyReveal(id) }),
+    el("button", { type: "button", class: "header-button", id: "api-key-rotate", text: "Rotate key", onclick: () => mrForm({
+      id: "api-key-rotate-form", title: "Rotate key", label: "Create",
+      fields: [{ name: "displayName", label: "Name", default: `${k.displayName || k.id} (rotated)`, help: "The new key's name. It gets this key's restrictions." }],
+      note: "A new key is created with this key's restrictions. This key keeps working until you delete it from the new key's page (Delete the previous key).",
+      submit: async (v) => {
+        const op = recordOperation(`Rotate API key ${id}`);
+        let nk;
+        try { nk = await apisCall("key-rotate", { id, displayName: v.displayName }); op.succeeded(""); } catch (err) { op.failed(err.message); throw err; }
+        navigate(`/apis/credentials/key/${encodeURIComponent(nk.id)}`);
+        apiKeyShow("API key created", nk.keyString, null, "Copy the new key into your applications, then delete the previous key.");
+      } }) }),
+    el("button", { type: "button", class: "header-button", id: "api-key-delete-button", text: "Delete", onclick: () => apiKeyDelete(k, () => navigate("/apis/credentials")) }),
+  ];
+  const previous = k.previous ? el("section", { class: "card", id: "api-key-previous" },
+    el("h2", { text: "Previous key" }),
+    el("p", { text: `${k.previous.displayName || k.previous.id}, created ${new Date(k.previous.createTime).toLocaleString()}, still works until you delete it.` }),
+    el("button", { type: "button", class: "secondary", id: "api-key-delete-previous", text: "Delete the previous key", onclick: async () => {
+      const op = recordOperation(`Delete the previous key of ${id}`);
+      try { await apisCall("key-delete-previous", { id }); op.succeeded(""); notify("Deleted the previous key"); renderAPIKeyPage(view, id); }
+      catch (err) { op.failed(err.message); notify(err.message, "error"); }
+    } })) : null;
+  setChildren(view, pageHeader("Edit API key", `${k.name} · created ${new Date(k.createTime).toLocaleString()}`, { back, actions }), previous, form);
+  show();
+  announce(`Edit API key ${k.displayName || k.id}`);
+}
+
+async function renderAPIKeysRestore(view) {
+  const project = currentProject();
+  const back = "/apis/credentials" + scopeSearch();
+  if (!project) return apisNeedProject(view, "Restore deleted credentials");
+  setChildren(view, pageHeader("Restore deleted credentials", "", { back }), loadingState(3, { what: "deleted credentials" }));
+  let data;
+  try { data = await apisCall("keys", { deleted: true }); } catch (err) {
+    setChildren(view, pageHeader("Restore deleted credentials", "", { back }), errorState("Could not list deleted credentials", err.message));
+    return;
+  }
+  const keys = data.keys || [];
+  setChildren(view, pageHeader("Restore deleted credentials", "Credentials deleted in the last 30 days can be restored.", { back }),
+    el("div", { class: "table-wrap" }, el("table", { class: "table", id: "api-keys-deleted" },
+      el("thead", {}, el("tr", {}, ...["Name", "Type", "Deletion date", ""].map((h) => el("th", { scope: "col", text: h })))),
+      el("tbody", {}, ...(keys.length ? keys.map((k) => el("tr", { "data-key": k.id },
+        el("td", { text: k.displayName || k.id }), el("td", { text: "API key" }),
+        el("td", { text: new Date(k.deleteTime).toLocaleString() }),
+        el("td", {}, el("button", { type: "button", class: "link-button", "data-action": "restore-key", text: "Restore", onclick: async () => {
+          const op = recordOperation(`Restore API key ${k.id}`);
+          try { await apisCall("key-undelete", { id: k.id }); op.succeeded(""); notify("Restored API key"); renderAPIKeysRestore(view); }
+          catch (err) { op.failed(err.message); notify(err.message, "error"); }
+        } }))))
+        : [el("tr", {}, el("td", { colspan: "4", text: "No deleted credentials to restore" }))])))));
+  announce("Restore deleted credentials");
 }

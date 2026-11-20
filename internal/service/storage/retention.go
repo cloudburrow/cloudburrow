@@ -257,6 +257,11 @@ func retentionChange(old, next *objectRetention, override bool) error {
 // checkNewObject applies the bucket to a new version: its default
 // event-based hold, and object retention only where enabled.
 func checkNewObject(b bucketRecord, o *objectRecord) error {
+	// The bucket's encryption enforcement config (cmek.go, #1938) applies
+	// to every operation that creates an object.
+	if err := checkEnforced(b, encryptionKind(o.KMSKeyVersion, o.KeySHA256)); err != nil {
+		return err
+	}
 	if o.ACL == nil {
 		o.ACL = newObjectACL(b)
 	}

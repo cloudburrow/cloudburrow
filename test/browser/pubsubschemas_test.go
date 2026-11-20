@@ -187,17 +187,19 @@ func TestPubSubSchemaCreateShowsTheValidationError(t *testing.T) {
 		t.Fatalf("the console API does not list the Avro schema created in the browser: %d %s", code, body)
 	}
 
-	// Delete from its row, confirmed by the schema's name.
-	p.run(chromedp.Click(chromedp.CSS(fmt.Sprintf(`button[aria-label=%q]`, "Actions for "+schema))))
-	p.clickText(`.overflow-menu:not([hidden]) [role="menuitem"]`, "Delete")
-	p.waitFor(`document.querySelector(".modal #confirm-input") !== null && document.activeElement === document.querySelector(".modal #confirm-input")`)
-	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #confirm-input`), "browser-schema"), chromedp.KeyEvent(kb.Enter))
-	p.waitFor(`!document.querySelector(".modal .form-error").hidden`)
+	// Delete from its row, confirmed as Google's is: "Click Delete. Confirm
+	// the delete operation." (docs.cloud.google.com/pubsub/docs/delete-schema,
+	// #1931), nothing typed. Enter, on Cancel, sends nothing.
+	p.openRowDelete(schema, "Delete")
+	p.confirmOnlyDialog()
+	p.run(chromedp.KeyEvent(kb.Enter))
+	p.waitFor(`document.querySelector(".modal.is-open") === null`)
 	if sent := p.sent(http.MethodDelete, created); len(sent) != 0 {
-		t.Fatalf("a delete confirmed with the short name was sent: %v", sent)
+		t.Fatalf("Enter on the delete dialog, focus on Cancel, sent a delete: %v", sent)
 	}
-	p.eval(`(() => { const f = document.querySelector(".modal #confirm-input"); f.value = ""; return true; })()`, nil)
-	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #confirm-input`), schema), chromedp.KeyEvent(kb.Enter))
+	p.openRowDelete(schema, "Delete")
+	p.confirmOnlyDialog()
+	p.pressDelete()
 	p.waitFor(fmt.Sprintf(`document.querySelector(".modal") === null && document.querySelector(%q) === null`, row))
 	if sent := p.sent(http.MethodDelete, created); len(sent) != 1 {
 		t.Errorf("the delete was sent %d times, want once: %v", len(sent), sent)

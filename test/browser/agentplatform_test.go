@@ -164,7 +164,8 @@ func TestModelGardenCataloguesAndDeploysOnlyLocalModels(t *testing.T) {
 	p.waitFor(`document.querySelectorAll("#garden-cards article").length === 1`)
 
 	p.clickText(`#garden-cards article[data-model="gemma-4"] button`, "Deploy")
-	p.confirmByName("gemma-4-e2b-it-community")
+	// Google's Model Garden asks for no ID typed to deploy (#1931).
+	p.pressConfirm("Deploy")
 	p.waitFor(`document.querySelector('#garden-cards article[data-model="gemma-4"] progress') !== null`)
 	var progress string
 	p.eval(`document.querySelector('#garden-cards article[data-model="gemma-4"] .garden-status').textContent`, &progress)
@@ -254,7 +255,8 @@ func TestModelGardenDownloadsAHuggingFaceModel(t *testing.T) {
 	free.Store(60 << 30)
 	check()
 	p.clickText("#hf-lookup button", "Download")
-	p.confirmByName("org/tiny")
+	// Nothing typed to download, as Model Garden's Deploy (#1931).
+	p.pressConfirm("Download")
 	p.waitFor(`document.querySelector('#hf-models tr[data-hf-model="org/tiny"] td[data-state="downloaded"]') !== null`)
 	if _, err := os.Stat(filepath.Join(hf.Dir, "org--tiny", "model.safetensors")); err != nil {
 		t.Fatalf("the download is not on disk: %v", err)

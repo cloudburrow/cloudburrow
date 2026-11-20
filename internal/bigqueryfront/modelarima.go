@@ -58,7 +58,7 @@ import (
 // (UNVERIFIED). Custom holidays (CREATE MODEL … AS (training_data AS
 // (…), custom_holiday AS (…))) are a stage of their own (modelholiday.go,
 // #1776), as are holiday_region's built-in holidays
-// (modelholidayregion.go). Refused 501: hierarchical_time_series_cols and more than one time_series_id_col.
+// (modelholidayregion.go). Several time_series_id_col columns are modeltsid.go's; hierarchical_time_series_cols is refused 501.
 // ARIMA_PLUS_XREG is this pipeline on a linear regression's residuals
 // (modelxreg.go, #1766).
 // Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-create-time-series
@@ -92,6 +92,10 @@ type tsOptions struct {
 	Holidays []customHoliday `json:"customHolidays,omitempty"`
 	// Regions are holiday_region's (modelholidayregion.go, #1776).
 	Regions []string `json:"holidayRegions,omitempty"`
+
+	// IDCols are every time_series_id_col when there are several, IDCol
+	// the first (modeltsid.go).
+	IDCols []string `json:"idCols,omitempty"`
 }
 
 // applyArimaDefaults sets an ARIMA_PLUS model's documented defaults.
@@ -314,6 +318,10 @@ type arimaTrained struct {
 	// Holidays are the holidays of a model with holiday_region, built-in
 	// and custom (modelholidayregion.go, #1776).
 	Holidays []customHoliday `json:"holidays,omitempty"`
+
+	// IDTypes are the ID columns' types when there are several, IDType
+	// the first's (modeltsid.go).
+	IDTypes []string `json:"idTypes,omitempty"`
 }
 
 // parseTSValue reads a TIMESTAMP (seconds), DATE or DATETIME REST value
@@ -382,25 +390,24 @@ func gridIndex(start int64, fq string, t int64) int {
 func trainArima(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *mlFail) {
 	var t mlTrained
 	ts := opts.TS
-	ti, di, ii := -1, -1, -1
+	ti, di := -1, -1
 	for i, c := range cols {
 		switch {
 		case strings.EqualFold(c.Name, ts.TimestampCol):
 			ti = i
 		case strings.EqualFold(c.Name, ts.DataCol):
 			di = i
-		case ts.IDCol != "" && strings.EqualFold(c.Name, ts.IDCol):
-			ii = i
 		}
 	}
+	idx, missing := findTSIDs(cols, ts)
 	if ti < 0 {
 		return t, mlInvalid("Unable to identify the time_series_timestamp_col '%s' in the input data", ts.TimestampCol)
 	}
 	if di < 0 {
 		return t, mlInvalid("Unable to identify the time_series_data_col '%s' in the input data", ts.DataCol)
 	}
-	if ts.IDCol != "" && ii < 0 {
-		return t, mlInvalid("Unable to identify the time_series_id_col '%s' in the input data", ts.IDCol)
+	if missing != "" {
+		return t, mlInvalid("Unable to identify the time_series_id_col '%s' in the input data", missing)
 	}
 	tt := strings.ToUpper(cols[ti].Type)
 	if tt != "TIMESTAMP" && tt != "DATE" && tt != "DATETIME" {
@@ -410,11 +417,18 @@ func trainArima(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *
 		return t, mlInvalid("time_series_data_col %s must be of type INT64, NUMERIC, BIGNUMERIC or FLOAT64, not %s", cols[di].Name, cols[di].Type)
 	}
 	a := &arimaTrained{Frequency: ts.Frequency}
-	if ii >= 0 {
-		a.IDType = mlTypeOf(cols[ii].Type)
-		if a.IDType != "STRING" && a.IDType != "INT64" {
+	for _, ii := range idx {
+		typ := mlTypeOf(cols[ii].Type)
+		if typ != "STRING" && typ != "INT64" {
 			return t, mlInvalid("time_series_id_col %s must be of type STRING or INT64, not %s", cols[ii].Name, cols[ii].Type)
 		}
+		a.IDTypes = append(a.IDTypes, typ)
+	}
+	if len(a.IDTypes) > 0 {
+		a.IDType = a.IDTypes[0]
+	}
+	if len(a.IDTypes) < 2 {
+		a.IDTypes = nil
 	}
 	type obs struct {
 		t int64
@@ -427,13 +441,10 @@ func trainArima(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *
 		if row[ti] == nil || row[di] == nil {
 			continue
 		}
-		key := ""
-		if ii >= 0 {
-			if row[ii] == nil {
-				nullID = true
-				continue
-			}
-			key = *row[ii]
+		key, ok := rowSeriesKey(row, idx)
+		if !ok {
+			nullID = true
+			continue
 		}
 		tm, ok := parseTSValue(*row[ti], tt)
 		v, err := strconv.ParseFloat(*row[di], 64)
@@ -450,7 +461,7 @@ func trainArima(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *
 		return t, mlInvalid("Input data doesn't contain any rows")
 	}
 	if a.IDType != "" {
-		sortLabels(ids, a.IDType)
+		sortSeriesKeys(ids, a.idTypes())
 	}
 	// The frequency: given, or the largest whose period is at most the
 	// smallest gap of any series.
@@ -997,11 +1008,7 @@ func sqlNaN(v float64) string {
 func (f front) arimaSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall) (string, int, string) {
 	a := md.Trained.Arima
 	ts := md.Options.TS
-	idCol, idVal := "", func(arimaSeries) string { return "" }
-	if a.IDType != "" {
-		idCol = sqlIdent(ts.IDCol) + " " + a.IDType + ", "
-		idVal = func(s arimaSeries) string { return sqlLabel(*s.ID, a.IDType) + ", " }
-	}
+	idCol, idVal := tsIDDecl(ts, a), func(s arimaSeries) string { return tsIDSQL(a, s) }
 	unsupported := func() (string, int, string) {
 		return "", 400, "ML." + c.fn + " is not supported for model type ARIMA_PLUS"
 	}
@@ -1200,18 +1207,17 @@ func (f front) arimaSubquery(r *http.Request, q queryOptions, md bqModel, c mlCa
 		if code != 0 {
 			return "", code, msg
 		}
-		ti, di, ii := -1, -1, -1
+		ti, di := -1, -1
 		for i, col := range qcols {
 			switch {
 			case strings.EqualFold(col.Name, ts.TimestampCol):
 				ti = i
 			case strings.EqualFold(col.Name, ts.DataCol):
 				di = i
-			case ts.IDCol != "" && strings.EqualFold(col.Name, ts.IDCol):
-				ii = i
 			}
 		}
-		if ti < 0 || di < 0 || (ts.IDCol != "" && ii < 0) {
+		idx, missing := findTSIDs(qcols, ts)
+		if ti < 0 || di < 0 || missing != "" {
 			return "", 400, "The input data must have the model's time_series_timestamp_col, time_series_data_col and time_series_id_col"
 		}
 		tt := strings.ToUpper(qcols[ti].Type)
@@ -1232,12 +1238,9 @@ func (f front) arimaSubquery(r *http.Request, q queryOptions, md bqModel, c mlCa
 		}
 		var keys []string
 		for _, row := range qrows {
-			key := ""
-			if ii >= 0 {
-				if row[ii] == nil {
-					continue
-				}
-				key = *row[ii]
+			key, ok := rowSeriesKey(row, idx)
+			if !ok {
+				continue
 			}
 			s, ok := series[key]
 			if !ok || row[ti] == nil || row[di] == nil {
@@ -1256,30 +1259,7 @@ func (f front) arimaSubquery(r *http.Request, q queryOptions, md bqModel, c mlCa
 			p := paths[key]
 			keys = append(keys, fmt.Sprintf("(%s%d, %s, %s)", idVal(s), tm, sqlF(y), score(y, p.fc[k], p.se[k])))
 		}
-		idSel, idJoin := "", ""
-		if ii >= 0 {
-			idSel = "_cbml_in." + sqlIdent(ts.IDCol) + ", "
-			idJoin = " AND _cbml_s._cbml_id = _cbml_in." + sqlIdent(ts.IDCol)
-		}
-		scoredCols := "STRUCT<"
-		if a.IDType != "" {
-			scoredCols += "_cbml_id " + a.IDType + ", "
-		}
-		scoredCols += "_cbml_t INT64, _cbml_y FLOAT64, is_anomaly BOOL, lower_bound FLOAT64, upper_bound FLOAT64, anomaly_probability FLOAT64>"
-		if len(keys) == 0 {
-			keys = nil
-		}
-		// The input's other columns follow.
-		var rest string
-		for i, col := range qcols {
-			if i != ti && i != di && i != ii {
-				rest += ", _cbml_in." + sqlIdent(col.Name)
-			}
-		}
-		return "(SELECT " + idSel + "CAST(_cbml_in." + tsName + " AS TIMESTAMP) AS " + tsName + ", CAST(_cbml_in." + dataName + " AS FLOAT64) AS " + dataName +
-			", _cbml_s.is_anomaly, _cbml_s.lower_bound, _cbml_s.upper_bound, _cbml_s.anomaly_probability" + rest +
-			" FROM (" + c.input + ") AS _cbml_in LEFT JOIN " + mlRowsSubquery(scoredCols, keys) + " AS _cbml_s ON _cbml_s._cbml_t = UNIX_MICROS(CAST(_cbml_in." + tsName +
-			" AS TIMESTAMP)) AND _cbml_s._cbml_y = CAST(_cbml_in." + dataName + " AS FLOAT64)" + idJoin + ")", 0, ""
+		return anomalyInputJoin(c.input, qcols, ti, di, idx, ts, a, keys), 0, ""
 	}
 	return unsupported()
 }
@@ -1325,7 +1305,9 @@ func (md bqModel) arimaResource() (opts map[string]any, info []map[string]any) {
 	if ts.Seasonalities != "" && ts.Seasonalities != "AUTO" {
 		opts["seasonalPeriods"] = splitSeasonalities(ts.Seasonalities)
 	}
-	if ts.IDCol != "" {
+	if len(ts.IDCols) > 1 {
+		opts["timeSeriesIdColumns"] = ts.IDCols
+	} else if ts.IDCol != "" {
 		opts["timeSeriesIdColumn"] = ts.IDCol
 	}
 	if len(ts.Regions) > 0 {
@@ -1359,7 +1341,9 @@ func (md bqModel) arimaResource() (opts map[string]any, info []map[string]any) {
 			"hasDrift":            fit.Drift, "seasonalPeriods": s.seasonNames(), "hasHolidayEffect": s.hasHoliday(),
 			"hasSpikesAndDips": nonZero(s.Spikes), "hasStepChanges": nonZero(s.Steps),
 		}
-		if s.ID != nil {
+		if s.ID != nil && len(md.Trained.Arima.IDTypes) > 1 {
+			m["timeSeriesIds"] = idValues(*s.ID, len(md.Trained.Arima.IDTypes))
+		} else if s.ID != nil {
 			m["timeSeriesId"] = *s.ID
 		}
 		info = append(info, m)

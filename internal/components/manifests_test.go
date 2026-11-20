@@ -464,6 +464,32 @@ func TestMemorystoreNodeDir(t *testing.T) {
 	}
 }
 
+// TestMemorystoreNoPersistence (#1911): a created Redis instance without
+// persistence keeps no file in persistent mode, and removes the files a
+// previous run left before it starts, with or without TLS; the server `up`
+// runs keeps its append-only file.
+func TestMemorystoreNoPersistence(t *testing.T) {
+	for _, s := range []MemorystoreSettings{
+		{Name: "n", Persistent: true, MaxMemory: 1 << 30, NoPersistence: true},
+		{Name: "n", Persistent: true, MaxMemory: 1 << 30, NoPersistence: true, TLSCert: "c", TLSKey: "k", TLSCA: "a"},
+		{Name: "n", Persistent: true, MaxMemory: 1 << 30, NoPersistence: true, TLSCert: "c", TLSKey: "k", TLSCA: "a", TLSFront: true},
+	} {
+		b := MemorystoreServerOf(s)
+		args := strings.Join(b.Args, " ")
+		if b.Args[0] != "sh" || !strings.Contains(args, "rm -rf /data/dump.rdb /data/appendonly.aof /data/appendonlydir; ") ||
+			!strings.Contains(args, `--save  --appendonly no`) || strings.Contains(args, "--appendonly yes") ||
+			!strings.Contains(args, `exec docker-entrypoint.sh "$@"`) {
+			t.Errorf("TLS %v front %v: args = %q", s.TLSCert != "", s.TLSFront, b.Args)
+		}
+	}
+	if args := strings.Join(MemorystoreServerOf(MemorystoreSettings{Name: "n", Persistent: true, MaxMemory: 1 << 30}).Args, " "); !strings.Contains(args, "--appendonly yes") || strings.Contains(args, "rm -rf") {
+		t.Errorf("the server up runs: args = %q", args)
+	}
+	if args := strings.Join(MemorystoreServerOf(MemorystoreSettings{Name: "n", Persistent: true, MaxMemory: 1 << 30, RDBSeconds: 3600}).Args, " "); !strings.Contains(args, "--save 3600 1") || strings.Contains(args, "rm -rf") {
+		t.Errorf("RDB: args = %q", args)
+	}
+}
+
 // A cluster node of an instance bound to 127.0.0.1 binds its pod's address
 // and ::1 alone (#1614), whichever way the image's entrypoint is started.
 func TestMemorystoreNodePodAndLoopback6(t *testing.T) {

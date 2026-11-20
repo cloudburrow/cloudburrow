@@ -237,6 +237,23 @@ jobs:
       - run: make fmt-check
       - run: make vet
       - run: make docs-check
+      # ISO/IEC 14496-26's conformance streams and reference decodes (#1754),
+      # which TestPSFullConformance and TestFullParametricStereoTrack check
+      # the HE-AAC v2 decoder against. They are ISO's copyright and never
+      # committed: internal/isoconformance reads them out of ISO's zips by
+      # HTTP range requests into the user's cache directory, pinned by
+      # SHA-256 and ISO's MD5, only with CLOUDBURROW_TEST_DOWNLOADS set.
+      # Cached here under a key of the pins, so ISO's server is asked once;
+      # make test-race then finds them cached and runs the tests (without
+      # the variable, so nothing else downloads).
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/cloudburrow-test/iso-14496-26-ed2
+            ~/Library/Caches/cloudburrow-test/iso-14496-26-ed2
+          key: iso-14496-26-ed2-${{ hashFiles('internal/isoconformance/isoconformance.go') }}
+      - name: Fetch the ISO/IEC 14496-26 conformance files (test data, never committed)
+        run: CLOUDBURROW_TEST_DOWNLOADS=1 go test -count=1 -run '^TestPSFullConformance$' ./third_party/aac-go/
       - run: make test-race
       # The emulator binaries the bigquery-emulator job built, each checked
       # against the sums it reported, for make build (#1087).
@@ -288,7 +305,7 @@ jobs:
           ./bin/cloudburrow storage-server --listen 127.0.0.1:4443 --host storage.localhost --pubsub-emulator 127.0.0.1:8095 \
             --cors-allow-origin https://app.test:8443 \
             --signing-cert "signer@cloudburrow-ci.iam.gserviceaccount.com=$RUNNER_TEMP/sign-cert.pem" > storage-server.log 2>&1 &
-          for i in $(seq 1 50); do curl -s -o /dev/null http://127.0.0.1:4443/storage/v1/b?project=p && break; sleep 0.2; done
+          for _ in $(seq 1 50); do curl -s -o /dev/null http://127.0.0.1:4443/storage/v1/b?project=p && break; sleep 0.2; done
           set -o pipefail
           CLOUDBURROW_TEST_STORAGE=http://127.0.0.1:4443 CLOUDBURROW_TEST_PUBSUB=127.0.0.1:8095 CLOUDBURROW_TEST_CORS_ORIGIN=https://app.test:8443 \
             CLOUDBURROW_TEST_SIGNING_KEY="$RUNNER_TEMP/sign-key.pem" CLOUDBURROW_TEST_SIGNING_EMAIL=signer@cloudburrow-ci.iam.gserviceaccount.com \
@@ -326,7 +343,7 @@ jobs:
           persist() {
             ./bin/cloudburrow storage-server --listen 127.0.0.1:4444 --data-dir "$RUNNER_TEMP/gcs-data" --mode "${1:-persistent}" >> storage-persist.log 2>&1 &
             PERSIST=$!
-            for i in $(seq 1 50); do curl -s -o /dev/null 'http://127.0.0.1:4444/storage/v1/b?project=p' && break; sleep 0.2; done
+            for _ in $(seq 1 50); do curl -s -o /dev/null 'http://127.0.0.1:4444/storage/v1/b?project=p' && break; sleep 0.2; done
           }
           probe() {
             CLOUDBURROW_TEST_STORAGE=http://127.0.0.1:4444 \
@@ -499,6 +516,22 @@ jobs:
         with:
           go-version: "1.27"
 
+      # The served shard's Kubernetes Engine API (#1913) makes kind clusters
+      # beside the instance's, each node a container of the pinned node
+      # image, and refuses a cluster or node below 20 GiB free
+      # (CLOUDBURROW_GKE_MIN_FREE_GB). The runner image leaves too little
+      # beside the instance to be sure of that, so the toolchains no step
+      # of this job uses go first, and the job fails here, naming it, rather
+      # than in a test as RESOURCE_EXHAUSTED.
+      - name: Free disk for the Kubernetes Engine API's clusters
+        if: matrix.shard == 'served'
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /usr/share/swift
+          df -h /
+          free=$(df -BG --output=avail / | tail -1 | tr -dc 0-9)
+          [ "$free" -ge 30 ] || { echo "only $free GiB free: the Kubernetes Engine tests need 20 GiB beside the instance"; exit 1; }
+
       - name: Install kubectl
         run: |
           curl --retry 5 --retry-all-errors -fsSLo kubectl "https://dl.k8s.io/release/v1.36.4/bin/linux/amd64/kubectl"
@@ -596,6 +629,35 @@ jobs:
           shasum -a 256 -c SHA256SUMS
           cp bigquery-emulator-* "$GITHUB_WORKSPACE/internal/bigqueryimage/bin/"
 
+      # Artifact Registry's vulnerability scanning (#1912) in the run shard,
+      # so TestArtifactRegistryVulnerabilityScanning and
+      # TestGcloudArtifactsVulnerabilityScanning scan instead of skipping
+      # (#1917): the pinned OSV-Scanner and the Alpine snapshot (about 67 MB)
+      # in the instance's prefetch cache, from this cache, keyed by the pins,
+      # or else the latest release's mirror, then upstream, each file checked
+      # against its pinned SHA-256 (tools/osvmirror fetch). Saved as soon as
+      # it is fetched, so a failing suite still keeps it. With
+      # CLOUDBURROW_TEST_OSV_REQUIRED the tests fail rather than skip when
+      # the scanner is missing.
+      - name: Restore the vulnerability scanner
+        id: osv-cache
+        if: matrix.shard == 'run'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/cb/cache/osv-scanner
+          key: osv-scanner-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('internal/osvscan/pins.go') }}
+      - name: Prefetch the vulnerability scanner
+        if: matrix.shard == 'run'
+        run: |
+          go run ./tools/osvmirror fetch -dir "$RUNNER_TEMP/cb/cache" -ecosystems Alpine
+          echo "CLOUDBURROW_TEST_OSV_REQUIRED=1" >> "$GITHUB_ENV"
+      - name: Save the vulnerability scanner
+        if: matrix.shard == 'run' && steps.osv-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/cb/cache/osv-scanner
+          key: osv-scanner-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('internal/osvscan/pins.go') }}
+
       - name: Start an instance and run the compatibility suite
         run: |
           # make build, not go build: the CLI embeds the Linux storage server
@@ -661,8 +723,9 @@ jobs:
           COMPAT_ENV=$(scripts/compat-env.sh --strict --only "$TEST_VARS" --env-json env.json \
             --cli "$PWD/bin/cloudburrow" --gcloud "$RUNNER_TEMP/google-cloud-sdk/bin/gcloud" -- "${CB[@]}")
           eval "$COMPAT_ENV"
-          [ -s "$CLOUDBURROW_TEST_KUBECONFIG" ] && kind get clusters | grep -qx "$CLOUDBURROW_TEST_CLUSTER" ||
-            { echo "the instance's kubeconfig or kind cluster is not where the compat tests expect"; kind get clusters; exit 1; }
+          if ! { [ -s "$CLOUDBURROW_TEST_KUBECONFIG" ] && kind get clusters | grep -qx "$CLOUDBURROW_TEST_CLUSTER"; }; then
+            echo "the instance's kubeconfig or kind cluster is not where the compat tests expect"; kind get clusters; exit 1
+          fi
 
           # -v, so each test's PASS or SKIP is in the log. Without it go test
           # prints only a package-level "ok", and a skipped test is
@@ -732,6 +795,9 @@ jobs:
             fi
             echo "== compat summary ($SHARD): $(grep -c -- '--- PASS' compat.log) passed, $(grep -c -- '--- SKIP' compat.log) skipped, retried: $(grep -h '^RETRIED:' compat.log | sed 's/RETRIED: //' | tr '\n' ' ')"
             grep -- '--- SKIP' compat.log || true
+            # What the Kubernetes Engine clusters left (#1913): they are
+            # deleted by name, so this should be what the instance began with.
+            if [ "$SHARD" = served ]; then df -h /; kind get clusters; fi
           fi
 
           # The official Node.js clients (#589), configured from `cloudburrow
@@ -760,7 +826,7 @@ jobs:
           # shards for the screens only their instances serve (#700, #854,
           # #1472, #1568).
           case "$SHARD" in
-            storage|run|emulators|memorystore|sql) printf '%s\n' "${CB[@]}" > "$RUNNER_TEMP/cb-args" ;;
+            storage|served|run|emulators|memorystore|sql) printf '%s\n' "${CB[@]}" > "$RUNNER_TEMP/cb-args" ;;
           esac
           if [ "$SHARD" = storage ]; then
             # The official Python clients against the same instance (#287),
@@ -890,10 +956,13 @@ jobs:
       # TestDatastore*, TestSpanner* and TestBigtable* run there (#854,
       # #1198); the Memorystore screens only by the memorystore shard's, so
       # TestMemorystore* run there (#1568); and the Cloud SQL screens only by the sql shard's, so
-      # TestCloudSQL* run there (#868, #995, #1472). Every test selected for the shard must pass: go test
+      # TestCloudSQL* run there (#868, #995, #1472); and the Kubernetes Engine API
+      # only by the served shard's, so TestGKEServed* runs there, with
+      # TestKubernetesEnginePages*, which also runs in storage (#1913, #1925).
+      # Every test selected for the shard must pass: go test
       # exits 0 on a skip, and each skips without its variables or its screen.
       - name: Console in a headless browser
-        if: matrix.shard == 'storage' || matrix.shard == 'run' || matrix.shard == 'emulators' || matrix.shard == 'memorystore' || matrix.shard == 'sql'
+        if: matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'run' || matrix.shard == 'emulators' || matrix.shard == 'memorystore' || matrix.shard == 'sql'
         run: |
           set -o pipefail
           # ubuntu-latest ships Google Chrome: it is in the runner image's
@@ -933,13 +1002,22 @@ jobs:
           # The memorystore shard's read back through the Memorystore admin API.
           if [ "$SHARD" = memorystore ]; then BROWSER_VARS+=,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT; fi
           # The Logs Explorer reads entries written through the Logging API (#1410).
-          if [ "$SHARD" = storage ]; then BROWSER_VARS+=,LOGGING,STORAGE,PUBSUB,TASKS,SCHEDULER,RESOURCEMANAGER,SERVICEUSAGE; fi
+          # And the kubeconfig, with which the Kubernetes Engine test removes the
+          # deployment its Deploy made (#1857).
+          if [ "$SHARD" = storage ]; then BROWSER_VARS+=,LOGGING,STORAGE,PUBSUB,TASKS,SCHEDULER,RESOURCEMANAGER,SERVICEUSAGE,APIKEYS,KUBECONFIG; fi
           # The run shard's read back through Cloud Run, Cloud KMS, Secret Manager,
-          # Cloud Logging and BigQuery's official clients.
-          if [ "$SHARD" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT; fi
+          # Cloud Logging and BigQuery's official clients, and enable the
+          # Container Scanning API through its Service Usage, RUN_SERVICEUSAGE
+          # (#1912): the scanner is the one prefetched into the state dir above.
+          if [ "$SHARD" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT,RUN_SERVICEUSAGE; fi
           # The sql shard's read back through the Cloud SQL Admin API, the Backup
           # and DR Service and Secret Manager, which holds Run SQL's password.
           if [ "$SHARD" = sql ]; then BROWSER_VARS+=,SQLADMIN,BACKUPDR,SECRETS; fi
+          # The served shard's: the Kubernetes Engine API, whose cluster the
+          # pages make is removed through it by name whatever the test
+          # reached, and the kubeconfig the Deploy test cleans up with
+          # (#1913, #1925).
+          if [ "$SHARD" = served ]; then BROWSER_VARS+=,GKE,KUBECONFIG; fi
           BROWSER_ENV=$(scripts/compat-env.sh --strict --only "$BROWSER_VARS" --cli "$PWD/bin/cloudburrow" -- "${CB[@]}")
           eval "$BROWSER_ENV"
 
@@ -952,16 +1030,23 @@ jobs:
           EMULATORS_SHARD_TESTS=$COMPAT_BROWSER_EMULATORS_SHARD_TESTS
           MEMORYSTORE_SHARD_TESTS=$COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS
           SQL_SHARD_TESTS=$COMPAT_BROWSER_SQL_SHARD_TESTS
+          SERVED_SHARD_TESTS=$COMPAT_BROWSER_SERVED_SHARD_TESTS
+          SERVED_ONLY_TESTS=$COMPAT_BROWSER_SERVED_ONLY_TESTS
           NEVER_TESTS=$COMPAT_BROWSER_NEVER_TESTS
           case "$SHARD" in
             run) SELECT=(-run "$RUN_SHARD_TESTS" -skip "$NEVER_TESTS"); PICK=(grep -E "$RUN_SHARD_TESTS") ;;
             emulators) SELECT=(-run "$EMULATORS_SHARD_TESTS" -skip "$NEVER_TESTS"); PICK=(grep -E "$EMULATORS_SHARD_TESTS") ;;
             memorystore) SELECT=(-run "$MEMORYSTORE_SHARD_TESTS" -skip "$NEVER_TESTS"); PICK=(grep -E "$MEMORYSTORE_SHARD_TESTS") ;;
             sql) SELECT=(-run "$SQL_SHARD_TESTS" -skip "$NEVER_TESTS"); PICK=(grep -E "$SQL_SHARD_TESTS") ;;
-            *) SELECT=(-skip "$RUN_SHARD_TESTS|$EMULATORS_SHARD_TESTS|$MEMORYSTORE_SHARD_TESTS|$SQL_SHARD_TESTS|$NEVER_TESTS"); PICK=(grep -vE "$RUN_SHARD_TESTS|$EMULATORS_SHARD_TESTS|$MEMORYSTORE_SHARD_TESTS|$SQL_SHARD_TESTS") ;;
+            served) SELECT=(-run "$SERVED_SHARD_TESTS" -skip "$NEVER_TESTS"); PICK=(grep -E "$SERVED_SHARD_TESTS") ;;
+            *) SELECT=(-skip "$RUN_SHARD_TESTS|$EMULATORS_SHARD_TESTS|$MEMORYSTORE_SHARD_TESTS|$SQL_SHARD_TESTS|$SERVED_ONLY_TESTS|$NEVER_TESTS"); PICK=(grep -vE "$RUN_SHARD_TESTS|$EMULATORS_SHARD_TESTS|$MEMORYSTORE_SHARD_TESTS|$SQL_SHARD_TESTS|$SERVED_ONLY_TESTS") ;;
           esac
           rc=0
-          go test -tags=browser -count=1 -timeout 10m -v "${SELECT[@]}" ./test/browser/ | tee browser.log || rc=1
+          # 10m, and 20m in served, whose test makes a Kubernetes Engine
+          # cluster and node pool, real kind nodes, through the pages (#1913,
+          # #1925): about a minute on a laptop, several on a runner.
+          BROWSER_TIMEOUT=10m; [ "$SHARD" = served ] && BROWSER_TIMEOUT=20m
+          go test -tags=browser -count=1 -timeout "$BROWSER_TIMEOUT" -v "${SELECT[@]}" ./test/browser/ | tee browser.log || rc=1
           for t in $(go test -tags=browser -list '.*' ./test/browser/ | grep '^Test' | "${PICK[@]}" | grep -vE "$NEVER_TESTS"); do
             grep -q -- "^--- PASS: $t (" browser.log ||
               { echo "$t did not pass: $(grep -- "^--- [A-Z]*: $t (" browser.log || echo 'no result')"; rc=1; }
@@ -971,7 +1056,7 @@ jobs:
           echo "== browser ($SHARD): $(grep -c -- '^--- PASS' browser.log) console tests passed in $("$CHROME" --version)"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: failure() && (matrix.shard == 'storage' || matrix.shard == 'run' || matrix.shard == 'emulators' || matrix.shard == 'memorystore' || matrix.shard == 'sql')
+        if: failure() && (matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'run' || matrix.shard == 'emulators' || matrix.shard == 'memorystore' || matrix.shard == 'sql')
         with:
           name: browser-screenshots-${{ matrix.shard }}
           path: |
@@ -1077,7 +1162,9 @@ jobs:
           # the connection's group members (#1812), autonomous embeddings with AI.SEARCH
           # and VECTOR_SEARCH, and EmbedContent's multichannel, ADPCM and surround audio
           # tracks (#1651), its G.726, GSM 6.10, 2- and 5-bit ADPCM, MPEG Layer I and II
-          # WAVs, arithmetic and 12-bit JPEGs and 16K video frames (#1840) need
+          # WAVs, arithmetic and 12-bit JPEGs and 16K video frames (#1840), and generation's
+          # conversations, function calling, images and token counts (#1937), and
+          # BigQuery's AI.COUNT_TOKENS (#1962) need
           # the local generation or embeddings model (CLOUDBURROW_TEST_LOCALAI,
           # CLOUDBURROW_TEST_EMBEDDINGS), which CI does not download, so they
           # skip in every shard and the count above, of PASS and FAIL lines,
@@ -1086,7 +1173,7 @@ jobs:
           # --cloudbuild-host-steps, which the run shard sets; and Model
           # Garden's Hugging Face deploys CLOUDBURROW_TEST_HF_DEPLOY, for
           # about 1.3 GB of models and 6 GB of engine images; all run locally.
-          never='^Test(BigQueryAIAgg|FunctionsFrameworkBuiltWithBuildpacks|FunctionsRebuildReusesLayers|FunctionsBuildBrokenModulePathFails|GenerateContentThroughTheOfficialSDK|EmbeddingGemmaThroughTheOfficialSDK|EmbeddingGemmaThroughThePredictionClient|EmbedContentThroughThePredictionClient|EmbedContentEmbedsImagesThroughThePredictionClient|EmbedContentEmbedsAudioThroughThePredictionClient|EmbedContentEmbedsWebPAndBMPThroughThePredictionClient|EmbedContentEmbedsVideoAndPDFThroughThePredictionClient|GenerationNeverUsesApplicationDefaultCredentials|StreamGenerateContentThroughTheOfficialSDK|StreamGenerateContentThroughThePredictionClient|StorageSignedURLV2RegisteredCert|StorageVersioningPersistentMode|FunctionsSubmitBuildBuildpacks|RawPredictOnTheEmbeddingModel|RawPredictOnTheGenerationModel|StreamingPredictOnTheGenerationModel|StreamingPredictOnTheEmbeddingModel|ConsoleEmbeddingsPlaygroundMatchesTheOfficialSDK|ConsoleLocalModelsUnloadDeleteDownloadLoad|FunctionsNodejsBuiltWithBuildpacks|FunctionsPythonBuiltWithBuildpacks|FunctionsJavaBuiltWithBuildpacks|FunctionsRubyBuiltWithBuildpacks|FunctionsPHPBuiltWithBuildpacks|FunctionsDotnetBuiltWithBuildpacks|FunctionsAPIBuildsAndServes|GcloudFunctions|TerraformCloudFunctions2Function|FunctionsEventTriggerBuilds|GcloudFunctionsEventTriggers|ConsoleLocalModelsLoadEmbedUnload|CloudBuildHostStepsOff|FunctionsV1BuildsAndServes|GcloudFunctionsV1|ConsoleFunctionsV1|TerraformCloudFunctionsFunction|FunctionsSecretsBuildsAndMounts|EmbedContentEmbedsMP3ThroughThePredictionClient|EmbedContentEmbedsMPEG25MP3ThroughThePredictionClient|EmbedContentEmbedsAVideosAudioTrackThroughThePredictionClient|EmbedContentEmbedsVP9AndAV1ThroughThePredictionClient|BigQueryMLImportedONNXModel|EmbedContentEmbedsHEICAndAnimatedWebPThroughThePredictionClient|EmbedContentEmbedsAVIFThroughThePredictionClient|BigQueryAIGenerate|BigQueryAIGenerateStructured|BigQueryAIManagedFunctions|BigQueryAIEmbed|BigQueryMLAnnotateImage|BigQueryMLRemoteGenerateText|BigQueryMLRemoteGenerateEmbedding|BigQueryMLRemoteGenerationOptions|BigQueryMLRemoteConnectionPermissions|BigQueryMLRemoteDefaultConnection|BigQueryMLAnnotateImageLabels|BigQueryMLAnnotateImageDetections|BigQueryMLTranscribe|BigQueryMLTranslate|BigQueryMLUnderstandText|BigQueryConnectionGroupMembers1812|BigQueryAutonomousEmbeddingsAndAISearch|BigQueryVectorSearchAutonomousEmbeddings|EmbedContentEmbedsMultichannelWAVAndGrayVideoThroughThePredictionClient|EmbedContentEmbedsADPCMWAVAndLosslessAndMultichannelTracksThroughThePredictionClient|EmbedContentEmbedsSurroundAACAndG711TracksAnd3BitADPCMThroughThePredictionClient|EmbedContentEmbeds16KVideoThroughThePredictionClient|EmbedContentEmbeds2And5BitADPCMAndMP3WAVsThroughThePredictionClient|EmbedContentEmbedsArithmeticAnd12BitJPEGThroughThePredictionClient|EmbedContentEmbedsG726WAVThroughThePredictionClient|EmbedContentEmbedsGSM610WAVThroughThePredictionClient|EmbedContentEmbedsMPEGLayerIAndJointStereoWAVThroughThePredictionClient|EmbedContentEmbedsMPEGLayerIIWAVThroughThePredictionClient|ModelGardenDeploysHuggingFaceModels)$'
+          never='^Test(BigQueryAIAgg|FunctionsFrameworkBuiltWithBuildpacks|FunctionsRebuildReusesLayers|FunctionsBuildBrokenModulePathFails|GenerateContentThroughTheOfficialSDK|GenerateContentMultiTurnChatThroughTheOfficialSDK|GenerateContentFunctionCallingRoundTripThroughTheOfficialSDK|GenerateContentImagePartThroughTheOfficialSDK|CountTokensAndComputeTokensThroughTheOfficialSDK|V1Beta1PredictionClientServesWhatV1Serves|EmbeddingGemmaThroughTheOfficialSDK|EmbeddingGemmaThroughThePredictionClient|EmbedContentThroughThePredictionClient|EmbedContentEmbedsImagesThroughThePredictionClient|EmbedContentEmbedsAudioThroughThePredictionClient|EmbedContentEmbedsWebPAndBMPThroughThePredictionClient|EmbedContentEmbedsVideoAndPDFThroughThePredictionClient|GenerationNeverUsesApplicationDefaultCredentials|StreamGenerateContentThroughTheOfficialSDK|StreamGenerateContentThroughThePredictionClient|StorageSignedURLV2RegisteredCert|StorageVersioningPersistentMode|FunctionsSubmitBuildBuildpacks|RawPredictOnTheEmbeddingModel|RawPredictOnTheGenerationModel|StreamingPredictOnTheGenerationModel|StreamingPredictOnTheEmbeddingModel|ConsoleEmbeddingsPlaygroundMatchesTheOfficialSDK|ConsoleLocalModelsUnloadDeleteDownloadLoad|FunctionsNodejsBuiltWithBuildpacks|FunctionsPythonBuiltWithBuildpacks|FunctionsJavaBuiltWithBuildpacks|FunctionsRubyBuiltWithBuildpacks|FunctionsPHPBuiltWithBuildpacks|FunctionsDotnetBuiltWithBuildpacks|FunctionsAPIBuildsAndServes|GcloudFunctions|TerraformCloudFunctions2Function|FunctionsEventTriggerBuilds|GcloudFunctionsEventTriggers|ConsoleLocalModelsLoadEmbedUnload|CloudBuildHostStepsOff|FunctionsV1BuildsAndServes|GcloudFunctionsV1|ConsoleFunctionsV1|TerraformCloudFunctionsFunction|FunctionsSecretsBuildsAndMounts|EmbedContentEmbedsMP3ThroughThePredictionClient|EmbedContentEmbedsMPEG25MP3ThroughThePredictionClient|EmbedContentEmbedsAVideosAudioTrackThroughThePredictionClient|EmbedContentEmbedsAFullParametricStereoTrackThroughThePredictionClient|EmbedContentEmbedsVP9AndAV1ThroughThePredictionClient|BigQueryMLImportedONNXModel|EmbedContentEmbedsHEICAndAnimatedWebPThroughThePredictionClient|EmbedContentEmbedsAVIFThroughThePredictionClient|BigQueryAIGenerate|BigQueryAICountTokens|BigQueryAIGenerateStructured|BigQueryAIManagedFunctions|BigQueryAIEmbed|BigQueryMLAnnotateImage|BigQueryMLRemoteGenerateText|BigQueryMLRemoteGenerateEmbedding|BigQueryMLRemoteGenerationOptions|BigQueryMLRemoteConnectionPermissions|BigQueryMLRemoteDefaultConnection|BigQueryMLAnnotateImageLabels|BigQueryMLAnnotateImageDetections|BigQueryMLTranscribe|BigQueryMLTranslate|BigQueryMLUnderstandText|BigQueryMLProcessDocument|DocumentAIProcessors|DocumentAIProcessorVersions|DocumentAIBatchProcess|SpeechRecognizers|SpeechBatchRecognize|SpeechAdaptationResources|SpeechAdaptationBoost|SpeechStreamingRecognize|SpeechV1|BigQueryConnectionGroupMembers1812|BigQueryAutonomousEmbeddingsAndAISearch|BigQueryVectorSearchAutonomousEmbeddings|EmbedContentEmbedsMultichannelWAVAndGrayVideoThroughThePredictionClient|EmbedContentEmbedsADPCMWAVAndLosslessAndMultichannelTracksThroughThePredictionClient|EmbedContentEmbedsSurroundAACAndG711TracksAnd3BitADPCMThroughThePredictionClient|EmbedContentEmbeds16KVideoThroughThePredictionClient|EmbedContentEmbeds2And5BitADPCMAndMP3WAVsThroughThePredictionClient|EmbedContentEmbedsArithmeticAnd12BitJPEGThroughThePredictionClient|EmbedContentEmbedsG726WAVThroughThePredictionClient|EmbedContentEmbedsGSM610WAVThroughThePredictionClient|EmbedContentEmbedsMPEGLayerIAndJointStereoWAVThroughThePredictionClient|EmbedContentEmbedsMPEGLayerIIWAVThroughThePredictionClient|ModelGardenDeploysHuggingFaceModels)$'
           none=$(comm -23 all.txt ran.txt | grep -vE "$never" || true)
           if [ -n "$none" ]; then
             echo "tests that ran in no shard:"; echo "$none"; exit 1

@@ -142,17 +142,29 @@ func TestCloudSQLInstanceActionsThroughThePage(t *testing.T) {
 
 	// Create Instance is Google's create page: the engine first, SQL Server
 	// shown and not available, then each engine's versions.
-	p.clickText("#view button", "Create Instance")
+	p.clickText("#view button", "Create instance")
 	p.waitFor(`document.querySelector("#f-databaseVersion") !== null`)
 	var steps []string
 	p.eval(`[...document.querySelectorAll(".create-step-title")].map((s) => s.textContent)`, &steps)
 	if len(steps) < 6 || steps[0] != "Choose your database engine" || steps[1] != "Choose a Cloud SQL edition" {
 		t.Errorf("the create page's sections are %q", steps)
 	}
-	var sqlServerOff bool
-	p.eval(`[...document.querySelectorAll("input[type=radio]")].some((r) => r.value === "SQL Server" && r.disabled)`, &sqlServerOff)
-	if !sqlServerOff {
-		t.Error("SQL Server is choosable on the create page")
+	// SQL Server (#1916) is choosable, its versions name the local edition,
+	// and its licence checkbox, unchecked, links Microsoft's terms.
+	var sqlServer struct {
+		Disabled bool     `json:"disabled"`
+		Versions []string `json:"versions"`
+		Checked  bool     `json:"checked"`
+		Links    []string `json:"links"`
+	}
+	p.eval(`(() => { const r = [...document.querySelectorAll("input[type=radio]")].find((r) => r.value === "SQL Server");
+		const disabled = r.disabled; r.click();
+		const box = document.querySelector("#f-mssqlEula");
+		return { disabled, versions: [...document.querySelector("#f-sqlserverVersion").options].map((o) => o.textContent),
+			checked: box.checked, links: [...box.closest(".form-row").querySelectorAll("a")].map((a) => a.href) }; })()`, &sqlServer)
+	if sqlServer.Disabled || !contains(sqlServer.Versions, "SQL Server 2022 Standard (runs Developer locally)") || sqlServer.Checked ||
+		!contains(sqlServer.Links, "https://go.microsoft.com/fwlink/?LinkId=746388") {
+		t.Errorf("SQL Server on the create page: %+v", sqlServer)
 	}
 	var versions []string
 	p.eval(`[...document.querySelector("#f-databaseVersion").options].map((o) => o.value)`, &versions)

@@ -9,7 +9,10 @@ import (
 
 	"cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
 	betapb "cloud.google.com/go/aiplatform/apiv1beta1/aiplatformpb"
+	"cloud.google.com/go/documentai/apiv1/documentaipb"
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
+	speechv1pb "cloud.google.com/go/speech/apiv1/speechpb"
+	"cloud.google.com/go/speech/apiv2/speechpb"
 	"google.golang.org/genproto/googleapis/api/httpbody"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
@@ -63,6 +66,15 @@ func (s *Server) RegisterGRPC(srv *grpc.Server) {
 	// ChatCompletions (#1840, modelgarden.go).
 	s.registerModelGarden(srv)
 	betapb.RegisterPredictionServiceServer(srv, &betaPrediction{s: s})
+	// Document AI's processors (documentai.go, #1799).
+	documentaipb.RegisterDocumentProcessorServiceServer(srv, &documentAIService{s: s})
+	// Speech-to-Text's recognizers (speechrecognizers.go, #1799).
+	speechpb.RegisterSpeechServer(srv, &speechService{s: s})
+	// Speech-to-Text v1's Recognize, LongRunningRecognize and
+	// StreamingRecognize (speechv1.go, #1930).
+	speechv1pb.RegisterSpeechServer(srv, &speechV1Service{s: s})
+	// countTokens and computeTokens (#1937, tokens.go).
+	s.registerTokens(srv)
 }
 
 // grpcError renders err as a status: an *apierror.Error keeps its code, a
@@ -287,11 +299,9 @@ func (p *predictionService) StreamGenerateContent(req *aiplatformpb.GenerateCont
 		return grpcError(err)
 	}
 	for c := range chunks {
-		var resp *GenerateContentResponse
-		if c.Last {
-			resp = textResponse(actual, "", c.FinishReason)
-		} else {
-			resp = textResponse(actual, c.Text, "")
+		resp := chunkResponse(actual, c)
+		if resp == nil {
+			continue
 		}
 		pb, err := toProto(resp)
 		if err != nil {

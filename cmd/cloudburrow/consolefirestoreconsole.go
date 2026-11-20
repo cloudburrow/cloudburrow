@@ -99,7 +99,7 @@ const kmsKeyPattern = `projects/[^\/]+/locations/[^\/]+/keyRings/[^\/]+/cryptoKe
 func (firestoreDatabasesProvider) CreateForm() (string, []console.Field) {
 	regions, regionLabels := locationChoices(firestoreRegions)
 	multi, multiLabels := locationChoices(firestoreMultiRegions)
-	return "Create database", []console.Field{
+	return "Create a Firestore database", []console.Field{
 		{Name: "database", Label: "Database ID", Type: "text", Required: true, Pattern: databaseIDPattern,
 			Help: "Lowercase letters, numbers and hyphens, 4 to 63 characters, starting with a letter and ending with a letter or number."},
 		{Name: "edition", Label: "Edition", Type: "radio", Options: []string{"STANDARD", "ENTERPRISE"}, Default: "STANDARD",

@@ -26,6 +26,9 @@ var compatEnvExceptions = map[string]string{
 	// The instance under test is a `-tags onnx` build whose BigQuery
 	// imports ONNX models (#1711); no instance reports which build it is.
 	"CLOUDBURROW_TEST_ONNX": "opt-in switch: the instance is an onnx build run with ONNXRUNTIME_LIB",
+	// Test data, not an instance: internal/isoconformance downloads ISO's
+	// conformance files only when it is set (#1754).
+	"CLOUDBURROW_TEST_DOWNLOADS": "opt-in switch: tests may download test data not cached yet",
 	// Restart probes: which half of a probe a run is, and where the probe
 	// keeps what it wrote. ci.yml sets them around a stop and an up.
 	"CLOUDBURROW_TEST_KMS_PROBE":                "restart probe fixture file",
@@ -70,6 +73,9 @@ var compatEnvExceptions = map[string]string{
 	// The workloads' namespace, which defaults to the one every instance
 	// uses; set only for an instance configured with another.
 	"CLOUDBURROW_TEST_NAMESPACE": "defaults to the instance default",
+	// Whether the vulnerability scanner must be prefetched (#1917): CI's run
+	// shard sets it after prefetching; an instance does not say.
+	"CLOUDBURROW_TEST_OSV_REQUIRED": "opt-in switch: the scanning tests fail rather than skip without the prefetched scanner",
 }
 
 var compatVarRE = regexp.MustCompile(`CLOUDBURROW_TEST_[A-Z0-9_]*[A-Z0-9]`)
@@ -228,6 +234,7 @@ func compatEnvFixture(t *testing.T, edit func(env map[string]string)) (dir, envF
 		"CLOUDBURROW_LOGGING_ENDPOINT":            "127.0.0.1:9009",
 		"CLOUDBURROW_RESOURCEMANAGER_ENDPOINT":    "127.0.0.1:9007",
 		"CLOUDBURROW_SERVICEUSAGE_ENDPOINT":       "127.0.0.1:9023",
+		"CLOUDBURROW_APIKEYS_ENDPOINT":            "127.0.0.1:9029",
 		"SPANNER_EMULATOR_HOST":                   "127.0.0.1:9013",
 		"CLOUDBURROW_SPANNER_REST_ENDPOINT":       "http://127.0.0.1:9022",
 		"DATASTORE_EMULATOR_HOST":                 "127.0.0.1:9011",
@@ -246,6 +253,7 @@ func compatEnvFixture(t *testing.T, edit func(env map[string]string)) (dir, envF
 		"CLOUDBURROW_CLOUDSQL_CONNECTOR_ENDPOINT": "127.0.0.1:3307",
 		"CLOUDBURROW_BACKUPDR_ENDPOINT":           "127.0.0.1:9024",
 		"CLOUDBURROW_PRIVATECA_ENDPOINT":          "127.0.0.1:9028",
+		"CLOUDBURROW_GKE_ENDPOINT":                "127.0.0.1:9030",
 		"CLOUDBURROW_BIGQUERY_ENDPOINT":           "http://127.0.0.1:9014",
 		"CLOUDBURROW_BIGQUERY_STORAGE_ENDPOINT":   "127.0.0.1:9015",
 	}
@@ -326,6 +334,7 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"LOGGING":                  "127.0.0.1:9009",
 		"RESOURCEMANAGER":          "127.0.0.1:9007",
 		"SERVICEUSAGE":             "127.0.0.1:9023",
+		"APIKEYS":                  "127.0.0.1:9029",
 		"RUN_STORAGE":              "http://127.0.0.1:50003",
 		"RUN_PUBSUB":               "127.0.0.1:50004",
 		"RUN_FIRESTORE":            "127.0.0.1:9010",
@@ -342,6 +351,7 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"RUN_MYSQL":                "127.0.0.1:9017",
 		"RUN_SERVICEUSAGE":         "127.0.0.1:9023",
 		"SQL_SERVICEUSAGE":         "127.0.0.1:9023",
+		"GKE_SERVICEUSAGE":         "127.0.0.1:9023",
 		"SPANNER":                  "127.0.0.1:9013",
 		"DATASTORE":                "127.0.0.1:9011",
 		"FIRESTORE":                "127.0.0.1:9010",
@@ -356,6 +366,7 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"CLOUDSQL_CONNECTOR":       "127.0.0.1:3307",
 		"BACKUPDR":                 "127.0.0.1:9024",
 		"PRIVATECA":                "127.0.0.1:9028",
+		"GKE":                      "127.0.0.1:9030",
 		"BIGQUERY":                 "http://127.0.0.1:9014",
 		"BIGQUERY_STORAGE":         "127.0.0.1:9015",
 		"BIGQUERY_PROJECT":         "ct-local",
@@ -373,8 +384,10 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"FIRESTORE_STORAGE":        "http://127.0.0.1:50003",
 		"CMEK_KMS":                 "127.0.0.1:9018",
 		"SQL_PRIVATECA":            "127.0.0.1:9028",
+		"MEMORYSTORE_PRIVATECA":    "127.0.0.1:9028",
 		"CLOUDSQL_SECRETS":         "127.0.0.1:9006",
 		"NOPUBSUB_STORAGE":         "http://127.0.0.1:50003",
+		"SQL_LOGGING":              "127.0.0.1:9009",
 		"APPENGINE_URL":            "http://127.0.0.1:18506",
 		"SCALE_RUN":                "127.0.0.1:50002",
 		"SCALE_SECRETS":            "127.0.0.1:9006",
@@ -487,8 +500,8 @@ func TestWorkflowsSetCompatEnvThroughTheScript(t *testing.T) {
 		`BROWSER_VARS=CONSOLE,CONTROL,ADMIN_TOKEN,CLUSTER` + "\n",
 		`if [ "$SHARD" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE,BIGTABLE,SPANNER,KMS; fi`,
 		`if [ "$SHARD" = memorystore ]; then BROWSER_VARS+=,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT; fi`,
-		`if [ "$SHARD" = storage ]; then BROWSER_VARS+=,LOGGING,STORAGE,PUBSUB,TASKS,SCHEDULER,RESOURCEMANAGER,SERVICEUSAGE; fi`,
-		`if [ "$SHARD" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT; fi`,
+		`if [ "$SHARD" = storage ]; then BROWSER_VARS+=,LOGGING,STORAGE,PUBSUB,TASKS,SCHEDULER,RESOURCEMANAGER,SERVICEUSAGE,APIKEYS,KUBECONFIG; fi`,
+		`if [ "$SHARD" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT,RUN_SERVICEUSAGE; fi`,
 		`if [ "$SHARD" = sql ]; then BROWSER_VARS+=,SQLADMIN,BACKUPDR,SECRETS; fi`,
 		`scripts/compat-env.sh --strict --only "$BROWSER_VARS"`,
 	} {
@@ -504,8 +517,8 @@ func TestWorkflowsSetCompatEnvThroughTheScript(t *testing.T) {
 		`BROWSER_VARS=CONSOLE,CONTROL,ADMIN_TOKEN,CLUSTER` + "\n",
 		`if [ "$shard" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE,BIGTABLE,SPANNER,KMS; fi`,
 		`if [ "$shard" = memorystore ]; then BROWSER_VARS+=,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT; fi`,
-		`if [ "$shard" = storage ]; then BROWSER_VARS+=,LOGGING,STORAGE,PUBSUB,TASKS,SCHEDULER,RESOURCEMANAGER,SERVICEUSAGE; fi`,
-		`if [ "$shard" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT; fi`,
+		`if [ "$shard" = storage ]; then BROWSER_VARS+=,LOGGING,STORAGE,PUBSUB,TASKS,SCHEDULER,RESOURCEMANAGER,SERVICEUSAGE,APIKEYS,KUBECONFIG; fi`,
+		`if [ "$shard" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT,RUN_SERVICEUSAGE; fi`,
 		`if [ "$shard" = sql ]; then BROWSER_VARS+=,SQLADMIN,BACKUPDR,SECRETS; fi`,
 		`scripts/compat-env.sh --only "$BROWSER_VARS"`,
 	} {

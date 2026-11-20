@@ -639,6 +639,13 @@ type MemorystoreSettings struct {
 	// stops, in place of the append-only file. In persistent mode the
 	// snapshot is on the server's volume, so its data comes back with it.
 	RDBSeconds int
+	// NoPersistence, without RDBSeconds, is a created Memorystore for
+	// Redis instance's persistence_config DISABLED (#1911): even in
+	// persistent mode the server writes neither an append-only file nor a
+	// snapshot, and the files a previous run left on its volume are
+	// removed before it starts, so a restart of the server starts it
+	// empty, as Memorystore documents of an instance without persistence.
+	NoPersistence bool
 	// ReplicaOf, host:port, starts the server as a replica of it
 	// (--replicaof): a Memorystore Standard tier node (#1412).
 	ReplicaOf string
@@ -687,6 +694,10 @@ const MemorystoreTLSPort = 6378
 // memorystoreTLSDir is where a server's TLS files are written in its
 // container, from its environment, before it starts.
 const memorystoreTLSDir = "/tmp/tls"
+
+// MemorystoreTLSDir is where a Memorystore server's TLS files are in its
+// pod, where a certificate rotation writes the next ones (#1918).
+const MemorystoreTLSDir = memorystoreTLSDir
 
 // Redis images of Memorystore's older versions (#1386), each the last
 // release of its line, pinned by the index digest (linux/amd64 and
@@ -775,6 +786,7 @@ func MemorystoreServerOf(o MemorystoreSettings) Backend {
 		dir = o.Dir
 	}
 	_, ownPersistence := settings["appendonly"]
+	forget := false
 	switch {
 	case dir != "" && ownPersistence:
 		args = append(args, "--dir", dir)
@@ -784,6 +796,11 @@ func MemorystoreServerOf(o MemorystoreSettings) Backend {
 		args = append(args, "--dir", "/data", "--appendonly", "no", "--save", fmt.Sprintf("%d 1", o.RDBSeconds))
 	case o.RDBSeconds > 0:
 		args = append(args, "--appendonly", "no", "--save", fmt.Sprintf("%d 1", o.RDBSeconds))
+	case o.NoPersistence && persistent:
+		// The volume still is the server's directory, so a snapshot or an
+		// RDB persistence set later (CONFIG SET save) is written there.
+		args = append(args, "--dir", "/data", "--save", "", "--appendonly", "no")
+		forget = true
 	case persistent:
 		args = append(args, "--dir", "/data", "--appendonly", "yes", "--appendfsync", "everysec")
 	default:
@@ -839,6 +856,16 @@ func MemorystoreServerOf(o MemorystoreSettings) Backend {
 		b.Args = append([]string{"sh", "-c", script, "sh"}, args...)
 		b.Port = tlsPort
 		b.Env = map[string]string{"MEMORYSTORE_TLS_CERT": o.TLSCert, "MEMORYSTORE_TLS_KEY": o.TLSKey, "MEMORYSTORE_TLS_CA": o.TLSCA}
+	}
+	if forget {
+		// Nodes do not load files made before persistence was disabled.
+		const rm = `rm -rf /data/dump.rdb /data/appendonly.aof /data/appendonlydir; `
+		if len(b.Args) > 2 && b.Args[0] == "sh" {
+			b.Args = append([]string{}, b.Args...)
+			b.Args[2] = rm + b.Args[2]
+		} else {
+			b.Args = append([]string{"sh", "-c", rm + `exec docker-entrypoint.sh "$@"`, "sh"}, b.Args...)
+		}
 	}
 	if o.PodAndLoopback6 {
 		if len(b.Args) > 2 && b.Args[0] == "sh" {
@@ -1223,3 +1250,64 @@ const (
 	FirestoreMongoTLSCertEnv = "FIRESTORE_MONGODB_TLS_CERT"
 	FirestoreMongoTLSKeyEnv  = "FIRESTORE_MONGODB_TLS_KEY"
 )
+
+// Microsoft's SQL Server container images (#1916), mcr.microsoft.com/mssql/server
+// of each release Cloud SQL offers, which are linux/amd64 only: each tag is
+// one linux/amd64 OCI image manifest, no index, pinned by that manifest's
+// digest. Read from the registry's manifest and config without pulling
+// anything (2026-11-19): 2017-latest is 14.0.3570.2 (Ubuntu 18.04, runs as
+// root), 2019-latest 15.0.4510.2, 2022-latest 16.0.4325.4 and 2025-latest
+// 17.0.5065.9 (each runs as mssql, uid 10001). A node pulls one only when a
+// SQL Server instance whose user accepted Microsoft's licence is created.
+const (
+	CloudSQLServer2017Image = "mcr.microsoft.com/mssql/server:2017-latest@sha256:5f6fd78f8752390dbd3584b91dee463f1f4b2b30beef9af3fd35753d32940c52"
+	CloudSQLServer2019Image = "mcr.microsoft.com/mssql/server:2019-latest@sha256:debdc21628cddd1a4433371c601c8dee9bad3533ae8b18fe9dc8c5596368b10d"
+	CloudSQLServer2022Image = "mcr.microsoft.com/mssql/server:2022-latest@sha256:4525e3efac9f3e241cb003bb2ff2a82818b502f37e12049d788b1a9fa7e13b7f"
+	CloudSQLServer2025Image = "mcr.microsoft.com/mssql/server:2025-latest@sha256:05644dad1266ca3d445d1e8f6d2ebb9a6a03df9a39376e0f7b48917356dca9d9"
+)
+
+// CloudSQLServerPort is SQL Server's port, 1433.
+const CloudSQLServerPort = 1433
+
+// CloudSQLServerImage is the image of a SQLSERVER_<year>_<edition>
+// version, by its year; "" for none.
+func CloudSQLServerImage(version string) string {
+	switch {
+	case strings.HasPrefix(version, "SQLSERVER_2017_"):
+		return CloudSQLServer2017Image
+	case strings.HasPrefix(version, "SQLSERVER_2019_"):
+		return CloudSQLServer2019Image
+	case strings.HasPrefix(version, "SQLSERVER_2022_"):
+		return CloudSQLServer2022Image
+	case strings.HasPrefix(version, "SQLSERVER_2025_"):
+		return CloudSQLServer2025Image
+	}
+	return ""
+}
+
+// CloudSQLServerBackend is a Cloud SQL for SQL Server instance's server
+// (#1916): Microsoft's image of its release, as the edition pid
+// (MSSQL_PID), with saPassword for sa, and its data in a volume at
+// /var/opt/mssql. eulaAccepted is whether the instance's user accepted
+// Microsoft's licence: only then is ACCEPT_EULA=Y set, and without it the
+// image does not start. Nothing else ever sets it.
+func CloudSQLServerBackend(name, version, pid, saPassword string, eulaAccepted bool) Backend {
+	b := Backend{
+		Name:  SQLInstancePrefix + name,
+		Image: CloudSQLServerImage(version),
+		Port:  CloudSQLServerPort,
+		Env: map[string]string{
+			"MSSQL_PID":         pid,
+			"MSSQL_SA_PASSWORD": saPassword,
+		},
+		Persistent: true,
+		MountPath:  "/var/opt/mssql",
+		OwnsClaim:  true,
+		// SQL Server needs 2 GB of memory (Microsoft's requirements).
+		MemoryRequest: "2Gi",
+	}
+	if eulaAccepted {
+		b.Env["ACCEPT_EULA"] = "Y"
+	}
+	return b
+}

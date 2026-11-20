@@ -89,19 +89,58 @@ not honoured tells the caller their setting applied when it did not.
 |---|---|
 | `candidateCount` > 1 | `--num_output_candidates` exists but was never exercised; untested is not supported. |
 | `responseMimeType` other than `application/json` and `text/plain` (`text/x.enum`) | Not wired up. |
-| `presencePenalty`, `frequencyPenalty`, `logprobs`, `responseLogprobs` | No runtime control. |
+| `logprobs`, `responseLogprobs` | The runtime exposes no per-token log-probabilities. |
 | `thinkingConfig`, `speechConfig`, `audioTimestamp`, `routingConfig`, `responseModalities` | Out of scope. |
-| `tools`, `toolConfig` | Function calling is not implemented. |
+| Google-hosted tools (`googleSearch`, `retrieval`, `codeExecution`, `urlContext`, …), `streamFunctionCallArguments` | `UNIMPLEMENTED` naming the tool: only declared functions run locally. |
 | `safetySettings` | **No safety filtering happens here.** Accepting the field would imply it does. |
-| `systemInstruction` | Needs a chat template to place it; see multi-turn below. |
 | `cachedContent` | No context caching exists. |
-| Non-text parts (`inlineData`, `fileData`, …) | Text-only. |
-| More than one `contents` entry | The runtime takes one prompt and applies the model's own template. Joining turns would mean inventing a chat template and changing what the model sees in a way the caller cannot inspect. |
+| Parts other than text, images, `functionCall` and `functionResponse` (PDF, audio, video, code execution) | Refused naming the MIME type or field. |
 | Any unknown field | Rejected by `DisallowUnknownFields`, so an option added to Vertex later cannot be quietly dropped. |
-| `:countTokens` | Returns `UNIMPLEMENTED`. The tokenizer is inside the runtime; a count produced any other way would not be the model's. |
 
-`usageMetadata` is **absent from every response**. A token count nothing measured is worse
-than no token count, because it looks authoritative.
+With an `ExecGenerator` that is not `cloudburrow_generate` (the old image), `tools`,
+`toolConfig`, `systemInstruction`, non-text parts, more than one turn and `:countTokens` are
+refused too: `litert_lm_main` takes one prompt and exposes no tokenizer.
+
+---
+
+## 2a. Conversations, function calling, images and tokens (#1937)
+
+`cloudburrow_generate --request_stdin` takes the whole request as LiteRT-LM `Conversation`
+messages on standard input and writes JSON lines (`{"prompt_tokens":N}`, `{"text":...}`,
+`{"tool_calls":[...]}`), so **the model's own chat template** (Gemma 4's, bundled in the
+`.litertlm`) renders every turn:
+
+| Vertex | LiteRT-LM message |
+|---|---|
+| `systemInstruction` | `{"role":"system"}`, first in the preface |
+| `user` text and image parts | `{"role":"user","content":[{"type":"text"},{"type":"image","blob":<PNG>}]}` |
+| `model` text and `functionCall` parts | `{"role":"assistant","tool_calls":[{"type":"function","function":{"name","arguments"}}]}` |
+| `functionResponse` parts | `{"role":"tool","content":[{"name","response"}]}` |
+
+The last message is the one answered; the earlier ones are the conversation's preface.
+
+**Function calling is the model's native tool use.** Gemma 4's template declares the tools and
+its `<|tool_call>` syntax carries the calls, which LiteRT-LM's Gemma 4 processor parses into
+`functionCall` parts. The call's arguments are constrained by LiteRT-LM's LLGuidance tool-call
+grammar, built from the declared schemas, and `toolConfig.functionCallingConfig.mode` selects
+the grammar's choice: `AUTO` (text and/or calls), `ANY` (calls only; one allowed name forces
+it), `NONE` (text only), `VALIDATED` (text or calls limited to `allowedFunctionNames`). The
+image builds LiteRT-LM with `--define=LITERT_LM_FST_CONSTRAINTS_DISABLED=1`, because upstream's
+default FST provider applies only `auto`.
+
+**Images** (`image/png`, `image/jpeg`, `image/webp`, `image/heic`, `image/heif`, inline or
+`gs://` from the instance's Cloud Storage) are decoded, re-encoded as PNG and read by Gemma 4
+E2B's own vision encoder, loaded with `--vision_backend=cpu` only for a request that has one.
+
+**Tokens** are counted by the model's tokenizer in the runtime. `usageMetadata` is on every
+response and on the last event of a stream: `promptTokenCount` is `Conversation::CountTokens`
+of the rendered conversation (template, tools and image tokens included), the same number
+`:countTokens` answers; `candidatesTokenCount` is what the engine decoded. A generation ended by
+a stop sequence reports the prompt's count only (the runtime is stopped before it counts).
+`:computeTokens` returns each content's token IDs and bytes. `presencePenalty` and
+`frequencyPenalty` are LiteRT-LM's `RepetitionPenaltyConfig`. Over gRPC, v1beta1's
+`PredictionService` serves what v1 serves, and `LlmUtilityService` (v1, and v1beta1's
+`ComputeTokens`) counts and computes tokens.
 
 ---
 

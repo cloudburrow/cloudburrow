@@ -496,7 +496,7 @@ service.
 | Cloud KMS | **Yes**: a key, its versions' states (enabled, disabled, scheduled for destruction) and a ciphertext it decrypts | `TestKMSAcrossRestart` |
 | Datastore | **Yes**: an entity | `TestDatastoreAcrossRestart` |
 | Firestore | **Yes**: documents in the default database and in a named one, which the Admin API still lists | `TestFirestoreAcrossRestart` |
-| Memorystore | **Yes**: a key on the default server; a created Redis instance, READY at its own address with the same AUTH string and its key, with append-only or with RDB persistence; Redis clusters and Valkey instances with persistence keep their keys, and come back **empty** without it, as on Google | `TestMemorystoreAcrossRestart`, `TestMemorystoreCreatedAcrossRestart`, `TestMemorystoreRDBAcrossRestart`, `TestMemorystoreClustersAcrossRestart` |
+| Memorystore | **Yes**: a key on the default server; a created Redis instance, READY at its own address with the same AUTH string, with its key with RDB persistence and **empty** without (#1911); Redis clusters and Valkey instances with persistence keep their keys, and come back **empty** without it, as on Google | `TestMemorystoreAcrossRestart`, `TestMemorystoreCreatedAcrossRestart`, `TestMemorystoreRDBAcrossRestart`, `TestMemorystoreClustersAcrossRestart` |
 | Cloud SQL for PostgreSQL | **Yes**: a table's row | `TestCloudSQLAcrossRestart` |
 | Cloud SQL for MySQL | **Yes**: a table's row | `TestCloudSQLMySQLAcrossRestart` |
 | **Pub/Sub** | **No**, as `cloudburrow status` says: Google's emulator loses its state on restart even when given `--data-dir`, which we measured | none |
@@ -600,6 +600,36 @@ What `prefetch` stores in `<state dir>/cache`, and how:
   download whether or not the terminal is opened. Tested by
   `TestTheTerminalImageIsPrefetchedAndOptional`, `TestOfflinePlanIncludesTheTerminalImage` and
   `TestTerminalWaitsForTheBackgroundImport`.
+
+- **Vulnerability scanning** (#1912), only with `--vulnerability-scanning` (which needs `run`):
+  Google's OSV-Scanner v2.7.1 for this machine (about 56 MB, from its GitHub release) and the OSV
+  database snapshot it scans against (`osv-scanner/`), each checked against the SHA-256 in
+  dependencies.json (`scanning`). The whole snapshot is **about 1.19 GB**: Ubuntu 820 MB, npm
+  222 MB, Debian 82 MB, PyPI 38 MB, Go 13 MB, Maven 10.5 MB, Alpine 9.3 MB;
+  `--vulnerability-scanning=Alpine,Go` fetches only the ecosystems named. Without it an image push
+  to a repository with scanning on records a `DISCOVERY` occurrence `FINISHED_FAILED`, saying the
+  scanner is not prefetched. The scanner runs with `--offline`, so a scan makes no calls off the
+  machine.
+
+  **Where it comes from (#1917).** The snapshot is pinned to object generations of OSV's bucket,
+  which keeps old generations for only about a week. So each CloudBurrow release carries its own
+  copy as release assets: the four scanner binaries (`osv-scanner-v2.7.1-<os>_<arch>`) and the
+  pinned archives of Alpine, Debian, Go, Maven, npm and PyPI (`osv-db-<ecosystem>-<sha256
+  prefix>.zip`), with `osv-mirror-SHA256SUMS` and `osv-mirror-NOTICE.txt`. Prefetch tries, in
+  order, this CLI's own release, the latest release (the same names hold the same bytes, so it
+  serves whenever its pins are this CLI's), then upstream (OSV-Scanner's GitHub release, OSV's
+  bucket). Every file is checked against the SHA-256 pinned in this CLI whichever source serves it,
+  so the mirror is trusted no more than upstream. `CLOUDBURROW_OSV_MIRROR` replaces the two
+  release sources with your own comma-separated download bases (a copy of a release's
+  `osv-*` assets on an internal server, for example), or `none` for upstream only.
+
+  **Ubuntu is not mirrored.** Its archive alone is 820 MB, more than twice the six mirrored
+  ecosystems together (about 375 MB); mirroring it would make every release (one every one to
+  two days) about 1.4 GB of assets instead of about 600 MB. Ubuntu comes from OSV's bucket only:
+  `--vulnerability-scanning` with no list fetches it while OSV still serves its pinned generation
+  and otherwise goes on without it, with a warning; `--vulnerability-scanning=Ubuntu` fails
+  instead. A CloudBurrow less than about a week
+  old always gets it.
 
 Every image is the reference CloudBurrow pins by digest, or the one a checksummed Knative YAML
 names, with one exception: Kourier's YAML names its Envoy gateway by tag,

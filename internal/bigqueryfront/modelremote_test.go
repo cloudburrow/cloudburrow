@@ -16,18 +16,21 @@ func TestParseRemoteModel(t *testing.T) {
 		"CREATE MODEL ds.m REMOTE WITH CONNECTION DEFAULT OPTIONS(ENDPOINT='gemini-2.0-flash')":               0,
 		"CREATE MODEL ds.m REMOTE WITH CONNECTION `p.us.c` OPTIONS(REMOTE_SERVICE_TYPE='CLOUD_AI_VISION_V1')": 0,
 		// #1773: the services with no local model, and their options.
-		"CREATE MODEL ds.m REMOTE WITH CONNECTION `p.us.c` OPTIONS(REMOTE_SERVICE_TYPE='CLOUD_AI_TRANSLATE_V3')":                             0, // #1799
-		"CREATE MODEL ds.m REMOTE WITH CONNECTION `p.us.c` OPTIONS(REMOTE_SERVICE_TYPE='CLOUD_AI_NATURAL_LANGUAGE_V1')":                      0, // #1799
-		"CREATE MODEL ds.m REMOTE WITH CONNECTION `p.us.c` OPTIONS(REMOTE_SERVICE_TYPE='CLOUD_AI_SPEECH_TO_TEXT_V2')":                        0, // #1799
-		"CREATE MODEL ds.m REMOTE WITH CONNECTION `p.us.c` OPTIONS(REMOTE_SERVICE_TYPE='CLOUD_AI_SPEECH_TO_TEXT_V2', SPEECH_RECOGNIZER='x')": 501,
-		"CREATE MODEL ds.m REMOTE WITH CONNECTION `p.us.c` OPTIONS(REMOTE_SERVICE_TYPE='CLOUD_AI_DOCUMENT_V1', DOCUMENT_PROCESSOR='x')":      501,
-		"CREATE MODEL ds.m REMOTE WITH CONNECTION `p.us.c` OPTIONS(REMOTE_SERVICE_TYPE='CLOUD_AI_NOPE')":                                     400,
-		"CREATE MODEL ds.m REMOTE WITH CONNECTION `p.us.c` OPTIONS(REMOTE_SERVICE_TYPE='CLOUD_AI_VISION_V1', ENDPOINT='x')":                  400,
-		"CREATE MODEL ds.m REMOTE WITH CONNECTION `p.us.c` OPTIONS(ENDPOINT='x', bogus=1)":                                                   400,
-		"CREATE MODEL ds.m REMOTE WITH CONNECTION `p.us.c` OPTIONS(ENDPOINT='x') AS SELECT 1":                                                400,
-		"CREATE MODEL ds.m REMOTE WITH CONNECTION `p.us.c`":                                                                                  400,
-		"CREATE MODEL ds.m REMOTE CONNECTION `p.us.c` OPTIONS(ENDPOINT='x')":                                                                 400,
-		"CREATE MODEL ds.m REMOTE WITH CONNECTION `a.b.c.d` OPTIONS(ENDPOINT='x')":                                                           400,
+		"CREATE MODEL ds.m REMOTE WITH CONNECTION `p.us.c` OPTIONS(REMOTE_SERVICE_TYPE='CLOUD_AI_TRANSLATE_V3')":                        0, // #1799
+		"CREATE MODEL ds.m REMOTE WITH CONNECTION `p.us.c` OPTIONS(REMOTE_SERVICE_TYPE='CLOUD_AI_NATURAL_LANGUAGE_V1')":                 0, // #1799
+		"CREATE MODEL ds.m REMOTE WITH CONNECTION `p.us.c` OPTIONS(REMOTE_SERVICE_TYPE='CLOUD_AI_SPEECH_TO_TEXT_V2')":                   0, // #1799
+		"CREATE MODEL ds.m REMOTE WITH CONNECTION `p.us.c` OPTIONS(REMOTE_SERVICE_TYPE='CLOUD_AI_TRANSLATE_V3', SPEECH_RECOGNIZER='x')": 400,
+		"CREATE MODEL ds.m REMOTE WITH CONNECTION `p.us.c` OPTIONS(REMOTE_SERVICE_TYPE='CLOUD_AI_DOCUMENT_V1', DOCUMENT_PROCESSOR='x')": 0,   // #1799
+		"CREATE MODEL ds.m REMOTE WITH CONNECTION `p.us.c` OPTIONS(REMOTE_SERVICE_TYPE='CLOUD_AI_DOCUMENT_V1')":                         400, // DOCUMENT_PROCESSOR is required
+		"CREATE MODEL ds.m REMOTE WITH CONNECTION `p.us.c` OPTIONS(REMOTE_SERVICE_TYPE='CLOUD_AI_VISION_V1', DOCUMENT_PROCESSOR='x')":   400,
+		"CREATE MODEL ds.m REMOTE WITH CONNECTION `p.us.c` OPTIONS(REMOTE_SERVICE_TYPE='CLOUD_AI_DOCUMENT_V1', DOCUMENT_PROCESSOR='')":  400,
+		"CREATE MODEL ds.m REMOTE WITH CONNECTION `p.us.c` OPTIONS(REMOTE_SERVICE_TYPE='CLOUD_AI_NOPE')":                                400,
+		"CREATE MODEL ds.m REMOTE WITH CONNECTION `p.us.c` OPTIONS(REMOTE_SERVICE_TYPE='CLOUD_AI_VISION_V1', ENDPOINT='x')":             400,
+		"CREATE MODEL ds.m REMOTE WITH CONNECTION `p.us.c` OPTIONS(ENDPOINT='x', bogus=1)":                                              400,
+		"CREATE MODEL ds.m REMOTE WITH CONNECTION `p.us.c` OPTIONS(ENDPOINT='x') AS SELECT 1":                                           400,
+		"CREATE MODEL ds.m REMOTE WITH CONNECTION `p.us.c`":                                                                             400,
+		"CREATE MODEL ds.m REMOTE CONNECTION `p.us.c` OPTIONS(ENDPOINT='x')":                                                            400,
+		"CREATE MODEL ds.m REMOTE WITH CONNECTION `a.b.c.d` OPTIONS(ENDPOINT='x')":                                                      400,
 	} {
 		toks, _ := lex(sql)
 		d, is, code, msg := parseModelDDL(toks, sql)
@@ -150,7 +153,8 @@ func TestAIFunctionsAreNamed(t *testing.T) {
 		"select ai.embed(content) from t":                                                          "",
 		"SELECT AI.AGG(s, 'summarize') FROM t":                                                     "",
 		"SELECT AI.SEARCH(TABLE t, 'c', 'q')":                                                      "",
-		"SELECT AI.COUNT_TOKENS('hi')":                                                             "AI.COUNT_TOKENS",
+		"SELECT AI.COUNT_TOKENS('hi')":                                                             "",
+		"SELECT AI.NOT_A_FUNCTION(1)":                                                              "AI.NOT_A_FUNCTION",
 		"SELECT ai.x FROM t AS ai":                                                                 "",
 		"SELECT p.ai.f(1)":                                                                         "",
 		"SELECT 'AI.GENERATE(' AS s":                                                               "",
@@ -181,7 +185,8 @@ func TestParseStringArray(t *testing.T) {
 func TestServiceTypeRefusalsNameTheirFunction(t *testing.T) {
 	for typ, fn := range serviceTypeFunctions {
 		code, msg := checkServiceType(strings.ToLower(typ))
-		if typ == "CLOUD_AI_VISION_V1" || typ == "CLOUD_AI_SPEECH_TO_TEXT_V2" || typ == "CLOUD_AI_TRANSLATE_V3" || typ == "CLOUD_AI_NATURAL_LANGUAGE_V1" {
+		if typ == "CLOUD_AI_VISION_V1" || typ == "CLOUD_AI_SPEECH_TO_TEXT_V2" || typ == "CLOUD_AI_TRANSLATE_V3" || typ == "CLOUD_AI_NATURAL_LANGUAGE_V1" ||
+			typ == "CLOUD_AI_DOCUMENT_V1" {
 			if code != 0 {
 				t.Errorf("%s: %d %s", typ, code, msg)
 			}

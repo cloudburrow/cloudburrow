@@ -22,8 +22,8 @@ func TestPlaygroundGenerationOptions(t *testing.T) {
 	const model = "gemma-4-e2b-it-community"
 	var mu sync.Mutex
 	var got []vertexai.Request
-	gen := &vertexai.ScriptedGenerator{ID: model, Chunks: []string{"true"}, Options: true,
-		Seen: func(r vertexai.Request) { mu.Lock(); got = append(got, r); mu.Unlock() }}
+	gen := &vertexai.CountingGenerator{ScriptedGenerator: &vertexai.ScriptedGenerator{ID: model, Chunks: []string{"true"}, Options: true,
+		Seen: func(r vertexai.Request) { mu.Lock(); got = append(got, r); mu.Unlock() }}}
 	api := httptest.NewServer(vertexai.NewServer(gen).Handler())
 	t.Cleanup(api.Close)
 	addr := strings.TrimPrefix(api.URL, "http://")
@@ -48,7 +48,7 @@ func TestPlaygroundGenerationOptions(t *testing.T) {
 		document.querySelector("#pg-opt-json").checked = true;
 		set("#pg-opt-responseSchema", '{"type":"BOOLEAN"}');
 		document.querySelector("#pg-prompt").value = "is it?";
-		[...document.querySelectorAll("#view button")].find((b) => b.textContent === "Run").click();
+		[...document.querySelectorAll("#view button")].find((b) => b.textContent === "Submit").click();
 		return true;
 	})()`, nil)
 	p.waitFor(`document.querySelector("#pg-output").textContent === "true"`)

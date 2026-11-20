@@ -188,6 +188,11 @@ func (p projectsProvider) Edit(_ context.Context, _ string, path []string, value
 	return err
 }
 
+// CreateHref implements console.CreateHrefer: the Projects list's Create
+// project opens the New project page, as the project picker's New project
+// and Manage resources' Create project do (#1932).
+func (projectsProvider) CreateHref() string { return "/projectcreate" }
+
 // CreateForm implements console.Creator.
 //
 // The pattern is the identifier rule the API enforces, so the form refuses

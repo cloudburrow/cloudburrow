@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/cloudburrow/cloudburrow/internal/apienable"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/localhost"
@@ -34,6 +35,9 @@ type tasksService struct {
 	// interpose run inside the call observer, in order: the request log
 	// (#314), then fault injection (#306), so the log sees injected faults.
 	interpose []grpc.UnaryServerInterceptor
+	// apiGate refuses calls in a project where the API is disabled
+	// (#1914); nil refuses none.
+	apiGate apienable.Decider
 	// requests reports each JSON request to the admin event log (#591).
 	requests func(rest.Request)
 	// wrapJSON wraps the JSON API (IAM enforcement, #1879); nil is none.
@@ -144,6 +148,7 @@ func (t *tasksService) Start(ctx context.Context) error {
 	t.store = st
 	addr := net.JoinHostPort(t.cfg.BindAddress, strconv.Itoa(t.cfg.Endpoints.Tasks))
 	t.server = grpctransport.New(addr)
+	t.server.Gate(t.apiGate, "cloudtasks.googleapis.com")
 	t.server.Observe(t.calls)
 	if t.tracing != nil {
 		t.server.ServerOptions(t.tracing.ServerOptions()...)

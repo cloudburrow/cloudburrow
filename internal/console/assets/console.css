@@ -1177,6 +1177,38 @@ td.mono { word-break: break-word; }
   border-radius: var(--radius);
 }
 
+/* Agent Studio's prompt page (#1962): the conversation and prompt, with
+   the Model settings panel beside them on a wide screen and below them on
+   a narrow one. */
+.pg-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+@media (min-width: 1100px) { .pg-layout { grid-template-columns: minmax(0, 1fr) 300px; align-items: start; } }
+.pg-main { display: grid; gap: 16px; min-width: 0; }
+.pg-main > .card, .pg-layout > .card { margin: 0; }
+.pg-stack { display: grid; gap: 8px; margin: 8px 0; }
+.pg-field { display: grid; gap: 4px; margin: 8px 0; }
+.pg-field > span:first-child { color: var(--text-muted); font-size: var(--text-caption-size); line-height: var(--text-caption-line); }
+.pg-field input, .pg-field select, .pg-field textarea { max-width: 100%; box-sizing: border-box; }
+.pg-check { display: flex; align-items: center; gap: 6px; margin: 8px 0; }
+.pg-settings h2, .pg-main h2 { margin-top: 0; font-size: var(--text-heading-size); line-height: var(--text-heading-line); }
+.pg-chat { display: grid; gap: 8px; max-height: 480px; overflow: auto; }
+.pg-turn { padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.pg-turn[data-role="model"] { background: var(--surface-alt, var(--surface)); }
+.pg-turn p { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.pg-turn .pg-turn-role { font-weight: 600; color: var(--text-muted); font-size: var(--text-caption-size); line-height: var(--text-caption-line); }
+.pg-attachments { list-style: none; margin: 8px 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.pg-attachments li { display: flex; align-items: center; gap: 6px; padding: 2px 4px 2px 8px; border: 1px solid var(--border); border-radius: var(--radius); max-width: 100%; overflow-wrap: anywhere; }
+.pg-section { margin: 8px 0; }
+.pg-disclosure[aria-expanded="true"]::after { content: " \25B4"; }
+.pg-disclosure[aria-expanded="false"]::after { content: " \25BE"; }
+.pg-file { max-width: 100%; }
+.pg-tokens { display: flex; flex-wrap: wrap; gap: 2px; font-family: var(--mono); }
+.pg-token { padding: 0 2px; border-radius: 2px; color: var(--text); white-space: pre; border-bottom: 2px solid var(--border); }
+.pg-token[data-n="0"] { border-bottom-color: var(--accent); }
+.pg-token[data-n="1"] { border-bottom-color: var(--ok); }
+.pg-token[data-n="2"] { border-bottom-color: var(--warn); }
+.pg-token[data-n="3"] { border-bottom-color: var(--error); }
+#pg-code-text { max-height: 360px; }
+
 /* --- project picker and account ------------------------------------- */
 
 .picker-button {
@@ -1307,6 +1339,9 @@ td.mono { word-break: break-word; }
               font-size: var(--text-caption-size); color: var(--text-muted); }
 .breadcrumb a { color: var(--accent); text-decoration: none; }
 .breadcrumb a:hover { text-decoration: underline; }
+/* A crumb that is one long word (a file named CODEOWNERS) breaks rather
+   than widening a 320px page (#1928). */
+.breadcrumb > * { min-width: 0; overflow-wrap: anywhere; }
 
 /* --- navigation menu ------------------------------------------------- */
 
@@ -1706,7 +1741,8 @@ tr.is-inspected { background: var(--nav-selected); }
 .listing-summary { margin-bottom: 16px; }
 .listing-summary dd { overflow-wrap: anywhere; }
 /* A screen of summary cards alone (#1854): Cloud Build's Dashboard, a card per trigger. */
-.summary-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
+/* min(): a card is never wider than a 320px window less its gutter (#1930). */
+.summary-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr)); gap: 16px; }
 .summary-cards .listing-summary { margin-bottom: 0; }
 
 /* The tab strip sits at the bottom of the header block, where the console
@@ -1726,6 +1762,9 @@ tr.is-inspected { background: var(--nav-selected); }
 .tab.is-selected { color: var(--accent); border-bottom-color: var(--accent); }
 
 .tab-panel { min-width: 0; }
+/* A page's tabs that are pages of their own (#1857). */
+.tab-strip.page-tabs { margin: 0 0 12px; border-bottom: 1px solid var(--border); }
+.page-tabs a.tab { text-decoration: none; }
 
 /* Outcomes appear here rather than in a window.alert. */
 .snackbars {
@@ -2256,3 +2295,54 @@ svg.bq-chart { display: block; border: 1px solid var(--border); border-radius: v
 /* A create field's dialog (#1859): Spanner's Compare editions. */
 .field-dialog { max-width: min(880px, calc(100vw - 32px)); }
 .field-dialog-table th[scope="row"] { font-weight: 500; text-align: left; }
+/* Manage resources (#1865): the tree's indent and toggles, and the info
+   panel's tabs, which sit inside a dialog rather than under a header. */
+#mr-tree .mr-name { white-space: nowrap; }
+#mr-tree .mr-toggle, #mr-tree .mr-toggle-space { display: inline-block; width: 28px; }
+#mr-tree .mr-kind { color: var(--text-muted); }
+#mr-panel .tab-strip { margin: 12px 0 16px; border-bottom: 1px solid var(--border); }
+#mr-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; }
+#mr-actions .filter { flex: 1 1 200px; min-width: 0; }
+
+/* APIs & Services (#1866): Create credentials' menu, the Library's
+   categories and cards, and an API's facts. */
+.menu-anchor { position: relative; display: inline-block; }
+.menu-anchor .overflow-menu { left: 0; right: auto; min-width: 280px; }
+.overflow-item[disabled] { color: var(--text-muted); cursor: default; }
+.library-categories { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 16px; }
+.library-categories .chip { border: 1px solid var(--border); background: var(--surface); color: var(--text); padding: 4px 12px; cursor: pointer; font: inherit; }
+.library-categories .chip.is-selected { background: var(--nav-selected); color: var(--nav-selected-text); }
+.library-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr)); }
+.library-card { display: block; color: inherit; text-decoration: none; }
+.library-card h3 { margin: 0 0 4px; }
+.api-facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 24px; margin: 12px 0; }
+.api-facts dt { color: var(--text-muted); }
+.api-facts dd { margin: 0; }
+
+/* An action's answer text (#1930): Document AI's extracted text, a
+   transcript. Scrolls inside the dialog rather than stretching it. */
+.result-text { font-family: var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 40vh;
+  overflow: auto; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-alt); }
+
+/* Section headings over a SummaryOnly screen's cards (#1930): Document AI's
+   Processor gallery, by category. */
+.summary-section { font-size: var(--text-heading-size); font-weight: 500; margin: 24px 0 12px; }
+.summary-section:first-of-type { margin-top: 8px; }
+
+/* An action's answer drawn over its document (#1930): Document AI's test
+   document, its page images with the layout's boxes, beside its text and
+   rows. Side by side when there is room, stacked in a narrow window. */
+.modal:has(.result-doc) { max-width: min(1280px, calc(100vw - 32px)); width: 100%; }
+.result-doc { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+.result-pages { flex: 1 1 320px; min-width: 0; max-height: 70vh; overflow: auto; }
+.result-side { flex: 1 1 320px; min-width: 0; max-height: 70vh; overflow: auto; }
+.result-page { margin: 0 0 12px; }
+.result-page figcaption { font-size: var(--text-caption-size); color: var(--text-muted); margin-top: 4px; }
+.result-page-frame { position: relative; width: 100%; border: 1px solid var(--border); }
+.result-page-frame img { display: block; width: 100%; height: auto; }
+.result-box { position: absolute; box-sizing: border-box; border: 1.5px solid var(--accent); pointer-events: auto; }
+.result-box.kind-block { border-color: #1a73e8; }
+.result-box.kind-paragraph { border-color: #188038; }
+.result-box.kind-line { border-color: #e37400; }
+.result-box.is-lit { background: rgba(26, 115, 232, 0.25); border-width: 2.5px; }
+#action-result-table tr.is-lit { background: var(--nav-selected); }
