@@ -2988,11 +2988,20 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   const hasStatus = () => Boolean(data.alwaysStatus || data.items.some((i) => i.status));
   // Status is the first column, as an icon, the way Google's lists draw it
   // (#1842); the row menu's column has no header text.
+  // The name column is first unless the listing puts it after a data
+  // column (Listing.NameAfter): Cloud Run functions' list leads with
+  // Environment, then Name (#1853). A hidden NameAfter column leaves it
+  // first.
+  const nameAfter = () => (data.nameAfter && dataColumns().includes(data.nameAfter) ? data.nameAfter : "");
+  const ordered = () => {
+    const cols = dataColumns();
+    const at = nameAfter() ? cols.indexOf(nameAfter()) + 1 : 0;
+    return [...cols.slice(0, at), nameColumn(), ...cols.slice(at)];
+  };
   const columns = () => [
     ...(selectable ? ["select"] : []),
     ...(hasStatus() ? ["Status"] : []),
-    nameColumn(),
-    ...dataColumns(),
+    ...ordered(),
     ...(hasActions() ? ["Actions"] : []),
   ];
 
@@ -3217,15 +3226,15 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
               spinner(`${item.name} is being changed`)))
           : el("td", { class: "status-cell" }, statusIcon(item.status)));
       }
-      cells.push(el("td", {}, item.link
+      const nameCell = el("td", {}, item.link
         ? el("a", { href: item.link, text: item.name })
         : (item.opens || []).length
           ? el("a", { href: detailHref(route, item.opens), text: item.name })
         : caps.detail
           ? el("a", { href: detailHref(route, item.name), text: item.name })
-          : document.createTextNode(item.name)));
-      for (const c of dataColumns()) {
-        cells.push(el("td", { text: (item.fields || {})[c] || "—" }));
+          : document.createTextNode(item.name));
+      for (const c of ordered()) {
+        cells.push(c === nameColumn() ? nameCell : el("td", { text: (item.fields || {})[c] || "—" }));
       }
       if (hasActions()) cells.push(rowActionsCell(item));
       const row = el("tr", {
@@ -4553,6 +4562,14 @@ function openActionForm(route, segments, action, onDone, title = null) {
       op.succeeded("", res.operation);
       submitting = false;
       notify(segments.length ? `${action.label} applied to ${name}` : `${action.label} done`);
+      // An action whose Google flow goes on to the resource it made
+      // (Action.Then): Write a function's Create lands on the function's
+      // Source tab (#1853).
+      if (action.then) {
+        close();
+        navigate(actionThen(action.then, values));
+        return null;
+      }
       onDone();
       // An action that answers with rows — a pull — keeps its dialog open to
       // show them. Closing it would be the pull done and its messages thrown
@@ -4585,6 +4602,16 @@ function openActionForm(route, segments, action, onDone, title = null) {
     ...actionSteps.nodes,
     el("div", { class: "modal-actions" }, cancel, primary)));
   fields.focusFirst();
+}
+
+// actionThen is an Action.Then route with each {field} replaced by the
+// value submitted for it, encoded as a path segment, and the project kept.
+function actionThen(then, values) {
+  const filled = then.replace(/\{([A-Za-z0-9_]+)\}/g, (_, k) => encodeURIComponent(values[k] || ""));
+  const url = new URL(filled, location.origin);
+  const project = new URLSearchParams(location.search).get("project");
+  if (project && !url.searchParams.has("project")) url.searchParams.set("project", project);
+  return url.pathname + url.search;
 }
 
 // listActionButtons are the list screen's own actions (#1289), on no
@@ -7179,6 +7206,23 @@ function sourceFilesEntry(f, id, errorId, helpId) {
       sync();
       editor.focus();
     } });
+  // Rename file, as Google's editor's (#1853): the open file takes the
+  // name typed in the file name box, keeping its place and contents.
+  const rename = el("button", { type: "button", class: "secondary sourcefiles-rename", text: "Rename file",
+    onclick: () => {
+      const name = newName.value.trim();
+      if (!current || !name || files[name] !== undefined || name.startsWith("/") || name.split("/").includes("..")) {
+        newName.focus();
+        return;
+      }
+      files = Object.fromEntries(Object.entries(files).map(([k, v]) => [k === current ? name : k, v]));
+      current = name;
+      newName.value = "";
+      edited = true;
+      draw();
+      sync();
+      editor.focus();
+    } });
   const remove = el("button", { type: "button", class: "secondary sourcefiles-remove", text: "Delete file",
     onclick: () => {
       if (!current) return;
@@ -7206,7 +7250,7 @@ function sourceFilesEntry(f, id, errorId, helpId) {
     el("legend", { text: f.label }),
     el("div", { class: "sourcefiles-body" },
       el("div", { class: "sourcefiles-side" }, tabs,
-        el("div", { class: "sourcefiles-actions" }, newName, add, remove)),
+        el("div", { class: "sourcefiles-actions" }, newName, add, rename, remove)),
       editor),
     control, help, error);
   const entry = { field: Object.assign({}, f, { default: control.value }), control, node, error, helpId, errorId,

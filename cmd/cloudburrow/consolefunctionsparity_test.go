@@ -139,7 +139,7 @@ func TestConsoleFunctionsParity(t *testing.T) {
 		t.Fatal(err)
 	}
 	if strings.Join(l.Columns, ",") != "Environment,Region,Trigger,Runtime,Memory allocated,Executed function,Last deployed,Deployed by,Authentication,URL" ||
-		l.NameColumn != "Name" {
+		l.NameColumn != "Name" || l.NameAfter != "Environment" {
 		t.Errorf("the list's columns = %v (%s)", l.Columns, l.NameColumn)
 	}
 	for _, it := range l.Items {
@@ -163,7 +163,8 @@ func TestConsoleFunctionsParity(t *testing.T) {
 		}
 		srcTab, _ := fnSection(d, "source")
 		if len(srcTab.Tabs) != 2 || srcTab.Tabs[0].Label != "index.js" || !strings.Contains(srcTab.Tabs[0].Text, "'v1'") ||
-			len(srcTab.Actions) != 1 || srcTab.Actions[0].Submit != "Save and redeploy" {
+			len(srcTab.Actions) != 3 || srcTab.Actions[0].Submit != "Save and redeploy" ||
+			srcTab.Actions[1].Label != "Show Payload" || srcTab.Actions[2].Label != "Test" {
 			t.Errorf("%s's Source tab = %+v", id, srcTab)
 		}
 		trig, _ := fnSection(d, "triggers")
@@ -177,6 +178,35 @@ func TestConsoleFunctionsParity(t *testing.T) {
 		}
 		if !strings.Contains(testing.Text, want) || len(testing.Actions) != 1 || testing.Actions[0].ID != functionsTestAction {
 			t.Errorf("%s's Testing tab = %+v; want %q", id, testing, want)
+		}
+	}
+
+	// Show Payload and the Source tab's Test are offered and answer.
+	pay, err := p.ActAtResult(ctx, "", []string{"par-gen2"}, functionsShowPayloadAction, nil)
+	if err != nil || pay == nil || pay.Text != functionTestBody {
+		t.Errorf("Show Payload on an HTTP function = %+v, %v", pay, err)
+	}
+	if _, err := p.ActAtResult(ctx, "", []string{"par-gen2"}, functionsSourceTestAction, map[string]string{"data": "{}"}); err == nil ||
+		!strings.Contains(err.Error(), "no URL") {
+		t.Errorf("Test on the Source tab = %v; want the Testing tab's answer for an undeployed function", err)
+	}
+	offered := map[string]bool{}
+	for _, a := range p.DetailActions(ctx, "", []string{"par-gen2"}) {
+		offered[a.ID] = true
+	}
+	if !offered[functionsShowPayloadAction] || !offered[functionsSourceTestAction] {
+		t.Errorf("DetailActions = %v; want Show Payload and Test offered", offered)
+	}
+
+	// Allow public access on a 1st gen function: allUsers is granted
+	// roles/cloudfunctions.invoker through the v1 API, and the list says so.
+	if err := p.allowPublicInvocation(ctx, "projects/console-parity-fn/locations/us-central1/functions/par-gen1", true); err != nil {
+		t.Fatalf("Allow public access: %v", err)
+	}
+	l, _ = p.List(ctx, "")
+	for _, it := range l.Items {
+		if it.Name == "par-gen1" && it.Fields["Authentication"] != runAllowPublic {
+			t.Errorf("par-gen1's Authentication = %q; want %q", it.Fields["Authentication"], runAllowPublic)
 		}
 	}
 
@@ -218,6 +248,16 @@ func TestConsoleFunctionsParity(t *testing.T) {
 	cp, err := p.find("", "par-gen1-copy")
 	if err != nil || cp.GetEnvironment() != functionspb.Environment_GEN_1 || cp.GetBuildConfig().GetEntryPoint() != "hello" {
 		t.Fatalf("the copy = %v, %v", cp, err)
+	}
+
+	// Write a function's settings reach the function's service config.
+	create("par-set", functionGen2, map[string]string{"minInstances": "1", "maxInstances": "3", "timeout": "120", "concurrency": "8",
+		"cpu": "2", "env": `{"MODE":"set"}`, "serviceAccount": "fn@console-parity-fn.iam.gserviceaccount.com", "billing": runBillingRequest, "ingress": runIngressAll})
+	if fn, _ := p.find("", "par-set"); fn.GetServiceConfig().GetMinInstanceCount() != 1 || fn.GetServiceConfig().GetMaxInstanceCount() != 3 ||
+		fn.GetServiceConfig().GetTimeoutSeconds() != 120 || fn.GetServiceConfig().GetMaxInstanceRequestConcurrency() != 8 ||
+		fn.GetServiceConfig().GetAvailableCpu() != "2" || fn.GetServiceConfig().GetEnvironmentVariables()["MODE"] != "set" ||
+		fn.GetServiceConfig().GetServiceAccountEmail() != "fn@console-parity-fn.iam.gserviceaccount.com" {
+		t.Errorf("the settings reached the service config as %v", fn.GetServiceConfig())
 	}
 
 	// A Cloud Firestore trigger, then Edit trigger to Cloud Audit Logs.

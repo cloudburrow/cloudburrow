@@ -55,7 +55,7 @@ var functionStorageEvents = []struct{ v1, v2 string }{
 	{"google.storage.object.metadataUpdate", "google.cloud.storage.object.v1.metadataUpdated"},
 }
 
-var functionNamePattern = regexp.MustCompile(`^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$`)
+var functionNamePattern = regexp.MustCompile(`^[a-z]([a-z0-9\-]{0,61}[a-z0-9])?$`)
 
 // functionsProvider is the Cloud Functions page.
 type functionsProvider struct {
@@ -125,7 +125,7 @@ var functionColumns = []string{"Environment", "Region", "Trigger", "Runtime", "M
 	"Last deployed", "Deployed by", "Authentication", "URL"}
 
 func (p functionsProvider) List(ctx context.Context, project string) (console.Listing, error) {
-	out := console.Listing{Columns: functionColumns, NameColumn: "Name", Noun: "functions", AlwaysStatus: true,
+	out := console.Listing{Columns: functionColumns, NameColumn: "Name", NameAfter: "Environment", Noun: "functions", AlwaysStatus: true,
 		Note: "Deployed by is the account that deployed the function on Google's console; calls here are not authenticated " +
 			"(ADR-0006), so none is recorded and the column shows the API the function was deployed through."}
 	for _, fn := range runadapter.Functions(p.project(project)) {
@@ -373,6 +373,7 @@ func (p functionsProvider) createAction() console.Action {
 			Help: "Lower case letters, digits and hyphens, starting with a letter, at most 63"},
 		{Name: "region", Label: "Region", Type: "select", Options: runadapter.FunctionRegions, Default: "us-central1"},
 		{Name: "trigger"}, // functionTriggerFields, below
+		functionAuthenticationField(),
 		{Name: "runtime", Label: "Runtime", Type: "select", Options: runtimes, Default: "nodejs22"},
 		{Name: "entryPoint", Label: "Entry point", Type: "text", Required: true,
 			Help: "The function the Functions Framework serves, such as Hello"},
@@ -432,7 +433,7 @@ func (p functionsProvider) DetailActions(ctx context.Context, project string, pa
 // DetailActions.
 func (p functionsProvider) functionActionTabs(ctx context.Context, fn *functionspb.Function) []console.Section {
 	runtime, entry := fn.GetBuildConfig().GetRuntime(), fn.GetBuildConfig().GetEntryPoint()
-	out := []console.Section{{Actions: p.triggerActions(fn)}, {Actions: []console.Action{testAction()}}}
+	out := []console.Section{{Actions: p.triggerActions(fn)}, {Actions: []console.Action{testAction()}}, {Actions: sourceTabActions()}}
 	if a, ok := editSourceAction(fn, runtime, entry, nil); ok {
 		// The files are the Source tab's; DetailActions only names it.
 		out = append(out, console.Section{Actions: []console.Action{a}})
@@ -473,7 +474,9 @@ func (p functionsProvider) ActAtResult(ctx context.Context, project string, path
 		return nil, p.editTrigger(ctx, fn, values)
 	case functionsAddTriggerAction, functionsDeleteTriggerAction:
 		return nil, p.actOnEventarc(ctx, fn, action, values)
-	case functionsTestAction:
+	case functionsShowPayloadAction:
+		return showPayload(fn, fn.GetEventTrigger()), nil
+	case functionsTestAction, functionsSourceTestAction:
 	default:
 		return nil, fmt.Errorf("unknown action %q", action)
 	}
@@ -747,9 +750,33 @@ func (p functionsProvider) ActAtFile(ctx context.Context, project string, path [
 	if values["environment"] == functionGen1 && (trigger.kind == functionTriggerFirestore || trigger.kind == functionTriggerAudit) {
 		return nil, fmt.Errorf("a 1st gen function's %s trigger is not served (the v1 API's legacy providers); choose 2nd gen, whose trigger is an Eventarc trigger", trigger.kind)
 	}
+	public, err := functionPublicChoice(values["authentication"])
+	if err != nil {
+		return nil, err
+	}
+	settings, err := functionSettingsOf(values)
+	if err != nil {
+		return nil, err
+	}
+	if err := p.createFunction(ctx, parent, id, values, data, trigger, secrets, settings, memory, mb, pool, kms, binauthz); err != nil {
+		return nil, err
+	}
+	if public {
+		return nil, p.allowPublicInvocation(ctx, parent+"/functions/"+id, values["environment"] == functionGen1)
+	}
+	return nil, nil
+}
+
+// createFunction uploads the archive and creates the function through the
+// API of its environment, waiting for the deploy.
+func (p functionsProvider) createFunction(ctx context.Context, parent, id string, values map[string]string, data []byte,
+	trigger functionTriggerSpec, secrets functionSecrets, settings functionSettings, memory string, mb int32, pool, kms, binauthz string) error {
 	switch env := values["environment"]; env {
 	case functionGen1:
-		return nil, p.withV1Client(ctx, func(c *functionsv1.CloudFunctionsClient) error {
+		if err := settings.gen1Refusal(); err != nil {
+			return err
+		}
+		return p.withV1Client(ctx, func(c *functionsv1.CloudFunctionsClient) error {
 			up, err := c.GenerateUploadUrl(ctx, &fv1.GenerateUploadUrlRequest{Parent: parent, KmsKeyName: kms})
 			if err != nil {
 				return err
@@ -763,6 +790,7 @@ func (p functionsProvider) ActAtFile(ctx context.Context, project string, path [
 				BuildWorkerPool: pool, KmsKeyName: kms}
 			trigger.setV1(fn)
 			secrets.setV1(fn)
+			settings.setV1(fn)
 			op, err := c.CreateFunction(ctx, &fv1.CreateFunctionRequest{Location: parent, Function: fn})
 			if err != nil {
 				return err
@@ -774,9 +802,9 @@ func (p functionsProvider) ActAtFile(ctx context.Context, project string, path [
 		})
 	case "", functionGen2:
 	default:
-		return nil, fmt.Errorf("unknown environment %q: %s or %s", env, functionGen1, functionGen2)
+		return fmt.Errorf("unknown environment %q: %s or %s", env, functionGen1, functionGen2)
 	}
-	return nil, p.withClient(ctx, func(c *functions.FunctionClient) error {
+	return p.withClient(ctx, func(c *functions.FunctionClient) error {
 		up, err := c.GenerateUploadUrl(ctx, &functionspb.GenerateUploadUrlRequest{Parent: parent, KmsKeyName: kms})
 		if err != nil {
 			return err
@@ -786,6 +814,7 @@ func (p functionsProvider) ActAtFile(ctx context.Context, project string, path [
 		}
 		sc := &functionspb.ServiceConfig{AvailableMemory: memory, BinaryAuthorizationPolicy: binauthz}
 		secrets.v2(sc)
+		settings.v2(sc)
 		op, err := c.CreateFunction(ctx, &functionspb.CreateFunctionRequest{Parent: parent, FunctionId: id, Function: &functionspb.Function{
 			BuildConfig: &functionspb.BuildConfig{Runtime: values["runtime"], EntryPoint: strings.TrimSpace(values["entryPoint"]), WorkerPool: pool,
 				Source: &functionspb.Source{Source: &functionspb.Source_StorageSource{StorageSource: up.GetStorageSource()}}},

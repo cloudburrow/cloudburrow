@@ -92,7 +92,7 @@ func (p runProvider) writeFunctionAction() []console.Action {
 	a := p.functions.createAction()
 	a.ID, a.Label, a.Submit = runWriteFunction, "Write a function", "Create"
 	a.Fields = inlineSourceFields(a.Fields)
-	return []console.Action{a}
+	return []console.Action{writeFunctionLayout(a)}
 }
 
 // writeFunction creates the function through Cloud Functions v2.

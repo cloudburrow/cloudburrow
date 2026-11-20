@@ -127,6 +127,11 @@ type Listing struct {
 	// up with two columns headed "Name": the implicit one and a field of the
 	// same label. The screen decides what its identifier is called.
 	NameColumn string `json:"nameColumn,omitempty"`
+	// NameAfter, when set, is the data column the name column is drawn
+	// after, for a list whose Google columns do not begin with the name:
+	// Cloud Run functions' leads with Environment, then Name (#1853).
+	// Empty, or a column not on screen, draws the name first.
+	NameAfter string `json:"nameAfter,omitempty"`
 	// TableTitle heads the table, and names it, where Google's page titles
 	// its table apart from the page: Audit Logs' "Data Access audit logs
 	// configuration" (#1864). Empty draws no heading.
@@ -1352,6 +1357,11 @@ type Action struct {
 	// parameter, comma-separated: Roles' Create custom role from selection
 	// opens Create custom role with ?roles= (#2013).
 	Href string `json:"href,omitempty"`
+	// Then, when set, is the console route the form's action opens once it
+	// succeeds, each {field} in it replaced by the value submitted for that
+	// field: Write a function's Create lands on the function's Source tab,
+	// as Google's does (#1853).
+	Then string `json:"then,omitempty"`
 	// Button draws a row's action as a button on the row, before its
 	// menu, as Google's Triggers rows carry Run (#1854).
 	Button bool `json:"button,omitempty"`

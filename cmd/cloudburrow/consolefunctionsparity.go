@@ -329,6 +329,7 @@ func (p functionsProvider) sourceSection(ctx context.Context, fn *functionspb.Fu
 	if a, ok := editSourceAction(fn, runtime, entryPoint, files); ok {
 		sec.Actions = []console.Action{a}
 	}
+	sec.Actions = append(sec.Actions, sourceTabActions()...)
 	return sec
 }
 
@@ -787,7 +788,8 @@ func (p functionsProvider) functionTabs(ctx context.Context, fn *functionspb.Fun
 	runtime, entry, url string, runtimeEnv, buildEnv map[string]string, et *functionspb.EventTrigger) []console.Section {
 	gen1 := fn.GetEnvironment() == functionspb.Environment_GEN_1
 	return []console.Section{
-		runNotLocal("metrics", "Metrics", "A function's metrics (invocations, execution times, memory) are Cloud Monitoring's, which CloudBurrow does not run."),
+		runNotLocal("metrics", "Metrics", "A function's metrics (invocations, execution times, memory) are Cloud Monitoring's "+
+			"cloudfunctions.googleapis.com and run.googleapis.com metrics, which this instance's Cloud Monitoring does not produce."),
 		{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Heading: "General information", Properties: summary}}},
 		p.sourceSection(ctx, fn, runtime, entry),
 		variablesSection(runtimeEnv, buildEnv, functionSecretsListing(fn.GetServiceConfig())),

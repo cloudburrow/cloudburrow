@@ -133,8 +133,19 @@ func TestCloudRunFunctionsEditDownloadAndPermissionsThroughThePage(t *testing.T)
 // machine the build fails "image architecture does not match the cluster".
 func requireAmd64FunctionBuilds(ctx context.Context, t *testing.T) {
 	t.Helper()
+	if ok, why := amd64FunctionBuilds(ctx, t); !ok {
+		t.Skip(why)
+	}
+}
+
+// amd64FunctionBuilds reports whether a function built here can run, and
+// why not: builds are asked for (CLOUDBURROW_TEST_FUNCTIONS) and the
+// cluster's nodes are the Google builder's architecture. A test with only
+// part of it build-dependent runs the rest either way (#1853).
+func amd64FunctionBuilds(ctx context.Context, t *testing.T) (bool, string) {
+	t.Helper()
 	if os.Getenv("CLOUDBURROW_TEST_FUNCTIONS") == "" {
-		t.Skip("CLOUDBURROW_TEST_FUNCTIONS is not set; this test builds a function from source with Google's builder, so it runs only when asked for")
+		return false, "CLOUDBURROW_TEST_FUNCTIONS is not set; this test builds a function from source with Google's builder, so it runs only when asked for"
 	}
 	cluster := strings.TrimSpace(os.Getenv(envCluster))
 	kubeconfig := strings.TrimSpace(os.Getenv("CLOUDBURROW_TEST_KUBECONFIG"))
@@ -147,6 +158,7 @@ func requireAmd64FunctionBuilds(ctx context.Context, t *testing.T) {
 		t.Fatalf("read the node architecture: %v", err)
 	}
 	if want := strings.TrimPrefix(buildpacks.BuilderPlatform, "linux/"); arch != want {
-		t.Skipf("the cluster's nodes are %s; the Google builder produces %s images only, which cannot run here", arch, want)
+		return false, fmt.Sprintf("the cluster's nodes are %s; the Google builder produces %s images only, which cannot run here", arch, want)
 	}
+	return true, ""
 }
