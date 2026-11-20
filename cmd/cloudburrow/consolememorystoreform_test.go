@@ -43,7 +43,7 @@ func TestMemorystoreCreateFormsFollowGoogle(t *testing.T) {
 		return console.Field{}
 	}
 	_, redis := (memorystoreProvider{}).CreateForm()
-	if got, want := names(redis), "id,displayName,tier,region,zone,redisVersion,memorySizeGb,authEnabled,transitEncryption,authorizedNetwork,redisConfigs,"+
+	if got, want := names(redis), "id,displayName,tier,region,zone,redisVersion,memorySizeGb,authEnabled,transitEncryption,authorizedNetwork,connectMode,reservedIpRange,redisConfigs,"+
 		"readReplicas,replicaCount,customerManagedKey,labels"; got != want {
 		t.Errorf("Create a Redis instance fields = %s, want %s", got, want)
 	}

@@ -187,6 +187,15 @@ func (memorystoreProvider) CreateForm() (string, []console.Field) {
 			Help: "The server serves TLS only, with a certificate of the instance's own CA, which its page shows. It cannot be changed later."},
 		{Name: "authorizedNetwork", Label: "Authorized network", Type: "text", Default: "default",
 			Help: "The VPC network clients connect from. Every client on this machine, or in its Kubernetes cluster, reaches the instance whichever network is named."},
+		// Advanced network options (#1862): Google's expander sets up a
+		// private services access connection, which it recommends; the API
+		// defaults to direct peering.
+		{Name: "connectMode", Label: "Connection", Type: "radio", Default: "DIRECT_PEERING", Section: msSectionNetwork,
+			Options:      []string{"DIRECT_PEERING", "PRIVATE_SERVICE_ACCESS"},
+			OptionLabels: map[string]string{"DIRECT_PEERING": "Direct peering", "PRIVATE_SERVICE_ACCESS": "Private services access"},
+			Help:         "Private services access connects over the network's allocated range; direct peering peers the network with the instance's. It cannot be changed later."},
+		{Name: "reservedIpRange", Label: "IP range", Type: "text", Section: msSectionNetwork, Pattern: `^([a-z]([a-z0-9\-]{0,61}[a-z0-9])?|[0-9]{1,3}(\.[0-9]{1,3}){3}\/[0-9]{1,2})?$`,
+			Help: "Optional: a CIDR range, /29 or larger (/28 with read replicas), or with private services access the name of an allocated range. Unset, an unused range is chosen."},
 		{Name: "redisConfigs", Label: "Configurations", Type: "map",
 			Help: "Optional (Add Configuration). One key=value per line: maxmemory-policy, notify-keyspace-events, activedefrag, " +
 				"lfu-decay-time, lfu-log-factor, stream-node-max-bytes, stream-node-max-entries, maxmemory-gb."},
@@ -236,6 +245,10 @@ func (p memorystoreProvider) Create(ctx context.Context, project string, values 
 		in.TransitEncryptionMode = redispb.Instance_SERVER_AUTHENTICATION
 	}
 	in.CustomerManagedKey = strings.TrimSpace(values["customerManagedKey"])
+	if v, ok := redispb.Instance_ConnectMode_value[values["connectMode"]]; ok {
+		in.ConnectMode = redispb.Instance_ConnectMode(v)
+	}
+	in.ReservedIpRange = strings.TrimSpace(values["reservedIpRange"])
 	if values["tier"] == "STANDARD_HA" {
 		in.Tier = redispb.Instance_STANDARD_HA
 		if values["readReplicas"] == "true" {
@@ -337,7 +350,7 @@ func (p memorystoreProvider) Detail(ctx context.Context, project string, path []
 		{Label: "Labels", Value: orDash(memorystorePairs(inst.GetLabels()))},
 	}
 	config := []console.Property{
-		{Label: "AUTH", Value: map[bool]string{true: "Enabled", false: "Disabled"}[inst.GetAuthEnabled()]},
+		{Label: "AUTH", Value: memorystoreOnOff(inst.GetAuthEnabled())},
 		{Label: "In-transit encryption", Value: memorystoreTransit(inst)},
 		{Label: "Redis configs", Value: orDash(memorystorePairs(inst.GetRedisConfigs()))},
 		{Label: "Persistence", Value: memorystorePersistence(inst.GetPersistenceConfig())},
@@ -345,7 +358,8 @@ func (p memorystoreProvider) Detail(ctx context.Context, project string, path []
 	conns := []console.Property{
 		{Label: "Endpoint", Value: memorystoreEndpoint(inst)},
 		{Label: "Authorized network", Value: orDash(inst.GetAuthorizedNetwork())},
-		{Label: "Connection mode", Value: inst.GetConnectMode().String()},
+		{Label: "Connection mode", Value: memorystoreConnectText(inst.GetConnectMode().String())},
+		{Label: "IP range", Value: orDash(inst.GetReservedIpRange())},
 	}
 	if inst.GetTier() == redispb.Instance_STANDARD_HA {
 		var nodes []string
@@ -357,7 +371,7 @@ func (p memorystoreProvider) Detail(ctx context.Context, project string, path []
 			console.Property{Label: "Alternative zone", Value: inst.GetAlternativeLocationId()})
 		config = append(config,
 			console.Property{Label: "Replicas", Value: strconv.Itoa(int(inst.GetReplicaCount()))},
-			console.Property{Label: "Read replicas", Value: inst.GetReadReplicasMode().String()})
+			console.Property{Label: "Read replicas", Value: memorystoreOnOff(inst.GetReadReplicasMode() == redispb.Instance_READ_REPLICAS_ENABLED)})
 		conns = append(conns,
 			console.Property{Label: "Read endpoint", Value: orDash(memorystoreReadEndpoint(inst))},
 			console.Property{Label: "Nodes", Value: strings.Join(nodes, ", ")})
@@ -397,7 +411,7 @@ func (p memorystoreProvider) Detail(ctx context.Context, project string, path []
 		return d, nil
 	}
 	d.Edit = &console.EditForm{
-		Label: "Edit", Title: "Edit Redis instance", Submit: "Save",
+		Label: "Edit", Title: "Edit Redis instance", Submit: "Save", Page: true,
 		Fields: []console.Field{
 			{Name: "displayName", Label: "Display name", Type: "text", Default: inst.GetDisplayName()},
 			{Name: "memorySizeGb", Label: "Capacity", Type: "number", Required: true, Pattern: `^[0-9]{1,3}$`,
@@ -406,10 +420,10 @@ func (p memorystoreProvider) Detail(ctx context.Context, project string, path []
 			{Name: "redisConfigs", Label: "Configurations", Type: "map", Default: console.FormatMap(inst.GetRedisConfigs()),
 				Help: "A config removed here goes back to its default."},
 			{Name: "persistence", Label: "Persistence", Type: "select", Default: memorystorePersistenceChoice(inst.GetPersistenceConfig()),
-				Options: memorystorePersistenceChoices,
-				Help:    "RDB snapshots every period (the server's save point), or none; set on the running server."},
+				Options: memorystorePersistenceChoices, OptionLabels: memorystorePersistenceChoiceLabels,
+				Help: "RDB snapshots every period (the server's save point), or none; set on the running server."},
 			{Name: "maintenanceDay", Label: "Maintenance window day", Type: "select", Default: memorystoreWindowDay(inst),
-				Options: memorystoreWindowDays, Help: "The weekly one-hour maintenance window (maintenance_policy); NONE for no window."},
+				Options: memorystoreWindowDays, OptionLabels: memorystoreWindowDayLabels, Help: "The weekly one-hour maintenance window (maintenance_policy); NONE for no window."},
 			{Name: "maintenanceHour", Label: "Maintenance window hour (UTC)", Type: "number", Pattern: `^([0-9]|1[0-9]|2[0-3])$`,
 				Default: memorystoreWindowHour(inst), Help: "0 to 23."},
 		},
@@ -629,6 +643,19 @@ func (p memorystoreProvider) ActAt(ctx context.Context, project string, path []s
 // none, or RDB with one of Memorystore's snapshot periods.
 var memorystorePersistenceChoices = []string{"DISABLED", "ONE_HOUR", "SIX_HOURS", "TWELVE_HOURS", "TWENTY_FOUR_HOURS"}
 
+// memorystorePersistenceChoiceLabels are those options in words.
+var memorystorePersistenceChoiceLabels = map[string]string{"DISABLED": "No persistence", "ONE_HOUR": "RDB snapshot every hour",
+	"SIX_HOURS": "RDB snapshot every 6 hours", "TWELVE_HOURS": "RDB snapshot every 12 hours", "TWENTY_FOUR_HOURS": "RDB snapshot every 24 hours"}
+
+// memorystoreWindowDayLabels are the maintenance window's days in words.
+var memorystoreWindowDayLabels = func() map[string]string {
+	m := map[string]string{"NONE": "No window"}
+	for k, v := range memorystoreDayLabels {
+		m[k] = v
+	}
+	return m
+}()
+
 func memorystorePersistenceChoice(pc *redispb.PersistenceConfig) string {
 	if pc.GetPersistenceMode() == redispb.PersistenceConfig_RDB {
 		return pc.GetRdbSnapshotPeriod().String()
@@ -639,9 +666,9 @@ func memorystorePersistenceChoice(pc *redispb.PersistenceConfig) string {
 // memorystorePersistence is persistence_config as the page shows it.
 func memorystorePersistence(pc *redispb.PersistenceConfig) string {
 	if pc.GetPersistenceMode() != redispb.PersistenceConfig_RDB {
-		return "Disabled"
+		return "No persistence"
 	}
-	return fmt.Sprintf("RDB every %s, next %s", pc.GetRdbSnapshotPeriod(), pc.GetRdbNextSnapshotTime().AsTime().UTC().Format(time.RFC3339))
+	return fmt.Sprintf("%s, next %s", memorystorePersistenceChoiceLabels[pc.GetRdbSnapshotPeriod().String()], pc.GetRdbNextSnapshotTime().AsTime().UTC().Format(time.RFC3339))
 }
 
 // memorystoreEncryption is an instance's encryption at rest, as its page

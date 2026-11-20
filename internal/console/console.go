@@ -791,6 +791,11 @@ type EditForm struct {
 	// opens Deploy worker pool revision, ending in Deploy (#1852).
 	Title  string `json:"title,omitempty"`
 	Submit string `json:"submit,omitempty"`
+	// Page draws the form as a page of its own, the resource's address
+	// with ?edit=1, ending in Submit and Cancel, rather than as a dialog:
+	// Google's Edit opens the "Edit Redis instance" page, which saves with
+	// Save (#1862).
+	Page bool `json:"page,omitempty"`
 }
 
 // Property is one label/value pair on a resource's summary.
