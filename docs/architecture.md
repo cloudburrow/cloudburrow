@@ -155,6 +155,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/hooks/` | Runs the `ready.d` and `shutdown.d` lifecycle script directories (#285). |
 | `internal/grpchttp/` | Builds gRPC servers that are served through `ServeHTTP` (h2c) with `WaitForHandlers`, and stops them so `Stop` waits for every call's handler, its stats `End` included, before returning (#1804). `grpchttptest` holds the shared regression-test helpers. |
 | `internal/hostguard/` | Refuses HTTP requests whose Host header names a host CloudBurrow does not answer to: the DNS-rebinding defence on every HTTP listener (#676). |
+| `internal/unserved/` | The local-only guard (#1975): the inventories of every endpoint setting of the pinned hashicorp/google, google-beta and gcloud (`scripts/endpoint-inventory.sh`), and the refusal the Resource Manager port serves at `/_cloudburrow/unserved/` for every one this instance does not serve, which `cloudburrow terraform`, `env --format terraform` and `gcloud-setup` point them at. |
 | `internal/hostrelay/` | TCP relay that lets pods reach services the CLI serves on loopback (#575). |
 | `internal/iamcheck/` | How the servers CloudBurrow runs in the cluster (Cloud Storage, Pub/Sub's front) ask the host's one evaluator, `internal/iameval`, whether a request's caller holds a permission, under `up --iam-enforcement=on` (#1879). |
 | `internal/iamcond/` | Compiles and evaluates IAM Conditions: the CEL subset Google accepts on a role binding (#1742, #1745). |

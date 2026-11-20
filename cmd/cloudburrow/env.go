@@ -17,6 +17,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
 	"github.com/cloudburrow/cloudburrow/internal/metadata"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
+	"github.com/cloudburrow/cloudburrow/internal/unserved"
 )
 
 // runEnv prints the environment that points Google tooling at this instance.
@@ -734,7 +735,23 @@ func writeTerraformEnv(w io.Writer, cfg config.Config) {
 		fmt.Fprintf(w, "export %s=%q\n", e.env, e.url)
 	}
 	for _, s := range skipped {
-		fmt.Fprintf(w, "# %s: no Verified Terraform support, so no endpoint is set; its resources would reach real Google\n", s)
+		fmt.Fprintf(w, "# %s: no Verified Terraform support, so its endpoints are refused locally rather than pointed here\n", s)
+	}
+	// The local-only guard (#1975): every other endpoint argument of the
+	// pinned google and google-beta providers is refused by this instance,
+	// so a resource it does not serve fails here instead of reaching Google.
+	fmt.Fprintln(w, "# Every other endpoint is refused locally (#1975); none is left at its Google default.")
+	var noEnv []string
+	for _, r := range terraformRefusals(cfg, set) {
+		if unserved.TerraformNoEnv[r.attr] {
+			noEnv = append(noEnv, r.attr)
+			continue
+		}
+		fmt.Fprintf(w, "export %s=%q\n", r.env, r.url)
+	}
+	if len(noEnv) > 0 {
+		fmt.Fprintf(w, "# The provider reads no variable for %s: they keep their Google default here; "+
+			"`cloudburrow terraform` sets them in the provider block.\n", strings.Join(noEnv, ", "))
 	}
 }
 

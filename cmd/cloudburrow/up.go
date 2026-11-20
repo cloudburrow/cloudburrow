@@ -20,6 +20,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/store"
 	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
+	"github.com/cloudburrow/cloudburrow/internal/unserved"
 	"github.com/cloudburrow/cloudburrow/internal/version"
 	"io"
 	"log/slog"
@@ -798,6 +799,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// Kourier's gateway asks before routing to a Cloud Run service
 	// (run.routes.invoke, runinvoke.go).
 	rmSrv.HandleUnguarded(isRunInvokeAuthz, runInvokeAuthz{e: iamEnforcer, creds: creds, run: runSvc})
+	// The local-only guard's refusal (#1975): every endpoint setting
+	// `cloudburrow terraform` and `gcloud-setup` write for an API this
+	// instance does not serve points here, and is refused with a message,
+	// whatever Host the tool derived (regional hosts among them).
+	rmSrv.HandleUnguarded(unserved.Match, unserved.Handler())
 	coord.Register(rmSrv)
 	// A build's serviceAccount names an IAM account of this registry (#1854).
 	runadapter.UseServiceAccounts(func(name string) (string, bool, bool) {
