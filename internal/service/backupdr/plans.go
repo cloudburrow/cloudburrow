@@ -213,6 +213,7 @@ func checkSchedule(i int, sch map[string]any, typ string) error {
 	if sch == nil {
 		return invalid("backupPlan.backupRules[%d].standardSchedule is required.", i)
 	}
+	enumNames(sch)
 	rt, _ := sch["recurrenceType"].(string)
 	if !recurrences[rt] {
 		return invalid("backupPlan.backupRules[%d].standardSchedule.recurrenceType %q is not one of HOURLY, DAILY, WEEKLY, MONTHLY, YEARLY.", i, rt)
@@ -498,8 +499,8 @@ func (s *Server) dataSourceJSON(d *dataSource) map[string]any {
 	}
 	out := map[string]any{"name": d.Name, "state": "ACTIVE", "configState": state, "backupCount": strconv.Itoa(count),
 		"createTime": d.CreateTime, "updateTime": d.UpdateTime, "etag": strconv.Quote(d.UpdateTime),
-		"totalStoredBytes": strconv.FormatInt(s.storedBytes(d.Name+"/"), 10),
-		"backupConfigInfo": cfg,
+		"totalStoredBytes":      strconv.FormatInt(s.storedBytes(d.Name+"/"), 10),
+		"backupConfigInfo":      cfg,
 		"dataSourceGcpResource": gcp}
 	if len(d.Labels) > 0 {
 		out["labels"] = d.Labels
@@ -971,4 +972,41 @@ func locationOfName(name string) string {
 		return p[3]
 	}
 	return ""
+}
+
+// The schedule's enums by number: the REST clients of
+// cloud.google.com/go/backupdr send enums as numbers (protojson with
+// UseEnumNumbers), which Google's API accepts as it does their names.
+var (
+	recurrenceEnum = []string{"RECURRENCE_TYPE_UNSPECIFIED", "HOURLY", "DAILY", "WEEKLY", "MONTHLY", "YEARLY"}
+	dayEnum        = []string{"DAY_OF_WEEK_UNSPECIFIED", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"}
+	monthEnum      = []string{"MONTH_UNSPECIFIED", "JANUARY", "FEBRUARY", "MARCH", "APRIL", "MAY", "JUNE", "JULY", "AUGUST",
+		"SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER"}
+	weekEnum = []string{"WEEK_OF_MONTH_UNSPECIFIED", "FIRST", "SECOND", "THIRD", "FOURTH", "LAST"}
+)
+
+// enumName is v as its enum's name when it is a number.
+func enumName(v any, names []string) any {
+	if n, ok := v.(float64); ok && n >= 0 && int(n) < len(names) && n == float64(int(n)) {
+		return names[int(n)]
+	}
+	return v
+}
+
+// enumNames rewrites a standardSchedule's numeric enums as their names.
+func enumNames(sch map[string]any) {
+	if v, ok := sch["recurrenceType"]; ok {
+		sch["recurrenceType"] = enumName(v, recurrenceEnum)
+	}
+	for k, names := range map[string][]string{"daysOfWeek": dayEnum, "months": monthEnum} {
+		if l, ok := sch[k].([]any); ok {
+			for i := range l {
+				l[i] = enumName(l[i], names)
+			}
+		}
+	}
+	if w, ok := sch["weekDayOfMonth"].(map[string]any); ok {
+		w["weekOfMonth"] = enumName(w["weekOfMonth"], weekEnum)
+		w["dayOfWeek"] = enumName(w["dayOfWeek"], dayEnum)
+	}
 }

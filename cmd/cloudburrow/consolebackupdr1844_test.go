@@ -14,7 +14,7 @@ func TestBackupDRRuleWeekDayOfMonth(t *testing.T) {
 	rules, err := bdrRulesFrom(console.FormatGroup([]map[string]string{
 		{"ruleId": "monthly", "recurrence": "MONTHLY", "weekDayOfMonth": "LAST-SUNDAY", "start": "0", "end": "24", "retention": "30"},
 		{"ruleId": "yearly", "recurrence": "YEARLY", "weekDayOfMonth": "first mon", "months": "MAR", "start": "0", "end": "24", "retention": "30"},
-	}), "UTC", false)
+	}), "UTC", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +39,7 @@ func TestBackupDRRuleWeekDayOfMonth(t *testing.T) {
 		{"ruleId": "a", "recurrence": "MONTHLY", "weekDayOfMonth": "FIFTH-MONDAY", "start": "0", "end": "24", "retention": "7"},
 		{"ruleId": "a", "recurrence": "MONTHLY", "weekDayOfMonth": "LAST-FUNDAY", "start": "0", "end": "24", "retention": "7"},
 	} {
-		if _, err := bdrRulesFrom(console.FormatGroup([]map[string]string{bad}), "UTC", false); err == nil {
+		if _, err := bdrRulesFrom(console.FormatGroup([]map[string]string{bad}), "UTC", false, ""); err == nil {
 			t.Errorf("accepted %v", bad)
 		}
 	}

@@ -378,6 +378,10 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		if d.sqlAdmin != nil {
 			p.sql = d.sqlAdmin
 		}
+		if enabled[config.ServiceCompute] && d.compute != nil {
+			// Compute Engine VMs and disks (#2075).
+			p.compute = d.compute.API
+		}
 		// Google's menu (#1844): Overview, Vaulted backups, Backup plans,
 		// Backup plan associations, Backup vaults (p) and Jobs.
 		providers = append(providers, bdrOverviewProvider{api: p}, bdrVaultedProvider{api: p}, bdrPlansProvider{api: p},

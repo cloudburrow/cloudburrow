@@ -123,8 +123,8 @@ func TestConsoleBackupDRGooglePages(t *testing.T) {
 	}
 
 	// Schedule backup: an instance and a plan of its region.
-	if f := vaulted.CreateFormFor(ctx, project); len(f[2].Options) != 2 || len(f[3].Options) != 2 {
-		t.Errorf("Schedule backup's resources and plans: %+v %+v", f[2], f[3])
+	if f := vaulted.CreateFormFor(ctx, project); len(f[2].Options) != 2 || len(f[5].Options) != 2 {
+		t.Errorf("Schedule backup's resources and plans: %+v %+v", f[2], f[5])
 	}
 	if _, err := vaulted.Create(ctx, project, map[string]string{"resourceType": backupdr.CloudSQLResourceType, "region": "us-east1",
 		"instance": "pg", "plan": "projects/" + project + "/locations/us-central1/backupPlans/plan-1"}); err == nil {
@@ -148,9 +148,12 @@ func TestConsoleBackupDRGooglePages(t *testing.T) {
 	if sqlOnly, _ := vaulted.List(console.WithScopeValue(ctx, bdrTypeKey, backupdr.CloudSQLResourceType), project); len(sqlOnly.Items) != 1 {
 		t.Errorf("Resource type Cloud SQL: %+v", sqlOnly.Items)
 	}
-	if vms, _ := vaulted.List(console.WithScopeValue(ctx, bdrTypeKey, "compute.googleapis.com/Instance"), project); len(vms.Items) != 0 ||
-		!strings.Contains(vms.Note, "not served") {
+	if vms, _ := vaulted.List(console.WithScopeValue(ctx, bdrTypeKey, "compute.googleapis.com/Instance"), project); len(vms.Items) != 0 {
 		t.Errorf("Resource type Compute Engine: %+v %q", vms.Items, vms.Note)
+	}
+	if adb, _ := vaulted.List(console.WithScopeValue(ctx, bdrTypeKey, "alloydb.googleapis.com/Cluster"), project); len(adb.Items) != 0 ||
+		!strings.Contains(adb.Note, "not served") {
+		t.Errorf("Resource type AlloyDB: %+v %q", adb.Items, adb.Note)
 	}
 	if acts := bdrActionIDs(vaulted.DetailActions(ctx, project, path)); acts != "ondemand,changeplan,removeplan,pitr" {
 		t.Errorf("a resource's actions before a backup: %s", acts)

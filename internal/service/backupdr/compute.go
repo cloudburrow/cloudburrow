@@ -548,7 +548,7 @@ func (s *Server) computeBackupJSON(b *backup, d *dataSource, out map[string]any)
 		disks = append(disks, map[string]any{"deviceName": dk.DeviceName, "boot": dk.Boot, "autoDelete": dk.AutoDelete,
 			"mode": dk.Mode, "diskSizeGb": strconv.FormatInt(dk.SizeGb, 10), "type": "PERSISTENT",
 			"diskType": "projects/" + d.Project + "/zones/" + d.Zone + "/diskTypes/" + dk.Type,
-			"source": dk.Source})
+			"source":   dk.Source})
 	}
 	p := map[string]any{"sourceInstance": d.computeRel(), "machineType": str(i, "machineType"), "description": str(i, "description"),
 		"canIpForward": i["canIpForward"] == true, "disk": disks, "keyRevocationActionType": "NONE"}

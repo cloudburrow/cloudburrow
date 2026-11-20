@@ -38,13 +38,13 @@ func (m *memVMs) DeleteSnapshot(_ context.Context, key string) error {
 	delete(m.data, key)
 	return nil
 }
-func (m *memVMs) Start(context.Context, compute.VMSpec) error                   { return nil }
-func (m *memVMs) Stop(context.Context, compute.VMSpec) error                    { return nil }
-func (m *memVMs) Suspend(context.Context, compute.VMSpec) error                 { return nil }
-func (m *memVMs) Resume(context.Context, compute.VMSpec) error                  { return nil }
+func (m *memVMs) Start(context.Context, compute.VMSpec) error                  { return nil }
+func (m *memVMs) Stop(context.Context, compute.VMSpec) error                   { return nil }
+func (m *memVMs) Suspend(context.Context, compute.VMSpec) error                { return nil }
+func (m *memVMs) Resume(context.Context, compute.VMSpec) error                 { return nil }
 func (m *memVMs) SerialOutput(context.Context, compute.VMSpec) (string, error) { return "", nil }
-func (m *memVMs) SSHAddress(compute.VMSpec) string                              { return "" }
-func (m *memVMs) FreeBytes() (uint64, error)                                    { return 1 << 50, nil }
+func (m *memVMs) SSHAddress(compute.VMSpec) string                             { return "" }
+func (m *memVMs) FreeBytes() (uint64, error)                                   { return 1 << 50, nil }
 
 // diskKey is the backend key of a served disk ("disk-" + its id).
 func diskKey(t *testing.T, api *compute.Server, project, zone, disk string) string {
@@ -225,11 +225,11 @@ func TestComputeBackupAndRestore(t *testing.T) {
 		t.Errorf("the disk restored from the VM's backup: %v", d)
 	}
 	for body, want := range map[string]int{
-		`{"diskTargetEnvironment":{"project":"p","zone":"us-central1-a"},"diskRestoreProperties":{}}`:                                                http.StatusBadRequest,
-		`{"computeInstanceTargetEnvironment":{"project":"p","zone":"us-central1-a"},"computeInstanceRestoreProperties":{"name":"x"}}`:                http.StatusBadRequest,
-		`{"regionDiskTargetEnvironment":{"project":"p","region":"us-central1"}}`:                                                                     http.StatusNotImplemented,
-		`{"diskTargetEnvironment":{"project":"p","zone":"us-central1-a"},"diskRestoreProperties":{"name":"data2x","storagePool":"x"}}`:               http.StatusNotImplemented,
-		`{"diskTargetEnvironment":{"project":"p","zone":"us-central1-b"},"diskRestoreProperties":{"name":"data2"}}`:                                  http.StatusConflict,
+		`{"diskTargetEnvironment":{"project":"p","zone":"us-central1-a"},"diskRestoreProperties":{}}`:                                  http.StatusBadRequest,
+		`{"computeInstanceTargetEnvironment":{"project":"p","zone":"us-central1-a"},"computeInstanceRestoreProperties":{"name":"x"}}`:  http.StatusBadRequest,
+		`{"regionDiskTargetEnvironment":{"project":"p","region":"us-central1"}}`:                                                       http.StatusNotImplemented,
+		`{"diskTargetEnvironment":{"project":"p","zone":"us-central1-a"},"diskRestoreProperties":{"name":"data2x","storagePool":"x"}}`: http.StatusNotImplemented,
+		`{"diskTargetEnvironment":{"project":"p","zone":"us-central1-b"},"diskRestoreProperties":{"name":"data2"}}`:                    http.StatusConflict,
 	} {
 		if code, out := call(t, s, "POST", "/v1/"+db["name"].(string)+":restore", body); code != want {
 			t.Errorf("restore %s: %d %v, want %d", body, code, out, want)

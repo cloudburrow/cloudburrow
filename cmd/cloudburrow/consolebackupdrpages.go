@@ -26,8 +26,8 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
 )
 
-// bdrResourceTypes are Google's Resource Type choices; only Cloud SQL is
-// served here (docs/backupdr.md).
+// bdrResourceTypes are Google's Resource Type choices; Cloud SQL and
+// Compute Engine's VMs and disks (#2075) are served here (docs/backupdr.md).
 var bdrResourceTypes = []string{backupdr.CloudSQLResourceType, "compute.googleapis.com/Instance", "compute.googleapis.com/Disk",
 	"alloydb.googleapis.com/Cluster", "file.googleapis.com/Instance"}
 
@@ -38,8 +38,8 @@ var bdrResourceTypeLabels = map[string]string{backupdr.CloudSQLResourceType: "Cl
 // why.
 func bdrUnservedTypes() map[string]string {
 	out := map[string]string{}
-	for _, t := range bdrResourceTypes[1:] {
-		out[t] = "Not available locally: CloudBurrow's Backup and DR Service backs up Cloud SQL instances only; " +
+	for _, t := range bdrResourceTypes[3:] {
+		out[t] = "Not available locally: CloudBurrow's Backup and DR Service backs up Cloud SQL instances and Compute Engine VMs and disks; " +
 			bdrResourceTypeLabels[t] + " is not served (docs/backupdr.md)."
 	}
 	return out
@@ -101,8 +101,18 @@ type bdrSource struct {
 func (s bdrSource) vaultID() string { return lastSegment(str(s.vault, "name")) }
 func (s bdrSource) id() string      { return lastSegment(str(s.ds, "name")) }
 func (s bdrSource) instance() string {
-	return str(nested(s.ds, "dataSourceGcpResource", "cloudSqlInstanceDatasourceProperties"), "name")
+	g := nested(s.ds, "dataSourceGcpResource")
+	switch str(g, "type") {
+	case backupdr.ComputeInstanceResourceType:
+		return str(nested(g, "computeInstanceDatasourceProperties"), "name")
+	case backupdr.ComputeDiskResourceType:
+		return str(nested(g, "diskDatasourceProperties"), "name")
+	}
+	return str(nested(g, "cloudSqlInstanceDatasourceProperties"), "name")
 }
+
+// typ is the protected resource's type.
+func (s bdrSource) typ() string          { return str(nested(s.ds, "dataSourceGcpResource"), "type") }
 func (s bdrSource) instanceName() string { return lastSegment(s.instance()) }
 func (s bdrSource) location() string     { return str(nested(s.ds, "dataSourceGcpResource"), "location") }
 func (s bdrSource) plan() string {
@@ -434,8 +444,8 @@ func (p bdrVaultedProvider) List(ctx context.Context, project string) (console.L
 	}
 	l := console.Listing{Columns: bdrVaultedColumns, NameColumn: "Resource name", Noun: "protected resources", AlwaysStatus: true,
 		Filters: []*console.Scope{bdrTypeFilter(typ)},
-		Note:    "The resources with a backup plan applied, or with backups in a backup vault of this project: Cloud SQL instances only (docs/backupdr.md)."}
-	if typ != "all" && typ != backupdr.CloudSQLResourceType {
+		Note:    "The resources with a backup plan applied, or with backups in a backup vault of this project: Cloud SQL instances, Compute Engine VMs and disks (docs/backupdr.md)."}
+	if typ != "all" && typ != backupdr.CloudSQLResourceType && !bdrComputeType(typ) {
 		if _, known := bdrResourceTypeLabels[typ]; !known {
 			l.Unavailable = fmt.Sprintf("%q is not a resource type Backup and DR protects", typ)
 			return l, nil
@@ -454,6 +464,9 @@ func (p bdrVaultedProvider) List(ctx context.Context, project string) (console.L
 		return l, nil
 	}
 	for _, s := range srcs {
+		if typ != "all" && s.typ() != typ {
+			continue
+		}
 		cfg := nested(s.ds, "backupConfigInfo")
 		// The row's menu: "Either from the menu, or from the details page
 		// for the resource, select Create on-demand backup"; Change backup
@@ -466,7 +479,7 @@ func (p bdrVaultedProvider) List(ctx context.Context, project string) (console.L
 		}
 		l.Items = append(l.Items, console.Resource{Name: s.instanceName(), Status: str(s.ds, "configState"),
 			Opens: []string{s.vaultID(), s.id()}, Target: []string{s.vaultID(), s.id()}, Actions: menu,
-			Fields: map[string]string{"Resource type": "Cloud SQL", "Location": s.location(), "Backup plan": lastSegment(s.plan()),
+			Fields: map[string]string{"Resource type": bdrTypeLabel(s.typ()), "Location": s.location(), "Backup plan": lastSegment(s.plan()),
 				"Backup vault": s.vaultID(), "Backups": str(s.ds, "backupCount"), "Last backup": bdrLastState(str(cfg, "lastBackupState")),
 				"Last successful backup": str(cfg, "lastSuccessfulBackupConsistencyTime")}})
 	}
@@ -483,10 +496,11 @@ func bdrLastState(s string) string {
 
 // CreateForm implements console.Creator: Google's Schedule backup.
 func (bdrVaultedProvider) CreateForm() (string, []console.Field) {
-	return "Schedule backup", bdrScheduleFields(nil, nil, nil, nil)
+	return "Schedule backup", bdrScheduleFields(nil, nil, nil, nil, nil, nil, nil, nil)
 }
 
-func bdrScheduleFields(instances []string, instLabels map[string]string, plans []string, planLabels map[string]string) []console.Field {
+func bdrScheduleFields(instances []string, instLabels map[string]string, plans []string, planLabels map[string]string,
+	vms []string, vmLabels map[string]string, disks []string, diskLabels map[string]string) []console.Field {
 	regions := backupdr.Regions
 	return []console.Field{
 		{Name: "resourceType", Label: "Resource Type", Type: "radio", Required: true, Section: "Choose resources",
@@ -494,10 +508,15 @@ func bdrScheduleFields(instances []string, instLabels map[string]string, plans [
 			UnavailableOptions: bdrUnservedTypes()},
 		{Name: "region", Label: "Region", Type: "select", Required: true, Section: "Choose resources", Options: regions,
 			OptionLabels: bdrRegionLabels(), Default: "us-central1", Help: "The region of the instance."},
-		{Name: "instance", Label: "Resources", Type: "select", Required: true, Section: "Choose resources", Options: instances,
-			OptionLabels: instLabels, Help: "The Cloud SQL instance to back up, in the region chosen."},
+		{Name: "instance", Label: "Resources", Type: "select", Section: "Choose resources", Options: instances,
+			OptionLabels: instLabels, ShowWhen: "resourceType=" + backupdr.CloudSQLResourceType,
+			Help: "The Cloud SQL instance to back up, in the region chosen."},
+		{Name: "vm", Label: "VM instances", Type: "select", Section: "Choose resources", Options: vms, OptionLabels: vmLabels,
+			ShowWhen: "resourceType=" + backupdr.ComputeInstanceResourceType, Help: "The Compute Engine VM to back up, in the region chosen: each of its disks, and its configuration."},
+		{Name: "disk", Label: "Disks", Type: "select", Section: "Choose resources", Options: disks, OptionLabels: diskLabels,
+			ShowWhen: "resourceType=" + backupdr.ComputeDiskResourceType, Help: "The disk to back up, in the region chosen."},
 		{Name: "plan", Label: "Backup plan", Type: "select", Required: true, Section: "Apply backup plan", Options: plans,
-			OptionLabels: planLabels, Help: "A Cloud SQL backup plan in the instance's region."},
+			OptionLabels: planLabels, Help: "A backup plan for the resource type, in the resource's region."},
 	}
 }
 
@@ -510,7 +529,9 @@ func (p bdrVaultedProvider) CreateFormFor(ctx context.Context, project string) [
 		labels[n] = n + " (" + inst[n][0] + ")"
 	}
 	plans, planLabels := p.api.planOptions(ctx, project)
-	return bdrScheduleFields(sortedKeysOf(inst), labels, plans, planLabels)
+	vms, vmLabels := bdrResourceOptions(p.api.computeResources(project, "instances"))
+	disks, diskLabels := bdrResourceOptions(p.api.computeResources(project, "disks"))
+	return bdrScheduleFields(sortedKeysOf(inst), labels, plans, planLabels, vms, vmLabels, disks, diskLabels)
 }
 
 func (bdrVaultedProvider) CreateOnPage() bool   { return true }
@@ -523,8 +544,11 @@ func (p bdrVaultedProvider) Create(ctx context.Context, project string, v map[st
 	if project == "" {
 		return "", errors.New("choose a project first")
 	}
+	if bdrComputeType(v["resourceType"]) {
+		return p.scheduleCompute(ctx, project, v)
+	}
 	if v["resourceType"] != "" && v["resourceType"] != backupdr.CloudSQLResourceType {
-		return "", fmt.Errorf("%s is not served here: Backup and DR backs up Cloud SQL instances only", bdrTypeLabel(v["resourceType"]))
+		return "", fmt.Errorf("%s is not served here: Backup and DR backs up Cloud SQL instances and Compute Engine VMs and disks", bdrTypeLabel(v["resourceType"]))
 	}
 	inst := p.api.sqlInstances(ctx, project)
 	i, ok := inst[v["instance"]]
@@ -565,7 +589,7 @@ func (p bdrVaultedProvider) Detail(ctx context.Context, project string, path []s
 	}
 	cfg := nested(s.ds, "backupConfigInfo")
 	d := console.Detail{Title: s.instanceName(), Summary: []console.Property{
-		{Label: "Resource name", Value: s.instance()}, {Label: "Resource type", Value: "Cloud SQL"},
+		{Label: "Resource name", Value: s.instance()}, {Label: "Resource type", Value: bdrTypeLabel(s.typ())},
 		{Label: "Location", Value: bdrRegionLabel(s.location())},
 		{Label: "Backup vault", Value: s.vaultID(), Link: "/backupdr/" + url.PathEscape(s.vaultID())},
 		{Label: "Backup plan", Value: lastSegment(s.plan()), Link: bdrLinkIf(s.plan() != "", "/backupdr-plans/"+url.PathEscape(lastSegment(s.plan())))},
@@ -575,6 +599,10 @@ func (p bdrVaultedProvider) Detail(ctx context.Context, project string, path []s
 		{Label: "Last backup", Value: bdrLastState(str(cfg, "lastBackupState"))},
 		{Label: "Last successful backup", Value: str(cfg, "lastSuccessfulBackupConsistencyTime")},
 		{Label: "Data source", Value: str(s.ds, "name")}}}
+	if bdrComputeType(s.typ()) {
+		// A VM's or disk's rows in place of the database version.
+		d.Summary = append(append(d.Summary[:6:6], bdrComputeSummary(s)...), d.Summary[7:]...)
+	}
 	if s.association() == "" {
 		d.Summary = append(d.Summary, console.Property{Label: "Backup configuration",
 			Value: "No backup plan: its backups are kept until they expire. Schedule backup applies a plan again."})
@@ -636,6 +664,9 @@ func bdrBackupDelete(b map[string]any, now time.Time) console.Action {
 // restoreAction is Google's Restore: the backup (chosen on the resource's
 // page, given on a backup's row), then Choose restore destination.
 func (p bdrVaultedProvider) restoreAction(ctx context.Context, project string, s bdrSource, backups []string) console.Action {
+	if bdrComputeType(s.typ()) {
+		return p.computeRestoreAction(ctx, project, s, backups)
+	}
 	engine := strings.SplitN(str(nested(s.ds, "dataSourceGcpResource", "cloudSqlInstanceDatasourceProperties"), "databaseInstalledVersion"), "_", 2)[0]
 	var targets []string
 	inst := p.api.sqlInstances(ctx, project)
@@ -718,6 +749,10 @@ func (p bdrVaultedProvider) DetailActions(ctx context.Context, project string, p
 	if len(active) > 0 {
 		acts = append(acts, p.restoreAction(ctx, project, s, active))
 	}
+	if bdrComputeType(s.typ()) {
+		// Point-in-time restore is Cloud SQL's.
+		return acts
+	}
 	acts = append(acts, console.Action{ID: "pitr", Label: "Point-in-time restore", Fields: []console.Field{
 		{Name: "target", Label: "New instance ID", Type: "text", Required: true, Pattern: `[a-z][a-z0-9\-]{0,96}`},
 		{Name: "time", Label: "Point in time", Type: "text", Required: true,
@@ -759,6 +794,9 @@ func (p bdrVaultedProvider) ActAt(ctx context.Context, project string, path []st
 		}
 		_, err = p.api.call(ctx, p.api.bdr, http.MethodDelete, "/v1/"+s.association(), nil)
 	case "restore":
+		if bdrComputeType(s.typ()) {
+			return p.restoreCompute(ctx, s, v)
+		}
 		target := s.instanceName()
 		switch v["destination"] {
 		case "", "source":
@@ -873,13 +911,14 @@ func bdrPlanFields(vaults []string, vaultLabels map[string]string) []console.Fie
 		{Name: "rules", Label: "Backup rules", Type: console.GroupFieldType, Required: true, Section: "Backup rules", AddLabel: "Add rule",
 			Default: console.FormatGroup([]map[string]string{{"ruleId": "daily-backup", "recurrence": "DAILY", "hourly": "6", "start": "0", "end": "24", "retention": "7"}}),
 			Help: "Each rule's recurrence, its backup window (24-hour clock, start inclusive, end exclusive, in the plan's time zone) and how many " +
-				"days its backups are kept; an hourly rule repeats every 6 to 23 hours. A weekly rule runs on its days of the week; a monthly rule " +
+				"days its backups are kept; an hourly rule repeats every 6 to 23 hours (1 to 23 for Compute Engine and disks). A weekly rule runs on its days of the week; a monthly rule " +
 				"on its days of the month, or on a week day of the month (the LAST SUNDAY); a yearly rule in its months, on either.",
 			Group: []console.Field{
 				{Name: "ruleId", Label: "Rule name", Type: "text", Required: true, Pattern: bdrIDPattern, Help: bdrIDHelp},
 				{Name: "recurrence", Label: "Recurrence", Type: "select", Options: recur, OptionLabels: map[string]string{
 					"HOURLY": "Hourly", "DAILY": "Daily", "WEEKLY": "Weekly", "MONTHLY": "Monthly", "YEARLY": "Yearly"}},
-				{Name: "hourly", Label: "Every (hours, hourly only)", Type: "text", Pattern: `[6-9]|1[0-9]|2[0-3]`, Help: "6 to 23"},
+				{Name: "hourly", Label: "Every (hours, hourly only)", Type: "text", Pattern: `[1-9]|1[0-9]|2[0-3]`,
+					Help: "6 to 23 for Cloud SQL, 1 to 23 for Compute Engine and disks"},
 				{Name: "daysOfWeek", Label: "Days of the week (weekly only)", Type: "text", Pattern: bdrTokensPattern,
 					Help: "Such as MON WED: MON, TUE, WED, THU, FRI, SAT, SUN."},
 				{Name: "daysOfMonth", Label: "Days of the month (monthly and yearly only)", Type: "text", Pattern: `[0-9 ,]*`,
@@ -925,7 +964,7 @@ func (bdrPlansProvider) CreateSubmit() string { return "Create" }
 
 // bdrRulesFrom reads the Backup rules group into the API's rules, checking
 // what Google's form checks.
-func bdrRulesFrom(group, tz string, optional bool) ([]any, error) {
+func bdrRulesFrom(group, tz string, optional bool, typ string) ([]any, error) {
 	rows, err := console.ParseGroup(group)
 	if err != nil {
 		return nil, err
@@ -972,9 +1011,15 @@ func bdrRulesFrom(group, tz string, optional bool) ([]any, error) {
 			return nil, fmt.Errorf("rule %d: %w", n, err)
 		}
 		if rec == "HOURLY" {
+			// Compute Engine VMs and disks: 1 to 23 hours; Cloud SQL: 6
+			// to 23 (StandardSchedule.hourlyFrequency).
+			lo := 6
+			if bdrComputeType(typ) {
+				lo = 1
+			}
 			h, err := strconv.Atoi(r["hourly"])
-			if err != nil || h < 6 || h > 23 {
-				return nil, fmt.Errorf("rule %d: an hourly rule repeats every 6 to 23 hours", n)
+			if err != nil || h < lo || h > 23 {
+				return nil, fmt.Errorf("rule %d: an hourly rule repeats every %d to 23 hours", n, lo)
 			}
 			sch["hourlyFrequency"] = h
 		}
@@ -988,8 +1033,12 @@ func (p bdrPlansProvider) Create(ctx context.Context, project string, v map[stri
 	if project == "" {
 		return "", errors.New("choose a project first")
 	}
-	if v["resourceType"] != "" && v["resourceType"] != backupdr.CloudSQLResourceType {
-		return "", fmt.Errorf("%s is not served here: Backup and DR backs up Cloud SQL instances only", bdrTypeLabel(v["resourceType"]))
+	typ := v["resourceType"]
+	if typ == "" {
+		typ = backupdr.CloudSQLResourceType
+	}
+	if typ != backupdr.CloudSQLResourceType && !bdrComputeType(typ) {
+		return "", fmt.Errorf("%s is not served here: Backup and DR backs up Cloud SQL instances and Compute Engine VMs and disks", bdrTypeLabel(typ))
 	}
 	if !bdrIDRe.MatchString(v["id"]) {
 		return "", fmt.Errorf("the name must be %s", bdrIDHelp)
@@ -999,11 +1048,11 @@ func (p bdrPlansProvider) Create(ctx context.Context, project string, v map[stri
 			lastSegment(v["vault"]), vl, v["region"])
 	}
 	ondemand := v["ondemand"] == "true" || v["ondemand"] == "on"
-	rules, err := bdrRulesFrom(v["rules"], strings.TrimSpace(v["timeZone"]), ondemand)
+	rules, err := bdrRulesFrom(v["rules"], strings.TrimSpace(v["timeZone"]), ondemand, typ)
 	if err != nil {
 		return "", err
 	}
-	body := map[string]any{"backupVault": v["vault"], "resourceType": backupdr.CloudSQLResourceType, "backupRules": rules}
+	body := map[string]any{"backupVault": v["vault"], "resourceType": typ, "backupRules": rules}
 	if ondemand {
 		n, err := strconv.Atoi(strings.TrimSpace(v["ondemandDays"]))
 		if err != nil || n < 1 || n > 36159 {
@@ -1175,7 +1224,7 @@ func (p bdrPlansProvider) Edit(ctx context.Context, project string, path []strin
 		return err
 	}
 	ondemand := v["ondemand"] == "true" || v["ondemand"] == "on"
-	rules, err := bdrRulesFrom(v["rules"], strings.TrimSpace(v["timeZone"]), ondemand)
+	rules, err := bdrRulesFrom(v["rules"], strings.TrimSpace(v["timeZone"]), ondemand, str(x, "resourceType"))
 	if err != nil {
 		return err
 	}

@@ -133,6 +133,8 @@ cloud.google.com/go/auth/oauth2adapt v0.2.8/go.mod h1:XQ9y31RkqZCcwJWNSx2Xvric3R
 cloud.google.com/go/auth/oauth2adapt v0.3.1 h1:BKLDdbWS7pafd820dsyFDF6fPEzIGqr7ny6hbTzCCgE=
 cloud.google.com/go/auth/oauth2adapt v0.3.1/go.mod h1:B1nM4FJDxoDqAt3PXFG4IflUoQ5kvWAOOM3R+5wAszg=
 cloud.google.com/go/automl v1.21.0/go.mod h1:MNbhUevuECzM3jqSOM7hmOedOdRJkm8xbbXW44SU15U=
+cloud.google.com/go/backupdr v1.18.0 h1:QrYAT7p3hXwwHnfubJvmm0hbrrs6a280bYO8QRc7okM=
+cloud.google.com/go/backupdr v1.18.0/go.mod h1:hajwpppV5U8ypguodM8q7ujE6RNWnzQ24Qe8xpU9O9c=
 cloud.google.com/go/baremetalsolution v1.10.0/go.mod h1:xhhT9VQiKPFd2fUs4oeDSRrxV0sb0PGeVmuZoUE2cBA=
 cloud.google.com/go/batch v1.20.0/go.mod h1:ABT/5QqsIDsONa+n/8C7XYPjwh/kjOEPXukcRTaMsCg=
 cloud.google.com/go/beyondcorp v1.8.0/go.mod h1:aVxzwamO8H4GXWQHowBAmL0KYNfYpW4E6Do2wfP0RYs=
