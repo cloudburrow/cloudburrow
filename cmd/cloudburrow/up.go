@@ -639,6 +639,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			// Eventarc's Cloud Audit Logs events (#1877), from the calls
 			// the services' fronts record.
 			go feedAuditLogs(recorder, runSvc.functions.Load)
+			// The direct events of the Google sources served (#1997):
+			// Memorystore for Redis, Cloud Run functions and Eventarc.
+			if memorystoreAdminSvc != nil {
+				runadapter.SetRedisInstanceLister(memorystoreAdminSvc.listInstances)
+			}
+			go watchEventarcResources(runSvc.functions.Load)
 			if slices.Contains(cfg.EnabledServices(), config.ServiceFirestore) {
 				// Firestore events (#1877), from Firestore's Listen.
 				go feedFirestoreEvents(func() *netfwd.Forwarder { return forwarderFor(forwarders, "firestore") },

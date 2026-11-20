@@ -14,6 +14,7 @@ import (
 
 	"cloud.google.com/go/pubsub/v2"
 	"cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
+	redispb "cloud.google.com/go/redis/apiv1/redispb"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -216,5 +217,39 @@ func feedAuditLogs(rec *admin.Recorder, functions func() *runadapter.FunctionsSe
 		f.Eventarc().EmitAuditLog(ctx, runadapter.AuditCall{Project: project, ServiceName: svc, MethodName: method,
 			ResourceName: ev.Detail["resource"], Code: rpccode.Code_value[ev.Detail["code"]], Time: ev.Time})
 		cancel()
+	}
+}
+
+// watchEventarcResources runs Eventarc's watch of the resources whose
+// changes are direct events (#1997) once the functions' server is up.
+func watchEventarcResources(functions func() *runadapter.FunctionsServer) {
+	for {
+		if f := functions(); f != nil {
+			f.Eventarc().WatchResources(context.Background())
+			return
+		}
+		time.Sleep(time.Second)
+	}
+}
+
+// listInstances is every Memorystore for Redis instance of a project, for
+// Eventarc's Redis events (#1997); none until the admin API runs.
+func (s *memorystoreAdminService) listInstances(ctx context.Context, project string) ([]*redispb.Instance, error) {
+	api := s.api
+	if api == nil {
+		return nil, errors.New("the Memorystore admin API has not started")
+	}
+	var out []*redispb.Instance
+	req := &redispb.ListInstancesRequest{Parent: "projects/" + project + "/locations/-", PageSize: 1000}
+	for {
+		resp, err := api.ListInstances(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, resp.GetInstances()...)
+		if resp.GetNextPageToken() == "" {
+			return out, nil
+		}
+		req.PageToken = resp.GetNextPageToken()
 	}
 }
