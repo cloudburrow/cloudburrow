@@ -34,8 +34,9 @@ import (
 // them out avoids; data outside an ML function still unknown; ML.PREDICT
 // of an imported TENSORFLOW_LITE image model over the decoded images,
 // to TensorFlow's output, and refused for an image of the wrong size;
-// ML.GENERATE_TEXT over an object table 501, as the local runtime reads
-// text only.
+// ML.GENERATE_TEXT over an object table with its PROMPT, each object
+// sent to the local runtime as its ObjectRef (#1980), and refused
+// without a PROMPT.
 //
 // covers: bigquery.jobs.query, bigquery.jobs.insert
 func TestBigQueryMLImageFunctions(t *testing.T) {
@@ -324,15 +325,34 @@ func TestBigQueryMLImageFunctions(t *testing.T) {
 		}
 	}
 
-	// A multimodal prompt over the object table: the local runtime reads
-	// text only.
-	err = mlRun(h, c, fmt.Sprintf("CREATE MODEL `%s.gen` REMOTE WITH CONNECTION `%s` OPTIONS(ENDPOINT = 'gemini-2.5-flash')", ds, conn))
+	// A multimodal prompt over the object table (#1980): each object is
+	// sent to the local Vertex AI endpoint as its ref, and every row comes
+	// back with the object table's columns: the model's answer, or a
+	// status naming why it gave none (here, with no local generation model
+	// or one that reads no images, its refusal).
+	grantObjectRefs(t, h, cc, project, cn)
+	grantProject(t, h, remoteProjectsClient(t, h), project, "roles/aiplatform.user", "serviceAccount:"+cn.GetCloudResource().GetServiceAccountId())
+	err = mlRun(h, c, fmt.Sprintf("CREATE MODEL `%s.gen` REMOTE WITH CONNECTION `%s` OPTIONS(ENDPOINT = '%s')", ds, conn, localModel))
 	if err != nil && strings.Contains(err.Error(), "local Vertex AI endpoint") {
-		t.Log("this instance serves no local Vertex AI endpoint (up --local-ai-model): the multimodal refusal is not reached")
+		t.Log("this instance serves no local Vertex AI endpoint (up --local-ai-model): the multimodal prompt is not reached")
 		return
 	}
 	if err != nil {
 		t.Fatalf("CREATE MODEL REMOTE: %v", err)
 	}
-	refused(fmt.Sprintf("SELECT * FROM ML.GENERATE_TEXT(MODEL `%s.gen`, TABLE `%s.images`, STRUCT('Describe the image' AS prompt))", ds, ds), "multimodal")
+	rows := mlQuery(t, h, c, fmt.Sprintf("SELECT uri, ml_generate_text_llm_result AS r, ml_generate_text_status AS s FROM ML.GENERATE_TEXT(MODEL `%s.gen`, TABLE `%s.images`, "+
+		"STRUCT('Describe the image in one word' AS prompt, TRUE AS flatten_json_output)) ORDER BY uri", ds, ds))
+	if len(rows) == 0 {
+		t.Fatal("ML.GENERATE_TEXT over the object table answered no rows")
+	}
+	for _, row := range rows {
+		if s, _ := row["s"].(string); s == "" && row["r"] == nil || !strings.HasPrefix(fmt.Sprint(row["uri"]), "gs://") {
+			t.Fatalf("ML.GENERATE_TEXT over the object table: %v", row)
+		}
+		t.Logf("%v: %v %v", row["uri"], row["r"], row["s"])
+	}
+	if err := mlRun(h, c, fmt.Sprintf("SELECT * FROM ML.GENERATE_TEXT(MODEL `%s.gen`, TABLE `%s.images`, STRUCT(TRUE AS flatten_json_output))", ds, ds)); err == nil ||
+		!strings.Contains(err.Error(), "PROMPT") {
+		t.Fatalf("ML.GENERATE_TEXT over an object table without a prompt: %v", err)
+	}
 }

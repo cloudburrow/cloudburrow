@@ -50,11 +50,15 @@ type jobText struct {
 	// ddl is what a DDL statement the front carried out itself did
 	// (#1002, cloneddl.go), or nil.
 	ddl *ownDDL
+	// vectorStats is a query's statistics.query.vectorSearchStatistics:
+	// how its VECTOR_SEARCH and AI.SEARCH calls used vector indexes
+	// (vectorindex.go, #1952), or nil.
+	vectorStats json.RawMessage
 }
 
 func (t jobText) empty() bool {
 	return t.query == "" && t.uris == nil && len(t.names) == 0 && t.dml == nil && t.writeDisposition == "" &&
-		!t.paramsSet && t.dest == nil && t.load == nil && t.ddl == nil
+		!t.paramsSet && t.dest == nil && t.load == nil && t.ddl == nil && t.vectorStats == nil
 }
 
 // merge adds what o changed to t: o's query text, parameters and
@@ -71,6 +75,9 @@ func (t *jobText) merge(o jobText) {
 	}
 	if o.load != nil { // a load into a partition, #1273
 		t.load = o.load
+	}
+	if o.vectorStats != nil {
+		t.vectorStats = o.vectorStats
 	}
 }
 
@@ -128,6 +135,22 @@ func (t jobText) patch(job map[string]any) {
 	}
 	if t.ddl != nil {
 		t.ddl.patch(job)
+	}
+	if t.vectorStats != nil {
+		var vs any
+		if json.Unmarshal(t.vectorStats, &vs) == nil {
+			st, _ := job["statistics"].(map[string]any)
+			if st == nil {
+				st = map[string]any{}
+				job["statistics"] = st
+			}
+			q, _ := st["query"].(map[string]any)
+			if q == nil {
+				q = map[string]any{}
+				st["query"] = q
+			}
+			q["vectorSearchStatistics"] = vs
+		}
 	}
 }
 
