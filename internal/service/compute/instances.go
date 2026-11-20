@@ -346,13 +346,14 @@ func notReady(rel, status string) error {
 }
 
 // transition sets o's status to during, runs work, and sets after (or
-// failed when work fails).
+// failed when work fails), unless another operation on the instance is
+// queued behind this one: the status is then the later operation's to set.
 func (s *Server) transition(project, scope, opType, rel string, o obj, during, after, failed string, work func(context.Context, VMSpec) error) (obj, error) {
 	o["status"] = during
 	vm := s.vmSpecLocked(o)
 	return s.runOpLocked(project, scope, opType, rel, func(ctx context.Context) error { return work(ctx, vm) }, func(err error) {
 		cur, ok := s.res[rel]
-		if !ok {
+		if !ok || s.queued[rel] > 0 {
 			return
 		}
 		if err != nil {

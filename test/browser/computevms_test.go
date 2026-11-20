@@ -150,15 +150,15 @@ func TestComputeEngineThroughTheBrowser(t *testing.T) {
 
 	// Stop and Start / Resume from the list's row menu.
 	p.navigate("/compute/instances?project=" + project)
-	vmRowMenu(p, vm, "Stop", nil, vm)
+	vmRowMenu(p, vm, "Stop", nil, byButton)
 	waitStatus("compute-instances", vm, "TERMINATED", 3*time.Minute)
 	p.navigate("/compute/instances?project=" + project)
-	vmRowMenu(p, vm, "Start / Resume", nil, "")
+	vmRowMenu(p, vm, "Start / Resume", nil, byButton)
 	waitStatus("compute-instances", vm, "RUNNING", 5*time.Minute)
 
 	// Delete; the boot disk goes with it, the data disk stays.
 	p.navigate("/compute/instances?project=" + project)
-	vmRowMenu(p, vm, "Delete", nil, vm)
+	vmRowMenu(p, vm, "Delete", nil, byButton)
 	deadline = time.Now().Add(3 * time.Minute)
 	for find("compute-instances", vm) != nil {
 		if time.Now().After(deadline) {
@@ -208,8 +208,15 @@ func TestComputeEngineScreensMeetWCAG(t *testing.T) {
 	auditScreens(t, pages)
 }
 
+// byButton, as vmRowMenu's confirm, is a dialog Google's console confirms
+// by its button alone, nothing typed: a VM's Stop, Start / Resume and
+// Delete (docs.cloud.google.com/compute/docs/instances/stop-start-instance,
+// deleting-instance).
+const byButton = "\x00button"
+
 // vmRowMenu chooses an item of a list row's menu, fills its fields,
-// confirms it by name when asked, and waits for its dialog to close.
+// confirms it by name, or by its button alone (byButton), and waits for
+// its dialog to close.
 func vmRowMenu(p *tab, row, label string, values map[string]string, confirm string) {
 	p.t.Helper()
 	p.waitFor(`document.querySelector(".modal") === null`)
@@ -224,7 +231,12 @@ func vmRowMenu(p *tab, row, label string, values map[string]string, confirm stri
 		}
 		p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	}
-	if confirm != "" {
+	switch confirm {
+	case "":
+	case byButton:
+		p.confirmOnlyDialogLabelled(label)
+		p.pressDelete()
+	default:
 		p.confirmByName(confirm)
 	}
 	p.waitFor(`document.querySelector(".modal.is-open") === null`)

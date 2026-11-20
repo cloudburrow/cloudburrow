@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -133,5 +134,73 @@ func TestVMsWithoutABackendAre501(t *testing.T) {
 	}
 	if _, err := s.Call("GET", "p", "zones/us-central1-a/machineTypes", nil, nil); err != nil {
 		t.Fatalf("machine types need no backend: %v", err)
+	}
+}
+
+// slowStartVMs is fakeVMs whose Start blocks until release is closed, and
+// which records the order of Start and Stop calls.
+type slowStartVMs struct {
+	fakeVMs
+	release chan struct{}
+	mu      sync.Mutex
+	calls   []string
+}
+
+func (f *slowStartVMs) Start(context.Context, VMSpec) error {
+	<-f.release
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "start")
+	return nil
+}
+
+func (f *slowStartVMs) Stop(context.Context, VMSpec) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "stop")
+	return nil
+}
+
+// TestStopWaitsForAnAttachDiskRestart (#2052): an attachDisk restarts a
+// running VM's container in the background; a Stop asked meanwhile runs
+// after it, so the VM ends TERMINATED, its container stopped, and is not
+// set RUNNING again by the attach finishing last.
+func TestStopWaitsForAnAttachDiskRestart(t *testing.T) {
+	vms := &slowStartVMs{release: make(chan struct{})}
+	close(vms.release)
+	s, err := New(Options{VMs: vms})
+	if err != nil {
+		t.Fatal(err)
+	}
+	z := "zones/us-central1-a/"
+	if _, err := vmCall(t, s, "POST", z+"instances", obj{"name": "vm1", "machineType": z + "machineTypes/e2-small",
+		"disks":             []any{obj{"boot": true, "initializeParams": obj{"sourceImage": "projects/debian-cloud/global/images/family/debian-12"}}},
+		"networkInterfaces": []any{obj{"network": "global/networks/default"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := vmCall(t, s, "POST", z+"disks", obj{"name": "data", "sizeGb": "10"}); err != nil {
+		t.Fatal(err)
+	}
+	vms.release = make(chan struct{})
+	vms.mu.Lock()
+	vms.calls = nil
+	vms.mu.Unlock()
+	attach, err := s.Call("POST", "p", z+"instances/vm1/attachDisk", nil, obj{"source": z + "disks/data", "deviceName": "data"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stop, err := s.Call("POST", "p", z+"instances/vm1/stop", nil, nil)
+	if err != nil {
+		t.Fatalf("a stop while the attach restarts the VM: %v", err)
+	}
+	close(vms.release)
+	s.waitOp(context.Background(), str(attach, "selfLink"))
+	s.waitOp(context.Background(), str(stop, "selfLink"))
+	inst, _ := s.Call("GET", "p", z+"instances/vm1", nil, nil)
+	vms.mu.Lock()
+	calls := strings.Join(vms.calls, ",")
+	vms.mu.Unlock()
+	if inst["status"] != "TERMINATED" || calls != "stop,start,stop" {
+		t.Fatalf("after attachDisk then stop: status %v, backend calls %s; want TERMINATED, stop,start,stop", inst["status"], calls)
 	}
 }

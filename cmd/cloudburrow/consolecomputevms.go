@@ -246,6 +246,13 @@ func (p computeInstancesProvider) List(ctx context.Context, project string) (con
 // instanceActions are what Google offers an instance in its status: SSH
 // and Stop, Suspend and Reset while it runs, Start / Resume when it is
 // stopped or suspended, and Delete. onPage adds the page's own actions.
+//
+// Each is confirmed as Google's console confirms it, by its button alone,
+// nothing typed: "To confirm, click Stop", "Click Suspend, and then click
+// Suspend to confirm", "Click Start / Resume, and then click Start",
+// "click Reset to confirm", and Delete's dialog "click the Delete button"
+// (docs.cloud.google.com/compute/docs/instances/stop-start-instance,
+// suspend-resume-instance, reset-instance, deleting-instance).
 func (p computeInstancesProvider) instanceActions(o map[string]any, onPage bool) []console.Action {
 	name := vpcStr(o, "name")
 	status := vpcStr(o, "status")
@@ -254,20 +261,20 @@ func (p computeInstancesProvider) instanceActions(o map[string]any, onPage bool)
 		acts = append(acts, console.Action{ID: "ssh", Label: "SSH", Button: true})
 	}
 	if status == "TERMINATED" || status == "SUSPENDED" {
-		acts = append(acts, console.Action{ID: "start", Label: "Start / Resume", Confirm: "Start or resume " + name + "?"})
+		acts = append(acts, console.Action{ID: "start", Label: "Start / Resume", ConfirmStyle: console.DeleteConfirmClick, Confirm: "Start or resume " + name + "?"})
 	}
 	if status == "RUNNING" || status == "SUSPENDED" {
-		acts = append(acts, console.Action{ID: "stop", Label: "Stop", Confirm: "Stop " + name + "? Its processes end; its disks keep what they hold."})
+		acts = append(acts, console.Action{ID: "stop", Label: "Stop", ConfirmStyle: console.DeleteConfirmClick, Confirm: "Stop " + name + "? Its processes end; its disks keep what they hold."})
 	}
 	if status == "RUNNING" {
 		acts = append(acts,
-			console.Action{ID: "suspend", Label: "Suspend", Confirm: "Suspend " + name + "? Its processes are frozen until it is resumed."},
-			console.Action{ID: "reset", Label: "Reset", Confirm: "Reset " + name + "? It restarts at once, without shutting down cleanly."})
+			console.Action{ID: "suspend", Label: "Suspend", ConfirmStyle: console.DeleteConfirmClick, Confirm: "Suspend " + name + "? Its processes are frozen until it is resumed."},
+			console.Action{ID: "reset", Label: "Reset", ConfirmStyle: console.DeleteConfirmClick, Confirm: "Reset " + name + "? It restarts at once, without shutting down cleanly."})
 	}
 	if onPage {
 		acts = append(acts, p.diskActions(o)...)
 	}
-	return append(acts, console.Action{ID: "delete", Label: "Delete", Destructive: true, Leaves: onPage,
+	return append(acts, console.Action{ID: "delete", Label: "Delete", Destructive: true, Leaves: onPage, ConfirmStyle: console.DeleteConfirmClick,
 		Confirm: "Delete VM instance " + name + "? Its boot disk is deleted with it when auto-delete is on."})
 }
 

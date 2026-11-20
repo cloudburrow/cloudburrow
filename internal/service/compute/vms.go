@@ -65,8 +65,9 @@ func (s *Server) checkDiskBudget() error {
 }
 
 // runOpLocked records a RUNNING operation on target and runs work in the
-// background; finish, called with s.mu held, records the outcome on the
-// resources. It returns the operation.
+// background, once target's earlier operations are done; finish, called
+// with s.mu held, records the outcome on the resources. It returns the
+// operation.
 func (s *Server) runOpLocked(project, scope, opType, target string, work func(context.Context) error, finish func(error)) (obj, error) {
 	op := s.newOpLocked(project, scope, opType, target)
 	op["status"], op["progress"] = "RUNNING", 0.0
@@ -77,13 +78,25 @@ func (s *Server) runOpLocked(project, scope, opType, target string, work func(co
 	if err := s.saveLocked(); err != nil {
 		return nil, err
 	}
+	prev := s.queue[target]
+	s.queue[target] = done
+	s.queued[target]++
 	out := copyObj(op)
 	go func() {
+		if prev != nil {
+			<-prev
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
 		err := work(ctx)
 		cancel()
 		s.mu.Lock()
 		defer s.mu.Unlock()
+		if s.queued[target]--; s.queued[target] == 0 {
+			delete(s.queued, target)
+		}
+		if s.queue[target] == done {
+			delete(s.queue, target)
+		}
 		if finish != nil {
 			finish(err)
 		}
