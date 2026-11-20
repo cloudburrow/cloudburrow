@@ -3731,6 +3731,12 @@ async function renderDetail(view, route, resourcePath) {
   // sharing's My subscriptions, #1989) is headed by its own name, not
   // "<Kind> details".
   if (data.heading) crumb.querySelector("h1, h2").textContent = data.heading;
+  // An edit form that is a page of its own (#1862), as Google's Edit opens
+  // the Edit Redis instance page: the resource's address with ?edit=1 draws
+  // the form instead of the resource's tabs.
+  if (data.edit && data.edit.page && new URLSearchParams(location.search).get("edit") === "1") {
+    return renderEditPage(view, route, segments, data, crumb);
+  }
   const sections = (data.sections || []).slice();
   // A Logs tab where Google's page has one (#1842, audit item 9): a Cloud
   // Run service's, job's and worker pool's, a function's, and a GKE
@@ -4432,7 +4438,14 @@ async function renderDetail(view, route, resourcePath) {
       setTimeout(() => revealValue(route, segments, data.reveal), 0);
     }
   }
-  if (data.edit) {
+  if (data.edit && data.edit.page) {
+    const editHref = new URL(detailHref(route, segments), location.origin);
+    editHref.searchParams.set("edit", "1");
+    pageActions.unshift(el("a", {
+      class: "button primary", id: "detail-edit", href: editHref.pathname + editHref.search,
+      text: data.edit.label || "Edit",
+    }));
+  } else if (data.edit) {
     pageActions.unshift(el("button", {
       class: "primary", text: data.edit.label || "Edit",
       onclick: () => openEditForm(route, segments, data.edit, reloadPage),
@@ -5348,6 +5361,12 @@ async function editFromRow(route, segments, onDone) {
     const data = await api(`/api/detail/${route.service}?project=${encodeURIComponent(project)}` +
       segments.map((sg) => `&name=${encodeURIComponent(sg)}`).join(""));
     if (!data.edit) throw new Error("This resource has nothing that can be edited.");
+    // An edit form that is a page of its own (#1862) opens that page.
+    if (data.edit.page) {
+      const url = new URL(detailHref(route, segments), location.origin);
+      url.searchParams.set("edit", "1");
+      return navigate(url.pathname + url.search);
+    }
     openEditForm(route, segments, data.edit, onDone);
   } catch (err) {
     notify(String(err.message), "error");
@@ -5450,6 +5469,60 @@ function inlineEditForm(route, segments, section, onDone) {
     spec.note ? el("p", { class: "form-help", text: spec.note }) : null,
     error, ...fields.nodes,
     el("div", { class: "picklist-actions" }, primary));
+}
+
+// renderEditPage draws an edit form that is a page of its own (#1862):
+// Google's Edit opens the "Edit Redis instance" page, under the resource's
+// crumbs, which saves with Save and goes back to the resource's page;
+// Cancel goes back without saving.
+function renderEditPage(view, route, segments, data, crumb) {
+  const spec = data.edit;
+  const name = segments[segments.length - 1];
+  const here = detailHref(route, segments);
+  const title = spec.title || spec.label || "Edit";
+  // The resource's crumbs, its own now a link back to it, then the form.
+  const nav = crumb.querySelector(".breadcrumb").cloneNode(true);
+  const last = nav.lastElementChild;
+  if (last && last.tagName === "SPAN") last.replaceWith(el("a", { href: here, text: last.textContent }));
+  nav.append(el("span", { "aria-hidden": "true", text: "/" }), el("span", { text: title }));
+  const header = pageHeader(title, `${name} · ` + (currentProject() ? `Project ${currentProject()}` : "All projects"),
+    { back: here, backLabel: `Back to ${name}` });
+  header.prepend(nav);
+
+  const fields = buildCreateForm(spec);
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  const primary = el("button", { type: "submit", class: "primary", id: "edit-page-save", text: spec.submit || "Save" });
+  const cancel = el("a", { class: "button secondary", href: here, text: "Cancel" });
+  const submit = async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    if (!fields.validate()) return;
+    setBusy(primary, true);
+    const op = recordOperation(`Update ${name}`);
+    try {
+      const res = await send(
+        `/api/resources/${route.service}?project=${encodeURIComponent(currentProject())}`,
+        "PATCH", { Path: segments, Values: fields.values() });
+      op.succeeded("", res.operation);
+      notify(`Updated ${name}`);
+      announce(`Updated ${name}`);
+      navigate(here);
+    } catch (err) {
+      // The API's own message, on the page where the change was made.
+      op.failed(err.message, err.operation);
+      setBusy(primary, false);
+      error.textContent = err.message;
+      error.hidden = false;
+    }
+  };
+  setChildren(view, header,
+    el("form", { class: "create-page is-single-page edit-page", novalidate: true, onsubmit: submit },
+      spec.note ? el("p", { class: "form-help", text: spec.note }) : null,
+      error,
+      ...fields.nodes,
+      el("div", { class: "form-actions" }, primary, cancel)));
+  fields.focusFirst();
+  announce(`${title} form`);
 }
 
 // pageTabStrip is a route's `pageTabs` as a tablist of links, the route

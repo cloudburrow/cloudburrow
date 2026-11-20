@@ -64,7 +64,7 @@ import (
 // would copy the keys once and lose the writes made during the migration.
 //
 // An engine_version update to a later version (VALKEY_7_2, VALKEY_8_0,
-// VALKEY_9_0) is a rolling upgrade (#1563): new nodes of the new version's
+// VALKEY_9_0, VALKEY_9_1) is a rolling upgrade (#1563): new nodes of the new version's
 // image join as replicas of the old ones, the first of each shard is
 // promoted once synced (CLUSTER FAILOVER in CLUSTER mode; in CLUSTER_
 // DISABLED mode the old primary's writes are paused until the new node has
@@ -822,7 +822,7 @@ func (c *clusters) caughtUp(ctx context.Context, r *clusterRecord, source string
 }
 
 // valkeyVersions orders the engine versions.
-var valkeyVersions = map[string]int{"VALKEY_7_2": 1, "VALKEY_8_0": 2, "VALKEY_9_0": 3}
+var valkeyVersions = map[string]int{"VALKEY_7_2": 1, "VALKEY_8_0": 2, "VALKEY_9_0": 3, "VALKEY_9_1": 4}
 
 // upgrade moves instance name to version as a rolling upgrade does: new
 // nodes of the version's image join as replicas of the old ones, each

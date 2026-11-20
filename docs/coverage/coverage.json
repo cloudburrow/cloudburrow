@@ -7150,6 +7150,7 @@
         "method": "google.cloud.memorystore.v1.Memorystore/CreateAclPolicy",
         "status": "Verified",
         "tests": [
+          "test/compat/memorystore2019_test.go:140 TestMemorystoreValkeyDefaultVersion",
           "test/compat/memorystorevalkeyacl_test.go:58 TestMemorystoreValkeyACLPolicies"
         ]
       },
@@ -7172,6 +7173,10 @@
           "test/compat/memorystore1614_test.go:224 TestMemorystoreValkeyCrossInstanceFollowsFailover",
           "test/compat/memorystore1614_test.go:60 TestMemorystoreValkeyReaderAndFailover",
           "test/compat/memorystore1657_test.go:59 TestMemorystoreValkeyAutomaticFailover",
+          "test/compat/memorystore2019_test.go:140 TestMemorystoreValkeyDefaultVersion",
+          "test/compat/memorystore2019_test.go:191 TestMemorystoreValkeyUpgrade90To91",
+          "test/compat/memorystore2019_test.go:250 TestMemorystoreValkeyUpgrade80To91",
+          "test/compat/memorystore2019_test.go:80 TestMemorystoreValkey91",
           "test/compat/memorystoreclusterfailover1910_test.go:172 TestValkeyClusterModeAutomaticFailover",
           "test/compat/memorystoreclustertls_test.go:130 TestMemorystoreValkeyInTransitEncryption",
           "test/compat/memorystoreiam1614_test.go:121 TestMemorystoreIAMAuthChecksTheToken",
@@ -7303,6 +7308,7 @@
           "test/compat/memorystore1563_test.go:169 TestMemorystoreValkeyUpgradeKeepsWrites",
           "test/compat/memorystore1614_test.go:60 TestMemorystoreValkeyReaderAndFailover",
           "test/compat/memorystore1657_test.go:59 TestMemorystoreValkeyAutomaticFailover",
+          "test/compat/memorystore2019_test.go:80 TestMemorystoreValkey91",
           "test/compat/memorystoreclusterfailover1910_test.go:172 TestValkeyClusterModeAutomaticFailover",
           "test/compat/memorystoreclustermaintenance_test.go:194 TestValkeyRescheduleMaintenance",
           "test/compat/memorystorerestart1557_test.go:74 TestMemorystoreClustersAcrossRestart",
@@ -7416,6 +7422,8 @@
           "test/compat/memorystore1563_test.go:202 TestMemorystoreValkeyClusterUpgradeKeepsWrites",
           "test/compat/memorystore1563_test.go:57 TestMemorystoreValkeyCrossInstanceReplicationTLS",
           "test/compat/memorystore1614_test.go:224 TestMemorystoreValkeyCrossInstanceFollowsFailover",
+          "test/compat/memorystore2019_test.go:191 TestMemorystoreValkeyUpgrade90To91",
+          "test/compat/memorystore2019_test.go:250 TestMemorystoreValkeyUpgrade80To91",
           "test/compat/memorystorevalkey_test.go:233 TestMemorystoreValkeyClusterDisabled",
           "test/compat/memorystorevalkey_test.go:85 TestMemorystoreValkeyInstance",
           "test/compat/memorystorevalkeyca1918_test.go:47 TestMemorystoreValkeyServerCA",
