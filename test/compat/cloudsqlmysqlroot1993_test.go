@@ -16,47 +16,58 @@ import (
 	sqladmin "google.golang.org/api/sqladmin/v1"
 )
 
-// mysqlAs runs stmts through the official connector as user, and returns
-// the first column of the last statement's rows, joined by ";" (read).
-func mysqlAs(t *testing.T, h *Harness, conn, user, password, database string, read bool, stmts ...string) string {
+// mysqlOpen opens a database/sql handle on conn through the official
+// connector, as user.
+func mysqlOpen(t *testing.T, h *Harness, conn, user, password, database string) *sql.DB {
 	t.Helper()
 	drv := fmt.Sprintf("cloudsql-root-%d", time.Now().UnixNano())
 	cleanup, err := cloudsqlmysql.RegisterDriver(drv, connectorOptions(h)...)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer cleanup()
+	t.Cleanup(func() { _ = cleanup() })
 	db, err := sql.Open(drv, fmt.Sprintf("%s:%s@%s(%s)/%s", user, password, drv, conn, database))
 	if err != nil {
 		t.Fatal(err)
 	}
+	return db
+}
+
+// mysqlExecAs runs stmts through the official connector as user.
+func mysqlExecAs(t *testing.T, h *Harness, conn, user, password, database string, stmts ...string) {
+	t.Helper()
+	db := mysqlOpen(t, h, conn, user, password, database)
 	defer db.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	last := len(stmts) - 1
-	if read {
-		last--
-	}
-	for _, s := range stmts[:last+1] {
+	for _, s := range stmts {
 		if _, err := db.ExecContext(ctx, s); err != nil {
 			t.Fatalf("%s as %s: %v", s, user, err)
 		}
 	}
-	if !read {
-		return ""
-	}
-	rows, err := db.QueryContext(ctx, stmts[len(stmts)-1])
+}
+
+// mysqlAs runs stmts as mysqlExecAs does, then the query q, and returns
+// the first column of its rows, joined by ";".
+func mysqlAs(t *testing.T, h *Harness, conn, user, password, database string, q string, stmts ...string) string {
+	t.Helper()
+	mysqlExecAs(t, h, conn, user, password, database, stmts...)
+	db := mysqlOpen(t, h, conn, user, password, database)
+	defer db.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	rows, err := db.QueryContext(ctx, q)
 	if err != nil {
-		t.Fatalf("%s as %s: %v", stmts[len(stmts)-1], user, err)
+		t.Fatalf("%s as %s: %v", q, user, err)
 	}
 	defer rows.Close()
 	var out []string
 	for rows.Next() {
-		var s string
-		if err := rows.Scan(&s); err != nil {
+		var v string
+		if err := rows.Scan(&v); err != nil {
 			t.Fatal(err)
 		}
-		out = append(out, s)
+		out = append(out, v)
 	}
 	return strings.Join(out, ";")
 }
@@ -119,10 +130,10 @@ func TestCloudSQLMySQLRootDeleted(t *testing.T) {
 
 	// An instance made before #1993: no system account until it starts.
 	admins := "SELECT COUNT(*) FROM mysql.user WHERE user = 'cloudsqladmin'"
-	if got := mysqlAs(t, h, conn, "app", "App-pass1", "mysql", true, admins); got != "3" {
+	if got := mysqlAs(t, h, conn, "app", "App-pass1", "mysql", admins); got != "3" {
 		t.Fatalf("system accounts of a new instance: %s, want 3", got)
 	}
-	mysqlAs(t, h, conn, "root", "Root-pass1", "mysql", false,
+	mysqlExecAs(t, h, conn, "root", "Root-pass1", "mysql",
 		"DROP USER 'cloudsqladmin'@'localhost', 'cloudsqladmin'@'127.0.0.1', 'cloudsqladmin'@'::1'")
 	if dbs, err := svc.Databases.List(project, inst).Do(); err != nil || dbs == nil {
 		t.Fatalf("databases.list without the system account: %v", err)
@@ -137,7 +148,7 @@ func TestCloudSQLMySQLRootDeleted(t *testing.T) {
 			t.Fatalf("activationPolicy %s: %+v", policy, op.Error.Errors[0])
 		}
 	}
-	if got := mysqlAs(t, h, conn, "app", "App-pass1", "mysql", true, admins); got != "3" {
+	if got := mysqlAs(t, h, conn, "app", "App-pass1", "mysql", admins); got != "3" {
 		t.Fatalf("system accounts after a start: %s, want 3", got)
 	}
 
@@ -162,9 +173,9 @@ func TestCloudSQLMySQLRootDeleted(t *testing.T) {
 	wantHTTP(t, "users.insert of a system account's name", err, http.StatusBadRequest)
 
 	rows := "SELECT CONCAT(id, '=', name) FROM t ORDER BY id"
-	mysqlAs(t, h, conn, "app", "App-pass1", "mysql", false, "CREATE DATABASE appdb")
-	if got := mysqlAs(t, h, conn, "app", "App-pass1", "appdb", true, "CREATE TABLE t (id INT PRIMARY KEY, name VARCHAR(10))",
-		"INSERT INTO t VALUES (1, 'a'), (2, 'b')", rows); got != "1=a;2=b" {
+	mysqlExecAs(t, h, conn, "app", "App-pass1", "mysql", "CREATE DATABASE appdb")
+	if got := mysqlAs(t, h, conn, "app", "App-pass1", "appdb", rows, "CREATE TABLE t (id INT PRIMARY KEY, name VARCHAR(10))",
+		"INSERT INTO t VALUES (1, 'a'), (2, 'b')"); got != "1=a;2=b" {
 		t.Fatalf("rows written: %q", got)
 	}
 
@@ -177,7 +188,7 @@ func TestCloudSQLMySQLRootDeleted(t *testing.T) {
 	if op = waitSQLOpDone(t, svc, project, op); op.Error != nil {
 		t.Fatalf("export without root: %s", op.Error.Errors[0].Message)
 	}
-	mysqlAs(t, h, conn, "app", "App-pass1", "appdb", false, "DROP TABLE t")
+	mysqlExecAs(t, h, conn, "app", "App-pass1", "appdb", "DROP TABLE t")
 	op, err = svc.Instances.Import(project, inst, &sqladmin.InstancesImportRequest{ImportContext: &sqladmin.ImportContext{
 		Uri: uri, FileType: "SQL", Database: "appdb"}}).Do()
 	if err != nil {
@@ -186,7 +197,7 @@ func TestCloudSQLMySQLRootDeleted(t *testing.T) {
 	if op = waitSQLOpDone(t, svc, project, op); op.Error != nil {
 		t.Fatalf("import without root: %s", op.Error.Errors[0].Message)
 	}
-	if got := mysqlAs(t, h, conn, "app", "App-pass1", "appdb", true, rows); got != "1=a;2=b" {
+	if got := mysqlAs(t, h, conn, "app", "App-pass1", "appdb", rows); got != "1=a;2=b" {
 		t.Errorf("rows after the import: %q", got)
 	}
 
@@ -201,7 +212,7 @@ func TestCloudSQLMySQLRootDeleted(t *testing.T) {
 	if err != nil || len(list.Items) == 0 || list.Items[0].Status != "SUCCESSFUL" {
 		t.Fatalf("backupRuns.list: %v %+v", err, list)
 	}
-	mysqlAs(t, h, conn, "app", "App-pass1", "appdb", false, "UPDATE t SET name = 'z' WHERE id = 1")
+	mysqlExecAs(t, h, conn, "app", "App-pass1", "appdb", "UPDATE t SET name = 'z' WHERE id = 1")
 	op, err = svc.Instances.RestoreBackup(project, inst, &sqladmin.InstancesRestoreBackupRequest{
 		RestoreBackupContext: &sqladmin.RestoreBackupContext{BackupRunId: list.Items[0].Id, InstanceId: inst, Project: project}}).Do()
 	if err != nil {
@@ -210,7 +221,7 @@ func TestCloudSQLMySQLRootDeleted(t *testing.T) {
 	if op = waitSQLOpDone(t, svc, project, op); op.Error != nil {
 		t.Fatalf("restore without root: %s", op.Error.Errors[0].Message)
 	}
-	if got := mysqlAs(t, h, conn, "app", "App-pass1", "appdb", true, rows); got != "1=a;2=b" {
+	if got := mysqlAs(t, h, conn, "app", "App-pass1", "appdb", rows); got != "1=a;2=b" {
 		t.Errorf("rows after the restore: %q", got)
 	}
 	if users := sqlUserNames(t, svc, project, inst); users["root@%"] || !users["app@%"] {
@@ -254,7 +265,7 @@ func TestCloudSQLMySQLRootDeleted(t *testing.T) {
 	if users := sqlUserNames(t, svc, project, inst); users["root@%"] || !users["app@%"] {
 		t.Errorf("users.list after the restart: %v, want app@%% only", users)
 	}
-	if got := mysqlAs(t, h, conn, "app", "App-pass1", "appdb", true, rows); got != "1=a;2=b" {
+	if got := mysqlAs(t, h, conn, "app", "App-pass1", "appdb", rows); got != "1=a;2=b" {
 		t.Errorf("rows after the restart: %q", got)
 	}
 }
@@ -279,12 +290,12 @@ func TestCloudSQLMySQLRootDeletedReplica(t *testing.T) {
 	}
 	waitSQLOp(t, svc, project, op)
 	deleteMySQLRoot(t, svc, project, inst)
-	mysqlAs(t, h, in.ConnectionName, "app", "App-pass1", "mysql", false, "CREATE DATABASE appdb",
+	mysqlExecAs(t, h, in.ConnectionName, "app", "App-pass1", "mysql", "CREATE DATABASE appdb",
 		"CREATE TABLE appdb.t (id INT PRIMARY KEY)", "INSERT INTO appdb.t VALUES (1)")
 	rep := inst + "-r"
 	createSQLInstance(t, svc, project, &sqladmin.DatabaseInstance{Name: rep, MasterInstanceName: inst,
 		Settings: &sqladmin.Settings{Tier: "db-custom-1-3840"}})
-	mysqlAs(t, h, in.ConnectionName, "app", "App-pass1", "appdb", false, "INSERT INTO t VALUES (2)")
+	mysqlExecAs(t, h, in.ConnectionName, "app", "App-pass1", "appdb", "INSERT INTO t VALUES (2)")
 	eventually(t, "the replica's databases", func() error {
 		dbs, err := svc.Databases.List(project, rep).Do()
 		if err != nil {

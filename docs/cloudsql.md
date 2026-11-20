@@ -304,7 +304,7 @@ and an address the connectors reach through 3307.
 |---|---|
 | `databaseVersion` | `POSTGRES_9_6` to `POSTGRES_18`, `MYSQL_5_6` and `MYSQL_5_7` (#1524, where the node runs linux/amd64), `MYSQL_8_0` or `MYSQL_8_4` (#1381, #1462): see [Database versions](#database-versions-and-major-version-upgrades-1381). The engine's service must be enabled (412 otherwise). `MYSQL_5_6`, `MYSQL_5_7`, `MYSQL_8_0_*` minor pins and any other `POSTGRES_*` or `MYSQL_*` are 501 saying why; another value is 400. `SQLSERVER_*` (#1916) is 412 FAILED_PRECONDITION until you accept Microsoft's licence, then served where the node runs linux/amd64: see [Cloud SQL for SQL Server](#cloud-sql-for-sql-server). |
 | `region` | Recorded and answered, and in the connection name (`us-central1` when left out). Every server runs in the one cluster. |
-| `rootPassword` | MySQL's `root` password (empty leaves `root` with none, as Cloud SQL does). PostgreSQL's user is `postgres`, trusted locally like the server `up` runs. |
+| `rootPassword` | MySQL's `'root'@'%'` password (empty leaves `root` with none, as Cloud SQL does). `root` is yours: change its password or delete it, as the hashicorp/google provider does after every insert; CloudBurrow manages the instance through an account of its own (see [CloudBurrow's MySQL account](#cloudburrows-mysql-account-1993)). PostgreSQL's user is `postgres`, trusted locally like the server `up` runs. |
 | `settings.tier` | Required, recorded and answered. The server is not sized by it. |
 | `settings.databaseFlags` | Passed to the server: `-c name=value` to `postgres`, `--name=value` to `mysqld`. A patch that changes them starts the server again with them; a flag the server rejects fails the operation with its words. `cloudsql.*` flags (IAM authentication, Cloud SQL's extensions) are 501. |
 | `settings.userLabels`, `deletionProtectionEnabled` | Recorded and answered. `delete` of a protected instance is 400, as on Cloud SQL. |
@@ -319,6 +319,38 @@ and an address the connectors reach through 3307.
 The operation `insert` returns is `RUNNING` until the server serves through its tunnel, then
 `DONE` (or `DONE` with the server's error, and the instance `FAILED`). `delete` removes the
 server, its Service and its volume. `restart` restarts its pod.
+
+#### CloudBurrow's MySQL account (#1993)
+
+Cloud SQL manages a MySQL instance through system accounts of its own (`root@localhost`,
+`root@127.0.0.1` and `root@::1` are "used to provide the managed database service";
+[users](https://docs.cloud.google.com/sql/docs/mysql/users)), which "you can't delete,
+modify, or assign database roles to", and which gcloud and the console cannot display. Its
+`'root'@'%'` is the user's, and may be deleted. A created MySQL instance here is the same:
+
+- CloudBurrow signs in as **`cloudsqladmin`**, at `localhost`, `127.0.0.1` and `::1` only, with
+  every privilege and the password the instance was created with (`rootPassword`). The Admin
+  API (through the instance's tunnel, a `kubectl port-forward` that arrives from the pod's
+  loopback) and every script in the server's container (backups, exports and imports,
+  point-in-time recovery, replicas, the standby, major version upgrades) use it. It is a name of
+  its own, not `root` at a loopback host: MySQL matches the most specific host first, so a
+  `root@127.0.0.1` would take every `root` sign-in through the tunnel, and refuse the password
+  `users.update` gave `'root'@'%'`.
+- It is made, with the binary log off, each time each server starts: the primary, a read
+  replica (its `super_read_only` lifted meanwhile), the standby, and a physically restored copy
+  (in its `--init-file`). An instance created before #1993 gets it at its next start (the next
+  `up`, or a stop and start); until then CloudBurrow signs in as `root`, which it could not
+  delete.
+- `users.list` and `users.get` leave out `cloudsqladmin`, `root` at the loopback hosts,
+  `cloudsqlreplica` and `cloudsqlstandby`; `users.insert` of one of their names is 400.
+- `users.delete` of `'root'@'%'` succeeds, and the instance keeps working: `TestCloudSQLMySQLRootDeleted`
+  deletes it and runs an export, an import, a backup and its restore, a clone and a restart,
+  and `TestBackupDRRestoreToANewInstance`'s Terraform MySQL subtest applies a
+  `google_sql_database_instance`, whose provider deletes it. A major version upgrade and a new
+  standby keep it deleted.
+
+`up`'s own MySQL server (`--services cloudsql-mysql`) is still reached as `root`, which
+`users.delete` refuses there, with its `cloudburrow` user.
 
 ### Password policy (#1876)
 
@@ -419,7 +451,8 @@ by the engine's own replication. `databaseVersion` and `tier` default to the pri
   gtid_mode`, as every Cloud SQL for MySQL instance has them) and it gets a `cloudsqlreplica`
   user; the replica, with its own `server_id`, loads the primary's databases with
   `mysqldump --set-gtid-purged=ON` and replicates with `SOURCE_AUTO_POSITION`, with
-  `super_read_only` on, so a write is refused by the server. Its `root` is the primary's.
+  `super_read_only` on, so a write is refused by the server. Its `rootPassword` is the
+  primary's, and so is its `cloudsqladmin` password (#1993), made on the replica itself.
 
 The replica answers `instanceType: READ_REPLICA_INSTANCE`, `masterInstanceName`
 (`{project}:{primary}`), `replicaConfiguration` and `settings.databaseReplicationEnabled`; the
@@ -876,10 +909,15 @@ flags, deletion protection, automated backups and their start time, sent as one
 - **A restore really restores**: `restoreBackup` drops every application database of the
   target and loads the backup's, ending the sessions connected to them, so the rows written
   after the backup are gone. `restoreBackupContext.instanceId` may name another instance of
-  the same engine, as on Cloud SQL. **Users are not in a backup**: roles and MySQL's
-  `mysql` database stay the target's (Cloud SQL restores them too). A MySQL backup runs as
-  `root` with the password the server was started with; one changed afterwards through
-  `users.update` makes the backup fail with MySQL's words.
+  the same engine, as on Cloud SQL. **A created MySQL instance's backup has its users**
+  (#1993): Cloud SQL's restore "takes the source instance's settings, databases, and users"
+  ([restore](https://docs.cloud.google.com/sql/docs/mysql/backup-recovery/restore)), so a
+  restore, a clone or a restore to a new instance drops the target's accounts and gives it the
+  source's, with their passwords and grants (a deleted `'root'@'%'` stays deleted), and its
+  IAM users; the system accounts are the target's own. `PROXY` grants and MySQL 5.6's
+  accounts are not carried, and a backup taken before #1993 leaves the target's accounts as
+  they are. PostgreSQL's roles and the MySQL server `up` runs keep the target's users. A MySQL
+  backup runs as `cloudsqladmin` (`root` on `up`'s server, with the password it was started with).
 - **`instances.clone`** creates a new instance with the source's settings, starts its server,
   and loads a dump of the source taken then; with `pointInTime` it recovers the source to that
   time (next section), and with `binLogCoordinates` (#1421) to a position in a MySQL source's

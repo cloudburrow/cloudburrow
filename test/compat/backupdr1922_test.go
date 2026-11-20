@@ -213,11 +213,6 @@ func TestBackupDRRestoreToANewInstance(t *testing.T) {
 	// then restores the backup into it (instances.restoreBackup with
 	// backupdrBackup), so the rows are the backup's.
 	t.Run("terraform", func(t *testing.T) {
-		if c.name == "mysql" {
-			// The provider deletes a new MySQL instance's 'root'@'%',
-			// which CloudBurrow uses (#1993).
-			t.Skip("Terraform's MySQL instances need #1993")
-		}
 		h := h.For(t)
 		m := newTFModule(t)
 		target := c.instance + "-tf"

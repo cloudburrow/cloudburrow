@@ -392,10 +392,12 @@ func MySQLSystemAccountsSQL(version, password string) string {
 }
 
 // mysqlHidden is whether users.list leaves the account out: MySQL's own
-// (mysql.*), CloudBurrow's, and root at a loopback host, which Cloud SQL
-// lists as system users "used to provide the managed database service".
+// (mysql.*), CloudBurrow's, the replication users (cloudsqlreplica, a
+// system user in Cloud SQL's list, and the standby's), and root at a
+// loopback host, which Cloud SQL lists as system users "used to provide
+// the managed database service".
 func mysqlHidden(name, host string) bool {
-	if strings.HasPrefix(name, "mysql.") || name == MySQLAdminUser {
+	if strings.HasPrefix(name, "mysql.") || name == MySQLAdminUser || name == "cloudsqlreplica" || name == "cloudsqlstandby" {
 		return true
 	}
 	return name == "root" && (host == "localhost" || host == "127.0.0.1" || host == "::1")
