@@ -147,6 +147,9 @@ type Admin struct {
 	// usage counts the documents calls through the front (usage.go, #2048).
 	usageOnce sync.Once
 	usage     *Usage
+	// rulesGate is the projects' Security Rules as last set (rulesgate.go,
+	// #2050); nil until the front serves.
+	rulesGate atomic.Pointer[rulesGate]
 }
 
 // New returns the API for the emulator at emulator (host:port).

@@ -87,8 +87,8 @@ func clientGet(t *testing.T, addr, project, doc, uid string) (int, string) {
 // cloud.firestore release puts it in force, projects.test evaluates ALLOW
 // and DENY cases by the emulator, and a client-SDK call (a Firebase ID
 // token, or none) is then allowed or denied by the rules, while the server
-// client library is not, as on Google. Deleting the release opens the
-// project's Firestore again.
+// client library is not, as on Google. Before any release, and once the
+// release is deleted, client calls are denied (#2050).
 func TestFirebaseRulesReleaseEnforcesOnClientCalls(t *testing.T) {
 	h := New(t)
 	c := firebaseRulesClient(t, h) // skips without CLOUDBURROW_TEST_FIREBASERULES
@@ -121,7 +121,7 @@ func TestFirebaseRulesReleaseEnforcesOnClientCalls(t *testing.T) {
 		t.Fatalf("rulesets.list: %+v %v", list, err)
 	}
 
-	// The project's Firestore is open before any release, as it always was.
+	// Before any release, a client call is denied, as on Google (#2050).
 	admin := func() *firestore.Client {
 		t.Setenv("FIRESTORE_EMULATOR_HOST", fsAddr)
 		fc, err := firestore.NewClient(ctx, project)
@@ -134,8 +134,8 @@ func TestFirebaseRulesReleaseEnforcesOnClientCalls(t *testing.T) {
 	if _, err := admin.Doc("users/alice").Set(ctx, map[string]any{"name": "Alice"}); err != nil {
 		t.Fatalf("the admin write: %v", err)
 	}
-	if code, body := clientGet(t, fsAddr, project, "users/alice", "bob"); code != http.StatusOK {
-		t.Fatalf("before a release, bob's read: %d %s; want 200", code, body)
+	if code, body := clientGet(t, fsAddr, project, "users/alice", "bob"); code != http.StatusForbidden {
+		t.Fatalf("before a release, bob's read: %d %s; want 403", code, body)
 	}
 
 	relName := parent + "/releases/cloud.firestore"
@@ -209,7 +209,7 @@ func TestFirebaseRulesReleaseEnforcesOnClientCalls(t *testing.T) {
 		t.Errorf("projects.test of a source that does not compile: %+v %v", bad, err)
 	}
 
-	// patch to an open ruleset, then delete: open again.
+	// patch to an open ruleset, then delete: denied again.
 	open, err := c.Projects.Rulesets.Create(parent, &rules.Ruleset{Source: &rules.Source{Files: []*rules.File{{Name: "firestore.rules",
 		Content: "rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    match /{document=**} {\n      allow read: if true;\n    }\n  }\n}\n"}}}}).Context(ctx).Do()
 	if err != nil {
@@ -231,8 +231,8 @@ func TestFirebaseRulesReleaseEnforcesOnClientCalls(t *testing.T) {
 	if _, err := c.Projects.Rulesets.Delete(rs.Name).Context(ctx).Do(); err != nil {
 		t.Errorf("rulesets.delete: %v", err)
 	}
-	if code, body := clientGet(t, fsAddr, project, "users/alice", ""); code != http.StatusOK {
-		t.Errorf("after the release is deleted, an unauthenticated read: %d %s; want 200", code, body)
+	if code, body := clientGet(t, fsAddr, project, "users/alice", ""); code != http.StatusForbidden {
+		t.Errorf("after the release is deleted, an unauthenticated read: %d %s; want 403", code, body)
 	}
 }
 

@@ -289,6 +289,8 @@ func (d *Documents) restore(ctx context.Context) error {
 	if err := d.importAll(ctx); err != nil {
 		return fmt.Errorf("import: %w", err)
 	}
+	// Nor the Security Rules (#2050).
+	d.admin.restoreRules(ctx)
 	// The emulator started empty: it holds no versions from before the
 	// import (pitr.go, #1942).
 	d.admin.sawImport(d.admin.now())

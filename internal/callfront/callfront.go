@@ -512,8 +512,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if fa != nil {
 			// Reads, writes, deletes and query statistics (#2048), then
 			// who Security Rules apply to: server libraries' calls are
-			// sent as the emulator's owner.
-			h = firestoreadmin.ClientAuth(fa.Usage().Wrap(h))
+			// sent as the emulator's owner, and a client call before any
+			// Rules release is denied (#2050).
+			h = firestoreadmin.ClientAuth(fa.RulesGate(fa.Usage().Wrap(h)))
 		}
 		servers = append(servers, Server(h, logger.Printf, *service))
 		logger.Printf("call front: serving %s for the emulator at %s", l.Addr(), p[1])
