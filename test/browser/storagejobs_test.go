@@ -16,6 +16,8 @@ import (
 	"cloud.google.com/go/storage/control/apiv2/controlpb"
 	insights "cloud.google.com/go/storageinsights/apiv1"
 	"cloud.google.com/go/storageinsights/apiv1/storageinsightspb"
+	"github.com/chromedp/chromedp"
+	"github.com/chromedp/chromedp/kb"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 	sbo "google.golang.org/api/storagebatchoperations/v1"
@@ -355,6 +357,52 @@ func TestStorageCompanionScreensMeetWCAG(t *testing.T) {
 		pages = append(pages, listAndCreate(l.name, l.path, project)...)
 	}
 	auditScreens(t, pages)
+}
+
+// TestStorageListPollKeepsKeyboardFocus (#2047), in the storage shard: the
+// Inventory reports list's poll, reading the listing it shows, leaves the
+// page as it is, so a keyboard user's focus stays on the control they were
+// on; a redraw that does rebuild the table (a sort, by keyboard) puts focus
+// back on the control that stands where theirs stood.
+func TestStorageListPollKeepsKeyboardFocus(t *testing.T) {
+	needService(t, "storage")
+	project := uniqueProject(t)
+	p := open(t)
+	p.navigate("/storage/inventory-reports?project=" + project)
+	p.waitFor(settled)
+	focused := func(js string) string {
+		var at string
+		p.eval(`(async () => { `+js+`; await new Promise((r) => setTimeout(r, 50));
+			const a = document.activeElement;
+			return a === null || a === document.body ? "body" : a.tagName + " " + (a.getAttribute("aria-label") || a.textContent.trim()); })()`,
+			&at, awaitPromise)
+		return at
+	}
+	sort := `[...document.querySelectorAll("#view th .sort-button")].find((b) => b.textContent.includes("Configuration ID"))`
+	var marked bool
+	p.eval(`(() => { const s = document.querySelector('#view select[aria-label="Rows per page"]');
+		s.focus(); s.dataset.mark = "1"; return document.activeElement === s; })()`, &marked)
+	if !marked {
+		t.Fatal("Rows per page could not be focused")
+	}
+	if at := focused(`await LIST_POLL_TICK()`); at != "SELECT Rows per page" {
+		t.Errorf("after the list poll focus is on %s, want Rows per page", at)
+	}
+	var kept bool
+	p.eval(`document.activeElement.dataset.mark === "1"`, &kept)
+	if !kept {
+		t.Error("the list poll rebuilt Rows per page though the listing had not changed")
+	}
+	p.eval(sort+`.focus()`, nil)
+	p.run(chromedp.KeyEvent(kb.Enter))
+	if at := focused(`0`); !strings.HasPrefix(at, "BUTTON Configuration ID") {
+		t.Errorf("after sorting by keyboard focus is on %s, want the Configuration ID sort button", at)
+	}
+	var sorted string
+	p.eval(sort+`.closest("th").getAttribute("aria-sort")`, &sorted)
+	if sorted != "ascending" {
+		t.Errorf("the Configuration ID column is sorted %q, want ascending", sorted)
+	}
 }
 
 // TestStorageInsightsDatasetsThroughThePage (#1976), in the storage shard.

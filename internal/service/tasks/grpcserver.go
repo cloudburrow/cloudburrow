@@ -315,7 +315,8 @@ func generateTaskName(parent string) string {
 
 // --- queue methods ---
 
-func (g *GRPCServer) CreateQueue(_ context.Context, req *taskspb.CreateQueueRequest) (*taskspb.Queue, error) {
+func (g *GRPCServer) CreateQueue(_ context.Context, req *taskspb.CreateQueueRequest) (_ *taskspb.Queue, err error) {
+	defer func() { g.called("CreateQueue", req, err) }()
 	if _, _, err := resource.ParseLocation(req.GetParent()); err != nil {
 		return nil, apierror.InvalidArgument("%v", err)
 	}
@@ -348,7 +349,8 @@ var updatableQueuePaths = []string{"app_engine_routing_override", "http_target",
 // INVALID_ARGUMENT naming it. Fields CreateQueue refuses are refused here
 // when the mask names them. The dispatcher reads the stored queue on every
 // pass and retry, so the new configuration applies to tasks already queued.
-func (g *GRPCServer) UpdateQueue(_ context.Context, req *taskspb.UpdateQueueRequest) (*taskspb.Queue, error) {
+func (g *GRPCServer) UpdateQueue(_ context.Context, req *taskspb.UpdateQueueRequest) (_ *taskspb.Queue, err error) {
+	defer func() { g.called("UpdateQueue", req, err) }()
 	in := req.GetQueue()
 	if in.GetName() == "" {
 		return nil, apierror.InvalidArgument("queue.name is required")
@@ -456,7 +458,8 @@ func retryConfigSetter(sub string, want RetryConfig) (func(*RetryConfig, *RateLi
 	return nil, apierror.InvalidArgument("update_mask path %q is not a field of Queue", "retry_config."+sub)
 }
 
-func (g *GRPCServer) GetQueue(_ context.Context, req *taskspb.GetQueueRequest) (*taskspb.Queue, error) {
+func (g *GRPCServer) GetQueue(_ context.Context, req *taskspb.GetQueueRequest) (_ *taskspb.Queue, err error) {
+	defer func() { g.called("GetQueue", req, err) }()
 	q, err := g.store.GetQueue(req.GetName())
 	if err != nil {
 		return nil, err
@@ -464,7 +467,8 @@ func (g *GRPCServer) GetQueue(_ context.Context, req *taskspb.GetQueueRequest) (
 	return toProtoQueue(q), nil
 }
 
-func (g *GRPCServer) ListQueues(_ context.Context, req *taskspb.ListQueuesRequest) (*taskspb.ListQueuesResponse, error) {
+func (g *GRPCServer) ListQueues(_ context.Context, req *taskspb.ListQueuesRequest) (_ *taskspb.ListQueuesResponse, err error) {
+	defer func() { g.called("ListQueues", req, err) }()
 	if _, _, err := resource.ParseLocation(req.GetParent()); err != nil {
 		return nil, apierror.InvalidArgument("%v", err)
 	}
@@ -496,14 +500,16 @@ func (g *GRPCServer) ListQueues(_ context.Context, req *taskspb.ListQueuesReques
 	return resp, nil
 }
 
-func (g *GRPCServer) DeleteQueue(_ context.Context, req *taskspb.DeleteQueueRequest) (*emptypb.Empty, error) {
+func (g *GRPCServer) DeleteQueue(_ context.Context, req *taskspb.DeleteQueueRequest) (_ *emptypb.Empty, err error) {
+	defer func() { g.called("DeleteQueue", req, err) }()
 	if err := g.store.DeleteQueue(req.GetName()); err != nil {
 		return nil, err
 	}
 	return &emptypb.Empty{}, nil
 }
 
-func (g *GRPCServer) PauseQueue(_ context.Context, req *taskspb.PauseQueueRequest) (*taskspb.Queue, error) {
+func (g *GRPCServer) PauseQueue(_ context.Context, req *taskspb.PauseQueueRequest) (_ *taskspb.Queue, err error) {
+	defer func() { g.called("PauseQueue", req, err) }()
 	q, err := g.store.SetQueueState(req.GetName(), StatePaused)
 	if err != nil {
 		return nil, err
@@ -511,7 +517,8 @@ func (g *GRPCServer) PauseQueue(_ context.Context, req *taskspb.PauseQueueReques
 	return toProtoQueue(q), nil
 }
 
-func (g *GRPCServer) ResumeQueue(_ context.Context, req *taskspb.ResumeQueueRequest) (*taskspb.Queue, error) {
+func (g *GRPCServer) ResumeQueue(_ context.Context, req *taskspb.ResumeQueueRequest) (_ *taskspb.Queue, err error) {
+	defer func() { g.called("ResumeQueue", req, err) }()
 	q, err := g.store.SetQueueState(req.GetName(), StateRunning)
 	if err != nil {
 		return nil, err
@@ -519,7 +526,8 @@ func (g *GRPCServer) ResumeQueue(_ context.Context, req *taskspb.ResumeQueueRequ
 	return toProtoQueue(q), nil
 }
 
-func (g *GRPCServer) PurgeQueue(_ context.Context, req *taskspb.PurgeQueueRequest) (*taskspb.Queue, error) {
+func (g *GRPCServer) PurgeQueue(_ context.Context, req *taskspb.PurgeQueueRequest) (_ *taskspb.Queue, err error) {
+	defer func() { g.called("PurgeQueue", req, err) }()
 	if err := g.store.PurgeQueue(req.GetName()); err != nil {
 		return nil, err
 	}
@@ -532,7 +540,8 @@ func (g *GRPCServer) PurgeQueue(_ context.Context, req *taskspb.PurgeQueueReques
 
 // --- task methods ---
 
-func (g *GRPCServer) CreateTask(ctx context.Context, req *taskspb.CreateTaskRequest) (*taskspb.Task, error) {
+func (g *GRPCServer) CreateTask(ctx context.Context, req *taskspb.CreateTaskRequest) (_ *taskspb.Task, err error) {
+	defer func() { g.called("CreateTask", req, err) }()
 	parent := req.GetParent()
 	if _, err := resource.Parse(parent); err != nil {
 		return nil, apierror.InvalidArgument("%v", err)
@@ -560,7 +569,8 @@ func (g *GRPCServer) CreateTask(ctx context.Context, req *taskspb.CreateTaskRequ
 	return g.protoTask(created), nil
 }
 
-func (g *GRPCServer) GetTask(_ context.Context, req *taskspb.GetTaskRequest) (*taskspb.Task, error) {
+func (g *GRPCServer) GetTask(_ context.Context, req *taskspb.GetTaskRequest) (_ *taskspb.Task, err error) {
+	defer func() { g.called("GetTask", req, err) }()
 	t, err := g.store.GetTask(req.GetName())
 	if err != nil {
 		return nil, err
@@ -568,7 +578,8 @@ func (g *GRPCServer) GetTask(_ context.Context, req *taskspb.GetTaskRequest) (*t
 	return g.protoTask(t), nil
 }
 
-func (g *GRPCServer) ListTasks(_ context.Context, req *taskspb.ListTasksRequest) (*taskspb.ListTasksResponse, error) {
+func (g *GRPCServer) ListTasks(_ context.Context, req *taskspb.ListTasksRequest) (_ *taskspb.ListTasksResponse, err error) {
+	defer func() { g.called("ListTasks", req, err) }()
 	tasks, err := g.store.ListTasks(req.GetParent())
 	if err != nil {
 		return nil, err
@@ -590,7 +601,8 @@ func (g *GRPCServer) ListTasks(_ context.Context, req *taskspb.ListTasksRequest)
 	return resp, nil
 }
 
-func (g *GRPCServer) DeleteTask(_ context.Context, req *taskspb.DeleteTaskRequest) (*emptypb.Empty, error) {
+func (g *GRPCServer) DeleteTask(_ context.Context, req *taskspb.DeleteTaskRequest) (_ *emptypb.Empty, err error) {
+	defer func() { g.called("DeleteTask", req, err) }()
 	if err := g.store.DeleteTask(req.GetName()); err != nil {
 		return nil, err
 	}
@@ -599,7 +611,8 @@ func (g *GRPCServer) DeleteTask(_ context.Context, req *taskspb.DeleteTaskReques
 
 // GetIamPolicy returns a queue's stored policy (ADR-0006, #366). Stored,
 // never enforced.
-func (g *GRPCServer) GetIamPolicy(_ context.Context, req *iampb.GetIamPolicyRequest) (*iampb.Policy, error) {
+func (g *GRPCServer) GetIamPolicy(_ context.Context, req *iampb.GetIamPolicyRequest) (_ *iampb.Policy, err error) {
+	defer func() { g.called("GetIamPolicy", req, err) }()
 	q, err := g.store.GetQueue(req.GetResource())
 	if err != nil {
 		return nil, err
@@ -608,7 +621,8 @@ func (g *GRPCServer) GetIamPolicy(_ context.Context, req *iampb.GetIamPolicyRequ
 }
 
 // SetIamPolicy stores a policy. Stored, never enforced.
-func (g *GRPCServer) SetIamPolicy(_ context.Context, req *iampb.SetIamPolicyRequest) (*iampb.Policy, error) {
+func (g *GRPCServer) SetIamPolicy(_ context.Context, req *iampb.SetIamPolicyRequest) (_ *iampb.Policy, err error) {
+	defer func() { g.called("SetIamPolicy", req, err) }()
 	p, err := g.store.SetIamPolicy(req.GetResource(), req)
 	if err != nil {
 		return nil, err
@@ -618,7 +632,8 @@ func (g *GRPCServer) SetIamPolicy(_ context.Context, req *iampb.SetIamPolicyRequ
 
 // TestIamPermissions returns every requested permission of an existing
 // queue: nothing is enforced, so nothing is denied.
-func (g *GRPCServer) TestIamPermissions(_ context.Context, req *iampb.TestIamPermissionsRequest) (*iampb.TestIamPermissionsResponse, error) {
+func (g *GRPCServer) TestIamPermissions(_ context.Context, req *iampb.TestIamPermissionsRequest) (_ *iampb.TestIamPermissionsResponse, err error) {
+	defer func() { g.called("TestIamPermissions", req, err) }()
 	if _, err := g.store.GetQueue(req.GetResource()); err != nil {
 		return nil, err
 	}

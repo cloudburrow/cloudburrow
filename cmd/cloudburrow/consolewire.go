@@ -197,6 +197,8 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		if enabled[config.ServicePubSub] {
 			sp.pubsub = pubsubAddr
 		}
+		// A bucket's Inventory reports tab (#1843) reads Storage Insights.
+		sp.insights = companionAddr(d.cfg, d.cfg.Endpoints.StorageInsights)
 		providers = append(providers, sp,
 			storageDeletedProvider{endpoint: storageAddr},
 			storageSettingsProvider{endpoint: storageAddr},
@@ -220,7 +222,11 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			pubsubSchemasProvider{endpoint: pubsubAddr})
 	}
 	if enabled[config.ServiceTasks] && d.tasks != nil {
-		providers = append(providers, tasksProvider{svc: d.tasks, faults: d.faults})
+		tp := tasksProvider{svc: d.tasks, faults: d.faults}
+		if enabled[config.ServiceMonitoring] && d.monitoring != nil {
+			tp.metrics = monitoringScreen{api: monitoringAPIOf(d.monitoring)}
+		}
+		providers = append(providers, tp)
 	}
 	// workflowsEventarc is Eventarc, for Workflows' Eventarc triggers
 	// (#2011); nil without it.

@@ -365,7 +365,7 @@ input[type="datetime-local"]:focus-within {
    to, the title, and the screen's own controls beside it, as Google's
    console puts "+ Create  Refresh" and "Edit  Delete" on the title's line. */
 .page-title-row { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 16px; min-height: 40px; }
-.page-title-row h1 { margin: 0; }
+.page-title-row h1 { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .page-header-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; flex: 1 1 auto; }
 .page-header-actions:empty { display: none; }
 .page-header-actions .info-toggle { margin-left: auto; }
@@ -447,6 +447,9 @@ button.primary.header-button[disabled], button.primary.header-button.is-busy[dis
   font-weight: 500; color: var(--accent); cursor: pointer;
 }
 .view-options-wrap { position: relative; }
+.view-options-group { border: 0; margin: 0 0 12px; padding: 0; }
+.view-options-group legend { padding: 4px 0 8px; font-weight: 500; }
+.view-options-group .view-options-item { padding: 6px 0; }
 .view-options-menu {
   position: absolute; top: 44px; right: 0; z-index: 30; min-width: 240px; max-height: 360px; overflow-y: auto;
   padding: 8px 0; background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow-menu);
@@ -1483,6 +1486,9 @@ tbody tr.is-selected { background: var(--nav-selected); }
 .overflow-item:hover { background: var(--state-hover); }
 .overflow-item:active { background: var(--state-press); }
 .overflow-item.is-destructive { color: var(--error); }
+/* A tab's ellipsis (#2064) opens from its left edge: it can be the first
+   control on the tab, with nothing to its left to open over. */
+.section-actions .overflow-menu { left: 0; right: auto; }
 
 /* The footer carries the page size and the range, so the count on screen
    always describes the rows on screen. */

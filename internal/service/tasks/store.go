@@ -197,10 +197,13 @@ type Store struct {
 	now func() time.Time
 	// swept is when DeleteTask last removed the expired tombstones.
 	swept time.Time
+	// metrics are the API calls and attempts Cloud Monitoring has not
+	// drained yet (#2064).
+	metrics *metricsLog
 }
 
 // NewStore wraps a metadata store.
-func NewStore(db store.Store) *Store { return &Store{db: db, now: time.Now} }
+func NewStore(db store.Store) *Store { return &Store{db: db, now: time.Now, metrics: &metricsLog{}} }
 
 func queueKey(name string) string { return "tasks/queues/" + name }
 func taskKey(name string) string  { return "tasks/tasks/" + name }

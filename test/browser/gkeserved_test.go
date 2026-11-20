@@ -9,6 +9,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/chromedp/chromedp"
+	"github.com/chromedp/chromedp/kb"
 )
 
 // envGKE is the Kubernetes Engine API (#1913), exported only by the served
@@ -147,9 +150,80 @@ func TestGKEServedClusterThroughTheBrowser(t *testing.T) {
 	p.setField("#f-name", name)
 	p.setField("#f-zone", zone)
 	p.setField("#f-nodes", "1")
+	// A second node pool, made with the cluster (#1857): Google's Create
+	// cluster lists default-pool and its Add node pool.
+	p.clickText("form.create-page button", "Add node pool")
+	p.eval(`(() => { const r = document.querySelector("form.create-page .group-row");
+		const [n, c] = r.querySelectorAll("input[type=text]");
+		n.value = "pool-c"; n.dispatchEvent(new Event("input"));
+		c.value = "1"; c.dispatchEvent(new Event("input"));
+		return true; })()`, nil)
+	// WCAG over the create page as filled, before it is sent.
+	auditScreens(t, []a11yPage{{"Create cluster, Standard, with a node pool", "/kubernetes/clusters/create?project=" + project,
+		`document.querySelector("#view form.create-page") !== null`,
+		`document.querySelector("#view input[type=radio][name=f-mode-choice][value=Standard]").click();
+		 document.querySelector("form.create-page .group-add").click()`}})
 	p.eval(`(() => { [...document.querySelectorAll("#view form.create-page button")].find((b) => b.textContent.trim() === "Create").click(); return true; })()`, nil)
 	p.waitFor(`location.pathname !== "/kubernetes/clusters/create"`)
-	gkeIdle(t, project, name, 6*time.Minute)
+	created := gkeIdle(t, project, name, 8*time.Minute)
+	hasPool := false
+	for _, s := range created.Sections {
+		for _, it := range s.Listing.Items {
+			hasPool = hasPool || (s.ID == "nodepools" && it.Name == "pool-c" && it.Fields["Number of nodes"] == "1")
+		}
+	}
+	if !hasPool {
+		t.Error("Create cluster did not make pool-c with one node")
+	}
+
+	// The cluster's page: Google's tabs, Nodes holding Node pools and
+	// Nodes; the nodes read from the cluster, with CPU requested; Upgrade
+	// says why it is not offered, with one version served.
+	p.navigate("/kubernetes/clusters/" + name + "?project=" + project)
+	p.waitFor(`document.querySelector("#view h1") && document.querySelector("#view h1").textContent === "Cluster details" &&
+		document.querySelectorAll("#view [role=tab]").length > 0`)
+	var tabs string
+	p.eval(`[...[...document.querySelectorAll("#view [role=tablist]")][0].querySelectorAll("[role=tab]")].filter((b) => !b.hidden).map((b) => b.textContent).join(",")`, &tabs)
+	if tabs != "Details,Nodes,Storage,Observability,Logs,Operations" {
+		t.Errorf("the served cluster's tabs are %q", tabs)
+	}
+	var upgradeOff bool
+	p.eval(`[...document.querySelectorAll("#view button")].some((b) => b.textContent === "Upgrade" && b.disabled && (b.title || "").includes("No newer"))`, &upgradeOff)
+	if !upgradeOff {
+		t.Error("Upgrade is not disabled with its reason on a cluster at the only version served")
+	}
+	p.navigate("/kubernetes/clusters/" + name + "?project=" + project + "&tab=nodes")
+	p.waitFor(`document.querySelector("#subtab-nodepools") !== null && document.querySelector("#subtab-nodes") !== null &&
+		[...document.querySelectorAll("#detail-panel tbody tr")].length >= 2 &&
+		[...document.querySelectorAll("#detail-panel thead th")].some((th) => th.textContent.trim() === "CPU requested")`)
+	p.navigate("/kubernetes/clusters/" + name + "?project=" + project + "&tab=storage")
+	p.waitFor(`document.querySelector("#detail-panel") !== null && document.querySelector("#detail-panel").textContent.includes("persistent volume")`)
+	auditScreens(t, []a11yPage{
+		{"served cluster details", "/kubernetes/clusters/" + name + "?project=" + project, `document.querySelector("#view h1") !== null && document.querySelectorAll("#view [role=tab]").length > 0`, ""},
+		{"served cluster nodes", "/kubernetes/clusters/" + name + "?project=" + project + "&tab=nodes", `document.querySelector("#subtab-nodes") !== null && document.querySelector("#detail-panel tbody tr") !== null`, ""},
+		{"Connect dialog", "/kubernetes/clusters/" + name + "?project=" + project, `document.querySelector("#view h1") !== null && document.querySelectorAll("#view [role=tab]").length > 0`,
+			`[...document.querySelectorAll("#view button")].find((b) => b.textContent.trim() === "Connect").click()`},
+	})
+	// Connect is gcloud get-credentials.
+	p = open(t)
+	p.navigate("/kubernetes/clusters/" + name + "?project=" + project)
+	p.waitFor(`document.querySelector("#view h1") && document.querySelector("#view h1").textContent === "Cluster details"`)
+	p.clickText("#view button", "Connect")
+	p.waitFor(fmt.Sprintf(`[...document.querySelectorAll(".modal:not(.is-closing) textarea")].some((a) => a.value === %q)`,
+		"gcloud container clusters get-credentials "+name+" --location "+zone+" --project "+project))
+	p.clickText(".modal:not(.is-closing) button", "Cancel")
+	p.waitFor(`document.querySelector(".modal:not(.is-closing)") === null`)
+	// pool-c's Upgrade, from its row's menu, says why.
+	p.navigate("/kubernetes/clusters/" + name + "?project=" + project + "&tab=nodepools")
+	poolRow := `[...document.querySelectorAll("#view tbody tr")].find((r) => [...r.querySelectorAll("td, th")].some((c) => c.textContent.trim() === "pool-c"))`
+	p.waitFor(poolRow + ` !== undefined`)
+	p.eval(poolRow+`.querySelector(".overflow-trigger").click()`, nil)
+	var poolUpgrade bool
+	p.eval(`[...document.querySelectorAll(".overflow-item")].some((b) => b.textContent.trim() === "Upgrade" && (b.disabled || b.getAttribute("aria-disabled") === "true"))`, &poolUpgrade)
+	if !poolUpgrade {
+		t.Error("pool-c's Upgrade is not drawn disabled at the only version served")
+	}
+	p.run(chromedp.KeyEvent(kb.Escape))
 
 	// Listed, Standard, in its zone.
 	p.navigate("/kubernetes/clusters?project=" + project)
