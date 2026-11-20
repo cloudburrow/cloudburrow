@@ -1,8 +1,10 @@
 package iameval
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -92,7 +94,7 @@ func (e *Enforcer) Interceptor(svc *Service) grpc.UnaryServerInterceptor {
 		if e == nil || e.On == nil || !e.On() {
 			return handler(ctx, req)
 		}
-		if strings.HasSuffix(info.FullMethod, "/TestIamPermissions") {
+		if strings.HasSuffix(info.FullMethod, "/TestIamPermissions") && svc.checksPolicies() {
 			return e.testPermissions(ctx, svc, req, handler)
 		}
 		_, m := ForMethod(svc, info.FullMethod)
@@ -103,9 +105,17 @@ func (e *Enforcer) Interceptor(svc *Service) grpc.UnaryServerInterceptor {
 		if !ok {
 			return handler(ctx, req)
 		}
-		resource := field(msg.ProtoReflect(), m.Field)
-		if err := e.Authorize(ctx, svc, bearer(ctx), m.PermissionOf(resource), resource); err != nil {
-			return nil, err
+		resources := fieldValues(msg.ProtoReflect(), m.Field)
+		for _, resource := range resources {
+			if err := e.Authorize(ctx, svc, bearer(ctx), m.PermissionOf(resource), resource); err != nil {
+				return nil, err
+			}
+		}
+		resource := resources[0]
+		for _, account := range actAsFields(msg.ProtoReflect(), m.ActAs) {
+			if err := e.AuthorizeActAs(ctx, svc, bearer(ctx), Project(resource), account); err != nil {
+				return nil, err
+			}
 		}
 		return handler(ctx, req)
 	}
@@ -261,12 +271,13 @@ func (e *Enforcer) HTTP(svc *Service, m *rest.Matcher, next http.Handler) http.H
 			next.ServeHTTP(w, r)
 			return
 		}
-		full, fields, ok := m.Match(r)
+		route, fields, ok := m.MatchRoute(r)
+		full := "/" + route.Service + "/" + route.MethodName
 		if !ok {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if strings.HasSuffix(full, "/TestIamPermissions") {
+		if strings.HasSuffix(full, "/TestIamPermissions") && svc.checksPolicies() {
 			e.testPermissionsJSON(w, r, svc, fields["resource"], next)
 			return
 		}
@@ -275,10 +286,28 @@ func (e *Enforcer) HTTP(svc *Service, m *rest.Matcher, next http.Handler) http.H
 			next.ServeHTTP(w, r)
 			return
 		}
-		resource := fields[row.Field]
-		if err := e.Authorize(r.Context(), svc, Bearer(r.Header.Get("Authorization")), row.PermissionOf(resource), resource); err != nil {
-			WriteJSONStatus(w, err)
-			return
+		var raw []byte
+		if route.Body != "" && r.Body != nil {
+			b, err := io.ReadAll(io.LimitReader(r.Body, 64<<20))
+			_ = r.Body.Close()
+			r.Body = io.NopCloser(bytes.NewReader(b))
+			if err == nil {
+				raw = b
+			}
+		}
+		resources := jsonResources(fields, raw, route.Body, row.Field)
+		for _, resource := range resources {
+			if err := e.Authorize(r.Context(), svc, Bearer(r.Header.Get("Authorization")), row.PermissionOf(resource), resource); err != nil {
+				WriteJSONStatus(w, err)
+				return
+			}
+		}
+		resource := resources[0]
+		for _, account := range jsonActAs(raw, route.Body, row.ActAs) {
+			if err := e.AuthorizeActAs(r.Context(), svc, Bearer(r.Header.Get("Authorization")), Project(resource), account); err != nil {
+				WriteJSONStatus(w, err)
+				return
+			}
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -378,4 +407,17 @@ func (e *Enforcer) HTTPPaths(svc *Service, methods []JSONMethod, next http.Handl
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// checksPolicies is whether svc's table checks its IAM policy methods,
+// and so answers TestIamPermissions with what the caller holds: a table
+// that checks only actAs (Cloud Run's, Cloud Functions') leaves its IAM
+// methods as they were.
+func (s *Service) checksPolicies() bool {
+	for full := range s.Methods {
+		if strings.HasSuffix(full, "/GetIamPolicy") {
+			return true
+		}
+	}
+	return false
 }

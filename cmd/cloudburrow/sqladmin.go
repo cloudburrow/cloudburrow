@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -8,6 +9,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/components"
@@ -137,5 +141,39 @@ func sqlAdminIAM(creds *metadata.Credentials, e *iameval.Enforcer) sqladmin.IAMS
 				Resource: "projects/" + project + "/instances/" + instance, Type: "sqladmin.googleapis.com/Instance",
 				Service: "sqladmin.googleapis.com", Project: project, Time: time.Now()}).Granted
 		},
+	}
+}
+
+// cloudSQLEnforcer checks the Cloud SQL Admin API's requests (#1879) by
+// their paths (iameval.CloudSQLJSON), and refuses with Cloud SQL's own 403
+// envelope, reason notAuthorized; a token this instance did not mint is
+// 401, as elsewhere.
+func cloudSQLEnforcer(e *iameval.Enforcer) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if e == nil || e.On == nil || !e.On() {
+				next.ServeHTTP(w, r)
+				return
+			}
+			permission, resource, ok := iameval.MatchJSON(iameval.CloudSQLJSON, r.Method, r.URL.Path)
+			if !ok {
+				next.ServeHTTP(w, r)
+				return
+			}
+			err := e.Authorize(r.Context(), iameval.CloudSQL, iameval.Bearer(r.Header.Get("Authorization")), permission, resource)
+			switch status.Code(err) {
+			case codes.OK:
+				next.ServeHTTP(w, r)
+			case codes.PermissionDenied:
+				w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+				w.WriteHeader(http.StatusForbidden)
+				_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{
+					"code": http.StatusForbidden, "message": iameval.CloudSQLDenied,
+					"errors": []map[string]any{{"domain": "global", "reason": "notAuthorized", "message": iameval.CloudSQLDenied}},
+				}})
+			default:
+				iameval.WriteJSONStatus(w, err)
+			}
+		})
 	}
 }

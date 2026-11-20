@@ -64,8 +64,9 @@
 # (UP_FLAGS) and runs only the enforcement tests (COMPAT_RUN,
 # ^TestIAMEnforcement), which skip on every other shard's instance, as
 # those run with enforcement off (#1879): Cloud Storage, Pub/Sub, Cloud
-# Tasks, Secret Manager, Cloud KMS, Cloud Run (for run.routes.invoke),
-# Cloud Scheduler and Workflows.
+# Tasks, Secret Manager, Cloud KMS, Cloud Run (for run.routes.invoke and
+# iam.serviceAccounts.actAs), Cloud Scheduler, Workflows, Cloud Logging,
+# Cloud Monitoring, Memorystore and the Cloud SQL Admin API.
 
 # A tenth, sqlreplicas, is the sql shard's instance again for the Cloud SQL
 # tests that make replicas, standbys and external primaries
@@ -384,9 +385,11 @@ compat_shard() {
       # an instance that enforces, and nothing else, so the shard is a few
       # minutes; the other suites ran with enforcement off in their shards.
       # BigQuery for BigQuery sharing's (Analytics Hub, #1989).
-      # Cloud Scheduler and Workflows since the fourth round.
-      SERVICES=storage,pubsub,tasks,secretmanager,kms,run,bigquery,scheduler,workflows
-      TEST_VARS+=,STORAGE,PUBSUB,TASKS,SECRETS,KMS,RUN,RESOURCEMANAGER,ANALYTICSHUB,BIGQUERY,BIGQUERY_PROJECT,SCHEDULER,WORKFLOWS,IAM_ENFORCEMENT
+      # Cloud Scheduler and Workflows since the fourth round; Cloud
+      # Logging, Cloud Monitoring, Memorystore and the Cloud SQL Admin API
+      # since the fifth.
+      SERVICES=storage,pubsub,tasks,secretmanager,kms,run,bigquery,scheduler,workflows,logging,monitoring,memorystore,cloudsql
+      TEST_VARS+=,STORAGE,PUBSUB,TASKS,SECRETS,KMS,RUN,RESOURCEMANAGER,ANALYTICSHUB,BIGQUERY,BIGQUERY_PROJECT,SCHEDULER,WORKFLOWS,LOGGING,MONITORING,MEMORYSTORE_ADMIN,SQLADMIN,IAM_ENFORCEMENT
       UP_FLAGS=(--iam-enforcement=on)
       COMPAT_RUN='^TestIAMEnforcement' ;;
     localai)

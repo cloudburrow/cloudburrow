@@ -169,6 +169,9 @@ type Server struct {
 	// Wrap, when set before Start, wraps the API's handler: the gate
 	// refusing calls in a project where the API is disabled (#1914).
 	Wrap func(http.Handler) http.Handler
+	// Enforce, when set before Start, wraps the API's handler inside Wrap:
+	// IAM enforcement (#1879).
+	Enforce func(http.Handler) http.Handler
 }
 
 // ServerOf is the name of instance name's server in the cluster: its own
@@ -220,6 +223,9 @@ func (s *Server) Start(context.Context) error {
 	// Loopback-only, but a rebound or cross-site page reaches
 	// loopback too (#676, #1586).
 	var h http.Handler = s
+	if s.Enforce != nil {
+		h = s.Enforce(h)
+	}
 	if s.Wrap != nil {
 		h = s.Wrap(h)
 	}

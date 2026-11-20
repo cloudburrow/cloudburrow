@@ -22,6 +22,8 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 	"github.com/cloudburrow/cloudburrow/internal/metadata"
 	"github.com/cloudburrow/cloudburrow/internal/service/kms"
+	"github.com/cloudburrow/cloudburrow/internal/service/logging"
+	"github.com/cloudburrow/cloudburrow/internal/service/redisadmin"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/scheduler"
 	"github.com/cloudburrow/cloudburrow/internal/service/secrets"
@@ -176,15 +178,101 @@ func newIAMEnforcer(cfg config.Config, creds *metadata.Credentials, reg func() *
 			}
 			return iameval.Caller{Email: strings.ToLower(email)}
 		},
-		Policies:   map[string]iameval.PolicyGetter{},
+		Policies: map[string]iameval.PolicyGetter{
+			// A service account's own policy, which iam.serviceAccounts.actAs
+			// reads (who may act as it), as IAM keeps it.
+			iameval.IAM.Name: func(_ context.Context, resource string) *iampolicy.Stored {
+				return registrySource{reg: reg}.Policy(resource)
+			},
+		},
 		OwnerEmail: owner,
 	}
+}
+
+// iamEnforced are the services the fifth round enforces (#1879): Cloud
+// Logging, Cloud Monitoring, Memorystore (Redis, Redis Cluster and
+// Valkey), and Cloud Run's and Cloud Functions' iam.serviceAccounts.actAs.
+type iamEnforced struct {
+	logging     *loggingService
+	monitoring  *monitoringService
+	memorystore *memorystoreAdminService
+	run         *runService
+}
+
+func (s iamEnforced) use(e *iameval.Enforcer) {
+	if s.logging != nil {
+		s.logging.interpose = append(s.logging.interpose, e.Interceptor(iameval.Logging))
+		s.logging.wrapJSON = jsonEnforcer(e, iameval.Logging, logging.Transcoder().Mixins)
+		// A log view keeps its own policy (roles/logging.viewAccessor).
+		e.Policies[iameval.Logging.Name] = iameval.GRPCPolicyGetter(func() func(context.Context, *iampb.GetIamPolicyRequest) (*iampb.Policy, error) {
+			a := s.logging.Admin()
+			if a == nil {
+				return nil
+			}
+			return a.ViewIAMPolicy
+		})
+	}
+	if s.monitoring != nil {
+		// Monitoring keeps no resource-level policies.
+		s.monitoring.interpose = append(s.monitoring.interpose, e.Interceptor(iameval.Monitoring))
+		s.monitoring.wrapJSON = jsonEnforcer(e, iameval.Monitoring, nil)
+	}
+	if s.memorystore != nil {
+		// Three APIs on one port, each its own table; none keeps
+		// resource-level policies.
+		for _, svc := range []*iameval.Service{iameval.Redis, iameval.RedisCluster, iameval.Valkey} {
+			s.memorystore.interpose = append(s.memorystore.interpose, e.Interceptor(svc))
+		}
+		redis, cluster := jsonEnforcer(e, iameval.Redis, nil), jsonEnforcer(e, iameval.RedisCluster, nil)
+		s.memorystore.wrapRedisJSON = func(next http.Handler) http.Handler { return redis(cluster(next)) }
+		valkey := jsonEnforcer(e, iameval.Valkey, nil)
+		// Valkey's JSON API is under /memorystore, its paths beside
+		// CloudRedis's: matched without the prefix.
+		s.memorystore.wrapValkeyJSON = func(next http.Handler) http.Handler {
+			return stripForMatch(redisadmin.MemorystoreRESTPrefix, valkey, next)
+		}
+	}
+	if s.run != nil {
+		s.run.interpose = append(s.run.interpose, e.Interceptor(iameval.Run), e.Interceptor(iameval.Functions), e.Interceptor(iameval.Eventarc))
+		run, functions := jsonEnforcer(e, iameval.Run, nil), jsonEnforcer(e, iameval.Functions, nil)
+		eventarc := jsonEnforcer(e, iameval.Eventarc, nil)
+		s.run.wrapJSON = func(next http.Handler) http.Handler {
+			// Eventarc's JSON API is under /eventarc on this port.
+			return run(functions(stripForMatch("/eventarc", eventarc, next)))
+		}
+	}
+}
+
+// stripForMatch checks a request with wrap as if its path had no prefix,
+// then serves it to next with its path as it came.
+func stripForMatch(prefix string, wrap func(http.Handler) http.Handler, next http.Handler) http.Handler {
+	type orig struct{}
+	inner := wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if o, ok := r.Context().Value(orig{}).(*http.Request); ok {
+			o.Body = r.Body
+			next.ServeHTTP(w, o)
+			return
+		}
+		next.ServeHTTP(w, r)
+	}))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path, ok := strings.CutPrefix(r.URL.Path, prefix)
+		if !ok {
+			next.ServeHTTP(w, r)
+			return
+		}
+		c := r.Clone(context.WithValue(r.Context(), orig{}, r))
+		c.URL.Path = path
+		c.URL.RawPath = ""
+		inner.ServeHTTP(w, c)
+	})
 }
 
 // useIAMEnforcement interposes the enforcer on the in-process services
 // whose methods it maps, and gives it their policies.
 func useIAMEnforcement(e *iameval.Enforcer, secretsSvc *secretsService, kmsSvc *kmsService, tasksSvc *tasksService, hub *analyticsHubSvc,
-	schedulerSvc *schedulerService, workflowsSvc *workflowsService) {
+	schedulerSvc *schedulerService, workflowsSvc *workflowsService, more iamEnforced) {
+	more.use(e)
 	// Cloud Scheduler and Workflows keep no resource-level policies, so
 	// only the project's and its ancestors' apply: no policy reader.
 	if schedulerSvc != nil {

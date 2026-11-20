@@ -41,6 +41,8 @@ type runService struct {
 	// interpose run inside the call observer, in order: the request log
 	// (#314), then fault injection (#306), so the log sees injected faults.
 	interpose []grpc.UnaryServerInterceptor
+	// wrapJSON wraps the JSON API (IAM enforcement, #1879); nil is none.
+	wrapJSON func(http.Handler) http.Handler
 	// apiGate refuses calls in a project where the API is disabled
 	// (#1914); nil refuses none.
 	apiGate apienable.Decider
@@ -334,6 +336,9 @@ func (r *runService) Start(ctx context.Context) error {
 	// paths, /v1/projects/{p}/occurrences and /notes, are beside Cloud
 	// Run v1's and Artifact Registry's.
 	jsonAPI = containerAnalysisHandlerOr(caSrv, jsonAPI)
+	if r.wrapJSON != nil {
+		jsonAPI = r.wrapJSON(jsonAPI)
+	}
 	if r.requests != nil {
 		jsonAPI = rest.Observe(jsonAPI, r.requests)
 	}

@@ -36,9 +36,11 @@ type monitoringService struct {
 	tracing   *telemetry.Tracing
 	calls     grpctransport.Observer
 	interpose []grpc.UnaryServerInterceptor
-	requests  func(rest.Request)
-	server    *grpctransport.Server
-	api       *monitoring.Server
+	// wrapJSON wraps the JSON API (IAM enforcement, #1879); nil is none.
+	wrapJSON func(http.Handler) http.Handler
+	requests func(rest.Request)
+	server   *grpctransport.Server
+	api      *monitoring.Server
 	// logging is the instance's Cloud Logging, or nil; counters the request
 	// counters.
 	logging  *loggingService
@@ -147,6 +149,9 @@ func (s *monitoringService) Start(ctx context.Context) error {
 		s.server.Interpose(i)
 	}
 	var jsonAPI http.Handler = monitoring.NewRESTHandler(api)
+	if s.wrapJSON != nil {
+		jsonAPI = s.wrapJSON(jsonAPI)
+	}
 	if s.requests != nil {
 		jsonAPI = rest.Observe(jsonAPI, s.requests)
 	}

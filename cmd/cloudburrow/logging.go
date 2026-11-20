@@ -48,6 +48,8 @@ type loggingService struct {
 	// (#314), which is what `cloudburrow logs --service logging` reads
 	// (#587), then fault injection (#600), so the log sees injected faults.
 	interpose []grpc.UnaryServerInterceptor
+	// wrapJSON wraps the JSON API (IAM enforcement, #1879); nil is none.
+	wrapJSON func(http.Handler) http.Handler
 	// apiGate refuses calls in a project where the API is disabled
 	// (#1914); nil refuses none.
 	apiGate apienable.Decider
@@ -331,6 +333,9 @@ func (s *loggingService) Start(ctx context.Context) error {
 		s.admin.RegisterViewIAM(g) // log views' IAM (#1519)
 	}
 	var jsonAPI http.Handler = logging.NewRESTHandler(register)
+	if s.wrapJSON != nil {
+		jsonAPI = s.wrapJSON(jsonAPI)
+	}
 	// The Logging clock (#1404), a CloudBurrow extension on the API's port.
 	transcoded := jsonAPI
 	jsonAPI = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

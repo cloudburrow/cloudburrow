@@ -22,6 +22,10 @@ type Method struct {
 	// PermissionFor, when set, picks the permission by the resource
 	// (the IAMPolicy mixin, whose permission is the resource's type's).
 	PermissionFor func(resource string) string
+	// ActAs are the request's fields (dotted paths) naming a service
+	// account the call attaches to its resource: each one set needs
+	// iam.serviceAccounts.actAs on that account (actas.go).
+	ActAs []string
 }
 
 // Service is one API's table: its methods by gRPC full method, the
@@ -40,6 +44,10 @@ type Service struct {
 	Types map[string]string
 	// Deny is the error a denied call gets.
 	Deny func(permission, resource string) error
+	// DenyActAs, when set, is the error a call without
+	// iam.serviceAccounts.actAs on account gets, in the service's own
+	// words; nil is Deny's.
+	DenyActAs func(account, resource string) error
 }
 
 // Type is resource.type for a resource name.
@@ -234,23 +242,33 @@ var Tasks = &Service{
 	Name:              "cloudtasks.googleapis.com",
 	PolicyCollections: []string{"queues"},
 	Types:             map[string]string{"queues": "cloudtasks.googleapis.com/Queue", "tasks": "cloudtasks.googleapis.com/Task"},
-	Methods: sm(map[string][2]string{
-		"ListQueues":   {"cloudtasks.queues.list", "parent"},
-		"GetQueue":     {"cloudtasks.queues.get", "name"},
-		"CreateQueue":  {"cloudtasks.queues.create", "parent"},
-		"UpdateQueue":  {"cloudtasks.queues.update", "queue.name"},
-		"DeleteQueue":  {"cloudtasks.queues.delete", "name"},
-		"PurgeQueue":   {"cloudtasks.queues.purge", "name"},
-		"PauseQueue":   {"cloudtasks.queues.pause", "name"},
-		"ResumeQueue":  {"cloudtasks.queues.resume", "name"},
-		"GetIamPolicy": {"cloudtasks.queues.getIamPolicy", "resource"},
-		"SetIamPolicy": {"cloudtasks.queues.setIamPolicy", "resource"},
-		"ListTasks":    {"cloudtasks.tasks.list", "parent"},
-		"GetTask":      {"cloudtasks.tasks.get", "name"},
-		"CreateTask":   {"cloudtasks.tasks.create", "parent"},
-		"DeleteTask":   {"cloudtasks.tasks.delete", "name"},
-		"RunTask":      {"cloudtasks.tasks.run", "name"},
-	}, "/google.cloud.tasks.v2.CloudTasks/"),
+	Methods: func() map[string]Method {
+		m := sm(map[string][2]string{
+			"ListQueues":   {"cloudtasks.queues.list", "parent"},
+			"GetQueue":     {"cloudtasks.queues.get", "name"},
+			"CreateQueue":  {"cloudtasks.queues.create", "parent"},
+			"UpdateQueue":  {"cloudtasks.queues.update", "queue.name"},
+			"DeleteQueue":  {"cloudtasks.queues.delete", "name"},
+			"PurgeQueue":   {"cloudtasks.queues.purge", "name"},
+			"PauseQueue":   {"cloudtasks.queues.pause", "name"},
+			"ResumeQueue":  {"cloudtasks.queues.resume", "name"},
+			"GetIamPolicy": {"cloudtasks.queues.getIamPolicy", "resource"},
+			"SetIamPolicy": {"cloudtasks.queues.setIamPolicy", "resource"},
+			"ListTasks":    {"cloudtasks.tasks.list", "parent"},
+			"GetTask":      {"cloudtasks.tasks.get", "name"},
+			"CreateTask":   {"cloudtasks.tasks.create", "parent"},
+			"DeleteTask":   {"cloudtasks.tasks.delete", "name"},
+			"RunTask":      {"cloudtasks.tasks.run", "name"},
+		}, "/google.cloud.tasks.v2.CloudTasks/")
+		// A task's OIDC or OAuth token: "The caller must have
+		// iam.serviceAccounts.actAs permission for the service account"
+		// (https://docs.cloud.google.com/tasks/docs/reference/rest/v2/OidcToken,
+		// read 2026-11-20).
+		row := m["/google.cloud.tasks.v2.CloudTasks/CreateTask"]
+		row.ActAs = []string{"task.http_request.oauth_token.service_account_email", "task.http_request.oidc_token.service_account_email"}
+		m["/google.cloud.tasks.v2.CloudTasks/CreateTask"] = row
+		return m
+	}(),
 	Deny: func(permission, resource string) error {
 		return grpcDenied(fmt.Sprintf("The principal (user or service account) lacks IAM permission \"%s\" for the resource \"%s\" (or the resource may not exist).", permission, resource),
 			permission, resource, false)
@@ -359,6 +377,14 @@ var Scheduler = &Service{
 			"ResumeJob": {"cloudscheduler.jobs.enable", "name"},
 			"RunJob":    {"cloudscheduler.jobs.run", "name"},
 		}, "/google.cloud.scheduler.v1.CloudScheduler/")
+		// "The caller must have iam.serviceAccounts.actAs permission for
+		// the service account" of a job's OIDC or OAuth token (the Job
+		// reference, read 2026-11-20).
+		for _, k := range []string{"CreateJob", "UpdateJob"} {
+			row := m["/google.cloud.scheduler.v1.CloudScheduler/"+k]
+			row.ActAs = []string{"job.http_target.oauth_token.service_account_email", "job.http_target.oidc_token.service_account_email"}
+			m["/google.cloud.scheduler.v1.CloudScheduler/"+k] = row
+		}
 		for k, v := range sm(map[string][2]string{
 			"GetLocation":   {"cloudscheduler.locations.get", "name"},
 			"ListLocations": {"cloudscheduler.locations.list", "name"},
@@ -403,6 +429,15 @@ var Workflows = &Service{
 			"UpdateWorkflow":        {"workflows.workflows.update", "workflow.name"},
 			"ListWorkflowRevisions": {"workflows.workflows.listRevision", "name"},
 		}, "/google.cloud.workflows.v1.Workflows/")
+		// "Ensure that all principals who deploy or update workflows have
+		// permission to attach or act as the service account"
+		// (https://docs.cloud.google.com/workflows/docs/authentication,
+		// read 2026-11-20).
+		for _, k := range []string{"CreateWorkflow", "UpdateWorkflow"} {
+			row := m["/google.cloud.workflows.v1.Workflows/"+k]
+			row.ActAs = []string{"workflow.service_account"}
+			m["/google.cloud.workflows.v1.Workflows/"+k] = row
+		}
 		for prefix, rows := range map[string]map[string][2]string{
 			"/google.cloud.workflows.executions.v1.Executions/": {
 				"ListExecutions":  {"workflows.executions.list", "parent"},

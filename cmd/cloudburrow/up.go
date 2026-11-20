@@ -176,7 +176,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	comps.SetEarlierStorage(&earlierStorage{kubeconfig: cfg.KubeconfigPath(), namespace: cfg.Cluster.Namespace,
 		instance: cfg.InstanceDir(), project: cfg.DefaultProject(), out: stdout})
 	if serviceEnabled(cfg, config.ServiceBigQuery) || serviceEnabled(cfg, config.ServiceStorage) ||
-		(cfg.IAMEnforced() && serviceEnabled(cfg, config.ServicePubSub)) {
+		(cfg.IAMEnforced() && (serviceEnabled(cfg, config.ServicePubSub) || serviceEnabled(cfg, config.ServiceRun))) {
 		// BigQuery's front reads a project's folders and organization
 		// from Resource Manager, through cloudburrow-host (#1392,
 		// INFORMATION_SCHEMA.JOBS_BY_FOLDER and JOBS_BY_ORGANIZATION),
@@ -185,7 +185,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		comps.SetResourceManager(fmt.Sprintf("%s.%s.svc.cluster.local:%d", ClusterHostService, cfg.Cluster.Namespace,
 			cfg.Endpoints.ResourceManager))
 		// With --iam-enforcement=on the storage server (and Pub/Sub's
-		// front) ask the host's evaluator there (#1879).
+		// front) ask the host's evaluator there (#1879), as Kourier does
+		// for run.routes.invoke, with or without storage and Pub/Sub.
 		comps.SetIAMCheck(cfg.IAMEnforced())
 	}
 	if serviceEnabled(cfg, config.ServicePubSub) && serviceEnabled(cfg, config.ServiceKMS) && cfg.Endpoints.KMS > 0 {
@@ -699,7 +700,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// injection see a denied call as the client does. Off by default: the
 	// interceptors pass every call through until --iam-enforcement=on.
 	iamEnforcer := newIAMEnforcer(cfg, creds, func() *resourcemanager.Registry { return projectRegistry })
-	useIAMEnforcement(iamEnforcer, secretsSvc, kmsSvc, tasksSvc, analyticsHub, schedulerSvc, workflowsSvc)
+	useIAMEnforcement(iamEnforcer, secretsSvc, kmsSvc, tasksSvc, analyticsHub, schedulerSvc, workflowsSvc,
+		iamEnforced{logging: loggingSvc, monitoring: monitoringSvc, memorystore: memorystoreAdminSvc, run: runSvc})
 	// Log buckets' customer-managed keys (#1950).
 	if loggingSvc != nil {
 		keys := cmekKeys(kmsSvc, iamEnforcer)
@@ -929,6 +931,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// minted, and the principal's cloudsql.instances.login.
 		if creds != nil {
 			sqlAdminSrv.UseIAM(sqlAdminIAM(creds, iamEnforcer))
+			// The Admin API's own methods (#1879).
+			sqlAdminSrv.Enforce = cloudSQLEnforcer(iamEnforcer)
 		}
 		// CUSTOMER_MANAGED_CAS_CA (#1834) has this instance's Certificate
 		// Authority Service issue the server certificates, in process.
