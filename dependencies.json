@@ -1265,11 +1265,11 @@
     "realTools": {
       "$comment": "The real tools compatibility.md's Verified real-tool rows name (#694). Test-only: CI installs or resolves them for the compat job, never with credentials; cloudburrow never ships or pulls them. A bump changes the pin here, in ci.yml or the test, and the versions in compatibility.md together.",
       "googleCloudCli": {
-        "version": "586.0.0",
-        "source": "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-586.0.0-linux-x86_64.tar.gz",
+        "version": "593.0.0",
+        "source": "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-593.0.0-linux-x86_64.tar.gz",
         "includes": {
-          "gsutil": "5.37",
-          "bq": "2.1.38"
+          "gsutil": "5.38",
+          "bq": "2.1.42"
         },
         "platforms": [
           "linux/amd64"
@@ -1281,8 +1281,8 @@
         "updateFeed": "gcloud-component-snapshot",
         "skipDiscovery": "Released through Google's Cloud SDK channel, not GitHub; the current version is .version in https://dl.google.com/dl/cloudsdk/channels/rapid/components-2.json.",
         "verification": "release-checksum",
-        "digest": "sha256:6c774c76793eedd501150b59da653610fbe3eaac169e822965b722de75a2f001",
-        "digestNote": "SHA-256 of the versioned archive, computed on download. Google publishes a checksum only for the unversioned google-cloud-cli-linux-x86_64.tar.gz (for 586.0.0, c1cd1823624a33f2341d0d384aafe2d7b24c1b77c9b131087d772ee0791ff2be); the two archives differ only in gzip framing, and both decompress to the same tar (sha256 7726754653d053baca7121be8c041928d34d5183ecbdc6a245f261f25548389a)."
+        "digest": "sha256:42c32b7553c712f71fcf6f124546c0519437f53755f47f9bd0c957998cd6b826",
+        "digestNote": "SHA-256 of the versioned archive, computed on download 2026-11-19 (its tar, gunzipped: sha256 5f80cdf432eefca57f6e3b1755229ee7339c46a6de7937fab124ba32e6529574). Google publishes a checksum only for the unversioned google-cloud-cli-linux-x86_64.tar.gz. 593.0.0 replaced 586.0.0 for `gcloud alpha source-manager hooks` (#1927), which 586.0.0 does not have."
       },
       "hashicorpGoogleProvider": {
         "version": "8.4.0",

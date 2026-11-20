@@ -4,6 +4,7 @@ package compat
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	cloudbuild "cloud.google.com/go/cloudbuild/apiv1/v2"
 	cbpb "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
 	"github.com/google/uuid"
+	ak "google.golang.org/api/apikeys/v2"
 	"google.golang.org/api/iterator"
 	"google.golang.org/genproto/googleapis/api/httpbody"
 	"google.golang.org/grpc/codes"
@@ -78,6 +80,7 @@ func TestCloudBuildTriggersAndWorkerPools(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
 	t.Cleanup(cancel)
+	apiKey := webhookKey(ctx, t, h, h.Project())
 	cb := cloudBuildClient(ctx, t, h)
 	parent := runParent(h)
 	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")[:8]
@@ -219,7 +222,7 @@ func TestCloudBuildTriggersAndWorkerPools(t *testing.T) {
 		t.Errorf("the webhook config = %v", wh.GetWebhookConfig())
 	}
 	post := func(secret string) (int, string) {
-		u := "http://" + h.Endpoint(EnvRun) + "/v1/" + wh.GetResourceName() + ":webhook?key=k&secret=" + secret
+		u := "http://" + h.Endpoint(EnvRun) + "/v1/" + wh.GetResourceName() + ":webhook?key=" + apiKey + "&secret=" + secret
 		resp, err := http.Post(u, "application/json", strings.NewReader(`{"message":"from-the-hook"}`))
 		if err != nil {
 			t.Fatalf("POST :webhook: %v", err)
@@ -300,6 +303,7 @@ func TestGcloudBuildsTriggersAndWorkerPools(t *testing.T) {
 	t.Cleanup(cancel)
 	g := newGcloudSession(t, h)
 	cb := cloudBuildClient(ctx, t, h)
+	apiKey := webhookKey(ctx, t, h, g.project)
 	parent := "projects/" + g.project + "/locations/us-central1"
 	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")[:8]
 	dir := t.TempDir()
@@ -338,7 +342,7 @@ func TestGcloudBuildsTriggersAndWorkerPools(t *testing.T) {
 	g.must("builds", "triggers", "create", "webhook", "--name="+hook, "--region=us-central1", "--inline-config="+inline,
 		"--secret=projects/"+g.project+"/secrets/"+secret+"/versions/1", "--substitutions=_WHO=hook")
 	hid := lastLine(g.must("builds", "triggers", "describe", hook, "--region=us-central1", "--format=value(id)"))
-	resp, err := http.Post("http://"+h.Endpoint(EnvRun)+"/v1/"+parent+"/triggers/"+hook+":webhook?key=k&secret="+value, "application/json", strings.NewReader(`{}`))
+	resp, err := http.Post("http://"+h.Endpoint(EnvRun)+"/v1/"+parent+"/triggers/"+hook+":webhook?key="+apiKey+"&secret="+value, "application/json", strings.NewReader(`{}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -356,4 +360,27 @@ func TestGcloudBuildsTriggersAndWorkerPools(t *testing.T) {
 	if out, err := g.run(nil, "builds", "triggers", "describe", name, "--region=us-central1"); err == nil {
 		t.Errorf("the trigger is still there after delete:\n%s", out)
 	}
+}
+
+// webhookKey is an API key of project's, made through the API Keys API,
+// for a webhook trigger's URL: Google's documented form is
+// .../triggers/TRIGGER:webhook?key=API_KEY&secret=SECRET, and its front end
+// refuses a key no project has with API_KEY_INVALID before the trigger
+// sees the call (#1915). Deleted when the test ends. The run shard exports
+// the API Keys API as RUN_APIKEYS, so the API Keys suite stays in storage.
+func webhookKey(ctx context.Context, t *testing.T, h *Harness, project string) string {
+	t.Helper()
+	shardEndpoint(h, envRunAPIKeys, EnvAPIKeys)
+	c := apiKeysClient(t, h)
+	op, err := c.Projects.Locations.Keys.Create("projects/"+project+"/locations/global",
+		&ak.V2Key{DisplayName: "Cloud Build webhook"}).KeyId("wh-" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]).Context(ctx).Do()
+	if err != nil || !op.Done {
+		t.Fatalf("create the webhook's API key: %+v, %v", op, err)
+	}
+	var k ak.V2Key
+	if err := json.Unmarshal(op.Response, &k); err != nil || k.Name == "" || k.KeyString == "" {
+		t.Fatalf("the webhook's API key: %s, %v", op.Response, err)
+	}
+	t.Cleanup(func() { _, _ = c.Projects.Locations.Keys.Delete(k.Name).Context(context.Background()).Do() })
+	return k.KeyString
 }

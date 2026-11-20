@@ -32,6 +32,7 @@ func TestAuthorize(t *testing.T) {
 		reason string
 	}{
 		{"unknown key", "AIzaNope", storage, "API_KEY_INVALID"},
+		{"gsutil's anonymous key", "AIzaSyDnacJHrKma0048b13sh8cgxNUwulubmJM", storage, ""},
 		{"open key", open, storage, ""},
 		{"referrer ok", web, Request{Service: "storage.googleapis.com", Referrer: "https://app.example.com/page"}, ""},
 		{"bare domain", web, Request{Service: "storage.googleapis.com", Referrer: "https://www.example.org/"}, ""},

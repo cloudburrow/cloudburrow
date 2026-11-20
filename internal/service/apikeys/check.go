@@ -55,10 +55,26 @@ func Invalid(service string) *Denial {
 		Metadata: map[string]string{"service": service}}
 }
 
+// toolKeys are the API keys Google's own tools ship with, and send on
+// every anonymous call: live keys of Google's projects, not the caller's,
+// so Google's front end accepts them, unrestricted, wherever they are
+// sent. An instance never holds them in a project of its own.
+//
+// gsutil's: gslib/gcs_json_api.py adds it as the key= parameter of every
+// JSON API call it makes with no credentials ("This API key is not secret
+// and is used to identify gsutil during anonymous requests").
+var toolKeys = map[string]bool{
+	"AIzaSyDnacJHrKma0048b13sh8cgxNUwulubmJM": true,
+}
+
 // Authorize is the whole decision on a request carrying keyString: the
 // key's project, and nil when the key allows the request, else Google's
-// Denial.
+// Denial. A key one of Google's tools ships (toolKeys) is allowed, with no
+// project of the instance's.
 func (s *Server) Authorize(keyString string, r Request) (project string, d *Denial) {
+	if toolKeys[keyString] {
+		return "", nil
+	}
 	project, k, ok := s.Lookup(keyString)
 	if !ok {
 		return project, Invalid(r.Service)

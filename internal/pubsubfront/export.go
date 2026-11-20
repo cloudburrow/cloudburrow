@@ -509,12 +509,15 @@ func (f *Front) withExportStateJSON(sub json.RawMessage) (json.RawMessage, bool)
 }
 
 // StateLoadHeader is the gRPC metadata key `cloudburrow state load` sets on
-// the subscriptions it creates again. A saved export subscription whose
-// table or bucket is gone is restored as it was saved: on GCP such a
-// subscription is kept, its state NOT_FOUND or PERMISSION_DENIED, and only
-// a new one is refused (#1874). Every other check still applies. It grants
-// nothing a caller could not already do: the subscription is one the
-// caller could have created before the destination was deleted.
+// the topics and subscriptions it creates again. A saved export
+// subscription whose table or bucket is gone is restored as it was saved:
+// on GCP such a subscription is kept, its state NOT_FOUND or
+// PERMISSION_DENIED, and only a new one is refused (#1874). Likewise a
+// saved CMEK topic whose Cloud KMS key has since been disabled is kept on
+// GCP (only its publishes fail), and only a new topic is refused. Every
+// other check still applies. It grants nothing a caller could not already
+// do: the topic or subscription is one the caller could have created
+// before the key was disabled or the destination deleted.
 const StateLoadHeader = "x-cloudburrow-state-load"
 
 // stateLoad reports whether ctx is a call `cloudburrow state load` made.

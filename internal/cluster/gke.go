@@ -230,6 +230,12 @@ func (g *GKE) join(ctx context.Context, kind, image, pool, name string) error {
 		return fail(fmt.Errorf("write node %s's kubeadm configuration: %w", name, err))
 	}
 	if _, err := r.Run(ctx, "docker", "exec", name, "kubeadm", "join", "--config", "/kind/kubeadm.conf", "--skip-phases=preflight"); err != nil {
+		// Why the kubelet did not come up is in its journal, which goes
+		// with the node container: kept in the error.
+		journal, _ := r.Run(context.WithoutCancel(ctx), "docker", "exec", name, "journalctl", "-u", "kubelet", "--no-pager", "-n", "20")
+		if j := strings.TrimSpace(journal); j != "" {
+			err = fmt.Errorf("%w; the kubelet's last journal lines:\n%s", err, j)
+		}
 		return fail(fmt.Errorf("join node %s: %w", name, err))
 	}
 	if _, err := r.Run(ctx, "kubectl", "--kubeconfig", g.kubeconfig(kind), "wait", "--for=condition=Ready", "node/"+name, "--timeout=180s"); err != nil {

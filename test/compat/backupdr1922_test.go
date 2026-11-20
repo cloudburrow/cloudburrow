@@ -164,8 +164,10 @@ func TestBackupDRRestoreToANewInstance(t *testing.T) {
 		h := h.For(t)
 		g := newGcloudSession(t, h)
 		target := c.instance + "-g"
+		// Into the test's project, where the client reads it and the
+		// cleanup deletes it: gcloud's own default project is another.
 		out, err := g.run(nil, "sql", "backups", "restore", bk, "--restore-instance", target, "--region", "us-central1",
-			"--project", g.project, "--quiet")
+			"--project", project, "--quiet")
 		defer deleteInstance(target)
 		if err != nil {
 			t.Fatalf("gcloud sql backups restore: %v\n%s", err, out)

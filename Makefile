@@ -157,10 +157,13 @@ COMPAT_NODE_DIR ?= test/compat-node
 COMPAT_NODE_TESTS ?= *.test.mjs
 # Extra node --test flags, such as --test-name-pattern or --test-skip-pattern.
 COMPAT_NODE_FLAGS ?=
+# --test-force-exit: a test that times out leaves its SDK's streams open and
+# retrying, which kept the emulators shard's test file running until the
+# job's 90-minute limit (main run 44645694075); the file now ends with it.
 compat-node: build
 	cd $(COMPAT_NODE_DIR) && $(NPM) ci --ignore-scripts --no-audit --no-fund
 	cd $(COMPAT_NODE_DIR) && CLOUDBURROW_BIN=$(abspath $(BIN_DIR)/$(BINARY)) CLOUDBURROW_ARGS="$(CLOUDBURROW_ARGS)" \
-		$(NODE) --import ./guard.mjs --test --test-concurrency=1 --test-timeout=300000 --test-reporter=spec $(COMPAT_NODE_FLAGS) $(COMPAT_NODE_TESTS)
+		$(NODE) --import ./guard.mjs --test --test-concurrency=1 --test-timeout=300000 --test-force-exit --test-reporter=spec $(COMPAT_NODE_FLAGS) $(COMPAT_NODE_TESTS)
 
 ## cloud-sql-proxy: Fetch Google's pinned Cloud SQL Auth Proxy binary, checked against its SHA-256, for the compat test (#1421)
 # The release the Cloud Run adapter's sidecar image is (internal/adapter/run
