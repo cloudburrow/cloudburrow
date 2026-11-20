@@ -111,7 +111,7 @@ func TestStorageGoogleRound2ThroughTheBrowser(t *testing.T) {
 	p.waitFor(`[...document.querySelectorAll("#view h2")].some((h) => h.textContent === "Not available locally")`)
 	var menu string
 	p.eval(`[...document.querySelectorAll("#product-nav a")].map((a) => a.textContent).join("|")`, &menu)
-	if menu != "Buckets|Observability|Storage Intelligence|Inventory reports|Transfer data|Settings" {
+	if menu != "Buckets|Observability|Storage Intelligence|Batch operations|Inventory reports|Insights datasets|Transfer data|Settings" {
 		t.Errorf("the Cloud Storage menu reads %q", menu)
 	}
 

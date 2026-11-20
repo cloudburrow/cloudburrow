@@ -59,8 +59,9 @@ func loadModelServer(t *testing.T) {
 	}
 }
 
-// TestModelRegistryAndEndpointsThroughThePages (#1940), in the scale shard
-// (a container start). From the drawer's Agent Platform row: Import on
+// TestModelRegistryAndEndpointsThroughThePages (#1940), in the run shard,
+// whose instance serves Cloud Run and so the screens (a container start).
+// From the drawer's Agent Platform row: Import on
 // the Model Registry page uploads the serving container fixture, Create
 // endpoint on the Endpoints page makes an endpoint, Deploy to endpoint on
 // the model's page runs the container in the cluster, and on the
