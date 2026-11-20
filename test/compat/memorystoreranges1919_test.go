@@ -29,6 +29,12 @@ func TestMemorystoreReservedIPRanges(t *testing.T) {
 	parent := "projects/" + project + "/locations/us-central1"
 	suffix := time.Now().UnixNano() % 1e7
 	network := fmt.Sprintf("projects/%s/global/networks/rng-%d", project, suffix)
+	// Beside Compute Engine (#1936) both authorized networks must exist, as
+	// on Google.
+	if addr := memorystoreComputeAddr(h); addr != "" {
+		computeNetwork(t, addr, project, fmt.Sprintf("rng-%d", suffix), "", "")
+		computeNetwork(t, addr, project, fmt.Sprintf("rng-%d-2", suffix), "", "")
+	}
 	for _, rg := range []string{"169.254.0.0/29", "127.0.0.0/29", "199.36.153.0/29", "224.0.0.0/29", "0.0.0.0/29", "10.0.0.0/7"} {
 		_, err := c.CreateInstance(ctx, &redispb.CreateInstanceRequest{Parent: parent, InstanceId: "rng-refused",
 			Instance: &redispb.Instance{Tier: redispb.Instance_BASIC, MemorySizeGb: 1, AuthorizedNetwork: network, ReservedIpRange: rg}})

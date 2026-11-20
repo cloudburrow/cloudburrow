@@ -45,7 +45,7 @@ func TestUpdateCryptoKeyMask(t *testing.T) {
 		"an HSM template":                  {[]string{"version_template.protection_level"}, &kmspb.CryptoKey{VersionTemplate: &kmspb.CryptoKeyVersionTemplate{ProtectionLevel: kmspb.ProtectionLevel_HSM}}, codes.InvalidArgument},
 		"an EXTERNAL template":             {[]string{"version_template.protection_level"}, &kmspb.CryptoKey{VersionTemplate: &kmspb.CryptoKeyVersionTemplate{ProtectionLevel: kmspb.ProtectionLevel_EXTERNAL}}, codes.InvalidArgument},
 		"an asymmetric template":           {[]string{"version_template.algorithm"}, &kmspb.CryptoKey{VersionTemplate: &kmspb.CryptoKeyVersionTemplate{Algorithm: kmspb.CryptoKeyVersion_EC_SIGN_P256_SHA256}}, codes.InvalidArgument},
-		"a signing algorithm":              {[]string{"version_template.algorithm"}, &kmspb.CryptoKey{VersionTemplate: &kmspb.CryptoKeyVersionTemplate{Algorithm: kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_65}}, codes.InvalidArgument},
+		"a signing algorithm":              {[]string{"version_template.algorithm"}, &kmspb.CryptoKey{VersionTemplate: &kmspb.CryptoKeyVersionTemplate{Algorithm: kmspb.CryptoKeyVersion_PQ_SIGN_SLH_DSA_SHA2_128S}}, codes.InvalidArgument},
 		"an invalid label key":             {[]string{"labels"}, &kmspb.CryptoKey{Labels: map[string]string{"Bad Key": "v"}}, codes.InvalidArgument},
 		"a malformed name":                 {[]string{"labels"}, &kmspb.CryptoKey{Name: ring.GetName() + "/cryptoKey/k"}, codes.InvalidArgument},
 		"a missing key":                    {[]string{"labels"}, &kmspb.CryptoKey{Name: ring.GetName() + "/cryptoKeys/absent"}, codes.NotFound},

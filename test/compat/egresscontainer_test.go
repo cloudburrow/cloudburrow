@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/url"
 	"os"
@@ -32,6 +33,13 @@ import (
 // host, forwards the instance's KMS and token ports; the sink serves them
 // on the container's loopback, where the fixture names them. A control
 // connection to 192.0.2.1 must be counted first, or a zero proves nothing.
+//
+// The instance listens on the host's loopback, which a container reaches
+// only on Docker Desktop (host.docker.internal). On Linux the relay reaches
+// the host at its bridge network's gateway, where nothing of the instance
+// listens, so this test forwards each port from that gateway to the
+// loopback for its own duration (hostForwarder); on CI every client got EOF
+// or a timeout without it.
 //
 // Go and Node must make no attempt. Python's google-auth starts a Regional
 // Access Boundary lookup at iamcredentials.googleapis.com for any
@@ -82,12 +90,14 @@ func TestServedClientsSendNothingOffTheMachine(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = exec.Command("docker", "network", "rm", network).Run() })
 	args := []string{"run", "-d", "--name", relay, "-v", dir + ":/egress:ro", "--entrypoint", "/egress/sink"}
+	hostIP := "127.0.0.1"
 	if runtime.GOOS == "linux" {
-		args = append(args, "--add-host", "host.docker.internal:host-gateway")
+		hostIP = bridgeGateway(ctx, t)
+		args = append(args, "--add-host", "host.docker.internal:"+hostIP)
 	}
 	args = append(args, image,
-		"-forward", "0.0.0.0:"+kmsPort+"=host.docker.internal:"+kmsPort,
-		"-forward", "0.0.0.0:"+tok.Port()+"=host.docker.internal:"+tok.Port())
+		"-forward", "0.0.0.0:"+kmsPort+"=host.docker.internal:"+hostForwarder(t, hostIP, "127.0.0.1:"+kmsPort),
+		"-forward", "0.0.0.0:"+tok.Port()+"=host.docker.internal:"+hostForwarder(t, hostIP, tok.Host))
 	if b, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput(); err != nil {
 		t.Fatalf("start the relay: %v\n%s", err, b)
 	}
@@ -157,6 +167,66 @@ func TestServedClientsSendNothingOffTheMachine(t *testing.T) {
 		}
 		t.Logf("%v; no connection attempt off the machine", ok)
 	})
+}
+
+// bridgeGateway is the host's address on Docker's default bridge network,
+// where the relay starts.
+func bridgeGateway(ctx context.Context, t *testing.T) string {
+	t.Helper()
+	out, err := exec.CommandContext(ctx, "docker", "network", "inspect", "bridge", "--format",
+		"{{range .IPAM.Config}}{{.Gateway}} {{end}}").Output()
+	if err != nil {
+		t.Fatalf("docker network inspect bridge: %v", err)
+	}
+	for _, f := range strings.Fields(string(out)) {
+		if ip := net.ParseIP(f); ip != nil && ip.To4() != nil {
+			return f
+		}
+	}
+	t.Fatalf("the bridge network has no IPv4 gateway: %q", out)
+	return ""
+}
+
+// hostForwarder listens on ip, at a port the system picks, and forwards each
+// connection to target, an address of the instance on the host's loopback,
+// until the test ends. It returns the port.
+func hostForwarder(t *testing.T, ip, target string) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", net.JoinHostPort(ip, "0"))
+	if err != nil {
+		t.Fatalf("listen on %s for the relay: %v", ip, err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer c.Close()
+				u, err := net.Dial("tcp", target)
+				if err != nil {
+					return
+				}
+				defer u.Close()
+				done := make(chan struct{}, 2)
+				pipe := func(dst, src net.Conn) {
+					_, _ = io.Copy(dst, src)
+					if tc, ok := dst.(*net.TCPConn); ok {
+						_ = tc.CloseWrite()
+					}
+					done <- struct{}{}
+				}
+				go pipe(u, c)
+				go pipe(c, u)
+				<-done
+				<-done
+			}()
+		}
+	}()
+	_, port, _ := net.SplitHostPort(ln.Addr().String())
+	return port
 }
 
 // egressImage builds the no-egress container's image (testdata/egress's

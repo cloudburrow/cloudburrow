@@ -27,6 +27,21 @@ func TestRenderConfigTurnsLeaderElectionOff(t *testing.T) {
 	}
 }
 
+// A new cluster's kubelets, the control plane's and a node pool's, never
+// re-verify an image's pull credentials, so an image a revision pulled from
+// Artifact Registry still runs under its kind-loaded dev.local name with
+// imagePullPolicy Never (run 44709318191).
+func TestKubeletsNeverVerifyPulledImages(t *testing.T) {
+	t.Parallel()
+	want := "kind: KubeletConfiguration\n    imagePullCredentialsVerificationPolicy: NeverVerify\n"
+	if got := RenderConfig(nil); !strings.Contains(got, "apiVersion: kubelet.config.k8s.io/v1beta1\n    "+want) {
+		t.Errorf("rendered config has no KubeletConfiguration patch with %q:\n%s", want, got)
+	}
+	if got := joinConfig("k", "n", "10.0.0.2", "t", "p"); !strings.Contains(got, "imagePullCredentialsVerificationPolicy: NeverVerify\nkind: KubeletConfiguration\n") {
+		t.Errorf("a node pool's kubelet configuration does not set NeverVerify:\n%s", got)
+	}
+}
+
 // WaitServiceNetwork polls until the kubernetes Service answers from the
 // node, through its ClusterIP.
 func TestWaitServiceNetwork(t *testing.T) {

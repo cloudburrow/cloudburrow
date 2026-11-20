@@ -22,6 +22,8 @@ import (
 type consoleConnectPage struct {
 	Variables []struct{ Name, Value string }  `json:"variables"`
 	Withheld  []struct{ Name, Reason string } `json:"withheld"`
+	// Refusals are the gcloud refusals `env` adds (#1977), listed apart.
+	Refusals []struct{ Name, Value string } `json:"refusals"`
 }
 
 // TestConsoleConnectIsTheInstancesEnv (#802): the Connect page's
@@ -58,6 +60,14 @@ func TestConsoleConnectIsTheInstancesEnv(t *testing.T) {
 
 	shown := map[string]string{}
 	for _, v := range page.Variables {
+		shown[v.Name] = v.Value
+	}
+	// The gcloud refusals `env` adds for every API this instance does not
+	// serve (#1977) are on the page in a list of their own.
+	for _, v := range page.Refusals {
+		if _, dup := shown[v.Name]; dup {
+			t.Errorf("the page lists %s both as a variable and as a refusal", v.Name)
+		}
 		shown[v.Name] = v.Value
 	}
 	withheld := map[string]bool{}
