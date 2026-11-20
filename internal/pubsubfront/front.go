@@ -106,6 +106,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/apienable"
 	"github.com/cloudburrow/cloudburrow/internal/calllog"
+	"github.com/cloudburrow/cloudburrow/internal/egress"
 	"github.com/cloudburrow/cloudburrow/internal/frontready"
 	"github.com/cloudburrow/cloudburrow/internal/grpchttp"
 	"github.com/cloudburrow/cloudburrow/internal/iamcheck"
@@ -209,7 +210,9 @@ type Front struct {
 	clock  *OffsetClock
 	logf   func(format string, args ...any)
 
-	// pushClient makes the relay's pushes.
+	// pushClient makes the relay's pushes, through the local-only guard
+	// (#2015): a front in a pod serves no API itself, so a push endpoint
+	// on any Google host is refused there.
 	pushClient *http.Client
 
 	mu   sync.Mutex
@@ -309,7 +312,7 @@ func New(upstream string, logf func(format string, args ...any)) (*Front, error)
 	}
 	return &Front{upstream: conn, rest: upstream, admin: pubsubpb.NewSubscriberClient(conn),
 		topics: pubsubpb.NewPublisherClient(conn), clock: &OffsetClock{}, logf: logf,
-		pushClient: &http.Client{}, subs: map[string]*subState{}, projects: map[string]bool{},
+		pushClient: egress.Client(nil), subs: map[string]*subState{}, projects: map[string]bool{},
 		policies: map[string]*pubsubpb.ExpirationPolicy{}, labels: map[string]map[string]string{},
 		iam: map[string]iampolicy.Stored{}, detached: map[string]*pubsubpb.Subscription{},
 		snapshots: map[string]keptSnapshot{}, protoSchemas: map[string]*protoSchema{},

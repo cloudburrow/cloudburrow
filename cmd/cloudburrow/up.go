@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
+	"github.com/cloudburrow/cloudburrow/internal/egress"
 	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/iamcheck"
@@ -320,6 +321,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// A secret's customer-managed keys (#1453) are this instance's Cloud KMS.
 		secretsSvc.kms = kmsSvc.API
 	}
+	// Every outbound dispatcher sends a googleapis.com URL to this
+	// instance's own endpoint of the API, and refuses any other Google host
+	// (internal/egress, #2015).
+	egress.SetLocal(localAPIs(cfg))
 	schedulerSvc := newSchedulerService(cfg, func() *netfwd.Forwarder { return forwarderFor(forwarders, "pubsub") })
 	schedulerSvc.useTokens(creds)
 	schedulerSvc.register(coord)

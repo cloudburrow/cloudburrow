@@ -13,6 +13,8 @@ import (
 
 	"cloud.google.com/go/monitoring/apiv3/v2/monitoringpb"
 	"google.golang.org/protobuf/encoding/protojson"
+
+	"github.com/cloudburrow/cloudburrow/internal/egress"
 )
 
 // Notification delivery (#1964) stays on the machine: a webhook channel's
@@ -175,9 +177,10 @@ func (s *Server) notify(ctx context.Context, in Incident, p *monitoringpb.AlertP
 	}
 }
 
-var webhookClient = &http.Client{Timeout: 10 * time.Second,
+// webhookClient sends through the local-only guard (#2015) as well.
+var webhookClient = egress.Client(&http.Client{Timeout: 10 * time.Second,
 	// A redirect could leave the machine.
-	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }})
 
 func deliver(ctx context.Context, c *monitoringpb.NotificationChannel, payload []byte, publish Publisher) (state, detail string) {
 	t := channelTypeOf(c.GetType())

@@ -140,6 +140,9 @@ func (s *schedulerService) Start(ctx context.Context) error {
 	if s.tokens != nil {
 		s.runner.WithTokens(s.tokens)
 	}
+	// A googleapis.com target, such as a workflow's Cloud Scheduler
+	// trigger, reaches this instance's own API, never Google (#2011, #2015).
+	s.runner.WithLocalAPIs(localAPIs(s.cfg))
 	// App Engine targets go to the server standing in for the app (#1506).
 	if s.cfg.AppEngineURL != "" {
 		s.runner.WithAppEngine(s.cfg.AppEngineURL)

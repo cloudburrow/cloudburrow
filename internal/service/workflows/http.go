@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/cloudburrow/cloudburrow/internal/egress"
 	"github.com/cloudburrow/cloudburrow/internal/localhost"
 )
 
@@ -69,7 +70,9 @@ func NewHTTPClient() *http.Client {
 	t.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 		return d.DialContext(ctx, network, localhost.Rewrite(addr))
 	}
-	return &http.Client{Transport: t}
+	// The local-only guard (#2015) refuses a Google host on its name, on
+	// every redirect, before the name is resolved.
+	return egress.Client(&http.Client{Transport: t})
 }
 
 type egressError struct{ host string }
@@ -100,24 +103,26 @@ func (h *HTTPCaller) resolve(raw string) (*url.URL, string, error) {
 	if isLocalHost(host) {
 		return u, "", nil
 	}
-	if api, ok := strings.CutSuffix(strings.ToLower(host), ".googleapis.com"); ok {
-		// A regional host such as us-central1-run.googleapis.com names run.
-		if i := strings.LastIndex(api, "-"); i >= 0 && h.Local != nil && h.Local(api) == "" && h.Local(api[i+1:]) != "" {
-			api = api[i+1:]
-		}
+	if egress.GoogleHost(host) {
+		// The local-only guard (#2015): a served googleapis.com API is
+		// this instance's, anything else of Google's is refused.
+		var served egress.LocalAPIs
 		if h.Local != nil {
-			if base := h.Local(api); base != "" {
-				b, err := url.Parse(base)
-				if err != nil {
-					return nil, "", raiseErr("SystemError", "bad local endpoint for %s: %v", api, err)
-				}
-				out := *u
-				out.Scheme, out.Host = b.Scheme, b.Host
-				return &out, api, nil
-			}
+			served = h.Local
 		}
-		return nil, api, raiseErr("ConnectionFailedError",
-			"refused: %s.googleapis.com is not served by this CloudBurrow instance, and CloudBurrow sends no request to Google (start the instance with the service in --services)", api)
+		api, _ := egress.API(host, u.Path, served)
+		out, err := egress.ResolveURL(u, served)
+		var refused *egress.RefusedError
+		switch {
+		case errors.As(err, &refused) && refused.API != "":
+			return nil, api, raiseErr("ConnectionFailedError",
+				"refused: %s.googleapis.com is not served by this CloudBurrow instance, and CloudBurrow sends no request to Google (start the instance with the service in --services)", api)
+		case err != nil && refused == nil:
+			return nil, "", raiseErr("SystemError", "%v", err)
+		case err != nil:
+			return nil, "", raiseErr("ConnectionFailedError", "%v", err)
+		}
+		return out, api, nil
 	}
 	return nil, "", raiseErr("ConnectionFailedError",
 		"refused: %s is outside this CloudBurrow instance, which runs locally and sends no request off the machine; call a local Cloud Run service or a served API instead", host)
