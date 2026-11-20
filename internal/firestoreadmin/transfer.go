@@ -31,6 +31,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	adminpb "cloud.google.com/go/firestore/apiv1/admin/adminpb"
 	"cloud.google.com/go/firestore/apiv1/firestorepb"
@@ -298,16 +299,20 @@ func (a *Admin) ExportDocuments(ctx context.Context, req *adminpb.ExportDocument
 		if err := a.checkSnapshotTime(dbName, "snapshot_time", snapshot, true); err != nil {
 			return nil, err
 		}
-		if entities {
-			return nil, status.Error(codes.Unimplemented, "snapshot_time is not served here for a Datastore mode database: the Datastore emulator keeps no earlier versions of its entities")
-		}
 	}
 	if entities {
 		// A Datastore mode database's entities, exported by the
 		// Datastore front in the Datastore Admin API's format (#1884):
 		// collection_ids are kinds, namespace_ids namespaces.
-		res, err := a.copyDatastore(ctx, frontstate.DatastoreExportPath, dbName, datastoreCopyRequest{
-			Kinds: req.GetCollectionIds(), Namespaces: req.GetNamespaceIds(), OutputURIPrefix: req.GetOutputUriPrefix(), Exact: true})
+		// At a snapshot time, the entities as the Datastore front's
+		// versions have them then (#1967).
+		cr := datastoreCopyRequest{
+			Kinds: req.GetCollectionIds(), Namespaces: req.GetNamespaceIds(), OutputURIPrefix: req.GetOutputUriPrefix(), Exact: true}
+		snapAt := timestamppb.New(start)
+		if snapshot != nil {
+			cr.ReadTime, snapAt = snapshot.AsTime().UTC().Format(time.RFC3339Nano), snapshot
+		}
+		res, err := a.copyDatastore(ctx, frontstate.DatastoreExportPath, dbName, cr)
 		if err != nil {
 			return nil, err
 		}
@@ -317,7 +322,7 @@ func (a *Admin) ExportDocuments(ctx context.Context, req *adminpb.ExportDocument
 			ProgressDocuments: &adminpb.Progress{EstimatedWork: res.Entities, CompletedWork: res.Entities},
 			ProgressBytes:     &adminpb.Progress{EstimatedWork: res.Bytes, CompletedWork: res.Bytes},
 			CollectionIds:     req.GetCollectionIds(), NamespaceIds: req.GetNamespaceIds(), OutputUriPrefix: outURI,
-			SnapshotTime: timestamppb.New(start)}
+			SnapshotTime: snapAt}
 		return a.finish(dbName, md, &adminpb.ExportDocumentsResponse{OutputUriPrefix: outURI})
 	}
 	if prefix == "" {

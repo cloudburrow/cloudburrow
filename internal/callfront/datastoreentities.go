@@ -16,12 +16,14 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	pb "cloud.google.com/go/datastore/apiv1/datastorepb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/cloudburrow/cloudburrow/internal/datastoreversions"
 	"github.com/cloudburrow/cloudburrow/internal/frontstate"
 )
 
@@ -157,6 +159,27 @@ func (d *datastoreDatabases) readEntities(ctx context.Context, project, database
 	return out, nil
 }
 
+// readEntitiesAt is readEntities as the entities were at the RFC 3339
+// time at, from the front's versions (#1967); now for "".
+func (d *datastoreDatabases) readEntitiesAt(ctx context.Context, project, database string, f entityFilter, at string) ([]*pb.Entity, error) {
+	if at == "" {
+		return d.readEntities(ctx, project, database, f)
+	}
+	t, err := time.Parse(time.RFC3339Nano, at)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "the read time %q: %v", at, err)
+	}
+	if d.versions == nil {
+		return nil, status.Error(codes.Unimplemented, "a read at an earlier time is not served here: the front keeps no versions of the entities")
+	}
+	if since := d.versions.Since(project, emulatorDB(database)); t.Before(since) {
+		return nil, status.Errorf(codes.FailedPrecondition, "The snapshot time %s is earlier than the database's earliest version time %s.",
+			t.UTC().Format(time.RFC3339), since.UTC().Format(time.RFC3339Nano))
+	}
+	return d.versions.At(ctx, project, emulatorDB(database), t, datastoreversions.EntityFilter{Kinds: f.Kinds, Namespaces: f.Namespaces},
+		func() ([]*pb.Entity, error) { return d.readEntities(ctx, project, database, f) })
+}
+
 // commitAll applies muts in commits of at most 500 mutations, Google's
 // limit.
 func (d *datastoreDatabases) commitAll(ctx context.Context, project, dbID string, muts []*pb.Mutation) error {
@@ -249,6 +272,9 @@ type copyRequest struct {
 	// InputURI is an import's export: its folder or its
 	// overall_export_metadata file.
 	InputURI string `json:"inputUri,omitempty"`
+	// ReadTime reads the entities as they were then (#1967): an export
+	// at a snapshot time, a clone of an earlier minute. RFC 3339.
+	ReadTime string `json:"readTime,omitempty"`
 }
 
 // serveCopy answers the copy paths.
@@ -280,8 +306,15 @@ func (a *datastoreAdmin) serveCopy(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(res)
 	}
+	var req copyRequest
+	if len(body) > 0 && r.URL.Path != frontstate.DatastoreLoadPath {
+		if err := json.Unmarshal(body, &req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
 	if r.URL.Path == frontstate.DatastoreDumpPath {
-		es, err := a.dbs.readEntities(ctx, project, database, entityFilter{})
+		es, err := a.dbs.readEntitiesAt(ctx, project, database, entityFilter{}, req.ReadTime)
 		if err != nil {
 			reply(nil, err)
 			return
@@ -318,19 +351,12 @@ func (a *datastoreAdmin) serveCopy(w http.ResponseWriter, r *http.Request) {
 		reply(copyResult{Entities: int64(len(es)), Bytes: entityBytes(es)}, err)
 		return
 	}
-	var req copyRequest
-	if len(body) > 0 {
-		if err := json.Unmarshal(body, &req); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-	}
 	switch r.URL.Path {
 	case frontstate.DatastoreDeletePath:
 		n, err := a.dbs.deleteEntities(ctx, project, database, req.entityFilter)
 		reply(copyResult{Entities: int64(n)}, err)
 	case frontstate.DatastoreExportPath:
-		res, err := a.export(ctx, project, database, req.entityFilter, req.OutputURIPrefix, req.Exact)
+		res, err := a.export(ctx, project, database, req.entityFilter, req.OutputURIPrefix, req.Exact, req.ReadTime)
 		reply(res, err)
 	case frontstate.DatastoreImportPath:
 		res, err := a.importEntities(ctx, project, database, req.entityFilter, req.InputURI)

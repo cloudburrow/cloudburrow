@@ -37,6 +37,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/apienable"
 	"github.com/cloudburrow/cloudburrow/internal/calllog"
+	"github.com/cloudburrow/cloudburrow/internal/datastoreversions"
 	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
 	"github.com/cloudburrow/cloudburrow/internal/frontready"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
@@ -282,7 +283,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// Firestore with MongoDB compatibility (#1703): the MongoDB wire
 	// protocol for the Admin API's Enterprise edition databases.
 	mongoListen := fs.String("mongodb-listen", "", "address the front serves Firestore with MongoDB compatibility's wire protocol on (needs --firestore-admin)")
-	stateDir := fs.String("state-dir", "", "directory the Firestore Admin API or the Spanner front keeps its state in")
+	stateDir := fs.String("state-dir", "", "directory the Firestore Admin API, the Spanner front or the Datastore front (its entities' versions, #1967) keeps its state in")
 	// The named Datastore databases calls name, which the emulator cannot
 	// list, kept for the project's purge (#1550).
 	datastoreDBs := fs.Bool("datastore-databases", false, "record the named Datastore databases calls name, for a project's purge")
@@ -344,14 +345,29 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// other intercept or the emulator sees it.
 		icpts = append(icpts, newDatastoreGate(*firestoreAdminAddr))
 	}
-	if *datastoreDBs || *queries == "datastore" {
+	var dbs *datastoreDatabases
+	var versions *datastoreversions.Log
+	if *datastoreDBs {
+		dbs = newDatastoreDatabases(*upstream, logger.Printf)
+		// The versions of the entities (#1967): every commit is
+		// recorded, and a read at an earlier time is answered from
+		// them, within the database's version window.
+		var gate *datastoreGate
+		if len(icpts) > 0 {
+			gate, _ = icpts[0].(*datastoreGate)
+		}
+		versions = datastoreversions.New(func(db string) time.Duration { return retentionOf(gate, db) }, logger.Printf)
+		dbs.versions = versions
+		c, err := dbs.unversionedClient()
+		if err != nil {
+			return fmt.Errorf("the Datastore emulator at %s: %w", *upstream, err)
+		}
+		go versions.Open(ctx, c, MarkerProject, *stateDir)
+		icpts = append(icpts, newDatastoreWindow(gate, versions))
+	} else if *queries == "datastore" {
 		// A read at an earlier read time is refused, not answered with
 		// the entities as they are now (#1942, datastorereadtime.go).
 		icpts = append(icpts, newDatastoreReadTimes())
-	}
-	var dbs *datastoreDatabases
-	if *datastoreDBs {
-		dbs = newDatastoreDatabases(*upstream, logger.Printf)
 	}
 	switch {
 	case *queries == "datastore" || (*datastoreDBs && *queries == ""):
@@ -360,6 +376,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			// Each named database in an emulator project of its own
 			// (#1885), as the front's own calls keep it (dbs.client).
 			qd.SeparateDatabases(dbs.SawResource)
+			qd.KeepVersions(versions)
 			// The entities named databases kept before are moved
 			// to their emulator projects once (#1885); calls naming
 			// a named database wait for the move.

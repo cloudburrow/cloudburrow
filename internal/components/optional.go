@@ -259,7 +259,7 @@ func OptionalPort(s config.Service) int {
 // request metrics, request log and traces, so a pod's calls are seen as
 // the host's are. Its image is the storage image, which
 // LifecycleComponent.Backends sets.
-// FrontStateDir is where the Spanner, Bigtable and Firestore fronts keep
+// FrontStateDir is where the Spanner, Bigtable, Firestore and Datastore fronts keep
 // their records and data copies (#1514), on an emptyDir of their pod
 // limited to FrontStateSizeLimit: a restart of the front's container keeps
 // them, and a restart of the pod loses them with the emulator's data.
@@ -376,6 +376,11 @@ func firestoreFront() *Front {
 func datastoreFront() *Front {
 	f := callFront("datastore", DatastorePort, DatastoreEmulatorPort)
 	f.Args = append(f.Args, "--queries", "datastore", "--datastore-databases")
+	// The versions of the entities (#1967), on the front's emptyDir: a
+	// restart of the front keeps them, a restart of the pod starts them
+	// again (the log's generation marker tells it the entities it goes
+	// with).
+	withState(f)
 	return f
 }
 

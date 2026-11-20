@@ -79,7 +79,10 @@ func (a *Admin) versionWindow(db *adminpb.Database) (time.Duration, time.Time) {
 	if c := db.CreateTime.AsTime(); !strings.HasSuffix(db.Name, "/databases/"+DefaultDatabase) && earliest.Before(c) {
 		earliest = c
 	}
-	if earliest.Before(a.historySince) {
+	// The Firestore emulator's history is a Native mode database's; a
+	// Datastore mode database's versions are the Datastore front's,
+	// which applies its own start too (#1967).
+	if !isDatastoreMode(db) && earliest.Before(a.historySince) {
 		earliest = a.historySince
 	}
 	return retention, earliest
@@ -115,6 +118,15 @@ func (a *Admin) checkReadTime(dbName string, t time.Time) error {
 	_, earliest := a.versionWindow(db)
 	now := a.now()
 	a.mu.Unlock()
+	return ReadTimeRefusal(t, now, earliest)
+}
+
+// ReadTimeRefusal is the refusal of a read at t, now, of a database whose
+// earliest version time is earliest, or nil: any microsecond within the
+// past hour, a whole minute before it, never before earliest. A time in
+// the future is the emulator's to refuse. The Datastore front applies it
+// too (#1967).
+func ReadTimeRefusal(t, now, earliest time.Time) error {
 	if t.After(now) {
 		return nil
 	}
@@ -122,6 +134,19 @@ func (a *Admin) checkReadTime(dbName string, t time.Time) error {
 		return errTooOld(t, earliest)
 	}
 	return nil
+}
+
+// Window is the database's earliest version time and whether its
+// point-in-time recovery is enabled, if the API knows it.
+func (a *Admin) Window(name string) (time.Time, bool, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	db, ok := a.databases[name]
+	if !ok || db.DeleteTime != nil {
+		return time.Time{}, false, false
+	}
+	_, earliest := a.versionWindow(db)
+	return earliest, db.PointInTimeRecoveryEnablement == adminpb.Database_POINT_IN_TIME_RECOVERY_ENABLED, true
 }
 
 // checkSnapshotTime checks an export's or clone's snapshot time: a whole
