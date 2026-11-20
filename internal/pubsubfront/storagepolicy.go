@@ -36,6 +36,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 )
 
 // regionName is a Google Cloud region's form, "us-central1" or
@@ -96,6 +97,26 @@ func updatedStoragePolicy(p *pubsubpb.MessageStoragePolicy) *pubsubpb.MessageSto
 		return &pubsubpb.MessageStoragePolicy{}
 	}
 	return proto.Clone(p).(*pubsubpb.MessageStoragePolicy)
+}
+
+// recomputedStoragePolicy is the policy an update of message_storage_policy
+// sets on name: p, or, when p names no region (gcloud's
+// `--recompute-message-storage-policy` sends the mask with no policy),
+// the regions gcp.resourceLocations allows on the topic's project, which
+// Google pushes to the topic; none when no organization policy restricts
+// locations, since "the message storage policy allows all regions"
+// (resource location restriction, read 2026-11-20).
+func recomputedStoragePolicy(ctx context.Context, name string, p *pubsubpb.MessageStoragePolicy) *pubsubpb.MessageStoragePolicy {
+	out := updatedStoragePolicy(p)
+	if len(out.GetAllowedPersistenceRegions()) > 0 {
+		return out
+	}
+	if project := orgpolicy.ProjectOf(name); project != "" {
+		if regions, ok := orgpolicy.AllowedRegions(ctx, project); ok {
+			out.AllowedPersistenceRegions = regions
+		}
+	}
+	return out
 }
 
 // setStoragePolicy keeps the policy an update set on a topic, in the

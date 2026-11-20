@@ -1,7 +1,9 @@
 package orgpolicy
 
 import (
+	"context"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -115,4 +117,76 @@ func LocationKind(location string) string {
 		return "REGION"
 	}
 	return "MULTI_REGION"
+}
+
+// googleRegion reports whether v is a Google Cloud region, not another
+// cloud's location the groups list (aws-us-east-1, azure-eastus2).
+func googleRegion(v string) bool {
+	return regionRE.MatchString(v) && !strings.HasPrefix(v, "aws-") && !strings.HasPrefix(v, "azure-")
+}
+
+// knownRegions is every region the value groups name, as a region's own
+// group (in:{region}-locations) or as itself.
+func knownRegions() []string {
+	seen := map[string]bool{}
+	add := func(v string) {
+		v = strings.TrimPrefix(v, "is:")
+		if m := regionGroupRE.FindStringSubmatch(v); m != nil {
+			seen[m[1]] = true
+		} else if googleRegion(v) {
+			seen[v] = true
+		}
+	}
+	for g, vs := range valueGroups {
+		add(g)
+		for _, v := range vs {
+			add(v)
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for r := range seen {
+		out = append(out, r)
+	}
+	return out
+}
+
+// AllowedRegions is the regions gcp.resourceLocations allows on resource,
+// sorted, and whether a policy restricts them at all: Pub/Sub's
+// `--recompute-message-storage-policy` pushes "the message storage policy
+// defined in your organization's Resource Location Restriction policy" to
+// a topic, and "when no organization policy is in effect, the message
+// storage policy allows all regions" (Resource location restriction, read
+// 2026-11-20: https://docs.cloud.google.com/pubsub/docs/resource-location-restriction).
+// The candidates are the value groups' regions and the regions the
+// policy's own values name; a policy allowing all of them restricts none.
+func AllowedRegions(ctx context.Context, resource string) ([]string, bool) {
+	e := effective(ctx, current(), resource, ResourceLocations)
+	if e.Spec == nil {
+		return nil, false
+	}
+	cands := map[string]bool{}
+	for _, r := range knownRegions() {
+		cands[r] = true
+	}
+	for _, rule := range e.Spec.GetRules() {
+		for _, v := range rule.GetValues().GetAllowedValues() {
+			v = strings.TrimPrefix(v, "is:")
+			if m := regionGroupRE.FindStringSubmatch(v); m != nil {
+				cands[m[1]] = true
+			} else if googleRegion(strings.ToLower(v)) {
+				cands[strings.ToLower(v)] = true
+			}
+		}
+	}
+	var out []string
+	for r := range cands {
+		if ListAllows(e.Spec, e.Tags, r, locationMatches) {
+			out = append(out, r)
+		}
+	}
+	if len(out) == len(cands) {
+		return nil, false // a policy that allows every region restricts none
+	}
+	sort.Strings(out)
+	return out, true
 }

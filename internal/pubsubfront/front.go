@@ -1046,7 +1046,7 @@ func (o *observed) request(fr frame) (frame, error) {
 			if err := o.f.checkStoragePolicyUpdate(o.context(), o.resource, r.GetTopic(), paths); err != nil {
 				return nil, err
 			}
-			o.storagePolicy = updatedStoragePolicy(r.GetTopic().GetMessageStoragePolicy())
+			o.storagePolicy = recomputedStoragePolicy(o.context(), o.resource, r.GetTopic().GetMessageStoragePolicy())
 		}
 		plan, err := o.f.planTopicSchemaUpdate(&r)
 		if err != nil {

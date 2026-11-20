@@ -22,8 +22,10 @@ package pubsubfront
 //     missing permissions required to write to the BigQuery table: ..." and
 //     "Cloud Pub/Sub did not have the necessary permissions configured to
 //     access the provided bucket ...". Which status code Google gives with
-//     them is UNVERIFIED (the pages quote the text alone): FAILED_PRECONDITION
-//     here, as for a disabled API;
+//     them is UNVERIFIED (docs re-read 2026-11-20:
+//     https://docs.cloud.google.com/pubsub/docs/bigquery-troubleshooting;
+//     the pages quote the text alone): FAILED_PRECONDITION here, as for a
+//     disabled API;
 //   - a subscription whose account loses a role is PERMISSION_DENIED ("The
 //     Pub/Sub service account no longer has permission to write to the
 //     table"), its messages kept in the backlog, and "the subscription
@@ -108,7 +110,10 @@ func (f *Front) checkActAs(ctx context.Context, sub, email string) error {
 	}
 	if !d.Holds(perm) {
 		// Google's IAM wording for a missing permission on a service
-		// account; Pub/Sub's own text for this case is UNVERIFIED.
+		// account; Pub/Sub's own text for this case is UNVERIFIED (docs
+		// re-read 2026-11-20:
+		// https://docs.cloud.google.com/pubsub/docs/create-bigquery-subscription,
+		// which names the permission and no error).
 		return status.Errorf(codes.PermissionDenied, "Permission '%s' denied on service account %s (or it may not exist).", perm, email)
 	}
 	return nil

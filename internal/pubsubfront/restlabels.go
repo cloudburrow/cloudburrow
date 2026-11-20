@@ -228,7 +228,7 @@ func (f *Front) restPatchTopic(w http.ResponseWriter, r *http.Request, name stri
 			writeRESTError(w, err)
 			return true
 		}
-		kept.storagePolicy = updatedStoragePolicy(t.GetMessageStoragePolicy())
+		kept.storagePolicy = recomputedStoragePolicy(r.Context(), name, t.GetMessageStoragePolicy())
 		forward = without(forward, "message_storage_policy")
 	}
 	if len(forward) == 0 {
