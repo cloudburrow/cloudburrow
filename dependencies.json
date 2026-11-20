@@ -671,6 +671,13 @@
         "verification": "go.sum",
         "notes": "Generated contract types for the service CloudBurrow implements."
       },
+      "goCloudQuotas": {
+        "module": "cloud.google.com/go/cloudquotas",
+        "version": "v1.14.1",
+        "license": "Apache-2.0",
+        "verification": "go.sum",
+        "notes": "Generated contract types for the Cloud Quotas API that APIs & Services' Quotas & System Limits serves (#2030)."
+      },
       "goCloudRun": {
         "module": "cloud.google.com/go/run",
         "version": "v1.25.0",
