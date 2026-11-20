@@ -9293,6 +9293,7 @@
           "test/compat/cloudbuilddefaultlogs_test.go:132 TestGcloudBuildsSubmitDefaultLogsBucket",
           "test/compat/cloudbuilddefaultlogs_test.go:47 TestCloudBuildDefaultLogsBucket",
           "test/compat/iamenforcementstorage1879_test.go:102 TestIAMEnforcementStorage",
+          "test/compat/iamworkforceidentity2056_test.go:375 TestWorkforceIdentityFederationStorage",
           "test/compat/iamworkloadidentity1941_test.go:496 TestWorkloadIdentityFederationStorage",
           "test/compat/storage_test.go:92 TestStorageObjectRoundTrip",
           "test/compat/storagecmek1938_test.go:137 TestStorageCMEK",
@@ -16679,10 +16680,279 @@
     "Key": "workloadidentity",
     "Title": "Workload Identity Federation (IAM v1 pools, STS v1)",
     "counts": {
-      "Unimplemented": 25,
-      "Verified": 22
+      "Unimplemented": 42,
+      "Verified": 46
     },
     "rows": [
+      {
+        "method": "iam.locations.workforcePools.create",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkforceidentity2056_test.go:523 TestGcloudIAMWorkforcePools",
+          "test/compat/iamworkforceidentity2056_test.go:54 TestWorkforcePools"
+        ]
+      },
+      {
+        "method": "iam.locations.workforcePools.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkforceidentity2056_test.go:523 TestGcloudIAMWorkforcePools",
+          "test/compat/iamworkforceidentity2056_test.go:54 TestWorkforcePools"
+        ]
+      },
+      {
+        "method": "iam.locations.workforcePools.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkforceidentity2056_test.go:523 TestGcloudIAMWorkforcePools",
+          "test/compat/iamworkforceidentity2056_test.go:54 TestWorkforcePools",
+          "test/compat/iamworkforceidentity2056_test.go:580 TestIAMEnforcementWorkforceIdentity"
+        ]
+      },
+      {
+        "method": "iam.locations.workforcePools.getIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.locations.workforcePools.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkforceidentity2056_test.go:523 TestGcloudIAMWorkforcePools",
+          "test/compat/iamworkforceidentity2056_test.go:54 TestWorkforcePools",
+          "test/compat/iamworkforceidentity2056_test.go:580 TestIAMEnforcementWorkforceIdentity"
+        ]
+      },
+      {
+        "method": "iam.locations.workforcePools.operations.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkforceidentity2056_test.go:54 TestWorkforcePools"
+        ]
+      },
+      {
+        "method": "iam.locations.workforcePools.patch",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkforceidentity2056_test.go:523 TestGcloudIAMWorkforcePools",
+          "test/compat/iamworkforceidentity2056_test.go:54 TestWorkforcePools",
+          "test/compat/iamworkforceidentity2056_test.go:580 TestIAMEnforcementWorkforceIdentity"
+        ]
+      },
+      {
+        "method": "iam.locations.workforcePools.providers.create",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkforceidentity2056_test.go:523 TestGcloudIAMWorkforcePools",
+          "test/compat/iamworkforceidentity2056_test.go:54 TestWorkforcePools"
+        ]
+      },
+      {
+        "method": "iam.locations.workforcePools.providers.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkforceidentity2056_test.go:523 TestGcloudIAMWorkforcePools",
+          "test/compat/iamworkforceidentity2056_test.go:54 TestWorkforcePools"
+        ]
+      },
+      {
+        "method": "iam.locations.workforcePools.providers.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkforceidentity2056_test.go:523 TestGcloudIAMWorkforcePools",
+          "test/compat/iamworkforceidentity2056_test.go:54 TestWorkforcePools"
+        ]
+      },
+      {
+        "method": "iam.locations.workforcePools.providers.keys.create",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkforceidentity2056_test.go:54 TestWorkforcePools"
+        ]
+      },
+      {
+        "method": "iam.locations.workforcePools.providers.keys.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkforceidentity2056_test.go:54 TestWorkforcePools"
+        ]
+      },
+      {
+        "method": "iam.locations.workforcePools.providers.keys.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkforceidentity2056_test.go:54 TestWorkforcePools"
+        ]
+      },
+      {
+        "method": "iam.locations.workforcePools.providers.keys.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkforceidentity2056_test.go:54 TestWorkforcePools"
+        ]
+      },
+      {
+        "method": "iam.locations.workforcePools.providers.keys.operations.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkforceidentity2056_test.go:54 TestWorkforcePools"
+        ]
+      },
+      {
+        "method": "iam.locations.workforcePools.providers.keys.undelete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkforceidentity2056_test.go:54 TestWorkforcePools"
+        ]
+      },
+      {
+        "method": "iam.locations.workforcePools.providers.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkforceidentity2056_test.go:523 TestGcloudIAMWorkforcePools",
+          "test/compat/iamworkforceidentity2056_test.go:54 TestWorkforcePools",
+          "test/compat/iamworkforceidentity2056_test.go:580 TestIAMEnforcementWorkforceIdentity"
+        ]
+      },
+      {
+        "method": "iam.locations.workforcePools.providers.operations.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkforceidentity2056_test.go:54 TestWorkforcePools"
+        ]
+      },
+      {
+        "method": "iam.locations.workforcePools.providers.patch",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkforceidentity2056_test.go:523 TestGcloudIAMWorkforcePools",
+          "test/compat/iamworkforceidentity2056_test.go:54 TestWorkforcePools"
+        ]
+      },
+      {
+        "method": "iam.locations.workforcePools.providers.scimTenants.create",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.locations.workforcePools.providers.scimTenants.delete",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.locations.workforcePools.providers.scimTenants.get",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.locations.workforcePools.providers.scimTenants.getIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.locations.workforcePools.providers.scimTenants.list",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.locations.workforcePools.providers.scimTenants.patch",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.locations.workforcePools.providers.scimTenants.setIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.locations.workforcePools.providers.scimTenants.testIamPermissions",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.locations.workforcePools.providers.scimTenants.tokens.create",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.locations.workforcePools.providers.scimTenants.tokens.delete",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.locations.workforcePools.providers.scimTenants.tokens.get",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.locations.workforcePools.providers.scimTenants.tokens.list",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.locations.workforcePools.providers.scimTenants.tokens.patch",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.locations.workforcePools.providers.scimTenants.undelete",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.locations.workforcePools.providers.undelete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkforceidentity2056_test.go:523 TestGcloudIAMWorkforcePools",
+          "test/compat/iamworkforceidentity2056_test.go:54 TestWorkforcePools"
+        ]
+      },
+      {
+        "method": "iam.locations.workforcePools.setIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.locations.workforcePools.subjects.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkforceidentity2056_test.go:375 TestWorkforceIdentityFederationStorage"
+        ]
+      },
+      {
+        "method": "iam.locations.workforcePools.subjects.operations.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkforceidentity2056_test.go:375 TestWorkforceIdentityFederationStorage"
+        ]
+      },
+      {
+        "method": "iam.locations.workforcePools.subjects.revokeSessions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkforceidentity2056_test.go:375 TestWorkforceIdentityFederationStorage"
+        ]
+      },
+      {
+        "method": "iam.locations.workforcePools.subjects.undelete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkforceidentity2056_test.go:375 TestWorkforceIdentityFederationStorage"
+        ]
+      },
+      {
+        "method": "iam.locations.workforcePools.testIamPermissions",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.locations.workforcePools.undelete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkforceidentity2056_test.go:523 TestGcloudIAMWorkforcePools",
+          "test/compat/iamworkforceidentity2056_test.go:54 TestWorkforcePools"
+        ]
+      },
       {
         "method": "iam.projects.locations.workloadIdentityPools.addAttestationRule",
         "status": "Unimplemented",
@@ -16976,6 +17246,7 @@
         "method": "sts.token",
         "status": "Verified",
         "tests": [
+          "test/compat/iamworkforceidentity2056_test.go:308 TestWorkforceIdentityFederationSTS",
           "test/compat/iamworkloadidentity1941_test.go:433 TestWorkloadIdentityFederationSTS"
         ]
       }

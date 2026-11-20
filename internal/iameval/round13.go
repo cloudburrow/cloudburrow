@@ -26,8 +26,8 @@ const (
 // on the parent for a create or list and on the resource otherwise. The
 // patch pages name none: each is checked with the permission of its name
 // in Google's permission index, logging.queries.update and
-// logging.logScopes.update (Logging Admin's), UNVERIFIED (re-read
-// 2026-11-20: the patch pages above).
+// logging.logScopes.update (Logging Admin's),
+// UNVERIFIED (re-read 2026-11-20: the patch pages above).
 var LoggingExtraJSON = []JSONMethod{
 	{Method: "GET", Pattern: regexp.MustCompile(logParent + `/savedQueries$`), Permission: "logging.queries.list"},
 	{Method: "POST", Pattern: regexp.MustCompile(logParent + `/savedQueries$`), Permission: "logging.queries.create"},

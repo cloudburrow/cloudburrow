@@ -181,6 +181,11 @@ var DeleteConfirmRules = map[string]DeleteConfirmRule{
 	// Workload Identity Federation (#1941): "Click Delete pool, then click
 	// Delete." and, for a provider, "Click Delete to delete the provider."
 	"iam-workload-identity": {Style: DeleteConfirmClick, Source: "https://docs.cloud.google.com/iam/docs/manage-workload-identity-pools-providers", Verified: true},
+	// UNVERIFIED (re-read 2026-11-20): Workforce Identity Federation
+	// (#2056): "click Delete on the pool that you want to delete" and
+	// "Follow additional instructions"; the dialog itself is not described
+	// (https://docs.cloud.google.com/iam/docs/manage-workforce-identity-pools-providers).
+	"iam-workforce-identity": unverified,
 	// Model Registry (#1940): "Click Delete on the confirmation screen."
 	"vertex-models": {Style: DeleteConfirmClick, Source: "https://docs.cloud.google.com/vertex-ai/docs/model-registry/delete-model", Verified: true},
 	// UNVERIFIED: "click Actions, and then click Delete endpoint." No dialog
