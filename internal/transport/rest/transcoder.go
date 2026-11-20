@@ -38,7 +38,8 @@ import (
 // It is a grpc.ServiceRegistrar: register a server with it as with a
 // *grpc.Server, e.g. kmspb.RegisterKeyManagementServiceServer(t, impl), and
 // mount it with grpctransport.Server.ServeHTTP to share the gRPC port (h2c).
-// The call does not pass through the gRPC server's interceptors.
+// The call does not pass through the gRPC server's interceptors, only
+// through Interceptor when one is set.
 //
 // The mapping follows google/api/http.proto: path variables set the request
 // fields they name; body "*" is the whole request, body "<field>" that field;
@@ -73,6 +74,10 @@ type Transcoder struct {
 	// publishes and its descriptors lack (#1788): request bodies and
 	// responses are decoded and encoded through it.
 	Overlay *Overlay
+	// Interceptor, when set, wraps every call as a gRPC server's unary
+	// interceptor does, with the method's full gRPC name in its info: a
+	// check that reads the decoded request (IAM enforcement, #1989).
+	Interceptor grpc.UnaryServerInterceptor
 
 	once     sync.Once
 	routes   []Route
@@ -328,7 +333,7 @@ func (t *Transcoder) serve(w http.ResponseWriter, r *http.Request, rt *Route, ca
 	if a := r.Header.Get("Authorization"); a != "" {
 		ctx = metadata.NewIncomingContext(ctx, metadata.Pairs("authorization", a))
 	}
-	resp, err := md.Handler(svc.impl, ctx, dec, nil)
+	resp, err := md.Handler(svc.impl, ctx, dec, t.Interceptor)
 	if err != nil {
 		writeStatusError(w, err)
 		return

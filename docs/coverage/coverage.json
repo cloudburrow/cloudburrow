@@ -11439,6 +11439,7 @@
         "method": "bigquery.jobs.get",
         "status": "Verified",
         "tests": [
+          "test/compat/analyticshub1989_test.go:196 TestAnalyticsHubEgressStorageReadAndQueryResults",
           "test/compat/bigqueryalterprojectstatement_test.go:19 TestBigQueryAlterProjectStatementType",
           "test/compat/bigqueryasyncjobs_test.go:60 TestBigQueryAsyncJobs",
           "test/compat/bigqueryavroload_test.go:108 TestBigQueryAvroLoadTypes",
@@ -11530,6 +11531,7 @@
         "method": "bigquery.jobs.insert",
         "status": "Verified",
         "tests": [
+          "test/compat/analyticshub1989_test.go:196 TestAnalyticsHubEgressStorageReadAndQueryResults",
           "test/compat/bigquery1548_test.go:36 TestBigQueryScriptsUndropAndAlterSchema",
           "test/compat/bigquery1562_test.go:181 TestBigQueryMLHashBucketize",
           "test/compat/bigquery1562_test.go:235 TestBigQueryMLDNNOptions1562",
@@ -16609,6 +16611,7 @@
         "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/GetListing",
         "status": "Verified",
         "tests": [
+          "test/compat/analyticshub1989_test.go:78 TestIAMEnforcementAnalyticsHub",
           "test/compat/analyticshub_test.go:116 TestAnalyticsHubPublishSubscribeQuery",
           "test/compat/terraform_analyticshub_test.go:24 TestTerraformBigQueryAnalyticsHub"
         ]
@@ -16622,6 +16625,7 @@
         "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/GetSubscription",
         "status": "Verified",
         "tests": [
+          "test/compat/analyticshub1989_test.go:78 TestIAMEnforcementAnalyticsHub",
           "test/compat/analyticshub_test.go:116 TestAnalyticsHubPublishSubscribeQuery",
           "test/compat/terraform_analyticshub_test.go:24 TestTerraformBigQueryAnalyticsHub"
         ]
@@ -16637,6 +16641,7 @@
         "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/ListListings",
         "status": "Verified",
         "tests": [
+          "test/compat/analyticshub1989_test.go:78 TestIAMEnforcementAnalyticsHub",
           "test/compat/analyticshub_test.go:116 TestAnalyticsHubPublishSubscribeQuery"
         ]
       },
@@ -16682,6 +16687,7 @@
         "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/SetIamPolicy",
         "status": "Verified",
         "tests": [
+          "test/compat/analyticshub1989_test.go:78 TestIAMEnforcementAnalyticsHub",
           "test/compat/analyticshub_test.go:116 TestAnalyticsHubPublishSubscribeQuery"
         ]
       },
@@ -16699,6 +16705,8 @@
         "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/SubscribeListing",
         "status": "Verified",
         "tests": [
+          "test/compat/analyticshub1989_test.go:196 TestAnalyticsHubEgressStorageReadAndQueryResults",
+          "test/compat/analyticshub1989_test.go:78 TestIAMEnforcementAnalyticsHub",
           "test/compat/analyticshub_test.go:116 TestAnalyticsHubPublishSubscribeQuery",
           "test/compat/analyticshub_test.go:342 TestAnalyticsHubRestrictedExport",
           "test/compat/terraform_analyticshub_test.go:24 TestTerraformBigQueryAnalyticsHub"
@@ -16708,6 +16716,7 @@
         "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/TestIamPermissions",
         "status": "Verified",
         "tests": [
+          "test/compat/analyticshub1989_test.go:78 TestIAMEnforcementAnalyticsHub",
           "test/compat/analyticshub_test.go:116 TestAnalyticsHubPublishSubscribeQuery"
         ]
       },
@@ -16722,6 +16731,7 @@
         "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/UpdateListing",
         "status": "Verified",
         "tests": [
+          "test/compat/analyticshub1989_test.go:78 TestIAMEnforcementAnalyticsHub",
           "test/compat/analyticshub_test.go:116 TestAnalyticsHubPublishSubscribeQuery",
           "test/compat/terraform_analyticshub_test.go:24 TestTerraformBigQueryAnalyticsHub"
         ]

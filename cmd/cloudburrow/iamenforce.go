@@ -7,9 +7,14 @@ import (
 	"strings"
 	"time"
 
+	ahpb "cloud.google.com/go/bigquery/analyticshub/apiv1/analyticshubpb"
 	"cloud.google.com/go/iam/apiv1/iampb"
 	iamv2 "cloud.google.com/go/iam/apiv2/iampb"
 	"google.golang.org/genproto/googleapis/api/annotations"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	grpcmd "google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/iamcond"
@@ -176,7 +181,19 @@ func newIAMEnforcer(cfg config.Config, creds *metadata.Credentials, reg func() *
 
 // useIAMEnforcement interposes the enforcer on the in-process services
 // whose methods it maps, and gives it their policies.
-func useIAMEnforcement(e *iameval.Enforcer, secretsSvc *secretsService, kmsSvc *kmsService, tasksSvc *tasksService) {
+func useIAMEnforcement(e *iameval.Enforcer, secretsSvc *secretsService, kmsSvc *kmsService, tasksSvc *tasksService, hub *analyticsHubSvc) {
+	if hub != nil {
+		// BigQuery sharing (#1989): the table's checks, then those it
+		// cannot express, on gRPC and JSON alike.
+		hub.enforce = append(hub.enforce, e.Interceptor(iameval.AnalyticsHub), analyticsHubChecks(e))
+		e.Policies[iameval.AnalyticsHub.Name] = iameval.GRPCPolicyGetter(func() func(context.Context, *iampb.GetIamPolicyRequest) (*iampb.Policy, error) {
+			api := hub.API()
+			if api == nil {
+				return nil
+			}
+			return api.GetIamPolicy
+		})
+	}
 	if secretsSvc != nil {
 		secretsSvc.interpose = append(secretsSvc.interpose, e.Interceptor(iameval.SecretManager))
 		secretsSvc.wrapJSON = jsonEnforcer(e, iameval.SecretManager, nil)
@@ -231,4 +248,67 @@ func iamEnforcementMode(cfg config.Config) string {
 		return config.IAMEnforcementOn
 	}
 	return config.IAMEnforcementOff
+}
+
+// analyticsHubChecks are BigQuery sharing's checks that iameval's method
+// table cannot express (#1989): SubscribeListing also needs
+// bigquery.datasets.create on the subscriber's project, as "Create new
+// datasets: bigquery.datasets.create on the subscriber project"
+// (https://docs.cloud.google.com/bigquery/docs/analytics-hub-view-subscribe-listings,
+// read 2026-11-20); and ListOrgDataExchanges, whose reference names no
+// permission, answers only the exchanges the caller holds
+// analyticshub.dataExchanges.list on (UNVERIFIED, re-read 2026-11-20:
+// https://docs.cloud.google.com/bigquery/docs/reference/analytics-hub/rest/v1/organizations.locations.dataExchanges/list).
+func analyticsHubChecks(e *iameval.Enforcer) grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		if e == nil || e.On == nil || !e.On() {
+			return handler(ctx, req)
+		}
+		bearer := ""
+		if md, ok := grpcmd.FromIncomingContext(ctx); ok {
+			for _, v := range md.Get("authorization") {
+				if b := iameval.Bearer(v); b != "" {
+					bearer = b
+				}
+			}
+		}
+		switch in := req.(type) {
+		case *ahpb.SubscribeListingRequest:
+			if p := in.GetDestinationDataset().GetDatasetReference().GetProjectId(); p != "" {
+				if err := e.Authorize(ctx, iameval.AnalyticsHub, bearer, "bigquery.datasets.create", "projects/"+p); err != nil {
+					return nil, err
+				}
+			}
+		case *ahpb.ListOrgDataExchangesRequest:
+			resp, err := handler(ctx, req)
+			out, ok := resp.(*ahpb.ListOrgDataExchangesResponse)
+			if err != nil || !ok {
+				return resp, err
+			}
+			kept := make([]*ahpb.DataExchange, 0, len(out.GetDataExchanges()))
+			for _, x := range out.GetDataExchanges() {
+				err := e.Authorize(ctx, iameval.AnalyticsHub, bearer, "analyticshub.dataExchanges.list", x.GetName())
+				if status.Code(err) == codes.Unauthenticated {
+					return nil, err
+				}
+				if err == nil {
+					kept = append(kept, x)
+				}
+			}
+			out.DataExchanges = kept
+			return out, nil
+		}
+		return handler(ctx, req)
+	}
+}
+
+// organizationOf is the organization ("organizations/N") a project is
+// under, "" for none.
+func organizationOf(src registrySource, project string) string {
+	for _, a := range src.Ancestry(project) {
+		if strings.HasPrefix(a, "organizations/") {
+			return a
+		}
+	}
+	return ""
 }

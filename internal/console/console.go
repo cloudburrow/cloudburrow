@@ -755,6 +755,10 @@ type Detail struct {
 	// is addressed by its encoded key and headed by its key path (#875).
 	// Empty means the last segment.
 	Title string `json:"title,omitempty"`
+	// Heading replaces "<Kind> details" over a top-level page that is not
+	// one resource of the route's kind: BigQuery sharing's My
+	// subscriptions (#1989). Empty keeps it.
+	Heading string `json:"heading,omitempty"`
 	// Object, on an object's page, is the bucket and the object name the
 	// page is about: the page then offers Download and Delete beside its
 	// title, through the object routes, as Google's object page does (#1843).

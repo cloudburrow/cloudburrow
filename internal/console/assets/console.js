@@ -3616,6 +3616,10 @@ async function renderDetail(view, route, resourcePath) {
   // A page addressed by something no reader recognises — a Datastore
   // entity's encoded key (#875) — says what it is in its heading.
   if (data.title) (nameLine || crumb.querySelector("h1, h2")).textContent = data.title;
+  // A top-level page that is not one resource of the route's kind (BigQuery
+  // sharing's My subscriptions, #1989) is headed by its own name, not
+  // "<Kind> details".
+  if (data.heading) crumb.querySelector("h1, h2").textContent = data.heading;
   const sections = (data.sections || []).slice();
   // A Logs tab where Google's page has one (#1842, audit item 9): a Cloud
   // Run service's, job's and worker pool's, a function's, and a GKE

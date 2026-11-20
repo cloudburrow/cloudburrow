@@ -1,6 +1,7 @@
 package analyticshub
 
 import (
+	"context"
 	"net/http"
 
 	"google.golang.org/grpc"
@@ -22,9 +23,26 @@ func Transcoder() *rest.Transcoder {
 // Routes returns every bound route.
 func Routes() []rest.Route { return Transcoder().Routes() }
 
-// NewRESTHandler returns the JSON API for what register adds.
-func NewRESTHandler(register func(grpc.ServiceRegistrar)) http.Handler {
+// NewRESTHandler returns the JSON API for what register adds; each call
+// passes through check, in order, as its gRPC call does (IAM enforcement,
+// #1989).
+func NewRESTHandler(register func(grpc.ServiceRegistrar), check ...grpc.UnaryServerInterceptor) http.Handler {
 	t := Transcoder()
+	if len(check) > 0 {
+		t.Interceptor = chain(check)
+	}
 	register(t)
 	return t
+}
+
+// chain runs is in order, the first outermost.
+func chain(is []grpc.UnaryServerInterceptor) grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		next := handler
+		for i := len(is) - 1; i >= 0; i-- {
+			in, h := is[i], next
+			next = func(ctx context.Context, req any) (any, error) { return in(ctx, req, info, h) }
+		}
+		return next(ctx, req)
+	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -16,8 +17,11 @@ import (
 // analyticsHubProvider is BigQuery's Sharing (Analytics Hub) page (#1960),
 // in Google's layout: the project's data exchanges, Create exchange; an
 // exchange's page with its listings and their subscriptions, Create
-// listing, Subscribe, Revoke subscription and Delete listing. Every change
-// is a call on the service's own methods.
+// listing, Subscribe, Revoke subscription and Delete listing; and
+// (consoleanalyticshubedit.go, #1989) Edit exchange and Edit listing, a
+// listing's page, Refresh and Delete subscription, the subscriber's My
+// subscriptions, and Permissions. Every change is a call on the service's
+// own methods.
 type analyticsHubProvider struct{ svc *analyticsHubSvc }
 
 const analyticsHubNotStarted = "BigQuery sharing (Analytics Hub) has not started"
@@ -87,6 +91,12 @@ func (p analyticsHubProvider) List(ctx context.Context, project string) (console
 	}
 	listing.Total = len(listing.Items)
 	listing.RowsOpenable = true
+	subs, err := a.mySubscriptions(ctx, project)
+	if err == nil {
+		listing.Summary = []console.PropertyGroup{{Heading: "Subscriber", Properties: []console.Property{
+			{Label: "My subscriptions", Value: strconv.Itoa(len(subs)) + " in this project",
+				Link: "/bigquery-sharing/" + hubSubscriptionsRow + "?project=" + url.QueryEscape(project)}}}}
+	}
 	return listing, nil
 }
 
@@ -133,8 +143,13 @@ func exchangeName(project, row string) (string, error) {
 }
 
 func (p analyticsHubProvider) Detail(ctx context.Context, project string, path []string) (console.Detail, error) {
-	if len(path) > 1 {
-		return console.DeeperThan(1, path), nil
+	switch {
+	case len(path) > 2:
+		return console.DeeperThan(2, path), nil
+	case len(path) == 1 && path[0] == hubSubscriptionsRow:
+		return p.subscriptionsPage(ctx, project)
+	case len(path) == 2:
+		return p.listingDetail(ctx, project, path)
 	}
 	a, err := p.api()
 	if err != nil {
@@ -169,23 +184,14 @@ func (p analyticsHubProvider) Detail(ctx context.Context, project string, path [
 		}})
 	}
 	listings.Total = len(listings.Items)
+	listings.RowsOpenable = true
 	subs, err := api.ListSharedResourceSubscriptions(ctx, &ahpb.ListSharedResourceSubscriptionsRequest{Resource: name, PageSize: 1000})
 	if err != nil {
 		return console.Detail{Unavailable: "cannot list the subscriptions: " + consoleErr(err)}, nil
 	}
-	subscriptions := console.Listing{Columns: []string{"Listing", "State", "Linked dataset", "Created"}, Noun: "subscriptions", AlwaysStatus: true}
-	for _, s := range subs.GetSharedResourceSubscriptions() {
-		linked := "—"
-		for _, r := range s.GetLinkedResources() {
-			linked = r.GetLinkedDataset()
-		}
-		state := strings.TrimPrefix(s.GetState().String(), "STATE_")
-		subscriptions.Items = append(subscriptions.Items, console.Resource{Name: s.GetName(), Status: state, Fields: map[string]string{
-			"Listing": s.GetListing()[strings.LastIndex(s.GetListing(), "/")+1:], "State": state, "Linked dataset": linked,
-			"Created": s.GetCreationTime().AsTime().UTC().Format("2006-01-02 15:04:05 UTC")}})
-	}
-	subscriptions.Total = len(subscriptions.Items)
+	subscriptions := hubSubscriptionRows(subs.GetSharedResourceSubscriptions(), false)
 	return console.Detail{
+		Edit: exchangeEditForm(e),
 		Summary: []console.Property{
 			{Label: "Display name", Value: e.GetDisplayName()},
 			{Label: "Region", Value: strings.Split(name, "/")[3]},
@@ -199,14 +205,40 @@ func (p analyticsHubProvider) Detail(ctx context.Context, project string, path [
 				{Label: "Resource name", Value: e.GetName()},
 				{Label: "Description", Value: orDash(e.GetDescription())},
 				{Label: "Documentation", Value: orDash(e.GetDocumentation())},
+				{Label: "Log subscriber email", Value: map[bool]string{true: "On", false: "Off"}[e.GetLogLinkedDatasetQueryUserEmail()]},
 			}}}},
+			{ID: "permissions", Kind: console.KindPermissions},
 		},
 	}, nil
 }
 
 func (p analyticsHubProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
 	a, err := p.api()
-	if err != nil || len(path) != 1 {
+	if err != nil {
+		return nil
+	}
+	switch {
+	case len(path) == 1 && path[0] == hubSubscriptionsRow:
+		if project == "" {
+			return nil
+		}
+		subs, err := a.mySubscriptions(ctx, project)
+		if err != nil {
+			return nil
+		}
+		return hubSubscriptionActions(subs, false)
+	case len(path) == 2:
+		name, err := listingName(project, path)
+		if err != nil {
+			return nil
+		}
+		acts := []console.Action{hubIconAction}
+		subs, err := a.svc.API().ListSharedResourceSubscriptions(ctx, &ahpb.ListSharedResourceSubscriptionsRequest{Resource: name, PageSize: 1000})
+		if err == nil {
+			acts = append(acts, hubSubscriptionActions(subs.GetSharedResourceSubscriptions(), true)...)
+		}
+		return acts
+	case len(path) != 1:
 		return nil
 	}
 	name, err := exchangeName(project, path[0])
@@ -236,18 +268,10 @@ func (p analyticsHubProvider) DetailActions(ctx context.Context, project string,
 			console.Action{ID: "delete-listing", Label: "Delete listing", Destructive: true, Fields: []console.Field{
 				{Name: "listing", Label: "Listing", Type: "select", Required: true, Options: ids}}})
 	}
+	acts = append(acts, hubIconAction)
 	subs, err := a.svc.API().ListSharedResourceSubscriptions(ctx, &ahpb.ListSharedResourceSubscriptionsRequest{Resource: name, PageSize: 1000})
 	if err == nil {
-		var active []string
-		for _, s := range subs.GetSharedResourceSubscriptions() {
-			if s.GetState() == ahpb.Subscription_STATE_ACTIVE {
-				active = append(active, s.GetName())
-			}
-		}
-		if len(active) > 0 {
-			acts = append(acts, console.Action{ID: "revoke", Label: "Revoke subscription", Destructive: true, Fields: []console.Field{
-				{Name: "subscription", Label: "Subscription", Type: "select", Required: true, Options: active}}})
-		}
+		acts = append(acts, hubSubscriptionActions(subs.GetSharedResourceSubscriptions(), true)...)
 	}
 	return acts
 }
@@ -257,8 +281,28 @@ func (p analyticsHubProvider) ActAt(ctx context.Context, project string, path []
 	if err != nil {
 		return err
 	}
-	if len(path) != 1 {
-		return errors.New("these actions apply to an exchange")
+	switch {
+	case len(path) == 1 && path[0] == hubSubscriptionsRow:
+		subs, err := a.mySubscriptions(ctx, project)
+		if err != nil {
+			return errors.New(consoleErr(err))
+		}
+		if action == "revoke" {
+			return fmt.Errorf("unknown action %q", action)
+		}
+		return hubSubscriptionAct(ctx, a, action, v["subscription"], subs)
+	case len(path) == 2:
+		name, err := listingName(project, path)
+		if err != nil {
+			return err
+		}
+		subs, err := a.svc.API().ListSharedResourceSubscriptions(ctx, &ahpb.ListSharedResourceSubscriptionsRequest{Resource: name, PageSize: 1000})
+		if err != nil {
+			return errors.New(consoleErr(err))
+		}
+		return hubSubscriptionAct(ctx, a, action, v["subscription"], subs.GetSharedResourceSubscriptions())
+	case len(path) != 1:
+		return errors.New("these actions apply to an exchange or a listing")
 	}
 	name, err := exchangeName(project, path[0])
 	if err != nil {
@@ -266,6 +310,12 @@ func (p analyticsHubProvider) ActAt(ctx context.Context, project string, path []
 	}
 	api := a.svc.API()
 	switch action {
+	case "refresh", "delete-subscription":
+		subs, err := api.ListSharedResourceSubscriptions(ctx, &ahpb.ListSharedResourceSubscriptionsRequest{Resource: name, PageSize: 1000})
+		if err != nil {
+			return errors.New(consoleErr(err))
+		}
+		return hubSubscriptionAct(ctx, a, action, v["subscription"], subs.GetSharedResourceSubscriptions())
 	case "create-listing":
 		l := &ahpb.Listing{DisplayName: v["displayName"], Description: v["description"],
 			Source: &ahpb.Listing_BigqueryDataset{BigqueryDataset: &ahpb.Listing_BigQueryDatasetSource{Dataset: strings.TrimSpace(v["dataset"])}}}

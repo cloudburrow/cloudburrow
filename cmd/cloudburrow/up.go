@@ -597,6 +597,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		analyticsHub.calls = callEvents(recorder, requestMetrics, "analyticshub")
 		analyticsHub.interpose = append(analyticsHub.interpose, grpctransport.LogInterceptor(logger, "analyticshub"), faults.Interceptor("analyticshub"))
 		analyticsHub.requests = requestEvents(recorder, requestMetrics, "analyticshub")
+		analyticsHub.orgOf = func(project string) string {
+			return organizationOf(registrySource{reg: func() *resourcemanager.Registry { return projectRegistry }}, project)
+		}
 	}
 	if privateCASvc != nil {
 		privateCASvc.calls = callEvents(recorder, requestMetrics, "privateca")
@@ -628,7 +631,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// injection see a denied call as the client does. Off by default: the
 	// interceptors pass every call through until --iam-enforcement=on.
 	iamEnforcer := newIAMEnforcer(cfg, creds, func() *resourcemanager.Registry { return projectRegistry })
-	useIAMEnforcement(iamEnforcer, secretsSvc, kmsSvc, tasksSvc)
+	useIAMEnforcement(iamEnforcer, secretsSvc, kmsSvc, tasksSvc, analyticsHub)
 
 	// The runtime file straight after the control server, so it names an
 	// address already listening and `wait` can follow startup from the start.

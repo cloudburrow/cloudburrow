@@ -287,8 +287,9 @@ compat_shard() {
       # IAM enforcement (#1879): every TestIAMEnforcement* test, against
       # an instance that enforces, and nothing else, so the shard is a few
       # minutes; the other suites ran with enforcement off in their shards.
-      SERVICES=storage,pubsub,tasks,secretmanager,kms,run
-      TEST_VARS+=,STORAGE,PUBSUB,TASKS,SECRETS,KMS,RUN,RESOURCEMANAGER,IAM_ENFORCEMENT
+      # BigQuery for BigQuery sharing's (Analytics Hub, #1989).
+      SERVICES=storage,pubsub,tasks,secretmanager,kms,run,bigquery
+      TEST_VARS+=,STORAGE,PUBSUB,TASKS,SECRETS,KMS,RUN,RESOURCEMANAGER,ANALYTICSHUB,BIGQUERY,BIGQUERY_PROJECT,IAM_ENFORCEMENT
       UP_FLAGS=(--iam-enforcement=on)
       COMPAT_RUN='^TestIAMEnforcement' ;;
     emulators)

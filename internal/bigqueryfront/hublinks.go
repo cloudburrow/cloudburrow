@@ -14,6 +14,11 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"cloud.google.com/go/bigquery/storage/apiv1/storagepb"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 )
 
 // Analytics Hub linked datasets (#1960).
@@ -54,8 +59,18 @@ import (
 //     dataset are refused 403 accessDenied before anything runs; and so is
 //     direct table access, tabledata.list (restrict_direct_table_access,
 //     "restrict direct table access (read api/tabledata.list) on linked
-//     table"). Reading the shared tables through the Storage Read API, a
-//     separate port the front does not see, is not refused;
+//     table"), and through the Storage Read API, whose front shares
+//     these links (storageread.go): CreateReadSession of a restricted
+//     linked table is refused PERMISSION_DENIED (#1989), and of one that is
+//     not, reads the shared table;
+//   - with restrict_query_result, "restrict export of query result derived
+//     from restricted linked dataset table": a copy or extract job whose
+//     source is the result table of a query job that read such a linked
+//     dataset is refused 403 accessDenied (hubResultSource, #1989).
+//     Reading that result (jobs.getQueryResults, tabledata.list) is not
+//     export, and is allowed; without restrict_query_result the result
+//     may be copied and extracted, as "Disable copy and export of shared
+//     data" "permits exports of query results";
 //   - a revoked subscription's linked dataset "remains in the subscriber's
 //     project", but "the subscriber can no longer query" it: every read of
 //     it is refused 403 accessDenied.
@@ -568,8 +583,84 @@ func (f front) refuseHubCopyOut(w http.ResponseWriter, r *http.Request, srcs []t
 			hubAccessDenied(w, hubEgressMessage(project, s.DatasetID, what))
 			return true
 		}
+		if ds := f.inProject(refProject(s, project)).hubResultSource(r, s); ds != "" {
+			hubAccessDenied(w, hubResultMessage(refProject(s, project), ds, what))
+			return true
+		}
 	}
 	return false
+}
+
+// hubResultSource is the linked dataset with restrict_query_result whose
+// tables the query job that wrote t (a query's result table, in a hidden
+// dataset: the front's resultsDataset, the job's ID its table's, or the
+// emulator's own dataset of the job) read; "" for none. f is in t's
+// project.
+func (f front) hubResultSource(r *http.Request, t tableRef) string {
+	if !strings.HasPrefix(t.DatasetID, "_") || !f.hubs.any() {
+		return ""
+	}
+	for _, id := range []string{t.TableID, t.DatasetID} {
+		status, b := f.get(r, "/jobs/"+url.PathEscape(id))
+		if status != http.StatusOK {
+			continue
+		}
+		var job struct {
+			Configuration struct {
+				Query *struct {
+					queryOptions
+					DestinationTable *tableRef `json:"destinationTable"`
+				} `json:"query"`
+			} `json:"configuration"`
+		}
+		if json.Unmarshal(b, &job) != nil || job.Configuration.Query == nil {
+			continue
+		}
+		d := job.Configuration.Query.DestinationTable
+		if d == nil || d.DatasetID != t.DatasetID || d.TableID != t.TableID {
+			continue
+		}
+		for _, ds := range f.hubRefs(job.Configuration.Query.queryOptions) {
+			if l, _ := f.hubLink(ds); l.Restricted && l.QueryResult {
+				return ds
+			}
+		}
+	}
+	return ""
+}
+
+func hubResultMessage(project, dataset, what string) string {
+	return fmt.Sprintf("The table is the result of a query of %s:%s, a linked dataset of an Analytics Hub listing that restricts "+
+		"export of query results (restrict_query_result): %s would copy it out, which the listing's publisher does not allow.", project, dataset, what)
+}
+
+// hubSession checks a Storage Read session of a linked table t: refused
+// PERMISSION_DENIED for a revoked subscription's, and for a listing with
+// restricted export, as its restrict_direct_table_access restricts
+// "direct table access (read api/tabledata.list) on linked table"
+// (#1989). Any other reads the shared table: in and t are given back
+// naming it.
+func (s *storageRead) hubSession(req *storagepb.CreateReadSessionRequest, in rawFrame, t readTable) (rawFrame, readTable, error) {
+	l, ok := s.hubs.get(t.project, t.dataset)
+	if !ok {
+		return in, t, nil
+	}
+	switch {
+	case l.Revoked:
+		return nil, t, status.Error(codes.PermissionDenied, "Access Denied: "+hubRevokedMessage(t.project, t.dataset))
+	case l.Restricted:
+		return nil, t, status.Error(codes.PermissionDenied, "Access Denied: "+hubEgressMessage(t.project, t.dataset,
+			"a Storage Read API session (direct table access, restrict_direct_table_access)"))
+	case !l.selected(t.table):
+		return nil, t, status.Errorf(codes.NotFound, "Not found: Table %s:%s.%s", t.project, t.dataset, t.table)
+	}
+	src := readTable{project: l.SourceProject, dataset: l.SourceDataset, table: t.table}
+	req.ReadSession.Table = "projects/" + src.project + "/datasets/" + src.dataset + "/tables/" + src.table
+	out, err := proto.Marshal(req)
+	if err != nil {
+		return nil, t, status.Error(codes.Internal, err.Error())
+	}
+	return out, src, nil
 }
 
 // hubDatasetFields adds a linked dataset's linkedDatasetSource and type to

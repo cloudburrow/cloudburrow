@@ -38,10 +38,15 @@ type analyticsHubSvc struct {
 	tracing   *telemetry.Tracing
 	calls     grpctransport.Observer
 	interpose []grpc.UnaryServerInterceptor
-	requests  func(rest.Request)
-	bigquery  func() *netfwd.Forwarder
-	server    *grpctransport.Server
-	api       *analyticshub.Server
+	// enforce are the IAM checks (#1989), innermost on gRPC and on every
+	// JSON call too, which passes no other interceptor.
+	enforce  []grpc.UnaryServerInterceptor
+	requests func(rest.Request)
+	// orgOf names a project's organization, for ListOrgDataExchanges.
+	orgOf    func(project string) string
+	bigquery func() *netfwd.Forwarder
+	server   *grpctransport.Server
+	api      *analyticshub.Server
 }
 
 func newAnalyticsHubService(cfg config.Config) *analyticsHubSvc {
@@ -91,6 +96,9 @@ func (s *analyticsHubSvc) Start(ctx context.Context) error {
 		return err
 	}
 	s.api = api
+	if s.orgOf != nil {
+		api.OrganizationOf(s.orgOf)
+	}
 	s.server = grpctransport.New(net.JoinHostPort(s.cfg.BindAddress, strconv.Itoa(s.cfg.Endpoints.AnalyticsHub)))
 	s.server.Observe(s.calls)
 	if s.tracing != nil {
@@ -99,7 +107,10 @@ func (s *analyticsHubSvc) Start(ctx context.Context) error {
 	for _, i := range s.interpose {
 		s.server.Interpose(i)
 	}
-	var jsonAPI http.Handler = analyticshub.NewRESTHandler(api.Register)
+	for _, i := range s.enforce {
+		s.server.Interpose(i)
+	}
+	var jsonAPI http.Handler = analyticshub.NewRESTHandler(api.Register, s.enforce...)
 	if s.requests != nil {
 		jsonAPI = rest.Observe(jsonAPI, s.requests)
 	}

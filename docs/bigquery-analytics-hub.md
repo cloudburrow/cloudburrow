@@ -22,7 +22,11 @@ c, err := analyticshub.NewClient(ctx, option.WithEndpoint(addr), option.WithoutA
 `_listing_subscription` apply locally. gcloud has no Analytics Hub command.
 The console's BigQuery menu has **Analytics Hub**: exchanges, their listings
 and subscriptions, Create exchange, Create listing (with the data egress
-options), Subscribe, Revoke subscription and Delete.
+options), Subscribe, Revoke subscription and Delete; Edit exchange and Edit
+listing (everything but the shared dataset), Upload icon, a listing's own
+page, Refresh subscription and Delete subscription, **My subscriptions**
+(the project's subscriptions, and the exchanges of its organization), and a
+Permissions tab on an exchange and a listing (#1989).
 
 ## Linked datasets
 
@@ -50,9 +54,23 @@ dataset, but a copy, clone or snapshot job, an extract job, a query job with a
 destination table, `CREATE TABLE … AS SELECT` (and any CREATE, INSERT, MERGE,
 UPDATE or EXPORT DATA statement that reads it) and tabledata.list of a linked
 table are refused 403 `accessDenied` before anything runs, as Google
-documents. Not enforced locally: reads through the BigQuery Storage Read API,
-and `restrict_query_result`'s ban on exporting a finished query's result table.
-IAM is stored, not enforced (ADR-0006).
+documents. So is a BigQuery Storage Read API session of a linked table
+(`restrict_direct_table_access`: "read api/tabledata.list"); a linked table
+without restriction is read through it from the shared table. With
+`restrict_query_result`, a copy or extract job of the result table of a query
+that read the linked dataset is refused too; the result itself is read as
+usual. Without it, query results may be copied and exported (#1989).
+
+## IAM
+
+Policies on exchanges, listings and subscriptions are stored, and with
+`cloudburrow up --iam-enforcement=on` enforced (#1989): each method checks
+the `analyticshub.*` permission Google documents for it, on the resource,
+its exchange (for a listing) and its project, folders and organization; a
+subscription also needs `bigquery.datasets.create` on the subscriber's
+project. Grant `roles/analyticshub.viewer`, `subscriber`, `publisher`,
+`listingAdmin`, `subscriptionOwner` or `admin` as on Google. A request with no
+access token is the instance's own account, which holds every permission.
 
 ## Not served
 

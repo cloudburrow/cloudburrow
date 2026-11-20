@@ -224,15 +224,18 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	if policies == nil {
 		policies = &rowPolicies{}
 	}
-	iam := &iamPolicies{}                                             // iam.go, #1231
-	buffers := &streamBuffers{stamp: o.streamTimes}                   // streamingbuffer.go, #1273, #1370
-	settings := &projectOptions{}                                     // projectoptions.go, #1375
-	jobRows := &jobsTable{logf: o.logf}                               // jobstable.go, #1378
-	newest := &newestJobs{}                                           // joblisting.go, #1633
-	open := &openJobs{}                                               // jobsopen.go, #1633
-	tables := &tableSettings{}                                        // tableoptions.go, #1390
-	linked := &linkedDatasets{}                                       // loglinks.go, #1423
-	hubs := &hubLinks{}                                               // hublinks.go, #1960
+	iam := &iamPolicies{}                           // iam.go, #1231
+	buffers := &streamBuffers{stamp: o.streamTimes} // streamingbuffer.go, #1273, #1370
+	settings := &projectOptions{}                   // projectoptions.go, #1375
+	jobRows := &jobsTable{logf: o.logf}             // jobstable.go, #1378
+	newest := &newestJobs{}                         // joblisting.go, #1633
+	open := &openJobs{}                             // jobsopen.go, #1633
+	tables := &tableSettings{}                      // tableoptions.go, #1390
+	linked := &linkedDatasets{}                     // loglinks.go, #1423
+	hubs := o.hubs                                  // hublinks.go, #1960, shared with the Storage Read front
+	if hubs == nil {
+		hubs = &hubLinks{}
+	}
 	icebergs := &icebergTables{}                                      // iceberg.go, #1427
 	dropped := &droppedStore{}                                        // dropped.go, #1460
 	models := &bqModels{}                                             // models.go, #1465
@@ -782,6 +785,9 @@ type options struct {
 	// policies are the row access policies, shared with the Storage Read
 	// front (rowpolicies.go, #1218).
 	policies *rowPolicies
+	// hubs are the Analytics Hub linked datasets, shared with the Storage
+	// Read front (hublinks.go, #1960, #1989).
+	hubs *hubLinks
 	// stateDir is where the front keeps what a restart of its own must
 	// not lose (functionstate.go); empty: memory alone. logf logs.
 	stateDir string
