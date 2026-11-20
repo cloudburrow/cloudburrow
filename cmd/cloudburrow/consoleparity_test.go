@@ -181,6 +181,9 @@ var parityRows = []parityRow{
 	{Resource: "Developer Connect reads the console does not need", Service: "developerconnect",
 		Methods:  []string{"DeveloperConnect/UpdateConnection", "DeveloperConnect/FetchLinkableGitRepositories", "DeveloperConnect/FetchGitRefs"},
 		Excluded: "a connection's labels, annotations and disabled flag, which no CloudBurrow page shows; the linkable repositories, which are the instance page's Repositories, where Link repository is offered; and a link's branches and tags, which are the repository's own (#1546)"},
+	{Resource: "Developer Connect git tokens", Service: "developerconnect",
+		Methods:  []string{"DeveloperConnect/FetchReadToken", "DeveloperConnect/FetchReadWriteToken"},
+		Excluded: "short-lived machine credentials a git client or build fetches through the API, which Google's console offers no action for; the repository page's git URL is the console's clone surface (#1955)"},
 	// Eventarc (#1877): on Cloud Run's Triggers tab, as Google's is.
 	{Resource: "Eventarc triggers", Service: "eventarc",
 		Methods:  []string{"Eventarc/CreateTrigger", "Eventarc/ListTriggers", "Eventarc/DeleteTrigger"},

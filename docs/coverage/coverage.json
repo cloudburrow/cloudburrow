@@ -1424,6 +1424,8 @@
           "test/compat/cloudbuildpubsub_test.go:108 TestTerraformCloudBuildPubsubTrigger",
           "test/compat/cloudbuildpubsub_test.go:31 TestCloudBuildPubsubTrigger",
           "test/compat/cloudbuildserviceaccount_test.go:92 TestCloudBuildServiceAccount",
+          "test/compat/cloudbuildssm_test.go:183 TestCloudBuildSourceManagerTriggerFilters",
+          "test/compat/cloudbuildssm_test.go:453 TestTerraformCloudBuildSourceManagerTrigger",
           "test/compat/cloudbuildtriggers_test.go:75 TestCloudBuildTriggersAndWorkerPools",
           "test/compat/runconnectrepo_test.go:37 TestCloudRunContinuousDeployFromRepository",
           "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
@@ -1444,6 +1446,7 @@
           "test/compat/cloudbuildapproval_test.go:308 TestTerraformCloudBuildTriggerApproval",
           "test/compat/cloudbuildpubsub_test.go:108 TestTerraformCloudBuildPubsubTrigger",
           "test/compat/cloudbuildpubsub_test.go:31 TestCloudBuildPubsubTrigger",
+          "test/compat/cloudbuildssm_test.go:453 TestTerraformCloudBuildSourceManagerTrigger",
           "test/compat/cloudbuildtriggers_test.go:75 TestCloudBuildTriggersAndWorkerPools",
           "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
         ]
@@ -1479,6 +1482,7 @@
           "test/compat/cloudbuildapproval_test.go:126 TestCloudBuildApproveBuild",
           "test/compat/cloudbuildapproval_test.go:308 TestTerraformCloudBuildTriggerApproval",
           "test/compat/cloudbuildpubsub_test.go:108 TestTerraformCloudBuildPubsubTrigger",
+          "test/compat/cloudbuildssm_test.go:453 TestTerraformCloudBuildSourceManagerTrigger",
           "test/compat/cloudbuildtriggers_test.go:75 TestCloudBuildTriggersAndWorkerPools",
           "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
         ]
@@ -1509,6 +1513,7 @@
         "method": "google.devtools.cloudbuild.v1.CloudBuild/ListBuilds",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudbuildssm_test.go:183 TestCloudBuildSourceManagerTriggerFilters",
           "test/compat/cloudbuildsteps_test.go:220 TestGcloudBuildsStepsAndList",
           "test/compat/cloudbuildsteps_test.go:283 TestCloudBuildHostStepsOff",
           "test/compat/cloudbuildsteps_test.go:66 TestCloudBuildArbitraryStepsFilterAndRetry",
@@ -1544,6 +1549,7 @@
           "test/compat/cloudbuildapproval_test.go:246 TestGcloudBuildsApproveAndReject",
           "test/compat/cloudbuildapproval_test.go:308 TestTerraformCloudBuildTriggerApproval",
           "test/compat/cloudbuildserviceaccount_test.go:92 TestCloudBuildServiceAccount",
+          "test/compat/cloudbuildssm_test.go:183 TestCloudBuildSourceManagerTriggerFilters",
           "test/compat/cloudbuildtriggers_test.go:75 TestCloudBuildTriggersAndWorkerPools",
           "test/compat/runconnectrepo_test.go:37 TestCloudRunContinuousDeployFromRepository"
         ]
@@ -1554,6 +1560,7 @@
         "tests": [
           "test/compat/cloudbuildapproval_test.go:308 TestTerraformCloudBuildTriggerApproval",
           "test/compat/cloudbuildpubsub_test.go:31 TestCloudBuildPubsubTrigger",
+          "test/compat/cloudbuildssm_test.go:453 TestTerraformCloudBuildSourceManagerTrigger",
           "test/compat/cloudbuildtriggers_test.go:75 TestCloudBuildTriggersAndWorkerPools",
           "test/compat/runconnectrepo_test.go:37 TestCloudRunContinuousDeployFromRepository",
           "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
@@ -1959,8 +1966,8 @@
     "Key": "developerconnect",
     "Title": "Developer Connect",
     "counts": {
-      "Unimplemented": 15,
-      "Verified": 11
+      "Unimplemented": 13,
+      "Verified": 13
     },
     "rows": [
       {
@@ -2040,13 +2047,17 @@
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/FetchReadToken",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildssm_test.go:318 TestDeveloperConnectReadTokens"
+        ]
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/FetchReadWriteToken",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildssm_test.go:318 TestDeveloperConnectReadTokens"
+        ]
       },
       {
         "method": "google.cloud.developerconnect.v1.DeveloperConnect/FetchSelf",

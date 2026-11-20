@@ -33,8 +33,10 @@ import (
 // matches the pushed branch or tag, with the commit's tree as /workspace
 // and the repository's built-in substitutions (COMMIT_SHA, SHORT_SHA,
 // REVISION_ID, REPO_NAME, REPO_FULL_NAME, REF_NAME, BRANCH_NAME or
-// TAG_NAME). RunBuildTrigger runs one at the head of source.branchName
-// (or tagName, or commitSha), else of the repository's default branch.
+// TAG_NAME); its includedFiles, ignoredFiles and filter narrow the pushes
+// that build (#1955, cloudbuildtriggerfilter.go). RunBuildTrigger runs one
+// at the head of source.branchName (or tagName, or commitSha), else of the
+// repository's default branch, unfiltered.
 // Pull request filters are refused (#1854): this instance's Secure Source
 // Manager serves no pull requests (CreatePullRequest, MergePullRequest and
 // the other pull request methods are UNIMPLEMENTED), so no pull request
@@ -104,11 +106,38 @@ func devConnectTriggers(repo string) []*cbpb.BuildTrigger {
 }
 
 // runDevConnectPushTriggers runs the triggers on links to a repository for
-// one pushed ref.
-func runDevConnectPushTriggers(ctx context.Context, builds *CloudBuildServer, repo, dir, ref, sha string) {
+// one pushed ref, from old (empty for a new ref) to sha: each whose push
+// filter accepts the ref, whose includedFiles and ignoredFiles accept the
+// push's changed files, and whose filter accepts its substitutions
+// (#1955, cloudbuildtriggerfilter.go).
+func runDevConnectPushTriggers(ctx context.Context, builds *CloudBuildServer, repo, dir, ref, old, sha string) {
+	var files []string
+	filesRead := false
 	for _, t := range devConnectTriggers(repo) {
 		if t.GetDisabled() || !pushFilterAccepts(t.GetRepositoryEventConfig().GetPush(), ref) {
 			continue
+		}
+		if len(t.GetIncludedFiles()) > 0 || len(t.GetIgnoredFiles()) > 0 {
+			if !filesRead {
+				files, filesRead = changedFiles(ctx, dir, old, sha), true
+			}
+			if !triggerFilesAccept(t, files) {
+				continue
+			}
+		}
+		if t.GetFilter() != "" {
+			p, _, _ := resource.ParseLocation(strings.SplitN(t.GetResourceName(), "/triggers/", 2)[0])
+			subs := map[string]string{}
+			for k, v := range t.GetSubstitutions() {
+				subs[k] = v
+			}
+			for k, v := range devConnectBuiltins(t, repo, ref, sha) {
+				subs[k] = v
+			}
+			subs["PROJECT_ID"] = p
+			if ok, err := triggerFilterAccepts(t, subs); err != nil || !ok {
+				continue
+			}
 		}
 		if _, err := builds.runDevConnectTrigger(ctx, t, dir, ref, sha, nil); err != nil {
 			slog.Warn("cloudbuild: trigger's build was refused", "repository", repo, "trigger", t.GetName(), "err", err)
@@ -143,14 +172,8 @@ func (c *CloudBuildServer) runDevConnectTrigger(ctx context.Context, t *cbpb.Bui
 	for k, v := range extra {
 		b.Substitutions[k] = v
 	}
-	id := repo[strings.LastIndex(repo, "/")+1:]
-	subs := map[string]string{"TRIGGER_NAME": t.GetName(), "COMMIT_SHA": sha, "REVISION_ID": sha, "SHORT_SHA": sha[:7],
-		"REPO_NAME": id, "REPO_FULL_NAME": repo, "TRIGGER_BUILD_CONFIG_PATH": configPath}
-	if short, ok := strings.CutPrefix(ref, "refs/heads/"); ok {
-		subs["BRANCH_NAME"], subs["REF_NAME"] = short, short
-	} else if short, ok := strings.CutPrefix(ref, "refs/tags/"); ok {
-		subs["TAG_NAME"], subs["REF_NAME"] = short, short
-	}
+	subs := devConnectBuiltins(t, repo, ref, sha)
+	subs["TRIGGER_BUILD_CONFIG_PATH"] = configPath
 	archive := func(ctx context.Context) (io.ReadCloser, error) {
 		out, err := exec.CommandContext(ctx, "git", "-C", dir, "archive", "--format=tgz", sha).Output()
 		if err != nil {
@@ -167,6 +190,19 @@ func (c *CloudBuildServer) runDevConnectTrigger(ctx context.Context, t *cbpb.Bui
 	p, l, _ := resource.ParseLocation(strings.SplitN(t.GetResourceName(), "/triggers/", 2)[0])
 	return c.createBuild(ctx, p, l, l == "global", b,
 		&triggerContext{id: t.GetId(), name: t.GetName(), approval: approval, subs: subs, archive: archive, source: src})
+}
+
+// devConnectBuiltins are a repository build's built-in substitutions.
+func devConnectBuiltins(t *cbpb.BuildTrigger, repo, ref, sha string) map[string]string {
+	id := repo[strings.LastIndex(repo, "/")+1:]
+	subs := map[string]string{"TRIGGER_NAME": t.GetName(), "COMMIT_SHA": sha, "REVISION_ID": sha, "SHORT_SHA": sha[:7],
+		"REPO_NAME": id, "REPO_FULL_NAME": repo}
+	if short, ok := strings.CutPrefix(ref, "refs/heads/"); ok {
+		subs["BRANCH_NAME"], subs["REF_NAME"] = short, short
+	} else if short, ok := strings.CutPrefix(ref, "refs/tags/"); ok {
+		subs["TAG_NAME"], subs["REF_NAME"] = short, short
+	}
+	return subs
 }
 
 // runDevConnectManual is RunBuildTrigger of a trigger on a link: its build
