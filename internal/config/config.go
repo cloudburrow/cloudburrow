@@ -116,6 +116,13 @@ const (
 	// metric descriptors, user-defined time series, and the built-in
 	// metrics of the instance's log-based metrics and API requests.
 	ServiceMonitoring Service = "monitoring"
+	// ServiceCompute is the Compute Engine API's VPC networking
+	// (compute.googleapis.com, #1936): networks, subnetworks, firewall
+	// rules, routes, addresses and their operations, served in the CLI
+	// process. Opt-in: with it, Memorystore, Kubernetes Engine and Cloud
+	// SQL check their network fields against its networks and subnets, as
+	// Google does; without it they keep accepting any network.
+	ServiceCompute Service = "compute"
 )
 
 // AllServices lists the default services in a stable order, so startup
@@ -128,7 +135,7 @@ func AllServices() []Service {
 
 // OptionalServices lists the opt-in services, in a stable order.
 func OptionalServices() []Service {
-	return []Service{ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceCloudSQL, ServiceBigQuery, ServiceMemorystore, ServiceCloudSQLMySQL, ServiceScheduler, ServiceLogging, ServiceKMS, ServiceBackupDR, ServicePrivateCA, ServiceGKE, ServiceMonitoring}
+	return []Service{ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceCloudSQL, ServiceBigQuery, ServiceMemorystore, ServiceCloudSQLMySQL, ServiceScheduler, ServiceLogging, ServiceKMS, ServiceBackupDR, ServicePrivateCA, ServiceGKE, ServiceMonitoring, ServiceCompute}
 }
 
 // KnownServices lists every selectable service.
@@ -189,7 +196,7 @@ func (s Service) Persistence() Persistence {
 		// Key material is in Kubernetes Secrets, like Secret Manager's
 		// payloads, which the cluster keeps.
 		return PersistenceVolume
-	case ServiceStorage, ServiceTasks, ServiceSecrets, ServiceScheduler, ServiceBackupDR, ServicePrivateCA, ServiceGKE, ServiceMonitoring:
+	case ServiceStorage, ServiceTasks, ServiceSecrets, ServiceScheduler, ServiceBackupDR, ServicePrivateCA, ServiceGKE, ServiceMonitoring, ServiceCompute:
 		return PersistenceVolume
 	case ServiceRun:
 		// Workload definitions live in the Kubernetes API, which the cluster
@@ -347,6 +354,11 @@ type Endpoints struct {
 	// Monitoring is the host port of the Cloud Monitoring API v3
 	// (monitoring.googleapis.com, #1939): gRPC and JSON on one port.
 	Monitoring int `json:"monitoring"`
+	// Compute is the host port of the Compute Engine API's VPC networking
+	// (compute.googleapis.com, #1936), JSON under /compute/v1/. With it
+	// enabled it also answers the Kubernetes Engine node pools' instance
+	// group managers, which the GKE port answers without it.
+	Compute int `json:"compute"`
 	// ONNX is the host port of the ONNX runner (#1711), which runs BigQuery
 	// ML's imported ONNX models for the BigQuery front, published to the
 	// cluster through cloudburrow-host. CloudBurrow's own API, not a
@@ -421,6 +433,7 @@ func (e *Endpoints) fields() []endpointField {
 		{"privateca", &e.PrivateCA},
 		{"gke", &e.GKE},
 		{"monitoring", &e.Monitoring},
+		{"compute", &e.Compute},
 		{"onnx", &e.ONNX},
 		{"tfconvert", &e.TFConvert},
 	}
@@ -494,6 +507,8 @@ func (e Endpoints) OptionalPort(s Service) int {
 		return e.GKE
 	case ServiceMonitoring:
 		return e.Monitoring
+	case ServiceCompute:
+		return e.Compute
 	default:
 		return 0
 	}
@@ -820,6 +835,10 @@ func Default() Config {
 			// Cloud Monitoring (#1939): after 9029-9030 (API Keys, GKE)
 			// and the ports other open branches took.
 			Monitoring: 9033,
+			// The Compute Engine API (#1936): its own port, as
+			// compute.googleapis.com is its own API, the next free one
+			// after Kubernetes Engine's 9030.
+			Compute: 9031,
 			// OS-assigned. The port is not what enables local AI —
 			// LocalAI.ModelPath is. A configured port with no model binds
 			// nothing, so there is no endpoint answering every request with

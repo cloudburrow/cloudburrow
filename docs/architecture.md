@@ -199,6 +199,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/service/backupdr/` | The Backup and DR Service API v1 for Cloud SQL (vaults, plans, associations, data sources, backups over Cloud SQL backup runs), built by us (#1433). |
 | `internal/service/apikeys/` | The API Keys API v2 (each project's API keys and their restrictions), built by us; `Authorize` is Google's decision on a request that carries a key, with its API_KEY_* errors (#1915). |
 | `internal/service/gke/` | The Kubernetes Engine API v1 (clusters, node pools, operations), built by us (#1913); each cluster is a kind cluster that `internal/cluster`'s `GKE` makes and resizes. |
+| `internal/service/compute/` | The Compute Engine API v1's VPC networking (networks, subnetworks, firewall rules, routes, addresses, operations, regions and zones), built by us (#1936); records other services check their network fields against, no traffic. |
 | `internal/service/privateca/` | Certificate Authority Service v1 (CA pools, CAs, certificates, real X.509 signed in process), built by us (#1834). |
 | `internal/service/monitoring/` | Cloud Monitoring API v3 MetricService (metric and monitored resource descriptors, time series with alignment and reduction, log-based and request metrics), built by us (#1939). |
 | `internal/service/serviceusage/` | The Service Usage API v1 (which APIs each project has enabled), built by us; enabling an API not served is refused, and a disabled API's calls are refused SERVICE_DISABLED, through `internal/apienable` (#1352, #1914). |

@@ -104,6 +104,8 @@ Set by `scripts/compat-env.sh` from a running instance:
 | `CLOUDBURROW_TEST_SINK_LOGGING`, `CLOUDBURROW_TEST_SINK_STORAGE`, `CLOUDBURROW_TEST_SINK_PUBSUB` | as `LOGGING`, `STORAGE` and `PUBSUB` | the Cloud Logging sinks that deliver to Cloud Storage, Pub/Sub and BigQuery (#1404), in the emulators shard beside BigQuery, and `gcloud logging copy` and `CopyLogEntries` to a bucket (#1394) |
 | `CLOUDBURROW_TEST_CMEK_KMS` | as `KMS` | the customer-managed keys of Memorystore (memorystore shard) and of Cloud SQL and a Backup and DR vault (sql shard) (#1568), so the Cloud KMS tests stay in served |
 | `CLOUDBURROW_TEST_SQL_SERVICEUSAGE` | as `SERVICEUSAGE` | gcloud privateca roots create's `generateServiceIdentity` of the CA service agent (#1834), in the sql shard, so the Service Usage tests stay in storage |
+| `CLOUDBURROW_TEST_SQL_COMPUTE` | as `COMPUTE` | Cloud SQL's private networks checked against Compute Engine's (#1936), in the sql shard, so the Compute Engine suite stays in served |
+| `CLOUDBURROW_TEST_MEMORYSTORE_COMPUTE` | as `COMPUTE` | Memorystore's networks and reserved ranges checked against Compute Engine's (#1936), in the memorystore shard |
 | `CLOUDBURROW_TEST_SQL_PRIVATECA` | as `PRIVATECA` | the CA pools of Cloud SQL's `CUSTOMER_MANAGED_CAS_CA` instances (#1834), in the sql shard, so the Certificate Authority Service tests stay in their shard |
 | `CLOUDBURROW_TEST_MEMORYSTORE_PRIVATECA` | as `PRIVATECA` | the CA pools of Redis clusters' `SERVER_CA_MODE_CUSTOMER_MANAGED_CAS_CA` (#1907), in the memorystore shard, so the Certificate Authority Service tests stay in their shard |
 | `CLOUDBURROW_TEST_CLOUDSQL_SECRETS` | as `SECRETS` | Cloud SQL's Data API, whose password is a secret version, in the sql shard (#1568), so the Secret Manager tests stay in storage and run |
@@ -128,6 +130,7 @@ Set by `scripts/compat-env.sh` from a running instance:
 | `CLOUDBURROW_TEST_CLOUDSQL` | `PGHOST`:`PGPORT` | Cloud SQL for PostgreSQL |
 | `CLOUDBURROW_TEST_SQLADMIN` | `CLOUDBURROW_SQLADMIN_ENDPOINT` | the Cloud SQL Admin API (#1301), with either Cloud SQL service |
 | `CLOUDBURROW_TEST_BACKUPDR` | `CLOUDBURROW_BACKUPDR_ENDPOINT` | the Backup and DR Service (#1433), `--services backupdr` with either Cloud SQL service; gcloud backup-dr and Terraform's `google_backup_dr_*` |
+| `CLOUDBURROW_TEST_COMPUTE` | `CLOUDBURROW_COMPUTE_ENDPOINT` | the Compute Engine API's VPC networking (#1936), `--services compute`; JSON under `/compute/v1/`, in process |
 | `CLOUDBURROW_TEST_GKE` | `CLOUDBURROW_GKE_ENDPOINT` | the Kubernetes Engine API (#1913), `--services gke`; gRPC and JSON on one port; its clusters are kind clusters, so it needs Docker, kind and kubectl |
 | `CLOUDBURROW_TEST_PRIVATECA` | `CLOUDBURROW_PRIVATECA_ENDPOINT` | Certificate Authority Service (#1834), `--services privateca`; gRPC and JSON on one port |
 | `CLOUDBURROW_TEST_MONITORING` | `CLOUDBURROW_MONITORING_ENDPOINT` | Cloud Monitoring (#1939), `--services monitoring`; gRPC and JSON on one port |

@@ -47,6 +47,9 @@ var serviceAgents = map[string]string{
 	"container.googleapis.com": "container-engine-robot.iam.gserviceaccount.com",
 	// Cloud Monitoring's notification service agent (#1939).
 	"monitoring.googleapis.com": "gcp-sa-monitoring-notification.iam.gserviceaccount.com",
+	// Compute Engine Service Agent, the primary agent of
+	// compute.googleapis.com (#1936).
+	"compute.googleapis.com": "compute-system.iam.gserviceaccount.com",
 	// External Key Management Service Service Account, Cloud KMS's primary
 	// agent, not the Cloud KMS Service Agent (gcp-sa-cloudkms, which is not
 	// primary): https://cloud.google.com/kms/docs/create-ekm-connection runs

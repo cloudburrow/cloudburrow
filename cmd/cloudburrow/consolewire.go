@@ -90,6 +90,8 @@ type consoleDeps struct {
 	gke *gkeService
 	// monitoring is Cloud Monitoring (#1939), nil unless enabled.
 	monitoring *monitoringService
+	// compute is the Compute Engine API (#1936), nil unless enabled.
+	compute *computeService
 	// sqlAdmin is the Cloud SQL Admin API, which restores Backup and DR
 	// backups; nil unless a Cloud SQL service is enabled.
 	sqlAdmin *sqladmin.Server
@@ -295,6 +297,13 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			monitoringChannelsProvider{admin}, monitoringUptimeProvider{admin},
 			monitoringDashboardsProvider{monitoringAdmin: admin, metrics: screen}, monitoringGroupsProvider{admin},
 			monitoringServicesProvider{admin}, monitoringSnoozesProvider{admin})
+	}
+	// VPC network (#1936): the Compute Engine API's networks, subnets,
+	// firewall rules, routes and addresses, in this process.
+	if enabled[config.ServiceCompute] && d.compute != nil {
+		screen := computeScreen{svc: d.compute}
+		providers = append(providers, computeNetworksProvider{screen}, computeFirewallsProvider{screen},
+			computeRoutesProvider{screen}, computeAddressesProvider{screen})
 	}
 	if enabled[config.ServiceScheduler] && d.scheduler != nil {
 		providers = append(providers, schedulerProvider{svc: d.scheduler, faults: d.faults})
@@ -656,6 +665,7 @@ var serviceTitles = map[config.Service]string{
 	config.ServicePrivateCA:     "Certificate Authority Service",
 	config.ServiceGKE:           "Kubernetes Engine",
 	config.ServiceMonitoring:    "Cloud Monitoring",
+	config.ServiceCompute:       "VPC network",
 }
 
 func serviceTitle(s config.Service) string {

@@ -186,13 +186,15 @@ compat_shard() {
       PROBE_TESTS="TestSecretManagerAcrossRestart TestTasksAcrossRestart TestSchedulerAcrossRestart TestStorageAcrossRestart"
       PROBE_VARS=SECRETS,TASKS,SCHEDULER,STORAGE ;;
     served)
-      SERVICES=kms,logging,privateca,gke,monitoring
+      SERVICES=kms,logging,privateca,gke,monitoring,compute
       # The Kubernetes Engine API (#1913): its clusters are kind clusters
       # beside the instance's. Service Usage as GKE_SERVICEUSAGE, which
       # `gcloud container clusters create` asks whether
       # container.googleapis.com is enabled, so the Service Usage suite
       # stays in storage. Cloud Monitoring (#1939), in process, beside the
       # Cloud Logging its log-based metrics read.
+      # The Compute Engine API's VPC networking (#1936), in process,
+      # beside Kubernetes Engine, whose cluster networks it checks.
       # Certificate Authority Service (#1834), in process like KMS.
       # Cloud KMS (#309) and Cloud Logging (#304). Resource Manager's tests
       # run in the storage shard; the Logging folder and organization tests
@@ -201,7 +203,7 @@ compat_shard() {
       # 38910752877: in storage gcloud had no logging override).
       # Cloud KMS Autokey's folder and project tests (#1568) make their
       # folder with it too.
-      TEST_VARS+=,KMS,LOGGING,LOGGING_RESOURCEMANAGER,PRIVATECA,GKE,GKE_SERVICEUSAGE,MONITORING
+      TEST_VARS+=,KMS,LOGGING,LOGGING_RESOURCEMANAGER,PRIVATECA,GKE,GKE_SERVICEUSAGE,MONITORING,COMPUTE
       # Cloud KMS (#418): a key with ENABLED, DISABLED and
       # DESTROY_SCHEDULED versions and a ciphertext.
       SETUP_TESTS="TestKMSRestartSetup"
@@ -328,8 +330,10 @@ compat_shard() {
       # Certificate Authority Service as MEMORYSTORE_PRIVATECA, for a Redis
       # cluster's customer-managed CA (#1907), so the privateca suite stays
       # in its own shard.
-      SERVICES=memorystore,storage,kms,privateca
-      TEST_VARS+=,MEMORYSTORE,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT,CMEK_KMS,MEMORYSTORE_RESOURCEMANAGER,MEMORYSTORE_PRIVATECA
+      # Compute Engine (#1936) as MEMORYSTORE_COMPUTE: networks and
+      # reserved ranges are checked against its networks.
+      SERVICES=memorystore,storage,kms,privateca,compute
+      TEST_VARS+=,MEMORYSTORE,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT,CMEK_KMS,MEMORYSTORE_RESOURCEMANAGER,MEMORYSTORE_PRIVATECA,MEMORYSTORE_COMPUTE
       # A created Memorystore instance follows the mode too (#1302), with RDB
       # persistence as well (#1384), and Redis clusters and Valkey instances
       # with and without persistence_config (#1557).
@@ -364,8 +368,10 @@ compat_shard() {
       # generateServiceIdentity of the CA service agent (#1834).
       # Cloud Logging as SQL_LOGGING, for Backup and DR's job logs (#1924);
       # LOGGING is not in TEST_VARS, so the Logging suites stay in theirs.
-      SERVICES=cloudsql,cloudsql-mysql,backupdr,storage,secretmanager,kms,privateca,logging
-      TEST_VARS+=,MYSQL,MYSQL_PASSWORD,CLOUDSQL,SQLADMIN,BACKUPDR,CMEK_KMS,CLOUDSQL_SECRETS,NOPUBSUB_STORAGE,SQL_RESOURCEMANAGER,SQL_SERVICEUSAGE,SQL_PRIVATECA,SQL_LOGGING
+      # Compute Engine (#1936) as SQL_COMPUTE: private networks are
+      # checked against its networks.
+      SERVICES=cloudsql,cloudsql-mysql,backupdr,storage,secretmanager,kms,privateca,logging,compute
+      TEST_VARS+=,MYSQL,MYSQL_PASSWORD,CLOUDSQL,SQLADMIN,BACKUPDR,CMEK_KMS,CLOUDSQL_SECRETS,NOPUBSUB_STORAGE,SQL_RESOURCEMANAGER,SQL_SERVICEUSAGE,SQL_PRIVATECA,SQL_LOGGING,SQL_COMPUTE
       # Cloud SQL for PostgreSQL (#701): a table with a row.
       SETUP_TESTS="TestCloudSQLRestartSetup"
       PROBE_TESTS="TestCloudSQLMySQLAcrossRestart TestCloudSQLAcrossRestart"

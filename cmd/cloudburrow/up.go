@@ -332,6 +332,16 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// The Kubernetes Engine API (#1913), in process; its clusters are
 	// kind clusters of their own.
 	gkeSvc := newGKEService(cfg)
+	// The Compute Engine API's VPC networking (#1936), in process, before
+	// the services that check their networks against it.
+	computeSvc := newComputeService(cfg)
+	if computeSvc != nil {
+		computeSvc.gke = gkeSvc
+		if gkeSvc != nil {
+			gkeSvc.networks = computeSvc.gkeNetworks
+		}
+	}
+	computeSvc.register(coord)
 	gkeSvc.register(coord)
 	// The Memorystore admin API (#1302), over the Valkey server's tunnel.
 	memorystoreAdminSvc := newMemorystoreAdminService(cfg, func() *netfwd.Forwarder { return forwarderFor(forwarders, "memorystore") })
@@ -341,6 +351,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// A Redis cluster's customer-managed CA (#1907): this instance's
 		// Certificate Authority Service, in process.
 		memorystoreAdminSvc.privateca = privateCASvc
+		// Networks and reserved ranges are checked against Compute
+		// Engine's when compute is served (#1936).
+		if computeSvc != nil {
+			memorystoreAdminSvc.networks = computeSvc.memorystoreNetworks
+		}
 		// A Redis before 6.0 with in-transit encryption is served TLS by
 		// a front from the storage image (#1768).
 		memorystoreAdminSvc.storageImage = lazyStorageImage(newStorageImageComponent(cfg.KubeconfigPath(), cfg.ClusterName(), comps, stdout), comps)
@@ -447,6 +462,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		privateCA:    privateCASvc,
 		gke:          gkeSvc,
 		monitoring:   monitoringSvc,
+		compute:      computeSvc,
 		logging:      loggingSvc,
 		run:          runSvc,
 		memorystore:  memorystoreAdminSvc,
@@ -530,6 +546,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	if monitoringSvc != nil {
 		monitoringSvc.tracing = tracing
+	}
+	if computeSvc != nil {
+		computeSvc.requests = requestEvents(recorder, requestMetrics, "compute")
 	}
 	if loggingSvc != nil {
 		loggingSvc.tracing = tracing
@@ -757,6 +776,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	sqlAdminSrv := newSQLAdminServer(cfg, forwarders, mysqlCreds, stderr)
 	if sqlAdminSrv != nil {
 		sqlAdminRef = sqlAdminSrv
+		// settings.ipConfiguration.privateNetwork is checked against
+		// Compute Engine's networks when compute is served (#1936).
+		if computeSvc != nil {
+			sqlAdminSrv.SetNetworks(computeSvc.sqlNetworks)
+		}
 		// executeSql reads a user's password from Secret Manager (#1462).
 		if secretsSvc != nil {
 			sqlAdminSrv.SetSecretAccessor(buildSecretAccessor{svc: secretsSvc})
@@ -877,6 +901,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		privateCA:      privateCASvc,
 		gke:            gkeSvc,
 		monitoring:     monitoringSvc,
+		compute:        computeSvc,
 	})
 	if consoleSrv != nil {
 		// The Request Log reads the same recorder /admin/events does.
@@ -961,6 +986,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		if a := gkeSvc.Addr(); a != "" {
 			live["gke"] = a
+		}
+		if a := computeSvc.Addr(); a != "" {
+			live["compute"] = a
 		}
 		if a := apiKeysSrv.Addr(); a != "" {
 			live["apikeys"] = a

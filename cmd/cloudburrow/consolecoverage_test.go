@@ -58,6 +58,8 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 	config.ServiceGKE: {Providers: []string{"gkeclusters"}},
 	config.ServiceMonitoring: {Providers: []string{"monitoring-explorer", "monitoring-metrics", "monitoring-alerting", "monitoring-incidents",
 		"monitoring-channels", "monitoring-uptime", "monitoring-dashboards", "monitoring-groups", "monitoring-services", "monitoring-snoozes"}},
+	// VPC network (#1936): the Compute Engine API's networking.
+	config.ServiceCompute: {Providers: []string{"vpc-networks", "vpc-firewalls", "vpc-routes", "vpc-addresses"}},
 }
 
 // clusterScreens are the registry's screens that belong to no selectable
@@ -157,6 +159,7 @@ func coverageDeps(t *testing.T) consoleDeps {
 		kms:        &kmsService{},
 		privateCA:  &privateCAService{},
 		monitoring: &monitoringService{},
+		compute:    &computeService{},
 		scheduler:  &schedulerService{},
 		logging:    &loggingService{},
 		// The APIs & Services page (#1352) reads the Service Usage server.

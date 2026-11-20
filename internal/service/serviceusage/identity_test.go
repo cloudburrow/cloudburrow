@@ -72,6 +72,7 @@ func TestGenerateServiceIdentityEveryEntry(t *testing.T) {
 		"privateca.googleapis.com":            "gcp-sa-privateca.iam.gserviceaccount.com",
 		"container.googleapis.com":            "container-engine-robot.iam.gserviceaccount.com",
 		"monitoring.googleapis.com":           "gcp-sa-monitoring-notification.iam.gserviceaccount.com",
+		"compute.googleapis.com":              "compute-system.iam.gserviceaccount.com",
 		"cloudkms.googleapis.com":             "gcp-sa-ekms.iam.gserviceaccount.com",
 		"pubsub.googleapis.com":               "gcp-sa-pubsub.iam.gserviceaccount.com",
 		"secretmanager.googleapis.com":        "gcp-sa-secretmanager.iam.gserviceaccount.com",

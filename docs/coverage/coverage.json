@@ -13729,6 +13729,454 @@
     ]
   },
   {
+    "Key": "compute",
+    "Title": "Compute Engine API (v1): VPC networking",
+    "counts": {
+      "Implemented": 15,
+      "Unimplemented": 17,
+      "Verified": 37
+    },
+    "rows": [
+      {
+        "method": "compute.addresses.aggregatedList",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:299 TestGcloudComputeNetworks",
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.addresses.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.addresses.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.addresses.insert",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.addresses.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.addresses.move",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.addresses.setLabels",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.addresses.testIamPermissions",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.firewalls.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:299 TestGcloudComputeNetworks",
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.firewalls.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.firewalls.insert",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:299 TestGcloudComputeNetworks",
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.firewalls.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:299 TestGcloudComputeNetworks",
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.firewalls.patch",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.firewalls.testIamPermissions",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.firewalls.update",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.globalAddresses.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:299 TestGcloudComputeNetworks",
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.globalAddresses.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.globalAddresses.insert",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:299 TestGcloudComputeNetworks",
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.globalAddresses.list",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.globalAddresses.move",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.globalAddresses.setLabels",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.globalAddresses.testIamPermissions",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.globalOperations.aggregatedList",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.globalOperations.delete",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.globalOperations.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.globalOperations.list",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.globalOperations.wait",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.networks.addPeering",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.networks.cancelRequestRemovePeering",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.networks.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.networks.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.networks.getEffectiveFirewalls",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.networks.insert",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.networks.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:299 TestGcloudComputeNetworks",
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.networks.listPeeringRoutes",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.networks.patch",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.networks.removePeering",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.networks.requestRemovePeering",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.networks.switchToCustomMode",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.networks.updatePeering",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.regionOperations.delete",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionOperations.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.regionOperations.list",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionOperations.wait",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.regions.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.regions.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.routes.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.routes.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.routes.insert",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.routes.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.routes.testIamPermissions",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.subnetworks.aggregatedList",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.subnetworks.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.subnetworks.expandIpCidrRange",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:299 TestGcloudComputeNetworks",
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.subnetworks.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.subnetworks.getIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.subnetworks.insert",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.subnetworks.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.subnetworks.listUsable",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.subnetworks.patch",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.subnetworks.setIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.subnetworks.setPrivateIpGoogleAccess",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.subnetworks.testIamPermissions",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.zoneOperations.delete",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.zoneOperations.get",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.zoneOperations.list",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.zoneOperations.wait",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.zones.get",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.zones.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      }
+    ]
+  },
+  {
     "Key": "backupdr",
     "Title": "Backup and DR Service API (v1)",
     "counts": {

@@ -57,6 +57,7 @@ import (
 	runv1 "google.golang.org/api/run/v1"
 
 	apikeyssvc "github.com/cloudburrow/cloudburrow/internal/service/apikeys"
+	computesvc "github.com/cloudburrow/cloudburrow/internal/service/compute"
 	rmsvc "github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	serviceusagesvc "github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
 	sqladminsvc "github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
@@ -264,6 +265,10 @@ var areas = []area{
 	// Terraform call it. Its methods are the official generated client's
 	// (google.golang.org/api/apikeys/v2), from the server's own table.
 	{Key: "apikeys", Title: "API Keys API (v2)", Own: true, Methods: apikeysMethods()},
+	// The Compute Engine API's VPC networking (#1936), by discovery ID
+	// (google.golang.org/api/compute/v1), from the server's own table:
+	// the resources it serves, every one of their methods.
+	{Key: "compute", Title: "Compute Engine API (v1): VPC networking", Own: true, Methods: computeMethods()},
 	// The Backup and DR Service (#1433): CloudBurrow's own, JSON only, for
 	// Cloud SQL. Its methods are the official generated client's
 	// (google.golang.org/api/backupdr/v1).
@@ -412,6 +417,17 @@ func serviceusageMethods() []string {
 func apikeysMethods() []string {
 	var out []string
 	for id := range apikeyssvc.MethodStatuses() {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// computeMethods is every method of the Compute Engine resources served,
+// from the server's own table (internal/service/compute).
+func computeMethods() []string {
+	var out []string
+	for id := range computesvc.MethodStatuses() {
 		out = append(out, id)
 	}
 	sort.Strings(out)
@@ -762,7 +778,7 @@ func loadRegistry(root string) (map[string]string, error) {
 	}
 	// The Cloud SQL Admin API's too (#1301), and Service Usage's (#1352).
 	// And Cloud Run v1's (#1533).
-	for _, statuses := range []map[string]bool{sqladminsvc.MethodStatuses(), serviceusagesvc.MethodStatuses(), apikeyssvc.MethodStatuses(), backupdrStatuses, runadapter.V1MethodStatuses(),
+	for _, statuses := range []map[string]bool{sqladminsvc.MethodStatuses(), serviceusagesvc.MethodStatuses(), apikeyssvc.MethodStatuses(), computesvc.MethodStatuses(), backupdrStatuses, runadapter.V1MethodStatuses(),
 		rmsvc.CloudIdentityMethodStatuses()} {
 		for id, isBuilt := range statuses {
 			if isBuilt {

@@ -49,6 +49,8 @@ func cliEndpointVar(service string) string {
 		return "CLOUDBURROW_GKE_ENDPOINT"
 	case "monitoring":
 		return "CLOUDBURROW_MONITORING_ENDPOINT"
+	case "compute":
+		return "CLOUDBURROW_COMPUTE_ENDPOINT"
 	case "run":
 		// Cloud Run v2, gRPC and JSON (#661), for code that deploys or lists
 		// services; given to pods too, since the adapter is published to them

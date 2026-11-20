@@ -80,6 +80,8 @@ var compatSections = map[string]string{
 	"gke": "## Kubernetes Engine API — `google.container.v1`",
 	// Cloud Monitoring (#1939), named by gRPC method.
 	"monitoring": "## Cloud Monitoring — `google.monitoring.v3`",
+	// The Compute Engine API's VPC networking (#1936), by discovery ID.
+	"compute": "## Compute Engine VPC networking — `compute.googleapis.com` v1",
 }
 
 // acceptedStatuses maps a status cell of docs/compatibility.md to the
@@ -170,7 +172,7 @@ func namedMethods(key, op string, report map[string]string) (ids, ambiguous []st
 	// Discovery-ID pages: BigQuery, the Cloud Run v1 API (#1293), the
 	// Cloud SQL Admin API (#1301), Resource Manager v1 REST (#1296) and
 	// Service Usage (#1352).
-	if key == "bigquery" || key == "runv1" || key == "sqladmin" || key == "resourcemanagerv1" || key == "serviceusage" || key == "apikeys" || key == "backupdr" ||
+	if key == "bigquery" || key == "runv1" || key == "sqladmin" || key == "resourcemanagerv1" || key == "serviceusage" || key == "apikeys" || key == "compute" || key == "backupdr" ||
 		key == "cloudidentity" {
 		for _, tok := range storageToken.FindAllStringSubmatch(op, -1) {
 			if _, ok := report[tok[1]]; ok {
