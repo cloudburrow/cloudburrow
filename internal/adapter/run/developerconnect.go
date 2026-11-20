@@ -15,6 +15,7 @@ import (
 
 	dcpb "cloud.google.com/go/developerconnect/apiv1/developerconnectpb"
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
+	"github.com/cloudburrow/cloudburrow/internal/aipfilter"
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
@@ -274,9 +275,6 @@ func (d *DeveloperConnectServer) ListConnections(_ context.Context, req *dcpb.Li
 	if _, _, err := resource.ParseLocation(req.GetParent()); err != nil {
 		return nil, apierror.InvalidArgument("%v", err)
 	}
-	if req.GetFilter() != "" || req.GetOrderBy() != "" {
-		return nil, apierror.Unimplemented("ListConnections filter and order_by are not supported")
-	}
 	ssmState.mu.Lock()
 	var all []*dcpb.Connection
 	loadDCLocked()
@@ -286,7 +284,11 @@ func (d *DeveloperConnectServer) ListConnections(_ context.Context, req *dcpb.Li
 		}
 	}
 	ssmState.mu.Unlock()
-	items, next, err := page(all, req.GetPageSize(), req.GetPageToken(), req.GetParent()+"/connections")
+	all, err := aipfilter.List(req.GetFilter(), req.GetOrderBy(), all)
+	if err != nil {
+		return nil, err
+	}
+	items, next, err := page(all, req.GetPageSize(), req.GetPageToken(), req.GetParent()+"/connections|"+req.GetFilter()+"|"+req.GetOrderBy())
 	if err != nil {
 		return nil, err
 	}
@@ -465,9 +467,6 @@ func (d *DeveloperConnectServer) GetGitRepositoryLink(_ context.Context, req *dc
 
 // ListGitRepositoryLinks lists a connection's links, by name.
 func (d *DeveloperConnectServer) ListGitRepositoryLinks(_ context.Context, req *dcpb.ListGitRepositoryLinksRequest) (*dcpb.ListGitRepositoryLinksResponse, error) {
-	if req.GetFilter() != "" || req.GetOrderBy() != "" {
-		return nil, apierror.Unimplemented("ListGitRepositoryLinks filter and order_by are not supported")
-	}
 	ssmState.mu.Lock()
 	loadDCLocked()
 	if _, err := connectionLocked(req.GetParent()); err != nil {
@@ -481,7 +480,11 @@ func (d *DeveloperConnectServer) ListGitRepositoryLinks(_ context.Context, req *
 		}
 	}
 	ssmState.mu.Unlock()
-	items, next, err := page(all, req.GetPageSize(), req.GetPageToken(), req.GetParent()+"/gitRepositoryLinks")
+	all, err := aipfilter.List(req.GetFilter(), req.GetOrderBy(), all)
+	if err != nil {
+		return nil, err
+	}
+	items, next, err := page(all, req.GetPageSize(), req.GetPageToken(), req.GetParent()+"/gitRepositoryLinks|"+req.GetFilter()+"|"+req.GetOrderBy())
 	if err != nil {
 		return nil, err
 	}

@@ -7,6 +7,7 @@ import (
 
 	"cloud.google.com/go/scheduler/apiv1/schedulerpb"
 	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
+	locationpb "google.golang.org/genproto/googleapis/cloud/location"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -99,6 +100,8 @@ func TestFilterMatches(t *testing.T) {
 		{`(state = PAUSED OR state = ENABLED) AND name:alpha`, "alpha-prod"},
 		{`name:alpha OR name:beta AND state = PAUSED`, "beta-dev"},
 		{`state = 1`, "alpha-prod"},
+		{`retry_config:retry_count`, "alpha-prod"},
+		{`retry_config:max_retry_duration`, "alpha-prod,beta-dev"},
 	} {
 		if got := names(t, tc.filter); got != tc.want {
 			t.Errorf("filter %q = %q, want %q", tc.filter, got, tc.want)
@@ -121,6 +124,8 @@ func TestFilterRepeatedAndMaps(t *testing.T) {
 		{`topics.name != "projects/p/topics/t1"`, "b,c"},
 		{`labels.env = prod`, "a"},
 		{`labels:env`, "a"},
+		{`labels.["env"] = prod`, "a"},
+		{`labels["env"]:prod`, "a"},
 		{`version_aliases.current = 3`, "a"},
 		{`version_aliases.current > 1`, "a"},
 	} {
@@ -221,7 +226,7 @@ func orderNames(t *testing.T, orderBy string) string {
 func TestOrderBy(t *testing.T) {
 	for _, tc := range []struct{ orderBy, want string }{
 		{"", "alpha-prod,beta-dev,gamma"},
-		{"name desc", "beta-dev,alpha-prod,gamma"}, // europe-west1 < us-central1
+		{"name desc", "beta-dev,alpha-prod,gamma"},   // europe-west1 < us-central1
 		{"description", "gamma,alpha-prod,beta-dev"}, // "" < "N" < "h"
 		{"description desc", "beta-dev,alpha-prod,gamma"},
 		{"state", "alpha-prod,beta-dev,gamma"},
@@ -259,5 +264,61 @@ func TestList(t *testing.T) {
 	got, err := List(`state != DISABLED`, "user_update_time desc", jobs())
 	if err != nil || len(got) != 2 || !strings.HasSuffix(got[0].GetName(), "beta-dev") {
 		t.Fatalf("List: %v %v", got, err)
+	}
+}
+
+func TestLocationIDs(t *testing.T) {
+	mk := func(id string) (*locationpb.Location, error) {
+		return &locationpb.Location{Name: "projects/p/locations/" + id, LocationId: id, DisplayName: id,
+			Labels: map[string]string{"cloud.googleapis.com/region": id}}, nil
+	}
+	ids := []string{"europe-west1", "us-central1", "us-east1"}
+	got, err := LocationIDs(`locationId = "us-*"`, ids, mk)
+	if err != nil || strings.Join(got, ",") != "us-central1,us-east1" {
+		t.Fatalf("LocationIDs: %v %v", got, err)
+	}
+	got, err = LocationIDs(`labels["cloud.googleapis.com/region"] = us-east1`, ids, mk)
+	if err != nil || strings.Join(got, ",") != "us-east1" {
+		t.Fatalf("LocationIDs labels: %v %v", got, err)
+	}
+	got, err = LocationIDs("", ids, mk)
+	if err != nil || len(got) != 3 {
+		t.Fatalf("LocationIDs empty: %v %v", got, err)
+	}
+	if _, err := LocationIDs(`region = x`, ids, mk); err == nil {
+		t.Fatal("unknown field accepted")
+	}
+}
+
+func TestPage(t *testing.T) {
+	items := []int{5, 4, 3, 2, 1}
+	p1, tok, err := Page("s", items, "", 2)
+	if err != nil || len(p1) != 2 || p1[0] != 5 || tok == "" {
+		t.Fatalf("page 1: %v %q %v", p1, tok, err)
+	}
+	p2, tok2, err := Page("s", items, tok, 2)
+	if err != nil || len(p2) != 2 || p2[0] != 3 {
+		t.Fatalf("page 2: %v %v", p2, err)
+	}
+	p3, tok3, err := Page("s", items, tok2, 2)
+	if err != nil || len(p3) != 1 || tok3 != "" {
+		t.Fatalf("page 3: %v %q %v", p3, tok3, err)
+	}
+	if _, _, err := Page("other", items, tok, 2); err == nil {
+		t.Fatal("token replayed on another scope")
+	}
+	if _, _, err := Page("s", items, "garbage", 2); err == nil {
+		t.Fatal("garbage token accepted")
+	}
+	if _, _, err := Page("s", items, "", -1); err == nil {
+		t.Fatal("negative page size accepted")
+	}
+	js, next, err := ListPage("jobs", "state != DISABLED", "name desc", jobs(), "", 1)
+	if err != nil || len(js) != 1 || !strings.HasSuffix(js[0].GetName(), "beta-dev") || next == "" {
+		t.Fatalf("ListPage: %v %q %v", js, next, err)
+	}
+	js, next, err = ListPage("jobs", "state != DISABLED", "name desc", jobs(), next, 1)
+	if err != nil || len(js) != 1 || !strings.HasSuffix(js[0].GetName(), "alpha-prod") || next != "" {
+		t.Fatalf("ListPage 2: %v %q %v", js, next, err)
 	}
 }

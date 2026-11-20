@@ -9,6 +9,7 @@ import (
 	locationpb "google.golang.org/genproto/googleapis/cloud/location"
 	"google.golang.org/protobuf/types/known/anypb"
 
+	"github.com/cloudburrow/cloudburrow/internal/aipfilter"
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/paging"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
@@ -83,20 +84,23 @@ func kmsLocation(project, id string) (*locationpb.Location, error) {
 	return &locationpb.Location{Name: project + "/locations/" + id, LocationId: id, DisplayName: id, Metadata: md}, nil
 }
 
-// ListLocations lists the project's locations, paged. A filter is refused,
-// since none is applied.
+// ListLocations lists the project's locations, paged, with the mixin's
+// AIP-160 filter.
 func (l locationsServer) ListLocations(_ context.Context, req *locationpb.ListLocationsRequest) (*locationpb.ListLocationsResponse, error) {
 	if _, _, err := resource.ParseLocation(req.GetName() + "/locations/global"); err != nil || strings.Count(req.GetName(), "/") != 1 {
 		return nil, apierror.Wrap(apierror.InvalidArgument("name %q must be projects/{project}", req.GetName()))
-	}
-	if req.GetFilter() != "" {
-		return nil, apierror.Wrap(apierror.Unimplemented("ListLocations filter is not supported"))
 	}
 	ids, err := l.locations(req.GetName())
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	page, next, err := paging.Page("kms-locations:"+req.GetName(), ids, req.GetPageToken(), int(req.GetPageSize()))
+	ids, err = aipfilter.LocationIDs(req.GetFilter(), ids, func(id string) (*locationpb.Location, error) {
+		return kmsLocation(req.GetName(), id)
+	})
+	if err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	page, next, err := paging.Page("kms-locations:"+req.GetName()+"|"+req.GetFilter(), ids, req.GetPageToken(), int(req.GetPageSize()))
 	if err != nil {
 		return nil, apierror.Wrap(apierror.InvalidArgument("%v", err))
 	}

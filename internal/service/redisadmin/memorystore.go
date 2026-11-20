@@ -18,6 +18,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/cloudburrow/cloudburrow/internal/aipfilter"
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/paging"
 	"github.com/cloudburrow/cloudburrow/internal/store"
@@ -423,9 +424,6 @@ func (s *MemorystoreServer) ListInstances(ctx context.Context, req *memorystorep
 	if req.GetPageSize() < 0 {
 		return nil, apierror.InvalidArgument("page_size must not be negative")
 	}
-	if req.GetFilter() != "" || req.GetOrderBy() != "" {
-		return nil, apierror.Unimplemented("filter and order_by are not served for Memorystore instances here")
-	}
 	resp := &memorystorepb.ListInstancesResponse{}
 	c := s.api.valkey
 	if c == nil {
@@ -445,6 +443,19 @@ func (s *MemorystoreServer) ListInstances(ctx context.Context, req *memorystorep
 		names = append(names, n)
 	}
 	sort.Strings(names)
+	if req.GetFilter() != "" || req.GetOrderBy() != "" {
+		// AIP-160 filter and AIP-132 order_by (#1943).
+		all := make([]*memorystorepb.Instance, len(names))
+		for i, n := range names {
+			all[i] = byName[n]
+		}
+		items, next, err := aipfilter.ListPage("memorystore-instances:"+req.GetParent(), req.GetFilter(), req.GetOrderBy(), all, req.GetPageToken(), int(req.GetPageSize()))
+		if err != nil {
+			return nil, err
+		}
+		resp.Instances, resp.NextPageToken = items, next
+		return resp, nil
+	}
 	page, next, err := paging.Page("memorystore-instances:"+req.GetParent(), names, req.GetPageToken(), int(req.GetPageSize()))
 	if err != nil {
 		return nil, apierror.InvalidArgument("invalid page_token %q", req.GetPageToken())

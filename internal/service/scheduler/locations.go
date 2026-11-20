@@ -9,6 +9,7 @@ import (
 	locationpb "google.golang.org/genproto/googleapis/cloud/location"
 	"google.golang.org/grpc"
 
+	"github.com/cloudburrow/cloudburrow/internal/aipfilter"
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/locations"
 	"github.com/cloudburrow/cloudburrow/internal/paging"
@@ -72,20 +73,23 @@ func location(project, id string) *locationpb.Location {
 	return &locationpb.Location{Name: project + "/locations/" + id, LocationId: id, DisplayName: id}
 }
 
-// ListLocations lists the project's locations, paged. A filter is refused,
-// since none is applied.
+// ListLocations lists the project's locations, paged, with the mixin's
+// AIP-160 filter.
 func (l *LocationsServer) ListLocations(_ context.Context, req *locationpb.ListLocationsRequest) (*locationpb.ListLocationsResponse, error) {
 	if !projectRE.MatchString(req.GetName()) {
 		return nil, apierror.Wrap(apierror.InvalidArgument("name %q must be projects/{project}", req.GetName()))
-	}
-	if req.GetFilter() != "" {
-		return nil, apierror.Wrap(apierror.Unimplemented("ListLocations filter is not supported"))
 	}
 	ids, err := l.locations(req.GetName())
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	page, next, err := paging.Page("scheduler-locations:"+req.GetName(), ids, req.GetPageToken(), int(req.GetPageSize()))
+	ids, err = aipfilter.LocationIDs(req.GetFilter(), ids, func(id string) (*locationpb.Location, error) {
+		return location(req.GetName(), id), nil
+	})
+	if err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	page, next, err := paging.Page("scheduler-locations:"+req.GetName()+"|"+req.GetFilter(), ids, req.GetPageToken(), int(req.GetPageSize()))
 	if err != nil {
 		return nil, apierror.Wrap(apierror.InvalidArgument("%v", err))
 	}

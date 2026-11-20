@@ -328,7 +328,7 @@ func (s *Server) ListKeyRings(_ context.Context, req *kmspb.ListKeyRingsRequest)
 	if err := parseLocation("parent", req.GetParent()); err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	filter, err := parseFilter(req.GetFilter(), ringFilterFields)
+	filter, err := parseFilter(req.GetFilter(), &kmspb.KeyRing{})
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -345,7 +345,12 @@ func (s *Server) ListKeyRings(_ context.Context, req *kmspb.ListKeyRingsRequest)
 	if filter != nil {
 		var matched []string
 		for _, n := range names {
-			if filter.match(func(field string) (string, bool) { return n, field == "name" }) {
+			var r keyRing
+			found, err := s.get(dbKey(ringPrefix, n), &r)
+			if err != nil {
+				return nil, apierror.Wrap(err)
+			}
+			if found && filter.Match(toRing(r)) {
 				matched = append(matched, n)
 			}
 		}
@@ -680,7 +685,7 @@ func (s *Server) ListCryptoKeys(_ context.Context, req *kmspb.ListCryptoKeysRequ
 	if err := parseKeyRing("parent", req.GetParent()); err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	filter, err := parseFilter(req.GetFilter(), keyFilterFields)
+	filter, err := parseFilter(req.GetFilter(), &kmspb.CryptoKey{})
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -704,16 +709,14 @@ func (s *Server) ListCryptoKeys(_ context.Context, req *kmspb.ListCryptoKeysRequ
 			if err != nil {
 				return nil, apierror.Wrap(err)
 			}
-			if found && filter.match(func(field string) (string, bool) {
-				if field == "name" {
-					return n, true
-				}
-				if label, ok := strings.CutPrefix(field, "labels."); ok {
-					v, has := k.Labels[label]
-					return v, has
-				}
-				return "", false
-			}) {
+			if !found {
+				continue
+			}
+			pk, err := s.toKey(k)
+			if err != nil {
+				return nil, err
+			}
+			if filter.Match(pk) {
 				matched = append(matched, n)
 			}
 		}
@@ -845,7 +848,7 @@ func (s *Server) ListCryptoKeyVersions(_ context.Context, req *kmspb.ListCryptoK
 	if err := parseCryptoKey("parent", req.GetParent()); err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	filter, err := parseFilter(req.GetFilter(), versionFilterFields)
+	filter, err := parseFilter(req.GetFilter(), &kmspb.CryptoKeyVersion{})
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -871,12 +874,7 @@ func (s *Server) ListCryptoKeyVersions(_ context.Context, req *kmspb.ListCryptoK
 			if err != nil {
 				return nil, apierror.Wrap(err)
 			}
-			if found && filter.match(func(field string) (string, bool) {
-				if field == "state" {
-					return v.state().String(), true
-				}
-				return "", false
-			}) {
+			if found && filter.Match(s.toVersion(v)) {
 				matched = append(matched, n)
 			}
 		}
@@ -1530,13 +1528,6 @@ func orderedPage(scope string, names []string, less func(a, b string) bool, desc
 	}
 	return out, next, nil
 }
-
-// The fields each list can filter on, and with which operators (#408).
-var (
-	ringFilterFields    = fieldSupport{"name": {"=", "!=", ":"}}
-	keyFilterFields     = fieldSupport{"name": {"=", "!=", ":"}, "labels.": {"=", ":"}}
-	versionFilterFields = fieldSupport{"state": {"=", "!="}}
-)
 
 // Locations returns the Locations mixin over s's key rings (#1291).
 func (s *Server) Locations() locationpb.LocationsServer { return locationsServer{s: s} }

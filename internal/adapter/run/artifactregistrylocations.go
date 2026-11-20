@@ -9,6 +9,7 @@ import (
 	"google.golang.org/genproto/googleapis/api/annotations"
 	locationpb "google.golang.org/genproto/googleapis/cloud/location"
 
+	"github.com/cloudburrow/cloudburrow/internal/aipfilter"
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/locations"
 	"github.com/cloudburrow/cloudburrow/internal/paging"
@@ -63,10 +64,13 @@ func (arLocations) ListLocations(_ context.Context, req *locationpb.ListLocation
 	if !arProjectRE.MatchString(req.GetName()) {
 		return nil, apierror.Wrap(apierror.InvalidArgument("name %q must be projects/{project}", req.GetName()))
 	}
-	if req.GetFilter() != "" {
-		return nil, apierror.Wrap(apierror.Unimplemented("ListLocations filter is not supported"))
+	ids, err := aipfilter.LocationIDs(req.GetFilter(), ArtifactRegistryLocations, func(id string) (*locationpb.Location, error) {
+		return &locationpb.Location{Name: req.GetName() + "/locations/" + id, LocationId: id}, nil
+	})
+	if err != nil {
+		return nil, apierror.Wrap(err)
 	}
-	page, next, err := paging.Page("artifactregistry-locations:"+req.GetName(), ArtifactRegistryLocations, req.GetPageToken(), int(req.GetPageSize()))
+	page, next, err := paging.Page("artifactregistry-locations:"+req.GetName()+"|"+req.GetFilter(), ids, req.GetPageToken(), int(req.GetPageSize()))
 	if err != nil {
 		return nil, apierror.Wrap(apierror.InvalidArgument("%v", err))
 	}

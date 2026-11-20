@@ -24,6 +24,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/cloudburrow/cloudburrow/internal/aipfilter"
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
@@ -340,12 +341,6 @@ func EventarcTriggers(project string) []*eventarcpb.Trigger {
 
 // ListTriggers lists a location's triggers, by name.
 func (e *EventarcServer) ListTriggers(_ context.Context, req *eventarcpb.ListTriggersRequest) (*eventarcpb.ListTriggersResponse, error) {
-	if req.GetFilter() != "" {
-		return nil, apierror.Unimplemented("ListTriggers filter is not supported")
-	}
-	if ob := req.GetOrderBy(); ob != "" && ob != "name" {
-		return nil, apierror.Unimplemented("ListTriggers order_by %q is not supported: triggers are listed by name", ob)
-	}
 	eaState.mu.Lock()
 	var all []*eventarcpb.Trigger
 	for _, n := range sortedKeys(eaState.triggers) {
@@ -355,7 +350,13 @@ func (e *EventarcServer) ListTriggers(_ context.Context, req *eventarcpb.ListTri
 		}
 	}
 	eaState.mu.Unlock()
-	items, next, err := page(all, req.GetPageSize(), req.GetPageToken(), req.GetParent())
+	// AIP-160 filter (the reference's example is destination:gke) and an
+	// AIP-132 order_by such as "name desc, trigger_id".
+	all, err := aipfilter.List(req.GetFilter(), req.GetOrderBy(), all, aipfilter.Alias("trigger_id", "name"))
+	if err != nil {
+		return nil, err
+	}
+	items, next, err := page(all, req.GetPageSize(), req.GetPageToken(), req.GetParent()+"|"+req.GetFilter()+"|"+req.GetOrderBy())
 	if err != nil {
 		return nil, err
 	}
@@ -480,12 +481,13 @@ func (e *EventarcServer) GetProvider(_ context.Context, req *eventarcpb.GetProvi
 
 // ListProviders lists the providers served, by name.
 func (e *EventarcServer) ListProviders(_ context.Context, req *eventarcpb.ListProvidersRequest) (*eventarcpb.ListProvidersResponse, error) {
-	if req.GetFilter() != "" {
-		return nil, apierror.Unimplemented("ListProviders filter is not supported")
-	}
 	ps := eaProviders(req.GetParent())
 	sort.Slice(ps, func(i, j int) bool { return ps[i].GetName() < ps[j].GetName() })
-	items, next, err := page(ps, req.GetPageSize(), req.GetPageToken(), req.GetParent())
+	ps, err := aipfilter.List(req.GetFilter(), req.GetOrderBy(), ps, aipfilter.Alias("_id", "name"))
+	if err != nil {
+		return nil, err
+	}
+	items, next, err := page(ps, req.GetPageSize(), req.GetPageToken(), req.GetParent()+"|"+req.GetFilter()+"|"+req.GetOrderBy())
 	if err != nil {
 		return nil, err
 	}

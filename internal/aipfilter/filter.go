@@ -18,7 +18,8 @@
 //   - "=" on a string matches the whole value, with "*" as a wildcard
 //     (name = "*-prod"); ":" on a string is a case-insensitive substring
 //     match; FIELD:* is true when the field is set (non-empty for a
-//     repeated field or map), and MAP:KEY when the map has KEY;
+//     repeated field or map), MAP:KEY when the map has KEY, and
+//     MESSAGE:FIELD when that subfield of the message is set;
 //   - a repeated field matches when any element does (and != when none is
 //     equal);
 //   - enums compare by value name, timestamps as RFC 3339 strings (or a
@@ -198,12 +199,12 @@ type step struct {
 
 // restriction is FIELD OP VALUE over one resolved path.
 type restriction struct {
-	steps []step
-	op    string
-	any   bool  // FIELD:*
+	steps  []step
+	op     string
+	any    bool   // FIELD:*
 	hasKey string // MAP:KEY
-	keyOp bool
-	vals  []value // OR-ed
+	keyOp  bool
+	vals   []value // OR-ed
 }
 
 // value is a parsed comparison operand for the leaf's kind.
@@ -532,8 +533,8 @@ func (p *parser) errorf(format string, a ...any) error {
 	return apierror.InvalidArgument("invalid filter %q: "+format, append([]any{p.src}, a...)...)
 }
 
-func (p *parser) eof() bool     { return p.pos >= len(p.src) }
-func (p *parser) rest() string  { return p.src[p.pos:] }
+func (p *parser) eof() bool    { return p.pos >= len(p.src) }
+func (p *parser) rest() string { return p.src[p.pos:] }
 func (p *parser) peekByte() byte {
 	if p.eof() {
 		return 0
@@ -668,17 +669,35 @@ func (p *parser) parseSimple() (node, error) {
 const opChars = "=!<>:~"
 
 // readName reads a field path: text up to whitespace, an operator or a
-// parenthesis.
+// parenthesis. A map key may be bracketed and quoted, as in Artifact
+// Registry's annotations.["external_link"]; it reads as annotations.external_link.
 func (p *parser) readName() string {
-	start := p.pos
+	var b strings.Builder
 	for !p.eof() {
 		c := p.src[p.pos]
+		if c == '[' {
+			end := strings.IndexByte(p.src[p.pos:], ']')
+			if end < 0 {
+				break
+			}
+			key := strings.TrimSpace(p.src[p.pos+1 : p.pos+end])
+			if len(key) >= 2 && (key[0] == '"' || key[0] == '\'' || key[0] == '`') && key[len(key)-1] == key[0] {
+				key = key[1 : len(key)-1]
+			}
+			if !strings.HasSuffix(b.String(), ".") {
+				b.WriteByte('.')
+			}
+			b.WriteString(key)
+			p.pos += end + 1
+			continue
+		}
 		if isSpace(c) || strings.IndexByte(opChars+"()\"'", c) >= 0 {
 			break
 		}
+		b.WriteByte(c)
 		p.pos++
 	}
-	return p.src[start:p.pos]
+	return b.String()
 }
 
 func (p *parser) readOp() string {
@@ -816,6 +835,15 @@ func (p *parser) parseRestriction() (node, error) {
 		fd = fd.MapValue()
 	}
 	k := kindOf(fd)
+	if k == kMessage && op == ":" && len(raws) == 1 && !quoted[0] && !last.isKey {
+		// MESSAGE:FIELD is true when that subfield is set, as in Eventarc's
+		// documented destination:gke.
+		if sub := fieldByName(fd.Message(), raws[0]); sub != nil {
+			r.steps = append(r.steps, step{fd: sub})
+			r.any = true
+			return r, nil
+		}
+	}
 	switch {
 	case k == kMessage:
 		return nil, p.errorf("field %q is a message; compare one of its fields, or use %s:*", name, name)

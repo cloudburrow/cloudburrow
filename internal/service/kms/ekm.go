@@ -185,8 +185,6 @@ type EkmServer struct {
 // Ekm returns the EKM service over s's store.
 func (s *Server) Ekm() *EkmServer { return &EkmServer{s: s} }
 
-var ekmFilterFields = fieldSupport{"name": {"=", "!=", ":"}}
-
 func (e *EkmServer) CreateEkmConnection(ctx context.Context, req *kmspb.CreateEkmConnectionRequest) (*kmspb.EkmConnection, error) {
 	return retryChanged(func() (*kmspb.EkmConnection, error) { return e.createEkmConnection(ctx, req) })
 }
@@ -248,7 +246,7 @@ func (e *EkmServer) ListEkmConnections(_ context.Context, req *kmspb.ListEkmConn
 	if err := parseLocation("parent", req.GetParent()); err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	filter, err := parseFilter(req.GetFilter(), ekmFilterFields)
+	filter, err := parseFilter(req.GetFilter(), &kmspb.EkmConnection{})
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -263,7 +261,12 @@ func (e *EkmServer) ListEkmConnections(_ context.Context, req *kmspb.ListEkmConn
 	if filter != nil {
 		var matched []string
 		for _, n := range names {
-			if filter.match(func(field string) (string, bool) { return n, field == "name" }) {
+			var c ekmConnection
+			found, err := s.get(dbKey(ekmConnectionPrefix, n), &c)
+			if err != nil {
+				return nil, apierror.Wrap(err)
+			}
+			if found && filter.Match(c.proto()) {
 				matched = append(matched, n)
 			}
 		}
