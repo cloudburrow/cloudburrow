@@ -1,8 +1,11 @@
 package main
 
 import (
+	"github.com/cloudburrow/cloudburrow/internal/authplatform"
 	"github.com/cloudburrow/cloudburrow/internal/service/apikeys"
+	"github.com/cloudburrow/cloudburrow/internal/service/cloudquotas"
 	"github.com/cloudburrow/cloudburrow/internal/service/monitoring"
+	"github.com/cloudburrow/cloudburrow/internal/service/siteverification"
 
 	"context"
 	"errors"
@@ -30,6 +33,16 @@ type serviceUsageProvider struct {
 	// apiKeys is the API Keys API (#1915), whose keys the Credentials page
 	// lists and edits; nil says it is not served.
 	apiKeys *apikeys.Server
+	// quotas is the Cloud Quotas API (#2030), behind Quotas & System
+	// Limits; sites the Site Verification API, behind Domain verification.
+	quotas *cloudquotas.Server
+	sites  *siteverification.Server
+	// auth is Google Auth Platform's app and clients (#2030), behind the
+	// OAuth consent screen and OAuth 2.0 Client IDs.
+	auth *authplatform.Store
+	// metaAddr is the metadata server's address, which serves the OAuth
+	// endpoints.
+	metaAddr func() string
 }
 
 func (serviceUsageProvider) ID() string    { return "serviceusage" }

@@ -16510,6 +16510,129 @@
     ]
   },
   {
+    "Key": "cloudquotas",
+    "Title": "Cloud Quotas API (v1)",
+    "counts": {
+      "Verified": 8
+    },
+    "rows": [
+      {
+        "method": "google.api.cloudquotas.v1.CloudQuotas/CreateQuotaPreference",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudquotas2030_test.go:82 TestCloudQuotasLifecycle"
+        ]
+      },
+      {
+        "method": "google.api.cloudquotas.v1.CloudQuotas/GetQuotaInfo",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudquotas2030_test.go:82 TestCloudQuotasLifecycle"
+        ]
+      },
+      {
+        "method": "google.api.cloudquotas.v1.CloudQuotas/GetQuotaPreference",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudquotas2030_test.go:82 TestCloudQuotasLifecycle"
+        ]
+      },
+      {
+        "method": "google.api.cloudquotas.v1.CloudQuotas/ListQuotaInfos",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudquotas2030_test.go:82 TestCloudQuotasLifecycle"
+        ]
+      },
+      {
+        "method": "google.api.cloudquotas.v1.CloudQuotas/ListQuotaPreferences",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudquotas2030_test.go:82 TestCloudQuotasLifecycle"
+        ]
+      },
+      {
+        "method": "google.api.cloudquotas.v1.CloudQuotas/UpdateQuotaPreference",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudquotas2030_test.go:82 TestCloudQuotasLifecycle"
+        ]
+      },
+      {
+        "method": "google.api.cloudquotas.v1.QuotaAdjusterSettingsManager/GetQuotaAdjusterSettings",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudquotas2030_test.go:82 TestCloudQuotasLifecycle"
+        ]
+      },
+      {
+        "method": "google.api.cloudquotas.v1.QuotaAdjusterSettingsManager/UpdateQuotaAdjusterSettings",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudquotas2030_test.go:82 TestCloudQuotasLifecycle"
+        ]
+      }
+    ]
+  },
+  {
+    "Key": "siteverification",
+    "Title": "Site Verification API (v1)",
+    "counts": {
+      "Verified": 7
+    },
+    "rows": [
+      {
+        "method": "siteVerification.webResource.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/siteverification2030_test.go:63 TestSiteVerificationLifecycle"
+        ]
+      },
+      {
+        "method": "siteVerification.webResource.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/siteverification2030_test.go:63 TestSiteVerificationLifecycle"
+        ]
+      },
+      {
+        "method": "siteVerification.webResource.getToken",
+        "status": "Verified",
+        "tests": [
+          "test/compat/siteverification2030_test.go:63 TestSiteVerificationLifecycle"
+        ]
+      },
+      {
+        "method": "siteVerification.webResource.insert",
+        "status": "Verified",
+        "tests": [
+          "test/compat/siteverification2030_test.go:63 TestSiteVerificationLifecycle"
+        ]
+      },
+      {
+        "method": "siteVerification.webResource.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/siteverification2030_test.go:63 TestSiteVerificationLifecycle"
+        ]
+      },
+      {
+        "method": "siteVerification.webResource.patch",
+        "status": "Verified",
+        "tests": [
+          "test/compat/siteverification2030_test.go:63 TestSiteVerificationLifecycle"
+        ]
+      },
+      {
+        "method": "siteVerification.webResource.update",
+        "status": "Verified",
+        "tests": [
+          "test/compat/siteverification2030_test.go:63 TestSiteVerificationLifecycle"
+        ]
+      }
+    ]
+  },
+  {
     "Key": "workloadidentity",
     "Title": "Workload Identity Federation (IAM v1 pools, STS v1)",
     "counts": {

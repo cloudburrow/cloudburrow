@@ -23,6 +23,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/aipfilter"
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/paging"
+	"github.com/cloudburrow/cloudburrow/internal/quotalimit"
 )
 
 // API is google.cloud.security.privateca.v1.CertificateAuthorityService.
@@ -370,8 +371,11 @@ func (a *API) CreateCertificateAuthority(ctx context.Context, req *privatecapb.C
 		return nil, apierror.AlreadyExists("CertificateAuthority %s already exists", name)
 	}
 	loc, _, _ := strings.Cut(req.GetParent(), "/caPools/")
-	if len(sortedKeys(s.cas, loc+"/")) >= MaxCAsPerLocation {
-		return nil, status.Errorf(codes.ResourceExhausted, "quota exceeded: at most %d CAs per location per project", MaxCAsPerLocation)
+	// A Cloud Quotas preference for the location's region (#2030), when
+	// one is granted, else Google's default.
+	project, region := locationParts(loc)
+	if limit := quotalimit.Limit(project, "privateca.googleapis.com", "CAS-per-project-region", map[string]string{"region": region}, MaxCAsPerLocation); int64(len(sortedKeys(s.cas, loc+"/"))) >= limit {
+		return nil, status.Errorf(codes.ResourceExhausted, "quota exceeded: at most %d CAs per location per project", limit)
 	}
 	var (
 		key    crypto.Signer
@@ -998,4 +1002,13 @@ func (a *API) UpdateCertificate(_ context.Context, req *privatecapb.UpdateCertif
 		return nil, apierror.Wrap(err)
 	}
 	return clone(next), nil
+}
+
+// locationParts splits projects/{project}/locations/{location}.
+func locationParts(loc string) (project, location string) {
+	p := strings.Split(loc, "/")
+	if len(p) == 4 {
+		return p[1], p[3]
+	}
+	return "", ""
 }

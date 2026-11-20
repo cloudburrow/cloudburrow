@@ -104,6 +104,7 @@ func testGcloudSetup(t *testing.T, gdir, stateDir string) string {
 		"cloudidentity":          "http://127.0.0.1:9007/",
 		"policytroubleshooter":   "http://127.0.0.1:9007/",
 		"orgpolicy":              "http://127.0.0.1:9007/",
+		"cloudquotas":            "http://127.0.0.1:9007/",
 		"cloudscheduler":         "http://127.0.0.1:9008/",
 		"run":                    "http://run.localhost:9004/",
 		// Artifact Registry and Cloud Build on the Run port (#1347).

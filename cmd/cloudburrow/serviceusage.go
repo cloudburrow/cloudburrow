@@ -22,6 +22,10 @@ var serviceUsageAPIs = []struct {
 	{"", serviceusage.API{Name: "cloudresourcemanager.googleapis.com", Title: "Cloud Resource Manager API"}},
 	{"", serviceusage.API{Name: "serviceusage.googleapis.com", Title: "Service Usage API"}},
 	{"", serviceusage.API{Name: "apikeys.googleapis.com", Title: "API Keys API"}},
+	// The Cloud Quotas and Site Verification APIs (#2030), on the Resource
+	// Manager port.
+	{"", serviceusage.API{Name: "cloudquotas.googleapis.com", Title: "Cloud Quotas API"}},
+	{"", serviceusage.API{Name: "siteverification.googleapis.com", Title: "Google Site Verification API"}},
 	{config.ServiceStorage, serviceusage.API{Name: "storage.googleapis.com", Title: "Cloud Storage API"}},
 	// The Cloud Storage companion APIs (#1957), served with Cloud Storage.
 	{config.ServiceStorage, serviceusage.API{Name: "storagebatchoperations.googleapis.com", Title: "Storage Batch Operations API"}},

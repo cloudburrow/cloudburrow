@@ -47,20 +47,25 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
+	"github.com/cloudburrow/cloudburrow/internal/quotalimit"
 )
 
 const saPrefix = "resourcemanager/serviceaccounts/"
 
 // Service account limits, from Google's IAM pages.
 const (
-	maxServiceAccounts     = 100
-	maxSADisplayName       = 100
-	maxSADescription       = 256
-	saUndeletePeriod       = 30 * 24 * time.Hour
-	saDefaultPageSize      = 20
-	saMaxPageSize          = 100
-	serviceAccountDomain   = ".iam.gserviceaccount.com"
-	serviceAccountNotFound = "Unknown service account"
+	maxServiceAccounts = 100
+	// ServiceAccountQuotaService and ServiceAccountQuotaID name
+	// maxServiceAccounts in the Cloud Quotas API (#2030).
+	ServiceAccountQuotaService = "iam.googleapis.com"
+	ServiceAccountQuotaID      = "SERVICE-ACCOUNT-COUNT-per-project"
+	maxSADisplayName           = 100
+	maxSADescription           = 256
+	saUndeletePeriod           = 30 * 24 * time.Hour
+	saDefaultPageSize          = 20
+	saMaxPageSize              = 100
+	serviceAccountDomain       = ".iam.gserviceaccount.com"
+	serviceAccountNotFound     = "Unknown service account"
 )
 
 var saIDPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{4,28}[a-z0-9]$`)
@@ -269,9 +274,11 @@ func (r *Registry) CreateServiceAccount(req *adminpb.CreateServiceAccountRequest
 			return nil, apierror.AlreadyExists("Service account %s already exists within project projects/%s.", id, project)
 		}
 	}
-	if live >= maxServiceAccounts {
+	// The Cloud Quotas API's preference for Service Account Count, when
+	// one is granted (#2030), else Google's default.
+	if limit := quotalimit.Limit(project, ServiceAccountQuotaService, ServiceAccountQuotaID, nil, maxServiceAccounts); int64(live) >= limit {
 		return nil, &apierror.Error{Code: codes.ResourceExhausted, Reason: "rateLimitExceeded",
-			Message: fmt.Sprintf("Maximum number of service accounts on project reached (%d).", maxServiceAccounts)}
+			Message: fmt.Sprintf("Maximum number of service accounts on project reached (%d).", limit)}
 	}
 	a := &serviceAccount{Project: project, AccountID: id, UniqueID: uid, DisplayName: sa.GetDisplayName(),
 		Description: sa.GetDescription(), Etag: newSAEtag(), CreateTime: r.now().UTC()}
@@ -695,4 +702,22 @@ func checkSACustom(project, method string, res any) error {
 		return apierror.FailedPrecondition("%s", v.Singular())
 	}
 	return nil
+}
+
+// LiveServiceAccounts counts a project's service accounts that are not
+// deleted: the usage of Service Account Count (#2030).
+func (r *Registry) LiveServiceAccounts(project string) (int64, error) {
+	r.mu.Lock()
+	defer r.unlock()
+	all, err := r.accountsLocked(project)
+	if err != nil {
+		return 0, err
+	}
+	var n int64
+	for _, a := range all {
+		if !a.Deleted {
+			n++
+		}
+	}
+	return n, nil
 }

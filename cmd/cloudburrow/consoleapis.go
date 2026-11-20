@@ -33,6 +33,8 @@ var apiLibrary = map[string]apiLibraryInfo{
 	"cloudresourcemanager.googleapis.com": {"Management tools", "Creates, reads and updates projects, folders and the organization.", "resourcemanager"},
 	"serviceusage.googleapis.com":         {"Management tools", "Lists, enables and disables the APIs a project uses.", ""},
 	"apikeys.googleapis.com":              {"Security", "Manages the API keys of a project and their restrictions.", ""},
+	"cloudquotas.googleapis.com":          {"Management tools", "Lists the quotas of the APIs a project uses and adjusts them with quota preferences.", ""},
+	"siteverification.googleapis.com":     {"Developer tools", "Verifies that you own a website or a domain, and lists what you have verified.", ""},
 	"storage.googleapis.com":              {"Storage", "Stores and retrieves objects in buckets.", "storage"},
 	"pubsub.googleapis.com":               {"Big data", "Sends and receives messages between independent applications.", "pubsub"},
 	"cloudtasks.googleapis.com":           {"Developer tools", "Manages the execution of large numbers of distributed requests.", "tasks"},
@@ -269,7 +271,7 @@ func (p serviceUsageProvider) entries(project string, w *apiWindow) ([]apiEntry,
 //   - apis: every API, served (with its state and counters) or not;
 //   - api {service}: one API, with its methods' counters;
 //   - enable / disable {service}: services.enable and services.disable.
-func (p serviceUsageProvider) StudioCall(_ context.Context, project, call string, body json.RawMessage) (any, error) {
+func (p serviceUsageProvider) StudioCall(ctx context.Context, project, call string, body json.RawMessage) (any, error) {
 	if project == "" {
 		return nil, errors.New("choose a project first")
 	}
@@ -285,6 +287,12 @@ func (p serviceUsageProvider) StudioCall(_ context.Context, project, call string
 	}
 	if strings.HasPrefix(call, "key") {
 		return p.keysCall(project, call, body)
+	}
+	if strings.HasPrefix(call, "oauth-") {
+		return p.oauthCall(project, call, body)
+	}
+	if strings.HasPrefix(call, "quota") || strings.HasPrefix(call, "domain") {
+		return p.quotasCall(ctx, project, call, body)
 	}
 	switch call {
 	case "apis", "api":

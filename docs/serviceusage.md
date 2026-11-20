@@ -160,10 +160,27 @@ created" with no email. An API CloudBurrow serves but has not looked up is 501 n
 guessed agent (a unit test fails when a newly served API is missing from both lists); an API the
 instance does not serve is refused as `:enable` refuses it.
 
+## Quotas
+
+The Cloud Quotas API (`cloudquotas.googleapis.com` v1, #2030) is served on the Resource Manager
+port. Its quota infos are the quotas CloudBurrow describes for the APIs it serves
+(internal/service/cloudquotas/catalog.go), with Google's documented defaults; a quota preference is
+granted at once, as no capacity review is needed locally, and is refused by Google's two safety
+checks (a decrease below usage, or by more than 10%). The preferences are kept per project in the
+project registry's store. A quota marked enforced is read through internal/quotalimit by the API
+that enforces it, so a granted preference changes what that API allows: IAM's service accounts per
+project (default 100) and Certificate Authority Service's CAs per project and region (default 1000).
+Workflows' 10000 workflows per project is a system limit: listed, enforced, not adjustable. Rate
+quotas are described but not applied. The console's IAM & Admin > Quotas & System Limits page and
+each API's Quotas & System Limits tab read and edit them.
+
+The Site Verification API (`siteVerification` v1) is on the same port; see
+[compatibility.md](compatibility.md#site-verification--siteverification-v1).
+
 ## Not served
 
 - Folders and organizations as parents (501): the enabled set is kept per project.
-- Consumer quota, the rest of `v1beta1`, `v2` and `v2beta`: gcloud's `services` commands that call them
+- Service Usage's consumer quota (its quotas are the Cloud Quotas API's, above), the rest of `v1beta1`, `v2` and `v2beta`: gcloud's `services` commands that call them
   (`services quota`, `services policies`, group and dependency listings) are not served and fail
   locally, never at Google, through `gcloud-setup`'s override.
 

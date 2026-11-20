@@ -597,8 +597,9 @@ const ROUTES = [
     unavailable: "Essential Contacts is the Essential Contacts API's, which CloudBurrow does not serve: a local instance sends no notifications." },
   { path: "/iam-admin/asset-inventory", title: "Asset Inventory", service: null, requires: "iam", screen: "unavailable", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin",
     unavailable: "Asset Inventory is the Cloud Asset API's, which CloudBurrow does not serve. The toolbar's search finds every served resource, and each product's list holds its own." },
-  { path: "/iam-admin/quotas", title: "Quotas & System Limits", service: null, requires: "iam", screen: "unavailable", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin",
-    unavailable: "Quotas are the Cloud Quotas API's, which CloudBurrow does not serve. The limits Google documents per API are enforced by the services themselves." },
+  // Quotas & System Limits (#2030): the Cloud Quotas API's quota infos and
+  // preferences, over every API, with Edit quotas.
+  { path: "/iam-admin/quotas", title: "Quotas & System Limits", service: "serviceusage", screen: "apis-quotas", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin" },
   { path: "/iam-admin/pam", title: "Privileged Access Manager", service: null, requires: "iam", screen: "unavailable", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin",
     unavailable: "Privileged Access Manager (entitlements and grants) is the Privileged Access Manager API's, which CloudBurrow does not serve. Grant a role on the IAM page; an IAM condition on request.time makes it temporary." },
   { path: "/iam-admin/principal-access-boundary", title: "Principal Access Boundary", service: null, requires: "iam", screen: "unavailable", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin",
@@ -707,15 +708,18 @@ const ROUTES = [
     product: "serviceusage", productTitle: "APIs & Services" },
   { path: "/apis/credentials", service: "serviceusage", screen: "apis-credentials", icon: "serviceusage", title: "Credentials", section: "Management tools",
     product: "serviceusage", productTitle: "APIs & Services" },
-  { path: "/apis/credentials/consent", title: "OAuth consent screen", service: null, requires: "serviceusage", screen: "unavailable", icon: "serviceusage",
-    section: "Management tools", product: "serviceusage", productTitle: "APIs & Services",
-    unavailable: "The OAuth consent screen is Google Auth Platform's (Branding, Audience, Clients, Data Access, Verification Center), which CloudBurrow does not serve: a local instance signs no user in with OAuth, and its APIs take a service account key or no credentials at all." },
+  // The OAuth consent screen (#2030): Google Auth Platform's Overview,
+  // Branding, Audience, Clients and Data Access over the local app and
+  // clients (internal/authplatform).
+  { path: "/apis/credentials/consent", title: "OAuth consent screen", service: "serviceusage", screen: "auth-platform", icon: "serviceusage",
+    section: "Management tools", product: "serviceusage", productTitle: "APIs & Services" },
   { path: "/apis/credentials/agreements", title: "Page usage agreements", service: null, requires: "serviceusage", screen: "unavailable", icon: "serviceusage",
     section: "Management tools", product: "serviceusage", productTitle: "APIs & Services",
     unavailable: "Page usage agreements are the terms of service a project has accepted for Google's APIs. A local instance has no terms to accept." },
-  { path: "/apis/credentials/domainverification", title: "Domain verification", service: null, requires: "serviceusage", screen: "unavailable", icon: "serviceusage",
-    section: "Management tools", product: "serviceusage", productTitle: "APIs & Services",
-    unavailable: "Domain verification proves to Google that a project owns a domain, for push notifications and OAuth redirects. A local instance reaches no outside domain, so there is nothing to verify." },
+  // Domain verification (#2030): the Site Verification API's verified
+  // sites and domains, with Add domain.
+  { path: "/apis/credentials/domainverification", title: "Domain verification", service: "serviceusage", screen: "apis-domains", icon: "serviceusage",
+    section: "Management tools", product: "serviceusage", productTitle: "APIs & Services" },
   // Service Usage operations (#1530): what operations.list answers, with
   // Delete. Google's menu has no such page; it is kept after Google's.
   { path: "/apis/operations", service: "serviceusage-operations", icon: "serviceusage", title: "Operations", kind: "Operation", section: "Management tools",
@@ -8161,6 +8165,9 @@ function dispatch(view) {
   if (match.screen === "apis-dashboard" && !resourcePath.length) return renderAPIsDashboard(view);
   if (match.screen === "apis-dashboard" && resourcePath[0] === "api" && resourcePath[1]) return renderAPIPage(view, resourcePath[1], resourcePath[2] || "overview");
   if (match.screen === "apis-library") return renderAPILibrary(view, resourcePath[0] || "");
+  if (match.screen === "apis-quotas") return renderQuotasPage(view);
+  if (match.screen === "auth-platform") return renderAuthPlatform(view, resourcePath[0] || "overview", resourcePath[1] || "");
+  if (match.screen === "apis-domains") return renderDomainVerification(view);
   if (match.screen === "apis-credentials" && !resourcePath.length) return renderAPICredentials(view);
   if (match.screen === "apis-credentials" && resourcePath[0] === "key" && resourcePath[1]) return renderAPIKeyPage(view, resourcePath[1]);
   if (match.screen === "apis-credentials" && resourcePath[0] === "restore") return renderAPIKeysRestore(view);
@@ -18523,15 +18530,138 @@ async function renderAPIPage(view, name, tab) {
             el("td", { text: apisLatency(m.p50Ms, m) }), el("td", { text: apisLatency(m.p95Ms, m) })))
             : [el("tr", {}, el("td", { colspan: "5", text: "No calls yet." }))])))));
   } else if (tab === "quotas") {
-    setChildren(panel, el("div", { class: "state", id: "api-quotas" },
-      el("h2", { text: "Not available locally" }),
-      el("p", { text: "Quotas are the Cloud Quotas and Service Usage consumer quota APIs', which CloudBurrow does not serve. " +
-        "The per-request limits Google documents for this API, such as sizes and counts, are enforced by the local service itself." })));
+    setChildren(panel, quotasBlock(a.name, redraw));
   } else {
     setChildren(panel, apisCredentialSections("api-credentials"));
   }
   setChildren(view, pageHeader(a.title, `${a.name} · project ${project}`, { back: "/apis" + scopeSearch(), actions }), strip, panel);
   announce(`${a.title}: ${API_TABS.find(([id]) => id === tab)[1]}`);
+}
+
+// quotasBlock is Quotas & System Limits (#2030): the Cloud Quotas API's
+// quota infos of one API (service) or of every one, each row's value and
+// the project's preference, with Edit quotas on an adjustable quota.
+function quotasBlock(service, redraw) {
+  const id = service ? "api-quotas" : "quotas";
+  const box = el("div", { id }, loadingState(3, { what: "quotas" }));
+  const filter = el("input", { type: "search", class: "filter", id: `${id}-filter`, placeholder: "Filter", "aria-label": "Filter quotas and system limits" });
+  let rows = [];
+  const dims = (d) => Object.keys(d || {}).length ? Object.entries(d).map(([k, v]) => `${k}: ${v}`).join(", ") : "";
+  const draw = () => {
+    const q = filter.value.trim().toLowerCase();
+    const shown = rows.filter((r) => !q || [r.name, r.service, r.metric, dims(r.dimensions)].some((t) => (t || "").toLowerCase().includes(q)));
+    const head = ["Type", ...(service ? [] : ["Service"]), "Name", "Dimensions (e.g. location)", "Value", "Adjustable", "Enforced locally", "Actions"];
+    setChildren(table, el("thead", {}, el("tr", {}, ...head.map((h) => el("th", { scope: "col", text: h })))),
+      el("tbody", {}, ...(shown.length ? shown.map((r) => el("tr", {},
+        el("td", { text: r.type }),
+        service ? null : el("td", { class: "mono", text: r.service }),
+        el("td", {}, el("span", { text: r.name }), el("br"), el("span", { class: "form-help mono", text: r.metric })),
+        el("td", { text: dims(r.dimensions) }),
+        el("td", { text: apisNumber(r.value) + (r.value !== r.default ? ` (default ${apisNumber(r.default)})` : "") }),
+        el("td", { text: r.adjustable ? "Yes" : "No" }),
+        el("td", { text: r.enforced ? "Yes" : "No" }),
+        el("td", {}, r.adjustable ? el("button", { type: "button", class: "secondary", text: "Edit quota",
+          "aria-label": `Edit quota ${r.name}${dims(r.dimensions) ? " " + dims(r.dimensions) : ""}`,
+          onclick: () => quotaEdit(r, reload) }) : null)))
+        : [el("tr", {}, el("td", { colspan: String(head.length), text: rows.length ? "No quota matches the filter." : "This API has no quota CloudBurrow describes." }))])));
+  };
+  const table = el("table", { class: "table", id: `${id}-table` });
+  const reload = async () => {
+    try {
+      const data = await apisCall("quotas", { service: service || "" });
+      rows = data.quotas || [];
+      setChildren(box, el("p", { class: "form-help", text: "The Cloud Quotas API's quotas for this project, with Google's documented defaults. " +
+        "A quota marked Enforced locally refuses calls past its value, so a granted preference changes what the API allows; the others are described, not applied." }),
+        el("div", { class: "filter-bar" }, filter), el("div", { class: "table-wrap" }, table));
+      draw();
+    } catch (err) {
+      setChildren(box, errorState("Could not read the quotas", err.message, reload));
+    }
+  };
+  filter.addEventListener("input", draw);
+  reload();
+  return box;
+}
+
+function quotaEdit(r, after) {
+  const region = (r.dimensions || {}).region || "";
+  mrForm({
+    id: "quota-edit", title: "Edit quotas", label: "Submit request",
+    note: `${r.name} (${r.service})${region ? `, region ${region}` : ""}: current value ${r.value}. A local instance grants the new value at once; ` +
+      "a decrease below current usage, or by more than 10%, is refused as Google's safety checks refuse it.",
+    fields: [
+      { name: "value", label: "New value", type: "text", required: true, default: String(r.value) },
+      ...(r.dimensionKeys && r.dimensionKeys.includes("region") && !region ? [{ name: "region", label: "Region (empty for every region)", type: "text" }] : []),
+      { name: "justification", label: "Request description", type: "textarea" },
+    ],
+    submit: async (v) => {
+      const out = await apisCall("quota-set", { service: r.service, quotaId: r.quotaId, region: region || v.region || "", value: v.value, justification: v.justification || "" });
+      notify(`Quota ${r.name} is now ${out.granted}`);
+      after();
+    },
+  });
+}
+
+async function renderQuotasPage(view) {
+  const project = currentProject();
+  if (!project) return apisNeedProject(view, "Quotas & System Limits");
+  setChildren(view, pageHeader("Quotas & System Limits", `Project ${project}`), quotasBlock("", () => renderQuotasPage(view)));
+  announce("Quotas & System Limits");
+}
+
+// renderDomainVerification is Domain verification (#2030): the Site
+// Verification API's verified sites and domains, Add domain (a token,
+// then Verify) and Remove.
+async function renderDomainVerification(view) {
+  const project = currentProject();
+  if (!project) return apisNeedProject(view, "Domain verification");
+  const body = el("div", { id: "domains-body" }, loadingState(3, { what: "verified domains" }));
+  const reload = async () => {
+    let data;
+    try { data = await apisCall("domains"); } catch (err) { setChildren(body, errorState("Could not list verified domains", err.message, reload)); return; }
+    const list = data.resources || [];
+    setChildren(body,
+      el("p", { class: "form-help", text: "Sites and domains verified through the Site Verification API. A local instance checks a FILE or META token on a site served on this machine; " +
+        "DNS records are not looked up, as the instance makes no calls off the machine." }),
+      el("div", { class: "table-wrap" }, el("table", { class: "table", id: "domains-table" },
+        el("thead", {}, el("tr", {}, ...["Domain", "Type", "Owners", "Actions"].map((h) => el("th", { scope: "col", text: h })))),
+        el("tbody", {}, ...(list.length ? list.map((r) => el("tr", {},
+          el("td", { class: "mono", text: r.site.identifier }), el("td", { text: r.site.type }), el("td", { text: (r.owners || []).join(", ") }),
+          el("td", {}, el("button", { type: "button", class: "secondary", text: "Remove", "aria-label": `Remove ${r.site.identifier}`,
+            onclick: () => mrForm({ id: "domain-remove", title: `Remove ${r.site.identifier}?`, label: "Remove", destructive: true, fields: [],
+              note: `You are no longer a verified owner of ${r.site.identifier}.`,
+              submit: async () => { await apisCall("domain-delete", { id: r.id }); notify(`Removed ${r.site.identifier}`); reload(); } }) }))))
+          : [el("tr", {}, el("td", { colspan: "4", text: "No domain is verified." }))])))));
+  };
+  const add = el("button", { type: "button", class: "header-button primary", id: "domains-add", html: ICON_ADD,
+    onclick: () => domainAdd(reload) }, el("span", { text: "Add domain" }));
+  setChildren(view, pageHeader("Domain verification", `Project ${project}`, { actions: [add, refreshButton(() => reload())] }), body);
+  reload();
+  announce("Domain verification");
+}
+
+function domainAdd(after) {
+  mrForm({
+    id: "domain-add", title: "Add domain", label: "Get token",
+    note: "Enter the site's URL (ending in a slash). The next step shows the token to place: a file in the site's top directory (FILE) or a meta tag on its home page (META).",
+    fields: [
+      { name: "identifier", label: "Site URL", type: "text", required: true, default: "http://localhost:8080/" },
+      { name: "method", label: "Verification method", type: "select", required: true, options: ["FILE", "META"], default: "FILE" },
+    ],
+    submit: async (v) => {
+      const t = await apisCall("domain-token", { type: "SITE", identifier: v.identifier, method: v.method });
+      setTimeout(() => mrForm({
+        id: "domain-verify", title: "Verify ownership", label: "Verify", fields: [],
+        note: v.method === "FILE" ? `Serve ${v.identifier}${t.token} with the content "google-site-verification: ${t.token}", then choose Verify.`
+          : `Add ${t.token} to the head of ${v.identifier}, then choose Verify.`,
+        submit: async () => {
+          await apisCall("domain-verify", { type: "SITE", identifier: v.identifier, method: v.method });
+          notify(`Verified ${v.identifier}`);
+          after();
+        },
+      }), 0);
+    },
+  });
 }
 
 const API_CATEGORIES = ["Big data", "Compute", "Databases", "Developer tools", "Management tools", "Security", "Storage"];
@@ -18626,7 +18756,7 @@ function apisCredentialSections(idPrefix) {
   return el("div", { class: "api-credentials", id: idPrefix },
     el("h2", { text: "API Keys" }), apiKeysTable(idPrefix),
     el("h2", { text: "OAuth 2.0 Client IDs" }),
-    el("p", { class: "unavailable", id: `${idPrefix}-oauth`, text: "Not available locally: OAuth clients are Google Auth Platform's, which CloudBurrow does not serve." }),
+    oauthClientsTable(`${idPrefix}-oauth`),
     el("h2", { text: "Service Accounts" }), accounts);
 }
 
@@ -18641,7 +18771,7 @@ function renderAPICredentials(view) {
       onclick: () => { menu.hidden = true; trigger.setAttribute("aria-expanded", "false"); apiKeyCreate(project); } }),
     // Google's label, its reason as the tooltip and description, as every
     // row menu draws an item this instance cannot perform (#1868).
-    unavailableMenuItem("OAuth client ID", "Not available locally: OAuth clients are Google Auth Platform's, which CloudBurrow does not serve."),
+    el("a", { class: "overflow-item", role: "menuitem", id: "credentials-create-oauth", href: "/apis/credentials/consent/clients/create" + scopeSearch(), text: "OAuth client ID" }),
     served.has("iam-service-accounts")
       ? el("a", { class: "overflow-item", role: "menuitem", href: "/iam-admin/serviceaccounts/create" + scopeSearch(), text: "Service account" })
       : unavailableMenuItem("Service account", "Not available locally: this instance was not started with IAM service accounts."));
@@ -18653,6 +18783,217 @@ function renderAPICredentials(view) {
   setChildren(view, pageHeader("Credentials", "", { actions: [el("div", { class: "menu-anchor" }, trigger, menu), restore] }),
     el("p", { class: "subtitle", text: "Create credentials to access your enabled APIs." }),
     apisCredentialSections("credentials"));
+}
+
+// Google Auth Platform (#2030): the OAuth consent screen's tabs and the
+// OAuth 2.0 Client IDs, over the local app and clients. Google's pages are
+// console-only (the IAP OAuth Admin API that made brands and clients was
+// shut down on 2026-03-19), so these are the only way to make them.
+
+const AUTH_TABS = [["overview", "Overview"], ["branding", "Branding"], ["audience", "Audience"], ["clients", "Clients"], ["scopes", "Data Access"]];
+const AUTH_TYPES = [["WEB", "Web application"], ["ANDROID", "Android"], ["IOS", "iOS"], ["CHROME_EXTENSION", "Chrome Extension"],
+  ["TV_LIMITED_INPUT", "TVs and Limited Input devices"], ["DESKTOP", "Desktop app"]];
+const authLines = (v) => (v || "").split(/[\n,]/).map((x) => x.trim()).filter(Boolean);
+
+function oauthClientsTable(id, opts = {}) {
+  const box = el("div", { id }, loadingState(2));
+  apisCall(opts.deleted ? "oauth-clients" : "oauth-app", { deleted: !!opts.deleted }).then((data) => {
+    const list = data.clients || [];
+    setChildren(box, el("div", { class: "table-wrap" }, el("table", { class: "table", id: `${id}-table` },
+      el("thead", {}, el("tr", {}, ...["Name", "Creation date", "Type", "Client ID", "Actions"].map((h) => el("th", { scope: "col", text: h })))),
+      el("tbody", {}, ...(list.length ? list.map((c) => el("tr", {},
+        el("td", {}, opts.deleted ? el("span", { text: c.name }) : el("a", { href: `/apis/credentials/consent/clients/${encodeURIComponent(c.clientId)}${scopeSearch()}`, text: c.name })),
+        el("td", { text: formatTime(c.createTime) }), el("td", { text: c.typeLabel }), el("td", { class: "mono", text: c.clientId }),
+        el("td", {}, opts.deleted
+          ? el("button", { type: "button", class: "secondary", text: "Restore", "aria-label": `Restore ${c.name}`,
+            onclick: async () => { await apisCall("oauth-client-restore", { id: c.clientId }); notify(`Restored ${c.name}`); opts.after && opts.after(); } })
+          : el("button", { type: "button", class: "secondary", text: "Delete", "aria-label": `Delete OAuth client ${c.name}`,
+            onclick: () => oauthClientDelete(c, () => (opts.after ? opts.after() : navigate(location.pathname + location.search))) }))))
+        : [el("tr", {}, el("td", { colspan: "5", text: opts.deleted ? "No deleted OAuth clients." : "No OAuth clients to display" }))])))),
+    opts.deleted ? null : el("p", {}, el("a", { href: "/apis/credentials/consent/clients/create" + scopeSearch(), id: `${id}-create`, text: "Create client" })));
+  }).catch((err) => setChildren(box, el("p", { class: "unavailable", text: err.message })));
+  return box;
+}
+
+function oauthClientDelete(c, after) {
+  mrForm({ id: "oauth-client-delete", title: `Delete OAuth client ${c.name}?`, label: "Delete", destructive: true, fields: [],
+    note: "Applications using this client can no longer sign users in, and its refresh tokens stop working. You can restore it for 30 days from Deleted credentials on the Clients tab.",
+    submit: async () => { await apisCall("oauth-client-delete", { id: c.clientId }); notify(`Deleted ${c.name}`); after(); } });
+}
+
+function oauthSecretShown(title, clientId, secret) {
+  const { dialog, close } = openModal({ labelledBy: "oauth-created-title" });
+  const field = (label, id, value) => el("label", { class: "form-field" }, el("span", { class: "form-label", text: label }),
+    el("input", { type: "text", id, class: "mono", readonly: "readonly", value, "aria-label": label }));
+  dialog.append(el("div", { class: "modal-body", id: "oauth-created" },
+    el("h2", { id: "oauth-created-title", text: title }),
+    el("p", { class: "form-help", text: secret ? "The client secret is shown only now: store it somewhere safe, such as Secret Manager. Afterwards only its last four characters are shown."
+      : "This type of client has no secret." }),
+    field("Client ID", "oauth-created-id", clientId), secret ? field("Client secret", "oauth-created-secret", secret) : null,
+    el("div", { class: "modal-actions" }, el("button", { type: "button", class: "primary", id: "oauth-created-close", text: "OK", onclick: () => close() }))));
+  dialog.querySelector("input").focus();
+}
+
+function authBrandForm(id, b, project, onSaved, only) {
+  const v = b || {};
+  const all = {
+    branding: [
+      { name: "appName", label: "App name", type: "text", required: true, default: v.appName || "" },
+      { name: "supportEmail", label: "User support email", type: "text", required: true, default: v.supportEmail || "" },
+      { name: "homePage", label: "Application home page", type: "text", default: v.homePage || "" },
+      { name: "privacyPolicy", label: "Application privacy policy link", type: "text", default: v.privacyPolicy || "" },
+      { name: "termsOfService", label: "Application terms of service link", type: "text", default: v.termsOfService || "" },
+      { name: "authorizedDomains", label: "Authorized domains (one per line)", type: "textarea", default: (v.authorizedDomains || []).join("\n") },
+      { name: "developerEmails", label: "Developer contact information (email addresses, one per line)", type: "textarea", required: true, default: (v.developerEmails || []).join("\n") },
+    ],
+    audience: [
+      { name: "userType", label: "User type", type: "select", required: true, options: ["EXTERNAL", "INTERNAL"], optionLabels: { EXTERNAL: "External", INTERNAL: "Internal" }, default: v.userType || "EXTERNAL" },
+      { name: "publishingStatus", label: "Publishing status", type: "select", required: true, options: ["TESTING", "IN_PRODUCTION"], optionLabels: { TESTING: "Testing", IN_PRODUCTION: "In production" }, default: v.publishingStatus || "TESTING" },
+      { name: "testUsers", label: "Test users (email addresses, one per line)", type: "textarea", default: (v.testUsers || []).join("\n") },
+    ],
+    scopes: [
+      { name: "scopes", label: "Scopes (one per line)", type: "textarea", default: (v.scopes || ["openid", "https://www.googleapis.com/auth/userinfo.email"]).join("\n") },
+    ],
+  };
+  const fields = only ? all[only] : [...all.branding, ...all.audience.slice(0, 1)];
+  const form = buildCreateForm({ label: "Save", fields });
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  const submit = el("button", { type: "submit", class: "primary", id: `${id}-save`, text: b ? "Save" : "Create" });
+  return el("form", { id, novalidate: true, onsubmit: async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    if (!form.validate()) return;
+    const f = form.values();
+    const next = { ...v };
+    for (const [k, val] of Object.entries(f)) next[k] = ["authorizedDomains", "developerEmails", "testUsers", "scopes"].includes(k) ? authLines(val) : val;
+    submit.disabled = true;
+    try { await apisCall("oauth-app-set", { brand: next }); notify(b ? "Saved" : "Google Auth Platform configured"); onSaved(); }
+    catch (err) { error.textContent = err.message; error.hidden = false; }
+    submit.disabled = false;
+  } }, error, ...form.nodes, el("div", { class: "form-actions" }, submit));
+}
+
+async function renderAuthPlatform(view, tab, sub) {
+  const project = currentProject();
+  if (!project) return apisNeedProject(view, "Google Auth Platform");
+  if (!AUTH_TABS.some(([t]) => t === tab)) tab = "overview";
+  setChildren(view, pageHeader("Google Auth Platform", ""), loadingState(3, { what: "the OAuth app" }));
+  let data;
+  try { data = await apisCall("oauth-app"); } catch (err) {
+    setChildren(view, pageHeader("Google Auth Platform", ""), errorState("Could not read the OAuth app", err.message));
+    return;
+  }
+  const redraw = () => renderAuthPlatform(view, tab, sub);
+  const b = data.brand;
+  const base = "/apis/credentials/consent";
+  const strip = el("div", { class: "tab-strip", role: "tablist", "aria-label": "Google Auth Platform sections" },
+    ...AUTH_TABS.map(([id, label]) => el("a", { role: "tab", id: `auth-tab-${id}`, class: "tab" + (id === tab ? " is-selected" : ""),
+      "aria-selected": String(id === tab), href: `${base}/${id}${scopeSearch()}`, text: label })));
+  const panel = el("div", { role: "tabpanel", id: "auth-panel", "aria-labelledby": `auth-tab-${tab}` });
+  if (!b) {
+    setChildren(panel, el("h2", { text: "Google Auth Platform not configured yet" }),
+      el("p", { text: "Get started: give the app's information, its audience and a contact. Clients can be created once the app is configured." }),
+      authBrandForm("auth-get-started", null, project, redraw));
+  } else if (tab === "overview") {
+    setChildren(panel, el("dl", { class: "api-facts", id: "auth-overview" },
+      ...[["App name", b.appName], ["User support email", b.supportEmail], ["User type", b.userType === "INTERNAL" ? "Internal" : "External"],
+        ["Publishing status", b.publishingStatus === "TESTING" ? "Testing" : "In production"], ["OAuth clients", String((data.clients || []).length)],
+        ["Authorization endpoint", `${data.base}${data.authorizePath}`],
+        ["Token endpoint", `${data.base}/token`], ["Revocation endpoint", `${data.base}${data.revokePath}`]]
+        .flatMap(([k, val]) => [el("dt", { text: k }), el("dd", { class: k.endsWith("endpoint") ? "mono" : "", text: val })])),
+      el("p", { class: "form-help", text: "A local client signs in the instance's user: point your OAuth library's authorization and token URIs at these endpoints. " +
+        "Brand verification and the Verification Center are Google's review, which a local app does not need." }));
+  } else if (tab === "branding") {
+    setChildren(panel, el("h2", { text: "Branding" }), authBrandForm("auth-branding", b, project, redraw, "branding"));
+  } else if (tab === "audience") {
+    setChildren(panel, el("h2", { text: "Audience" }),
+      el("p", { class: "form-help", text: "An External app in Testing can only be used by its test users; Internal is your organization's users." }),
+      authBrandForm("auth-audience", b, project, redraw, "audience"));
+  } else if (tab === "scopes") {
+    setChildren(panel, el("h2", { text: "Data Access" }), authBrandForm("auth-scopes", b, project, redraw, "scopes"));
+  } else if (sub === "create") {
+    setChildren(panel, authClientForm(null, async (c) => {
+      const out = await apisCall("oauth-client-create", { client: c });
+      navigate(`${base}/clients/${encodeURIComponent(out.client.clientId)}${scopeSearch()}`);
+      oauthSecretShown("OAuth client created", out.client.clientId, out.secret);
+    }));
+  } else if (sub === "deleted") {
+    setChildren(panel, el("h2", { text: "Deleted credentials" }), oauthClientsTable("auth-deleted", { deleted: true, after: redraw }));
+  } else if (sub) {
+    let c;
+    try { c = await apisCall("oauth-client", { id: sub }); } catch (err) { setChildren(panel, errorState("Could not read the client", err.message)); }
+    if (c) setChildren(panel, authClientPage(c, redraw));
+  } else {
+    const create = el("a", { class: "header-button primary", id: "auth-clients-create", href: `${base}/clients/create${scopeSearch()}`, html: ICON_ADD }, el("span", { text: "Create client" }));
+    const deleted = el("a", { class: "header-button", id: "auth-clients-deleted", href: `${base}/clients/deleted${scopeSearch()}`, text: "Deleted credentials" });
+    setChildren(panel, el("div", { class: "title-actions" }, create, deleted), oauthClientsTable("auth-clients", { after: redraw }));
+  }
+  setChildren(view, pageHeader("Google Auth Platform", b ? b.appName : "", {}), strip, panel);
+  announce(`Google Auth Platform: ${AUTH_TABS.find(([t]) => t === tab)[1]}`);
+}
+
+function formatTime(t) {
+  return t ? new Date(t).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" }) : "";
+}
+
+function authClientForm(c, save) {
+  const v = c || {};
+  let type = v.type || "WEB";
+  const typeSelect = el("select", { id: "auth-client-type", "aria-label": "Application type", disabled: c ? "disabled" : null },
+    ...AUTH_TYPES.map(([t, l]) => el("option", { value: t, text: l, selected: t === type ? "selected" : null })));
+  const slot = el("div", { id: "auth-client-fields" });
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  let form;
+  const draw = () => {
+    const fields = [{ name: "name", label: "Name", type: "text", required: true, default: v.name || `${AUTH_TYPES.find(([t]) => t === type)[1]} client 1` }];
+    if (type === "WEB") fields.push({ name: "javascriptOrigins", label: "Authorized JavaScript origins (one per line)", type: "textarea", default: (v.javascriptOrigins || []).join("\n") },
+      { name: "redirectUris", label: "Authorized redirect URIs (one per line)", type: "textarea", default: (v.redirectUris || []).join("\n") });
+    if (type === "ANDROID") fields.push({ name: "packageName", label: "Package name", type: "text", required: true, default: v.packageName || "" },
+      { name: "sha1", label: "SHA-1 certificate fingerprint", type: "text", required: true, default: v.sha1 || "" });
+    if (type === "IOS") fields.push({ name: "bundleId", label: "Bundle ID", type: "text", required: true, default: v.bundleId || "" },
+      { name: "appStoreId", label: "App Store ID", type: "text", default: v.appStoreId || "" }, { name: "teamId", label: "Team ID", type: "text", default: v.teamId || "" });
+    if (type === "CHROME_EXTENSION") fields.push({ name: "extensionId", label: "Item ID", type: "text", required: true, default: v.extensionId || "" });
+    form = buildCreateForm({ label: "Save", fields });
+    setChildren(slot, ...form.nodes);
+  };
+  typeSelect.addEventListener("change", () => { type = typeSelect.value; draw(); });
+  draw();
+  const submit = el("button", { type: "submit", class: "primary", id: "auth-client-save", text: c ? "Save" : "Create" });
+  return el("form", { id: "auth-client-form", novalidate: true, onsubmit: async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    if (!form.validate()) return;
+    const f = form.values();
+    const out = { ...v, ...f, type, javascriptOrigins: authLines(f.javascriptOrigins), redirectUris: authLines(f.redirectUris) };
+    delete out.typeLabel; delete out.secrets;
+    submit.disabled = true;
+    try { await save(out); } catch (err) { error.textContent = err.message; error.hidden = false; }
+    submit.disabled = false;
+  } }, el("h2", { text: c ? `Client ${v.name}` : "Create OAuth client ID" }), error,
+    el("label", { class: "form-field" }, el("span", { class: "form-label", text: "Application type" }), typeSelect), slot,
+    el("div", { class: "form-actions" }, submit));
+}
+
+function authClientPage(c, redraw) {
+  const secrets = (c.secrets || []);
+  const secretRows = el("div", { class: "table-wrap" }, el("table", { class: "table", id: "auth-secrets" },
+    el("thead", {}, el("tr", {}, ...["Client secret", "Creation date", "Status", "Actions"].map((h) => el("th", { scope: "col", text: h })))),
+    el("tbody", {}, ...(secrets.length ? secrets.map((sec) => el("tr", {},
+      el("td", { class: "mono", text: `****${sec.last4}` }), el("td", { text: formatTime(sec.createTime) }), el("td", { text: sec.enabled ? "Enabled" : "Disabled" }),
+      el("td", {}, el("button", { type: "button", class: "secondary", text: sec.enabled ? "Disable" : "Enable", "aria-label": `${sec.enabled ? "Disable" : "Enable"} secret ending ${sec.last4}`,
+        onclick: async () => { await apisCall("oauth-secret-set", { id: c.clientId, secretId: sec.id, action: sec.enabled ? "disable" : "enable" }); redraw(); } }),
+      sec.enabled ? null : el("button", { type: "button", class: "secondary", text: "Delete", "aria-label": `Delete secret ending ${sec.last4}`,
+        onclick: async () => { await apisCall("oauth-secret-set", { id: c.clientId, secretId: sec.id, action: "delete" }); redraw(); } }))))
+      : [el("tr", {}, el("td", { colspan: "4", text: "This type of client has no secret." }))]))));
+  const addSecret = el("button", { type: "button", class: "secondary", id: "auth-secret-add", text: "Add secret",
+    disabled: secrets.length >= 2 || !["WEB", "DESKTOP", "TV_LIMITED_INPUT"].includes(c.type) ? "disabled" : null,
+    onclick: async () => { const out = await apisCall("oauth-secret-add", { id: c.clientId }); oauthSecretShown("Secret added", c.clientId, out.secret); redraw(); } });
+  return el("div", { id: "auth-client" },
+    el("dl", { class: "api-facts" }, ...[["Client ID", c.clientId], ["Type", c.typeLabel], ["Creation date", formatTime(c.createTime)]]
+      .flatMap(([k, val]) => [el("dt", { text: k }), el("dd", { class: k === "Client ID" ? "mono" : "", id: k === "Client ID" ? "auth-client-id" : null, text: val })])),
+    el("h2", { text: "Client secrets" }), secretRows, addSecret,
+    authClientForm(c, async (next) => { await apisCall("oauth-client-update", { id: c.clientId, client: next }); notify("Saved"); redraw(); }),
+    el("button", { type: "button", class: "secondary danger", id: "auth-client-delete", text: "Delete", onclick: () => oauthClientDelete(c, () => navigate("/apis/credentials/consent/clients" + scopeSearch())) }));
 }
 
 // API keys (#1915): the Credentials page's table, Create credentials > API

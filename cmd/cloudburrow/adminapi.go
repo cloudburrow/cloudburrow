@@ -6,10 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/cloudburrow/cloudburrow/internal/authplatform"
 	"github.com/cloudburrow/cloudburrow/internal/service/apikeys"
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
+	"github.com/cloudburrow/cloudburrow/internal/service/cloudquotas"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
+	"github.com/cloudburrow/cloudburrow/internal/service/siteverification"
 	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 	"github.com/cloudburrow/cloudburrow/internal/version"
@@ -63,6 +66,12 @@ type adminDeps struct {
 	// apiKeys is the API Keys API (#1915), for its per-project keys'
 	// reset; read at reset time for the same reason.
 	apiKeys func() *apikeys.Server
+	// cloudQuotas and siteVerify are the Cloud Quotas and Site
+	// Verification APIs (#2030).
+	cloudQuotas func() *cloudquotas.Server
+	siteVerify  func() *siteverification.Server
+	// authPlatform is Google Auth Platform's apps and clients (#2030).
+	authPlatform func() *authplatform.Store
 	// storageJobs is the Cloud Storage companion APIs (#1957), for their
 	// per-project reset; read at reset time.
 	storageJobs func() *storageJobs
@@ -180,6 +189,10 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 	if d.apiKeys != nil {
 		// Each project's API keys (#1915), kept in the registry's store.
 		api.RegisterResetter(&apiKeysResetter{srv: d.apiKeys})
+	}
+	if d.cloudQuotas != nil {
+		api.RegisterResetter(&cloudQuotasResetter{srv: d.cloudQuotas}, &siteVerificationResetter{srv: d.siteVerify},
+			&authPlatformResetter{store: d.authPlatform})
 	}
 	if d.run != nil {
 		// Repositories and projects' settings (#1543), served beside Cloud Run.
