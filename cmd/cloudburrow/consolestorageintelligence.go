@@ -120,12 +120,12 @@ func (p storageIntelligenceProvider) List(ctx context.Context, project string) (
 		// Enabled or Disabled by its effective edition (#1843).
 		if scope == "projects/"+project {
 			status := "Disabled"
-			if e := c.Effective.EffectiveEdition; e == "STANDARD" || e == "TRIAL" {
+			if intelligenceEnabled(c) {
 				status = "Enabled"
 			}
 			listing.Summary = []console.PropertyGroup{{Heading: "Overview", Properties: []console.Property{
 				{Label: "Resource", Value: scope},
-				{Label: "Status", Value: status},
+				{Label: "Status", Value: status, Action: disableLink(status), ActionText: disableText(status)},
 				{Label: "Edition", Value: orDash(c.Effective.EffectiveEdition)},
 				{Label: "Bucket filters", Value: orDash(filterText(c))},
 			}}}
@@ -144,6 +144,22 @@ func (p storageIntelligenceProvider) List(ctx context.Context, project string) (
 	}
 	listing.Total = len(listing.Items)
 	return listing, nil
+}
+
+// disableLink and disableText put Disable beside an enabled Status, as
+// Google's Overview has it (#2047).
+func disableLink(status string) string {
+	if status == "Enabled" {
+		return intelligenceDisableID
+	}
+	return ""
+}
+
+func disableText(status string) string {
+	if status == "Enabled" {
+		return "Disable"
+	}
+	return ""
 }
 
 // intelligenceEditions are the editions a row can be set to, by action ID.
@@ -201,12 +217,169 @@ func (p storageIntelligenceProvider) DetailActions(ctx context.Context, project 
 	return intelligenceActions(c.EditionConfig, true)
 }
 
-// ActAt implements console.PathActor.
+// ActAt implements console.PathActor. With no path it is the list
+// screen's: Configure Storage Intelligence and the Overview's Disable.
 func (p storageIntelligenceProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
+	if len(path) == 0 {
+		switch action {
+		case intelligenceConfigureID:
+			return p.configure(ctx, project, values)
+		case intelligenceDisableID:
+			return p.ActWith(ctx, project, "projects/"+project, "disable", nil)
+		}
+		return fmt.Errorf("%s is not an action of the Storage Intelligence page", action)
+	}
 	if len(path) != 1 {
 		return fmt.Errorf("unknown action %q", action)
 	}
 	return p.ActWith(ctx, project, path[0], action, values)
+}
+
+// Google's Configuration page (#2047,
+// configure-and-manage-storage-intelligence): Enable Storage Intelligence
+// opens the Configure Storage Intelligence dialog, the resource, Continue,
+// optional bucket filters by location and by name (a regular expression
+// at a time, Add regular expression), then Enable this configuration; and
+// the Overview's Disable beside Status asks for Disable typed.
+const (
+	intelligenceConfigureID = "configure"
+	intelligenceDisableID   = "disableproject"
+	intelligenceResource    = "Resource"
+	intelligenceFilters     = "Bucket filters"
+)
+
+// The bucket filter types.
+const (
+	filterNone    = "none"
+	filterInclude = "include"
+	filterExclude = "exclude"
+)
+
+// ListActions implements console.ListActor.
+func (p storageIntelligenceProvider) ListActions(ctx context.Context, project string) []console.Action {
+	if project == "" {
+		return nil
+	}
+	scopes := p.scopes(project)
+	labels := map[string]string{}
+	for _, sc := range scopes {
+		labels[sc] = sc
+	}
+	labels["projects/"+project] = "Project " + project
+	labels[resourcemanager.OrganizationName] = "Organization (" + resourcemanager.OrganizationName + ")"
+	kinds := func(noun string) (map[string]string, []string) {
+		return map[string]string{
+			filterNone:    "No " + noun + " filter",
+			filterInclude: "Include buckets " + map[string]string{"location": "in these locations", "name": "whose names match"}[noun],
+			filterExclude: "Exclude buckets " + map[string]string{"location": "in these locations", "name": "whose names match"}[noun],
+		}, []string{filterNone, filterInclude, filterExclude}
+	}
+	locLabels, locOpts := kinds("location")
+	nameLabels, nameOpts := kinds("name")
+	out := []console.Action{{ID: intelligenceConfigureID, Label: "Enable Storage Intelligence",
+		Title: "Configure Storage Intelligence", Steps: "continue", Submit: "Enable this configuration",
+		Fields: []console.Field{
+			{Name: "resource", Label: "Resource", Type: "select", Required: true, Section: intelligenceResource,
+				Options: scopes, OptionLabels: labels, Default: "projects/" + project,
+				Help: "The project, folder or organization to configure. Its edition becomes Standard; " +
+					"what it sets is inherited by the resources under it that inherit from their parent."},
+			{Name: "locationFilter", Label: "Filter by location", Type: "select", Section: intelligenceFilters,
+				Options: locOpts, OptionLabels: locLabels, Default: filterNone},
+			{Name: "locations", Label: "Locations", Type: console.GroupFieldType, Section: intelligenceFilters,
+				AddLabel: "Add location", ShowWhen: "locationFilter=" + filterInclude + "|" + filterExclude,
+				Group: []console.Field{{Name: "location", Label: "Location", Type: "text", Pattern: `[a-zA-Z0-9-]+`,
+					Help: "A Cloud Storage location, such as us-central1, us or eu."}}},
+			{Name: "bucketFilter", Label: "Filter by bucket name", Type: "select", Section: intelligenceFilters,
+				Options: nameOpts, OptionLabels: nameLabels, Default: filterNone},
+			{Name: "regexes", Label: "Bucket name regular expressions", Type: console.GroupFieldType, Section: intelligenceFilters,
+				AddLabel: "Add regular expression", ShowWhen: "bucketFilter=" + filterInclude + "|" + filterExclude,
+				Group: []console.Field{{Name: "regex", Label: "Regular expression", Type: "text",
+					Help: "An RE2 expression matched against bucket names, such as ^logs-."}}},
+		}}}
+	var c intelligenceJSON
+	if err := storageCall(ctx, http.MethodGet, p.url("projects/"+project), nil, &c); err == nil && intelligenceEnabled(c) {
+		out = append(out, intelligenceDisableAction(intelligenceDisableID, true))
+	}
+	return out
+}
+
+// intelligenceEnabled is the Overview's Status: Enabled while the effective
+// edition is Standard or a trial.
+func intelligenceEnabled(c intelligenceJSON) bool {
+	e := c.Effective.EffectiveEdition
+	return e == "STANDARD" || e == "TRIAL"
+}
+
+// intelligenceDisableAction is Disable, confirmed by typing Disable.
+func intelligenceDisableAction(id string, linked bool) console.Action {
+	return console.Action{ID: id, Label: "Disable", Linked: linked, ConfirmTitle: "Disable Storage Intelligence?",
+		ConfirmStyle: console.DeleteConfirmDisable, Submit: "Disable",
+		Confirm: "The edition becomes Disabled: Storage Intelligence stops for this resource, and the resources " +
+			"under it that inherit from their parent."}
+}
+
+// configure is Enable this configuration: the resource's edition STANDARD
+// with the dialog's filter, in one Update...IntelligenceConfig.
+func (p storageIntelligenceProvider) configure(ctx context.Context, project string, values map[string]string) error {
+	if project == "" {
+		return errors.New("choose a project")
+	}
+	resource := strings.TrimSpace(values["resource"])
+	known := false
+	for _, s := range p.scopes(project) {
+		known = known || s == resource
+	}
+	if !known {
+		return fmt.Errorf("%q is not a resource this page configures", resource)
+	}
+	rows := func(field, sub string) ([]string, error) {
+		parsed, err := console.ParseGroup(values[field])
+		if err != nil {
+			return nil, err
+		}
+		var out []string
+		for _, r := range parsed {
+			if v := strings.TrimSpace(r[sub]); v != "" {
+				out = append(out, v)
+			}
+		}
+		return out, nil
+	}
+	filter := map[string]any{}
+	add := func(kind, field, sub, included, excluded, key, noun string) error {
+		if kind == "" || kind == filterNone {
+			return nil
+		}
+		vals, err := rows(field, sub)
+		if err != nil {
+			return err
+		}
+		if len(vals) == 0 {
+			return fmt.Errorf("add a %s, or choose no filter", noun)
+		}
+		switch kind {
+		case filterInclude:
+			filter[included] = map[string]any{key: vals}
+		case filterExclude:
+			filter[excluded] = map[string]any{key: vals}
+		default:
+			return fmt.Errorf("%q is not a filter type", kind)
+		}
+		return nil
+	}
+	if err := add(values["locationFilter"], "locations", "location", "includedCloudStorageLocations",
+		"excludedCloudStorageLocations", "locations", "location"); err != nil {
+		return err
+	}
+	if err := add(values["bucketFilter"], "regexes", "regex", "includedCloudStorageBuckets",
+		"excludedCloudStorageBuckets", "bucketIdRegexes", "regular expression"); err != nil {
+		return err
+	}
+	body := map[string]any{"editionConfig": "STANDARD"}
+	if len(filter) > 0 {
+		body["filter"] = filter
+	}
+	return storageCall(ctx, http.MethodPatch, p.url(resource)+"?updateMask="+urlpkg.QueryEscape("edition_config,filter"), body, nil)
 }
 
 // Actions implements console.Actor.
@@ -220,9 +393,14 @@ func intelligenceActions(edition string, page bool) []console.Action {
 	r := console.Resource{Status: edition}
 	var out []console.Action
 	for _, e := range intelligenceEditions {
-		if e.edition != r.Status {
-			out = append(out, console.Action{ID: e.id, Label: e.label})
+		if e.edition == r.Status {
+			continue
 		}
+		if e.id == "disable" {
+			out = append(out, intelligenceDisableAction(e.id, false))
+			continue
+		}
+		out = append(out, console.Action{ID: e.id, Label: e.label})
 	}
 	if page && (r.Status == "STANDARD" || r.Status == "TRIAL") {
 		out = append(out, console.Action{ID: "filter", Label: "Edit filter", Fields: []console.Field{
@@ -297,5 +475,6 @@ func (p storageIntelligenceProvider) ActWith(ctx context.Context, project, name,
 var (
 	_ console.Actor     = storageIntelligenceProvider{}
 	_ console.PathActor = storageIntelligenceProvider{}
+	_ console.ListActor = storageIntelligenceProvider{}
 	_ console.Driller   = storageIntelligenceProvider{}
 )

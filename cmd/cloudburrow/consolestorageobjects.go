@@ -209,7 +209,7 @@ func (p storageProvider) DetailActions(ctx context.Context, project string, path
 		return p.softDeletedActions(ctx, path)
 	}
 	if path[0] == softBucketPage {
-		return p.softBucketActions(ctx, path)
+		return p.softBucketActions(ctx, project, path)
 	}
 	if path[0] == managedFolderPage {
 		return p.managedFolderActions(ctx, path)
@@ -286,7 +286,7 @@ func (p storageProvider) ActAt(ctx context.Context, project string, path []strin
 		return err
 	}
 	if len(path) > 0 && path[0] == softBucketPage {
-		return p.restoreSoftBucket(ctx, path, action)
+		return p.restoreSoftBucket(ctx, path, action, values)
 	}
 	if action == "createsimplefolder" {
 		return p.createSimpleFolder(ctx, path, values)

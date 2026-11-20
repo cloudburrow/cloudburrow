@@ -3675,7 +3675,14 @@ function openAskedListAction(route, data, onDone) {
   here.searchParams.delete("action");
   history.replaceState(history.state, "", here.pathname + here.search);
   const opened = (data.actions || []).find((a) => a.id === asked && !a.href);
-  if (opened) openActionForm(route, [], opened, onDone, data.noun || route.title);
+  if (!opened) return;
+  // One with nothing to fill in is performed as its button would be,
+  // confirmed first where it asks (#2047: Storage Intelligence's Disable).
+  if ((opened.fields || []).some((f) => f.type !== "hidden")) {
+    openActionForm(route, [], opened, onDone, data.noun || route.title);
+  } else {
+    runAction(route, [], opened, onDone, NO_ROW, data.noun || route.title);
+  }
 }
 
 // detailHref is the address of one row's contents.
@@ -4670,7 +4677,9 @@ function listActionButtons(route, data, onDone) {
   // A list action the listing also offers on its selection (#1864) is
   // drawn once, as the selection's button.
   const onSelection = new Set((data.selectActions || []).map((a) => a.id));
-  return (data.actions || []).filter((a) => !onSelection.has(a.id)).map((a) => el("button", {
+  // A Linked one is opened from where the page links to it (#2047:
+  // Disable beside Storage Intelligence's Status), not as a button.
+  return (data.actions || []).filter((a) => !onSelection.has(a.id) && !a.linked).map((a) => el("button", {
     type: "button", class: "secondary", id: `list-action-${a.id}`, text: a.label,
     // One that is a link opens its page: the Datastore page's Indexes
     // (#1846).
@@ -9081,7 +9090,11 @@ function notify(message, kind = "info") {
 // "confirm" for nothing typed, the dialog's button alone, as a Cloud Storage
 // bucket's or a Cloud Run service's does.
 function confirmDestructive({ title, detail, confirmWord, onConfirm, confirmLabel = "Delete", consequence = "This cannot be undone.", style = "name" }) {
-  if (style === "delete" || style === "DELETE" || style === "Delete") confirmWord = style;
+  // "Disable" for that word, as Storage Intelligence's Disable asks (#2047);
+  // "prefix10" for the name's first 10 characters, as Cloud Storage's
+  // Delete HMAC key asks for the access ID's.
+  if (style === "delete" || style === "DELETE" || style === "Delete" || style === "Disable") confirmWord = style;
+  if (style === "prefix10") confirmWord = String(confirmWord).slice(0, 10);
   const typed = style !== "confirm";
   return new Promise((settle) => {
     const error = el("p", { class: "form-error", role: "alert", hidden: true });

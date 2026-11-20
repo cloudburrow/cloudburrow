@@ -279,16 +279,16 @@ func (p storageProvider) softBucketDetail(ctx context.Context, path []string) (c
 		Trail: []console.Crumb{{Label: "Soft-deleted buckets", Path: nil}, {Label: b.Name}}}, nil
 }
 
-func (p storageProvider) softBucketActions(ctx context.Context, path []string) []console.Action {
+func (p storageProvider) softBucketActions(ctx context.Context, project string, path []string) []console.Action {
 	if len(path) != 3 {
 		return nil
 	}
-	return storageDeletedProvider{endpoint: p.endpoint}.DetailActions(ctx, "", path[1:])
+	return storageDeletedProvider{endpoint: p.endpoint}.DetailActions(ctx, project, path[1:])
 }
 
-func (p storageProvider) restoreSoftBucket(ctx context.Context, path []string, action string) error {
+func (p storageProvider) restoreSoftBucket(ctx context.Context, path []string, action string, values map[string]string) error {
 	if len(path) != 3 {
 		return errors.New("a soft-deleted bucket is addressed generation/name")
 	}
-	return storageDeletedProvider{endpoint: p.endpoint}.ActAt(ctx, "", path[1:], action, nil)
+	return storageDeletedProvider{endpoint: p.endpoint}.ActAt(ctx, "", path[1:], action, values)
 }

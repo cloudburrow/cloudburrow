@@ -12,9 +12,14 @@ package main
 //     the key's secret, so it goes to the console's create response as a
 //     console.OneTime and nowhere else: not the operations ledger, not a log
 //     entry, not the listing, and no page of its own.
-//   - Activate and Deactivate are hmacKeys.update against the etag just read.
-//   - Delete is hmacKeys.delete, offered only on an INACTIVE key: the API
-//     refuses an ACTIVE one, so the row does not offer it.
+//   - The Interoperability tab lists the service accounts with keys, each
+//     opening its keys (#2047), as Google's "Access keys for service
+//     accounts" does.
+//   - A key's state is a button: clicked, it is hmacKeys.update against the
+//     etag just read, to Inactive after a confirmation, to Active at once.
+//   - Delete is hmacKeys.delete, offered only on an INACTIVE key (the API
+//     refuses an ACTIVE one), confirmed by the access ID's first 10
+//     characters.
 
 import (
 	"bytes"
@@ -25,6 +30,8 @@ import (
 	"io"
 	"net/http"
 	urlpkg "net/url"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
@@ -129,10 +136,9 @@ func (p storageSettingsProvider) hmacKeys(ctx context.Context, project string) (
 
 func (p storageSettingsProvider) List(ctx context.Context, project string) (console.Listing, error) {
 	listing := console.Listing{
-		Columns:      []string{"Service account", "Created", "Updated"},
-		NameColumn:   "Access ID",
-		Noun:         "HMAC keys",
-		AlwaysStatus: true,
+		Columns:    []string{"HMAC keys", "Active keys"},
+		NameColumn: "Service account",
+		Noun:       "service accounts",
 	}
 	if project == "" {
 		listing.Prompt = "Cloud Storage settings are per project. Choose one in the toolbar."
@@ -156,21 +162,83 @@ func (p storageSettingsProvider) List(ctx context.Context, project string) (cons
 		{ID: "interoperability", Label: "Interoperability"},
 	}
 	listing.ListTab = "interoperability"
-	listing.Note = "Interoperability: the project's HMAC keys. A key's secret is shown once, when it " +
-		"is created; a key can be deleted once it is inactive."
+	// Google's Interoperability tab (#2047, managing-hmackeys): the
+	// Service account HMAC section's "Access keys for service accounts"
+	// lists the service accounts with keys, each opening its keys.
+	listing.TableTitle = "Access keys for service accounts"
+	listing.Note = "Service account HMAC: the service accounts with HMAC keys in this project. Open one to see " +
+		"its keys, change a key's state by clicking it, or delete an inactive key. A key's secret is shown once, when it is created."
+	total, active := map[string]int{}, map[string]int{}
+	var order []string
 	for _, k := range keys {
+		if total[k.ServiceAccountEmail] == 0 {
+			order = append(order, k.ServiceAccountEmail)
+		}
+		total[k.ServiceAccountEmail]++
+		if k.State == hmacActive {
+			active[k.ServiceAccountEmail]++
+		}
+	}
+	sort.Strings(order)
+	for _, sa := range order {
 		listing.Items = append(listing.Items, console.Resource{
-			Name:   k.AccessID,
-			Status: k.State,
-			Fields: map[string]string{
-				"Service account": k.ServiceAccountEmail,
-				"Created":         shortTime(k.TimeCreated),
-				"Updated":         shortTime(k.Updated),
-			},
+			Name:   sa,
+			Fields: map[string]string{"HMAC keys": strconv.Itoa(total[sa]), "Active keys": strconv.Itoa(active[sa])},
 		})
 	}
 	listing.Total = len(listing.Items)
 	return listing, nil
+}
+
+// Detail implements console.Driller: a service account's HMAC keys, each
+// with its state as a button that changes it and, once inactive, Delete.
+func (p storageSettingsProvider) Detail(ctx context.Context, project string, path []string) (console.Detail, error) {
+	if len(path) > 1 {
+		return console.DeeperThan(1, path), nil
+	}
+	if project == "" {
+		return console.Detail{Prompt: "Choose a project in the toolbar."}, nil
+	}
+	keys, err := p.hmacKeys(ctx, project)
+	if err != nil {
+		return console.Detail{Unavailable: err.Error()}, nil
+	}
+	sec := console.Section{ID: "keys", Label: "HMAC keys", Listing: console.Listing{
+		Columns: []string{"State", "Created", "Updated"}, NameColumn: "Access ID", Noun: "HMAC keys",
+		Items: []console.Resource{},
+		Note:  "Click a key's state to change it: deactivating asks first. Delete a key once it is inactive, typing the first 10 characters of its access ID.",
+	}}
+	for _, k := range keys {
+		if k.ServiceAccountEmail != path[0] {
+			continue
+		}
+		sec.Listing.Items = append(sec.Listing.Items, console.Resource{
+			Name: k.AccessID,
+			Fields: map[string]string{"State": hmacStateLabel(k.State),
+				"Created": shortTime(k.TimeCreated), "Updated": shortTime(k.Updated)},
+			Target:  []string{path[0], k.AccessID},
+			Actions: hmacActions(k.State),
+		})
+	}
+	if len(sec.Listing.Items) == 0 {
+		return console.Detail{Unavailable: path[0] + " has no HMAC keys in this project."}, nil
+	}
+	sec.Listing.Total = len(sec.Listing.Items)
+	return console.Detail{Title: path[0], Summary: []console.Property{
+		{Label: "Service account", Value: path[0]},
+		{Label: "HMAC keys", Value: strconv.Itoa(len(sec.Listing.Items))},
+	}, Sections: []console.Section{sec}}, nil
+}
+
+// hmacStateLabel is a key's state as Google's console words it.
+func hmacStateLabel(state string) string {
+	switch state {
+	case hmacActive:
+		return "Active"
+	case hmacInactive:
+		return "Inactive"
+	}
+	return state
 }
 
 // Create key.
@@ -237,36 +305,55 @@ func (p storageSettingsProvider) CreateOneTime(ctx context.Context, project stri
 
 // Activate, Deactivate and Delete.
 
-// hmacActions are what a key in a state can have done to it: Delete only when
-// INACTIVE, as the API requires.
+// hmacActions are a key's buttons: its state, clicked to change it, and
+// Delete only when INACTIVE, as the API requires. Google's console asks
+// first only on the way to Inactive, and has Delete confirmed by the access
+// ID's first 10 characters (managing-hmackeys, #2047).
 func hmacActions(state string) []console.Action {
 	switch state {
 	case hmacActive:
-		return []console.Action{{ID: "deactivate", Label: "Deactivate"}}
+		return []console.Action{{ID: "deactivate", Label: "Active", Button: true,
+			ConfirmTitle: "Deactivate HMAC key?", Submit: "Deactivate", ConfirmStyle: console.DeleteConfirmClick,
+			Confirm: "Requests signed with this key are refused until it is activated again."}}
 	case hmacInactive:
 		return []console.Action{
-			{ID: "activate", Label: "Activate"},
-			{ID: "delete", Label: "Delete", Destructive: true},
+			{ID: "activate", Label: "Inactive", Button: true},
+			{ID: "delete", Label: "Delete", Button: true, Destructive: true, ConfirmTitle: "Delete HMAC key?",
+				ConfirmStyle: console.DeleteConfirmPrefix10},
 		}
 	}
 	return nil
 }
 
-// Actions implements console.Actor.
-func (storageSettingsProvider) Actions(r console.Resource) []console.Action {
-	return hmacActions(r.Status)
+// DetailActions implements console.PathActor: a key's, read now.
+func (p storageSettingsProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
+	if len(path) != 2 || project == "" {
+		return nil
+	}
+	var k hmacKeyJSON
+	if err := storageCall(ctx, http.MethodGet, p.keyURL(project, path[1]), nil, &k); err != nil || k.ServiceAccountEmail != path[0] {
+		return nil
+	}
+	return hmacActions(k.State)
 }
 
-// Act implements console.Actor. The key is read first and the action checked
-// against its current state, so the route can do no more than the row it
-// drew offered.
-func (p storageSettingsProvider) Act(ctx context.Context, project, name, action string) error {
+// ActAt implements console.PathActor on [service account, access ID]. The
+// key is read first and the action checked against its current state, so
+// the route can do no more than the row it drew offered.
+func (p storageSettingsProvider) ActAt(ctx context.Context, project string, path []string, action string, _ map[string]string) error {
 	if project == "" {
 		return errors.New("choose a project")
 	}
+	if len(path) != 2 {
+		return errors.New("an HMAC key is addressed serviceAccount/accessId")
+	}
+	name := path[1]
 	var k hmacKeyJSON
 	if err := storageCall(ctx, http.MethodGet, p.keyURL(project, name), nil, &k); err != nil {
 		return err
+	}
+	if k.ServiceAccountEmail != path[0] {
+		return fmt.Errorf("%s is not a key of %s", name, path[0])
 	}
 	offered := false
 	for _, a := range hmacActions(k.State) {
@@ -293,5 +380,6 @@ func (p storageSettingsProvider) Act(ctx context.Context, project, name, action 
 
 var (
 	_ console.OneTimeCreator = storageSettingsProvider{}
-	_ console.Actor          = storageSettingsProvider{}
+	_ console.PathActor      = storageSettingsProvider{}
+	_ console.Driller        = storageSettingsProvider{}
 )

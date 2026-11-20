@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	urlpkg "net/url"
 	"strings"
 	"testing"
 	"time"
@@ -74,9 +75,11 @@ func settingsActionIDs(actions []console.Action) string {
 // TestStorageSettingsHMACKeysThroughTheConsole (#792): the Settings screen
 // names the project's service account from serviceAccount.get. Create key
 // answers with the key's 40-character secret, and the key is listed by the
-// official client's ListHMACKeys as ACTIVE. Its row offers Deactivate and no
-// Delete; Deactivate makes the client read INACTIVE, and the row then offers
-// Activate and Delete; a delete through the route while the key is ACTIVE
+// official client's ListHMACKeys as ACTIVE. Interoperability lists the
+// service account with its key counts, and the account's page lists the key
+// (#2047), its state a button offering Deactivate and no Delete; Deactivate
+// makes the client read INACTIVE, and the row then offers Activate and
+// Delete; a delete through the route while the key is ACTIVE
 // is refused before the API is asked. Delete removes it from the client's
 // list. The secret is in the create response and in nothing read after it:
 // the listing, the operations ledger, the logs, the Request Log and every
@@ -101,9 +104,27 @@ func TestStorageSettingsHMACKeysThroughTheConsole(t *testing.T) {
 		_ = json.Unmarshal([]byte(body), &rows)
 		return l, rows.Items
 	}
+	// keys are the rows of the service account's page (#2047).
+	keys := func() []hmacRow {
+		t.Helper()
+		q := urlpkg.Values{"project": {project}, "name": {sa}}
+		code, body := consoleCall(t, srv, http.MethodGet, "/api/detail/storage-settings?"+q.Encode(), "")
+		later = append(later, body)
+		var d struct {
+			Unavailable string
+			Sections    []struct{ Listing struct{ Items []hmacRow } }
+		}
+		if err := json.Unmarshal([]byte(body), &d); code != http.StatusOK || err != nil {
+			t.Fatalf("the service account's page = %d (%v): %s", code, err, body)
+		}
+		if d.Unavailable != "" || len(d.Sections) != 1 {
+			return nil
+		}
+		return d.Sections[0].Listing.Items
+	}
 	act := func(name, action string) (int, string) {
 		t.Helper()
-		b, _ := json.Marshal(map[string]string{"Name": name, "Action": action})
+		b, _ := json.Marshal(map[string]any{"Path": []string{sa, name}, "Action": action})
 		code, body := consoleCall(t, srv, http.MethodPost, "/api/actions/storage-settings?project="+project, string(b))
 		later = append(later, body)
 		return code, body
@@ -164,13 +185,18 @@ func TestStorageSettingsHMACKeysThroughTheConsole(t *testing.T) {
 	}
 
 	_, rows = list()
-	if len(rows) != 1 || rows[0].Name != id || rows[0].Status != "ACTIVE" || rows[0].Fields["Service account"] != sa {
-		t.Fatalf("the screen lists %+v", rows)
+	if len(rows) != 1 || rows[0].Name != sa || rows[0].Fields["HMAC keys"] != "1" || rows[0].Fields["Active keys"] != "1" {
+		t.Fatalf("Access keys for service accounts lists %+v; want %s with its one active key", rows, sa)
 	}
-	if got := settingsActionIDs(rows[0].Actions); got != "deactivate" {
-		t.Errorf("an ACTIVE key's row offers %q; want Deactivate and no Delete", got)
+	rows = keys()
+	if len(rows) != 1 || rows[0].Name != id || rows[0].Fields["State"] != "Active" {
+		t.Fatalf("the service account's page lists %+v", rows)
 	}
-	if code, body := act(id, "delete"); code != http.StatusBadRequest || !strings.Contains(body, "not available on a key that is ACTIVE") {
+	if got := settingsActionIDs(rows[0].Actions); got != "deactivate" || rows[0].Actions[0].Label != "Active" ||
+		!rows[0].Actions[0].Button || rows[0].Actions[0].Submit != "Deactivate" {
+		t.Errorf("an ACTIVE key's row offers %+v; want its state, clicked to Deactivate, and no Delete", rows[0].Actions)
+	}
+	if code, body := act(id, "delete"); code != http.StatusBadRequest || !strings.Contains(body, "not available") {
 		t.Errorf("delete of an ACTIVE key through the route = %d %s; want it refused", code, body)
 	}
 	if st := sdkState(id); st != "ACTIVE" {
@@ -183,9 +209,14 @@ func TestStorageSettingsHMACKeysThroughTheConsole(t *testing.T) {
 	if st := sdkState(id); st != "INACTIVE" {
 		t.Errorf("after Deactivate the client reads %s", st)
 	}
-	_, rows = list()
-	if len(rows) != 1 || rows[0].Status != "INACTIVE" || settingsActionIDs(rows[0].Actions) != "activate,delete" {
-		t.Errorf("an INACTIVE key's row = %+v; want Activate and Delete", rows)
+	rows = keys()
+	if len(rows) != 1 || rows[0].Fields["State"] != "Inactive" || settingsActionIDs(rows[0].Actions) != "activate,delete" ||
+		rows[0].Actions[1].ConfirmStyle != console.DeleteConfirmPrefix10 {
+		t.Errorf("an INACTIVE key's row = %+v; want its state to Activate and Delete confirmed by the access ID's first 10 characters", rows)
+	}
+	if code, body := consoleCall(t, srv, http.MethodPost, "/api/actions/storage-settings?project="+project,
+		`{"Path":["other@`+project+`.iam.gserviceaccount.com","`+id+`"],"Action":"activate"}`); code != http.StatusBadRequest {
+		t.Errorf("a key addressed under another service account = %d %s; want it refused", code, body)
 	}
 	if code, body := act(id, "activate"); code != http.StatusOK || sdkState(id) != "ACTIVE" {
 		t.Errorf("Activate = %d %s", code, body)
@@ -200,6 +231,9 @@ func TestStorageSettingsHMACKeysThroughTheConsole(t *testing.T) {
 		t.Errorf("after Delete the client reads %s", st)
 	}
 	if _, rows = list(); len(rows) != 0 {
+		t.Errorf("a service account with no keys left is still listed: %+v", rows)
+	}
+	if rows = keys(); len(rows) != 0 {
 		t.Errorf("a deleted key is still listed: %+v", rows)
 	}
 

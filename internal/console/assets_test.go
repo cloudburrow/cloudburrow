@@ -913,8 +913,12 @@ func TestDestructiveActionsAskForTheName(t *testing.T) {
 	// it, the word delete or DELETE, or the button alone, which leaves
 	// focus on Cancel so one Enter does not delete.
 	// #1860: Cloud SQL's Delete backup asks for the word Delete.
-	if !strings.Contains(js, `if (style === "delete" || style === "DELETE" || style === "Delete") confirmWord = style;`) {
+	if !strings.Contains(js, `if (style === "delete" || style === "DELETE" || style === "Delete" || style === "Disable") confirmWord = style;`) {
 		t.Error("a delete confirmed by the word delete does not ask for that word")
+	}
+	// #2047: Delete HMAC key asks for the access ID's first 10 characters.
+	if !strings.Contains(js, `if (style === "prefix10") confirmWord = String(confirmWord).slice(0, 10);`) {
+		t.Error("a confirmation by the name's first 10 characters does not ask for them")
 	}
 	// #1860: an action's own dialog title, and a confirmation titled and
 	// styled as Google's, on click and after a form.
