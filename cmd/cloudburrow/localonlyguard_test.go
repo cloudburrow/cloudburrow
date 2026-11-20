@@ -135,3 +135,53 @@ func TestRefusalsUseTheResourceManagerPort(t *testing.T) {
 		t.Errorf("gcloud-setup does not refuse workflows on the Resource Manager port, or does not name the unoverridable APIs:\n%s", conf)
 	}
 }
+
+// TestEnvRefusesEveryUnservedGcloudAPI (#1977): `env`'s shell, plain and
+// json output, which a shell, a docker --env-file and the GitHub action
+// apply, set every api_endpoint_overrides property of the pinned gcloud,
+// each once: the served ones at this instance, every other one at the
+// refusal. Before, only the served ones were set and gcloud sent the rest
+// to googleapis.com. The in-cluster (kubernetes) format stays without them.
+func TestEnvRefusesEveryUnservedGcloudAPI(t *testing.T) {
+	for _, services := range []string{"storage", "run", "storage,pubsub,tasks,secretmanager,run,kms,bigquery,spanner,firestore,bigtable"} {
+		args := []string{"--offline", "--name", "guard", "--state-dir", t.TempDir(), "--services", services}
+		for _, format := range []string{"shell", "plain", "json"} {
+			out := runEnvFormat(t, args, format)
+			if strings.Contains(out, "googleapis.com") {
+				t.Errorf("%s %s: a Google address in the output", services, format)
+			}
+			for _, p := range unserved.GcloudOverrides() {
+				name := gcloudOverridePrefix + strings.ToUpper(p)
+				var n int
+				switch format {
+				case "shell":
+					n = strings.Count(out, "export "+name+"=")
+				case "plain":
+					n = strings.Count("\n"+out, "\n"+name+"=")
+				case "json":
+					n = strings.Count(out, `"`+name+`":`)
+				}
+				if n != 1 {
+					t.Errorf("%s %s: %s is set %d times; want once, local or refused", services, format, name, n)
+				}
+			}
+		}
+		shell := runEnvFormat(t, args, "shell")
+		if want := `export CLOUDSDK_API_ENDPOINT_OVERRIDES_WORKFLOWS="http://127.0.0.1:9007` + unserved.PathPrefix + `workflows/"`; !strings.Contains(shell, want) {
+			t.Errorf("%s: workflows is not refused: want %s", services, want)
+		}
+		if strings.Contains(services, "kms") && strings.Contains(shell, gcloudOverridePrefix+"CLOUDKMS=\"http://127.0.0.1:9007"+unserved.PathPrefix) {
+			t.Errorf("%s: served KMS is refused", services)
+		}
+		// One comment for the refusals, not one per line.
+		if n := strings.Count(shell, gcloudRefusalComment); n != 1 {
+			t.Errorf("%s: the refusal comment appears %d times", services, n)
+		}
+	}
+	cfg := formatsConfig(t, "storage")
+	for _, v := range kubernetesEnvVars(cfg, runtimeInfo{}, cfg.DefaultProject()) {
+		if strings.Contains(v.Value, unserved.PathPrefix) {
+			t.Errorf("pod env carries the refusal %s", v.Name)
+		}
+	}
+}

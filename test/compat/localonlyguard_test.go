@@ -85,6 +85,52 @@ func TestGcloudRefusesAnUnservedAPILocally(t *testing.T) {
 	}
 }
 
+// TestEnvRefusesAnUnservedGcloudAPILocally (#1977): in a shell that ran
+// `eval "$(cloudburrow env)"` and nothing else (a fresh CLOUDSDK_CONFIG, no
+// gcloud-setup), `gcloud workflows list`, an API no instance serves, fails
+// with the instance's refusal. Before #1977 `env` exported overrides only
+// for the served APIs, so gcloud sent it to workflows.googleapis.com. gcloud
+// runs behind egressGuard, which fails the test on any request bound off
+// the machine. Credentials are disabled, as gcloud-setup does: with no
+// account gcloud stops before sending anything ("You do not currently have
+// an active account selected"), which would prove nothing.
+func TestEnvRefusesAnUnservedGcloudAPILocally(t *testing.T) {
+	h := New(t)
+	h.Endpoint(EnvResourceManager)
+	gcloud := gcloudBinary(t)
+	cli := os.Getenv(EnvCLI)
+	if cli == "" {
+		t.Skipf("%s is not set", EnvCLI)
+	}
+	// The variables are evaluated by the shell, never printed.
+	script := `eval "$("$CB_CLI" env "$@")" || exit 97
+case "$CLOUDSDK_API_ENDPOINT_OVERRIDES_WORKFLOWS" in
+*` + unserved.PathPrefix + `workflows/) ;;
+*) echo "cloudburrow env does not refuse workflows" >&2; exit 98 ;;
+esac
+exec "$CB_GCLOUD" workflows list --location us-central1 --project "$CB_PROJECT" --quiet`
+	cmd := exec.Command("bash", append([]string{"-c", script, "bash"}, cliArgs()...)...)
+	cmd.Env = append(gcloudTargetEnv(os.Environ()), "CB_CLI="+cli, "CB_GCLOUD="+gcloud, "CB_PROJECT="+h.Project(),
+		"CLOUDSDK_CONFIG="+t.TempDir(), "CLOUDSDK_CORE_DISABLE_PROMPTS=1", "CLOUDSDK_CORE_DISABLE_USAGE_REPORTING=true",
+		"CLOUDSDK_COMPONENT_MANAGER_DISABLE_UPDATE_CHECK=true", "CLOUDSDK_CORE_CHECK_GCE_METADATA=false",
+		"CLOUDSDK_AUTH_DISABLE_CREDENTIALS=true")
+	cmd.Env = append(cmd.Env, egressGuard(t)...)
+	b, err := cmd.CombinedOutput()
+	out := string(b)
+	if code := cmd.ProcessState.ExitCode(); code == 97 || code == 98 {
+		t.Fatalf("before gcloud ran (exit %d):\n%s", code, lastLines(out, 5))
+	}
+	if err == nil {
+		t.Fatalf("gcloud workflows list succeeded:\n%s", out)
+	}
+	if !strings.Contains(out, refusedLocally) || !strings.Contains(out, "workflows is not served") {
+		t.Errorf("gcloud failed, but not with CloudBurrow's refusal:\n%s", lastLines(out, 20))
+	}
+	if strings.Contains(out, "googleapis.com") || strings.Contains(out, "ProxyError") {
+		t.Errorf("gcloud tried Google:\n%s", lastLines(out, 20))
+	}
+}
+
 // TestPinnedToolsGainNoUnmappedEndpoint reads the endpoint settings of the
 // real pinned tools, as scripts/endpoint-inventory.sh does, and fails when
 // one has a setting internal/unserved's inventory lacks: a new provider
