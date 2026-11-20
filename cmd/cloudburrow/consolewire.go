@@ -288,7 +288,11 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	if enabled[config.ServiceCompute] && d.compute != nil {
 		screen := computeScreen{svc: d.compute}
 		providers = append(providers, computeNetworksProvider{screen}, computeFirewallsProvider{screen},
-			computeRoutesProvider{screen}, computeAddressesProvider{screen})
+			computeRoutesProvider{screen}, computeAddressesProvider{screen},
+			// Compute Engine (#1965): VM instances, disks, snapshots,
+			// images and machine types, over the same API.
+			computeInstancesProvider{screen}, computeDisksProvider{screen}, computeSnapshotsProvider{screen},
+			computeImagesProvider{screen}, computeMachineTypesProvider{screen}, computeMetadataProvider{screen})
 	}
 	if enabled[config.ServiceScheduler] && d.scheduler != nil {
 		providers = append(providers, schedulerProvider{svc: d.scheduler, faults: d.faults})

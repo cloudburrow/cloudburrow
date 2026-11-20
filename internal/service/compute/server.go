@@ -327,6 +327,14 @@ func render(o obj, base string) obj {
 		if linkKeys[k] {
 			switch t := v.(type) {
 			case string:
+				if k == "sourceImage" && imageProjectLink(t) {
+					// A public image lives in Google's image project, and
+					// Google names it under www.googleapis.com whichever
+					// endpoint was called: Terraform's provider recognises a
+					// boot disk's image only in that form (#1965).
+					out[k] = abs(t, googleBase)
+					continue
+				}
 				out[k] = abs(t, base)
 				continue
 			case []any:
@@ -355,6 +363,20 @@ func render(o obj, base string) obj {
 		}
 	}
 	return out
+}
+
+// googleBase is the base of Google's own Compute Engine links.
+const googleBase = "https://www.googleapis.com/compute/v1/"
+
+// imageProjectLink reports whether rel names an image of a public image
+// project.
+func imageProjectLink(rel string) bool {
+	for _, p := range PublicImages {
+		if strings.HasPrefix(rel, "projects/"+p.Project+"/global/images/") {
+			return true
+		}
+	}
+	return false
 }
 
 func abs(rel, base string) string {

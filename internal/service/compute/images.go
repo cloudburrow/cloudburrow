@@ -145,10 +145,16 @@ func imageObj(p PublicImage) obj {
 
 // LookupImage is the public image a sourceImage names: an image
 // (projects/P/global/images/NAME) or a family
-// (projects/P/global/images/family/F), as a URL or a relative name.
+// (projects/P/global/images/family/F), as a URL or a relative name. A
+// zonal image family view (projects/P/zones/Z/imageFamilyViews/F), which
+// gcloud compute instances create --image-family sends with the zone "-",
+// names the family.
 func LookupImage(ref string) (PublicImage, error) {
 	rel := Rel(ref, "")
 	parts := strings.Split(strings.TrimPrefix(rel, "projects/"), "/")
+	if len(parts) == 5 && parts[1] == "zones" && parts[3] == "imageFamilyViews" && (parts[2] == "-" || IsZone(parts[2])) {
+		parts = []string{parts[0], "global", "images", "family", parts[4]}
+	}
 	if len(parts) < 4 || parts[1] != "global" || parts[2] != "images" {
 		return PublicImage{}, invalid("Invalid value for field 'sourceImage': '%s'. The URL is malformed.", ref)
 	}
@@ -225,4 +231,15 @@ func (s *Server) images(c call) (obj, error) {
 		return nil, unimplemented("images.insert is not served: custom images are not built from a VM's disk yet (#1963); use the public images of debian-cloud, ubuntu-os-cloud and rocky-linux-cloud.")
 	}
 	return nil, unimplemented("%s on images of %s is not served (#1963)", c.method, c.project)
+}
+
+// RefusedImageProjects are the public image projects whose images are not
+// served, each with the reason, by project name.
+func RefusedImageProjects() [][2]string {
+	var out [][2]string
+	for p, why := range refusedImageProjects {
+		out = append(out, [2]string{p, why})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i][0] < out[j][0] })
+	return out
 }

@@ -98,10 +98,13 @@ COMPAT_SHARDS="storage served run scale emulators memorystore sql acceptance iam
 # the test that makes a cluster through the pages runs there, and
 # TestKubernetesEnginePagesThroughTheBrowser, which holds with and without
 # the API, runs there as well as in storage. Only the first is kept out of
-# storage (COMPAT_BROWSER_SERVED_ONLY_TESTS), where it would skip.
+# storage (COMPAT_BROWSER_SERVED_ONLY_TESTS), where it would skip. The
+# served shard serves the Compute Engine API too, so the VPC network and
+# Compute Engine pages' tests (TestVPCNetwork*, #1936; TestComputeEngine*,
+# #1965, which boots a VM) run there and only there.
 COMPAT_BROWSER_SHARDS="storage served run emulators memorystore sql"
-COMPAT_BROWSER_SERVED_SHARD_TESTS='^Test(GKEServed|KubernetesEnginePages)'
-COMPAT_BROWSER_SERVED_ONLY_TESTS='^TestGKEServed'
+COMPAT_BROWSER_SERVED_SHARD_TESTS='^Test(GKEServed|KubernetesEnginePages|VPCNetwork|ComputeEngine)'
+COMPAT_BROWSER_SERVED_ONLY_TESTS='^Test(GKEServed|VPCNetwork|ComputeEngine)'
 COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|LoggingAdmin|SecretManager|Eventarc)'
 COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|Bigtable|Spanner)'
 COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS='^TestMemorystore'
