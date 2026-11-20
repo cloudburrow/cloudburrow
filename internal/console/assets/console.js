@@ -7272,6 +7272,20 @@ async function renderNewProject(view) {
   announce("New project form");
 }
 
+// createReturn is a create page's ?return=, the console page it was opened
+// from, with that page's title; null for anything but a path of a route
+// this console has (never another origin, never //host).
+function createReturn(path) {
+  if (!path || !path.startsWith("/") || path.startsWith("//") || path.includes("\\")) return null;
+  const u = new URL(path, location.origin);
+  if (u.origin !== location.origin) return null;
+  const r = ROUTES.find((x) => x.path === u.pathname);
+  if (!r) return null;
+  const scope = new URLSearchParams(scopeSearch());
+  for (const [k, v] of scope) if (!u.searchParams.has(k)) u.searchParams.set(k, v);
+  return { href: u.pathname + u.search, title: r.title };
+}
+
 async function renderCreatePage(view, route) {
   const target = route.of;
   const project = currentProject();
@@ -7281,15 +7295,20 @@ async function renderCreatePage(view, route) {
   const back = new URL(target.path, location.origin);
   if (project) back.searchParams.set("project", project);
   carryScope(back, target.service);
-  const listHref = back.pathname + back.search;
+  // A create page opened from another page goes back there (#1932): Manage
+  // resources' Create folder opens Resource hierarchy's Create folder page
+  // with ?return=/cloud-resource-manager. Only a path of this console.
+  const returnTo = createReturn(new URLSearchParams(location.search).get("return"));
+  const listHref = returnTo ? returnTo.href : back.pathname + back.search;
+  const listTitle = returnTo ? returnTo.title : target.title;
 
   // A full page with a back arrow to the list, as Google's create flows are
   // (#1842).
   const header = [pageHeader(caps.create ? (caps.create.title || caps.create.label) : "Create",
     project ? `Project ${project}` : "All projects",
-    { back: listHref, backLabel: `Back to ${target.title}` })];
+    { back: listHref, backLabel: `Back to ${listTitle}` })];
   header[0].prepend(el("nav", { class: "breadcrumb", "aria-label": "Breadcrumb" },
-    el("a", { href: listHref, text: target.title }),
+    el("a", { href: listHref, text: listTitle }),
     el("span", { "aria-hidden": "true", text: "/" }),
     el("span", { text: caps.create ? (caps.create.title || caps.create.label) : "Create" })));
 
@@ -7344,7 +7363,7 @@ async function renderCreatePage(view, route) {
         const next = new URL(detailHref(target, [name]), location.origin);
         next.searchParams.set("action", caps.create.then);
         navigate(next.pathname + next.search);
-      } else navigate(target.path);
+      } else navigate(returnTo ? returnTo.href : target.path);
       if (once) showOneTime(once);
     } catch (err) {
       setBusy(primary, false);
@@ -17880,20 +17899,6 @@ function renderManageResources(view) {
     }
   };
 
-  const createFolder = () => mrForm({
-    id: "mr-create-folder", title: "Create folder", label: "Create",
-    note: "A folder groups projects and other folders under the organization.",
-    fields: [
-      { name: "displayName", label: "Folder name", type: "text", required: true,
-        pattern: "^[\\p{L}\\p{N}]([\\p{L}\\p{N} _\\-]{0,28}[\\p{L}\\p{N}])?$",
-        help: "Up to 30 letters, numbers, spaces, hyphens and underscores, starting and ending with a letter or number; unique among the folders beside it." },
-      { name: "parent", label: "Location", type: "select", required: true, options: destinations({ kind: "project", id: "" }),
-        optionLabels: destLabels(), default: tree.nodes.find((x) => x.kind === "organization") ? `organizations/${tree.nodes.find((x) => x.kind === "organization").id}` : "",
-        help: "The organization or folder to create it in." },
-    ],
-    submit: (v) => run(`Created folder ${v.displayName}`, "folder", { displayName: v.displayName, parent: v.parent }),
-  });
-
   const move = (n) => mrForm({
     id: "mr-move", title: `Move "${label(n)}"`, label: "Move",
     note: n.kind === "project"
@@ -18179,7 +18184,10 @@ function renderManageResources(view) {
 
   const header = pageHeader("Manage resources", "", { actions: [
     Object.assign(createButton("Create project", () => navigate("/projectcreate")), { id: "mr-create-project" }),
-    Object.assign(createButton("Create folder", () => tree && createFolder()), { id: "mr-create-folder-button" }),
+    // Create folder is the Resource hierarchy's Create folder page, as Create
+    // project is the New project page, and comes back here (#1932).
+    Object.assign(createButton("Create folder", () => navigate("/resource-hierarchy/create?return=/cloud-resource-manager" +
+      scopeSearch().replace(/^\?/, "&"))), { id: "mr-create-folder-button" }),
     refreshButton(() => reload())] });
   drawBar();
   setChildren(view, header, noteBanner(mrNoteText), bar, body);
