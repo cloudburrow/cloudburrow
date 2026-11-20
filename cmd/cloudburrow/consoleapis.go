@@ -37,6 +37,7 @@ var apiLibrary = map[string]apiLibraryInfo{
 	"run.googleapis.com":                  {"Compute", "Deploys and manages containerized services and jobs.", "run"},
 	"secretmanager.googleapis.com":        {"Security", "Stores API keys, passwords, certificates and other sensitive data.", "secretmanager"},
 	"cloudkms.googleapis.com":             {"Security", "Manages cryptographic keys and performs operations with them.", "kms"},
+	"kmsinventory.googleapis.com":         {"Security", "Reports which resources Cloud KMS keys protect.", "kms"},
 	"cloudscheduler.googleapis.com":       {"Developer tools", "Runs jobs on a schedule: HTTP targets, Pub/Sub topics and App Engine.", "scheduler"},
 	"logging.googleapis.com":              {"Management tools", "Writes and queries log entries, and routes them with sinks.", "logging"},
 	"monitoring.googleapis.com":           {"Management tools", "Manages your Cloud Monitoring data and configurations: metrics, alerting policies, uptime checks, groups, services and dashboards.", ""},

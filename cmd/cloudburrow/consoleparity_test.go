@@ -748,6 +748,13 @@ var parityRows = []parityRow{
 			"a version's page shows Trusted wrapping enabled and HSM trusted; Export trusted-wrapped on the page of a version with trusted wrapping (the wrapped key shown base64), " +
 			"Import trusted-wrapped version on an HSM_SINGLE_TENANT key's page (importing key, algorithm, wrapped key) (#1521)",
 		Tests: []string{"TestConsoleKMSTrustedKeyWrapping", "TestKMSTrustedKeyWrappingThroughThePage"}},
+	{Resource: "Cloud KMS key usage tracking", Service: "kms",
+		Methods:  []string{"KeyTrackingService/GetProtectedResourcesSummary", "KeyTrackingService/SearchProtectedResources"},
+		Provider: "kms", Offers: "A key's Usage tracking tab: the key usage summary (protected resources, projects, Google Cloud products) over the protected resources (Name, Project, Crypto key version, Cloud product, Resource type, Location, Creation date, Labels) with the Filter box and the same-project notice (#2053)",
+		Tests: []string{"TestConsoleKMSUsageTracking", "TestKMSUsageTrackingAndControlsThroughTheBrowser"}},
+	{Resource: "Cloud KMS inventory key list", Service: "kms",
+		Methods:  []string{"KeyDashboardService/ListCryptoKeys"},
+		Excluded: "the Key inventory page lists the project's keys through Cloud KMS's own ListKeyRings and ListCryptoKeys, the same keys this call returns"},
 	{Resource: "Cloud KMS key handle read", Service: "kms",
 		Methods:  []string{"Autokey/GetKeyHandle"},
 		Excluded: "a read of one key handle; the project's Autokey page lists every key handle with its key and resource type"},

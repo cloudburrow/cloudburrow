@@ -3407,9 +3407,30 @@
     "Key": "kms",
     "Title": "Cloud KMS",
     "counts": {
-      "Verified": 63
+      "Verified": 66
     },
     "rows": [
+      {
+        "method": "google.cloud.kms.inventory.v1.KeyDashboardService/ListCryptoKeys",
+        "status": "Verified",
+        "tests": [
+          "test/compat/kmsinventory2053_test.go:68 TestKMSInventoryCountsCMEKResources"
+        ]
+      },
+      {
+        "method": "google.cloud.kms.inventory.v1.KeyTrackingService/GetProtectedResourcesSummary",
+        "status": "Verified",
+        "tests": [
+          "test/compat/kmsinventory2053_test.go:68 TestKMSInventoryCountsCMEKResources"
+        ]
+      },
+      {
+        "method": "google.cloud.kms.inventory.v1.KeyTrackingService/SearchProtectedResources",
+        "status": "Verified",
+        "tests": [
+          "test/compat/kmsinventory2053_test.go:68 TestKMSInventoryCountsCMEKResources"
+        ]
+      },
       {
         "method": "google.cloud.kms.v1.Autokey/CreateKeyHandle",
         "status": "Verified",

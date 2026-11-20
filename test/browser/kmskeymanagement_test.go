@@ -18,7 +18,7 @@ import (
 // KMS Controls, Key inventory, then Single-tenant HSM), KMS Controls lists
 // the project's Key Access Justifications configuration, Create key ring is a page that goes on to the
 // ring's Create key page, whose form starts at Google's defaults; the key's
-// page has Overview, Versions, Permissions and Logs; Rotate, confirmed with
+// page has Overview, Versions, Usage tracking, Permissions and Logs; Rotate, confirmed with
 // its button alone, makes version 2 primary; the checked versions are
 // disabled from the Versions tab's Disable; and Key inventory lists the key.
 func TestKMSKeyManagementIsGooglesFlow(t *testing.T) {
@@ -85,7 +85,7 @@ func TestKMSKeyManagementIsGooglesFlow(t *testing.T) {
 	p.waitFor(`document.querySelector("#view .tab-strip .tab") !== null`)
 	var tabs []string
 	p.eval(`[...document.querySelectorAll("#view .tab-strip .tab")].map((b) => b.textContent)`, &tabs)
-	if strings.Join(tabs, ",") != "Overview,Versions,Permissions,Logs" {
+	if strings.Join(tabs, ",") != "Overview,Versions,Usage tracking,Permissions,Logs" {
 		t.Errorf("the key's tabs are %v", tabs)
 	}
 	p.clickText("#view .tab-strip .tab", "Versions")

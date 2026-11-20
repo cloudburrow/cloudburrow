@@ -236,11 +236,14 @@ func TestKMSCreateKeyOptionsThroughTheForm(t *testing.T) {
 	if defaults.Destroy != "30" || defaults.Period != "90d" {
 		t.Errorf("Create key opened with destroy %q, period %q; want 30 days and 90d", defaults.Destroy, defaults.Period)
 	}
-	next := time.Now().UTC().Add(10 * 24 * time.Hour).Truncate(time.Second).Format(time.RFC3339)
+	// Starting on is a date picker (#2053): the key rotates at that date's
+	// midnight UTC.
+	day := time.Now().UTC().Add(10 * 24 * time.Hour).Format(time.DateOnly)
+	next := day + "T00:00:00Z"
 	setField(p, "#view form.create-page", "f-cryptoKeyId", "k")
 	setField(p, "#view form.create-page", "f-destroyScheduledDays", "3")
 	setField(p, "#view form.create-page", "f-rotationPeriod", "30d")
-	setField(p, "#view form.create-page", "f-nextRotationTime", next)
+	setField(p, "#view form.create-page", "f-nextRotationTime", day)
 	p.run(chromedp.Click(chromedp.CSS(`#view form.create-page button[type="submit"]`)))
 	p.waitFor(`!location.search.includes("action=") && document.querySelector("#view form.create-page") === null`)
 	got := editDefaults(t, "kms", project, ring, "k")

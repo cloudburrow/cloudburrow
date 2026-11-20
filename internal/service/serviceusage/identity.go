@@ -102,6 +102,10 @@ var serviceAgents = map[string]string{
 // https://cloud.google.com/iam/docs/service-agents gives no primary
 // service agent, so generateServiceIdentity names none for them.
 var noPrimaryAgent = map[string]string{
+	// The Inventory API's agent is the Cloud KMS organization service
+	// agent, granted roles/cloudkms.orgServiceAgent on an organization
+	// (view-key-usage), not a project's primary agent (#2053).
+	"kmsinventory.googleapis.com": "KMS Inventory",
 	// The Storage Transfer Service Service Agent (project-NUMBER@storage-
 	// transfer-service) is not primary; googleServiceAccounts.get names it
 	// (#1957).

@@ -103,6 +103,7 @@ func TestGenerateServiceIdentityEveryEntry(t *testing.T) {
 		"analyticshub.googleapis.com":           "gcp-sa-analyticshub.iam.gserviceaccount.com",
 		"workflows.googleapis.com":              "gcp-sa-workflows.iam.gserviceaccount.com",
 		"workflowexecutions.googleapis.com":     "",
+		"kmsinventory.googleapis.com":           "",
 	}
 	if len(want) != len(serviceAgents)+len(noPrimaryAgent) {
 		t.Fatalf("want has %d services; the tables have %d", len(want), len(serviceAgents)+len(noPrimaryAgent))
