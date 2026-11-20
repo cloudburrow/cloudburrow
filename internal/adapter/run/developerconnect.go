@@ -41,7 +41,8 @@ import (
 // gitProxyUri is that URL too, as this port serves the repository itself.
 // GitHub, GitLab, Bitbucket and generic HTTP connections are refused
 // UNIMPLEMENTED: they authorize a hosted provider, which no instance
-// reaches. The tokens (FetchReadToken, FetchReadWriteToken), account
+// reaches. FetchReadToken and FetchReadWriteToken mint tokens the
+// instance's git server accepts (developerconnecttokens.go, #1955); account
 // connectors and insights configs are UNIMPLEMENTED.
 
 // DeveloperConnectServer serves Developer Connect's connections and links.

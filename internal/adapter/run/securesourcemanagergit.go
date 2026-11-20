@@ -84,6 +84,11 @@ func (m *SecureSourceManagerServer) serveGit(builds *CloudBuildServer, w http.Re
 		http.Error(w, "git is not installed on this host", http.StatusNotImplemented)
 		return
 	}
+	// A Developer Connect token is scoped to its link's repository, and a
+	// read token cannot push (#1955, developerconnecttokens.go).
+	if checkLinkToken(w, r, repo.GetName()) {
+		return
+	}
 	push := r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/git-receive-pack")
 	var before map[string]string
 	if push {
@@ -145,16 +150,14 @@ func ssmSelf() string {
 
 // ssmGitCaller is a git request's caller: its bearer token, or the
 // password of its basic credentials (git's credential helpers send the
-// access token so).
+// access token so); a Developer Connect token's fetcher.
 func ssmGitCaller(r *http.Request) string {
-	tok := ""
-	if k, t, ok := strings.Cut(r.Header.Get("Authorization"), " "); ok && strings.EqualFold(k, "bearer") {
-		tok = strings.TrimSpace(t)
-	} else if _, pw, ok := r.BasicAuth(); ok {
-		tok = pw
-	}
+	tok := gitRequestToken(r)
 	if tok == "" {
 		return ssmOwnerAccount
+	}
+	if account, ok := linkTokenAccount(tok); ok {
+		return account
 	}
 	ctx := metadata.NewIncomingContext(r.Context(), metadata.Pairs("authorization", "Bearer "+tok))
 	return ssmCallerOf(ctx)
@@ -306,7 +309,7 @@ func (m *SecureSourceManagerServer) runPushTriggers(ctx context.Context, builds 
 	}
 	// The Cloud Build triggers on a Developer Connect link to the
 	// repository run too (#1852, cloudbuilddevconnect.go).
-	runDevConnectPushTriggers(ctx, builds, repo.GetName(), dir, ref, sha)
+	runDevConnectPushTriggers(ctx, builds, repo.GetName(), dir, ref, old, sha)
 	raw, err := exec.CommandContext(ctx, "git", "-C", dir, "show", "HEAD:"+ssmTriggersFile).Output()
 	if err != nil {
 		return // no triggers file on the default branch
