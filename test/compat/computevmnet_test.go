@@ -113,7 +113,8 @@ func TestComputeVMNetworkingThroughTheGoClient(t *testing.T) {
 	signer, _ := ssh.NewSignerFromKey(priv)
 	keyLine := "tester:" + strings.TrimSpace(string(ssh.MarshalAuthorizedKey(sshPub))) + " tester"
 	// Every VM listens on the ports the test probes.
-	script := "#!/bin/bash\nfor p in 7070 8080 8081 8082 9090; do systemd-run --unit=listen-$p nc -lk $p; done\n"
+	listenPorts := []string{"7070", "8080", "8081", "8082", "9090"}
+	script := "#!/bin/bash\nfor p in " + strings.Join(listenPorts, " ") + "; do systemd-run --unit=listen-$p nc -lk $p; done\n"
 	insert := func(name string, nic *computepb.NetworkInterface, tags ...string) {
 		wait(insts.Insert(ctx, &computepb.InsertInstanceRequest{Project: p, Zone: zone, InstanceResource: &computepb.Instance{
 			Name:        proto.String(name),
@@ -191,25 +192,52 @@ func TestComputeVMNetworkingThroughTheGoClient(t *testing.T) {
 		out := run(from, "nc -z -w 3 "+host+" "+port+" && echo OPEN || echo CLOSED")
 		return strings.Contains(out, "OPEN")
 	}
+	// state is what a failed probe reports of a VM: its VPC interface,
+	// routes, listeners and the firewall its guest applied.
+	state := func(vm string) string {
+		return vm + ":\n" + run(vm, "ip -4 addr show vpc0; ip route; ss -ltn; sudo nft list ruleset")
+	}
 	// eventually waits until a probe gives want (the guests apply their
-	// network every 2 seconds), and fails after two minutes.
+	// network every 2 seconds), and fails after two minutes, with both
+	// ends' state when the destination is one of the VMs.
 	eventually := func(what, from, host, port string, want bool) {
 		t.Helper()
 		deadline := time.Now().Add(2 * time.Minute)
 		for probe(from, host, port) != want {
 			if time.Now().After(deadline) {
-				t.Fatalf("%s: %s -> %s:%s open=%v, want %v; %s", what, from, host, port, !want, want,
-					run(from, "ip -4 addr show vpc0; ip route; sudo nft list ruleset"))
+				dump := state(from)
+				for vm, a := range ip {
+					if a == host || strings.HasPrefix(host, vm+".") {
+						dump += "\n" + state(vm)
+					}
+				}
+				t.Fatalf("%s: %s -> %s:%s open=%v, want %v; %s", what, from, host, port, !want, want, dump)
 			}
 			time.Sleep(3 * time.Second)
 		}
 	}
-	// Each listener is up before the blocked ports are probed.
-	for _, vm := range []string{server, defB} {
+	// Every VM a probe connects to listens on every probed port before any
+	// probe runs: a port its startup script has not opened yet is closed
+	// whatever the firewall says, so a refused probe would prove nothing
+	// and an admitted one would fail. The client is a destination too
+	// (7070 and 9090 from the server); its startup script may run after
+	// the server's (CI run 44740769561: the server's 7070 probe of the
+	// client failed).
+	for _, vm := range []string{server, client, defB} {
 		deadline := time.Now().Add(3 * time.Minute)
-		for !strings.Contains(run(vm, "ss -ltn"), ":9090") {
+		for {
+			out := run(vm, "ss -ltn")
+			missing := ""
+			for _, port := range listenPorts {
+				if !strings.Contains(out, ":"+port+" ") {
+					missing += " " + port
+				}
+			}
+			if missing == "" {
+				break
+			}
 			if time.Now().After(deadline) {
-				t.Fatalf("%s never listened: %s", vm, run(vm, "ss -ltn"))
+				t.Fatalf("%s never listened on%s: %s", vm, missing, out)
 			}
 			time.Sleep(3 * time.Second)
 		}
@@ -225,32 +253,24 @@ func TestComputeVMNetworkingThroughTheGoClient(t *testing.T) {
 	if probe(client, ip[server], "8081") {
 		t.Error("a deny at priority 900 did not beat an allow at 1000")
 	}
-	if !probe(client, ip[server], "9090") {
-		t.Error("a source-tag rule did not admit the tagged client")
-	}
+	eventually("a source-tag rule admits the tagged client", client, ip[server], "9090", true)
 	if probe(server, ip[client], "9090") {
 		t.Error("a target-tag rule applied to an instance without the tag")
 	}
 	if probe(client, ip[server], "7070") {
 		t.Error("the client's egress deny did not block 7070")
 	}
-	if !probe(server, ip[client], "7070") {
-		t.Error("the allow on 7070 did not admit the server (its egress is not denied)")
-	}
+	eventually("the allow on 7070 admits the server (its egress is not denied)", server, ip[client], "7070", true)
 	fqdn := func(vm string) string { return vm + "." + zone + ".c." + p + ".internal" }
 	if out := run(client, "getent hosts "+fqdn(server)); !strings.Contains(out, ip[server]) {
 		t.Errorf("internal DNS: %s does not resolve to %s on its network: %q", fqdn(server), ip[server], out)
 	}
-	if !probe(client, fqdn(server), "8080") {
-		t.Error("the server's internal DNS name did not connect")
-	}
+	eventually("the server's internal DNS name connects", client, fqdn(server), "8080", true)
 
 	// The default network: default-allow-internal admits any port from
 	// 10.128.0.0/9; the custom network is not reachable from it.
 	eventually("default-allow-internal", defA, ip[defB], "8082", true)
-	if !probe(defA, fqdn(defB), "8080") {
-		t.Error("a default network VM's DNS name did not connect")
-	}
+	eventually("a default network VM's DNS name connects", defA, fqdn(defB), "8080", true)
 	if probe(defA, ip[server], "8080") {
 		t.Error("a VM on another network reached the custom network's VM, whose firewall admits 0.0.0.0/0 on 8080")
 	}
