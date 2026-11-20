@@ -181,6 +181,10 @@ func (s *Instances) Claims(r *http.Request) bool {
 		if r.URL.Path == getOperation || r.URL.Path == fetchCacheUpdate {
 			return true
 		}
+		if m, ok := strings.CutPrefix(r.URL.Path, dataService); ok && (m == "ExecuteSql" || m == "ExecuteStreamingSql") {
+			// For the query mode (querymode.go).
+			return true
+		}
 		if m, ok := strings.CutPrefix(r.URL.Path, dataService); ok && keyedDataMethods[m] {
 			return s.hasDatabaseKeys()
 		}
@@ -189,6 +193,9 @@ func (s *Instances) Claims(r *http.Request) bool {
 		}
 		m, ok := strings.CutPrefix(r.URL.Path, instanceService)
 		return ok && (claimed[m] || iamMethods[m])
+	}
+	if claimsRESTQuery(r) {
+		return true
 	}
 	if restDataDatabase(r) != "" {
 		return s.restDataRefusal(r) != nil
@@ -231,6 +238,10 @@ func (s *Instances) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
 		s.grpc.ServeHTTP(w, r)
+		return
+	}
+	if restExecuteSQL.MatchString(r.URL.Path) && claimsRESTQuery(r) {
+		s.serveRESTQuery(w, r)
 		return
 	}
 	if restDataDatabase(r) != "" {

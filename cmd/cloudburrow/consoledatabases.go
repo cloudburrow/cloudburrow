@@ -1732,7 +1732,8 @@ func (p spannerProvider) spannerTableData(ctx context.Context, c *spanner.Client
 	if err != nil {
 		return console.Section{ID: "data", Label: "Data", Unavailable: "reading columns: " + err.Error()}
 	}
-	return spannerDataSection(ctx, c, d, instanceID, dbID, table, cols)
+	ps := p.spannerProtosFor(ctx, c.DatabaseName(), cols)
+	return spannerDataSection(ctx, c, d, ps, instanceID, dbID, table, cols)
 }
 
 // QueryHint is the Spanner Studio's contract with the user.
@@ -2072,7 +2073,7 @@ func (p spannerProvider) spannerInsertRowActions(ctx context.Context, project st
 	if err != nil || len(cols) == 0 {
 		return nil
 	}
-	fields := spannerRowFields(cols, nil)
+	fields := spannerRowFields(p.spannerProtosFor(ctx, c.DatabaseName(), cols), cols, nil)
 	if len(fields) == 0 {
 		return nil
 	}

@@ -9,22 +9,22 @@ package main
 //
 // Measured on the emulator (cloud-spanner-emulator 1.5.58, 2026-11-19): a
 // PostgreSQL-dialect database is created and queried, the catalogue's views
-// list views, change streams and sequences, labels are kept on an instance,
-// and AnalyzeQuery (query mode PLAN) answers INTERNAL "query plan
-// unavailable", so Explain says the emulator's own words.
+// list views, change streams and sequences, and labels are kept on an
+// instance.
 //
-// Query plans stay unavailable (#1859, round 2). The emulator's README says
+// Query plans stay unavailable (#1859, #2017). The emulator's README says
 // "The SQL query modes PLAN and PROFILE do not return any query plans" and
 // no release or flag up to 1.5.59 changes that: its handler
 // (frontend/handlers/queries.cc) answers PLAN and PROFILE with one node,
-// "No query plan", or none. A plan drawn here from the query's text (a scan
-// of each table, a filter per WHERE) would not be Spanner's: the operators,
-// the index chosen, the distributed unions and the join strategy are its
-// optimizer's decisions, which nothing local makes, so a tuned query could
-// look right here and run differently on Spanner. What the emulator does
-// return is PROFILE's query statistics, rows_returned and elapsed_time
-// (it reports no CPU time), so Run runs in PROFILE mode, as Google's Spanner
-// Studio does, and the Explanation tab shows them as the Query summary.
+// "No query plan". A plan drawn from the query's text would not be
+// Spanner's (the operators, the index chosen, the distributed unions and
+// the join strategy are its optimizer's decisions, which nothing local
+// makes), so the Spanner front refuses the modes that return a plan
+// UNIMPLEMENTED (internal/spannerfront/querymode.go), and Explain shows
+// that refusal. The front serves WITH_STATS, the results with the
+// emulator's query statistics (rows_returned and elapsed_time; it reports
+// no CPU time), so Run runs in WITH_STATS mode and the Explanation tab
+// shows them as the Query summary.
 
 import (
 	"context"
@@ -252,12 +252,12 @@ type spannerStudioResult struct {
 	Elapsed  string            `json:"elapsed,omitempty"`
 	Plan     []spannerPlanNode `json:"plan,omitempty"`
 	PlanNote string            `json:"planNote,omitempty"`
-	// Stats is PROFILE mode's query statistics, as the emulator returns
+	// Stats is WITH_STATS mode's query statistics, as the emulator returns
 	// them, for the Explanation tab's Query summary.
 	Stats *spannerQueryStats `json:"stats,omitempty"`
 }
 
-// spannerQueryStats is the query statistics PROFILE mode returns
+// spannerQueryStats is the query statistics WITH_STATS mode returns
 // (ResultSetStats.query_stats): the emulator sets rows_returned and
 // elapsed_time; Spanner's cpu_time and rows_scanned are shown when present.
 type spannerQueryStats struct {
@@ -270,7 +270,7 @@ type spannerQueryStats struct {
 // spannerNoPlanNote is the Explanation tab's word when the emulator has no
 // plan to give; why is in this file's comment.
 const spannerNoPlanNote = "Not available locally: the Spanner emulator returns no query plan (its documented limitation: " +
-	"\"The SQL query modes PLAN and PROFILE do not return any query plans\")."
+	"\"The SQL query modes PLAN and PROFILE do not return any query plans\"), so query modes PLAN and PROFILE are refused."
 
 // spannerPlan is a returned plan's nodes, none when the plan is the
 // emulator's placeholder ("No query plan").
@@ -289,7 +289,7 @@ func spannerPlan(plan *sppb.QueryPlan) []spannerPlanNode {
 	return out
 }
 
-// spannerStats reads PROFILE's query statistics, nil when there are none.
+// spannerStats reads the query statistics, nil when there are none.
 func spannerStats(m map[string]any) *spannerQueryStats {
 	str := func(k string) string {
 		if v, ok := m[k]; ok && v != nil {
@@ -422,10 +422,12 @@ func (p spannerProvider) spannerStudioRun(ctx context.Context, dbAdmin *database
 	if len(st.Kinds) > 1 {
 		return nil, errors.New("Run runs one query at a time: select one statement, or remove everything after the first semicolon")
 	}
-	// PROFILE mode, as Google's Spanner Studio runs a query: its results
-	// and its statistics. The rows past the first 1,000 are read and
-	// dropped, since the statistics come at the end of the stream.
-	it := c.Single().QueryWithStats(ctx, spanner.Statement{SQL: strings.TrimRight(sql, "; \t\r\n")})
+	// WITH_STATS mode: the results and the statistics, without the plan
+	// that Google's Spanner Studio's PROFILE adds and nothing local makes.
+	// The rows past the first 1,000 are read and dropped, since the
+	// statistics come at the end of the stream.
+	mode := sppb.ExecuteSqlRequest_WITH_STATS
+	it := c.Single().QueryWithOptions(ctx, spanner.Statement{SQL: strings.TrimRight(sql, "; \t\r\n")}, spanner.QueryOptions{Mode: &mode})
 	defer it.Stop()
 	res := &spannerStudioResult{Kind: "query", Rows: [][]string{}}
 	more := false
@@ -483,7 +485,7 @@ func spannerStudioExplain(ctx context.Context, c *spanner.Client, sql string) (*
 	plan, err := c.Single().AnalyzeQuery(ctx, spanner.Statement{SQL: sql})
 	res := &spannerStudioResult{Kind: "explain"}
 	if err != nil {
-		res.PlanNote = spannerNoPlanNote[:len(spannerNoPlanNote)-2] + "; AnalyzeQuery answered: " + spanner.ErrDesc(err) + ")."
+		res.PlanNote = spannerNoPlanNote + " AnalyzeQuery (query mode PLAN) answered: " + spanner.ErrDesc(err)
 		return res, nil
 	}
 	if res.Plan = spannerPlan(plan); len(res.Plan) == 0 {
@@ -641,13 +643,6 @@ func spannerTableColumns(ctx context.Context, c *spanner.Client, table string) (
 	}
 }
 
-// spannerEditable says whether the Data tab's forms can write a column:
-// the scalar types and ARRAYs of them, in either dialect
-// (consolespannerdata.go).
-func spannerEditable(t string) bool {
-	return spannerColumnType(t) != nil
-}
-
 // spannerCastExpr is the SQL that turns the string parameter name into a
 // value of the column's type: Google's console takes each value as text.
 func spannerCastExpr(t, name string) string {
@@ -670,16 +665,40 @@ func spannerCastExpr(t, name string) string {
 // form can write, prefilled with row when it is given. A key column cannot
 // change on Edit row (Spanner has no key update: it is a delete and an
 // insert).
-func spannerRowFields(cols []spannerColumn, row map[string]string) []console.Field {
+//
+// A PROTO column is its message's JSON, in a textarea, and an ENUM is
+// chosen from its value names (consolespannerproto.go).
+func spannerRowFields(ps spannerProtos, cols []spannerColumn, row map[string]string) []console.Field {
 	var out []console.Field
 	for _, col := range cols {
-		if col.Generated || !spannerEditable(col.Type) {
+		if col.Generated || !ps.editable(col.Type) {
 			continue
 		}
 		f := console.Field{Name: "col_" + col.Name, Label: col.Name, Type: "text", Required: !col.Nullable && col.Key == 0 || col.Key > 0,
 			Help: col.Type}
-		if spannerColumnType(col.Type).GetCode() == sppb.TypeCode_ARRAY {
+		switch t := ps.columnType(col.Type); t.GetCode() {
+		case sppb.TypeCode_ARRAY:
 			f.Help += ": a JSON array, such as [1, 2] or [\"a\", null]"
+			switch t.GetArrayElementType().GetCode() {
+			case sppb.TypeCode_PROTO:
+				f.Type = "textarea"
+				f.Help = fmt.Sprintf("ARRAY<%s>: a JSON array of the messages' JSON, such as [{\"field\": 1}, null]", t.GetArrayElementType().GetProtoTypeFqn())
+			case sppb.TypeCode_ENUM:
+				f.Help = fmt.Sprintf("ARRAY<%s>: a JSON array of value names, such as [\"%s\"]; the values are %s",
+					t.GetArrayElementType().GetProtoTypeFqn(), enumNames(ps.enum(t.GetArrayElementType().GetProtoTypeFqn()))[0],
+					strings.Join(enumNames(ps.enum(t.GetArrayElementType().GetProtoTypeFqn())), ", "))
+			}
+		case sppb.TypeCode_PROTO:
+			f.Type = "textarea"
+			f.Help = t.GetProtoTypeFqn() + ": the message as JSON, such as {\"field\": \"value\"}"
+		case sppb.TypeCode_ENUM:
+			f.Type = "select"
+			f.Help = t.GetProtoTypeFqn()
+			f.Options = enumNames(ps.enum(t.GetProtoTypeFqn()))
+			if col.Nullable {
+				f.Options = append([]string{""}, f.Options...)
+				f.OptionLabels = map[string]string{"": "NULL"}
+			}
 		}
 		if col.Nullable {
 			f.Help += ", nullable: left empty, the value is NULL"
@@ -697,7 +716,7 @@ func spannerRowFields(cols []spannerColumn, row map[string]string) []console.Fie
 
 // spannerDataSection is a table's Data tab: up to 200 rows, each with Edit
 // row and Delete row, as Google's table Data page has them.
-func spannerDataSection(ctx context.Context, c *spanner.Client, d spannerDialect, instanceID, dbID, table string, cols []spannerColumn) console.Section {
+func spannerDataSection(ctx context.Context, c *spanner.Client, d spannerDialect, ps spannerProtos, instanceID, dbID, table string, cols []spannerColumn) console.Section {
 	sec := console.Section{ID: "data", Label: "Data"}
 	l := console.Listing{Noun: "rows"}
 	var keys []string
@@ -751,7 +770,7 @@ func spannerDataSection(ctx context.Context, c *spanner.Client, d spannerDialect
 				l.Unavailable = "decoding rows: " + err.Error()
 				break
 			}
-			values[col.Name] = renderSpannerValue(v)
+			values[col.Name] = ps.render(v)
 		}
 		keyVals := make([]string, len(keys))
 		for i, k := range keys {
@@ -771,7 +790,7 @@ func spannerDataSection(ctx context.Context, c *spanner.Client, d spannerDialect
 			hidden := console.Field{Name: "key", Type: "hidden", Default: string(keyJSON)}
 			res.ActsOn = []string{instanceID, dbID, table, "rows"}
 			res.Actions = []console.Action{
-				{ID: "editrow", Label: "Edit row", Fields: append([]console.Field{hidden}, spannerRowFields(cols, values)...)},
+				{ID: "editrow", Label: "Edit row", Fields: append([]console.Field{hidden}, spannerRowFields(ps, cols, values)...)},
 				{ID: "deleterow", Label: "Delete row", Destructive: true, Fields: []console.Field{hidden}},
 			}
 		}
@@ -815,16 +834,17 @@ func (p spannerProvider) spannerRowAct(ctx context.Context, project string, path
 	if len(cols) == 0 {
 		return fmt.Errorf("table %s not found", table)
 	}
+	ps := p.spannerProtosFor(ctx, dbName, cols)
 	b := &spannerBinder{d: d, params: map[string]any{}}
 	params := b.params
 	// A typed parameter for an ARRAY and every PostgreSQL column; a string
 	// cast to the column's type otherwise (spannerCastExpr).
 	arg := func(col spannerColumn, pn, raw string) (string, error) {
-		if !spannerTypedColumn(d, col.Type) {
+		if !ps.typed(d, col.Type) {
 			params[pn] = raw
 			return spannerCastExpr(col.Type, pn), nil
 		}
-		v, err := spannerTypedParam(col.Type, raw)
+		v, err := ps.typedParam(col.Type, raw)
 		if err != nil {
 			return "", fmt.Errorf("%s: %w", col.Name, err)
 		}
@@ -868,7 +888,7 @@ func (p spannerProvider) spannerRowAct(ctx context.Context, project string, path
 	case "insertrow":
 		var names, exprs []string
 		for i, col := range cols {
-			if col.Generated || !spannerEditable(col.Type) {
+			if col.Generated || !ps.editable(col.Type) {
 				continue
 			}
 			e, ok, err := value(col, fmt.Sprintf("v%d", i))
@@ -890,7 +910,7 @@ func (p spannerProvider) spannerRowAct(ctx context.Context, project string, path
 		}
 		var sets []string
 		for i, col := range cols {
-			if col.Key > 0 || col.Generated || !spannerEditable(col.Type) {
+			if col.Key > 0 || col.Generated || !ps.editable(col.Type) {
 				continue
 			}
 			e, ok, err := value(col, fmt.Sprintf("v%d", i))
