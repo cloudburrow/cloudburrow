@@ -219,6 +219,8 @@ type Server struct {
 	// d delivers to sink destinations other than log buckets (deliver.go,
 	// #1404).
 	d deliverer
+	// vol counts what sinks route and log buckets take (volume.go, #2021).
+	vol volumes
 }
 
 // UseAdmin makes the project exclusions admin stores apply to writes: an
@@ -389,6 +391,7 @@ func (s *Server) WriteLogEntries(ctx context.Context, req *loggingpb.WriteLogEnt
 	sinks := map[parent][]sinkRoute{}
 	routes := map[*loggingpb.LogEntry]*route{}
 	var deliveries []delivery
+	var hits []sinkHit
 	out := make([]*loggingpb.LogEntry, 0, len(req.GetEntries()))
 	failed := map[int32]*spb.Status{}
 	var first *apierror.Error
@@ -410,6 +413,7 @@ func (s *Server) WriteLogEntries(ctx context.Context, req *loggingpb.WriteLogEnt
 		if !keep {
 			continue
 		}
+		hits = append(hits, rt.hits...)
 		hidden := s.excluded(e, exclusions) || rt.intercepted
 		buckets := rt.buckets
 		if hidden && len(buckets) == 0 {
@@ -445,6 +449,10 @@ func (s *Server) WriteLogEntries(ctx context.Context, req *loggingpb.WriteLogEnt
 		release()
 		s.deliver(deliveries)
 		s.linkWrites(out, routes, gens) // #1423, analytics.go
+		s.countIngestion(out, routes)
+	}
+	if !req.GetDryRun() {
+		s.countHits(hits)
 	}
 	if first != nil {
 		st, err := status.New(first.Code, fmt.Sprintf("%s (%d of %d entries not written)", first.Message, len(failed), len(req.GetEntries()))).
@@ -755,6 +763,9 @@ type routing struct {
 	// intercepted is set when an intercepting sink above the entry's
 	// parent matched it: its own _Default bucket does not hold it.
 	intercepted bool
+	// hits are the sinks to a log bucket or a project that routed the
+	// entry, for their volume (volume.go).
+	hits []sinkHit
 }
 
 // routeOf is where the sinks of the entry's own parent, and the
@@ -811,6 +822,7 @@ func (s *Server) follow(e *loggingpb.LogEntry, routes []sinkRoute, cache map[par
 		}
 		switch {
 		case r.isBucket():
+			out.hits = append(out.hits, sinkHit{sink: r.sink, dest: r.dest, e: e})
 			if !seen[r.dest] {
 				seen[r.dest] = true
 				out.buckets = append(out.buckets, r.dest)
@@ -819,6 +831,7 @@ func (s *Server) follow(e *loggingpb.LogEntry, routes []sinkRoute, cache map[par
 			if !reroute {
 				continue // routed to a project once already
 			}
+			out.hits = append(out.hits, sinkHit{sink: r.sink, dest: r.dest, e: e})
 			dp := projectParent(r.project())
 			if seen["project|"+dp.id] {
 				continue

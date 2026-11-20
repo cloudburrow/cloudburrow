@@ -141,7 +141,7 @@ func (p loggingSinksProvider) List(ctx context.Context, project string) (console
 		f := map[string]string{
 			"Enabled": enabledWord(s.GetDisabled()), "Type": sinkTypeOf(s.GetDestination()), "Description": orDash(s.GetDescription()),
 			"Destination": s.GetDestination(), "Created": loggingTime(s.GetCreateTime()), "Last updated": loggingTime(s.GetUpdateTime()),
-			"Filter": orDash(s.GetFilter()), "Delivery": delivery, "Last error": orDash(lastErr),
+			"Filter": orDash(s.GetFilter()), "Delivery": delivery, "Last error": orDash(lastErr), "Volume": p.sinkVolume(name),
 		}
 		if children {
 			f["Include children"] = yesNo(s.GetIncludeChildren())
@@ -189,10 +189,10 @@ const (
 	sinkNoSplunk = "Not available locally: Google routes to Splunk through a Pub/Sub topic that a Dataflow job forwards, and CloudBurrow runs no Dataflow. Route to a Pub/Sub topic and read it instead."
 )
 
-// sinkColumns are Google's Log Router columns, then CloudBurrow's
-// delivery status (Volume, Google's last column, is ingested bytes from
-// Cloud Monitoring, which no instance has).
-var sinkColumns = []string{"Enabled", "Type", "Description", "Destination", "Created", "Last updated", "Delivery"}
+// sinkColumns are Google's Log Router columns, Volume last (the bytes the
+// sink routed in the past 30 days, #2021), then CloudBurrow's delivery
+// status.
+var sinkColumns = []string{"Enabled", "Type", "Description", "Destination", "Created", "Last updated", "Volume", "Delivery"}
 
 // sinkTypeOf is the Log Router's Type column: the destination's service.
 func sinkTypeOf(dest string) string {
@@ -338,10 +338,11 @@ func (loggingSinksProvider) CreateLayout() string { return console.CreateLayoutP
 
 // Actions implements console.Actor: a Log Router row's More actions, as
 // Google's: View sink details, Edit sink, Disable sink or Enable sink,
-// Delete sink, Troubleshoot sink (RowMenuOrder places Edit and Delete).
-func (loggingSinksProvider) Actions(r console.Resource) []console.Action {
+// Delete sink, Troubleshoot sink, View sink log volume and error rates
+// (RowMenuOrder places Edit and Delete).
+func (p loggingSinksProvider) Actions(r console.Resource) []console.Action {
 	out := []console.Action{{ID: "view", Label: "View sink details", Href: "/logs/sinks/" + url.PathEscape(r.Name)}}
-	return append(out, sinkToggle(r.Fields["Enabled"] != "Disabled"), sinkTroubleshootAction)
+	return append(out, sinkToggle(r.Fields["Enabled"] != "Disabled"), sinkTroubleshootAction, p.sinkVolumeLink(r.Name))
 }
 
 var sinkTroubleshootAction = console.Action{ID: sinkCheckTroubleshoot, Label: "Troubleshoot sink"}
@@ -349,7 +350,7 @@ var sinkTroubleshootAction = console.Action{ID: sinkCheckTroubleshoot, Label: "T
 // RowMenuOrder implements console.RowMenuOrderer: Google's row menu order
 // (docs.cloud.google.com/logging/docs/export/configure_export_v2).
 func (loggingSinksProvider) RowMenuOrder() []string {
-	return []string{"view", console.RowMenuEdit, "disable", "enable", console.RowMenuDelete, sinkCheckTroubleshoot}
+	return []string{"view", console.RowMenuEdit, "disable", "enable", console.RowMenuDelete, sinkCheckTroubleshoot, sinkVolumeAction}
 }
 
 // ActAtResult answers Troubleshoot sink with its findings; the other

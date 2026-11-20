@@ -77,7 +77,7 @@ func TestConsoleLoggingParityActions(t *testing.T) {
 	var l console.Listing
 	getJSON200(t, sinks, &l)
 	if len(l.Items) != 1 || l.Items[0].Fields["Type"] != "Pub/Sub topic" || l.Items[0].Fields["Enabled"] != "Enabled" ||
-		l.Items[0].Fields["Description"] != "errors out" || len(l.Items[0].Actions) != 3 || l.Items[0].Actions[1].Label != "Disable sink" ||
+		l.Items[0].Fields["Description"] != "errors out" || len(l.Items[0].Actions) != 4 || l.Items[0].Actions[1].Label != "Disable sink" || l.Items[0].Fields["Volume"] != "0 B" ||
 		l.Items[0].Actions[2].Label != "Troubleshoot sink" {
 		t.Fatalf("the Log Router row = %+v", l.Items)
 	}

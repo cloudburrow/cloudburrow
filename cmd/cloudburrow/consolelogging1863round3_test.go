@@ -138,16 +138,17 @@ func TestConsoleSavedQueryLibrary(t *testing.T) {
 }
 
 // TestConsoleLoggingRowMenus (#1863): the Log Router's row menu is
-// Google's order with Troubleshoot sink last, and a log-based metric's is
+// Google's order with Troubleshoot sink and View sink log volume and error
+// rates last (#2021), and a log-based metric's is
 // Edit metric, View in Metrics Explorer, Delete metric, the explorer link
 // unavailable without Cloud Monitoring.
 func TestConsoleLoggingRowMenus(t *testing.T) {
 	if got := (loggingSinksProvider{}).RowMenuOrder(); !slices.Equal(got,
-		[]string{"view", console.RowMenuEdit, "disable", "enable", console.RowMenuDelete, sinkCheckTroubleshoot}) {
+		[]string{"view", console.RowMenuEdit, "disable", "enable", console.RowMenuDelete, sinkCheckTroubleshoot, sinkVolumeAction}) {
 		t.Errorf("sink menu order %v", got)
 	}
 	acts := (loggingSinksProvider{}).Actions(console.Resource{Name: "s", Fields: map[string]string{"Enabled": "Enabled"}})
-	if len(acts) != 3 || acts[2].Label != "Troubleshoot sink" {
+	if len(acts) != 4 || acts[2].Label != "Troubleshoot sink" || acts[3].Label != "View sink log volume and error rates" || acts[3].Unavailable == "" {
 		t.Errorf("sink actions %+v", acts)
 	}
 	m := loggingMetricsProvider{}

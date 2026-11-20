@@ -34,6 +34,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/admin"
 	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
+	"github.com/cloudburrow/cloudburrow/internal/service/monitoring"
 )
 
 const loggingNotStarted = "Cloud Logging has not started"
@@ -43,6 +44,9 @@ const loggingNotStarted = "Cloud Logging has not started"
 type loggingAdminScreen struct {
 	svc    *loggingService
 	faults *admin.Faults
+	// monitoring is the instance's Cloud Monitoring, nil when it is not
+	// served: Create usage alert and the sinks' volume links (#2021).
+	monitoring func() *monitoring.Server
 }
 
 func (s loggingAdminScreen) admin() (*logging.Admin, error) {

@@ -105,6 +105,9 @@ func (p loggingBucketsProvider) List(ctx context.Context, project string) (conso
 	}
 	out.Total = len(out.Items)
 	out.RowsOpenable = true
+	if strings.HasPrefix(parent, "projects/") {
+		out.Summary = p.usageSummary(strings.TrimPrefix(parent, "projects/")) // #2021
+	}
 	return out, nil
 }
 

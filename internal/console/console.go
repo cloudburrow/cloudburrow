@@ -217,6 +217,10 @@ type Listing struct {
 	// over it, beside its text and rows: Document AI's Upload test
 	// document draws the layout it found on the document (#1930).
 	Pages []ResultPage `json:"pages,omitempty"`
+	// ColumnTypes are a query result's column types, by column name, as
+	// BigQuery names them (STRING, INTEGER, TIMESTAMP, …; REPEATED for an
+	// array), for the results' chart: Log Analytics' (#2021).
+	ColumnTypes map[string]string `json:"columnTypes,omitempty"`
 }
 
 // ResultPage is one page image of an action's answer, and its boxes.

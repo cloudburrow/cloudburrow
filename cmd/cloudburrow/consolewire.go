@@ -370,6 +370,9 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	// Cloud Logging's admin screens, beside the Logs Explorer (#1226).
 	if enabled[config.ServiceLogging] && d.logging != nil {
 		screen := loggingAdminScreen{svc: d.logging, faults: d.faults}
+		if enabled[config.ServiceMonitoring] && d.monitoring != nil {
+			screen.monitoring = monitoringServerOf(d.monitoring)
+		}
 		metrics := loggingMetricsProvider{loggingAdminScreen: screen, monitoring: enabled[config.ServiceMonitoring] && d.monitoring != nil}
 		providers = append(providers, metrics, loggingSinksProvider{screen}, loggingExclusionsProvider{screen}, loggingBucketsProvider{screen},
 			loggingSettingsProvider{screen},

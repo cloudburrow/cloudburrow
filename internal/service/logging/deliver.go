@@ -340,6 +340,7 @@ func (s *Server) deliverNow(ctx context.Context, ds []delivery) {
 				continue
 			}
 			s.delivered(g.sink, len(msgs))
+			s.countSink(g.sink, g.dest, int64(len(msgs)), entryBytes(g.entries), int64(len(g.entries)-len(msgs)))
 		case strings.HasPrefix(g.dest, "bigquery.googleapis.com/"):
 			parts := strings.Split(g.dest, "/") // bigquery.googleapis.com/projects/P/datasets/D
 			if dest.BigQuery == nil {
@@ -415,19 +416,24 @@ func (s *Server) flushDue(ctx context.Context, now time.Time) {
 		}
 		files, _ := copyFiles(w.entries, now)
 		written := 0
+		var bytes int64
 		for _, f := range files {
 			body, err := f.body()
 			if err == nil {
 				err = storage.WriteObject(ctx, w.b.bucket, f.name, "application/json", body)
 			}
 			if err != nil {
-				s.sinkError(g, errorCode(err, "bucket_not_found"), err.Error())
+				fg := *g
+				fg.entries = f.entries
+				s.sinkError(&fg, errorCode(err, "bucket_not_found"), err.Error())
 				continue
 			}
 			written += len(f.entries)
+			bytes += entryBytes(f.entries)
 		}
 		if written > 0 {
 			s.delivered(w.b.sink, written)
+			s.countSink(w.b.sink, g.dest, int64(written), bytes, 0)
 		}
 	}
 }
@@ -450,6 +456,17 @@ func (s *Server) recordDelivery(g *group, n, rejected int, code, detail string) 
 	if n == 0 && rejected == 0 && code == "" {
 		return
 	}
+	// The sink's volume (volume.go): the n written, and as errors the
+	// entries that did not reach their table.
+	failed := rejected
+	if code != "" {
+		failed = len(g.entries) - n
+	}
+	var bytes int64
+	if len(g.entries) > 0 && n > 0 {
+		bytes = entryBytes(g.entries) * int64(n) / int64(len(g.entries))
+	}
+	s.countSink(g.sink, g.dest, int64(n), bytes, int64(max(failed, 0)))
 	now := s.clock()
 	s.d.mu.Lock()
 	st := s.d.statusOf(g.sink)

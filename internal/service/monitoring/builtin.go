@@ -74,7 +74,8 @@ const (
 )
 
 func (b logBuiltin) Descriptors(project string) []*metricpb.MetricDescriptor {
-	out := []*metricpb.MetricDescriptor{{
+	out := volumeDescriptors(b.src, project)
+	out = append(out, &metricpb.MetricDescriptor{
 		Name: descriptorName(project, logEntryCount), Type: logEntryCount,
 		MetricKind: delta, ValueType: tInt, Unit: "1", DisplayName: "Log entries",
 		Description: "Number of log entries that contribute to user-defined metrics. Sampled every 60 seconds.",
@@ -83,7 +84,7 @@ func (b logBuiltin) Descriptors(project string) []*metricpb.MetricDescriptor {
 			{Key: "severity", ValueType: labelpb.LabelDescriptor_STRING, Description: "The severity of the log entry."},
 		},
 		MonitoredResourceTypes: []string{"global", "k8s_container", "cloud_run_revision", "gce_instance", "generic_task", "generic_node"},
-	}}
+	})
 	for _, m := range b.src.LogMetrics(project) {
 		md := &metricpb.MetricDescriptor{Name: descriptorName(project, logUserPrefix+m.Name), Type: logUserPrefix + m.Name,
 			MetricKind: delta, ValueType: tInt, Unit: m.Unit, Description: m.Description, DisplayName: m.Name}
@@ -112,6 +113,9 @@ func minute(t time.Time) time.Time {
 
 func (b logBuiltin) Series(project, metricType string, start, end time.Time) ([]*monitoringpb.TimeSeries, error) {
 	from := start.Add(-logPointPeriod)
+	if vs, ok := b.src.(LogVolumeSource); ok && volumeMetric(metricType) {
+		return volumeSeries(vs, project, metricType, start, end), nil
+	}
 	if metricType == logEntryCount {
 		groups := map[string]*monitoringpb.TimeSeries{}
 		counts := map[string]map[time.Time]int64{}

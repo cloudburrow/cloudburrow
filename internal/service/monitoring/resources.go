@@ -54,6 +54,8 @@ var resourceDescriptors = []*monitoredres.MonitoredResourceDescriptor{
 		"project_id", "location", "cluster_name", "node_name"),
 	res("k8s_pod", "Kubernetes Pod", "A Kubernetes pod.",
 		"project_id", "location", "cluster_name", "namespace_name", "pod_name"),
+	res("logging_sink", "Logging export sink", "An export sink in Cloud Logging.",
+		"project_id", "name", "destination"),
 	res("pubsub_subscription", "Cloud Pub/Sub Subscription", "A Pub/Sub subscription.",
 		"project_id", "subscription_id"),
 	res("uptime_url", "Uptime Check URL", "A URL checked by an uptime check.",
