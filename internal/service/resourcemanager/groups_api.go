@@ -22,18 +22,63 @@ import (
 // Google's do. Served: groups create/get/list/lookup/patch/delete/search;
 // memberships create/get/list/lookup/delete, checkTransitiveMembership,
 // searchTransitiveGroups, searchDirectGroups, searchTransitiveMemberships,
-// getMembershipGraph and modifyMembershipRoles (groups_search.go). The
-// security settings are refused 501, and so are devices, customers,
-// inbound SSO and the policies.
+// getMembershipGraph and modifyMembershipRoles (groups_search.go); the
+// security settings (groupsecurity.go) and inbound SSO (inboundsso.go,
+// #1959). Devices, customers' user invitations, allowlisted domains and
+// the policies are refused 501.
 
 const (
-	groupType      = "type.googleapis.com/google.apps.cloudidentity.groups.v1.Group"
-	membershipType = "type.googleapis.com/google.apps.cloudidentity.groups.v1.Membership"
+	groupType            = "type.googleapis.com/google.apps.cloudidentity.groups.v1.Group"
+	membershipType       = "type.googleapis.com/google.apps.cloudidentity.groups.v1.Membership"
+	securitySettingsType = "type.googleapis.com/google.apps.cloudidentity.groups.v1.SecuritySettings"
 )
+
+func ciMask(m string) []string {
+	var out []string
+	for _, f := range strings.Split(m, ",") {
+		if f = strings.TrimSpace(f); f != "" {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+func securitySettingsJSON(ss SecuritySettings) *ci.SecuritySettings {
+	out := &ci.SecuritySettings{Name: ss.Name}
+	if ss.Query != "" {
+		out.MemberRestriction = &ci.MemberRestriction{Query: ss.Query, Evaluation: &ci.RestrictionEvaluation{State: ss.Evaluation}}
+	}
+	return out
+}
+
+// evaluated adds the MEMBER role's restrictionEvaluations to mj, when g
+// has a member restriction: "Evaluations of restrictions applied to
+// parent group on this membership".
+func (r *Registry) evaluated(g *Group, m GroupMember, mj *ci.Membership) *ci.Membership {
+	state := r.MemberEvaluation(g, m.Email)
+	if state == "" {
+		return mj
+	}
+	for _, role := range mj.Roles {
+		if role.Name == "MEMBER" {
+			role.RestrictionEvaluations = &ci.RestrictionEvaluations{
+				MemberRestrictionEvaluation: &ci.MembershipRoleRestrictionEvaluation{State: state}}
+		}
+	}
+	return mj
+}
 
 // IsCloudIdentityPath is whether path is Cloud Identity's.
 func IsCloudIdentityPath(path string) bool {
-	return path == "/v1/groups" || strings.HasPrefix(path, "/v1/groups/") || strings.HasPrefix(path, "/v1/groups:")
+	if path == "/v1/groups" || strings.HasPrefix(path, "/v1/groups/") || strings.HasPrefix(path, "/v1/groups:") {
+		return true
+	}
+	for _, res := range []string{"inboundSamlSsoProfiles", "inboundOidcSsoProfiles", "inboundSsoAssignments"} {
+		if path == "/v1/"+res || strings.HasPrefix(path, "/v1/"+res+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 func ciTime(t time.Time) string { return t.UTC().Format(time.RFC3339Nano) }
@@ -296,10 +341,31 @@ func (r *Registry) identityRoutes(rt *rest.Router) {
 		return doneOp(w, "", nil)
 	})
 	rt.Handle("GET /v1/groups/{group}/securitySettings", func(w http.ResponseWriter, req *http.Request) error {
-		return apierror.Unimplemented("Not implemented here: a group's security settings (member restrictions).")
+		for _, f := range ciMask(req.URL.Query().Get("readMask")) {
+			if f != "*" && f != "member_restriction" && f != "memberRestriction" {
+				return apierror.InvalidArgument("Invalid readMask field %q: it may only contain member_restriction.", f)
+			}
+		}
+		ss, err := r.GetSecuritySettings("groups/" + req.PathValue("group") + "/securitySettings")
+		if err != nil {
+			return err
+		}
+		return rest.WriteJSON(w, http.StatusOK, securitySettingsJSON(ss))
 	})
 	rt.Handle("PATCH /v1/groups/{group}/securitySettings", func(w http.ResponseWriter, req *http.Request) error {
-		return apierror.Unimplemented("Not implemented here: a group's security settings (member restrictions).")
+		var in ci.SecuritySettings
+		if err := rest.DecodeJSON(req, &in); err != nil {
+			return err
+		}
+		var q string
+		if in.MemberRestriction != nil {
+			q = in.MemberRestriction.Query
+		}
+		ss, err := r.UpdateSecuritySettings("groups/"+req.PathValue("group")+"/securitySettings", q, ciMask(req.URL.Query().Get("updateMask")))
+		if err != nil {
+			return err
+		}
+		return doneOp(w, securitySettingsType, securitySettingsJSON(ss))
 	})
 	rt.Handle("POST /v1/groups/{group}/memberships", func(w http.ResponseWriter, req *http.Request) error {
 		var m ci.Membership
@@ -329,7 +395,7 @@ func (r *Registry) identityRoutes(rt *rest.Router) {
 		if err != nil {
 			return err
 		}
-		return doneOp(w, membershipType, membershipJSON(g, out, true))
+		return doneOp(w, membershipType, r.evaluated(g, out, membershipJSON(g, out, true)))
 	})
 	rt.Handle("GET /v1/groups/{group}/{verb}", func(w http.ResponseWriter, req *http.Request) error {
 		parent := "groups/" + req.PathValue("group")
@@ -360,7 +426,7 @@ func (r *Registry) identityRoutes(rt *rest.Router) {
 			}
 			resp := ci.ListMembershipsResponse{NextPageToken: next, Memberships: []*ci.Membership{}}
 			for _, k := range page {
-				resp.Memberships = append(resp.Memberships, membershipJSON(g, byKey[k], full))
+				resp.Memberships = append(resp.Memberships, r.evaluated(g, byKey[k], membershipJSON(g, byKey[k], full)))
 			}
 			return rest.WriteJSON(w, http.StatusOK, resp)
 		case "memberships:lookup":
@@ -451,7 +517,7 @@ func (r *Registry) identityRoutes(rt *rest.Router) {
 		if err != nil {
 			return err
 		}
-		return rest.WriteJSON(w, http.StatusOK, membershipJSON(g, m, true))
+		return rest.WriteJSON(w, http.StatusOK, r.evaluated(g, m, membershipJSON(g, m, true)))
 	})
 	rt.Handle("DELETE /v1/groups/{group}/memberships/{membership}", func(w http.ResponseWriter, req *http.Request) error {
 		if err := r.DeleteMembership("groups/" + req.PathValue("group") + "/memberships/" + req.PathValue("membership")); err != nil {
@@ -459,8 +525,8 @@ func (r *Registry) identityRoutes(rt *rest.Router) {
 		}
 		return doneOp(w, "", nil)
 	})
-	for _, res := range []string{"allowlistedDomains", "customers", "devices", "inboundOidcSsoProfiles", "inboundSamlSsoProfiles",
-		"inboundSsoAssignments", "policies"} {
+	r.inboundSSORoutes(rt)
+	for _, res := range []string{"allowlistedDomains", "customers", "devices", "policies"} {
 		refuse := func(w http.ResponseWriter, req *http.Request) error {
 			return apierror.Unimplemented("Not implemented here: Cloud Identity's %s; its groups and memberships are served.", res)
 		}

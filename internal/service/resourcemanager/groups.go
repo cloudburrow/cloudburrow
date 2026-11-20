@@ -66,6 +66,9 @@ type Group struct {
 	CreateTime  time.Time         `json:"createTime"`
 	UpdateTime  time.Time         `json:"updateTime"`
 	Members     []GroupMember     `json:"members,omitempty"`
+	// MemberRestriction is the security settings' member restriction
+	// query (groupsecurity.go, #1959); empty for none.
+	MemberRestriction string `json:"memberRestriction,omitempty"`
 }
 
 // Name is the group's resource name, groups/{id}.
@@ -464,7 +467,8 @@ func (r *Registry) DeleteGroup(name string) error {
 	if err := r.st.Delete(groupPrefix + g.ID); err != nil {
 		return apierror.Internal(err, "delete group")
 	}
-	return nil
+	// Its SSO assignment (#1959) targets nothing any more.
+	return r.dropGroupAssignmentsLocked(g.Name())
 }
 
 // membershipRoles checks roles (default MEMBER): each OWNER, MANAGER or
@@ -563,6 +567,9 @@ func (r *Registry) CreateMembershipExpiring(parent, email, namespace string, rol
 		}
 	}
 	if err := r.securityMemberLocked(g, email); err != nil {
+		return nil, GroupMember{}, err
+	}
+	if err := r.checkRestrictionLocked(g, email); err != nil {
 		return nil, GroupMember{}, err
 	}
 	typ, err := r.memberTypeLocked(email)
