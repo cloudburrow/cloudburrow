@@ -156,13 +156,13 @@ func TestConsoleLogExplorerThroughView(t *testing.T) {
 	ctx := context.Background()
 	bucket := "projects/proj-1/locations/global/buckets/_Default"
 	if _, err := svc.admin.ConfigServer().CreateView(ctx, &loggingpb.CreateViewRequest{Parent: bucket, ViewId: "errors",
-		View: &loggingpb.LogView{Filter: "severity>=ERROR"}}); err != nil {
+		View: &loggingpb.LogView{Filter: `LOG_ID("errors")`}}); err != nil {
 		t.Fatal(err)
 	}
 	writeConsoleEntries(t, svc,
 		textEntry("projects/proj-1/logs/app", "fine", "INFO", time.Now()),
-		textEntry("projects/proj-1/logs/app", "broke", "ERROR", time.Now()),
-		textEntry("projects/proj-1/logs/app", "broke long ago", "ERROR", time.Now().Add(-40*24*time.Hour)))
+		textEntry("projects/proj-1/logs/errors", "broke", "ERROR", time.Now()),
+		textEntry("projects/proj-1/logs/errors", "broke long ago", "ERROR", time.Now().Add(-40*24*time.Hour)))
 
 	get := func(path string) (int, string) {
 		resp, err := http.Get(hs.URL + path)
@@ -175,7 +175,7 @@ func TestConsoleLogExplorerThroughView(t *testing.T) {
 	}
 	code, body := get("/api/logs/buckets?parent=projects/proj-1")
 	if code != 200 || !strings.Contains(body, `"retentionDays":30`) || !strings.Contains(body, bucket+"/views/errors") ||
-		!strings.Contains(body, "severity\\u003e=ERROR") {
+		!strings.Contains(body, `LOG_ID(\"errors\")`) {
 		t.Fatalf("buckets = %d %s", code, body)
 	}
 	view := bucket + "/views/errors"
@@ -232,6 +232,6 @@ func TestConsoleLogExplorerThroughView(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 	writeConsoleEntries(t, svc,
 		textEntry("projects/proj-1/logs/app", "fine again", "INFO", time.Now()),
-		textEntry("projects/proj-1/logs/app", "tailed error", "ERROR", time.Now()))
+		textEntry("projects/proj-1/logs/errors", "tailed error", "ERROR", time.Now()))
 	next("tailed error")
 }

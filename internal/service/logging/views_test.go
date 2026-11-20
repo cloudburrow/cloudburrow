@@ -27,8 +27,6 @@ func TestViewFilterAndRetentionOnRead(t *testing.T) {
 		{Name: "stdout", Filter: `SOURCE("projects/proj-1") AND LOG_ID("stdout")`},
 		{Name: "notgce", Filter: `NOT resource.type = "gce_instance"`},
 		{Name: "or", Filter: `LOG_ID("stderr") OR resource.type = "gce_instance"`},
-		{Name: "compound", Filter: `NOT (LOG_ID("stdout") AND resource.type = "global")`},
-		{Name: "search", Filter: `SEARCH("x")`},
 	} {
 		if _, err := cs.CreateView(ctx, &loggingpb.CreateViewRequest{Parent: g + "/buckets/_Default", ViewId: v.Name,
 			View: &loggingpb.LogView{Filter: v.Filter}}); err != nil {
@@ -64,11 +62,22 @@ func TestViewFilterAndRetentionOnRead(t *testing.T) {
 		}
 	}
 	// Log views take OR (flexible filters), but not NOT on a compound
-	// statement, nor SEARCH.
-	for _, v := range []string{"compound", "search"} {
-		if _, code := read(g + "/buckets/_Default/views/" + v); code != codes.Unimplemented {
-			t.Errorf("the view %s = %v, want UNIMPLEMENTED", v, code)
+	// statement, SEARCH, bare text or fields beyond resource.type,
+	// resource.labels, labels and apphub (#2028): CreateView and UpdateView
+	// refuse them as INVALID_ARGUMENT.
+	for _, f := range []string{`NOT (LOG_ID("stdout") AND resource.type = "global")`, `SEARCH("x")`, `hello`,
+		`severity>=ERROR`, `LOG_ID("stdout") AND logName:"stdout"`} {
+		if _, err := cs.CreateView(ctx, &loggingpb.CreateViewRequest{Parent: g + "/buckets/_Default", ViewId: "refused",
+			View: &loggingpb.LogView{Filter: f}}); status.Code(err) != codes.InvalidArgument {
+			t.Errorf("CreateView with %q = %v, want INVALID_ARGUMENT", f, err)
 		}
+		if _, err := cs.UpdateView(ctx, &loggingpb.UpdateViewRequest{Name: g + "/buckets/_Default/views/or",
+			View: &loggingpb.LogView{Filter: f}, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"filter"}}}); status.Code(err) != codes.InvalidArgument {
+			t.Errorf("UpdateView with %q = %v, want INVALID_ARGUMENT", f, err)
+		}
+	}
+	if got, code := read(g + "/buckets/_Default/views/or"); len(got) != 2 || code != codes.OK {
+		t.Errorf("the view or after refused updates = %v, %v; want its 2 entries", got, code)
 	}
 
 	// Retention: one day on _Default ages the two-day-old entry out, and

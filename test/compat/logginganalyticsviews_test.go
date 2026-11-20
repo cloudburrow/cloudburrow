@@ -82,10 +82,13 @@ func newLinkFixture(t *testing.T, h *Harness, prefix string) *linkFixture {
 	return f
 }
 
+// write writes one entry with the severity sev, also held in the label
+// level: a log view filter takes labels, not severity (#2028).
 func (f *linkFixture) write(msg string, sev ltype.LogSeverity, at time.Time) {
 	f.t.Helper()
 	js, _ := structpb.NewStruct(map[string]any{"msg": msg})
 	e := &loggingpb.LogEntry{LogName: f.logName, Severity: sev, Payload: &loggingpb.LogEntry_JsonPayload{JsonPayload: js},
+		Labels:   map[string]string{"level": sev.String()},
 		Resource: &mrpb.MonitoredResource{Type: "global", Labels: map[string]string{"project_id": f.project}}}
 	if !at.IsZero() {
 		e.Timestamp = timestamppb.New(at)
@@ -194,7 +197,7 @@ func TestLoggingLinkedDatasetViewsRetentionAndDeleteLog(t *testing.T) {
 	f.write("e1", ltype.LogSeverity_ERROR, time.Time{})
 	f.write("i1", ltype.LogSeverity_INFO, time.Time{})
 	if _, err := f.cfg.CreateView(ctx, &loggingpb.CreateViewRequest{Parent: f.bucket, ViewId: "errors",
-		View: &loggingpb.LogView{Filter: "severity>=ERROR"}}); err != nil {
+		View: &loggingpb.LogView{Filter: `labels.level = "ERROR" OR labels.level = "CRITICAL"`}}); err != nil {
 		t.Fatalf("CreateView: %v", err)
 	}
 	f.link()
@@ -211,12 +214,12 @@ func TestLoggingLinkedDatasetViewsRetentionAndDeleteLog(t *testing.T) {
 
 	// A view made after the link, and a changed filter.
 	if _, err := f.cfg.CreateView(ctx, &loggingpb.CreateViewRequest{Parent: f.bucket, ViewId: "info",
-		View: &loggingpb.LogView{Filter: "severity=INFO"}}); err != nil {
+		View: &loggingpb.LogView{Filter: `labels.level = "INFO"`}}); err != nil {
 		t.Fatalf("CreateView after the link: %v", err)
 	}
 	f.expect("after CreateView", "info", "i1")
 	if _, err := f.cfg.UpdateView(ctx, &loggingpb.UpdateViewRequest{Name: f.bucket + "/views/errors",
-		View: &loggingpb.LogView{Filter: "severity=CRITICAL"}, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"filter"}}}); err != nil {
+		View: &loggingpb.LogView{Filter: `labels.level = "CRITICAL"`}, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"filter"}}}); err != nil {
 		t.Fatalf("UpdateView: %v", err)
 	}
 	f.expect("after UpdateView", "errors", "e2")
@@ -272,7 +275,7 @@ func TestLoggingLinkedDatasetAcrossRestarts(t *testing.T) {
 	restart := bigQueryEmulatorRestarter(t)
 	f.write("before", ltype.LogSeverity_ERROR, time.Time{})
 	if _, err := f.cfg.CreateView(f.ctx, &loggingpb.CreateViewRequest{Parent: f.bucket, ViewId: "errors",
-		View: &loggingpb.LogView{Filter: "severity>=ERROR"}}); err != nil {
+		View: &loggingpb.LogView{Filter: `labels.level = "ERROR" OR labels.level = "CRITICAL"`}}); err != nil {
 		t.Fatalf("CreateView: %v", err)
 	}
 	f.link()

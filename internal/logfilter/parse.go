@@ -613,17 +613,24 @@ func (p *parser) boolFunc() (node, *Error) {
 	}
 }
 
-// CheckView refuses what a log view filter may not hold. Log views take
-// source(), log_id() and comparisons, joined by AND and OR, with NOT on one
-// of those but never on a compound statement
-// (docs.cloud.google.com/logging/docs/logs-views); global restrictions and
-// the other functions are refused.
+// CheckView refuses what a log view filter may not hold, as the log views
+// docs list it (docs.cloud.google.com/logging/docs/logs-views, "Filter
+// syntax"): source() and log_id(), and comparisons of resource types
+// (resource.type), resource labels (resource.labels.KEY), labels
+// (labels.KEY) and App Hub labels (apphub.application.location and the
+// like), with any of the language's comparison operators; joined by AND and
+// OR; NOT on one source(), log_id() or comparison, never on a compound
+// statement. Every other field (severity, logName, timestamp, payloads),
+// every other function (SEARCH, sample, ip_in_net, cast, regexp_extract)
+// and bare text (a global restriction) are refused.
 func (f *Filter) CheckView() error {
 	if f == nil {
 		return nil
 	}
 	return checkView(f.root)
 }
+
+const viewTakes = "a log view filter takes source(), log_id() and comparisons of resource.type, resource.labels, labels and apphub fields only"
 
 func checkView(n node) error {
 	switch v := n.(type) {
@@ -647,8 +654,41 @@ func checkView(n node) error {
 			return errorf("Invalid filter: in a log view filter, NOT applies to one comparison, source() or log_id(), not to a compound statement")
 		}
 		return checkView(v.n)
-	case cmpNode, presenceNode, logIDNode, funcNode:
+	case logIDNode, funcNode:
+		return nil
+	case cmpNode:
+		return checkViewField(v.lhs)
+	case presenceNode:
+		return checkViewField(v.lhs)
+	case globalNode:
+		return errorf("Invalid filter: %s; bare text (a global restriction) is not one", viewTakes)
+	case searchNode:
+		return errorf("Invalid filter: %s; SEARCH is not one", viewTakes)
+	}
+	return errorf("Invalid filter: %s", viewTakes)
+}
+
+// checkViewField refuses a comparison on a field a log view filter does not
+// take.
+func checkViewField(l lhsExpr) error {
+	p, ok := l.(pathLHS)
+	if !ok {
+		return errorf("Invalid filter: %s; cast() and regexp_extract() are not", viewTakes)
+	}
+	if viewField(p.fi.path) {
 		return nil
 	}
-	return errorf("Invalid filter: a log view filter takes source(), log_id() and field comparisons only")
+	return errorf("Invalid filter: %s; %s is not one of them", viewTakes, strings.Join(p.fi.path, "."))
+}
+
+func viewField(path []string) bool {
+	switch path[0] {
+	case "resource":
+		return len(path) == 2 && path[1] == "type" || len(path) >= 3 && path[1] == "labels"
+	case "labels":
+		return len(path) >= 2
+	case "apphub":
+		return len(path) >= 3
+	}
+	return false
 }

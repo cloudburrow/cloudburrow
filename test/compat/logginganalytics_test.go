@@ -269,7 +269,7 @@ func TestGcloudLoggingLinks(t *testing.T) {
 	g.must("logging", "buckets", "create", bucketID, "--location=global", "--enable-analytics", p)
 	t.Cleanup(func() { _, _ = g.run(nil, "logging", "buckets", "delete", bucketID, "--location=global", "--quiet", p) })
 	// A log view made with gcloud is a view of the linked dataset (#1435).
-	g.must("logging", "views", "create", "errors", "--bucket="+bucketID, "--location=global", "--log-filter=severity>=ERROR", p)
+	g.must("logging", "views", "create", "errors", "--bucket="+bucketID, "--location=global", `--log-filter=LOG_ID("errors")`, p)
 	g.must("logging", "links", "create", linkID, "--bucket="+bucketID, "--location=global", "--description=gcloud", p)
 	out := g.must("logging", "links", "describe", linkID, "--bucket="+bucketID, "--location=global", p, "--format=value(bigqueryDataset.datasetId)")
 	if want := "bigquery.googleapis.com/projects/" + project + "/datasets/" + linkID; strings.TrimSpace(out) != want {

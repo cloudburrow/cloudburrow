@@ -207,7 +207,7 @@ func TestLinkedDatasetsFollowTheBucket(t *testing.T) {
 	write("app", "a1", ltype.LogSeverity_ERROR)
 	write("other", "o1", ltype.LogSeverity_INFO)
 	if _, err := cfg.CreateView(ctx, &loggingpb.CreateViewRequest{Parent: bucket, ViewId: "errors",
-		View: &loggingpb.LogView{Filter: "severity>=ERROR"}}); err != nil {
+		View: &loggingpb.LogView{Filter: `LOG_ID("app")`}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := cfg.CreateLink(ctx, &loggingpb.CreateLinkRequest{Parent: bucket, LinkId: "la_link"}); err != nil {
@@ -237,13 +237,13 @@ func TestLinkedDatasetsFollowTheBucket(t *testing.T) {
 	check("after writes", "_AllLogs", "a1,o1,a2,o2")
 
 	if _, err := cfg.UpdateView(ctx, &loggingpb.UpdateViewRequest{Name: bucket + "/views/errors",
-		View: &loggingpb.LogView{Filter: "severity<=INFO"}, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"filter"}}}); err != nil {
+		View: &loggingpb.LogView{Filter: `LOG_ID("other")`}, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"filter"}}}); err != nil {
 		t.Fatal(err)
 	}
 	check("after UpdateView", "errors", "o1,o2")
 	if _, err := cfg.CreateView(ctx, &loggingpb.CreateViewRequest{Parent: bucket, ViewId: "odd",
-		View: &loggingpb.LogView{Filter: "SEARCH(\"x\")"}}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("CreateView with a filter CloudBurrow does not evaluate on a linked bucket = %v; want UNIMPLEMENTED", err)
+		View: &loggingpb.LogView{Filter: "SEARCH(\"x\")"}}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("CreateView with a filter log views refuse, on a linked bucket = %v; want INVALID_ARGUMENT", err)
 	}
 	if _, err := cfg.DeleteView(ctx, &loggingpb.DeleteViewRequest{Name: bucket + "/views/errors"}); err != nil {
 		t.Fatal(err)

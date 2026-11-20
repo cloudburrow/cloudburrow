@@ -298,28 +298,51 @@ func TestSource(t *testing.T) {
 	}
 }
 
-// TestCheckView: log views take AND, OR, NOT on one term, comparisons,
-// source() and log_id(); not NOT on a compound statement or SEARCH.
+// TestCheckView: log views take source(), log_id() and comparisons of
+// resource.type, resource.labels, labels and apphub fields, with AND, OR
+// and NOT on one term (docs.cloud.google.com/logging/docs/logs-views); not
+// NOT on a compound statement, other fields, other functions, SEARCH or
+// bare text.
 func TestCheckView(t *testing.T) {
 	opts := Options{Source: func(string) (func(Record) bool, error) { return func(Record) bool { return true }, nil }}
 	for q, ok := range map[string]bool{
-		`source("projects/p1") AND log_id("stdout")`:          true,
-		`NOT resource.type = "gce_instance"`:                  true,
-		`log_id("a") OR log_id("b")`:                          true,
-		`resource.labels.zone:"us" AND labels.env =~ "^prod"`: true,
-		`severity >= ERROR`:                                   true,
-		`NOT (log_id("a") AND resource.type = "global")`:      false,
-		`NOT (log_id("a") OR log_id("b"))`:                    false,
-		`SEARCH("x")`:                                         false,
-		`hello`:                                               false,
-		`sample(insertId, 0.5)`:                               false,
+		`source("projects/p1") AND log_id("stdout")`:                                        true,
+		`SOURCE("projects/p1") AND resource.type = "gce_instance" AND LOG_ID("x")`:          true,
+		`NOT resource.type = "gce_instance"`:                                                true,
+		`NOT log_id("stdout") AND NOT source("projects/p1")`:                                true,
+		`log_id("a") OR log_id("b")`:                                                        true,
+		`source("projects/p") AND (resource.type="gae_app" OR resource.type="gke_cluster")`: true,
+		`resource.labels.zone:"us" AND labels.env =~ "^prod"`:                               true,
+		`resource.labels.container_name="mycontainer"`:                                      true,
+		`labels.test="FALSE"`:                                                               true,
+		`labels."a/b" != "x" AND labels.n >= 3 AND labels.m !~ "y"`:                         true,
+		`apphub.application.location="global"`:                                              true,
+		`resource.labels.zone:*`:                                                            true,
+		`NOT (log_id("a") AND resource.type = "global")`:                                    false,
+		`NOT (log_id("a") OR log_id("b"))`:                                                  false,
+		`severity >= ERROR`:                                                                 false,
+		`logName = "projects/p1/logs/stdout"`:                                               false,
+		`timestamp >= "2026-01-01T00:00:00Z"`:                                               false,
+		`textPayload:"x"`:                                                                   false,
+		`jsonPayload.msg = "x"`:                                                             false,
+		`resource:"x"`:                                                                      false,
+		`resource.labels:"x"`:                                                               false,
+		`log_id("a") AND severity = ERROR`:                                                  false,
+		`SEARCH("x")`:                                                                       false,
+		`hello`:                                                                             false,
+		`sample(insertId, 0.5)`:                                                             false,
+		`cast(labels.n, STRING) = "3"`:                                                      false,
 	} {
 		f, err := Parse(q, opts)
 		if err != nil {
 			t.Fatalf("%q: %v", q, err)
 		}
-		if err := f.CheckView(); (err == nil) != ok {
+		err = f.CheckView()
+		if (err == nil) != ok {
 			t.Errorf("%q: CheckView = %v, want ok %v", q, err, ok)
+		}
+		if err != nil && !strings.HasPrefix(err.Error(), "Invalid filter: ") {
+			t.Errorf("%q: CheckView = %q, want an \"Invalid filter: \" message", q, err)
 		}
 	}
 }
