@@ -90,8 +90,24 @@ func TestQueueFieldsAreRefusedOrKept(t *testing.T) {
 		_, err = c.ListQueues(cc, &taskspb.ListQueuesRequest{Parent: loc, Filter: f})
 		wantCodeNaming(t, err, codes.InvalidArgument, "filter")
 	}
-	_, err = c.ListQueues(cc, &taskspb.ListQueuesRequest{Parent: loc, Filter: `name =~ "q.*"`})
-	wantCodeNaming(t, err, codes.Unimplemented, "regular expressions")
+	// Cloud Logging's regular expressions (#1943): an RE2 =~ and !~.
+	all, err := c.ListQueues(cc, &taskspb.ListQueuesRequest{Parent: loc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for f, want := range map[string]int{
+		`name =~ "/queues/"`:        len(all.GetQueues()),
+		`name !~ "/queues/"`:        0,
+		`name =~ "` + queueA + `$"`: 1,
+		`state =~ "^RUN"`:           -1,
+	} {
+		got, err := c.ListQueues(cc, &taskspb.ListQueuesRequest{Parent: loc, Filter: f})
+		if err != nil || (want >= 0 && len(got.GetQueues()) != want) {
+			t.Errorf("%s = %d queues, %v; want %d", f, len(got.GetQueues()), err, want)
+		}
+	}
+	_, err = c.ListQueues(cc, &taskspb.ListQueuesRequest{Parent: loc, Filter: `name =~ "("`})
+	wantCodeNaming(t, err, codes.InvalidArgument, "regular expression")
 }
 
 // Any Queue field can be filtered on, combined with AND, OR and NOT (#1255).

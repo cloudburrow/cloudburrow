@@ -45,8 +45,51 @@ import (
 type Option func(*config)
 
 type config struct {
-	fields  map[string]bool   // allowed top-level paths; nil allows every field
-	aliases map[string]string // filter name -> descriptor path
+	fields   map[string]bool   // allowed top-level paths; nil allows every field
+	aliases  map[string]string // filter name -> descriptor path
+	computed map[string]func(proto.Message) string
+}
+
+// Computed adds a string-valued filter field that is not a message field,
+// such as Vertex AI's endpoint (an Endpoint's ID); it takes = != : and
+// wildcards as a string field does.
+func Computed(name string, get func(proto.Message) string) Option {
+	return func(c *config) {
+		if c.computed == nil {
+			c.computed = map[string]func(proto.Message) string{}
+		}
+		c.computed[name] = get
+	}
+}
+
+// computedRestriction is FIELD OP VALUE on a Computed field.
+type computedRestriction struct {
+	get  func(proto.Message) string
+	op   string
+	vals []value
+}
+
+func (r *computedRestriction) eval(m protoreflect.Message) bool {
+	s := r.get(m.Interface())
+	for _, v := range r.vals {
+		var ok bool
+		switch {
+		case r.op == ":" && v.s == "*":
+			ok = s != ""
+		case v.pat:
+			ok = Wildcard(v.s, s)
+		case r.op == ":":
+			ok = strings.Contains(strings.ToLower(s), strings.ToLower(v.s))
+		case r.op == "=" || r.op == "!=":
+			ok = s == v.s
+		default:
+			ok = cmpOrdered(s, v.s, r.op)
+		}
+		if ok {
+			return r.op != "!="
+		}
+	}
+	return r.op == "!="
 }
 
 // Fields restricts a filter or an order_by to the documented fields. A name
@@ -85,6 +128,9 @@ func (c *config) allowed(p string) bool {
 	if c.fields == nil {
 		return true
 	}
+	if s := snake(p); s != p && c.allowed(s) {
+		return true
+	}
 	for {
 		if c.fields[p] {
 			return true
@@ -95,6 +141,23 @@ func (c *config) allowed(p string) bool {
 		}
 		p = p[:i]
 	}
+}
+
+// snake turns a JSON camelCase path (displayName) into its proto name
+// (display_name).
+func snake(p string) string {
+	var b strings.Builder
+	for i := 0; i < len(p); i++ {
+		c := p[i]
+		if c >= 'A' && c <= 'Z' {
+			if i > 0 && p[i-1] != '.' {
+				b.WriteByte('_')
+			}
+			c += 'a' - 'A'
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
 }
 
 func (c *config) resolve(p string) string {
@@ -770,6 +833,14 @@ func (p *parser) parseRestriction() (node, error) {
 	}
 	if !p.cfg.allowed(name) {
 		return nil, p.errorf("field %q is not a filterable field", name)
+	}
+	if get, ok := p.cfg.computed[name]; ok {
+		v, q, err := p.readValue()
+		if err != nil {
+			return nil, err
+		}
+		pat := strings.Contains(v, "*") && !(op == ":" && v == "*" && !q)
+		return &computedRestriction{get: get, op: op, vals: []value{{s: v, pat: pat}}}, nil
 	}
 	r := &restriction{op: op}
 	steps, err := resolvePath(p.md, p.cfg.resolve(name), true)

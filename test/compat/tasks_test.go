@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
+	"regexp"
 	"testing"
 	"time"
 
@@ -244,9 +245,10 @@ func TestTasksRefusesWhatItWouldDrop(t *testing.T) {
 	}
 	// stackdriver_logging_config is served since #1256
 	// (TestTasksStackdriverLoggingConfig).
-	it := c.ListQueues(ctx, &taskspb.ListQueuesRequest{Parent: location(h), Filter: `name =~ "compat.*"`})
-	if _, err := it.Next(); status.Code(err) != codes.Unimplemented {
-		t.Errorf("ListQueues with a regular expression = %v; want Unimplemented", err)
+	// Cloud Logging's regular-expression operator (#1943).
+	it := c.ListQueues(ctx, &taskspb.ListQueuesRequest{Parent: location(h), Filter: `name =~ "` + regexp.QuoteMeta(named) + `$"`})
+	if q, err := it.Next(); err != nil || q.GetName() != named {
+		t.Errorf("ListQueues with a regular expression = %v, %v; want %s", q.GetName(), err, named)
 	}
 }
 

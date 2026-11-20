@@ -552,8 +552,13 @@ func (p *filterParser) parseRestriction() (*filterNode, error) {
 			p.filter, field, p.what)
 	}
 	var values []string
+	// A value list is AIP-160's composite argument: values joined by OR
+	// (any matches) or by AND (all match, as for a repeated field such as
+	// topics), each optionally negated by NOT (#1943).
+	listJoin, negated := "", map[int]bool{}
 	if p.keyword("(") {
 		p.pos++
+		neg := false
 		for {
 			t, ok := p.peek()
 			if !ok {
@@ -563,11 +568,20 @@ func (p *filterParser) parseRestriction() (*filterNode, error) {
 			if !t.quoted && t.text == ")" {
 				break
 			}
-			if !t.quoted && (t.text == "OR") {
+			if !t.quoted && (t.text == "OR" || t.text == "AND") {
+				if listJoin != "" && listJoin != t.text {
+					return nil, apierror.InvalidArgument("list filter %q: a value list mixes AND and OR; group it with parentheses", p.filter)
+				}
+				listJoin = t.text
 				continue
 			}
-			if !t.quoted && (t.text == "AND" || t.text == "NOT") {
-				return nil, apierror.Unimplemented("list filter %q: %s inside a value list is not implemented; only OR is", p.filter, t.text)
+			if !t.quoted && t.text == "NOT" {
+				neg = !neg
+				continue
+			}
+			if neg {
+				negated[len(values)] = true
+				neg = false
 			}
 			values = append(values, t.text)
 		}
@@ -602,6 +616,21 @@ func (p *filterParser) parseRestriction() (*filterNode, error) {
 				return nil, apierror.InvalidArgument("list filter %q: %s takes a duration in seconds such as 259200s, got %q", p.filter, field, v)
 			}
 		}
+	}
+	if listJoin == "AND" || len(negated) > 0 {
+		join := "OR"
+		if listJoin == "AND" {
+			join = "AND"
+		}
+		n := &filterNode{op: join}
+		for i, v := range values {
+			c := &filterNode{field: field, cmp: op, values: []string{v}}
+			if negated[i] {
+				c = &filterNode{op: "NOT", children: []*filterNode{c}}
+			}
+			n.children = append(n.children, c)
+		}
+		return n, nil
 	}
 	return &filterNode{field: field, cmp: op, values: values}, nil
 }

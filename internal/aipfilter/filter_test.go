@@ -9,6 +9,7 @@ import (
 	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
 	locationpb "google.golang.org/genproto/googleapis/cloud/location"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -186,12 +187,28 @@ func TestFilterFieldsAndAliases(t *testing.T) {
 		!strings.Contains(err.Error(), "not a filterable field") {
 		t.Fatalf("restricted field: %v", err)
 	}
+	if _, err := Apply(`timeZone = UTC`, jobs(), Fields("time_zone")); err != nil {
+		t.Fatalf("a JSON name of an allowed field: %v", err)
+	}
 	if _, err := Apply(`http_target.headers.env = prod`, jobs(), Fields("http_target")); err != nil {
 		t.Fatalf("subpath of an allowed field: %v", err)
 	}
 	got, err := Apply(`env = dev`, jobs(), Alias("env", "http_target.headers.env"))
 	if err != nil || len(got) != 1 || !strings.HasSuffix(got[0].GetName(), "beta-dev") {
 		t.Fatalf("alias: %v %v", got, err)
+	}
+}
+
+func TestComputed(t *testing.T) {
+	id := Computed("job", func(m proto.Message) string {
+		n := m.(*schedulerpb.Job).GetName()
+		return n[strings.LastIndexByte(n, '/')+1:]
+	})
+	for f, want := range map[string]int{`job = gamma`: 1, `job != gamma`: 2, `job = "*-dev"`: 1, `job:alpha OR job:beta`: 2, `job:*`: 3} {
+		got, err := Apply(f, jobs(), id)
+		if err != nil || len(got) != want {
+			t.Errorf("%s = %d, %v; want %d", f, len(got), err, want)
+		}
 	}
 }
 

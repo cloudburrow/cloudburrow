@@ -21,6 +21,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/cloudburrow/cloudburrow/internal/aipfilter"
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/lro"
 	"github.com/cloudburrow/cloudburrow/internal/modelgarden"
@@ -281,6 +282,14 @@ func (es *endpointService) GetEndpoint(_ context.Context, req *aiplatformpb.GetE
 	return endpointProto(m, e), nil
 }
 
+var vertexEndpointFilter = []aipfilter.Option{
+	aipfilter.Fields("endpoint", "display_name", "labels"),
+	aipfilter.Computed("endpoint", func(m proto.Message) string {
+		n := m.(*aiplatformpb.Endpoint).GetName()
+		return n[strings.LastIndexByte(n, '/')+1:]
+	}),
+}
+
 func (es *endpointService) ListEndpoints(_ context.Context, req *aiplatformpb.ListEndpointsRequest) (*aiplatformpb.ListEndpointsResponse, error) {
 	m, err := es.garden()
 	if err != nil {
@@ -290,14 +299,28 @@ func (es *endpointService) ListEndpoints(_ context.Context, req *aiplatformpb.Li
 	if err != nil {
 		return nil, grpcError(err)
 	}
-	if req.GetFilter() != "" {
-		return nil, grpcError(apierror.Unimplemented("ListEndpoints filter is not supported"))
+	if strings.Contains(req.GetFilter(), "base_model_name") {
+		return nil, grpcError(apierror.Unimplemented("ListEndpoints filter on base_model_name is not supported"))
 	}
-	out := &aiplatformpb.ListEndpointsResponse{}
+	var all []*aiplatformpb.Endpoint
 	for _, e := range m.Endpoints(p, l) {
-		out.Endpoints = append(out.Endpoints, endpointProto(m, e))
+		all = append(all, endpointProto(m, e))
 	}
-	return out, nil
+	// ListEndpointsRequest documents the filter's fields (endpoint, the ID;
+	// display_name; labels) and order_by's (display_name, create_time,
+	// update_time).
+	all, err = aipfilter.Apply(req.GetFilter(), all, vertexEndpointFilter...)
+	if err != nil {
+		return nil, grpcError(err)
+	}
+	if err := aipfilter.SortBy(req.GetOrderBy(), all, aipfilter.Fields("display_name", "create_time", "update_time")); err != nil {
+		return nil, grpcError(err)
+	}
+	items, next, err := aipfilter.Page("vertex-endpoints:"+req.GetParent()+"|"+req.GetFilter()+"|"+req.GetOrderBy(), all, req.GetPageToken(), int(req.GetPageSize()))
+	if err != nil {
+		return nil, grpcError(err)
+	}
+	return &aiplatformpb.ListEndpointsResponse{Endpoints: items, NextPageToken: next}, nil
 }
 
 func (es *endpointService) UndeployModel(_ context.Context, req *aiplatformpb.UndeployModelRequest) (*longrunningpb.Operation, error) {

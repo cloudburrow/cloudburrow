@@ -119,6 +119,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/ac3/` | An AC-3 and E-AC-3 decoder written from ATSC A/52, for a video's audio track in Vertex AI EmbedContent (#1739). |
 | `internal/adapter/run/` | Cloud Run v2 API mapped onto Knative Serving (services, revisions) and Kubernetes batch Jobs (jobs, executions); refuses what it cannot map (ADR-0005). |
 | `internal/admin/` | The loopback-only control API: seed, reset, event inspection. |
+| `internal/aipfilter/` | The shared list `filter` (AIP-160) and `order_by` (AIP-132) evaluator (#1943): compiles a filter or order against a resource's message descriptor (INVALID_ARGUMENT for an unknown field, a wrong-typed value or bad syntax), matches and sorts protocol buffer resources, the Locations mixin's filter, and an order-preserving pager. |
 | `internal/apicontract/` | Pins the Google API contracts CloudBurrow implements against, and where each comes from. |
 | `internal/apienable/` | Refuses calls to an API disabled in their project with Google's `SERVICE_DISABLED` (#1914): the gRPC interceptors and HTTP gate the in-process services and the in-cluster servers wrap, the Service Usage server's decision, and the host endpoint the in-cluster servers ask, with a one-second cache. |
 | `internal/apierror/` | One internal cause mapped to a Google-style gRPC status and JSON error body. |
