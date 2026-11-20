@@ -72,7 +72,8 @@ import (
 const vectorIndexMinBytes = 10 << 20
 
 // vectorIndexDefaultFraction is the fraction of lists probed when
-// fraction_lists_to_search is not given (UNVERIFIED, above).
+// fraction_lists_to_search is not given (UNVERIFIED, re-read 2026-11-19:
+// https://docs.cloud.google.com/bigquery/docs/vector-index, above).
 const vectorIndexDefaultFraction = 0.1
 
 // vectorIndex is one table's vector index, kept in its tableSetting.
