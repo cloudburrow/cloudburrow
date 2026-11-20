@@ -816,7 +816,7 @@ func (p storageAgentPoolsProvider) List(ctx context.Context, project string) (co
 	return listing, nil
 }
 
-const agentPoolIDPattern = `^[a-z]([a-z0-9-._~]{3,61}[a-z0-9])?$`
+const agentPoolIDPattern = `^[a-z]([a-z0-9\-._~]{3,61}[a-z0-9])?$`
 
 func (storageAgentPoolsProvider) CreateForm() (string, []console.Field) {
 	return "Create pool", []console.Field{

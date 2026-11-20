@@ -326,10 +326,12 @@ func TestStorageTransferScheduleFollowsTheInstanceClock(t *testing.T) {
 // covers: storagetransfer.projects.agentPools.create, storagetransfer.projects.agentPools.get, storagetransfer.projects.agentPools.list, storagetransfer.projects.agentPools.patch, storagetransfer.projects.agentPools.delete, storagetransfer.transferOperations.pause, storagetransfer.transferOperations.resume, storagetransfer.transferOperations.cancel
 //
 // TestStorageTransferPosixAgentPool (#1957): an agent pool limited to
-// 1 Mbps carries a transfer of a 2 MB local file slowly enough to pause it
-// (PAUSED, and pause refused when not running), resume it and cancel it
-// (ABORTED); patched to no limit, the pool carries the next run to SUCCESS,
-// and the object holds the file.
+// 1 MB/s (limitMbps is megabytes per second, as Google documents) carries a
+// transfer of a 16 MB local file slowly enough to pause it (PAUSED, and
+// pause refused when not running), resume it and cancel it (ABORTED);
+// patched to 8 MB/s, the next run takes about 2 s, not the 16 s a megabit
+// limit would, and the object holds the file; patched to no limit, the
+// next run finds it unchanged and skips it.
 func TestStorageTransferPosixAgentPool(t *testing.T) {
 	h := New(t)
 	sc := storageClient(t, h)
@@ -338,7 +340,7 @@ func TestStorageTransferPosixAgentPool(t *testing.T) {
 	dst := h.Project() + "-spd"
 	db := companionBucket(t, h, sc, dst, "")
 	dir := t.TempDir()
-	data := bytes.Repeat([]byte("burrow-"), 2<<20/7)
+	data := bytes.Repeat([]byte("burrow-"), 16<<20/7)
 	if err := os.WriteFile(filepath.Join(dir, "big.bin"), data, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -399,13 +401,29 @@ func TestStorageTransferPosixAgentPool(t *testing.T) {
 	}
 
 	if _, err := c.UpdateAgentPool(ctx, &storagetransferpb.UpdateAgentPoolRequest{
+		AgentPool:  &storagetransferpb.AgentPool{Name: pool.GetName(), BandwidthLimit: &storagetransferpb.AgentPool_BandwidthLimit{LimitMbps: 8}},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"bandwidth_limit"}}}); err != nil {
+		t.Fatalf("UpdateAgentPool: %v", err)
+	}
+	start := time.Now()
+	op = runTransfer(t, h, c, job.GetName())
+	if md := waitTransfer(t, h, c, op); md.GetStatus() != storagetransferpb.TransferOperation_SUCCESS ||
+		md.GetCounters().GetBytesCopiedToSink() != int64(len(data)) {
+		t.Errorf("8 MB/s run: %v, counters %+v", md.GetStatus(), md.GetCounters())
+	}
+	// 16 MB at 8 MB/s is 2 s; at 8 megabits it would be 16 s.
+	if d := time.Since(start); d < 1500*time.Millisecond || d > 10*time.Second {
+		t.Errorf("16 MB through an 8 MB/s pool took %v, want about 2 s", d)
+	}
+	if _, err := c.UpdateAgentPool(ctx, &storagetransferpb.UpdateAgentPoolRequest{
 		AgentPool:  &storagetransferpb.AgentPool{Name: pool.GetName(), BandwidthLimit: &storagetransferpb.AgentPool_BandwidthLimit{}},
 		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"bandwidth_limit"}}}); err != nil {
 		t.Fatalf("UpdateAgentPool: %v", err)
 	}
 	op = runTransfer(t, h, c, job.GetName())
+	// The file is in the sink now, unchanged, so the run skips it.
 	if md := waitTransfer(t, h, c, op); md.GetStatus() != storagetransferpb.TransferOperation_SUCCESS ||
-		md.GetCounters().GetBytesCopiedToSink() != int64(len(data)) {
+		md.GetCounters().GetObjectsFromSourceSkippedBySync() != 1 {
 		t.Errorf("unlimited run: %v, counters %+v", md.GetStatus(), md.GetCounters())
 	}
 	if got := objectBody(t, ctx, db, "posix/big.bin"); got != string(data) {

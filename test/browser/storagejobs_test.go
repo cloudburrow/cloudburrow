@@ -132,8 +132,9 @@ func TestStorageBatchOperationsThroughThePage(t *testing.T) {
 	}
 
 	p.navigate("/storage/batch-operations/" + id + "?project=" + project)
-	p.waitFor(fmt.Sprintf(`document.querySelector("#view").textContent.includes("Bucket operations") &&
-		document.querySelector("#view").textContent.includes(%q)`, bucket))
+	p.waitFor(`document.querySelector("#view").textContent.includes("SUCCEEDED")`)
+	p.clickText("#view [role=tab]", "Bucket operations")
+	p.waitFor(fmt.Sprintf(`document.querySelector("#detail-panel").textContent.includes(%q)`, bucket))
 
 	p.navigate("/storage/batch-operations?project=" + project)
 	p.openRowDelete(id, "Delete")
@@ -218,8 +219,8 @@ func TestStorageInventoryReportsThroughThePage(t *testing.T) {
 	}
 	id := cfg.GetName()[strings.LastIndex(cfg.GetName(), "/")+1:]
 	p.navigate("/storage/inventory-reports/" + id + "?project=" + project)
-	p.waitFor(`document.querySelector("#view").textContent.includes("Report history") &&
-		document.querySelector("#view").textContent.includes("Succeeded")`)
+	p.clickText("#view [role=tab]", "Report history")
+	p.waitFor(`document.querySelector("#detail-panel").textContent.includes("Succeeded")`)
 
 	p.navigate("/storage/inventory-reports?project=" + project)
 	if rows := p.listAction("advance-storage-clock", map[string]string{"duration": "1d"}); rows == "" {
@@ -336,4 +337,21 @@ func TestStorageTransferThroughThePage(t *testing.T) {
 		j, err := c.TransferJobs.Get(job.Name, project).Do()
 		return err != nil || j.Status == "DELETED"
 	})
+}
+
+// TestStorageCompanionScreensMeetWCAG (#1957), in the storage shard: the
+// Batch operations, Inventory reports, Transfer jobs and Agent pools lists
+// and their create pages pass the console's WCAG 2.1 AA audit at 320 and
+// 640 CSS pixels.
+func TestStorageCompanionScreensMeetWCAG(t *testing.T) {
+	needService(t, "storage")
+	project := uniqueProject(t)
+	var pages []a11yPage
+	for _, l := range []struct{ name, path string }{
+		{"Batch operations", "/storage/batch-operations"}, {"Inventory reports", "/storage/inventory-reports"},
+		{"Transfer jobs", "/transfer/jobs"}, {"Agent pools", "/transfer/agent-pools"},
+	} {
+		pages = append(pages, listAndCreate(l.name, l.path, project)...)
+	}
+	auditScreens(t, pages)
 }

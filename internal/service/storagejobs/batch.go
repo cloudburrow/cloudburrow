@@ -175,6 +175,11 @@ func (s *BatchServer) route(r *http.Request) (string, any, error) {
 		return "", nil, notFound("%s not found", r.URL.Path)
 	}
 	loc := p[3]
+	// "-" is every location, gcloud's storage batch-operations library
+	// default parent for a list; jobs are all global.
+	if loc == "-" && len(p) == 5 && r.Method == http.MethodGet {
+		loc = "global"
+	}
 	if loc != "global" {
 		return "", nil, invalid("Storage batch operations jobs are in location global only, not %q.", loc)
 	}

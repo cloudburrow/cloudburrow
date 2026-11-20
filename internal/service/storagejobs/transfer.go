@@ -1136,7 +1136,8 @@ func (s *TransferServer) filter(c *stpb.ObjectConditions, items []item) []item {
 	return out
 }
 
-// bandwidth is the bytes per second a run's agent pool allows (0: no
+// bandwidth is the bytes per second a run's agent pool allows: limitMbps is
+// megabytes per second, as Google documents, so 1_000_000 bytes each (0: no
 // limit).
 func (s *TransferServer) bandwidth(spec *stpb.TransferSpec) int64 {
 	var limit int64
@@ -1145,8 +1146,8 @@ func (s *TransferServer) bandwidth(spec *stpb.TransferSpec) int64 {
 			continue
 		}
 		if p, err := s.pool(name); err == nil {
-			if mbps := p.(*stpb.AgentPool).GetBandwidthLimit().GetLimitMbps(); mbps > 0 && (limit == 0 || mbps*125000 < limit) {
-				limit = mbps * 125000
+			if mbps := p.(*stpb.AgentPool).GetBandwidthLimit().GetLimitMbps(); mbps > 0 && (limit == 0 || mbps*1_000_000 < limit) {
+				limit = mbps * 1_000_000
 			}
 		}
 	}

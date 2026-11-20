@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"cloud.google.com/go/longrunning/autogen/longrunningpb"
 	"cloud.google.com/go/storage"
 	sbo "cloud.google.com/go/storagebatchoperations/apiv1"
 	"cloud.google.com/go/storagebatchoperations/apiv1/storagebatchoperationspb"
@@ -450,5 +451,78 @@ func TestStorageBatchOperationsRewriteToKMSKey(t *testing.T) {
 	defer r.Close()
 	if body, _ := io.ReadAll(r); string(body) != "secret a" {
 		t.Errorf("enc/a reads %q after the rewrite", body)
+	}
+}
+
+// covers: storagebatchoperations.projects.locations.operations.cancel, storagebatchoperations.projects.locations.operations.delete
+//
+// TestStorageBatchOperationsOperationCancelAndDelete (#1957), official Go
+// client: a job over a manifest of 20,000 rows runs long enough that
+// cancelling its long-running operation cancels the job (CANCELED, fewer
+// objects processed than listed); cancelling it again is
+// FAILED_PRECONDITION; deleting the operation makes operations.get
+// NOT_FOUND while the job itself stays readable.
+func TestStorageBatchOperationsOperationCancelAndDelete(t *testing.T) {
+	h := New(t)
+	sc := storageClient(t, h)
+	c := batchClient(t, h)
+	ctx := h.Context()
+	setStorageIntelligence(t, h, "STANDARD")
+	t.Cleanup(func() { setStorageIntelligence(t, h, "INHERIT") })
+	name := h.Project() + "-sbc"
+	bh := companionBucket(t, h, sc, name, "")
+	var manifest strings.Builder
+	manifest.WriteString("bucket,name,generation\n")
+	for i := range 20000 {
+		fmt.Fprintf(&manifest, "%s,missing/%05d,\n", name, i)
+	}
+	putCompanionObject(t, ctx, bh, "manifest.csv", manifest.String())
+	parent := "projects/" + h.Project() + "/locations/global"
+	id := "cancel-" + strings.TrimPrefix(h.Project(), "cb-test-")
+	job := manifestJob(name, "gs://"+name+"/manifest.csv")
+	job.Transformation = &storagebatchoperationspb.Job_PutObjectHold{PutObjectHold: &storagebatchoperationspb.PutObjectHold{
+		TemporaryHold: storagebatchoperationspb.PutObjectHold_SET}}
+	op, err := c.CreateJob(ctx, &storagebatchoperationspb.CreateJobRequest{Parent: parent, JobId: id, Job: job})
+	if err != nil {
+		t.Fatalf("CreateJob: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = c.DeleteJob(context.Background(), &storagebatchoperationspb.DeleteJobRequest{Name: parent + "/jobs/" + id})
+	})
+	if err := c.CancelOperation(ctx, &longrunningpb.CancelOperationRequest{Name: op.Name()}); err != nil {
+		t.Fatalf("CancelOperation: %v", err)
+	}
+	var j *storagebatchoperationspb.Job
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		j, err = c.GetJob(ctx, &storagebatchoperationspb.GetJobRequest{Name: parent + "/jobs/" + id})
+		if err != nil {
+			t.Fatalf("GetJob: %v", err)
+		}
+		if j.GetState() != storagebatchoperationspb.Job_RUNNING || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if j.GetState() != storagebatchoperationspb.Job_CANCELED {
+		t.Fatalf("after operations.cancel the job is %v, want CANCELED", j.GetState())
+	}
+	if done := j.GetCounters().GetSucceededObjectCount() + j.GetCounters().GetFailedObjectCount(); done >= 20000 {
+		t.Errorf("a cancelled job processed all %d objects", done)
+	}
+	if _, err := op.Wait(ctx); err == nil {
+		t.Error("the cancelled job's operation finished without an error")
+	}
+	if err := c.CancelOperation(ctx, &longrunningpb.CancelOperationRequest{Name: op.Name()}); storageJobsCode(err) != codes.FailedPrecondition {
+		t.Errorf("second CancelOperation: %v, want FAILED_PRECONDITION", err)
+	}
+	if err := c.DeleteOperation(ctx, &longrunningpb.DeleteOperationRequest{Name: op.Name()}); err != nil {
+		t.Fatalf("DeleteOperation: %v", err)
+	}
+	if _, err := c.GetOperation(ctx, &longrunningpb.GetOperationRequest{Name: op.Name()}); storageJobsCode(err) != codes.NotFound {
+		t.Errorf("GetOperation after DeleteOperation: %v, want NOT_FOUND", err)
+	}
+	if _, err := c.GetJob(ctx, &storagebatchoperationspb.GetJobRequest{Name: parent + "/jobs/" + id}); err != nil {
+		t.Errorf("the job is gone with its operation: %v", err)
 	}
 }

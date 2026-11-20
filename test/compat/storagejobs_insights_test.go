@@ -15,6 +15,7 @@ import (
 	"cloud.google.com/go/storageinsights/apiv1/storageinsightspb"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
+	locationpb "google.golang.org/genproto/googleapis/cloud/location"
 	"google.golang.org/genproto/googleapis/type/date"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
@@ -309,5 +310,42 @@ func TestStorageInsightsReportConfigChecks(t *testing.T) {
 		DatasetConfig: &storageinsightspb.DatasetConfig{}})
 	if storageJobsCode(err) != codes.Unimplemented {
 		t.Errorf("CreateDatasetConfig: %v, want UNIMPLEMENTED", err)
+	}
+}
+
+// covers: storageinsights.projects.locations.list, storageinsights.projects.locations.get
+//
+// TestStorageInsightsLocations (#1957), official Go client: the locations
+// list names the us multi-region and us-central1; a location is read by
+// name; a region Google documents inventory reports as unsupported in
+// (africa-south1) is NOT_FOUND.
+func TestStorageInsightsLocations(t *testing.T) {
+	h := New(t)
+	c := insightsClient(t, h)
+	ctx := h.Context()
+	parent := "projects/" + h.Project()
+	seen := map[string]bool{}
+	it := c.ListLocations(ctx, &locationpb.ListLocationsRequest{Name: parent})
+	for {
+		l, err := it.Next()
+		if errors.Is(err, iterator.Done) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("ListLocations: %v", err)
+		}
+		seen[l.GetName()] = true
+	}
+	for _, want := range []string{parent + "/locations/us", parent + "/locations/us-central1"} {
+		if !seen[want] {
+			t.Errorf("ListLocations lacks %s (has %v)", want, seen)
+		}
+	}
+	l, err := c.GetLocation(ctx, &locationpb.GetLocationRequest{Name: parent + "/locations/europe-west1"})
+	if err != nil || l.GetName() != parent+"/locations/europe-west1" || l.GetLocationId() != "europe-west1" {
+		t.Errorf("GetLocation europe-west1 = %+v, %v", l, err)
+	}
+	if _, err := c.GetLocation(ctx, &locationpb.GetLocationRequest{Name: parent + "/locations/africa-south1"}); storageJobsCode(err) != codes.NotFound {
+		t.Errorf("GetLocation africa-south1: %v, want NOT_FOUND", err)
 	}
 }

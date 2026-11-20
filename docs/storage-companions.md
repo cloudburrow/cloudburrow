@@ -70,13 +70,15 @@ names:
 
 The destination bucket must be in the source bucket's project and location, and a bucket takes at most
 100 configurations. `reportDetails` records each report. Dataset configurations, which are BigQuery
-linked datasets, are not served and answer 501.
+linked datasets of Google's views over the buckets' metadata refreshed daily, are not served and
+answer 501, as do the operations only they make: building and refreshing those views in the
+instance's BigQuery is its own work (#1976).
 
 ## Storage Transfer Service
 
 Transfer jobs copy between the instance's buckets, and between a bucket and a local directory. A local
 directory is reached through an agent pool. CloudBurrow's own local agent serves every pool, so you do
-not install Google's agents. A pool's bandwidth limit paces the transfers that go through it.
+not install Google's agents. A pool's bandwidth limit (`limitMbps`, megabytes per second, as Google documents) paces the transfers that go through it.
 
 Jobs support the following:
 

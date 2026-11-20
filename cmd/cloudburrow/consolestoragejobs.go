@@ -325,7 +325,7 @@ func (p storageBatchProvider) List(ctx context.Context, project string) (console
 	return listing, nil
 }
 
-const batchJobIDPattern = `^[a-z0-9]([a-z0-9-]{0,126}[a-z0-9])?$`
+const batchJobIDPattern = `^[a-z0-9]([a-z0-9\-]{0,126}[a-z0-9])?$`
 
 func (storageBatchProvider) CreateForm() (string, []console.Field) {
 	unchanged := map[string]string{"": "No change", "SET": "Set", "UNSET": "Remove"}

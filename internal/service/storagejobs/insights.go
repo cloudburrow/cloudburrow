@@ -33,6 +33,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -154,6 +155,9 @@ func (s *InsightsServer) route(r *http.Request) (string, any, error) {
 		return pre + "list", locationsList(project, insightsLocations), nil
 	}
 	if len(p) == 4 && r.Method == http.MethodGet {
+		if unsupportedInsightsLocations[p[3]] || !locationPattern.MatchString(p[3]) {
+			return pre + "get", nil, notFound("Location projects/%s/locations/%s not found.", project, p[3])
+		}
 		return pre + "get", location(project, p[3]), nil
 	}
 	if len(p) < 5 {
@@ -200,14 +204,19 @@ func (s *InsightsServer) route(r *http.Request) (string, any, error) {
 		}
 	case "datasetConfigs":
 		return pre + "datasetConfigs", nil, unimplemented("Storage Insights dataset configurations are not available in CloudBurrow: " +
-			"they are BigQuery linked datasets, which CloudBurrow's BigQuery does not serve. Inventory reports (reportConfigs) are served.")
+			"each links a BigQuery dataset of Google's views over the buckets' metadata, refreshed daily, which needs this service to " +
+			"build and refresh them in the instance's BigQuery (#1976). Inventory reports (reportConfigs) are served.")
 	case "operations":
 		// Only dataset configurations make operations.
 		return pre + "operations", nil, unimplemented("Storage Insights operations are not available in CloudBurrow: only dataset " +
-			"configurations, which are not served, make them. Inventory report configurations answer at once.")
+			"configurations, which are not served (#1976), make them. Inventory report configurations answer at once.")
 	}
 	return "", nil, notFound("%s not found", r.URL.Path)
 }
+
+// locationPattern is a Cloud Storage location's form: a multi-region, a
+// dual-region or a region, lower case.
+var locationPattern = regexp.MustCompile(`^[a-z]+(-[a-z]+[0-9]+)?[0-9]*$`)
 
 // insightsLocations are the locations Google lists; every location of a
 // bucket is accepted.

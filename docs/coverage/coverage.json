@@ -13732,99 +13732,107 @@
     "Key": "storagejobs",
     "Title": "Cloud Storage companion APIs (Batch Operations, Insights, Transfer v1)",
     "counts": {
-      "Implemented": 4,
       "Unimplemented": 11,
-      "Verified": 35
+      "Verified": 39
     },
     "rows": [
       {
         "method": "storagebatchoperations.projects.locations.get",
         "status": "Verified",
         "tests": [
-          "test/compat/storagejobs_batch_test.go:191 TestStorageBatchOperationsJobs"
+          "test/compat/storagejobs_batch_test.go:192 TestStorageBatchOperationsJobs"
         ]
       },
       {
         "method": "storagebatchoperations.projects.locations.jobs.bucketOperations.get",
         "status": "Verified",
         "tests": [
-          "test/compat/storagejobs_batch_test.go:191 TestStorageBatchOperationsJobs"
+          "test/compat/storagejobs_batch_test.go:192 TestStorageBatchOperationsJobs"
         ]
       },
       {
         "method": "storagebatchoperations.projects.locations.jobs.bucketOperations.list",
         "status": "Verified",
         "tests": [
-          "test/compat/storagejobs_batch_test.go:191 TestStorageBatchOperationsJobs"
+          "test/compat/storagejobs_batch_test.go:192 TestStorageBatchOperationsJobs"
         ]
       },
       {
         "method": "storagebatchoperations.projects.locations.jobs.cancel",
         "status": "Verified",
         "tests": [
-          "test/compat/storagejobs_batch_test.go:191 TestStorageBatchOperationsJobs"
+          "test/compat/storagejobs_batch_test.go:192 TestStorageBatchOperationsJobs",
+          "test/compat/storagejobs_cli_test.go:73 TestGcloudStorageBatchOperations"
         ]
       },
       {
         "method": "storagebatchoperations.projects.locations.jobs.create",
         "status": "Verified",
         "tests": [
-          "test/compat/storagejobs_batch_test.go:191 TestStorageBatchOperationsJobs",
-          "test/compat/storagejobs_batch_test.go:355 TestStorageBatchOperationsRefusals",
-          "test/compat/storagejobs_batch_test.go:419 TestStorageBatchOperationsRewriteToKMSKey"
+          "test/compat/storagejobs_batch_test.go:192 TestStorageBatchOperationsJobs",
+          "test/compat/storagejobs_batch_test.go:356 TestStorageBatchOperationsRefusals",
+          "test/compat/storagejobs_batch_test.go:420 TestStorageBatchOperationsRewriteToKMSKey",
+          "test/compat/storagejobs_cli_test.go:73 TestGcloudStorageBatchOperations"
         ]
       },
       {
         "method": "storagebatchoperations.projects.locations.jobs.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/storagejobs_batch_test.go:191 TestStorageBatchOperationsJobs"
+          "test/compat/storagejobs_batch_test.go:192 TestStorageBatchOperationsJobs",
+          "test/compat/storagejobs_cli_test.go:73 TestGcloudStorageBatchOperations"
         ]
       },
       {
         "method": "storagebatchoperations.projects.locations.jobs.get",
         "status": "Verified",
         "tests": [
-          "test/compat/storagejobs_batch_test.go:191 TestStorageBatchOperationsJobs",
-          "test/compat/storagejobs_batch_test.go:419 TestStorageBatchOperationsRewriteToKMSKey"
+          "test/compat/storagejobs_batch_test.go:192 TestStorageBatchOperationsJobs",
+          "test/compat/storagejobs_batch_test.go:420 TestStorageBatchOperationsRewriteToKMSKey",
+          "test/compat/storagejobs_cli_test.go:73 TestGcloudStorageBatchOperations"
         ]
       },
       {
         "method": "storagebatchoperations.projects.locations.jobs.list",
         "status": "Verified",
         "tests": [
-          "test/compat/storagejobs_batch_test.go:191 TestStorageBatchOperationsJobs"
+          "test/compat/storagejobs_batch_test.go:192 TestStorageBatchOperationsJobs",
+          "test/compat/storagejobs_cli_test.go:73 TestGcloudStorageBatchOperations"
         ]
       },
       {
         "method": "storagebatchoperations.projects.locations.list",
         "status": "Verified",
         "tests": [
-          "test/compat/storagejobs_batch_test.go:191 TestStorageBatchOperationsJobs"
+          "test/compat/storagejobs_batch_test.go:192 TestStorageBatchOperationsJobs"
         ]
       },
       {
         "method": "storagebatchoperations.projects.locations.operations.cancel",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagejobs_batch_test.go:465 TestStorageBatchOperationsOperationCancelAndDelete"
+        ]
       },
       {
         "method": "storagebatchoperations.projects.locations.operations.delete",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagejobs_batch_test.go:465 TestStorageBatchOperationsOperationCancelAndDelete"
+        ]
       },
       {
         "method": "storagebatchoperations.projects.locations.operations.get",
         "status": "Verified",
         "tests": [
-          "test/compat/storagejobs_batch_test.go:191 TestStorageBatchOperationsJobs"
+          "test/compat/storagejobs_batch_test.go:192 TestStorageBatchOperationsJobs"
         ]
       },
       {
         "method": "storagebatchoperations.projects.locations.operations.list",
         "status": "Verified",
         "tests": [
-          "test/compat/storagejobs_batch_test.go:191 TestStorageBatchOperationsJobs"
+          "test/compat/storagejobs_batch_test.go:192 TestStorageBatchOperationsJobs"
         ]
       },
       {
@@ -13864,13 +13872,17 @@
       },
       {
         "method": "storageinsights.projects.locations.get",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagejobs_insights_test.go:322 TestStorageInsightsLocations"
+        ]
       },
       {
         "method": "storageinsights.projects.locations.list",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagejobs_insights_test.go:322 TestStorageInsightsLocations"
+        ]
       },
       {
         "method": "storageinsights.projects.locations.operations.cancel",
@@ -13896,67 +13908,67 @@
         "method": "storageinsights.projects.locations.reportConfigs.create",
         "status": "Verified",
         "tests": [
-          "test/compat/storagejobs_cli_test.go:121 TestGcloudStorageInsightsInventoryReports",
-          "test/compat/storagejobs_cli_test.go:260 TestTerraformStorageInsightsReportConfig",
-          "test/compat/storagejobs_insights_test.go:133 TestStorageInsightsInventoryReports",
-          "test/compat/storagejobs_insights_test.go:242 TestStorageInsightsParquetReport",
-          "test/compat/storagejobs_insights_test.go:282 TestStorageInsightsReportConfigChecks"
+          "test/compat/storagejobs_cli_test.go:124 TestGcloudStorageInsightsInventoryReports",
+          "test/compat/storagejobs_cli_test.go:263 TestTerraformStorageInsightsReportConfig",
+          "test/compat/storagejobs_insights_test.go:134 TestStorageInsightsInventoryReports",
+          "test/compat/storagejobs_insights_test.go:243 TestStorageInsightsParquetReport",
+          "test/compat/storagejobs_insights_test.go:283 TestStorageInsightsReportConfigChecks"
         ]
       },
       {
         "method": "storageinsights.projects.locations.reportConfigs.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/storagejobs_cli_test.go:121 TestGcloudStorageInsightsInventoryReports",
-          "test/compat/storagejobs_cli_test.go:260 TestTerraformStorageInsightsReportConfig",
-          "test/compat/storagejobs_insights_test.go:133 TestStorageInsightsInventoryReports"
+          "test/compat/storagejobs_cli_test.go:124 TestGcloudStorageInsightsInventoryReports",
+          "test/compat/storagejobs_cli_test.go:263 TestTerraformStorageInsightsReportConfig",
+          "test/compat/storagejobs_insights_test.go:134 TestStorageInsightsInventoryReports"
         ]
       },
       {
         "method": "storageinsights.projects.locations.reportConfigs.get",
         "status": "Verified",
         "tests": [
-          "test/compat/storagejobs_cli_test.go:121 TestGcloudStorageInsightsInventoryReports",
-          "test/compat/storagejobs_cli_test.go:260 TestTerraformStorageInsightsReportConfig",
-          "test/compat/storagejobs_insights_test.go:133 TestStorageInsightsInventoryReports"
+          "test/compat/storagejobs_cli_test.go:124 TestGcloudStorageInsightsInventoryReports",
+          "test/compat/storagejobs_cli_test.go:263 TestTerraformStorageInsightsReportConfig",
+          "test/compat/storagejobs_insights_test.go:134 TestStorageInsightsInventoryReports"
         ]
       },
       {
         "method": "storageinsights.projects.locations.reportConfigs.list",
         "status": "Verified",
         "tests": [
-          "test/compat/storagejobs_cli_test.go:121 TestGcloudStorageInsightsInventoryReports",
-          "test/compat/storagejobs_insights_test.go:133 TestStorageInsightsInventoryReports"
+          "test/compat/storagejobs_cli_test.go:124 TestGcloudStorageInsightsInventoryReports",
+          "test/compat/storagejobs_insights_test.go:134 TestStorageInsightsInventoryReports"
         ]
       },
       {
         "method": "storageinsights.projects.locations.reportConfigs.patch",
         "status": "Verified",
         "tests": [
-          "test/compat/storagejobs_cli_test.go:260 TestTerraformStorageInsightsReportConfig",
-          "test/compat/storagejobs_insights_test.go:133 TestStorageInsightsInventoryReports"
+          "test/compat/storagejobs_cli_test.go:263 TestTerraformStorageInsightsReportConfig",
+          "test/compat/storagejobs_insights_test.go:134 TestStorageInsightsInventoryReports"
         ]
       },
       {
         "method": "storageinsights.projects.locations.reportConfigs.reportDetails.get",
         "status": "Verified",
         "tests": [
-          "test/compat/storagejobs_insights_test.go:133 TestStorageInsightsInventoryReports"
+          "test/compat/storagejobs_insights_test.go:134 TestStorageInsightsInventoryReports"
         ]
       },
       {
         "method": "storageinsights.projects.locations.reportConfigs.reportDetails.list",
         "status": "Verified",
         "tests": [
-          "test/compat/storagejobs_insights_test.go:133 TestStorageInsightsInventoryReports",
-          "test/compat/storagejobs_insights_test.go:242 TestStorageInsightsParquetReport"
+          "test/compat/storagejobs_insights_test.go:134 TestStorageInsightsInventoryReports",
+          "test/compat/storagejobs_insights_test.go:243 TestStorageInsightsParquetReport"
         ]
       },
       {
         "method": "storagetransfer.googleServiceAccounts.get",
         "status": "Verified",
         "tests": [
-          "test/compat/storagejobs_cli_test.go:169 TestTerraformStorageTransferJob",
+          "test/compat/storagejobs_cli_test.go:172 TestTerraformStorageTransferJob",
           "test/compat/storagejobs_transfer_test.go:156 TestStorageTransferBetweenBuckets"
         ]
       },
@@ -13964,45 +13976,45 @@
         "method": "storagetransfer.projects.agentPools.create",
         "status": "Verified",
         "tests": [
-          "test/compat/storagejobs_transfer_test.go:333 TestStorageTransferPosixAgentPool"
+          "test/compat/storagejobs_transfer_test.go:335 TestStorageTransferPosixAgentPool"
         ]
       },
       {
         "method": "storagetransfer.projects.agentPools.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/storagejobs_transfer_test.go:333 TestStorageTransferPosixAgentPool"
+          "test/compat/storagejobs_transfer_test.go:335 TestStorageTransferPosixAgentPool"
         ]
       },
       {
         "method": "storagetransfer.projects.agentPools.get",
         "status": "Verified",
         "tests": [
-          "test/compat/storagejobs_transfer_test.go:333 TestStorageTransferPosixAgentPool"
+          "test/compat/storagejobs_transfer_test.go:335 TestStorageTransferPosixAgentPool"
         ]
       },
       {
         "method": "storagetransfer.projects.agentPools.list",
         "status": "Verified",
         "tests": [
-          "test/compat/storagejobs_transfer_test.go:333 TestStorageTransferPosixAgentPool"
+          "test/compat/storagejobs_transfer_test.go:335 TestStorageTransferPosixAgentPool"
         ]
       },
       {
         "method": "storagetransfer.projects.agentPools.patch",
         "status": "Verified",
         "tests": [
-          "test/compat/storagejobs_transfer_test.go:333 TestStorageTransferPosixAgentPool"
+          "test/compat/storagejobs_transfer_test.go:335 TestStorageTransferPosixAgentPool"
         ]
       },
       {
         "method": "storagetransfer.transferJobs.create",
         "status": "Verified",
         "tests": [
-          "test/compat/storagejobs_cli_test.go:169 TestTerraformStorageTransferJob",
+          "test/compat/storagejobs_cli_test.go:172 TestTerraformStorageTransferJob",
           "test/compat/storagejobs_transfer_test.go:156 TestStorageTransferBetweenBuckets",
           "test/compat/storagejobs_transfer_test.go:294 TestStorageTransferScheduleFollowsTheInstanceClock",
-          "test/compat/storagejobs_transfer_test.go:421 TestStorageTransferNotifiesPubSub"
+          "test/compat/storagejobs_transfer_test.go:439 TestStorageTransferNotifiesPubSub"
         ]
       },
       {
@@ -14016,7 +14028,7 @@
         "method": "storagetransfer.transferJobs.get",
         "status": "Verified",
         "tests": [
-          "test/compat/storagejobs_cli_test.go:169 TestTerraformStorageTransferJob",
+          "test/compat/storagejobs_cli_test.go:172 TestTerraformStorageTransferJob",
           "test/compat/storagejobs_transfer_test.go:156 TestStorageTransferBetweenBuckets",
           "test/compat/storagejobs_transfer_test.go:294 TestStorageTransferScheduleFollowsTheInstanceClock"
         ]
@@ -14032,7 +14044,7 @@
         "method": "storagetransfer.transferJobs.patch",
         "status": "Verified",
         "tests": [
-          "test/compat/storagejobs_cli_test.go:169 TestTerraformStorageTransferJob",
+          "test/compat/storagejobs_cli_test.go:172 TestTerraformStorageTransferJob",
           "test/compat/storagejobs_transfer_test.go:156 TestStorageTransferBetweenBuckets"
         ]
       },
@@ -14041,14 +14053,14 @@
         "status": "Verified",
         "tests": [
           "test/compat/storagejobs_transfer_test.go:156 TestStorageTransferBetweenBuckets",
-          "test/compat/storagejobs_transfer_test.go:421 TestStorageTransferNotifiesPubSub"
+          "test/compat/storagejobs_transfer_test.go:439 TestStorageTransferNotifiesPubSub"
         ]
       },
       {
         "method": "storagetransfer.transferOperations.cancel",
         "status": "Verified",
         "tests": [
-          "test/compat/storagejobs_transfer_test.go:333 TestStorageTransferPosixAgentPool"
+          "test/compat/storagejobs_transfer_test.go:335 TestStorageTransferPosixAgentPool"
         ]
       },
       {
@@ -14070,14 +14082,14 @@
         "method": "storagetransfer.transferOperations.pause",
         "status": "Verified",
         "tests": [
-          "test/compat/storagejobs_transfer_test.go:333 TestStorageTransferPosixAgentPool"
+          "test/compat/storagejobs_transfer_test.go:335 TestStorageTransferPosixAgentPool"
         ]
       },
       {
         "method": "storagetransfer.transferOperations.resume",
         "status": "Verified",
         "tests": [
-          "test/compat/storagejobs_transfer_test.go:333 TestStorageTransferPosixAgentPool"
+          "test/compat/storagejobs_transfer_test.go:335 TestStorageTransferPosixAgentPool"
         ]
       }
     ]

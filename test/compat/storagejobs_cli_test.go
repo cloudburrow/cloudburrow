@@ -14,7 +14,7 @@ import (
 	"cloud.google.com/go/storagetransfer/apiv1/storagetransferpb"
 )
 
-// Not yet passing (#1957 follow-up), so it covers nothing:
+// Not yet passing: gcloud transfer escapes the override (#1975), so it covers nothing:
 //
 // TestGcloudTransferJobs (#1957): gcloud transfer jobs create (a bucket to
 // bucket job with an include prefix, not run on create), list, describe,
@@ -65,7 +65,7 @@ func TestGcloudTransferJobs(t *testing.T) {
 	}
 }
 
-// Not yet passing (#1957 follow-up), so it covers nothing:
+// covers: storagebatchoperations.projects.locations.jobs.create, storagebatchoperations.projects.locations.jobs.get, storagebatchoperations.projects.locations.jobs.list, storagebatchoperations.projects.locations.jobs.cancel, storagebatchoperations.projects.locations.jobs.delete
 //
 // TestGcloudStorageBatchOperations (#1957): gcloud storage batch-operations
 // jobs create (put metadata over a prefix), describe, list, cancel (refused
@@ -101,8 +101,11 @@ func TestGcloudStorageBatchOperations(t *testing.T) {
 	if a, err := bh.Object("p/a").Attrs(ctx); err != nil || a.CacheControl != "no-store" {
 		t.Errorf("after the gcloud job: %+v, %v", a, err)
 	}
-	if out := g.must("storage", "batch-operations", "jobs", "list", "--project", project, "--format=value(name)"); !strings.Contains(out, full) {
-		t.Errorf("batch-operations jobs list lacks %s:\n%s", full, out)
+	// gcloud's table names a job by its basename (BATCH_JOB_ID), with its
+	// transformation and state.
+	if out := g.must("storage", "batch-operations", "jobs", "list", "--project", project); !strings.Contains(out, "BATCH_JOB_ID") ||
+		!regexp.MustCompile(`(?m)^`+regexp.QuoteMeta(id)+`\s.*putMetadata.*SUCCEEDED`).MatchString(out) {
+		t.Errorf("batch-operations jobs list lacks %s, SUCCEEDED:\n%s", id, out)
 	}
 	if out, err := g.run(nil, "storage", "batch-operations", "jobs", "cancel", id, "--project", project); err == nil {
 		t.Errorf("cancel of a finished job succeeded:\n%s", out)
