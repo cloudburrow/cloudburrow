@@ -245,6 +245,33 @@ func TestScratchTablesInResultsDataset(t *testing.T) {
 	}
 }
 
+// TestResultsDatasetMadeForAnyObjectInIt (#2045): a query naming any
+// object in resultsDataset, not only a scratch table, has the dataset made
+// first: a vector index's tables and the ML vocabulary functions are
+// named otherwise, and on a fresh instance either can be the first thing
+// asked of it. A query naming none of it makes nothing.
+func TestResultsDatasetMadeForAnyObjectInIt(t *testing.T) {
+	body := func(sql string) string { b, _ := json.Marshal(map[string]any{"query": sql}); return string(b) }
+	for _, sql := range []string{
+		"DROP TABLE IF EXISTS `" + resultsDataset + ".cloudburrow_vector_index_00ff_lists`",
+		"CREATE FUNCTION IF NOT EXISTS `" + resultsDataset + "`.`" + mlVocabPrefix + "vocab`(x INT64) AS (x)",
+		"SELECT table_name FROM `p`.`" + resultsDataset + "`.INFORMATION_SCHEMA.TABLES",
+	} {
+		emu := &expiryEmulator{}
+		q := newExpiryResults(emu, &expiryClock{t: time.Unix(1_000_000, 0)})
+		do(t, q, "POST", base+"/queries", body(sql))
+		if n := emu.datasetInserts(); n != 1 || !emu.datasets[resultsDataset] {
+			t.Errorf("%s: the dataset made %d times", sql, n)
+		}
+	}
+	emu := &expiryEmulator{}
+	q := newExpiryResults(emu, &expiryClock{t: time.Unix(1_000_000, 0)})
+	do(t, q, "POST", base+"/queries", body("SELECT 1 FROM `ds.t`"))
+	if n := emu.datasetInserts(); n != 0 {
+		t.Errorf("a query naming none of it: the dataset made %d times", n)
+	}
+}
+
 // TestUnscratch (#1057): an error naming a scratch table in
 // resultsDataset names the client's dataset instead.
 func TestUnscratch(t *testing.T) {

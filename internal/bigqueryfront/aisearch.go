@@ -3,6 +3,7 @@ package bigqueryfront
 import (
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -335,7 +336,14 @@ func (f front) aiSearchSubquery(r *http.Request, q queryOptions, c aiSearchCall,
 	v := floatArrayLiteral(vec)
 	bvec, qv := "b._cb_vs_vec", v
 	if use.index != nil && use.index.Norm == "L2" {
+		// The query vector is the front's: normalized here, a literal,
+		// not an expression the engine evaluates per element (#2042).
+		// A zero vector stays SQL's, whose elements divide by NULL.
 		bvec, qv = normalizedSQL(bvec), normalizedSQL(v)
+		if nv := append([]float64(nil), vec...); slices.ContainsFunc(nv, func(x float64) bool { return x != 0 }) {
+			normalize(nv)
+			qv = floatArrayLiteral(nv)
+		}
 	}
 	dist := searchDistance(distance, bvec, qv)
 	// The base rows, with the embedding beside them; with an index, a

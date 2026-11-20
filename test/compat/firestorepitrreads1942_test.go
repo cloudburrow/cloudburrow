@@ -181,7 +181,12 @@ func TestFirestorePointInTimeReadsThroughEveryReadMethod(t *testing.T) {
 	}
 
 	// The generated client: RunAggregationQuery, ListCollectionIds and
-	// PartitionQuery with read_time.
+	// PartitionQuery with read_time. Google's read_time "must be a
+	// microsecond precision timestamp within the past one hour"
+	// (google.firestore.v1 reference), and time.Now has nanoseconds on
+	// Linux (CI's runners) though microseconds on macOS, so "now" is
+	// truncated as a client must.
+	now := func() *timestamppb.Timestamp { return timestamppb.New(time.Now().Truncate(time.Microsecond)) }
 	count := func(rt *timestamppb.Timestamp) (int64, error) {
 		stream, err := g.RunAggregationQuery(ctx, &firestorepb.RunAggregationQueryRequest{Parent: docs,
 			QueryType: &firestorepb.RunAggregationQueryRequest_StructuredAggregationQuery{StructuredAggregationQuery: &firestorepb.StructuredAggregationQuery{
@@ -210,7 +215,7 @@ func TestFirestorePointInTimeReadsThroughEveryReadMethod(t *testing.T) {
 	if n, err := count(ts1); err != nil || n != 1 {
 		t.Errorf("RunAggregationQuery COUNT at t1 = %d, %v; want 1", n, err)
 	}
-	if n, err := count(timestamppb.Now()); err != nil || n != 3 {
+	if n, err := count(now()); err != nil || n != 3 {
 		t.Errorf("RunAggregationQuery COUNT now = %d, %v; want 3", n, err)
 	}
 	if _, err := count(tsBefore); status.Code(err) != codes.FailedPrecondition {
@@ -240,17 +245,27 @@ func TestFirestorePointInTimeReadsThroughEveryReadMethod(t *testing.T) {
 	if got, err := collections(docs, ts1); err != nil || got != "cities" {
 		t.Errorf("ListCollectionIds of the root at t1 = %q, %v; want cities", got, err)
 	}
-	if got, err := collections(docs, timestamppb.Now()); err != nil || got != "cities,towns" {
+	if got, err := collections(docs, now()); err != nil || got != "cities,towns" {
 		t.Errorf("ListCollectionIds of the root now = %q, %v; want cities,towns", got, err)
 	}
 	if got, err := collections(docs+"/cities/sf", ts1); err != nil || got != "landmarks" {
 		t.Errorf("ListCollectionIds of cities/sf at t1 = %q, %v; want landmarks", got, err)
 	}
-	if got, err := collections(docs+"/cities/sf", timestamppb.Now()); err != nil || got != "" {
+	if got, err := collections(docs+"/cities/sf", now()); err != nil || got != "" {
 		t.Errorf("ListCollectionIds of cities/sf now = %q, %v; want none", got, err)
 	}
 	if _, err := collections(docs, tsBefore); status.Code(err) != codes.FailedPrecondition {
 		t.Errorf("ListCollectionIds before the earliest version time: %v, want FailedPrecondition", err)
+	}
+	// Finer than a microsecond is refused on every read method, this one
+	// too (the emulator would answer it), with the emulator's words.
+	nanos := now()
+	nanos.Nanos += 1
+	if _, err := collections(docs, nanos); status.Code(err) != codes.InvalidArgument || !strings.Contains(err.Error(), "microseconds precision") {
+		t.Errorf("ListCollectionIds at a nanosecond read_time: %v, want InvalidArgument", err)
+	}
+	if _, err := count(nanos); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("RunAggregationQuery at a nanosecond read_time: %v, want InvalidArgument", err)
 	}
 	partitions := func(rt *timestamppb.Timestamp) (int, error) {
 		_, err := g.PartitionQuery(ctx, &firestorepb.PartitionQueryRequest{Parent: docs, PartitionCount: 3,
@@ -267,7 +282,7 @@ func TestFirestorePointInTimeReadsThroughEveryReadMethod(t *testing.T) {
 	if n, err := partitions(ts1); err != nil || n != 0 {
 		t.Errorf("PartitionQuery at t1 = %d cursors, %v; want none", n, err)
 	}
-	if n, err := partitions(timestamppb.Now()); err != nil || n == 0 {
+	if n, err := partitions(now()); err != nil || n == 0 {
 		t.Errorf("PartitionQuery now = %d cursors, %v; want some", n, err)
 	}
 	if _, err := partitions(tsBefore); status.Code(err) != codes.FailedPrecondition {

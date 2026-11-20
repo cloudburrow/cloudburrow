@@ -20,7 +20,7 @@ import (
 // enabled less an hour, nor before the emulator's last import.
 func TestReadTimeWindow(t *testing.T) {
 	a := New("")
-	now := time.Date(2026, 11, 19, 12, 30, 15, 500, time.UTC)
+	now := time.Date(2026, 11, 19, 12, 30, 15, 500000, time.UTC)
 	a.now = func() time.Time { return now }
 	def := "projects/p/databases/(default)"
 	code := func(at time.Time) codes.Code { return status.Code(a.checkReadTime(def, at)) }
@@ -33,6 +33,16 @@ func TestReadTimeWindow(t *testing.T) {
 	}
 	if c := code(now.Add(time.Hour)); c != codes.OK {
 		t.Errorf("future: %v, want OK (the emulator refuses it)", c)
+	}
+	// Finer than a microsecond: refused on every read, ListCollectionIds
+	// (which the emulator would answer) included.
+	if c := code(now.Add(-time.Minute + 123)); c != codes.InvalidArgument {
+		t.Errorf("a minute back with nanoseconds: %v, want InvalidArgument", c)
+	}
+	lc := &firestorepb.ListCollectionIdsRequest{Parent: def + "/documents",
+		ConsistencySelector: &firestorepb.ListCollectionIdsRequest_ReadTime{ReadTime: timestamppb.New(now.Add(-time.Second + 1))}}
+	if err := a.checkRequestReadTime(lc); status.Code(err) != codes.InvalidArgument || status.Convert(err).Message() != "timestamp cannot have more than microseconds precision" {
+		t.Errorf("ListCollectionIds with nanoseconds: %v, want InvalidArgument", err)
 	}
 
 	ctx := context.Background()
@@ -92,10 +102,12 @@ func TestReadTimeWindow(t *testing.T) {
 }
 
 // TestReadTimeGuardClaimsOldReads: the guard claims a gRPC or REST read
-// outside the window, and leaves the rest to the emulator.
+// outside the window, or finer than a microsecond, and leaves the rest to
+// the emulator. "now" is at microsecond precision, as a client's read_time
+// must be: Linux clocks have nanoseconds, which the guard refuses.
 func TestReadTimeGuardClaimsOldReads(t *testing.T) {
 	a := New("")
-	now := time.Now().UTC()
+	now := time.Now().UTC().Truncate(time.Microsecond)
 	a.now = func() time.Time { return now }
 	g := a.EditionGuard()
 	name := "projects/p/databases/(default)/documents/c/d"
@@ -107,6 +119,9 @@ func TestReadTimeGuardClaimsOldReads(t *testing.T) {
 	}
 	if grpcReq(now.Add(-time.Minute)) {
 		t.Error("a read a minute back was claimed")
+	}
+	if !grpcReq(now.Add(-time.Minute + 123)) {
+		t.Error("a read a minute back with nanoseconds was not claimed")
 	}
 	if !grpcReq(now.Add(-2 * time.Hour)) {
 		t.Error("a read two hours back was not claimed")
