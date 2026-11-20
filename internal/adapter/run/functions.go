@@ -96,6 +96,8 @@ type storedFunction struct {
 	// (#1428), nil for a 2nd-gen one; version is its v1 versionId.
 	v1      *fv1.CloudFunction
 	version int64
+	// history is a 1st-gen function's earlier versions (#1958).
+	history map[int64]functionVersion
 }
 
 // functions is process-wide, like repositories.
@@ -151,16 +153,18 @@ func (f *FunctionsServer) GetFunction(_ context.Context, req *functionspb.GetFun
 	if _, _, err := parseFunctionName(req.GetName()); err != nil {
 		return nil, err
 	}
-	if req.GetRevision() != "" {
-		return nil, apierror.Unimplemented("GetFunction revision is not supported: only the current function is kept")
-	}
 	functions.mu.Lock()
 	defer functions.mu.Unlock()
 	sf, ok := functions.fns[req.GetName()]
 	if !ok {
 		return nil, functionNotFound(req.GetName())
 	}
-	return cloneFunction(sf.fn), nil
+	// revision is a 1st-gen function's version (#1958).
+	at, err := revisionOf(sf, req.GetRevision())
+	if err != nil {
+		return nil, err
+	}
+	return cloneFunction(at.fn), nil
 }
 
 // ListFunctions lists a location's functions, or every location's for
@@ -169,9 +173,6 @@ func (f *FunctionsServer) ListFunctions(_ context.Context, req *functionspb.List
 	project, location, err := resource.ParseLocation(req.GetParent())
 	if err != nil {
 		return nil, apierror.InvalidArgument("%v", err)
-	}
-	if req.GetPageToken() != "" || req.GetOrderBy() != "" {
-		return nil, apierror.Unimplemented("ListFunctions page_token and order_by are not supported")
 	}
 	// gcloud functions list sends environment="GEN_2", and lists 1st gen
 	// through the v1 API (#1428).
@@ -188,13 +189,18 @@ func (f *FunctionsServer) ListFunctions(_ context.Context, req *functionspb.List
 	if location == "-" {
 		prefix = "projects/" + project + "/locations/"
 	}
-	out := &functionspb.ListFunctionsResponse{}
+	var fns []*functionspb.Function
 	for _, fn := range Functions(project) {
 		if strings.HasPrefix(fn.GetName(), prefix) && (env == functionspb.Environment_ENVIRONMENT_UNSPECIFIED || fn.GetEnvironment() == env) {
-			out.Functions = append(out.Functions, fn)
+			fns = append(fns, fn)
 		}
 	}
-	return out, nil
+	// page_size, page_token and order_by (#1958).
+	page, next, err := pageFunctions("functions:"+req.GetParent()+"|"+req.GetFilter(), fns, req.GetOrderBy(), req.GetPageToken(), req.GetPageSize())
+	if err != nil {
+		return nil, err
+	}
+	return &functionspb.ListFunctionsResponse{Functions: page, NextPageToken: next}, nil
 }
 
 // unsupportedFunction refuses the fields of a function that this instance

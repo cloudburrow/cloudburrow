@@ -255,6 +255,9 @@ func (r *runService) Start(ctx context.Context) error {
 		adapter.Executions().Register(g)
 		adapter.Tasks().Register(g)
 		builds.Register(g)
+		// SourceUpload (#1958): the archive `gcloud beta run deploy
+		// --source` uploads through the Cloud Run API.
+		builds.SourceUpload().Register(g)
 		ops.Register(g)
 	}
 	// Artifact Registry's repositories and Cloud Build's builds (#1347),
@@ -318,6 +321,8 @@ func (r *runService) Start(ctx context.Context) error {
 	// Artifact Registry's own prefix (#1578): its Locations mixin, whose
 	// /v1/ path is Cloud Run v1's, and its other calls through the above.
 	jsonAPI = runadapter.ArtifactRegistryHandlerOr(jsonAPI)
+	// UploadSource's media path, /upload/v2/{parent}:uploadSource (#1958).
+	jsonAPI = builds.SourceUpload().Handler(jsonAPI)
 	// Container Analysis's JSON under /containeranalysis/ (#1912): its v1
 	// paths, /v1/projects/{p}/occurrences and /notes, are beside Cloud
 	// Run v1's and Artifact Registry's.
