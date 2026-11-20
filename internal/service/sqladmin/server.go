@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
+	"github.com/cloudburrow/cloudburrow/internal/sysparams"
 )
 
 // Region is the region every instance reports. CloudBurrow has no regions;
@@ -215,7 +216,7 @@ func (s *Server) Start(context.Context) error {
 	if s.Wrap != nil {
 		h = s.Wrap(h)
 	}
-	s.srv = &http.Server{Handler: hostguard.Wrap(h), ReadHeaderTimeout: 10 * time.Second}
+	s.srv = &http.Server{Handler: hostguard.Wrap(sysparams.Wrap(h, sysparams.Options{})), ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = s.srv.Serve(ln) }()
 	return nil
 }

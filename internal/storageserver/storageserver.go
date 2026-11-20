@@ -22,12 +22,14 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/cloudburrow/cloudburrow/internal/apienable"
+	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/iamcheck"
 	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"github.com/cloudburrow/cloudburrow/internal/sched"
 	"github.com/cloudburrow/cloudburrow/internal/service/storage"
+	"github.com/cloudburrow/cloudburrow/internal/sysparams"
 )
 
 // ErrUsage is a flag error; the flag set has already printed it.
@@ -174,7 +176,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	var protocols http.Protocols
 	protocols.SetHTTP1(true)
 	protocols.SetUnencryptedHTTP2(true)
-	hs := &http.Server{Handler: hostguard.WrapHost(apienable.Gate(nil, "storage.googleapis.com", srv, srv.APIEnableOptions()), AllowedHosts(names)...), ReadHeaderTimeout: 30 * time.Second, Protocols: &protocols}
+	hs := &http.Server{Handler: hostguard.WrapHost(apienable.Gate(nil, "storage.googleapis.com", systemParams(srv), srv.APIEnableOptions()), AllowedHosts(names)...), ReadHeaderTimeout: 30 * time.Second, Protocols: &protocols}
 	fmt.Fprintf(stdout, "Cloud Storage (builtin, in development) listening on http://%s\n", ln.Addr())
 	errc := make(chan error, 1)
 	go func() { errc <- hs.Serve(ln) }()
@@ -343,4 +345,16 @@ func PrepareDir(dir string, ephemeral bool) error {
 		}
 	}
 	return nil
+}
+
+// systemParams applies Google's REST system parameters (#1954) that the
+// JSON API's handlers leave to it: the JSONP callback of an error, and a
+// malformed parameter answered in the JSON API's envelope. Successes are
+// formatted by the handlers (storage.writeResponse); errors already carry
+// the v1 errors[] list.
+func systemParams(h http.Handler) http.Handler {
+	return sysparams.Wrap(h, sysparams.Options{
+		V1Errors:   true,
+		WriteError: func(w http.ResponseWriter, _ *http.Request, err error) { apierror.WriteStorageJSON(w, err) },
+	})
 }

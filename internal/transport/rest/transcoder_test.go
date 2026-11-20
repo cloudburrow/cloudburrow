@@ -15,6 +15,7 @@ import (
 	"cloud.google.com/go/scheduler/apiv1/schedulerpb"
 	"google.golang.org/genproto/googleapis/api/annotations"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
+	spb "google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -312,7 +313,7 @@ func TestPathVariables(t *testing.T) {
 func TestQueryBinding(t *testing.T) {
 	srv, f := setup(t, true, nil)
 	jobs := srv.URL + "/v1/projects/p/locations/l/jobs"
-	for _, q := range []string{"pageSize=5&pageToken=t", "page_size=5&page_token=t", "pageSize=5&page_token=t&alt=json&prettyPrint=false&$.xgafv=2"} {
+	for _, q := range []string{"pageSize=5&pageToken=t", "page_size=5&page_token=t", "pageSize=5&page_token=t&alt=json&prettyPrint=false&$.xgafv=2", "pageSize=5&pageToken=t&quotaUser=u&userIp=1.2.3.4&key=k"} {
 		code, _, raw := call(t, "GET", jobs+"?"+q, "")
 		r, _ := f.request().(*schedulerpb.ListJobsRequest)
 		if code != 200 || r.GetPageSize() != 5 || r.GetPageToken() != "t" || r.GetParent() != "projects/p/locations/l" {
@@ -352,9 +353,14 @@ func TestQueryBinding(t *testing.T) {
 		{"GET", jobs + "?pageSize=1&page_size=2", 400, "INVALID_ARGUMENT", "repeated"},
 		{"GET", jobs + "?pageSize=two&zzz=1", 400, "INVALID_ARGUMENT", "zzz"}, // names are checked first
 		{"PATCH", jobs + "/j?updateMask=retry_config", 400, "INVALID_ARGUMENT", "updateMask"},
-		{"GET", jobs + "?fields=jobs", 501, "UNIMPLEMENTED", "fields"},
-		{"GET", jobs + "?$fields=jobs", 501, "UNIMPLEMENTED", "$fields"},
-		{"GET", jobs + "?alt=proto", 501, "UNIMPLEMENTED", "alt"},
+		{"GET", jobs + "?fields=bogus", 400, "INVALID_ARGUMENT", "Invalid field selection bogus"},
+		{"GET", jobs + "?$fields=jobs(nope)", 400, "INVALID_ARGUMENT", "Invalid field selection jobs/nope"},
+		{"GET", jobs + "?fields=jobs(name", 400, "INVALID_ARGUMENT", "Invalid field selection jobs(name"},
+		{"GET", jobs + "?fields=jobs&fields=jobs", 400, "INVALID_ARGUMENT", "repeated"},
+		{"GET", jobs + "?alt=media", 501, "UNIMPLEMENTED", "alt=media"},
+		{"GET", jobs + "?alt=xml", 400, "INVALID_ARGUMENT", "alt"},
+		{"GET", jobs + "?$.xgafv=3", 400, "INVALID_ARGUMENT", "xgafv"},
+		{"GET", jobs + "?callback=a-b", 400, "INVALID_ARGUMENT", "callback"},
 	} {
 		code, m, raw := call(t, c.method, c.url, "")
 		wantError(t, c.method+" "+c.url, code, m, raw, c.code, c.status, c.names)
@@ -455,4 +461,86 @@ func TestMixinSelectorMustNameAMethod(t *testing.T) {
 		}
 	}()
 	(&Transcoder{Mixins: []*annotations.HttpRule{{Selector: "nomethod", Pattern: &annotations.HttpRule_Get{Get: "/v1/x"}}}}).Routes()
+}
+
+// The system parameters the Transcoder applies to its answers (#1954):
+// fields and its header, alt=proto, prettyPrint, $.xgafv, callback and
+// $outputDefaults.
+func TestSystemParameters(t *testing.T) {
+	srv, _ := setup(t, true, nil)
+	jobs := srv.URL + "/v1/projects/p/locations/l/jobs"
+	get := func(url string, h map[string]string) (int, string, string) {
+		t.Helper()
+		req, _ := http.NewRequest("GET", url, nil)
+		for k, v := range h {
+			req.Header.Set(k, v)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, resp.Header.Get("Content-Type"), string(b)
+	}
+	for _, c := range []struct {
+		url    string
+		header map[string]string
+		want   string
+	}{
+		{jobs + "?fields=jobs(name)&prettyPrint=false", nil, `{"jobs":[{"name":"projects/p/locations/l/jobs/j"}]}`},
+		{jobs + "?fields=jobs/state&prettyPrint=false", nil, `{"jobs":[{"state":"ENABLED"}]}`},
+		{jobs + "?$fields=jobs.name&prettyPrint=false", nil, `{"jobs":[{"name":"projects/p/locations/l/jobs/j"}]}`},
+		{jobs + "?prettyPrint=false", map[string]string{"X-Goog-FieldMask": "jobs.state"}, `{"jobs":[{"state":"ENABLED"}]}`},
+		{jobs + "/j?fields=*&prettyPrint=false", nil, `{"name":"projects/p/locations/l/jobs/j","state":"PAUSED"}`},
+		{jobs + "/j?fields=state&prettyPrint=false", nil, `{"state":"PAUSED"}`},
+		{srv.URL + "/v1/operations/o?fields=done&prettyPrint=false", nil, `{"done":true}`},
+		{srv.URL + "/v1/operations/o?fields=name,response(foo)&prettyPrint=false", nil, `{"name":"operations/o"}`},
+		{jobs + "/j?fields=state", nil, `{"state":"PAUSED"}`},
+		{jobs + "/j?fields=state&prettyPrint=true", nil, "{\n  \"state\": \"PAUSED\"\n}\n"},
+	} {
+		code, ct, body := get(c.url, c.header)
+		if code != 200 || body != c.want || !strings.HasPrefix(ct, "application/json") {
+			t.Errorf("GET %s %v = %d %s %q; want %q", c.url, c.header, code, ct, body, c.want)
+		}
+	}
+	// $outputDefaults writes the fields at their defaults.
+	if _, _, body := get(jobs+"/j?$outputDefaults=true&prettyPrint=false", nil); !strings.Contains(body, `"description":""`) {
+		t.Errorf("$outputDefaults: %s", body)
+	}
+	// JSONP.
+	if code, ct, body := get(jobs+"/j?fields=state&callback=cb.f&prettyPrint=false", nil); code != 200 || ct != "text/javascript; charset=UTF-8" ||
+		body != "// API callback\ncb.f({\"state\":\"PAUSED\"});\n" {
+		t.Errorf("callback = %d %s %q", code, ct, body)
+	}
+	// alt=proto: the binary message, pruned.
+	code, ct, body := get(jobs+"/j?alt=proto&fields=state", nil)
+	var job schedulerpb.Job
+	if err := proto.Unmarshal([]byte(body), &job); code != 200 || ct != ContentTypeProto || err != nil ||
+		job.GetState() != schedulerpb.Job_PAUSED || job.GetName() != "" {
+		t.Errorf("alt=proto = %d %s %v %v", code, ct, &job, err)
+	}
+	// alt=proto errors are the binary google.rpc.Status.
+	code, ct, body = get(jobs+"/absent?alt=proto", nil)
+	var st spb.Status
+	if err := proto.Unmarshal([]byte(body), &st); code != 404 || ct != ContentTypeProto || err != nil || st.GetCode() != int32(codes.NotFound) {
+		t.Errorf("alt=proto error = %d %s %v %v", code, ct, &st, err)
+	}
+	// $.xgafv=1: the v1 error format carries errors[].
+	code, _, body = get(jobs+"/absent?$.xgafv=1", nil)
+	var v1 struct {
+		Error struct {
+			Code   int
+			Status string
+			Errors []struct{ Message, Domain, Reason string }
+		}
+	}
+	if err := json.Unmarshal([]byte(body), &v1); code != 404 || err != nil || v1.Error.Status != "NOT_FOUND" ||
+		len(v1.Error.Errors) != 1 || v1.Error.Errors[0].Reason != "notFound" || v1.Error.Errors[0].Domain != "global" {
+		t.Errorf("$.xgafv=1 = %d %s", code, body)
+	}
+	code, _, body = get(jobs+"/absent?$.xgafv=2", nil)
+	if code != 404 || strings.Contains(body, `"errors"`) {
+		t.Errorf("$.xgafv=2 = %d %s", code, body)
+	}
 }
