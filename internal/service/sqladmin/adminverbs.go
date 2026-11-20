@@ -196,11 +196,11 @@ func (s *Server) executeSQL(r *http.Request, project string, e Engine) (any, err
 	if body.Database == "" {
 		return nil, Errorf(http.StatusBadRequest, "Invalid request: database is required.")
 	}
-	if body.AutoIamAuthn || body.PasswordSecretVersion == "" {
-		return nil, unimplemented("executeSql with IAM database authentication",
-			"IAM database authentication is not served (no Cloud SQL sign-in here checks a Google identity, ADR-0004); give user and passwordSecretVersion, a Secret Manager secret version holding the user's password")
+	if !body.AutoIamAuthn && body.PasswordSecretVersion == "" {
+		return nil, Errorf(http.StatusBadRequest, "Invalid request: give user and passwordSecretVersion, "+
+			"or autoIamAuthn to sign in as the caller's IAM user.")
 	}
-	if body.User == "" {
+	if !body.AutoIamAuthn && body.User == "" {
 		return nil, Errorf(http.StatusBadRequest, "Invalid request: user is required with passwordSecretVersion.")
 	}
 	switch body.PartialResultMode {
@@ -218,21 +218,41 @@ func (s *Server) executeSQL(r *http.Request, project string, e Engine) (any, err
 	if !ok {
 		return nil, unimplemented("executeSql on this instance", "its server cannot run statements as a user")
 	}
-	s.emu.RLock()
-	acc := s.secrets
-	s.emu.RUnlock()
-	if acc == nil {
-		return nil, Errorf(http.StatusPreconditionFailed, "passwordSecretVersion is read from this instance's Secret Manager, which is not running; "+
-			"start CloudBurrow with secretmanager in --services.")
-	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*engineTimeout)
 	defer cancel()
-	pw, err := acc.AccessSecretVersion(ctx, body.PasswordSecretVersion)
-	if err != nil {
-		return nil, Errorf(http.StatusBadRequest, "Invalid request: cannot read passwordSecretVersion %s: %v.", body.PasswordSecretVersion, err)
-	}
+	user, password := body.User, ""
+	var results []sqlResult
+	var runErr error
 	start := time.Now()
-	results, runErr := runner.RunSQL(ctx, body.User, strings.TrimRight(string(pw), "\r\n"), body.Database, body.SQLStatement, body.RowLimit)
+	if body.AutoIamAuthn {
+		// The caller's IAM user (#1944): user and passwordSecretVersion are
+		// ignored, as Google documents.
+		login, err := s.executeSQLLogin(ctx, r, project, e)
+		if err != nil {
+			var ae *apiError
+			if errors.As(err, &ae) {
+				return nil, err
+			}
+			runErr = authError{err}
+		}
+		user, password = login.role, login.password
+	} else {
+		s.emu.RLock()
+		acc := s.secrets
+		s.emu.RUnlock()
+		if acc == nil {
+			return nil, Errorf(http.StatusPreconditionFailed, "passwordSecretVersion is read from this instance's Secret Manager, which is not running; "+
+				"start CloudBurrow with secretmanager in --services.")
+		}
+		pw, err := acc.AccessSecretVersion(ctx, body.PasswordSecretVersion)
+		if err != nil {
+			return nil, Errorf(http.StatusBadRequest, "Invalid request: cannot read passwordSecretVersion %s: %v.", body.PasswordSecretVersion, err)
+		}
+		password = strings.TrimRight(string(pw), "\r\n")
+	}
+	if runErr == nil {
+		results, runErr = runner.RunSQL(ctx, user, password, body.Database, body.SQLStatement, body.RowLimit)
+	}
 	var apiErr *apiError
 	if errors.As(runErr, &apiErr) {
 		return nil, runErr
@@ -370,4 +390,36 @@ func (s *Server) preCheckMajorVersionUpgrade(r *http.Request, base, project stri
 	s.mu.Unlock()
 	op["preCheckMajorVersionUpgradeContext"] = pc
 	return op, nil
+}
+
+// executeSQLLogin is executeSql's sign-in with autoIamAuthn (#1944): as
+// the IAM user of the account the request's access token was minted for,
+// checked as the connector checks a sign-in. A request with no token this
+// instance minted is 401; a refused sign-in is the error of the database's
+// refusal.
+func (s *Server) executeSQLLogin(ctx context.Context, r *http.Request, project string, e Engine) (iamLogin, error) {
+	tok, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	src := s.iamSource()
+	if !ok || strings.TrimSpace(tok) == "" || src == nil || src.Token == nil {
+		return iamLogin{}, Errorf(http.StatusUnauthorized, "Request had invalid authentication credentials: autoIamAuthn signs in as the caller, "+
+			"and the request has no access token this instance issued.")
+	}
+	hash := tokenHash(strings.TrimSpace(tok))
+	email, _, ok := src.Token(hash, time.Now())
+	if !ok || email == "" {
+		return iamLogin{}, Errorf(http.StatusUnauthorized, "Request had invalid authentication credentials: the access token is not one this instance issued, or it has expired.")
+	}
+	typ := TypeIAMUser
+	if strings.HasSuffix(strings.ToLower(email), saSuffix) {
+		typ = TypeIAMServiceAccount
+	}
+	name, err := iamDBName(typ, email, isMySQLEngine(e))
+	if err != nil {
+		return iamLogin{}, errIAMRefused{msg: err.Error()}
+	}
+	u, ok := iamUserNamed(ctx, e, name)
+	if !ok {
+		return iamLogin{}, errIAMRefused{msg: fmt.Sprintf("%s is not an IAM user of instance %s: the API caller must be an IAM user in the database", email, e.Instance())}
+	}
+	return s.checkIAMLogin(project, e, u, hash)
 }

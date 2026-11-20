@@ -3,6 +3,7 @@ package sqladmin
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"fmt"
 	"net"
 	"net/http"
@@ -200,8 +201,13 @@ func (p *Postgres) ListUsers(ctx context.Context) ([]User, error) {
 		return nil, err
 	}
 	defer c.Close(context.Background())
-	rows, err := c.Query(ctx, `SELECT rolname FROM pg_catalog.pg_roles
-		WHERE rolcanlogin AND rolname NOT LIKE 'pg\_%' ORDER BY rolname`)
+	// An IAM user is a member of cloudsqliamuser or
+	// cloudsqliamserviceaccount (#1944), as on Cloud SQL.
+	rows, err := c.Query(ctx, `SELECT r.rolname, COALESCE((SELECT g.rolname FROM pg_catalog.pg_auth_members m
+		JOIN pg_catalog.pg_roles g ON g.oid = m.roleid
+		WHERE m.member = r.oid AND g.rolname IN ('`+pgIAMUserGroup+`', '`+pgIAMServiceAccountGroup+`') LIMIT 1), '')
+		FROM pg_catalog.pg_roles r
+		WHERE r.rolcanlogin AND r.rolname NOT LIKE 'pg\_%' ORDER BY r.rolname`)
 	if err != nil {
 		return nil, pgError(err)
 	}
@@ -209,12 +215,94 @@ func (p *Postgres) ListUsers(ctx context.Context) ([]User, error) {
 	var out []User
 	for rows.Next() {
 		var u User
-		if err := rows.Scan(&u.Name); err != nil {
+		var group string
+		if err := rows.Scan(&u.Name, &group); err != nil {
 			return nil, err
+		}
+		switch group {
+		case pgIAMUserGroup:
+			u.Type, u.IAMEmail = TypeIAMUser, u.Name
+		case pgIAMServiceAccountGroup:
+			u.Type, u.IAMEmail = TypeIAMServiceAccount, u.Name+saSuffix
 		}
 		out = append(out, u)
 	}
 	return out, rows.Err()
+}
+
+// The roles Cloud SQL for PostgreSQL makes its IAM users members of.
+const (
+	pgIAMUserGroup           = "cloudsqliamuser"
+	pgIAMServiceAccountGroup = "cloudsqliamserviceaccount"
+)
+
+// pgIAMHBA are the pg_hba.conf lines that hold the IAM roles to their
+// password, put ahead of the server's trust line (#1944).
+var pgIAMHBA = []string{
+	"host all +" + pgIAMUserGroup + " all md5",
+	"host all +" + pgIAMServiceAccountGroup + " all md5",
+}
+
+// CreateIAMUser creates an IAM user's login role (#1944): no privileges,
+// a member of the IAM group of its type, signing in with password only,
+// which pg_hba.conf requires of it.
+func (p *Postgres) CreateIAMUser(ctx context.Context, u User, email, password string) error {
+	ctx, cancel := context.WithTimeout(ctx, engineTimeout)
+	defer cancel()
+	c, err := p.conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer c.Close(context.Background())
+	group := pgIAMUserGroup
+	if u.Type == TypeIAMServiceAccount {
+		group = pgIAMServiceAccountGroup
+	}
+	for _, g := range []string{pgIAMUserGroup, pgIAMServiceAccountGroup} {
+		var exists bool
+		if err := c.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1)", g).Scan(&exists); err != nil {
+			return pgError(err)
+		}
+		if !exists {
+			if _, err := c.Exec(ctx, "CREATE ROLE "+g+" NOLOGIN"); err != nil {
+				return pgError(err)
+			}
+		}
+	}
+	if err := pgEnsureIAMHBA(ctx, c); err != nil {
+		return err
+	}
+	if _, err := c.Exec(ctx, "CREATE ROLE "+pgx.Identifier{u.Name}.Sanitize()+" LOGIN PASSWORD "+quotePGString(password)+
+		" IN ROLE "+group); err != nil {
+		return pgError(err)
+	}
+	return nil
+}
+
+// pgEnsureIAMHBA puts pgIAMHBA at the top of pg_hba.conf, once, and
+// reloads it.
+func pgEnsureIAMHBA(ctx context.Context, c *pgx.Conn) error {
+	var hbaFile, hba string
+	if err := c.QueryRow(ctx, "SHOW hba_file").Scan(&hbaFile); err != nil {
+		return pgError(err)
+	}
+	if err := c.QueryRow(ctx, "SELECT pg_read_file($1)", hbaFile).Scan(&hba); err != nil {
+		return pgError(err)
+	}
+	if strings.Contains(hba, pgIAMHBA[0]) {
+		return nil
+	}
+	// The first matching line wins, so the lines go first: the file is
+	// rewritten with them ahead of what it holds.
+	next := strings.Join(pgIAMHBA, "\n") + "\n" + hba
+	if _, err := c.Exec(ctx, "COPY (SELECT "+quotePGString(base64Std(next))+") TO PROGRAM "+
+		quotePGString("base64 -d > "+hbaFile)); err != nil {
+		return pgError(err)
+	}
+	if _, err := c.Exec(ctx, "SELECT pg_reload_conf()"); err != nil {
+		return pgError(err)
+	}
+	return nil
 }
 
 // CreateUser creates a login role able to create databases and roles, as
@@ -452,6 +540,16 @@ func (m *MySQL) ListUsers(ctx context.Context) ([]User, error) {
 		return nil, err
 	}
 	defer db.Close()
+	iam := map[string][2]string{}
+	if irows, err := db.QueryContext(ctx, "SELECT user, type, email FROM "+myIAMTable); err == nil {
+		for irows.Next() {
+			var n, t, e string
+			if irows.Scan(&n, &t, &e) == nil {
+				iam[n] = [2]string{t, e}
+			}
+		}
+		irows.Close()
+	}
 	rows, err := db.QueryContext(ctx, `SELECT User, Host FROM mysql.user
 		WHERE User NOT LIKE 'mysql.%' ORDER BY User, Host`)
 	if err != nil {
@@ -464,9 +562,29 @@ func (m *MySQL) ListUsers(ctx context.Context) ([]User, error) {
 		if err := rows.Scan(&u.Name, &u.Host); err != nil {
 			return nil, err
 		}
+		if t, ok := iam[u.Name]; ok && u.Host == "%" {
+			u.Type, u.IAMEmail = t[0], t[1]
+		}
 		out = append(out, u)
 	}
 	return out, rows.Err()
+}
+
+// myIAMTable is where a MySQL server keeps which of its accounts are IAM
+// users (#1944), and their emails, which the account name drops. It is in
+// the mysql schema, which no database listing shows, and replicates with
+// the accounts.
+const myIAMTable = "mysql.cloudburrow_iam_users"
+
+// CreateIAMUser creates an IAM user's account (#1944): no privileges,
+// signing in with password only, recorded in myIAMTable.
+func (m *MySQL) CreateIAMUser(ctx context.Context, u User, email, password string) error {
+	acct := myString(u.Name) + "@'%'"
+	ident := " IDENTIFIED BY " + myString(password)
+	return m.exec(ctx,
+		"CREATE TABLE IF NOT EXISTS "+myIAMTable+" (user VARCHAR(32) NOT NULL PRIMARY KEY, type VARCHAR(40) NOT NULL, email VARCHAR(255) NOT NULL) ENGINE=InnoDB",
+		"CREATE USER "+acct+ident,
+		"REPLACE INTO "+myIAMTable+" (user, type, email) VALUES ("+myString(u.Name)+", "+myString(u.Type)+", "+myString(email)+")")
 }
 
 func hostOr(h string) string {
@@ -501,5 +619,11 @@ func (m *MySQL) DeleteUser(ctx context.Context, u User) error {
 	if u.Name == "root" || u.Name == m.AppUser {
 		return Errorf(http.StatusBadRequest, "Invalid request: %s is an account CloudBurrow itself uses and cannot be deleted.", u.Name)
 	}
-	return m.exec(ctx, "DROP USER "+myString(u.Name)+"@"+myString(hostOr(u.Host)))
+	stmts := []string{"DROP USER " + myString(u.Name) + "@" + myString(hostOr(u.Host))}
+	if u.Type != "" && u.Type != TypeBuiltIn {
+		stmts = append(stmts, "DELETE FROM "+myIAMTable+" WHERE user = "+myString(u.Name))
+	}
+	return m.exec(ctx, stmts...)
 }
+
+func base64Std(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }

@@ -49,10 +49,17 @@ type iamPrincipal struct {
 // suite stays in storage.
 func newIAMPrincipal(t *testing.T, h *Harness, project, name string, roles ...string) *iamPrincipal {
 	t.Helper()
+	return newIAMPrincipalIn(t, h, envMemorystoreResourceManager, project, name, roles...)
+}
+
+// newIAMPrincipalIn is newIAMPrincipal in a shard whose own name for
+// Resource Manager is rmEnv (Cloud SQL's is SQL_RESOURCEMANAGER, #1944).
+func newIAMPrincipalIn(t *testing.T, h *Harness, rmEnv, project, name string, roles ...string) *iamPrincipal {
+	t.Helper()
 	meta := h.Endpoint(EnvMetadata)
 	// projectRoles reads the shared variable, so the shard's own name is
 	// exported under it for this test.
-	shardEndpoint(h, envMemorystoreResourceManager, EnvResourceManager)
+	shardEndpoint(h, rmEnv, EnvResourceManager)
 	if !strings.HasPrefix(meta, "http://") {
 		meta = "http://" + meta
 	}

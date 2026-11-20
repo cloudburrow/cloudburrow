@@ -101,15 +101,15 @@ func TestConnectorDialsThroughTheListener(t *testing.T) {
 	}
 }
 
-// TestConnectorRefusesIAMAuthAndBadKeys: an access_token is IAM database
-// authentication, which is 501; a key that is not PEM is 400.
+// TestConnectorRefusesIAMAuthAndBadKeys: an access_token this instance
+// did not mint is 400 (#1944); a key that is not PEM is 400.
 func TestConnectorRefusesIAMAuthAndBadKeys(t *testing.T) {
 	srv := NewServer("", newFake())
 	if err := srv.EnableConnector("127.0.0.1:0", t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
 	for body, want := range map[string]int{
-		`{"public_key":"x","access_token":"t"}`: http.StatusNotImplemented,
+		`{"public_key":"x","access_token":"t"}`: http.StatusBadRequest,
 		`{"public_key":"not pem"}`:              http.StatusBadRequest,
 	} {
 		req, _ := http.NewRequest(http.MethodPost, "/v1/projects/p/instances/pg:generateEphemeralCert", strings.NewReader(body))
