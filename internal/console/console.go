@@ -114,6 +114,13 @@ type InfoTab struct {
 	// label. The page's DetailActions at that path must offer it (the
 	// server checks), marked Linked so it is not also a page button.
 	Form *Action `json:"form,omitempty"`
+	// Permissions draws the tab as the row's IAM policy, read and changed
+	// through the provider's PolicyEditor at the row's Target (or its
+	// name): Google's Pub/Sub Topics list, "select the topics ... If the
+	// info panel is hidden, click Show info panel. In the Permissions tab,
+	// click Add principal" (#1847). With several rows checked, Add principal
+	// grants the role on each of them.
+	Permissions bool `json:"permissions,omitempty"`
 }
 
 // Listing is a page of resources.
@@ -899,7 +906,16 @@ type EditForm struct {
 	// opens Deploy worker pool revision, ending in Deploy (#1852).
 	Title  string `json:"title,omitempty"`
 	Submit string `json:"submit,omitempty"`
+	// Layout is EditLayoutPage for an edit that is a page of its own, as
+	// Google's Edit subscription is (#1847: "In the subscription details
+	// page, click Edit ... Click Update"): the page's Edit opens it at the
+	// resource's address with ?edit=1, drawn under its section headings as
+	// a one-page create form is. Empty is a dialog.
+	Layout string `json:"layout,omitempty"`
 }
+
+// EditLayoutPage is EditForm.Layout for an edit drawn as its own page.
+const EditLayoutPage = "page"
 
 // Property is one label/value pair on a resource's summary.
 type Property struct {

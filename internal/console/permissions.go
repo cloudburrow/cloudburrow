@@ -207,6 +207,10 @@ type permissionsRequest struct {
 	Test *struct {
 		Permissions []string
 	}
+	// Read answers the policy as a Permissions tab draws it, with its etag:
+	// an info panel's Permissions tab (InfoTab.Permissions, #1847) reads it
+	// for the row it describes.
+	Read *struct{}
 }
 
 // handlePermissions applies Grant access or Remove principal: the service's
@@ -229,8 +233,13 @@ func (s *Server) handlePermissions(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "malformed request: " + err.Error()})
 		return
 	}
-	if n := btoi(req.Grant != nil) + btoi(req.Remove != nil) + btoi(req.Test != nil) + btoi(req.EditCondition != nil); n != 1 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "send one of grant, remove, editCondition or test"})
+	if n := btoi(req.Grant != nil) + btoi(req.Remove != nil) + btoi(req.Test != nil) + btoi(req.EditCondition != nil) +
+		btoi(req.Read != nil); n != 1 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "send one of grant, remove, editCondition, test or read"})
+		return
+	}
+	if req.Read != nil {
+		s.readPermissions(w, r, pe, req.Path)
 		return
 	}
 	if req.Test != nil {
@@ -313,6 +322,23 @@ func (s *Server) handlePermissions(w http.ResponseWriter, r *http.Request) {
 		OperationID: opID, Message: what + " on " + name,
 	})
 	writeJSON(w, http.StatusOK, map[string]string{"applied": action, "operation": opID})
+}
+
+// readPermissions answers the policy at path as a Permissions section, or
+// the section's Unavailable when the service cannot read it. It changes
+// nothing, so it records no operation.
+func (s *Server) readPermissions(w http.ResponseWriter, r *http.Request, pe PolicyEditor, path []string) {
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+	target := (*PolicyTarget)(nil)
+	if len(path) > 0 {
+		target = pe.PolicyOn(ctx, path)
+	}
+	if target == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "this resource has no IAM policy"})
+		return
+	}
+	writeJSON(w, http.StatusOK, permissionsSection(ctx, pe, r.URL.Query().Get("project"), path, target))
 }
 
 // testPermissions answers Test permissions: the service's

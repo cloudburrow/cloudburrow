@@ -124,6 +124,7 @@ func topicRow(project string, t *pubsubpb.Topic) console.Resource {
 			"Labels":         orDash(formatAttributes(t.GetLabels())),
 		},
 		Actions: []console.Action{createSubscriptionLink(project, t.GetName())},
+		Info:    pubsubInfoTabs(t.GetLabels(), "topic", true),
 	}
 }
 
@@ -165,7 +166,7 @@ func subscriptionRow(s *pubsubpb.Subscription) console.Resource {
 		"Exactly once delivery": enabledDisabled(s.GetEnableExactlyOnceDelivery()),
 		"Expiration":            expirationWords(s.GetExpirationPolicy()),
 		"Dead lettering":        dl,
-	}}
+	}, Info: pubsubInfoTabs(s.GetLabels(), "subscription", true)}
 }
 
 func enabledDisabled(v bool) string {
@@ -775,7 +776,8 @@ func subscriptionSnapshotsSection(ctx context.Context, tc *vkit.TopicAdminClient
 func headerActions(all []console.Action, inTab map[string]bool) []console.Action {
 	out := []console.Action{}
 	for _, a := range all {
-		if !inTab[a.ID] {
+		// A linked action (the info panel's Labels) is no button.
+		if !inTab[a.ID] && !a.Linked {
 			out = append(out, a)
 		}
 	}

@@ -162,40 +162,6 @@ func refuseImmutable(form *console.EditForm, values map[string]string) error {
 
 // ---------------------------------------------------------------- topics
 
-// topicEditForm is Edit topic, prefilled from the topic: its retention, the
-// one field the emulator's UpdateTopic applies.
-func topicEditForm(t *pubsubpb.Topic) *console.EditForm {
-	retention := console.Field{
-		Name: "messageRetention", Label: "Message retention duration", Type: "text",
-		Default: formatPubSubDuration(t.GetMessageRetentionDuration()),
-		Help: "How long the topic keeps every message published to it, acknowledged or not, from 10m to 31d. " +
-			pubsubDurationHelp + " Empty: the topic keeps none.",
-	}
-	if t.GetMessageRetentionDuration() != nil {
-		// Measured: an emptied retention is saved as 31 days.
-		retention.Required = true
-		retention.Help = "How long the topic keeps every message published to it, acknowledged or not, from 10m to 31d. " +
-			pubsubDurationHelp + " Once set it cannot be removed here: the emulator sets an empty retention to 31 days."
-	}
-	return &console.EditForm{
-		Label: "Edit topic",
-		Fields: []console.Field{
-			{Name: "name", Label: "Topic ID", Type: "text", Default: lastSegment(t.GetName()), Immutable: true,
-				Help: "A topic's name cannot be changed."},
-			retention,
-			{Name: "schema", Label: "Schema", Type: "text", Default: t.GetSchemaSettings().GetSchema(),
-				Help: "A schema ID of this project, or projects/{project}/schemas/{schema}, AVRO or PROTOCOL_BUFFER " +
-					"(#1446). A message published to the topic that does not conform to it is refused. Empty: no schema."},
-			{Name: "schemaEncoding", Label: "Message encoding", Type: "select", Options: []string{"JSON", "BINARY"},
-				Default: topicEncoding(t),
-				Help:    "How a message's data encodes the schema, with a schema only."},
-			labelsField(t.GetLabels(), ""),
-		},
-		Note: "Saved through UpdateTopic. The message storage policy and the KMS key cannot be " +
-			"changed on this emulator: its UpdateTopic refuses each as \"not a known Topic field\".",
-	}
-}
-
 // topicEncoding is a topic's message encoding, JSON when it has none.
 func topicEncoding(t *pubsubpb.Topic) string {
 	if t.GetSchemaSettings().GetEncoding() == pubsubpb.Encoding_BINARY {
@@ -255,6 +221,13 @@ func (p pubsubProvider) Edit(ctx context.Context, project string, path []string,
 	if err != nil {
 		return err
 	}
+	// Google's Edit topic page (#1847); a request with the older dialog's
+	// fields is read as it was.
+	if _, ok := values["enableRetention"]; ok {
+		if values, err = topicEditValues(values); err != nil {
+			return err
+		}
+	}
 	if err := refuseImmutable(topicEditForm(cur), values); err != nil {
 		return err
 	}
@@ -306,75 +279,6 @@ func pushOrPull(s *pubsubpb.Subscription) bool {
 	return d == "Push" || d == "Pull"
 }
 
-// subscriptionEditForm is Edit subscription, prefilled from the
-// subscription: what the emulator's UpdateSubscription applies, then what it
-// refuses or cannot change, shown disabled with the reason.
-func subscriptionEditForm(s *pubsubpb.Subscription) *console.EditForm {
-	const delivery, retries, deadLetter, fixed = "Delivery", "Retry policy", "Dead lettering", "Not editable"
-	fields := []console.Field{
-		{Name: "name", Label: "Subscription ID", Type: "text", Default: lastSegment(s.GetName()), Immutable: true,
-			Help: "A subscription's name cannot be changed."},
-		{Name: "topic", Label: "Topic", Type: "text", Default: subscriptionTopic(s), Immutable: true,
-			Help: "A subscription's topic cannot be changed: the emulator says the topic field is not mutable."},
-	}
-	if pushOrPull(s) {
-		push := s.GetPushConfig()
-		fields = append(fields,
-			console.Field{Name: "pushEndpoint", Label: "Push endpoint", Type: "url", Default: push.GetPushEndpoint(), Section: delivery,
-				Help: "Empty for a pull subscription. An http or https URL receives each message as an HTTP POST: " +
-					"giving one switches a pull subscription to push, and emptying it switches back to pull."},
-			console.Field{Name: "pushAttributes", Label: "Push attributes", Type: "map", Default: console.FormatMap(push.GetAttributes()),
-				Section: delivery, Help: "Optional, with a push endpoint only. One key=value per line, such as x-goog-version=v1."},
-		)
-	}
-	fields = append(fields,
-		console.Field{Name: "ackDeadline", Label: "Acknowledgement deadline (seconds)", Type: "number", Required: true,
-			Default: strconv.Itoa(int(s.GetAckDeadlineSeconds())), Section: delivery,
-			Help: "How long a subscriber has to acknowledge a message before it is redelivered, 10 to 600 seconds."},
-		console.Field{Name: "messageRetention", Label: "Message retention duration", Type: "text", Required: true,
-			Default: formatPubSubDuration(s.GetMessageRetentionDuration()), Section: delivery,
-			Help: "How long an unacknowledged message is kept, 10m to 31d. " + pubsubDurationHelp},
-		console.Field{Name: "retainAcked", Label: "Retain acknowledged messages", Type: "checkbox",
-			Default: strconv.FormatBool(s.GetRetainAckedMessages()), Section: delivery,
-			Help: "Keeps acknowledged messages for the retention duration too, so a seek can replay them."},
-		console.Field{Name: "exactlyOnce", Label: "Exactly-once delivery", Type: "checkbox",
-			Default: strconv.FormatBool(s.GetEnableExactlyOnceDelivery()), Section: delivery,
-			Help: pubsubExactlyOnceHelp},
-		console.Field{Name: "expiration", Label: "Expiration period", Type: "text",
-			Default: formatPubSubExpiration(s.GetExpirationPolicy()), Section: delivery,
-			Help: pubsubExpirationHelp},
-
-		console.Field{Name: "minBackoff", Label: "Minimum backoff", Type: "text",
-			Default: formatPubSubDuration(s.GetRetryPolicy().GetMinimumBackoff()), Section: retries,
-			Help: "0s to 600s. Both empty: no retry policy, and a message that is not acknowledged is redelivered at once. " +
-				"One left empty takes its default, 10s minimum or 600s maximum."},
-		console.Field{Name: "maxBackoff", Label: "Maximum backoff", Type: "text",
-			Default: formatPubSubDuration(s.GetRetryPolicy().GetMaximumBackoff()), Section: retries,
-			Help: "0s to 600s, and no less than the minimum. " + pubsubDurationHelp},
-
-		console.Field{Name: "deadLetterTopic", Label: "Dead-letter topic", Type: "text",
-			Default: s.GetDeadLetterPolicy().GetDeadLetterTopic(), Section: deadLetter,
-			Help: "projects/{project}/topics/{topic}, a topic that exists. Empty: no dead-letter policy."},
-		console.Field{Name: "maxDeliveryAttempts", Label: "Maximum delivery attempts", Type: "number",
-			Default: strconv.Itoa(int(max(s.GetDeadLetterPolicy().GetMaxDeliveryAttempts(), 5))), Section: deadLetter,
-			Help: "5 to 100. After this many delivery attempts a message is published to the dead-letter topic."},
-		labelsField(s.GetLabels(), "Labels"),
-	)
-	fields = append(fields,
-		console.Field{Name: "filter", Label: "Filter", Type: "text", Default: s.GetFilter(), Immutable: true, Section: fixed,
-			Help: "The emulator refuses a change: \"" + pubsubFilterRefusal + "\""},
-		console.Field{Name: "messageOrdering", Label: "Message ordering", Type: "text",
-			Default: yesNo(s.GetEnableMessageOrdering()), Immutable: true, Section: fixed,
-			Help: "Set when the subscription is created; the emulator says the field is not mutable."},
-	)
-	note := "Saved through UpdateSubscription, with an update mask naming each field that changed; switching between " +
-		"push and pull is its push_config."
-	if !pushOrPull(s) {
-		note += " This subscription delivers to " + deliveryType(s) + ", which the form leaves as it is."
-	}
-	return &console.EditForm{Label: "Edit subscription", Fields: fields, Note: note}
-}
-
 // formatPubSubExpiration shows a policy the way the expiration field reads
 // it: its ttl, never for a policy without one, and empty for none, which is
 // Google's default.
@@ -408,6 +312,13 @@ func (p pubsubSubscriptionsProvider) Edit(ctx context.Context, project string, p
 	cur, err := c.SubscriptionAdminClient.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: name})
 	if err != nil {
 		return err
+	}
+	// Google's Edit subscription page (#1847); a request with the older
+	// dialog's fields is read as it was.
+	if _, ok := values["deliveryType"]; ok {
+		if values, err = subscriptionEditValues(project, cur, values); err != nil {
+			return err
+		}
 	}
 	if err := refuseImmutable(subscriptionEditForm(cur), values); err != nil {
 		return err

@@ -92,6 +92,8 @@ func (p pubsubProvider) DetailActions(ctx context.Context, project string, path 
 		{ID: actPullAck, Label: "Pull and ack", Fields: []console.Field{subField, maxField}},
 		{ID: actPullNoAck, Label: "Pull without ack", Fields: []console.Field{noAckSub, maxField}},
 		{ID: actAckMessage, Label: "Ack"},
+		// The Topics list's info panel Labels tab (#1847).
+		pubsubLabelsAction(nil),
 	}
 }
 
@@ -115,6 +117,9 @@ func (p pubsubProvider) ActAtResult(ctx context.Context, project string, path []
 	topic := path[0]
 	if !strings.HasPrefix(topic, "projects/"+project+"/topics/") {
 		return nil, fmt.Errorf("%s is not a topic of project %s", topic, project)
+	}
+	if action == actEditLabels && len(path) == 1 {
+		return nil, p.topicSetLabels(ctx, project, topic, values)
 	}
 	c, err := p.client(ctx, project)
 	if err != nil {

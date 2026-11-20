@@ -19,7 +19,8 @@ import (
 // consolePubSubEditForm reads a topic's or subscription's page from the
 // console and returns its edit form's note, the help of each field it shows
 // disabled, and the values it would submit: every field's default except the
-// immutable ones, which the browser does not send.
+// immutable ones, which the browser does not send. label is the page's
+// title (Edit topic, Edit subscription), which Google's Edit opens (#1847).
 func consolePubSubEditForm(t *testing.T, addr, service, project, name, label string) (string, map[string]string, map[string]string) {
 	t.Helper()
 	code, body := consoleDo(t, addr, http.MethodGet, "/api/detail/"+service+"?project="+project+"&name="+url.QueryEscape(name), "")
@@ -29,8 +30,8 @@ func consolePubSubEditForm(t *testing.T, addr, service, project, name, label str
 	var detail struct {
 		Unavailable string
 		Edit        *struct {
-			Label, Note string
-			Fields      []struct {
+			Label, Note, Title string
+			Fields             []struct {
 				Name, Default, Help string
 				Immutable           bool
 			}
@@ -39,7 +40,7 @@ func consolePubSubEditForm(t *testing.T, addr, service, project, name, label str
 	if err := json.Unmarshal([]byte(body), &detail); err != nil {
 		t.Fatalf("decode detail: %v: %s", err, body)
 	}
-	if detail.Edit == nil || detail.Edit.Label != label {
+	if detail.Edit == nil || detail.Edit.Title != label || detail.Edit.Label != "Edit" {
 		t.Fatalf("the page of %s offers no %s (unavailable: %q): %s", name, label, detail.Unavailable, body)
 	}
 	values, fixed := map[string]string{}, map[string]string{}
@@ -102,7 +103,7 @@ func TestConsolePubSubEditTopicAndSubscription(t *testing.T) {
 	if v, ok := values["labels"]; !ok || v != "" {
 		t.Errorf("Edit topic's labels = %q (offered %v); want an empty labels field", v, ok)
 	}
-	values["messageRetention"] = "2d"
+	values["enableRetention"], values["retentionDays"] = "true", "2"
 	values["labels"] = `{"env":"dev"}`
 	if code, body := edit("pubsub", tp, values); code != http.StatusOK {
 		t.Fatalf("console topic edit = %d: %s", code, body)
@@ -117,7 +118,7 @@ func TestConsolePubSubEditTopicAndSubscription(t *testing.T) {
 	_, sdkErr := ps.TopicAdminClient.UpdateTopic(ctx, &pubsubpb.UpdateTopicRequest{
 		Topic:      &pubsubpb.Topic{Name: tp, MessageRetentionDuration: durationpb.New(5 * time.Minute)},
 		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"message_retention_duration"}}})
-	values["messageRetention"] = "5m"
+	values["retentionDays"], values["retentionMinutes"] = "0", "5"
 	code, body := edit("pubsub", tp, values)
 	sameRefusal("topic retention of 5m", code, body, sdkErr)
 	if got, _ := ps.TopicAdminClient.GetTopic(ctx, &pubsubpb.GetTopicRequest{Topic: tp}); got.GetMessageRetentionDuration().AsDuration() != 48*time.Hour {
@@ -126,7 +127,7 @@ func TestConsolePubSubEditTopicAndSubscription(t *testing.T) {
 	// An emptied retention is refused by the console: the emulator's own
 	// UpdateTopic with the mask and no value sets 31 days rather than
 	// removing it, which the official client then reads.
-	values["messageRetention"] = ""
+	values["enableRetention"] = "false"
 	if code, body := edit("pubsub", tp, values); code != http.StatusBadRequest || !strings.Contains(body, "31 days") {
 		t.Errorf("console edit emptying the topic's retention = %d %s; want 400 saying the emulator would save 31 days", code, body)
 	}
@@ -156,10 +157,10 @@ func TestConsolePubSubEditTopicAndSubscription(t *testing.T) {
 	if help, shown := fixed["filter"]; err == nil || !shown || !strings.Contains(help, status.Convert(err).Message()) {
 		t.Errorf("UpdateSubscription(filter) = %v; the form must show the filter disabled with that refusal, not %q", err, help)
 	}
-	if _, shown := fixed["expiration"]; shown || values["expiration"] != "31d" {
-		t.Errorf("the expiration period is disabled = %v, prefilled %q; want an editable field reading 31d", shown, values["expiration"])
+	if _, shown := fixed["expirationDays"]; shown || values["expirationDays"] != "31" {
+		t.Errorf("the expiration period is disabled = %v, prefilled %q; want an editable field reading 31 days", shown, values["expirationDays"])
 	}
-	if values["pushEndpoint"] != "" || values["ackDeadline"] != "10" {
+	if values["deliveryType"] != "Pull" || values["pushEndpoint"] != "" || values["ackDeadline"] != "10" {
 		t.Fatalf("the edit form is not prefilled from the pull subscription: %v", values)
 	}
 	// Nothing is published, so the endpoint is never called.
@@ -167,13 +168,16 @@ func TestConsolePubSubEditTopicAndSubscription(t *testing.T) {
 	values["ackDeadline"] = "30"
 	values["messageRetention"] = "2d"
 	values["retainAcked"] = "true"
+	values["deliveryType"] = "Push"
 	values["pushEndpoint"] = endpoint
 	values["pushAttributes"] = `{"x-goog-version":"v1"}`
-	values["minBackoff"] = "5s"
-	values["maxBackoff"] = "1m"
+	values["retryPolicy"] = "Retry after exponential backoff delay"
+	values["minBackoff"] = "5"
+	values["maxBackoff"] = "60"
+	values["deadLettering"] = "true"
 	values["deadLetterTopic"] = dead
 	values["maxDeliveryAttempts"] = "7"
-	values["expiration"] = "3d"
+	values["expirationDays"] = "3"
 	if code, body := edit("pubsub-subscriptions", sub, values); code != http.StatusOK {
 		t.Fatalf("console subscription edit = %d: %s", code, body)
 	}
@@ -205,11 +209,11 @@ func TestConsolePubSubEditTopicAndSubscription(t *testing.T) {
 	_, sdkErr = ps.SubscriptionAdminClient.UpdateSubscription(ctx, &pubsubpb.UpdateSubscriptionRequest{
 		Subscription: &pubsubpb.Subscription{Name: sub, ExpirationPolicy: &pubsubpb.ExpirationPolicy{Ttl: durationpb.New(12 * time.Hour)}},
 		UpdateMask:   &fieldmaskpb.FieldMask{Paths: []string{"expiration_policy"}}})
-	short := map[string]string{}
-	for k, v := range values {
-		short[k] = v
-	}
-	short["expiration"] = "12h"
+	// The page's Days cannot name 12 hours: the request an older page
+	// sends can, and is refused with the API's own words.
+	short := map[string]string{"ackDeadline": "30", "messageRetention": "2d", "retainAcked": "true",
+		"pushEndpoint": endpoint, "pushAttributes": `{"x-goog-version":"v1"}`, "minBackoff": "5s", "maxBackoff": "1m",
+		"deadLetterTopic": dead, "maxDeliveryAttempts": "7", "exactlyOnce": "false", "expiration": "12h"}
 	code, body = edit("pubsub-subscriptions", sub, short)
 	sameRefusal("expiration of 12h", code, body, sdkErr)
 	if s, _ := ps.SubscriptionAdminClient.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: sub}); s.GetExpirationPolicy().GetTtl().AsDuration() != 72*time.Hour {
@@ -220,8 +224,9 @@ func TestConsolePubSubEditTopicAndSubscription(t *testing.T) {
 	}
 
 	// Back to pull, with no retry or dead-letter policy.
-	values["pushEndpoint"], values["pushAttributes"] = "", ""
-	values["minBackoff"], values["maxBackoff"], values["deadLetterTopic"] = "", "", ""
+	values["deliveryType"] = "Pull"
+	values["retryPolicy"] = "Retry immediately"
+	values["deadLettering"] = "false"
 	if code, body := edit("pubsub-subscriptions", sub, values); code != http.StatusOK {
 		t.Fatalf("console edit back to pull = %d: %s", code, body)
 	}
@@ -243,7 +248,7 @@ func TestConsolePubSubEditTopicAndSubscription(t *testing.T) {
 	for k, v := range values {
 		withPush[k] = v
 	}
-	withPush["pushEndpoint"] = endpoint
+	withPush["deliveryType"], withPush["pushEndpoint"] = "Push", endpoint
 	if code, body := edit("pubsub-subscriptions", sub, withPush); code == http.StatusOK || !strings.Contains(body, "pull subscriptions only") {
 		t.Errorf("console edit to exactly-once with a push endpoint = %d: %s; want the refusal", code, body)
 	}

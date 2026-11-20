@@ -59,12 +59,12 @@ func TestPubSubLabelsAreCheckedOnTheForms(t *testing.T) {
 	p.navigate("/pubsub/topics?project=" + project)
 	p.clickText("#view tbody a", topic)
 	p.waitFor(`document.querySelector(".modal") === null`)
-	p.clickText("#view .page-actions button", "Edit topic")
-	p.waitFor(`document.querySelector(".modal.is-open #f-labels") !== null`)
-	setField(p, ".modal.is-open", "f-labels", "team=a b")
-	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
-	p.waitFor(`!document.querySelector(".modal.is-open #e-labels").hidden`)
-	p.eval(`document.querySelector(".modal.is-open #e-labels").textContent`, &refusal)
+	p.clickText("#view .page-actions button", "Edit")
+	p.waitFor(`document.querySelector("form.edit-page #f-labels") !== null`)
+	setField(p, "form.edit-page", "f-labels", "team=a b")
+	p.run(chromedp.Click(chromedp.CSS(`form.edit-page button[type="submit"]`)))
+	p.waitFor(`!document.querySelector("form.edit-page #e-labels").hidden`)
+	p.eval(`document.querySelector("form.edit-page #e-labels").textContent`, &refusal)
 	if !strings.Contains(refusal, `Line 1`) || !strings.Contains(refusal, `"a b"`) {
 		t.Errorf("a value with a space was refused on the field with %q; want line 1 and the value", refusal)
 	}

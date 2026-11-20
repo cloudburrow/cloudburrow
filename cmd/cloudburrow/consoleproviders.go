@@ -137,7 +137,10 @@ func (p pubsubProvider) List(ctx context.Context, project string) (console.Listi
 		}
 		items = append(items, topicRow(project, t))
 	}
-	return console.Listing{Columns: topicListColumns, NameColumn: "Topic name", Noun: "topics", Items: items, Total: len(items)}, nil
+	// Google's: select the topics, then the info panel's Permissions and
+	// Labels tabs (#1847).
+	return console.Listing{Columns: topicListColumns, NameColumn: "Topic name", Noun: "topics", Items: items, Total: len(items),
+		InfoOnSelect: true}, nil
 }
 
 // tasksProvider lists queues from the in-process Cloud Tasks store.

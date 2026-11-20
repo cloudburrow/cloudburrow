@@ -3049,6 +3049,9 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   // Google's Spanner Instances list, "Select the checkbox for the instance.
   // The Info panel appears".
   const infoOnSelect = Boolean(opts.rowControls && data.infoOnSelect);
+  if (infoOnSelect) {
+    INFO_SELECTION = () => [...selected].map((n) => data.items.find((i) => i.name === n)).filter(Boolean);
+  }
   const selectable = Boolean(opts.rowControls && caps.delete) || selectActions.length > 0 || infoOnSelect;
   // Or a list screen's rows marked selectable: History's builds awaiting
   // approval, which its Approve takes (#1854). A top-level list's own
@@ -3855,6 +3858,11 @@ async function renderDetail(view, route, resourcePath) {
   // sharing's My subscriptions, #1989) is headed by its own name, not
   // "<Kind> details".
   if (data.heading) crumb.querySelector("h1, h2").textContent = data.heading;
+  // Google's Edit subscription is a page (#1847): this resource's address
+  // with ?edit=1 draws it in place of the tabs.
+  if (data.edit && data.edit.layout === "page" && new URLSearchParams(location.search).get("edit") === "1") {
+    return renderEditPage(view, route, segments, data.edit, crumb);
+  }
   // A section ShownIn another is drawn by that tab's Show list, not as a
   // tab of its own (#1843): a bucket's soft-deleted objects are the
   // Objects tab's "Soft-deleted objects only".
@@ -4571,7 +4579,11 @@ async function renderDetail(view, route, resourcePath) {
   if (data.edit) {
     pageActions.unshift(el("button", {
       class: "primary", text: data.edit.label || "Edit",
-      onclick: () => openEditForm(route, segments, data.edit, reloadPage),
+      // An edit that is a page of its own (EditForm.Layout, #1847) opens
+      // at this page's address with ?edit=1.
+      onclick: () => data.edit.layout === "page"
+        ? navigate(editPageHref())
+        : openEditForm(route, segments, data.edit, reloadPage),
     }));
   }
   // Beside the title, as Google's Edit and Delete are (#1842).
@@ -5490,6 +5502,7 @@ async function editFromRow(route, segments, onDone) {
     const data = await api(`/api/detail/${route.service}?project=${encodeURIComponent(project)}` +
       segments.map((sg) => `&name=${encodeURIComponent(sg)}`).join(""));
     if (!data.edit) throw new Error("This resource has nothing that can be edited.");
+    if (data.edit.layout === "page") return navigate(editPageHref(detailHref(route, segments)));
     openEditForm(route, segments, data.edit, onDone);
   } catch (err) {
     notify(String(err.message), "error");
@@ -5553,6 +5566,77 @@ function openEditForm(route, segments, spec, onDone) {
     ...fields.nodes,
     el("div", { class: "modal-actions" }, cancel, primary)));
   fields.focusFirst();
+}
+
+// editPageHref is the address of a resource's edit page (EditForm.Layout
+// "page", #1847): its own page's address, here or at href, with ?edit=1.
+function editPageHref(href) {
+  const u = new URL(href || location.pathname + location.search, location.origin);
+  u.searchParams.delete("tab");
+  u.searchParams.set("edit", "1");
+  return u.pathname + u.search;
+}
+
+// renderEditPage draws an edit as a page of its own (#1847), as Google's
+// Edit subscription is: the resource's crumbs, then Edit, the form under
+// its section headings as a one-page create form draws it, and the form's
+// Submit ("Update") then Cancel at the bottom. Cancel and a saved change
+// go back to the resource's page.
+function renderEditPage(view, route, segments, spec, crumb) {
+  const name = segments[segments.length - 1];
+  const u = new URL(location.href);
+  u.searchParams.delete("edit");
+  const backHref = u.pathname + u.search;
+  const title = spec.title || spec.label || "Edit";
+  const nav = crumb.querySelector(".breadcrumb");
+  const last = nav.lastElementChild;
+  if (last && last.tagName === "SPAN") nav.replaceChild(el("a", { href: backHref, text: last.textContent }), last);
+  nav.append(el("span", { "aria-hidden": "true", text: "/" }), el("span", { text: title }));
+  const heading = crumb.querySelector("h1, h2");
+  heading.textContent = title;
+  const arrow = crumb.querySelector(".page-title-row a");
+  if (arrow) {
+    arrow.setAttribute("href", backHref);
+    arrow.setAttribute("aria-label", `Back to ${name}`);
+  }
+  const header = crumb.querySelector(".page-header-actions");
+  if (header) setChildren(header);
+  if (!crumb.querySelector(".resource-name")) heading.after(el("p", { class: "resource-name", text: name }));
+
+  const fields = buildCreateForm(spec);
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  const primary = el("button", { type: "submit", class: "primary", text: spec.submit || "Save" });
+  const cancel = el("a", { class: "button secondary", href: backHref, text: "Cancel" });
+  const submit = async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    if (!fields.validate()) return;
+    setBusy(primary, true);
+    const op = recordOperation(`Update ${name}`);
+    try {
+      const res = await send(
+        `/api/resources/${route.service}?project=${encodeURIComponent(currentProject())}`,
+        "PATCH", { Path: segments, Values: fields.values() });
+      op.succeeded("", res.operation);
+      notify(`Updated ${name}`);
+      announce(`Updated ${name}`);
+      navigate(backHref);
+    } catch (err) {
+      op.failed(err.message, err.operation);
+      setBusy(primary, false);
+      error.textContent = err.message;
+      error.hidden = false;
+    }
+  };
+  setChildren(view, crumb,
+    el("form", { class: "create-page is-single-page edit-page", novalidate: true, onsubmit: submit,
+                 "aria-label": `${title} ${name}` },
+      spec.note ? el("p", { class: "form-help", text: spec.note }) : null,
+      error,
+      ...fields.nodes,
+      el("div", { class: "form-actions" }, primary, cancel)));
+  fields.focusFirst();
+  announce(`${title} form`);
 }
 
 // inlineEditForm is a section's own edit form (Section.Edit, #1864), sent
@@ -6148,6 +6232,7 @@ function infoTabs(item, tabs, details, route, onDone) {
   });
   const draw = (tab) => {
     if (tab.id === "details") return setChildren(panel, ...details);
+    if (tab.permissions) return drawInfoPermissions(panel, item, tab, route);
     const shown = (tab.properties || []).length
       ? el("dl", { class: "info-fields" }, ...tab.properties.flatMap((p) => [
           el("dt", { text: p.label }), el("dd", { text: p.value })]))
@@ -6196,6 +6281,90 @@ function infoTabs(item, tabs, details, route, onDone) {
   };
   select(INFO_TAB, false);
   return el("div", { class: "info-tabbed" }, strip, panel);
+}
+
+// INFO_SELECTION answers the rows checked in the list the info panel
+// belongs to, so an info panel's Permissions tab can grant on each of them
+// (#1847: "To set roles for one or more topics, select the topics").
+let INFO_SELECTION = () => [];
+
+// drawInfoPanel's Permissions tab (InfoTab.Permissions, #1847): the row's
+// IAM policy, read through POST /api/permissions/{service} with Read, one
+// row per principal and role with Remove principal on each, under Add
+// principal. With several rows checked, Add principal grants the role on
+// each, each read and saved with its own etag.
+let INFO_PERMS_DRAW = 0;
+async function drawInfoPermissions(panel, item, tab, route) {
+  const mine = ++INFO_PERMS_DRAW;
+  const url = `/api/permissions/${route.service}?project=${encodeURIComponent(currentProject())}`;
+  const targetOf = (i) => ((i.target || []).length ? i.target : [i.name]);
+  const read = (i) => send(url, "POST", { Path: targetOf(i), Read: {} });
+  setChildren(panel, el("p", { class: "unavailable", text: "Reading the IAM policy…" }));
+  let section;
+  try {
+    section = await read(item);
+  } catch (err) {
+    if (mine !== INFO_PERMS_DRAW) return;
+    return setChildren(panel, el("p", { class: "form-error", role: "alert", text: err.message }));
+  }
+  if (mine !== INFO_PERMS_DRAW || !panel.isConnected) return;
+  if (!section.permissions || section.unavailable) {
+    return setChildren(panel, el("p", { class: "unavailable", text: section.unavailable || "This resource has no IAM policy to show." }));
+  }
+  const view = section.permissions;
+  const redraw = () => drawInfoPermissions(panel, item, tab, route);
+  const checked = INFO_SELECTION().filter((i) => i && i.info && i.info.some((t) => t.permissions));
+  const many = checked.length > 1 && checked.some((i) => i.name === item.name) ? checked : [item];
+  const label = many.length > 1 ? `${many.length} selected` : item.name;
+  // One Grant per checked row, each with the etag its own read gave.
+  const change = async (body) => {
+    if (!body.Grant || many.length === 1) return send(url, "POST", { Path: targetOf(item), Etag: view.etag, ...body });
+    let last = null;
+    for (const i of many) {
+      const own = i.name === item.name ? section : await read(i);
+      if (!own.permissions) throw new Error(`${i.name}: ${own.unavailable || "no IAM policy"}`);
+      last = await send(url, "POST", { Path: targetOf(i), Etag: own.permissions.etag, ...body });
+    }
+    return last;
+  };
+  const rows = (view.bindings || []).flatMap((b) => (b.members || []).map((m) =>
+    ({ member: m, role: b.role, conditional: b.conditional || null })))
+    .sort((a, b) => a.member.localeCompare(b.member) || a.role.localeCompare(b.role));
+  const add = el("button", { type: "button", class: "primary", id: "info-add-principal", text: "Add principal",
+    onclick: () => openGrantForm(view, label, change, redraw) });
+  setChildren(panel,
+    permissionsNote(view),
+    many.length > 1
+      ? el("p", { class: "form-help", id: "info-permissions-scope",
+          text: `Add principal grants the role on each of the ${many.length} checked rows. The principals below are ${item.name}'s.` })
+      : null,
+    el("div", { class: "action-bar" }, add),
+    rows.length
+      ? el("table", { id: "info-permissions", "aria-label": `Principals with roles on ${item.name}` },
+          el("thead", {}, el("tr", {}, el("th", { text: "Principal" }), el("th", { text: "Role" }),
+            el("th", {}, el("span", { class: "sr-only", text: "Actions" })))),
+          el("tbody", {}, ...rows.map((r) => el("tr", {},
+            el("td", { class: "mono", text: r.member }), el("td", { class: "mono", text: r.role }),
+            el("td", {}, el("button", { type: "button", class: "secondary danger", text: "Remove principal",
+              "aria-label": `Remove ${r.member} from ${r.role}`,
+              onclick: () => confirmDestructive({
+                title: `Remove ${r.member} from ${r.role}?`,
+                detail: `${r.member} will no longer be listed with ${r.role} on ${item.name}.`,
+                confirmWord: r.member, confirmLabel: "Remove", consequence: "",
+                onConfirm: async () => {
+                  const op = recordOperation(`Remove ${r.member} from ${r.role} on ${item.name}`);
+                  try {
+                    const res = await send(url, "POST", { Path: targetOf(item), Etag: view.etag,
+                      Remove: { Member: r.member, Role: r.role, Condition: r.conditional } });
+                    op.succeeded("", res.operation);
+                  } catch (err) {
+                    op.failed(err.message, err.operation);
+                    throw err;
+                  }
+                  notify(`Removed ${r.member} from ${r.role}`);
+                  redraw();
+                } }) }))))))
+      : el("p", { class: "unavailable", text: `No principal holds a role on ${item.name}. Add principal adds one.` }));
 }
 
 // openInfoPanelOn opens the info panel on one row, as a checkbox that opens

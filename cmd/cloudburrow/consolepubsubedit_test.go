@@ -83,8 +83,9 @@ func TestPubSubEditTopicThroughUpdateTopic(t *testing.T) {
 	}
 
 	form := pubsubEditOf(t, p, project, name)
-	if form.Label != "Edit topic" || strings.Contains(form.Note, "abels") {
-		t.Errorf("edit form %q, note %q; want Edit topic, its note not naming labels", form.Label, form.Note)
+	if form.Label != "Edit" || form.Title != "Edit topic" || form.Submit != "Update" || form.Layout != console.EditLayoutPage ||
+		strings.Contains(form.Note, "abels") {
+		t.Errorf("edit form %+v; want Google's Edit opening the Edit topic page, ending in Update, its note not naming labels", form)
 	}
 	if f, ok := fieldNamed(form, "labels"); !ok || f.Type != "map" || f.Default != `{"team":"a"}` || f.Help != pubsubLabelsHelp {
 		t.Errorf("labels field = %+v; want a map prefilled with team=a", f)
@@ -93,11 +94,9 @@ func TestPubSubEditTopicThroughUpdateTopic(t *testing.T) {
 		t.Errorf("name field = %+v; want orders, immutable", f)
 	}
 	values := pubsubSubmitted(form)
-	if len(values) != 4 || values["messageRetention"] != "" || values["labels"] != `{"team":"a"}` || values["schema"] != "" {
-		t.Fatalf("a topic with no retention submits %v; want an empty retention, no schema and its labels", values)
-	}
-	if f, _ := fieldNamed(form, "messageRetention"); f.Required {
-		t.Error("the retention of a topic that has none is required")
+	if values["enableRetention"] != "false" || values["useSchema"] != "false" || values["labels"] != `{"team":"a"}` ||
+		values["retentionDays"] != "7" {
+		t.Fatalf("a topic with no retention submits %v; want no retention, no schema and its labels", values)
 	}
 	if err := p.Edit(ctx, project, []string{name}, values); err != nil {
 		t.Fatalf("saving the form unchanged: %v", err)
@@ -106,7 +105,7 @@ func TestPubSubEditTopicThroughUpdateTopic(t *testing.T) {
 		t.Errorf("saving unchanged gave the topic a retention: %v", got.GetMessageRetentionDuration())
 	}
 
-	values["messageRetention"] = "2d"
+	values["enableRetention"], values["retentionDays"] = "true", "2"
 	if err := p.Edit(ctx, project, []string{name}, values); err != nil {
 		t.Fatalf("Edit: %v", err)
 	}
@@ -123,8 +122,16 @@ func TestPubSubEditTopicThroughUpdateTopic(t *testing.T) {
 		t.Errorf("the topic's summary reads %v; want its retention and labels", props)
 	}
 	form = pubsubEditOf(t, p, project, name)
-	if f, _ := fieldNamed(form, "messageRetention"); f.Default != "2d" || !f.Required {
-		t.Errorf("after saving, retention is prefilled %+v; want 2d, required", f)
+	if got := pubsubSubmitted(form); got["enableRetention"] != "true" || got["retentionDays"] != "2" ||
+		got["retentionHours"] != "0" || got["retentionMinutes"] != "0" {
+		t.Errorf("after saving, the retention is prefilled %v; want 2 days", got)
+	}
+	// Clearing Enable message retention is refused: the emulator would
+	// save 31 days.
+	cleared := pubsubSubmitted(form)
+	cleared["enableRetention"] = "false"
+	if err := p.Edit(ctx, project, []string{name}, cleared); err == nil || err.Error() != pubsubRetentionUnclearable {
+		t.Errorf("clearing Enable message retention = %v; want %q", err, pubsubRetentionUnclearable)
 	}
 
 	// Labels, changed and then removed, with the retention left as it is.
@@ -217,8 +224,9 @@ func TestPubSubEditSubscriptionThroughUpdateSubscription(t *testing.T) {
 	}
 
 	form := pubsubEditOf(t, p, project, name)
-	if form.Label != "Edit subscription" || strings.Contains(form.Note, "abels") {
-		t.Errorf("edit form %q, note %q; want Edit subscription, its note not naming labels", form.Label, form.Note)
+	if form.Label != "Edit" || form.Title != "Edit subscription" || form.Submit != "Update" ||
+		form.Layout != console.EditLayoutPage || strings.Contains(form.Note, "abels") {
+		t.Errorf("edit form %+v; want Google's Edit opening the Edit subscription page, ending in Update", form)
 	}
 	if f, ok := fieldNamed(form, "labels"); !ok || f.Type != "map" || f.Help != pubsubLabelsHelp {
 		t.Errorf("labels field = %+v; want a map", f)
@@ -232,31 +240,39 @@ func TestPubSubEditSubscriptionThroughUpdateSubscription(t *testing.T) {
 	if f, _ := fieldNamed(form, "filter"); f.Default != `attributes.kind = "a"` || !strings.Contains(f.Help, pubsubFilterRefusal) {
 		t.Errorf("filter field = %+v", f)
 	}
+	if f, _ := fieldNamed(form, "deliveryType"); f.UnavailableOptions[deliveryBigQuery] == "" || f.UnavailableOptions[deliveryStorage] == "" {
+		t.Errorf("delivery type = %+v; want the export types drawn unavailable on a pull subscription", f)
+	}
 	values := pubsubSubmitted(form)
 	want := map[string]string{
-		"pushEndpoint": "", "pushAttributes": "", "ackDeadline": "10", "messageRetention": "7d", "retainAcked": "false",
-		"minBackoff": "", "maxBackoff": "", "deadLetterTopic": "", "maxDeliveryAttempts": "5", "exactlyOnce": "false",
-		"expiration": "", "labels": `{"team":"a"}`,
-	}
-	if len(values) != len(want) {
-		t.Errorf("the form submits %v; want exactly %v", values, want)
+		"deliveryType": deliveryPull, "pushEndpoint": "", "pushAttributes": "", "ackDeadline": "10", "messageRetention": "7d",
+		"retainAcked": "false", "retryPolicy": retryImmediately, "minBackoff": "10", "maxBackoff": "600",
+		"deadLettering": "false", "deadLetterTopic": "", "maxDeliveryAttempts": "5", "exactlyOnce": "false",
+		"expirationMode": expireAfterDays, "expirationDays": "31", "labels": `{"team":"a"}`,
 	}
 	for k, v := range want {
 		if values[k] != v {
 			t.Errorf("%s prefilled as %q, want %q", k, values[k], v)
 		}
 	}
+	// Saved unchanged, it changes nothing.
+	if err := p.Edit(ctx, project, []string{name}, values); err != nil {
+		t.Fatalf("Edit unchanged: %v", err)
+	}
+	if s, _ := c.SubscriptionAdminClient.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: name}); s.GetExpirationPolicy() != nil ||
+		s.GetRetryPolicy() != nil {
+		t.Errorf("saving unchanged wrote %v", s)
+	}
 
 	values["ackDeadline"] = "30"
 	values["messageRetention"] = "2d"
 	values["retainAcked"] = "true"
+	values["deliveryType"] = deliveryPush
 	values["pushEndpoint"] = "http://127.0.0.1:9/push"
 	values["pushAttributes"] = `{"x-goog-version":"v1"}`
-	values["minBackoff"] = "5s"
-	values["maxBackoff"] = "1m"
-	values["deadLetterTopic"] = dead
-	values["maxDeliveryAttempts"] = "7"
-	values["expiration"] = "3d"
+	values["retryPolicy"], values["minBackoff"], values["maxBackoff"] = retryBackoff, "5", "60"
+	values["deadLettering"], values["deadLetterTopic"], values["maxDeliveryAttempts"] = "true", "orders-dead", "7"
+	values["expirationDays"] = "3"
 	if err := p.Edit(ctx, project, []string{name}, values); err != nil {
 		t.Fatalf("Edit: %v", err)
 	}
@@ -274,16 +290,19 @@ func TestPubSubEditSubscriptionThroughUpdateSubscription(t *testing.T) {
 	if s.GetLabels()["team"] != "a" || s.GetFilter() != `attributes.kind = "a"` || !s.GetEnableMessageOrdering() {
 		t.Errorf("the edit changed what the form does not send: %v", s)
 	}
-	if got := pubsubSubmitted(pubsubEditOf(t, p, project, name)); got["pushEndpoint"] != "http://127.0.0.1:9/push" ||
-		got["minBackoff"] != "5s" || got["maxBackoff"] != "1m0s" || got["messageRetention"] != "2d" || got["expiration"] != "3d" {
+	if got := pubsubSubmitted(pubsubEditOf(t, p, project, name)); got["deliveryType"] != deliveryPush ||
+		got["pushEndpoint"] != "http://127.0.0.1:9/push" || got["retryPolicy"] != retryBackoff || got["minBackoff"] != "5" ||
+		got["maxBackoff"] != "60" || got["messageRetention"] != "2d" || got["expirationDays"] != "3" ||
+		got["deadLettering"] != "true" || got["deadLetterTopic"] != dead {
 		t.Errorf("the form after saving is prefilled with %v", got)
 	}
 
-	// Back to pull, and no retry or dead-letter policy.
-	values["pushEndpoint"], values["pushAttributes"] = "", ""
-	values["minBackoff"], values["maxBackoff"] = "", ""
-	values["deadLetterTopic"] = ""
-	values["expiration"] = "never"
+	// Back to Pull: the endpoint typed is not sent; no retry or dead-letter
+	// policy; Never expire.
+	values["deliveryType"] = deliveryPull
+	values["retryPolicy"] = retryImmediately
+	values["deadLettering"] = "false"
+	values["expirationMode"] = expireNever
 	if err := p.Edit(ctx, project, []string{name}, values); err != nil {
 		t.Fatalf("Edit back to pull: %v", err)
 	}
@@ -293,8 +312,17 @@ func TestPubSubEditSubscriptionThroughUpdateSubscription(t *testing.T) {
 		s.GetExpirationPolicy() == nil || s.GetExpirationPolicy().GetTtl() != nil {
 		t.Errorf("GetSubscription after switching back to pull, never expiring, reads %v", s)
 	}
-	if got := pubsubSubmitted(pubsubEditOf(t, p, project, name)); got["expiration"] != "never" {
-		t.Errorf("a subscription that never expires is prefilled with expiration %q, want never", got["expiration"])
+	if got := pubsubSubmitted(pubsubEditOf(t, p, project, name)); got["expirationMode"] != expireNever {
+		t.Errorf("a subscription that never expires is prefilled with %q, want %s", got["expirationMode"], expireNever)
+	}
+	// An export delivery type is refused on Edit, as the page draws it.
+	toExport := map[string]string{}
+	for k, x := range values {
+		toExport[k] = x
+	}
+	toExport["deliveryType"] = deliveryBigQuery
+	if err := p.Edit(ctx, project, []string{name}, toExport); err == nil || !strings.Contains(err.Error(), pubsubNoExportOnEdit) {
+		t.Errorf("Edit to Write to BigQuery = %v; want %q", err, pubsubNoExportOnEdit)
 	}
 
 	// Exactly-once on, refused with a push endpoint, and off again.
@@ -309,7 +337,7 @@ func TestPubSubEditSubscriptionThroughUpdateSubscription(t *testing.T) {
 	for k, x := range values {
 		withPush[k] = x
 	}
-	withPush["pushEndpoint"] = "http://127.0.0.1:9/push"
+	withPush["deliveryType"], withPush["pushEndpoint"] = deliveryPush, "http://127.0.0.1:9/push"
 	if err := p.Edit(ctx, project, []string{name}, withPush); err == nil || !strings.Contains(err.Error(), "pull subscriptions only") {
 		t.Errorf("exactly-once with a push endpoint = %v; want the refusal", err)
 	}
@@ -334,18 +362,17 @@ func TestPubSubEditSubscriptionThroughUpdateSubscription(t *testing.T) {
 
 	// Refused before UpdateSubscription, changing nothing.
 	for what, v := range map[string]map[string]string{
-		"bad labels":                  {"labels": "team=a"},
-		"attributes with no endpoint": {"pushAttributes": `{"x-goog-version":"v1"}`},
-		"a deadline not a number":     {"ackDeadline": "soon"},
-		"a bad retention":             {"messageRetention": "a week"},
-		"no retention":                {"messageRetention": ""},
-		"a bad backoff":               {"minBackoff": "fast"},
-		"a bad expiration":            {"expiration": "soon"},
-		"a zero expiration":           {"expiration": "0s"},
-		"attempts not a number":       {"deadLetterTopic": dead, "maxDeliveryAttempts": "many"},
-		"a changed topic":             {"topic": dead},
-		"a changed filter":            {"filter": ""},
-		"a rename":                    {"name": "other"},
+		"bad labels":              {"labels": "team=a"},
+		"a deadline not a number": {"ackDeadline": "soon"},
+		"a bad retention":         {"messageRetention": "a week"},
+		"no retention":            {"messageRetention": ""},
+		"a bad backoff":           {"retryPolicy": retryBackoff, "minBackoff": "fast"},
+		"a bad expiration":        {"expirationMode": expireAfterDays, "expirationDays": "soon"},
+		"a zero expiration":       {"expirationMode": expireAfterDays, "expirationDays": "0"},
+		"attempts not a number":   {"deadLettering": "true", "deadLetterTopic": dead, "maxDeliveryAttempts": "many"},
+		"a changed topic":         {"topic": dead},
+		"a changed filter":        {"filter": ""},
+		"a rename":                {"name": "other"},
 	} {
 		bad := map[string]string{}
 		for k, x := range values {
@@ -435,8 +462,9 @@ func TestPubSubEditFormLeavesOtherDeliveriesAndReadsDurations(t *testing.T) {
 			t.Errorf("a BigQuery subscription's form offers %s", f.Name)
 		}
 	}
-	if !strings.Contains(form.Note, "BigQuery") {
-		t.Errorf("the note does not say the BigQuery delivery is left as it is: %q", form.Note)
+	if f, _ := fieldNamed(form, "deliveryType"); !f.Immutable || f.Default != deliveryType(&pubsubpb.Subscription{
+		BigqueryConfig: &pubsubpb.BigQueryConfig{Table: "p.d.t"}}) || !strings.Contains(f.Help, "BigQuery") {
+		t.Errorf("the delivery type does not say the BigQuery delivery is left as it is: %+v", f)
 	}
 	for in, want := range map[string]time.Duration{"7d": 7 * 24 * time.Hour, "36h": 36 * time.Hour, "10m": 10 * time.Minute, "90s": 90 * time.Second} {
 		d, err := parsePubSubDuration("x", in)
