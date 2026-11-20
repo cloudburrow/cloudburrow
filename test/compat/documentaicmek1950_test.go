@@ -3,6 +3,8 @@
 package compat
 
 import (
+	"errors"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -12,6 +14,7 @@ import (
 	"cloud.google.com/go/iam"
 	kms "cloud.google.com/go/kms/apiv1"
 	"cloud.google.com/go/kms/apiv1/kmspb"
+	"google.golang.org/api/googleapi"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -107,11 +110,18 @@ func TestDocumentAICMEK(t *testing.T) {
 	if _, err := g.ProcessDocument(ctx, &documentaipb.ProcessRequest{Name: p.GetName(), Source: raw}); status.Code(err) != codes.FailedPrecondition {
 		t.Errorf("ProcessDocument with the version disabled: %v; want FAILED_PRECONDITION", err)
 	}
-	if _, err := r.GetProcessorVersion(ctx, &documentaipb.GetProcessorVersionRequest{Name: p.GetDefaultProcessorVersion()}); status.Code(err) != codes.FailedPrecondition {
+	if _, err := r.GetProcessorVersion(ctx, &documentaipb.GetProcessorVersionRequest{Name: p.GetDefaultProcessorVersion()}); !restFailedPrecondition(err) {
 		t.Errorf("GetProcessorVersion over REST with the version disabled: %v; want FAILED_PRECONDITION", err)
 	}
 	setVersionState(t, h, k, v1, kmspb.CryptoKeyVersion_ENABLED)
 	if _, err := g.ProcessDocument(ctx, &documentaipb.ProcessRequest{Name: p.GetName(), Source: raw}); err != nil {
 		t.Errorf("ProcessDocument with the version enabled again: %v", err)
 	}
+}
+
+// restFailedPrecondition reports whether a REST client's error is Google's
+// FAILED_PRECONDITION over HTTP: 400 with that status in the body.
+func restFailedPrecondition(err error) bool {
+	var ge *googleapi.Error
+	return errors.As(err, &ge) && ge.Code == http.StatusBadRequest && strings.Contains(ge.Body, "FAILED_PRECONDITION")
 }

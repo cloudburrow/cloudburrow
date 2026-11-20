@@ -528,7 +528,7 @@ func spannerCreateDatabaseForm() console.Action {
 // encryption choice is Cloud KMS key.
 func spannerKMSKeyField() console.Field {
 	return console.Field{Name: "kmsKey", Label: "Cloud KMS key", Type: "text", Required: true, ShowWhen: "encryption=Cloud KMS key",
-		Pattern: `^projects/[^/]+/locations/[^/]+/keyRings/[^/]+/cryptoKeys/[^/]+$`,
+		Pattern: `^projects/[^\/]+/locations/[^\/]+/keyRings/[^\/]+/cryptoKeys/[^\/]+$`,
 		Help:    "projects/PROJECT/locations/LOCATION/keyRings/KEY_RING/cryptoKeys/KEY, in the instance configuration's region; the Spanner service agent needs roles/cloudkms.cryptoKeyEncrypterDecrypter on it."}
 }
 

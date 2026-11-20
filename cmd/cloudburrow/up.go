@@ -222,7 +222,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		comps.SetVertexAI(fmt.Sprintf("%s.%s.svc.cluster.local:%d", ClusterHostService, cfg.Cluster.Namespace,
 			cfg.Endpoints.LocalAI))
 	}
-	if firestoreKMS(cfg) || storageKMS(cfg) {
+	if firestoreKMS(cfg) || storageKMS(cfg) || spannerKMS(cfg) {
+		// Spanner's (#1950) encrypt through it too.
 		// Firestore's customer-managed keys (#1881) are checked against
 		// this process's Cloud KMS, and Cloud Storage's (#1938) encrypt
 		// through it, through cloudburrow-host: its port is fixed now,
@@ -991,7 +992,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// verify the URLs those accounts sign (#1787).
 	runEnabled := serviceEnabled(cfg, config.ServiceRun)
 	pubsubKMS := serviceEnabled(cfg, config.ServicePubSub) && serviceEnabled(cfg, config.ServiceKMS)
-	if runEnabled || serviceEnabled(cfg, config.ServiceBigQuery) || serviceEnabled(cfg, config.ServiceStorage) || pubsubKMS || firestoreKMS(cfg) {
+	if runEnabled || serviceEnabled(cfg, config.ServiceBigQuery) || serviceEnabled(cfg, config.ServiceStorage) || pubsubKMS || firestoreKMS(cfg) || spannerKMS(cfg) {
 		// The Cloud SQL Admin API and its connector are published for Cloud
 		// SQL volumes (#1346): the Auth Proxy a revision runs reaches both.
 		published := map[string]bool{"run": true, "tasks": true, "secretmanager": true, "kms": true,
@@ -1012,8 +1013,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			if firestoreKMS(cfg) {
 				published["kms"] = true
 			}
-			// Cloud Storage encrypts with customer-managed keys (#1938).
-			if storageKMS(cfg) {
+			// Cloud Storage (#1938) and Spanner (#1950) encrypt with
+			// customer-managed keys.
+			if storageKMS(cfg) || spannerKMS(cfg) {
 				published["kms"] = true
 			}
 		}

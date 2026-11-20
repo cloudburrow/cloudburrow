@@ -40,7 +40,7 @@ package spannerfront
 // Choices Google does not document, pinned by unit tests (UNVERIFIED): the
 // texts after Google's sentence, a bad key name or location
 // INVALID_ARGUMENT, and a service agent without the role
-// FAILED_PRECONDITION with Google's sentence. Docs read 2026-11-19:
+// FAILED_PRECONDITION with Google's sentence. Docs re-read 2026-11-19, still unanswered:
 // https://docs.cloud.google.com/spanner/docs/cmek
 
 import (

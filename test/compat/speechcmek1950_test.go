@@ -22,7 +22,7 @@ import (
 // recognizer. Measured first: GetConfig and UpdateConfig were 501 and
 // Recognizer.kms_key_name refused.
 //
-// covers: google.cloud.speech.v2.Speech/CreateRecognizer, google.cloud.speech.v2.Speech/GetRecognizer, google.cloud.speech.v2.Speech/UpdateRecognizer, google.cloud.speech.v2.Speech/CreatePhraseSet, google.cloud.speech.v2.Speech/GetPhraseSet
+// covers: google.cloud.speech.v2.Speech/GetConfig, google.cloud.speech.v2.Speech/UpdateConfig, google.cloud.speech.v2.Speech/CreateRecognizer, google.cloud.speech.v2.Speech/GetRecognizer, google.cloud.speech.v2.Speech/UpdateRecognizer, google.cloud.speech.v2.Speech/CreatePhraseSet, google.cloud.speech.v2.Speech/GetPhraseSet
 func TestSpeechCMEK(t *testing.T) {
 	h := New(t)
 	h.Endpoint(EnvLocalAI)
@@ -72,7 +72,7 @@ func TestSpeechCMEK(t *testing.T) {
 	if _, err := g.GetRecognizer(ctx, &speechpb.GetRecognizerRequest{Name: rec.GetName()}); status.Code(err) != codes.FailedPrecondition {
 		t.Errorf("GetRecognizer with the version disabled: %v; want FAILED_PRECONDITION", err)
 	}
-	if _, err := r.GetPhraseSet(ctx, &speechpb.GetPhraseSetRequest{Name: ps.GetName()}); status.Code(err) != codes.FailedPrecondition {
+	if _, err := r.GetPhraseSet(ctx, &speechpb.GetPhraseSetRequest{Name: ps.GetName()}); !restFailedPrecondition(err) {
 		t.Errorf("GetPhraseSet over REST with the version disabled: %v; want FAILED_PRECONDITION", err)
 	}
 	if _, err := g.Recognize(ctx, &speechpb.RecognizeRequest{Recognizer: rec.GetName(),

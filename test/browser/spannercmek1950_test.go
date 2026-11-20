@@ -59,13 +59,13 @@ func TestSpannerCMEKThroughThePage(t *testing.T) {
 		KeyShown bool
 	}
 	p.eval(`(() => { const k = document.querySelector(".modal.is-open #f-kmsKey");
-		return { Options: [...document.querySelectorAll(".modal.is-open input[type=radio][name="f-encryption-choice"]")].map((r) => r.value),
+		return { Options: [...document.querySelectorAll(".modal.is-open input[type=radio][name='f-encryption-choice']")].map((r) => r.value),
 			KeyShown: !!k && !k.closest("[hidden]") } })()`, &form)
 	if len(form.Options) != 3 || form.Options[0] != "Use database encryption" || form.Options[2] != "Cloud KMS key" || form.KeyShown {
 		t.Fatalf("Create backup's encryption = %+v; want Google's three choices and no key field until Cloud KMS key", form)
 	}
 	p.run(chromedp.SendKeys(chromedp.CSS(`.modal.is-open #f-backup`), "keyed"))
-	p.eval(`(() => { const r = [...document.querySelectorAll(".modal.is-open input[type=radio][name="f-encryption-choice"]")].find((r) => r.value === "Cloud KMS key");
+	p.eval(`(() => { const r = [...document.querySelectorAll(".modal.is-open input[type=radio][name='f-encryption-choice']")].find((r) => r.value === "Cloud KMS key");
 		r.click(); return true })()`, nil)
 	p.waitFor(`(() => { const k = document.querySelector(".modal.is-open #f-kmsKey"); return !!k && !k.closest("[hidden]") })()`)
 	p.run(chromedp.SendKeys(chromedp.CSS(`.modal.is-open #f-kmsKey`), key))

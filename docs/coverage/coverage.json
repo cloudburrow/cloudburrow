@@ -6059,9 +6059,8 @@
     "Key": "vertexai",
     "Title": "Vertex AI PredictionService",
     "counts": {
-      "Implemented": 2,
       "Unimplemented": 26,
-      "Verified": 63
+      "Verified": 65
     },
     "rows": [
       {
@@ -6381,7 +6380,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/documentai_test.go:72 TestDocumentAIProcessors",
-          "test/compat/documentaicmek1950_test.go:64 TestDocumentAICMEK"
+          "test/compat/documentaicmek1950_test.go:67 TestDocumentAICMEK"
         ]
       },
       {
@@ -6455,7 +6454,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/documentai_test.go:276 TestDocumentAIProcessorVersions",
-          "test/compat/documentaicmek1950_test.go:64 TestDocumentAICMEK"
+          "test/compat/documentaicmek1950_test.go:67 TestDocumentAICMEK"
         ]
       },
       {
@@ -6489,7 +6488,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/documentai_test.go:72 TestDocumentAIProcessors",
-          "test/compat/documentaicmek1950_test.go:64 TestDocumentAICMEK"
+          "test/compat/documentaicmek1950_test.go:67 TestDocumentAICMEK"
         ]
       },
       {
@@ -6571,8 +6570,10 @@
       },
       {
         "method": "google.cloud.speech.v2.Speech/GetConfig",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/speechcmek1950_test.go:26 TestSpeechCMEK"
+        ]
       },
       {
         "method": "google.cloud.speech.v2.Speech/GetCustomClass",
@@ -6657,8 +6658,10 @@
       },
       {
         "method": "google.cloud.speech.v2.Speech/UpdateConfig",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/speechcmek1950_test.go:26 TestSpeechCMEK"
+        ]
       },
       {
         "method": "google.cloud.speech.v2.Speech/UpdateCustomClass",
