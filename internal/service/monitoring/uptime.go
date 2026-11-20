@@ -23,6 +23,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/egress"
 )
 
 // UptimeCheckService (#1964): checks are kept in the instance's state and
@@ -369,6 +370,10 @@ func runCheck(ctx context.Context, c *monitoringpb.UptimeCheckConfig, host strin
 	if !IsLocalHost(host) {
 		return UptimeResult{Error: "not checked: " + host + " is not a local host, and CloudBurrow checks only hosts on the machine"}
 	}
+	if egress.GoogleHost(host) {
+		// The metadata server's link-local address is Google's (#2015).
+		return UptimeResult{Error: "not checked: " + host + " is Google's, and CloudBurrow sends no request to Google"}
+	}
 	timeout := c.GetTimeout().AsDuration()
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -410,11 +415,11 @@ func runCheck(ctx context.Context, c *monitoringpb.UptimeCheckConfig, host strin
 	if a := h.GetAuthInfo(); a != nil {
 		req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(a.GetUsername()+":"+a.GetPassword())))
 	}
-	client := &http.Client{
+	client := egress.Client(&http.Client{
 		// Redirects are not followed, as Google's checkers do not follow them.
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-		Transport:     &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: !h.GetValidateSsl()}}, //nolint:gosec // validate_ssl off, as asked
-	}
+		Transport:     uptimeTransport(h.GetValidateSsl()),
+	})
 	resp, err := client.Do(req)
 	if err != nil {
 		return UptimeResult{Latency: time.Since(start), Error: err.Error()}
@@ -524,4 +529,10 @@ func (b uptimeBuiltin) Series(project, metricType string, start, end time.Time) 
 		}
 	}
 	return out, nil
+}
+
+// uptimeTransport is what an uptime check dials with: SSL validated unless
+// validate_ssl is off, as asked. Tests replace it with a loopback-only sink.
+var uptimeTransport = func(validate bool) http.RoundTripper {
+	return &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: !validate}} //nolint:gosec // validate_ssl off, as asked
 }

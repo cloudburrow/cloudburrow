@@ -16,6 +16,7 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/cloudburrow/cloudburrow/internal/egress"
 	"github.com/cloudburrow/cloudburrow/internal/sched"
 	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 )
@@ -97,6 +98,10 @@ func NewDispatcher(s *Store, client *http.Client, clock sched.Clock) *Dispatcher
 		// that takes 40 s, which succeeds on Google.
 		client = &http.Client{}
 	}
+	// Every attempt, and every redirect it follows, goes through the
+	// local-only guard (#2015): a googleapis.com target reaches this
+	// instance's API, and no Google host is dialled.
+	client = egress.Client(client)
 	if clock == nil {
 		clock = sched.RealClock{}
 	}

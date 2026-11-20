@@ -35,6 +35,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/egress"
 )
 
 // Event types a trigger can name.
@@ -117,9 +118,8 @@ type WorkflowStarter interface {
 
 // WithEvents enables event triggers.
 func (f *FunctionsServer) WithEvents(e Events) *FunctionsServer {
-	if e.Client == nil {
-		e.Client = &http.Client{}
-	}
+	// Every delivery goes through the local-only guard (#2015).
+	e.Client = egress.Client(e.Client)
 	f.events = &e
 	return f
 }
@@ -579,3 +579,7 @@ func sourcedCloudEvent(spec *functionspb.EventTrigger, m, attrs map[string]any) 
 	h.Set("Content-Type", ct)
 	return &CloudEvent{Headers: h, Data: raw}, nil
 }
+
+// guardedDefault is the client a delivery uses when no Events client is
+// set: http.DefaultClient's behaviour behind the local-only guard (#2015).
+var guardedDefault = egress.Client(nil)
