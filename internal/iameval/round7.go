@@ -140,8 +140,10 @@ func computeDeny(permission, resource string) error {
 // the project for an insert, list or aggregatedList and on the resource
 // otherwise; an insert's field-level permissions (compute.subnetworks.use,
 // compute.images.useReadOnly, iam.serviceAccounts.actAs on
-// serviceAccounts[].email, ...) are ComputeFieldChecks'. A patch's get and
-// a firewall patch's compute.networks.updatePolicy are not checked.
+// serviceAccounts[].email, ...) are ComputeFieldChecks'; a patch's get, a
+// firewall patch's compute.networks.updatePolicy, natIP's
+// compute.addresses.use and an INTERNAL address's createInternal are the
+// thirteenth round's (cmd/cloudburrow/iamenforce13.go).
 // Compute keeps no resource-level policies on what is served, so the
 // project's and its ancestors' apply. Public images (debian-cloud,
 // ubuntu-os-cloud, rocky-linux-cloud) are readable by every caller, as
@@ -358,6 +360,11 @@ func RunPortOperation(typeURL string) (svc *Service, get, list, del string) {
 		return Functions, "cloudfunctions.operations.get", "cloudfunctions.operations.list", ""
 	case strings.HasPrefix(name, "google.devtools.cloudbuild."):
 		return CloudBuild, "cloudbuild.operations.get", "cloudbuild.operations.list", ""
+	case strings.HasPrefix(name, "google.cloud.eventarc."):
+		// Eventarc's operations pages name none (re-read 2026-11-20):
+		// the permission index's eventarc.operations.get, .list and
+		// .delete (Eventarc Viewer's and Admin's), UNVERIFIED (round 13).
+		return Eventarc, "eventarc.operations.get", "eventarc.operations.list", "eventarc.operations.delete"
 	case strings.HasPrefix(name, "google.cloud.developerconnect."):
 		// Developer Connect's operations pages name these (round 12).
 		return DeveloperConnect, "developerconnect.operations.get", "developerconnect.operations.list", "developerconnect.operations.delete"
@@ -370,7 +377,7 @@ func RunPortOperation(typeURL string) (svc *Service, get, list, del string) {
 // operation is then kept only if the caller holds its own API's list
 // permission (RunPortOperation).
 var RunPortListOperations = []string{"run.operations.list", "cloudfunctions.operations.list", "cloudbuild.operations.list",
-	"developerconnect.operations.list"}
+	"developerconnect.operations.list", "eventarc.operations.list"}
 
 // RunPortListLocations are the permissions, any one of which lets a caller
 // list locations on the Cloud Run port, whose one Locations service
@@ -379,6 +386,8 @@ var RunPortListOperations = []string{"run.operations.list", "cloudfunctions.oper
 // (the permission index; UNVERIFIED, re-read 2026-11-20: no page names
 // it). GetLocation is not checked: neither API names a permission for it
 // (the index has no run.locations.get or cloudfunctions.locations.get).
+// Cloud Run v1's GET /v1/projects/P/locations, shared with Cloud
+// Functions v1, is checked the same way (round 13).
 var RunPortListLocations = []string{"run.locations.list", "cloudfunctions.locations.list"}
 
 // ArtifactRegistryLocationsJSON are Artifact Registry's Locations mixin

@@ -62,8 +62,10 @@ func rows(byPrefix map[string]map[string][2]string) map[string]Method {
 // names in "Logging roles and permissions"
 // (https://docs.cloud.google.com/iam/docs/roles-permissions/logging). A
 // log view keeps its own policy (roles/logging.viewAccessor on one view).
-// TailLogEntries is a stream, and saved queries and log scopes are served
-// over JSON alone (no published proto), so they are not checked.
+// TailLogEntries, a stream, is checked as ListLogEntries on its first
+// message (its page names logging.logEntries.list and
+// logging.privateLogEntries.list on resourceNames, read 2026-11-20); saved
+// queries and log scopes, served over JSON alone, are LoggingExtraJSON's.
 // A resource under a folder, the organization or a billing account is
 // checked against that root's policy and its ancestors' (HierarchyRoot;
 // a billing account's is its organization's, hierarchy.go). A sink's
@@ -88,6 +90,7 @@ var Logging = &Service{
 				"DeleteLog":       {"logging.logs.delete", "log_name"},
 				"WriteLogEntries": {"logging.logEntries.create", "log_name|entries.log_name"},
 				"ListLogEntries":  {"logging.logEntries.list", "resource_names"},
+				"TailLogEntries":  {"logging.logEntries.list", "resource_names"},
 				"ListLogs":        {"logging.logs.list", "parent"},
 			},
 			"/google.logging.v2.ConfigServiceV2/": {

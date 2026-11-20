@@ -704,6 +704,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		iamEnforced{logging: loggingSvc, monitoring: monitoringSvc, memorystore: memorystoreAdminSvc, run: runSvc})
 	iamEnforced7{privateCA: privateCASvc, gke: gkeSvc, compute: computeSvc, run: runSvc}.use(iamEnforcer)
 	iamEnforced8{compute: computeSvc}.use(iamEnforcer)
+	iamEnforced13{memorystore: memorystoreAdminSvc, gke: gkeSvc}.use(iamEnforcer)
 	useIAMEnforcement12Source(iamEnforcer, runSvc)
 	useIAMEnforcement12DataTransfer(iamEnforcer, dataTransfer)
 	// Log buckets' customer-managed keys (#1950).

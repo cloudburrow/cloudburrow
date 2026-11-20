@@ -158,7 +158,8 @@ const RunJobOverrides = "run.jobs.runWithOverrides"
 // page names it (the audit page's generateUploadUrl is not in Google's
 // permission index). Not checked: ListRuntimes ("iam.permissions.none"),
 // TestIamPermissions (no page names one; it answers what the caller
-// holds), and the shared Operations and Locations mixins. A function keeps
+// holds); the shared Operations and Locations mixins are the Run port's
+// (round7.go). A function keeps
 // its own policy. Deployers need "Service Account User role
 // (roles/iam.serviceAccountUser) on the runtime service account", and on
 // the build's (https://docs.cloud.google.com/functions/docs/reference/iam/roles),

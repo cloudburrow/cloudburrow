@@ -241,6 +241,12 @@ func (s iamEnforced) use(e *iameval.Enforcer) {
 	if s.logging != nil {
 		s.logging.interpose = append(s.logging.interpose, e.Interceptor(iameval.Logging))
 		s.logging.wrapJSON = jsonEnforcer(e, iameval.Logging, logging.Transcoder().Mixins)
+		// TailLogEntries, a stream, and the JSON-only saved queries and
+		// log scopes (#1879, round 13).
+		s.logging.streamInterpose = append(s.logging.streamInterpose, e.StreamInterceptor(iameval.Logging))
+		s.logging.wrapExtra = func(next http.Handler) http.Handler {
+			return e.HTTPPaths(iameval.Logging, iameval.LoggingExtraJSON, next)
+		}
 		// A log view keeps its own policy (roles/logging.viewAccessor).
 		e.Policies[iameval.Logging.Name] = iameval.GRPCPolicyGetter(func() func(context.Context, *iampb.GetIamPolicyRequest) (*iampb.Policy, error) {
 			a := s.logging.Admin()

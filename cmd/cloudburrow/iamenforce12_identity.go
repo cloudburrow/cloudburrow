@@ -69,7 +69,7 @@ func groupDenied(resource string) error {
 
 // ssoDenied is the refusal of an inbound SSO method to a caller who is
 // not the customer's admin: Google's PERMISSION_DENIED wording
-// (UNVERIFIED against a page, 2026-11-20: the reference gives none).
+// (UNVERIFIED, re-read 2026-11-20: https://docs.cloud.google.com/identity/docs/reference/rest/v1/groups/get gives none).
 func ssoDenied() error {
 	return &apierror.Error{Code: codes.PermissionDenied, Reason: "forbidden", Message: "The caller does not have permission"}
 }

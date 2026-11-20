@@ -17,7 +17,8 @@ func newerDeny(permission, resource string) error {
 // the permissions of their names in "Memorystore for Redis roles and
 // permissions" (https://docs.cloud.google.com/iam/docs/roles-permissions/redis).
 // The Locations and Operations mixins on Memorystore's one port serve
-// three APIs whose names they cannot tell apart, and are not checked.
+// three APIs whose names they cannot tell apart: they are checked by the
+// operation's own API, or any one API's permission (round13.go).
 // Memorystore keeps no resource-level policies. Google's wording of a
 // denial is UNVERIFIED (re-read 2026-11-20: the access-control pages give
 // none): newerDeny's.

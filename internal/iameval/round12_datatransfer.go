@@ -15,7 +15,9 @@ package iameval
 // account" (create and patch pages): iam.serviceAccounts.actAs. The
 // Locations mixin's pages name no permission and are not checked. The
 // service keeps no resource-level policies. Google's wording of a denial
-// is UNVERIFIED (the pages give none): newerDeny's.
+// is UNVERIFIED (re-read 2026-11-20:
+// https://docs.cloud.google.com/bigquery/docs/reference/datatransfer/rest/v1/projects.locations.transferConfigs/get
+// gives none): newerDeny's.
 var DataTransfer = &Service{
 	Name: "bigquerydatatransfer.googleapis.com",
 	Methods: methodRows("/google.cloud.bigquery.datatransfer.v1.DataTransferService/", map[string]Method{

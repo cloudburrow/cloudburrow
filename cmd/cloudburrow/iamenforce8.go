@@ -49,6 +49,9 @@ func (s iamEnforced8) use(e *iameval.Enforcer) {
 		prev := s.compute.wrapJSON
 		s.compute.wrapJSON = func(next http.Handler) http.Handler {
 			h := computeFieldChecks(e, next)
+			// Round 13: natIP's address, a patch's get and a firewall
+			// patch's network (iamenforce13.go).
+			h = computeRound13Checks(e, s.compute, h)
 			if prev != nil {
 				h = prev(h)
 			}

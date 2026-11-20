@@ -174,7 +174,8 @@ func AnswerProject(r *http.Request, path string, next http.Handler) string {
 }
 
 // BackupDR is the Backup and DR Service's table. Its deny wording is
-// newerDeny's (UNVERIFIED, 2026-11-20: the pages give none). It keeps no
+// newerDeny's (UNVERIFIED, re-read 2026-11-20: https://docs.cloud.google.com/backup-disaster-recovery/docs/reference/rest/v1/projects.locations.backupVaults/get
+// gives none). It keeps no
 // resource-level policies (a vault's testIamPermissions answers what the
 // caller holds on it, "A caller is not required to have Google IAM
 // permission to make this request").
@@ -245,7 +246,9 @@ var BackupDRRules = []PathRule{
 }
 
 // StorageBatchOperations is Storage Batch Operations' table; it keeps no
-// resource-level policies. Deny wording: newerDeny's (UNVERIFIED).
+// resource-level policies. Deny wording: newerDeny's
+// (UNVERIFIED, re-read 2026-11-20: https://docs.cloud.google.com/storage/docs/storagebatchoperations/reference/rest/v1/projects.locations.jobs/get
+// gives none).
 var StorageBatchOperations = &Service{Name: "storagebatchoperations.googleapis.com", Deny: newerDeny}
 
 // StorageBatchOperationsRules are its methods' permissions, as its REST
@@ -270,7 +273,9 @@ var StorageBatchOperationsRules = []PathRule{
 }
 
 // StorageInsights is Storage Insights' table; it keeps no resource-level
-// policies. Deny wording: newerDeny's (UNVERIFIED).
+// policies. Deny wording: newerDeny's (UNVERIFIED, re-read 2026-11-20:
+// https://docs.cloud.google.com/storage/docs/insights/reference/rest/v1/projects.locations.reportConfigs/get
+// gives none).
 var StorageInsights = &Service{Name: "storageinsights.googleapis.com", Deny: newerDeny}
 
 // StorageInsightsRules are its methods' permissions, as its REST reference
@@ -302,7 +307,9 @@ var StorageInsightsRules = []PathRule{
 
 // StorageTransfer is the Storage Transfer API v1's table; it keeps no
 // resource-level policies, and every check is on the project. Deny
-// wording: newerDeny's (UNVERIFIED).
+// wording: newerDeny's (UNVERIFIED, re-read 2026-11-20:
+// https://docs.cloud.google.com/storage-transfer/docs/reference/rest/v1/transferJobs/get
+// gives none).
 var StorageTransfer = &Service{Name: "storagetransfer.googleapis.com", Deny: newerDeny}
 
 // StorageTransferRules are its methods' permissions

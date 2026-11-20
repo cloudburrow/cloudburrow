@@ -48,9 +48,8 @@ var (
 //     compute.instances.setDeletionProtection, serviceAccounts[]
 //     compute.instances.setServiceAccount and serviceAccounts[].email
 //     iam.serviceAccounts.actAs ("default" is the Compute Engine default
-//     service account). accessConfigs[].natIP's compute.addresses.use is
-//     not checked: the instance is given no address of the project's (its
-//     external IP is local).
+//     service account). accessConfigs[].natIP's compute.addresses.use, on
+//     the reserved address of that IP, is the caller's wrapper's (round 13).
 //   - instances.attachDisk: source compute.disks.use (useReadOnly).
 //   - disks.insert: sourceImage compute.images.useReadOnly, sourceSnapshot
 //     compute.snapshots.useReadOnly, sourceDisk compute.disks.useReadOnly,

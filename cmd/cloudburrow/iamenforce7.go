@@ -57,6 +57,16 @@ func (s iamEnforced7) use(e *iameval.Enforcer) {
 					next.ServeHTTP(w, r)
 					return
 				}
+				// An INTERNAL address's insert is createInternal, in place
+				// of create (round 13).
+				if perm, project, ok := computeInternalInsert(r); ok {
+					if err := e.Authorize(r.Context(), iameval.Compute, iameval.Bearer(r.Header.Get("Authorization")), perm, project); err != nil {
+						iameval.WriteJSONStatus(w, err)
+						return
+					}
+					next.ServeHTTP(w, r)
+					return
+				}
 				checked.ServeHTTP(w, r)
 			})
 		}
@@ -203,9 +213,11 @@ func runPortListed(ctx context.Context, e *iameval.Enforcer, bearer, typeURL, na
 }
 
 var (
-	runPortOpPath    = regexp.MustCompile(`^/v[12]/(projects/[^/]+/locations/[^/]+/operations/[^/:]+)(:wait)?$`)
-	runPortOpsPath   = regexp.MustCompile(`^/v[12]/(projects/[^/]+/locations/[^/]+)/operations$`)
-	runPortLocsPath  = regexp.MustCompile(`^/v2/(projects/[^/]+)/locations$`)
+	// Eventarc's JSON API is under /eventarc on the port (round 13).
+	runPortOpPath  = regexp.MustCompile(`^(?:/eventarc)?/v[12]/(projects/[^/]+/locations/[^/]+/operations/[^/:]+)(:wait)?$`)
+	runPortOpsPath = regexp.MustCompile(`^(?:/eventarc)?/v[12]/(projects/[^/]+/locations/[^/]+)/operations$`)
+	// Cloud Run v1's and Cloud Functions v1's list is /v1/ (round 13).
+	runPortLocsPath  = regexp.MustCompile(`^/v[12]/(projects/[^/]+)/locations$`)
 	runPortV1OpPath  = regexp.MustCompile(`^/v1/(operations/[^/:]+)$`)
 	runPortV1OpsPath = regexp.MustCompile(`^/v1/operations$`)
 )
