@@ -100,6 +100,7 @@ func TestGenerateServiceIdentityEveryEntry(t *testing.T) {
 		"bigtable.googleapis.com":               "",
 		"cloudresourcemanager.googleapis.com":   "",
 		"serviceusage.googleapis.com":           "",
+		"analyticshub.googleapis.com":           "gcp-sa-analyticshub.iam.gserviceaccount.com",
 	}
 	if len(want) != len(serviceAgents)+len(noPrimaryAgent) {
 		t.Fatalf("want has %d services; the tables have %d", len(want), len(serviceAgents)+len(noPrimaryAgent))

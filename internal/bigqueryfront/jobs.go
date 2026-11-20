@@ -296,11 +296,17 @@ func (f front) checkJob(w http.ResponseWriter, r *http.Request, job jobBody, pro
 		if msg == "" && f.refuseObjectTableJob(w, r, d, srcs) { // #1783, objecttables.go
 			return
 		}
+		if msg == "" && f.refuseHubCopyOut(w, r, srcs, "a copy, clone or snapshot job") { // #1960, hublinks.go
+			return
+		}
 		if msg == "" {
 			f.copyJob(w, r, c.Copy) // #987
 			return
 		}
 	case c.Extract != nil:
+		if s := c.Extract.SourceTable; s != nil && f.refuseHubCopyOut(w, r, []tableRef{{ProjectID: s.ProjectID, DatasetID: s.DatasetID, TableID: s.TableID}}, "an extract job") { // #1960
+			return
+		}
 		f.extractJob(w, r, c.Extract)
 		return
 	case c.Query != nil:
@@ -317,6 +323,9 @@ func (f front) checkJob(w http.ResponseWriter, r *http.Request, job jobBody, pro
 			return
 		}
 		if f.refusePseudoColumns(w, r, c.Query.queryOptions, true) { // #1458, pseudocolumns.go
+			return
+		}
+		if !dryRun(r, true) && f.refuseHubQuery(w, r, c.Query.queryOptions, true, c.Query.DestinationTable != nil) { // #1960, hublinks.go
 			return
 		}
 		qf := &queryFailures{}        // #1109, queryfailures.go

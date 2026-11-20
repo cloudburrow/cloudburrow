@@ -374,8 +374,9 @@ compat_shard() {
       # IAM enforcement (#1879): every TestIAMEnforcement* test, against
       # an instance that enforces, and nothing else, so the shard is a few
       # minutes; the other suites ran with enforcement off in their shards.
-      SERVICES=storage,pubsub,tasks,secretmanager,kms,run
-      TEST_VARS+=,STORAGE,PUBSUB,TASKS,SECRETS,KMS,RUN,RESOURCEMANAGER,IAM_ENFORCEMENT
+      # BigQuery for BigQuery sharing's (Analytics Hub, #1989).
+      SERVICES=storage,pubsub,tasks,secretmanager,kms,run,bigquery
+      TEST_VARS+=,STORAGE,PUBSUB,TASKS,SECRETS,KMS,RUN,RESOURCEMANAGER,ANALYTICSHUB,BIGQUERY,BIGQUERY_PROJECT,IAM_ENFORCEMENT
       UP_FLAGS=(--iam-enforcement=on)
       COMPAT_RUN='^TestIAMEnforcement' ;;
     localai)
@@ -430,7 +431,8 @@ compat_shard() {
       # Cloud KMS as CMEK_KMS, for Firestore's customer-managed keys
       # (#1881), so the KMS suite stays in served.
       # The BigQuery Data Transfer Service (#1948), served with BigQuery.
-      TEST_VARS+=,DATATRANSFER,LOGGING_RESOURCEMANAGER,SPANNER,SPANNER_REST,DATASTORE,FIRESTORE,FIRESTORE_MONGODB,FIRESTORE_MONGODB_CA,FIRESTORE_RESOURCEMANAGER,BIGTABLE,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT,BIGQUERY_RESOURCEMANAGER,SINK_LOGGING,SINK_STORAGE,SINK_PUBSUB,FIRESTORE_STORAGE,BQML_STORAGE,CMEK_KMS
+      # BigQuery sharing (Analytics Hub, #1960), served with BigQuery.
+      TEST_VARS+=,DATATRANSFER,ANALYTICSHUB,LOGGING_RESOURCEMANAGER,SPANNER,SPANNER_REST,DATASTORE,FIRESTORE,FIRESTORE_MONGODB,FIRESTORE_MONGODB_CA,FIRESTORE_RESOURCEMANAGER,BIGTABLE,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT,BIGQUERY_RESOURCEMANAGER,SINK_LOGGING,SINK_STORAGE,SINK_PUBSUB,FIRESTORE_STORAGE,BQML_STORAGE,CMEK_KMS
       # Firestore's probe documents and named database (#1636): written
       # alone, as a front-state reset in the suite forgets the database.
       SETUP_TESTS="TestFirestoreRestartSetup"

@@ -87,6 +87,8 @@ type consoleDeps struct {
 	backupdr *backupdr.Server
 	// privateCA is Certificate Authority Service (#1834), nil unless enabled.
 	privateCA *privateCAService
+	// analyticsHub is BigQuery sharing (#1960), nil without BigQuery.
+	analyticsHub *analyticsHubSvc
 	// gke is the Kubernetes Engine API (#1913), nil unless enabled.
 	gke *gkeService
 	// monitoring is Cloud Monitoring (#1939), nil unless enabled.
@@ -304,6 +306,10 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		providers = append(providers, kmsProvider{svc: d.kms}, kmsEkmProvider{svc: d.kms}, kmsAutokeyProvider{svc: d.kms}, kmsInventoryProvider{svc: d.kms}, kmsHsmProvider{svc: d.kms})
 	}
 	// Certificate Authority Service (#1834) runs in this process too.
+	// BigQuery's Sharing (Analytics Hub) page (#1960).
+	if d.analyticsHub != nil {
+		providers = append(providers, analyticsHubProvider{svc: d.analyticsHub})
+	}
 	if enabled[config.ServicePrivateCA] && d.privateCA != nil {
 		providers = append(providers, privateCAProvider{svc: d.privateCA}, privateCATemplatesProvider{svc: d.privateCA})
 	}

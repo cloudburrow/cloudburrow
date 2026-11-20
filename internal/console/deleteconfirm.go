@@ -56,6 +56,8 @@ var DeleteConfirmRules = map[string]DeleteConfirmRule{
 	"hierarchy": {Style: DeleteConfirmName, Source: "https://docs.cloud.google.com/resource-manager/docs/manage-folders", Verified: true},
 	// UNVERIFIED: no console steps for deleting a tag key (docs re-read 2026-11-19)
 	"tags": unverified,
+	// UNVERIFIED: Google's Analytics Hub docs describe no dialog for deleting a data exchange (docs re-read 2026-11-20: https://docs.cloud.google.com/bigquery/docs/analytics-hub-manage-exchanges)
+	"bigquery-sharing": unverified,
 	// UNVERIFIED: "Select the checkbox for the roles ... click Delete." No dialog described (docs re-read 2026-11-19).
 	"iam-roles": unverified,
 	// "Confirm that you want to delete the group by clicking Confirm in the confirmation dialog."

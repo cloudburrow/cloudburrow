@@ -393,9 +393,10 @@ const ROUTES = [
     section: "Databases", product: "bigquery", productTitle: "BigQuery" },
   { path: "/bigquery-scheduled-queries", service: "bigquery-scheduled-queries", icon: "bigquery", title: "Scheduled queries",
     kind: "Scheduled query", section: "Databases", product: "bigquery", productTitle: "BigQuery" },
-  { path: "/bigquery-sharing", service: null, requires: "bigquery", screen: "unavailable", icon: "bigquery", title: "Analytics Hub",
-    section: "Databases", product: "bigquery", productTitle: "BigQuery",
-    unavailable: "Analytics Hub (Sharing) exchanges and listings are the Analytics Hub API's, which CloudBurrow does not run. A dataset is shared through its Permissions tab." },
+  // BigQuery sharing (Analytics Hub, #1960): exchanges, their listings
+  // and subscriptions.
+  { path: "/bigquery-sharing", service: "bigquery-sharing", icon: "bigquery", title: "Analytics Hub", kind: "Exchange",
+    section: "Databases", product: "bigquery", productTitle: "BigQuery" },
   { path: "/bigquery-dataform", service: null, requires: "bigquery", screen: "unavailable", icon: "bigquery", title: "Dataform",
     section: "Databases", product: "bigquery", productTitle: "BigQuery",
     unavailable: "Dataform repositories and workflows are the Dataform API's, which CloudBurrow does not run." },
@@ -3655,6 +3656,10 @@ async function renderDetail(view, route, resourcePath) {
   // A page addressed by something no reader recognises — a Datastore
   // entity's encoded key (#875) — says what it is in its heading.
   if (data.title) (nameLine || crumb.querySelector("h1, h2")).textContent = data.title;
+  // A top-level page that is not one resource of the route's kind (BigQuery
+  // sharing's My subscriptions, #1989) is headed by its own name, not
+  // "<Kind> details".
+  if (data.heading) crumb.querySelector("h1, h2").textContent = data.heading;
   const sections = (data.sections || []).slice();
   // A Logs tab where Google's page has one (#1842, audit item 9): a Cloud
   // Run service's, job's and worker pool's, a function's, and a GKE

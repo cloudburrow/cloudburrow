@@ -332,6 +332,13 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		privateCASvc.storage = func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") }
 	}
 	privateCASvc.register(coord)
+	// BigQuery sharing (Analytics Hub, #1960), in process; its linked
+	// datasets are made on the instance's BigQuery.
+	analyticsHub := newAnalyticsHubService(cfg)
+	if analyticsHub != nil {
+		analyticsHub.bigquery = func() *netfwd.Forwarder { return forwarderFor(forwarders, "bigquery") }
+	}
+	analyticsHub.register(coord)
 	// The Kubernetes Engine API (#1913), in process; its clusters are
 	// kind clusters of their own.
 	gkeSvc := newGKEService(cfg)
@@ -485,6 +492,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		mysql:        mysqlCreds,
 		scheduler:    schedulerSvc,
 		privateCA:    privateCASvc,
+		analyticsHub: analyticsHub,
 		gke:          gkeSvc,
 		monitoring:   monitoringSvc,
 		compute:      computeSvc,
@@ -616,6 +624,15 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		monitoringSvc.interpose = append(monitoringSvc.interpose, grpctransport.LogInterceptor(logger, "monitoring"), faults.Interceptor("monitoring"))
 		monitoringSvc.requests = requestEvents(recorder, requestMetrics, "monitoring")
 	}
+	if analyticsHub != nil {
+		analyticsHub.tracing = tracing
+		analyticsHub.calls = callEvents(recorder, requestMetrics, "analyticshub")
+		analyticsHub.interpose = append(analyticsHub.interpose, grpctransport.LogInterceptor(logger, "analyticshub"), faults.Interceptor("analyticshub"))
+		analyticsHub.requests = requestEvents(recorder, requestMetrics, "analyticshub")
+		analyticsHub.orgOf = func(project string) string {
+			return organizationOf(registrySource{reg: func() *resourcemanager.Registry { return projectRegistry }}, project)
+		}
+	}
 	if privateCASvc != nil {
 		privateCASvc.calls = callEvents(recorder, requestMetrics, "privateca")
 		privateCASvc.interpose = append(privateCASvc.interpose, grpctransport.LogInterceptor(logger, "privateca"), faults.Interceptor("privateca"))
@@ -646,7 +663,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// injection see a denied call as the client does. Off by default: the
 	// interceptors pass every call through until --iam-enforcement=on.
 	iamEnforcer := newIAMEnforcer(cfg, creds, func() *resourcemanager.Registry { return projectRegistry })
-	useIAMEnforcement(iamEnforcer, secretsSvc, kmsSvc, tasksSvc)
+	useIAMEnforcement(iamEnforcer, secretsSvc, kmsSvc, tasksSvc, analyticsHub)
 	// Log buckets' customer-managed keys (#1950).
 	if loggingSvc != nil {
 		keys := cmekKeys(kmsSvc, iamEnforcer)
@@ -996,6 +1013,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		backupdr:       backupDRSrv,
 		sqlAdmin:       sqlAdminSrv,
 		privateCA:      privateCASvc,
+		analyticsHub:   analyticsHub,
 		gke:            gkeSvc,
 		monitoring:     monitoringSvc,
 		compute:        computeSvc,
@@ -1084,6 +1102,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		if a := gkeSvc.Addr(); a != "" {
 			live["gke"] = a
+		}
+		if a := analyticsHub.Addr(); a != "" {
+			live["analyticshub"] = a
 		}
 		if a := computeSvc.Addr(); a != "" {
 			live["compute"] = a

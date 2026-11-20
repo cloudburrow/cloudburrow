@@ -46,7 +46,7 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 	config.ServiceBigtable:      {Providers: []string{"bigtable", "bigtable-instances"}},
 	config.ServiceSpanner:       {Providers: []string{"spanner"}},
 	config.ServiceCloudSQL:      {Providers: []string{"cloudsql", "cloudsql-instances", "cloudsql-backups"}},
-	config.ServiceBigQuery:      {Providers: []string{"bigquery", "bigquery-jobs", "bigquery-transfers", "bigquery-scheduled-queries"}},
+	config.ServiceBigQuery:      {Providers: []string{"bigquery", "bigquery-jobs", "bigquery-transfers", "bigquery-scheduled-queries", "bigquery-sharing"}},
 	config.ServiceScheduler:     {Providers: []string{"scheduler"}},
 	config.ServiceKMS:           {Providers: []string{"kms", "kms-ekm", "kms-autokey", "kms-inventory", "kms-hsm"}},
 	config.ServiceLogging:       {Providers: []string{"logging-metrics", "logging-sinks", "logging-exclusions", "logging-buckets", "logging-settings", "logging-saved-queries", "logging-log-scopes", "logging-analytics"}, Screen: "/logs"},
@@ -167,6 +167,7 @@ func coverageDeps(t *testing.T) consoleDeps {
 		monitoring:   &monitoringService{},
 		compute:      &computeService{},
 		dataTransfer: &dataTransferSvc{},
+		analyticsHub: &analyticsHubSvc{},
 		scheduler:    &schedulerService{},
 		logging:      &loggingService{},
 		// The APIs & Services page (#1352) reads the Service Usage server.

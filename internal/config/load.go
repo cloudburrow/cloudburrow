@@ -206,6 +206,7 @@ type rawFlags struct {
 	backupdr         int
 	privateca        int
 	gke              int
+	analyticsHub     int
 	monitoring       int
 	compute          int
 	storageBatch     int
@@ -298,6 +299,7 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.IntVar(&r.storageInsights, "port-storageinsights", 0, "Storage Insights API (storageinsights.googleapis.com) host port (0 = OS-assigned; default 9036)")
 	fs.IntVar(&r.storageTransfer, "port-storagetransfer", 0, "Storage Transfer Service API (storagetransfer.googleapis.com) host port (0 = OS-assigned; default 9037)")
 	fs.IntVar(&r.gke, "port-gke", 0, "Kubernetes Engine API host port (0 = OS-assigned; default 9030)")
+	fs.IntVar(&r.analyticsHub, "port-analyticshub", 0, "BigQuery sharing (Analytics Hub) API host port (0 = OS-assigned; default 9042)")
 	fs.IntVar(&r.monitoring, "port-monitoring", 0, "Cloud Monitoring API host port (0 = OS-assigned; default 9033)")
 	fs.IntVar(&r.compute, "port-compute", 0, "Compute Engine API (VPC networking) host port (0 = OS-assigned; default 9031)")
 	fs.IntVar(&r.dataTransfer, "port-datatransfer", 0, "BigQuery Data Transfer Service host port (0 = OS-assigned; default 9034)")
@@ -510,6 +512,7 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 		{"PORT_BACKUPDR", &cfg.Endpoints.BackupDR},
 		{"PORT_PRIVATECA", &cfg.Endpoints.PrivateCA},
 		{"PORT_GKE", &cfg.Endpoints.GKE},
+		{"PORT_ANALYTICSHUB", &cfg.Endpoints.AnalyticsHub},
 		{"PORT_MONITORING", &cfg.Endpoints.Monitoring},
 		{"PORT_COMPUTE", &cfg.Endpoints.Compute},
 		{"PORT_STORAGEBATCHOPERATIONS", &cfg.Endpoints.StorageBatchOperations},
@@ -665,6 +668,7 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 		{"port-backupdr", raw.backupdr, &cfg.Endpoints.BackupDR},
 		{"port-privateca", raw.privateca, &cfg.Endpoints.PrivateCA},
 		{"port-gke", raw.gke, &cfg.Endpoints.GKE},
+		{"port-analyticshub", raw.analyticsHub, &cfg.Endpoints.AnalyticsHub},
 		{"port-monitoring", raw.monitoring, &cfg.Endpoints.Monitoring},
 		{"port-compute", raw.compute, &cfg.Endpoints.Compute},
 		{"port-storagebatchoperations", raw.storageBatch, &cfg.Endpoints.StorageBatchOperations},

@@ -1146,7 +1146,9 @@ jobs:
           # chooses (#1881).
           # And the BigQuery Data Transfer Service, whose scheduled query the
           # Scheduled queries page makes is read back through it (#1948).
-          if [ "$SHARD" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE,BIGTABLE,SPANNER,KMS,DATATRANSFER; fi
+          # And BigQuery sharing, whose exchanges the Sharing pages make are
+          # read back through it (#1960).
+          if [ "$SHARD" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE,BIGTABLE,SPANNER,KMS,DATATRANSFER,ANALYTICSHUB; fi
           # The memorystore shard's read back through the Memorystore admin API.
           if [ "$SHARD" = memorystore ]; then BROWSER_VARS+=,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT; fi
           # The Logs Explorer reads entries written through the Logging API (#1410).

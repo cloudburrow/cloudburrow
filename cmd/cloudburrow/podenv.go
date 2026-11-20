@@ -53,6 +53,8 @@ func cliEndpointVar(service string) string {
 		return "CLOUDBURROW_PRIVATECA_ENDPOINT"
 	case "gke":
 		return "CLOUDBURROW_GKE_ENDPOINT"
+	case "analyticshub":
+		return "CLOUDBURROW_ANALYTICSHUB_ENDPOINT"
 	case "monitoring":
 		return "CLOUDBURROW_MONITORING_ENDPOINT"
 	case "compute":

@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	ahpb "cloud.google.com/go/bigquery/analyticshub/apiv1/analyticshubpb"
 	iamadminpb "cloud.google.com/go/iam/admin/apiv1/adminpb"
 	iamv2pb "cloud.google.com/go/iam/apiv2/iampb"
 	"cloud.google.com/go/orgpolicy/apiv2/orgpolicypb"
@@ -31,6 +32,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/grafeas"
 	"github.com/cloudburrow/cloudburrow/internal/modelgarden"
 	"github.com/cloudburrow/cloudburrow/internal/sched"
+	"github.com/cloudburrow/cloudburrow/internal/service/analyticshub"
 	"github.com/cloudburrow/cloudburrow/internal/service/datatransfer"
 	"github.com/cloudburrow/cloudburrow/internal/service/gke"
 	"github.com/cloudburrow/cloudburrow/internal/service/kms"
@@ -76,6 +78,12 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		t.Fatal(err)
 	}
 	gkeSrv.Register(srv)
+	// BigQuery sharing alone: its Operations mixin is another service's row.
+	hub, err := analyticshub.NewServer("", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ahpb.RegisterAnalyticsHubServiceServer(srv, hub)
 	mon, err := monitoring.NewServer("")
 	if err != nil {
 		t.Fatal(err)
