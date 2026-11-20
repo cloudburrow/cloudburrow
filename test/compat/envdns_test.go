@@ -117,8 +117,8 @@ func TestEnvResolvesNoGoogleName(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
-	base, egressDir := egressImage(ctx, t)
-	image := envDNSImage(ctx, t, base)
+	_, egressDir := egressImage(ctx, t)
+	image := envDNSImage(ctx, t)
 	dir := t.TempDir()
 	for _, f := range []string{"sink"} {
 		b, err := os.ReadFile(filepath.Join(egressDir, f))
@@ -296,16 +296,15 @@ func isGoogleName(name string) bool {
 	return false
 }
 
-// envDNSImage builds testdata/envdns's image on base (egressImage's),
-// tagged by the hash of the base and its files so a change rebuilds it.
-func envDNSImage(ctx context.Context, t *testing.T, base string) string {
+// envDNSImage builds testdata/envdns's image (egressImage's layers plus
+// gcloud and Java), tagged by the hash of its files so a change rebuilds it.
+func envDNSImage(ctx context.Context, t *testing.T) string {
 	t.Helper()
 	src, err := filepath.Abs(filepath.Join("testdata", "envdns"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	sum := sha256.New()
-	sum.Write([]byte(base))
 	for _, f := range []string{"Dockerfile", "pom.xml", "Probe.java"} {
 		b, err := os.ReadFile(filepath.Join(src, f))
 		if err != nil {
@@ -315,7 +314,7 @@ func envDNSImage(ctx context.Context, t *testing.T, base string) string {
 	}
 	image := fmt.Sprintf("cloudburrow-compat-envdns:%x", sum.Sum(nil))[:len("cloudburrow-compat-envdns:")+12]
 	if exec.CommandContext(ctx, "docker", "image", "inspect", image).Run() != nil {
-		if b, err := exec.CommandContext(ctx, "docker", "build", "--build-arg", "BASE="+base, "-t", image, src).CombinedOutput(); err != nil {
+		if b, err := exec.CommandContext(ctx, "docker", "build", "-t", image, src).CombinedOutput(); err != nil {
 			t.Fatalf("build %s: %v\n%s", image, err, b)
 		}
 	}
