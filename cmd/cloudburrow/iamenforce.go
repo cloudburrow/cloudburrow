@@ -320,8 +320,9 @@ func (s iamEnforced) use(e *iameval.Enforcer) {
 		run, functions := jsonEnforcer(e, iameval.Run, nil), jsonEnforcer(e, iameval.Functions, nil)
 		eventarc := jsonEnforcer(e, iameval.Eventarc, nil)
 		s.run.wrapJSON = func(next http.Handler) http.Handler {
-			// Eventarc's JSON API is under /eventarc on this port.
-			return run(functions(stripForMatch("/eventarc", eventarc, next)))
+			// Eventarc's JSON API is under /eventarc on this port, its
+			// Publishing API's under /eventarcpublishing (#1879).
+			return run(functions(stripForMatch("/eventarcpublishing", eventarc, stripForMatch("/eventarc", eventarc, next))))
 		}
 	}
 }

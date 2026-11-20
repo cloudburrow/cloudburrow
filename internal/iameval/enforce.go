@@ -54,6 +54,26 @@ type Enforcer struct {
 	// OwnerEmail is the instance's own account, whom a request with no
 	// bearer token is served as: deny policies apply to it too (#1886).
 	OwnerEmail string
+	// Scopes resolve a service's resource names, by service host, where
+	// the name alone does not say what policies apply (round 11).
+	Scopes map[string]func(resource string) Scope
+	// ParentOf is a project's or folder's current parent ("folders/N",
+	// "organizations/N"), "" for none or an unknown one.
+	ParentOf func(resource string) string
+}
+
+// Scope is what applies to a resource whose name does not say.
+type Scope struct {
+	// Resource is the name its policies are kept under, "" for the name
+	// as given.
+	Resource string
+	// Own, when set, are the service's own policy resources that apply,
+	// the deepest first, in place of the service's PolicyCollections'.
+	Own []string
+	// Parent is the hierarchy resource ("projects/P", "folders/N",
+	// "organizations/N") whose ancestry applies above it, "" for the one
+	// its name shows.
+	Parent string
 }
 
 // email is the account c is checked as.
@@ -105,8 +125,14 @@ func (e *Enforcer) Interceptor(svc *Service) grpc.UnaryServerInterceptor {
 		if !ok {
 			return handler(ctx, req)
 		}
+		if m.Filter != "" {
+			return e.filterGRPC(ctx, svc, m, req, handler)
+		}
 		resources := fieldValues(msg.ProtoReflect(), m.Field)
 		for _, resource := range resources {
+			if resource == "" && m.Optional {
+				continue
+			}
 			if err := e.Authorize(ctx, svc, bearer(ctx), m.PermissionOf(resource), resource); err != nil {
 				return nil, err
 			}
@@ -128,6 +154,9 @@ func (e *Enforcer) Interceptor(svc *Service) grpc.UnaryServerInterceptor {
 			if err := e.AuthorizeActAs(ctx, svc, bearer(ctx), Project(resource), account); err != nil {
 				return nil, err
 			}
+		}
+		if err := e.extra(ctx, svc, m, bearer(ctx), resource); err != nil {
+			return nil, err
 		}
 		return handler(ctx, req)
 	}
@@ -187,17 +216,39 @@ func (e *Enforcer) Authorize(ctx context.Context, svc *Service, bearer, permissi
 // Request is the check of permission on resource in svc for email, with
 // the service's own policies on the resource and its parents.
 func (e *Enforcer) Request(ctx context.Context, svc *Service, email, permission, resource string) Request {
+	own, parent := svc.PolicyResources(resource), ""
+	if f := e.Scopes[svc.Name]; f != nil {
+		// A name its policies are not kept under (a service account by
+		// "projects/-", a tag value), or whose ancestry its name does
+		// not show (#1879, round 11).
+		sc := f(resource)
+		if sc.Resource != "" {
+			resource = sc.Resource
+			own = svc.PolicyResources(resource)
+		}
+		if sc.Own != nil {
+			own = sc.Own
+		}
+		parent = sc.Parent
+	}
 	req := Request{Email: email, Permission: permission, Resource: resource, Type: svc.Type(resource),
 		Service: svc.Name, Project: Project(resource), Time: e.now()}
+	if parent != "" {
+		req.Project = Project(parent)
+	}
 	if get := e.Policies[svc.Name]; get != nil {
-		for _, r := range svc.PolicyResources(resource) {
+		for _, r := range own {
 			req.Own = append(req.Own, Attached{Resource: "//" + svc.Name + "/" + r, Policy: get(ctx, r)})
 		}
 	}
 	if req.Project == "" && e.Eval != nil {
 		// A folder's, the organization's or a billing account's resource:
 		// its root's policy and the root's ancestors' apply (#1879).
-		req.Own = append(req.Own, e.Eval.hierarchyPolicies(resource)...)
+		root := resource
+		if parent != "" {
+			root = parent
+		}
+		req.Own = append(req.Own, e.Eval.hierarchyPolicies(root)...)
 	}
 	return req
 }
@@ -307,6 +358,10 @@ func (e *Enforcer) HTTP(svc *Service, m *rest.Matcher, next http.Handler) http.H
 			next.ServeHTTP(w, r)
 			return
 		}
+		if row.Filter != "" {
+			e.filterJSON(w, r, svc, row, next)
+			return
+		}
 		var raw []byte
 		if route.Body != "" && r.Body != nil {
 			b, err := io.ReadAll(io.LimitReader(r.Body, 64<<20))
@@ -318,6 +373,9 @@ func (e *Enforcer) HTTP(svc *Service, m *rest.Matcher, next http.Handler) http.H
 		}
 		resources := jsonResources(fields, raw, route.Body, row.Field)
 		for _, resource := range resources {
+			if resource == "" && row.Optional {
+				continue
+			}
 			if err := e.Authorize(r.Context(), svc, Bearer(r.Header.Get("Authorization")), row.PermissionOf(resource), resource); err != nil {
 				WriteJSONStatus(w, err)
 				return
@@ -349,6 +407,10 @@ func (e *Enforcer) HTTP(svc *Service, m *rest.Matcher, next http.Handler) http.H
 				WriteJSONStatus(w, err)
 				return
 			}
+		}
+		if err := e.extra(r.Context(), svc, row, Bearer(r.Header.Get("Authorization")), resource); err != nil {
+			WriteJSONStatus(w, err)
+			return
 		}
 		next.ServeHTTP(w, r)
 	})

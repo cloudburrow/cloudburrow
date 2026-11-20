@@ -2186,7 +2186,8 @@
         "method": "google.cloud.eventarc.v1.Eventarc/CreateChannel",
         "status": "Verified",
         "tests": [
-          "test/compat/eventarcadvanced_test.go:447 TestEventarcChannelsToCloudRun"
+          "test/compat/eventarcadvanced_test.go:447 TestEventarcChannelsToCloudRun",
+          "test/compat/iamenforcementround11_1879_test.go:363 TestIAMEnforcementEventarc"
         ]
       },
       {
@@ -2321,7 +2322,8 @@
         "method": "google.cloud.eventarc.v1.Eventarc/GetGoogleChannelConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/eventarcadvanced_test.go:447 TestEventarcChannelsToCloudRun"
+          "test/compat/eventarcadvanced_test.go:447 TestEventarcChannelsToCloudRun",
+          "test/compat/iamenforcementround11_1879_test.go:363 TestIAMEnforcementEventarc"
         ]
       },
       {
@@ -2365,7 +2367,8 @@
         "method": "google.cloud.eventarc.v1.Eventarc/ListChannels",
         "status": "Verified",
         "tests": [
-          "test/compat/eventarcadvanced_test.go:447 TestEventarcChannelsToCloudRun"
+          "test/compat/eventarcadvanced_test.go:447 TestEventarcChannelsToCloudRun",
+          "test/compat/iamenforcementround11_1879_test.go:363 TestIAMEnforcementEventarc"
         ]
       },
       {
@@ -2408,6 +2411,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/eventarc_test.go:42 TestEventarcTriggersToCloudRun",
+          "test/compat/iamenforcementround11_1879_test.go:363 TestIAMEnforcementEventarc",
           "test/compat/listfilters1943_test.go:53 TestListFiltersEventarc"
         ]
       },
@@ -2416,6 +2420,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/eventarc_test.go:42 TestEventarcTriggersToCloudRun",
+          "test/compat/iamenforcementround11_1879_test.go:363 TestIAMEnforcementEventarc",
           "test/compat/listfilters1943_test.go:53 TestListFiltersEventarc"
         ]
       },
@@ -4578,6 +4583,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/iamcustomroles1743_test.go:53 TestIAMCustomRoles",
+          "test/compat/iamenforcementround11_1879_test.go:279 TestIAMEnforcementIAMAPI",
           "test/compat/iampredefinedroles1746_test.go:29 TestIAMPredefinedRoles"
         ]
       },
@@ -4620,6 +4626,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/iamcustomroles1743_test.go:53 TestIAMCustomRoles",
+          "test/compat/iamenforcementround11_1879_test.go:279 TestIAMEnforcementIAMAPI",
           "test/compat/iampredefinedroles1746_test.go:29 TestIAMPredefinedRoles"
         ]
       },
@@ -4677,6 +4684,7 @@
         "method": "google.iam.admin.v1.IAM/GetIamPolicy",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcementround11_1879_test.go:279 TestIAMEnforcementIAMAPI",
           "test/compat/iamserviceaccounts1747_test.go:382 TestIAMCredentialsImpersonation"
         ]
       },
@@ -4685,6 +4693,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/iamcustomroles1743_test.go:53 TestIAMCustomRoles",
+          "test/compat/iamenforcementround11_1879_test.go:279 TestIAMEnforcementIAMAPI",
           "test/compat/iampredefinedroles1746_test.go:29 TestIAMPredefinedRoles"
         ]
       },
@@ -4692,6 +4701,7 @@
         "method": "google.iam.admin.v1.IAM/GetServiceAccount",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcementround11_1879_test.go:279 TestIAMEnforcementIAMAPI",
           "test/compat/iamserviceaccounts1747_test.go:133 TestIAMServiceAccounts"
         ]
       },
@@ -4714,6 +4724,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/iamcustomroles1743_test.go:53 TestIAMCustomRoles",
+          "test/compat/iamenforcementround11_1879_test.go:279 TestIAMEnforcementIAMAPI",
           "test/compat/iampredefinedroles1746_test.go:29 TestIAMPredefinedRoles"
         ]
       },
@@ -4721,6 +4732,7 @@
         "method": "google.iam.admin.v1.IAM/ListServiceAccountKeys",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcementround11_1879_test.go:279 TestIAMEnforcementIAMAPI",
           "test/compat/iamserviceaccounts1747_test.go:256 TestIAMServiceAccountKeys"
         ]
       },
@@ -4728,6 +4740,7 @@
         "method": "google.iam.admin.v1.IAM/ListServiceAccounts",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcementround11_1879_test.go:279 TestIAMEnforcementIAMAPI",
           "test/compat/iamserviceaccounts1747_test.go:133 TestIAMServiceAccounts"
         ]
       },
@@ -4847,14 +4860,16 @@
         "method": "google.iam.v2.Policies/CreatePolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/iamdenypolicies1886_test.go:50 TestIAMEnforcementDenyPolicies"
+          "test/compat/iamdenypolicies1886_test.go:50 TestIAMEnforcementDenyPolicies",
+          "test/compat/iamenforcementround11_1879_test.go:195 TestIAMEnforcementOwnerRepairs"
         ]
       },
       {
         "method": "google.iam.v2.Policies/DeletePolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/iamdenypolicies1886_test.go:50 TestIAMEnforcementDenyPolicies"
+          "test/compat/iamdenypolicies1886_test.go:50 TestIAMEnforcementDenyPolicies",
+          "test/compat/iamenforcementround11_1879_test.go:195 TestIAMEnforcementOwnerRepairs"
         ]
       },
       {
@@ -4868,7 +4883,8 @@
         "method": "google.iam.v2.Policies/ListPolicies",
         "status": "Verified",
         "tests": [
-          "test/compat/iamdenypolicies1886_test.go:50 TestIAMEnforcementDenyPolicies"
+          "test/compat/iamdenypolicies1886_test.go:50 TestIAMEnforcementDenyPolicies",
+          "test/compat/iamenforcementround11_1879_test.go:279 TestIAMEnforcementIAMAPI"
         ]
       },
       {
@@ -5057,6 +5073,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigquerymlremoteiam_test.go:242 TestBigQueryMLRemoteDefaultConnection",
+          "test/compat/iamenforcementround11_1879_test.go:195 TestIAMEnforcementOwnerRepairs",
+          "test/compat/iamenforcementround11_1879_test.go:66 TestIAMEnforcementResourceManager",
           "test/compat/resourcemanageriam_test.go:204 TestGcloudProjectIAM",
           "test/compat/resourcemanageriam_test.go:250 TestTerraformProjectIAM",
           "test/compat/resourcemanageriam_test.go:276 TestConsoleProjectIAM",
@@ -5071,6 +5089,7 @@
         "method": "google.cloud.resourcemanager.v3.Projects/GetProject",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcementround11_1879_test.go:66 TestIAMEnforcementResourceManager",
           "test/compat/projectnumber_test.go:34 TestOneProjectNumberEverywhere",
           "test/compat/resourcemanager_test.go:62 TestResourceManagerV3Projects",
           "test/compat/terraform_batch10_test.go:460 TestTerraformResourceManagerDataSources"
@@ -5096,6 +5115,7 @@
         "method": "google.cloud.resourcemanager.v3.Projects/SearchProjects",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcementround11_1879_test.go:66 TestIAMEnforcementResourceManager",
           "test/compat/resourcemanager_test.go:62 TestResourceManagerV3Projects"
         ]
       },
@@ -5105,6 +5125,8 @@
         "tests": [
           "test/compat/bigquerymlremoteiam_test.go:164 TestBigQueryMLRemoteConnectionPermissions",
           "test/compat/iamconditions1745_test.go:135 TestIAMConditionAttributes",
+          "test/compat/iamenforcementround11_1879_test.go:195 TestIAMEnforcementOwnerRepairs",
+          "test/compat/iamenforcementround11_1879_test.go:66 TestIAMEnforcementResourceManager",
           "test/compat/orgpolicy1890_test.go:269 TestOrgPolicyEnforcementIAM",
           "test/compat/resourcemanageriam_test.go:276 TestConsoleProjectIAM",
           "test/compat/resourcemanageriam_test.go:70 TestResourceManagerProjectIAM",
@@ -5196,6 +5218,7 @@
         "method": "google.cloud.resourcemanager.v3.TagKeys/CreateTagKey",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcementround11_1879_test.go:66 TestIAMEnforcementResourceManager",
           "test/compat/resourcemanagertags_test.go:94 TestResourceManagerV3Tags",
           "test/compat/resterrorstatus_test.go:126 TestGcloudResourceManagerErrorStatus"
         ]
@@ -5204,6 +5227,7 @@
         "method": "google.cloud.resourcemanager.v3.TagKeys/DeleteTagKey",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcementround11_1879_test.go:66 TestIAMEnforcementResourceManager",
           "test/compat/resourcemanagertags_test.go:94 TestResourceManagerV3Tags",
           "test/compat/resterrorstatus_test.go:126 TestGcloudResourceManagerErrorStatus"
         ]
@@ -5229,6 +5253,7 @@
         "method": "google.cloud.resourcemanager.v3.TagKeys/GetTagKey",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcementround11_1879_test.go:66 TestIAMEnforcementResourceManager",
           "test/compat/resourcemanagertags_test.go:94 TestResourceManagerV3Tags"
         ]
       },
@@ -5545,6 +5570,7 @@
         "method": "cloudresourcemanager.projects.get",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcementround11_1879_test.go:66 TestIAMEnforcementResourceManager",
           "test/compat/resourcemanageriam_test.go:250 TestTerraformProjectIAM",
           "test/compat/resourcemanagerv1_test.go:50 TestResourceManagerV1Projects",
           "test/compat/resourcemanagerv1orgpolicy_test.go:43 TestResourceManagerV1FolderAndOrganizationOrgPolicy",
@@ -5594,6 +5620,7 @@
         "method": "cloudresourcemanager.projects.list",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcementround11_1879_test.go:66 TestIAMEnforcementResourceManager",
           "test/compat/resourcemanagerv1_test.go:50 TestResourceManagerV1Projects"
         ]
       },

@@ -34,6 +34,18 @@ type Method struct {
 	// needs IfSetPermission too, on the same resource (Cloud Run's RunJob
 	// with overrides).
 	IfSet, IfSetPermission string
+	// Optional is a resource field a request may leave empty, and is then
+	// not checked (a project created under no parent, IAM's ListRoles of
+	// the predefined roles).
+	Optional bool
+	// Extra are further checks the method's resource implies, which
+	// parentOf (the enforcer's ParentOf) may help name: a folder move's
+	// current parent, a tag binding's tag value and resource (round 11).
+	Extra func(resource string, parentOf func(string) string) []Check
+	// Filter, when set, is the response's repeated field of resources
+	// (each with a name): the call is not refused, and its answer keeps
+	// only the resources the caller holds Permission on (a search).
+	Filter string
 	// Also are further checks on other resources the request names: each
 	// field set needs its permission on the resource it names (Private
 	// CA's CreateCertificate with a certificate template).

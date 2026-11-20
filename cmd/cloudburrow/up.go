@@ -866,6 +866,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// instance does not serve points here, and is refused with a message,
 	// whatever Host the tool derived (regional hosts among them).
 	rmSrv.HandleUnguarded(unserved.Match, unserved.Handler())
+	// IAM enforcement (#1879) of Resource Manager, IAM, deny and
+	// organization policies, on this port.
+	useIAMEnforcement11(iamEnforcer, rmSrv, func() *resourcemanager.Registry { return projects })
 	coord.Register(rmSrv)
 	// A build's serviceAccount names an IAM account of this registry (#1854).
 	runadapter.UseServiceAccounts(func(name string) (string, bool, bool) {
