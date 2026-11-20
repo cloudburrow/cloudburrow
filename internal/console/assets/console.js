@@ -442,6 +442,22 @@ const ROUTES = [
     section: "AI and machine learning", product: "speech", productTitle: "Speech-to-Text" },
   { path: "/speech/phrase-sets", service: "speech-phrase-sets", icon: "ai", title: "Phrase sets", kind: "Phrase set",
     section: "AI and machine learning", product: "speech", productTitle: "Speech-to-Text" },
+  // Compute Engine (#1965): Google's menu, at Google's paths: VM
+  // instances (an instance's page has its Details, Storage, Networking and
+  // Serial port tabs), Disks, Snapshots, Images, and Machine types, over the
+  // Compute Engine API in process.
+  { path: "/compute/instances", service: "compute-instances", icon: "compute", title: "VM instances", kind: "Instance",
+    section: "Compute", product: "compute", productTitle: "Compute Engine" },
+  { path: "/compute/disks", service: "compute-disks", icon: "compute", title: "Disks", kind: "Disk",
+    section: "Compute", product: "compute", productTitle: "Compute Engine" },
+  { path: "/compute/snapshots", service: "compute-snapshots", icon: "compute", title: "Snapshots", kind: "Snapshot",
+    section: "Compute", product: "compute", productTitle: "Compute Engine" },
+  { path: "/compute/images", service: "compute-images", icon: "compute", title: "Images", kind: "Image",
+    section: "Compute", product: "compute", productTitle: "Compute Engine" },
+  { path: "/compute/machineTypes", service: "compute-machinetypes", icon: "compute", title: "Machine types", kind: "Machine type",
+    section: "Compute", product: "compute", productTitle: "Compute Engine" },
+  { path: "/compute/metadata", service: "compute-metadata", icon: "compute", title: "Metadata", kind: "Metadata item",
+    section: "Compute", product: "compute", productTitle: "Compute Engine" },
 
   // VPC network (#1936): Google's menu, at Google's paths: VPC networks
   // (a network's page has its subnets, firewall rules and routes),
@@ -776,6 +792,8 @@ const ICONS = {
   // Cloud KMS: a key inside a shield.
   kms:       '<path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6z"/><circle cx="10" cy="11" r="2"/><path d="M12 11h4M15 11v2"/>',
   // Certificate Authority Service: a certificate with a seal.
+  // Compute Engine: a chip with its pins.
+  compute: '<rect x="6" y="6" width="12" height="12" rx="1.5"/><rect x="9.5" y="9.5" width="5" height="5"/><path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3"/>',
   // VPC network: three connected nodes.
   vpc: '<circle cx="12" cy="5" r="2.5"/><circle cx="5" cy="18" r="2.5"/><circle cx="19" cy="18" r="2.5"/><path d="M11 7.2L6.2 15.8M13 7.2l4.8 8.6M7.5 18h9"/>',
   privateca: '<rect x="3" y="4" width="18" height="12" rx="1"/><path d="M7 8h10M7 11h6"/><circle cx="17" cy="16" r="3"/><path d="M15.5 18.5L15 22l2-1 2 1-.5-3.5"/>',
@@ -836,6 +854,8 @@ const ICONS = {
 const CATEGORY_ICONS = {
   // A lightning bolt: code that runs on demand.
   "Serverless computing": '<path d="M13 3L5 13h6l-1 8 8-10h-6z"/>',
+  // A server rack: virtual machines.
+  "Compute": '<rect x="4" y="4" width="16" height="6" rx="1"/><rect x="4" y="14" width="16" height="6" rx="1"/><path d="M8 7h.01M8 17h.01"/>',
   // A shipping container.
   "Containers": '<rect x="3" y="6" width="18" height="12" rx="1"/><path d="M7 6v12M11 6v12M15 6v12M19 6v12"/>',
   // A drive.

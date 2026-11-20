@@ -113,7 +113,11 @@ func (s *Server) Call(method, project, path string, query map[string][]string, b
 	if body == nil {
 		body = obj{}
 	}
-	parts := strings.Split(strings.Trim(path, "/"), "/")
+	var parts []string
+	if p := strings.Trim(path, "/"); p != "" {
+		// An empty path is the project itself (projects.get).
+		parts = strings.Split(p, "/")
+	}
 	c := call{method: method, project: project, parts: parts, query: query, body: body}
 	if isZoneOpWait(c) {
 		s.waitOp(context.Background(), "projects/"+project+"/zones/"+parts[1]+"/operations/"+parts[3])
@@ -411,7 +415,13 @@ func (s *Server) aggregated(c call, coll string) (obj, error) {
 			continue
 		}
 		if f.match(m[k]) {
-			scopes[scope] = append(scopes[scope], m[k])
+			o := m[k]
+			if coll == "instances" {
+				// As instances.get: with the SSH address a running
+				// instance's port 22 is forwarded to.
+				o = s.decorate(o)
+			}
+			scopes[scope] = append(scopes[scope], o)
 		}
 	}
 	items := map[string]any{}

@@ -1,0 +1,10 @@
+[Unit]
+Description=CloudBurrow VPC network: internal IP, peers, firewall rules, internal DNS
+After=cloudburrow-network.service
+[Service]
+PassEnvironment=CLOUDBURROW_GUEST_METADATA CLOUDBURROW_INTERNAL_IP
+ExecStart=/usr/lib/cloudburrow/vpc
+Restart=always
+RestartSec=2
+[Install]
+WantedBy=multi-user.target

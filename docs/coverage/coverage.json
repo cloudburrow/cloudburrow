@@ -13811,9 +13811,9 @@
     "Key": "compute",
     "Title": "Compute Engine API (v1): VPC networking",
     "counts": {
-      "Implemented": 25,
+      "Implemented": 21,
       "Unimplemented": 74,
-      "Verified": 67
+      "Verified": 71
     },
     "rows": [
       {
@@ -13915,7 +13915,8 @@
         "method": "compute.disks.get",
         "status": "Verified",
         "tests": [
-          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient",
+          "test/compat/computevmstools_test.go:176 TestTerraformComputeInstance"
         ]
       },
       {
@@ -13989,7 +13990,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/compute_test.go:299 TestGcloudComputeNetworks",
-          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
+          "test/compat/computevmnet_test.go:33 TestComputeVMNetworkingThroughTheGoClient"
         ]
       },
       {
@@ -14004,7 +14006,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/compute_test.go:299 TestGcloudComputeNetworks",
-          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
+          "test/compat/computevmnet_test.go:33 TestComputeVMNetworkingThroughTheGoClient"
         ]
       },
       {
@@ -14090,7 +14093,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
-          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
+          "test/compat/computevmstools_test.go:30 TestGcloudComputeInstances"
         ]
       },
       {
@@ -14178,14 +14182,17 @@
       },
       {
         "method": "compute.instances.aggregatedList",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevmstools_test.go:30 TestGcloudComputeInstances"
+        ]
       },
       {
         "method": "compute.instances.attachDisk",
         "status": "Verified",
         "tests": [
-          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient",
+          "test/compat/computevmstools_test.go:176 TestTerraformComputeInstance"
         ]
       },
       {
@@ -14197,6 +14204,7 @@
         "method": "compute.instances.delete",
         "status": "Verified",
         "tests": [
+          "test/compat/computevmnet_test.go:33 TestComputeVMNetworkingThroughTheGoClient",
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
         ]
       },
@@ -14209,14 +14217,17 @@
         "method": "compute.instances.detachDisk",
         "status": "Verified",
         "tests": [
-          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient",
+          "test/compat/computevmstools_test.go:176 TestTerraformComputeInstance"
         ]
       },
       {
         "method": "compute.instances.get",
         "status": "Verified",
         "tests": [
-          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+          "test/compat/computevmnet_test.go:33 TestComputeVMNetworkingThroughTheGoClient",
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient",
+          "test/compat/computevmstools_test.go:176 TestTerraformComputeInstance"
         ]
       },
       {
@@ -14255,6 +14266,7 @@
         "method": "compute.instances.insert",
         "status": "Verified",
         "tests": [
+          "test/compat/computevmnet_test.go:33 TestComputeVMNetworkingThroughTheGoClient",
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
         ]
       },
@@ -14303,7 +14315,8 @@
         "method": "compute.instances.setLabels",
         "status": "Verified",
         "tests": [
-          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient",
+          "test/compat/computevmstools_test.go:176 TestTerraformComputeInstance"
         ]
       },
       {
@@ -14347,8 +14360,10 @@
       },
       {
         "method": "compute.instances.setTags",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevmnet_test.go:33 TestComputeVMNetworkingThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.instances.simulateMaintenanceEvent",
@@ -14466,7 +14481,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
-          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
+          "test/compat/computevmnet_test.go:33 TestComputeVMNetworkingThroughTheGoClient"
         ]
       },
       {
@@ -14521,8 +14537,10 @@
       },
       {
         "method": "compute.projects.get",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevmstools_test.go:30 TestGcloudComputeInstances"
+        ]
       },
       {
         "method": "compute.projects.getXpnHost",
@@ -14551,8 +14569,10 @@
       },
       {
         "method": "compute.projects.setCommonInstanceMetadata",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevmstools_test.go:30 TestGcloudComputeInstances"
+        ]
       },
       {
         "method": "compute.projects.setDefaultNetworkTier",
@@ -14721,7 +14741,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
-          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
+          "test/compat/computevmnet_test.go:33 TestComputeVMNetworkingThroughTheGoClient"
         ]
       },
       {
@@ -14771,7 +14792,8 @@
         "method": "compute.zoneOperations.get",
         "status": "Verified",
         "tests": [
-          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient",
+          "test/compat/computevmstools_test.go:176 TestTerraformComputeInstance"
         ]
       },
       {
