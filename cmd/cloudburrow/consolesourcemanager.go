@@ -22,6 +22,7 @@ import (
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/protobuf/proto"
 
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/console"
@@ -388,14 +389,12 @@ func dropDashes(props []console.Property) []console.Property {
 	return out
 }
 
-// ssmInitializeUnavailable is why Initialize repository cannot be chosen.
-const ssmInitializeUnavailable = "The .gitignore, license and README templates are Google's own, which a local instance does not hold: push the files instead."
-
 // createRepositoryAction is the web interface's Create repository form, as
 // Google's create-repository page documents it: a page of its own (its
 // "Create repository" page, reached from My repositories), going on to the
 // new repository's page.
 func createRepositoryAction() console.Action {
+	gitignores, licenses := runadapter.SourceManagerTemplateNames()
 	return console.Action{ID: "create-repo", Label: "Create repository", Title: "Create repository", Submit: "Create repository",
 		Page: true, Opens: "id", Fields: []console.Field{
 			{Name: "id", Label: "Repository ID", Type: "text", Required: true, Pattern: "^[a-z]([\\-a-z0-9]{0,61}[a-z0-9])?$",
@@ -405,8 +404,31 @@ func createRepositoryAction() console.Action {
 				Help: "the branch a clone checks out, and whose " + runadapter.SourceManagerTriggersFile + " a push's triggers are read from"},
 			{Name: "serviceAccount", Label: "Service account", Type: "text", Pattern: `^[^@\s]+@[^@\s]+$`,
 				Help: "A user-managed service account for integrations such as Cloud Build (optional)."},
-			{Name: "initialize", Label: "Initialize repository", Type: "checkbox", Default: "false", Unavailable: ssmInitializeUnavailable},
+			{Name: "initialize", Label: "Initialize repository", Type: "checkbox", Default: "false",
+				Help: "Select this option if you want to initialize the repository and add .gitignore, license, and README files."},
+			{Name: "gitignore", Label: ".gitignore", Type: "select", Options: append([]string{""}, gitignores...), ShowWhen: "initialize",
+				Help: "Choose which files to not track using the drop-down menu templates."},
+			{Name: "license", Label: "license", Type: "select", Options: append([]string{""}, licenses...), ShowWhen: "initialize",
+				Help: "Select a common license from the drop-down menu."},
 		}}
+}
+
+// ssmInitialConfig is Create repository's initial_config: the default
+// branch, and with Initialize repository the README from the default
+// template and the chosen .gitignore and license templates.
+func ssmInitialConfig(v map[string]string) *ssmpb.Repository_InitialConfig {
+	ic := &ssmpb.Repository_InitialConfig{DefaultBranch: strings.TrimSpace(v["branch"])}
+	if v["initialize"] == "true" {
+		ic.Readme = "default"
+		if g := strings.TrimSpace(v["gitignore"]); g != "" {
+			ic.Gitignores = []string{g}
+		}
+		ic.License = strings.TrimSpace(v["license"])
+	}
+	if proto.Equal(ic, &ssmpb.Repository_InitialConfig{}) {
+		return nil
+	}
+	return ic
 }
 
 // pushHelp is how to push to a repository: an empty repository's Code tab.
@@ -492,9 +514,7 @@ func (p sourceManagerProvider) ActAt(ctx context.Context, project string, path [
 		}
 		r := &ssmpb.Repository{Instance: in.GetName(), Description: strings.TrimSpace(v["description"]),
 			ServiceAccount: strings.TrimSpace(v["serviceAccount"])}
-		if b := strings.TrimSpace(v["branch"]); b != "" {
-			r.InitialConfig = &ssmpb.Repository_InitialConfig{DefaultBranch: b}
-		}
+		r.InitialConfig = ssmInitialConfig(v)
 		return p.withClient(ctx, func(c *securesourcemanager.Client) error {
 			op, err := c.CreateRepository(ctx, &ssmpb.CreateRepositoryRequest{Parent: parent, RepositoryId: strings.TrimSpace(v["id"]), Repository: r})
 			if err != nil {

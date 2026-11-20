@@ -2523,3 +2523,37 @@ svg.bq-chart { display: block; border: 1px solid var(--border); border-radius: v
    leaves beside Delete. */
 .orgpolicy-rule { min-inline-size: 0; }
 .orgpolicy-custom-line input { flex: 1 1 0; width: 0; min-width: 0; }
+
+/* Secure Source Manager's code view and Files changed (#2071). */
+.tok-kw { color: var(--accent); font-weight: 600; }
+.list-menus { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin: 8px 0; }
+.list-menu-label { display: inline-flex; gap: 6px; align-items: center; max-width: 100%; min-width: 0; }
+.list-menu-label .list-menu { min-width: 0; max-width: 100%; flex: 1 1 auto; }
+.list-menu-toggle[aria-pressed="true"] { box-shadow: inset 0 0 0 2px var(--accent); font-weight: 600; }
+.ref-picker-row { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
+.code-scroll { overflow: auto; max-height: 70vh; }
+.code-view { border-collapse: collapse; width: 100%; font-size: var(--text-caption-size, 12px); }
+.code-view td { padding: 0 8px; vertical-align: top; white-space: pre; }
+.code-line-number { color: var(--text-muted); text-align: right; user-select: none; width: 1%; border-right: 1px solid var(--border); }
+.code-blame { white-space: nowrap; border-right: 1px solid var(--border); background: var(--surface-alt); max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
+.diff-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; position: relative; }
+.diff-file { margin: 8px 0; padding: 0; overflow: auto; }
+.diff-file-head { display: flex; gap: 8px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--border); background: var(--surface-alt); }
+.diff-file-name { margin: 0; font-size: inherit; }
+.diff-table { border-collapse: collapse; width: 100%; }
+.diff-table td { padding: 0 6px; vertical-align: top; }
+.diff-code { white-space: pre; width: 50%; }
+.diff-table:not(.is-split) .diff-code { width: auto; }
+.diff-num { color: var(--text-muted); text-align: right; width: 1%; user-select: none; }
+.diff-sign { display: inline-block; width: 1.2em; user-select: none; }
+.is-add { background: color-mix(in srgb, var(--ok) 14%, var(--surface)); }
+.is-del { background: color-mix(in srgb, var(--error) 14%, var(--surface)); }
+.is-hunk { color: var(--text-muted); background: var(--surface-alt); }
+.diff-plus-cell { width: 1%; }
+.diff-plus { border: 1px solid var(--accent); color: var(--accent); background: var(--surface); border-radius: 3px; cursor: pointer;
+  line-height: 1; padding: 0 4px; }
+.is-add .diff-num, .is-del .diff-num { color: var(--text); }
+.diff-comments td, .diff-form-row td { background: var(--surface-alt); padding: 6px 8px; }
+.diff-comment { margin: 2px 0; white-space: pre-wrap; }
+.diff-comment.is-pending .status-chip { font-weight: 600; }
+.diff-comment-form textarea { width: 100%; box-sizing: border-box; }

@@ -1682,6 +1682,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/securesourcemanager_test.go:36 TestSecureSourceManagerPushTrigger",
+          "test/compat/securesourcemanagertemplates_test.go:29 TestSecureSourceManagerInitialConfig",
           "test/compat/terraform_batch11_run_test.go:164 TestTerraformSecureSourceManagerIAM"
         ]
       },

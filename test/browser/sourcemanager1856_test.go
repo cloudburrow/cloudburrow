@@ -41,8 +41,8 @@ func ssmCreateRepositoryPage(p *tab, inst string, values map[string]string) {
 //     private_config and service attachments, and its page shows them;
 //   - Create repository is the web interface's page of its own (the
 //     instance's page with ?form=create-repo, headed Create repository,
-//     with a breadcrumb back to the instance and Initialize repository
-//     drawn disabled): Cancel goes back to the instance, and Create
+//     with a breadcrumb back to the instance and Initialize repository,
+//     choosable since #2071): Cancel goes back to the instance, and Create
 //     repository makes the repository GetRepository reads and opens its
 //     page.
 //
@@ -113,7 +113,7 @@ func TestCloudRunSourceManagerPrivateInstanceAndCreateRepositoryPage(t *testing.
 		Submit: document.querySelector("#action-page-form button[type=submit]").textContent.trim(),
 		Modal: document.querySelector(".modal") !== null,
 		InitOff: document.querySelector("#action-page-form #f-initialize").disabled }))()`, &pg)
-	if pg.Heading != "Create repository" || !strings.Contains(pg.Crumb, inst) || pg.Submit != "Create repository" || pg.Modal || !pg.InitOff {
+	if pg.Heading != "Create repository" || !strings.Contains(pg.Crumb, inst) || pg.Submit != "Create repository" || pg.Modal || pg.InitOff {
 		t.Errorf("the Create repository page = %+v", pg)
 	}
 	p.clickText("#action-page-form a", "Cancel")

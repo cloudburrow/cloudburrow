@@ -46,8 +46,9 @@ import (
 // A private instance (private_config.is_private, #1856) is stored with its
 // CA pool and custom host config and given its HTTP and SSH service
 // attachments; it is served on this port as any other, since a local
-// instance has no VPC to reach it through. A repository's gitignores and
-// license templates, which are Google's, are UNIMPLEMENTED.
+// instance has no VPC to reach it through. A repository's initial_config
+// gitignores, license and readme are written as its first commit
+// (securesourcemanagertemplates.go, #2071).
 
 // SecureSourceManagerServer serves Secure Source Manager's instances and
 // repositories.
@@ -384,7 +385,8 @@ func (m *SecureSourceManagerServer) GetRepository(_ context.Context, req *ssmpb.
 
 // CreateRepository makes a bare git repository on the instance it names.
 // initial_config.default_branch is its HEAD (main when unset); its
-// gitignores, license and readme templates are refused.
+// gitignores, license and readme are its first commit
+// (securesourcemanagertemplates.go).
 func (m *SecureSourceManagerServer) CreateRepository(ctx context.Context, req *ssmpb.CreateRepositoryRequest) (*longrunningpb.Operation, error) {
 	project, location, err := resource.ParseLocation(req.GetParent())
 	if err != nil {
@@ -408,8 +410,9 @@ func (m *SecureSourceManagerServer) CreateRepository(ctx context.Context, req *s
 		return nil, apierror.InvalidArgument("repository.instance %q must be in %s", r.GetInstance(), req.GetParent())
 	}
 	ic := r.GetInitialConfig()
-	if len(ic.GetGitignores()) > 0 || ic.GetLicense() != "" || ic.GetReadme() != "" {
-		return nil, apierror.Unimplemented("initial_config gitignores, license and readme are not supported: their templates are Google's; push the files instead")
+	initial, err := ssmInitialFiles(ic, req.GetRepositoryId(), r.GetDescription())
+	if err != nil {
+		return nil, err
 	}
 	branch := ic.GetDefaultBranch()
 	if branch == "" {
@@ -452,6 +455,12 @@ func (m *SecureSourceManagerServer) CreateRepository(ctx context.Context, req *s
 	if err := installSSMPreReceive(dir); err != nil {
 		_ = os.RemoveAll(dir)
 		return nil, apierror.Internal(err, "pre-receive hook")
+	}
+	if len(initial) > 0 {
+		if err := ssmWriteInitialCommit(ctx, dir, branch, ssmCallerOf(ctx), initial); err != nil {
+			_ = os.RemoveAll(dir)
+			return nil, apierror.Internal(err, "initial commit")
+		}
 	}
 	ssmState.repos[name] = r
 	saveSSMLocked()
