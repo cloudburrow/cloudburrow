@@ -450,6 +450,28 @@ type FieldDialog struct {
 	Rows    [][]string `json:"rows"`
 }
 
+// StepEntryView is one workflow execution step entry of a Section's
+// StepEntries: its ID, what the table shows of it, and its navigationInfo
+// (parent, children, next, previous: entry IDs, "" or empty for none).
+type StepEntryView struct {
+	ID        string   `json:"id"`
+	Step      string   `json:"step"`
+	Routine   string   `json:"routine"`
+	Type      string   `json:"type"`
+	State     string   `json:"state"`
+	Started   string   `json:"started"`
+	Updated   string   `json:"updated"`
+	Exception string   `json:"exception,omitempty"`
+	Parent    string   `json:"parent,omitempty"`
+	Children  []string `json:"children,omitempty"`
+	Next      string   `json:"next,omitempty"`
+	Previous  string   `json:"previous,omitempty"`
+	// Progress is a for loop's ("iteration 2 of 3"); Variables, by name,
+	// each as JSON, are recorded with detailed execution history only.
+	Progress  string            `json:"progress,omitempty"`
+	Variables map[string]string `json:"variables,omitempty"`
+}
+
 // GroupFieldType is the Type of a repeatable group of fields (Field.Group).
 const GroupFieldType = "group"
 
@@ -881,6 +903,11 @@ type Section struct {
 	// graph above the table, each marked with its entries' state, as
 	// Google's Steps tab has its visualization panel (#2004).
 	Graph string `json:"graph,omitempty"`
+	// StepEntries, beside a Graph, are the execution's step entries for
+	// Google's step detail panel (#2011): choosing a step entry shows its
+	// details, its variables with detailed history, and its Parent,
+	// Children, Next and Previous entries, each a link to that entry.
+	StepEntries []StepEntryView `json:"stepEntries,omitempty"`
 	// Series is the content when Kind is KindChart.
 	Series []ChartSeries `json:"series,omitempty"`
 	// Unavailable explains why this one section has no content, so a section

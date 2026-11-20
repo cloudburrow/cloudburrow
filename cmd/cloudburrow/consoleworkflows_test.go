@@ -110,7 +110,7 @@ func TestConsoleWorkflows(t *testing.T) {
 	for _, s := range d.Sections {
 		tabs = append(tabs, s.Label)
 	}
-	if got := strings.Join(tabs, ","); got != "Details,Executions,Source,Revisions,Logs" {
+	if got := strings.Join(tabs, ","); got != "Details,Executions,Source,Revisions,Triggers,Logs" {
 		t.Errorf("a workflow's tabs = %s", got)
 	}
 	if s := workflowsSection(d, "source"); s == nil || s.Language != "workflows" || s.Text != source {

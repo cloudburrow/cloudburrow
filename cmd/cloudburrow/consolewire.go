@@ -219,6 +219,9 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	if enabled[config.ServiceTasks] && d.tasks != nil {
 		providers = append(providers, tasksProvider{svc: d.tasks, faults: d.faults})
 	}
+	// workflowsEventarc is Eventarc, for Workflows' Eventarc triggers
+	// (#2011); nil without it.
+	var workflowsEventarc *eventarcProvider
 	if enabled[config.ServiceRun] {
 		// Agent Platform's Model Registry and Endpoints (#1940), through
 		// the official aiplatform client on the local AI endpoint, which
@@ -288,8 +291,10 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		if runPubSub != "" {
 			// Eventarc's own Triggers page (#1877), on the Run port, over
 			// Pub/Sub, its transport.
-			providers = append(providers, eventarcProvider{run: runProvider{runAddr: runAddrOf(d.run),
-				defaultProject: d.cfg.DefaultProject(), pubsubAddr: runPubSub}})
+			ea := eventarcProvider{run: runProvider{runAddr: runAddrOf(d.run),
+				defaultProject: d.cfg.DefaultProject(), pubsubAddr: runPubSub}}
+			workflowsEventarc = &ea
+			providers = append(providers, ea)
 		}
 	}
 	if enabled[config.ServiceSecrets] && d.secrets != nil {
@@ -308,7 +313,12 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	}
 	// Workflows (#1986), in process.
 	if enabled[config.ServiceWorkflows] && d.workflows != nil {
-		providers = append(providers, workflowsProvider{svc: d.workflows, logs: d.logging})
+		wp := workflowsProvider{svc: d.workflows, logs: d.logging, eventarc: workflowsEventarc}
+		// Its Create workflow's Cloud Scheduler triggers (#2011).
+		if enabled[config.ServiceScheduler] && d.scheduler != nil {
+			wp.scheduler = d.scheduler
+		}
+		providers = append(providers, wp)
 	}
 	// Cloud Monitoring (#1939) runs in this process too: Metrics explorer
 	// and Metrics management.

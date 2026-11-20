@@ -105,6 +105,10 @@ type executionRecord struct {
 	// source encrypted under it.
 	key    string
 	cipher []byte
+	// level is the execution's own executionHistoryLevel, which the Go
+	// client's Execution has no field for (the JSON API carries it); ""
+	// takes its workflow's.
+	level string
 }
 
 // Server serves both APIs over one set of records.
@@ -165,6 +169,7 @@ type diskExecution struct {
 	Journal   []journalEntry  `json:"journal,omitempty"`
 	Key       string          `json:"key,omitempty"`
 	Cipher    []byte          `json:"cipher,omitempty"`
+	Level     string          `json:"executionHistoryLevel,omitempty"`
 }
 
 func (s *Server) load() error {
@@ -194,7 +199,7 @@ func (s *Server) load() error {
 		s.wfs[rec.WF.GetName()] = rec
 	}
 	for _, e := range d.Executions {
-		rec := &executionRecord{Ex: &executionspb.Execution{}, History: e.History, journal: e.Journal, key: e.Key, cipher: e.Cipher}
+		rec := &executionRecord{Ex: &executionspb.Execution{}, History: e.History, journal: e.Journal, key: e.Key, cipher: e.Cipher, level: e.Level}
 		if err := protojson.Unmarshal(e.Execution, rec.Ex); err != nil {
 			return err
 		}
@@ -248,7 +253,7 @@ func (s *Server) save() error {
 		if e.Ex.GetState() != executionspb.Execution_ACTIVE && e.Ex.GetState() != executionspb.Execution_QUEUED {
 			j = nil
 		}
-		d.Executions = append(d.Executions, diskExecution{Execution: b, History: h, Journal: j, Key: e.key, Cipher: e.cipher})
+		d.Executions = append(d.Executions, diskExecution{Execution: b, History: h, Journal: j, Key: e.key, Cipher: e.cipher, Level: e.level})
 	}
 	for _, name := range sortedNames(s.ops) {
 		b, err := protojson.Marshal(s.ops[name])

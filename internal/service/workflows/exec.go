@@ -2,6 +2,7 @@ package workflows
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -34,6 +35,16 @@ type StepEntry struct {
 	ThreadID   string `json:"threadId,omitempty"`
 	Exception  string `json:"exception,omitempty"`
 	Parent     int64  `json:"parent,omitempty,string"`
+	// ProgressType and ProgressNumber are a for loop's progress
+	// (stepEntryMetadata): PROGRESS_TYPE_FOR and the iteration it is on,
+	// counting from 1. ExpectedIteration is how many it will run, recorded
+	// with detailed execution history only.
+	ProgressType      string `json:"progressType,omitempty"`
+	ProgressNumber    int64  `json:"progressNumber,omitempty,string"`
+	ExpectedIteration int64  `json:"expectedIteration,omitempty,string"`
+	// Variables are the variables in scope when the step finished, each as
+	// JSON (variableData), recorded with detailed execution history only.
+	Variables map[string]json.RawMessage `json:"variables,omitempty"`
 }
 
 type ctrlKind int
@@ -75,6 +86,10 @@ type machine struct {
 	currentMu  sync.Mutex
 	current    [2]string // routine, step
 	maxHistory int
+	// detailed is the execution's history level: EXECUTION_HISTORY_DETAILED
+	// also records each entry's in-scope variables and a for loop's
+	// expected iterations.
+	detailed bool
 
 	// The journal of effects (journal.go).
 	journalMu sync.Mutex
@@ -140,6 +155,44 @@ func (f *frame) lookup(name string) (any, bool) {
 		}
 	}
 	return nil, false
+}
+
+// variables are the frame's variables in scope, each as JSON, for a step
+// entry's variableData; nil unless the execution keeps detailed history.
+func (f *frame) variables() map[string]json.RawMessage {
+	if !f.x.detailed {
+		return nil
+	}
+	f.x.mu.Lock()
+	defer f.x.mu.Unlock()
+	out := map[string]json.RawMessage{}
+	for s := f.sc; s != nil; s = s.parent {
+		for k, v := range s.vars {
+			if _, shadowed := out[k]; shadowed {
+				continue
+			}
+			if b, err := encodeJSON(v, false); err == nil {
+				out[k] = b
+			}
+		}
+	}
+	return out
+}
+
+// progress records a for loop's iteration on the step entry id, the for
+// step's: the iteration it is on, and with detailed history how many it
+// runs.
+func (x *machine) progress(id int64, n, of int) {
+	x.historyMu.Lock()
+	defer x.historyMu.Unlock()
+	if id <= 0 || int(id) > len(x.history) || x.history[id-1].EntryID != id {
+		return
+	}
+	e := x.history[id-1]
+	e.ProgressType, e.ProgressNumber = "PROGRESS_TYPE_FOR", int64(n)
+	if x.detailed {
+		e.ExpectedIteration = int64(of)
+	}
 }
 
 func (f *frame) isFunction(name string) bool {
@@ -448,10 +501,13 @@ func (x *machine) record(f *frame, s *step, typ string) *StepEntry {
 	return e
 }
 
-func (x *machine) finish(e *StepEntry, err error) {
+func (x *machine) finish(e *StepEntry, err error, vars map[string]json.RawMessage) {
 	x.historyMu.Lock()
 	defer x.historyMu.Unlock()
 	e.UpdateTime = x.now().UTC().Format(time.RFC3339Nano)
+	if vars != nil {
+		e.Variables = vars
+	}
 	switch {
 	case err == nil:
 		e.State = "STATE_SUCCEEDED"
@@ -498,7 +554,7 @@ func (f *frame) runStep(s *step) (c ctrl, err error) {
 	entry := f.x.record(f, s, s.stepType())
 	g := *f
 	g.parent = entry.EntryID
-	defer func() { f.x.finish(entry, err) }()
+	defer func() { f.x.finish(entry, err, g.variables()) }()
 	c, err = g.body(s)
 	if err != nil {
 		return ctrl{}, f.at(s, err)
@@ -670,6 +726,7 @@ func (f *frame) runLoop(l *loopSpec) (ctrl, error) {
 		return ctrl{}, err
 	}
 	for i, it := range items {
+		f.x.progress(f.parent, i+1, len(items))
 		g := f.child(false, nil)
 		g.sc.vars[l.value] = it
 		if l.index != "" {

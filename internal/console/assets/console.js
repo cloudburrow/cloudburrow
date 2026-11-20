@@ -3930,6 +3930,13 @@ async function renderDetail(view, route, resourcePath) {
       const viz = wfStepsVisualization(section.graph, list.items);
       note = note ? el("div", {}, note, viz) : viz;
     }
+    // Google's step detail panel (#2011): a step entry's details, its
+    // variables with detailed history, and its Parent, Children, Next
+    // and Previous entries, each moving the panel to that entry.
+    if ((section.stepEntries || []).length) {
+      const panel = wfStepPanel(section.stepEntries);
+      note = note ? el("div", {}, note, panel) : panel;
+    }
     // An upload control where the provider says objects can land. It joins
     // the section's note, so it is drawn whether or not there are rows yet —
     // an empty bucket is exactly where the first upload happens.
@@ -7434,6 +7441,58 @@ function wfStepsVisualization(source, items) {
   const details = el("details", { class: "wf-visualization", open: true },
     el("summary", { text: "Visualization" }), graph.node);
   return details;
+}
+
+// wfStepPanel is an execution's step detail panel (#2011): the step entry
+// chosen in its Step entry list, with Google's Parent, Children, Next and
+// Previous links that choose those entries instead.
+function wfStepPanel(entries) {
+  const byId = new Map(entries.map((e) => [e.id, e]));
+  const label = (e) => `${e.step} (#${e.id}, ${e.routine})`;
+  const chooser = el("select", { id: "wf-step-entry", class: "wf-step-choose" },
+    ...entries.map((e) => el("option", { value: e.id, text: `${label(e)}: ${e.state}` })));
+  const body = el("div", { class: "wf-step-body", "aria-live": "polite" });
+  const link = (id, text) => {
+    const e = byId.get(id);
+    if (!e) return el("span", { text: "—" });
+    return el("button", { type: "button", class: "link-button wf-step-link", "data-entry": id,
+      text: text || label(e), onclick: () => show(id, true) });
+  };
+  const show = (id, focus) => {
+    const e = byId.get(id);
+    if (!e) return;
+    chooser.value = id;
+    const row = (term, value) => [el("dt", { text: term }), el("dd", {}, value)];
+    const text = (v) => el("span", { text: v || "—" });
+    const kids = (e.children || []).length
+      ? el("ul", { class: "wf-step-children" }, ...e.children.map((c) => el("li", {}, link(c))))
+      : text("");
+    const vars = Object.keys(e.variables || {}).sort();
+    setChildren(body,
+      el("h3", { text: e.step }),
+      el("dl", { class: "wf-step-props" },
+        ...row("Step entry", text(`#${e.id}`)), ...row("Routine", text(e.routine)), ...row("Type", text(e.type)),
+        ...row("State", text(e.state)), ...row("Start time", text(e.started)), ...row("Update time", text(e.updated)),
+        ...(e.progress ? row("Progress", text(e.progress)) : []),
+        ...(e.exception ? row("Exception", el("code", { text: e.exception })) : [])),
+      el("h4", { text: "Navigation" }),
+      el("dl", { class: "wf-step-props wf-step-nav" },
+        ...row("Parent", e.parent ? link(e.parent) : text("")), ...row("Children", kids),
+        ...row("Previous", e.previous ? link(e.previous) : text("")), ...row("Next", e.next ? link(e.next) : text(""))),
+      el("h4", { text: "Variables" }),
+      vars.length
+        // A list rather than a table, so a long value wraps in a narrow
+        // window instead of scrolling the page sideways.
+        ? el("dl", { class: "wf-step-props wf-step-vars" },
+            ...vars.flatMap((k) => row(k, el("code", { text: e.variables[k] }))))
+        : el("p", { class: "form-help", text: "Variables are recorded with the Detailed execution history level." }));
+    if (focus) chooser.focus();
+  };
+  chooser.addEventListener("change", () => show(chooser.value, false));
+  show(entries[0].id, false);
+  return el("section", { class: "wf-step-panel", "aria-labelledby": "wf-step-title" },
+    el("h2", { id: "wf-step-title", text: "Step entry details" }),
+    el("label", { for: "wf-step-entry", text: "Step entry" }), chooser, body);
 }
 
 // schemaEntry is a "schema" field: one row per column, each a name, a type

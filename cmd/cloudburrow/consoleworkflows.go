@@ -19,6 +19,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/locations"
+	"github.com/cloudburrow/cloudburrow/internal/service/workflows"
 )
 
 // workflowsProvider is the console's Workflows page (#1986): a project's
@@ -39,6 +40,10 @@ type workflowsProvider struct {
 	// logs is the instance's Cloud Logging, which executions write their
 	// start, end, sys.log and call logs to; nil without it.
 	logs *loggingService
+	// eventarc and scheduler make and list a workflow's triggers (#2011);
+	// nil where the instance does not serve them.
+	eventarc  *eventarcProvider
+	scheduler *schedulerService
 }
 
 const workflowsNotStarted = "Workflows has not started"
@@ -173,14 +178,28 @@ func workflowsFromForm(values map[string]string) (*workflowspb.Workflow, error) 
 		SourceCode:            &workflowspb.Workflow_SourceContents{SourceContents: values["sourceContents"]}}, nil
 }
 
-func (workflowsProvider) CreateForm() (string, []console.Field) {
+func (p workflowsProvider) CreateForm() (string, []console.Field) {
 	const details = "Workflow details"
-	return "Create workflow", append([]console.Field{
+	fields := append([]console.Field{
 		{Name: "workflowId", Label: "Workflow name", Type: "text", Required: true, Section: details,
 			Pattern: `^[a-zA-Z]([a-zA-Z0-9_\-]{0,62}[a-zA-Z0-9])?$`,
 			Help:    "Letters, numbers, underscores and hyphens; starts with a letter and ends with a letter or number; at most 64 characters."},
 		{Name: "location", Label: "Region", Type: "select", Required: true, Default: "us-central1", Section: details, Options: workflowsRegions()},
 	}, workflowsFields(nil)...)
+	// Google's Triggers section sits between the details and the editor.
+	return "Create workflow", withTriggers(fields, p.triggerFields())
+}
+
+// withTriggers puts the Triggers fields before the workflow editor.
+func withTriggers(fields, triggers []console.Field) []console.Field {
+	out := make([]console.Field, 0, len(fields)+len(triggers))
+	for _, f := range fields {
+		if f.Type == "workflowsource" {
+			out = append(out, triggers...)
+		}
+		out = append(out, f)
+	}
+	return out
 }
 
 func (p workflowsProvider) Create(ctx context.Context, project string, values map[string]string) (string, error) {
@@ -195,8 +214,13 @@ func (p workflowsProvider) Create(ctx context.Context, project string, values ma
 	if err != nil {
 		return "", err
 	}
+	parent := "projects/" + project + "/locations/" + strings.TrimSpace(values["location"])
+	triggers, err := p.triggersFromForm(project, parent+"/workflows/"+strings.TrimSpace(values["workflowId"]), values)
+	if err != nil {
+		return "", err
+	}
 	op, err := s.Workflows().CreateWorkflow(ctx, &workflowspb.CreateWorkflowRequest{
-		Parent: "projects/" + project + "/locations/" + strings.TrimSpace(values["location"]), WorkflowId: strings.TrimSpace(values["workflowId"]), Workflow: w})
+		Parent: parent, WorkflowId: strings.TrimSpace(values["workflowId"]), Workflow: w})
 	if err != nil {
 		return "", err
 	}
@@ -204,7 +228,7 @@ func (p workflowsProvider) Create(ctx context.Context, project string, values ma
 	if err := op.GetResponse().UnmarshalTo(out); err != nil {
 		return "", err
 	}
-	return out.GetName(), nil
+	return out.GetName(), p.createTriggers(ctx, project, triggers)
 }
 
 func (p workflowsProvider) workflow(ctx context.Context, project string, name string) (*workflowspb.Workflow, error) {
@@ -277,6 +301,7 @@ func (p workflowsProvider) workflowDetail(ctx context.Context, project, name str
 			{ID: "executions", Label: "Executions", Listing: execs},
 			{ID: "source", Label: "Source", Kind: console.KindText, Text: w.GetSourceContents(), Language: "workflows"},
 			{ID: "revisions", Label: "Revisions", Listing: revs},
+			p.triggersSection(ctx, project, name),
 			p.logsSection(ctx, project, `resource.labels.workflow_id="`+workflowID(name)+`" AND resource.labels.location="`+kmsLocation(name)+`"`),
 		},
 	}, nil
@@ -348,6 +373,15 @@ func (p workflowsProvider) executionDetail(ctx context.Context, project, wf, nam
 		{Label: "Execution state", Value: e.GetState().String()}, {Label: "Revision", Value: e.GetWorkflowRevisionId()},
 		{Label: "Start time", Value: kmsTime(e.GetStartTime())}, {Label: "End time", Value: kmsTime(e.GetEndTime())},
 		{Label: "Execution duration", Value: dur}, {Label: "Call log level", Value: workflowsCallLogLabels[e.GetCallLogLevel().String()]}}
+	// The execution's own history level, or its workflow's revision's.
+	level := workflowsHistoryLabels[s.HistoryLevel(name)]
+	if level == "" {
+		level = "Basic (the workflow's)"
+		if rev, err := s.Workflows().GetWorkflow(ctx, &workflowspb.GetWorkflowRequest{Name: wf, RevisionId: e.GetWorkflowRevisionId()}); err == nil {
+			level = workflowsHistoryLabels[rev.GetExecutionHistoryLevel().String()] + " (the workflow's)"
+		}
+	}
+	props = append(props, console.Property{Label: "Execution history level", Value: level})
 	for _, cs := range e.GetStatus().GetCurrentSteps() {
 		props = append(props, console.Property{Label: "Current step", Value: cs.GetRoutine() + " › " + cs.GetStep()})
 	}
@@ -358,17 +392,16 @@ func (p workflowsProvider) executionDetail(ctx context.Context, project, wf, nam
 	default:
 		props = append(props, console.Property{Label: "Output", Value: kmsOrDash(e.GetResult())})
 	}
-	steps := console.Listing{Columns: []string{"Entry", "Routine", "Type", "Started", "Updated", "Parent", "Exception"}, NameColumn: "Step", Noun: "step entries"}
+	steps := console.Listing{Columns: []string{"Routine", "Type", "Started", "Updated", "Exception"}, NameColumn: "Step", Noun: "step entries"}
+	var views []console.StepEntryView
 	if entries, err := s.StepEntries(name); err == nil {
+		nav := workflows.Navigate(entries)
 		for _, st := range entries {
 			state := strings.TrimPrefix(st.State, "STATE_")
-			parent := "—"
-			if st.Parent != 0 {
-				parent = strconv.FormatInt(st.Parent, 10)
-			}
+			typ := strings.TrimPrefix(st.StepType, "STEP_")
 			steps.Items = append(steps.Items, console.Resource{Name: st.Step, Status: state, Fields: map[string]string{
-				"Entry": strconv.FormatInt(st.EntryID, 10), "Routine": st.Routine, "Type": strings.TrimPrefix(st.StepType, "STEP_"),
-				"Started": st.CreateTime, "Updated": st.UpdateTime, "Parent": parent, "Exception": kmsOrDash(st.Exception)}})
+				"Routine": st.Routine, "Type": typ, "Started": st.CreateTime, "Updated": st.UpdateTime, "Exception": kmsOrDash(st.Exception)}})
+			views = append(views, workflowsStepView(st, nav[st.EntryID]))
 		}
 	}
 	steps.Total = len(steps.Items)
@@ -381,12 +414,43 @@ func (p workflowsProvider) executionDetail(ctx context.Context, project, wf, nam
 	id := name[strings.LastIndex(name, "/")+1:]
 	sections := []console.Section{
 		{ID: "summary", Label: "Summary", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Heading: "Execution", Properties: props}}},
-		{ID: "steps", Label: "Steps", Listing: steps, Graph: graph},
+		{ID: "steps", Label: "Steps", Listing: steps, Graph: graph, StepEntries: views},
 		p.logsSection(ctx, project, `labels."workflows.googleapis.com/execution_id"="`+id+`"`),
 	}
 	// Headed by its execution ID, as Google's Execution details page is.
 	return console.Detail{Title: id, Summary: []console.Property{{Label: "State", Value: e.GetState().String()}, {Label: "Workflow", Value: wf}},
 		Sections: sections}, nil
+}
+
+// workflowsStepView is a step entry as Google's step detail panel shows it.
+func workflowsStepView(st workflows.StepEntry, nav *workflows.Navigation) console.StepEntryView {
+	id := func(n int64) string {
+		if n == 0 {
+			return ""
+		}
+		return strconv.FormatInt(n, 10)
+	}
+	v := console.StepEntryView{ID: id(st.EntryID), Step: st.Step, Routine: st.Routine, Type: strings.TrimPrefix(st.StepType, "STEP_"),
+		State: strings.TrimPrefix(st.State, "STATE_"), Started: st.CreateTime, Updated: st.UpdateTime, Exception: st.Exception}
+	if nav != nil {
+		v.Parent, v.Next, v.Previous = id(nav.Parent), id(nav.Next), id(nav.Previous)
+		for _, c := range nav.Children {
+			v.Children = append(v.Children, id(c))
+		}
+	}
+	if st.ProgressType != "" {
+		v.Progress = "Iteration " + strconv.FormatInt(st.ProgressNumber, 10)
+		if st.ExpectedIteration > 0 {
+			v.Progress += " of " + strconv.FormatInt(st.ExpectedIteration, 10)
+		}
+	}
+	if len(st.Variables) > 0 {
+		v.Variables = map[string]string{}
+		for k, raw := range st.Variables {
+			v.Variables[k] = string(raw)
+		}
+	}
+	return v
 }
 
 func (p workflowsProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
@@ -401,11 +465,18 @@ func (p workflowsProvider) DetailActions(ctx context.Context, project string, pa
 				{Name: "argument", Label: "Input (JSON)", Type: "textarea", Help: "The argument main receives, as JSON; empty for none."},
 				{Name: "callLogLevel", Label: "Call log level", Type: "select", Default: "CALL_LOG_LEVEL_UNSPECIFIED", Options: workflowsCallLogLevels,
 					OptionLabels: map[string]string{"CALL_LOG_LEVEL_UNSPECIFIED": "Not specified (the workflow's level)", "LOG_ERRORS_ONLY": "Errors only",
-						"LOG_ALL_CALLS": "All calls", "LOG_NONE": "No logs"}}}},
+						"LOG_ALL_CALLS": "All calls", "LOG_NONE": "No logs"}},
+				// Execution.executionHistoryLevel (#2011): this execution's,
+				// over the workflow's.
+				{Name: "executionHistoryLevel", Label: "Execution history level", Type: "select", Default: "EXECUTION_HISTORY_LEVEL_UNSPECIFIED",
+					Options: workflows.HistoryLevels, OptionLabels: map[string]string{
+						"EXECUTION_HISTORY_LEVEL_UNSPECIFIED": "Not specified (the workflow's: " + workflowsHistoryLabels[w.GetExecutionHistoryLevel().String()] + ")",
+						"EXECUTION_HISTORY_BASIC":             "Basic", "EXECUTION_HISTORY_DETAILED": "Detailed"},
+					Help: "Detailed also records the in-scope variables of each step entry and the expected iterations of each for loop."}}},
 			{ID: "edit", Label: "Edit", Fields: append([]console.Field{
 				{Name: "workflowId", Label: "Workflow name", Type: "text", Default: workflowID(w.GetName()), Immutable: true, Section: "Workflow details"},
 				{Name: "location", Label: "Region", Type: "text", Default: kmsLocation(w.GetName()), Immutable: true, Section: "Workflow details"},
-			}, workflowsFields(w)...)},
+			}, withTriggers(workflowsFields(w), p.triggerFields())...)},
 			{ID: "delete", Label: "Delete", Destructive: true, Leaves: true,
 				Confirm: "Deleting the workflow deletes its executions too."},
 		}
@@ -434,19 +505,29 @@ func (p workflowsProvider) ActAt(ctx context.Context, project string, path []str
 	switch action {
 	case "execute":
 		lvl := executionspb.Execution_CallLogLevel(executionspb.Execution_CallLogLevel_value[values["callLogLevel"]])
-		_, err := s.Executions().CreateExecution(ctx, &executionspb.CreateExecutionRequest{Parent: path[0],
-			Execution: &executionspb.Execution{Argument: strings.TrimSpace(values["argument"]), CallLogLevel: lvl}})
+		// The Go client's Execution has no execution_history_level; the
+		// server's own CreateExecution, which the JSON API calls, takes it.
+		_, err := s.StartLevel(path[0], &executionspb.Execution{Argument: strings.TrimSpace(values["argument"]), CallLogLevel: lvl},
+			values["executionHistoryLevel"])
 		return err
 	case "edit":
 		w, err := workflowsFromForm(values)
 		if err != nil {
 			return err
 		}
+		triggers, err := p.triggersFromForm(project, path[0], values)
+		if err != nil {
+			return err
+		}
 		w.Name = path[0]
-		_, err = s.Workflows().UpdateWorkflow(ctx, &workflowspb.UpdateWorkflowRequest{Workflow: w,
+		if _, err = s.Workflows().UpdateWorkflow(ctx, &workflowspb.UpdateWorkflowRequest{Workflow: w,
 			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"description", "labels", "service_account", "source_contents",
-				"crypto_key_name", "call_log_level", "execution_history_level", "user_env_vars"}}})
-		return err
+				"crypto_key_name", "call_log_level", "execution_history_level", "user_env_vars"}}}); err != nil {
+			return err
+		}
+		// Add new trigger on Edit makes the triggers once the workflow is
+		// updated, as Google's Edit workflow does.
+		return p.createTriggers(ctx, project, triggers)
 	case "delete":
 		_, err := s.Workflows().DeleteWorkflow(ctx, &workflowspb.DeleteWorkflowRequest{Name: path[0]})
 		return err

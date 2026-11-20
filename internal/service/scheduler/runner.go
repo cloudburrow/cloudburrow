@@ -47,6 +47,9 @@ type Runner struct {
 	// App Engine app (--appengine-url, #1506); "" fails App Engine
 	// attempts 404.
 	appEngine string
+	// local is this instance's endpoint of each API, by the first label of
+	// its googleapis.com host (localapis.go).
+	local func(api string) string
 
 	mu       sync.Mutex
 	inflight map[string]bool
@@ -229,7 +232,11 @@ func (r *Runner) attempt(ctx context.Context, j Job, scheduled time.Time, attemp
 	case j.HTTP != nil:
 		actx, cancel := context.WithTimeout(ctx, j.AttemptDeadline)
 		defer cancel()
-		req, err := http.NewRequestWithContext(actx, j.HTTP.Method, j.HTTP.URI, bytes.NewReader(j.HTTP.Body))
+		target, err := r.localTarget(j.HTTP.URI)
+		if err != nil {
+			return 0, err
+		}
+		req, err := http.NewRequestWithContext(actx, j.HTTP.Method, target, bytes.NewReader(j.HTTP.Body))
 		if err != nil {
 			return 0, err
 		}

@@ -1925,7 +1925,7 @@ tr.is-inspected { background: var(--nav-selected); }
   font-family: var(--mono); font-size: var(--text-caption-size);
   background: var(--surface-alt); border: 1px solid var(--border); border-radius: var(--radius);
 }
-.connect-about { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; }
+.connect-about { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 16px; margin: 0; }
 .connect-about dt { color: var(--text-muted); }
 .connect-about dd { margin: 0; overflow-wrap: anywhere; }
 /* A path or command inside a sentence breaks rather than widening the page. */
@@ -2435,4 +2435,18 @@ svg.bq-chart { display: block; border: 1px solid var(--border); border-radius: v
 .wf-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .wf-visualization { margin-bottom: 12px; }
 .wf-visualization > summary { cursor: pointer; font-weight: 600; padding: 4px 0; }
+/* The step detail panel (#2011). */
+.wf-step-panel { border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; margin-bottom: 12px; }
+.wf-step-panel > h2 { font-size: var(--text-heading-size); margin: 0 0 8px; }
+.wf-step-panel > label { display: block; font-weight: 600; margin-bottom: 4px; }
+.wf-step-choose { max-width: 100%; }
+.wf-step-body h3 { font-size: var(--text-body-size); margin: 12px 0 4px; }
+.wf-step-body h4 { font-size: var(--text-body-size); margin: 12px 0 4px; }
+.wf-step-props { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 16px; margin: 0; }
+.wf-step-props dt { font-weight: 600; }
+.wf-step-props dd { margin: 0; overflow-wrap: anywhere; }
+.wf-step-children { margin: 0; padding-left: 18px; }
+.wf-step-panel { min-width: 0; max-width: 100%; box-sizing: border-box; }
+.wf-step-vars dt { font-family: var(--mono); }
+.wf-step-vars code { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-all; }
 .wf-source-field > label { display: block; margin-bottom: 4px; }

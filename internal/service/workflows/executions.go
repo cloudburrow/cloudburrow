@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"time"
 
@@ -41,6 +42,22 @@ func (a *ExecutionsAPI) CreateExecution(_ context.Context, req *executionspb.Cre
 // Start creates an execution of the workflow's current revision and runs
 // it. Eventarc's workflow destination starts its executions here.
 func (s *Server) Start(parent string, in *executionspb.Execution) (*executionspb.Execution, error) {
+	return s.StartLevel(parent, in, "")
+}
+
+// HistoryLevels are Execution.executionHistoryLevel's values.
+var HistoryLevels = []string{"EXECUTION_HISTORY_LEVEL_UNSPECIFIED", "EXECUTION_HISTORY_BASIC", "EXECUTION_HISTORY_DETAILED"}
+
+// StartLevel is Start with the execution's executionHistoryLevel, which
+// overrides its workflow's ("" or EXECUTION_HISTORY_LEVEL_UNSPECIFIED
+// takes the workflow's).
+func (s *Server) StartLevel(parent string, in *executionspb.Execution, level string) (*executionspb.Execution, error) {
+	if level == "EXECUTION_HISTORY_LEVEL_UNSPECIFIED" {
+		level = ""
+	}
+	if level != "" && !slices.Contains(HistoryLevels, level) {
+		return nil, apierror.InvalidArgument("Invalid value at 'execution.execution_history_level' (type.googleapis.com/google.cloud.workflows.executions.v1.ExecutionHistoryLevel), %q", level)
+	}
 	m := workflowRE.FindStringSubmatch(parent)
 	if m == nil {
 		return nil, apierror.InvalidArgument("parent %q must be projects/{project}/locations/{location}/workflows/{workflow}", parent)
@@ -75,7 +92,7 @@ func (s *Server) Start(parent string, in *executionspb.Execution) (*executionspb
 	if ex.CallLogLevel == executionspb.Execution_CALL_LOG_LEVEL_UNSPECIFIED {
 		ex.CallLogLevel = executionspb.Execution_CallLogLevel(wf.GetCallLogLevel())
 	}
-	er := &executionRecord{Ex: ex, key: wf.GetCryptoKeyName(), cipher: rec.cipher}
+	er := &executionRecord{Ex: ex, key: wf.GetCryptoKeyName(), cipher: rec.cipher, level: level}
 	if err := s.prepare(er, wf); err != nil {
 		return nil, err
 	}
@@ -133,6 +150,8 @@ func (s *Server) prepare(er *executionRecord, wf *workflowspb.Workflow) error {
 	mach.emit = emit
 	mach.execID = id
 	mach.callLevel = er.Ex.GetCallLogLevel().String()
+	mach.detailed = er.level == "EXECUTION_HISTORY_DETAILED" ||
+		(er.level == "" && wf.GetExecutionHistoryLevel() == workflowspb.ExecutionHistoryLevel_EXECUTION_HISTORY_DETAILED)
 	mach.children = s
 	mach.onJournal = func() {
 		s.mu.Lock()
@@ -417,6 +436,17 @@ func (s *Server) Wait(name string) {
 	if er != nil && er.done != nil {
 		<-er.done
 	}
+}
+
+// HistoryLevel is the executionHistoryLevel an execution was created with,
+// "" when it named none.
+func (s *Server) HistoryLevel(name string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if er := s.execs[name]; er != nil {
+		return er.level
+	}
+	return ""
 }
 
 // StepEntries is an execution's history.

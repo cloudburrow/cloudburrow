@@ -1,6 +1,7 @@
 package workflows
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -112,9 +113,122 @@ func NewRESTHandler(s *Server) http.Handler {
 		if s.serveExtra(w, r) {
 			return
 		}
+		if s.serveHistoryLevel(w, r, t) {
+			return
+		}
 		t.ServeHTTP(w, r)
 	})
 }
+
+var (
+	executionsRE    = regexp.MustCompile(`^/v1/(projects/[^/]+/locations/[^/]+/workflows/[^/:]+)/executions$`)
+	executionPathRE = regexp.MustCompile(`^/v1/(projects/[^/]+/locations/[^/]+/workflows/[^/]+/executions/[^/:]+)(?::cancel)?$`)
+)
+
+// serveHistoryLevel carries Execution.executionHistoryLevel, which the
+// JSON API has and the Go client's proto does not: CreateExecution reads
+// it from the body and runs the execution at that level, and every
+// execution the API answers with (create, get, list, cancel) carries the
+// level it was created with.
+func (s *Server) serveHistoryLevel(w http.ResponseWriter, r *http.Request, next http.Handler) bool {
+	p := r.URL.Path
+	switch {
+	case r.Method == http.MethodPost && executionsRE.MatchString(p):
+		parent := executionsRE.FindStringSubmatch(p)[1]
+		body, err := io.ReadAll(io.LimitReader(r.Body, 2*MaxMemoryBytes))
+		if err != nil {
+			apierror.WriteJSON(w, apierror.InvalidArgument("cannot read the request body: %v", err))
+			return true
+		}
+		fields := map[string]json.RawMessage{}
+		if len(strings.TrimSpace(string(body))) > 0 {
+			if err := json.Unmarshal(body, &fields); err != nil {
+				apierror.WriteJSON(w, apierror.InvalidArgument("Invalid JSON payload received. %v", err))
+				return true
+			}
+		}
+		level := ""
+		if raw, ok := fields["executionHistoryLevel"]; ok {
+			if err := json.Unmarshal(raw, &level); err != nil {
+				apierror.WriteJSON(w, apierror.InvalidArgument("Invalid value at 'execution.execution_history_level' (type.googleapis.com/google.cloud.workflows.executions.v1.ExecutionHistoryLevel), %s", raw))
+				return true
+			}
+			delete(fields, "executionHistoryLevel")
+		}
+		rest, _ := json.Marshal(fields)
+		in := &executionspb.Execution{}
+		if err := protojson.Unmarshal(rest, in); err != nil {
+			apierror.WriteJSON(w, apierror.InvalidArgument("Invalid JSON payload received. %v", err))
+			return true
+		}
+		ex, err := s.StartLevel(parent, in, level)
+		if err != nil {
+			apierror.WriteJSON(w, err)
+			return true
+		}
+		b, _ := protojsonMarshal(ex)
+		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+		_, _ = w.Write(s.withLevels(b))
+		return true
+	case (r.Method == http.MethodGet && (executionsRE.MatchString(p) || executionPathRE.MatchString(p))) ||
+		(r.Method == http.MethodPost && strings.HasSuffix(p, ":cancel") && executionPathRE.MatchString(p)):
+		rec := &bufferedResponse{header: http.Header{}, code: http.StatusOK}
+		next.ServeHTTP(rec, r)
+		for k, v := range rec.header {
+			w.Header()[k] = v
+		}
+		out := rec.body.Bytes()
+		if rec.code == http.StatusOK {
+			out = s.withLevels(out)
+			w.Header().Del("Content-Length")
+		}
+		w.WriteHeader(rec.code)
+		_, _ = w.Write(out)
+		return true
+	}
+	return false
+}
+
+// withLevels adds executionHistoryLevel to the execution, or each of the
+// executions, that b holds, when it was created with one.
+func (s *Server) withLevels(b []byte) []byte {
+	var one map[string]any
+	if err := json.Unmarshal(b, &one); err != nil {
+		return b
+	}
+	add := func(m map[string]any) {
+		if name, _ := m["name"].(string); name != "" {
+			if l := s.HistoryLevel(name); l != "" {
+				m["executionHistoryLevel"] = l
+			}
+		}
+	}
+	if list, ok := one["executions"].([]any); ok {
+		for _, e := range list {
+			if m, ok := e.(map[string]any); ok {
+				add(m)
+			}
+		}
+	} else {
+		add(one)
+	}
+	out, err := json.Marshal(one)
+	if err != nil {
+		return b
+	}
+	return out
+}
+
+// bufferedResponse holds a response to rewrite before it is sent.
+type bufferedResponse struct {
+	header http.Header
+	code   int
+	body   bytes.Buffer
+}
+
+func (b *bufferedResponse) Header() http.Header         { return b.header }
+func (b *bufferedResponse) WriteHeader(code int)        { b.code = code }
+func (b *bufferedResponse) Write(p []byte) (int, error) { return b.body.Write(p) }
 
 var (
 	stepEntriesRE = regexp.MustCompile(`^/v1/(projects/[^/]+/locations/[^/]+/workflows/[^/]+/executions/[^/:]+)/stepEntries(?:/([0-9]+))?$`)
@@ -128,16 +242,78 @@ func writeJSON(w http.ResponseWriter, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-// stepEntryJSON is a StepEntry in the API's JSON form.
-func stepEntryJSON(execution string, e StepEntry) map[string]any {
+// Navigation is a step entry's navigationInfo: its parent, the entries it
+// stepped into, and the entries before and after it at its own level (the
+// same parent and thread).
+type Navigation struct {
+	Parent   int64
+	Children []int64
+	Previous int64
+	Next     int64
+}
+
+// Navigate is the navigationInfo of each of entries, by entry ID.
+func Navigate(entries []StepEntry) map[int64]*Navigation {
+	out := make(map[int64]*Navigation, len(entries))
+	last := map[[2]string]int64{}
+	for _, e := range entries {
+		n := &Navigation{Parent: e.Parent}
+		out[e.EntryID] = n
+		if p := out[e.Parent]; p != nil && e.Parent != 0 {
+			p.Children = append(p.Children, e.EntryID)
+		}
+		level := [2]string{strconv.FormatInt(e.Parent, 10), e.ThreadID}
+		if prev, ok := last[level]; ok {
+			n.Previous = prev
+			out[prev].Next = e.EntryID
+		}
+		last[level] = e.EntryID
+	}
+	return out
+}
+
+// stepEntryJSON is a StepEntry in the API's JSON form, with its
+// navigationInfo.
+func stepEntryJSON(execution string, e StepEntry, nav *Navigation) map[string]any {
+	meta := map[string]any{"threadId": e.ThreadID}
+	if e.ProgressType != "" {
+		meta["progressType"] = e.ProgressType
+		meta["progressNumber"] = strconv.FormatInt(e.ProgressNumber, 10)
+	}
+	if e.ExpectedIteration != 0 {
+		meta["expectedIteration"] = strconv.FormatInt(e.ExpectedIteration, 10)
+	}
 	out := map[string]any{
 		"name": execution + "/stepEntries/" + strconv.FormatInt(e.EntryID, 10), "step": e.Step, "routine": e.Routine,
 		"entryId": strconv.FormatInt(e.EntryID, 10), "stepType": e.StepType, "state": e.State,
 		"createTime": e.CreateTime, "updateTime": e.UpdateTime,
-		"stepEntryMetadata": map[string]any{"threadId": e.ThreadID},
+		"stepEntryMetadata": meta,
 	}
-	if e.Parent != 0 {
-		out["navigationInfo"] = map[string]any{"parent": strconv.FormatInt(e.Parent, 10)}
+	if nav != nil {
+		ni := map[string]any{}
+		id := func(n int64) string { return strconv.FormatInt(n, 10) }
+		if nav.Parent != 0 {
+			ni["parent"] = id(nav.Parent)
+		}
+		if len(nav.Children) > 0 {
+			kids := make([]string, len(nav.Children))
+			for i, c := range nav.Children {
+				kids[i] = id(c)
+			}
+			ni["children"] = kids
+		}
+		if nav.Previous != 0 {
+			ni["previous"] = id(nav.Previous)
+		}
+		if nav.Next != 0 {
+			ni["next"] = id(nav.Next)
+		}
+		if len(ni) > 0 {
+			out["navigationInfo"] = ni
+		}
+	}
+	if e.Variables != nil {
+		out["variableData"] = map[string]any{"variables": e.Variables}
 	}
 	if e.Exception != "" {
 		out["exception"] = map[string]any{"payload": e.Exception}
@@ -157,11 +333,12 @@ func (s *Server) serveExtra(w http.ResponseWriter, r *http.Request) bool {
 			apierror.WriteJSON(w, err)
 			return true
 		}
+		nav := Navigate(entries)
 		if m[2] != "" {
 			id, _ := strconv.ParseInt(m[2], 10, 64)
 			for _, e := range entries {
 				if e.EntryID == id {
-					writeJSON(w, stepEntryJSON(m[1], e))
+					writeJSON(w, stepEntryJSON(m[1], e, nav[e.EntryID]))
 					return true
 				}
 			}
@@ -189,7 +366,7 @@ func (s *Server) serveExtra(w http.ResponseWriter, r *http.Request) bool {
 		}
 		list := []any{}
 		for _, e := range page {
-			list = append(list, stepEntryJSON(m[1], e))
+			list = append(list, stepEntryJSON(m[1], e, nav[e.EntryID]))
 		}
 		out := map[string]any{"stepEntries": list, "totalSize": len(entries)}
 		if next != "" {
@@ -247,8 +424,9 @@ func (s *Server) serveExtra(w http.ResponseWriter, r *http.Request) bool {
 				return true
 			}
 			list := []any{}
+			nav := Navigate(entries)
 			for _, e := range entries {
-				list = append(list, stepEntryJSON(m[1], e))
+				list = append(list, stepEntryJSON(m[1], e, nav[e.EntryID]))
 			}
 			b, _ := json.Marshal(map[string]any{"stepEntries": list})
 			writeJSON(w, map[string]any{"data": string(b)})

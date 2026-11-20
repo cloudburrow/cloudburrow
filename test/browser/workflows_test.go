@@ -53,6 +53,13 @@ func TestWorkflowsThroughTheBrowser(t *testing.T) {
 	p.waitFor(`[...document.querySelectorAll("#view .wf-highlight .tok-key")].some((k) => k.textContent === "switch") &&
 		[...document.querySelectorAll("#view .wf-highlight .tok-expr")].some((k) => k.textContent === "${input.n * 2}") &&
 		["log", "check", "double"].every((n) => [...document.querySelectorAll("#view .wf-graph .wf-name")].some((t) => t.textContent === n))`)
+	// Google's Triggers section (#2011): Add new trigger, Cloud Scheduler.
+	p.clickText("#view button", "Add new trigger: Cloud Scheduler")
+	p.waitFor(`document.querySelector('#view [aria-label="Name 1"]') !== null`)
+	for label, v := range map[string]string{"Name 1": "browser-wf-every-day", "Frequency 1": "0 9 * * *",
+		"Workflow's argument 1": `{"n": 5}`, "Service account 1": "invoker@" + project + ".iam.gserviceaccount.com"} {
+		p.setField(fmt.Sprintf(`#view [aria-label=%q]`, label), v)
+	}
 	p.submitForm(map[string]string{"workflowId": id, "location": "us-east1", "description": "from the browser",
 		"callLogLevel": "LOG_ALL_CALLS", "executionHistoryLevel": "EXECUTION_HISTORY_DETAILED"}, "workflowId")
 	p.waitFor(fmt.Sprintf(`location.pathname === "/workflows" &&
@@ -61,12 +68,28 @@ func TestWorkflowsThroughTheBrowser(t *testing.T) {
 		t.Errorf("the workflow's Details read back as %s; want All calls and Detailed", got)
 	}
 
+	// The trigger is a Cloud Scheduler job that runs the workflow, on its
+	// Triggers tab.
+	var triggers string
+	for _, s := range detail(name)["sections"].([]any) {
+		if sec := s.(map[string]any); sec["id"] == "triggers" {
+			b, _ := json.Marshal(sec)
+			triggers = string(b)
+		}
+	}
+	if !strings.Contains(triggers, "browser-wf-every-day") || !strings.Contains(triggers, "Cloud Scheduler") || !strings.Contains(triggers, "0 9 * * *") {
+		t.Errorf("the Triggers tab = %s", triggers)
+	}
 	p.follow(name)
 	p.waitFor(`location.pathname.endsWith("browser-wf")`)
+	p.clickText(`#view [role="tab"]`, "Triggers")
+	p.waitFor(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes("browser-wf-every-day"))`)
 	p.clickText(`#view [role="tab"]`, "Source")
 	p.waitFor(`[...document.querySelectorAll("#view .wf-highlight .tok-expr")].some((k) => k.textContent === "${input.n * 2}") &&
 		document.querySelectorAll("#view .wf-graph .wf-node").length === 3`)
-	p.pageAction("Execute", map[string]string{"argument": `{"n": 21}`}, "")
+	// Execute with its own Execution history level, over the workflow's
+	// Detailed (#2011).
+	p.pageAction("Execute", map[string]string{"argument": `{"n": 21}`, "executionHistoryLevel": "EXECUTION_HISTORY_BASIC"}, "")
 
 	// The execution's ID is the console API's; its page is reached from the
 	// Executions tab.
@@ -98,10 +121,26 @@ func TestWorkflowsThroughTheBrowser(t *testing.T) {
 	// The visualization marks the steps that ran.
 	p.waitFor(`document.querySelector("#view details.wf-visualization[open] .wf-graph") !== null &&
 		document.querySelectorAll("#view .wf-node.is-succeeded").length === 3`)
+	// Google's step detail panel (#2011): the check entry, between log and
+	// double; Next moves the panel to double. Basic history keeps no
+	// variables.
+	p.waitFor(`document.querySelector("#wf-step-entry") !== null`)
+	p.eval(`(() => { const s = document.querySelector("#wf-step-entry");
+		s.value = [...s.options].find((o) => o.text.startsWith("check ")).value;
+		s.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`, nil)
+	p.waitFor(`document.querySelector(".wf-step-body h3").textContent === "check" &&
+		[...document.querySelectorAll(".wf-step-nav .wf-step-link")].map((b) => b.textContent.split(" ")[0]).join(",") === "log,double" &&
+		document.querySelector(".wf-step-body").textContent.includes("recorded with the Detailed")`)
+	p.eval(`(() => { [...document.querySelectorAll(".wf-step-nav .wf-step-link")].find((b) => b.textContent.startsWith("double ")).click(); return true; })()`, nil)
+	p.waitFor(`document.querySelector(".wf-step-body h3").textContent === "double" && document.activeElement.id === "wf-step-entry"`)
 	p.clickText(`#view [role="tab"]`, "Logs")
 	p.waitFor(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes("doubling 21"))`)
-	if got := fmt.Sprint(detail(name, name+"/executions/"+execID)["summary"]); !strings.Contains(got, "SUCCEEDED") {
+	ed := detail(name, name+"/executions/"+execID)
+	if got := fmt.Sprint(ed["summary"]); !strings.Contains(got, "SUCCEEDED") {
 		t.Errorf("the execution reads %s through the console API", got)
+	}
+	if got := fmt.Sprint(ed["sections"]); !strings.Contains(got, "label:Execution history level value:Basic") {
+		t.Errorf("the execution's Summary has no Basic history level: %s", got)
 	}
 }
 
@@ -119,7 +158,8 @@ func TestWorkflowsScreensMeetWCAG(t *testing.T) {
 	if code, body := consoleDo(t, http.MethodPost, "/api/resources/workflows?project="+project, string(b)); code != http.StatusOK {
 		t.Fatalf("create = %d: %s", code, body)
 	}
-	b, _ = json.Marshal(map[string]any{"Path": []string{name}, "Action": "execute", "Values": map[string]string{}})
+	b, _ = json.Marshal(map[string]any{"Path": []string{name}, "Action": "execute",
+		"Values": map[string]string{"executionHistoryLevel": "EXECUTION_HISTORY_DETAILED"}})
 	if code, body := consoleDo(t, http.MethodPost, "/api/actions/workflows?project="+project, string(b)); code != http.StatusOK {
 		t.Fatalf("execute = %d: %s", code, body)
 	}
@@ -155,6 +195,14 @@ func TestWorkflowsScreensMeetWCAG(t *testing.T) {
 		{"Source tab", wf + q + "&tab=source", settled + ` && document.querySelector("#view .wf-graph") !== null`, ""},
 		{"Execution summary", run + q, settled + ` && document.querySelector("#view").textContent.includes("Execution duration")`, ""},
 		{"Execution steps", run + q + "&tab=steps", settled + ` && document.querySelector("#view .wf-node.is-succeeded") !== null`, ""},
+		// The step detail panel on the loop's entry, with its children and
+		// (detailed history) its variables (#2011).
+		{"Step detail panel", run + q + "&tab=steps", settled + ` && document.querySelector("#wf-step-entry") !== null`,
+			`const s = document.querySelector("#wf-step-entry"); s.value = [...s.options].find((o) => o.text.startsWith("loop ")).value;
+			s.dispatchEvent(new Event("change", { bubbles: true }))`},
+		{"Create workflow triggers", "/workflows/create" + q, settled + ` && document.querySelector("#view .wf-graph") !== null`,
+			`[...document.querySelectorAll("#view button")].filter((b) => b.textContent.startsWith("Add new trigger")).forEach((b) => b.click())`},
+		{"Triggers tab", wf + q + "&tab=triggers", settled, ""},
 		{"Execution logs", run + q + "&tab=logs", settled + ` && document.querySelector("#view tbody tr") !== null`, ""},
 	})
 }
