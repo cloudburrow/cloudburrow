@@ -209,6 +209,16 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		providers = append(providers, tasksProvider{svc: d.tasks, faults: d.faults})
 	}
 	if enabled[config.ServiceRun] {
+		// Agent Platform's Model Registry and Endpoints (#1940), through
+		// the official aiplatform client on the local AI endpoint, which
+		// Cloud Run starts.
+		var api vertexAPI
+		if d.localAI != nil {
+			api.addr = d.localAI.Addr
+		}
+		providers = append(providers, vertexModelsProvider{api: api}, vertexEndpointsProvider{api: api})
+	}
+	if enabled[config.ServiceRun] {
 		// Two screens of one product: services, and jobs with their
 		// executions (#785).
 		// The storage tunnel's bound address, not the configured port, which

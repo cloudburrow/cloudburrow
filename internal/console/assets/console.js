@@ -75,12 +75,17 @@ function agentPlatformRoutes() {
       "Studio sends your own prompts to the local model."),
     // Models.
     page(AP_PATHS.localModels, "Local models", "Models", { service: "ai-local", screen: "local-models", listedWhenOff: true }),
-    absent(`${AP}/models`, "Model Registry", "Models", "projects.locations.models",
-      "Models uploaded or trained in a project, with their versions", AP_DOCS + "models"),
+    // The Model Registry (#1940), served with Cloud Run, which runs its
+    // deployed models; its off state is the not-served page.
+    page(`${AP}/models`, "Model Registry", "Models", { service: "vertex-models", listedWhenOff: true,
+      api: "projects.locations.models", about: "Models uploaded or trained in a project, with their versions",
+      docs: AP_DOCS + "models", instead: "Start CloudBurrow with --services including run, which runs deployed models." }),
     absent(`${AP}/tuning`, "Tuning", "Models", "projects.locations.tuningJobs",
       "Supervised and preference tuning jobs for Gemini and open models", AP_DOCS + "models"),
     page(AP_PATHS.predict, "Online prediction", "Models", { service: "ai-predict", screen: "predict", listedWhenOff: true }),
-    page(AP_PATHS.endpoints, "Endpoints", "Models", { service: null, screen: "ap-endpoints" }),
+    // Every endpoint (#1940): the registry's and Model Garden's, whose
+    // own page (?endpoint=) keeps its deploy progress and test.
+    page(AP_PATHS.endpoints, "Endpoints", "Models", { service: "vertex-endpoints", screen: "ap-endpoints", listedWhenOff: true }),
     absent(`${AP}/batch-predictions`, "Batch inference", "Models", "projects.locations.batchPredictionJobs",
       "Batch prediction jobs over Cloud Storage or BigQuery input", AP_DOCS + "models"),
     // Notebooks.
@@ -8037,7 +8042,21 @@ function dispatch(view) {
   if (match.screen === "embeddings") return renderEmbeddings(view);
   if (match.screen === "local-models") return renderLocalModels(view);
   if (match.screen === "model-garden") return renderModelGarden(view);
-  if (match.screen === "ap-endpoints") return renderHFEndpoints(view);
+  if (match.screen === "ap-endpoints") {
+    // The registry's endpoints list and pages when served (#1940); Model
+    // Garden's deployment page otherwise, and for ?endpoint=.
+    const registry = SERVICES.some((sv) => sv.id === "vertex-endpoints");
+    if (!registry || new URLSearchParams(location.search).get("endpoint")) return renderHFEndpoints(view);
+    // Its own screen, so no create route is generated for it.
+    if (resourcePath.length === 1 && resourcePath[0] === "create") {
+      return renderCreatePage(view, { path: `${match.path}/create`, service: match.service, screen: "create",
+        title: `Create in ${match.title}`, of: match });
+    }
+    return resourcePath.length ? renderDetail(view, match, resourcePath) : renderList(view, match);
+  }
+  if (match.service === "vertex-models" && !SERVICES.some((sv) => sv.id === "vertex-models")) {
+    return renderNotServed(view, { ...match, api: null });
+  }
   if (match.screen === "agent-garden") return renderAgentGarden(view);
   if (match.screen === "not-served") return renderNotServed(view, match);
   if (match.screen === "ap-overview") return renderAgentPlatformOverview(view);

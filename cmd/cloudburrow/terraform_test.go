@@ -36,8 +36,8 @@ func TestTheTerraformProviderNeverPointsAtGoogle(t *testing.T) {
 			}
 			set, rows := 0, 0
 			for _, e := range terraformEndpoints {
-				if slices.Contains(services, e.service) {
-					rows++ // Run has three: Cloud Run v2, Artifact Registry and Cloud Build (#1304)
+				if slices.Contains(services, e.service) || (e.service == localAIEndpoint && slices.Contains(services, config.ServiceRun)) {
+					rows++ // Run has three: Cloud Run v2, Artifact Registry and Cloud Build (#1304); Vertex AI is served with it (#1940)
 				}
 				in := strings.Contains(body, e.attr)
 				if in && !e.verified {

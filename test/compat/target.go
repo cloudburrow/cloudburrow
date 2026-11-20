@@ -238,6 +238,9 @@ var gcloudOverrides = []struct {
 	{"spanner", []string{"SPANNER_REST"}},
 	{"firestore", []string{"FIRESTORE"}},
 	{"datastore", []string{"DATASTORE"}},
+	// Vertex AI's Model Registry and Endpoints, on the local AI endpoint
+	// (#1940).
+	{"aiplatform", []string{"PREDICTION"}},
 }
 
 // gcloudRestrictConfig checks a configuration `cloudburrow gcloud-setup`

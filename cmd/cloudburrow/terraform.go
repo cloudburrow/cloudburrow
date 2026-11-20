@@ -160,6 +160,11 @@ var terraformEndpoints = []terraformEndpoint{
 	// google_compute_network and google_compute_subnetwork apply, plan
 	// clean, update and destroy in TestTerraformComputeNetworkAndSubnetwork.
 	{config.ServiceCompute, "compute_custom_endpoint", "GOOGLE_COMPUTE_CUSTOM_ENDPOINT", "/compute/v1/", true, ""},
+	// Vertex AI (#1940), on the local AI endpoint, served with Cloud Run:
+	// google_vertex_ai_endpoint applies, is read back through the official
+	// client, plans clean, updates its labels and destroys in
+	// TestTerraformVertexAIEndpoint.
+	{localAIEndpoint, "vertex_ai_custom_endpoint", "GOOGLE_VERTEX_AI_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	// Firestore (#1331): google_firestore_document applies, plans clean,
 	// updates its fields and destroys in TestTerraformFirestoreDocument,
 	// over the documents REST API the emulator serves on its port. On the
@@ -287,6 +292,7 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 		config.ServiceGKE:        cfg.Endpoints.GKE,
 		config.ServiceMonitoring: cfg.Endpoints.Monitoring,
 		config.ServiceCompute:    cfg.Endpoints.Compute,
+		localAIEndpoint:          cfg.Endpoints.LocalAI,
 	}
 	enabled := map[config.Service]bool{resourceManagerEndpoint: true, serviceUsageService: true, apiKeysService: true, sqlAdminEndpoint: sqlAdminEnabled(cfg),
 		memorystoreAdminEndpoint: serviceEnabled(cfg, config.ServiceMemorystore)}
@@ -296,6 +302,7 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 	enabled[config.ServiceBackupDR] = backupDREnabled(cfg)
 	enabled[config.ServicePrivateCA] = privateCAEnabled(cfg)
 	enabled[config.ServiceMonitoring] = monitoringEnabled(cfg)
+	enabled[localAIEndpoint] = serviceEnabled(cfg, config.ServiceRun)
 	var set []terraformURL
 	var skipped []config.Service
 	for _, e := range terraformEndpoints {

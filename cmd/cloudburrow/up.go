@@ -857,6 +857,14 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		localAISrv.SetDocumentAIState(filepath.Join(cfg.StateDir, "documentai", "processors.json"))
 		localAISrv.SetSpeechState(filepath.Join(cfg.StateDir, "speech", "recognizers.json"))
 	}
+	// The Model Registry and Endpoints (#1940): deployed models run as
+	// Cloud Run services; artifacts are copied in this Cloud Storage.
+	withModelRegistry(cfg, localAISrv, runSvc, func() string {
+		if f := forwarderFor(forwarders, "storage"); f != nil {
+			return f.HostAddr()
+		}
+		return ""
+	})
 	if garden != nil {
 		defer garden.Close()
 	}

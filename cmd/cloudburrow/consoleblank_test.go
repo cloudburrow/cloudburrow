@@ -68,6 +68,8 @@ var emulatorOnly = map[string]string{
 	"k8sobjects":           "Object Browser lists kubectl api-resources, which the fake kubectl does not serve (TestGKEObjectBrowserParsesAPIResources)",
 	"bigquery-jobs":        "BigQuery's Job history reads the same emulator, through the validating front",
 	"eventarc":             "a trigger needs Pub/Sub, its transport, which this test does not run (TestEventarcTriggersPageThroughTheBrowser drives the page)",
+	"vertex-models":        "the Model Registry is read from the local AI endpoint over gRPC, which this test does not start (TestModelRegistryAndEndpointsThroughThePages drives the page)",
+	"vertex-endpoints":     "Endpoints are read from the local AI endpoint over gRPC, which this test does not start (TestModelRegistryAndEndpointsThroughThePages drives the page)",
 	"run-domains":          "the Cloud Run Admin API v1's domain mappings, which this test's in-process adapter does not serve over HTTP (TestCloudRunGooglePagesThroughTheBrowser drives the page)",
 	"cloudsql-instances":   "the Cloud SQL Admin API over PostgreSQL and MySQL servers; there is no in-process one",
 }

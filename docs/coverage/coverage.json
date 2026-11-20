@@ -6051,62 +6051,85 @@
     "Key": "vertexai",
     "Title": "Vertex AI PredictionService",
     "counts": {
-      "Unimplemented": 28,
-      "Verified": 63
+      "Implemented": 1,
+      "Unimplemented": 12,
+      "Verified": 78
     },
     "rows": [
       {
         "method": "google.cloud.aiplatform.v1.EndpointService/CreateEndpoint",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
+          "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints",
+          "test/compat/modelregistrycli_test.go:96 TestTerraformVertexAIEndpoint"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.EndpointService/DeleteEndpoint",
         "status": "Verified",
         "tests": [
-          "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels"
+          "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels",
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
+          "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints",
+          "test/compat/modelregistrycli_test.go:96 TestTerraformVertexAIEndpoint"
         ]
       },
       {
         "method": "google.cloud.aiplatform.v1.EndpointService/DeployModel",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
+          "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.EndpointService/GetEndpoint",
         "status": "Verified",
         "tests": [
-          "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels"
+          "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels",
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
+          "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints",
+          "test/compat/modelregistrycli_test.go:96 TestTerraformVertexAIEndpoint"
         ]
       },
       {
         "method": "google.cloud.aiplatform.v1.EndpointService/ListEndpoints",
         "status": "Verified",
         "tests": [
-          "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels"
+          "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels",
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
+          "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints"
         ]
       },
       {
         "method": "google.cloud.aiplatform.v1.EndpointService/MutateDeployedModel",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.EndpointService/UndeployModel",
         "status": "Verified",
         "tests": [
-          "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels"
+          "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels",
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
+          "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints"
         ]
       },
       {
         "method": "google.cloud.aiplatform.v1.EndpointService/UpdateEndpoint",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
+          "test/compat/modelregistrycli_test.go:96 TestTerraformVertexAIEndpoint"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.EndpointService/UpdateEndpointLongRunning",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "google.cloud.aiplatform.v1.LlmUtilityService/ComputeTokens",
@@ -6131,8 +6154,10 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.ModelGardenService/GetPublisherModel",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelregistry_test.go:485 TestGetPublisherModelDescribesTheServedModels"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.ModelService/BatchImportEvaluatedAnnotations",
@@ -6146,37 +6171,49 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.ModelService/CopyModel",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.ModelService/DeleteModel",
         "status": "Verified",
         "tests": [
-          "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels"
+          "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels",
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
+          "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints"
         ]
       },
       {
         "method": "google.cloud.aiplatform.v1.ModelService/DeleteModelVersion",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.ModelService/ExportModel",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.ModelService/GetModel",
         "status": "Verified",
         "tests": [
-          "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels"
+          "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels",
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
+          "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints"
         ]
       },
       {
         "method": "google.cloud.aiplatform.v1.ModelService/GetModelEvaluation",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.ModelService/GetModelEvaluationSlice",
@@ -6185,8 +6222,10 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.ModelService/ImportModelEvaluation",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.ModelService/ListModelEvaluationSlices",
@@ -6195,8 +6234,10 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.ModelService/ListModelEvaluations",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.ModelService/ListModelVersionCheckpoints",
@@ -6205,20 +6246,26 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.ModelService/ListModelVersions",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.ModelService/ListModels",
         "status": "Verified",
         "tests": [
-          "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels"
+          "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels",
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
+          "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints"
         ]
       },
       {
         "method": "google.cloud.aiplatform.v1.ModelService/MergeVersionAliases",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.ModelService/UpdateExplanationDataset",
@@ -6227,13 +6274,18 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.ModelService/UpdateModel",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.ModelService/UploadModel",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
+          "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.PredictionService/DirectPredict",
@@ -6282,6 +6334,7 @@
         "method": "google.cloud.aiplatform.v1.PredictionService/Explain",
         "status": "Verified",
         "tests": [
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
           "test/compat/predictiongrpc_test.go:214 TestConsoleExplainMatchesThePredictionClient",
           "test/compat/predictiongrpc_test.go:63 TestPredictionClientReachesACustomEndpoint"
         ]
@@ -6297,6 +6350,8 @@
         "method": "google.cloud.aiplatform.v1.PredictionService/Predict",
         "status": "Verified",
         "tests": [
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
+          "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints",
           "test/compat/predictiongrpc_test.go:63 TestPredictionClientReachesACustomEndpoint"
         ]
       },
@@ -6304,6 +6359,7 @@
         "method": "google.cloud.aiplatform.v1.PredictionService/RawPredict",
         "status": "Verified",
         "tests": [
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
           "test/compat/predictiongrpc_test.go:63 TestPredictionClientReachesACustomEndpoint",
           "test/compat/rawpredict_test.go:26 TestRawPredictOnTheEmbeddingModel",
           "test/compat/rawpredict_test.go:71 TestRawPredictOnTheGenerationModel"
