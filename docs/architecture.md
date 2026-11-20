@@ -197,6 +197,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/service/scheduler/` | Cloud Scheduler, built by us (#302). |
 | `internal/service/secrets/` | Secret Manager v1, built by us; with a cluster, versions are kept as Kubernetes Secrets in the workload namespace. |
 | `internal/service/backupdr/` | The Backup and DR Service API v1 for Cloud SQL (vaults, plans, associations, data sources, backups over Cloud SQL backup runs), built by us (#1433). |
+| `internal/service/datatransfer/` | The BigQuery Data Transfer Service v1 (scheduled queries and dataset copies: transfer configs, runs, logs, BigQuery's schedule syntax and table templates), built by us (#1948); runs execute on the instance's BigQuery through an `Executor` `cmd/cloudburrow` wires. |
 | `internal/service/apikeys/` | The API Keys API v2 (each project's API keys and their restrictions), built by us; `Authorize` is Google's decision on a request that carries a key, with its API_KEY_* errors (#1915). |
 | `internal/service/gke/` | The Kubernetes Engine API v1 (clusters, node pools, operations), built by us (#1913); each cluster is a kind cluster that `internal/cluster`'s `GKE` makes and resizes. |
 | `internal/service/privateca/` | Certificate Authority Service v1 (CA pools, CAs, certificates, real X.509 signed in process), built by us (#1834). |

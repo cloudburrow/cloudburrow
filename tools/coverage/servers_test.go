@@ -30,6 +30,8 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
 	"github.com/cloudburrow/cloudburrow/internal/grafeas"
 	"github.com/cloudburrow/cloudburrow/internal/modelgarden"
+	"github.com/cloudburrow/cloudburrow/internal/sched"
+	"github.com/cloudburrow/cloudburrow/internal/service/datatransfer"
 	"github.com/cloudburrow/cloudburrow/internal/service/gke"
 	"github.com/cloudburrow/cloudburrow/internal/service/kms"
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
@@ -73,6 +75,11 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		t.Fatal(err)
 	}
 	gkeSrv.Register(srv)
+	dts, err := datatransfer.NewServer(store.NewMemory(), sched.RealClock{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dts.Register(srv)
 	rmReg := resourcemanager.New(store.NewMemory())
 	rmpb.RegisterProjectsServer(srv, resourcemanager.NewProjectsServer(rmReg))
 	rmpb.RegisterFoldersServer(srv, resourcemanager.NewFoldersServer(rmReg))

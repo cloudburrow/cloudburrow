@@ -866,6 +866,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		sqlAdmin:       sqlAdminSrv,
 		privateCA:      privateCASvc,
 		gke:            gkeSvc,
+		dataTransfer:   dataTransfer,
 	})
 	if consoleSrv != nil {
 		// The Request Log reads the same recorder /admin/events does.

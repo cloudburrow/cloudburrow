@@ -4225,6 +4225,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/artifactregistrylocations_test.go:42 TestArtifactRegistryLocations",
+          "test/compat/bigquerydatatransfer_test.go:88 TestBigQueryDataTransferScheduledQuery",
           "test/compat/kmslocations_test.go:24 TestKMSLocations",
           "test/compat/memorystoreops_test.go:34 TestMemorystoreLocationsOperationsMaintenance",
           "test/compat/schedulerlocations_test.go:23 TestSchedulerLocations"
@@ -4235,6 +4236,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/artifactregistrylocations_test.go:42 TestArtifactRegistryLocations",
+          "test/compat/bigquerydatatransfer_test.go:88 TestBigQueryDataTransferScheduledQuery",
           "test/compat/kmslocations_test.go:24 TestKMSLocations",
           "test/compat/memorystoreops_test.go:34 TestMemorystoreLocationsOperationsMaintenance",
           "test/compat/schedulerlocations_test.go:23 TestSchedulerLocations"
@@ -5498,6 +5500,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/artifactregistrylocations_test.go:42 TestArtifactRegistryLocations",
+          "test/compat/bigquerydatatransfer_test.go:88 TestBigQueryDataTransferScheduledQuery",
           "test/compat/kmslocations_test.go:24 TestKMSLocations",
           "test/compat/memorystoreops_test.go:34 TestMemorystoreLocationsOperationsMaintenance",
           "test/compat/schedulerlocations_test.go:23 TestSchedulerLocations"
@@ -5508,6 +5511,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/artifactregistrylocations_test.go:42 TestArtifactRegistryLocations",
+          "test/compat/bigquerydatatransfer_test.go:88 TestBigQueryDataTransferScheduledQuery",
           "test/compat/kmslocations_test.go:24 TestKMSLocations",
           "test/compat/memorystoreops_test.go:34 TestMemorystoreLocationsOperationsMaintenance",
           "test/compat/schedulerlocations_test.go:23 TestSchedulerLocations"
@@ -15146,6 +15150,133 @@
         "status": "Verified",
         "tests": [
           "test/compat/gke_test.go:125 TestGKEClustersNodePoolsAndOperations"
+        ]
+      }
+    ]
+  },
+  {
+    "Key": "datatransfer",
+    "Title": "BigQuery Data Transfer Service (v1)",
+    "counts": {
+      "Implemented": 1,
+      "Unimplemented": 1,
+      "Verified": 14
+    },
+    "rows": [
+      {
+        "method": "google.cloud.bigquery.datatransfer.v1.DataTransferService/CheckValidCreds",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.bigquery.datatransfer.v1.DataTransferService/CreateTransferConfig",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerydatatransfer_test.go:254 TestBigQueryDataTransferDatasetCopy",
+          "test/compat/bigquerydatatransfer_test.go:88 TestBigQueryDataTransferScheduledQuery",
+          "test/compat/terraform_bigquerydatatransfer_test.go:23 TestTerraformBigQueryDataTransferConfig"
+        ]
+      },
+      {
+        "method": "google.cloud.bigquery.datatransfer.v1.DataTransferService/DeleteTransferConfig",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerydatatransfer_test.go:254 TestBigQueryDataTransferDatasetCopy",
+          "test/compat/bigquerydatatransfer_test.go:88 TestBigQueryDataTransferScheduledQuery",
+          "test/compat/terraform_bigquerydatatransfer_test.go:23 TestTerraformBigQueryDataTransferConfig"
+        ]
+      },
+      {
+        "method": "google.cloud.bigquery.datatransfer.v1.DataTransferService/DeleteTransferRun",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerydatatransfer_test.go:88 TestBigQueryDataTransferScheduledQuery"
+        ]
+      },
+      {
+        "method": "google.cloud.bigquery.datatransfer.v1.DataTransferService/EnrollDataSources",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerydatatransfer_test.go:88 TestBigQueryDataTransferScheduledQuery"
+        ]
+      },
+      {
+        "method": "google.cloud.bigquery.datatransfer.v1.DataTransferService/GetDataSource",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerydatatransfer_test.go:88 TestBigQueryDataTransferScheduledQuery"
+        ]
+      },
+      {
+        "method": "google.cloud.bigquery.datatransfer.v1.DataTransferService/GetTransferConfig",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerydatatransfer_test.go:88 TestBigQueryDataTransferScheduledQuery",
+          "test/compat/terraform_bigquerydatatransfer_test.go:23 TestTerraformBigQueryDataTransferConfig"
+        ]
+      },
+      {
+        "method": "google.cloud.bigquery.datatransfer.v1.DataTransferService/GetTransferRun",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerydatatransfer_test.go:254 TestBigQueryDataTransferDatasetCopy",
+          "test/compat/bigquerydatatransfer_test.go:88 TestBigQueryDataTransferScheduledQuery"
+        ]
+      },
+      {
+        "method": "google.cloud.bigquery.datatransfer.v1.DataTransferService/ListDataSources",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerydatatransfer_test.go:88 TestBigQueryDataTransferScheduledQuery"
+        ]
+      },
+      {
+        "method": "google.cloud.bigquery.datatransfer.v1.DataTransferService/ListTransferConfigs",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerydatatransfer_test.go:88 TestBigQueryDataTransferScheduledQuery"
+        ]
+      },
+      {
+        "method": "google.cloud.bigquery.datatransfer.v1.DataTransferService/ListTransferLogs",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerydatatransfer_test.go:88 TestBigQueryDataTransferScheduledQuery"
+        ]
+      },
+      {
+        "method": "google.cloud.bigquery.datatransfer.v1.DataTransferService/ListTransferRuns",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerydatatransfer_test.go:88 TestBigQueryDataTransferScheduledQuery"
+        ]
+      },
+      {
+        "method": "google.cloud.bigquery.datatransfer.v1.DataTransferService/ScheduleTransferRuns",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerydatatransfer_test.go:88 TestBigQueryDataTransferScheduledQuery"
+        ]
+      },
+      {
+        "method": "google.cloud.bigquery.datatransfer.v1.DataTransferService/StartManualTransferRuns",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerydatatransfer_test.go:254 TestBigQueryDataTransferDatasetCopy",
+          "test/compat/bigquerydatatransfer_test.go:88 TestBigQueryDataTransferScheduledQuery"
+        ]
+      },
+      {
+        "method": "google.cloud.bigquery.datatransfer.v1.DataTransferService/UnenrollDataSources",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.bigquery.datatransfer.v1.DataTransferService/UpdateTransferConfig",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerydatatransfer_test.go:88 TestBigQueryDataTransferScheduledQuery",
+          "test/compat/terraform_bigquerydatatransfer_test.go:23 TestTerraformBigQueryDataTransferConfig"
         ]
       }
     ]

@@ -244,10 +244,10 @@ func (s *Server) Now() time.Time { return s.clock.Now().UTC() }
 
 var (
 	projectPart = `(?:[a-z][a-z0-9-]{4,28}[a-z0-9]|[0-9]+)`
-	parentRE    = regexp.MustCompile(`^projects/(` + projectPart + `)(?:/locations/([a-z0-9-]+))?$`)
-	configRE    = regexp.MustCompile(`^projects/(` + projectPart + `)(?:/locations/([a-z0-9-]+))?/transferConfigs/([A-Za-z0-9_-]+)$`)
-	runRE       = regexp.MustCompile(`^(projects/` + projectPart + `(?:/locations/[a-z0-9-]+)?/transferConfigs/[A-Za-z0-9_-]+)/runs/([A-Za-z0-9_-]+)$`)
-	dataSrcRE   = regexp.MustCompile(`^(projects/` + projectPart + `(?:/locations/[a-z0-9-]+)?)/dataSources/([a-z_]+)$`)
+	parentRE    = regexp.MustCompile(`^projects/(` + projectPart + `)(?:/locations/([A-Za-z0-9-]+))?$`)
+	configRE    = regexp.MustCompile(`^projects/(` + projectPart + `)(?:/locations/([A-Za-z0-9-]+))?/transferConfigs/([A-Za-z0-9_-]+)$`)
+	runRE       = regexp.MustCompile(`^(projects/` + projectPart + `(?:/locations/[A-Za-z0-9-]+)?/transferConfigs/[A-Za-z0-9_-]+)/runs/([A-Za-z0-9_-]+)$`)
+	dataSrcRE   = regexp.MustCompile(`^(projects/` + projectPart + `(?:/locations/[A-Za-z0-9-]+)?)/dataSources/([a-z_]+)$`)
 	topicRE     = regexp.MustCompile(`^projects/` + projectPart + `/topics/[A-Za-z][A-Za-z0-9._~%+-]{2,254}$`)
 	datasetRE   = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
 )
@@ -262,6 +262,7 @@ func newID() string {
 // findConfig resolves a config name, with or without its location, as
 // Google answers both forms.
 func (s *Server) findConfig(name string) (*record, error) {
+	name = lowerLocation(name)
 	m := configRE.FindStringSubmatch(name)
 	if m == nil {
 		return nil, apierror.InvalidArgument("Invalid resource name %q: expected projects/{project}/locations/{location}/transferConfigs/{config}", name)
@@ -280,7 +281,7 @@ func (s *Server) findConfig(name string) (*record, error) {
 }
 
 func (s *Server) findRun(name string) (*record, *runRecord, error) {
-	m := runRE.FindStringSubmatch(name)
+	m := runRE.FindStringSubmatch(lowerLocation(name))
 	if m == nil {
 		return nil, nil, apierror.InvalidArgument("Invalid resource name %q: expected projects/{project}/locations/{location}/transferConfigs/{config}/runs/{run}", name)
 	}
@@ -298,8 +299,23 @@ func (s *Server) findRun(name string) (*record, *runRecord, error) {
 
 // --- data sources ---
 
+// lowerLocation lowercases a name's location, as Google takes "US" and
+// "us" alike (Terraform sends the location as configured).
+func lowerLocation(name string) string {
+	i := strings.Index(name, "/locations/")
+	if i < 0 {
+		return name
+	}
+	rest := name[i+len("/locations/"):]
+	loc, tail, _ := strings.Cut(rest, "/")
+	if tail != "" {
+		tail = "/" + tail
+	}
+	return name[:i] + "/locations/" + strings.ToLower(loc) + tail
+}
+
 func checkParent(parent string) ([]string, error) {
-	m := parentRE.FindStringSubmatch(parent)
+	m := parentRE.FindStringSubmatch(lowerLocation(parent))
 	if m == nil {
 		return nil, apierror.InvalidArgument("Invalid parent %q: expected projects/{project} or projects/{project}/locations/{location}", parent)
 	}
@@ -308,7 +324,7 @@ func checkParent(parent string) ([]string, error) {
 
 // GetDataSource answers scheduled_query and cross_region_copy.
 func (s *Server) GetDataSource(_ context.Context, req *dtpb.GetDataSourceRequest) (*dtpb.DataSource, error) {
-	m := dataSrcRE.FindStringSubmatch(req.GetName())
+	m := dataSrcRE.FindStringSubmatch(lowerLocation(req.GetName()))
 	if m == nil {
 		return nil, apierror.Wrap(apierror.InvalidArgument("Invalid resource name %q: expected projects/{project}/locations/{location}/dataSources/{data_source}", req.GetName()))
 	}
@@ -329,7 +345,7 @@ func (s *Server) ListDataSources(_ context.Context, req *dtpb.ListDataSourcesReq
 	}
 	resp := &dtpb.ListDataSourcesResponse{NextPageToken: next}
 	for _, id := range page {
-		resp.DataSources = append(resp.DataSources, dataSource(req.GetParent(), id))
+		resp.DataSources = append(resp.DataSources, dataSource(lowerLocation(req.GetParent()), id))
 	}
 	return resp, nil
 }

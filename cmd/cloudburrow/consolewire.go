@@ -25,6 +25,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/service/apikeys"
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
+	"github.com/cloudburrow/cloudburrow/internal/service/datatransfer"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
 	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
@@ -88,6 +89,8 @@ type consoleDeps struct {
 	privateCA *privateCAService
 	// gke is the Kubernetes Engine API (#1913), nil unless enabled.
 	gke *gkeService
+	// dataTransfer is the BigQuery Data Transfer Service (#1948).
+	dataTransfer *dataTransferSvc
 	// sqlAdmin is the Cloud SQL Admin API, which restores Backup and DR
 	// backups; nil unless a Cloud SQL service is enabled.
 	sqlAdmin *sqladmin.Server
@@ -280,6 +283,11 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	// Certificate Authority Service (#1834) runs in this process too.
 	if enabled[config.ServicePrivateCA] && d.privateCA != nil {
 		providers = append(providers, privateCAProvider{svc: d.privateCA}, privateCATemplatesProvider{svc: d.privateCA})
+	}
+	// BigQuery's Data transfers and Scheduled queries pages (#1948).
+	if d.dataTransfer != nil {
+		providers = append(providers, dataTransferProvider{svc: d.dataTransfer},
+			dataTransferProvider{svc: d.dataTransfer, only: datatransfer.ScheduledQuery})
 	}
 	if enabled[config.ServiceScheduler] && d.scheduler != nil {
 		providers = append(providers, schedulerProvider{svc: d.scheduler, faults: d.faults})
