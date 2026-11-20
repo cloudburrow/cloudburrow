@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/bigtable"
+	btapb "cloud.google.com/go/bigtable/admin/apiv2/adminpb"
 )
 
 // TestBigtableConsoleParity (#1858): Create instance's steps (edition, 2x
@@ -168,5 +169,92 @@ func TestBigtableConsoleParity(t *testing.T) {
 	}
 	if _, err := studio("sql", map[string]any{"sql": "SELECT nope FROM missing"}); err == nil {
 		t.Error("a query of a missing table was answered")
+	}
+}
+
+// TestBigtableStudioSavedQueries (#1858): Save query (a name and an
+// optional region of Create instance's), a new version on Save, the
+// project's list under the Explorer's Queries, Delete query; and the
+// Tables page's Status from each cluster's replication state.
+func TestBigtableStudioSavedQueries(t *testing.T) {
+	p, _, iac := bigtableInstancesConsole(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	if err := iac.CreateInstance(ctx, &bigtable.InstanceConf{InstanceId: "saved-inst", DisplayName: "saved-inst",
+		ClusterId: "saved-c1", Zone: "us-central1-b", NumNodes: 1, StorageType: bigtable.SSD}); err != nil {
+		t.Fatal(err)
+	}
+	call := func(name string, body map[string]any) (any, error) {
+		body["instance"] = "saved-inst"
+		raw, _ := json.Marshal(body)
+		return p.StudioCall(ctx, "demo", name, raw)
+	}
+	if _, err := call("savequery", map[string]any{"name": " ", "sql": "SELECT 1"}); err == nil {
+		t.Error("a saved query without a name was saved")
+	}
+	if _, err := call("savequery", map[string]any{"name": "q", "region": "atlantis1", "sql": "SELECT 1"}); err == nil || !strings.Contains(err.Error(), "Bigtable region") {
+		t.Errorf("a saved query in an unknown region: %v", err)
+	}
+	out, err := call("savequery", map[string]any{"name": "Daily orders", "region": "us-east1", "sql": "SELECT _key FROM orders"})
+	sq, _ := out.(bqSavedQuery)
+	if err != nil || sq.ID == "" || sq.Version != 1 || sq.Region != "us-east1" {
+		t.Fatalf("savequery = %+v, %v", out, err)
+	}
+	if _, err := call("savequery", map[string]any{"name": "daily ORDERS", "sql": "SELECT 2"}); err == nil {
+		t.Error("a second saved query of the same name was saved")
+	}
+	out, err = call("savequery", map[string]any{"id": sq.ID, "name": "Daily orders", "sql": "SELECT _key FROM orders LIMIT 5"})
+	if v, _ := out.(bqSavedQuery); err != nil || v.Version != 2 || v.Query != "SELECT _key FROM orders LIMIT 5" {
+		t.Fatalf("Save of the open query = %+v, %v", out, err)
+	}
+	out, err = call("savedqueries", map[string]any{})
+	m, _ := out.(map[string]any)
+	if qs, _ := m["queries"].([]bqSavedQuery); err != nil || len(qs) != 1 || qs[0].Name != "Daily orders" {
+		t.Fatalf("savedqueries = %+v, %v", out, err)
+	}
+	if rs, _ := m["regions"].([]map[string]string); len(rs) == 0 || rs[0]["id"] == "" || rs[0]["label"] == "" {
+		t.Errorf("savedqueries regions = %v", m["regions"])
+	}
+	// Saved queries are the project's: another project lists none.
+	raw, _ := json.Marshal(map[string]any{"instance": "saved-inst"})
+	if out, err := p.StudioCall(ctx, "other", "savedqueries", raw); err != nil || len(out.(map[string]any)["queries"].([]bqSavedQuery)) != 0 {
+		t.Errorf("another project's savedqueries = %+v, %v", out, err)
+	}
+	if _, err := call("deletequery", map[string]any{"id": sq.ID}); err != nil {
+		t.Fatalf("deletequery: %v", err)
+	}
+	if _, err := call("deletequery", map[string]any{"id": sq.ID}); err == nil {
+		t.Error("a deleted saved query was deleted again")
+	}
+
+	// The Tables page's Status.
+	admin, err := bigtable.NewAdminClient(ctx, "demo", "saved-inst", localOpts(p.endpoint)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close()
+	if err := admin.CreateTable(ctx, "orders"); err != nil {
+		t.Fatal(err)
+	}
+	d, err := p.Detail(ctx, "demo", []string{"saved-inst"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := bigtableSection(d, "tables").Listing.Items
+	if len(rows) != 1 || rows[0].Fields["Status"] != "Ready" || rows[0].Fields["Storage utilization"] != "—" {
+		t.Errorf("the Tables page = %+v", rows)
+	}
+}
+
+func TestBigtableTableStatus(t *testing.T) {
+	for want, states := range map[string]map[string]*btapb.Table_ClusterState{
+		"—":     nil,
+		"Ready": {"a": {ReplicationState: btapb.Table_ClusterState_READY}, "b": {ReplicationState: btapb.Table_ClusterState_READY}},
+		"a: Ready, b: Initializing": {"b": {ReplicationState: btapb.Table_ClusterState_INITIALIZING},
+			"a": {ReplicationState: btapb.Table_ClusterState_READY}},
+	} {
+		if got := bigtableTableStatus(states); got != want {
+			t.Errorf("bigtableTableStatus(%v) = %q, want %q", states, got, want)
+		}
 	}
 }

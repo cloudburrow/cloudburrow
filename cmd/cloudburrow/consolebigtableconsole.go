@@ -646,7 +646,7 @@ func clusterScalingMode(c *bigtable.ClusterInfo) string {
 // tablesListing is an instance's Tables page: Google's columns, each table
 // a link to its page, with Edit table and Delete table on its row.
 func (p bigtableInstancesProvider) tablesListing(ctx context.Context, project, instance string, clusters int) console.Listing {
-	list := console.Listing{Columns: []string{"Clusters", "Column families", "Change stream", "Deletion protection", "Current backups"},
+	list := console.Listing{Columns: []string{"Clusters", "Status", "Storage utilization", "Column families", "Change stream", "Deletion protection", "Current backups"},
 		NameColumn: "Table ID", Noun: "tables"}
 	admin, err := bigtable.NewAdminClient(ctx, project, instance, localOpts(p.endpoint)...)
 	if err != nil {
@@ -670,8 +670,12 @@ func (p bigtableInstancesProvider) tablesListing(ctx context.Context, project, i
 	}
 	sort.Strings(tables)
 	for _, t := range tables {
-		fields := map[string]string{"Clusters": strconv.Itoa(clusters), "Column families": "—", "Change stream": "Disabled",
-			"Deletion protection": "Disabled", "Current backups": strconv.Itoa(backups[t])}
+		fields := map[string]string{"Clusters": strconv.Itoa(clusters), "Status": "—", "Storage utilization": "—", "Column families": "—",
+			"Change stream": "Disabled", "Deletion protection": "Disabled", "Current backups": strconv.Itoa(backups[t])}
+		if rt, err := admin.TableAdminClientV2().GetTable(ctx, &btapb.GetTableRequest{
+			Name: "projects/" + project + "/instances/" + instance + "/tables/" + t, View: btapb.Table_REPLICATION_VIEW}); err == nil {
+			fields["Status"] = bigtableTableStatus(rt.GetClusterStates())
+		}
 		var info *bigtable.TableInfo
 		if info, err = admin.TableInfo(ctx, t); err == nil {
 			names := make([]string, 0, len(info.FamilyInfos))
@@ -694,8 +698,34 @@ func (p bigtableInstancesProvider) tablesListing(ctx context.Context, project, i
 	}
 	list.Total = len(list.Items)
 	list.Note = "Each table's page holds its rows, column families and every table action; Bigtable Studio queries them. " +
-		"Storage utilization is not shown: the emulator keeps every table in memory and reports no size."
+		"Status is each cluster's replication state (GetTable's REPLICATION_VIEW). " +
+		"Storage utilization is not available locally: Google's comes from Cloud Monitoring's disk metrics, and the emulator keeps every table in memory and reports no size."
 	return list
+}
+
+// bigtableTableStatus is a Tables row's Status: Ready when the table is
+// ready in every cluster, else each cluster with its replication state
+// (Initializing, Unplanned maintenance, ...), as GetTable reports them.
+func bigtableTableStatus(states map[string]*btapb.Table_ClusterState) string {
+	if len(states) == 0 {
+		return "—"
+	}
+	ids := make([]string, 0, len(states))
+	ready := true
+	for id, cs := range states {
+		ids = append(ids, id)
+		ready = ready && cs.GetReplicationState() == btapb.Table_ClusterState_READY
+	}
+	if ready {
+		return "Ready"
+	}
+	sort.Strings(ids)
+	parts := make([]string, 0, len(ids))
+	for _, id := range ids {
+		word := strings.ReplaceAll(strings.ToLower(states[id].GetReplicationState().String()), "_", " ")
+		parts = append(parts, id+": "+strings.ToUpper(word[:1])+word[1:])
+	}
+	return strings.Join(parts, ", ")
 }
 
 // --- tables ---

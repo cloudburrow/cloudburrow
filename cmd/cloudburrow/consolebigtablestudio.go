@@ -7,7 +7,18 @@ package main
 // builder (a table, row-key filters, column filters and a limit, run as
 // ReadRows) and the SQL editor (GoogleSQL for Bigtable, run as PrepareQuery
 // and ExecuteQuery, which the Bigtable front serves). Its calls are
-// POST /api/studio/bigtable-instances?call=explorer|read|sql.
+// POST /api/studio/bigtable-instances?call=explorer|read|sql, and the
+// saved queries' savedqueries|savequery|deletequery.
+//
+// Saved queries (https://docs.cloud.google.com/bigtable/docs/create-manage-saved-queries,
+// read 2026-11-20): the Query editor's Save (Save query, with a name and,
+// under Show advanced options, a Region) and Save as > Save as query; the
+// Explorer's Queries section, each with View actions Open query and Delete
+// query. Google keeps them per project, outliving the instance, as the
+// Studio assets of the Databases console, which CloudBurrow does not serve:
+// here they are CloudBurrow's own record in the instance's state
+// directory, as BigQuery Studio's are (consolebigquerysavedqueries.go),
+// reachable by no API.
 
 import (
 	"context"
@@ -15,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -39,6 +51,20 @@ type bigtableStudioRequest struct {
 	Limit     int    `json:"limit"`
 	// The SQL editor's statement.
 	SQL string `json:"sql"`
+	// A saved query's id, name and region (savequery, deletequery).
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Region string `json:"region"`
+}
+
+// bigtableSavedQueriesFile is Bigtable Studio's saved queries record in the
+// instance directory.
+const bigtableSavedQueriesFile = "bigtable-saved-queries.json"
+
+// bigtableRegion reports whether r is a region Create instance offers.
+func bigtableRegion(r string) bool {
+	ids, _ := bigtableRegions()
+	return slices.Contains(ids, r)
 }
 
 type bigtableStudioFamily struct {
@@ -90,6 +116,28 @@ func (p bigtableInstancesProvider) StudioCall(ctx context.Context, project, call
 	}
 	if req.Instance == "" || strings.ContainsAny(req.Instance, "/ ") {
 		return nil, errors.New("a Bigtable Studio call names an instance")
+	}
+	store := bqSavedQueryStore{path: p.savedQueries, region: bigtableRegion, product: "Bigtable"}
+	switch call {
+	case "savedqueries":
+		all, err := store.list(project)
+		if err != nil {
+			return nil, err
+		}
+		// The Region list of the Save query dialog's advanced options.
+		ids, labels := bigtableRegions()
+		regions := make([]map[string]string, 0, len(ids))
+		for _, id := range ids {
+			regions = append(regions, map[string]string{"id": id, "label": labels[id]})
+		}
+		return map[string]any{"queries": all, "regions": regions}, nil
+	case "savequery":
+		return store.save(project, bqSavedQuery{ID: req.ID, Name: req.Name, Region: req.Region, Query: req.SQL}, time.Now())
+	case "deletequery":
+		if err := store.remove(project, req.ID); err != nil {
+			return nil, err
+		}
+		return map[string]string{"deleted": req.ID}, nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*dbTimeout)
 	defer cancel()
