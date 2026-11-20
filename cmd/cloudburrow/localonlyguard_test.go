@@ -16,7 +16,7 @@ import (
 // instance or refused by it, in the provider block or in the environment the
 // wrapper runs the binary with. None is left at its googleapis.com default.
 func TestEveryTerraformEndpointIsLocalOrRefused(t *testing.T) {
-	for _, services := range []string{"storage", "run", "storage,pubsub,tasks,secretmanager,run,kms,bigquery,spanner,firestore,bigtable"} {
+	for _, services := range []string{"storage", "run", "storage,pubsub,tasks,secretmanager,run,kms,bigquery,spanner,firestore,bigtable", "run,workflows"} {
 		cfg := formatsConfig(t, services)
 		set, _ := terraformSettings(cfg)
 		covered := map[string]string{}
@@ -45,6 +45,11 @@ func TestEveryTerraformEndpointIsLocalOrRefused(t *testing.T) {
 		}
 		if strings.Contains(block, "googleapis.com") {
 			t.Errorf("%s: a Google address in\n%s", services, block)
+		}
+		// Workflows (#1986): its port when it is served, refused otherwise.
+		wf := covered["workflows_custom_endpoint"]
+		if served := strings.Contains(services, "workflows"); served != (wf == "http://127.0.0.1:9038/v1/") || served == strings.Contains(wf, unserved.PathPrefix) {
+			t.Errorf("%s: workflows_custom_endpoint = %q", services, wf)
 		}
 	}
 	// Document AI, which #1953 found sent to Google, is refused when nothing
@@ -143,7 +148,7 @@ func TestRefusalsUseTheResourceManagerPort(t *testing.T) {
 // refusal. Before, only the served ones were set and gcloud sent the rest
 // to googleapis.com. The in-cluster (kubernetes) format stays without them.
 func TestEnvRefusesEveryUnservedGcloudAPI(t *testing.T) {
-	for _, services := range []string{"storage", "run", "storage,pubsub,tasks,secretmanager,run,kms,bigquery,spanner,firestore,bigtable"} {
+	for _, services := range []string{"storage", "run", "storage,pubsub,tasks,secretmanager,run,kms,bigquery,spanner,firestore,bigtable", "run,workflows"} {
 		args := []string{"--offline", "--name", "guard", "--state-dir", t.TempDir(), "--services", services}
 		for _, format := range []string{"shell", "plain", "json"} {
 			out := runEnvFormat(t, args, format)
@@ -167,8 +172,16 @@ func TestEnvRefusesEveryUnservedGcloudAPI(t *testing.T) {
 			}
 		}
 		shell := runEnvFormat(t, args, "shell")
-		if want := `export CLOUDSDK_API_ENDPOINT_OVERRIDES_WORKFLOWS="http://127.0.0.1:9007` + unserved.PathPrefix + `workflows/"`; !strings.Contains(shell, want) {
-			t.Errorf("%s: workflows is not refused: want %s", services, want)
+		// Workflows and Workflow Executions (#1986): both at the Workflows
+		// port when it is served, refused otherwise.
+		for _, api := range []string{"workflows", "workflowexecutions"} {
+			want := `export CLOUDSDK_API_ENDPOINT_OVERRIDES_` + strings.ToUpper(api) + `="http://127.0.0.1:9007` + unserved.PathPrefix + api + `/"`
+			if strings.Contains(services, "workflows") {
+				want = `export CLOUDSDK_API_ENDPOINT_OVERRIDES_` + strings.ToUpper(api) + `="http://127.0.0.1:9038/"`
+			}
+			if !strings.Contains(shell, want) {
+				t.Errorf("%s: %s: want %s", services, api, want)
+			}
 		}
 		if strings.Contains(services, "kms") && strings.Contains(shell, gcloudOverridePrefix+"CLOUDKMS=\"http://127.0.0.1:9007"+unserved.PathPrefix) {
 			t.Errorf("%s: served KMS is refused", services)

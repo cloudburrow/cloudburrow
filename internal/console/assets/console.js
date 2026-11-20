@@ -425,6 +425,10 @@ const ROUTES = [
     section: "Integration services" },
   { path: "/scheduler/jobs", service: "scheduler", title: "Cloud Scheduler", navTitle: "Jobs", kind: "Job",
     section: "Integration services" },
+  // Workflows (#1986), at Google's own path: workflows, their source,
+  // revisions and executions, and an execution's steps.
+  { path: "/workflows", service: "workflows", title: "Workflows", kind: "Workflow",
+    section: "Integration services" },
 
   // Agent Platform (formerly Vertex AI, #1839). Google renamed Vertex AI to
   // Gemini Enterprise Agent Platform in April 2026 and moved its console
@@ -796,6 +800,7 @@ const ICONS = {
   "run-domains": '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5l5 2.5-5 2.5z"/>',
   "run-builds": '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5l5 2.5-5 2.5z"/>',
   // Eventarc: an event routed from a source to a destination.
+  workflows: '<circle cx="6" cy="5" r="2"/><circle cx="18" cy="12" r="2"/><circle cx="6" cy="19" r="2"/><path d="M8 5h3a3 3 0 0 1 3 3v1a3 3 0 0 0 3 3M8 19h3a3 3 0 0 0 3-3v-1a3 3 0 0 1 3-3"/>',
   eventarc: '<circle cx="5" cy="12" r="2.5"/><circle cx="19" cy="6" r="2.5"/><circle cx="19" cy="18" r="2.5"/><path d="M7.5 12h4l5-5M11.5 12l5 5"/>',
   "cloud-build-triggers": '<path d="M13 3L5 13h6l-1 8 8-10h-6z"/>',
   "cloud-build-dashboard": '<rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="5" rx="1"/><rect x="13" y="10" width="8" height="11" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/>',

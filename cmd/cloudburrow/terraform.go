@@ -142,6 +142,10 @@ var terraformEndpoints = []terraformEndpoint{
 	// and _certificate apply, plan clean and destroy in
 	// TestTerraformPrivateCA.
 	{config.ServicePrivateCA, "privateca_custom_endpoint", "GOOGLE_PRIVATECA_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	// google_workflows_workflow (#1986): the Workflows API v1 on its own
+	// port. TestTerraformWorkflowsWorkflow applies one, plans clean,
+	// updates its source in place and destroys it.
+	{config.ServiceWorkflows, "workflows_custom_endpoint", "GOOGLE_WORKFLOWS_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	// The Kubernetes Engine API (#1913): a google_container_cluster with
 	// remove_default_node_pool and a google_container_node_pool apply, plan
 	// clean, update in place and destroy in
@@ -321,6 +325,7 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 		analyticsHubService:      cfg.Endpoints.AnalyticsHub,
 		config.ServiceMonitoring: cfg.Endpoints.Monitoring,
 		config.ServiceCompute:    cfg.Endpoints.Compute,
+		config.ServiceWorkflows:  cfg.Endpoints.Workflows,
 		localAIEndpoint:          cfg.Endpoints.LocalAI,
 		storageTransferService:   cfg.Endpoints.StorageTransfer,
 		storageInsightsService:   cfg.Endpoints.StorageInsights,
@@ -335,6 +340,7 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 	enabled[config.ServicePrivateCA] = privateCAEnabled(cfg)
 	enabled[analyticsHubService] = analyticsHubEnabled(cfg)
 	enabled[config.ServiceMonitoring] = monitoringEnabled(cfg)
+	enabled[config.ServiceWorkflows] = workflowsEnabled(cfg)
 	enabled[localAIEndpoint] = localAIServed(cfg)
 	enabled[storageTransferService] = storageJobsEnabled(cfg)
 	enabled[storageInsightsService] = storageJobsEnabled(cfg)

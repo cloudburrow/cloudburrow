@@ -89,6 +89,8 @@ type consoleDeps struct {
 	privateCA *privateCAService
 	// analyticsHub is BigQuery sharing (#1960), nil without BigQuery.
 	analyticsHub *analyticsHubSvc
+	// workflows is Workflows (#1986), nil unless enabled.
+	workflows *workflowsService
 	// gke is the Kubernetes Engine API (#1913), nil unless enabled.
 	gke *gkeService
 	// monitoring is Cloud Monitoring (#1939), nil unless enabled.
@@ -313,6 +315,10 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	}
 	if enabled[config.ServicePrivateCA] && d.privateCA != nil {
 		providers = append(providers, privateCAProvider{svc: d.privateCA}, privateCATemplatesProvider{svc: d.privateCA})
+	}
+	// Workflows (#1986), in process.
+	if enabled[config.ServiceWorkflows] && d.workflows != nil {
+		providers = append(providers, workflowsProvider{svc: d.workflows})
 	}
 	// Cloud Monitoring (#1939) runs in this process too: Metrics explorer
 	// and Metrics management.
@@ -704,6 +710,7 @@ var serviceTitles = map[config.Service]string{
 	config.ServiceGKE:           "Kubernetes Engine",
 	config.ServiceMonitoring:    "Cloud Monitoring",
 	config.ServiceCompute:       "VPC network",
+	config.ServiceWorkflows:     "Workflows",
 }
 
 func serviceTitle(s config.Service) string {

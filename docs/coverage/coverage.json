@@ -2231,10 +2231,11 @@
           "test/compat/eventarc_test.go:42 TestEventarcTriggersToCloudRun",
           "test/compat/eventarcaudit_test.go:113 TestEventarcAuditLogTriggers",
           "test/compat/eventarcdatastore_test.go:69 TestEventarcDatastoreTriggers",
-          "test/compat/eventarcdest_test.go:33 TestEventarcDestinations",
+          "test/compat/eventarcdest_test.go:35 TestEventarcDestinations",
           "test/compat/eventarcfirestore_test.go:67 TestEventarcFirestoreTriggers",
           "test/compat/eventarcgke_test.go:41 TestEventarcGKEDestination",
-          "test/compat/run1958_test.go:514 TestCallEventTriggeredFunctions"
+          "test/compat/run1958_test.go:514 TestCallEventTriggeredFunctions",
+          "test/compat/workflows_cli_test.go:228 TestEventarcTriggerStartsAWorkflow"
         ]
       },
       {
@@ -2284,7 +2285,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/eventarc_test.go:42 TestEventarcTriggersToCloudRun",
-          "test/compat/eventarcdest_test.go:33 TestEventarcDestinations",
+          "test/compat/eventarcdest_test.go:35 TestEventarcDestinations",
           "test/compat/eventarcgke_test.go:41 TestEventarcGKEDestination"
         ]
       },
@@ -17047,6 +17048,97 @@
         "status": "Verified",
         "tests": [
           "test/compat/privateca_phase2_test.go:50 TestPrivateCASubordinatesTemplatesAndCRLs"
+        ]
+      }
+    ]
+  },
+  {
+    "Key": "workflows",
+    "Title": "Workflows and Workflow Executions (v1)",
+    "counts": {
+      "Verified": 10
+    },
+    "rows": [
+      {
+        "method": "google.cloud.workflows.executions.v1.Executions/CancelExecution",
+        "status": "Verified",
+        "tests": [
+          "test/compat/workflows_test.go:401 TestWorkflowsCallbackAndCancel"
+        ]
+      },
+      {
+        "method": "google.cloud.workflows.executions.v1.Executions/CreateExecution",
+        "status": "Verified",
+        "tests": [
+          "test/compat/workflows_cli_test.go:145 TestConsoleWorkflows",
+          "test/compat/workflows_test.go:150 TestWorkflowsLifecycleTryRetryParallelAndLimits",
+          "test/compat/workflows_test.go:401 TestWorkflowsCallbackAndCancel",
+          "test/compat/workflows_test.go:476 TestWorkflowsCallRunStorageAndPubSub"
+        ]
+      },
+      {
+        "method": "google.cloud.workflows.executions.v1.Executions/GetExecution",
+        "status": "Verified",
+        "tests": [
+          "test/compat/workflows_cli_test.go:145 TestConsoleWorkflows",
+          "test/compat/workflows_test.go:150 TestWorkflowsLifecycleTryRetryParallelAndLimits",
+          "test/compat/workflows_test.go:401 TestWorkflowsCallbackAndCancel",
+          "test/compat/workflows_test.go:476 TestWorkflowsCallRunStorageAndPubSub"
+        ]
+      },
+      {
+        "method": "google.cloud.workflows.executions.v1.Executions/ListExecutions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/workflows_cli_test.go:145 TestConsoleWorkflows",
+          "test/compat/workflows_cli_test.go:228 TestEventarcTriggerStartsAWorkflow",
+          "test/compat/workflows_test.go:150 TestWorkflowsLifecycleTryRetryParallelAndLimits"
+        ]
+      },
+      {
+        "method": "google.cloud.workflows.v1.Workflows/CreateWorkflow",
+        "status": "Verified",
+        "tests": [
+          "test/compat/workflows_test.go:150 TestWorkflowsLifecycleTryRetryParallelAndLimits",
+          "test/compat/workflows_test.go:476 TestWorkflowsCallRunStorageAndPubSub"
+        ]
+      },
+      {
+        "method": "google.cloud.workflows.v1.Workflows/DeleteWorkflow",
+        "status": "Verified",
+        "tests": [
+          "test/compat/workflows_test.go:150 TestWorkflowsLifecycleTryRetryParallelAndLimits"
+        ]
+      },
+      {
+        "method": "google.cloud.workflows.v1.Workflows/GetWorkflow",
+        "status": "Verified",
+        "tests": [
+          "test/compat/workflows_cli_test.go:145 TestConsoleWorkflows",
+          "test/compat/workflows_cli_test.go:34 TestGcloudWorkflows",
+          "test/compat/workflows_cli_test.go:87 TestTerraformWorkflowsWorkflow",
+          "test/compat/workflows_test.go:150 TestWorkflowsLifecycleTryRetryParallelAndLimits"
+        ]
+      },
+      {
+        "method": "google.cloud.workflows.v1.Workflows/ListWorkflowRevisions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/workflows_test.go:150 TestWorkflowsLifecycleTryRetryParallelAndLimits"
+        ]
+      },
+      {
+        "method": "google.cloud.workflows.v1.Workflows/ListWorkflows",
+        "status": "Verified",
+        "tests": [
+          "test/compat/workflows_test.go:150 TestWorkflowsLifecycleTryRetryParallelAndLimits"
+        ]
+      },
+      {
+        "method": "google.cloud.workflows.v1.Workflows/UpdateWorkflow",
+        "status": "Verified",
+        "tests": [
+          "test/compat/workflows_test.go:150 TestWorkflowsLifecycleTryRetryParallelAndLimits"
         ]
       }
     ]

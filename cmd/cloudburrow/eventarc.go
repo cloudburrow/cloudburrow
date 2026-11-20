@@ -179,6 +179,8 @@ type eventsConfig struct {
 	// gke reaches a Kubernetes Engine cluster of this instance, for
 	// Eventarc's GKE destinations (#1877); nil without gke.
 	gke func(cluster string) (runadapter.GKEAccess, bool)
+	// workflows is Eventarc's workflow destination (#1986), or nil.
+	workflows runadapter.WorkflowStarter
 }
 
 // Publish publishes one event Eventarc sources itself (audit logs,

@@ -100,6 +100,19 @@ type Events struct {
 	// destinations (#1877); nil when the Kubernetes Engine API is not
 	// served.
 	GKE func(cluster string) (GKEAccess, bool)
+	// Workflows starts an Eventarc trigger's workflow destination (#1986),
+	// or is nil when the instance does not serve Workflows.
+	Workflows WorkflowStarter
+}
+
+// WorkflowStarter is Workflows as an Eventarc destination: a trigger's
+// event is the argument of an execution of its workflow (#1986).
+type WorkflowStarter interface {
+	// WorkflowExists reports whether projects/*/locations/*/workflows/* is
+	// deployed.
+	WorkflowExists(name string) bool
+	// StartWorkflow starts an execution with the event as its argument.
+	StartWorkflow(ctx context.Context, name, argument string) error
 }
 
 // WithEvents enables event triggers.

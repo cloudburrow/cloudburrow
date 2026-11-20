@@ -43,6 +43,7 @@ require (
 	cloud.google.com/go/storagebatchoperations v1.3.1
 	cloud.google.com/go/storageinsights v1.10.1
 	cloud.google.com/go/storagetransfer v1.21.1
+	cloud.google.com/go/workflows v1.22.1
 	github.com/Eyevinn/mp4ff v0.63.0
 	github.com/apache/arrow-go/v18 v18.8.0
 	github.com/apache/iceberg-go v0.7.0
