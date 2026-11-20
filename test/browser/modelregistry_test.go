@@ -139,7 +139,9 @@ func TestModelRegistryAndEndpointsThroughThePages(t *testing.T) {
 	if rows := p.pageAction("View evaluation", map[string]string{"evaluation": evalID}, ""); !strings.Contains(rows, "0.25") {
 		t.Errorf("View evaluation answered %q; want the metric imported", rows)
 	}
-	p.pageAction("Deploy to endpoint", map[string]string{"endpoint": epID, "displayName": "browser-linear-v1"}, "")
+	// The deploy answers once the model's container is ready, which on a
+	// loaded machine takes longer than a dialog's usual 30 seconds.
+	p.pageActionWithin("Deploy to endpoint", map[string]string{"endpoint": epID, "displayName": "browser-linear-v1"}, "", 4*time.Minute)
 	var ep struct {
 		Sections []struct {
 			Listing struct {
