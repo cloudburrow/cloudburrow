@@ -33,7 +33,9 @@ func (p kmsInventoryProvider) List(ctx context.Context, project string) (console
 	if api == nil {
 		return console.Listing{}, errors.New(kmsNotStarted)
 	}
-	listing := console.Listing{Columns: kmsInventoryColumns, NameColumn: "Key name", Noun: "keys", AlwaysStatus: true}
+	listing := console.Listing{Columns: kmsInventoryColumns, NameColumn: "Key name", Noun: "keys", AlwaysStatus: true,
+		// Off until turned on in Column display options, as Google's is.
+		HiddenColumns: []string{"EKM via VPC connection"}}
 	if project == "" {
 		listing.Prompt = "Key inventory lists a project's keys. Choose one in the toolbar."
 		return listing, nil

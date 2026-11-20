@@ -13,7 +13,8 @@ import (
 )
 
 // TestConsoleKMSGooglesKeyPages (#1851): Create key is Google's form, with
-// its words and defaults; a key's page has Overview, Permissions and Logs,
+// its words and defaults; a key's page has Overview, Versions, Permissions
+// and Logs,
 // Rotate makes the new version primary, Edit Rotation Period saves the
 // schedule, the checked versions are disabled, destroyed and restored
 // together, and Key inventory lists the key with Google's columns.
@@ -83,8 +84,8 @@ func TestConsoleKMSGooglesKeyPages(t *testing.T) {
 	for _, s := range d.Sections {
 		tabs = append(tabs, s.ID)
 	}
-	if strings.Join(tabs, ",") != "overview,permissions,logs" {
-		t.Errorf("a key's tabs are %v; want Overview, Permissions, Logs", tabs)
+	if strings.Join(tabs, ",") != "overview,versions,permissions,logs" {
+		t.Errorf("a key's tabs are %v; want Overview, Versions, Permissions, Logs", tabs)
 	}
 	ids := kmsActionIDs(p, []string{ring, "sym"})
 	for _, want := range []string{"rotate", "editrotation", "disableversions", "enableversions", "destroyversions", "restoreversions"} {
@@ -92,7 +93,7 @@ func TestConsoleKMSGooglesKeyPages(t *testing.T) {
 			t.Errorf("the key's actions %v lack %s", ids, want)
 		}
 	}
-	row := d.Sections[0].Listing.Items[0]
+	row := d.Sections[1].Listing.Items[0]
 	if !row.Selectable || len(row.Actions) == 0 || row.Actions[len(row.Actions)-1].ID != "destroy" {
 		t.Errorf("a version row is %+v; want selectable with its lifecycle menu", row)
 	}

@@ -2536,7 +2536,7 @@ func TestComponentHealthIsReadNotLatched(t *testing.T) {
 // without claiming it cannot be undone.
 func TestAnActionThatChangesStateAsksForTheNameBack(t *testing.T) {
 	js := consoleAsset(t, "console.js")
-	form := functionBody(t, js, "function openActionForm(route, segments, action, onDone, title = null)")
+	form := functionBody(t, js, "function openActionForm(route, segments, action, onDone, title = null, host = null)")
 	for _, want := range []string{"if (action.confirm) {", "detail: action.confirm,", "confirmWord: name,", `consequence: "",`} {
 		if !strings.Contains(form, want) {
 			t.Errorf("openActionForm does not confirm an action carrying Confirm: missing %q", want)
@@ -2622,5 +2622,32 @@ func TestShowListAndViewOptionsDialog(t *testing.T) {
 	}
 	if strings.Contains(js, "object-versions-toggle") {
 		t.Error("Show versions is still a checkbox beside Google's Show list")
+	}
+}
+
+// TestAnActionPageAndOptionsThatFollowAField (#1851): an action marked page
+// is drawn in the page's place at its address and keeps ?action= there; a
+// select with optionsBy relists from optionsFor when the field it follows
+// changes; a listing's hiddenColumns start off in Column display options.
+func TestAnActionPageAndOptionsThatFollowAField(t *testing.T) {
+	js := consoleAsset(t, "console.js")
+	run := functionBody(t, js, "async function runAction(route, target, action, onDone, row = NO_ROW, title = null)")
+	if !strings.Contains(run, `action.page && path`) || !strings.Contains(run, `to.searchParams.set("action", action.id)`) {
+		t.Error("runAction does not open a page action at its address")
+	}
+	form := functionBody(t, js, "function openActionForm(route, segments, action, onDone, title = null, host = null)")
+	for _, want := range []string{`close: () => navigate(host.back)`, `pageHeader(heading`, `class: "create-page is-single-page"`, `href: host.back, text: "Cancel"`} {
+		if !strings.Contains(form, want) {
+			t.Errorf("openActionForm's page lacks %s", want)
+		}
+	}
+	if !strings.Contains(js, `if (opened && opened.page) {`) {
+		t.Error("a detail page does not draw the page action its address names")
+	}
+	if !strings.Contains(js, `const by = entry.field.optionsBy;`) || !strings.Contains(js, `(entry.field.optionsFor || {})[valueText(other)]`) {
+		t.Error("a select does not follow its optionsBy field")
+	}
+	if !strings.Contains(js, `stored[service] : hiddenByDefault`) || !strings.Contains(js, `hiddenByDefault: data.hiddenColumns || []`) {
+		t.Error("a listing's hiddenColumns do not start off")
 	}
 }

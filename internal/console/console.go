@@ -127,6 +127,10 @@ type Listing struct {
 	// up with two columns headed "Name": the implicit one and a field of the
 	// same label. The screen decides what its identifier is called.
 	NameColumn string `json:"nameColumn,omitempty"`
+	// HiddenColumns are the Columns off until the viewer turns them on in
+	// Column display options, as Google's Key inventory hides EKM via VPC
+	// connection by default (#1851).
+	HiddenColumns []string `json:"hiddenColumns,omitempty"`
 	// TableTitle heads the table, and names it, where Google's page titles
 	// its table apart from the page: Audit Logs' "Data Access audit logs
 	// configuration" (#1864). Empty draws no heading.
@@ -453,6 +457,13 @@ type Field struct {
 	// field is neither checked nor submitted. Cloud SQL's Database version
 	// lists the chosen engine's versions only (#1860).
 	VisibleWhen map[string]string `json:"visibleWhen,omitempty"`
+	// OptionsBy and OptionsFor, on a select, list only the options
+	// OptionsFor gives for the value the field OptionsBy names holds, the
+	// first of them chosen when the current one is not among them: Cloud
+	// KMS's Create key lists the chosen purpose's algorithms only (#1851).
+	// Options still lists every option, the field's whole range.
+	OptionsBy  string              `json:"optionsBy,omitempty"`
+	OptionsFor map[string][]string `json:"optionsFor,omitempty"`
 	// CheckedWhen, on a checkbox, checks it and holds it checked while
 	// another field of the form holds a value, in ShowWhen's "name=value"
 	// form ("a|b" for either): Memorystore's Security choice of IAM Auth or
@@ -1383,6 +1394,12 @@ type Action struct {
 	// it, not as a button of its own: a property's ActionText link (Upgrade
 	// beside an edition) or an info panel tab's Form (#1859).
 	Linked bool `json:"linked,omitempty"`
+	// Page draws the action's form as a page of its own at the resource
+	// page's address with ?action=<id>, under the action's Title (or
+	// Label), ending in its Submit (or Label) and Cancel, instead of a
+	// dialog: Cloud KMS's Create key is a page (#1851). Cancel and success
+	// return to the resource's page.
+	Page bool `json:"page,omitempty"`
 }
 
 // PathActor is a provider with actions on the resources inside a resource.
