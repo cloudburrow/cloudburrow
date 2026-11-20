@@ -139,10 +139,16 @@ func TestCloudRunArtifactRegistryCreateAndEditRepositoryThroughThePage(t *testin
 	p.clickText("#view .page-actions a, #view .page-actions button", "Setup Instructions")
 	p.waitFor(`new URLSearchParams(location.search).get("tab") === "setup"`)
 	p.waitFor(`document.querySelector("#view").textContent.includes("docker push us-east1-docker.pkg.localhost:")`)
-	p.pageAction("Edit Repository", map[string]string{"description": "edited in the browser", "labels": "team=api"}, "")
+	// Edit Repository is Google's page (#1855), ending in Update.
+	p.clickText("#view .page-actions a", "Edit Repository")
+	p.waitFor(`document.querySelector("#edit-page-form #f-description") !== null`)
+	p.eval(`(() => { const f = document.querySelector("#edit-page-form #f-description"); f.value = "edited in the browser";
+		f.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`, nil)
+	p.clickText("#edit-page-form button", "Update")
+	p.waitFor(`document.querySelector("#edit-page-form") === null && document.querySelector("#view [role=tabpanel]") !== null`)
 	r, err = c.GetRepository(ctx, &arpb.GetRepositoryRequest{Name: name})
-	if err != nil || r.GetDescription() != "edited in the browser" || r.GetLabels()["team"] != "api" || len(r.GetCleanupPolicies()) != 1 {
-		t.Errorf("GetRepository after Edit Repository = %v, %v; want the new description and label, the policy kept", r, err)
+	if err != nil || r.GetDescription() != "edited in the browser" || r.GetLabels()["team"] != "web" || len(r.GetCleanupPolicies()) != 1 {
+		t.Errorf("GetRepository after Edit Repository = %v, %v; want the new description, the label and the policy kept", r, err)
 	}
 }
 
@@ -179,17 +185,17 @@ func TestCloudRunArtifactRegistryEditRuleAndCleanupPoliciesThroughThePage(t *tes
 	}
 	p.navigate(page)
 	p.waitFor(`document.querySelector(".modal") === null`)
-	p.clickText("#view .page-actions button", "Edit Repository")
-	p.waitFor(`document.querySelector(".modal.is-open form") !== null`)
-	p.run(chromedp.Click(chromedp.CSS(".modal.is-open #f-cleanupMode-0")))
-	p.clickText(".modal.is-open button", "Add a cleanup policy")
-	p.eval(`(() => { const row = document.querySelector(".modal.is-open .group-row");
+	p.clickText("#view .page-actions a", "Edit Repository")
+	p.waitFor(`document.querySelector("#edit-page-form") !== null`)
+	p.run(chromedp.Click(chromedp.CSS("#edit-page-form #f-cleanupMode-0")))
+	p.clickText("#edit-page-form button", "Add a cleanup policy")
+	p.eval(`(() => { const row = document.querySelector("#edit-page-form .group-row");
 		const set = (label, v) => { const c = row.querySelector('[aria-label="' + label + ' 1"]'); c.value = v;
 			c.dispatchEvent(new Event("input", { bubbles: true })); c.dispatchEvent(new Event("change", { bubbles: true })); };
 		set("Name", "keep-5"); set("Policy type", "Keep most recent versions"); set("Keep count", "5");
 		return true; })()`, nil)
-	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
-	p.waitFor(`document.querySelector(".modal.is-open") === null`)
+	p.run(chromedp.Click(chromedp.CSS(`#edit-page-form button[type="submit"]`)))
+	p.waitFor(`document.querySelector("#edit-page-form") === null`)
 	r, err := c.GetRepository(ctx, &arpb.GetRepositoryRequest{Name: name})
 	if err != nil || !r.GetCleanupPolicyDryRun() || r.GetCleanupPolicies()["keep-5"].GetMostRecentVersions().GetKeepCount() != 5 {
 		t.Errorf("GetRepository after Edit Repository's cleanup policies = %v, %v; want keep-5 in dry run", r, err)
