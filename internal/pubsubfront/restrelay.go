@@ -201,6 +201,9 @@ func (f *Front) restAnswer(resp *http.Response) error {
 				if p.labels != nil {
 					f.setLabels(name, p.labels)
 				}
+				if p.storagePolicy != nil {
+					f.setStoragePolicy(name, p.storagePolicy)
+				}
 			}
 		}
 	}

@@ -49,6 +49,9 @@ type savedState struct {
 	Policies map[string]json.RawMessage `json:"policies,omitempty"`
 	// Labels are the kept labels, by topic or subscription name (#949).
 	Labels map[string]map[string]string `json:"labels,omitempty"`
+	// StoragePolicies are the kept message storage policies, as
+	// protojson, by topic name (#2000).
+	StoragePolicies map[string]json.RawMessage `json:"storagePolicies,omitempty"`
 	// LastActive is when each subscription was last active, by the front's
 	// clock; one with a streaming pull open is active as of the write.
 	LastActive map[string]time.Time `json:"lastActive,omitempty"`
@@ -113,6 +116,14 @@ func (f *Front) restore(b []byte) error {
 		}
 		policies[name] = p
 	}
+	storage := make(map[string]*pubsubpb.MessageStoragePolicy, len(s.StoragePolicies))
+	for name, raw := range s.StoragePolicies {
+		p := &pubsubpb.MessageStoragePolicy{}
+		if err := protojson.Unmarshal(raw, p); err != nil {
+			return fmt.Errorf("the message storage policy of %s: %w", name, err)
+		}
+		storage[name] = p
+	}
 	detached := make(map[string]*pubsubpb.Subscription, len(s.Detached))
 	for name, raw := range s.Detached {
 		d := &pubsubpb.Subscription{}
@@ -159,6 +170,9 @@ func (f *Front) restore(b []byte) error {
 	}
 	for name, l := range s.Labels {
 		f.labels[name] = updatedLabels(l)
+	}
+	for name, p := range storage {
+		f.storagePolicies[name] = p
 	}
 	for name, last := range s.LastActive {
 		f.subs[name] = &subState{last: last}
@@ -233,6 +247,15 @@ func (f *Front) save() error {
 	}
 	for name, l := range f.labels {
 		s.Labels[name] = updatedLabels(l)
+	}
+	if len(f.storagePolicies) > 0 {
+		s.StoragePolicies = make(map[string]json.RawMessage, len(f.storagePolicies))
+	}
+	for name, p := range f.storagePolicies {
+		if s.StoragePolicies[name], err = protojson.Marshal(p); err != nil {
+			f.mu.Unlock()
+			return fmt.Errorf("encode the message storage policy of %s: %w", name, err)
+		}
 	}
 	if len(f.subs) > 0 {
 		s.LastActive = make(map[string]time.Time, len(f.subs))

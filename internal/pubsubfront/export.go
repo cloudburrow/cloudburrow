@@ -26,11 +26,12 @@ package pubsubfront
 // While a subscription is in error its messages stay in the backlog and
 // are not dead-lettered, as Google's troubleshooting pages say.
 //
-// Locally nothing is authorized: service_account_email is kept and checked
-// for its form (#1998), and PERMISSION_DENIED is the state when the
-// instance does not serve the destination's service, or serves it with
-// its API disabled in the subscription's project, which Google gives when
-// "bigquery.googleapis.com API is not enabled for the project".
+// PERMISSION_DENIED is the state when the instance does not serve the
+// destination's service, or serves it with its API disabled in the
+// subscription's project, which Google gives when "bigquery.googleapis.com
+// API is not enabled for the project", and, with `up
+// --iam-enforcement=on`, when the account the subscription writes as lacks
+// the roles Google documents (exportiam.go, #1998).
 
 import (
 	"context"
@@ -53,6 +54,7 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/egress"
 )
 
 var (
@@ -85,6 +87,9 @@ type exporter struct {
 	attempts map[string]int
 	// keys are Cloud KMS keys' states the front looked up, briefly cached.
 	keys map[string]keyState
+	// writers are the writer checks' answers (exportiam.go), briefly
+	// cached, by configuration and subscription.
+	writers map[string]writerCheck
 }
 
 type exportWorker struct {
@@ -111,9 +116,12 @@ func (e *exporter) init() {
 		e.states = map[string]int32{}
 		e.attempts = map[string]int{}
 		e.keys = map[string]keyState{}
+		e.writers = map[string]writerCheck{}
 	}
 	if e.client == nil {
-		e.client = &http.Client{Timeout: 60 * time.Second}
+		// Behind the local-only guard (#2015): exports write to this
+		// instance's BigQuery and Cloud Storage, never to Google.
+		e.client = egress.Client(&http.Client{Timeout: 60 * time.Second})
 	}
 }
 
@@ -438,6 +446,23 @@ func destinationState(err error) (int32, bool) {
 		return d.state, true
 	}
 	return 0, false
+}
+
+// checkWriterAtCreate is CreateSubscription's and UpdateSubscription's
+// check of the writing account's roles: Google's refusal when it lacks
+// them, nothing for a state load, which restores a subscription as saved.
+func (f *Front) checkWriterAtCreate(ctx context.Context, s *pubsubpb.Subscription) error {
+	if stateLoad(ctx) {
+		return nil
+	}
+	err := f.checkWriter(ctx, s)
+	if _, ok := destinationState(err); ok {
+		return apierror.FailedPrecondition("%s", err.Error())
+	}
+	if err != nil {
+		return status.Errorf(codes.Unavailable, "Cannot check the subscription's service account: %v", err)
+	}
+	return nil
 }
 
 // checkServiceAccount checks a service_account_email's form.

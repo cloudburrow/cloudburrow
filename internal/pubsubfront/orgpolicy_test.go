@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -63,5 +64,27 @@ func TestOrgPoliciesOnPubSub(t *testing.T) {
 	after := &iampolicy.Stored{Bindings: []iampolicy.Binding{{Role: "roles/pubsub.subscriber", Members: []string{"allAuthenticatedUsers"}}}}
 	if err := checkOrgMembers(ctx, "projects/p/topics/t", nil, after); status.Code(err) != codes.FailedPrecondition {
 		t.Errorf("allAuthenticatedUsers = %v", err)
+	}
+}
+
+// TestRecomputeStoragePolicy (#2001): an update of message_storage_policy
+// naming no region, which gcloud's --recompute-message-storage-policy
+// sends, pushes the regions gcp.resourceLocations allows to the topic, and
+// none when no policy restricts locations; named regions are kept as given.
+func TestRecomputeStoragePolicy(t *testing.T) {
+	ctx := context.Background()
+	if p := recomputedStoragePolicy(ctx, "projects/p/topics/t", nil); len(p.GetAllowedPersistenceRegions()) != 0 {
+		t.Errorf("no organization policy: %v, want all regions", p)
+	}
+	useOrgPolicies(t)
+	p := recomputedStoragePolicy(ctx, "projects/p/topics/t", nil)
+	got := p.GetAllowedPersistenceRegions()
+	if !slices.Contains(got, "us-central1") || !slices.Contains(got, "us-east4") || slices.Contains(got, "europe-west1") ||
+		slices.ContainsFunc(got, func(r string) bool { return !strings.HasPrefix(r, "us-") }) || !slices.IsSorted(got) {
+		t.Errorf("in:us-locations recomputes to %v, want the US regions only, sorted", got)
+	}
+	named := &pubsubpb.MessageStoragePolicy{AllowedPersistenceRegions: []string{"us-east1"}, EnforceInTransit: true}
+	if p := recomputedStoragePolicy(ctx, "projects/p/topics/t", named); !slices.Equal(p.GetAllowedPersistenceRegions(), []string{"us-east1"}) || !p.GetEnforceInTransit() {
+		t.Errorf("named regions = %v, want kept", p)
 	}
 }

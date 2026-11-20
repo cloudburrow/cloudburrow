@@ -42,6 +42,17 @@ type Request struct {
 	// Cloud Storage signed URL's, #1887), checked in the bearer's place:
 	// Google checks a signed URL against its signer's permissions.
 	Signer string `json:"signer,omitempty"`
+	// AgentDomain names a service agent checked in the bearer's place,
+	// service-PROJECT_NUMBER@AgentDomain of the project AgentProject, which
+	// the host numbers as its registry does (#1998: a Pub/Sub export
+	// subscription writes as service-N@gcp-sa-pubsub.iam.gserviceaccount.com).
+	AgentDomain  string `json:"agentDomain,omitempty"`
+	AgentProject string `json:"agentProject,omitempty"`
+	// HostPolicies are hierarchy resources whose stored policies the host
+	// holds and adds to Own, the resource's own first: a service account's
+	// ("projects/p/serviceAccounts/e"), which Resource Manager keeps
+	// (#1998).
+	HostPolicies []string `json:"hostPolicies,omitempty"`
 	// Anonymous makes a request with no bearer token allUsers alone,
 	// rather than the instance's own account (Cloud Run invoke).
 	Anonymous bool `json:"anonymous,omitempty"`

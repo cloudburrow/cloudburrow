@@ -758,6 +758,9 @@ func editObjectBody(body []byte, edit func(jsonObject)) ([]byte, error) {
 // binding the front keeps for it, and whether it changed.
 func (f *Front) withTopicJSON(res json.RawMessage) (json.RawMessage, bool) {
 	out, labelled := f.withLabelsJSON(res)
+	if o2, kept := f.withStoragePolicyJSON(out); kept {
+		out, labelled = o2, true
+	}
 	var o jsonObject
 	if json.Unmarshal(out, &o) != nil || o == nil {
 		return out, labelled

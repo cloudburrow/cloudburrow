@@ -43,6 +43,8 @@ type pendingKey struct{}
 type pending struct {
 	policy *pubsubpb.ExpirationPolicy
 	labels map[string]string
+	// storagePolicy is a topic's message storage policy (#2000).
+	storagePolicy *pubsubpb.MessageStoragePolicy
 }
 
 // exportPaths are the export configs a subscription may have.

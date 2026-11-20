@@ -4,10 +4,20 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/cloudburrow/cloudburrow/internal/iamcheck"
+	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
+	"github.com/cloudburrow/cloudburrow/internal/resource"
 )
+
+// ServiceAgent is the email of the service agent of project whose domain
+// is domain: service-PROJECT_NUMBER@DOMAIN, the project's number the
+// registry's (resource.ProjectNumber).
+func ServiceAgent(project, domain string) string {
+	return "service-" + strconv.FormatInt(resource.ProjectNumber(project), 10) + "@" + domain
+}
 
 // ServeCheck answers the in-cluster servers' checks (internal/iamcheck,
 // #1879) with this evaluator: the caller named from the bearer token this
@@ -35,6 +45,9 @@ func (e *Enforcer) CheckRemote(in iamcheck.Request) iamcheck.Decision {
 	out := iamcheck.Decision{Held: []string{}}
 	var c Caller
 	switch {
+	case in.AgentDomain != "" && in.AgentProject != "":
+		// A service agent of the project (#1998): never the owner.
+		c = Caller{Email: ServiceAgent(in.AgentProject, in.AgentDomain)}
 	case in.Signer != "":
 		// The server verified the signature; the signer is checked.
 		c = Caller{Email: strings.ToLower(in.Signer)}
@@ -67,6 +80,13 @@ func (e *Enforcer) CheckRemote(in iamcheck.Request) iamcheck.Decision {
 	req := Request{Email: email, Resource: in.Resource, Type: in.Type, Service: in.Service, Project: project, Time: e.now()}
 	for _, p := range in.Own {
 		req.Own = append(req.Own, Attached{Resource: p.Resource, Policy: p.Policy})
+	}
+	for _, r := range in.HostPolicies {
+		var pol *iampolicy.Stored
+		if e.Eval.Source != nil {
+			pol = e.Eval.Source.Policy(r)
+		}
+		req.Own = append(req.Own, Attached{Resource: "//iam.googleapis.com/" + r, Policy: pol})
 	}
 	if project != "" {
 		out.Teams = e.Eval.ProjectTeams(project, email, req.Time)
