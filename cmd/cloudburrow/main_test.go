@@ -182,6 +182,9 @@ func TestEnvExportsEveryClientVariable(t *testing.T) {
 		"GCE_METADATA_ROOT",
 		"CLOUDSDK_METRICS_ENVIRONMENT",
 		"CLOUDSDK_CORE_CHECK_GCE_METADATA",
+		// Read by gcloud: no credential, so no Regional Access Boundary
+		// lookup at Google's IAM Credentials host (#2040).
+		"CLOUDSDK_AUTH_DISABLE_CREDENTIALS",
 		// Read by gcloud, which ignores the two above.
 		"CLOUDSDK_API_ENDPOINT_OVERRIDES_STORAGE",
 		"CLOUDSDK_API_ENDPOINT_OVERRIDES_PUBSUB",

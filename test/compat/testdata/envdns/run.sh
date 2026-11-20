@@ -52,8 +52,9 @@ for client in "$@"; do
       CLOUDSDK_AUTH_DISABLE_CREDENTIALS=true g pubsub-topics "$gcloud" pubsub topics list
       ;;
     # The fixture as gcloud's credential (auth/credential_file_override):
-    # gcloud's own google-auth then starts the Regional Access Boundary
-    # lookup (#1981).
+    # with credentials on, gcloud's own google-auth would start the
+    # Regional Access Boundary lookup (#1981); `env` exports
+    # CLOUDSDK_AUTH_DISABLE_CREDENTIALS, so none is loaded (#2040).
     gcloud-fixture)
       export CLOUDSDK_CONFIG=$(mktemp -d) CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE=$GOOGLE_APPLICATION_CREDENTIALS
       g storage-ls "$gcloud" storage ls

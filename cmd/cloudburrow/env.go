@@ -322,6 +322,19 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 			"read by gcloud: sends no usage statistics to Google"},
 		{"CLOUDSDK_COMPONENT_MANAGER_DISABLE_UPDATE_CHECK", "true",
 			"read by gcloud: does not ask Google for component updates"},
+		// gcloud sends no credential, as gcloud-setup's configuration and
+		// the console terminal set (#2040). With a service account loaded
+		// (the fixture as auth/credential_file_override), gcloud 593.0.0's
+		// bundled google-auth looks up its Regional Access Boundary before
+		// each request, at
+		// iamcredentials.googleapis.com whatever
+		// api_endpoint_overrides/iamcredentials says: the host is built from
+		// the constant googleapis.com (_regional_access_boundary_utils.py
+		// _get_domain), and gcloud's override reaches only google.auth.iam's
+		// generateAccessToken, signBlob and generateIdToken URLs
+		// (iam_endpoint.py). CloudBurrow serves unauthenticated requests.
+		{"CLOUDSDK_AUTH_DISABLE_CREDENTIALS", "true",
+			"read by gcloud: sends no credential (CloudBurrow authenticates nothing), so it never looks up a service account's Regional Access Boundary at Google"},
 		{"CLOUDSDK_API_ENDPOINT_OVERRIDES_IAMCREDENTIALS", "http://" + addr(cfg.Endpoints.Metadata) + "/",
 			"read by gcloud for --impersonate-service-account (docs/credentials.md)"},
 		// gcloud refreshes a credential_file_override service account at
