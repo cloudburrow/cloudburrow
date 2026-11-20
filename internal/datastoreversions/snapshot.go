@@ -21,10 +21,12 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// snapshotPrefix begins a snapshot's database ID: an underscore, which no
-// database ID of Google's has, keeps it apart from every database a call
-// can name.
-const snapshotPrefix = "cloudburrow_pitr_"
+// snapshotPrefix begins a snapshot's database ID. The emulator takes
+// lowercase letters, digits and hyphens alone in the project it is kept in
+// (it refused an underscore), so the prefix is a long one no caller's
+// database is expected to have; a database whose ID begins with it is not
+// versioned.
+const snapshotPrefix = "cloudburrow-pitr-snapshot-"
 
 const (
 	snapshotIdle = 2 * time.Minute
@@ -74,7 +76,7 @@ func (l *Log) snapshot(ctx context.Context, project, database string, t time.Tim
 	sn := s.m[k]
 	if sn == nil {
 		s.n++
-		sn = &snapshot{project: project, id: fmt.Sprintf("%s%d_%d", snapshotPrefix, time.Now().UnixNano(), s.n), done: make(chan struct{})}
+		sn = &snapshot{project: project, id: fmt.Sprintf("%s%d-%d", snapshotPrefix, time.Now().UnixNano(), s.n), done: make(chan struct{})}
 		s.m[k] = sn
 		sn.used = time.Now()
 		s.mu.Unlock()

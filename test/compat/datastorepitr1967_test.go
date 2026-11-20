@@ -55,6 +55,13 @@ func TestDatastorePointInTimeReads(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = c.Close() })
+	// WithReadOptions sets the client's own read options, for every read
+	// after: the reads at an earlier time have a client of their own.
+	rc, err := datastore.NewClientWithDatabase(ctx, project, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = rc.Close() })
 	const kind = "Pitr1967"
 	k := func(name string) *datastore.Key {
 		kk := datastore.NameKey(kind, name, nil)
@@ -69,7 +76,7 @@ func TestDatastorePointInTimeReads(t *testing.T) {
 	valueAt := func(name string, at time.Time) string {
 		t.Helper()
 		var e pitrEntity
-		err := c.WithReadOptions(datastore.ReadTime(at)).Get(ctx, k(name), &e)
+		err := rc.WithReadOptions(datastore.ReadTime(at)).Get(ctx, k(name), &e)
 		if err == datastore.ErrNoSuchEntity {
 			return "none"
 		}
@@ -120,7 +127,7 @@ func TestDatastorePointInTimeReads(t *testing.T) {
 			t.Errorf("%s now = %s (%v), want %s", name, got, err, want)
 		}
 	}
-	at := c.WithReadOptions(datastore.ReadTime(t1))
+	at := rc.WithReadOptions(datastore.ReadTime(t1))
 	for _, tc := range []struct {
 		what string
 		q    *datastore.Query
@@ -186,7 +193,7 @@ func TestDatastorePointInTimeReads(t *testing.T) {
 
 	// Before the database's earliest version time.
 	old := time.Now().Add(-2 * time.Hour).Truncate(time.Minute)
-	if err := c.WithReadOptions(datastore.ReadTime(old)).Get(ctx, k("a"), &e); status.Code(err) != codes.FailedPrecondition {
+	if err := rc.WithReadOptions(datastore.ReadTime(old)).Get(ctx, k("a"), &e); status.Code(err) != codes.FailedPrecondition {
 		t.Errorf("Get two hours back: %v, want FailedPrecondition", err)
 	}
 
@@ -266,7 +273,12 @@ func TestDatastorePointInTimeReads(t *testing.T) {
 	if _, err := dc.Put(ctx, dk, &pitrEntity{V: 2}); err != nil {
 		t.Fatal(err)
 	}
-	if err := dc.WithReadOptions(datastore.ReadTime(td)).Get(ctx, dk, &e); err != nil || e.V != 1 {
+	drc, err := datastore.NewClient(ctx, project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = drc.Close() })
+	if err := drc.WithReadOptions(datastore.ReadTime(td)).Get(ctx, dk, &e); err != nil || e.V != 1 {
 		t.Errorf("the default database's entity at an earlier time = %d, %v; want 1", e.V, err)
 	}
 }

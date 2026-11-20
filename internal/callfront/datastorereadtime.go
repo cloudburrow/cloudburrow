@@ -1,16 +1,19 @@
 package callfront
 
-// Datastore reads at a past read time (#1942).
+// Datastore reads at a past read time (#1942, #1967).
 //
 // Google serves a Datastore mode database's entities at an earlier
 // read_time, within its version window (an hour, seven days with
 // point-in-time recovery). The Datastore emulator keeps no earlier
 // versions: measured, a Lookup at a read_time before a write answers the
-// entity as written, with no update_time. So that a read never silently
-// answers today's entities for an earlier time, the front refuses a
-// Lookup, RunQuery, RunAggregationQuery or BeginTransaction whose read time
-// is more than readTimeSlack in the past, UNIMPLEMENTED, naming why; a
-// read time of about now is served as now.
+// entity as written, with no update_time. With --datastore-databases the
+// front keeps the versions itself (internal/datastoreversions, #1967) and
+// datastoreWindow refuses a read outside the window, as the Firestore
+// front does; the reads within it are the version log's. Without it,
+// datastoreReadTimes refuses a Lookup, RunQuery, RunAggregationQuery or
+// BeginTransaction whose read time is more than readTimeSlack in the past,
+// UNIMPLEMENTED, naming why, so a read never silently answers today's
+// entities for an earlier time; a read time of about now is served as now.
 
 import (
 	"bytes"

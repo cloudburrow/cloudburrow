@@ -23,6 +23,11 @@ package firestoreadmin
 // versions across its own restart, when the documents are imported again
 // (documents.go), so earliestVersionTime is never earlier than that import.
 // Nor does it drop old versions: they stay in its heap until it restarts.
+//
+// A Datastore mode database's versions are the Datastore front's
+// (internal/datastoreversions, #1967): its reads are checked there, by
+// ReadTimeRefusal over the window Window answers (AccessPath), and its
+// exports and clones at a snapshot time read the front's versions.
 
 import (
 	"bytes"
@@ -97,8 +102,9 @@ func (a *Admin) sawImport(at time.Time) {
 }
 
 // errTooOld is Google's refusal of a read outside the version window
-// (UNVERIFIED code: the page names the condition, "the read_time is too
-// old", not the status).
+// (UNVERIFIED (docs re-read 2026-11-19:
+// <https://docs.cloud.google.com/firestore/native/docs/pitr>): the page
+// names the condition, "the read_time is too old", not the status).
 func errTooOld(t time.Time, earliest time.Time) error {
 	return status.Errorf(codes.FailedPrecondition, "The requested 'read_time' (%s) is too old: reads older than one hour must be at a whole minute, and none may be earlier than the database's earliest version time (%s).",
 		t.Format(time.RFC3339Nano), earliest.Format(time.RFC3339Nano))
