@@ -83,6 +83,14 @@ type Server struct {
 	seeded map[string]bool
 	// waiters are the running operations, closed when each is done.
 	waiters map[string]chan struct{}
+	// queue is, by resource, the last operation started on it, closed when
+	// it is done, and queued how many of its operations have not finished.
+	// A resource's operations run one after another, in the order they were
+	// asked for, as Google's do: a Stop asked while an attachDisk is still
+	// restarting the VM's container waits for it, so the attach can neither
+	// restart a VM that was stopped nor set it RUNNING again.
+	queue  map[string]chan struct{}
+	queued map[string]int
 	// pods are the pod IPs the running VMs' guests last reported (#1968),
 	// by instance.
 	pods map[string]podSeen
@@ -97,7 +105,8 @@ func New(opts Options) (*Server, error) {
 		opts.Now = time.Now
 	}
 	s := &Server{opts: opts, res: map[string]obj{}, ops: map[string]obj{},
-		defaultDeleted: map[string]bool{}, seeded: map[string]bool{}, waiters: map[string]chan struct{}{}}
+		defaultDeleted: map[string]bool{}, seeded: map[string]bool{}, waiters: map[string]chan struct{}{},
+		queue: map[string]chan struct{}{}, queued: map[string]int{}}
 	if err := s.restore(); err != nil {
 		return nil, err
 	}

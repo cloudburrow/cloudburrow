@@ -969,9 +969,10 @@ func mergeVectorStats(all []map[string]any) json.RawMessage {
 }
 
 // normalizedSQL is v, an ARRAY<FLOAT64> expression, divided by its L2
-// norm.
+// norm. The norm is summed once, not again for each element (#2042).
 func normalizedSQL(v string) string {
-	return "ARRAY(SELECT _cb_n_x / NULLIF(SQRT((SELECT SUM(_cb_n_y * _cb_n_y) FROM UNNEST(" + v + ") AS _cb_n_y)), 0) FROM UNNEST(" + v + ") AS _cb_n_x WITH OFFSET _cb_n_o ORDER BY _cb_n_o)"
+	return "(SELECT ARRAY(SELECT _cb_n_x / _cb_n.n FROM UNNEST(" + v + ") AS _cb_n_x WITH OFFSET _cb_n_o ORDER BY _cb_n_o) " +
+		"FROM (SELECT NULLIF(SQRT(SUM(_cb_n_y * _cb_n_y)), 0) AS n FROM UNNEST(" + v + ") AS _cb_n_y) AS _cb_n)"
 }
 
 // probeSQL is the lists a query vector qv probes: the use's nearest

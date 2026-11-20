@@ -327,7 +327,10 @@ func TestBigQueryMLTranscribe(t *testing.T) {
 	cc, _ := remoteConnectionClient(t, h)
 	sc := storageClient(t, h)
 	// Whisper transcriptions of every row with local whisper: more than h.Context()'s minute
-	// on a 4-vCPU runner (main run 44709318191 timed out at 60s).
+	// on a 4-vCPU runner (main run 44709318191 timed out at 60s). The
+	// queries run in it too, through mlQueryIn and mlRunIn: with
+	// mlQuery's h.Context() the ML.TRANSCRIBE query still ended at 60s
+	// (main run 44774469756).
 	// Ended by t.Cleanup, registered first so it runs last, after the
 	// test's own cleanups that still use ctx.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
@@ -397,7 +400,7 @@ func TestBigQueryMLTranscribe(t *testing.T) {
 	if err := bh.IAM().SetPolicy(ctx, pol); err != nil {
 		t.Fatalf("bucket IAM SetPolicy: %v", err)
 	}
-	run := func(sql string) error { return mlRun(h, c, sql) }
+	run := func(sql string) error { return mlRunIn(ctx, c, sql) }
 	if err := run(fmt.Sprintf("CREATE EXTERNAL TABLE `%s.audio` WITH CONNECTION `%s` OPTIONS(object_metadata = 'SIMPLE', uris = ['gs://%s/audio/*'])",
 		ds, conn, bh.BucketName())); err != nil {
 		t.Fatalf("CREATE EXTERNAL TABLE: %v", err)
@@ -431,7 +434,7 @@ func TestBigQueryMLTranscribe(t *testing.T) {
 		t.Errorf("remoteModelInfo: %+v", md.RemoteModelInfo)
 	}
 
-	rows := mlQueryCtx(t, ctx, c, fmt.Sprintf("SELECT uri, content_type, transcripts, ml_transcribe_status AS status, "+
+	rows := mlQueryIn(t, ctx, c, fmt.Sprintf("SELECT uri, content_type, transcripts, ml_transcribe_status AS status, "+
 		"JSON_VALUE(ml_transcribe_result, '$.results[0].language_code') AS lang, "+
 		"LAX_INT64(ml_transcribe_result.metadata.total_billed_duration.seconds) AS billed, "+
 		"LAX_INT64(ml_transcribe_result.results[0].result_end_offset.seconds) AS end_s, "+
@@ -470,7 +473,7 @@ func TestBigQueryMLTranscribe(t *testing.T) {
 		t.Errorf("text row: %v", notes)
 	}
 
-	normRows := mlQueryCtx(t, ctx, c, fmt.Sprintf("SELECT transcripts, ml_transcribe_status AS status, "+
+	normRows := mlQueryIn(t, ctx, c, fmt.Sprintf("SELECT transcripts, ml_transcribe_status AS status, "+
 		"JSON_VALUE(ml_transcribe_result, '$.results[0].alternatives[0].transcript') AS first "+
 		`FROM ML.TRANSCRIBE(MODEL `+"`%s.speech`, TABLE `%s.audio`"+`, recognition_config => (JSON '{"language_codes": ["en-US"], "model": "chirp", `+
 		`"auto_decoding_config": {}, "transcript_normalization": {"entries": [{"search": "COUNTRY", "replace": "nation"}, `+
@@ -484,7 +487,7 @@ func TestBigQueryMLTranscribe(t *testing.T) {
 	// SEPARATE_RECOGNITION_PER_CHANNEL (#1799): JFK on the left channel,
 	// the adaptation sample on the right, each transcribed on its own and
 	// tagged with its channel; the billed duration counts both channels.
-	chRows := mlQueryCtx(t, ctx, c, fmt.Sprintf("SELECT transcripts, ml_transcribe_status AS status, TO_JSON_STRING(ml_transcribe_result) AS result "+
+	chRows := mlQueryIn(t, ctx, c, fmt.Sprintf("SELECT transcripts, ml_transcribe_status AS status, TO_JSON_STRING(ml_transcribe_result) AS result "+
 		`FROM ML.TRANSCRIBE(MODEL `+"`%s.speech`, TABLE `%s.stereo`"+`, recognition_config => (JSON '{"language_codes": ["en-US"], "model": "chirp", `+
 		`"auto_decoding_config": {}, "features": {"multi_channel_mode": "SEPARATE_RECOGNITION_PER_CHANNEL"}}'))`, ds, ds))
 	if len(chRows) != 1 || chRows[0]["status"] != "" {
@@ -520,7 +523,7 @@ func TestBigQueryMLTranscribe(t *testing.T) {
 		t.Errorf("per-channel transcripts: %q", text)
 	}
 
-	recRows := mlQueryCtx(t, ctx, c, fmt.Sprintf("SELECT uri, transcripts, ml_transcribe_status AS status, "+
+	recRows := mlQueryIn(t, ctx, c, fmt.Sprintf("SELECT uri, transcripts, ml_transcribe_status AS status, "+
 		"LAX_INT64(ml_transcribe_result.results[0].alternatives[0].words[1].start_offset.nanos) AS word_nanos "+
 		"FROM ML.TRANSCRIBE(MODEL `%s.speech_rec`, TABLE `%s.audio`) WHERE uri LIKE '%%.wav'", ds, ds))
 	if len(recRows) != 1 || recRows[0]["status"] != "" || recRows[0]["transcripts"] != text || recRows[0]["word_nanos"] == nil {

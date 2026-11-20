@@ -68,6 +68,9 @@ type schedulerService struct {
 	// tokens mints the Authorization header of an HTTP job with oidcToken
 	// or oauthToken, from the instance's local key (#1243).
 	tokens scheduler.TokenMinter
+	// live is `up`'s bound addresses, for a googleapis.com target's local
+	// endpoint (localAPIs); nil uses the configured ports.
+	live func() map[string]string
 }
 
 // useTokens mints job tokens with m. Called before Start.
@@ -144,7 +147,7 @@ func (s *schedulerService) Start(ctx context.Context) error {
 	}
 	// A googleapis.com target, such as a workflow's Cloud Scheduler
 	// trigger, reaches this instance's own API, never Google (#2011, #2015).
-	s.runner.WithLocalAPIs(localAPIs(s.cfg))
+	s.runner.WithLocalAPIs(localAPIs(s.cfg, s.live))
 	// App Engine targets go to the server standing in for the app (#1506).
 	if s.cfg.AppEngineURL != "" {
 		s.runner.WithAppEngine(s.cfg.AppEngineURL)

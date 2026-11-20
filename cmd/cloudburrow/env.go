@@ -303,8 +303,50 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 			"the project every local resource lives under"},
 		{"GCE_METADATA_HOST", addr(cfg.Endpoints.Metadata),
 			"points Google's metadata lookups at this instance, not 169.254.169.254"},
+		// No Google name is resolved off the machine (#2038). gcloud reads
+		// the metadata server at GCE_METADATA_ROOT, never GCE_METADATA_HOST
+		// (gce_read.py), and its default is metadata.google.internal; every
+		// gcloud request's User-Agent asks gce_cache whether it is on GCE
+		// unless metrics/environment is set (metrics.py), whatever
+		// core/check_gce_metadata says. Python's google-auth and Node's
+		// gcp-metadata ping GCE_METADATA_IP (default 169.254.169.254).
+		{"GCE_METADATA_ROOT", addr(cfg.Endpoints.Metadata),
+			"read by gcloud and older libraries for the metadata server: this instance, so metadata.google.internal is never looked up"},
+		{"GCE_METADATA_IP", addr(cfg.Endpoints.Metadata),
+			"read by Python's google-auth and Node's gcp-metadata for their metadata ping: this instance, not 169.254.169.254"},
+		{"CLOUDSDK_METRICS_ENVIRONMENT", "cloudburrow",
+			"read by gcloud: names its environment, so it never probes metadata.google.internal to find out"},
+		{"CLOUDSDK_CORE_CHECK_GCE_METADATA", "false",
+			"read by gcloud: takes no account or project from a metadata server"},
+		{"CLOUDSDK_CORE_DISABLE_USAGE_REPORTING", "true",
+			"read by gcloud: sends no usage statistics to Google"},
+		{"CLOUDSDK_COMPONENT_MANAGER_DISABLE_UPDATE_CHECK", "true",
+			"read by gcloud: does not ask Google for component updates"},
+		// gcloud sends no credential, as gcloud-setup's configuration and
+		// the console terminal set (#2040). With a service account loaded
+		// (the fixture as auth/credential_file_override), gcloud 593.0.0's
+		// bundled google-auth looks up its Regional Access Boundary before
+		// each request, at
+		// iamcredentials.googleapis.com whatever
+		// api_endpoint_overrides/iamcredentials says: the host is built from
+		// the constant googleapis.com (_regional_access_boundary_utils.py
+		// _get_domain), and gcloud's override reaches only google.auth.iam's
+		// generateAccessToken, signBlob and generateIdToken URLs
+		// (iam_endpoint.py). CloudBurrow serves unauthenticated requests.
+		{"CLOUDSDK_AUTH_DISABLE_CREDENTIALS", "true",
+			"read by gcloud: sends no credential (CloudBurrow authenticates nothing), so it never looks up a service account's Regional Access Boundary at Google"},
 		{"CLOUDSDK_API_ENDPOINT_OVERRIDES_IAMCREDENTIALS", "http://" + addr(cfg.Endpoints.Metadata) + "/",
-			"read by gcloud, whose impersonation first refreshes at Google's token endpoint, so it does not work locally (docs/credentials.md)"},
+			"read by gcloud for --impersonate-service-account (docs/credentials.md)"},
+		// gcloud refreshes a credential_file_override service account at
+		// auth/token_host, never at the file's token_uri, and that defaults
+		// to oauth2.googleapis.com; a user account refreshes there too, or at
+		// auth/mtls_token_host under client certificates. Both name this
+		// instance's token endpoint, as gcloud-setup's configuration does
+		// (#1975), so no refresh leaves the machine.
+		{"CLOUDSDK_AUTH_TOKEN_HOST", tokenURI(cfg),
+			"read by gcloud: every credential refresh goes to this instance, not Google's token endpoint"},
+		{"CLOUDSDK_AUTH_MTLS_TOKEN_HOST", tokenURI(cfg),
+			"read by gcloud under client certificates: refreshes go to this instance"},
 		{"CLOUDSDK_CORE_PROJECT", project,
 			"gcloud's project"},
 	}

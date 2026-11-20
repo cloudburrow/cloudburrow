@@ -613,7 +613,17 @@ func (f front) vectorSearchSubquery(r *http.Request, q queryOptions, c vectorSea
 	for _, col := range qcols {
 		queryCols = append(queryCols, "q."+sqlIdent(col.Name)+" AS "+sqlIdent(col.Name))
 	}
-	qrows := "SELECT q0.*, " + qvec + " AS _cb_vs_qvec, ROW_NUMBER() OVER () AS _cb_vs_qid FROM (" + qsql + ") AS q0"
+	// The query vector, normalized for an L2 index's search, is a column
+	// of the query rows, which their ROW_NUMBER keeps the engine from
+	// folding into the scoring: an expression there is evaluated again
+	// at each element of each base row's vector (measured, #2042: a
+	// TREE_AH search of 11,000 rows took 39 s, its distances 14 times).
+	qn := ""
+	if use.index != nil && use.index.Norm == "L2" {
+		qn = ", " + normalizedSQL(qvec) + " AS _cb_vs_qn"
+		scored = func(string) string { return "q._cb_vs_qn" }
+	}
+	qrows := "SELECT q0.*, " + qvec + " AS _cb_vs_qvec" + qn + ", ROW_NUMBER() OVER () AS _cb_vs_qid FROM (" + qsql + ") AS q0"
 	cand := ""
 	if use.index != nil {
 		probes, code, msg := f.batchProbes(r, probeOptions(q, qsql), "SELECT "+qvec+" AS v FROM ("+qsql+") AS q0", use)
@@ -628,10 +638,16 @@ func (f front) vectorSearchSubquery(r *http.Request, q queryOptions, c vectorSea
 	if post {
 		keep = ", b._cb_vs_keep AS _cb_vs_keep"
 	}
-	inner := "SELECT STRUCT(" + strings.Join(queryCols, ", ") + ") AS query, STRUCT(" + strings.Join(baseCols, ", ") + ") AS base, " + dist + " AS distance, " +
-		"ROW_NUMBER() OVER (PARTITION BY q._cb_vs_qid ORDER BY " + dist + ") AS _cb_vs_rank" + keep + " " +
+	// Each pair's distance is computed once, and ranked a level up.
+	carry := ""
+	if post {
+		carry = ", _cb_vs_keep"
+	}
+	inner := "SELECT query, base, distance, ROW_NUMBER() OVER (PARTITION BY _cb_vs_qid ORDER BY distance) AS _cb_vs_rank" + carry + " FROM (" +
+		"SELECT STRUCT(" + strings.Join(queryCols, ", ") + ") AS query, STRUCT(" + strings.Join(baseCols, ", ") + ") AS base, " + dist + " AS distance, " +
+		"q._cb_vs_qid AS _cb_vs_qid" + keep + " " +
 		"FROM (" + qrows + ") AS q " +
-		"CROSS JOIN (" + baseSQL + ") AS b WHERE " + present + cand
+		"CROSS JOIN (" + baseSQL + ") AS b WHERE " + present + cand + ")"
 	sub := "(SELECT query, base, distance FROM (" + inner + ")"
 	var conds []string
 	if topK >= 0 {

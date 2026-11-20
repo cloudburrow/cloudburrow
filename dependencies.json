@@ -1363,16 +1363,22 @@
           "bq": "2.1.42"
         },
         "platforms": [
-          "linux/amd64"
+          "linux/amd64",
+          "linux/arm64"
         ],
         "license": "google-cloud-cli-terms",
         "redistribution": "pull-only",
         "scope": "test-only",
-        "usedBy": ".github/workflows/ci.yml, compat job, storage, served, run and emulators shards: the gcloud, gsutil and bq tests in test/compat, through CLOUDBURROW_TEST_GCLOUD",
+        "usedBy": ".github/workflows/ci.yml, compat job, storage, served, run and emulators shards: the gcloud, gsutil and bq tests in test/compat, through CLOUDBURROW_TEST_GCLOUD; test/compat/testdata/envdns/Dockerfile (TestEnvResolvesNoGoogleName, #2038), which checks the archive for its architecture against checksums",
         "updateFeed": "gcloud-component-snapshot",
         "skipDiscovery": "Released through Google's Cloud SDK channel, not GitHub; the current version is .version in https://dl.google.com/dl/cloudsdk/channels/rapid/components-2.json.",
         "verification": "release-checksum",
         "digest": "sha256:42c32b7553c712f71fcf6f124546c0519437f53755f47f9bd0c957998cd6b826",
+        "checksums": {
+          "google-cloud-cli-593.0.0-linux-x86_64.tar.gz": "sha256:42c32b7553c712f71fcf6f124546c0519437f53755f47f9bd0c957998cd6b826",
+          "google-cloud-cli-593.0.0-linux-arm.tar.gz": "sha256:f40acaca49c9774bca035c96dcf7350a13c09007e906cb4832e91dc36ce11497"
+        },
+        "checksumsNote": "Both archives downloaded anonymously over HTTPS from dl.google.com on 2026-11-20: the x86_64 one hashed to the digest recorded 2026-11-19, and the arm one (VERSION 593.0.0) hashed to the value above. Google's install page publishes checksums only for the unversioned archives of the current release (594.0.0 by then), not for 593.0.0.",
         "digestNote": "SHA-256 of the versioned archive, computed on download 2026-11-19 (its tar, gunzipped: sha256 5f80cdf432eefca57f6e3b1755229ee7339c46a6de7937fab124ba32e6529574). Google publishes a checksum only for the unversioned google-cloud-cli-linux-x86_64.tar.gz. 593.0.0 replaced 586.0.0 for `gcloud alpha source-manager hooks` (#1927), which 586.0.0 does not have."
       },
       "hashicorpGoogleProvider": {

@@ -30,8 +30,17 @@ export CLOUDSDK_API_ENDPOINT_OVERRIDES_PUBSUB="http://127.0.0.1:9002/"
 export CLOUDSDK_API_ENDPOINT_OVERRIDES_SECRETMANAGER="http://127.0.0.1:9006/"
 export CLOUDSDK_API_ENDPOINT_OVERRIDES_SERVICEUSAGE="http://127.0.0.1:9023/"
 export CLOUDSDK_API_ENDPOINT_OVERRIDES_STORAGE="http://127.0.0.1:9001/storage/v1/"
+export CLOUDSDK_AUTH_DISABLE_CREDENTIALS="true"
+export CLOUDSDK_AUTH_MTLS_TOKEN_HOST="http://127.0.0.1:9005/token"
+export CLOUDSDK_AUTH_TOKEN_HOST="http://127.0.0.1:9005/token"
+export CLOUDSDK_COMPONENT_MANAGER_DISABLE_UPDATE_CHECK="true"
+export CLOUDSDK_CORE_CHECK_GCE_METADATA="false"
+export CLOUDSDK_CORE_DISABLE_USAGE_REPORTING="true"
 export CLOUDSDK_CORE_PROJECT="cloudburrow"
+export CLOUDSDK_METRICS_ENVIRONMENT="cloudburrow"
 export GCE_METADATA_HOST="127.0.0.1:9005"
+export GCE_METADATA_IP="127.0.0.1:9005"
+export GCE_METADATA_ROOT="127.0.0.1:9005"
 export GOOGLE_APPLICATION_CREDENTIALS="/Users/you/.cloudburrow/cloudburrow/credentials.json"
 export GOOGLE_CLOUD_PROJECT="cloudburrow"
 export PUBSUB_EMULATOR_HOST="127.0.0.1:9002"
@@ -209,16 +218,17 @@ Credentials endpoint for the impersonated account's token. gcloud does **not** r
 `GOOGLE_APPLICATION_CREDENTIALS` for its own calls.
 
 **gcloud impersonation does not work locally in any configuration.** Measured in CI with Cloud
-SDK 586.0.0 (#697), behind a proxy that refuses every request bound off the machine:
+SDK 586.0.0 (#697) and 593.0.0 (#2034), behind a proxy that refuses every request bound off the machine:
 
 | Configuration | Measured outcome |
 |---|---|
-| `cloudburrow env` alone, in a gcloud configuration with no account | **Fails, locally.** There is no source credential: `You do not currently have an active account selected.` Nothing is sent. `TestGcloudImpersonationThroughEnv` ("exported variables alone"). |
-| `cloudburrow env`, plus the exported fixture as `auth/credential_file_override` | **Fails, and tries to leave the machine.** gcloud refreshes the fixture at `oauth2.googleapis.com`, not at the fixture's local `token_uri`, before it reaches the exported IAM Credentials override; the proxy refuses it and gcloud reports `There was a problem refreshing your current auth tokens`. Without such a proxy that request goes to Google. `TestGcloudImpersonationThroughEnv` ("fixture as credential_file_override"). |
+| `cloudburrow env` as exported, with or without the fixture as `auth/credential_file_override` | **Ignored.** `env` exports `CLOUDSDK_AUTH_DISABLE_CREDENTIALS=true` (#2040), as `gcloud-setup` writes `auth/disable_credentials`, so gcloud loads no credential and lists the buckets unauthenticated, locally. With a service account loaded, gcloud's bundled google-auth would look up its Regional Access Boundary at `iamcredentials.googleapis.com`, a host no property moves (docs/security.md). `TestGcloudImpersonationThroughEnv` ("as exported, fixture as credential_file_override"). |
+| `cloudburrow env` with credentials turned back on (`CLOUDSDK_AUTH_DISABLE_CREDENTIALS=false`), in a gcloud configuration with no account | **Fails, locally.** There is no source credential: `You do not currently have an active account selected.` Nothing is sent. `TestGcloudImpersonationThroughEnv` ("credentials enabled, exported variables alone"). |
+| `cloudburrow env` with credentials turned back on, plus the exported fixture as `auth/credential_file_override` | **Refused locally.** gcloud refreshes a `credential_file_override` at `auth/token_host`, never at the file's `token_uri`, and that property defaults to `oauth2.googleapis.com`. `cloudburrow env` exports `CLOUDSDK_AUTH_TOKEN_HOST` and `CLOUDSDK_AUTH_MTLS_TOKEN_HOST` at the instance's token endpoint (#2034), so gcloud refreshes the fixture there, then calls the exported IAM Credentials override, which refuses `generateAccessToken` with `PERMISSION_DENIED`, as under `gcloud-setup` below. Before #2034 the refresh went to `oauth2.googleapis.com`, and only a proxy or a network block kept it from Google. `TestGcloudImpersonationThroughEnv` ("credentials enabled, fixture as credential_file_override"). |
 | `gcloud-setup` | **Ignored.** The configuration sets `auth/disable_credentials`, so gcloud loads no credential, prints no impersonation warning, and sends the request unauthenticated, which CloudBurrow serves. `TestGcloudImpersonationUnderGcloudSetup` ("as written"). Turning credentials back on with the exported override does not leave the machine: the configuration's `auth/token_host` is the instance's token endpoint (#1975), so gcloud refreshes the fixture there, then calls the exported IAM Credentials override, which refuses `generateAccessToken` with `PERMISSION_DENIED` because the fixture's account holds no `roles/iam.serviceAccountTokenCreator` on the impersonated one, as Google would. Measured with Cloud SDK 593.0.0 ("credentials enabled with the exported override"). |
 
 So `CLOUDSDK_API_ENDPOINT_OVERRIDES_IAMCREDENTIALS`, which `cloudburrow env` exports and only gcloud
-reads, does not make gcloud impersonation work locally: under `env` gcloud never gets that far, and under `gcloud-setup` with credentials on the override refuses the fixture's account. Use impersonation from code (above),
+reads, does not make gcloud impersonation work locally: as exported gcloud loads no credential, with no source credential gcloud never gets that far, and with the fixture as one the override refuses the fixture's account. Use impersonation from code (above),
 where the source credential is the fixture and every call stays on loopback.
 
 ## What these tokens are not

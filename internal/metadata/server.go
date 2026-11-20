@@ -297,6 +297,17 @@ func (s *Server) serviceAccounts(w http.ResponseWriter, r *http.Request) {
 
 	switch field {
 	case "":
+		// ?recursive=true is the account's attributes as JSON, as GCE
+		// answers it; Python's google-auth reads the email and scopes this
+		// way before every compute_engine refresh (#2038).
+		if r.URL.Query().Get("recursive") == "true" {
+			writeJSON(w, map[string]any{
+				"aliases": []string{"default"},
+				"email":   email,
+				"scopes":  []string{"https://www.googleapis.com/auth/cloud-platform"},
+			})
+			return
+		}
 		s.text(w, "aliases\nemail\nidentity\nscopes\ntoken\n")
 	case "email":
 		s.text(w, email)

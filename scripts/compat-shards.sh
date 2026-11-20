@@ -68,6 +68,13 @@
 # BigQuery (for Pub/Sub's BigQuery subscriptions, #1998), Cloud Scheduler
 # and Workflows.
 
+# An eleventh, cross, is the run shard's instance again for
+# COMPAT_CROSS_TESTS, which the run shard skips: Eventarc's tests and
+# Artifact Registry's cleanup policies, split from run when it reached its
+# 60m (main run 44740769561), and the tests that need services no other
+# shard exports together (Cloud Storage with BigQuery, Cloud KMS or Cloud
+# Logging; Pub/Sub or Firestore with BigQuery and Service Usage).
+
 # A tenth, sqlreplicas, is the sql shard's instance again for the Cloud SQL
 # tests that make replicas, standbys and external primaries
 # (COMPAT_SQL_REPLICA_TESTS), which the sql shard skips (COMPAT_SKIP): the
@@ -106,7 +113,9 @@ COMPAT_LOCALAI_TEST_NAMES="
   ConsoleLocalModelsLoadEmbedUnload
   ConsoleLocalModelsUnloadDeleteDownloadLoad
   CountTokensAndComputeTokensThroughTheOfficialSDK DocumentAIBatchProcess
+  DocumentAIBatchShardsAndFieldMask DocumentAIEvaluationsAndReview
   DocumentAIProcessorVersions DocumentAIProcessors
+  TerraformDocumentAIProcessorDefaultVersion
   EmbedContentEmbeds16KVideoThroughThePredictionClient
   EmbedContentEmbeds2And5BitADPCMAndMP3WAVsThroughThePredictionClient
   EmbedContentEmbedsADPCMWAVAndLosslessAndMultichannelTracksThroughThePredictionClient
@@ -146,7 +155,30 @@ COMPAT_LOCALAI_TEST_NAMES="
 COMPAT_LOCALAI_TESTS="^Test($(echo "$COMPAT_LOCALAI_TEST_NAMES" | tr -s ' \n' '||' | sed 's/^|//; s/|$//'))\$"
 
 # The shards, in the order ci.yml's matrix lists them.
-COMPAT_SHARDS="storage served run scale emulators memorystore sql sqlreplicas acceptance iam localai"
+COMPAT_SHARDS="storage served run cross scale emulators memorystore sql sqlreplicas acceptance iam localai"
+
+# The cross shard's tests (COMPAT_CROSS_TESTS), which the run shard skips:
+# Eventarc's, whose triggers route events from Cloud Storage, Pub/Sub,
+# Firestore, Datastore, Memorystore and Cloud Audit Logs to Cloud Run, GKE
+# and Workflows (about 620 s), and Artifact Registry's cleanup policies
+# (240 s, CLOUDBURROW_ARTIFACT_REGISTRY_CLEANUP_INTERVAL): the run shard
+# reached its 60m in main run 44740769561 with Landing 160's tests, and
+# TestWorkflowsCustomerManagedKey, three Workflows tests and the restart
+# probes after it ran in no shard. And the tests that need services no
+# other shard serves together, by name: Storage Insights' dataset
+# configurations and activity views (Cloud Storage with BigQuery), Storage
+# Batch Operations' rewrite to a Cloud KMS key, Cloud Storage's Data Access
+# audit logs (Cloud Logging), Pub/Sub's BigQuery subscriptions and gcloud's
+# message storage policy (Pub/Sub with BigQuery and Service Usage), and
+# BigQuery and Firestore refused while disabled (Service Usage).
+COMPAT_CROSS_TEST_NAMES="ArtifactRegistryCleanupPolicies
+  GcloudPubSubTopicStoragePolicyUpdate GcloudStorageInsightsDatasetConfigs
+  PubSubBigQuerySubscriptionPermissionDenied ServiceDisabledBigQuery
+  ServiceDisabledFirestore StorageBatchOperationsRewriteToKMSKey
+  StorageDataAccessAuditLogs StorageDataAccessAuditLogsOffByDefault
+  StorageInsightsActivityViews StorageInsightsDatasetConfigChecks
+  StorageInsightsLinkedDataset TerraformStorageInsightsDatasetConfig"
+COMPAT_CROSS_TESTS="^Test((Gcloud|Terraform|GcloudAndTerraform)?Eventarc[A-Za-z0-9_]*|$(echo "$COMPAT_CROSS_TEST_NAMES" | tr -s ' \n' '||' | sed 's/^|//; s/|$//'))\$"
 
 # The sqlreplicas shard's tests, by name: every Cloud SQL test of high
 # availability, read replicas, blue-green deployments, external primaries,
@@ -191,11 +223,15 @@ COMPAT_SQL_REPLICA_TESTS='^Test[A-Za-z]*SQL[A-Za-z0-9]*(HighAvailability|Replica
 # storage (COMPAT_BROWSER_SERVED_ONLY_TESTS), where it would skip. The
 # served shard serves the Compute Engine API too, so the VPC network and
 # Compute Engine pages' tests (TestVPCNetwork*, #1936; TestComputeEngine*,
-# #1965, which boots a VM) run there and only there.
+# #1965, which boots a VM) run there and only there. Agent Platform's Model
+# Registry and Endpoints screens are drawn only where Cloud Run is served,
+# which starts the local AI endpoint they call (#1940): their test,
+# TestModelRegistryAndEndpointsThroughThePages, runs in run, as the scale
+# shard runs no browser test.
 COMPAT_BROWSER_SHARDS="storage served run emulators memorystore sql localai"
 COMPAT_BROWSER_SERVED_SHARD_TESTS='^Test(GKEServed|KubernetesEnginePages|VPCNetwork|ComputeEngine)'
 COMPAT_BROWSER_SERVED_ONLY_TESTS='^Test(GKEServed|VPCNetwork|ComputeEngine)'
-COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|LoggingAdmin|SecretManager|Eventarc|DocumentAI|Speech|Workflows)'
+COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|LoggingAdmin|SecretManager|Eventarc|DocumentAI|Speech|Workflows|ModelRegistry)'
 COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|Bigtable|Spanner)'
 COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS='^TestMemorystore'
 COMPAT_BROWSER_SQL_SHARD_TESTS='^Test(CloudSQL|BackupDR|PrivateCAKMS)'
@@ -305,7 +341,7 @@ compat_shard() {
       SETUP_TESTS="TestKMSRestartSetup"
       PROBE_TESTS="TestKMSAcrossRestart"
       PROBE_VARS=KMS ;;
-    run)
+    run|cross)
       # tasks too: TestAPodReachesTheCLIHostedServices (#575) needs Secret
       # Manager and Tasks served to pods, which only Run's cluster has.
       # Storage and Pub/Sub for
@@ -362,11 +398,20 @@ compat_shard() {
       # customer-managed key tests (with RUN_KMS); LOCALAI, which the
       # generation tests read, is not exported, so they still skip.
       TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_FIRESTORE,RUN_DATASTORE,RUN_GKE,RUN_MEMORYSTORE_ADMIN,RUN_KMS,RUN_LOCALAI,RUN_SCHEDULER,RUN_LOGGING,RUN_BIGQUERY,RUN_SQLADMIN,RUN_RESOURCEMANAGER,RUN_SERVICEUSAGE,RUN_APIKEYS,RUN_MYSQL,MYSQL_PASSWORD,BIGQUERY_PROJECT,APPENGINE_URL,WORKFLOWS
-      # Workflows (#1996): an execution waiting on a callback when the
-      # instance stops carries on after it starts again.
-      SETUP_TESTS="TestWorkflowsRestartSetup"
-      PROBE_TESTS="TestWorkflowsAcrossRestart"
-      PROBE_VARS=WORKFLOWS ;;
+      if [ "$1" = cross ]; then
+        # The run shard's instance again, for COMPAT_CROSS_TESTS only, with
+        # the plain names of the services they read: COMPAT_RUN keeps every
+        # other suite those names would select to its own shard.
+        TEST_VARS+=,STORAGE,STORAGE_BATCH,STORAGE_INSIGHTS,PUBSUB,BIGQUERY,FIRESTORE,SERVICEUSAGE,KMS,LOGGING,RESOURCEMANAGER
+        COMPAT_RUN=$COMPAT_CROSS_TESTS
+      else
+        COMPAT_SKIP=$COMPAT_CROSS_TESTS
+        # Workflows (#1996): an execution waiting on a callback when the
+        # instance stops carries on after it starts again.
+        SETUP_TESTS="TestWorkflowsRestartSetup"
+        PROBE_TESTS="TestWorkflowsAcrossRestart"
+        PROBE_VARS=WORKFLOWS
+      fi ;;
     scale)
       # The tests that take minutes each (#1821), split from run: Cloud
       # Run's CPU, automatic and manual scaling and instance splits, through
@@ -398,7 +443,9 @@ compat_shard() {
       SERVICES=storage,pubsub,tasks,secretmanager,kms,run,bigquery,scheduler,workflows
       TEST_VARS+=,STORAGE,PUBSUB,TASKS,SECRETS,KMS,RUN,RESOURCEMANAGER,ANALYTICSHUB,BIGQUERY,BIGQUERY_PROJECT,SCHEDULER,WORKFLOWS,IAM_ENFORCEMENT
       UP_FLAGS=(--iam-enforcement=on)
-      COMPAT_RUN='^TestIAMEnforcement' ;;
+      # And Workload Identity Federation's federated principal reading a
+      # bucket, refused until it is granted (#1941), which needs enforcement.
+      COMPAT_RUN='^Test(IAMEnforcement|WorkloadIdentityFederationStorage$)' ;;
     localai)
       # The local AI tests (#1985): BigQuery and Cloud Storage for the AI
       # and ML functions' tables and object tables, Resource Manager (every
@@ -531,7 +578,7 @@ compat_shard() {
   # bq's (#696) run in the emulators shard, with BigQuery, and gcloud sql's
   # in the sql shard.
   case "$1" in
-    storage|served|run|scale|emulators|memorystore|sql|sqlreplicas) TEST_VARS+=,GCLOUD ;;
+    storage|served|run|cross|scale|emulators|memorystore|sql|sqlreplicas) TEST_VARS+=,GCLOUD ;;
   esac
 }
 

@@ -746,6 +746,14 @@ func (f *Front) reconcile(ctx context.Context, project string, held bool) bool {
 	if f.gen != gen || (f.restoring != nil && !held) {
 		return false
 	}
+	for _, t := range cur.topics {
+		// The emulator never holds the policy an update set (#2000): kept
+		// out, the periodic reconcile put the emulator's back in the
+		// definitions the export check reads, and an
+		// IN_TRANSIT_LOCATION_RESTRICTION subscription the update allowed
+		// stayed restricted (main run 44774469756).
+		f.withStoragePolicyLocked(t)
+	}
 	changed := replaceProject(f.defs.topics, cur.topics, project)
 	changed = replaceProject(f.defs.subs, cur.subs, project) || changed
 	changed = replaceProject(f.defs.snapshots, cur.snapshots, project) || changed

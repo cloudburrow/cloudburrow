@@ -88,6 +88,11 @@ tagging `vX.Y.Z` by hand, move the entries under **Unreleased** into a new
 
 ### Fixed
 
+- **BigQuery: `CREATE VECTOR INDEX` works as a project's first statement** (#2045): on a fresh
+  instance, an index on a table of 10 MB or more failed "dataset _cloudburrow_query_results is not
+  found" until a query had run, as its tables are kept in that hidden dataset, which was made only
+  for a query result or a scratch table. The front now makes it before any statement that names
+  it (the ML vocabulary functions had the same gap); `datasets.list` still leaves it out.
 - **Release pins follow the latest release** (#1901): scheduled releases are tagged every one to
   two days without a commit to `main`, so the README, SECURITY.md, docs/install.md, docs/ci.md,
   the install script's usage and action.yml no longer name a numbered release. They link

@@ -50,12 +50,12 @@ func mlRows() []*mlRow {
 // mlQuery reads every row of sql as name -> value.
 func mlQuery(t *testing.T, h *Harness, c *bigquery.Client, sql string) []map[string]bigquery.Value {
 	t.Helper()
-	return mlQueryCtx(t, h.Context(), c, sql)
+	return mlQueryIn(t, h.Context(), c, sql)
 }
 
-// mlQueryCtx is mlQuery within ctx, for queries that run longer than the
-// harness's minute (local transcription).
-func mlQueryCtx(t *testing.T, ctx context.Context, c *bigquery.Client, sql string) []map[string]bigquery.Value {
+// mlQueryIn is mlQuery in ctx, for a query that may take longer than
+// h.Context()'s minute (local whisper on a CI runner).
+func mlQueryIn(t *testing.T, ctx context.Context, c *bigquery.Client, sql string) []map[string]bigquery.Value {
 	t.Helper()
 	it, err := c.Query(sql).Read(ctx)
 	if err != nil {
@@ -76,11 +76,16 @@ func mlQueryCtx(t *testing.T, ctx context.Context, c *bigquery.Client, sql strin
 }
 
 func mlRun(h *Harness, c *bigquery.Client, sql string) error {
-	job, err := c.Query(sql).Run(h.Context())
+	return mlRunIn(h.Context(), c, sql)
+}
+
+// mlRunIn is mlRun in ctx.
+func mlRunIn(ctx context.Context, c *bigquery.Client, sql string) error {
+	job, err := c.Query(sql).Run(ctx)
 	if err != nil {
 		return err
 	}
-	st, err := job.Wait(h.Context())
+	st, err := job.Wait(ctx)
 	if err != nil {
 		return err
 	}

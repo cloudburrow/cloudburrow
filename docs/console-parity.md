@@ -803,7 +803,9 @@ has no row.
 An action's own confirmation follows Google's too (`Action.ConfirmStyle`, `Action.ConfirmTitle`, #1860):
 Cloud SQL's Delete backup asks for the word `Delete` (sql/docs/postgres/backup-recovery/backing-up),
 Stop and Start ("Stop database instance?", sql/docs/mysql/start-stop-restart-instance) and a user's
-Remove (sql/docs/mysql/create-manage-users) for nothing typed.
+Remove (sql/docs/mysql/create-manage-users) for nothing typed, as do a Compute Engine VM's Stop, Start / Resume,
+Suspend, Reset and Delete (compute/docs/instances/stop-start-instance, suspend-resume-instance, reset-instance,
+deleting-instance).
 
 #### Create labels (#1933)
 

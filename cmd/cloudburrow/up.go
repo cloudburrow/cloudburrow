@@ -326,12 +326,25 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// A secret's customer-managed keys (#1453) are this instance's Cloud KMS.
 		secretsSvc.kms = kmsSvc.API
 	}
+	// liveEndpoints, assigned below once every service exists, is every
+	// bound address; boundAddrs reads it after the services start, so the
+	// dispatchers below find an OS-assigned port (--port-storage 0) too.
+	var liveEndpoints func() map[string]string
+	boundAddrs := func() map[string]string {
+		if liveEndpoints == nil {
+			return nil
+		}
+		return liveEndpoints()
+	}
 	// Every outbound dispatcher sends a googleapis.com URL to this
 	// instance's own endpoint of the API, and refuses any other Google host
 	// (internal/egress, #2015).
-	egress.SetLocal(localAPIs(cfg))
+	egress.SetLocal(localAPIs(cfg, boundAddrs))
 	schedulerSvc := newSchedulerService(cfg, func() *netfwd.Forwarder { return forwarderFor(forwarders, "pubsub") })
 	schedulerSvc.useTokens(creds)
+	if schedulerSvc != nil {
+		schedulerSvc.live = boundAddrs
+	}
 	schedulerSvc.register(coord)
 	// Certificate Authority Service (#1834), in process.
 	privateCASvc := newPrivateCAService(cfg)
@@ -355,6 +368,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if workflowsSvc != nil {
 		workflowsSvc.tokens = creds
 		workflowsSvc.kms = kmsSvc
+		workflowsSvc.live = boundAddrs
 		// Eventarc's workflow destination (#1986).
 		if runSvc != nil && runSvc.events != nil {
 			runSvc.events.workflows = workflowsSvc
@@ -1153,7 +1167,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// without Cloud Run or BigQuery.
 	var hostComp *clusterHost
 	// Every bound address, as the runtime file records it and the hooks see it.
-	liveEndpoints := func() map[string]string {
+	liveEndpoints = func() map[string]string {
 		live := map[string]string{"control": control.Addr(), "metadata": metaSrv.Addr()}
 		if consoleSrv != nil && consoleSrv.Addr() != "" {
 			live["console"] = consoleSrv.Addr()
