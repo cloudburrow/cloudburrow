@@ -219,6 +219,15 @@ type Listing struct {
 	// table, as Google's Cloud Build Dashboard is a card per trigger
 	// (#1854). With no card, the screen's empty state shows.
 	SummaryOnly bool `json:"summaryOnly,omitempty"`
+	// CardFilter, on a SummaryOnly screen, is the label of a box over its
+	// cards that narrows them to those whose PropertyGroup.Filter holds
+	// what is typed: Google's Cloud Build Dashboard has "Filter triggers"
+	// by source, name or description (#1854).
+	CardFilter string `json:"cardFilter,omitempty"`
+	// OptionalColumns are Columns a viewer has not chosen yet: drawn only
+	// once turned on in the column selector, as Google's History adds
+	// Trigger description and Artifacts with it (#1854).
+	OptionalColumns []string `json:"optionalColumns,omitempty"`
 	// Scope is the picker a Scoper's list screen draws above its rows: the
 	// Bigtable instance whose tables these are (#1360).
 	Scope *Scope `json:"scope,omitempty"`
@@ -923,6 +932,17 @@ type Property struct {
 	// instance's edition (#1859).
 	Action     string `json:"action,omitempty"`
 	ActionText string `json:"actionText,omitempty"`
+	// Chart draws the value as a bar chart, oldest bar first, each bar
+	// telling what it is when hovered or focused: a Cloud Build
+	// Dashboard card's Build history, the duration of each of the 20 most
+	// recent builds (#1854). Value is then the chart's text alternative.
+	// A pointer, so a Property stays comparable.
+	Chart *BarChart `json:"chart,omitempty"`
+}
+
+// BarChart is a Property's bar chart.
+type BarChart struct {
+	Bars []Bar `json:"bars"`
 }
 
 // SectionKind says what a section actually holds.
@@ -1118,6 +1138,26 @@ type PropertyGroup struct {
 	Section string `json:"section,omitempty"`
 	// Properties are the pairs, in the order the provider gives them.
 	Properties []Property `json:"properties"`
+	// Pin, on a SummaryOnly screen's card, is the card's key for a Pin
+	// button on it: a pinned card is drawn first, as Google's Cloud Build
+	// Dashboard pins a card to the top of the page (#1854). Pins are the
+	// viewer's own, kept in the browser.
+	Pin string `json:"pin,omitempty"`
+	// Filter is the text Listing.CardFilter matches the card by.
+	Filter string `json:"filter,omitempty"`
+}
+
+// Bar is one bar of a Property's bar chart (Property.Chart).
+type Bar struct {
+	// Value is the bar's height, against the tallest bar of its chart.
+	Value float64 `json:"value"`
+	// Label is what the bar says when hovered or focused: "Successful,
+	// 00:01:02, Nov 20, 2026".
+	Label string `json:"label"`
+	// Status colours it: "ok", "fail", or empty for neither.
+	Status string `json:"status,omitempty"`
+	// Link, when set, is the console route the bar opens.
+	Link string `json:"link,omitempty"`
 }
 
 // ChartSeries is one line on a chart, with its own points and unit.
@@ -1286,6 +1326,14 @@ type DeleteWords struct {
 type RowEditLeader interface {
 	RowEditor
 	RowEditFirst() bool
+}
+
+// RowDeleteIconer is a Deleter whose rows' Delete is a trash icon on the
+// row rather than an item of its menu: Google's private pools list has "In
+// the row with your private pool, click the trash icon" (#1854).
+type RowDeleteIconer interface {
+	Deleter
+	RowDeleteIcon() bool
 }
 
 // SelectionLister is a list screen whose rows marked Selectable can be
@@ -1896,7 +1944,7 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 			"create": caps.Create, "delete": caps.Delete, "detail": caps.Detail,
 			"query": caps.Query, "edit": caps.Edit, "reveal": caps.Reveal,
 			"deleteLabel": caps.DeleteLabel, "deleteConfirm": caps.DeleteConfirm,
-			"deleteSelected": caps.DeleteSelected, "deleteSubmit": caps.DeleteSubmit, "editRow": caps.EditRow, "editRowFirst": caps.EditRowFirst,
+			"deleteSelected": caps.DeleteSelected, "deleteSubmit": caps.DeleteSubmit, "editRow": caps.EditRow, "editRowFirst": caps.EditRowFirst, "deleteIcon": caps.DeleteIcon,
 			"page": caps.Page, "scope": caps.Scope, "filters": caps.Filters,
 		})
 	}
@@ -2095,6 +2143,8 @@ type capabilities struct {
 	EditRow        string `json:"editRow,omitempty"`
 	// EditRowFirst puts the rows' Edit first in their menus (RowEditLeader).
 	EditRowFirst bool `json:"editRowFirst,omitempty"`
+	// DeleteIcon draws the rows' Delete as a trash icon (RowDeleteIconer).
+	DeleteIcon bool `json:"deleteIcon,omitempty"`
 	// Detail means a row can be opened to show what is inside it.
 	Detail bool `json:"detail,omitempty"`
 	// Edit means a resource's detail page can offer an edit form. The form
@@ -2266,6 +2316,9 @@ func (s *Server) capabilitiesOf(p Provider) capabilities {
 	}
 	if rl, ok := p.(RowEditLeader); ok {
 		c.EditRowFirst = rl.RowEditFirst()
+	}
+	if di, ok := p.(RowDeleteIconer); ok && c.Delete {
+		c.DeleteIcon = di.RowDeleteIcon()
 	}
 	if re, ok := p.(RowEditor); ok {
 		c.EditRow = re.RowEditLabel()

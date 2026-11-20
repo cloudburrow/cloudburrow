@@ -492,6 +492,15 @@ func unsupportedCreate(b *cbpb.Build) error {
 	}
 	add(b.GetArtifacts() != nil, "artifacts")
 	add(b.GetGitConfig() != nil, "gitConfig")
+	// A git source dependency is fetched into the workspace by Google's
+	// workers before the steps run; the local builder fetches none, so it
+	// is refused rather than ignored. An empty dependency is a no-op.
+	for _, d := range b.GetDependencies() {
+		if d.GetGitSource() != nil {
+			add(true, "dependencies.gitSource")
+			break
+		}
+	}
 	if o := b.GetOptions(); o != nil {
 		add(len(o.GetSourceProvenanceHash()) > 0, "options.sourceProvenanceHash")
 		add(o.GetMachineType() != cbpb.BuildOptions_UNSPECIFIED, "options.machineType")

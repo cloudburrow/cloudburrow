@@ -170,15 +170,26 @@ func TestCloudRunBuildWorkerPoolEditThroughThePage(t *testing.T) {
 		consoleDo(t, http.MethodDelete, "/api/resources/cloud-build-worker-pools?project="+project+"&name="+name, "")
 	})
 
+	// The pool's name opens Google's Edit private pool page (#1854),
+	// prefilled, ending in Save.
 	p := open(t)
 	p.navigate("/cloud-build/worker-pools?project=" + project)
 	p.clickText("#view tbody a", name)
-	p.waitFor(fmt.Sprintf(`location.pathname === %q`, "/cloud-build/worker-pools/"+name))
-	p.pageAction("Edit worker pool", map[string]string{"displayName": "Browser builders", "machineType": "e2-highcpu-8", "diskSizeGb": "200"}, "")
+	p.waitFor(fmt.Sprintf(`location.pathname === %q && new URLSearchParams(location.search).get("edit") === "1" &&
+		document.querySelector("#edit-page-form #f-diskSizeGb") !== null`, "/cloud-build/worker-pools/"+name))
+	var form struct{ Heading, Submit, Machine string }
+	p.eval(`(() => ({ Heading: document.querySelector("#view h1").textContent,
+		Submit: document.querySelector("#edit-page-form button[type=submit]").textContent,
+		Machine: document.querySelector("#edit-page-form #f-machineType-e2").value }))()`, &form)
+	if form.Heading != "Edit private pool" || form.Submit != "Save" || form.Machine != "e2-standard-2" {
+		t.Errorf("the pool's page is %+v; want Edit private pool, prefilled, ending in Save", form)
+	}
+	p.submitForm(map[string]string{"machineType-e2": "e2-highcpu-8", "diskSizeGb": "200"}, "diskSizeGb")
+	p.waitFor(`!new URLSearchParams(location.search).has("edit")`)
 	w, err := c.GetWorkerPool(ctx, &cbpb.GetWorkerPoolRequest{Name: "projects/" + project + "/locations/us-central1/workerPools/" + name})
-	if wc := w.GetPrivatePoolV1Config().GetWorkerConfig(); err != nil || w.GetDisplayName() != "Browser builders" ||
+	if wc := w.GetPrivatePoolV1Config().GetWorkerConfig(); err != nil ||
 		wc.GetMachineType() != "e2-highcpu-8" || wc.GetDiskSizeGb() != 200 {
-		t.Errorf("GetWorkerPool after Edit worker pool = %v, %v; want the form's values", w, err)
+		t.Errorf("GetWorkerPool after Edit private pool's Save = %v, %v; want the page's values", w, err)
 	}
 
 	// The default build service account is Create trigger's Service

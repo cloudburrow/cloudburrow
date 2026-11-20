@@ -2421,10 +2421,16 @@ function filterBar({ noun, columns, onChange, extra = [] }) {
 // "View options" / "Column display options": a checkbox per data column,
 // remembered per service. hidden() is the set of columns turned off.
 const COLUMNS_KEY = "cloudburrow.columns";
+// CARD_PINS_KEY keeps a SummaryOnly screen's pinned cards (#1854), and
+// cardFilterText what its card filter holds across its polls.
+const CARD_PINS_KEY = "cloudburrow.cardpins";
+const cardFilterText = new Map();
 
-function viewOptions({ service, columns, onChange, scope = null, reload = null }) {
+function viewOptions({ service, columns, onChange, scope = null, reload = null, optional = [] }) {
   const stored = readStored(COLUMNS_KEY, {}) || {};
-  let off = new Set(Array.isArray(stored[service]) ? stored[service] : []);
+  // A column the screen offers only on request (Listing.OptionalColumns)
+  // starts off until the viewer has chosen columns here (#1854).
+  let off = new Set(Array.isArray(stored[service]) ? stored[service] : optional || []);
   if (scope) return viewOptionsDialog({ service, columns, onChange, scope, reload, off });
   const button = el("button", { type: "button", class: "icon-button view-options",
     "aria-label": "View options", title: "View options", "aria-haspopup": "true", "aria-expanded": "false",
@@ -3078,9 +3084,10 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   // (#1842). The filter still reads the hidden ones, as Google's does.
   const chooser = opts.rowControls && route.service
     ? viewOptions({ service: route.service, columns: allDataColumns, onChange: () => draw(),
-      scope: data.scope && data.scope.viewOptions ? data.scope : null, reload })
+      scope: data.scope && data.scope.viewOptions ? data.scope : null, reload, optional: data.optionalColumns })
     : null;
-  const dataColumns = () => allDataColumns().filter((c) => !chooser || !chooser.hidden().has(c));
+  const dataColumns = () => allDataColumns().filter((c) => chooser
+    ? !chooser.hidden().has(c) : !(data.optionalColumns || []).includes(c));
   const hasActions = () =>
     data.items.some((i) => (i.actions || []).some((a) => !a.panel) || i.object) || caps.delete;
   // Declared by the provider, or inferred from the rows that happen to be
@@ -3259,12 +3266,21 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
           (item.actsOn || []).length ? item.name : null),
       })),
       ...(caps.editRowFirst ? [] : edit),
-      ...(caps.delete ? [{
+      ...(caps.delete && !caps.deleteIcon ? [{
         label: caps.deleteLabel || "Delete", destructive: true,
         run: () => deleteResource(route, item.name, refresh, rowBusy(item.name)),
       }] : []),
       ...(item.object ? objectActions(route, item, refresh, rowBusy(item.name)) : []),
     ];
+    // Delete as a trash icon on the row (RowDeleteIconer), as Google's
+    // private pools list draws it (#1854).
+    if (caps.delete && caps.deleteIcon) {
+      buttons.push(el("button", { type: "button", class: "icon-button row-delete-icon",
+        disabled: busy ? "disabled" : null,
+        "aria-label": `${caps.deleteLabel || "Delete"} ${item.name}`, title: caps.deleteLabel || "Delete",
+        onclick: () => deleteResource(route, item.name, refresh, rowBusy(item.name)),
+        html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 7h12M9 7V5h6v2M8 7l1 12h6l1-12M10.5 10v6M13.5 10v6"/></svg>' }));
+    }
     if (!actions.length && !buttons.length) return el("td", {});
     if (!actions.length) return el("td", { class: "row-actions" }, ...buttons);
     // Suppressed rather than merely ignored while the row is busy: a live
@@ -5831,15 +5847,61 @@ async function renderList(view, route) {
     // Cards under section headings, when the provider names them, as
     // Document AI's Processor gallery groups its types (#1930).
     const cards = listingSummary(data), groups = (data.summary || []).filter((g) => (g.properties || []).length);
-    const runs = [];
-    groups.forEach((g, i) => {
-      if (!runs.length || g.section) runs.push({ section: g.section || "", cards: [] });
-      runs[runs.length - 1].cards.push(cards[i]);
-    });
-    setChildren(view, ...header, noteBanner(data.note),
-      ...runs.flatMap((r) => [
+    // A card with a Pin key can be pinned to the top (#1854), the pins
+    // the viewer's own; Filter narrows the cards by what is typed.
+    const pinKey = `${CARD_PINS_KEY}.${route.service}`;
+    const pins = new Set(readStored(pinKey, []) || []);
+    const filterBox = data.cardFilter ? el("input", { type: "search", class: "card-filter", id: "card-filter",
+      "aria-label": data.cardFilter, placeholder: data.cardFilter }) : null;
+    const typed = cardFilterText.get(route.service) || "";
+    if (filterBox) filterBox.value = typed;
+    const drawCards = () => {
+      const want = filterBox ? filterBox.value.trim().toLowerCase() : "";
+      const shown = groups.map((g, i) => ({ g, card: cards[i], i }))
+        // A card with no Filter text (a banner) stays whatever is typed.
+        .filter(({ g }) => !want || !g.filter || g.filter.toLowerCase().includes(want));
+      for (const { g, card } of shown) {
+        const old = card.querySelector(".card-pin");
+        if (old) old.remove();
+        if (!g.pin) continue;
+        const on = pins.has(g.pin);
+        card.classList.toggle("is-pinned", on);
+        card.prepend(el("button", { type: "button", class: "icon-button card-pin", "aria-pressed": on ? "true" : "false",
+          "aria-label": `Pin ${g.heading || g.pin}`, title: on ? "Unpin" : "Pin",
+          html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l-1 6 3 3v2H7v-2l3-3zM12 14v7"/></svg>',
+          onclick: () => {
+            if (pins.has(g.pin)) pins.delete(g.pin); else pins.add(g.pin);
+            writeStored(pinKey, [...pins]);
+            keepingFocus(view, drawCards);
+            announce(`${g.heading || g.pin} ${pins.has(g.pin) ? "pinned" : "unpinned"}`);
+          } }));
+      }
+      // Pinned cards first, in their own order; then the rest in theirs.
+      shown.sort((a, b) => (pins.has(b.g.pin) ? 1 : 0) - (pins.has(a.g.pin) ? 1 : 0) || a.i - b.i);
+      const runs = [];
+      shown.forEach(({ g, card }, n) => {
+        const pinned = g.pin && pins.has(g.pin);
+        if (!runs.length || (!pinned && g.section) || (n > 0 && !pinned && shown[n - 1].g.pin && pins.has(shown[n - 1].g.pin)))
+          runs.push({ section: pinned ? "" : g.section || "", cards: [] });
+        runs[runs.length - 1].cards.push(card);
+      });
+      setChildren(cardsHolder, ...(shown.length ? runs.flatMap((r) => [
         r.section ? el("h2", { class: "summary-section", text: r.section }) : null,
-        el("div", { class: "summary-cards" }, ...r.cards)]).filter(Boolean));
+        el("div", { class: "summary-cards" }, ...r.cards)]).filter(Boolean)
+        : [emptyState(`No ${noun} match the filter`, "Change or clear the filter to see more.")]));
+      return shown.length;
+    };
+    const cardsHolder = el("div", { class: "summary-card-runs" });
+    if (filterBox) filterBox.addEventListener("input", () => {
+      cardFilterText.set(route.service, filterBox.value);
+      const n = drawCards();
+      announce(`${n} ${noun} shown`);
+    });
+    drawCards();
+    setChildren(view, ...header, noteBanner(data.note),
+      filterBox ? el("div", { class: "card-filter-bar" },
+        el("label", { for: "card-filter", class: "sr-only", text: data.cardFilter }), filterBox) : null,
+      cardsHolder);
     announce(`${data.summary.length} ${noun} loaded`);
     return;
   }
@@ -5913,6 +5975,7 @@ function serverFilterBox(spec, reload) {
 // propertyValue is a property's <dd>: its value, as a link when the
 // provider names the page it opens (#1554).
 function propertyValue(prop) {
+  if (prop.chart && (prop.chart.bars || []).length) return el("dd", {}, barChart(prop));
   const value = prop.link ? el("a", { href: prop.link, text: prop.value }) : prop.value;
   // A link beside the value that opens one of the page's actions, as
   // Google's Upgrade beside a Spanner instance's edition (#1859): the page's
@@ -5932,6 +5995,27 @@ function propertyValue(prop) {
   button.textContent = prop.copy;
   button.classList.add("property-copy");
   return el("dd", { class: "has-copy" }, el("span", { class: "property-copy-value" }, value), button);
+}
+
+// barChart draws a Property's Chart (#1854): a Cloud Build Dashboard card's
+// Build history, a bar per build, each telling its outcome, duration and
+// time when hovered or focused, as Google's does on hover. The bars are a
+// list a screen reader reads; the property's value is its summary.
+function barChart(prop) {
+  const max = Math.max(...prop.chart.bars.map((b) => b.value), 0) || 1;
+  const tip = el("span", { class: "bar-chart-tip", "aria-hidden": "true" });
+  const show = (b) => { tip.textContent = b.label; };
+  const bars = prop.chart.bars.map((b) => {
+    const style = `height:${Math.max(6, Math.round((b.value / max) * 100))}%`;
+    const bar = b.link
+      ? el("a", { class: `bar-chart-bar is-${b.status || "none"}`, href: b.link, style, "aria-label": b.label, title: b.label })
+      : el("span", { class: `bar-chart-bar is-${b.status || "none"}`, tabindex: "0", role: "img", style, "aria-label": b.label, title: b.label });
+    bar.addEventListener("mouseenter", () => show(b));
+    bar.addEventListener("focus", () => show(b));
+    return el("li", {}, bar);
+  });
+  return el("div", { class: "bar-chart" },
+    el("ul", { class: "bar-chart-bars", "aria-label": `${prop.label}: ${prop.value}` }, ...bars), tip);
 }
 
 // listingSummary draws a listing's summary groups as the same property cards

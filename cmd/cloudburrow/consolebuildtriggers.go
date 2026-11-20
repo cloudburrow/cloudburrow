@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -240,7 +241,9 @@ func (p buildWorkerPoolsProvider) List(_ context.Context, project string) (conso
 		if w.GetState() != cbpb.WorkerPool_RUNNING {
 			st = w.GetState().String()
 		}
-		out.Items = append(out.Items, console.Resource{Name: parts[5], Status: st, Fields: map[string]string{
+		// The pool's name opens Edit private pool, as Google's does.
+		edit := "/cloud-build/worker-pools/" + url.PathEscape(parts[5]) + "?edit=1&project=" + url.QueryEscape(p.project(project))
+		out.Items = append(out.Items, console.Resource{Name: parts[5], Status: st, Link: edit, Fields: map[string]string{
 			"Region": parts[3], "Machine type": orDash(wc.GetMachineType()), "Disk (GB)": disk,
 			"Display name": orDash(w.GetDisplayName()), "Age": stampAge(w.GetCreateTime())}})
 	}

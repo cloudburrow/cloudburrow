@@ -1,6 +1,6 @@
 package main
 
-// A Cloud Build worker pool's page, with Edit worker pool, and the default
+// A Cloud Build worker pool's page, Google's Edit private pool (#1854), and the default
 // build service account on the Triggers page (#1491): the console parity
 // audit found GetWorkerPool, UpdateWorkerPool and GetDefaultServiceAccount
 // never sent by the console.
@@ -8,6 +8,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -77,58 +78,101 @@ func (p buildWorkerPoolsProvider) Detail(ctx context.Context, project string, pa
 			shown = append(shown, pr)
 		}
 	}
-	return console.Detail{Summary: shown}, nil
+	return console.Detail{Summary: shown, Edit: editPoolForm(w)}, nil
 }
 
-// DetailActions implements console.PathActor: Edit worker pool, prefilled.
-func (p buildWorkerPoolsProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
-	if len(path) != 1 {
-		return nil
+// editPoolForm is Google's Edit private pool page (EditForm.Page, #1854):
+// "Click the private pool name. The Edit private pool page is displayed.
+// ... update the machine type, disk size, and other settings as needed.
+// Click Save." (create-manage-private-pools). It holds Create private
+// pool's Machine configuration, Worker release and Assign external IPs,
+// prefilled; the name, region and network are fixed once it exists.
+func editPoolForm(w *cbpb.WorkerPool) *console.EditForm {
+	cfg := w.GetPrivatePoolV1Config()
+	wc := cfg.GetWorkerConfig()
+	series, _, _ := strings.Cut(wc.GetMachineType(), "-")
+	if poolMachineTypes[series] == nil {
+		series = "e2"
 	}
-	w, err := p.get(ctx, project, path[0])
-	if err != nil {
-		return nil
-	}
-	wc := w.GetPrivatePoolV1Config().GetWorkerConfig()
 	disk := ""
 	if wc.GetDiskSizeGb() != 0 {
 		disk = strconv.FormatInt(wc.GetDiskSizeGb(), 10)
 	}
-	return []console.Action{{ID: "edit-pool", Label: "Edit worker pool", Fields: []console.Field{
-		{Name: "displayName", Label: "Display name", Type: "text", Default: w.GetDisplayName()},
-		{Name: "machineType", Label: "Machine type", Type: "text", Required: true, Default: wc.GetMachineType(),
-			Help: "Such as e2-standard-2; a build that names the pool runs on the host's Docker whatever its machine type"},
-		{Name: "diskSizeGb", Label: "Disk size (GB)", Type: "number", Default: disk, Help: "100 to 4000; empty or 0 is the default"},
-		{Name: "etag", Type: "hidden", Default: w.GetEtag()},
-	}}}
+	release, channel, version := "channel", "regular", ""
+	switch r := wc.GetWorkerRelease(); r {
+	case "", "regular", "stable", "rapid":
+		channel = orText(r, "regular")
+	default:
+		release, version = "version", r
+	}
+	external := "true"
+	if cfg.GetNetworkConfig().GetEgressOption() == cbpb.PrivatePoolV1Config_NetworkConfig_NO_PUBLIC_EGRESS {
+		external = "false"
+	}
+	_, all := buildWorkerPoolsProvider{}.CreateForm()
+	var fields []console.Field
+	for _, f := range all {
+		switch {
+		case f.Name == "name" || f.Name == "region" || f.Section == "Network type" && f.Name != "externalIPs":
+			continue
+		case f.Name == "series":
+			f.Default = series
+		case strings.HasPrefix(f.Name, "machineType-"):
+			if f.Name == "machineType-"+series && wc.GetMachineType() != "" {
+				f.Default = wc.GetMachineType()
+				if !slices.Contains(f.Options, f.Default) {
+					f.Options = append(f.Options, f.Default)
+				}
+			}
+		case f.Name == "diskSizeGb":
+			f.Default = disk
+		case f.Name == "nestedVirtualization":
+			f.Default = fmt.Sprint(wc.GetEnableNestedVirtualization())
+		case f.Name == "release":
+			f.Default = release
+		case f.Name == "channel":
+			f.Default = channel
+		case f.Name == "version":
+			f.Default = version
+		case f.Name == "externalIPs":
+			f.Default = external
+		}
+		fields = append(fields, f)
+	}
+	fields = append(fields, console.Field{Name: "etag", Type: "hidden", Default: w.GetEtag()})
+	return &console.EditForm{Label: "Edit", Title: "Edit private pool", Submit: "Save", Page: true, Fields: fields,
+		Note: "Name, Region and Network type are fixed once the pool exists."}
 }
 
-// ActAt implements console.PathActor: UpdateWorkerPool of the display name,
-// machine type and disk size, with the etag the form was drawn from.
-func (p buildWorkerPoolsProvider) ActAt(ctx context.Context, project string, path []string, action string, v map[string]string) error {
-	if len(path) != 1 || action != "edit-pool" {
-		return fmt.Errorf("unknown action %q", action)
+// Edit implements console.Editor: Edit private pool's Save, an
+// UpdateWorkerPool of what the page holds, with the etag it was drawn from.
+func (p buildWorkerPoolsProvider) Edit(ctx context.Context, project string, path []string, v map[string]string) error {
+	if len(path) != 1 {
+		return fmt.Errorf("only a private pool is edited here")
 	}
 	name, err := p.poolName(project, path[0])
 	if err != nil {
 		return err
 	}
-	var disk int64
-	if d := strings.TrimSpace(v["diskSizeGb"]); d != "" {
-		if disk, err = strconv.ParseInt(d, 10, 64); err != nil || disk < 0 {
-			return fmt.Errorf("disk size %q: expected a whole number of GB", d)
-		}
+	if _, set := v["externalIPs"]; !set {
+		// An unchecked box is not sent.
+		v["externalIPs"] = "false"
 	}
-	mt := strings.TrimSpace(v["machineType"])
-	if mt == "" {
+	pool, err := poolFromValues(v)
+	if err != nil {
+		return err
+	}
+	if pool.GetPrivatePoolV1Config().GetWorkerConfig().GetMachineType() == "" {
 		return fmt.Errorf("a machine type is required")
 	}
-	w := &cbpb.WorkerPool{Name: name, DisplayName: strings.TrimSpace(v["displayName"]), Etag: v["etag"],
-		Config: &cbpb.WorkerPool_PrivatePoolV1Config{PrivatePoolV1Config: &cbpb.PrivatePoolV1Config{
-			WorkerConfig: &cbpb.PrivatePoolV1Config_WorkerConfig{MachineType: mt, DiskSizeGb: disk}}}}
+	pool.Name, pool.Etag = name, v["etag"]
+	paths := []string{"private_pool_v1_config.worker_config.machine_type", "private_pool_v1_config.worker_config.disk_size_gb",
+		"private_pool_v1_config.worker_config.enable_nested_virtualization", "private_pool_v1_config.network_config.egress_option"}
+	if v["release"] != "" {
+		paths = append(paths, "private_pool_v1_config.worker_config.worker_release")
+	}
 	return p.b.withClient(ctx, func(c *cloudbuild.Client) error {
-		op, err := c.UpdateWorkerPool(ctx, &cbpb.UpdateWorkerPoolRequest{WorkerPool: w, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{
-			"display_name", "private_pool_v1_config.worker_config.machine_type", "private_pool_v1_config.worker_config.disk_size_gb"}}})
+		op, err := c.UpdateWorkerPool(ctx, &cbpb.UpdateWorkerPoolRequest{WorkerPool: pool, UpdateMask: &fieldmaskpb.FieldMask{Paths: paths}})
 		if err != nil {
 			return err
 		}
@@ -136,6 +180,10 @@ func (p buildWorkerPoolsProvider) ActAt(ctx context.Context, project string, pat
 		return err
 	})
 }
+
+// RowDeleteIcon draws each row's Delete as a trash icon: "In the row with
+// your private pool, click the trash icon."
+func (buildWorkerPoolsProvider) RowDeleteIcon() bool { return true }
 
 // defaultServiceAccount is the Triggers page's summary: the account builds
 // run as, as GetDefaultServiceAccount answers it.
@@ -155,6 +203,7 @@ func (p buildTriggersProvider) defaultServiceAccount(ctx context.Context, projec
 }
 
 var (
-	_ console.Driller   = buildWorkerPoolsProvider{}
-	_ console.PathActor = buildWorkerPoolsProvider{}
+	_ console.Driller         = buildWorkerPoolsProvider{}
+	_ console.Editor          = buildWorkerPoolsProvider{}
+	_ console.RowDeleteIconer = buildWorkerPoolsProvider{}
 )

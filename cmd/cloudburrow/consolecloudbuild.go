@@ -13,6 +13,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -60,6 +61,18 @@ func buildOutcome(b *cbpb.Build) string {
 	return "Queued"
 }
 
+// barStatus colours a Build history bar: green for a success, red for a
+// failure or timeout, neither for the rest.
+func barStatus(b *cbpb.Build) string {
+	switch b.GetStatus() {
+	case cbpb.Build_SUCCESS:
+		return "ok"
+	case cbpb.Build_FAILURE, cbpb.Build_TIMEOUT, cbpb.Build_INTERNAL_ERROR:
+		return "fail"
+	}
+	return ""
+}
+
 // hms is a duration as HH:MM:SS.
 func hms(d time.Duration) string {
 	d = d.Round(time.Second)
@@ -78,7 +91,7 @@ func (p buildDashboardProvider) List(_ context.Context, project string) (console
 	if project == "" {
 		project = p.b.defaultProject
 	}
-	out := console.Listing{NameColumn: "Trigger", Noun: "triggers", SummaryOnly: true}
+	out := console.Listing{NameColumn: "Trigger", Noun: "triggers", SummaryOnly: true, CardFilter: "Filter triggers"}
 	byTrigger := map[string][]*cbpb.Build{}
 	pending := 0
 	for _, b := range runadapter.CloudBuilds(project, "") {
@@ -125,7 +138,8 @@ func (p buildDashboardProvider) List(_ context.Context, project string) (console
 		}
 		if len(bs) == 0 {
 			props = append(props, console.Property{Label: "Latest build", Value: "-"})
-			out.Summary = append(out.Summary, console.PropertyGroup{Heading: strings.Join(title, " · "), Properties: props})
+			out.Summary = append(out.Summary, console.PropertyGroup{Heading: strings.Join(title, " · "), Properties: props,
+				Pin: t.GetId(), Filter: strings.Join([]string{repo, t.GetName(), t.GetDescription()}, " ")})
 			continue
 		}
 		latest := bs[0]
@@ -156,21 +170,27 @@ func (p buildDashboardProvider) List(_ context.Context, project string) (console
 				}
 			}
 		}
-		// Build history: each recent build's duration, oldest first, as
-		// the bar chart's bars run.
+		// Build history: Google's bar chart of each recent build's
+		// duration, oldest first, each bar its outcome, duration and time.
 		var hist []string
+		var bars []console.Bar
 		var total time.Duration
 		finished, passed, failed := 0, 0, 0
 		for i := len(bs) - 1; i >= 0; i-- {
 			b := bs[i]
 			d, ok := finishedDuration(b)
+			word := buildOutcome(b)
 			if ok {
 				total += d
 				finished++
-				hist = append(hist, buildOutcome(b)+" "+hms(d))
-			} else {
-				hist = append(hist, buildOutcome(b))
+				word += " " + hms(d)
+			} else if b.GetStartTime() != nil {
+				d = time.Since(b.GetStartTime().AsTime())
 			}
+			hist = append(hist, word)
+			bars = append(bars, console.Bar{Value: d.Seconds(), Status: barStatus(b),
+				Label: word + ", " + b.GetCreateTime().AsTime().Local().Format("Jan 2, 2006, 3:04:05 PM"),
+				Link:  "/cloud-build/builds/" + url.PathEscape(b.GetId()) + q})
 			switch b.GetStatus() {
 			case cbpb.Build_SUCCESS:
 				passed++
@@ -178,7 +198,7 @@ func (p buildDashboardProvider) List(_ context.Context, project string) (console
 				failed++
 			}
 		}
-		props = append(props, console.Property{Label: "Build history", Value: strings.Join(hist, ", ")})
+		props = append(props, console.Property{Label: "Build history", Value: strings.Join(hist, ", "), Chart: &console.BarChart{Bars: bars}})
 		if finished > 0 {
 			props = append(props, console.Property{Label: "Average duration", Value: hms(total / time.Duration(finished))})
 		}
@@ -186,7 +206,8 @@ func (p buildDashboardProvider) List(_ context.Context, project string) (console
 			props = append(props, console.Property{Label: "Pass - Fail %",
 				Value: fmt.Sprintf("%d%% - %d%%", passed*100/(passed+failed), 100-passed*100/(passed+failed))})
 		}
-		out.Summary = append(out.Summary, console.PropertyGroup{Heading: strings.Join(title, " · "), Properties: props})
+		out.Summary = append(out.Summary, console.PropertyGroup{Heading: strings.Join(title, " · "), Properties: props,
+			Pin: t.GetId(), Filter: strings.Join([]string{repo, t.GetName(), t.GetDescription()}, " ")})
 	}
 	out.Total = len(triggers)
 	if len(triggers) == 0 {
@@ -383,12 +404,50 @@ type buildSettingsProvider struct {
 func (buildSettingsProvider) ID() string    { return "cloud-build-settings" }
 func (buildSettingsProvider) Title() string { return "Cloud Build settings" }
 
-func (p buildSettingsProvider) account(ctx context.Context, project string) string {
+// settingsAccountKey carries Settings' Service account drop-down: "Use the
+// drop-down menu to select the service account you want to update"
+// (configure-access-for-cloud-build-service-account, #1854).
+const settingsAccountKey = "serviceAccount"
+
+// FilterKeys implements console.Filterer: the Service account drop-down.
+func (buildSettingsProvider) FilterKeys() []string { return []string{settingsAccountKey} }
+
+// defaultAccount is the project's default build service account.
+func (p buildSettingsProvider) defaultAccount(ctx context.Context, project string) string {
 	groups := buildTriggersProvider{b: p.b}.defaultServiceAccount(ctx, project)
 	if len(groups) == 0 || len(groups[0].Properties) == 0 {
 		return ""
 	}
 	return groups[0].Properties[0].Value
+}
+
+// accounts are the drop-down's choices: the default build service account,
+// then the project's other IAM service accounts.
+func (p buildSettingsProvider) accounts(ctx context.Context, project string) []string {
+	def := p.defaultAccount(ctx, project)
+	if def == "" {
+		return nil
+	}
+	out := []string{def}
+	for _, a := range (buildTriggersProvider{registry: p.registry}).serviceAccounts(project) {
+		if a != def {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+// account is the service account the page updates: the one chosen in the
+// drop-down, else the default build service account.
+func (p buildSettingsProvider) account(ctx context.Context, project string) string {
+	all := p.accounts(ctx, project)
+	if len(all) == 0 {
+		return ""
+	}
+	if want := console.ScopeValue(ctx, settingsAccountKey); want != "" && slices.Contains(all, want) {
+		return want
+	}
+	return all[0]
 }
 
 func (p buildSettingsProvider) policy(ctx context.Context, project string) (*iampb.Policy, error) {
@@ -410,6 +469,16 @@ func (p buildSettingsProvider) List(ctx context.Context, project string) (consol
 		out.Unavailable = "Cloud Build is not reachable, so its service account is not known"
 		return out, nil
 	}
+	all := p.accounts(ctx, project)
+	choice := &console.Scope{Key: settingsAccountKey, Label: "Service account", Selected: sa, Default: all[0]}
+	for i, a := range all {
+		label := a
+		if i == 0 {
+			label += " (default)"
+		}
+		choice.Options = append(choice.Options, console.ScopeOption{ID: a, Label: label})
+	}
+	out.Filters = []*console.Scope{choice}
 	out.Summary = []console.PropertyGroup{{Heading: "Service account permissions", Properties: []console.Property{
 		{Label: "Service account email", Value: sa}}}}
 	pol, err := p.policy(ctx, project)
@@ -499,6 +568,7 @@ var (
 	_ console.Provider  = buildDashboardProvider{}
 	_ console.ListActor = buildRepositoriesProvider{}
 	_ console.Actor     = buildSettingsProvider{}
+	_ console.Filterer  = buildSettingsProvider{}
 	_ console.Provider  = buildSettingsProvider{}
 	_ console.PathActor = buildRepositoriesProvider{}
 )

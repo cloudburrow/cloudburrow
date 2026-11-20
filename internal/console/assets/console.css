@@ -2523,3 +2523,23 @@ svg.bq-chart { display: block; border: 1px solid var(--border); border-radius: v
    leaves beside Delete. */
 .orgpolicy-rule { min-inline-size: 0; }
 .orgpolicy-custom-line input { flex: 1 1 0; width: 0; min-width: 0; }
+
+/* A Cloud Build Dashboard card's Build history bar chart, its Pin and the
+   Filter triggers box (#1854). */
+.bar-chart { display: flex; flex-direction: column; gap: 4px; }
+.bar-chart-bars { display: flex; align-items: flex-end; gap: 3px; height: 48px; margin: 0; padding: 0; list-style: none; }
+.bar-chart-bars li { display: flex; align-items: flex-end; height: 100%; flex: 0 0 10px; }
+.bar-chart-bar { display: block; width: 10px; border-radius: 2px 2px 0 0; background: var(--text-muted); }
+.bar-chart-bar.is-ok { background: var(--ok); }
+.bar-chart-bar.is-fail { background: var(--error); }
+.bar-chart-bar:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.bar-chart-tip { min-height: 1.3em; font-size: var(--text-caption-size); color: var(--text-muted); }
+.listing-summary { position: relative; }
+.card-pin { position: absolute; top: 8px; right: 8px; }
+.card-pin svg { fill: none; stroke: currentColor; stroke-width: 1.6; }
+.card-pin[aria-pressed="true"] svg { fill: currentColor; }
+.listing-summary.is-pinned { border-color: var(--accent); }
+.card-filter-bar { margin: 0 0 16px; }
+.card-filter { width: min(360px, 100%); }
+.row-delete-icon svg { fill: none; stroke: currentColor; stroke-width: 1.6; }
+.listing-summary:has(> .card-pin) > h2 { padding-right: 40px; }
