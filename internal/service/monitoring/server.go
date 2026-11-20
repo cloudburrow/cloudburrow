@@ -11,9 +11,12 @@
 // entries, from the local Cloud Logging, and the API request counts and
 // latencies it serves.
 //
-// Alerting, dashboards, groups, uptime checks, services/SLOs and the
-// Query (MQL/PromQL) service are not served: their gRPC services are not
-// registered, so they answer UNIMPLEMENTED.
+// The other v3 services (#1964) are served too: alert policies, evaluated
+// over these series and the local Cloud Logging (evaluate.go), with
+// incidents and notifications delivered only on the machine (notify.go);
+// notification channels, uptime checks run against local hosts, groups,
+// services and SLOs, snoozes, and the Dashboards API v1. The Query service
+// (MQL) is not registered and answers UNIMPLEMENTED.
 // docs/monitoring.md is the user's guide.
 package monitoring
 
@@ -29,7 +32,9 @@ import (
 	"time"
 
 	"cloud.google.com/go/monitoring/apiv3/v2/monitoringpb"
+	"cloud.google.com/go/monitoring/dashboard/apiv1/dashboardpb"
 	metricpb "google.golang.org/genproto/googleapis/api/metric"
+	"google.golang.org/genproto/googleapis/api/monitoredres"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -97,6 +102,13 @@ type Builtin interface {
 // Server is the Monitoring API.
 type Server struct {
 	monitoringpb.UnimplementedMetricServiceServer
+	monitoringpb.UnimplementedAlertPolicyServiceServer
+	monitoringpb.UnimplementedNotificationChannelServiceServer
+	monitoringpb.UnimplementedUptimeCheckServiceServer
+	monitoringpb.UnimplementedGroupServiceServer
+	monitoringpb.UnimplementedServiceMonitoringServiceServer
+	monitoringpb.UnimplementedSnoozeServiceServer
+	dashboardpb.UnimplementedDashboardsServiceServer
 
 	state string // the file; "" keeps everything in memory
 
@@ -105,6 +117,18 @@ type Server struct {
 	descriptors map[string]*metricpb.MetricDescriptor
 	// series by project, then by series key.
 	series map[string]map[string]*series
+
+	// objects are the configuration objects by kind, then resource name.
+	objects map[string]map[string]proto.Message
+	// incidents are every project's, oldest first.
+	incidents  []*Incident
+	deliveries []Delivery
+	codes      map[string]verificationCode
+	lastEval   time.Time
+	logs       LogMatcher
+	publish    Publisher
+	consoleURL string
+	uptime     uptimeState
 
 	builtins []Builtin
 	// now is the clock, for tests.
@@ -115,7 +139,10 @@ type Server struct {
 // memory only). A state file that cannot be read is an error.
 func NewServer(state string) (*Server, error) {
 	s := &Server{state: state, now: time.Now,
-		descriptors: map[string]*metricpb.MetricDescriptor{}, series: map[string]map[string]*series{}}
+		descriptors: map[string]*metricpb.MetricDescriptor{}, series: map[string]map[string]*series{},
+		objects: map[string]map[string]proto.Message{}, codes: map[string]verificationCode{},
+		uptime: uptimeState{last: map[string]time.Time{}, results: map[string][]UptimeResult{}, targets: map[string]*monitoredres.MonitoredResource{}}}
+	s.builtins = append(s.builtins, uptimeBuiltin{s})
 	if state != "" {
 		if err := s.load(); err != nil {
 			return nil, err
@@ -134,12 +161,23 @@ func (s *Server) AddBuiltin(b Builtin) {
 	s.mu.Unlock()
 }
 
-// Register adds MetricService to a gRPC server, or to the JSON transcoder.
-func (s *Server) Register(g grpc.ServiceRegistrar) { monitoringpb.RegisterMetricServiceServer(g, s) }
+// Register adds the services to a gRPC server, or to the JSON transcoder.
+func (s *Server) Register(g grpc.ServiceRegistrar) {
+	monitoringpb.RegisterMetricServiceServer(g, s)
+	monitoringpb.RegisterAlertPolicyServiceServer(g, s)
+	monitoringpb.RegisterNotificationChannelServiceServer(g, s)
+	monitoringpb.RegisterUptimeCheckServiceServer(g, s)
+	monitoringpb.RegisterGroupServiceServer(g, s)
+	monitoringpb.RegisterServiceMonitoringServiceServer(g, s)
+	monitoringpb.RegisterSnoozeServiceServer(g, s)
+	dashboardpb.RegisterDashboardsServiceServer(g, s)
+}
 
 type disk struct {
 	Descriptors map[string]json.RawMessage            `json:"descriptors"`
 	Series      map[string]map[string]json.RawMessage `json:"series"`
+	Objects     map[string]map[string]json.RawMessage `json:"objects,omitempty"`
+	Incidents   []*Incident                           `json:"incidents,omitempty"`
 }
 
 func (s *Server) load() error {
@@ -171,6 +209,19 @@ func (s *Server) load() error {
 			s.series[p][k] = &series{TS: ts}
 		}
 	}
+	for kind, m := range d.Objects {
+		if newObject(kind) == nil {
+			continue
+		}
+		for n, raw := range m {
+			o := newObject(kind)
+			if err := protojson.Unmarshal(raw, o); err != nil {
+				return fmt.Errorf("parse %s %s: %w", kind, n, err)
+			}
+			s.put(kind, n, o)
+		}
+	}
+	s.incidents = d.Incidents
 	return nil
 }
 
@@ -197,6 +248,18 @@ func (s *Server) save() error {
 			d.Series[p][k] = b
 		}
 	}
+	d.Objects = map[string]map[string]json.RawMessage{}
+	for kind, m := range s.objects {
+		d.Objects[kind] = map[string]json.RawMessage{}
+		for n, o := range m {
+			b, err := protojson.Marshal(o)
+			if err != nil {
+				return err
+			}
+			d.Objects[kind][n] = b
+		}
+	}
+	d.Incidents = s.incidents
 	b, err := json.Marshal(d)
 	if err != nil {
 		return err
@@ -211,7 +274,8 @@ func (s *Server) save() error {
 	return os.Rename(tmp, s.state)
 }
 
-// ResetProject deletes the user-defined descriptors and series of project,
+// ResetProject deletes the user-defined descriptors, series, configuration
+// objects and incidents of project,
 // or of every project when project is "".
 func (s *Server) ResetProject(project string) error {
 	s.mu.Lock()
@@ -223,8 +287,24 @@ func (s *Server) ResetProject(project string) error {
 	}
 	if project == "" {
 		s.series = map[string]map[string]*series{}
+		s.objects = map[string]map[string]proto.Message{}
+		s.incidents, s.deliveries = nil, nil
 	} else {
 		delete(s.series, project)
+		for _, m := range s.objects {
+			for n := range m {
+				if strings.HasPrefix(n, "projects/"+project+"/") {
+					delete(m, n)
+				}
+			}
+		}
+		var keep []*Incident
+		for _, in := range s.incidents {
+			if in.Project != project {
+				keep = append(keep, in)
+			}
+		}
+		s.incidents = keep
 	}
 	return s.save()
 }

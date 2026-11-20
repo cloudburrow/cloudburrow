@@ -152,6 +152,10 @@ var gcloudVerified = []struct {
 	// TestGcloudPrivateCA drives pools, roots, subordinates, templates,
 	// certificates and CRLs.
 	{config.ServicePrivateCA, "privateca", "/", false, false},
+	// Cloud Monitoring (#1964): gcloud monitoring appends v3/ (policies,
+	// channels, uptime, snoozes) and v1/ (dashboards) to the one JSON port.
+	// TestGcloudMonitoring drives dashboards, channels and policies.
+	{config.ServiceMonitoring, "monitoring", "/", false, false},
 	// Bigtable's admin REST API (#1440), on the Bigtable port beside gRPC;
 	// gcloud bigtable appends v2/. TestGcloudBigtableAppProfiles creates,
 	// lists, updates and deletes app profiles.
@@ -224,7 +228,8 @@ func gcloudConfiguration(cfg config.Config, adcPath string) string {
 		sqlAdminEndpoint: cfg.Endpoints.SQLAdmin, memorystoreAdminEndpoint: cfg.Endpoints.MemorystoreAdmin,
 		serviceUsageService: cfg.Endpoints.ServiceUsage, config.ServiceBackupDR: cfg.Endpoints.BackupDR,
 		config.ServiceBigtable: cfg.Endpoints.Bigtable, spannerRESTEndpoint: cfg.Endpoints.SpannerREST,
-		config.ServiceFirestore: cfg.Endpoints.Firestore, config.ServicePrivateCA: cfg.Endpoints.PrivateCA, config.ServiceDatastore: cfg.Endpoints.Datastore}
+		config.ServiceFirestore: cfg.Endpoints.Firestore, config.ServicePrivateCA: cfg.Endpoints.PrivateCA, config.ServiceDatastore: cfg.Endpoints.Datastore,
+		config.ServiceMonitoring: cfg.Endpoints.Monitoring}
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n# Instance %q.\n", gcloudMarker, cfg.Name)
 	// should_prompt_to_enable_api is off because gcloud would otherwise ask
@@ -245,6 +250,9 @@ func gcloudConfiguration(cfg config.Config, adcPath string) string {
 		}
 		if v.service == config.ServicePrivateCA {
 			on = privateCAEnabled(cfg)
+		}
+		if v.service == config.ServiceMonitoring {
+			on = monitoringEnabled(cfg)
 		}
 		if on && ports[v.service] != 0 {
 			addr := host(ports[v.service])

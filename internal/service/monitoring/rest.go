@@ -7,9 +7,9 @@ import (
 )
 
 // Transcoder is the JSON API's configuration (the google.api.http bindings
-// of google.monitoring.v3), with nothing registered.
+// of google.monitoring.v3 and google.monitoring.dashboard.v1), with nothing registered.
 func Transcoder() *rest.Transcoder {
-	return &rest.Transcoder{Packages: []string{"google.monitoring.v3"}}
+	return &rest.Transcoder{Packages: []string{"google.monitoring.v3", "google.monitoring.dashboard.v1"}}
 }
 
 // Routes is every bound route.

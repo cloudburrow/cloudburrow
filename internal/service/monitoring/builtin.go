@@ -283,9 +283,12 @@ func bucketIndex(opts *distribution.Distribution_BucketOptions, n int, v float64
 // cumulative latency histogram over Bounds.
 type RequestCount struct {
 	Service, Method, Code string
-	Count                 uint64
-	Sum                   float64
-	Buckets               []uint64
+	// Project is the project the calls named; "" is the instance's
+	// default project's.
+	Project string
+	Count   uint64
+	Sum     float64
+	Buckets []uint64
 }
 
 // RequestSource is the instance's request counters.
@@ -312,8 +315,9 @@ type requestDelta struct {
 	buckets    []uint64
 }
 
-// RequestBuiltin serves serviceruntime.googleapis.com/api/* for the
-// instance's project from periodic samples of the request counters: each
+// RequestBuiltin serves serviceruntime.googleapis.com/api/* per project
+// (the project each call named; a call that named none is the instance's
+// default project's) from periodic samples of the request counters: each
 // sample's change since the last is one DELTA point. A read takes a sample
 // first, so it sees the calls made up to it.
 type RequestBuiltin struct {
@@ -340,7 +344,9 @@ func NewRequestBuiltin(src RequestSource, project string, now func() time.Time) 
 	return r
 }
 
-func requestKey(c RequestCount) string { return c.Service + "\x00" + c.Method + "\x00" + c.Code }
+func requestKey(c RequestCount) string {
+	return c.Service + "\x00" + c.Method + "\x00" + c.Code + "\x00" + c.Project
+}
 
 // Sample records the counters' change since the last sample.
 func (r *RequestBuiltin) Sample() {
@@ -392,7 +398,7 @@ func (r *RequestBuiltin) Descriptors(project string) []*metricpb.MetricDescripto
 }
 
 func (r *RequestBuiltin) Series(project, metricType string, start, end time.Time) ([]*monitoringpb.TimeSeries, error) {
-	if project != r.project || (metricType != requestCount && metricType != requestLatencies) {
+	if metricType != requestCount && metricType != requestLatencies {
 		return nil, nil
 	}
 	r.Sample()
@@ -402,6 +408,9 @@ func (r *RequestBuiltin) Series(project, metricType string, start, end time.Time
 	var out []*monitoringpb.TimeSeries
 	for k, ds := range r.deltas {
 		c := r.headers[k]
+		if owner := c.Project; owner != project && (owner != "" || project != r.project) {
+			continue
+		}
 		ts := &monitoringpb.TimeSeries{
 			Metric: &metricpb.Metric{Type: metricType, Labels: codeLabels(c.Code)},
 			Resource: &monitoredres.MonitoredResource{Type: "consumed_api", Labels: map[string]string{

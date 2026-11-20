@@ -343,6 +343,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	monitoringSvc := newMonitoringService(cfg)
 	if monitoringSvc != nil {
 		monitoringSvc.logging = loggingSvc
+		// Pub/Sub notification channels publish to this instance's Pub/Sub
+		// (#1964).
+		if serviceEnabled(cfg, config.ServicePubSub) {
+			monitoringSvc.pubsub = func() *netfwd.Forwarder { return forwarderFor(forwarders, "pubsub") }
+		}
 	}
 	monitoringSvc.register(coord)
 	if loggingSvc != nil {
