@@ -227,6 +227,8 @@ func recognizerConfigFields(cur *speechpb.Recognizer) []console.Field {
 		{Name: "profanityFilter", Label: "Profanity filter", Type: "checkbox", Default: strconv.FormatBool(f.GetProfanityFilter())},
 		{Name: "spokenPunctuation", Label: "Spoken punctuation", Type: "checkbox", Default: strconv.FormatBool(f.GetEnableSpokenPunctuation())},
 		{Name: "spokenEmojis", Label: "Spoken emojis", Type: "checkbox", Default: strconv.FormatBool(f.GetEnableSpokenEmojis())},
+		{Name: "denoise", Label: "Denoise audio", Type: "checkbox", Default: strconv.FormatBool(c.GetDenoiserConfig().GetDenoiseAudio()),
+			Help: "denoised locally with RNNoise before it is transcribed"},
 	}
 }
 
@@ -242,7 +244,11 @@ func recognitionConfig(v map[string]string) *speechpb.RecognitionConfig {
 			langs = append(langs, l)
 		}
 	}
-	return &speechpb.RecognitionConfig{Model: model, LanguageCodes: langs,
+	var denoiser *speechpb.DenoiserConfig
+	if v["denoise"] == "true" {
+		denoiser = &speechpb.DenoiserConfig{DenoiseAudio: true}
+	}
+	return &speechpb.RecognitionConfig{Model: model, LanguageCodes: langs, DenoiserConfig: denoiser,
 		DecodingConfig: &speechpb.RecognitionConfig_AutoDecodingConfig{AutoDecodingConfig: &speechpb.AutoDetectDecodingConfig{}},
 		Features: &speechpb.RecognitionFeatures{EnableWordTimeOffsets: v["wordTimeOffsets"] == "true",
 			EnableWordConfidence: v["wordConfidence"] == "true", EnableAutomaticPunctuation: v["punctuation"] == "true",

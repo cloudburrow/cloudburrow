@@ -6896,7 +6896,7 @@
         "tests": [
           "test/compat/speech_test.go:321 TestSpeechBatchRecognize",
           "test/compat/speech_test.go:80 TestSpeechRecognizers",
-          "test/compat/speechfeatures_test.go:48 TestSpeechRecognitionFeatures1799",
+          "test/compat/speechfeatures_test.go:57 TestSpeechRecognitionFeatures1799",
           "test/compat/speechstream_test.go:58 TestSpeechAdaptationBoost"
         ]
       },
@@ -6977,7 +6977,7 @@
         "method": "google.cloud.speech.v1.Speech/Recognize",
         "status": "Verified",
         "tests": [
-          "test/compat/speechfeatures_test.go:48 TestSpeechRecognitionFeatures1799",
+          "test/compat/speechfeatures_test.go:57 TestSpeechRecognitionFeatures1799",
           "test/compat/speechstream_test.go:229 TestSpeechV1"
         ]
       },
