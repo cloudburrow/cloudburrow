@@ -3856,6 +3856,8 @@ func (p secretsProvider) Detail(_ context.Context, project string, path []string
 		NameColumn:   "Version",
 		Noun:         "versions",
 		AlwaysStatus: true,
+		// Google's Versions tab: select versions, then Actions (#1850).
+		SelectActions: secretVersionSelectActions(secret, st.Now()),
 	}
 	all, err := st.ListVersions(project, id)
 	if err != nil {
@@ -3876,10 +3878,10 @@ func (p secretsProvider) Detail(_ context.Context, project string, path []string
 			if a := aliases[v.Number]; len(a) > 0 {
 				va = strings.Join(a, ", ")
 			}
-			href := "/secrets/" + urlpkg.PathEscape(path[0]) + "/" + strconv.Itoa(v.Number) + "?reveal=1"
 			versions.Items = append(versions.Items, console.Resource{
-				Name:   fmt.Sprint(v.Number),
-				Status: string(v.State),
+				Name:       fmt.Sprint(v.Number),
+				Status:     string(v.State),
+				Selectable: true,
 				Fields: map[string]string{
 					"State":                     string(v.State),
 					"Aliases":                   va,
@@ -3887,7 +3889,7 @@ func (p secretsProvider) Detail(_ context.Context, project string, path []string
 					"Scheduled for destruction": scheduled,
 					"Destroyed":                 destroyed,
 				},
-				Actions: secretVersionRowActions(secret, v, st.Now(), href),
+				Actions: secretVersionRowActions(secret, v, st.Now()),
 			})
 		}
 		versions.Total = len(versions.Items)
@@ -3897,8 +3899,8 @@ func (p secretsProvider) Detail(_ context.Context, project string, path []string
 		// holds to anyone who opened a page. A value is shown only from the
 		// version's own page, only when asked for, and the asking is recorded.
 		versions.RowsOpenable = true
-		versions.Note = "Each version's Actions menu has View secret value, Disable, Enable and Destroy. " +
-			"Payloads are never included in this list."
+		versions.Note = "Select versions, then Disable, Enable or Destroy; each version's Actions menu has View secret value " +
+			"and what its state allows. Payloads are never included in this list."
 	}
 
 	return console.Detail{
@@ -3915,8 +3917,12 @@ func (p secretsProvider) Detail(_ context.Context, project string, path []string
 			{ID: "permissions", Kind: console.KindPermissions},
 			{ID: "logs", Label: "Logs", Kind: console.KindLogs},
 		},
+		// Google's Edit secret is a page ending in Update secret
+		// (https://docs.cloud.google.com/secret-manager/docs/edit-secrets).
 		Edit: &console.EditForm{
 			Label:  "Edit secret",
+			Submit: "Update secret",
+			Layout: console.EditLayoutPage,
 			Fields: secretOptionalFields(&secret),
 			Note: "Replication cannot be changed after a secret is created, so it is not offered here; " +
 				"Change encryption keys changes its customer-managed keys.",
@@ -4015,7 +4021,8 @@ func (p secretsProvider) DetailActions(_ context.Context, project string, path [
 		if err != nil {
 			return nil
 		}
-		return []console.Action{secretAddVersionAction(), secretAdvanceClockAction(), secretKeysAction(sec)}
+		return append([]console.Action{secretAddVersionAction(), secretAdvanceClockAction(), secretKeysAction(sec)},
+			secretVersionSelectActions(sec, st.Now())...)
 	case 2:
 		// What is offered depends on the version's current state. Enabling an
 		// enabled version and destroying a destroyed one are both buttons that
@@ -4029,20 +4036,9 @@ func (p secretsProvider) DetailActions(_ context.Context, project string, path [
 		if err != nil {
 			return nil
 		}
-		destroy := secretDestroyAction(sec, st.Now())
-		switch {
-		case v.State == secrets.StateEnabled:
-			return []console.Action{{ID: "disable", Label: "Disable"}, destroy}
-		case v.State == secrets.StateDisabled && !v.ScheduledDestroy.IsZero():
-			// Already scheduled: a second destroy is refused, and enabling
-			// or disabling cancels (#1278).
-			return []console.Action{{ID: "enable", Label: "Enable (cancels the destruction)"},
-				{ID: "disable", Label: "Keep disabled (cancels the destruction)"}}
-		case v.State == secrets.StateDisabled:
-			return []console.Action{{ID: "enable", Label: "Enable"}, destroy}
-		}
-		// Destroyed is terminal, so it offers nothing.
-		return nil
+		// Already scheduled: a second destroy is refused, and enabling or
+		// disabling cancels (#1278). Destroyed is terminal: nothing.
+		return secretVersionLifecycle(sec, v, st.Now())
 	}
 	return nil
 }
@@ -4072,6 +4068,8 @@ func (p secretsProvider) ActAt(_ context.Context, project string, path []string,
 	case "destroy":
 		_, err := st.DestroyVersion(project, id, path[1])
 		return err
+	case "disableversions", "enableversions", "destroyversions":
+		return actSecretVersions(st, project, id, strings.TrimSuffix(action, "versions"), values[secretVersionsField])
 	case actSecretKeys:
 		return setSecretKeys(st, project, id, values)
 	case actSecretAdvanceClock:
@@ -4353,6 +4351,10 @@ func (p secretsProvider) Create(_ context.Context, project string, values map[st
 		return "", err
 	}
 	id := strings.TrimSpace(values["secretId"])
+	secretType := strings.TrimSpace(values["secretType"])
+	if err := secrets.CheckSecretType(secretType); err != nil {
+		return "", err
+	}
 	if loc := strings.TrimSpace(values["location"]); loc != "" {
 		// A regional secret (#1519): no replication policy, and its one
 		// replica is its location.
@@ -4400,6 +4402,12 @@ func (p secretsProvider) Create(_ context.Context, project string, values map[st
 	if err := st.BindTags(sec.Name, tags); err != nil {
 		_ = st.DeleteSecret(project, id)
 		return "", fmt.Errorf("the tags were refused, so the secret was not created: %w", err)
+	}
+	if secretType != "" {
+		if _, err := st.SetSecretType(project, id, secretType); err != nil {
+			_ = st.DeleteSecret(project, id)
+			return "", fmt.Errorf("the secret type was refused, so the secret was not created: %w", err)
+		}
 	}
 	return sec.Name, nil
 }

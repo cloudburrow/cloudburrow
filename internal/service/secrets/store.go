@@ -105,6 +105,9 @@ type Secret struct {
 	// VersionAliases is version_aliases (#1850): an alias to the number of
 	// the version it names, set by UpdateSecret (aliases.go).
 	VersionAliases map[string]int `json:"versionAliases,omitempty"`
+	// SecretType is secret_type (#1850), the enum's name; empty is
+	// SECRET_TYPE_UNSPECIFIED. Set at creation only (secrettype.go).
+	SecretType string `json:"secretType,omitempty"`
 }
 
 // Expired reports whether the secret's expire_time has come at now.

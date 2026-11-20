@@ -78,6 +78,9 @@ func toProtoSecret(s Secret) *secretmanagerpb.Secret {
 	if s.VersionDestroyTTL > 0 {
 		out.VersionDestroyTtl = durationpb.New(s.VersionDestroyTTL)
 	}
+	if s.SecretType != "" {
+		out.SecretType = secretmanagerpb.Secret_SecretType(secretmanagerpb.Secret_SecretType_value[s.SecretType])
+	}
 	if len(s.VersionAliases) > 0 {
 		out.VersionAliases = make(map[string]int64, len(s.VersionAliases))
 		for a, n := range s.VersionAliases {
@@ -251,6 +254,10 @@ func (g *GRPCServer) CreateSecret(_ context.Context, req *secretmanagerpb.Create
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
+	secretType, err := secretTypeOf(sec)
+	if err != nil {
+		return nil, apierror.Wrap(err)
+	}
 	kind, locations, keys := replicationOf(sec.GetReplication())
 	if location != "" {
 		// A regional secret (#1519) has no replication policy: its one
@@ -273,6 +280,12 @@ func (g *GRPCServer) CreateSecret(_ context.Context, req *secretmanagerpb.Create
 		// delete drops the bindings already made.
 		_ = g.store.DeleteSecret(project, req.GetSecretId())
 		return nil, apierror.Wrap(err)
+	}
+	if secretType != "" {
+		if created, err = g.store.SetSecretType(project, req.GetSecretId(), secretType); err != nil {
+			_ = g.store.DeleteSecret(project, req.GetSecretId())
+			return nil, apierror.Wrap(err)
+		}
 	}
 	return toProtoSecret(created), nil
 }
@@ -320,6 +333,10 @@ func (g *GRPCServer) UpdateSecret(_ context.Context, req *secretmanagerpb.Update
 			updateTTL = true
 		case p == "version_aliases" || p == "versionAliases":
 			updateAliases = true
+		case p == "secret_type" || p == "secretType":
+			// "Optional. Immutable." (resources.proto): set at creation only.
+			return nil, apierror.Wrap(apierror.InvalidArgument(
+				"secret_type is immutable: a secret's type is set only when it is created"))
 		case p == "labels":
 			updateLabels = true
 		case p == "annotations":

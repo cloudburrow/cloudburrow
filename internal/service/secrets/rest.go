@@ -190,6 +190,8 @@ type jsonSecret struct {
 	// VersionDestroyTTL is a google.protobuf.Duration in JSON: seconds
 	// with an "s" (#1278).
 	VersionDestroyTTL string `json:"versionDestroyTtl,omitempty"`
+	// SecretType is secret_type's enum name (#1850), absent when unset.
+	SecretType string `json:"secretType,omitempty"`
 }
 
 // jsonRotation is a Secret's rotation schedule (#1278).
@@ -257,6 +259,7 @@ func renderSecret(s Secret) jsonSecret {
 		Labels:                    s.Labels,
 		Annotations:               s.Annotations,
 		Etag:                      s.Etag,
+		SecretType:                s.SecretType,
 	}
 	if !s.Expire.IsZero() {
 		out.ExpireTime = s.Expire.UTC().Format(time.RFC3339Nano)

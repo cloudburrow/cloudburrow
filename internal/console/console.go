@@ -899,7 +899,21 @@ type EditForm struct {
 	// opens Deploy worker pool revision, ending in Deploy (#1852).
 	Title  string `json:"title,omitempty"`
 	Submit string `json:"submit,omitempty"`
+	// Layout EditLayoutPage draws the form as a page of its own, under its
+	// Sections' headings with a back arrow to the resource, as Google's Edit
+	// secret page ends in Update secret (#1850); empty is a dialog. The page
+	// is the resource's address with ?edit=1.
+	Layout string `json:"layout,omitempty"`
 }
+
+// DateTimeFieldType is a Field.Type drawn as the browser's date and time
+// picker (input type=datetime-local), as Google's Starting on is (#1850).
+// Its Default is an RFC 3339 time, shown in the browser's time zone, and
+// the value sent is the RFC 3339 instant chosen, in UTC.
+const DateTimeFieldType = "datetime-local"
+
+// EditLayoutPage is EditForm.Layout's page of its own.
+const EditLayoutPage = "page"
 
 // Property is one label/value pair on a resource's summary.
 type Property struct {
@@ -1326,6 +1340,12 @@ type Action struct {
 	// kind of resource rather than the one acted on: Cloud SQL's Stop asks
 	// "Stop database instance?" (#1860). Empty is "<Label> <name>?".
 	ConfirmTitle string `json:"confirmTitle,omitempty"`
+	// ConfirmWord is what a "name" confirmation asks to be typed back where
+	// it is not the last segment of the path acted on: a secret version's
+	// Destroy asks for the secret's ID, "enter the secret ID to confirm"
+	// (#1850), whether it is chosen from the version's row or checked on the
+	// secret's Versions tab.
+	ConfirmWord string `json:"confirmWord,omitempty"`
 	// Confirm is what performing the action changes or puts at stake, and
 	// asks for the resource's name back before anything is sent.
 	//
@@ -1383,6 +1403,11 @@ type Action struct {
 	// it, not as a button of its own: a property's ActionText link (Upgrade
 	// beside an edition) or an info panel tab's Form (#1859).
 	Linked bool `json:"linked,omitempty"`
+	// Reveal makes the action show the value at its path through the
+	// provider's Revealer, in a dialog ending in Done, as Google's View
+	// secret value does from a version row's Actions menu (#1850). The
+	// action route never receives it; the reveal route records it.
+	Reveal bool `json:"reveal,omitempty"`
 }
 
 // PathActor is a provider with actions on the resources inside a resource.
