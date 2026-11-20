@@ -64,6 +64,10 @@ func hostPorts(cfg config.Config) map[string]int {
 		case config.ServiceFirestore:
 			ports["firestore"] = e.Firestore
 			ports["firestore-mongodb"] = e.FirestoreMongoDB
+			// The Firebase Rules API (#2048), served beside it.
+			if e.FirebaseRules >= 0 {
+				ports["firebaserules"] = e.FirebaseRules
+			}
 		case config.ServiceSpanner:
 			ports["spanner"] = e.Spanner
 			ports["spanner-rest"] = e.SpannerREST

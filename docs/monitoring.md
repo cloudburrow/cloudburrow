@@ -27,7 +27,8 @@ OpenTelemetry's Google Cloud exporter takes the same endpoint and options.
 - **Built-in metrics**:
   - `logging.googleapis.com/user/NAME` for each enabled log-based metric (counter or distribution, one-minute DELTA points, labels from its extractors), counting the entries received after the metric was created;
   - `logging.googleapis.com/log_entry_count`, per log and severity;
-  - `serviceruntime.googleapis.com/api/request_count` and `api/request_latencies` on `consumed_api`, for the APIs CloudBurrow serves itself, attributed to the project each call names (a call that names none to the instance's default project).
+  - `serviceruntime.googleapis.com/api/request_count` and `api/request_latencies` on `consumed_api`, for the APIs CloudBurrow serves itself, attributed to the project each call names (a call that names none to the instance's default project);
+  - with Firestore (#2048), `firestore.googleapis.com/document/read_ops_count` (`type` LOOKUP or QUERY), `write_ops_count` (`op` CREATE or UPDATE) and `delete_ops_count` on `firestore.googleapis.com/Database`, the same counts as `document/read_count`, `write_count` and `delete_count` on `firestore_instance`, and `query_stat/per_query/result_counts` and `scanned_documents_counts`: the successful document operations and query executions the Firestore front saw, by minute, kept for a day. A write counts as CREATE when its document did not exist and UPDATE when it did; a delete of a missing document is not counted, as Google's DELETE_NOOP is not; Listen and Write streams are not counted.
 
 User-defined descriptors and points are kept in `monitoring.json` in the instance directory in persistent mode. Log-based values come from Cloud Logging's in-memory entries, and request metrics are kept in memory for a week.
 

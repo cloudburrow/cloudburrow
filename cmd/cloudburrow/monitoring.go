@@ -48,6 +48,9 @@ type monitoringService struct {
 	// pubsub is the instance's Pub/Sub tunnel, for Pub/Sub notification
 	// channels (#1964); nil, or nil from it, when Pub/Sub is not served.
 	pubsub func() *netfwd.Forwarder
+	// firestore is the Firestore front's host address, for Firestore's
+	// document metrics (#2048); nil when Firestore is not served.
+	firestore func() string
 	// cancel stops alert evaluation and uptime checks.
 	cancel context.CancelFunc
 }
@@ -104,6 +107,9 @@ func (s *monitoringService) Start(ctx context.Context) error {
 	s.api = api
 	if s.logging != nil {
 		api.AddBuiltin(monitoring.NewLogBuiltin(monitoringLogs{svc: s.logging}))
+	}
+	if s.firestore != nil {
+		api.AddBuiltin(monitoring.NewFirestoreBuiltin(monitoringFirestore{addr: s.firestore}))
 	}
 	if s.logging != nil {
 		api.SetLogMatcher(monitoringLogs{svc: s.logging})

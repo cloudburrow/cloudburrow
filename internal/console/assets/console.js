@@ -273,9 +273,8 @@ const ROUTES = [
   // database's own pages. `tabOf` makes a menu entry a tab of the database
   // being looked at ((default) elsewhere), so Indexes, Import/Export,
   // Disaster recovery and Time-to-live open that database's tab; each
-  // entry's own address leads to (default)'s. Security (rules), Usage,
-  // Insights and Key Visualizer are in Google's place and say why they are
-  // not available. Databases is not under /firestore/, where it would
+  // entry's own address leads to (default)'s. Key Visualizer is in
+  // Google's place and says why it is not available. Databases is not under /firestore/, where it would
   // shadow a collection named "databases".
   { path: "/firestore-databases", service: "firestore-databases", icon: "firestore", title: "Databases", kind: "Database", section: "Databases",
     product: "firestore", productTitle: "Firestore" },
@@ -288,24 +287,20 @@ const ROUTES = [
     path: "/firestore-" + tab, service: "firestore-databases", icon: "firestore", title, section: "Databases",
     product: "firestore", productTitle: "Firestore", tabOf: { route: "/firestore-databases", tab },
     redirect: "/firestore-databases/(default)?tab=" + tab })),
-  { path: "/firestore-rules", screen: "unavailable", service: null, requires: "firestore-databases", icon: "firestore",
-    title: "Security", section: "Databases", product: "firestore", productTitle: "Firestore",
-    unavailable: "Firestore Security Rules are kept by the Firebase Rules API, which CloudBurrow does not serve. " +
-      "Server client libraries, which reach the local Firestore, ignore rules, as they do on Google's. " +
-      "An Enterprise edition database's users (Firestore with MongoDB compatibility) are on its Security tab, " +
-      "with Add User, under Databases." },
-  { path: "/firestore-usage", screen: "unavailable", service: null, requires: "firestore-databases", icon: "firestore",
-    title: "Usage", section: "Databases", product: "firestore", productTitle: "Firestore",
-    unavailable: "Usage charts read Cloud Monitoring metrics, which CloudBurrow does not emulate. Each call to " +
-      "Firestore is in the console's Requests page." },
-  { path: "/firestore-insights", screen: "unavailable", service: null, requires: "firestore-databases", icon: "firestore",
-    title: "Insights", section: "Databases", product: "firestore", productTitle: "Firestore",
-    unavailable: "Query insights are gathered by Google's Firestore query statistics, which the local Firestore " +
-      "does not record. Query Explain is on an Enterprise database's page." },
+  // Security (rules), Usage and Insights are the database's Rules, Usage
+  // and Query insights tabs (#2048): the Firebase Rules API's released
+  // rules, and the front's document and query counts.
+  ...[["/firestore-rules", "rules", "Security"], ["/firestore-usage", "usage", "Usage"],
+    ["/firestore-insights", "insights", "Insights"]].map(([path, tab, title]) => ({
+    path, service: "firestore-databases", icon: "firestore", title, section: "Databases",
+    product: "firestore", productTitle: "Firestore", tabOf: { route: "/firestore-databases", tab },
+    redirect: "/firestore-databases/(default)?tab=" + tab })),
   { path: "/firestore-key-visualizer", screen: "unavailable", service: null, requires: "firestore-databases", icon: "firestore",
     title: "Key Visualizer", section: "Databases", product: "firestore", productTitle: "Firestore",
-    unavailable: "Key Visualizer draws Google's access-pattern heatmaps from its storage servers; the local " +
-      "Firestore keeps none." },
+    unavailable: "Key Visualizer scans are generated only for databases with more than 3,000 document operations " +
+      "in a minute, each covering two hours in 10-second segments over up to 1,000 key buckets of Google's storage " +
+      "servers. The local Firestore is one emulator process with no key ranges to bucket, so a heatmap would be " +
+      "invented; reads, writes and deletes are on the Usage tab." },
   { path: "/datastore", service: "datastore", title: "Datastore", section: "Databases" },
   // The project's Bigtable instances, with their clusters, app profiles and
   // IAM policy (#1358). First, as Google's Bigtable opens on its Instances list (#1858). Not under /bigtable/, where it would shadow a table.

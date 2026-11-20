@@ -410,8 +410,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// the instance's Cloud Storage, and indexes.
 		icpts = append(icpts, dbs, newDatastoreAdmin(dbs, *storage))
 	}
+	var fa *firestoreadmin.Admin
 	if *firestoreAdmin {
-		fa := firestoreadmin.New(*upstream)
+		fa = firestoreadmin.New(*upstream)
 		fa.SetStorage(*storage)
 		fa.SetDatastore(*datastoreAddr)
 		if err := fa.SetKMS(*kmsAddr); err != nil {
@@ -507,6 +508,12 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		var h http.Handler = HandlerWith(p[1], ring, logger.Printf, icpt)
 		if docs != nil {
 			h = docs.Wrap(h)
+		}
+		if fa != nil {
+			// Reads, writes, deletes and query statistics (#2048), then
+			// who Security Rules apply to: server libraries' calls are
+			// sent as the emulator's owner.
+			h = firestoreadmin.ClientAuth(fa.Usage().Wrap(h))
 		}
 		servers = append(servers, Server(h, logger.Printf, *service))
 		logger.Printf("call front: serving %s for the emulator at %s", l.Addr(), p[1])

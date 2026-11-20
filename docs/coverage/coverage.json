@@ -14190,6 +14190,99 @@
     ]
   },
   {
+    "Key": "firebaserules",
+    "Title": "Firebase Rules API (v1)",
+    "counts": {
+      "Verified": 11
+    },
+    "rows": [
+      {
+        "method": "firebaserules.projects.test",
+        "status": "Verified",
+        "tests": [
+          "test/compat/firebaserules_test.go:92 TestFirebaseRulesReleaseEnforcesOnClientCalls"
+        ]
+      },
+      {
+        "method": "firebaserules.projects.rulesets.create",
+        "status": "Verified",
+        "tests": [
+          "test/compat/firebaserules_test.go:245 TestTerraformFirebaseRules",
+          "test/compat/firebaserules_test.go:92 TestFirebaseRulesReleaseEnforcesOnClientCalls"
+        ]
+      },
+      {
+        "method": "firebaserules.projects.rulesets.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/firebaserules_test.go:245 TestTerraformFirebaseRules",
+          "test/compat/firebaserules_test.go:92 TestFirebaseRulesReleaseEnforcesOnClientCalls"
+        ]
+      },
+      {
+        "method": "firebaserules.projects.rulesets.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/firebaserules_test.go:92 TestFirebaseRulesReleaseEnforcesOnClientCalls"
+        ]
+      },
+      {
+        "method": "firebaserules.projects.rulesets.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/firebaserules_test.go:245 TestTerraformFirebaseRules",
+          "test/compat/firebaserules_test.go:92 TestFirebaseRulesReleaseEnforcesOnClientCalls"
+        ]
+      },
+      {
+        "method": "firebaserules.projects.releases.create",
+        "status": "Verified",
+        "tests": [
+          "test/compat/firebaserules_test.go:245 TestTerraformFirebaseRules",
+          "test/compat/firebaserules_test.go:92 TestFirebaseRulesReleaseEnforcesOnClientCalls"
+        ]
+      },
+      {
+        "method": "firebaserules.projects.releases.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/firebaserules_test.go:245 TestTerraformFirebaseRules",
+          "test/compat/firebaserules_test.go:92 TestFirebaseRulesReleaseEnforcesOnClientCalls"
+        ]
+      },
+      {
+        "method": "firebaserules.projects.releases.getExecutable",
+        "status": "Verified",
+        "tests": [
+          "test/compat/firebaserules_test.go:92 TestFirebaseRulesReleaseEnforcesOnClientCalls"
+        ]
+      },
+      {
+        "method": "firebaserules.projects.releases.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/firebaserules_test.go:92 TestFirebaseRulesReleaseEnforcesOnClientCalls"
+        ]
+      },
+      {
+        "method": "firebaserules.projects.releases.patch",
+        "status": "Verified",
+        "tests": [
+          "test/compat/firebaserules_test.go:245 TestTerraformFirebaseRules",
+          "test/compat/firebaserules_test.go:92 TestFirebaseRulesReleaseEnforcesOnClientCalls"
+        ]
+      },
+      {
+        "method": "firebaserules.projects.releases.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/firebaserules_test.go:245 TestTerraformFirebaseRules",
+          "test/compat/firebaserules_test.go:92 TestFirebaseRulesReleaseEnforcesOnClientCalls"
+        ]
+      }
+    ]
+  },
+  {
     "Key": "compute",
     "Title": "Compute Engine API (v1): VPC networking",
     "counts": {
@@ -17899,6 +17992,7 @@
         "method": "google.monitoring.v3.MetricService/ListTimeSeries",
         "status": "Verified",
         "tests": [
+          "test/compat/firestoreusage_test.go:20 TestFirestoreDocumentMetrics",
           "test/compat/monitoring_query_test.go:288 TestMonitoringSLOCompliance",
           "test/compat/monitoring_test.go:242 TestMonitoringLogBasedMetrics",
           "test/compat/monitoring_test.go:324 TestMonitoringRequestCounts",

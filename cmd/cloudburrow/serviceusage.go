@@ -40,6 +40,7 @@ var serviceUsageAPIs = []struct {
 	{config.ServiceScheduler, serviceusage.API{Name: "cloudscheduler.googleapis.com", Title: "Cloud Scheduler API"}},
 	{config.ServiceLogging, serviceusage.API{Name: "logging.googleapis.com", Title: "Cloud Logging API"}},
 	{config.ServiceFirestore, serviceusage.API{Name: "firestore.googleapis.com", Title: "Cloud Firestore API"}},
+	{config.ServiceFirestore, serviceusage.API{Name: "firebaserules.googleapis.com", Title: "Firebase Rules API"}},
 	{config.ServiceDatastore, serviceusage.API{Name: "datastore.googleapis.com", Title: "Cloud Datastore API"}},
 	{config.ServiceBigtable, serviceusage.API{Name: "bigtable.googleapis.com", Title: "Cloud Bigtable API"}},
 	{config.ServiceBigtable, serviceusage.API{Name: "bigtableadmin.googleapis.com", Title: "Cloud Bigtable Admin API"}},

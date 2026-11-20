@@ -155,6 +155,10 @@ var terraformEndpoints = []terraformEndpoint{
 	// google_bigquery_data_transfer_config applies, plans clean, updates in
 	// place and destroys in TestTerraformBigQueryDataTransferConfig.
 	{dataTransferService, "bigquery_data_transfer_custom_endpoint", "GOOGLE_BIGQUERY_DATA_TRANSFER_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	// The Firebase Rules API (#2048), served with Firestore: a
+	// google_firebaserules_ruleset and a google_firebaserules_release
+	// apply, plan clean, change and destroy in TestTerraformFirebaseRules.
+	{firebaseRulesService, "firebaserules_custom_endpoint", "GOOGLE_FIREBASERULES_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	// BigQuery sharing (#1960): google_bigquery_analytics_hub_data_exchange,
 	// _listing and _listing_subscription apply, plan clean, update in place
 	// and destroy in TestTerraformBigQueryAnalyticsHub.
@@ -330,6 +334,7 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 		storageTransferService:   cfg.Endpoints.StorageTransfer,
 		storageInsightsService:   cfg.Endpoints.StorageInsights,
 		dataTransferService:      cfg.Endpoints.DataTransfer,
+		firebaseRulesService:     cfg.Endpoints.FirebaseRules,
 	}
 	enabled := map[config.Service]bool{resourceManagerEndpoint: true, serviceUsageService: true, apiKeysService: true, sqlAdminEndpoint: sqlAdminEnabled(cfg),
 		memorystoreAdminEndpoint: serviceEnabled(cfg, config.ServiceMemorystore)}
@@ -345,6 +350,7 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 	enabled[storageTransferService] = storageJobsEnabled(cfg)
 	enabled[storageInsightsService] = storageJobsEnabled(cfg)
 	enabled[dataTransferService] = dataTransferEnabled(cfg)
+	enabled[firebaseRulesService] = firebaseRulesEnabled(cfg)
 	var set []terraformURL
 	var skipped []config.Service
 	for _, e := range terraformEndpoints {

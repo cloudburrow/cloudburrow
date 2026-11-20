@@ -111,6 +111,11 @@ func (p firestoreDatabasesProvider) passwordListing(uc *adminpb.UserCreds) *cons
 // credentials actions that return a password show their result; every
 // other action is ActAt's.
 func (p firestoreDatabasesProvider) ActAtResult(ctx context.Context, project string, path []string, action string, values map[string]string) (*console.Listing, error) {
+	if action == "playground" && len(path) == 1 && project != "" {
+		ctx, cancel := context.WithTimeout(ctx, dbTimeout)
+		defer cancel()
+		return p.simulateRules(ctx, project, path[0], values)
+	}
 	switch {
 	case action == "runpipeline" && len(path) == 1,
 		action == "explainquery" && len(path) == 1,

@@ -143,6 +143,10 @@ type Admin struct {
 	// the state in memory alone.
 	state *frontstate.Store
 	logf  func(string, ...any)
+
+	// usage counts the documents calls through the front (usage.go, #2048).
+	usageOnce sync.Once
+	usage     *Usage
 }
 
 // New returns the API for the emulator at emulator (host:port).

@@ -405,7 +405,8 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		// call front serves (#1331).
 		{config.ServiceFirestore, func(a string) console.Provider {
 			return firestoreDatabasesProvider{endpoint: a, mongo: forwardedAddr(d.forwarders, "firestore-mongodb"),
-				mongoCA: filepath.Join(d.cfg.InstanceDir(), firestoreadmin.MongoCAFile), projects: d.projects}
+				mongoCA: filepath.Join(d.cfg.InstanceDir(), firestoreadmin.MongoCAFile), projects: d.projects,
+				rules: firebaseRulesAddr(d.cfg)}
 		}},
 		// The Firestore Admin API lists the Datastore mode databases the
 		// page's database picker offers (#1883).

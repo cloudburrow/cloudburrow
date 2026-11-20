@@ -89,6 +89,8 @@ Flags:
     	Datastore emulator host port (0 = OS-assigned; default 9011)
   -port-datatransfer int
     	BigQuery Data Transfer Service host port (0 = OS-assigned; default 9034)
+  -port-firebaserules int
+    	Firebase Rules API host port, served with Firestore (0 = OS-assigned; default 9043)
   -port-firestore int
     	Firestore emulator host port (0 = OS-assigned; default 9010)
   -port-firestore-mongodb int

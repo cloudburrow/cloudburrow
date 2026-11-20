@@ -34,6 +34,8 @@ type firestoreDatabasesProvider struct {
 	// projects is Resource Manager, whose project IAM policy Add User
 	// grants the new user's role in (#1845, consolefirestoresecurity.go).
 	projects *resourcemanager.Registry
+	// rules is the Firebase Rules API's host address (#2048), or "".
+	rules func() string
 }
 
 // mongoConnectionString is the connection string Google documents for
@@ -189,6 +191,11 @@ func (p firestoreDatabasesProvider) Detail(ctx context.Context, project string, 
 		// and the Backups table (#1845).
 		p.disasterRecovery(ctx, c, name, path[0]),
 		{ID: "ttl", Label: "Time-to-live", Listing: p.ttlPolicies(ctx, c, name, path[0]), Actions: acts["ttl"]},
+		// Security (rules), Usage and Query insights (#2048,
+		// consolefirestorerules.go).
+		p.rulesSection(ctx, project, path[0]),
+		p.usageSection(ctx, project, path[0]),
+		p.insightsSection(ctx, project, path[0]),
 	}
 	// Users (Security) and pipelines are Enterprise edition features
 	// (#1500, consolefirestorepipeline.go).
