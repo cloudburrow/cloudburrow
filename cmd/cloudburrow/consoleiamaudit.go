@@ -7,9 +7,10 @@ package main
 // organization), each with the log types that resource's allow policy
 // enables for it (its auditConfigs, and allServices' for every service).
 //
-// Each service's log types and exempted principals are edited on its row,
-// and the default configuration (allServices) with Set default
-// configuration, as on Google's page; each is saved through the resource's
+// The services checked in the table open Google's info panel (#2013),
+// with its Log Types and Exempted Principals tabs, and the default
+// configuration (allServices) opens it with Set Default Configuration, as
+// on Google's page; each is saved through the resource's
 // SetIamPolicy with the update mask auditConfigs, so the policy's bindings
 // are left as they are. Stored, as the policy's audit configs are: no audit
 // log is written or withheld because of them (#1486).
@@ -17,9 +18,11 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	"cloud.google.com/go/iam/admin/apiv1/adminpb"
@@ -47,7 +50,7 @@ func (iamAuditProvider) ScopeKey() string { return iamAuditScopeKey }
 
 const iamAuditNote = "The services that can write Data Access audit logs, from the IAM API's queryAuditableServices, with the log types " +
 	"the selected resource's allow policy enables for each (its auditConfigs; allServices, the default configuration, applies to every service). " +
-	"Edit log types and Set default configuration save through SetIamPolicy with the update mask auditConfigs. " +
+	"Edit log types and Set Default Configuration save through SetIamPolicy with the update mask auditConfigs. " +
 	"The configuration is stored and returned, never acted on: no audit log is written or withheld because of it."
 
 // allServices is the audit config that applies to every service: the
@@ -124,7 +127,7 @@ func (p iamAuditProvider) scopeOptions(project string) []console.ScopeOption {
 
 func (p iamAuditProvider) List(ctx context.Context, project string) (console.Listing, error) {
 	l := console.Listing{NameColumn: "Service", Columns: []string{"Admin Read", "Data Read", "Data Write", "Exempted principals"},
-		Noun: "services", Note: iamAuditNote}
+		Noun: "services", Note: iamAuditNote, TableTitle: "Data Access audit logs configuration"}
 	resource, err := auditResource(ctx, project)
 	sc := &console.Scope{Key: iamAuditScopeKey, Label: "Resource", Selected: resource, Options: p.scopeOptions(project)}
 	if project != "" {
@@ -205,27 +208,65 @@ func logConfig(c *iampb.AuditConfig, logType string) *iampb.AuditLogConfig {
 	return nil
 }
 
-// auditConfigAction is the form that edits service's audit config, drawn
-// from c, its config in the policy the page read (nil: none), with that
-// policy's etag, so a policy changed since is refused.
+// auditConfigAction is the info panel that edits service's audit config
+// (#2013), drawn from c, its config in the policy the page read (nil:
+// none), with that policy's etag, so a policy changed since is refused.
+// Its tabs are Google's: Log Types, the log types enabled, and Exempted
+// Principals, each exempted principal with its Disabled Log Types, Add
+// exempted principal adding one and Delete removing one; then Save
+// (docs.cloud.google.com/logging/docs/audit/configure-data-access).
 func auditConfigAction(id, label, service string, c *iampb.AuditConfig, etag string) console.Action {
 	var fields []console.Field
+	exempt := map[string][]string{}
+	var order []string
 	for _, t := range auditLogTypes {
 		lc := logConfig(c, t.logType)
 		on := "false"
 		if lc != nil {
 			on = "true"
 		}
-		fields = append(fields,
-			console.Field{Name: t.field, Label: t.column, Type: "checkbox", Default: on, Section: "Log Types",
-				Help: t.column + " audit logs for " + service + "."},
-			console.Field{Name: t.field + "Exempted", Label: t.column + ": exempted principals", Type: "textarea", Section: "Exempted Principals",
-				Default: strings.Join(lc.GetExemptedMembers(), "\n"),
-				Help:    "Principals whose " + t.column + " accesses are not logged, one per line or separated by commas, such as user:ada@example.com. Only for a log type that is enabled."})
+		fields = append(fields, console.Field{Name: t.field, Label: t.column, Type: "checkbox", Default: on, Section: auditLogTypesTab,
+			Help: t.column + " audit logs for " + service + "."})
+		for _, m := range lc.GetExemptedMembers() {
+			if _, ok := exempt[m]; !ok {
+				order = append(order, m)
+			}
+			exempt[m] = append(exempt[m], t.field)
+		}
 	}
-	fields = append(fields, console.Field{Name: "etag", Type: "hidden", Default: etag})
-	return console.Action{ID: id, Label: label, Fields: fields}
+	var rows []map[string]string
+	for _, m := range order {
+		row := map[string]string{"principal": m}
+		for _, t := range auditLogTypes {
+			row[t.field] = strconv.FormatBool(slices.Contains(exempt[m], t.field))
+		}
+		rows = append(rows, row)
+	}
+	def := ""
+	if len(rows) > 0 {
+		b, _ := json.Marshal(rows)
+		def = string(b)
+	}
+	group := []console.Field{{Name: "principal", Label: "Principal", Type: "text", Required: true,
+		Help: "a principal such as user:ada@example.com"}}
+	for _, t := range auditLogTypes {
+		group = append(group, console.Field{Name: t.field, Label: t.column, Type: "checkbox"})
+	}
+	fields = append(fields,
+		console.Field{Name: auditExemptedField, Label: "Exempted principals", Type: console.GroupFieldType, Section: auditExemptedTab,
+			Group: group, AddLabel: "Add exempted principal", RemoveLabel: "Delete", Default: def,
+			Help: "Disabled Log Types: the log types checked on a principal are not logged for its accesses. " +
+				"Exempting a principal from a log type enables that log type, as on Google."},
+		console.Field{Name: "etag", Type: "hidden", Default: etag})
+	return console.Action{ID: id, Label: label, Fields: fields, Submit: "Save", Panel: true}
 }
+
+// The info panel's tabs, and its exempted principals' field.
+const (
+	auditLogTypesTab   = "Log Types"
+	auditExemptedTab   = "Exempted Principals"
+	auditExemptedField = "exempted"
+)
 
 // DetailActions implements console.PathActor: a service row's Edit log
 // types.
@@ -245,7 +286,7 @@ func (p iamAuditProvider) DetailActions(ctx context.Context, project string, pat
 		base64.StdEncoding.EncodeToString(pol.GetEtag()))}
 }
 
-// ListActions implements console.ListActor: Set default configuration.
+// ListActions implements console.ListActor: Set Default Configuration.
 func (p iamAuditProvider) ListActions(ctx context.Context, project string) []console.Action {
 	resource, err := auditResource(ctx, project)
 	if err != nil {
@@ -259,11 +300,12 @@ func (p iamAuditProvider) ListActions(ctx context.Context, project string) []con
 	// Google's page configures the services checked in its table together
 	// (#1864): the selection's Edit selected services, its services written
 	// into Services.
+	// One service checked draws its row's own panel, with its config; this
+	// is the panel for several.
 	sel := auditConfigAction(auditSelectAction, "Edit selected services", "the selected services", nil, etag)
 	sel.SelectionField = "services"
-	sel.Fields = append([]console.Field{{Name: "services", Label: "Services", Type: "textarea", Required: true,
-		Help: "The services checked in the table, one per line. Each gets the log types and exempted principals below."}}, sel.Fields...)
-	return []console.Action{auditConfigAction(auditDefaultAction, "Set default configuration", allServices, auditConfigsByService(pol)[allServices], etag), sel}
+	sel.Fields = append([]console.Field{{Name: "services", Type: "hidden"}}, sel.Fields...)
+	return []console.Action{auditConfigAction(auditDefaultAction, "Set Default Configuration", allServices, auditConfigsByService(pol)[allServices], etag), sel}
 }
 
 const auditSelectAction = "edit-selected"
@@ -298,17 +340,9 @@ func (p iamAuditProvider) ActAt(ctx context.Context, project string, path []stri
 	if err != nil || len(etag) == 0 {
 		return errors.New("the form carries no policy etag this console read: reload the page")
 	}
-	var logConfigs []*iampb.AuditLogConfig
-	for _, t := range auditLogTypes {
-		exempt := splitPrincipals(values[t.field+"Exempted"])
-		if values[t.field] != "true" {
-			if len(exempt) > 0 {
-				return fmt.Errorf("%s exempts principals from %s, which is not enabled: enable it, or clear its exempted principals", strings.Join(services, ", "), t.column)
-			}
-			continue
-		}
-		logConfigs = append(logConfigs, &iampb.AuditLogConfig{
-			LogType: iampb.AuditLogConfig_LogType(iampb.AuditLogConfig_LogType_value[t.logType]), ExemptedMembers: exempt})
+	logConfigs, err := auditLogConfigsOf(values)
+	if err != nil {
+		return err
 	}
 	pol, err := p.auditPolicy(ctx, resource)
 	if err != nil {
@@ -343,16 +377,41 @@ func (p iamAuditProvider) ActAt(ctx context.Context, project string, path []stri
 	return err
 }
 
-// splitPrincipals is a textarea's principals, separated by commas or new
-// lines.
-func splitPrincipals(v string) []string {
-	var out []string
-	for _, m := range strings.FieldsFunc(v, func(r rune) bool { return r == ',' || r == '\n' || r == '\r' }) {
-		if m = strings.TrimSpace(m); m != "" && !slices.Contains(out, m) {
-			out = append(out, m)
+// auditLogConfigsOf is the panel's log configs: each log type checked on
+// Log Types, or on which a principal is exempted (Google: "If you add an
+// exempted principal to a service for an audit log type, then this
+// enables the audit log type even if it was previously disabled"), with
+// the principals whose Disabled Log Types include it.
+func auditLogConfigsOf(values map[string]string) ([]*iampb.AuditLogConfig, error) {
+	rows, err := console.ParseGroup(values[auditExemptedField])
+	if err != nil {
+		return nil, fmt.Errorf("exempted principals: %v", err)
+	}
+	var out []*iampb.AuditLogConfig
+	for _, t := range auditLogTypes {
+		var exempt []string
+		for _, r := range rows {
+			m := strings.TrimSpace(r["principal"])
+			if r[t.field] != "true" || slices.Contains(exempt, m) {
+				continue
+			}
+			if m == "" {
+				return nil, fmt.Errorf("an exempted principal with %s disabled has no principal", t.column)
+			}
+			exempt = append(exempt, m)
+		}
+		if values[t.field] != "true" && len(exempt) == 0 {
+			continue
+		}
+		out = append(out, &iampb.AuditLogConfig{
+			LogType: iampb.AuditLogConfig_LogType(iampb.AuditLogConfig_LogType_value[t.logType]), ExemptedMembers: exempt})
+	}
+	for _, r := range rows {
+		if m := strings.TrimSpace(r["principal"]); m != "" && !slices.ContainsFunc(auditLogTypes, func(t struct{ column, logType, field string }) bool { return r[t.field] == "true" }) {
+			return nil, fmt.Errorf("exempted principal %s has no Disabled Log Types: check the log types not to log for it, or Delete it", m)
 		}
 	}
-	return out
+	return out, nil
 }
 
 var (

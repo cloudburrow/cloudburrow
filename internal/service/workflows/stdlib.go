@@ -42,6 +42,7 @@ var callStep = map[string]bool{
 	"events.await_callback": true, "events.create_callback_endpoint": true,
 	"sys.log": true, "sys.sleep": true, "sys.sleep_until": true,
 	"http.get": true, "http.post": true, "http.put": true, "http.patch": true, "http.delete": true, "http.request": true,
+	"experimental.executions.map": true, "experimental.executions.run": true,
 }
 
 var stdlib map[string]*fn
@@ -478,7 +479,7 @@ func init() {
 			return a[1], nil
 		}},
 		"sys.now": {params: nil, call: func(f *frame, _ []any) (any, error) {
-			return float64(f.x.now().UnixNano()) / 1e9, nil
+			return f.x.effect(f, "now", func() (any, error) { return float64(f.x.now().UnixNano()) / 1e9, nil })
 		}},
 		// text
 		"text.decode": {params: []string{"data", "charset"}, required: 1, call: func(_ *frame, a []any) (any, error) {
@@ -678,15 +679,17 @@ func init() {
 			return float64(t.UnixNano()) / 1e9, nil
 		}},
 		// uuid
-		"uuid.generate": {params: nil, call: func(*frame, []any) (any, error) {
-			var b [16]byte
-			_, _ = rand.Read(b[:])
-			b[6] = b[6]&0x0f | 0x40
-			b[8] = b[8]&0x3f | 0x80
-			return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]), nil
+		"uuid.generate": {params: nil, call: func(f *frame, _ []any) (any, error) {
+			return f.x.effect(f, "uuid", func() (any, error) {
+				var b [16]byte
+				_, _ = rand.Read(b[:])
+				b[6] = b[6]&0x0f | 0x40
+				b[8] = b[8]&0x3f | 0x80
+				return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]), nil
+			})
 		}},
 		"events.create_callback_endpoint": {params: []string{"http_callback_method"}, defaults: map[string]any{"http_callback_method": "POST"},
-			call: func(f *frame, a []any) (any, error) { return f.x.createCallback(a[0]) }},
+			call: func(f *frame, a []any) (any, error) { return f.createCallback(a[0]) }},
 	}
 }
 

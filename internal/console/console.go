@@ -95,6 +95,25 @@ type Resource struct {
 	// preview only where the server would give one.
 	Size        int64  `json:"size,omitempty"`
 	ContentType string `json:"contentType,omitempty"`
+	// Info is the info panel's tabs for this row beyond its columns: Google's
+	// Spanner Instances list opens a checked instance's Labels tab, where
+	// its labels are added, updated and deleted (#1859).
+	Info []InfoTab `json:"info,omitempty"`
+}
+
+// InfoTab is one tab of the info panel for a row (Resource.Info).
+type InfoTab struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	// Properties are what the tab shows; Empty is what it says when there
+	// are none ("No labels").
+	Properties []Property `json:"properties,omitempty"`
+	Empty      string     `json:"empty,omitempty"`
+	// Form, when set, is an action drawn in the tab itself, its fields
+	// prefilled, performed at the row's Target and saved with its Submit
+	// label. The page's DetailActions at that path must offer it (the
+	// server checks), marked Linked so it is not also a page button.
+	Form *Action `json:"form,omitempty"`
 }
 
 // Listing is a page of resources.
@@ -108,6 +127,10 @@ type Listing struct {
 	// up with two columns headed "Name": the implicit one and a field of the
 	// same label. The screen decides what its identifier is called.
 	NameColumn string `json:"nameColumn,omitempty"`
+	// TableTitle heads the table, and names it, where Google's page titles
+	// its table apart from the page: Audit Logs' "Data Access audit logs
+	// configuration" (#1864). Empty draws no heading.
+	TableTitle string `json:"tableTitle,omitempty"`
 	// Noun is the plural word for these resources, used in the filter and the
 	// empty state. Empty falls back to the screen's title, which reads badly
 	// when the title is not a noun for the rows — "Filter resource manager".
@@ -181,6 +204,10 @@ type Listing struct {
 	// approval), where a top-level list's own SelectActions take any row
 	// (#1864: Roles' Create role from selection). The server sets it.
 	SelectMarked bool `json:"selectMarked,omitempty"`
+	// InfoOnSelect gives each row a checkbox that opens the info panel on the
+	// row it checks, as Google's Spanner Instances list does: "Select the
+	// checkbox for the instance. The Info panel appears" (#1859).
+	InfoOnSelect bool `json:"infoOnSelect,omitempty"`
 	// Actions are the list screen's own actions, on no existing resource,
 	// drawn beside Create (ListActor, #1289). The server sets them.
 	Actions []Action `json:"actions,omitempty"`
@@ -343,6 +370,11 @@ type Field struct {
 	// files the editor starts with, and those files by choice: a function's
 	// runtime and its sample source. A "sourcefiles" field's value is a JSON
 	// object of file name to contents.
+	//
+	// A "workflowsource" field is a workflow's source, YAML or JSON, in
+	// an editor that highlights its syntax and draws the graph of its
+	// steps beside it, as Google's Workflows editor does (#2004). Its
+	// value is the source text.
 	Follows   string                       `json:"follows,omitempty"`
 	Templates map[string]map[string]string `json:"templates,omitempty"`
 	// Completions, on a text or textarea field, are the words Ctrl+Space
@@ -405,6 +437,9 @@ type Field struct {
 	// value ("true" or "false" for a checkbox); ParseGroup reads it.
 	Group    []Field `json:"group,omitempty"`
 	AddLabel string  `json:"addLabel,omitempty"`
+	// RemoveLabel names each row's remove button where Google's is not
+	// "Remove": Audit Logs' exempted principals have Delete (#2013).
+	RemoveLabel string `json:"removeLabel,omitempty"`
 	// DisabledOptions, on a "radio" field, are options drawn but not
 	// choosable: SQL Server on Cloud SQL's engine choice, which CloudBurrow
 	// does not run (#1860).
@@ -433,7 +468,36 @@ type Field struct {
 	// Google's Spanner Create instance has Compare editions beside the
 	// edition (#1859).
 	Dialog *FieldDialog `json:"dialog,omitempty"`
+	// Panel puts the field in a dialog of its own instead of on the form:
+	// the fields naming the same Panel are drawn in one dialog titled by
+	// it, opened by a button of that label where the first of them would
+	// be, and ending in Save, which keeps what was set, or Cancel, which
+	// puts back what the fields held before it opened. Google's create
+	// page has Set password policy under Enable password policies (#1860).
+	// The fields stay the form's: their values are submitted with it, and
+	// the button is drawn while any of them is visible.
+	Panel string `json:"panel,omitempty"`
+	// PickFrom, on a "picklist" field (PicklistFieldType), is the
+	// "service:call" of the Studio call that answers what the field's
+	// picker offers, as Google's Create role and Edit role have Add
+	// permissions (#1864). The value is the chosen items, one per line; the
+	// form lists them with a checkbox each, cleared to remove one, and
+	// AddLabel names the button that opens the picker. The call gets
+	// {"filter": "<the picker's Filter by role>"} and answers
+	// {"items": [{"value": "...", "note": "..."}]}.
+	PickFrom string `json:"pickFrom,omitempty"`
+	// SeedFrom, on a "picklist" field, names the address parameter whose
+	// value seeds the chosen items (#2013): Google's Create custom role
+	// from selection opens Create custom role with the selected roles'
+	// permissions listed, each checked, unchecked to exclude it. The
+	// PickFrom call gets {"seed": "<the parameter's value>"} and answers
+	// {"items": [...], "note": "..."}, every item then chosen.
+	SeedFrom string `json:"seedFrom,omitempty"`
 }
+
+// PicklistFieldType is the Type of a list of items chosen from a picker
+// (Field.PickFrom): one per line in the value.
+const PicklistFieldType = "picklist"
 
 // FieldDialog is a Field's Dialog: Button opens a dialog titled Title, an
 // Intro above a table of Columns, each of Rows headed by its first cell.
@@ -443,6 +507,28 @@ type FieldDialog struct {
 	Intro   string     `json:"intro,omitempty"`
 	Columns []string   `json:"columns"`
 	Rows    [][]string `json:"rows"`
+}
+
+// StepEntryView is one workflow execution step entry of a Section's
+// StepEntries: its ID, what the table shows of it, and its navigationInfo
+// (parent, children, next, previous: entry IDs, "" or empty for none).
+type StepEntryView struct {
+	ID        string   `json:"id"`
+	Step      string   `json:"step"`
+	Routine   string   `json:"routine"`
+	Type      string   `json:"type"`
+	State     string   `json:"state"`
+	Started   string   `json:"started"`
+	Updated   string   `json:"updated"`
+	Exception string   `json:"exception,omitempty"`
+	Parent    string   `json:"parent,omitempty"`
+	Children  []string `json:"children,omitempty"`
+	Next      string   `json:"next,omitempty"`
+	Previous  string   `json:"previous,omitempty"`
+	// Progress is a for loop's ("iteration 2 of 3"); Variables, by name,
+	// each as JSON, are recorded with detailed execution history only.
+	Progress  string            `json:"progress,omitempty"`
+	Variables map[string]string `json:"variables,omitempty"`
 }
 
 // GroupFieldType is the Type of a repeatable group of fields (Field.Group).
@@ -646,6 +732,28 @@ type CreateThener interface {
 	CreateThen() string
 }
 
+// CreateCommitter is a Creator whose create page makes the resource
+// partway through its steps, as Google's Create service account makes the
+// account at the first step's Create and continue, before its roles and
+// users are granted (#1864). CreateCommitStep is that step's number (1 for
+// the first). Its Continue reads Create and continue and sends the form's
+// values with CreateCommitKey set to "true", the Create answering with the
+// name; the step's fields are then fixed, and the page's submit sends every
+// value with CreateCreatedKey holding that name, for the Create to finish
+// the resource it already made. Submitting before the step creates it all
+// at once, as Google's Done on the first step does.
+type CreateCommitter interface {
+	Creator
+	CreateCommitStep() int
+}
+
+// CreateCommitKey and CreateCreatedKey are the values a CreateCommitter's
+// page adds (see CreateCommitter).
+const (
+	CreateCommitKey  = "_commit"
+	CreateCreatedKey = "_created"
+)
+
 // Pager is a provider whose listings can be continued past their first page.
 //
 // Separate from Provider and Driller because paging is a property of a specific
@@ -804,6 +912,11 @@ type Property struct {
 	// copies it: Google's object page has Copy URL and Copy gsutil URI
 	// (#1843).
 	Copy string `json:"copy,omitempty"`
+	// Action, when set, is the ID of one of the page's actions, opened by a
+	// link beside the value reading ActionText: Upgrade beside a Spanner
+	// instance's edition (#1859).
+	Action     string `json:"action,omitempty"`
+	ActionText string `json:"actionText,omitempty"`
 }
 
 // SectionKind says what a section actually holds.
@@ -870,6 +983,21 @@ type Section struct {
 	// Text is the content when Kind is KindText. Newlines are significant and
 	// the client renders it monospace.
 	Text string `json:"text,omitempty"`
+	// Language, on a KindText section, is the language Text is in, which
+	// the console highlights: "workflows" is a workflow's source, YAML or
+	// JSON, drawn with its syntax highlighted beside the graph of its
+	// steps, as Google's Workflows Source tab shows it (#2004).
+	Language string `json:"language,omitempty"`
+	// Graph, on a listing of a workflow execution's step entries, is the
+	// source of the revision that ran: the console draws its steps as a
+	// graph above the table, each marked with its entries' state, as
+	// Google's Steps tab has its visualization panel (#2004).
+	Graph string `json:"graph,omitempty"`
+	// StepEntries, beside a Graph, are the execution's step entries for
+	// Google's step detail panel (#2011): choosing a step entry shows its
+	// details, its variables with detailed history, and its Parent,
+	// Children, Next and Previous entries, each a link to that entry.
+	StepEntries []StepEntryView `json:"stepEntries,omitempty"`
 	// Series is the content when Kind is KindChart.
 	Series []ChartSeries `json:"series,omitempty"`
 	// Unavailable explains why this one section has no content, so a section
@@ -895,6 +1023,10 @@ type Section struct {
 	// Actions over the strip, and each tab its own content; the tab
 	// chosen is the address's subtab.
 	Tabs []Section `json:"tabs,omitempty"`
+	// Edit is a form drawn in the tab itself, above its content, sent as
+	// the page's Edit is (the provider's Editor): Google's service account
+	// Details tab has its Name box and Save (#1864). Its Label heads it.
+	Edit *EditForm `json:"edit,omitempty"`
 }
 
 // dropBlankProperties removes every Property whose Value is empty or
@@ -1176,6 +1308,14 @@ type Action struct {
 	// DeleteConfirm style, as BigQuery's Delete table asks for the word
 	// delete and a Datastore entity's Delete for nothing typed.
 	ConfirmStyle string `json:"confirmStyle,omitempty"`
+	// Title is the action's dialog title where Google's is not the
+	// action's label: Cloud SQL's Create database opens "New database"
+	// (#1860). Empty is "<Label> for <name>".
+	Title string `json:"title,omitempty"`
+	// ConfirmTitle is the confirmation's title where Google's names the
+	// kind of resource rather than the one acted on: Cloud SQL's Stop asks
+	// "Stop database instance?" (#1860). Empty is "<Label> <name>?".
+	ConfirmTitle string `json:"confirmTitle,omitempty"`
 	// Confirm is what performing the action changes or puts at stake, and
 	// asks for the resource's name back before anything is sent.
 	//
@@ -1207,7 +1347,10 @@ type Action struct {
 	// Href, when set, makes the action a link: it opens this console
 	// route instead of being performed, as a topic row's Create
 	// subscription opens the Create subscription page with the topic filled
-	// in (#1847). The action route never receives it.
+	// in (#1847). The action route never receives it. On a selection
+	// action, the checked rows go in the address as SelectionField's
+	// parameter, comma-separated: Roles' Create custom role from selection
+	// opens Create custom role with ?roles= (#2013).
 	Href string `json:"href,omitempty"`
 	// Button draws a row's action as a button on the row, before its
 	// menu, as Google's Triggers rows carry Run (#1854).
@@ -1217,6 +1360,19 @@ type Action struct {
 	// button: "next" for Next, as Google's Create application profile
 	// asks for the profile's type first (#1858), "continue" for Continue.
 	Steps string `json:"steps,omitempty"`
+	// Panel draws the action's form in the info panel beside the list
+	// instead of a dialog, its fields' Sections as the panel's tabs, as
+	// Google's Audit Logs edits the services checked in its table in an
+	// information panel (#2013). A selection action with Panel opens as
+	// rows are checked; when one row is checked and that row carries a
+	// Panel action of its own, the row's is drawn (its own values), and a
+	// row's Panel actions are not in its menu. A list action with Panel
+	// opens the panel from its button, as Set Default Configuration does.
+	Panel bool `json:"panel,omitempty"`
+	// Linked marks an action the page offers only where something links to
+	// it, not as a button of its own: a property's ActionText link (Upgrade
+	// beside an edition) or an info panel tab's Form (#1859).
+	Linked bool `json:"linked,omitempty"`
 }
 
 // PathActor is a provider with actions on the resources inside a resource.
@@ -1968,6 +2124,8 @@ type createForm struct {
 	Then string `json:"then,omitempty"`
 	// Href is CreateHrefer's: the console page the create button opens.
 	Href string `json:"href,omitempty"`
+	// CommitStep is CreateCommitter's: the step whose Continue creates.
+	CommitStep int `json:"commitStep,omitempty"`
 }
 
 // ProjectCreateFormer is a Creator whose fields depend on the project, as
@@ -2026,6 +2184,9 @@ func (s *Server) capabilitiesOf(p Provider) capabilities {
 		}
 		if ct, ok := p.(CreateThener); ok {
 			c.Create.Then = ct.CreateThen()
+		}
+		if cc, ok := p.(CreateCommitter); ok {
+			c.Create.CommitStep = cc.CreateCommitStep()
 		}
 		if ch, ok := p.(CreateHrefer); ok && ch.CreateHref() != "" {
 			c.Create.Href = ch.CreateHref()

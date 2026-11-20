@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"time"
 
@@ -41,6 +42,22 @@ func (a *ExecutionsAPI) CreateExecution(_ context.Context, req *executionspb.Cre
 // Start creates an execution of the workflow's current revision and runs
 // it. Eventarc's workflow destination starts its executions here.
 func (s *Server) Start(parent string, in *executionspb.Execution) (*executionspb.Execution, error) {
+	return s.StartLevel(parent, in, "")
+}
+
+// HistoryLevels are Execution.executionHistoryLevel's values.
+var HistoryLevels = []string{"EXECUTION_HISTORY_LEVEL_UNSPECIFIED", "EXECUTION_HISTORY_BASIC", "EXECUTION_HISTORY_DETAILED"}
+
+// StartLevel is Start with the execution's executionHistoryLevel, which
+// overrides its workflow's ("" or EXECUTION_HISTORY_LEVEL_UNSPECIFIED
+// takes the workflow's).
+func (s *Server) StartLevel(parent string, in *executionspb.Execution, level string) (*executionspb.Execution, error) {
+	if level == "EXECUTION_HISTORY_LEVEL_UNSPECIFIED" {
+		level = ""
+	}
+	if level != "" && !slices.Contains(HistoryLevels, level) {
+		return nil, apierror.InvalidArgument("Invalid value at 'execution.execution_history_level' (type.googleapis.com/google.cloud.workflows.executions.v1.ExecutionHistoryLevel), %q", level)
+	}
 	m := workflowRE.FindStringSubmatch(parent)
 	if m == nil {
 		return nil, apierror.InvalidArgument("parent %q must be projects/{project}/locations/{location}/workflows/{workflow}", parent)
@@ -64,9 +81,8 @@ func (s *Server) Start(parent string, in *executionspb.Execution) (*executionspb
 		return nil, apierror.NotFound("Resource '%s' was not found", parent)
 	}
 	wf := clone(rec.WF)
-	prog, err := Parse(wf.GetSourceContents())
-	if err != nil {
-		return nil, apierror.FailedPrecondition("the workflow's source no longer parses: %v", err)
+	if err := s.unseal(parent, wf.GetCryptoKeyName(), rec.cipher); err != nil {
+		return nil, err
 	}
 	now := s.now()
 	name := parent + "/executions/" + newUUID()
@@ -76,6 +92,30 @@ func (s *Server) Start(parent string, in *executionspb.Execution) (*executionspb
 	if ex.CallLogLevel == executionspb.Execution_CALL_LOG_LEVEL_UNSPECIFIED {
 		ex.CallLogLevel = executionspb.Execution_CallLogLevel(wf.GetCallLogLevel())
 	}
+	er := &executionRecord{Ex: ex, key: wf.GetCryptoKeyName(), cipher: rec.cipher, level: level}
+	if err := s.prepare(er, wf); err != nil {
+		return nil, err
+	}
+	s.execs[name] = er
+	if err := s.save(); err != nil {
+		er.cancel(context.Canceled)
+		delete(s.execs, name)
+		return nil, apierror.Wrap(err)
+	}
+	s.systemLog(er, "ACTIVE", "Execution started", map[string]any{"start": map[string]any{"argument": in.GetArgument()}})
+	s.wg.Add(1)
+	go s.run(er, in.GetArgument())
+	return clone(ex), nil
+}
+
+// prepare makes an execution's machine for the workflow revision wf. The
+// caller holds mu.
+func (s *Server) prepare(er *executionRecord, wf *workflowspb.Workflow) error {
+	prog, err := Parse(wf.GetSourceContents())
+	if err != nil {
+		return apierror.FailedPrecondition("the workflow's source no longer parses: %v", err)
+	}
+	name := er.Ex.GetName()
 	parts := strings.Split(name, "/")
 	project, location, workflow, id := parts[1], parts[3], parts[5], parts[7]
 	env := map[string]any{
@@ -90,13 +130,14 @@ func (s *Server) Start(parent string, in *executionspb.Execution) (*executionspb
 	if i := strings.LastIndex(sa, "/serviceAccounts/"); i >= 0 {
 		sa = sa[i+len("/serviceAccounts/"):]
 	}
-	ctx, cancel := context.WithCancel(s.ctx)
-	logf := func(severity string, payload any) {
+	ctx, cancel := context.WithCancelCause(s.ctx)
+	emit := func(logID, severity string, payload any) {
 		if s.opts.Log != nil {
-			s.opts.Log(project, location, workflow, id, severity, payload)
+			s.opts.Log(project, location, workflow, id, logID, severity, payload)
 		}
 	}
-	rt := &runtime{h: &HTTPCaller{Client: NewHTTPClient(), Local: s.opts.Local, Tokens: s.opts.Tokens, ServiceAccount: sa, Ingress: s.opts.Ingress}, log: logf}
+	rt := &runtime{h: &HTTPCaller{Client: NewHTTPClient(), Local: s.opts.Local, Tokens: s.opts.Tokens, ServiceAccount: sa, Ingress: s.opts.Ingress},
+		log: func(severity string, payload any) { emit(SysLogID, severity, payload) }}
 	cbURL := func(n string) string {
 		addr := "localhost"
 		if s.opts.Addr != nil && s.opts.Addr() != "" {
@@ -106,26 +147,124 @@ func (s *Server) Start(parent string, in *executionspb.Execution) (*executionspb
 	}
 	mach := newMachine(ctx, prog, rt, env, name, cbURL)
 	mach.now = s.now
-	er := &executionRecord{Ex: ex, m: mach, cancel: cancel, done: make(chan struct{})}
-	s.execs[name] = er
-	if err := s.save(); err != nil {
-		cancel()
-		delete(s.execs, name)
-		return nil, apierror.Wrap(err)
+	mach.emit = emit
+	mach.execID = id
+	mach.callLevel = er.Ex.GetCallLogLevel().String()
+	mach.detailed = er.level == "EXECUTION_HISTORY_DETAILED" ||
+		(er.level == "" && wf.GetExecutionHistoryLevel() == workflowspb.ExecutionHistoryLevel_EXECUTION_HISTORY_DETAILED)
+	mach.children = s
+	mach.onJournal = func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.execs[name] == er {
+			_ = s.save()
+		}
 	}
-	s.wg.Add(1)
-	go s.run(er, in.GetArgument())
-	return clone(ex), nil
+	if er.journal != nil {
+		mach.resumeFrom(er.journal)
+	}
+	er.m, er.cancel, er.done = mach, cancel, make(chan struct{})
+	return nil
+}
+
+// Resume carries on the executions that were running when the instance
+// stopped (journal.go). Executions of a workflow since deleted, or whose
+// revision no longer parses, fail.
+func (s *Server) Resume() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, name := range sortedNames(s.execs) {
+		er := s.execs[name]
+		st := er.Ex.GetState()
+		if er.m != nil || (st != executionspb.Execution_ACTIVE && st != executionspb.Execution_QUEUED) {
+			continue
+		}
+		wf := s.revisionOf(er.Ex)
+		var err error
+		if wf == nil {
+			err = apierror.NotFound("the workflow of %s no longer exists", name)
+		} else {
+			err = s.prepare(er, wf)
+		}
+		if err != nil {
+			end := s.now()
+			er.Ex.State = executionspb.Execution_FAILED
+			er.Ex.EndTime = timestamppb.New(end)
+			er.Ex.Duration = durationpb.New(end.Sub(er.Ex.GetStartTime().AsTime()))
+			er.Ex.Error = &executionspb.Execution_Error{Payload: strconvQuote(err.Error()), Context: "RuntimeError: " + err.Error()}
+			er.journal = nil
+			continue
+		}
+		er.Ex.State = executionspb.Execution_ACTIVE
+		er.History = nil
+		s.wg.Add(1)
+		go s.run(er, er.Ex.GetArgument())
+	}
+	_ = s.save()
+}
+
+// revisionOf is the workflow revision an execution runs. The caller holds
+// mu.
+func (s *Server) revisionOf(ex *executionspb.Execution) *workflowspb.Workflow {
+	m := executionRE.FindStringSubmatch(ex.GetName())
+	if m == nil {
+		return nil
+	}
+	rec := s.wfs[m[1]]
+	if rec == nil {
+		return nil
+	}
+	for _, r := range rec.Revisions {
+		if r.GetRevisionId() == ex.GetWorkflowRevisionId() {
+			return clone(r)
+		}
+	}
+	return clone(rec.WF)
+}
+
+// systemLog writes an ExecutionsSystemLog entry of the execution's start
+// or end.
+func (s *Server) systemLog(er *executionRecord, state, message string, details map[string]any) {
+	if s.opts.Log == nil {
+		return
+	}
+	parts := strings.Split(er.Ex.GetName(), "/")
+	payload := map[string]any{"@type": systemLogType, "message": message, "state": state,
+		"activityTime": s.now().UTC().Format(time.RFC3339Nano)}
+	for k, v := range details {
+		payload[k] = v
+	}
+	severity := "INFO"
+	if state == "FAILED" {
+		severity = "ERROR"
+	}
+	go s.opts.Log(parts[1], parts[3], parts[5], parts[7], SystemLogID, severity, payload)
 }
 
 func (s *Server) run(er *executionRecord, argument string) {
 	defer s.wg.Done()
 	defer close(er.done)
+	name := er.Ex.GetName()
+	go s.watchKey(er, name[:strings.Index(name, "/executions/")])
 	result, err := er.m.run(argument)
 	er.m.callbacks.close()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	ex := er.Ex
+	var ke *errKey
+	if errors.Is(err, context.Canceled) && errors.As(context.Cause(er.m.ctx), &ke) {
+		err = ke
+	}
+	if errors.Is(err, context.Canceled) && ex.State != executionspb.Execution_CANCELLED && s.ctx.Err() != nil {
+		// The instance is stopping: the execution stays ACTIVE, with its
+		// journal, and carries on when the instance starts again.
+		er.History = er.m.History()
+		er.journal = er.m.Journal()
+		er.m = nil
+		er.cancel = nil
+		_ = s.save()
+		return
+	}
 	end := s.now()
 	ex.EndTime = timestamppb.New(end)
 	ex.Duration = durationpb.New(end.Sub(ex.GetStartTime().AsTime()))
@@ -134,12 +273,10 @@ func (s *Server) run(er *executionRecord, argument string) {
 		ex.State = executionspb.Execution_SUCCEEDED
 		ex.Result = result
 	case errors.Is(err, context.Canceled):
-		if ex.State != executionspb.Execution_CANCELLED {
-			// The instance is stopping: it is recorded as interrupted.
-			ex.State = executionspb.Execution_FAILED
-			ex.Error = &executionspb.Execution_Error{Payload: `"the CloudBurrow instance stopped while the execution ran"`,
-				Context: "RuntimeError: the CloudBurrow instance stopped while the execution ran"}
-		}
+		ex.State = executionspb.Execution_CANCELLED
+	case errors.As(err, &ke):
+		ex.State = executionspb.Execution_FAILED
+		ex.Error = &executionspb.Execution_Error{Payload: strconvQuote(ke.Error()), Context: "RuntimeError: " + ke.Error()}
 	default:
 		ex.State = executionspb.Execution_FAILED
 		payload, ctxText := errorPayload(err)
@@ -155,6 +292,19 @@ func (s *Server) run(er *executionRecord, argument string) {
 	er.History = er.m.History()
 	er.m = nil
 	er.cancel = nil
+	er.journal = nil
+	switch ex.State {
+	case executionspb.Execution_SUCCEEDED:
+		s.systemLog(er, "SUCCEEDED", "Execution succeeded", map[string]any{"success": map[string]any{"result": ex.GetResult()}})
+	case executionspb.Execution_FAILED:
+		src := ""
+		if st := ex.GetError().GetStackTrace().GetElements(); len(st) > 0 {
+			src = st[0].GetRoutine() + "." + st[0].GetStep()
+		}
+		s.systemLog(er, "FAILED", "Execution failed", map[string]any{"failure": map[string]any{"exception": ex.GetError().GetPayload(), "source": src}})
+	case executionspb.Execution_CANCELLED:
+		s.systemLog(er, "CANCELLED", "Execution cancelled", nil)
+	}
 	if s.execs[ex.GetName()] == er {
 		_ = s.save()
 	}
@@ -265,7 +415,7 @@ func (a *ExecutionsAPI) CancelExecution(_ context.Context, req *executionspb.Can
 	cancel, done := er.cancel, er.done
 	s.mu.Unlock()
 	if cancel != nil {
-		cancel()
+		cancel(context.Canceled)
 	}
 	if done != nil {
 		select {
@@ -286,6 +436,17 @@ func (s *Server) Wait(name string) {
 	if er != nil && er.done != nil {
 		<-er.done
 	}
+}
+
+// HistoryLevel is the executionHistoryLevel an execution was created with,
+// "" when it named none.
+func (s *Server) HistoryLevel(name string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if er := s.execs[name]; er != nil {
+		return er.level
+	}
+	return ""
 }
 
 // StepEntries is an execution's history.
@@ -363,4 +524,46 @@ func (s *Server) WorkflowSource(name string) (*workflowspb.Workflow, bool) {
 		return nil, false
 	}
 	return clone(rec.WF), true
+}
+
+func strconvQuote(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
+}
+
+// StartChild starts an execution for experimental.executions.
+func (s *Server) StartChild(workflow, argument string) (string, error) {
+	ex, err := s.Start(workflow, &executionspb.Execution{Argument: argument})
+	if err != nil {
+		return "", err
+	}
+	return ex.GetName(), nil
+}
+
+// WaitChild waits for an execution experimental.executions started.
+func (s *Server) WaitChild(ctx context.Context, name string) (state, result, errPayload string, err error) {
+	for {
+		s.mu.Lock()
+		er := s.execs[name]
+		var done chan struct{}
+		if er != nil {
+			done = er.done
+			if er.m == nil && er.Ex.GetState() != executionspb.Execution_ACTIVE && er.Ex.GetState() != executionspb.Execution_QUEUED {
+				ex := er.Ex
+				s.mu.Unlock()
+				return ex.GetState().String(), ex.GetResult(), ex.GetError().GetPayload(), nil
+			}
+		}
+		s.mu.Unlock()
+		if er == nil {
+			return "", "", "", raiseErr("HttpError", "the execution %s was not found", name)
+		}
+		wait := time.After(time.Second)
+		select {
+		case <-ctx.Done():
+			return "", "", "", ctx.Err()
+		case <-done:
+		case <-wait:
+		}
+	}
 }

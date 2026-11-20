@@ -2945,7 +2945,11 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   // A top-level list's selection actions (#1864) are its ListActions,
   // sent with an empty path: Roles' Create role from selection.
   const selectActions = data.selectActions || [];
-  const selectable = Boolean(opts.rowControls && caps.delete) || selectActions.length > 0;
+  // A list whose checkbox opens the info panel on the checked row (#1859):
+  // Google's Spanner Instances list, "Select the checkbox for the instance.
+  // The Info panel appears".
+  const infoOnSelect = Boolean(opts.rowControls && data.infoOnSelect);
+  const selectable = Boolean(opts.rowControls && caps.delete) || selectActions.length > 0 || infoOnSelect;
   // Or a list screen's rows marked selectable: History's builds awaiting
   // approval, which its Approve takes (#1854). A top-level list's own
   // selection actions take any of its rows (#1864).
@@ -2977,7 +2981,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
     : null;
   const dataColumns = () => allDataColumns().filter((c) => !chooser || !chooser.hidden().has(c));
   const hasActions = () =>
-    data.items.some((i) => (i.actions || []).length || i.object) || caps.delete;
+    data.items.some((i) => (i.actions || []).some((a) => !a.panel) || i.object) || caps.delete;
   // Declared by the provider, or inferred from the rows that happen to be
   // present. Inference alone made the column come and go as the data
   // changed, taking any sort applied to it with it.
@@ -3017,16 +3021,32 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   });
   const selectionLabel = el("span", { class: "selection-count unavailable", text: "" });
   // In the order they were checked, which is the order Compose joins them.
-  const selectionButtons = selectActions.map((a) => el("button", {
+  // A selection action drawn in the info panel (Action.Panel, #2013) has
+  // no button: checking rows opens it, as Google's Audit Logs does.
+  const panelSelect = selectActions.find((a) => a.panel);
+  const selectionButtons = selectActions.filter((a) => !a.panel).map((a) => el("button", {
     class: "secondary", text: a.label, disabled: "disabled",
     onclick: () => {
       const byName = new Map(data.items.map((i) => [i.name, i]));
       const names = [...selected].map((n) => byName.get(n)).filter(Boolean)
         .map((i) => (i.object ? i.object[i.object.length - 1] : i.name));
+      // A selection action that is a link (#2013): Roles' Create custom
+      // role from selection opens Create custom role with ?roles=.
+      if (a.href) {
+        const to = new URL(a.href, location.origin);
+        const project = currentProject();
+        if (project) to.searchParams.set("project", project);
+        to.searchParams.set(a.selectionField, names.join(","));
+        return navigate(to.pathname + to.search);
+      }
       const fields = (a.fields || []).map((f) =>
         f.name === a.selectionField ? { ...f, default: names.join("\n") } : f);
-      // The whole page again, whose summary counts the objects too.
-      runAction(route, opts.pagePath || [], { ...a, fields }, () => reload());
+      // The whole page again, whose summary counts the objects too. On a
+      // top-level list there is no page to name: a confirmation names the
+      // checked row, or how many there are (#1864: Roles' Disable).
+      const top = !(opts.pagePath || []).length && !(a.fields || []).some((f) => f.type !== "hidden");
+      const what = top ? (names.length === 1 ? names[0] : `${names.length} ${data.noun || "rows"}`) : null;
+      runAction(route, opts.pagePath || [], { ...a, fields }, () => reload(), NO_ROW, what);
     },
   }));
 
@@ -3122,7 +3142,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
         disabled: busy ? "disabled" : null, "aria-label": `${a.label} ${item.name}`, onclick: rowAction(a) }));
     const actions = [
       ...(caps.editRowFirst ? edit : []),
-      ...(item.actions || []).filter((a) => !a.button).map((a) => ({
+      ...(item.actions || []).filter((a) => !a.button && !a.panel).map((a) => ({
         label: a.label, destructive: a.destructive,
         // A row whose actions address a path of their own is named by its
         // row, not the path's last segment: a value inside a Datastore
@@ -3175,6 +3195,15 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
               if (e.target.checked) selected.add(item.name);
               else selected.delete(item.name);
               drawSelection();
+              if (infoOnSelect && e.target.checked) {
+                inspected = item.name;
+                openInfoPanelOn(item, dataColumns(), route, refresh);
+                for (const r of body.querySelectorAll("tr[aria-pressed]")) {
+                  const on = r.getAttribute("aria-label") === `Inspect ${item.name}`;
+                  r.setAttribute("aria-pressed", on ? "true" : "false");
+                  r.classList.toggle("is-inspected", on);
+                }
+              }
             },
           })));
       }
@@ -3344,12 +3373,33 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
     return button;
   };
 
+  // The info panel of the checked rows (#2013): one row's own Panel
+  // action, with its values, or the selection's for several; closed when
+  // none is checked. Redrawn only when the checked rows change.
+  let panelFor = "";
+  const drawSelectionPanel = () => {
+    const byName = new Map(data.items.map((i) => [i.name, i]));
+    const items = [...selected].map((x) => byName.get(x)).filter(Boolean);
+    const key = items.map((i) => i.name).join("\n");
+    if (key === panelFor) return;
+    panelFor = key;
+    if (!items.length) return closeActionPanel();
+    const own = items.length === 1 ? (items[0].actions || []).find((a) => a.panel) : null;
+    if (own) return openActionPanel(route, rowTarget(items[0]), own, refresh, items[0].name, { keepFocus: true });
+    const names = items.map((i) => (i.object ? i.object[i.object.length - 1] : i.name));
+    const fields = (panelSelect.fields || []).map((f) =>
+      f.name === panelSelect.selectionField ? { ...f, default: names.join("\n") } : f);
+    openActionPanel(route, [], { ...panelSelect, fields }, refresh,
+      names.length === 1 ? names[0] : `${names.length} ${data.noun || "rows"}`, { keepFocus: true });
+  };
+
   const drawSelection = () => {
     if (!selectable) return;
     const n = selected.size;
     bulk.disabled = n === 0;
     for (const b of selectionButtons) b.disabled = n === 0;
     selectionLabel.textContent = n ? `${n} selected` : "";
+    if (panelSelect) drawSelectionPanel();
     const boxes = [...body.querySelectorAll('input[type="checkbox"]')];
     const head = headRow.querySelector('input[type="checkbox"]');
     if (head) {
@@ -3441,6 +3491,11 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
         readAt = new Date();
         staleBecause = "";
         draw();
+        // The inspected row's panel shows what was just saved from it (#1859:
+        // a Spanner instance's Labels tab), but a poll does not redraw it
+        // under someone typing in it.
+        const shown = !quiet && inspected && infoPanelOpen() && data.items.find((i) => i.name === inspected);
+        if (shown) drawInfoPanel(shown, dataColumns(), route, refresh);
         announce(`${data.items.length} ${noun}, updated just now`);
         return;
       }
@@ -3532,14 +3587,17 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
               // (#1854); Delete only where the rows can be deleted.
               ...selectionButtons,
               caps.delete ? bulk : null,
-              selectionLabel)
+              caps.delete || selectActions.length ? selectionLabel : null)
           : null)
       : el("div", { class: "action-bar" }, ...selectionButtons,
           selectActions.length ? selectionLabel : null, refreshControl),
     el("div", { class: "filter-bar" }, bar.node, chooser ? chooser.node : null, freshness),
     bar.chips,
+    // Listing.TableTitle (#1864): the table's own heading, as Google's
+    // Audit Logs titles its table "Data Access audit logs configuration".
+    data.tableTitle ? el("h2", { class: "table-title", id: "table-title", text: data.tableTitle }) : null,
     el("div", { class: "table-wrap" },
-      el("table", {}, el("thead", {}, headRow), body)),
+      el("table", { "aria-labelledby": data.tableTitle ? "table-title" : null }, el("thead", {}, headRow), body)),
     footer);
   if (opts.rowControls) openAskedListAction(route, data, refresh);
 }
@@ -3794,6 +3852,12 @@ async function renderDetail(view, route, resourcePath) {
         })));
       note = note ? el("div", {}, bar, note) : bar;
     }
+    // Section.Edit (#1864): a form drawn in the tab itself, as Google's
+    // service account Details tab has its Name box and Save.
+    if (section.edit) {
+      const form = inlineEditForm(route, segments, section, reload);
+      note = note ? el("div", {}, form, note) : form;
+    }
 
     // A grouped section's own strip, its siblings' labels (#1845).
     if (section.group) {
@@ -3949,6 +4013,19 @@ async function renderDetail(view, route, resourcePath) {
   const drawListingSection = (into, section, note, reload) => {
     let list = section.listing || {};
     const noun = list.noun || section.label.toLowerCase();
+    // A workflow execution's Steps (#2004): the visualization panel of
+    // the revision that ran, over the step entries' table.
+    if (section.graph) {
+      const viz = wfStepsVisualization(section.graph, list.items);
+      note = note ? el("div", {}, note, viz) : viz;
+    }
+    // Google's step detail panel (#2011): a step entry's details, its
+    // variables with detailed history, and its Parent, Children, Next
+    // and Previous entries, each moving the panel to that entry.
+    if ((section.stepEntries || []).length) {
+      const panel = wfStepPanel(section.stepEntries);
+      note = note ? el("div", {}, note, panel) : panel;
+    }
     // An upload control where the provider says objects can land. It joins
     // the section's note, so it is drawn whether or not there are rows yet —
     // an empty bucket is exactly where the first upload happens.
@@ -4143,6 +4220,14 @@ async function renderDetail(view, route, resourcePath) {
       return setChildren(into, note,
         emptyState(`No ${section.label.toLowerCase()}`, `${name} reports none.`));
     }
+    // A workflow's source (#2004), highlighted beside its graph.
+    if (section.language === "workflows") {
+      return setChildren(into, note,
+        el("div", { class: "card text-section" },
+          el("div", { class: "text-actions" },
+            copyButton(section.text, `${section.label} for ${name}`)),
+          wfSourceSection(section.text, `${section.label} of ${name}`)));
+    }
     setChildren(into, note,
       el("div", { class: "card text-section" },
         el("div", { class: "text-actions" },
@@ -4283,7 +4368,9 @@ async function renderDetail(view, route, resourcePath) {
   // button, not the header's (#1851): a key's Disable over its versions.
   const onRows = new Set(sections.flatMap((s) => ((s.listing || {}).selectActions || []).map((a) => a.id)));
   const pageActions = [
-    ...(data.actions || []).filter((a) => !onTabs.has(a.id) && !onRows.has(a.id)).map((a) =>
+    // A Linked action is opened from where the page links to it (#1859:
+    // Upgrade beside a Spanner instance's edition), not as a button.
+    ...(data.actions || []).filter((a) => !onTabs.has(a.id) && !onRows.has(a.id) && !a.linked).map((a) =>
       el("button", {
         class: "secondary" + (a.destructive ? " danger" : ""),
         text: a.label,
@@ -4415,11 +4502,14 @@ function openActionForm(route, segments, action, onDone, title = null) {
     // before it is sent (#787). Cancelled, the form stays open.
     if (action.confirm) {
       await confirmDestructive({
-        title: `${action.label}: ${name}?`,
+        // As Google's console confirms it (#1860, #1931): Cloud SQL's
+        // Remove asks "Remove user account?" with nothing typed.
+        title: action.confirmTitle || `${action.label}: ${name}?`,
         detail: action.confirm,
         confirmWord: name,
         confirmLabel: action.label,
         consequence: "",
+        style: action.confirmStyle || "name",
         onConfirm: async () => {
           const failure = await perform(values);
           if (failure) throw failure;
@@ -4488,7 +4578,9 @@ function openActionForm(route, segments, action, onDone, title = null) {
   };
 
   dialog.append(el("form", { class: "modal-body", novalidate: true, onsubmit: submit },
-    el("h2", { id: "action-title", text: segments.length ? `${action.label} for ${name}` : action.label }),
+    // Google's title where it is not the action's label (Action.Title,
+    // #1860): Cloud SQL's Create database opens "New database".
+    el("h2", { id: "action-title", text: action.title || (segments.length ? `${action.label} for ${name}` : action.label) }),
     error,
     ...actionSteps.nodes,
     el("div", { class: "modal-actions" }, cancel, primary)));
@@ -4507,8 +4599,116 @@ function listActionButtons(route, data, onDone) {
     type: "button", class: "secondary", id: `list-action-${a.id}`, text: a.label,
     // One that is a link opens its page: the Datastore page's Indexes
     // (#1846).
-    onclick: () => (a.href ? navigate(a.href) : openActionForm(route, [], a, onDone, data.noun || route.title)),
+    onclick: () => (a.href ? navigate(a.href)
+      : a.panel ? openActionPanel(route, [], a, onDone, a.label)
+      : openActionForm(route, [], a, onDone, data.noun || route.title)),
   }));
+}
+
+// openActionPanel draws an action's form in the info panel (Action.Panel,
+// #2013), as Google's Audit Logs edits the checked services in its
+// information panel: the panel titled by what it acts on, the fields'
+// Sections as its tabs (Log Types, Exempted Principals), then the
+// action's submit (Save). It is sent as a dialog's form is.
+function openActionPanel(route, segments, action, onDone, title, { keepFocus = false } = {}) {
+  const panel = infoPanelHost();
+  if (!panel) return openActionForm(route, segments, action, onDone, title);
+  const name = title || segments[segments.length - 1] || action.label;
+  const fields = buildCreateForm({ label: action.label, fields: action.fields });
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  const primary = el("button", { type: "submit", class: "primary", id: "action-panel-save", text: action.submit || action.label });
+  const slug = (n) => n.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const sections = fields.nodes.filter((n) => n.classList && n.classList.contains("form-section"));
+  const loose = fields.nodes.filter((n) => !sections.includes(n));
+  const buttons = [];
+  const select = (i) => {
+    buttons.forEach((b, j) => {
+      b.classList.toggle("is-selected", i === j);
+      b.setAttribute("aria-selected", i === j ? "true" : "false");
+      b.tabIndex = i === j ? 0 : -1;
+    });
+    sections.forEach((x, j) => { x.hidden = i !== j; });
+  };
+  sections.forEach((x, i) => {
+    const h = x.querySelector(".form-section-title");
+    const label = h ? h.textContent : `Tab ${i + 1}`;
+    if (h) h.remove();
+    x.id = `action-panel-${slug(label)}`;
+    x.setAttribute("role", "tabpanel");
+    x.setAttribute("aria-labelledby", `${x.id}-tab`);
+    buttons.push(el("button", { type: "button", class: "tab", role: "tab", id: `${x.id}-tab`, "aria-controls": x.id, text: label,
+      onclick: () => select(i),
+      onkeydown: (ev) => {
+        const step = ev.key === "ArrowRight" ? 1 : ev.key === "ArrowLeft" ? -1 : 0;
+        if (!step) return;
+        ev.preventDefault();
+        const j = (i + step + sections.length) % sections.length;
+        select(j);
+        buttons[j].focus();
+      } }));
+  });
+  const strip = buttons.length > 1 ? el("div", { class: "tab-strip action-panel-tabs", role: "tablist", "aria-label": action.label }, ...buttons) : null;
+  if (buttons.length) select(0);
+  let submitting = false;
+  const submit = async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    if (submitting) return;
+    if (!fields.validate()) {
+      // The first tab holding an invalid field is shown.
+      const bad = sections.findIndex((x) => x.querySelector(":invalid, [aria-invalid=\"true\"]"));
+      if (bad >= 0) select(bad);
+      return;
+    }
+    submitting = true;
+    primary.disabled = true;
+    const op = recordOperation(`${action.label} ${name}`);
+    try {
+      const res = await send(`/api/actions/${route.service}?project=${encodeURIComponent(currentProject())}`,
+        "POST", { Path: segments, Action: action.id, Values: fields.values() });
+      op.succeeded("", res.operation);
+      notify(`${action.label}: saved for ${name}`);
+      announce(`Saved ${name}`);
+      closeActionPanel();
+      onDone();
+    } catch (err) {
+      op.failed(err.message, err.operation);
+      error.textContent = err.message;
+      error.hidden = false;
+    } finally {
+      submitting = false;
+      primary.disabled = false;
+    }
+  };
+  panel.hidden = false;
+  panel.dataset.actionPanel = action.id;
+  document.documentElement.setAttribute("data-info", "open");
+  setChildren(panel,
+    el("form", { class: "action-panel", id: "action-panel", novalidate: true, onsubmit: submit, "aria-labelledby": "action-panel-title" },
+      el("div", { class: "info-head" },
+        el("h2", { id: "action-panel-title", text: segments.length || title !== action.label ? `${action.label}: ${name}` : action.label }),
+        el("button", { type: "button", class: "icon-button", "aria-label": "Close info panel", onclick: () => closeActionPanel(true),
+          html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>' })),
+      error, ...loose, strip, ...sections,
+      el("div", { class: "modal-actions" },
+        el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => closeActionPanel(true) }), primary)));
+  if (!keepFocus) (buttons[0] || primary).focus();
+}
+
+// closeActionPanel takes an action's form out of the info panel: the
+// panel goes back to the row the viewer keeps open, or hides.
+function closeActionPanel(fromPanel = false) {
+  const panel = infoPanelHost();
+  if (!panel || !panel.dataset.actionPanel) return;
+  delete panel.dataset.actionPanel;
+  setChildren(panel);
+  if (infoPanelOpen()) {
+    setChildren(panel, el("div", { class: "info-empty" }, el("h2", { text: "Select a resource" })));
+  } else {
+    panel.hidden = true;
+    document.documentElement.removeAttribute("data-info");
+  }
+  if (fromPanel) { const v = document.getElementById("view"); if (v) v.focus(); }
 }
 
 // sendActionWithFile performs an action whose form holds a file (#999):
@@ -5213,6 +5413,45 @@ function openEditForm(route, segments, spec, onDone) {
   fields.focusFirst();
 }
 
+// inlineEditForm is a section's own edit form (Section.Edit, #1864), sent
+// as the page's Edit is, through PATCH /api/resources/{service}.
+function inlineEditForm(route, segments, section, onDone) {
+  const spec = section.edit;
+  const name = segments[segments.length - 1];
+  const fields = buildCreateForm(spec);
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  const titleId = `inline-edit-${section.id}`;
+  const primary = el("button", { type: "submit", class: "primary", id: `${titleId}-save`, text: spec.submit || "Save" });
+  let submitting = false;
+  const submit = async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    if (submitting || !fields.validate()) return;
+    submitting = true;
+    primary.disabled = true;
+    const op = recordOperation(`Update ${name}`);
+    try {
+      const res = await send(`/api/resources/${route.service}?project=${encodeURIComponent(currentProject())}`,
+        "PATCH", { Path: segments, Values: fields.values() });
+      op.succeeded("", res.operation);
+      notify(`Updated ${name}`);
+      onDone();
+    } catch (err) {
+      op.failed(err.message, err.operation);
+      error.textContent = err.message;
+      error.hidden = false;
+    } finally {
+      submitting = false;
+      primary.disabled = false;
+    }
+  };
+  return el("form", { class: "inline-edit", novalidate: true, onsubmit: submit, "aria-labelledby": titleId },
+    el("h2", { class: "table-title", id: titleId, text: spec.title || spec.label || "Edit" }),
+    spec.note ? el("p", { class: "form-help", text: spec.note }) : null,
+    error, ...fields.nodes,
+    el("div", { class: "picklist-actions" }, primary));
+}
+
 // pageTabStrip is a route's `pageTabs` as a tablist of links, the route
 // itself selected (#1857).
 function pageTabStrip(route) {
@@ -5427,6 +5666,17 @@ function serverFilterBox(spec, reload) {
 // provider names the page it opens (#1554).
 function propertyValue(prop) {
   const value = prop.link ? el("a", { href: prop.link, text: prop.value }) : prop.value;
+  // A link beside the value that opens one of the page's actions, as
+  // Google's Upgrade beside a Spanner instance's edition (#1859): the page's
+  // own address with ?action=, which the page opens once.
+  if (prop.action) {
+    const here = new URL(location.href);
+    here.searchParams.set("action", prop.action);
+    return el("dd", { class: "has-property-action" }, el("span", {}, value), " ",
+      el("a", { class: "property-action", href: here.pathname + here.search,
+                "aria-label": `${prop.actionText || prop.action} ${prop.label.toLowerCase()}`,
+                text: prop.actionText || prop.action }));
+  }
   if (!prop.copy) return el("dd", {}, value);
   // A Copy button of its own, labelled as Google labels it: Copy URL,
   // Copy gsutil URI (#1843).
@@ -5653,7 +5903,7 @@ function drawInfoPanel(item, columns, route, onDone) {
 
   const caps = capabilityOf(route.service);
   const actions = [
-    ...(item.actions || []).map((a) => ({
+    ...(item.actions || []).filter((a) => !a.panel).map((a) => ({
       label: a.label, destructive: a.destructive,
       run: () => runAction(route, (item.target || []).length ? item.target : item.name, a, onDone),
     })),
@@ -5662,6 +5912,44 @@ function drawInfoPanel(item, columns, route, onDone) {
       run: () => deleteResource(route, item.name, onDone),
     }] : []),
   ];
+
+  const details = [
+    item.status
+      ? el("p", {}, el("span", { class: "status", "data-state": stateOf(item.status) },
+          el("span", { text: item.status })))
+      : null,
+    // Only the columns the listing itself declares, so the panel can never
+    // show a field the provider did not return.
+    el("dl", { class: "info-fields" }, ...columns.flatMap((c) => {
+      const value = (item.fields || {})[c];
+      return value ? [el("dt", { text: c }), el("dd", { text: value })] : [];
+    })),
+    item.link
+      ? el("p", {}, el("a", { href: item.link, text: "Open" }))
+      : (item.opens || []).length
+        ? el("p", {}, el("a", { href: detailHref(route, item.opens), text: "Open" }))
+      : caps.detail
+        ? el("p", {}, el("a", { href: detailHref(route, item.name), text: "Open" }))
+        : null,
+    actions.length
+      ? el("div", { class: "info-actions" }, ...actions.map((a) =>
+          el("button", {
+            class: "secondary" + (a.destructive ? " danger" : ""),
+            text: a.label, onclick: () => a.run(),
+          })))
+      : null,
+  ];
+  const head = el("div", { class: "info-head" },
+    el("h2", { text: item.name }),
+    el("button", { class: "icon-button", "aria-label": "Close info panel",
+                   onclick: () => closeInfoPanel(),
+                   html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>' }));
+  // A row with tabs of its own (Resource.Info, #1859): Google's Spanner
+  // instance panel has a Labels tab. The row's columns are the first tab.
+  if ((item.info || []).length) {
+    const tabs = [{ id: "details", label: "Details" }, ...item.info];
+    return setChildren(panel, head, infoTabs(item, tabs, details, route, onDone));
+  }
 
   setChildren(panel,
     el("div", { class: "info-head" },
@@ -5693,6 +5981,93 @@ function drawInfoPanel(item, columns, route, onDone) {
             text: a.label, onclick: () => a.run(),
           })))
       : null);
+}
+
+// infoTabs draws the info panel's tabs for a row (Resource.Info, #1859): a
+// tablist (arrows, Home and End move between tabs) over one panel. A tab
+// with a Form edits in place: its fields prefilled, saved with the form's
+// Submit label, performed at the row's Target.
+let INFO_TAB = "details";
+function infoTabs(item, tabs, details, route, onDone) {
+  if (!tabs.some((t) => t.id === INFO_TAB)) INFO_TAB = "details";
+  const panel = el("div", { class: "info-tab-panel", role: "tabpanel", id: "info-tab-panel", tabindex: "0" });
+  const buttons = tabs.map((t) => el("button", {
+    type: "button", role: "tab", id: `info-tab-${t.id}`, "aria-controls": "info-tab-panel",
+    text: t.label, onclick: () => select(t.id, false),
+  }));
+  const strip = el("div", { class: "tab-strip info-tabs", role: "tablist", "aria-label": `${item.name} info` }, ...buttons);
+  strip.addEventListener("keydown", (e) => {
+    const i = tabs.findIndex((t) => t.id === INFO_TAB);
+    const next = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: tabs.length - 1 }[e.key];
+    if (next === undefined) return;
+    e.preventDefault();
+    select(tabs[(next + tabs.length) % tabs.length].id, true);
+  });
+  const draw = (tab) => {
+    if (tab.id === "details") return setChildren(panel, ...details);
+    const shown = (tab.properties || []).length
+      ? el("dl", { class: "info-fields" }, ...tab.properties.flatMap((p) => [
+          el("dt", { text: p.label }), el("dd", { text: p.value })]))
+      : el("p", { class: "unavailable", text: tab.empty || `No ${tab.label.toLowerCase()}` });
+    if (!tab.form) return setChildren(panel, shown);
+    const form = buildCreateForm({ label: tab.form.label, fields: tab.form.fields });
+    const error = el("p", { class: "form-error", role: "alert", hidden: true });
+    const save = el("button", { type: "submit", class: "primary", text: tab.form.submit || tab.form.label });
+    const target = (item.target || []).length ? item.target : [item.name];
+    const submit = async (e) => {
+      e.preventDefault();
+      error.hidden = true;
+      if (!form.validate()) return;
+      const values = form.values();
+      save.disabled = true;
+      const op = recordOperation(`${tab.form.label} ${item.name}`);
+      try {
+        const res = await send(`/api/actions/${route.service}?project=${encodeURIComponent(currentProject())}`,
+          "POST", { Path: target, Action: tab.form.id, Values: values });
+        op.succeeded("", res && res.operation);
+        notify(`Saved the ${tab.label.toLowerCase()} of ${item.name}`);
+        if (onDone) onDone();
+      } catch (err) {
+        op.failed(err.message, err.operation);
+        error.textContent = err.message;
+        error.hidden = false;
+      } finally {
+        save.disabled = false;
+      }
+    };
+    setChildren(panel, shown,
+      el("form", { class: "info-tab-form", "aria-label": `${tab.label} of ${item.name}`, onsubmit: submit, novalidate: true },
+        ...form.nodes, error, el("div", { class: "action-bar" }, save)));
+  };
+  const select = (id, focus) => {
+    INFO_TAB = id;
+    buttons.forEach((b, i) => {
+      const on = tabs[i].id === id;
+      b.setAttribute("aria-selected", on ? "true" : "false");
+      b.tabIndex = on ? 0 : -1;
+      b.classList.toggle("is-active", on);
+      if (on && focus) b.focus();
+    });
+    panel.setAttribute("aria-labelledby", `info-tab-${id}`);
+    draw(tabs.find((t) => t.id === id));
+  };
+  select(INFO_TAB, false);
+  return el("div", { class: "info-tabbed" }, strip, panel);
+}
+
+// openInfoPanelOn opens the info panel on one row, as a checkbox that opens
+// it does (Listing.InfoOnSelect, #1859).
+function openInfoPanelOn(item, columns, route, onDone) {
+  writeStored(INFO_OPEN_KEY, true);
+  const panel = infoPanelHost();
+  if (!panel) return;
+  panel.hidden = false;
+  document.documentElement.setAttribute("data-info", "open");
+  if (INFO_TOGGLE && INFO_TOGGLE.isConnected) {
+    INFO_TOGGLE.setAttribute("aria-expanded", "true");
+    labelInfoToggle(INFO_TOGGLE, true);
+  }
+  drawInfoPanel(item, columns, route, onDone);
 }
 
 // --- the query pane ---------------------------------------------------
@@ -6057,9 +6432,15 @@ function buildCreateForm(spec) {
     // Google's inline source editor (#1852): files, one open at a time in a
     // code editor, submitted as a JSON object of file name to contents.
     if (f.type === "sourcefiles") return sourceFilesEntry(f, id, errorId, helpId);
+    // A workflow's source (#2004): Google's editor, its syntax highlighted,
+    // beside the graph of its steps.
+    if (f.type === "workflowsource") return workflowSourceEntry(f, id, errorId, helpId);
     // A repeatable group of fields (#1863): Google's exclusion filters,
     // a row each with its name, filter and Disable.
     if (f.type === "group") return groupEntry(f, id, errorId, helpId);
+    // Items chosen from a picker (#1864): Google's Create role and Edit
+    // role permissions, each with a checkbox, and Add permissions.
+    if (f.type === "picklist") return picklistEntry(f, id, errorId, helpId);
 
     // A textarea rather than an input wherever the value can hold newlines:
     // Enter inserts one instead of submitting the form, which is the whole
@@ -6310,7 +6691,8 @@ function buildCreateForm(spec) {
       const on = when.every(([n, v]) => byName.has(n) && valueText(byName.get(n)) === v);
       entry.node.hidden = !on;
       entry.inactive = !on;
-      entry.control.disabled = !on || !!entry.field.immutable;
+      // Shown, a choice this instance cannot make stays disabled (#1860).
+      entry.control.disabled = !on || !!entry.field.immutable || !!entry.field.unavailable;
     };
     for (const [n] of when) {
       const other = byName.get(n);
@@ -6360,6 +6742,75 @@ function buildCreateForm(spec) {
     });
   }
 
+  // Fields held in a dialog of their own (Field.Panel, #1860): Google's
+  // create page has Set password policy under Enable password policies, a
+  // button whose dialog holds the policy's options and ends in Save. The
+  // fields stay the form's entries, so they are validated and submitted
+  // with it; the button stands where the first of them would be, drawn
+  // while any of them is visible, and Cancel (or Escape) puts back what
+  // they held when it opened.
+  for (const e of entries) e.slot = e.node;
+  const panels = new Map();
+  for (const e of entries) {
+    const name = e.field.panel;
+    if (!name) continue;
+    if (!panels.has(name)) panels.set(name, []);
+    panels.get(name).push(e);
+  }
+  for (const [name, members] of panels) {
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    const titleId = `panel-${slug}-title`;
+    const holder = el("div", { class: "field-panel", hidden: true }, ...members.map((m) => m.node));
+    const visible = (m) => !m.inactive && !m.node.hidden;
+    let openPanel;
+    const button = el("button", { type: "button", class: "secondary", id: `panel-${slug}`, text: name,
+      onclick: () => openPanel() });
+    const row = el("div", { class: "form-row field-panel-row" }, button, holder);
+    const refresh = () => { row.hidden = !members.some(visible); };
+    openPanel = (focusOn) => {
+      const before = members.map((m) => (m.isCheck ? m.control.checked : m.control.value));
+      let saved = false;
+      const { dialog, close } = openModal({ labelledBy: titleId });
+      const cancel = el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() });
+      const save = el("button", { type: "submit", class: "primary", text: "Save" });
+      holder.hidden = false;
+      dialog.append(el("form", { class: "modal-body field-panel-dialog", novalidate: true,
+        onsubmit: (ev) => {
+          ev.preventDefault();
+          const bad = members.filter((m) => !check(m));
+          if (bad.length) { bad[0].control.focus(); return; }
+          saved = true;
+          close();
+        } },
+        el("h2", { id: titleId, text: name }), holder, el("div", { class: "modal-actions" }, cancel, save)));
+      dialog.addEventListener("cb-closed", () => {
+        if (!saved) {
+          members.forEach((m, i) => {
+            if (m.isCheck) m.control.checked = before[i];
+            else m.control.value = before[i];
+            m.control.dispatchEvent(new Event("change", { bubbles: true }));
+            markValid(m);
+          });
+        }
+        holder.hidden = true;
+        row.append(holder);
+      });
+      const first = focusOn || members.find((m) => visible(m) && !m.control.disabled);
+      if (first) first.control.focus();
+    };
+    for (const m of members) {
+      m.slot = null;
+      m.openPanel = () => openPanel(m);
+      for (const n of [...Object.keys(m.field.visibleWhen || {}),
+        ...(m.field.showWhen || "").split("&").map((t) => t.split("=")[0])]) {
+        const other = byName.get(n);
+        if (other) other.control.addEventListener("change", refresh);
+      }
+    }
+    members[0].slot = row;
+    refresh();
+  }
+
   // Fields group under their section heading, in the order the backend gave
   // them. A form whose fields declare no section renders as one block, which
   // is what a two-field form should look like.
@@ -6374,7 +6825,7 @@ function buildCreateForm(spec) {
     ? [el("section", { class: "form-section" },
         el("h3", { class: "form-section-title", text: g.name }),
         ...formTabs(g.name, g.entries))]
-    : g.entries.map((e) => e.node));
+    : g.entries.map((e) => e.slot).filter(Boolean));
 
   // Stated once, not once per field: the marker means nothing until something
   // says what it means.
@@ -6414,7 +6865,9 @@ function buildCreateForm(spec) {
         // A field on a tab that is not showing: show its tab first (#1852).
         const panel = first.node.closest && first.node.closest(".form-tab-panel");
         if (panel && panel.hidden) panel.dispatchEvent(new Event("form-tab-show"));
-        (first.focus || (() => first.control.focus()))();
+        // A field held in a dialog (Field.Panel) opens it, on that field.
+        if (first.openPanel) first.openPanel();
+        else (first.focus || (() => first.control.focus()))();
       }
       return !first;
     },
@@ -6472,7 +6925,7 @@ function uploadIntoTextarea(f, control) {
 // Variables & Secrets, Volumes, Networking and Security (#1852). Every field
 // stays in the form whichever tab shows, so Create submits them all.
 function formTabs(section, entries) {
-  const plain = entries.filter((e) => !e.field.tab).map((e) => e.node);
+  const plain = entries.filter((e) => !e.field.tab).map((e) => e.slot || (e.slot === undefined ? e.node : null)).filter(Boolean);
   const tabs = [];
   for (const e of entries.filter((x) => x.field.tab)) {
     let t = tabs.find((x) => x.name === e.field.tab);
@@ -6761,6 +7214,741 @@ function sourceFilesEntry(f, id, errorId, helpId) {
   return entry;
 }
 
+// --- Workflows' source editor and graph (#2004) ---------------------------
+//
+// Google's Workflows editor highlights the source's syntax, YAML or JSON,
+// and draws the workflow's steps as a graph beside it, redrawn as the
+// source changes; the Source tab shows the same, read only, and an
+// execution's Steps tab has the graph in a visualization panel, each step
+// marked succeeded or failed
+// (https://docs.cloud.google.com/workflows/docs/debug-steps). Written here
+// rather than vendored: the highlighter is a line tokenizer, and the graph
+// needs only the subset of YAML a workflow is written in, which wfParseYAML
+// reads (block mappings and sequences, flow collections, quoted and block
+// scalars). An error in the source is shown under the graph with its line.
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+// wfLanguage is the language a workflow's source is in: JSON when it opens
+// with a brace or bracket, as the Workflows API decides, else YAML.
+function wfLanguage(src) {
+  return /^\s*[[{]/.test(src || "") ? "json" : "yaml";
+}
+
+// wfTokens splits a run of text into highlighted spans: strings (with the
+// ${...} expressions inside them), expressions, numbers, literals,
+// comments (YAML only) and punctuation.
+function wfTokens(text, lang, out) {
+  const push = (cls, s) => { if (s) out.push(cls ? el("span", { class: cls, text: s }) : document.createTextNode(s)); };
+  const exprEnd = (s, i) => {
+    let depth = 0;
+    for (let j = i + 1; j < s.length; j++) {
+      if (s[j] === "{") depth++;
+      else if (s[j] === "}" && --depth === 0) return j + 1;
+      else if (s[j] === '"' || s[j] === "'") {
+        const q = s[j];
+        for (j++; j < s.length && s[j] !== q; j++) if (s[j] === "\\") j++;
+      }
+    }
+    return s.length;
+  };
+  const stringWithExprs = (s) => {
+    let i = 0, last = 0;
+    const span = el("span", { class: "tok-str" });
+    while ((i = s.indexOf("${", i)) !== -1) {
+      if (i > last) span.append(s.slice(last, i));
+      const end = exprEnd(s, i + 1);
+      span.append(el("span", { class: "tok-expr", text: s.slice(i, end) }));
+      i = last = end;
+    }
+    if (last < s.length) span.append(s.slice(last));
+    out.push(span);
+  };
+  let i = 0, plain = "";
+  const flush = () => { push("", plain); plain = ""; };
+  while (i < text.length) {
+    const c = text[i];
+    if (lang === "yaml" && c === "#" && (i === 0 || /\s/.test(text[i - 1]))) {
+      flush(); push("tok-comment", text.slice(i)); return;
+    }
+    if (c === '"' || (c === "'" && lang === "yaml" && (i === 0 || /[\s,[{:]/.test(text[i - 1])))) {
+      let j = i + 1;
+      for (; j < text.length && text[j] !== c; j++) if (c === '"' && text[j] === "\\") j++;
+      flush();
+      const s = text.slice(i, j + 1);
+      // A JSON string followed by a colon is a key.
+      if (lang === "json" && /^\s*:/.test(text.slice(j + 1))) push("tok-key", s);
+      else stringWithExprs(s);
+      i = j + 1;
+      continue;
+    }
+    if (c === "$" && text[i + 1] === "{") {
+      flush();
+      const end = exprEnd(text, i + 1);
+      push("tok-expr", text.slice(i, end));
+      i = end;
+      continue;
+    }
+    if ("[]{},:".includes(c)) { flush(); push("tok-punct", c); i++; continue; }
+    const word = /^-?\d+(\.\d+)?([eE][+-]?\d+)?\b|^(true|false|null|True|False|Null|TRUE|FALSE|NULL)\b/.exec(text.slice(i));
+    if (word && (i === 0 || /[\s,[{:]/.test(text[i - 1]))) {
+      const rest = text.slice(i + word[0].length);
+      if (lang === "json" || /^\s*($|[,\]}#])/.test(rest)) {
+        flush();
+        push(word[3] ? "tok-lit" : "tok-num", word[0]);
+        i += word[0].length;
+        continue;
+      }
+    }
+    plain += c;
+    i++;
+  }
+  flush();
+}
+
+// wfHighlight is the source as highlighted nodes, line by line.
+function wfHighlight(src, lang) {
+  const out = [];
+  let blockIndent = -1; // inside a YAML block scalar: the indent of its key
+  (src || "").split("\n").forEach((line, n) => {
+    if (n) out.push(document.createTextNode("\n"));
+    if (lang === "json") return wfTokens(line, "json", out);
+    const indent = line.match(/^ */)[0].length;
+    if (blockIndent >= 0) {
+      if (!line.trim() || indent > blockIndent) { out.push(el("span", { class: "tok-str", text: line })); return; }
+      blockIndent = -1;
+    }
+    const m = /^(\s*(?:-\s+)*)("(?:[^"\\]|\\.)*"|'[^']*'|[^\s#"'\-[{][^:#]*?|-[^\s:#][^:#]*?)(\s*:)(?=\s|$)(.*)$/.exec(line);
+    if (!m) return wfTokens(line, "yaml", out);
+    out.push(document.createTextNode(m[1].replace(/-/g, "")));
+    // The dashes are punctuation, in place.
+    if (m[1].includes("-")) {
+      out.pop();
+      for (const ch of m[1]) out.push(ch === "-" ? el("span", { class: "tok-punct", text: "-" }) : document.createTextNode(ch));
+    }
+    out.push(el("span", { class: "tok-key", text: m[2] }), el("span", { class: "tok-punct", text: m[3] }));
+    if (/^\s*[|>][-+0-9]*\s*(#.*)?$/.test(m[4])) blockIndent = m[1].length;
+    wfTokens(m[4], "yaml", out);
+  });
+  return out;
+}
+
+// --- a small YAML reader, for the graph -------------------------------
+
+class WfYAMLError extends Error {
+  constructor(message, line) { super(message); this.line = line; }
+}
+
+function wfStripComment(s) {
+  let q = "";
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (q) { if (c === q) q = ""; else if (c === "\\" && q === '"') i++; continue; }
+    if (c === '"' || c === "'") q = c;
+    else if (c === "#" && (i === 0 || /\s/.test(s[i - 1]))) return s.slice(0, i);
+  }
+  return s;
+}
+
+function wfScalar(s, line) {
+  s = s.trim();
+  if (s === "" || s === "~" || /^null$/i.test(s)) return null;
+  if (/^true$/i.test(s)) return true;
+  if (/^false$/i.test(s)) return false;
+  if (/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(s)) return Number(s);
+  if (s[0] === '"') {
+    try { return JSON.parse(s); } catch (_) { throw new WfYAMLError(`unterminated or invalid string ${s}`, line); }
+  }
+  if (s[0] === "'") {
+    if (!s.endsWith("'") || s.length < 2) throw new WfYAMLError(`unterminated string ${s}`, line);
+    return s.slice(1, -1).replace(/''/g, "'");
+  }
+  if (s[0] === "[" || s[0] === "{") return wfFlow(s, line);
+  return s;
+}
+
+// wfFlow reads a flow collection: [a, b] or {k: v}, nested, with quoted
+// strings and ${...} expressions inside plain scalars.
+function wfFlow(s, line) {
+  let i = 0;
+  const ws = () => { while (i < s.length && /\s/.test(s[i])) i++; };
+  const plain = (stops) => {
+    const start = i;
+    while (i < s.length && !stops.includes(s[i])) {
+      if (s[i] === "$" && s[i + 1] === "{") {
+        let depth = 0;
+        for (i++; i < s.length; i++) {
+          if (s[i] === "{") depth++;
+          else if (s[i] === "}" && --depth === 0) break;
+        }
+      }
+      if (s[i] === '"' || s[i] === "'") {
+        const q = s[i];
+        for (i++; i < s.length && s[i] !== q; i++) if (s[i] === "\\" && q === '"') i++;
+      }
+      i++;
+    }
+    return s.slice(start, i);
+  };
+  const value = (stops) => {
+    ws();
+    if (s[i] === "[") {
+      i++;
+      const arr = [];
+      for (;;) {
+        ws();
+        if (s[i] === "]") { i++; return arr; }
+        arr.push(value(",]"));
+        ws();
+        if (s[i] === ",") i++;
+        else if (s[i] === "]") { i++; return arr; }
+        else throw new WfYAMLError("expected , or ] in a flow sequence", line);
+      }
+    }
+    if (s[i] === "{") {
+      i++;
+      const obj = {};
+      for (;;) {
+        ws();
+        if (s[i] === "}") { i++; return obj; }
+        const key = wfScalar(plain(":,}"), line);
+        if (s[i] !== ":") throw new WfYAMLError("expected : in a flow mapping", line);
+        i++;
+        obj[key] = value(",}");
+        ws();
+        if (s[i] === ",") i++;
+        else if (s[i] === "}") { i++; return obj; }
+        else throw new WfYAMLError("expected , or } in a flow mapping", line);
+      }
+    }
+    return wfScalar(plain(stops), line);
+  };
+  const v = value("");
+  ws();
+  if (i < s.length) throw new WfYAMLError(`unexpected ${s.slice(i, i + 10)}`, line);
+  return v;
+}
+
+const WF_KEY = /^("(?:[^"\\]|\\.)*"|'[^']*'|[^\s"'[{#][^:]*?)\s*:(?:\s+(.*))?$/;
+
+function wfParseYAML(src) {
+  // Lines, each with its indent; "- x" becomes a dash line and x on a
+  // line of its own at x's column, so a sequence item is any node.
+  const raw = src.replace(/\t/g, "  ").split("\n");
+  const lines = [];
+  for (let n = 0; n < raw.length; n++) {
+    const text = wfStripComment(raw[n]).replace(/\s+$/, "");
+    if (!text.trim() || /^(---|\.\.\.)$/.test(text.trim())) continue;
+    let indent = text.match(/^ */)[0].length;
+    let rest = text.slice(indent);
+    while (/^-(\s|$)/.test(rest)) {
+      lines.push({ indent, dash: true, n });
+      const sp = rest.slice(1).match(/^ */)[0].length;
+      indent += 1 + sp;
+      rest = rest.slice(1 + sp);
+    }
+    if (rest) lines.push({ indent, text: rest, n, rawIndex: n });
+  }
+  let i = 0;
+  const node = (minIndent) => {
+    const l = lines[i];
+    if (!l || l.indent < minIndent) return null;
+    if (l.dash) return seq(l.indent);
+    if (WF_KEY.test(l.text) && !/^[[{]/.test(l.text)) return map(l.indent);
+    i++;
+    return flowOrScalar(l);
+  };
+  const flowOrScalar = (l) => {
+    let text = l.text;
+    // A flow collection may run on over lines.
+    if (/^[[{]/.test(text)) {
+      const balanced = (t) => {
+        let d = 0, q = "";
+        for (const c of t) {
+          if (q) { if (c === q) q = ""; continue; }
+          if (c === '"' || c === "'") q = c;
+          else if (c === "[" || c === "{") d++;
+          else if (c === "]" || c === "}") d--;
+        }
+        return d <= 0;
+      };
+      while (!balanced(text) && lines[i] && !lines[i].dash) text += " " + lines[i++].text;
+    }
+    return wfScalar(text, l.n + 1);
+  };
+  const seq = (indent) => {
+    const arr = [];
+    while (lines[i] && lines[i].indent === indent && lines[i].dash) {
+      i++;
+      arr.push(lines[i] && lines[i].indent > indent ? node(indent + 1) : null);
+    }
+    if (lines[i] && lines[i].indent > indent) throw new WfYAMLError("bad indentation of a sequence item", lines[i].n + 1);
+    return arr;
+  };
+  const map = (indent) => {
+    const obj = {};
+    while (lines[i] && lines[i].indent === indent && !lines[i].dash) {
+      const l = lines[i];
+      const m = WF_KEY.exec(l.text);
+      if (!m) throw new WfYAMLError(`expected a key: ${l.text}`, l.n + 1);
+      const key = String(wfScalar(m[1], l.n + 1));
+      if (Object.prototype.hasOwnProperty.call(obj, key)) throw new WfYAMLError(`duplicate key ${key}`, l.n + 1);
+      i++;
+      const rest = (m[2] || "").trim();
+      if (!rest) {
+        const next = lines[i];
+        obj[key] = next && (next.indent > indent || (next.indent === indent && next.dash)) ? node(next.indent) : null;
+      } else if (/^[|>][-+0-9]*$/.test(rest)) {
+        // A block scalar: the raw lines more indented than the key.
+        const body = [];
+        let n = l.n + 1;
+        for (; n < raw.length; n++) {
+          const r = raw[n];
+          if (r.trim() && r.match(/^ */)[0].length <= indent) break;
+          body.push(r);
+        }
+        while (lines[i] && lines[i].n < n) i++;
+        const cut = Math.min(...body.filter((b) => b.trim()).map((b) => b.match(/^ */)[0].length), Infinity);
+        const text = body.map((b) => b.slice(cut === Infinity ? 0 : cut));
+        obj[key] = rest[0] === ">" ? text.join(" ").trim() : text.join("\n").replace(/\n+$/, "\n");
+      } else {
+        obj[key] = flowOrScalar({ text: rest, n: l.n });
+      }
+    }
+    if (lines[i] && lines[i].indent > indent) throw new WfYAMLError("bad indentation of a mapping entry", lines[i].n + 1);
+    return obj;
+  };
+  if (!lines.length) return null;
+  const v = node(0);
+  if (i < lines.length) throw new WfYAMLError("unexpected content after the document", lines[i].n + 1);
+  return v;
+}
+
+// wfParse is the source's definition, or { error, line }.
+function wfParse(src) {
+  try {
+    if (wfLanguage(src) === "json") return { def: JSON.parse(src) };
+    return { def: wfParseYAML(src || "") };
+  } catch (err) {
+    const pos = /position (\d+)/.exec(err.message);
+    const line = err.line || (pos ? (src.slice(0, Number(pos[1])).match(/\n/g) || []).length + 1 : 0);
+    return { error: err.message, line };
+  }
+}
+
+// --- the workflow's graph ----------------------------------------------
+
+// wfModel is the definition as subworkflows, each a name and its steps:
+// { name, kind, detail, next, ends, branches: [{label, next}], children:
+// [{label, steps}] }. A definition that is a list of steps is main's.
+function wfModel(def) {
+  const subs = [];
+  const steps = (list, path) => (Array.isArray(list) ? list : []).map((item, k) => {
+    const name = item && typeof item === "object" && !Array.isArray(item) ? Object.keys(item)[0] : `step ${k + 1}`;
+    const body = (item && item[name]) || {};
+    const s = { name, path: `${path}/${name}`, kind: "assign", detail: "", next: body.next, ends: false, branches: [], children: [] };
+    if (body.call !== undefined) { s.kind = "call"; s.detail = String(body.call); }
+    else if (body.switch) {
+      s.kind = "switch";
+      (Array.isArray(body.switch) ? body.switch : []).forEach((c, j) => {
+        const cond = c && c.condition !== undefined ? String(c.condition) : "";
+        if (c && c.steps) s.children.push({ label: `condition ${j + 1}`, steps: steps(c.steps, `${s.path}/${j}`) });
+        s.branches.push({ label: cond, next: c && (c.next || (c.return !== undefined || c.raise !== undefined ? "end" : null)) });
+      });
+    } else if (body.for) {
+      s.kind = "for";
+      const f = body.for;
+      s.detail = `${f.value || "value"} in ${f.in !== undefined ? (Array.isArray(f.in) ? JSON.stringify(f.in) : f.in) : f.range ? JSON.stringify(f.range) : "…"}`;
+      s.children.push({ label: "loop", steps: steps(f.steps, s.path) });
+    } else if (body.parallel) {
+      s.kind = "parallel";
+      const p = body.parallel;
+      if (p.for) s.children.push({ label: "for", steps: steps(p.for.steps, s.path) });
+      (Array.isArray(p.branches) ? p.branches : []).forEach((b) => {
+        const bn = b && Object.keys(b)[0];
+        if (bn) s.children.push({ label: bn, steps: steps(b[bn].steps, `${s.path}/${bn}`) });
+      });
+    } else if (body.try !== undefined) {
+      s.kind = "try";
+      const t = body.try;
+      if (t && t.steps) s.children.push({ label: "try", steps: steps(t.steps, `${s.path}/try`) });
+      else s.detail = t && t.call ? `call ${t.call}` : "";
+      if (body.except && body.except.steps) s.children.push({ label: "except", steps: steps(body.except.steps, `${s.path}/except`) });
+      if (body.retry) s.detail = (s.detail ? s.detail + ", " : "") + "retry";
+    } else if (body.steps) {
+      s.kind = "steps";
+      s.children.push({ label: "", steps: steps(body.steps, s.path) });
+    } else if (body.return !== undefined) { s.kind = "return"; s.ends = true; }
+    else if (body.raise !== undefined) { s.kind = "raise"; s.ends = true; }
+    else if (body.assign) s.kind = "assign";
+    else if (body.next) s.kind = "next";
+    if (s.next === "end") s.ends = true;
+    return s;
+  });
+  if (Array.isArray(def)) subs.push({ name: "main", steps: steps(def, "main") });
+  else if (def && typeof def === "object") {
+    for (const [name, sub] of Object.entries(def)) subs.push({ name, steps: steps(sub && sub.steps, name) });
+  }
+  return subs;
+}
+
+const WF_KIND_LABEL = { call: "Call", switch: "Switch", for: "For", parallel: "Parallel", try: "Try", steps: "Steps",
+  return: "Return", raise: "Raise", assign: "Assign", next: "Jump" };
+
+// wfGraph draws the subworkflows as an SVG of step boxes joined by
+// arrows: the next step down, jumps and switch branches along the right,
+// return and raise to the End. A nested block (for, parallel, try, steps,
+// a switch's steps) is a box of its own around its steps, collapsible.
+// states maps "routine/step" to the state of its entries (SUCCEEDED,
+// FAILED, IN_PROGRESS, …), marking each box as Google's visualization
+// marks it.
+function wfGraph(def, opts = {}) {
+  const subs = wfModel(def);
+  const states = opts.states || {};
+  const collapsed = opts.collapsed || new Set();
+  const W = 220, H = 44, GAP = 26, PAD = 14, LANE = 14;
+  const svg = document.createElementNS(SVG_NS, "svg");
+  const mk = (tag, attrs = {}, parent = svg) => {
+    const n = document.createElementNS(SVG_NS, tag);
+    for (const [k, v] of Object.entries(attrs)) if (v !== undefined && v !== null) n.setAttribute(k, v);
+    parent.append(n);
+    return n;
+  };
+  const defs = mk("defs");
+  const marker = mk("marker", { id: "wf-arrow", viewBox: "0 0 10 10", refX: "9", refY: "5", markerWidth: "7", markerHeight: "7", orient: "auto-start-reverse" }, defs);
+  mk("path", { d: "M0,0 L10,5 L0,10 z", class: "wf-arrowhead" }, marker);
+  // Blocks beneath edges beneath boxes.
+  const blocks = mk("g", { class: "wf-blocks" });
+  const edges = mk("g", { class: "wf-edges" });
+  let maxX = 0;
+  const truncate = (s, n) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
+  const text = (x, y, s, cls, parent) => { const t = mk("text", { x, y, class: cls }, parent); t.textContent = s; return t; };
+  const arrow = (d, cls = "") => mk("path", { d, class: `wf-edge ${cls}`.trim(), "marker-end": "url(#wf-arrow)" }, edges);
+  let lanes = 0;
+  // layout places a list of steps from (x, y) and returns its bottom and
+  // the boxes by name, joining them.
+  const layout = (list, x, y, routine, endY) => {
+    const boxes = {};
+    const placed = [];
+    for (const s of list) {
+      const top = y;
+      const g = mk("g", { class: `wf-node wf-${s.kind}` });
+      const st = states[`${routine}/${s.name}`];
+      if (st) g.classList.add(`is-${st.toLowerCase()}`);
+      const hasKids = s.children.length > 0;
+      const isCollapsed = collapsed.has(s.path);
+      mk("rect", { x, y, width: W, height: H, rx: "6", class: "wf-box" }, g);
+      text(x + 10, y + 18, truncate(s.name, 26), "wf-name", g);
+      text(x + 10, y + 34, truncate(`${WF_KIND_LABEL[s.kind] || s.kind}${s.detail ? ": " + s.detail : ""}`, 32), "wf-kind", g);
+      const title = mk("title", {}, g);
+      title.textContent = `${s.name} (${WF_KIND_LABEL[s.kind] || s.kind})${s.detail ? ": " + s.detail : ""}${st ? ", " + st.toLowerCase() : ""}`;
+      if (st === "SUCCEEDED") text(x + W - 20, y + 27, "✓", "wf-mark wf-ok", g);
+      else if (st === "FAILED") text(x + W - 18, y + 27, "!", "wf-mark wf-failed", g);
+      else if (st === "IN_PROGRESS") text(x + W - 20, y + 27, "…", "wf-mark", g);
+      y += H;
+      if (hasKids) {
+        // The block's toggle: collapse or expand its steps.
+        const tg = mk("g", { class: "wf-toggle", role: "button", tabindex: "0", "data-path": s.path,
+          "aria-expanded": isCollapsed ? "false" : "true", "aria-label": `${isCollapsed ? "Expand" : "Collapse"} ${s.name}` }, g);
+        mk("rect", { x: x + W - 44, y: top + 6, width: "18", height: "18", rx: "3", class: "wf-toggle-box" }, tg);
+        text(x + W - 39, top + 20, isCollapsed ? "+" : "−", "wf-toggle-sign", tg);
+        if (!isCollapsed) {
+          let cy = y + 10;
+          const bx = x + PAD;
+          for (const c of s.children) {
+            if (c.label) { text(bx, cy + 10, c.label, "wf-branch-label"); cy += 16; }
+            cy = layout(c.steps, bx + 6, cy, routine, null) + 10;
+          }
+          mk("rect", { x: x - 4, y: top - 4, width: W + PAD * 2 + 14, height: cy - top + 4, rx: "8", class: "wf-block" }, blocks);
+          maxX = Math.max(maxX, x + W + PAD * 2 + 14);
+          y = cy;
+        }
+      }
+      boxes[s.name] = { top, bottom: y, s };
+      placed.push({ s, top, bottom: y });
+      maxX = Math.max(maxX, x + W);
+      y += GAP;
+    }
+    // The arrows: down to the next step unless the step jumps or ends.
+    const cx = x + W / 2;
+    const jump = (from, to, label, cls) => {
+      const lane = x + W + 18 + (lanes++ % 6) * LANE;
+      const y1 = from.top + H / 2;
+      const y2 = to === "end" ? endY : to.top + H / 2;
+      if (to === "end" && endY === null) return;
+      arrow(`M${x + W},${y1} H${lane} V${y2} H${to === "end" ? cx + 34 : x + W}`, cls);
+      if (label) text(lane + 4, (y1 + y2) / 2, truncate(label, 24), "wf-edge-label");
+      maxX = Math.max(maxX, lane + 4 + Math.min(label.length, 24) * 6.5);
+    };
+    placed.forEach((p, k) => {
+      const after = placed[k + 1];
+      const s = p.s;
+      if (s.kind === "switch") {
+        for (const b of s.branches) {
+          if (!b.next) continue;
+          const to = b.next === "end" ? "end" : boxes[b.next];
+          if (to) jump(p, to, b.label, "wf-branch");
+        }
+      }
+      if (s.next && s.next !== "end") {
+        if (boxes[s.next]) jump(p, boxes[s.next], "next", "");
+      } else if (s.ends) {
+        jump(p, "end", "", "wf-end-edge");
+      } else if (after) {
+        arrow(`M${cx},${p.bottom} V${after.top}`);
+      } else if (endY !== null) {
+        arrow(`M${cx},${p.bottom} V${endY - 12}`);
+      }
+    });
+    return placed.length ? placed[placed.length - 1].bottom : y;
+  };
+  let y = 8;
+  for (const sub of subs) {
+    text(8, y + 14, sub.name, "wf-sub-title");
+    y += 24;
+    mk("rect", { x: 8 + W / 2 - 30, y, width: "60", height: "22", rx: "11", class: "wf-terminal" });
+    text(8 + W / 2, y + 15, "Start", "wf-terminal-text");
+    y += 22 + GAP;
+    if (sub.steps.length) arrow(`M${8 + W / 2},${y - GAP} V${y}`);
+    // The End's place is known once the steps are laid out, so the steps
+    // are laid out twice: once to measure.
+    const probe = svg.childNodes.length;
+    const edgeProbe = edges.childNodes.length;
+    const blockProbe = blocks.childNodes.length;
+    const lanesBefore = lanes;
+    const bottom = layout(sub.steps, 8, y, sub.name, null);
+    while (svg.childNodes.length > probe) svg.lastChild.remove();
+    while (edges.childNodes.length > edgeProbe) edges.lastChild.remove();
+    while (blocks.childNodes.length > blockProbe) blocks.lastChild.remove();
+    lanes = lanesBefore;
+    const endY = bottom + GAP + 11;
+    layout(sub.steps, 8, y, sub.name, endY);
+    mk("rect", { x: 8 + W / 2 - 30, y: endY - 11, width: "60", height: "22", rx: "11", class: "wf-terminal" });
+    text(8 + W / 2, endY + 4, "End", "wf-terminal-text");
+    y = endY + 11 + 30;
+  }
+  const width = Math.max(maxX + 16, W + 32);
+  svg.setAttribute("viewBox", `0 0 ${width} ${y}`);
+  svg.style.width = `${width}px`;
+  svg.style.height = `${y}px`;
+  svg.setAttribute("class", "wf-graph");
+  svg.setAttribute("role", "group");
+  const count = subs.reduce((n, s) => n + s.steps.length, 0);
+  svg.setAttribute("aria-label", `Workflow graph: ${subs.length} ${subs.length === 1 ? "subworkflow" : "subworkflows"}, ${count} top-level steps`);
+  return svg;
+}
+
+// wfGraphPanel is the graph with Google's zoom controls, redrawn by
+// update(source, states); a source that does not parse keeps the last
+// graph and says where it fails.
+function wfGraphPanel(label) {
+  let zoom = 1, last = null, lastStates = {};
+  const collapsed = new Set();
+  const canvas = el("div", { class: "wf-canvas" });
+  const status = el("p", { class: "wf-graph-status", role: "status" });
+  const zoomTo = (z) => {
+    zoom = Math.min(2, Math.max(0.4, z));
+    const svg = canvas.querySelector("svg");
+    if (svg) {
+      const [, , w, h] = svg.getAttribute("viewBox").split(" ").map(Number);
+      // The stylesheet sizes every svg as an icon, so the size is a style.
+      svg.style.width = `${w * zoom}px`;
+      svg.style.height = `${h * zoom}px`;
+    }
+    zoomLabel.textContent = `${Math.round(zoom * 100)}%`;
+  };
+  const zoomLabel = el("span", { class: "wf-zoom-level", text: "100%" });
+  const tools = el("div", { class: "wf-graph-tools" },
+    el("span", { class: "wf-graph-title", text: label }),
+    el("button", { type: "button", class: "secondary icon-text", "aria-label": "Zoom out", text: "−", onclick: () => zoomTo(zoom - 0.2) }),
+    zoomLabel,
+    el("button", { type: "button", class: "secondary icon-text", "aria-label": "Zoom in", text: "+", onclick: () => zoomTo(zoom + 0.2) }),
+    el("button", { type: "button", class: "secondary", text: "Reset", onclick: () => zoomTo(1) }));
+  const draw = () => {
+    if (last === null) return;
+    const svg = wfGraph(last, { states: lastStates, collapsed });
+    setChildren(canvas, svg);
+    zoomTo(zoom);
+  };
+  const toggle = (t) => {
+    const p = t.getAttribute("data-path");
+    if (collapsed.has(p)) collapsed.delete(p); else collapsed.add(p);
+    draw();
+    const again = canvas.querySelector(`.wf-toggle[data-path="${CSS.escape(p)}"]`);
+    if (again) again.focus();
+  };
+  canvas.addEventListener("click", (e) => { const t = e.target.closest(".wf-toggle"); if (t) toggle(t); });
+  canvas.addEventListener("keydown", (e) => {
+    const t = e.target.closest && e.target.closest(".wf-toggle");
+    if (t && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); toggle(t); }
+  });
+  const node = el("div", { class: "wf-graph-panel" }, tools, canvas, status);
+  const update = (src, states = {}) => {
+    const parsed = wfParse(src || "");
+    lastStates = states;
+    if (parsed.error) {
+      status.textContent = `The graph cannot be drawn: ${parsed.line ? `line ${parsed.line}: ` : ""}${parsed.error}`;
+      status.classList.add("is-error");
+      if (last === null) setChildren(canvas);
+      return parsed;
+    }
+    status.textContent = "";
+    status.classList.remove("is-error");
+    last = parsed.def;
+    draw();
+    return parsed;
+  };
+  return { node, update };
+}
+
+// wfCodeView is the highlighted source with line numbers; editable, it is
+// a textarea over the highlighting, the text drawn by the layer beneath.
+function wfCodeView(src, { editable = false, id = null, name = null, label = "Workflow source", required = false } = {}) {
+  const gutter = el("pre", { class: "wf-gutter", "aria-hidden": "true" });
+  const layer = el("pre", { class: "wf-highlight", "aria-hidden": editable ? "true" : null });
+  const lang = el("span", { class: "wf-lang" });
+  const textarea = editable
+    ? el("textarea", { id, name, class: "wf-input", spellcheck: "false", autocomplete: "off", autocapitalize: "off",
+        wrap: "off", required, "aria-label": label })
+    : null;
+  const paint = (text) => {
+    const l = wfLanguage(text);
+    lang.textContent = l === "json" ? "JSON" : "YAML";
+    setChildren(layer, ...wfHighlight(text, l), document.createTextNode("\n"));
+    const n = (text.match(/\n/g) || []).length + 1;
+    gutter.textContent = Array.from({ length: n }, (_, k) => String(k + 1)).join("\n");
+    if (textarea) textarea.style.height = `${Math.max(16, n + 1) * 1.5}em`;
+  };
+  const code = el("div", { class: "wf-code" }, layer, textarea);
+  const scroller = el("div", { class: "wf-scroller", tabindex: editable ? null : "0",
+    role: editable ? null : "region", "aria-label": editable ? null : label }, gutter, code);
+  if (textarea) {
+    textarea.value = src || "";
+    // Tab indents two spaces once the source is being typed, as the
+    // editor's does; until then, and after Escape, Tab moves on, so the
+    // editor never traps the keyboard (WCAG 2.1.2).
+    let typing = false;
+    textarea.addEventListener("focus", () => { typing = false; });
+    textarea.addEventListener("input", () => { typing = true; paint(textarea.value); });
+    textarea.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") { typing = false; return; }
+      if (!typing || e.key !== "Tab" || e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) return;
+      e.preventDefault();
+      const { selectionStart: a, selectionEnd: b } = textarea;
+      textarea.value = textarea.value.slice(0, a) + "  " + textarea.value.slice(b);
+      textarea.selectionStart = textarea.selectionEnd = a + 2;
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  } else {
+    layer.classList.add("is-static");
+  }
+  paint(src || "");
+  return { node: el("div", { class: "wf-editor-pane" }, el("div", { class: "wf-editor-head" }, lang), scroller), textarea, paint };
+}
+
+// workflowSourceEntry is a "workflowsource" field: the editor on the left,
+// the graph of what it holds on the right, redrawn as it is typed.
+function workflowSourceEntry(f, id, errorId, helpId) {
+  const view = wfCodeView(f.default || "", { editable: true, id, name: f.name, label: f.label, required: f.required });
+  const control = view.textarea;
+  const graph = wfGraphPanel("Workflow graph");
+  let timer = 0;
+  const check = () => {
+    const parsed = graph.update(control.value);
+    // A source that does not parse is still the API's to refuse, as it
+    // refuses with its own message; the editor only says where.
+    control.setAttribute("aria-invalid", parsed.error ? "true" : "false");
+  };
+  control.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(check, 150); });
+  if (helpId) control.setAttribute("aria-describedby", helpId);
+  const help = f.help ? el("p", { id: helpId, class: "form-help", text: f.help }) : null;
+  const error = el("p", { id: errorId, class: "form-field-error", hidden: true });
+  const node = el("div", { class: "form-row wf-source-field" },
+    el("label", { for: id, text: f.label }), help,
+    el("div", { class: "wf-split" }, view.node, graph.node), error);
+  check();
+  return { field: f, control, node, error, helpId, errorId, isCheck: false, focus: () => control.focus() };
+}
+
+// wfSourceSection is a workflow's Source tab: the source, highlighted and
+// read only, beside its graph.
+function wfSourceSection(text, label) {
+  const view = wfCodeView(text, { label });
+  const graph = wfGraphPanel("Workflow graph");
+  graph.update(text);
+  return el("div", { class: "wf-split" }, view.node, graph.node);
+}
+
+// wfStepsVisualization is the Steps tab's visualization panel: the graph
+// of the revision that ran, each step marked with the state of its
+// entries, in a panel the expander opens and closes as Google's does.
+function wfStepsVisualization(source, items) {
+  const states = {};
+  const rank = { FAILED: 3, IN_PROGRESS: 2, SUCCEEDED: 1 };
+  for (const it of items || []) {
+    const key = `${(it.fields || {}).Routine || "main"}/${it.name}`;
+    const st = String(it.status || "").replace(/^STATE_/, "");
+    if (!states[key] || (rank[st] || 0) > (rank[states[key]] || 0)) states[key] = st;
+  }
+  const graph = wfGraphPanel("Workflow graph");
+  graph.update(source, states);
+  const details = el("details", { class: "wf-visualization", open: true },
+    el("summary", { text: "Visualization" }), graph.node);
+  return details;
+}
+
+// wfStepPanel is an execution's step detail panel (#2011): the step entry
+// chosen in its Step entry list, with Google's Parent, Children, Next and
+// Previous links that choose those entries instead.
+function wfStepPanel(entries) {
+  const byId = new Map(entries.map((e) => [e.id, e]));
+  const label = (e) => `${e.step} (#${e.id}, ${e.routine})`;
+  const chooser = el("select", { id: "wf-step-entry", class: "wf-step-choose" },
+    ...entries.map((e) => el("option", { value: e.id, text: `${label(e)}: ${e.state}` })));
+  const body = el("div", { class: "wf-step-body", "aria-live": "polite" });
+  const link = (id, text) => {
+    const e = byId.get(id);
+    if (!e) return el("span", { text: "—" });
+    return el("button", { type: "button", class: "link-button wf-step-link", "data-entry": id,
+      text: text || label(e), onclick: () => show(id, true) });
+  };
+  const show = (id, focus) => {
+    const e = byId.get(id);
+    if (!e) return;
+    chooser.value = id;
+    const row = (term, value) => [el("dt", { text: term }), el("dd", {}, value)];
+    const text = (v) => el("span", { text: v || "—" });
+    const kids = (e.children || []).length
+      ? el("ul", { class: "wf-step-children" }, ...e.children.map((c) => el("li", {}, link(c))))
+      : text("");
+    const vars = Object.keys(e.variables || {}).sort();
+    setChildren(body,
+      el("h3", { text: e.step }),
+      el("dl", { class: "wf-step-props" },
+        ...row("Step entry", text(`#${e.id}`)), ...row("Routine", text(e.routine)), ...row("Type", text(e.type)),
+        ...row("State", text(e.state)), ...row("Start time", text(e.started)), ...row("Update time", text(e.updated)),
+        ...(e.progress ? row("Progress", text(e.progress)) : []),
+        ...(e.exception ? row("Exception", el("code", { text: e.exception })) : [])),
+      el("h4", { text: "Navigation" }),
+      el("dl", { class: "wf-step-props wf-step-nav" },
+        ...row("Parent", e.parent ? link(e.parent) : text("")), ...row("Children", kids),
+        ...row("Previous", e.previous ? link(e.previous) : text("")), ...row("Next", e.next ? link(e.next) : text(""))),
+      el("h4", { text: "Variables" }),
+      vars.length
+        // A list rather than a table, so a long value wraps in a narrow
+        // window instead of scrolling the page sideways.
+        ? el("dl", { class: "wf-step-props wf-step-vars" },
+            ...vars.flatMap((k) => row(k, el("code", { text: e.variables[k] }))))
+        : el("p", { class: "form-help", text: "Variables are recorded with the Detailed execution history level." }));
+    if (focus) chooser.focus();
+  };
+  chooser.addEventListener("change", () => show(chooser.value, false));
+  show(entries[0].id, false);
+  return el("section", { class: "wf-step-panel", "aria-labelledby": "wf-step-title" },
+    el("h2", { id: "wf-step-title", text: "Step entry details" }),
+    el("label", { for: "wf-step-entry", text: "Step entry" }), chooser, body);
+}
+
 // schemaEntry is a "schema" field: one row per column, each a name, a type
 // from the field's options and a mode, with Add field and Remove. A RECORD
 // row holds its nested fields in a list of its own under it, with Add nested
@@ -6993,8 +8181,9 @@ function groupEntry(f, id, errorId, helpId) {
         ? el("label", { class: "group-check" }, c, el("span", { text: s.label }))
         : el("label", { class: "group-cell" }, el("span", { class: "group-cell-label", text: s.label }), c);
     });
-    const remove = el("button", { type: "button", class: "secondary group-remove", text: "Remove",
-      "aria-label": `Remove ${f.label.toLowerCase()} ${n}`,
+    const removeLabel = f.removeLabel || "Remove";
+    const remove = el("button", { type: "button", class: "secondary group-remove", text: removeLabel,
+      "aria-label": `${removeLabel} ${f.label.toLowerCase()} ${n}`,
       onclick: () => { rows.splice(rows.indexOf(r), 1); r.node.remove(); sync(); } });
     r.node = el("div", { class: "group-row", role: "listitem" }, ...cells, remove);
     rows.push(r);
@@ -7014,6 +8203,159 @@ function groupEntry(f, id, errorId, helpId) {
   f.default = control.value;
   return { field: f, control, node, error, helpId, errorId, isCheck: false,
            focus: () => (rows[0] ? rows[0].controls[0] : add).focus() };
+}
+
+// picklistEntry is a "picklist" field (Field.PickFrom, #1864), as Google's
+// Create role and Edit role hold a role's permissions: the chosen items
+// listed with a checkbox each, unchecked to take one out, and Add
+// Permissions, which opens a picker under the list (All Services, a
+// filter, a checkbox per item, Add Permissions). The picker's items come
+// from the Studio call PickFrom names, read once. The value is the checked
+// items, one per line, in a hidden textarea, so validation, dirtiness and
+// submission are every other field's.
+const PICKLIST_SHOWN = 100;
+
+function picklistEntry(f, id, errorId, helpId) {
+  const control = el("textarea", { id, name: f.name, hidden: true, class: "picklist-value" });
+  const [service, call] = (f.pickFrom || "").split(":");
+  const addLabel = f.addLabel || "Add";
+  const chosen = new Map();
+  const notes = new Map();
+  for (const v of (f.default || "").split(/[\n,]/).map((x) => x.trim()).filter(Boolean)) chosen.set(v, true);
+  const count = el("p", { class: "form-help picklist-count", "aria-live": "polite" });
+  const list = el("ul", { class: "picklist-rows", role: "list", "aria-label": f.label });
+  const sync = () => {
+    const kept = [...chosen].filter(([, on]) => on).map(([v]) => v);
+    control.value = kept.join("\n");
+    count.textContent = `${kept.length} assigned`;
+    control.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  const drawChosen = () => {
+    setChildren(list, ...[...chosen.keys()].sort().map((v, n) => {
+      const box = el("input", { type: "checkbox", id: `${id}-item-${n}`, "data-value": v });
+      box.checked = chosen.get(v);
+      box.addEventListener("change", () => { chosen.set(v, box.checked); sync(); });
+      return el("li", { class: "picklist-row" }, el("label", { class: "group-check", for: box.id }, box,
+        el("span", { class: "mono", text: v }), notes.get(v) ? el("span", { class: "form-help", text: ` ${notes.get(v)}` }) : null));
+    }));
+    list.hidden = chosen.size === 0;
+  };
+
+  const pickerId = `${id}-picker`;
+  const serviceSelect = el("select", { id: `${id}-service` }, el("option", { value: "", text: "All Services" }));
+  // All Types (#2013): a permission's type is its resource type, the
+  // middle of service.resource.verb, as the Permission's name holds it.
+  const typeSelect = el("select", { id: `${id}-type` }, el("option", { value: "", text: "All Types" }));
+  const typeOf = (v) => { const parts = v.split("."); return parts.length >= 3 ? parts.slice(1, -1).join(".") : ""; };
+  const drawTypes = () => {
+    const svc = serviceSelect.value;
+    const was = typeSelect.value;
+    const types = [...new Set((items || []).filter((it) => !svc || it.value.startsWith(`${svc}.`))
+      .map((it) => typeOf(it.value)).filter(Boolean))].sort();
+    setChildren(typeSelect, el("option", { value: "", text: "All Types" }), ...types.map((x) => el("option", { value: x, text: x })));
+    typeSelect.value = types.includes(was) ? was : "";
+  };
+  const filterInput = el("input", { type: "text", id: `${id}-filter`, autocomplete: "off", spellcheck: "false" });
+  const results = el("ul", { class: "picklist-rows picklist-results", role: "list", "aria-label": `${addLabel}: results` });
+  const status = el("p", { class: "form-help", "aria-live": "polite" });
+  const picked = new Set();
+  let items = null;
+  const drawResults = () => {
+    const q = filterInput.value.trim().toLowerCase();
+    const svc = serviceSelect.value;
+    const type = typeSelect.value;
+    const match = (items || []).filter((it) => !chosen.get(it.value) &&
+      (!svc || it.value.startsWith(`${svc}.`)) && (!type || typeOf(it.value) === type) &&
+      (!q || it.value.toLowerCase().includes(q)));
+    status.textContent = match.length > PICKLIST_SHOWN
+      ? `${match.length} match; the first ${PICKLIST_SHOWN} are shown. Filter to narrow them.`
+      : `${match.length} match.`;
+    setChildren(results, ...match.slice(0, PICKLIST_SHOWN).map((it, n) => {
+      const box = el("input", { type: "checkbox", id: `${id}-pick-${n}`, "data-value": it.value });
+      box.checked = picked.has(it.value);
+      box.addEventListener("change", () => { if (box.checked) picked.add(it.value); else picked.delete(it.value); });
+      return el("li", { class: "picklist-row" }, el("label", { class: "group-check", for: box.id }, box,
+        el("span", { class: "mono", text: it.value }), it.note ? el("span", { class: "form-help", text: ` ${it.note}` }) : null));
+    }));
+  };
+  const load = async () => {
+    if (items) return drawResults();
+    status.textContent = "Loading…";
+    try {
+      const res = await send(`/api/studio/${encodeURIComponent(service)}?call=${encodeURIComponent(call)}&project=${encodeURIComponent(currentProject())}`,
+        "POST", {});
+      items = (res && res.items) || [];
+      const services = [...new Set(items.map((it) => it.value.split(".")[0]))].sort();
+      serviceSelect.append(...services.map((x) => el("option", { value: x, text: x })));
+      drawTypes();
+      drawResults();
+    } catch (err) {
+      status.textContent = err.message;
+    }
+  };
+  // Enter in the filter must not submit the form.
+  filterInput.addEventListener("keydown", (e) => { if (e.key === "Enter") e.preventDefault(); });
+  filterInput.addEventListener("input", drawResults);
+  serviceSelect.addEventListener("change", () => { drawTypes(); drawResults(); });
+  typeSelect.addEventListener("change", drawResults);
+  const toggle = el("button", { type: "button", class: "secondary picklist-add", id: `${id}-add`, text: addLabel,
+    "aria-expanded": "false", "aria-controls": pickerId });
+  const closePicker = () => {
+    picker.hidden = true;
+    toggle.setAttribute("aria-expanded", "false");
+    picked.clear();
+    toggle.focus();
+  };
+  const addButton = el("button", { type: "button", class: "primary", id: `${id}-pick-add`, text: addLabel, onclick: () => {
+    for (const v of picked) chosen.set(v, true);
+    drawChosen();
+    sync();
+    closePicker();
+  } });
+  const picker = el("div", { class: "picklist-picker", id: pickerId, role: "group", "aria-label": `${addLabel} to ${f.label.toLowerCase()}`, hidden: true },
+    el("div", { class: "picklist-filters" },
+      el("div", { class: "form-row" }, el("label", { for: serviceSelect.id, text: "Service" }), serviceSelect),
+      el("div", { class: "form-row" }, el("label", { for: typeSelect.id, text: "Type" }), typeSelect)),
+    el("div", { class: "form-row" }, el("label", { for: filterInput.id, text: "Filter permissions" }), filterInput),
+    status, results,
+    el("div", { class: "picklist-actions" }, addButton,
+      el("button", { type: "button", class: "secondary", text: "Cancel", onclick: closePicker })));
+  toggle.addEventListener("click", () => {
+    if (!picker.hidden) return closePicker();
+    picker.hidden = false;
+    toggle.setAttribute("aria-expanded", "true");
+    filterInput.focus();
+    load();
+  });
+  const help = f.help ? el("p", { id: helpId, class: "form-help", text: f.help }) : null;
+  const error = el("p", { id: errorId, class: "form-field-error", hidden: true });
+  // SeedFrom (#2013): the address names what to start from, as Create
+  // custom role from selection lists the selected roles' permissions,
+  // each checked. The seeded value is the form's starting one, so a
+  // Cancel after it asks nothing.
+  const seedNote = el("p", { class: "form-help picklist-seed", hidden: true });
+  const node = el("fieldset", { class: "form-row picklist-field" },
+    el("legend", {}, el("span", { text: f.label })), seedNote, count, list, toggle, picker, control, help, error);
+  drawChosen();
+  sync();
+  f.default = control.value;
+  const seed = f.seedFrom ? new URLSearchParams(location.search).get(f.seedFrom) : "";
+  if (seed) {
+    seedNote.hidden = false;
+    seedNote.textContent = "Reading the selected roles' permissions…";
+    send(`/api/studio/${encodeURIComponent(service)}?call=${encodeURIComponent(call)}&project=${encodeURIComponent(currentProject())}`,
+      "POST", { seed }).then((res) => {
+      for (const it of (res && res.items) || []) {
+        chosen.set(it.value, true);
+        if (it.note) notes.set(it.value, it.note);
+      }
+      seedNote.textContent = (res && res.note) || "";
+      drawChosen();
+      sync();
+      f.default = control.value;
+    }).catch((err) => { seedNote.textContent = err.message; seedNote.classList.add("form-field-error"); });
+  }
+  return { field: f, control, node, error, helpId, errorId, isCheck: false, focus: () => toggle.focus() };
 }
 
 // mapToLines renders a map field's JSON value as one "key=value" per line.
@@ -7371,9 +8713,31 @@ async function renderCreatePage(view, route) {
 
   // Numbered steps, as Google's Cloud Storage and Cloud SQL create pages
   // are, or one page under headings, as Pub/Sub's are (#1847).
+  // A create that makes the resource at a step's Continue (#1864):
+  // Google's Create service account creates the account at Create and
+  // continue, then grants. The rest is sent with the name it answered.
+  let created = "";
+  const commit = caps.create.commitStep ? {
+    step: caps.create.commitStep,
+    label: "Create and continue",
+    run: async (body) => {
+      error.hidden = true;
+      if (!fields.validate()) { steps.revealInvalid(); return false; }
+      try {
+        created = await submitCreate(target, caps.create, { ...fields.values(), _commit: "true" });
+        notify(`Created ${created}`);
+        for (const c of body.querySelectorAll("input, select, textarea")) c.disabled = true;
+        return true;
+      } catch (err) {
+        error.textContent = err.message;
+        error.hidden = false;
+        return false;
+      }
+    },
+  } : null;
   const steps = caps.create.layout === "page"
     ? { nodes: fields.nodes, revealInvalid() {} }
-    : createSteps(fields.nodes, caps.create.layout === "next" ? "Next" : "Continue");
+    : createSteps(fields.nodes, caps.create.layout === "next" ? "Next" : "Continue", { commit });
   const checks = createChecks(target, caps.create, fields);
 
   const submit = async (e) => {
@@ -7384,7 +8748,8 @@ async function renderCreatePage(view, route) {
     setBusy(primary, true);
     try {
       let once = null;
-      const name = await submitCreate(target, caps.create, fields.values(), (o) => { once = o; });
+      const name = await submitCreate(target, caps.create,
+        created ? { ...fields.values(), _created: created } : fields.values(), (o) => { once = o; });
       notify(`Created ${name}`);
       announce(`Created ${name}`);
       // A create that goes on to an action of what it made (#1851): Create
@@ -7500,7 +8865,11 @@ function createChecks(target, spec, fields) {
 //   if (!fields.validate()) steps.revealInvalid();
 // The button is Continue, or Next where Google's page says Next, as
 // Create log bucket does (CreateLayoutNext, #1863).
-function createSteps(nodes, continueLabel = "Continue", { foldRest = false } = {}) {
+// commit, when given, is the step ({ step, label, run }) whose Continue
+// creates the resource (CreateCommitter, #1864): its button reads label,
+// and the step is left only when run(body) resolves true; then it is
+// done, and its title no longer reopens it.
+function createSteps(nodes, continueLabel = "Continue", { foldRest = false, commit = null } = {}) {
   const sections = nodes.filter((n) => n.classList && n.classList.contains("form-section"));
   if (!sections.length) return { nodes, revealInvalid() {} };
   const lead = [];
@@ -7536,9 +8905,18 @@ function createSteps(nodes, continueLabel = "Continue", { foldRest = false } = {
   steps.forEach((s, i) => {
     s.head.addEventListener("click", () => setOpen(s, s.body.hidden));
     if (i < steps.length - 1) {
+      const commits = commit && commit.step === i + 1;
       s.body.append(el("div", { class: "create-step-continue" },
-        el("button", { type: "button", class: "secondary", text: continueLabel,
-          onclick: () => {
+        el("button", { type: "button", class: commits ? "primary" : "secondary", text: commits ? commit.label : continueLabel,
+          onclick: async (e) => {
+            if (commits) {
+              const b = e.currentTarget;
+              setBusy(b, true);
+              const ok = await commit.run(s.body);
+              setBusy(b, false);
+              if (!ok) return;
+              b.disabled = true;
+            }
             setOpen(s, false);
             s.step.classList.add("is-done");
             const next = steps[i + 1];
@@ -7623,7 +9001,7 @@ function notify(message, kind = "info") {
 // "confirm" for nothing typed, the dialog's button alone, as a Cloud Storage
 // bucket's or a Cloud Run service's does.
 function confirmDestructive({ title, detail, confirmWord, onConfirm, confirmLabel = "Delete", consequence = "This cannot be undone.", style = "name" }) {
-  if (style === "delete" || style === "DELETE") confirmWord = style;
+  if (style === "delete" || style === "DELETE" || style === "Delete") confirmWord = style;
   const typed = style !== "confirm";
   return new Promise((settle) => {
     const error = el("p", { class: "form-error", role: "alert", hidden: true });
@@ -7909,7 +9287,9 @@ async function runAction(route, target, action, onDone, row = NO_ROW, title = nu
   // same way before it is sent, as its Confirm promises, without the
   // closing "cannot be undone".
   await confirmDestructive({
-    title: `${action.label} ${name}?`,
+    // Google's title where it names the kind, not the resource (#1860):
+    // Cloud SQL's "Stop database instance?".
+    title: action.confirmTitle || `${action.label} ${name}?`,
     detail: action.confirm || undefined,
     confirmWord: name,
     confirmLabel: action.confirm ? action.label : undefined,
@@ -7970,6 +9350,8 @@ function notFound(view, path) {
 // throw inside a render function left the skeleton on screen permanently.
 function route() {
   const view = document.getElementById("view");
+  // An action's info panel (#2013) belongs to the screen that opened it.
+  closeActionPanel();
   const title = () => {
     const match = ROUTES.find((r) => r.path === location.pathname);
     return match ? match.title : "This screen";
@@ -14677,6 +16059,8 @@ function formKMSLocation(entries) {
     const e = entries.find((x) => x.field.name === name);
     return e ? e.control.value : "";
   };
+  // A form with a single Region (Create workflow, #2004) names it as location.
+  if (!entries.some((x) => x.field.name === "locationType")) return value("location") || value("region");
   const loc = value("locationType") === "region" ? value("region") : value("multiRegion");
   return ({ nam5: "us", eur3: "europe" })[loc] || loc;
 }
@@ -14689,7 +16073,7 @@ async function browseKeys(control, location) {
   const body = el("div", { class: "browse-list" }, loadingState(3, { what: "keys" }));
   dialog.append(el("div", { class: "modal-body" },
     el("h2", { id: "browse-title", text: "Select a Cloud KMS key" }),
-    el("p", { class: "form-help", text: `Keys in ${location}, the database's Cloud KMS location.` }),
+    el("p", { class: "form-help", text: `Keys in ${location}, the Cloud KMS location the resource's own location requires.` }),
     body,
     el("div", { class: "modal-actions" },
       el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }))));
@@ -15278,8 +16662,12 @@ function diagnoseCard(data) {
 // click replaces the preview tab (its name in italics), Ctrl or Command
 // click and a double click on the tab keep it, as Google's do
 // (https://docs.cloud.google.com/bigquery/docs/bigquery-web-ui). The
-// standalone pages stay as deep links. Personal history and Project history
-// are below. Every call goes to POST /api/studio/bigquery
+// standalone pages stay as deep links. The left pane's tabs are Google's:
+// Explorer, Data (the data hierarchy, without code assets), Files (saved
+// queries) and Source control (not served). Job history is opened from the
+// Explorer, as a tab with Personal history and Project history
+// (https://docs.cloud.google.com/bigquery/docs/managing-jobs). Every call
+// goes to POST /api/studio/bigquery
 // (cmd/cloudburrow/consolebigquerystudio.go).
 //
 // Saved queries are CloudBurrow's own: Google keeps them as Dataform code
@@ -15316,8 +16704,8 @@ function bqReadTabs() {
 }
 
 function bqWriteTabs(tabs) {
-  try { sessionStorage.setItem(BQ_STUDIO_TABS, JSON.stringify(tabs.map(({ id, kind, title, query, settings, path, savedId, preview, subtab, viz }) =>
-    ({ id, kind, title, query, settings, path, savedId, preview, subtab, viz })))); } catch { /* not kept */ }
+  try { sessionStorage.setItem(BQ_STUDIO_TABS, JSON.stringify(tabs.map(({ id, kind, title, query, settings, path, savedId, preview, subtab, viz, pane, selected }) =>
+    ({ id, kind, title, query, settings, path, savedId, preview, subtab, viz, pane, selected })))); } catch { /* not kept */ }
 }
 
 // bqRecent are the ten resources most recently opened, newest first, for
@@ -15379,7 +16767,16 @@ function bqMenu(label, items) {
       if (first) first.focus();
     }
   });
-  menu.addEventListener("keydown", (e) => { if (e.key === "Escape") { close(); button.focus(); } });
+  menu.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { close(); button.focus(); return; }
+    // Up and Down move between the menu's items, as a menu's do.
+    const step = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
+    if (!step) return;
+    e.preventDefault();
+    const all = [...menu.querySelectorAll("button:not([disabled])")];
+    const i = all.indexOf(document.activeElement);
+    if (all.length) all[(i + step + all.length) % all.length].focus();
+  });
   // A click anywhere else closes it, as a menu does.
   const outside = (e) => {
     if (!menu.isConnected) { document.removeEventListener("click", outside); return; }
@@ -15471,25 +16868,80 @@ function renderBigQueryStudio(view) {
   const linkedSaved = params.get("savedQuery");
   let counter = tabs.reduce((n, t) => Math.max(n, t.id), 0);
   const queryCount = () => tabs.filter((t) => (t.kind || "query") === "query" && !t.savedId).length;
+  // Split tabs (#2005): Google's workspace can "split the tabs into two
+  // panes and view them side by side" (bigquery-web-ui). Each tab is in the
+  // left or the right pane (t.pane, kept with the tabs in this browser) and
+  // each pane keeps its own selected tab (t.selected). The pane last used
+  // is where a new tab opens.
+  for (const t of tabs) if (t.pane !== "right") t.pane = "left";
+  let active = "left";
   const newTab = (query = "", title = null, extra = {}) => {
     counter += 1;
     const n = queryCount() + 1;
     const tab = { id: counter, kind: "query", title: title || (n === 1 ? "Untitled query" : `Untitled query ${n}`),
-                  query, settings: {}, ...extra };
+                  query, settings: {}, pane: active, ...extra };
     tabs.push(tab);
     return tab;
   };
   if (linked !== null) newTab(linked);
-  if (!tabs.length) tabs.push({ id: ++counter, kind: "home", title: "Home" });
-  let current = tabs[tabs.length - 1];
+  if (!tabs.length) tabs.push({ id: ++counter, kind: "home", title: "Home", pane: "left" });
+  const inPane = (side) => tabs.filter((t) => t.pane === side);
+  const isSplit = () => tabs.some((t) => t.pane === "right") && tabs.some((t) => t.pane === "left");
+  // A pane left with no tab closes: its tabs are all in the other, which
+  // becomes the left one.
+  const currents = { left: null, right: null };
+  const unsplitIfEmpty = () => {
+    if (isSplit()) return;
+    for (const t of tabs) t.pane = "left";
+    active = "left";
+    if (currents.right) currents.left = currents.right;
+    currents.right = null;
+  };
+  unsplitIfEmpty();
+  const pickCurrent = (side) => {
+    const list = inPane(side);
+    if (list.includes(currents[side])) return;
+    currents[side] = list.find((t) => t.selected) || list[list.length - 1] || null;
+  };
+  pickCurrent("left");
+  pickCurrent("right");
+  // A link that opened a query selects its tab.
+  if (linked !== null) currents.left = tabs[tabs.length - 1];
 
   const explorerBody = el("div", { class: "bq-explorer-body" });
   const search = el("input", { type: "search", class: "bq-explorer-search", placeholder: "Search BigQuery resources",
                                "aria-label": "Search BigQuery resources" });
   const starredOnly = el("input", { type: "checkbox", id: "bq-starred-only" });
-  const strip = el("div", { class: "tab-strip bq-tabs", role: "tablist", "aria-label": "Editor tabs" });
-  const panel = el("div", { class: "bq-tab-panel" });
+  const makeSide = (side) => {
+    const strip = el("div", { class: "tab-strip bq-tabs", role: "tablist", "aria-label": "Editor tabs", "data-pane": side });
+    const panel = el("div", { class: "bq-tab-panel", role: "tabpanel", id: "bq-tab-panel-" + side });
+    const box = el("section", { class: "bq-split-pane bq-split-" + side, "data-pane": side }, strip, panel);
+    // The pane a click or a key lands in is where the next tab opens.
+    box.addEventListener("focusin", () => { active = side; });
+    box.addEventListener("pointerdown", () => { active = side; });
+    // Arrow keys, Home and End move between a strip's tabs, as a
+    // tablist's do; Enter or Space selects (the tab is a button).
+    strip.addEventListener("keydown", (e) => {
+      const all = [...strip.querySelectorAll(".tab")];
+      const i = all.indexOf(document.activeElement);
+      if (i < 0) return;
+      let j = -1;
+      if (e.key === "ArrowRight") j = (i + 1) % all.length;
+      else if (e.key === "ArrowLeft") j = (i - 1 + all.length) % all.length;
+      else if (e.key === "Home") j = 0;
+      else if (e.key === "End") j = all.length - 1;
+      if (j < 0) return;
+      e.preventDefault();
+      all[j].focus();
+    });
+    return { strip, panel, box };
+  };
+  const sides = { left: makeSide("left"), right: makeSide("right") };
+  const splitHost = el("div", { class: "bq-split" }, sides.left.box, sides.right.box);
   const history = el("section", { class: "bq-history card", "aria-label": "Job history" });
+  // The left pane's tab: explorer, data, files or source (#1861).
+  let pane = "explorer";
+  const paneHost = el("div", { class: "bq-pane", id: "bq-pane", role: "tabpanel" });
 
   let tree = null;
   let saved = [];
@@ -15507,19 +16959,37 @@ function renderBigQueryStudio(view) {
     setChildren(explorerBody, el("p", { class: "unavailable" }, spinner("Loading the Explorer"), " Loading…"));
     try {
       [tree] = await Promise.all([bqStudioCall("explorer"), loadSaved()]);
-      drawTree();
+      if (pane === "files") drawFiles(); else drawTree();
     } catch (err) {
       setChildren(explorerBody, el("p", { class: "form-error", role: "alert", text: err.message }));
     }
   };
 
-  const select = (tab) => { current = tab; drawTabs(); };
+  const select = (tab) => { currents[tab.pane] = tab; active = tab.pane; drawSide(tab.pane); };
   const openQuery = (sql, title = null) => select(newTab(sql, title));
+  // openQuerySplit is Query > In split tab: the query opens in the other
+  // pane, splitting the workspace when it is not split.
+  const openQuerySplit = (sql, title = null) => {
+    const other = isSplit() && active === "right" ? "left" : "right";
+    const tab = newTab(sql, title, { pane: other });
+    currents[other] = tab;
+    active = other;
+    drawTabs();
+  };
+  // openJobs opens Job history as a tab, or selects the one open, as the
+  // Explorer's Job history does in Google's Studio.
+  const openJobs = () => {
+    const open = tabs.find((t) => t.kind === "jobs");
+    if (open) return select(open);
+    const tab = { id: ++counter, kind: "jobs", title: "Job history", pane: active };
+    tabs.push(tab);
+    select(tab);
+  };
   const openHome = () => {
     const home = tabs.find((t) => t.kind === "home");
     if (home) return select(home);
     counter += 1;
-    const tab = { id: counter, kind: "home", title: "Home" };
+    const tab = { id: counter, kind: "home", title: "Home", pane: active };
     tabs.unshift(tab);
     select(tab);
   };
@@ -15540,8 +17010,8 @@ function renderBigQueryStudio(view) {
       if (keep) same.preview = false;
       return select(same);
     }
-    const tab = { id: ++counter, kind: "resource", resourceKind: kind, title, path, preview: !keep };
-    const preview = keep ? -1 : tabs.findIndex((t) => t.kind === "resource" && t.preview);
+    const tab = { id: ++counter, kind: "resource", resourceKind: kind, title, path, preview: !keep, pane: active };
+    const preview = keep ? -1 : tabs.findIndex((t) => t.kind === "resource" && t.preview && t.pane === active);
     if (preview >= 0) tabs.splice(preview, 1, tab);
     else tabs.push(tab);
     select(tab);
@@ -15607,7 +17077,9 @@ function renderBigQueryStudio(view) {
         { label: "Manage permissions", disabled: true, title: BQ_UNAVAILABLE_PERMISSIONS, run: () => {} },
         { label: "Delete", danger: true, run: () => bqDeleteSaved(sq, async () => { await loadSaved(); drawTree(); }) },
       ], null, "/bigquery-studio?" + new URLSearchParams({ project: proj, savedQuery: sq.id }), () => openSaved(sq)));
-    const queriesNode = (!q && !onlyStarred) || queryKids.length
+    // The Data pane lists the data hierarchy only: "Code assets aren't
+    // listed in the Data pane" (bigquery-web-ui).
+    const queriesNode = pane === "data" ? null : (!q && !onlyStarred) || queryKids.length
       ? node(`${proj}.queries`, "Queries", "folder", 2, null, queryKids.length ? queryKids
           : [el("li", { class: "bq-node-empty unavailable", text: "No saved queries. Save a query from its tab." })])
       : null;
@@ -15625,6 +17097,7 @@ function renderBigQueryStudio(view) {
         ];
         if (isTable) {
           items.push({ label: "Query", run: () => openQuery(`SELECT * FROM \`${proj}.${ds.id}.${id}\` LIMIT 1000`, id) });
+          items.push({ label: "Query in split tab", run: () => openQuerySplit(`SELECT * FROM \`${proj}.${ds.id}.${id}\` LIMIT 1000`, id) });
         }
         items.push({ label: "Copy ID", run: () => bqCopy(key, "ID") });
         if (isTable) items.push({ label: "Delete", danger: true, run: () => bqDetailAction(path, "deletetable", loadExplorer) });
@@ -15654,39 +17127,185 @@ function renderBigQueryStudio(view) {
       { label: "Copy ID", run: () => bqCopy(proj, "ID") },
     ], [queriesNode, ...dsNodes].filter(Boolean), "/bigquery");
     setChildren(explorerBody,
-      el("ul", { class: "bq-tree", role: "tree", "aria-label": "Explorer" }, projectNode),
+      el("ul", { class: "bq-tree", role: "tree", "aria-label": pane === "data" ? "Data" : "Explorer" }, projectNode),
       tree.datasets.length ? null
         : el("p", { class: "unavailable", text: "No datasets yet. Create dataset from the project's View actions." }),
       (q || onlyStarred) && !dsNodes.length && !queryKids.length ? el("p", { class: "unavailable", text: "No resources match." }) : null);
+  };
+
+  // drawFiles is the Files pane: the project's saved queries. Google
+  // organizes code assets (saved queries, notebooks) in folders there; a
+  // CloudBurrow saved query is a record of its own (above), with no folder.
+  const drawFiles = () => {
+    const proj = tree ? tree.project : project;
+    setChildren(explorerBody,
+      el("p", { class: "unavailable bq-files-note", text: BQ_SAVED_NOTE + " Folders and notebooks are Dataform's, which is not served." }),
+      saved.length
+        ? el("ul", { class: "bq-files", "aria-label": "Saved queries" }, ...saved.map((sq) => el("li", { class: "bq-node-row" },
+            el("a", { class: "bq-node-name", href: "/bigquery-studio?" + new URLSearchParams({ project: proj, savedQuery: sq.id }),
+              text: sq.name, onclick: (e) => { if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return; e.preventDefault(); openSaved(sq); } }),
+            bqMenu(`View actions for ${sq.name}`, [
+              { label: "Open", run: () => openSaved(sq) },
+              { label: "Copy link", run: () => bqCopy(bqSavedLink(sq.id), "the link to this saved query") },
+              { label: "Delete", danger: true, run: () => bqDeleteSaved(sq, async () => { await loadSaved(); drawPane(); }) },
+            ]))))
+        : el("p", { class: "unavailable", text: "No saved queries. Save a query from its tab." }));
+  };
+
+  // drawPane draws the left pane's chosen tab, in Google's order:
+  // Explorer, Data, Files, Source control.
+  const PANES = [["explorer", "Explorer"], ["data", "Data"], ["files", "Files"], ["source", "Source control"]];
+  const paneTabs = el("div", { class: "tab-strip bq-pane-tabs", role: "tablist", "aria-label": "Left pane" });
+  // Arrow keys move between the pane's tabs, as a tablist's do.
+  paneTabs.addEventListener("keydown", (e) => {
+    const step = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0;
+    if (!step) return;
+    e.preventDefault();
+    const i = PANES.findIndex(([id]) => id === pane);
+    pane = PANES[(i + step + PANES.length) % PANES.length][0];
+    drawPane();
+    paneTabs.querySelector(".tab.is-selected").focus();
+  });
+  const drawPane = () => {
+    setChildren(paneTabs, ...PANES.map(([id, label]) => el("button", {
+      type: "button", role: "tab", id: "bq-pane-" + id, class: "tab" + (pane === id ? " is-selected" : ""),
+      "aria-selected": pane === id ? "true" : "false", "aria-controls": "bq-pane", tabindex: pane === id ? "0" : "-1",
+      text: label, onclick: () => { pane = id; drawPane(); },
+    })));
+    paneHost.setAttribute("aria-labelledby", "bq-pane-" + pane);
+    const title = PANES.find(([id]) => id === pane)[1];
+    const head = el("div", { class: "bq-explorer-head" }, el("h2", { text: title }),
+      pane === "explorer" || pane === "data"
+        ? el("button", { type: "button", class: "secondary", text: "+ Add data", title: "Create dataset",
+                         onclick: () => bqCreateDataset(() => loadExplorer()) })
+        : null);
+    if (pane === "source") {
+      setChildren(paneHost, head, el("p", { class: "unavailable", text:
+        "Not available locally: Source control keeps code assets in a Git repository through Dataform, which CloudBurrow does not serve. " +
+        "Saved queries are listed under Files." }));
+      return;
+    }
+    if (pane === "files") {
+      setChildren(paneHost, head, explorerBody);
+      drawFiles();
+      return;
+    }
+    setChildren(paneHost, head,
+      pane === "explorer" ? el("button", { type: "button", class: "bq-explorer-home", text: "Home", onclick: () => openHome() }) : null,
+      pane === "explorer" ? el("button", { type: "button", class: "bq-explorer-home bq-explorer-jobs", text: "Job history", onclick: () => openJobs() }) : null,
+      search,
+      el("label", { class: "bq-starred", for: "bq-starred-only" }, starredOnly, el("span", { text: " Show starred resources only" })),
+      explorerBody);
+    drawTree();
   };
   search.addEventListener("input", drawTree);
   starredOnly.addEventListener("change", drawTree);
 
   const closeTab = (t) => {
+    const side = t.pane;
     tabs.splice(tabs.indexOf(t), 1);
-    if (!tabs.length) openHome();
-    else if (current === t) current = tabs[tabs.length - 1];
+    if (!tabs.length) { active = "left"; openHome(); return; }
+    if (currents[side] === t) currents[side] = null;
+    unsplitIfEmpty();
     drawTabs();
+  };
+  // Close other tabs keeps only t, in the left pane.
+  const closeOthers = (t) => {
+    tabs.splice(0, tabs.length, t);
+    t.pane = "left";
+    active = "left";
+    currents.left = t;
+    currents.right = null;
+    drawTabs();
+    focusTab(t);
+  };
+  const focusTab = (t) => {
+    const b = sides[t.pane].strip.querySelector(`.tab[data-tab="${t.id}"]`);
+    if (b) b.focus();
+  };
+  // moveTab puts t in the side pane: Split tab to left or right when the
+  // workspace is not split (the other tabs go to the other pane), Move tab
+  // to left or right pane when it is. Focus follows the tab.
+  const moveTab = (t, side) => {
+    if (!isSplit()) for (const o of tabs) o.pane = side === "left" ? "right" : "left";
+    t.pane = side;
+    unsplitIfEmpty();
+    currents[t.pane] = t;
+    active = t.pane;
+    drawTabs();
+    focusTab(t);
+    announce(isSplit() ? `${t.title} is in the ${t.pane} pane` : `${t.title}: the workspace is no longer split`);
+  };
+  const tabMenu = (t) => {
+    const items = [];
+    if (!isSplit()) {
+      const one = tabs.length < 2;
+      const why = one ? "Only one tab is open" : null;
+      items.push({ label: "Split tab to left", disabled: one, title: why, run: () => moveTab(t, "left") });
+      items.push({ label: "Split tab to right", disabled: one, title: why, run: () => moveTab(t, "right") });
+    } else if (t.pane === "left") {
+      items.push({ label: "Move tab to right pane", run: () => moveTab(t, "right") });
+    } else {
+      items.push({ label: "Move tab to left pane", run: () => moveTab(t, "left") });
+    }
+    items.push({ label: "Close tab", run: () => closeTab(t) });
+    items.push({ label: "Close other tabs", disabled: tabs.length < 2, run: () => closeOthers(t) });
+    const menu = bqMenu(`Open menu for ${t.title}`, items);
+    const button = menu.querySelector("button");
+    button.setAttribute("title", "Open menu");
+    // The strip scrolls sideways, which would clip a menu inside it: the
+    // open menu is placed on the page, under its button, within the window.
+    button.addEventListener("click", () => {
+      const list = menu.querySelector(".bq-menu");
+      if (list.hidden) return;
+      const r = button.getBoundingClientRect();
+      list.style.position = "fixed";
+      list.style.top = `${Math.round(r.bottom)}px`;
+      list.style.right = "auto";
+      const left = Math.min(r.right - list.offsetWidth, window.innerWidth - list.offsetWidth - 8);
+      list.style.left = `${Math.max(8, Math.round(left))}px`;
+    });
+    return menu;
   };
 
   const drawTabs = () => {
+    const split = isSplit();
+    splitHost.classList.toggle("is-split", split);
+    sides.right.box.hidden = !split;
+    if (!split) setChildren(sides.right.strip);
+    drawSide("left");
+    if (split) drawSide("right");
+  };
+
+  // drawSide draws one pane's strip and its selected tab.
+  const drawSide = (side) => {
+    pickCurrent(side);
+    for (const t of tabs) t.selected = t === currents.left || t === currents.right;
     bqWriteTabs(tabs);
-    setChildren(strip, ...tabs.map((t) => el("span", { class: "bq-tab-wrap" },
+    const { strip, panel } = sides[side];
+    const current = currents[side];
+    const split = isSplit();
+    strip.setAttribute("aria-label", split ? `Editor tabs, ${side} pane` : "Editor tabs");
+    sides[side].box.setAttribute("aria-label", split ? `${side === "left" ? "Left" : "Right"} pane` : "Editor");
+    setChildren(strip, ...inPane(side).map((t) => el("span", { class: "bq-tab-wrap" },
       el("button", {
         type: "button", role: "tab", class: "tab bq-tab-" + (t.kind || "query") + (t === current ? " is-selected" : "") +
-          (t.preview ? " is-preview" : ""),
-        "aria-selected": t === current ? "true" : "false", text: t.title,
+          (t.preview ? " is-preview" : ""), id: `bq-tab-${t.id}`, "data-tab": String(t.id),
+        "aria-selected": t === current ? "true" : "false", "aria-controls": "bq-tab-panel-" + side, text: t.title,
         title: t.preview ? "Preview tab: double-click to keep it open" : null,
         onclick: () => select(t),
-        ondblclick: () => { if (t.preview) { t.preview = false; drawTabs(); } },
+        ondblclick: () => { if (t.preview) { t.preview = false; drawSide(t.pane); } },
       }),
+      tabMenu(t),
       el("button", {
         type: "button", class: "icon-button bq-tab-close", "aria-label": `Close ${t.title}`, title: "Close tab",
         html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
         onclick: () => closeTab(t),
       }))),
       el("button", { type: "button", class: "secondary bq-new-query", text: "SQL query",
-        "aria-label": "SQL query: open a new query tab", onclick: () => openQuery("") }));
+        "aria-label": "SQL query: open a new query tab", onclick: () => { active = side; openQuery(""); } }));
+    if (!current) { setChildren(panel); return; }
+    panel.setAttribute("aria-labelledby", `bq-tab-${current.id}`);
     const kind = current.kind || "query";
     if (kind === "home") {
       setChildren(panel, bqHomeTab({
@@ -15695,6 +17314,9 @@ function renderBigQueryStudio(view) {
         createTable: (ds) => bqDetailAction([ds], "createtable", loadExplorer, true),
         loadFile: (ds) => bqDetailAction([ds], "loadfile", loadExplorer, true),
       }));
+    } else if (kind === "jobs") {
+      setChildren(panel, history);
+      drawHistory();
     } else if (kind === "resource") {
       const host = el("div", { class: "bq-resource-tab", "data-embedded": "true" });
       if (current.subtab) host.dataset.tab = current.subtab;
@@ -15705,11 +17327,11 @@ function renderBigQueryStudio(view) {
     } else {
       setChildren(panel, bqQueryTab(current, {
         save: () => bqWriteTabs(tabs),
-        onRan: () => drawHistory(),
+        onRan: () => {},
         saved: () => saved,
         onSaved: async (sq) => {
           await loadSaved();
-          drawTree();
+          if (pane === "files") drawFiles(); else drawTree();
           bqRemember({ kind: "query", savedId: sq.id, title: sq.name });
           drawTabs();
         },
@@ -15753,17 +17375,10 @@ function renderBigQueryStudio(view) {
   setChildren(view,
     pageHeader("BigQuery Studio", null),
     el("div", { class: "bq-studio" },
-      el("aside", { class: "bq-explorer card", "aria-label": "Explorer" },
-        el("div", { class: "bq-explorer-head" },
-          el("h2", { text: "Explorer" }),
-          el("button", { type: "button", class: "secondary", text: "+ Add data", title: "Create dataset",
-                         onclick: () => bqCreateDataset(() => loadExplorer()) })),
-        el("button", { type: "button", class: "bq-explorer-home", text: "Home", onclick: () => openHome() }),
-        search,
-        el("label", { class: "bq-starred", for: "bq-starred-only" }, starredOnly, el("span", { text: " Show starred resources only" })),
-        explorerBody),
+      el("aside", { class: "bq-explorer card", "aria-label": "Left pane" }, paneTabs, paneHost),
       el("main", { class: "bq-workspace" },
-        strip, panel, history)));
+        splitHost)));
+  drawPane();
   drawTabs();
   loadExplorer().then(() => {
     // A link to a saved query (Copy link) opens it once the list is read.
@@ -15772,10 +17387,9 @@ function renderBigQueryStudio(view) {
       if (sq) openSaved(sq);
       else notify(`No saved query ${linkedSaved} in ${project}`, "error");
     }
-    const home = panel.querySelector(".bq-home");
+    const home = splitHost.querySelector(".bq-home");
     if (home && home.bqRefresh) home.bqRefresh();
   });
-  drawHistory();
   announce("BigQuery Studio");
 }
 
@@ -16575,7 +18189,11 @@ function renderIAMPage(view, route) {
         el("thead", {}, el("tr", {},
           el("th", {}, el("span", { class: "sr-only", text: "Select" })),
           el("th", { text: "Type" }), el("th", { text: "Principal" }), el("th", { text: "Name" }),
-          el("th", { text: "Role" }), el("th", { text: "Inheritance" }),
+          el("th", { text: "Role" }),
+          // Security insights (#2013): Google's column of the Recommender
+          // API's policy insights, which CloudBurrow does not serve.
+          el("th", { text: "Security insights" }),
+          el("th", { text: "Inheritance" }),
           el("th", {}, el("span", { class: "sr-only", text: "Edit" })))),
         el("tbody", {}, ...rows.map((r) => {
           const own = r.roles.some((x) => !x.from);
@@ -16590,7 +18208,10 @@ function renderIAMPage(view, route) {
             el("td", { text: iamPrincipalType(r.member) }),
             el("td", { class: "mono", text: r.member.replace(/^[a-zA-Z]+:/, "") }),
             el("td", { text: name(r.member) }),
-            roleCell(r), inheritCell(r),
+            roleCell(r),
+            el("td", { class: "iam-insights" }, el("span", { class: "form-help", text: "Not available locally",
+              title: IAM_INSIGHTS_UNAVAILABLE })),
+            inheritCell(r),
             el("td", { class: "row-actions" },
               el("button", { type: "button", class: "secondary", text: "Edit principal",
                 "aria-label": `Edit principal ${r.member}`,
@@ -16903,8 +18524,22 @@ function renderOrgPolicyEdit(view, constraint) {
       r = r || { enforce: true, values: "allowAll", type: "allow", custom: [] };
       const i = n++;
       const entry = {};
-      const custom = el("textarea", { class: "orgpolicy-custom-values", rows: 2, "aria-label": "Custom values" });
-      custom.value = (r.custom || []).join("\n");
+      // Google's Custom value boxes, one value each, and Add value for
+      // another (#2013).
+      const valuesBox = el("div", { class: "orgpolicy-custom-values" });
+      const addValue = (v) => {
+        const k = valuesBox.children.length + 1;
+        const input = el("input", { type: "text", class: "orgpolicy-custom-value", "aria-label": `Custom value ${k}`,
+          autocomplete: "off", spellcheck: "false", value: v || "" });
+        const line = el("div", { class: "orgpolicy-custom-line" }, input,
+          el("button", { type: "button", class: "secondary", text: "Delete", "aria-label": `Delete custom value ${k}`,
+            onclick: () => { line.remove(); if (!valuesBox.children.length) addValue(""); } }));
+        valuesBox.append(line);
+        return input;
+      };
+      for (const v of r.custom || []) addValue(v);
+      if (!valuesBox.children.length) addValue("");
+      const customValues = () => [...valuesBox.querySelectorAll(".orgpolicy-custom-value")].map((x) => x.value.trim()).filter(Boolean);
       const c = r.condition || {};
       const ctitle = el("input", { type: "text", class: "orgpolicy-condition-title", "aria-label": "Condition title", value: c.title || "" });
       const cexpr = el("textarea", { class: "orgpolicy-condition", rows: 2, "aria-label": "Condition" });
@@ -16912,8 +18547,10 @@ function renderOrgPolicyEdit(view, constraint) {
       const customBox = el("div", { class: "orgpolicy-custom" },
         el("span", { class: "form-label", text: "Policy type" }),
         radios(`orgpolicy-type-${i}`, [["allow", "Allow"], ["deny", "Deny"]], r.type || "allow"),
-        el("label", { class: "form-label" }, el("span", { text: "Custom values" }), custom,
-          el("span", { class: "form-help", text: "One per line, such as in:us-locations or us-east1." })));
+        el("span", { class: "form-label", text: "Custom value" }), valuesBox,
+        el("span", { class: "form-help", text: "A value each, such as in:us-locations or us-east1." }),
+        el("button", { type: "button", class: "secondary orgpolicy-add-value", text: "Add value",
+          onclick: () => addValue("").focus() }));
       const showCustom = () => { customBox.hidden = picked(`orgpolicy-values-${i}`) !== "custom"; };
       const kind = d.boolean
         ? el("div", {}, el("span", { class: "form-label", text: "Enforcement" }),
@@ -16933,7 +18570,7 @@ function renderOrgPolicyEdit(view, constraint) {
       entry.value = () => ({
         enforce: picked(`orgpolicy-enforce-${i}`) === "on",
         values: picked(`orgpolicy-values-${i}`), type: picked(`orgpolicy-type-${i}`),
-        custom: iamDenyLines(custom.value),
+        custom: customValues(),
         condition: cexpr.value.trim() ? { title: ctitle.value, expression: cexpr.value } : null,
       });
       rules.push(entry);
@@ -17250,44 +18887,88 @@ function renderIAMAnalyzer(view) {
   fields.focusFirst();
 }
 
+const IAM_INSIGHTS_UNAVAILABLE = "Security insights are the Recommender API's policy insights (excess permissions), " +
+  "which CloudBurrow does not serve.";
+
 function PROJECT_IAM_NOTE_TEXT() {
   return "The project's IAM policy, stored and never enforced (ADR-0006). Nothing inherits it: a resource's own " +
-    "Permissions tab shows only that resource's bindings. Google's Security insights (excess permissions) come from " +
-    "the Recommender API, which CloudBurrow does not serve, so the column is not drawn.";
+    "Permissions tab shows only that resource's bindings. Google's Security insights column (excess permissions) comes " +
+    "from the Recommender API, which CloudBurrow does not serve: it says Not available locally.";
 }
 
-// iamRolePicker is Select a role: a searchable list of every role, by
-// title and name, Google's role picker without its product groups.
+// iamRolePicker is Select a role (#2013): Google's role picker, its roles
+// grouped by product. Down the left are the groups (Basic, Custom, then
+// each product as Google's role index names it), a group chosen listing
+// its roles on the right; the filter searches every role by title, name,
+// product or type, the hits under their products' headings.
+const IAM_ROLE_SHOWN = 100;
+
+function iamRoleProducts(roles) {
+  const first = ["Basic", "Custom"];
+  const names = [...new Set(roles.map((r) => r.product || "Other"))];
+  return [...first.filter((x) => names.includes(x)),
+    ...names.filter((x) => !first.includes(x)).sort((a, b) => a.localeCompare(b))];
+}
+
 function iamRolePicker(roles, initial, id) {
   let value = initial || "";
   const button = el("button", { type: "button", class: "secondary iam-role-button", id,
-    "aria-haspopup": "listbox", "aria-expanded": "false" });
+    "aria-haspopup": "dialog", "aria-expanded": "false" });
   const label = () => { button.textContent = value ? iamRoleLabel(roles, value) : "Select a role"; button.title = value; };
   label();
   const search = el("input", { type: "search", class: "iam-role-search", placeholder: "Filter", "aria-label": "Filter roles", autocomplete: "off" });
+  const products = iamRoleProducts(roles);
+  const current = roles.find((r) => r.name === value);
+  let product = current ? (current.product || "Other") : products[0];
+  const groups = el("ul", { class: "iam-role-products", role: "list", "aria-label": "By product or service" });
   const list = el("ul", { class: "iam-role-list", role: "listbox", "aria-label": "Roles" });
-  const pop = el("div", { class: "iam-role-pop", hidden: true }, search, list);
-  const drawList = () => {
-    const q = search.value.trim().toLowerCase();
-    const hits = roles.filter((r) => !q || r.name.toLowerCase().includes(q) || (r.title || "").toLowerCase().includes(q)
-      || (r.type || "").toLowerCase() === q).slice(0, 100);
-    setChildren(list, ...hits.map((r) => el("li", { role: "presentation" },
-      el("button", { type: "button", role: "option", class: "iam-role-option", "data-role": r.name,
-        "aria-selected": String(r.name === value),
-        onclick: () => { value = r.name; label(); close(); onChange(); } },
-        el("span", { class: "iam-role-title", text: r.title || r.name }),
-        el("span", { class: "mono form-help", text: ` ${r.name}` }),
-        el("span", { class: "form-help", text: r.type === "Custom" ? " Custom" : r.type === "Basic" ? " Basic" : "" })))),
-      hits.length ? null : el("li", { class: "unavailable", text: "No role matches." }));
+  const status = el("p", { class: "form-help iam-role-status", "aria-live": "polite" });
+  const option = (r) => el("li", { role: "presentation" },
+    el("button", { type: "button", role: "option", class: "iam-role-option", "data-role": r.name,
+      "aria-selected": String(r.name === value),
+      onclick: () => { value = r.name; label(); close(); onChange(); } },
+      el("span", { class: "iam-role-title", text: r.title || r.name }),
+      el("span", { class: "mono form-help", text: ` ${r.name}` })));
+  const drawGroups = (q) => {
+    setChildren(groups, ...products.map((x) => el("li", {},
+      el("button", { type: "button", class: "iam-role-product", "data-product": x,
+        "aria-pressed": String(!q && x === product),
+        onclick: () => { product = x; search.value = ""; draw(); } }, x))));
   };
+  const draw = () => {
+    const q = search.value.trim().toLowerCase();
+    drawGroups(q);
+    if (!q) {
+      const mine = roles.filter((r) => (r.product || "Other") === product);
+      status.textContent = `${product}: ${mine.length} roles`;
+      setChildren(list, ...mine.map(option), mine.length ? null : el("li", { class: "unavailable", text: "No role in this group." }));
+      return;
+    }
+    const hits = roles.filter((r) => r.name.toLowerCase().includes(q) || (r.title || "").toLowerCase().includes(q)
+      || (r.product || "").toLowerCase().includes(q) || (r.type || "").toLowerCase() === q);
+    const shown = hits.slice(0, IAM_ROLE_SHOWN);
+    status.textContent = hits.length > IAM_ROLE_SHOWN
+      ? `${hits.length} roles match; the first ${IAM_ROLE_SHOWN} are shown. Filter to narrow them.` : `${hits.length} roles match`;
+    const items = [];
+    for (const x of products) {
+      const inGroup = shown.filter((r) => (r.product || "Other") === x);
+      if (!inGroup.length) continue;
+      items.push(el("li", { role: "presentation", class: "iam-role-group", text: x }), ...inGroup.map(option));
+    }
+    setChildren(list, ...items, hits.length ? null : el("li", { class: "unavailable", text: "No role matches." }));
+  };
+  const pop = el("div", { class: "iam-role-pop", role: "dialog", "aria-label": "Select a role", hidden: true }, search, status,
+    el("div", { class: "iam-role-panes" }, groups, list));
   const close = () => { pop.hidden = true; button.setAttribute("aria-expanded", "false"); };
   let onChange = () => {};
   button.addEventListener("click", () => {
     pop.hidden = !pop.hidden;
     button.setAttribute("aria-expanded", String(!pop.hidden));
-    if (!pop.hidden) { drawList(); search.focus(); }
+    if (!pop.hidden) { draw(); search.focus(); }
   });
-  search.addEventListener("input", drawList);
+  search.addEventListener("input", draw);
+  // Escape in the filter closes the picker; elsewhere it closes the
+  // dialog, as every dialog's Escape does.
   search.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.stopPropagation(); close(); button.focus(); } });
   return { node: el("div", { class: "iam-role-picker" }, button, pop), value: () => value,
     onChange: (fn) => { onChange = fn; } };

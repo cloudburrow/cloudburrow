@@ -12,6 +12,15 @@ package iamroles
 // To refresh it, fetch the index and every page it links to and extract
 // each role-description/role-permissions table row the same way.
 //
+// products.tsv.gz is each of those roles' product (#2013): the title of
+// the per-service page that lists it, as the index's menu names that page
+// ("Compute Engine" for .../roles-permissions/compute), read 2026-11-20,
+// one "name<TAB>product" per line. Google's console groups Select a role
+// by product; this is the grouping the docs give. The nine job function
+// roles (roles/iam.devOps ...) are on "Roles for job functions". To
+// refresh it, take each page's role-title ids (class="role-title" id="X"
+// is roles/X) with the page's menu title.
+//
 // The basic roles (roles/owner, editor, viewer, admin, writer, reader)
 // are not on those pages; their titles are from "Roles overview"
 // (https://docs.cloud.google.com/iam/docs/roles-overview, read
@@ -31,6 +40,12 @@ import (
 //go:embed roles.tsv.gz
 var rolesGz []byte
 
+//go:embed products.tsv.gz
+var productsGz []byte
+
+// BasicProduct is the basic roles' group in Select a role.
+const BasicProduct = "Basic"
+
 // Role is a predefined role.
 type Role struct {
 	Name        string
@@ -42,6 +57,9 @@ type Role struct {
 	// can be granted on ("Project", "Bucket", "Organization"), often none.
 	Lowest      []string
 	Permissions []string
+	// Product is the product Google's docs list the role under ("Cloud
+	// Storage"), BasicProduct for a basic role.
+	Product string
 }
 
 // basicRoles are the basic roles, from "Roles overview".
@@ -81,6 +99,22 @@ func loadRoles() {
 	}
 	if err := sc.Err(); err != nil {
 		panic("iamroles: read the embedded role catalog: " + err.Error())
+	}
+	pz, err := gzip.NewReader(bytes.NewReader(productsGz))
+	if err != nil {
+		panic("iamroles: the embedded product catalog is not gzip: " + err.Error())
+	}
+	ps := bufio.NewScanner(pz)
+	for ps.Scan() {
+		if name, product, ok := strings.Cut(ps.Text(), "\t"); ok && roles[name] != nil {
+			roles[name].Product = product
+		}
+	}
+	if err := ps.Err(); err != nil {
+		panic("iamroles: read the embedded product catalog: " + err.Error())
+	}
+	for i := range basicRoles {
+		basicRoles[i].Product = BasicProduct
 	}
 	for n := range roles {
 		roleNames = append(roleNames, n)

@@ -1609,6 +1609,10 @@ thead th {
 .info-fields { display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; margin: 16px 0; }
 .info-fields dt { color: var(--text-muted); }
 .info-fields dd { margin: 0; overflow-wrap: anywhere; }
+/* The info panel's tabs for a row (#1859: a Spanner instance's Labels). */
+.info-tabs { margin: 8px 0 0; }
+.info-tab-panel { padding-top: 8px; }
+.info-tab-form { display: grid; gap: 12px; }
 .info-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px;
                 padding-top: 16px; border-top: 1px solid var(--border); }
 .info-empty { padding-top: 24px; text-align: center; }
@@ -1925,7 +1929,7 @@ tr.is-inspected { background: var(--nav-selected); }
   font-family: var(--mono); font-size: var(--text-caption-size);
   background: var(--surface-alt); border: 1px solid var(--border); border-radius: var(--radius);
 }
-.connect-about { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; }
+.connect-about { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 16px; margin: 0; }
 .connect-about dt { color: var(--text-muted); }
 .connect-about dd { margin: 0; overflow-wrap: anywhere; }
 /* A path or command inside a sentence breaks rather than widening the page. */
@@ -1983,6 +1987,8 @@ tr.is-inspected { background: var(--nav-selected); }
 dd.has-copy { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 dd.has-copy .property-copy-value { overflow-wrap: anywhere; min-width: 0; }
 dd.has-copy .property-copy { padding: 2px 8px; font-size: var(--text-badge-size); }
+/* A link beside a value that opens a page action: Upgrade beside an edition (#1859). */
+dd.has-property-action { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
 .objects-show { display: inline-flex; align-items: center; gap: 6px; }
 /* A form section's tabs (Field.Tab, #1852): Google's Create service page's
    Container(s), Variables & Secrets, Volumes, Networking and Security. */
@@ -2092,6 +2098,16 @@ dd.has-copy .property-copy { padding: 2px 8px; font-size: var(--text-badge-size)
 .group-cell textarea, .group-cell input { width: 100%; box-sizing: border-box; }
 .group-cell-label { font-size: var(--text-caption-size); color: var(--text-muted); }
 .group-check { display: inline-flex; align-items: center; gap: 6px; }
+/* A picklist (#1864): Create role's and Edit role's permissions, each with
+   a checkbox, and the Add permissions picker under them. */
+.picklist-rows { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 4px; max-height: 240px; overflow-y: auto; }
+.picklist-row .mono { overflow-wrap: anywhere; }
+.picklist-picker { border: 1px solid var(--border); border-radius: var(--radius-control); padding: 12px; margin-top: 8px; }
+.picklist-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.picklist-filters { display: flex; gap: 12px; flex-wrap: wrap; }
+.picklist-filters .form-row { flex: 1 1 160px; min-width: 0; }
+.picklist-filters select { width: 100%; }
+.table-title { font-size: var(--text-heading-size); font-weight: 500; margin: 16px 0 8px; }
 
 /* Logs Explorer (#1863, round 2): query suggestions, summary chips,
    highlight, pinned entries and the Timeline's drag handles. */
@@ -2161,6 +2177,18 @@ tr.log-entry.is-pinned { background: var(--state-hover); }
 .bq-menu-item:hover { background: var(--state-hover); }
 .bq-menu-item.danger { color: var(--error); }
 .bq-workspace { min-width: 0; display: grid; gap: 12px; }
+/* Split tabs (#2005): two panes side by side, each its own strip and
+   panel; below 960px, where the Explorer stacks, the panes stack too. */
+.bq-split { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; min-width: 0; }
+.bq-split-pane { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-content: start; }
+.bq-split-pane > * { min-width: 0; }
+.bq-split.is-split { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.bq-split.is-split .bq-split-pane + .bq-split-pane { border-left: 1px solid var(--border); padding-left: 12px; }
+@media (max-width: 959px) {
+  .bq-split.is-split { grid-template-columns: minmax(0, 1fr); }
+  .bq-split.is-split .bq-split-pane + .bq-split-pane { border-left: 0; padding-left: 0; border-top: 1px solid var(--border); padding-top: 12px; }
+}
+.bq-tab-wrap .bq-menu-wrap .icon-button { width: 28px; height: 28px; }
 .bq-tabs { margin: 0; align-items: center; border-bottom: 1px solid var(--border); }
 .bq-tab-wrap { display: inline-flex; align-items: center; }
 .bq-tab-close { width: 28px; height: 28px; }
@@ -2181,7 +2209,8 @@ tr.log-entry.is-pinned { background: var(--state-hover); }
 .bq-job-info dt { color: var(--text-muted); }
 .bq-job-info dd { margin: 0; font-family: var(--mono); overflow-wrap: anywhere; }
 .bq-json { overflow-x: auto; max-height: 480px; }
-.bq-history { overflow-x: auto; }
+/* Positioned, so a state icon's sr-only text (absolute) scrolls with the table rather than widening the page. */
+.bq-history { overflow-x: auto; position: relative; }
 .bq-settings fieldset { border: 1px solid var(--border); border-radius: var(--radius); margin: 0 0 12px; padding: 8px 12px; }
 .bq-radio { display: block; margin: 4px 0; }
 .bq-dest-fields { display: grid; gap: 4px; margin-top: 8px; }
@@ -2251,7 +2280,21 @@ svg.bq-chart { display: block; border: 1px solid var(--border); border-radius: v
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-control); padding: 8px;
   box-shadow: var(--shadow-menu); }
 .iam-role-search { width: 100%; box-sizing: border-box; }
-.iam-role-list { list-style: none; margin: 8px 0 0; padding: 0; max-height: 280px; overflow-y: auto; }
+.iam-role-list { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow-y: auto; min-width: 0; }
+/* Select a role's product groups (#2013): the groups down the left, the
+   chosen group's roles (or the filter's hits) on the right. */
+.iam-role-panes { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 8px; margin-top: 8px; }
+.iam-role-products { list-style: none; margin: 0; padding: 0 8px 0 0; max-height: 320px; overflow-y: auto; border-right: 1px solid var(--border); }
+.iam-role-product { display: block; width: 100%; text-align: left; background: none; border: 0; padding: 6px 8px;
+  cursor: pointer; color: inherit; font: inherit; overflow-wrap: anywhere; }
+.iam-role-product:hover, .iam-role-product:focus-visible, .iam-role-product[aria-pressed="true"] { background: var(--surface-alt); }
+.iam-role-product[aria-pressed="true"] { font-weight: 500; }
+.iam-role-group { font-size: var(--text-caption-size); color: var(--text-muted); padding: 8px 8px 2px; font-weight: 500; }
+.iam-role-status { margin: 8px 0 0; }
+@media (max-width: 600px) {
+  .iam-role-panes { grid-template-columns: minmax(0, 1fr); }
+  .iam-role-products { border-right: 0; border-bottom: 1px solid var(--border); max-height: 160px; padding: 0 0 8px; }
+}
 .iam-role-option { display: block; width: 100%; text-align: left; background: none; border: 0; padding: 6px 8px;
   cursor: pointer; color: inherit; font: inherit; }
 .iam-role-option:hover, .iam-role-option:focus-visible, .iam-role-option[aria-selected="true"] { background: var(--surface-alt); }
@@ -2375,3 +2418,96 @@ svg.bq-chart { display: block; border: 1px solid var(--border); border-radius: v
 .result-box.kind-line { border-color: #e37400; }
 .result-box.is-lit { background: rgba(26, 115, 232, 0.25); border-width: 2.5px; }
 #action-result-table tr.is-lit { background: var(--nav-selected); }
+
+/* Workflows' source editor and graph (#2004): the source on the left, its
+   syntax highlighted, the graph of its steps on the right, as Google's
+   Workflows editor lays them out. The editor is a textarea over the
+   highlighted layer: the textarea's own text is transparent, the caret and
+   the selection are its, and the layer beneath draws the same characters in
+   the same metrics. Token colours are the theme's own text tokens, each
+   measured on --surface by TestTokensMeetContrast. */
+.wf-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; align-items: start; }
+@media (max-width: 900px) { .wf-split { grid-template-columns: minmax(0, 1fr); } }
+.wf-editor-pane, .wf-graph-panel { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); min-width: 0; }
+.wf-editor-head, .wf-graph-tools { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--border);
+  color: var(--text-muted); font-size: var(--text-caption-size); line-height: var(--text-caption-line); }
+.wf-graph-title { margin-right: auto; font-weight: 600; }
+.wf-graph-tools button { min-width: 32px; padding: 2px 8px; }
+.wf-scroller { display: grid; grid-template-columns: max-content minmax(0, 1fr); overflow: auto; max-height: 560px; }
+.wf-gutter, .wf-highlight, .wf-code .wf-input { font-family: var(--mono); font-size: var(--text-body-size); line-height: 1.5em; tab-size: 2;
+  margin: 0; padding: 8px 10px; white-space: pre; border: 1px solid transparent; }
+/* The editor's edge is a field's (WCAG 1.4.11); the layer beneath has the
+   same border, transparent, so the two keep the same metrics. */
+.wf-gutter { color: var(--text-muted); text-align: right; user-select: none; background: var(--surface); }
+.wf-code { display: grid; grid-template-columns: minmax(100%, max-content); }
+.wf-code > * { grid-area: 1 / 1; }
+.wf-highlight { color: var(--text); background: var(--surface); pointer-events: none; }
+.wf-highlight.is-static { pointer-events: auto; }
+.form-row .wf-code .wf-input { color: transparent; background: transparent; caret-color: var(--text); resize: none; overflow: hidden;
+  width: 100%; min-width: 0; min-height: 0; max-width: none; box-sizing: border-box; border: 1px solid var(--field-border); border-radius: 0; }
+.form-row .wf-code .wf-input:focus { outline: none; }
+.form-row .wf-code .wf-input:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.wf-input::selection { background: color-mix(in srgb, var(--accent) 30%, transparent); }
+.tok-key { color: var(--accent); }
+.tok-str { color: var(--ok); }
+.tok-expr { color: var(--warn); font-weight: 600; }
+.tok-num, .tok-lit { color: var(--error); }
+.tok-comment { color: var(--text-muted); font-style: italic; }
+.tok-punct { color: var(--text-muted); }
+.wf-canvas { overflow: auto; max-height: 560px; padding: 8px; }
+.wf-graph-status { margin: 0; padding: 6px 10px; font-size: var(--text-caption-size); color: var(--text-muted); }
+.wf-graph-status:empty { display: none; }
+.wf-graph-status.is-error { color: var(--error); }
+.wf-canvas svg.wf-graph { display: block; font-family: var(--font); max-width: none; stroke: none; stroke-width: 0; }
+.wf-box { fill: var(--surface); stroke: var(--field-border); stroke-width: 1; }
+.wf-node.is-succeeded .wf-box { stroke: var(--ok); stroke-width: 2; }
+.wf-node.is-failed .wf-box { stroke: var(--error); stroke-width: 2; }
+.wf-node.is-in_progress .wf-box { stroke: var(--accent); stroke-width: 2; stroke-dasharray: 4 3; }
+.wf-name { fill: var(--text); font-size: var(--text-body-size); font-weight: 600; }
+.wf-kind, .wf-branch-label, .wf-edge-label { fill: var(--text-muted); font-size: var(--text-caption-size); }
+.wf-sub-title { fill: var(--text); font-size: var(--text-body-size); font-weight: 600; }
+.wf-mark { fill: var(--text-muted); font-size: var(--text-heading-size); font-weight: 700; }
+.wf-mark.wf-ok { fill: var(--ok); }
+.wf-mark.wf-failed { fill: var(--error); }
+.wf-block { fill: color-mix(in srgb, var(--state-ink) 3%, transparent); stroke: var(--border); stroke-dasharray: 4 3; }
+.wf-terminal { fill: var(--surface-alt); stroke: var(--field-border); }
+.wf-terminal-text { fill: var(--text); font-size: var(--text-caption-size); text-anchor: middle; }
+.wf-edge { fill: none; stroke: var(--text-muted); stroke-width: 1.4; }
+.wf-edge.wf-branch { stroke: var(--accent); }
+.wf-edge.wf-end-edge { stroke-dasharray: 3 3; }
+.wf-arrowhead { fill: var(--text-muted); }
+.wf-toggle { cursor: pointer; }
+.wf-toggle-box { fill: var(--surface); stroke: var(--field-border); }
+.wf-toggle-sign { fill: var(--text); font-size: var(--text-body-size); font-weight: 700; }
+.wf-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.wf-visualization { margin-bottom: 12px; }
+.wf-visualization > summary { cursor: pointer; font-weight: 600; padding: 4px 0; }
+/* The step detail panel (#2011). */
+.wf-step-panel { border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; margin-bottom: 12px; }
+.wf-step-panel > h2 { font-size: var(--text-heading-size); margin: 0 0 8px; }
+.wf-step-panel > label { display: block; font-weight: 600; margin-bottom: 4px; }
+.wf-step-choose { max-width: 100%; }
+.wf-step-body h3 { font-size: var(--text-body-size); margin: 12px 0 4px; }
+.wf-step-body h4 { font-size: var(--text-body-size); margin: 12px 0 4px; }
+.wf-step-props { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 16px; margin: 0; }
+.wf-step-props dt { font-weight: 600; }
+.wf-step-props dd { margin: 0; overflow-wrap: anywhere; }
+.wf-step-children { margin: 0; padding-left: 18px; }
+.wf-step-panel { min-width: 0; max-width: 100%; box-sizing: border-box; }
+.wf-step-vars dt { font-family: var(--mono); }
+.wf-step-vars code { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-all; }
+.wf-source-field > label { display: block; margin-bottom: 4px; }
+/* BigQuery Studio's left pane: Explorer, Data, Files, Source control (#1861). */
+.bq-pane-tabs { margin: 0 0 8px; overflow-x: auto; }
+.bq-files { list-style: none; margin: 8px 0 0; padding: 0; }
+.bq-files .bq-node-row { padding: 2px 0; }
+.bq-files-note { font-size: var(--text-caption-size); }
+/* An action drawn in the info panel (Action.Panel, #2013): Google's Audit
+   Logs information panel, its tabs Log Types and Exempted Principals. */
+.action-panel { display: flex; flex-direction: column; gap: 8px; }
+.action-panel .tab-strip { margin: 4px 0; }
+.action-panel .form-section[hidden] { display: none; }
+.action-panel .group-row { flex-wrap: wrap; }
+.orgpolicy-custom-values { display: grid; gap: 4px; margin-bottom: 4px; }
+.orgpolicy-custom-line { display: flex; gap: 8px; align-items: center; }
+.orgpolicy-custom-line input { flex: 1 1 auto; min-width: 0; }

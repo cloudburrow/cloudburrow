@@ -36,19 +36,21 @@ func sqlStateLabel(in *sqladminapi.DatabaseInstance) string {
 }
 
 // stopStartActions are Stop on a running created primary and Start on a
-// stopped one; a read replica cannot be stopped.
+// stopped one; a read replica cannot be stopped. Each is confirmed as
+// Google's is, by its own button in "Stop database instance?" or "Start
+// database instance?", nothing typed.
 func stopStartActions(in *sqladminapi.DatabaseInstance) []console.Action {
 	if upSQLInstance(in.Name) || in.InstanceType == "ON_PREMISES_INSTANCE" || in.MasterInstanceName != "" {
 		return nil
 	}
 	if sqlStopped(in) {
-		return []console.Action{{ID: "start", Label: "Start",
+		return []console.Action{{ID: "start", Label: "Start", ConfirmTitle: "Start database instance?", ConfirmStyle: console.DeleteConfirmClick,
 			Confirm: "The instance starts with its data, and accepts connections again."}}
 	}
 	if in.State != "RUNNABLE" {
 		return nil
 	}
-	return []console.Action{{ID: "stop", Label: "Stop",
+	return []console.Action{{ID: "stop", Label: "Stop", ConfirmTitle: "Stop database instance?", ConfirmStyle: console.DeleteConfirmClick,
 		Confirm: "The instance is stopped: it does not respond to connections until you start it again. Its data is kept."}}
 }
 
@@ -93,8 +95,8 @@ func passwordPolicyFields(section string, cur *sqladminapi.PasswordValidationPol
 			Help: "The password can't contain the username."},
 	}
 	if !strings.HasPrefix(version, "MYSQL_") {
-		f := console.Field{Name: "passwordChangeInterval", Label: "Set password change interval (hours)", Type: "number", Section: section,
-			VisibleWhen: on, Help: "The minimum time after which the password can be changed again (PostgreSQL)."}
+		f := console.Field{Name: "passwordChangeInterval", Label: "Set password change interval", Type: "number", Section: section,
+			VisibleWhen: on, Help: "The minimum number of hours after which the password can be changed again (PostgreSQL)."}
 		if d := strings.TrimSuffix(cur.PasswordChangeInterval, "s"); d != "" && d != "0" {
 			if secs, err := strconv.ParseInt(d, 10, 64); err == nil {
 				f.Default = strconv.FormatInt(secs/3600, 10)
@@ -106,8 +108,17 @@ func passwordPolicyFields(section string, cur *sqladminapi.PasswordValidationPol
 		}
 		fields = append(fields, f)
 	}
+	// Google's options are in the Set password policy dialog, its button
+	// under Enable password policies, ending in Save.
+	for i := range fields[1:] {
+		fields[i+1].Panel = sqlPasswordPolicyPanel
+	}
 	return fields
 }
+
+// sqlPasswordPolicyPanel is Google's button, and dialog, under Enable
+// password policies.
+const sqlPasswordPolicyPanel = "Set password policy"
 
 // passwordPolicyOf is the policy the form's values set, nil when the form
 // enables none and the instance had none.

@@ -11,6 +11,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -156,10 +157,56 @@ func roleFields(r *adminpb.Role) []console.Field {
 		{Name: "description", Label: "Description", Type: "text", Default: desc, Help: "At most 300 bytes."},
 		{Name: "stage", Label: "Role launch stage", Type: "select", Options: roleStages, OptionLabels: roleStageLabels, Default: stage,
 			Help: "Informational, except Disabled: a disabled role stays in policies and grants nothing."},
-		{Name: "permissions", Label: "Assigned permissions", Type: "textarea", Default: perms,
-			Help: "Add permissions, one per line, or comma-separated, such as datastore.entities.get. Each must be one Google supports in custom roles; " +
+		{Name: "permissions", Label: "Assigned permissions", Type: console.PicklistFieldType, Default: perms,
+			PickFrom: "iam-roles:" + rolePermissionsCall, AddLabel: "Add Permissions", SeedFrom: roleSeedParam,
+			Help: "Uncheck a permission to take it out of the role. Add Permissions offers every permission Google supports in custom roles; " +
 				"a project role cannot hold an organization or folder permission. At most 3,000."},
 	}
+}
+
+// rolePermissionsCall is the Studio call Add permissions reads its
+// permissions from.
+const rolePermissionsCall = "permissions"
+
+// iamPickItem is one permission the picker offers.
+type iamPickItem struct {
+	Value string `json:"value"`
+	Note  string `json:"note,omitempty"`
+}
+
+// roleSeedParam is the address parameter Create custom role from
+// selection opens Create custom role with: the checked roles' rows.
+const roleSeedParam = "roles"
+
+// StudioCall answers Add Permissions (#1864): every permission Google
+// supports in custom roles, TESTING ones noted. With a seed (#2013), the
+// rows of the roles checked for Create custom role from selection, it
+// answers their permissions instead, for the form to list checked.
+func (p iamRolesProvider) StudioCall(_ context.Context, project, call string, body json.RawMessage) (any, error) {
+	if call != rolePermissionsCall {
+		return nil, fmt.Errorf("no such call %q", call)
+	}
+	var in struct {
+		Seed string `json:"seed"`
+	}
+	if len(body) > 0 {
+		if err := json.Unmarshal(body, &in); err != nil {
+			return nil, fmt.Errorf("malformed request: %v", err)
+		}
+	}
+	if strings.TrimSpace(in.Seed) != "" {
+		return p.selectionPermissions(project, in.Seed)
+	}
+	items := []iamPickItem{}
+	for _, n := range iamroles.Names() {
+		switch iamroles.Level(n) {
+		case iamroles.Supported:
+			items = append(items, iamPickItem{Value: n})
+		case iamroles.Testing:
+			items = append(items, iamPickItem{Value: n, Note: "(Testing)"})
+		}
+	}
+	return map[string]any{"items": items}, nil
 }
 
 func roleIDField() console.Field {
@@ -193,7 +240,7 @@ func roleFromForm(values map[string]string) *adminpb.Role {
 func (iamRolesProvider) CreateSubmit() string { return "Create" }
 
 func (p iamRolesProvider) CreateForm() (string, []console.Field) {
-	return "Create role", createFields(nil)
+	return "Create custom role", createFields(nil)
 }
 
 func (iamRolesProvider) CreateOnPage() bool { return true }
@@ -249,7 +296,7 @@ func (p iamRolesProvider) Detail(_ context.Context, project string, path []strin
 		{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Heading: "Role", Properties: props}}},
 	}}
 	if !r.GetDeleted() && !strings.HasPrefix(r.GetName(), "roles/") {
-		d.Edit = &console.EditForm{Label: "Edit role", Fields: roleFields(r), Note: "The ID cannot change, as on Google."}
+		d.Edit = &console.EditForm{Label: "Edit role", Submit: "Update", Fields: roleFields(r), Note: "The ID cannot change, as on Google."}
 	}
 	return d, nil
 }
@@ -298,37 +345,34 @@ func (p iamRolesProvider) Act(_ context.Context, project, row, action string) er
 	return err
 }
 
-const roleFromSelection = "create-from-selection"
-
-// ListActions is Create role from selection (#1864): the roles checked in
-// the list (their rows written into Roles), combined into a new custom
-// role holding every permission of theirs that custom roles support.
+// ListActions is Create custom role from selection (#2013): the roles
+// checked in the list open Create custom role with their permissions
+// listed, each checked (Field.SeedFrom), as Google's does; and Disable.
 func (iamRolesProvider) ListActions(context.Context, string) []console.Action {
-	fields := append([]console.Field{{Name: "roles", Label: "Roles", Type: "textarea", Required: true,
-		Help: "The roles checked in the list, one per line. Their permissions that custom roles do not support are left out."}},
-		createFields(nil)...)
-	out := []console.Field{}
-	for _, f := range fields {
-		if f.Name != "permissions" {
-			out = append(out, f)
-		}
-	}
-	return []console.Action{{ID: roleFromSelection, Label: "Create role from selection", SelectionField: "roles", Fields: out}}
+	return []console.Action{{ID: "create-from-selection", Label: "Create custom role from selection", SelectionField: roleSeedParam,
+		Href: "/iam-admin/roles/create"},
+		// Google's Roles page: checking custom roles enables Disable
+		// (docs.cloud.google.com/iam/docs/creating-custom-roles, #1864).
+		{ID: rolesDisable, Label: "Disable", SelectionField: "roles", Submit: "Disable",
+			Confirm: "a disabled role stays in the policies that grant it, and grants nothing until its launch stage is changed",
+			Fields:  []console.Field{{Name: "roles", Type: "hidden"}}}}
 }
 
-func (iamRolesProvider) DetailActions(context.Context, string, []string) []console.Action { return nil }
-
-func (p iamRolesProvider) ActAt(_ context.Context, project string, path []string, action string, values map[string]string) error {
-	if len(path) != 0 || action != roleFromSelection {
-		return fmt.Errorf("unknown action %q", action)
-	}
-	org := values["parent"] == "The organization"
+// selectionPermissions are the permissions of the roles whose rows seed
+// names (comma- or newline-separated), each once and sorted, that custom
+// roles support: Google's "Some predefined roles contain deprecated
+// permissions or permissions that are otherwise not permitted in custom
+// roles", which are left out. A permission a project role cannot hold is
+// noted, for the form to uncheck or the role to be made in the
+// organization.
+func (p iamRolesProvider) selectionPermissions(project, seed string) (map[string]any, error) {
 	seen := map[string]bool{}
-	var perms []string
-	for _, row := range strings.Fields(values["roles"]) {
+	var names, perms []string
+	left := 0
+	for _, row := range permissionsOf(seed) {
 		name, err := roleName(project, row)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		var included []string
 		if pr := iamroles.Predefined(name); pr != nil {
@@ -336,30 +380,75 @@ func (p iamRolesProvider) ActAt(_ context.Context, project string, path []string
 		} else {
 			r, err := p.registry.GetRole(name)
 			if err != nil {
-				return fmt.Errorf("role %s: %w", name, err)
+				return nil, fmt.Errorf("role %s: %w", name, err)
 			}
 			included = r.GetIncludedPermissions()
 		}
+		names = append(names, name)
 		for _, perm := range included {
-			lvl := iamroles.Level(perm)
-			if seen[perm] || (lvl != iamroles.Supported && lvl != iamroles.Testing) || (!org && !iamroles.ProjectApplicable(perm)) {
+			if seen[perm] {
 				continue
 			}
 			seen[perm] = true
+			if lvl := iamroles.Level(perm); lvl != iamroles.Supported && lvl != iamroles.Testing {
+				left++
+				continue
+			}
 			perms = append(perms, perm)
 		}
 	}
-	if len(perms) == 0 {
-		return errors.New("the selected roles hold no permission a custom role supports")
-	}
 	sort.Strings(perms)
-	role := roleFromForm(values)
-	role.IncludedPermissions = perms
-	_, err := p.create(project, values, role)
-	return err
+	items := []iamPickItem{}
+	for _, perm := range perms {
+		var notes []string
+		if iamroles.Level(perm) == iamroles.Testing {
+			notes = append(notes, "(Testing)")
+		}
+		if !iamroles.ProjectApplicable(perm) {
+			notes = append(notes, "(not in a project role)")
+		}
+		items = append(items, iamPickItem{Value: perm, Note: strings.Join(notes, " ")})
+	}
+	note := fmt.Sprintf("The permissions of %s. Uncheck the ones to exclude.", strings.Join(names, ", "))
+	if left > 0 {
+		note += fmt.Sprintf(" %d that custom roles do not support are left out.", left)
+	}
+	return map[string]any{"items": items, "note": note}, nil
+}
+
+const rolesDisable = "disable-selected"
+
+// disableRoles sets each checked custom role's launch stage to DISABLED.
+func (p iamRolesProvider) disableRoles(project, rows string) error {
+	if strings.TrimSpace(rows) == "" {
+		return errors.New("check the custom roles to disable")
+	}
+	for _, row := range strings.Fields(rows) {
+		if strings.HasPrefix(row, predefinedRolePrefix) {
+			return fmt.Errorf("%s is a predefined role, which cannot be disabled", "roles/"+strings.TrimPrefix(row, predefinedRolePrefix))
+		}
+		name, err := roleName(project, row)
+		if err != nil {
+			return err
+		}
+		if _, err := p.registry.UpdateRole(name, &adminpb.Role{Stage: adminpb.Role_DISABLED}, []string{"stage"}); err != nil {
+			return fmt.Errorf("role %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+func (iamRolesProvider) DetailActions(context.Context, string, []string) []console.Action { return nil }
+
+func (p iamRolesProvider) ActAt(_ context.Context, project string, path []string, action string, values map[string]string) error {
+	if len(path) == 0 && action == rolesDisable {
+		return p.disableRoles(project, values["roles"])
+	}
+	return fmt.Errorf("unknown action %q", action)
 }
 
 var _ console.ListActor = iamRolesProvider{}
+var _ console.Studio = iamRolesProvider{}
 var _ console.Creator = iamRolesProvider{}
 var _ console.PageCreator = iamRolesProvider{}
 var _ console.Deleter = iamRolesProvider{}

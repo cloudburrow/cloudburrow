@@ -245,8 +245,9 @@ func TestPubSubBigQuerySubscriptionInTransit(t *testing.T) {
 	}
 	topic, _ := newTopicWithDeadLetter(t, h, ps, "bq-transit",
 		&pubsubpb.MessageStoragePolicy{AllowedPersistenceRegions: []string{"us-east1"}, EnforceInTransit: true})
-	// The destination moves into the allowed region; UpdateTopic of
-	// message_storage_policy is not served locally (#2000).
+	// The destination moves into the allowed region; the topic's policy
+	// moving instead is TestPubSubUpdateTopicStoragePolicyRecoversInTransit
+	// (#2000).
 	sub := "projects/" + h.Project() + "/subscriptions/bq-transit"
 	if _, err := ps.SubscriptionAdminClient.CreateSubscription(ctx, &pubsubpb.Subscription{Name: sub, Topic: topic,
 		BigqueryConfig: &pubsubpb.BigQueryConfig{Table: bqProject + "." + ds.DatasetID + ".t"}}); err != nil {

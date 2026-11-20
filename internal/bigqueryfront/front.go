@@ -458,7 +458,8 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 				configs: configs, jobs: own, records: records, functions: functions, views: views, ids: ids, policies: policies,
 				listJobs: listJobs, iam: iam, buffers: buffers, settings: settings, jobsTable: jobRows, newest: newest, open: open,
 				resourceManager: o.resourceManager, tables: tables, linked: linked, hubs: hubs, icebergs: icebergs, dropped: dropped, models: models,
-				onnx: o.onnx, tfconvert: o.tfconvert, vertexai: o.vertexai, connections: connections, numbers: numbers, objects: objects}
+				onnx: o.onnx, tfconvert: o.tfconvert, vertexai: o.vertexai, connections: connections, numbers: numbers, objects: objects,
+				cdcStreams: o.cdcStreams}
 			if j[3] == "jobs" {
 				f.withDefaultJobKey(w, r, func(w http.ResponseWriter) { f.insertJob(w, r) }) // #1456, defaultjobkey.go
 			} else {
@@ -705,6 +706,9 @@ type front struct {
 	// buffers are the streaming buffers of ingestion-time partitioned
 	// tables (streamingbuffer.go, #1273), or nil.
 	buffers *streamBuffers
+	// cdcStreams are the tables receiving change data capture, whose
+	// mutating DML is refused (storagewritecdc.go, #2003), or nil.
+	cdcStreams *cdcStreams
 	// policies are the tables' row access policies (rowpolicies.go,
 	// #1218), or nil.
 	policies *rowPolicies
@@ -788,6 +792,9 @@ type options struct {
 	// hubs are the Analytics Hub linked datasets, shared with the Storage
 	// Read front (hublinks.go, #1960, #1989).
 	hubs *hubLinks
+	// cdcStreams are the tables receiving change data capture through
+	// the Storage Write API, shared with it (storagewritecdc.go, #2003).
+	cdcStreams *cdcStreams
 	// stateDir is where the front keeps what a restart of its own must
 	// not lose (functionstate.go); empty: memory alone. logf logs.
 	stateDir string

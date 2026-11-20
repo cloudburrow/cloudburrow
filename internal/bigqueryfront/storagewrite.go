@@ -124,6 +124,13 @@ type storageWrite struct {
 	// dir is where the streams are kept (storagewritestate.go); empty:
 	// in memory alone.
 	dir string
+	// cdc and cdcKeys are change data capture's per-table locks and each
+	// table's keys (storagewritecdc.go, #1999); cdcKeys under mu.
+	cdc     cdcState
+	cdcKeys map[string]*cdcKeys
+	// active are the tables receiving change data capture, shared with
+	// the REST front's DML (storagewritecdc.go, #2003), or nil.
+	active *cdcStreams
 }
 
 // writeStream is a write stream the front made, or a table's default
@@ -646,7 +653,8 @@ func (w *storageWrite) insertBatch(ctx context.Context, t readTable, rows []json
 	if err != nil {
 		return status.Error(codes.Internal, err.Error())
 	}
-	code, got := w.call(ctx, http.MethodPost, t, "/insertAll", body)
+	// Not tabledata.insertAll's 30-minute hold from DML (#2007).
+	code, got := w.call(withWriteAPIAppend(ctx), http.MethodPost, t, "/insertAll", body)
 	if code != http.StatusOK {
 		return restStatus(code, got, "writing the rows to "+t.path())
 	}
@@ -681,6 +689,9 @@ type appendConn struct {
 	// missing is the connection's default_missing_value_interpretation,
 	// as its last request to give one set it (#1391).
 	missing storagepb.AppendRowsRequest_MissingValueInterpretation
+	// cdcTables are the tables the connection has applied changes to,
+	// receiving change data capture until it ends (#2003).
+	cdcTables map[string]bool
 }
 
 type arrowConvResult struct {
@@ -701,6 +712,11 @@ type convResult struct {
 // its error, and the connection goes on.
 func (w *storageWrite) appendRows(ss grpc.ServerStream) error {
 	c := &appendConn{convs: map[string]convResult{}, arrowConvs: map[string]arrowConvResult{}}
+	defer func() {
+		for key := range c.cdcTables {
+			w.active.end(key)
+		}
+	}()
 	for {
 		var in rawFrame
 		if err := ss.RecvMsg(&in); err != nil {
@@ -806,6 +822,17 @@ func (w *storageWrite) appendOne(ctx context.Context, c *appendConn, req *storag
 		if cr.err != nil {
 			return appendFailed(name, cr.err), nil
 		}
+		if cr.conv.cdc() {
+			resp := w.appendChanges(ctx, name, st, cr, req, missing)
+			if key := cdcStreamKey(st.table.project, st.table.dataset, st.table.table); resp.GetError() == nil && !c.cdcTables[key] {
+				if c.cdcTables == nil {
+					c.cdcTables = map[string]bool{}
+				}
+				c.cdcTables[key] = true
+				w.active.begin(key)
+			}
+			return resp, nil
+		}
 		serialized := pr.GetRows().GetSerializedRows()
 		rows, rowErrs, err = convertRows(cr.fields, len(serialized), func(i int) (map[string]any, error) {
 			obj, err := cr.conv.row(serialized[i])
@@ -910,43 +937,56 @@ func (w *storageWrite) appendOne(ctx context.Context, c *appendConn, req *storag
 func convertRows(fields []field, n int, row func(int) (map[string]any, error)) ([]json.RawMessage, []*storagepb.RowError, error) {
 	rows := make([]json.RawMessage, 0, n)
 	var rowErrs []*storagepb.RowError
-	fail := func(i int, format string, args ...any) {
-		rowErrs = append(rowErrs, &storagepb.RowError{Index: int64(i), Code: storagepb.RowError_FIELDS_ERROR, Message: fmt.Sprintf(format, args...)})
-	}
 	for i := 0; i < n; i++ {
 		obj, err := row(i)
 		if err != nil {
-			fail(i, "%v", err)
+			rowErrs = append(rowErrs, fieldsError(i, "%v", err))
 			continue
 		}
-		raw, err := json.Marshal(obj)
+		raw, rowErr, err := checkedRow(fields, obj, i)
 		if err != nil {
-			fail(i, "%v", err)
-			continue
+			return nil, nil, err
 		}
-		var check map[string]any
-		dec := json.NewDecoder(bytes.NewReader(raw))
-		dec.UseNumber()
-		if err := dec.Decode(&check); err != nil {
-			fail(i, "%v", err)
+		if rowErr != nil {
+			rowErrs = append(rowErrs, rowErr)
 			continue
-		}
-		if _, errs := checkRow(fields, check, false); len(errs) > 0 {
-			var msgs []string
-			for _, e := range errs {
-				msgs = append(msgs, e.Message)
-			}
-			fail(i, "%s", strings.Join(msgs, "; "))
-			continue
-		}
-		if _, p := fixValues(fields, check, fmt.Sprintf("the row at index %d", i), ""); p != nil {
-			c := codes.InvalidArgument
-			if p.code == http.StatusNotImplemented {
-				c = codes.Unimplemented
-			}
-			return nil, nil, status.Error(c, p.msg)
 		}
 		rows = append(rows, raw)
 	}
 	return rows, rowErrs, nil
+}
+
+// fieldsError is the row error of the row at index i.
+func fieldsError(i int, format string, args ...any) *storagepb.RowError {
+	return &storagepb.RowError{Index: int64(i), Code: storagepb.RowError_FIELDS_ERROR, Message: fmt.Sprintf(format, args...)}
+}
+
+// checkedRow is convertRows' check of one row, obj, at index i: its JSON,
+// or its row error, or an error that fails the whole append.
+func checkedRow(fields []field, obj map[string]any, i int) (json.RawMessage, *storagepb.RowError, error) {
+	raw, err := json.Marshal(obj)
+	if err != nil {
+		return nil, fieldsError(i, "%v", err), nil
+	}
+	var check map[string]any
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	if err := dec.Decode(&check); err != nil {
+		return nil, fieldsError(i, "%v", err), nil
+	}
+	if _, errs := checkRow(fields, check, false); len(errs) > 0 {
+		var msgs []string
+		for _, e := range errs {
+			msgs = append(msgs, e.Message)
+		}
+		return nil, fieldsError(i, "%s", strings.Join(msgs, "; ")), nil
+	}
+	if _, p := fixValues(fields, check, fmt.Sprintf("the row at index %d", i), ""); p != nil {
+		c := codes.InvalidArgument
+		if p.code == http.StatusNotImplemented {
+			c = codes.Unimplemented
+		}
+		return nil, nil, status.Error(c, p.msg)
+	}
+	return raw, nil, nil
 }

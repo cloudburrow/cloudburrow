@@ -150,7 +150,10 @@ func (p bigqueryProvider) DetailActions(ctx context.Context, project string, pat
 func (p bigqueryProvider) detailActions(ctx context.Context, path []string) []console.Action {
 	switch len(path) {
 	case 1:
-		actions := []console.Action{{ID: "createtable", Label: "Create table", Fields: bigqueryTableFields()}}
+		// Create table's Destination names the project's datasets (#1861,
+		// consolebigquerycreatetable.go).
+		ids, _ := p.datasetIDs(ctx)
+		actions := []console.Action{{ID: "createtable", Label: "Create table", Fields: createTableFields(p.project, path[0], ids)}}
 		// Edit dataset's form is drawn from the dataset (#1205,
 		// consolebigquerydatasetedit.go), so it is left out when the
 		// dataset cannot be read.
@@ -310,6 +313,10 @@ func bigqueryTableFields() []console.Field {
 		{Name: "skipLeadingRows", Label: "Header rows to skip", Type: "number", Section: adv, ShowWhen: loaded,
 			Help: "CSV only: rows at the top of the file that are not data. Empty is 0."},
 		{Name: "description", Label: "Description", Type: "textarea", Section: adv},
+		// Encryption, as Create dataset's (#1861): the key is Google's.
+		{Name: "encryption", Label: "Encryption", Type: "radio", Section: adv,
+			Options: []string{bqEncryptionGoogle, bqEncryptionKMS}, Default: bqEncryptionGoogle,
+			UnavailableOptions: map[string]string{bqEncryptionKMS: bqNoDatasetKMS}},
 	}
 }
 
@@ -435,6 +442,10 @@ func (p bigqueryProvider) ActAt(ctx context.Context, project string, path []stri
 		return err
 	}
 	if ok, err := p.tagActAt(ctx, path, action, values); ok { // consolebigquerytags.go, #1780
+		return err
+	}
+	path, err := createTableTarget(p.project, path, action, values) // #1861: Create table's Destination
+	if err != nil {
 		return err
 	}
 	switch {

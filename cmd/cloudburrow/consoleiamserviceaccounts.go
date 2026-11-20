@@ -95,10 +95,11 @@ func (p iamServiceAccountsProvider) List(_ context.Context, project string) (con
 	return l, nil
 }
 
-func saFields(a *adminpb.ServiceAccount) []console.Field {
+// saInlineFields are the Details tab's Name and Description boxes.
+func saInlineFields(a *adminpb.ServiceAccount) []console.Field {
 	return []console.Field{
-		{Name: "displayName", Label: "Service account name", Type: "text", Default: a.GetDisplayName(), Help: "At most 100 bytes."},
-		{Name: "description", Label: "Service account description", Type: "text", Default: a.GetDescription(), Help: "At most 256 bytes."},
+		{Name: "displayName", Label: "Name", Type: "text", Default: a.GetDisplayName(), Help: "At most 100 bytes."},
+		{Name: "description", Label: "Description", Type: "text", Default: a.GetDescription(), Help: "At most 256 bytes."},
 	}
 }
 
@@ -130,6 +131,11 @@ func (iamServiceAccountsProvider) CreateForm() (string, []console.Field) {
 
 func (iamServiceAccountsProvider) CreateTitle() string { return "Create service account" }
 
+// CreateCommitStep implements console.CreateCommitter: Google makes the
+// account at the first step's Create and continue, then grants its roles
+// and users (docs.cloud.google.com/iam/docs/service-accounts-create, #1864).
+func (iamServiceAccountsProvider) CreateCommitStep() int { return 1 }
+
 func (iamServiceAccountsProvider) CreateOnPage() bool { return true }
 
 func (p iamServiceAccountsProvider) Create(ctx context.Context, project string, values map[string]string) (string, error) {
@@ -143,10 +149,26 @@ func (p iamServiceAccountsProvider) Create(ctx context.Context, project string, 
 		}
 	}
 	users, admins := formPrincipals(values["users"]), formPrincipals(values["admins"])
-	a, err := p.registry.CreateServiceAccount(&adminpb.CreateServiceAccountRequest{Name: "projects/" + project, AccountId: strings.TrimSpace(values["accountId"]),
-		ServiceAccount: &adminpb.ServiceAccount{DisplayName: values["displayName"], Description: values["description"]}})
-	if err != nil {
-		return "", err
+	var a *adminpb.ServiceAccount
+	var err error
+	if created := strings.TrimSpace(values[console.CreateCreatedKey]); created != "" {
+		// Made at Create and continue: the page now grants its roles.
+		name, nerr := saName(project, created)
+		if nerr != nil {
+			return "", nerr
+		}
+		if a, err = p.registry.GetServiceAccount(name); err != nil {
+			return "", err
+		}
+	} else {
+		a, err = p.registry.CreateServiceAccount(&adminpb.CreateServiceAccountRequest{Name: "projects/" + project, AccountId: strings.TrimSpace(values["accountId"]),
+			ServiceAccount: &adminpb.ServiceAccount{DisplayName: values["displayName"], Description: values["description"]}})
+		if err != nil {
+			return "", err
+		}
+		if values[console.CreateCommitKey] == "true" {
+			return a.GetEmail(), nil
+		}
 	}
 	// Step 2: the project roles, one SetIamPolicy of the project's policy.
 	if len(roles) > 0 {
@@ -260,12 +282,16 @@ func (p iamServiceAccountsProvider) Detail(ctx context.Context, project string, 
 	// Google's tabs (#1864): Details, Permissions, Keys, Metrics, then the
 	// shared Logs tab (the route's logs).
 	return console.Detail{Summary: props[:2], Sections: []console.Section{
-		{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Heading: "Service account", Properties: props}}},
+		// Google edits an account on its Details tab: the Name box, then
+		// Save (docs.cloud.google.com/iam/docs/service-accounts-list-edit, #1864).
+		{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Heading: "Service account", Properties: props}},
+			Edit: &console.EditForm{Label: "Service account details", Submit: "Save", Fields: saInlineFields(a),
+				Note: "The email and unique ID cannot change, as on Google."}},
 		{ID: "permissions", Kind: console.KindPermissions},
 		{ID: "keys", Label: "Keys", Listing: keys},
 		{ID: "metrics", Label: "Metrics", Kind: console.KindText, Unavailable: "Not available locally: a service account's metrics " +
 			"(authentication and key usage) are Cloud Monitoring's, which CloudBurrow does not serve."},
-	}, Edit: &console.EditForm{Label: "Edit service account", Fields: saFields(a), Note: "The ID and email cannot change, as on Google."}}, nil
+	}}, nil
 }
 
 func (p iamServiceAccountsProvider) Edit(_ context.Context, project string, path []string, values map[string]string) error {
@@ -276,8 +302,18 @@ func (p iamServiceAccountsProvider) Edit(_ context.Context, project string, path
 	if err != nil {
 		return err
 	}
-	_, err = p.registry.PatchServiceAccount(&adminpb.ServiceAccount{Name: name, DisplayName: values["displayName"], Description: values["description"]},
-		[]string{"display_name", "description"})
+	// Only the boxes the form sent: a form without Description keeps it.
+	var mask []string
+	if _, ok := values["displayName"]; ok {
+		mask = append(mask, "display_name")
+	}
+	if _, ok := values["description"]; ok {
+		mask = append(mask, "description")
+	}
+	if len(mask) == 0 {
+		return errors.New("give the service account's name or description")
+	}
+	_, err = p.registry.PatchServiceAccount(&adminpb.ServiceAccount{Name: name, DisplayName: values["displayName"], Description: values["description"]}, mask)
 	return err
 }
 
@@ -431,6 +467,7 @@ func (p iamServiceAccountsProvider) TestPermissions(ctx context.Context, project
 
 var _ console.Creator = iamServiceAccountsProvider{}
 var _ console.PageCreator = iamServiceAccountsProvider{}
+var _ console.CreateCommitter = iamServiceAccountsProvider{}
 var _ console.Deleter = iamServiceAccountsProvider{}
 var _ console.Driller = iamServiceAccountsProvider{}
 var _ console.Editor = iamServiceAccountsProvider{}

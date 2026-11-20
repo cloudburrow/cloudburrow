@@ -1006,6 +1006,11 @@ func (f *Front) refreshOne(ctx context.Context, kind, name string) bool {
 	}
 	switch kind {
 	case kindTopic:
+		if t, ok := got.(*pubsubpb.Topic); ok && t != nil {
+			// The policy an update set (#2000) is the topic's, not the
+			// emulator's, when it is created again.
+			f.withStoragePolicyLocked(t)
+		}
 		return keepOne(f.defs.topics, name, got, gone)
 	case kindSub:
 		return keepOne(f.defs.subs, name, got, gone)

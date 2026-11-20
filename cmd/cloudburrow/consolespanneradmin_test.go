@@ -59,7 +59,9 @@ func TestSpannerAdminActionsAreOfferedWhereTheyBelong(t *testing.T) {
 		}
 		return out
 	}
-	if got := ids("inst"); !slices.Equal(got, []string{"editinstance", "createdatabase", "createpartition", "createbackup", "moveinstance", "dropinstance"}) {
+	if got := ids("inst"); !slices.Equal(got, []string{"editinstance", "createdatabase", "createpartition", "createbackup", "moveinstance", "dropinstance",
+		// Linked (#1859): the info panel's Labels and Upgrade beside the edition.
+		"editlabels", "upgradeedition"}) {
 		t.Errorf("an instance's actions = %v", got)
 	}
 	if got := ids("inst", "db"); !slices.Equal(got, []string{"updateddl", "createschedule", "createdbbackup", "dropdatabase", "dropprotection"}) {

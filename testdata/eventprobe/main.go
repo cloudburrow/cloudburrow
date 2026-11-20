@@ -49,6 +49,12 @@ func main() {
 		mu.Lock()
 		events = append(events, e)
 		mu.Unlock()
+		if strings.HasPrefix(r.URL.Path, "/fail") {
+			// A destination that fails every delivery, for the
+			// dead-letter tests (#1997): recorded, then refused.
+			http.Error(w, "this path fails every event", http.StatusInternalServerError)
+			return
+		}
 		w.WriteHeader(http.StatusNoContent)
 	})
 	port := os.Getenv("PORT")

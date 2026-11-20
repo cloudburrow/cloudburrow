@@ -4,15 +4,22 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
+
+	"cloud.google.com/go/logging/apiv2/loggingpb"
 
 	"cloud.google.com/go/workflows/apiv1/workflowspb"
 	"cloud.google.com/go/workflows/executions/apiv1/executionspb"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/locations"
+	"github.com/cloudburrow/cloudburrow/internal/service/workflows"
 )
 
 // workflowsProvider is the console's Workflows page (#1986): a project's
@@ -21,7 +28,23 @@ import (
 // tabs, Edit (a new revision), Execute and Delete; an execution's page with
 // its argument, result or error and its Steps (the step entries), and
 // Cancel. Paths are [workflow] and [workflow, execution].
-type workflowsProvider struct{ svc *workflowsService }
+//
+// #2004: the source is edited in Google's editor, its syntax highlighted
+// beside the graph of its steps (the "workflowsource" field, the Source
+// tab's "workflows" language); the form has Google's Encryption, Call log
+// level, Execution history and Environment variables; an execution's page
+// has Google's Summary, Steps (with the visualization) and Logs tabs, and
+// a workflow's page its Logs, read from the instance's Cloud Logging.
+type workflowsProvider struct {
+	svc *workflowsService
+	// logs is the instance's Cloud Logging, which executions write their
+	// start, end, sys.log and call logs to; nil without it.
+	logs *loggingService
+	// eventarc and scheduler make and list a workflow's triggers (#2011);
+	// nil where the instance does not serve them.
+	eventarc  *eventarcProvider
+	scheduler *schedulerService
+}
 
 const workflowsNotStarted = "Workflows has not started"
 
@@ -71,21 +94,112 @@ func workflowsRegions() []string {
 	return out
 }
 
-var workflowsCallLogLevels = []string{"CALL_LOG_LEVEL_UNSPECIFIED", "LOG_ALL_CALLS", "LOG_ERRORS_ONLY", "LOG_NONE"}
+// workflowsCallLogLevels are Google's Call log level choices, in its
+// order (https://docs.cloud.google.com/workflows/docs/creating-updating-workflow).
+var workflowsCallLogLevels = []string{"CALL_LOG_LEVEL_UNSPECIFIED", "LOG_ERRORS_ONLY", "LOG_ALL_CALLS", "LOG_NONE"}
 
-func (workflowsProvider) CreateForm() (string, []console.Field) {
-	return "Create workflow", []console.Field{
-		{Name: "workflowId", Label: "Workflow name", Type: "text", Required: true, Pattern: `^[a-zA-Z]([a-zA-Z0-9_\-]{0,62}[a-zA-Z0-9])?$`,
-			Help: "Letters, numbers, underscores and hyphens; starts with a letter; at most 64 characters."},
-		{Name: "location", Label: "Region", Type: "select", Required: true, Default: "us-central1", Options: workflowsRegions()},
-		{Name: "description", Label: "Description", Type: "text"},
-		{Name: "serviceAccount", Label: "Service account", Type: "text",
-			Help: "The account the workflow's calls are authorized as; empty uses the Compute Engine default service account."},
-		{Name: "callLogLevel", Label: "Call log level", Type: "select", Default: "CALL_LOG_LEVEL_UNSPECIFIED", Options: workflowsCallLogLevels},
-		{Name: "sourceContents", Label: "Source (YAML or JSON)", Type: "textarea", Required: true, Default: workflowsSample,
-			Help: "Google's workflow syntax. http.* calls and connectors reach this instance's own endpoints only."},
-		labelsField(nil, ""),
+var workflowsCallLogLabels = map[string]string{"CALL_LOG_LEVEL_UNSPECIFIED": "Not specified", "LOG_ERRORS_ONLY": "Errors only",
+	"LOG_ALL_CALLS": "All calls", "LOG_NONE": "No logs"}
+
+// workflowsHistoryLevels are Google's Execution history choices: Basic,
+// the default, and Detailed.
+var workflowsHistoryLevels = []string{"EXECUTION_HISTORY_BASIC", "EXECUTION_HISTORY_DETAILED"}
+
+var workflowsHistoryLabels = map[string]string{"EXECUTION_HISTORY_LEVEL_UNSPECIFIED": "Basic", "EXECUTION_HISTORY_BASIC": "Basic",
+	"EXECUTION_HISTORY_DETAILED": "Detailed"}
+
+// workflowsEnvKey is what Workflows accepts as an environment variable's
+// name: letters, digits and underscores, not starting with a digit
+// (https://docs.cloud.google.com/workflows/docs/use-environment-variables).
+// The GOOGLE and WORKFLOWS prefixes it reserves are the API's to refuse,
+// a lookahead being beyond Go's regexp.
+const workflowsEnvKey = `^[A-Za-z_][A-Za-z0-9_]*$`
+
+// workflowsFields are the fields Google's Create workflow and Edit share,
+// in its order, holding w's values (nil for a new workflow).
+func workflowsFields(w *workflowspb.Workflow) []console.Field {
+	enc, key := "google", ""
+	desc, sa, lvl, hist, src := "", "", "CALL_LOG_LEVEL_UNSPECIFIED", "EXECUTION_HISTORY_BASIC", workflowsSample
+	var labels, env map[string]string
+	if w != nil {
+		if key = w.GetCryptoKeyName(); key != "" {
+			enc = "cmek"
+		}
+		desc, sa, lvl, src = w.GetDescription(), w.GetServiceAccount(), w.GetCallLogLevel().String(), w.GetSourceContents()
+		if w.GetExecutionHistoryLevel() == workflowspb.ExecutionHistoryLevel_EXECUTION_HISTORY_DETAILED {
+			hist = "EXECUTION_HISTORY_DETAILED"
+		}
+		labels, env = w.GetLabels(), w.GetUserEnvVars()
 	}
+	const details = "Workflow details"
+	return []console.Field{
+		{Name: "description", Label: "Description", Type: "text", Default: desc, Section: details},
+		{Name: "serviceAccount", Label: "Service account", Type: "text", Default: sa, Section: details,
+			Help: "The account the workflow's calls are authorized as; empty uses the Compute Engine default service account."},
+		{Name: "encryption", Label: "Encryption", Type: "radio", Default: enc, Section: details, Options: []string{"google", "cmek"},
+			OptionLabels: map[string]string{"google": "Google-managed encryption key", "cmek": "Cloud KMS key"}},
+		{Name: "cryptoKeyName", Label: "Cloud KMS key", Type: "text", Default: key, Section: details, ShowWhen: "encryption=cmek", Browse: "kms",
+			Pattern: `^projects/[^\/]+/locations/[^\/]+/keyRings/[^\/]+/cryptoKeys/[^\/]+$`,
+			Help:    "A symmetric key of this instance's Cloud KMS in the workflow's region: projects/PROJECT/locations/REGION/keyRings/RING/cryptoKeys/KEY."},
+		{Name: "callLogLevel", Label: "Call log level", Type: "select", Default: lvl, Section: details, Options: workflowsCallLogLevels,
+			OptionLabels: workflowsCallLogLabels, Help: "Which calls of each execution are logged to Cloud Logging; an execution can set its own."},
+		{Name: "executionHistoryLevel", Label: "Execution history", Type: "select", Default: hist, Section: details,
+			Options: workflowsHistoryLevels, OptionLabels: workflowsHistoryLabels,
+			Help: "Detailed also records the in-scope variables and the expected iterations of each step entry."},
+		{Name: "userEnvVars", Label: "Environment variables", Type: "map", Default: console.FormatMap(env), Section: details,
+			KeyPattern: workflowsEnvKey, KeyHelp: "A name is letters, digits and underscores, not starting with a digit, GOOGLE or WORKFLOWS.",
+			MaxEntries: 20, Help: "NAME=value, one per line; read with sys.get_env."},
+		labelsField(labels, details),
+		{Name: "sourceContents", Label: "Workflow editor", Type: "workflowsource", Required: true, Default: src, Section: "Workflow editor",
+			Help: "Google's workflow syntax, in YAML or JSON; the graph beside it follows as you type. Tab indents while typing; Escape, then Tab, leaves the editor. http.* calls and connectors reach this instance's own endpoints only."},
+	}
+}
+
+// workflowsFromForm is the workflow a Create or Edit form describes.
+func workflowsFromForm(values map[string]string) (*workflowspb.Workflow, error) {
+	labels, err := console.ParseMap(values["labels"])
+	if err != nil {
+		return nil, err
+	}
+	env, err := console.ParseMap(values["userEnvVars"])
+	if err != nil {
+		return nil, fmt.Errorf("environment variables: %w", err)
+	}
+	key := ""
+	if values["encryption"] == "cmek" {
+		if key = strings.TrimSpace(values["cryptoKeyName"]); key == "" {
+			return nil, fmt.Errorf("choose a Cloud KMS key, or Google-managed encryption")
+		}
+	}
+	return &workflowspb.Workflow{Description: strings.TrimSpace(values["description"]), Labels: labels, UserEnvVars: env,
+		ServiceAccount: strings.TrimSpace(values["serviceAccount"]), CryptoKeyName: key,
+		CallLogLevel:          workflowspb.Workflow_CallLogLevel(workflowspb.Workflow_CallLogLevel_value[values["callLogLevel"]]),
+		ExecutionHistoryLevel: workflowspb.ExecutionHistoryLevel(workflowspb.ExecutionHistoryLevel_value[values["executionHistoryLevel"]]),
+		SourceCode:            &workflowspb.Workflow_SourceContents{SourceContents: values["sourceContents"]}}, nil
+}
+
+func (p workflowsProvider) CreateForm() (string, []console.Field) {
+	const details = "Workflow details"
+	fields := append([]console.Field{
+		{Name: "workflowId", Label: "Workflow name", Type: "text", Required: true, Section: details,
+			Pattern: `^[a-zA-Z]([a-zA-Z0-9_\-]{0,62}[a-zA-Z0-9])?$`,
+			Help:    "Letters, numbers, underscores and hyphens; starts with a letter and ends with a letter or number; at most 64 characters."},
+		{Name: "location", Label: "Region", Type: "select", Required: true, Default: "us-central1", Section: details, Options: workflowsRegions()},
+	}, workflowsFields(nil)...)
+	// Google's Triggers section sits between the details and the editor.
+	return "Create workflow", withTriggers(fields, p.triggerFields())
+}
+
+// withTriggers puts the Triggers fields before the workflow editor.
+func withTriggers(fields, triggers []console.Field) []console.Field {
+	out := make([]console.Field, 0, len(fields)+len(triggers))
+	for _, f := range fields {
+		if f.Type == "workflowsource" {
+			out = append(out, triggers...)
+		}
+		out = append(out, f)
+	}
+	return out
 }
 
 func (p workflowsProvider) Create(ctx context.Context, project string, values map[string]string) (string, error) {
@@ -96,16 +210,17 @@ func (p workflowsProvider) Create(ctx context.Context, project string, values ma
 	if project == "" {
 		return "", fmt.Errorf("choose a project before creating a workflow")
 	}
-	labels, err := console.ParseMap(values["labels"])
+	w, err := workflowsFromForm(values)
 	if err != nil {
 		return "", err
 	}
-	w := &workflowspb.Workflow{Description: strings.TrimSpace(values["description"]), Labels: labels,
-		ServiceAccount: strings.TrimSpace(values["serviceAccount"]),
-		CallLogLevel:   workflowspb.Workflow_CallLogLevel(workflowspb.Workflow_CallLogLevel_value[values["callLogLevel"]]),
-		SourceCode:     &workflowspb.Workflow_SourceContents{SourceContents: values["sourceContents"]}}
+	parent := "projects/" + project + "/locations/" + strings.TrimSpace(values["location"])
+	triggers, err := p.triggersFromForm(project, parent+"/workflows/"+strings.TrimSpace(values["workflowId"]), values)
+	if err != nil {
+		return "", err
+	}
 	op, err := s.Workflows().CreateWorkflow(ctx, &workflowspb.CreateWorkflowRequest{
-		Parent: "projects/" + project + "/locations/" + strings.TrimSpace(values["location"]), WorkflowId: strings.TrimSpace(values["workflowId"]), Workflow: w})
+		Parent: parent, WorkflowId: strings.TrimSpace(values["workflowId"]), Workflow: w})
 	if err != nil {
 		return "", err
 	}
@@ -113,7 +228,7 @@ func (p workflowsProvider) Create(ctx context.Context, project string, values ma
 	if err := op.GetResponse().UnmarshalTo(out); err != nil {
 		return "", err
 	}
-	return out.GetName(), nil
+	return out.GetName(), p.createTriggers(ctx, project, triggers)
 }
 
 func (p workflowsProvider) workflow(ctx context.Context, project string, name string) (*workflowspb.Workflow, error) {
@@ -177,14 +292,65 @@ func (p workflowsProvider) workflowDetail(ctx context.Context, project, name str
 			{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Heading: "Workflow", Properties: []console.Property{
 				{Label: "Resource name", Value: w.GetName()}, {Label: "Description", Value: kmsOrDash(w.GetDescription())},
 				{Label: "Service account", Value: kmsOrDash(w.GetServiceAccount())}, {Label: "Created", Value: kmsTime(w.GetCreateTime())},
-				{Label: "Last updated", Value: kmsTime(w.GetUpdateTime())}, {Label: "Call log level", Value: w.GetCallLogLevel().String()},
+				{Label: "Last updated", Value: kmsTime(w.GetUpdateTime())},
+				{Label: "Call log level", Value: workflowsCallLogLabels[w.GetCallLogLevel().String()]},
+				{Label: "Execution history", Value: workflowsHistoryLabels[w.GetExecutionHistoryLevel().String()]},
+				{Label: "Encryption", Value: workflowsEncryption(w.GetCryptoKeyName())},
 				{Label: "Environment variables", Value: kmsOrDash(strings.Join(env, ", "))},
 				{Label: "Labels", Value: kmsOrDash(labelsText(w.GetLabels()))}}}}},
-			{ID: "source", Label: "Source", Kind: console.KindText, Text: w.GetSourceContents()},
 			{ID: "executions", Label: "Executions", Listing: execs},
+			{ID: "source", Label: "Source", Kind: console.KindText, Text: w.GetSourceContents(), Language: "workflows"},
 			{ID: "revisions", Label: "Revisions", Listing: revs},
+			p.triggersSection(ctx, project, name),
+			p.logsSection(ctx, project, `resource.labels.workflow_id="`+workflowID(name)+`" AND resource.labels.location="`+kmsLocation(name)+`"`),
 		},
 	}, nil
+}
+
+// workflowsEncryption is the Encryption a workflow's page shows.
+func workflowsEncryption(key string) string {
+	if key == "" {
+		return "Google-managed encryption key"
+	}
+	return "Cloud KMS key: " + key
+}
+
+func workflowID(name string) string { return name[strings.LastIndex(name, "/")+1:] }
+
+// logsSection is the Logs tab of a workflow's or an execution's page:
+// what its executions wrote to the instance's Cloud Logging (their start
+// and end, sys.log and call logs), newest first, as Google's Logs tab
+// lists them. filter is ANDed terms of a Cloud Logging filter over the
+// project's logs.
+func (p workflowsProvider) logsSection(ctx context.Context, project, filter string) console.Section {
+	sec := console.Section{ID: "logs", Label: "Logs"}
+	if p.logs == nil || p.logs.api == nil {
+		sec.Unavailable = "Cloud Logging is not served by this instance, so executions' logs are not kept."
+		return sec
+	}
+	l := console.Listing{Columns: []string{"Severity", "Log", "Summary"}, NameColumn: "Time", Noun: "log entries"}
+	resp, err := p.logs.api.ListLogEntries(ctx, &loggingpb.ListLogEntriesRequest{ResourceNames: []string{"projects/" + project},
+		Filter: `resource.type="workflows.googleapis.com/Workflow" AND ` + filter, OrderBy: "timestamp desc", PageSize: 500})
+	if err != nil {
+		sec.Unavailable = "cannot read the logs: " + consoleErr(err)
+		return sec
+	}
+	for _, e := range resp.GetEntries() {
+		logID := e.GetLogName()[strings.LastIndex(e.GetLogName(), "/logs/")+len("/logs/"):]
+		if u, err := url.PathUnescape(logID); err == nil {
+			logID = u
+		}
+		summary := e.GetTextPayload()
+		if j := e.GetJsonPayload(); j != nil {
+			b, _ := protojson.Marshal(j)
+			summary = string(b)
+		}
+		l.Items = append(l.Items, console.Resource{Name: e.GetTimestamp().AsTime().UTC().Format(time.RFC3339Nano), Status: e.GetSeverity().String(),
+			Fields: map[string]string{"Severity": e.GetSeverity().String(), "Log": logID, "Summary": kmsOrDash(summary)}})
+	}
+	l.Total = len(l.Items)
+	sec.Listing = l
+	return sec
 }
 
 func (p workflowsProvider) executionDetail(ctx context.Context, project, wf, name string) (console.Detail, error) {
@@ -204,35 +370,87 @@ func (p workflowsProvider) executionDetail(ctx context.Context, project, wf, nam
 		dur = d.AsDuration().String()
 	}
 	props := []console.Property{{Label: "Execution ID", Value: name[strings.LastIndex(name, "/")+1:]},
-		{Label: "State", Value: e.GetState().String()}, {Label: "Revision", Value: e.GetWorkflowRevisionId()},
+		{Label: "Execution state", Value: e.GetState().String()}, {Label: "Revision", Value: e.GetWorkflowRevisionId()},
 		{Label: "Start time", Value: kmsTime(e.GetStartTime())}, {Label: "End time", Value: kmsTime(e.GetEndTime())},
-		{Label: "Duration", Value: dur}, {Label: "Call log level", Value: e.GetCallLogLevel().String()}}
+		{Label: "Execution duration", Value: dur}, {Label: "Call log level", Value: workflowsCallLogLabels[e.GetCallLogLevel().String()]}}
+	// The execution's own history level, or its workflow's revision's.
+	level := workflowsHistoryLabels[s.HistoryLevel(name)]
+	if level == "" {
+		level = "Basic (the workflow's)"
+		if rev, err := s.Workflows().GetWorkflow(ctx, &workflowspb.GetWorkflowRequest{Name: wf, RevisionId: e.GetWorkflowRevisionId()}); err == nil {
+			level = workflowsHistoryLabels[rev.GetExecutionHistoryLevel().String()] + " (the workflow's)"
+		}
+	}
+	props = append(props, console.Property{Label: "Execution history level", Value: level})
 	for _, cs := range e.GetStatus().GetCurrentSteps() {
 		props = append(props, console.Property{Label: "Current step", Value: cs.GetRoutine() + " › " + cs.GetStep()})
 	}
-	steps := console.Listing{Columns: []string{"Routine", "Type", "Started", "Updated", "Exception"}, NameColumn: "Step", Noun: "steps"}
+	props = append(props, console.Property{Label: "Input", Value: kmsOrDash(e.GetArgument())})
+	switch {
+	case e.GetError() != nil:
+		props = append(props, console.Property{Label: "Output", Value: strings.TrimSpace(e.GetError().GetContext() + "\n\n" + e.GetError().GetPayload())})
+	default:
+		props = append(props, console.Property{Label: "Output", Value: kmsOrDash(e.GetResult())})
+	}
+	steps := console.Listing{Columns: []string{"Routine", "Type", "Started", "Updated", "Exception"}, NameColumn: "Step", Noun: "step entries"}
+	var views []console.StepEntryView
 	if entries, err := s.StepEntries(name); err == nil {
+		nav := workflows.Navigate(entries)
 		for _, st := range entries {
 			state := strings.TrimPrefix(st.State, "STATE_")
+			typ := strings.TrimPrefix(st.StepType, "STEP_")
 			steps.Items = append(steps.Items, console.Resource{Name: st.Step, Status: state, Fields: map[string]string{
-				"Routine": st.Routine, "Type": strings.TrimPrefix(st.StepType, "STEP_"), "Started": st.CreateTime, "Updated": st.UpdateTime,
-				"Exception": kmsOrDash(st.Exception)}})
+				"Routine": st.Routine, "Type": typ, "Started": st.CreateTime, "Updated": st.UpdateTime, "Exception": kmsOrDash(st.Exception)}})
+			views = append(views, workflowsStepView(st, nav[st.EntryID]))
 		}
 	}
 	steps.Total = len(steps.Items)
+	// The graph is of the revision that ran, which a later deploy does not
+	// change.
+	graph := ""
+	if rev, err := s.Workflows().GetWorkflow(ctx, &workflowspb.GetWorkflowRequest{Name: wf, RevisionId: e.GetWorkflowRevisionId()}); err == nil {
+		graph = rev.GetSourceContents()
+	}
+	id := name[strings.LastIndex(name, "/")+1:]
 	sections := []console.Section{
 		{ID: "summary", Label: "Summary", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Heading: "Execution", Properties: props}}},
-		{ID: "input", Label: "Input", Kind: console.KindText, Text: kmsOrDash(e.GetArgument())},
+		{ID: "steps", Label: "Steps", Listing: steps, Graph: graph, StepEntries: views},
+		p.logsSection(ctx, project, `labels."workflows.googleapis.com/execution_id"="`+id+`"`),
 	}
-	switch {
-	case e.GetError() != nil:
-		sections = append(sections, console.Section{ID: "output", Label: "Output", Kind: console.KindText,
-			Text: e.GetError().GetContext() + "\n\n" + e.GetError().GetPayload()})
-	default:
-		sections = append(sections, console.Section{ID: "output", Label: "Output", Kind: console.KindText, Text: kmsOrDash(e.GetResult())})
+	// Headed by its execution ID, as Google's Execution details page is.
+	return console.Detail{Title: id, Summary: []console.Property{{Label: "State", Value: e.GetState().String()}, {Label: "Workflow", Value: wf}},
+		Sections: sections}, nil
+}
+
+// workflowsStepView is a step entry as Google's step detail panel shows it.
+func workflowsStepView(st workflows.StepEntry, nav *workflows.Navigation) console.StepEntryView {
+	id := func(n int64) string {
+		if n == 0 {
+			return ""
+		}
+		return strconv.FormatInt(n, 10)
 	}
-	sections = append(sections, console.Section{ID: "steps", Label: "Steps", Listing: steps})
-	return console.Detail{Summary: []console.Property{{Label: "State", Value: e.GetState().String()}, {Label: "Workflow", Value: wf}}, Sections: sections}, nil
+	v := console.StepEntryView{ID: id(st.EntryID), Step: st.Step, Routine: st.Routine, Type: strings.TrimPrefix(st.StepType, "STEP_"),
+		State: strings.TrimPrefix(st.State, "STATE_"), Started: st.CreateTime, Updated: st.UpdateTime, Exception: st.Exception}
+	if nav != nil {
+		v.Parent, v.Next, v.Previous = id(nav.Parent), id(nav.Next), id(nav.Previous)
+		for _, c := range nav.Children {
+			v.Children = append(v.Children, id(c))
+		}
+	}
+	if st.ProgressType != "" {
+		v.Progress = "Iteration " + strconv.FormatInt(st.ProgressNumber, 10)
+		if st.ExpectedIteration > 0 {
+			v.Progress += " of " + strconv.FormatInt(st.ExpectedIteration, 10)
+		}
+	}
+	if len(st.Variables) > 0 {
+		v.Variables = map[string]string{}
+		for k, raw := range st.Variables {
+			v.Variables[k] = string(raw)
+		}
+	}
+	return v
 }
 
 func (p workflowsProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
@@ -245,13 +463,20 @@ func (p workflowsProvider) DetailActions(ctx context.Context, project string, pa
 		return []console.Action{
 			{ID: "execute", Label: "Execute", Fields: []console.Field{
 				{Name: "argument", Label: "Input (JSON)", Type: "textarea", Help: "The argument main receives, as JSON; empty for none."},
-				{Name: "callLogLevel", Label: "Call log level", Type: "select", Default: "CALL_LOG_LEVEL_UNSPECIFIED", Options: workflowsCallLogLevels}}},
-			{ID: "edit", Label: "Edit", Fields: []console.Field{
-				{Name: "description", Label: "Description", Type: "text", Default: w.GetDescription()},
-				{Name: "serviceAccount", Label: "Service account", Type: "text", Default: w.GetServiceAccount()},
-				{Name: "sourceContents", Label: "Source (YAML or JSON)", Type: "textarea", Required: true, Default: w.GetSourceContents(),
-					Help: "Deploying a changed source makes a new revision."},
-				labelsField(w.GetLabels(), "")}},
+				{Name: "callLogLevel", Label: "Call log level", Type: "select", Default: "CALL_LOG_LEVEL_UNSPECIFIED", Options: workflowsCallLogLevels,
+					OptionLabels: map[string]string{"CALL_LOG_LEVEL_UNSPECIFIED": "Not specified (the workflow's level)", "LOG_ERRORS_ONLY": "Errors only",
+						"LOG_ALL_CALLS": "All calls", "LOG_NONE": "No logs"}},
+				// Execution.executionHistoryLevel (#2011): this execution's,
+				// over the workflow's.
+				{Name: "executionHistoryLevel", Label: "Execution history level", Type: "select", Default: "EXECUTION_HISTORY_LEVEL_UNSPECIFIED",
+					Options: workflows.HistoryLevels, OptionLabels: map[string]string{
+						"EXECUTION_HISTORY_LEVEL_UNSPECIFIED": "Not specified (the workflow's: " + workflowsHistoryLabels[w.GetExecutionHistoryLevel().String()] + ")",
+						"EXECUTION_HISTORY_BASIC":             "Basic", "EXECUTION_HISTORY_DETAILED": "Detailed"},
+					Help: "Detailed also records the in-scope variables of each step entry and the expected iterations of each for loop."}}},
+			{ID: "edit", Label: "Edit", Fields: append([]console.Field{
+				{Name: "workflowId", Label: "Workflow name", Type: "text", Default: workflowID(w.GetName()), Immutable: true, Section: "Workflow details"},
+				{Name: "location", Label: "Region", Type: "text", Default: kmsLocation(w.GetName()), Immutable: true, Section: "Workflow details"},
+			}, withTriggers(workflowsFields(w), p.triggerFields())...)},
 			{ID: "delete", Label: "Delete", Destructive: true, Leaves: true,
 				Confirm: "Deleting the workflow deletes its executions too."},
 		}
@@ -280,24 +505,29 @@ func (p workflowsProvider) ActAt(ctx context.Context, project string, path []str
 	switch action {
 	case "execute":
 		lvl := executionspb.Execution_CallLogLevel(executionspb.Execution_CallLogLevel_value[values["callLogLevel"]])
-		_, err := s.Executions().CreateExecution(ctx, &executionspb.CreateExecutionRequest{Parent: path[0],
-			Execution: &executionspb.Execution{Argument: strings.TrimSpace(values["argument"]), CallLogLevel: lvl}})
+		// The Go client's Execution has no execution_history_level; the
+		// server's own CreateExecution, which the JSON API calls, takes it.
+		_, err := s.StartLevel(path[0], &executionspb.Execution{Argument: strings.TrimSpace(values["argument"]), CallLogLevel: lvl},
+			values["executionHistoryLevel"])
 		return err
 	case "edit":
-		labels, err := console.ParseMap(values["labels"])
+		w, err := workflowsFromForm(values)
 		if err != nil {
 			return err
 		}
-		op, err := s.Workflows().UpdateWorkflow(ctx, &workflowspb.UpdateWorkflowRequest{
-			Workflow: &workflowspb.Workflow{Name: path[0], Description: strings.TrimSpace(values["description"]), Labels: labels,
-				ServiceAccount: strings.TrimSpace(values["serviceAccount"]),
-				SourceCode:     &workflowspb.Workflow_SourceContents{SourceContents: values["sourceContents"]}},
-			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"description", "labels", "service_account", "source_contents"}}})
+		triggers, err := p.triggersFromForm(project, path[0], values)
 		if err != nil {
 			return err
 		}
-		_ = op
-		return nil
+		w.Name = path[0]
+		if _, err = s.Workflows().UpdateWorkflow(ctx, &workflowspb.UpdateWorkflowRequest{Workflow: w,
+			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"description", "labels", "service_account", "source_contents",
+				"crypto_key_name", "call_log_level", "execution_history_level", "user_env_vars"}}}); err != nil {
+			return err
+		}
+		// Add new trigger on Edit makes the triggers once the workflow is
+		// updated, as Google's Edit workflow does.
+		return p.createTriggers(ctx, project, triggers)
 	case "delete":
 		_, err := s.Workflows().DeleteWorkflow(ctx, &workflowspb.DeleteWorkflowRequest{Name: path[0]})
 		return err

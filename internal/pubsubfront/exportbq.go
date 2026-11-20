@@ -69,37 +69,48 @@ func (e *exporter) tableURL(t bqTable) string {
 
 // tableSchema reads a table's columns.
 func (e *exporter) tableSchema(ctx context.Context, t bqTable) ([]bqField, error) {
+	cols, _, err := e.tableMeta(ctx, t)
+	return cols, err
+}
+
+// tableMeta reads a table's columns and primary key.
+func (e *exporter) tableMeta(ctx context.Context, t bqTable) ([]bqField, []string, error) {
 	if e.bigquery == "" {
-		return nil, &errDestination{int32(pubsubpb.BigQueryConfig_PERMISSION_DENIED),
+		return nil, nil, &errDestination{int32(pubsubpb.BigQueryConfig_PERMISSION_DENIED),
 			"Cannot write to the BigQuery table: bigquery.googleapis.com is not enabled for the project."}
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, e.tableURL(t), nil)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	resp, err := e.do(req)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
 	switch {
 	case resp.StatusCode == http.StatusNotFound:
-		return nil, &errDestination{int32(pubsubpb.BigQueryConfig_NOT_FOUND), "Cannot write to the BigQuery table " + t.String() + ": it does not exist."}
+		return nil, nil, &errDestination{int32(pubsubpb.BigQueryConfig_NOT_FOUND), "Cannot write to the BigQuery table " + t.String() + ": it does not exist."}
 	case resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusUnauthorized:
-		return nil, &errDestination{int32(pubsubpb.BigQueryConfig_PERMISSION_DENIED), "Cannot write to the BigQuery table " + t.String() + ": permission denied."}
+		return nil, nil, &errDestination{int32(pubsubpb.BigQueryConfig_PERMISSION_DENIED), "Cannot write to the BigQuery table " + t.String() + ": permission denied."}
 	case resp.StatusCode/100 != 2:
-		return nil, fmt.Errorf("BigQuery tables.get %s: %s", t, resp.Status)
+		return nil, nil, fmt.Errorf("BigQuery tables.get %s: %s", t, resp.Status)
 	}
 	var tbl struct {
 		Schema struct {
 			Fields []bqField `json:"fields"`
 		} `json:"schema"`
+		TableConstraints struct {
+			PrimaryKey struct {
+				Columns []string `json:"columns"`
+			} `json:"primaryKey"`
+		} `json:"tableConstraints"`
 	}
 	if err := json.Unmarshal(body, &tbl); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return tbl.Schema.Fields, nil
+	return tbl.Schema.Fields, tbl.TableConstraints.PrimaryKey.Columns, nil
 }
 
 // datasetLocation is the location of a table's dataset.
@@ -160,7 +171,7 @@ func hasType(cols []bqField, name string, types []string) bool {
 
 // checkTable checks the table fits the configuration; schema is the
 // topic's, for use_topic_schema.
-func checkTable(cfg *pubsubpb.BigQueryConfig, cols []bqField, schema *topicMsgSchema) error {
+func checkTable(cfg *pubsubpb.BigQueryConfig, cols []bqField, key []string, schema *topicMsgSchema) error {
 	if !cfg.GetUseTopicSchema() && !cfg.GetUseTableSchema() && !hasType(cols, "data", dataTypes) {
 		return mismatch("The BigQuery table must have a column called data of type BYTES, STRING, or JSON.")
 	}
@@ -172,6 +183,14 @@ func checkTable(cfg *pubsubpb.BigQueryConfig, cols []bqField, schema *topicMsgSc
 		}
 	}
 	if cfg.GetUseTopicSchema() && schema != nil {
+		// Change data capture (exportcdc.go, #1999).
+		changes, err := schemaChanges(schema)
+		if err != nil {
+			return mismatch("The topic's schema is not compatible with the BigQuery table: %v.", err)
+		}
+		if changes && len(key) == 0 {
+			return mismatch("%s", noPrimaryKey)
+		}
 		var last error
 		for _, r := range schema.revisions {
 			if err := compatible(r.root.fields, metadataFree(cols, cfg), cfg.GetDropUnknownFields(), ""); err != nil {
@@ -217,6 +236,9 @@ func (f *Front) checkBigQueryConfig(ctx context.Context, s *pubsubpb.Subscriptio
 	if err := checkServiceAccount(cfg.GetServiceAccountEmail()); err != nil {
 		return err
 	}
+	if err := f.checkActAs(ctx, s.GetName(), cfg.GetServiceAccountEmail()); err != nil {
+		return err
+	}
 	t, err := parseTable(cfg.GetTable())
 	if err != nil {
 		return err
@@ -232,7 +254,7 @@ func (f *Front) checkBigQueryConfig(ctx context.Context, s *pubsubpb.Subscriptio
 			return nil // the emulator answers for the topic
 		}
 	}
-	cols, err := f.exp.tableSchema(ctx, t)
+	cols, key, err := f.exp.tableMeta(ctx, t)
 	if st, ok := destinationState(err); ok {
 		if stateLoad(ctx) {
 			return nil // restored as saved; its delivery reports the state
@@ -247,10 +269,10 @@ func (f *Front) checkBigQueryConfig(ctx context.Context, s *pubsubpb.Subscriptio
 	if err != nil {
 		return apierror.Internal(err, "Cannot read the BigQuery table %s.", t)
 	}
-	if err := checkTable(cfg, cols, schema); err != nil {
+	if err := checkTable(cfg, cols, key, schema); err != nil {
 		return apierror.InvalidArgument("Incompatible table schema: %s", err.Error())
 	}
-	return nil
+	return f.checkWriterAtCreate(ctx, s)
 }
 
 // runBigQueryExport delivers s until ctx ends.
@@ -274,9 +296,13 @@ func (f *Front) runBigQueryExport(ctx context.Context, s *pubsubpb.Subscription)
 				continue
 			}
 		}
-		cols, err := f.exp.tableSchema(ctx, t)
+		cols, key, err := f.exp.tableMeta(ctx, t)
 		if err == nil {
-			err = checkTable(cfg, cols, schema)
+			err = checkTable(cfg, cols, key, schema)
+		}
+		if err == nil {
+			// The writing account's roles (#1998, exportiam.go).
+			err = f.checkWriter(ctx, s)
 		}
 		if err == nil && f.enforcesInTransit(s.GetTopic()) {
 			var loc string
@@ -302,19 +328,20 @@ func (f *Front) runBigQueryExport(ctx context.Context, s *pubsubpb.Subscription)
 			}
 			continue
 		}
-		f.writeRows(ctx, s, t, cols, schema, ps)
+		f.writeRows(ctx, s, t, cols, key, schema, ps)
 	}
 }
 
-// row is one message's row, or why it has none.
-func bqRow(s *pubsubpb.Subscription, cols []bqField, schema *topicMsgSchema, m *pubsubpb.PubsubMessage) (map[string]any, error) {
+// bqRow is one message's row, or why it has none, and its change when it
+// is one (exportcdc.go).
+func bqRow(s *pubsubpb.Subscription, cols []bqField, schema *topicMsgSchema, m *pubsubpb.PubsubMessage) (map[string]any, *msgChange, error) {
 	cfg := s.GetBigqueryConfig()
 	row := map[string]any{}
 	switch {
 	case cfg.GetUseTopicSchema():
 		r, err := schema.decode(m.GetData(), cols)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		row = r
 	case cfg.GetUseTableSchema():
@@ -322,7 +349,7 @@ func bqRow(s *pubsubpb.Subscription, cols []bqField, schema *topicMsgSchema, m *
 		d := json.NewDecoder(bytes.NewReader(m.GetData()))
 		d.UseNumber()
 		if err := d.Decode(&r); err != nil || r == nil {
-			return nil, fmt.Errorf("the message is not a JSON object, which use_table_schema requires")
+			return nil, nil, fmt.Errorf("the message is not a JSON object, which use_table_schema requires")
 		}
 		row = r
 	default:
@@ -332,15 +359,23 @@ func bqRow(s *pubsubpb.Subscription, cols []bqField, schema *topicMsgSchema, m *
 			row["data"] = base64.StdEncoding.EncodeToString(m.GetData())
 		case "JSON":
 			if !json.Valid(m.GetData()) {
-				return nil, fmt.Errorf("the message data is not valid JSON, which the JSON column data requires")
+				return nil, nil, fmt.Errorf("the message data is not valid JSON, which the JSON column data requires")
 			}
 			row["data"] = string(m.GetData())
 		default:
 			row["data"] = string(m.GetData())
 		}
 	}
+	var ch *msgChange
+	if cfg.GetUseTopicSchema() || cfg.GetUseTableSchema() {
+		c, err := takeChange(row)
+		if err != nil {
+			return nil, nil, err
+		}
+		ch = c
+	}
 	if err := fitColumns(row, cols, cfg.GetDropUnknownFields() && (cfg.GetUseTopicSchema() || cfg.GetUseTableSchema()), ""); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if cfg.GetWriteMetadata() {
 		attrs := m.GetAttributes()
@@ -353,7 +388,7 @@ func bqRow(s *pubsubpb.Subscription, cols []bqField, schema *topicMsgSchema, m *
 		row["publish_time"] = m.GetPublishTime().AsTime().UTC().Format(time.RFC3339Nano)
 		row["attributes"] = string(a)
 	}
-	return row, nil
+	return row, ch, nil
 }
 
 // fitColumns drops, or refuses, the fields of a row that have no column,
@@ -456,20 +491,48 @@ func (e *exporter) insert(ctx context.Context, t bqTable, rows []insertRow) (map
 
 // writeRows writes the messages pulled, acknowledges those written and
 // fails the others.
-func (f *Front) writeRows(ctx context.Context, s *pubsubpb.Subscription, t bqTable, cols []bqField, schema *topicMsgSchema, ps []pulled) {
+func (f *Front) writeRows(ctx context.Context, s *pubsubpb.Subscription, t bqTable, cols []bqField, key []string, schema *topicMsgSchema, ps []pulled) {
 	var rows []insertRow
 	var held []pulled
 	var bad []failed
+	var changes []cdcRow
+	var changed []pulled
 	for _, p := range ps {
-		row, err := bqRow(s, cols, schema, p.msg)
+		row, ch, err := bqRow(s, cols, schema, p.msg)
 		if err != nil {
 			bad = append(bad, failed{p, err.Error()})
+			continue
+		}
+		if ch != nil {
+			changes = append(changes, cdcRow{row: row, ch: ch})
+			changed = append(changed, p)
 			continue
 		}
 		rows = append(rows, insertRow{InsertID: p.msg.GetMessageId(), JSON: row})
 		held = append(held, p)
 	}
 	var ok []pulled
+	if len(changes) > 0 {
+		// Changes go to the Storage Write API's _default stream
+		// (exportcdc.go, #1999).
+		refused, err := f.exp.writeChanges(ctx, t, cols, key, changes)
+		if err != nil {
+			f.logf("pubsub front: export %s: %v", s.GetName(), err)
+			var ids []string
+			for _, p := range changed {
+				ids = append(ids, p.ackID)
+			}
+			f.extend(ctx, s.GetName(), ids, 0)
+		} else {
+			for i, p := range changed {
+				if reason, no := refused[i]; no {
+					bad = append(bad, failed{p, reason})
+				} else {
+					ok = append(ok, p)
+				}
+			}
+		}
+	}
 	if len(rows) > 0 {
 		refused, err := f.exp.insert(ctx, t, rows)
 		if err != nil {
@@ -482,6 +545,7 @@ func (f *Front) writeRows(ctx context.Context, s *pubsubpb.Subscription, t bqTab
 				ids = append(ids, p.ackID)
 			}
 			f.extend(ctx, s.GetName(), ids, 0)
+			f.ackWritten(ctx, s, ok)
 			f.fail(ctx, s, bad)
 			return
 		}
@@ -508,11 +572,16 @@ func (f *Front) writeRows(ctx context.Context, s *pubsubpb.Subscription, t bqTab
 			}
 		}
 	}
+	f.ackWritten(ctx, s, ok)
+	f.fail(ctx, s, bad)
+}
+
+// ackWritten acknowledges the messages written.
+func (f *Front) ackWritten(ctx context.Context, s *pubsubpb.Subscription, ok []pulled) {
 	var ids []string
 	for _, p := range ok {
 		ids = append(ids, p.ackID)
 	}
 	f.ack(ctx, s.GetName(), ids)
 	f.exp.forgetAttempts(s.GetName(), ok)
-	f.fail(ctx, s, bad)
 }

@@ -473,6 +473,9 @@ func (p spannerProvider) List(ctx context.Context, project string) (console.List
 		Noun:    "instances", NameColumn: "Instance ID",
 		AlwaysStatus: true,
 		RowsOpenable: true,
+		// Google's: "Select the checkbox for the instance. The Info panel
+		// appears", with its Labels tab (#1859).
+		InfoOnSelect: true,
 	}
 	if project == "" {
 		base.Prompt = "Spanner holds instances per project. Choose one in the toolbar."
@@ -525,6 +528,8 @@ func (p spannerProvider) List(ctx context.Context, project string) (console.List
 				"Databases":        count,
 				"Labels":           orDash(spannerLabels(inst.GetLabels())),
 			},
+			Target: []string{lastSegment(inst.GetName())},
+			Info:   []console.InfoTab{spannerLabelsTab(inst.GetLabels())},
 		})
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].Name < items[j].Name })
@@ -1391,7 +1396,7 @@ func (p spannerProvider) instanceDetail(ctx context.Context, project, instanceID
 		Actions: header,
 		Summary: []console.Property{
 			{Label: "Instance name", Value: inst.GetDisplayName()},
-			{Label: "Edition", Value: spannerEdition(inst.GetEdition())},
+			spannerEditionProperty(inst.GetEdition()),
 			{Label: "Configuration", Value: lastSegment(inst.GetConfig())},
 			{Label: "Compute capacity", Value: spannerCapacity(inst.GetNodeCount(), inst.GetProcessingUnits())},
 			{Label: "Autoscaling", Value: orDash(spannerAutoscalingLabel(inst.GetAutoscalingConfig()))},
@@ -2033,7 +2038,7 @@ func (p spannerProvider) DetailActions(ctx context.Context, project string, path
 		if edit, ok := p.spannerEditInstanceAction(ctx, project, path[0]); ok {
 			acts = append([]console.Action{edit}, acts...)
 		}
-		return acts
+		return append(acts, p.spannerInstanceLinkedActions(ctx, project, path[0])...)
 	case 2:
 		acts := []console.Action{spannerDDLAction(path[0], path[1]), spannerCreateScheduleAction(),
 			spannerCreateDatabaseBackupAction(), {
@@ -2101,6 +2106,9 @@ func (p spannerProvider) ActAt(ctx context.Context, project string, path []strin
 			return fmt.Errorf("%s is a table's action", action)
 		}
 		return p.spannerRowAct(ctx, project, path, action, values)
+	}
+	if handled, err := p.spannerInfoAct(ctx, project, path, action, values); handled {
+		return err
 	}
 	if handled, err := p.spannerAdminAct(ctx, project, path, action, values); handled {
 		return err

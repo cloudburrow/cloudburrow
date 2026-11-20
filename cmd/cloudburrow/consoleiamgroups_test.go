@@ -33,10 +33,10 @@ func TestConsoleIAMGroups(t *testing.T) {
 		t.Fatalf("List = %+v", l.Items)
 	}
 	sa := "a@p.iam.gserviceaccount.com"
-	if err := p.Edit(ctx, "", []string{"inner" + d}, map[string]string{"add": sa, "role": "MEMBER"}); err != nil {
+	if err := p.ActAt(ctx, "", []string{"inner" + d}, "add-members", map[string]string{"members": sa, "role": "MEMBER"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := p.Edit(ctx, "", []string{"outer" + d}, map[string]string{"add": "inner" + d, "role": "MANAGER"}); err != nil {
+	if err := p.ActAt(ctx, "", []string{"outer" + d}, "add-members", map[string]string{"members": "inner" + d, "role": "MANAGER"}); err != nil {
 		t.Fatal(err)
 	}
 	if !reg.MemberNames("group:outer"+d, sa) {
@@ -56,7 +56,7 @@ func TestConsoleIAMGroups(t *testing.T) {
 	if g, _ := reg.GetGroup(mustLookup(t, reg, "outer"+d)); g.DisplayName != "Renamed" {
 		t.Errorf("Edit group: display name %q", g.DisplayName)
 	}
-	if err := p.Edit(ctx, "", []string{"outer" + d}, map[string]string{"remove": "inner" + d}); err != nil {
+	if err := p.ActAt(ctx, "", []string{"outer" + d}, "remove-members", map[string]string{"members": "inner" + d}); err != nil {
 		t.Fatal(err)
 	}
 	if reg.MemberNames("group:outer"+d, sa) {
@@ -140,18 +140,18 @@ func TestConsoleIAMGroupsSearchRolesGraph(t *testing.T) {
 	// Add member with an expiry; a past one and an expiry without a member are refused.
 	future := time.Now().Add(48 * time.Hour).UTC().Truncate(time.Second)
 	ada := "ada@example.com"
-	if err := p.Edit(ctx, "", []string{"eng-infra" + d}, map[string]string{"add": ada, "expire": future.Format(time.RFC3339)}); err != nil {
+	if err := p.ActAt(ctx, "", []string{"eng-infra" + d}, "add-members", map[string]string{"members": ada, "expire": future.Format(time.RFC3339)}); err != nil {
 		t.Fatal(err)
 	}
-	if err := p.Edit(ctx, "", []string{"eng-infra" + d}, map[string]string{"add": "bob@example.com", "expire": "2001-01-01T00:00:00Z"}); err == nil {
+	if err := p.ActAt(ctx, "", []string{"eng-infra" + d}, "add-members", map[string]string{"members": "bob@example.com", "expire": "2001-01-01T00:00:00Z"}); err == nil {
 		t.Error("added a member with a past expiry")
 	}
-	if err := p.Edit(ctx, "", []string{"eng-infra" + d}, map[string]string{"expire": future.Format(time.RFC3339)}); err == nil {
+	if err := p.ActAt(ctx, "", []string{"eng-infra" + d}, "add-members", map[string]string{"expire": future.Format(time.RFC3339)}); err == nil {
 		t.Error("an expiry without a member to add was accepted")
 	}
 	// eng is a security group: it takes security groups only
 	// (update-group-to-security-group), so eng-infra joins once it is one.
-	if err := p.Edit(ctx, "", []string{"eng" + d}, map[string]string{"add": "eng-infra" + d}); err == nil {
+	if err := p.ActAt(ctx, "", []string{"eng" + d}, "add-members", map[string]string{"members": "eng-infra" + d}); err == nil {
 		t.Error("a Google Group was added to a security group")
 	}
 	if !strings.Contains(det0Help(t, p, "eng"+d), "security group") {
@@ -161,7 +161,7 @@ func TestConsoleIAMGroupsSearchRolesGraph(t *testing.T) {
 		Labels: map[string]string{resourcemanager.LabelDiscussionForum: "", resourcemanager.LabelSecurity: ""}}, []string{"labels"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := p.Edit(ctx, "", []string{"eng" + d}, map[string]string{"add": "eng-infra" + d}); err != nil {
+	if err := p.ActAt(ctx, "", []string{"eng" + d}, "add-members", map[string]string{"members": "eng-infra" + d}); err != nil {
 		t.Fatal(err)
 	}
 	det, _ := p.Detail(ctx, "", []string{"eng-infra" + d})
@@ -261,18 +261,20 @@ func mustGroup(t *testing.T, p iamGroupsProvider, row string) *resourcemanager.G
 	return g
 }
 
-// det0Help is the help of a group's Edit group > Add member field.
+// det0Help is the help of a group's Add members > Member email field.
 func det0Help(t *testing.T, p iamGroupsProvider, row string) string {
 	t.Helper()
-	det, err := p.Detail(context.Background(), "", []string{row})
-	if err != nil || det.Edit == nil {
-		t.Fatalf("Detail %s: %v", row, err)
-	}
-	for _, f := range det.Edit.Fields {
-		if f.Name == "add" {
-			return f.Help
+	for _, a := range p.DetailActions(context.Background(), "", []string{row}) {
+		if a.ID != "add-members" {
+			continue
+		}
+		for _, f := range a.Fields {
+			if f.Name == "members" {
+				return f.Help
+			}
 		}
 	}
+	t.Fatalf("%s's page has no Add members", row)
 	return ""
 }
 
@@ -301,5 +303,53 @@ func TestConsoleIAMGroupsNameRules(t *testing.T) {
 	if _, err := p.Create(context.Background(), "", map[string]string{"email": strings.Repeat("a", 65) + d}); err == nil ||
 		!strings.Contains(err.Error(), "64 characters") {
 		t.Errorf("a 65-character name = %v, want the 64-character refusal", err)
+	}
+}
+
+// TestConsoleIAMGroupPageButtons (#1864): a group's page has Google's Add
+// members, Remove members (the Members table's checked rows), View in
+// Google Groups (not available locally) and Delete group; Edit group's
+// fields are Group name and Group description, ending in Save.
+func TestConsoleIAMGroupPageButtons(t *testing.T) {
+	p := iamGroupsProvider{registry: resourcemanager.New(store.NewMemory())}
+	ctx := context.Background()
+	email := "team@" + resourcemanager.OrganizationDomain
+	if _, err := p.Create(ctx, "", map[string]string{"email": email, "displayName": "Team"}); err != nil {
+		t.Fatal(err)
+	}
+	var labels []string
+	for _, a := range p.DetailActions(ctx, "", []string{email}) {
+		labels = append(labels, a.Label)
+		if a.ID == "view-in-groups" && a.Unavailable == "" {
+			t.Error("View in Google Groups does not say why it is not available")
+		}
+	}
+	if got := strings.Join(labels, ","); got != "Add members,Remove members,View in Google Groups,Delete group" {
+		t.Errorf("the group page's actions are %s", got)
+	}
+	d, _ := p.Detail(ctx, "", []string{email})
+	if d.Edit == nil || d.Edit.Submit != "Save" || d.Edit.Fields[0].Label != "Group name" || d.Edit.Fields[1].Label != "Group description" {
+		t.Fatalf("Edit group is %+v", d.Edit)
+	}
+	if sa := d.Sections[0].Listing.SelectActions; len(sa) != 1 || sa[0].ID != "remove-members" || len(d.Sections[0].Actions) != 1 {
+		t.Errorf("the Members tab's actions are %+v and %+v", d.Sections[0].Actions, sa)
+	}
+	if err := p.ActAt(ctx, "", []string{email}, "add-members", map[string]string{"members": "ada@example.com, bob@example.com", "role": "MANAGER"}); err != nil {
+		t.Fatal(err)
+	}
+	if g := mustGroup(t, p, email); len(g.Members) != 2 || !hasRole(g.Members[0], "MANAGER") {
+		t.Fatalf("after Add members the group holds %+v", g.Members)
+	}
+	if err := p.ActAt(ctx, "", []string{email}, "remove-members", map[string]string{"members": "ada@example.com\nbob@example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	if g := mustGroup(t, p, email); len(g.Members) != 0 {
+		t.Fatalf("after Remove members the group holds %+v", g.Members)
+	}
+	if err := p.ActAt(ctx, "", []string{email}, "delete-group", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.group(email); err == nil {
+		t.Error("Delete group left the group")
 	}
 }

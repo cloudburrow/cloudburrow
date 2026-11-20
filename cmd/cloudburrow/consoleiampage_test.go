@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/iamroles"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 )
@@ -199,26 +200,49 @@ func TestConsoleIAMResourcePages(t *testing.T) {
 	}
 }
 
-// Create role from selection (#1864): two predefined roles combined into
-// a project role holding their supported permissions.
+// Create custom role from selection (#2013): the checked roles open
+// Create custom role with their supported permissions listed, each
+// checked; what is created holds the permissions the form kept.
 func TestConsoleIAMCreateRoleFromSelection(t *testing.T) {
 	reg := iamPageRegistry(t)
 	p := iamRolesProvider{registry: reg}
 	ctx := context.Background()
 	l, _ := p.List(ctx, "iam-page")
-	if len(l.SelectActions) != 1 || l.SelectActions[0].SelectionField != "roles" {
+	if len(l.SelectActions) != 2 || l.SelectActions[0].SelectionField != "roles" || l.SelectActions[0].Href != "/iam-admin/roles/create" ||
+		l.SelectActions[1].Label != "Disable" {
 		t.Fatalf("the Roles list's selection actions are %+v", l.SelectActions)
 	}
-	if err := p.ActAt(ctx, "iam-page", nil, roleFromSelection, map[string]string{
-		"roles": "predefined:storage.objectViewer\npredefined:pubsub.viewer", "title": "Readers", "roleId": "readers", "stage": "GA"}); err != nil {
+	out, err := p.StudioCall(ctx, "iam-page", "permissions",
+		json.RawMessage(`{"seed":"predefined:storage.objectViewer,predefined:pubsub.viewer"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed := out.(map[string]any)
+	var values []string
+	for _, it := range seed["items"].([]iamPickItem) {
+		values = append(values, it.Value)
+	}
+	if !slices.Contains(values, "storage.objects.get") || !slices.Contains(values, "pubsub.topics.list") || !slices.IsSorted(values) {
+		t.Errorf("the seeded permissions are %v", values)
+	}
+	if note := seed["note"].(string); !strings.Contains(note, "roles/storage.objectViewer") || !strings.Contains(note, "Uncheck") {
+		t.Errorf("the seed's note is %q", note)
+	}
+	// storage.objects.list unchecked: the role holds the rest.
+	kept := slices.DeleteFunc(slices.Clone(values), func(v string) bool { return v == "storage.objects.list" })
+	if _, err := p.Create(ctx, "iam-page", map[string]string{"title": "Readers", "roleId": "readers", "stage": "GA",
+		"permissions": strings.Join(kept, "\n")}); err != nil {
 		t.Fatal(err)
 	}
 	r, err := reg.GetRole("projects/iam-page/roles/readers")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Contains(r.GetIncludedPermissions(), "storage.objects.get") || !slices.Contains(r.GetIncludedPermissions(), "pubsub.topics.list") {
+	if !slices.Contains(r.GetIncludedPermissions(), "storage.objects.get") || slices.Contains(r.GetIncludedPermissions(), "storage.objects.list") {
 		t.Errorf("the role holds %v", r.GetIncludedPermissions())
+	}
+	if _, err := p.StudioCall(ctx, "iam-page", "permissions", json.RawMessage(`{"seed":"no-such-role"}`)); err == nil {
+		t.Error("a seed naming no role was answered")
 	}
 	_, fields := p.CreateForm()
 	var names []string
@@ -227,5 +251,66 @@ func TestConsoleIAMCreateRoleFromSelection(t *testing.T) {
 	}
 	if got := strings.Join(names, ","); got != "title,description,roleId,stage,permissions,parent" {
 		t.Errorf("Create role's fields are %s; want Google's order", got)
+	}
+}
+
+// TestConsoleIAMRolesPermissionPickerAndDisable (#1864): Create custom
+// role's permissions are a picklist whose Add Permissions reads the
+// supported permissions from the provider's Studio call; Edit role ends in
+// Update; Disable over checked custom roles sets their stage to DISABLED
+// and refuses a predefined role.
+func TestConsoleIAMRolesPermissionPickerAndDisable(t *testing.T) {
+	reg := iamPageRegistry(t)
+	p := iamRolesProvider{registry: reg}
+	ctx := context.Background()
+	label, fields := p.CreateForm()
+	if label != "Create custom role" {
+		t.Errorf("the create label is %q", label)
+	}
+	var perms console.Field
+	for _, f := range fields {
+		if f.Name == "permissions" {
+			perms = f
+		}
+	}
+	if perms.Type != console.PicklistFieldType || perms.PickFrom != "iam-roles:permissions" || perms.AddLabel != "Add Permissions" {
+		t.Fatalf("the permissions field is %+v", perms)
+	}
+	out, err := p.StudioCall(ctx, "iam-page", "permissions", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := out.(map[string]any)["items"].([]iamPickItem)
+	has := func(v string) bool {
+		return slices.ContainsFunc(items, func(it iamPickItem) bool { return it.Value == v })
+	}
+	if !has("storage.objects.get") || len(items) < 1000 {
+		t.Errorf("the picker offers %d permissions, storage.objects.get %v", len(items), has("storage.objects.get"))
+	}
+	for _, it := range items {
+		if l := iamroles.Level(it.Value); l != iamroles.Supported && l != iamroles.Testing {
+			t.Fatalf("the picker offers %s, which custom roles do not support", it.Value)
+		}
+	}
+	if _, err := p.StudioCall(ctx, "iam-page", "nope", nil); err == nil {
+		t.Error("an unknown call was answered")
+	}
+	if _, err := p.Create(ctx, "iam-page", map[string]string{"title": "Getter", "roleId": "getter", "stage": "GA",
+		"permissions": "storage.objects.get\nstorage.objects.list"}); err != nil {
+		t.Fatal(err)
+	}
+	d, _ := p.Detail(ctx, "iam-page", []string{"getter"})
+	if d.Edit == nil || d.Edit.Submit != "Update" || d.Edit.Label != "Edit role" {
+		t.Fatalf("Edit role is %+v", d.Edit)
+	}
+	if err := p.ActAt(ctx, "iam-page", nil, rolesDisable, map[string]string{"roles": "predefined:viewer"}); err == nil {
+		t.Error("a predefined role was disabled")
+	}
+	if err := p.ActAt(ctx, "iam-page", nil, rolesDisable, map[string]string{"roles": "getter"}); err != nil {
+		t.Fatal(err)
+	}
+	r, err := reg.GetRole("projects/iam-page/roles/getter")
+	if err != nil || r.GetStage().String() != "DISABLED" || len(r.GetIncludedPermissions()) != 2 {
+		t.Errorf("after Disable the role is %v, %v", r, err)
 	}
 }

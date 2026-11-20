@@ -49,6 +49,9 @@ type User struct {
 	// Type is the Admin API's user type, "" for BUILT_IN; IAMEmail is an
 	// IAM user's full email, which MySQL's user name drops (#1944).
 	Type, IAMEmail string
+	// Policy is the user's own password policy and its status (#2009),
+	// nil for none or where the engine serves none.
+	Policy *UserPolicy
 }
 
 // Engine is one running server.
@@ -890,7 +893,11 @@ func (s *Server) users(r *http.Request, base, project string, e Engine, rest []s
 		if err != nil {
 			return "sql.users.get", nil, err
 		}
-		return "sql.users.get", userJSON(project, e, u), nil
+		us, err := withPolicies(ctx, e, []User{u})
+		if err != nil {
+			return "sql.users.get", nil, err
+		}
+		return "sql.users.get", userJSON(project, e, us[0]), nil
 	}
 	if len(rest) != 0 {
 		return "sql.users", nil, Errorf(http.StatusNotFound, "%s is not a Cloud SQL Admin API path", r.URL.Path)
@@ -898,6 +905,9 @@ func (s *Server) users(r *http.Request, base, project string, e Engine, rest []s
 	switch r.Method {
 	case http.MethodGet:
 		us, err := e.ListUsers(ctx)
+		if err == nil {
+			us, err = withPolicies(ctx, e, us)
+		}
 		if err != nil {
 			return "sql.users.list", nil, err
 		}
@@ -908,10 +918,14 @@ func (s *Server) users(r *http.Request, base, project string, e Engine, rest []s
 		return "sql.users.list", map[string]any{"kind": "sql#usersList", "items": items}, nil
 	case http.MethodPost:
 		var u struct {
-			Name, Host, Password, Type, IamEmail string
+			Name, Host, Password, Type, IamEmail, DualPasswordType string
+			PasswordPolicy                                         *userPolicyIn
 		}
 		if err := readChecked(r, "user", userFields, &u); err != nil {
 			return "sql.users.insert", nil, err
+		}
+		if u.DualPasswordType == dualRetain {
+			return "sql.users.insert", nil, Errorf(http.StatusBadRequest, "Invalid request: a new user has no current password to retain (dualPasswordType DUAL_PASSWORD).")
 		}
 		if u.IamEmail != "" && ((u.Type != TypeIAMUser && u.Type != TypeIAMServiceAccount) || !strings.EqualFold(u.IamEmail, u.Name)) {
 			return "sql.users.insert", nil, Errorf(http.StatusBadRequest, "Invalid request: iamEmail is an IAM user's email, which its name gives; it is not set on its own.")
@@ -927,16 +941,32 @@ func (s *Server) users(r *http.Request, base, project string, e Engine, rest []s
 			return "sql.users.insert", nil, unimplemented("users of type "+u.Type,
 				"only BUILT_IN, CLOUD_IAM_USER and CLOUD_IAM_SERVICE_ACCOUNT users are served (IAM groups are not)")
 		}
+		var expiration int64
+		if u.PasswordPolicy != nil {
+			var err error
+			if expiration, err = checkUserPolicy(e, u.PasswordPolicy); err != nil {
+				return "sql.users.insert", nil, err
+			}
+		}
 		if err := s.checkPassword(project, e.Instance(), u.Name, u.Host, u.Password, false); err != nil {
 			return "sql.users.insert", nil, err
 		}
 		if err := e.CreateUser(ctx, User{Name: u.Name, Host: u.Host}, u.Password); err != nil {
 			return "sql.users.insert", nil, err
 		}
+		if u.PasswordPolicy != nil {
+			p := UserPolicy{}.apply(u.PasswordPolicy, expiration)
+			if err := e.(policyEngine).SetUserPolicy(ctx, User{Name: u.Name, Host: u.Host}, p); err != nil {
+				return "sql.users.insert", nil, err
+			}
+		}
 		s.notePassword(project, e.Instance(), u.Name, u.Host, u.Password)
 		return "sql.users.insert", s.done(base, project, e, "CREATE_USER", u.Name), nil
 	case http.MethodPut:
-		var u struct{ Name, Host, Password string }
+		var u struct {
+			Name, Host, Password, DualPasswordType string
+			PasswordPolicy                         *userPolicyIn
+		}
 		if err := readChecked(r, "user", userFields, &u); err != nil {
 			return "sql.users.update", nil, err
 		}
@@ -955,11 +985,47 @@ func (s *Server) users(r *http.Request, base, project string, e Engine, rest []s
 			}
 			return "sql.users.update", s.done(base, project, e, "UPDATE_USER", name), nil
 		}
+		var expiration int64
+		if u.PasswordPolicy != nil {
+			if expiration, err = checkUserPolicy(e, u.PasswordPolicy); err != nil {
+				return "sql.users.update", nil, err
+			}
+		}
+		if err := checkDual(e, u.DualPasswordType, u.Password); err != nil {
+			return "sql.users.update", nil, err
+		}
+		dual := u.DualPasswordType == dualRetain || u.DualPasswordType == dualNone
 		if err := s.checkPassword(project, e.Instance(), cur.Name, cur.Host, u.Password, true); err != nil {
 			return "sql.users.update", nil, err
 		}
-		if err := e.UpdateUser(ctx, cur, u.Password); err != nil {
-			return "sql.users.update", nil, err
+		switch {
+		case dual:
+			// Retain current password, or discard the retained one (#2009).
+			if err := e.(policyEngine).ChangeDualPassword(ctx, cur, u.Password, u.DualPasswordType); err != nil {
+				return "sql.users.update", nil, err
+			}
+		case u.Password != "" || u.PasswordPolicy == nil:
+			if err := e.UpdateUser(ctx, cur, u.Password); err != nil {
+				return "sql.users.update", nil, err
+			}
+		}
+		if u.PasswordPolicy != nil {
+			// The policy sent over the user's own; setting it unlocks the
+			// user, as the Users page's Unlock does.
+			pe := e.(policyEngine)
+			ps, err := pe.UserPolicies(ctx)
+			if err != nil {
+				return "sql.users.update", nil, err
+			}
+			p := ps[passwordKey(cur.Name, cur.Host)].apply(u.PasswordPolicy, expiration)
+			if err := pe.SetUserPolicy(ctx, cur, p); err != nil {
+				return "sql.users.update", nil, err
+			}
+		}
+		if pe, ok := e.(policyEngine); ok && u.Password != "" {
+			if err := pe.PasswordChanged(ctx, cur); err != nil {
+				return "sql.users.update", nil, err
+			}
 		}
 		s.notePassword(project, e.Instance(), cur.Name, cur.Host, u.Password)
 		return "sql.users.update", s.done(base, project, e, "UPDATE_USER", name), nil
@@ -989,6 +1055,14 @@ func userJSON(project string, e Engine, u User) map[string]any {
 	}
 	if u.IAMEmail != "" {
 		m["iamEmail"] = u.IAMEmail
+	}
+	if u.Policy != nil {
+		if pp := u.Policy.json(); len(pp) > 0 {
+			m["passwordPolicy"] = pp
+		}
+		if u.Policy.DualPassword {
+			m["dualPasswordType"] = dualRetain
+		}
 	}
 	return m
 }

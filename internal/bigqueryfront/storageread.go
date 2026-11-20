@@ -155,6 +155,9 @@ type writeOptions struct {
 	policies *rowPolicies
 	// hubs are the REST front's Analytics Hub linked datasets (#1989).
 	hubs *hubLinks
+	// cdcStreams are the tables receiving change data capture, shared
+	// with the REST front (#2003).
+	cdcStreams *cdcStreams
 }
 
 // serveStorageRead is ServeStorageRead, with the REST front's job records
@@ -180,6 +183,9 @@ func serveStorageRead(ctx context.Context, l net.Listener, upstream string, rest
 		}
 		if wo != nil && wo.logf != nil {
 			s.write.logf = wo.logf
+		}
+		if wo != nil {
+			s.write.active = wo.cdcStreams
 		}
 		if wo != nil && wo.stateDir != "" {
 			if err := s.write.keepStreams(wo.stateDir); err != nil {

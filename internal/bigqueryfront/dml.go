@@ -481,7 +481,15 @@ func (f front) serveDML(w http.ResponseWriter, r *http.Request, q queryOptions, 
 		}
 		d, base = md, d.asMerge
 	}
-	if msg := f.bufferedChange(r, q, d, ds, table); msg != "" {
+	// A table receiving change data capture refuses mutating DML
+	// (storagewritecdc.go, #2003).
+	if msg := f.cdcDMLRefusal(r, d, ds, table); msg != "" {
+		f.failBeforeRun(w, r, q, insert, ds, http.StatusBadRequest, rowError{Reason: "invalidQuery", Message: msg})
+		return
+	}
+	// The front's own change data capture DELETEs (storagewritecdc.go,
+	// #1999) change rows just streamed, as BigQuery's apply jobs do.
+	if msg := f.bufferedChange(r, q, d, ds, table); msg != "" && !isChangeApply(r.Context()) {
 		f.failBeforeRun(w, r, q, insert, ds, http.StatusBadRequest, rowError{Reason: "badRequest", Message: msg})
 		return
 	}
@@ -1148,7 +1156,9 @@ func (f front) bufferedChange(r *http.Request, q queryOptions, d dmlStmt, ds, ta
 	// The rows in the streaming buffer, and those streamed in the last 30
 	// minutes (#1370, streamingbuffer.go).
 	var conds []string
-	if win, ok := f.buffers.window(projectOf(f.base), ds, table); ok {
+	// A window whose held rows all carry their stream time is checked by
+	// them: the Write API's rows (gRPC) in it may be changed (#2007).
+	if win, ok := f.buffers.window(projectOf(f.base), ds, table); ok && !win.Stamped {
 		conds = append(conds, win.cond())
 	}
 	if c := f.buffers.streamedRecently(projectOf(f.base), ds, table); c != "" {

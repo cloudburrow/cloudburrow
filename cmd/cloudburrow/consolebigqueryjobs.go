@@ -749,6 +749,10 @@ func (p bigqueryProvider) ActAtResult(ctx context.Context, project string, path 
 	if err := p.writable(project); err != nil {
 		return nil, err
 	}
+	path, err := createTableTarget(p.project, path, action, values) // #1861: Create table's Destination
+	if err != nil {
+		return nil, err
+	}
 	switch {
 	case action == "createtable" && len(path) == 1 && values["source"] == bqSourceGCS:
 		// Create table from Google Cloud Storage is a load into a new
@@ -1048,6 +1052,17 @@ func bigqueryJobPage(project string, job *bqv2.Job, raw rawJob) console.Detail {
 		if s.StartTime > 0 && s.EndTime >= s.StartTime {
 			jobProps = append(jobProps, console.Property{Label: "Duration",
 				Value: (time.Duration(s.EndTime-s.StartTime) * time.Millisecond).String()})
+		}
+	}
+	// Google's job details name the user and, for a query, the bytes
+	// processed and billed (https://docs.cloud.google.com/bigquery/docs/managing-jobs,
+	// #1861).
+	// A dash when the engine names no user, as Job history's column has.
+	jobProps = append(jobProps, console.Property{Label: "User", Value: orDash(job.UserEmail)})
+	if s := job.Statistics; s != nil && (s.Query != nil || s.TotalBytesProcessed > 0) {
+		jobProps = append(jobProps, console.Property{Label: "Bytes processed", Value: studioBytes(s.TotalBytesProcessed)})
+		if s.Query != nil {
+			jobProps = append(jobProps, console.Property{Label: "Bytes billed", Value: studioBytes(s.Query.TotalBytesBilled)})
 		}
 	}
 	if errorResult != nil {

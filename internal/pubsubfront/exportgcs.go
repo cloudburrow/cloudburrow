@@ -148,6 +148,12 @@ func (f *Front) checkStorageConfig(ctx context.Context, s *pubsubpb.Subscription
 	if cfg.GetBucket() == "" || strings.HasPrefix(cfg.GetBucket(), "gs://") || strings.Contains(cfg.GetBucket(), "/") {
 		return apierror.InvalidArgument("Invalid Cloud Storage bucket name %q: name the bucket alone, without gs:// or a path.", cfg.GetBucket())
 	}
+	if err := checkServiceAccount(cfg.GetServiceAccountEmail()); err != nil {
+		return err
+	}
+	if err := f.checkActAs(ctx, s.GetName(), cfg.GetServiceAccountEmail()); err != nil {
+		return err
+	}
 	if strings.HasSuffix(cfg.GetFilenameSuffix(), "/") {
 		return apierror.InvalidArgument("The filename suffix cannot end in \"/\".")
 	}
@@ -191,7 +197,7 @@ func (f *Front) checkStorageConfig(ctx context.Context, s *pubsubpb.Subscription
 	if err != nil {
 		return apierror.Internal(err, "Cannot read the Cloud Storage bucket %s.", cfg.GetBucket())
 	}
-	return nil
+	return f.checkWriterAtCreate(forProject(ctx, projectOf(s.GetName())), s)
 }
 
 // bucket checks a bucket exists, and returns its location.
@@ -454,6 +460,10 @@ func (f *Front) runStorageExport(ctx context.Context, s *pubsubpb.Subscription) 
 	for ctx.Err() == nil {
 		var schema *topicMsgSchema
 		loc, err := f.exp.bucket(ctx, cfg.GetBucket())
+		if err == nil {
+			// The writing account's roles (#1998, exportiam.go).
+			err = f.checkWriter(ctx, s)
+		}
 		if err == nil && !f.inTransitAllowed(s.GetTopic(), loc) {
 			err = &errDestination{int32(pubsubpb.CloudStorageConfig_IN_TRANSIT_LOCATION_RESTRICTION),
 				"Cannot write to the Cloud Storage bucket " + cfg.GetBucket() + ": enforce_in_transit is set and its location " + loc + " is not one of the topic's allowed regions."}

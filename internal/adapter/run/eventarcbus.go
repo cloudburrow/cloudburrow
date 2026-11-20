@@ -39,6 +39,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	eventarcpb "cloud.google.com/go/eventarc/apiv1/eventarcpb"
 	"cloud.google.com/go/logging/apiv2/loggingpb"
@@ -479,10 +480,52 @@ func (f *FunctionsServer) eaDeliver(pipeline string, d *eventarcpb.Pipeline_Dest
 			attrs["content-type"] = ct
 		}
 		return pub.Publish(ctx, eaTopicName(d.GetTopic()), data, attrs)
+	case d.GetWorkflow() != "":
+		if err := f.checkWorkflow(d.GetWorkflow()); err != nil {
+			return err
+		}
+		arg, err := eaPipelineWorkflowArgument(msg, format)
+		if err != nil {
+			return err
+		}
+		return f.events.Workflows.StartWorkflow(ctx, d.GetWorkflow(), arg)
 	case d.GetHttpEndpoint() != nil:
 		return f.eaDeliverHTTP(ctx, pipeline, d, msg, format)
 	}
 	return fmt.Errorf("the destination is not one this instance delivers to")
+}
+
+// eaPipelineWorkflowArgument is a pipeline's message as a workflow's
+// runtime argument (#1996): the CloudEvent in its JSON format, its
+// attributes beside data (the JSON value when the payload is JSON, else
+// the text, or data_base64 when it is not UTF-8), as Eventarc passes it.
+func eaPipelineWorkflowArgument(msg map[string]any, format *eaFormat) (string, error) {
+	body, ct, err := eaPayload(msg, format)
+	if err != nil {
+		return "", err
+	}
+	out := map[string]any{}
+	for k, v := range msg {
+		if k != "data" {
+			out[k] = eaHeaderValue(v)
+		}
+	}
+	if ct != "" {
+		out["datacontenttype"] = ct
+	}
+	if _, has := msg["data"]; has {
+		var data any
+		switch {
+		case json.Unmarshal(body, &data) == nil:
+			out["data"] = data
+		case utf8.Valid(body):
+			out["data"] = string(body)
+		default:
+			out["data_base64"] = base64.StdEncoding.EncodeToString(body)
+		}
+	}
+	b, err := json.Marshal(out)
+	return string(b), err
 }
 
 // eaDeliverHTTP posts the message to an HTTP endpoint.

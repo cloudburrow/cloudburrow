@@ -912,8 +912,17 @@ func TestDestructiveActionsAskForTheName(t *testing.T) {
 	// #1931: each kind's delete is confirmed as Google's console confirms
 	// it, the word delete or DELETE, or the button alone, which leaves
 	// focus on Cancel so one Enter does not delete.
-	if !strings.Contains(js, `if (style === "delete" || style === "DELETE") confirmWord = style;`) {
+	// #1860: Cloud SQL's Delete backup asks for the word Delete.
+	if !strings.Contains(js, `if (style === "delete" || style === "DELETE" || style === "Delete") confirmWord = style;`) {
 		t.Error("a delete confirmed by the word delete does not ask for that word")
+	}
+	// #1860: an action's own dialog title, and a confirmation titled and
+	// styled as Google's, on click and after a form.
+	for _, want := range []string{`text: action.title || (segments.length ?`, "title: action.confirmTitle || `${action.label} ${name}?`",
+		"title: action.confirmTitle || `${action.label}: ${name}?`", `const panels = new Map();`, `if (first.openPanel) first.openPanel();`} {
+		if !strings.Contains(js, want) {
+			t.Errorf("console.js lacks %s", want)
+		}
 	}
 	if !strings.Contains(js, "(input || cancel).focus();") {
 		t.Error("a confirmation with nothing to type does not leave focus on Cancel")
@@ -2553,5 +2562,36 @@ func TestRowTargetsAndConfirmedActions(t *testing.T) {
 		if !strings.Contains(js, want) {
 			t.Errorf("console.js is missing %q", want)
 		}
+	}
+}
+
+// TestTheInfoPanelHasARowsTabsAndPropertyActionLinks (#1859): Google's
+// Spanner Instances list opens the Info panel on a checked row, with a
+// Labels tab edited in place and saved; an instance's Edition has Upgrade
+// beside it. The tabs are a tablist with arrow keys, the form posts the tab's
+// action at the row's Target, and a Linked action is not a page button.
+func TestTheInfoPanelHasARowsTabsAndPropertyActionLinks(t *testing.T) {
+	js := consoleAsset(t, "console.js")
+	for _, want := range []string{
+		"const infoOnSelect = Boolean(opts.rowControls && data.infoOnSelect);",
+		"openInfoPanelOn(item, dataColumns(), route, refresh);",
+		"function infoTabs(item, tabs, details, route, onDone)",
+		`role: "tablist", "aria-label": ` + "`${item.name} info`",
+		`role: "tab", id: ` + "`info-tab-${t.id}`",
+		`role: "tabpanel", id: "info-tab-panel"`,
+		"ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: tabs.length - 1",
+		`{ Path: target, Action: tab.form.id, Values: values }`,
+		"text: tab.form.submit || tab.form.label",
+		"!onTabs.has(a.id) && !onRows.has(a.id) && !a.linked",
+		`here.searchParams.set("action", prop.action);`,
+		`class: "property-action"`,
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("console.js is missing %q", want)
+		}
+	}
+	// A poll does not redraw the panel under someone typing in it.
+	if !strings.Contains(js, "const shown = !quiet && inspected && infoPanelOpen()") {
+		t.Error("a refresh does not redraw the inspected row's panel, or a poll does")
 	}
 }

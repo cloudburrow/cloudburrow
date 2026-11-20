@@ -68,6 +68,10 @@ import (
 type rowConv struct {
 	md   protoreflect.MessageDescriptor
 	cols []colConv
+	// changeType and changeSeq are the writer schema's _CHANGE_TYPE and
+	// _CHANGE_SEQUENCE_NUMBER pseudo-columns, nil when it has none: change
+	// data capture (storagewritecdc.go, #1999).
+	changeType, changeSeq protoreflect.FieldDescriptor
 }
 
 // colConv is one field of the writer schema and the column it writes.
@@ -117,6 +121,14 @@ func newRowConv(md protoreflect.MessageDescriptor, fields []field, path string) 
 	for i := 0; i < md.Fields().Len(); i++ {
 		fd := md.Fields().Get(i)
 		name := columnNameOf(fd)
+		if path == "" {
+			if pc := changePseudoColumn(name); pc != "" {
+				if err := rc.takePseudoColumn(pc, fd); err != nil {
+					return nil, err
+				}
+				continue
+			}
+		}
 		col, ok := fieldNamed(fields, name)
 		if !ok {
 			return nil, status.Errorf(codes.InvalidArgument,
@@ -280,6 +292,27 @@ func (rc *rowConv) row(b []byte) (map[string]any, error) {
 		return nil, fmt.Errorf("the row does not decode as the writer schema's message: %v", err)
 	}
 	return rc.message(msg)
+}
+
+// rowChange decodes one serialized row as row does, and reads its change
+// data capture pseudo-columns (storagewritecdc.go).
+func (rc *rowConv) rowChange(b []byte) (map[string]any, rowChange, error) {
+	msg := dynamicpb.NewMessage(rc.md)
+	if err := (proto.UnmarshalOptions{AllowPartial: true}).Unmarshal(b, msg); err != nil {
+		return nil, rowChange{}, fmt.Errorf("the row does not decode as the writer schema's message: %v", err)
+	}
+	obj, err := rc.message(msg)
+	if err != nil {
+		return nil, rowChange{}, err
+	}
+	var ch rowChange
+	if rc.changeType != nil && msg.Has(rc.changeType) {
+		ch.typ = msg.Get(rc.changeType).String()
+	}
+	if rc.changeSeq != nil && msg.Has(rc.changeSeq) {
+		ch.seq, ch.hasSeq = msg.Get(rc.changeSeq).String(), true
+	}
+	return obj, ch, nil
 }
 
 func (rc *rowConv) message(msg protoreflect.Message) (map[string]any, error) {

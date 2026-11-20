@@ -239,7 +239,8 @@ func (c *LifecycleComponent) Backends() []Backend {
 			// Cloud KMS's, through cloudburrow-host (#1874).
 			args := append([]string{}, b.Front.Args...)
 			if c.enabled(config.ServiceBigQuery) {
-				args = append(args, "--bigquery", "http://"+InClusterBigQueryHost(c.installer.Namespace))
+				args = append(args, "--bigquery", "http://"+InClusterBigQueryHost(c.installer.Namespace),
+					"--bigquery-storage", InClusterBigQueryStorageHost(c.installer.Namespace))
 			}
 			if c.enabled(config.ServiceStorage) {
 				args = append(args, "--storage", "http://"+InClusterBuiltinStorageHost(c.installer.Namespace))

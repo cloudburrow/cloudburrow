@@ -65,6 +65,24 @@ var fieldTypes = map[string]bool{
 // fieldModes are TableFieldSchema.mode's values; empty means NULLABLE.
 var fieldModes = map[string]bool{"": true, "NULLABLE": true, "REQUIRED": true, "REPEATED": true}
 
+// maxTableColumns is BigQuery's "Maximum number of columns in a table":
+// "Each table, query result, or view definition can have up to 10,000
+// columns. This includes nested and repeated columns."
+// https://cloud.google.com/bigquery/quotas (#2008). The engine's SQLite
+// holds 32,767 (third_party/bigquery-emulator patch 0105), so this, not
+// the engine, is the limit a caller meets.
+const maxTableColumns = 10000
+
+// countColumns counts a schema's columns as the limit does: every field,
+// a RECORD's subfields at every depth among them.
+func countColumns(fields []field) int {
+	n := len(fields)
+	for _, f := range fields {
+		n += countColumns(f.Fields)
+	}
+	return n
+}
+
 // checkSchema returns why a schema BigQuery would refuse is invalid, or "".
 // It checks each name, that no two fields at one level share a name
 // ("Duplicate column names are not allowed even if the case differs",
@@ -73,6 +91,11 @@ var fieldModes = map[string]bool{"": true, "NULLABLE": true, "REQUIRED": true, "
 // The emulator checks only duplicates, and answers them 500 (measured,
 // #861); a 500 is retried by the Go client until its deadline.
 func checkSchema(fields []field, prefix string) string {
+	if prefix == "" {
+		if n := countColumns(fields); n > maxTableColumns {
+			return fmt.Sprintf("Too many columns: the schema has %d columns, including nested and repeated columns; a table can have up to %d columns", n, maxTableColumns)
+		}
+	}
 	seen := map[string]string{}
 	for _, f := range fields {
 		if msg := checkColumnName(f.Name); msg != "" {

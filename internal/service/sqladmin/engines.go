@@ -48,6 +48,11 @@ type Postgres struct {
 	// Logical is a replica of a PostgreSQL external primary (#1524),
 	// which replicates by subscriptions, not as a standby.
 	Logical bool
+	// SignInLog, when set, streams the server's log, whose failed
+	// sign-ins lock a role with a lock after failed attempts (#2014);
+	// LogKey names the server it reads, Name when "".
+	SignInLog SignInLog
+	LogKey    string
 }
 
 func (p *Postgres) Instance() string        { return p.Name }
@@ -202,12 +207,16 @@ func (p *Postgres) ListUsers(ctx context.Context) ([]User, error) {
 	}
 	defer c.Close(context.Background())
 	// An IAM user is a member of cloudsqliamuser or
-	// cloudsqliamserviceaccount (#1944), as on Cloud SQL.
+	// cloudsqliamserviceaccount (#1944), as on Cloud SQL. A user its
+	// failed sign-ins locked (#2014) has lost its login, and is a user
+	// still.
 	rows, err := c.Query(ctx, `SELECT r.rolname, COALESCE((SELECT g.rolname FROM pg_catalog.pg_auth_members m
 		JOIN pg_catalog.pg_roles g ON g.oid = m.roleid
 		WHERE m.member = r.oid AND g.rolname IN ('`+pgIAMUserGroup+`', '`+pgIAMServiceAccountGroup+`') LIMIT 1), '')
 		FROM pg_catalog.pg_roles r
-		WHERE r.rolcanlogin AND r.rolname NOT LIKE 'pg\_%' ORDER BY r.rolname`)
+		WHERE (r.rolcanlogin OR EXISTS (SELECT 1 FROM pg_catalog.pg_db_role_setting s, unnest(s.setconfig) x
+			WHERE s.setrole = r.oid AND s.setdatabase = 0 AND x = '`+pgFailedCheckSetting+`=on'))
+		AND r.rolname NOT LIKE 'pg\_%' ORDER BY r.rolname`)
 	if err != nil {
 		return nil, pgError(err)
 	}
@@ -282,6 +291,11 @@ func (p *Postgres) CreateIAMUser(ctx context.Context, u User, email, password st
 // pgEnsureIAMHBA puts pgIAMHBA at the top of pg_hba.conf, once, and
 // reloads it.
 func pgEnsureIAMHBA(ctx context.Context, c *pgx.Conn) error {
+	return pgEnsureHBA(ctx, c, pgIAMHBA...)
+}
+
+// pgEnsureHBA puts lines at the top of pg_hba.conf, once, and reloads it.
+func pgEnsureHBA(ctx context.Context, c *pgx.Conn, lines ...string) error {
 	var hbaFile, hba string
 	if err := c.QueryRow(ctx, "SHOW hba_file").Scan(&hbaFile); err != nil {
 		return pgError(err)
@@ -289,12 +303,12 @@ func pgEnsureIAMHBA(ctx context.Context, c *pgx.Conn) error {
 	if err := c.QueryRow(ctx, "SELECT pg_read_file($1)", hbaFile).Scan(&hba); err != nil {
 		return pgError(err)
 	}
-	if strings.Contains(hba, pgIAMHBA[0]) {
+	if strings.Contains(hba, lines[0]) {
 		return nil
 	}
 	// The first matching line wins, so the lines go first: the file is
 	// rewritten with them ahead of what it holds.
-	next := strings.Join(pgIAMHBA, "\n") + "\n" + hba
+	next := strings.Join(lines, "\n") + "\n" + hba
 	if _, err := c.Exec(ctx, "COPY (SELECT "+quotePGString(base64Std(next))+") TO PROGRAM "+
 		quotePGString("base64 -d > "+hbaFile)); err != nil {
 		return pgError(err)

@@ -96,6 +96,7 @@ Set by `scripts/compat-env.sh` from a running instance:
 | `CLOUDBURROW_TEST_RUN_FIRESTORE` | as `FIRESTORE` | the Eventarc Firestore triggers (#1877), on the run shard |
 | `CLOUDBURROW_TEST_RUN_DATASTORE` | as `DATASTORE` | the Eventarc Datastore mode triggers (#1877), on the run shard |
 | `CLOUDBURROW_TEST_RUN_GKE` | as `GKE` | the Eventarc GKE destination (#1877), on the run shard |
+| `CLOUDBURROW_TEST_RUN_MEMORYSTORE_ADMIN` | as `MEMORYSTORE_ADMIN` | the Eventarc Memorystore for Redis direct events (#1997), on the run shard |
 | `CLOUDBURROW_TEST_RUN_KMS`, `CLOUDBURROW_TEST_RUN_SCHEDULER`, `CLOUDBURROW_TEST_RUN_LOGGING` | as `KMS`, `SCHEDULER` and `LOGGING` | the Cloud Run revision tests; see below |
 | `CLOUDBURROW_TEST_RUN_LOCALAI` | as `LOCALAI`: the local Vertex AI endpoint, which Cloud Run starts without a model | the run shard's Document AI and Speech-to-Text customer-managed key tests (#1972), with `RUN_KMS` |
 | `CLOUDBURROW_TEST_TASKS_LOGGING` | as `LOGGING` | the Cloud Tasks dispatch log (#1256), in the storage shard, so the Logging tests stay in served |
@@ -163,8 +164,8 @@ neither list.
 
 | Variable | Needed by |
 | --- | --- |
-| `CLOUDBURROW_TEST_KMS_PROBE`, `CLOUDBURROW_TEST_SECRETS_PROBE`, `CLOUDBURROW_TEST_TASKS_PROBE`, `CLOUDBURROW_TEST_SCHEDULER_PROBE` | the restart probes' setup: the file each writes its fixture to |
-| `CLOUDBURROW_TEST_KMS_EXPECT`, `CLOUDBURROW_TEST_SECRETS_EXPECT`, `CLOUDBURROW_TEST_TASKS_EXPECT`, `CLOUDBURROW_TEST_SCHEDULER_EXPECT`, `CLOUDBURROW_TEST_DATASTORE_EXPECT`, `CLOUDBURROW_TEST_FIRESTORE_EXPECT`, `CLOUDBURROW_TEST_MEMORYSTORE_EXPECT`, `CLOUDBURROW_TEST_MYSQL_EXPECT`, `CLOUDBURROW_TEST_CLOUDSQL_EXPECT` | the restart probes: `present` after a persistent restart, `absent` after an ephemeral one |
+| `CLOUDBURROW_TEST_KMS_PROBE`, `CLOUDBURROW_TEST_SECRETS_PROBE`, `CLOUDBURROW_TEST_TASKS_PROBE`, `CLOUDBURROW_TEST_SCHEDULER_PROBE`, `CLOUDBURROW_TEST_WORKFLOWS_PROBE` | the restart probes' setup: the file each writes its fixture to |
+| `CLOUDBURROW_TEST_KMS_EXPECT`, `CLOUDBURROW_TEST_SECRETS_EXPECT`, `CLOUDBURROW_TEST_TASKS_EXPECT`, `CLOUDBURROW_TEST_SCHEDULER_EXPECT`, `CLOUDBURROW_TEST_DATASTORE_EXPECT`, `CLOUDBURROW_TEST_FIRESTORE_EXPECT`, `CLOUDBURROW_TEST_MEMORYSTORE_EXPECT`, `CLOUDBURROW_TEST_MYSQL_EXPECT`, `CLOUDBURROW_TEST_CLOUDSQL_EXPECT`, `CLOUDBURROW_TEST_WORKFLOWS_EXPECT` | the restart probes: `present` after a persistent restart, `absent` after an ephemeral one |
 | `CLOUDBURROW_TEST_CLOUDSQL_SETUP` | `TestCloudSQLRestartSetup` |
 | `CLOUDBURROW_TEST_FIRESTORE_SETUP` | `TestFirestoreRestartSetup` |
 | `CLOUDBURROW_TEST_STORAGE_RESTART_PROBE` | `TestStorageAcrossRestart`: `<mode>:<file>` |

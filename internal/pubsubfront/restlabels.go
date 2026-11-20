@@ -137,6 +137,10 @@ func (f *Front) serveTopic(w http.ResponseWriter, r *http.Request, name, verb st
 				writeRESTError(w, err)
 				return
 			}
+			if err := checkStoragePolicy(t.GetMessageStoragePolicy()); err != nil {
+				writeRESTError(w, err)
+				return
+			}
 			if err := f.checkTopicKey(r.Context(), &t); err != nil {
 				writeRESTError(w, err)
 				return
@@ -186,8 +190,8 @@ func (f *Front) serveTopic(w http.ResponseWriter, r *http.Request, name, verb st
 	}
 }
 
-// restPatchTopic applies the labels of a PATCH of a topic, as gRPC's
-// UpdateTopic is, and reports whether it answered the request itself;
+// restPatchTopic applies the labels and message storage policy (#2000) of
+// a PATCH of a topic, as gRPC's UpdateTopic does, and reports whether it answered the request itself;
 // otherwise r is to be forwarded as it now is, its mask in the body in
 // snake_case whatever it names.
 func (f *Front) restPatchTopic(w http.ResponseWriter, r *http.Request, name string, body []byte) bool {
@@ -195,7 +199,8 @@ func (f *Front) restPatchTopic(w http.ResponseWriter, r *http.Request, name stri
 	if !ok || len(paths) == 0 {
 		return false
 	}
-	if !masks(paths, "labels") {
+	labels, storage := masks(paths, "labels"), masks(paths, "message_storage_policy")
+	if !labels && !storage {
 		// Any other mask is the emulator's to apply, in the body and in
 		// snake_case: the provider's ?updateMask=schemaSettings (#1304) is
 		// otherwise refused as "schemaSettings is not a known Topic field".
@@ -207,20 +212,39 @@ func (f *Front) restPatchTopic(w http.ResponseWriter, r *http.Request, name stri
 	if raw != nil && restJSON.Unmarshal(raw, &t) != nil {
 		return false // the emulator's refusal is the answer
 	}
-	if err := CheckLabels(t.GetLabels()); err != nil {
-		writeRESTError(w, err)
-		return true
+	kept := &pending{}
+	forward := paths
+	if labels {
+		if err := CheckLabels(t.GetLabels()); err != nil {
+			writeRESTError(w, err)
+			return true
+		}
+		kept.labels = updatedLabels(t.GetLabels())
+		forward = without(forward, "labels")
 	}
-	kept := &pending{labels: updatedLabels(t.GetLabels())}
-	forward := without(paths, "labels")
+	if storage {
+		// A message storage policy update (#2000, storagepolicy.go).
+		if err := f.checkStoragePolicyUpdate(r.Context(), name, &t, paths); err != nil {
+			writeRESTError(w, err)
+			return true
+		}
+		kept.storagePolicy = recomputedStoragePolicy(r.Context(), name, t.GetMessageStoragePolicy())
+		forward = without(forward, "message_storage_policy")
+	}
 	if len(forward) == 0 {
 		cur, err := f.topic(r.Context(), name)
 		if err != nil {
 			writeRESTError(w, err)
 			return true
 		}
-		f.setLabels(name, kept.labels)
+		if kept.labels != nil {
+			f.setLabels(name, kept.labels)
+		}
+		if kept.storagePolicy != nil {
+			f.setStoragePolicy(name, kept.storagePolicy)
+		}
 		f.withTopicLabels(cur)
+		f.withTopicStoragePolicy(cur)
 		out, err := protojson.Marshal(cur)
 		if err != nil {
 			writeRESTError(w, err)
@@ -231,7 +255,15 @@ func (f *Front) restPatchTopic(w http.ResponseWriter, r *http.Request, name stri
 		return true
 	}
 	if topicKey != "" {
-		if b, changed := editObject(o[topicKey], func(t jsonObject) { delete(t, "labels") }); changed {
+		if b, changed := editObject(o[topicKey], func(t jsonObject) {
+			if labels {
+				delete(t, "labels")
+			}
+			if storage {
+				delete(t, "messageStoragePolicy")
+				delete(t, "message_storage_policy")
+			}
+		}); changed {
 			o[topicKey] = b
 		}
 	}

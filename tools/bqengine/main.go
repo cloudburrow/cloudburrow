@@ -79,6 +79,20 @@ type Patched struct {
 	Dir string `json:"dir"`
 	// Patches are applied in order, relative to the wrapper module.
 	Patches []string `json:"patches"`
+	// Files replace whole files of the copy after the patches: a binary
+	// file, which a patch cannot change (#2008).
+	Files []File `json:"files,omitempty"`
+}
+
+// File is one file of a patched copy replaced by a file in the wrapper
+// module, checked against its pinned hash.
+type File struct {
+	// Path is the file in the copy, relative to its root.
+	Path string `json:"path"`
+	// From is the replacement, relative to the wrapper module.
+	From string `json:"from"`
+	// SHA256 is From's hex SHA-256.
+	SHA256 string `json:"sha256"`
 }
 
 // Arches are the node architectures built by default, those the storage
@@ -205,8 +219,18 @@ func loadSources(dir string) (Sources, error) {
 		if filepath.IsAbs(p.Dir) || !strings.HasPrefix(filepath.ToSlash(filepath.Clean(p.Dir)), "build/") {
 			return s, fmt.Errorf("sources.json: %s: dir %q must be under build/", p.Path, p.Dir)
 		}
+		for _, f := range p.Files {
+			if !localPath(f.Path) || !localPath(f.From) || len(f.SHA256) != 64 {
+				return s, fmt.Errorf("sources.json: %s: file %+v needs a relative path and from, and a sha256", p.Path, f)
+			}
+		}
 	}
 	return s, nil
+}
+
+// localPath is a relative path that stays below its root.
+func localPath(p string) bool {
+	return p != "" && !filepath.IsAbs(p) && !strings.Contains("/"+filepath.ToSlash(p)+"/", "/../")
 }
 
 func hasLine(b []byte, line string) bool {
@@ -226,6 +250,9 @@ func inputHash(dir string, src Sources) (string, error) {
 	files := []string{"sources.json", "go.mod", "go.sum"}
 	for _, p := range src.Patched {
 		files = append(files, p.Patches...)
+		for _, f := range p.Files {
+			files = append(files, f.From)
+		}
 	}
 	for _, f := range files {
 		b, err := os.ReadFile(filepath.Join(dir, f))
@@ -328,6 +355,12 @@ func prepare(ctx context.Context, dir string, src Sources) error {
 			}
 			fmt.Printf("bqengine: applied %s to %s@%s\n", name, p.Path, p.Version)
 		}
+		for _, f := range p.Files {
+			if err := replaceFile(dir, dst, f); err != nil {
+				return fmt.Errorf("%s: %w", p.Path, err)
+			}
+			fmt.Printf("bqengine: replaced %s of %s@%s with %s\n", f.Path, p.Path, p.Version, f.From)
+		}
 	}
 	// The replacements must be in force: a version bump that left the
 	// go.mod's versioned replace behind would silently build unpatched.
@@ -349,6 +382,25 @@ func prepare(ctx context.Context, dir string, src Sources) error {
 		}
 	}
 	return nil
+}
+
+// replaceFile writes f.From over f.Path in the copy at dst, once its hash
+// is the pinned one. The file must exist in the copy: a replacement adds
+// nothing new.
+func replaceFile(dir, dst string, f File) error {
+	b, err := os.ReadFile(filepath.Join(dir, f.From))
+	if err != nil {
+		return err
+	}
+	if sum := sha256.Sum256(b); hex.EncodeToString(sum[:]) != f.SHA256 {
+		return fmt.Errorf("%s hashes to %x, pinned %s", f.From, sum, f.SHA256)
+	}
+	target := filepath.Join(dst, f.Path)
+	info, err := os.Stat(target)
+	if err != nil {
+		return fmt.Errorf("replace %s: %w", f.Path, err)
+	}
+	return os.WriteFile(target, b, info.Mode().Perm())
 }
 
 // download fetches a module at its version through the go command, which

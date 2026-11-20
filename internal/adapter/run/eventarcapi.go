@@ -48,12 +48,16 @@ import (
 // ce-specversion, ce-type, ce-time (and ce-subject for Cloud Storage) and
 // the documented data (MessagePublishedData; the object), with an ID token
 // for the trigger's service account. Triggers are kept in memory, as the
-// functions' are. Cloud Audit Logs (eventarcaudit.go) and Firestore
-// (eventarcfirestore.go) events are published by this process to a topic
-// Eventarc makes; a destination can also be a Cloud Run function or an
-// HTTP endpoint; match-path-pattern (eventarcpath.go) is the one operator
-// beyond an exact match. Channels (eventarcchannels.go), GKE and Workflows
-// destinations are UNIMPLEMENTED with the reason.
+// functions' are. Cloud Audit Logs (eventarcaudit.go), Firestore
+// (eventarcfirestore.go, eventarcdatastore.go) and the resource events of
+// Memorystore for Redis, Cloud Run functions and Eventarc itself
+// (eventarcresources.go) are published by this process to a topic
+// Eventarc makes; a destination can also be a Cloud Run function, a GKE
+// service (eventarcgke.go), an HTTP endpoint or a workflow (#1986);
+// match-path-pattern (eventarcpath.go) is the one operator beyond an
+// exact match; a trigger can be on a channel (eventarcchannels.go).
+// Eventarc Advanced's buses, pipelines and enrollments are
+// eventarcadvanced.go.
 
 // EventarcServer serves Eventarc's triggers and providers.
 type EventarcServer struct {
@@ -135,6 +139,9 @@ func eaProviders(location string) []*eventarcpb.Provider {
 		}
 	}
 	sort.Strings(direct["firestore.googleapis.com"])
+	for _, svc := range []string{"redis.googleapis.com", "cloudfunctions.googleapis.com", "eventarc.googleapis.com"} {
+		direct[svc] = eaDirectTypes(svc)
+	}
 	names := append(AuditServiceNames(), "storage.googleapis.com")
 	sort.Strings(names)
 	var out []*eventarcpb.Provider
@@ -185,6 +192,8 @@ func eaSpec(t *eventarcpb.Trigger, region string) (*functionspb.EventTrigger, er
 		}
 	} else if err := eaCheckFilters(spec); err != nil {
 		return nil, err
+	} else if err := eaResourceServed(spec.GetEventType()); err != nil {
+		return nil, apierror.Unimplemented("%v", err)
 	}
 	switch typ := spec.GetEventType(); {
 	case spec.GetChannel() != "":
@@ -327,6 +336,7 @@ func (e *EventarcServer) CreateTrigger(ctx context.Context, req *eventarcpb.Crea
 	eaState.mu.Lock()
 	eaState.triggers[name] = &eaTrigger{t: t, live: live}
 	eaState.mu.Unlock()
+	e.baselineResources(ctx, project, spec.GetEventType())
 	return e.op(name, "create", proto.Clone(t))
 }
 

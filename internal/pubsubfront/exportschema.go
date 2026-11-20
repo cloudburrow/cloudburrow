@@ -124,6 +124,9 @@ func (n *schemaNode) allowed() []string {
 // compatible checks the members against the table's columns.
 func compatible(members []schemaMember, cols []bqField, drop bool, path string) error {
 	for _, m := range members {
+		if path == "" && isChangeField(m.name) {
+			continue // a pseudo-column of change data capture (exportcdc.go)
+		}
 		c, ok := column(cols, m.name)
 		if !ok {
 			if drop {

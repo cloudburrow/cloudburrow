@@ -39,7 +39,6 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
-	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -69,9 +68,13 @@ type Options struct {
 	Local func(api string) string
 	// Tokens mint the workflow service account's tokens; nil sends none.
 	Tokens TokenMinter
-	// Log writes an execution's sys.log entries and call logs, to the
-	// instance's Cloud Logging when it serves it.
-	Log func(project, location, workflow, execution, severity string, payload any)
+	// Log writes an execution's log entries (sys.log's, its start and end,
+	// call logs) to logID, in the instance's Cloud Logging when it serves
+	// it.
+	Log func(project, location, workflow, execution, logID, severity string, payload any)
+	// KMS is the instance's Cloud KMS, which a workflow's
+	// customer-managed key is used through (cmek.go); nil without it.
+	KMS func() KMS
 	// Addr is this server's own address, for callback URLs.
 	Addr func() string
 	// Ingress is the cluster ingress's host address, which Cloud Run
@@ -86,14 +89,26 @@ type workflowRecord struct {
 	WF        *workflowspb.Workflow
 	Revisions []*workflowspb.Workflow // newest first
 	revCount  int
+	// cipher is the source encrypted under WF's crypto_key_name.
+	cipher []byte
 }
 
 type executionRecord struct {
 	Ex      *executionspb.Execution
 	History []StepEntry
 	m       *machine
-	cancel  context.CancelFunc
+	cancel  context.CancelCauseFunc
 	done    chan struct{}
+	// journal is a stopped execution's journal, to resume it from.
+	journal []journalEntry
+	// key and cipher are its revision's customer-managed key and the
+	// source encrypted under it.
+	key    string
+	cipher []byte
+	// level is the execution's own executionHistoryLevel, which the Go
+	// client's Execution has no field for (the JSON API carries it); ""
+	// takes its workflow's.
+	level string
 }
 
 // Server serves both APIs over one set of records.
@@ -109,13 +124,15 @@ type Server struct {
 	wg    sync.WaitGroup
 	ctx   context.Context
 	stop  context.CancelFunc
+	// keyCheck is KeyCheckInterval when the server was made.
+	keyCheck time.Duration
 }
 
 // NewServer loads the records in state ("" keeps them in memory).
 func NewServer(state string, opts Options) (*Server, error) {
 	ctx, stop := context.WithCancel(context.Background())
 	s := &Server{opts: opts, state: state, wfs: map[string]*workflowRecord{}, execs: map[string]*executionRecord{},
-		ops: map[string]*longrunningpb.Operation{}, now: time.Now, ctx: ctx, stop: stop}
+		ops: map[string]*longrunningpb.Operation{}, now: time.Now, ctx: ctx, stop: stop, keyCheck: KeyCheckInterval}
 	if state != "" {
 		if err := s.load(); err != nil {
 			stop()
@@ -143,11 +160,16 @@ type diskWorkflow struct {
 	Workflow  json.RawMessage   `json:"workflow"`
 	Revisions []json.RawMessage `json:"revisions"`
 	Count     int               `json:"revisionCount"`
+	Cipher    []byte            `json:"cipher,omitempty"`
 }
 
 type diskExecution struct {
 	Execution json.RawMessage `json:"execution"`
 	History   []StepEntry     `json:"history"`
+	Journal   []journalEntry  `json:"journal,omitempty"`
+	Key       string          `json:"key,omitempty"`
+	Cipher    []byte          `json:"cipher,omitempty"`
+	Level     string          `json:"executionHistoryLevel,omitempty"`
 }
 
 func (s *Server) load() error {
@@ -163,7 +185,7 @@ func (s *Server) load() error {
 		return fmt.Errorf("workflows state %s: %w", s.state, err)
 	}
 	for _, w := range d.Workflows {
-		rec := &workflowRecord{WF: &workflowspb.Workflow{}, revCount: w.Count}
+		rec := &workflowRecord{WF: &workflowspb.Workflow{}, revCount: w.Count, cipher: w.Cipher}
 		if err := protojson.Unmarshal(w.Workflow, rec.WF); err != nil {
 			return err
 		}
@@ -177,19 +199,12 @@ func (s *Server) load() error {
 		s.wfs[rec.WF.GetName()] = rec
 	}
 	for _, e := range d.Executions {
-		rec := &executionRecord{Ex: &executionspb.Execution{}, History: e.History}
+		rec := &executionRecord{Ex: &executionspb.Execution{}, History: e.History, journal: e.Journal, key: e.Key, cipher: e.Cipher, level: e.Level}
 		if err := protojson.Unmarshal(e.Execution, rec.Ex); err != nil {
 			return err
 		}
-		// An execution the instance stopped during cannot resume where it
-		// was: it fails, saying why.
-		if rec.Ex.GetState() == executionspb.Execution_ACTIVE || rec.Ex.GetState() == executionspb.Execution_QUEUED {
-			rec.Ex.State = executionspb.Execution_FAILED
-			rec.Ex.EndTime = timestamppb.New(s.now())
-			rec.Ex.Duration = durationpb.New(s.now().Sub(rec.Ex.GetStartTime().AsTime()))
-			rec.Ex.Error = &executionspb.Execution_Error{Payload: `"the CloudBurrow instance stopped while the execution ran"`,
-				Context: "RuntimeError: the CloudBurrow instance stopped while the execution ran; executions do not resume after a restart"}
-		}
+		// An execution the instance stopped during carries on when Resume
+		// is called (journal.go).
 		s.execs[rec.Ex.GetName()] = rec
 	}
 	for _, o := range d.Operations {
@@ -222,6 +237,7 @@ func (s *Server) save() error {
 			}
 			dw.Revisions = append(dw.Revisions, rb)
 		}
+		dw.Cipher = w.cipher
 		d.Workflows = append(d.Workflows, dw)
 	}
 	for _, name := range sortedNames(s.execs) {
@@ -230,11 +246,14 @@ func (s *Server) save() error {
 		if err != nil {
 			return err
 		}
-		h := e.History
+		h, j := e.History, e.journal
 		if e.m != nil {
-			h = e.m.History()
+			h, j = e.m.History(), e.m.Journal()
 		}
-		d.Executions = append(d.Executions, diskExecution{Execution: b, History: h})
+		if e.Ex.GetState() != executionspb.Execution_ACTIVE && e.Ex.GetState() != executionspb.Execution_QUEUED {
+			j = nil
+		}
+		d.Executions = append(d.Executions, diskExecution{Execution: b, History: h, Journal: j, Key: e.key, Cipher: e.cipher, Level: e.level})
 	}
 	for _, name := range sortedNames(s.ops) {
 		b, err := protojson.Marshal(s.ops[name])
@@ -275,7 +294,7 @@ func (s *Server) ResetProject(project string) error {
 	for name, e := range s.execs {
 		if match(name) {
 			if e.cancel != nil {
-				e.cancel()
+				e.cancel(context.Canceled)
 			}
 			delete(s.execs, name)
 		}
@@ -362,8 +381,8 @@ func validateWorkflow(w *workflowspb.Workflow) error {
 			return apierror.InvalidArgument("user_env_vars %q is longer than %d bytes", k, MaxEnvVarBytes)
 		}
 	}
-	if w.GetCryptoKeyName() != "" {
-		return apierror.Unimplemented("crypto_key_name (CMEK) is not supported by CloudBurrow's Workflows")
+	if err := checkKeyName(w); err != nil {
+		return err
 	}
 	src := w.GetSourceContents()
 	if src == "" {
@@ -416,7 +435,11 @@ func (a *WorkflowsAPI) CreateWorkflow(_ context.Context, req *workflowspb.Create
 		project := strings.Split(name, "/")[1]
 		w.ServiceAccount = "projects/" + project + "/serviceAccounts/" + a.s.projectNumber(project) + "-compute@developer.gserviceaccount.com"
 	}
-	rec := &workflowRecord{WF: w, Revisions: []*workflowspb.Workflow{clone(w)}, revCount: 1}
+	cipher, err := s.seal(w)
+	if err != nil {
+		return nil, err
+	}
+	rec := &workflowRecord{WF: w, Revisions: []*workflowspb.Workflow{clone(w)}, revCount: 1, cipher: cipher}
 	s.wfs[name] = rec
 	op, err := s.op(req.GetParent(), "create", name, w)
 	if err != nil {
@@ -524,7 +547,7 @@ func (a *WorkflowsAPI) DeleteWorkflow(_ context.Context, req *workflowspb.Delete
 	for name, e := range s.execs {
 		if strings.HasPrefix(name, req.GetName()+"/executions/") {
 			if e.cancel != nil {
-				e.cancel()
+				e.cancel(context.Canceled)
 			}
 			delete(s.execs, name)
 		}
@@ -587,6 +610,11 @@ func (a *WorkflowsAPI) UpdateWorkflow(_ context.Context, req *workflowspb.Update
 				next.ServiceAccount = in.GetServiceAccount()
 			}
 		case "crypto_key_name":
+			if next.CryptoKeyName != in.GetCryptoKeyName() {
+				// "that revision of the workflow is encrypted with the new
+				// key" (use-cmek).
+				newRevision = true
+			}
 			next.CryptoKeyName = in.GetCryptoKeyName()
 		case "call_log_level":
 			if next.CallLogLevel != in.GetCallLogLevel() {
@@ -608,6 +636,15 @@ func (a *WorkflowsAPI) UpdateWorkflow(_ context.Context, req *workflowspb.Update
 	if err := validateWorkflow(next); err != nil {
 		return nil, err
 	}
+	cipher := rec.cipher
+	if next.GetCryptoKeyName() != rec.WF.GetCryptoKeyName() || next.GetSourceContents() != rec.WF.GetSourceContents() {
+		c, err := s.seal(next)
+		if err != nil {
+			return nil, err
+		}
+		cipher = c
+	}
+	rec.cipher = cipher
 	now := timestamppb.New(s.now())
 	next.UpdateTime = now
 	if newRevision && revisionFields != nil {

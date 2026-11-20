@@ -3,7 +3,9 @@
 package compat
 
 import (
+	"context"
 	"encoding/base64"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +13,8 @@ import (
 	"cloud.google.com/go/datastore"
 	datastorepb "cloud.google.com/go/datastore/apiv1/datastorepb"
 	eventarcpb "cloud.google.com/go/eventarc/apiv1/eventarcpb"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 )
@@ -178,6 +182,132 @@ func TestEventarcDatastoreTriggers(t *testing.T) {
 	for _, e := range all {
 		if strings.HasPrefix(e.Headers["ce-entity"], "posts/") {
 			t.Errorf("an entity of posts reached the service: %v", e.Headers)
+		}
+	}
+}
+
+// covers: google.cloud.eventarc.v1.Eventarc/CreateTrigger, google.cloud.eventarc.v1.Eventarc/GetTrigger
+//
+// TestGcloudAndTerraformEventarcDatastoreTriggers (#1997): Datastore mode
+// triggers made as Google's "Extend Datastore with Cloud Functions (2nd
+// gen)" and Eventarc's Datastore pages make them, through the harness
+// with egress blocked. gcloud eventarc triggers create with
+// --event-filters type, database and namespace,
+// --event-filters-path-pattern=entity=KIND/{id} and
+// --event-data-content-type=application/protobuf; and Terraform's
+// google_eventarc_trigger with matching_criteria (the entity one with
+// operator match-path-pattern) and event_data_content_type. Each is read
+// back with the official client, receives the create of an entity of its
+// kind made with the Datastore client, and is deleted (triggers delete,
+// destroy).
+func TestGcloudAndTerraformEventarcDatastoreTriggers(t *testing.T) {
+	h := New(t)
+	dsAddr := runShardEndpoint(h, "CLOUDBURROW_TEST_RUN_DATASTORE", EnvDatastore)
+	f := newEventarcFixture(t, h, "eventarc-ds-cli-probe")
+	g := newGcloudSession(t, h)
+	m := newTFModule(t)
+	t.Setenv("DATASTORE_EMULATOR_HOST", dsAddr)
+	dc, err := datastore.NewClient(f.ctx, h.Project())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = dc.Close() })
+	suffix := strings.ReplaceAll(time.Now().Format("150405.000000"), ".", "")
+	gkind, tkind := "gusers"+suffix, "tusers"+suffix
+	for _, n := range []string{"gcloud-ds", "tf-ds"} {
+		name := f.parent + "/triggers/" + n
+		t.Cleanup(func() {
+			if op, err := f.ec.DeleteTrigger(context.Background(), &eventarcpb.DeleteTriggerRequest{Name: name, AllowMissing: true}); err == nil {
+				_, _ = op.Wait(context.Background())
+			}
+		})
+	}
+	g.must("eventarc", "triggers", "create", "gcloud-ds", "--location=us-central1", "--project="+h.Project(),
+		"--destination-run-service="+f.service, "--destination-run-region=us-central1", "--destination-run-path=/gcloud",
+		"--event-filters=type=google.cloud.datastore.entity.v1.written", "--event-filters=database=(default)",
+		"--event-filters=namespace=(default)", "--event-filters-path-pattern=entity="+gkind+"/{id}",
+		"--event-data-content-type=application/protobuf")
+	gt, err := f.ec.GetTrigger(f.ctx, &eventarcpb.GetTriggerRequest{Name: f.parent + "/triggers/gcloud-ds"})
+	if err != nil || len(gt.GetEventFilters()) != 4 || gt.GetEventDataContentType() != "application/protobuf" {
+		t.Fatalf("gcloud's Datastore mode trigger = %v, %v", gt, err)
+	}
+	for _, ef := range gt.GetEventFilters() {
+		if ef.GetAttribute() == "entity" && (ef.GetOperator() != "match-path-pattern" || ef.GetValue() != gkind+"/{id}") {
+			t.Errorf("the entity filter = %v", ef)
+		}
+	}
+	m.write(fmt.Sprintf(`
+resource "google_eventarc_trigger" "t" {
+  project                 = %[1]q
+  location                = "us-central1"
+  name                    = "tf-ds"
+  event_data_content_type = "application/protobuf"
+  matching_criteria {
+    attribute = "type"
+    value     = "google.cloud.datastore.entity.v1.written"
+  }
+  matching_criteria {
+    attribute = "database"
+    value     = "(default)"
+  }
+  matching_criteria {
+    attribute = "entity"
+    value     = "%[2]s/{id}"
+    operator  = "match-path-pattern"
+  }
+  destination {
+    cloud_run_service {
+      service = %[3]q
+      region  = "us-central1"
+      path    = "/terraform"
+    }
+  }
+}
+`, h.Project(), tkind, f.service))
+	m.must("init", "-input=false", "-no-color")
+	if out := m.must("apply", "-auto-approve", "-input=false", "-no-color"); !strings.Contains(out, "1 added, 0 changed, 0 destroyed") {
+		t.Errorf("apply:\n%s", out)
+	}
+	tt, err := f.ec.GetTrigger(f.ctx, &eventarcpb.GetTriggerRequest{Name: f.parent + "/triggers/tf-ds"})
+	if err != nil || len(tt.GetEventFilters()) != 3 || tt.GetEventDataContentType() != "application/protobuf" {
+		t.Fatalf("Terraform's Datastore mode trigger = %v, %v", tt, err)
+	}
+	m.planClean()
+	// The triggers' watch of the database starts within a few seconds.
+	time.Sleep(8 * time.Second)
+	type row struct{ N int64 }
+	for _, k := range []string{gkind, tkind} {
+		key := datastore.NameKey(k, "e1", nil)
+		if _, err := dc.Put(f.ctx, key, &row{N: 1}); err != nil {
+			t.Fatalf("Put %s: %v", k, err)
+		}
+		t.Cleanup(func() { _ = dc.Delete(context.Background(), key) })
+	}
+	for path, k := range map[string]string{"/gcloud": gkind, "/terraform": tkind} {
+		ev, all := probedEvents(t, f.base, f.host, func(e probedEvent) bool { return e.Path == path && e.Headers["ce-entity"] == k+"/e1" })
+		if ev.Headers == nil {
+			t.Errorf("no Datastore mode event for %s/e1 reached %s; the service got %d events", k, path, len(all))
+			continue
+		}
+		if ev.Headers["ce-type"] != "google.cloud.datastore.entity.v1.written" || ev.Headers["content-type"] != "application/protobuf" {
+			t.Errorf("%s's event = %v", path, ev.Headers)
+		}
+		raw, _ := base64.StdEncoding.DecodeString(ev.DataBase64)
+		if v, _, _ := entityEventData(t, raw); v.GetEntity().GetProperties()["N"].GetIntegerValue() != 1 {
+			t.Errorf("%s's EntityEventData value = %v", path, v)
+		}
+	}
+	_, all := probedEvents(t, f.base, f.host, func(probedEvent) bool { return false })
+	for _, e := range all {
+		if (e.Path == "/gcloud" && strings.HasPrefix(e.Headers["ce-entity"], tkind)) || (e.Path == "/terraform" && strings.HasPrefix(e.Headers["ce-entity"], gkind)) {
+			t.Errorf("an entity of another kind reached %s: %v", e.Path, e.Headers)
+		}
+	}
+	g.must("eventarc", "triggers", "delete", "gcloud-ds", "--location=us-central1", "--project="+h.Project(), "--quiet")
+	m.must("destroy", "-auto-approve", "-input=false", "-no-color")
+	for _, n := range []string{"gcloud-ds", "tf-ds"} {
+		if _, err := f.ec.GetTrigger(f.ctx, &eventarcpb.GetTriggerRequest{Name: f.parent + "/triggers/" + n}); status.Code(err) != codes.NotFound {
+			t.Errorf("GetTrigger %s after delete: %v; want NotFound", n, err)
 		}
 	}
 }
