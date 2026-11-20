@@ -45,6 +45,14 @@ type Connect struct {
 	// Withheld are variables `env` exports whose value is a credential; the
 	// page names them and never carries the value.
 	Withheld []WithheldVar `json:"withheld,omitempty"`
+	// Refusals are the CLOUDSDK_API_ENDPOINT_OVERRIDES_* variables `env
+	// --format json` adds for every gcloud API this instance does not serve
+	// (#1977), each pointing at the local refusal. They are computed by the
+	// function `env` adds them with, so Variables, Withheld and Refusals
+	// together are exactly what `env --format json` prints. The page lists
+	// them apart from the variables table, which stays the ones a developer
+	// reads.
+	Refusals []EnvVar `json:"refusals,omitempty"`
 	// Formats are `env --format <id>`'s output, less the withheld values.
 	Formats []EnvFormat `json:"formats"`
 	// Warnings are what `env` says on stderr: a variable it cannot export.
