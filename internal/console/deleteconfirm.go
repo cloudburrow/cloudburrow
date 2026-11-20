@@ -200,6 +200,11 @@ var DeleteConfirmRules = map[string]DeleteConfirmRule{
 	"vpc-firewalls": {Style: DeleteConfirmClick, Source: "https://docs.cloud.google.com/firewall/docs/using-firewalls", Verified: true},
 	// "Click Delete again to confirm."
 	"vpc-routes": {Style: DeleteConfirmClick, Source: "https://docs.cloud.google.com/vpc/docs/using-routes", Verified: true},
+	// Compute Engine snapshots (#1965). UNVERIFIED: "Select one or more
+	// snapshots that you want to delete. At the top of the Snapshots page,
+	// click Delete." No dialog described (docs re-read 2026-11-20:
+	// https://docs.cloud.google.com/compute/docs/disks/manage-snapshots).
+	"compute-snapshots": unverified,
 }
 
 // deleteConfirmOf is p's confirmation style, empty for the default.
