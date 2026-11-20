@@ -377,6 +377,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// the entities as they are now (#1942, datastorereadtime.go).
 		icpts = append(icpts, newDatastoreReadTimes())
 	}
+	var firestoreQueries Intercept
 	switch {
 	case *queries == "datastore" || (*datastoreDBs && *queries == ""):
 		qd := queryfront.NewDatastore(*upstream)
@@ -394,7 +395,10 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		icpts = append(icpts, qd)
 	case *queries == "firestore":
-		icpts = append(icpts, queryfront.NewFirestore(*upstream))
+		// After the Firestore Admin API's intercepts, below: its access
+		// gate and the edition guard, which refuses a read_time outside the
+		// version window (#1942), see a PartitionQuery first.
+		firestoreQueries = queryfront.NewFirestore(*upstream)
 	}
 	if dbs != nil {
 		if len(icpts) > 0 {
@@ -433,7 +437,10 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// The access gate goes first (#1880, #1881): a Datastore mode
 		// database's, or an inaccessible key's, data calls are refused
 		// before anything else reads them.
-		icpts = append(icpts, fa.AccessGate(), fa, fa.EditionGuard())
+		// REST gets and lists at a read time or in a transaction, which
+		// the emulator's gateway cannot answer, after the guard has
+		// applied the version window (#1942).
+		icpts = append(icpts, fa.AccessGate(), fa, fa.EditionGuard(), fa.RESTReads())
 		if *mongoListen != "" {
 			// TLS only, as Google requires (#1738): the certificate the
 			// instance issued, in the front's environment.
@@ -458,6 +465,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			}()
 			logger.Printf("call front: serving Firestore with MongoDB compatibility on %s", ml.Addr())
 		}
+	}
+	if firestoreQueries != nil {
+		icpts = append(icpts, firestoreQueries)
 	}
 	if *spannerInstances {
 		si, err := spannerfront.New(*upstream)

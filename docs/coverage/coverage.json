@@ -9734,6 +9734,7 @@
           "test/compat/firestorecompact1969_test.go:40 TestFirestoreCompactsItsVersionsBeforeTheHeapFills",
           "test/compat/firestorepersist1615_test.go:165 TestFirestoreAcrossRestart",
           "test/compat/firestorepersist1615_test.go:64 TestFirestoreSurvivesAPodRestart",
+          "test/compat/firestorepitrreads1942_test.go:51 TestFirestorePointInTimeReadsThroughEveryReadMethod",
           "test/compat/optional_test.go:43 TestFirestoreDocumentCRUD"
         ]
       },
@@ -9748,6 +9749,7 @@
         "method": "google.firestore.v1.Firestore/BeginTransaction",
         "status": "Verified",
         "tests": [
+          "test/compat/firestorepitrreads1942_test.go:51 TestFirestorePointInTimeReadsThroughEveryReadMethod",
           "test/compat/optional_test.go:43 TestFirestoreDocumentCRUD"
         ]
       },
@@ -9798,7 +9800,8 @@
         "method": "google.firestore.v1.Firestore/ListCollectionIds",
         "status": "Verified",
         "tests": [
-          "test/compat/consoledatawrites_test.go:348 TestConsoleFirestoreSubcollections"
+          "test/compat/consoledatawrites_test.go:348 TestConsoleFirestoreSubcollections",
+          "test/compat/firestorepitrreads1942_test.go:51 TestFirestorePointInTimeReadsThroughEveryReadMethod"
         ]
       },
       {
@@ -9806,7 +9809,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/consoledatawrites_test.go:1015 TestConsoleFirestoreCountsMissingDocuments",
-          "test/compat/consoledatawrites_test.go:602 TestConsoleFirestoreListsMissingDocumentsWithSubcollections"
+          "test/compat/consoledatawrites_test.go:602 TestConsoleFirestoreListsMissingDocumentsWithSubcollections",
+          "test/compat/firestorepitrreads1942_test.go:51 TestFirestorePointInTimeReadsThroughEveryReadMethod"
         ]
       },
       {
@@ -9822,7 +9826,8 @@
         "method": "google.firestore.v1.Firestore/PartitionQuery",
         "status": "Verified",
         "tests": [
-          "test/compat/firestoremethods_test.go:322 TestFirestorePartitionedQueries"
+          "test/compat/firestoremethods_test.go:322 TestFirestorePartitionedQueries",
+          "test/compat/firestorepitrreads1942_test.go:51 TestFirestorePointInTimeReadsThroughEveryReadMethod"
         ]
       },
       {
@@ -9837,7 +9842,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolefirestorecount_test.go:32 TestConsoleFirestoreCountOnly",
-          "test/compat/firestoremethods_test.go:278 TestFirestoreCountAggregation"
+          "test/compat/firestoremethods_test.go:278 TestFirestoreCountAggregation",
+          "test/compat/firestorepitrreads1942_test.go:51 TestFirestorePointInTimeReadsThroughEveryReadMethod"
         ]
       },
       {

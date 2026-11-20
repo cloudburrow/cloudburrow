@@ -28,7 +28,8 @@ import (
 //   - Export's Destination has Browse, which picks a bucket of this
 //     instance's Cloud Storage; the export runs and is a row of the
 //     Import/Export tab's jobs table; Export from an earlier point in time
-//     is drawn disabled, with the reason.
+//     is offered, its snapshot time asked for once it is checked (#1942,
+//     TestFirestorePointInTimeRecoveryThroughTheBrowser).
 func TestFirestoreIndexesAndImportExportMatchGooglesThroughTheBrowser(t *testing.T) {
 	needService(t, "firestore")
 	needService(t, "storage")
@@ -113,11 +114,11 @@ func TestFirestoreIndexesAndImportExportMatchGooglesThroughTheBrowser(t *testing
 	p.waitFor(`document.querySelector("#section-actions-importexport") !== null`)
 	p.clickText("#section-actions-importexport button", "Export")
 	p.waitFor(`document.querySelector(".modal.is-open #browse-outputUriPrefix") !== null`)
-	var snapshot struct{ Disabled, Reason bool }
+	var snapshot struct{ Disabled, TimeHidden bool }
 	p.eval(`({ Disabled: document.querySelector("#f-snapshot").disabled,
-		Reason: document.querySelector(".modal.is-open").textContent.includes("keeps no earlier versions") })`, &snapshot)
-	if !snapshot.Disabled || !snapshot.Reason {
-		t.Errorf("Export from an earlier point in time = %+v; want it disabled with the reason", snapshot)
+		TimeHidden: document.querySelector(".modal.is-open #f-snapshotTime").closest(".form-row").hidden })`, &snapshot)
+	if snapshot.Disabled || !snapshot.TimeHidden {
+		t.Errorf("Export from an earlier point in time = %+v; want it offered, its snapshot time shown only once it is checked (#1942)", snapshot)
 	}
 	p.run(chromedp.Click(chromedp.CSS(`#browse-outputUriPrefix`)))
 	p.clickText("#browse-title ~ .browse-list .fs-row-link", bucket)
