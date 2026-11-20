@@ -6974,7 +6974,7 @@
           "test/compat/memorystore1657_test.go:59 TestMemorystoreValkeyAutomaticFailover",
           "test/compat/memorystoreclusterfailover1910_test.go:172 TestValkeyClusterModeAutomaticFailover",
           "test/compat/memorystoreclustertls_test.go:130 TestMemorystoreValkeyInTransitEncryption",
-          "test/compat/memorystoreiam1614_test.go:114 TestMemorystoreIAMAuthChecksTheToken",
+          "test/compat/memorystoreiam1614_test.go:121 TestMemorystoreIAMAuthChecksTheToken",
           "test/compat/memorystorerestart1557_test.go:74 TestMemorystoreClustersAcrossRestart",
           "test/compat/memorystorevalkey_test.go:233 TestMemorystoreValkeyClusterDisabled",
           "test/compat/memorystorevalkey_test.go:308 TestMemorystoreValkeyRefusals",
@@ -7268,7 +7268,7 @@
           "test/compat/memorystoreclusterca1907_test.go:46 TestRedisClusterServerCAModes",
           "test/compat/memorystoreclusterfailover1910_test.go:131 TestRedisClusterAutomaticFailover",
           "test/compat/memorystoreclustertls_test.go:49 TestMemorystoreRedisClusterInTransitEncryption",
-          "test/compat/memorystoreiam1614_test.go:114 TestMemorystoreIAMAuthChecksTheToken",
+          "test/compat/memorystoreiam1614_test.go:121 TestMemorystoreIAMAuthChecksTheToken",
           "test/compat/memorystorerestart1557_test.go:74 TestMemorystoreClustersAcrossRestart",
           "test/compat/memorystorewindows1909_test.go:52 TestMemorystoreMaintenanceWindowSchedules",
           "test/compat/memorystorezones1908_test.go:77 TestMemorystoreZoneDistribution",
@@ -7472,7 +7472,7 @@
           "test/compat/gcloudrediscluster_test.go:23 TestGcloudRedisCluster",
           "test/compat/memorystorecertrotation1918_test.go:40 TestRedisClusterServerCertRotation",
           "test/compat/memorystorecluster_test.go:136 TestMemorystoreRedisCluster",
-          "test/compat/memorystoreiam1614_test.go:114 TestMemorystoreIAMAuthChecksTheToken",
+          "test/compat/memorystoreiam1614_test.go:121 TestMemorystoreIAMAuthChecksTheToken",
           "test/compat/memorystorezones1908_test.go:77 TestMemorystoreZoneDistribution",
           "test/compat/terraform_rediscluster_test.go:25 TestTerraformRedisCluster"
         ]
@@ -12839,7 +12839,7 @@
         "tests": [
           "test/compat/cloudsqlbluegreen_test.go:31 TestCloudSQLBlueGreenDeployment",
           "test/compat/cloudsqlbluegreenha_test.go:28 TestCloudSQLBlueGreenDeploymentHA",
-          "test/compat/cloudsqlconnector_test.go:58 TestCloudSQLConnectorDialsBothServers",
+          "test/compat/cloudsqlconnector_test.go:63 TestCloudSQLConnectorDialsBothServers",
           "test/compat/cloudsqlcustomerca_test.go:210 TestCloudSQLCustomerManagedCA",
           "test/compat/cloudsqldemote_test.go:177 TestCloudSQLDemoteSkipReplicationSetup",
           "test/compat/cloudsqldemote_test.go:26 TestCloudSQLDemote",
@@ -12848,6 +12848,7 @@
           "test/compat/cloudsqlexternaldump_test.go:26 TestCloudSQLExternalMySQLDumpFileAndOffline",
           "test/compat/cloudsqlexternalpg_test.go:28 TestCloudSQLExternalPostgresPrimary",
           "test/compat/cloudsqlha_test.go:34 TestCloudSQLHighAvailability",
+          "test/compat/cloudsqliam1944_test.go:47 TestCloudSQLIAMDatabaseAuthentication",
           "test/compat/cloudsqlinstances_test.go:58 TestCloudSQLInstanceWrites",
           "test/compat/cloudsqlmysql57_test.go:29 TestCloudSQLMySQL57",
           "test/compat/cloudsqlmysql57_test.go:32 TestCloudSQLMySQL56",
@@ -12869,7 +12870,7 @@
           "test/compat/cloudsqlbluegreen_test.go:31 TestCloudSQLBlueGreenDeployment",
           "test/compat/cloudsqlbluegreenha_test.go:28 TestCloudSQLBlueGreenDeploymentHA",
           "test/compat/cloudsqlcertrotation_test.go:27 TestCloudSQLServerCertRotationDuringMaintenance",
-          "test/compat/cloudsqlconnector_test.go:58 TestCloudSQLConnectorDialsBothServers",
+          "test/compat/cloudsqlconnector_test.go:63 TestCloudSQLConnectorDialsBothServers",
           "test/compat/cloudsqlcustomerca_test.go:210 TestCloudSQLCustomerManagedCA",
           "test/compat/cloudsqldemote_test.go:177 TestCloudSQLDemoteSkipReplicationSetup",
           "test/compat/cloudsqldemote_test.go:26 TestCloudSQLDemote",
@@ -12906,8 +12907,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqlinstances_test.go:321 TestTerraformSQLDatabaseInstance",
-          "test/compat/sqladmin_test.go:279 TestSQLAdminDatabasesAndUsersAreTheServers",
-          "test/compat/sqladmin_test.go:432 TestGcloudSQL",
+          "test/compat/sqladmin_test.go:280 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:433 TestGcloudSQL",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
       },
@@ -12920,7 +12921,7 @@
           "test/compat/cloudsqlmysql57_test.go:32 TestCloudSQLMySQL56",
           "test/compat/cloudsqlreplicaupgrade_test.go:237 TestGcloudSQLOldPostgresVersion",
           "test/compat/cloudsqlversions_test.go:113 TestCloudSQLDatabaseVersions",
-          "test/compat/sqladmin_test.go:279 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:280 TestSQLAdminDatabasesAndUsersAreTheServers",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
       },
@@ -12935,8 +12936,8 @@
           "test/compat/cloudsqlreplicaupgrade_test.go:114 TestCloudSQLPostgresOldVersionsAndRefusals",
           "test/compat/cloudsqlreplicaupgrade_test.go:237 TestGcloudSQLOldPostgresVersion",
           "test/compat/cloudsqlversions_test.go:113 TestCloudSQLDatabaseVersions",
-          "test/compat/sqladmin_test.go:279 TestSQLAdminDatabasesAndUsersAreTheServers",
-          "test/compat/sqladmin_test.go:432 TestGcloudSQL",
+          "test/compat/sqladmin_test.go:280 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:433 TestGcloudSQL",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
       },
@@ -12944,8 +12945,8 @@
         "method": "sql.databases.list",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:279 TestSQLAdminDatabasesAndUsersAreTheServers",
-          "test/compat/sqladmin_test.go:432 TestGcloudSQL",
+          "test/compat/sqladmin_test.go:280 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:433 TestGcloudSQL",
           "test/compat/terraform_batch12_sql_test.go:29 TestTerraformSQLDataSources"
         ]
       },
@@ -12955,14 +12956,14 @@
         "tests": [
           "test/compat/cloudsqlreplicaupgrade_test.go:114 TestCloudSQLPostgresOldVersionsAndRefusals",
           "test/compat/cloudsqlreplicaupgrade_test.go:237 TestGcloudSQLOldPostgresVersion",
-          "test/compat/sqladmin_test.go:279 TestSQLAdminDatabasesAndUsersAreTheServers"
+          "test/compat/sqladmin_test.go:280 TestSQLAdminDatabasesAndUsersAreTheServers"
         ]
       },
       {
         "method": "sql.databases.update",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:279 TestSQLAdminDatabasesAndUsersAreTheServers"
+          "test/compat/sqladmin_test.go:280 TestSQLAdminDatabasesAndUsersAreTheServers"
         ]
       },
       {
@@ -12977,7 +12978,7 @@
         "method": "sql.instances.ListEntraIdCertificates",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/cloudsqladminverbs_test.go:309 TestCloudSQLRefusedMethods"
+          "test/compat/cloudsqladminverbs_test.go:312 TestCloudSQLRefusedMethods"
         ],
         "note": "returns UNIMPLEMENTED (in-process check): Microsoft Entra ID authentication: it is a SQL Server feature that CloudBurrow's SQL Server instances (#1916) do not have: they run Microsoft's container image with SQL authentication only"
       },
@@ -12994,7 +12995,7 @@
         "method": "sql.instances.RotateEntraIdCertificate",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/cloudsqladminverbs_test.go:309 TestCloudSQLRefusedMethods"
+          "test/compat/cloudsqladminverbs_test.go:312 TestCloudSQLRefusedMethods"
         ],
         "note": "returns UNIMPLEMENTED (in-process check): Microsoft Entra ID authentication: it is a SQL Server feature that CloudBurrow's SQL Server instances (#1916) do not have: they run Microsoft's container image with SQL authentication only"
       },
@@ -13010,7 +13011,7 @@
         "method": "sql.instances.acquireSsrsLease",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/cloudsqladminverbs_test.go:309 TestCloudSQLRefusedMethods"
+          "test/compat/cloudsqladminverbs_test.go:312 TestCloudSQLRefusedMethods"
         ],
         "note": "returns UNIMPLEMENTED (in-process check): SQL Server Reporting Services leases: it is a SQL Server feature that CloudBurrow's SQL Server instances (#1916) do not have: they run Microsoft's container image with SQL authentication only"
       },
@@ -13018,7 +13019,7 @@
         "method": "sql.instances.addEntraIdCertificate",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/cloudsqladminverbs_test.go:309 TestCloudSQLRefusedMethods"
+          "test/compat/cloudsqladminverbs_test.go:312 TestCloudSQLRefusedMethods"
         ],
         "note": "returns UNIMPLEMENTED (in-process check): Microsoft Entra ID authentication: it is a SQL Server feature that CloudBurrow's SQL Server instances (#1916) do not have: they run Microsoft's container image with SQL authentication only"
       },
@@ -13124,6 +13125,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqladminverbs_test.go:137 TestCloudSQLDataAPIAndFinalBackup",
+          "test/compat/cloudsqliam1944_test.go:47 TestCloudSQLIAMDatabaseAuthentication",
           "test/compat/consolecloudsqldataapi_test.go:27 TestConsoleCloudSQLDataAPIAndProjectBackups",
           "test/compat/terraform_sql_provision_test.go:54 TestTerraformSQLProvisionScript"
         ]
@@ -13202,7 +13204,7 @@
           "test/compat/cloudsqlversions_test.go:300 TestCloudSQLCascadingAndCrossRegionReplicas",
           "test/compat/cloudsqlversions_test.go:410 TestGcloudSQLDatabaseVersions",
           "test/compat/cloudsqlversions_test.go:447 TestTerraformSQLDatabaseVersion",
-          "test/compat/sqladmin_test.go:432 TestGcloudSQL",
+          "test/compat/sqladmin_test.go:433 TestGcloudSQL",
           "test/compat/sqladmin_test.go:51 TestSQLAdminInstancesDescribeTheRunningServers",
           "test/compat/terraform_batch4_test.go:38 TestTerraformSQLSSLCertAndReplica",
           "test/compat/terraform_batch4_test.go:405 TestTerraformSQLSourceRepresentation",
@@ -13242,6 +13244,7 @@
           "test/compat/cloudsqlha_cli_test.go:60 TestTerraformSQLHighAvailability",
           "test/compat/cloudsqlha_test.go:34 TestCloudSQLHighAvailability",
           "test/compat/cloudsqlhapg1524_test.go:21 TestCloudSQLHighAvailabilityBeforePostgres13",
+          "test/compat/cloudsqliam1944_test.go:47 TestCloudSQLIAMDatabaseAuthentication",
           "test/compat/cloudsqlinstances_test.go:294 TestGcloudSQLInstances",
           "test/compat/cloudsqlinstances_test.go:321 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlinstances_test.go:58 TestCloudSQLInstanceWrites",
@@ -13290,7 +13293,7 @@
           "test/compat/cloudsqlha_test.go:34 TestCloudSQLHighAvailability",
           "test/compat/cloudsqlinstances_test.go:294 TestGcloudSQLInstances",
           "test/compat/cloudsqlinstances_test.go:58 TestCloudSQLInstanceWrites",
-          "test/compat/sqladmin_test.go:432 TestGcloudSQL",
+          "test/compat/sqladmin_test.go:433 TestGcloudSQL",
           "test/compat/sqladmin_test.go:51 TestSQLAdminInstancesDescribeTheRunningServers",
           "test/compat/terraform_batch12_sql_test.go:29 TestTerraformSQLDataSources"
         ]
@@ -13343,7 +13346,7 @@
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
           "test/compat/cloudsqlpitrrestore_test.go:33 TestCloudSQLPointInTimeRestoreFromBackupDR",
           "test/compat/cloudsqlpitrrestore_test.go:74 TestGcloudSQLPointInTimeRestoreRefused",
-          "test/compat/sqladmin_test.go:102 TestSQLAdminRefusesWhatItCannotDoFaithfully"
+          "test/compat/sqladmin_test.go:103 TestSQLAdminRefusesWhatItCannotDoFaithfully"
         ]
       },
       {
@@ -13386,7 +13389,7 @@
         "method": "sql.instances.releaseSsrsLease",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/cloudsqladminverbs_test.go:309 TestCloudSQLRefusedMethods"
+          "test/compat/cloudsqladminverbs_test.go:312 TestCloudSQLRefusedMethods"
         ],
         "note": "returns UNIMPLEMENTED (in-process check): SQL Server Reporting Services leases: it is a SQL Server feature that CloudBurrow's SQL Server instances (#1916) do not have: they run Microsoft's container image with SQL authentication only"
       },
@@ -13519,8 +13522,8 @@
           "test/compat/cloudsqlversions_test.go:207 TestCloudSQLMajorVersionUpgrade",
           "test/compat/cloudsqlversions_test.go:410 TestGcloudSQLDatabaseVersions",
           "test/compat/cloudsqlversions_test.go:447 TestTerraformSQLDatabaseVersion",
-          "test/compat/sqladmin_test.go:279 TestSQLAdminDatabasesAndUsersAreTheServers",
-          "test/compat/sqladmin_test.go:432 TestGcloudSQL",
+          "test/compat/sqladmin_test.go:280 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:433 TestGcloudSQL",
           "test/compat/terraform_batch4_test.go:38 TestTerraformSQLSSLCertAndReplica",
           "test/compat/terraform_batch7_test.go:229 TestTerraformSQLPostgres12Upgrade",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
@@ -13531,7 +13534,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqlmaintenance_test.go:51 TestCloudSQLRescheduleMaintenance",
-          "test/compat/sqladmin_test.go:279 TestSQLAdminDatabasesAndUsersAreTheServers"
+          "test/compat/sqladmin_test.go:280 TestSQLAdminDatabasesAndUsersAreTheServers"
         ]
       },
       {
@@ -13647,8 +13650,9 @@
         "method": "sql.users.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:279 TestSQLAdminDatabasesAndUsersAreTheServers",
-          "test/compat/sqladmin_test.go:432 TestGcloudSQL",
+          "test/compat/cloudsqliam1944_test.go:47 TestCloudSQLIAMDatabaseAuthentication",
+          "test/compat/sqladmin_test.go:280 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:433 TestGcloudSQL",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
       },
@@ -13656,7 +13660,8 @@
         "method": "sql.users.get",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:279 TestSQLAdminDatabasesAndUsersAreTheServers"
+          "test/compat/cloudsqliam1944_test.go:47 TestCloudSQLIAMDatabaseAuthentication",
+          "test/compat/sqladmin_test.go:280 TestSQLAdminDatabasesAndUsersAreTheServers"
         ]
       },
       {
@@ -13665,13 +13670,14 @@
         "tests": [
           "test/compat/cloudsqladminverbs_test.go:137 TestCloudSQLDataAPIAndFinalBackup",
           "test/compat/cloudsqlfields_test.go:65 TestCloudSQLFieldsNeverSilentlyDropped",
+          "test/compat/cloudsqliam1944_test.go:47 TestCloudSQLIAMDatabaseAuthentication",
           "test/compat/cloudsqlinstances_test.go:58 TestCloudSQLInstanceWrites",
           "test/compat/cloudsqlmysql57_test.go:29 TestCloudSQLMySQL57",
           "test/compat/cloudsqlmysql57_test.go:32 TestCloudSQLMySQL56",
           "test/compat/cloudsqlpasswordpolicy_test.go:27 TestCloudSQLPasswordValidationPolicy",
           "test/compat/cloudsqlversions_test.go:207 TestCloudSQLMajorVersionUpgrade",
-          "test/compat/sqladmin_test.go:279 TestSQLAdminDatabasesAndUsersAreTheServers",
-          "test/compat/sqladmin_test.go:432 TestGcloudSQL",
+          "test/compat/sqladmin_test.go:280 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:433 TestGcloudSQL",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
       },
@@ -13679,11 +13685,12 @@
         "method": "sql.users.list",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudsqliam1944_test.go:47 TestCloudSQLIAMDatabaseAuthentication",
           "test/compat/cloudsqlmysql57_test.go:29 TestCloudSQLMySQL57",
           "test/compat/cloudsqlmysql57_test.go:32 TestCloudSQLMySQL56",
           "test/compat/cloudsqlstopstart_test.go:30 TestCloudSQLStopAndStart",
-          "test/compat/sqladmin_test.go:279 TestSQLAdminDatabasesAndUsersAreTheServers",
-          "test/compat/sqladmin_test.go:432 TestGcloudSQL",
+          "test/compat/sqladmin_test.go:280 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:433 TestGcloudSQL",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
       },
@@ -13694,7 +13701,7 @@
           "test/compat/cloudsqlmysql57_test.go:29 TestCloudSQLMySQL57",
           "test/compat/cloudsqlmysql57_test.go:32 TestCloudSQLMySQL56",
           "test/compat/cloudsqlpasswordpolicy_test.go:27 TestCloudSQLPasswordValidationPolicy",
-          "test/compat/sqladmin_test.go:279 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:280 TestSQLAdminDatabasesAndUsersAreTheServers",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
       }

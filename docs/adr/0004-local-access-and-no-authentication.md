@@ -230,11 +230,45 @@ their own tickets:
 - **Some calls check a token this instance minted**, never one from Google, and never a
   signature of Google's: IAM Credentials on a service account the IAM API created (an
   unrecognised bearer is 401), Memorystore's IAM auth, Firestore with MongoDB
-  compatibility's token sign-ins, and BigQuery's per-project IAM of a minted token's caller
-  (#1767; a BigQuery request without one is served as before). Each also reads the project's
+  compatibility's token sign-ins, BigQuery's per-project IAM of a minted token's caller
+  (#1767; a BigQuery request without one is served as before), and Cloud SQL's IAM database
+  sign-ins (#1944, below). Each also reads the project's
   stored policy; those, with BigQuery remote models' connection permissions (#1765), are the
   exceptions [ADR-0006](0006-iam-policy-surface.md) lists. Every other service API still
   ignores `Authorization` and serves any caller.
+
+*Amended by #1944 (decided 2026-11-19):* **Cloud SQL IAM database authentication checks a token
+this instance minted.** Until now an IAM user type, the `cloudsql.iam_authentication` flag, an
+`access_token` in `generateEphemeralCert` and `executeSql` with `autoIamAuthn` were 501, because no
+Cloud SQL sign-in here checked a Google identity. That kept applications that sign in with
+`WithIAMAuthN`, the Auth Proxy's `--auto-iam-authn` or a token as the password from running at all
+locally, which is the opposite of what this emulator is for: the code path Google documents could
+not be exercised, only replaced. The concern of the original decision still holds: a check against
+semantics we invented would let a test pass that proves nothing. That is why the check is the one
+Memorystore's IAM auth (#1614) and Firestore with MongoDB compatibility (#1738) already make, which
+invents nothing:
+
+- the token must be one **this instance minted** and still live, found by its **SHA-256** in the
+  instance's log of minted tokens (`internal/metadata`'s `issued.go`). It is never sent to or
+  checked with Google, and a token Google issued fails here, as one minted here would fail at
+  Google;
+- its account must be the IAM user's own principal, named as Google names its database user, and
+  hold `cloudsql.instances.login` on the instance (`roles/cloudsql.instanceUser`), evaluated by the
+  instance's policy evaluator from the project's stored policy, as ADR-0006 does for the checks it
+  lists, whether or not `--iam-enforcement` is on;
+- the instance's IAM flag must be on, as Google requires.
+
+The check is made where the connectors and the Auth Proxy arrive, the connector listener
+(`sqladmin`'s `iamwire.go`), which then signs in to the server as the IAM user with a password of
+the user's own, derived from a key kept owner-only in the state directory and never shown.
+PostgreSQL's `pg_hba.conf` requires that password of the IAM groups ahead of its trust line, and
+MySQL checks every account's password, so an IAM user cannot be signed in to through the server's
+own port whatever is sent. Built-in users are unchanged: PostgreSQL still trusts every other
+connection. The same holds for `executeSql` with `autoIamAuthn`, which checks the request's bearer
+token the same way. What this proves, and what it does not: an application's IAM sign-in path runs
+end to end and a principal without the role is refused, as on Google; it says nothing about
+Google's token issuance or about a token Google would accept. IAM groups (`CLOUD_IAM_GROUP`) stay
+501.
 
 **Never load application default credentials.** The compatibility harness (issue #10)
 additionally refuses non-local endpoints, so a misconfigured test cannot reach real GCP.

@@ -296,7 +296,9 @@ auth checks the access token against the tokens this instance minted and the pro
 `CLUSTER_DISABLED` Valkey instance's reader endpoint follows the replicas' health and its primary endpoint an
 automatic failover, and a cross-instance secondary follows its primary instance's failover (#1614); Redis Cluster and Valkey
 cluster clients on the host and in the Kubernetes cluster, each given addresses it reaches (#1614); Cloud SQL blue-green deployments
-for MySQL (#1614). IAM database authentication is excluded (below).
+for MySQL (#1614). IAM database authentication for IAM users and service accounts, PostgreSQL and MySQL
+(#1944): through the connectors' `WithIAMAuthN`, the Auth Proxy's `--auto-iam-authn`, a token as the
+password, and `executeSql` with `autoIamAuthn`; IAM groups are excluded (below).
 
 | Gap | Why open | Size |
 |---|---|---|
@@ -350,8 +352,9 @@ Not gaps to close; each stays until its decision is amended.
   email): UNIMPLEMENTED, naming the reason, as that account is not an IAM service account and
   has no key of its own. On an account the IAM API created it is served and checked (#1747);
   the signature is local, so a signed URL made with it is accepted by no Google service.
-- **Cloud SQL IAM database authentication** (`generateEphemeralCert` with an access token,
-  `cloudsql.iam_authentication`, users of an IAM type): 501, as no Cloud SQL sign-in here checks a Google identity
-  ([ADR-0004](adr/0004-local-access-and-no-authentication.md)).
+- **Cloud SQL IAM groups** (`CLOUD_IAM_GROUP` users and their members' automatic accounts): 501. IAM
+  users and service accounts are served since #1944 (below, and ADR-0004's amendment of 2026-11-19),
+  checking a token this instance minted; a token sent as a password to the server's own port, rather
+  than through the connector listener, is refused, as the role's password is the connector's alone.
 - **Local AI and embeddings in per-PR CI**, and the default build's embeddings answering 501:
   maintainer decisions recorded in compatibility.md (§What CI does not run, §Local AI, #41).

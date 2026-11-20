@@ -39,6 +39,7 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -503,18 +504,21 @@ func (c *connector) serve(s *Server, raw net.Conn) {
 	if err := tc.Handshake(); err != nil {
 		return
 	}
-	_ = raw.SetDeadline(time.Time{})
 	addr := target.Addr()
 	if addr == "" {
 		return
 	}
-	up, err := net.DialTimeout("tcp", addr, 10*time.Second)
-	if err != nil {
+	project, _, _ := parseDNSName(tc.ConnectionState().ServerName)
+	// IAM database authentication (#1944): an IAM user's sign-in is
+	// checked here, and made to the server on the client's behalf.
+	client, up, err := s.iamSignIn(tc, project, target, certTokenHash(tc), addr)
+	_ = raw.SetDeadline(time.Time{})
+	if err != nil || up == nil {
 		return
 	}
 	defer up.Close()
 	done := make(chan struct{}, 2)
-	go func() { _, _ = io.Copy(up, tc); closeWrite(up); done <- struct{}{} }()
+	go func() { _, _ = io.Copy(up, client); closeWrite(up); done <- struct{}{} }()
 	go func() { _, _ = io.Copy(tc, up); _ = tc.CloseWrite(); done <- struct{}{} }()
 	<-done
 	<-done
@@ -592,13 +596,9 @@ func (s *Server) connectSettings(r *http.Request, project string, e Engine) (any
 }
 
 // generateEphemeralCert is connect.generateEphemeralCert: it signs the
-// request's public key with the instance's CA, for one hour.
-// iamWhy is why IAM database authentication is not served: it signs a
-// database user in as a Google identity, and no Cloud SQL sign-in here
-// checks one (ADR-0004; only the checks ADR-0006 lists read a token).
-const iamWhy = "IAM database authentication signs in as a Google identity, and no Cloud SQL sign-in here checks one: " +
-	"every local caller is trusted (docs/adr/0004-local-access-and-no-authentication.md)"
-
+// request's public key with the instance's CA, for one hour. With an
+// access_token (IAM database authentication, #1944) the certificate
+// carries the token, as its SHA-256 (tokenURNPrefix), and expires with it.
 func (s *Server) generateEphemeralCert(r *http.Request, project string, e Engine) (any, error) {
 	if err := s.connectorReady(r); err != nil {
 		return nil, err
@@ -617,9 +617,21 @@ func (s *Server) generateEphemeralCert(r *http.Request, project string, e Engine
 	if err := decode(r, &req); err != nil {
 		return nil, err
 	}
-	if req.AccessToken != "" || req.AccessToken2 != "" {
-		return nil, unimplemented("IAM database authentication (an access_token in generateEphemeralCert)",
-			iamWhy+"; connect as a built-in user without WithIAMAuthN (docs/cloudsql.md)")
+	tok := req.AccessToken
+	if tok == "" {
+		tok = req.AccessToken2
+	}
+	var tokenExpiry time.Time
+	if tok != "" {
+		src := s.iamSource()
+		var ok bool
+		var email string
+		if src != nil && src.Token != nil {
+			email, tokenExpiry, ok = src.Token(tokenHash(tok), time.Now())
+		}
+		if !ok || email == "" {
+			return nil, Errorf(http.StatusBadRequest, "Invalid request: access_token is not a valid access token: it is not one this instance issued, or it has expired.")
+		}
 	}
 	pk := req.PublicKey
 	if pk == "" {
@@ -652,6 +664,13 @@ func (s *Server) generateEphemeralCert(r *http.Request, project string, e Engine
 		NotAfter:     now.Add(life),
 		KeyUsage:     x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+	}
+	if tok != "" {
+		u, _ := url.Parse(tokenURNPrefix + tokenHash(tok))
+		tmpl.URIs = []*url.URL{u}
+		if tokenExpiry.Before(tmpl.NotAfter) {
+			tmpl.NotAfter = tokenExpiry
+		}
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, ca.cert, pub, ca.key)
 	if err != nil {

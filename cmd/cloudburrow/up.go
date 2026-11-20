@@ -839,6 +839,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if kmsSvc != nil {
 			sqlAdminSrv.UseKMS(sqlAdminKMS{svc: kmsSvc})
 		}
+		// IAM database authentication (#1944) checks a token this instance
+		// minted, and the principal's cloudsql.instances.login.
+		if creds != nil {
+			sqlAdminSrv.UseIAM(sqlAdminIAM(creds, iamEnforcer))
+		}
 		// CUSTOMER_MANAGED_CAS_CA (#1834) has this instance's Certificate
 		// Authority Service issue the server certificates, in process.
 		if privateCASvc != nil {

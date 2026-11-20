@@ -84,7 +84,15 @@ func databaseUserActions(in *sqladminapi.DatabaseInstance, dbNames, userRefs []s
 	if mysql {
 		add = append(add, console.Field{Name: "host", Label: "Host", Type: "text", Default: "%", Help: "the hosts the user may connect from; % is any"})
 	}
-	acts = append(acts, console.Action{ID: "add-user", Label: "Add user account", Fields: add})
+	acts = append(acts, console.Action{ID: "add-user", Label: "Add user account", Fields: add},
+		// Google's Add user account offers Cloud IAM beside built-in
+		// authentication (#1944): a principal, signing in with an access
+		// token once the instance's IAM authentication flag is on.
+		console.Action{ID: "add-iam-user", Label: "Add user account (Cloud IAM)", Fields: []console.Field{
+			{Name: "principal", Label: "Principal", Type: "text", Required: true,
+				Help: "a user's or service account's email; it signs in with an IAM access token, and needs roles/cloudsql.instanceUser"},
+			{Name: "type", Label: "Type", Type: "select", Required: true, Default: "CLOUD_IAM_USER",
+				Options: []string{"CLOUD_IAM_USER", "CLOUD_IAM_SERVICE_ACCOUNT"}}}})
 	if len(userRefs) > 0 {
 		acts = append(acts,
 			console.Action{ID: "change-password", Label: "Change password", Fields: []console.Field{
@@ -113,6 +121,16 @@ func databaseUserAct(ctx context.Context, svc *sqladminapi.Service, project, ins
 		}
 		_, err = svc.Users.Insert(project, instance, &sqladminapi.User{Name: strings.TrimSpace(v["userName"]),
 			Host: strings.TrimSpace(v["host"]), Password: v["password"]}).Context(ctx).Do()
+	case "add-iam-user":
+		principal := strings.TrimSpace(v["principal"])
+		if principal == "" {
+			return true, errors.New("a principal is required")
+		}
+		typ := v["type"]
+		if typ == "" {
+			typ = "CLOUD_IAM_USER"
+		}
+		_, err = svc.Users.Insert(project, instance, &sqladminapi.User{Name: principal, Type: typ}).Context(ctx).Do()
 	case "change-password":
 		if v["password"] == "" {
 			return true, errors.New("a new password is required")
