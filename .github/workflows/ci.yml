@@ -504,7 +504,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [storage, served, run, scale, emulators, memorystore, sql, acceptance, iam]
+        shard: [storage, served, run, scale, emulators, memorystore, sql, sqlreplicas, acceptance, iam]
     env:
       SHARD: ${{ matrix.shard }}
       # Every make build here uses the emulator binaries the
@@ -531,6 +531,14 @@ jobs:
           df -h /
           free=$(df -BG --output=avail / | tail -1 | tr -dc 0-9)
           [ "$free" -ge 30 ] || { echo "only $free GiB free: the Kubernetes Engine tests need 20 GiB beside the instance"; exit 1; }
+          # Every node container's systemd, containerd and kubelet take
+          # inotify instances from root's one per-host allowance, 128 on the
+          # runner image: with the clusters' nodes beside the instance's, a
+          # joining node's kubelet never answered its health check (main run
+          # 44645694075, a pool's second and third nodes). kind's known issues give
+          # these values for many nodes on one host.
+          sysctl fs.inotify.max_user_instances fs.inotify.max_user_watches
+          sudo sysctl -w fs.inotify.max_user_instances=512 fs.inotify.max_user_watches=524288
 
       - name: Install kubectl
         run: |
@@ -543,12 +551,14 @@ jobs:
       # emulators shard, and gcloud sql's, in the sql shard. The versioned release archive,
       # checked against its pinned SHA-256 before it is unpacked, and never
       # given credentials. 88 MB and a few seconds to unpack, so it is not
-      # cached: restoring the unpacked 460 MB would take longer.
+      # cached: restoring the unpacked 460 MB would take longer. 593.0.0
+      # since 586.0.0 had no `gcloud alpha source-manager hooks`, which
+      # TestGcloudSourceManagerHooks drives (#1927; main run 44645694075).
       - name: Install the Google Cloud CLI
-        if: matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'run' || matrix.shard == 'scale' || matrix.shard == 'emulators' || matrix.shard == 'memorystore' || matrix.shard == 'sql'
+        if: matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'run' || matrix.shard == 'scale' || matrix.shard == 'emulators' || matrix.shard == 'memorystore' || matrix.shard == 'sql' || matrix.shard == 'sqlreplicas'
         run: |
-          curl --retry 5 --retry-all-errors -fsSLo "$RUNNER_TEMP/gcloud.tar.gz" https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-586.0.0-linux-x86_64.tar.gz
-          echo "6c774c76793eedd501150b59da653610fbe3eaac169e822965b722de75a2f001  $RUNNER_TEMP/gcloud.tar.gz" | sha256sum -c -
+          curl --retry 5 --retry-all-errors -fsSLo "$RUNNER_TEMP/gcloud.tar.gz" https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-593.0.0-linux-x86_64.tar.gz
+          echo "42c32b7553c712f71fcf6f124546c0519437f53755f47f9bd0c957998cd6b826  $RUNNER_TEMP/gcloud.tar.gz" | sha256sum -c -
           tar -xzf "$RUNNER_TEMP/gcloud.tar.gz" -C "$RUNNER_TEMP" && rm "$RUNNER_TEMP/gcloud.tar.gz"
           # The beta commands (gcloud beta run domain-mappings, #1349) and the
           # alpha one (gcloud alpha builds approve --location, #1362) need
@@ -783,9 +793,15 @@ jobs:
             # 3,766 s under Landing 148's 90m stopgap): its tests that take
             # minutes each moved to the scale shard (#1821), about 31 minutes,
             # leaving run about 32.
+            # The sql shard passed 60m in 44645694075 with no test hung
+            # (3,185 s in 44617241748): its replica tests moved to the
+            # sqlreplicas shard, about 28 minutes of tests, leaving sql
+            # about 27.
             # COMPAT_RUN, from compat_shard: the iam shard runs only the
-            # enforcement tests (#1879).
+            # enforcement tests (#1879), and sqlreplicas only the Cloud SQL
+            # replica tests, which COMPAT_SKIP keeps out of sql.
             SELECT_RUN=(); [ -n "$COMPAT_RUN" ] && SELECT_RUN=(-run "$COMPAT_RUN")
+            [ -n "$COMPAT_SKIP" ] && SELECT_RUN+=(-skip "$COMPAT_SKIP")
             go test -tags=compat -timeout 60m -v ${SELECT_RUN[@]+"${SELECT_RUN[@]}"} ./test/compat/... | tee compat.log
             rc=$?
             set -e
@@ -1127,7 +1143,7 @@ jobs:
         run: |
           go test -tags=compat -list '.*' ./test/compat/ | grep '^Test' | sort > all.txt
           missing=
-          for shard in storage served run scale emulators memorystore sql iam; do
+          for shard in storage served run scale emulators memorystore sql sqlreplicas iam; do
             d=logs/compat-log-$shard
             [ -d "$d" ] || { echo "no logs from the $shard shard"; missing=1; continue; }
             # Top-level results only; a subtest's line is indented.

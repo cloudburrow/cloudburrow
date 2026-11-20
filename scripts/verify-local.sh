@@ -305,6 +305,8 @@ run_shard() {
     # The iam shard runs only the enforcement tests (COMPAT_RUN, #1879).
     local select_run=()
     [ -n "$COMPAT_RUN" ] && select_run=(-run "$COMPAT_RUN")
+    # The sql shard skips the replica tests, which sqlreplicas runs.
+    [ -n "$COMPAT_SKIP" ] && select_run+=(-skip "$COMPAT_SKIP")
     go test -tags=compat -count=1 -timeout 60m -v ${select_run[@]+"${select_run[@]}"} ./test/compat/... > "$dir/compat.log" 2>&1 || rc=$?
     if [ "$rc" -ne 0 ]; then
       retry_flaky "$dir/compat.log" go test -tags=compat -count=1 -timeout 10m -v ./test/compat/... > "$dir/retry.out" 2>&1 || true

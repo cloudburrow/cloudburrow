@@ -66,8 +66,20 @@
 # those run with enforcement off (#1879): Cloud Storage, Pub/Sub, Cloud
 # Tasks, Secret Manager, Cloud KMS and Cloud Run (for run.routes.invoke).
 
+# A tenth, sqlreplicas, is the sql shard's instance again for the Cloud SQL
+# tests that make replicas, standbys and external primaries
+# (COMPAT_SQL_REPLICA_TESTS), which the sql shard skips (COMPAT_SKIP): the
+# sql shard took 3,185 s of its 60m in main run 44617241748 and passed 60m
+# in 44645694075 (no test hung; TestTerraformSQLProvisionScript had run
+# 16 s), and these 28 tests are 1,666 s of its 3,260.
+
 # The shards, in the order ci.yml's matrix lists them.
-COMPAT_SHARDS="storage served run scale emulators memorystore sql acceptance iam"
+COMPAT_SHARDS="storage served run scale emulators memorystore sql sqlreplicas acceptance iam"
+
+# The sqlreplicas shard's tests, by name: every Cloud SQL test of high
+# availability, read replicas, blue-green deployments, external primaries,
+# switchover, demotion, failover and promotion.
+COMPAT_SQL_REPLICA_TESTS='^Test[A-Za-z]*SQL[A-Za-z0-9]*(HighAvailability|Replica|BlueGreen|External|Switchover|Demote|Failover|Promote)'
 
 # The console's headless-browser suite (#594) runs in the storage, run,
 # emulators, memorystore and sql shards: the Cloud KMS and Cloud Run
@@ -136,9 +148,9 @@ compat_shard() {
   SETUP_TESTS="" PROBE_TESTS="" PROBE_VARS=""
   # UP_FLAGS are `up` flags beyond the services and fixtures; COMPAT_RUN,
   # when set, is the -run pattern of the shard's compat suite (all of it
-  # when empty).
+  # when empty), and COMPAT_SKIP its -skip pattern (none when empty).
   UP_FLAGS=()
-  COMPAT_RUN=""
+  COMPAT_RUN="" COMPAT_SKIP=""
   # What every instance has, whatever its services: the ADC fixture
   # (#346), the instance's own kubeconfig and kind cluster (#346, never
   # the default kubeconfig), the admin API, the metadata server (#303),
@@ -241,13 +253,15 @@ compat_shard() {
       # Secret Manager or Cloud Run read RUN_KMS, RUN_STORAGE and RUN_PUBSUB
       # (#1568): the customer-managed and regional secrets, Terraform's data
       # sources, Cloud Storage volumes and Pub/Sub build triggers.
+      # RUN_APIKEYS: the API Keys API (#1915), for the key a Cloud Build
+      # webhook trigger's URL carries.
       FIXTURES=(--cloudbuild-host-steps --appengine-url http://127.0.0.1:18506)
       # Artifact Registry's cleanup policies run every minute rather than
       # Google's "approximately one day" (#1897): `up` reads the variable,
       # and TestArtifactRegistryCleanupPolicies, which skips without one
       # of 2m or less, reads the same, so it runs here.
       export CLOUDBURROW_ARTIFACT_REGISTRY_CLEANUP_INTERVAL=1m
-      TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_FIRESTORE,RUN_KMS,RUN_SCHEDULER,RUN_LOGGING,RUN_BIGQUERY,RUN_SQLADMIN,RUN_RESOURCEMANAGER,RUN_SERVICEUSAGE,RUN_MYSQL,MYSQL_PASSWORD,BIGQUERY_PROJECT,APPENGINE_URL ;;
+      TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_FIRESTORE,RUN_KMS,RUN_SCHEDULER,RUN_LOGGING,RUN_BIGQUERY,RUN_SQLADMIN,RUN_RESOURCEMANAGER,RUN_SERVICEUSAGE,RUN_APIKEYS,RUN_MYSQL,MYSQL_PASSWORD,BIGQUERY_PROJECT,APPENGINE_URL ;;
     scale)
       # The tests that take minutes each (#1821), split from run: Cloud
       # Run's CPU, automatic and manual scaling and instance splits, through
@@ -332,7 +346,7 @@ compat_shard() {
       # with and without persistence_config (#1557).
       PROBE_TESTS="TestMemorystoreAcrossRestart TestMemorystoreCreatedAcrossRestart TestMemorystoreRDBAcrossRestart TestMemorystoreClustersAcrossRestart"
       PROBE_VARS=MEMORYSTORE,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT ;;
-    sql)
+    sql|sqlreplicas)
       # Cloud SQL for PostgreSQL (#311, #584) and for MySQL with its
       # generated password (#297), the Cloud SQL Admin API over both
       # servers (#1301), and the Backup and DR Service over their backups
@@ -363,17 +377,24 @@ compat_shard() {
       # LOGGING is not in TEST_VARS, so the Logging suites stay in theirs.
       SERVICES=cloudsql,cloudsql-mysql,backupdr,storage,secretmanager,kms,privateca,logging
       TEST_VARS+=,MYSQL,MYSQL_PASSWORD,CLOUDSQL,SQLADMIN,BACKUPDR,CMEK_KMS,CLOUDSQL_SECRETS,NOPUBSUB_STORAGE,SQL_RESOURCEMANAGER,SQL_SERVICEUSAGE,SQL_PRIVATECA,SQL_LOGGING
-      # Cloud SQL for PostgreSQL (#701): a table with a row.
-      SETUP_TESTS="TestCloudSQLRestartSetup"
-      PROBE_TESTS="TestCloudSQLMySQLAcrossRestart TestCloudSQLAcrossRestart"
-      PROBE_VARS=MYSQL,MYSQL_PASSWORD,CLOUDSQL ;;
+      # The replica tests run in sqlreplicas, against the same instance,
+      # and the restart probes in sql.
+      if [ "$1" = sqlreplicas ]; then
+        COMPAT_RUN=$COMPAT_SQL_REPLICA_TESTS
+      else
+        COMPAT_SKIP=$COMPAT_SQL_REPLICA_TESTS
+        # Cloud SQL for PostgreSQL (#701): a table with a row.
+        SETUP_TESTS="TestCloudSQLRestartSetup"
+        PROBE_TESTS="TestCloudSQLMySQLAcrossRestart TestCloudSQLAcrossRestart"
+        PROBE_VARS=MYSQL,MYSQL_PASSWORD,CLOUDSQL
+      fi ;;
     *) echo "unknown shard $1" >&2; return 1 ;;
   esac
   # The pinned gcloud, in the shards whose services its tests use (#694);
   # bq's (#696) run in the emulators shard, with BigQuery, and gcloud sql's
   # in the sql shard.
   case "$1" in
-    storage|served|run|scale|emulators|memorystore|sql) TEST_VARS+=,GCLOUD ;;
+    storage|served|run|scale|emulators|memorystore|sql|sqlreplicas) TEST_VARS+=,GCLOUD ;;
   esac
 }
 

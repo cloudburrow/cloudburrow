@@ -170,7 +170,10 @@ func TestConsoleFunctionsV1(t *testing.T) {
 			t.Errorf("the console's page of %s = %v; want the v1 resource", cs.id, props)
 		}
 		// The page offers Edit, Download and Permissions too (#1491); what
-		// matters here is that Test function is among them.
+		// matters here is that Test function is among them: Google's
+		// console has a Testing tab for every 1st-gen function, event ones
+		// too, which it calls through CallFunction as `gcloud functions
+		// call` does (#1853).
 		offered := slices.Contains(acts, "test-function")
 		if cs.id == "console-v1-http" {
 			if !offered || props["URL"] != fn.GetHttpsTrigger().GetUrl() {
@@ -180,8 +183,8 @@ func TestConsoleFunctionsV1(t *testing.T) {
 			if code == http.StatusOK || !strings.Contains(out, "not ACTIVE") {
 				t.Errorf("Test function of an OFFLINE function = %d %s; want call's refusal", code, out)
 			}
-		} else if offered || props["Trigger resource"] != fn.GetEventTrigger().GetResource() {
-			t.Errorf("the event function's page = %v with actions %v; want its trigger and no Test function", props, acts)
+		} else if !offered || props["Trigger resource"] != fn.GetEventTrigger().GetResource() {
+			t.Errorf("the event function's page = %v with actions %v; want its trigger and Test function", props, acts)
 		}
 	}
 	code, out := consoleDo(t, addr, http.MethodGet, "/api/resources/functions?project="+url.QueryEscape(project), "")
