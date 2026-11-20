@@ -296,7 +296,8 @@ func TestSecretErrorsUseGoogleCodes(t *testing.T) {
 }
 
 // TestSecretManagerRefusesWhatItWouldDrop: through the official client, a
-// version_aliases on CreateSecret is UNIMPLEMENTED naming the field (topics
+// version_aliases on CreateSecret naming a version the new secret cannot
+// have is INVALID_ARGUMENT (#1961; topics
 // are served since #1259, TestSecretManagerTopicNotifications, rotation
 // since #1278, TestSecretManagerRotationAndDelayedDestroy),
 // user-managed replication with no replicas is INVALID_ARGUMENT, a stale
@@ -307,15 +308,15 @@ func TestSecretManagerRefusesWhatItWouldDrop(t *testing.T) {
 	c := secretsClient(t, h)
 	ctx := h.Context()
 	auto := &secretmanagerpb.Replication{Replication: &secretmanagerpb.Replication_Automatic_{Automatic: &secretmanagerpb.Replication_Automatic{}}}
-	for field, sec := range map[string]*secretmanagerpb.Secret{
-		"version_aliases": {Replication: auto, VersionAliases: map[string]int64{"current": 1}},
-	} {
-		_, err := c.CreateSecret(ctx, &secretmanagerpb.CreateSecretRequest{Parent: secretsParent(h), SecretId: "refused-" + strings.ReplaceAll(field, "_", "-"), Secret: sec})
-		if status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), field) {
-			t.Errorf("CreateSecret with %s = %v; want Unimplemented naming %s", field, err, field)
-		}
+	// version_aliases at creation are served since #1961 with UpdateSecret's
+	// validation: a new secret has no versions, so an alias naming one is
+	// INVALID_ARGUMENT (TestSecretManagerVersionAliases covers the rest).
+	_, err := c.CreateSecret(ctx, &secretmanagerpb.CreateSecretRequest{Parent: secretsParent(h), SecretId: "refused-version-aliases",
+		Secret: &secretmanagerpb.Secret{Replication: auto, VersionAliases: map[string]int64{"current": 1}}})
+	if status.Code(err) != codes.InvalidArgument || !strings.Contains(err.Error(), "current") {
+		t.Errorf("CreateSecret with an alias of a version that does not exist = %v; want InvalidArgument naming the alias", err)
 	}
-	_, err := c.CreateSecret(ctx, &secretmanagerpb.CreateSecretRequest{Parent: secretsParent(h), SecretId: "no-replicas", Secret: &secretmanagerpb.Secret{
+	_, err = c.CreateSecret(ctx, &secretmanagerpb.CreateSecretRequest{Parent: secretsParent(h), SecretId: "no-replicas", Secret: &secretmanagerpb.Secret{
 		Replication: &secretmanagerpb.Replication{Replication: &secretmanagerpb.Replication_UserManaged_{UserManaged: &secretmanagerpb.Replication_UserManaged{}}}}})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Errorf("user-managed replication with no replicas = %v; want InvalidArgument", err)
