@@ -16,6 +16,8 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/iamcheck"
+	"github.com/cloudburrow/cloudburrow/internal/iamgate"
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 )
 
@@ -200,4 +202,23 @@ func (s *Instances) serveRESTIAM(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 	_, _ = w.Write(out)
+}
+
+// OwnPolicies are the own policies of a resource the IAM gate checks
+// (#1879, internal/iamgate): a database's, backup's or database role's,
+// then its instance's.
+func (s *Instances) OwnPolicies(resource string) []iamcheck.Policy {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []iamcheck.Policy
+	for _, r := range []string{resource, iamgate.Prefix(resource, 3), iamgate.Prefix(resource, 2)} {
+		if r == "" || (len(out) > 0 && out[len(out)-1].Resource == "//spanner.googleapis.com/"+r) {
+			continue
+		}
+		if !strings.Contains(r, "/instances/") {
+			continue
+		}
+		out = append(out, iamcheck.Policy{Resource: "//spanner.googleapis.com/" + r, Policy: s.policies[r]})
+	}
+	return out
 }

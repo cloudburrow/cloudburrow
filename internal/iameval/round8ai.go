@@ -27,9 +27,9 @@ import (
 //     shared Operations service (no page names a permission for get or
 //     wait; the index has only aiplatform.operations.list).
 //
-// Google's wording of a denial is UNVERIFIED for each (re-read
-// 2026-11-20: the troubleshooting pages quote only "403: Permission
-// denied"): the newer APIs'.
+// Google's wording of a denial, the newer APIs', is UNVERIFIED for each
+// (re-read 2026-11-20: the troubleshooting pages quote only "403:
+// Permission denied").
 
 func init() {
 	for _, v := range []string{"v1", "v1beta1"} {
@@ -52,7 +52,8 @@ const aiPredict = "aiplatform.endpoints.predict"
 // models); Explain aiplatform.endpoints.explain. The bidirectional
 // streaming methods (StreamingPredict, StreamingRawPredict,
 // StreamDirectPredict, StreamDirectRawPredict), which have no REST page,
-// are checked as the predict they stream (UNVERIFIED). ModelGardenService
+// are checked as the predict they stream (UNVERIFIED, re-read 2026-11-20:
+// no page names one). ModelGardenService
 // Deploy needs aiplatform.endpoints.create, .deploy and
 // aiplatform.models.upload on its destination. Vertex AI keeps no
 // resource-level policies on what is served.

@@ -328,9 +328,14 @@ func (c *LifecycleComponent) Backends() []Backend {
 				// key is checked by the host's evaluator.
 				if s == config.ServiceSpanner && c.kms != "" && b.Front != nil {
 					b.Front.Args = append(append([]string{}, b.Front.Args...), "--kms", c.kms)
-					if c.iamCheck && c.resourceManager != "" {
-						b.Front.Args = append(b.Front.Args, "--iam-check", "http://"+c.resourceManager)
-					}
+				}
+				// IAM enforcement (#1879): Firestore's, Spanner's and
+				// Bigtable's fronts check each call with the host's one
+				// evaluator, through cloudburrow-host; Spanner's also the
+				// service agent's use of a customer-managed key (#1950).
+				if (s == config.ServiceFirestore || s == config.ServiceSpanner || s == config.ServiceBigtable) &&
+					c.iamCheck && c.resourceManager != "" && b.Front != nil {
+					b.Front.Args = append(append([]string{}, b.Front.Args...), "--iam-check", "http://"+c.resourceManager)
 				}
 				// BigQuery's front runs from the storage image (#902).
 				if s == config.ServiceBigQuery {

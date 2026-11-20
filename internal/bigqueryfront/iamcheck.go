@@ -1,6 +1,7 @@
 package bigqueryfront
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -719,6 +720,15 @@ func (s *iamState) check(w http.ResponseWriter, r *http.Request, next http.Handl
 		if !s.onProject(email, project, "bigquery.jobs.create") {
 			return denyProject("bigquery.jobs.create")
 		}
+		if s.checkModels(jobSQL(r), project, func(t tableRef, perm string) bool {
+			res := bqResource{project: t.ProjectID, dataset: t.DatasetID, kind: "models", id: t.TableID}
+			if s.allowed(r, next, email, res, perm) {
+				return false
+			}
+			return denyIn("Model", res, perm)
+		}) {
+			return true
+		}
 		if s.checkJob(r, project, onTable, denyTable, func(t tableRef) bool {
 			return s.checkView(r, t, 0, onTable, denyTable)
 		}) {
@@ -895,6 +905,50 @@ func (s *iamState) filterJobs(body []byte, email, project string, all bool) ([]b
 // `d.t`, d.t, p.d.t.
 var sqlTables = regexp.MustCompile("(?i)\\b(?:FROM|JOIN)\\s+(`[^`]+`(?:\\.`[^`]+`)*|[A-Za-z_][\\w-]*(?:\\.[A-Za-z_][\\w-]*){1,2})")
 
+// sqlModels are the models ML functions name: "(MODEL m" or ", MODEL m".
+var sqlModels = regexp.MustCompile("(?i)[(,]\\s*MODEL\\s+(`[^`]+`(?:\\.`[^`]+`)*|[A-Za-z_][\\w-]*(?:\\.[A-Za-z_][\\w-]*){0,2})")
+
+// checkModels checks the models ML functions in sql name: "run
+// inference" needs bigquery.models.getData on the model (#1879; "Generate
+// text", Required permissions,
+// https://docs.cloud.google.com/bigquery/docs/generate-text, read
+// 2026-11-20). deny answers a denial and reports true.
+func (s *iamState) checkModels(sql, project string, deny func(tableRef, string) bool) bool {
+	for _, m := range sqlModels.FindAllStringSubmatch(sql, -1) {
+		path := strings.Split(strings.ReplaceAll(m[1], "`", ""), ".")
+		var t tableRef
+		switch len(path) {
+		case 3:
+			t = tableRef{ProjectID: path[0], DatasetID: path[1], TableID: path[2]}
+		case 2:
+			t = tableRef{ProjectID: project, DatasetID: path[0], TableID: path[1]}
+		default:
+			continue
+		}
+		if deny(t, "bigquery.models.getData") {
+			return true
+		}
+	}
+	return false
+}
+
+// sqlTableArgs are the tables table-valued functions' TABLE arguments name.
+var sqlTableArgs = regexp.MustCompile("(?i)[(,]\\s*TABLE\\s+(`[^`]+`(?:\\.`[^`]+`)*|[A-Za-z_][\\w-]*(?:\\.[A-Za-z_][\\w-]*){1,2})")
+
+// mintedCallerKey keys the account of a minted token in a request's context.
+type mintedCallerKey struct{}
+
+// withMintedCaller is ctx with the account of the request's minted token.
+func withMintedCaller(ctx context.Context, email string) context.Context {
+	return context.WithValue(ctx, mintedCallerKey{}, email)
+}
+
+// mintedCaller is the account of the request's minted token, "" for none.
+func mintedCaller(ctx context.Context) string {
+	email, _ := ctx.Value(mintedCallerKey{}).(string)
+	return email
+}
+
 // checkJob checks the job's tables: a load's or a query's destination, a
 // copy's sources and destination, an extract's source, a query's tables.
 func (s *iamState) checkJob(r *http.Request, project string, onTable func(t tableRef, perm string) bool,
@@ -987,7 +1041,30 @@ func (s *iamState) checkJob(r *http.Request, project string, onTable func(t tabl
 	if e := c.Extract; e != nil && need(e.SourceTable, "bigquery.tables.export") {
 		return true
 	}
-	for _, m := range sqlTables.FindAllStringSubmatch(sql, -1) {
+	// A table-valued function's TABLE argument (ML.GENERATE_TEXT(MODEL m,
+	// TABLE t)) is read as a FROM is (#1879).
+	for _, m := range sqlTableArgs.FindAllStringSubmatch(sql, -1) {
+		path := strings.Split(strings.ReplaceAll(m[1], "`", ""), ".")
+		var t tableRef
+		switch len(path) {
+		case 3:
+			t = tableRef{ProjectID: path[0], DatasetID: path[1], TableID: path[2]}
+		case 2:
+			t = tableRef{ProjectID: project, DatasetID: path[0], TableID: path[1]}
+		default:
+			continue
+		}
+		if need(&t, "bigquery.tables.getData") || viewReads(t) {
+			return true
+		}
+	}
+	for _, ix := range sqlTables.FindAllStringSubmatchIndex(sql, -1) {
+		if strings.HasPrefix(strings.TrimLeft(sql[ix[1]:], " \t\r\n"), "(") {
+			// A table-valued function (FROM ML.GENERATE_TEXT(...)), not a
+			// table: its MODEL and TABLE arguments are checked (#1879).
+			continue
+		}
+		m := []string{sql[ix[0]:ix[1]], sql[ix[2]:ix[3]]}
 		path := strings.Split(strings.ReplaceAll(m[1], "`", ""), ".")
 		var t tableRef
 		switch len(path) {
@@ -1028,6 +1105,11 @@ func (s *iamState) handler(engine, rest http.Handler) http.Handler {
 			email = s.caller(r)
 		}
 		project := pathProject(r)
+		if email != "" {
+			// A remote model's connection is checked for this caller
+			// (connectionauth.go, #1879).
+			r = r.WithContext(withMintedCaller(r.Context(), email))
+		}
 		if email != "" && r.Method == http.MethodGet && strings.TrimSuffix(r.URL.Path, "/") == "/bigquery/v2/projects" {
 			s.serveProjects(w, r, rest, email)
 			return

@@ -9785,6 +9785,7 @@
           "test/compat/firestorecompact1969_test.go:40 TestFirestoreCompactsItsVersionsBeforeTheHeapFills",
           "test/compat/firestorepersist1615_test.go:120 TestFirestoreRestartSetup",
           "test/compat/firestorepersist1615_test.go:64 TestFirestoreSurvivesAPodRestart",
+          "test/compat/iamenforcementround9_1879_test.go:64 TestIAMEnforcementFirestore",
           "test/compat/optional_test.go:43 TestFirestoreDocumentCRUD"
         ]
       },
@@ -9816,7 +9817,8 @@
         "method": "google.firestore.v1.Firestore/GetDocument",
         "status": "Verified",
         "tests": [
-          "test/compat/firestoremethods_test.go:59 TestFirestoreDocumentRPCs"
+          "test/compat/firestoremethods_test.go:59 TestFirestoreDocumentRPCs",
+          "test/compat/iamenforcementround9_1879_test.go:64 TestIAMEnforcementFirestore"
         ]
       },
       {
@@ -9874,6 +9876,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consoledocs_test.go:108 TestConsoleFirestoreDocumentCreateEditDelete",
+          "test/compat/iamenforcementround9_1879_test.go:64 TestIAMEnforcementFirestore",
           "test/compat/optional_test.go:43 TestFirestoreDocumentCRUD"
         ]
       },
@@ -10127,7 +10130,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolefirestoreadmin_test.go:89 TestConsoleFirestoreDatabaseEditsIndexesAndFieldOverrides",
-          "test/compat/firestoreadmin_test.go:145 TestFirestoreAdminIndexes"
+          "test/compat/firestoreadmin_test.go:145 TestFirestoreAdminIndexes",
+          "test/compat/iamenforcementround9_1879_test.go:64 TestIAMEnforcementFirestore"
         ]
       },
       {
@@ -10767,6 +10771,7 @@
           "test/compat/consolebigtableedit_test.go:103 TestConsoleBigtableFamiliesAndRowWrites",
           "test/compat/consolebigtablepicker_test.go:33 TestConsoleBigtableInstancePicker",
           "test/compat/consoledatabases_test.go:47 TestConsoleBigtableCreateAndDeleteTable",
+          "test/compat/iamenforcementround9_1879_test.go:290 TestIAMEnforcementBigtable",
           "test/compat/terraform_batch5_test.go:267 TestTerraformBigtableGCPolicy"
         ]
       },
@@ -10927,6 +10932,7 @@
         "method": "google.bigtable.v2.Bigtable/MutateRow",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcementround9_1879_test.go:290 TestIAMEnforcementBigtable",
           "test/compat/optional_test.go:197 TestBigtableTableAndRows"
         ]
       },
@@ -11000,6 +11006,7 @@
           "test/compat/consolebigtableactions_test.go:37 TestConsoleBigtableTableAndCellActions",
           "test/compat/consolebigtableedit_test.go:103 TestConsoleBigtableFamiliesAndRowWrites",
           "test/compat/consolebigtablepicker_test.go:33 TestConsoleBigtableInstancePicker",
+          "test/compat/iamenforcementround9_1879_test.go:290 TestIAMEnforcementBigtable",
           "test/compat/optional_test.go:197 TestBigtableTableAndRows"
         ]
       },
@@ -11124,7 +11131,8 @@
         "tests": [
           "test/compat/consoledatabases_test.go:120 TestConsoleSpannerCreateAndDropDatabase",
           "test/compat/consoledatabases_test.go:208 TestConsoleSpannerDML",
-          "test/compat/consolespanneradmin_test.go:75 TestConsoleSpannerSchemaConfigurationsAndPartitions"
+          "test/compat/consolespanneradmin_test.go:75 TestConsoleSpannerSchemaConfigurationsAndPartitions",
+          "test/compat/iamenforcementround9_1879_test.go:159 TestIAMEnforcementSpanner"
         ]
       },
       {
@@ -11208,6 +11216,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/iamconditions1745_test.go:120 TestSpannerIAMConditions",
+          "test/compat/iamenforcementround9_1879_test.go:159 TestIAMEnforcementSpanner",
           "test/compat/storediam_test.go:109 TestTerraformSpannerIAM",
           "test/compat/storediam_test.go:182 TestConsoleSpannerPermissions",
           "test/compat/storediam_test.go:94 TestSpannerIAM"
@@ -11476,6 +11485,7 @@
         "method": "google.spanner.v1.Spanner/Commit",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcementround9_1879_test.go:159 TestIAMEnforcementSpanner",
           "test/compat/optional_test.go:264 TestSpannerSchemaAndQuery",
           "test/compat/spanner_test.go:104 TestSpannerReadWriteTransactionIsAtomic",
           "test/compat/spanner_test.go:202 TestSpannerDatabasesAreIsolated"
@@ -11485,6 +11495,7 @@
         "method": "google.spanner.v1.Spanner/CreateSession",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcementround9_1879_test.go:159 TestIAMEnforcementSpanner",
           "test/compat/optional_test.go:264 TestSpannerSchemaAndQuery",
           "test/compat/spanner_test.go:104 TestSpannerReadWriteTransactionIsAtomic",
           "test/compat/spanner_test.go:202 TestSpannerDatabasesAreIsolated",
@@ -11517,6 +11528,7 @@
         "method": "google.spanner.v1.Spanner/ExecuteStreamingSql",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcementround9_1879_test.go:159 TestIAMEnforcementSpanner",
           "test/compat/optional_test.go:264 TestSpannerSchemaAndQuery"
         ]
       },
@@ -12321,6 +12333,7 @@
           "test/compat/consolebigqueryorc_test.go:17 TestConsoleBigQueryLoadORCThroughTheForm",
           "test/compat/consolebigquerywrites_test.go:398 TestConsoleBigQueryReadWriteEditorRunsDML",
           "test/compat/documentai_test.go:201 TestBigQueryMLProcessDocument",
+          "test/compat/iamenforcementround9_1879_test.go:367 TestIAMEnforcementBigQueryMLRemote",
           "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
           "test/compat/logginganalyticsviews_test.go:188 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
           "test/compat/logginganalyticsviews_test.go:266 TestLoggingLinkedDatasetAcrossRestarts",
@@ -12909,7 +12922,8 @@
         "tests": [
           "test/compat/bigqueryconnection_test.go:36 TestBigQueryConnectionAPI",
           "test/compat/bigqueryconnectiongroups1812_test.go:27 TestBigQueryConnectionGroupMembers1812",
-          "test/compat/bigquerymlremoteiam_test.go:164 TestBigQueryMLRemoteConnectionPermissions"
+          "test/compat/bigquerymlremoteiam_test.go:164 TestBigQueryMLRemoteConnectionPermissions",
+          "test/compat/iamenforcementround9_1879_test.go:367 TestIAMEnforcementBigQueryMLRemote"
         ]
       },
       {
