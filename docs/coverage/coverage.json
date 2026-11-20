@@ -11121,7 +11121,8 @@
           "test/compat/spanner_test.go:104 TestSpannerReadWriteTransactionIsAtomic",
           "test/compat/spanner_test.go:202 TestSpannerDatabasesAreIsolated",
           "test/compat/spannercmek1950_test.go:61 TestSpannerCMEK",
-          "test/compat/spannereditions1949_test.go:78 TestSpannerEditionsAutoscalingAndSchedules"
+          "test/compat/spannereditions1949_test.go:78 TestSpannerEditionsAutoscalingAndSchedules",
+          "test/compat/spannerproto2017_test.go:59 TestSpannerProtoBundleColumns"
         ]
       },
       {
@@ -11181,7 +11182,8 @@
         "tests": [
           "test/compat/consoledatabases_test.go:120 TestConsoleSpannerCreateAndDropDatabase",
           "test/compat/consoledatabases_test.go:208 TestConsoleSpannerDML",
-          "test/compat/consolespanneradmin_test.go:75 TestConsoleSpannerSchemaConfigurationsAndPartitions"
+          "test/compat/consolespanneradmin_test.go:75 TestConsoleSpannerSchemaConfigurationsAndPartitions",
+          "test/compat/spannerproto2017_test.go:59 TestSpannerProtoBundleColumns"
         ]
       },
       {
@@ -11567,14 +11569,18 @@
         "status": "Verified",
         "tests": [
           "test/compat/spannercmek1950_test.go:61 TestSpannerCMEK",
-          "test/compat/spannerdata_test.go:137 TestSpannerUnaryQueryDMLAndRollback"
+          "test/compat/spannerdata_test.go:137 TestSpannerUnaryQueryDMLAndRollback",
+          "test/compat/spannerprofile_test.go:35 TestSpannerQueryModes",
+          "test/compat/spannerproto2017_test.go:59 TestSpannerProtoBundleColumns"
         ]
       },
       {
         "method": "google.spanner.v1.Spanner/ExecuteStreamingSql",
         "status": "Verified",
         "tests": [
-          "test/compat/optional_test.go:264 TestSpannerSchemaAndQuery"
+          "test/compat/optional_test.go:264 TestSpannerSchemaAndQuery",
+          "test/compat/spannerplans2029_test.go:35 TestSpannerQueryPlansRefusedForEveryShape",
+          "test/compat/spannerprofile_test.go:35 TestSpannerQueryModes"
         ]
       },
       {

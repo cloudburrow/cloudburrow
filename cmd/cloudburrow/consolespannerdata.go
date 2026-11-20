@@ -11,9 +11,8 @@ package main
 //
 // Spanner has no STRUCT columns ("STRUCT is not supported as a column
 // type"; a STRUCT exists in queries only), so the Data tab has none to edit;
-// a PROTO column stays read-only here (its value is a serialised message
-// with a descriptor the console does not hold), and Spanner Studio's DML
-// writes one.
+// PROTO and ENUM columns are read and written through the database's
+// proto bundle (consolespannerproto.go, #2017).
 
 import (
 	"context"
@@ -125,8 +124,13 @@ func spannerColumnType(t string) *sppb.Type {
 // as Spanner's wire encoding of type t: an INT64 and the string-encoded
 // types as their text, a float as a number, a BOOL as true or false, BYTES
 // as base64 (as the Data tab shows them), an ARRAY as a JSON array of its
-// elements, null for NULL.
+// elements, null for NULL; a PROTO as its message's JSON and an ENUM by
+// value name, through the bundle ps.
 func spannerWireValue(t *sppb.Type, raw string) (*structpb.Value, error) {
+	return spannerProtos{}.wireValue(t, raw)
+}
+
+func (ps spannerProtos) wireValue(t *sppb.Type, raw string) (*structpb.Value, error) {
 	if t.GetCode() == sppb.TypeCode_ARRAY {
 		var elems []any
 		dec := json.NewDecoder(strings.NewReader(raw))
@@ -151,7 +155,7 @@ func spannerWireValue(t *sppb.Type, raw string) (*structpb.Value, error) {
 				b, _ := json.Marshal(x)
 				s = string(b)
 			}
-			v, err := spannerWireValue(t.GetArrayElementType(), s)
+			v, err := ps.wireValue(t.GetArrayElementType(), s)
 			if err != nil {
 				return nil, fmt.Errorf("element %d: %w", i, err)
 			}
@@ -160,6 +164,8 @@ func spannerWireValue(t *sppb.Type, raw string) (*structpb.Value, error) {
 		return structpb.NewListValue(list), nil
 	}
 	switch t.GetCode() {
+	case sppb.TypeCode_PROTO, sppb.TypeCode_ENUM:
+		return ps.protoWire(t, raw)
 	case sppb.TypeCode_FLOAT64, sppb.TypeCode_FLOAT32:
 		f, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
 		switch {
@@ -200,11 +206,15 @@ func spannerWireValue(t *sppb.Type, raw string) (*structpb.Value, error) {
 
 // spannerTypedParam is raw as a parameter of the column's type.
 func spannerTypedParam(colType, raw string) (spanner.GenericColumnValue, error) {
-	t := spannerColumnType(colType)
+	return spannerProtos{}.typedParam(colType, raw)
+}
+
+func (ps spannerProtos) typedParam(colType, raw string) (spanner.GenericColumnValue, error) {
+	t := ps.columnType(colType)
 	if t == nil {
 		return spanner.GenericColumnValue{}, fmt.Errorf("the Data tab does not write %s columns", colType)
 	}
-	v, err := spannerWireValue(t, raw)
+	v, err := ps.wireValue(t, raw)
 	if err != nil {
 		return spanner.GenericColumnValue{}, err
 	}
@@ -245,10 +255,9 @@ func spannerTableColumnsIn(ctx context.Context, c *spanner.Client, d spannerDial
 }
 
 // spannerTypedColumn says whether a column is written as a typed parameter
-// rather than through spannerCastExpr: every column of a PostgreSQL
-// database, and an ARRAY in either dialect.
+// rather than through spannerCastExpr (spannerProtos.typed).
 func spannerTypedColumn(d spannerDialect, t string) bool {
-	return d.pg || spannerColumnType(t).GetCode() == sppb.TypeCode_ARRAY
+	return spannerProtos{}.typed(d, t)
 }
 
 // spannerPGTableDetail is a PostgreSQL database's table page: the Schema,
