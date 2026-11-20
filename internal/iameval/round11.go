@@ -25,6 +25,9 @@ import (
 // Check is one permission on one resource.
 type Check struct {
 	Permission, Resource string
+	// Service, when set, is the table the check is made in (another
+	// service's resource, round 12); nil is the method's own.
+	Service *Service
 }
 
 // extra runs m's Extra checks on resource.
@@ -40,7 +43,11 @@ func (e *Enforcer) extra(ctx context.Context, svc *Service, m *Method, bearer, r
 		if c.Permission == "" || c.Resource == "" {
 			continue
 		}
-		if err := e.Authorize(ctx, svc, bearer, c.Permission, c.Resource); err != nil {
+		in := svc
+		if c.Service != nil {
+			in = c.Service
+		}
+		if err := e.Authorize(ctx, in, bearer, c.Permission, c.Resource); err != nil {
 			return err
 		}
 	}
@@ -217,7 +224,7 @@ func tagBindingChecks(name, value, node string) []Check {
 
 // rmDeny is Resource Manager's refusal: "Permission 'P' denied on resource
 // '//cloudresourcemanager.googleapis.com/R' (or it may not exist).", as
-// gcloud reports a v3 call's (UNVERIFIED against a page, 2026-11-20: the
+// gcloud reports a v3 call's (UNVERIFIED, re-read 2026-11-20: the
 // reference pages give no wording), with ErrorInfo IAM_PERMISSION_DENIED.
 func rmDeny(permission, resource string) error {
 	full := resource
@@ -320,7 +327,7 @@ func rmMethods() map[string]Method {
 	// A binding's resource is a full resource name: Resource Manager's
 	// own (a project, folder or organization) is checked with
 	// resourcemanager.hierarchyNodes.*; another service's resource with
-	// that service's own permission, which is not checked here.
+	// that service's own permission (round12_tags.go).
 	node := func(permission string) func(string) string {
 		return func(full string) string {
 			if HierarchyNode(full) == "" {
@@ -329,14 +336,21 @@ func rmMethods() map[string]Method {
 			return permission
 		}
 	}
+	other := func(verb string) func(string, func(string) string) []Check {
+		return func(full string, _ func(string) string) []Check { return tagResourceChecks(full, verb) }
+	}
 	add("TagBindings", map[string]Method{
-		"ListTagBindings":   {Field: "parent", PermissionFor: node("resourcemanager.hierarchyNodes.listTagBindings")},
-		"ListEffectiveTags": {Field: "parent", PermissionFor: node("resourcemanager.hierarchyNodes.listEffectiveTags")},
+		"ListTagBindings": {Field: "parent", PermissionFor: node("resourcemanager.hierarchyNodes.listTagBindings"),
+			Extra: other("listTagBindings")},
+		"ListEffectiveTags": {Field: "parent", PermissionFor: node("resourcemanager.hierarchyNodes.listEffectiveTags"),
+			Extra: other("listEffectiveTags")},
 		"CreateTagBinding": {Field: "tag_binding.parent", PermissionFor: node("resourcemanager.hierarchyNodes.createTagBinding"),
 			Also: []Also{{Field: "tag_binding.tag_value", Permission: "resourcemanager.tagValueBindings.create"},
-				{Field: "tag_binding.tag_value_namespaced_name", Permission: "resourcemanager.tagValueBindings.create"}}},
+				{Field: "tag_binding.tag_value_namespaced_name", Permission: "resourcemanager.tagValueBindings.create"}},
+			Extra: other("createTagBinding")},
 		"DeleteTagBinding": {Field: "name", Extra: func(name string, _ func(string) string) []Check {
-			return tagBindingChecks(name, "resourcemanager.tagValueBindings.delete", "resourcemanager.hierarchyNodes.deleteTagBinding")
+			return append(tagBindingChecks(name, "resourcemanager.tagValueBindings.delete", "resourcemanager.hierarchyNodes.deleteTagBinding"),
+				tagResourceChecks(tagBindingResource(name), "deleteTagBinding")...)
 		}},
 	})
 	add("TagHolds", map[string]Method{
@@ -349,7 +363,7 @@ func rmMethods() map[string]Method {
 
 // iamDeny is the IAM API's refusal, "Permission 'P' denied on resource (or
 // it may not exist).", which names no resource, with ErrorInfo
-// IAM_PERMISSION_DENIED (UNVERIFIED against a page, 2026-11-20: the
+// IAM_PERMISSION_DENIED (UNVERIFIED, re-read 2026-11-20: the
 // reference pages give no wording).
 func iamDeny(permission, resource string) error {
 	return grpcDenied(fmt.Sprintf("Permission '%s' denied on resource (or it may not exist).", permission), permission, resource, true)

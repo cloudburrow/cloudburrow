@@ -108,12 +108,12 @@ func TestRoundElevenTables(t *testing.T) {
 // attachment point are read as Google writes them.
 func TestRoundElevenNames(t *testing.T) {
 	got := tagBindingChecks("tagBindings/%2F%2Fcloudresourcemanager.googleapis.com%2Fprojects%2F123/tagValues/456", "v", "n")
-	want := []Check{{"v", "tagValues/456"}, {"n", "projects/123"}}
+	want := []Check{{Permission: "v", Resource: "tagValues/456"}, {Permission: "n", Resource: "projects/123"}}
 	if !slices.Equal(got, want) {
 		t.Errorf("tagBindingChecks = %v, want %v", got, want)
 	}
 	got = tagBindingChecks("tagBindings/%2F%2Fstorage.googleapis.com%2Fprojects%2F_%2Fbuckets%2Fb/tagValues/456", "v", "n")
-	if !slices.Equal(got, []Check{{"v", "tagValues/456"}}) {
+	if !slices.Equal(got, []Check{{Permission: "v", Resource: "tagValues/456"}}) {
 		t.Errorf("a bucket's binding = %v", got)
 	}
 	if a := DenyAttachment("policies/cloudresourcemanager.googleapis.com%2Fprojects%2Fp/denypolicies/d"); a != "projects/p" {

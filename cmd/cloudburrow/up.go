@@ -704,6 +704,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		iamEnforced{logging: loggingSvc, monitoring: monitoringSvc, memorystore: memorystoreAdminSvc, run: runSvc})
 	iamEnforced7{privateCA: privateCASvc, gke: gkeSvc, compute: computeSvc, run: runSvc}.use(iamEnforcer)
 	iamEnforced8{compute: computeSvc}.use(iamEnforcer)
+	useIAMEnforcement12Source(iamEnforcer, runSvc)
+	useIAMEnforcement12DataTransfer(iamEnforcer, dataTransfer)
 	// Log buckets' customer-managed keys (#1950).
 	if loggingSvc != nil {
 		keys := cmekKeys(kmsSvc, iamEnforcer)
@@ -869,6 +871,13 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// IAM enforcement (#1879) of Resource Manager, IAM, deny and
 	// organization policies, on this port.
 	useIAMEnforcement11(iamEnforcer, rmSrv, func() *resourcemanager.Registry { return projects })
+	useIAMEnforcement12Tags(iamEnforcer, func() string {
+		if f := forwarderFor(forwarders, "storage"); f != nil {
+			return f.HostAddr()
+		}
+		return ""
+	}, func() *resourcemanager.Registry { return projects })
+	useIAMEnforcement12Identity(iamEnforcer, rmSrv, func() *resourcemanager.Registry { return projects })
 	coord.Register(rmSrv)
 	// A build's serviceAccount names an IAM account of this registry (#1854).
 	runadapter.UseServiceAccounts(func(name string) (string, bool, bool) {
@@ -973,6 +982,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// API is enabled in every project until someone disables it.
 	useAPIEnablement(serviceUsageSrv, rmSrv, apiGated{tasks: tasksSvc, run: runSvc, scheduler: schedulerSvc,
 		memorystore: memorystoreAdminSvc, logging: loggingSvc, kms: kmsSvc, secrets: secretsSvc, sqlAdmin: sqlAdminSrv, backupDR: backupDRSrv})
+	// IAM enforcement (#1879) of Backup and DR and the Cloud Storage
+	// companion APIs, inside the enablement gate.
+	useIAMEnforcementBackup(iamEnforcer, backupDRSrv, storageJobsSrv)
 	// API keys are checked where Google checks them (#1915).
 	defer useAPIKeys(apiKeysSrv, rmSrv)()
 

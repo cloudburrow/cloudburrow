@@ -348,7 +348,7 @@ var ServiceUsageJSON = func() []JSONMethod {
 // none; neither has a delete permission). Any other API's operation
 // (Artifact Registry's, whose audit page lists its operations among the
 // methods that produce no audit logs, and names no permission; Eventarc's;
-// Secure Source Manager's) is not checked: svc nil.
+// Secure Source Manager's, whose pages name none) is not checked: svc nil.
 func RunPortOperation(typeURL string) (svc *Service, get, list, del string) {
 	name := typeURL[strings.LastIndex(typeURL, "/")+1:]
 	switch {
@@ -358,6 +358,9 @@ func RunPortOperation(typeURL string) (svc *Service, get, list, del string) {
 		return Functions, "cloudfunctions.operations.get", "cloudfunctions.operations.list", ""
 	case strings.HasPrefix(name, "google.devtools.cloudbuild."):
 		return CloudBuild, "cloudbuild.operations.get", "cloudbuild.operations.list", ""
+	case strings.HasPrefix(name, "google.cloud.developerconnect."):
+		// Developer Connect's operations pages name these (round 12).
+		return DeveloperConnect, "developerconnect.operations.get", "developerconnect.operations.list", "developerconnect.operations.delete"
 	}
 	return nil, "", "", ""
 }
@@ -366,7 +369,8 @@ func RunPortOperation(typeURL string) (svc *Service, get, list, del string) {
 // caller list a location's operations on the Cloud Run port; each listed
 // operation is then kept only if the caller holds its own API's list
 // permission (RunPortOperation).
-var RunPortListOperations = []string{"run.operations.list", "cloudfunctions.operations.list", "cloudbuild.operations.list"}
+var RunPortListOperations = []string{"run.operations.list", "cloudfunctions.operations.list", "cloudbuild.operations.list",
+	"developerconnect.operations.list"}
 
 // RunPortListLocations are the permissions, any one of which lets a caller
 // list locations on the Cloud Run port, whose one Locations service

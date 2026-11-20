@@ -290,6 +290,9 @@ type server struct {
 	// Observe, if set, is called once per request with the method name and
 	// the answer's HTTP status.
 	Observe func(method string, code int)
+	// Wrap, when set before Start, wraps the API's handler: IAM
+	// enforcement (#1879).
+	Wrap func(http.Handler) http.Handler
 
 	srv *http.Server
 	ln  net.Listener
@@ -305,7 +308,11 @@ func (s *server) Start(context.Context) error {
 		return fmt.Errorf("%s: listen on %s: %w", s.name, s.addr, err)
 	}
 	s.ln = ln
-	s.srv = &http.Server{Handler: hostguard.Wrap(sysparams.Wrap(s, sysparams.Options{})), ReadHeaderTimeout: 10 * time.Second}
+	var h http.Handler = s
+	if s.Wrap != nil {
+		h = s.Wrap(h)
+	}
+	s.srv = &http.Server{Handler: hostguard.Wrap(sysparams.Wrap(h, sysparams.Options{})), ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = s.srv.Serve(ln) }()
 	s.rt.start()
 	return nil

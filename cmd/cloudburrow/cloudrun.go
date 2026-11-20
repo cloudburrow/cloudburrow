@@ -16,6 +16,7 @@ import (
 
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/grafeas"
 	"github.com/cloudburrow/cloudburrow/internal/k8s"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/pubsubfront"
@@ -78,6 +79,9 @@ type runService struct {
 	// functions is the started Cloud Functions server, whose functions a
 	// project's reset deletes with their event triggers (#1540).
 	functions atomic.Pointer[runadapter.FunctionsServer]
+	// containerAnalysis is the Container Analysis server, whose notes'
+	// and occurrences' policies IAM enforcement reads (#1879).
+	containerAnalysis atomic.Pointer[grafeas.Server]
 }
 
 // metadataAccount is the metadata server's AccountResolver: the account a
@@ -183,6 +187,7 @@ func (r *runService) Start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	r.containerAnalysis.Store(caSrv)
 	go runadapter.RunContinuousAnalysis(cpuCtx, time.Hour)
 	// Cleanup policies run in the background, about daily (#1897), for as
 	// long as the adapter.
