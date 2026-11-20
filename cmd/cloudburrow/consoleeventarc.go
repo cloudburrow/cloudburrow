@@ -59,7 +59,30 @@ var eaEventTypes = []eaEventType{
 	{"google.cloud.datastore.entity.v1.updated.withAuthContext", "Cloud Firestore (Datastore mode)"},
 	{"google.cloud.datastore.entity.v1.deleted.withAuthContext", "Cloud Firestore (Datastore mode)"},
 	{"google.cloud.datastore.entity.v1.written.withAuthContext", "Cloud Firestore (Datastore mode)"},
+	// The direct events of the other Google sources served (#1997).
+	{"google.cloud.redis.instance.v1.created", eaRedisProvider},
+	{"google.cloud.redis.instance.v1.updated", eaRedisProvider},
+	{"google.cloud.redis.instance.v1.deleted", eaRedisProvider},
+	{"google.cloud.functions.function.v2.created", eaFunctionsProvider},
+	{"google.cloud.functions.function.v2.updated", eaFunctionsProvider},
+	{"google.cloud.functions.function.v2.deleted", eaFunctionsProvider},
+	{"google.cloud.eventarc.trigger.v1.created", eaEventarcProvider},
+	{"google.cloud.eventarc.trigger.v1.updated", eaEventarcProvider},
+	{"google.cloud.eventarc.trigger.v1.deleted", eaEventarcProvider},
+	{"google.cloud.eventarc.channel.v1.created", eaEventarcProvider},
+	{"google.cloud.eventarc.channel.v1.updated", eaEventarcProvider},
+	{"google.cloud.eventarc.channel.v1.deleted", eaEventarcProvider},
+	{"google.cloud.eventarc.channelConnection.v1.created", eaEventarcProvider},
+	{"google.cloud.eventarc.channelConnection.v1.deleted", eaEventarcProvider},
 }
+
+// The providers of the direct resource events, as Google's "Event
+// providers and destinations" page names them.
+const (
+	eaRedisProvider     = "Google Cloud Memorystore for Redis"
+	eaFunctionsProvider = "Cloud Run functions (formerly Cloud Functions)"
+	eaEventarcProvider  = "Eventarc"
+)
 
 // eaAuditLogType is Cloud Audit Logs' event type, whose provider is the
 // service that wrote the entry.
@@ -82,7 +105,7 @@ func eaProviderOf(typ string) string {
 var eaDestinations = []string{"Cloud Run", "Cloud Run functions", "Google Kubernetes Engine", "HTTP endpoint"}
 
 const eventarcNote = "Triggers deliver each event to their destination as a CloudEvent in binary content mode, over a Pub/Sub " +
-	"push subscription Eventarc makes. Google sources' direct events of Cloud Pub/Sub and Cloud Storage, the Cloud Audit Logs (Admin Activity) entries of the calls this instance serves over gRPC, and Cloud Firestore's document and Datastore mode entity events, are served, to Cloud Run, Cloud Run functions, Google Kubernetes Engine and HTTP endpoints; " +
+	"push subscription Eventarc makes. Google sources' direct events of Cloud Pub/Sub and Cloud Storage, the Cloud Audit Logs (Admin Activity) entries of the calls this instance serves over gRPC, Cloud Firestore's document and Datastore mode entity events, and the direct events of Memorystore for Redis instances, Cloud Run functions and Eventarc's own triggers, channels and channel connections (#1997), are served, to Cloud Run, Cloud Run functions, Google Kubernetes Engine and HTTP endpoints; " +
 	"a trigger on a channel delivers the custom or third-party events published to it (#1947). The columns follow Google's Triggers page (UNVERIFIED, re-read 2026-11-19: " +
 	"https://docs.cloud.google.com/eventarc/standard/docs/overview names the page, not its columns)."
 
@@ -259,6 +282,9 @@ func (p eventarcProvider) CreateForm() (string, []console.Field) {
 			Help: "Cloud Firestore (Datastore mode): optional. The namespace, (default) for the default one; empty for every namespace."},
 		{Name: "entity", Label: "Entity", Type: "text", Section: "Event provider",
 			Help: "Cloud Firestore (Datastore mode): optional. An entity path, kinds and IDs, or a path pattern such as users/{userId}; empty for every entity."},
+		{Name: "resourceId", Label: "Resource ID", Type: "text", Section: "Event provider",
+			Help: "Memorystore for Redis, Cloud Run functions and Eventarc: optional. The ID of the instance, function, trigger, " +
+				"channel or channel connection whose events are delivered; empty for every one."},
 		{Name: "documentMatch", Label: "Document match", Type: "select", Options: []string{"Path pattern", "Exact"}, Default: "Path pattern",
 			Section: "Event provider", Help: "Cloud Firestore: whether Document is a path pattern (match-path-pattern) or one document."},
 		{Name: "region", Label: "Region", Type: "select", Options: []string{p.run.location()}, Default: p.run.location(), Section: "Trigger"},
@@ -383,6 +409,11 @@ func eaFormTrigger(project, region string, values map[string]string) (*eventarcp
 				f.Operator = "match-path-pattern"
 			}
 			t.EventFilters = append(t.EventFilters, f)
+		}
+	case eaRedisProvider, eaFunctionsProvider, eaEventarcProvider:
+		if id := strings.TrimSpace(values["resourceId"]); id != "" {
+			attr, _ := runadapter.ResourceEventAttribute(typ)
+			t.EventFilters = append(t.EventFilters, &eventarcpb.EventFilter{Attribute: attr, Value: id})
 		}
 	case "Cloud Audit Logs":
 		svc, method := strings.TrimSpace(values["serviceName"]), strings.TrimSpace(values["methodName"])

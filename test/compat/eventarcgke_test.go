@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -21,6 +22,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/cloudburrow/cloudburrow/internal/service/gke"
@@ -28,7 +30,7 @@ import (
 
 // covers: google.cloud.eventarc.v1.Eventarc/CreateTrigger, google.cloud.eventarc.v1.Eventarc/UpdateTrigger, google.cloud.eventarc.v1.Eventarc/DeleteTrigger
 //
-// TestEventarcGKEDestination (#1877), with the official Kubernetes Engine,
+// TestEventarcGKEDestination (#1877, #1997), with the official Kubernetes Engine,
 // Eventarc and Pub/Sub clients, as Google's "Route Pub/Sub events to GKE"
 // documents it: on an Autopilot cluster the Kubernetes Engine API makes,
 // a Deployment of the event probe behind a Service (port 80) in a
@@ -37,7 +39,11 @@ import (
 // destination.gke names the cluster, namespace, service and path, as a
 // binary-mode CloudEvent with MessagePublishedData. The location defaults
 // to the trigger's region; UpdateTrigger moves the path; a cluster the
-// API does not know, and no service, are INVALID_ARGUMENT.
+// API does not know, and no service, are INVALID_ARGUMENT. gcloud eventarc
+// triggers create with --destination-gke-cluster, -location, -namespace,
+// -service and -path, and Terraform's google_eventarc_trigger with a
+// destination.gke block, make triggers that deliver there too, and update
+// and delete them.
 func TestEventarcGKEDestination(t *testing.T) {
 	h := New(t)
 	gkeAddr := runShardEndpoint(h, "CLOUDBURROW_TEST_RUN_GKE", EnvGKE)
@@ -226,5 +232,101 @@ spec:
 	id = publish("moved")
 	if got, all := events(func(e probedEvent) bool { return e.Headers["ce-id"] == id }); got.Path != "/second" {
 		t.Errorf("after the update the event reached %q (%d events); want /second", got.Path, len(all))
+	}
+
+	// gcloud eventarc triggers create with --destination-gke-* (#1997),
+	// as Google's "Route Pub/Sub events to GKE" runs it, through the
+	// harness with egress blocked; its event reaches the same Service.
+	deliveredTo := func(who string, tr *eventarcpb.Trigger, path string) {
+		t.Helper()
+		id, err := pc.Publisher(tr.GetTransport().GetPubsub().GetTopic()).Publish(ctx, &pubsub.Message{Data: []byte(who)}).Get(ctx)
+		if err != nil {
+			t.Fatalf("Publish to %s's trigger: %v", who, err)
+		}
+		if got, all := events(func(e probedEvent) bool { return e.Headers["ce-id"] == id }); got.Path != path {
+			t.Errorf("%s's trigger delivered to %q (%d events); want %s", who, got.Path, len(all), path)
+		}
+	}
+	g := newGcloudSession(t, h)
+	g.must("eventarc", "triggers", "create", "gcloud-gke", "--location=us-central1", "--project="+h.Project(),
+		"--destination-gke-cluster=ea-gke", "--destination-gke-location=us-central1",
+		"--destination-gke-namespace=events", "--destination-gke-service=probe", "--destination-gke-path=/gcloud",
+		"--event-filters=type=google.cloud.pubsub.topic.v1.messagePublished")
+	gname := parent + "/triggers/gcloud-gke"
+	t.Cleanup(func() {
+		if dop, err := ec.DeleteTrigger(context.Background(), &eventarcpb.DeleteTriggerRequest{Name: gname, AllowMissing: true}); err == nil {
+			_, _ = dop.Wait(context.Background())
+		}
+	})
+	gt, err := ec.GetTrigger(ctx, &eventarcpb.GetTriggerRequest{Name: gname})
+	if g := gt.GetDestination().GetGke(); err != nil || g.GetCluster() != "ea-gke" || g.GetNamespace() != "events" ||
+		g.GetService() != "probe" || g.GetPath() != "/gcloud" || g.GetLocation() != "us-central1" {
+		t.Fatalf("gcloud's GKE trigger = %v, %v", gt, err)
+	}
+	deliveredTo("gcloud", gt, "/gcloud")
+	if out := g.must("eventarc", "triggers", "describe", "gcloud-gke", "--location=us-central1", "--project="+h.Project(),
+		"--format=value(destination.gke.service)"); lastLine(out) != "probe" {
+		t.Errorf("triggers describe: destination.gke.service = %q", out)
+	}
+	g.must("eventarc", "triggers", "update", "gcloud-gke", "--location=us-central1", "--project="+h.Project(), "--destination-gke-path=/gcloud2")
+	if gt, err := ec.GetTrigger(ctx, &eventarcpb.GetTriggerRequest{Name: gname}); err != nil || gt.GetDestination().GetGke().GetPath() != "/gcloud2" {
+		t.Errorf("after triggers update --destination-gke-path: %v, %v", gt, err)
+	}
+	g.must("eventarc", "triggers", "delete", "gcloud-gke", "--location=us-central1", "--project="+h.Project(), "--quiet")
+
+	// Terraform's google_eventarc_trigger with destination.gke (#1997):
+	// applied, read back, delivered to, a path change in place, and
+	// destroyed.
+	m := newTFModule(t)
+	tname := parent + "/triggers/tf-gke"
+	t.Cleanup(func() {
+		if dop, err := ec.DeleteTrigger(context.Background(), &eventarcpb.DeleteTriggerRequest{Name: tname, AllowMissing: true}); err == nil {
+			_, _ = dop.Wait(context.Background())
+		}
+	})
+	module := func(path string) string {
+		return fmt.Sprintf(`
+resource "google_eventarc_trigger" "t" {
+  project  = %[1]q
+  location = "us-central1"
+  name     = "tf-gke"
+  matching_criteria {
+    attribute = "type"
+    value     = "google.cloud.pubsub.topic.v1.messagePublished"
+  }
+  destination {
+    gke {
+      cluster   = "ea-gke"
+      location  = "us-central1"
+      namespace = "events"
+      service   = "probe"
+      path      = %[2]q
+    }
+  }
+}
+`, h.Project(), path)
+	}
+	m.write(module("/terraform"))
+	m.must("init", "-input=false", "-no-color")
+	if out := m.must("apply", "-auto-approve", "-input=false", "-no-color"); !strings.Contains(out, "1 added, 0 changed, 0 destroyed") {
+		t.Errorf("first apply:\n%s", out)
+	}
+	tt, err := ec.GetTrigger(ctx, &eventarcpb.GetTriggerRequest{Name: tname})
+	if err != nil || tt.GetDestination().GetGke().GetPath() != "/terraform" || tt.GetDestination().GetGke().GetCluster() != "ea-gke" {
+		t.Fatalf("Terraform's GKE trigger = %v, %v", tt, err)
+	}
+	m.planClean()
+	deliveredTo("terraform", tt, "/terraform")
+	m.write(module("/terraform2"))
+	if out := m.must("apply", "-auto-approve", "-input=false", "-no-color"); !strings.Contains(out, "0 added, 1 changed, 0 destroyed") {
+		t.Errorf("second apply:\n%s", out)
+	}
+	if tt, err := ec.GetTrigger(ctx, &eventarcpb.GetTriggerRequest{Name: tname}); err != nil || tt.GetDestination().GetGke().GetPath() != "/terraform2" {
+		t.Errorf("after the second apply: %v, %v", tt, err)
+	}
+	m.planClean()
+	m.must("destroy", "-auto-approve", "-input=false", "-no-color")
+	if _, err := ec.GetTrigger(ctx, &eventarcpb.GetTriggerRequest{Name: tname}); status.Code(err) != codes.NotFound {
+		t.Errorf("GetTrigger after destroy: %v; want NotFound", err)
 	}
 }

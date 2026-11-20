@@ -181,9 +181,20 @@ func eventReason(typ string) string {
 	case strings.HasPrefix(typ, "google.cloud.datastore."):
 		return "Datastore mode's are the google.cloud.datastore.entity.v1 created, updated, deleted and written events and their withAuthContext variants"
 	case strings.HasPrefix(typ, "google.firebase."):
-		return "Firebase's need Firebase services, which this instance does not serve"
+		return "the Firebase providers' (Firebase Alerts, Authentication, Data Connect, Realtime Database, Remote Config " +
+			"and Test Lab) need their Firebase services, which this instance does not serve"
+	case strings.HasPrefix(typ, "google.cloud.speech."):
+		return "Speech-to-Text's are v1 Adaptation's custom classes and phrase sets, and this instance does not serve " +
+			"google.cloud.speech.v1.Adaptation"
+	case strings.HasPrefix(typ, "google.cloud.redis."):
+		return "Memorystore for Redis's are google.cloud.redis.instance.v1 created, updated and deleted"
+	case strings.HasPrefix(typ, "google.cloud.functions."):
+		return "Cloud Run functions' are google.cloud.functions.function.v2 created, updated and deleted"
+	case strings.HasPrefix(typ, "google.cloud.eventarc."):
+		return "Eventarc's are its triggers', channels' (created, updated, deleted) and channel connections' (created, deleted)"
 	}
-	return "Eventarc's other sources (direct events of other Google services, and custom channels) are not served"
+	return "the direct events served are Pub/Sub's, Cloud Storage's, Firestore's, Memorystore for Redis's, Cloud Run " +
+		"functions' and Eventarc's; the other providers' services are not served here, so their events are not either"
 }
 
 func storageBucket(t *functionspb.EventTrigger) string {
