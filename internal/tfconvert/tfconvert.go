@@ -22,7 +22,10 @@ import (
 type Refusal struct {
 	// Kind is "format" (not a SavedModel), "signature" (no
 	// serving_default), "flex" (needs TensorFlow ops TensorFlow Lite's
-	// builtins lack), "convert" (any other converter failure), "limit"
+	// builtins lack), "ragged" (a RaggedTensor input, output or
+	// tf.train.Example feature), "sparse" (a SparseTensor input or
+	// VarLenFeature, which CloudBurrow cannot feed), "convert" (any other
+	// converter failure), "limit"
 	// (too large) or "unavailable" (no docker, or the image would not
 	// build).
 	Kind    string `json:"kind"`
@@ -34,7 +37,7 @@ func (r *Refusal) Error() string { return r.Message }
 // Unsupported reports whether the refusal is CloudBurrow's, not the
 // model's: BigQuery, which runs TensorFlow itself, would import it.
 func (r *Refusal) Unsupported() bool {
-	return r.Kind == "flex" || r.Kind == "unavailable"
+	return r.Kind == "flex" || r.Kind == "sparse" || r.Kind == "unavailable"
 }
 
 // File is one file of a SavedModel, its path relative to the SavedModel's

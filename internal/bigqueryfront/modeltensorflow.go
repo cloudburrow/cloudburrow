@@ -55,12 +55,29 @@ import (
 // with the converter's message; an operator internal/tflitemodel does not
 // run; and every model without the CLI's converter.
 //
-// UNVERIFIED (docs re-read 2026-11-18: bigqueryml-syntax-create-tensorflow), as Google does not say: BigQuery's own error texts (the
-// page names none but the out-of-memory one); "Models trained using a
-// version of GraphDef earlier than version 20 aren't supported" is not
-// checked; tf.train.Example inputs and SparseTensor inputs are 501 (the
-// converter refuses them); ML.EXPLAIN_PREDICT and other functions the
-// page does not name are 501; each row runs as a batch of one.
+//   - "Models trained using a version of GraphDef earlier than version 20
+//     aren't supported" and "Models trained using an unreleased version of
+//     TensorFlow aren't supported": saved_model.pb's GraphDef producer
+//     version and tensorflow_version are read before converting
+//     (modeltfversion.go), 400;
+//   - "RaggedTensors aren't supported": a ragged signature tensor or
+//     tf.train.Example feature is 400 (the converter's "ragged");
+//   - tf.train.Example inputs: "BigQuery ML automatically determines the
+//     feature names and converts the input BigQuery columns": a
+//     serving_default whose one input is a string tensor of serialized
+//     tf.train.Example protos parsed by ParseExample is converted from the
+//     parse's dense outputs on, so its inputs are the features' names, of
+//     the feature's dtype and shape (deploy/tfconvert/convert.py).
+//
+// UNVERIFIED (docs re-read 2026-11-20: bigqueryml-syntax-create-tensorflow), as Google does not say: BigQuery's own error texts (the
+// page names none but the out-of-memory one); a NULL input in place of a
+// tf.train.Example feature's default value (a NULL input is 400, as for
+// any model); what counts as an unreleased TensorFlow (CloudBurrow refuses
+// a tensorflow_version with "dev" or "nightly" in it, as tf-nightly and
+// source builds write); SparseTensor inputs and VarLenFeature
+// tf.train.Example features, which BigQuery supports, are 501 here (the
+// converter's "sparse"); ML.EXPLAIN_PREDICT and other functions the page
+// does not name are 501; each row runs as a batch of one.
 
 // tfConverter converts a SavedModel's files to TensorFlow Lite: the CLI's
 // converter, *tfconvert.Client.
@@ -155,6 +172,13 @@ func (f front) readSavedModel(ctx context.Context, path string) (string, []tfcon
 		}
 		files = append(files, tfconvert.File{Name: strings.TrimPrefix(it.Name, prefix), Data: data})
 	}
+	byName := make(map[string][]byte, len(files))
+	for _, fl := range files {
+		byName[fl.Name] = fl.Data
+	}
+	if code, msg := checkSavedModelVersions(uri, byName); code != 0 {
+		return "", nil, code, msg
+	}
 	return uri, files, 0, ""
 }
 
@@ -170,6 +194,11 @@ func tensorflowRefusal(uri string, err error) (int, string) {
 	case "custom":
 		return 400, "Failed to load the TensorFlow model " + uri + ": only core TensorFlow operations are supported; models that use custom or " +
 			"tf.contrib operations aren't supported: " + rf.Message
+	case "ragged":
+		return 400, "Failed to load the TensorFlow model " + uri + ": RaggedTensors aren't supported: " + rf.Message
+	case "sparse":
+		return 501, "Not implemented here: the TensorFlow model " + uri + " takes a SparseTensor (" + rf.Message +
+			"), which CloudBurrow's TensorFlow Lite run of imported TensorFlow models cannot feed. Nothing was run."
 	case "limit":
 		return 400, "The TensorFlow model " + uri + " is too large: models are limited to 450 MB in size"
 	case "flex":

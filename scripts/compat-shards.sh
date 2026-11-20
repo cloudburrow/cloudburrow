@@ -95,6 +95,7 @@ COMPAT_LOCALAI_TEST_NAMES="
   BigQueryConnectionGroupMembers1812 BigQueryMLAnnotateImage
   BigQueryMLAnnotateImageDetections BigQueryMLAnnotateImageLabels
   BigQueryMLImportedONNXModel BigQueryMLProcessDocument
+  BigQueryMLTensorFlowImportGenerated
   BigQueryMLRemoteConnectionPermissions BigQueryMLRemoteDefaultConnection
   BigQueryMLRemoteGenerateEmbedding BigQueryMLRemoteGenerateText
   BigQueryMLRemoteGenerationOptions BigQueryMLTranscribe
