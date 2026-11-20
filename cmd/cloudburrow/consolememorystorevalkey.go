@@ -162,10 +162,9 @@ func (valkeyProvider) CreateForm() (string, []console.Field) {
 	fields = append(fields, memorystoreMaintenanceFields()...)
 	fields = append(fields,
 		console.Field{Name: "engineVersion", Label: "Choose version", Type: "radio", Default: redisadmin.DefaultValkeyVersion, Section: "Choose version",
-			Options:            []string{"VALKEY_7_2", "VALKEY_8_0", "VALKEY_9_0", "VALKEY_9_1"},
-			OptionLabels:       map[string]string{"VALKEY_7_2": "Valkey 7.2", "VALKEY_8_0": "Valkey 8.0", "VALKEY_9_0": "Valkey 9.0", "VALKEY_9_1": "Valkey 9.1"},
-			UnavailableOptions: map[string]string{"VALKEY_9_1": "Not available locally: CloudBurrow does not run a Valkey 9.1 server yet."},
-			Help:               "A version cannot be downgraded later."},
+			Options:      valkeyEngineVersions,
+			OptionLabels: valkeyVersionLabels,
+			Help:         "Valkey 9.1 is the default, as Google's. A version cannot be downgraded later."},
 		console.Field{Name: "engineConfigs", Label: "Engine configs", Type: "map", Section: msSectionAdvanced,
 			Help: "Optional. One key=value per line, such as maxmemory-policy."},
 		console.Field{Name: "restoreBackup", Label: "Restore from backup", Type: "text", Section: msSectionAdvanced,
@@ -183,8 +182,9 @@ func (valkeyProvider) CreateTitle() string { return "Create a Valkey instance" }
 // headings, as Google's.
 func (valkeyProvider) CreateLayout() string { return console.CreateLayoutPage }
 
-// valkeyEngineVersions are the engine_version values served (#1557).
-var valkeyEngineVersions = []string{"VALKEY_7_2", "VALKEY_8_0", "VALKEY_9_0"}
+// valkeyEngineVersions are the engine_version values served (#1557, 9.1
+// since #2019), Google's Choose version options.
+var valkeyEngineVersions = []string{"VALKEY_7_2", "VALKEY_8_0", "VALKEY_9_0", "VALKEY_9_1"}
 
 // CreateOnPage implements console.PageCreator.
 func (valkeyProvider) CreateOnPage() bool { return true }

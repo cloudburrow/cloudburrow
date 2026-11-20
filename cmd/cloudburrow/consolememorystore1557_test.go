@@ -99,7 +99,7 @@ func TestConsoleValkeyReplicationMigrationVersions(t *testing.T) {
 	d, _ := valkeyPageProps(t, p, "vk-pri")
 	found := false
 	for _, f := range d.Edit.Fields {
-		if f.Name == "engineVersion" && f.Default == "VALKEY_7_2" && len(f.Options) == 3 {
+		if f.Name == "engineVersion" && f.Default == "VALKEY_7_2" && len(f.Options) == 4 {
 			found = true
 		}
 	}

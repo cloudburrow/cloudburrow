@@ -755,11 +755,13 @@ func memorystoreBeforeReplicaOf(image string) bool {
 
 // Valkey images of Memorystore for Valkey's other engine versions (#1557),
 // each the latest release of its line, pinned by the index digest
-// (linux/amd64 and linux/arm64 among others): VALKEY_7_2 is Valkey 7.2.14
-// and VALKEY_9_0 is Valkey 9.0.6. MemorystoreImage is VALKEY_8_0's.
+// (linux/amd64 and linux/arm64 among others): VALKEY_7_2 is Valkey 7.2.14,
+// VALKEY_9_0 is Valkey 9.0.6 and VALKEY_9_1, Google's default (#2019), is
+// Valkey 9.1.4. MemorystoreImage is VALKEY_8_0's.
 const (
 	MemorystoreValkey72Image = "valkey/valkey:7.2-alpine@sha256:c6c2f0020be34bbf684a53a0ef716ab16ff70295186d4d9f2518435beb7afbff"
 	MemorystoreValkey90Image = "valkey/valkey:9.0-alpine@sha256:187679e3bd4036959631e3f03983ab2ba503ab21e6fd0454d508e909db2ee989"
+	MemorystoreValkey91Image = "valkey/valkey:9.1-alpine@sha256:56729e68bdda139cbd3f6a2538683dc3523325fc5711ea1a379938f1b37893f0"
 )
 
 // MemorystoreBinary is the prefix of image's server programs: "valkey"

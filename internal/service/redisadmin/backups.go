@@ -316,7 +316,7 @@ func (c *clusters) startBackup(r *clusterRecord, id string, ttl time.Duration, a
 	if r.Valkey != nil {
 		b.EngineVersion, b.NodeType = r.Valkey.EngineVersion, r.Valkey.NodeType
 	} else {
-		b.EngineVersion = "VALKEY_8_0"
+		b.EngineVersion = redisClusterEngineVersion
 	}
 	c.backups[name] = b
 	op := c.newOperation(r.Name, "backup")

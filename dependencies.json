@@ -563,6 +563,27 @@
         "updateFeed": "docker-hub-tags",
         "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect`."
       },
+      "memorystoreValkey91": {
+        "$comment": "Valkey 9.1, the server of Memorystore for Valkey's engine_version VALKEY_9_1, Google's default (#2019). NOT a Google-published component: Google publishes no Memorystore emulator.",
+        "image": "valkey/valkey:9.1-alpine",
+        "version": "9.1.4",
+        "digest": "sha256:56729e68bdda139cbd3f6a2538683dc3523325fc5711ea1a379938f1b37893f0",
+        "source": "https://hub.docker.com/r/valkey/valkey",
+        "license": "BSD-3-Clause (the server); the image also carries Alpine and its packages",
+        "redistribution": "not-redistributed",
+        "redistributionPlan": "Pulled from Docker Hub by digest at run time.",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm",
+          "linux/arm64",
+          "linux/ppc64le"
+        ],
+        "notGooglePublished": "Verified: `gcloud emulators` has no Memorystore component, and Google documents none. Memorystore for Valkey runs Valkey.",
+        "provides": "A real Valkey 9.1 server for VALKEY_9_1 instances. NOT the Memorystore admin API.",
+        "verification": "compat-tested",
+        "updateFeed": "docker-hub-tags",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect`."
+      },
       "memorystoreValkey": {
         "$comment": "Valkey, run in the cluster for the Memorystore service (#296). NOT a Google-published component: Google publishes no Memorystore emulator.",
         "image": "valkey/valkey:8.1-alpine",

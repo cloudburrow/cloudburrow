@@ -720,10 +720,12 @@ var memorystoreImages = map[string]string{
 	"REDIS_5_0": components.MemorystoreRedis50Image,
 	"REDIS_6_X": components.MemorystoreRedis62Image,
 	"REDIS_7_0": components.MemorystoreRedis70Image,
-	// Memorystore for Valkey's engine_version (#1557); VALKEY_8_0 is the
-	// default image.
+	// Memorystore for Valkey's engine_version (#1557); VALKEY_8_0 (and a
+	// Redis cluster's nodes) run the default image. VALKEY_9_1 is Google's
+	// default engine_version (#2019).
 	"VALKEY_7_2": components.MemorystoreValkey72Image,
 	"VALKEY_9_0": components.MemorystoreValkey90Image,
+	"VALKEY_9_1": components.MemorystoreValkey91Image,
 }
 
 // Suspend stops a suspended instance's server and keeps its volume
