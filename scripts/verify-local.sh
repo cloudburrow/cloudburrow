@@ -474,7 +474,7 @@ browser_suite() {  # <shard> <dir> <flags...>
   # The run shard's read back through Cloud Run, Cloud KMS, Secret Manager,
   # Cloud Logging and BigQuery's official clients, and enable the Container
   # Scanning API through its Service Usage, RUN_SERVICEUSAGE (#1912).
-  if [ "$shard" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT,RUN_SERVICEUSAGE; fi
+  if [ "$shard" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT,RUN_SERVICEUSAGE,WORKFLOWS; fi
   # The sql shard's read back through the Cloud SQL Admin API, the Backup
   # and DR Service and Secret Manager, which holds Run SQL's password.
   if [ "$shard" = sql ]; then BROWSER_VARS+=,SQLADMIN,BACKUPDR,SECRETS; fi

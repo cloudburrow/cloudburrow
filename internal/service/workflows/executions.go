@@ -96,7 +96,7 @@ func (s *Server) Start(parent string, in *executionspb.Execution) (*executionspb
 			s.opts.Log(project, location, workflow, id, severity, payload)
 		}
 	}
-	rt := &runtime{h: &HTTPCaller{Client: NewHTTPClient(), Local: s.opts.Local, Tokens: s.opts.Tokens, ServiceAccount: sa}, log: logf}
+	rt := &runtime{h: &HTTPCaller{Client: NewHTTPClient(), Local: s.opts.Local, Tokens: s.opts.Tokens, ServiceAccount: sa, Ingress: s.opts.Ingress}, log: logf}
 	cbURL := func(n string) string {
 		addr := "localhost"
 		if s.opts.Addr != nil && s.opts.Addr() != "" {

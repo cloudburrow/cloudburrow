@@ -37,13 +37,13 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
 	"github.com/cloudburrow/cloudburrow/internal/service/monitoring"
 	"github.com/cloudburrow/cloudburrow/internal/service/privateca"
-	"github.com/cloudburrow/cloudburrow/internal/service/workflows"
 	"github.com/cloudburrow/cloudburrow/internal/service/redisadmin"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/scheduler"
 	"github.com/cloudburrow/cloudburrow/internal/service/secrets"
 	"github.com/cloudburrow/cloudburrow/internal/service/tasks"
 	"github.com/cloudburrow/cloudburrow/internal/service/vertexai"
+	"github.com/cloudburrow/cloudburrow/internal/service/workflows"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 )
 

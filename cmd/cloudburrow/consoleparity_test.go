@@ -265,7 +265,7 @@ var parityRows = []parityRow{
 		Provider: "workflows", Offers: "Workflows page (#1986): a project's workflows in every region; Create workflow with the source editor (YAML or JSON, from Google's sample), region, description, service account, call log level and labels; a workflow's page with Details, Source, Executions and Revisions tabs; Edit (a changed source is a new revision) and Delete",
 		Tests: []string{"TestConsoleWorkflows", "TestWorkflowsThroughTheBrowser"}},
 	{Resource: "Workflow executions", Service: "workflows",
-		Methods: []string{"Executions/CreateExecution", "Executions/GetExecution", "Executions/ListExecutions", "Executions/CancelExecution"},
+		Methods:  []string{"Executions/CreateExecution", "Executions/GetExecution", "Executions/ListExecutions", "Executions/CancelExecution"},
 		Provider: "workflows", Offers: "a workflow's Execute (input JSON, call log level) and Executions tab; an execution's page with Summary, Input, Output (result or error) and Steps (its step entries); Cancel while it runs",
 		Tests: []string{"TestConsoleWorkflows", "TestWorkflowsThroughTheBrowser"}},
 	{Resource: "Certificate Authority Service CA pools", Service: "privateca",

@@ -74,6 +74,9 @@ type Options struct {
 	Log func(project, location, workflow, execution, severity string, payload any)
 	// Addr is this server's own address, for callback URLs.
 	Addr func() string
+	// Ingress is the cluster ingress's host address, which Cloud Run
+	// URLs are sent to (HTTPCaller.Ingress); "" without Cloud Run.
+	Ingress string
 	// ProjectNumber resolves a project's number for sys.get_env; nil uses
 	// the ID.
 	ProjectNumber func(project string) string

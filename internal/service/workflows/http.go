@@ -42,6 +42,11 @@ type HTTPCaller struct {
 	// and connectors; nil sends no Authorization header.
 	Tokens         TokenMinter
 	ServiceAccount string
+	// Ingress is the host address of the cluster's ingress gateway, which
+	// a Cloud Run service's URL (a .localhost name with no port) is sent
+	// to with its own Host header, as its callers on the machine reach it;
+	// "" sends it as it is.
+	Ingress string
 }
 
 // NewHTTPClient is the client executions use: .localhost names dial
@@ -242,6 +247,10 @@ func (h *HTTPCaller) send(ctx context.Context, method, raw string, headers, quer
 		return nil, raiseErr("ValueError", "bad request: %v", rerr)
 	}
 	req.Header = hdr
+	if h.Ingress != "" && localhost.IsSubdomain(u.Hostname()) && u.Port() == "" && u.Scheme == "http" {
+		req.Host = u.Host
+		req.URL.Host = h.Ingress
+	}
 	client := h.Client
 	if client == nil {
 		client = NewHTTPClient()

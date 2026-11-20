@@ -255,6 +255,7 @@ func compatEnvFixture(t *testing.T, edit func(env map[string]string)) (dir, envF
 		"CLOUDBURROW_PRIVATECA_ENDPOINT":          "127.0.0.1:9028",
 		"CLOUDBURROW_GKE_ENDPOINT":                "127.0.0.1:9030",
 		"CLOUDBURROW_MONITORING_ENDPOINT":         "127.0.0.1:9033",
+		"CLOUDBURROW_WORKFLOWS_ENDPOINT":          "127.0.0.1:9038",
 		"CLOUDBURROW_COMPUTE_ENDPOINT":            "127.0.0.1:9031",
 		"CLOUDBURROW_BIGQUERY_ENDPOINT":           "http://127.0.0.1:9014",
 		"CLOUDBURROW_BIGQUERY_STORAGE_ENDPOINT":   "127.0.0.1:9015",
@@ -371,6 +372,7 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"PRIVATECA":                "127.0.0.1:9028",
 		"GKE":                      "127.0.0.1:9030",
 		"MONITORING":               "127.0.0.1:9033",
+		"WORKFLOWS":                "127.0.0.1:9038",
 		"COMPUTE":                  "127.0.0.1:9031",
 		"BIGQUERY":                 "http://127.0.0.1:9014",
 		"BIGQUERY_STORAGE":         "127.0.0.1:9015",
@@ -508,7 +510,7 @@ func TestWorkflowsSetCompatEnvThroughTheScript(t *testing.T) {
 		`if [ "$SHARD" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE,BIGTABLE,SPANNER,KMS; fi`,
 		`if [ "$SHARD" = memorystore ]; then BROWSER_VARS+=,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT; fi`,
 		`if [ "$SHARD" = storage ]; then BROWSER_VARS+=,LOGGING,STORAGE,PUBSUB,TASKS,SCHEDULER,RESOURCEMANAGER,SERVICEUSAGE,APIKEYS,KUBECONFIG,MONITORING; fi`,
-		`if [ "$SHARD" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT,RUN_SERVICEUSAGE; fi`,
+		`if [ "$SHARD" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT,RUN_SERVICEUSAGE,WORKFLOWS; fi`,
 		`if [ "$SHARD" = sql ]; then BROWSER_VARS+=,SQLADMIN,BACKUPDR,SECRETS; fi`,
 		`scripts/compat-env.sh --strict --only "$BROWSER_VARS"`,
 	} {
@@ -525,7 +527,7 @@ func TestWorkflowsSetCompatEnvThroughTheScript(t *testing.T) {
 		`if [ "$shard" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE,BIGTABLE,SPANNER,KMS; fi`,
 		`if [ "$shard" = memorystore ]; then BROWSER_VARS+=,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT; fi`,
 		`if [ "$shard" = storage ]; then BROWSER_VARS+=,LOGGING,STORAGE,PUBSUB,TASKS,SCHEDULER,RESOURCEMANAGER,SERVICEUSAGE,APIKEYS,KUBECONFIG,MONITORING; fi`,
-		`if [ "$shard" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT,RUN_SERVICEUSAGE; fi`,
+		`if [ "$shard" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT,RUN_SERVICEUSAGE,WORKFLOWS; fi`,
 		`if [ "$shard" = sql ]; then BROWSER_VARS+=,SQLADMIN,BACKUPDR,SECRETS; fi`,
 		`scripts/compat-env.sh --only "$BROWSER_VARS"`,
 	} {

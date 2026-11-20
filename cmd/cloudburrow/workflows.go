@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"time"
 
+	"cloud.google.com/go/workflows/apiv1/workflowspb"
+	"cloud.google.com/go/workflows/executions/apiv1/executionspb"
 	"google.golang.org/grpc"
 
 	"github.com/cloudburrow/cloudburrow/internal/config"
@@ -102,10 +104,11 @@ func (s *workflowsService) Start(ctx context.Context) error {
 	}
 	local := localAPIs(s.cfg)
 	api, err := workflows.NewServer(state, workflows.Options{
-		Local:  local,
-		Tokens: s.tokens,
-		Addr:   s.Addr,
-		Log:    workflowsLogger(local),
+		Local:   local,
+		Tokens:  s.tokens,
+		Addr:    s.Addr,
+		Log:     workflowsLogger(local),
+		Ingress: workflowsIngress(s.cfg),
 	})
 	if err != nil {
 		return err
@@ -138,6 +141,19 @@ func (s *workflowsService) Stop(ctx context.Context) error {
 		return nil
 	}
 	return s.server.Stop(ctx)
+}
+
+// workflowsIngress is the Knative gateway's host port, which a workflow's
+// calls to a Cloud Run service's URL go through, or "" without Cloud Run.
+func workflowsIngress(cfg config.Config) string {
+	if !serviceEnabled(cfg, config.ServiceRun) || cfg.Endpoints.Ingress <= 0 {
+		return ""
+	}
+	host := cfg.BindAddress
+	if ip := net.ParseIP(host); host == "" || (ip != nil && ip.IsUnspecified()) {
+		host = "127.0.0.1"
+	}
+	return net.JoinHostPort(host, strconv.Itoa(cfg.Endpoints.Ingress))
 }
 
 // workflowsLogger writes an execution's sys.log entries to the instance's
@@ -174,6 +190,27 @@ func workflowsLogger(local func(string) string) func(project, location, workflow
 		}
 		resp.Body.Close()
 	}
+}
+
+// WorkflowExists is Eventarc's check of a workflow destination (#1986).
+func (s *workflowsService) WorkflowExists(name string) bool {
+	api := s.API()
+	if api == nil {
+		return false
+	}
+	_, err := api.Workflows().GetWorkflow(context.Background(), &workflowspb.GetWorkflowRequest{Name: name})
+	return err == nil
+}
+
+// StartWorkflow starts an execution of an Eventarc trigger's workflow with
+// the event as its argument.
+func (s *workflowsService) StartWorkflow(_ context.Context, name, argument string) error {
+	api := s.API()
+	if api == nil {
+		return errors.New("Workflows has not started")
+	}
+	_, err := api.Start(name, &executionspb.Execution{Argument: argument})
+	return err
 }
 
 // workflowsResetter deletes the workflows and their executions.

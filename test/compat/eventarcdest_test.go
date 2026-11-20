@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -28,8 +29,10 @@ import (
 // Google requires) delivers a published message to the URI as a
 // binary-mode CloudEvent; without the network attachment, or to a
 // function that does not exist, CreateTrigger is INVALID_ARGUMENT. A GKE
-// or Workflows destination, a channel and the channel and channel
-// connection methods are UNIMPLEMENTED with the reason.
+// destination, a channel and the channel and channel
+// connection methods are UNIMPLEMENTED with the reason; a workflow that is
+// not deployed is refused (TestEventarcTriggerStartsAWorkflow delivers to
+// one that is).
 func TestEventarcDestinations(t *testing.T) {
 	h := New(t)
 	pubsubAddr := runShardEndpoint(h, "CLOUDBURROW_TEST_RUN_PUBSUB", EnvPubSub)
@@ -47,6 +50,10 @@ func TestEventarcDestinations(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = ec.Close() })
 	parent := runParent(h)
+	workflowCode := codes.FailedPrecondition
+	if strings.TrimSpace(os.Getenv(EnvWorkflows)) != "" {
+		workflowCode = codes.InvalidArgument
+	}
 
 	var mu sync.Mutex
 	var got []*http.Request
@@ -74,8 +81,10 @@ func TestEventarcDestinations(t *testing.T) {
 			Descriptor_: &eventarcpb.Destination_CloudFunction{CloudFunction: parent + "/functions/no-such-function"}}}, codes.InvalidArgument},
 		"a GKE service": {&eventarcpb.Trigger{EventFilters: typ, Destination: &eventarcpb.Destination{Descriptor_: &eventarcpb.Destination_Gke{
 			Gke: &eventarcpb.GKE{Cluster: "c", Location: "us-central1", Namespace: "default", Service: "s"}}}}, codes.Unimplemented},
-		"a workflow": {&eventarcpb.Trigger{EventFilters: typ, Destination: &eventarcpb.Destination{
-			Descriptor_: &eventarcpb.Destination_Workflow{Workflow: parent + "/workflows/w"}}}, codes.Unimplemented},
+		// A workflow that is not deployed (#1986): INVALID_ARGUMENT where
+		// the instance serves Workflows, FAILED_PRECONDITION where not.
+		"a missing workflow": {&eventarcpb.Trigger{EventFilters: typ, Destination: &eventarcpb.Destination{
+			Descriptor_: &eventarcpb.Destination_Workflow{Workflow: parent + "/workflows/no-such-workflow"}}}, workflowCode},
 		"a channel": {&eventarcpb.Trigger{EventFilters: typ, Channel: parent + "/channels/c", Destination: http1}, codes.Unimplemented},
 	} {
 		_, err := ec.CreateTrigger(ctx, &eventarcpb.CreateTriggerRequest{Parent: parent, TriggerId: "bad", Trigger: c.tr})

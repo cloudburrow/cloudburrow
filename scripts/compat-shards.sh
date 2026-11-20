@@ -233,7 +233,9 @@ compat_shard() {
       # revision and task that query PostgreSQL, and Cloud SQL for MySQL for
       # the revision that queries MySQL, through a Cloud SQL volume (#1346).
       # Firestore, as RUN_FIRESTORE, for the Eventarc Firestore triggers (#1877).
-      SERVICES=run,secretmanager,tasks,storage,pubsub,firestore,kms,scheduler,logging,bigquery,cloudsql,cloudsql-mysql
+      # Workflows (#1986): its workflows call a Cloud Run service with
+      # http.post and Cloud Storage and Pub/Sub through connectors.
+      SERVICES=run,secretmanager,tasks,storage,pubsub,firestore,kms,scheduler,logging,bigquery,cloudsql,cloudsql-mysql,workflows
       # Cloud Run (#336). For the revisions that reach Storage and Pub/Sub
       # with no client options (#576) and call KMS, Scheduler and Logging
       # (#681), the RUN_* names, so those suites do not run a second time
@@ -266,7 +268,7 @@ compat_shard() {
       # and TestArtifactRegistryCleanupPolicies, which skips without one
       # of 2m or less, reads the same, so it runs here.
       export CLOUDBURROW_ARTIFACT_REGISTRY_CLEANUP_INTERVAL=1m
-      TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_FIRESTORE,RUN_KMS,RUN_SCHEDULER,RUN_LOGGING,RUN_BIGQUERY,RUN_SQLADMIN,RUN_RESOURCEMANAGER,RUN_SERVICEUSAGE,RUN_APIKEYS,RUN_MYSQL,MYSQL_PASSWORD,BIGQUERY_PROJECT,APPENGINE_URL ;;
+      TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_FIRESTORE,RUN_KMS,RUN_SCHEDULER,RUN_LOGGING,RUN_BIGQUERY,RUN_SQLADMIN,RUN_RESOURCEMANAGER,RUN_SERVICEUSAGE,RUN_APIKEYS,RUN_MYSQL,MYSQL_PASSWORD,BIGQUERY_PROJECT,APPENGINE_URL,WORKFLOWS ;;
     scale)
       # The tests that take minutes each (#1821), split from run: Cloud
       # Run's CPU, automatic and manual scaling and instance splits, through

@@ -75,7 +75,7 @@ var workflowsCallLogLevels = []string{"CALL_LOG_LEVEL_UNSPECIFIED", "LOG_ALL_CAL
 
 func (workflowsProvider) CreateForm() (string, []console.Field) {
 	return "Create workflow", []console.Field{
-		{Name: "workflowId", Label: "Workflow name", Type: "text", Required: true, Pattern: `^[a-zA-Z]([a-zA-Z0-9_-]{0,62}[a-zA-Z0-9])?$`,
+		{Name: "workflowId", Label: "Workflow name", Type: "text", Required: true, Pattern: `^[a-zA-Z]([a-zA-Z0-9_\-]{0,62}[a-zA-Z0-9])?$`,
 			Help: "Letters, numbers, underscores and hyphens; starts with a letter; at most 64 characters."},
 		{Name: "location", Label: "Region", Type: "select", Required: true, Default: "us-central1", Options: workflowsRegions()},
 		{Name: "description", Label: "Description", Type: "text"},

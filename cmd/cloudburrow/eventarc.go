@@ -176,6 +176,8 @@ type eventsConfig struct {
 	tokens    *metadata.Credentials
 	// pushBase is the Run port as the cluster reaches it.
 	pushBase func() string
+	// workflows is Eventarc's workflow destination (#1986), or nil.
+	workflows runadapter.WorkflowStarter
 }
 
 // Publish publishes one event Eventarc sources itself (audit logs,

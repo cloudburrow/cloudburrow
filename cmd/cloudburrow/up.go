@@ -334,6 +334,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	workflowsSvc := newWorkflowsService(cfg)
 	if workflowsSvc != nil {
 		workflowsSvc.tokens = creds
+		// Eventarc's workflow destination (#1986).
+		if runSvc != nil && runSvc.events != nil {
+			runSvc.events.workflows = workflowsSvc
+		}
 	}
 	workflowsSvc.register(coord)
 	// The Kubernetes Engine API (#1913), in process; its clusters are
