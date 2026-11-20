@@ -148,7 +148,7 @@ func eaProviders(location string) []*eventarcpb.Provider {
 
 func (e *EventarcServer) op(target, verb string, response proto.Message) (*longrunningpb.Operation, error) {
 	s := e.f.s
-	loc := strings.SplitN(target, "/triggers/", 2)[0]
+	loc := eaLocOf(target)
 	op := s.ops.CreateNamed(loc+"/operations/"+uuid.NewString(), target)
 	now := timestamppb.Now()
 	_ = s.ops.SetMetadata(op.Name, &eventarcpb.OperationMetadata{CreateTime: now, EndTime: now, Target: target, Verb: verb, ApiVersion: "v1"})
@@ -159,11 +159,8 @@ func (e *EventarcServer) op(target, verb string, response proto.Message) (*longr
 // eaSpec is a trigger as the functions' transport takes it, or why it
 // cannot be served.
 func eaSpec(t *eventarcpb.Trigger, region string) (*functionspb.EventTrigger, error) {
-	if t.GetChannel() != "" {
-		return nil, apierror.Unimplemented("the trigger's channel: %s", channelReason)
-	}
 	spec := &functionspb.EventTrigger{TriggerRegion: region, ServiceAccountEmail: t.GetServiceAccount(),
-		RetryPolicy: functionspb.EventTrigger_RETRY_POLICY_RETRY}
+		RetryPolicy: functionspb.EventTrigger_RETRY_POLICY_RETRY, Channel: t.GetChannel()}
 	for _, f := range t.GetEventFilters() {
 		if op := f.GetOperator(); op != "" && op != pathPatternOp {
 			return nil, apierror.InvalidArgument("event filter operator %q is not supported: an exact match (no operator) and %q are", op, pathPatternOp)
@@ -177,10 +174,20 @@ func eaSpec(t *eventarcpb.Trigger, region string) (*functionspb.EventTrigger, er
 		}
 		spec.EventFilters = append(spec.EventFilters, &functionspb.EventFilter{Attribute: f.GetAttribute(), Value: f.GetValue(), Operator: f.GetOperator()})
 	}
-	if err := eaCheckFilters(spec); err != nil {
+	if spec.GetChannel() != "" {
+		// A channel's events are custom or a provider's: any type, and
+		// filters on any of their attributes (#1947).
+		if err := eaCheckChannelTrigger(t, spec); err != nil {
+			return nil, err
+		}
+	} else if err := eaCheckFilters(spec); err != nil {
 		return nil, err
 	}
 	switch typ := spec.GetEventType(); {
+	case spec.GetChannel() != "":
+		if t.GetTransport().GetPubsub().GetTopic() != "" {
+			return nil, apierror.InvalidArgument("transport.pubsub.topic is not set on a channel's trigger: its events come from the channel")
+		}
 	case typ == pubsubPublished:
 		spec.PubsubTopic = t.GetTransport().GetPubsub().GetTopic()
 		if spec.PubsubTopic != "" && !strings.Contains(spec.PubsubTopic, "/topics/") {
@@ -275,6 +282,9 @@ func (e *EventarcServer) CreateTrigger(ctx context.Context, req *eventarcpb.Crea
 		return e.op(name, "create", t)
 	}
 	spec.Trigger = name
+	if spec.GetChannel() != "" {
+		return e.storeChannelTrigger(name, t, spec)
+	}
 	if sourcedEventType(spec.GetEventType()) {
 		if _, ok := e.f.publisher(); !ok {
 			return nil, apierror.FailedPrecondition("this instance cannot publish %s events to a trigger's topic", spec.GetEventType())
@@ -533,6 +543,12 @@ func (f *FunctionsServer) deliverEventarc(ctx context.Context, t *eventarcpb.Tri
 	if err != nil {
 		return http.StatusBadRequest, err
 	}
+	return f.deliverEvent(ctx, t, ev)
+}
+
+// deliverEvent posts one CloudEvent, in binary content mode, to a
+// trigger's destination.
+func (f *FunctionsServer) deliverEvent(ctx context.Context, t *eventarcpb.Trigger, ev *CloudEvent) (int, error) {
 	project := strings.Split(t.GetName(), "/")[1]
 	d := t.GetDestination()
 	if he := d.GetHttpEndpoint(); he != nil {

@@ -40,6 +40,13 @@ import (
 // maxFieldNumber is the largest field number protobuf allows.
 const maxFieldNumber = 536870911
 
+// ParseProtoSchema reads a Protobuf schema definition, as a Pub/Sub
+// schema holds one, and returns the one top-level message it defines;
+// Eventarc Advanced's Protobuf payload formats (#1947) are read with it.
+func ParseProtoSchema(def string) (protoreflect.MessageDescriptor, error) {
+	return parseProtoSchema(def)
+}
+
 // parseProtoSchema reads a PROTOCOL_BUFFER schema definition and returns
 // the one top-level message it defines.
 func parseProtoSchema(def string) (md protoreflect.MessageDescriptor, err error) {
