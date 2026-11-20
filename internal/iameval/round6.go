@@ -38,10 +38,9 @@ func newerDenyOf(permission, resource string) error {
 // for are checked with the permission of their name, UNVERIFIED (docs
 // re-read 2026-11-20): UpdateInstance run.instances.update, and the
 // worker pools' and instances' GetIamPolicy and SetIamPolicy. SubmitBuild
-// is cloudbuild.builds.create on its parent (the audit page). Not
-// checked: SourceUpload's UploadSource, which no page documents, and the
-// Operations and Locations mixins, which Artifact Registry, Cloud Build
-// and Cloud Functions share on this port. TestIamPermissions needs no
+// is cloudbuild.builds.create on its parent (the audit page).
+// SourceUpload's UploadSource and the port's Operations and Locations
+// mixins are the seventh round's (round7.go). TestIamPermissions needs no
 // permission ("There are no permissions required for making this API
 // call.") and answers what the caller holds. Services, jobs, worker pools
 // and instances keep their own policies. A template's service account
@@ -234,8 +233,10 @@ var Functions = &Service{
 // pythonPackages); GetIamPolicy and SetIamPolicy as "Artifact Registry
 // audit logging" names them (https://docs.cloud.google.com/artifact-registry/docs/audit-logging).
 // BatchDeleteVersions checks artifactregistry.versions.delete on each of
-// its names. Not checked: GetVPCSCConfig and UpdateVPCSCConfig (their
-// artifactregistry.vpcscconfigs.* is not in Google's permission index),
+// its names. Not checked: GetVPCSCConfig and UpdateVPCSCConfig, whose
+// artifactregistry.vpcscconfigs.get and .update the audit page names but
+// neither Google's permission index nor any Artifact Registry role holds
+// (re-read 2026-11-20), so no role could grant them,
 // TestIamPermissions (no page names one; it answers what the caller
 // holds), and the shared mixins. A repository keeps its own policy, which
 // applies to its packages, versions, tags and files. Google's wording of a
@@ -310,8 +311,11 @@ var ArtifactRegistry = &Service{
 // their pages name them. RetryBuild's page names "one or more of"
 // cloudbuild.builds.get and cloudbuild.builds.create: cloudbuild.builds.create
 // is checked, as the retry creates a build (UNVERIFIED which one Google
-// checks, re-read 2026-11-20). Not checked: ReceiveTriggerWebhook, which a
-// trigger's secret authorizes when no OAuth token is sent. Cloud Build
+// checks, re-read 2026-11-20). Not checked: ReceiveTriggerWebhook, which
+// the trigger's webhook secret authorizes, not IAM ("You'll need a secret
+// to authenticate incoming webhook events",
+// https://docs.cloud.google.com/build/docs/automate-builds-webhook-events,
+// re-read 2026-11-20). Cloud Build
 // keeps no resource-level policies on these resources. Google's wording
 // of a denial is UNVERIFIED (re-read 2026-11-20: the pages give none): the
 // newer APIs'.

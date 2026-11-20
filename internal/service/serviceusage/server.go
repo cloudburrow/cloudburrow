@@ -98,6 +98,9 @@ type Server struct {
 	// Observe, if set, is called once per request with the method name and
 	// the answer's HTTP status.
 	Observe func(method string, code int)
+	// Wrap, if set before Start, wraps the API's handler (IAM
+	// enforcement, #1879).
+	Wrap func(http.Handler) http.Handler
 	// Dependents names, for an API, the catalogued APIs that depend on it
 	// (Google's service dependencies), which disabling it disables too
 	// with disableDependentServices, and refuses without.
@@ -136,7 +139,11 @@ func (s *Server) Start(context.Context) error {
 	s.ln = ln
 	// Loopback-only, but a rebound or cross-site page reaches
 	// loopback too (#676, #1586).
-	s.srv = &http.Server{Handler: hostguard.Wrap(sysparams.Wrap(s, sysparams.Options{})), ReadHeaderTimeout: 10 * time.Second}
+	var h http.Handler = s
+	if s.Wrap != nil {
+		h = s.Wrap(h)
+	}
+	s.srv = &http.Server{Handler: hostguard.Wrap(sysparams.Wrap(h, sysparams.Options{})), ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = s.srv.Serve(ln) }()
 	return nil
 }

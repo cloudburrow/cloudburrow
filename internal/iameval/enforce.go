@@ -117,6 +117,13 @@ func (e *Enforcer) Interceptor(svc *Service) grpc.UnaryServerInterceptor {
 				return nil, err
 			}
 		}
+		for _, a := range m.Also {
+			for _, r := range actAsFields(msg.ProtoReflect(), []string{a.Field}) {
+				if err := e.Authorize(ctx, svc, bearer(ctx), a.Permission, r); err != nil {
+					return nil, err
+				}
+			}
+		}
 		for _, account := range actAsFields(msg.ProtoReflect(), m.ActAs) {
 			if err := e.AuthorizeActAs(ctx, svc, bearer(ctx), Project(resource), account); err != nil {
 				return nil, err
@@ -321,6 +328,14 @@ func (e *Enforcer) HTTP(svc *Service, m *rest.Matcher, next http.Handler) http.H
 			if err := e.Authorize(r.Context(), svc, Bearer(r.Header.Get("Authorization")), row.IfSetPermission, resource); err != nil {
 				WriteJSONStatus(w, err)
 				return
+			}
+		}
+		for _, a := range row.Also {
+			for _, res := range jsonActAs(raw, route.Body, []string{a.Field}) {
+				if err := e.Authorize(r.Context(), svc, Bearer(r.Header.Get("Authorization")), a.Permission, res); err != nil {
+					WriteJSONStatus(w, err)
+					return
+				}
 			}
 		}
 		accounts := jsonActAs(raw, route.Body, row.ActAs)

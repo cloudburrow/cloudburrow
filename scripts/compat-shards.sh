@@ -67,8 +67,9 @@
 # Tasks, Secret Manager, Cloud KMS, Cloud Run (for run.routes.invoke,
 # iam.serviceAccounts.actAs and, since the sixth round, its admin API and
 # Cloud Functions, Artifact Registry and Cloud Build on its port), Cloud
-# Scheduler, Workflows, Cloud Logging, Cloud Monitoring, Memorystore and
-# the Cloud SQL Admin API.
+# Scheduler, Workflows, Cloud Logging, Cloud Monitoring, Memorystore, the
+# Cloud SQL Admin API, Certificate Authority Service, Kubernetes Engine,
+# Compute Engine, API Keys and Service Usage.
 
 # A tenth, sqlreplicas, is the sql shard's instance again for the Cloud SQL
 # tests that make replicas, standbys and external primaries
@@ -389,9 +390,11 @@ compat_shard() {
       # BigQuery for BigQuery sharing's (Analytics Hub, #1989).
       # Cloud Scheduler and Workflows since the fourth round; Cloud
       # Logging, Cloud Monitoring, Memorystore and the Cloud SQL Admin API
-      # since the fifth.
-      SERVICES=storage,pubsub,tasks,secretmanager,kms,run,bigquery,scheduler,workflows,logging,monitoring,memorystore,cloudsql
-      TEST_VARS+=,STORAGE,PUBSUB,TASKS,SECRETS,KMS,RUN,RESOURCEMANAGER,ANALYTICSHUB,BIGQUERY,BIGQUERY_PROJECT,SCHEDULER,WORKFLOWS,LOGGING,MONITORING,MEMORYSTORE_ADMIN,SQLADMIN,IAM_ENFORCEMENT
+      # since the fifth; Certificate Authority Service, Kubernetes Engine
+      # (no cluster is made), Compute Engine, API Keys and Service Usage
+      # since the seventh.
+      SERVICES=storage,pubsub,tasks,secretmanager,kms,run,bigquery,scheduler,workflows,logging,monitoring,memorystore,cloudsql,privateca,gke,compute
+      TEST_VARS+=,STORAGE,PUBSUB,TASKS,SECRETS,KMS,RUN,RESOURCEMANAGER,ANALYTICSHUB,BIGQUERY,BIGQUERY_PROJECT,SCHEDULER,WORKFLOWS,LOGGING,MONITORING,MEMORYSTORE_ADMIN,SQLADMIN,PRIVATECA,GKE,COMPUTE,APIKEYS,SERVICEUSAGE,IAM_ENFORCEMENT
       UP_FLAGS=(--iam-enforcement=on)
       COMPAT_RUN='^TestIAMEnforcement' ;;
     localai)

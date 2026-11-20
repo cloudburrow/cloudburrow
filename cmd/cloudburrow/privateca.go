@@ -38,8 +38,10 @@ type privateCAService struct {
 	calls     grpctransport.Observer
 	interpose []grpc.UnaryServerInterceptor
 	requests  func(rest.Request)
-	server    *grpctransport.Server
-	api       *privateca.Server
+	// wrapJSON wraps the JSON API (IAM enforcement, #1879); nil is none.
+	wrapJSON func(http.Handler) http.Handler
+	server   *grpctransport.Server
+	api      *privateca.Server
 	// kms is the instance's Cloud KMS, or nil; storage its Cloud Storage
 	// tunnel (#1834).
 	kms     *kmsService
@@ -116,6 +118,9 @@ func (s *privateCAService) Start(ctx context.Context) error {
 		s.server.Interpose(i)
 	}
 	var jsonAPI http.Handler = privateca.NewRESTHandler(api)
+	if s.wrapJSON != nil {
+		jsonAPI = s.wrapJSON(jsonAPI)
+	}
 	if s.requests != nil {
 		jsonAPI = rest.Observe(jsonAPI, s.requests)
 	}

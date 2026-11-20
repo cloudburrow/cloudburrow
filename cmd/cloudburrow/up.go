@@ -702,6 +702,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	iamEnforcer := newIAMEnforcer(cfg, creds, func() *resourcemanager.Registry { return projectRegistry })
 	useIAMEnforcement(iamEnforcer, secretsSvc, kmsSvc, tasksSvc, analyticsHub, schedulerSvc, workflowsSvc,
 		iamEnforced{logging: loggingSvc, monitoring: monitoringSvc, memorystore: memorystoreAdminSvc, run: runSvc})
+	iamEnforced7{privateCA: privateCASvc, gke: gkeSvc, compute: computeSvc, run: runSvc}.use(iamEnforcer)
 	// Log buckets' customer-managed keys (#1950).
 	if loggingSvc != nil {
 		keys := cmekKeys(kmsSvc, iamEnforcer)
@@ -890,6 +891,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	// The API Keys API (#1915), each project's keys, in the same store.
 	apiKeysSrv := newAPIKeysServer(cfg, projects, projects.Backing())
+	// IAM enforcement (#1879) of Service Usage and API Keys.
+	iamEnforced7{serviceUsage: serviceUsageSrv, apiKeys: apiKeysSrv}.use(iamEnforcer)
 	if apiKeysSrv != nil {
 		apiKeysRef = apiKeysSrv
 		coord.Register(apiKeysSrv)

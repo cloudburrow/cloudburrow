@@ -34,6 +34,16 @@ type Method struct {
 	// needs IfSetPermission too, on the same resource (Cloud Run's RunJob
 	// with overrides).
 	IfSet, IfSetPermission string
+	// Also are further checks on other resources the request names: each
+	// field set needs its permission on the resource it names (Private
+	// CA's CreateCertificate with a certificate template).
+	Also []Also
+}
+
+// Also is a further check: Permission on the resource the request's Field
+// (a dotted path) names, when it is set.
+type Also struct {
+	Field, Permission string
 }
 
 // Service is one API's table: its methods by gRPC full method, the
