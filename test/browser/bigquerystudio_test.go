@@ -24,8 +24,8 @@ import (
 // the query will process; Run shows Query results with Job information,
 // Results, Visualization, JSON, Execution details and Execution graph; Edit >
 // Query settings' destination table writes the results to a table; Schedule is
-// drawn disabled with its reason; Personal and Project history list the
-// job, with Open as new query. A page CloudBurrow does not serve says
+// drawn disabled with its reason; the Explorer's Job history opens a tab
+// whose Personal and Project history list the job, with Open as new query. A page CloudBurrow does not serve says
 // "Not available locally", and the table's page has Google's tabs in
 // Google's order.
 func TestBigQueryStudioExplorerEditorAndHistory(t *testing.T) {
@@ -100,7 +100,7 @@ func TestBigQueryStudioExplorerEditorAndHistory(t *testing.T) {
 	p.clickExpr(node(tableKey) + `.querySelector(".bq-node-menu")`)
 	var items []string
 	p.eval(node(tableKey)+`.querySelectorAll(".bq-menu-item").length ? [...`+node(tableKey)+`.querySelectorAll(".bq-menu-item")].map((b) => b.textContent) : []`, &items)
-	if strings.Join(items, "|") != "Open|Open in new tab|Query|Copy ID|Delete" {
+	if strings.Join(items, "|") != "Open|Open in new tab|Query|Query in split tab|Copy ID|Delete" {
 		t.Errorf("a table's View actions are %q", items)
 	}
 	p.clickText(".bq-menu-item", "Query")
@@ -175,7 +175,20 @@ func TestBigQueryStudioExplorerEditorAndHistory(t *testing.T) {
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	// Personal and Project history.
+	// The job Run ran, named in its Job information.
+	var jobID string
+	p.eval(`[...document.querySelectorAll(".bq-results-tabs .tab")].find((b) => b.textContent === "Job information").click()`, nil)
+	p.waitFor(`document.querySelector(".bq-job-info") !== null`)
+	p.eval(`(() => { const d = [...document.querySelectorAll(".bq-job-info dt")].find((n) => n.textContent === "Job ID");
+		const v = d ? d.nextElementSibling.textContent : ""; return v.slice(v.lastIndexOf(".") + 1); })()`, &jobID)
+	if jobID == "" {
+		t.Fatalf("Job information names no job")
+	}
+
+	// Personal and Project history, in the Job history tab the Explorer's
+	// Job history opens.
+	p.clickText(".bq-explorer-jobs", "Job history")
+	p.waitFor(`document.querySelector(".bq-tabs .tab.is-selected").textContent === "Job history"`)
 	p.waitFor(`[...document.querySelectorAll(".bq-history-table td")].length > 0`)
 	p.clickText(".bq-history-tabs .tab", "Project history")
 	p.waitFor(`document.querySelector(".bq-history-tabs .tab.is-selected").textContent === "Project history" &&
@@ -193,26 +206,19 @@ func TestBigQueryStudioExplorerEditorAndHistory(t *testing.T) {
 	}
 
 	// The job's page: Open as new query opens Studio on its statement.
-	var jobID string
-	p.eval(`[...document.querySelectorAll(".bq-results-tabs .tab")].find((b) => b.textContent === "Job information").click()`, nil)
-	p.waitFor(`document.querySelector(".bq-job-info") !== null`)
-	p.eval(`(() => { const d = [...document.querySelectorAll(".bq-job-info dt")].find((n) => n.textContent === "Job ID");
-		const v = d ? d.nextElementSibling.textContent : ""; return v.slice(v.lastIndexOf(".") + 1); })()`, &jobID)
-	if jobID == "" {
-		t.Fatalf("Job information names no job")
-	}
 	p.navigate("/bigquery-jobs/" + url.PathEscape(jobID) + q)
 	p.clickText("#view .page-actions button", "Open as new query")
 	p.waitFor(`location.pathname === "/bigquery-studio" && document.querySelector(".bq-editor") !== null &&
 		document.querySelector(".bq-editor").value.includes("ORDER BY id")`)
 
 	// A page CloudBurrow does not serve, in Google's place.
-	p.navigate("/bigquery-sharing" + q)
+	// (Analytics Hub is served since #1960; Dataform is not.)
+	p.navigate("/bigquery-dataform" + q)
 	p.waitFor(`document.querySelector("#view .state h2") !== null`)
 	var unavailable string
 	p.eval(`document.querySelector("#view .state").textContent`, &unavailable)
 	if !strings.Contains(unavailable, "Not available locally") {
-		t.Errorf("Analytics Hub says %q", unavailable)
+		t.Errorf("Dataform says %q", unavailable)
 	}
 
 	// The table's tabs, in Google's order.

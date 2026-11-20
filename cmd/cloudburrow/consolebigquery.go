@@ -291,17 +291,27 @@ func (p bigqueryProvider) datasetDetail(ctx context.Context, datasetID string) (
 			{Label: "Location", Value: orDash(md.Location)},
 		},
 		Sections: []console.Section{
-			// Google's dataset page opens on Overview (#1861); the id stays
-			// "tables", which addresses and tests name.
-			{ID: "tables", Label: "Overview", Listing: tables},
-			p.routinesSection(ctx, ds),
-			p.modelsSection(ctx, ds), // #1465
+			// Google's dataset page opens on Overview, which lists the
+			// dataset's tables, routines and models (#1861,
+			// https://docs.cloud.google.com/bigquery/docs/bigquery-web-ui):
+			// one tab holding the three, each on its own strip inside it.
+			// The ids stay "tables", "routines" and "models", which
+			// addresses and tests name.
+			overviewSection(console.Section{ID: "tables", Label: "Tables", Listing: tables}),
+			overviewSection(p.routinesSection(ctx, ds)),
+			overviewSection(p.modelsSection(ctx, ds)), // #1465
 			{
 				ID: "details", Label: "Details", Kind: console.KindProperties,
 				Groups: []console.PropertyGroup{{Heading: "Dataset", Properties: props}},
 			},
 		},
 	}, nil
+}
+
+// overviewSection puts a dataset's listing under its Overview tab.
+func overviewSection(s console.Section) console.Section {
+	s.Group = "Overview"
+	return s
 }
 
 func (p bigqueryProvider) tableDetail(ctx context.Context, datasetID, tableID string) (console.Detail, error) {
