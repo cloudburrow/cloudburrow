@@ -182,8 +182,10 @@ func TestEventarcAdvancedBusToCloudRun(t *testing.T) {
 	} {
 		_, err := ec.CreatePipeline(ctx, &eventarcpb.CreatePipelineRequest{Parent: parent, PipelineId: "adv-bad", Pipeline: bad})
 		if want := codes.InvalidArgument; name == "a workflow" {
-			if status.Code(err) != codes.Unimplemented {
-				t.Errorf("CreatePipeline with %s = %v; want Unimplemented", name, err)
+			// A missing workflow is INVALID_ARGUMENT where Workflows is
+			// served, FAILED_PRECONDITION where it is not.
+			if c := status.Code(err); c != codes.InvalidArgument && c != codes.FailedPrecondition {
+				t.Errorf("CreatePipeline with %s = %v; want InvalidArgument or FailedPrecondition", name, err)
 			}
 		} else if status.Code(err) != want {
 			t.Errorf("CreatePipeline with %s = %v; want %v", name, err, want)
@@ -234,18 +236,32 @@ func TestEventarcAdvancedBusToCloudRun(t *testing.T) {
 		})
 		return got
 	}
-	orders := createEnrollment("adv-orders", `message.type == "com.example.order.v1" && message.data.total > 100`, toRun.GetName())
+	orders := createEnrollment("adv-orders", `message.type == "com.example.order.v1" && message.region == "us"`, toRun.GetName())
 	createEnrollment("adv-all", "true", toTopic.GetName())
 	if _, err := ec.CreateEnrollment(ctx, &eventarcpb.CreateEnrollmentRequest{Parent: parent, EnrollmentId: "adv-bad", Enrollment: &eventarcpb.Enrollment{
 		CelMatch: "message.type ==", MessageBus: busName, Destination: toRun.GetName()}}); status.Code(err) != codes.InvalidArgument {
 		t.Errorf("a bad CEL match = %v", err)
 	}
+	// Google's "Use Common Expression Language" page: message.data and
+	// message.data_base64 are reserved and can't be used; an enrollment
+	// matches on context attributes only. Refused at create and at update.
+	for _, m := range []string{`message.data.total > 10`, `has(message.data_base64)`} {
+		_, err := ec.CreateEnrollment(ctx, &eventarcpb.CreateEnrollmentRequest{Parent: parent, EnrollmentId: "adv-data", Enrollment: &eventarcpb.Enrollment{
+			CelMatch: m, MessageBus: busName, Destination: toRun.GetName()}})
+		if status.Code(err) != codes.InvalidArgument || !strings.Contains(err.Error(), "cel_match") || !strings.Contains(err.Error(), "reserved") {
+			t.Errorf("CreateEnrollment with cel_match %s = %v; want INVALID_ARGUMENT naming cel_match", m, err)
+		}
+	}
+	if _, err := ec.UpdateEnrollment(ctx, &eventarcpb.UpdateEnrollmentRequest{Enrollment: &eventarcpb.Enrollment{Name: orders.GetName(),
+		CelMatch: `message.data.total > 10`}, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"cel_match"}}}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("UpdateEnrollment to a message.data match = %v; want INVALID_ARGUMENT", err)
+	}
 	eop, err := ec.UpdateEnrollment(ctx, &eventarcpb.UpdateEnrollmentRequest{Enrollment: &eventarcpb.Enrollment{Name: orders.GetName(),
-		CelMatch: `message.type == "com.example.order.v1" && message.data.total > 10`}, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"cel_match"}}})
+		CelMatch: `message.type == "com.example.order.v1" && message.region == "eu"`}, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"cel_match"}}})
 	if err != nil {
 		t.Fatalf("UpdateEnrollment: %v", err)
 	}
-	if got, err := eop.Wait(ctx); err != nil || !strings.HasSuffix(got.GetCelMatch(), "> 10") {
+	if got, err := eop.Wait(ctx); err != nil || !strings.HasSuffix(got.GetCelMatch(), `== "eu"`) {
 		t.Errorf("UpdateEnrollment = %v, %v", got, err)
 	}
 	if got, err := ec.GetEnrollment(ctx, &eventarcpb.GetEnrollmentRequest{Name: orders.GetName()}); err != nil || got.GetMessageBus() != busName {
@@ -287,8 +303,10 @@ func TestEventarcAdvancedBusToCloudRun(t *testing.T) {
 	}
 	if _, err := pub.Publish(ctx, &publishingpb.PublishRequest{MessageBus: busName, Format: &publishingpb.PublishRequest_ProtoMessage_{
 		ProtoMessage_: &publishingpb.CloudEvent{Id: "adv-2", Source: "//shop/orders", SpecVersion: "1.0", Type: "com.example.order.v1",
-			Attributes: map[string]*publishingpb.CloudEvent_CloudEventAttributeValue{"datacontenttype": {Attr: &publishingpb.CloudEvent_CloudEventAttributeValue_CeString{CeString: "application/json"}}},
-			Data:       &publishingpb.CloudEvent_TextData{TextData: `{"total":3}`}}}}); err != nil {
+			Attributes: map[string]*publishingpb.CloudEvent_CloudEventAttributeValue{
+				"datacontenttype": {Attr: &publishingpb.CloudEvent_CloudEventAttributeValue_CeString{CeString: "application/json"}},
+				"region":          {Attr: &publishingpb.CloudEvent_CloudEventAttributeValue_CeString{CeString: "us"}}},
+			Data: &publishingpb.CloudEvent_TextData{TextData: `{"total":3}`}}}}); err != nil {
 		t.Fatalf("Publish proto_message: %v", err)
 	}
 	if _, err := pub.Publish(ctx, &publishingpb.PublishRequest{MessageBus: busName, Format: &publishingpb.PublishRequest_JsonMessage{
@@ -307,7 +325,7 @@ func TestEventarcAdvancedBusToCloudRun(t *testing.T) {
 	}
 	for _, e := range all {
 		if e.Headers["ce-id"] == "adv-2" {
-			t.Errorf("adv-2 (total 3) reached the service: the match is total > 10")
+			t.Errorf("adv-2 (region us) reached the service: the match is region eu")
 		}
 	}
 	// The topic pipeline gets both, in the Pub/Sub binding.
