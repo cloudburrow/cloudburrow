@@ -80,11 +80,11 @@ func ssmPush(t *testing.T, clone, branch string, files map[string]string) {
 // TestCloudRunSourceManagerRepositoryPagesThroughThePage (#1856), in the
 // run shard, whose Run port serves Secure Source Manager:
 //   - Create instance is a page of Instance ID, a Region list, Labels,
-//     Private instance drawn disabled with its reason and Encryption, whose
+//     Private instance (TestCloudRunSourceManagerPrivateInstanceAndCreateRepositoryPage) and Encryption, whose
 //     customer-managed choice reveals the Cloud KMS key; Create makes the
 //     instance GetInstance reads with its labels;
-//   - Create repository on the instance's page takes a Service account and
-//     draws Initialize repository disabled; GetRepository reads it;
+//   - Create repository, the instance's page of its own, takes a Service
+//     account; GetRepository reads it;
 //   - after a push, the Code tab lists the pushed files and a file's page
 //     its content; Branches lists main;
 //   - New issue, Comment and Close issue change what GetIssue and
@@ -117,13 +117,10 @@ func TestCloudRunSourceManagerRepositoryPagesThroughThePage(t *testing.T) {
 		p.eval(fmt.Sprintf(`document.querySelector("#view #%s").closest(".form-row").hidden`, id), &h)
 		return h
 	}
-	var form struct {
-		Region  string
-		Private bool
-	}
-	p.eval(`(() => ({ Region: document.querySelector("#view #f-region").tagName, Private: document.querySelector("#view #f-private").disabled }))()`, &form)
-	if form.Region != "SELECT" || !form.Private {
-		t.Errorf("Create instance draws %+v; want a Region list and Private instance disabled", form)
+	var region string
+	p.eval(`document.querySelector("#view #f-region").tagName`, &region)
+	if region != "SELECT" {
+		t.Errorf("Create instance draws Region as %s; want a list", region)
 	}
 	if !hidden("f-kmsKey") {
 		t.Error("Create instance shows the Cloud KMS key before Customer-managed encryption key is chosen")
@@ -149,17 +146,9 @@ func TestCloudRunSourceManagerRepositoryPagesThroughThePage(t *testing.T) {
 	}
 
 	p.navigate("/secure-source-manager/" + inst + "?project=" + project)
-	p.clickText("#view .section-actions button, #view .page-actions button", "Create repository")
-	p.waitFor(`document.querySelector(".modal.is-open #f-initialize") !== null`)
-	var initOff bool
-	p.eval(`document.querySelector(".modal.is-open #f-initialize").disabled`, &initOff)
-	if !initOff {
-		t.Error("Create repository's Initialize repository is choosable")
-	}
-	p.clickText(".modal.is-open .modal-actions button", "Cancel")
-	p.waitFor(`document.querySelector(".modal") === null`)
+	p.waitFor(settled)
 	sa := "builder@" + project + ".iam.gserviceaccount.com"
-	p.pageAction("Create repository", map[string]string{"id": "app", "description": "code", "serviceAccount": sa}, "")
+	ssmCreateRepositoryPage(p, inst, map[string]string{"id": "app", "description": "code", "serviceAccount": sa})
 	repo := loc + "/repositories/app"
 	r, err := c.GetRepository(ctx, &ssmpb.GetRepositoryRequest{Name: repo})
 	if err != nil || r.GetServiceAccount() != sa {

@@ -1645,6 +1645,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/securesourcemanager_test.go:36 TestSecureSourceManagerPushTrigger",
+          "test/compat/securesourcemanagerprivate_test.go:29 TestSecureSourceManagerPrivateInstance",
           "test/compat/terraform_batch11_run_test.go:164 TestTerraformSecureSourceManagerIAM"
         ]
       },
@@ -1782,7 +1783,8 @@
         "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/GetInstance",
         "status": "Verified",
         "tests": [
-          "test/compat/securesourcemanager_test.go:36 TestSecureSourceManagerPushTrigger"
+          "test/compat/securesourcemanager_test.go:36 TestSecureSourceManagerPushTrigger",
+          "test/compat/securesourcemanagerprivate_test.go:29 TestSecureSourceManagerPrivateInstance"
         ]
       },
       {

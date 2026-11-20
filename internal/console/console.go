@@ -1413,6 +1413,15 @@ type Action struct {
 	// menu is the row menus' own: Escape closes it and gives focus back to
 	// its trigger. Any provider's tab may use it.
 	Menu bool `json:"menu,omitempty"`
+	// Page draws the action's form at an address of its own, the page it
+	// is on with ?form=ID, instead of in a dialog, as Google's Secure
+	// Source Manager web interface has Create repository as a page (#1856).
+	// Its Title heads the page and its Submit ends it; Cancel goes back.
+	Page bool `json:"page,omitempty"`
+	// Opens, on a Page action, names the field whose value is the ID of
+	// the row the action made, which the console opens when it is done:
+	// Create repository goes on to the new repository's page.
+	Opens string `json:"opens,omitempty"`
 }
 
 // PathActor is a provider with actions on the resources inside a resource.

@@ -2653,3 +2653,28 @@ func TestAnEditFormCanBeAPageAndAListingHasGroupsOverItsRows(t *testing.T) {
 		}
 	}
 }
+
+// An Action with Page set draws its form at the page's own address with
+// ?form=ID instead of in a dialog, as Google's Secure Source Manager web
+// interface has Create repository as a page (#1856); Opens names the field
+// whose value is the row it made, which the console then opens.
+func TestAnActionCanBeAPage(t *testing.T) {
+	b, err := json.Marshal(Action{ID: "create-repo", Label: "Create repository", Page: true, Opens: "id"})
+	if err != nil || !strings.Contains(string(b), `"page":true`) || !strings.Contains(string(b), `"opens":"id"`) {
+		t.Errorf("Action.Page and Opens marshal as %s, %v", b, err)
+	}
+	js := consoleAsset(t, "console.js")
+	for _, want := range []string{
+		`const formAsked = new URLSearchParams(location.search).get("form");`,
+		"if (pageAction) return renderActionPage(view, route, segments, data, pageAction);",
+		"if (action.page && path && path.length) return navigate(actionPageHref(route, path, action.id));",
+		`u.searchParams.set("form", id);`,
+		`"POST", { Path: segments, Action: action.id, Values: values });`,
+		"navigate(made ? detailHref(route, [...segments, made]) : pageHref);",
+		`const cancel = el("a", { class: "button secondary", href: pageHref, text: "Cancel" });`,
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("console.js is missing %q", want)
+		}
+	}
+}

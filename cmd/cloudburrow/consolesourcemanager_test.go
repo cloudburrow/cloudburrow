@@ -59,15 +59,43 @@ func TestConsoleSourceManagerInstancesAndRepositories(t *testing.T) {
 	if err != nil || l.Unavailable != "" || len(l.Items) != 1 || l.Items[0].Name != "inst" || l.Items[0].Status != "Active" || !l.RowsOpenable {
 		t.Fatalf("the Instances list = %+v, %v", l, err)
 	}
-	if _, f := p.CreateForm(); len(f) != 6 || f[1].Type != "select" || f[3].Unavailable == "" || f[5].ShowWhen != "encryption=cmek" {
+	if _, f := p.CreateForm(); len(f) != 7 || f[1].Type != "select" || f[3].Name != "private" || f[3].Unavailable != "" ||
+		f[4].Name != "caPool" || f[4].ShowWhen != "private" || f[6].ShowWhen != "encryption=cmek" {
 		t.Errorf("Create instance's fields = %+v", f)
 	}
-	if _, err := p.Create(ctx, "", map[string]string{"name": "x", "region": "us-central1", "private": "true"}); err == nil {
-		t.Error("Create instance made a private instance")
+	// Private instance (#1856): a Private Service Connect instance with its
+	// CA pool, whose page shows its service attachments.
+	if _, err := p.Create(ctx, "", map[string]string{"name": "priv", "region": "us-central1", "private": "true", "caPool": "pool"}); err == nil {
+		t.Error("Create instance took a CA pool that is not a resource name")
+	}
+	if _, err := p.Create(ctx, "", map[string]string{"name": "priv", "region": "us-central1", "private": "true",
+		"caPool": "projects/console-ssm/locations/us-central1/caPools/web"}); err != nil {
+		t.Fatal(err)
+	}
+	pd, err := p.Detail(ctx, "", []string{"priv"})
+	if err != nil || pd.Unavailable != "" {
+		t.Fatalf("the private instance's page = %+v, %v", pd, err)
+	}
+	pprops := map[string]string{}
+	for _, pr := range pd.Summary {
+		pprops[pr.Label] = pr.Value
+	}
+	if !strings.HasPrefix(pprops["Private instance"], "Yes") || pprops["CA pool"] != "projects/console-ssm/locations/us-central1/caPools/web" ||
+		!strings.HasSuffix(pprops["HTTP service attachment"], "/serviceAttachments/priv-http") ||
+		!strings.HasSuffix(pprops["SSH service attachment"], "/serviceAttachments/priv-ssh") {
+		t.Errorf("the private instance's page = %v", pprops)
+	}
+	if err := p.Delete(ctx, "", "priv"); err != nil {
+		t.Fatal(err)
 	}
 	acts := p.DetailActions(ctx, "", []string{"inst"})
 	if len(acts) != 2 || acts[0].ID != "create-repo" || acts[1].ID != "create-connection" {
 		t.Fatalf("the instance's actions = %+v", acts)
+	}
+	// Create repository is the web interface's page of its own, going on to
+	// the new repository (#1856).
+	if a := acts[0]; !a.Page || a.Opens != "id" || a.Title != "Create repository" || a.Submit != "Create repository" {
+		t.Errorf("Create repository = %+v; want a page opening the repository it makes", a)
 	}
 	if err := p.ActAt(ctx, "", []string{"inst"}, "create-repo", map[string]string{"id": "app", "description": "first", "branch": "main"}); err != nil {
 		t.Fatal(err)

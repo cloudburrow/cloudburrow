@@ -109,7 +109,7 @@ func (p sourceManagerProvider) List(ctx context.Context, project string) (consol
 		AlwaysStatus: true, RowsOpenable: true,
 		Note: "Each instance is ACTIVE when created, and serves its repositories over git's HTTP protocol on this instance's " +
 			"Run port, its web interface being the instance's page here. A push runs the push triggers of the repository's " +
-			".cloudbuild/triggers.yaml as Cloud Builds. Private instances and webhooks are not served."}
+			".cloudbuild/triggers.yaml as Cloud Builds. A private instance is served on this port as any other: no VPC stands between a client and it here."}
 	ins, err := p.instances(ctx, project)
 	if err != nil {
 		return console.Listing{Unavailable: consoleErr(err)}, nil
@@ -129,6 +129,14 @@ func ssmEncryption(in *ssmpb.Instance) string {
 		return "Customer-managed key"
 	}
 	return "Google-managed key"
+}
+
+// ssmPrivate is whether an instance is private, as its page says it.
+func ssmPrivate(in *ssmpb.Instance) string {
+	if in.GetPrivateConfig().GetIsPrivate() {
+		return "Yes (Private Service Connect)"
+	}
+	return "No"
 }
 
 // stateWord is an enum value as the list's status: ACTIVE is Active.
@@ -156,12 +164,14 @@ const (
 	ssmEncCMEK   = "cmek"
 )
 
-// ssmPrivateUnavailable is why a private instance cannot be made here.
-const ssmPrivateUnavailable = "A private instance is reached through Private Service Connect, which no CloudBurrow instance provides."
+// ssmCAPoolPattern is a CA pool's resource name.
+const ssmCAPoolPattern = `^projects/[^\/]+/locations/[^\/]+/caPools/[^\/]+$`
 
 // CreateForm is Create instance, as Google's create-instance page documents
 // it: an Instance ID, its Region, and its encryption, Google-managed or a
-// customer-managed Cloud KMS key in the instance's region.
+// customer-managed Cloud KMS key in the instance's region; and Private
+// instance, Google's Private Service Connect instance, with its optional
+// CA pool (#1856).
 func (sourceManagerProvider) CreateForm() (string, []console.Field) {
 	return "Create instance", []console.Field{
 		{Name: "name", Label: "Instance ID", Type: "text", Required: true, Pattern: "^[a-z]([\\-a-z0-9]{0,61}[a-z0-9])?$",
@@ -169,7 +179,10 @@ func (sourceManagerProvider) CreateForm() (string, []console.Field) {
 		{Name: "region", Label: "Region", Type: "select", Required: true, Options: ssmRegions, OptionLabels: ssmRegionLabels, Default: "us-central1"},
 		{Name: "labels", Label: "Labels", Type: "map", KeyPattern: `^\p{Ll}[\p{Ll}\p{Lo}\p{N}_\-]{0,62}$`, ValuePattern: `^[\p{Ll}\p{Lo}\p{N}_\-]{0,63}$`,
 			KeyHelp: "A key is 1 to 63 lowercase letters, digits, _ and -, starting with a lowercase letter.", ValueHelp: "A value is 0 to 63 lowercase letters, digits, _ and -.", MaxEntries: 64},
-		{Name: "private", Label: "Private instance", Type: "checkbox", Default: "false", Unavailable: ssmPrivateUnavailable},
+		{Name: "private", Label: "Private instance", Type: "checkbox", Default: "false",
+			Help: "A Private Service Connect instance, reached through endpoints in your VPC network. Here it is served on this port as any other."},
+		{Name: "caPool", Label: "CA pool", Type: "text", Pattern: ssmCAPoolPattern, ShowWhen: "private",
+			Help: "projects/CA_PROJECT/locations/CA_LOCATION/caPools/CA_POOL_NAME. Required if you use your own CA certificate; leave it empty for a Google-managed certificate."},
 		{Name: "encryption", Label: "Encryption", Type: "radio", Section: "Encryption", Options: []string{ssmEncGoogle, ssmEncCMEK}, Default: ssmEncGoogle,
 			OptionLabels: map[string]string{ssmEncGoogle: "Google-managed encryption key", ssmEncCMEK: "Customer-managed encryption key (CMEK)"}},
 		{Name: "kmsKey", Label: "Cloud KMS key", Type: "text", Section: "Encryption", Pattern: kmsKeyPattern, Browse: "kms", Required: true,
@@ -202,6 +215,9 @@ func (p sourceManagerProvider) Create(ctx context.Context, project string, v map
 			return "", err
 		}
 		in.Labels = labels
+	}
+	if v["private"] == "true" {
+		in.PrivateConfig = &ssmpb.Instance_PrivateConfig{IsPrivate: true, CaPool: strings.TrimSpace(v["caPool"])}
 	}
 	if v["encryption"] == ssmEncCMEK {
 		in.KmsKey = strings.TrimSpace(v["kmsKey"])
@@ -330,6 +346,10 @@ func (p sourceManagerProvider) instanceDetail(ctx context.Context, project strin
 		{Label: "API host", Value: hc.GetApi()},
 		{Label: "Encryption", Value: ssmEncryption(in)},
 		{Label: "Cloud KMS key", Value: in.GetKmsKey()},
+		{Label: "Private instance", Value: ssmPrivate(in)},
+		{Label: "CA pool", Value: in.GetPrivateConfig().GetCaPool()},
+		{Label: "HTTP service attachment", Value: in.GetPrivateConfig().GetHttpServiceAttachment()},
+		{Label: "SSH service attachment", Value: in.GetPrivateConfig().GetSshServiceAttachment()},
 		{Label: "Labels", Value: strings.Join(labels, ", ")},
 		{Label: "Created", Value: stampAge(in.GetCreateTime())},
 		{Label: "Updated", Value: stampAge(in.GetUpdateTime())}})}
@@ -372,18 +392,21 @@ func dropDashes(props []console.Property) []console.Property {
 const ssmInitializeUnavailable = "The .gitignore, license and README templates are Google's own, which a local instance does not hold: push the files instead."
 
 // createRepositoryAction is the web interface's Create repository form, as
-// Google's create-repository page documents it.
+// Google's create-repository page documents it: a page of its own (its
+// "Create repository" page, reached from My repositories), going on to the
+// new repository's page.
 func createRepositoryAction() console.Action {
-	return console.Action{ID: "create-repo", Label: "Create repository", Submit: "Create repository", Fields: []console.Field{
-		{Name: "id", Label: "Repository ID", Type: "text", Required: true, Pattern: "^[a-z]([\\-a-z0-9]{0,61}[a-z0-9])?$",
-			Help: "Lowercase letters, numbers and dashes, starting with a letter. It cannot be changed later."},
-		{Name: "description", Label: "Description", Type: "text"},
-		{Name: "branch", Label: "Default branch", Type: "text", Default: "main",
-			Help: "the branch a clone checks out, and whose " + runadapter.SourceManagerTriggersFile + " a push's triggers are read from"},
-		{Name: "serviceAccount", Label: "Service account", Type: "text", Pattern: `^[^@\s]+@[^@\s]+$`,
-			Help: "A user-managed service account for integrations such as Cloud Build (optional)."},
-		{Name: "initialize", Label: "Initialize repository", Type: "checkbox", Default: "false", Unavailable: ssmInitializeUnavailable},
-	}}
+	return console.Action{ID: "create-repo", Label: "Create repository", Title: "Create repository", Submit: "Create repository",
+		Page: true, Opens: "id", Fields: []console.Field{
+			{Name: "id", Label: "Repository ID", Type: "text", Required: true, Pattern: "^[a-z]([\\-a-z0-9]{0,61}[a-z0-9])?$",
+				Help: "Lowercase letters, numbers and dashes, starting with a letter. It cannot be changed later."},
+			{Name: "description", Label: "Description", Type: "text"},
+			{Name: "branch", Label: "Default branch", Type: "text", Default: "main",
+				Help: "the branch a clone checks out, and whose " + runadapter.SourceManagerTriggersFile + " a push's triggers are read from"},
+			{Name: "serviceAccount", Label: "Service account", Type: "text", Pattern: `^[^@\s]+@[^@\s]+$`,
+				Help: "A user-managed service account for integrations such as Cloud Build (optional)."},
+			{Name: "initialize", Label: "Initialize repository", Type: "checkbox", Default: "false", Unavailable: ssmInitializeUnavailable},
+		}}
 }
 
 // pushHelp is how to push to a repository: an empty repository's Code tab.

@@ -3855,6 +3855,12 @@ async function renderDetail(view, route, resourcePath) {
       view.dataset.embedded !== "true") {
     return renderEditPage(view, route, segments, data);
   }
+  // An action whose form is a page of its own (Action.Page, #1856): its
+  // page's address with ?form=ACTION.
+  const formAsked = new URLSearchParams(location.search).get("form");
+  const pageAction = formAsked && view.dataset.embedded !== "true" &&
+    (data.actions || []).find((a) => a.id === formAsked && a.page);
+  if (pageAction) return renderActionPage(view, route, segments, data, pageAction);
 
   if ((data.trail || []).length) drawTrail(data.trail);
   // A page addressed by something no reader recognises — a Datastore
@@ -5536,6 +5542,74 @@ function editPageHref(route, segments) {
   const u = new URL(detailHref(route, segments), location.origin);
   u.searchParams.set("edit", "1");
   return u.pathname + u.search;
+}
+
+// actionPageHref is the address of an action's own page (Action.Page): the
+// page it is on with ?form=ACTION, the project and scope kept.
+function actionPageHref(route, segments, id) {
+  const u = new URL(detailHref(route, segments), location.origin);
+  u.searchParams.set("form", id);
+  return u.pathname + u.search;
+}
+
+// renderActionPage draws an action's form at an address of its own
+// (Action.Page, #1856), as Google's Secure Source Manager web interface
+// has Create repository as a page: the form its dialog would hold, sent
+// the same way, its Title heading it and its Submit ending it. Cancel
+// goes back to the page it is on; a done action goes back there too, or
+// to the row it made when the action Opens one.
+function renderActionPage(view, route, segments, data, action) {
+  const name = data.title || segments[segments.length - 1];
+  const project = currentProject();
+  const pageHref = detailHref(route, segments);
+  const title = action.title || action.label;
+  const header = pageHeader(title, (project ? `Project ${project}` : "All projects") + scopeSubtitle(route.service),
+    { back: pageHref, backLabel: `Back to ${name}` });
+  const back = new URL(route.path, location.origin);
+  if (project) back.searchParams.set("project", project);
+  carryScope(back, route.service);
+  const trail = [el("a", { href: back.pathname + back.search, text: route.crumb || route.title })];
+  segments.forEach((sg, i) => {
+    trail.push(el("span", { "aria-hidden": "true", text: "/" }));
+    trail.push(el("a", { href: detailHref(route, segments.slice(0, i + 1)), text: sg }));
+  });
+  trail.push(el("span", { "aria-hidden": "true", text: "/" }), el("span", { text: title }));
+  header.prepend(el("nav", { class: "breadcrumb", "aria-label": "Breadcrumb" }, ...trail));
+
+  const fields = buildCreateForm({ label: action.label, fields: action.fields });
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  const primary = el("button", { type: "submit", class: "primary", text: action.submit || action.label });
+  const cancel = el("a", { class: "button secondary", href: pageHref, text: "Cancel" });
+  const submit = async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    if (!fields.validate()) return;
+    setBusy(primary, true);
+    const values = fields.values();
+    const op = recordOperation(`${action.label} ${name}`);
+    try {
+      const res = await send(
+        `/api/actions/${route.service}?project=${encodeURIComponent(project)}`,
+        "POST", { Path: segments, Action: action.id, Values: values });
+      op.succeeded("", res.operation);
+      notify(`${action.label} applied to ${name}`);
+      announce(`${action.label} applied to ${name}`);
+      const made = action.opens && values[action.opens];
+      navigate(made ? detailHref(route, [...segments, made]) : pageHref);
+    } catch (err) {
+      op.failed(err.message, err.operation);
+      setBusy(primary, false);
+      error.textContent = err.message;
+      error.hidden = false;
+    }
+  };
+  setChildren(view, header,
+    el("form", { class: "create-page action-page", id: "action-page-form", novalidate: true, onsubmit: submit },
+      error,
+      ...fields.nodes,
+      el("div", { class: "form-actions" }, primary, cancel)));
+  fields.focusFirst();
+  announce(`${title}, ${name}`);
 }
 
 // renderEditPage draws an EditForm with Page set at the resource's own
@@ -9479,6 +9553,9 @@ async function runAction(route, target, action, onDone, row = NO_ROW, title = nu
   // subscription.
   if (action.href) return navigate(action.href);
   const path = Array.isArray(target) ? target : null;
+  // An action whose form is a page of its own (Action.Page, #1856): the
+  // web interface's Create repository.
+  if (action.page && path && path.length) return navigate(actionPageHref(route, path, action.id));
   // A page's own heading, when its last segment is an address no reader
   // recognises: a Datastore entity's encoded key (#875). A delete is
   // confirmed by typing back what the page is headed, not the address.

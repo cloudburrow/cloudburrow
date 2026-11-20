@@ -43,8 +43,11 @@ import (
 // securesourcemanagerpulls.go, securesourcemanagerbranchrules.go, #1856).
 // So are its webhooks, and pull requests' comments and reviews
 // (securesourcemanagerhooks.go, securesourcemanagerreviews.go, #1927).
-// Private instances are UNIMPLEMENTED (they need Private Service Connect) and a
-// repository's gitignores and license templates, which are Google's.
+// A private instance (private_config.is_private, #1856) is stored with its
+// CA pool and custom host config and given its HTTP and SSH service
+// attachments; it is served on this port as any other, since a local
+// instance has no VPC to reach it through. A repository's gitignores and
+// license templates, which are Google's, are UNIMPLEMENTED.
 
 // SecureSourceManagerServer serves Secure Source Manager's instances and
 // repositories.
@@ -280,10 +283,10 @@ func (m *SecureSourceManagerServer) CreateInstance(_ context.Context, req *ssmpb
 	if in == nil {
 		in = &ssmpb.Instance{}
 	}
-	if in.GetPrivateConfig().GetIsPrivate() {
-		return nil, apierror.Unimplemented("private instances are not supported: they are reached through Private Service Connect, which no instance here provides")
-	}
 	name := req.GetParent() + "/instances/" + req.GetInstanceId()
+	if err := ssmPrivateConfig(in, name); err != nil {
+		return nil, err
+	}
 	now := timestamppb.New(time.Now())
 	in.Name, in.CreateTime, in.UpdateTime = name, now, now
 	in.State, in.StateNote = ssmpb.Instance_ACTIVE, ssmpb.Instance_STATE_NOTE_UNSPECIFIED
