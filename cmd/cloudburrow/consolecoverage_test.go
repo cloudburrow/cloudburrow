@@ -54,8 +54,9 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 	config.ServiceCloudSQLMySQL: {Providers: []string{"cloudsql-mysql", "cloudsql-instances", "cloudsql-backups"}},
 	config.ServiceBackupDR: {Providers: []string{"backupdr-overview", "backupdr-vaulted", "backupdr-plans", "backupdr-associations",
 		"backupdr", "backupdr-jobs"}},
-	config.ServicePrivateCA: {Providers: []string{"privateca", "privateca-templates"}},
-	config.ServiceWorkflows: {Providers: []string{"workflows"}},
+	config.ServicePrivateCA:        {Providers: []string{"privateca", "privateca-templates"}},
+	config.ServiceWorkflows:        {Providers: []string{"workflows"}},
+	config.ServiceParameterManager: {Providers: []string{"parametermanager"}},
 	// The Kubernetes Engine API (#1913): its clusters are on Kubernetes
 	// clusters, beside the instance's own.
 	config.ServiceGKE: {Providers: []string{"gkeclusters"}},
@@ -159,19 +160,20 @@ func coverageDeps(t *testing.T) consoleDeps {
 	}
 	projects := resourcemanager.New(store.NewMemory())
 	d := consoleDeps{
-		cfg:          cfg,
-		projects:     projects,
-		tasks:        &tasksService{},
-		secrets:      &secretsService{},
-		kms:          &kmsService{},
-		privateCA:    &privateCAService{},
-		monitoring:   &monitoringService{},
-		compute:      &computeService{},
-		dataTransfer: &dataTransferSvc{},
-		analyticsHub: &analyticsHubSvc{},
-		scheduler:    &schedulerService{},
-		logging:      &loggingService{},
-		workflows:    &workflowsService{},
+		cfg:              cfg,
+		projects:         projects,
+		tasks:            &tasksService{},
+		secrets:          &secretsService{},
+		kms:              &kmsService{},
+		privateCA:        &privateCAService{},
+		monitoring:       &monitoringService{},
+		compute:          &computeService{},
+		dataTransfer:     &dataTransferSvc{},
+		analyticsHub:     &analyticsHubSvc{},
+		scheduler:        &schedulerService{},
+		logging:          &loggingService{},
+		workflows:        &workflowsService{},
+		parameterManager: &parameterManagerService{},
 		// The APIs & Services page (#1352) reads the Service Usage server.
 		serviceUsage: newServiceUsageServer(cfg, projects, store.NewMemory()),
 		// The Backup and DR page (#1433) reads the Backup and DR server.

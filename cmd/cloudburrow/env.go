@@ -592,6 +592,16 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 			envVar{cliEndpointVar("workflows"), wf,
 				"Workflows and Workflow Executions v1, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint"})
 	}
+	// Parameter Manager (#2054): gcloud parametermanager, the Go client, and
+	// Terraform's google_parameter_manager_* through
+	// parameter_manager_custom_endpoint and its regional twin.
+	if parameterManagerEnabled(cfg) && cfg.Endpoints.ParameterManager != 0 {
+		pm := addr(cfg.Endpoints.ParameterManager)
+		vars = append(vars,
+			envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_PARAMETERMANAGER", "http://" + pm + "/", "read by gcloud; gcloud parametermanager parameters and versions"},
+			envVar{cliEndpointVar("parametermanager"), pm,
+				"Parameter Manager v1, global and regional, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint"})
+	}
 
 	// The Kubernetes Engine API (#1913): gcloud container clusters and
 	// node-pools, and Terraform's google_container_* through
@@ -820,6 +830,7 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 		"compute":                &e.Compute,
 		"analyticshub":           &e.AnalyticsHub,
 		"workflows":              &e.Workflows,
+		"parametermanager":       &e.ParameterManager,
 		// The local AI endpoint, which serves Vertex AI's Model Registry
 		// and Endpoints (#1940) to gcloud-setup and terraform, and Document
 		// AI (#1953), which terraform points document_ai_custom_endpoint at.

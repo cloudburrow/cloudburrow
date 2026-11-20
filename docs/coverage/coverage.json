@@ -17131,6 +17131,155 @@
     ]
   },
   {
+    "Key": "parametermanager",
+    "Title": "Parameter Manager (v1)",
+    "counts": {
+      "Unimplemented": 11,
+      "Verified": 11
+    },
+    "rows": [
+      {
+        "method": "google.cloud.parametermanager.v1.ParameterManager/CreateParameter",
+        "status": "Verified",
+        "tests": [
+          "test/compat/parametermanager_test.go:108 TestParameterManagerLifecycle",
+          "test/compat/parametermanager_test.go:376 TestParameterManagerCMEK"
+        ]
+      },
+      {
+        "method": "google.cloud.parametermanager.v1.ParameterManager/CreateParameterVersion",
+        "status": "Verified",
+        "tests": [
+          "test/compat/parametermanager_test.go:108 TestParameterManagerLifecycle",
+          "test/compat/parametermanager_test.go:275 TestParameterManagerRenderSecretReference",
+          "test/compat/parametermanager_test.go:376 TestParameterManagerCMEK"
+        ]
+      },
+      {
+        "method": "google.cloud.parametermanager.v1.ParameterManager/CreateTemplate",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.parametermanager.v1.ParameterManager/CreateTemplateVersion",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.parametermanager.v1.ParameterManager/DeleteParameter",
+        "status": "Verified",
+        "tests": [
+          "test/compat/parametermanager_test.go:108 TestParameterManagerLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.parametermanager.v1.ParameterManager/DeleteParameterVersion",
+        "status": "Verified",
+        "tests": [
+          "test/compat/parametermanager_test.go:108 TestParameterManagerLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.parametermanager.v1.ParameterManager/DeleteTemplate",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.parametermanager.v1.ParameterManager/DeleteTemplateVersion",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.parametermanager.v1.ParameterManager/GetParameter",
+        "status": "Verified",
+        "tests": [
+          "test/compat/parametermanager_test.go:108 TestParameterManagerLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.parametermanager.v1.ParameterManager/GetParameterVersion",
+        "status": "Verified",
+        "tests": [
+          "test/compat/parametermanager_test.go:108 TestParameterManagerLifecycle",
+          "test/compat/parametermanager_test.go:376 TestParameterManagerCMEK"
+        ]
+      },
+      {
+        "method": "google.cloud.parametermanager.v1.ParameterManager/GetTemplate",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.parametermanager.v1.ParameterManager/GetTemplateVersion",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.parametermanager.v1.ParameterManager/ListParameterVersions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/parametermanager_test.go:108 TestParameterManagerLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.parametermanager.v1.ParameterManager/ListParameters",
+        "status": "Verified",
+        "tests": [
+          "test/compat/parametermanager_test.go:108 TestParameterManagerLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.parametermanager.v1.ParameterManager/ListTemplateVersions",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.parametermanager.v1.ParameterManager/ListTemplates",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.parametermanager.v1.ParameterManager/RenderParameterVersion",
+        "status": "Verified",
+        "tests": [
+          "test/compat/parametermanager_test.go:108 TestParameterManagerLifecycle",
+          "test/compat/parametermanager_test.go:275 TestParameterManagerRenderSecretReference",
+          "test/compat/parametermanager_test.go:439 TestIAMEnforcementParameterManagerRender"
+        ]
+      },
+      {
+        "method": "google.cloud.parametermanager.v1.ParameterManager/RenderTemplateVersion",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.parametermanager.v1.ParameterManager/UpdateParameter",
+        "status": "Verified",
+        "tests": [
+          "test/compat/parametermanager_test.go:108 TestParameterManagerLifecycle",
+          "test/compat/parametermanager_test.go:376 TestParameterManagerCMEK"
+        ]
+      },
+      {
+        "method": "google.cloud.parametermanager.v1.ParameterManager/UpdateParameterVersion",
+        "status": "Verified",
+        "tests": [
+          "test/compat/parametermanager_test.go:108 TestParameterManagerLifecycle"
+        ]
+      },
+      {
+        "method": "google.cloud.parametermanager.v1.ParameterManager/UpdateTemplate",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.parametermanager.v1.ParameterManager/UpdateTemplateVersion",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      }
+    ]
+  },
+  {
     "Key": "workflows",
     "Title": "Workflows and Workflow Executions (v1)",
     "counts": {

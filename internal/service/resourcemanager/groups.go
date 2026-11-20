@@ -771,6 +771,11 @@ func (r *Registry) Principals(email string) []string {
 		}
 		return r.federatedPrincipals(strings.TrimSpace(email))
 	}
+	if l := strings.ToLower(strings.TrimSpace(email)); strings.HasPrefix(l, "principal://") {
+		// A resource's own identity, such as a Parameter Manager
+		// parameter's (#2054), is its own policy member.
+		return []string{strings.TrimSpace(email)}
+	}
 	email = normEmail(email)
 	if email == "" {
 		return nil

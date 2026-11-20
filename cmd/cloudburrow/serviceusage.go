@@ -57,6 +57,7 @@ var serviceUsageAPIs = []struct {
 	{config.ServiceCompute, serviceusage.API{Name: "compute.googleapis.com", Title: "Compute Engine API"}},
 	{config.ServiceWorkflows, serviceusage.API{Name: "workflows.googleapis.com", Title: "Workflows API"}},
 	{config.ServiceWorkflows, serviceusage.API{Name: "workflowexecutions.googleapis.com", Title: "Workflow Executions API"}},
+	{config.ServiceParameterManager, serviceusage.API{Name: "parametermanager.googleapis.com", Title: "Parameter Manager API"}},
 }
 
 // serviceUsageCatalog splits serviceUsageAPIs into what this instance

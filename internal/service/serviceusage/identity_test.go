@@ -102,6 +102,7 @@ func TestGenerateServiceIdentityEveryEntry(t *testing.T) {
 		"serviceusage.googleapis.com":           "",
 		"analyticshub.googleapis.com":           "gcp-sa-analyticshub.iam.gserviceaccount.com",
 		"workflows.googleapis.com":              "gcp-sa-workflows.iam.gserviceaccount.com",
+		"parametermanager.googleapis.com":       "gcp-sa-pm.iam.gserviceaccount.com",
 		"workflowexecutions.googleapis.com":     "",
 	}
 	if len(want) != len(serviceAgents)+len(noPrimaryAgent) {

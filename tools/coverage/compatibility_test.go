@@ -79,8 +79,9 @@ var compatSections = map[string]string{
 	// Workload Identity Federation (#1941), named by whole discovery ID.
 	"workloadidentity": "## Workload Identity Federation — `iam.googleapis.com` v1 pools, `sts.googleapis.com` v1",
 	// Certificate Authority Service (#1834), named by gRPC method.
-	"privateca": "## Certificate Authority Service — `google.cloud.security.privateca.v1`",
-	"workflows": "## Workflows — `google.cloud.workflows.v1` and `google.cloud.workflows.executions.v1`",
+	"privateca":        "## Certificate Authority Service — `google.cloud.security.privateca.v1`",
+	"parametermanager": "## Parameter Manager — `google.cloud.parametermanager.v1`",
+	"workflows":        "## Workflows — `google.cloud.workflows.v1` and `google.cloud.workflows.executions.v1`",
 	// The Kubernetes Engine API (#1913), named by gRPC method.
 	"gke": "## Kubernetes Engine API — `google.container.v1`",
 	// BigQuery sharing (#1960), named by gRPC method.

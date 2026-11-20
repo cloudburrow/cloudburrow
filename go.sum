@@ -363,6 +363,8 @@ cloud.google.com/go/orgpolicy v1.22.1/go.mod h1:yleebuPUQYw8z6yHHYogRE0Q9ZYJqNF0
 cloud.google.com/go/osconfig v1.21.0/go.mod h1:BofnHqjjvu6lZQv/hqo2+rLCUiY4O6A9UYwwvVrSBjk=
 cloud.google.com/go/osconfig v1.22.0/go.mod h1:bUL0FaSR2ahPcFRRYnd6a0LyUzsQYIdUpBq8Tmxg8fE=
 cloud.google.com/go/oslogin v1.18.0/go.mod h1:3Oa36T3781Mv+yCSVYlfasi7auHjfPFqvNOd1q92umc=
+cloud.google.com/go/parametermanager v1.2.1 h1:RWhV4rxgBjxKkHCjNmQEMCa6Nqr+8FhZmzfLTmagxIg=
+cloud.google.com/go/parametermanager v1.2.1/go.mod h1:6RQSbM3EbmoXET98IfgiqR7vYAbmh0MWNKaBL3Fsnv8=
 cloud.google.com/go/phishingprotection v0.13.0/go.mod h1:2gyYqwNjePPEocXDkDve3EuJPaRqN/E7fp28K3arR0k=
 cloud.google.com/go/policytroubleshooter v1.16.0/go.mod h1:FZg3IW3exF6wc9eO/iBYijsGqiiCzc9mjZhsxgATXYA=
 cloud.google.com/go/privatecatalog v0.16.0/go.mod h1:Dq1bSHRRaDqFr7Rb7UntXVjh1reeY6YdzYicL0EPTrM=

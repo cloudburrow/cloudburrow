@@ -146,6 +146,12 @@ var terraformEndpoints = []terraformEndpoint{
 	// port. TestTerraformWorkflowsWorkflow applies one, plans clean,
 	// updates its source in place and destroys it.
 	{config.ServiceWorkflows, "workflows_custom_endpoint", "GOOGLE_WORKFLOWS_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	// Parameter Manager (#2054): google_parameter_manager_parameter and
+	// _parameter_version, and their regional twins, whose base path is
+	// parametermanager.{{location}}.rep.googleapis.com, on one port.
+	// TestTerraformParameterManager applies them, plans clean and destroys.
+	{config.ServiceParameterManager, "parameter_manager_custom_endpoint", "GOOGLE_PARAMETER_MANAGER_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	{config.ServiceParameterManager, "parameter_manager_regional_custom_endpoint", "GOOGLE_PARAMETER_MANAGER_REGIONAL_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	// The Kubernetes Engine API (#1913): a google_container_cluster with
 	// remove_default_node_pool and a google_container_node_pool apply, plan
 	// clean, update in place and destroy in
@@ -318,18 +324,19 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 		// The front serves the admin REST API on the gRPC port.
 		config.ServiceBigtable: cfg.Endpoints.Bigtable,
 		// The admin API's port, not the RESP one.
-		memorystoreAdminEndpoint: cfg.Endpoints.MemorystoreAdmin,
-		config.ServiceBackupDR:   cfg.Endpoints.BackupDR,
-		config.ServicePrivateCA:  cfg.Endpoints.PrivateCA,
-		config.ServiceGKE:        cfg.Endpoints.GKE,
-		analyticsHubService:      cfg.Endpoints.AnalyticsHub,
-		config.ServiceMonitoring: cfg.Endpoints.Monitoring,
-		config.ServiceCompute:    cfg.Endpoints.Compute,
-		config.ServiceWorkflows:  cfg.Endpoints.Workflows,
-		localAIEndpoint:          cfg.Endpoints.LocalAI,
-		storageTransferService:   cfg.Endpoints.StorageTransfer,
-		storageInsightsService:   cfg.Endpoints.StorageInsights,
-		dataTransferService:      cfg.Endpoints.DataTransfer,
+		memorystoreAdminEndpoint:       cfg.Endpoints.MemorystoreAdmin,
+		config.ServiceBackupDR:         cfg.Endpoints.BackupDR,
+		config.ServicePrivateCA:        cfg.Endpoints.PrivateCA,
+		config.ServiceGKE:              cfg.Endpoints.GKE,
+		analyticsHubService:            cfg.Endpoints.AnalyticsHub,
+		config.ServiceMonitoring:       cfg.Endpoints.Monitoring,
+		config.ServiceCompute:          cfg.Endpoints.Compute,
+		config.ServiceWorkflows:        cfg.Endpoints.Workflows,
+		config.ServiceParameterManager: cfg.Endpoints.ParameterManager,
+		localAIEndpoint:                cfg.Endpoints.LocalAI,
+		storageTransferService:         cfg.Endpoints.StorageTransfer,
+		storageInsightsService:         cfg.Endpoints.StorageInsights,
+		dataTransferService:            cfg.Endpoints.DataTransfer,
 	}
 	enabled := map[config.Service]bool{resourceManagerEndpoint: true, serviceUsageService: true, apiKeysService: true, sqlAdminEndpoint: sqlAdminEnabled(cfg),
 		memorystoreAdminEndpoint: serviceEnabled(cfg, config.ServiceMemorystore)}
@@ -341,6 +348,7 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 	enabled[analyticsHubService] = analyticsHubEnabled(cfg)
 	enabled[config.ServiceMonitoring] = monitoringEnabled(cfg)
 	enabled[config.ServiceWorkflows] = workflowsEnabled(cfg)
+	enabled[config.ServiceParameterManager] = parameterManagerEnabled(cfg)
 	enabled[localAIEndpoint] = localAIServed(cfg)
 	enabled[storageTransferService] = storageJobsEnabled(cfg)
 	enabled[storageInsightsService] = storageJobsEnabled(cfg)

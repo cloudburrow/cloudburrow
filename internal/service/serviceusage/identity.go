@@ -44,6 +44,9 @@ var serviceAgents = map[string]string{
 	"privateca.googleapis.com": "gcp-sa-privateca.iam.gserviceaccount.com",
 	// Workflows Service Agent, the primary agent of workflows.googleapis.com.
 	"workflows.googleapis.com": "gcp-sa-workflows.iam.gserviceaccount.com",
+	// Parameter Manager Service Agent, which uses a parameter's customer-managed
+	// key (docs.cloud.google.com/secret-manager/parameter-manager/docs/cmek).
+	"parametermanager.googleapis.com": "gcp-sa-pm.iam.gserviceaccount.com",
 	// Kubernetes Engine Service Agent, the primary agent of
 	// container.googleapis.com.
 	"container.googleapis.com": "container-engine-robot.iam.gserviceaccount.com",

@@ -503,6 +503,9 @@ const ROUTES = [
     section: "Security and identity", product: "secrets", productTitle: "Secret Manager" },
   { path: "/secrets-regional", service: "secrets-regional", icon: "secrets", title: "Regional secrets", kind: "Secret",
     section: "Security and identity", product: "secrets", productTitle: "Secret Manager" },
+  // Parameter Manager (#2054), in Secret Manager's menu as Google has it.
+  { path: "/secrets-parameters", service: "parametermanager", icon: "secrets", title: "Parameter Manager", kind: "Parameter",
+    section: "Security and identity", product: "secrets", productTitle: "Secret Manager" },
   { path: "/secrets-settings", service: null, requires: "secrets", screen: "unavailable", icon: "secrets", title: "Settings",
     section: "Security and identity", product: "secrets", productTitle: "Secret Manager",
     unavailable: "Google's Secret Manager settings are the project's own Google Cloud configuration, which Google's documentation does not describe and a local instance does not hold. A secret's replication, encryption, rotation, expiration and destruction delay are set on the secret itself, with Create secret and Edit secret." },
