@@ -48,32 +48,39 @@ func TestMakeCrossCoversReleaseTargets(t *testing.T) {
 	}
 }
 
-// TestCICheckRunsMakeCross (#713): the check job runs `make cross` on the
-// Linux Go 1.27 row, the one row that also runs in merge groups, so a PR
-// that breaks a release target fails before it lands.
-func TestCICheckRunsMakeCross(t *testing.T) {
+// TestCICrossJobBuildsEveryReleaseTarget (#713): CI's cross job runs
+// `make cross` for each release target, one a row, and gates ci-green, so a
+// PR that breaks a release target fails before it lands. It left the check
+// job for its own (PR #1987: the check job ran out of time in make cross).
+func TestCICrossJobBuildsEveryReleaseTarget(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "ci.yml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, check, ok := strings.Cut(string(raw), "\n  check:\n")
+	_, cross, ok := strings.Cut(string(raw), "\n  cross:\n")
 	if !ok {
-		t.Fatal("ci.yml has no check job")
+		t.Fatal("ci.yml has no cross job")
 	}
-	if i := regexp.MustCompile(`\n  [a-z0-9-]+:\n`).FindStringIndex(check); i != nil {
-		check = check[:i[0]]
+	if i := regexp.MustCompile(`\n  [a-z0-9-]+:\n`).FindStringIndex(cross); i != nil {
+		cross = cross[:i[0]]
 	}
-	var live []string
-	for _, line := range strings.Split(check, "\n") {
-		if !strings.HasPrefix(strings.TrimSpace(line), "#") {
-			live = append(live, line)
-		}
+	if !strings.Contains(cross, "run: make cross CROSS_TARGETS=${{ matrix.target }}") {
+		t.Error("the cross job does not run make cross for its row's target")
 	}
-	step := regexp.MustCompile(`(?m)^      - name: [^\n]+\n        if: runner\.os == 'Linux' && matrix\.go == '1\.27'\n        run: make cross$`)
-	if !step.MatchString(strings.Join(live, "\n")) {
-		t.Error("the check job has no `make cross` step on the Linux Go 1.27 row")
+	mk, err := os.ReadFile(filepath.Join("..", "..", "Makefile"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(check, `'[{"go":"1.27","os":"ubuntu-latest"}]'`) {
-		t.Error("the merge-group matrix no longer includes the Linux Go 1.27 row that runs make cross")
+	m := regexp.MustCompile(`(?m)^CROSS_TARGETS := (.+)$`).FindStringSubmatch(string(mk))
+	if m == nil {
+		t.Fatal("the Makefile has no CROSS_TARGETS")
+	}
+	want := "target: [" + strings.Join(strings.Fields(m[1]), ", ") + "]"
+	if !strings.Contains(cross, want) {
+		t.Errorf("the cross job's matrix is not the Makefile's CROSS_TARGETS: want %q", want)
+	}
+	_, green, _ := strings.Cut(string(raw), "\n  ci-green:\n")
+	if !regexp.MustCompile(`needs: \[[^\]]*\bcross\b`).MatchString(green) {
+		t.Error("ci-green does not need the cross job")
 	}
 }
