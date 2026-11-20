@@ -104,7 +104,7 @@ func TestCloudSQLConsoleRound2(t *testing.T) {
 		t.Error("Project backups is still a menu page of its own")
 	}
 	b := secs["backups"].Listing
-	if len(b.Items) != 1 || b.Items[0].Fields["Location"] != "us-central1" || b.Items[0].Fields["Expires"] != "2026-12-18T10:00:00Z" ||
+	if len(b.Items) != 1 || b.Items[0].Fields["Location"] != "Region: us-central1" || b.Items[0].Fields["Expires"] != "2026-12-18T10:00:00Z" ||
 		!strings.Contains(ids(secs["backups"].Actions), ",create-project-backup,") {
 		t.Errorf("merged Backups %+v %s", b, ids(secs["backups"].Actions))
 	}

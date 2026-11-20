@@ -348,7 +348,7 @@ func TestSQLRequestBodyFieldsNeverSilentlyDropped(t *testing.T) {
 		{"POST", "/users", `{"name":"u","nickname":"n"}`, "nickname"},
 		{"POST", "/databases", `{"name":"d","owner":"o"}`, "owner"},
 		{"POST", "/backupRuns", `{"backupKind":"PHYSICAL"}`, "backupKind"},
-		{"POST", "/backupRuns", `{"location":"europe-west1"}`, "europe-west1"},
+		{"POST", "/backupRuns", `{"location":"mars-1"}`, "mars-1"},
 		{"POST", "/backupRuns", `{"diskEncryptionConfiguration":{"kmsKeyName":"` + testKey + `"}}`, "diskEncryptionConfiguration"},
 		{"POST", "/backupRuns", `{"timeZone":"UTC"}`, "timeZone"},
 		{"POST", "/sslCerts", `{"commonName":"c","validity":"1y"}`, "validity"},

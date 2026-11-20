@@ -20,9 +20,12 @@ func backupName(r *BackupRun) string { return "projects/" + r.Project + "/backup
 func backupJSON(base string, r *BackupRun) map[string]any {
 	out := map[string]any{
 		"kind": "sql#backup", "name": backupName(r), "instance": r.Instance, "type": r.Type, "state": r.Status,
-		"databaseVersion": r.DatabaseVersion, "location": Region, "backupKind": "SNAPSHOT",
+		"databaseVersion": r.DatabaseVersion, "location": backupLocation(r), "backupKind": "SNAPSHOT",
 		"selfLink":  base + backupName(r),
 		"backupRun": base + "projects/" + r.Project + "/instances/" + r.Instance + "/backupRuns/" + r.ID,
+	}
+	if r.KMSKey != "" {
+		out["kmsKey"], out["kmsKeyVersion"] = r.KMSKey, r.KMSKeyVersion
 	}
 	iv := map[string]any{}
 	if r.StartTime != "" {
@@ -204,8 +207,8 @@ func (s *Server) createBackup(r *http.Request, base, project string) (any, error
 	if body.Instance == "" {
 		return nil, Errorf(http.StatusBadRequest, "Invalid request: backup.instance is required.")
 	}
-	if body.Location != "" && body.Location != Region {
-		return nil, unimplemented("a backup in location "+body.Location, "CloudBurrow keeps every backup in its one region, "+Region)
+	if err := checkBackupLocation("backup.location", body.Location); err != nil {
+		return nil, err
 	}
 	exp, err := expiry(s.Clock(), body.TTLDays, body.ExpiryTime)
 	if err != nil {
@@ -218,7 +221,7 @@ func (s *Server) createBackup(r *http.Request, base, project string) (any, error
 	if err := s.busy(e.Instance()); err != nil {
 		return nil, err
 	}
-	op, id, err := s.takeBackupRun(base, project, e, "ON_DEMAND", body.Description, false)
+	op, id, err := s.takeBackupRunIn(base, project, e, "ON_DEMAND", body.Description, false, body.Location)
 	if err != nil {
 		return nil, err
 	}

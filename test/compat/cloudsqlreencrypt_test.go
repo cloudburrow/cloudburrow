@@ -19,8 +19,8 @@ import (
 // instances.reencrypt, and again with gcloud sql instances reencrypt: the
 // operation is REENCRYPT, diskEncryptionStatus names the new version, and
 // with the old version disabled the instance stays RUNNABLE and restarts.
-// backupReencryptionConfig is 501 (backups here are not encrypted with the
-// key), and a data key whose version is disabled is not re-encrypted.
+// A data key whose version is disabled is not re-encrypted; backups'
+// re-encryption is TestCloudSQLBackupLocationsAndReencryption's (#1956).
 // covers: sql.instances.reencrypt, sql.instances.insert, sql.instances.get, sql.instances.restart, sql.instances.delete, google.cloud.kms.v1.KeyManagementService/CreateCryptoKeyVersion, google.cloud.kms.v1.KeyManagementService/UpdateCryptoKeyPrimaryVersion
 func TestCloudSQLReencrypt(t *testing.T) {
 	h := New(t)
@@ -62,10 +62,6 @@ func TestCloudSQLReencrypt(t *testing.T) {
 			CryptoKeyVersion: &kmspb.CryptoKeyVersion{Name: v2.GetName(), State: kmspb.CryptoKeyVersion_ENABLED},
 			UpdateMask:       &fieldmaskpb.FieldMask{Paths: []string{"state"}}})
 	}()
-	_, err = svc.Instances.Reencrypt(project, name, &sqladmin.InstancesReencryptRequest{
-		BackupReencryptionConfig: &sqladmin.BackupReencryptionConfig{BackupLimit: 5, BackupType: "AUTOMATED"}}).Do()
-	wantCode(t, "reencrypt with backupReencryptionConfig", err, 501, "backupReencryptionConfig")
-
 	op, err = svc.Instances.Reencrypt(project, name, &sqladmin.InstancesReencryptRequest{}).Do()
 	if err != nil {
 		t.Fatal(err)

@@ -97,6 +97,9 @@ func (s *Server) restoreToNewInstance(r *http.Request, base, project, dest strin
 	if cp.Status != "SUCCESSFUL" {
 		return nil, Errorf(http.StatusBadRequest, "Invalid request: the backup run %s is %s, not SUCCESSFUL.", cp.ID, cp.Status)
 	}
+	if err := s.backupKeyUsable(cp); err != nil {
+		return nil, err
+	}
 	if !instanceNameRE.MatchString(dest) || len(dest) > maxInstanceName {
 		return nil, Errorf(http.StatusBadRequest, "Invalid request: instance name %q must be lowercase letters, digits and hyphens, "+
 			"start with a letter, not end with a hyphen, and be at most %d characters in CloudBurrow.", dest, maxInstanceName)

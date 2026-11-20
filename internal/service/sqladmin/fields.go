@@ -230,12 +230,7 @@ var backupRunFields = map[string]fieldRule{
 	"description": kept, "type": kept,
 	"backupKind": refusedValues("a backup here is a logical dump of the server's databases, not a disk snapshot "+
 		"or a physical backup", "SNAPSHOT"),
-	"location": {how: fieldRefused, refuse: func(f string, v any) error {
-		if notSet(v) || v == Region {
-			return nil
-		}
-		return unimplemented(fmt.Sprintf("a backup in location %v", v), "CloudBurrow keeps every backup in its one region, "+Region)
-	}},
+	"location": kept,
 	"diskEncryptionConfiguration": {how: fieldRefused, refuse: func(f string, v any) error {
 		if notSet(v) {
 			return nil
