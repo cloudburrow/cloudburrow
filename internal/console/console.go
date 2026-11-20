@@ -95,6 +95,25 @@ type Resource struct {
 	// preview only where the server would give one.
 	Size        int64  `json:"size,omitempty"`
 	ContentType string `json:"contentType,omitempty"`
+	// Info is the info panel's tabs for this row beyond its columns: Google's
+	// Spanner Instances list opens a checked instance's Labels tab, where
+	// its labels are added, updated and deleted (#1859).
+	Info []InfoTab `json:"info,omitempty"`
+}
+
+// InfoTab is one tab of the info panel for a row (Resource.Info).
+type InfoTab struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	// Properties are what the tab shows; Empty is what it says when there
+	// are none ("No labels").
+	Properties []Property `json:"properties,omitempty"`
+	Empty      string     `json:"empty,omitempty"`
+	// Form, when set, is an action drawn in the tab itself, its fields
+	// prefilled, performed at the row's Target and saved with its Submit
+	// label. The page's DetailActions at that path must offer it (the
+	// server checks), marked Linked so it is not also a page button.
+	Form *Action `json:"form,omitempty"`
 }
 
 // Listing is a page of resources.
@@ -185,6 +204,10 @@ type Listing struct {
 	// approval), where a top-level list's own SelectActions take any row
 	// (#1864: Roles' Create role from selection). The server sets it.
 	SelectMarked bool `json:"selectMarked,omitempty"`
+	// InfoOnSelect gives each row a checkbox that opens the info panel on the
+	// row it checks, as Google's Spanner Instances list does: "Select the
+	// checkbox for the instance. The Info panel appears" (#1859).
+	InfoOnSelect bool `json:"infoOnSelect,omitempty"`
 	// Actions are the list screen's own actions, on no existing resource,
 	// drawn beside Create (ListActor, #1289). The server sets them.
 	Actions []Action `json:"actions,omitempty"`
@@ -889,6 +912,11 @@ type Property struct {
 	// copies it: Google's object page has Copy URL and Copy gsutil URI
 	// (#1843).
 	Copy string `json:"copy,omitempty"`
+	// Action, when set, is the ID of one of the page's actions, opened by a
+	// link beside the value reading ActionText: Upgrade beside a Spanner
+	// instance's edition (#1859).
+	Action     string `json:"action,omitempty"`
+	ActionText string `json:"actionText,omitempty"`
 }
 
 // SectionKind says what a section actually holds.
@@ -1341,6 +1369,10 @@ type Action struct {
 	// row's Panel actions are not in its menu. A list action with Panel
 	// opens the panel from its button, as Set Default Configuration does.
 	Panel bool `json:"panel,omitempty"`
+	// Linked marks an action the page offers only where something links to
+	// it, not as a button of its own: a property's ActionText link (Upgrade
+	// beside an edition) or an info panel tab's Form (#1859).
+	Linked bool `json:"linked,omitempty"`
 }
 
 // PathActor is a provider with actions on the resources inside a resource.

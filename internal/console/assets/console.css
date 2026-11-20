@@ -1609,6 +1609,10 @@ thead th {
 .info-fields { display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; margin: 16px 0; }
 .info-fields dt { color: var(--text-muted); }
 .info-fields dd { margin: 0; overflow-wrap: anywhere; }
+/* The info panel's tabs for a row (#1859: a Spanner instance's Labels). */
+.info-tabs { margin: 8px 0 0; }
+.info-tab-panel { padding-top: 8px; }
+.info-tab-form { display: grid; gap: 12px; }
 .info-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px;
                 padding-top: 16px; border-top: 1px solid var(--border); }
 .info-empty { padding-top: 24px; text-align: center; }
@@ -1983,6 +1987,8 @@ tr.is-inspected { background: var(--nav-selected); }
 dd.has-copy { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 dd.has-copy .property-copy-value { overflow-wrap: anywhere; min-width: 0; }
 dd.has-copy .property-copy { padding: 2px 8px; font-size: var(--text-badge-size); }
+/* A link beside a value that opens a page action: Upgrade beside an edition (#1859). */
+dd.has-property-action { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
 .objects-show { display: inline-flex; align-items: center; gap: 6px; }
 /* A form section's tabs (Field.Tab, #1852): Google's Create service page's
    Container(s), Variables & Secrets, Volumes, Networking and Security. */

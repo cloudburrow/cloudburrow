@@ -265,8 +265,16 @@ func TestConsoleSpannerBackupsAndSchedules(t *testing.T) {
 	// partition's link landed on the snackbar (TestSpannerSchemaAndPartitionsThroughThePage).
 	// Since #1859 Create backup and Create instance partition are drawn at
 	// the top of their tabs, not beside the title.
-	if len(d.Actions) > 5 {
-		t.Errorf("an instance's page draws %d actions %v, want at most 5 so they fit one row", len(d.Actions), actionIDs(d.Actions))
+	// A Linked action (the info panel's Labels, Upgrade beside the edition)
+	// is not drawn as a button.
+	drawn := 0
+	for _, a := range d.Actions {
+		if !a.Linked {
+			drawn++
+		}
+	}
+	if drawn > 5 {
+		t.Errorf("an instance's page draws %d actions %v, want at most 5 so they fit one row", drawn, actionIDs(d.Actions))
 	}
 	if b := spannerSection(d, "backups"); b == nil || len(b.Actions) != 1 || b.Actions[0].ID != "createbackup" {
 		t.Errorf("the Backup/Restore tab's actions = %+v, want Create backup", b)
