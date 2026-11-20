@@ -81,6 +81,15 @@ func runEnv(_ context.Context, args []string, stdout, stderr io.Writer) error {
 	for _, w := range unexportableWarnings(cfg) {
 		fmt.Fprintf(stderr, "cloudburrow env: %s\n", w)
 	}
+	// The local-only guard (#1977): in the formats a shell, a docker
+	// --env-file or the GitHub action applies, every gcloud override this
+	// instance does not serve is refused locally, so a gcloud command for
+	// any other API fails here instead of calling googleapis.com. Pod env
+	// and the console's Connect page stay without them (see
+	// gcloudRefusalVars).
+	if *format == "shell" || *format == "plain" || *format == "json" {
+		vars = append(vars, gcloudRefusalVars(cfg, vars)...)
+	}
 	if err := writeEnvFormat(stdout, *format, cfg, vars); err != nil {
 		fmt.Fprintf(stderr, "unknown format %q; use shell, json, plain, terraform, docker-compose or kubernetes\n", *format)
 		return errUsage
@@ -135,6 +144,42 @@ func exportedEnv(cfg config.Config, info runtimeInfo, live bool) (config.Config,
 	}
 
 	return cfg, envVars(cfg, proj, adcPath), nil
+}
+
+// gcloudOverridePrefix heads the variable gcloud reads each
+// api_endpoint_overrides property from.
+const gcloudOverridePrefix = "CLOUDSDK_API_ENDPOINT_OVERRIDES_"
+
+// gcloudRefusalComment is the comment of every refusal gcloudRefusalVars
+// returns.
+const gcloudRefusalComment = "not served by this instance: refused locally, so gcloud never calls Google for it (#1977)"
+
+// gcloudRefusalVars is, for every api_endpoint_overrides property of the
+// pinned gcloud that vars does not already set, the override pointing it at
+// this instance's refusal (internal/unserved, on the Resource Manager
+// port), sorted by name. A property left unset sends that API's commands to
+// googleapis.com (#1977: 168 of gcloud 586.0.0's 200 were).
+//
+// They are added only to `env`'s shell, plain and json output and to hook
+// environments, where gcloud may run. Pod env (podenv) does not get them:
+// the console terminal's pod reads its own overrides, and a container
+// spec of 170 refusals is noise. Nor does the console's Connect page,
+// whose formats name the variables a developer reads; it says that `env`
+// adds them.
+func gcloudRefusalVars(cfg config.Config, vars []envVar) []envVar {
+	set := map[string]bool{}
+	for _, v := range vars {
+		set[v.Name] = true
+	}
+	base := refusalBase(cfg)
+	var out []envVar
+	for _, p := range unserved.GcloudOverrides() {
+		name := gcloudOverridePrefix + strings.ToUpper(p)
+		if !set[name] {
+			out = append(out, envVar{name, unserved.URL(base, p), gcloudRefusalComment})
+		}
+	}
+	return out
 }
 
 // unexportableWarnings says, for each enabled emulator whose port `env`
@@ -575,7 +620,16 @@ func writeShell(w io.Writer, vars []envVar) {
 	fmt.Fprintln(w, "# None of this authenticates anything: CloudBurrow serves every caller,")
 	fmt.Fprintln(w, "# and the credentials file exists only so tools that insist on having one")
 	fmt.Fprintln(w, "# can run offline. See docs/credentials.md.")
+	refusals := false
 	for _, v := range vars {
+		if v.Comment == gcloudRefusalComment {
+			if !refusals {
+				fmt.Fprintf(w, "# gcloud overrides for the APIs this instance does not serve: %s.\n", gcloudRefusalComment)
+				refusals = true
+			}
+			fmt.Fprintf(w, "export %s=%q\n", v.Name, v.Value)
+			continue
+		}
 		fmt.Fprintf(w, "export %s=%q  # %s\n", v.Name, v.Value, v.Comment)
 	}
 }

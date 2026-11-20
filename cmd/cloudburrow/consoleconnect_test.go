@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -17,6 +18,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/admin"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/unserved"
 )
 
 // connectInstance writes a runtime file naming this test process, as a live
@@ -99,7 +101,17 @@ func TestConnectVariablesAreEnvJSON(t *testing.T) {
 	if len(withheld) != 1 || !withheld["MYSQL_PASSWORD"] {
 		t.Errorf("withheld %v, want MYSQL_PASSWORD only", c.Withheld)
 	}
+	refusals := 0
 	for name, want := range env {
+		// The gcloud refusals (#1977) are `env`'s alone: the page names
+		// them in a line rather than listing them.
+		if strings.Contains(want, unserved.PathPrefix) {
+			refusals++
+			if _, shown := got[name]; shown {
+				t.Errorf("the page lists the refusal %s", name)
+			}
+			continue
+		}
 		if withheld[name] {
 			if _, shown := got[name]; shown {
 				t.Errorf("%s is both withheld and shown", name)
@@ -123,10 +135,24 @@ func TestConnectVariablesAreEnvJSON(t *testing.T) {
 	for _, f := range c.Formats {
 		formats[f.ID] = f.Text
 	}
+	if refusals < 100 {
+		t.Errorf("env --format json exports %d gcloud refusals; want one per unserved override of gcloud %s", refusals, unserved.GcloudVersion)
+	}
+	note := fmt.Sprintf("# `cloudburrow env` also exports %d CLOUDSDK_API_ENDPOINT_OVERRIDES_* refusals", refusals)
+	if !strings.Contains(formats["shell"], note) {
+		t.Errorf("the page's shell format does not say `env` adds %d refusals:\n%s", refusals, formats["shell"])
+	}
 	for _, f := range append(append([]string{}, envFormats...), "kubernetes") {
 		want := withoutLinesNaming(runEnvFormat(t, args, f), "MYSQL_PASSWORD")
-		if formats[f] != want {
-			t.Errorf("the page's %s format differs from `env --format %s` less MYSQL_PASSWORD:\npage:\n%s\nenv:\n%s", f, f, formats[f], want)
+		want = withoutLinesNaming(withoutGcloudRefusals(want), gcloudRefusalComment)
+		page := withoutLinesNaming(formats[f], "# `cloudburrow env` also exports ")
+		if f == "json" {
+			// The refusals follow the last of the page's entries, which
+			// then ends with a comma in `env`'s output.
+			want, page = strings.ReplaceAll(want, ",\n", "\n"), strings.ReplaceAll(page, ",\n", "\n")
+		}
+		if page != want {
+			t.Errorf("the page's %s format differs from `env --format %s` less MYSQL_PASSWORD and the refusals:\npage:\n%s\nenv:\n%s", f, f, page, want)
 		}
 	}
 
@@ -145,6 +171,18 @@ func TestConnectVariablesAreEnvJSON(t *testing.T) {
 	if !strings.Contains(c.GcloudSetup.Writes, "config_cloudburrow-connect") {
 		t.Errorf("gcloud-setup's sentence does not name the file it writes: %s", c.GcloudSetup.Writes)
 	}
+}
+
+// withoutGcloudRefusals is text less its lines setting a gcloud override
+// to the refusal (#1977); the terraform format's refusals stay.
+func withoutGcloudRefusals(text string) string {
+	var out []string
+	for _, line := range strings.SplitAfter(text, "\n") {
+		if !strings.Contains(line, gcloudOverridePrefix) || !strings.Contains(line, unserved.PathPrefix) {
+			out = append(out, line)
+		}
+	}
+	return strings.Join(out, "")
 }
 
 func withoutLinesNaming(text, name string) string {

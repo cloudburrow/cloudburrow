@@ -141,7 +141,9 @@ func TestHookEnvironmentIsAllowListed(t *testing.T) {
 	for _, k := range hookEnvBase {
 		allowed[k] = true
 	}
-	for _, v := range envVars(withLivePorts(cfg, live()), cfg.DefaultProject(), "/adc.json") {
+	vars := envVars(withLivePorts(cfg, live()), cfg.DefaultProject(), "/adc.json")
+	// And the gcloud refusals `env` exports (#1977).
+	for _, v := range append(vars, gcloudRefusalVars(withLivePorts(cfg, live()), vars)...) {
 		allowed[v.Name] = true
 	}
 	got := map[string]string{}
@@ -154,6 +156,9 @@ func TestHookEnvironmentIsAllowListed(t *testing.T) {
 	}
 	if got["RUNNER_TEMP"] != "/runner/tmp" || got["LC_ALL"] != "C" || got["PATH"] == "" {
 		t.Errorf("an allowed variable is missing: RUNNER_TEMP=%q LC_ALL=%q PATH=%q", got["RUNNER_TEMP"], got["LC_ALL"], got["PATH"])
+	}
+	if !strings.Contains(got["CLOUDSDK_API_ENDPOINT_OVERRIDES_WORKFLOWS"], "/_cloudburrow/unserved/workflows/") {
+		t.Errorf("a hook's gcloud would send workflows to Google: CLOUDSDK_API_ENDPOINT_OVERRIDES_WORKFLOWS = %q", got["CLOUDSDK_API_ENDPOINT_OVERRIDES_WORKFLOWS"])
 	}
 	if got["STORAGE_EMULATOR_HOST"] != "http://127.0.0.1:43210" {
 		t.Errorf("STORAGE_EMULATOR_HOST = %q, want the instance's", got["STORAGE_EMULATOR_HOST"])

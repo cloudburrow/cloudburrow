@@ -72,7 +72,10 @@ var hookEnvBase = []string{"PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "
 func hookEnvironment(cfg config.Config, live func() map[string]string, adcPath string) func() []string {
 	return func() []string {
 		env := allowedEnv(os.Environ(), cfg.HookEnv)
-		for _, v := range envVars(withLivePorts(cfg, live()), cfg.DefaultProject(), adcPath) {
+		lcfg := withLivePorts(cfg, live())
+		vars := envVars(lcfg, cfg.DefaultProject(), adcPath)
+		// A hook may run gcloud: it gets the refusals `env` exports (#1977).
+		for _, v := range append(vars, gcloudRefusalVars(lcfg, vars)...) {
 			env = append(env, v.Name+"="+v.Value)
 		}
 		return env
