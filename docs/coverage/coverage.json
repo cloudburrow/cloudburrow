@@ -5820,8 +5820,8 @@
     "Title": "Vertex AI PredictionService",
     "counts": {
       "Implemented": 1,
-      "Unimplemented": 7,
-      "Verified": 36
+      "Unimplemented": 6,
+      "Verified": 37
     },
     "rows": [
       {
@@ -5908,8 +5908,10 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.ModelGardenService/GetPublisherModel",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelregistry_test.go:485 TestGetPublisherModelDescribesTheServedModels"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.ModelService/BatchImportEvaluatedAnnotations",

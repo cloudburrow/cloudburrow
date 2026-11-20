@@ -1870,6 +1870,7 @@ Console: Agent Platform → Model Registry and Endpoints (`TestModelRegistryAndE
 | `EndpointService.MutateDeployedModel` | **Verified** | Same test: replica counts by mask, applied to the running service. |
 | `EndpointService.UndeployModel` | **Verified** | Same tests: removes the service; a model still taking traffic is FAILED_PRECONDITION unless `traffic_split` moves it or it is the last one. |
 | `EndpointService.DeleteEndpoint` | **Verified** | Same tests: FAILED_PRECONDITION while a model is deployed. |
+| `ModelGardenService.GetPublisherModel` | **Verified** | `TestGetPublisherModelDescribesTheServedModels`, official `ModelGardenClient`: `publishers/google/models/{model}` for the local catalogue's models with a runtime (the embedding and generation models above), named, versioned `001`, with their runtime as `frameworks` and their provenance as `openSourceCategory` (a community conversion is `THIRD_PARTY_OWNED_OSS`); any other model is NOT_FOUND, as Predict on it is; `is_hugging_face_model` is UNIMPLEMENTED (Model Garden's Deploy takes Hugging Face models). gRPC only. |
 | `PredictionService.Predict`, `RawPredict`, `Explain` on a registry endpoint | **Verified** | Same tests: relayed to the picked deployed model's predict route, `deployedModelId` in the answer; `Explain` with the model's or deployed model's explanation spec. |
 
 ## Vertex AI PredictionService v1beta1 — `google.cloud.aiplatform.v1beta1`

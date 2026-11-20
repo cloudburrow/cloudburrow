@@ -90,13 +90,21 @@ func TestAgentPlatformNavigationAndRedirects(t *testing.T) {
 		}
 	}
 
-	p.navigate("/agent-platform/models")
+	// Tuning: Model Registry is served with Cloud Run since #1940.
+	p.navigate("/agent-platform/tuning")
 	p.waitFor(`document.querySelector("#not-served") !== null`)
 	var text string
 	p.eval(`document.querySelector("#view").textContent`, &text)
-	if !strings.Contains(text, "Model Registry") || !strings.Contains(text, "Not available locally") ||
-		!strings.Contains(text, "projects.locations.models") {
-		t.Errorf("Model Registry reads %q; want it named as not available locally, with its API", text)
+	if !strings.Contains(text, "Tuning") || !strings.Contains(text, "Not available locally") ||
+		!strings.Contains(text, "projects.locations.tuningJobs") {
+		t.Errorf("Tuning reads %q; want it named as not available locally, with its API", text)
+	}
+	// Model Registry, with Cloud Run off here, says how to start it.
+	p.navigate("/agent-platform/models")
+	p.waitFor(`document.querySelector("#not-served") !== null`)
+	p.eval(`document.querySelector("#view").textContent`, &text)
+	if !strings.Contains(text, "Model Registry") || !strings.Contains(text, "--services including run") {
+		t.Errorf("Model Registry without Cloud Run reads %q; want how to start it", text)
 	}
 
 	p.navigate("/agent-platform/overview")

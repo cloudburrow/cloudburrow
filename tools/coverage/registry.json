@@ -11,7 +11,7 @@
   "google.cloud.aiplatform.v1.EndpointService/UpdateEndpoint": "implemented",
   "google.cloud.aiplatform.v1.EndpointService/UpdateEndpointLongRunning": "implemented",
   "google.cloud.aiplatform.v1.ModelGardenService/Deploy": "implemented",
-  "google.cloud.aiplatform.v1.ModelGardenService/GetPublisherModel": "unimplemented",
+  "google.cloud.aiplatform.v1.ModelGardenService/GetPublisherModel": "implemented",
   "google.cloud.aiplatform.v1.ModelService/BatchImportEvaluatedAnnotations": "unimplemented",
   "google.cloud.aiplatform.v1.ModelService/BatchImportModelEvaluationSlices": "unimplemented",
   "google.cloud.aiplatform.v1.ModelService/CopyModel": "implemented",

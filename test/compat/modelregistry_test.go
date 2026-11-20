@@ -474,3 +474,36 @@ func hasAll(list []string, want ...string) bool {
 	}
 	return true
 }
+
+// covers: google.cloud.aiplatform.v1.ModelGardenService/GetPublisherModel
+//
+// TestGetPublisherModelDescribesTheServedModels (#1940): the official
+// ModelGardenClient reads each publisher model this instance serves at
+// publishers/google/models/{model} (no model need be downloaded: it is the
+// catalogue's description); a model it does not serve, gemini-2.0-flash,
+// is NOT_FOUND, as Predict on it is, and a malformed name INVALID_ARGUMENT.
+func TestGetPublisherModelDescribesTheServedModels(t *testing.T) {
+	h := New(t)
+	h.Endpoint(EnvPrediction)
+	c, err := aiplatform.NewModelGardenClient(h.Context(), gardenOpts(h, EnvPrediction)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close() }()
+	for _, id := range []string{"embeddinggemma-300m-onnx-community", "gemma-4-e2b-it-community"} {
+		m, err := c.GetPublisherModel(h.Context(), &aiplatformpb.GetPublisherModelRequest{Name: "publishers/google/models/" + id})
+		if err != nil {
+			t.Fatalf("GetPublisherModel %s: %v", id, err)
+		}
+		if m.GetName() != "publishers/google/models/"+id || m.GetVersionId() == "" ||
+			m.GetOpenSourceCategory() == aiplatformpb.PublisherModel_OPEN_SOURCE_CATEGORY_UNSPECIFIED {
+			t.Errorf("GetPublisherModel %s = %v", id, m)
+		}
+	}
+	if _, err := c.GetPublisherModel(h.Context(), &aiplatformpb.GetPublisherModelRequest{Name: "publishers/google/models/gemini-2.0-flash"}); status.Code(err) != codes.NotFound {
+		t.Errorf("an unserved model: %v, want NOT_FOUND", err)
+	}
+	if _, err := c.GetPublisherModel(h.Context(), &aiplatformpb.GetPublisherModelRequest{Name: "models/x"}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("a malformed name: %v, want INVALID_ARGUMENT", err)
+	}
+}

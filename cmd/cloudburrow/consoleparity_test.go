@@ -1750,7 +1750,7 @@ var parityRows = []parityRow{
 	{Resource: "Model Registry: evaluations", Service: "vertexai",
 		Methods:  []string{"ModelService/ImportModelEvaluation", "ModelService/ListModelEvaluations", "ModelService/GetModelEvaluation"},
 		Provider: "vertex-models", Offers: "A model's Evaluate tab lists its evaluations; Import evaluation stores one and View evaluation shows its metrics",
-		Tests:    []string{"TestModelRegistryDeploysACustomContainer"}},
+		Tests: []string{"TestModelRegistryDeploysACustomContainer"}},
 	{Resource: "Endpoints: create, deploy and manage", Service: "vertexai",
 		Methods: []string{"EndpointService/CreateEndpoint", "EndpointService/DeployModel", "EndpointService/UpdateEndpoint",
 			"EndpointService/MutateDeployedModel"},
@@ -1758,6 +1758,9 @@ var parityRows = []parityRow{
 			"cluster with its machine type, compute nodes and traffic share; an endpoint's page lists its deployed models with their " +
 			"traffic split, and offers Test model, Edit traffic split, Edit compute nodes, Edit settings and Undeploy model",
 		Tests: []string{"TestModelRegistryAndEndpointsThroughThePages", "TestModelRegistryDeploysACustomContainer"}},
+	{Resource: "Model Garden: publisher model description", Service: "vertexai",
+		Methods:  []string{"ModelGardenService/GetPublisherModel"},
+		Excluded: "a publisher model's description, which the Local models page shows from the same catalogue (ID, publisher, licence, runtime, state) the method reads (#1940)"},
 	{Resource: "Endpoints: long-running update", Service: "vertexai",
 		Methods:  []string{"EndpointService/UpdateEndpointLongRunning"},
 		Excluded: "the same update as UpdateEndpoint, answered as an operation, which the endpoint page's Edit settings and Edit traffic split send"},
