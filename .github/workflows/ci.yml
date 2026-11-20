@@ -499,8 +499,8 @@ jobs:
     # Well above its usual run; a wedged job fails here instead of at GitHub's 6-hour default (#715).
     # The localai shard (#1985) builds the LiteRT-LM image from source when
     # its cache misses, a Bazel build of tens of minutes on the runner's four
-    # vCPUs, before its suite.
-    timeout-minutes: ${{ matrix.shard == 'localai' && 150 || 90 }}
+    # vCPUs, before a suite of up to 120 minutes (COMPAT_TIMEOUT).
+    timeout-minutes: ${{ matrix.shard == 'localai' && 180 || 90 }}
     # Same rule as integration: the suite that caught #268 only after it merged.
     needs: [changes, bigquery-emulator]
     if: github.event_name != 'pull_request' || needs.changes.outputs.heavy == 'true' || contains(github.event.pull_request.labels.*.name, 'run-integration')
@@ -889,7 +889,7 @@ jobs:
             # replica tests, which COMPAT_SKIP keeps out of sql.
             SELECT_RUN=(); [ -n "$COMPAT_RUN" ] && SELECT_RUN=(-run "$COMPAT_RUN")
             [ -n "$COMPAT_SKIP" ] && SELECT_RUN+=(-skip "$COMPAT_SKIP")
-            go test -tags=compat -timeout 60m -v ${SELECT_RUN[@]+"${SELECT_RUN[@]}"} ./test/compat/... | tee compat.log
+            go test -tags=compat -timeout "$COMPAT_TIMEOUT" -v ${SELECT_RUN[@]+"${SELECT_RUN[@]}"} ./test/compat/... | tee compat.log
             rc=$?
             set -e
             if [ "$rc" -ne 0 ]; then

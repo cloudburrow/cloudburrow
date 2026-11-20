@@ -220,6 +220,8 @@ compat_shard() {
   # when empty), and COMPAT_SKIP its -skip pattern (none when empty).
   UP_FLAGS=()
   COMPAT_RUN="" COMPAT_SKIP=""
+  # COMPAT_TIMEOUT is the suite's go test -timeout.
+  COMPAT_TIMEOUT=60m
   # The localai shard's switches, unset for every other shard: verify-local.sh
   # runs the shards one after another in one shell.
   unset CLOUDBURROW_TEST_ONNX CLOUDBURROW_TEST_VISION_LABELS CLOUDBURROW_TEST_VISION_DETECT
@@ -376,7 +378,11 @@ compat_shard() {
       # MediaPipe's pinned classifier and detectors (32.6 MB) to annotate
       # images.
       export CLOUDBURROW_TEST_ONNX=1 CLOUDBURROW_TEST_VISION_LABELS=1 CLOUDBURROW_TEST_VISION_DETECT=1
-      COMPAT_RUN=$COMPAT_LOCALAI_TESTS ;;
+      COMPAT_RUN=$COMPAT_LOCALAI_TESTS
+      # 1,327 s of tests on an 8-CPU Docker Desktop VM with an Apple M-series
+      # host (2026-11-20), generation and whisper.cpp on the CPU: the
+      # runner's four vCPUs are slower, so twice the other shards' 60m.
+      COMPAT_TIMEOUT=120m ;;
     emulators)
       # pubsub for TestEmulatorsBehindAFrontRefuseOtherPods (#1114), which
       # dials both emulators from a pod; PUBSUB is not exported, so the

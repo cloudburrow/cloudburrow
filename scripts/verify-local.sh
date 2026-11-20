@@ -330,7 +330,7 @@ run_shard() {
     [ -n "$COMPAT_RUN" ] && select_run=(-run "$COMPAT_RUN")
     # The sql shard skips the replica tests, which sqlreplicas runs.
     [ -n "$COMPAT_SKIP" ] && select_run+=(-skip "$COMPAT_SKIP")
-    go test -tags=compat -count=1 -timeout 60m -v ${select_run[@]+"${select_run[@]}"} ./test/compat/... > "$dir/compat.log" 2>&1 || rc=$?
+    go test -tags=compat -count=1 -timeout "$COMPAT_TIMEOUT" -v ${select_run[@]+"${select_run[@]}"} ./test/compat/... > "$dir/compat.log" 2>&1 || rc=$?
     if [ "$rc" -ne 0 ]; then
       retry_flaky "$dir/compat.log" go test -tags=compat -count=1 -timeout 10m -v ./test/compat/... > "$dir/retry.out" 2>&1 || true
       settle_retries "$dir/compat.log"
