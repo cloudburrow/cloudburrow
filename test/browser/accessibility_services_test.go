@@ -94,19 +94,13 @@ func (p *tab) dialogFailures(want bool) []string {
 // the skip link, every visible, enabled control is reached, each stop is on
 // screen with a focus indicator drawn, and focus comes back round rather
 // than being trapped (WCAG 2.1.1, 2.1.2, 2.4.1, 2.4.7).
+//
+// The page is walked once, and must hold still for it: every control tagged
+// before the first Tab is still in the document after the last. A page
+// that rebuilds its controls under a keyboard user (a list's poll landing
+// between two presses) drops their focus to the top of the page, so that
+// is a failure of its own, not a reason to walk again (#2047).
 func (p *tab) keyboardFailures() []string {
-	p.t.Helper()
-	fails, _ := p.keyboardWalk()
-	return fails
-}
-
-// keyboardWalk is keyboardFailures, and whether the page held still while
-// it was walked: every control tagged before the first Tab is still in the
-// document after the last. A list that re-renders mid-walk (a refresh
-// landing between two presses) replaces the controls the walk was to
-// reach, which says nothing about the page's keyboard access, so the
-// caller shows the page again and walks it afresh (#2047).
-func (p *tab) keyboardWalk() (fails []string, stable bool) {
 	p.t.Helper()
 	var want []string
 	p.eval(tagControlsJS, &want)
@@ -142,14 +136,13 @@ func (p *tab) keyboardWalk() (fails []string, stable bool) {
 			out = append(out, fmt.Sprintf("Tab never reaches %q", w))
 		}
 	}
-	p.eval(fmt.Sprintf(`document.querySelectorAll("[data-a11y-key]").length === %d &&
-		[...document.querySelectorAll("[data-a11y-key]")].every((a) => a.isConnected)`, len(want)), &stable)
-	return out, stable
+	var stable bool
+	p.eval(fmt.Sprintf(`document.querySelectorAll("[data-a11y-key]").length === %d`, len(want)), &stable)
+	if !stable {
+		out = append(out, "the page rebuilt its controls during the Tab walk, taking the keyboard user's place")
+	}
+	return out
 }
-
-// keyboardWalkRetries is how many times a page that re-rendered during its
-// Tab walk is shown and walked again before that is reported as a failure.
-const keyboardWalkRetries = 3
 
 // auditScreens runs the whole audit over pages, each part in a subtest:
 // accessible names and table headers; contrast in the light and the dark
@@ -204,20 +197,7 @@ func auditScreensAt(t *testing.T, opener func(*testing.T) *tab, pages []a11yPage
 		each(t, func(p *tab) { p.run(reducedMotion()) }, func(p *tab, pg a11yPage) {
 			fails := p.dialogFailures(strings.HasSuffix(pg.name, " dialog"))
 			if pg.then == "" {
-				// Only a walk the page held still for is judged: one it
-				// re-rendered under is walked again on the page shown
-				// afresh, every check intact (#2047).
-				stable := false
-				for try := 0; !stable; try++ {
-					if try == keyboardWalkRetries {
-						fails = append(fails, fmt.Sprintf("the page re-rendered during each of %d Tab walks", try))
-						break
-					}
-					if try > 0 {
-						p.showAsked(pg)
-					}
-					fails, stable = p.keyboardWalk()
-				}
+				fails = p.keyboardFailures()
 			}
 			for _, fl := range fails {
 				t.Errorf("%s: %s", pg.name, fl)

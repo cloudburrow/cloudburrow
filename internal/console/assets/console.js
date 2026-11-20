@@ -1035,6 +1035,44 @@ const setChildren = (node, ...children) => {
   node.replaceChildren(...children.flat().filter((c) => c !== null && c !== undefined && c !== false));
 };
 
+// keepingFocus runs redraw, which rebuilds part of root, and puts focus back
+// on the control that stands where the focused one stood (#2047).
+//
+// A list's poll, a sort, a pager or a chart's tick rebuilt its controls
+// under a keyboard user: the focused one left the document and focus fell
+// to <body>, so the next Tab started again from the top of the page.
+// Google's console keeps a reader's place across its refreshes. The control
+// is matched by what it is and says (its role, label and text, not an
+// arrow drawn beside it), and by which of the like ones it was.
+const FOCUSABLE = "a[href], button, input, select, textarea, summary, [tabindex]";
+const focusKey = (n) => {
+  const label = n.getAttribute("aria-label") || "";
+  const text = label ? "" : [...n.childNodes]
+    .filter((c) => !(c.nodeType === 1 && c.getAttribute("aria-hidden") === "true"))
+    .map((c) => c.textContent).join("").trim().slice(0, 120);
+  return [n.tagName, n.getAttribute("type") || "", n.getAttribute("role") || "", n.getAttribute("name") || "",
+    n.id, label, text].join("\u0001");
+};
+const keepingFocus = (root, redraw) => {
+  const was = document.activeElement;
+  if (!root || !was || was === document.body || !root.contains(was)) return redraw();
+  const key = focusKey(was);
+  const nth = [...root.querySelectorAll(FOCUSABLE)].filter((n) => focusKey(n) === key).indexOf(was);
+  const out = redraw();
+  const settle = () => {
+    // Focus the redraw moved on purpose stays where it was put.
+    if (document.activeElement && document.activeElement !== document.body) return;
+    // A node taken out and put back (a header kept across redraws) was
+    // still blurred by its removal.
+    const like = () => [...root.querySelectorAll(FOCUSABLE)].filter((n) => focusKey(n) === key);
+    const now = was.isConnected ? was : like()[Math.max(nth, 0)] || like().pop();
+    if (now) now.focus({ preventScroll: true });
+  };
+  if (out && typeof out.then === "function") return out.then((v) => { settle(); return v; });
+  settle();
+  return out;
+};
+
 // --- data ------------------------------------------------------------
 
 // Every call is bounded.
@@ -1260,7 +1298,7 @@ function renderOperations() {
 
   const ops = mergedOperations();
 
-  setChildren(list, ...ops.map((op) =>
+  keepingFocus(list, () => setChildren(list, ...ops.map((op) =>
     el("li", { class: SEEN_OPERATIONS.has(op.key) ? null : "is-unread" },
       // Running is not a warning. Rendering it in the same amber the tables
       // use for "Paused" said something had gone slightly wrong; a moving
@@ -1280,7 +1318,7 @@ function renderOperations() {
                         href: `/logs?operation=${encodeURIComponent(op.id)}`,
                         text: op.detail })
             : el("div", { class: "op-detail unavailable", text: op.detail }))
-        : null)));
+        : null))));
 
   if (empty) empty.hidden = ops.length > 0;
   if (stale) {
@@ -3237,7 +3275,8 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
     return el("td", { class: "row-actions" }, ...buttons, overflowMenu(actions, item.name));
   };
 
-  const draw = () => {
+  const draw = () => keepingFocus(view, drawNow);
+  const drawNow = () => {
     const rows = visibleRows();
     const total = rows.length;
     const pages = Math.max(1, Math.ceil(total / pageSize));
@@ -3532,12 +3571,19 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   const freshness = el("p", { class: "table-freshness unavailable", role: "status" });
 
   const drawFreshness = () => {
-    setChildren(freshness,
-      el("span", { text: staleBecause
-        ? `Last read ${relativeTime(readAt)} — refresh failed: ${staleBecause}`
-        : `Updated ${relativeTime(readAt)}` }));
+    const said = staleBecause
+      ? `Last read ${relativeTime(readAt)} — refresh failed: ${staleBecause}`
+      : `Updated ${relativeTime(readAt)}`;
+    // A live region rewritten with the same words is read out again.
+    if (freshness.textContent !== said) setChildren(freshness, el("span", { text: said }));
     freshness.classList.toggle("is-stale", Boolean(staleBecause));
   };
+
+  // The listing the table was last drawn from, as read. A poll that reads
+  // the same listing changes nothing on the page (#2047): Google's console
+  // does not rebuild a list nobody changed, and rebuilding it took the
+  // place of a keyboard user tabbing through it.
+  let drawnFrom = JSON.stringify(data);
 
   // quiet is the automatic poll: it must not raise a snackbar every interval
   // on an instance whose backend is down, and must not blank a table that
@@ -3547,6 +3593,14 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
     try {
       const fresh = await opts.refetch();
       if (fresh && Array.isArray(fresh.items)) {
+        const read = JSON.stringify(fresh);
+        if (quiet && read === drawnFrom) {
+          readAt = new Date();
+          staleBecause = "";
+          drawFreshness();
+          return;
+        }
+        drawnFrom = read;
         data = fresh;
         // A selection may name rows that no longer exist.
         const names = new Set(data.items.map((i) => i.name));
@@ -12132,7 +12186,11 @@ async function renderMonitoring(view) {
 
     const gaps = samples.filter((s) => s.unavailable).length;
 
-    setChildren(view, ...header,
+    // Read before the page is rebuilt, so the rebuild is one step and focus
+    // is put back on the range button that had it (#2047).
+    const activity = await productActivity();
+    const requests = await requestCharts(samples);
+    keepingFocus(view, () => setChildren(view, ...header,
       rangeControl,
       gaps
         ? el("p", { class: "unavailable",
@@ -12179,8 +12237,8 @@ async function renderMonitoring(view) {
           // node run out of disk" asks about.
           foot: `Kubelet node filesystem · ${foot}`,
         })),
-      await productActivity(),
-      await requestCharts(samples),
+      activity,
+      requests,
       // Absence, stated. The alternative is a reader assuming these charts
       // are missing rather than impossible.
       el("div", { class: "card" },
@@ -12188,7 +12246,7 @@ async function renderMonitoring(view) {
         el("p", { class: "unavailable", text:
           "Cloud Run workloads' own request count and latency need Knative's " +
           "queue-proxy metrics, which are off in this instance (#181). Cost, quota " +
-          "and SLO data do not exist locally at all and are not approximated." })));
+          "and SLO data do not exist locally at all and are not approximated." }))));
   };
 
   await draw();
