@@ -259,6 +259,8 @@
           "test/compat/secretreplication_test.go:53 TestSecretManagerUserManagedReplicasRoundTrip",
           "test/compat/secrets_test.go:49 TestSecretLifecycle",
           "test/compat/secretschedule_test.go:53 TestSecretManagerRotationAndDelayedDestroy",
+          "test/compat/secrettags1961_test.go:157 TestTerraformSecretTags",
+          "test/compat/secrettags1961_test.go:31 TestSecretManagerTagsAndAliasesAtCreation",
           "test/compat/secrettopics_test.go:33 TestSecretManagerTopicNotifications",
           "test/compat/sysparams1954_test.go:180 TestSystemParametersSecretManager",
           "test/compat/terraform_batch11_test.go:478 TestTerraformRegionalSecretIAM",
@@ -281,6 +283,7 @@
         "tests": [
           "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secrets_test.go:49 TestSecretLifecycle",
+          "test/compat/secrettags1961_test.go:31 TestSecretManagerTagsAndAliasesAtCreation",
           "test/compat/secrettopics_test.go:33 TestSecretManagerTopicNotifications",
           "test/compat/terraform_batch11_test.go:478 TestTerraformRegionalSecretIAM",
           "test/compat/terraform_batch4_test.go:215 TestTerraformSecretVersionDeletionPolicy",
@@ -355,6 +358,7 @@
           "test/compat/secretreplication_test.go:53 TestSecretManagerUserManagedReplicasRoundTrip",
           "test/compat/secrets_test.go:49 TestSecretLifecycle",
           "test/compat/secretschedule_test.go:53 TestSecretManagerRotationAndDelayedDestroy",
+          "test/compat/secrettags1961_test.go:31 TestSecretManagerTagsAndAliasesAtCreation",
           "test/compat/secrettopics_test.go:33 TestSecretManagerTopicNotifications",
           "test/compat/sysparams1954_test.go:180 TestSystemParametersSecretManager",
           "test/compat/terraform_batch6_test.go:477 TestTerraformDataSources",
@@ -5113,7 +5117,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/resourcemanagerregionaltags_test.go:54 TestResourceManagerRegionalTagBindings",
-          "test/compat/resourcemanagertags_test.go:94 TestResourceManagerV3Tags"
+          "test/compat/resourcemanagertags_test.go:94 TestResourceManagerV3Tags",
+          "test/compat/secrettags1961_test.go:31 TestSecretManagerTagsAndAliasesAtCreation"
         ]
       },
       {
@@ -5121,7 +5126,9 @@
         "status": "Verified",
         "tests": [
           "test/compat/resourcemanagerregionaltags_test.go:54 TestResourceManagerRegionalTagBindings",
-          "test/compat/resourcemanagertags_test.go:94 TestResourceManagerV3Tags"
+          "test/compat/resourcemanagertags_test.go:94 TestResourceManagerV3Tags",
+          "test/compat/secrettags1961_test.go:157 TestTerraformSecretTags",
+          "test/compat/secrettags1961_test.go:31 TestSecretManagerTagsAndAliasesAtCreation"
         ]
       },
       {
@@ -16717,7 +16724,9 @@
           "test/compat/privateca_cli_test.go:36 TestGcloudPrivateCA",
           "test/compat/privateca_kms_test.go:101 TestPrivateCAKMSKeysCMEKAndIssuanceRules",
           "test/compat/privateca_kms_test.go:429 TestTerraformPrivateCAKMSKeyAndTemplateRules",
-          "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
+          "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates",
+          "test/compat/privatecasans1961_test.go:146 TestTerraformPrivateCACertificateSubjectKeyID",
+          "test/compat/privatecasans1961_test.go:39 TestPrivateCACustomSANsAndSubjectKeyID"
         ]
       },
       {
@@ -16818,7 +16827,8 @@
           "test/compat/privateca_cli_test.go:141 TestTerraformPrivateCA",
           "test/compat/privateca_kms_test.go:101 TestPrivateCAKMSKeysCMEKAndIssuanceRules",
           "test/compat/privateca_kms_test.go:429 TestTerraformPrivateCAKMSKeyAndTemplateRules",
-          "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
+          "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates",
+          "test/compat/privatecasans1961_test.go:146 TestTerraformPrivateCACertificateSubjectKeyID"
         ]
       },
       {

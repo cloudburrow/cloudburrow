@@ -25,8 +25,8 @@ func TestCreateSecretRefusesFieldsItWouldDrop(t *testing.T) {
 	g, s := newGRPC(t)
 	ctx := context.Background()
 	cases := map[string]*secretmanagerpb.Secret{
-		"version_aliases": {Replication: automatic(), VersionAliases: map[string]int64{"current": 1}},
-		"tags":            {Replication: automatic(), Tags: map[string]string{"tagKeys/1": "tagValues/1"}},
+		// Without Resource Manager's bindings (#1961).
+		"tags": {Replication: automatic(), Tags: map[string]string{"tagKeys/1": "tagValues/1"}},
 		// A top-level key is a regional secret's (#1519); on a global
 		// secret it is refused, not dropped.
 		"customer_managed_encryption": {Replication: automatic(),

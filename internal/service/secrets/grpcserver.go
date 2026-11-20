@@ -259,9 +259,19 @@ func (g *GRPCServer) CreateSecret(_ context.Context, req *secretmanagerpb.Create
 		kind, locations = "user-managed", []string{location}
 		keys = normalKeys([]string{sec.GetCustomerManagedEncryption().GetKmsKeyName()})
 	}
+	name := SecretName(project, req.GetSecretId())
+	if err := g.store.CheckTags(name, sec.GetTags()); err != nil {
+		return nil, apierror.Wrap(err)
+	}
 	created, err := g.store.CreateSecretEncrypted(project, req.GetSecretId(),
 		sec.GetLabels(), sec.GetAnnotations(), expire, topicNames(sec), sch, keys, kind, locations...)
 	if err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	if err := g.store.BindTags(created.Name, sec.GetTags()); err != nil {
+		// Checked above; a binding made meanwhile can still collide. The
+		// delete drops the bindings already made.
+		_ = g.store.DeleteSecret(project, req.GetSecretId())
 		return nil, apierror.Wrap(err)
 	}
 	return toProtoSecret(created), nil

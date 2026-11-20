@@ -447,6 +447,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if memorystoreAdminSvc != nil {
 		memorystoreAdminSvc.registry = func() *resourcemanager.Registry { return projectRegistry }
 	}
+	if secretsSvc != nil {
+		// Secret.tags are Resource Manager's tag bindings (#1961).
+		secretsSvc.registry = func() *resourcemanager.Registry { return projectRegistry }
+	}
 	if serviceEnabled(cfg, config.ServiceFirestore) {
 		// Firestore with MongoDB compatibility's token sign-in (#1738)
 		// checks the tokens these credentials minted and the project's
