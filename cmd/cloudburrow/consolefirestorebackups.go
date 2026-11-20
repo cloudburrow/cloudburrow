@@ -38,10 +38,17 @@ func firestoreTransferActions() []console.Action {
 			{Name: "outputUriPrefix", Label: "Destination", Type: "text", Required: true, Pattern: `^gs://.+`, Browse: "storage",
 				Help: "gs://BUCKET[/PATH] in this instance's Cloud Storage; a bucket alone gets a folder named after the time."},
 			collectionIDsField("The collections to export."),
-			// Google's "Export from an earlier point in time", for a
-			// database with PITR (#1845).
+			// Google's "Choose the state of your database to export":
+			// "Export from an earlier point in time" and its snapshot time,
+			// for a database with PITR (#1845, #1942;
+			// https://docs.cloud.google.com/firestore/native/docs/manage-data/export-import,
+			// read 2026-11-20).
 			{Name: "snapshot", Label: "Export from an earlier point in time", Type: "checkbox", Default: "false",
-				Unavailable: fsNoSnapshotExport},
+				Section: "Choose the state of your database to export",
+				Help:    "Needs point-in-time recovery, enabled on the Disaster recovery tab."},
+			{Name: "snapshotTime", Label: "Snapshot time (UTC)", Type: "datetime-local", Required: true, ShowWhen: "snapshot",
+				Section: "Choose the state of your database to export",
+				Help:    "A whole minute within the past 7 days, not earlier than the database's earliest version time."},
 		}},
 		{ID: "importdocuments", Label: "Import", Fields: []console.Field{
 			{Name: "inputUriPrefix", Label: "Export location", Type: "text", Required: true, Pattern: `^gs://.+/.+`, Browse: "storage",
@@ -57,22 +64,35 @@ func firestoreTransferActions() []console.Action {
 
 // cloneAction is Google's Clone and its "Create a clone" dialog
 // (https://docs.cloud.google.com/firestore/native/docs/manage-databases,
-// read 2026-11-19): the clone's ID and the minute it is cloned from.
+// read 2026-11-20): the clone's ID, and in Clone from the point in time it
+// is cloned from, at the minute: any minute of the past 7 days with
+// point-in-time recovery, of the past hour without (#1942).
 func cloneAction() console.Action {
 	return console.Action{ID: "clonedatabase", Label: "Clone", Fields: []console.Field{
 		{Name: "databaseId", Label: "Give the clone an ID", Type: "text", Required: true, Pattern: databaseIDPattern,
 			Help: "The new database's ID, which no database of the project has."},
-		{Name: "cloneFrom", Label: "Clone from", Type: "select", Options: []string{"now"}, Default: "now",
-			OptionLabels: map[string]string{"now": "The current minute"},
-			Help: "The local Firestore keeps no earlier versions of the documents, so a clone is of the current minute; " +
-				"CloneDatabase refuses an earlier snapshot_time."},
+		{Name: "cloneFrom", Label: "Clone from", Type: "datetime-local", Required: true,
+			Default: time.Now().UTC().Truncate(time.Minute).Format("2006-01-02T15:04"),
+			Help: "A point in time, UTC, at the minute: within the past 7 days with point-in-time recovery, " +
+				"the past hour without, and not earlier than the database's earliest version time."},
 	}}
 }
 
-// fsNoSnapshotExport is why an export from an earlier point in time is drawn
-// disabled.
-const fsNoSnapshotExport = "Not available locally: the local Firestore keeps no earlier versions of the documents, " +
-	"so ExportDocuments refuses snapshot_time and an export is of the documents as they are now."
+// pointInTimeMinute reads a form's point in time (an RFC 3339 or
+// datetime-local time, read as UTC) as the whole minute it is in, as
+// Google's console picks it; empty is the current minute.
+func pointInTimeMinute(v, what string) (time.Time, error) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return time.Now().UTC().Truncate(time.Minute), nil
+	}
+	for _, layout := range []string{time.RFC3339Nano, "2006-01-02T15:04:05", "2006-01-02T15:04"} {
+		if t, err := time.Parse(layout, v); err == nil {
+			return t.UTC().Truncate(time.Minute), nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("the %s must be a date and time, not %q", what, v)
+}
 
 func firestoreBackupActions() []console.Action {
 	return []console.Action{
@@ -154,11 +174,19 @@ func actTransfer(ctx context.Context, c *admin.FirestoreAdminClient, db string, 
 	project := strings.SplitN(db, "/databases/", 2)[0]
 	switch {
 	case action == "exportdocuments" && len(path) == 1:
+		req := &adminpb.ExportDocumentsRequest{Name: db,
+			OutputUriPrefix: strings.TrimSpace(values["outputUriPrefix"]), CollectionIds: collectionIDs(values["collectionIds"])}
 		if values["snapshot"] == "true" {
-			return true, errors.New(fsNoSnapshotExport)
+			if strings.TrimSpace(values["snapshotTime"]) == "" {
+				return true, errors.New("a snapshot time is required to export from an earlier point in time")
+			}
+			at, err := pointInTimeMinute(values["snapshotTime"], "snapshot time")
+			if err != nil {
+				return true, err
+			}
+			req.SnapshotTime = timestamppb.New(at)
 		}
-		op, err := c.ExportDocuments(ctx, &adminpb.ExportDocumentsRequest{Name: db,
-			OutputUriPrefix: strings.TrimSpace(values["outputUriPrefix"]), CollectionIds: collectionIDs(values["collectionIds"])})
+		op, err := c.ExportDocuments(ctx, req)
 		if err == nil {
 			_, err = op.Wait(ctx)
 		}
@@ -177,9 +205,13 @@ func actTransfer(ctx context.Context, c *admin.FirestoreAdminClient, db string, 
 		}
 		return true, err
 	case action == "clonedatabase" && len(path) == 1:
-		// The emulator keeps no earlier versions: a clone is of now.
+		// Clone from: the minute picked (#1942).
+		at, err := pointInTimeMinute(values["cloneFrom"], "point in time to clone from")
+		if err != nil {
+			return true, err
+		}
 		op, err := c.CloneDatabase(ctx, &adminpb.CloneDatabaseRequest{Parent: project, DatabaseId: strings.TrimSpace(values["databaseId"]),
-			PitrSnapshot: &adminpb.PitrSnapshot{Database: db, SnapshotTime: timestamppb.New(time.Now().UTC().Truncate(time.Minute))}})
+			PitrSnapshot: &adminpb.PitrSnapshot{Database: db, SnapshotTime: timestamppb.New(at)}})
 		if err == nil {
 			_, err = op.Wait(ctx)
 		}
