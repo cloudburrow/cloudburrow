@@ -60,7 +60,7 @@ func TestStorageHMACKeySecretShownOnce(t *testing.T) {
 	p.waitFor(`[...document.querySelectorAll("#view .listing-summary dd")].some((n) => n.textContent.endsWith("@gs-project-accounts.iam.gserviceaccount.com"))`)
 	var pages string
 	p.eval(`[...document.querySelectorAll("#product-nav a")].map((a) => a.textContent).join(" | ")`, &pages)
-	if pages != "Buckets | Observability | Storage Intelligence | Inventory reports | Transfer data | Settings" {
+	if pages != "Buckets | Observability | Storage Intelligence | Batch operations | Inventory reports | Insights datasets | Transfer data | Settings" {
 		t.Errorf("the Cloud Storage product's pages read %q", pages)
 	}
 
@@ -69,7 +69,7 @@ func TestStorageHMACKeySecretShownOnce(t *testing.T) {
 	p.waitFor(`document.querySelector("#tab-interoperability.is-selected") !== null`)
 
 	// Cancel discards what was typed without asking (#783).
-	p.clickText("#view button", "Create key")
+	p.clickText("#view button", "Create a key for a service account")
 	p.waitFor(`document.querySelector(".modal.is-open #f-serviceAccountEmail") !== null`)
 	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #f-serviceAccountEmail`), sa))
 	p.clickText(".modal .modal-actions button", "Cancel")
@@ -78,10 +78,10 @@ func TestStorageHMACKeySecretShownOnce(t *testing.T) {
 		t.Fatalf("Cancel sent the create: %d requests", n)
 	}
 
-	p.clickText("#view button", "Create key")
+	p.clickText("#view button", "Create a key for a service account")
 	p.waitFor(`document.querySelector(".modal.is-open #f-serviceAccountEmail") !== null`)
 	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #f-serviceAccountEmail`), sa))
-	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
+	p.clickText(".modal.is-open button", "Create key")
 	p.waitFor(`document.querySelector(".modal.is-open #one-time-value") !== null`)
 	var shown struct {
 		Secret, Note, Title string

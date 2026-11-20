@@ -15,7 +15,7 @@ import (
 
 // TestStorageObjectVersionsThroughTheBrowser (#853), in the storage shard.
 // In a bucket whose versioning Edit bucket turned on, an object written twice
-// is listed once; Show versions lists both generations, named
+// is listed once; the Show list's Live and noncurrent objects lists both generations, named
 // name#generation, and stays on for the next page. Restore as live version
 // on the noncurrent row makes its bytes live, as a third generation. Delete
 // version on a row says it is not kept as noncurrent and asks for the
@@ -109,9 +109,15 @@ func TestStorageObjectVersionsThroughTheBrowser(t *testing.T) {
 		p.clickText(`.overflow-menu:not([hidden]) [role="menuitem"]`, item)
 	}
 
+	// Google's Show list (#1843): "Live and noncurrent objects" lists every
+	// generation.
+	showVersions := func(choice string) {
+		p.eval(fmt.Sprintf(`(() => { const s = document.querySelector("#objects-show"); s.value = %q;
+			s.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`, choice), nil)
+	}
 	p.navigate("/storage/browser/" + bucket + "/docs?project=" + project)
-	p.waitFor(`document.querySelector("#object-versions-toggle") !== null && [...document.querySelectorAll("#view tbody tr")].length === 1`)
-	p.run(chromedp.Click(chromedp.CSS(`#object-versions-toggle`)))
+	p.waitFor(`document.querySelector("#objects-show") !== null && [...document.querySelectorAll("#view tbody tr")].length === 1`)
+	showVersions("Live and noncurrent objects")
 	p.waitFor(rowCount(2))
 
 	// Restore as live version.
@@ -221,10 +227,10 @@ func TestStorageObjectVersionsThroughTheBrowser(t *testing.T) {
 	p.clickText("#action-result .modal-actions button", "Close")
 	p.waitFor(`document.querySelector(".modal") === null`)
 
-	// Show versions stays on for the next object list.
+	// Live and noncurrent objects stays chosen for the next object list.
 	p.navigate("/storage/browser/" + bucket + "/docs?project=" + project)
-	p.waitFor(`document.querySelector("#object-versions-toggle") !== null && document.querySelector("#object-versions-toggle").checked`)
+	p.waitFor(`document.querySelector("#objects-show")?.value === "Live and noncurrent objects"`)
 	p.waitFor(rowCount(2))
-	p.run(chromedp.Click(chromedp.CSS(`#object-versions-toggle`)))
+	showVersions("Live objects only")
 	p.waitFor(`[...document.querySelectorAll("#view tbody tr")].length === 1`)
 }

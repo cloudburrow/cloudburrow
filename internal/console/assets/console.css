@@ -447,6 +447,9 @@ button.primary.header-button[disabled], button.primary.header-button.is-busy[dis
   font-weight: 500; color: var(--accent); cursor: pointer;
 }
 .view-options-wrap { position: relative; }
+.view-options-group { border: 0; margin: 0 0 12px; padding: 0; }
+.view-options-group legend { padding: 4px 0 8px; font-weight: 500; }
+.view-options-group .view-options-item { padding: 6px 0; }
 .view-options-menu {
   position: absolute; top: 44px; right: 0; z-index: 30; min-width: 240px; max-height: 360px; overflow-y: auto;
   padding: 8px 0; background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow-menu);

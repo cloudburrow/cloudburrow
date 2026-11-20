@@ -460,9 +460,15 @@ func restoreObject(ctx context.Context, c *storage.Client, path []string) error 
 	return err
 }
 
+// showSoftDeleted is Google's Show list choice for soft-deleted objects
+// (use-soft-deleted-objects).
+const showSoftDeleted = "Soft-deleted objects only"
+
 // deletedObjects is a bucket's soft-deleted objects, each with Restore.
 func (p storageProvider) deletedObjects(ctx context.Context, b bucketMeta) console.Section {
-	sec := console.Section{ID: "deleted", Label: "Deleted objects", Listing: console.Listing{
+	// Drawn by the Objects tab's Show list, as Google's (#1843), not as a
+	// tab of its own.
+	sec := console.Section{ID: "deleted", Label: "Deleted objects", ShownIn: "objects", ShowAs: showSoftDeleted, Listing: console.Listing{
 		Columns: []string{"Generation", "Size", "Deleted", "Hard delete"}, NameColumn: "Name",
 		Noun: "deleted objects", Items: []console.Resource{},
 	}}

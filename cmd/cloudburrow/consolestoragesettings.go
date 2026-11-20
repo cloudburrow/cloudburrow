@@ -176,13 +176,19 @@ func (p storageSettingsProvider) List(ctx context.Context, project string) (cons
 // Create key.
 
 func (storageSettingsProvider) CreateForm() (string, []console.Field) {
-	return "Create key", []console.Field{{
+	// Google's Interoperability tab: "Create a key for a service account"
+	// (#1843, managing-hmackeys).
+	return "Create a key for a service account", []console.Field{{
 		Name: "serviceAccountEmail", Label: "Service account email", Type: "text", Required: true,
 		Pattern: `^[^@\s]+@[^@\s]+$`,
 		Help: "The service account the key signs requests as, such as app@PROJECT.iam.gserviceaccount.com. " +
 			"A service account has at most 10 keys that are not deleted.",
 	}}
 }
+
+// CreateSubmit implements console.CreateSubmitter: the dialog that "Create
+// a key for a service account" opens ends in Create key.
+func (storageSettingsProvider) CreateSubmit() string { return "Create key" }
 
 // Create is CreateOneTime without the secret. The create route calls
 // CreateOneTime, so the secret is shown; this exists for the Creator

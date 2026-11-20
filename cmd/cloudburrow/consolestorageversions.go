@@ -37,6 +37,7 @@ import (
 	"strings"
 
 	"cloud.google.com/go/storage"
+	"google.golang.org/api/iterator"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
 )
@@ -188,7 +189,7 @@ func versionActions(generation int64, name string, live bool) []console.Action {
 	return append(out, console.Action{
 		ID: "deleteversion", Label: "Delete version", Destructive: true,
 		Confirm: fmt.Sprintf("Generation %s of %s is deleted, not kept as a noncurrent version. %s "+
-			"With soft delete on for the bucket it can be restored from Deleted objects until its hard delete time.",
+			"With soft delete on for the bucket it can be restored, from the Show list's Soft-deleted objects only, until its hard delete time.",
 			gen, name, after),
 	})
 }
@@ -497,3 +498,107 @@ var (
 	_ console.ObjectVersioner = storageProvider{}
 	_ console.ResultActor     = storageProvider{}
 )
+
+// Google's object page has a Version history tab (#1843;
+// using-versioned-objects, use-soft-deleted-objects): every generation of
+// the object, each noncurrent one with Restore, which opens "the restore
+// object version pane" ending in Confirm; and in its Show list, "Soft-deleted
+// objects only", the object's soft-deleted generations, each with Restore.
+const (
+	showLiveAndNoncurrent = "Live and noncurrent objects"
+	versionHistoryID      = "versions"
+)
+
+// restoreVersionPane is Restore on a Version history row: what is restored,
+// confirmed with Confirm and nothing typed.
+func restoreVersionPane(id, what string) console.Action {
+	return console.Action{ID: id, Label: "Restore", ConfirmTitle: "Restore object version",
+		Confirm: what, ConfirmStyle: console.DeleteConfirmClick, Submit: "Confirm"}
+}
+
+// versionHistory is the object page's Version history tab and the
+// soft-deleted generations its Show list draws.
+func (p storageProvider) versionHistory(ctx context.Context, bucket, name string) []console.Section {
+	live := console.Section{ID: versionHistoryID, Label: "Version history", Show: showLiveAndNoncurrent,
+		Listing: console.Listing{Columns: []string{"Generation", "State", "Size", "Updated"}, NameColumn: "Name",
+			Noun: "versions", Items: []console.Resource{}}}
+	token := ""
+	for {
+		q := urlpkg.Values{"versions": {"true"}, "prefix": {name}}
+		if token != "" {
+			q.Set("pageToken", token)
+		}
+		var page struct {
+			Items         []versionJSON `json:"items"`
+			NextPageToken string        `json:"nextPageToken"`
+		}
+		if err := getJSON(ctx, p.bucketURL(bucket)+"/o?"+q.Encode(), &page); err != nil {
+			live.Listing.Unavailable = "cannot list the object's versions: " + err.Error()
+			break
+		}
+		for _, v := range page.Items {
+			if v.Name != name {
+				continue
+			}
+			if len(live.Listing.Items) == versionsLimit {
+				live.Listing.Note = fmt.Sprintf("The first %d versions are listed, as on Google's console; list the rest with objects.list versions=true.", versionsLimit)
+				break
+			}
+			row, ok := versionRow(bucket, "", v)
+			if !ok {
+				continue
+			}
+			if v.TimeDeleted != "" {
+				row.Actions = append([]console.Action{restoreVersionPane("restoreversion", fmt.Sprintf(
+					"Generation %s of %s becomes the live version again; on a versioned bucket the live version it replaces is kept as noncurrent.",
+					v.Generation, name))}, row.Actions[1:]...)
+			}
+			live.Listing.Items = append(live.Listing.Items, row)
+		}
+		if page.NextPageToken == "" || live.Listing.Note != "" {
+			break
+		}
+		token = page.NextPageToken
+	}
+	live.Listing.Total = len(live.Listing.Items)
+	return []console.Section{live, p.softDeletedVersions(ctx, bucket, name)}
+}
+
+// softDeletedVersions are the object's soft-deleted generations, drawn by
+// Version history's Show list.
+func (p storageProvider) softDeletedVersions(ctx context.Context, bucket, name string) console.Section {
+	sec := console.Section{ID: "versionsdeleted", Label: "Soft-deleted versions", ShownIn: versionHistoryID,
+		ShowAs: showSoftDeleted, Listing: console.Listing{Columns: []string{"Generation", "Size", "Deleted", "Hard delete"},
+			NameColumn: "Name", Noun: "soft-deleted versions", Items: []console.Resource{}}}
+	c, err := p.storageClient(ctx)
+	if err != nil {
+		sec.Listing.Unavailable = err.Error()
+		return sec
+	}
+	defer func() { _ = c.Close() }()
+	it := c.Bucket(bucket).Objects(ctx, &storage.Query{SoftDeleted: true, Prefix: name})
+	for len(sec.Listing.Items) < softDeletedLimit {
+		o, err := it.Next()
+		if errors.Is(err, iterator.Done) {
+			break
+		}
+		if err != nil {
+			sec.Listing.Unavailable = "cannot list the soft-deleted versions: " + err.Error()
+			return sec
+		}
+		if o.Name != name {
+			continue
+		}
+		gen := strconv.FormatInt(o.Generation, 10)
+		sec.Listing.Items = append(sec.Listing.Items, console.Resource{
+			Name: name + "#" + gen,
+			Fields: map[string]string{"Generation": gen, "Size": formatBytes(o.Size),
+				"Deleted": stampOrDash(o.SoftDeleteTime), "Hard delete": stampOrDash(o.HardDeleteTime)},
+			Target: softObjectPath(bucket, o.Generation, name),
+			Actions: []console.Action{restoreVersionPane("restore", fmt.Sprintf(
+				"Soft-deleted generation %s of %s is restored as the object's live version.", gen, name))},
+		})
+	}
+	sec.Listing.Total = len(sec.Listing.Items)
+	return sec
+}

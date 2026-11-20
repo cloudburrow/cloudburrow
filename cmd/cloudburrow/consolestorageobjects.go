@@ -646,8 +646,10 @@ func (p storageProvider) objectDetail(ctx context.Context, project string, path 
 
 	sections := []console.Section{{ID: "metadata", Label: "Metadata", Kind: console.KindProperties,
 		Groups: groups}}
-	// The live object's ACL, while uniform access is off (#1233).
+	// The live object's ACL, while uniform access is off (#1233), and
+	// Google's Version history tab (#1843).
 	if gen == 0 {
+		sections = append(sections, p.versionHistory(ctx, bucket, name)...)
 		if acl, ok := p.objectACLSection(ctx, bucket, name); ok {
 			sections = append(sections, acl)
 		}

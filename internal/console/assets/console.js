@@ -2384,9 +2384,10 @@ function filterBar({ noun, columns, onChange, extra = [] }) {
 // remembered per service. hidden() is the set of columns turned off.
 const COLUMNS_KEY = "cloudburrow.columns";
 
-function viewOptions({ service, columns, onChange }) {
+function viewOptions({ service, columns, onChange, scope = null, reload = null }) {
   const stored = readStored(COLUMNS_KEY, {}) || {};
   let off = new Set(Array.isArray(stored[service]) ? stored[service] : []);
+  if (scope) return viewOptionsDialog({ service, columns, onChange, scope, reload, off });
   const button = el("button", { type: "button", class: "icon-button view-options",
     "aria-label": "View options", title: "View options", "aria-haspopup": "true", "aria-expanded": "false",
     html: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M9 5v14M15 5v14"/></svg>' });
@@ -2426,6 +2427,67 @@ function viewOptions({ service, columns, onChange }) {
     node: el("div", { class: "view-options-wrap" }, button, panel),
     hidden: () => off,
   };
+}
+
+// viewOptionsDialog is View options where the list's scope is chosen in it
+// (Scope.ViewOptions, #1843): Google's Buckets page "Click View options.
+// Select Soft deleted buckets only. Click Save." A dialog with the scope's
+// choices as radio buttons over the column choices, applied by Save.
+function viewOptionsDialog({ service, columns, onChange, scope, reload, off }) {
+  const button = el("button", { type: "button", class: "secondary view-options view-options-text",
+    "aria-haspopup": "dialog", text: "View options" });
+  button.addEventListener("click", () => {
+    const { dialog, close } = openModal({ labelledBy: "view-options-title" });
+    const name = `view-options-${scope.key}`;
+    const radios = (scope.options || []).map((o) => {
+      const id = `${name}-${o.id}`;
+      return el("label", { class: "view-options-item", for: id },
+        el("input", { type: "radio", id, name, value: o.id, checked: o.id === scope.selected ? "checked" : null }),
+        el("span", { text: o.label || o.id }));
+    });
+    const boxes = columns().map((c) => {
+      const id = `vo-col-${c.replace(/[^A-Za-z0-9]+/g, "-")}`;
+      return el("label", { class: "view-options-item", for: id },
+        el("input", { type: "checkbox", id, value: c, checked: off.has(c) ? null : "checked" }),
+        el("span", { text: c }));
+    });
+    const save = (e) => {
+      e.preventDefault();
+      off.clear();
+      for (const b of boxes) {
+        const input = b.querySelector("input");
+        if (!input.checked) off.add(input.value);
+      }
+      const all = readStored(COLUMNS_KEY, {}) || {};
+      all[service] = [...off];
+      writeStored(COLUMNS_KEY, all);
+      const picked = (dialog.querySelector(`input[name="${name}"]:checked`) || {}).value || scope.selected;
+      close();
+      if (picked !== scope.selected) {
+        const params = new URLSearchParams(location.search);
+        if (picked && picked !== scope.default) params.set(scope.key, picked);
+        else params.delete(scope.key);
+        const qs = params.toString();
+        history.pushState(history.state, "", location.pathname + (qs ? `?${qs}` : ""));
+        if (reload) reload();
+        return;
+      }
+      onChange();
+    };
+    dialog.append(
+      el("form", { class: "modal-body", id: "view-options-dialog", onsubmit: save },
+        el("h2", { id: "view-options-title", text: "View options" }),
+        el("fieldset", { class: "view-options-group" },
+          el("legend", { text: scope.label && scope.label !== "View options" ? scope.label : "Show" }), ...radios),
+        el("fieldset", { class: "view-options-group" },
+          el("legend", { text: "Column display options" }), ...boxes),
+        el("div", { class: "modal-actions" },
+          el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }),
+          el("button", { type: "submit", class: "primary", id: "view-options-save", text: "Save" }))));
+    const first = dialog.querySelector("input");
+    if (first) first.focus();
+  });
+  return { node: el("div", { class: "view-options-wrap" }, button), hidden: () => off };
 }
 
 // A cancel is not a failure: the user stopped it.
@@ -2977,7 +3039,8 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   // The data columns on screen: View options can turn any of them off
   // (#1842). The filter still reads the hidden ones, as Google's does.
   const chooser = opts.rowControls && route.service
-    ? viewOptions({ service: route.service, columns: allDataColumns, onChange: () => draw() })
+    ? viewOptions({ service: route.service, columns: allDataColumns, onChange: () => draw(),
+      scope: data.scope && data.scope.viewOptions ? data.scope : null, reload })
     : null;
   const dataColumns = () => allDataColumns().filter((c) => !chooser || !chooser.hidden().has(c));
   const hasActions = () =>
@@ -3731,7 +3794,11 @@ async function renderDetail(view, route, resourcePath) {
   // sharing's My subscriptions, #1989) is headed by its own name, not
   // "<Kind> details".
   if (data.heading) crumb.querySelector("h1, h2").textContent = data.heading;
-  const sections = (data.sections || []).slice();
+  // A section ShownIn another is drawn by that tab's Show list, not as a
+  // tab of its own (#1843): a bucket's soft-deleted objects are the
+  // Objects tab's "Soft-deleted objects only".
+  const allSections = (data.sections || []).slice();
+  const sections = allSections.filter((s) => !s.shownIn);
   // A Logs tab where Google's page has one (#1842, audit item 9): a Cloud
   // Run service's, job's and worker pool's, a function's, and a GKE
   // workload's, pod's, Service's and Job's ("Click the Logs tab to get the
@@ -3816,7 +3883,12 @@ async function renderDetail(view, route, resourcePath) {
   // address, which is the Studio's (#1861).
   const embedded = view.dataset.embedded === "true";
   const wanted = (embedded ? view.dataset.tab : new URLSearchParams(location.search).get("tab")) || data.openTab;
-  let current = Math.max(0, sections.findIndex((sec) => sec.id === wanted));
+  // An address naming a section ShownIn another opens that tab with the
+  // section chosen in its Show list: ?tab=deleted, a bucket's Deleted
+  // objects tab before #1843.
+  const shownWanted = allSections.find((sec) => sec.shownIn && sec.id === wanted);
+  if (shownWanted) SHOW_CHOICES[shownWanted.shownIn] = shownWanted.showAs || shownWanted.label;
+  let current = Math.max(0, sections.findIndex((sec) => sec.id === (shownWanted ? shownWanted.shownIn : wanted)));
 
   const panel = el("div", { class: "tab-panel", id: "detail-panel", role: "tabpanel" });
 
@@ -4029,20 +4101,23 @@ async function renderDetail(view, route, resourcePath) {
     // An upload control where the provider says objects can land. It joins
     // the section's note, so it is drawn whether or not there are rows yet —
     // an empty bucket is exactly where the first upload happens.
-    if (section.uploadTo) {
-      const up = uploadControl(route, section.uploadTo, reload);
-      // Show versions (#853): the same place listed with every generation,
-      // live and noncurrent, from the storage server's versions=true.
-      up.append(versionsToggle(() => drawPanel()));
-      // Google's Show list (#1843): Soft-deleted objects only draws the
-      // bucket's soft-deleted objects, with Restore, in the Objects tab.
-      const softSection = sections.find((sc) => sc.id === "deleted");
-      if (softSection) up.append(objectsShowPicker(() => drawPanel()));
-      note = note ? el("div", {}, note, up) : up;
-      if (softSection && objectsShow === OBJECTS_SHOW_SOFT) {
-        return drawListingSection(into, { ...softSection, uploadTo: null }, note, reload);
+    // Google's Show list (#1843): on the Objects tab "Live objects only",
+    // "Live and noncurrent objects" (#853: every generation, from the
+    // storage server's versions=true) and "Soft-deleted objects only"; on
+    // any tab another section is ShownIn, this tab's own rows and each such
+    // section's, drawn in this tab.
+    const shownHere = allSections.filter((sc) => sc.shownIn === section.id);
+    if (section.uploadTo || shownHere.length) {
+      const show = showList(section, shownHere, () => drawPanel());
+      let bar = show.node;
+      if (section.uploadTo) {
+        bar = uploadControl(route, section.uploadTo, reload);
+        bar.append(show.node);
       }
-      if (readStored(VERSIONS_KEY, false)) return drawVersionsSection(into, section, note, reload);
+      note = note ? el("div", {}, note, bar) : bar;
+      const other = shownHere.find((sc) => (sc.showAs || sc.label) === show.choice);
+      if (other) return drawListingSection(into, { ...other, uploadTo: null }, note, reload);
+      if (section.uploadTo && show.choice === SHOW_NONCURRENT) return drawVersionsSection(into, section, note, reload);
     }
     if (!(list.items || []).length) {
       // The listing's own note, when it has one.
@@ -5076,27 +5151,31 @@ const PREVIEW_IMAGES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
 // as the Cloud Storage console keeps it.
 const VERSIONS_KEY = "cloudburrow.storage.versions";
 
-// The Objects tab's Show list (#1843), for this page view.
-const OBJECTS_SHOW_LIVE = "Live objects only";
-const OBJECTS_SHOW_SOFT = "Soft-deleted objects only";
-let objectsShow = OBJECTS_SHOW_LIVE;
+// Google's Show list (#1843): a tab's own rows, or a section ShownIn it,
+// chosen for this page view per tab. On a bucket's Objects tab "Live and
+// noncurrent objects" is kept for the viewer across pages, as the Cloud
+// Storage console keeps it (#853).
+const SHOW_LIVE = "Live objects only";
+const SHOW_NONCURRENT = "Live and noncurrent objects";
+let SHOW_CHOICES = {};
 
-function objectsShowPicker(onChange) {
-  const select = el("select", { id: "objects-show", name: "show" },
-    ...[OBJECTS_SHOW_LIVE, OBJECTS_SHOW_SOFT].map((o) =>
-      el("option", { value: o, text: o, selected: o === objectsShow })));
-  select.addEventListener("change", () => { objectsShow = select.value; onChange(); });
-  return el("label", { class: "objects-show", for: "objects-show" }, "Show ", select);
-}
-
-function versionsToggle(onChange) {
-  const box = el("input", { type: "checkbox", id: "object-versions-toggle",
-    checked: readStored(VERSIONS_KEY, false) });
-  box.addEventListener("change", () => {
-    writeStored(VERSIONS_KEY, box.checked);
+function showList(section, shownHere, onChange) {
+  const own = section.show || SHOW_LIVE;
+  const options = [own, ...(section.uploadTo ? [SHOW_NONCURRENT] : []),
+    ...shownHere.map((sc) => sc.showAs || sc.label)];
+  let choice = SHOW_CHOICES[section.id];
+  if (!options.includes(choice)) {
+    choice = section.uploadTo && readStored(VERSIONS_KEY, false) ? SHOW_NONCURRENT : own;
+  }
+  const id = `${section.id}-show`;
+  const select = el("select", { id, name: "show" },
+    ...options.map((o) => el("option", { value: o, text: o, selected: o === choice })));
+  select.addEventListener("change", () => {
+    SHOW_CHOICES[section.id] = select.value;
+    if (section.uploadTo) writeStored(VERSIONS_KEY, select.value === SHOW_NONCURRENT);
     onChange();
   });
-  return el("label", { class: "versions-toggle", for: "object-versions-toggle" }, box, " Show versions");
+  return { node: el("label", { class: "objects-show", for: id }, "Show ", select), choice };
 }
 
 function objectQuery(path) {
@@ -5539,7 +5618,8 @@ async function renderList(view, route) {
     header.push(...listingSummary(data));
   }
   if (data.serverFilter) header.push(serverFilterBox(data.serverFilter, () => renderList(view, route)));
-  if (data.scope) header.push(scopePicker(data.scope, () => renderList(view, route), (data.filters || []).map((f) => f.key)));
+  // A scope held in View options (#1843) is chosen in that dialog.
+  if (data.scope && !data.scope.viewOptions) header.push(scopePicker(data.scope, () => renderList(view, route), (data.filters || []).map((f) => f.key)));
   (data.filters || []).forEach((f, i, all) =>
     header.push(scopePicker(f, () => renderList(view, route), all.slice(i + 1).map((x) => x.key))));
 
@@ -9292,7 +9372,7 @@ async function runAction(route, target, action, onDone, row = NO_ROW, title = nu
     title: action.confirmTitle || `${action.label} ${name}?`,
     detail: action.confirm || undefined,
     confirmWord: name,
-    confirmLabel: action.confirm ? action.label : undefined,
+    confirmLabel: action.confirm ? (action.submit || action.label) : undefined,
     consequence: action.destructive ? undefined : "",
     // As Google's console confirms this action (#1931): BigQuery's Delete
     // table asks for the word delete, a Datastore entity's Delete for
