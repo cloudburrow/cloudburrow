@@ -14,6 +14,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 	"github.com/cloudburrow/cloudburrow/internal/service/apikeys"
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
+	"github.com/cloudburrow/cloudburrow/internal/service/monitoring"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
 	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
@@ -549,9 +550,14 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// service ends up with none (#600), never a list kept here.
 	requestMetrics := metrics.New(metricsServices(cfg)...)
 	control.Mount(func(mux *http.ServeMux) { mux.Handle("GET /metrics", metricsHandler(requestMetrics)) })
+	// The request history: one-minute deltas of the counters per project,
+	// which Cloud Monitoring serves as serviceruntime.googleapis.com/api/*
+	// and APIs & Services charts over a time range (#1866).
+	requestHistory := monitoring.NewRequestBuiltin(monitoringCounters{reg: requestMetrics}, cfg.DefaultProject(), time.Now)
+	coord.Register(&requestSampler{history: requestHistory})
 	if monitoringSvc != nil {
-		// serviceruntime.googleapis.com/api/* are sampled from these.
 		monitoringSvc.counters = requestMetrics
+		monitoringSvc.reqs = requestHistory
 	}
 	// Fault injection (#306) on the services CloudBurrow serves itself. Each
 	// faults.Interceptor below is what makes its service's rules accepted
@@ -1046,6 +1052,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		serviceUsage:   serviceUsageSrv,
 		apiKeys:        apiKeysSrv,
 		requestMetrics: requestMetrics,
+		requestHistory: requestHistory,
 		backupdr:       backupDRSrv,
 		sqlAdmin:       sqlAdminSrv,
 		privateCA:      privateCASvc,

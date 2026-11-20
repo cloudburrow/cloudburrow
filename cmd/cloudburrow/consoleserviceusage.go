@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/cloudburrow/cloudburrow/internal/service/apikeys"
+	"github.com/cloudburrow/cloudburrow/internal/service/monitoring"
 
 	"context"
 	"errors"
@@ -22,6 +23,10 @@ type serviceUsageProvider struct {
 	// metrics are the request counters the APIs & Services pages count
 	// calls from (#1866); nil shows no counts.
 	metrics *metrics.Registry
+	// history is the counters' one-minute history per project, which the
+	// pages count and chart over a time range (#1866); nil counts every
+	// project together since the instance started, and draws no charts.
+	history *monitoring.RequestBuiltin
 	// apiKeys is the API Keys API (#1915), whose keys the Credentials page
 	// lists and edits; nil says it is not served.
 	apiKeys *apikeys.Server
@@ -64,7 +69,7 @@ func (serviceUsageProvider) Actions(r console.Resource) []console.Action {
 		return []console.Action{{ID: "enable", Label: "Enable"}}
 	}
 	return []console.Action{{ID: "disable", Label: "Disable",
-		Confirm: "The API is recorded as disabled for this project. CloudBurrow keeps serving it."}}
+		Confirm: "Calls to the API in this project fail with SERVICE_DISABLED until it is enabled again."}}
 }
 
 // Act implements console.Actor.

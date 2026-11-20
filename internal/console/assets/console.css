@@ -2375,3 +2375,13 @@ svg.bq-chart { display: block; border: 1px solid var(--border); border-radius: v
 .result-box.kind-line { border-color: #e37400; }
 .result-box.is-lit { background: rgba(26, 115, 232, 0.25); border-width: 2.5px; }
 #action-result-table tr.is-lit { background: var(--nav-selected); }
+
+/* APIs & Services charts (#1866): the time ranges and Select Graphs. */
+.apis-ranges { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.apis-ranges .chip { border: 1px solid var(--border); background: var(--surface); color: var(--text); padding: 4px 12px; cursor: pointer; font: inherit; }
+.apis-ranges .chip.is-selected { background: var(--nav-selected); color: var(--nav-selected-text); }
+.apis-select-graphs { margin: 0 0 12px; }
+.apis-select-graphs fieldset { border: 1px solid var(--border); background: var(--surface); margin: 8px 0 0; padding: 8px 12px; max-width: 420px; }
+.apis-graph-option { display: block; padding: 4px 0; }
+.apis-charts { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(min(420px, 100%), 1fr)); }
+.apis-chart .explorer-chart { width: 100%; height: auto; }

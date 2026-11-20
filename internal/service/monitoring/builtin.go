@@ -304,8 +304,9 @@ type RequestSource interface {
 const (
 	requestCount     = "serviceruntime.googleapis.com/api/request_count"
 	requestLatencies = "serviceruntime.googleapis.com/api/request_latencies"
-	// requestRing bounds each request series: a week of one-minute samples.
-	requestRing = 7 * 24 * 60
+	// requestRing bounds each request series: 30 days of one-minute samples,
+	// the longest time range the APIs & Services charts offer (#1866).
+	requestRing = 30 * 24 * 60
 )
 
 type requestDelta struct {
@@ -326,6 +327,7 @@ type RequestBuiltin struct {
 	now     func() time.Time
 
 	mu      sync.Mutex
+	began   time.Time
 	last    map[string]RequestCount
 	lastAt  time.Time
 	deltas  map[string][]requestDelta
@@ -338,6 +340,7 @@ func NewRequestBuiltin(src RequestSource, project string, now func() time.Time) 
 	r := &RequestBuiltin{src: src, project: project, now: now, last: map[string]RequestCount{},
 		deltas: map[string][]requestDelta{}, headers: map[string]RequestCount{}}
 	r.lastAt = now()
+	r.began = r.lastAt
 	for _, c := range src.Snapshot() {
 		r.last[requestKey(c)] = c
 	}
@@ -378,6 +381,63 @@ func (r *RequestBuiltin) Sample() {
 		}
 	}
 	r.lastAt = now
+}
+
+// RequestDelta is one sampling interval of one request series: the calls
+// one method of one service answered with one code.
+type RequestDelta struct {
+	Service, Method, Code string
+	// ResponseCode is the HTTP response code Cloud Monitoring labels the
+	// series with (a gRPC code's documented HTTP equivalent).
+	ResponseCode string
+	Start, End   time.Time
+	Count        uint64
+	// Sum is the calls' total latency in seconds; Buckets the cumulative
+	// latency histogram over the source's Bounds.
+	Sum     float64
+	Buckets []uint64
+}
+
+// Project is the default project, which a call that named none counts in.
+func (r *RequestBuiltin) Project() string { return r.project }
+
+// Began is when sampling started: there is no history before it.
+func (r *RequestBuiltin) Began() time.Time {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.began
+}
+
+// Deltas are project's request deltas whose interval ends within
+// [start, end], as Series reads them (a call that named no project is the
+// default project's). It takes a sample first.
+func (r *RequestBuiltin) Deltas(project string, start, end time.Time) []RequestDelta {
+	r.Sample()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []RequestDelta
+	for k, ds := range r.deltas {
+		c := r.headers[k]
+		if owner := c.Project; owner != project && (owner != "" || project != r.project) {
+			continue
+		}
+		code := codeLabels(c.Code)["response_code"]
+		for _, d := range ds {
+			if d.end.Before(start) || d.end.After(end) {
+				continue
+			}
+			out = append(out, RequestDelta{Service: c.Service, Method: c.Method, Code: c.Code, ResponseCode: code,
+				Start: d.start, End: d.end, Count: d.count, Sum: d.sum, Buckets: append([]uint64(nil), d.buckets...)})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].End.Equal(out[j].End) {
+			return out[i].End.Before(out[j].End)
+		}
+		a, b := out[i], out[j]
+		return a.Service+"\x00"+a.Method+"\x00"+a.Code < b.Service+"\x00"+b.Method+"\x00"+b.Code
+	})
+	return out
 }
 
 func (r *RequestBuiltin) Descriptors(project string) []*metricpb.MetricDescriptor {

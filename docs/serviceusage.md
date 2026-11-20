@@ -9,8 +9,10 @@ as Resource Manager does. `cloudburrow env` exports `CLOUDBURROW_SERVICEUSAGE_EN
 `CLOUDSDK_API_ENDPOINT_OVERRIDES_SERVICEUSAGE`, `cloudburrow gcloud-setup` writes the `serviceusage`
 override, and `cloudburrow terraform` sets the provider's `service_usage_custom_endpoint`. The
 console's **APIs & Services** pages (#1866) are Google's: Enabled APIs & services (charts and each
-enabled API's requests, errors and latency, from the instance's own request counters), each API's
-page with **Disable API**, the Library with **Enable**, and Credentials.
+enabled API's requests, errors and latency: the project's own calls over Google's time ranges, from
+the request history Cloud Monitoring serves as `serviceruntime.googleapis.com/api/*`), each API's
+page with its graphs, **Select Graphs** and **Disable API**, the Library with **Enable**, and
+Credentials.
 
 ## What is listed
 

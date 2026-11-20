@@ -26,6 +26,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/apikeys"
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
 	"github.com/cloudburrow/cloudburrow/internal/service/datatransfer"
+	"github.com/cloudburrow/cloudburrow/internal/service/monitoring"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
 	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
@@ -83,6 +84,9 @@ type consoleDeps struct {
 	// requestMetrics are the request counters, which APIs & Services
 	// counts each API's calls from (#1866).
 	requestMetrics *metrics.Registry
+	// requestHistory is their one-minute history per project, which the
+	// APIs & Services charts read over a time range (#1866).
+	requestHistory *monitoring.RequestBuiltin
 	// backupdr is the Backup and DR Service (#1433), nil unless enabled.
 	backupdr *backupdr.Server
 	// privateCA is Certificate Authority Service (#1834), nil unless enabled.
@@ -354,7 +358,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	}
 	// APIs & Services (#1352): always served, as projects are.
 	if d.serviceUsage != nil {
-		providers = append(providers, serviceUsageProvider{api: d.serviceUsage, metrics: d.requestMetrics, apiKeys: d.apiKeys}, serviceUsageOperationsProvider{api: d.serviceUsage})
+		providers = append(providers, serviceUsageProvider{api: d.serviceUsage, metrics: d.requestMetrics, history: d.requestHistory, apiKeys: d.apiKeys}, serviceUsageOperationsProvider{api: d.serviceUsage})
 	}
 	// Backup and DR (#1433), in process, restoring through Cloud SQL.
 	if enabled[config.ServiceBackupDR] && d.backupdr != nil {

@@ -18338,61 +18338,76 @@ const apisNumber = (n) => Number(n || 0).toLocaleString("en-US");
 const apisErrors = (t) => !t.measured ? "Not counted" : t.requests ? `${((t.errors / t.requests) * 100).toFixed(1)}%` : "0%";
 const apisLatency = (v, t) => !t.measured ? "Not counted" : v === null || v === undefined ? "—" : `${v.toFixed(1)} ms`;
 
-// apisSeries adds up the request charts' series of the given services,
-// sample by sample: calls per second, the share that failed, and the
-// call-weighted median latency.
-function apisSeries(data, names) {
-  const byAt = new Map();
-  for (const svc of (data && data.services) || []) {
-    if (!names.has(svc.service)) continue;
-    for (const p of svc.points || []) {
-      const at = p.at;
-      const acc = byAt.get(at) || { at, rate: 0, failed: 0, weighted: 0, weight: 0 };
-      acc.rate += p.rate;
-      if (p.error_rate !== null && p.error_rate !== undefined) acc.failed += p.rate * p.error_rate;
-      if (p.p50_ms !== null && p.p50_ms !== undefined && p.rate > 0) { acc.weighted += p.rate * p.p50_ms; acc.weight += p.rate; }
-      byAt.set(at, acc);
-    }
-  }
-  return [...byAt.values()].sort((a, b) => (a.at < b.at ? -1 : 1)).map((a) => ({
-    at: a.at, rate: a.rate,
-    errorPct: a.rate > 0 ? (a.failed / a.rate) * 100 : null,
-    p50: a.weight > 0 ? a.weighted / a.weight : null,
-  }));
+// The charts are the server's (consoleapicharts.go): the project's calls
+// over the selected time range, from the instance's one-minute request
+// history, as Google draws them from serviceruntime.googleapis.com/api.
+let apisRange = "PT1H";
+
+// apisRangeBar is Google's row of time ranges above the charts.
+function apisRangeBar(data, onChange) {
+  const ranges = (data && data.ranges) || [];
+  const current = (data && data.range) || apisRange;
+  const bar = el("div", { class: "apis-ranges", role: "group", id: "apis-range", "aria-label": "Time range" },
+    ...ranges.map((r) => el("button", { type: "button", class: "chip" + (r.ID === current ? " is-selected" : ""),
+      "data-range": r.ID, "aria-pressed": String(r.ID === current), text: r.Label,
+      onclick: () => { apisRange = r.ID; onChange(); } })));
+  return bar;
 }
 
-async function apisCharts(names, idPrefix) {
-  let data = null;
-  try { data = await api("/api/metrics/requests"); } catch (err) {
-    return el("p", { class: "unavailable", id: `${idPrefix}-charts`, text: `Request charts unavailable: ${err.message}` });
-  }
-  if (!names.size) {
+// apisChartCard draws one of the server's charts, every series on one axis.
+function apisChartCard(chart, idPrefix) {
+  const rows = (chart.series || []).map((s) => ({ name: s.name,
+    fields: { points: JSON.stringify((s.points || []).map((p) => ({ at: p.at, value: p.value === null ? null : p.value }))) } }));
+  return el("div", { class: "chart-card apis-chart", id: `${idPrefix}-chart-${chart.id}`, "data-chart": chart.id },
+    el("div", { class: "chart-head" }, el("h3", { text: chart.title }), el("span", { class: "chart-now", text: chart.unit || "" })),
+    explorerChart(rows, chart.title));
+}
+
+// apisChartsBlock is the charts, or why there are none.
+function apisChartsBlock(data, idPrefix, opts = {}) {
+  if (opts.counted === false) {
     return el("p", { class: "unavailable", id: `${idPrefix}-charts`, text: "Not available locally: this API's calls are not counted by this instance." });
   }
-  const pts = apisSeries(data, names);
-  const last = pts.length ? pts[pts.length - 1] : null;
-  return el("div", { class: "charts", id: `${idPrefix}-charts` },
-    chartCard("Traffic", pts.map((p) => ({ value: p.rate })), {
-      label: "Requests per second", current: last ? `${last.rate.toFixed(2)}/s` : "",
-      foot: "Requests per second, every project on this instance",
-    }),
-    chartCard("Errors", pts.map((p) => ({ value: p.errorPct })), {
-      label: "Errors as a percentage of requests", max: 100,
-      current: last && last.errorPct !== null ? `${last.errorPct.toFixed(1)}%` : "",
-      foot: "Percent of requests that failed (any code but OK, or HTTP 4xx and 5xx)",
-    }),
-    chartCard("Median latency", pts.map((p) => ({ value: p.p50 })), {
-      label: "Median latency in milliseconds",
-      current: last && last.p50 !== null ? `${last.p50.toFixed(1)} ms` : "",
-      foot: "Median estimated from the latency histogram",
+  if (!data.charts) {
+    return el("p", { class: "unavailable", id: `${idPrefix}-charts`,
+      text: "Not available locally: this instance keeps no request history, so there are no charts." });
+  }
+  const charts = data.charts.filter((c) => !opts.only || opts.only.includes(c.id));
+  const wrap = el("div", { class: "charts apis-charts", id: `${idPrefix}-charts` });
+  if (!opts.select) {
+    setChildren(wrap, ...charts.map((c) => apisChartCard(c, idPrefix)));
+    return wrap;
+  }
+  // Select Graphs: the four Google shows by default, and the others it
+  // offers, each a checkbox; the choice holds until the page is left.
+  const chosen = opts.chosen;
+  const draw = () => setChildren(wrap, ...charts.filter((c) => chosen.has(c.id)).map((c) => apisChartCard(c, idPrefix)));
+  // A disclosure button rather than <details>, so the closed list's
+  // checkboxes are out of the Tab order (as playgroundDisclosure).
+  const list = el("fieldset", { id: `${idPrefix}-select-graphs-list` },
+    el("legend", { class: "sr-only", text: "Graphs to show" }),
+    ...charts.map((c) => {
+      const box = el("input", { type: "checkbox", id: `${idPrefix}-graph-${c.id}`, value: c.id, checked: chosen.has(c.id) });
+      box.addEventListener("change", () => { if (box.checked) chosen.add(c.id); else chosen.delete(c.id); draw(); });
+      return el("label", { class: "apis-graph-option", for: `${idPrefix}-graph-${c.id}` }, box, el("span", { text: " " + c.title }));
     }));
+  list.hidden = true;
+  const toggle = el("button", { type: "button", class: "header-button", id: `${idPrefix}-select-graphs`, "aria-expanded": "false",
+    "aria-controls": `${idPrefix}-select-graphs-list`, text: "Select Graphs" });
+  toggle.addEventListener("click", () => {
+    list.hidden = !list.hidden;
+    toggle.setAttribute("aria-expanded", String(!list.hidden));
+  });
+  const menu = el("div", { class: "apis-select-graphs" }, toggle, list);
+  draw();
+  return el("div", {}, menu, wrap);
 }
 
 function apisDisable(name, title, project, after) {
   mrForm({
     id: "api-disable", title: `Disable ${title}?`, label: "Disable", destructive: true, fields: [],
-    note: `${name} is recorded as disabled for project ${project}: Service Usage, gcloud and Terraform report it DISABLED. ` +
-      "Re-enable it from the Library.",
+    note: `Calls to ${name} in project ${project} fail with SERVICE_DISABLED, as on Google, until it is enabled again. ` +
+      "Service Usage, gcloud and Terraform report it DISABLED. Re-enable it from the Library.",
     submit: async () => {
       const op = recordOperation(`Disable ${name} on ${project}`);
       try { await apisCall("disable", { service: name }); op.succeeded(""); } catch (err) { op.failed(err.message); throw err; }
@@ -18430,13 +18445,14 @@ function renderAPIsDashboard(view) {
   };
   filter.addEventListener("input", draw);
   const charts = el("div", { id: "apis-dashboard-charts-slot" });
+  const banner = el("div", { id: "apis-counters-note" });
   const reload = async () => {
     try {
-      const data = await apisCall("apis");
+      const data = await apisCall("apis", { range: apisRange });
       list = data.apis || [];
       draw();
-      const names = new Set(list.filter((a) => a.state === "ENABLED" && a.metricsService).map((a) => a.metricsService));
-      setChildren(charts, await apisCharts(names, "apis-dashboard"));
+      setChildren(banner, noteBanner(data.countersNote || ""));
+      setChildren(charts, apisRangeBar(data, reload), apisChartsBlock(data, "apis-dashboard"));
     } catch (err) {
       setChildren(body, errorState("Could not list the project's APIs", err.message, reload));
     }
@@ -18444,12 +18460,17 @@ function renderAPIsDashboard(view) {
   const enable = el("a", { class: "header-button primary", id: "apis-enable", href: "/apis/library" + scopeSearch(), html: ICON_ADD },
     el("span", { text: "Enable APIs and services" }));
   setChildren(view, pageHeader("APIs & Services", "", { actions: [enable, refreshButton(() => reload())] }),
-    noteBanner(apiCountersNote), charts, el("div", { class: "filter-bar" }, filter), body);
+    banner, charts, el("div", { class: "filter-bar" }, filter), body);
   reload();
 }
 
-const apiCountersNote = "Requests, errors and latency are this instance's own request counters (/metrics), " +
-  "for every project together: CloudBurrow does not keep them per project.";
+// apisGraphs is the Select Graphs choice for an API, kept while its page
+// is redrawn (a new time range, Enable): Google's defaults at first.
+const apisChosenGraphs = new Map();
+function apisGraphs(name, charts) {
+  if (!apisChosenGraphs.has(name)) apisChosenGraphs.set(name, new Set((charts || []).filter((c) => c.default).map((c) => c.id)));
+  return apisChosenGraphs.get(name);
+}
 
 const API_TABS = [["overview", "Overview"], ["metrics", "Metrics"], ["quotas", "Quotas & System Limits"], ["credentials", "Credentials"]];
 
@@ -18459,7 +18480,7 @@ async function renderAPIPage(view, name, tab) {
   if (!API_TABS.some(([id]) => id === tab)) tab = "overview";
   setChildren(view, pageHeader("API/Service details", "", { back: "/apis" + scopeSearch() }), loadingState(4, { what: name }));
   let data;
-  try { data = await apisCall("api", { service: name }); } catch (err) {
+  try { data = await apisCall("api", { service: name, range: apisRange }); } catch (err) {
     setChildren(view, pageHeader("API/Service details", "", { back: "/apis" + scopeSearch() }), errorState(`Could not read ${name}`, err.message));
     return;
   }
@@ -18484,12 +18505,15 @@ async function renderAPIPage(view, name, tab) {
       dl([["Service name", a.name], ["Type", "Public API"], ["Status", a.state === "ENABLED" ? "Enabled" : a.state === "DISABLED" ? "Disabled" : "Not available locally"],
         ["Category", a.category || ""], ["Served by", "This CloudBurrow instance"]]),
       a.unavailable ? el("p", { class: "unavailable", text: `Not available locally: ${a.unavailable}.` }) : null,
-      el("h2", { text: "Traffic" }), await apisCharts(new Set(a.metricsService ? [a.metricsService] : []), "api-overview"));
+      el("h2", { text: "Traffic" }), apisRangeBar(data, redraw),
+      apisChartsBlock(data, "api-overview", { only: ["traffic-by-code"], counted: !!a.metricsService }));
   } else if (tab === "metrics") {
     const methods = data.methods || [];
     setChildren(panel,
       a.sharedWith && a.sharedWith.length ? el("p", { class: "form-help", text: `Counted together with ${a.sharedWith.join(", ")}, which the same local server serves.` }) : null,
-      await apisCharts(new Set(a.metricsService ? [a.metricsService] : []), "api-metrics"),
+      noteBanner(data.countersNote || ""), apisRangeBar(data, redraw),
+      apisChartsBlock(data, "api-metrics", { counted: !!a.metricsService, select: true,
+        chosen: apisGraphs(name, data.charts) }),
       el("h2", { text: "Methods" }),
       !a.totals.measured ? el("p", { class: "unavailable", id: "api-methods", text: "Not available locally: this API's calls are not counted by this instance." })
         : el("div", { class: "table-wrap" }, el("table", { class: "table", id: "api-methods" },
