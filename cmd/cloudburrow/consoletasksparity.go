@@ -17,10 +17,13 @@ import (
 	"time"
 
 	"cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
+	"cloud.google.com/go/monitoring/apiv3/v2/monitoringpb"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/locations"
+	"github.com/cloudburrow/cloudburrow/internal/service/monitoring"
 	"github.com/cloudburrow/cloudburrow/internal/service/tasks"
 )
 
@@ -308,7 +311,8 @@ func (p tasksProvider) actOnQueue(ctx context.Context, project, name, action str
 // ratio is Edit queue's.
 func tasksLoggingAction(q tasks.Queue) console.Action {
 	if q.Logging != nil && q.Logging.SamplingRatio > 0 {
-		return console.Action{ID: tasksDisableLogs, Label: "Disable logs", Submit: "Disable",
+		// "Click the ellipsis icon > Disable logs": in the tab's menu.
+		return console.Action{ID: tasksDisableLogs, Label: "Disable logs", Submit: "Disable", Menu: true,
 			ConfirmStyle: console.DeleteConfirmClick,
 			Confirm:      "The queue's dispatch attempts stop being written to Cloud Logging. Entries already written are kept."}
 	}
@@ -343,22 +347,119 @@ func tasksLogsSection(q tasks.Queue) console.Section {
 		Actions: []console.Action{tasksLoggingAction(q)}}
 }
 
-// tasksMetricsSection is the Metrics tab: Google's queue metrics, from
-// https://docs.cloud.google.com/tasks/docs/monitor (read 2026-11-20): API
-// requests, Queue depth, Task attempt count and Task attempt delays. They
-// are Cloud Monitoring time series, which no local service provides; the
-// queue's depth now is read from its tasks.
-func tasksMetricsSection(depth int) console.Section {
-	na := "Not available locally (Cloud Monitoring)"
-	return console.Section{ID: "metrics", Label: "Metrics", Kind: console.KindProperties,
-		Note: "A queue's metrics are Cloud Monitoring time series, and this instance does not run " +
-			"Cloud Monitoring, so no chart is drawn. Queue depth is the number of tasks in the queue now.",
-		Groups: []console.PropertyGroup{{Heading: "Metrics", Properties: []console.Property{
-			{Label: "API requests", Value: na},
-			{Label: "Queue depth", Value: strconv.Itoa(depth) + " now; " + na + " over time"},
-			{Label: "Task attempt count", Value: na},
-			{Label: "Task attempt delays", Value: na},
-		}}}}
+// tasksMetricCharts are the Metrics tab's charts, as Google's queue page
+// draws Cloud Monitoring's four Cloud Tasks metrics
+// (https://docs.cloud.google.com/tasks/docs/monitor and
+// https://docs.cloud.google.com/monitoring/api/metrics_gcp_c, read
+// 2026-11-20), each with its unit.
+var tasksMetricCharts = []struct {
+	label, metricType, unit string
+}{
+	{"API requests", monitoring.TasksAPIRequests, "requests per minute"},
+	{"Queue depth", monitoring.TasksDepth, "tasks"},
+	{"Task attempt count", monitoring.TasksAttemptCount, "attempts per minute"},
+	{"Task attempt delays", monitoring.TasksAttemptDelay, "ms, mean per minute"},
+}
+
+// tasksMetricsWindow is the charts' span, in one-minute points.
+const tasksMetricsWindow = 60
+
+// tasksMetricsSection is the Metrics tab: the queue's four metrics over
+// the last hour, read with ListTimeSeries from the instance's Cloud
+// Monitoring, which records them from this queue's calls and dispatch
+// (#2064). One point a minute: counts summed, the depth the minute's last
+// reading, the delay the mean of the minute's attempts.
+func (p tasksProvider) tasksMetricsSection(ctx context.Context, queue string) console.Section {
+	sec := console.Section{ID: "metrics", Label: "Metrics", Kind: console.KindChart,
+		Note: "Cloud Monitoring's cloudtasks.googleapis.com metrics for this queue over the last hour, " +
+			"sampled every 60 seconds; Metrics Explorer reads the same time series."}
+	a, err := p.metrics.server()
+	if err != nil {
+		sec.Unavailable = "Cloud Monitoring is not served by this instance, so the queue's metrics are not recorded. " +
+			"Start the instance with monitoring to chart them."
+		return sec
+	}
+	parts := strings.Split(queue, "/")
+	if len(parts) != 6 {
+		sec.Unavailable = "not a queue name: " + queue
+		return sec
+	}
+	now := time.Now().UTC()
+	end := now.Truncate(time.Minute).Add(time.Minute)
+	start := end.Add(-tasksMetricsWindow * time.Minute)
+	var notes []string
+	for _, c := range tasksMetricCharts {
+		filter := fmt.Sprintf(`metric.type = %q AND resource.type = "cloud_tasks_queue" AND resource.labels.queue_id = %q AND resource.labels.location = %q`,
+			c.metricType, parts[5], parts[3])
+		resp, err := a.ListTimeSeries(ctx, &monitoringpb.ListTimeSeriesRequest{Name: "projects/" + parts[1], Filter: filter,
+			Interval: &monitoringpb.TimeInterval{StartTime: timestamppb.New(start), EndTime: timestamppb.New(now)},
+			View:     monitoringpb.ListTimeSeriesRequest_FULL, PageSize: 1000})
+		if err != nil {
+			notes = append(notes, c.label+": "+err.Error())
+			continue
+		}
+		sec.Series = append(sec.Series, tasksChartSeries(c.label, c.unit, c.metricType == monitoring.TasksDepth, resp.GetTimeSeries(), end))
+	}
+	if len(notes) > 0 {
+		sec.Note += " " + strings.Join(notes, "; ")
+	}
+	return sec
+}
+
+// tasksChartSeries is one chart: a point a minute for the window ending at
+// end, nil where nothing was recorded. A gauge's minute is its last
+// reading summed over the series; a count's the sum of its deltas; a
+// distribution's the mean of its values.
+func tasksChartSeries(label, unit string, isGauge bool, series []*monitoringpb.TimeSeries, end time.Time) console.ChartSeries {
+	type slot struct {
+		sum, n float64
+		at     time.Time
+		seen   bool
+	}
+	slots := make([]slot, tasksMetricsWindow)
+	start := end.Add(-tasksMetricsWindow * time.Minute)
+	for _, ts := range series {
+		last := map[int]time.Time{}
+		gaugeAt := map[int]float64{}
+		for _, pt := range ts.GetPoints() {
+			at := pt.GetInterval().GetEndTime().AsTime()
+			i := int(at.Sub(start) / time.Minute)
+			if i < 0 || i >= tasksMetricsWindow {
+				continue
+			}
+			s := &slots[i]
+			s.seen = true
+			switch v := pt.GetValue(); {
+			case v.GetDistributionValue() != nil:
+				d := v.GetDistributionValue()
+				s.sum += d.GetMean() * float64(d.GetCount())
+				s.n += float64(d.GetCount())
+			case isGauge:
+				if at.After(last[i]) || last[i].IsZero() {
+					last[i] = at
+					gaugeAt[i] = float64(v.GetInt64Value())
+				}
+			default:
+				s.sum += float64(v.GetInt64Value())
+			}
+		}
+		for i, g := range gaugeAt {
+			slots[i].sum += g
+		}
+	}
+	out := console.ChartSeries{Label: label, Unit: unit}
+	for i, s := range slots {
+		pt := console.ChartPoint{At: start.Add(time.Duration(i+1) * time.Minute).Format(time.RFC3339)}
+		if s.seen {
+			v := s.sum
+			if s.n > 0 {
+				v = s.sum / s.n
+			}
+			pt.Value = &v
+		}
+		out.Points = append(out.Points, pt)
+	}
+	return out
 }
 
 // tasksCreateQueueFields is Create queue: Queue name, the Region list, then

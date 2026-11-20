@@ -29,6 +29,7 @@
           "test/compat/tasks_test.go:65 TestTasksQueueLifecycle",
           "test/compat/taskshttptarget_test.go:33 TestTasksQueueHTTPTarget",
           "test/compat/taskslogging_test.go:35 TestTasksStackdriverLoggingConfig",
+          "test/compat/tasksmetrics_test.go:30 TestTasksQueueMetricsInCloudMonitoring",
           "test/compat/terraform_batch9_test.go:36 TestTerraformCloudTasksQueueIAM",
           "test/compat/terraform_tasks_secrets_test.go:24 TestTerraformTasksQueueHTTPTarget"
         ]
@@ -44,6 +45,7 @@
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
           "test/compat/iamenforcement1879_test.go:282 TestIAMEnforcementTasks",
           "test/compat/tasks_test.go:146 TestTasksTaskLifecycle",
+          "test/compat/tasksmetrics_test.go:30 TestTasksQueueMetricsInCloudMonitoring",
           "test/compat/tasktokens_test.go:115 TestTasksOIDCAndOAuthTokens"
         ]
       },
@@ -17875,7 +17877,8 @@
         "tests": [
           "test/compat/monitoring_test.go:242 TestMonitoringLogBasedMetrics",
           "test/compat/monitoring_test.go:365 TestTerraformMonitoringMetricDescriptor",
-          "test/compat/monitoring_test.go:88 TestMonitoringCustomMetrics"
+          "test/compat/monitoring_test.go:88 TestMonitoringCustomMetrics",
+          "test/compat/tasksmetrics_test.go:30 TestTasksQueueMetricsInCloudMonitoring"
         ]
       },
       {
@@ -17906,7 +17909,8 @@
           "test/compat/monitoring_query_test.go:288 TestMonitoringSLOCompliance",
           "test/compat/monitoring_test.go:242 TestMonitoringLogBasedMetrics",
           "test/compat/monitoring_test.go:324 TestMonitoringRequestCounts",
-          "test/compat/monitoring_test.go:88 TestMonitoringCustomMetrics"
+          "test/compat/monitoring_test.go:88 TestMonitoringCustomMetrics",
+          "test/compat/tasksmetrics_test.go:30 TestTasksQueueMetricsInCloudMonitoring"
         ]
       },
       {

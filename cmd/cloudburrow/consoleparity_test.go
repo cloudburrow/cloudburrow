@@ -454,8 +454,8 @@ var parityRows = []parityRow{
 	// Cloud Tasks
 	{Resource: "Cloud Tasks queues", Service: "tasks",
 		Methods:  []string{"CloudTasks/CreateQueue", "CloudTasks/DeleteQueue", "CloudTasks/GetQueue", "CloudTasks/ListQueues", "CloudTasks/PauseQueue", "CloudTasks/ResumeQueue", "CloudTasks/PurgeQueue"},
-		Provider: "tasks", Offers: "Queues list (with a filter box in ListQueues' own syntax, #1255), queue detail with configuration, Create queue, Delete, Pause / Resume, Purge; the checked queues' Pause queue (its prompt's Pause), Resume queue, Purge queue (Purge) and Delete queue (the name typed, then Confirm), as Google's prompts (#1848)",
-		Tests: []string{"TestConsoleQueueActionsFollowState", "TestConsoleQueueListFilter", "TestNoDetailShowsABlankProperty", "TestRowMenuClosesOnEscapeAndGivesFocusBack", "TestTasksActionsConfirmAsGooglesPrompts", "TestTasksPromptsAndCheckedTasksAsGoogles"}},
+		Provider: "tasks", Offers: "Queues list (with a filter box in ListQueues' own syntax, #1255), queue detail with configuration, Create queue, Delete, Pause / Resume, Purge; the checked queues' Pause queue (its prompt's Pause), Resume queue, Purge queue (Purge) and Delete queue (the name typed, then Confirm), as Google's prompts (#1848); the queue's Metrics tab charts Cloud Monitoring's cloudtasks.googleapis.com metrics, and its Logs tab's Disable logs is in the tab's ellipsis menu (#2064)",
+		Tests: []string{"TestConsoleQueueActionsFollowState", "TestConsoleQueueListFilter", "TestNoDetailShowsABlankProperty", "TestRowMenuClosesOnEscapeAndGivesFocusBack", "TestTasksActionsConfirmAsGooglesPrompts", "TestTasksPromptsAndCheckedTasksAsGoogles", "TestTasksMetricsTabChartsCloudMonitoring", "TestTasksDisableLogsIsInTheTabsMenu", "TestTasksTabMenuAndMetricsAsGoogles"}},
 	{Resource: "Cloud Tasks tasks", Service: "tasks",
 		Methods:  []string{"CloudTasks/GetTask", "CloudTasks/ListTasks", "CloudTasks/DeleteTask"},
 		Provider: "tasks", Offers: "Tasks section on the queue page, task detail (request, headers redacted, body), Delete task; each task's checkbox and the Tasks tab's Delete task over the checked tasks, its prompt's Delete (#1848)",

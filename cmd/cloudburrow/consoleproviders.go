@@ -149,6 +149,9 @@ func (p pubsubProvider) List(ctx context.Context, project string) (console.Listi
 type tasksProvider struct {
 	svc    *tasksService
 	faults *admin.Faults
+	// metrics is the instance's Cloud Monitoring, for the Metrics tab's
+	// charts (#2064); its api is nil when Monitoring is not served.
+	metrics monitoringScreen
 }
 
 func (tasksProvider) ID() string    { return "tasks" }
@@ -226,7 +229,7 @@ func (p tasksProvider) ListFiltered(ctx context.Context, project, filter string)
 // A queue's tasks were invisible: the store held them, the gRPC service
 // served them, and the console offered no way to look. Depth on the list
 // answers "how much"; this answers "what, and when".
-func (p tasksProvider) Detail(_ context.Context, project string, path []string) (console.Detail, error) {
+func (p tasksProvider) Detail(ctx context.Context, project string, path []string) (console.Detail, error) {
 	if len(path) == 2 {
 		return p.taskDetail(path[0], path[1])
 	}
@@ -311,11 +314,11 @@ func (p tasksProvider) Detail(_ context.Context, project string, path []string) 
 	return console.Detail{
 		Summary: summary,
 		// Google's queue page: Tasks, Metrics, Logs, Configuration and
-		// Permissions (#1848). Metrics are Cloud Monitoring's, not run here;
+		// Permissions (#1848). Metrics are Cloud Monitoring's charts (#2064);
 		// the Logs tab is where the queue's logging is turned on or off.
 		Sections: []console.Section{
 			{ID: "tasks", Label: "Tasks", Listing: listing},
-			tasksMetricsSection(len(tasks)),
+			p.tasksMetricsSection(ctx, name),
 			tasksLogsSection(queue),
 			config,
 			{ID: "permissions", Kind: console.KindPermissions},

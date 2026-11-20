@@ -1401,6 +1401,12 @@ type Action struct {
 	// it, not as a button of its own: a property's ActionText link (Upgrade
 	// beside an edition) or an info panel tab's Form (#1859).
 	Linked bool `json:"linked,omitempty"`
+	// Menu, on a Section's action, draws it in the ellipsis menu at the
+	// top of the tab instead of as a button there, as Google's Cloud Tasks
+	// Logs tab has "Click the ellipsis icon > Disable logs" (#2064). The
+	// menu is the row menus' own: Escape closes it and gives focus back to
+	// its trigger. Any provider's tab may use it.
+	Menu bool `json:"menu,omitempty"`
 }
 
 // PathActor is a provider with actions on the resources inside a resource.

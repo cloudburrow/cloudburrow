@@ -3980,12 +3980,20 @@ async function renderDetail(view, route, resourcePath) {
       : null;
     // A tab's own actions, at the top of the tab rather than beside the
     // page title: Google's Lifecycle tab has Add a rule (#1843).
+    // An action with Menu goes in the tab's ellipsis menu instead, as
+    // Google's Cloud Tasks Logs tab has Disable logs (#2064), drawn and
+    // driven by the keyboard as a row's menu is.
     if ((section.actions || []).length) {
+      const run = (a) => () => runAction(route, segments, a, reload, NO_ROW, data.title || null);
+      const inMenu = section.actions.filter((a) => a.menu);
       const bar = el("div", { class: "action-bar section-actions", id: `section-actions-${section.id}` },
-        ...section.actions.map((a) => el("button", {
+        ...section.actions.filter((a) => !a.menu).map((a) => el("button", {
           type: "button", class: "secondary" + (a.destructive ? " danger" : ""), text: a.label,
-          onclick: () => runAction(route, segments, a, reload, NO_ROW, data.title || null),
-        })));
+          disabled: a.unavailable ? "disabled" : null, title: a.unavailable || null,
+          onclick: run(a),
+        })),
+        inMenu.length ? overflowMenu(inMenu.map((a) => ({ label: a.label, destructive: a.destructive,
+          unavailable: a.unavailable, run: run(a) })), `the ${section.label} tab`) : null);
       note = note ? el("div", {}, bar, note) : bar;
     }
     // Section.Edit (#1864): a form drawn in the tab itself, as Google's
