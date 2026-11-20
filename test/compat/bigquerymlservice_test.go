@@ -319,8 +319,10 @@ func TestBigQueryMLTranscribe(t *testing.T) {
 	sc := storageClient(t, h)
 	// Whisper transcriptions of every row with local whisper: more than h.Context()'s minute
 	// on a 4-vCPU runner (main run 44709318191 timed out at 60s).
+	// Ended by t.Cleanup, registered first so it runs last, after the
+	// test's own cleanups that still use ctx.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-	defer cancel()
+	t.Cleanup(cancel)
 	wav, err := os.ReadFile("../../internal/speech/testdata/jfk.wav")
 	if err != nil {
 		t.Fatal(err)

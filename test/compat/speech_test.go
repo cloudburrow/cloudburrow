@@ -82,8 +82,10 @@ func TestSpeechRecognizers(t *testing.T) {
 	g, r := speechClients(t, h)
 	// Several whisper recognitions with local whisper: more than h.Context()'s minute
 	// on a 4-vCPU runner (main run 44709318191 timed out at 60s).
+	// Ended by t.Cleanup, registered first so it runs last, after the
+	// test's own cleanups that still use ctx.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-	defer cancel()
+	t.Cleanup(cancel)
 	parent := "projects/" + h.Project() + "/locations/us"
 	wav, err := os.ReadFile("../../internal/speech/testdata/jfk.wav")
 	if err != nil {
