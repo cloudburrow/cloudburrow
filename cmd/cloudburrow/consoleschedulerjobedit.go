@@ -152,8 +152,10 @@ func schedulerEditForm(j scheduler.Job) *console.EditForm {
 			Help: "How long one attempt may take, 15s to 30m. " + schedulerDurationHelp})
 	}
 	return &console.EditForm{
-		Label:  "Edit job",
-		Steps:  "continue",
+		Label: "Edit job",
+		Steps: "continue",
+		// A page, as Create job's is (#2062).
+		Page:   true,
 		Fields: fields,
 		Note: "Saved through UpdateJob; the next run follows the new schedule. The name, region and target type " +
 			"cannot be changed, and the state changes with Pause and Resume.",

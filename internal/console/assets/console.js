@@ -3847,6 +3847,11 @@ async function renderDetail(view, route, resourcePath) {
       errorState(`${name} unavailable`, data.unavailable, () => renderDetail(view, route, segments)));
   }
 
+  // The resource's Edit page (EditForm.Page, #2062), drawn in place of
+  // its tabs while the address has ?edit=1.
+  if (new URLSearchParams(location.search).get("edit") === "1" && data.edit && data.edit.page) {
+    return renderEditPage(view, route, segments, data.edit);
+  }
   if ((data.trail || []).length) drawTrail(data.trail);
   // A page addressed by something no reader recognises — a Datastore
   // entity's encoded key (#875) — says what it is in its heading.
@@ -5503,6 +5508,9 @@ async function editFromRow(route, segments, onDone) {
 // differently from a create form would be a second form implementation to keep
 // in step with the first.
 function openEditForm(route, segments, spec, onDone) {
+  // An edit that is a page (EditForm.Page, #2062): Google's Edit job is
+  // Create job's page, so it opens at the resource's address with ?edit=1.
+  if (spec.page) return openEditPage(route, segments);
   const name = segments[segments.length - 1];
   const fields = buildCreateForm(spec);
   // Google's Edit job follows Create job's steps (EditForm.Steps, #1849).
@@ -5559,6 +5567,85 @@ function openEditForm(route, segments, spec, onDone) {
     ...(steps ? steps.nodes : fields.nodes),
     el("div", { class: "modal-actions" }, cancel, primary)));
   fields.focusFirst();
+}
+
+// openEditPage opens a resource's Edit page (EditForm.Page, #2062): its
+// detail address with ?edit=1, and ?return= naming the list it was opened
+// from, where Save and Cancel go back to.
+function openEditPage(route, segments) {
+  const url = new URL(detailHref(route, segments), location.origin);
+  url.searchParams.set("edit", "1");
+  if (location.pathname === route.path) url.searchParams.set("return", location.pathname + location.search);
+  navigate(url.pathname + url.search);
+}
+
+// renderEditPage draws an EditForm as a full page, as the create page is:
+// a back arrow, the title over the resource's name, the form's steps (with
+// Continue where EditForm.Steps says), and Save then Cancel at the bottom.
+// The change is sent as the dialog's is, one PATCH of
+// /api/resources/{service}; the API's refusal stays on the page.
+function renderEditPage(view, route, segments, spec) {
+  const name = segments[segments.length - 1];
+  const project = currentProject();
+  const given = new URLSearchParams(location.search);
+  const detail = new URL(location.pathname + location.search, location.origin);
+  detail.searchParams.delete("edit");
+  detail.searchParams.delete("return");
+  const returnTo = createReturn(given.get("return"));
+  const backHref = returnTo ? returnTo.href : detail.pathname + detail.search;
+  const title = spec.title || spec.label || "Edit";
+  const header = pageHeader(title, project ? `Project ${project}` : "All projects",
+    { back: backHref, backLabel: returnTo ? `Back to ${returnTo.title}` : `Back to ${name}` });
+  const list = new URL(route.path, location.origin);
+  if (project) list.searchParams.set("project", project);
+  carryScope(list, route.service);
+  header.prepend(el("nav", { class: "breadcrumb", "aria-label": "Breadcrumb" },
+    el("a", { href: list.pathname + list.search, text: route.crumb || route.title }),
+    el("span", { "aria-hidden": "true", text: "/" }),
+    el("a", { href: detail.pathname + detail.search, text: name }),
+    el("span", { "aria-hidden": "true", text: "/" }),
+    el("span", { text: title })));
+  header.querySelector(".page-title-row").after(el("p", { class: "resource-name", text: name }));
+
+  const fields = buildCreateForm(spec);
+  const steps = spec.steps
+    ? createSteps(fields.nodes, spec.steps === "next" ? "Next" : "Continue")
+    : { nodes: fields.nodes, revealInvalid() {} };
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  const primary = el("button", { type: "submit", class: "primary", text: spec.submit || spec.label || "Save" });
+  const cancel = el("a", { class: "button secondary", href: backHref, text: "Cancel" });
+  let submitting = false;
+  const submit = async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    if (submitting) return;
+    if (!fields.validate()) { steps.revealInvalid(); return; }
+    submitting = true;
+    setBusy(primary, true);
+    const op = recordOperation(`Update ${name}`);
+    try {
+      const res = await send(`/api/resources/${route.service}?project=${encodeURIComponent(project)}`,
+        "PATCH", { Path: segments, Values: fields.values() });
+      op.succeeded("", res.operation);
+      notify(`Updated ${name}`);
+      announce(`Updated ${name}`);
+      navigate(backHref);
+    } catch (err) {
+      op.failed(err.message, err.operation);
+      error.textContent = err.message;
+      error.hidden = false;
+      submitting = false;
+      setBusy(primary, false);
+    }
+  };
+  setChildren(view, header,
+    el("form", { class: "create-page", novalidate: true, onsubmit: submit },
+      spec.note ? el("p", { class: "form-help", text: spec.note }) : null,
+      error,
+      ...steps.nodes,
+      el("div", { class: "form-actions" }, primary, cancel)));
+  fields.focusFirst();
+  announce(`${title} form`);
 }
 
 // inlineEditForm is a section's own edit form (Section.Edit, #1864), sent

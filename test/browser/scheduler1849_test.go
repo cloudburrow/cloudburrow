@@ -19,9 +19,9 @@ import (
 // AttemptStarted and AttemptFinished are on the job's Logs tab, and View
 // logs opens the Logs Explorer with the job's query, listing them. Edit job
 // is Create job's three steps, Define the schedule, Configure the execution
-// and Configure optional settings, each with Continue; a new Frequency
+// and Configure optional settings, each with Continue, on a page (#2062); a new Frequency
 // saved through it is what the console API then reads. The list, the job's
-// Logs tab and the Edit job dialog pass the WCAG 2.1 AA audit.
+// Logs tab and the Edit job page pass the WCAG 2.1 AA audit.
 func TestSchedulerLogsAndEditStepsThroughThePage(t *testing.T) {
 	needService(t, "scheduler")
 	p := open(t)
@@ -73,21 +73,28 @@ func TestSchedulerLogsAndEditStepsThroughThePage(t *testing.T) {
 	}
 	p.waitFor(`document.querySelector("#view").textContent.includes("AttemptFinished")`)
 
-	// Edit job: Create job's three steps.
+	// Edit job: Create job's three steps, on a page of its own (#2062), as
+	// Create job is ("on the Create a job page").
 	p.navigate("/scheduler/jobs/" + url.PathEscape(job) + "?project=" + project)
 	p.waitFor(settled)
 	p.clickText("#view .page-actions button", "Edit job")
-	p.waitFor(`document.querySelector(".modal.is-open #f-schedule") !== null`)
+	p.waitFor(`new URLSearchParams(location.search).get("edit") === "1" && document.querySelector("#view form.create-page #f-schedule") !== null`)
 	var form struct {
-		Steps, Continue []string
-		DeadlineStep    string
+		Steps, Continue    []string
+		DeadlineStep, Head string
+		Modal              bool
 	}
-	p.eval(`(() => { const m = document.querySelector(".modal.is-open");
+	p.eval(`(() => { const m = document.querySelector("#view form.create-page");
 		const dl = m.querySelector("#f-attemptDeadline");
 		const step = dl && dl.closest(".create-step");
 		return { Steps: [...m.querySelectorAll(".create-step-title")].map((n) => n.textContent),
 			Continue: [...m.querySelectorAll(".create-step-continue button")].map((b) => b.textContent.trim()),
-			DeadlineStep: step ? step.querySelector(".create-step-title").textContent : "" }; })()`, &form)
+			DeadlineStep: step ? step.querySelector(".create-step-title").textContent : "",
+			Head: document.querySelector("#view h1").textContent,
+			Modal: document.querySelector(".modal") !== null }; })()`, &form)
+	if form.Modal || form.Head != "Edit job" {
+		t.Errorf("Edit job opened a dialog (%v) or a page headed %q; want the Edit job page", form.Modal, form.Head)
+	}
 	if strings.Join(form.Steps, "|") != "Define the schedule|Configure the execution|Configure optional settings" {
 		t.Errorf("Edit job's steps are %v; want Create job's", form.Steps)
 	}
@@ -97,18 +104,21 @@ func TestSchedulerLogsAndEditStepsThroughThePage(t *testing.T) {
 	if form.DeadlineStep != "Configure optional settings" {
 		t.Errorf("the Attempt deadline config is in %q; want Configure optional settings", form.DeadlineStep)
 	}
+	editPage := "/scheduler/jobs/" + url.PathEscape(job) + "?project=" + project + "&edit=1"
 	auditScreens(t, []a11yPage{
 		{"Cloud Scheduler jobs list", list, rowReady(job), ""},
 		{"Cloud Scheduler job Logs tab", "/scheduler/jobs/" + url.PathEscape(job) + "?project=" + project + "&tab=logs",
 			settled + ` && [...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes("AttemptFinished"))`, ""},
-		{"Edit job dialog", "/scheduler/jobs/" + url.PathEscape(job) + "?project=" + project, settled,
-			`[...document.querySelectorAll("#view .page-actions button")].find((b) => b.textContent.trim() === "Edit job").click()`},
+		{"Edit job page", editPage, `document.querySelector("#view form.create-page #f-schedule") !== null`, ""},
 	})
 
-	p.clickText(".modal.is-open .create-step-continue button", "Continue")
-	p.setField(".modal.is-open #f-schedule", "15 6 * * *")
-	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
-	p.waitFor(`document.querySelector(".modal") === null`)
+	p.navigate(editPage)
+	p.waitFor(`document.querySelector("#view form.create-page #f-schedule") !== null`)
+	p.clickText("#view form.create-page .create-step-continue button", "Continue")
+	p.setField("#view form.create-page #f-schedule", "15 6 * * *")
+	p.run(chromedp.Click(chromedp.CSS(`#view form.create-page button[type="submit"]`)))
+	// Saved, the page goes back to the job's.
+	p.waitFor(`location.pathname.startsWith("/scheduler/jobs/") && !new URLSearchParams(location.search).has("edit") && document.querySelector("#view form.create-page") === null`)
 	code, body := consoleDo(t, http.MethodGet, "/api/detail/scheduler?project="+project+"&name="+url.QueryEscape(job), "")
 	var detail struct {
 		Edit struct {

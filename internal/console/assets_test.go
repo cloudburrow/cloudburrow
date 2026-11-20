@@ -2624,3 +2624,23 @@ func TestShowListAndViewOptionsDialog(t *testing.T) {
 		t.Error("Show versions is still a checkbox beside Google's Show list")
 	}
 }
+
+// An EditForm with Page opens as a page at the resource's address with
+// ?edit=1, the create page's layout, not a dialog (#2062): Google's Edit
+// job follows Create job's steps on the Create a job page.
+func TestAnEditFormWithPageIsAPage(t *testing.T) {
+	js := consoleAsset(t, "console.js")
+	for _, want := range []string{
+		"if (spec.page) return openEditPage(route, segments);",
+		`url.searchParams.set("edit", "1");`,
+		`new URLSearchParams(location.search).get("edit") === "1" && data.edit && data.edit.page`,
+		"return renderEditPage(view, route, segments, data.edit);",
+		`el("form", { class: "create-page", novalidate: true, onsubmit: submit }`,
+		`"PATCH", { Path: segments, Values: fields.values() });`,
+		`el("div", { class: "form-actions" }, primary, cancel)`,
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("console.js is missing %q", want)
+		}
+	}
+}

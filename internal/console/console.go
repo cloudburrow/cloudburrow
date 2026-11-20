@@ -904,6 +904,11 @@ type EditForm struct {
 	// follows Create job's steps (#1849): "continue" for Continue, "next"
 	// for Next.
 	Steps string `json:"steps,omitempty"`
+	// Page draws the form as a full page at the resource's address with
+	// ?edit=1, as the create page is, not a dialog: Google's Edit job is
+	// Create job's page ("Follow the steps ... when creating a job", and
+	// "on the Create a job page", #2062).
+	Page bool `json:"page,omitempty"`
 }
 
 // Property is one label/value pair on a resource's summary.

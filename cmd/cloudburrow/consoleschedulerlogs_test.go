@@ -130,6 +130,10 @@ func TestConsoleSchedulerLogsAndEditSteps(t *testing.T) {
 	if d.Edit == nil || d.Edit.Steps != "continue" {
 		t.Fatalf("Edit job = %+v; want Create job's steps", d.Edit)
 	}
+	// And Create job's page, not a dialog (#2062).
+	if !d.Edit.Page {
+		t.Error("Edit job is a dialog; want a page, as Create job is")
+	}
 	want := map[string]string{"name": schedulerStepSchedule, "schedule": schedulerStepSchedule, "timeZone": schedulerStepSchedule,
 		"targetType": schedulerStepExecution, "uri": schedulerStepExecution, "httpMethod": schedulerStepExecution,
 		"authHeader": schedulerStepExecution, "retryCount": schedulerStepOptional, "attemptDeadline": schedulerStepOptional}

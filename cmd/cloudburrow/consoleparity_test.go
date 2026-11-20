@@ -1190,7 +1190,7 @@ var parityRows = []parityRow{
 		Excluded: "a read of one listed location; the Create job form's Region shows every location ListLocations lists"},
 	{Resource: "Cloud Scheduler job edit", Service: "scheduler",
 		Methods:  []string{"CloudScheduler/UpdateJob"},
-		Provider: "scheduler", Offers: "Edit job on a job's page and in each row's menu, Create job's three steps (#1849): description, schedule, time zone, the target's fields, retry configuration and attempt deadline, with the name, region and target type fixed (#795)",
+		Provider: "scheduler", Offers: "Edit job on a job's page and in each row's menu, the Edit job page with Create job's three steps (#1849, #2062): description, schedule, time zone, the target's fields, retry configuration and attempt deadline, with the name, region and target type fixed (#795)",
 		Tests: []string{"TestConsoleSchedulerEditJob", "TestSchedulerEditJobThroughUpdateJob", "TestSchedulerEditJobThroughTheForm",
 			"TestConsoleSchedulerLogsAndEditSteps", "TestSchedulerLogsAndEditStepsThroughThePage"}},
 
