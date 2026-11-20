@@ -353,6 +353,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	computeSvc.register(coord)
 	gkeSvc.register(coord)
+	if gkeSvc != nil && runSvc != nil && runSvc.events != nil {
+		// Eventarc's GKE destinations (#1877) reach its clusters' services.
+		runSvc.events.gke = gkeSvc.clusterAccess
+	}
 	// The BigQuery Data Transfer Service (#1948), in process; its runs
 	// execute on the instance's BigQuery and notify its Pub/Sub.
 	dataTransfer := newDataTransferService(cfg)
@@ -614,6 +618,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			if slices.Contains(cfg.EnabledServices(), config.ServiceFirestore) {
 				// Firestore events (#1877), from Firestore's Listen.
 				go feedFirestoreEvents(func() *netfwd.Forwarder { return forwarderFor(forwarders, "firestore") },
+					runSvc.functions.Load, "us-central1")
+			}
+			if slices.Contains(cfg.EnabledServices(), config.ServiceDatastore) {
+				// Firestore in Datastore mode events (#1877), by polling.
+				go feedDatastoreEvents(func() *netfwd.Forwarder { return forwarderFor(forwarders, string(config.ServiceDatastore)) },
 					runSvc.functions.Load, "us-central1")
 			}
 		}

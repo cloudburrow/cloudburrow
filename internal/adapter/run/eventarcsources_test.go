@@ -262,7 +262,6 @@ func TestEventarcDeliversToAFunction(t *testing.T) {
 		t.Errorf("delivery = %d, %v; host %q path %q auth %q audience %q", code, err, host, path, auth, tokens.audience)
 	}
 	for _, d := range []*eventarcpb.Destination{
-		{Descriptor_: &eventarcpb.Destination_Gke{Gke: &eventarcpb.GKE{Cluster: "c", Service: "s"}}},
 		{Descriptor_: &eventarcpb.Destination_Workflow{Workflow: "projects/p/locations/us-central1/workflows/w"}},
 	} {
 		_, err := eaSpec(&eventarcpb.Trigger{EventFilters: []*eventarcpb.EventFilter{{Attribute: "type", Value: pubsubPublished}}, Destination: d}, "us-central1")

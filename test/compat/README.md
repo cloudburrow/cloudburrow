@@ -94,6 +94,8 @@ Set by `scripts/compat-env.sh` from a running instance:
 | `CLOUDBURROW_TEST_STORAGE_TRANSFER` | `CLOUDBURROW_STORAGETRANSFER_ENDPOINT` | the Storage Transfer Service API v1 (#1957), gcloud transfer and Terraform's `google_storage_transfer_job` |
 | `CLOUDBURROW_TEST_RUN_STORAGE`, `CLOUDBURROW_TEST_RUN_PUBSUB` | as `STORAGE` and `PUBSUB` | the Cloud Run revision tests; see below |
 | `CLOUDBURROW_TEST_RUN_FIRESTORE` | as `FIRESTORE` | the Eventarc Firestore triggers (#1877), on the run shard |
+| `CLOUDBURROW_TEST_RUN_DATASTORE` | as `DATASTORE` | the Eventarc Datastore mode triggers (#1877), on the run shard |
+| `CLOUDBURROW_TEST_RUN_GKE` | as `GKE` | the Eventarc GKE destination (#1877), on the run shard |
 | `CLOUDBURROW_TEST_RUN_KMS`, `CLOUDBURROW_TEST_RUN_SCHEDULER`, `CLOUDBURROW_TEST_RUN_LOGGING` | as `KMS`, `SCHEDULER` and `LOGGING` | the Cloud Run revision tests; see below |
 | `CLOUDBURROW_TEST_RUN_LOCALAI` | as `LOCALAI`: the local Vertex AI endpoint, which Cloud Run starts without a model | the run shard's Document AI and Speech-to-Text customer-managed key tests (#1972), with `RUN_KMS` |
 | `CLOUDBURROW_TEST_TASKS_LOGGING` | as `LOGGING` | the Cloud Tasks dispatch log (#1256), in the storage shard, so the Logging tests stay in served |

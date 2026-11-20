@@ -40,7 +40,7 @@ func sourcedEventType(typ string) bool {
 // eaContentType is the event data's content type: Firestore's is
 // protobuf, as Google's Firestore triggers document.
 func eaContentType(typ string) string {
-	if isFirestoreType(typ) {
+	if isFirestoreType(typ) || isDatastoreType(typ) {
 		return "application/protobuf"
 	}
 	return "application/json"

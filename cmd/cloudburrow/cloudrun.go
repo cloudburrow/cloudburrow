@@ -301,7 +301,7 @@ func (r *runService) Start(ctx context.Context) error {
 	runadapter.UseEventarcProtoSchemas(pubsubfront.ParseProtoSchema)
 	if r.events != nil {
 		functions.WithEvents(runadapter.Events{Transport: r.events.transport, Tokens: r.events.tokens,
-			PushBase: r.events.pushBase, Ingress: ingress})
+			PushBase: r.events.pushBase, Ingress: ingress, GKE: r.events.gke})
 	}
 	// The Docker Registry HTTP API v2 at /v2/ (#1383), before the JSON
 	// APIs: no Google API's path starts with v2/ on this port but Cloud

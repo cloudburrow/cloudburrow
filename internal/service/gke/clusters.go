@@ -680,3 +680,20 @@ func (s *Server) NodeImage(version string) string {
 	}
 	return s.opts.Versions[0].Image
 }
+
+// ClusterAccess is how this process reaches a RUNNING cluster's Kubernetes
+// API (projects/P/locations/L/clusters/C), for Eventarc's GKE destinations
+// (#1877); false when there is no such cluster or it is not running.
+func (s *Server) ClusterAccess(name string) (Access, bool) {
+	p, err := parseName(name, "", "", "", "", "", "cluster")
+	if err != nil || p.cluster == "" {
+		return Access{}, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e, err := s.lookupLocked(p)
+	if err != nil || e.cluster.GetStatus() != containerpb.Cluster_RUNNING || e.access.Endpoint == "" {
+		return Access{}, false
+	}
+	return e.access, true
+}

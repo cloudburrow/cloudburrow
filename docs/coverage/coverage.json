@@ -2230,8 +2230,10 @@
         "tests": [
           "test/compat/eventarc_test.go:42 TestEventarcTriggersToCloudRun",
           "test/compat/eventarcaudit_test.go:113 TestEventarcAuditLogTriggers",
+          "test/compat/eventarcdatastore_test.go:69 TestEventarcDatastoreTriggers",
           "test/compat/eventarcdest_test.go:33 TestEventarcDestinations",
           "test/compat/eventarcfirestore_test.go:67 TestEventarcFirestoreTriggers",
+          "test/compat/eventarcgke_test.go:41 TestEventarcGKEDestination",
           "test/compat/run1958_test.go:514 TestCallEventTriggeredFunctions"
         ]
       },
@@ -2282,7 +2284,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/eventarc_test.go:42 TestEventarcTriggersToCloudRun",
-          "test/compat/eventarcdest_test.go:33 TestEventarcDestinations"
+          "test/compat/eventarcdest_test.go:33 TestEventarcDestinations",
+          "test/compat/eventarcgke_test.go:41 TestEventarcGKEDestination"
         ]
       },
       {
@@ -2339,7 +2342,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/eventarc_test.go:42 TestEventarcTriggersToCloudRun",
-          "test/compat/eventarcaudit_test.go:113 TestEventarcAuditLogTriggers"
+          "test/compat/eventarcaudit_test.go:113 TestEventarcAuditLogTriggers",
+          "test/compat/eventarcdatastore_test.go:69 TestEventarcDatastoreTriggers"
         ]
       },
       {
@@ -2460,7 +2464,8 @@
         "method": "google.cloud.eventarc.v1.Eventarc/UpdateTrigger",
         "status": "Verified",
         "tests": [
-          "test/compat/eventarc_test.go:42 TestEventarcTriggersToCloudRun"
+          "test/compat/eventarc_test.go:42 TestEventarcTriggersToCloudRun",
+          "test/compat/eventarcgke_test.go:41 TestEventarcGKEDestination"
         ]
       }
     ]

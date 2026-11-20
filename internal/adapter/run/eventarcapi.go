@@ -129,10 +129,11 @@ func eaProviders(location string) []*eventarcpb.Provider {
 		"storage.googleapis.com": {storageEventPrefix + "finalized", storageEventPrefix + "deleted", storageEventPrefix + "archived", storageEventPrefix + "metadataUpdated"},
 	}
 	for typ := range eaTypeAttrs {
-		if isFirestoreType(typ) {
+		if isFirestoreType(typ) || isDatastoreType(typ) {
 			direct["firestore.googleapis.com"] = append(direct["firestore.googleapis.com"], typ)
 		}
 	}
+	sort.Strings(direct["firestore.googleapis.com"])
 	names := append(AuditServiceNames(), "storage.googleapis.com")
 	sort.Strings(names)
 	var out []*eventarcpb.Provider
@@ -225,9 +226,9 @@ func eaSpec(t *eventarcpb.Trigger, region string) (*functionspb.EventTrigger, er
 			return nil, apierror.InvalidArgument("destination.networkConfig.networkAttachment is required for an HTTP endpoint destination")
 		}
 	case d.GetGke() != nil:
-		return nil, apierror.Unimplemented("destination.gke is not supported: this instance serves no Google Kubernetes Engine " +
-			"(its cluster is a local kind cluster, not a GKE cluster the Kubernetes Engine API names); route to a Cloud Run " +
-			"service, a function or an HTTP endpoint")
+		if err := eaCheckGKE(d.GetGke()); err != nil {
+			return nil, err
+		}
 	case d.GetWorkflow() != "":
 		return nil, apierror.Unimplemented("destination.workflow is not supported: this instance does not serve Workflows")
 	default:
@@ -254,11 +255,12 @@ func (e *EventarcServer) CreateTrigger(ctx context.Context, req *eventarcpb.Crea
 		return nil, apierror.InvalidArgument("trigger is required")
 	}
 	t := proto.Clone(in).(*eventarcpb.Trigger)
-	if run := t.GetDestination().GetCloudRun(); run != nil && run.GetRegion() == "" {
-		run.Region = region
-	}
+	eaDestinationDefaults(t, region)
 	spec, err := eaSpec(t, region)
 	if err != nil {
+		return nil, err
+	}
+	if err := e.f.checkGKEDestination(project, t); err != nil {
 		return nil, err
 	}
 	name := req.GetParent() + "/triggers/" + req.GetTriggerId()
@@ -420,6 +422,27 @@ func (e *EventarcServer) UpdateTrigger(ctx context.Context, req *eventarcpb.Upda
 			case "destination.cloud_run.region":
 				run.Region = from.GetRegion()
 			}
+		case "destination.gke", "destination.gke.cluster", "destination.gke.location", "destination.gke.namespace",
+			"destination.gke.service", "destination.gke.path":
+			gke := next.GetDestination().GetGke()
+			if gke == nil {
+				return nil, apierror.InvalidArgument("update_mask path %q: the trigger's destination is not GKE", p)
+			}
+			from := in.GetDestination().GetGke()
+			switch p {
+			case "destination.gke":
+				next.Destination = in.GetDestination()
+			case "destination.gke.cluster":
+				gke.Cluster = from.GetCluster()
+			case "destination.gke.location":
+				gke.Location = from.GetLocation()
+			case "destination.gke.namespace":
+				gke.Namespace = from.GetNamespace()
+			case "destination.gke.service":
+				gke.Service = from.GetService()
+			case "destination.gke.path":
+				gke.Path = from.GetPath()
+			}
 		case "service_account":
 			next.ServiceAccount = in.GetServiceAccount()
 		case "labels":
@@ -433,10 +456,11 @@ func (e *EventarcServer) UpdateTrigger(ctx context.Context, req *eventarcpb.Upda
 		}
 	}
 	region := strings.Split(next.GetName(), "/")[3]
-	if run := next.GetDestination().GetCloudRun(); run != nil && run.GetRegion() == "" {
-		run.Region = region
-	}
+	eaDestinationDefaults(next, region)
 	if _, err := eaSpec(next, region); err != nil {
+		return nil, err
+	}
+	if err := e.f.checkGKEDestination(strings.Split(next.GetName(), "/")[1], next); err != nil {
 		return nil, err
 	}
 	if req.GetValidateOnly() {
@@ -572,6 +596,9 @@ func (f *FunctionsServer) deliverEvent(ctx context.Context, t *eventarcpb.Trigge
 		defer resp.Body.Close()
 		_, _ = io.Copy(io.Discard, resp.Body)
 		return resp.StatusCode, nil
+	}
+	if gke := d.GetGke(); gke != nil {
+		return f.deliverGKE(ctx, project, gke, ev)
 	}
 	var target, path string
 	timeout := time.Minute

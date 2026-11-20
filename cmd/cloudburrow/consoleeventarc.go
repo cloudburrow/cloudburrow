@@ -50,6 +50,15 @@ var eaEventTypes = []eaEventType{
 	{"google.cloud.firestore.document.v1.updated.withAuthContext", "Cloud Firestore"},
 	{"google.cloud.firestore.document.v1.deleted.withAuthContext", "Cloud Firestore"},
 	{"google.cloud.firestore.document.v1.written.withAuthContext", "Cloud Firestore"},
+	// Firestore in Datastore mode's entity events (#1877).
+	{"google.cloud.datastore.entity.v1.created", "Cloud Firestore (Datastore mode)"},
+	{"google.cloud.datastore.entity.v1.updated", "Cloud Firestore (Datastore mode)"},
+	{"google.cloud.datastore.entity.v1.deleted", "Cloud Firestore (Datastore mode)"},
+	{"google.cloud.datastore.entity.v1.written", "Cloud Firestore (Datastore mode)"},
+	{"google.cloud.datastore.entity.v1.created.withAuthContext", "Cloud Firestore (Datastore mode)"},
+	{"google.cloud.datastore.entity.v1.updated.withAuthContext", "Cloud Firestore (Datastore mode)"},
+	{"google.cloud.datastore.entity.v1.deleted.withAuthContext", "Cloud Firestore (Datastore mode)"},
+	{"google.cloud.datastore.entity.v1.written.withAuthContext", "Cloud Firestore (Datastore mode)"},
 }
 
 // eaAuditLogType is Cloud Audit Logs' event type, whose provider is the
@@ -70,10 +79,10 @@ func eaProviderOf(typ string) string {
 
 // eaDestinations are the event destinations Create trigger offers, as
 // Google's select names them.
-var eaDestinations = []string{"Cloud Run", "Cloud Run functions", "HTTP endpoint"}
+var eaDestinations = []string{"Cloud Run", "Cloud Run functions", "Google Kubernetes Engine", "HTTP endpoint"}
 
 const eventarcNote = "Triggers deliver each event to their destination as a CloudEvent in binary content mode, over a Pub/Sub " +
-	"push subscription Eventarc makes. Google sources' direct events of Cloud Pub/Sub and Cloud Storage, the Cloud Audit Logs (Admin Activity) entries of the calls this instance serves over gRPC, and Cloud Firestore's document events, are served; " +
+	"push subscription Eventarc makes. Google sources' direct events of Cloud Pub/Sub and Cloud Storage, the Cloud Audit Logs (Admin Activity) entries of the calls this instance serves over gRPC, and Cloud Firestore's document and Datastore mode entity events, are served, to Cloud Run, Cloud Run functions, Google Kubernetes Engine and HTTP endpoints; " +
 	"a trigger on a channel delivers the custom or third-party events published to it (#1947). The columns follow Google's Triggers page (UNVERIFIED, re-read 2026-11-19: " +
 	"https://docs.cloud.google.com/eventarc/standard/docs/overview names the page, not its columns)."
 
@@ -207,6 +216,12 @@ func (p eventarcProvider) destinationFields(d *eventarcpb.Destination) []console
 			Help: "Optional. The path on the destination the events are sent to, beginning with /."},
 		{Name: "function", Label: "Select a Cloud Run function", Type: "text", Default: lastSegment(d.GetCloudFunction()), Section: sec,
 			Help: "Cloud Run functions: the function, in the trigger's region, the events are sent to."},
+		{Name: "gkeCluster", Label: "Select a GKE cluster", Type: "text", Default: d.GetGke().GetCluster(), Section: sec,
+			Help: "Google Kubernetes Engine: the cluster, in the trigger's region, of this instance's Kubernetes Engine API."},
+		{Name: "gkeNamespace", Label: "Namespace", Type: "text", Default: d.GetGke().GetNamespace(), Section: sec,
+			Help: "Google Kubernetes Engine: optional. The service's namespace; default when empty."},
+		{Name: "gkeService", Label: "Service", Type: "text", Default: d.GetGke().GetService(), Section: sec,
+			Help: "Google Kubernetes Engine: the Kubernetes Service the events are sent to, on its port 80."},
 		{Name: "uri", Label: "Destination URI", Type: "text", Default: d.GetHttpEndpoint().GetUri(), Pattern: `^https?://.+$`, Section: sec,
 			Help: "HTTP endpoint: the internal endpoint's URI, such as http://10.10.10.8:80/route; reached from this machine."},
 		{Name: "networkAttachment", Label: "Network attachment", Type: "text", Default: d.GetNetworkConfig().GetNetworkAttachment(), Section: sec,
@@ -240,6 +255,10 @@ func (p eventarcProvider) CreateForm() (string, []console.Field) {
 			Help: "Cloud Firestore: the database whose documents' events are delivered."},
 		{Name: "document", Label: "Document", Type: "text", Section: "Event provider",
 			Help: "Cloud Firestore: optional. A document path, or a path pattern such as users/{userId}; empty for every document."},
+		{Name: "namespace", Label: "Namespace", Type: "text", Section: "Event provider",
+			Help: "Cloud Firestore (Datastore mode): optional. The namespace, (default) for the default one; empty for every namespace."},
+		{Name: "entity", Label: "Entity", Type: "text", Section: "Event provider",
+			Help: "Cloud Firestore (Datastore mode): optional. An entity path, kinds and IDs, or a path pattern such as users/{userId}; empty for every entity."},
 		{Name: "documentMatch", Label: "Document match", Type: "select", Options: []string{"Path pattern", "Exact"}, Default: "Path pattern",
 			Section: "Event provider", Help: "Cloud Firestore: whether Document is a path pattern (match-path-pattern) or one document."},
 		{Name: "region", Label: "Region", Type: "select", Options: []string{p.run.location()}, Default: p.run.location(), Section: "Trigger"},
@@ -276,6 +295,13 @@ func eaFormDestination(project, region string, values map[string]string) (*event
 			fn = "projects/" + project + "/locations/" + region + "/functions/" + fn
 		}
 		return &eventarcpb.Destination{Descriptor_: &eventarcpb.Destination_CloudFunction{CloudFunction: fn}}, nil
+	case "Google Kubernetes Engine":
+		cluster, svc := strings.TrimSpace(values["gkeCluster"]), strings.TrimSpace(values["gkeService"])
+		if cluster == "" || svc == "" {
+			return nil, errors.New("a Google Kubernetes Engine destination needs its cluster and service")
+		}
+		return &eventarcpb.Destination{Descriptor_: &eventarcpb.Destination_Gke{Gke: &eventarcpb.GKE{Cluster: cluster, Location: region,
+			Namespace: strings.TrimSpace(values["gkeNamespace"]), Service: svc, Path: path}}}, nil
 	case "HTTP endpoint":
 		uri, na := strings.TrimSpace(values["uri"]), strings.TrimSpace(values["networkAttachment"])
 		if uri == "" || na == "" {
@@ -337,6 +363,22 @@ func eaFormTrigger(project, region string, values map[string]string) (*eventarcp
 		t.EventFilters = append(t.EventFilters, &eventarcpb.EventFilter{Attribute: "database", Value: db})
 		if doc := strings.TrimSpace(values["document"]); doc != "" {
 			f := &eventarcpb.EventFilter{Attribute: "document", Value: doc}
+			if values["documentMatch"] != "Exact" {
+				f.Operator = "match-path-pattern"
+			}
+			t.EventFilters = append(t.EventFilters, f)
+		}
+	case "Cloud Firestore (Datastore mode)":
+		db := strings.TrimSpace(values["database"])
+		if db == "" {
+			db = "(default)"
+		}
+		t.EventFilters = append(t.EventFilters, &eventarcpb.EventFilter{Attribute: "database", Value: db})
+		if ns := strings.TrimSpace(values["namespace"]); ns != "" {
+			t.EventFilters = append(t.EventFilters, &eventarcpb.EventFilter{Attribute: "namespace", Value: ns})
+		}
+		if ent := strings.TrimSpace(values["entity"]); ent != "" {
+			f := &eventarcpb.EventFilter{Attribute: "entity", Value: ent}
 			if values["documentMatch"] != "Exact" {
 				f.Operator = "match-path-pattern"
 			}

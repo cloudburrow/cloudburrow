@@ -70,3 +70,32 @@ func TestEventarcConsoleTriggers(t *testing.T) {
 		}
 	}
 }
+
+// Create trigger's Datastore mode event types take Database, Namespace and
+// Entity (a path pattern unless Exact), and its Google Kubernetes Engine
+// destination the cluster, namespace, service and path (#1877).
+func TestEventarcConsoleDatastoreAndGKE(t *testing.T) {
+	tr, err := eaFormTrigger("p", "us-central1", map[string]string{"eventType": "google.cloud.datastore.entity.v1.written",
+		"database": "(default)", "namespace": "shop", "entity": "users/{u}", "destination": "Google Kubernetes Engine",
+		"gkeCluster": "c1", "gkeNamespace": "events", "gkeService": "probe", "path": "/in"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, f := range tr.GetEventFilters() {
+		got = append(got, f.GetAttribute()+"="+f.GetValue()+"/"+f.GetOperator())
+	}
+	if strings.Join(got, ",") != "type=google.cloud.datastore.entity.v1.written/,database=(default)/,namespace=shop/,entity=users/{u}/match-path-pattern" {
+		t.Errorf("filters = %v", got)
+	}
+	g := tr.GetDestination().GetGke()
+	if g.GetCluster() != "c1" || g.GetLocation() != "us-central1" || g.GetNamespace() != "events" || g.GetService() != "probe" || g.GetPath() != "/in" {
+		t.Errorf("GKE destination = %v", g)
+	}
+	if kind, target, path := eaDestination(tr.GetDestination()); kind != "Google Kubernetes Engine" || target != "events/probe" || path != "/in" {
+		t.Errorf("shown as %q %q %q", kind, target, path)
+	}
+	if _, err := eaFormDestination("p", "us-central1", map[string]string{"destination": "Google Kubernetes Engine", "gkeCluster": "c1"}); err == nil {
+		t.Error("a GKE destination with no service was accepted")
+	}
+}

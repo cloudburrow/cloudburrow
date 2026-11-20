@@ -349,6 +349,8 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"RUN_STORAGE":              "http://127.0.0.1:50003",
 		"RUN_PUBSUB":               "127.0.0.1:50004",
 		"RUN_FIRESTORE":            "127.0.0.1:9010",
+		"RUN_DATASTORE":            "127.0.0.1:9011",
+		"RUN_GKE":                  "127.0.0.1:9030",
 		"RUN_KMS":                  "127.0.0.1:9018",
 		"RUN_LOCALAI":              "127.0.0.1:9020",
 		"RUN_SCHEDULER":            "127.0.0.1:9008",
