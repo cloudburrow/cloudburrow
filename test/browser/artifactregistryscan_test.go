@@ -119,9 +119,35 @@ func TestCloudRunArtifactRegistryVulnerabilitiesTabThroughThePage(t *testing.T) 
 	if !strings.Contains(tabs, "Vulnerabilities") {
 		t.Errorf("the version's tabs are %q; want a Vulnerabilities tab", tabs)
 	}
-	for _, want := range []string{"CRITICAL", "9.8", "Yes", "zlib", "OS", "1.2.11-r3", "1.2.12-r2"} {
+	for _, want := range []string{"Critical", "9.8", "Yes", "zlib", "OS", "1.2.11-r3", "1.2.12-r2"} {
 		if !strings.Contains(row, want) {
 			t.Errorf("CVE-2022-37434's row %q lacks %q", row, want)
+		}
+	}
+	// Google's Scan results summary over the table (#1855).
+	var summary string
+	p.eval(`(document.querySelector("#view [role=tabpanel] .section-summary") || {}).textContent || ""`, &summary)
+	for _, want := range []string{"Scan results", "Package types scanned", "OS", "Total vulnerabilities", "Fixable", "Critical"} {
+		if !strings.Contains(summary, want) {
+			t.Errorf("the Scan results summary %q lacks %q", summary, want)
+		}
+	}
+	// The image's versions list counts it in its Vulnerabilities column,
+	// and the Dependencies tab lists zlib (#1855).
+	p.navigate("/artifact-registry/" + id + "/zlib-app?project=" + project)
+	p.waitFor(`document.querySelector("#view tbody tr") !== null`)
+	var vrow string
+	p.eval(`document.querySelector("#view tbody tr").textContent`, &vrow)
+	if !strings.Contains(vrow, "Critical") {
+		t.Errorf("the version row %q has no vulnerability totals", vrow)
+	}
+	p.navigate(strings.Replace(path, "tab=vulnerabilities", "tab=dependencies", 1))
+	p.waitFor(`document.querySelector("#view [role=tabpanel] tbody tr") !== null`)
+	var deps string
+	p.eval(`document.querySelector("#view [role=tabpanel]").textContent`, &deps)
+	for _, want := range []string{"SBOM", "Most common licenses", "zlib", "1.2.11-r3"} {
+		if !strings.Contains(deps, want) {
+			t.Errorf("the Dependencies tab %q lacks %q", deps, want)
 		}
 	}
 }

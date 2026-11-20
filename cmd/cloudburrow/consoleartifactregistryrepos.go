@@ -417,10 +417,13 @@ func setVirtualUpstreams(r *arpb.Repository, parent, group string) error {
 	return nil
 }
 
-// editRepositoryAction is Edit repository on a repository's page, with the
-// create page's sections a repository can change: Description, Labels,
-// Immutable image tags (Docker), and Cleanup policies, prefilled.
-func editRepositoryAction(r *arpb.Repository) console.Action {
+// editRepositoryForm is Edit Repository on a repository's page and in its
+// row's menu: Google's page (EditForm.Page, #1855) with the create page's
+// sections a repository can change: Description, Labels, Immutable image
+// tags (Docker), Vulnerability scanning and Cleanup policies, prefilled,
+// ending in Update ("Click Update",
+// https://docs.cloud.google.com/artifact-registry/docs/repositories/cleanup-policy).
+func editRepositoryForm(r *arpb.Repository) *console.EditForm {
 	fields := []console.Field{
 		{Name: "description", Label: "Description", Type: "text", Default: r.GetDescription()},
 		arLabelsField(console.FormatMap(r.GetLabels())),
@@ -434,8 +437,25 @@ func editRepositoryAction(r *arpb.Repository) console.Action {
 	if r.GetMode() == arpb.Repository_STANDARD_REPOSITORY || r.GetMode() == arpb.Repository_REMOTE_REPOSITORY {
 		fields = append(fields, arCleanupModeField(r.GetCleanupPolicyDryRun()), arCleanupGroup(arCleanupToGroup(r)))
 	}
-	return console.Action{ID: "edit-repository", Label: "Edit Repository", Fields: fields}
+	return &console.EditForm{Label: "Edit Repository", Title: "Edit repository", Submit: "Update", Page: true, Fields: fields,
+		Note: "Name, Format, Mode, Location and Encryption are fixed once the repository exists."}
 }
+
+// Edit is Edit Repository's Update, at a repository's path.
+func (p artifactRegistryProvider) Edit(ctx context.Context, project string, path []string, values map[string]string) error {
+	if len(path) != 1 {
+		return fmt.Errorf("only a repository is edited here")
+	}
+	r, _, err := p.repository(project, path[0])
+	if err != nil {
+		return err
+	}
+	return p.editRepository(ctx, r, values)
+}
+
+// RowEditLabel puts Edit Repository in each row's menu, as Google's list
+// edits the repository selected in it.
+func (artifactRegistryProvider) RowEditLabel() string { return "Edit Repository" }
 
 func repoLabelsText(m map[string]string) string {
 	var out []string
@@ -482,4 +502,6 @@ var (
 	_ console.CreateLayouter  = artifactRegistryProvider{}
 	_ console.CreateTitler    = artifactRegistryProvider{}
 	_ console.CreateSubmitter = artifactRegistryProvider{}
+	_ console.Editor          = artifactRegistryProvider{}
+	_ console.RowEditor       = artifactRegistryProvider{}
 )

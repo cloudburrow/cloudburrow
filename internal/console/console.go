@@ -899,6 +899,12 @@ type EditForm struct {
 	// opens Deploy worker pool revision, ending in Deploy (#1852).
 	Title  string `json:"title,omitempty"`
 	Submit string `json:"submit,omitempty"`
+	// Page draws the form at an address of its own, the resource's page
+	// with ?edit=1, instead of in a dialog: Google's Edit Repository is a
+	// page with the create page's sections, ending in Update (#1855). The
+	// Edit button and a row's Edit item open it; Cancel and a saved change
+	// return to the resource's page.
+	Page bool `json:"page,omitempty"`
 }
 
 // Property is one label/value pair on a resource's summary.
@@ -1027,6 +1033,16 @@ type Section struct {
 	// the page's Edit is (the provider's Editor): Google's service account
 	// Details tab has its Name box and Save (#1864). Its Label heads it.
 	Edit *EditForm `json:"edit,omitempty"`
+	// ShownIn, when set, is the ID of the tab that draws this section
+	// through its Show list instead of a tab of its own: Google's bucket
+	// Objects tab shows "Soft-deleted objects only" there, not on a
+	// Deleted objects tab (#1843). ShowAs is that choice's label.
+	ShownIn string `json:"shownIn,omitempty"`
+	ShowAs  string `json:"showAs,omitempty"`
+	// Show is the label of this tab's own content in its Show list, when
+	// another section is ShownIn it: "Live and noncurrent objects" on an
+	// object's Version history (#1843). Empty is "Live objects only".
+	Show string `json:"show,omitempty"`
 }
 
 // dropBlankProperties removes every Property whose Value is empty or

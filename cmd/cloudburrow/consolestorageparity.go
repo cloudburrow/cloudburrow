@@ -618,3 +618,54 @@ func objectsTabActions(bucket, prefix string, hns bool) []console.Action {
 	}
 	return []console.Action{folder, createManagedFolderAction(bucket, prefix)}
 }
+
+// bucketObservability is a bucket's Observability tab, in Google's place
+// (#1843): its dashboards read Cloud Monitoring, which this instance does
+// not run, so it says so, as the Observability page does.
+func bucketObservability() console.Section {
+	return console.Section{ID: "observability", Label: "Observability",
+		Unavailable: "Not available locally: a bucket's Observability charts read Cloud Monitoring metrics, which CloudBurrow does not " +
+			"emulate. The bucket's requests are in Logs Explorer and in the console's Requests page."}
+}
+
+// inventoryReportsSection is a bucket's Inventory reports tab (#1843): the
+// Storage Insights inventory report configurations whose source is this
+// bucket, each opening its page under Inventory reports, with Create
+// inventory report there with the bucket filled in.
+func (p storageProvider) inventoryReportsSection(ctx context.Context, project, bucket string) console.Section {
+	sec := console.Section{ID: "inventory", Label: "Inventory reports", Listing: console.Listing{
+		Columns: []string{"Display name", "Destination", "Format", "Frequency", "Created"}, NameColumn: "Configuration ID",
+		Noun: "inventory report configurations", Items: []console.Resource{}}}
+	if p.insights == "" {
+		sec.Unavailable = "Storage Insights is not served by this instance, so no inventory report can be configured."
+		return sec
+	}
+	q := urlpkg.Values{"sourceBucket": {bucket}}
+	if project != "" {
+		q.Set("project", project)
+	}
+	sec.Actions = []console.Action{{ID: "create-inventory-report", Label: "Create inventory report configuration",
+		Href: "/storage-inventory-reports/create?" + q.Encode()}}
+	if project == "" {
+		return sec
+	}
+	inv := storageInventoryProvider{endpoint: p.insights, storage: p.endpoint}
+	cs, err := inv.configs(ctx, project)
+	if err != nil {
+		sec.Listing.Unavailable = "cannot list the inventory report configurations: " + err.Error()
+		return sec
+	}
+	for _, c := range cs {
+		if c.source() != bucket {
+			continue
+		}
+		freq, _, _ := c.frequency()
+		id := lastSegment(c.Name)
+		sec.Listing.Items = append(sec.Listing.Items, console.Resource{Name: id,
+			Link: "/storage-inventory-reports/" + urlpkg.PathEscape(id) + "?project=" + urlpkg.QueryEscape(project),
+			Fields: map[string]string{"Display name": c.DisplayName, "Destination": c.destination(),
+				"Format": c.format(), "Frequency": freq, "Created": shortTime(c.CreateTime)}})
+	}
+	sec.Listing.Total = len(sec.Listing.Items)
+	return sec
+}
