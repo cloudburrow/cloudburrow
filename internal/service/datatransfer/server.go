@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -34,6 +35,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/paging"
+	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 )
 
@@ -86,6 +88,9 @@ type Email struct {
 // record is one transfer config with its runs, kept as one store entry.
 type record struct {
 	Config *dtpb.TransferConfig
+	// Project is the project's ID, which BigQuery names it by; the
+	// config's name carries its number.
+	Project string
 	// Anchor is where an interval schedule counts from.
 	Anchor time.Time
 	Runs   []*runRecord
@@ -98,9 +103,10 @@ type runRecord struct {
 
 // stored is record's JSON form, with protos in protojson.
 type stored struct {
-	Config json.RawMessage `json:"config"`
-	Anchor time.Time       `json:"anchor"`
-	Runs   []storedRun     `json:"runs,omitempty"`
+	Config  json.RawMessage `json:"config"`
+	Project string          `json:"project"`
+	Anchor  time.Time       `json:"anchor"`
+	Runs    []storedRun     `json:"runs,omitempty"`
 }
 
 type storedRun struct {
@@ -122,6 +128,7 @@ type Server struct {
 	enrolled map[string]map[string]bool
 	emails   []Email
 	wake     chan struct{}
+	resolve  func(string) (string, bool)
 }
 
 // NewServer returns the service over db. exec and pub may be nil: a run
@@ -133,6 +140,26 @@ func NewServer(db store.Store, clock Clock, exec Executor, pub Publisher) (*Serv
 		return nil, err
 	}
 	return s, nil
+}
+
+// ResolveProjects sets how a project number in a parent is turned into
+// the project's ID: the instance's Resource Manager registry.
+func (s *Server) ResolveProjects(f func(number string) (string, bool)) { s.resolve = f }
+
+func (s *Server) projectID(number string) (string, error) {
+	if s.resolve != nil {
+		if id, ok := s.resolve(number); ok {
+			return id, nil
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, rec := range s.configs {
+		if strings.HasPrefix(rec.Config.GetName(), "projects/"+number+"/") && rec.Project != "" {
+			return rec.Project, nil
+		}
+	}
+	return "", apierror.NotFound("Project %s not found.", number)
 }
 
 // Register adds the service to a gRPC server, or to the JSON transcoder.
@@ -154,7 +181,7 @@ func (s *Server) load() error {
 		if err := json.Unmarshal(b, &st); err != nil {
 			return fmt.Errorf("transfer config %s: %w", k, err)
 		}
-		rec := &record{Config: &dtpb.TransferConfig{}, Anchor: st.Anchor}
+		rec := &record{Config: &dtpb.TransferConfig{}, Anchor: st.Anchor, Project: st.Project}
 		if err := protojson.Unmarshal(st.Config, rec.Config); err != nil {
 			return fmt.Errorf("transfer config %s: %w", k, err)
 		}
@@ -186,7 +213,7 @@ func (s *Server) save(rec *record) error {
 	if err != nil {
 		return err
 	}
-	st := stored{Config: cfg, Anchor: rec.Anchor}
+	st := stored{Config: cfg, Anchor: rec.Anchor, Project: rec.Project}
 	for _, rr := range rec.Runs {
 		r, err := protojson.Marshal(rr.Run)
 		if err != nil {
@@ -216,7 +243,7 @@ func (s *Server) Reset(project string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for name := range s.configs {
-		if project == "" || strings.HasPrefix(name, "projects/"+project+"/") {
+		if project == "" || strings.HasPrefix(name, normalize("projects/"+project)+"/") {
 			if err := s.db.Delete(storeKey(name)); err != nil {
 				return err
 			}
@@ -262,7 +289,7 @@ func newID() string {
 // findConfig resolves a config name, with or without its location, as
 // Google answers both forms.
 func (s *Server) findConfig(name string) (*record, error) {
-	name = lowerLocation(name)
+	name = normalize(name)
 	m := configRE.FindStringSubmatch(name)
 	if m == nil {
 		return nil, apierror.InvalidArgument("Invalid resource name %q: expected projects/{project}/locations/{location}/transferConfigs/{config}", name)
@@ -281,7 +308,7 @@ func (s *Server) findConfig(name string) (*record, error) {
 }
 
 func (s *Server) findRun(name string) (*record, *runRecord, error) {
-	m := runRE.FindStringSubmatch(lowerLocation(name))
+	m := runRE.FindStringSubmatch(normalize(name))
 	if m == nil {
 		return nil, nil, apierror.InvalidArgument("Invalid resource name %q: expected projects/{project}/locations/{location}/transferConfigs/{config}/runs/{run}", name)
 	}
@@ -314,8 +341,41 @@ func lowerLocation(name string) string {
 	return name[:i] + "/locations/" + strings.ToLower(loc) + tail
 }
 
+// normalize is a name as Google answers it: the location lowercased and
+// the project named by its number (resource.ProjectNumber, the number
+// Resource Manager gives the project).
+func normalize(name string) string {
+	name = lowerLocation(name)
+	rest, ok := strings.CutPrefix(name, "projects/")
+	if !ok {
+		return name
+	}
+	p, tail, more := strings.Cut(rest, "/")
+	if p != "" && !isNumber(p) && projectIDRE.MatchString(p) {
+		p = ProjectNumber(p)
+	}
+	if more {
+		return "projects/" + p + "/" + tail
+	}
+	return "projects/" + p
+}
+
+func isNumber(s string) bool {
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return s != ""
+}
+
+var projectIDRE = regexp.MustCompile(`^[a-z][a-z0-9-]{4,28}[a-z0-9]$`)
+
+// ProjectNumber is a project ID's number, as a string.
+func ProjectNumber(id string) string { return strconv.FormatInt(resource.ProjectNumber(id), 10) }
+
 func checkParent(parent string) ([]string, error) {
-	m := parentRE.FindStringSubmatch(lowerLocation(parent))
+	m := parentRE.FindStringSubmatch(normalize(parent))
 	if m == nil {
 		return nil, apierror.InvalidArgument("Invalid parent %q: expected projects/{project} or projects/{project}/locations/{location}", parent)
 	}
@@ -324,7 +384,7 @@ func checkParent(parent string) ([]string, error) {
 
 // GetDataSource answers scheduled_query and cross_region_copy.
 func (s *Server) GetDataSource(_ context.Context, req *dtpb.GetDataSourceRequest) (*dtpb.DataSource, error) {
-	m := dataSrcRE.FindStringSubmatch(lowerLocation(req.GetName()))
+	m := dataSrcRE.FindStringSubmatch(normalize(req.GetName()))
 	if m == nil {
 		return nil, apierror.Wrap(apierror.InvalidArgument("Invalid resource name %q: expected projects/{project}/locations/{location}/dataSources/{data_source}", req.GetName()))
 	}
@@ -332,6 +392,20 @@ func (s *Server) GetDataSource(_ context.Context, req *dtpb.GetDataSourceRequest
 		return nil, apierror.Wrap(apierror.NotFound("Data source with id %s not found.", m[2]))
 	}
 	return dataSource(m[1], m[2]), nil
+}
+
+// CheckValidCreds reports whether the caller holds valid credentials for
+// the data source. Neither data source served reads a third-party system:
+// a run executes as the caller on the instance's BigQuery, which asks for
+// no OAuth grant, so the answer is true for both, as Google's is for a
+// caller who has authorized the data source. bq mk --transfer_config asks
+// it before CreateTransferConfig and, on false, prompts for an
+// authorization code.
+func (s *Server) CheckValidCreds(ctx context.Context, req *dtpb.CheckValidCredsRequest) (*dtpb.CheckValidCredsResponse, error) {
+	if _, err := s.GetDataSource(ctx, &dtpb.GetDataSourceRequest{Name: req.GetName()}); err != nil {
+		return nil, err
+	}
+	return &dtpb.CheckValidCredsResponse{HasValidCreds: true}, nil
 }
 
 // ListDataSources lists the two data sources.
@@ -345,7 +419,7 @@ func (s *Server) ListDataSources(_ context.Context, req *dtpb.ListDataSourcesReq
 	}
 	resp := &dtpb.ListDataSourcesResponse{NextPageToken: next}
 	for _, id := range page {
-		resp.DataSources = append(resp.DataSources, dataSource(lowerLocation(req.GetParent()), id))
+		resp.DataSources = append(resp.DataSources, dataSource(normalize(req.GetParent()), id))
 	}
 	return resp, nil
 }
@@ -422,6 +496,31 @@ func param(p *structpb.Struct, key string) string {
 	return ""
 }
 
+// foldScheduleV2 carries schedule_options_v2, which bq sends in place of
+// schedule and schedule_options, into them: a time_based_schedule's
+// schedule, start_time and end_time, or a manual_schedule's auto
+// scheduling turned off. An event_driven_schedule is for Cloud Storage
+// transfers, a data source not served (501).
+func foldScheduleV2(c *dtpb.TransferConfig) error {
+	v2 := c.GetScheduleOptionsV2()
+	if v2 == nil {
+		return nil
+	}
+	switch {
+	case v2.GetEventDrivenSchedule() != nil:
+		return apierror.Unimplemented("event_driven_schedule is for Cloud Storage transfers, which this instance does not serve")
+	case v2.GetManualSchedule() != nil:
+		c.ScheduleOptions = &dtpb.ScheduleOptions{DisableAutoScheduling: true}
+	case v2.GetTimeBasedSchedule() != nil:
+		t := v2.GetTimeBasedSchedule()
+		if t.GetSchedule() != "" {
+			c.Schedule = t.GetSchedule()
+		}
+		c.ScheduleOptions = &dtpb.ScheduleOptions{StartTime: t.GetStartTime(), EndTime: t.GetEndTime()}
+	}
+	return nil
+}
+
 // validate checks a config as Google does for its data source, returning
 // the parsed schedule (nil when auto scheduling is off or none applies).
 func (s *Server) validate(ctx context.Context, project string, c *dtpb.TransferConfig) (*Schedule, error) {
@@ -432,8 +531,8 @@ func (s *Server) validate(ctx context.Context, project string, c *dtpb.TransferC
 		}
 		return nil, apierror.InvalidArgument("Data source with id %s not found.", c.GetDataSourceId())
 	}
-	if c.GetScheduleOptionsV2() != nil {
-		return nil, apierror.Unimplemented("schedule_options_v2 is not supported; use schedule and schedule_options")
+	if err := foldScheduleV2(c); err != nil {
+		return nil, err
 	}
 	params := c.GetParams()
 	known := map[string]bool{}
@@ -548,11 +647,23 @@ func (s *Server) CreateTransferConfig(ctx context.Context, req *dtpb.CreateTrans
 		return nil, apierror.Wrap(apierror.InvalidArgument("Transfer config is required."))
 	}
 	c := proto.Clone(req.GetTransferConfig()).(*dtpb.TransferConfig)
-	project := m[1]
+	project := parentRE.FindStringSubmatch(lowerLocation(req.GetParent()))[1]
+	if isNumber(project) {
+		id, err := s.projectID(project)
+		if err != nil {
+			return nil, apierror.Wrap(err)
+		}
+		project = id
+	}
 	if _, err := s.validate(ctx, project, c); err != nil {
 		return nil, apierror.Wrap(err)
 	}
 	location := m[2]
+	if location == "-" {
+		// bq's parent when no --location is given: the service takes the
+		// destination dataset's.
+		location = ""
+	}
 	if dest := c.GetDestinationDatasetId(); dest != "" {
 		loc, err := s.datasetLocation(ctx, project, dest)
 		if err != nil {
@@ -573,7 +684,7 @@ func (s *Server) CreateTransferConfig(ctx context.Context, req *dtpb.CreateTrans
 		location = "us"
 	}
 	now := s.Now()
-	c.Name = "projects/" + project + "/locations/" + location + "/transferConfigs/" + newID()
+	c.Name = "projects/" + ProjectNumber(project) + "/locations/" + location + "/transferConfigs/" + newID()
 	c.UpdateTime = timestamppb.New(now)
 	c.State = dtpb.TransferState_TRANSFER_STATE_UNSPECIFIED
 	c.UserId = 0
@@ -583,7 +694,7 @@ func (s *Server) CreateTransferConfig(ctx context.Context, req *dtpb.CreateTrans
 	} else {
 		c.OwnerInfo = nil
 	}
-	rec := &record{Config: c, Anchor: now}
+	rec := &record{Config: c, Anchor: now, Project: project}
 	if st := c.GetScheduleOptions().GetStartTime(); st != nil {
 		rec.Anchor = st.AsTime()
 	}
@@ -700,6 +811,8 @@ func (s *Server) UpdateTransferConfig(ctx context.Context, req *dtpb.UpdateTrans
 			c.Schedule = in.GetSchedule()
 		case "schedule_options":
 			c.ScheduleOptions = in.GetScheduleOptions()
+		case "schedule_options_v2":
+			c.ScheduleOptionsV2 = in.GetScheduleOptionsV2()
 		case "schedule_options.disable_auto_scheduling", "schedule_options.start_time", "schedule_options.end_time":
 			if c.ScheduleOptions == nil {
 				c.ScheduleOptions = &dtpb.ScheduleOptions{}
@@ -733,7 +846,7 @@ func (s *Server) UpdateTransferConfig(ctx context.Context, req *dtpb.UpdateTrans
 			return nil, apierror.Wrap(apierror.InvalidArgument("Invalid update mask path: %s", p))
 		}
 	}
-	project := configRE.FindStringSubmatch(c.GetName())[1]
+	project := rec.Project
 	if _, err := s.validate(ctx, project, c); err != nil {
 		return nil, apierror.Wrap(err)
 	}

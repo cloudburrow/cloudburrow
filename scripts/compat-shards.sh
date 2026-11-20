@@ -89,7 +89,8 @@ COMPAT_SHARDS="storage served run scale emulators memorystore sql acceptance iam
 # whose instance serves the services they read back.
 # The accessibility audit (#1604) follows the same split: its Cloud Storage,
 # Pub/Sub and Logs Explorer pages run in storage, and
-# TestBigQueryScreensAreNamedAndLegible in emulators; the rest of the
+# TestBigQueryScreensAreNamedAndLegible and TestBigQueryTransferScreensMeetWCAG
+# (#1948) in emulators; the rest of the
 # console's screens are TestCloudRunAndCICDScreensMeetWCAG (run),
 # TestDocumentAIAndSpeechScreensMeetWCAG and
 # TestSpeechAdaptationScreensMeetWCAG (run),

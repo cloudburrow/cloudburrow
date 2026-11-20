@@ -119,7 +119,9 @@ func (s *Server) logf(rr *runRecord, sev dtpb.TransferMessage_MessageSeverity, f
 func (s *Server) execute(ctx context.Context, name string) {
 	var run *dtpb.TransferRun
 	var cfg *dtpb.TransferConfig
+	var project string
 	s.update(name, func(rec *record, rr *runRecord) {
+		project = rec.Project
 		rr.Run.State = dtpb.TransferState_RUNNING
 		rr.Run.StartTime = timestamppb.New(s.Now())
 		s.logf(rr, dtpb.TransferMessage_INFO, "Dispatched run to data source with id %s", rr.Run.GetDataSourceId())
@@ -129,7 +131,6 @@ func (s *Server) execute(ctx context.Context, name string) {
 	if run == nil {
 		return
 	}
-	project := configRE.FindStringSubmatch(cfg.GetName())[1]
 	var msgs []string
 	var err error
 	if s.exec == nil {

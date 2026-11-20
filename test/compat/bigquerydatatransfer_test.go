@@ -4,6 +4,7 @@ package compat
 
 import (
 	"context"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -142,7 +143,8 @@ func TestBigQueryDataTransferScheduledQuery(t *testing.T) {
 	t.Cleanup(func() {
 		_ = g.DeleteTransferConfig(context.Background(), &datatransferpb.DeleteTransferConfigRequest{Name: created.GetName()})
 	})
-	if !strings.HasPrefix(created.GetName(), parent+"/transferConfigs/") || created.GetNextRunTime() == nil {
+	// Named by the project's number, as Google names it.
+	if !regexp.MustCompile(`^projects/[0-9]+/locations/us/transferConfigs/[a-f0-9-]+$`).MatchString(created.GetName()) || created.GetNextRunTime() == nil {
 		t.Fatalf("created %v", created)
 	}
 

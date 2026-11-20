@@ -60,5 +60,11 @@ Disable and Enable transfer, and Delete call the service's own methods.
 ## Not served
 
 Every other data source (Google Ads, Cloud Storage, Amazon S3, Teradata and the rest) is refused;
-`CheckValidCreds` and `schedule_options_v2` are 501. Resource names carry the project ID, where
-Google's carry the project number. `bq mk --transfer_config` is not wired yet.
+`schedule_options_v2`'s `time_based_schedule` and `manual_schedule` (what bq sends) are carried into
+`schedule` and `schedule_options`; its `event_driven_schedule`, for Cloud Storage transfers, is 501. Resource names carry the project number, as Google's do.
+
+## bq
+
+`bq mk|ls|show --transfer_config` work with `--api <BigQuery endpoint>`: bq sends Data Transfer calls
+to the address `--api` names, and BigQuery's tunnel answers Data Transfer's discovery document
+(`$discovery/rest?version=v1`) and passes `/v1/` to this service.

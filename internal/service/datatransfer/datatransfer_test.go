@@ -151,7 +151,7 @@ func TestScheduledQueryRunsOnTheClock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(got.GetName(), "projects/p-test/locations/us/transferConfigs/") || got.GetDatasetRegion() != "us" {
+	if !strings.HasPrefix(got.GetName(), "projects/"+ProjectNumber("p-test")+"/locations/us/transferConfigs/") || got.GetDatasetRegion() != "us" {
 		t.Fatalf("name %s region %s", got.GetName(), got.GetDatasetRegion())
 	}
 	if !got.GetNextRunTime().AsTime().Equal(at("2026-03-03T10:00:00Z")) {
@@ -260,6 +260,46 @@ func TestValidation(t *testing.T) {
 	}
 	if _, err := s.GetTransferConfig(ctx, &dtpb.GetTransferConfigRequest{Name: "projects/p-test/locations/us/transferConfigs/nope"}); status.Code(err) != codes.NotFound {
 		t.Errorf("get missing: %v", err)
+	}
+	if r, err := s.CheckValidCreds(ctx, &dtpb.CheckValidCredsRequest{Name: "projects/p-test/locations/us/dataSources/scheduled_query"}); err != nil || !r.GetHasValidCreds() {
+		t.Errorf("CheckValidCreds = %v, %v", r, err)
+	}
+	if _, err := s.CheckValidCreds(ctx, &dtpb.CheckValidCredsRequest{Name: "projects/p-test/dataSources/google_ads"}); status.Code(err) != codes.NotFound {
+		t.Errorf("CheckValidCreds of an unserved source: %v", err)
+	}
+	// schedule_options_v2, as bq sends it, under bq's "locations/-".
+	v2 := queryConfig(map[string]any{"query": "SELECT 1", "destination_table_name_template": "t"})
+	v2.Schedule = ""
+	v2.ScheduleOptionsV2 = &dtpb.ScheduleOptionsV2{Schedule: &dtpb.ScheduleOptionsV2_TimeBasedSchedule{
+		TimeBasedSchedule: &dtpb.TimeBasedSchedule{Schedule: "every 2 hours"}}}
+	gotV2, err := s.CreateTransferConfig(ctx, &dtpb.CreateTransferConfigRequest{Parent: "projects/p-test/locations/-", TransferConfig: v2})
+	if err != nil || gotV2.GetSchedule() != "every 2 hours" || gotV2.GetNextRunTime() == nil || !strings.Contains(gotV2.GetName(), "/locations/us/") {
+		t.Errorf("create with time_based_schedule = %v, %v", gotV2, err)
+	}
+	v2.ScheduleOptionsV2 = &dtpb.ScheduleOptionsV2{Schedule: &dtpb.ScheduleOptionsV2_ManualSchedule{ManualSchedule: &dtpb.ManualSchedule{}}}
+	if got, err := s.CreateTransferConfig(ctx, &dtpb.CreateTransferConfigRequest{Parent: "projects/p-test", TransferConfig: v2}); err != nil ||
+		!got.GetScheduleOptions().GetDisableAutoScheduling() || got.GetNextRunTime() != nil {
+		t.Errorf("create with manual_schedule = %v, %v", got, err)
+	}
+	v2.ScheduleOptionsV2 = &dtpb.ScheduleOptionsV2{Schedule: &dtpb.ScheduleOptionsV2_EventDrivenSchedule{EventDrivenSchedule: &dtpb.EventDrivenSchedule{}}}
+	if _, err := s.CreateTransferConfig(ctx, &dtpb.CreateTransferConfigRequest{Parent: "projects/p-test", TransferConfig: v2}); status.Code(err) != codes.Unimplemented {
+		t.Errorf("create with event_driven_schedule: %v", err)
+	}
+	// A parent by number resolves through ResolveProjects.
+	s.ResolveProjects(func(n string) (string, bool) { return "p-test", n == ProjectNumber("p-test") })
+	byNumber, err := s.CreateTransferConfig(ctx, &dtpb.CreateTransferConfigRequest{Parent: "projects/" + ProjectNumber("p-test"),
+		TransferConfig: queryConfig(map[string]any{"query": "SELECT 1", "destination_table_name_template": "t"})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// And the config is found by the project's ID too.
+	byID := strings.Replace(byNumber.GetName(), ProjectNumber("p-test"), "p-test", 1)
+	if _, err := s.GetTransferConfig(ctx, &dtpb.GetTransferConfigRequest{Name: byID}); err != nil {
+		t.Errorf("get by project ID: %v", err)
+	}
+	if _, err := s.CreateTransferConfig(ctx, &dtpb.CreateTransferConfigRequest{Parent: "projects/999",
+		TransferConfig: queryConfig(map[string]any{"query": "SELECT 1", "destination_table_name_template": "t"})}); status.Code(err) != codes.NotFound {
+		t.Errorf("unknown project number: %v", err)
 	}
 }
 

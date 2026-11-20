@@ -7,10 +7,13 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"cloud.google.com/go/bigquery"
@@ -25,6 +28,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/service/datatransfer"
+	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
@@ -48,8 +52,13 @@ type dataTransferSvc struct {
 	requests  func(rest.Request)
 	bigquery  func() *netfwd.Forwarder
 	pubsub    func() *netfwd.Forwarder
+	// registry is the project registry, which names a project by number.
+	registry func() *resourcemanager.Registry
 
 	server *grpctransport.Server
+	// bound is the bound address once Start has returned, which the
+	// BigQuery tunnel's Local hook reads from its own goroutines.
+	bound  atomic.Pointer[string]
 	api    *datatransfer.Server
 	db     store.Store
 	cancel context.CancelFunc
@@ -110,6 +119,13 @@ func (s *dataTransferSvc) Start(ctx context.Context) error {
 		return err
 	}
 	s.api = api
+	api.ResolveProjects(func(number string) (string, bool) {
+		if s.registry == nil {
+			return "", false
+		}
+		id, err := serviceUsageProjects{reg: s.registry()}.Resolve(number)
+		return id, err == nil && id != number
+	})
 	s.server = grpctransport.New(net.JoinHostPort(s.cfg.BindAddress, strconv.Itoa(s.cfg.Endpoints.DataTransfer)))
 	s.server.Observe(s.calls)
 	if s.tracing != nil {
@@ -133,6 +149,8 @@ func (s *dataTransferSvc) Start(ctx context.Context) error {
 		_ = db.Close()
 		return err
 	}
+	addr := s.server.Addr()
+	s.bound.Store(&addr)
 	// The runner outlives Start's context, until Stop.
 	rctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	s.cancel, s.done = cancel, make(chan struct{})
@@ -140,6 +158,39 @@ func (s *dataTransferSvc) Start(ctx context.Context) error {
 		defer close(s.done)
 		api.Run(rctx, time.Second)
 	}()
+	return nil
+}
+
+// bigQueryLocal is the BigQuery tunnel's Local hook (netfwd.Forwarder):
+// bq sends its Data Transfer calls to the address --api names, BigQuery's
+// (bq_api_utils.get_tpc_root_url_from_flags gives every service the --api
+// value), so that address answers Data Transfer's discovery document,
+// $discovery/rest?version=v1, and passes /v1/ to this service.
+// BigQuery's own API is /bigquery/v2/ and its discovery version=v2, which
+// the BigQuery backend answers as before.
+func (s *dataTransferSvc) bigQueryLocal(r *http.Request) http.Handler {
+	switch {
+	case r.URL.Path == "/$discovery/rest" && r.URL.Query().Get("version") == "v1":
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			doc, err := datatransfer.DiscoveryDocument("http://" + r.Host + "/")
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+			_, _ = w.Write(doc)
+		})
+	case strings.HasPrefix(r.URL.Path, "/v1/"):
+		bound := s.bound.Load()
+		if bound == nil {
+			return nil
+		}
+		addr := *bound
+		return &httputil.ReverseProxy{Rewrite: func(pr *httputil.ProxyRequest) {
+			pr.SetURL(&url.URL{Scheme: "http", Host: addr})
+			pr.Out.Host = addr
+		}}
+	}
 	return nil
 }
 

@@ -89,7 +89,7 @@ func (p dataTransferProvider) configs(ctx context.Context, project string) ([]*d
 }
 
 func (p dataTransferProvider) List(ctx context.Context, project string) (console.Listing, error) {
-	listing := console.Listing{Columns: dataTransferColumns, Noun: "transfers", AlwaysStatus: true}
+	listing := console.Listing{Columns: dataTransferColumns, NameColumn: "Transfer config ID", Noun: "transfers", AlwaysStatus: true}
 	if project == "" {
 		listing.Prompt = "Transfers are listed per project. Choose one in the toolbar."
 		return listing, nil
@@ -100,7 +100,10 @@ func (p dataTransferProvider) List(ctx context.Context, project string) (console
 	}
 	for _, c := range cfgs {
 		region := strings.Split(c.GetName(), "/")[3]
-		listing.Items = append(listing.Items, console.Resource{Name: c.GetName(), Status: dtState(c), Fields: map[string]string{
+		// A row is named by the config's ID, as Google's console names a
+		// transfer in its address; the full name is on its Configuration tab.
+		id := c.GetName()[strings.LastIndex(c.GetName(), "/")+1:]
+		listing.Items = append(listing.Items, console.Resource{Name: id, Status: dtState(c), Fields: map[string]string{
 			"Display name": orDash(c.GetDisplayName()), "Source": dtSourceName(c.GetDataSourceId()),
 			"Schedule (UTC)": orDash(c.GetSchedule()), "Region": region,
 			"Destination dataset": orDash(c.GetDestinationDatasetId()),
@@ -119,14 +122,27 @@ func dtLastRun(c *dtpb.TransferConfig) string {
 	return c.GetState().String()
 }
 
-func (p dataTransferProvider) owns(project, name string) error {
+// full is the full name of the project's transfer a row or page names,
+// by its config ID (a list row) or its full name.
+func (p dataTransferProvider) full(ctx context.Context, project, name string) (string, error) {
 	if project == "" {
-		return errors.New("choose a project first")
+		return "", errors.New("choose a project first")
 	}
-	if !strings.HasPrefix(name, "projects/"+project+"/locations/") || !strings.Contains(name, "/transferConfigs/") {
-		return fmt.Errorf("%s is not a transfer of project %s", name, project)
+	api := p.svc.API()
+	if api == nil {
+		return "", errors.New(dataTransferNotStarted)
 	}
-	return nil
+	if !strings.Contains(name, "/") {
+		c, err := api.GetTransferConfig(ctx, &dtpb.GetTransferConfigRequest{Name: "projects/" + project + "/transferConfigs/" + name})
+		if err != nil {
+			return "", fmt.Errorf("cannot read the transfer: %s", consoleErr(err))
+		}
+		name = c.GetName()
+	}
+	if !strings.HasPrefix(name, "projects/"+datatransfer.ProjectNumber(project)+"/locations/") || !strings.Contains(name, "/transferConfigs/") {
+		return "", fmt.Errorf("%s is not a transfer of project %s", name, project)
+	}
+	return name, nil
 }
 
 func (p dataTransferProvider) Detail(ctx context.Context, project string, path []string) (console.Detail, error) {
@@ -137,10 +153,11 @@ func (p dataTransferProvider) Detail(ctx context.Context, project string, path [
 	if api == nil {
 		return console.Detail{Unavailable: dataTransferNotStarted}, nil
 	}
-	if err := p.owns(project, path[0]); err != nil {
+	name, err := p.full(ctx, project, path[0])
+	if err != nil {
 		return console.Detail{Unavailable: err.Error()}, nil
 	}
-	c, err := api.GetTransferConfig(ctx, &dtpb.GetTransferConfigRequest{Name: path[0]})
+	c, err := api.GetTransferConfig(ctx, &dtpb.GetTransferConfigRequest{Name: name})
 	if err != nil {
 		return console.Detail{Unavailable: "cannot read the transfer: " + consoleErr(err)}, nil
 	}
@@ -222,18 +239,42 @@ func dtActions(state string) []console.Action {
 	return []console.Action{run, {ID: "disable", Label: "Disable transfer"}}
 }
 
+// dtDetailActions adds a transfer page's Schedule backfill and Delete run.
+func dtDetailActions(state string, runs []*dtpb.TransferRun) []console.Action {
+	acts := append(dtActions(state), console.Action{ID: "backfill", Label: "Schedule backfill", Fields: []console.Field{
+		{Name: "start", Label: "Start date", Type: "text", Required: true, Pattern: `^\d{4}-\d{2}-\d{2}$`, Help: "YYYY-MM-DD, UTC; included."},
+		{Name: "end", Label: "End date", Type: "text", Required: true, Pattern: `^\d{4}-\d{2}-\d{2}$`, Help: "YYYY-MM-DD, UTC; excluded."},
+	}})
+	if len(runs) > 0 {
+		var ids []string
+		labels := map[string]string{}
+		for _, r := range runs {
+			ids = append(ids, r.GetName())
+			labels[r.GetName()] = dtTime(r.GetRunTime()) + " (" + r.GetState().String() + ")"
+		}
+		acts = append(acts, console.Action{ID: "delete-run", Label: "Delete run", Destructive: true,
+			Fields: []console.Field{{Name: "run", Label: "Run", Type: "select", Required: true, Options: ids, OptionLabels: labels}}})
+	}
+	return acts
+}
+
 func (dataTransferProvider) Actions(r console.Resource) []console.Action { return dtActions(r.Status) }
 
 func (p dataTransferProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
 	api := p.svc.API()
-	if api == nil || len(path) != 1 || p.owns(project, path[0]) != nil {
+	if api == nil || len(path) != 1 {
 		return nil
 	}
-	c, err := api.GetTransferConfig(ctx, &dtpb.GetTransferConfigRequest{Name: path[0]})
+	name, err := p.full(ctx, project, path[0])
 	if err != nil {
 		return nil
 	}
-	return dtActions(dtState(c))
+	c, err := api.GetTransferConfig(ctx, &dtpb.GetTransferConfigRequest{Name: name})
+	if err != nil {
+		return nil
+	}
+	runs, _ := api.ListTransferRuns(ctx, &dtpb.ListTransferRunsRequest{Parent: c.GetName(), PageSize: 1000})
+	return dtDetailActions(dtState(c), runs.GetTransferRuns())
 }
 
 func (p dataTransferProvider) Act(ctx context.Context, project, name, action string) error {
@@ -241,10 +282,10 @@ func (p dataTransferProvider) Act(ctx context.Context, project, name, action str
 	if api == nil {
 		return errors.New(dataTransferNotStarted)
 	}
-	if err := p.owns(project, name); err != nil {
+	name, err := p.full(ctx, project, name)
+	if err != nil {
 		return err
 	}
-	var err error
 	switch action {
 	case "run":
 		_, err = api.StartManualTransferRuns(ctx, &dtpb.StartManualTransferRunsRequest{Parent: name,
@@ -259,9 +300,42 @@ func (p dataTransferProvider) Act(ctx context.Context, project, name, action str
 	return err
 }
 
-func (p dataTransferProvider) ActAt(ctx context.Context, project string, path []string, action string, _ map[string]string) error {
+func (p dataTransferProvider) ActAt(ctx context.Context, project string, path []string, action string, v map[string]string) error {
 	if len(path) != 1 {
 		return errors.New("transfer actions apply to a transfer")
+	}
+	api := p.svc.API()
+	switch action {
+	case "backfill":
+		if api == nil {
+			return errors.New(dataTransferNotStarted)
+		}
+		name, err := p.full(ctx, project, path[0])
+		if err != nil {
+			return err
+		}
+		start, err1 := time.Parse("2006-01-02", strings.TrimSpace(v["start"]))
+		end, err2 := time.Parse("2006-01-02", strings.TrimSpace(v["end"]))
+		if err1 != nil || err2 != nil {
+			return errors.New("the start and end dates must be YYYY-MM-DD")
+		}
+		_, err = api.StartManualTransferRuns(ctx, &dtpb.StartManualTransferRunsRequest{Parent: name,
+			Time: &dtpb.StartManualTransferRunsRequest_RequestedTimeRange{RequestedTimeRange: &dtpb.StartManualTransferRunsRequest_TimeRange{
+				StartTime: timestamppb.New(start), EndTime: timestamppb.New(end)}}})
+		return err
+	case "delete-run":
+		if api == nil {
+			return errors.New(dataTransferNotStarted)
+		}
+		name, err := p.full(ctx, project, path[0])
+		if err != nil {
+			return err
+		}
+		if !strings.HasPrefix(v["run"], name+"/runs/") {
+			return fmt.Errorf("%s is not a run of this transfer", v["run"])
+		}
+		_, err = api.DeleteTransferRun(ctx, &dtpb.DeleteTransferRunRequest{Name: v["run"]})
+		return err
 	}
 	return p.Act(ctx, project, path[0], action)
 }
@@ -271,10 +345,11 @@ func (p dataTransferProvider) Delete(ctx context.Context, project, name string) 
 	if api == nil {
 		return errors.New(dataTransferNotStarted)
 	}
-	if err := p.owns(project, name); err != nil {
+	name, err := p.full(ctx, project, name)
+	if err != nil {
 		return err
 	}
-	_, err := api.DeleteTransferConfig(ctx, &dtpb.DeleteTransferConfigRequest{Name: name})
+	_, err = api.DeleteTransferConfig(ctx, &dtpb.DeleteTransferConfigRequest{Name: name})
 	return err
 }
 

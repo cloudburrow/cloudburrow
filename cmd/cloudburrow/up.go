@@ -339,6 +339,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if dataTransfer != nil {
 		dataTransfer.bigquery = func() *netfwd.Forwarder { return forwarderFor(forwarders, "bigquery") }
 		dataTransfer.pubsub = func() *netfwd.Forwarder { return forwarderFor(forwarders, "pubsub") }
+		// bq's Data Transfer calls arrive at BigQuery's address.
+		if f := forwarderFor(forwarders, "bigquery"); f != nil {
+			f.Local = dataTransfer.bigQueryLocal
+		}
 	}
 	dataTransfer.register(coord)
 	// The Memorystore admin API (#1302), over the Valkey server's tunnel.
@@ -395,6 +399,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// reads it through this at reset time.
 	var registered func() []string = func() []string { return nil }
 	var projectRegistry *resourcemanager.Registry
+	if dataTransfer != nil {
+		dataTransfer.registry = func() *resourcemanager.Registry { return projectRegistry }
+	}
 	if memorystoreAdminSvc != nil {
 		memorystoreAdminSvc.registry = func() *resourcemanager.Registry { return projectRegistry }
 	}

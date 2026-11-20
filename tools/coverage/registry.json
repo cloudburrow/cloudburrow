@@ -64,7 +64,7 @@
   "google.cloud.aiplatform.v1beta1.PredictionService/StreamRawPredict": "implemented",
   "google.cloud.aiplatform.v1beta1.PredictionService/StreamingPredict": "implemented",
   "google.cloud.aiplatform.v1beta1.PredictionService/StreamingRawPredict": "implemented",
-  "google.cloud.bigquery.datatransfer.v1.DataTransferService/CheckValidCreds": "unimplemented",
+  "google.cloud.bigquery.datatransfer.v1.DataTransferService/CheckValidCreds": "implemented",
   "google.cloud.bigquery.datatransfer.v1.DataTransferService/CreateTransferConfig": "implemented",
   "google.cloud.bigquery.datatransfer.v1.DataTransferService/DeleteTransferConfig": "implemented",
   "google.cloud.bigquery.datatransfer.v1.DataTransferService/DeleteTransferRun": "implemented",
