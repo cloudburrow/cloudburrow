@@ -200,6 +200,7 @@ func TestConsoleSpannerSchemaConfigurationsAndPartitions(t *testing.T) {
 	// Create, list, open, see the operation of, and delete a partition.
 	const partition = "console-part"
 	partName := instName + "/instancePartitions/" + partition
+	spannerEnterprisePlus(t, ctx, instAdmin, instName)
 	if code, out := act([]string{instanceID}, "createpartition", map[string]string{
 		"partition": partition, "displayName": "From the console", "config": "emulator-config", "nodeCount": "2"}); code != http.StatusOK {
 		t.Fatalf("console Create instance partition = %d: %s", code, out)
