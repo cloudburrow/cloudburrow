@@ -207,9 +207,9 @@ func TestPipelineToTopicAndBus(t *testing.T) {
 	}
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		eaAdv.mu.Lock()
+		pub.mu.Lock()
 		n := len(pub.topics)
-		eaAdv.mu.Unlock()
+		pub.mu.Unlock()
 		if n > 0 || time.Now().After(deadline) {
 			break
 		}

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -82,12 +83,17 @@ func TestAuditLogFiltersAreChecked(t *testing.T) {
 
 type fakePublisher struct {
 	fakeTransport
+	// mu guards the fields below: a bus or pipeline publishes from its own
+	// goroutine (eaPublishToBus), while the test polls them.
+	mu     sync.Mutex
 	topics []string
 	data   []byte
 	attrs  map[string]string
 }
 
 func (f *fakePublisher) Publish(_ context.Context, topic string, data []byte, attrs map[string]string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.topics, f.data, f.attrs = append(f.topics, topic), data, attrs
 	return nil
 }
