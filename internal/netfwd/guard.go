@@ -349,3 +349,7 @@ func (l logWriter) Write(p []byte) (int, error) {
 
 // WriteGRPCStatus answers a gRPC call with a Trailers-Only status (#1880).
 func WriteGRPCStatus(w http.ResponseWriter, code int, msg string) { writeGRPCStatus(w, code, msg) }
+
+// GRPCPercentEncode is msg as a grpc-message value (a status sent in a
+// call's trailers, #1879).
+func GRPCPercentEncode(msg string) string { return grpcPercentEncode(msg) }

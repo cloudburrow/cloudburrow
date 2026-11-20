@@ -149,6 +149,7 @@ func (s *Server) V1Handler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// A custom method is part of its {name} segment, which a pattern
 		// cannot split, so the IAM methods are matched before the mux.
+		r = v1Context(r) // IAM enforcement's caller (v1auth.go)
 		if m := v1IAMRE.FindStringSubmatch(r.URL.Path); m != nil {
 			s.v1IAM(w, r, m)
 			return
@@ -280,6 +281,10 @@ func (s *Server) v1ListServices(w http.ResponseWriter, r *http.Request) {
 		v1Write(w, err, nil)
 		return
 	}
+	if err := v1Check(r.Context(), &runpb.ListServicesRequest{Parent: sc.parent()}); err != nil {
+		v1Write(w, err, nil)
+		return
+	}
 	svcs, raw, err := s.v1Services(r.Context(), sc)
 	if err != nil {
 		v1Write(w, err, nil)
@@ -313,7 +318,12 @@ func (s *Server) v1GetService(w http.ResponseWriter, r *http.Request) {
 		v1Write(w, err, nil)
 		return
 	}
-	svc, k, err := s.v1Service(r.Context(), scopeOf(r), id)
+	sc := scopeOf(r)
+	svc, k, err := s.v1Service(r.Context(), sc, id)
+	if cerr := v1Check(r.Context(), &runpb.GetServiceRequest{Name: v1Named(svc.GetName(), sc, "services", id)}); cerr != nil {
+		v1Write(w, cerr, nil)
+		return
+	}
 	if err != nil {
 		v1Write(w, err, nil)
 		return
@@ -352,7 +362,7 @@ func (s *Server) v1CreateService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	validateOnly := r.URL.Query().Get("dryRun") == "all"
-	if _, err := s.CreateService(r.Context(), &runpb.CreateServiceRequest{Parent: parent, ServiceId: id, Service: svc,
+	if _, err := v1Call(r.Context(), s.CreateService, &runpb.CreateServiceRequest{Parent: parent, ServiceId: id, Service: svc,
 		ValidateOnly: validateOnly}); err != nil {
 		v1Write(w, err, nil)
 		return
@@ -434,7 +444,7 @@ func (s *Server) v1ReplaceService(w http.ResponseWriter, r *http.Request) {
 	keepCloudSQLLayout(svc.GetTemplate(), existing.GetTemplate())
 	svc.Etag = in.Metadata.ResourceVersion
 	validateOnly := r.URL.Query().Get("dryRun") == "all"
-	if _, err := s.UpdateService(r.Context(), &runpb.UpdateServiceRequest{Service: svc, ValidateOnly: validateOnly}); err != nil {
+	if _, err := v1Call(r.Context(), s.UpdateService, &runpb.UpdateServiceRequest{Service: svc, ValidateOnly: validateOnly}); err != nil {
 		v1Write(w, err, nil)
 		return
 	}
@@ -452,7 +462,7 @@ func (s *Server) v1DeleteService(w http.ResponseWriter, r *http.Request) {
 		v1Write(w, err, nil)
 		return
 	}
-	if _, err := s.DeleteService(r.Context(), &runpb.DeleteServiceRequest{Name: svc.GetName(),
+	if _, err := v1Call(r.Context(), s.DeleteService, &runpb.DeleteServiceRequest{Name: svc.GetName(),
 		ValidateOnly: r.URL.Query().Get("dryRun") == "all"}); err != nil {
 		v1Write(w, err, nil)
 		return
@@ -484,6 +494,10 @@ func (s *Server) v1ListRevisions(w http.ResponseWriter, r *http.Request) {
 	sc := scopeOf(r)
 	sel, err := labelSelector(r)
 	if err != nil {
+		v1Write(w, err, nil)
+		return
+	}
+	if err := v1Check(r.Context(), &runpb.ListRevisionsRequest{Parent: sc.parent() + "/services/-"}); err != nil {
 		v1Write(w, err, nil)
 		return
 	}
@@ -536,7 +550,16 @@ func (s *Server) v1GetRevision(w http.ResponseWriter, r *http.Request) {
 		v1Write(w, err, nil)
 		return
 	}
-	rev, _, err := s.v1Revision(r.Context(), scopeOf(r), name)
+	sc := scopeOf(r)
+	rev, service, err := s.v1Revision(r.Context(), sc, name)
+	full := sc.parent() + "/services/-/revisions/" + name
+	if service != "" {
+		full = service + "/revisions/" + name
+	}
+	if cerr := v1Check(r.Context(), &runpb.GetRevisionRequest{Name: full}); cerr != nil {
+		v1Write(w, cerr, nil)
+		return
+	}
 	v1Write(w, err, rev)
 }
 
@@ -551,7 +574,7 @@ func (s *Server) v1DeleteRevision(w http.ResponseWriter, r *http.Request) {
 		v1Write(w, err, nil)
 		return
 	}
-	if _, err := s.Revisions().DeleteRevision(r.Context(), &runpb.DeleteRevisionRequest{
+	if _, err := v1Call(r.Context(), s.Revisions().DeleteRevision, &runpb.DeleteRevisionRequest{
 		Name: service + "/revisions/" + name, ValidateOnly: r.URL.Query().Get("dryRun") == "all"}); err != nil {
 		v1Write(w, err, nil)
 		return
@@ -585,7 +608,13 @@ func (s *Server) v1GetOwned(w http.ResponseWriter, r *http.Request, kind string,
 		v1Write(w, err, nil)
 		return
 	}
-	svc, k, err := s.v1Service(r.Context(), scopeOf(r), id)
+	sc := scopeOf(r)
+	svc, k, err := s.v1Service(r.Context(), sc, id)
+	// run.routes.get, run.configurations.get on the service that owns it.
+	if cerr := v1CheckPermission(r.Context(), "run."+kind+".get", v1Named(svc.GetName(), sc, "services", id)); cerr != nil {
+		v1Write(w, cerr, nil)
+		return
+	}
 	if err != nil {
 		v1Write(w, apierror.NotFound("%s.serving.knative.dev %q not found", kind, id), nil)
 		return
@@ -606,6 +635,14 @@ func (s *Server) v1ListOwned(w http.ResponseWriter, r *http.Request, kind string
 	sc := scopeOf(r)
 	sel, err := labelSelector(r)
 	if err != nil {
+		v1Write(w, err, nil)
+		return
+	}
+	perm := "run.routes.list"
+	if kind == "ConfigurationList" {
+		perm = "run.configurations.list"
+	}
+	if err := v1CheckPermission(r.Context(), perm, sc.parent()); err != nil {
 		v1Write(w, err, nil)
 		return
 	}

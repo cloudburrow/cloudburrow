@@ -92,12 +92,18 @@ type Server struct {
 	// opOrder is ops' names in the order they were made, which
 	// operations.list answers in.
 	opOrder []string
+	// opProjects is each operation's project, which IAM enforcement
+	// checks operations.get on (#1879).
+	opProjects map[string]string
 
 	srv *http.Server
 	ln  net.Listener
 	// Observe, if set, is called once per request with the method name and
 	// the answer's HTTP status.
 	Observe func(method string, code int)
+	// Wrap, if set before Start, wraps the API's handler (IAM
+	// enforcement, #1879).
+	Wrap func(http.Handler) http.Handler
 	// Dependents names, for an API, the catalogued APIs that depend on it
 	// (Google's service dependencies), which disabling it disables too
 	// with disableDependentServices, and refuses without.
@@ -136,7 +142,11 @@ func (s *Server) Start(context.Context) error {
 	s.ln = ln
 	// Loopback-only, but a rebound or cross-site page reaches
 	// loopback too (#676, #1586).
-	s.srv = &http.Server{Handler: hostguard.Wrap(sysparams.Wrap(s, sysparams.Options{})), ReadHeaderTimeout: 10 * time.Second}
+	var h http.Handler = s
+	if s.Wrap != nil {
+		h = s.Wrap(h)
+	}
+	s.srv = &http.Server{Handler: hostguard.Wrap(sysparams.Wrap(h, sysparams.Options{})), ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = s.srv.Serve(ln) }()
 	return nil
 }
@@ -745,8 +755,20 @@ func (s *Server) done(project, target, respType string, resp map[string]any) map
 	s.mu.Lock()
 	s.ops[name] = op
 	s.opOrder = append(s.opOrder, name)
+	if s.opProjects == nil {
+		s.opProjects = map[string]string{}
+	}
+	s.opProjects[name] = project
 	s.mu.Unlock()
 	return op
+}
+
+// OperationProject is the project of the operation name made, "" for an
+// operation this server did not make (IAM enforcement, #1879).
+func (s *Server) OperationProject(name string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.opProjects[name]
 }
 
 // listOperations is operations.list (#1530): every operation this instance

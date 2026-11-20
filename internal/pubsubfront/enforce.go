@@ -81,6 +81,75 @@ var psChecks = map[string][]psCheck{
 	iamService + "SetIamPolicy":            {{"setIamPolicy", "resource", false}},
 }
 
+// psActAs are the methods that attach a push subscription's OIDC token
+// service account, by the request field naming it: the caller needs
+// iam.serviceAccounts.actAs on it (#1879), as "Authenticate push
+// subscriptions" asks of whoever creates or updates such a subscription
+// (https://docs.cloud.google.com/pubsub/docs/authenticate-push-subscriptions,
+// read 2026-11-20). UpdateSubscription attaches it only when its update
+// mask names the push config.
+var psActAs = map[string]string{
+	subscriber + "CreateSubscription": "push_config.oidc_token.service_account_email",
+	subscriber + "UpdateSubscription": "subscription.push_config.oidc_token.service_account_email",
+	subscriber + "ModifyPushConfig":   "push_config.oidc_token.service_account_email",
+}
+
+// pushConfigMasked is whether an UpdateSubscription request's mask names
+// its push config (or a field in it).
+func pushConfigMasked(m protoreflect.Message) bool {
+	fd := m.Descriptor().Fields().ByName("update_mask")
+	if fd == nil || !m.Has(fd) {
+		return false
+	}
+	paths := m.Get(fd).Message()
+	pd := paths.Descriptor().Fields().ByName("paths")
+	if pd == nil {
+		return false
+	}
+	l := paths.Get(pd).List()
+	for i := 0; i < l.Len(); i++ {
+		p := l.Get(i).String()
+		if p == "push_config" || strings.HasPrefix(p, "push_config.") || p == "pushConfig" || strings.HasPrefix(p, "pushConfig.") {
+			return true
+		}
+	}
+	return false
+}
+
+// authorizeActAs checks the push subscription's OIDC token account a
+// request attaches, nil when it names none or the caller may act as it.
+func (f *Front) authorizeActAs(ctx context.Context, method string, m protoreflect.Message) error {
+	path, ok := psActAs[method]
+	if !ok {
+		return nil
+	}
+	if method == subscriber+"UpdateSubscription" && !pushConfigMasked(m) {
+		return nil
+	}
+	account := stringField(m, path)
+	if account == "" {
+		return nil
+	}
+	sub := stringField(m, "name")
+	if sub == "" {
+		sub = stringField(m, "subscription")
+	}
+	if sub == "" {
+		sub = stringField(m, "subscription.name")
+	}
+	d, err := f.iamCheck.Check(ctx, iamcheck.Request{Bearer: bearerOf(ctx), Project: projectOf(sub), ActAs: account})
+	if err != nil {
+		return status.Errorf(codes.Unavailable, "IAM check unavailable: %v", err)
+	}
+	if d.Unauthenticated {
+		return unauthenticated()
+	}
+	if !d.Holds("iam.serviceAccounts.actAs") {
+		return denied()
+	}
+	return nil
+}
+
 // denied is Pub/Sub's refusal.
 func denied() error {
 	return status.Error(codes.PermissionDenied, "User not authorized to perform this action.")
@@ -237,7 +306,7 @@ func (f *Front) authorize(ctx context.Context, method string, fr frame) error {
 			return denied()
 		}
 	}
-	return nil
+	return f.authorizeActAs(ctx, method, m)
 }
 
 // held are those of perms the caller holds on resource; every one when

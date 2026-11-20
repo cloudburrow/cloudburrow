@@ -15,16 +15,22 @@ import (
 	"google.golang.org/grpc/codes"
 	grpcmd "google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
+	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/iamcond"
 	"github.com/cloudburrow/cloudburrow/internal/iameval"
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 	"github.com/cloudburrow/cloudburrow/internal/metadata"
 	"github.com/cloudburrow/cloudburrow/internal/service/kms"
+	"github.com/cloudburrow/cloudburrow/internal/service/logging"
+	"github.com/cloudburrow/cloudburrow/internal/service/redisadmin"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
+	"github.com/cloudburrow/cloudburrow/internal/service/scheduler"
 	"github.com/cloudburrow/cloudburrow/internal/service/secrets"
 	"github.com/cloudburrow/cloudburrow/internal/service/tasks"
+	"github.com/cloudburrow/cloudburrow/internal/service/workflows"
 	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
 )
 
@@ -85,6 +91,42 @@ func (s registrySource) Ancestry(project string) []string {
 			out = append(out, "folders/"+a.ID)
 		case "organization":
 			out = append(out, "organizations/"+a.ID)
+		}
+	}
+	return out
+}
+
+// HierarchyAncestry is a folder's, the organization's or a billing
+// account's ancestry (#1879): a folder, its parent folders and the
+// organization; the organization alone; a billing account and the
+// organization, as "the billing account inherits IAM permissions from its
+// parent organization" (https://docs.cloud.google.com/billing/docs/how-to/billing-access,
+// read 2026-11-20). Cloud Billing is not served, so nothing here keeps a
+// billing account's own policy, and every billing account is taken to be
+// the instance's organization's (UNVERIFIED for an account Google holds
+// under no organization, re-read 2026-11-20).
+func (s registrySource) HierarchyAncestry(root string) []string {
+	reg := s.registry()
+	switch {
+	case reg == nil:
+		return nil
+	case root == resourcemanager.OrganizationName:
+		return []string{root}
+	case strings.HasPrefix(root, "billingAccounts/"):
+		return []string{root, resourcemanager.OrganizationName}
+	case !strings.HasPrefix(root, "folders/"):
+		return nil
+	}
+	var out []string
+	for p, i := root, 0; strings.HasPrefix(p, "folders/") && i <= resourcemanager.MaxFolderDepth+1; i++ {
+		f, err := reg.Folder(p)
+		if err != nil {
+			return out
+		}
+		out = append(out, p)
+		p = f.Parent
+		if p == resourcemanager.OrganizationName {
+			out = append(out, p)
 		}
 	}
 	return out
@@ -174,14 +216,166 @@ func newIAMEnforcer(cfg config.Config, creds *metadata.Credentials, reg func() *
 			}
 			return iameval.Caller{Email: strings.ToLower(email)}
 		},
-		Policies:   map[string]iameval.PolicyGetter{},
+		Policies: map[string]iameval.PolicyGetter{
+			// A service account's own policy, which iam.serviceAccounts.actAs
+			// reads (who may act as it), as IAM keeps it.
+			iameval.IAM.Name: func(_ context.Context, resource string) *iampolicy.Stored {
+				return registrySource{reg: reg}.Policy(resource)
+			},
+		},
 		OwnerEmail: owner,
 	}
 }
 
+// iamEnforced are the services the fifth round enforces (#1879): Cloud
+// Logging, Cloud Monitoring, Memorystore (Redis, Redis Cluster and
+// Valkey), and Cloud Run's and Cloud Functions' iam.serviceAccounts.actAs.
+type iamEnforced struct {
+	logging     *loggingService
+	monitoring  *monitoringService
+	memorystore *memorystoreAdminService
+	run         *runService
+}
+
+func (s iamEnforced) use(e *iameval.Enforcer) {
+	if s.logging != nil {
+		s.logging.interpose = append(s.logging.interpose, e.Interceptor(iameval.Logging))
+		s.logging.wrapJSON = jsonEnforcer(e, iameval.Logging, logging.Transcoder().Mixins)
+		// TailLogEntries, a stream, and the JSON-only saved queries and
+		// log scopes (#1879, round 13).
+		s.logging.streamInterpose = append(s.logging.streamInterpose, e.StreamInterceptor(iameval.Logging))
+		s.logging.wrapExtra = func(next http.Handler) http.Handler {
+			return e.HTTPPaths(iameval.Logging, iameval.LoggingExtraJSON, next)
+		}
+		// A log view keeps its own policy (roles/logging.viewAccessor).
+		e.Policies[iameval.Logging.Name] = iameval.GRPCPolicyGetter(func() func(context.Context, *iampb.GetIamPolicyRequest) (*iampb.Policy, error) {
+			a := s.logging.Admin()
+			if a == nil {
+				return nil
+			}
+			return a.ViewIAMPolicy
+		})
+	}
+	if s.monitoring != nil {
+		// Monitoring keeps no resource-level policies.
+		s.monitoring.interpose = append(s.monitoring.interpose, e.Interceptor(iameval.Monitoring))
+		s.monitoring.wrapJSON = jsonEnforcer(e, iameval.Monitoring, nil)
+	}
+	if s.memorystore != nil {
+		// Three APIs on one port, each its own table; none keeps
+		// resource-level policies.
+		for _, svc := range []*iameval.Service{iameval.Redis, iameval.RedisCluster, iameval.Valkey} {
+			s.memorystore.interpose = append(s.memorystore.interpose, e.Interceptor(svc))
+		}
+		redis, cluster := jsonEnforcer(e, iameval.Redis, nil), jsonEnforcer(e, iameval.RedisCluster, nil)
+		s.memorystore.wrapRedisJSON = func(next http.Handler) http.Handler { return redis(cluster(next)) }
+		valkey := jsonEnforcer(e, iameval.Valkey, nil)
+		// Valkey's JSON API is under /memorystore, its paths beside
+		// CloudRedis's: matched without the prefix.
+		s.memorystore.wrapValkeyJSON = func(next http.Handler) http.Handler {
+			return stripForMatch(redisadmin.MemorystoreRESTPrefix, valkey, next)
+		}
+	}
+	if s.run != nil {
+		runCheck := e.Interceptor(iameval.Run)
+		// The v1 (Knative-shaped) API serves its requests through the v2
+		// methods in process: each is checked as its v2 request.
+		runadapter.UseV1Authorize(&runadapter.V1Authorizer{
+			Method: func(ctx context.Context, full string, req proto.Message) error {
+				_, err := runCheck(ctx, req, &grpc.UnaryServerInfo{FullMethod: full}, func(context.Context, any) (any, error) { return nil, nil })
+				return err
+			},
+			Permission: func(ctx context.Context, permission, resource string) error {
+				return e.Authorize(ctx, iameval.Run, iameval.IncomingBearer(ctx), permission, resource)
+			},
+		})
+		// Cloud Run's services, jobs and worker pools keep their own
+		// policies, as do functions and Artifact Registry repositories.
+		e.Policies[iameval.Run.Name] = func(ctx context.Context, resource string) *iampolicy.Stored {
+			a := s.run.adapter.Load()
+			if a == nil {
+				return nil
+			}
+			get := a.GetIamPolicy
+			switch {
+			case strings.Contains(resource, "/jobs/"):
+				get = a.Jobs().GetIamPolicy
+			case strings.Contains(resource, "/workerPools/"):
+				get = a.WorkerPools().GetIamPolicy
+			case strings.Contains(resource, "/instances/"):
+				get = a.Instances().GetIamPolicy
+			}
+			return iameval.GRPCPolicyGetter(func() func(context.Context, *iampb.GetIamPolicyRequest) (*iampb.Policy, error) { return get })(ctx, resource)
+		}
+		e.Policies[iameval.Functions.Name] = iameval.GRPCPolicyGetter(func() func(context.Context, *iampb.GetIamPolicyRequest) (*iampb.Policy, error) {
+			f := s.run.functions.Load()
+			if f == nil {
+				return nil
+			}
+			return f.IAMPolicy
+		})
+		e.Policies[iameval.ArtifactRegistry.Name] = iameval.GRPCPolicyGetter(func() func(context.Context, *iampb.GetIamPolicyRequest) (*iampb.Policy, error) {
+			a := s.run.adapter.Load()
+			if a == nil {
+				return nil
+			}
+			return a.ArtifactRegistry().GetIamPolicy
+		})
+		s.run.interpose = append(s.run.interpose, runCheck, e.Interceptor(iameval.Functions), e.Interceptor(iameval.Eventarc),
+			e.Interceptor(iameval.ArtifactRegistry), e.Interceptor(iameval.CloudBuild))
+		run, functions := jsonEnforcer(e, iameval.Run, nil), jsonEnforcer(e, iameval.Functions, nil)
+		eventarc := jsonEnforcer(e, iameval.Eventarc, nil)
+		s.run.wrapJSON = func(next http.Handler) http.Handler {
+			// Eventarc's JSON API is under /eventarc on this port, its
+			// Publishing API's under /eventarcpublishing (#1879).
+			return run(functions(stripForMatch("/eventarcpublishing", eventarc, stripForMatch("/eventarc", eventarc, next))))
+		}
+	}
+}
+
+// stripForMatch checks a request with wrap as if its path had no prefix,
+// then serves it to next with its path as it came.
+func stripForMatch(prefix string, wrap func(http.Handler) http.Handler, next http.Handler) http.Handler {
+	type orig struct{}
+	inner := wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if o, ok := r.Context().Value(orig{}).(*http.Request); ok {
+			o.Body = r.Body
+			next.ServeHTTP(w, o)
+			return
+		}
+		next.ServeHTTP(w, r)
+	}))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path, ok := strings.CutPrefix(r.URL.Path, prefix)
+		if !ok {
+			next.ServeHTTP(w, r)
+			return
+		}
+		c := r.Clone(context.WithValue(r.Context(), orig{}, r))
+		c.URL.Path = path
+		c.URL.RawPath = ""
+		inner.ServeHTTP(w, c)
+	})
+}
+
 // useIAMEnforcement interposes the enforcer on the in-process services
 // whose methods it maps, and gives it their policies.
-func useIAMEnforcement(e *iameval.Enforcer, secretsSvc *secretsService, kmsSvc *kmsService, tasksSvc *tasksService, hub *analyticsHubSvc) {
+func useIAMEnforcement(e *iameval.Enforcer, secretsSvc *secretsService, kmsSvc *kmsService, tasksSvc *tasksService, hub *analyticsHubSvc,
+	schedulerSvc *schedulerService, workflowsSvc *workflowsService, more iamEnforced) {
+	more.use(e)
+	// Cloud Scheduler and Workflows keep no resource-level policies, so
+	// only the project's and its ancestors' apply: no policy reader.
+	if schedulerSvc != nil {
+		schedulerSvc.interpose = append(schedulerSvc.interpose, e.Interceptor(iameval.Scheduler))
+		schedulerSvc.wrapJSON = jsonEnforcer(e, iameval.Scheduler, scheduler.Transcoder().Mixins)
+	}
+	if workflowsSvc != nil {
+		workflowsSvc.interpose = append(workflowsSvc.interpose, e.Interceptor(iameval.Workflows))
+		bound := jsonEnforcer(e, iameval.Workflows, workflows.Transcoder().Mixins)
+		workflowsSvc.wrapJSON = func(next http.Handler) http.Handler {
+			return e.HTTPPaths(iameval.Workflows, iameval.WorkflowsJSON, bound(next))
+		}
+	}
 	if hub != nil {
 		// BigQuery sharing (#1989): the table's checks, then those it
 		// cannot express, on gRPC and JSON alike.

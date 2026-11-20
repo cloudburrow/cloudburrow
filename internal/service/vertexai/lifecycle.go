@@ -24,14 +24,24 @@ import (
 type listener struct {
 	addr string
 
-	// options are extra gRPC server options (tests: a stats handler).
+	// options are extra gRPC server options (tests: a stats handler; IAM
+	// enforcement's interceptors, UseIAM).
 	options []grpc.ServerOption
+	// wrapJSON wraps the JSON routes (IAM enforcement, #1879); nil none.
+	wrapJSON func(http.Handler) http.Handler
 
 	mu   sync.Mutex
 	ln   net.Listener
 	srv  *http.Server
 	grpc *grpc.Server
 	done chan struct{}
+}
+
+// UseIAM checks every call with IAM enforcement's interceptors and JSON
+// wrapper (#1879). It is called before Start.
+func (s *Server) UseIAM(unary []grpc.UnaryServerInterceptor, stream []grpc.StreamServerInterceptor, wrapJSON func(http.Handler) http.Handler) {
+	s.lis.options = append(s.lis.options, grpc.ChainUnaryInterceptor(unary...), grpc.ChainStreamInterceptor(stream...))
+	s.lis.wrapJSON = wrapJSON
 }
 
 // Name implements the lifecycle component interface.
@@ -84,6 +94,9 @@ func (s *Server) Start(ctx context.Context) error {
 // the prior-knowledge HTTP/2 an insecure gRPC client speaks.
 func (s *Server) mixedHandler(g *grpc.Server) http.Handler {
 	jsonAPI := s.Handler()
+	if s.lis.wrapJSON != nil {
+		jsonAPI = s.lis.wrapJSON(jsonAPI)
+	}
 	grpcAPI := hostguard.Wrap(g)
 	both := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.ProtoMajor == 2 && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {

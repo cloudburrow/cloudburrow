@@ -176,7 +176,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	comps.SetEarlierStorage(&earlierStorage{kubeconfig: cfg.KubeconfigPath(), namespace: cfg.Cluster.Namespace,
 		instance: cfg.InstanceDir(), project: cfg.DefaultProject(), out: stdout})
 	if serviceEnabled(cfg, config.ServiceBigQuery) || serviceEnabled(cfg, config.ServiceStorage) ||
-		(cfg.IAMEnforced() && serviceEnabled(cfg, config.ServicePubSub)) {
+		(cfg.IAMEnforced() && (serviceEnabled(cfg, config.ServicePubSub) || serviceEnabled(cfg, config.ServiceRun))) {
 		// BigQuery's front reads a project's folders and organization
 		// from Resource Manager, through cloudburrow-host (#1392,
 		// INFORMATION_SCHEMA.JOBS_BY_FOLDER and JOBS_BY_ORGANIZATION),
@@ -185,7 +185,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		comps.SetResourceManager(fmt.Sprintf("%s.%s.svc.cluster.local:%d", ClusterHostService, cfg.Cluster.Namespace,
 			cfg.Endpoints.ResourceManager))
 		// With --iam-enforcement=on the storage server (and Pub/Sub's
-		// front) ask the host's evaluator there (#1879).
+		// front) ask the host's evaluator there (#1879), as Kourier does
+		// for run.routes.invoke, with or without storage and Pub/Sub.
 		comps.SetIAMCheck(cfg.IAMEnforced())
 	}
 	if serviceEnabled(cfg, config.ServicePubSub) && serviceEnabled(cfg, config.ServiceKMS) && cfg.Endpoints.KMS > 0 {
@@ -720,7 +721,13 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// injection see a denied call as the client does. Off by default: the
 	// interceptors pass every call through until --iam-enforcement=on.
 	iamEnforcer := newIAMEnforcer(cfg, creds, func() *resourcemanager.Registry { return projectRegistry })
-	useIAMEnforcement(iamEnforcer, secretsSvc, kmsSvc, tasksSvc, analyticsHub)
+	useIAMEnforcement(iamEnforcer, secretsSvc, kmsSvc, tasksSvc, analyticsHub, schedulerSvc, workflowsSvc,
+		iamEnforced{logging: loggingSvc, monitoring: monitoringSvc, memorystore: memorystoreAdminSvc, run: runSvc})
+	iamEnforced7{privateCA: privateCASvc, gke: gkeSvc, compute: computeSvc, run: runSvc}.use(iamEnforcer)
+	iamEnforced8{compute: computeSvc}.use(iamEnforcer)
+	iamEnforced13{memorystore: memorystoreAdminSvc, gke: gkeSvc}.use(iamEnforcer)
+	useIAMEnforcement12Source(iamEnforcer, runSvc)
+	useIAMEnforcement12DataTransfer(iamEnforcer, dataTransfer)
 	// Log buckets' customer-managed keys (#1950).
 	if loggingSvc != nil {
 		keys := cmekKeys(kmsSvc, iamEnforcer)
@@ -883,6 +890,16 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// instance does not serve points here, and is refused with a message,
 	// whatever Host the tool derived (regional hosts among them).
 	rmSrv.HandleUnguarded(unserved.Match, unserved.Handler())
+	// IAM enforcement (#1879) of Resource Manager, IAM, deny and
+	// organization policies, on this port.
+	useIAMEnforcement11(iamEnforcer, rmSrv, func() *resourcemanager.Registry { return projects })
+	useIAMEnforcement12Tags(iamEnforcer, func() string {
+		if f := forwarderFor(forwarders, "storage"); f != nil {
+			return f.HostAddr()
+		}
+		return ""
+	}, func() *resourcemanager.Registry { return projects })
+	useIAMEnforcement12Identity(iamEnforcer, rmSrv, func() *resourcemanager.Registry { return projects })
 	coord.Register(rmSrv)
 	// A build's serviceAccount names an IAM account of this registry (#1854).
 	runadapter.UseServiceAccounts(func(name string) (string, bool, bool) {
@@ -909,6 +926,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	// The API Keys API (#1915), each project's keys, in the same store.
 	apiKeysSrv := newAPIKeysServer(cfg, projects, projects.Backing())
+	// IAM enforcement (#1879) of Service Usage and API Keys.
+	iamEnforced7{serviceUsage: serviceUsageSrv, apiKeys: apiKeysSrv}.use(iamEnforcer)
+	iamEnforced8{serviceUsage: serviceUsageSrv, apiKeys: apiKeysSrv}.use(iamEnforcer)
 	if apiKeysSrv != nil {
 		apiKeysRef = apiKeysSrv
 		coord.Register(apiKeysSrv)
@@ -950,6 +970,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// minted, and the principal's cloudsql.instances.login.
 		if creds != nil {
 			sqlAdminSrv.UseIAM(sqlAdminIAM(creds, iamEnforcer))
+			// The Admin API's own methods (#1879).
+			sqlAdminSrv.Enforce = cloudSQLEnforcer(iamEnforcer)
 		}
 		// CUSTOMER_MANAGED_CAS_CA (#1834) has this instance's Certificate
 		// Authority Service issue the server certificates, in process.
@@ -982,6 +1004,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// API is enabled in every project until someone disables it.
 	useAPIEnablement(serviceUsageSrv, rmSrv, apiGated{tasks: tasksSvc, run: runSvc, scheduler: schedulerSvc,
 		memorystore: memorystoreAdminSvc, logging: loggingSvc, kms: kmsSvc, secrets: secretsSvc, sqlAdmin: sqlAdminSrv, backupDR: backupDRSrv})
+	// IAM enforcement (#1879) of Backup and DR and the Cloud Storage
+	// companion APIs, inside the enablement gate.
+	useIAMEnforcementBackup(iamEnforcer, backupDRSrv, storageJobsSrv)
 	// API keys are checked where Google checks them (#1915).
 	defer useAPIKeys(apiKeysSrv, rmSrv)()
 
@@ -1019,6 +1044,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		localAISrv.SetSpeechState(filepath.Join(cfg.StateDir, "speech", "recognizers.json"))
 		// Their customer-managed keys (#1950), through Cloud KMS.
 		localAISrv.UseCMEK(cmekKeys(kmsSvc, iamEnforcer))
+		// IAM enforcement (#1879) of Vertex AI, Document AI, Speech-to-Text
+		// and Translation.
+		iamEnforced8{localAI: localAISrv}.use(iamEnforcer)
 	}
 	// The Model Registry and Endpoints (#1940): deployed models run as
 	// Cloud Run services; artifacts are copied in this Cloud Storage.

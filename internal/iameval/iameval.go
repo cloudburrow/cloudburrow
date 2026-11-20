@@ -359,7 +359,10 @@ func predefinedGrants(role, permission string) bool {
 		predefinedSets[role] = set
 	}
 	predefinedMu.Unlock()
-	return set[permission]
+	// Google lists some roles' permissions by their v2 names alone
+	// (Workload Identity Pool Viewer's iam.googleapis.com/workloadIdentityPools.get,
+	// #1879 round 12), which grant the v1 permission they name.
+	return set[permission] || set[V2Permission(permission)]
 }
 
 // basicGrants is whether a basic role includes permission. Google's role

@@ -68,7 +68,7 @@ func (s *Server) v1ListJobs(w http.ResponseWriter, r *http.Request) {
 			v1Write(w, err, nil)
 			return
 		}
-		resp, err := s.Jobs().ListJobs(r.Context(), &runpb.ListJobsRequest{Parent: parent, PageSize: 1000})
+		resp, err := v1Call(r.Context(), s.Jobs().ListJobs, &runpb.ListJobsRequest{Parent: parent, PageSize: 1000})
 		if err != nil {
 			v1Write(w, err, nil)
 			return
@@ -110,7 +110,7 @@ func (s *Server) v1GetJob(w http.ResponseWriter, r *http.Request) {
 
 // v1WriteJob answers with a job as it is stored, its delayExecution too.
 func (s *Server) v1WriteJob(w http.ResponseWriter, r *http.Request, name string) {
-	j, err := s.Jobs().GetJob(r.Context(), &runpb.GetJobRequest{Name: name})
+	j, err := v1Call(r.Context(), s.Jobs().GetJob, &runpb.GetJobRequest{Name: name})
 	if err != nil {
 		v1Write(w, err, nil)
 		return
@@ -145,7 +145,7 @@ func (s *Server) v1CreateJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	validateOnly := r.URL.Query().Get("dryRun") == "all"
-	if _, err := s.Jobs().CreateJob(r.Context(), &runpb.CreateJobRequest{Parent: parent, JobId: in.Metadata.Name, Job: job,
+	if _, err := v1Call(r.Context(), s.Jobs().CreateJob, &runpb.CreateJobRequest{Parent: parent, JobId: in.Metadata.Name, Job: job,
 		ValidateOnly: validateOnly}); err != nil {
 		v1Write(w, err, nil)
 		return
@@ -177,12 +177,12 @@ func (s *Server) v1DeleteJob(w http.ResponseWriter, r *http.Request) {
 		v1Write(w, err, nil)
 		return
 	}
-	j, err := s.Jobs().GetJob(r.Context(), &runpb.GetJobRequest{Name: parent + "/jobs/" + id})
+	j, err := v1Call(r.Context(), s.Jobs().GetJob, &runpb.GetJobRequest{Name: parent + "/jobs/" + id})
 	if err != nil {
 		v1Write(w, err, nil)
 		return
 	}
-	if _, err := s.Jobs().DeleteJob(r.Context(), &runpb.DeleteJobRequest{Name: j.GetName(),
+	if _, err := v1Call(r.Context(), s.Jobs().DeleteJob, &runpb.DeleteJobRequest{Name: j.GetName(),
 		ValidateOnly: r.URL.Query().Get("dryRun") == "all"}); err != nil {
 		v1Write(w, err, nil)
 		return
