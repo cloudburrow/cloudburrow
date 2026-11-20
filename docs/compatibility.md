@@ -2017,6 +2017,12 @@ prompt), `config_mask`, and `StreamingRecognize` (`speechstream.go`, `speechstre
 OpenAI's Whisper base model rather than Google's: `chirp`, `chirp_2`, `chirp_3`, `chirp_telephony`,
 `long`, `short`, `telephony` and `telephony_short`; `medical_dictation` and `medical_conversation`
 are UNIMPLEMENTED.
+gcloud's v2 commands (`gcloud alpha ml speech recognizers create`, `run-short`, `run-batch`, ...)
+cannot reach this endpoint: gcloud 593.0.0 replaces the `speech` override with
+`https://LOCATION-speech.googleapis.com/` for each call (`api_lib/ml/speech/client.py`, #1945;
+[security](security.md)), so no test runs them, and `gcloud ml speech recognize` is v1's JSON,
+which is not served (v1 is gRPC only, below). The console's Speech-to-Text pages (Transcriptions,
+Recognizers, Custom classes, Phrase sets) drive the same API through the official client.
 UNVERIFIED (re-read 2026-11-19: <https://docs.cloud.google.com/speech-to-text/docs/reference/rest/v2/projects.locations.recognizers>):
 `recognizer_id`'s exact rule (4 to 63 characters of `[a-z0-9-]`, starting with a letter, here), the
 locations served (any), `uid` and `etag` formats, the 30-day `expire_time`, the texts of the errors.
