@@ -1270,6 +1270,23 @@
         "verification": "image-digest",
         "digestNote": "The registry lists this manifest under infrastructure-public-image-f1fbebc, v0.64.0 and latest; upstream cloudbuild.yaml:17-29 tags each build infrastructure-public-image-$SHORT_SHA."
       },
+      "egressProbeBase": {
+        "$comment": "test/compat/testdata/egress/Dockerfile builds FROM this digest: the no-egress container of TestServedClientsSendNothingOffTheMachine (#1981), Python and Node with Google's client libraries on an --internal network.",
+        "image": "node:24.11.1-bookworm-slim",
+        "digest": "sha256:48abc13a19400ca3985071e287bd405a1d99306770eb81d61202fb6b65cf0b57",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "license": "MIT (Node.js) and DFSG-free Debian packages (see /usr/share/doc/*/copyright)",
+        "redistribution": "not published: built locally by the compat test only",
+        "scope": "test-only",
+        "usedBy": "test/compat/egresscontainer_test.go (#1981)",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "notes": "Multi-arch OCI index, resolved 2026-11-20 with docker buildx imagetools inspect.",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect node:24.11.1-bookworm-slim`."
+      },
       "iso14496_26Conformance": {
         "version": "ISO/IEC 14496-26:2024 (2nd edition), mpeg4audio-conformance2ndEd_20230125",
         "source": "https://standards.iso.org/iso-iec/14496/-26/ed-2/en/",
