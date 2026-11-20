@@ -10,6 +10,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -167,9 +168,13 @@ func (s *dataTransferSvc) Start(ctx context.Context) error {
 // value), so that address answers Data Transfer's discovery document,
 // $discovery/rest?version=v1, and passes /v1/ to this service.
 // BigQuery's own API is /bigquery/v2/ and its discovery version=v2, which
-// the BigQuery backend answers as before.
+// the BigQuery backend answers as before, and so is the BigQuery Connection
+// API (#1755), whose /v1/projects/{p}/locations/{l}/connections paths the
+// front serves on the same port: they are never Data Transfer's.
 func (s *dataTransferSvc) bigQueryLocal(r *http.Request) http.Handler {
 	switch {
+	case connectionAPIPath.MatchString(r.URL.Path):
+		return nil
 	case r.URL.Path == "/$discovery/rest" && r.URL.Query().Get("version") == "v1":
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			doc, err := datatransfer.DiscoveryDocument("http://" + r.Host + "/")
@@ -193,6 +198,11 @@ func (s *dataTransferSvc) bigQueryLocal(r *http.Request) http.Handler {
 	}
 	return nil
 }
+
+// connectionAPIPath is a BigQuery Connection API v1 path, the BigQuery
+// front's (internal/bigqueryfront's connectionRoute), with or without a
+// connection ID and a :getIamPolicy-style verb.
+var connectionAPIPath = regexp.MustCompile(`^/v1/projects/[^/]+/locations/[^/]+/connections(?:[/:]|$)`)
 
 func (s *dataTransferSvc) Stop(ctx context.Context) error {
 	var errs []error
