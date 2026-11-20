@@ -195,6 +195,37 @@ and nothing in it reaches Google. A red scheduled run, or one dispatched on main
 `workflow-red` issue through `report-red-runs.yml`. `test/repo/nightly_sql_workflow_test.go` keeps it
 in shape.
 
+### The local AI shard
+
+The compat job's `localai` shard (#1985) runs the compat tests that need the local generation or
+embedding runtime, which skip on every other shard's instance: Vertex AI's generation and
+embeddings through the official SDKs, BigQuery's AI and ML functions over them, `ML.ANNOTATE_IMAGE`'s
+MediaPipe models, Document AI's Tesseract, Speech-to-Text's whisper.cpp, BigQuery ML's imported
+ONNX models, and the console's Studio and Embeddings pages. `scripts/compat-shards.sh` names them
+(`COMPAT_LOCALAI_TESTS`, `COMPAT_BROWSER_LOCALAI_SHARD_TESTS`), and the shard runs those alone.
+Its instance is the `make build-onnx` CLI, started with `--local-ai-model` and
+`--local-ai-embeddings`, and needs, beyond the other shards:
+
+- **The LiteRT-LM image**, built as `make litert-lm` builds it, from `deploy/litert-lm`, and kept
+  as a saved image in an Actions cache keyed by that directory's files, so it is built again only
+  when they change (a Bazel build from Google's source; 6m17s on 16 cores, so expect several times
+  that on the runner's four vCPUs, which the shard's 180-minute job timeout allows for, beside its suite's 120 minutes).
+- **The pinned generation model and ONNX Runtime**: `scripts/localai-models.sh <dir>` fetches
+  `localai.generationModel` (Gemma 4 E2B's community LiteRT-LM conversion, 2,588,147,712 bytes, at
+  the pinned Hugging Face revision; public and ungated, so no sign-in and no token) and, on Linux
+  amd64, `localai.onnxRuntime` (`libonnxruntime.so` from Microsoft's PyPI wheel), checks each file's
+  size and SHA-256 from `dependencies.json`, and prints `CLOUDBURROW_LOCALAI_MODEL` and
+  `ONNXRUNTIME_LIB`. Cached keyed by those pins alone.
+- **The instance's own models**, which `up` and the tests fetch into `<state-dir>/models`, each
+  verified by its pin in `internal/localai`: EmbeddingGemma's and EmbeddingGemma 2's community ONNX
+  conversions, whisper.cpp's, Tesseract's and MediaPipe's. Cached keyed by those files, and saved
+  after the suite whatever its result.
+
+The shard is part of the compat job, so it gates `ci-green` and, through main's push run, the
+scheduled release, like every other shard. Run it locally with
+`scripts/verify-local.sh --shards localai`, after `scripts/localai-models.sh <dir>` and with
+`ONNXRUNTIME_LIB` set (on macOS, Homebrew's `onnxruntime`).
+
 ### The embedded BigQuery emulator
 
 Every CLI embeds CloudBurrow's build of the BigQuery emulator (#1061,
