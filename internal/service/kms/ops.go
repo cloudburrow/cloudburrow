@@ -101,8 +101,10 @@ func (s *Server) GetPublicKey(_ context.Context, req *kmspb.GetPublicKeyRequest)
 	if err != nil {
 		return nil, err
 	}
-	if algorithms[v.algorithm()].kem > 0 {
+	if spec := algorithms[v.algorithm()]; spec.kem > 0 {
 		return v.kemPublicKey(req.GetPublicKeyFormat())
+	} else if spec.pqSign() || spec.xwing {
+		return v.pqPublicKey(req.GetPublicKeyFormat())
 	}
 	der, err := v.publicDER()
 	if err != nil {
@@ -198,6 +200,13 @@ func (s *Server) AsymmetricSign(_ context.Context, req *kmspb.AsymmetricSignRequ
 		return nil, err
 	}
 	spec := algorithms[v.algorithm()]
+	if spec.pqSign() {
+		sig, err := v.signPQ(data, req.GetDigest())
+		if err != nil {
+			return nil, err
+		}
+		return v.signed(sig, digestOK, dataOK), nil
+	}
 	raw := spec.hash == 0
 	switch {
 	case raw && hasDigest:
@@ -555,8 +564,12 @@ func (s *Server) GenerateRandomBytes(_ context.Context, req *kmspb.GenerateRando
 	return &kmspb.GenerateRandomBytesResponse{Data: b, DataCrc32C: crc(b)}, nil
 }
 
-// kemKey is an ML-KEM version's decapsulation key, from its stored seed.
+// kemKey is an ML-KEM or X-Wing version's decapsulation key, from its
+// stored seed.
 func (v keyVersion) kemKey() (decapsulator, error) {
+	if algorithms[v.algorithm()].xwing {
+		return xwingKey{seed: v.Material}, nil
+	}
 	var (
 		dk  decapsulator
 		err error
@@ -600,8 +613,8 @@ func (v keyVersion) kemPublicKey(f kmspb.PublicKey_PublicKeyFormat) (*kmspb.Publ
 		PublicKeyFormat: f, PublicKey: &kmspb.ChecksummedData{Data: ek, Crc32CChecksum: crc(ek)}}, nil
 }
 
-// Decapsulate recovers the shared secret from an ML-KEM ciphertext made with
-// the version's encapsulation key.
+// Decapsulate recovers the shared secret from an ML-KEM or X-Wing
+// ciphertext made with the version's encapsulation key.
 func (s *Server) Decapsulate(_ context.Context, req *kmspb.DecapsulateRequest) (*kmspb.DecapsulateResponse, error) {
 	ct := req.GetCiphertext()
 	if len(ct) == 0 {
@@ -624,8 +637,9 @@ func (s *Server) Decapsulate(_ context.Context, req *kmspb.DecapsulateRequest) (
 	}
 	secret, err := dk.Decapsulate(ct)
 	if err != nil {
-		// Only a ciphertext of the wrong length fails: ML-KEM rejects
-		// implicitly, returning a pseudo-random secret for a bad one.
+		// Only a ciphertext of the wrong length fails (or, for X-Wing, an
+		// X25519 share of low order): ML-KEM rejects implicitly, returning
+		// a pseudo-random secret for a bad one.
 		return nil, apierror.Wrap(apierror.InvalidArgument("ciphertext is %d bytes, not a %s ciphertext", len(ct), v.algorithm()))
 	}
 	sum := crc32c(secret)

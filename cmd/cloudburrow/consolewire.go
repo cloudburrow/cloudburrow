@@ -87,6 +87,8 @@ type consoleDeps struct {
 	backupdr *backupdr.Server
 	// privateCA is Certificate Authority Service (#1834), nil unless enabled.
 	privateCA *privateCAService
+	// analyticsHub is BigQuery sharing (#1960), nil without BigQuery.
+	analyticsHub *analyticsHubSvc
 	// gke is the Kubernetes Engine API (#1913), nil unless enabled.
 	gke *gkeService
 	// monitoring is Cloud Monitoring (#1939), nil unless enabled.
@@ -179,6 +181,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		}
 		providers = append(providers, projectsProvider{registry: d.projects}, h, tagsProvider{registry: d.projects},
 			projectIAMProvider{registry: d.projects, iam: d.iam}, iamRolesProvider{registry: d.projects}, iamGroupsProvider{registry: d.projects},
+			iamSSOProfilesProvider{registry: d.projects}, iamSSOAssignmentsProvider{registry: d.projects},
 			iamServiceAccountsProvider{registry: d.projects}, iamWorkloadIdentityProvider{registry: d.projects}, iamAuditProvider{registry: d.projects},
 			iamOrgPoliciesProvider{registry: d.projects}, iamLabelsProvider{registry: d.projects}, iamSettingsProvider{registry: d.projects})
 	}
@@ -286,8 +289,11 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		if runPubSub != "" {
 			// Eventarc's own Triggers page (#1877), on the Run port, over
 			// Pub/Sub, its transport.
-			providers = append(providers, eventarcProvider{run: runProvider{runAddr: runAddrOf(d.run),
-				defaultProject: d.cfg.DefaultProject(), pubsubAddr: runPubSub}})
+			eaRun := runProvider{runAddr: runAddrOf(d.run), defaultProject: d.cfg.DefaultProject(), pubsubAddr: runPubSub}
+			providers = append(providers, eventarcProvider{run: eaRun},
+				// Eventarc Advanced's pages and its channels (#1947).
+				eaBusesProvider{eaAdvBase{eaRun}}, eaPipelinesProvider{eaAdvBase{eaRun}}, eaEnrollmentsProvider{eaAdvBase{eaRun}},
+				eaSourcesProvider{eaAdvBase{eaRun}}, eaChannelsProvider{eaAdvBase{eaRun}})
 		}
 	}
 	if enabled[config.ServiceSecrets] && d.secrets != nil {
@@ -301,6 +307,10 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		providers = append(providers, kmsProvider{svc: d.kms}, kmsEkmProvider{svc: d.kms}, kmsAutokeyProvider{svc: d.kms}, kmsInventoryProvider{svc: d.kms}, kmsHsmProvider{svc: d.kms})
 	}
 	// Certificate Authority Service (#1834) runs in this process too.
+	// BigQuery's Sharing (Analytics Hub) page (#1960).
+	if d.analyticsHub != nil {
+		providers = append(providers, analyticsHubProvider{svc: d.analyticsHub})
+	}
 	if enabled[config.ServicePrivateCA] && d.privateCA != nil {
 		providers = append(providers, privateCAProvider{svc: d.privateCA}, privateCATemplatesProvider{svc: d.privateCA})
 	}

@@ -142,7 +142,7 @@ func TestIamRouting(t *testing.T) {
 	_, iam, _, _ = iamFixture(t, store.NewMemory())
 	for res, want := range map[string]codes.Code{
 		"":                                         codes.InvalidArgument,
-		ring + "/importJobs/j":                     codes.Unimplemented,
+		ring + "/importJobs/j":                     codes.NotFound,
 		loc + "/ekmConnections/absent":             codes.NotFound,
 		loc + "/ekmConnections/bad.id":             codes.InvalidArgument,
 		"projects/p/locations/global/ekmConfig":    codes.InvalidArgument,

@@ -404,6 +404,22 @@ func (s *Instances) overlayPartition(p *instancepb.InstancePartition) {
 	p.UpdateTime = c.part.GetUpdateTime()
 }
 
+// CreateInstancePartition creates a partition in an Enterprise Plus
+// instance: "Geo-partitioning" is an Enterprise Plus feature
+// (https://docs.cloud.google.com/spanner/docs/editions-overview), so an
+// instance of a lower edition is refused FAILED_PRECONDITION, as the other
+// edition gates are (editions.go, #1974). A missing instance is the
+// emulator's NOT_FOUND.
+func (s *Instances) CreateInstancePartition(ctx context.Context, req *instancepb.CreateInstancePartitionRequest) (*longrunningpb.Operation, error) {
+	if _, err := s.emu.GetInstance(ctx, &instancepb.GetInstanceRequest{Name: req.GetParent()}); err != nil {
+		return nil, err
+	}
+	if ed := s.edition(req.GetParent()); editionRank(ed) < editionRank(instancepb.Instance_ENTERPRISE_PLUS) {
+		return nil, featureNeeds("CreateInstancePartition", "geo-partitioning", instancepb.Instance_ENTERPRISE_PLUS, ed)
+	}
+	return s.emu.CreateInstancePartition(ctx, req)
+}
+
 func (s *Instances) GetInstancePartition(ctx context.Context, req *instancepb.GetInstancePartitionRequest) (*instancepb.InstancePartition, error) {
 	p, err := s.emu.GetInstancePartition(ctx, req)
 	if err != nil {

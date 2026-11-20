@@ -371,6 +371,10 @@ type Endpoints struct {
 	// (bigquerydatatransfer.googleapis.com, #1948): gRPC and JSON on one
 	// port, served when BigQuery is.
 	DataTransfer int `json:"dataTransfer"`
+	// AnalyticsHub is the host port of BigQuery sharing, formerly
+	// Analytics Hub (analyticshub.googleapis.com, #1960): gRPC and JSON on
+	// one port, served when BigQuery is.
+	AnalyticsHub int `json:"analyticsHub"`
 	// ONNX is the host port of the ONNX runner (#1711), which runs BigQuery
 	// ML's imported ONNX models for the BigQuery front, published to the
 	// cluster through cloudburrow-host. CloudBurrow's own API, not a
@@ -450,6 +454,7 @@ func (e *Endpoints) fields() []endpointField {
 		{"storageinsights", &e.StorageInsights},
 		{"storagetransfer", &e.StorageTransfer},
 		{"datatransfer", &e.DataTransfer},
+		{"analyticshub", &e.AnalyticsHub},
 		{"onnx", &e.ONNX},
 		{"tfconvert", &e.TFConvert},
 	}
@@ -863,6 +868,10 @@ func Default() Config {
 			// The BigQuery Data Transfer Service (#1948): 9031 to 9033 are
 			// taken by other branches, so 9034.
 			DataTransfer: 9034,
+			// BigQuery sharing (#1960): 9034 to 9041 are taken by open
+			// branches (BigQuery Data Transfer, the Storage companions,
+			// Workflows), so 9042.
+			AnalyticsHub: 9042,
 			// OS-assigned. The port is not what enables local AI —
 			// LocalAI.ModelPath is. A configured port with no model binds
 			// nothing, so there is no endpoint answering every request with

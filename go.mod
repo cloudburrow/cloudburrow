@@ -48,6 +48,7 @@ require (
 	github.com/apache/iceberg-go v0.7.0
 	github.com/chromedp/cdproto v0.158.4
 	github.com/chromedp/chromedp v0.21.0
+	github.com/cloudflare/circl v1.6.5
 	github.com/creack/pty v1.1.24
 	github.com/darui3018823/opus v1.8.0
 	github.com/daulet/tokenizers v1.27.0

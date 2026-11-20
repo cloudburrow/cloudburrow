@@ -420,6 +420,7 @@ func TestSpannerUpdateInstancePartition(t *testing.T) {
 	f := newSpannerAdmin(t, "cb-upart", "upartdb")
 	ctx := f.ctx
 	name := f.instance + "/instancePartitions/p1"
+	spannerEnterprisePlus(t, ctx, f.inst, f.instance)
 	cop, err := f.inst.CreateInstancePartition(ctx, &instancepb.CreateInstancePartitionRequest{Parent: f.instance, InstancePartitionId: "p1",
 		InstancePartition: &instancepb.InstancePartition{Name: name, Config: f.config(), DisplayName: "partition one",
 			ComputeCapacity: &instancepb.InstancePartition_NodeCount{NodeCount: 1}}})

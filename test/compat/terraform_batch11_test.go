@@ -360,6 +360,7 @@ resource "google_spanner_instance" "i" {
   config       = "emulator-config"
   display_name = "Partitions"
   num_nodes    = 1
+  edition      = "ENTERPRISE_PLUS" # geo-partitioning needs it (#1974)
 }
 resource "google_spanner_database" "d" {
   project             = google_spanner_instance.i.project

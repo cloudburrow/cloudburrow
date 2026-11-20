@@ -131,9 +131,8 @@ func TestKMSIamPolicyIsStoredNotEnforced(t *testing.T) {
 				Permissions: []string{"cloudkms.keyRings.get"}}); err != nil || len(r.GetPermissions()) != 0 {
 				t.Errorf("TestIamPermissions on a missing ring = %v, %v; want an empty set (cloudkms_v1.yaml:59-64)", r, err)
 			}
-			if _, err := c.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: ring.GetName() + "/importJobs/j"}); kmsCode(variant, err) != codes.Unimplemented ||
-				!strings.Contains(status.Convert(err).Message(), "import jobs") {
-				t.Errorf("GetIamPolicy on an import job = %v, want UNIMPLEMENTED naming import jobs", err)
+			if _, err := c.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: ring.GetName() + "/importJobs/j"}); kmsCode(variant, err) != codes.NotFound {
+				t.Errorf("GetIamPolicy on a missing import job = %v, want NOT_FOUND (TestKMSImportJobIamPolicy)", err)
 			}
 		})
 	}

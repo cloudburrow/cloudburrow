@@ -1,6 +1,7 @@
 package bigqueryfront
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -36,7 +37,10 @@ import (
 // fraction_lists_to_search say. lexical_search_columns and
 // lexical_search_query_value make it a hybrid search (hybridsearch.go).
 //
-// 501, named: an ObjectRef column or query value (#1798). UNVERIFIED (re-read 2026-11-18; the page quotes no error
+// An ObjectRef column with autonomous embedding generation, an ObjectRef
+// query value and an ObjectRef query column are served as STRING ones are,
+// each ObjectRef "embedded at runtime using the same connection and
+// endpoint" (#1983, search_functions#objectref-search). UNVERIFIED (re-read 2026-11-18; the page quotes no error
 // text): the refusals' words; DOT_PRODUCT's distance as the negative dot
 // product; a base row with an empty (or NULL) array being skipped; a
 // query row whose array's length differs from a base row's failing the
@@ -252,7 +256,7 @@ func (f front) rewriteVectorSearch(r *http.Request, q queryOptions, text string,
 
 // searchEmbedder embeds STRING query values for a base table with
 // autonomous embedding generation.
-func (f front) searchEmbedder(r *http.Request, project string, e *genEmbedding, fn string) (func(string) ([]float64, int, string), int, string) {
+func (f front) searchEmbedder(r *http.Request, project string, e *genEmbedding, fn string) (func([]promptPiece) ([]float64, int, string), int, string) {
 	if e.Connection != "" {
 		parts := strings.Split(e.Connection, ".")
 		cn, ok := f.connections.lookup(connectionProject(parts[0], f.numbers), parts[1], parts[2])
@@ -268,8 +272,10 @@ func (f front) searchEmbedder(r *http.Request, project string, e *genEmbedding, 
 		task = "RETRIEVAL_QUERY"
 	}
 	a := aiResolved{rm: &remoteModel{Model: e.Model, Endpoint: e.Endpoint, Location: e.Location, Embedding: true}, taskType: task, dims: e.Dims}
-	return func(s string) ([]float64, int, string) {
-		vec, status := f.embedVector(r.Context(), project, a, s)
+	return func(ps []promptPiece) ([]float64, int, string) {
+		// A STRING or an ObjectRef (#1983), "embedded at runtime using
+		// the same connection and endpoint" as the base table's column.
+		vec, status := f.embedPieces(r, project, a, ps)
 		if status != "" {
 			return nil, 400, fn + " could not embed its query value: " + status
 		}
@@ -310,7 +316,7 @@ func (f front) vectorSearchSubquery(r *http.Request, q queryOptions, c vectorSea
 	}
 	// The column to search: ARRAY<FLOAT64>, or STRING with generation.
 	var baseVec, indexColumn string
-	var embed func(string) ([]float64, int, string)
+	var embed func([]promptPiece) ([]float64, int, string)
 	colType := ""
 	for _, fl := range fields {
 		if strings.EqualFold(str(fl, "name"), c.column) {
@@ -323,10 +329,14 @@ func (f front) vectorSearchSubquery(r *http.Request, q queryOptions, c vectorSea
 		return "", 400, "Column " + c.column + " not found in " + dataset + "." + table
 	case isFloatArray(colType):
 		baseVec, indexColumn = sqlIdent(c.column), c.column
-	case strings.EqualFold(colType, "STRING"):
+	case strings.EqualFold(colType, "STRING") || strings.HasPrefix(strings.ToUpper(colType), "STRUCT"):
+		// A STRING or ObjectRef column (#1983) with autonomous embedding
+		// generation: "The table must have autonomous embedding generation
+		// enabled on this column."
 		e := f.tables.get(streamKey(project, dataset, table), str(meta, "creationTime")).Embedding
-		if e == nil || !strings.EqualFold(e.Source, c.column) {
-			return "", 400, "The STRING column_to_search " + c.column + " of VECTOR_SEARCH must have autonomous embedding generation enabled on " + dataset + "." + table
+		if e == nil || !strings.EqualFold(e.Source, c.column) || e.SourceRef != strings.HasPrefix(strings.ToUpper(colType), "STRUCT") {
+			return "", 400, "The " + map[bool]string{true: "ObjectRef", false: "STRING"}[strings.HasPrefix(strings.ToUpper(colType), "STRUCT")] +
+				" column_to_search " + c.column + " of VECTOR_SEARCH must have autonomous embedding generation enabled on " + dataset + "." + table
 		}
 		baseVec, indexColumn = sqlIdent(e.Column)+".result", e.Column
 		var code int
@@ -334,10 +344,8 @@ func (f front) vectorSearchSubquery(r *http.Request, q queryOptions, c vectorSea
 		if embed, code, msg = f.searchEmbedder(r, project, e, "VECTOR_SEARCH"); code != 0 {
 			return "", code, msg
 		}
-	case strings.HasPrefix(strings.ToUpper(colType), "STRUCT"):
-		return "", 501, "Not implemented here: VECTOR_SEARCH over an ObjectRef column (#1798). Nothing was run."
 	default:
-		return "", 400, "The column_to_search " + c.column + " of VECTOR_SEARCH must be ARRAY<FLOAT64>, or a STRING column with autonomous embedding generation; it is " + colType
+		return "", 400, "The column_to_search " + c.column + " of VECTOR_SEARCH must be ARRAY<FLOAT64>, or a STRING or ObjectRef column with autonomous embedding generation; it is " + colType
 	}
 	topK := int64(10)
 	if v, ok := c.named["top_k"]; ok {
@@ -431,6 +439,7 @@ func (f front) vectorSearchSubquery(r *http.Request, q queryOptions, c vectorSea
 	if v, single := c.named["query_value"]; single {
 		var qv string
 		var str *string
+		var valueRef *objRef
 		switch {
 		case strings.HasPrefix(v, "@"):
 			s, isString := queryParameterString(q, v)
@@ -445,15 +454,35 @@ func (f front) vectorSearchSubquery(r *http.Request, q queryOptions, c vectorSea
 		default:
 			if s, ok := unquoteString(v); ok {
 				str = &s
+			} else if embed != nil {
+				// An expression: an ObjectRef or STRING to embed (#1983),
+				// or a vector.
+				ps, isVec, code, msg := f.searchValuePieces(r, q, v)
+				switch {
+				case code != 0:
+					return "", code, msg
+				case isVec:
+					qv = v
+				case ps == nil:
+					return "", 400, "The query_value of VECTOR_SEARCH can't be NULL"
+				case ps[0].ref != nil:
+					valueRef = ps[0].ref
+				default:
+					str = &ps[0].text
+				}
 			} else {
 				qv = v
 			}
 		}
-		if str != nil {
+		if str != nil || valueRef != nil {
 			if embed == nil {
 				return "", 400, "A STRING query_value of VECTOR_SEARCH needs a STRING column_to_search with autonomous embedding generation; " + c.column + " is " + colType
 			}
-			vec, code, msg := embed(*str)
+			ps := []promptPiece{{ref: valueRef}}
+			if str != nil {
+				ps = []promptPiece{{text: *str}}
+			}
+			vec, code, msg := embed(ps)
 			if code != 0 {
 				return "", code, msg
 			}
@@ -505,7 +534,12 @@ func (f front) vectorSearchSubquery(r *http.Request, q queryOptions, c vectorSea
 	if code != 0 {
 		return "", code, msg
 	}
-	want := func(ty string) bool { return isFloatArray(ty) || embed != nil && strings.EqualFold(ty, "STRING") }
+	isRefType := func(ty string) bool {
+		return strings.EqualFold(ty, "RECORD") || strings.HasPrefix(strings.ToUpper(ty), "STRUCT")
+	}
+	want := func(ty string) bool {
+		return isFloatArray(ty) || embed != nil && (strings.EqualFold(ty, "STRING") || isRefType(ty))
+	}
 	qcol, qtype := "", ""
 	if v, ok := c.named["query_column_to_search"]; ok {
 		s, ok := unquoteString(v)
@@ -540,27 +574,40 @@ func (f front) vectorSearchSubquery(r *http.Request, q queryOptions, c vectorSea
 		}
 	}
 	if !want(qtype) {
-		return "", 400, "The query column " + qcol + " of VECTOR_SEARCH must be ARRAY<FLOAT64>" + map[bool]string{true: " or STRING", false: ""}[embed != nil] + "; it is " + qtype
+		return "", 400, "The query column " + qcol + " of VECTOR_SEARCH must be ARRAY<FLOAT64>" + map[bool]string{true: ", STRING or ObjectRef", false: ""}[embed != nil] + "; it is " + qtype
 	}
 	qvec := "q0." + sqlIdent(qcol)
-	if strings.EqualFold(qtype, "STRING") {
-		// Each distinct query string is embedded here, and joined back.
-		_, rows, code, msg := f.queryAllRows(r, probeOptions(q, qsql), "SELECT DISTINCT "+sqlIdent(qcol)+" FROM ("+qsql+")")
+	if strings.EqualFold(qtype, "STRING") || isRefType(qtype) {
+		// Each distinct query string, or ObjectRef (#1983, read as its
+		// TO_JSON_STRING), is embedded here, and joined back.
+		key := "q0." + sqlIdent(qcol)
+		if isRefType(qtype) {
+			key = "TO_JSON_STRING(" + key + ")"
+		}
+		_, rows, code, msg := f.queryAllRows(r, probeOptions(q, qsql), "SELECT DISTINCT "+key+" FROM ("+qsql+") AS q0")
 		if code != 0 {
 			return "", code, msg
 		}
 		var pairs []string
 		for _, row := range rows {
-			if len(row) == 0 || row[0] == nil {
+			if len(row) == 0 || row[0] == nil || isRefType(qtype) && *row[0] == "null" {
 				return "", 400, "VECTOR_SEARCH could not embed its query value: " + embedNullStatus
 			}
-			vec, code, msg := embed(*row[0])
+			ps := []promptPiece{{text: *row[0]}}
+			if isRefType(qtype) {
+				o, ok := parseObjRef([]byte(*row[0]))
+				if !ok {
+					return "", 400, "The query column " + qcol + " of VECTOR_SEARCH must be ARRAY<FLOAT64>, STRING or ObjectRef; it is a STRUCT that is not an ObjectRef"
+				}
+				ps = []promptPiece{{ref: &o}}
+			}
+			vec, code, msg := embed(ps)
 			if code != 0 {
 				return "", code, msg
 			}
 			pairs = append(pairs, "STRUCT("+sqlString(*row[0])+" AS s, "+floatArrayLiteral(vec)+" AS e)")
 		}
-		qvec = "(SELECT m.e FROM UNNEST(ARRAY<STRUCT<s STRING, e ARRAY<FLOAT64>>>[" + strings.Join(pairs, ", ") + "]) AS m WHERE m.s = q0." + sqlIdent(qcol) + ")"
+		qvec = "(SELECT m.e FROM UNNEST(ARRAY<STRUCT<s STRING, e ARRAY<FLOAT64>>>[" + strings.Join(pairs, ", ") + "]) AS m WHERE m.s = " + key + ")"
 	}
 	var queryCols []string
 	for _, col := range qcols {
@@ -634,4 +681,30 @@ func vectorIndexStatement(text string) string {
 		}
 	}
 	return ""
+}
+
+// searchValuePieces evaluates a search's query value expression that is
+// neither a literal nor a query parameter (#1983): its one piece, a STRING
+// or an ObjectRef (OBJ.MAKE_REF's, already SQL), nil for a NULL; isVec
+// when it is neither, such as an ARRAY<FLOAT64>, which the caller reads
+// itself.
+func (f front) searchValuePieces(r *http.Request, q queryOptions, expr string) (ps []promptPiece, isVec bool, code int, msg string) {
+	_, rows, code, msg := f.queryAllRows(r, probeOptions(q, expr), "SELECT TO_JSON_STRING("+expr+")")
+	if code != 0 {
+		return nil, false, code, msg
+	}
+	if len(rows) != 1 || len(rows[0]) != 1 || rows[0][0] == nil {
+		return nil, false, 0, ""
+	}
+	raw := json.RawMessage(*rows[0][0])
+	ps, ok, isStruct := contentPieces(raw)
+	switch {
+	case ok:
+		return ps, false, 0, ""
+	case isStruct:
+		return nil, false, 400, "A STRUCT query value is not an ObjectRef: an ObjectRef is STRUCT<uri STRING, version STRING, authorizer STRING, details JSON>"
+	case string(bytes.TrimSpace(raw)) == "null":
+		return nil, false, 0, ""
+	}
+	return nil, true, 0, ""
 }

@@ -155,7 +155,7 @@ func servePush(c *CloudBuildServer, w http.ResponseWriter, r *http.Request) bool
 		w.WriteHeader(http.StatusNoContent)
 		return true
 	}
-	if _, err := c.runTrigger(withCaller(r).Context(), name, "", "", nil, pushBody(raw)); err != nil {
+	if _, err := c.runTrigger(withCaller(r).Context(), name, "", "", nil, pushBody(raw), true); err != nil {
 		slog.Warn("cloudbuild: a Pub/Sub trigger's build was refused", "trigger", name, "err", err)
 	}
 	w.WriteHeader(http.StatusNoContent)

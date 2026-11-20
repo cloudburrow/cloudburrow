@@ -21,6 +21,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/service/kms"
+	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/secrets"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 	"github.com/cloudburrow/cloudburrow/internal/telemetry"
@@ -63,6 +64,9 @@ type secretsService struct {
 	// kms is the instance's Cloud KMS, which encrypts the versions of a
 	// secret with customer-managed keys (#1453); nil when KMS is not enabled.
 	kms func() *kms.Server
+	// registry is Resource Manager's, which binds a new secret's tags
+	// (#1961); nil refuses them.
+	registry func() *resourcemanager.Registry
 }
 
 // Store returns the Secret Manager store, available after Start.
@@ -193,6 +197,14 @@ func (s *secretsService) Start(ctx context.Context) error {
 		st.SetKeyService(func() secrets.KeyService {
 			if api := s.kms(); api != nil {
 				return api
+			}
+			return nil
+		})
+	}
+	if s.registry != nil {
+		st.SetTagBinder(func() secrets.TagBinder {
+			if reg := s.registry(); reg != nil {
+				return reg
 			}
 			return nil
 		})

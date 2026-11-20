@@ -16,13 +16,13 @@ Do not edit these files by hand.
 | [Artifact Registry](artifactregistry.md) | 50 | 50 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Build](cloudbuild.md) | 19 | 19 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Secure Source Manager](securesourcemanager.md) | 53 | 53 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Developer Connect](developerconnect.md) | 26 | 11 | 0 | 15 | 0 | 0 | 0 | 0 |
-| [Eventarc](eventarc.md) | 39 | 7 | 0 | 32 | 0 | 0 | 0 | 0 |
+| [Developer Connect](developerconnect.md) | 26 | 13 | 0 | 13 | 0 | 0 | 0 | 0 |
+| [Eventarc](eventarc.md) | 42 | 42 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Container Analysis](containeranalysis.md) | 18 | 18 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Functions v2](functions.md) | 8 | 8 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Functions v1](functionsv1.md) | 11 | 11 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Run v1 (Knative API)](runv1.md) | 76 | 76 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Cloud KMS](kms.md) | 63 | 63 | 0 | 0 | 0 | 0 | 0 | 88 |
+| [Cloud KMS](kms.md) | 63 | 63 | 0 | 0 | 0 | 0 | 0 | 90 |
 | [IAM (custom roles, service accounts, deny policies, organization policies)](iam.md) | 48 | 48 | 0 | 0 | 0 | 0 | 0 | 4 |
 | [Resource Manager v3 (Projects, Folders, Organizations, Tags)](resourcemanager.md) | 54 | 54 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Resource Manager v1 REST (projects, org policies; liens on v1 and v3)](resourcemanagerv1.md) | 38 | 38 | 0 | 0 | 0 | 0 | 0 | 0 |
@@ -48,10 +48,11 @@ Do not edit these files by hand.
 | [Compute Engine API (v1): VPC networking](compute.md) | 166 | 71 | 0 | 74 | 21 | 0 | 0 | 0 |
 | [Cloud Storage companion APIs (Batch Operations, Insights, Transfer v1)](storagejobs.md) | 50 | 50 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Backup and DR Service API (v1)](backupdr.md) | 61 | 46 | 0 | 15 | 0 | 0 | 0 | 0 |
-| [Cloud Identity API (v1)](cloudidentity.md) | 70 | 18 | 0 | 52 | 0 | 0 | 0 | 0 |
+| [Cloud Identity API (v1)](cloudidentity.md) | 70 | 39 | 0 | 31 | 0 | 0 | 0 | 0 |
 | [Workload Identity Federation (IAM v1 pools, STS v1)](workloadidentity.md) | 47 | 22 | 0 | 25 | 0 | 0 | 0 | 0 |
 | [Certificate Authority Service (v1)](privateca.md) | 29 | 29 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Kubernetes Engine API (v1)](gke.md) | 37 | 16 | 0 | 19 | 2 | 0 | 0 | 0 |
+| [BigQuery sharing (Analytics Hub) API (v1)](analyticshub.md) | 29 | 20 | 0 | 8 | 1 | 0 | 0 | 0 |
 | [Cloud Monitoring API (v3) and Dashboards API (v1)](monitoring.md) | 56 | 52 | 0 | 2 | 2 | 0 | 0 | 0 |
 | [BigQuery Data Transfer Service (v1)](datatransfer.md) | 16 | 15 | 0 | 0 | 1 | 0 | 0 | 0 |
 

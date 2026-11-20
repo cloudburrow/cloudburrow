@@ -62,7 +62,7 @@ const instanceService = "/google.spanner.admin.instance.v1.InstanceAdmin/"
 var claimed = map[string]bool{"GetInstance": true, "ListInstances": true, "UpdateInstance": true, "DeleteInstance": true, "CreateInstance": true,
 	"GetInstanceConfig": true, "ListInstanceConfigs": true, "CreateInstanceConfig": true, "UpdateInstanceConfig": true,
 	"DeleteInstanceConfig": true, "ListInstanceConfigOperations": true, "MoveInstance": true,
-	"GetInstancePartition": true, "ListInstancePartitions": true, "UpdateInstancePartition": true, "DeleteInstancePartition": true}
+	"CreateInstancePartition": true, "GetInstancePartition": true, "ListInstancePartitions": true, "UpdateInstancePartition": true, "DeleteInstancePartition": true}
 
 var instanceNameRe = regexp.MustCompile(`^projects/[^/]+/instances/[^/]+$`)
 

@@ -73,8 +73,78 @@
 # in 44645694075 (no test hung; TestTerraformSQLProvisionScript had run
 # 16 s), and these 28 tests are 1,666 s of its 3,260.
 
+# An eleventh, localai, is an instance of a -tags onnx build (make
+# build-onnx, run with ONNXRUNTIME_LIB) started with the pinned Gemma 4 E2B
+# generation model (--local-ai-model, the LiteRT-LM runtime image `make
+# litert-lm` builds) and --local-ai-embeddings (EmbeddingGemma's community
+# ONNX conversion), for the compat tests that need the local generation or
+# embedding runtime (#1985), which skip on every other shard's instance:
+# Vertex AI's generation and embeddings, BigQuery's AI and ML functions over
+# them, ML.ANNOTATE_IMAGE's MediaPipe models, Document AI's Tesseract and
+# Speech-to-Text's whisper.cpp, which the same endpoint serves, and BigQuery
+# ML's imported ONNX models, which only an onnx build runs. COMPAT_RUN is
+# that list alone, so the BigQuery and Cloud Storage suites, whose endpoints
+# these tests read too, stay in their shards. The model's path is
+# CLOUDBURROW_LOCALAI_MODEL, which ci.yml fetches by its pin
+# (scripts/localai-models.sh) and verify-local.sh requires.
+COMPAT_LOCALAI_TEST_NAMES="
+  BigQueryAIAgg BigQueryAICountTokens BigQueryAIEmbed BigQueryAIGenerate
+  BigQueryAIGenerateStructured BigQueryAIManagedFunctions
+  BigQueryAutonomousEmbeddingsAndAISearch
+  BigQueryConnectionGroupMembers1812 BigQueryMLAnnotateImage
+  BigQueryMLAnnotateImageDetections BigQueryMLAnnotateImageLabels
+  BigQueryMLImportedONNXModel BigQueryMLProcessDocument
+  BigQueryMLRemoteConnectionPermissions BigQueryMLRemoteDefaultConnection
+  BigQueryMLRemoteGenerateEmbedding BigQueryMLRemoteGenerateText
+  BigQueryMLRemoteGenerationOptions BigQueryMLTranscribe
+  BigQueryMLTranslate BigQueryMLUnderstandText
+  BigQueryObjectRefAIFunctions BigQueryObjectRefEmbeddingsAndSearch
+  BigQueryVectorSearchAutonomousEmbeddings
+  ConsoleEmbeddingsPlaygroundMatchesTheOfficialSDK
+  ConsoleLocalModelsLoadEmbedUnload
+  ConsoleLocalModelsUnloadDeleteDownloadLoad
+  CountTokensAndComputeTokensThroughTheOfficialSDK DocumentAIBatchProcess
+  DocumentAIProcessorVersions DocumentAIProcessors
+  EmbedContentEmbeds16KVideoThroughThePredictionClient
+  EmbedContentEmbeds2And5BitADPCMAndMP3WAVsThroughThePredictionClient
+  EmbedContentEmbedsADPCMWAVAndLosslessAndMultichannelTracksThroughThePredictionClient
+  EmbedContentEmbedsAFullParametricStereoTrackThroughThePredictionClient
+  EmbedContentEmbedsAVIFThroughThePredictionClient
+  EmbedContentEmbedsAVideosAudioTrackThroughThePredictionClient
+  EmbedContentEmbedsArithmeticAnd12BitJPEGThroughThePredictionClient
+  EmbedContentEmbedsAudioThroughThePredictionClient
+  EmbedContentEmbedsG726WAVThroughThePredictionClient
+  EmbedContentEmbedsGSM610WAVThroughThePredictionClient
+  EmbedContentEmbedsHEICAndAnimatedWebPThroughThePredictionClient
+  EmbedContentEmbedsImagesThroughThePredictionClient
+  EmbedContentEmbedsMP3ThroughThePredictionClient
+  EmbedContentEmbedsMPEG25MP3ThroughThePredictionClient
+  EmbedContentEmbedsMPEGLayerIAndJointStereoWAVThroughThePredictionClient
+  EmbedContentEmbedsMPEGLayerIIWAVThroughThePredictionClient
+  EmbedContentEmbedsMultichannelWAVAndGrayVideoThroughThePredictionClient
+  EmbedContentEmbedsSurroundAACAndG711TracksAnd3BitADPCMThroughThePredictionClient
+  EmbedContentEmbedsVP9AndAV1ThroughThePredictionClient
+  EmbedContentEmbedsVideoAndPDFThroughThePredictionClient
+  EmbedContentEmbedsWebPAndBMPThroughThePredictionClient
+  EmbedContentThroughThePredictionClient
+  EmbeddingGemmaThroughTheOfficialSDK
+  EmbeddingGemmaThroughThePredictionClient
+  GenerateContentFunctionCallingRoundTripThroughTheOfficialSDK
+  GenerateContentImagePartThroughTheOfficialSDK
+  GenerateContentMultiTurnChatThroughTheOfficialSDK
+  GenerateContentThroughTheOfficialSDK
+  GenerationNeverUsesApplicationDefaultCredentials
+  RawPredictOnTheEmbeddingModel RawPredictOnTheGenerationModel
+  SpeechAdaptationBoost SpeechAdaptationResources SpeechBatchRecognize
+  SpeechRecognizers SpeechStreamingRecognize SpeechV1
+  StreamGenerateContentThroughTheOfficialSDK
+  StreamGenerateContentThroughThePredictionClient
+  StreamingPredictOnTheEmbeddingModel StreamingPredictOnTheGenerationModel
+  V1Beta1PredictionClientServesWhatV1Serves"
+COMPAT_LOCALAI_TESTS="^Test($(echo "$COMPAT_LOCALAI_TEST_NAMES" | tr -s ' \n' '||' | sed 's/^|//; s/|$//'))\$"
+
 # The shards, in the order ci.yml's matrix lists them.
-COMPAT_SHARDS="storage served run scale emulators memorystore sql sqlreplicas acceptance iam"
+COMPAT_SHARDS="storage served run scale emulators memorystore sql sqlreplicas acceptance iam localai"
 
 # The sqlreplicas shard's tests, by name: every Cloud SQL test of high
 # availability, read replicas, blue-green deployments, external primaries,
@@ -119,24 +189,24 @@ COMPAT_SQL_REPLICA_TESTS='^Test[A-Za-z]*SQL[A-Za-z0-9]*(HighAvailability|Replica
 # served shard serves the Compute Engine API too, so the VPC network and
 # Compute Engine pages' tests (TestVPCNetwork*, #1936; TestComputeEngine*,
 # #1965, which boots a VM) run there and only there.
-COMPAT_BROWSER_SHARDS="storage served run emulators memorystore sql"
+COMPAT_BROWSER_SHARDS="storage served run emulators memorystore sql localai"
 COMPAT_BROWSER_SERVED_SHARD_TESTS='^Test(GKEServed|KubernetesEnginePages|VPCNetwork|ComputeEngine)'
 COMPAT_BROWSER_SERVED_ONLY_TESTS='^Test(GKEServed|VPCNetwork|ComputeEngine)'
 COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|LoggingAdmin|SecretManager|Eventarc|DocumentAI|Speech)'
 COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|Bigtable|Spanner)'
 COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS='^TestMemorystore'
 COMPAT_BROWSER_SQL_SHARD_TESTS='^Test(CloudSQL|BackupDR|PrivateCAKMS)'
-# Browser tests no shard runs: the Studio's local models (#1396) and the
-# Embeddings page's image (#1454), audio and Cloud Storage objects (#1651)
-# and its scanned PDF read with document_ocr (#1733) need a -tags onnx build
-# started with -local-ai-embeddings and EmbeddingGemma 2 loaded, which no
-# shard builds or downloads (without them the console has no ai-embed screen
-# and the test skips); they run locally, as the compat suite's local AI
-# tests do (ci.yml never=).
-# Functions' Edit, Download and Permissions builds a function from source with
+# The Studio's local models (#1396) and the Embeddings page's image (#1454),
+# audio and Cloud Storage objects (#1651) and its scanned PDF read with
+# document_ocr (#1733) need a -tags onnx build started with
+# -local-ai-embeddings (without it the console has no ai-embed screen and
+# the test skips) and EmbeddingGemma 2, which the compat suite's image and
+# audio tests download and load first: the localai shard's (#1985).
+COMPAT_BROWSER_LOCALAI_SHARD_TESTS='^Test(StudioManagesLocalModelsAndTestsEmbeddings|EmbeddingsPageEmbedsAnImage|EmbeddingsPageEmbedsAudioAndCloudStorage|EmbeddingsPageReadsAScannedPDFWithOCR)$'
+# Browser tests no shard runs: Functions' Edit, Download and Permissions builds a function from source with
 # Google's builder, as the compat suite's Functions tests do, so it runs only
 # when asked for (CLOUDBURROW_TEST_FUNCTIONS) on amd64 nodes.
-COMPAT_BROWSER_NEVER_TESTS='^Test(StudioManagesLocalModelsAndTestsEmbeddings|EmbeddingsPageEmbedsAnImage|EmbeddingsPageEmbedsAudioAndCloudStorage|EmbeddingsPageReadsAScannedPDFWithOCR|CloudRunFunctionsEditDownloadAndPermissionsThroughThePage)$'
+COMPAT_BROWSER_NEVER_TESTS='^Test(CloudRunFunctionsEditDownloadAndPermissionsThroughThePage)$'
 
 # compat_shard <shard>: sets, for that shard,
 #   SERVICES     the instance's --services
@@ -155,6 +225,11 @@ compat_shard() {
   # when empty), and COMPAT_SKIP its -skip pattern (none when empty).
   UP_FLAGS=()
   COMPAT_RUN="" COMPAT_SKIP=""
+  # COMPAT_TIMEOUT is the suite's go test -timeout.
+  COMPAT_TIMEOUT=60m
+  # The localai shard's switches, unset for every other shard: verify-local.sh
+  # runs the shards one after another in one shell.
+  unset CLOUDBURROW_TEST_ONNX CLOUDBURROW_TEST_VISION_LABELS CLOUDBURROW_TEST_VISION_DETECT
   # What every instance has, whatever its services: the ADC fixture
   # (#346), the instance's own kubeconfig and kind cluster (#346, never
   # the default kubeconfig), the admin API, the metadata server (#303),
@@ -284,9 +359,13 @@ compat_shard() {
       # (#1596). Cloud Run as SCALE_RUN and Secret Manager as SCALE_SECRETS,
       # which only these tests read, so neither suite runs a second time
       # here; RUN_RESOURCEMANAGER and RUN_SERVICEUSAGE for gcloud's
-      # overrides, as in run.
-      SERVICES=run,secretmanager
-      TEST_VARS+=,SCALE_RUN,SCALE_SECRETS,PREDICTION,RUN_RESOURCEMANAGER,RUN_SERVICEUSAGE ;;
+      # overrides, as in run. storage as RUN_STORAGE for the Model
+      # Registry's artifacts (#1940: TestModelRegistryDeploysACustomContainer,
+      # TestModelRegistryExportsTheImageToArtifactRegistry,
+      # TestPythonAIPlatformUploadAndDeploy); STORAGE is not exported, so
+      # the storage suite does not run here.
+      SERVICES=run,secretmanager,storage
+      TEST_VARS+=,SCALE_RUN,SCALE_SECRETS,PREDICTION,RUN_STORAGE,RUN_RESOURCEMANAGER,RUN_SERVICEUSAGE ;;
     acceptance)
       # The acceptance workflow uploads, publishes and runs a Cloud Run
       # worker; test/k8s needs the cluster and Knative.
@@ -295,10 +374,29 @@ compat_shard() {
       # IAM enforcement (#1879): every TestIAMEnforcement* test, against
       # an instance that enforces, and nothing else, so the shard is a few
       # minutes; the other suites ran with enforcement off in their shards.
-      SERVICES=storage,pubsub,tasks,secretmanager,kms,run
-      TEST_VARS+=,STORAGE,PUBSUB,TASKS,SECRETS,KMS,RUN,RESOURCEMANAGER,IAM_ENFORCEMENT
+      # BigQuery for BigQuery sharing's (Analytics Hub, #1989).
+      SERVICES=storage,pubsub,tasks,secretmanager,kms,run,bigquery
+      TEST_VARS+=,STORAGE,PUBSUB,TASKS,SECRETS,KMS,RUN,RESOURCEMANAGER,ANALYTICSHUB,BIGQUERY,BIGQUERY_PROJECT,IAM_ENFORCEMENT
       UP_FLAGS=(--iam-enforcement=on)
       COMPAT_RUN='^TestIAMEnforcement' ;;
+    localai)
+      # The local AI tests (#1985): BigQuery and Cloud Storage for the AI
+      # and ML functions' tables and object tables, Resource Manager (every
+      # instance serves it) for the roles they grant the connection's
+      # service account. COMPAT_RUN keeps the shard to the local AI tests.
+      SERVICES=bigquery,storage
+      TEST_VARS+=,LOCALAI,EMBEDDINGS,BIGQUERY,BIGQUERY_PROJECT,BIGQUERY_RESOURCEMANAGER,RESOURCEMANAGER,STORAGE
+      UP_FLAGS=(--local-ai-model "${CLOUDBURROW_LOCALAI_MODEL-}" --local-ai-embeddings)
+      # The switches compat-env.sh has no source for: the instance is an
+      # onnx build (TestBigQueryMLImportedONNXModel), and may fetch
+      # MediaPipe's pinned classifier and detectors (32.6 MB) to annotate
+      # images.
+      export CLOUDBURROW_TEST_ONNX=1 CLOUDBURROW_TEST_VISION_LABELS=1 CLOUDBURROW_TEST_VISION_DETECT=1
+      COMPAT_RUN=$COMPAT_LOCALAI_TESTS
+      # 1,327 s of tests on an 8-CPU Docker Desktop VM with an Apple M-series
+      # host (2026-11-20), generation and whisper.cpp on the CPU: the
+      # runner's four vCPUs are slower, so twice the other shards' 60m.
+      COMPAT_TIMEOUT=120m ;;
     emulators)
       # pubsub for TestEmulatorsBehindAFrontRefuseOtherPods (#1114), which
       # dials both emulators from a pod; PUBSUB is not exported, so the
@@ -333,7 +431,8 @@ compat_shard() {
       # Cloud KMS as CMEK_KMS, for Firestore's customer-managed keys
       # (#1881), so the KMS suite stays in served.
       # The BigQuery Data Transfer Service (#1948), served with BigQuery.
-      TEST_VARS+=,DATATRANSFER,LOGGING_RESOURCEMANAGER,SPANNER,SPANNER_REST,DATASTORE,FIRESTORE,FIRESTORE_MONGODB,FIRESTORE_MONGODB_CA,FIRESTORE_RESOURCEMANAGER,BIGTABLE,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT,BIGQUERY_RESOURCEMANAGER,SINK_LOGGING,SINK_STORAGE,SINK_PUBSUB,FIRESTORE_STORAGE,BQML_STORAGE,CMEK_KMS
+      # BigQuery sharing (Analytics Hub, #1960), served with BigQuery.
+      TEST_VARS+=,DATATRANSFER,ANALYTICSHUB,LOGGING_RESOURCEMANAGER,SPANNER,SPANNER_REST,DATASTORE,FIRESTORE,FIRESTORE_MONGODB,FIRESTORE_MONGODB_CA,FIRESTORE_RESOURCEMANAGER,BIGTABLE,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT,BIGQUERY_RESOURCEMANAGER,SINK_LOGGING,SINK_STORAGE,SINK_PUBSUB,FIRESTORE_STORAGE,BQML_STORAGE,CMEK_KMS
       # Firestore's probe documents and named database (#1636): written
       # alone, as a front-state reset in the suite forgets the database.
       SETUP_TESTS="TestFirestoreRestartSetup"
@@ -413,6 +512,27 @@ compat_shard() {
   # in the sql shard.
   case "$1" in
     storage|served|run|scale|emulators|memorystore|sql|sqlreplicas) TEST_VARS+=,GCLOUD ;;
+  esac
+}
+
+# compat_browser_prepare <shard>: readies the instance the browser step
+# brought up again for its tests. In the localai shard (#1985), loads
+# EmbeddingGemma 2, which the compat suite downloaded into the state
+# directory and loaded, and which a restart leaves unloaded: the Embeddings
+# page's image, audio and PDF tests skip without it. Reads
+# CLOUDBURROW_TEST_CONTROL and CLOUDBURROW_TEST_ADMIN_TOKEN, and prints
+# neither.
+compat_browser_prepare() {
+  case "$1" in
+    localai)
+      local control=${CLOUDBURROW_TEST_CONTROL:?} code
+      case "$control" in http://*) ;; *) control="http://$control" ;; esac
+      code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST -H @- \
+        "$control/admin/local-models/embeddinggemma-2-onnx-community/load" <<EOF2
+Authorization: Bearer ${CLOUDBURROW_TEST_ADMIN_TOKEN:?}
+EOF2
+      )
+      [ "$code" = 200 ] || { echo "loading embeddinggemma-2-onnx-community answered $code" >&2; return 1; } ;;
   esac
 }
 

@@ -56,10 +56,15 @@ var DeleteConfirmRules = map[string]DeleteConfirmRule{
 	"hierarchy": {Style: DeleteConfirmName, Source: "https://docs.cloud.google.com/resource-manager/docs/manage-folders", Verified: true},
 	// UNVERIFIED: no console steps for deleting a tag key (docs re-read 2026-11-19)
 	"tags": unverified,
+	// UNVERIFIED: Google's Analytics Hub docs describe no dialog for deleting a data exchange (docs re-read 2026-11-20: https://docs.cloud.google.com/bigquery/docs/analytics-hub-manage-exchanges)
+	"bigquery-sharing": unverified,
 	// UNVERIFIED: "Select the checkbox for the roles ... click Delete." No dialog described (docs re-read 2026-11-19).
 	"iam-roles": unverified,
 	// "Confirm that you want to delete the group by clicking Confirm in the confirmation dialog."
 	"iam-groups": {Style: DeleteConfirmClick, Source: "https://docs.cloud.google.com/iam/docs/groups-in-cloud-console", Verified: true},
+	// UNVERIFIED: no console steps for deleting an SSO profile or an assignment (https://knowledge.workspace.google.com/admin/apps/setting-up-sso re-read 2026-11-20)
+	"iam-sso-profiles":    unverified,
+	"iam-sso-assignments": unverified,
 	// UNVERIFIED: "Select the service account ... click Delete." No dialog described (docs re-read 2026-11-19).
 	"iam-service-accounts": unverified,
 	// a label is removed with its delete icon, then Save: nothing typed.
@@ -108,6 +113,12 @@ var DeleteConfirmRules = map[string]DeleteConfirmRule{
 	"functions": unverified,
 	// UNVERIFIED: "Select the trigger and click Delete." No dialog described (docs re-read 2026-11-19).
 	"eventarc": unverified,
+	// Eventarc Advanced and channels (#1947).
+	"eventarc-buses":              unverified,
+	"eventarc-pipelines":          unverified,
+	"eventarc-enrollments":        unverified,
+	"eventarc-google-api-sources": unverified,
+	"eventarc-channels":           unverified,
 	// "enter the name of the secret, and then click Delete secret."
 	"secrets": {Style: DeleteConfirmName, Source: "https://docs.cloud.google.com/secret-manager/docs/delete-secrets", Verified: true},
 	// "enter the name of the secret, and then click Delete secret."

@@ -102,3 +102,45 @@ func TestNormalizeAuthorizer(t *testing.T) {
 		t.Error("a bare connection id was taken")
 	}
 }
+
+func TestObjListRefusesDocumentedURIs(t *testing.T) {
+	var f front
+	for _, args := range [][]string{
+		{"'gs://b/img/'"}, {"'gs://b//img/x.png'"}, {"'gs://b/*/*.png'"}, {"CONCAT('gs://b/', 'x')"}, {"'not-gs'"}, {}, {"'gs://b/x'", "'a'", "'b'"},
+	} {
+		if _, code, msg := f.objListSQL(nil, objCall{fn: "LIST", pos: args}); code != 400 || !strings.Contains(msg, "OBJ.LIST") {
+			t.Errorf("OBJ.LIST(%v) = %d %q, want 400 naming OBJ.LIST", args, code, msg)
+		}
+	}
+	if _, code, _ := f.objListSQL(nil, objCall{fn: "LIST", pos: []string{"'gs://b/img/*.png'"}}); code != 501 {
+		t.Errorf("OBJ.LIST without Cloud Storage = %d, want 501", code)
+	}
+}
+
+func TestAccessModeAndDuration(t *testing.T) {
+	for mode, want := range map[string][2]bool{"r": {false, true}, "RW": {true, true}, "w": {false, false}, "": {false, false}} {
+		if w, ok := accessMode(mode); w != want[0] || ok != want[1] {
+			t.Errorf("accessMode(%q) = %v %v", mode, w, ok)
+		}
+	}
+	for d, want := range map[time.Duration]bool{29 * time.Minute: false, 30 * time.Minute: true, 6 * time.Hour: true, 6*time.Hour + time.Second: false} {
+		if validAccessDuration(d) != want {
+			t.Errorf("validAccessDuration(%v) != %v", d, want)
+		}
+	}
+}
+
+func TestContentPieces(t *testing.T) {
+	if ps, ok, st := contentPieces([]byte(`"hi"`)); !ok || st || len(ps) != 1 || ps[0].text != "hi" {
+		t.Errorf("a STRING: %v %v %v", ps, ok, st)
+	}
+	if ps, ok, st := contentPieces([]byte(`{"uri":"gs://b/o","version":null,"authorizer":"p.us.c","details":null}`)); !ok || st || ps[0].ref == nil || ps[0].ref.URI != "gs://b/o" {
+		t.Errorf("an ObjectRef: %v %v %v", ps, ok, st)
+	}
+	if _, ok, st := contentPieces([]byte(`{"a":"x"}`)); ok || !st {
+		t.Errorf("a STRUCT: %v %v", ok, st)
+	}
+	if _, ok, st := contentPieces([]byte(`null`)); ok || st {
+		t.Errorf("NULL: %v %v", ok, st)
+	}
+}

@@ -202,6 +202,28 @@ Source Repositories events, a build read from a repository (`filename`, `gitFile
 your machine, and `pubsubConfig`, whose subscription Google owns. To build on a Pub/Sub message,
 point a push subscription at the webhook URL.
 
+**Triggers on a Secure Source Manager repository (#1852, #1955).** A trigger whose
+`repositoryEventConfig` (gRPC) or `developerConnectEventConfig` (JSON, gcloud, Terraform) names a
+Developer Connect link to one of the instance's Secure Source Manager repositories builds each
+push whose branch or tag matches its push filter. `includedFiles` and `ignoredFiles` are globs
+(`filepath.Match` syntax, with `**` for any number of directories) over the push's changed files:
+files matching an ignored glob are dropped, a push with nothing left builds nothing, and with
+`includedFiles` set one remaining file must match it. The trigger's `filter` is a CEL expression
+over its substitutions and the push's built-ins (`BRANCH_NAME == "release"`,
+`REPO_NAME.matches("^app-")`); `!` is refused, as Google's trigger filters do not support it, and
+the same filter applies to Pub/Sub and webhook triggers (`_ACTION == "INSERT"`). `RunBuildTrigger`
+(`gcloud builds triggers run --branch`, `--tag`, `--sha`) builds the named revision, unfiltered.
+Make one with `gcloud beta builds triggers create developer-connect --git-repository-link=…
+--branch-pattern='^main$' --included-files='src/**' --ignored-files='**/*.md'`, or Terraform's
+`google_cloudbuild_trigger` with `developer_connect_event_config`, `included_files`,
+`ignored_files` and `filter`.
+
+Developer Connect's `FetchReadToken` and `FetchReadWriteToken` on a link give a token the
+instance's git server accepts for an hour, for that repository only: send it as the password of
+HTTP basic credentials (`git -c http.extraHeader="Authorization: Basic $(printf
+oauth2:$TOKEN | base64)" clone …`). A read token is refused 403 on a push; a read-write token
+pushes.
+
 A worker pool (`gcloud builds worker-pools create`, `google_cloudbuild_worker_pool`, the console's
 Worker pools page) is stored with its long-running operations. A build that names it in
 `options.pool.name` runs on the host's Docker like any other, with the pool recorded on the build.

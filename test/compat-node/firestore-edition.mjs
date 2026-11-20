@@ -13,7 +13,7 @@ import { suffix } from './guard.mjs';
 
 // An Enterprise edition database, through the Admin API's REST surface
 // the front serves; deleted when done.
-async function enterpriseDatabase(project, id) {
+export async function enterpriseDatabase(project, id) {
   const base = `http://${process.env.FIRESTORE_EMULATOR_HOST}/v1/projects/${project}/databases`;
   const headers = { 'content-type': 'application/json', authorization: 'Bearer owner' };
   const res = await fetch(`${base}?databaseId=${id}`, {

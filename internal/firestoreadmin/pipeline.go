@@ -269,6 +269,9 @@ type pipelineRun struct {
 	// plan is explain mode "explain": the pipeline is planned, and a
 	// write stage writes nothing.
 	plan bool
+	// inSearch is set while a search stage evaluates its options:
+	// geo_distance is served only there, as Google documents.
+	inSearch bool
 }
 
 func (p *pipelineRun) all() ([]*firestorepb.Document, error) {
@@ -717,7 +720,6 @@ func (p *pipelineRun) aggregate(accs, groups map[string]*firestorepb.Value, rows
 var pipelineAggregates = map[string]bool{
 	"count": true, "count_if": true, "count_distinct": true, "sum": true, "average": true,
 	"minimum": true, "maximum": true, "first": true, "last": true, "array_agg": true, "array_agg_distinct": true,
-	"minimum_n": false, "maximum_n": false,
 }
 
 func (p *pipelineRun) accumulate(fn *firestorepb.Function, rows []row) (*firestorepb.Value, error) {
@@ -765,6 +767,9 @@ func (p *pipelineRun) accumulate(fn *firestorepb.Function, rows []row) (*firesto
 		}
 		return intValue(int64(len(seen))), nil
 	case "sum", "average":
+		// NaN anywhere makes NaN (aggregate-functions), as float64 sums do.
+		// UNVERIFIED (re-read 2026-11-20): Google does not say what sum of no
+		// numeric value is; it stays 0L (average is documented as NULL).
 		var isum int64
 		var fsum float64
 		allInt, n := true, 0
@@ -804,6 +809,8 @@ func (p *pipelineRun) accumulate(fn *firestorepb.Function, rows []row) (*firesto
 		}
 		return doubleValue(fsum), nil
 	case "minimum", "maximum":
+		// UNVERIFIED (re-read 2026-11-20): Google does not place NaN; it sorts
+		// below every other number, as in Firestore's value order.
 		var best *firestorepb.Value
 		for _, v := range present() {
 			if best == nil || (name == "minimum" && compareValues(v, best) < 0) || (name == "maximum" && compareValues(v, best) > 0) {
@@ -1024,27 +1031,8 @@ var pipelineFunctions = map[string]func(p *pipelineRun, args []*firestorepb.Valu
 // pipelineUnserved are the functions Google's reference documents that are
 // not evaluated here.
 var pipelineUnserved = map[string]string{
-	"score":              "full-text search scores need a search index",
-	"document_matches":   "full-text search needs a search index",
-	"geo_distance":       "geographic distance is not evaluated here",
-	"array_filter":       "lambda expressions are not evaluated here",
-	"array_transform":    "lambda expressions are not evaluated here",
-	"switch_on":          "switch_on is not evaluated here",
-	"rand":               "rand is not evaluated here",
-	"current_document":   "current_document is not evaluated here",
-	"timestamp_trunc":    "timestamp_trunc is not evaluated here",
-	"timestamp_diff":     "timestamp_diff is not evaluated here",
-	"timestamp_extract":  "timestamp_extract is not evaluated here",
-	"regex_find":         "regex_find is not evaluated here",
-	"regex_find_all":     "regex_find_all is not evaluated here",
-	"minimum_n":          "minimum_n is not evaluated here",
-	"maximum_n":          "maximum_n is not evaluated here",
-	"array_first_n":      "array_first_n is not evaluated here",
-	"array_last_n":       "array_last_n is not evaluated here",
-	"array_index_of_all": "array_index_of_all is not evaluated here",
-	"map_entries":        "map_entries is not evaluated here",
-	"offset":             "offset is not evaluated here",
-	"cmp":                "cmp is not evaluated here",
+	"score":            "full-text search scores need a search index",
+	"document_matches": "full-text search needs a search index",
 }
 
 func (p *pipelineRun) eval(v *firestorepb.Value, r row) (*firestorepb.Value, error) {
@@ -1436,12 +1424,12 @@ func compareValues(a, b *firestorepb.Value) int {
 }
 
 // equalValues is Firestore's equality: numbers by value, across int64
-// and float64; NaN equals nothing.
+// and float64, and NaN equal to NaN, as Firestore's value ordering has it
+// (comparison-functions: equal(NaN, NaN) is TRUE, not_equal(NaN, NaN)
+// FALSE; logical-functions: equal_any(NaN, [1L, NaN, 3L]) is TRUE;
+// array-functions: array_contains_all([NaN], [NaN]) is TRUE).
 func equalValues(a, b *firestorepb.Value) bool {
 	if a == nil || b == nil {
-		return false
-	}
-	if f, ok := asFloat(a); ok && math.IsNaN(f) {
 		return false
 	}
 	if isNumber(a) != isNumber(b) || (!isNumber(a) && typeRank(a) != typeRank(b)) {
@@ -1450,23 +1438,53 @@ func equalValues(a, b *firestorepb.Value) bool {
 	return compareValues(a, b) == 0
 }
 
-// valuesKey is a key equal values share, for grouping and distinct.
+// valuesKey is a key equal values share, for grouping and distinct: the
+// values equalValues makes equal (1L and 1.0, 0.0 and -0.0, every NaN,
+// at any depth) share one key.
 func valuesKey(vs []*firestorepb.Value) string {
 	var b strings.Builder
 	for _, v := range vs {
 		if v == nil {
 			b.WriteString("\x00absent")
 		} else {
-			c := v
-			if i, ok := v.GetValueType().(*firestorepb.Value_IntegerValue); ok {
-				c = doubleValue(float64(i.IntegerValue))
-			}
-			raw, _ := proto.MarshalOptions{Deterministic: true}.Marshal(c)
+			raw, _ := proto.MarshalOptions{Deterministic: true}.Marshal(canonicalValue(v))
 			b.Write(raw)
 		}
 		b.WriteString("\x00|")
 	}
 	return b.String()
+}
+
+// canonicalValue is v with each number in one form: an integral double
+// in int64's range as that int64 (so 2^53 + 1 and 2^53 keep apart),
+// -0.0 as 0, and one NaN.
+func canonicalValue(v *firestorepb.Value) *firestorepb.Value {
+	switch x := v.GetValueType().(type) {
+	case *firestorepb.Value_DoubleValue:
+		f := x.DoubleValue
+		switch {
+		case math.IsNaN(f):
+			return doubleValue(math.NaN())
+		case f == math.Trunc(f) && f >= -(1<<63) && f < 1<<63:
+			return intValue(int64(f))
+		}
+	case *firestorepb.Value_ArrayValue:
+		out := make([]*firestorepb.Value, len(x.ArrayValue.GetValues()))
+		for i, e := range x.ArrayValue.GetValues() {
+			out[i] = canonicalValue(e)
+		}
+		return arrayValue(out)
+	case *firestorepb.Value_MapValue:
+		if isVector(v) {
+			return v
+		}
+		out := make(map[string]*firestorepb.Value, len(x.MapValue.GetFields()))
+		for k, e := range x.MapValue.GetFields() {
+			out[k] = canonicalValue(e)
+		}
+		return mapValue(out)
+	}
+	return v
 }
 
 // --- the functions ---
@@ -1499,50 +1517,86 @@ func init() {
 		}
 	}
 
-	// Logic.
+	// Logic, three-valued as logical-functions documents: and, or and nor
+	// return NULL "if the result can't be derived due to any of the given
+	// values being ABSENT or NULL" (and(NULL, FALSE) is FALSE, or(NULL,
+	// TRUE) TRUE, nor(NULL, TRUE) FALSE), and xor NULL "if any of the
+	// given values are ABSENT or NULL".
+	// UNVERIFIED (re-read 2026-11-20): Google does not say what a non-boolean,
+	// non-NULL input (1L, "a") does; it stays an expression error. Nor
+	// does it say whether and(FALSE, <error>) short-circuits; arguments
+	// are evaluated left to right and stop at the first that decides.
+	// truth is v as three-valued logic: a boolean, or unknown (NULL,
+	// ABSENT).
+	truth := func(name string, v *firestorepb.Value) (val, known bool, err error) {
+		if v == nil || isNull(v) {
+			return false, false, nil
+		}
+		b, ok := v.GetValueType().(*firestorepb.Value_BooleanValue)
+		if !ok {
+			return false, false, evalErrf("%s: %s is not a boolean", name, typeName(v))
+		}
+		return b.BooleanValue, true, nil
+	}
 	logic := func(name string, and bool) fn {
 		return func(p *pipelineRun, args []*firestorepb.Value, r row) (*firestorepb.Value, error) {
+			unknown := false
 			for _, a := range args {
 				v, err := p.eval(a, r)
 				if err != nil {
 					return nil, err
 				}
-				b, ok := v.GetValueType().(*firestorepb.Value_BooleanValue)
-				if !ok {
-					return nil, evalErrf("%s: %s is not a boolean", name, typeName(v))
+				b, known, err := truth(name, v)
+				if err != nil {
+					return nil, err
 				}
-				if b.BooleanValue != and {
+				if !known {
+					unknown = true
+				} else if b != and {
 					return boolValue(!and), nil
 				}
+			}
+			if unknown {
+				return nullValue(), nil
 			}
 			return boolValue(and), nil
 		}
 	}
 	f["and"], f["or"] = logic("and", true), logic("or", false)
 	simple("xor", -1, func(vs []*firestorepb.Value) (*firestorepb.Value, error) {
-		out := false
+		out, unknown := false, false
 		for _, v := range vs {
-			b, ok := v.GetValueType().(*firestorepb.Value_BooleanValue)
-			if !ok {
-				return nil, evalErrf("xor: %s is not a boolean", typeName(v))
+			b, known, err := truth("xor", v)
+			if err != nil {
+				return nil, err
 			}
-			out = out != b.BooleanValue
+			unknown = unknown || !known
+			out = out != b
+		}
+		if unknown {
+			return nullValue(), nil
 		}
 		return boolValue(out), nil
 	})
 	f["nor"] = func(p *pipelineRun, args []*firestorepb.Value, r row) (*firestorepb.Value, error) {
-		v, err := f["or"](p, args, r)
-		if err != nil {
-			return nil, err
+		v, err := logic("nor", false)(p, args, r)
+		if err != nil || isNull(v) {
+			return v, err
 		}
 		return boolValue(!v.GetBooleanValue()), nil
 	}
+	// UNVERIFIED (re-read 2026-11-20): Google documents not() for a boolean only;
+	// not(NULL) and not(ABSENT) are NULL, as three-valued logic and the
+	// rest of the family have it.
 	simple("not", 1, func(vs []*firestorepb.Value) (*firestorepb.Value, error) {
-		b, ok := vs[0].GetValueType().(*firestorepb.Value_BooleanValue)
-		if !ok {
-			return nil, evalErrf("not: %s is not a boolean", typeName(vs[0]))
+		b, known, err := truth("not", vs[0])
+		if err != nil {
+			return nil, err
 		}
-		return boolValue(!b.BooleanValue), nil
+		if !known {
+			return nullValue(), nil
+		}
+		return boolValue(!b), nil
 	})
 	f["conditional"] = func(p *pipelineRun, args []*firestorepb.Value, r row) (*firestorepb.Value, error) {
 		if len(args) != 3 {
@@ -1863,16 +1917,19 @@ func init() {
 		return arrayValue(vals), nil
 	})
 	re := func(name string, anchored bool) {
-		strFn(name, 2, func(ss []string) (*firestorepb.Value, error) {
-			pat := ss[1]
-			if anchored {
-				pat = `^(?:` + pat + `)$`
+		simple(name, 2, func(vs []*firestorepb.Value) (*firestorepb.Value, error) {
+			if absent(vs[0]) || absent(vs[1]) {
+				return nullValue(), nil
 			}
-			rx, err := regexp.Compile(pat)
+			s, err := str(name, vs[0])
 			if err != nil {
-				return nil, evalErrf("%s: invalid regular expression %q: %v", name, ss[1], err)
+				return nil, err
 			}
-			return boolValue(rx.MatchString(ss[0])), nil
+			rx, err := pipelineRegex(name, vs[1], anchored)
+			if err != nil {
+				return nil, err
+			}
+			return boolValue(rx.MatchString(s)), nil
 		})
 	}
 	re("regex_contains", false)

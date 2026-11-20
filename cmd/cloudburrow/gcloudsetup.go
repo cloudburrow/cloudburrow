@@ -154,6 +154,9 @@ var gcloudVerified = []struct {
 	// TestGcloudEventarcTriggers drives triggers create, describe, list,
 	// update and delete, and providers list.
 	{config.ServiceRun, "eventarc", "/eventarc/", false, false},
+	// The Eventarc Publishing API (#1947), under /eventarcpublishing/:
+	// gcloud eventarc message-buses publish and channels publish.
+	{config.ServiceRun, "eventarcpublishing", "/eventarcpublishing/", false, false},
 	// The Cloud SQL Admin API (#1301): gcloud sql appends sql/v1beta4/.
 	// TestGcloudSQL drives instances list and describe, and databases and
 	// users create, list and delete, with either Cloud SQL service.
@@ -327,9 +330,9 @@ func gcloudConfiguration(cfg config.Config, adcPath string) string {
 			fmt.Fprintf(&b, "%s = %s\n", p, unserved.URL(base, p))
 		}
 	}
-	fmt.Fprintf(&b, "# gcloud %s has no override for %s, and `gcloud transfer authorize` calls Google's Storage\n"+
-		"# Transfer host whatever `transfer` says: those commands reach Google unless egress is blocked (docs/security.md).\n",
-		unserved.GcloudVersion, strings.Join(unserved.GcloudUnoverridable, ", "))
+	fmt.Fprintf(&b, "# gcloud %s has no override for %s, and `%s` call Google's hosts\n"+
+		"# whatever the overrides say: those commands reach Google unless egress is blocked (docs/security.md).\n",
+		unserved.GcloudVersion, strings.Join(unserved.GcloudUnoverridable, ", "), strings.Join(unserved.GcloudHardcodedCommands(), "`, `"))
 	// No credential is sent: CloudBurrow authenticates nothing. The ADC
 	// fixture is named for tools that insist on one being configured. A
 	// command that refreshes a credential anyway (`gcloud transfer
@@ -376,8 +379,8 @@ func runGcloudSetup(args []string, stdout, stderr io.Writer) error {
 	fmt.Fprintf(stderr, "cloudburrow: wrote gcloud configuration %s (%s); your default configuration is unchanged\n",
 		gcloudConfigName(cfg), path)
 	fmt.Fprintf(stderr, "cloudburrow: every API this instance does not serve is refused locally; gcloud has no override for %s, "+
-		"nor for `gcloud transfer authorize`, so those reach Google unless egress is blocked (docs/security.md)\n",
-		strings.Join(unserved.GcloudUnoverridable, ", "))
+		"nor for `%s`, so those reach Google unless egress is blocked (docs/security.md)\n",
+		strings.Join(unserved.GcloudUnoverridable, ", "), strings.Join(unserved.GcloudHardcodedCommands(), "`, `"))
 	if hint := dockerRegistryHint(cfg); hint != "" {
 		fmt.Fprintln(stderr, hint)
 	}

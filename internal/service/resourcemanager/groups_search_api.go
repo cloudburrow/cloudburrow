@@ -208,5 +208,5 @@ func (r *Registry) modifyMembershipRoles(w http.ResponseWriter, req *http.Reques
 	if err != nil {
 		return err
 	}
-	return rest.WriteJSON(w, http.StatusOK, ci.ModifyMembershipRolesResponse{Membership: membershipJSON(g, m, true)})
+	return rest.WriteJSON(w, http.StatusOK, ci.ModifyMembershipRolesResponse{Membership: r.evaluated(g, m, membershipJSON(g, m, true))})
 }

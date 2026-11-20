@@ -130,3 +130,36 @@ func TestIncrementalSchedulesNeedEnterprise(t *testing.T) {
 		t.Errorf("a downgrade with an incremental schedule = %v, want FailedPrecondition", err)
 	}
 }
+
+// CreateInstancePartition is refused below Enterprise Plus, naming
+// geo-partitioning; an Enterprise Plus instance's reaches the emulator, and
+// a missing instance is NOT_FOUND (#1974).
+func TestCreateInstancePartitionNeedsEnterprisePlus(t *testing.T) {
+	_, c := serve(t)
+	ctx := context.Background()
+	for id, ed := range map[string]instancepb.Instance_Edition{"std": instancepb.Instance_STANDARD, "ent": instancepb.Instance_ENTERPRISE, "plus": instancepb.Instance_ENTERPRISE_PLUS} {
+		if _, err := c.CreateInstance(ctx, &instancepb.CreateInstanceRequest{Parent: "projects/p", InstanceId: id,
+			Instance: &instancepb.Instance{Config: "projects/p/instanceConfigs/regional-us-central1", DisplayName: "instance " + id, NodeCount: 1, Edition: ed}}); err != nil {
+			t.Fatalf("CreateInstance %s: %v", id, err)
+		}
+	}
+	part := func(id string) error {
+		_, err := c.CreateInstancePartition(ctx, &instancepb.CreateInstancePartitionRequest{Parent: "projects/p/instances/" + id, InstancePartitionId: "p1",
+			InstancePartition: &instancepb.InstancePartition{Config: "projects/p/instanceConfigs/regional-us-central1", DisplayName: "partition",
+				ComputeCapacity: &instancepb.InstancePartition_NodeCount{NodeCount: 1}}})
+		return err
+	}
+	for id, ed := range map[string]string{"std": "STANDARD", "ent": "ENTERPRISE"} {
+		err := part(id)
+		want := "CreateInstancePartition: geo-partitioning requires the ENTERPRISE_PLUS edition or higher; the instance is " + ed + " edition: upgrade it with UpdateInstance (edition) first."
+		if status.Code(err) != codes.FailedPrecondition || status.Convert(err).Message() != want {
+			t.Errorf("a partition of a %s instance = %v; want FAILED_PRECONDITION %q", ed, err, want)
+		}
+	}
+	if err := part("plus"); status.Code(err) != codes.Unimplemented {
+		t.Errorf("a partition of an Enterprise Plus instance = %v; want the fake emulator's Unimplemented", err)
+	}
+	if err := part("missing"); status.Code(err) != codes.NotFound {
+		t.Errorf("a partition of a missing instance = %v; want NOT_FOUND", err)
+	}
+}

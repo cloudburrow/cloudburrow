@@ -68,6 +68,7 @@ import (
 	_ "cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
 	_ "cloud.google.com/go/aiplatform/apiv1beta1/aiplatformpb"
 	_ "cloud.google.com/go/artifactregistry/apiv1/artifactregistrypb"
+	_ "cloud.google.com/go/bigquery/analyticshub/apiv1/analyticshubpb"
 	_ "cloud.google.com/go/bigquery/datatransfer/apiv1/datatransferpb"
 	_ "cloud.google.com/go/bigtable/admin/apiv2/adminpb"
 	_ "cloud.google.com/go/bigtable/apiv2/bigtablepb"
@@ -79,6 +80,7 @@ import (
 	_ "cloud.google.com/go/developerconnect/apiv1/developerconnectpb"
 	_ "cloud.google.com/go/documentai/apiv1/documentaipb"
 	_ "cloud.google.com/go/eventarc/apiv1/eventarcpb"
+	_ "cloud.google.com/go/eventarc/publishing/apiv1/publishingpb"
 	_ "cloud.google.com/go/firestore/apiv1/admin/adminpb"
 	_ "cloud.google.com/go/firestore/apiv1/firestorepb"
 	_ "cloud.google.com/go/functions/apiv1/functionspb"
@@ -142,7 +144,9 @@ var areas = []area{
 	{Key: "developerconnect", Title: "Developer Connect", Own: true, Services: []string{"google.cloud.developerconnect.v1.DeveloperConnect"}},
 	// Eventarc (#1877), on the Run port: triggers delivering Pub/Sub and
 	// Cloud Storage events to Cloud Run as CloudEvents.
-	{Key: "eventarc", Title: "Eventarc", Own: true, Services: []string{"google.cloud.eventarc.v1.Eventarc"}},
+	// Eventarc Advanced and the Publishing API (#1947): buses, pipelines,
+	// enrollments, Google API sources and channels, with events delivered.
+	{Key: "eventarc", Title: "Eventarc", Own: true, Services: []string{"google.cloud.eventarc.v1.Eventarc", "google.cloud.eventarc.publishing.v1.Publisher"}},
 	// Container Analysis (#1912), on the Run port: Grafeas's notes and
 	// occurrences, which Artifact Registry's vulnerability scanning writes.
 	{Key: "containeranalysis", Title: "Container Analysis", Own: true, Services: []string{"grafeas.v1.Grafeas", "google.devtools.containeranalysis.v1.ContainerAnalysis"}},
@@ -297,6 +301,10 @@ var areas = []area{
 	// The Kubernetes Engine API (#1913): CloudBurrow's own, gRPC and JSON
 	// on one port, each cluster a kind cluster of its own.
 	{Key: "gke", Title: "Kubernetes Engine API (v1)", Own: true, Services: []string{"google.container.v1.ClusterManager"}},
+	// BigQuery sharing, formerly Analytics Hub (#1960): CloudBurrow's own,
+	// gRPC and JSON on one port; its subscriptions make linked datasets in
+	// the instance's BigQuery.
+	{Key: "analyticshub", Title: "BigQuery sharing (Analytics Hub) API (v1)", Own: true, Services: []string{"google.cloud.bigquery.analyticshub.v1.AnalyticsHubService"}},
 	// Cloud Monitoring (#1939, #1964): CloudBurrow's own, gRPC and JSON on
 	// one port, with the Dashboards API v1 beside v3. The Query service
 	// (MQL) is not registered and answers UNIMPLEMENTED.

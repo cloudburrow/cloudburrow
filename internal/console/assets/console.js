@@ -168,6 +168,18 @@ const ROUTES = [
   // Eventarc's Triggers page (#1877), served on the Run port over Pub/Sub.
   { path: "/eventarc/triggers", service: "eventarc", title: "Triggers", kind: "Trigger", section: "Integration services",
     product: "eventarc", productTitle: "Eventarc" },
+  // Eventarc Advanced (#1947): buses, pipelines, enrollments and Google
+  // API sources, and Eventarc Standard's channels, in Eventarc's menu.
+  { path: "/eventarc/message-buses", service: "eventarc-buses", icon: "eventarc", title: "Buses", kind: "Bus", section: "Integration services",
+    product: "eventarc", productTitle: "Eventarc" },
+  { path: "/eventarc/pipelines", service: "eventarc-pipelines", icon: "eventarc", title: "Pipelines", kind: "Pipeline", section: "Integration services",
+    product: "eventarc", productTitle: "Eventarc" },
+  { path: "/eventarc/enrollments", service: "eventarc-enrollments", icon: "eventarc", title: "Enrollments", kind: "Enrollment", section: "Integration services",
+    product: "eventarc", productTitle: "Eventarc" },
+  { path: "/eventarc/google-api-sources", service: "eventarc-google-api-sources", icon: "eventarc", title: "Google API sources", kind: "Google API source",
+    section: "Integration services", product: "eventarc", productTitle: "Eventarc" },
+  { path: "/eventarc/channels", service: "eventarc-channels", icon: "eventarc", title: "Channels", kind: "Channel", section: "Integration services",
+    product: "eventarc", productTitle: "Eventarc" },
   // Artifact Registry's menu (#1855): Repositories, then Settings (the
   // project's settings and each location's VPC-SC policy and platform logs).
   // Not under /artifact-registry/, where it would shadow a repository named
@@ -381,9 +393,10 @@ const ROUTES = [
     section: "Databases", product: "bigquery", productTitle: "BigQuery" },
   { path: "/bigquery-scheduled-queries", service: "bigquery-scheduled-queries", icon: "bigquery", title: "Scheduled queries",
     kind: "Scheduled query", section: "Databases", product: "bigquery", productTitle: "BigQuery" },
-  { path: "/bigquery-sharing", service: null, requires: "bigquery", screen: "unavailable", icon: "bigquery", title: "Analytics Hub",
-    section: "Databases", product: "bigquery", productTitle: "BigQuery",
-    unavailable: "Analytics Hub (Sharing) exchanges and listings are the Analytics Hub API's, which CloudBurrow does not run. A dataset is shared through its Permissions tab." },
+  // BigQuery sharing (Analytics Hub, #1960): exchanges, their listings
+  // and subscriptions.
+  { path: "/bigquery-sharing", service: "bigquery-sharing", icon: "bigquery", title: "Analytics Hub", kind: "Exchange",
+    section: "Databases", product: "bigquery", productTitle: "BigQuery" },
   { path: "/bigquery-dataform", service: null, requires: "bigquery", screen: "unavailable", icon: "bigquery", title: "Dataform",
     section: "Databases", product: "bigquery", productTitle: "BigQuery",
     unavailable: "Dataform repositories and workflows are the Dataform API's, which CloudBurrow does not run." },
@@ -567,6 +580,14 @@ const ROUTES = [
   { path: "/iam-admin/audit", service: "iam-audit", icon: "iam", title: "Audit Logs", kind: "Service", section: "IAM & Admin",
     product: "iam", productTitle: "IAM & Admin" },
   { path: "/iam-admin/groups", service: "iam-groups", icon: "iam", title: "Groups", kind: "Group", section: "IAM & Admin",
+    product: "iam", productTitle: "IAM & Admin" },
+  // Third-party SSO (#1959): Cloud Identity's inbound SAML and OIDC SSO
+  // profiles with their IdP certificates, and the profile assignments of
+  // groups (by priority) and organizational units, as the Admin console's
+  // Security > Authentication > SSO with third-party IdP has them.
+  { path: "/iam-admin/sso", service: "iam-sso-profiles", icon: "iam", title: "SSO profiles", kind: "SSO profile", section: "IAM & Admin",
+    product: "iam", productTitle: "IAM & Admin" },
+  { path: "/iam-admin/sso-assignments", service: "iam-sso-assignments", icon: "iam", title: "SSO profile assignments", kind: "SSO profile assignment", section: "IAM & Admin",
     product: "iam", productTitle: "IAM & Admin" },
   { path: "/iam-admin/essential-contacts", title: "Essential Contacts", service: null, requires: "iam", screen: "unavailable", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin",
     unavailable: "Essential Contacts is the Essential Contacts API's, which CloudBurrow does not serve: a local instance sends no notifications." },
@@ -3643,6 +3664,10 @@ async function renderDetail(view, route, resourcePath) {
   // A page addressed by something no reader recognises — a Datastore
   // entity's encoded key (#875) — says what it is in its heading.
   if (data.title) (nameLine || crumb.querySelector("h1, h2")).textContent = data.title;
+  // A top-level page that is not one resource of the route's kind (BigQuery
+  // sharing's My subscriptions, #1989) is headed by its own name, not
+  // "<Kind> details".
+  if (data.heading) crumb.querySelector("h1, h2").textContent = data.heading;
   const sections = (data.sections || []).slice();
   // A Logs tab where Google's page has one (#1842, audit item 9): a Cloud
   // Run service's, job's and worker pool's, a function's, and a GKE

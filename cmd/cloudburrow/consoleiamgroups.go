@@ -170,12 +170,17 @@ func (p iamGroupsProvider) Detail(_ context.Context, _ string, path []string) (c
 	if len(path) == 2 {
 		return p.memberDetail(g, path[1]), nil
 	}
-	members := console.Listing{NameColumn: "Member", Columns: []string{"Type", "Roles", "Expires"}, Noun: "members", RowsOpenable: true}
+	cols := []string{"Type", "Roles", "Expires"}
+	if g.MemberRestriction != "" {
+		cols = append(cols, "Restriction")
+	}
+	members := console.Listing{NameColumn: "Member", Columns: cols, Noun: "members", RowsOpenable: true}
 	ms := append([]resourcemanager.GroupMember(nil), g.Members...)
 	sort.Slice(ms, func(i, j int) bool { return ms[i].Email < ms[j].Email })
 	for _, m := range ms {
 		members.Items = append(members.Items, console.Resource{Name: m.Email,
-			Fields:  map[string]string{"Type": m.Type, "Roles": strings.Join(m.Roles, ", "), "Expires": memberExpiry(m)},
+			Fields: map[string]string{"Type": m.Type, "Roles": strings.Join(m.Roles, ", "), "Expires": memberExpiry(m),
+				"Restriction": orDash(p.registry.MemberEvaluation(g, m.Email))},
 			Actions: memberActions(m)})
 	}
 	members.Total = len(members.Items)
@@ -201,14 +206,24 @@ func (p iamGroupsProvider) Detail(_ context.Context, _ string, path []string) (c
 		}
 	}
 	parents.Total = len(parents.Items)
+	// Security settings (#1959): the member restriction and its state.
+	security := []console.Property{{Label: "Member restriction", Value: orDash(g.MemberRestriction)}}
+	if ss, err := p.registry.GetSecuritySettings(g.Name() + "/securitySettings"); err == nil && ss.Evaluation != "" {
+		security = append(security, console.Property{Label: "Restriction state", Value: ss.Evaluation})
+	}
 	return console.Detail{Summary: props[:2], Sections: []console.Section{
 		{ID: "members", Label: "Members", Listing: members},
 		p.transitiveSection(g),
 		{ID: "member-of", Label: "Member of", Listing: parents},
-		{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Heading: "Group", Properties: props}}},
+		{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Heading: "Group", Properties: props},
+			{Heading: "Security settings", Properties: security}}},
 	}, Edit: &console.EditForm{Label: "Edit group", Fields: []console.Field{
 		groupDisplayNameField(g.DisplayName),
 		{Name: "description", Label: "Description", Type: "text", Default: g.Description, Help: "At most 4,096 characters."},
+		{Name: "memberRestriction", Label: "Member restriction", Type: "text", Default: g.MemberRestriction,
+			Help: "Who can be added directly, in CEL: member.type == 1 (users), 2 (service accounts) or 3 (groups), and " +
+				"member.customer_id == groupCustomerId() (only the organization's), joined by && and ||; for example " +
+				"member.type == 1 && member.customer_id == groupCustomerId(). Empty for no restriction. Existing members stay; the state says whether they adhere."},
 		{Name: "add", Label: "Add member", Type: "text",
 			Help: addMemberHelp(g)},
 		{Name: "role", Label: "Role", Type: "select", Options: []string{"MEMBER", "MANAGER", "OWNER"}, Default: "MEMBER"},
@@ -230,12 +245,19 @@ func (p iamGroupsProvider) Edit(_ context.Context, _ string, path []string, valu
 	if add == "" && strings.TrimSpace(values["expire"]) != "" {
 		return errors.New("a member expiry needs a member to add; change an existing member's expiry from its row in Members")
 	}
+	restriction, restrictionChanged := values["memberRestriction"]
+	restrictionChanged = restrictionChanged && strings.TrimSpace(restriction) != g.MemberRestriction
+	if restrictionChanged {
+		if _, err := p.registry.UpdateSecuritySettings(g.Name()+"/securitySettings", restriction, []string{"member_restriction.query"}); err != nil {
+			return err
+		}
+	}
 	if dn, ok := values["displayName"]; ok && (dn != g.DisplayName || values["description"] != g.Description) {
 		if _, err := p.registry.UpdateGroup(g.Name(), resourcemanager.GroupInput{DisplayName: dn, Description: values["description"]},
 			[]string{"display_name", "description"}); err != nil {
 			return err
 		}
-	} else if add == "" && remove == "" {
+	} else if add == "" && remove == "" && !restrictionChanged {
 		return errors.New("change the display name or description, or give a member to add or to remove")
 	}
 	if remove != "" {

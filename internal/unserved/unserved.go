@@ -77,6 +77,25 @@ var GcloudHardcoded = map[string]string{
 	// storagetransfer.googleapis.com whatever the configuration says. Every
 	// other gcloud transfer command asks for 'transfer' and honours it.
 	"gcloud transfer authorize": "storagetransfer.googleapis.com",
+	// api_lib/ml/speech/client.py (#1945): Speech-to-Text v2's commands
+	// (`gcloud alpha ml speech recognizers` and `locations`) set the
+	// `speech` override, for the call, to https://LOCATION- plus the
+	// netloc of the generated client's BASE_URL
+	// (https://speech.googleapis.com/), replacing whatever the
+	// configuration says, so they always call LOCATION-speech.googleapis.com.
+	// The v1 commands (`gcloud ml speech recognize`) honour the override.
+	"gcloud alpha ml speech recognizers": "LOCATION-speech.googleapis.com",
+	"gcloud alpha ml speech locations":   "LOCATION-speech.googleapis.com",
+}
+
+// GcloudHardcodedCommands are GcloudHardcoded's commands, sorted.
+func GcloudHardcodedCommands() []string {
+	out := make([]string, 0, len(GcloudHardcoded))
+	for c := range GcloudHardcoded {
+		out = append(out, c)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func lines(s string) []string {

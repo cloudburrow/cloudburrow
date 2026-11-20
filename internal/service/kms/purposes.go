@@ -8,6 +8,7 @@ import (
 	"crypto/mlkem"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
@@ -17,6 +18,7 @@ import (
 	"cloud.google.com/go/kms/apiv1/kmspb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	slhdsa "github.com/cloudburrow/cloudburrow/third_party/circl-slhdsa"
 )
 
 // Key purposes and their algorithms (#1212). The table is resources.proto's
@@ -48,6 +50,16 @@ type algSpec struct {
 	// kem is the ML-KEM parameter set (768 or 1024) of a KEY_ENCAPSULATION
 	// key, whose material is the 64-byte FIPS 203 seed.
 	kem int
+	// mldsa is the ML-DSA parameter set (44, 65 or 87) of a PQ_SIGN_ML_DSA
+	// key, whose material is the 32-byte FIPS 204 seed; externalMu its
+	// _EXTERNAL_MU variant (pq.go, #1946).
+	mldsa      int
+	externalMu bool
+	// slhdsa is SLH-DSA-SHA2-128s, its material the FIPS 205 private key;
+	// with hash SHA256 it is the pre-hash variant.
+	slhdsa bool
+	// xwing is KEM_XWING, its material the 32-byte X-Wing decapsulation key.
+	xwing bool
 }
 
 var algorithms = map[algo]algSpec{
@@ -100,6 +112,17 @@ var algorithms = map[algo]algSpec{
 
 	kmspb.CryptoKeyVersion_ML_KEM_768:  {purpose: kmspb.CryptoKey_KEY_ENCAPSULATION, kem: 768},
 	kmspb.CryptoKeyVersion_ML_KEM_1024: {purpose: kmspb.CryptoKey_KEY_ENCAPSULATION, kem: 1024},
+	kmspb.CryptoKeyVersion_KEM_XWING:   {purpose: kmspb.CryptoKey_KEY_ENCAPSULATION, xwing: true},
+
+	// The post-quantum signing algorithms (pq.go, #1946).
+	kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_44:                     {purpose: kmspb.CryptoKey_ASYMMETRIC_SIGN, mldsa: 44},
+	kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_65:                     {purpose: kmspb.CryptoKey_ASYMMETRIC_SIGN, mldsa: 65},
+	kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_87:                     {purpose: kmspb.CryptoKey_ASYMMETRIC_SIGN, mldsa: 87},
+	kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_44_EXTERNAL_MU:         {purpose: kmspb.CryptoKey_ASYMMETRIC_SIGN, mldsa: 44, externalMu: true},
+	kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_65_EXTERNAL_MU:         {purpose: kmspb.CryptoKey_ASYMMETRIC_SIGN, mldsa: 65, externalMu: true},
+	kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_87_EXTERNAL_MU:         {purpose: kmspb.CryptoKey_ASYMMETRIC_SIGN, mldsa: 87, externalMu: true},
+	kmspb.CryptoKeyVersion_PQ_SIGN_SLH_DSA_SHA2_128S:             {purpose: kmspb.CryptoKey_ASYMMETRIC_SIGN, slhdsa: true},
+	kmspb.CryptoKeyVersion_PQ_SIGN_HASH_SLH_DSA_SHA2_128S_SHA256: {purpose: kmspb.CryptoKey_ASYMMETRIC_SIGN, slhdsa: true, hash: crypto.SHA256},
 
 	// AES_256_KWP is "AES key wrap with zero padding algorithm (RFC 5649).
 	// Can only be used by keys with purpose AES_WRAPPING", served at
@@ -107,12 +130,12 @@ var algorithms = map[algo]algSpec{
 	kmspb.CryptoKeyVersion_AES_256_KWP: {purpose: kmspb.CryptoKey_AES_WRAPPING, keyLen: 32},
 }
 
-// algorithmPurpose is the purpose of an implemented algorithm. The documented
-// algorithms missing from the table are UNIMPLEMENTED: Go's standard library
-// has no ML-DSA, SLH-DSA or X-Wing. EXTERNAL_SYMMETRIC_ENCRYPTION is served
+// algorithmPurpose is the purpose of an implemented algorithm. A documented
+// algorithm missing from the table is UNIMPLEMENTED. EXTERNAL_SYMMETRIC_ENCRYPTION is served
 // for external keys only, AES_256_KWP (AES_WRAPPING) for HSM_SINGLE_TENANT
 // keys only, and EC_SIGN_SECP256K1_SHA256 for HSM and HSM_SINGLE_TENANT keys
-// only (levelAlgorithm). ML-KEM is crypto/mlkem.
+// only (levelAlgorithm), and the post-quantum ones for SOFTWARE keys only
+// (pq.go). ML-KEM is crypto/mlkem.
 func algorithmPurpose(a algo) (kmspb.CryptoKey_CryptoKeyPurpose, bool) {
 	if s, ok := algorithms[a]; ok {
 		return s.purpose, true
@@ -145,6 +168,9 @@ func keyAlgorithm(p kmspb.CryptoKey_CryptoKeyPurpose, a algo) (algo, error) {
 		return 0, apierror.InvalidArgument("crypto_key.version_template.algorithm is required for purpose %s", p)
 	}
 	ap, ok := algorithmPurpose(a)
+	if ok && algorithms[a].mldsa > 0 && !mldsaAvailable {
+		return 0, apierror.Unimplemented("crypto_key.version_template.algorithm %s is not implemented: %v", a, errMLDSAUnavailable)
+	}
 	if !ok {
 		return 0, apierror.Unimplemented("crypto_key.version_template.algorithm %s is not implemented", a)
 	}
@@ -176,6 +202,12 @@ func generate(a algo) ([]byte, error) {
 		priv, err = ecdsa.GenerateKey(s.curve, rand.Reader)
 	case s.ed25519:
 		_, priv, err = ed25519.GenerateKey(rand.Reader)
+	case s.pqSign() || s.xwing:
+		b, err := generatePQ(s)
+		if err != nil {
+			return nil, apierror.Internal(err, "generate %s key", a)
+		}
+		return b, nil
 	case s.kem > 0:
 		seed := make([]byte, mlkem.SeedSize)
 		if _, err := rand.Read(seed); err != nil {
@@ -273,6 +305,9 @@ func VerifySignature(publicPEM string, a kmspb.CryptoKeyVersion_CryptoKeyVersion
 	if !ok || s.purpose != kmspb.CryptoKey_ASYMMETRIC_SIGN {
 		return false, fmt.Errorf("%s is not a signing algorithm", a)
 	}
+	if s.pqSign() {
+		return false, fmt.Errorf("%s signatures are verified with the NIST_PQC public key, outside the console", a)
+	}
 	var digest []byte
 	if s.hash != 0 {
 		h := s.hash.New()
@@ -310,6 +345,41 @@ func VerifySignature(publicPEM string, a kmspb.CryptoKeyVersion_CryptoKeyVersion
 		}
 	}
 	return false, errors.New("unsupported public key type")
+}
+
+// PostQuantum reports whether a is a post-quantum signing algorithm, whose
+// public key is read as NIST_PQC (VerifyPQSignature).
+func PostQuantum(a kmspb.CryptoKeyVersion_CryptoKeyVersionAlgorithm) bool {
+	return algorithms[a].pqSign()
+}
+
+// VerifyPQSignature checks a post-quantum AsymmetricSign signature of data
+// against the NIST_PQC public key, for the console's Verify: pure ML-DSA or
+// SLH-DSA over data, HashSLH-DSA over data's SHA-256. An external-μ
+// signature cannot be checked from data here.
+func VerifyPQSignature(pub []byte, a kmspb.CryptoKeyVersion_CryptoKeyVersionAlgorithm, data, sig []byte) (bool, error) {
+	s := algorithms[a]
+	switch {
+	case s.externalMu:
+		return false, fmt.Errorf("%s signs an externally computed μ: verify it with the μ, outside the console", a)
+	case s.slhdsa:
+		k := slhdsa.PublicKey{ID: slhdsa.SHA2_128s}
+		if err := k.UnmarshalBinary(pub); err != nil {
+			return false, err
+		}
+		msg := slhdsa.NewMessage(data)
+		if s.hash != 0 {
+			sum := sha256.Sum256(data)
+			var err error
+			if msg, err = slhdsa.NewPreHashedDigest(crypto.SHA256, sum[:]); err != nil {
+				return false, err
+			}
+		}
+		return slhdsa.Verify(&k, msg, sig, nil), nil
+	case s.mldsa > 0:
+		return mldsaVerify(s.mldsa, pub, data, sig)
+	}
+	return false, fmt.Errorf("%s is not a post-quantum signing algorithm", a)
 }
 
 // EncryptWithPublicKey is RSA-OAEP under the GetPublicKey PEM with the

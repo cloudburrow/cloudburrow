@@ -68,6 +68,14 @@ type BackupRun struct {
 	// InstanceDeletionTime is set on a FINAL backup when its instance is
 	// deleted: a final backup outlives its instance.
 	InstanceDeletionTime string `json:"instanceDeletionTime,omitempty"`
+	// Location is the backup's location (#1956): a region or a
+	// multi-region, as asked for or configured, else the default.
+	Location string `json:"location,omitempty"`
+	// KMSKey, KMSKeyVersion and WrappedKey are a CMEK instance's backup's
+	// key (#1956): its instance's data key, wrapped by KMSKeyVersion.
+	KMSKey        string `json:"kmsKey,omitempty"`
+	KMSKeyVersion string `json:"kmsKeyVersion,omitempty"`
+	WrappedKey    []byte `json:"wrappedKey,omitempty"`
 }
 
 type backupStore struct {
@@ -176,9 +184,10 @@ func backupRunJSON(base string, r *BackupRun) map[string]any {
 	out := map[string]any{
 		"kind": "sql#backupRun", "id": r.ID, "instance": r.Instance, "status": r.Status, "type": r.Type,
 		"enqueuedTime": r.EnqueuedTime, "windowStartTime": r.WindowStartTime, "backupKind": "SNAPSHOT",
-		"databaseVersion": r.DatabaseVersion, "location": Region,
+		"databaseVersion": r.DatabaseVersion, "location": backupLocation(r),
 		"selfLink": base + "projects/" + r.Project + "/instances/" + r.Instance + "/backupRuns/" + r.ID,
 	}
+	backupEncryptionJSON(out, r)
 	if r.Description != "" {
 		out["description"] = r.Description
 	}
@@ -239,6 +248,7 @@ func (s *Server) backupRuns(r *http.Request, base, project string, e Engine, res
 		var body struct {
 			Description string `json:"description"`
 			Type        string `json:"type"`
+			Location    string `json:"location"`
 		}
 		if err := readChecked(r, "backupRun", backupRunFields, &body); err != nil {
 			return "sql.backupRuns.insert", nil, err
@@ -246,17 +256,20 @@ func (s *Server) backupRuns(r *http.Request, base, project string, e Engine, res
 		if body.Type == "AUTOMATED" {
 			return "sql.backupRuns.insert", nil, Errorf(http.StatusBadRequest, "Invalid request: only an ON_DEMAND backup can be requested.")
 		}
+		if err := checkBackupLocation("backupRun.location", body.Location); err != nil {
+			return "sql.backupRuns.insert", nil, err
+		}
 		// Custom constraints on sqladmin.googleapis.com/BackupRun (#1895):
-		// an on-demand run is in the instance's region, as backupRunJSON
-		// answers it.
+		// an on-demand run is in the location backupRunJSON answers.
+		loc, _, _ := s.backupPlacement(e.Instance(), body.Location)
 		if err := checkCustom(r.Context(), project, orgpolicy.TypeSQLBackupRun, orgpolicy.MethodCreate,
-			map[string]any{"description": body.Description, "location": Region}); err != nil {
+			map[string]any{"description": body.Description, "location": loc}); err != nil {
 			return "sql.backupRuns.insert", nil, err
 		}
 		if err := s.busy(e.Instance()); err != nil {
 			return "sql.backupRuns.insert", nil, err
 		}
-		op, err := s.takeBackup(base, project, e, "ON_DEMAND", body.Description)
+		op, _, err := s.takeBackupRunIn(base, project, e, "ON_DEMAND", body.Description, false, body.Location)
 		return "sql.backupRuns.insert", op, err
 	case len(rest) == 1:
 		if b == nil {
@@ -337,17 +350,37 @@ func (s *Server) takeBackup(base, project string, e Engine, typ, description str
 // takeBackupRun is takeBackup, returning the run's ID and, with backupDR,
 // marking it the Backup and DR Service's.
 func (s *Server) takeBackupRun(base, project string, e Engine, typ, description string, backupDR bool) (map[string]any, string, error) {
+	return s.takeBackupRunIn(base, project, e, typ, description, backupDR, "")
+}
+
+// takeBackupRunIn is takeBackupRun in a location (#1956): the one asked
+// for, else the instance's backupConfiguration.location, else the
+// default. A CMEK instance's backup is wrapped with its key's primary
+// version.
+func (s *Server) takeBackupRunIn(base, project string, e Engine, typ, description string, backupDR bool, location string) (map[string]any, string, error) {
 	if err := sqlServerEngine(e, "a backup"); err != nil {
 		return nil, "", err
+	}
+	loc, custom, spec := s.backupPlacement(e.Instance(), location)
+	wrapped, version, err := s.backupKey(spec)
+	if err != nil {
+		return nil, "", err
+	}
+	var placeErr error
+	if custom {
+		placeErr = backupLocationAllowed(context.Background(), project, loc, spec)
 	}
 	b := s.backups
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	b.mu.Lock()
 	run := &BackupRun{ID: b.newIDLocked(), Project: project, Instance: e.Instance(), DatabaseVersion: e.DatabaseVersion(),
 		Type: typ, Description: description, Status: "RUNNING", EnqueuedTime: now, StartTime: now, WindowStartTime: now,
-		BackupDR: backupDR}
+		BackupDR: backupDR, Location: loc}
+	if version != "" {
+		run.KMSKey, run.KMSKeyVersion, run.WrappedKey = spec.KMSKey, version, wrapped
+	}
 	b.runs[run.ID] = run
-	err := b.saveLocked()
+	err = b.saveLocked()
 	b.mu.Unlock()
 	if err != nil {
 		return nil, "", err
@@ -356,7 +389,12 @@ func (s *Server) takeBackupRun(base, project string, e Engine, typ, description 
 	id := op["name"].(string)
 	t := s.target(e)
 	go func() {
-		err := s.dump(t, run.ID)
+		// "Backups fail if they are in a region the organization policy
+		// does not allow."
+		err := placeErr
+		if err == nil {
+			err = s.dump(t, run.ID)
+		}
 		if err == nil {
 			// The base a point-in-time recovery starts from is part of
 			// the backup: when it fails, so does the backup.
@@ -534,6 +572,9 @@ func (s *Server) restoreBackup(r *http.Request, base, project string, e Engine) 
 	}
 	if cp.Status != "SUCCESSFUL" {
 		return nil, Errorf(http.StatusBadRequest, "Invalid request: the backup run %s is %s, not SUCCESSFUL.", cp.ID, cp.Status)
+	}
+	if err := s.backupKeyUsable(cp); err != nil {
+		return nil, err
 	}
 	if engineOf(cp.DatabaseVersion) != engineOf(e.DatabaseVersion()) {
 		return nil, Errorf(http.StatusBadRequest, "Invalid request: a %s backup cannot be restored into a %s instance.", cp.DatabaseVersion, e.DatabaseVersion())

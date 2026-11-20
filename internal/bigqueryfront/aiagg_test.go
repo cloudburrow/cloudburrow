@@ -133,7 +133,7 @@ func TestAIAggGroupBatches(t *testing.T) {
 	r := httptest.NewRequest("POST", "/", nil)
 	a := aiResolved{rm: &remoteModel{Model: "gemma-4-e2b-it-community", Location: "US"}, maxErrRatio: 1}
 
-	lit, ok, failed, _ := f.aggGroup(r, "p", a, "Summarize", []string{"one", "two", "three"})
+	lit, ok, failed, _ := f.aggGroup(r, "p", a, "Summarize", textItems([]string{"one", "two", "three"}))
 	if !ok || failed != 0 || lit != sqlString("rows=3 parts=0") || len(prompts) != 1 || !strings.HasPrefix(prompts[0], "Summarize\n\n") {
 		t.Errorf("one call: %s %v %d %q", lit, ok, failed, prompts)
 	}
@@ -145,7 +145,7 @@ func TestAIAggGroupBatches(t *testing.T) {
 	aiAggBatchBytes = len("Summarize") + 2*len("<row>xxxx</row>\n") // two rows a batch
 	prompts, cfgs = nil, nil
 	rows := []string{"r001", "r002", "r003", "r004", "r005"}
-	lit, ok, failed, _ = f.aggGroup(r, "p", a, "Summarize", rows)
+	lit, ok, failed, _ = f.aggGroup(r, "p", a, "Summarize", textItems(rows))
 	// 5 rows: 3 batches (2, 2, 1), then their 3 answers combined: the
 	// answers are longer than the budget, so in pairs (2, 1), then 1.
 	if !ok || failed != 0 || len(prompts) < 4 || !strings.Contains(prompts[len(prompts)-1], "<part>") {
@@ -158,11 +158,11 @@ func TestAIAggGroupBatches(t *testing.T) {
 	}
 
 	prompts, cfgs = nil, nil
-	lit, ok, failed, status := f.aggGroup(r, "p", a, "Summarize", []string{"r001", "boom", "r003", "r004"})
+	lit, ok, failed, status := f.aggGroup(r, "p", a, "Summarize", textItems([]string{"r001", "boom", "r003", "r004"}))
 	if !ok || failed != 2 || !strings.Contains(status, "UNAVAILABLE") {
 		t.Errorf("a failed batch: %s %v %d %s", lit, ok, failed, status)
 	}
-	if _, ok, failed, _ := f.aggGroup(r, "p", a, "Summarize", []string{"boom", "boom"}); ok || failed != 2 {
+	if _, ok, failed, _ := f.aggGroup(r, "p", a, "Summarize", textItems([]string{"boom", "boom"})); ok || failed != 2 {
 		t.Errorf("every call failed: %v %d", ok, failed)
 	}
 
@@ -170,7 +170,7 @@ func TestAIAggGroupBatches(t *testing.T) {
 	fields, _ := parseOutputSchema("n INT64")
 	a.schema = fields
 	prompts, cfgs = nil, nil
-	lit, ok, failed, _ = f.aggGroup(r, "p", a, "Count", []string{"a", "b"})
+	lit, ok, failed, _ = f.aggGroup(r, "p", a, "Count", textItems([]string{"a", "b"}))
 	if !ok || failed != 0 || lit != "STRUCT<`n` INT64>(2)" || cfgs[0]["responseSchema"] == nil || !strings.Contains(prompts[0], "JSON object") {
 		t.Errorf("output_schema: %s %v %d %v", lit, ok, failed, cfgs)
 	}
@@ -253,4 +253,13 @@ func TestAIAggPositionalParameters(t *testing.T) {
 	if none := usedParams(nq, "SELECT 1"); string(none.QueryParameters) != "[]" || none.ParameterMode != "NAMED" {
 		t.Errorf("none used: %s %s", none.QueryParameters, none.ParameterMode)
 	}
+}
+
+// textItems are rows of text alone, one aggItem each.
+func textItems(rows []string) []aggItem {
+	out := make([]aggItem, len(rows))
+	for i, s := range rows {
+		out[i] = aggItem{text: s, rows: 1}
+	}
+	return out
 }

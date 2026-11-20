@@ -193,18 +193,16 @@ func (s *Server) keyBlocksConnections(name string) error {
 	return nil
 }
 
-// backupReencryptionWhy is why reencrypt's backupReencryptionConfig is
-// refused.
-const backupReencryptionWhy = "an instance's backups here are not encrypted with its customer-managed key (a backup records no kmsKeyVersion), " +
-	"so there is no backup to re-encrypt; send no backupReencryptionConfig and the instance itself is re-encrypted (docs/cloudsql.md)"
-
 // reencrypt is instances.reencrypt (#1614), gcloud sql instances
 // reencrypt: "Reencrypt CMEK instance with latest key version". The
 // instance's data key is unwrapped and wrapped again by its CryptoKey's
 // primary version, which becomes diskEncryptionStatus.kmsKeyVersionName, so
 // the version that wrapped it before can be disabled or destroyed without
 // suspending the instance. The server keeps running: only the key's wrapping
-// changes.
+// changes. With backupReencryptionConfig (#1956) the instance's backups of
+// its backupType, at most backupLimit, are wrapped again too
+// (backupkeys.go); otherwise "Backups aren't automatically re-encrypted
+// with the new key version when you re-encrypt your instance".
 func (s *Server) reencrypt(r *http.Request, base, project string, e Engine) (any, error) {
 	name := e.Instance()
 	c, err := s.createdFor(project, name, "instances.reencrypt")
@@ -217,9 +215,9 @@ func (s *Server) reencrypt(r *http.Request, base, project string, e Engine) (any
 	if err := decode(r, &body); err != nil {
 		return nil, err
 	}
-	if body.BackupReencryptionConfig != nil && string(*body.BackupReencryptionConfig) != "null" &&
-		string(*body.BackupReencryptionConfig) != "{}" {
-		return nil, unimplemented("reencrypt's backupReencryptionConfig", backupReencryptionWhy)
+	bcfg, err := parseBackupReencryption(body.BackupReencryptionConfig)
+	if err != nil {
+		return nil, err
 	}
 	s.emu.RLock()
 	spec, state, k := c.spec, c.state, s.kms
@@ -246,6 +244,12 @@ func (s *Server) reencrypt(r *http.Request, base, project string, e Engine) (any
 	if err != nil {
 		return nil, keyError(spec.KMSKey, err)
 	}
+	var backups []rewrappedBackup
+	if bcfg != nil {
+		if backups, err = s.rewrapBackups(ctx, k, project, name, spec.KMSKey, bcfg); err != nil {
+			return nil, err
+		}
+	}
 	s.emu.Lock()
 	if c.spec.KMSKey != spec.KMSKey || string(c.spec.WrappedKey) != string(spec.WrappedKey) {
 		s.emu.Unlock()
@@ -254,6 +258,9 @@ func (s *Server) reencrypt(r *http.Request, base, project string, e Engine) (any
 	c.spec.KMSKeyVersion, c.spec.WrappedKey = version, wrapped
 	err = s.saveLocked()
 	s.emu.Unlock()
+	if err == nil {
+		err = s.applyRewrapped(backups)
+	}
 	if err != nil {
 		return nil, err
 	}

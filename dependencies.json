@@ -690,7 +690,7 @@
         "version": "v2.8.0",
         "license": "Apache-2.0",
         "verification": "go.sum",
-        "notes": "Test-only (#416): the compat suite's envelope-encryption client for Cloud KMS. Never linked into the binary (TestTheBinaryDoesNotLinkTink); the server's crypto is the Go standard library."
+        "notes": "Test-only (#416): the compat suite's envelope-encryption client for Cloud KMS, and its independent ML-DSA and SLH-DSA verifier (#1946). Never linked into the binary (TestTheBinaryDoesNotLinkTink); the server's crypto is the Go standard library and, for SLH-DSA, CIRCL (goCircl)."
       },
       "goChromedp": {
         "module": "github.com/chromedp/chromedp",
@@ -707,12 +707,21 @@
         "verification": "go.sum",
         "notes": "Test-only (#416): Tink's Cloud KMS integration, used as the acceptance client over gRPC and REST. Never linked into the binary."
       },
+      "goCircl": {
+        "module": "github.com/cloudflare/circl",
+        "version": "v1.6.5",
+        "sum": "h1:O64F26HEqNhznd/hrC5KZXVKYuKM2rx4deZDTc4ihQA=",
+        "source": "https://github.com/cloudflare/circl",
+        "license": "BSD-3-Clause",
+        "verification": "go.sum",
+        "notes": "Cloud KMS post-quantum algorithms (#1946). Linked: third_party/circl-slhdsa is its sign/slhdsa (with internal/conv and internal/sha3), copied from this module's sources and given one constructor for a SHA-256 digest the client hashed (PROVENANCE.md): Go has no SLH-DSA, and Google's only Go one is internal to Tink, which the binary does not link. Test-only as a module: the compat suite's independent X-Wing encapsulation (kem/xwing) and HashSLH-DSA verification (sign/slhdsa). ML-DSA, ML-KEM and X-Wing on the server are Go's crypto/mldsa, crypto/mlkem, crypto/ecdh and crypto/sha3."
+      },
       "goKMS": {
         "module": "cloud.google.com/go/kms",
         "version": "v1.35.0",
         "license": "Apache-2.0",
         "verification": "go.sum",
-        "notes": "Generated contract types for the Cloud KMS implementation (#309), and the client the compatibility tests drive it with. Promoted from indirect (v1.32.0) to direct. The server's crypto is Go standard library only (docs/upstream-evaluation.md, Cloud KMS amendment)."
+        "notes": "Generated contract types for the Cloud KMS implementation (#309), and the client the compatibility tests drive it with. Promoted from indirect (v1.32.0) to direct. The server's crypto is Go's standard library, but SLH-DSA, which is CIRCL's (goCircl, #1946; docs/upstream-evaluation.md, Cloud KMS amendment)."
       },
       "goNet": {
         "module": "golang.org/x/net",
@@ -1107,6 +1116,9 @@
         "$comment": "The only model that is both runnable and obtainable without credentials. A COMMUNITY conversion, not Google-published.",
         "repo": "litert-community/gemma-4-E2B-it-litert-lm",
         "artifact": "gemma-4-E2B-it.litertlm",
+        "revision": "2d74ac41a33d7da82f39f7d5720a04c68514a103",
+        "sha256": "181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c",
+        "ci": "ci.yml's localai compat shard (#1985) fetches artifact at revision with scripts/localai-models.sh, checks sizeBytes and sha256, and caches it keyed by them; no Hugging Face sign-in.",
         "publisher": "litert-community (NOT the verified google organisation)",
         "sizeBytes": 2588147712,
         "gated": false,
@@ -1127,6 +1139,23 @@
         "gatedCandidate": "litert-community/embeddinggemma-300m (gated: auto, 401; holds per-NPU .tflite rather than a bundle)",
         "notes": "The runtime half works: embedding_litert_lm_main builds, ships and initialises. See docs/embeddings.md.",
         "skipDiscovery": "Nothing to discover: the gap is an export format, not a version."
+      },
+      "onnxRuntime": {
+        "$comment": "The ONNX Runtime library a -tags onnx build loads at run time (ONNXRUNTIME_LIB), for ci.yml's localai compat shard (#1985): libonnxruntime.so from Microsoft's own PyPI wheel, unpacked by scripts/localai-models.sh. github.com/yalue/onnxruntime_go v1.36.0 is built on the 1.29.0 C API headers, which later releases keep serving; 1.31.1 is the version the local runs use (Homebrew's, on macOS).",
+        "version": "1.31.1",
+        "source": "https://pypi.org/project/onnxruntime/1.31.1/",
+        "license": "MIT",
+        "redistribution": "not published: downloaded by CI and by a developer on Linux; only the shared library is unpacked, and nothing of it is in the CLI",
+        "updateFeed": "pypi",
+        "verification": "sha256",
+        "artifacts": {
+          "linux/amd64": {
+            "url": "https://files.pythonhosted.org/packages/eb/27/c6a823bac55b2977bea2027c3ec9393a2c1002cb9a09eb40354563e02730/onnxruntime-1.31.1-cp312-cp312-manylinux_2_28_x86_64.whl",
+            "sha256": "1f3dea47f2f0e5117c2404cea7d21fd253ae7836a3bf167a501cdfbb2600d536",
+            "sizeBytes": 23760988
+          }
+        },
+        "skipDiscovery": "PyPI; depcheck only discovers GitHub-sourced components."
       },
       "modelGardenVLLM": {
         "$comment": "ModelGardenService.Deploy's engine for Hugging Face text-generation models (#1840, internal/modelgarden): the engine Model Garden uses, its official CPU build. Run by `docker run` beside the instance's cluster when a model is deployed, never at `up`.",

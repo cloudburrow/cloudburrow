@@ -5,8 +5,12 @@ import (
 	"strings"
 	"testing"
 
+	rmpb "cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
+
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/secrets"
+	"github.com/cloudburrow/cloudburrow/internal/store"
 )
 
 // TestConsoleSecretParity (#1850): the list's Google columns and row
@@ -31,7 +35,7 @@ func TestConsoleSecretParity(t *testing.T) {
 			sections = append(sections, f.Section)
 		}
 	}
-	want := "Replication policy,Encryption,Rotation,Notifications,Expiration,Labels,Annotations,Version aliases,Delayed destruction"
+	want := "Replication policy,Encryption,Rotation,Notifications,Expiration,Labels,Annotations,Version aliases,Delayed destruction,Tags"
 	if got := strings.Join(sections, ","); got != want {
 		t.Errorf("Create secret sections = %s\nwant %s", got, want)
 	}
@@ -139,5 +143,35 @@ func TestConsoleSecretParity(t *testing.T) {
 	}
 	if _, f := r.CreateForm(); f[1].Name != "location" {
 		t.Errorf("Create regional secret's second field is %s", f[1].Name)
+	}
+}
+
+// Create secret's Tags bind through Resource Manager's registry; an unknown
+// key refuses the create with nothing stored (#1961).
+func TestConsoleSecretTags(t *testing.T) {
+	ctx := context.Background()
+	p := secretsFixture(t)
+	st := p.svc.Store()
+	reg := resourcemanager.New(store.NewMemory())
+	st.SetTagBinder(func() secrets.TagBinder { return reg })
+	k, err := reg.CreateTagKey(&rmpb.TagKey{Parent: resourcemanager.OrganizationName, ShortName: "env"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reg.CreateTagValue(&rmpb.TagValue{Parent: k.GetName(), ShortName: "prod"}, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Create(ctx, "tags-project", map[string]string{"secretId": "bad", "payload": "x", "tags": `{"tagKeys/42":"prod"}`}); err == nil {
+		t.Error("an unknown tag key was accepted")
+	}
+	if _, err := st.GetSecret("tags-project", "bad"); err == nil {
+		t.Error("the refused secret was stored")
+	}
+	if _, err := p.Create(ctx, "tags-project", map[string]string{"secretId": "ok", "payload": "x", "tags": `{"` + k.GetNamespacedName() + `":"prod"}`}); err != nil {
+		t.Fatal(err)
+	}
+	b, err := reg.TagBindings(secrets.FullResourcePrefix + "projects/tags-project/secrets/ok")
+	if err != nil || len(b) != 1 || b[0].GetTagValueNamespacedName() != k.GetNamespacedName()+"/prod" {
+		t.Errorf("the secret's bindings = %v, %v", b, err)
 	}
 }

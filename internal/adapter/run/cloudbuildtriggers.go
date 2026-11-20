@@ -151,12 +151,11 @@ func unsupportedTrigger(t *cbpb.BuildTrigger) error {
 		return repo("sourceToBuild")
 	case t.GetAutodetect() && !onDevConnectLink(t):
 		return repo("autodetect")
-	case t.GetFilter() != "":
-		return apierror.Unimplemented("BuildTrigger field filter (a CEL expression over the event) is not supported")
 	case t.GetServiceAccount() != "" && checkServiceAccountName("trigger.service_account", t.GetServiceAccount()) != nil:
 		return checkServiceAccountName("trigger.service_account", t.GetServiceAccount())
-	case len(t.GetIncludedFiles()) > 0 || len(t.GetIgnoredFiles()) > 0:
-		return apierror.Unimplemented("BuildTrigger fields includedFiles and ignoredFiles filter repository pushes, which no trigger here has")
+	}
+	if err := unsupportedTriggerFilters(t); err != nil {
+		return err
 	}
 	// A trigger on a Developer Connect link reads its config file from the
 	// pushed commit (#1854): there is no inline build to check until then.
@@ -447,7 +446,8 @@ func (c *CloudBuildServer) UpdateBuildTrigger(ctx context.Context, req *cbpb.Upd
 
 // RunBuildTrigger runs a trigger's build. Its source, a RepoSource, may
 // carry substitutions, which override the trigger's; a branch, tag or
-// commit is refused, as no trigger here has a repository.
+// commit builds that revision of a repository trigger's Secure Source
+// Manager repository, and is refused on a trigger with no repository.
 func (c *CloudBuildServer) RunBuildTrigger(ctx context.Context, req *cbpb.RunBuildTriggerRequest) (*longrunning.Operation, error) {
 	// A trigger on a Developer Connect link builds a commit of its
 	// repository (#1852, cloudbuilddevconnect.go).
@@ -470,12 +470,14 @@ func (c *CloudBuildServer) RunBuildTrigger(ctx context.Context, req *cbpb.RunBui
 		return nil, apierror.Unimplemented("RunBuildTrigger source names a repository revision, which needs a hosted git " +
 			"repository; this trigger's build has its own source")
 	}
-	return c.runTrigger(ctx, req.GetName(), req.GetProjectId(), req.GetTriggerId(), req.GetSource().GetSubstitutions(), nil)
+	return c.runTrigger(ctx, req.GetName(), req.GetProjectId(), req.GetTriggerId(), req.GetSource().GetSubstitutions(), nil, false)
 }
 
 // runTrigger starts a build from a trigger, with extra substitutions over
-// the trigger's and its $(body.…) bindings resolved against body.
-func (c *CloudBuildServer) runTrigger(ctx context.Context, name, project, triggerID string, extra map[string]string, body any) (*longrunning.Operation, error) {
+// the trigger's and its $(body.…) bindings resolved against body. An
+// event's build runs only when the trigger's filter accepts it: nil, nil
+// when it does not.
+func (c *CloudBuildServer) runTrigger(ctx context.Context, name, project, triggerID string, extra map[string]string, body any, event bool) (*longrunning.Operation, error) {
 	triggerStore.mu.Lock()
 	t, err := triggerOf(name, project, triggerID)
 	approval := false
@@ -508,6 +510,18 @@ func (c *CloudBuildServer) runTrigger(ctx context.Context, name, project, trigge
 	// The trigger's account, never the build config's (#1854).
 	b.ServiceAccount = t.GetServiceAccount()
 	p, l, _ := resource.ParseLocation(strings.SplitN(t.GetResourceName(), "/triggers/", 2)[0])
+	// An event (a webhook or Pub/Sub message) builds only when
+	// the trigger's filter accepts its substitutions (#1955); a manual run
+	// is not filtered.
+	if event {
+		ok, err := triggerFilterAccepts(t, filterValues(p, b, map[string]string{"TRIGGER_NAME": t.GetName()}))
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, nil
+		}
+	}
 	return c.createBuild(ctx, p, l, l == "global", b, &triggerContext{id: t.GetId(), name: t.GetName(), approval: approval})
 }
 
@@ -573,7 +587,7 @@ func (c *CloudBuildServer) ReceiveTriggerWebhook(ctx context.Context, req *cbpb.
 	if data := req.GetBody().GetData(); len(data) > 0 {
 		_ = json.Unmarshal(data, &body)
 	}
-	if _, err := c.runTrigger(ctx, t.GetResourceName(), "", "", nil, body); err != nil {
+	if _, err := c.runTrigger(ctx, t.GetResourceName(), "", "", nil, body, true); err != nil {
 		return nil, err
 	}
 	return &cbpb.ReceiveTriggerWebhookResponse{}, nil

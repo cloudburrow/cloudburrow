@@ -86,8 +86,9 @@ func registryUnimplemented(t *testing.T, prefix string) []string {
 // field, through the official client (#396). Rotation schedules, once here,
 // are implemented (#816; TestKMSRotationSchedule), and so are the asymmetric,
 // MAC, raw and ML-KEM purposes (#1212), HSM protection (#1452), and the
-// external and single-tenant HSM levels (#1469); the algorithms Go's
-// standard library does not compute are not.
+// external and single-tenant HSM levels (#1469), and the post-quantum
+// algorithms and import_only (#1946; TestKMSPostQuantumSignatures,
+// TestKMSImportOnlyKeys).
 func TestKMSOutOfScopeKeyOptionsAreUnimplemented(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
@@ -101,12 +102,7 @@ func TestKMSOutOfScopeKeyOptionsAreUnimplemented(t *testing.T) {
 		key   *kmspb.CryptoKey
 		field string
 	}{
-		"AES_WRAPPING": {&kmspb.CryptoKey{Purpose: kmspb.CryptoKey_AES_WRAPPING}, "purpose"},
-		"ML-DSA": {&kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ASYMMETRIC_SIGN,
-			VersionTemplate: &kmspb.CryptoKeyVersionTemplate{Algorithm: kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_65}}, "algorithm"},
-		"X-Wing": {&kmspb.CryptoKey{Purpose: kmspb.CryptoKey_KEY_ENCAPSULATION,
-			VersionTemplate: &kmspb.CryptoKeyVersionTemplate{Algorithm: kmspb.CryptoKeyVersion_KEM_XWING}}, "algorithm"},
-		"import_only":        {&kmspb.CryptoKey{Purpose: sym, ImportOnly: true}, "import_only"},
+		"AES_WRAPPING":       {&kmspb.CryptoKey{Purpose: kmspb.CryptoKey_AES_WRAPPING}, "purpose"},
 		"crypto_key_backend": {&kmspb.CryptoKey{Purpose: sym, CryptoKeyBackend: ring.GetName()}, "crypto_key_backend"},
 	} {
 		_, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(),

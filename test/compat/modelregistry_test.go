@@ -100,6 +100,11 @@ func TestModelRegistryDeploysACustomContainer(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 	defer cancel()
 	buildModelServer(t, ctx)
+	// Served from the instance's Artifact Registry, as a user's serving
+	// image is (a kind-loaded dev.local image is not always visible to
+	// the kubelet on Docker Desktop's containerd image store, measured
+	// 2026-11-20).
+	image := pushModelServer(t, ctx, h)
 	parent := runParent(h)
 
 	// The artifacts: two versions of a linear model.
@@ -111,7 +116,7 @@ func TestModelRegistryDeploysACustomContainer(t *testing.T) {
 	putArtifact(t, ctx, sc, bkt, "v2/model.json", `{"weight":10,"bias":0,"name":"linear-v2"}`)
 
 	modelID := fmt.Sprintf("compat-linear-%d", time.Now().UnixNano()%1e6)
-	spec := &aiplatformpb.ModelContainerSpec{ImageUri: modelServerImage, PredictRoute: "/v1/models/linear:predict",
+	spec := &aiplatformpb.ModelContainerSpec{ImageUri: image, PredictRoute: "/v1/models/linear:predict",
 		HealthRoute: "/v1/models/linear", Ports: []*aiplatformpb.Port{{ContainerPort: 7080}},
 		Env: []*aiplatformpb.EnvVar{{Name: "MODEL_FLAVOUR", Value: "linear"}}}
 	explain := &aiplatformpb.ExplanationSpec{
@@ -173,7 +178,7 @@ func TestModelRegistryDeploysACustomContainer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetModel: %v", err)
 	}
-	if m.GetVersionId() != "1" || strings.Join(m.GetVersionAliases(), ",") != "default" || m.GetContainerSpec().GetImageUri() != modelServerImage ||
+	if m.GetVersionId() != "1" || strings.Join(m.GetVersionAliases(), ",") != "default" || m.GetContainerSpec().GetImageUri() != image ||
 		m.GetArtifactUri() != "gs://"+bkt+"/v1" {
 		t.Errorf("GetModel = version %s, aliases %v, image %s, artifactUri %s", m.GetVersionId(), m.GetVersionAliases(),
 			m.GetContainerSpec().GetImageUri(), m.GetArtifactUri())

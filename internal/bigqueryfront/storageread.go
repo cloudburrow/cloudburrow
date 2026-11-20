@@ -104,6 +104,9 @@ type storageRead struct {
 	write *storageWrite
 	// policies are the REST front's row access policies (#1218), or nil.
 	policies *rowPolicies
+	// hubs are the REST front's Analytics Hub linked datasets
+	// (hublinks.go, #1989), or nil.
+	hubs *hubLinks
 
 	mu      sync.Mutex
 	streams map[string]*readStream
@@ -150,6 +153,8 @@ type writeOptions struct {
 	logf     func(string, ...any)
 	// policies are the REST front's row access policies (#1218).
 	policies *rowPolicies
+	// hubs are the REST front's Analytics Hub linked datasets (#1989).
+	hubs *hubLinks
 }
 
 // serveStorageRead is ServeStorageRead, with the REST front's job records
@@ -163,7 +168,7 @@ func serveStorageRead(ctx context.Context, l net.Listener, upstream string, rest
 	}
 	defer s.upstream.Close()
 	if wo != nil {
-		s.policies = wo.policies
+		s.policies, s.hubs = wo.policies, wo.hubs
 		if wo.stateDir != "" {
 			s.keepStreams(readStreamsStateFile(wo.stateDir), wo.logf) // storagereadstate.go, #1460
 		}
@@ -318,6 +323,11 @@ func (s *storageRead) createSession(ss grpc.ServerStream, open func() (grpc.Clie
 	default:
 		return status.Errorf(codes.InvalidArgument, "read_session.data_format %s: give ARROW or AVRO", f)
 	}
+	asked := req.GetReadSession().GetTable()
+	in, t, err := s.hubSession(&req, in, t) // hublinks.go, #1989
+	if err != nil {
+		return err
+	}
 	if err := s.tableExists(ss.Context(), t); err != nil {
 		return err
 	}
@@ -345,6 +355,9 @@ func (s *storageRead) createSession(ss grpc.ServerStream, open func() (grpc.Clie
 			return fr
 		}
 		rs := &readStream{table: t, restriction: restriction}
+		if sess.GetTable() != "" {
+			sess.Table = asked // a linked table's session names it, not the shared one
+		}
 		if e := sess.GetExpireTime(); e != nil {
 			rs.expires = e.AsTime()
 		}

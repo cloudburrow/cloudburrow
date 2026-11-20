@@ -370,8 +370,10 @@ func (p vertexModelsProvider) DetailActions(ctx context.Context, project string,
 		}},
 		{ID: "export", Label: "Export", Fields: []console.Field{
 			{Name: "version", Label: "Version", Type: "text", Help: "A version ID or alias; empty is the default version."},
-			{Name: "destination", Label: "Cloud Storage destination", Type: "text", Required: true, Pattern: `^gs://.+$`,
-				Help: "A gs:// prefix in this instance's Cloud Storage; the artifacts land under model-ID/custom-trained/TIMESTAMP."},
+			{Name: "destination", Label: "Cloud Storage destination", Type: "text", Pattern: `^(gs://.+)?$`,
+				Help: "A gs:// prefix in this instance's Cloud Storage; the artifacts land under model-ID/custom-trained/TIMESTAMP. Give this, an image destination, or both."},
+			{Name: "imageDestination", Label: "Artifact Registry image destination", Type: "text", Pattern: `^([a-z0-9\-]+-docker\.pkg\.dev/.+)?$`,
+				Help: "LOCATION-docker.pkg.dev/PROJECT/REPOSITORY/IMAGE[:TAG] in this instance's Artifact Registry; the model's serving image is copied there (tag latest by default)."},
 		}},
 		{ID: "evaluation", Label: "Import evaluation", Fields: []console.Field{
 			{Name: "version", Label: "Version", Type: "text", Help: "A version ID or alias; empty is the default version."},
@@ -553,9 +555,14 @@ func (p vertexModelsProvider) manage(ctx context.Context, model, action string, 
 		return &console.Listing{Columns: []string{"Version"}, NameColumn: "Model", Noun: "models", Total: 1,
 			Items: []console.Resource{{Name: r.GetModel(), Fields: map[string]string{"Version": r.GetModelVersionId()}}}}, nil
 	case "export":
-		op, err := mc.ExportModel(ctx, &aiplatformpb.ExportModelRequest{Name: ref, OutputConfig: &aiplatformpb.ExportModelRequest_OutputConfig{
-			ExportFormatId:      "custom-trained",
-			ArtifactDestination: &aiplatformpb.GcsDestination{OutputUriPrefix: strings.TrimSpace(values["destination"])}}})
+		oc := &aiplatformpb.ExportModelRequest_OutputConfig{ExportFormatId: "custom-trained"}
+		if d := strings.TrimSpace(values["destination"]); d != "" {
+			oc.ArtifactDestination = &aiplatformpb.GcsDestination{OutputUriPrefix: d}
+		}
+		if d := strings.TrimSpace(values["imageDestination"]); d != "" {
+			oc.ImageDestination = &aiplatformpb.ContainerRegistryDestination{OutputUri: d}
+		}
+		op, err := mc.ExportModel(ctx, &aiplatformpb.ExportModelRequest{Name: ref, OutputConfig: oc})
 		if err != nil {
 			return nil, err
 		}
@@ -563,8 +570,9 @@ func (p vertexModelsProvider) manage(ctx context.Context, model, action string, 
 			return nil, err
 		}
 		meta, _ := op.Metadata()
-		return &console.Listing{Columns: []string{"Artifact output"}, NameColumn: "Model", Noun: "exports", Total: 1,
-			Items: []console.Resource{{Name: ref, Fields: map[string]string{"Artifact output": meta.GetOutputInfo().GetArtifactOutputUri()}}}}, nil
+		return &console.Listing{Columns: []string{"Artifact output", "Image output"}, NameColumn: "Model", Noun: "exports", Total: 1,
+			Items: []console.Resource{{Name: ref, Fields: map[string]string{"Artifact output": meta.GetOutputInfo().GetArtifactOutputUri(),
+				"Image output": meta.GetOutputInfo().GetImageOutputUri()}}}}, nil
 	case "evaluation":
 		var metrics any
 		if err := json.Unmarshal([]byte(values["metrics"]), &metrics); err != nil {

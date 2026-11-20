@@ -191,7 +191,25 @@ func (f front) serveLinkedWriter(w http.ResponseWriter, r *http.Request, dataset
 
 // isLinked reports whether dataset is a Log Analytics linked dataset.
 func (f front) isLinked(_ *http.Request, dataset string) bool {
+	if _, hub := f.hubLink(dataset); hub { // #1960, hublinks.go
+		return true
+	}
 	return dataset != "" && f.linked.has(projectOf(f.base), dataset)
+}
+
+// linkWriter reports whether r is a linked dataset's own writer: the
+// Logging server's or the Analytics Hub server's.
+func linkWriter(r *http.Request) bool {
+	return r.Header.Get(linkedWriterHeader) != "" || r.Header.Get(HubLinkHeader) != ""
+}
+
+// linkedMessage is the refusal for what into a linked dataset of either
+// kind.
+func (f front) linkedMessage(dataset, what string) string {
+	if _, hub := f.hubLink(dataset); hub {
+		return hubLinkedWriteMessage(projectOf(f.base), dataset, what)
+	}
+	return linkedWriteMessage(projectOf(f.base), dataset, what)
 }
 
 // linkedWriteMessage is the message a write to a linked dataset is refused
@@ -206,10 +224,10 @@ func linkedWriteMessage(project, dataset, what string) string {
 // refuseLinkedWrite answers 403 accessDenied when dataset is a linked
 // dataset and r is not the Logging server's, and reports whether it did.
 func (f front) refuseLinkedWrite(w http.ResponseWriter, r *http.Request, dataset, what string) bool {
-	if r.Header.Get(linkedWriterHeader) != "" || !f.isLinked(r, dataset) {
+	if linkWriter(r) || !f.isLinked(r, dataset) {
 		return false
 	}
-	writeError(w, http.StatusForbidden, "accessDenied", linkedWriteMessage(projectOf(f.base), dataset, what))
+	writeError(w, http.StatusForbidden, "accessDenied", f.linkedMessage(dataset, what))
 	return true
 }
 
@@ -312,7 +330,7 @@ func (f front) queryWritesLinked(r *http.Request, q queryOptions) (dataset, stmt
 // refuseLinkedQuery refuses a query, before anything of it runs, that
 // writes into a linked dataset, and reports whether it did.
 func (f front) refuseLinkedQuery(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool) bool {
-	if r.Header.Get(linkedWriterHeader) != "" {
+	if linkWriter(r) {
 		return false
 	}
 	upper, writes := strings.ToUpper(q.Query), false
@@ -327,7 +345,7 @@ func (f front) refuseLinkedQuery(w http.ResponseWriter, r *http.Request, q query
 		return false
 	}
 	f.failBeforeRun(w, r, q, insert, dataset, http.StatusForbidden, rowError{Reason: "accessDenied",
-		Message: linkedWriteMessage(projectOf(f.base), dataset, "the statement "+stmt)})
+		Message: f.linkedMessage(dataset, "the statement "+stmt)})
 	return true
 }
 

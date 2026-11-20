@@ -302,7 +302,7 @@ func (p cloudSQLInstancesProvider) detailAllOf(ctx context.Context, project stri
 		st = &sqladminapi.Settings{}
 	}
 	protect, backups, start := "Off", "Off", ""
-	logDays, retained := "", ""
+	logDays, retained, backupLoc := "", "", ""
 	if st.DeletionProtectionEnabled {
 		protect = "On"
 	}
@@ -310,7 +310,7 @@ func (p cloudSQLInstancesProvider) detailAllOf(ctx context.Context, project stri
 		if bc.Enabled {
 			backups = "On"
 		}
-		start = bc.StartTime
+		start, backupLoc = bc.StartTime, bc.Location
 		if bc.TransactionLogRetentionDays > 0 {
 			logDays = strconv.FormatInt(bc.TransactionLogRetentionDays, 10)
 		}
@@ -335,6 +335,7 @@ func (p cloudSQLInstancesProvider) detailAllOf(ctx context.Context, project stri
 		{Label: "Labels", Value: formatPairs(st.UserLabels)}, {Label: "Database flags", Value: formatFlags(st.DatabaseFlags)},
 		{Label: "Deletion protection", Value: protect}, {Label: "Automated backups", Value: backups},
 		{Label: "Backup start time (UTC)", Value: start}, {Label: "Retained automated backups", Value: retained},
+		{Label: "Backup location", Value: sqlBackupLocationLabel(backupLoc)},
 		{Label: "Point-in-time recovery", Value: pitr}, {Label: "Transaction log retention (days)", Value: logDays},
 		{Label: "Earliest recovery time", Value: earliest}, {Label: "Latest recovery time", Value: latest},
 		{Label: "Instance type", Value: in.InstanceType}, {Label: "Primary instance", Value: in.MasterInstanceName},
@@ -351,7 +352,8 @@ func (p cloudSQLInstancesProvider) detailAllOf(ctx context.Context, project stri
 			d.Summary = append(d.Summary, pr)
 		}
 	}
-	runs := console.Listing{Columns: []string{"Type", "Description", "Enqueued", "Finished"}, NameColumn: "Backup ID", Noun: "backups",
+	runs := console.Listing{Columns: []string{"Type", "Description", "Location", "Encryption key version", "Enqueued", "Finished"},
+		NameColumn: "Backup ID", Noun: "backups",
 		Note: "Each backup is the server's databases dumped with pg_dump or mysqldump. An automated backup is taken at its start time only while CloudBurrow runs."}
 	var ids []string
 	if list, err := svc.BackupRuns.List(project, name).Context(ctx).Do(); err != nil {
@@ -359,8 +361,13 @@ func (p cloudSQLInstancesProvider) detailAllOf(ctx context.Context, project stri
 	} else {
 		for _, r := range list.Items {
 			id := strconv.FormatInt(r.Id, 10)
+			keyVersion := ""
+			if r.DiskEncryptionStatus != nil {
+				keyVersion = r.DiskEncryptionStatus.KmsKeyVersionName
+			}
 			runs.Items = append(runs.Items, console.Resource{Name: id, Status: r.Status, Fields: map[string]string{
-				"Type": r.Type, "Description": r.Description, "Enqueued": r.EnqueuedTime, "Finished": r.EndTime}})
+				"Type": r.Type, "Description": r.Description, "Location": sqlBackupLocationLabel(r.Location),
+				"Encryption key version": keyVersion, "Enqueued": r.EnqueuedTime, "Finished": r.EndTime}})
 			if r.Status == "SUCCESSFUL" {
 				ids = append(ids, id)
 			}
@@ -448,6 +455,7 @@ func (p cloudSQLInstancesProvider) detailAllOf(ctx context.Context, project stri
 				Help: "PostgreSQL's server restarts to archive its WAL; recovery reaches back to the first base taken after it is on."},
 			{Name: "retainedBackups", Label: "Retained automated backups", Type: "number", Default: retained,
 				Help: "1 to 365; older automated backups are deleted."},
+			sqlBackupLocationField(backupLoc),
 			{Name: "logRetentionDays", Label: "Transaction log retention (days)", Type: "number", Default: logDays,
 				Help: "1 to 7 (35 on Enterprise Plus); older log and bases are dropped, and the earliest recovery time moves with them."},
 		}, Note: "The database version and the instance ID cannot be changed."}
@@ -515,7 +523,8 @@ func (p cloudSQLInstancesProvider) Edit(ctx context.Context, project string, pat
 		DeletionProtectionEnabled: v["deletionProtection"] == "true",
 		AvailabilityType:          v["availabilityType"],
 		BackupConfiguration: &sqladminapi.BackupConfiguration{Enabled: v["backupsEnabled"] == "true",
-			StartTime: strings.TrimSpace(v["backupStartTime"]), ForceSendFields: []string{"Enabled"}},
+			StartTime: strings.TrimSpace(v["backupStartTime"]), Location: strings.TrimSpace(v["backupLocation"]),
+			ForceSendFields: []string{"Enabled"}},
 		ForceSendFields: []string{"DeletionProtectionEnabled", "UserLabels", "DatabaseFlags"}}
 	for _, l := range labels {
 		st.UserLabels[l[0]] = l[1]
@@ -1288,4 +1297,50 @@ func cmekVersion(in *sqladminapi.DatabaseInstance) string {
 		return ""
 	}
 	return in.DiskEncryptionStatus.KmsKeyVersionName
+}
+
+// sqlBackupMultiRegions are Cloud SQL's backup multi-regions (#1956).
+var sqlBackupMultiRegions = []string{"us", "eu", "asia"}
+
+// sqlBackupLocationLabel is a backup location as Google's Backups page's
+// Location column shows it: whether it is a multi-region or a region, and
+// which.
+func sqlBackupLocationLabel(loc string) string {
+	if loc == "" {
+		return ""
+	}
+	for _, m := range sqlBackupMultiRegions {
+		if loc == m {
+			return "Multi-region: " + loc
+		}
+	}
+	return "Region: " + loc
+}
+
+// sqlBackupLocationField is the automated backups' location (#1956), as
+// Google's Edit backup settings offers it under Advanced options:
+// Multi-region (the default, the one nearest the instance), a chosen
+// multi-region, or a region.
+func sqlBackupLocationField(current string) console.Field {
+	opts := []string{""}
+	labels := map[string]string{"": "Multi-region nearest the instance (default)"}
+	seen := map[string]bool{"": true}
+	add := func(l, label string) {
+		if !seen[l] {
+			seen[l] = true
+			opts = append(opts, l)
+			labels[l] = label
+		}
+	}
+	for _, m := range sqlBackupMultiRegions {
+		add(m, "Multi-region: "+m)
+	}
+	for _, r := range bqRegionNames {
+		if strings.Contains(r[0], "-") {
+			add(r[0], "Region: "+r[0]+" ("+r[1]+")")
+		}
+	}
+	add(current, sqlBackupLocationLabel(current))
+	return console.Field{Name: "backupLocation", Label: "Backup location", Type: "select", Options: opts, OptionLabels: labels,
+		Default: current, Help: "Where automated and on-demand backups are stored. Changing it does not move the backups already taken."}
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/asn1"
 	"errors"
 	"fmt"
 	"sort"
@@ -543,6 +544,10 @@ func (p privateCAProvider) DetailActions(ctx context.Context, project string, pa
 					Help: "Required in an Enterprise pool; in a DevOps pool, empty is generated."},
 				{Name: "commonName", Label: "Common name", Type: "text"},
 				{Name: "dnsNames", Label: "DNS names", Type: "text", Help: "Comma-separated subject alternative names."},
+				{Name: "customSans", Label: "Custom SANs", Type: "textarea",
+					Help: "Optional: one OID=text per line, each written as an otherName SAN whose value is the text as a UTF8String (#1961)."},
+				{Name: "subjectKeyId", Label: "Subject key ID", Type: "text", Pattern: `^([0-9a-f]{2})*$`,
+					Help: "Optional: lowercase hexadecimal; empty is the SHA-1 of the public key."},
 				{Name: "rdnSequence", Label: "Subject RDN sequence", Type: "textarea", Help: privateCARDNHelp},
 				{Name: "publicKey", Label: "Public key (PEM)", Type: "textarea", Required: true},
 				{Name: "usage", Label: "Extended key usage", Type: "select", Default: "server_auth", Options: []string{"server_auth", "client_auth", "server_auth,client_auth"}},
@@ -706,16 +711,23 @@ func (p privateCAProvider) poolAction(ctx context.Context, api *privateca.API, p
 			if err != nil {
 				return err
 			}
+			custom, err := privateCAParseCustomSANs(values["customSans"])
+			if err != nil {
+				return err
+			}
 			cert.CertificateConfig = &privatecapb.Certificate_Config{Config: &privatecapb.CertificateConfig{
 				SubjectConfig: &privatecapb.CertificateConfig_SubjectConfig{
 					Subject:        &privatecapb.Subject{CommonName: strings.TrimSpace(values["commonName"]), RdnSequence: rdn},
-					SubjectAltName: &privatecapb.SubjectAltNames{DnsNames: dns}},
+					SubjectAltName: &privatecapb.SubjectAltNames{DnsNames: dns, CustomSans: custom}},
 				PublicKey: &privatecapb.PublicKey{Format: privatecapb.PublicKey_PEM, Key: []byte(strings.TrimSpace(values["publicKey"]) + "\n")},
 				X509Config: &privatecapb.X509Parameters{
 					CaOptions: &privatecapb.X509Parameters_CaOptions{IsCa: new(bool)},
 					KeyUsage: &privatecapb.KeyUsage{BaseKeyUsage: &privatecapb.KeyUsage_KeyUsageOptions{DigitalSignature: true, KeyEncipherment: true},
 						ExtendedKeyUsage: eku}},
 			}}
+			if kid := strings.TrimSpace(values["subjectKeyId"]); kid != "" {
+				cert.GetConfig().SubjectKeyId = &privatecapb.CertificateConfig_KeyId{KeyId: kid}
+			}
 		}
 		_, err = api.CreateCertificate(ctx, &privatecapb.CreateCertificateRequest{Parent: pool, CertificateId: strings.TrimSpace(values["certificateId"]),
 			Certificate: cert, IssuingCertificateAuthorityId: strings.TrimSpace(values["issuer"])})
@@ -955,3 +967,32 @@ var (
 	_ console.PathActor    = privateCAProvider{}
 	_ console.PolicyEditor = privateCAProvider{}
 )
+
+// privateCAParseCustomSANs reads the Custom SANs field: one OID=text per
+// line, each a custom SAN whose value is text as an ASN.1 UTF8String.
+func privateCAParseCustomSANs(text string) ([]*privatecapb.X509Extension, error) {
+	var out []*privatecapb.X509Extension
+	for _, line := range strings.Split(text, "\n") {
+		if line = strings.TrimSpace(line); line == "" {
+			continue
+		}
+		o, v, ok := strings.Cut(line, "=")
+		if !ok {
+			return nil, fmt.Errorf("custom SAN %q is not OID=text", line)
+		}
+		id := &privatecapb.ObjectId{}
+		for _, part := range strings.Split(strings.TrimSpace(o), ".") {
+			n, err := strconv.ParseInt(part, 10, 32)
+			if err != nil || n < 0 {
+				return nil, fmt.Errorf("custom SAN %q: %q is not an object identifier", line, o)
+			}
+			id.ObjectIdPath = append(id.ObjectIdPath, int32(n))
+		}
+		value, err := asn1.MarshalWithParams(strings.TrimSpace(v), "utf8")
+		if err != nil {
+			return nil, fmt.Errorf("custom SAN %q: %v", line, err)
+		}
+		out = append(out, &privatecapb.X509Extension{ObjectId: id, Value: value})
+	}
+	return out, nil
+}

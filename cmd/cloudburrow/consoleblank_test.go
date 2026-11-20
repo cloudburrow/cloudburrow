@@ -4,6 +4,7 @@ import (
 	functionspb "cloud.google.com/go/functions/apiv2/functionspb"
 	"cloud.google.com/go/iam/admin/apiv1/adminpb"
 	"cloud.google.com/go/kms/apiv1/kmspb"
+	ci "google.golang.org/api/cloudidentity/v1"
 	"google.golang.org/grpc"
 	"time"
 
@@ -54,24 +55,29 @@ var blankProject = "blank-check"
 // through: the server drops a blank Property before it is served
 // (TestTheServerDropsBlankProperties).
 var emulatorOnly = map[string]string{
-	"firestore":            "the Firestore emulator is a Java container; there is no in-process fake",
-	"firestore-databases":  "Firestore's databases screen reads the Admin API the emulator pod's call front serves",
-	"bigtable-instances":   "the instance admin API is the Bigtable front's, which bttest does not serve (TestConsoleBigtableInstancesScreen drives the front)",
-	"datastore":            "the Datastore emulator is a Java container; there is no in-process fake",
-	"spanner":              "the screens read the instance and database admin APIs, which spannertest does not serve",
-	"cloudsql":             "a PostgreSQL server; there is no in-process one",
-	"cloudsql-mysql":       "a MySQL server; there is no in-process one",
-	"memorystore":          "a Valkey server per instance; there is no in-process one (unit-tested in consolememorystore_test.go)",
-	"memorystore-clusters": "a Redis Cluster of Valkey servers; there is no in-process one (TestConsoleRedisCluster drives the page)",
-	"memorystore-valkey":   "Valkey servers per instance; there is no in-process one (TestConsoleValkeyInstances drives the page over fake nodes)",
-	"bigquery":             "goccy/bigquery-emulator is a container built on ZetaSQL; there is no in-process fake",
-	"k8sobjects":           "Object Browser lists kubectl api-resources, which the fake kubectl does not serve (TestGKEObjectBrowserParsesAPIResources)",
-	"bigquery-jobs":        "BigQuery's Job history reads the same emulator, through the validating front",
-	"eventarc":             "a trigger needs Pub/Sub, its transport, which this test does not run (TestEventarcTriggersPageThroughTheBrowser drives the page)",
-	"vertex-models":        "the Model Registry is read from the local AI endpoint over gRPC, which this test does not start (TestModelRegistryAndEndpointsThroughThePages drives the page)",
-	"vertex-endpoints":     "Endpoints are read from the local AI endpoint over gRPC, which this test does not start (TestModelRegistryAndEndpointsThroughThePages drives the page)",
-	"run-domains":          "the Cloud Run Admin API v1's domain mappings, which this test's in-process adapter does not serve over HTTP (TestCloudRunGooglePagesThroughTheBrowser drives the page)",
-	"cloudsql-instances":   "the Cloud SQL Admin API over PostgreSQL and MySQL servers; there is no in-process one",
+	"firestore":                   "the Firestore emulator is a Java container; there is no in-process fake",
+	"firestore-databases":         "Firestore's databases screen reads the Admin API the emulator pod's call front serves",
+	"bigtable-instances":          "the instance admin API is the Bigtable front's, which bttest does not serve (TestConsoleBigtableInstancesScreen drives the front)",
+	"datastore":                   "the Datastore emulator is a Java container; there is no in-process fake",
+	"spanner":                     "the screens read the instance and database admin APIs, which spannertest does not serve",
+	"cloudsql":                    "a PostgreSQL server; there is no in-process one",
+	"cloudsql-mysql":              "a MySQL server; there is no in-process one",
+	"memorystore":                 "a Valkey server per instance; there is no in-process one (unit-tested in consolememorystore_test.go)",
+	"memorystore-clusters":        "a Redis Cluster of Valkey servers; there is no in-process one (TestConsoleRedisCluster drives the page)",
+	"memorystore-valkey":          "Valkey servers per instance; there is no in-process one (TestConsoleValkeyInstances drives the page over fake nodes)",
+	"bigquery":                    "goccy/bigquery-emulator is a container built on ZetaSQL; there is no in-process fake",
+	"k8sobjects":                  "Object Browser lists kubectl api-resources, which the fake kubectl does not serve (TestGKEObjectBrowserParsesAPIResources)",
+	"bigquery-jobs":               "BigQuery's Job history reads the same emulator, through the validating front",
+	"eventarc":                    "a trigger needs Pub/Sub, its transport, which this test does not run (TestEventarcTriggersPageThroughTheBrowser drives the page)",
+	"eventarc-buses":              "this test's in-process adapter does not serve Eventarc over gRPC (TestEventarcAdvancedPagesThroughTheBrowser drives the page)",
+	"eventarc-pipelines":          "this test's in-process adapter does not serve Eventarc over gRPC (TestEventarcAdvancedPagesThroughTheBrowser drives the page)",
+	"eventarc-enrollments":        "this test's in-process adapter does not serve Eventarc over gRPC (TestEventarcAdvancedPagesThroughTheBrowser drives the page)",
+	"eventarc-google-api-sources": "this test's in-process adapter does not serve Eventarc over gRPC (TestEventarcAdvancedPagesThroughTheBrowser drives the page)",
+	"eventarc-channels":           "this test's in-process adapter does not serve Eventarc over gRPC (TestEventarcAdvancedPagesThroughTheBrowser drives the page)",
+	"vertex-models":               "the Model Registry is read from the local AI endpoint over gRPC, which this test does not start (TestModelRegistryAndEndpointsThroughThePages drives the page)",
+	"vertex-endpoints":            "Endpoints are read from the local AI endpoint over gRPC, which this test does not start (TestModelRegistryAndEndpointsThroughThePages drives the page)",
+	"run-domains":                 "the Cloud Run Admin API v1's domain mappings, which this test's in-process adapter does not serve over HTTP (TestCloudRunGooglePagesThroughTheBrowser drives the page)",
+	"cloudsql-instances":          "the Cloud SQL Admin API over PostgreSQL and MySQL servers; there is no in-process one",
 }
 
 // TestNoDetailShowsABlankProperty enforces console parity §4.4: "Only fields
@@ -245,6 +251,20 @@ func blankCheckDeps(t *testing.T) consoleDeps {
 		t.Fatal(err)
 	}
 	if _, _, err := d.projects.CreateMembership(blankGroup.Name(), "member@example.com", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	// SSO profiles with no display name, and an assignment (#1959).
+	blankSAML, err := d.projects.CreateSAMLProfile(ci.InboundSamlSsoProfile{Customer: resourcemanager.CustomerName,
+		IdpConfig: &ci.SamlIdpConfig{EntityId: "https://idp.example.com", SingleSignOnServiceUri: "https://idp.example.com/sso"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.projects.CreateOIDCProfile(ci.InboundOidcSsoProfile{Customer: resourcemanager.CustomerName,
+		IdpConfig: &ci.OidcIdpConfig{IssuerUri: "https://issuer.example.com"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.projects.CreateSSOAssignment(ci.InboundSsoAssignment{Customer: resourcemanager.CustomerName, TargetGroup: blankGroup.Name(), Rank: 1,
+		SsoMode: resourcemanager.SSOModeSAML, SamlSsoInfo: &ci.SamlSsoInfo{InboundSamlSsoProfile: blankSAML.Profile.Name}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := d.projects.Create(resourcemanager.Project{

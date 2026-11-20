@@ -5,6 +5,7 @@ import (
 	"crypto/mlkem"
 	"encoding/base64"
 	"slices"
+	"strings"
 	"testing"
 
 	kmsapi "cloud.google.com/go/kms/apiv1"
@@ -73,7 +74,8 @@ func TestConsoleKMSCreateKeyOffersEveryPurpose(t *testing.T) {
 			t.Errorf("purpose options %v lack %s", purpose, want)
 		}
 	}
-	for _, want := range []string{"EC_SIGN_P256_SHA256", "RSA_SIGN_PSS_2048_SHA256", "RSA_DECRYPT_OAEP_2048_SHA256", "HMAC_SHA256", "AES_256_GCM", "ML_KEM_768", "EC_SIGN_SECP256K1_SHA256"} {
+	for _, want := range []string{"EC_SIGN_P256_SHA256", "RSA_SIGN_PSS_2048_SHA256", "RSA_DECRYPT_OAEP_2048_SHA256", "HMAC_SHA256", "AES_256_GCM", "ML_KEM_768", "EC_SIGN_SECP256K1_SHA256",
+		"PQ_SIGN_ML_DSA_65", "PQ_SIGN_ML_DSA_44_EXTERNAL_MU", "PQ_SIGN_SLH_DSA_SHA2_128S", "PQ_SIGN_HASH_SLH_DSA_SHA2_128S_SHA256", "KEM_XWING"} {
 		if !slices.Contains(alg, want) {
 			t.Errorf("algorithm options lack %s", want)
 		}
@@ -184,6 +186,23 @@ func TestConsoleKMSVersionCryptoActions(t *testing.T) {
 		t.Error("decapsulate did not recover the secret")
 	}
 
+	// The post-quantum algorithms (#1946): Sign, then Verify against the
+	// NIST_PQC key; X-Wing's public key in XWING_RAW_BYTES.
+	for _, a := range []string{"PQ_SIGN_ML_DSA_65", "PQ_SIGN_SLH_DSA_SHA2_128S", "PQ_SIGN_HASH_SLH_DSA_SHA2_128S_SHA256"} {
+		v := mk(strings.ToLower(strings.ReplaceAll(a, "_", "-")), "ASYMMETRIC_SIGN", a)
+		sig := kmsActResult(t, p, v, "sign", map[string]string{"data": "pq"})["Signature"]
+		if got := kmsActResult(t, p, v, "verify", map[string]string{"data": "pq", "signature": sig})["Signature"]; got != "Valid" {
+			t.Errorf("%s verify = %s", a, got)
+		}
+		if got := kmsActResult(t, p, v, "verify", map[string]string{"data": "other", "signature": sig})["Signature"]; got != "Invalid" {
+			t.Errorf("%s verify of other data = %s", a, got)
+		}
+	}
+	xw := mk("xwing", "KEY_ENCAPSULATION", "KEM_XWING")
+	if got, _ := base64.StdEncoding.DecodeString(kmsActResult(t, p, xw, "publickey", map[string]string{"format": "XWING_RAW_BYTES"})["Public key (XWING_RAW_BYTES, base64)"]); len(got) != 1216 {
+		t.Errorf("X-Wing public key = %d bytes, want 1216", len(got))
+	}
+
 	if got := kmsActResult(t, p, []string{ring}, "randombytes", map[string]string{"length": "16"})["Random bytes"]; len(got) != 24 {
 		t.Errorf("16 random bytes = %q", got)
 	}
@@ -248,5 +267,19 @@ func TestConsoleKMSDeleteKeyRing(t *testing.T) {
 	}
 	if _, err := c.GetKeyRing(ctx, &kmspb.GetKeyRingRequest{Name: "projects/demo-proj/locations/global/keyRings/empty"}); err == nil {
 		t.Error("the SDK still reads the deleted key ring")
+	}
+}
+
+// Create key's "Restrict key versions to import only" (#1946) makes an
+// import_only key with no version, which the official client reads back.
+func TestConsoleKMSCreateImportOnlyKey(t *testing.T) {
+	p, c, ring := kmsConsole(t)
+	if _, err := p.ActAtResult(context.Background(), "demo-proj", []string{ring}, "createkey",
+		map[string]string{"cryptoKeyId": "io", "keyMaterial": kmsMaterialImported, "importOnly": "true"}); err != nil {
+		t.Fatal(err)
+	}
+	k, err := c.GetCryptoKey(context.Background(), &kmspb.GetCryptoKeyRequest{Name: ring + "/cryptoKeys/io"})
+	if err != nil || !k.GetImportOnly() || k.GetPrimary() != nil {
+		t.Errorf("GetCryptoKey = %v, %v; want import_only with no version", k, err)
 	}
 }

@@ -99,9 +99,10 @@ func grpcDenied(msg, permission, resource string, withInfo bool) error {
 // service name the methods' full names begin with. A method not listed is
 // not enforced: docs/compatibility.md's "IAM enforcement" lists what is.
 var Services = map[string]*Service{
-	"google.cloud.secretmanager.v1.SecretManagerService": SecretManager,
-	"google.cloud.kms.v1.KeyManagementService":           KMS,
-	"google.cloud.tasks.v2.CloudTasks":                   Tasks,
+	"google.cloud.secretmanager.v1.SecretManagerService":        SecretManager,
+	"google.cloud.kms.v1.KeyManagementService":                  KMS,
+	"google.cloud.tasks.v2.CloudTasks":                          Tasks,
+	"google.cloud.bigquery.analyticshub.v1.AnalyticsHubService": AnalyticsHub,
 }
 
 // ForMethod is the service and method row of a gRPC full method on the
@@ -154,10 +155,10 @@ var SecretManager = &Service{
 // read 2026-11-19). Google words a denial "Permission 'P' denied on
 // resource 'R' (or it may not exist).", with ErrorInfo
 // IAM_PERMISSION_DENIED. A key's policy and its key ring's both apply to
-// the key and its versions.
+// the key and its versions, an import job's and its key ring's to the job.
 var KMS = &Service{
 	Name:              "cloudkms.googleapis.com",
-	PolicyCollections: []string{"keyRings", "cryptoKeys"},
+	PolicyCollections: []string{"keyRings", "cryptoKeys", "importJobs"},
 	Types: map[string]string{"keyRings": "cloudkms.googleapis.com/KeyRing", "cryptoKeys": "cloudkms.googleapis.com/CryptoKey",
 		"cryptoKeyVersions": "cloudkms.googleapis.com/CryptoKeyVersion", "importJobs": "cloudkms.googleapis.com/ImportJob"},
 	Methods: kmsMethods(),
@@ -195,6 +196,12 @@ func kmsMethods() map[string]Method {
 		"ListImportJobs":                {"cloudkms.importJobs.list", "parent"},
 		"GetImportJob":                  {"cloudkms.importJobs.get", "name"},
 		"CreateImportJob":               {"cloudkms.importJobs.create", "parent"},
+		// The Importer role "Enables ImportCryptoKeyVersion" with
+		// importJobs.useToImport and no cryptoKeyVersions.create; the
+		// permission is held on the job (importing-a-key: "Grant the
+		// importjobs.useToImport permission for a specific import job").
+		"ImportCryptoKeyVersion": {"cloudkms.importJobs.useToImport", "import_job"},
+		"Decapsulate":            {"cloudkms.cryptoKeyVersions.useToDecapsulate", "name"},
 	}, "/google.cloud.kms.v1.KeyManagementService/")
 	iam := func(verb string) func(string) string {
 		return func(resource string) string {
@@ -244,6 +251,77 @@ var Tasks = &Service{
 		return grpcDenied(fmt.Sprintf("The principal (user or service account) lacks IAM permission \"%s\" for the resource \"%s\" (or the resource may not exist).", permission, resource),
 			permission, resource, false)
 	},
+}
+
+// AnalyticsHub is BigQuery sharing's table (#1989): the permission each
+// method's REST reference names
+// (https://docs.cloud.google.com/bigquery/docs/reference/analytics-hub/rest,
+// read 2026-11-20), and, where a reference names none (subscribe, revoke,
+// ListSharedResourceSubscriptions, ListOrgDataExchanges), the one of
+// "BigQuery sharing roles and permissions"
+// (https://docs.cloud.google.com/iam/docs/roles-permissions/analyticshub)
+// whose name is the method's: subscribe is analyticshub.listings.subscribe
+// on the listing ("Analytics Hub Subscriber ... on the publisher's
+// listing, exchange, or project",
+// https://docs.cloud.google.com/bigquery/docs/analytics-hub-view-subscribe-listings),
+// RevokeSubscription analyticshub.subscriptions.delete (UNVERIFIED, re-read 2026-11-20), and
+// ListSharedResourceSubscriptions the listing's or exchange's
+// viewSubscriptions. An exchange's policy applies to its listings
+// ("A data exchange-level grant applies to all listings in that
+// exchange"). SubscribeListing also needs bigquery.datasets.create on the
+// subscriber's project, and ListOrgDataExchanges answers the exchanges the
+// caller may list; the CLI checks those (cmd/cloudburrow/iamenforce.go).
+// Google's wording of a denial is UNVERIFIED (re-read 2026-11-20): its newer APIs' "Permission
+// 'P' denied on resource 'R' (or it may not exist).", with ErrorInfo
+// IAM_PERMISSION_DENIED.
+var AnalyticsHub = &Service{
+	Name:              "analyticshub.googleapis.com",
+	PolicyCollections: []string{"dataExchanges", "listings", "subscriptions"},
+	Types: map[string]string{"dataExchanges": "analyticshub.googleapis.com/DataExchange",
+		"listings": "analyticshub.googleapis.com/Listing", "subscriptions": "analyticshub.googleapis.com/Subscription"},
+	Methods: analyticsHubMethods(),
+	Deny: func(permission, resource string) error {
+		return grpcDenied(fmt.Sprintf("Permission '%s' denied on resource '%s' (or it may not exist).", permission, resource),
+			permission, resource, true)
+	},
+}
+
+func analyticsHubMethods() map[string]Method {
+	const prefix = "/google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/"
+	m := sm(map[string][2]string{
+		"ListDataExchanges":   {"analyticshub.dataExchanges.list", "parent"},
+		"GetDataExchange":     {"analyticshub.dataExchanges.get", "name"},
+		"CreateDataExchange":  {"analyticshub.dataExchanges.create", "parent"},
+		"UpdateDataExchange":  {"analyticshub.dataExchanges.update", "data_exchange.name"},
+		"DeleteDataExchange":  {"analyticshub.dataExchanges.delete", "name"},
+		"ListListings":        {"analyticshub.listings.list", "parent"},
+		"GetListing":          {"analyticshub.listings.get", "name"},
+		"CreateListing":       {"analyticshub.listings.create", "parent"},
+		"UpdateListing":       {"analyticshub.listings.update", "listing.name"},
+		"DeleteListing":       {"analyticshub.listings.delete", "name"},
+		"SubscribeListing":    {"analyticshub.listings.subscribe", "name"},
+		"GetSubscription":     {"analyticshub.subscriptions.get", "name"},
+		"ListSubscriptions":   {"analyticshub.subscriptions.list", "parent"},
+		"RefreshSubscription": {"analyticshub.subscriptions.update", "name"},
+		"RevokeSubscription":  {"analyticshub.subscriptions.delete", "name"},
+		"DeleteSubscription":  {"analyticshub.subscriptions.delete", "name"},
+	}, prefix)
+	kind := func(resource string) string {
+		switch {
+		case strings.Contains(resource, "/listings/"):
+			return "listings"
+		case strings.Contains(resource, "/subscriptions/"):
+			return "subscriptions"
+		}
+		return "dataExchanges"
+	}
+	verb := func(v string) func(string) string {
+		return func(resource string) string { return "analyticshub." + kind(resource) + "." + v }
+	}
+	m[prefix+"GetIamPolicy"] = Method{Field: "resource", PermissionFor: verb("getIamPolicy")}
+	m[prefix+"SetIamPolicy"] = Method{Field: "resource", PermissionFor: verb("setIamPolicy")}
+	m[prefix+"ListSharedResourceSubscriptions"] = Method{Field: "resource", PermissionFor: verb("viewSubscriptions")}
+	return m
 }
 
 func sm(rows map[string][2]string, prefix string) map[string]Method {

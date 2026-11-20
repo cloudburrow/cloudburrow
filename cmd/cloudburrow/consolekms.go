@@ -593,6 +593,8 @@ func kmsCreateKeyFieldsAt(now time.Time) []console.Field {
 		{Name: "algorithm", Label: alg.Label, Type: "select", Options: alg.Options,
 			OptionLabels: kmsLabelsFor(alg.Options, kmsAlgorithmWords), Help: alg.Help},
 		kmsTrustedWrappingField("the first version"),
+		{Name: "importOnly", Label: "Restrict key versions to import only", Type: "checkbox", ShowWhen: "keyMaterial=" + kmsMaterialImported,
+			Help: "import_only: every version is imported, never generated, and the key is rotated by hand. Fixed once the key exists."},
 		{Name: "rotationPeriod", Label: "Rotation period", Type: "select", Default: kmsFormatPeriod(durationpb.New(kmsDefaultRotation)),
 			Options: kmsRotationPresets, OptionLabels: kmsLabelsFor(kmsRotationPresets, kmsPeriodLabel),
 			Help: "Symmetric keys only: Cloud KMS rotates other keys by hand. " + kmsRotationPeriodHelp},
@@ -680,6 +682,7 @@ func kmsCreateKeyRequest(ring string, values map[string]string) (*kmspb.CreateCr
 			ProtectionLevel: level,
 			Algorithm:       alg,
 		},
+		ImportOnly: checked(values, "importOnly") && values["keyMaterial"] == kmsMaterialImported,
 	}
 	if raw := strings.TrimSpace(values["destroyScheduledDays"]); raw != "" {
 		n, err := strconv.Atoi(raw)

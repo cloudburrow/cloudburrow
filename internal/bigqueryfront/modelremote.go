@@ -543,10 +543,6 @@ func (f front) remoteSubquery(r *http.Request, q queryOptions, md bqModel, c mlC
 	if multimodal && !strings.EqualFold(found.Type, "RECORD") && !strings.EqualFold(found.Type, "JSON") {
 		return "", 400, fmt.Sprintf("Invalid table-valued function %s: column %s must be of type STRING, STRUCT or ObjectRef, not %s", fname, found.Name, found.Type)
 	}
-	if multimodal && c.fn == "GENERATE_TABLE" {
-		return "", 501, "Not implemented here: AI.GENERATE_TABLE of a multimodal prompt (#1980): CloudBurrow sends ObjectRefs to ML.GENERATE_TEXT, " +
-			"AI.GENERATE_TEXT and the scalar AI functions. Nothing was run."
-	}
 	key := "_cbml_in." + sqlIdent(found.Name)
 	if multimodal {
 		key = "TO_JSON_STRING(" + key + ")"
@@ -598,7 +594,7 @@ func (f front) remoteSubquery(r *http.Request, q queryOptions, md bqModel, c mlC
 		}
 		var parts []string
 		if c.fn == "GENERATE_TABLE" {
-			parts = f.generateTableRow(r, project, rm, schema, in, genCfg)
+			parts = f.generateTableRow(r, project, rm, schema, ri, genCfg)
 		} else if c.ai && c.fn == "GENERATE_EMBEDDING" {
 			parts = f.embedRow(r.Context(), project, rm, ri, true, taskType, dims)
 		} else if c.ai {
@@ -871,8 +867,20 @@ func (f front) aiGenerateTextRow(ctx context.Context, project string, rm *remote
 
 // generateTableRow is one prompt's AI.GENERATE_TABLE columns, as SQL
 // literals: the schema's fields, full_response and status (#1771).
-func (f front) generateTableRow(r *http.Request, project string, rm *remoteModel, schema []aiField, prompt string, cfg map[string]any) []string {
-	text, raw, status := f.aiGenerateText(r, project, rm, prompt+aiSchemaInstruction(schema), schemaObject(schema), cfg)
+func (f front) generateTableRow(r *http.Request, project string, rm *remoteModel, schema []aiField, in rowInput, cfg map[string]any) []string {
+	// A multimodal prompt (#1983): its parts, the schema's instruction
+	// after them.
+	var text, status string
+	var raw []byte
+	if in.multimodal {
+		status = in.status
+		if status == "" {
+			parts := append(append([]any{}, in.parts...), map[string]string{"text": aiSchemaInstruction(schema)})
+			text, raw, status = f.aiGenerateParts(r, project, rm, parts, schemaObject(schema), cfg)
+		}
+	} else {
+		text, raw, status = f.aiGenerateText(r, project, rm, in.text+aiSchemaInstruction(schema), schemaObject(schema), cfg)
+	}
 	var vals []string
 	if status == "" {
 		vals, status = schemaLiterals(schema, text)

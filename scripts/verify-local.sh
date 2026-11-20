@@ -17,7 +17,11 @@
 #
 # Options:
 #   --shards A,B,...  the shards to run, in order; default every one:
-#                     storage,served,run,scale,emulators,memorystore,sql,acceptance,iam
+#                     storage,served,run,scale,emulators,memorystore,sql,acceptance,iam,localai
+#                     (localai, #1985, needs make build-onnx's CLI, which it builds
+#                     unless --no-build, ONNXRUNTIME_LIB, and the pinned
+#                     generation model at CLOUDBURROW_LOCALAI_MODEL:
+#                     scripts/localai-models.sh <dir> fetches it)
 #   --port-base N     the instances' port layout (default 41000)
 #   --out DIR         where the result and logs go (default ./verify-local)
 #   --no-build        use bin/cloudburrow as it is instead of `make build`
@@ -92,6 +96,16 @@ for v in GOOGLE_APPLICATION_CREDENTIALS GOOGLE_CLOUD_PROJECT GCLOUD_PROJECT GOOG
     exit 2
   fi
 done
+# The localai shard (#1985) runs the onnx build with the pinned generation
+# model; refuse before starting anything when either is missing.
+case " ${SHARD_LIST[*]} " in
+  *" localai "*)
+    [ -n "${ONNXRUNTIME_LIB:-}" ] && [ -r "$ONNXRUNTIME_LIB" ] ||
+      { echo "verify-local: the localai shard needs ONNXRUNTIME_LIB, the ONNX Runtime library (docs/embeddings.md)" >&2; exit 2; }
+    [ -n "${CLOUDBURROW_LOCALAI_MODEL:-}" ] && [ -r "$CLOUDBURROW_LOCALAI_MODEL" ] ||
+      { echo "verify-local: the localai shard needs CLOUDBURROW_LOCALAI_MODEL, the pinned generation model: run scripts/localai-models.sh <dir>" >&2; exit 2; }
+    ;;
+esac
 for c in jq go kind docker make; do
   command -v "$c" >/dev/null || { echo "verify-local: $c is required" >&2; exit 2; }
 done
@@ -148,6 +162,11 @@ trap 'exit 143' TERM
 if [ -n "$build" ]; then
   log "make build"
   make build > "$LOGS/build.log" 2>&1 || { tail -n 20 "$LOGS/build.log" >&2; exit 1; }
+  case " ${SHARD_LIST[*]} " in
+    *" localai "*)
+      log "make build-onnx"
+      make build-onnx > "$LOGS/build-onnx.log" 2>&1 || { tail -n 20 "$LOGS/build-onnx.log" >&2; exit 1; } ;;
+  esac
 fi
 [ -x "$CLI" ] || { echo "verify-local: no $CLI; run make build" >&2; exit 2; }
 # shellcheck source=.github/scripts/retry-flaky.sh
@@ -210,6 +229,10 @@ run_shard() {
   SUITES="$WORK/$shard.suites" CHECKS="$WORK/$shard.checks"
   : > "$SUITES"; : > "$CHECKS"
   compat_shard "$shard"
+  # The localai shard's instance is the onnx build (#1985), as in CI; the
+  # functions this calls see this CLI too.
+  local CLI=$CLI
+  if [ "$shard" = localai ]; then CLI="$ROOT/bin/cloudburrow-onnx"; fi
   # The hooks write where RUNNER_TEMP names; here, the shard's own directory.
   export RUNNER_TEMP="$WORK/$shard"
   mkdir -p "$RUNNER_TEMP"
@@ -307,7 +330,7 @@ run_shard() {
     [ -n "$COMPAT_RUN" ] && select_run=(-run "$COMPAT_RUN")
     # The sql shard skips the replica tests, which sqlreplicas runs.
     [ -n "$COMPAT_SKIP" ] && select_run+=(-skip "$COMPAT_SKIP")
-    go test -tags=compat -count=1 -timeout 60m -v ${select_run[@]+"${select_run[@]}"} ./test/compat/... > "$dir/compat.log" 2>&1 || rc=$?
+    go test -tags=compat -count=1 -timeout "$COMPAT_TIMEOUT" -v ${select_run[@]+"${select_run[@]}"} ./test/compat/... > "$dir/compat.log" 2>&1 || rc=$?
     if [ "$rc" -ne 0 ]; then
       retry_flaky "$dir/compat.log" go test -tags=compat -count=1 -timeout 10m -v ./test/compat/... > "$dir/retry.out" 2>&1 || true
       settle_retries "$dir/compat.log"
@@ -445,7 +468,8 @@ browser_suite() {  # <shard> <dir> <flags...>
     memorystore) select=-run pattern="$COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS" ;;
     sql) select=-run pattern="$COMPAT_BROWSER_SQL_SHARD_TESTS" ;;
     served) select=-run pattern="$COMPAT_BROWSER_SERVED_SHARD_TESTS" ;;
-    *) select=-skip pattern="$COMPAT_BROWSER_RUN_SHARD_TESTS|$COMPAT_BROWSER_EMULATORS_SHARD_TESTS|$COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS|$COMPAT_BROWSER_SQL_SHARD_TESTS|$COMPAT_BROWSER_SERVED_ONLY_TESTS|$COMPAT_BROWSER_NEVER_TESTS"
+    localai) select=-run pattern="$COMPAT_BROWSER_LOCALAI_SHARD_TESTS" ;;
+    *) select=-skip pattern="$COMPAT_BROWSER_RUN_SHARD_TESTS|$COMPAT_BROWSER_EMULATORS_SHARD_TESTS|$COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS|$COMPAT_BROWSER_SQL_SHARD_TESTS|$COMPAT_BROWSER_SERVED_ONLY_TESTS|$COMPAT_BROWSER_LOCALAI_SHARD_TESTS|$COMPAT_BROWSER_NEVER_TESTS"
       skip=() ;;
   esac
   for c in "${CLOUDBURROW_TEST_CHROME:-}" "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
@@ -466,7 +490,7 @@ browser_suite() {  # <shard> <dir> <flags...>
   # Datastore, Firestore and Bigtable emulators (#895, #1198).
   # And Cloud KMS, whose key the Create a Firestore database page chooses
   # (#1881).
-  if [ "$shard" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE,BIGTABLE,SPANNER,KMS,DATATRANSFER; fi
+  if [ "$shard" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE,BIGTABLE,SPANNER,KMS,DATATRANSFER,ANALYTICSHUB; fi
   # The memorystore shard's read back through the Memorystore admin API.
   if [ "$shard" = memorystore ]; then BROWSER_VARS+=,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT; fi
   # The Logs Explorer reads entries written through the Logging API (#1410).
@@ -480,9 +504,13 @@ browser_suite() {  # <shard> <dir> <flags...>
   if [ "$shard" = sql ]; then BROWSER_VARS+=,SQLADMIN,BACKUPDR,SECRETS; fi
   # The served shard's: the Kubernetes Engine API and the kubeconfig (#1913).
   if [ "$shard" = served ]; then BROWSER_VARS+=,GKE,KUBECONFIG; fi
+  # The localai shard's: the Embeddings page's Cloud Storage objects (#1985).
+  if [ "$shard" = localai ]; then BROWSER_VARS+=,STORAGE,LOCALAI,EMBEDDINGS; fi
   BROWSER_ENV=$(scripts/compat-env.sh --only "$BROWSER_VARS" --cli "$CLI" -- "$@" 2>/dev/null)
   (
     eval "$BROWSER_ENV"
+    # As in CI: what the restarted instance needs before its tests (#1985).
+    compat_browser_prepare "$shard" 2>> "$dir/browser-prepare.err" || true
     export CLOUDBURROW_TEST_CHROME="$chrome" CLOUDBURROW_TEST_SCREENSHOTS="$dir/browser-screenshots"
     go test -tags=browser -count=1 -timeout 10m -v "$select" "$pattern" ${skip[@]+"${skip[@]}"} ./test/browser/ > "$dir/browser.log" 2>&1 || true
   )
@@ -539,7 +567,7 @@ done
 # from ci.yml so the two cannot drift.
 compat_coverage() {
   local s never none
-  for s in storage served run emulators memorystore sql iam; do
+  for s in storage served run emulators memorystore sql iam localai; do
     case " ${SHARD_LIST[*]} " in *" $s "*) ;; *) return 0 ;; esac
   done
   SUITES="$WORK/coverage.suites" CHECKS="$WORK/coverage.checks"
@@ -548,7 +576,7 @@ compat_coverage() {
   go test -tags=compat -list '.*' ./test/compat/ | grep '^Test' | sort > "$WORK/all.txt"
   # A shard without restart probes has no probe-*.log, and cat's exit 1
   # for the unmatched glob would end the script under set -e.
-  for s in storage served run emulators memorystore sql iam; do
+  for s in storage served run emulators memorystore sql iam localai; do
     cat "$LOGS/$s"/compat.log "$LOGS/$s"/probe-*.log 2>/dev/null || true
   done | grep -oE -- '^--- (PASS|FAIL): Test[A-Za-z0-9_]+' | awk '{print $3}' | sort -u > "$WORK/ran.txt"
   none=$(comm -23 "$WORK/all.txt" "$WORK/ran.txt" | grep -vE "${never:-^$}" || true)

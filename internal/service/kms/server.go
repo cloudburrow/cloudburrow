@@ -92,6 +92,9 @@ type cryptoKey struct {
 	// the key was created (external.go, #1469).
 	Backend     string `json:"cryptoKeyBackend,omitempty"`
 	Coordinated bool   `json:"coordinated,omitempty"`
+	// ImportOnly is import_only (#1946): the key's versions are imported
+	// only, never generated (importOnlyRefusal).
+	ImportOnly bool `json:"importOnly,omitempty"`
 }
 
 // Destroy scheduling (resources.proto destroy_scheduled_duration; the range
@@ -452,6 +455,7 @@ func (s *Server) toKey(k cryptoKey) (*kmspb.CryptoKey, error) {
 		},
 		KeyAccessJustificationsPolicy: k.KAJPolicy.proto(),
 		CryptoKeyBackend:              k.Backend,
+		ImportOnly:                    k.ImportOnly,
 	}
 	if k.RotationPeriod > 0 {
 		out.RotationSchedule = &kmspb.CryptoKey_RotationPeriod{RotationPeriod: durationpb.New(k.RotationPeriod)}
@@ -496,8 +500,28 @@ func unsupportedKey(k *kmspb.CryptoKey) error {
 	if k.GetCryptoKeyBackend() != "" && pl != kmspb.ProtectionLevel_EXTERNAL_VPC && pl != kmspb.ProtectionLevel_HSM_SINGLE_TENANT {
 		return apierror.Unimplemented("crypto_key.crypto_key_backend is not implemented for protection level %s: it applies to EXTERNAL_VPC keys, naming their EkmConnection, and HSM_SINGLE_TENANT keys, naming their SingleTenantHsmInstance", pl)
 	}
-	if k.GetImportOnly() {
-		return apierror.Unimplemented("crypto_key.import_only is not implemented")
+	return nil
+}
+
+// importOnlyRefusal checks an import_only key at create (#1946): "Use the
+// --import-only flag to prevent Cloud KMS from generating key material for
+// new key versions. With this flag set, new key versions for this key must
+// be imported", and "Keys created as --import-only must be rotated
+// manually" (importing-a-key, read 2026-11-20). So the key is created with
+// no version (skip_initial_version_creation, as the page's samples do), no
+// rotation schedule, and at a level an import job serves. The codes are
+// UNVERIFIED.
+// Docs re-read 2026-11-20, still unanswered: https://docs.cloud.google.com/kms/docs/importing-a-key
+func importOnlyRefusal(req *kmspb.CreateCryptoKeyRequest, level kmspb.ProtectionLevel, rotates bool) error {
+	switch {
+	case !req.GetCryptoKey().GetImportOnly():
+		return nil
+	case !req.GetSkipInitialVersionCreation():
+		return apierror.InvalidArgument("skip_initial_version_creation must be set for an import_only key: its versions are imported, never generated")
+	case rotates:
+		return apierror.InvalidArgument("an import_only key cannot rotate automatically: it must be rotated manually, by importing a new version")
+	case isExternal(level):
+		return apierror.InvalidArgument("import_only is not valid at protection level %s: import jobs serve SOFTWARE, HSM and HSM_SINGLE_TENANT keys", level)
 	}
 	return nil
 }
@@ -578,6 +602,9 @@ func (s *Server) createCryptoKey(_ context.Context, req *kmspb.CreateCryptoKeyRe
 	if err := checkSchedule(period, nextRotation); err != nil {
 		return nil, apierror.Wrap(err)
 	}
+	if err := importOnlyRefusal(req, level, period > 0 || !nextRotation.IsZero()); err != nil {
+		return nil, apierror.Wrap(err)
+	}
 	name := req.GetParent() + "/cryptoKeys/" + req.GetCryptoKeyId()
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -605,7 +632,7 @@ func (s *Server) createCryptoKey(_ context.Context, req *kmspb.CreateCryptoKeyRe
 	k := cryptoKey{Name: name, Created: now, Labels: in.GetLabels(), Next: 1, DestroyScheduled: destroyAfter,
 		RotationPeriod: period, NextRotation: nextRotation,
 		Purpose: storedPurpose(in.GetPurpose()), Algorithm: storedAlgorithm(alg),
-		ProtectionLevel: storedLevel(level), KAJPolicy: kaj}
+		ProtectionLevel: storedLevel(level), KAJPolicy: kaj, ImportOnly: in.GetImportOnly()}
 	if level == kmspb.ProtectionLevel_EXTERNAL_VPC {
 		c, err := s.keyBackend("crypto_key.crypto_key_backend", in.GetCryptoKeyBackend(), req.GetParent())
 		if err != nil {
@@ -773,6 +800,12 @@ func (s *Server) createCryptoKeyVersion(_ context.Context, req *kmspb.CreateCryp
 	}
 	if err := s.backendUsable(k); err != nil {
 		return nil, err
+	}
+	if k.ImportOnly {
+		// "new key versions for this key must be imported"
+		// (importing-a-key); the code is UNVERIFIED.
+		// Docs re-read 2026-11-20, still unanswered: https://docs.cloud.google.com/kms/docs/importing-a-key
+		return nil, apierror.Wrap(apierror.FailedPrecondition("CryptoKey %s is import_only: its versions must be imported with ImportCryptoKeyVersion, not created", k.Name))
 	}
 	trusted := req.GetCryptoKeyVersion().GetTrustedWrappingEnabled()
 	if trusted {
@@ -1431,6 +1464,9 @@ func (s *Server) updateCryptoKey(_ context.Context, req *kmspb.UpdateCryptoKeyRe
 	}
 	if (k.RotationPeriod > 0 || !k.NextRotation.IsZero()) && k.purpose() != kmspb.CryptoKey_ENCRYPT_DECRYPT {
 		return nil, apierror.Wrap(apierror.InvalidArgument("automatic rotation is only supported for ENCRYPT_DECRYPT keys, not %s", k.purpose()))
+	}
+	if (k.RotationPeriod > 0 || !k.NextRotation.IsZero()) && k.ImportOnly {
+		return nil, apierror.Wrap(apierror.InvalidArgument("an import_only key cannot rotate automatically: it must be rotated manually, by importing a new version"))
 	}
 	if (k.RotationPeriod > 0 || !k.NextRotation.IsZero()) && k.manualExternal() {
 		return nil, apierror.Wrap(apierror.Unimplemented("automatic rotation is not implemented for %s keys whose versions name their own external key: Google documents it for symmetric coordinated external keys only", k.protectionLevel()))

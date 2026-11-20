@@ -95,6 +95,7 @@ var targetEndpoints = []targetEndpoint{
 	{"BACKUPDR", envKey("CLOUDBURROW_BACKUPDR_ENDPOINT")},
 	{"PRIVATECA", envKey("CLOUDBURROW_PRIVATECA_ENDPOINT")},
 	{"GKE", envKey("CLOUDBURROW_GKE_ENDPOINT")},
+	{"ANALYTICSHUB", envKey("CLOUDBURROW_ANALYTICSHUB_ENDPOINT")},
 	{"COMPUTE", envKey("CLOUDBURROW_COMPUTE_ENDPOINT")},
 	{"DATATRANSFER", envKey("CLOUDBURROW_DATATRANSFER_ENDPOINT")},
 }
@@ -235,6 +236,7 @@ var gcloudOverrides = []struct {
 	{"securesourcemanager", []string{"RUN"}},
 	{"developerconnect", []string{"RUN"}},
 	{"eventarc", []string{"RUN"}},
+	{"eventarcpublishing", []string{"RUN"}},
 	{"sql", []string{"SQLADMIN"}},
 	{"redis", []string{"MEMORYSTORE_ADMIN"}},
 	{"memorystore", []string{"MEMORYSTORE_ADMIN"}},

@@ -39,14 +39,14 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 		"storage-transfer-agent-pools"}},
 	config.ServicePubSub:        {Providers: []string{"pubsub", "pubsub-subscriptions", "pubsub-snapshots", "pubsub-schemas"}},
 	config.ServiceTasks:         {Providers: []string{"tasks"}},
-	config.ServiceRun:           {Providers: []string{"run", "run-jobs", "run-worker-pools", "run-domains", "run-instances", "run-builds", "cloud-build-triggers", "cloud-build-worker-pools", "cloud-build-dashboard", "cloud-build-repositories", "cloud-build-settings", "secure-source-manager", "artifact-registry", "artifact-registry-settings", "functions", "eventarc", "vertex-models", "vertex-endpoints"}},
+	config.ServiceRun:           {Providers: []string{"run", "run-jobs", "run-worker-pools", "run-domains", "run-instances", "run-builds", "cloud-build-triggers", "cloud-build-worker-pools", "cloud-build-dashboard", "cloud-build-repositories", "cloud-build-settings", "secure-source-manager", "artifact-registry", "artifact-registry-settings", "functions", "eventarc", "eventarc-buses", "eventarc-pipelines", "eventarc-enrollments", "eventarc-google-api-sources", "eventarc-channels", "vertex-models", "vertex-endpoints"}},
 	config.ServiceSecrets:       {Providers: []string{"secrets", "secrets-regional"}},
 	config.ServiceFirestore:     {Providers: []string{"firestore", "firestore-databases"}},
 	config.ServiceDatastore:     {Providers: []string{"datastore"}},
 	config.ServiceBigtable:      {Providers: []string{"bigtable", "bigtable-instances"}},
 	config.ServiceSpanner:       {Providers: []string{"spanner"}},
 	config.ServiceCloudSQL:      {Providers: []string{"cloudsql", "cloudsql-instances", "cloudsql-backups"}},
-	config.ServiceBigQuery:      {Providers: []string{"bigquery", "bigquery-jobs", "bigquery-transfers", "bigquery-scheduled-queries"}},
+	config.ServiceBigQuery:      {Providers: []string{"bigquery", "bigquery-jobs", "bigquery-transfers", "bigquery-scheduled-queries", "bigquery-sharing"}},
 	config.ServiceScheduler:     {Providers: []string{"scheduler"}},
 	config.ServiceKMS:           {Providers: []string{"kms", "kms-ekm", "kms-autokey", "kms-inventory", "kms-hsm"}},
 	config.ServiceLogging:       {Providers: []string{"logging-metrics", "logging-sinks", "logging-exclusions", "logging-buckets", "logging-settings", "logging-saved-queries", "logging-log-scopes", "logging-analytics"}, Screen: "/logs"},
@@ -70,7 +70,7 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 // Speech-to-Text on the local AI endpoint (#1930), and CloudBurrow's own
 // cluster.
 var clusterScreens = []string{
-	"projects", "hierarchy", "tags", "iam", "iam-roles", "iam-groups", "iam-service-accounts", "iam-workload-identity", "iam-audit", "iam-orgpolicies", "iam-labels", "iam-settings", "serviceusage", "serviceusage-operations", "ai",
+	"projects", "hierarchy", "tags", "iam", "iam-roles", "iam-groups", "iam-sso-profiles", "iam-sso-assignments", "iam-service-accounts", "iam-workload-identity", "iam-audit", "iam-orgpolicies", "iam-labels", "iam-settings", "serviceusage", "serviceusage-operations", "ai",
 	"documentai-overview", "documentai-gallery", "documentai", "speech-transcriptions", "speech-recognizers",
 	"speech-custom-classes", "speech-phrase-sets",
 	"workloads", "pods", "k8sservices", "jobs", "nodes", "k8sstorage", "events",
@@ -167,6 +167,7 @@ func coverageDeps(t *testing.T) consoleDeps {
 		monitoring:   &monitoringService{},
 		compute:      &computeService{},
 		dataTransfer: &dataTransferSvc{},
+		analyticsHub: &analyticsHubSvc{},
 		scheduler:    &schedulerService{},
 		logging:      &loggingService{},
 		// The APIs & Services page (#1352) reads the Service Usage server.

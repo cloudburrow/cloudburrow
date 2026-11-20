@@ -104,6 +104,15 @@ What no configuration can redirect, and so only an egress block (a proxy or fire
   `storagetransfer.googleapis.com` whatever `transfer` says. Every other `gcloud transfer`
   command asks for `transfer` and honours it. There is no `storagetransfer` property: a
   configuration that writes one is ignored.
+- **Speech-to-Text v2's gcloud commands** (`gcloud alpha ml speech recognizers` and
+  `gcloud alpha ml speech locations`, #1945) replace the `speech` override, for each call, with
+  `https://LOCATION-speech.googleapis.com/`, built from the generated client's `BASE_URL`
+  (`api_lib/ml/speech/client.py`), so they call Google whatever the configuration says. No
+  test runs them. The API they call is served locally: use the official client libraries
+  (`cloud.google.com/go/speech/apiv2` and the others) with the local AI endpoint, or the
+  console's Speech-to-Text pages. The v1 commands (`gcloud ml speech recognize`) honour the
+  override, which `gcloud-setup` points at the local refusal (v1's JSON surface is not served;
+  its gRPC is).
 - **A newer tool than the pin.** A provider or gcloud release newer than the inventory may have
   endpoint settings it does not name, which stay at their default. Older providers ignore the
   variables they do not have.
