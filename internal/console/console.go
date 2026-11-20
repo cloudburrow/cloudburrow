@@ -899,6 +899,12 @@ type EditForm struct {
 	// opens Deploy worker pool revision, ending in Deploy (#1852).
 	Title  string `json:"title,omitempty"`
 	Submit string `json:"submit,omitempty"`
+	// Page draws the form at an address of its own, the resource's page
+	// with ?edit=1, instead of in a dialog: Google's Edit Repository is a
+	// page with the create page's sections, ending in Update (#1855). The
+	// Edit button and a row's Edit item open it; Cancel and a saved change
+	// return to the resource's page.
+	Page bool `json:"page,omitempty"`
 }
 
 // Property is one label/value pair on a resource's summary.

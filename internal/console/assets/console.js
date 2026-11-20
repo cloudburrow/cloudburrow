@@ -3846,6 +3846,12 @@ async function renderDetail(view, route, resourcePath) {
     return setChildren(view, ...header,
       errorState(`${name} unavailable`, data.unavailable, () => renderDetail(view, route, segments)));
   }
+  // The resource's edit page (EditForm.Page, #1855): its page's address
+  // with ?edit=1.
+  if (data.edit && data.edit.page && new URLSearchParams(location.search).get("edit") === "1" &&
+      view.dataset.embedded !== "true") {
+    return renderEditPage(view, route, segments, data);
+  }
 
   if ((data.trail || []).length) drawTrail(data.trail);
   // A page addressed by something no reader recognises — a Datastore
@@ -4077,8 +4083,17 @@ async function renderDetail(view, route, resourcePath) {
       }
       case undefined:
       case "":
-      case "listing":
+      case "listing": {
+        // A listing's own Groups, drawn as cards over its rows (#1855):
+        // Google's Vulnerabilities tab has its Scan results summary above
+        // the table.
+        const cards = (section.groups || []).filter((g) => (g.properties || []).length).map((group) =>
+          el("div", { class: "card properties section-summary" },
+            group.heading ? el("h2", { text: group.heading }) : null,
+            el("dl", {}, ...group.properties.flatMap((prop) => [el("dt", { text: prop.label }), propertyValue(prop)]))));
+        if (cards.length) note = el("div", {}, ...cards, note);
         return drawListingSection(panel, section, note, reload);
+      }
       default:
         // Said out loud rather than drawn as an empty table: a kind this
         // console does not know is a version skew, and guessing hides it.
@@ -4568,7 +4583,14 @@ async function renderDetail(view, route, resourcePath) {
       setTimeout(() => revealValue(route, segments, data.reveal), 0);
     }
   }
-  if (data.edit) {
+  if (data.edit && data.edit.page) {
+    // An edit form with a page of its own (EditForm.Page, #1855): Google's
+    // Edit Repository opens a page, not a dialog.
+    pageActions.unshift(el("a", {
+      class: "button primary", id: "edit-page-link", text: data.edit.label || "Edit",
+      href: editPageHref(route, segments),
+    }));
+  } else if (data.edit) {
     pageActions.unshift(el("button", {
       class: "primary", text: data.edit.label || "Edit",
       onclick: () => openEditForm(route, segments, data.edit, reloadPage),
@@ -5490,10 +5512,79 @@ async function editFromRow(route, segments, onDone) {
     const data = await api(`/api/detail/${route.service}?project=${encodeURIComponent(project)}` +
       segments.map((sg) => `&name=${encodeURIComponent(sg)}`).join(""));
     if (!data.edit) throw new Error("This resource has nothing that can be edited.");
+    if (data.edit.page) return navigate(editPageHref(route, segments));
     openEditForm(route, segments, data.edit, onDone);
   } catch (err) {
     notify(String(err.message), "error");
   }
+}
+
+// editPageHref is the address of a resource's edit page (EditForm.Page):
+// its own page with ?edit=1, the project and scope kept.
+function editPageHref(route, segments) {
+  const u = new URL(detailHref(route, segments), location.origin);
+  u.searchParams.set("edit", "1");
+  return u.pathname + u.search;
+}
+
+// renderEditPage draws an EditForm with Page set at the resource's own
+// address (#1855), as Google's Edit Repository is a page with the create
+// page's sections ending in Update: the same form the dialog would hold,
+// sent the same way, and Cancel or a saved change goes back to the
+// resource's page.
+function renderEditPage(view, route, segments, data) {
+  const spec = data.edit;
+  const name = segments[segments.length - 1];
+  const project = currentProject();
+  const pageHref = detailHref(route, segments);
+  const title = spec.title || spec.label || "Edit";
+  const header = pageHeader(title, (project ? `Project ${project}` : "All projects") + scopeSubtitle(route.service),
+    { back: pageHref, backLabel: `Back to ${name}` });
+  const back = new URL(route.path, location.origin);
+  if (project) back.searchParams.set("project", project);
+  carryScope(back, route.service);
+  const trail = [el("a", { href: back.pathname + back.search, text: route.crumb || route.title })];
+  segments.forEach((sg, i) => {
+    trail.push(el("span", { "aria-hidden": "true", text: "/" }));
+    trail.push(el("a", { href: detailHref(route, segments.slice(0, i + 1)), text: sg }));
+  });
+  trail.push(el("span", { "aria-hidden": "true", text: "/" }), el("span", { text: title }));
+  header.prepend(el("nav", { class: "breadcrumb", "aria-label": "Breadcrumb" }, ...trail));
+
+  const fields = buildCreateForm(spec);
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  const primary = el("button", { type: "submit", class: "primary", text: spec.submit || spec.label || "Save" });
+  const cancel = el("a", { class: "button secondary", href: pageHref, text: "Cancel" });
+  const submit = async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    if (!fields.validate()) return;
+    setBusy(primary, true);
+    const op = recordOperation(`Update ${name}`);
+    try {
+      const res = await send(
+        `/api/resources/${route.service}?project=${encodeURIComponent(project)}`,
+        "PATCH", { Path: segments, Values: fields.values() });
+      op.succeeded("", res.operation);
+      notify(`Updated ${name}`);
+      announce(`Updated ${name}`);
+      navigate(pageHref);
+    } catch (err) {
+      op.failed(err.message, err.operation);
+      setBusy(primary, false);
+      error.textContent = err.message;
+      error.hidden = false;
+    }
+  };
+  setChildren(view, header,
+    el("form", { class: "create-page edit-page", id: "edit-page-form", novalidate: true, onsubmit: submit },
+      el("p", { class: "resource-name", text: name }),
+      spec.note ? el("p", { class: "form-help", text: spec.note }) : null,
+      error,
+      ...fields.nodes,
+      el("div", { class: "form-actions" }, primary, cancel)));
+  fields.focusFirst();
+  announce(`${title} ${name}`);
 }
 
 // openEditForm changes a resource in place.
