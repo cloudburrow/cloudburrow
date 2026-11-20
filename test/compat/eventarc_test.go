@@ -135,11 +135,15 @@ func TestEventarcTriggersToCloudRun(t *testing.T) {
 	// Refusals.
 	for name, bad := range map[string]*eventarcpb.Trigger{
 		"an unknown event type": {EventFilters: []*eventarcpb.EventFilter{typeFilter("google.cloud.example.v1.unknown")}, Destination: dest("")},
-		"a channel":             {Channel: parent + "/channels/c", EventFilters: []*eventarcpb.EventFilter{typeFilter("x")}, Destination: dest("")},
 	} {
 		if _, err := ec.CreateTrigger(ctx, &eventarcpb.CreateTriggerRequest{Parent: parent, TriggerId: "bad", Trigger: bad}); status.Code(err) != codes.Unimplemented {
 			t.Errorf("CreateTrigger with %s: %v; want Unimplemented", name, err)
 		}
+	}
+	// Channels are served (#1947): one that does not exist is refused.
+	if _, err := ec.CreateTrigger(ctx, &eventarcpb.CreateTriggerRequest{Parent: parent, TriggerId: "bad", Trigger: &eventarcpb.Trigger{
+		Channel: parent + "/channels/no-such-channel", EventFilters: []*eventarcpb.EventFilter{typeFilter("x")}, Destination: dest("")}}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("CreateTrigger on a missing channel: %v; want InvalidArgument", err)
 	}
 	missing := &eventarcpb.Trigger{EventFilters: []*eventarcpb.EventFilter{typeFilter("google.cloud.pubsub.topic.v1.messagePublished")},
 		Destination: &eventarcpb.Destination{Descriptor_: &eventarcpb.Destination_CloudRun{CloudRun: &eventarcpb.CloudRun{Service: "no-such-service"}}}}

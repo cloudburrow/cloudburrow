@@ -128,8 +128,9 @@ func (d dirEntries) List(prefix string) []string {
 }
 
 // mysqlArchiver dumps each application database of a MySQL server with
-// mysqldump, as root, whose password the server's container holds in
-// MYSQL_ROOT_PASSWORD: it never passes through the host's command line.
+// mysqldump, as the server's administrative account (mysqlRootEnv), whose
+// password the server's container holds in MYSQL_ROOT_PASSWORD: it never
+// passes through the host's command line.
 type mysqlArchiver struct {
 	exec func(ctx context.Context, stdin io.Reader, stdout io.Writer, argv ...string) error
 	// bare is a created instance's server, which has no default database
@@ -151,19 +152,24 @@ func (m *mysqlArchiver) sh(ctx context.Context, stdin io.Reader, stdout io.Write
 }
 
 // mysqlRootEnv starts every script run in a MySQL server's container: the
-// clients sign in as root over TCP to 127.0.0.1:3306 ($MYSQL_LOCAL), not over
+// clients sign in as sqladmin.MySQLAdminUser (#1993), or as root on a
+// server that has none (`up`'s, or one made before #1993 until its next
+// start), over TCP to 127.0.0.1:3306 ($MYSQL_LOCAL), not over
 // the unix socket, and wait until the server answers there. On CI's runners
 // the server's classic socket, /var/run/mysqld/mysqld.sock, was missing
 // while the server served TCP (only mysqlx.sock was there), so a backup or a
 // replica's setup failed with ERROR 2002; TCP is what the pod's readiness
 // probe checks. The flags are explicit because not every client reads
-// MYSQL_HOST (mysqladmin pinged over the socket with it set). The image's
-// root is root@'%', which a TCP sign-in from 127.0.0.1 is. mysqladmin ping
-// succeeds once the server runs, even when it refuses the login.
-const mysqlRootEnv = `export MYSQL_PWD="${MYSQL_ROOT_PASSWORD:-}"; MYSQL_LOCAL="-uroot -h127.0.0.1 -P3306 --protocol=TCP"; ` +
+// MYSQL_HOST (mysqladmin pinged over the socket with it set). The
+// administrative account is at 127.0.0.1, and the image's root is
+// root@'%', which a TCP sign-in from 127.0.0.1 is too, unless the user
+// deleted it. mysqladmin ping succeeds once the server runs, even when it
+// refuses the login.
+const mysqlRootEnv = `export MYSQL_PWD="${MYSQL_ROOT_PASSWORD:-}"; MYSQL_LOCAL="-u` + sqladmin.MySQLAdminUser + ` -h127.0.0.1 -P3306 --protocol=TCP"; ` +
 	`i=0; until mysqladmin $MYSQL_LOCAL --connect-timeout=2 ping >/dev/null 2>&1; do ` +
 	`i=$((i+1)); if [ "$i" -ge 120 ]; then ` +
 	`echo "mysqld did not answer on 127.0.0.1:3306 in 120s" >&2; exit 1; fi; sleep 1; done
+mysql $MYSQL_LOCAL -N -e 'SELECT 1' >/dev/null 2>&1 || MYSQL_LOCAL="-uroot -h127.0.0.1 -P3306 --protocol=TCP"
 `
 
 func (m *mysqlArchiver) query(ctx context.Context, stmt string) (string, error) {
@@ -198,6 +204,11 @@ func (m *mysqlArchiver) Export(ctx context.Context, w admin.EntryWriter) error {
 	if err := w.Add(pgDatabasesEntry, int64(len(b)), bytes.NewReader(b)); err != nil {
 		return err
 	}
+	if m.bare {
+		if err := m.exportAccounts(ctx, w); err != nil {
+			return err
+		}
+	}
 	for i, name := range names {
 		f, err := os.CreateTemp("", "cloudburrow-mysqldump-*")
 		if err != nil {
@@ -224,7 +235,59 @@ func (m *mysqlArchiver) Export(ctx context.Context, w admin.EntryWriter) error {
 	return nil
 }
 
-// Import drops every application database and loads the archive's.
+// mysqlAccountsEntry holds a created instance's accounts (#1993): Cloud
+// SQL's restore "takes the source instance's settings, databases, and
+// users" (docs.cloud.google.com/sql/docs/mysql/backup-recovery/restore),
+// so a restore, a clone or a restore to a new instance gives the target
+// the source's users, a deleted 'root'@'%' included, and its IAM users.
+const mysqlAccountsEntry = "mysql/accounts.sql"
+
+// mysqlUserAccounts is the mysql.user condition of the accounts a backup
+// carries: neither MySQL's own nor the system accounts users.list hides.
+const mysqlUserAccounts = `user NOT LIKE 'mysql.%' AND user NOT IN ('` + sqladmin.MySQLAdminUser + `', '` +
+	components.SQLReplicaUser + `', '` + components.SQLStandbyUser + `') AND NOT (user = 'root' AND host IN ('localhost', '127.0.0.1', '::1'))`
+
+// mysqlExportAccounts prints the statements that recreate the accounts,
+// their grants and the IAM users' table, in forms a replica of the target
+// replays whatever accounts it has. PROXY grants are left out: only the
+// image's root@localhost may grant them. MySQL 5.6 has no SHOW CREATE
+// USER, and its backups carry no accounts.
+const mysqlExportAccounts = mysqlRootEnv + `set -e
+case "$(mysql $MYSQL_LOCAL -N -B -e 'SELECT VERSION()')" in 5.6*) exit 0 ;; esac
+for u in $(mysql $MYSQL_LOCAL -N -B -e "SELECT CONCAT(QUOTE(user), '@', QUOTE(host)) FROM mysql.user WHERE ` + mysqlUserAccounts + `"); do
+  { mysql $MYSQL_LOCAL -N -B -r -e "SET SESSION print_identified_with_as_hex = ON; SHOW CREATE USER $u" 2>/dev/null ||
+    mysql $MYSQL_LOCAL -N -B -r -e "SHOW CREATE USER $u"; } | sed 's/^CREATE USER /CREATE USER IF NOT EXISTS /; s/$/;/'
+  mysql $MYSQL_LOCAL -N -B -r -e "SHOW GRANTS FOR $u" | grep -v '^GRANT PROXY ON ' | sed 's/$/;/'
+done
+if [ "$(mysql $MYSQL_LOCAL -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'mysql' AND table_name = 'cloudburrow_iam_users'")" = 1 ]; then
+  echo "CREATE TABLE IF NOT EXISTS mysql.cloudburrow_iam_users (user VARCHAR(32) NOT NULL PRIMARY KEY, type VARCHAR(40) NOT NULL, email VARCHAR(255) NOT NULL) ENGINE=InnoDB;"
+  mysql $MYSQL_LOCAL -N -B -r -e "SELECT CONCAT('REPLACE INTO mysql.cloudburrow_iam_users (user, type, email) VALUES (', QUOTE(user), ', ', QUOTE(type), ', ', QUOTE(email), ');') FROM mysql.cloudburrow_iam_users"
+fi
+`
+
+// mysqlImportAccounts drops the target's accounts, and its IAM users'
+// rows, and runs the archive's statements, read on standard input.
+const mysqlImportAccounts = mysqlRootEnv + `set -e
+drops=$(mysql $MYSQL_LOCAL -N -B -e "SELECT CONCAT('DROP USER IF EXISTS ', QUOTE(user), '@', QUOTE(host), ';') FROM mysql.user WHERE ` + mysqlUserAccounts + `")
+iam=$(mysql $MYSQL_LOCAL -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'mysql' AND table_name = 'cloudburrow_iam_users'")
+{
+  printf '%s\n' "$drops"
+  if [ "$iam" = 1 ]; then echo 'DELETE FROM mysql.cloudburrow_iam_users;'; fi
+  cat
+} | mysql $MYSQL_LOCAL
+`
+
+func (m *mysqlArchiver) exportAccounts(ctx context.Context, w admin.EntryWriter) error {
+	var out bytes.Buffer
+	if err := m.exec(ctx, nil, &out, "sh", "-c", mysqlExportAccounts); err != nil {
+		return fmt.Errorf("dump the accounts: %w", err)
+	}
+	return w.Add(mysqlAccountsEntry, int64(out.Len()), &out)
+}
+
+// Import drops every application database and loads the archive's; on a
+// created instance, the archive's accounts too, when it has them (a backup
+// taken before #1993 has none, and the target keeps its own).
 func (m *mysqlArchiver) Import(ctx context.Context, r admin.EntryReader) error {
 	f, err := r.Open(pgDatabasesEntry)
 	if err != nil {
@@ -268,6 +331,18 @@ func (m *mysqlArchiver) Import(ctx context.Context, r admin.EntryReader) error {
 			return fmt.Errorf("restore %s: %w", name, err)
 		}
 		restored = restored || name == components.CloudSQLDatabase
+	}
+	if m.bare {
+		a, err := r.Open(mysqlAccountsEntry)
+		if err == nil {
+			err = m.exec(ctx, a, io.Discard, "sh", "-c", mysqlImportAccounts)
+			_ = a.Close()
+			if err != nil {
+				return fmt.Errorf("restore the accounts: %w", err)
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
 	}
 	if !restored && !m.bare {
 		if _, err := m.query(ctx, "CREATE DATABASE "+quoteMySQLIdent(components.CloudSQLDatabase)); err != nil {

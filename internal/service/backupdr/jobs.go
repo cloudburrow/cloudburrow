@@ -12,7 +12,6 @@ package backupdr
 // of them, the longest time range of the console's Jobs page.
 
 import (
-	"errors"
 	"sort"
 	"strconv"
 	"strings"
@@ -101,11 +100,8 @@ func (s *Server) finishJobLocked(j *Job, err error) {
 	j.Payload["endTime"] = j.End
 	j.Payload["jobStatus"] = "SUCCESSFUL"
 	if err != nil {
-		code, typ := 13, "INTERNAL"
-		var ae *apiError
-		if errors.As(err, &ae) {
-			code, typ = grpcCode(ae.code), ae.status
-		}
+		ae := asAPIError(err)
+		code, typ := grpcCode(ae.code), ae.status
 		j.Payload["jobStatus"] = "FAILED"
 		j.Payload["errorCode"] = float64(code)
 		j.Payload["errorType"] = typ

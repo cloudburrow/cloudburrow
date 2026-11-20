@@ -70,6 +70,23 @@ func TestConsoleFirestoreTransferAndBackups(t *testing.T) {
 	if n := len(docs.Names("projects/p/databases/copy")); n != 5 {
 		t.Errorf("the clone has %d documents, want 5", n)
 	}
+	// Clone from a minute picked (#1942), as the form's datetime-local
+	// value; an export from an earlier point in time without PITR is the
+	// API's refusal.
+	minute := time.Now().UTC().Truncate(time.Minute).Format("2006-01-02T15:04")
+	if err := p.ActAt(ctx, "p", at, "clonedatabase", map[string]string{"databaseId": "copy-at", "cloneFrom": minute}); err != nil {
+		t.Fatalf("Clone from %s: %v", minute, err)
+	}
+	if n := len(docs.Names("projects/p/databases/copy-at")); n != 5 {
+		t.Errorf("the clone from %s has %d documents, want 5", minute, n)
+	}
+	if err := p.ActAt(ctx, "p", at, "clonedatabase", map[string]string{"databaseId": "copy-bad", "cloneFrom": "yesterday"}); err == nil {
+		t.Error("Clone from \"yesterday\" was accepted")
+	}
+	err = p.ActAt(ctx, "p", at, "exportdocuments", map[string]string{"outputUriPrefix": "gs://exports/at", "snapshot": "true", "snapshotTime": minute})
+	if err == nil || !strings.Contains(err.Error(), "Point-in-Time Recovery must be enabled") {
+		t.Errorf("Export from an earlier point in time without PITR: %v", err)
+	}
 
 	c, err := p.client(ctx)
 	if err != nil {

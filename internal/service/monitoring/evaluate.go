@@ -65,6 +65,9 @@ type Incident struct {
 	Observed       string            `json:"observed,omitempty"`
 	Threshold      string            `json:"threshold,omitempty"`
 	Severity       string            `json:"severity,omitempty"`
+	// Notified is when each channel was last told the incident is open,
+	// for renotifyInterval.
+	Notified map[string]time.Time `json:"notified,omitempty"`
 }
 
 // MaxIncidents bounds the incidents kept per project; the oldest closed
@@ -236,6 +239,65 @@ func (s *Server) Evaluate(ctx context.Context) {
 	_ = s.save()
 	s.mu.Unlock()
 	s.notifyIncidents(ctx, changed)
+	s.renotify(ctx, now)
+}
+
+// renotify repeats an open incident's notification to each channel whose
+// notificationChannelStrategy sets a renotifyInterval, once that interval
+// has passed since the channel was last told
+// (docs.cloud.google.com/monitoring/alerts/policies-in-api, read
+// 2026-11-20). A snoozed policy is not repeated.
+func (s *Server) renotify(ctx context.Context, now time.Time) {
+	type send struct {
+		in       Incident
+		p        *monitoringpb.AlertPolicy
+		channels []*monitoringpb.NotificationChannel
+	}
+	var sends []send
+	s.mu.Lock()
+	for _, in := range s.incidents {
+		if in.State != IncidentOpen {
+			continue
+		}
+		p, _ := s.get(kindPolicies, in.Policy).(*monitoringpb.AlertPolicy)
+		if p == nil || p.Enabled != nil && !p.GetEnabled().GetValue() || s.snoozedLocked(p.GetName(), now) {
+			continue
+		}
+		var due []*monitoringpb.NotificationChannel
+		for _, st := range p.GetAlertStrategy().GetNotificationChannelStrategy() {
+			if st.GetRenotifyInterval() == nil {
+				continue
+			}
+			every := st.GetRenotifyInterval().AsDuration()
+			for _, n := range st.GetNotificationChannelNames() {
+				last := in.Started
+				if t, ok := in.Notified[n]; ok && t.After(last) {
+					last = t
+				}
+				if now.Sub(last) < every {
+					continue
+				}
+				if c, ok := s.get(kindChannels, n).(*monitoringpb.NotificationChannel); ok {
+					due = append(due, clone(c))
+					if in.Notified == nil {
+						in.Notified = map[string]time.Time{}
+					}
+					in.Notified[n] = now
+				}
+			}
+		}
+		if len(due) > 0 {
+			sends = append(sends, send{*in, clone(p), due})
+		}
+	}
+	if len(sends) > 0 {
+		_ = s.save()
+	}
+	publish := s.publish
+	s.mu.Unlock()
+	for _, x := range sends {
+		s.notify(ctx, x.in, x.p, x.channels, publish)
+	}
 }
 
 // violation is one series (or log entry) meeting a condition.
@@ -260,6 +322,10 @@ func (s *Server) evaluateCondition(ctx context.Context, project string, p *monit
 		return s.evalThreshold(ctx, project, c.GetConditionThreshold(), now)
 	case c.GetConditionAbsent() != nil:
 		return s.evalAbsent(ctx, project, c.GetConditionAbsent(), now)
+	case c.GetConditionMonitoringQueryLanguage() != nil:
+		return s.evalMQL(ctx, project, c.GetConditionMonitoringQueryLanguage(), now)
+	case c.GetConditionPrometheusQueryLanguage() != nil:
+		return s.evalPromQL(ctx, project, c.GetName(), c.GetConditionPrometheusQueryLanguage(), now)
 	case c.GetConditionMatchedLog() != nil:
 		if logs == nil {
 			return nil, false

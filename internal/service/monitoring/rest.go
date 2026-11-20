@@ -20,5 +20,5 @@ func Routes() []rest.Route { return Transcoder().Routes() }
 func NewRESTHandler(s *Server) http.Handler {
 	t := Transcoder()
 	s.Register(t)
-	return t
+	return withPrometheusAPI(s, t)
 }

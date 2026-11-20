@@ -548,7 +548,7 @@ func eaCheckPipeline(e *EventarcServer) func(*eventarcpb.Pipeline) error {
 				}
 			}
 		case d.GetWorkflow() != "":
-			return apierror.Unimplemented("destinations[0].workflow is not supported: this instance does not serve Workflows")
+			return apierror.Unimplemented("destinations[0].workflow is not supported: a pipeline does not deliver to Workflows on this instance (a trigger's destination.workflow does)")
 		case d.GetMessageBus() != "":
 			if strings.Split(d.GetMessageBus(), "/")[1] != project {
 				return apierror.InvalidArgument("destinations[0].message_bus %s must be in the pipeline's project %s", d.GetMessageBus(), project)

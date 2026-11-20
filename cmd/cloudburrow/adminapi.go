@@ -75,6 +75,8 @@ type adminDeps struct {
 	privateCA *privateCAService
 	// analyticsHub is BigQuery sharing (#1960), nil without BigQuery.
 	analyticsHub *analyticsHubSvc
+	// workflows is Workflows (#1986), nil unless enabled.
+	workflows *workflowsService
 	// gke is the Kubernetes Engine API (#1913), nil unless enabled.
 	gke *gkeService
 	// monitoring is Cloud Monitoring (#1939), nil unless enabled.
@@ -197,6 +199,9 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 	}
 	if d.analyticsHub != nil {
 		api.RegisterResetter(&analyticsHubResetter{svc: d.analyticsHub})
+	}
+	if d.workflows != nil {
+		api.RegisterResetter(&workflowsResetter{svc: d.workflows})
 	}
 	if d.monitoring != nil {
 		api.RegisterResetter(&monitoringResetter{svc: d.monitoring})

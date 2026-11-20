@@ -402,6 +402,10 @@ func openAt(t *testing.T, consoleAddr string) *tab {
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.WindowSize(1440, 900),
 		chromedp.ProxyServer(sink.URL),
+		// A proxy setting is not a block on its own (a probe behind
+		// HTTPS_PROXY reached Google, 2026-11-20): anything Chrome resolves
+		// itself, outside the proxy, gets no address for a non-loopback name.
+		chromedp.Flag("host-resolver-rules", "MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE *.localhost, EXCLUDE 127.0.0.1, EXCLUDE [::1]"),
 		chromedp.Flag("disable-component-update", true),
 		chromedp.Flag("disable-domain-reliability", true),
 		chromedp.Flag("no-pings", true),

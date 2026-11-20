@@ -92,7 +92,7 @@ func TestPubSubGooglePagesCreate(t *testing.T) {
 		names = append(names, f.Name)
 	}
 	if got := strings.Join(names, " "); !strings.HasPrefix(got, "name topic deliveryType bigqueryTable bigquerySchema bigqueryDropUnknown bigqueryWriteMetadata "+
-		"bigqueryServiceAccount storageBucket filenamePrefix filenameSuffix filenameDatetimeFormat storageFormat storageWriteMetadata "+
+		"bigqueryServiceAccount storageBucket filenamePrefix filenameSuffix filenameDatetimeFormat storageFormat storageUseTopicSchema storageWriteMetadata "+
 		"maxDurationMinutes maxBytes maxMessages pushEndpoint pushAttributes filter retryPolicy") {
 		t.Errorf("Create subscription's fields are %s; want Google's order", got)
 	}

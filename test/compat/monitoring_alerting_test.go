@@ -103,7 +103,8 @@ func writeGauge(t *testing.T, h *Harness, c *monitoring.MetricClient, metric str
 //     the webhooks receive in Google's 1.2 schema, with basic auth; a point
 //     below closes it;
 //   - deleting a channel in use is FAILED_PRECONDITION, with force it is
-//     removed from the policy; an MQL condition is UNIMPLEMENTED;
+//     removed from the policy; an MQL condition naming no metric is
+//     INVALID_ARGUMENT;
 //   - the policy and the channels are deleted.
 //
 // covers: google.monitoring.v3.NotificationChannelService/ListNotificationChannelDescriptors, google.monitoring.v3.NotificationChannelService/GetNotificationChannelDescriptor, google.monitoring.v3.NotificationChannelService/CreateNotificationChannel, google.monitoring.v3.NotificationChannelService/ListNotificationChannels, google.monitoring.v3.NotificationChannelService/GetNotificationChannel, google.monitoring.v3.NotificationChannelService/UpdateNotificationChannel, google.monitoring.v3.NotificationChannelService/DeleteNotificationChannel, google.monitoring.v3.NotificationChannelService/SendNotificationChannelVerificationCode, google.monitoring.v3.AlertPolicyService/CreateAlertPolicy, google.monitoring.v3.AlertPolicyService/ListAlertPolicies, google.monitoring.v3.AlertPolicyService/GetAlertPolicy, google.monitoring.v3.AlertPolicyService/UpdateAlertPolicy, google.monitoring.v3.AlertPolicyService/DeleteAlertPolicy
@@ -265,7 +266,7 @@ func TestMonitoringAlertPoliciesAndChannels(t *testing.T) {
 	_, err = ac.CreateAlertPolicy(ctx, &monitoringpb.CreateAlertPolicyRequest{Name: parent, AlertPolicy: &monitoringpb.AlertPolicy{DisplayName: "mql",
 		Conditions: []*monitoringpb.AlertPolicy_Condition{{DisplayName: "q", Condition: &monitoringpb.AlertPolicy_Condition_ConditionMonitoringQueryLanguage{
 			ConditionMonitoringQueryLanguage: &monitoringpb.AlertPolicy_Condition_MonitoringQueryLanguageCondition{Query: "fetch global"}}}}}})
-	wantMonitoringCode(t, "an MQL condition", err, codes.Unimplemented, "Monitoring Query Language")
+	wantMonitoringCode(t, "an MQL condition with no metric", err, codes.InvalidArgument, "not valid MQL")
 	if err := ac.DeleteAlertPolicy(ctx, &monitoringpb.DeleteAlertPolicyRequest{Name: p.GetName()}); err != nil {
 		t.Errorf("DeleteAlertPolicy: %v", err)
 	}

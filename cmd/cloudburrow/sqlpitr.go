@@ -179,7 +179,7 @@ func (d *sqlDumper) Prune(ctx context.Context, t sqladmin.DumpTarget, before tim
 		return d.sh(ctx, t, nil, io.Discard, mysqlPITRPrelude+`cd "$R/base"
 for b in *.sql; do n=${b%.sql}; [ "$n" -lt "$1" ] 2>/dev/null && rm -f "$b"; done
 f=$(sed -n "s/.*SOURCE_LOG_FILE='\([^']*\)'.*/\1/p" "$1.sql" | head -1)
-[ -z "$f" ] || mysql -uroot -e "PURGE BINARY LOGS TO '$f'"`, id)
+[ -z "$f" ] || mysql $MYSQL_LOCAL -e "PURGE BINARY LOGS TO '$f'"`, id)
 	}
 	return d.sh(ctx, t, nil, io.Discard, pgPITRPrelude+`cd "$R/base"
 for b in *; do [ "$b" -lt "$1" ] 2>/dev/null && rm -rf "$b"; done

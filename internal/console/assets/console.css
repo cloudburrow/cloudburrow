@@ -2072,12 +2072,16 @@ dd.has-copy .property-copy { padding: 2px 8px; font-size: var(--text-badge-size)
 .explorer-builder h2 { font-size: var(--text-body-size); margin: 12px 0 8px; }
 .explorer-builder h2:first-child { margin-top: 0; }
 .explorer-field { display: grid; gap: 4px; margin-bottom: 8px; }
-.explorer-field select, .explorer-field input { width: 100%; box-sizing: border-box; }
+.explorer-field select, .explorer-field input, .explorer-field textarea { width: 100%; box-sizing: border-box; }
+/* Builder and PromQL (#1991), the query pane's two languages. */
+.tab-strip.explorer-tabs { margin: -8px -8px 12px; border-bottom: 1px solid var(--border); }
+.explorer-field textarea { min-height: 7em; resize: vertical; }
 .explorer-toolbar { margin-bottom: 12px; }
 .explorer-chart { display: block; width: 100%; height: auto; }
 .explorer-grid { stroke: var(--border); }
 .explorer-axis { fill: var(--text-muted); }
-.explorer-table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+.explorer-table-wrap { margin-top: 12px; }
+.explorer-table { width: 100%; border-collapse: collapse; }
 .explorer-table th, .explorer-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); word-break: break-word; }
 @media (max-width: 720px) { .explorer { grid-template-columns: minmax(0, 1fr); } }
 

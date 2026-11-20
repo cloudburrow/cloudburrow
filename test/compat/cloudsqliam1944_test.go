@@ -44,6 +44,7 @@ const sqlInstanceUserRole = "roles/cloudsql.instanceUser"
 // account and a made-up token are refused, as is the principal once its
 // role is taken back; executeSql with autoIamAuthn runs as the caller's
 // IAM user; and generateEphemeralCert refuses a token it did not issue.
+// The MySQL instance's 'root'@'%' is deleted first, as Terraform does (#1993).
 func TestCloudSQLIAMDatabaseAuthentication(t *testing.T) {
 	h := New(t)
 	if os.Getenv(EnvCloudSQL) == "" && os.Getenv(EnvMySQL) == "" {
@@ -84,6 +85,11 @@ func TestCloudSQLIAMDatabaseAuthentication(t *testing.T) {
 			in := createSQLInstance(t, svc, project, &sqladmin.DatabaseInstance{Name: inst, DatabaseVersion: eng.version,
 				RootPassword: "Root-pass1", Settings: &sqladmin.Settings{Tier: "db-custom-1-3840", DataApiAccess: "ALLOW_DATA_API",
 					DatabaseFlags: []*sqladmin.DatabaseFlags{{Name: eng.flag, Value: "on"}}}})
+			if eng.mysql {
+				// IAM database authentication on an instance without
+				// 'root'@'%', which Terraform deletes (#1993).
+				deleteMySQLRoot(t, svc, project, inst)
+			}
 			for _, p := range []*iamPrincipal{granted, nobody} {
 				op, err := svc.Users.Insert(project, inst, &sqladmin.User{Name: p.email, Type: "CLOUD_IAM_SERVICE_ACCOUNT"}).Do()
 				if err != nil {

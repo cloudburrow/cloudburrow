@@ -2,6 +2,7 @@ package run
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -129,10 +130,11 @@ func eaProviders(location string) []*eventarcpb.Provider {
 		"storage.googleapis.com": {storageEventPrefix + "finalized", storageEventPrefix + "deleted", storageEventPrefix + "archived", storageEventPrefix + "metadataUpdated"},
 	}
 	for typ := range eaTypeAttrs {
-		if isFirestoreType(typ) {
+		if isFirestoreType(typ) || isDatastoreType(typ) {
 			direct["firestore.googleapis.com"] = append(direct["firestore.googleapis.com"], typ)
 		}
 	}
+	sort.Strings(direct["firestore.googleapis.com"])
 	names := append(AuditServiceNames(), "storage.googleapis.com")
 	sort.Strings(names)
 	var out []*eventarcpb.Provider
@@ -225,11 +227,13 @@ func eaSpec(t *eventarcpb.Trigger, region string) (*functionspb.EventTrigger, er
 			return nil, apierror.InvalidArgument("destination.networkConfig.networkAttachment is required for an HTTP endpoint destination")
 		}
 	case d.GetGke() != nil:
-		return nil, apierror.Unimplemented("destination.gke is not supported: this instance serves no Google Kubernetes Engine " +
-			"(its cluster is a local kind cluster, not a GKE cluster the Kubernetes Engine API names); route to a Cloud Run " +
-			"service, a function or an HTTP endpoint")
+		if err := eaCheckGKE(d.GetGke()); err != nil {
+			return nil, err
+		}
 	case d.GetWorkflow() != "":
-		return nil, apierror.Unimplemented("destination.workflow is not supported: this instance does not serve Workflows")
+		if !eaWorkflowRE.MatchString(d.GetWorkflow()) {
+			return nil, apierror.InvalidArgument("destination.workflow %q must be projects/*/locations/*/workflows/*", d.GetWorkflow())
+		}
 	default:
 		return nil, apierror.InvalidArgument("the trigger's destination must name a cloudRun service, a cloudFunction, " +
 			"a gke service, a workflow or an httpEndpoint")
@@ -254,17 +258,23 @@ func (e *EventarcServer) CreateTrigger(ctx context.Context, req *eventarcpb.Crea
 		return nil, apierror.InvalidArgument("trigger is required")
 	}
 	t := proto.Clone(in).(*eventarcpb.Trigger)
-	if run := t.GetDestination().GetCloudRun(); run != nil && run.GetRegion() == "" {
-		run.Region = region
-	}
+	eaDestinationDefaults(t, region)
 	spec, err := eaSpec(t, region)
 	if err != nil {
+		return nil, err
+	}
+	if err := e.f.checkGKEDestination(project, t); err != nil {
 		return nil, err
 	}
 	name := req.GetParent() + "/triggers/" + req.GetTriggerId()
 	if fn := t.GetDestination().GetCloudFunction(); fn != "" {
 		if _, ok := eaFunction(fn); !ok {
 			return nil, apierror.InvalidArgument("destination.cloudFunction %q not found", fn)
+		}
+	}
+	if wf := t.GetDestination().GetWorkflow(); wf != "" {
+		if err := e.f.checkWorkflow(wf); err != nil {
+			return nil, err
 		}
 	}
 	if run := t.GetDestination().GetCloudRun(); run != nil {
@@ -420,6 +430,27 @@ func (e *EventarcServer) UpdateTrigger(ctx context.Context, req *eventarcpb.Upda
 			case "destination.cloud_run.region":
 				run.Region = from.GetRegion()
 			}
+		case "destination.gke", "destination.gke.cluster", "destination.gke.location", "destination.gke.namespace",
+			"destination.gke.service", "destination.gke.path":
+			gke := next.GetDestination().GetGke()
+			if gke == nil {
+				return nil, apierror.InvalidArgument("update_mask path %q: the trigger's destination is not GKE", p)
+			}
+			from := in.GetDestination().GetGke()
+			switch p {
+			case "destination.gke":
+				next.Destination = in.GetDestination()
+			case "destination.gke.cluster":
+				gke.Cluster = from.GetCluster()
+			case "destination.gke.location":
+				gke.Location = from.GetLocation()
+			case "destination.gke.namespace":
+				gke.Namespace = from.GetNamespace()
+			case "destination.gke.service":
+				gke.Service = from.GetService()
+			case "destination.gke.path":
+				gke.Path = from.GetPath()
+			}
 		case "service_account":
 			next.ServiceAccount = in.GetServiceAccount()
 		case "labels":
@@ -433,10 +464,11 @@ func (e *EventarcServer) UpdateTrigger(ctx context.Context, req *eventarcpb.Upda
 		}
 	}
 	region := strings.Split(next.GetName(), "/")[3]
-	if run := next.GetDestination().GetCloudRun(); run != nil && run.GetRegion() == "" {
-		run.Region = region
-	}
+	eaDestinationDefaults(next, region)
 	if _, err := eaSpec(next, region); err != nil {
+		return nil, err
+	}
+	if err := e.f.checkGKEDestination(strings.Split(next.GetName(), "/")[1], next); err != nil {
 		return nil, err
 	}
 	if req.GetValidateOnly() {
@@ -553,6 +585,19 @@ func (f *FunctionsServer) deliverEventarc(ctx context.Context, t *eventarcpb.Tri
 func (f *FunctionsServer) deliverEvent(ctx context.Context, t *eventarcpb.Trigger, ev *CloudEvent) (int, error) {
 	project := strings.Split(t.GetName(), "/")[1]
 	d := t.GetDestination()
+	if wf := d.GetWorkflow(); wf != "" {
+		if err := f.checkWorkflow(wf); err != nil {
+			return http.StatusNotFound, err
+		}
+		arg, err := eaWorkflowArgument(ev)
+		if err != nil {
+			return http.StatusBadRequest, err
+		}
+		if err := f.events.Workflows.StartWorkflow(ctx, wf, arg); err != nil {
+			return http.StatusInternalServerError, err
+		}
+		return http.StatusOK, nil
+	}
 	if he := d.GetHttpEndpoint(); he != nil {
 		// An internal HTTP endpoint: sent to its URI as it is, from this
 		// host, with no token, as Eventarc sends to one.
@@ -572,6 +617,9 @@ func (f *FunctionsServer) deliverEvent(ctx context.Context, t *eventarcpb.Trigge
 		defer resp.Body.Close()
 		_, _ = io.Copy(io.Discard, resp.Body)
 		return resp.StatusCode, nil
+	}
+	if gke := d.GetGke(); gke != nil {
+		return f.deliverGKE(ctx, project, gke, ev)
 	}
 	var target, path string
 	timeout := time.Minute
@@ -634,6 +682,42 @@ func (f *FunctionsServer) deliverEvent(ctx context.Context, t *eventarcpb.Trigge
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, resp.Body)
 	return resp.StatusCode, nil
+}
+
+var eaWorkflowRE = regexp.MustCompile(`^projects/[^/]+/locations/[^/]+/workflows/[^/]+$`)
+
+// checkWorkflow refuses a workflow destination this instance cannot start.
+func (f *FunctionsServer) checkWorkflow(name string) error {
+	if f.events == nil || f.events.Workflows == nil {
+		return apierror.FailedPrecondition("destination.workflow needs Workflows, which this instance does not serve: start it with --services workflows")
+	}
+	if !f.events.Workflows.WorkflowExists(name) {
+		return apierror.InvalidArgument("destination.workflow %q not found", name)
+	}
+	return nil
+}
+
+// eaWorkflowArgument is the event as a workflow's runtime argument: the
+// CloudEvent in its JSON format, its attributes beside data (the JSON
+// value when the data is JSON, else the text), as Eventarc passes it.
+func eaWorkflowArgument(ev *CloudEvent) (string, error) {
+	out := map[string]any{}
+	for k, v := range ev.Headers {
+		if lk := strings.ToLower(k); strings.HasPrefix(lk, "ce-") && len(v) > 0 {
+			out[strings.TrimPrefix(lk, "ce-")] = v[0]
+		}
+	}
+	if ct := ev.Headers.Get("Content-Type"); ct != "" {
+		out["datacontenttype"] = ct
+	}
+	var data any
+	if err := json.Unmarshal(ev.Data, &data); err == nil {
+		out["data"] = data
+	} else {
+		out["data"] = string(ev.Data)
+	}
+	b, err := json.Marshal(out)
+	return string(b), err
 }
 
 // projectNumberOf is a project's number, as the default compute account

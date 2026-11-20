@@ -384,6 +384,9 @@ func subscriptionPageFields(withTopic bool) []console.Field {
 			Help: "Optional, such as YYYY-MM-DD/hh_mm_ssZ; YYYY-MM-DDThh:mm:ss+00:00 by default."},
 		console.Field{Name: "storageFormat", Label: "File format", Type: "radio", ShowWhen: "deliveryType=" + deliveryStorage,
 			Options: []string{formatText, formatAvro}, Default: formatText},
+		console.Field{Name: "storageUseTopicSchema", Label: "Use topic schema", Type: "checkbox", Default: "false",
+			ShowWhen: "storageFormat=" + formatAvro,
+			Help:     "Writes the Avro files in the topic's Avro schema; the topic must have one."},
 		console.Field{Name: "storageWriteMetadata", Label: "Write metadata", Type: "checkbox", Default: "false",
 			ShowWhen: "storageFormat=" + formatAvro},
 		console.Field{Name: "maxDurationMinutes", Label: "Max duration (minutes)", Type: "number", Default: "5",
@@ -927,7 +930,7 @@ func exportFromForm(sub *pubsubpb.Subscription, values map[string]string) error 
 			FilenameDatetimeFormat: strings.TrimSpace(values["filenameDatetimeFormat"])}
 		if values["storageFormat"] == formatAvro {
 			cs.OutputFormat = &pubsubpb.CloudStorageConfig_AvroConfig_{AvroConfig: &pubsubpb.CloudStorageConfig_AvroConfig{
-				WriteMetadata: values["storageWriteMetadata"] == "true"}}
+				WriteMetadata: values["storageWriteMetadata"] == "true", UseTopicSchema: values["storageUseTopicSchema"] == "true"}}
 		} else {
 			cs.OutputFormat = &pubsubpb.CloudStorageConfig_TextConfig_{TextConfig: &pubsubpb.CloudStorageConfig_TextConfig{}}
 		}

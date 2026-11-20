@@ -23,20 +23,19 @@ import (
 
 const refusedLocally = "CloudBurrow refused this request locally"
 
-// TestTerraformRefusesAnUnservedResourceLocally: a google_workflows_workflow,
+// TestTerraformRefusesAnUnservedResourceLocally: a google_dns_managed_zone,
 // which no instance serves, applied through `cloudburrow terraform`, fails
-// with the instance's refusal naming workflows_custom_endpoint. Before #1975
-// the provider sent it to workflows.googleapis.com.
+// with the instance's refusal naming dns_custom_endpoint. Before #1975 the
+// provider sent it to dns.googleapis.com. (It used Workflows until #1986
+// served it.)
 func TestTerraformRefusesAnUnservedResourceLocally(t *testing.T) {
 	h := New(t)
 	h.Endpoint(EnvResourceManager) // the refusal is served on its port
 	m := newTFModule(t)
 	m.write(`
-resource "google_workflows_workflow" "w" {
-  name            = "localonly"
-  region          = "us-central1"
-  source_contents = "main:\n  steps:\n  - done:\n      return: 1\n"
-  deletion_protection = false
+resource "google_dns_managed_zone" "z" {
+  name     = "localonly"
+  dns_name = "localonly.example.com."
 }
 `)
 	m.must("init", "-input=false", "-no-color")
@@ -44,18 +43,18 @@ resource "google_workflows_workflow" "w" {
 	if err == nil {
 		t.Fatalf("apply of an unserved resource succeeded:\n%s", lastLines(out, 20))
 	}
-	if !strings.Contains(out, refusedLocally) || !strings.Contains(out, "workflows_custom_endpoint") {
-		t.Errorf("apply failed, but not with CloudBurrow's refusal naming workflows_custom_endpoint:\n%s", lastLines(out, 30))
+	if !strings.Contains(out, refusedLocally) || !strings.Contains(out, "dns_custom_endpoint") {
+		t.Errorf("apply failed, but not with CloudBurrow's refusal naming dns_custom_endpoint:\n%s", lastLines(out, 30))
 	}
 	if strings.Contains(out, "proxyconnect") || strings.Contains(out, "googleapis.com") {
 		t.Errorf("the provider tried Google:\n%s", lastLines(out, 30))
 	}
 }
 
-// TestGcloudRefusesAnUnservedAPILocally: `gcloud workflows list`, an API no
-// instance serves, through gcloud-setup's configuration, fails at once with
-// the instance's refusal naming the workflows override (a 400, which gcloud
-// does not retry), never at Google.
+// TestGcloudRefusesAnUnservedAPILocally: `gcloud dns managed-zones list`,
+// an API no instance serves, through gcloud-setup's configuration, fails at
+// once with the instance's refusal naming the dns override (a 400, which
+// gcloud does not retry), never at Google.
 func TestGcloudRefusesAnUnservedAPILocally(t *testing.T) {
 	h := New(t)
 	h.Endpoint(EnvResourceManager)
@@ -67,17 +66,17 @@ func TestGcloudRefusesAnUnservedAPILocally(t *testing.T) {
 	gdir := t.TempDir()
 	name := gcloudSetup(t, cli, gdir)
 	conf, _ := os.ReadFile(filepath.Join(gdir, "configurations", "config_"+name))
-	if !strings.Contains(string(conf), "workflows = http://") || !strings.Contains(string(conf), unserved.PathPrefix+"workflows/") {
-		t.Fatalf("the configuration does not refuse workflows:\n%s", conf)
+	if !strings.Contains(string(conf), "\ndns = http://") || !strings.Contains(string(conf), unserved.PathPrefix+"dns/") {
+		t.Fatalf("the configuration does not refuse dns:\n%s", conf)
 	}
-	cmd := exec.Command(gcloud, "workflows", "list", "--location", "us-central1", "--project", h.Project(), "--quiet")
+	cmd := exec.Command(gcloud, "dns", "managed-zones", "list", "--project", h.Project(), "--quiet")
 	cmd.Env = append(gcloudTargetEnv(noGoogleEgress()), "CLOUDSDK_CONFIG="+gdir, "CLOUDSDK_ACTIVE_CONFIG_NAME="+name)
 	b, err := cmd.CombinedOutput()
 	out := string(b)
 	if err == nil {
-		t.Fatalf("gcloud workflows list succeeded:\n%s", out)
+		t.Fatalf("gcloud dns managed-zones list succeeded:\n%s", out)
 	}
-	if !strings.Contains(out, refusedLocally) || !strings.Contains(out, "workflows is not served") {
+	if !strings.Contains(out, refusedLocally) || !strings.Contains(out, "dns is not served") {
 		t.Errorf("gcloud failed, but not with CloudBurrow's refusal:\n%s", lastLines(out, 20))
 	}
 	if strings.Contains(out, "googleapis.com") || strings.Contains(out, "ProxyError") {
@@ -87,9 +86,10 @@ func TestGcloudRefusesAnUnservedAPILocally(t *testing.T) {
 
 // TestEnvRefusesAnUnservedGcloudAPILocally (#1977): in a shell that ran
 // `eval "$(cloudburrow env)"` and nothing else (a fresh CLOUDSDK_CONFIG, no
-// gcloud-setup), `gcloud workflows list`, an API no instance serves, fails
-// with the instance's refusal. Before #1977 `env` exported overrides only
-// for the served APIs, so gcloud sent it to workflows.googleapis.com. gcloud
+// gcloud-setup), `gcloud dns managed-zones list`, an API no instance
+// serves, fails with the instance's refusal. Before #1977 `env` exported
+// overrides only for the served APIs, so gcloud sent it to
+// dns.googleapis.com (the test used Workflows until #1986 served it). gcloud
 // runs behind egressGuard, which fails the test on any request bound off
 // the machine. Credentials are disabled, as gcloud-setup does: with no
 // account gcloud stops before sending anything ("You do not currently have
@@ -104,11 +104,11 @@ func TestEnvRefusesAnUnservedGcloudAPILocally(t *testing.T) {
 	}
 	// The variables are evaluated by the shell, never printed.
 	script := `eval "$("$CB_CLI" env "$@")" || exit 97
-case "$CLOUDSDK_API_ENDPOINT_OVERRIDES_WORKFLOWS" in
-*` + unserved.PathPrefix + `workflows/) ;;
-*) echo "cloudburrow env does not refuse workflows" >&2; exit 98 ;;
+case "$CLOUDSDK_API_ENDPOINT_OVERRIDES_DNS" in
+*` + unserved.PathPrefix + `dns/) ;;
+*) echo "cloudburrow env does not refuse dns" >&2; exit 98 ;;
 esac
-exec "$CB_GCLOUD" workflows list --location us-central1 --project "$CB_PROJECT" --quiet`
+exec "$CB_GCLOUD" dns managed-zones list --project "$CB_PROJECT" --quiet`
 	cmd := exec.Command("bash", append([]string{"-c", script, "bash"}, cliArgs()...)...)
 	cmd.Env = append(gcloudTargetEnv(os.Environ()), "CB_CLI="+cli, "CB_GCLOUD="+gcloud, "CB_PROJECT="+h.Project(),
 		"CLOUDSDK_CONFIG="+t.TempDir(), "CLOUDSDK_CORE_DISABLE_PROMPTS=1", "CLOUDSDK_CORE_DISABLE_USAGE_REPORTING=true",
@@ -121,9 +121,9 @@ exec "$CB_GCLOUD" workflows list --location us-central1 --project "$CB_PROJECT" 
 		t.Fatalf("before gcloud ran (exit %d):\n%s", code, lastLines(out, 5))
 	}
 	if err == nil {
-		t.Fatalf("gcloud workflows list succeeded:\n%s", out)
+		t.Fatalf("gcloud dns managed-zones list succeeded:\n%s", out)
 	}
-	if !strings.Contains(out, refusedLocally) || !strings.Contains(out, "workflows is not served") {
+	if !strings.Contains(out, refusedLocally) || !strings.Contains(out, "dns is not served") {
 		t.Errorf("gcloud failed, but not with CloudBurrow's refusal:\n%s", lastLines(out, 20))
 	}
 	if strings.Contains(out, "googleapis.com") || strings.Contains(out, "ProxyError") {

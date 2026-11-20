@@ -354,6 +354,29 @@ func TestPubSubCMEKTopic(t *testing.T) {
 	if _, err := ps.TopicAdminClient.CreateTopic(ctx, &pubsubpb.Topic{Name: topic + "-disabled", KmsKeyName: key.GetName()}); status.Code(err) != codes.FailedPrecondition {
 		t.Errorf("a topic with a disabled key: %v, want FailedPrecondition", err)
 	}
+	// Enabled again: publishing works again, on the same topic.
+	if _, err := k.UpdateCryptoKeyVersion(ctx, &kmspb.UpdateCryptoKeyVersionRequest{
+		CryptoKeyVersion: &kmspb.CryptoKeyVersion{Name: key.GetPrimary().GetName(), State: kmspb.CryptoKeyVersion_ENABLED},
+		UpdateMask:       &fieldmaskpb.FieldMask{Paths: []string{"state"}}}); err != nil {
+		t.Fatal(err)
+	}
+	eventually1874(t, "publishing to work again", 15*time.Second, func() bool {
+		_, err := ps.TopicAdminClient.Publish(ctx, &pubsubpb.PublishRequest{Topic: topic,
+			Messages: []*pubsubpb.PubsubMessage{{Data: []byte("x")}}})
+		return err == nil
+	})
+	sub := "projects/" + h.Project() + "/subscriptions/cmek"
+	if _, err := ps.SubscriptionAdminClient.CreateSubscription(ctx, &pubsubpb.Subscription{Name: sub, Topic: topic}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ps.TopicAdminClient.Publish(ctx, &pubsubpb.PublishRequest{Topic: topic,
+		Messages: []*pubsubpb.PubsubMessage{{Data: []byte("after")}}}); err != nil {
+		t.Fatal(err)
+	}
+	r, err := ps.SubscriptionAdminClient.Pull(ctx, &pubsubpb.PullRequest{Subscription: sub, MaxMessages: 1})
+	if err != nil || len(r.GetReceivedMessages()) != 1 || string(r.GetReceivedMessages()[0].GetMessage().GetData()) != "after" {
+		t.Errorf("pull after the key is enabled again: %v, %v", r, err)
+	}
 }
 
 func TestPubSubAvroSchemaRevisionTime(t *testing.T) {

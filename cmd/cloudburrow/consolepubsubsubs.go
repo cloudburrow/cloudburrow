@@ -154,6 +154,23 @@ func (p pubsubSubscriptionsProvider) Detail(ctx context.Context, project string,
 	}, nil
 }
 
+// storageFormatOf is a Cloud Storage subscription's output format, as the
+// console's File format reads it.
+func storageFormatOf(cs *pubsubpb.CloudStorageConfig) string {
+	a := cs.GetAvroConfig()
+	if a == nil {
+		return formatText
+	}
+	out := formatAvro
+	if a.GetUseTopicSchema() {
+		out += ", topic schema"
+	}
+	if a.GetWriteMetadata() {
+		out += ", with metadata"
+	}
+	return out
+}
+
 func subscriptionDeliverySection(s *pubsubpb.Subscription) console.Section {
 	sec := console.Section{ID: "delivery", Label: "Delivery", Kind: console.KindProperties}
 	switch deliveryType(s) {
@@ -173,6 +190,8 @@ func subscriptionDeliverySection(s *pubsubpb.Subscription) console.Section {
 			{Label: "Bucket", Value: cs.GetBucket()},
 			{Label: "File name prefix", Value: orDash(cs.GetFilenamePrefix())},
 			{Label: "File name suffix", Value: orDash(cs.GetFilenameSuffix())},
+			{Label: "File name datetime format", Value: orDash(cs.GetFilenameDatetimeFormat())},
+			{Label: "File format", Value: storageFormatOf(cs)},
 			{Label: "Maximum duration", Value: durationOrDash(cs.GetMaxDuration())},
 			{Label: "Maximum bytes", Value: countOrDash(cs.GetMaxBytes())},
 			{Label: "Maximum messages", Value: countOrDash(cs.GetMaxMessages())},
