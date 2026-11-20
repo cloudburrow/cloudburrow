@@ -147,10 +147,12 @@ func TestFunctionsFields(t *testing.T) {
 			codes.Unimplemented, "Cloud Source Repositories"},
 		{"a VPC connector", &functionspb.Function{BuildConfig: build(), ServiceConfig: &functionspb.ServiceConfig{
 			VpcConnector: parent + "/connectors/c"}}, codes.Unimplemented, "Serverless VPC Access"},
-		{"an audit log trigger", &functionspb.Function{BuildConfig: build(),
-			EventTrigger: &functionspb.EventTrigger{EventType: "google.cloud.audit.log.v1.written"}}, codes.Unimplemented, "Cloud Audit Logs"},
-		{"a Firestore trigger", &functionspb.Function{BuildConfig: build(),
-			EventTrigger: &functionspb.EventTrigger{EventType: "google.cloud.firestore.document.v1.written"}}, codes.Unimplemented, "emulators"},
+		// Audit log and Firestore triggers are served (#1853), as Eventarc
+		// triggers: each without the filter Eventarc requires is refused.
+		{"an audit log trigger without serviceName", &functionspb.Function{BuildConfig: build(),
+			EventTrigger: &functionspb.EventTrigger{EventType: "google.cloud.audit.log.v1.written"}}, codes.InvalidArgument, `"serviceName"`},
+		{"a Firestore trigger without database", &functionspb.Function{BuildConfig: build(),
+			EventTrigger: &functionspb.EventTrigger{EventType: "google.cloud.firestore.document.v1.written"}}, codes.InvalidArgument, `"database"`},
 	}
 	for _, r := range refused {
 		_, err := fc.CreateFunction(ctx, &functionspb.CreateFunctionRequest{Parent: parent, FunctionId: "sdk-fn-refused", Function: r.fn})

@@ -335,6 +335,9 @@ func (p *pubsubSnapshotter) Import(ctx context.Context, r admin.EntryReader) err
 	}
 
 	// Topics first: a subscription, and a dead-letter policy, name one.
+	// Marked as a state load, so a CMEK topic whose key has been disabled
+	// since comes back as saved, as GCP keeps it.
+	topicCtx := metadata.AppendToOutgoingContext(ctx, pubsubfront.StateLoadHeader, "1")
 	for _, t := range topics {
 		t.State = pubsubpb.Topic_STATE_UNSPECIFIED
 		if ss := t.GetSchemaSettings(); ss != nil {
@@ -344,7 +347,7 @@ func (p *pubsubSnapshotter) Import(ctx context.Context, r admin.EntryReader) err
 				}
 			}
 		}
-		if _, err := c.TopicAdminClient.CreateTopic(ctx, t); err != nil {
+		if _, err := c.TopicAdminClient.CreateTopic(topicCtx, t); err != nil {
 			return fmt.Errorf("create %s: %w", t.GetName(), err)
 		}
 	}
