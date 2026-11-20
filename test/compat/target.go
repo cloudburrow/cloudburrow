@@ -223,6 +223,7 @@ var gcloudOverrides = []struct {
 	{"securesourcemanager", []string{"RUN"}},
 	{"developerconnect", []string{"RUN"}},
 	{"eventarc", []string{"RUN"}},
+	{"eventarcpublishing", []string{"RUN"}},
 	{"sql", []string{"SQLADMIN"}},
 	{"redis", []string{"MEMORYSTORE_ADMIN"}},
 	{"memorystore", []string{"MEMORYSTORE_ADMIN"}},

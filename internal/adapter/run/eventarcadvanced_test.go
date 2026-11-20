@@ -286,8 +286,8 @@ func TestChannelEventsReachTriggers(t *testing.T) {
 func TestTransformationFunctions(t *testing.T) {
 	msg := map[string]any{"id": "1", "data": map[string]any{"a": map[string]any{"b": int64(1)}, "list": []any{"x", "y"}, "s": "order-123"}}
 	for expr, want := range map[string]string{
-		`message.setField("data.a.c", 2)`:                    `{"data":{"a":{"b":1,"c":2},"list":["x","y"],"s":"order-123"},"id":"1"}`,
-		`message.removeFields(["data.a", "data.list"])`:      `{"data":{"s":"order-123"},"id":"1"}`,
+		`message.setField("data.a.c", 2)`:                   `{"data":{"a":{"b":1,"c":2},"list":["x","y"],"s":"order-123"},"id":"1"}`,
+		`message.removeFields(["data.a", "data.list"])`:     `{"data":{"s":"order-123"},"id":"1"}`,
 		`{"data": message.data.merge({"k": "v"})}`:          `{"data":{"a":{"b":1},"k":"v","list":["x","y"],"s":"order-123"}}`,
 		`{"d": message.data.list.denormalize()}`:            `{"d":{"0":"x","1":"y"}}`,
 		`{"d": message.data.denormalize()}`:                 `{"d":{"a.b":1,"list.0":"x","list.1":"y","s":"order-123"}}`,

@@ -263,8 +263,11 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		if runPubSub != "" {
 			// Eventarc's own Triggers page (#1877), on the Run port, over
 			// Pub/Sub, its transport.
-			providers = append(providers, eventarcProvider{run: runProvider{runAddr: runAddrOf(d.run),
-				defaultProject: d.cfg.DefaultProject(), pubsubAddr: runPubSub}})
+			eaRun := runProvider{runAddr: runAddrOf(d.run), defaultProject: d.cfg.DefaultProject(), pubsubAddr: runPubSub}
+			providers = append(providers, eventarcProvider{run: eaRun},
+				// Eventarc Advanced's pages and its channels (#1947).
+				eaBusesProvider{eaAdvBase{eaRun}}, eaPipelinesProvider{eaAdvBase{eaRun}}, eaEnrollmentsProvider{eaAdvBase{eaRun}},
+				eaSourcesProvider{eaAdvBase{eaRun}}, eaChannelsProvider{eaAdvBase{eaRun}})
 		}
 	}
 	if enabled[config.ServiceSecrets] && d.secrets != nil {

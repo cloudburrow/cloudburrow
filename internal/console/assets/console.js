@@ -163,6 +163,18 @@ const ROUTES = [
   // Eventarc's Triggers page (#1877), served on the Run port over Pub/Sub.
   { path: "/eventarc/triggers", service: "eventarc", title: "Triggers", kind: "Trigger", section: "Integration services",
     product: "eventarc", productTitle: "Eventarc" },
+  // Eventarc Advanced (#1947): buses, pipelines, enrollments and Google
+  // API sources, and Eventarc Standard's channels, in Eventarc's menu.
+  { path: "/eventarc/message-buses", service: "eventarc-buses", icon: "eventarc", title: "Buses", kind: "Bus", section: "Integration services",
+    product: "eventarc", productTitle: "Eventarc" },
+  { path: "/eventarc/pipelines", service: "eventarc-pipelines", icon: "eventarc", title: "Pipelines", kind: "Pipeline", section: "Integration services",
+    product: "eventarc", productTitle: "Eventarc" },
+  { path: "/eventarc/enrollments", service: "eventarc-enrollments", icon: "eventarc", title: "Enrollments", kind: "Enrollment", section: "Integration services",
+    product: "eventarc", productTitle: "Eventarc" },
+  { path: "/eventarc/google-api-sources", service: "eventarc-google-api-sources", icon: "eventarc", title: "Google API sources", kind: "Google API source",
+    section: "Integration services", product: "eventarc", productTitle: "Eventarc" },
+  { path: "/eventarc/channels", service: "eventarc-channels", icon: "eventarc", title: "Channels", kind: "Channel", section: "Integration services",
+    product: "eventarc", productTitle: "Eventarc" },
   // Artifact Registry's menu (#1855): Repositories, then Settings (the
   // project's settings and each location's VPC-SC policy and platform logs).
   // Not under /artifact-registry/, where it would shadow a repository named

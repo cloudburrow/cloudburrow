@@ -76,6 +76,7 @@ import (
 	_ "cloud.google.com/go/developerconnect/apiv1/developerconnectpb"
 	_ "cloud.google.com/go/documentai/apiv1/documentaipb"
 	_ "cloud.google.com/go/eventarc/apiv1/eventarcpb"
+	_ "cloud.google.com/go/eventarc/publishing/apiv1/publishingpb"
 	_ "cloud.google.com/go/firestore/apiv1/admin/adminpb"
 	_ "cloud.google.com/go/firestore/apiv1/firestorepb"
 	_ "cloud.google.com/go/functions/apiv1/functionspb"
@@ -137,7 +138,9 @@ var areas = []area{
 	{Key: "developerconnect", Title: "Developer Connect", Own: true, Services: []string{"google.cloud.developerconnect.v1.DeveloperConnect"}},
 	// Eventarc (#1877), on the Run port: triggers delivering Pub/Sub and
 	// Cloud Storage events to Cloud Run as CloudEvents.
-	{Key: "eventarc", Title: "Eventarc", Own: true, Services: []string{"google.cloud.eventarc.v1.Eventarc"}},
+	// Eventarc Advanced and the Publishing API (#1947): buses, pipelines,
+	// enrollments, Google API sources and channels, with events delivered.
+	{Key: "eventarc", Title: "Eventarc", Own: true, Services: []string{"google.cloud.eventarc.v1.Eventarc", "google.cloud.eventarc.publishing.v1.Publisher"}},
 	// Container Analysis (#1912), on the Run port: Grafeas's notes and
 	// occurrences, which Artifact Registry's vulnerability scanning writes.
 	{Key: "containeranalysis", Title: "Container Analysis", Own: true, Services: []string{"grafeas.v1.Grafeas", "google.devtools.containeranalysis.v1.ContainerAnalysis"}},
