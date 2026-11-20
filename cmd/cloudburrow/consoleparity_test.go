@@ -305,6 +305,9 @@ var parityRows = []parityRow{
 	{Resource: "Cloud Monitoring time series writes", Service: "monitoring",
 		Methods:  []string{"MetricService/CreateTimeSeries"},
 		Excluded: "points are written by the application's own client (a client library or OpenTelemetry's exporter); Google's console has no page that writes one, and Metrics explorer charts what was written"},
+	{Resource: "Cloud Monitoring MQL queries", Service: "monitoring",
+		Methods:  []string{"QueryService/QueryTimeSeries"},
+		Excluded: "MQL is deprecated and Google's console no longer offers it for charts, dashboards or alerting policies; only the Monitoring API runs it (docs.cloud.google.com/stackdriver/docs/deprecations/mql, #1966)"},
 	// Cloud Monitoring (#1964)
 	{Resource: "Cloud Monitoring alert policies", Service: "monitoring",
 		Methods:  []string{"AlertPolicyService/ListAlertPolicies", "AlertPolicyService/GetAlertPolicy", "AlertPolicyService/CreateAlertPolicy", "AlertPolicyService/UpdateAlertPolicy", "AlertPolicyService/DeleteAlertPolicy"},

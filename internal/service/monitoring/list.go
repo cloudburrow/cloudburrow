@@ -28,6 +28,9 @@ func (s *Server) ListTimeSeries(_ context.Context, req *monitoringpb.ListTimeSer
 	if strings.TrimSpace(req.GetFilter()) == "" {
 		return nil, apierror.InvalidArgument("Field filter had an invalid value of \"\": a filter must specify a metric type, as metric.type = \"TYPE\"")
 	}
+	if isSLOSelector(req.GetFilter()) {
+		return s.sloTimeSeries(context.Background(), project, req)
+	}
 	f, err := parseFilter(req.GetFilter(), filterSeries)
 	if err != nil {
 		return nil, err

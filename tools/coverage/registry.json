@@ -831,7 +831,7 @@
   "google.monitoring.v3.NotificationChannelService/SendNotificationChannelVerificationCode": "implemented",
   "google.monitoring.v3.NotificationChannelService/UpdateNotificationChannel": "implemented",
   "google.monitoring.v3.NotificationChannelService/VerifyNotificationChannel": "implemented",
-  "google.monitoring.v3.QueryService/QueryTimeSeries": "unimplemented",
+  "google.monitoring.v3.QueryService/QueryTimeSeries": "implemented",
   "google.monitoring.v3.ServiceMonitoringService/CreateService": "implemented",
   "google.monitoring.v3.ServiceMonitoringService/CreateServiceLevelObjective": "implemented",
   "google.monitoring.v3.ServiceMonitoringService/DeleteService": "implemented",

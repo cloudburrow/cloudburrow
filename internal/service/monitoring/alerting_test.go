@@ -182,7 +182,7 @@ func TestRefusedConditions(t *testing.T) {
 	}
 	mql := &monitoringpb.AlertPolicy_Condition{DisplayName: "m", Condition: &monitoringpb.AlertPolicy_Condition_ConditionMonitoringQueryLanguage{
 		ConditionMonitoringQueryLanguage: &monitoringpb.AlertPolicy_Condition_MonitoringQueryLanguageCondition{Query: "fetch x"}}}
-	wantCode(t, mk(mql, 1), codes.Unimplemented, "Monitoring Query Language")
+	wantCode(t, mk(mql, 1), codes.InvalidArgument, "not valid MQL")
 	th := &monitoringpb.AlertPolicy_Condition{DisplayName: "t", Condition: &monitoringpb.AlertPolicy_Condition_ConditionThreshold{
 		ConditionThreshold: &monitoringpb.AlertPolicy_Condition_MetricThreshold{Filter: `metric.type = "custom.googleapis.com/x"`, Comparison: monitoringpb.ComparisonType_COMPARISON_GT}}}
 	wantCode(t, mk(th, 2), codes.InvalidArgument, "combiner")

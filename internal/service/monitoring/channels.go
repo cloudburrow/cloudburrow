@@ -375,14 +375,29 @@ func (s *Server) VerifyNotificationChannel(_ context.Context, req *monitoringpb.
 	if c == nil {
 		return nil, apierror.NotFound("Requested entity was not found.")
 	}
-	code, ok := s.codes[c.GetName()]
 	if req.GetCode() == "" {
 		return nil, apierror.InvalidArgument("Field code is required")
 	}
-	if !ok || code.code != req.GetCode() || s.now().After(code.expire) {
+	// The channel's own code, or one GetNotificationChannelVerificationCode
+	// gave for a verified channel "with an equivalent identity in the same
+	// or in a different project": the same type and labels.
+	from := ""
+	for n, code := range s.codes {
+		if code.code != req.GetCode() || s.now().After(code.expire) {
+			continue
+		}
+		o, _ := s.get(kindChannels, n).(*monitoringpb.NotificationChannel)
+		if n == c.GetName() || o != nil && o.GetType() == c.GetType() && sameMap(o.GetLabels(), c.GetLabels()) {
+			from = n
+			break
+		}
+	}
+	if from == "" {
 		return nil, apierror.InvalidArgument("Field code had an invalid value of %q: the verification code is wrong or has expired", req.GetCode())
 	}
-	delete(s.codes, c.GetName())
+	if from == c.GetName() {
+		delete(s.codes, c.GetName())
+	}
 	c.VerificationStatus = monitoringpb.NotificationChannel_VERIFIED
 	if err := s.save(); err != nil {
 		return nil, err
