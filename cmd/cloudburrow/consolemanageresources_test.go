@@ -136,7 +136,8 @@ func TestTagKeyCreateForm(t *testing.T) {
 
 // TestTagKeyCreateFormValuesAndPage (#1865): Create tag key's Tag values
 // section is Predefined values (a row per Add value, each its Tag value and
-// Tag value description) or Dynamic values, drawn and refused; the page
+// Tag value description) or Dynamic values (#2023: made with ".*" without
+// value constraints, consolerm2023_test.go has the rest); the page
 // ends in Create tag key. A key's row menu has View details and Manage
 // access, and its page has Edit next to Description, which opens the
 // edit panel ending in Save.
@@ -151,7 +152,7 @@ func TestTagKeyCreateFormValuesAndPage(t *testing.T) {
 	}
 	vt := byName["valueType"]
 	if vt.Type != "radio" || vt.OptionLabels[tagValuesPredefined] != "Predefined values" || vt.OptionLabels[tagValuesDynamic] != "Dynamic values" ||
-		vt.UnavailableOptions[tagValuesDynamic] == "" {
+		vt.UnavailableOptions[tagValuesDynamic] != "" {
 		t.Errorf("Tag values = %+v", vt)
 	}
 	vs := byName["values"]
@@ -162,9 +163,9 @@ func TestTagKeyCreateFormValuesAndPage(t *testing.T) {
 	if tg.CreateSubmit() != "Create tag key" {
 		t.Errorf("the page ends in %q", tg.CreateSubmit())
 	}
-	if _, err := tg.Create(ctx, "", map[string]string{"parent": resourcemanager.OrganizationName, "shortName": "dyn",
-		"valueType": tagValuesDynamic}); err == nil {
-		t.Error("a key with dynamic values was created")
+	if dyn, err := tg.Create(ctx, "", map[string]string{"parent": resourcemanager.OrganizationName, "shortName": "dyn",
+		"valueType": tagValuesDynamic}); err != nil || reg.TagKeyAllowedValuesRegex("tagKeys/"+dyn) != ".*" {
+		t.Errorf("a key with dynamic values = %q, %v; want one allowing .*", dyn, err)
 	}
 	id, err := tg.Create(ctx, "", map[string]string{"parent": resourcemanager.OrganizationName, "shortName": "env",
 		"valueType": tagValuesPredefined,

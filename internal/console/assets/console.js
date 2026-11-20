@@ -1066,7 +1066,7 @@ async function api(path, options = {}) {
     else outer.addEventListener("abort", onOuter, { once: true });
   }
 
-  path = scopedAPIPath(path);
+  path = resourceScopedAPIPath(scopedAPIPath(path));
   let res;
   try {
     res = await fetch(path, {
@@ -1705,7 +1705,9 @@ function navLink(entry, onPinChange, nested = false, draggable = false) {
 function scopeSearch() {
   const from = new URLSearchParams(location.search);
   const scope = new URLSearchParams();
-  for (const key of ["project"]) {
+  // The folder or organization chosen in the toolbar travels too (#2023);
+  // a page that does not work at that level drops it (syncResourceScope).
+  for (const key of ["project", "folder", "organizationId"]) {
     const value = from.get(key);
     if (value) scope.set(key, value);
   }
@@ -7578,6 +7580,79 @@ function currentProject() {
   return new URLSearchParams(location.search).get("project") || "";
 }
 
+// --- the folder or organization chosen in the toolbar (#2023) ------------
+//
+// Google's resource selector chooses a project, a folder or the
+// organization, and the pages that work at that level (IAM, Organization
+// Policies, Tags) then show that resource; its address carries
+// ?folder=N or ?organizationId=N, as console.cloud.google.com's does. The
+// project stays in the address for every per-project page, and a page that
+// does not work at the folder's or organization's level drops the choice,
+// so the toolbar always names what the page reads.
+const RESOURCE_SCOPE_KEYS = ["folder", "organizationId"];
+const RESOURCE_SCOPED_PATHS = ["/iam-admin/iam", "/iam-admin/orgpolicies", "/iam-admin/tags", "/tags"];
+const resourceScopedPath = (pathname) => RESOURCE_SCOPED_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"));
+// RESOURCE_NAMES are the folders' and the organization's display names, as
+// the picker last read them: "folder:N" and "organization:N".
+let RESOURCE_NAMES = {};
+
+function currentResource() {
+  const q = new URLSearchParams(location.search);
+  if (q.get("folder")) return { kind: "folder", id: q.get("folder") };
+  if (q.get("organizationId")) return { kind: "organization", id: q.get("organizationId") };
+  return null;
+}
+
+// resourceLabel is how the toolbar and a page name a chosen resource.
+function resourceLabel(r) {
+  return RESOURCE_NAMES[`${r.kind}:${r.id}`] || (r.kind === "folder" ? `Folder ${r.id}` : `Organization ${r.id}`);
+}
+
+// resourceScopedAPIPath adds the chosen folder or organization to a
+// console API request made from a page that works at its level.
+function resourceScopedAPIPath(path) {
+  if (typeof path !== "string" || !path.startsWith("/api/") || !resourceScopedPath(location.pathname)) return path;
+  const here = new URLSearchParams(location.search);
+  const url = new URL(path, location.origin);
+  let changed = false;
+  for (const k of RESOURCE_SCOPE_KEYS) {
+    if (here.get(k) && !url.searchParams.has(k)) { url.searchParams.set(k, here.get(k)); changed = true; }
+  }
+  return changed ? url.pathname + url.search : path;
+}
+
+// syncResourceScope drops a choice the page cannot use, names what the
+// page reads in the toolbar, and moves the links to the pages that work at
+// the folder's or organization's level onto the choice.
+function syncResourceScope() {
+  if (currentResource() && !resourceScopedPath(location.pathname)) {
+    const u = new URL(location.href);
+    for (const k of RESOURCE_SCOPE_KEYS) u.searchParams.delete(k);
+    history.replaceState(history.state, "", u.pathname + u.search + u.hash);
+  }
+  const res = currentResource();
+  const current = document.getElementById("project-current");
+  if (current) {
+    current.textContent = res ? resourceLabel(res) : (currentProject() || "Select a project");
+    current.dataset.kind = res ? res.kind : "project";
+  }
+  const here = new URLSearchParams(location.search);
+  for (const a of document.querySelectorAll("a[href]")) {
+    const href = a.getAttribute("href");
+    if (!href.startsWith("/")) continue;
+    const u = new URL(href, location.origin);
+    const scoped = resourceScopedPath(u.pathname);
+    let changed = false;
+    for (const k of RESOURCE_SCOPE_KEYS) {
+      const want = scoped ? (here.get(k) || "") : "";
+      if ((u.searchParams.get(k) || "") === want) continue;
+      if (want) u.searchParams.set(k, want); else u.searchParams.delete(k);
+      changed = true;
+    }
+    if (changed) a.setAttribute("href", u.pathname + u.search + u.hash);
+  }
+}
+
 // notify shows the outcome of something the user did.
 //
 // window.alert blocks the page, cannot be styled, cannot be dismissed by
@@ -7982,6 +8057,7 @@ function notFound(view, path) {
 // dispatch() returns the render's promise, which nobody used to await: a
 // throw inside a render function left the skeleton on screen permanently.
 function route() {
+  syncResourceScope();
   const view = document.getElementById("view");
   const title = () => {
     const match = ROUTES.find((r) => r.path === location.pathname);
@@ -7991,8 +8067,11 @@ function route() {
     const pending = dispatch(view);
     if (pending && typeof pending.catch === "function") {
       pending.then(syncStickyOffsets, (err) => screenFailed(err, title()));
+      // The page's links drawn, they follow the toolbar's choice (#2023).
+      pending.then(syncResourceScope, () => {});
     } else {
       syncStickyOffsets();
+      syncResourceScope();
     }
     return pending;
   } catch (err) {
@@ -8851,10 +8930,13 @@ async function initProjects() {
     const url = new URL(location.href);
     if (id) url.searchParams.set("project", id);
     else url.searchParams.delete("project");
+    // A project chosen replaces a folder or the organization (#2023).
+    for (const k of RESOURCE_SCOPE_KEYS) url.searchParams.delete(k);
     history.pushState({}, "", url);
     rescopeLinks(selected, id);
     selected = id;
     current.textContent = id || "Select a project";
+    current.dataset.kind = "project";
     closePicker();
     route();
     // The terminal follows the toolbar's project (#781).
@@ -8919,7 +9001,7 @@ async function initProjects() {
     const stars = starred();
     return el("li", { class: "picker-row", "data-kind": "project" },
           el("button", {
-            class: "picker-item" + (selected === p.id ? " is-selected" : ""),
+            class: "picker-item" + (selected === p.id && !currentResource() ? " is-selected" : ""),
             style: indent(depth),
             onclick: () => select(p.id),
           },
@@ -8933,12 +9015,32 @@ async function initProjects() {
             onclick: () => toggleStar(p.id),
           }));
   };
+  // Choosing a folder or the organization (#2023) scopes the page to it
+  // when the page works at that level (IAM, Organization Policies, Tags),
+  // and otherwise opens its own page, the project kept.
+  const resourceHref = (r) => {
+    const u = new URL(location.href);
+    for (const k of RESOURCE_SCOPE_KEYS) u.searchParams.delete(k);
+    u.searchParams.set(r.kind === "organization" ? "organizationId" : "folder", r.id);
+    if (!resourceScopedPath(u.pathname)) {
+      u.pathname = r.kind === "organization" ? "/resource-hierarchy/organization" : `/resource-hierarchy/${encodeURIComponent(r.id)}`;
+    }
+    for (const k of [...u.searchParams.keys()]) if (k !== "project" && !RESOURCE_SCOPE_KEYS.includes(k)) u.searchParams.delete(k);
+    return u.pathname + u.search;
+  };
   const resourceRow = (r, depth) => {
     const word = r.kind === "organization" ? "Organization" : "Folder";
-    const href = r.kind === "organization" ? "/resource-hierarchy/organization" : `/resource-hierarchy/${encodeURIComponent(r.id)}`;
+    const res = currentResource();
+    const chosen = res && res.kind === r.kind && res.id === r.id;
     return el("li", { class: "picker-row", "data-kind": r.kind },
-      el("a", { class: "picker-item", href: href + scopeSearch(), style: indent(depth),
-        onclick: () => closePicker() },
+      el("a", { class: "picker-item" + (chosen ? " is-selected" : ""), href: resourceHref(r), style: indent(depth),
+        "aria-current": chosen ? "true" : null,
+        onclick: (e) => {
+          e.preventDefault();
+          closePicker();
+          history.pushState({}, "", resourceHref(r));
+          route();
+        } },
         el("span", { class: "picker-item-name" }, el("span", { class: "picker-item-kind", text: `${word} ` }), r.name),
         el("span", { class: "picker-item-id", text: r.id })),
       el("span", { class: "picker-star-space", "aria-hidden": "true" }));
@@ -8976,6 +9078,9 @@ async function initProjects() {
       KNOWN_PROJECTS = projects.map((p) => p.id);
       // The tree for All; a failure leaves the flat list of projects.
       try { hierarchy = (await send("/api/studio/projects?call=tree", "POST", {})).nodes || []; } catch { hierarchy = []; }
+      RESOURCE_NAMES = {};
+      for (const n of hierarchy) if (n.kind !== "project") RESOURCE_NAMES[`${n.kind}:${n.id}`] = n.name || n.id;
+      syncResourceScope();
     } catch {
       // The picker still shows what is selected; it simply cannot offer
       // alternatives, which is better than showing none at all. KNOWN_PROJECTS
@@ -16517,7 +16622,11 @@ function iamRows(data) {
 
 function renderIAMPage(view, route) {
   const project = currentProject();
-  if (!project) {
+  // A folder or the organization chosen in the toolbar is the page's
+  // resource (#2023).
+  const res = currentResource();
+  const scopeWord = res ? `${res.kind} "${resourceLabel(res)}"` : `project "${project}"`;
+  if (!project && !res) {
     setChildren(view, pageHeader("IAM", ""), emptyState("No project is selected", "Choose a project in the toolbar."));
     return;
   }
@@ -16569,7 +16678,7 @@ function renderIAMPage(view, route) {
     const own = iamRows(data).filter((r) => members.includes(r.member));
     confirmDestructive({
       title: members.length === 1 ? `Remove access for ${members[0]}?` : `Remove access for ${members.length} principals?`,
-      detail: `Every role ${members.length === 1 ? "this principal holds" : "these principals hold"} on project ${project} is removed. ` +
+      detail: `Every role ${members.length === 1 ? "this principal holds" : "these principals hold"} on ${scopeWord} is removed. ` +
         "Roles inherited from a folder or the organization stay, and are removed there.",
       confirmWord: members.length === 1 ? members[0] : "remove",
       confirmLabel: "Remove",
@@ -16578,7 +16687,7 @@ function renderIAMPage(view, route) {
         for (const r of own) {
           const removes = r.roles.filter((x) => !x.from).map((x) => ({ role: x.role, condition: x.condition }));
           if (!removes.length) continue;
-          const op = recordOperation(`Remove access for ${r.member} on ${project}`);
+          const op = recordOperation(`Remove access for ${r.member} on ${res ? resourceLabel(res) : project}`);
           try {
             await iamCall("change", { etag: data.etag, members: [r.member], add: [], remove: removes });
             op.succeeded("");
@@ -16716,8 +16825,9 @@ function renderIAMPage(view, route) {
     el("label", { class: "check-line" }, google, el("span", { text: "Include Google-provided role grants" })));
   allowOnly.push(actionBar, bar.chips);
   setChildren(view, header,
-    el("h2", { id: "iam-scope-title", text: `Permissions for project "${project}"` }),
-    el("p", { class: "subtitle", text: "These permissions affect this project and all of its resources." }),
+    el("h2", { id: "iam-scope-title", text: `Permissions for ${scopeWord}` }),
+    el("p", { class: "subtitle", text: res ? `These permissions affect this ${res.kind} and all of its resources.`
+      : "These permissions affect this project and all of its resources." }),
     noteBanner(PROJECT_IAM_NOTE_TEXT()),
     tabs,
     actionBar,
@@ -16725,7 +16835,8 @@ function renderIAMPage(view, route) {
     body,
     el("p", { class: "form-help" },
       el("span", { text: "Test permissions and the condition linter are on " }),
-      el("a", { href: `/iam-admin/iam/${encodeURIComponent(project)}?tab=permissions`, text: "the policy's Permissions tab" }),
+      el("a", { href: res ? (res.kind === "organization" ? "/resource-hierarchy/organization?tab=permissions" : `/resource-hierarchy/${encodeURIComponent(res.id)}?tab=permissions`)
+        : `/iam-admin/iam/${encodeURIComponent(project)}?tab=permissions`, text: "the policy's Permissions tab" }),
       el("span", { text: ". " }),
       el("a", { href: "/iam-admin/troubleshooter", text: "Policy Troubleshooter" }),
       el("span", { text: " explains a principal's access, and " }),
@@ -16933,8 +17044,9 @@ function openIAMDenyPanel(resource, policy, onDone) {
 // the Org Policy v2 registry (cmd/cloudburrow/consoleorgpolicyedit.go).
 function renderOrgPolicyEdit(view, constraint) {
   const project = currentProject();
+  const res = currentResource();
   const back = `/iam-admin/orgpolicies/${encodeURIComponent(constraint)}`;
-  if (!project) {
+  if (!project && !res) {
     setChildren(view, pageHeader("Edit policy", ""), emptyState("No project is selected", "Choose a project in the toolbar."));
     return;
   }
@@ -17015,7 +17127,7 @@ function renderOrgPolicyEdit(view, constraint) {
       e.preventDefault();
       error.hidden = true;
       save.disabled = true;
-      const op = recordOperation(`Set ${dryRun ? "dry run " : ""}policy ${d.constraint} on ${project}`);
+      const op = recordOperation(`Set ${dryRun ? "dry run " : ""}policy ${d.constraint} on ${res ? resourceLabel(res) : project}`);
       try {
         await call("policy-set", { constraint: d.constraint, dryRun, etag: d.etag, source: picked("orgpolicy-source"),
           merge: picked("orgpolicy-enforcement") === "merge", rules: rules.map((r) => r.value()) });
@@ -18206,7 +18318,14 @@ function renderManageResources(view) {
       if (tab === "tags") {
         const bound = row.tags || [];
         const inScope = tree.tagValues.filter((v) => tagScope && tagParts(v).scope === tagScope);
-        const keys = [...new Set(inScope.map((v) => tagParts(v).key))].sort();
+        // A key of dynamic values (#2023) has no values to pick: its Value
+        // is typed, and must match the key's validation regular expression.
+        const dynamic = {};
+        for (const [k, re] of Object.entries(tree.dynamicKeys || {})) {
+          const [scope, short] = k.split("/");
+          if (tagScope && scope === tagScope) dynamic[short] = re;
+        }
+        const keys = [...new Set([...inScope.map((v) => tagParts(v).key), ...Object.keys(dynamic)])].sort();
         const changed = () => tagDraft.removes.size > 0 || tagDraft.adds.some((a) => a.key && a.value);
         const save = el("button", { type: "button", class: "primary", id: "mr-panel-tags-save", text: "Save",
           disabled: changed() ? null : "disabled",
@@ -18221,19 +18340,33 @@ function renderManageResources(view) {
             el("option", { value: "", text: "Select a key" }),
             ...keys.map((k) => el("option", { value: k, text: k, selected: a.key === k ? true : null })));
           const valueSelect = el("select", { "aria-label": `Value ${i + 1}`, class: "mr-tag-value" });
+          const helpID = `mr-tag-dynamic-help-${i}`;
+          const valueInput = el("input", { type: "text", class: "mr-tag-value mr-tag-dynamic", "aria-label": `Value ${i + 1}`,
+            "aria-describedby": helpID, value: a.value || "", autocomplete: "off" });
+          const help = el("p", { class: "form-help", id: helpID });
+          const valueCell = el("td", {});
           // The Value drop-down holds the chosen key's values; it is
-          // refilled in place, so focus stays on the Key.
+          // refilled in place, so focus stays on the Key. A dynamic key's
+          // Value is a text box, as Google's: "enter a string that matches
+          // the validation regular expression configured for that tag key".
           const fillValues = () => {
+            if (a.key && dynamic[a.key] !== undefined) {
+              help.textContent = `Enter a value matching ${dynamic[a.key]}`;
+              setChildren(valueCell, valueInput, help);
+              return;
+            }
             const values = inScope.filter((v) => tagParts(v).key === a.key).map((v) => tagParts(v).value);
             setChildren(valueSelect, el("option", { value: "", text: "Select a value" }),
               ...values.map((v) => el("option", { value: v, text: v, selected: a.value === v ? true : null })));
             valueSelect.disabled = !a.key;
+            setChildren(valueCell, valueSelect);
           };
           fillValues();
-          keySelect.addEventListener("change", () => { a.key = keySelect.value; a.value = ""; fillValues(); refreshSave(); });
+          keySelect.addEventListener("change", () => { a.key = keySelect.value; a.value = ""; valueInput.value = ""; fillValues(); refreshSave(); });
           valueSelect.addEventListener("change", () => { a.value = valueSelect.value; refreshSave(); });
+          valueInput.addEventListener("input", () => { a.value = valueInput.value.trim(); refreshSave(); });
           return el("tr", { class: "mr-tag-new" },
-            el("td", {}, keySelect), el("td", {}, valueSelect),
+            el("td", {}, keySelect), valueCell,
             el("td", {}, el("button", { type: "button", class: "secondary", "aria-label": `Delete item ${i + 1}`, text: "Delete item",
               onclick: () => { tagDraft.adds.splice(i, 1); draw(); } })));
         };

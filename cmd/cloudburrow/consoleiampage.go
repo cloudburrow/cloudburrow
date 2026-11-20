@@ -40,8 +40,12 @@ type iamPageInherited struct {
 }
 
 type iamPagePolicy struct {
-	Project   string             `json:"project"`
-	Resource  string             `json:"resource"`
+	Project  string `json:"project"`
+	Resource string `json:"resource"`
+	// Kind and Display name a folder or the organization chosen in the
+	// toolbar (#2023): "folder" or "organization", and its name.
+	Kind      string             `json:"kind,omitempty"`
+	Display   string             `json:"display,omitempty"`
 	Etag      string             `json:"etag"`
 	Bindings  []console.Binding  `json:"bindings"`
 	Inherited []iamPageInherited `json:"inherited"`
@@ -75,22 +79,38 @@ type iamPageChange struct {
 var basicRoles = map[string]bool{"roles/owner": true, "roles/editor": true, "roles/viewer": true, "roles/browser": true}
 
 func (p projectIAMProvider) StudioCall(ctx context.Context, project, call string, body json.RawMessage) (any, error) {
-	if project == "" {
+	// A folder or the organization chosen in the toolbar's resource
+	// selector is the page's resource (#2023).
+	sel, scoped, err := consoleResourceScope(ctx, p.registry)
+	if err != nil {
+		return nil, err
+	}
+	var selp *selectedResource
+	if scoped {
+		selp = &sel
+	}
+	if project == "" && !scoped {
 		return nil, errors.New("choose a project in the toolbar")
 	}
 	switch call {
 	case "policy":
+		if scoped {
+			return p.pagePolicyOf(ctx, sel)
+		}
 		return p.pagePolicy(ctx, project)
 	case "roles":
 		return p.pageRoles(project)
 	case "deny-list", "deny-get", "deny-create", "deny-update", "deny-delete":
-		return p.denyCall(project, call, body)
+		return p.denyCall(project, selp, call, body)
 	case "troubleshoot", "analyze", "enforcement":
 		return p.analysisCall(ctx, project, call, body)
 	case "change":
 		var c iamPageChange
 		if err := json.Unmarshal(body, &c); err != nil {
 			return nil, fmt.Errorf("malformed change: %v", err)
+		}
+		if scoped {
+			return p.pageChangeOn(ctx, iamServerOf(p.registry, sel.Name), sel.Name, c)
 		}
 		return p.pageChange(ctx, project, c)
 	}
@@ -168,9 +188,35 @@ func (p projectIAMProvider) pageRoles(project string) ([]iamPageRole, error) {
 	return out, nil
 }
 
+// pagePolicyOf is the policy of the folder or organization chosen in the
+// toolbar (#2023), read through Folders' or Organizations' GetIamPolicy,
+// with the bindings of the folders and organization above it.
+func (p projectIAMProvider) pagePolicyOf(ctx context.Context, sel selectedResource) (iamPagePolicy, error) {
+	pol, err := getProtoPolicy(ctx, iamServerOf(p.registry, sel.Name), sel.Name)
+	if err != nil {
+		return iamPagePolicy{}, err
+	}
+	out := iamPagePolicy{Resource: "//cloudresourcemanager.googleapis.com/" + sel.Name, Kind: strings.ToLower(sel.Kind), Display: sel.Display,
+		Etag: pol.Etag, Bindings: pol.Bindings, Inherited: []iamPageInherited{}, Names: map[string]string{}, Note: projectIAMNote}
+	for _, a := range ancestorsOf(p.registry, sel.Name) {
+		ap, err := getProtoPolicy(ctx, iamServerOf(p.registry, a.Name), a.Name)
+		if err != nil {
+			continue
+		}
+		out.Inherited = append(out.Inherited, iamPageInherited{Resource: a.Name, Display: a.Display, Bindings: ap.Bindings})
+	}
+	return out, nil
+}
+
 // pageChange applies Grant access or Edit principal in one SetIamPolicy:
 // each removal first, then each grant, for every member named.
 func (p projectIAMProvider) pageChange(ctx context.Context, project string, c iamPageChange) (map[string]string, error) {
+	return p.pageChangeOn(ctx, p.api(), resourcemanager.V3Name(project), c)
+}
+
+// pageChangeOn is pageChange on resource through api: a project's through
+// Projects, a folder's or the organization's through theirs (#2023).
+func (p projectIAMProvider) pageChangeOn(ctx context.Context, api iamServer, resource string, c iamPageChange) (map[string]string, error) {
 	if c.Etag == "" {
 		return nil, errors.New("etag is required: send the one the policy was read with")
 	}
@@ -186,8 +232,7 @@ func (p projectIAMProvider) pageChange(ctx context.Context, project string, c ia
 	if len(c.Add) == 0 && len(c.Remove) == 0 {
 		return nil, errors.New("choose a role to grant or remove")
 	}
-	resource := resourcemanager.V3Name(project)
-	pol, err := getProtoPolicy(ctx, p.api(), resource)
+	pol, err := getProtoPolicy(ctx, api, resource)
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +252,7 @@ func (p projectIAMProvider) pageChange(ctx context.Context, project string, c ia
 		}
 	}
 	pol.Etag = c.Etag
-	if err := setProtoPolicy(ctx, p.api(), resource, pol); err != nil {
+	if err := setProtoPolicy(ctx, api, resource, pol); err != nil {
 		return nil, err
 	}
 	return map[string]string{"applied": "change"}, nil

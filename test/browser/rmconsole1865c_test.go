@@ -53,8 +53,11 @@ func TestResourceSelectorChoosesFoldersAndTheOrganization(t *testing.T) {
 	folderID := strings.TrimPrefix(folder.GetName(), "folders/")
 	project := uniqueProject(t)
 
+	// From a page that does not work at the folder's level, the folder
+	// opens its own page and the project is kept; from IAM it scopes the
+	// page (#2023, rmconsole2023_test.go).
 	p := open(t)
-	p.navigate("/iam-admin/iam?project=" + project)
+	p.navigate("/projects?project=" + project)
 	p.waitFor(`document.getElementById("project-current").textContent === "` + project + `"`)
 	p.run(chromedp.Click(chromedp.CSS(`#project-button`)))
 	p.waitFor(`document.querySelector('#project-list li[data-kind="organization"]') !== null`)
@@ -72,7 +75,7 @@ func TestResourceSelectorChoosesFoldersAndTheOrganization(t *testing.T) {
 		t.Errorf("All lists the kinds %q; want the organization, folders and projects", kinds)
 	}
 	p.eval(row+`.click(), true`, nil)
-	p.waitFor(`location.pathname === "/resource-hierarchy/` + folderID + `"`)
+	p.waitFor(`location.pathname === "/resource-hierarchy/` + folderID + `" && !location.search.includes("folder=")`)
 	p.waitFor(`document.getElementById("project-panel").hidden`)
 	var current string
 	p.eval(`document.getElementById("project-current").textContent`, &current)
@@ -83,7 +86,7 @@ func TestResourceSelectorChoosesFoldersAndTheOrganization(t *testing.T) {
 
 // TestTagKeyPagesAsGooglesThroughTheBrowser (#1865): Create tag key's Tag
 // values section is Predefined values with Add value rows (Tag value, Tag
-// value description) or Dynamic values, drawn and not choosable, ending in
+// value description) or Dynamic values (choosable since #2023), ending in
 // Create tag key, and the values are made with the key; a key's row menu
 // has View details and Manage access (the key's Permissions); its page has
 // Edit next to Description, an edit panel ending in Save.
@@ -122,8 +125,8 @@ func TestTagKeyPagesAsGooglesThroughTheBrowser(t *testing.T) {
 	p.eval(`({ Submit: document.querySelector('#view form.create-page button[type="submit"]').textContent,
 		AddValue: ([...document.querySelectorAll("#view form.create-page button")].find((b) => b.textContent === "Add value") || {}).textContent || "",
 		DynamicOff: [...document.querySelectorAll("#view form.create-page input[type=radio]")].find((r) => r.value === "dynamic").disabled })`, &form)
-	if form.Submit != "Create tag key" || form.AddValue != "Add value" || !form.DynamicOff {
-		t.Errorf("Create tag key reads %+v; want Add value, Dynamic values not choosable, ending in Create tag key", form)
+	if form.Submit != "Create tag key" || form.AddValue != "Add value" || form.DynamicOff {
+		t.Errorf("Create tag key reads %+v; want Add value, Dynamic values choosable, ending in Create tag key", form)
 	}
 	p.setField("#f-shortName", short)
 	p.eval(`[...document.querySelectorAll("#view form.create-page button")].find((b) => b.textContent === "Add value").click(), true`, nil)

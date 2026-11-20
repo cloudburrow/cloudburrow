@@ -45,11 +45,21 @@ func (p projectIAMProvider) api() iamServer { return resourcemanager.NewProjects
 // List holds the selected project's one policy, with what it binds.
 func (p projectIAMProvider) List(ctx context.Context, project string) (console.Listing, error) {
 	out := console.Listing{NameColumn: "Project", Columns: []string{"Principals", "Roles"}, Noun: "IAM policies", Note: projectIAMNote}
-	if project == "" {
+	sel, scoped, err := consoleResourceScope(ctx, p.registry)
+	if err != nil {
+		out.Unavailable = err.Error()
+		return out, nil
+	}
+	name, api := resourcemanager.V3Name(project), p.api()
+	if scoped {
+		// The folder or organization chosen in the toolbar (#2023).
+		out.NameColumn = sel.Kind
+		name, api, project = sel.Name, iamServerOf(p.registry, sel.Name), idOfName(sel.Name)
+	} else if project == "" {
 		out.Prompt = "IAM is per project. Choose one in the toolbar."
 		return out, nil
 	}
-	pol, err := getProtoPolicy(ctx, p.api(), resourcemanager.V3Name(project))
+	pol, err := getProtoPolicy(ctx, api, name)
 	if err != nil {
 		out.Unavailable = "cannot read the project's IAM policy: " + err.Error()
 		return out, nil
@@ -72,10 +82,24 @@ func (p projectIAMProvider) Detail(ctx context.Context, project string, path []s
 	if len(path) > 1 {
 		return console.DeeperThan(1, path), nil
 	}
-	if project != "" && path[0] != project {
+	sel, scoped, err := consoleResourceScope(ctx, p.registry)
+	if err != nil {
+		return console.Detail{Unavailable: err.Error()}, nil
+	}
+	title := "IAM for project " + path[0]
+	if scoped {
+		if path[0] != idOfName(sel.Name) {
+			return console.Detail{Unavailable: fmt.Sprintf("%s is not the selected %s %s", path[0], strings.ToLower(sel.Kind), sel.Name)}, nil
+		}
+		title = "IAM for " + strings.ToLower(sel.Kind) + " " + sel.Display
+	} else if project != "" && path[0] != project {
 		return console.Detail{Unavailable: fmt.Sprintf("%s is not the selected project %s", path[0], project)}, nil
 	}
-	pol, err := getProtoPolicy(ctx, p.api(), resourcemanager.V3Name(path[0]))
+	api, name, err := p.policyTarget(ctx, path)
+	if err != nil {
+		return console.Detail{Unavailable: err.Error()}, nil
+	}
+	pol, err := getProtoPolicy(ctx, api, name)
 	if err != nil {
 		return console.Detail{Unavailable: "cannot read the project's IAM policy: " + err.Error()}, nil
 	}
@@ -105,7 +129,7 @@ func (p projectIAMProvider) Detail(ctx context.Context, project string, path []s
 		sections = append([]console.Section{{ID: "principals", Label: "Principals", Kind: console.KindProperties,
 			Groups: []console.PropertyGroup{{Heading: "View by principals", Properties: props}}}}, sections...)
 	}
-	return console.Detail{Title: "IAM for project " + path[0], Sections: sections}, nil
+	return console.Detail{Title: title, Sections: sections}, nil
 }
 
 func (projectIAMProvider) PolicyOn(_ context.Context, path []string) *console.PolicyTarget {
@@ -116,13 +140,41 @@ func (projectIAMProvider) PolicyOn(_ context.Context, path []string) *console.Po
 }
 
 func (p projectIAMProvider) GetPolicy(ctx context.Context, _ string, path []string) (console.Policy, error) {
-	return getProtoPolicy(ctx, p.api(), resourcemanager.V3Name(path[0]))
+	api, name, err := p.policyTarget(ctx, path)
+	if err != nil {
+		return console.Policy{}, err
+	}
+	return getProtoPolicy(ctx, api, name)
 }
 
 func (p projectIAMProvider) SetPolicy(ctx context.Context, _ string, path []string, pol console.Policy) error {
-	return setProtoPolicy(ctx, p.api(), resourcemanager.V3Name(path[0]), pol)
+	api, name, err := p.policyTarget(ctx, path)
+	if err != nil {
+		return err
+	}
+	return setProtoPolicy(ctx, api, name, pol)
 }
 
 func (p projectIAMProvider) TestPermissions(ctx context.Context, _ string, path []string, perms []string) ([]string, error) {
-	return testProtoPermissions(ctx, p.api(), resourcemanager.V3Name(path[0]), perms)
+	api, name, err := p.policyTarget(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	return testProtoPermissions(ctx, api, name, perms)
 }
+
+// policyTarget is the API and resource name of the policy path names: the
+// project, or the folder or organization chosen in the toolbar when path
+// names it by its number (#2023).
+func (p projectIAMProvider) policyTarget(ctx context.Context, path []string) (iamServer, string, error) {
+	sel, scoped, err := consoleResourceScope(ctx, p.registry)
+	if err != nil {
+		return nil, "", err
+	}
+	if scoped && len(path) == 1 && path[0] == idOfName(sel.Name) {
+		return iamServerOf(p.registry, sel.Name), sel.Name, nil
+	}
+	return p.api(), resourcemanager.V3Name(path[0]), nil
+}
+
+func idOfName(name string) string { return name[strings.LastIndex(name, "/")+1:] }
