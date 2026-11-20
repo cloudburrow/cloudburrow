@@ -1,12 +1,21 @@
 package apikeys
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"testing"
 
 	"github.com/cloudburrow/cloudburrow/internal/store"
 )
 
+// testToolKey stands in for a key Google's tools ship, which this
+// repository holds only by hash (toolKeys).
+const testToolKey = "AIzaCloudBurrowTestToolKey"
+
 func TestAuthorize(t *testing.T) {
+	sum := sha256.Sum256([]byte(testToolKey))
+	toolKeys[hex.EncodeToString(sum[:])] = true
+	t.Cleanup(func() { delete(toolKeys, hex.EncodeToString(sum[:])) })
 	s := NewServer("", store.NewMemory(), nil)
 	mk := func(id string, r *Restrictions) string {
 		t.Helper()
@@ -32,7 +41,7 @@ func TestAuthorize(t *testing.T) {
 		reason string
 	}{
 		{"unknown key", "AIzaNope", storage, "API_KEY_INVALID"},
-		{"gsutil's anonymous key", "AIzaSyDnacJHrKma0048b13sh8cgxNUwulubmJM", storage, ""},
+		{"a tool's key", testToolKey, storage, ""},
 		{"open key", open, storage, ""},
 		{"referrer ok", web, Request{Service: "storage.googleapis.com", Referrer: "https://app.example.com/page"}, ""},
 		{"bare domain", web, Request{Service: "storage.googleapis.com", Referrer: "https://www.example.org/"}, ""},

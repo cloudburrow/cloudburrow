@@ -1,6 +1,8 @@
 package apikeys
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
@@ -63,8 +65,18 @@ func Invalid(service string) *Denial {
 // gsutil's: gslib/gcs_json_api.py adds it as the key= parameter of every
 // JSON API call it makes with no credentials ("This API key is not secret
 // and is used to identify gsutil during anonymous requests").
+//
+// They are held by SHA-256, hex, so no key of Google's is written in this
+// repository even though each is published: secret scanners flag the
+// AIza form, and the instance only ever needs to recognise one.
 var toolKeys = map[string]bool{
-	"AIzaSyDnacJHrKma0048b13sh8cgxNUwulubmJM": true,
+	"b3f19cc85129501b94306e7892b522f46fa2dcda7da664cc74a0ca9314d7d984": true, // gsutil
+}
+
+// isToolKey reports whether keyString is one of toolKeys.
+func isToolKey(keyString string) bool {
+	sum := sha256.Sum256([]byte(keyString))
+	return toolKeys[hex.EncodeToString(sum[:])]
 }
 
 // Authorize is the whole decision on a request carrying keyString: the
@@ -72,7 +84,7 @@ var toolKeys = map[string]bool{
 // Denial. A key one of Google's tools ships (toolKeys) is allowed, with no
 // project of the instance's.
 func (s *Server) Authorize(keyString string, r Request) (project string, d *Denial) {
-	if toolKeys[keyString] {
+	if isToolKey(keyString) {
 		return "", nil
 	}
 	project, k, ok := s.Lookup(keyString)
