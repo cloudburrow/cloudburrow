@@ -329,6 +329,13 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		privateCASvc.storage = func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") }
 	}
 	privateCASvc.register(coord)
+	// Workflows and Workflow Executions (#1986), in process; executions
+	// call this instance's own endpoints, with tokens minted locally.
+	workflowsSvc := newWorkflowsService(cfg)
+	if workflowsSvc != nil {
+		workflowsSvc.tokens = creds
+	}
+	workflowsSvc.register(coord)
 	// The Kubernetes Engine API (#1913), in process; its clusters are
 	// kind clusters of their own.
 	gkeSvc := newGKEService(cfg)
@@ -460,6 +467,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		mysql:        mysqlCreds,
 		scheduler:    schedulerSvc,
 		privateCA:    privateCASvc,
+		workflows:    workflowsSvc,
 		gke:          gkeSvc,
 		monitoring:   monitoringSvc,
 		compute:      computeSvc,
@@ -537,6 +545,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	if privateCASvc != nil {
 		privateCASvc.tracing = tracing
+	}
+	if workflowsSvc != nil {
+		workflowsSvc.tracing = tracing
+		workflowsSvc.calls = callEvents(recorder, requestMetrics, "workflows")
+		workflowsSvc.interpose = append(workflowsSvc.interpose, grpctransport.LogInterceptor(logger, "workflows"), faults.Interceptor("workflows"))
+		workflowsSvc.requests = requestEvents(recorder, requestMetrics, "workflows")
 	}
 	if gkeSvc != nil {
 		gkeSvc.tracing = tracing
@@ -910,6 +924,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		backupdr:       backupDRSrv,
 		sqlAdmin:       sqlAdminSrv,
 		privateCA:      privateCASvc,
+		workflows:      workflowsSvc,
 		gke:            gkeSvc,
 		monitoring:     monitoringSvc,
 		compute:        computeSvc,
@@ -995,6 +1010,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if a := privateCASvc.Addr(); a != "" {
 			live["privateca"] = a
 		}
+		if a := workflowsSvc.Addr(); a != "" {
+			live["workflows"] = a
+		}
 		if a := gkeSvc.Addr(); a != "" {
 			live["gke"] = a
 		}
@@ -1057,7 +1075,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// SQL volumes (#1346): the Auth Proxy a revision runs reaches both.
 		published := map[string]bool{"run": true, "tasks": true, "secretmanager": true, "kms": true,
 			"scheduler": true, "logging": true, "resourcemanager": true, "serviceusage": true, "apikeys": true, "metadata": true,
-			"sqladmin": true, "cloudsql-connector": true, "onnx": true, "tfconvert": true, "localai": true}
+			"sqladmin": true, "cloudsql-connector": true, "onnx": true, "tfconvert": true, "localai": true, "workflows": true}
 		if !runEnabled {
 			published = map[string]bool{"resourcemanager": true, "onnx": true, "tfconvert": true, "localai": true}
 			// The storage server reads IAM service accounts' certificates

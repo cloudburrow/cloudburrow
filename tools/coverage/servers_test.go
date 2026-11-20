@@ -17,6 +17,8 @@ import (
 	"cloud.google.com/go/orgpolicy/apiv2/orgpolicypb"
 	rmpb "cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
 	"cloud.google.com/go/security/privateca/apiv1/privatecapb"
+	"cloud.google.com/go/workflows/apiv1/workflowspb"
+	"cloud.google.com/go/workflows/executions/apiv1/executionspb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -35,6 +37,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
 	"github.com/cloudburrow/cloudburrow/internal/service/monitoring"
 	"github.com/cloudburrow/cloudburrow/internal/service/privateca"
+	"github.com/cloudburrow/cloudburrow/internal/service/workflows"
 	"github.com/cloudburrow/cloudburrow/internal/service/redisadmin"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/scheduler"
@@ -69,6 +72,14 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		t.Fatal(err)
 	}
 	privatecapb.RegisterCertificateAuthorityServiceServer(srv, pca.API())
+	// Workflows and Executions alone (#1986): their Locations and
+	// Operations mixins are other services' rows.
+	wfs, err := workflows.NewServer("", workflows.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflowspb.RegisterWorkflowsServer(srv, wfs.Workflows())
+	executionspb.RegisterExecutionsServer(srv, wfs.Executions())
 	gkeSrv, err := gke.NewServer(nil, gke.Options{Versions: []gke.Version{{GKE: "1.36.4-gke.0", Image: "kindest/node:v1.36.4"}}})
 	if err != nil {
 		t.Fatal(err)

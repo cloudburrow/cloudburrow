@@ -53,6 +53,7 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 	config.ServiceBackupDR: {Providers: []string{"backupdr-overview", "backupdr-vaulted", "backupdr-plans", "backupdr-associations",
 		"backupdr", "backupdr-jobs"}},
 	config.ServicePrivateCA: {Providers: []string{"privateca", "privateca-templates"}},
+	config.ServiceWorkflows: {Providers: []string{"workflows"}},
 	// The Kubernetes Engine API (#1913): its clusters are on Kubernetes
 	// clusters, beside the instance's own.
 	config.ServiceGKE: {Providers: []string{"gkeclusters"}},
@@ -158,6 +159,7 @@ func coverageDeps(t *testing.T) consoleDeps {
 		secrets:    &secretsService{},
 		kms:        &kmsService{},
 		privateCA:  &privateCAService{},
+		workflows:  &workflowsService{},
 		monitoring: &monitoringService{},
 		compute:    &computeService{},
 		scheduler:  &schedulerService{},

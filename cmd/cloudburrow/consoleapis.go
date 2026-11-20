@@ -51,6 +51,8 @@ var apiLibrary = map[string]apiLibraryInfo{
 	"sqladmin.googleapis.com":             {"Databases", "Administers Cloud SQL instances, databases, users and backups.", ""},
 	"backupdr.googleapis.com":             {"Storage", "Manages backup vaults, backup plans and the backups in them.", ""},
 	"privateca.googleapis.com":            {"Security", "Creates and manages private certificate authorities and the certificates they issue.", ""},
+	"workflows.googleapis.com":            {"Developer tools", "Manages workflow definitions: orchestrates and automates Google Cloud and HTTP-based API services with serverless workflows.", "workflows"},
+	"workflowexecutions.googleapis.com":   {"Developer tools", "Executes workflows, lists their executions, their step entries and callbacks, and cancels them.", "workflows"},
 	"compute.googleapis.com":              {"Compute", "Creates and runs virtual machines on Google Cloud Platform; CloudBurrow serves its VPC networking: networks, subnets, firewall rules, routes and IP addresses.", ""},
 	"container.googleapis.com":            {"Compute", "Builds and manages container-based applications, powered by the open source Kubernetes technology.", ""},
 	"containeranalysis.googleapis.com":    {"Developer tools", "Stores and reads the notes and occurrences of software artifacts, vulnerabilities among them.", ""},

@@ -42,6 +42,8 @@ var serviceAgents = map[string]string{
 	// Private CA Service Account; gcloud privateca roots create --kms-key-version
 	// and --bucket call this method for it and grant it roles on the key and bucket.
 	"privateca.googleapis.com": "gcp-sa-privateca.iam.gserviceaccount.com",
+	// Workflows Service Agent, the primary agent of workflows.googleapis.com.
+	"workflows.googleapis.com": "gcp-sa-workflows.iam.gserviceaccount.com",
 	// Kubernetes Engine Service Agent, the primary agent of
 	// container.googleapis.com.
 	"container.googleapis.com": "container-engine-robot.iam.gserviceaccount.com",
@@ -94,6 +96,9 @@ var serviceAgents = map[string]string{
 // https://cloud.google.com/iam/docs/service-agents gives no primary
 // service agent, so generateServiceIdentity names none for them.
 var noPrimaryAgent = map[string]string{
+	// The Workflows Service Agent is workflows.googleapis.com's; the
+	// executions API has none of its own.
+	"workflowexecutions.googleapis.com": "Workflow Executions",
 	// Its agents (gcp-sa-logging, service-folder-/service-org-, pNUMBER-ID)
 	// are not primary; Logging's CMEK names its account through
 	// getCmekSettings instead.

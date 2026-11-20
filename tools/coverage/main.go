@@ -98,6 +98,8 @@ import (
 	_ "cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
 	_ "cloud.google.com/go/securesourcemanager/apiv1/securesourcemanagerpb"
 	_ "cloud.google.com/go/security/privateca/apiv1/privatecapb"
+	_ "cloud.google.com/go/workflows/apiv1/workflowspb"
+	_ "cloud.google.com/go/workflows/executions/apiv1/executionspb"
 	_ "cloud.google.com/go/spanner/admin/database/apiv1/databasepb"
 	_ "cloud.google.com/go/spanner/admin/instance/apiv1/instancepb"
 	_ "cloud.google.com/go/spanner/apiv1/spannerpb"
@@ -287,6 +289,10 @@ var areas = []area{
 	// JSON on one port. Its Locations, Operations and IAMPolicy mixins are
 	// the rows the scheduler and kms areas list (mixin keys are global).
 	{Key: "privateca", Title: "Certificate Authority Service (v1)", Own: true, Services: []string{"google.cloud.security.privateca.v1.CertificateAuthorityService"}},
+	// Workflows and Workflow Executions (#1986): CloudBurrow's own, with
+	// an interpreter of the workflow syntax.
+	{Key: "workflows", Title: "Workflows and Workflow Executions (v1)", Own: true,
+		Services: []string{"google.cloud.workflows.v1.Workflows", "google.cloud.workflows.executions.v1.Executions"}},
 	// The Kubernetes Engine API (#1913): CloudBurrow's own, gRPC and JSON
 	// on one port, each cluster a kind cluster of its own.
 	{Key: "gke", Title: "Kubernetes Engine API (v1)", Own: true, Services: []string{"google.container.v1.ClusterManager"}},

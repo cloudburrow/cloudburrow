@@ -49,6 +49,8 @@ var serviceUsageAPIs = []struct {
 	{config.ServiceGKE, serviceusage.API{Name: "container.googleapis.com", Title: "Kubernetes Engine API"}},
 	{config.ServiceMonitoring, serviceusage.API{Name: "monitoring.googleapis.com", Title: "Cloud Monitoring API"}},
 	{config.ServiceCompute, serviceusage.API{Name: "compute.googleapis.com", Title: "Compute Engine API"}},
+	{config.ServiceWorkflows, serviceusage.API{Name: "workflows.googleapis.com", Title: "Workflows API"}},
+	{config.ServiceWorkflows, serviceusage.API{Name: "workflowexecutions.googleapis.com", Title: "Workflow Executions API"}},
 }
 
 // serviceUsageCatalog splits serviceUsageAPIs into what this instance

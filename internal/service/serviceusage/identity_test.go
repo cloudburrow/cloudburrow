@@ -70,6 +70,8 @@ func TestGenerateServiceIdentityThroughTheOfficialClient(t *testing.T) {
 func TestGenerateServiceIdentityEveryEntry(t *testing.T) {
 	want := map[string]string{
 		"privateca.googleapis.com":            "gcp-sa-privateca.iam.gserviceaccount.com",
+		"workflows.googleapis.com":            "gcp-sa-workflows.iam.gserviceaccount.com",
+		"workflowexecutions.googleapis.com":   "",
 		"container.googleapis.com":            "container-engine-robot.iam.gserviceaccount.com",
 		"monitoring.googleapis.com":           "gcp-sa-monitoring-notification.iam.gserviceaccount.com",
 		"compute.googleapis.com":              "compute-system.iam.gserviceaccount.com",

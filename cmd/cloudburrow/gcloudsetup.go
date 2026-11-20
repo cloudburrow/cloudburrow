@@ -36,10 +36,8 @@ const resourceManagerService config.Service = "resourcemanager"
 // serviceUsageService keys Service Usage, always served beside it (#1352).
 const serviceUsageService config.Service = "serviceusage"
 
-// gcloudVerified are the services whose gcloud use docs/compatibility.md
-// marks Verified; no other endpoint is written, so gcloud never believes a
-// service is local that has not been shown to work.
-var gcloudVerified = []struct {
+// gcloudEndpoint is one row of gcloudVerified.
+type gcloudEndpoint = struct {
 	service  config.Service
 	property string
 	path     string
@@ -51,7 +49,12 @@ var gcloudVerified = []struct {
 	// name still resolves to loopback (RFC 6761), where {location}-127.0.0.1
 	// resolves to nothing.
 	regional bool
-}{
+}
+
+// gcloudVerified are the services whose gcloud use docs/compatibility.md
+// marks Verified; no other endpoint is written, so gcloud never believes a
+// service is local that has not been shown to work.
+var gcloudVerified = []gcloudEndpoint{
 	{config.ServiceStorage, "storage", "/storage/v1/", false, false},
 	{config.ServicePubSub, "pubsub", "/", false, false},
 	// Cloud KMS (#426): gcloud's apitools client appends v1/ itself, and
@@ -175,6 +178,11 @@ var gcloudVerified = []struct {
 	// batches to /batch/compute/v1 beside it. TestGcloudComputeNetworks
 	// drives networks, subnets, firewall-rules and addresses.
 	{config.ServiceCompute, "compute", "/compute/v1/", false, false},
+	// Workflows (#1986): gcloud workflows calls both APIs on one port and
+	// appends v1/. TestGcloudWorkflows drives deploy, run, executions
+	// describe and list.
+	{config.ServiceWorkflows, "workflows", "/", false, false},
+	{config.ServiceWorkflows, "workflowexecutions", "/", false, false},
 	// Bigtable's admin REST API (#1440), on the Bigtable port beside gRPC;
 	// gcloud bigtable appends v2/. TestGcloudBigtableAppProfiles creates,
 	// lists, updates and deletes app profiles.
@@ -247,10 +255,9 @@ func gcloudConfigPath(cfg config.Config) (string, error) {
 	return filepath.Join(dir, "configurations", "config_"+gcloudConfigName(cfg)), nil
 }
 
-// gcloudConfiguration renders the configuration file.
-func gcloudConfiguration(cfg config.Config, adcPath string) string {
-	host := func(port int) string { return net.JoinHostPort(cfg.BindAddress, strconv.Itoa(port)) }
-	ports := map[config.Service]int{config.ServiceStorage: cfg.Endpoints.Storage, config.ServicePubSub: cfg.Endpoints.PubSub,
+// gcloudPorts are the ports of the endpoints gcloudVerified names.
+func gcloudPorts(cfg config.Config) map[config.Service]int {
+	return map[config.Service]int{config.ServiceStorage: cfg.Endpoints.Storage, config.ServicePubSub: cfg.Endpoints.PubSub,
 		config.ServiceKMS: cfg.Endpoints.KMS, config.ServiceSecrets: cfg.Endpoints.Secrets, config.ServiceTasks: cfg.Endpoints.Tasks,
 		config.ServiceScheduler: cfg.Endpoints.Scheduler, config.ServiceLogging: cfg.Endpoints.Logging,
 		resourceManagerService: cfg.Endpoints.ResourceManager, config.ServiceRun: cfg.Endpoints.Run,
@@ -260,7 +267,39 @@ func gcloudConfiguration(cfg config.Config, adcPath string) string {
 		config.ServiceBigtable: cfg.Endpoints.Bigtable, spannerRESTEndpoint: cfg.Endpoints.SpannerREST,
 		config.ServiceFirestore: cfg.Endpoints.Firestore, config.ServicePrivateCA: cfg.Endpoints.PrivateCA, config.ServiceDatastore: cfg.Endpoints.Datastore,
 		config.ServiceGKE: cfg.Endpoints.GKE, config.ServiceMonitoring: cfg.Endpoints.Monitoring, config.ServiceCompute: cfg.Endpoints.Compute,
-		localAIEndpoint: cfg.Endpoints.LocalAI}
+		config.ServiceWorkflows: cfg.Endpoints.Workflows,
+		localAIEndpoint:         cfg.Endpoints.LocalAI}
+}
+
+// gcloudOverrideOn is whether an endpoint of gcloudVerified is served.
+func gcloudOverrideOn(cfg config.Config, v gcloudEndpoint) bool {
+	on := v.always || serviceEnabled(cfg, v.service) || (v.service == sqlAdminEndpoint && sqlAdminEnabled(cfg)) ||
+		(v.service == memorystoreAdminEndpoint && serviceEnabled(cfg, config.ServiceMemorystore))
+	if v.service == spannerRESTEndpoint {
+		on = serviceEnabled(cfg, config.ServiceSpanner)
+	}
+	if v.service == config.ServiceBackupDR {
+		on = backupDREnabled(cfg)
+	}
+	if v.service == config.ServicePrivateCA {
+		on = privateCAEnabled(cfg)
+	}
+	if v.service == config.ServiceMonitoring {
+		on = monitoringEnabled(cfg)
+	}
+	if v.service == config.ServiceWorkflows {
+		on = workflowsEnabled(cfg)
+	}
+	if v.service == localAIEndpoint {
+		on = serviceEnabled(cfg, config.ServiceRun)
+	}
+	return on
+}
+
+// gcloudConfiguration renders the configuration file.
+func gcloudConfiguration(cfg config.Config, adcPath string) string {
+	host := func(port int) string { return net.JoinHostPort(cfg.BindAddress, strconv.Itoa(port)) }
+	ports := gcloudPorts(cfg)
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n# Instance %q.\n", gcloudMarker, cfg.Name)
 	// should_prompt_to_enable_api is off because gcloud would otherwise ask
@@ -271,23 +310,7 @@ func gcloudConfiguration(cfg config.Config, adcPath string) string {
 	fmt.Fprintf(&b, "[core]\nproject = %s\ndisable_usage_reporting = true\nshould_prompt_to_enable_api = false\n", cfg.DefaultProject())
 	b.WriteString("\n[api_endpoint_overrides]\n")
 	for _, v := range gcloudVerified {
-		on := v.always || serviceEnabled(cfg, v.service) || (v.service == sqlAdminEndpoint && sqlAdminEnabled(cfg)) ||
-			(v.service == memorystoreAdminEndpoint && serviceEnabled(cfg, config.ServiceMemorystore))
-		if v.service == spannerRESTEndpoint {
-			on = serviceEnabled(cfg, config.ServiceSpanner)
-		}
-		if v.service == config.ServiceBackupDR {
-			on = backupDREnabled(cfg)
-		}
-		if v.service == config.ServicePrivateCA {
-			on = privateCAEnabled(cfg)
-		}
-		if v.service == config.ServiceMonitoring {
-			on = monitoringEnabled(cfg)
-		}
-		if v.service == localAIEndpoint {
-			on = serviceEnabled(cfg, config.ServiceRun)
-		}
+		on := gcloudOverrideOn(cfg, v)
 		if on && ports[v.service] != 0 {
 			addr := host(ports[v.service])
 			if ip := net.ParseIP(cfg.BindAddress); v.regional && ip != nil && ip.IsLoopback() {
