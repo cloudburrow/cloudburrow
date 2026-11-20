@@ -59,7 +59,11 @@ func TestConsoleAuditLogsScopes(t *testing.T) {
 				t.Fatalf("storage.googleapis.com's row offers %v", row.Actions)
 			}
 			etag := row.Actions[0].Fields[len(row.Actions[0].Fields)-1].Default
-			edit := map[string]string{"dataRead": "true", "dataReadExempted": "user:ada@example.com\nuser:bo@example.com", "etag": etag}
+			if !row.Actions[0].Panel || row.Actions[0].Submit != "Save" {
+				t.Errorf("the row's panel action is %+v", row.Actions[0])
+			}
+			edit := map[string]string{"dataRead": "true", "etag": etag,
+				"exempted": `[{"principal":"user:ada@example.com","dataRead":"true"},{"principal":"user:bo@example.com","dataRead":"true","dataWrite":"false"}]`}
 			if err := p.ActAt(sctx, "any-project", []string{"storage.googleapis.com"}, auditEditAction, edit); err != nil {
 				t.Fatalf("Edit log types: %v", err)
 			}
@@ -109,11 +113,30 @@ func TestConsoleAuditLogsScopes(t *testing.T) {
 					break
 				}
 			}
-			// Exempting principals from a log type that is not enabled is refused.
+			// Exempting a principal from a log type enables it, as Google
+			// documents; an exempted principal with no Disabled Log Types is
+			// refused.
 			acts = p.ListActions(sctx, "any-project")
-			bad := map[string]string{"dataWriteExempted": "user:x@example.com", "etag": acts[0].Fields[len(acts[0].Fields)-1].Default}
+			etag = acts[0].Fields[len(acts[0].Fields)-1].Default
+			bad := map[string]string{"exempted": `[{"principal":"user:x@example.com"}]`, "etag": etag}
 			if err := p.ActAt(sctx, "any-project", nil, auditDefaultAction, bad); err == nil {
-				t.Error("an exemption from a disabled log type was accepted")
+				t.Error("an exempted principal with no disabled log type was accepted")
+			}
+			ex := map[string]string{"adminRead": "true", "exempted": `[{"principal":"user:x@example.com","dataWrite":"true"}]`, "etag": etag}
+			if err := p.ActAt(sctx, "any-project", nil, auditDefaultAction, ex); err != nil {
+				t.Fatal(err)
+			}
+			got, _ = c.api.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: c.resource})
+			if lc := logConfig(auditConfigsByService(got)[allServices], "DATA_WRITE"); lc == nil || len(lc.GetExemptedMembers()) != 1 {
+				t.Errorf("allServices after an exemption from Data Write = %v; want Data Write enabled with the principal", auditConfigsByService(got)[allServices])
+			}
+			// The panel reads the exemption back on its Exempted Principals tab.
+			acts = p.ListActions(sctx, "any-project")
+			for _, f := range acts[0].Fields {
+				if f.Name == "exempted" && (f.Section != "Exempted Principals" || f.AddLabel != "Add exempted principal" || f.RemoveLabel != "Delete" ||
+					!strings.Contains(f.Default, `"dataWrite":"true"`)) {
+					t.Errorf("the Exempted Principals field is %+v", f)
+				}
 			}
 			// Clearing every log type removes the service's config.
 			l, _ = p.List(sctx, "any-project")

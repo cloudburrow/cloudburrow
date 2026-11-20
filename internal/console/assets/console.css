@@ -2092,6 +2092,16 @@ dd.has-copy .property-copy { padding: 2px 8px; font-size: var(--text-badge-size)
 .group-cell textarea, .group-cell input { width: 100%; box-sizing: border-box; }
 .group-cell-label { font-size: var(--text-caption-size); color: var(--text-muted); }
 .group-check { display: inline-flex; align-items: center; gap: 6px; }
+/* A picklist (#1864): Create role's and Edit role's permissions, each with
+   a checkbox, and the Add permissions picker under them. */
+.picklist-rows { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 4px; max-height: 240px; overflow-y: auto; }
+.picklist-row .mono { overflow-wrap: anywhere; }
+.picklist-picker { border: 1px solid var(--border); border-radius: var(--radius-control); padding: 12px; margin-top: 8px; }
+.picklist-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.picklist-filters { display: flex; gap: 12px; flex-wrap: wrap; }
+.picklist-filters .form-row { flex: 1 1 160px; min-width: 0; }
+.picklist-filters select { width: 100%; }
+.table-title { font-size: var(--text-heading-size); font-weight: 500; margin: 16px 0 8px; }
 
 /* Logs Explorer (#1863, round 2): query suggestions, summary chips,
    highlight, pinned entries and the Timeline's drag handles. */
@@ -2264,7 +2274,21 @@ svg.bq-chart { display: block; border: 1px solid var(--border); border-radius: v
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-control); padding: 8px;
   box-shadow: var(--shadow-menu); }
 .iam-role-search { width: 100%; box-sizing: border-box; }
-.iam-role-list { list-style: none; margin: 8px 0 0; padding: 0; max-height: 280px; overflow-y: auto; }
+.iam-role-list { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow-y: auto; min-width: 0; }
+/* Select a role's product groups (#2013): the groups down the left, the
+   chosen group's roles (or the filter's hits) on the right. */
+.iam-role-panes { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 8px; margin-top: 8px; }
+.iam-role-products { list-style: none; margin: 0; padding: 0 8px 0 0; max-height: 320px; overflow-y: auto; border-right: 1px solid var(--border); }
+.iam-role-product { display: block; width: 100%; text-align: left; background: none; border: 0; padding: 6px 8px;
+  cursor: pointer; color: inherit; font: inherit; overflow-wrap: anywhere; }
+.iam-role-product:hover, .iam-role-product:focus-visible, .iam-role-product[aria-pressed="true"] { background: var(--surface-alt); }
+.iam-role-product[aria-pressed="true"] { font-weight: 500; }
+.iam-role-group { font-size: var(--text-caption-size); color: var(--text-muted); padding: 8px 8px 2px; font-weight: 500; }
+.iam-role-status { margin: 8px 0 0; }
+@media (max-width: 600px) {
+  .iam-role-panes { grid-template-columns: minmax(0, 1fr); }
+  .iam-role-products { border-right: 0; border-bottom: 1px solid var(--border); max-height: 160px; padding: 0 0 8px; }
+}
 .iam-role-option { display: block; width: 100%; text-align: left; background: none; border: 0; padding: 6px 8px;
   cursor: pointer; color: inherit; font: inherit; }
 .iam-role-option:hover, .iam-role-option:focus-visible, .iam-role-option[aria-selected="true"] { background: var(--surface-alt); }
@@ -2472,3 +2496,12 @@ svg.bq-chart { display: block; border: 1px solid var(--border); border-radius: v
 .bq-files { list-style: none; margin: 8px 0 0; padding: 0; }
 .bq-files .bq-node-row { padding: 2px 0; }
 .bq-files-note { font-size: var(--text-caption-size); }
+/* An action drawn in the info panel (Action.Panel, #2013): Google's Audit
+   Logs information panel, its tabs Log Types and Exempted Principals. */
+.action-panel { display: flex; flex-direction: column; gap: 8px; }
+.action-panel .tab-strip { margin: 4px 0; }
+.action-panel .form-section[hidden] { display: none; }
+.action-panel .group-row { flex-wrap: wrap; }
+.orgpolicy-custom-values { display: grid; gap: 4px; margin-bottom: 4px; }
+.orgpolicy-custom-line { display: flex; gap: 8px; align-items: center; }
+.orgpolicy-custom-line input { flex: 1 1 auto; min-width: 0; }

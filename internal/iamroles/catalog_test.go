@@ -54,3 +54,22 @@ func TestPredefinedRoles(t *testing.T) {
 		t.Fatalf("roles/resourcemanager.folderAdmin: %+v", f.Lowest)
 	}
 }
+
+func TestPredefinedRoleProducts(t *testing.T) {
+	for name, want := range map[string]string{
+		"roles/storage.objectViewer": "Cloud Storage",
+		"roles/compute.admin":        "Compute Engine",
+		"roles/datastore.user":       "Firestore",
+		"roles/iam.devOps":           "Roles for job functions",
+		"roles/viewer":               BasicProduct,
+	} {
+		if r := Predefined(name); r == nil || r.Product != want {
+			t.Errorf("%s's product = %+v, want %q", name, r, want)
+		}
+	}
+	for _, n := range PredefinedNames() {
+		if Predefined(n).Product == "" {
+			t.Errorf("%s has no product", n)
+		}
+	}
+}

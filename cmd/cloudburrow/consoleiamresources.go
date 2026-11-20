@@ -31,6 +31,16 @@ func (iamOrgPoliciesProvider) Title() string { return "Organization Policies" }
 
 // List is every constraint Google's page lists for the project, set or
 // not, with where its policy comes from and what is in effect.
+//
+// The columns (#2013): Google's docs name the list, its Filter (by
+// constraint name), Policy details and the three policy sources, but no
+// column (re-read 2026-11-20: creating-managing-policies, apply-policies
+// and create-custom-constraints under docs.cloud.google.com). So they are
+// the API's fields: Constraint is the constraint's name and Name its
+// displayName; Policy source is which of Google's three sources the
+// project's own policy is (none: Inherit parent's policy; spec.reset:
+// Google-managed default; rules: Override parent's policy); Effective is
+// getEffectivePolicy's; Last edited is the policy's updateTime.
 func (p iamOrgPoliciesProvider) List(_ context.Context, project string) (console.Listing, error) {
 	l := console.Listing{NameColumn: "Constraint", Columns: []string{"Name", "Policy source", "Effective", "Last edited"},
 		Noun: "organization policies", Note: orgPolicyNote}
@@ -39,10 +49,11 @@ func (p iamOrgPoliciesProvider) List(_ context.Context, project string) (console
 		return l, nil
 	}
 	resource := "projects/" + project
-	own := map[string]string{}
+	own, reset := map[string]string{}, map[string]bool{}
 	if all, err := p.registry.OrgPolicies(resource); err == nil {
 		for _, op := range all {
 			own[op.Constraint] = op.UpdateTime
+			reset[op.Constraint] = op.RestoreDefault != nil
 		}
 	} else {
 		l.Unavailable = consoleErr(err)
@@ -51,7 +62,10 @@ func (p iamOrgPoliciesProvider) List(_ context.Context, project string) (console
 	for _, c := range resourcemanager.Constraints {
 		source := "Inherit parent's policy"
 		updated, set := own[c.Name]
-		if set {
+		switch {
+		case set && reset[c.Name]:
+			source = "Google-managed default"
+		case set:
 			source = "Override parent's policy"
 		}
 		effective := "Google-managed default"

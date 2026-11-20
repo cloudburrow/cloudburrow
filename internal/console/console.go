@@ -108,6 +108,10 @@ type Listing struct {
 	// up with two columns headed "Name": the implicit one and a field of the
 	// same label. The screen decides what its identifier is called.
 	NameColumn string `json:"nameColumn,omitempty"`
+	// TableTitle heads the table, and names it, where Google's page titles
+	// its table apart from the page: Audit Logs' "Data Access audit logs
+	// configuration" (#1864). Empty draws no heading.
+	TableTitle string `json:"tableTitle,omitempty"`
 	// Noun is the plural word for these resources, used in the filter and the
 	// empty state. Empty falls back to the screen's title, which reads badly
 	// when the title is not a noun for the rows — "Filter resource manager".
@@ -410,6 +414,9 @@ type Field struct {
 	// value ("true" or "false" for a checkbox); ParseGroup reads it.
 	Group    []Field `json:"group,omitempty"`
 	AddLabel string  `json:"addLabel,omitempty"`
+	// RemoveLabel names each row's remove button where Google's is not
+	// "Remove": Audit Logs' exempted principals have Delete (#2013).
+	RemoveLabel string `json:"removeLabel,omitempty"`
 	// DisabledOptions, on a "radio" field, are options drawn but not
 	// choosable: SQL Server on Cloud SQL's engine choice, which CloudBurrow
 	// does not run (#1860).
@@ -447,7 +454,27 @@ type Field struct {
 	// The fields stay the form's: their values are submitted with it, and
 	// the button is drawn while any of them is visible.
 	Panel string `json:"panel,omitempty"`
+	// PickFrom, on a "picklist" field (PicklistFieldType), is the
+	// "service:call" of the Studio call that answers what the field's
+	// picker offers, as Google's Create role and Edit role have Add
+	// permissions (#1864). The value is the chosen items, one per line; the
+	// form lists them with a checkbox each, cleared to remove one, and
+	// AddLabel names the button that opens the picker. The call gets
+	// {"filter": "<the picker's Filter by role>"} and answers
+	// {"items": [{"value": "...", "note": "..."}]}.
+	PickFrom string `json:"pickFrom,omitempty"`
+	// SeedFrom, on a "picklist" field, names the address parameter whose
+	// value seeds the chosen items (#2013): Google's Create custom role
+	// from selection opens Create custom role with the selected roles'
+	// permissions listed, each checked, unchecked to exclude it. The
+	// PickFrom call gets {"seed": "<the parameter's value>"} and answers
+	// {"items": [...], "note": "..."}, every item then chosen.
+	SeedFrom string `json:"seedFrom,omitempty"`
 }
+
+// PicklistFieldType is the Type of a list of items chosen from a picker
+// (Field.PickFrom): one per line in the value.
+const PicklistFieldType = "picklist"
 
 // FieldDialog is a Field's Dialog: Button opens a dialog titled Title, an
 // Intro above a table of Columns, each of Rows headed by its first cell.
@@ -681,6 +708,28 @@ type CreateThener interface {
 	Creator
 	CreateThen() string
 }
+
+// CreateCommitter is a Creator whose create page makes the resource
+// partway through its steps, as Google's Create service account makes the
+// account at the first step's Create and continue, before its roles and
+// users are granted (#1864). CreateCommitStep is that step's number (1 for
+// the first). Its Continue reads Create and continue and sends the form's
+// values with CreateCommitKey set to "true", the Create answering with the
+// name; the step's fields are then fixed, and the page's submit sends every
+// value with CreateCreatedKey holding that name, for the Create to finish
+// the resource it already made. Submitting before the step creates it all
+// at once, as Google's Done on the first step does.
+type CreateCommitter interface {
+	Creator
+	CreateCommitStep() int
+}
+
+// CreateCommitKey and CreateCreatedKey are the values a CreateCommitter's
+// page adds (see CreateCommitter).
+const (
+	CreateCommitKey  = "_commit"
+	CreateCreatedKey = "_created"
+)
 
 // Pager is a provider whose listings can be continued past their first page.
 //
@@ -946,6 +995,10 @@ type Section struct {
 	// Actions over the strip, and each tab its own content; the tab
 	// chosen is the address's subtab.
 	Tabs []Section `json:"tabs,omitempty"`
+	// Edit is a form drawn in the tab itself, above its content, sent as
+	// the page's Edit is (the provider's Editor): Google's service account
+	// Details tab has its Name box and Save (#1864). Its Label heads it.
+	Edit *EditForm `json:"edit,omitempty"`
 }
 
 // dropBlankProperties removes every Property whose Value is empty or
@@ -1266,7 +1319,10 @@ type Action struct {
 	// Href, when set, makes the action a link: it opens this console
 	// route instead of being performed, as a topic row's Create
 	// subscription opens the Create subscription page with the topic filled
-	// in (#1847). The action route never receives it.
+	// in (#1847). The action route never receives it. On a selection
+	// action, the checked rows go in the address as SelectionField's
+	// parameter, comma-separated: Roles' Create custom role from selection
+	// opens Create custom role with ?roles= (#2013).
 	Href string `json:"href,omitempty"`
 	// Button draws a row's action as a button on the row, before its
 	// menu, as Google's Triggers rows carry Run (#1854).
@@ -1276,6 +1332,15 @@ type Action struct {
 	// button: "next" for Next, as Google's Create application profile
 	// asks for the profile's type first (#1858), "continue" for Continue.
 	Steps string `json:"steps,omitempty"`
+	// Panel draws the action's form in the info panel beside the list
+	// instead of a dialog, its fields' Sections as the panel's tabs, as
+	// Google's Audit Logs edits the services checked in its table in an
+	// information panel (#2013). A selection action with Panel opens as
+	// rows are checked; when one row is checked and that row carries a
+	// Panel action of its own, the row's is drawn (its own values), and a
+	// row's Panel actions are not in its menu. A list action with Panel
+	// opens the panel from its button, as Set Default Configuration does.
+	Panel bool `json:"panel,omitempty"`
 }
 
 // PathActor is a provider with actions on the resources inside a resource.
@@ -2027,6 +2092,8 @@ type createForm struct {
 	Then string `json:"then,omitempty"`
 	// Href is CreateHrefer's: the console page the create button opens.
 	Href string `json:"href,omitempty"`
+	// CommitStep is CreateCommitter's: the step whose Continue creates.
+	CommitStep int `json:"commitStep,omitempty"`
 }
 
 // ProjectCreateFormer is a Creator whose fields depend on the project, as
@@ -2085,6 +2152,9 @@ func (s *Server) capabilitiesOf(p Provider) capabilities {
 		}
 		if ct, ok := p.(CreateThener); ok {
 			c.Create.Then = ct.CreateThen()
+		}
+		if cc, ok := p.(CreateCommitter); ok {
+			c.Create.CommitStep = cc.CreateCommitStep()
 		}
 		if ch, ok := p.(CreateHrefer); ok && ch.CreateHref() != "" {
 			c.Create.Href = ch.CreateHref()
