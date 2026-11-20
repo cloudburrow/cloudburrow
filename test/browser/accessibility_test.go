@@ -654,6 +654,15 @@ func (p *tab) reflowFailures() []string {
 			const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
 			for (let t = walker.nextNode(); t && wide.size < 3; t = walker.nextNode()) {
 				if (!t.textContent.trim() || !t.parentElement || t.parentElement.closest("[hidden]")) continue;
+				// Text in a box that clips or scrolls it, such as a narrow
+				// window's product menu strip, cannot widen the page: name
+				// what does instead.
+				let clipped = false;
+				for (let a = t.parentElement; a && a !== document.body; a = a.parentElement) {
+					const o = getComputedStyle(a).overflowX;
+					if (o === "auto" || o === "scroll" || o === "hidden" || o === "clip") { clipped = true; break; }
+				}
+				if (clipped) continue;
 				const range = document.createRange(); range.selectNodeContents(t);
 				const b = range.getBoundingClientRect();
 				if (b.right > vw + 1) wide.add("text " + JSON.stringify(t.textContent.trim().slice(0, 40)) + " in " +

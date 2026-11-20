@@ -78,12 +78,15 @@ func TestLoggingExplorerAsGoogleLaysItOut(t *testing.T) {
 	p.waitFor(shown("q-error") + ` && !` + shown("q-info") + ` && !` + shown("q-other"))
 	p.waitFor(`location.search.includes("query=severity")`)
 
-	// A query it cannot evaluate is refused on the pane, naming why.
-	setQuery("(severity>=ERROR)")
+	// A query with an unmatched parenthesis, which the language's syntax
+	// checklist names (logging-query-language, Syntax issues), is refused
+	// on the pane, naming where. (severity>=ERROR), which this used before
+	// #2026, is in the language and runs.
+	setQuery("(severity>=ERROR")
 	p.waitFor(`!document.querySelector("#log-query-error").hidden`)
 	var refusal string
 	p.eval(`document.querySelector("#log-query-error").textContent`, &refusal)
-	if !strings.Contains(refusal, "parentheses") {
+	if !strings.Contains(refusal, "syntax error") || !strings.Contains(refusal, "<EOF>") {
 		t.Errorf("the refused query says %q, want why", refusal)
 	}
 	p.forgive()
@@ -146,8 +149,14 @@ func TestLoggingExplorerAsGoogleLaysItOut(t *testing.T) {
 	p.waitFor(`location.pathname === "/logs/metrics/create" && document.querySelector("#f-filter") !== null`)
 	p.waitFor(`document.querySelector("#f-filter").value === "severity>=ERROR"`)
 
+	// Log Analytics is served wherever BigQuery is, with or without a
+	// linked dataset (#2021), and is not available locally elsewhere.
 	p.navigate("/logs/analytics?project=" + project)
-	p.waitFor(`document.querySelector("#view").textContent.includes("Not available locally")`)
+	if serviceServed(t, "logging-analytics") {
+		p.waitFor(`[...document.querySelectorAll("#view .log-views h2")].some((h) => h.textContent === "Log views")`)
+	} else {
+		p.waitFor(`document.querySelector("#view").textContent.includes("Not available locally")`)
+	}
 	p.navigate("/logs/dashboard?project=" + project)
 	p.waitFor(`document.querySelector("#view").textContent.includes("Log entries by severity")`)
 	p.waitFor(`[...document.querySelectorAll("#view a")].some((a) => a.textContent === "ERROR")`)

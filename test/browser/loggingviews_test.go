@@ -44,7 +44,9 @@ func TestLoggingViewsThroughTheBrowser(t *testing.T) {
 	p.clickText("#view .page-actions button", "Create view")
 	p.waitFor(`document.querySelector(".modal.is-open #f-id") !== null`)
 	p.run(chromedp.SendKeys(chromedp.CSS(`.modal.is-open #f-id`), "errors"))
-	setField("filter", "severity>=ERROR")
+	// A log view filter takes source(), resource.type and log_id(), not
+	// severity (#2028).
+	setField("filter", `LOG_ID("errors")`)
 	setField("description", "just errors")
 	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
@@ -68,13 +70,13 @@ func TestLoggingViewsThroughTheBrowser(t *testing.T) {
 	p.waitFor(`document.querySelector(".modal.is-open #f-filter") !== null`)
 	var prefilled string
 	p.eval(`document.querySelector(".modal.is-open #f-filter").value`, &prefilled)
-	if prefilled != "severity>=ERROR" {
+	if prefilled != `LOG_ID("errors")` {
 		t.Errorf("Edit's filter is prefilled with %q, want the view's", prefilled)
 	}
-	setField("filter", "severity>=WARNING")
+	setField("filter", `LOG_ID("warnings")`)
 	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
-	if body := views(); !strings.Contains(body, "severity\\u003e=WARNING") && !strings.Contains(body, "severity>=WARNING") {
+	if body := views(); !strings.Contains(body, `LOG_ID(\"warnings\")`) {
 		t.Errorf("the console API does not read the filter the browser saved: %s", body)
 	}
 
