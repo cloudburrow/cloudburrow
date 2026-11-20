@@ -206,6 +206,7 @@ func (p loggingAnalyticsProvider) rewrite(ctx context.Context, statement, fallba
 }
 
 var (
-	_ console.Provider = loggingAnalyticsProvider{}
-	_ console.Executor = loggingAnalyticsProvider{}
+	_ console.Provider  = loggingAnalyticsProvider{}
+	_ console.Executor  = loggingAnalyticsProvider{}
+	_ console.ListActor = loggingAnalyticsProvider{}
 )

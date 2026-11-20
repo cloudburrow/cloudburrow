@@ -8013,6 +8013,25 @@ function route() {
 // panel puts Google's default query on it in the editor. The results are
 // a table and, as Google's page lets them be, a chart (#2021), drawn as
 // BigQuery's Visualization draws one, from the result's column types.
+// Recent queries (#2031): Cloud Logging keeps the user's last 10,000
+// unique queries over 30 days (recentQueries.list), the Logs Explorer's and
+// Log Analytics' each in the Query library's Recent tab of its own page.
+// Recording one never stands in the way of running it.
+// Kept only where the instance serves Cloud Logging, whose Saved queries
+// screen comes with it.
+const keepsRecentQueries = () => !!capabilityOf("logging-saved-queries").id;
+
+function recordRecentQuery(project, query, sql) {
+  if (!project || !query || !query.trim() || !keepsRecentQueries()) return;
+  send(`/api/logs/recent-queries?project=${encodeURIComponent(project)}`, "POST", { query: query.trim(), sql })
+    .catch(() => { /* the query still runs */ });
+}
+
+async function listRecentQueries(project, sql) {
+  const d = await api(`/api/logs/recent-queries?project=${encodeURIComponent(project)}&type=${sql ? "sql" : "logging"}`);
+  return d.recentQueries || [];
+}
+
 async function renderLogAnalytics(view, match) {
   const caps = capabilityOf("logging-analytics");
   if (!caps.id) return renderUnavailable(view, match);
@@ -8032,8 +8051,69 @@ async function renderLogAnalytics(view, match) {
   // views, which the statement itself names.
   const chart = el("section", { class: "card log-analytics-chart", id: "log-analytics-chart", "aria-labelledby": "log-analytics-chart-title", hidden: true });
   const chartTab = {};
+  // The statement whose results are drawn: what Save to dashboard saves.
+  let chartedSQL = "";
+  // Save to dashboard (#2031), as on Google's Log Analytics: the chart, or
+  // the table, to a new or existing custom dashboard of the project, a
+  // widget whose query is the statement (opsAnalyticsQuery).
+  const dashboardsServed = !!capabilityOf("monitoring-dashboards").id;
+  const openSaveToDashboard = async () => {
+    const { dialog, close } = openModal({ labelledBy: "la-dash-title" });
+    const error = el("p", { class: "form-error", role: "alert", hidden: true });
+    const choice = el("select", { id: "la-dash-choice" }, el("option", { value: "New dashboard", text: "New dashboard" }));
+    const name = el("input", { type: "text", id: "la-dash-name", required: true });
+    const nameRow = el("div", { class: "form-row" }, el("label", { for: "la-dash-name", text: "Dashboard name" }), name);
+    const title = el("input", { type: "text", id: "la-dash-chart-title", required: true, value: "Log Analytics chart" });
+    const kind = el("select", { id: "la-dash-kind" },
+      ...["Bar", "Line", "Table"].map((k) => el("option", { value: k, text: k === "Table" ? "Table" : `${k} chart` })));
+    kind.value = ((chartTab.viz || {}).type === "Line") ? "Line" : "Bar";
+    choice.addEventListener("change", () => {
+      nameRow.hidden = choice.value !== "New dashboard";
+      name.required = !nameRow.hidden;
+    });
+    const submit = el("button", { type: "submit", class: "primary", text: "Save" });
+    dialog.append(el("form", { class: "modal-body", onsubmit: async (e) => {
+        e.preventDefault();
+        error.hidden = true;
+        submit.disabled = true;
+        try {
+          await send(`/api/actions/logging-analytics?project=${encodeURIComponent(project)}`, "POST", {
+            Path: [], Action: "save-chart-to-dashboard", Values: { dashboard: choice.value, dashboardName: name.value.trim(),
+              title: title.value.trim(), kind: kind.value, sql: chartedSQL } });
+          const where = choice.value === "New dashboard" ? name.value.trim() : choice.selectedOptions[0].textContent;
+          close();
+          notify(`Saved ${title.value.trim()} to dashboard ${where}`);
+        } catch (err) {
+          error.textContent = err.message;
+          error.hidden = false;
+          submit.disabled = false;
+        }
+      } },
+      el("h2", { id: "la-dash-title", text: "Save to dashboard" }),
+      el("div", { class: "form-row" }, el("label", { for: "la-dash-choice", text: "Dashboard" }), choice),
+      nameRow,
+      el("div", { class: "form-row" }, el("label", { for: "la-dash-chart-title", text: "Chart title" }), title),
+      el("div", { class: "form-row" }, el("label", { for: "la-dash-kind", text: "Save as" }), kind),
+      el("p", { class: "unavailable", text: "The dashboard runs this query, as Cloud Monitoring keeps it: a widget whose query is the SQL (opsAnalyticsQuery)." }),
+      error,
+      el("div", { class: "modal-actions" },
+        el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }),
+        submit)));
+    name.focus();
+    try {
+      const list = await api(`/api/resources/monitoring-dashboards?project=${encodeURIComponent(project)}`);
+      for (const d of list.items || []) choice.append(el("option", { value: d.name, text: (d.fields || {})["Display name"] || d.name }));
+    } catch { /* New dashboard alone */ }
+  };
+  const saveToDashboard = el("button", { type: "button", class: "secondary", id: "log-analytics-save-dashboard",
+    text: "Save to dashboard", "aria-haspopup": "dialog",
+    disabled: dashboardsServed && project ? null : "disabled",
+    title: dashboardsServed ? (project ? "Save this chart to a custom dashboard" : "Choose a project: a dashboard is one project's")
+      : "Not available locally: a dashboard is Cloud Monitoring's, and this instance does not serve Cloud Monitoring.",
+    onclick: () => openSaveToDashboard() });
   const drawResultChart = (listing) => {
     if (!listing || !(listing.items || []).length) { chart.hidden = true; return; }
+    chartedSQL = editor.value.trim();
     const types = listing.columnTypes || {};
     const cols = [listing.nameColumn, ...(listing.columns || [])].filter(Boolean);
     const res = {
@@ -8042,7 +8122,8 @@ async function renderLogAnalytics(view, match) {
       rows: listing.items.map((it) => ({ [listing.nameColumn]: it.name, ...(it.fields || {}) })),
     };
     res.totalRows = res.rows.length;
-    const draw = () => setChildren(chart, el("h2", { id: "log-analytics-chart-title", text: "Chart" }),
+    const draw = () => setChildren(chart,
+      el("div", { class: "log-fields-head" }, el("h2", { id: "log-analytics-chart-title", text: "Chart" }), saveToDashboard),
       bqVisualization(res, chartTab, draw));
     draw();
     chart.hidden = false;
@@ -8052,6 +8133,21 @@ async function renderLogAnalytics(view, match) {
   editor.setAttribute("aria-label", "Query");
   const run = [...pane.querySelectorAll("button")].find((b) => b.textContent === "Run");
   if (run) run.textContent = "Run query";
+  // Each statement run is one of the user's recent queries (#2031).
+  if (run) run.addEventListener("click", () => { recordRecentQuery(project, editor.value, true); setTimeout(drawRecent, 500); });
+  const recentList = el("div", { id: "log-analytics-recent" });
+  const drawRecent = async () => {
+    if (!project || !keepsRecentQueries()) return setChildren(recentList);
+    let recent = [];
+    try { recent = await listRecentQueries(project, true); } catch { /* none shown */ }
+    setChildren(recentList, el("h2", { text: "Recent queries" }), recent.length
+      ? el("ul", { class: "log-view-list" }, ...recent.slice(0, 10).map((r) => el("li", {},
+          el("button", { type: "button", class: "link-button mono", text: r.query.replace(/\s+/g, " ").slice(0, 120),
+            title: "Put this query in the editor",
+            onclick: () => { editor.value = r.query; editor.dispatchEvent(new Event("input")); editor.focus(); } }),
+          el("span", { class: "unavailable", text: ` ${relativeTime(new Date(r.lastRunTime))}` }))))
+      : el("p", { class: "unavailable", text: "No recent queries. Each query you run is kept here for 30 days." }));
+  };
   const defaultQuery = (name) => "SELECT\n  timestamp, severity, log_name, resource.type, text_payload, json_payload\n" +
     `FROM\n  \`${name}\`\nORDER BY timestamp DESC\nLIMIT 1000`;
   if (!editor.value && views.length) {
@@ -8068,8 +8164,10 @@ async function renderLogAnalytics(view, match) {
             onclick: () => { editor.value = defaultQuery(v.name); editor.dispatchEvent(new Event("input")); editor.focus(); } }),
           el("span", { class: "unavailable", text: ` Linked dataset: ${(v.fields || {})["Linked dataset in BigQuery"] || "none needed"}` }))))
       : el("p", { class: "unavailable", text: data.prompt ||
-          "No bucket of this project is upgraded to use Log Analytics. Upgrade one in Logs Storage to query it here." }));
+          "No bucket of this project is upgraded to use Log Analytics. Upgrade one in Logs Storage to query it here." }),
+    recentList);
   setChildren(view, header, el("div", { class: "log-analytics" }, panel, el("div", { class: "log-analytics-main" }, pane, chart)));
+  drawRecent();
   announce("Log Analytics");
 }
 
@@ -11202,16 +11300,9 @@ async function renderLogs(view) {
   // Summary fields (#1863), Google's Preferences > Manage summary fields:
   // custom fields drawn as chips at the start of each entry's summary,
   // optionally truncated; and Show summary chips. Per viewer.
-  // Recent queries (#1863): the last 20 queries run, in this browser.
-  const RECENT_KEY = "cloudburrow.logs.recentQueries";
-  const recentQueries = () => {
-    try { return JSON.parse(readStored(RECENT_KEY, "[]")).filter((r) => r && typeof r.query === "string"); } catch { return []; }
-  };
-  const rememberQuery = (query) => {
-    if (!query) return;
-    const list = [{ query, at: Date.now() }, ...recentQueries().filter((r) => r.query !== query)].slice(0, 20);
-    writeStored(RECENT_KEY, JSON.stringify(list));
-  };
+  // Recent queries (#2031): the user's, as Google keeps them, in Cloud
+  // Logging (recentQueries.list), each query run recorded there.
+  const rememberQuery = (query) => recordRecentQuery(project, query, false);
   const SUMMARY_KEY = "cloudburrow.logs.summary";
   let summary = { fields: [], truncate: false, chars: 30, fromEnd: false, show: true, defaults: true };
   try { summary = { ...summary, ...JSON.parse(readStored(SUMMARY_KEY, "{}")) }; } catch { /* the defaults */ }
@@ -11347,12 +11438,20 @@ async function renderLogs(view) {
   // histogram and the rows can never disagree about what is being looked at.
   const timeline = el("div", { class: "card log-timeline", id: "log-timeline" });
   let timelineCollapsed = false;
-  // The Fields pane (#1863): the values of the entries the query matches,
-  // each with its count, as Google's Log fields pane lists them; choosing one
+  // The Fields pane (#1863, #2031): the values of the entries the query
+  // matches, each with its approximate count, as Google's Fields pane lists
+  // them in three sections (logs-explorer-interface, re-read 2026-11-20):
+  // Pinned, the fields pinned from an entry; System metadata, the entries
+  // broken down by Resource type and Severity, which are always there, and
+  // by Log name and Project ID; and Frequent fields, "the most frequent
+  // json_payload fields in the current query results". Choosing a value
   // adds its clause to the query and runs it.
-  const fieldsPane = el("aside", { class: "card log-fields", id: "log-fields", "aria-label": "Log fields" });
+  const fieldsPane = el("aside", { class: "card log-fields", id: "log-fields", "aria-label": "Fields" });
   const LOG_FIELD_GROUPS = [["resource.type", "Resource type"], ["severity", "Severity"],
     ["logName", "Log name"], ["resource.labels.project_id", "Project ID"]];
+  // How many json_payload fields Frequent fields lists, and values a field.
+  const FREQUENT_FIELDS = 10;
+  const FIELD_VALUES = 20;
   // Pin to Fields pane (#1863): a field of an expanded entry gets a group of
   // its own under Pinned, at the top of the pane. Per viewer.
   const PINNED_FIELDS_KEY = "cloudburrow.logs.pinnedFields";
@@ -11369,42 +11468,78 @@ async function renderLogs(view) {
     pinnedFields = pinnedFields.filter((f) => f !== path);
     writeStored(PINNED_FIELDS_KEY, JSON.stringify(pinnedFields));
     drawFields(fieldEntries);
-    announce(`Unpinned ${path}`);
+    announce(`Removed ${path} from the Fields pane`);
   };
+  // jsonPayloadLeaves calls f with each scalar field of a JSON payload and
+  // its path, jsonPayload.a.b; a key that is not an identifier is quoted,
+  // as the query language takes it. Arrays are not walked: a field with an
+  // array index cannot be added (logs-explorer-interface).
+  const jsonPayloadLeaves = (v, path, f) => {
+    if (v === null || v === undefined) return;
+    if (Array.isArray(v)) return;
+    if (typeof v === "object") {
+      for (const [k, x] of Object.entries(v)) {
+        jsonPayloadLeaves(x, `${path}.${/^[A-Za-z_][A-Za-z0-9_]*$/.test(k) ? k : JSON.stringify(k)}`, f);
+      }
+      return;
+    }
+    f(path, v);
+  };
+  const countValues = (entries, path) => {
+    const counts = new Map();
+    for (const e of entries) {
+      const v = path.split(".").map((k) => k.replace(/^"|"$/g, ""))
+        .reduce((o, k) => (o && typeof o === "object" ? o[k] : undefined), e.logEntry || {});
+      if (v !== undefined && v !== "" && v !== null && typeof v !== "object") counts.set(v, (counts.get(v) || 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, FIELD_VALUES);
+  };
+  const frequentFields = (entries) => {
+    const seen = new Map();
+    for (const e of entries) {
+      const payload = (e.logEntry || {}).jsonPayload;
+      if (!payload || typeof payload !== "object") continue;
+      const here = new Set();
+      jsonPayloadLeaves(payload, "jsonPayload", (path) => here.add(path));
+      for (const p of here) seen.set(p, (seen.get(p) || 0) + 1);
+    }
+    return [...seen.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).slice(0, FREQUENT_FIELDS).map(([p]) => p);
+  };
+  const fieldGroup = (g) => el("section", { class: "log-field-group" + (g.pinned ? " is-pinned" : ""), "data-field": g.path },
+    g.pinned
+      ? el("div", { class: "log-fields-head" }, el("h4", { class: "mono", text: g.label }),
+          el("button", { class: "link-button is-inline", text: "Remove", "aria-label": `Remove ${g.path} from the Fields pane`,
+            onclick: () => unpinField(g.path) }))
+      : el("h4", { class: g.mono ? "mono" : null, text: g.label }),
+    g.values.length
+      ? el("ul", {}, ...g.values.map(([v, n]) => el("li", {},
+          el("button", { class: "log-field-value", "data-value": String(v),
+            title: `Add ${g.path}=${logQueryValue(String(v))} to the query`,
+            onclick: () => { addClause(`${g.path}=${logQueryValue(String(v))}`); runQuery(); } },
+            el("span", { class: "mono", text: g.path === "logName" ? decodeURIComponent(String(v).slice(String(v).indexOf("/logs/") + 6)) : String(v) }),
+            el("span", { class: "log-field-count", "aria-label": `about ${n} entries`, text: String(n) })))))
+      : el("p", { class: "unavailable", text: "No values" }));
   const drawFields = (entries) => {
     fieldEntries = entries;
-    const groups = [...pinnedFields.map((f) => [f, f, true]), ...LOG_FIELD_GROUPS].map(([path, label, isPinned]) => {
-      const counts = new Map();
-      for (const e of entries) {
-        const v = path.split(".").reduce((o, k) => (o && typeof o === "object" ? o[k] : undefined), e.logEntry || {});
-        if (v !== undefined && v !== "") counts.set(v, (counts.get(v) || 0) + 1);
-      }
-      return { path, label, pinned: !!isPinned, values: [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 20) };
-    });
-    const types = groups.find((g) => g.path === "resource.type" && !g.pinned).values.map(([v]) => v);
+    const pinned = pinnedFields.map((path) => ({ path, label: path, pinned: true, values: countValues(entries, path) }));
+    const system = LOG_FIELD_GROUPS.map(([path, label]) => ({ path, label, values: countValues(entries, path) }));
+    const frequent = frequentFields(entries).map((path) => ({ path, label: path, mono: true, values: countValues(entries, path) }));
+    const types = system.find((g) => g.path === "resource.type").values.map(([v]) => v);
     const keep = resourceType.value;
     setChildren(resourceType, el("option", { value: "", text: "All resources" }),
       ...[...new Set([...types, ...(keep ? [keep] : [])])].sort().map((v) => el("option", { value: v, text: v })));
     resourceType.value = keep;
+    const section = (id, title, groups, empty) => el("section", { class: "log-fields-section", id, "aria-labelledby": `${id}-title` },
+      el("h3", { class: "log-fields-subhead", id: `${id}-title`, text: title }),
+      groups.length ? groups.map(fieldGroup) : el("p", { class: "unavailable", text: empty }));
     setChildren(fieldsPane,
-      el("div", { class: "log-fields-head" }, el("h2", { text: "Log fields" }),
+      el("div", { class: "log-fields-head" }, el("h2", { text: "Fields" }),
         el("button", { class: "link-button is-inline", text: "Clear", onclick: () => {
           queryEditor.value = ""; severity.value = ""; resourceType.value = ""; runQuery(); } })),
-      pinnedFields.length ? el("h3", { class: "log-fields-subhead", text: "Pinned" }) : null,
-      ...groups.map((g) => el("section", { class: "log-field-group" + (g.pinned ? " is-pinned" : ""), "data-field": g.path },
-        g.pinned
-          ? el("div", { class: "log-fields-head" }, el("h3", { class: "mono", text: g.label }),
-              el("button", { class: "link-button is-inline", text: "Unpin", "aria-label": `Unpin ${g.path}`,
-                onclick: () => unpinField(g.path) }))
-          : el("h3", { text: g.label }),
-        g.values.length
-          ? el("ul", {}, ...g.values.map(([v, n]) => el("li", {},
-              el("button", { class: "log-field-value", "data-value": v,
-                title: `Add ${g.path}=${logQueryValue(v)} to the query`,
-                onclick: () => { addClause(`${g.path}=${logQueryValue(v)}`); runQuery(); } },
-                el("span", { class: "mono", text: g.path === "logName" ? decodeURIComponent(v.slice(v.indexOf("/logs/") + 6)) : v }),
-                el("span", { class: "log-field-count", text: String(n) })))))
-          : el("p", { class: "unavailable", text: "No values" }))));
+      el("p", { class: "unavailable log-fields-note", text: "Approximate counts, over the entries the query read." }),
+      pinned.length ? section("log-fields-pinned", "Pinned", pinned, "") : null,
+      section("log-fields-system", "System metadata", system, ""),
+      section("log-fields-frequent", "Frequent fields", frequent, "No json_payload fields in the current query results."));
   };
 
   // The Timeline's drag handles (#1863): the start and end of the range,
@@ -12188,11 +12323,20 @@ async function renderLogs(view) {
       }
       panel.setAttribute("aria-labelledby", `log-library-tab-${current}`);
       if (current === "recent") {
-        const recent = recentQueries();
+        if (!keepsRecentQueries()) return setChildren(panel, el("p", { class: "unavailable", text: "Not available locally: recent queries are Cloud Logging's, and this instance does not serve Cloud Logging." }));
+        if (!project) return setChildren(panel, el("p", { class: "unavailable", text: "Choose a project in the toolbar: recent queries belong to one." }));
+        setChildren(panel, el("p", { class: "unavailable", text: "Loading recent queries…" }));
+        let recent;
+        try {
+          recent = await listRecentQueries(project, false);
+        } catch (err) {
+          return setChildren(panel, el("p", { class: "form-error", role: "alert", text: err.message }));
+        }
+        if (current !== "recent") return;
         return setChildren(panel, recent.length
-          ? el("ul", { class: "query-library-list" }, ...recent.map((r) => item({ query: r.query },
-              el("span", { class: "unavailable", text: relativeTime(new Date(r.at)) }))))
-          : el("p", { class: "unavailable", text: "No recent queries. A query you run is listed here, in this browser." }));
+          ? el("ul", { class: "query-library-list", id: "log-recent-queries" }, ...recent.map((r) => item({ query: r.query },
+              el("span", { class: "unavailable", text: `Last run ${relativeTime(new Date(r.lastRunTime))}` }))))
+          : el("p", { class: "unavailable", text: "No recent queries. Each query you run is kept here for 30 days." }));
       }
       if (current === "google") {
         return setChildren(panel, ...LOG_QUERY_LIBRARY.map(([section, queries]) => el("section", { class: "query-library-section" },

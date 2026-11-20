@@ -17651,6 +17651,7 @@
         "method": "google.monitoring.dashboard.v1.DashboardsService/CreateDashboard",
         "status": "Verified",
         "tests": [
+          "test/compat/logging2031_test.go:147 TestMonitoringDashboardOpsAnalyticsQuery",
           "test/compat/monitoring_alerting_test.go:544 TestMonitoringDashboards",
           "test/compat/monitoring_alerting_test.go:594 TestTerraformMonitoringAlerting",
           "test/compat/monitoring_alerting_test.go:703 TestGcloudMonitoring"
@@ -17660,6 +17661,7 @@
         "method": "google.monitoring.dashboard.v1.DashboardsService/DeleteDashboard",
         "status": "Verified",
         "tests": [
+          "test/compat/logging2031_test.go:147 TestMonitoringDashboardOpsAnalyticsQuery",
           "test/compat/monitoring_alerting_test.go:544 TestMonitoringDashboards",
           "test/compat/monitoring_alerting_test.go:594 TestTerraformMonitoringAlerting",
           "test/compat/monitoring_alerting_test.go:703 TestGcloudMonitoring"
@@ -17669,6 +17671,7 @@
         "method": "google.monitoring.dashboard.v1.DashboardsService/GetDashboard",
         "status": "Verified",
         "tests": [
+          "test/compat/logging2031_test.go:147 TestMonitoringDashboardOpsAnalyticsQuery",
           "test/compat/monitoring_alerting_test.go:544 TestMonitoringDashboards",
           "test/compat/monitoring_alerting_test.go:594 TestTerraformMonitoringAlerting",
           "test/compat/monitoring_alerting_test.go:703 TestGcloudMonitoring"
@@ -17678,6 +17681,7 @@
         "method": "google.monitoring.dashboard.v1.DashboardsService/ListDashboards",
         "status": "Verified",
         "tests": [
+          "test/compat/logging2031_test.go:147 TestMonitoringDashboardOpsAnalyticsQuery",
           "test/compat/monitoring_alerting_test.go:544 TestMonitoringDashboards",
           "test/compat/monitoring_alerting_test.go:703 TestGcloudMonitoring"
         ]
@@ -17686,6 +17690,7 @@
         "method": "google.monitoring.dashboard.v1.DashboardsService/UpdateDashboard",
         "status": "Verified",
         "tests": [
+          "test/compat/logging2031_test.go:147 TestMonitoringDashboardOpsAnalyticsQuery",
           "test/compat/monitoring_alerting_test.go:544 TestMonitoringDashboards"
         ]
       },

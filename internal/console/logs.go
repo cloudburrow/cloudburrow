@@ -52,6 +52,21 @@ type Entry struct {
 	// what makes "click a failed operation to see its logs" possible.
 	OperationID string `json:"operationId,omitempty"`
 	Message     string `json:"message"`
+	// JSONPayload is a Cloud Logging entry's jsonPayload, its credentials
+	// redacted as Message's are (RedactJSON), or nil: what the query
+	// editor matches jsonPayload.* against and the Fields pane's Frequent
+	// fields count (#2031).
+	JSONPayload map[string]any `json:"jsonPayload,omitempty"`
+}
+
+// RedactJSON is a JSON payload with Redact applied to its text, or nil when
+// what is left is not a JSON object.
+func RedactJSON(payload []byte) map[string]any {
+	var out map[string]any
+	if json.Unmarshal([]byte(Redact(string(payload))), &out) != nil {
+		return nil
+	}
+	return out
 }
 
 // OperationState is the lifecycle of a tracked operation.

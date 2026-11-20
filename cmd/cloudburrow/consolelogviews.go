@@ -15,6 +15,7 @@ import (
 
 	"cloud.google.com/go/logging/apiv2/loggingpb"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/cloudburrow/cloudburrow/internal/admin"
 	"github.com/cloudburrow/cloudburrow/internal/console"
@@ -42,7 +43,7 @@ func consoleEntry(e *loggingpb.LogEntry) console.Entry {
 	if rest, ok := strings.CutPrefix(e.GetLogName(), "projects/"); ok {
 		project, _, _ = strings.Cut(rest, "/")
 	}
-	return console.Entry{
+	out := console.Entry{
 		Timestamp: e.GetTimestamp().AsTime(),
 		Severity:  consoleSeverity(e.GetSeverity().String()),
 		Source:    console.LoggingSourcePrefix + e.GetLogName()[strings.LastIndex(e.GetLogName(), "/")+1:],
@@ -50,6 +51,14 @@ func consoleEntry(e *loggingpb.LogEntry) console.Entry {
 		Resource:  e.GetLogName(),
 		Message:   console.Redact(entryMessage(e)),
 	}
+	// The jsonPayload itself, for the query editor and the Fields pane's
+	// Frequent fields (#2031).
+	if p, ok := e.GetPayload().(*loggingpb.LogEntry_JsonPayload); ok {
+		if b, err := protojson.Marshal(p.JsonPayload); err == nil {
+			out.JSONPayload = console.RedactJSON(b)
+		}
+	}
+	return out
 }
 
 func (v consoleLogViews) Buckets(ctx context.Context, parent string) ([]console.LogBucketViews, error) {

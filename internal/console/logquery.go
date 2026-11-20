@@ -46,10 +46,16 @@ func LogEntryFields(e Entry) map[string]string {
 }
 
 // logEntryJSON nests LogEntryFields back into the LogEntry shape, for the
-// expanded entry.
+// expanded entry; an entry with a jsonPayload has that, and no textPayload,
+// as a LogEntry has one payload (#2031).
 func logEntryJSON(e Entry) map[string]any {
 	out := map[string]any{}
-	for path, v := range LogEntryFields(e) {
+	fields := LogEntryFields(e)
+	if e.JSONPayload != nil {
+		delete(fields, "textPayload")
+		out["jsonPayload"] = e.JSONPayload
+	}
+	for path, v := range fields {
 		parts := strings.Split(path, ".")
 		m := out
 		for _, p := range parts[:len(parts)-1] {

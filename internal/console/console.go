@@ -1433,6 +1433,8 @@ type Server struct {
 	// logNames lists a parent's log names, for the Logs Explorer's Log name
 	// picker (#1554).
 	logNames LogNameLister
+	// recentQueries are Cloud Logging's per-user recent queries (#2031).
+	recentQueries RecentQueries
 	// linter is the IAM API's LintPolicy, for the condition editor's Run
 	// Linter (#1756, iamlint.go); nil offers none.
 	linter PolicyLinter
@@ -1529,6 +1531,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/logs/buckets", s.handleLogBuckets)
 	mux.HandleFunc("GET /api/logs/names", s.handleLogNames)
 	mux.HandleFunc("GET /api/logs/scopes", s.handleLogScopes)
+	mux.HandleFunc("GET /api/logs/recent-queries", s.handleRecentQueries)
+	mux.HandleFunc("POST /api/logs/recent-queries", s.handleRecentQueries)
 	mux.HandleFunc("DELETE /api/logs", s.handleDeleteLog)
 	mux.HandleFunc("GET /api/operations", s.handleOperations)
 	mux.HandleFunc("GET /api/instance", s.handleInstance)

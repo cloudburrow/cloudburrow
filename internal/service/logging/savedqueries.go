@@ -131,6 +131,16 @@ func (a *Admin) ServeExtra(w http.ResponseWriter, r *http.Request) bool {
 		c = collSavedQueries
 	case strings.Contains(path, "/logScopes"):
 		c = collLogScopes
+	case strings.Contains(path, "/recentQueries"):
+		// Recent queries (#2031), list only (recentqueries.go).
+		before, after, _ = strings.Cut(path, "/recentQueries")
+		if after != "" && !strings.HasPrefix(after, "/") {
+			return false
+		}
+		if err := a.serveRecent(w, r, before, strings.TrimPrefix(after, "/")); err != nil {
+			rest.WriteError(w, err)
+		}
+		return true
 	default:
 		return false
 	}
@@ -493,8 +503,9 @@ func (a *Admin) listExtra(w http.ResponseWriter, r *http.Request, c extraCollect
 	return rest.WriteJSON(w, http.StatusOK, out)
 }
 
-// CallExtra calls the saved query and log scope JSON API in process, for
-// the console, and returns the status and body a client would get.
+// CallExtra calls the saved query, log scope and recent query JSON API in
+// process, for the console, as the instance's own account, and returns the
+// status and body a client would get.
 func (a *Admin) CallExtra(method, path string, body []byte) (int, []byte) {
 	r := httptest.NewRequest(method, path, bytes.NewReader(body))
 	if len(body) > 0 {

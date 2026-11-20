@@ -626,3 +626,67 @@ var (
 	_ console.Actor           = loggingLogScopesProvider{}
 	_ console.CreateSubmitter = loggingLogScopesProvider{}
 )
+
+// ---- Recent queries (#2031) ----
+
+// consoleRecentQueries are the Query library's Recent queries: recorded as
+// the instance's own account, whom the console serves, and listed through
+// recentQueries.list in process, as that account.
+type consoleRecentQueries struct{ loggingAdminScreen }
+
+func (s *loggingService) recentQueries() console.RecentQueries {
+	if s == nil {
+		return nil
+	}
+	return consoleRecentQueries{loggingAdminScreen{svc: s}}
+}
+
+func (c consoleRecentQueries) Record(project, query string, sql bool) error {
+	a, err := c.admin()
+	if err != nil {
+		return err
+	}
+	return a.RecordRecentQuery("projects/"+project, "global", logging.Owner(), query, sql)
+}
+
+// recentQueriesShown is how many the Query library lists.
+const recentQueriesShown = 50
+
+func (c consoleRecentQueries) List(project string, sql bool) ([]console.RecentQuery, error) {
+	a, err := c.admin()
+	if err != nil {
+		return nil, err
+	}
+	kind := `type("Logging")`
+	if sql {
+		kind = `type("OpsAnalytics")`
+	}
+	var resp struct {
+		RecentQueries []struct {
+			Name         string `json:"name"`
+			LastRunTime  string `json:"lastRunTime"`
+			LoggingQuery *struct {
+				Filter string `json:"filter"`
+			} `json:"loggingQuery"`
+			OpsAnalyticsQuery *struct {
+				SQLQueryText string `json:"sqlQueryText"`
+			} `json:"opsAnalyticsQuery"`
+		} `json:"recentQueries"`
+	}
+	path := "/v2/projects/" + url.PathEscape(project) + "/locations/global/recentQueries?pageSize=" +
+		strconv.Itoa(recentQueriesShown) + "&filter=" + url.QueryEscape(kind)
+	if err := callLoggingJSON(a, http.MethodGet, path, nil, &resp); err != nil {
+		return nil, err
+	}
+	out := make([]console.RecentQuery, 0, len(resp.RecentQueries))
+	for _, q := range resp.RecentQueries {
+		r := console.RecentQuery{Name: q.Name, LastRunTime: q.LastRunTime, SQL: q.OpsAnalyticsQuery != nil}
+		if q.LoggingQuery != nil {
+			r.Query = q.LoggingQuery.Filter
+		} else if q.OpsAnalyticsQuery != nil {
+			r.Query = q.OpsAnalyticsQuery.SQLQueryText
+		}
+		out = append(out, r)
+	}
+	return out, nil
+}
