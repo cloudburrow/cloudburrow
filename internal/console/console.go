@@ -1027,6 +1027,16 @@ type Section struct {
 	// the page's Edit is (the provider's Editor): Google's service account
 	// Details tab has its Name box and Save (#1864). Its Label heads it.
 	Edit *EditForm `json:"edit,omitempty"`
+	// ShownIn, when set, is the ID of the tab that draws this section
+	// through its Show list instead of a tab of its own: Google's bucket
+	// Objects tab shows "Soft-deleted objects only" there, not on a
+	// Deleted objects tab (#1843). ShowAs is that choice's label.
+	ShownIn string `json:"shownIn,omitempty"`
+	ShowAs  string `json:"showAs,omitempty"`
+	// Show is the label of this tab's own content in its Show list, when
+	// another section is ShownIn it: "Live and noncurrent objects" on an
+	// object's Version history (#1843). Empty is "Live objects only".
+	Show string `json:"show,omitempty"`
 }
 
 // dropBlankProperties removes every Property whose Value is empty or
