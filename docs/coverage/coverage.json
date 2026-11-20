@@ -9972,7 +9972,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/datastoreadmin1884_test.go:122 TestDatastoreAdminExportImport",
-          "test/compat/datastoreadmin1884_test.go:395 TestGcloudDatastoreExportImport"
+          "test/compat/datastoreadmin1884_test.go:397 TestGcloudDatastoreExportImport"
         ]
       },
       {
@@ -9987,7 +9987,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/datastoreadmin1884_test.go:122 TestDatastoreAdminExportImport",
-          "test/compat/datastoreadmin1884_test.go:395 TestGcloudDatastoreExportImport"
+          "test/compat/datastoreadmin1884_test.go:397 TestGcloudDatastoreExportImport"
         ]
       },
       {
