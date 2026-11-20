@@ -297,6 +297,7 @@ func (p gkeClustersProvider) servedActions(ctx context.Context, project string, 
 			{Name: "labels", Label: "Labels", Type: "textarea", Default: strings.TrimSpace(labels), Help: "One key=value per line."},
 		}},
 		upgrade,
+		gkeMaintenanceAction(c),
 		{ID: "delete", Label: "Delete", Destructive: true, Confirm: c.GetName(), Leaves: true},
 		p.addPoolAction(c),
 	}
@@ -322,6 +323,14 @@ func (p gkeClustersProvider) servedAct(ctx context.Context, project string, c *c
 		return gkeStatusErr(err)
 	case "upgrade":
 		_, err := api.UpdateCluster(ctx, &containerpb.UpdateClusterRequest{Name: name, Update: &containerpb.ClusterUpdate{DesiredMasterVersion: v["version"]}})
+		return gkeStatusErr(err)
+	case "maintenance":
+		mp, err := gkeParseMaintenance(v["window"], v["exclusions"])
+		if err != nil {
+			return err
+		}
+		mp.ResourceVersion = c.GetMaintenancePolicy().GetResourceVersion()
+		_, err = api.SetMaintenancePolicy(ctx, &containerpb.SetMaintenancePolicyRequest{Name: name, MaintenancePolicy: mp})
 		return gkeStatusErr(err)
 	case "edit":
 		labels := map[string]string{}

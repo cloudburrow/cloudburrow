@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
 )
@@ -144,7 +145,72 @@ func (w gkeWorkload) actions(system bool) []console.Action {
 		}
 		out = append(out, console.Action{ID: "rollingupdate", Label: "Rolling update", Submit: "Update", Fields: fields})
 	}
-	return append(out, console.Action{ID: "delete", Label: "Delete", Destructive: true, Confirm: w.name, Leaves: true})
+	return append(out, gkeWorkloadDelete(false))
+}
+
+// gkeWorkloadDelete is a workload's Delete, on its page and in its row's
+// menu, or (selected) the Workloads list's Delete for the checked ones.
+// From https://docs.cloud.google.com/kubernetes-engine/docs/how-to/stateless-apps
+// (re-read 2026-11-20): "In the workloads list, select one or more
+// Deployments to delete. Click Delete. When prompted to confirm, click
+// Delete." Nothing is typed back.
+func gkeWorkloadDelete(selected bool) console.Action {
+	if selected {
+		return console.Action{ID: gkeDeleteSelected, Label: "Delete", Destructive: true, ConfirmStyle: console.DeleteConfirmClick,
+			SelectionField: "workloads", Fields: []console.Field{{Name: "workloads", Label: "Workloads", Type: "hidden"}}}
+	}
+	return console.Action{ID: "delete", Label: "Delete", Destructive: true, ConfirmStyle: console.DeleteConfirmClick, Leaves: true}
+}
+
+// gkeDeleteSelected is the Workloads list's Delete over the checked rows.
+const gkeDeleteSelected = "delete-selected"
+
+// ListSelectActions is the Workloads list's Delete for the checked
+// workloads (#2070), as Google's list has "select one or more Deployments
+// to delete. Click Delete."
+func (p gkeWorkloadsProvider) ListSelectActions(context.Context, string) []console.Action {
+	return []console.Action{gkeWorkloadDelete(true)}
+}
+
+// List is the Workloads list, its rows named workloads, so the list's
+// Delete asks "Delete 2 workloads?".
+func (p gkeWorkloadsProvider) List(ctx context.Context, project string) (console.Listing, error) {
+	l, err := p.gkeObjects.List(ctx, project)
+	l.Noun = "workloads"
+	return l, err
+}
+
+// deleteSelected deletes the checked workloads, one name per line. A
+// Kubernetes system object among them refuses the whole selection before
+// anything is deleted, naming it with the reason the row's Delete gives.
+func (p gkeWorkloadsProvider) deleteSelected(ctx context.Context, names string) error {
+	var found []gkeWorkload
+	seen := map[string]bool{}
+	for _, n := range strings.Split(names, "\n") {
+		n = strings.TrimSpace(n)
+		if n == "" || seen[n] {
+			continue
+		}
+		seen[n] = true
+		w, err := p.find(ctx, n)
+		if err != nil {
+			return err
+		}
+		if p.system(w) {
+			return fmt.Errorf("%s: namespace %s holds Kubernetes system objects, which are not changed from the console; nothing was deleted", w.name, w.ns)
+		}
+		found = append(found, w)
+	}
+	if len(found) == 0 {
+		return errors.New("select the workloads to delete")
+	}
+	kube := kubeRunner(p.kubeconfig, "")
+	for _, w := range found {
+		if _, err := kube.Do(ctx, "", "delete", w.resource, "-n", w.ns); err != nil {
+			return fmt.Errorf("%s: %w", w.name, kubectlCause(err))
+		}
+	}
+	return nil
 }
 
 // yamlAction is the YAML tab's Edit: the object as kubectl prints it,
@@ -180,7 +246,11 @@ func (p gkeWorkloadsProvider) Detail(ctx context.Context, project string, path [
 		return d, err
 	}
 	w, err := p.find(ctx, path[0])
-	if err != nil || p.system(w) {
+	if err != nil {
+		return d, nil
+	}
+	d = p.withUtilization(w, d)
+	if p.system(w) {
 		return d, nil
 	}
 	if a, ok := p.yamlAction(ctx, w); ok {
@@ -212,6 +282,9 @@ func (p gkeWorkloadsProvider) DetailActions(ctx context.Context, _ string, path 
 }
 
 func (p gkeWorkloadsProvider) ActAt(ctx context.Context, _ string, path []string, action string, v map[string]string) error {
+	if len(path) == 0 && action == gkeDeleteSelected {
+		return p.deleteSelected(ctx, v["workloads"])
+	}
 	if len(path) != 1 {
 		return fmt.Errorf("no workload at %s", strings.Join(path, "/"))
 	}
@@ -353,4 +426,127 @@ func (p gkeWorkloadsProvider) ActAt(ctx context.Context, _ string, path []string
 		return nil
 	}
 	return fmt.Errorf("unknown action %s", action)
+}
+
+// withSeries gives Workloads the retained kubelet readings its Overview
+// tab charts (#2070), the ones a pod's Metrics charts read.
+func (p gkeWorkloadsProvider) withSeries(series *console.Series) gkeWorkloadsProvider {
+	p.series = series
+	return p
+}
+
+// gkeNoSeries is why a workload's utilization has no chart.
+const gkeNoSeries = "Not available: this instance keeps no kubelet readings (the console's metrics sampler is not running)."
+
+// withUtilization puts Google's resource utilization on a workload's
+// Overview tab (#2070): "high level details about the workload, including
+// its resource utilization" (https://docs.cloud.google.com/kubernetes-engine/docs/concepts/dashboards,
+// re-read 2026-11-20). CPU, memory and disk are the kubelet's readings of
+// the workload's managed pods, summed: the same history a pod's Metrics
+// charts draw, never estimated.
+func (p gkeWorkloadsProvider) withUtilization(w gkeWorkload, d console.Detail) console.Detail {
+	var pods []string
+	for _, s := range d.Sections {
+		if s.ID == "pods" {
+			for _, it := range s.Listing.Items {
+				pods = append(pods, w.ns+"/"+it.Name)
+			}
+		}
+	}
+	sec := console.Section{ID: "utilization", Label: "Utilization", Kind: console.KindChart,
+		Series: gkeUtilization(p.series, pods),
+		Note: "The sum over the workload's managed pods, as the kubelet measured them, retained in memory only, " +
+			"so a restart of CloudBurrow begins again from nothing. A break in a line is a sample in which a pod had no reading. " +
+			"Disk is the pods' ephemeral storage: their containers' writable layers, logs and emptyDir volumes."}
+	out := make([]console.Section, 0, len(d.Sections)+1)
+	placed := false
+	for _, s := range d.Sections {
+		if !placed && s.Group == "Overview" {
+			sec.Group = "Overview"
+			out = append(out, sec)
+			placed = true
+		}
+		out = append(out, s)
+	}
+	if !placed {
+		// A workload with no Overview tab of its own (a Job's page) keeps
+		// its tabs; the charts lead them.
+		out = append([]console.Section{sec}, out...)
+	}
+	d.Sections = out
+	return d
+}
+
+// gkeUtilization is the CPU, Memory and Disk series of the pods named
+// (namespace/name), summed per sample. A sample where one of the pods
+// reported has a point only if every pod it reported has a reading of that
+// metric, so a sum is never a part of the pods passed off as all of them;
+// CPU is each pod's rate between its consecutive counters, as podCPURate.
+func gkeUtilization(series *console.Series, pods []string) []console.ChartSeries {
+	cpu := console.ChartSeries{Label: "CPU", Unit: "cores"}
+	memory := console.ChartSeries{Label: "Memory", Unit: "bytes"}
+	disk := console.ChartSeries{Label: "Disk", Unit: "bytes"}
+	switch {
+	case series == nil:
+		cpu.Unavailable, memory.Unavailable, disk.Unavailable = gkeNoSeries, gkeNoSeries, gkeNoSeries
+		return []console.ChartSeries{cpu, memory, disk}
+	case len(pods) == 0:
+		why := "Not available: this workload has no managed pods to measure."
+		cpu.Unavailable, memory.Unavailable, disk.Unavailable = why, why, why
+		return []console.ChartSeries{cpu, memory, disk}
+	}
+	want := map[string]bool{}
+	for _, k := range pods {
+		want[k] = true
+	}
+	samples, _, _ := series.Window()
+	prev := map[string]*console.PodMetrics{}
+	anyDisk := false
+	for _, s := range samples {
+		at := s.At.UTC().Format(time.RFC3339)
+		var c, m, dk float64
+		seen, cOK, mOK, dOK := 0, true, true, true
+		now := map[string]*console.PodMetrics{}
+		for i := range s.Pods {
+			r := s.Pods[i]
+			if !want[r.Key()] {
+				continue
+			}
+			seen++
+			if rate := podCPURate(prev[r.Key()], &r); rate != nil {
+				c += *rate
+			} else {
+				cOK = false
+			}
+			if r.MemoryWorkingSetBytes > 0 {
+				m += float64(r.MemoryWorkingSetBytes)
+			} else {
+				mOK = false
+			}
+			if r.EphemeralStorageUsedBytes > 0 {
+				dk += float64(r.EphemeralStorageUsedBytes)
+				anyDisk = true
+			} else {
+				dOK = false
+			}
+			if r.CPUCoreNanoSeconds > 0 {
+				now[r.Key()] = &r
+			}
+		}
+		prev = now
+		point := func(ok bool, v float64) console.ChartPoint {
+			if seen == 0 || !ok {
+				return console.ChartPoint{At: at}
+			}
+			return console.ChartPoint{At: at, Value: &v}
+		}
+		cpu.Points = append(cpu.Points, point(cOK, c))
+		memory.Points = append(memory.Points, point(mOK, m))
+		disk.Points = append(disk.Points, point(dOK, dk))
+	}
+	if len(samples) > 0 && !anyDisk {
+		disk.Points = nil
+		disk.Unavailable = "Not available: the kubelet reported no ephemeral storage for this workload's pods."
+	}
+	return []console.ChartSeries{cpu, memory, disk}
 }

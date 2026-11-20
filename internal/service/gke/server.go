@@ -54,6 +54,8 @@ type Access struct {
 type Node struct {
 	Pool string
 	Name string
+	// Image is the node image it runs.
+	Image string
 }
 
 // Backend makes and removes the local clusters behind the API. Its names
@@ -113,6 +115,9 @@ type Options struct {
 	// subnetwork are checked against (vpc.go, #1936); nil, or nil from it,
 	// checks none.
 	Networks func() Networks
+	// AutoUpgradeInterval is how often automatic upgrades are started
+	// (upgrade.go): a minute when zero, never when negative.
+	AutoUpgradeInterval time.Duration
 }
 
 // Server is the Kubernetes Engine API.
@@ -140,6 +145,8 @@ type entry struct {
 	// busy is the operation running on the cluster: Google runs one at a
 	// time and refuses another.
 	busy string
+	// soak ends a blue-green upgrade's pool soak early, by pool.
+	soak map[string]chan struct{}
 }
 
 type opEntry struct {
@@ -165,6 +172,13 @@ func NewServer(backend Backend, opts Options) (*Server, error) {
 	if err := s.restore(); err != nil {
 		stop()
 		return nil, err
+	}
+	if opts.AutoUpgradeInterval == 0 {
+		opts.AutoUpgradeInterval = time.Minute
+	}
+	if _, ok := backend.(Upgrader); ok && opts.AutoUpgradeInterval > 0 {
+		s.wg.Add(1)
+		go s.autoUpgradeLoop(opts.AutoUpgradeInterval)
 	}
 	return s, nil
 }
@@ -510,6 +524,7 @@ func (s *Server) startOpLocked(p parsed, typ containerpb.Operation_Type, target 
 		StartTime:     now.UTC().Format(time.RFC3339Nano),
 	}
 	ctx, cancel := context.WithCancel(s.bg)
+	ctx = context.WithValue(ctx, opKey{}, op)
 	oe := &opEntry{op: op, project: p.project, cancel: cancel}
 	s.ops[opName(p.project, p.location, id)] = oe
 	if e != nil {

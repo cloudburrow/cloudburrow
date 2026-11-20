@@ -106,6 +106,19 @@ func gkeVersion(image string) string {
 	return strings.TrimPrefix(tag, "v") + "-gke.0"
 }
 
+// gkeVersions are the versions served, newest (the instance's node image)
+// first, then the pinned node image one minor below it, which a cluster
+// can be made on and upgraded from (#2069). An instance on another node
+// image serves the previous one only if it is older.
+func gkeVersions(image string) []gke.Version {
+	out := []gke.Version{{GKE: gkeVersion(image), Image: image}}
+	prev := config.GKEPreviousNodeImage
+	if gkeVersionLess(gkeVersion(prev), gkeVersion(image)) {
+		out = append(out, gke.Version{GKE: gkeVersion(prev), Image: prev})
+	}
+	return out
+}
+
 // gkeBackend adapts internal/cluster's GKE to the API's Backend.
 type gkeBackend struct{ g *cluster.GKE }
 
@@ -116,6 +129,39 @@ func (b gkeBackend) Create(ctx context.Context, kind, image string, standard boo
 
 func (b gkeBackend) Resize(ctx context.Context, kind, image, pool string, n int) error {
 	return b.g.Resize(ctx, kind, image, pool, n)
+}
+
+func (b gkeBackend) UpgradeControlPlane(ctx context.Context, kind, image string) error {
+	return b.g.UpgradeControlPlane(ctx, kind, image)
+}
+
+func (b gkeBackend) PoolNodes(ctx context.Context, kind, pool string) ([]gke.Node, error) {
+	nodes, err := b.g.PoolNodes(ctx, kind, pool)
+	out := make([]gke.Node, 0, len(nodes))
+	for _, n := range nodes {
+		out = append(out, gke.Node{Pool: pool, Name: n.Name, Image: n.Image})
+	}
+	return out, err
+}
+
+func (b gkeBackend) AddNode(ctx context.Context, kind, image, pool string) (string, error) {
+	return b.g.AddNode(ctx, kind, image, pool)
+}
+
+func (b gkeBackend) CordonNode(ctx context.Context, kind, name string) error {
+	return b.g.CordonNode(ctx, kind, name)
+}
+
+func (b gkeBackend) UncordonNode(ctx context.Context, kind, name string) error {
+	return b.g.UncordonNode(ctx, kind, name)
+}
+
+func (b gkeBackend) DrainNode(ctx context.Context, kind, name string) error {
+	return b.g.DrainNode(ctx, kind, name)
+}
+
+func (b gkeBackend) RemoveNode(ctx context.Context, kind, name string) error {
+	return b.g.RemoveNode(ctx, kind, name)
 }
 
 func (b gkeBackend) Delete(ctx context.Context, kind string) error { return b.g.Delete(ctx, kind) }
@@ -141,7 +187,7 @@ func (s *gkeService) Start(ctx context.Context) error {
 	api, err := gke.NewServer(gkeBackend{g: &cluster.GKE{Dir: gkeDir(s.cfg)}}, gke.Options{
 		Instance:     s.cfg.ClusterName(),
 		State:        state,
-		Versions:     []gke.Version{{GKE: gkeVersion(s.cfg.Cluster.NodeImage), Image: s.cfg.Cluster.NodeImage}},
+		Versions:     gkeVersions(s.cfg.Cluster.NodeImage),
 		MinFreeBytes: gkeMinFree(),
 		Networks:     s.networks,
 	})

@@ -6,8 +6,10 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"cloud.google.com/go/container/apiv1/containerpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
 )
@@ -99,8 +101,22 @@ func (p gkeClustersProvider) poolActions(c *containerpb.Cluster, np *containerpb
 			{Name: "labels", Label: "Labels", Type: "textarea", Default: strings.TrimSpace(labels), Help: "The nodes' resource labels, one key=value per line."},
 		}},
 		gkePoolUpgrade(c, np, versions),
+		gkePoolCompleteUpgrade(np),
 		{ID: "delete", Label: "Delete", Destructive: true, Confirm: np.GetName()},
 	}
+}
+
+// gkePoolCompleteUpgrade ends a blue-green upgrade's soak, as `gcloud
+// container node-pools complete-upgrade` does (#2069); otherwise it says
+// why it is not offered.
+func gkePoolCompleteUpgrade(np *containerpb.NodePool) console.Action {
+	a := console.Action{ID: "complete", Label: "Complete upgrade", Submit: "Complete upgrade", Fields: []console.Field{
+		{Name: "note", Label: "Soaking", Type: "textarea", Immutable: true,
+			Default: "The green nodes run " + np.GetUpdateInfo().GetBlueGreenInfo().GetGreenPoolVersion() + ". Completing ends the soak: the blue nodes are deleted now."}}}
+	if np.GetUpdateInfo().GetBlueGreenInfo().GetPhase() != containerpb.NodePool_UpdateInfo_BlueGreenInfo_NODE_POOL_SOAKING {
+		return console.Action{ID: "complete", Label: "Complete upgrade", Unavailable: "This node pool is not soaking in a blue-green upgrade."}
+	}
+	return a
 }
 
 // gkePoolUpgrade is a node pool's Upgrade: Google's node pool page has
@@ -167,6 +183,9 @@ func (p gkeClustersProvider) poolAct(ctx context.Context, cluster string, c *con
 	switch action {
 	case "delete":
 		_, err := api.DeleteNodePool(ctx, &containerpb.DeleteNodePoolRequest{Name: name})
+		return gkeStatusErr(err)
+	case "complete":
+		_, err := api.CompleteNodePoolUpgrade(ctx, &containerpb.CompleteNodePoolUpgradeRequest{Name: name})
 		return gkeStatusErr(err)
 	case "upgrade":
 		v := strings.TrimSpace(v["version"])
@@ -296,4 +315,97 @@ func (p gkeClustersProvider) servedSubAct(ctx context.Context, project string, c
 		return p.opAct(ctx, project, c, name, action)
 	}
 	return fmt.Errorf("no %s under cluster %s", seg, c.GetName())
+}
+
+// gkeExclusionScopes are the console's words for an exclusion's scope.
+var gkeExclusionScopes = map[string]containerpb.MaintenanceExclusionOptions_Scope{
+	"no_upgrades": containerpb.MaintenanceExclusionOptions_NO_UPGRADES, "no_minor_upgrades": containerpb.MaintenanceExclusionOptions_NO_MINOR_UPGRADES,
+	"no_minor_or_node_upgrades": containerpb.MaintenanceExclusionOptions_NO_MINOR_OR_NODE_UPGRADES,
+}
+
+// gkeMaintenanceAction edits the cluster's maintenance window and
+// exclusions (Google's Details, Automation: Maintenance window and
+// Maintenance exclusions; #2069), which automatic upgrades respect and
+// manual ones ignore.
+func gkeMaintenanceAction(c *containerpb.Cluster) console.Action {
+	w := c.GetMaintenancePolicy().GetWindow()
+	window := ""
+	if d := w.GetDailyMaintenanceWindow(); d != nil {
+		window = "daily " + d.GetStartTime()
+	} else if r := w.GetRecurringWindow(); r != nil {
+		window = r.GetWindow().GetStartTime().AsTime().UTC().Format(time.RFC3339) + " " +
+			r.GetWindow().GetEndTime().AsTime().UTC().Format(time.RFC3339) + " " + r.GetRecurrence()
+	}
+	names := make([]string, 0, len(w.GetMaintenanceExclusions()))
+	for n := range w.GetMaintenanceExclusions() {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	var ex []string
+	for _, n := range names {
+		tw := w.GetMaintenanceExclusions()[n]
+		ex = append(ex, n+" "+tw.GetStartTime().AsTime().UTC().Format(time.RFC3339)+" "+tw.GetEndTime().AsTime().UTC().Format(time.RFC3339)+" "+
+			strings.ToLower(tw.GetMaintenanceExclusionOptions().GetScope().String()))
+	}
+	return console.Action{ID: "maintenance", Label: "Edit maintenance", Title: "Maintenance window and exclusions", Submit: "Save", Fields: []console.Field{
+		{Name: "window", Label: "Maintenance window", Type: "text", Default: window,
+			Help: "Empty for any time; \"daily HH:MM\" (UTC, four hours); or \"START END RRULE\", RFC 3339 times and FREQ=DAILY or FREQ=WEEKLY;BYDAY=SA,SU. Automatic upgrades start only inside it; manual upgrades ignore it."},
+		{Name: "exclusions", Label: "Maintenance exclusions", Type: "textarea", Default: strings.Join(ex, "\n"),
+			Help: "One per line: NAME START END SCOPE, RFC 3339 times, scope no_upgrades, no_minor_upgrades or no_minor_or_node_upgrades."},
+	}}
+}
+
+// gkeParseMaintenance reads the Edit maintenance dialog.
+func gkeParseMaintenance(window, exclusions string) (*containerpb.MaintenancePolicy, error) {
+	mw := &containerpb.MaintenanceWindow{MaintenanceExclusions: map[string]*containerpb.TimeWindow{}}
+	ts := func(s string) (*timestamppb.Timestamp, error) {
+		t, err := time.Parse(time.RFC3339, s)
+		if err != nil {
+			return nil, fmt.Errorf("%q is not an RFC 3339 time", s)
+		}
+		return timestamppb.New(t), nil
+	}
+	if f := strings.Fields(window); len(f) > 0 {
+		switch {
+		case len(f) == 2 && f[0] == "daily":
+			mw.Policy = &containerpb.MaintenanceWindow_DailyMaintenanceWindow{DailyMaintenanceWindow: &containerpb.DailyMaintenanceWindow{StartTime: f[1]}}
+		case len(f) == 3:
+			start, err := ts(f[0])
+			if err != nil {
+				return nil, err
+			}
+			end, err := ts(f[1])
+			if err != nil {
+				return nil, err
+			}
+			mw.Policy = &containerpb.MaintenanceWindow_RecurringWindow{RecurringWindow: &containerpb.RecurringTimeWindow{
+				Window: &containerpb.TimeWindow{StartTime: start, EndTime: end}, Recurrence: f[2]}}
+		default:
+			return nil, fmt.Errorf("maintenance window %q is neither \"daily HH:MM\" nor \"START END RRULE\"", window)
+		}
+	}
+	for _, line := range strings.Split(exclusions, "\n") {
+		f := strings.Fields(line)
+		if len(f) == 0 {
+			continue
+		}
+		if len(f) != 4 {
+			return nil, fmt.Errorf("exclusion %q is not NAME START END SCOPE", strings.TrimSpace(line))
+		}
+		start, err := ts(f[1])
+		if err != nil {
+			return nil, err
+		}
+		end, err := ts(f[2])
+		if err != nil {
+			return nil, err
+		}
+		scope, ok := gkeExclusionScopes[strings.ToLower(f[3])]
+		if !ok {
+			return nil, fmt.Errorf("exclusion scope %q is not no_upgrades, no_minor_upgrades or no_minor_or_node_upgrades", f[3])
+		}
+		mw.MaintenanceExclusions[f[0]] = &containerpb.TimeWindow{StartTime: start, EndTime: end,
+			Options: &containerpb.TimeWindow_MaintenanceExclusionOptions{MaintenanceExclusionOptions: &containerpb.MaintenanceExclusionOptions{Scope: scope}}}
+	}
+	return &containerpb.MaintenancePolicy{Window: mw}, nil
 }

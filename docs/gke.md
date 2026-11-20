@@ -16,7 +16,7 @@ The instance already runs on kind and pins its node image (`dependencies.json`),
 | `endpoint` | `127.0.0.1:PORT`, the kind API server (Google's is a bare IP on 443) |
 | `masterAuth.clusterCaCertificate` | kind's cluster CA |
 | `masterAuth.clientCertificate`/`clientKey` | kind's admin certificate, only with `clientCertificateConfig.issueClientCertificate` (`--issue-client-certificate`) |
-| Versions | one per kind node image: `1.36.4-gke.0` for `kindest/node:v1.36.4`; every release channel offers it |
+| Versions | one per pinned kind node image: `1.36.4-gke.0` for `kindest/node:v1.36.4` (the default, the instance's), and `1.35.8-gke.0` for `kindest/node:v1.35.8`; every release channel offers both, the newest its default and upgrade target |
 
 Limits of this machine, not Google's: at most 9 nodes per cluster and 5 clusters per instance, and **below 20 GiB of free disk** a create or a node pool growth answers `RESOURCE_EXHAUSTED` (set `CLOUDBURROW_GKE_MIN_FREE_GB` on `up` to change it).
 
@@ -31,13 +31,34 @@ gcloud container clusters get-credentials demo --zone us-central1-a
 kubectl get nodes
 ```
 
+## Upgrades
+
+As Google's [upgrading a cluster](https://docs.cloud.google.com/kubernetes-engine/docs/how-to/upgrading-a-cluster) has it (#2069): the control plane first (`UpdateMaster`, or `UpdateCluster` `desired_master_version`; operation `UPGRADE_MASTER`, the cluster `RECONCILING`), one minor version at a time, then each node pool (`UpdateNodePool` `node_version`, or `UpdateCluster` `desired_node_version` with `desired_node_pool_id`, required with more than one pool; `-` is the control plane's version; operation `UPGRADE_NODES`, with `progress` metrics `NODES_TOTAL` and `NODES_DONE` and a `detail` line). A node pool is never newer than the control plane, nor more than two minor versions older; the control plane is never downgraded.
+
+kind cannot move a cluster to another node image, so the upgrade is done the way kubeadm upgrades a cluster in place, which keeps etcd's state as a GKE control plane upgrade does:
+
+1. **Control plane.** A helper container of the newer node image, with no network, runs only containerd; its control-plane images (kube-apiserver, kube-controller-manager, kube-scheduler, kube-proxy, etcd, CoreDNS, pause) are exported, and its `kubeadm`, `kubelet` and `kubectl` copied out, into the control plane's node. `kubeadm upgrade apply vX.Y.Z` rewrites the static pods (etcd's data kept), then the control plane's kubelet is replaced and restarted. Nothing is downloaded. The API server is briefly unavailable, as a zonal cluster's is on Google; workloads keep running.
+2. **Nodes.** Nodes are replaced, never changed in place, as GKE replaces VMs, per the pool's `upgradeSettings` ([node pool upgrade strategies](https://docs.cloud.google.com/kubernetes-engine/docs/concepts/node-pool-upgrade-strategies)):
+   - **Surge** (the default, `maxSurge: 1`, `maxUnavailable: 0`): per zone, `maxSurge + maxUnavailable` nodes at a time; `maxSurge` new nodes of the newer image join and are Ready before as many old ones are cordoned, drained and deleted; the rest of the batch is drained, deleted and recreated. Both 0, or a sum above 100, is `INVALID_ARGUMENT`.
+   - **Blue-green**: the green nodes join (`CREATING_GREEN_POOL`), the blue ones are cordoned (`CORDONING_BLUE_POOL`), drained in batches of `batchNodeCount` or `batchPercentage` with `batchSoakDuration` between (`DRAINING_BLUE_POOL`), the pool soaks `nodePoolSoakDuration` (default one hour, at most seven days in all; `NODE_POOL_SOAKING`; `CompleteNodePoolUpgrade` ends it), then the blue nodes are deleted (`DELETING_BLUE_POOL`). The phase is in the pool's `updateInfo.blueGreenInfo`.
+
+   A drain goes through the eviction API, so PodDisruptionBudgets hold, for up to an hour; the pods still there are then deleted, as Google evicts them. A new node is given the images loaded onto the node it replaces (`kind load`), since a kind node pulls nothing its predecessor had been given. `RollbackNodePoolUpgrade` stays 501.
+
+**Maintenance windows and exclusions** ([docs](https://docs.cloud.google.com/kubernetes-engine/docs/concepts/maintenance-windows-and-exclusions)): `maintenancePolicy` at create and `SetMaintenancePolicy` (with `resourceVersion`; a stale one is `FAILED_PRECONDITION`) take a daily window (four hours from `startTime`, UTC), a recurring window (`FREQ=DAILY` or `FREQ=WEEKLY;BYDAY=...`) and up to 20 exclusions, at most three of them "no upgrades". Manual upgrades start at once and ignore both, as documented. Automatic upgrades, checked every minute, move a cluster whose control plane is older than its channel's target (the newest version), then each pool with `management.autoUpgrade` that is older than the control plane, only inside the window (any time without one) and outside every exclusion whose scope covers them: `NO_UPGRADES` all, `NO_MINOR_UPGRADES` minor ones, `NO_MINOR_OR_NODE_UPGRADES` minor ones and every node upgrade. Not done: pausing an automatic upgrade that runs past its window's end.
+
+```sh
+gcloud container clusters create demo --zone us-central1-a --num-nodes 1 --issue-client-certificate --cluster-version 1.35
+gcloud container clusters upgrade demo --zone us-central1-a --master --cluster-version 1.36
+gcloud container clusters upgrade demo --zone us-central1-a --node-pool default-pool
+```
+
 ## Terraform
 
 `cloudburrow terraform` gives the provider `container_custom_endpoint`, and `compute_custom_endpoint` at the same port: the provider reads a node pool's size from its Compute Engine instance group managers, which this port answers for its own pools (every other Compute Engine call is 501). Google's recommended layout, a `google_container_cluster` with `remove_default_node_pool = true` and a separately managed `google_container_node_pool`, applies, plans clean and updates labels and `node_count` in place (`TestTerraformContainerClusterAndNodePool`). Set `deletion_protection = false` to destroy, as on Google.
 
 ## Console
 
-Kubernetes clusters lists the project's clusters beside the instance's own. **Create cluster** makes an Autopilot or Standard cluster; a cluster's page has **Edit**, **Upgrade** and **Delete**, the Node pools tab **Add node pool** and, on each pool, **Resize**, **Edit** and **Delete** (#1925), and the Operations tab each operation, a running one with **Cancel**.
+Kubernetes clusters lists the project's clusters beside the instance's own. **Create cluster** makes an Autopilot or Standard cluster; a cluster's page has **Edit**, **Upgrade** (to a newer served version; each node pool's **Upgrade** up to the control plane's, and **Complete upgrade** while a blue-green upgrade soaks), **Edit maintenance** (the maintenance window and exclusions) and **Delete**, the Node pools tab **Add node pool** and, on each pool, **Resize**, **Edit** and **Delete** (#1925), and the Operations tab each operation, a running one with **Cancel**. The instance's own cluster's Workloads list has row checkboxes and one **Delete** for the checked workloads, confirmed with a click as Google's is (a Kubernetes system object checked refuses the selection with the reason); a workload's Overview tab charts CPU, Memory and Disk, its managed pods' kubelet readings summed; and Object Browser filters by API group and kind with a checkbox tree (#2070).
 
 ## Lifetime
 
@@ -45,4 +66,4 @@ An ephemeral instance deletes its clusters when it stops; a persistent one keeps
 
 ## Not yet
 
-Node pool autoscaling, choosing zones, upgrades between versions (only one is served), IP rotation, maintenance and network policies answer 501. Node pool Kubernetes labels and taints, machine type changes and disk size changes answer 501 (`UpdateNodePool` takes the image type and resource labels).
+Node pool autoscaling, choosing zones, rolling back a node pool upgrade, IP rotation and network policies answer 501. Node pool Kubernetes labels and taints, machine type changes and disk size changes answer 501 (`UpdateNodePool` takes the image type and resource labels).

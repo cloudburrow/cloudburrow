@@ -138,8 +138,8 @@ func TestKubernetesEnginePagesWorkloadActionsThroughTheBrowser(t *testing.T) {
 	if !strings.Contains(items, "Delete") || !strings.Contains(items, "Edit replicas") {
 		t.Errorf("the row's menu is %q", items)
 	}
+	// "When prompted to confirm, click Delete." (#2070)
 	p.clickText(".overflow-item", "Delete")
-	p.confirmByName(name)
-	p.waitFor(`document.querySelector(".modal.is-open") === null`)
+	p.pressConfirm("Delete")
 	gkeEventually(t, kubeconfig, "", "get", "deployment", name, "-n", "default", "--ignore-not-found", "-o", "name")
 }

@@ -260,9 +260,6 @@ func (s *Server) UpdateNodePool(_ context.Context, req *containerpb.UpdateNodePo
 	if req.GetKubeletConfig() != nil {
 		other = append(other, "kubelet_config")
 	}
-	if req.GetUpgradeSettings() != nil {
-		other = append(other, "upgrade_settings")
-	}
 	if len(other) > 0 {
 		return nil, status.Errorf(codes.Unimplemented, "Not available locally: updating a node pool's %v.", other)
 	}
@@ -273,8 +270,7 @@ func (s *Server) UpdateNodePool(_ context.Context, req *containerpb.UpdateNodePo
 	if !validImageType(req.GetImageType()) {
 		return nil, status.Errorf(codes.InvalidArgument, "Image type %q is not supported.", req.GetImageType())
 	}
-	sv, err := s.resolveVersion("Node version", req.GetNodeVersion())
-	if err != nil {
+	if err := checkUpgradeSettings(req.GetUpgradeSettings()); err != nil {
 		return nil, err
 	}
 	s.mu.Lock()
@@ -290,8 +286,28 @@ func (s *Server) UpdateNodePool(_ context.Context, req *containerpb.UpdateNodePo
 		return nil, err
 	}
 	np := findPool(e.cluster, p.pool)
+	sv, err := s.resolveNodeVersion(e.cluster, req.GetNodeVersion())
+	if err != nil {
+		return nil, err
+	}
+	if us := req.GetUpgradeSettings(); us != nil {
+		// The settings apply to this upgrade too.
+		np.UpgradeSettings = proto.Clone(us).(*containerpb.NodePool_UpgradeSettings)
+		if np.UpgradeSettings.Strategy == nil {
+			st := containerpb.NodePoolUpdateStrategy_SURGE
+			np.UpgradeSettings.Strategy = &st
+		}
+	}
 	if sv.GKE != np.Version {
-		return nil, status.Errorf(codes.Unimplemented, "Upgrading nodes to %s is not available locally.", sv.GKE)
+		if err := checkNodeUpgrade(e.cluster, sv); err != nil {
+			return nil, err
+		}
+		up, err := s.upgrader()
+		if err != nil {
+			return nil, err
+		}
+		np.Config.ImageType = req.GetImageType()
+		return s.startPoolUpgradeLocked(p, e, np, sv, up), nil
 	}
 	np.Config.ImageType = req.GetImageType()
 	if rl := req.GetResourceLabels(); rl != nil {

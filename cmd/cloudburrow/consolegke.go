@@ -73,7 +73,12 @@ type gkeObjects struct {
 
 // gkeWorkloadsProvider is Workloads, the one Kubernetes object screen with a
 // create: Deploy.
-type gkeWorkloadsProvider struct{ gkeObjects }
+type gkeWorkloadsProvider struct {
+	gkeObjects
+	// series is the kubelet readings the Overview tab's utilization charts
+	// sum (#2070); nil where the instance keeps none.
+	series *console.Series
+}
 
 func (p gkeObjects) ScopeKey() string     { return gkeClusterScope }
 func (p gkeObjects) FilterKeys() []string { return []string{gkeSystemFilter} }
@@ -222,6 +227,9 @@ func gkeWorkloads(kubeconfig, cluster, own string) gkeWorkloadsProvider {
 			w := gkeWorkloadOf(item)
 			r.Target = []string{r.Name}
 			r.Actions = w.actions(gkeSystemNamespace(w.ns, own))
+			// Checked for the list's Delete (#2070); a system object
+			// checked is refused with the reason, as its row's Delete is.
+			r.Selectable = true
 		}
 		return r, ok
 	}
@@ -257,7 +265,7 @@ func gkeWorkloads(kubeconfig, cluster, own string) gkeWorkloadsProvider {
 		}
 		return inDetail(item)
 	}
-	return gkeWorkloadsProvider{gkeObjects{kubeProvider: base, cluster: cluster, ownNamespace: own, tabs: gkeWorkloadTabs}}
+	return gkeWorkloadsProvider{gkeObjects: gkeObjects{kubeProvider: base, cluster: cluster, ownNamespace: own, tabs: gkeWorkloadTabs}}
 }
 
 // gkeKindLabel is the Type column's wording: Deployment, Stateful Set,
@@ -1110,7 +1118,39 @@ func (p gkeObjectBrowser) List(ctx context.Context, _ string) (console.Listing, 
 	}
 	sort.SliceStable(l.Items, func(i, j int) bool { return l.Items[i].Fields["API group"] < l.Items[j].Fields["API group"] })
 	l.Total = len(l.Items)
+	l.CheckTree = gkeAPIGroupTree(l.Items)
 	return l, nil
+}
+
+// gkeAPIGroupTree is Object Browser's filter (#2070): each API group a
+// checkbox with its resource kinds under it, as "You can list and filter
+// resources by specific API groups and Resource Kinds"
+// (https://docs.cloud.google.com/kubernetes-engine/docs/concepts/dashboards,
+// re-read 2026-11-20), in place of the shared filter bar. The groups are
+// in the list's order, core first; each group's kinds sorted.
+func gkeAPIGroupTree(items []console.Resource) *console.CheckTree {
+	t := &console.CheckTree{Label: "API groups", Column: "API group", ChildColumn: "Kind"}
+	at := map[string]int{}
+	kinds := map[string]map[string]bool{}
+	for _, r := range items {
+		g, k := r.Fields["API group"], r.Fields["Kind"]
+		if _, ok := at[g]; !ok {
+			at[g] = len(t.Groups)
+			t.Groups = append(t.Groups, console.CheckTreeNode{Label: g})
+			kinds[g] = map[string]bool{}
+		}
+		if k != "" && !kinds[g][k] {
+			kinds[g][k] = true
+			t.Groups[at[g]].Children = append(t.Groups[at[g]].Children, k)
+		}
+	}
+	// core is the API group Kubernetes' own kinds are in: first, as the
+	// tree's root group.
+	sort.SliceStable(t.Groups, func(i, j int) bool { return t.Groups[i].Label == "core" && t.Groups[j].Label != "core" })
+	for i := range t.Groups {
+		sort.Strings(t.Groups[i].Children)
+	}
+	return t
 }
 
 func (p gkeObjectBrowser) CanDrill() bool { return true }

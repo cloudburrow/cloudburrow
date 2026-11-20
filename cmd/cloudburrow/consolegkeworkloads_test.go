@@ -197,10 +197,11 @@ func TestGKEServedClusterTabsAndUpgrades(t *testing.T) {
 	if upgrade.Unavailable != "" || len(upgrade.Fields) != 1 || strings.Join(upgrade.Fields[0].Options, ",") != "1.36.4-gke.0" {
 		t.Fatalf("Upgrade = %+v", upgrade)
 	}
-	// The served versions run one kind node image each: the API refuses
-	// moving a cluster across them, and the console says so.
+	// The console's Upgrade asks the API to upgrade (#2069); this test's
+	// backend makes clusters but cannot upgrade them, and the API's refusal
+	// is what the console shows.
 	if err := p.ActAt(ctx, "pc", []string{"std-2"}, "upgrade", map[string]string{"version": "1.36.4-gke.0"}); err == nil ||
-		!strings.Contains(err.Error(), "not available locally") {
+		!strings.Contains(err.Error(), "not available with this backend") {
 		t.Errorf("Upgrade = %v", err)
 	}
 

@@ -178,7 +178,7 @@ func TestGKEServedClusterThroughTheBrowser(t *testing.T) {
 
 	// The cluster's page: Google's tabs, Nodes holding Node pools and
 	// Nodes; the nodes read from the cluster, with CPU requested; Upgrade
-	// says why it is not offered, with one version served.
+	// says why it is not offered, the cluster being at the newest version.
 	p.navigate("/kubernetes/clusters/" + name + "?project=" + project)
 	p.waitFor(`document.querySelector("#view h1") && document.querySelector("#view h1").textContent === "Cluster details" &&
 		document.querySelectorAll("#view [role=tab]").length > 0`)
@@ -190,7 +190,7 @@ func TestGKEServedClusterThroughTheBrowser(t *testing.T) {
 	var upgradeOff bool
 	p.eval(`[...document.querySelectorAll("#view button")].some((b) => b.textContent === "Upgrade" && b.disabled && (b.title || "").includes("No newer"))`, &upgradeOff)
 	if !upgradeOff {
-		t.Error("Upgrade is not disabled with its reason on a cluster at the only version served")
+		t.Error("Upgrade is not disabled with its reason on a cluster at the newest version served")
 	}
 	p.navigate("/kubernetes/clusters/" + name + "?project=" + project + "&tab=nodes")
 	p.waitFor(`document.querySelector("#subtab-nodepools") !== null && document.querySelector("#subtab-nodes") !== null &&
@@ -221,7 +221,7 @@ func TestGKEServedClusterThroughTheBrowser(t *testing.T) {
 	var poolUpgrade bool
 	p.eval(`[...document.querySelectorAll(".overflow-item")].some((b) => b.textContent.trim() === "Upgrade" && (b.disabled || b.getAttribute("aria-disabled") === "true"))`, &poolUpgrade)
 	if !poolUpgrade {
-		t.Error("pool-c's Upgrade is not drawn disabled at the only version served")
+		t.Error("pool-c's Upgrade is not drawn disabled at the control plane's version")
 	}
 	p.run(chromedp.KeyEvent(kb.Escape))
 

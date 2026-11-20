@@ -2523,3 +2523,17 @@ svg.bq-chart { display: block; border: 1px solid var(--border); border-radius: v
    leaves beside Delete. */
 .orgpolicy-rule { min-inline-size: 0; }
 .orgpolicy-custom-line input { flex: 1 1 0; width: 0; min-width: 0; }
+
+/* A list's checkbox tree filter (#2070): Object Browser's API groups and
+   kinds. Columns that reflow to one at narrow widths. */
+.check-tree { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 12px; margin: 0 0 12px; min-width: 0; }
+.check-tree legend { font-weight: 500; padding: 0 4px; }
+.check-tree ul { list-style: none; margin: 0; padding: 0; }
+.check-tree-groups { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr)); gap: 2px 16px; }
+.check-tree-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.check-tree-label { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; overflow-wrap: anywhere; min-width: 0; }
+.check-tree .check-tree-kinds { padding-left: 36px; }
+.check-tree-toggle svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; }
+.check-tree-toggle[aria-expanded="true"] svg { transform: rotate(90deg); }
+.check-tree-spacer { display: inline-block; width: 32px; flex: none; }
+@media (prefers-reduced-motion: no-preference) { .check-tree-toggle svg { transition: transform 0.15s; } }
