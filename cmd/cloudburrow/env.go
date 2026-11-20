@@ -489,6 +489,16 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 				"the Kubernetes Engine API v1, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint"})
 	}
 
+	// The BigQuery Data Transfer Service (#1948): Terraform's
+	// google_bigquery_data_transfer_config through
+	// bigquery_data_transfer_custom_endpoint.
+	if dataTransferEnabled(cfg) && cfg.Endpoints.DataTransfer != 0 {
+		dt := addr(cfg.Endpoints.DataTransfer)
+		vars = append(vars,
+			envVar{cliEndpointVar("datatransfer"), dt,
+				"the BigQuery Data Transfer Service v1, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint"})
+	}
+
 	// Service Usage (#1352): gcloud services, and Terraform's
 	// google_project_service through service_usage_custom_endpoint.
 	if cfg.Endpoints.ServiceUsage > 0 {
@@ -634,6 +644,7 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 		"backupdr":          &e.BackupDR,
 		"privateca":         &e.PrivateCA,
 		"gke":               &e.GKE,
+		"datatransfer":      &e.DataTransfer,
 		"onnx":              &e.ONNX,
 		"tfconvert":         &e.TFConvert,
 		// The ingress gateway, which kind publishes where `up` configured

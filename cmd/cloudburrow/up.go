@@ -333,6 +333,14 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// kind clusters of their own.
 	gkeSvc := newGKEService(cfg)
 	gkeSvc.register(coord)
+	// The BigQuery Data Transfer Service (#1948), in process; its runs
+	// execute on the instance's BigQuery and notify its Pub/Sub.
+	dataTransfer := newDataTransferService(cfg)
+	if dataTransfer != nil {
+		dataTransfer.bigquery = func() *netfwd.Forwarder { return forwarderFor(forwarders, "bigquery") }
+		dataTransfer.pubsub = func() *netfwd.Forwarder { return forwarderFor(forwarders, "pubsub") }
+	}
+	dataTransfer.register(coord)
 	// The Memorystore admin API (#1302), over the Valkey server's tunnel.
 	memorystoreAdminSvc := newMemorystoreAdminService(cfg, func() *netfwd.Forwarder { return forwarderFor(forwarders, "memorystore") })
 	if memorystoreAdminSvc != nil {
@@ -434,6 +442,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		scheduler:    schedulerSvc,
 		privateCA:    privateCASvc,
 		gke:          gkeSvc,
+		dataTransfer: dataTransfer,
 		logging:      loggingSvc,
 		run:          runSvc,
 		memorystore:  memorystoreAdminSvc,
@@ -504,6 +513,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	if privateCASvc != nil {
 		privateCASvc.tracing = tracing
+	}
+	if dataTransfer != nil {
+		dataTransfer.tracing = tracing
+		dataTransfer.calls = callEvents(recorder, requestMetrics, "datatransfer")
+		dataTransfer.interpose = append(dataTransfer.interpose, grpctransport.LogInterceptor(logger, "datatransfer"), faults.Interceptor("datatransfer"))
+		dataTransfer.requests = requestEvents(recorder, requestMetrics, "datatransfer")
 	}
 	if gkeSvc != nil {
 		gkeSvc.tracing = tracing
@@ -935,6 +950,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		if a := gkeSvc.Addr(); a != "" {
 			live["gke"] = a
+		}
+		if a := dataTransfer.Addr(); a != "" {
+			live["datatransfer"] = a
 		}
 		if a := apiKeysSrv.Addr(); a != "" {
 			live["apikeys"] = a

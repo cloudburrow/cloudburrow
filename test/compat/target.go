@@ -90,6 +90,7 @@ var targetEndpoints = []targetEndpoint{
 	{"BACKUPDR", envKey("CLOUDBURROW_BACKUPDR_ENDPOINT")},
 	{"PRIVATECA", envKey("CLOUDBURROW_PRIVATECA_ENDPOINT")},
 	{"GKE", envKey("CLOUDBURROW_GKE_ENDPOINT")},
+	{"DATATRANSFER", envKey("CLOUDBURROW_DATATRANSFER_ENDPOINT")},
 }
 
 // normalizeEndpoint reduces an address to host:port, so that

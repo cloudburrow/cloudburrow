@@ -146,6 +146,10 @@ var terraformEndpoints = []terraformEndpoint{
 	// clean, update in place and destroy in
 	// TestTerraformContainerClusterAndNodePool.
 	{config.ServiceGKE, "container_custom_endpoint", "GOOGLE_CONTAINER_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	// The BigQuery Data Transfer Service (#1948): a scheduled query's
+	// google_bigquery_data_transfer_config applies, plans clean, updates in
+	// place and destroys in TestTerraformBigQueryDataTransferConfig.
+	{dataTransferService, "bigquery_data_transfer_custom_endpoint", "GOOGLE_BIGQUERY_DATA_TRANSFER_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	// Compute Engine, for the one read google_container_node_pool makes of
 	// it: a pool's node_count is its instance group managers' targetSize,
 	// which the Kubernetes Engine port answers for its own pools' groups
@@ -277,6 +281,7 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 		config.ServiceBackupDR:   cfg.Endpoints.BackupDR,
 		config.ServicePrivateCA:  cfg.Endpoints.PrivateCA,
 		config.ServiceGKE:        cfg.Endpoints.GKE,
+		dataTransferService:      cfg.Endpoints.DataTransfer,
 	}
 	enabled := map[config.Service]bool{resourceManagerEndpoint: true, serviceUsageService: true, apiKeysService: true, sqlAdminEndpoint: sqlAdminEnabled(cfg),
 		memorystoreAdminEndpoint: serviceEnabled(cfg, config.ServiceMemorystore)}
@@ -285,6 +290,7 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 	}
 	enabled[config.ServiceBackupDR] = backupDREnabled(cfg)
 	enabled[config.ServicePrivateCA] = privateCAEnabled(cfg)
+	enabled[dataTransferService] = dataTransferEnabled(cfg)
 	var set []terraformURL
 	var skipped []config.Service
 	for _, e := range terraformEndpoints {

@@ -339,6 +339,10 @@ type Endpoints struct {
 	// GKE is the host port of the Kubernetes Engine API
 	// (container.googleapis.com, #1913): gRPC and JSON on one port.
 	GKE int `json:"gke"`
+	// DataTransfer is the host port of the BigQuery Data Transfer Service
+	// (bigquerydatatransfer.googleapis.com, #1948): gRPC and JSON on one
+	// port, served when BigQuery is.
+	DataTransfer int `json:"dataTransfer"`
 	// ONNX is the host port of the ONNX runner (#1711), which runs BigQuery
 	// ML's imported ONNX models for the BigQuery front, published to the
 	// cluster through cloudburrow-host. CloudBurrow's own API, not a
@@ -412,6 +416,7 @@ func (e *Endpoints) fields() []endpointField {
 		{"backupdr", &e.BackupDR},
 		{"privateca", &e.PrivateCA},
 		{"gke", &e.GKE},
+		{"datatransfer", &e.DataTransfer},
 		{"onnx", &e.ONNX},
 		{"tfconvert", &e.TFConvert},
 	}
@@ -806,6 +811,9 @@ func Default() Config {
 			// The Kubernetes Engine API (#1913): the next free port after the
 			// API Keys API's 9029.
 			GKE: 9030,
+			// The BigQuery Data Transfer Service (#1948): 9031 to 9033 are
+			// taken by other branches, so 9034.
+			DataTransfer: 9034,
 			// OS-assigned. The port is not what enables local AI —
 			// LocalAI.ModelPath is. A configured port with no model binds
 			// nothing, so there is no endpoint answering every request with
