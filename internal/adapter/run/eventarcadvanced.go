@@ -548,7 +548,20 @@ func eaCheckPipeline(e *EventarcServer) func(*eventarcpb.Pipeline) error {
 				}
 			}
 		case d.GetWorkflow() != "":
-			return apierror.Unimplemented("destinations[0].workflow is not supported: a pipeline does not deliver to Workflows on this instance (a trigger's destination.workflow does)")
+			// A workflow destination starts one execution per event, the
+			// CloudEvent its argument (#1996).
+			if !eaWorkflowRE.MatchString(d.GetWorkflow()) {
+				return apierror.InvalidArgument("destinations[0].workflow %q must be projects/{project}/locations/{location}/workflows/{workflow}", d.GetWorkflow())
+			}
+			if strings.Split(d.GetWorkflow(), "/")[1] != project {
+				return apierror.InvalidArgument("destinations[0].workflow %s must be in the pipeline's project %s", d.GetWorkflow(), project)
+			}
+			if e.f == nil {
+				return apierror.FailedPrecondition("destination.workflow needs Workflows, which this instance does not serve: start it with --services workflows")
+			}
+			if err := e.f.checkWorkflow(d.GetWorkflow()); err != nil {
+				return err
+			}
 		case d.GetMessageBus() != "":
 			if strings.Split(d.GetMessageBus(), "/")[1] != project {
 				return apierror.InvalidArgument("destinations[0].message_bus %s must be in the pipeline's project %s", d.GetMessageBus(), project)

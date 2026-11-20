@@ -175,8 +175,73 @@ func TestPipelineAvroOutputAndRetries(t *testing.T) {
 	}
 	bad = proto.Clone(p).(*eventarcpb.Pipeline)
 	bad.Destinations[0].DestinationDescriptor = &eventarcpb.Pipeline_Destination_Workflow{Workflow: loc + "/workflows/w"}
+	// Without Workflows, a workflow destination is refused.
 	if err := eaCheckPipeline(f.Eventarc())(bad); err == nil || !strings.Contains(err.Error(), "Workflows") {
 		t.Errorf("a workflow destination: %v", err)
+	}
+}
+
+type chanWorkflows struct{ got chan [2]string }
+
+func (w *chanWorkflows) WorkflowExists(name string) bool {
+	return name == "projects/eawf/locations/us-central1/workflows/w"
+}
+func (w *chanWorkflows) StartWorkflow(_ context.Context, name, arg string) error {
+	w.got <- [2]string{name, arg}
+	return nil
+}
+
+// A pipeline whose destination is a workflow (#1996) starts one execution
+// per matching event, the CloudEvent in JSON its argument; a workflow
+// that does not exist, or one in another project, is refused.
+func TestPipelineToWorkflow(t *testing.T) {
+	w := &chanWorkflows{got: make(chan [2]string, 4)}
+	f := (&FunctionsServer{}).WithEvents(Events{Transport: &fakePublisher{}, Workflows: w})
+	loc := "projects/eawf/locations/us-central1"
+	bus := loc + "/messageBuses/b"
+	wf := loc + "/workflows/w"
+	eaPut(t, eaAdv.buses, &eventarcpb.MessageBus{Name: bus})
+	p := &eventarcpb.Pipeline{Name: loc + "/pipelines/p",
+		Destinations: []*eventarcpb.Pipeline_Destination{{DestinationDescriptor: &eventarcpb.Pipeline_Destination_Workflow{Workflow: wf}}},
+		RetryPolicy:  &eventarcpb.Pipeline_RetryPolicy{MaxAttempts: 1}}
+	if err := eaCheckPipeline(f.Eventarc())(p); err != nil {
+		t.Fatalf("check the pipeline: %v", err)
+	}
+	for _, bad := range []string{loc + "/workflows/missing", "projects/other/locations/us-central1/workflows/w", "w"} {
+		q := proto.Clone(p).(*eventarcpb.Pipeline)
+		q.Destinations[0].DestinationDescriptor = &eventarcpb.Pipeline_Destination_Workflow{Workflow: bad}
+		if err := eaCheckPipeline(f.Eventarc())(q); err == nil {
+			t.Errorf("workflow %q was accepted", bad)
+		}
+	}
+	eaPut(t, eaAdv.pipelines, p)
+	eaPut(t, eaAdv.enrollments, &eventarcpb.Enrollment{Name: loc + "/enrollments/e", MessageBus: bus, Destination: p.Name,
+		CelMatch: `message.type == "order.created"`})
+	pub := f.EventarcPublisher()
+	if _, err := pub.Publish(context.Background(), &publishingpb.PublishRequest{MessageBus: bus, Format: &publishingpb.PublishRequest_JsonMessage{
+		JsonMessage: `{"specversion":"1.0","type":"order.created","source":"//shop","id":"1","datacontenttype":"application/json","data":{"order":42}}`}}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-w.got:
+		var arg map[string]any
+		if err := json.Unmarshal([]byte(got[1]), &arg); err != nil || got[0] != wf || arg["type"] != "order.created" || arg["id"] != "1" || arg["source"] != "//shop" {
+			t.Errorf("the workflow %s's argument %s (%v)", got[0], got[1], err)
+		}
+		if d, _ := arg["data"].(map[string]any); d["order"] != float64(42) {
+			t.Errorf("the argument's data %v", arg["data"])
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the workflow was not started")
+	}
+	if _, err := pub.Publish(context.Background(), &publishingpb.PublishRequest{MessageBus: bus, Format: &publishingpb.PublishRequest_JsonMessage{
+		JsonMessage: `{"specversion":"1.0","type":"order.deleted","source":"//shop","id":"2"}`}}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-w.got:
+		t.Errorf("a non-matching event started %v", got)
+	case <-time.After(300 * time.Millisecond):
 	}
 }
 

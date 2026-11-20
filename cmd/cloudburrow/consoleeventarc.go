@@ -309,6 +309,14 @@ func eaFormDestination(project, region string, values map[string]string) (*event
 		}
 		return &eventarcpb.Destination{Descriptor_: &eventarcpb.Destination_HttpEndpoint{HttpEndpoint: &eventarcpb.HttpEndpoint{Uri: uri}},
 			NetworkConfig: &eventarcpb.NetworkConfig{NetworkAttachment: na}}, nil
+	case "Workflows":
+		// A workflow's Eventarc trigger, made from Workflows' Create
+		// workflow (#2011): the workflow's resource name.
+		wf := strings.TrimSpace(values["workflow"])
+		if wf == "" {
+			return nil, errors.New("choose the workflow the events start")
+		}
+		return &eventarcpb.Destination{Descriptor_: &eventarcpb.Destination_Workflow{Workflow: wf}}, nil
 	default:
 		return nil, fmt.Errorf("event destination %q is not served", kind)
 	}

@@ -3949,6 +3949,19 @@ async function renderDetail(view, route, resourcePath) {
   const drawListingSection = (into, section, note, reload) => {
     let list = section.listing || {};
     const noun = list.noun || section.label.toLowerCase();
+    // A workflow execution's Steps (#2004): the visualization panel of
+    // the revision that ran, over the step entries' table.
+    if (section.graph) {
+      const viz = wfStepsVisualization(section.graph, list.items);
+      note = note ? el("div", {}, note, viz) : viz;
+    }
+    // Google's step detail panel (#2011): a step entry's details, its
+    // variables with detailed history, and its Parent, Children, Next
+    // and Previous entries, each moving the panel to that entry.
+    if ((section.stepEntries || []).length) {
+      const panel = wfStepPanel(section.stepEntries);
+      note = note ? el("div", {}, note, panel) : panel;
+    }
     // An upload control where the provider says objects can land. It joins
     // the section's note, so it is drawn whether or not there are rows yet —
     // an empty bucket is exactly where the first upload happens.
@@ -4142,6 +4155,14 @@ async function renderDetail(view, route, resourcePath) {
     if (!section.text) {
       return setChildren(into, note,
         emptyState(`No ${section.label.toLowerCase()}`, `${name} reports none.`));
+    }
+    // A workflow's source (#2004), highlighted beside its graph.
+    if (section.language === "workflows") {
+      return setChildren(into, note,
+        el("div", { class: "card text-section" },
+          el("div", { class: "text-actions" },
+            copyButton(section.text, `${section.label} for ${name}`)),
+          wfSourceSection(section.text, `${section.label} of ${name}`)));
     }
     setChildren(into, note,
       el("div", { class: "card text-section" },
@@ -6057,6 +6078,9 @@ function buildCreateForm(spec) {
     // Google's inline source editor (#1852): files, one open at a time in a
     // code editor, submitted as a JSON object of file name to contents.
     if (f.type === "sourcefiles") return sourceFilesEntry(f, id, errorId, helpId);
+    // A workflow's source (#2004): Google's editor, its syntax highlighted,
+    // beside the graph of its steps.
+    if (f.type === "workflowsource") return workflowSourceEntry(f, id, errorId, helpId);
     // A repeatable group of fields (#1863): Google's exclusion filters,
     // a row each with its name, filter and Disable.
     if (f.type === "group") return groupEntry(f, id, errorId, helpId);
@@ -6759,6 +6783,741 @@ function sourceFilesEntry(f, id, errorId, helpId) {
   const entry = { field: Object.assign({}, f, { default: control.value }), control, node, error, helpId, errorId,
                   isCheck: false, follow, focus: () => editor.focus() };
   return entry;
+}
+
+// --- Workflows' source editor and graph (#2004) ---------------------------
+//
+// Google's Workflows editor highlights the source's syntax, YAML or JSON,
+// and draws the workflow's steps as a graph beside it, redrawn as the
+// source changes; the Source tab shows the same, read only, and an
+// execution's Steps tab has the graph in a visualization panel, each step
+// marked succeeded or failed
+// (https://docs.cloud.google.com/workflows/docs/debug-steps). Written here
+// rather than vendored: the highlighter is a line tokenizer, and the graph
+// needs only the subset of YAML a workflow is written in, which wfParseYAML
+// reads (block mappings and sequences, flow collections, quoted and block
+// scalars). An error in the source is shown under the graph with its line.
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+// wfLanguage is the language a workflow's source is in: JSON when it opens
+// with a brace or bracket, as the Workflows API decides, else YAML.
+function wfLanguage(src) {
+  return /^\s*[[{]/.test(src || "") ? "json" : "yaml";
+}
+
+// wfTokens splits a run of text into highlighted spans: strings (with the
+// ${...} expressions inside them), expressions, numbers, literals,
+// comments (YAML only) and punctuation.
+function wfTokens(text, lang, out) {
+  const push = (cls, s) => { if (s) out.push(cls ? el("span", { class: cls, text: s }) : document.createTextNode(s)); };
+  const exprEnd = (s, i) => {
+    let depth = 0;
+    for (let j = i + 1; j < s.length; j++) {
+      if (s[j] === "{") depth++;
+      else if (s[j] === "}" && --depth === 0) return j + 1;
+      else if (s[j] === '"' || s[j] === "'") {
+        const q = s[j];
+        for (j++; j < s.length && s[j] !== q; j++) if (s[j] === "\\") j++;
+      }
+    }
+    return s.length;
+  };
+  const stringWithExprs = (s) => {
+    let i = 0, last = 0;
+    const span = el("span", { class: "tok-str" });
+    while ((i = s.indexOf("${", i)) !== -1) {
+      if (i > last) span.append(s.slice(last, i));
+      const end = exprEnd(s, i + 1);
+      span.append(el("span", { class: "tok-expr", text: s.slice(i, end) }));
+      i = last = end;
+    }
+    if (last < s.length) span.append(s.slice(last));
+    out.push(span);
+  };
+  let i = 0, plain = "";
+  const flush = () => { push("", plain); plain = ""; };
+  while (i < text.length) {
+    const c = text[i];
+    if (lang === "yaml" && c === "#" && (i === 0 || /\s/.test(text[i - 1]))) {
+      flush(); push("tok-comment", text.slice(i)); return;
+    }
+    if (c === '"' || (c === "'" && lang === "yaml" && (i === 0 || /[\s,[{:]/.test(text[i - 1])))) {
+      let j = i + 1;
+      for (; j < text.length && text[j] !== c; j++) if (c === '"' && text[j] === "\\") j++;
+      flush();
+      const s = text.slice(i, j + 1);
+      // A JSON string followed by a colon is a key.
+      if (lang === "json" && /^\s*:/.test(text.slice(j + 1))) push("tok-key", s);
+      else stringWithExprs(s);
+      i = j + 1;
+      continue;
+    }
+    if (c === "$" && text[i + 1] === "{") {
+      flush();
+      const end = exprEnd(text, i + 1);
+      push("tok-expr", text.slice(i, end));
+      i = end;
+      continue;
+    }
+    if ("[]{},:".includes(c)) { flush(); push("tok-punct", c); i++; continue; }
+    const word = /^-?\d+(\.\d+)?([eE][+-]?\d+)?\b|^(true|false|null|True|False|Null|TRUE|FALSE|NULL)\b/.exec(text.slice(i));
+    if (word && (i === 0 || /[\s,[{:]/.test(text[i - 1]))) {
+      const rest = text.slice(i + word[0].length);
+      if (lang === "json" || /^\s*($|[,\]}#])/.test(rest)) {
+        flush();
+        push(word[3] ? "tok-lit" : "tok-num", word[0]);
+        i += word[0].length;
+        continue;
+      }
+    }
+    plain += c;
+    i++;
+  }
+  flush();
+}
+
+// wfHighlight is the source as highlighted nodes, line by line.
+function wfHighlight(src, lang) {
+  const out = [];
+  let blockIndent = -1; // inside a YAML block scalar: the indent of its key
+  (src || "").split("\n").forEach((line, n) => {
+    if (n) out.push(document.createTextNode("\n"));
+    if (lang === "json") return wfTokens(line, "json", out);
+    const indent = line.match(/^ */)[0].length;
+    if (blockIndent >= 0) {
+      if (!line.trim() || indent > blockIndent) { out.push(el("span", { class: "tok-str", text: line })); return; }
+      blockIndent = -1;
+    }
+    const m = /^(\s*(?:-\s+)*)("(?:[^"\\]|\\.)*"|'[^']*'|[^\s#"'\-[{][^:#]*?|-[^\s:#][^:#]*?)(\s*:)(?=\s|$)(.*)$/.exec(line);
+    if (!m) return wfTokens(line, "yaml", out);
+    out.push(document.createTextNode(m[1].replace(/-/g, "")));
+    // The dashes are punctuation, in place.
+    if (m[1].includes("-")) {
+      out.pop();
+      for (const ch of m[1]) out.push(ch === "-" ? el("span", { class: "tok-punct", text: "-" }) : document.createTextNode(ch));
+    }
+    out.push(el("span", { class: "tok-key", text: m[2] }), el("span", { class: "tok-punct", text: m[3] }));
+    if (/^\s*[|>][-+0-9]*\s*(#.*)?$/.test(m[4])) blockIndent = m[1].length;
+    wfTokens(m[4], "yaml", out);
+  });
+  return out;
+}
+
+// --- a small YAML reader, for the graph -------------------------------
+
+class WfYAMLError extends Error {
+  constructor(message, line) { super(message); this.line = line; }
+}
+
+function wfStripComment(s) {
+  let q = "";
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (q) { if (c === q) q = ""; else if (c === "\\" && q === '"') i++; continue; }
+    if (c === '"' || c === "'") q = c;
+    else if (c === "#" && (i === 0 || /\s/.test(s[i - 1]))) return s.slice(0, i);
+  }
+  return s;
+}
+
+function wfScalar(s, line) {
+  s = s.trim();
+  if (s === "" || s === "~" || /^null$/i.test(s)) return null;
+  if (/^true$/i.test(s)) return true;
+  if (/^false$/i.test(s)) return false;
+  if (/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(s)) return Number(s);
+  if (s[0] === '"') {
+    try { return JSON.parse(s); } catch (_) { throw new WfYAMLError(`unterminated or invalid string ${s}`, line); }
+  }
+  if (s[0] === "'") {
+    if (!s.endsWith("'") || s.length < 2) throw new WfYAMLError(`unterminated string ${s}`, line);
+    return s.slice(1, -1).replace(/''/g, "'");
+  }
+  if (s[0] === "[" || s[0] === "{") return wfFlow(s, line);
+  return s;
+}
+
+// wfFlow reads a flow collection: [a, b] or {k: v}, nested, with quoted
+// strings and ${...} expressions inside plain scalars.
+function wfFlow(s, line) {
+  let i = 0;
+  const ws = () => { while (i < s.length && /\s/.test(s[i])) i++; };
+  const plain = (stops) => {
+    const start = i;
+    while (i < s.length && !stops.includes(s[i])) {
+      if (s[i] === "$" && s[i + 1] === "{") {
+        let depth = 0;
+        for (i++; i < s.length; i++) {
+          if (s[i] === "{") depth++;
+          else if (s[i] === "}" && --depth === 0) break;
+        }
+      }
+      if (s[i] === '"' || s[i] === "'") {
+        const q = s[i];
+        for (i++; i < s.length && s[i] !== q; i++) if (s[i] === "\\" && q === '"') i++;
+      }
+      i++;
+    }
+    return s.slice(start, i);
+  };
+  const value = (stops) => {
+    ws();
+    if (s[i] === "[") {
+      i++;
+      const arr = [];
+      for (;;) {
+        ws();
+        if (s[i] === "]") { i++; return arr; }
+        arr.push(value(",]"));
+        ws();
+        if (s[i] === ",") i++;
+        else if (s[i] === "]") { i++; return arr; }
+        else throw new WfYAMLError("expected , or ] in a flow sequence", line);
+      }
+    }
+    if (s[i] === "{") {
+      i++;
+      const obj = {};
+      for (;;) {
+        ws();
+        if (s[i] === "}") { i++; return obj; }
+        const key = wfScalar(plain(":,}"), line);
+        if (s[i] !== ":") throw new WfYAMLError("expected : in a flow mapping", line);
+        i++;
+        obj[key] = value(",}");
+        ws();
+        if (s[i] === ",") i++;
+        else if (s[i] === "}") { i++; return obj; }
+        else throw new WfYAMLError("expected , or } in a flow mapping", line);
+      }
+    }
+    return wfScalar(plain(stops), line);
+  };
+  const v = value("");
+  ws();
+  if (i < s.length) throw new WfYAMLError(`unexpected ${s.slice(i, i + 10)}`, line);
+  return v;
+}
+
+const WF_KEY = /^("(?:[^"\\]|\\.)*"|'[^']*'|[^\s"'[{#][^:]*?)\s*:(?:\s+(.*))?$/;
+
+function wfParseYAML(src) {
+  // Lines, each with its indent; "- x" becomes a dash line and x on a
+  // line of its own at x's column, so a sequence item is any node.
+  const raw = src.replace(/\t/g, "  ").split("\n");
+  const lines = [];
+  for (let n = 0; n < raw.length; n++) {
+    const text = wfStripComment(raw[n]).replace(/\s+$/, "");
+    if (!text.trim() || /^(---|\.\.\.)$/.test(text.trim())) continue;
+    let indent = text.match(/^ */)[0].length;
+    let rest = text.slice(indent);
+    while (/^-(\s|$)/.test(rest)) {
+      lines.push({ indent, dash: true, n });
+      const sp = rest.slice(1).match(/^ */)[0].length;
+      indent += 1 + sp;
+      rest = rest.slice(1 + sp);
+    }
+    if (rest) lines.push({ indent, text: rest, n, rawIndex: n });
+  }
+  let i = 0;
+  const node = (minIndent) => {
+    const l = lines[i];
+    if (!l || l.indent < minIndent) return null;
+    if (l.dash) return seq(l.indent);
+    if (WF_KEY.test(l.text) && !/^[[{]/.test(l.text)) return map(l.indent);
+    i++;
+    return flowOrScalar(l);
+  };
+  const flowOrScalar = (l) => {
+    let text = l.text;
+    // A flow collection may run on over lines.
+    if (/^[[{]/.test(text)) {
+      const balanced = (t) => {
+        let d = 0, q = "";
+        for (const c of t) {
+          if (q) { if (c === q) q = ""; continue; }
+          if (c === '"' || c === "'") q = c;
+          else if (c === "[" || c === "{") d++;
+          else if (c === "]" || c === "}") d--;
+        }
+        return d <= 0;
+      };
+      while (!balanced(text) && lines[i] && !lines[i].dash) text += " " + lines[i++].text;
+    }
+    return wfScalar(text, l.n + 1);
+  };
+  const seq = (indent) => {
+    const arr = [];
+    while (lines[i] && lines[i].indent === indent && lines[i].dash) {
+      i++;
+      arr.push(lines[i] && lines[i].indent > indent ? node(indent + 1) : null);
+    }
+    if (lines[i] && lines[i].indent > indent) throw new WfYAMLError("bad indentation of a sequence item", lines[i].n + 1);
+    return arr;
+  };
+  const map = (indent) => {
+    const obj = {};
+    while (lines[i] && lines[i].indent === indent && !lines[i].dash) {
+      const l = lines[i];
+      const m = WF_KEY.exec(l.text);
+      if (!m) throw new WfYAMLError(`expected a key: ${l.text}`, l.n + 1);
+      const key = String(wfScalar(m[1], l.n + 1));
+      if (Object.prototype.hasOwnProperty.call(obj, key)) throw new WfYAMLError(`duplicate key ${key}`, l.n + 1);
+      i++;
+      const rest = (m[2] || "").trim();
+      if (!rest) {
+        const next = lines[i];
+        obj[key] = next && (next.indent > indent || (next.indent === indent && next.dash)) ? node(next.indent) : null;
+      } else if (/^[|>][-+0-9]*$/.test(rest)) {
+        // A block scalar: the raw lines more indented than the key.
+        const body = [];
+        let n = l.n + 1;
+        for (; n < raw.length; n++) {
+          const r = raw[n];
+          if (r.trim() && r.match(/^ */)[0].length <= indent) break;
+          body.push(r);
+        }
+        while (lines[i] && lines[i].n < n) i++;
+        const cut = Math.min(...body.filter((b) => b.trim()).map((b) => b.match(/^ */)[0].length), Infinity);
+        const text = body.map((b) => b.slice(cut === Infinity ? 0 : cut));
+        obj[key] = rest[0] === ">" ? text.join(" ").trim() : text.join("\n").replace(/\n+$/, "\n");
+      } else {
+        obj[key] = flowOrScalar({ text: rest, n: l.n });
+      }
+    }
+    if (lines[i] && lines[i].indent > indent) throw new WfYAMLError("bad indentation of a mapping entry", lines[i].n + 1);
+    return obj;
+  };
+  if (!lines.length) return null;
+  const v = node(0);
+  if (i < lines.length) throw new WfYAMLError("unexpected content after the document", lines[i].n + 1);
+  return v;
+}
+
+// wfParse is the source's definition, or { error, line }.
+function wfParse(src) {
+  try {
+    if (wfLanguage(src) === "json") return { def: JSON.parse(src) };
+    return { def: wfParseYAML(src || "") };
+  } catch (err) {
+    const pos = /position (\d+)/.exec(err.message);
+    const line = err.line || (pos ? (src.slice(0, Number(pos[1])).match(/\n/g) || []).length + 1 : 0);
+    return { error: err.message, line };
+  }
+}
+
+// --- the workflow's graph ----------------------------------------------
+
+// wfModel is the definition as subworkflows, each a name and its steps:
+// { name, kind, detail, next, ends, branches: [{label, next}], children:
+// [{label, steps}] }. A definition that is a list of steps is main's.
+function wfModel(def) {
+  const subs = [];
+  const steps = (list, path) => (Array.isArray(list) ? list : []).map((item, k) => {
+    const name = item && typeof item === "object" && !Array.isArray(item) ? Object.keys(item)[0] : `step ${k + 1}`;
+    const body = (item && item[name]) || {};
+    const s = { name, path: `${path}/${name}`, kind: "assign", detail: "", next: body.next, ends: false, branches: [], children: [] };
+    if (body.call !== undefined) { s.kind = "call"; s.detail = String(body.call); }
+    else if (body.switch) {
+      s.kind = "switch";
+      (Array.isArray(body.switch) ? body.switch : []).forEach((c, j) => {
+        const cond = c && c.condition !== undefined ? String(c.condition) : "";
+        if (c && c.steps) s.children.push({ label: `condition ${j + 1}`, steps: steps(c.steps, `${s.path}/${j}`) });
+        s.branches.push({ label: cond, next: c && (c.next || (c.return !== undefined || c.raise !== undefined ? "end" : null)) });
+      });
+    } else if (body.for) {
+      s.kind = "for";
+      const f = body.for;
+      s.detail = `${f.value || "value"} in ${f.in !== undefined ? (Array.isArray(f.in) ? JSON.stringify(f.in) : f.in) : f.range ? JSON.stringify(f.range) : "…"}`;
+      s.children.push({ label: "loop", steps: steps(f.steps, s.path) });
+    } else if (body.parallel) {
+      s.kind = "parallel";
+      const p = body.parallel;
+      if (p.for) s.children.push({ label: "for", steps: steps(p.for.steps, s.path) });
+      (Array.isArray(p.branches) ? p.branches : []).forEach((b) => {
+        const bn = b && Object.keys(b)[0];
+        if (bn) s.children.push({ label: bn, steps: steps(b[bn].steps, `${s.path}/${bn}`) });
+      });
+    } else if (body.try !== undefined) {
+      s.kind = "try";
+      const t = body.try;
+      if (t && t.steps) s.children.push({ label: "try", steps: steps(t.steps, `${s.path}/try`) });
+      else s.detail = t && t.call ? `call ${t.call}` : "";
+      if (body.except && body.except.steps) s.children.push({ label: "except", steps: steps(body.except.steps, `${s.path}/except`) });
+      if (body.retry) s.detail = (s.detail ? s.detail + ", " : "") + "retry";
+    } else if (body.steps) {
+      s.kind = "steps";
+      s.children.push({ label: "", steps: steps(body.steps, s.path) });
+    } else if (body.return !== undefined) { s.kind = "return"; s.ends = true; }
+    else if (body.raise !== undefined) { s.kind = "raise"; s.ends = true; }
+    else if (body.assign) s.kind = "assign";
+    else if (body.next) s.kind = "next";
+    if (s.next === "end") s.ends = true;
+    return s;
+  });
+  if (Array.isArray(def)) subs.push({ name: "main", steps: steps(def, "main") });
+  else if (def && typeof def === "object") {
+    for (const [name, sub] of Object.entries(def)) subs.push({ name, steps: steps(sub && sub.steps, name) });
+  }
+  return subs;
+}
+
+const WF_KIND_LABEL = { call: "Call", switch: "Switch", for: "For", parallel: "Parallel", try: "Try", steps: "Steps",
+  return: "Return", raise: "Raise", assign: "Assign", next: "Jump" };
+
+// wfGraph draws the subworkflows as an SVG of step boxes joined by
+// arrows: the next step down, jumps and switch branches along the right,
+// return and raise to the End. A nested block (for, parallel, try, steps,
+// a switch's steps) is a box of its own around its steps, collapsible.
+// states maps "routine/step" to the state of its entries (SUCCEEDED,
+// FAILED, IN_PROGRESS, …), marking each box as Google's visualization
+// marks it.
+function wfGraph(def, opts = {}) {
+  const subs = wfModel(def);
+  const states = opts.states || {};
+  const collapsed = opts.collapsed || new Set();
+  const W = 220, H = 44, GAP = 26, PAD = 14, LANE = 14;
+  const svg = document.createElementNS(SVG_NS, "svg");
+  const mk = (tag, attrs = {}, parent = svg) => {
+    const n = document.createElementNS(SVG_NS, tag);
+    for (const [k, v] of Object.entries(attrs)) if (v !== undefined && v !== null) n.setAttribute(k, v);
+    parent.append(n);
+    return n;
+  };
+  const defs = mk("defs");
+  const marker = mk("marker", { id: "wf-arrow", viewBox: "0 0 10 10", refX: "9", refY: "5", markerWidth: "7", markerHeight: "7", orient: "auto-start-reverse" }, defs);
+  mk("path", { d: "M0,0 L10,5 L0,10 z", class: "wf-arrowhead" }, marker);
+  // Blocks beneath edges beneath boxes.
+  const blocks = mk("g", { class: "wf-blocks" });
+  const edges = mk("g", { class: "wf-edges" });
+  let maxX = 0;
+  const truncate = (s, n) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
+  const text = (x, y, s, cls, parent) => { const t = mk("text", { x, y, class: cls }, parent); t.textContent = s; return t; };
+  const arrow = (d, cls = "") => mk("path", { d, class: `wf-edge ${cls}`.trim(), "marker-end": "url(#wf-arrow)" }, edges);
+  let lanes = 0;
+  // layout places a list of steps from (x, y) and returns its bottom and
+  // the boxes by name, joining them.
+  const layout = (list, x, y, routine, endY) => {
+    const boxes = {};
+    const placed = [];
+    for (const s of list) {
+      const top = y;
+      const g = mk("g", { class: `wf-node wf-${s.kind}` });
+      const st = states[`${routine}/${s.name}`];
+      if (st) g.classList.add(`is-${st.toLowerCase()}`);
+      const hasKids = s.children.length > 0;
+      const isCollapsed = collapsed.has(s.path);
+      mk("rect", { x, y, width: W, height: H, rx: "6", class: "wf-box" }, g);
+      text(x + 10, y + 18, truncate(s.name, 26), "wf-name", g);
+      text(x + 10, y + 34, truncate(`${WF_KIND_LABEL[s.kind] || s.kind}${s.detail ? ": " + s.detail : ""}`, 32), "wf-kind", g);
+      const title = mk("title", {}, g);
+      title.textContent = `${s.name} (${WF_KIND_LABEL[s.kind] || s.kind})${s.detail ? ": " + s.detail : ""}${st ? ", " + st.toLowerCase() : ""}`;
+      if (st === "SUCCEEDED") text(x + W - 20, y + 27, "✓", "wf-mark wf-ok", g);
+      else if (st === "FAILED") text(x + W - 18, y + 27, "!", "wf-mark wf-failed", g);
+      else if (st === "IN_PROGRESS") text(x + W - 20, y + 27, "…", "wf-mark", g);
+      y += H;
+      if (hasKids) {
+        // The block's toggle: collapse or expand its steps.
+        const tg = mk("g", { class: "wf-toggle", role: "button", tabindex: "0", "data-path": s.path,
+          "aria-expanded": isCollapsed ? "false" : "true", "aria-label": `${isCollapsed ? "Expand" : "Collapse"} ${s.name}` }, g);
+        mk("rect", { x: x + W - 44, y: top + 6, width: "18", height: "18", rx: "3", class: "wf-toggle-box" }, tg);
+        text(x + W - 39, top + 20, isCollapsed ? "+" : "−", "wf-toggle-sign", tg);
+        if (!isCollapsed) {
+          let cy = y + 10;
+          const bx = x + PAD;
+          for (const c of s.children) {
+            if (c.label) { text(bx, cy + 10, c.label, "wf-branch-label"); cy += 16; }
+            cy = layout(c.steps, bx + 6, cy, routine, null) + 10;
+          }
+          mk("rect", { x: x - 4, y: top - 4, width: W + PAD * 2 + 14, height: cy - top + 4, rx: "8", class: "wf-block" }, blocks);
+          maxX = Math.max(maxX, x + W + PAD * 2 + 14);
+          y = cy;
+        }
+      }
+      boxes[s.name] = { top, bottom: y, s };
+      placed.push({ s, top, bottom: y });
+      maxX = Math.max(maxX, x + W);
+      y += GAP;
+    }
+    // The arrows: down to the next step unless the step jumps or ends.
+    const cx = x + W / 2;
+    const jump = (from, to, label, cls) => {
+      const lane = x + W + 18 + (lanes++ % 6) * LANE;
+      const y1 = from.top + H / 2;
+      const y2 = to === "end" ? endY : to.top + H / 2;
+      if (to === "end" && endY === null) return;
+      arrow(`M${x + W},${y1} H${lane} V${y2} H${to === "end" ? cx + 34 : x + W}`, cls);
+      if (label) text(lane + 4, (y1 + y2) / 2, truncate(label, 24), "wf-edge-label");
+      maxX = Math.max(maxX, lane + 4 + Math.min(label.length, 24) * 6.5);
+    };
+    placed.forEach((p, k) => {
+      const after = placed[k + 1];
+      const s = p.s;
+      if (s.kind === "switch") {
+        for (const b of s.branches) {
+          if (!b.next) continue;
+          const to = b.next === "end" ? "end" : boxes[b.next];
+          if (to) jump(p, to, b.label, "wf-branch");
+        }
+      }
+      if (s.next && s.next !== "end") {
+        if (boxes[s.next]) jump(p, boxes[s.next], "next", "");
+      } else if (s.ends) {
+        jump(p, "end", "", "wf-end-edge");
+      } else if (after) {
+        arrow(`M${cx},${p.bottom} V${after.top}`);
+      } else if (endY !== null) {
+        arrow(`M${cx},${p.bottom} V${endY - 12}`);
+      }
+    });
+    return placed.length ? placed[placed.length - 1].bottom : y;
+  };
+  let y = 8;
+  for (const sub of subs) {
+    text(8, y + 14, sub.name, "wf-sub-title");
+    y += 24;
+    mk("rect", { x: 8 + W / 2 - 30, y, width: "60", height: "22", rx: "11", class: "wf-terminal" });
+    text(8 + W / 2, y + 15, "Start", "wf-terminal-text");
+    y += 22 + GAP;
+    if (sub.steps.length) arrow(`M${8 + W / 2},${y - GAP} V${y}`);
+    // The End's place is known once the steps are laid out, so the steps
+    // are laid out twice: once to measure.
+    const probe = svg.childNodes.length;
+    const edgeProbe = edges.childNodes.length;
+    const blockProbe = blocks.childNodes.length;
+    const lanesBefore = lanes;
+    const bottom = layout(sub.steps, 8, y, sub.name, null);
+    while (svg.childNodes.length > probe) svg.lastChild.remove();
+    while (edges.childNodes.length > edgeProbe) edges.lastChild.remove();
+    while (blocks.childNodes.length > blockProbe) blocks.lastChild.remove();
+    lanes = lanesBefore;
+    const endY = bottom + GAP + 11;
+    layout(sub.steps, 8, y, sub.name, endY);
+    mk("rect", { x: 8 + W / 2 - 30, y: endY - 11, width: "60", height: "22", rx: "11", class: "wf-terminal" });
+    text(8 + W / 2, endY + 4, "End", "wf-terminal-text");
+    y = endY + 11 + 30;
+  }
+  const width = Math.max(maxX + 16, W + 32);
+  svg.setAttribute("viewBox", `0 0 ${width} ${y}`);
+  svg.style.width = `${width}px`;
+  svg.style.height = `${y}px`;
+  svg.setAttribute("class", "wf-graph");
+  svg.setAttribute("role", "group");
+  const count = subs.reduce((n, s) => n + s.steps.length, 0);
+  svg.setAttribute("aria-label", `Workflow graph: ${subs.length} ${subs.length === 1 ? "subworkflow" : "subworkflows"}, ${count} top-level steps`);
+  return svg;
+}
+
+// wfGraphPanel is the graph with Google's zoom controls, redrawn by
+// update(source, states); a source that does not parse keeps the last
+// graph and says where it fails.
+function wfGraphPanel(label) {
+  let zoom = 1, last = null, lastStates = {};
+  const collapsed = new Set();
+  const canvas = el("div", { class: "wf-canvas" });
+  const status = el("p", { class: "wf-graph-status", role: "status" });
+  const zoomTo = (z) => {
+    zoom = Math.min(2, Math.max(0.4, z));
+    const svg = canvas.querySelector("svg");
+    if (svg) {
+      const [, , w, h] = svg.getAttribute("viewBox").split(" ").map(Number);
+      // The stylesheet sizes every svg as an icon, so the size is a style.
+      svg.style.width = `${w * zoom}px`;
+      svg.style.height = `${h * zoom}px`;
+    }
+    zoomLabel.textContent = `${Math.round(zoom * 100)}%`;
+  };
+  const zoomLabel = el("span", { class: "wf-zoom-level", text: "100%" });
+  const tools = el("div", { class: "wf-graph-tools" },
+    el("span", { class: "wf-graph-title", text: label }),
+    el("button", { type: "button", class: "secondary icon-text", "aria-label": "Zoom out", text: "−", onclick: () => zoomTo(zoom - 0.2) }),
+    zoomLabel,
+    el("button", { type: "button", class: "secondary icon-text", "aria-label": "Zoom in", text: "+", onclick: () => zoomTo(zoom + 0.2) }),
+    el("button", { type: "button", class: "secondary", text: "Reset", onclick: () => zoomTo(1) }));
+  const draw = () => {
+    if (last === null) return;
+    const svg = wfGraph(last, { states: lastStates, collapsed });
+    setChildren(canvas, svg);
+    zoomTo(zoom);
+  };
+  const toggle = (t) => {
+    const p = t.getAttribute("data-path");
+    if (collapsed.has(p)) collapsed.delete(p); else collapsed.add(p);
+    draw();
+    const again = canvas.querySelector(`.wf-toggle[data-path="${CSS.escape(p)}"]`);
+    if (again) again.focus();
+  };
+  canvas.addEventListener("click", (e) => { const t = e.target.closest(".wf-toggle"); if (t) toggle(t); });
+  canvas.addEventListener("keydown", (e) => {
+    const t = e.target.closest && e.target.closest(".wf-toggle");
+    if (t && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); toggle(t); }
+  });
+  const node = el("div", { class: "wf-graph-panel" }, tools, canvas, status);
+  const update = (src, states = {}) => {
+    const parsed = wfParse(src || "");
+    lastStates = states;
+    if (parsed.error) {
+      status.textContent = `The graph cannot be drawn: ${parsed.line ? `line ${parsed.line}: ` : ""}${parsed.error}`;
+      status.classList.add("is-error");
+      if (last === null) setChildren(canvas);
+      return parsed;
+    }
+    status.textContent = "";
+    status.classList.remove("is-error");
+    last = parsed.def;
+    draw();
+    return parsed;
+  };
+  return { node, update };
+}
+
+// wfCodeView is the highlighted source with line numbers; editable, it is
+// a textarea over the highlighting, the text drawn by the layer beneath.
+function wfCodeView(src, { editable = false, id = null, name = null, label = "Workflow source", required = false } = {}) {
+  const gutter = el("pre", { class: "wf-gutter", "aria-hidden": "true" });
+  const layer = el("pre", { class: "wf-highlight", "aria-hidden": editable ? "true" : null });
+  const lang = el("span", { class: "wf-lang" });
+  const textarea = editable
+    ? el("textarea", { id, name, class: "wf-input", spellcheck: "false", autocomplete: "off", autocapitalize: "off",
+        wrap: "off", required, "aria-label": label })
+    : null;
+  const paint = (text) => {
+    const l = wfLanguage(text);
+    lang.textContent = l === "json" ? "JSON" : "YAML";
+    setChildren(layer, ...wfHighlight(text, l), document.createTextNode("\n"));
+    const n = (text.match(/\n/g) || []).length + 1;
+    gutter.textContent = Array.from({ length: n }, (_, k) => String(k + 1)).join("\n");
+    if (textarea) textarea.style.height = `${Math.max(16, n + 1) * 1.5}em`;
+  };
+  const code = el("div", { class: "wf-code" }, layer, textarea);
+  const scroller = el("div", { class: "wf-scroller", tabindex: editable ? null : "0",
+    role: editable ? null : "region", "aria-label": editable ? null : label }, gutter, code);
+  if (textarea) {
+    textarea.value = src || "";
+    // Tab indents two spaces once the source is being typed, as the
+    // editor's does; until then, and after Escape, Tab moves on, so the
+    // editor never traps the keyboard (WCAG 2.1.2).
+    let typing = false;
+    textarea.addEventListener("focus", () => { typing = false; });
+    textarea.addEventListener("input", () => { typing = true; paint(textarea.value); });
+    textarea.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") { typing = false; return; }
+      if (!typing || e.key !== "Tab" || e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) return;
+      e.preventDefault();
+      const { selectionStart: a, selectionEnd: b } = textarea;
+      textarea.value = textarea.value.slice(0, a) + "  " + textarea.value.slice(b);
+      textarea.selectionStart = textarea.selectionEnd = a + 2;
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  } else {
+    layer.classList.add("is-static");
+  }
+  paint(src || "");
+  return { node: el("div", { class: "wf-editor-pane" }, el("div", { class: "wf-editor-head" }, lang), scroller), textarea, paint };
+}
+
+// workflowSourceEntry is a "workflowsource" field: the editor on the left,
+// the graph of what it holds on the right, redrawn as it is typed.
+function workflowSourceEntry(f, id, errorId, helpId) {
+  const view = wfCodeView(f.default || "", { editable: true, id, name: f.name, label: f.label, required: f.required });
+  const control = view.textarea;
+  const graph = wfGraphPanel("Workflow graph");
+  let timer = 0;
+  const check = () => {
+    const parsed = graph.update(control.value);
+    // A source that does not parse is still the API's to refuse, as it
+    // refuses with its own message; the editor only says where.
+    control.setAttribute("aria-invalid", parsed.error ? "true" : "false");
+  };
+  control.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(check, 150); });
+  if (helpId) control.setAttribute("aria-describedby", helpId);
+  const help = f.help ? el("p", { id: helpId, class: "form-help", text: f.help }) : null;
+  const error = el("p", { id: errorId, class: "form-field-error", hidden: true });
+  const node = el("div", { class: "form-row wf-source-field" },
+    el("label", { for: id, text: f.label }), help,
+    el("div", { class: "wf-split" }, view.node, graph.node), error);
+  check();
+  return { field: f, control, node, error, helpId, errorId, isCheck: false, focus: () => control.focus() };
+}
+
+// wfSourceSection is a workflow's Source tab: the source, highlighted and
+// read only, beside its graph.
+function wfSourceSection(text, label) {
+  const view = wfCodeView(text, { label });
+  const graph = wfGraphPanel("Workflow graph");
+  graph.update(text);
+  return el("div", { class: "wf-split" }, view.node, graph.node);
+}
+
+// wfStepsVisualization is the Steps tab's visualization panel: the graph
+// of the revision that ran, each step marked with the state of its
+// entries, in a panel the expander opens and closes as Google's does.
+function wfStepsVisualization(source, items) {
+  const states = {};
+  const rank = { FAILED: 3, IN_PROGRESS: 2, SUCCEEDED: 1 };
+  for (const it of items || []) {
+    const key = `${(it.fields || {}).Routine || "main"}/${it.name}`;
+    const st = String(it.status || "").replace(/^STATE_/, "");
+    if (!states[key] || (rank[st] || 0) > (rank[states[key]] || 0)) states[key] = st;
+  }
+  const graph = wfGraphPanel("Workflow graph");
+  graph.update(source, states);
+  const details = el("details", { class: "wf-visualization", open: true },
+    el("summary", { text: "Visualization" }), graph.node);
+  return details;
+}
+
+// wfStepPanel is an execution's step detail panel (#2011): the step entry
+// chosen in its Step entry list, with Google's Parent, Children, Next and
+// Previous links that choose those entries instead.
+function wfStepPanel(entries) {
+  const byId = new Map(entries.map((e) => [e.id, e]));
+  const label = (e) => `${e.step} (#${e.id}, ${e.routine})`;
+  const chooser = el("select", { id: "wf-step-entry", class: "wf-step-choose" },
+    ...entries.map((e) => el("option", { value: e.id, text: `${label(e)}: ${e.state}` })));
+  const body = el("div", { class: "wf-step-body", "aria-live": "polite" });
+  const link = (id, text) => {
+    const e = byId.get(id);
+    if (!e) return el("span", { text: "—" });
+    return el("button", { type: "button", class: "link-button wf-step-link", "data-entry": id,
+      text: text || label(e), onclick: () => show(id, true) });
+  };
+  const show = (id, focus) => {
+    const e = byId.get(id);
+    if (!e) return;
+    chooser.value = id;
+    const row = (term, value) => [el("dt", { text: term }), el("dd", {}, value)];
+    const text = (v) => el("span", { text: v || "—" });
+    const kids = (e.children || []).length
+      ? el("ul", { class: "wf-step-children" }, ...e.children.map((c) => el("li", {}, link(c))))
+      : text("");
+    const vars = Object.keys(e.variables || {}).sort();
+    setChildren(body,
+      el("h3", { text: e.step }),
+      el("dl", { class: "wf-step-props" },
+        ...row("Step entry", text(`#${e.id}`)), ...row("Routine", text(e.routine)), ...row("Type", text(e.type)),
+        ...row("State", text(e.state)), ...row("Start time", text(e.started)), ...row("Update time", text(e.updated)),
+        ...(e.progress ? row("Progress", text(e.progress)) : []),
+        ...(e.exception ? row("Exception", el("code", { text: e.exception })) : [])),
+      el("h4", { text: "Navigation" }),
+      el("dl", { class: "wf-step-props wf-step-nav" },
+        ...row("Parent", e.parent ? link(e.parent) : text("")), ...row("Children", kids),
+        ...row("Previous", e.previous ? link(e.previous) : text("")), ...row("Next", e.next ? link(e.next) : text(""))),
+      el("h4", { text: "Variables" }),
+      vars.length
+        // A list rather than a table, so a long value wraps in a narrow
+        // window instead of scrolling the page sideways.
+        ? el("dl", { class: "wf-step-props wf-step-vars" },
+            ...vars.flatMap((k) => row(k, el("code", { text: e.variables[k] }))))
+        : el("p", { class: "form-help", text: "Variables are recorded with the Detailed execution history level." }));
+    if (focus) chooser.focus();
+  };
+  chooser.addEventListener("change", () => show(chooser.value, false));
+  show(entries[0].id, false);
+  return el("section", { class: "wf-step-panel", "aria-labelledby": "wf-step-title" },
+    el("h2", { id: "wf-step-title", text: "Step entry details" }),
+    el("label", { for: "wf-step-entry", text: "Step entry" }), chooser, body);
 }
 
 // schemaEntry is a "schema" field: one row per column, each a name, a type
@@ -14677,6 +15436,8 @@ function formKMSLocation(entries) {
     const e = entries.find((x) => x.field.name === name);
     return e ? e.control.value : "";
   };
+  // A form with a single Region (Create workflow, #2004) names it as location.
+  if (!entries.some((x) => x.field.name === "locationType")) return value("location") || value("region");
   const loc = value("locationType") === "region" ? value("region") : value("multiRegion");
   return ({ nam5: "us", eur3: "europe" })[loc] || loc;
 }
@@ -14689,7 +15450,7 @@ async function browseKeys(control, location) {
   const body = el("div", { class: "browse-list" }, loadingState(3, { what: "keys" }));
   dialog.append(el("div", { class: "modal-body" },
     el("h2", { id: "browse-title", text: "Select a Cloud KMS key" }),
-    el("p", { class: "form-help", text: `Keys in ${location}, the database's Cloud KMS location.` }),
+    el("p", { class: "form-help", text: `Keys in ${location}, the Cloud KMS location the resource's own location requires.` }),
     body,
     el("div", { class: "modal-actions" },
       el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }))));
