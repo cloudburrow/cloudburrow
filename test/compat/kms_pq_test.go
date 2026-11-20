@@ -225,6 +225,7 @@ func TestKMSDecapsulateXWing(t *testing.T) {
 // version 1, which encrypts.
 //
 // unverified: google.cloud.kms.v1.KeyManagementService/CreateCryptoKey INVALID_ARGUMENT: import_only without skip_initial_version_creation, or with a rotation schedule
+// Docs re-read 2026-11-20, still unanswered: https://docs.cloud.google.com/kms/docs/importing-a-key
 // unverified: google.cloud.kms.v1.KeyManagementService/CreateCryptoKeyVersion FAILED_PRECONDITION: on an import_only key
 // Docs re-read 2026-11-20, still unanswered: https://docs.cloud.google.com/kms/docs/importing-a-key
 func TestKMSImportOnlyKeys(t *testing.T) {

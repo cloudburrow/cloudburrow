@@ -10,7 +10,7 @@ import (
 // The pipeline semantics of #1990, each against the example tables of
 // Google's function reference (firebase.google.com/docs/firestore/
 // pipelines/functions/{logical,comparison,array,aggregate}-functions,
-// read 2026-11-20). Cases Google leaves open are marked UNVERIFIED.
+// re-read 2026-11-20). Cases Google leaves open are marked UNVERIFIED.
 
 var (
 	tru, fls = boolValue(true), boolValue(false)

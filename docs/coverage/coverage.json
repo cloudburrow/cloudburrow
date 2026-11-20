@@ -3601,7 +3601,7 @@
           "test/compat/kms1577_test.go:34 TestKMSDefaultKeyAccessJustificationsPolicies",
           "test/compat/kms_external_test.go:39 TestKMSExternalKeys",
           "test/compat/kms_hsm_ekm_autokey_test.go:54 TestKMSHSMKeysAndKeyAccessJustifications",
-          "test/compat/kms_pq_test.go:230 TestKMSImportOnlyKeys",
+          "test/compat/kms_pq_test.go:231 TestKMSImportOnlyKeys",
           "test/compat/kms_purposes_test.go:87 TestKMSAsymmetricSignVerifiesWithThePublicKeyPEM",
           "test/compat/kms_rotation_test.go:33 TestKMSRotationSchedule",
           "test/compat/kms_secp256k1_test.go:34 TestKMSSecp256k1SignsAndVerifiesWithThePublicKey",
@@ -3658,7 +3658,7 @@
           {
             "code": "INVALID_ARGUMENT",
             "case": "import_only without skip_initial_version_creation, or with a rotation schedule",
-            "test": "test/compat/kms_pq_test.go:230 TestKMSImportOnlyKeys"
+            "test": "test/compat/kms_pq_test.go:231 TestKMSImportOnlyKeys"
           },
           {
             "code": "INVALID_ARGUMENT",
@@ -3679,7 +3679,7 @@
           "test/compat/cloudsqlreencrypt_test.go:25 TestCloudSQLReencrypt",
           "test/compat/kms_external_test.go:39 TestKMSExternalKeys",
           "test/compat/kms_hsm_ekm_autokey_test.go:54 TestKMSHSMKeysAndKeyAccessJustifications",
-          "test/compat/kms_pq_test.go:230 TestKMSImportOnlyKeys",
+          "test/compat/kms_pq_test.go:231 TestKMSImportOnlyKeys",
           "test/compat/kms_purposes_test.go:386 TestKMSAsymmetricVersionsStartPendingGeneration",
           "test/compat/kms_secp256k1_test.go:34 TestKMSSecp256k1SignsAndVerifiesWithThePublicKey",
           "test/compat/kms_test.go:224 TestKMSVersionCanStartDisabled",
@@ -3694,7 +3694,7 @@
           {
             "code": "FAILED_PRECONDITION",
             "case": "on an import_only key",
-            "test": "test/compat/kms_pq_test.go:230 TestKMSImportOnlyKeys"
+            "test": "test/compat/kms_pq_test.go:231 TestKMSImportOnlyKeys"
           },
           {
             "code": "INVALID_ARGUMENT",
@@ -4070,8 +4070,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_import_test.go:33 TestKMSImportManuallyWrappedKeys",
-          "test/compat/kms_pq_test.go:230 TestKMSImportOnlyKeys",
-          "test/compat/kms_pq_test.go:311 TestIAMEnforcementKMSImportJobs",
+          "test/compat/kms_pq_test.go:231 TestKMSImportOnlyKeys",
+          "test/compat/kms_pq_test.go:312 TestIAMEnforcementKMSImportJobs",
           "test/compat/kms_trusted_test.go:57 TestKMSTrustedKeyWrapping"
         ],
         "unverified": [
@@ -4406,7 +4406,7 @@
           "test/compat/kms_ekm_iam_test.go:31 TestKMSEkmIamPolicyIsStoredNotEnforced",
           "test/compat/kms_iam_test.go:35 TestKMSIamPolicyIsStoredNotEnforced",
           "test/compat/kms_otherservices_test.go:23 TestKMSImportJobIamPolicy",
-          "test/compat/kms_pq_test.go:311 TestIAMEnforcementKMSImportJobs",
+          "test/compat/kms_pq_test.go:312 TestIAMEnforcementKMSImportJobs",
           "test/compat/terraform_batch11_test.go:699 TestTerraformKMSDataSourcesBatch11",
           "test/compat/terraform_batch9_test.go:127 TestTerraformCloudFunctions2FunctionIAM",
           "test/compat/terraform_iam_more_test.go:119 TestTerraformKMSStoredIAM"
@@ -4440,7 +4440,7 @@
           "test/compat/kms_ekm_iam_test.go:31 TestKMSEkmIamPolicyIsStoredNotEnforced",
           "test/compat/kms_iam_test.go:35 TestKMSIamPolicyIsStoredNotEnforced",
           "test/compat/kms_otherservices_test.go:23 TestKMSImportJobIamPolicy",
-          "test/compat/kms_pq_test.go:311 TestIAMEnforcementKMSImportJobs",
+          "test/compat/kms_pq_test.go:312 TestIAMEnforcementKMSImportJobs",
           "test/compat/orgpolicylocations1890_test.go:49 TestOrgPolicyEnforcementPubSub",
           "test/compat/terraform_batch9_test.go:127 TestTerraformCloudFunctions2FunctionIAM",
           "test/compat/terraform_iam_more_test.go:119 TestTerraformKMSStoredIAM"
