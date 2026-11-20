@@ -209,7 +209,7 @@ func (p storageProvider) DetailActions(ctx context.Context, project string, path
 		return p.softDeletedActions(ctx, path)
 	}
 	if path[0] == softBucketPage {
-		return p.softBucketActions(ctx, path)
+		return p.softBucketActions(ctx, project, path)
 	}
 	if path[0] == managedFolderPage {
 		return p.managedFolderActions(ctx, path)
@@ -286,7 +286,7 @@ func (p storageProvider) ActAt(ctx context.Context, project string, path []strin
 		return err
 	}
 	if len(path) > 0 && path[0] == softBucketPage {
-		return p.restoreSoftBucket(ctx, path, action)
+		return p.restoreSoftBucket(ctx, path, action, values)
 	}
 	if action == "createsimplefolder" {
 		return p.createSimpleFolder(ctx, path, values)
@@ -646,8 +646,10 @@ func (p storageProvider) objectDetail(ctx context.Context, project string, path 
 
 	sections := []console.Section{{ID: "metadata", Label: "Metadata", Kind: console.KindProperties,
 		Groups: groups}}
-	// The live object's ACL, while uniform access is off (#1233).
+	// The live object's ACL, while uniform access is off (#1233), and
+	// Google's Version history tab (#1843).
 	if gen == 0 {
+		sections = append(sections, p.versionHistory(ctx, bucket, name)...)
 		if acl, ok := p.objectACLSection(ctx, bucket, name); ok {
 			sections = append(sections, acl)
 		}
