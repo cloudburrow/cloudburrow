@@ -292,16 +292,22 @@ func tokenUsersPage(r *clusterRecord, token string, size int32) ([]string, strin
 	if size < 0 {
 		return nil, "", apierror.InvalidArgument("page_size must not be negative")
 	}
-	names := make([]string, 0, len(r.TokenUsers))
-	for u := range r.TokenUsers {
-		names = append(names, u)
-	}
-	sort.Strings(names)
+	names := tokenUserIDs(r)
 	page, next, err := paging.Page("token-auth-users:"+r.Name, names, token, int(size))
 	if err != nil {
 		return nil, "", apierror.InvalidArgument("invalid page_token %q", token)
 	}
 	return page, next, nil
+}
+
+// tokenUserIDs are a cluster's token auth users, in ID order.
+func tokenUserIDs(r *clusterRecord) []string {
+	names := make([]string, 0, len(r.TokenUsers))
+	for u := range r.TokenUsers {
+		names = append(names, u)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // authTokensPage is a page of user's tokens, in ID order.

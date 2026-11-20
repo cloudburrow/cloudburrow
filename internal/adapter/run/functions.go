@@ -32,6 +32,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/cloudburrow/cloudburrow/internal/aipfilter"
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 	"github.com/cloudburrow/cloudburrow/internal/locations"
@@ -170,31 +171,27 @@ func (f *FunctionsServer) ListFunctions(_ context.Context, req *functionspb.List
 	if err != nil {
 		return nil, apierror.InvalidArgument("%v", err)
 	}
-	if req.GetPageToken() != "" || req.GetOrderBy() != "" {
-		return nil, apierror.Unimplemented("ListFunctions page_token and order_by are not supported")
-	}
-	// gcloud functions list sends environment="GEN_2", and lists 1st gen
-	// through the v1 API (#1428).
-	env := functionspb.Environment_ENVIRONMENT_UNSPECIFIED
-	if f := req.GetFilter(); f != "" {
-		k, v, ok := strings.Cut(f, "=")
-		e, known := functionspb.Environment_value[strings.Trim(strings.TrimSpace(v), `"`)]
-		if !ok || strings.TrimSpace(k) != "environment" || !known {
-			return nil, apierror.Unimplemented("ListFunctions filter %q is not supported: only environment=\"GEN_1\" or \"GEN_2\" is", f)
-		}
-		env = functionspb.Environment(e)
-	}
 	prefix := req.GetParent() + "/functions/"
 	if location == "-" {
 		prefix = "projects/" + project + "/locations/"
 	}
-	out := &functionspb.ListFunctionsResponse{}
+	var all []*functionspb.Function
 	for _, fn := range Functions(project) {
-		if strings.HasPrefix(fn.GetName(), prefix) && (env == functionspb.Environment_ENVIRONMENT_UNSPECIFIED || fn.GetEnvironment() == env) {
-			out.Functions = append(out.Functions, fn)
+		if strings.HasPrefix(fn.GetName(), prefix) {
+			all = append(all, fn)
 		}
 	}
-	return out, nil
+	// AIP-160 filter (gcloud functions list sends environment="GEN_2", and
+	// lists 1st gen through the v1 API, #1428) and AIP-132 order_by.
+	all, err = aipfilter.List(req.GetFilter(), req.GetOrderBy(), all)
+	if err != nil {
+		return nil, err
+	}
+	items, next, err := page(all, req.GetPageSize(), req.GetPageToken(), req.GetParent()+"/functions|"+req.GetFilter()+"|"+req.GetOrderBy())
+	if err != nil {
+		return nil, err
+	}
+	return &functionspb.ListFunctionsResponse{Functions: items, NextPageToken: next}, nil
 }
 
 // unsupportedFunction refuses the fields of a function that this instance
@@ -1115,35 +1112,24 @@ func (f *FunctionsServer) ListRuntimes(_ context.Context, req *functionspb.ListR
 	if _, _, err := resource.ParseLocation(req.GetParent()); err != nil {
 		return nil, apierror.InvalidArgument("%v", err)
 	}
-	envs := []functionspb.Environment{functionspb.Environment_GEN_2, functionspb.Environment_GEN_1}
-	name := ""
-	if f := req.GetFilter(); f != "" {
-		// gcloud functions deploy --no-gen2 sends name=go123 AND
-		// environment=GEN_1: terms of name and environment, ANDed.
-		for _, term := range strings.Split(f, " AND ") {
-			k, v, ok := strings.Cut(term, "=")
-			k, v = strings.TrimSpace(k), strings.Trim(strings.TrimSpace(v), `"`)
-			e, known := functionspb.Environment_value[v]
-			switch {
-			case ok && k == "environment" && known:
-				envs = []functionspb.Environment{functionspb.Environment(e)}
-			case ok && k == "name" && v != "":
-				name = v
-			default:
-				return nil, apierror.Unimplemented("ListRuntimes filter %q is not supported: only name= and environment= terms joined by AND are", f)
-			}
-		}
+	// gcloud functions deploy --no-gen2 sends name=go123 AND
+	// environment=GEN_1; any AIP-160 filter over a runtime's fields works.
+	var zero *functionspb.ListRuntimesResponse_Runtime
+	flt, err := aipfilter.Compile(req.GetFilter(), zero.ProtoReflect().Descriptor())
+	if err != nil {
+		return nil, err
 	}
+	envs := []functionspb.Environment{functionspb.Environment_GEN_2, functionspb.Environment_GEN_1}
 	out := &functionspb.ListRuntimesResponse{}
 	for _, r := range Runtimes {
-		if name != "" && r.Name != name {
-			continue
-		}
 		// Each runtime builds a 1st-gen function too (#1428), through the
 		// same builder.
 		for _, env := range envs {
-			out.Runtimes = append(out.Runtimes, &functionspb.ListRuntimesResponse_Runtime{
-				Name: r.Name, DisplayName: r.Display, Stage: functionspb.ListRuntimesResponse_GA, Environment: env})
+			rt := &functionspb.ListRuntimesResponse_Runtime{
+				Name: r.Name, DisplayName: r.Display, Stage: functionspb.ListRuntimesResponse_GA, Environment: env}
+			if flt.Match(rt) {
+				out.Runtimes = append(out.Runtimes, rt)
+			}
 		}
 	}
 	return out, nil
@@ -1231,11 +1217,19 @@ func (functionsLocations) ListLocations(_ context.Context, req *locationpb.ListL
 	if !ok || project == "" || strings.Contains(project, "/") {
 		return nil, apierror.InvalidArgument("name %q must be projects/{project}", req.GetName())
 	}
-	out := &locationpb.ListLocationsResponse{}
+	var all []*locationpb.Location
 	for _, r := range FunctionRegions {
-		out.Locations = append(out.Locations, &locationpb.Location{Name: req.GetName() + "/locations/" + r, LocationId: r, DisplayName: r})
+		all = append(all, &locationpb.Location{Name: req.GetName() + "/locations/" + r, LocationId: r, DisplayName: r})
 	}
-	return out, nil
+	all, err := aipfilter.Apply(req.GetFilter(), all)
+	if err != nil {
+		return nil, err
+	}
+	items, next, err := page(all, req.GetPageSize(), req.GetPageToken(), req.GetName()+"/locations|"+req.GetFilter())
+	if err != nil {
+		return nil, err
+	}
+	return &locationpb.ListLocationsResponse{Locations: items, NextPageToken: next}, nil
 }
 
 func (functionsLocations) GetLocation(_ context.Context, req *locationpb.GetLocationRequest) (*locationpb.Location, error) {

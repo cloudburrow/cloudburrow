@@ -7,6 +7,7 @@ import (
 
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
 	ssmpb "cloud.google.com/go/securesourcemanager/apiv1/securesourcemanagerpb"
+	"github.com/cloudburrow/cloudburrow/internal/aipfilter"
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -67,14 +68,10 @@ func (m *SecureSourceManagerServer) GetIssue(_ context.Context, req *ssmpb.GetIs
 
 // ListIssues lists a repository's issues, by number.
 func (m *SecureSourceManagerServer) ListIssues(_ context.Context, req *ssmpb.ListIssuesRequest) (*ssmpb.ListIssuesResponse, error) {
-	want := ssmpb.Issue_STATE_UNSPECIFIED
-	if f := strings.ReplaceAll(req.GetFilter(), " ", ""); f != "" {
-		v, ok := strings.CutPrefix(f, "state=")
-		st, known := ssmpb.Issue_State_value[strings.Trim(v, `"`)]
-		if !ok || !known || st == 0 {
-			return nil, apierror.Unimplemented("filter %q is not supported: only state=OPEN and state=CLOSED are", req.GetFilter())
-		}
-		want = ssmpb.Issue_State(st)
+	var zero *ssmpb.Issue
+	f, err := aipfilter.Compile(req.GetFilter(), zero.ProtoReflect().Descriptor())
+	if err != nil {
+		return nil, err
 	}
 	ssmState.mu.Lock()
 	defer ssmState.mu.Unlock()
@@ -83,7 +80,7 @@ func (m *SecureSourceManagerServer) ListIssues(_ context.Context, req *ssmpb.Lis
 	}
 	var all []*ssmpb.Issue
 	for _, k := range sortedByNumber(ssmState.issues, req.GetParent(), "issues") {
-		if is := ssmState.issues[k]; want == 0 || is.GetState() == want {
+		if is := ssmState.issues[k]; f.Match(is) {
 			all = append(all, proto.Clone(is).(*ssmpb.Issue))
 		}
 	}

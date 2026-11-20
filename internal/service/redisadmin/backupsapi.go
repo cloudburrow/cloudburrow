@@ -11,6 +11,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/cloudburrow/cloudburrow/internal/aipfilter"
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/paging"
 )
@@ -106,14 +107,22 @@ func (s *ClusterServer) GetTokenAuthUser(ctx context.Context, req *clusterpb.Get
 }
 
 func (s *ClusterServer) ListTokenAuthUsers(ctx context.Context, req *clusterpb.ListTokenAuthUsersRequest) (*clusterpb.ListTokenAuthUsersResponse, error) {
-	if req.GetFilter() != "" || req.GetOrderBy() != "" {
-		return nil, apierror.Unimplemented("filter and order_by are not served for token auth users here")
-	}
 	c, r, err := s.find(req.GetParent())
 	if err != nil {
 		return nil, err
 	}
 	defer c.mu.Unlock()
+	if req.GetFilter() != "" || req.GetOrderBy() != "" {
+		var all []*clusterpb.TokenAuthUser
+		for _, u := range tokenUserIDs(r) {
+			all = append(all, renderTokenUser(r, u, c.tokenUserState(r)))
+		}
+		items, next, err := aipfilter.ListPage("token-auth-users:"+r.Name, req.GetFilter(), req.GetOrderBy(), all, req.GetPageToken(), int(req.GetPageSize()))
+		if err != nil {
+			return nil, err
+		}
+		return &clusterpb.ListTokenAuthUsersResponse{TokenAuthUsers: items, NextPageToken: next}, nil
+	}
 	page, next, err := tokenUsersPage(r, req.GetPageToken(), req.GetPageSize())
 	if err != nil {
 		return nil, err
@@ -181,9 +190,6 @@ func (s *ClusterServer) GetAuthToken(ctx context.Context, req *clusterpb.GetAuth
 }
 
 func (s *ClusterServer) ListAuthTokens(ctx context.Context, req *clusterpb.ListAuthTokensRequest) (*clusterpb.ListAuthTokensResponse, error) {
-	if req.GetFilter() != "" || req.GetOrderBy() != "" {
-		return nil, apierror.Unimplemented("filter and order_by are not served for auth tokens here")
-	}
 	owner, user, _, err := splitTokenName(req.GetParent(), false)
 	if err != nil {
 		return nil, err
@@ -193,6 +199,21 @@ func (s *ClusterServer) ListAuthTokens(ctx context.Context, req *clusterpb.ListA
 		return nil, err
 	}
 	defer c.mu.Unlock()
+	if req.GetFilter() != "" || req.GetOrderBy() != "" {
+		toks, _, err := authTokensPage(r, user, "", paging.MaxPageSize)
+		if err != nil {
+			return nil, err
+		}
+		var all []*clusterpb.AuthToken
+		for _, t := range toks {
+			all = append(all, renderToken(r, user, t, c.tokenUserState(r)))
+		}
+		items, next, err := aipfilter.ListPage("auth-tokens:"+req.GetParent(), req.GetFilter(), req.GetOrderBy(), all, req.GetPageToken(), int(req.GetPageSize()))
+		if err != nil {
+			return nil, err
+		}
+		return &clusterpb.ListAuthTokensResponse{AuthTokens: items, NextPageToken: next}, nil
+	}
 	page, next, err := authTokensPage(r, user, req.GetPageToken(), req.GetPageSize())
 	if err != nil {
 		return nil, err
@@ -392,14 +413,22 @@ func (s *MemorystoreServer) GetTokenAuthUser(ctx context.Context, req *memorysto
 }
 
 func (s *MemorystoreServer) ListTokenAuthUsers(ctx context.Context, req *memorystorepb.ListTokenAuthUsersRequest) (*memorystorepb.ListTokenAuthUsersResponse, error) {
-	if req.GetFilter() != "" || req.GetOrderBy() != "" {
-		return nil, apierror.Unimplemented("filter and order_by are not served for token auth users here")
-	}
 	c, r, err := s.find(req.GetParent())
 	if err != nil {
 		return nil, err
 	}
 	defer c.mu.Unlock()
+	if req.GetFilter() != "" || req.GetOrderBy() != "" {
+		var all []*memorystorepb.TokenAuthUser
+		for _, u := range tokenUserIDs(r) {
+			all = append(all, toValkeyUser(renderTokenUser(r, u, c.tokenUserState(r))))
+		}
+		items, next, err := aipfilter.ListPage("token-auth-users:"+r.Name, req.GetFilter(), req.GetOrderBy(), all, req.GetPageToken(), int(req.GetPageSize()))
+		if err != nil {
+			return nil, err
+		}
+		return &memorystorepb.ListTokenAuthUsersResponse{TokenAuthUsers: items, NextPageToken: next}, nil
+	}
 	page, next, err := tokenUsersPage(r, req.GetPageToken(), req.GetPageSize())
 	if err != nil {
 		return nil, err
@@ -467,9 +496,6 @@ func (s *MemorystoreServer) GetAuthToken(ctx context.Context, req *memorystorepb
 }
 
 func (s *MemorystoreServer) ListAuthTokens(ctx context.Context, req *memorystorepb.ListAuthTokensRequest) (*memorystorepb.ListAuthTokensResponse, error) {
-	if req.GetFilter() != "" || req.GetOrderBy() != "" {
-		return nil, apierror.Unimplemented("filter and order_by are not served for auth tokens here")
-	}
 	owner, user, _, err := splitTokenName(req.GetParent(), false)
 	if err != nil {
 		return nil, err
@@ -479,6 +505,21 @@ func (s *MemorystoreServer) ListAuthTokens(ctx context.Context, req *memorystore
 		return nil, err
 	}
 	defer c.mu.Unlock()
+	if req.GetFilter() != "" || req.GetOrderBy() != "" {
+		toks, _, err := authTokensPage(r, user, "", paging.MaxPageSize)
+		if err != nil {
+			return nil, err
+		}
+		var all []*memorystorepb.AuthToken
+		for _, t := range toks {
+			all = append(all, convert(renderToken(r, user, t, c.tokenUserState(r)), &memorystorepb.AuthToken{}))
+		}
+		items, next, err := aipfilter.ListPage("auth-tokens:"+req.GetParent(), req.GetFilter(), req.GetOrderBy(), all, req.GetPageToken(), int(req.GetPageSize()))
+		if err != nil {
+			return nil, err
+		}
+		return &memorystorepb.ListAuthTokensResponse{AuthTokens: items, NextPageToken: next}, nil
+	}
 	page, next, err := authTokensPage(r, user, req.GetPageToken(), req.GetPageSize())
 	if err != nil {
 		return nil, err

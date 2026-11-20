@@ -14,9 +14,11 @@ import (
 
 	arpb "cloud.google.com/go/artifactregistry/apiv1/artifactregistrypb"
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
+	"github.com/cloudburrow/cloudburrow/internal/aipfilter"
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/registry"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -178,11 +180,43 @@ func pageOf[T any](items []T, size int32, token string) ([]T, string, error) {
 	return items[start:end], next, nil
 }
 
-func noFilter(filter, orderBy string) error {
-	if filter != "" || orderBy != "" {
-		return apierror.Unimplemented("filter and order_by are not supported")
+// arFilterFields are the fields each list's reference documents as
+// filterable (docs.cloud.google.com/artifact-registry/docs/reference/rpc/
+// google.devtools.artifactregistry.v1); order_by takes any field.
+var (
+	arPackageFilter = aipfilter.Fields("name", "annotations")
+	arVersionFilter = aipfilter.Fields("name", "annotations")
+	arTagFilter     = aipfilter.Fields("name", "version")
+	arFileFilter    = aipfilter.Fields("name", "owner", "annotations")
+)
+
+// arFiltered lists everything through list (with paging, filter and
+// order_by cleared on a copy of req), then filters, orders and pages it.
+func arFiltered[R proto.Message, T proto.Message](req R, filter, orderBy string, size int32, token string,
+	clear func(R), list func(R) ([]T, error), fields aipfilter.Option) ([]T, string, error) {
+	var zero T
+	f, err := aipfilter.Compile(filter, zero.ProtoReflect().Descriptor(), fields)
+	if err != nil {
+		return nil, "", err
 	}
-	return nil
+	o, err := aipfilter.CompileOrder(orderBy, zero.ProtoReflect().Descriptor())
+	if err != nil {
+		return nil, "", err
+	}
+	all := proto.Clone(req).(R)
+	clear(all)
+	items, err := list(all)
+	if err != nil {
+		return nil, "", err
+	}
+	var out []T
+	for _, it := range items {
+		if f.Match(it) {
+			out = append(out, it)
+		}
+	}
+	aipfilter.Sort(o, out)
+	return pageOf(out, size, token)
 }
 
 func storeErr(err error) error {
@@ -209,16 +243,27 @@ func (a *ArtifactRegistryServer) packageOf(st *registry.Store, repoName, image s
 	return p, nil
 }
 
-// ListPackages lists a repository's images.
-func (a *ArtifactRegistryServer) ListPackages(_ context.Context, req *arpb.ListPackagesRequest) (*arpb.ListPackagesResponse, error) {
-	if isPackageRepo(req.GetParent()) {
-		if err := noFilter(req.GetFilter(), req.GetOrderBy()); err != nil {
-			return nil, err
-		}
-		return a.fmtListPackages(req)
+// ListPackages lists a repository's images, with the documented AIP-160
+// filter (name, annotations) and order_by.
+func (a *ArtifactRegistryServer) ListPackages(ctx context.Context, req *arpb.ListPackagesRequest) (*arpb.ListPackagesResponse, error) {
+	if req.GetFilter() == "" && req.GetOrderBy() == "" {
+		return a.listPackages(ctx, req)
 	}
-	if err := noFilter(req.GetFilter(), req.GetOrderBy()); err != nil {
+	page, next, err := arFiltered(req, req.GetFilter(), req.GetOrderBy(), req.GetPageSize(), req.GetPageToken(),
+		func(r *arpb.ListPackagesRequest) { r.Filter, r.OrderBy, r.PageSize, r.PageToken = "", "", 0, "" },
+		func(r *arpb.ListPackagesRequest) ([]*arpb.Package, error) {
+			resp, err := a.listPackages(ctx, r)
+			return resp.GetPackages(), err
+		}, arPackageFilter)
+	if err != nil {
 		return nil, err
+	}
+	return &arpb.ListPackagesResponse{Packages: page, NextPageToken: next}, nil
+}
+
+func (a *ArtifactRegistryServer) listPackages(_ context.Context, req *arpb.ListPackagesRequest) (*arpb.ListPackagesResponse, error) {
+	if isPackageRepo(req.GetParent()) {
+		return a.fmtListPackages(req)
 	}
 	st, err := contentStore(req.GetParent())
 	if err != nil {
@@ -309,16 +354,27 @@ func parseVersionName(name string) (pkgName, repoName, image, digest string, err
 	return pkgName, repoName, image, digest, err
 }
 
-// ListVersions lists an image's manifests as versions, newest first.
-func (a *ArtifactRegistryServer) ListVersions(_ context.Context, req *arpb.ListVersionsRequest) (*arpb.ListVersionsResponse, error) {
-	if isPackageRepo(req.GetParent()) {
-		if err := noFilter(req.GetFilter(), req.GetOrderBy()); err != nil {
-			return nil, err
-		}
-		return a.fmtListVersions(req)
+// ListVersions lists an image's manifests as versions, newest first, with
+// the documented AIP-160 filter (name, annotations) and order_by.
+func (a *ArtifactRegistryServer) ListVersions(ctx context.Context, req *arpb.ListVersionsRequest) (*arpb.ListVersionsResponse, error) {
+	if req.GetFilter() == "" && req.GetOrderBy() == "" {
+		return a.listVersions(ctx, req)
 	}
-	if err := noFilter(req.GetFilter(), req.GetOrderBy()); err != nil {
+	page, next, err := arFiltered(req, req.GetFilter(), req.GetOrderBy(), req.GetPageSize(), req.GetPageToken(),
+		func(r *arpb.ListVersionsRequest) { r.Filter, r.OrderBy, r.PageSize, r.PageToken = "", "", 0, "" },
+		func(r *arpb.ListVersionsRequest) ([]*arpb.Version, error) {
+			resp, err := a.listVersions(ctx, r)
+			return resp.GetVersions(), err
+		}, arVersionFilter)
+	if err != nil {
 		return nil, err
+	}
+	return &arpb.ListVersionsResponse{Versions: page, NextPageToken: next}, nil
+}
+
+func (a *ArtifactRegistryServer) listVersions(_ context.Context, req *arpb.ListVersionsRequest) (*arpb.ListVersionsResponse, error) {
+	if isPackageRepo(req.GetParent()) {
+		return a.fmtListVersions(req)
 	}
 	repoName, image, err := parsePackageName(req.GetParent())
 	if err != nil {
@@ -401,22 +457,31 @@ func parseTagName(name string) (pkgName, repoName, image, tag string, err error)
 	return pkgName, repoName, image, tag, err
 }
 
-// ListTags lists an image's tags, by name. The filter Artifact Registry
-// documents for tags, version="<version name>", is applied.
-func (a *ArtifactRegistryServer) ListTags(_ context.Context, req *arpb.ListTagsRequest) (*arpb.ListTagsResponse, error) {
+// ListTags lists an image's tags, by name, with the documented AIP-160
+// filter (name, version); ListTagsRequest has no order_by.
+func (a *ArtifactRegistryServer) ListTags(ctx context.Context, req *arpb.ListTagsRequest) (*arpb.ListTagsResponse, error) {
+	if req.GetFilter() == "" {
+		return a.listTags(ctx, req)
+	}
+	page, next, err := arFiltered(req, req.GetFilter(), "", req.GetPageSize(), req.GetPageToken(),
+		func(r *arpb.ListTagsRequest) { r.Filter, r.PageSize, r.PageToken = "", 0, "" },
+		func(r *arpb.ListTagsRequest) ([]*arpb.Tag, error) {
+			resp, err := a.listTags(ctx, r)
+			return resp.GetTags(), err
+		}, arTagFilter)
+	if err != nil {
+		return nil, err
+	}
+	return &arpb.ListTagsResponse{Tags: page, NextPageToken: next}, nil
+}
+
+func (a *ArtifactRegistryServer) listTags(_ context.Context, req *arpb.ListTagsRequest) (*arpb.ListTagsResponse, error) {
 	pkgRepo := isPackageRepo(req.GetParent())
 	repoName, image, err := parsePackageName(req.GetParent())
 	if err != nil && !pkgRepo {
 		return nil, err
 	}
 	wantVersion := ""
-	if f := strings.TrimSpace(req.GetFilter()); f != "" {
-		v, ok := strings.CutPrefix(f, "version=")
-		if !ok {
-			return nil, apierror.Unimplemented("ListTags filter %q is not supported: only version=\"...\"", f)
-		}
-		wantVersion = strings.Trim(strings.TrimSpace(v), `"`)
-	}
 	if isPackageRepo(req.GetParent()) {
 		return a.fmtListTags(req, wantVersion)
 	}
@@ -728,20 +793,26 @@ func repoFiles(st *registry.Store, repoName string) []*arpb.File {
 	return out
 }
 
-// ListFiles lists a repository's files. The owner filter Artifact Registry
-// documents, owner="<version name>", is applied.
-func (a *ArtifactRegistryServer) ListFiles(_ context.Context, req *arpb.ListFilesRequest) (*arpb.ListFilesResponse, error) {
-	if req.GetOrderBy() != "" {
-		return nil, apierror.Unimplemented("order_by is not supported")
+// ListFiles lists a repository's files, with the documented AIP-160 filter
+// (name, owner, annotations) and order_by.
+func (a *ArtifactRegistryServer) ListFiles(ctx context.Context, req *arpb.ListFilesRequest) (*arpb.ListFilesResponse, error) {
+	if req.GetFilter() == "" && req.GetOrderBy() == "" {
+		return a.listFiles(ctx, req)
 	}
+	page, next, err := arFiltered(req, req.GetFilter(), req.GetOrderBy(), req.GetPageSize(), req.GetPageToken(),
+		func(r *arpb.ListFilesRequest) { r.Filter, r.OrderBy, r.PageSize, r.PageToken = "", "", 0, "" },
+		func(r *arpb.ListFilesRequest) ([]*arpb.File, error) {
+			resp, err := a.listFiles(ctx, r)
+			return resp.GetFiles(), err
+		}, arFileFilter)
+	if err != nil {
+		return nil, err
+	}
+	return &arpb.ListFilesResponse{Files: page, NextPageToken: next}, nil
+}
+
+func (a *ArtifactRegistryServer) listFiles(_ context.Context, req *arpb.ListFilesRequest) (*arpb.ListFilesResponse, error) {
 	owner := ""
-	if f := strings.TrimSpace(req.GetFilter()); f != "" {
-		v, ok := strings.CutPrefix(f, "owner=")
-		if !ok {
-			return nil, apierror.Unimplemented("ListFiles filter %q is not supported: only owner=\"...\"", f)
-		}
-		owner = strings.Trim(strings.TrimSpace(v), `"`)
-	}
 	if isPackageRepo(req.GetParent()) {
 		return a.fmtListFiles(req, owner)
 	}
