@@ -21,16 +21,23 @@ import (
 // roles hold no other index permission); exports and imports (datastore.databases.export,
 // datastore.databases.import) and operations (datastore.operations.*) take
 // the permissions of the roles the same page lists for them, as their REST
-// references name none.
+// references name none; BulkDeleteDocuments datastore.databases.bulkDelete
+// (the page's Bulk Admin role) and user creds (Firestore with MongoDB
+// compatibility's) datastore.userCreds.create, get, list, delete, and
+// update for enable, disable and resetPassword, by the catalog's names.
 //
 // A commit's, a batch write's and a write stream's writes each need what
 // that table gives their kind: an update or transform with
 // current_document.exists false datastore.entities.create, with exists
 // true (or an update_time precondition, which only an existing document
 // meets) datastore.entities.update, with no precondition both; a delete
-// datastore.entities.delete. A write stream is checked on its first
-// message, the one naming the database; Listen, which the table does not
-// list, needs what a query does. ExecutePipeline is not checked.
+// datastore.entities.delete. A write stream's every message is checked,
+// on the database its first names; Listen, which the table does not list,
+// needs what a query does, on each message. ExecutePipeline needs what its
+// stages do, as the table lists them (nested pipelines' too):
+// collection, collection_group and database datastore.entities.get and
+// list, documents datastore.entities.get, update datastore.entities.update,
+// delete datastore.entities.delete.
 var Firestore = &Service{
 	Name: "firestore.googleapis.com",
 	Type: func(resource string) string {
@@ -78,6 +85,7 @@ func firestoreMethods() map[string]Rule {
 		fsData + "PartitionQuery":      On("parent", db, get, list),
 		fsData + "ListCollectionIds":   On("parent", db, list),
 		fsData + "Listen":              On("database", db, get, list),
+		fsData + "ExecutePipeline":     firestorePipeline,
 
 		fsAdmin + "CreateDatabase":  On("parent", nil, "datastore.databases.create"),
 		fsAdmin + "GetDatabase":     On("name", nil, "datastore.databases.getMetadata"),
@@ -96,6 +104,15 @@ func firestoreMethods() map[string]Rule {
 		fsAdmin + "UpdateField":     On("field.name", db, "datastore.schemas.update"),
 		fsAdmin + "ExportDocuments": On("name", nil, "datastore.databases.export"),
 		fsAdmin + "ImportDocuments": On("name", nil, "datastore.databases.import"),
+
+		fsAdmin + "BulkDeleteDocuments": On("name", nil, "datastore.databases.bulkDelete"),
+		fsAdmin + "CreateUserCreds":     On("parent", nil, "datastore.userCreds.create"),
+		fsAdmin + "GetUserCreds":        On("name", db, "datastore.userCreds.get"),
+		fsAdmin + "ListUserCreds":       On("parent", nil, "datastore.userCreds.list"),
+		fsAdmin + "EnableUserCreds":     On("name", db, "datastore.userCreds.update"),
+		fsAdmin + "DisableUserCreds":    On("name", db, "datastore.userCreds.update"),
+		fsAdmin + "ResetUserPassword":   On("name", db, "datastore.userCreds.update"),
+		fsAdmin + "DeleteUserCreds":     On("name", db, "datastore.userCreds.delete"),
 
 		fsAdmin + "GetBackup":    On("name", nil, "datastore.backups.get"),
 		fsAdmin + "ListBackups":  On("parent", nil, "datastore.backups.list"),
@@ -147,4 +164,65 @@ func firestoreWrites(m protoreflect.Message) []Check {
 		}
 	}
 	return out
+}
+
+// pipelineStage is the permissions of a pipeline stage, by its name, as
+// "Required permissions for API methods" lists them for executePipeline.
+var pipelineStage = map[string][]string{
+	"collection":       {"datastore.entities.get", "datastore.entities.list"},
+	"collection_group": {"datastore.entities.get", "datastore.entities.list"},
+	"database":         {"datastore.entities.get", "datastore.entities.list"},
+	"documents":        {"datastore.entities.get"},
+	"update":           {"datastore.entities.update"},
+	"delete":           {"datastore.entities.delete"},
+}
+
+// firestorePipeline is ExecutePipeline's checks: each stage's, in every
+// pipeline the request holds (subpipelines in expressions too).
+func firestorePipeline(m protoreflect.Message) []Check {
+	db := FirestoreDatabase(String(m, "database"))
+	if db == "" {
+		return nil
+	}
+	need := map[string]bool{}
+	walkStages(m, func(name string) {
+		for _, p := range pipelineStage[name] {
+			need[p] = true
+		}
+	})
+	var out []Check
+	for _, p := range []string{"datastore.entities.get", "datastore.entities.list", "datastore.entities.update", "datastore.entities.delete"} {
+		if need[p] {
+			out = append(out, Check{p, db})
+		}
+	}
+	return out
+}
+
+// walkStages calls f with the name of each google.firestore.v1.Pipeline.Stage
+// in m, at any depth.
+func walkStages(m protoreflect.Message, f func(string)) {
+	if m.Descriptor().FullName() == "google.firestore.v1.Pipeline.Stage" {
+		f(String(m, "name"))
+	}
+	m.Range(func(fd protoreflect.FieldDescriptor, v protoreflect.Value) bool {
+		switch {
+		case fd.IsMap():
+			if fd.MapValue().Kind() == protoreflect.MessageKind {
+				v.Map().Range(func(_ protoreflect.MapKey, mv protoreflect.Value) bool {
+					walkStages(mv.Message(), f)
+					return true
+				})
+			}
+		case fd.IsList():
+			if fd.Kind() == protoreflect.MessageKind {
+				for i := 0; i < v.List().Len(); i++ {
+					walkStages(v.List().Get(i).Message(), f)
+				}
+			}
+		case fd.Kind() == protoreflect.MessageKind:
+			walkStages(v.Message(), f)
+		}
+		return true
+	})
 }

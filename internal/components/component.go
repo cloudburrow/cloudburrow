@@ -329,11 +329,11 @@ func (c *LifecycleComponent) Backends() []Backend {
 				if s == config.ServiceSpanner && c.kms != "" && b.Front != nil {
 					b.Front.Args = append(append([]string{}, b.Front.Args...), "--kms", c.kms)
 				}
-				// IAM enforcement (#1879): Firestore's, Spanner's and
-				// Bigtable's fronts check each call with the host's one
+				// IAM enforcement (#1879): Firestore's, Datastore's,
+				// Spanner's and Bigtable's fronts check each call with the host's one
 				// evaluator, through cloudburrow-host; Spanner's also the
 				// service agent's use of a customer-managed key (#1950).
-				if (s == config.ServiceFirestore || s == config.ServiceSpanner || s == config.ServiceBigtable) &&
+				if (s == config.ServiceFirestore || s == config.ServiceDatastore || s == config.ServiceSpanner || s == config.ServiceBigtable) &&
 					c.iamCheck && c.resourceManager != "" && b.Front != nil {
 					b.Front.Args = append(append([]string{}, b.Front.Args...), "--iam-check", "http://"+c.resourceManager)
 				}

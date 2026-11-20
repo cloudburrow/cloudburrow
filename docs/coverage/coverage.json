@@ -9810,7 +9810,8 @@
           "test/compat/firestorepipeline_test.go:48 TestFirestorePipelines",
           "test/compat/firestorepipelinefns_test.go:27 TestFirestorePipelineFunctions",
           "test/compat/firestorepipelinemore_test.go:28 TestFirestorePipelinesMore",
-          "test/compat/firestorepipelinesub_test.go:25 TestFirestorePipelineSubqueries"
+          "test/compat/firestorepipelinesub_test.go:25 TestFirestorePipelineSubqueries",
+          "test/compat/iamenforcementround10_1879_test.go:150 TestIAMEnforcementFirestoreStreams"
         ]
       },
       {
@@ -9891,7 +9892,8 @@
         "method": "google.firestore.v1.Firestore/Write",
         "status": "Verified",
         "tests": [
-          "test/compat/firestoremethods_test.go:128 TestFirestoreWriteStream"
+          "test/compat/firestoremethods_test.go:128 TestFirestoreWriteStream",
+          "test/compat/iamenforcementround10_1879_test.go:150 TestIAMEnforcementFirestoreStreams"
         ]
       }
     ]
@@ -10196,7 +10198,8 @@
         "method": "google.datastore.v1.Datastore/AllocateIds",
         "status": "Verified",
         "tests": [
-          "test/compat/datastoremethods_test.go:22 TestDatastoreAllocateAndReserveIDs"
+          "test/compat/datastoremethods_test.go:22 TestDatastoreAllocateAndReserveIDs",
+          "test/compat/iamenforcementround10_1879_test.go:67 TestIAMEnforcementDatastore"
         ]
       },
       {
@@ -10214,6 +10217,7 @@
         "tests": [
           "test/compat/datastoredatabases1885_test.go:49 TestDatastoreNamedDatabasesKeepTheirEntitiesApart",
           "test/compat/emulatorkill1611_test.go:281 TestDatastoreAfterTheEmulatorIsKilled",
+          "test/compat/iamenforcementround10_1879_test.go:67 TestIAMEnforcementDatastore",
           "test/compat/optional_test.go:105 TestDatastoreQueriesSeeAFreshWrite",
           "test/compat/optional_test.go:130 TestDatastoreEntityCRUD"
         ]
@@ -10227,6 +10231,7 @@
           "test/compat/datastorepitr1967_test.go:39 TestDatastorePointInTimeReads",
           "test/compat/datastoreupgrade1885_test.go:90 TestDatastoreNamedDatabaseEntitiesSurviveTheUpgrade",
           "test/compat/emulatorkill1611_test.go:281 TestDatastoreAfterTheEmulatorIsKilled",
+          "test/compat/iamenforcementround10_1879_test.go:67 TestIAMEnforcementDatastore",
           "test/compat/optional_test.go:130 TestDatastoreEntityCRUD"
         ]
       },
@@ -10268,6 +10273,7 @@
           "test/compat/datastoreoperators1888_test.go:35 TestDatastoreNotEqualInNotInAndOr",
           "test/compat/datastorepitr1967_test.go:39 TestDatastorePointInTimeReads",
           "test/compat/datastoreupgrade1885_test.go:90 TestDatastoreNamedDatabaseEntitiesSurviveTheUpgrade",
+          "test/compat/iamenforcementround10_1879_test.go:67 TestIAMEnforcementDatastore",
           "test/compat/optional_test.go:105 TestDatastoreQueriesSeeAFreshWrite",
           "test/compat/optional_test.go:130 TestDatastoreEntityCRUD"
         ]
@@ -10322,7 +10328,8 @@
         "method": "google.datastore.admin.v1.DatastoreAdmin/ListIndexes",
         "status": "Verified",
         "tests": [
-          "test/compat/datastoreadmin1884_test.go:122 TestDatastoreAdminExportImport"
+          "test/compat/datastoreadmin1884_test.go:122 TestDatastoreAdminExportImport",
+          "test/compat/iamenforcementround10_1879_test.go:67 TestIAMEnforcementDatastore"
         ]
       }
     ]
@@ -10795,7 +10802,8 @@
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/ListSchemaBundles",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablebackups_test.go:241 TestBigtableSchemaBundles"
+          "test/compat/bigtablebackups_test.go:241 TestBigtableSchemaBundles",
+          "test/compat/iamenforcementround10_1879_test.go:350 TestIAMEnforcementBigtableAdmin"
         ]
       },
       {
@@ -10854,6 +10862,7 @@
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/TestIamPermissions",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcementround10_1879_test.go:350 TestIAMEnforcementBigtableAdmin",
           "test/compat/storediam_test.go:220 TestBigtableTableIAM",
           "test/compat/storediam_test.go:348 TestConsoleBigtableTablePermissions"
         ]
@@ -10918,7 +10927,8 @@
         "method": "google.bigtable.v2.Bigtable/GenerateInitialChangeStreamPartitions",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablechangestreams_test.go:128 TestBigtableChangeStreams"
+          "test/compat/bigtablechangestreams_test.go:128 TestBigtableChangeStreams",
+          "test/compat/iamenforcementround10_1879_test.go:350 TestIAMEnforcementBigtableAdmin"
         ]
       },
       {
@@ -11166,6 +11176,7 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/ListBackupSchedules",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcementround10_1879_test.go:240 TestIAMEnforcementSpannerOperations",
           "test/compat/spannerbackups_test.go:246 TestSpannerBackupSchedules",
           "test/compat/spannereditions1949_test.go:207 TestGcloudSpannerEditions",
           "test/compat/spannereditions1949_test.go:78 TestSpannerEditionsAutoscalingAndSchedules"
@@ -11183,6 +11194,7 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/ListDatabaseOperations",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcementround10_1879_test.go:240 TestIAMEnforcementSpannerOperations",
           "test/compat/spannerbackups_test.go:67 TestSpannerBackupAndRestore"
         ]
       },
@@ -11226,6 +11238,7 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/TestIamPermissions",
         "status": "Verified",
         "tests": [
+          "test/compat/iamenforcementround10_1879_test.go:240 TestIAMEnforcementSpannerOperations",
           "test/compat/storediam_test.go:182 TestConsoleSpannerPermissions",
           "test/compat/storediam_test.go:94 TestSpannerIAM"
         ]

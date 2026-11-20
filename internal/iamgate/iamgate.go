@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 
@@ -58,6 +59,10 @@ type Service struct {
 	Type func(resource string) string
 	// Deny is the error a denied call gets, in the API's words.
 	Deny func(permission, resource string) error
+	// TestIAM are the API's TestIamPermissions methods (full names),
+	// which the gate answers for a caller with a token from the host's
+	// evaluator.
+	TestIAM map[string]bool
 }
 
 // Gate checks the calls of its services.
@@ -90,10 +95,11 @@ func (g *Gate) rule(full string) (*Service, Rule) {
 	return nil, nil
 }
 
-// Checked reports whether a full method has a rule.
+// Checked reports whether a full method has a rule, or is a
+// TestIamPermissions the gate answers.
 func (g *Gate) Checked(full string) bool {
 	_, r := g.rule(full)
-	return r != nil
+	return r != nil || g.testIAM(full) != nil
 }
 
 // Authorize checks a call of full with request m, sent with bearer; nil
@@ -113,6 +119,7 @@ func (g *Gate) Authorize(ctx context.Context, bearer, full string, m protoreflec
 		if c.Resource == "" || c.Permission == "" {
 			continue
 		}
+		c.Resource = strings.ReplaceAll(c.Resource, Routed, routedDatabase(ctx))
 		if _, ok := byRes[c.Resource]; !ok {
 			order = append(order, c.Resource)
 		}
@@ -340,13 +347,29 @@ func (g *Gate) Wrap(next http.Handler) http.Handler {
 				next.ServeHTTP(w, r)
 				return
 			}
+			ctx := withRouting(r.Context(), r.Header.Get("X-Goog-Request-Params"))
 			msg, err := g.firstFrame(r)
 			if err == nil && msg != nil {
-				err = g.Authorize(r.Context(), bearer, r.URL.Path, msg)
+				err = g.Authorize(ctx, bearer, r.URL.Path, msg)
 			}
 			if err != nil {
 				st := status.Convert(err)
 				netfwd.WriteGRPCStatus(w, int(st.Code()), st.Message())
+				return
+			}
+			if resp, ok, err := g.answerTestIAM(ctx, bearer, r.URL.Path, msg); ok {
+				if err != nil {
+					st := status.Convert(err)
+					netfwd.WriteGRPCStatus(w, int(st.Code()), st.Message())
+					return
+				}
+				writeGRPCMessage(w, resp)
+				return
+			}
+			if msg != nil && clientStreaming(r.URL.Path) {
+				// Each later message of a client stream (a Firestore
+				// Write or Listen) is checked as it arrives.
+				g.serveStream(ctx, w, r, next, bearer, msg)
 				return
 			}
 			next.ServeHTTP(w, r)
@@ -363,10 +386,20 @@ func (g *Gate) Wrap(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		ctx := r.Context()
+		if db := r.URL.Query().Get("databaseId"); db != "" {
+			ctx = withRouting(ctx, "database_id="+url.QueryEscape(db))
+		}
 		if route.Body != "" && r.Body != nil {
 			b, err := io.ReadAll(io.LimitReader(r.Body, maxBody))
 			_ = r.Body.Close()
 			r.Body = io.NopCloser(bytes.NewReader(b))
+			var named struct {
+				DatabaseID string `json:"databaseId"`
+			}
+			if json.Unmarshal(b, &named) == nil && named.DatabaseID != "" {
+				ctx = withRouting(ctx, "database_id="+url.QueryEscape(named.DatabaseID))
+			}
 			if err == nil && len(b) > 0 {
 				target := msg
 				if route.Body != "*" {
@@ -380,7 +413,15 @@ func (g *Gate) Wrap(next http.Handler) http.Handler {
 		for path, v := range fields {
 			setString(msg, path, v)
 		}
-		if err := g.Authorize(r.Context(), bearer, full, msg); err != nil {
+		if resp, ok, err := g.answerTestIAM(ctx, bearer, full, msg); ok {
+			if err != nil {
+				writeJSON(w, err)
+				return
+			}
+			writeJSONMessage(w, resp)
+			return
+		}
+		if err := g.Authorize(ctx, bearer, full, msg); err != nil {
 			writeJSON(w, err)
 			return
 		}
@@ -411,8 +452,14 @@ func (g *Gate) firstFrame(r *http.Request) (protoreflect.Message, error) {
 		io.Reader
 		io.Closer
 	}{io.MultiReader(bytes.NewReader(hdr[:]), bytes.NewReader(body), r.Body), r.Body}
-	if hdr[0] == 1 {
-		enc := r.Header.Get("Grpc-Encoding")
+	return decodeFrame(r.URL.Path, r.Header.Get("Grpc-Encoding"), hdr[0], body)
+}
+
+// decodeFrame is a gRPC message of full method's request type, from its
+// frame's flag and bytes; nil for a message it cannot decode, which the
+// emulator answers.
+func decodeFrame(full, enc string, flag byte, body []byte) (protoreflect.Message, error) {
+	if flag == 1 {
 		if enc != "gzip" {
 			return nil, status.Errorf(codes.Unimplemented, "a request compressed with %q cannot be checked", enc)
 		}
@@ -424,7 +471,7 @@ func (g *Gate) firstFrame(r *http.Request) (protoreflect.Message, error) {
 			return nil, status.Errorf(codes.Internal, "decompress the request: %v", err)
 		}
 	}
-	msg := Input(r.URL.Path)
+	msg := Input(full)
 	if msg == nil {
 		return nil, nil
 	}
@@ -452,6 +499,12 @@ func (g *Gate) StreamInterceptor(newFrame func() any, decode func(frame any) []b
 		raw := decode(fr)
 		msg := Input(info.FullMethod)
 		if msg != nil && proto.Unmarshal(raw, msg.Interface()) == nil {
+			if resp, ok, err := g.answerTestIAM(ss.Context(), BearerOf(ss.Context()), info.FullMethod, msg); ok {
+				if err != nil {
+					return err
+				}
+				return ss.SendMsg(resp)
+			}
 			if err := g.Authorize(ss.Context(), BearerOf(ss.Context()), info.FullMethod, msg); err != nil {
 				return err
 			}

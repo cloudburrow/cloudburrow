@@ -302,7 +302,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	firestoreAdminAddr := fs.String("firestore-admin-addr", "", "the Firestore front (host:port), whose Admin API says which databases the Datastore API serves (with --datastore-databases)")
 	datastoreAddr := fs.String("datastore", "", "the Datastore front (host:port), which clears a deleted Datastore mode database's entities (with --firestore-admin)")
 	kmsAddr := fs.String("kms", "", "the instance's Cloud KMS (host:port, gRPC), which customer-managed keys are checked against (with --firestore-admin or --spanner-instances)")
-	iamCheck := fs.String("iam-check", "", "http://host:port of the host's IAM evaluator, which checks each Firestore (with --firestore-admin) or Spanner (with --spanner-instances) call's caller, and the Spanner service agent's use of a customer-managed key (with --kms; what `up --iam-enforcement=on` passes, #1879, #1950)")
+	iamCheck := fs.String("iam-check", "", "http://host:port of the host's IAM evaluator, which checks each Firestore (with --firestore-admin), Datastore (with --datastore-databases) or Spanner (with --spanner-instances) call's caller, and the Spanner service agent's use of a customer-managed key (with --kms; what `up --iam-enforcement=on` passes, #1879, #1950)")
 	queries := fs.String("queries", "", "answer the query RPCs the emulator does not serve: datastore (RunAggregationQuery) or firestore (PartitionQuery)")
 	if err := fs.Parse(args); err != nil {
 		return ErrUsage
@@ -319,8 +319,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		fmt.Fprintln(stderr, "call-front: --datastore needs --firestore-admin, and --kms --firestore-admin or --spanner-instances")
 		return ErrUsage
 	}
-	if *iamCheck != "" && !*spannerInstances && !*firestoreAdmin {
-		fmt.Fprintln(stderr, "call-front: --iam-check needs --spanner-instances or --firestore-admin")
+	if *iamCheck != "" && !*spannerInstances && !*firestoreAdmin && !*datastoreDBs {
+		fmt.Fprintln(stderr, "call-front: --iam-check needs --spanner-instances, --firestore-admin or --datastore-databases")
 		return ErrUsage
 	}
 	if *firestoreAdminAddr != "" && !*datastoreDBs {
@@ -417,6 +417,13 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	var gate *iamgate.Gate
 	if *iamCheck != "" {
 		gate = &iamgate.Gate{Client: &iamcheck.Client{Base: *iamCheck}}
+		if *datastoreDBs {
+			// The Datastore API and its Admin API (Datastore mode);
+			// the emulator, Firestore's in Datastore mode, reads a
+			// bearer token as Firestore's does.
+			gate.Services = append(gate.Services, iamgate.Datastore)
+			gate.PassAs = "owner"
+		}
 	}
 	if *firestoreAdmin {
 		fa := firestoreadmin.New(*upstream)

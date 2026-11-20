@@ -22,8 +22,27 @@ import (
 // database or backup they name. A database's and its instance's own
 // policies apply with the project's. A denial is PERMISSION_DENIED
 // "Caller is missing IAM permission P on resource R.", Spanner's wording.
+// TestIamPermissions (both admin APIs') answers the requested permissions
+// a caller with a token holds, by the evaluator.
 // The long-running operations' methods, whose references name no
-// permission, are not checked.
+// permission, take the operation permissions of the IAM page's list by
+// what the operation is of (spanner.databaseOperations.*,
+// backupOperations.*, instanceOperations.*, instanceConfigOperations.*,
+// instancePartitionOperations.*), on that database, backup, instance,
+// instance configuration or partition: Get and Wait .get, List .list,
+// Cancel .cancel, Delete .delete, or .cancel for a database's or a
+// backup's operation, for which the list has no delete.
+// ListDatabaseOperations, ListBackupOperations,
+// ListInstanceConfigOperations and ListInstancePartitionOperations take
+// the .list their references name, on their parent. AddSplitPoints
+// (spanner.databases.addSplitPoints), CopyBackup (spanner.backups.create on
+// the instance, spanner.backups.copy on the source), MoveInstance
+// (spanner.instances.update), ListDatabaseRoles (spanner.databaseRoles.list;
+// its page spells it databasesRoles, which Google's permission index does
+// not have), backup schedules, instance configs and instance partitions
+// take what their references name (CreateBackupSchedule says "one or more
+// of" spanner.backupSchedules.create and spanner.databases.createBackup:
+// the first).
 var Spanner = &Service{
 	Name: "spanner.googleapis.com",
 	Type: func(resource string) string {
@@ -37,10 +56,13 @@ var Spanner = &Service{
 			return "spanner.googleapis.com/Instance"
 		case len(parts) == 4 && parts[2] == "instanceConfigs":
 			return "spanner.googleapis.com/InstanceConfig"
+		case len(parts) == 6 && parts[4] == "instancePartitions":
+			return "spanner.googleapis.com/InstancePartition"
 		}
 		return ""
 	},
 	Methods: spannerMethods(),
+	TestIAM: map[string]bool{spDBAdmin + "TestIamPermissions": true, spInsAdmin + "TestIamPermissions": true},
 	Deny: func(permission, resource string) error {
 		return status.Error(codes.PermissionDenied, fmt.Sprintf("Caller is missing IAM permission %s on resource %s.", permission, resource))
 	},
@@ -99,6 +121,64 @@ func spannerMethods() map[string]Rule {
 		spInsAdmin + "SetIamPolicy":        On("resource", nil, "spanner.instances.setIamPolicy"),
 		spInsAdmin + "GetInstanceConfig":   On("name", nil, "spanner.instanceConfigs.get"),
 		spInsAdmin + "ListInstanceConfigs": On("parent", nil, "spanner.instanceConfigs.list"),
+
+		spDBAdmin + "ListDatabaseOperations":           On("parent", nil, "spanner.databaseOperations.list"),
+		spDBAdmin + "ListBackupOperations":             On("parent", nil, "spanner.backupOperations.list"),
+		spInsAdmin + "ListInstanceConfigOperations":    On("parent", nil, "spanner.instanceConfigOperations.list"),
+		spInsAdmin + "ListInstancePartitionOperations": On("parent", nil, "spanner.instancePartitionOperations.list"),
+
+		spDBAdmin + "AddSplitPoints":       On("database", nil, "spanner.databases.addSplitPoints"),
+		spDBAdmin + "CopyBackup":           both(On("parent", nil, "spanner.backups.create"), On("source_backup", nil, "spanner.backups.copy")),
+		spDBAdmin + "ListDatabaseRoles":    On("parent", nil, "spanner.databaseRoles.list"),
+		spDBAdmin + "CreateBackupSchedule": On("parent", nil, "spanner.backupSchedules.create"),
+		spDBAdmin + "GetBackupSchedule":    On("name", nil, "spanner.backupSchedules.get"),
+		spDBAdmin + "ListBackupSchedules":  On("parent", nil, "spanner.backupSchedules.list"),
+		spDBAdmin + "UpdateBackupSchedule": On("backup_schedule.name", nil, "spanner.backupSchedules.update"),
+		spDBAdmin + "DeleteBackupSchedule": On("name", nil, "spanner.backupSchedules.delete"),
+
+		spInsAdmin + "MoveInstance":            On("name", nil, "spanner.instances.update"),
+		spInsAdmin + "CreateInstanceConfig":    On("parent", nil, "spanner.instanceConfigs.create"),
+		spInsAdmin + "UpdateInstanceConfig":    On("instance_config.name", nil, "spanner.instanceConfigs.update"),
+		spInsAdmin + "DeleteInstanceConfig":    On("name", nil, "spanner.instanceConfigs.delete"),
+		spInsAdmin + "CreateInstancePartition": On("parent", nil, "spanner.instancePartitions.create"),
+		spInsAdmin + "GetInstancePartition":    On("name", nil, "spanner.instancePartitions.get"),
+		spInsAdmin + "ListInstancePartitions":  On("parent", nil, "spanner.instancePartitions.list"),
+		spInsAdmin + "UpdateInstancePartition": On("instance_partition.name", nil, "spanner.instancePartitions.update"),
+		spInsAdmin + "DeleteInstancePartition": On("name", nil, "spanner.instancePartitions.delete"),
+
+		spOps + "GetOperation":    spannerOperation("get"),
+		spOps + "WaitOperation":   spannerOperation("get"),
+		spOps + "ListOperations":  spannerOperation("list"),
+		spOps + "CancelOperation": spannerOperation("cancel"),
+		spOps + "DeleteOperation": spannerOperation("delete"),
+	}
+}
+
+const spOps = "/google.longrunning.Operations/"
+
+// spannerOperation is an Operations method's permission, by the resource
+// the operation (or, for ListOperations, the collection) name is under.
+func spannerOperation(verb string) Rule {
+	return func(m protoreflect.Message) []Check {
+		name := String(m, "name")
+		res, _, ok := strings.Cut(name, "/operations")
+		if !ok || res == "" {
+			return nil
+		}
+		parts := strings.Split(res, "/")
+		if len(parts) < 4 || len(parts)%2 != 0 {
+			return nil
+		}
+		kind := map[string]string{"databases": "databaseOperations", "backups": "backupOperations", "instances": "instanceOperations",
+			"instanceConfigs": "instanceConfigOperations", "instancePartitions": "instancePartitionOperations"}[parts[len(parts)-2]]
+		if kind == "" {
+			return nil
+		}
+		v := verb
+		if v == "delete" && (kind == "databaseOperations" || kind == "backupOperations") {
+			v = "cancel"
+		}
+		return []Check{{"spanner." + kind + "." + v, res}}
 	}
 }
 
