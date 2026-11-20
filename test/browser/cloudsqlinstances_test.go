@@ -278,7 +278,9 @@ func TestCloudSQLInstanceActionsThroughThePage(t *testing.T) {
 	t.Cleanup(func() { _, _ = svc.Backups.DeleteBackup(backup).Do() })
 	p.navigate(page)
 	p.clickText("#view [role=tab]", "Backups")
-	p.waitFor(fmt.Sprintf(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q) && r.textContent.includes("us-central1"))`, "browser-"+name))
+	// Kept in the multi-region nearest the instance by default (#1956), as
+	// Google keeps it.
+	p.waitFor(fmt.Sprintf(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q) && r.textContent.includes("Multi-region: us"))`, "browser-"+name))
 
 	// Run SQL (Data API).
 	rows := p.pageAction("Run SQL (Data API)", map[string]string{"database": "postgres", "user": "browserapi",

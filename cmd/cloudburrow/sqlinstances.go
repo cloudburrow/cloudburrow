@@ -120,8 +120,15 @@ func (p *sqlProvisioner) Engine(spec sqladmin.Spec) sqladmin.Engine {
 		// A replica of `up`'s server has its data, and its superuser.
 		user = components.CloudSQLUser
 	}
-	return &sqladmin.Postgres{Name: spec.Name, Version: spec.DatabaseVersion,
+	pg := &sqladmin.Postgres{Name: spec.Name, Version: spec.DatabaseVersion,
 		User: user, Database: user, HostAddr: p.hostAddr(spec.ServerName()), Logical: spec.External != nil}
+	if spec.MasterInstanceName == "" {
+		// A primary's failed sign-ins lock a user with a lock after
+		// failed attempts (#2014); a replica's users are the primary's.
+		pg.SignInLog = pgSignInLog(p.cfg, components.SQLInstancePrefix+spec.ServerName(), true)
+		pg.LogKey = spec.ServerName()
+	}
+	return pg
 }
 
 // primaryHost is the Service a replica's server replicates from: for a
@@ -321,7 +328,21 @@ func (p *sqlProvisioner) Start(ctx context.Context, spec sqladmin.Spec) error {
 	if sqladmin.IsSQLServer(spec.DatabaseVersion) {
 		return p.sqlServerSetup(ctx, spec)
 	}
-	return p.standby(ctx, spec)
+	if err := p.standby(ctx, spec); err != nil {
+		return err
+	}
+	p.watchSignIns(ctx, spec)
+	return nil
+}
+
+// watchSignIns counts the failed sign-ins of spec's server, when one of
+// its roles is locked by them (#2014).
+func (p *sqlProvisioner) watchSignIns(ctx context.Context, spec sqladmin.Spec) {
+	if pg, ok := p.Engine(spec).(*sqladmin.Postgres); ok {
+		if err := pg.WatchSignIns(ctx); err != nil {
+			p.logf("counting the failed sign-ins of Cloud SQL instance %s: %v", spec.Name, err)
+		}
+	}
 }
 
 func (p *sqlProvisioner) Restart(ctx context.Context, spec sqladmin.Spec) error {
@@ -360,6 +381,7 @@ func (p *sqlProvisioner) sqlServerSetup(ctx context.Context, spec sqladmin.Spec)
 // pods, their volumes kept. Start applies them again, with one pod each.
 func (p *sqlProvisioner) Stop(ctx context.Context, spec sqladmin.Spec) error {
 	srv := spec.ServerName()
+	sqladmin.StopSignInWatch(srv)
 	p.mu.Lock()
 	f := p.fwds[srv]
 	delete(p.fwds, srv)
@@ -395,6 +417,7 @@ var sqlServerOf = func(name string) string { return name }
 
 // Remove deletes server name (a Spec's ServerName) and its volume.
 func (p *sqlProvisioner) Remove(ctx context.Context, name string) error {
+	sqladmin.StopSignInWatch(name)
 	p.mu.Lock()
 	f := p.fwds[name]
 	delete(p.fwds, name)
@@ -445,6 +468,7 @@ func (p *sqlProvisioner) Prune(ctx context.Context, keep []string) error {
 
 // Close stops every tunnel; the servers stay, with the cluster.
 func (p *sqlProvisioner) Close() {
+	sqladmin.StopSignInWatches()
 	p.mu.Lock()
 	fs := p.fwds
 	p.fwds, p.up = map[string]*netfwd.Forwarder{}, map[string]bool{}

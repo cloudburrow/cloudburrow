@@ -14,12 +14,13 @@ import (
 
 // TestCloudSQLConsoleStopStartConnectionsAndPasswordPolicy (#1860), in the
 // sql shard, on a created PostgreSQL instance's page:
-//   - Stop, beside the title and confirmed by the instance's name, stops it
+//   - Stop, beside the title and confirmed in Google's dialog, stops it
 //     (activationPolicy NEVER, which the API answers), the page then shows
 //     it STOPPED with Start beside the title, and Start starts it again;
 //   - Connections has Google's Summary, Networking, Security and
 //     Connectivity tests tabs, Create client certificate on Security;
-//   - with the password policy enabled (Edit's Enable password policies),
+//   - with the password policy enabled (Edit's Enable password policies,
+//     then Set password policy's dialog),
 //     Add user account with a short password is refused with the policy's
 //     words, and one that meets it is taken;
 //   - the create page has Enable password policies after the password,
@@ -67,7 +68,8 @@ func TestCloudSQLConsoleStopStartConnectionsAndPasswordPolicy(t *testing.T) {
 	p.navigate(page)
 	p.waitFor(`[...document.querySelectorAll("#view .page-actions button")].some((b) => b.textContent === "Stop")`)
 	p.clickText("#view .page-actions button", "Stop")
-	p.confirmByName(name)
+	p.waitFor(`document.querySelector(".modal.is-open form[data-confirm=confirm]") !== null`)
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	waitPolicy("NEVER")
 	p.navigate(page)
 	p.waitFor(`[...document.querySelectorAll("#view .page-actions button")].some((b) => b.textContent === "Start")`)
@@ -77,7 +79,8 @@ func TestCloudSQLConsoleStopStartConnectionsAndPasswordPolicy(t *testing.T) {
 		t.Error("the stopped instance's page does not say STOPPED")
 	}
 	p.clickText("#view .page-actions button", "Start")
-	p.confirmByName(name)
+	p.waitFor(`document.querySelector(".modal.is-open form[data-confirm=confirm]") !== null`)
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	waitPolicy("ALWAYS")
 
 	// Connections: Google's tabs, the client certificates on Security.
@@ -97,9 +100,13 @@ func TestCloudSQLConsoleStopStartConnectionsAndPasswordPolicy(t *testing.T) {
 	p.clickText("#view .page-actions button", "Edit")
 	p.waitFor(`document.querySelector(".modal.is-open #f-enablePasswordPolicy") !== null`)
 	p.eval(`(() => { const f = document.querySelector(".modal.is-open #f-enablePasswordPolicy"); f.checked = true;
-		f.dispatchEvent(new Event("change", { bubbles: true }));
-		const m = document.querySelector(".modal.is-open #f-passwordMinLength"); m.value = "12";
-		m.dispatchEvent(new Event("input", { bubbles: true })); m.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`, nil)
+		f.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`, nil)
+	// The policy's options are in Google's Set password policy dialog.
+	p.clickText(".modal.is-open button", "Set password policy")
+	p.waitFor(`document.querySelector(".modal.is-open .field-panel-dialog #f-passwordMinLength") !== null`)
+	p.setField(".modal.is-open .field-panel-dialog #f-passwordMinLength", "12")
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open .field-panel-dialog button[type="submit"]`)))
+	p.waitFor(`document.querySelector(".modal.is-open .field-panel-dialog") === null && document.querySelectorAll(".modal.is-open").length === 1`)
 	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
 	p.waitFor(`document.querySelector(".modal") === null`)
 	for deadline := time.Now().Add(2 * time.Minute); ; time.Sleep(time.Second) {

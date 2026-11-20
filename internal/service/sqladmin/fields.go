@@ -211,8 +211,8 @@ var userFields = map[string]fieldRule{
 	"etag": output, "kind": output, "instance": output, "project": output, "iamStatus": output,
 	"iamEmail":             kept, // checked by users.insert (#1944)
 	"databaseRoles":        refused501("users are created without role memberships; GRANT them with executeSql or a client"),
-	"dualPasswordType":     refusedValues("MySQL's dual passwords (RETAIN CURRENT PASSWORD) are not set through the API", "NO_DUAL_PASSWORD"),
-	"passwordPolicy":       refused501("a user's password is not checked against a policy"),
+	"dualPasswordType":     kept, // MySQL's RETAIN CURRENT PASSWORD, checked by users.update (#2009)
+	"passwordPolicy":       kept, // the user's own policy, checked by users.insert and update (#2009)
 	"serverRoles":          sqlServerOnly(),
 	"sqlserverUserDetails": sqlServerOnly(),
 }

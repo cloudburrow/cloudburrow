@@ -912,8 +912,17 @@ func TestDestructiveActionsAskForTheName(t *testing.T) {
 	// #1931: each kind's delete is confirmed as Google's console confirms
 	// it, the word delete or DELETE, or the button alone, which leaves
 	// focus on Cancel so one Enter does not delete.
-	if !strings.Contains(js, `if (style === "delete" || style === "DELETE") confirmWord = style;`) {
+	// #1860: Cloud SQL's Delete backup asks for the word Delete.
+	if !strings.Contains(js, `if (style === "delete" || style === "DELETE" || style === "Delete") confirmWord = style;`) {
 		t.Error("a delete confirmed by the word delete does not ask for that word")
+	}
+	// #1860: an action's own dialog title, and a confirmation titled and
+	// styled as Google's, on click and after a form.
+	for _, want := range []string{`text: action.title || (segments.length ?`, "title: action.confirmTitle || `${action.label} ${name}?`",
+		"title: action.confirmTitle || `${action.label}: ${name}?`", `const panels = new Map();`, `if (first.openPanel) first.openPanel();`} {
+		if !strings.Contains(js, want) {
+			t.Errorf("console.js lacks %s", want)
+		}
 	}
 	if !strings.Contains(js, "(input || cancel).focus();") {
 		t.Error("a confirmation with nothing to type does not leave focus on Cancel")

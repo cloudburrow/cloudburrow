@@ -438,6 +438,15 @@ type Field struct {
 	// Google's Spanner Create instance has Compare editions beside the
 	// edition (#1859).
 	Dialog *FieldDialog `json:"dialog,omitempty"`
+	// Panel puts the field in a dialog of its own instead of on the form:
+	// the fields naming the same Panel are drawn in one dialog titled by
+	// it, opened by a button of that label where the first of them would
+	// be, and ending in Save, which keeps what was set, or Cancel, which
+	// puts back what the fields held before it opened. Google's create
+	// page has Set password policy under Enable password policies (#1860).
+	// The fields stay the form's: their values are submitted with it, and
+	// the button is drawn while any of them is visible.
+	Panel string `json:"panel,omitempty"`
 }
 
 // FieldDialog is a Field's Dialog: Button opens a dialog titled Title, an
@@ -1218,6 +1227,14 @@ type Action struct {
 	// DeleteConfirm style, as BigQuery's Delete table asks for the word
 	// delete and a Datastore entity's Delete for nothing typed.
 	ConfirmStyle string `json:"confirmStyle,omitempty"`
+	// Title is the action's dialog title where Google's is not the
+	// action's label: Cloud SQL's Create database opens "New database"
+	// (#1860). Empty is "<Label> for <name>".
+	Title string `json:"title,omitempty"`
+	// ConfirmTitle is the confirmation's title where Google's names the
+	// kind of resource rather than the one acted on: Cloud SQL's Stop asks
+	// "Stop database instance?" (#1860). Empty is "<Label> <name>?".
+	ConfirmTitle string `json:"confirmTitle,omitempty"`
 	// Confirm is what performing the action changes or puts at stake, and
 	// asks for the resource's name back before anything is sent.
 	//

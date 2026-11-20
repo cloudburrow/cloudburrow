@@ -19,6 +19,9 @@ const (
 	DeleteConfirmWord = "delete"
 	// DeleteConfirmWordUpper asks for the word DELETE.
 	DeleteConfirmWordUpper = "DELETE"
+	// DeleteConfirmWordTitle asks for the word Delete, as Cloud SQL's
+	// Delete backup window does (#1860).
+	DeleteConfirmWordTitle = "Delete"
 	// DeleteConfirmClick asks for nothing typed: the dialog's Delete alone.
 	DeleteConfirmClick = "confirm"
 )
