@@ -913,8 +913,12 @@ func TestDestructiveActionsAskForTheName(t *testing.T) {
 	// it, the word delete or DELETE, or the button alone, which leaves
 	// focus on Cancel so one Enter does not delete.
 	// #1860: Cloud SQL's Delete backup asks for the word Delete.
-	if !strings.Contains(js, `if (style === "delete" || style === "DELETE" || style === "Delete") confirmWord = style;`) {
+	if !strings.Contains(js, `if (style === "delete" || style === "DELETE" || style === "Delete" || style === "Disable") confirmWord = style;`) {
 		t.Error("a delete confirmed by the word delete does not ask for that word")
+	}
+	// #2047: Delete HMAC key asks for the access ID's first 10 characters.
+	if !strings.Contains(js, `if (style === "prefix10") confirmWord = String(confirmWord).slice(0, 10);`) {
+		t.Error("a confirmation by the name's first 10 characters does not ask for them")
 	}
 	// #1860: an action's own dialog title, and a confirmation titled and
 	// styled as Google's, on click and after a form.
@@ -2557,7 +2561,7 @@ func TestRowTargetsAndConfirmedActions(t *testing.T) {
 		"(item.target || []).length ? item.target",
 		"run: () => runAction(route, (item.target || []).length ? item.target : item.name, a, onDone),",
 		"detail: action.confirm || undefined,",
-		"confirmLabel: action.confirm ? action.label : undefined,",
+		"confirmLabel: action.confirm ? (action.submit || action.label) : undefined,",
 	} {
 		if !strings.Contains(js, want) {
 			t.Errorf("console.js is missing %q", want)
@@ -2593,5 +2597,30 @@ func TestTheInfoPanelHasARowsTabsAndPropertyActionLinks(t *testing.T) {
 	// A poll does not redraw the panel under someone typing in it.
 	if !strings.Contains(js, "const shown = !quiet && inspected && infoPanelOpen()") {
 		t.Error("a refresh does not redraw the inspected row's panel, or a poll does")
+	}
+}
+
+// A section ShownIn another is no tab of its own but a choice in that
+// tab's Show list, which an old address naming it opens (#1843); and a
+// Scope held in View options is chosen in that dialog's radio buttons over
+// its column choices, applied by Save, not by a picker over the list.
+func TestShowListAndViewOptionsDialog(t *testing.T) {
+	js := consoleAsset(t, "console.js")
+	for _, want := range []string{
+		"const sections = allSections.filter((s) => !s.shownIn);",
+		"if (shownWanted) SHOW_CHOICES[shownWanted.shownIn] = shownWanted.showAs || shownWanted.label;",
+		"const shownHere = allSections.filter((sc) => sc.shownIn === section.id);",
+		"if (other) return drawListingSection(into, { ...other, uploadTo: null }, note, reload);",
+		`const SHOW_NONCURRENT = "Live and noncurrent objects";`,
+		"if (data.scope && !data.scope.viewOptions) header.push(scopePicker(",
+		"if (scope) return viewOptionsDialog({ service, columns, onChange, scope, reload, off });",
+		`el("button", { type: "submit", class: "primary", id: "view-options-save", text: "Save" })`,
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("console.js is missing %q", want)
+		}
+	}
+	if strings.Contains(js, "object-versions-toggle") {
+		t.Error("Show versions is still a checkbox beside Google's Show list")
 	}
 }

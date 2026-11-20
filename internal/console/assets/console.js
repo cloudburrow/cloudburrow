@@ -1035,6 +1035,44 @@ const setChildren = (node, ...children) => {
   node.replaceChildren(...children.flat().filter((c) => c !== null && c !== undefined && c !== false));
 };
 
+// keepingFocus runs redraw, which rebuilds part of root, and puts focus back
+// on the control that stands where the focused one stood (#2047).
+//
+// A list's poll, a sort, a pager or a chart's tick rebuilt its controls
+// under a keyboard user: the focused one left the document and focus fell
+// to <body>, so the next Tab started again from the top of the page.
+// Google's console keeps a reader's place across its refreshes. The control
+// is matched by what it is and says (its role, label and text, not an
+// arrow drawn beside it), and by which of the like ones it was.
+const FOCUSABLE = "a[href], button, input, select, textarea, summary, [tabindex]";
+const focusKey = (n) => {
+  const label = n.getAttribute("aria-label") || "";
+  const text = label ? "" : [...n.childNodes]
+    .filter((c) => !(c.nodeType === 1 && c.getAttribute("aria-hidden") === "true"))
+    .map((c) => c.textContent).join("").trim().slice(0, 120);
+  return [n.tagName, n.getAttribute("type") || "", n.getAttribute("role") || "", n.getAttribute("name") || "",
+    n.id, label, text].join("\u0001");
+};
+const keepingFocus = (root, redraw) => {
+  const was = document.activeElement;
+  if (!root || !was || was === document.body || !root.contains(was)) return redraw();
+  const key = focusKey(was);
+  const nth = [...root.querySelectorAll(FOCUSABLE)].filter((n) => focusKey(n) === key).indexOf(was);
+  const out = redraw();
+  const settle = () => {
+    // Focus the redraw moved on purpose stays where it was put.
+    if (document.activeElement && document.activeElement !== document.body) return;
+    // A node taken out and put back (a header kept across redraws) was
+    // still blurred by its removal.
+    const like = () => [...root.querySelectorAll(FOCUSABLE)].filter((n) => focusKey(n) === key);
+    const now = was.isConnected ? was : like()[Math.max(nth, 0)] || like().pop();
+    if (now) now.focus({ preventScroll: true });
+  };
+  if (out && typeof out.then === "function") return out.then((v) => { settle(); return v; });
+  settle();
+  return out;
+};
+
 // --- data ------------------------------------------------------------
 
 // Every call is bounded.
@@ -1260,7 +1298,7 @@ function renderOperations() {
 
   const ops = mergedOperations();
 
-  setChildren(list, ...ops.map((op) =>
+  keepingFocus(list, () => setChildren(list, ...ops.map((op) =>
     el("li", { class: SEEN_OPERATIONS.has(op.key) ? null : "is-unread" },
       // Running is not a warning. Rendering it in the same amber the tables
       // use for "Paused" said something had gone slightly wrong; a moving
@@ -1280,7 +1318,7 @@ function renderOperations() {
                         href: `/logs?operation=${encodeURIComponent(op.id)}`,
                         text: op.detail })
             : el("div", { class: "op-detail unavailable", text: op.detail }))
-        : null)));
+        : null))));
 
   if (empty) empty.hidden = ops.length > 0;
   if (stale) {
@@ -2384,9 +2422,10 @@ function filterBar({ noun, columns, onChange, extra = [] }) {
 // remembered per service. hidden() is the set of columns turned off.
 const COLUMNS_KEY = "cloudburrow.columns";
 
-function viewOptions({ service, columns, onChange }) {
+function viewOptions({ service, columns, onChange, scope = null, reload = null }) {
   const stored = readStored(COLUMNS_KEY, {}) || {};
   let off = new Set(Array.isArray(stored[service]) ? stored[service] : []);
+  if (scope) return viewOptionsDialog({ service, columns, onChange, scope, reload, off });
   const button = el("button", { type: "button", class: "icon-button view-options",
     "aria-label": "View options", title: "View options", "aria-haspopup": "true", "aria-expanded": "false",
     html: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M9 5v14M15 5v14"/></svg>' });
@@ -2426,6 +2465,67 @@ function viewOptions({ service, columns, onChange }) {
     node: el("div", { class: "view-options-wrap" }, button, panel),
     hidden: () => off,
   };
+}
+
+// viewOptionsDialog is View options where the list's scope is chosen in it
+// (Scope.ViewOptions, #1843): Google's Buckets page "Click View options.
+// Select Soft deleted buckets only. Click Save." A dialog with the scope's
+// choices as radio buttons over the column choices, applied by Save.
+function viewOptionsDialog({ service, columns, onChange, scope, reload, off }) {
+  const button = el("button", { type: "button", class: "secondary view-options view-options-text",
+    "aria-haspopup": "dialog", text: "View options" });
+  button.addEventListener("click", () => {
+    const { dialog, close } = openModal({ labelledBy: "view-options-title" });
+    const name = `view-options-${scope.key}`;
+    const radios = (scope.options || []).map((o) => {
+      const id = `${name}-${o.id}`;
+      return el("label", { class: "view-options-item", for: id },
+        el("input", { type: "radio", id, name, value: o.id, checked: o.id === scope.selected ? "checked" : null }),
+        el("span", { text: o.label || o.id }));
+    });
+    const boxes = columns().map((c) => {
+      const id = `vo-col-${c.replace(/[^A-Za-z0-9]+/g, "-")}`;
+      return el("label", { class: "view-options-item", for: id },
+        el("input", { type: "checkbox", id, value: c, checked: off.has(c) ? null : "checked" }),
+        el("span", { text: c }));
+    });
+    const save = (e) => {
+      e.preventDefault();
+      off.clear();
+      for (const b of boxes) {
+        const input = b.querySelector("input");
+        if (!input.checked) off.add(input.value);
+      }
+      const all = readStored(COLUMNS_KEY, {}) || {};
+      all[service] = [...off];
+      writeStored(COLUMNS_KEY, all);
+      const picked = (dialog.querySelector(`input[name="${name}"]:checked`) || {}).value || scope.selected;
+      close();
+      if (picked !== scope.selected) {
+        const params = new URLSearchParams(location.search);
+        if (picked && picked !== scope.default) params.set(scope.key, picked);
+        else params.delete(scope.key);
+        const qs = params.toString();
+        history.pushState(history.state, "", location.pathname + (qs ? `?${qs}` : ""));
+        if (reload) reload();
+        return;
+      }
+      onChange();
+    };
+    dialog.append(
+      el("form", { class: "modal-body", id: "view-options-dialog", onsubmit: save },
+        el("h2", { id: "view-options-title", text: "View options" }),
+        el("fieldset", { class: "view-options-group" },
+          el("legend", { text: scope.label && scope.label !== "View options" ? scope.label : "Show" }), ...radios),
+        el("fieldset", { class: "view-options-group" },
+          el("legend", { text: "Column display options" }), ...boxes),
+        el("div", { class: "modal-actions" },
+          el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }),
+          el("button", { type: "submit", class: "primary", id: "view-options-save", text: "Save" }))));
+    const first = dialog.querySelector("input");
+    if (first) first.focus();
+  });
+  return { node: el("div", { class: "view-options-wrap" }, button), hidden: () => off };
 }
 
 // A cancel is not a failure: the user stopped it.
@@ -2977,7 +3077,8 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   // The data columns on screen: View options can turn any of them off
   // (#1842). The filter still reads the hidden ones, as Google's does.
   const chooser = opts.rowControls && route.service
-    ? viewOptions({ service: route.service, columns: allDataColumns, onChange: () => draw() })
+    ? viewOptions({ service: route.service, columns: allDataColumns, onChange: () => draw(),
+      scope: data.scope && data.scope.viewOptions ? data.scope : null, reload })
     : null;
   const dataColumns = () => allDataColumns().filter((c) => !chooser || !chooser.hidden().has(c));
   const hasActions = () =>
@@ -3174,7 +3275,8 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
     return el("td", { class: "row-actions" }, ...buttons, overflowMenu(actions, item.name));
   };
 
-  const draw = () => {
+  const draw = () => keepingFocus(view, drawNow);
+  const drawNow = () => {
     const rows = visibleRows();
     const total = rows.length;
     const pages = Math.max(1, Math.ceil(total / pageSize));
@@ -3469,12 +3571,19 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   const freshness = el("p", { class: "table-freshness unavailable", role: "status" });
 
   const drawFreshness = () => {
-    setChildren(freshness,
-      el("span", { text: staleBecause
-        ? `Last read ${relativeTime(readAt)} — refresh failed: ${staleBecause}`
-        : `Updated ${relativeTime(readAt)}` }));
+    const said = staleBecause
+      ? `Last read ${relativeTime(readAt)} — refresh failed: ${staleBecause}`
+      : `Updated ${relativeTime(readAt)}`;
+    // A live region rewritten with the same words is read out again.
+    if (freshness.textContent !== said) setChildren(freshness, el("span", { text: said }));
     freshness.classList.toggle("is-stale", Boolean(staleBecause));
   };
+
+  // The listing the table was last drawn from, as read. A poll that reads
+  // the same listing changes nothing on the page (#2047): Google's console
+  // does not rebuild a list nobody changed, and rebuilding it took the
+  // place of a keyboard user tabbing through it.
+  let drawnFrom = JSON.stringify(data);
 
   // quiet is the automatic poll: it must not raise a snackbar every interval
   // on an instance whose backend is down, and must not blank a table that
@@ -3484,6 +3593,14 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
     try {
       const fresh = await opts.refetch();
       if (fresh && Array.isArray(fresh.items)) {
+        const read = JSON.stringify(fresh);
+        if (quiet && read === drawnFrom) {
+          readAt = new Date();
+          staleBecause = "";
+          drawFreshness();
+          return;
+        }
+        drawnFrom = read;
         data = fresh;
         // A selection may name rows that no longer exist.
         const names = new Set(data.items.map((i) => i.name));
@@ -3612,7 +3729,14 @@ function openAskedListAction(route, data, onDone) {
   here.searchParams.delete("action");
   history.replaceState(history.state, "", here.pathname + here.search);
   const opened = (data.actions || []).find((a) => a.id === asked && !a.href);
-  if (opened) openActionForm(route, [], opened, onDone, data.noun || route.title);
+  if (!opened) return;
+  // One with nothing to fill in is performed as its button would be,
+  // confirmed first where it asks (#2047: Storage Intelligence's Disable).
+  if ((opened.fields || []).some((f) => f.type !== "hidden")) {
+    openActionForm(route, [], opened, onDone, data.noun || route.title);
+  } else {
+    runAction(route, [], opened, onDone, NO_ROW, data.noun || route.title);
+  }
 }
 
 // detailHref is the address of one row's contents.
@@ -3731,7 +3855,11 @@ async function renderDetail(view, route, resourcePath) {
   // sharing's My subscriptions, #1989) is headed by its own name, not
   // "<Kind> details".
   if (data.heading) crumb.querySelector("h1, h2").textContent = data.heading;
-  const sections = (data.sections || []).slice();
+  // A section ShownIn another is drawn by that tab's Show list, not as a
+  // tab of its own (#1843): a bucket's soft-deleted objects are the
+  // Objects tab's "Soft-deleted objects only".
+  const allSections = (data.sections || []).slice();
+  const sections = allSections.filter((s) => !s.shownIn);
   // A Logs tab where Google's page has one (#1842, audit item 9): a Cloud
   // Run service's, job's and worker pool's, a function's, and a GKE
   // workload's, pod's, Service's and Job's ("Click the Logs tab to get the
@@ -3816,7 +3944,12 @@ async function renderDetail(view, route, resourcePath) {
   // address, which is the Studio's (#1861).
   const embedded = view.dataset.embedded === "true";
   const wanted = (embedded ? view.dataset.tab : new URLSearchParams(location.search).get("tab")) || data.openTab;
-  let current = Math.max(0, sections.findIndex((sec) => sec.id === wanted));
+  // An address naming a section ShownIn another opens that tab with the
+  // section chosen in its Show list: ?tab=deleted, a bucket's Deleted
+  // objects tab before #1843.
+  const shownWanted = allSections.find((sec) => sec.shownIn && sec.id === wanted);
+  if (shownWanted) SHOW_CHOICES[shownWanted.shownIn] = shownWanted.showAs || shownWanted.label;
+  let current = Math.max(0, sections.findIndex((sec) => sec.id === (shownWanted ? shownWanted.shownIn : wanted)));
 
   const panel = el("div", { class: "tab-panel", id: "detail-panel", role: "tabpanel" });
 
@@ -4029,20 +4162,23 @@ async function renderDetail(view, route, resourcePath) {
     // An upload control where the provider says objects can land. It joins
     // the section's note, so it is drawn whether or not there are rows yet —
     // an empty bucket is exactly where the first upload happens.
-    if (section.uploadTo) {
-      const up = uploadControl(route, section.uploadTo, reload);
-      // Show versions (#853): the same place listed with every generation,
-      // live and noncurrent, from the storage server's versions=true.
-      up.append(versionsToggle(() => drawPanel()));
-      // Google's Show list (#1843): Soft-deleted objects only draws the
-      // bucket's soft-deleted objects, with Restore, in the Objects tab.
-      const softSection = sections.find((sc) => sc.id === "deleted");
-      if (softSection) up.append(objectsShowPicker(() => drawPanel()));
-      note = note ? el("div", {}, note, up) : up;
-      if (softSection && objectsShow === OBJECTS_SHOW_SOFT) {
-        return drawListingSection(into, { ...softSection, uploadTo: null }, note, reload);
+    // Google's Show list (#1843): on the Objects tab "Live objects only",
+    // "Live and noncurrent objects" (#853: every generation, from the
+    // storage server's versions=true) and "Soft-deleted objects only"; on
+    // any tab another section is ShownIn, this tab's own rows and each such
+    // section's, drawn in this tab.
+    const shownHere = allSections.filter((sc) => sc.shownIn === section.id);
+    if (section.uploadTo || shownHere.length) {
+      const show = showList(section, shownHere, () => drawPanel());
+      let bar = show.node;
+      if (section.uploadTo) {
+        bar = uploadControl(route, section.uploadTo, reload);
+        bar.append(show.node);
       }
-      if (readStored(VERSIONS_KEY, false)) return drawVersionsSection(into, section, note, reload);
+      note = note ? el("div", {}, note, bar) : bar;
+      const other = shownHere.find((sc) => (sc.showAs || sc.label) === show.choice);
+      if (other) return drawListingSection(into, { ...other, uploadTo: null }, note, reload);
+      if (section.uploadTo && show.choice === SHOW_NONCURRENT) return drawVersionsSection(into, section, note, reload);
     }
     if (!(list.items || []).length) {
       // The listing's own note, when it has one.
@@ -4595,7 +4731,9 @@ function listActionButtons(route, data, onDone) {
   // A list action the listing also offers on its selection (#1864) is
   // drawn once, as the selection's button.
   const onSelection = new Set((data.selectActions || []).map((a) => a.id));
-  return (data.actions || []).filter((a) => !onSelection.has(a.id)).map((a) => el("button", {
+  // A Linked one is opened from where the page links to it (#2047:
+  // Disable beside Storage Intelligence's Status), not as a button.
+  return (data.actions || []).filter((a) => !onSelection.has(a.id) && !a.linked).map((a) => el("button", {
     type: "button", class: "secondary", id: `list-action-${a.id}`, text: a.label,
     // One that is a link opens its page: the Datastore page's Indexes
     // (#1846).
@@ -5076,27 +5214,31 @@ const PREVIEW_IMAGES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
 // as the Cloud Storage console keeps it.
 const VERSIONS_KEY = "cloudburrow.storage.versions";
 
-// The Objects tab's Show list (#1843), for this page view.
-const OBJECTS_SHOW_LIVE = "Live objects only";
-const OBJECTS_SHOW_SOFT = "Soft-deleted objects only";
-let objectsShow = OBJECTS_SHOW_LIVE;
+// Google's Show list (#1843): a tab's own rows, or a section ShownIn it,
+// chosen for this page view per tab. On a bucket's Objects tab "Live and
+// noncurrent objects" is kept for the viewer across pages, as the Cloud
+// Storage console keeps it (#853).
+const SHOW_LIVE = "Live objects only";
+const SHOW_NONCURRENT = "Live and noncurrent objects";
+let SHOW_CHOICES = {};
 
-function objectsShowPicker(onChange) {
-  const select = el("select", { id: "objects-show", name: "show" },
-    ...[OBJECTS_SHOW_LIVE, OBJECTS_SHOW_SOFT].map((o) =>
-      el("option", { value: o, text: o, selected: o === objectsShow })));
-  select.addEventListener("change", () => { objectsShow = select.value; onChange(); });
-  return el("label", { class: "objects-show", for: "objects-show" }, "Show ", select);
-}
-
-function versionsToggle(onChange) {
-  const box = el("input", { type: "checkbox", id: "object-versions-toggle",
-    checked: readStored(VERSIONS_KEY, false) });
-  box.addEventListener("change", () => {
-    writeStored(VERSIONS_KEY, box.checked);
+function showList(section, shownHere, onChange) {
+  const own = section.show || SHOW_LIVE;
+  const options = [own, ...(section.uploadTo ? [SHOW_NONCURRENT] : []),
+    ...shownHere.map((sc) => sc.showAs || sc.label)];
+  let choice = SHOW_CHOICES[section.id];
+  if (!options.includes(choice)) {
+    choice = section.uploadTo && readStored(VERSIONS_KEY, false) ? SHOW_NONCURRENT : own;
+  }
+  const id = `${section.id}-show`;
+  const select = el("select", { id, name: "show" },
+    ...options.map((o) => el("option", { value: o, text: o, selected: o === choice })));
+  select.addEventListener("change", () => {
+    SHOW_CHOICES[section.id] = select.value;
+    if (section.uploadTo) writeStored(VERSIONS_KEY, select.value === SHOW_NONCURRENT);
     onChange();
   });
-  return el("label", { class: "versions-toggle", for: "object-versions-toggle" }, box, " Show versions");
+  return { node: el("label", { class: "objects-show", for: id }, "Show ", select), choice };
 }
 
 function objectQuery(path) {
@@ -5539,7 +5681,8 @@ async function renderList(view, route) {
     header.push(...listingSummary(data));
   }
   if (data.serverFilter) header.push(serverFilterBox(data.serverFilter, () => renderList(view, route)));
-  if (data.scope) header.push(scopePicker(data.scope, () => renderList(view, route), (data.filters || []).map((f) => f.key)));
+  // A scope held in View options (#1843) is chosen in that dialog.
+  if (data.scope && !data.scope.viewOptions) header.push(scopePicker(data.scope, () => renderList(view, route), (data.filters || []).map((f) => f.key)));
   (data.filters || []).forEach((f, i, all) =>
     header.push(scopePicker(f, () => renderList(view, route), all.slice(i + 1).map((x) => x.key))));
 
@@ -9001,7 +9144,11 @@ function notify(message, kind = "info") {
 // "confirm" for nothing typed, the dialog's button alone, as a Cloud Storage
 // bucket's or a Cloud Run service's does.
 function confirmDestructive({ title, detail, confirmWord, onConfirm, confirmLabel = "Delete", consequence = "This cannot be undone.", style = "name" }) {
-  if (style === "delete" || style === "DELETE" || style === "Delete") confirmWord = style;
+  // "Disable" for that word, as Storage Intelligence's Disable asks (#2047);
+  // "prefix10" for the name's first 10 characters, as Cloud Storage's
+  // Delete HMAC key asks for the access ID's.
+  if (style === "delete" || style === "DELETE" || style === "Delete" || style === "Disable") confirmWord = style;
+  if (style === "prefix10") confirmWord = String(confirmWord).slice(0, 10);
   const typed = style !== "confirm";
   return new Promise((settle) => {
     const error = el("p", { class: "form-error", role: "alert", hidden: true });
@@ -9292,7 +9439,7 @@ async function runAction(route, target, action, onDone, row = NO_ROW, title = nu
     title: action.confirmTitle || `${action.label} ${name}?`,
     detail: action.confirm || undefined,
     confirmWord: name,
-    confirmLabel: action.confirm ? action.label : undefined,
+    confirmLabel: action.confirm ? (action.submit || action.label) : undefined,
     consequence: action.destructive ? undefined : "",
     // As Google's console confirms this action (#1931): BigQuery's Delete
     // table asks for the word delete, a Datastore entity's Delete for
@@ -12039,7 +12186,11 @@ async function renderMonitoring(view) {
 
     const gaps = samples.filter((s) => s.unavailable).length;
 
-    setChildren(view, ...header,
+    // Read before the page is rebuilt, so the rebuild is one step and focus
+    // is put back on the range button that had it (#2047).
+    const activity = await productActivity();
+    const requests = await requestCharts(samples);
+    keepingFocus(view, () => setChildren(view, ...header,
       rangeControl,
       gaps
         ? el("p", { class: "unavailable",
@@ -12086,8 +12237,8 @@ async function renderMonitoring(view) {
           // node run out of disk" asks about.
           foot: `Kubelet node filesystem · ${foot}`,
         })),
-      await productActivity(),
-      await requestCharts(samples),
+      activity,
+      requests,
       // Absence, stated. The alternative is a reader assuming these charts
       // are missing rather than impossible.
       el("div", { class: "card" },
@@ -12095,7 +12246,7 @@ async function renderMonitoring(view) {
         el("p", { class: "unavailable", text:
           "Cloud Run workloads' own request count and latency need Knative's " +
           "queue-proxy metrics, which are off in this instance (#181). Cost, quota " +
-          "and SLO data do not exist locally at all and are not approximated." })));
+          "and SLO data do not exist locally at all and are not approximated." }))));
   };
 
   await draw();
