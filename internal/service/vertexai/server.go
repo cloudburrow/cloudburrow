@@ -8,12 +8,15 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/cmek"
 	"github.com/cloudburrow/cloudburrow/internal/embedding"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/lro"
 	"github.com/cloudburrow/cloudburrow/internal/modelgarden"
+	"github.com/cloudburrow/cloudburrow/internal/sysparams"
 	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
 )
 
@@ -58,6 +61,9 @@ type Server struct {
 	// speech is Speech-to-Text's recognizers (speechrecognizers.go,
 	// #1799); nil until first used or SetSpeechState. Guarded by mu.
 	speech *speechStore
+	// keys are Document AI's and Speech-to-Text's customer-managed keys
+	// (cmek.go, #1950), set by UseCMEK.
+	keys atomic.Pointer[cmek.Keys]
 }
 
 // NewServer returns a server. A nil generator is valid and makes every
@@ -118,7 +124,7 @@ func (s *Server) Handler() http.Handler {
 	// operations through the REST transcoder when served (modelgarden.go).
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { s.serveREST(w, r, nil) })
 	// The playground page and any browser tab can reach this port (#676).
-	return hostguard.Wrap(mux)
+	return hostguard.Wrap(sysparams.Wrap(mux, sysparams.Options{}))
 }
 
 // notFound answers an unrouted path with the supported surface rather than an

@@ -79,7 +79,7 @@ func (a *Admin) takeBackup(ctx context.Context, dbName, schedule string) error {
 	var entities [][]byte
 	stats := &adminpb.Backup_Stats{}
 	if entityMode {
-		if entities, err = a.dumpEntities(ctx, dbName); err != nil {
+		if entities, err = a.dumpEntities(ctx, dbName, nil); err != nil {
 			return err
 		}
 		stats.SizeBytes, stats.DocumentCount = partsBytes(entities), int64(len(entities))
@@ -302,23 +302,11 @@ func (a *Admin) CloneDatabase(ctx context.Context, req *adminpb.CloneDatabaseReq
 	}
 	start := a.now()
 	// A whole minute in the source's version window (#1942): the
-	// emulator keeps the versions, so the clone is read at that time.
-	// A Datastore mode source's entities are copied as they are now, in
-	// the current minute alone (below).
-	a.mu.Lock()
-	srcDB, err := a.database(snap.GetDatabase())
-	datastoreMode := err == nil && srcDB.GetType() == adminpb.Database_DATASTORE_MODE
-	a.mu.Unlock()
-	if !datastoreMode {
-		if err := a.checkSnapshotTime(snap.GetDatabase(), "pitr_snapshot.snapshot_time", snap.GetSnapshotTime(), false); err != nil {
-			return nil, err
-		}
-	} else if err := snap.GetSnapshotTime().CheckValid(); err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "pitr_snapshot.snapshot_time is invalid: %v", err)
-	} else if at := snap.GetSnapshotTime().AsTime(); !at.Truncate(time.Minute).Equal(at) {
-		return nil, status.Error(codes.InvalidArgument, "pitr_snapshot.snapshot_time must be a whole minute.")
-	} else if at.After(start) {
-		return nil, status.Error(codes.InvalidArgument, "pitr_snapshot.snapshot_time is in the future.")
+	// Firestore emulator keeps a Native mode database's versions, the
+	// Datastore front a Datastore mode database's (#1967), so the clone
+	// is read at that time.
+	if err := a.checkSnapshotTime(snap.GetDatabase(), "pitr_snapshot.snapshot_time", snap.GetSnapshotTime(), false); err != nil {
+		return nil, err
 	}
 	a.mu.Lock()
 	src, err := a.database(snap.GetDatabase())
@@ -331,10 +319,6 @@ func (a *Admin) CloneDatabase(ctx context.Context, req *adminpb.CloneDatabaseReq
 		return nil, status.Errorf(codes.NotFound, "The database %s with that database_uid does not exist.", src.Name)
 	}
 	srcName, srcLoc, srcEdition, srcType := src.Name, src.LocationId, src.DatabaseEdition, src.Type
-	if at := snap.GetSnapshotTime().AsTime(); srcType == adminpb.Database_DATASTORE_MODE && at.Before(start.Truncate(time.Minute)) {
-		a.mu.Unlock()
-		return nil, status.Errorf(codes.Unimplemented, "a clone of a Datastore mode database at %s is not served here: the Datastore emulator keeps no earlier versions of its entities, so its clone is served for a snapshot_time in the current minute (%s) alone", at.Format(time.RFC3339), start.Truncate(time.Minute).Format(time.RFC3339))
-	}
 	var source *adminpb.Database_CmekConfig
 	if src.GetCmekConfig() != nil {
 		source = proto.Clone(src.GetCmekConfig()).(*adminpb.Database_CmekConfig)
@@ -358,7 +342,7 @@ func (a *Admin) CloneDatabase(ctx context.Context, req *adminpb.CloneDatabaseReq
 	}
 	if srcType == adminpb.Database_DATASTORE_MODE {
 		var entities [][]byte
-		if entities, err = a.dumpEntities(ctx, srcName); err == nil {
+		if entities, err = a.dumpEntities(ctx, srcName, snap.GetSnapshotTime()); err == nil {
 			err = a.loadEntities(ctx, db.Name, entities)
 		}
 	} else {

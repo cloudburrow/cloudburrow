@@ -29,15 +29,14 @@ import (
 // The rows are query (the query table's columns, batch form only), base
 // and distance, top_k (10; a negative one every row) per query row.
 //
-// CloudBurrow makes no vector index (CREATE VECTOR INDEX is 501,
-// vectorindex.go), so every search is brute force, which is what BigQuery
-// does with no index: "If you don't have a vector index, BigQuery uses
-// brute force, which returns exact results"; options' use_brute_force and
-// fraction_lists_to_search are checked as the page documents them.
+// With no usable vector index the search is brute force, which is what
+// BigQuery does: "If you don't have a vector index, BigQuery uses brute
+// force, which returns exact results"; with one it probes the index's
+// lists (vectorindex.go, #1952), as options' use_brute_force and
+// fraction_lists_to_search say. lexical_search_columns and
+// lexical_search_query_value make it a hybrid search (hybridsearch.go).
 //
-// 501, named: lexical_search_columns and lexical_search_query_value
-// (hybrid search needs a search index, which is not made) and an ObjectRef
-// column or query value (#1798). UNVERIFIED (re-read 2026-11-18; the page quotes no error
+// 501, named: an ObjectRef column or query value (#1798). UNVERIFIED (re-read 2026-11-18; the page quotes no error
 // text): the refusals' words; DOT_PRODUCT's distance as the negative dot
 // product; a base row with an empty (or NULL) array being skipped; a
 // query row whose array's length differs from a base row's failing the
@@ -231,7 +230,7 @@ func findVectorSearch(text string) ([]vectorSearchCall, int, string) {
 }
 
 // rewriteVectorSearch evaluates text's VECTOR_SEARCH calls into subqueries.
-func (f front) rewriteVectorSearch(r *http.Request, q queryOptions, text string) (string, int, string) {
+func (f front) rewriteVectorSearch(r *http.Request, q queryOptions, text string, stats *[]map[string]any) (string, int, string) {
 	calls, code, msg := findVectorSearch(text)
 	if code != 0 || len(calls) == 0 {
 		return text, code, msg
@@ -239,7 +238,7 @@ func (f front) rewriteVectorSearch(r *http.Request, q queryOptions, text string)
 	var b strings.Builder
 	last := 0
 	for _, c := range calls {
-		sub, code, msg := f.vectorSearchSubquery(r, q, c)
+		sub, code, msg := f.vectorSearchSubquery(r, q, c, stats)
 		if code != 0 {
 			return "", code, msg
 		}
@@ -291,12 +290,11 @@ func isFloatArray(ty string) bool {
 	return t == "ARRAY<FLOAT64>" || t == "ARRAY<FLOAT>"
 }
 
-// vectorSearchSubquery is c's rows as a subquery.
-func (f front) vectorSearchSubquery(r *http.Request, q queryOptions, c vectorSearchCall) (string, int, string) {
-	if _, ok := c.named["lexical_search_columns"]; ok {
-		return "", 501, "Not implemented here: VECTOR_SEARCH with lexical_search_columns: hybrid search needs a search index, which CloudBurrow does not make. Nothing was run."
-	}
-	if _, ok := c.named["lexical_search_query_value"]; ok {
+// vectorSearchSubquery is c's rows as a subquery; stats gets how it used
+// the table's vector index (vectorindex.go).
+func (f front) vectorSearchSubquery(r *http.Request, q queryOptions, c vectorSearchCall, stats *[]map[string]any) (string, int, string) {
+	lexCols, hybrid := c.named["lexical_search_columns"]
+	if _, ok := c.named["lexical_search_query_value"]; ok && !hybrid {
 		return "", 400, "lexical_search_query_value of VECTOR_SEARCH is only valid with lexical_search_columns"
 	}
 	project, dataset, table, ok := f.resolveModel(c.table, q)
@@ -311,7 +309,7 @@ func (f front) vectorSearchSubquery(r *http.Request, q queryOptions, c vectorSea
 		return "", 400, "The base table of VECTOR_SEARCH can't be a view: " + dataset + "." + table
 	}
 	// The column to search: ARRAY<FLOAT64>, or STRING with generation.
-	var baseVec string
+	var baseVec, indexColumn string
 	var embed func(string) ([]float64, int, string)
 	colType := ""
 	for _, fl := range fields {
@@ -324,13 +322,13 @@ func (f front) vectorSearchSubquery(r *http.Request, q queryOptions, c vectorSea
 	case colType == "":
 		return "", 400, "Column " + c.column + " not found in " + dataset + "." + table
 	case isFloatArray(colType):
-		baseVec = sqlIdent(c.column)
+		baseVec, indexColumn = sqlIdent(c.column), c.column
 	case strings.EqualFold(colType, "STRING"):
 		e := f.tables.get(streamKey(project, dataset, table), str(meta, "creationTime")).Embedding
 		if e == nil || !strings.EqualFold(e.Source, c.column) {
 			return "", 400, "The STRING column_to_search " + c.column + " of VECTOR_SEARCH must have autonomous embedding generation enabled on " + dataset + "." + table
 		}
-		baseVec = sqlIdent(e.Column) + ".result"
+		baseVec, indexColumn = sqlIdent(e.Column)+".result", e.Column
 		var code int
 		var msg string
 		if embed, code, msg = f.searchEmbedder(r, project, e, "VECTOR_SEARCH"); code != 0 {
@@ -350,7 +348,8 @@ func (f front) vectorSearchSubquery(r *http.Request, q queryOptions, c vectorSea
 		topK = n
 	}
 	distance := "EUCLIDEAN"
-	if v, ok := c.named["distance_type"]; ok {
+	v, distanceGiven := c.named["distance_type"]
+	if distanceGiven {
 		s, ok := unquoteString(v)
 		distance = strings.ToUpper(s)
 		if !ok || distance != "EUCLIDEAN" && distance != "COSINE" && distance != "DOT_PRODUCT" {
@@ -362,10 +361,35 @@ func (f front) vectorSearchSubquery(r *http.Request, q queryOptions, c vectorSea
 			return "", 400, msg
 		}
 	}
-	// The base rows, with the embedding beside them.
+	var lexical *lexicalSearch
+	if hybrid {
+		if _, single := c.named["query_value"]; !single {
+			return "", 400, "lexical_search_columns of VECTOR_SEARCH can be used only with query_value: hybrid search doesn't support batch queries"
+		}
+		lv, ok := c.named["lexical_search_query_value"]
+		if !ok {
+			return "", 400, "lexical_search_query_value of VECTOR_SEARCH must be given with lexical_search_columns"
+		}
+		var code int
+		var msg string
+		if lexical, code, msg = parseLexicalSearch(q, fields, lexCols, lv, "VECTOR_SEARCH"); code != 0 {
+			return "", code, msg
+		}
+	}
+	use, code, msg := f.searchIndex(r, project, dataset, table, fields, meta, indexColumn, c.named["options"])
+	if code != 0 {
+		return "", code, msg
+	}
+	*stats = append(*stats, use.stats())
+	if use.index != nil && !distanceGiven {
+		distance = use.index.Distance
+	}
+	// The base rows, with the embedding beside them; with an index, a
+	// WHERE on columns it does not store is a post-filter (_cb_vs_keep).
 	ref := quotePath([]string{project, dataset, table})
 	baseSQL := "SELECT *, " + baseVec + " AS _cb_vs_vec FROM " + ref
 	var names []string
+	post := false
 	if c.query == "" {
 		for _, fl := range fields {
 			names = append(names, str(fl, "name"))
@@ -379,10 +403,28 @@ func (f front) vectorSearchSubquery(r *http.Request, q queryOptions, c vectorSea
 			names = append(names, col.Name)
 		}
 		baseSQL = c.query[:c.fromAt] + ", " + baseVec + " AS _cb_vs_vec " + c.query[c.fromAt:]
+		if wcols, where, ok := whereColumns(c.query, fields); ok && where > 0 && use.index != nil && !use.index.preFilter(wcols) {
+			post = true
+			baseSQL = c.query[:c.fromAt] + ", " + baseVec + " AS _cb_vs_vec, IFNULL((" + c.query[where+len("WHERE"):] + "), FALSE) AS _cb_vs_keep " +
+				c.query[c.fromAt:where]
+		}
+	}
+	if use.index != nil {
+		listed := names
+		if post {
+			listed = append(append([]string(nil), names...), "_cb_vs_keep")
+		}
+		baseSQL = use.listedBase(baseSQL, listed)
 	}
 	var baseCols []string
 	for _, n := range names {
 		baseCols = append(baseCols, "b."+sqlIdent(n)+" AS "+sqlIdent(n))
+	}
+	bvec := "b._cb_vs_vec"
+	scored := func(qv string) string { return qv }
+	if use.index != nil && use.index.Norm == "L2" {
+		bvec = normalizedSQL(bvec)
+		scored = normalizedSQL
 	}
 	present := "b._cb_vs_vec IS NOT NULL AND ARRAY_LENGTH(b._cb_vs_vec) > 0"
 	mismatch := "ERROR('VECTOR_SEARCH: the query and base embeddings have different dimensions')"
@@ -421,11 +463,32 @@ func (f front) vectorSearchSubquery(r *http.Request, q queryOptions, c vectorSea
 		if strings.HasPrefix(v, "@") && str != nil {
 			paramRef = " AND (" + v + " IS NULL OR TRUE)" // the engine takes only the parameters a query names
 		}
-		dist := "IF(ARRAY_LENGTH(b._cb_vs_vec) != ARRAY_LENGTH(" + qv + "), " + mismatch + ", " + searchDistance(distance, "b._cb_vs_vec", qv) + ")"
-		sub := "(SELECT base, distance FROM (SELECT STRUCT(" + strings.Join(baseCols, ", ") + ") AS base, " + dist + " AS distance FROM (" + baseSQL + ") AS b " +
-			"WHERE " + present + paramRef + ") ORDER BY distance"
+		dist := "IF(ARRAY_LENGTH(b._cb_vs_vec) != ARRAY_LENGTH(" + qv + "), " + mismatch + ", " + searchDistance(distance, bvec, scored(qv)) + ")"
+		from := "(" + baseSQL + ") AS b"
+		cand := ""
+		if use.index != nil {
+			from += " CROSS JOIN (SELECT " + use.probeSQL(qv) + " AS _cb_vs_probe) AS _cb_p"
+			cand = "(b._cb_vs_list IS NULL OR b._cb_vs_list IN UNNEST(_cb_p._cb_vs_probe))"
+		}
+		keep := ""
+		if post {
+			keep = ", b._cb_vs_keep AS _cb_vs_keep"
+		}
+		if lexical != nil {
+			return lexical.hybridSQL(from, present+paramRef, cand, dist, baseCols, keep, "", post, topK), 0, ""
+		}
+		where := present + paramRef
+		if cand != "" {
+			where += " AND " + cand
+		}
+		sub := "(SELECT base, distance FROM (SELECT STRUCT(" + strings.Join(baseCols, ", ") + ") AS base, " + dist + " AS distance" + keep + " FROM " + from + " " +
+			"WHERE " + where + " ORDER BY distance"
 		if topK >= 0 {
 			sub += " LIMIT " + strconv.FormatInt(topK, 10)
+		}
+		sub += ")"
+		if post {
+			sub += " WHERE _cb_vs_keep"
 		}
 		return sub + ")", 0, ""
 	}
@@ -503,14 +566,35 @@ func (f front) vectorSearchSubquery(r *http.Request, q queryOptions, c vectorSea
 	for _, col := range qcols {
 		queryCols = append(queryCols, "q."+sqlIdent(col.Name)+" AS "+sqlIdent(col.Name))
 	}
-	dist := "IF(ARRAY_LENGTH(b._cb_vs_vec) != ARRAY_LENGTH(q._cb_vs_qvec), " + mismatch + ", " + searchDistance(distance, "b._cb_vs_vec", "q._cb_vs_qvec") + ")"
+	qrows := "SELECT q0.*, " + qvec + " AS _cb_vs_qvec, ROW_NUMBER() OVER () AS _cb_vs_qid FROM (" + qsql + ") AS q0"
+	cand := ""
+	if use.index != nil {
+		probes, code, msg := f.batchProbes(r, probeOptions(q, qsql), "SELECT "+qvec+" AS v FROM ("+qsql+") AS q0", use)
+		if code != 0 {
+			return "", code, msg
+		}
+		qrows = "SELECT q1.*, " + probes + " AS _cb_vs_probe FROM (" + qrows + ") AS q1"
+		cand = " AND (b._cb_vs_list IS NULL OR b._cb_vs_list IN UNNEST(q._cb_vs_probe))"
+	}
+	dist := "IF(ARRAY_LENGTH(b._cb_vs_vec) != ARRAY_LENGTH(q._cb_vs_qvec), " + mismatch + ", " + searchDistance(distance, bvec, scored("q._cb_vs_qvec")) + ")"
+	keep := ""
+	if post {
+		keep = ", b._cb_vs_keep AS _cb_vs_keep"
+	}
 	inner := "SELECT STRUCT(" + strings.Join(queryCols, ", ") + ") AS query, STRUCT(" + strings.Join(baseCols, ", ") + ") AS base, " + dist + " AS distance, " +
-		"ROW_NUMBER() OVER (PARTITION BY q._cb_vs_qid ORDER BY " + dist + ") AS _cb_vs_rank " +
-		"FROM (SELECT q0.*, " + qvec + " AS _cb_vs_qvec, ROW_NUMBER() OVER () AS _cb_vs_qid FROM (" + qsql + ") AS q0) AS q " +
-		"CROSS JOIN (" + baseSQL + ") AS b WHERE " + present
+		"ROW_NUMBER() OVER (PARTITION BY q._cb_vs_qid ORDER BY " + dist + ") AS _cb_vs_rank" + keep + " " +
+		"FROM (" + qrows + ") AS q " +
+		"CROSS JOIN (" + baseSQL + ") AS b WHERE " + present + cand
 	sub := "(SELECT query, base, distance FROM (" + inner + ")"
+	var conds []string
 	if topK >= 0 {
-		sub += " WHERE _cb_vs_rank <= " + strconv.FormatInt(topK, 10)
+		conds = append(conds, "_cb_vs_rank <= "+strconv.FormatInt(topK, 10))
+	}
+	if post {
+		conds = append(conds, "_cb_vs_keep")
+	}
+	if len(conds) > 0 {
+		sub += " WHERE " + strings.Join(conds, " AND ")
 	}
 	return sub + ")", 0, ""
 }
@@ -525,12 +609,9 @@ func probeOptions(q queryOptions, sql string) queryOptions {
 }
 
 // vectorIndexStatement is the 501 of a CREATE, ALTER or DROP VECTOR INDEX
-// statement in text, or "". BigQuery trains an IVF or TreeAH index in the
-// background and answers an indexed VECTOR_SEARCH approximately, with
-// INFORMATION_SCHEMA.VECTOR_INDEXES' coverage_percentage and index_status
-// following that training; CloudBurrow trains no index, and an index whose
-// searches stay exact would report a coverage and status, and give
-// results, that BigQuery's would not.
+// statement in a script (text), or "": the front carries out one that is
+// a query of its own (vectorindex.go, #1952), and a script's would reach
+// the engine, which has none.
 func vectorIndexStatement(text string) string {
 	u := strings.ToUpper(text)
 	if !strings.Contains(u, "VECTOR") || !strings.Contains(u, "INDEX") {
@@ -549,9 +630,7 @@ func vectorIndexStatement(text string) string {
 			j += 2
 		}
 		if j+1 < len(toks) && toks[j].is("VECTOR") && toks[j+1].is("INDEX") {
-			return "Not implemented here: " + strings.ToUpper(toks[i].text) + " VECTOR INDEX: BigQuery trains an IVF or TreeAH index in the background and answers " +
-				"VECTOR_SEARCH from it approximately, with INFORMATION_SCHEMA.VECTOR_INDEXES' coverage and status following that training; CloudBurrow trains no " +
-				"vector index, so VECTOR_SEARCH and AI.SEARCH run brute force (exact), as BigQuery does with no index. Nothing was run."
+			return "Not implemented here: " + strings.ToUpper(toks[i].text) + " VECTOR INDEX in a multi-statement query; run it as a query of its own. Nothing was run."
 		}
 	}
 	return ""

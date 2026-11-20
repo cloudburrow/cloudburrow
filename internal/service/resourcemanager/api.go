@@ -31,6 +31,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/grpchttp"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/paging"
+	"github.com/cloudburrow/cloudburrow/internal/sysparams"
 	grpcx "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
 	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
 )
@@ -730,7 +731,7 @@ func (s *Server) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("bind Resource Manager address %s: %w", s.addr, err)
 	}
-	guarded := hostguard.Wrap(both)
+	guarded := hostguard.Wrap(sysparams.Wrap(both, sysparams.Options{})) // #1954
 	unguarded := s.unguarded
 	top := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		for _, e := range unguarded {

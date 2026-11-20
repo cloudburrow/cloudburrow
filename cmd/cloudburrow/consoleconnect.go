@@ -74,6 +74,12 @@ func (c consoleConnect) Connect(context.Context) (console.Connect, error) {
 		if err := writeEnvFormat(&b, f, exported, shown); err != nil {
 			return console.Connect{}, err
 		}
+		// The page stays lean: it names the gcloud refusals `env` adds to
+		// these formats rather than listing them (#1977).
+		if f == "shell" {
+			fmt.Fprintf(&b, "# `cloudburrow env` also exports %d CLOUDSDK_API_ENDPOINT_OVERRIDES_* refusals, one per gcloud API "+
+				"this instance does not serve, so gcloud never calls Google for one.\n", len(gcloudRefusalVars(exported, shown)))
+		}
 		out.Formats = append(out.Formats, console.EnvFormat{ID: f, Label: envFormatLabels[f], Text: b.String()})
 	}
 	// kubernetes is written from the in-cluster addresses, as `env --format

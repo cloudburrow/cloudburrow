@@ -482,9 +482,15 @@ func (b instanceBody) unsupported() error {
 				}
 				if LogicalDecodingFlags[f.Name] {
 					// An external primary's prerequisites (#1524).
+				} else if isIAMFlag(f.Name) {
+					// IAM database authentication (#1944): Cloud SQL's own
+					// flag, kept in the settings, never passed to the server.
+					if v := strings.ToLower(f.Value); v != "on" && v != "off" {
+						return Errorf(http.StatusBadRequest, "Invalid request: Invalid flag value %q for flag %s: it must be on or off.", f.Value, f.Name)
+					}
 				} else if strings.HasPrefix(f.Name, "cloudsql.") || strings.HasPrefix(f.Name, "cloudsql_") {
 					return unimplemented("the database flag "+f.Name,
-						"it is a Cloud SQL flag, not the server's (IAM authentication and Cloud SQL's extensions are not served); only flags the server itself takes are passed to it")
+						"it is a Cloud SQL flag, not the server's (Cloud SQL's extensions are not served); only flags the server itself takes, and cloudsql.iam_authentication, are taken")
 				}
 				if strings.ContainsAny(f.Name, " =\n") || strings.ContainsAny(f.Value, "\n") {
 					return Errorf(http.StatusBadRequest, "Invalid request: database flag %q is not a flag name.", f.Name)
@@ -569,6 +575,18 @@ func decodeInstance(r *http.Request) (instanceBody, error) {
 		}
 	}
 	return b, nil
+}
+
+// serverFlags are the flags passed to the server: Cloud SQL's own
+// (IsCloudSQLOnlyFlag) are not, and changing one restarts nothing.
+func serverFlags(fs []Flag) []Flag {
+	var out []Flag
+	for _, f := range fs {
+		if !IsCloudSQLOnlyFlag(f.Name) {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 func flagsEqual(a, b []Flag) bool {
@@ -995,7 +1013,7 @@ func (s *Server) patchInstance(r *http.Request, base, project, name string, repl
 	// Stopping or starting the instance (#1875) shuts its server down, or
 	// starts it with its data.
 	activation := next.Stopped() != c.spec.Stopped()
-	restart := !flagsEqual(next.Flags, c.spec.Flags) || c.state == "FAILED" || haChange || activation
+	restart := !flagsEqual(serverFlags(next.Flags), serverFlags(c.spec.Flags)) || c.state == "FAILED" || haChange || activation
 	if restart && !next.Stopped() {
 		// A server whose key cannot be used is not started again (#1538).
 		if err := s.keyUsableWith(s.kms, next); err != nil {

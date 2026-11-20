@@ -15,6 +15,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/datastoreversions"
 )
 
 // The calls of a named database the front answers (databases.go, #1885):
@@ -27,12 +28,31 @@ func (d *Datastore) Lookup(ctx context.Context, req *pb.LookupRequest) (*pb.Look
 	if err != nil {
 		return nil, err
 	}
+	if d.versions != nil {
+		// A lookup at an earlier time is the log's (#1967).
+		t, ok, err := d.versions.ReadTime(req.GetReadOptions())
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			return d.versions.LookupAt(forward(ctx), c, req, t)
+		}
+	}
 	return c.Lookup(forward(ctx), req)
 }
 
 // BeginTransaction begins a transaction in a named database's emulator
 // project.
 func (d *Datastore) BeginTransaction(ctx context.Context, req *pb.BeginTransactionRequest) (*pb.BeginTransactionResponse, error) {
+	if d.versions != nil {
+		// A read-only transaction at an earlier time is the log's
+		// (#1967): the emulator never sees it.
+		if t, ok, err := d.versions.ReadTime(datastoreversions.ReadOptions(req)); err != nil {
+			return nil, err
+		} else if ok {
+			return &pb.BeginTransactionResponse{Transaction: d.versions.BeginReadOnly(req.GetProjectId(), req.GetDatabaseId(), t)}, nil
+		}
+	}
 	c, err := d.emulator()
 	if err != nil {
 		return nil, err
@@ -42,6 +62,12 @@ func (d *Datastore) BeginTransaction(ctx context.Context, req *pb.BeginTransacti
 
 // Commit commits in a named database's emulator project.
 func (d *Datastore) Commit(ctx context.Context, req *pb.CommitRequest) (*pb.CommitResponse, error) {
+	if d.versions != nil && datastoreversions.IsTransaction(req.GetTransaction()) {
+		if err := d.versions.EndTransaction(req.GetTransaction(), len(req.GetMutations())); err != nil {
+			return nil, err
+		}
+		return &pb.CommitResponse{}, nil
+	}
 	c, err := d.emulator()
 	if err != nil {
 		return nil, err
@@ -51,6 +77,9 @@ func (d *Datastore) Commit(ctx context.Context, req *pb.CommitRequest) (*pb.Comm
 
 // Rollback rolls back in a named database's emulator project.
 func (d *Datastore) Rollback(ctx context.Context, req *pb.RollbackRequest) (*pb.RollbackResponse, error) {
+	if d.versions != nil && datastoreversions.IsTransaction(req.GetTransaction()) {
+		return &pb.RollbackResponse{}, d.versions.EndTransaction(req.GetTransaction(), 0)
+	}
 	c, err := d.emulator()
 	if err != nil {
 		return nil, err

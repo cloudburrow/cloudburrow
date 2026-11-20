@@ -277,7 +277,7 @@ func TestFirestoreAdminCopiesADatastoreModeDatabase(t *testing.T) {
 	dsAddr := h.Endpoint(EnvDatastore)
 	sc := firestoreStorage(t, h)
 	c := firestoreAdmin(t, h)
-	ctx := h.Context()
+	ctx := minuteContext(t) // the clone waits for a whole minute after the source was created (#1967)
 	project := h.Project()
 	src, dst := uniqueDB("dssrc"), uniqueDB("dsdst")
 	srcDB, err := createDB(t, h, src, &adminpb.Database{LocationId: "nam5", Type: adminpb.Database_DATASTORE_MODE})
@@ -360,8 +360,10 @@ func TestFirestoreAdminCopiesADatastoreModeDatabase(t *testing.T) {
 	if _, err := rop.Wait(ctx); err != nil {
 		t.Fatal(err)
 	}
+	// A clone's snapshot_time is a whole minute no earlier than the
+	// source's earliest version time, its creation (#1967): the next one.
 	cop, err := c.CloneDatabase(ctx, &adminpb.CloneDatabaseRequest{Parent: "projects/" + project, DatabaseId: cloned,
-		PitrSnapshot: &adminpb.PitrSnapshot{Database: srcDB.GetName(), SnapshotTime: timestamppb.New(time.Now().UTC().Truncate(time.Minute))}})
+		PitrSnapshot: &adminpb.PitrSnapshot{Database: srcDB.GetName(), SnapshotTime: timestamppb.New(nextWholeMinute())}})
 	if err != nil {
 		t.Fatalf("CloneDatabase: %v", err)
 	}

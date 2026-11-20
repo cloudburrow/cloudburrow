@@ -228,6 +228,20 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 	if f.models == nil {
 		return false
 	}
+	// CREATE, ALTER and DROP VECTOR INDEX (vectorindex.go, #1952).
+	if st, code, msg, ok := parseVectorIndexStatement(q.Query); ok {
+		switch {
+		case code == 501:
+			writeError(w, code, "notImplemented", msg)
+		case code != 0:
+			f.failBeforeRun(w, r, q, insert, "_cloudburrow", code, rowError{Reason: "invalidQuery", Message: msg})
+		case dryRun(r, insert):
+			writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: a dry run of "+st.kind+" VECTOR INDEX. Nothing was run.")
+		default:
+			f.serveVectorIndexStatement(w, r, q, insert, st)
+		}
+		return true
+	}
 	// The ML functions of no model first (modelpreprocess.go).
 	text, code, msg := rewritePreprocess(q.Query, nil)
 	if code == 501 {
@@ -243,6 +257,17 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 			writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not make the vocabulary functions: "+msg)
 			return true
 		}
+	}
+	// The OBJ functions of ObjectRefs, first: the AI functions take their
+	// values (objfuncs.go, #1980).
+	if text, code, msg = f.rewriteObjFunctions(r, q, text); code != 0 {
+		reason := map[int]string{400: "invalidQuery", 403: "accessDenied", 404: "notFound", 500: "internalError", 501: "notImplemented"}[code]
+		if code == 501 || code == 500 {
+			writeError(w, code, reason, msg)
+			return true
+		}
+		f.failBeforeRun(w, r, q, insert, "_cloudburrow", code, rowError{Reason: reason, Message: msg})
+		return true
 	}
 	// The image functions, evaluated here (mlimagesql.go, #1798).
 	if text, code, msg = f.rewriteImageFunctions(r, q, text); code != 0 {
@@ -276,7 +301,8 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 		paramsChanged = true
 	}
 	// AI.SEARCH, over a table's generated embeddings (aisearch.go, #1778).
-	if text, code, msg = f.rewriteAISearch(r, q, text); code != 0 {
+	var searches []map[string]any // vectorSearchStatistics (vectorindex.go)
+	if text, code, msg = f.rewriteAISearch(r, q, text, &searches); code != 0 {
 		reason := map[int]string{400: "invalidQuery", 403: "accessDenied", 404: "notFound", 500: "internalError", 501: "notImplemented"}[code]
 		if code == 501 || code == 500 {
 			writeError(w, code, reason, msg)
@@ -285,12 +311,12 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 		f.failBeforeRun(w, r, q, insert, "_cloudburrow", code, rowError{Reason: reason, Message: msg})
 		return true
 	}
-	if msg := vectorIndexStatement(text); msg != "" { // vectorsearch.go, #1778
+	if msg := vectorIndexStatement(text); msg != "" { // in a script, vectorsearch.go
 		writeError(w, http.StatusNotImplemented, "notImplemented", msg)
 		return true
 	}
 	// VECTOR_SEARCH, brute force (vectorsearch.go, #1778).
-	if text, code, msg = f.rewriteVectorSearch(r, q, text); code != 0 {
+	if text, code, msg = f.rewriteVectorSearch(r, q, text, &searches); code != 0 {
 		reason := map[int]string{400: "invalidQuery", 403: "accessDenied", 404: "notFound", 500: "internalError", 501: "notImplemented"}[code]
 		if code == 501 || code == 500 {
 			writeError(w, code, reason, msg)
@@ -320,6 +346,7 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 		f.failBeforeRun(w, r, q, insert, "_cloudburrow", http.StatusBadRequest, rowError{Reason: "invalidQuery", Message: msg})
 		return true
 	}
+	client.vectorStats = mergeVectorStats(searches)
 	if len(calls) == 0 && text == q.Query {
 		return false
 	}

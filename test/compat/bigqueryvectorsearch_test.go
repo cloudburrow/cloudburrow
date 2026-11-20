@@ -24,8 +24,9 @@ import (
 //   - COSINE: cat lion (0.0061) and tiger (0.0194); dog dog and wolf (0);
 //   - the single form, query_value => [1.0, -1.0]: base and distance only;
 //   - query_column_to_search named, top_k => -1, options checked;
-//   - CREATE and DROP VECTOR INDEX are 501 (no index is trained), and
-//     INFORMATION_SCHEMA.VECTOR_INDEXES stays empty.
+//   - DROP VECTOR INDEX of a table with none is 404, and
+//     INFORMATION_SCHEMA.VECTOR_INDEXES is empty (vector indexes:
+//     bigqueryvectorindex_test.go).
 //
 // covers: bigquery.jobs.query
 func TestBigQueryVectorSearch(t *testing.T) {
@@ -119,9 +120,8 @@ func TestBigQueryVectorSearch(t *testing.T) {
 			"options => '{\"fraction_lists_to_search\": 1.5}')", d): "fraction_lists_to_search",
 		fmt.Sprintf("SELECT * FROM VECTOR_SEARCH(TABLE `%s.base_table`, 'my_embedding', query_value => [1.0, 2.0], distance_type => 'L1')", d): "distance_type",
 		fmt.Sprintf("SELECT * FROM VECTOR_SEARCH(TABLE `%s.base_table`, 'my_embedding', query_value => [1.0, -1.0], "+
-			"lexical_search_columns => ['description'], lexical_search_query_value => 'striped hunter')", d): "501",
-		fmt.Sprintf("CREATE VECTOR INDEX my_index ON `%s.base_table`(my_embedding) OPTIONS(index_type = 'IVF')", d): "501",
-		fmt.Sprintf("DROP VECTOR INDEX my_index ON `%s.base_table`", d):                                             "501",
+			"lexical_search_columns => ['description'])", d): "lexical_search_query_value",
+		fmt.Sprintf("DROP VECTOR INDEX my_index ON `%s.base_table`", d): "Not found",
 	} {
 		if err := run(sql); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: %v, want %q", sql, err, want)

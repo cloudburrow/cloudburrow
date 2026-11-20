@@ -34,7 +34,9 @@ type consoleCoverage struct {
 }
 
 var consoleCoverages = map[config.Service]consoleCoverage{
-	config.ServiceStorage:       {Providers: []string{"storage", "storage-deleted", "storage-settings", "storage-intelligence"}},
+	config.ServiceStorage: {Providers: []string{"storage", "storage-deleted", "storage-settings", "storage-intelligence",
+		"storage-batch-operations", "storage-inventory-reports", "storage-insights-datasets", "storage-transfer",
+		"storage-transfer-agent-pools"}},
 	config.ServicePubSub:        {Providers: []string{"pubsub", "pubsub-subscriptions", "pubsub-snapshots", "pubsub-schemas"}},
 	config.ServiceTasks:         {Providers: []string{"tasks"}},
 	config.ServiceRun:           {Providers: []string{"run", "run-jobs", "run-worker-pools", "run-domains", "run-instances", "run-builds", "cloud-build-triggers", "cloud-build-worker-pools", "cloud-build-dashboard", "cloud-build-repositories", "cloud-build-settings", "secure-source-manager", "artifact-registry", "artifact-registry-settings", "functions", "eventarc", "vertex-models", "vertex-endpoints"}},
@@ -44,7 +46,7 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 	config.ServiceBigtable:      {Providers: []string{"bigtable", "bigtable-instances"}},
 	config.ServiceSpanner:       {Providers: []string{"spanner"}},
 	config.ServiceCloudSQL:      {Providers: []string{"cloudsql", "cloudsql-instances", "cloudsql-backups"}},
-	config.ServiceBigQuery:      {Providers: []string{"bigquery", "bigquery-jobs"}},
+	config.ServiceBigQuery:      {Providers: []string{"bigquery", "bigquery-jobs", "bigquery-transfers", "bigquery-scheduled-queries"}},
 	config.ServiceScheduler:     {Providers: []string{"scheduler"}},
 	config.ServiceKMS:           {Providers: []string{"kms", "kms-ekm", "kms-autokey", "kms-inventory", "kms-hsm"}},
 	config.ServiceLogging:       {Providers: []string{"logging-metrics", "logging-sinks", "logging-exclusions", "logging-buckets", "logging-settings", "logging-saved-queries", "logging-log-scopes", "logging-analytics"}, Screen: "/logs"},
@@ -60,7 +62,8 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 	config.ServiceMonitoring: {Providers: []string{"monitoring-explorer", "monitoring-metrics", "monitoring-alerting", "monitoring-incidents",
 		"monitoring-channels", "monitoring-uptime", "monitoring-dashboards", "monitoring-groups", "monitoring-services", "monitoring-snoozes"}},
 	// VPC network (#1936): the Compute Engine API's networking.
-	config.ServiceCompute: {Providers: []string{"vpc-networks", "vpc-firewalls", "vpc-routes", "vpc-addresses"}},
+	config.ServiceCompute: {Providers: []string{"vpc-networks", "vpc-firewalls", "vpc-routes", "vpc-addresses",
+		"compute-instances", "compute-disks", "compute-snapshots", "compute-images", "compute-machinetypes", "compute-metadata"}},
 }
 
 // clusterScreens are the registry's screens that belong to no selectable
@@ -150,20 +153,24 @@ func coverageDeps(t *testing.T) consoleDeps {
 		Name: "coverage", Project: "coverage", BindAddress: "127.0.0.1",
 		StateDir: t.TempDir(), Mode: config.ModeEphemeral,
 		Services: config.KnownServices(),
+		// The Cloud Storage companion APIs' screens (#1957) are built for
+		// their bound ports.
+		Endpoints: config.Endpoints{StorageBatchOperations: 1, StorageInsights: 1, StorageTransfer: 1},
 	}
 	projects := resourcemanager.New(store.NewMemory())
 	d := consoleDeps{
-		cfg:        cfg,
-		projects:   projects,
-		tasks:      &tasksService{},
-		secrets:    &secretsService{},
-		kms:        &kmsService{},
-		privateCA:  &privateCAService{},
-		workflows:  &workflowsService{},
-		monitoring: &monitoringService{},
-		compute:    &computeService{},
-		scheduler:  &schedulerService{},
-		logging:    &loggingService{},
+		cfg:          cfg,
+		projects:     projects,
+		tasks:        &tasksService{},
+		secrets:      &secretsService{},
+		kms:          &kmsService{},
+		privateCA:    &privateCAService{},
+		monitoring:   &monitoringService{},
+		compute:      &computeService{},
+		dataTransfer: &dataTransferSvc{},
+		scheduler:    &schedulerService{},
+		logging:      &loggingService{},
+		workflows:    &workflowsService{},
 		// The APIs & Services page (#1352) reads the Service Usage server.
 		serviceUsage: newServiceUsageServer(cfg, projects, store.NewMemory()),
 		// The Backup and DR page (#1433) reads the Backup and DR server.

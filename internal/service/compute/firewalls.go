@@ -16,7 +16,7 @@ import (
 // (tcp, udp, icmp, esp, ah, sctp, ipip, all, or a number 0 to 255) with
 // ports only for tcp, udp and sctp. An ingress rule with no source
 // applies to 0.0.0.0/0; an egress rule with no destination to 0.0.0.0/0.
-// Recorded, not enforced: no traffic crosses these networks.
+// Enforced between VM instances by each guest's nftables (vpc.go, #1968).
 
 var (
 	protocols = map[string]bool{"tcp": true, "udp": true, "icmp": true, "esp": true, "ah": true, "sctp": true, "ipip": true, "all": true}

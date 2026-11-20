@@ -51,7 +51,7 @@ func migrationKey() *pb.Key {
 // rawClient is the emulator's client with no rewriting: the move reads and
 // writes the emulator's own projects.
 func (d *datastoreDatabases) rawClient() (pb.DatastoreClient, error) {
-	if _, err := d.client(); err != nil {
+	if _, err := d.unversionedClient(); err != nil {
 		return nil, err
 	}
 	return pb.NewDatastoreClient(d.conn), nil

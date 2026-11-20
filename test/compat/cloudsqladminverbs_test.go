@@ -211,9 +211,12 @@ func TestCloudSQLDataAPIAndFinalBackup(t *testing.T) {
 	}
 	if _, err := svc.Instances.ExecuteSql(project, name, &sqladmin.ExecuteSqlPayload{Database: "postgres", AutoIamAuthn: true,
 		SqlStatement: "SELECT 1"}).Do(); err == nil {
-		t.Error("executeSql served IAM database authentication")
+		t.Error("executeSql served autoIamAuthn to a caller with no access token")
 	} else {
-		wantCode(t, "executeSql with autoIamAuthn", err, 501, "ADR-0004")
+		// IAM database authentication is served since #1944
+		// (TestCloudSQLIAMDatabaseAuthentication): a caller with no token
+		// this instance minted is 401.
+		wantCode(t, "executeSql with autoIamAuthn and no access token", err, 401, "access token")
 	}
 	if _, err := svc.Instances.ExecuteSql(project, "postgres", &sqladmin.ExecuteSqlPayload{User: "cloudburrow", Database: "cloudburrow",
 		PasswordSecretVersion: ver.Name, SqlStatement: "SELECT 1"}).Do(); err == nil {

@@ -66,6 +66,16 @@ var DeleteConfirmRules = map[string]DeleteConfirmRule{
 	"iam-labels": {Style: DeleteConfirmClick, Source: "https://docs.cloud.google.com/resource-manager/docs/creating-managing-labels", Verified: true},
 	// "confirm you want to delete the bucket and its contents. Click Delete."
 	"storage": {Style: DeleteConfirmClick, Source: "https://docs.cloud.google.com/storage/docs/deleting-buckets", Verified: true},
+	// UNVERIFIED: no console steps for deleting a batch operations job (docs re-read 2026-11-19)
+	"storage-batch-operations": unverified,
+	// UNVERIFIED: "On the Report configuration details page, click Delete." No dialog described (docs re-read 2026-11-19).
+	"storage-inventory-reports": unverified,
+	// UNVERIFIED: "Select the dataset configuration ... click Delete." No dialog described (docs re-read 2026-11-19).
+	"storage-insights-datasets": unverified,
+	// UNVERIFIED: no console steps for deleting a transfer job read (docs re-read 2026-11-19)
+	"storage-transfer": unverified,
+	// UNVERIFIED: no console steps for deleting an agent pool read (docs re-read 2026-11-19)
+	"storage-transfer-agent-pools": unverified,
 	// "Enter delete and then click Delete."
 	"pubsub": {Style: DeleteConfirmWord, Source: "https://docs.cloud.google.com/pubsub/docs/delete-topic", Verified: true},
 	// UNVERIFIED: "Select the subscription to delete. Click Delete." No dialog described (docs re-read 2026-11-19).
@@ -137,7 +147,11 @@ var DeleteConfirmRules = map[string]DeleteConfirmRule{
 	// "In the dialog, enter the instance ID, and then click Delete."
 	"memorystore-valkey": {Style: DeleteConfirmName, Source: "https://docs.cloud.google.com/memorystore/docs/valkey/delete-instances", Verified: true},
 	// "In the Delete dataset dialog, type delete into the field, and then click Delete."
-	"bigquery": {Style: DeleteConfirmWord, Source: "https://docs.cloud.google.com/bigquery/docs/managing-datasets", Verified: true},
+	// UNVERIFIED: the scheduling-queries and transfer pages say only "click Delete"; no dialog described (docs re-read 2026-11-19).
+	"bigquery-transfers": unverified,
+	// UNVERIFIED: as bigquery-transfers (docs re-read 2026-11-19).
+	"bigquery-scheduled-queries": unverified,
+	"bigquery":                   {Style: DeleteConfirmWord, Source: "https://docs.cloud.google.com/bigquery/docs/managing-datasets", Verified: true},
 	// UNVERIFIED: no console delete for a job's history (docs re-read 2026-11-19)
 	"bigquery-jobs": unverified,
 	// UNVERIFIED: "Next to your processor, in the Action menu, click Delete
@@ -186,6 +200,11 @@ var DeleteConfirmRules = map[string]DeleteConfirmRule{
 	"vpc-firewalls": {Style: DeleteConfirmClick, Source: "https://docs.cloud.google.com/firewall/docs/using-firewalls", Verified: true},
 	// "Click Delete again to confirm."
 	"vpc-routes": {Style: DeleteConfirmClick, Source: "https://docs.cloud.google.com/vpc/docs/using-routes", Verified: true},
+	// Compute Engine snapshots (#1965). UNVERIFIED: "Select one or more
+	// snapshots that you want to delete. At the top of the Snapshots page,
+	// click Delete." No dialog described (docs re-read 2026-11-20:
+	// https://docs.cloud.google.com/compute/docs/disks/manage-snapshots).
+	"compute-snapshots": unverified,
 }
 
 // deleteConfirmOf is p's confirmation style, empty for the default.

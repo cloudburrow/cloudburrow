@@ -18,6 +18,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/gke"
 	"github.com/cloudburrow/cloudburrow/internal/service/redisadmin"
 	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
+	"github.com/cloudburrow/cloudburrow/internal/sysparams"
 	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
 )
 
@@ -108,7 +109,7 @@ func (s *computeService) Start(ctx context.Context) error {
 	if s.requests != nil {
 		h = rest.Observe(h, s.requests)
 	}
-	s.srv = &http.Server{Handler: hostguard.Wrap(h), ReadHeaderTimeout: 10 * time.Second}
+	s.srv = &http.Server{Handler: hostguard.Wrap(sysparams.Wrap(h, sysparams.Options{V1Errors: true})), ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = s.srv.Serve(ln) }()
 	return nil
 }

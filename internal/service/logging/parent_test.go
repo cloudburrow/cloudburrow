@@ -147,8 +147,8 @@ func TestFolderAndOrganizationParents(t *testing.T) {
 			_, err := cs.ListSinks(ctx, &loggingpb.ListSinksRequest{Parent: "billingAccounts/nope"})
 			return err
 		}(), codes.InvalidArgument},
-		{"updating a folder's settings", func() error {
-			_, err := cs.UpdateSettings(ctx, &loggingpb.UpdateSettingsRequest{Name: "folders/10/settings",
+		{"updating a billing account's settings", func() error {
+			_, err := cs.UpdateSettings(ctx, &loggingpb.UpdateSettingsRequest{Name: "billingAccounts/0A0B0C-0D0E0F-010203/settings",
 				Settings: &loggingpb.Settings{StorageLocation: "us-central1"}, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"storage_location"}}})
 			return err
 		}(), codes.FailedPrecondition},

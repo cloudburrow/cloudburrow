@@ -44,6 +44,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"github.com/cloudburrow/cloudburrow/internal/store"
+	"github.com/cloudburrow/cloudburrow/internal/sysparams"
 )
 
 // Projects resolves the project a request names, by ID or by number.
@@ -221,7 +222,7 @@ func (s *Server) Start(context.Context) error {
 		return fmt.Errorf("apikeys: listen on %s: %w", s.addr, err)
 	}
 	s.ln = ln
-	s.srv = &http.Server{Handler: hostguard.Wrap(s), ReadHeaderTimeout: 10 * time.Second}
+	s.srv = &http.Server{Handler: hostguard.Wrap(sysparams.Wrap(s, sysparams.Options{})), ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = s.srv.Serve(ln) }()
 	return nil
 }

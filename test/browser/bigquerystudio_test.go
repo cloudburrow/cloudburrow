@@ -207,12 +207,12 @@ func TestBigQueryStudioExplorerEditorAndHistory(t *testing.T) {
 		document.querySelector(".bq-editor").value.includes("ORDER BY id")`)
 
 	// A page CloudBurrow does not serve, in Google's place.
-	p.navigate("/bigquery-scheduled-queries" + q)
+	p.navigate("/bigquery-sharing" + q)
 	p.waitFor(`document.querySelector("#view .state h2") !== null`)
 	var unavailable string
 	p.eval(`document.querySelector("#view .state").textContent`, &unavailable)
-	if !strings.Contains(unavailable, "Not available locally") || !strings.Contains(unavailable, "Data Transfer Service") {
-		t.Errorf("Scheduled queries says %q", unavailable)
+	if !strings.Contains(unavailable, "Not available locally") {
+		t.Errorf("Analytics Hub says %q", unavailable)
 	}
 
 	// The table's tabs, in Google's order.

@@ -36,6 +36,11 @@ func (s *Server) serveGuest(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	if path == vpcSuffix {
+		s.mu.Unlock()
+		s.serveVPC(w, r, inst)
+		return
+	}
 	project := strings.Split(str(inst, "selfLink"), "/")[1]
 	pmeta := map[string]string{}
 	if po, ok := s.res[projectRel(project)]; ok {

@@ -16,9 +16,11 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
 	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
+	"github.com/cloudburrow/cloudburrow/internal/service/storagejobs"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
+	"github.com/cloudburrow/cloudburrow/internal/unserved"
 	"github.com/cloudburrow/cloudburrow/internal/version"
 	"io"
 	"log/slog"
@@ -222,7 +224,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		comps.SetVertexAI(fmt.Sprintf("%s.%s.svc.cluster.local:%d", ClusterHostService, cfg.Cluster.Namespace,
 			cfg.Endpoints.LocalAI))
 	}
-	if firestoreKMS(cfg) || storageKMS(cfg) {
+	if firestoreKMS(cfg) || storageKMS(cfg) || spannerKMS(cfg) {
+		// Spanner's (#1950) encrypt through it too.
 		// Firestore's customer-managed keys (#1881) are checked against
 		// this process's Cloud KMS, and Cloud Storage's (#1938) encrypt
 		// through it, through cloudburrow-host: its port is fixed now,
@@ -354,6 +357,18 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	computeSvc.register(coord)
 	gkeSvc.register(coord)
+	// The BigQuery Data Transfer Service (#1948), in process; its runs
+	// execute on the instance's BigQuery and notify its Pub/Sub.
+	dataTransfer := newDataTransferService(cfg)
+	if dataTransfer != nil {
+		dataTransfer.bigquery = func() *netfwd.Forwarder { return forwarderFor(forwarders, "bigquery") }
+		dataTransfer.pubsub = func() *netfwd.Forwarder { return forwarderFor(forwarders, "pubsub") }
+		// bq's Data Transfer calls arrive at BigQuery's address.
+		if f := forwarderFor(forwarders, "bigquery"); f != nil {
+			f.Local = dataTransfer.bigQueryLocal
+		}
+	}
+	dataTransfer.register(coord)
 	// The Memorystore admin API (#1302), over the Valkey server's tunnel.
 	memorystoreAdminSvc := newMemorystoreAdminService(cfg, func() *netfwd.Forwarder { return forwarderFor(forwarders, "memorystore") })
 	if memorystoreAdminSvc != nil {
@@ -425,6 +440,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// reads it through this at reset time.
 	var registered func() []string = func() []string { return nil }
 	var projectRegistry *resourcemanager.Registry
+	if dataTransfer != nil {
+		dataTransfer.registry = func() *resourcemanager.Registry { return projectRegistry }
+	}
 	if memorystoreAdminSvc != nil {
 		memorystoreAdminSvc.registry = func() *resourcemanager.Registry { return projectRegistry }
 	}
@@ -450,6 +468,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	var serviceUsageRef *serviceusage.Server
 	// And the API Keys API (#1915).
 	var apiKeysRef *apikeys.Server
+	// And the Cloud Storage companion APIs (#1957).
+	var storageJobsRef *storageJobs
 	// And the Cloud SQL Admin API and Backup and DR (#1541, #1542).
 	var sqlAdminRef *sqladmin.Server
 	var backupDRRef *backupdr.Server
@@ -475,6 +495,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		gke:          gkeSvc,
 		monitoring:   monitoringSvc,
 		compute:      computeSvc,
+		dataTransfer: dataTransfer,
 		logging:      loggingSvc,
 		run:          runSvc,
 		memorystore:  memorystoreAdminSvc,
@@ -482,6 +503,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		registry:     func() *resourcemanager.Registry { return projectRegistry },
 		serviceUsage: func() *serviceusage.Server { return serviceUsageRef },
 		apiKeys:      func() *apikeys.Server { return apiKeysRef },
+		storageJobs:  func() *storageJobs { return storageJobsRef },
 		sqlAdmin:     func() *sqladmin.Server { return sqlAdminRef },
 		backupDR:     func() *backupdr.Server { return backupDRRef },
 		projectStore: func() store.Store {
@@ -555,6 +577,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		workflowsSvc.calls = callEvents(recorder, requestMetrics, "workflows")
 		workflowsSvc.interpose = append(workflowsSvc.interpose, grpctransport.LogInterceptor(logger, "workflows"), faults.Interceptor("workflows"))
 		workflowsSvc.requests = requestEvents(recorder, requestMetrics, "workflows")
+	}
+	if dataTransfer != nil {
+		dataTransfer.tracing = tracing
+		dataTransfer.calls = callEvents(recorder, requestMetrics, "datatransfer")
+		dataTransfer.interpose = append(dataTransfer.interpose, grpctransport.LogInterceptor(logger, "datatransfer"), faults.Interceptor("datatransfer"))
+		dataTransfer.requests = requestEvents(recorder, requestMetrics, "datatransfer")
 	}
 	if gkeSvc != nil {
 		gkeSvc.tracing = tracing
@@ -632,6 +660,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// interceptors pass every call through until --iam-enforcement=on.
 	iamEnforcer := newIAMEnforcer(cfg, creds, func() *resourcemanager.Registry { return projectRegistry })
 	useIAMEnforcement(iamEnforcer, secretsSvc, kmsSvc, tasksSvc)
+	// Log buckets' customer-managed keys (#1950).
+	if loggingSvc != nil {
+		keys := cmekKeys(kmsSvc, iamEnforcer)
+		loggingSvc.keys = &keys
+	}
 
 	// The runtime file straight after the control server, so it names an
 	// address already listening and `wait` can follow startup from the start.
@@ -679,8 +712,30 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	coord.RegisterConcurrent(tunnels...)
 	// Ready only once Knative is, before anything that could deploy to it.
 	coord.Register(comps.KnativeReady())
+	var storageRequests *storageRequestScraper
 	if f := forwarderFor(forwarders, "storage"); f != nil {
-		coord.Register(newStorageEventScraper(f, recorder, requestMetrics))
+		scraper := newStorageEventScraper(f, recorder, requestMetrics)
+		// Cloud Storage's audit log entries and request activity (#1979):
+		// the registry, Logging and the companions are read at each batch,
+		// as they are set up below.
+		scraper.requests = &storageRequestScraper{tunnel: f, audit: &storageAudit{
+			registry: func() *resourcemanager.Registry { return projectRegistry },
+			write: func(ctx context.Context, entries []*loggingpb.LogEntry) error {
+				if loggingSvc == nil {
+					return nil
+				}
+				_, err := loggingSvc.api.WriteLogEntries(ctx, &loggingpb.WriteLogEntriesRequest{Entries: entries})
+				return err
+			},
+			jobs: func() *storagejobs.Runtime {
+				if storageJobsRef == nil {
+					return nil
+				}
+				return storageJobsRef.rt
+			},
+		}}
+		storageRequests = scraper.requests
+		coord.Register(scraper)
 		coord.Register(newStorageChannelRelay(f, stdout))
 	}
 	for _, svc := range []config.Service{config.ServicePubSub, config.ServiceBigtable,
@@ -762,6 +817,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// Kourier's gateway asks before routing to a Cloud Run service
 	// (run.routes.invoke, runinvoke.go).
 	rmSrv.HandleUnguarded(isRunInvokeAuthz, runInvokeAuthz{e: iamEnforcer, creds: creds, run: runSvc})
+	// The local-only guard's refusal (#1975): every endpoint setting
+	// `cloudburrow terraform` and `gcloud-setup` write for an API this
+	// instance does not serve points here, and is refused with a message,
+	// whatever Host the tool derived (regional hosts among them).
+	rmSrv.HandleUnguarded(unserved.Match, unserved.Handler())
 	coord.Register(rmSrv)
 	// A build's serviceAccount names an IAM account of this registry (#1854).
 	runadapter.UseServiceAccounts(func(name string) (string, bool, bool) {
@@ -793,6 +853,20 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		coord.Register(apiKeysSrv)
 	}
 
+	// The Cloud Storage companion APIs (#1957): batch operations,
+	// inventory reports and transfers over the instance's buckets.
+	storageJobsSrv := newStorageJobs(cfg, func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") },
+		func() *netfwd.Forwarder { return forwarderFor(forwarders, "pubsub") },
+		func() *netfwd.Forwarder { return forwarderFor(forwarders, "bigquery") }, projects)
+	if storageJobsSrv != nil {
+		storageJobsRef = storageJobsSrv
+		// A snapshot counts the requests up to its time (#1979).
+		storageJobsSrv.rt.UseActivityFlush(storageRequests.Flush)
+		for _, s := range storageJobsSrv.servers() {
+			coord.Register(s)
+		}
+	}
+
 	// The Cloud SQL Admin API (#1301), over whichever database servers run.
 	sqlAdminSrv := newSQLAdminServer(cfg, forwarders, mysqlCreds, stderr)
 	if sqlAdminSrv != nil {
@@ -810,6 +884,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// with this instance's Cloud KMS, in process.
 		if kmsSvc != nil {
 			sqlAdminSrv.UseKMS(sqlAdminKMS{svc: kmsSvc})
+		}
+		// IAM database authentication (#1944) checks a token this instance
+		// minted, and the principal's cloudsql.instances.login.
+		if creds != nil {
+			sqlAdminSrv.UseIAM(sqlAdminIAM(creds, iamEnforcer))
 		}
 		// CUSTOMER_MANAGED_CAS_CA (#1834) has this instance's Certificate
 		// Authority Service issue the server certificates, in process.
@@ -877,6 +956,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if localAISrv != nil {
 		localAISrv.SetDocumentAIState(filepath.Join(cfg.StateDir, "documentai", "processors.json"))
 		localAISrv.SetSpeechState(filepath.Join(cfg.StateDir, "speech", "recognizers.json"))
+		// Their customer-managed keys (#1950), through Cloud KMS.
+		localAISrv.UseCMEK(cmekKeys(kmsSvc, iamEnforcer))
 	}
 	// The Model Registry and Endpoints (#1940): deployed models run as
 	// Cloud Run services; artifacts are copied in this Cloud Storage.
@@ -932,6 +1013,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		gke:            gkeSvc,
 		monitoring:     monitoringSvc,
 		compute:        computeSvc,
+		dataTransfer:   dataTransfer,
 	})
 	if consoleSrv != nil {
 		// The Request Log reads the same recorder /admin/events does.
@@ -1023,12 +1105,16 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if a := computeSvc.Addr(); a != "" {
 			live["compute"] = a
 		}
+		if a := dataTransfer.Addr(); a != "" {
+			live["datatransfer"] = a
+		}
 		if a := apiKeysSrv.Addr(); a != "" {
 			live["apikeys"] = a
 		}
 		if a := monitoringSvc.Addr(); a != "" {
 			live["monitoring"] = a
 		}
+		storageJobsSrv.live(live)
 		if backupDRSrv != nil && backupDRSrv.Addr() != "" {
 			live["backupdr"] = backupDRSrv.Addr()
 		}
@@ -1074,11 +1160,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// verify the URLs those accounts sign (#1787).
 	runEnabled := serviceEnabled(cfg, config.ServiceRun)
 	pubsubKMS := serviceEnabled(cfg, config.ServicePubSub) && serviceEnabled(cfg, config.ServiceKMS)
-	if runEnabled || serviceEnabled(cfg, config.ServiceBigQuery) || serviceEnabled(cfg, config.ServiceStorage) || pubsubKMS || firestoreKMS(cfg) || computeEnabled(cfg) {
+	if runEnabled || serviceEnabled(cfg, config.ServiceBigQuery) || serviceEnabled(cfg, config.ServiceStorage) || pubsubKMS || firestoreKMS(cfg) || spannerKMS(cfg) || computeEnabled(cfg) {
 		// The Cloud SQL Admin API and its connector are published for Cloud
 		// SQL volumes (#1346): the Auth Proxy a revision runs reaches both.
 		published := map[string]bool{"run": true, "tasks": true, "secretmanager": true, "kms": true,
 			"scheduler": true, "logging": true, "resourcemanager": true, "serviceusage": true, "apikeys": true, "metadata": true,
+			"storagebatchoperations": true, "storageinsights": true, "storagetransfer": true,
 			"sqladmin": true, "cloudsql-connector": true, "onnx": true, "tfconvert": true, "localai": true, "workflows": true}
 		if !runEnabled {
 			published = map[string]bool{"resourcemanager": true, "onnx": true, "tfconvert": true, "localai": true}
@@ -1095,8 +1182,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			if firestoreKMS(cfg) {
 				published["kms"] = true
 			}
-			// Cloud Storage encrypts with customer-managed keys (#1938).
-			if storageKMS(cfg) {
+			// Cloud Storage (#1938) and Spanner (#1950) encrypt with
+			// customer-managed keys.
+			if storageKMS(cfg) || spannerKMS(cfg) {
 				published["kms"] = true
 			}
 		}

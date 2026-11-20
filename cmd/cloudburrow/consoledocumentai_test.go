@@ -78,9 +78,28 @@ func TestConsoleDocumentAIProcessors(t *testing.T) {
 		t.Fatal(err)
 	}
 	page, _ := procs.Detail(ctx, "p1", []string{id})
-	if page.Unavailable != "" || len(page.Sections) != 2 || len(page.Sections[1].Listing.Items) != 3 ||
+	if page.Unavailable != "" || len(page.Sections) != 3 || len(page.Sections[1].Listing.Items) != 3 ||
 		page.Sections[1].Listing.Items[0].Name != "pretrained-ocr-v2.1-2024-08-07" || len(page.Sections[1].Listing.SelectActions) != 3 {
 		t.Errorf("the processor's page: %+v", page)
+	}
+	// Evaluate & test (#1953): the default version has no evaluations, and
+	// the tab says why.
+	if ev := page.Sections[2]; ev.ID != "evaluate" || ev.Unavailable != "" || len(ev.Listing.Items) != 0 || !strings.Contains(ev.Note, "cannot be evaluated") {
+		t.Errorf("Evaluate & test: %+v", ev)
+	}
+	// Batch process offers the versions and pages per shard (#1953).
+	var batch console.Action
+	for _, a := range procs.DetailActions(ctx, "p1", []string{id}) {
+		if a.ID == "batch-process" {
+			batch = a
+		}
+	}
+	if len(batch.Fields) != 4 || batch.Fields[2].Name != "version" || len(batch.Fields[2].Options) != 3 || batch.Fields[3].Name != "pagesPerShard" {
+		t.Errorf("Batch process's fields: %+v", batch.Fields)
+	}
+	if _, err := procs.ActAtResult(ctx, "p1", []string{id}, "batch-process", map[string]string{"input": "gs://b/in/", "output": "gs://b/out",
+		"pagesPerShard": "0"}); err == nil || !strings.Contains(err.Error(), "positive") {
+		t.Errorf("Batch process with 0 pages per shard: %v", err)
 	}
 	// Manage versions: the default changes; Google refuses to undeploy or
 	// delete a pretrained version.

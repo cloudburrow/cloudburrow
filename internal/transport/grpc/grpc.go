@@ -20,6 +20,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/grpchttp"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
+	"github.com/cloudburrow/cloudburrow/internal/sysparams"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 	"google.golang.org/grpc"
@@ -208,7 +209,9 @@ func (s *Server) Start(ctx context.Context) error {
 		})
 		// h2c: prior-knowledge HTTP/2 without TLS, which a gRPC client with
 		// insecure credentials speaks.
-		httpSrv = &http.Server{Handler: h2c.NewHandler(hostguard.Wrap(both), &http2.Server{}), ReadHeaderTimeout: 10 * time.Second}
+		// The system parameters (#1954) of a hand-written JSON route; a
+		// transcoded one applies them itself, and gRPC passes by.
+		httpSrv = &http.Server{Handler: h2c.NewHandler(hostguard.Wrap(sysparams.Wrap(both, sysparams.Options{})), &http2.Server{}), ReadHeaderTimeout: 10 * time.Second}
 	}
 
 	s.mu.Lock()

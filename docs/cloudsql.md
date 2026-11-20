@@ -105,7 +105,7 @@ svc, _ := sqladmin.NewService(ctx,
 _, err := svc.Databases.Insert(project, "postgres", &sqladmin.Database{Name: "orders"}).Do()
 ```
 
-What answers 501, saying why: IAM database authentication (no Cloud SQL sign-in here checks a Google identity, ADR-0004), `pointInTimeRestore` and `restoreBackup` with `backupdrBackup` unless the instance runs `--services backupdr` ([backupdr.md](backupdr.md), #1433), SQL Server
+What answers 501, saying why: IAM groups (`CLOUD_IAM_GROUP`; IAM users and service accounts are served, see [IAM database authentication](#iam-database-authentication-1944)), `pointInTimeRestore` and `restoreBackup` with `backupdrBackup` unless the instance runs `--services backupdr` ([backupdr.md](backupdr.md), #1433), SQL Server
 versions (their images are linux/amd64 only), `MYSQL_5_7` and `MYSQL_5_6` on a node that cannot run linux/amd64 images, and
 their replicas, high availability, point-in-time recovery and upgrades anywhere (see [Database versions](#database-versions-and-major-version-upgrades-1381)), BAK and TDE imports and exports (SQL Server's files),
 and promoting or switching over to a PostgreSQL read replica upgraded on its own before its primary is upgraded (#1524); read
@@ -1166,8 +1166,9 @@ psql "host=127.0.0.1 port=6432 user=cloudburrow dbname=cloudburrow sslmode=disab
 Keep the braces: in zsh, macOS's default shell, an unbraced variable followed by `:us-central1`
 takes `:u` as its (uppercase) modifier, so a project `demo-a` gives `DEMO-As-central1:postgres`,
 which the proxy refuses as a connection name. Any `--token` will do, as tokens are not checked; pass one,
-so the proxy does not go looking for Google credentials. Leave
-`--auto-iam-authn` off: it is IAM database authentication, which is 501 (below). The proxy then
+so the proxy does not go looking for Google credentials. `--auto-iam-authn` signs in as an IAM user, with a token CloudBurrow minted, by the path the Go
+connector's `WithIAMAuthN` takes (see [IAM database authentication](#iam-database-authentication-1944);
+the proxy itself has not been run with it). The proxy then
 calls `connectSettings` and `generateEphemeralCert` and dials the reported address at 3307. It
 has no flag for that port (its `--port` is the local listener's), so it reaches only the instance
 whose connector holds 3307. Against an instance started with `--cloudsql-connector` on another
@@ -1179,11 +1180,45 @@ port, use a connector with a dial option, as above.
 making it executable. Pinned for linux/amd64, linux/arm64 and darwin/arm64, it is the release the
 Cloud Run sidecar image is. `TestCloudSQLAuthProxyBinary` reads, through it, the rows a parallel
 import restored (pgx on PostgreSQL, go-sql-driver/mysql on MySQL) and those of a clone to binary
-log coordinates. CI's sql shard installs it and runs the test. IAM database authentication (`WithIAMAuthN`, an
-`access_token` in `generateEphemeralCert`, users of type `CLOUD_IAM_USER` and the like) is 501: it
-signs a database user in as a Google identity, and no Cloud SQL sign-in here checks one
-([ADR-0004](adr/0004-local-access-and-no-authentication.md)). Connecting to the server directly,
-as above, still works and needs none of this.
+log coordinates. CI's sql shard installs it and runs the test. Connecting to the server directly, as above, still
+works for built-in users and needs none of this.
+
+### IAM database authentication (#1944)
+
+As Google documents it for PostgreSQL and MySQL
+([iam-authentication](https://docs.cloud.google.com/sql/docs/postgres/iam-authentication),
+[add-manage-iam-users](https://docs.cloud.google.com/sql/docs/mysql/add-manage-iam-users),
+[iam-logins](https://docs.cloud.google.com/sql/docs/mysql/iam-logins)), and decided in
+[ADR-0004](adr/0004-local-access-and-no-authentication.md)'s amendment of 2026-11-19:
+
+- `users.insert` of type `CLOUD_IAM_USER` or `CLOUD_IAM_SERVICE_ACCOUNT`, with the principal's email
+  as `name`, creates a database user named as Google names it. PostgreSQL: the email in lower case,
+  a service account's without `.gserviceaccount.com` (`sa@project.iam`), a member of
+  `cloudsqliamuser` or `cloudsqliamserviceaccount`. MySQL: the part before the `@` (at most 32
+  characters), with the email answered as `iamEmail`. It has no privileges until you `GRANT` them.
+- The instance's flag must be on: `cloudsql.iam_authentication` (PostgreSQL) or
+  `cloudsql_iam_authentication` (MySQL), set on an instance created through the Admin API. It is kept
+  in the settings, never passed to the server, and changing it restarts nothing. The servers `up`
+  runs have no flags, so they take no IAM sign-in.
+- A sign-in needs an access token **this instance minted** (IAM Credentials `generateAccessToken`, the
+  metadata server, the ADC fixture's token endpoint), still live, for the user's own principal,
+  which holds `cloudsql.instances.login` on the instance (`roles/cloudsql.instanceUser`). The token
+  is checked by its SHA-256 against the instance's log of minted tokens, never with Google.
+- Through the connector listener: the Go connector's `WithIAMAuthN` and the Auth Proxy's
+  `--auto-iam-authn` send the token to `generateEphemeralCert`, whose certificate carries its hash
+  (a URI SAN, `urn:cloudburrow:cloudsql:iam-token-sha256:…`) and expires with it; or the client
+  sends the token as its password (PostgreSQL's cleartext password; MySQL's `mysql_clear_password`,
+  the `mysql` client's `--enable-cleartext-plugin`, go-sql-driver's `allowCleartextPasswords`). The
+  listener then signs in to the server as the user with a password of the user's own, derived from
+  a key kept owner-only in the state directory (`cloudsql-iam-role-key`). PostgreSQL's
+  `pg_hba.conf` requires that password of the two IAM groups ahead of its trust line, so the
+  server's own port refuses an IAM user whatever is sent.
+- `executeSql` with `autoIamAuthn` signs in as the caller's IAM user, the account of the request's
+  bearer token, checked the same way; `user` and `passwordSecretVersion` are then ignored.
+- A refused sign-in is the server's: PostgreSQL `FATAL 28000 Cloud SQL IAM service account
+  authentication failed for user "…"`, MySQL `ERROR 1045 Access denied for user …`, with the reason.
+
+Not served: `CLOUD_IAM_GROUP` (501), and a token sent as a password to the server's own port.
 
 ### Cloud Run's Cloud SQL volume (#1346)
 

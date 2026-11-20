@@ -33,12 +33,16 @@ func TestTerminalEnvIsGcloudSetupAtInClusterAddresses(t *testing.T) {
 		"memorystore-admin": "cloudburrow-host.cloudburrow.svc.cluster.local:9021",
 		"serviceusage":      "cloudburrow-host.cloudburrow.svc.cluster.local:9023",
 		"apikeys":           "cloudburrow-host.cloudburrow.svc.cluster.local:9029",
-		"backupdr":          "cloudburrow-host.cloudburrow.svc.cluster.local:9024",
-		"privateca":         "cloudburrow-host.cloudburrow.svc.cluster.local:9025",
-		"gke":               "cloudburrow-host.cloudburrow.svc.cluster.local:9026",
-		"monitoring":        "cloudburrow-host.cloudburrow.svc.cluster.local:9033",
-		"compute":           "cloudburrow-host.cloudburrow.svc.cluster.local:9031",
-		"workflows":         "cloudburrow-host.cloudburrow.svc.cluster.local:9038",
+		// The Cloud Storage companion APIs (#1957).
+		"storagebatchoperations": "cloudburrow-host.cloudburrow.svc.cluster.local:9035",
+		"storageinsights":        "cloudburrow-host.cloudburrow.svc.cluster.local:9036",
+		"storagetransfer":        "cloudburrow-host.cloudburrow.svc.cluster.local:9037",
+		"backupdr":               "cloudburrow-host.cloudburrow.svc.cluster.local:9024",
+		"privateca":              "cloudburrow-host.cloudburrow.svc.cluster.local:9025",
+		"gke":                    "cloudburrow-host.cloudburrow.svc.cluster.local:9026",
+		"monitoring":             "cloudburrow-host.cloudburrow.svc.cluster.local:9033",
+		"compute":                "cloudburrow-host.cloudburrow.svc.cluster.local:9031",
+		"workflows":              "cloudburrow-host.cloudburrow.svc.cluster.local:9038",
 		// The Bigtable front, which serves the admin REST API (#1440).
 		"bigtable": "bigtable.cloudburrow.svc.cluster.local:8086",
 		// Spanner's REST port and Firestore, with the admin APIs (#1461).

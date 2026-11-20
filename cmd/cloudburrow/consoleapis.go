@@ -47,6 +47,7 @@ var apiLibrary = map[string]apiLibraryInfo{
 	"spanner.googleapis.com":              {"Databases", "Manages Spanner instances and databases, and runs transactions on them.", "spanner"},
 	"bigquery.googleapis.com":             {"Big data", "Creates datasets and tables, loads data and runs queries.", "bigquery"},
 	"bigquerystorage.googleapis.com":      {"Big data", "Reads and writes BigQuery table data in streams.", "bigquery"},
+	"bigquerydatatransfer.googleapis.com": {"Big data", "Schedules queries and copies datasets on a recurring schedule.", "bigquery"},
 	"redis.googleapis.com":                {"Databases", "Creates and manages Redis instances.", "memorystore"},
 	"sqladmin.googleapis.com":             {"Databases", "Administers Cloud SQL instances, databases, users and backups.", ""},
 	"backupdr.googleapis.com":             {"Storage", "Manages backup vaults, backup plans and the backups in them.", ""},
@@ -57,6 +58,11 @@ var apiLibrary = map[string]apiLibraryInfo{
 	"container.googleapis.com":            {"Compute", "Builds and manages container-based applications, powered by the open source Kubernetes technology.", ""},
 	"containeranalysis.googleapis.com":    {"Developer tools", "Stores and reads the notes and occurrences of software artifacts, vulnerabilities among them.", ""},
 	"containerscanning.googleapis.com":    {"Security", "Scans the container images pushed to Artifact Registry for vulnerabilities.", ""},
+
+	// The Cloud Storage companion APIs (#1957).
+	"storagebatchoperations.googleapis.com": {"Storage", "Runs jobs that delete, update or rewrite many Cloud Storage objects at once.", ""},
+	"storageinsights.googleapis.com":        {"Storage", "Writes scheduled inventory reports of the objects in a bucket.", ""},
+	"storagetransfer.googleapis.com":        {"Storage", "Transfers data between Cloud Storage buckets and file systems.", ""},
 }
 
 // apiTotals is an API's calls since the instance started, from the request

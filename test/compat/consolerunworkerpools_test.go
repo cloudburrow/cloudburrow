@@ -104,7 +104,8 @@ func TestConsoleRunWorkerPoolDeployEditScaleDelete(t *testing.T) {
 // TestConsoleRunInstanceCreateStopStartDelete (#1299): an instance created
 // on the console's Instances page reads back through the official
 // InstancesClient with the form's settings; Stop and Start from its page
-// stop and start it as the client reads it; the console's delete is
+// stop and start it as the client reads it; Edit updates it (#1958)
+// through UpdateInstance; the console's delete is
 // NOT_FOUND through the client.
 func TestConsoleRunInstanceCreateStopStartDelete(t *testing.T) {
 	h := New(t)
@@ -158,6 +159,19 @@ func TestConsoleRunInstanceCreateStopStartDelete(t *testing.T) {
 	if in, err := c.GetInstance(ctx, &runpb.GetInstanceRequest{Name: name}); err != nil ||
 		in.GetTerminalCondition().GetMessage() == "the instance is stopped" {
 		t.Errorf("after the console's start: %v, %v", in, err)
+	}
+	// Edit (#1958): UpdateInstance with the form's description, image and
+	// variables, a new generation the client reads back.
+	if page := consoleDetailOf(t, addr, "run-instances", project, id); !page.offers("edit") {
+		t.Errorf("the instance's page offers %+v; want Edit", page.Actions)
+	}
+	if code, resp := consoleAct(t, addr, "run-instances", project, []string{id}, "edit",
+		map[string]string{"description": "edited", "image": jobImage, "env": `{"GREETING":"hello"}`}); code != http.StatusOK {
+		t.Fatalf("console edit = %d: %s", code, resp)
+	}
+	if in, err := c.GetInstance(ctx, &runpb.GetInstanceRequest{Name: name}); err != nil || in.GetDescription() != "edited" ||
+		in.GetGeneration() < 2 || in.GetContainers()[0].GetEnv()[0].GetValue() != "hello" || len(in.GetContainers()[0].GetArgs()) == 0 {
+		t.Errorf("after the console's edit: %v, %v; want the new description and variable, the command kept", in, err)
 	}
 	if code, resp := consoleDo(t, addr, http.MethodDelete, "/api/resources/run-instances?project="+project+"&name="+id, ""); code != http.StatusOK {
 		t.Fatalf("console delete = %d: %s", code, resp)

@@ -427,14 +427,24 @@ func (f front) remoteSubquery(r *http.Request, q queryOptions, md bqModel, c mlC
 	case c.input == "":
 		return "", 400, fname + " requires an input: a query in parentheses or TABLE name"
 	}
+	// Multimodal input (#1798, #1980): an object table's objects, each
+	// sent to the model as its ref ObjectRef, with the PROMPT option for
+	// generation (bigqueryml-syntax-generate-text, "TABLE object_table").
+	objectInput := false
 	if c.table != nil {
-		// Multimodal input (#1798): an object table's objects sent to the
-		// model with the prompt (bigqueryml-syntax-generate-text, "TABLE
-		// object_table").
 		if ds, table, ok := tableOf(q, c.table); ok && (len(c.table) < 3 || c.table[0] == projectOf(f.base)) && f.isObjectTable(r, ds, table) {
-			return "", 501, "Not implemented here: " + fname + " over an object table (a multimodal prompt): the instance's local generative runtime " +
-				"(LiteRT-LM, `up --local-ai-model`) runs text models and reads text only; its generateContent refuses inlineData and fileData parts, " +
-				"so the objects cannot be sent to it (#1798). Nothing was run."
+			objectInput = true
+			if code, msg := f.objectTablesRead(r, queryOptions{Query: c.input, DefaultDataset: q.DefaultDataset}); code != 0 {
+				return "", code, msg
+			}
+			switch {
+			case c.fn == "GENERATE_EMBEDDING":
+				c.input = "SELECT *, ref AS " + objInputCol + " FROM " + quotePath(c.table)
+			case c.fn == "GENERATE_TEXT" && c.struc["prompt"] != "":
+				c.input = "SELECT *, STRUCT(" + c.struc["prompt"] + " AS _t, ref AS _r) AS " + objInputCol + " FROM " + quotePath(c.table)
+			default:
+				return "", 400, fname + " over an object table requires the PROMPT option: STRUCT('...' AS prompt)"
+			}
 		}
 	}
 	if f.vertexai == "" {
@@ -467,6 +477,7 @@ func (f front) remoteSubquery(r *http.Request, q queryOptions, md bqModel, c mlC
 		}
 		switch {
 		case c.fn == "GENERATE_TABLE" && k == "output_schema":
+		case objectInput && k == "prompt":
 		case k == "flatten_json_output" && !c.ai:
 			b, ok := map[string]bool{"TRUE": true, "FALSE": false}[strings.ToUpper(v)]
 			if !ok {
@@ -509,6 +520,9 @@ func (f front) remoteSubquery(r *http.Request, q queryOptions, md bqModel, c mlC
 	if c.fn == "GENERATE_EMBEDDING" {
 		col = "content"
 	}
+	if objectInput {
+		col = objInputCol
+	}
 	cols, _, code, msg := f.queryAllRows(r, q, "SELECT * FROM ("+c.input+") LIMIT 0")
 	if code != 0 {
 		return "", code, msg
@@ -522,10 +536,21 @@ func (f front) remoteSubquery(r *http.Request, q queryOptions, md bqModel, c mlC
 	if found == nil {
 		return "", 400, fmt.Sprintf("Invalid table-valued function %s: the input must have a column named %s", fname, col)
 	}
-	if !strings.EqualFold(found.Type, "STRING") {
-		return "", 400, fmt.Sprintf("Invalid table-valued function %s: column %s must be of type STRING, not %s", fname, found.Name, found.Type)
+	// A STRUCT prompt of STRING and ObjectRef fields, an ObjectRef content
+	// or prompt, or an ObjectRefRuntime JSON (#1980) is told apart by its
+	// TO_JSON_STRING and sent as parts.
+	multimodal := !strings.EqualFold(found.Type, "STRING")
+	if multimodal && !strings.EqualFold(found.Type, "RECORD") && !strings.EqualFold(found.Type, "JSON") {
+		return "", 400, fmt.Sprintf("Invalid table-valued function %s: column %s must be of type STRING, STRUCT or ObjectRef, not %s", fname, found.Name, found.Type)
+	}
+	if multimodal && c.fn == "GENERATE_TABLE" {
+		return "", 501, "Not implemented here: AI.GENERATE_TABLE of a multimodal prompt (#1980): CloudBurrow sends ObjectRefs to ML.GENERATE_TEXT, " +
+			"AI.GENERATE_TEXT and the scalar AI functions. Nothing was run."
 	}
 	key := "_cbml_in." + sqlIdent(found.Name)
+	if multimodal {
+		key = "TO_JSON_STRING(" + key + ")"
+	}
 	_, rows, code, msg := f.queryAllRows(r, q, "SELECT DISTINCT "+key+" FROM ("+c.input+") AS _cbml_in WHERE "+key+" IS NOT NULL")
 	if code != 0 {
 		return "", code, msg
@@ -559,17 +584,29 @@ func (f front) remoteSubquery(r *http.Request, q queryOptions, md bqModel, c mlC
 			continue
 		}
 		in := *row[0]
+		ri := rowInput{text: in}
+		if multimodal {
+			pieces, ok, code, msg := promptPieces(in)
+			if code != 0 {
+				return "", code, strings.ReplaceAll(msg, "AI.GENERATE", fname)
+			}
+			if !ok {
+				continue
+			}
+			ri = rowInput{multimodal: true}
+			ri.parts, ri.status = f.pieceParts(r, pieces, "")
+		}
 		var parts []string
 		if c.fn == "GENERATE_TABLE" {
 			parts = f.generateTableRow(r, project, rm, schema, in, genCfg)
 		} else if c.ai && c.fn == "GENERATE_EMBEDDING" {
-			parts = f.embedRow(r.Context(), project, rm, in, true, taskType, dims)
+			parts = f.embedRow(r.Context(), project, rm, ri, true, taskType, dims)
 		} else if c.ai {
-			parts = f.aiGenerateTextRow(r.Context(), project, rm, in, genCfg)
+			parts = f.aiGenerateTextRow(r.Context(), project, rm, ri, genCfg)
 		} else if c.fn == "GENERATE_TEXT" {
-			parts = f.generateRow(r.Context(), project, rm, in, flatten, genCfg)
+			parts = f.generateRow(r.Context(), project, rm, ri, flatten, genCfg)
 		} else {
-			parts = f.embedRow(r.Context(), project, rm, in, flatten, taskType, dims)
+			parts = f.embedRow(r.Context(), project, rm, ri, flatten, taskType, dims)
 		}
 		lits = append(lits, "STRUCT("+sqlString(in)+", "+strings.Join(parts, ", ")+")")
 	}
@@ -587,6 +624,9 @@ func (f front) remoteSubquery(r *http.Request, q queryOptions, md bqModel, c mlC
 				except = append(except, sqlIdent(ic.Name))
 			}
 		}
+	}
+	if objectInput {
+		except = append(except, objInputCol)
 	}
 	inSel := "_cbml_in.*"
 	if len(except) > 0 {
@@ -655,7 +695,12 @@ func (f front) vertexCall(ctx context.Context, project string, rm *remoteModel, 
 // generateBody is a generateContent request for prompt with generationConfig
 // cfg (none when cfg is empty).
 func generateBody(prompt string, cfg map[string]any) map[string]any {
-	body := map[string]any{"contents": []any{map[string]any{"role": "user", "parts": []any{map[string]string{"text": prompt}}}}}
+	return generatePartsBody([]any{map[string]string{"text": prompt}}, cfg)
+}
+
+// generatePartsBody is a generateContent request of a user turn of parts.
+func generatePartsBody(parts []any, cfg map[string]any) map[string]any {
+	body := map[string]any{"contents": []any{map[string]any{"role": "user", "parts": parts}}}
 	if len(cfg) > 0 {
 		body["generationConfig"] = cfg
 	}
@@ -663,9 +708,8 @@ func generateBody(prompt string, cfg map[string]any) map[string]any {
 }
 
 // generateRow is one prompt's output columns, as SQL literals.
-func (f front) generateRow(ctx context.Context, project string, rm *remoteModel, prompt string, flatten bool, cfg map[string]any) []string {
-	body := generateBody(prompt, cfg)
-	out, status := f.vertexCall(ctx, project, rm, "generateContent", body)
+func (f front) generateRow(ctx context.Context, project string, rm *remoteModel, in rowInput, flatten bool, cfg map[string]any) []string {
+	out, status := f.rowCall(ctx, project, rm, "generateContent", generatePartsBody(in.contentParts(), cfg), in.status)
 	if !flatten {
 		return []string{jsonLiteral(out), sqlString(status)}
 	}
@@ -695,16 +739,32 @@ func (f front) generateRow(ctx context.Context, project string, rm *remoteModel,
 }
 
 // embedRow is one content's output columns, as SQL literals.
-func (f front) embedRow(ctx context.Context, project string, rm *remoteModel, content string, flatten bool, taskType string, dims int) []string {
-	inst := map[string]any{"content": content}
+func (f front) embedRow(ctx context.Context, project string, rm *remoteModel, in rowInput, flatten bool, taskType string, dims int) []string {
+	inst := map[string]any{"content": in.text}
 	if taskType != "" {
 		inst["task_type"] = taskType
 	}
-	body := map[string]any{"instances": []any{inst}}
-	if dims > 0 {
-		body["parameters"] = map[string]any{"outputDimensionality": dims}
+	var body map[string]any
+	method := "predict"
+	if in.multimodal {
+		// An ObjectRef (#1980): :embedContent of its parts, which the local
+		// embedder reads when its model embeds that modality, and refuses
+		// naming it otherwise.
+		method = "embedContent"
+		body = map[string]any{"content": map[string]any{"role": "user", "parts": in.parts}}
+		if taskType != "" {
+			body["taskType"] = taskType
+		}
+		if dims > 0 {
+			body["outputDimensionality"] = dims
+		}
+	} else {
+		body = map[string]any{"instances": []any{inst}}
+		if dims > 0 {
+			body["parameters"] = map[string]any{"outputDimensionality": dims}
+		}
 	}
-	out, status := f.vertexCall(ctx, project, rm, "predict", body)
+	out, status := f.rowCall(ctx, project, rm, method, body, in.status)
 	if status != "" {
 		if flatten {
 			return []string{"CAST(NULL AS ARRAY<FLOAT64>)", "CAST(NULL AS JSON)", sqlString(status)}
@@ -714,23 +774,39 @@ func (f front) embedRow(ctx context.Context, project string, rm *remoteModel, co
 	if !flatten {
 		return []string{jsonLiteral(out), sqlString("")}
 	}
-	var resp struct {
-		Predictions []struct {
-			Embeddings struct {
-				Values     []float64       `json:"values"`
-				Statistics json.RawMessage `json:"statistics"`
-			} `json:"embeddings"`
-		} `json:"predictions"`
+	var values []float64
+	var stats json.RawMessage
+	if in.multimodal {
+		// :embedContent's answer: {"embedding": {"values"}, "usageMetadata"}.
+		var ec struct {
+			Embedding struct {
+				Values []float64 `json:"values"`
+			} `json:"embedding"`
+			UsageMetadata json.RawMessage `json:"usageMetadata"`
+		}
+		if err := json.Unmarshal(out, &ec); err != nil || len(ec.Embedding.Values) == 0 {
+			return []string{"CAST(NULL AS ARRAY<FLOAT64>)", "CAST(NULL AS JSON)", sqlString("The response had no embedding")}
+		}
+		values, stats = ec.Embedding.Values, ec.UsageMetadata
+	} else {
+		var resp struct {
+			Predictions []struct {
+				Embeddings struct {
+					Values     []float64       `json:"values"`
+					Statistics json.RawMessage `json:"statistics"`
+				} `json:"embeddings"`
+			} `json:"predictions"`
+		}
+		if err := json.Unmarshal(out, &resp); err != nil || len(resp.Predictions) != 1 {
+			return []string{"CAST(NULL AS ARRAY<FLOAT64>)", "CAST(NULL AS JSON)", sqlString("The response had no prediction")}
+		}
+		values, stats = resp.Predictions[0].Embeddings.Values, resp.Predictions[0].Embeddings.Statistics
 	}
-	if err := json.Unmarshal(out, &resp); err != nil || len(resp.Predictions) != 1 {
-		return []string{"CAST(NULL AS ARRAY<FLOAT64>)", "CAST(NULL AS JSON)", sqlString("The response had no prediction")}
-	}
-	e := resp.Predictions[0].Embeddings
-	vals := make([]string, len(e.Values))
-	for i, v := range e.Values {
+	vals := make([]string, len(values))
+	for i, v := range values {
 		vals[i] = sqlF(v)
 	}
-	return []string{"ARRAY<FLOAT64>[" + strings.Join(vals, ", ") + "]", jsonLiteral(e.Statistics), sqlString("")}
+	return []string{"ARRAY<FLOAT64>[" + strings.Join(vals, ", ") + "]", jsonLiteral(stats), sqlString("")}
 }
 
 // aiFunction is the first AI.<fn>( call in sql, upper-cased, or "".
@@ -763,9 +839,8 @@ func aiFunction(sql string) string {
 // aiGenerateTextRow is one prompt's AI.GENERATE_TEXT columns, as SQL
 // literals: result, rai_result, grounding_result, statistics (the
 // response's usageMetadata), full_response and status (#1765).
-func (f front) aiGenerateTextRow(ctx context.Context, project string, rm *remoteModel, prompt string, cfg map[string]any) []string {
-	body := generateBody(prompt, cfg)
-	out, status := f.vertexCall(ctx, project, rm, "generateContent", body)
+func (f front) aiGenerateTextRow(ctx context.Context, project string, rm *remoteModel, in rowInput, cfg map[string]any) []string {
+	out, status := f.rowCall(ctx, project, rm, "generateContent", generatePartsBody(in.contentParts(), cfg), in.status)
 	null := []string{"CAST(NULL AS STRING)", "CAST(NULL AS JSON)", "CAST(NULL AS JSON)", "CAST(NULL AS JSON)", jsonLiteral(out)}
 	if status != "" {
 		return append(null, sqlString(status))
@@ -809,4 +884,33 @@ func (f front) generateTableRow(r *http.Request, project string, rm *remoteModel
 		}
 	}
 	return append(vals, jsonLiteral(raw), sqlString(status))
+}
+
+// objInputCol is the column an object table's ObjectRef (and prompt) is
+// read from, left out of the function's output (#1980).
+const objInputCol = "_cbml_obj"
+
+// rowInput is one row's input to a remote model: text, or (multimodal)
+// generateContent parts, or the failure status of reading its objects.
+type rowInput struct {
+	text       string
+	multimodal bool
+	parts      []any
+	status     string
+}
+
+// contentParts are in's parts.
+func (in rowInput) contentParts() []any {
+	if in.multimodal {
+		return in.parts
+	}
+	return []any{map[string]string{"text": in.text}}
+}
+
+// rowCall is vertexCall, or pre as the row's status when it is set.
+func (f front) rowCall(ctx context.Context, project string, rm *remoteModel, method string, body any, pre string) ([]byte, string) {
+	if pre != "" {
+		return nil, pre
+	}
+	return f.vertexCall(ctx, project, rm, method, body)
 }

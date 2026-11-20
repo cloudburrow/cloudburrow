@@ -189,7 +189,7 @@ func TestComputeVMsThroughTheGoClient(t *testing.T) {
 			time.Sleep(2 * time.Second)
 		}
 	}
-	if out := run("cat /var/tmp/boots; ip -4 addr show eth0; sudo -n true && echo SUDO-OK"); !strings.Contains(out, "boot") || !strings.Contains(out, ip) || !strings.Contains(out, "SUDO-OK") {
+	if out := run("cat /var/tmp/boots; ip -4 addr show vpc0; sudo -n true && echo SUDO-OK"); !strings.Contains(out, "boot") || !strings.Contains(out, ip) || !strings.Contains(out, "SUDO-OK") {
 		t.Fatalf("over SSH: %s", out)
 	}
 
@@ -210,7 +210,9 @@ func TestComputeVMsThroughTheGoClient(t *testing.T) {
 		InstancesSetMachineTypeRequestResource: &computepb.InstancesSetMachineTypeRequest{MachineType: proto.String("zones/" + zone + "/machineTypes/e2-small")}}); computeCode(err) != http.StatusBadRequest {
 		t.Fatalf("setMachineType while running: %v, want 400", err)
 	}
-	// The boot disk kept the first boot's line, and the script ran again.
+	// The boot disk kept the first boot's line, and the script ran again
+	// (once its line is on the new boot's serial port).
+	serialHas("startup-script: STARTUP-MARK-"+vmName, 1)
 	if out := run("cat /var/tmp/boots | wc -l; nproc; echo hello | sudo tee /mnt/disks/data/hello.txt"); !strings.HasPrefix(strings.TrimSpace(out), "2") {
 		t.Fatalf("after restart: %s", out)
 	}

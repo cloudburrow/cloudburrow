@@ -12,7 +12,7 @@ Do not edit these files by hand.
 |---|---|---|---|---|---|---|---|---|
 | [Cloud Tasks](tasks.md) | 20 | 20 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Secret Manager](secretmanager.md) | 17 | 15 | 0 | 2 | 0 | 0 | 0 | 2 |
-| [Cloud Run v2](run.md) | 46 | 41 | 0 | 2 | 3 | 0 | 0 | 1 |
+| [Cloud Run v2](run.md) | 46 | 46 | 0 | 0 | 0 | 0 | 0 | 1 |
 | [Artifact Registry](artifactregistry.md) | 50 | 50 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Build](cloudbuild.md) | 19 | 19 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Secure Source Manager](securesourcemanager.md) | 53 | 53 | 0 | 0 | 0 | 0 | 0 | 0 |
@@ -28,7 +28,7 @@ Do not edit these files by hand.
 | [Resource Manager v1 REST (projects, org policies; liens on v1 and v3)](resourcemanagerv1.md) | 38 | 38 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Scheduler](scheduler.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Logging](logging.md) | 43 | 43 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Vertex AI PredictionService](vertexai.md) | 91 | 78 | 0 | 12 | 1 | 0 | 0 | 0 |
+| [Vertex AI PredictionService](vertexai.md) | 91 | 83 | 0 | 7 | 1 | 0 | 0 | 0 |
 | [Speech-to-Text v1](speechv1.md) | 3 | 3 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Vertex AI PredictionService v1beta1](vertexaiv1beta1.md) | 17 | 5 | 0 | 0 | 12 | 0 | 0 | 0 |
 | [Memorystore for Redis](memorystore.md) | 73 | 73 | 0 | 0 | 0 | 0 | 0 | 1 |
@@ -45,7 +45,8 @@ Do not edit these files by hand.
 | [Cloud SQL Admin API (v1)](sqladmin.md) | 80 | 75 | 0 | 5 | 0 | 0 | 0 | 0 |
 | [Service Usage API (v1)](serviceusage.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [API Keys API (v2)](apikeys.md) | 9 | 9 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Compute Engine API (v1): VPC networking](compute.md) | 166 | 67 | 0 | 74 | 25 | 0 | 0 | 0 |
+| [Compute Engine API (v1): VPC networking](compute.md) | 166 | 71 | 0 | 74 | 21 | 0 | 0 | 0 |
+| [Cloud Storage companion APIs (Batch Operations, Insights, Transfer v1)](storagejobs.md) | 50 | 50 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Backup and DR Service API (v1)](backupdr.md) | 61 | 46 | 0 | 15 | 0 | 0 | 0 | 0 |
 | [Cloud Identity API (v1)](cloudidentity.md) | 70 | 18 | 0 | 52 | 0 | 0 | 0 | 0 |
 | [Workload Identity Federation (IAM v1 pools, STS v1)](workloadidentity.md) | 47 | 22 | 0 | 25 | 0 | 0 | 0 | 0 |
@@ -53,6 +54,7 @@ Do not edit these files by hand.
 | [Workflows and Workflow Executions (v1)](workflows.md) | 10 | 0 | 0 | 0 | 10 | 0 | 0 | 0 |
 | [Kubernetes Engine API (v1)](gke.md) | 37 | 16 | 0 | 19 | 2 | 0 | 0 | 0 |
 | [Cloud Monitoring API (v3) and Dashboards API (v1)](monitoring.md) | 56 | 52 | 0 | 2 | 2 | 0 | 0 | 0 |
+| [BigQuery Data Transfer Service (v1)](datatransfer.md) | 16 | 15 | 0 | 0 | 1 | 0 | 0 | 0 |
 
 **Statuses.** *Verified*: an official-SDK compat test, linked, exercises it. *Refused*: a compat
 test proves the upstream emulator refuses it. *Unimplemented*: CloudBurrow returns `UNIMPLEMENTED`, proven

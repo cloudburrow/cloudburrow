@@ -365,6 +365,18 @@ type Endpoints struct {
 	// enabled it also answers the Kubernetes Engine node pools' instance
 	// group managers, which the GKE port answers without it.
 	Compute int `json:"compute"`
+	// StorageBatchOperations, StorageInsights and StorageTransfer are the
+	// host ports of the Cloud Storage companion APIs (#1957), served in
+	// process over the instance's buckets whenever Cloud Storage is:
+	// storagebatchoperations.googleapis.com, storageinsights.googleapis.com
+	// (inventory reports) and storagetransfer.googleapis.com, JSON each.
+	StorageBatchOperations int `json:"storageBatchOperations"`
+	StorageInsights        int `json:"storageInsights"`
+	StorageTransfer        int `json:"storageTransfer"`
+	// DataTransfer is the host port of the BigQuery Data Transfer Service
+	// (bigquerydatatransfer.googleapis.com, #1948): gRPC and JSON on one
+	// port, served when BigQuery is.
+	DataTransfer int `json:"dataTransfer"`
 	// Workflows is the host port of Workflows and Workflow Executions
 	// (workflows.googleapis.com and workflowexecutions.googleapis.com,
 	// #1986): gRPC and JSON on one port, with the executions' callback
@@ -445,6 +457,10 @@ func (e *Endpoints) fields() []endpointField {
 		{"gke", &e.GKE},
 		{"monitoring", &e.Monitoring},
 		{"compute", &e.Compute},
+		{"storagebatchoperations", &e.StorageBatchOperations},
+		{"storageinsights", &e.StorageInsights},
+		{"storagetransfer", &e.StorageTransfer},
+		{"datatransfer", &e.DataTransfer},
 		{"workflows", &e.Workflows},
 		{"onnx", &e.ONNX},
 		{"tfconvert", &e.TFConvert},
@@ -853,6 +869,14 @@ func Default() Config {
 			// compute.googleapis.com is its own API, the next free one
 			// after Kubernetes Engine's 9030.
 			Compute: 9031,
+			// The Cloud Storage companion APIs (#1957): 9029-9034 are taken
+			// by branches in flight, so the next three after them.
+			StorageBatchOperations: 9035,
+			StorageInsights:        9036,
+			StorageTransfer:        9037,
+			// The BigQuery Data Transfer Service (#1948): 9031 to 9033 are
+			// taken by other branches, so 9034.
+			DataTransfer: 9034,
 			// Workflows (#1986): after 9029-9037, which the API Keys API,
 			// Kubernetes Engine, Compute Engine, Monitoring and other open
 			// branches took.

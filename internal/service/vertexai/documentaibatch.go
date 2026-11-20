@@ -11,6 +11,7 @@ import (
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
 	"google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
@@ -36,8 +37,11 @@ import (
 //     (its input_gcs_source, status and output_gcs_destination), a
 //     document's failure kept in its status; when every document fails, the
 //     operation fails with the first one's error.
-//   - gcs_output_config.field_mask and sharding_config, and skip_human_review
-//     (there is no human review) are UNIMPLEMENTED.
+//   - gcs_output_config.field_mask trims each Document and sharding_config
+//     splits it into {file name}-{shard index}.json shards
+//     (documentaioutput.go, #1953); skip_human_review is accepted, there
+//     being no human review: each document's human_review_status is
+//     SKIPPED.
 //
 // UNVERIFIED (re-read 2026-11-19: the batchProcess reference and the send-request page do not say): that one failed document leaves the operation SUCCEEDED, and
 // the texts of the errors.
@@ -62,11 +66,15 @@ func (s *Server) batchProcess(ctx context.Context, req *documentaipb.BatchProces
 	if err != nil {
 		return nil, err
 	}
+	review := humanReviewSkipped()
 	if p.GetState() != documentaipb.Processor_ENABLED {
 		return nil, apierror.FailedPrecondition("Processor %s is not enabled: its state is %s", p.GetName(), p.GetState())
 	}
+	if err := s.docAIKeyUsable(ctx, p); err != nil {
+		return nil, err
+	}
 	if req.GetSkipHumanReview() {
-		return nil, apierror.Unimplemented("Not implemented here: skip_human_review: the local processors have no human review")
+		review.StateMessage = humanReviewSkippedByRequest
 	}
 	if err := checkProcessOptions(p.GetType(), req.GetProcessOptions()); err != nil {
 		return nil, err
@@ -75,8 +83,11 @@ func (s *Server) batchProcess(ctx context.Context, req *documentaipb.BatchProces
 	if out == nil || out.GetGcsUri() == "" {
 		return nil, apierror.InvalidArgument("document_output_config.gcs_output_config.gcs_uri is required")
 	}
-	if out.GetFieldMask() != nil || out.GetShardingConfig() != nil {
-		return nil, apierror.Unimplemented("Not implemented here: gcs_output_config's field_mask and sharding_config: each document is written whole")
+	if err := checkDocumentMask(out.GetFieldMask()); err != nil {
+		return nil, err
+	}
+	if err := checkSharding(out.GetShardingConfig()); err != nil {
+		return nil, err
 	}
 	outBucket, outPrefix, ok := splitGCS(out.GetGcsUri(), true)
 	if !ok {
@@ -131,14 +142,24 @@ func (s *Server) batchProcess(ctx context.Context, req *documentaipb.BatchProces
 	created := timestamppb.Now()
 	meta := &documentaipb.BatchProcessMetadata{State: documentaipb.BatchProcessMetadata_RUNNING, CreateTime: created, UpdateTime: created}
 	_ = s.ops.SetMetadata(opName, meta)
-	go s.runBatch(opName, opID, p, req.GetProcessOptions(), inputs, objs, w, outBucket, strings.TrimSuffix(outPrefix, "/"), created)
+	dst := batchOutput{bucket: outBucket, prefix: strings.TrimSuffix(outPrefix, "/"), mask: out.GetFieldMask(),
+		sharding: out.GetShardingConfig(), review: review}
+	go s.runBatch(opName, opID, p, req.GetProcessOptions(), inputs, objs, w, dst, created)
 	got, _ := s.ops.Get(opName)
 	return opProto(got)
 }
 
+// batchOutput is where and how a batch writes its Documents (#1953).
+type batchOutput struct {
+	bucket, prefix string
+	mask           *fieldmaskpb.FieldMask
+	sharding       *documentaipb.DocumentOutputConfig_GcsOutputConfig_ShardingConfig
+	review         *documentaipb.HumanReviewStatus
+}
+
 // runBatch processes each input and writes its Document.
 func (s *Server) runBatch(opName, opID string, p *documentaipb.Processor, opts *documentaipb.ProcessOptions, inputs []batchInput,
-	objs Objects, w ObjectWriter, outBucket, outPrefix string, created *timestamppb.Timestamp) {
+	objs Objects, w ObjectWriter, out batchOutput, created *timestamppb.Timestamp) {
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Hour)
 	defer cancel()
 	var statuses []*documentaipb.BatchProcessMetadata_IndividualProcessStatus
@@ -146,12 +167,12 @@ func (s *Server) runBatch(opName, opID string, p *documentaipb.Processor, opts *
 	ok := 0
 	for i, in := range inputs {
 		dest := fmt.Sprintf("%s/%d", opID, i)
-		if outPrefix != "" {
-			dest = outPrefix + "/" + dest
+		if out.prefix != "" {
+			dest = out.prefix + "/" + dest
 		}
 		st := &documentaipb.BatchProcessMetadata_IndividualProcessStatus{InputGcsSource: in.uri,
-			OutputGcsDestination: "gs://" + outBucket + "/" + dest}
-		err := s.batchOne(ctx, p, opts, in, objs, w, outBucket, dest)
+			OutputGcsDestination: "gs://" + out.bucket + "/" + dest, HumanReviewStatus: out.review}
+		err := s.batchOne(ctx, p, opts, in, objs, w, out, dest)
 		if err != nil {
 			e := apierror.From(err)
 			st.Status = &status.Status{Code: int32(e.Code), Message: e.Message}
@@ -167,7 +188,9 @@ func (s *Server) runBatch(opName, opID string, p *documentaipb.Processor, opts *
 		_ = s.ops.SetMetadata(opName, &documentaipb.BatchProcessMetadata{State: documentaipb.BatchProcessMetadata_RUNNING,
 			CreateTime: created, UpdateTime: timestamppb.Now(), IndividualProcessStatuses: statuses})
 	}
-	meta := &documentaipb.BatchProcessMetadata{State: documentaipb.BatchProcessMetadata_SUCCEEDED, StateMessage: "Processed all documents.",
+	// As the send-request page's example reads: "Processed 1 document(s)
+	// successfully".
+	meta := &documentaipb.BatchProcessMetadata{State: documentaipb.BatchProcessMetadata_SUCCEEDED, StateMessage: fmt.Sprintf("Processed %d document(s) successfully", ok),
 		CreateTime: created, UpdateTime: timestamppb.Now(), IndividualProcessStatuses: statuses}
 	if ok == 0 {
 		meta.State, meta.StateMessage = documentaipb.BatchProcessMetadata_FAILED, apierror.From(firstErr).Message
@@ -179,9 +202,9 @@ func (s *Server) runBatch(opName, opID string, p *documentaipb.Processor, opts *
 	_ = s.ops.Succeed(opName, &documentaipb.BatchProcessResponse{})
 }
 
-// batchOne processes one input into dest/{name}-0.json.
+// batchOne processes one input into dest/{name}-{shard}.json.
 func (s *Server) batchOne(ctx context.Context, p *documentaipb.Processor, opts *documentaipb.ProcessOptions, in batchInput,
-	objs Objects, w ObjectWriter, outBucket, dest string) error {
+	objs Objects, w ObjectWriter, out batchOutput, dest string) error {
 	bucket, object, _ := splitGCS(in.uri, false)
 	content, ct, err := objs.Read(ctx, bucket, object, docAIBatchBytes+1)
 	if err != nil {
@@ -201,13 +224,19 @@ func (s *Server) batchOne(ctx context.Context, p *documentaipb.Processor, opts *
 	if err != nil {
 		return err
 	}
-	b, err := protojson.Marshal(doc)
-	if err != nil {
-		return apierror.Internal(err, "encoding the document")
-	}
 	base := path.Base(object)
 	if i := strings.LastIndex(base, "."); i > 0 {
 		base = base[:i]
 	}
-	return w.Write(ctx, outBucket, dest+"/"+base+"-0.json", "application/json", b)
+	for i, sh := range shardDocument(doc, out.sharding) {
+		maskDocument(sh, out.mask)
+		b, err := protojson.Marshal(sh)
+		if err != nil {
+			return apierror.Internal(err, "encoding the document")
+		}
+		if err := w.Write(ctx, out.bucket, fmt.Sprintf("%s/%s-%d.json", dest, base, i), "application/json", b); err != nil {
+			return err
+		}
+	}
+	return nil
 }

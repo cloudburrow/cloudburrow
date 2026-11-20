@@ -6,11 +6,14 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/components"
 	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/iameval"
+	"github.com/cloudburrow/cloudburrow/internal/metadata"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
 )
@@ -109,4 +112,30 @@ func cloudSQLForPods(srv *sqladmin.Server, host *clusterHost) runadapter.CloudSQ
 func sqlAdminEnabled(cfg config.Config) bool {
 	return cfg.Endpoints.SQLAdmin >= 0 &&
 		(serviceEnabled(cfg, config.ServiceCloudSQL) || serviceEnabled(cfg, config.ServiceCloudSQLMySQL))
+}
+
+// sqlAdminIAM is Cloud SQL IAM database authentication's token source
+// (#1944): the live access tokens creds minted, by SHA-256, and the
+// instance's IAM evaluator for the principal's permission on the
+// instance, whether or not --iam-enforcement is on: an IAM sign-in is
+// always checked, as Memorystore's IAM auth is.
+func sqlAdminIAM(creds *metadata.Credentials, e *iameval.Enforcer) sqladmin.IAMSource {
+	return sqladmin.IAMSource{
+		Token: func(hash string, now time.Time) (string, time.Time, bool) {
+			for _, t := range creds.LiveTokens(now) {
+				if t.Hash == hash {
+					return t.Email, t.Expires, true
+				}
+			}
+			return "", time.Time{}, false
+		},
+		Allowed: func(project, instance, email, permission string) bool {
+			if e == nil || e.Eval == nil {
+				return false
+			}
+			return e.Eval.Check(iameval.Request{Email: strings.ToLower(email), Permission: permission,
+				Resource: "projects/" + project + "/instances/" + instance, Type: "sqladmin.googleapis.com/Instance",
+				Service: "sqladmin.googleapis.com", Project: project, Time: time.Now()}).Granted
+		},
+	}
 }

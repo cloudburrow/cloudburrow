@@ -519,9 +519,30 @@ func spannerCreateDatabaseForm() console.Action {
 			Options: spannerDDLTemplates,
 			Help:    "DDL statements separated by semicolons; leave it empty for an empty database. Show DDL templates inserts a starting point (GoogleSQL)."},
 		{Name: "encryption", Label: "Encryption", Type: "radio", Section: "Show encryption options",
-			Options: []string{"Google-managed encryption key", "Cloud KMS key"}, Default: "Google-managed encryption key",
-			UnavailableOptions: map[string]string{"Cloud KMS key": "Not available locally: the Spanner emulator encrypts nothing with a customer-managed key."}},
+			Options: []string{"Google-managed encryption key", "Cloud KMS key"}, Default: "Google-managed encryption key"},
+		spannerKMSKeyField(),
 	}}
+}
+
+// spannerKMSKeyField is a form's Cloud KMS key (#1950), shown when the
+// encryption choice is Cloud KMS key.
+func spannerKMSKeyField() console.Field {
+	return console.Field{Name: "kmsKey", Label: "Cloud KMS key", Type: "text", Required: true, ShowWhen: "encryption=Cloud KMS key",
+		Pattern: `^projects/[^\/]+/locations/[^\/]+/keyRings/[^\/]+/cryptoKeys/[^\/]+$`,
+		Help:    "projects/PROJECT/locations/LOCATION/keyRings/KEY_RING/cryptoKeys/KEY, in the instance configuration's region; the Spanner service agent needs roles/cloudkms.cryptoKeyEncrypterDecrypter on it."}
+}
+
+// spannerKMSKey is a form's Cloud KMS key when its encryption choice is
+// Cloud KMS key, else "".
+func spannerKMSKey(v map[string]string) (string, error) {
+	if strings.TrimSpace(v["encryption"]) != "Cloud KMS key" {
+		return "", nil
+	}
+	k := strings.TrimSpace(v["kmsKey"])
+	if k == "" {
+		return "", errors.New("a Cloud KMS key is required")
+	}
+	return k, nil
 }
 
 // spannerCreateDatabase is CreateDatabase in instanceID, waited on.
@@ -546,6 +567,13 @@ func (p spannerProvider) spannerCreateDatabase(ctx context.Context, project, ins
 		// statements in that dialect.
 		req.CreateStatement = fmt.Sprintf("CREATE DATABASE %q", dbID)
 		req.DatabaseDialect = databasepb.DatabaseDialect_POSTGRESQL
+	}
+	key, err := spannerKMSKey(v)
+	if err != nil {
+		return err
+	}
+	if key != "" {
+		req.EncryptionConfig = &databasepb.EncryptionConfig{KmsKeyName: key}
 	}
 	var statements []string
 	if ddl := strings.TrimSpace(v["ddl"]); ddl != "" {

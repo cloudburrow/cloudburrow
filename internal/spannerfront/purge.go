@@ -54,6 +54,7 @@ func (s *Instances) ResetProject(ctx context.Context, project string) error {
 	frontstate.DropProject(s.policies, project)
 	frontstate.DropProject(s.backups, project)
 	frontstate.DropProject(s.restored, project)
+	frontstate.DropProject(s.dbKeys, project)
 	frontstate.DropProject(s.schedules, project)
 	frontstate.DropProject(s.roleStmts, project)
 	s.emuOpNames = frontstate.KeepOthers(s.emuOpNames, project)

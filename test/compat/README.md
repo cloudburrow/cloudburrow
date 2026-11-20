@@ -89,9 +89,13 @@ Set by `scripts/compat-env.sh` from a running instance:
 | `CLOUDBURROW_TEST_RESOURCEMANAGER` | `CLOUDBURROW_RESOURCEMANAGER_ENDPOINT` | Resource Manager |
 | `CLOUDBURROW_TEST_SERVICEUSAGE` | `CLOUDBURROW_SERVICEUSAGE_ENDPOINT` | the Service Usage API (#1352), gcloud services and Terraform's `google_project_service` |
 | `CLOUDBURROW_TEST_APIKEYS` | `CLOUDBURROW_APIKEYS_ENDPOINT` | the API Keys API v2 (#1915), gcloud services api-keys and Terraform's `google_apikeys_key` |
+| `CLOUDBURROW_TEST_STORAGE_BATCH` | `CLOUDBURROW_STORAGEBATCHOPERATIONS_ENDPOINT` | the Storage Batch Operations API v1 (#1957), gcloud storage batch-operations |
+| `CLOUDBURROW_TEST_STORAGE_INSIGHTS` | `CLOUDBURROW_STORAGEINSIGHTS_ENDPOINT` | the Storage Insights API v1's inventory reports (#1957), gcloud storage insights inventory-reports and Terraform's `google_storage_insights_report_config` |
+| `CLOUDBURROW_TEST_STORAGE_TRANSFER` | `CLOUDBURROW_STORAGETRANSFER_ENDPOINT` | the Storage Transfer Service API v1 (#1957), gcloud transfer and Terraform's `google_storage_transfer_job` |
 | `CLOUDBURROW_TEST_RUN_STORAGE`, `CLOUDBURROW_TEST_RUN_PUBSUB` | as `STORAGE` and `PUBSUB` | the Cloud Run revision tests; see below |
 | `CLOUDBURROW_TEST_RUN_FIRESTORE` | as `FIRESTORE` | the Eventarc Firestore triggers (#1877), on the run shard |
 | `CLOUDBURROW_TEST_RUN_KMS`, `CLOUDBURROW_TEST_RUN_SCHEDULER`, `CLOUDBURROW_TEST_RUN_LOGGING` | as `KMS`, `SCHEDULER` and `LOGGING` | the Cloud Run revision tests; see below |
+| `CLOUDBURROW_TEST_RUN_LOCALAI` | as `LOCALAI`: the local Vertex AI endpoint, which Cloud Run starts without a model | the run shard's Document AI and Speech-to-Text customer-managed key tests (#1972), with `RUN_KMS` |
 | `CLOUDBURROW_TEST_TASKS_LOGGING` | as `LOGGING` | the Cloud Tasks dispatch log (#1256), in the storage shard, so the Logging tests stay in served |
 | `CLOUDBURROW_TEST_BIGQUERY_RESOURCEMANAGER` | as `RESOURCEMANAGER` | BigQuery's `JOBS_BY_FOLDER` and `JOBS_BY_ORGANIZATION` (#1392) and the purged project's emulator data (#1568), in the emulators shard, so the Resource Manager tests stay in storage |
 | `CLOUDBURROW_TEST_MEMORYSTORE_RESOURCEMANAGER` | as `RESOURCEMANAGER` | the principals the Memorystore IAM auth tests grant the connect roles to (#1614), in the memorystore shard, so the Resource Manager tests stay in storage |
@@ -103,7 +107,7 @@ Set by `scripts/compat-env.sh` from a running instance:
 | `CLOUDBURROW_TEST_GKE_SERVICEUSAGE` | as `SERVICEUSAGE` | gcloud's Service Usage override in the served shard: `gcloud container clusters create` checks `container.googleapis.com` is enabled through it (#1913), so the Service Usage suite does not run there too |
 | `CLOUDBURROW_TEST_LOGGING_RESOURCEMANAGER` | as `RESOURCEMANAGER` | the Cloud Logging folder and organization tests, which make a folder (#1395), in the served shard, so the Resource Manager tests stay in storage |
 | `CLOUDBURROW_TEST_SINK_LOGGING`, `CLOUDBURROW_TEST_SINK_STORAGE`, `CLOUDBURROW_TEST_SINK_PUBSUB` | as `LOGGING`, `STORAGE` and `PUBSUB` | the Cloud Logging sinks that deliver to Cloud Storage, Pub/Sub and BigQuery (#1404), in the emulators shard beside BigQuery, and `gcloud logging copy` and `CopyLogEntries` to a bucket (#1394) |
-| `CLOUDBURROW_TEST_CMEK_KMS` | as `KMS` | the customer-managed keys of Memorystore (memorystore shard) and of Cloud SQL and a Backup and DR vault (sql shard) (#1568), so the Cloud KMS tests stay in served |
+| `CLOUDBURROW_TEST_CMEK_KMS` | as `KMS` | the customer-managed keys of Memorystore (memorystore shard) and of Cloud SQL and a Backup and DR vault (sql shard) (#1568), and of Spanner's databases and backups (emulators shard, #1950), so the Cloud KMS tests stay in served |
 | `CLOUDBURROW_TEST_SQL_SERVICEUSAGE` | as `SERVICEUSAGE` | gcloud privateca roots create's `generateServiceIdentity` of the CA service agent (#1834), in the sql shard, so the Service Usage tests stay in storage |
 | `CLOUDBURROW_TEST_SQL_COMPUTE` | as `COMPUTE` | Cloud SQL's private networks checked against Compute Engine's (#1936), in the sql shard, so the Compute Engine suite stays in served |
 | `CLOUDBURROW_TEST_MEMORYSTORE_COMPUTE` | as `COMPUTE` | Memorystore's networks and reserved ranges checked against Compute Engine's (#1936), in the memorystore shard |
@@ -133,6 +137,7 @@ Set by `scripts/compat-env.sh` from a running instance:
 | `CLOUDBURROW_TEST_BACKUPDR` | `CLOUDBURROW_BACKUPDR_ENDPOINT` | the Backup and DR Service (#1433), `--services backupdr` with either Cloud SQL service; gcloud backup-dr and Terraform's `google_backup_dr_*` |
 | `CLOUDBURROW_TEST_COMPUTE` | `CLOUDBURROW_COMPUTE_ENDPOINT` | the Compute Engine API's VPC networking (#1936), `--services compute`; JSON under `/compute/v1/`, in process |
 | `CLOUDBURROW_TEST_GKE` | `CLOUDBURROW_GKE_ENDPOINT` | the Kubernetes Engine API (#1913), `--services gke`; gRPC and JSON on one port; its clusters are kind clusters, so it needs Docker, kind and kubectl |
+| `CLOUDBURROW_TEST_DATATRANSFER` | `CLOUDBURROW_DATATRANSFER_ENDPOINT` | the BigQuery Data Transfer Service (#1948), served with `bigquery`; gRPC and JSON on one port |
 | `CLOUDBURROW_TEST_PRIVATECA` | `CLOUDBURROW_PRIVATECA_ENDPOINT` | Certificate Authority Service (#1834), `--services privateca`; gRPC and JSON on one port |
 | `CLOUDBURROW_TEST_WORKFLOWS` | `CLOUDBURROW_WORKFLOWS_ENDPOINT` | Workflows and Workflow Executions (#1986), `--services workflows`; gRPC and JSON on one port; run in the run shard, beside the Cloud Run, Cloud Storage and Pub/Sub its workflows call |
 | `CLOUDBURROW_TEST_MONITORING` | `CLOUDBURROW_MONITORING_ENDPOINT` | Cloud Monitoring (#1939), `--services monitoring`; gRPC and JSON on one port |

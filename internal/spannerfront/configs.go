@@ -389,6 +389,18 @@ func (s *Instances) overlayPartition(p *instancepb.InstancePartition) {
 	if c.paths["compute_capacity"] {
 		p.ComputeCapacity = c.part.ComputeCapacity
 	}
+	if c.paths["autoscaling_config"] {
+		p.AutoscalingConfig = c.part.GetAutoscalingConfig()
+		if ac := p.AutoscalingConfig; ac != nil {
+			// An idle autoscaled partition runs at its minimum.
+			inst := &instancepb.Instance{}
+			autoscaledCapacity(inst, ac)
+			p.ComputeCapacity = &instancepb.InstancePartition_ProcessingUnits{ProcessingUnits: inst.GetProcessingUnits()}
+			if n := ac.GetAutoscalingLimits().GetMinNodes(); n > 0 {
+				p.ComputeCapacity = &instancepb.InstancePartition_NodeCount{NodeCount: n}
+			}
+		}
+	}
 	p.UpdateTime = c.part.GetUpdateTime()
 }
 
@@ -454,10 +466,17 @@ func (s *Instances) UpdateInstancePartition(ctx context.Context, req *instancepb
 		case "node_count", "processing_units":
 			set["compute_capacity"] = true
 		case "autoscaling_config":
-			if in.GetAutoscalingConfig() == nil {
-				continue
+			// The managed autoscaler (editions.go, #1949); "You can't
+			// enable asymmetric autoscaling on instance partitions."
+			if ac := in.GetAutoscalingConfig(); ac != nil {
+				if len(ac.GetAsymmetricAutoscalingOptions()) > 0 {
+					return nil, status.Errorf(codes.InvalidArgument, "Invalid %s request: asymmetric autoscaling can't be enabled on instance partitions.", method)
+				}
+				if err := checkAutoscaling(method, ac); err != nil {
+					return nil, err
+				}
 			}
-			return nil, status.Errorf(codes.Unimplemented, "%s of autoscaling_config is not served here: the emulator does not autoscale: set node_count or processing_units", method)
+			set[p] = true
 		default:
 			return nil, status.Errorf(codes.InvalidArgument, "Invalid %s request: field_mask path %q is not a field of InstancePartition that can be updated.", method, p)
 		}
@@ -486,6 +505,9 @@ func (s *Instances) UpdateInstancePartition(ctx context.Context, req *instancepb
 	}
 	if set["compute_capacity"] {
 		c.part.ComputeCapacity = in.ComputeCapacity
+	}
+	if set["autoscaling_config"] {
+		c.part.AutoscalingConfig = in.GetAutoscalingConfig()
 	}
 	for p := range set {
 		c.paths[p] = true

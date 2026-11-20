@@ -37,13 +37,17 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/apienable"
 	"github.com/cloudburrow/cloudburrow/internal/calllog"
+	"github.com/cloudburrow/cloudburrow/internal/cmek"
+	"github.com/cloudburrow/cloudburrow/internal/datastoreversions"
 	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
 	"github.com/cloudburrow/cloudburrow/internal/frontready"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
+	"github.com/cloudburrow/cloudburrow/internal/iamcheck"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 	"github.com/cloudburrow/cloudburrow/internal/queryfront"
 	"github.com/cloudburrow/cloudburrow/internal/spannerfront"
+	"github.com/cloudburrow/cloudburrow/internal/sysparams"
 )
 
 // ErrUsage means the arguments were refused; the reason has been written.
@@ -197,7 +201,7 @@ func Server(h http.Handler, logf func(string, ...any), service ...string) *http.
 	protocols.SetHTTP1(true)
 	protocols.SetUnencryptedHTTP2(true)
 	return &http.Server{
-		Handler:   hostguard.WrapService(gateAPI(h, name), name),
+		Handler:   hostguard.WrapService(sysparams.Wrap(gateAPI(h, name), sysparams.Options{}), name), // #1954
 		Protocols: &protocols,
 		// The emulators set no stream limit; Go's default of 250 could
 		// queue a client's new calls behind its long-lived streams.
@@ -282,7 +286,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// Firestore with MongoDB compatibility (#1703): the MongoDB wire
 	// protocol for the Admin API's Enterprise edition databases.
 	mongoListen := fs.String("mongodb-listen", "", "address the front serves Firestore with MongoDB compatibility's wire protocol on (needs --firestore-admin)")
-	stateDir := fs.String("state-dir", "", "directory the Firestore Admin API or the Spanner front keeps its state in")
+	stateDir := fs.String("state-dir", "", "directory the Firestore Admin API, the Spanner front or the Datastore front (its entities' versions, #1967) keeps its state in")
 	// The named Datastore databases calls name, which the emulator cannot
 	// list, kept for the project's purge (#1550).
 	datastoreDBs := fs.Bool("datastore-databases", false, "record the named Datastore databases calls name, for a project's purge")
@@ -296,7 +300,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// front serves their entities, and the host's Cloud KMS their keys.
 	firestoreAdminAddr := fs.String("firestore-admin-addr", "", "the Firestore front (host:port), whose Admin API says which databases the Datastore API serves (with --datastore-databases)")
 	datastoreAddr := fs.String("datastore", "", "the Datastore front (host:port), which clears a deleted Datastore mode database's entities (with --firestore-admin)")
-	kmsAddr := fs.String("kms", "", "the instance's Cloud KMS (host:port, gRPC), which customer-managed keys are checked against (with --firestore-admin)")
+	kmsAddr := fs.String("kms", "", "the instance's Cloud KMS (host:port, gRPC), which customer-managed keys are checked against (with --firestore-admin or --spanner-instances)")
+	iamCheck := fs.String("iam-check", "", "http://host:port of the host's IAM evaluator, which checks the Spanner service agent's use of a customer-managed key (with --spanner-instances and --kms; what `up --iam-enforcement=on` passes, #1950)")
 	queries := fs.String("queries", "", "answer the query RPCs the emulator does not serve: datastore (RunAggregationQuery) or firestore (PartitionQuery)")
 	if err := fs.Parse(args); err != nil {
 		return ErrUsage
@@ -309,8 +314,12 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		fmt.Fprintln(stderr, "call-front: --mongodb-listen needs --firestore-admin")
 		return ErrUsage
 	}
-	if (*datastoreAddr != "" || *kmsAddr != "") && !*firestoreAdmin {
-		fmt.Fprintln(stderr, "call-front: --datastore and --kms need --firestore-admin")
+	if *datastoreAddr != "" && !*firestoreAdmin || *kmsAddr != "" && !*firestoreAdmin && !*spannerInstances {
+		fmt.Fprintln(stderr, "call-front: --datastore needs --firestore-admin, and --kms --firestore-admin or --spanner-instances")
+		return ErrUsage
+	}
+	if *iamCheck != "" && (!*spannerInstances || *kmsAddr == "") {
+		fmt.Fprintln(stderr, "call-front: --iam-check needs --spanner-instances and --kms")
 		return ErrUsage
 	}
 	if *firestoreAdminAddr != "" && !*datastoreDBs {
@@ -344,14 +353,29 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// other intercept or the emulator sees it.
 		icpts = append(icpts, newDatastoreGate(*firestoreAdminAddr))
 	}
-	if *datastoreDBs || *queries == "datastore" {
+	var dbs *datastoreDatabases
+	var versions *datastoreversions.Log
+	if *datastoreDBs {
+		dbs = newDatastoreDatabases(*upstream, logger.Printf)
+		// The versions of the entities (#1967): every commit is
+		// recorded, and a read at an earlier time is answered from
+		// them, within the database's version window.
+		var gate *datastoreGate
+		if len(icpts) > 0 {
+			gate, _ = icpts[0].(*datastoreGate)
+		}
+		versions = datastoreversions.New(func(db string) time.Duration { return retentionOf(gate, db) }, logger.Printf)
+		dbs.versions = versions
+		c, err := dbs.unversionedClient()
+		if err != nil {
+			return fmt.Errorf("the Datastore emulator at %s: %w", *upstream, err)
+		}
+		go versions.Open(ctx, c, MarkerProject, *stateDir)
+		icpts = append(icpts, newDatastoreWindow(gate, versions))
+	} else if *queries == "datastore" {
 		// A read at an earlier read time is refused, not answered with
 		// the entities as they are now (#1942, datastorereadtime.go).
 		icpts = append(icpts, newDatastoreReadTimes())
-	}
-	var dbs *datastoreDatabases
-	if *datastoreDBs {
-		dbs = newDatastoreDatabases(*upstream, logger.Printf)
 	}
 	switch {
 	case *queries == "datastore" || (*datastoreDBs && *queries == ""):
@@ -360,6 +384,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			// Each named database in an emulator project of its own
 			// (#1885), as the front's own calls keep it (dbs.client).
 			qd.SeparateDatabases(dbs.SawResource)
+			qd.KeepVersions(versions)
 			// The entities named databases kept before are moved
 			// to their emulator projects once (#1885); calls naming
 			// a named database wait for the move.
@@ -438,6 +463,14 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		si, err := spannerfront.New(*upstream)
 		if err != nil {
 			return fmt.Errorf("the Spanner instance front: %w", err)
+		}
+		if *kmsAddr != "" {
+			k, conn, err := cmek.Dial(*kmsAddr)
+			if err != nil {
+				return fmt.Errorf("Cloud KMS at %s: %w", *kmsAddr, err)
+			}
+			defer conn.Close()
+			si.UseKeys(cmek.Keys{KMS: func() cmek.KMS { return k }, Check: cmek.Remote(&iamcheck.Client{Base: *iamCheck})})
 		}
 		if *stateDir != "" {
 			if err := si.KeepState(ctx, *stateDir, logger.Printf); err != nil {

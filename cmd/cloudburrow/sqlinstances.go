@@ -155,6 +155,10 @@ func (p *sqlProvisioner) backend(spec sqladmin.Spec) components.Backend {
 	}
 	var flags []components.SQLInstanceFlag
 	for _, f := range spec.Flags {
+		if sqladmin.IsCloudSQLOnlyFlag(f.Name) {
+			// Cloud SQL's own (#1944), not the server's.
+			continue
+		}
 		flags = append(flags, components.SQLInstanceFlag{Name: f.Name, Value: f.Value})
 	}
 	b := components.CloudSQLInstanceBackend(spec.ServerName(), spec.DatabaseVersion, true, spec.RootPassword, flags)

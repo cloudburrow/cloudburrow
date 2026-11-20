@@ -3,6 +3,7 @@ package rest
 import (
 	"encoding/base64"
 	"encoding/json"
+	"net/http"
 	"net/url"
 	"sort"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/sysparams"
 )
 
 // The Transcoder's query-parameter policy, first written for Cloud KMS
@@ -26,15 +28,20 @@ import (
 // well-known type with a string JSON form (FieldMask, Timestamp, Duration,
 // the wrappers).
 //
-// System parameters (cloud.google.com/apis/docs/system-parameters):
-//   - alt / $alt = json is accepted. The GAPIC REST client sends
-//     `$alt=json;enum-encoding=int` on every call; enums are then written as
-//     numbers. Whether Google does so is UNVERIFIED; both clients read either.
-// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/apis/docs/system-parameters
-//   - prettyPrint, $prettyPrint and $.xgafv are accepted and ignored: the
-//     discovery client and apitools send alt=json&prettyPrint=false.
-//   - any other alt, and fields / $fields, are UNIMPLEMENTED, naming the
-//     parameter.
+// System parameters (https://docs.cloud.google.com/apis/docs/system-parameters)
+// are read by internal/sysparams (#1954) and applied by the Transcoder:
+//   - fields / $fields, or the X-Goog-FieldMask header, prune the response,
+//     checked against the method's response message first;
+//   - alt / $alt is json (the default) or proto (the binary message,
+//     application/x-protobuf); `;enum-encoding=int`, which the GAPIC REST
+//     client sends, writes enums as numbers. media and sse are 501: no
+//     transcoded method has media or a JSON stream;
+//   - prettyPrint / $prettyPrint (true by default) indents the JSON,
+//     $outputDefaults writes fields at their defaults, callback / $callback
+//     wraps the answer in a JSONP call and $.xgafv=1 writes errors in the
+//     v1 format;
+//   - quotaUser, userIp, key and the others sysparams.Accepted lists are
+//     accepted and ignored.
 //
 // Any other parameter is INVALID_ARGUMENT, naming it: a dropped parameter
 // would look as though it had taken effect. The Cloud Tasks and Secret
@@ -44,12 +51,12 @@ import (
 
 // query is a request's parsed system parameters.
 type query struct {
-	enumInt bool // write enums as numbers
+	sys sysparams.Params
 }
 
 // marshal is the protojson form of a response under this query.
 func (q query) marshal() protojson.MarshalOptions {
-	return protojson.MarshalOptions{UseEnumNumbers: q.enumInt}
+	return protojson.MarshalOptions{UseEnumNumbers: q.sys.EnumInt, EmitUnpopulated: q.sys.OutputDefaults}
 }
 
 // param is a query parameter resolved to the field it sets.
@@ -63,11 +70,21 @@ type param struct {
 // parseQuery applies the policy to raw, setting the fields it names on req.
 // Every name is checked before any value is parsed, so an unknown parameter
 // is reported ahead of a malformed one.
-func parseQuery(raw string, req protoreflect.Message, rt *Route) (query, error) {
+func parseQuery(raw string, h http.Header, req protoreflect.Message, rt *Route) (query, error) {
 	var q query
 	vals, err := rawQuery(raw)
 	if err != nil {
 		return q, err
+	}
+	if q.sys, err = sysparams.FromValues(vals, h); err != nil {
+		return q, err
+	}
+	switch q.sys.Alt {
+	case "", "json", "proto":
+	case "media", "sse":
+		return q, apierror.Unimplemented("the alt=%s system parameter is not implemented: %s has no media or stream form over JSON", q.sys.Alt, rt.RPC)
+	default:
+		return q, apierror.InvalidArgument("Invalid value for alt: %q", q.sys.Alt)
 	}
 	names := make([]string, 0, len(vals))
 	for n := range vals {
@@ -78,24 +95,8 @@ func parseQuery(raw string, req protoreflect.Message, rt *Route) (query, error) 
 	set := map[protoreflect.FieldDescriptor]string{}
 	for _, n := range names {
 		vs := vals[n]
-		switch n {
-		case "alt", "$alt", "prettyPrint", "$prettyPrint", "$.xgafv", "fields", "$fields":
-			if len(vs) > 1 {
-				return q, apierror.InvalidArgument("query parameter %q is repeated", n)
-			}
-		}
-		switch n {
-		case "alt", "$alt":
-			switch vs[0] {
-			case "json":
-			case "json;enum-encoding=int":
-				q.enumInt = true
-			default:
-				return q, apierror.Unimplemented("the %s=%s system parameter is not implemented: only json is", n, vs[0])
-			}
-		case "prettyPrint", "$prettyPrint", "$.xgafv":
-		case "fields", "$fields":
-			return q, apierror.Unimplemented("the %s system parameter is not implemented", n)
+		switch {
+		case sysparams.IsSystem(n):
 		default:
 			p, ok := queryField(req.Descriptor(), rt, n)
 			if !ok {

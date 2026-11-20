@@ -47,6 +47,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 	"github.com/cloudburrow/cloudburrow/internal/pubsubfront"
+	"github.com/cloudburrow/cloudburrow/internal/sysparams"
 )
 
 const (
@@ -210,7 +211,7 @@ func (f *Front) Serve(ctx context.Context, l net.Listener) error {
 	// so the Host and Origin checks are here (#1587). Pods name the
 	// Service; a kubelet probe the pod's address.
 	srv := &http.Server{
-		Handler:           hostguard.WrapService(frontready.Wrap(apienable.Gate(nil, "bigtableadmin.googleapis.com", f.httpHandler(), apienable.Options{ServiceOf: bigtableAPI}), f.addr), "bigtable"),
+		Handler:           hostguard.WrapService(frontready.Wrap(apienable.Gate(nil, "bigtableadmin.googleapis.com", sysparams.Wrap(f.httpHandler(), sysparams.Options{}), apienable.Options{ServiceOf: bigtableAPI}), f.addr), "bigtable"),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	grpcL, httpL := pubsubfront.Split(l)

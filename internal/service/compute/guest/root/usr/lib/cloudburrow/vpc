@@ -1,0 +1,86 @@
+#!/bin/sh
+# The guest's side of its VPC network (#1968). Every 2 seconds it reports
+# its pod IP to CloudBurrow's Compute Engine API and reads back its
+# network's configuration, which it applies when it changes:
+#   - the firewall: the nftables ruleset of the VPC firewall rules that
+#     apply to this instance, applied first and atomically, so no packet
+#     crosses vpc0 before its rules are in force;
+#   - the segment: vpc0, a VXLAN device whose VNI is the network's, holding
+#     the instance's internal IP, an on-link route per subnet range of the
+#     network, and a static neighbour and forwarding entry per peer VM
+#     (its internal IP, its MAC, its pod IP);
+#   - internal DNS: INSTANCE.ZONE.c.PROJECT.internal of every instance on
+#     the network, in a block of /etc/hosts.
+set -u
+URL="${CLOUDBURROW_GUEST_METADATA}/cloudburrow/vpc"
+RUN=/run/cloudburrow-vpc
+mkdir -p "$RUN"
+log() { echo "$*" | /usr/lib/cloudburrow/console cloudburrow-vpc; }
+
+val() { sed -n "s/^$1 //p" "$RUN/conf" | head -n 1; }
+
+apply() {
+  sed -n '/^nft$/,$p' "$RUN/conf" | sed 1d > "$RUN/ruleset"
+  { echo "table inet cloudburrow"; echo "delete table inet cloudburrow"; cat "$RUN/ruleset"; } > "$RUN/ruleset.nft"
+  if ! nft -f "$RUN/ruleset.nft"; then
+    log "cannot apply the firewall rules"
+    return 1
+  fi
+  vni=$(val vni); mtu=$(val mtu); addr=$(val addr); mac=$(val mac)
+  if [ "$(cat "$RUN/vni" 2>/dev/null)" != "$vni" ] || ! ip link show vpc0 >/dev/null 2>&1; then
+    ip link del vpc0 2>/dev/null
+    if ! ip link add vpc0 type vxlan id "$vni" dstport 4789 dev eth0 nolearning; then
+      log "cannot make vpc0"
+      return 1
+    fi
+    echo "$vni" > "$RUN/vni"
+  fi
+  max=$(( $(cat /sys/class/net/eth0/mtu) - 50 ))
+  [ "$mtu" -gt "$max" ] && mtu=$max
+  echo 1 > /proc/sys/net/ipv6/conf/vpc0/disable_ipv6 2>/dev/null
+  ip link set vpc0 address "$mac" mtu "$mtu" up
+  ip addr replace "$addr/32" dev vpc0
+  # Routes: one per subnet range; stale ones removed.
+  sed -n 's/^route //p' "$RUN/conf" > "$RUN/routes"
+  while read -r cidr; do
+    ip route replace "$cidr" dev vpc0 scope link src "$addr"
+  done < "$RUN/routes"
+  ip -4 route show dev vpc0 | while read -r cidr _; do
+    grep -qx "$cidr" "$RUN/routes" || ip route del "$cidr" dev vpc0
+  done
+  # Peers: a permanent neighbour and forwarding entry each.
+  sed -n 's/^peer //p' "$RUN/conf" > "$RUN/peers"
+  while read -r ip pmac pod; do
+    ip neigh replace "$ip" lladdr "$pmac" dev vpc0 nud permanent
+    bridge fdb replace "$pmac" dev vpc0 dst "$pod" self permanent
+  done < "$RUN/peers"
+  ip neigh show dev vpc0 | while read -r ip _ pmac _; do
+    grep -q "^$ip " "$RUN/peers" || ip neigh del "$ip" dev vpc0
+  done
+  bridge fdb show dev vpc0 | while read -r pmac kw dst _; do
+    [ "$kw" = dst ] || continue
+    case "$pmac" in 42:01:*) grep -q " $pmac " "$RUN/peers" || bridge fdb del "$pmac" dev vpc0 dst "$dst" self ;; esac
+  done
+  # Internal DNS.
+  pod=$1
+  {
+    sed '/^# cloudburrow-vpc begin$/,/^# cloudburrow-vpc end$/d' /etc/hosts | grep -v "^$pod[[:space:]]"
+    echo "# cloudburrow-vpc begin"
+    sed -n 's/^host //p' "$RUN/conf"
+    echo "# cloudburrow-vpc end"
+  } > "$RUN/hosts"
+  cat "$RUN/hosts" > /etc/hosts
+  log "vpc0 $addr (VNI $vni), $(wc -l < "$RUN/peers") peers, $(grep -c ' comment ' "$RUN/ruleset") firewall entries"
+}
+
+last=""
+while true; do
+  pod=$(ip -4 -o addr show dev eth0 scope global | sed -n 's/.* inet \([0-9.]*\)\/.*/\1/p' | grep -vx "${CLOUDBURROW_INTERNAL_IP:-none}" | head -n 1)
+  if conf=$(curl -sf -m 5 -H 'Metadata-Flavor: Google' "$URL?pod=$pod") && [ -n "$conf" ]; then
+    if [ "$conf" != "$last" ]; then
+      printf '%s\n' "$conf" > "$RUN/conf"
+      apply "$pod" && last=$conf
+    fi
+  fi
+  sleep 2
+done

@@ -113,7 +113,11 @@ func (s *Server) Call(method, project, path string, query map[string][]string, b
 	if body == nil {
 		body = obj{}
 	}
-	parts := strings.Split(strings.Trim(path, "/"), "/")
+	var parts []string
+	if p := strings.Trim(path, "/"); p != "" {
+		// An empty path is the project itself (projects.get).
+		parts = strings.Split(p, "/")
+	}
 	c := call{method: method, project: project, parts: parts, query: query, body: body}
 	if isZoneOpWait(c) {
 		s.waitOp(context.Background(), "projects/"+project+"/zones/"+parts[1]+"/operations/"+parts[3])
@@ -136,6 +140,54 @@ func (s *Server) Do(c call) (obj, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	out, err := s.doLocked(c)
+	// What a call returns can be the stored resource itself, which an
+	// operation's goroutine goes on changing under the lock (vms.go): the
+	// caller renders it after the lock is released, so it gets its own copy
+	// ("concurrent map iteration and map write" in TestConsoleComputeVMs,
+	// Landing 157).
+	return deepCopy(out).(obj), err
+}
+
+// deepCopy copies maps and lists all the way down, keeping their types
+// ([]obj stays []obj, as renderAny tells lists from objects by it).
+func deepCopy(v any) any {
+	switch t := v.(type) {
+	case map[string]any:
+		if t == nil {
+			return obj(nil)
+		}
+		out := make(obj, len(t))
+		for k, e := range t {
+			out[k] = deepCopy(e)
+		}
+		return out
+	case []map[string]any:
+		if t == nil {
+			return t
+		}
+		out := make([]obj, len(t))
+		for i, e := range t {
+			out[i] = deepCopy(e).(obj)
+		}
+		return out
+	case []any:
+		if t == nil {
+			return t
+		}
+		out := make([]any, len(t))
+		for i, e := range t {
+			out[i] = deepCopy(e)
+		}
+		return out
+	case []string:
+		return append([]string(nil), t...)
+	}
+	return v
+}
+
+// doLocked is Do with s.mu held.
+func (s *Server) doLocked(c call) (obj, error) {
 	if len(c.parts) >= 2 && c.parts[0] == "global" && c.parts[1] == "images" {
 		// Public image projects are not projects of the caller's: no
 		// default network is made in them.
@@ -411,7 +463,13 @@ func (s *Server) aggregated(c call, coll string) (obj, error) {
 			continue
 		}
 		if f.match(m[k]) {
-			scopes[scope] = append(scopes[scope], m[k])
+			o := m[k]
+			if coll == "instances" {
+				// As instances.get: with the SSH address a running
+				// instance's port 22 is forwarded to.
+				o = s.decorate(o)
+			}
+			scopes[scope] = append(scopes[scope], o)
 		}
 	}
 	items := map[string]any{}

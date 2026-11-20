@@ -74,8 +74,9 @@ import (
 //
 // 501, naming why: model_params fields other than generationConfig, and of
 // the embedding functions other than outputDimensionality; embeddings
-// (optimized mode's distilled model); ObjectRef prompt fields (object
-// tables); and a call whose prompts the front cannot read (outside a
+// (optimized mode's distilled model); ObjectRef content of AI.EMBED,
+// AI.SIMILARITY and AI.COUNT_TOKENS (ObjectRef prompt fields of the
+// generating functions are sent as parts, objref.go, #1980); and a call whose prompts the front cannot read (outside a
 // SELECT block, or inside its FROM clause, such as a JOIN's ON).
 //
 // UNVERIFIED (re-read 2026-11-17: the pages above, which describe no
@@ -814,9 +815,14 @@ func (f front) aiRow(r *http.Request, project string, c aiCall, a aiResolved, ke
 	if c.fn == "COUNT_TOKENS" && strings.HasPrefix(strings.TrimSpace(key), "{") {
 		return nil, "", false, 400, "AI.COUNT_TOKENS's input must be a STRING"
 	}
-	prompt, ok, code, msg := promptText(key)
+	pieces, ok, code, msg := promptPieces(key)
 	if code != 0 || !ok {
 		return nil, "", false, code, strings.ReplaceAll(msg, "AI.GENERATE", c.name())
+	}
+	prompt := joinText(pieces)
+	if hasRef(pieces) && (c.fn == "COUNT_TOKENS" || c.fn == "EMBED") {
+		return nil, "", false, 501, "Not implemented here: " + c.name() + " of an ObjectRef (multimodal content, #1980): CloudBurrow sends ObjectRefs " +
+			"to AI.GENERATE, AI.GENERATE_BOOL/INT/DOUBLE, AI.IF, AI.SCORE, AI.CLASSIFY, ML.GENERATE_TEXT and AI/ML.GENERATE_EMBEDDING. Nothing was run."
 	}
 	if c.fn == "COUNT_TOKENS" {
 		return f.countTokensRow(r.Context(), project, a, prompt)
@@ -839,7 +845,28 @@ func (f front) aiRow(r *http.Request, project string, c aiCall, a aiResolved, ke
 	if c.fn == "CLASSIFY" {
 		full = classifyPrompt(prompt, a)
 	}
-	text, raw, status := f.aiGenerateText(r, project, a.rm, full, aiResponseSchema(c.fn, a.schema), a.genCfg)
+	var text, status string
+	var raw []byte
+	if hasRef(pieces) {
+		// ObjectRef fields (#1980): the objects as parts, in order, the
+		// call's instruction after them.
+		var parts []any
+		if c.fn == "CLASSIFY" {
+			parts, status = f.pieceParts(r, []promptPiece{{text: classifyPrompt(prompt, a)}}, "")
+			if status == "" {
+				var objs []any
+				objs, status = f.pieceParts(r, refPieces(pieces), "")
+				parts = append(objs, parts...)
+			}
+		} else {
+			parts, status = f.pieceParts(r, pieces, aiInstruction(c, a))
+		}
+		if status == "" {
+			text, raw, status = f.aiGenerateParts(r, project, a.rm, parts, aiResponseSchema(c.fn, a.schema), a.genCfg)
+		}
+	} else {
+		text, raw, status = f.aiGenerateText(r, project, a.rm, full, aiResponseSchema(c.fn, a.schema), a.genCfg)
+	}
 	fields, _ := c.output(a)
 	nulls := func() []string {
 		var out []string
@@ -1011,6 +1038,12 @@ func parseCategories(text string, a aiResolved) (string, string) {
 // cfg, when not nil, is the request's generationConfig (model_params'); the
 // schema's fields replace any of its own.
 func (f front) aiGenerateText(r *http.Request, project string, rm *remoteModel, prompt string, schema, cfg map[string]any) (string, []byte, string) {
+	return f.aiGenerateParts(r, project, rm, []any{map[string]string{"text": prompt}}, schema, cfg)
+}
+
+// aiGenerateParts is aiGenerateText of a user turn of parts (text and
+// ObjectRefs' fileData, #1980).
+func (f front) aiGenerateParts(r *http.Request, project string, rm *remoteModel, parts []any, schema, cfg map[string]any) (string, []byte, string) {
 	gc := map[string]any{}
 	for k, v := range cfg {
 		gc[k] = v
@@ -1019,7 +1052,7 @@ func (f front) aiGenerateText(r *http.Request, project string, rm *remoteModel, 
 		gc["responseMimeType"] = "application/json"
 		gc["responseSchema"] = schema
 	}
-	body := generateBody(prompt, gc)
+	body := generatePartsBody(parts, gc)
 	raw, status := f.vertexCall(r.Context(), project, rm, "generateContent", body)
 	if status != "" {
 		return "", raw, status

@@ -28,7 +28,15 @@ import (
 //   - ALTER TABLE ADD COLUMN ... GENERATED fills an existing table's rows;
 //   - AI.SEARCH returns base and distance, nearest first, top_k rows, its
 //     base query's columns only, each distance_type; a table without
-//     generation, another column, HYBRID and rerank are refused.
+//     generation, another column and HYBRID without a hybrid index are
+//     refused, and so are a reranker's num_candidates under top_k and an
+//     empty query_value with rerank;
+//   - rerank => TRUE adds rerank_score (0 to 1), the rows ordered by it,
+//     scored on the local embedding model;
+//   - with a hybrid index (CREATE VECTOR INDEX on the embedding column
+//     with lexical_search_columns, #1952), mode HYBRID and AUTO run a
+//     hybrid search, its distance 1 minus a reciprocal rank fusion score,
+//     and mode VECTOR a semantic one.
 //
 // covers: bigquery.jobs.query, bigquery.tables.get, bigquery.tabledata.insertAll
 func TestBigQueryAutonomousEmbeddingsAndAISearch(t *testing.T) {
@@ -207,8 +215,11 @@ func TestBigQueryAutonomousEmbeddingsAndAISearch(t *testing.T) {
 	for sql, want := range map[string]string{
 		fmt.Sprintf("SELECT * FROM AI.SEARCH(TABLE `%s.docs`, 'content', 'bread')", ds):                       "autonomous embedding generation",
 		fmt.Sprintf("SELECT * FROM AI.SEARCH(TABLE `%s.products`, 'name', 'bread')", ds):                      "source column",
-		fmt.Sprintf("SELECT * FROM AI.SEARCH(TABLE `%s.products`, 'description', 'x', mode => 'HYBRID')", ds): "501",
-		fmt.Sprintf("SELECT * FROM AI.SEARCH(TABLE `%s.products`, 'description', 'x', rerank => TRUE)", ds):   "501",
+		fmt.Sprintf("SELECT * FROM AI.SEARCH(TABLE `%s.products`, 'description', 'x', mode => 'HYBRID')", ds): "hybrid index",
+		fmt.Sprintf("SELECT * FROM AI.SEARCH(TABLE `%s.products`, 'description', 'x', top_k => 2, rerank => TRUE, "+
+			"options => '{\"reranker\": {\"num_candidates\": 1}}')", ds): "num_candidates",
+		fmt.Sprintf("SELECT * FROM AI.SEARCH(TABLE `%s.products`, 'description', '', rerank => TRUE)", ds):                   "non-empty",
+		fmt.Sprintf("SELECT * FROM AI.SEARCH(TABLE `%s.products`, 'description', 'x', options => '{\"reranker\": {}}')", ds): "rerank",
 		fmt.Sprintf("SELECT * FROM AI.SEARCH(TABLE `%s.products`, 'description', 'x', "+
 			"options => '{\"use_brute_force\": true, \"fraction_lists_to_search\": 0.5}')", ds): "fraction_lists_to_search",
 		fmt.Sprintf("SELECT * FROM AI.SEARCH(TABLE `%s.products`, 'description', 'x', distance_type => 'MANHATTAN')", ds): "distance_type",
@@ -216,5 +227,39 @@ func TestBigQueryAutonomousEmbeddingsAndAISearch(t *testing.T) {
 		if err := run(sql); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: %v, want %q", sql, err, want)
 		}
+	}
+
+	// rerank: the candidates scored and ordered by rerank_score.
+	rows = mlQuery(t, h, c, fmt.Sprintf("SELECT base.name AS name, distance, rerank_score FROM AI.SEARCH(TABLE `%s.products`, 'description', "+
+		"'books to learn from', top_k => 2, rerank => TRUE, options => '{\"reranker\": {\"num_candidates\": 3}}') ORDER BY rerank_score DESC", ds))
+	if len(rows) != 2 || rows[0]["name"] != "Encyclopedia set" {
+		t.Errorf("AI.SEARCH rerank: %v", rows)
+	}
+	for _, r := range rows {
+		if s, ok := r["rerank_score"].(float64); !ok || s < 0 || s > 1 {
+			t.Errorf("rerank_score %v, want 0 to 1", r)
+		}
+	}
+	t.Logf("AI.SEARCH rerank: %v", rows)
+
+	// A hybrid index: HYBRID and AUTO fuse the semantic and lexical ranks.
+	if err := run(fmt.Sprintf("CREATE VECTOR INDEX hybrid_index ON `%s.products`(description_embedding) "+
+		"OPTIONS(index_type = 'IVF', lexical_search_columns = ['description'])", ds)); err != nil {
+		t.Fatalf("CREATE VECTOR INDEX with lexical_search_columns: %v", err)
+	}
+	for _, mode := range []string{"HYBRID", "AUTO"} {
+		rows := mlQuery(t, h, c, fmt.Sprintf("SELECT base.name AS name, distance FROM AI.SEARCH(TABLE `%s.products`, 'description', 'board game', "+
+			"mode => '%s', top_k => 1)", ds, mode))
+		if len(rows) != 1 || rows[0]["name"] != "Super slingers" || !near(rows[0]["distance"], 1-2.0/61, 0.0001) {
+			t.Errorf("AI.SEARCH mode %s over a hybrid index: %v, want Super slingers at 1 - (1/61 + 1/61)", mode, rows)
+		}
+	}
+	rows = mlQuery(t, h, c, fmt.Sprintf("SELECT base.name AS name, distance FROM AI.SEARCH(TABLE `%s.products`, 'description', 'board game', "+
+		"mode => 'VECTOR', top_k => 1)", ds))
+	if len(rows) != 1 || rows[0]["name"] != "Super slingers" || near(rows[0]["distance"], 1-2.0/61, 0.0001) {
+		t.Errorf("AI.SEARCH mode VECTOR over a hybrid index: %v, want a semantic distance", rows)
+	}
+	if err := run(fmt.Sprintf("DROP VECTOR INDEX hybrid_index ON `%s.products`", ds)); err != nil {
+		t.Errorf("DROP VECTOR INDEX: %v", err)
 	}
 }

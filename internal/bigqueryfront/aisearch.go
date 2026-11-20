@@ -2,7 +2,6 @@ package bigqueryfront
 
 import (
 	"encoding/json"
-	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -29,13 +28,13 @@ import (
 // the call into the query as a subquery that computes each row's distance
 // from its generated embedding: brute force, which is what BigQuery does
 // with no vector index ("If no usable index exists, brute force is used
-// regardless"); CloudBurrow makes no vector index (CREATE VECTOR INDEX
-// fails), so mode AUTO is semantic search, and options' use_brute_force
-// and fraction_lists_to_search are checked and change nothing.
+// regardless"), or through the column's vector index (vectorindex.go,
+// #1952), as options' use_brute_force and fraction_lists_to_search say.
+// mode HYBRID, and AUTO over a hybrid index, is hybrid search
+// (hybridsearch.go); rerank => TRUE reranks on the local model
+// (rerank.go).
 //
-// 501, named: mode => 'HYBRID' (it needs a hybrid search index, which is
-// not served) and rerank => TRUE (the Discovery Engine ranking API, not
-// served locally). UNVERIFIED (re-read 2026-11-18, the page quotes no error text,
+// 501, named: an ObjectRef source or query value (#1798). UNVERIFIED (re-read 2026-11-18, the page quotes no error text,
 // and gives no formula): the refusals' words; DOT_PRODUCT's distance as
 // the negative dot product, as VECTOR_SEARCH's order (nearest first)
 // implies; a top_k of 0 giving no rows; a NULL query value failing 400.
@@ -139,7 +138,7 @@ func queryParameterString(q queryOptions, ref string) (*string, bool) {
 }
 
 // rewriteAISearch evaluates text's AI.SEARCH calls into subqueries.
-func (f front) rewriteAISearch(r *http.Request, q queryOptions, text string) (string, int, string) {
+func (f front) rewriteAISearch(r *http.Request, q queryOptions, text string, stats *[]map[string]any) (string, int, string) {
 	calls, code, msg := findAISearch(text)
 	if code != 0 || len(calls) == 0 {
 		return text, code, msg
@@ -147,7 +146,7 @@ func (f front) rewriteAISearch(r *http.Request, q queryOptions, text string) (st
 	var b strings.Builder
 	last := 0
 	for _, c := range calls {
-		sub, code, msg := f.aiSearchSubquery(r, q, c)
+		sub, code, msg := f.aiSearchSubquery(r, q, c, stats)
 		if code != 0 {
 			return "", code, msg
 		}
@@ -160,7 +159,7 @@ func (f front) rewriteAISearch(r *http.Request, q queryOptions, text string) (st
 }
 
 // aiSearchSubquery is c's rows as a subquery.
-func (f front) aiSearchSubquery(r *http.Request, q queryOptions, c aiSearchCall) (string, int, string) {
+func (f front) aiSearchSubquery(r *http.Request, q queryOptions, c aiSearchCall, stats *[]map[string]any) (string, int, string) {
 	project, dataset, table, ok := f.resolveModel(c.table, q)
 	if !ok {
 		return "", 400, "Table name " + strings.Join(c.table, ".") + " missing dataset while no default dataset is set in the request."
@@ -189,10 +188,6 @@ func (f front) aiSearchSubquery(r *http.Request, q queryOptions, c aiSearchCall)
 		if !ok || mode != "AUTO" && mode != "VECTOR" && mode != "HYBRID" {
 			return "", 400, "mode must be 'AUTO', 'VECTOR' or 'HYBRID'"
 		}
-	}
-	if mode == "HYBRID" {
-		return "", 501, "Not implemented here: AI.SEARCH with mode => 'HYBRID': hybrid search needs a hybrid search index, which CloudBurrow does not make " +
-			"(mode => 'AUTO' runs semantic search where there is none). Nothing was run."
 	}
 	topK := int64(10)
 	if v, ok := c.named["top_k"]; ok {
@@ -225,8 +220,13 @@ func (f front) aiSearchSubquery(r *http.Request, q queryOptions, c aiSearchCall)
 			return "", 400, msg
 		}
 	}
+	numCandidates := topK * 5
 	if rerank {
-		return "", 501, "Not implemented here: AI.SEARCH with rerank => TRUE: reranking calls the Discovery Engine ranking API, which CloudBurrow does not serve locally. Nothing was run."
+		var code int
+		var msg string
+		if numCandidates, code, msg = rerankCandidates(c.named["options"], topK, fields, c.column); code != 0 {
+			return "", code, msg
+		}
 	}
 	// The query value.
 	var value *string
@@ -243,6 +243,9 @@ func (f front) aiSearchSubquery(r *http.Request, q queryOptions, c aiSearchCall)
 	}
 	if value == nil {
 		return "", 400, "The query_value of AI.SEARCH can't be NULL"
+	}
+	if rerank && *value == "" {
+		return "", 400, "With rerank => TRUE, the query_value of AI.SEARCH must be a non-empty STRING"
 	}
 	if e.Connection != "" {
 		parts := strings.Split(e.Connection, ".")
@@ -263,45 +266,73 @@ func (f front) aiSearchSubquery(r *http.Request, q queryOptions, c aiSearchCall)
 	if status != "" {
 		return "", 400, "AI.SEARCH could not embed its query_value: " + status
 	}
-	lits := make([]string, len(vec))
-	var norm float64
-	for i, x := range vec {
-		lits[i] = sqlF(x)
-		norm += x * x
+	// The index, and whether the search is hybrid: mode HYBRID, or AUTO
+	// over a hybrid index (a vector index with lexical_search_columns).
+	use, code, msg := f.searchIndex(r, project, dataset, table, fields, meta, e.Column, c.named["options"])
+	if code != 0 {
+		return "", code, msg
 	}
-	v := "ARRAY<FLOAT64>[" + strings.Join(lits, ", ") + "]"
-	emb := "b._cb_search_embedding.result"
-	dot := "(SELECT SUM(x * " + v + "[OFFSET(i)]) FROM UNNEST(" + emb + ") AS x WITH OFFSET i)"
-	var dist string
-	switch distance {
-	case "EUCLIDEAN":
-		dist = "SQRT((SELECT SUM(POW(x - " + v + "[OFFSET(i)], 2)) FROM UNNEST(" + emb + ") AS x WITH OFFSET i))"
-	case "COSINE":
-		dist = "(1 - " + dot + " / (SQRT((SELECT SUM(x * x) FROM UNNEST(" + emb + ") AS x)) * " + sqlF(math.Sqrt(norm)) + "))"
-	case "DOT_PRODUCT":
-		dist = "(-" + dot + ")"
+	var lexical *lexicalSearch
+	if x := f.tables.get(streamKey(project, dataset, table), str(meta, "creationTime")).VectorIndex; mode != "VECTOR" {
+		hybridIndex := x != nil && strings.EqualFold(x.Column, e.Column) && len(x.Lexical) > 0
+		if mode == "HYBRID" && !hybridIndex {
+			return "", 400, "AI.SEARCH with mode => 'HYBRID' needs a hybrid index: a vector index on " + e.Column + " of " + dataset + "." + table +
+				" with the lexical_search_columns option"
+		}
+		if hybridIndex {
+			var quoted []string
+			for _, l := range x.Lexical {
+				quoted = append(quoted, sqlString(l))
+			}
+			var code int
+			var msg string
+			if lexical, code, msg = parseLexicalSearch(q, fields, "["+strings.Join(quoted, ", ")+"]", c.value, "AI.SEARCH"); code != 0 {
+				return "", code, msg
+			}
+		}
 	}
-	// The base rows, with the embedding beside them.
+	*stats = append(*stats, use.stats())
+	if _, given := c.named["distance_type"]; use.index != nil && !given {
+		distance = use.index.Distance
+	}
+	v := floatArrayLiteral(vec)
+	bvec, qv := "b._cb_vs_vec", v
+	if use.index != nil && use.index.Norm == "L2" {
+		bvec, qv = normalizedSQL(bvec), normalizedSQL(v)
+	}
+	dist := searchDistance(distance, bvec, qv)
+	// The base rows, with the embedding beside them; with an index, a
+	// WHERE on columns it does not store is a post-filter.
 	ref := quotePath([]string{project, dataset, table})
-	baseSQL := "SELECT *, " + sqlIdent(e.Column) + " AS _cb_search_embedding FROM " + ref
+	embExpr := sqlIdent(e.Column) + ".result"
+	baseSQL := "SELECT *, " + embExpr + " AS _cb_vs_vec FROM " + ref
 	var names []string
+	post := false
 	if c.query == "" {
 		for _, fl := range fields {
 			names = append(names, str(fl, "name"))
 		}
 	} else {
-		probe := q
-		if !strings.Contains(c.query, "@") && !strings.Contains(c.query, "?") {
-			probe.QueryParameters, probe.ParameterMode = nil, ""
-		}
-		cols, _, code, msg := f.queryAllRows(r, probe, "SELECT * FROM ("+c.query+") LIMIT 0")
+		cols, _, code, msg := f.queryAllRows(r, probeOptions(q, c.query), "SELECT * FROM ("+c.query+") LIMIT 0")
 		if code != 0 {
 			return "", code, msg
 		}
 		for _, col := range cols {
 			names = append(names, col.Name)
 		}
-		baseSQL = c.query[:c.fromAt] + ", " + sqlIdent(e.Column) + " AS _cb_search_embedding " + c.query[c.fromAt:]
+		baseSQL = c.query[:c.fromAt] + ", " + embExpr + " AS _cb_vs_vec " + c.query[c.fromAt:]
+		if wcols, where, ok := whereColumns(c.query, fields); ok && where > 0 && use.index != nil && !use.index.preFilter(wcols) {
+			post = true
+			baseSQL = c.query[:c.fromAt] + ", " + embExpr + " AS _cb_vs_vec, IFNULL((" + c.query[where+len("WHERE"):] + "), FALSE) AS _cb_vs_keep " +
+				c.query[c.fromAt:where]
+		}
+	}
+	if use.index != nil {
+		listed := names
+		if post {
+			listed = append(append([]string(nil), names...), "_cb_vs_keep")
+		}
+		baseSQL = use.listedBase(baseSQL, listed)
 	}
 	// A query parameter stays referenced, for the engine, which takes
 	// only the parameters a query names.
@@ -313,10 +344,48 @@ func (f front) aiSearchSubquery(r *http.Request, q queryOptions, c aiSearchCall)
 	for _, n := range names {
 		cols = append(cols, "b."+sqlIdent(n)+" AS "+sqlIdent(n))
 	}
-	sub := "(SELECT base, distance FROM (SELECT STRUCT(" + strings.Join(cols, ", ") + ") AS base, " + dist + " AS distance FROM (" + baseSQL + ") AS b " +
-		"WHERE " + emb + " IS NOT NULL AND ARRAY_LENGTH(" + emb + ") = " + strconv.Itoa(len(vec)) + paramRef + ") ORDER BY distance"
+	from := "(" + baseSQL + ") AS b"
+	cand := ""
+	if use.index != nil {
+		from += " CROSS JOIN (SELECT " + use.probeSQL(v) + " AS _cb_vs_probe) AS _cb_p"
+		cand = "(b._cb_vs_list IS NULL OR b._cb_vs_list IN UNNEST(_cb_p._cb_vs_probe))"
+	}
+	present := "b._cb_vs_vec IS NOT NULL AND ARRAY_LENGTH(b._cb_vs_vec) = " + strconv.Itoa(len(vec)) + paramRef
+	keep, carry, limit := "", "", topK
+	if post {
+		keep = ", b._cb_vs_keep AS _cb_vs_keep"
+	}
+	if rerank {
+		keep += ", b." + sqlIdent(c.column) + " AS _cb_rr_text"
+		carry, limit = ", _cb_rr_text", numCandidates
+	}
+	var sub string
+	if lexical != nil {
+		lexical.paramRef = ""
+		sub = lexical.hybridSQL(from, present, cand, dist, cols, keep, carry, post, limit)
+	} else {
+		sub = semanticSQL(from, present, cand, dist, cols, keep, carry, post, limit)
+	}
+	if !rerank {
+		return sub, 0, ""
+	}
+	return f.rerankSQL(r, q, project, a, *value, sub, topK)
+}
+
+// semanticSQL is a semantic search's rows (hybridSQL's arguments).
+func semanticSQL(from, present, cand, dist string, cols []string, keep, carry string, post bool, topK int64) string {
+	where := present
+	if cand != "" {
+		where += " AND " + cand
+	}
+	sub := "(SELECT base, distance" + carry + " FROM (SELECT STRUCT(" + strings.Join(cols, ", ") + ") AS base, " + dist + " AS distance" + keep + " FROM " + from + " " +
+		"WHERE " + where + " ORDER BY distance"
 	if topK >= 0 {
 		sub += " LIMIT " + strconv.FormatInt(topK, 10)
 	}
-	return sub + ")", 0, ""
+	sub += ")"
+	if post {
+		sub += " WHERE _cb_vs_keep"
+	}
+	return sub + ")"
 }

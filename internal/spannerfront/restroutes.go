@@ -89,8 +89,9 @@ var routes = []route{
 			return nil, err
 		}
 		req := &databasepb.CreateBackupRequest{Parent: r.m[1], BackupId: r.q.Get("backupId"), Backup: b}
-		if t := r.q.Get("encryptionConfig.encryptionType"); t != "" || r.q.Get("encryptionConfig.kmsKeyName") != "" {
+		if t := r.q.Get("encryptionConfig.encryptionType"); t != "" || r.q.Get("encryptionConfig.kmsKeyName") != "" || len(r.q["encryptionConfig.kmsKeyNames"]) > 0 {
 			req.EncryptionConfig = &databasepb.CreateBackupEncryptionConfig{KmsKeyName: r.q.Get("encryptionConfig.kmsKeyName"),
+				KmsKeyNames:    r.q["encryptionConfig.kmsKeyNames"],
 				EncryptionType: databasepb.CreateBackupEncryptionConfig_EncryptionType(databasepb.CreateBackupEncryptionConfig_EncryptionType_value[t])}
 		}
 		return databases{s: s}.CreateBackup(ctx, req)

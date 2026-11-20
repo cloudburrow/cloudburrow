@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/cloudburrow/cloudburrow/internal/cmek"
 	"io"
 	"net"
 	"net/http"
@@ -72,6 +73,8 @@ type loggingService struct {
 	// pubsub and bigquery are the tunnels sinks deliver through (#1404),
 	// or nil.
 	pubsub, bigquery func() *netfwd.Forwarder
+	// keys are log buckets' customer-managed keys (#1950), or nil.
+	keys *cmek.Keys
 	// stopDelivery ends the Cloud Storage sinks' hourly writes.
 	stopDelivery context.CancelFunc
 }
@@ -279,6 +282,9 @@ func (s *loggingService) Start(ctx context.Context) error {
 		s.admin.UseHierarchy(loggingHierarchy{s.hierarchy})
 	}
 	s.api.UseAdmin(s.admin)
+	if s.keys != nil {
+		s.admin.UseKeys(*s.keys)
+	}
 	if serviceEnabled(s.cfg, config.ServiceStorage) {
 		src := storageSourceFetcher{cfg: s.cfg}
 		if s.storage != nil {
