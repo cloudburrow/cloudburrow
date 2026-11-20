@@ -460,6 +460,108 @@ func init() {
 	}
 	extremes("minimum_n", false)
 	extremes("maximum_n", true)
+
+	// The scalar maximum, minimum and sum (#1990). Outside an aggregate
+	// stage the Go client sends them two ways: LogicalMaximum(x, y, ...)
+	// as maximum(x, y, ...), which logical-functions defines as "the
+	// maximum non-NULL, non-ABSENT value in a series of values" (NULL when
+	// there is none, types in Firestore's value order); and
+	// ArrayMaximum(a), ArrayMinimum(a), ArraySum(a) as maximum(a),
+	// minimum(a), sum(a), which array-functions defines on the array's
+	// elements. So one argument that is an array is the array form, and
+	// any other call the series form.
+	// UNVERIFIED (re-read 2026-11-20): Google does not say how it tells
+	// LogicalMaximum(a) of one array from ArrayMaximum(a); a lone array is
+	// taken as the array form (the series form of one value would return
+	// it unchanged). Nor does it place NaN for maximum and minimum; it
+	// sorts below every other number, as in Firestore's value order.
+	pick := func(vs []*firestorepb.Value, max bool) *firestorepb.Value {
+		var best *firestorepb.Value
+		for _, v := range vs {
+			if v == nil || isNull(v) {
+				continue
+			}
+			if c := compareValues(v, best); best == nil || (max && c > 0) || (!max && c < 0) {
+				best = v
+			}
+		}
+		if best == nil {
+			return nullValue()
+		}
+		return best
+	}
+	extreme := func(name string, max bool) {
+		f[name] = func(p *pipelineRun, args []*firestorepb.Value, r row) (*firestorepb.Value, error) {
+			if len(args) == 0 {
+				return nil, status.Errorf(codes.InvalidArgument, "the function %q takes at least 1 argument.", name)
+			}
+			vs, err := evals(p, args, r)
+			if err != nil {
+				return nil, err
+			}
+			if a := vs[0].GetArrayValue(); len(vs) == 1 && a != nil {
+				return pick(a.GetValues(), max), nil
+			}
+			return pick(vs, max), nil
+		}
+	}
+	extreme("maximum", true)
+	extreme("minimum", false)
+	// sum of an array, as array-functions documents it: non-numeric
+	// elements are ignored, NaN anywhere makes NaN, no numeric element
+	// makes NULL, and "If 64-bit integer overflow occurs before any
+	// floating point value is summed, an error is returned"; once a
+	// float64 is summed, the sum is float64 ([INT64.MAX_VALUE, 1.0] is
+	// 9.223372036854776e+18).
+	// UNVERIFIED (re-read 2026-11-20): sum(NULL) and sum(ABSENT) are NULL, and sum
+	// of a non-array an expression error; Google documents neither.
+	f["sum"] = func(p *pipelineRun, args []*firestorepb.Value, r row) (*firestorepb.Value, error) {
+		if err := argc("sum", args, 1, 1); err != nil {
+			return nil, err
+		}
+		vs, err := evals(p, args, r)
+		if err != nil {
+			return nil, err
+		}
+		if vs[0] == nil || isNull(vs[0]) {
+			return nullValue(), nil
+		}
+		a := vs[0].GetArrayValue()
+		if a == nil {
+			return nil, evalErrf("sum: %s is not an array", typeName(vs[0]))
+		}
+		var isum int64
+		var fsum float64
+		seen, float := false, false
+		for _, e := range a.GetValues() {
+			switch x := e.GetValueType().(type) {
+			case *firestorepb.Value_IntegerValue:
+				seen = true
+				if float {
+					fsum += float64(x.IntegerValue)
+					continue
+				}
+				s := isum + x.IntegerValue
+				if (x.IntegerValue > 0 && s < isum) || (x.IntegerValue < 0 && s > isum) {
+					return nil, evalErrf("sum: integer overflow")
+				}
+				isum = s
+			case *firestorepb.Value_DoubleValue:
+				seen = true
+				if !float {
+					float, fsum = true, float64(isum)
+				}
+				fsum += x.DoubleValue
+			}
+		}
+		switch {
+		case !seen:
+			return nullValue(), nil
+		case float:
+			return doubleValue(fsum), nil
+		}
+		return intValue(isum), nil
+	}
 	// offset is a field access: absent when the input is not an array
 	// or the index is out of bounds (the client's documentation).
 	f["offset"] = func(p *pipelineRun, args []*firestorepb.Value, r row) (*firestorepb.Value, error) {

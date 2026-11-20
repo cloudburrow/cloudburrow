@@ -4,6 +4,7 @@ package compat
 
 import (
 	"io"
+	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -41,6 +42,9 @@ func TestFirestorePipelineFunctions(t *testing.T) {
 		"x":  3,
 		"ts": time.Date(2001, 3, 16, 4, 0, 0, 0, time.UTC), "jan": time.Date(2026, 1, 24, 20, 0, 0, 0, time.UTC),
 		"nye": time.Date(2025, 12, 31, 23, 59, 59, 0, time.UTC),
+		// #1990: three-valued logic, NaN, the scalar maximum/minimum/sum.
+		"t": true, "fl": false, "nul": nil, "nan": math.NaN(), "mixed": []any{1, "a", 2},
+		"nans": []any{1, math.NaN(), 3},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -195,6 +199,112 @@ func TestFirestorePipelineFunctions(t *testing.T) {
 	want("map_entries", got["entries"], []any{map[string]any{"k": "foo", "v": int64(2)}})
 	want("current_document's x", got["doc_x"], int64(3))
 	refused("switch_on with no match outside where", base().Select(firestore.Fields(firestore.SwitchOn(firestore.Equal("x", 1), "one").As("r"))))
+
+	// Three-valued logic (#1990), logical-functions' tables: and, or and
+	// nor are NULL when a NULL or ABSENT input leaves the result open, xor
+	// whenever one is NULL or ABSENT. The client's And/Or/Xor/Nor take
+	// boolean expressions only, so a NULL or absent field goes in through
+	// RawBooleanFunction, which sends the same function.
+	lg := func(name string, a, b string) firestore.BooleanExpression {
+		return firestore.RawBooleanFunction(name, a, b)
+	}
+	got = one("logic", base().Select(firestore.Fields(
+		lg("and", "nul", "t").As("and_null_t"),
+		lg("and", "missing", "t").As("and_absent_t"),
+		lg("and", "nul", "fl").As("and_null_f"),
+		lg("or", "nul", "t").As("or_null_t"),
+		lg("or", "fl", "missing").As("or_f_absent"),
+		lg("xor", "nul", "fl").As("xor_null_f"),
+		lg("xor", "fl", "t").As("xor_f_t"),
+		lg("nor", "nul", "t").As("nor_null_t"),
+		lg("nor", "fl", "missing").As("nor_f_absent"),
+		firestore.And(firestore.Equal("x", 3), firestore.Equal("t", true)).As("and_helper"),
+		firestore.Xor(firestore.Equal("x", 3), firestore.Equal("t", true)).As("xor_helper"),
+		firestore.Nor(firestore.Equal("x", 1), firestore.Equal("t", false)).As("nor_helper"),
+		firestore.Conditional(lg("and", "nul", "t"), 1, 0).As("cond_null"))))
+	for k, w := range map[string]any{
+		"and_null_t": nil, "and_absent_t": nil, "and_null_f": false, "or_null_t": true, "or_f_absent": nil,
+		"xor_null_f": nil, "xor_f_t": true, "nor_null_t": false, "nor_f_absent": nil,
+		"and_helper": true, "xor_helper": false, "nor_helper": true, "cond_null": int64(0),
+	} {
+		if v, ok := got[k]; !ok || !reflect.DeepEqual(v, w) {
+			t.Errorf("%s = %#v (present %v), want %#v", k, v, ok, w)
+		}
+	}
+	if rs, err := base().Where(lg("and", "missing", "t")).Execute(ctx).Results().GetAll(); err != nil || len(rs) != 0 {
+		t.Errorf("where and(ABSENT, TRUE) = %d results, %v; want 0", len(rs), err)
+	}
+	if rs, err := base().Where(lg("or", "missing", "t")).Execute(ctx).Results().GetAll(); err != nil || len(rs) != 1 {
+		t.Errorf("where or(ABSENT, TRUE) = %d results, %v; want 1", len(rs), err)
+	}
+
+	// NaN (#1990), comparison-functions' and logical-functions' tables:
+	// equal(NaN, NaN) TRUE, not_equal(NaN, NaN) FALSE, NaN in [1, NaN, 3],
+	// and NaN incomparable to 0.
+	got = one("NaN", base().Select(firestore.Fields(
+		firestore.Equal("nan", firestore.FieldOf("nan")).As("eq"),
+		firestore.Equal("nan", firestore.ConstantOf(math.NaN())).As("eq_const"),
+		firestore.NotEqual("nan", firestore.FieldOf("nan")).As("ne"),
+		firestore.NotEqual("nan", 0).As("ne_0"),
+		firestore.EqualAny("nan", firestore.FieldOf("nans")).As("eq_any"),
+		firestore.NotEqualAny("nan", firestore.FieldOf("nans")).As("ne_any"),
+		firestore.ArrayContains("nans", firestore.FieldOf("nan")).As("contains"),
+		firestore.LessThan("nan", 0).As("lt"),
+		firestore.GreaterThanOrEqual(firestore.ConstantOf(0), firestore.FieldOf("nan")).As("ge"),
+		firestore.Cmp("nan", 0).As("cmp"))))
+	for k, w := range map[string]any{"eq": true, "eq_const": true, "ne": false, "ne_0": true, "eq_any": true,
+		"ne_any": false, "contains": true, "lt": false, "ge": false, "cmp": int64(-1)} {
+		want("NaN "+k, got[k], w)
+	}
+	if rs, err := base().Where(firestore.Equal("nan", firestore.ConstantOf(math.NaN()))).Execute(ctx).Results().GetAll(); err != nil || len(rs) != 1 {
+		t.Errorf("where nan == NaN = %d results, %v; want 1", len(rs), err)
+	}
+
+	// The scalar maximum, minimum and sum (#1990): LogicalMaximum and
+	// LogicalMinimum over their arguments (logical-functions' tables),
+	// ArrayMaximum, ArrayMinimum and ArraySum over an array's elements
+	// (array-functions'); the client sends both as maximum, minimum, sum.
+	got = one("maximum minimum sum", base().Select(firestore.Fields(
+		firestore.LogicalMaximum(firestore.ConstantOf(false), -10).As("max_f_m10"),
+		firestore.LogicalMaximum(firestore.ConstantOf(0.0), -5).As("max_0_m5"),
+		firestore.LogicalMinimum(firestore.ConstantOf(0.0), -5).As("min_0_m5"),
+		firestore.LogicalMinimum(firestore.ConstantOf("foo"), []string{"foo"}).As("min_foo_arr"),
+		firestore.LogicalMaximum("missing", firestore.FieldOf("missing")).As("max_absent"),
+		firestore.LogicalMaximum("nul", firestore.ConstantOfNull(), firestore.FieldOf("x")).As("max_null_x"),
+		firestore.ArrayMaximum("a").As("amax"),
+		firestore.ArrayMinimum("sparse").As("amin"),
+		firestore.ArrayMaximum(firestore.ConstantOf([]any{nil, nil})).As("amax_nulls"),
+		firestore.ArraySum("a").As("sum"),
+		firestore.ArraySum("mixed").As("sum_mixed"),
+		firestore.ArraySum("nans").As("sum_nan"),
+		firestore.ArraySum(firestore.ConstantOf([]any{int64(math.MaxInt64), 1.0})).As("sum_float"),
+		firestore.ArraySum(firestore.ConstantOf([]string{"a"})).As("sum_none"))))
+	for k, w := range map[string]any{"max_f_m10": int64(-10), "max_0_m5": 0.0, "min_0_m5": int64(-5), "min_foo_arr": "foo",
+		"max_absent": nil, "max_null_x": int64(3), "amax": int64(5), "amin": int64(1), "amax_nulls": nil,
+		"sum": int64(15), "sum_mixed": int64(3), "sum_float": 9.223372036854776e+18, "sum_none": nil} {
+		want(k, got[k], w)
+	}
+	if f, ok := got["sum_nan"].(float64); !ok || !math.IsNaN(f) {
+		t.Errorf("sum [1, NaN, 3] = %#v, want NaN", got["sum_nan"])
+	}
+	refused("sum overflow before a float", base().Select(firestore.Fields(
+		firestore.ArraySum(firestore.ConstantOf([]any{int64(math.MaxInt64), 1})).As("r"))))
+
+	// The aggregates under the same equality: 1 and 1.0, 0.0 and -0.0, and
+	// NaN and NaN are one value each to count_distinct; sum of a NaN is NaN.
+	for i, v := range []any{1, 1.0, 0.0, math.Copysign(0, -1), math.NaN(), math.NaN()} {
+		if _, err := c.Collection("g").Doc(string(rune('a'+i))).Set(ctx, map[string]any{"v": v}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got = one("aggregates", c.Pipeline().Collection("g").Aggregate(firestore.Accumulators(
+		firestore.CountDistinct("v").As("distinct"), firestore.Sum("v").As("sum"))))
+	want("count_distinct of 1, 1.0, 0.0, -0.0, NaN, NaN", got["distinct"], int64(3))
+	for _, k := range []string{"sum"} {
+		if f, ok := got[k].(float64); !ok || !math.IsNaN(f) {
+			t.Errorf("%s with NaN = %#v, want NaN", k, got[k])
+		}
+	}
 
 	// error and current_context, as raw functions through the generated
 	// client.
