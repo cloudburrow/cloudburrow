@@ -9,7 +9,8 @@ package main
 //     Aggregation (the per-series aligner and its alignment period, the
 //     cross-series reducer and the labels it groups by) and the time range,
 //     drawn as a line chart with the table of its series below. Each run
-//     is one ListTimeSeries.
+//     is one ListTimeSeries. Its PromQL tab (#1991) runs a range query
+//     over the same series (consolemonitoringpromql.go).
 //   - Metrics management (/monitoring/metrics-management)
 //     (docs.cloud.google.com/monitoring/metrics-management): the project's
 //     metric descriptors, Create for a user-defined metric
@@ -268,6 +269,9 @@ var (
 // QueryForm is the builder's controls. The page draws them itself, in
 // Google's layout; this is their contract.
 func (monitoringExplorerProvider) QueryForm(path []string) (string, []console.Field) {
+	if len(path) == 1 && path[0] == "promql" {
+		return "Run query", promqlQueryFields()
+	}
 	if len(path) != 1 || path[0] != "time-series" {
 		return "", nil
 	}
@@ -400,6 +404,9 @@ func (p monitoringExplorerProvider) Build(ctx context.Context, project string, p
 	}
 	if len(path) == 1 && path[0] == "resource-types" {
 		return p.resourceTypes(ctx, a, project)
+	}
+	if len(path) == 1 && path[0] == "promql" {
+		return promqlListing(ctx, a, project, values, time.Now())
 	}
 	if len(path) != 1 || path[0] != "time-series" {
 		return console.Listing{}, fmt.Errorf("Metrics explorer has no query at %v", path)

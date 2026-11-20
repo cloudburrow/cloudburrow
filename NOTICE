@@ -45,6 +45,20 @@ under the Apache License, Version 2.0, and with its dependencies
 github.com/golang/glog (Apache License, Version 2.0) and gonum.org/v1/gonum,
 Copyright The Gonum Authors, under the BSD 3-Clause License.
 
+The binary is linked with the Prometheus PromQL engine,
+github.com/prometheus/prometheus v0.316.0 (packages promql, promql/parser,
+storage, model and tsdb/chunks), Copyright 2012-2015 The Prometheus Authors,
+under the Apache License, Version 2.0, whose NOTICE reads "This product
+includes software developed at SoundCloud Ltd. (https://soundcloud.com/).",
+and with its dependencies github.com/prometheus/client_golang and
+github.com/prometheus/procfs (Apache License, Version 2.0),
+github.com/grafana/regexp (Copyright (c) 2009 The Go Authors),
+github.com/edsrzf/mmap-go (Copyright (c) 2011, Evan Shaw) and
+github.com/facette/natsort (Copyright (c) 2015, Vincent Batoufflet and Marc
+Falzon), under the BSD 3-Clause License, and github.com/dennwc/varint
+(Copyright (c) 2019 Denys Smirnov) and github.com/beorn7/perks, under the MIT
+License (#1966).
+
 The binary is linked with gen2brain/gav1d v0.2.7
 (https://github.com/gen2brain/gav1d), a pure Go port of dav1d that decodes
 AVIF images and AV1 video, Copyright (c) 2018-2025 VideoLAN and dav1d

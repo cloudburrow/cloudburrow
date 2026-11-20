@@ -744,6 +744,13 @@
         "verification": "go.sum",
         "notes": "The console terminal (#781): internal/k8s starts `kubectl exec -it` on a pseudo-terminal, which kubectl requires before it allocates one in the container, as the session leader so a resize reaches it as SIGWINCH. golang.org/x/sys has no call that opens one."
       },
+      "goPrometheus": {
+        "module": "github.com/prometheus/prometheus",
+        "version": "v0.316.0",
+        "license": "Apache-2.0",
+        "verification": "go.sum",
+        "notes": "Cloud Monitoring PromQL (#1966, internal/service/monitoring/promql.go): the PromQL parser and engine (promql, promql/parser, storage, model/labels) evaluate PromQL alert conditions and the Prometheus HTTP API over the local series. Google publishes no PromQL engine for Cloud Monitoring's data. Only those packages are imported (no scrape, TSDB storage, discovery or web packages). It brings github.com/prometheus/client_golang and github.com/prometheus/procfs (Apache-2.0), github.com/grafana/regexp, github.com/edsrzf/mmap-go and github.com/facette/natsort (BSD-3-Clause), github.com/dennwc/varint and github.com/beorn7/perks (MIT), indirect. test/compat also uses client_golang's api/prometheus/v1 client against the served API."
+      },
       "goDifferentialPrivacy": {
         "module": "github.com/google/differential-privacy/go/v4",
         "version": "4.1.0",

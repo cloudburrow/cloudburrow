@@ -41,18 +41,32 @@ Operations > Monitoring has **Metrics explorer** (`/monitoring/metrics-explorer`
 
 The other v3 services and the Dashboards API v1 are on the same port (`cloud.google.com/go/monitoring/apiv3/v2` clients and `cloud.google.com/go/monitoring/dashboard/apiv1`, with the same options):
 
-- **Alert policies** with metric-threshold, metric-absence and log-match conditions, evaluated every 15 seconds over the series above and the local Cloud Logging. Each series that meets a condition opens an **incident**, which closes when it stops meeting it. Google has no incident API; the console's Alerting and Incidents pages list them, and acknowledge and close them. MQL and PromQL conditions are refused with `UNIMPLEMENTED`.
-- **Notification channels**. Delivery never leaves the machine. Webhook channels (`webhook_tokenauth`, `webhook_basicauth`) are posted Google's incident JSON (schema 1.2) only when their host is local: localhost, a loopback or private address, a cluster service name or `host.docker.internal`. A `pubsub` channel publishes to the instance's own Pub/Sub topic (with `--services pubsub`). Email, SMS, Slack, PagerDuty and Google Chat notifications are recorded and never sent; so are verification codes, which the console shows.
+- **Alert policies** with metric-threshold, metric-absence and log-match conditions, evaluated every 15 seconds over the series above and the local Cloud Logging. Each series that meets a condition opens an **incident**, which closes when it stops meeting it. Google has no incident API; the console's Alerting and Incidents pages list them, and acknowledge and close them. MQL and PromQL conditions are evaluated too (below). A `notificationChannelStrategy` with a `renotifyInterval` (30 minutes to 24 hours) repeats an open incident's notification to its channels.
+- **Notification channels**. Delivery never leaves the machine. Webhook channels (`webhook_tokenauth`, `webhook_basicauth`) are posted Google's incident JSON (schema 1.2) only when their host is local: localhost, a loopback or private address, a cluster service name or `host.docker.internal`. A `pubsub` channel publishes to the instance's own Pub/Sub topic (with `--services pubsub`). Email, SMS, Slack, PagerDuty and Google Chat notifications are recorded and never sent; so are verification codes, which a channel's Deliveries on the console show. `VerifyNotificationChannel` takes that code; `GetNotificationChannelVerificationCode` of a verified channel gives one that verifies another channel with the same type and labels.
 - **Snoozes**: while one is active, its policies open no incidents.
 - **Uptime checks**: HTTP(S) and TCP checks of local hosts only, run once per period from one local checker. Each run writes `monitoring.googleapis.com/uptime_check/check_passed` and `request_latency`, which policies can alert on.
 - **Groups**: their members are the monitored resources of the project's series.
-- **Services and SLOs** are stored; their compliance is not computed.
+- **Services and SLOs**: `ListTimeSeries` with `select_slo_health`, `select_slo_compliance`, `select_slo_budget`, `select_slo_budget_fraction`, `select_slo_burn_rate("SLO", "3600s")` and `select_slo_counts` computes them from the SLO's request-based or windows-based SLI over the local series. `basicSli` is refused.
 - **Dashboards** are stored with an etag, and drawn on the console's Dashboards page.
 
 Terraform's `google_monitoring_notification_channel`, `_alert_policy`, `_uptime_check_config`, `_group` and `_dashboard` work through `cloudburrow terraform`. `cloudburrow gcloud-setup` writes the `monitoring` override, so `gcloud monitoring dashboards`, `gcloud alpha|beta monitoring channels` and `policies` reach the instance.
 
 Operations > Monitoring adds **Alerting**, **Incidents**, **Notification channels**, **Uptime checks**, **Dashboards**, **Groups**, **Services** and **Snoozes** pages.
 
+## PromQL and MQL (#1966)
+
+PromQL runs on the Prometheus engine over the local series, named as Google names them: `{"custom.googleapis.com/app/latency"}` or `custom_googleapis_com:app_latency`, `kubernetes_io:container_cpu_limit_cores`, with the metric and resource labels and `monitored_resource`. The Prometheus HTTP API Google serves is on the Monitoring port, so Grafana or `client_golang` can point at it:
+
+```
+http://localhost:9033/v1/projects/PROJECT/location/global/prometheus/api/v1/query?query=sum(custom_googleapis_com:app_latency)
+```
+
+`query`, `query_range`, `labels`, `label/NAME/values`, `series` and `metadata` are served. Alert policies take `conditionPrometheusQueryLanguage` (each series the query returns is true; it fires once true for `duration`).
+
+MQL is deprecated by Google but still runs through the API, so `QueryService.QueryTimeSeries` and `conditionMonitoringQueryLanguage` are served for the core of the language: `fetch`, `metric`, `filter`, `align`, `every`, `within`, `group_by` and `condition val() > N`. Other table operations answer `UNIMPLEMENTED`.
+
+The console offers them too ([#1991](https://github.com/cloudburrow/cloudburrow/issues/1991)): Metrics explorer's **PromQL** tab charts a range query; Create policy's **PromQL** condition takes a query, an evaluation interval and a retest window, and **Repeat notifications** sets `renotifyInterval` for the policy's channels (also on a policy's page); a service's page shows each SLO's status, compliance, error budget remaining and 1-hour burn rate, with Service level indicator and Error budget charts. MQL has no console page, as at Google.
+
 ## Not served
 
-The Query service (MQL, `QueryTimeSeries`) answers `UNIMPLEMENTED`. See [compatibility.md](compatibility.md#cloud-monitoring--googlemonitoringv3) for every claim and its gaps.
+SQL conditions, forecast options and `basicSli` SLOs answer `UNIMPLEMENTED`. See [compatibility.md](compatibility.md#cloud-monitoring--googlemonitoringv3) for every claim and its gaps.

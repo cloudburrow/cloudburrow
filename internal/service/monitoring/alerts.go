@@ -202,6 +202,11 @@ func (s *Server) checkPolicy(project string, p, old *monitoringpb.AlertPolicy) e
 		if err := checkCondition(i, c); err != nil {
 			return err
 		}
+		if pq := c.GetConditionPrometheusQueryLanguage(); pq != nil {
+			if err := s.checkPromMetrics(project, "alertPolicy.conditions["+itoa(i)+"].conditionPrometheusQueryLanguage.query", pq); err != nil {
+				return err
+			}
+		}
 		if c.GetConditionMatchedLog() != nil {
 			hasLog = true
 		}
@@ -215,6 +220,26 @@ func (s *Server) checkPolicy(project string, p, old *monitoringpb.AlertPolicy) e
 		}
 		if p.GetAlertStrategy().GetNotificationRateLimit().GetPeriod() == nil {
 			return apierror.InvalidArgument("Field alertPolicy.alertStrategy.notificationRateLimit is required for log-based alerting policies")
+		}
+	}
+	policyChannels := map[string]bool{}
+	for _, c := range p.GetNotificationChannels() {
+		policyChannels[c] = true
+	}
+	for i, st := range p.GetAlertStrategy().GetNotificationChannelStrategy() {
+		f := "alertPolicy.alertStrategy.notificationChannelStrategy[" + itoa(i) + "]"
+		for _, n := range st.GetNotificationChannelNames() {
+			if !policyChannels[n] {
+				return apierror.InvalidArgument("Field %s.notificationChannelNames had an invalid value of %q: name one of the policy's notificationChannels", f, n)
+			}
+		}
+		if r := st.GetRenotifyInterval(); r != nil {
+			if d := r.AsDuration(); d < 30*time.Minute || d > 24*time.Hour || d%time.Minute != 0 {
+				return apierror.InvalidArgument("Field %s.renotifyInterval had an invalid value of %q: it must be from 30 minutes to 24 hours, a whole number of minutes", f, d)
+			}
+			if hasLog {
+				return apierror.InvalidArgument("Field %s.renotifyInterval had an invalid value: log-based alerting policies repeat notifications by notificationRateLimit", f)
+			}
 		}
 	}
 	if ac := p.GetAlertStrategy().GetAutoClose(); ac != nil {
@@ -236,6 +261,12 @@ func checkCondition(i int, c *monitoringpb.AlertPolicy_Condition) error {
 		}
 		if len([]rune(filter)) > MaxFilter {
 			return apierror.InvalidArgument("Field %s had an invalid value: at most %d characters", field(f), MaxFilter)
+		}
+		if isSLOSelector(filter) {
+			if _, err := parseSLOSelector(filter); err != nil {
+				return apierror.InvalidArgument("Field %s had an invalid value of %q: %v", field(f), filter, apierror.From(err).Message)
+			}
+			return nil
 		}
 		pf, err := parseFilter(filter, filterSeries)
 		if err != nil {
@@ -315,9 +346,9 @@ func checkCondition(i int, c *monitoringpb.AlertPolicy_Condition) error {
 		}
 		return nil
 	case c.GetConditionMonitoringQueryLanguage() != nil:
-		return apierror.Unimplemented("%s: Monitoring Query Language conditions are not supported; use conditionThreshold or conditionAbsent", field("conditionMonitoringQueryLanguage"))
+		return checkMQLCondition(field, c.GetConditionMonitoringQueryLanguage())
 	case c.GetConditionPrometheusQueryLanguage() != nil:
-		return apierror.Unimplemented("%s: PromQL conditions are not supported; use conditionThreshold or conditionAbsent", field("conditionPrometheusQueryLanguage"))
+		return checkPromCondition(field, c.GetConditionPrometheusQueryLanguage())
 	case c.GetConditionSql() != nil:
 		return apierror.Unimplemented("%s: SQL conditions are not supported", field("conditionSql"))
 	}
