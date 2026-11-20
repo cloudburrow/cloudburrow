@@ -2945,7 +2945,11 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   // A top-level list's selection actions (#1864) are its ListActions,
   // sent with an empty path: Roles' Create role from selection.
   const selectActions = data.selectActions || [];
-  const selectable = Boolean(opts.rowControls && caps.delete) || selectActions.length > 0;
+  // A list whose checkbox opens the info panel on the checked row (#1859):
+  // Google's Spanner Instances list, "Select the checkbox for the instance.
+  // The Info panel appears".
+  const infoOnSelect = Boolean(opts.rowControls && data.infoOnSelect);
+  const selectable = Boolean(opts.rowControls && caps.delete) || selectActions.length > 0 || infoOnSelect;
   // Or a list screen's rows marked selectable: History's builds awaiting
   // approval, which its Approve takes (#1854). A top-level list's own
   // selection actions take any of its rows (#1864).
@@ -3175,6 +3179,15 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
               if (e.target.checked) selected.add(item.name);
               else selected.delete(item.name);
               drawSelection();
+              if (infoOnSelect && e.target.checked) {
+                inspected = item.name;
+                openInfoPanelOn(item, dataColumns(), route, refresh);
+                for (const r of body.querySelectorAll("tr[aria-pressed]")) {
+                  const on = r.getAttribute("aria-label") === `Inspect ${item.name}`;
+                  r.setAttribute("aria-pressed", on ? "true" : "false");
+                  r.classList.toggle("is-inspected", on);
+                }
+              }
             },
           })));
       }
@@ -3441,6 +3454,11 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
         readAt = new Date();
         staleBecause = "";
         draw();
+        // The inspected row's panel shows what was just saved from it (#1859:
+        // a Spanner instance's Labels tab), but a poll does not redraw it
+        // under someone typing in it.
+        const shown = !quiet && inspected && infoPanelOpen() && data.items.find((i) => i.name === inspected);
+        if (shown) drawInfoPanel(shown, dataColumns(), route, refresh);
         announce(`${data.items.length} ${noun}, updated just now`);
         return;
       }
@@ -3532,7 +3550,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
               // (#1854); Delete only where the rows can be deleted.
               ...selectionButtons,
               caps.delete ? bulk : null,
-              selectionLabel)
+              caps.delete || selectActions.length ? selectionLabel : null)
           : null)
       : el("div", { class: "action-bar" }, ...selectionButtons,
           selectActions.length ? selectionLabel : null, refreshControl),
@@ -4283,7 +4301,9 @@ async function renderDetail(view, route, resourcePath) {
   // button, not the header's (#1851): a key's Disable over its versions.
   const onRows = new Set(sections.flatMap((s) => ((s.listing || {}).selectActions || []).map((a) => a.id)));
   const pageActions = [
-    ...(data.actions || []).filter((a) => !onTabs.has(a.id) && !onRows.has(a.id)).map((a) =>
+    // A Linked action is opened from where the page links to it (#1859:
+    // Upgrade beside a Spanner instance's edition), not as a button.
+    ...(data.actions || []).filter((a) => !onTabs.has(a.id) && !onRows.has(a.id) && !a.linked).map((a) =>
       el("button", {
         class: "secondary" + (a.destructive ? " danger" : ""),
         text: a.label,
@@ -5427,6 +5447,17 @@ function serverFilterBox(spec, reload) {
 // provider names the page it opens (#1554).
 function propertyValue(prop) {
   const value = prop.link ? el("a", { href: prop.link, text: prop.value }) : prop.value;
+  // A link beside the value that opens one of the page's actions, as
+  // Google's Upgrade beside a Spanner instance's edition (#1859): the page's
+  // own address with ?action=, which the page opens once.
+  if (prop.action) {
+    const here = new URL(location.href);
+    here.searchParams.set("action", prop.action);
+    return el("dd", { class: "has-property-action" }, el("span", {}, value), " ",
+      el("a", { class: "property-action", href: here.pathname + here.search,
+                "aria-label": `${prop.actionText || prop.action} ${prop.label.toLowerCase()}`,
+                text: prop.actionText || prop.action }));
+  }
   if (!prop.copy) return el("dd", {}, value);
   // A Copy button of its own, labelled as Google labels it: Copy URL,
   // Copy gsutil URI (#1843).
@@ -5663,6 +5694,44 @@ function drawInfoPanel(item, columns, route, onDone) {
     }] : []),
   ];
 
+  const details = [
+    item.status
+      ? el("p", {}, el("span", { class: "status", "data-state": stateOf(item.status) },
+          el("span", { text: item.status })))
+      : null,
+    // Only the columns the listing itself declares, so the panel can never
+    // show a field the provider did not return.
+    el("dl", { class: "info-fields" }, ...columns.flatMap((c) => {
+      const value = (item.fields || {})[c];
+      return value ? [el("dt", { text: c }), el("dd", { text: value })] : [];
+    })),
+    item.link
+      ? el("p", {}, el("a", { href: item.link, text: "Open" }))
+      : (item.opens || []).length
+        ? el("p", {}, el("a", { href: detailHref(route, item.opens), text: "Open" }))
+      : caps.detail
+        ? el("p", {}, el("a", { href: detailHref(route, item.name), text: "Open" }))
+        : null,
+    actions.length
+      ? el("div", { class: "info-actions" }, ...actions.map((a) =>
+          el("button", {
+            class: "secondary" + (a.destructive ? " danger" : ""),
+            text: a.label, onclick: () => a.run(),
+          })))
+      : null,
+  ];
+  const head = el("div", { class: "info-head" },
+    el("h2", { text: item.name }),
+    el("button", { class: "icon-button", "aria-label": "Close info panel",
+                   onclick: () => closeInfoPanel(),
+                   html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>' }));
+  // A row with tabs of its own (Resource.Info, #1859): Google's Spanner
+  // instance panel has a Labels tab. The row's columns are the first tab.
+  if ((item.info || []).length) {
+    const tabs = [{ id: "details", label: "Details" }, ...item.info];
+    return setChildren(panel, head, infoTabs(item, tabs, details, route, onDone));
+  }
+
   setChildren(panel,
     el("div", { class: "info-head" },
       el("h2", { text: item.name }),
@@ -5693,6 +5762,93 @@ function drawInfoPanel(item, columns, route, onDone) {
             text: a.label, onclick: () => a.run(),
           })))
       : null);
+}
+
+// infoTabs draws the info panel's tabs for a row (Resource.Info, #1859): a
+// tablist (arrows, Home and End move between tabs) over one panel. A tab
+// with a Form edits in place: its fields prefilled, saved with the form's
+// Submit label, performed at the row's Target.
+let INFO_TAB = "details";
+function infoTabs(item, tabs, details, route, onDone) {
+  if (!tabs.some((t) => t.id === INFO_TAB)) INFO_TAB = "details";
+  const panel = el("div", { class: "info-tab-panel", role: "tabpanel", id: "info-tab-panel", tabindex: "0" });
+  const buttons = tabs.map((t) => el("button", {
+    type: "button", role: "tab", id: `info-tab-${t.id}`, "aria-controls": "info-tab-panel",
+    text: t.label, onclick: () => select(t.id, false),
+  }));
+  const strip = el("div", { class: "tab-strip info-tabs", role: "tablist", "aria-label": `${item.name} info` }, ...buttons);
+  strip.addEventListener("keydown", (e) => {
+    const i = tabs.findIndex((t) => t.id === INFO_TAB);
+    const next = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: tabs.length - 1 }[e.key];
+    if (next === undefined) return;
+    e.preventDefault();
+    select(tabs[(next + tabs.length) % tabs.length].id, true);
+  });
+  const draw = (tab) => {
+    if (tab.id === "details") return setChildren(panel, ...details);
+    const shown = (tab.properties || []).length
+      ? el("dl", { class: "info-fields" }, ...tab.properties.flatMap((p) => [
+          el("dt", { text: p.label }), el("dd", { text: p.value })]))
+      : el("p", { class: "unavailable", text: tab.empty || `No ${tab.label.toLowerCase()}` });
+    if (!tab.form) return setChildren(panel, shown);
+    const form = buildCreateForm({ label: tab.form.label, fields: tab.form.fields });
+    const error = el("p", { class: "form-error", role: "alert", hidden: true });
+    const save = el("button", { type: "submit", class: "primary", text: tab.form.submit || tab.form.label });
+    const target = (item.target || []).length ? item.target : [item.name];
+    const submit = async (e) => {
+      e.preventDefault();
+      error.hidden = true;
+      if (!form.validate()) return;
+      const values = form.values();
+      save.disabled = true;
+      const op = recordOperation(`${tab.form.label} ${item.name}`);
+      try {
+        const res = await send(`/api/actions/${route.service}?project=${encodeURIComponent(currentProject())}`,
+          "POST", { Path: target, Action: tab.form.id, Values: values });
+        op.succeeded("", res && res.operation);
+        notify(`Saved the ${tab.label.toLowerCase()} of ${item.name}`);
+        if (onDone) onDone();
+      } catch (err) {
+        op.failed(err.message, err.operation);
+        error.textContent = err.message;
+        error.hidden = false;
+      } finally {
+        save.disabled = false;
+      }
+    };
+    setChildren(panel, shown,
+      el("form", { class: "info-tab-form", "aria-label": `${tab.label} of ${item.name}`, onsubmit: submit, novalidate: true },
+        ...form.nodes, error, el("div", { class: "action-bar" }, save)));
+  };
+  const select = (id, focus) => {
+    INFO_TAB = id;
+    buttons.forEach((b, i) => {
+      const on = tabs[i].id === id;
+      b.setAttribute("aria-selected", on ? "true" : "false");
+      b.tabIndex = on ? 0 : -1;
+      b.classList.toggle("is-active", on);
+      if (on && focus) b.focus();
+    });
+    panel.setAttribute("aria-labelledby", `info-tab-${id}`);
+    draw(tabs.find((t) => t.id === id));
+  };
+  select(INFO_TAB, false);
+  return el("div", { class: "info-tabbed" }, strip, panel);
+}
+
+// openInfoPanelOn opens the info panel on one row, as a checkbox that opens
+// it does (Listing.InfoOnSelect, #1859).
+function openInfoPanelOn(item, columns, route, onDone) {
+  writeStored(INFO_OPEN_KEY, true);
+  const panel = infoPanelHost();
+  if (!panel) return;
+  panel.hidden = false;
+  document.documentElement.setAttribute("data-info", "open");
+  if (INFO_TOGGLE && INFO_TOGGLE.isConnected) {
+    INFO_TOGGLE.setAttribute("aria-expanded", "true");
+    labelInfoToggle(INFO_TOGGLE, true);
+  }
+  drawInfoPanel(item, columns, route, onDone);
 }
 
 // --- the query pane ---------------------------------------------------
