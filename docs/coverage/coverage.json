@@ -14042,44 +14042,44 @@
         "method": "serviceusage.operations.cancel",
         "status": "Verified",
         "tests": [
-          "test/compat/serviceusage_test.go:277 TestServiceUsageOperations"
+          "test/compat/serviceusage_test.go:281 TestServiceUsageOperations"
         ]
       },
       {
         "method": "serviceusage.operations.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/serviceusage_test.go:277 TestServiceUsageOperations"
+          "test/compat/serviceusage_test.go:281 TestServiceUsageOperations"
         ]
       },
       {
         "method": "serviceusage.operations.get",
         "status": "Verified",
         "tests": [
-          "test/compat/serviceusage_test.go:277 TestServiceUsageOperations",
-          "test/compat/serviceusage_test.go:52 TestServiceUsageServices"
+          "test/compat/serviceusage_test.go:281 TestServiceUsageOperations",
+          "test/compat/serviceusage_test.go:53 TestServiceUsageServices"
         ]
       },
       {
         "method": "serviceusage.operations.list",
         "status": "Verified",
         "tests": [
-          "test/compat/serviceusage_test.go:277 TestServiceUsageOperations"
+          "test/compat/serviceusage_test.go:281 TestServiceUsageOperations"
         ]
       },
       {
         "method": "serviceusage.services.batchEnable",
         "status": "Verified",
         "tests": [
-          "test/compat/serviceusage_test.go:167 TestTerraformProjectService",
-          "test/compat/serviceusage_test.go:52 TestServiceUsageServices"
+          "test/compat/serviceusage_test.go:168 TestTerraformProjectService",
+          "test/compat/serviceusage_test.go:53 TestServiceUsageServices"
         ]
       },
       {
         "method": "serviceusage.services.batchGet",
         "status": "Verified",
         "tests": [
-          "test/compat/serviceusage_test.go:52 TestServiceUsageServices"
+          "test/compat/serviceusage_test.go:53 TestServiceUsageServices"
         ]
       },
       {
@@ -14092,9 +14092,9 @@
           "test/compat/apienable_test.go:211 TestServiceDisabledBigQuery",
           "test/compat/apienable_test.go:244 TestServiceDisabledFirestore",
           "test/compat/apienable_test.go:270 TestGcloudServicesDisableEnforced",
-          "test/compat/serviceusage_test.go:167 TestTerraformProjectService",
-          "test/compat/serviceusage_test.go:238 TestGcloudServices",
-          "test/compat/serviceusage_test.go:52 TestServiceUsageServices"
+          "test/compat/serviceusage_test.go:168 TestTerraformProjectService",
+          "test/compat/serviceusage_test.go:239 TestGcloudServices",
+          "test/compat/serviceusage_test.go:53 TestServiceUsageServices"
         ]
       },
       {
@@ -14107,18 +14107,18 @@
           "test/compat/apienable_test.go:211 TestServiceDisabledBigQuery",
           "test/compat/apienable_test.go:244 TestServiceDisabledFirestore",
           "test/compat/apienable_test.go:270 TestGcloudServicesDisableEnforced",
-          "test/compat/serviceusage_test.go:167 TestTerraformProjectService",
-          "test/compat/serviceusage_test.go:238 TestGcloudServices",
-          "test/compat/serviceusage_test.go:52 TestServiceUsageServices"
+          "test/compat/serviceusage_test.go:168 TestTerraformProjectService",
+          "test/compat/serviceusage_test.go:239 TestGcloudServices",
+          "test/compat/serviceusage_test.go:53 TestServiceUsageServices"
         ]
       },
       {
         "method": "serviceusage.services.get",
         "status": "Verified",
         "tests": [
-          "test/compat/serviceusage_test.go:167 TestTerraformProjectService",
-          "test/compat/serviceusage_test.go:238 TestGcloudServices",
-          "test/compat/serviceusage_test.go:52 TestServiceUsageServices"
+          "test/compat/serviceusage_test.go:168 TestTerraformProjectService",
+          "test/compat/serviceusage_test.go:239 TestGcloudServices",
+          "test/compat/serviceusage_test.go:53 TestServiceUsageServices"
         ]
       },
       {
@@ -14126,9 +14126,9 @@
         "status": "Verified",
         "tests": [
           "test/compat/loggingparents_test.go:282 TestServiceUsageFolderParentRefused",
-          "test/compat/serviceusage_test.go:167 TestTerraformProjectService",
-          "test/compat/serviceusage_test.go:238 TestGcloudServices",
-          "test/compat/serviceusage_test.go:52 TestServiceUsageServices"
+          "test/compat/serviceusage_test.go:168 TestTerraformProjectService",
+          "test/compat/serviceusage_test.go:239 TestGcloudServices",
+          "test/compat/serviceusage_test.go:53 TestServiceUsageServices"
         ]
       }
     ]
