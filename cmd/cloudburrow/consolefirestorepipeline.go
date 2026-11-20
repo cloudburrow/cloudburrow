@@ -19,7 +19,8 @@ import (
 // An Enterprise edition database's pipelines and user credentials (#1500),
 // on its page on the Firestore databases screen: Run pipeline, through the
 // official client's pipeline API, shows the results; the User credentials
-// tab lists them, with Create user credentials on the page and Disable,
+// tab (Google's Security page, consolefirestoresecurity.go) lists them,
+// with Add User on the tab and Disable,
 // Enable, Reset password and Delete on a row, through the official Admin
 // client. A created or reset password is shown once, in the action's
 // result, as Google's console shows it, and is not in the operations log.
@@ -56,11 +57,6 @@ func runPipelineFields() []console.Field {
 	}
 }
 
-func createCredsFields() []console.Field {
-	return []console.Field{{Name: "userCredsId", Label: "User name", Type: "text", Required: true, Pattern: databaseIDPattern,
-		Help: "4 to 63 lowercase letters, numbers and hyphens, starting with a letter. The password is generated and shown once."}}
-}
-
 func credsActions(uc *adminpb.UserCreds) []console.Action {
 	toggle := console.Action{ID: "disablecreds", Label: "Disable"}
 	if uc.GetState() == adminpb.UserCreds_DISABLED {
@@ -73,15 +69,17 @@ func credsActions(uc *adminpb.UserCreds) []console.Action {
 }
 
 // userCreds is an Enterprise database's User credentials tab.
-func (p firestoreDatabasesProvider) userCreds(ctx context.Context, c *admin.FirestoreAdminClient, db, id string) console.Listing {
-	list := console.Listing{Columns: []string{"State", "Principal", "Created", "Updated"}, NameColumn: "User", Noun: "user credentials"}
+func (p firestoreDatabasesProvider) userCreds(ctx context.Context, c *admin.FirestoreAdminClient, project, db, id string) console.Listing {
+	list := console.Listing{Columns: []string{"Role", "State", "Principal", "Created", "Updated"}, NameColumn: "Username", Noun: "users"}
 	resp, err := c.ListUserCreds(ctx, &adminpb.ListUserCredsRequest{Parent: db})
 	if err != nil {
-		list.Unavailable = "listing user credentials: " + err.Error()
+		list.Unavailable = "listing users: " + err.Error()
 		return list
 	}
+	roles := p.credsRolesOn(ctx, project, id)
 	for _, uc := range resp.GetUserCreds() {
 		list.Items = append(list.Items, console.Resource{Name: lastSegment(uc.GetName()), Fields: map[string]string{
+			"Role":      roleTitles(roles[uc.GetResourceIdentity().GetPrincipal()]),
 			"State":     enumWord(uc.GetState(), ""),
 			"Principal": uc.GetResourceIdentity().GetPrincipal(),
 			"Created":   uc.GetCreateTime().AsTime().Format("2006-01-02 15:04:05 MST"),
@@ -89,8 +87,9 @@ func (p firestoreDatabasesProvider) userCreds(ctx context.Context, c *admin.Fire
 		}, Actions: credsActions(uc), ActsOn: []string{id, firestoreCredsSegment, lastSegment(uc.GetName())}})
 	}
 	list.Total = len(list.Items)
-	list.Note = "User credentials authenticate MongoDB drivers, by SCRAM-SHA-256, to Firestore with MongoDB compatibility: " +
-		"use the database's MongoDB connection string with the user's name and password."
+	list.Note = "Users authenticate MongoDB drivers, by SCRAM-SHA-256, to Firestore with MongoDB compatibility: " +
+		"use the database's connection string with the user's name and password. A user's role holds on this database alone " +
+		"(an IAM binding on the project, conditioned on resource.name); Role lists the project's bindings that hold here."
 	return list
 }
 
@@ -139,12 +138,29 @@ func (p firestoreDatabasesProvider) ActAtResult(ctx context.Context, project str
 	defer c.Close()
 	switch action {
 	case "createcreds":
-		uc, err := c.CreateUserCreds(ctx, &adminpb.CreateUserCredsRequest{Parent: db,
-			UserCredsId: strings.TrimSpace(values["userCredsId"]), UserCreds: &adminpb.UserCreds{}})
+		role := values["role"]
+		if role != "" {
+			if _, ok := credsRoleTitles[role]; !ok {
+				return nil, fmt.Errorf("%q is not a role Add User offers", role)
+			}
+		}
+		user := strings.TrimSpace(values["userCredsId"])
+		uc, err := c.CreateUserCreds(ctx, &adminpb.CreateUserCredsRequest{Parent: db, UserCredsId: user, UserCreds: &adminpb.UserCreds{}})
 		if err != nil {
 			return nil, err
 		}
-		return p.passwordListing(uc), nil
+		res := p.passwordListing(uc)
+		if role != "" {
+			// The password is shown even when the grant fails: it cannot
+			// be read again.
+			if err := p.grantCredsRole(ctx, project, path[0], user, uc.GetResourceIdentity().GetPrincipal(), role); err != nil {
+				res.Note += " The role was not granted: " + err.Error()
+			} else {
+				res.Columns = append(res.Columns, "Role")
+				res.Items[0].Fields["Role"] = roleTitles([]string{role})
+			}
+		}
+		return res, nil
 	case "resetpassword":
 		uc, err := c.ResetUserPassword(ctx, &adminpb.ResetUserPasswordRequest{Name: db + "/userCreds/" + path[2]})
 		if err != nil {

@@ -6,15 +6,19 @@ import (
 	"strings"
 	"testing"
 
+	"cloud.google.com/go/iam/apiv1/iampb"
+
 	"github.com/cloudburrow/cloudburrow/internal/callfront"
 	"github.com/cloudburrow/cloudburrow/internal/calllog"
 	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
 	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin/fstest"
+	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
+	"github.com/cloudburrow/cloudburrow/internal/store"
 )
 
 // TestConsoleFirestorePipelineAndUserCreds (#1500): Create database with
 // the Enterprise edition, Run pipeline on its page showing the results,
-// and its User credentials tab, with Create user credentials showing the
+// and its Security tab (#1845), with Add User showing the
 // password once and Disable, Reset password and Delete on a row. A
 // Standard database's page offers neither.
 func TestConsoleFirestorePipelineAndUserCreds(t *testing.T) {
@@ -27,7 +31,11 @@ func TestConsoleFirestorePipelineAndUserCreds(t *testing.T) {
 	srv := callfront.Server(callfront.HandlerWith(docsAddr, &calllog.Ring{}, t.Logf, a), t.Logf)
 	go func() { _ = srv.Serve(l) }()
 	t.Cleanup(func() { _ = srv.Close() })
-	p := firestoreDatabasesProvider{endpoint: l.Addr().String(), mongo: "127.0.0.1:9026"}
+	reg := resourcemanager.New(store.NewMemory())
+	if _, err := reg.EnsureExists("p"); err != nil {
+		t.Fatal(err)
+	}
+	p := firestoreDatabasesProvider{endpoint: l.Addr().String(), mongo: "127.0.0.1:9026", projects: reg}
 	ctx := context.Background()
 
 	if _, err := p.Create(ctx, "p", map[string]string{"database": "entdb", "location": "nam5", "concurrency": "PESSIMISTIC", "edition": "ENTERPRISE"}); err != nil {
@@ -76,9 +84,36 @@ func TestConsoleFirestorePipelineAndUserCreds(t *testing.T) {
 		t.Error("a read time that is not RFC 3339 was accepted")
 	}
 
-	res, err = p.ActAtResult(ctx, "p", at, "createcreds", map[string]string{"userCredsId": "app-user"})
+	// Google's Add User (#1845, round 3): Username and a role, granted on
+	// this database alone.
+	add, ok := fsAdminAction(p.DetailActions(ctx, "p", at), "createcreds")
+	if !ok || add.Label != "Add User" || add.Submit != "Add user" || len(add.Fields) != 2 || add.Fields[0].Label != "Username" || add.Fields[1].Label != "Role" {
+		t.Errorf("Add User = %+v", add)
+	}
+	if _, err := p.ActAtResult(ctx, "p", at, "createcreds", map[string]string{"userCredsId": "bad-role", "role": "roles/owner"}); err == nil {
+		t.Error("Add User took a role it does not offer")
+	}
+	res, err = p.ActAtResult(ctx, "p", at, "createcreds", map[string]string{"userCredsId": "app-user", "role": "roles/datastore.user"})
 	if err != nil || len(res.Items) != 1 || res.Items[0].Fields["Password"] == "" {
-		t.Fatalf("Create user credentials = %+v, %v", res, err)
+		t.Fatalf("Add User = %+v, %v", res, err)
+	}
+	if got := res.Items[0].Fields["Role"]; got != "Cloud Datastore User" {
+		t.Errorf("Add User's dialog Role = %q, want Cloud Datastore User (note %q)", got, res.Note)
+	}
+	pol, err := resourcemanager.NewProjectsServer(reg).GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: resourcemanager.V3Name("p"),
+		Options: &iampb.GetPolicyOptions{RequestedPolicyVersion: 3}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var granted bool
+	for _, b := range pol.GetBindings() {
+		if b.GetRole() == "roles/datastore.user" && len(b.GetMembers()) == 1 && strings.HasSuffix(b.GetMembers()[0], "/databases/entdb/userCreds/app-user") &&
+			b.GetCondition().GetExpression() == `resource.name == "projects/p/databases/entdb"` {
+			granted = true
+		}
+	}
+	if !granted {
+		t.Errorf("Add User granted no conditional roles/datastore.user binding: %v", pol.GetBindings())
 	}
 	first := res.Items[0].Fields["Password"]
 	// #1703: the connection string a MongoDB driver authenticates with.
@@ -92,24 +127,28 @@ func TestConsoleFirestorePipelineAndUserCreds(t *testing.T) {
 	}
 	var shown bool
 	for _, prop := range d.Summary {
-		if prop.Label == "MongoDB connection string" && prop.Value == strings.Replace(wantCS, "app-user", "USERNAME", 1) {
+		if prop.Label == "Connection string" && prop.Value == "mongodb://127.0.0.1:9026/entdb?loadBalanced=true&tls=true&retryWrites=false" {
 			shown = true
 		}
 	}
 	if !shown {
-		t.Errorf("an Enterprise database's page shows no MongoDB connection string: %+v", d.Summary)
+		t.Errorf("an Enterprise database's page shows no base connection string: %+v", d.Summary)
 	}
 	var tab bool
 	for _, s := range d.Sections {
 		if s.ID == "usercreds" {
 			tab = true
-			if len(s.Listing.Items) != 1 || s.Listing.Items[0].Fields["State"] != "Enabled" || s.Listing.Items[0].Fields["Password"] != "" {
-				t.Errorf("the User credentials tab = %+v", s.Listing.Items)
+			if s.Label != "Security" || len(s.Actions) != 1 || s.Actions[0].Label != "Add User" {
+				t.Errorf("the users tab is %q with %+v; want Google's Security with Add User", s.Label, s.Actions)
+			}
+			if len(s.Listing.Items) != 1 || s.Listing.Items[0].Fields["State"] != "Enabled" || s.Listing.Items[0].Fields["Password"] != "" ||
+				s.Listing.Items[0].Fields["Role"] != "Cloud Datastore User" {
+				t.Errorf("the Security tab = %+v", s.Listing.Items)
 			}
 		}
 	}
 	if !tab {
-		t.Fatal("an Enterprise database's page has no User credentials tab")
+		t.Fatal("an Enterprise database's page has no Security tab")
 	}
 	row := []string{"entdb", firestoreCredsSegment, "app-user"}
 	if _, ok := fsAdminAction(p.DetailActions(ctx, "p", row), "disablecreds"); !ok {

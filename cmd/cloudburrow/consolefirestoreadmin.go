@@ -12,6 +12,7 @@ import (
 	"google.golang.org/api/iterator"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 )
 
 // firestoreDatabasesProvider is Firestore's second screen (#1331): the
@@ -30,6 +31,9 @@ type firestoreDatabasesProvider struct {
 	// (#1703), shown in an Enterprise database's connection string, and
 	// mongoCA its CA certificate's file (#1738).
 	mongo, mongoCA string
+	// projects is Resource Manager, whose project IAM policy Add User
+	// grants the new user's role in (#1845, consolefirestoresecurity.go).
+	projects *resourcemanager.Registry
 }
 
 // mongoConnectionString is the connection string Google documents for
@@ -186,13 +190,19 @@ func (p firestoreDatabasesProvider) Detail(ctx context.Context, project string, 
 		p.disasterRecovery(ctx, c, name, path[0]),
 		{ID: "ttl", Label: "Time-to-live", Listing: p.ttlPolicies(ctx, c, name, path[0]), Actions: acts["ttl"]},
 	}
-	// User credentials and pipelines are Enterprise edition features
+	// Users (Security) and pipelines are Enterprise edition features
 	// (#1500, consolefirestorepipeline.go).
 	if db.DatabaseEdition == adminpb.Database_ENTERPRISE {
-		if cs := p.mongoConnectionString("USERNAME", path[0]); cs != "" {
-			summary = append(summary, console.Property{Label: "MongoDB connection string", Value: cs})
+		// Google's base connection string, which the Explorer panel shows
+		// (Connect using MongoDB tools); a user's own, with SCRAM, is in
+		// Add user's dialog.
+		if cs := p.baseConnectionString(path[0]); cs != "" {
+			summary = append(summary, console.Property{Label: "Connection string", Value: cs})
 		}
-		sections = append(sections, console.Section{ID: "usercreds", Label: "User credentials", Listing: p.userCreds(ctx, c, name, path[0])})
+		// Google's Security page of an Enterprise database: its users,
+		// with Add User (#1845, round 3).
+		sections = append(sections, console.Section{ID: "usercreds", Label: "Security",
+			Listing: p.userCreds(ctx, c, project, name, path[0]), Actions: []console.Action{addUserAction()}})
 	}
 	return console.Detail{Summary: summary, Sections: sections}, nil
 }

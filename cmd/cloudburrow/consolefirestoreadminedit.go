@@ -328,7 +328,7 @@ func (p firestoreDatabasesProvider) DetailActions(ctx context.Context, project s
 			acts = append(acts,
 				console.Action{ID: "runpipeline", Label: "Run pipeline", Fields: runPipelineFields()},
 				console.Action{ID: "explainquery", Label: "Query Explain (MongoDB)", Fields: explainQueryFields()},
-				console.Action{ID: "createcreds", Label: "Create user credentials", Fields: createCredsFields()})
+				addUserAction())
 		}
 		return acts
 	}
