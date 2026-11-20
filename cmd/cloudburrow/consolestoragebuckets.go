@@ -460,9 +460,15 @@ func restoreObject(ctx context.Context, c *storage.Client, path []string) error 
 	return err
 }
 
+// showSoftDeleted is Google's Show list choice for soft-deleted objects
+// (use-soft-deleted-objects).
+const showSoftDeleted = "Soft-deleted objects only"
+
 // deletedObjects is a bucket's soft-deleted objects, each with Restore.
 func (p storageProvider) deletedObjects(ctx context.Context, b bucketMeta) console.Section {
-	sec := console.Section{ID: "deleted", Label: "Deleted objects", Listing: console.Listing{
+	// Drawn by the Objects tab's Show list, as Google's (#1843), not as a
+	// tab of its own.
+	sec := console.Section{ID: "deleted", Label: "Deleted objects", ShownIn: "objects", ShowAs: showSoftDeleted, Listing: console.Listing{
 		Columns: []string{"Generation", "Size", "Deleted", "Hard delete"}, NameColumn: "Name",
 		Noun: "deleted objects", Items: []console.Resource{},
 	}}
@@ -651,8 +657,10 @@ func (p storageDeletedProvider) List(ctx context.Context, project string) (conso
 	if err != nil {
 		return console.Listing{}, err
 	}
+	gens := map[string][]softGeneration{}
 	err = s.Buckets.List(project).SoftDeleted(true).Context(ctx).Pages(ctx, func(page *storagev1.Buckets) error {
 		for _, b := range page.Items {
+			gens[b.Name] = append(gens[b.Name], softGeneration{generation: b.Generation, deleted: b.SoftDeleteTime})
 			out.Items = append(out.Items, console.Resource{
 				Name: b.Name,
 				Fields: map[string]string{
@@ -660,14 +668,19 @@ func (p storageDeletedProvider) List(ctx context.Context, project string) (conso
 					"Deleted":     shortTime(b.SoftDeleteTime),
 					"Hard delete": shortTime(b.HardDeleteTime),
 				},
-				Target:  []string{strconv.FormatInt(b.Generation, 10), b.Name},
-				Actions: []console.Action{restoreAction()},
+				Target: []string{strconv.FormatInt(b.Generation, 10), b.Name},
 			})
 		}
 		return nil
 	})
 	if err != nil {
 		return console.Listing{}, fmt.Errorf("list deleted buckets: %w", err)
+	}
+	// Restore is Google's pane, offering every soft-deleted generation of
+	// the name (#2047).
+	for i, r := range out.Items {
+		gen, _ := strconv.ParseInt(r.Target[0], 10, 64)
+		out.Items[i].Actions = []console.Action{bucketRestorePane(gen, append([]softGeneration(nil), gens[r.Name]...))}
 	}
 	sort.SliceStable(out.Items, func(i, j int) bool { return out.Items[i].Name < out.Items[j].Name })
 	out.Total = len(out.Items)
@@ -689,7 +702,7 @@ func deletedBucketTarget(path []string) (name string, generation int64, err erro
 
 // DetailActions implements console.PathActor: Restore, on a bucket still
 // soft-deleted at that generation.
-func (p storageDeletedProvider) DetailActions(ctx context.Context, _ string, path []string) []console.Action {
+func (p storageDeletedProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
 	name, gen, err := deletedBucketTarget(path)
 	if err != nil {
 		return nil
@@ -698,14 +711,24 @@ func (p storageDeletedProvider) DetailActions(ctx context.Context, _ string, pat
 	if err != nil {
 		return nil
 	}
-	if _, err := s.Buckets.Get(name).SoftDeleted(true).Generation(gen).Context(ctx).Do(); err != nil {
+	b, err := s.Buckets.Get(name).SoftDeleted(true).Generation(gen).Context(ctx).Do()
+	if err != nil {
 		return nil
 	}
-	return []console.Action{restoreAction()}
+	if project == "" {
+		project = strconv.FormatUint(b.ProjectNumber, 10)
+	}
+	gens, err := softGenerations(ctx, s, project, name)
+	if err != nil {
+		gens = nil
+	}
+	return []console.Action{bucketRestorePane(gen, gens)}
 }
 
-// ActAt implements console.PathActor: buckets.restore.
-func (p storageDeletedProvider) ActAt(ctx context.Context, _ string, path []string, action string, _ map[string]string) error {
+// ActAt implements console.PathActor: Restore is buckets.restore of the
+// generation the pane chose, then objects.bulkRestore of the objects it
+// chose (#2047).
+func (p storageDeletedProvider) ActAt(ctx context.Context, _ string, path []string, action string, values map[string]string) error {
 	if action != "restore" {
 		return fmt.Errorf("%s is not an action on a deleted bucket", action)
 	}
@@ -717,8 +740,7 @@ func (p storageDeletedProvider) ActAt(ctx context.Context, _ string, path []stri
 	if err != nil {
 		return err
 	}
-	_, err = s.Buckets.Restore(name, gen).Context(ctx).Do()
-	return err
+	return restoreBucket(ctx, s, name, gen, values)
 }
 
 var (

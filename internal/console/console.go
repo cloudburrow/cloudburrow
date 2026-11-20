@@ -1027,6 +1027,16 @@ type Section struct {
 	// the page's Edit is (the provider's Editor): Google's service account
 	// Details tab has its Name box and Save (#1864). Its Label heads it.
 	Edit *EditForm `json:"edit,omitempty"`
+	// ShownIn, when set, is the ID of the tab that draws this section
+	// through its Show list instead of a tab of its own: Google's bucket
+	// Objects tab shows "Soft-deleted objects only" there, not on a
+	// Deleted objects tab (#1843). ShowAs is that choice's label.
+	ShownIn string `json:"shownIn,omitempty"`
+	ShowAs  string `json:"showAs,omitempty"`
+	// Show is the label of this tab's own content in its Show list, when
+	// another section is ShownIn it: "Live and noncurrent objects" on an
+	// object's Version history (#1843). Empty is "Live objects only".
+	Show string `json:"show,omitempty"`
 }
 
 // dropBlankProperties removes every Property whose Value is empty or
@@ -1247,6 +1257,24 @@ type DeleteLabeler interface {
 	DeleteLabel() string
 }
 
+// DeleteWorder is a Deleter whose delete reads as Google's in two more
+// places (#1848): the list's header button over the checked rows, and the
+// confirmation's button. Cloud Tasks' Queues list has "Select the checkbox
+// for the queue ... Click Delete queue. At the prompt, type the queue name,
+// and then click Confirm."
+type DeleteWorder interface {
+	Deleter
+	DeleteWords() DeleteWords
+}
+
+// DeleteWords are a DeleteWorder's labels; an empty one keeps "Delete".
+type DeleteWords struct {
+	// Selected is the list's button that deletes the checked rows.
+	Selected string
+	// Submit is the confirmation dialog's button.
+	Submit string
+}
+
 // RowEditLeader is a RowEditor whose rows' menus begin with Edit, as
 // Google's Triggers menu reads Edit, Disable, Delete (#1854).
 type RowEditLeader interface {
@@ -1373,6 +1401,12 @@ type Action struct {
 	// it, not as a button of its own: a property's ActionText link (Upgrade
 	// beside an edition) or an info panel tab's Form (#1859).
 	Linked bool `json:"linked,omitempty"`
+	// Menu, on a Section's action, draws it in the ellipsis menu at the
+	// top of the tab instead of as a button there, as Google's Cloud Tasks
+	// Logs tab has "Click the ellipsis icon > Disable logs" (#2064). The
+	// menu is the row menus' own: Escape closes it and gives focus back to
+	// its trigger. Any provider's tab may use it.
+	Menu bool `json:"menu,omitempty"`
 }
 
 // PathActor is a provider with actions on the resources inside a resource.
@@ -1855,7 +1889,8 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 			"id": p.ID(), "title": p.Title(),
 			"create": caps.Create, "delete": caps.Delete, "detail": caps.Detail,
 			"query": caps.Query, "edit": caps.Edit, "reveal": caps.Reveal,
-			"deleteLabel": caps.DeleteLabel, "deleteConfirm": caps.DeleteConfirm, "editRow": caps.EditRow, "editRowFirst": caps.EditRowFirst,
+			"deleteLabel": caps.DeleteLabel, "deleteConfirm": caps.DeleteConfirm,
+			"deleteSelected": caps.DeleteSelected, "deleteSubmit": caps.DeleteSubmit, "editRow": caps.EditRow, "editRowFirst": caps.EditRowFirst,
 			"page": caps.Page, "scope": caps.Scope, "filters": caps.Filters,
 		})
 	}
@@ -2047,7 +2082,11 @@ type capabilities struct {
 	// console confirms this kind's (deleteconfirm.go): "delete", "DELETE",
 	// "confirm" (Delete alone), or empty for the name typed back.
 	DeleteConfirm string `json:"deleteConfirm,omitempty"`
-	EditRow       string `json:"editRow,omitempty"`
+	// DeleteSelected and DeleteSubmit are a DeleteWorder's labels for the
+	// checked rows' Delete and the confirmation's button (#1848).
+	DeleteSelected string `json:"deleteSelected,omitempty"`
+	DeleteSubmit   string `json:"deleteSubmit,omitempty"`
+	EditRow        string `json:"editRow,omitempty"`
 	// EditRowFirst puts the rows' Edit first in their menus (RowEditLeader).
 	EditRowFirst bool `json:"editRowFirst,omitempty"`
 	// Detail means a row can be opened to show what is inside it.
@@ -2214,6 +2253,10 @@ func (s *Server) capabilitiesOf(p Provider) capabilities {
 	}
 	if c.Delete {
 		c.DeleteConfirm = deleteConfirmOf(p)
+	}
+	if dw, ok := p.(DeleteWorder); ok {
+		w := dw.DeleteWords()
+		c.DeleteSelected, c.DeleteSubmit = w.Selected, w.Submit
 	}
 	if rl, ok := p.(RowEditLeader); ok {
 		c.EditRowFirst = rl.RowEditFirst()

@@ -32,6 +32,11 @@ type Scope struct {
 	Default string `json:"default,omitempty"`
 	// Options are the choices, Selected among them.
 	Options []ScopeOption `json:"options"`
+	// ViewOptions draws the choice inside the list's View options dialog,
+	// as radio buttons above its column choices, applied by Save, rather
+	// than as a picker over the list: Google's Buckets page holds "Soft
+	// deleted buckets only" there (#1843).
+	ViewOptions bool `json:"viewOptions,omitempty"`
 }
 
 // ScopeOption is one choice in a Scope.

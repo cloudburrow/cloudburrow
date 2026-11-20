@@ -428,6 +428,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	monitoringSvc := newMonitoringService(cfg)
 	if monitoringSvc != nil {
 		monitoringSvc.logging = loggingSvc
+		// Cloud Tasks' queue metrics come from its dispatch (#2064).
+		monitoringSvc.tasks = tasksSvc
 		// Pub/Sub notification channels publish to this instance's Pub/Sub
 		// (#1964).
 		if serviceEnabled(cfg, config.ServicePubSub) {
