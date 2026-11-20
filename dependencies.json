@@ -690,7 +690,7 @@
         "version": "v2.8.0",
         "license": "Apache-2.0",
         "verification": "go.sum",
-        "notes": "Test-only (#416): the compat suite's envelope-encryption client for Cloud KMS. Never linked into the binary (TestTheBinaryDoesNotLinkTink); the server's crypto is the Go standard library."
+        "notes": "Test-only (#416): the compat suite's envelope-encryption client for Cloud KMS, and its independent ML-DSA and SLH-DSA verifier (#1946). Never linked into the binary (TestTheBinaryDoesNotLinkTink); the server's crypto is the Go standard library and, for SLH-DSA, CIRCL (goCircl)."
       },
       "goChromedp": {
         "module": "github.com/chromedp/chromedp",
@@ -707,12 +707,21 @@
         "verification": "go.sum",
         "notes": "Test-only (#416): Tink's Cloud KMS integration, used as the acceptance client over gRPC and REST. Never linked into the binary."
       },
+      "goCircl": {
+        "module": "github.com/cloudflare/circl",
+        "version": "v1.6.5",
+        "sum": "h1:O64F26HEqNhznd/hrC5KZXVKYuKM2rx4deZDTc4ihQA=",
+        "source": "https://github.com/cloudflare/circl",
+        "license": "BSD-3-Clause",
+        "verification": "go.sum",
+        "notes": "Cloud KMS post-quantum algorithms (#1946). Linked: third_party/circl-slhdsa is its sign/slhdsa (with internal/conv and internal/sha3), copied from this module's sources and given one constructor for a SHA-256 digest the client hashed (PROVENANCE.md): Go has no SLH-DSA, and Google's only Go one is internal to Tink, which the binary does not link. Test-only as a module: the compat suite's independent X-Wing encapsulation (kem/xwing) and HashSLH-DSA verification (sign/slhdsa). ML-DSA, ML-KEM and X-Wing on the server are Go's crypto/mldsa, crypto/mlkem, crypto/ecdh and crypto/sha3."
+      },
       "goKMS": {
         "module": "cloud.google.com/go/kms",
         "version": "v1.35.0",
         "license": "Apache-2.0",
         "verification": "go.sum",
-        "notes": "Generated contract types for the Cloud KMS implementation (#309), and the client the compatibility tests drive it with. Promoted from indirect (v1.32.0) to direct. The server's crypto is Go standard library only (docs/upstream-evaluation.md, Cloud KMS amendment)."
+        "notes": "Generated contract types for the Cloud KMS implementation (#309), and the client the compatibility tests drive it with. Promoted from indirect (v1.32.0) to direct. The server's crypto is Go's standard library, but SLH-DSA, which is CIRCL's (goCircl, #1946; docs/upstream-evaluation.md, Cloud KMS amendment)."
       },
       "goNet": {
         "module": "golang.org/x/net",

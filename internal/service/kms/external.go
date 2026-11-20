@@ -101,6 +101,12 @@ func levelAlgorithm(level kmspb.ProtectionLevel, p kmspb.CryptoKey_CryptoKeyPurp
 	if p == kmspb.CryptoKey_AES_WRAPPING && level != kmspb.ProtectionLevel_HSM_SINGLE_TENANT {
 		return 0, apierror.Unimplemented("crypto_key.purpose AES_WRAPPING is not implemented at protection level %s: Google documents AES_WRAPPING keys as trusted wrapping keys in a single-tenant HSM (HSM_SINGLE_TENANT) only", level)
 	}
+	if s, ok := algorithms[a]; ok && (s.pqSign() || s.xwing) && level != kmspb.ProtectionLevel_SOFTWARE {
+		// The algorithms page lists the PQ signing algorithms and X-Wing at
+		// the software level only; the code is UNVERIFIED.
+		// Docs re-read 2026-11-20, still unanswered: https://docs.cloud.google.com/kms/docs/algorithms
+		return 0, apierror.InvalidArgument("crypto_key.version_template.algorithm %s is only available at protection level SOFTWARE, not %s", a, level)
+	}
 	if a == kmspb.CryptoKeyVersion_EC_SIGN_SECP256K1_SHA256 {
 		if err := secp256k1Level(level); err != nil {
 			return 0, err

@@ -12,10 +12,10 @@ import (
 )
 
 // iamServer serves the google.iam.v1.IAMPolicy mixin on the KMS port (#428).
-// Policies on key rings, crypto keys, a location's ekmConfig and EKM
-// connections (#1469) are stored on their records and never enforced: no KMS
-// RPC, Encrypt and Decrypt included, reads one (ADR-0006, as amended by
-// #421). Nothing is inherited: a key's policy is its own.
+// Policies on key rings, crypto keys, import jobs (#1946), a location's
+// ekmConfig and EKM connections (#1469) are stored on their records. With
+// --iam-enforcement=on, internal/iameval enforces them (#1879): a key's or
+// import job's policy and its key ring's both apply.
 type iamServer struct {
 	iampb.UnimplementedIAMPolicyServer
 	s *Server
@@ -34,6 +34,7 @@ const (
 	iamCryptoKey
 	iamEkmConfig
 	iamEkmConnection
+	iamImportJob
 )
 
 // iamResource is what a resource name routes to.
@@ -44,13 +45,13 @@ type iamResource struct {
 }
 
 func (r iamResource) label() string {
-	return [...]string{"key ring", "crypto key", "EkmConfig", "EkmConnection"}[r.kind]
+	return [...]string{"key ring", "crypto key", "EkmConfig", "EkmConnection", "ImportJob"}[r.kind]
 }
 
 // iamTarget routes resource. Google serves IAM on key rings, crypto keys,
-// import jobs, ekmConfig and ekmConnections (cloudkms_v1.yaml:75-105);
-// IAM on import jobs is UNIMPLEMENTED, never an empty policy, as
-// CloudBurrow keeps no policy on them. Anything else, a CryptoKeyVersion
+// import jobs, ekmConfig and ekmConnections (cloudkms_v1.yaml:75-105;
+// importJobs.getIamPolicy, setIamPolicy and testIamPermissions on the
+// importJobs REST page). Anything else, a CryptoKeyVersion
 // included, has no IAM on Google and is INVALID_ARGUMENT (UNVERIFIED).
 // Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/kms/docs/reference/rest/v1/projects.locations.keyRings.cryptoKeys
 func iamTarget(resource string) (iamResource, error) {
@@ -70,7 +71,10 @@ func iamTarget(resource string) (iamResource, error) {
 		}
 		return iamResource{key: dbKey(keyPrefix, resource), name: resource, kind: iamCryptoKey}, nil
 	case len(parts) == 8 && parts[6] == "importJobs":
-		return iamResource{}, apierror.Unimplemented("IAM on import jobs is not implemented: an ImportJob keeps no IAM policy locally")
+		if err := parseImportJob("resource", resource); err != nil {
+			return iamResource{}, err
+		}
+		return iamResource{key: dbKey(importJobPrefix, resource), name: resource, kind: iamImportJob}, nil
 	case len(parts) == 5 && parts[4] == "ekmConfig":
 		if _, err := parseEkmConfig("resource", resource); err != nil {
 			return iamResource{}, err
@@ -82,7 +86,7 @@ func iamTarget(resource string) (iamResource, error) {
 		}
 		return iamResource{key: dbKey(ekmConnectionPrefix, resource), name: resource, kind: iamEkmConnection}, nil
 	}
-	return iamResource{}, apierror.InvalidArgument("resource %q is not a key ring, crypto key, ekmConfig or EkmConnection name", resource)
+	return iamResource{}, apierror.InvalidArgument("resource %q is not a key ring, crypto key, import job, ekmConfig or EkmConnection name", resource)
 }
 
 // policyOf reads the resource's stored policy. found is false only for a
@@ -103,6 +107,10 @@ func (i *iamServer) policyOf(r iamResource) (policy *iampolicy.Stored, found boo
 		var rec ekmConfig
 		_, err = i.s.get(r.key, &rec)
 		return rec.IAMPolicy, err == nil, err
+	case iamImportJob:
+		var rec importJob
+		found, err = i.s.get(r.key, &rec)
+		return rec.IAMPolicy, found, err
 	}
 	var rec ekmConnection
 	found, err = i.s.get(r.key, &rec)
@@ -125,6 +133,9 @@ func (i *iamServer) setPolicy(r iamResource, req *iampb.SetIamPolicyRequest) (ia
 			return iampolicy.Stored{}, apierror.Wrap(err)
 		}
 		return apply(i.s, r, &rec, &rec.IAMPolicy, req)
+	case iamImportJob:
+		var rec importJob
+		return setOn(i.s, r, &rec, &rec.IAMPolicy, req)
 	}
 	var rec ekmConnection
 	return setOn(i.s, r, &rec, &rec.IAMPolicy, req)
@@ -199,8 +210,8 @@ func (i *iamServer) SetIamPolicy(_ context.Context, req *iampb.SetIamPolicyReque
 	return next.Proto(), nil
 }
 
-// TestIamPermissions returns every requested permission on a ring, key or
-// EkmConnection that exists, or on any location's ekmConfig, since nothing is enforced. On a well-formed name that does not
+// TestIamPermissions returns every requested permission on a ring, key,
+// import job or EkmConnection that exists, or on any location's ekmConfig, since nothing is enforced. On a well-formed name that does not
 // exist it returns an empty set, as Google documents: "If the resource does
 // not exist, this will return an empty set of permissions, not a NOT_FOUND
 // error" (cloudkms_v1.yaml:59-64, and iam_policy.proto's

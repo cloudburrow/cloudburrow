@@ -154,10 +154,10 @@ var SecretManager = &Service{
 // read 2026-11-19). Google words a denial "Permission 'P' denied on
 // resource 'R' (or it may not exist).", with ErrorInfo
 // IAM_PERMISSION_DENIED. A key's policy and its key ring's both apply to
-// the key and its versions.
+// the key and its versions, an import job's and its key ring's to the job.
 var KMS = &Service{
 	Name:              "cloudkms.googleapis.com",
-	PolicyCollections: []string{"keyRings", "cryptoKeys"},
+	PolicyCollections: []string{"keyRings", "cryptoKeys", "importJobs"},
 	Types: map[string]string{"keyRings": "cloudkms.googleapis.com/KeyRing", "cryptoKeys": "cloudkms.googleapis.com/CryptoKey",
 		"cryptoKeyVersions": "cloudkms.googleapis.com/CryptoKeyVersion", "importJobs": "cloudkms.googleapis.com/ImportJob"},
 	Methods: kmsMethods(),
@@ -195,6 +195,12 @@ func kmsMethods() map[string]Method {
 		"ListImportJobs":                {"cloudkms.importJobs.list", "parent"},
 		"GetImportJob":                  {"cloudkms.importJobs.get", "name"},
 		"CreateImportJob":               {"cloudkms.importJobs.create", "parent"},
+		// The Importer role "Enables ImportCryptoKeyVersion" with
+		// importJobs.useToImport and no cryptoKeyVersions.create; the
+		// permission is held on the job (importing-a-key: "Grant the
+		// importjobs.useToImport permission for a specific import job").
+		"ImportCryptoKeyVersion": {"cloudkms.importJobs.useToImport", "import_job"},
+		"Decapsulate":            {"cloudkms.cryptoKeyVersions.useToDecapsulate", "name"},
 	}, "/google.cloud.kms.v1.KeyManagementService/")
 	iam := func(verb string) func(string) string {
 		return func(resource string) string {

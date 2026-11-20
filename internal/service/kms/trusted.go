@@ -141,8 +141,8 @@ func (s *Server) importingVersion(name string) (keyVersion, cryptoKey, error) {
 // import encodes it (raw bytes, or PKCS #8 DER for an asymmetric key, which
 // is how it is stored).
 func trustedMaterial(field string, a algo, material []byte) ([]byte, error) {
-	if algorithms[a].kem > 0 {
-		return nil, apierror.Unimplemented("%s: trusted key wrapping of %s keys is not implemented: Google documents no encoding of ML-KEM key material for import or trusted wrapping", field, a)
+	if algorithms[a].pq() {
+		return nil, apierror.Unimplemented("%s: trusted key wrapping of %s keys is not implemented: Google documents no encoding of post-quantum key material for import or trusted wrapping", field, a)
 	}
 	return material, nil
 }

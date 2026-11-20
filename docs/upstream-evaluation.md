@@ -321,8 +321,12 @@ Firestore, Pub/Sub and Spanner only (checked in the pinned Cloud SDK image and i
 
 **What is built, and with what.** CloudBurrow implements `google.cloud.kms.v1` itself, to the
 behaviour in Google's docs and protos, finishing the draft on the `feat/309-kms` branch.
-- **Crypto:** Go standard library only (`crypto/aes`, `crypto/cipher` GCM, and `hash/crc32`
-  with the Castagnoli table). There is no Tink on the server.
+- **Crypto:** Go standard library (`crypto/aes`, `crypto/cipher` GCM, and `hash/crc32`
+  with the Castagnoli table; since #1946 `crypto/mldsa`, `crypto/mlkem`, `crypto/ecdh` and
+  `crypto/sha3` for ML-DSA, ML-KEM and X-Wing). There is no Tink on the server. SLH-DSA, which
+  Go lacks and Google offers only inside Tink, is Cloudflare's CIRCL v1.6.5 (BSD-3-Clause),
+  copied into `third_party/circl-slhdsa` with one constructor added for a client's SHA-256
+  digest ([PROVENANCE.md](../third_party/circl-slhdsa/PROVENANCE.md)).
 - **Protos:** the official generated `cloud.google.com/go/kms` package, pinned in `go.mod`
   when the service lands (#385).
 - **fakekms** is a reference and a test oracle only (#419, #420). It is never shipped in the
