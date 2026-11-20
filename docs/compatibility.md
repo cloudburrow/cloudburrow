@@ -1192,7 +1192,10 @@ every document held its last answered write and all 1,071 ledger documents were 
 open throughout reconnected by itself and saw the last write, and a read at a time before the
 compaction (within the hour) was `FAILED_PRECONDITION`, with `earliest_version_time` past it. Unit
 `TestACompactionLosesNoAcknowledgedWrite` and `TestHeapWatchReadsFullCollections` cover the gate,
-the ended streams and the log.
+the ended streams and the log; the first injects the orderings a loaded run can take between the
+export and the import (the run loop's check of the emulator in between, an old JVM still answering
+after its restart was asked for, a call held at the gate past its wait), each of which lost
+acknowledged writes before #2018.
 
 ### Firestore with MongoDB compatibility (#1703)
 

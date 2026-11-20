@@ -110,21 +110,39 @@ type Documents struct {
 	exported atomic.Int64
 
 	mu       sync.Mutex
-	restored chan struct{} // closed while the emulator holds the documents
-	current  manifest
+	restored chan struct{} // the gate: closed while calls may go through, under mu
+	// held is whether the emulator holds the documents, and compacting
+	// whether a compaction runs (compact.go), under mu: the gate is open
+	// while the first is and the second is not.
+	held       bool
+	compacting bool
+	// restoreMu serializes the imports (checkRestored) with the
+	// compactions, which restart the emulator: a check of the run loop's
+	// in the middle of one would see the old JVM's sentinel and open the
+	// gate before the new JVM is given the documents (#2018).
+	restoreMu sync.Mutex
+	current   manifest
 	// exportMu serializes exports.
 	exportMu sync.Mutex
 	done     chan struct{}
 	stopped  string
 	lock     *os.File
 
+	// gateWait is how long a call waits at the closed gate before it
+	// goes through (the constant's; tests shorten it). It never goes
+	// through while a compaction runs.
+	gateWait time.Duration
+
 	// The compaction of the emulator's versions (compact.go, #1969).
-	host        string             // the pod's, naming its RestartFile
-	heap        *heapWatch         // nil without the emulator's collection log
-	inflight    map[*call]struct{} // the calls let through, under mu
-	idle        chan struct{}      // signalled when the last one ends
-	lastCompact time.Time          // the run loop's
-	compactWait time.Duration      // the run loop's: the least time to the next compaction
+	host     string             // the pod's, naming its RestartFile
+	inflight map[*call]struct{} // the calls let through, under mu
+	idle     chan struct{}      // signalled when the last one ends
+	// heapMu guards heap, lastCompact and compactWait, which the run loop
+	// and a compaction both use.
+	heapMu      sync.Mutex
+	heap        *heapWatch    // nil without the emulator's collection log
+	lastCompact time.Time     // when the last compaction started
+	compactWait time.Duration // the least time to the next compaction
 	compactions atomic.Int64
 }
 
@@ -171,7 +189,7 @@ func (a *Admin) KeepDocuments(ctx context.Context, dir string, interval time.Dur
 	_ = os.Remove(stopped)
 	removeOldMarkers(dir)
 	d := &Documents{admin: a, emulator: a.emulator, dir: dir, interval: interval,
-		client: &http.Client{Timeout: 5 * time.Minute}, logf: logf,
+		client: &http.Client{Timeout: 5 * time.Minute}, logf: logf, gateWait: gateWait,
 		restored: make(chan struct{}), done: make(chan struct{}), stopped: stopped, lock: lock,
 		host: host, heap: &heapWatch{path: filepath.Join(dir, HeapLogFile)}, idle: make(chan struct{}, 1)}
 	_ = os.Remove(filepath.Join(dir, RestartFile+host))
@@ -211,7 +229,7 @@ func (d *Documents) run(ctx context.Context) {
 			// must not replace their exports with its empty databases.
 			if d.dirty() && d.isRestored() {
 				ectx, cancel := context.WithTimeout(context.Background(), stopExport)
-				if err := d.Export(ectx); err != nil {
+				if err := d.exportHeld(ectx); err != nil && err != errNotHeld {
 					d.logf("firestore documents: the last export: %v", err)
 				}
 				cancel()
@@ -227,7 +245,7 @@ func (d *Documents) run(ctx context.Context) {
 			d.maybeCompact(ctx)
 		case <-export.C:
 			if d.dirty() && d.isRestored() {
-				if err := d.Export(ctx); err != nil && ctx.Err() == nil {
+				if err := d.exportHeld(ctx); err != nil && err != errNotHeld && ctx.Err() == nil {
 					d.logf("firestore documents: export: %v", err)
 				}
 			}
@@ -237,63 +255,81 @@ func (d *Documents) run(ctx context.Context) {
 
 func (d *Documents) dirty() bool { return d.writes.Load() != d.exported.Load() }
 
+// isRestored reports whether the emulator holds the documents.
 func (d *Documents) isRestored() bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	select {
-	case <-d.restored:
-		return true
-	default:
-		return false
-	}
+	return d.held
 }
 
 // checkRestored imports the exports when the emulator has started empty:
 // its sentinel document is missing. An emulator not answering closes the
-// gate until it does.
+// gate until it does. It waits for a compaction that runs.
 func (d *Documents) checkRestored(ctx context.Context) {
+	d.restoreMu.Lock()
+	defer d.restoreMu.Unlock()
 	code, err := d.call(ctx, http.MethodGet, sentinelPath, nil)
 	if err != nil || code >= 500 {
-		d.close()
+		d.setHeld(false)
 		return
 	}
 	if code == http.StatusOK {
-		d.open()
+		d.setHeld(true)
 		return
 	}
-	d.close()
+	d.setHeld(false)
+	if err := d.restore(ctx); err != nil {
+		d.logf("firestore documents: %v", err)
+	}
+}
+
+// restore gives an emulator that started empty the documents, under
+// restoreMu: the exports are imported, then the sentinel written.
+func (d *Documents) restore(ctx context.Context) error {
 	if err := d.importAll(ctx); err != nil {
-		d.logf("firestore documents: import: %v", err)
-		return
+		return fmt.Errorf("import: %w", err)
 	}
 	// The emulator started empty: it holds no versions from before the
 	// import (pitr.go, #1942).
 	d.admin.sawImport(d.admin.now())
 	body := []byte(`{"fields":{"at":{"stringValue":"` + time.Now().UTC().Format(time.RFC3339Nano) + `"}}}`)
 	if code, err := d.call(ctx, http.MethodPatch, sentinelPath, body); err != nil || code != http.StatusOK {
-		d.logf("firestore documents: the sentinel document: %d, %v", code, err)
-		return
+		return fmt.Errorf("the sentinel document: %d, %v", code, err)
 	}
-	d.open()
+	d.setHeld(true)
+	return nil
 }
 
-func (d *Documents) open() {
+// setHeld records whether the emulator holds the documents.
+func (d *Documents) setHeld(v bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	select {
-	case <-d.restored:
-	default:
-		close(d.restored)
-	}
+	d.held = v
+	d.setGateLocked()
 }
 
-func (d *Documents) close() {
+// setCompacting records whether a compaction runs: the gate stays closed
+// while one does, whatever the emulator holds.
+func (d *Documents) setCompacting(v bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	d.compacting = v
+	d.setGateLocked()
+}
+
+// setGateLocked opens the gate when the emulator holds the documents and
+// no compaction runs, and closes it otherwise, under mu.
+func (d *Documents) setGateLocked() {
+	open := d.held && !d.compacting
 	select {
 	case <-d.restored:
-		d.restored = make(chan struct{})
+		if !open {
+			d.restored = make(chan struct{})
+		}
 	default:
+		if open {
+			close(d.restored)
+		}
 	}
 }
 
@@ -326,11 +362,32 @@ func (d *Documents) importAll(ctx context.Context) error {
 	return nil
 }
 
+// errNotHeld is exportHeld's refusal.
+var errNotHeld = fmt.Errorf("the emulator does not hold the documents")
+
+// exportHeld is Export while the emulator holds the documents, checked
+// under exportMu: an export of an emulator a compaction has restarted,
+// and not yet given the documents back, would replace their exports with
+// its empty databases (#2018).
+func (d *Documents) exportHeld(ctx context.Context) error {
+	d.exportMu.Lock()
+	defer d.exportMu.Unlock()
+	if !d.isRestored() {
+		return errNotHeld
+	}
+	return d.exportLocked(ctx)
+}
+
 // Export exports every database the front knows of into a new
 // generation, then makes it the current one.
 func (d *Documents) Export(ctx context.Context) error {
 	d.exportMu.Lock()
 	defer d.exportMu.Unlock()
+	return d.exportLocked(ctx)
+}
+
+// exportLocked is Export under exportMu.
+func (d *Documents) exportLocked(ctx context.Context) error {
 	seq := d.writes.Load()
 	dbs := map[string]bool{}
 	for n := range d.current.Exports {
@@ -498,7 +555,11 @@ func (d *Documents) serveExport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	start := time.Now()
-	if err := d.Export(r.Context()); err != nil {
+	if err := d.exportHeld(r.Context()); err != nil {
+		if err == errNotHeld {
+			http.Error(w, `{"error":"the emulator does not hold the documents yet"}`, http.StatusServiceUnavailable)
+			return
+		}
 		d.logf("firestore documents: export on request: %v", err)
 		b, _ := json.Marshal(map[string]string{"error": err.Error()})
 		w.WriteHeader(http.StatusInternalServerError)
@@ -536,7 +597,11 @@ func (d *Documents) wait(ctx context.Context) {
 	d.mu.Lock()
 	ch := d.restored
 	d.mu.Unlock()
-	t := time.NewTimer(gateWait)
+	wait := d.gateWait
+	if wait <= 0 {
+		wait = gateWait
+	}
+	t := time.NewTimer(wait)
 	defer t.Stop()
 	select {
 	case <-ch:
