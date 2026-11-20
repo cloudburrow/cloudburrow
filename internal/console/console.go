@@ -343,6 +343,11 @@ type Field struct {
 	// files the editor starts with, and those files by choice: a function's
 	// runtime and its sample source. A "sourcefiles" field's value is a JSON
 	// object of file name to contents.
+	//
+	// A "workflowsource" field is a workflow's source, YAML or JSON, in
+	// an editor that highlights its syntax and draws the graph of its
+	// steps beside it, as Google's Workflows editor does (#2004). Its
+	// value is the source text.
 	Follows   string                       `json:"follows,omitempty"`
 	Templates map[string]map[string]string `json:"templates,omitempty"`
 	// Completions, on a text or textarea field, are the words Ctrl+Space
@@ -866,6 +871,16 @@ type Section struct {
 	// Text is the content when Kind is KindText. Newlines are significant and
 	// the client renders it monospace.
 	Text string `json:"text,omitempty"`
+	// Language, on a KindText section, is the language Text is in, which
+	// the console highlights: "workflows" is a workflow's source, YAML or
+	// JSON, drawn with its syntax highlighted beside the graph of its
+	// steps, as Google's Workflows Source tab shows it (#2004).
+	Language string `json:"language,omitempty"`
+	// Graph, on a listing of a workflow execution's step entries, is the
+	// source of the revision that ran: the console draws its steps as a
+	// graph above the table, each marked with its entries' state, as
+	// Google's Steps tab has its visualization panel (#2004).
+	Graph string `json:"graph,omitempty"`
 	// Series is the content when Kind is KindChart.
 	Series []ChartSeries `json:"series,omitempty"`
 	// Unavailable explains why this one section has no content, so a section

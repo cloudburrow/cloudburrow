@@ -308,7 +308,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	}
 	// Workflows (#1986), in process.
 	if enabled[config.ServiceWorkflows] && d.workflows != nil {
-		providers = append(providers, workflowsProvider{svc: d.workflows})
+		providers = append(providers, workflowsProvider{svc: d.workflows, logs: d.logging})
 	}
 	// Cloud Monitoring (#1939) runs in this process too: Metrics explorer
 	// and Metrics management.

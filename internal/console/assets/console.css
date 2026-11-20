@@ -2371,3 +2371,68 @@ svg.bq-chart { display: block; border: 1px solid var(--border); border-radius: v
 .result-box.kind-line { border-color: #e37400; }
 .result-box.is-lit { background: rgba(26, 115, 232, 0.25); border-width: 2.5px; }
 #action-result-table tr.is-lit { background: var(--nav-selected); }
+
+/* Workflows' source editor and graph (#2004): the source on the left, its
+   syntax highlighted, the graph of its steps on the right, as Google's
+   Workflows editor lays them out. The editor is a textarea over the
+   highlighted layer: the textarea's own text is transparent, the caret and
+   the selection are its, and the layer beneath draws the same characters in
+   the same metrics. Token colours are the theme's own text tokens, each
+   measured on --surface by TestTokensMeetContrast. */
+.wf-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; align-items: start; }
+@media (max-width: 900px) { .wf-split { grid-template-columns: minmax(0, 1fr); } }
+.wf-editor-pane, .wf-graph-panel { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); min-width: 0; }
+.wf-editor-head, .wf-graph-tools { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--border);
+  color: var(--text-muted); font-size: var(--text-caption-size); line-height: var(--text-caption-line); }
+.wf-graph-title { margin-right: auto; font-weight: 600; }
+.wf-graph-tools button { min-width: 32px; padding: 2px 8px; }
+.wf-scroller { display: grid; grid-template-columns: max-content minmax(0, 1fr); overflow: auto; max-height: 560px; }
+.wf-gutter, .wf-highlight, .wf-code .wf-input { font-family: var(--mono); font-size: var(--text-body-size); line-height: 1.5em; tab-size: 2;
+  margin: 0; padding: 8px 10px; white-space: pre; border: 1px solid transparent; }
+/* The editor's edge is a field's (WCAG 1.4.11); the layer beneath has the
+   same border, transparent, so the two keep the same metrics. */
+.wf-gutter { color: var(--text-muted); text-align: right; user-select: none; background: var(--surface); }
+.wf-code { display: grid; grid-template-columns: minmax(100%, max-content); }
+.wf-code > * { grid-area: 1 / 1; }
+.wf-highlight { color: var(--text); background: var(--surface); pointer-events: none; }
+.wf-highlight.is-static { pointer-events: auto; }
+.form-row .wf-code .wf-input { color: transparent; background: transparent; caret-color: var(--text); resize: none; overflow: hidden;
+  width: 100%; min-width: 0; min-height: 0; max-width: none; box-sizing: border-box; border: 1px solid var(--field-border); border-radius: 0; }
+.form-row .wf-code .wf-input:focus { outline: none; }
+.form-row .wf-code .wf-input:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.wf-input::selection { background: color-mix(in srgb, var(--accent) 30%, transparent); }
+.tok-key { color: var(--accent); }
+.tok-str { color: var(--ok); }
+.tok-expr { color: var(--warn); font-weight: 600; }
+.tok-num, .tok-lit { color: var(--error); }
+.tok-comment { color: var(--text-muted); font-style: italic; }
+.tok-punct { color: var(--text-muted); }
+.wf-canvas { overflow: auto; max-height: 560px; padding: 8px; }
+.wf-graph-status { margin: 0; padding: 6px 10px; font-size: var(--text-caption-size); color: var(--text-muted); }
+.wf-graph-status:empty { display: none; }
+.wf-graph-status.is-error { color: var(--error); }
+.wf-canvas svg.wf-graph { display: block; font-family: var(--font); max-width: none; stroke: none; stroke-width: 0; }
+.wf-box { fill: var(--surface); stroke: var(--field-border); stroke-width: 1; }
+.wf-node.is-succeeded .wf-box { stroke: var(--ok); stroke-width: 2; }
+.wf-node.is-failed .wf-box { stroke: var(--error); stroke-width: 2; }
+.wf-node.is-in_progress .wf-box { stroke: var(--accent); stroke-width: 2; stroke-dasharray: 4 3; }
+.wf-name { fill: var(--text); font-size: var(--text-body-size); font-weight: 600; }
+.wf-kind, .wf-branch-label, .wf-edge-label { fill: var(--text-muted); font-size: var(--text-caption-size); }
+.wf-sub-title { fill: var(--text); font-size: var(--text-body-size); font-weight: 600; }
+.wf-mark { fill: var(--text-muted); font-size: var(--text-heading-size); font-weight: 700; }
+.wf-mark.wf-ok { fill: var(--ok); }
+.wf-mark.wf-failed { fill: var(--error); }
+.wf-block { fill: color-mix(in srgb, var(--state-ink) 3%, transparent); stroke: var(--border); stroke-dasharray: 4 3; }
+.wf-terminal { fill: var(--surface-alt); stroke: var(--field-border); }
+.wf-terminal-text { fill: var(--text); font-size: var(--text-caption-size); text-anchor: middle; }
+.wf-edge { fill: none; stroke: var(--text-muted); stroke-width: 1.4; }
+.wf-edge.wf-branch { stroke: var(--accent); }
+.wf-edge.wf-end-edge { stroke-dasharray: 3 3; }
+.wf-arrowhead { fill: var(--text-muted); }
+.wf-toggle { cursor: pointer; }
+.wf-toggle-box { fill: var(--surface); stroke: var(--field-border); }
+.wf-toggle-sign { fill: var(--text); font-size: var(--text-body-size); font-weight: 700; }
+.wf-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.wf-visualization { margin-bottom: 12px; }
+.wf-visualization > summary { cursor: pointer; font-weight: 600; padding: 4px 0; }
+.wf-source-field > label { display: block; margin-bottom: 4px; }

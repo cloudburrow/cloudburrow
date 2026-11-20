@@ -531,6 +531,7 @@ var contrastPairings = []pairing{
 // minimum, each with the reason WCAG gives.
 var colorExemptions = map[string]string{
 	"var(--disabled-label)": "the label of a disabled control: WCAG 1.4.3 exempts inactive components",
+	"transparent":           "the Workflows editor's textarea (#2004), whose characters the highlighted layer beneath it draws in measured token colours",
 }
 
 // Not measured, and why:
