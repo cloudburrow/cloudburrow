@@ -598,3 +598,34 @@ func TestIAMSignedURLWiring(t *testing.T) {
 		t.Fatal("no storage backend")
 	}
 }
+
+// Given Cloud KMS's in-cluster address, Spanner's front is told it, for
+// customer-managed keys, and with IAM enforcement the host's evaluator
+// too (#1950); without one, neither.
+func TestSpannerFrontReachesKMS(t *testing.T) {
+	var cfg config.Config
+	cfg.Services = []config.Service{config.ServiceSpanner}
+	for _, addr := range []string{"cloudburrow-host.cloudburrow.svc.cluster.local:9032", ""} {
+		c := NewLifecycleComponent("kc", cfg, io.Discard)
+		c.SetBuiltinStorageImage("img")
+		c.SetKMS(addr)
+		c.SetResourceManager("cloudburrow-host.cloudburrow.svc.cluster.local:9031")
+		c.SetIAMCheck(true)
+		found := false
+		for _, b := range c.Backends() {
+			if b.Name != "spanner" || b.Front == nil {
+				continue
+			}
+			found = true
+			args := strings.Join(b.Front.Args, " ")
+			want := addr != ""
+			if strings.Contains(args, "--kms "+addr) != want || want && !strings.Contains(args, "--iam-check http://cloudburrow-host.cloudburrow.svc.cluster.local:9031") ||
+				!want && strings.Contains(args, "--kms") {
+				t.Errorf("kms %q: args %q", addr, args)
+			}
+		}
+		if !found {
+			t.Fatal("no spanner front")
+		}
+	}
+}

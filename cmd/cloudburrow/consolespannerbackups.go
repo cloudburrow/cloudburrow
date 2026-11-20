@@ -269,7 +269,29 @@ func spannerCreateBackupAction(databases []string) console.Action {
 		{Name: "versionTime", Label: "Version time (UTC)", Type: "datetime-local", Required: true, ShowWhen: "versionFrom=Earlier point in time",
 			Help: "The backup holds the database as it was at this time."},
 		spannerExpiryField("7"),
+		spannerEncryptionField("Use database encryption"),
+		spannerKMSKeyField(),
 	}}
+}
+
+// spannerEncryptionField is a backup form's Encryption choice (#1950), as
+// Google's console offers it: the source's encryption (inherit), a
+// Google-managed key, or a Cloud KMS key.
+func spannerEncryptionField(inherit string) console.Field {
+	return console.Field{Name: "encryption", Label: "Encryption", Type: "radio", Section: "Encryption",
+		Options: []string{inherit, "Google-managed encryption key", "Cloud KMS key"}, Default: inherit}
+}
+
+// spannerEncryptionType is a backup form's encryption choice as the enum
+// value name, "" to inherit.
+func spannerEncryptionType(v map[string]string) string {
+	switch strings.TrimSpace(v["encryption"]) {
+	case "Google-managed encryption key":
+		return "GOOGLE_DEFAULT_ENCRYPTION"
+	case "Cloud KMS key":
+		return "CUSTOMER_MANAGED_ENCRYPTION"
+	}
+	return ""
 }
 
 // spannerBackupActions are a backup's page's actions.
@@ -280,10 +302,14 @@ func spannerBackupActions() []console.Action {
 			{Name: "backup", Label: "New backup ID", Type: "text", Required: true, Pattern: spannerIDPattern,
 				Help: "The copy's ID, in this instance."},
 			spannerExpiryField("7"),
+			spannerEncryptionField("Use backup encryption"),
+			spannerKMSKeyField(),
 		}},
 		{ID: "restorebackup", Label: "Restore to a new database", Fields: []console.Field{
 			{Name: "database", Label: "New database ID", Type: "text", Required: true, Pattern: spannerIDPattern,
 				Help: "A database that does not exist yet in this instance: it is created with the backup's schema and rows."},
+			spannerEncryptionField("Use backup encryption"),
+			spannerKMSKeyField(),
 		}},
 		spannerDeleteBackupAction(true),
 	}
@@ -481,6 +507,8 @@ func (p spannerProvider) spannerBackupDetail(ctx context.Context, project, insta
 					{Label: "Size", Value: spannerSize(b.GetSizeBytes())},
 					{Label: "State", Value: b.GetState().String()},
 					{Label: "Restoring databases", Value: orDash(strings.Join(restored, ", "))},
+					{Label: "Encryption type", Value: spannerEncryptionLabel(b.GetEncryptionInfo())},
+					{Label: "Encryption key version", Value: orDash(b.GetEncryptionInfo().GetKmsKeyVersion())},
 				},
 			}},
 		}},
@@ -648,8 +676,17 @@ func spannerDatabaseAct(ctx context.Context, dbAdmin *database.DatabaseAdminClie
 		if err != nil {
 			return err
 		}
-		op, err := dbAdmin.CreateBackup(ctx, &databasepb.CreateBackupRequest{Parent: instName, BackupId: id,
-			Backup: &databasepb.Backup{Database: instName + "/databases/" + db, ExpireTime: expire, VersionTime: version}})
+		key, err := spannerKMSKey(values)
+		if err != nil {
+			return err
+		}
+		req := &databasepb.CreateBackupRequest{Parent: instName, BackupId: id,
+			Backup: &databasepb.Backup{Database: instName + "/databases/" + db, ExpireTime: expire, VersionTime: version}}
+		if t := spannerEncryptionType(values); t != "" {
+			req.EncryptionConfig = &databasepb.CreateBackupEncryptionConfig{KmsKeyName: key,
+				EncryptionType: databasepb.CreateBackupEncryptionConfig_EncryptionType(databasepb.CreateBackupEncryptionConfig_EncryptionType_value[t])}
+		}
+		op, err := dbAdmin.CreateBackup(ctx, req)
 		if err != nil {
 			return err
 		}
@@ -675,8 +712,17 @@ func spannerDatabaseAct(ctx context.Context, dbAdmin *database.DatabaseAdminClie
 		if err != nil {
 			return err
 		}
-		op, err := dbAdmin.CopyBackup(ctx, &databasepb.CopyBackupRequest{Parent: instName, BackupId: id,
-			SourceBackup: spannerBackupName(project, path[0], path[2]), ExpireTime: expire})
+		key, err := spannerKMSKey(values)
+		if err != nil {
+			return err
+		}
+		req := &databasepb.CopyBackupRequest{Parent: instName, BackupId: id,
+			SourceBackup: spannerBackupName(project, path[0], path[2]), ExpireTime: expire}
+		if t := spannerEncryptionType(values); t != "" {
+			req.EncryptionConfig = &databasepb.CopyBackupEncryptionConfig{KmsKeyName: key,
+				EncryptionType: databasepb.CopyBackupEncryptionConfig_EncryptionType(databasepb.CopyBackupEncryptionConfig_EncryptionType_value[t])}
+		}
+		op, err := dbAdmin.CopyBackup(ctx, req)
 		if err != nil {
 			return err
 		}
@@ -687,8 +733,17 @@ func spannerDatabaseAct(ctx context.Context, dbAdmin *database.DatabaseAdminClie
 		if id == "" {
 			return errors.New("a new database ID is required")
 		}
-		op, err := dbAdmin.RestoreDatabase(ctx, &databasepb.RestoreDatabaseRequest{Parent: instName, DatabaseId: id,
-			Source: &databasepb.RestoreDatabaseRequest_Backup{Backup: spannerBackupName(project, path[0], path[2])}})
+		key, err := spannerKMSKey(values)
+		if err != nil {
+			return err
+		}
+		req := &databasepb.RestoreDatabaseRequest{Parent: instName, DatabaseId: id,
+			Source: &databasepb.RestoreDatabaseRequest_Backup{Backup: spannerBackupName(project, path[0], path[2])}}
+		if t := spannerEncryptionType(values); t != "" {
+			req.EncryptionConfig = &databasepb.RestoreDatabaseEncryptionConfig{KmsKeyName: key,
+				EncryptionType: databasepb.RestoreDatabaseEncryptionConfig_EncryptionType(databasepb.RestoreDatabaseEncryptionConfig_EncryptionType_value[t])}
+		}
+		op, err := dbAdmin.RestoreDatabase(ctx, req)
 		if err != nil {
 			return err
 		}
@@ -800,4 +855,13 @@ func spannerInstanceAct(ctx context.Context, instAdmin *instance.InstanceAdminCl
 		return err
 	}
 	return fmt.Errorf("unknown action %q", action)
+}
+
+// spannerEncryptionLabel is an encryption_info as Google's console names
+// it (#1950).
+func spannerEncryptionLabel(e *databasepb.EncryptionInfo) string {
+	if e.GetEncryptionType() == databasepb.EncryptionInfo_CUSTOMER_MANAGED_ENCRYPTION {
+		return "Cloud KMS key"
+	}
+	return "Google-managed"
 }

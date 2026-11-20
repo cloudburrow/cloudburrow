@@ -2,7 +2,6 @@ package spannerfront
 
 import (
 	"context"
-	"fmt"
 	"regexp"
 	"sort"
 	"strings"
@@ -35,8 +34,8 @@ import (
 //
 // Generated columns are not copied: the restored database computes them.
 // A sequence restarts in the restored database, as the emulator keeps no
-// sequence state to copy. Customer-managed encryption is refused: there is
-// no Cloud KMS key an emulator can use.
+// sequence state to copy. A backup with a customer-managed key keeps its
+// copy sealed with the key (cmek.go, #1950).
 
 const (
 	maxBackupLife = 366 * 24 * time.Hour
@@ -59,6 +58,9 @@ var (
 type backup struct {
 	pb   *databasepb.Backup
 	snap *snapshot
+	// sealed is a customer-managed backup's snapshot, sealed; snap is
+	// then nil.
+	sealed *sealedSnap
 }
 
 type snapshot struct {
@@ -84,7 +86,7 @@ func (s *Instances) expireBackups() {
 	}
 }
 
-func (s *Instances) backupCopy(name string) (*databasepb.Backup, *snapshot, bool) {
+func (s *Instances) backupCopy(name string) (*databasepb.Backup, *backup, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.expireBackups()
@@ -92,7 +94,7 @@ func (s *Instances) backupCopy(name string) (*databasepb.Backup, *snapshot, bool
 	if !ok {
 		return nil, nil, false
 	}
-	return proto.Clone(b.pb).(*databasepb.Backup), b.snap, true
+	return proto.Clone(b.pb).(*databasepb.Backup), b, true
 }
 
 func backupNotFound(name string) error {
@@ -115,15 +117,6 @@ func (s *Instances) checkExpire(method string, t *timestamppb.Timestamp, maxExpi
 	return nil
 }
 
-// refuseCMEK refuses customer-managed encryption, which encryption names
-// (an encryption type) or key sets.
-func refuseCMEK(method string, encryption fmt.Stringer, key string) error {
-	if strings.Contains(encryption.String(), "CUSTOMER_MANAGED") || key != "" {
-		return status.Errorf(codes.Unimplemented, "%s with customer-managed encryption is not served here: the emulator has no Cloud KMS key to encrypt with", method)
-	}
-	return nil
-}
-
 func (d databases) CreateBackup(ctx context.Context, req *databasepb.CreateBackupRequest) (*longrunningpb.Operation, error) {
 	s := d.s
 	if !instanceNameRe.MatchString(req.GetParent()) {
@@ -140,10 +133,17 @@ func (d databases) CreateBackup(ctx context.Context, req *databasepb.CreateBacku
 	if m == nil || m[1] != req.GetParent() {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid CreateBackup request: backup.database %q must be a database of %s.", in.GetDatabase(), req.GetParent())
 	}
-	if c := req.GetEncryptionConfig(); c != nil {
-		if err := refuseCMEK("CreateBackup", c.GetEncryptionType(), c.GetKmsKeyName()); err != nil {
-			return nil, err
-		}
+	c := req.GetEncryptionConfig()
+	named, err := keyNames("CreateBackup", c.GetKmsKeyName(), c.GetKmsKeyNames())
+	if err != nil {
+		return nil, err
+	}
+	keys, err := resolveKeys("CreateBackup", c.GetEncryptionType().String(), named, s.databaseKeys(in.GetDatabase()))
+	if err != nil {
+		return nil, err
+	}
+	if err := s.checkKeyLocations(ctx, "CreateBackup", req.GetParent(), keys); err != nil {
+		return nil, err
 	}
 	if orgpolicy.SourceSet() {
 		b := &databasepb.Backup{Name: req.GetParent() + "/backups/" + req.GetBackupId(), Database: in.GetDatabase(),
@@ -155,12 +155,13 @@ func (d databases) CreateBackup(ctx context.Context, req *databasepb.CreateBacku
 			return nil, err
 		}
 	}
-	return s.takeBackup(ctx, req.GetParent()+"/backups/"+req.GetBackupId(), in.GetDatabase(), in.GetVersionTime(), in.GetExpireTime(), nil)
+	return s.takeBackup(ctx, req.GetParent()+"/backups/"+req.GetBackupId(), in.GetDatabase(), in.GetVersionTime(), in.GetExpireTime(), nil, keys)
 }
 
 // takeBackup snapshots database into a new backup named name, and returns
-// the done CreateBackup operation.
-func (s *Instances) takeBackup(ctx context.Context, name, database string, version, expire *timestamppb.Timestamp, schedules []string) (*longrunningpb.Operation, error) {
+// the done CreateBackup operation; with keys, the backup is sealed with
+// them.
+func (s *Instances) takeBackup(ctx context.Context, name, database string, version, expire *timestamppb.Timestamp, schedules, keys []string) (*longrunningpb.Operation, error) {
 	start := s.now()
 	if version != nil {
 		v := version.AsTime()
@@ -185,25 +186,38 @@ func (s *Instances) takeBackup(ctx context.Context, name, database string, versi
 	if exists {
 		return nil, status.Errorf(codes.AlreadyExists, "Backup already exists: %s", name)
 	}
+	if err := s.databaseAccessible(ctx, database); err != nil {
+		return nil, err
+	}
 	snap, read, err := s.snapshot(ctx, database, version)
 	if err != nil {
 		return nil, err
+	}
+	var sealed *sealedSnap
+	if len(keys) > 0 {
+		if sealed, err = s.sealSnapshot(ctx, "CreateBackup", name, keys, snap); err != nil {
+			return nil, err
+		}
 	}
 	now := s.now()
 	b := &databasepb.Backup{
 		Name: name, Database: database, VersionTime: read, ExpireTime: expire,
 		CreateTime: timestamppb.New(now), SizeBytes: snap.size, ExclusiveSizeBytes: snap.size,
 		State: databasepb.Backup_READY, DatabaseDialect: snap.dialect,
-		EncryptionInfo:  &databasepb.EncryptionInfo{EncryptionType: databasepb.EncryptionInfo_GOOGLE_DEFAULT_ENCRYPTION},
 		MaxExpireTime:   timestamppb.New(read.AsTime().Add(maxBackupLife)),
 		BackupSchedules: schedules, OldestVersionTime: read,
+	}
+	setBackupEncryption(b, sealed)
+	stored := &backup{pb: b, snap: snap, sealed: sealed}
+	if sealed != nil {
+		stored.snap = nil
 	}
 	s.mu.Lock()
 	if _, exists := s.backups[name]; exists {
 		s.mu.Unlock()
 		return nil, status.Errorf(codes.AlreadyExists, "Backup already exists: %s", name)
 	}
-	s.backups[name] = &backup{pb: b, snap: snap}
+	s.backups[name] = stored
 	s.mu.Unlock()
 	meta := &databasepb.CreateBackupMetadata{Name: name, Database: database,
 		Progress: &databasepb.OperationProgress{ProgressPercent: 100, StartTime: timestamppb.New(start), EndTime: timestamppb.New(s.now())}}
@@ -232,14 +246,21 @@ func (d databases) CopyBackup(ctx context.Context, req *databasepb.CopyBackupReq
 	if !backupIDRe.MatchString(req.GetBackupId()) {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid CopyBackup request: backup_id %q must match [a-z][a-z0-9_\\-]*[a-z0-9] and be 2 to 60 characters long.", req.GetBackupId())
 	}
-	if c := req.GetEncryptionConfig(); c != nil {
-		if err := refuseCMEK("CopyBackup", c.GetEncryptionType(), c.GetKmsKeyName()); err != nil {
-			return nil, err
-		}
+	c := req.GetEncryptionConfig()
+	named, err := keyNames("CopyBackup", c.GetKmsKeyName(), c.GetKmsKeyNames())
+	if err != nil {
+		return nil, err
 	}
-	src, snap, ok := s.backupCopy(req.GetSourceBackup())
+	src, srcBackup, ok := s.backupCopy(req.GetSourceBackup())
 	if !ok {
 		return nil, backupNotFound(req.GetSourceBackup())
+	}
+	keys, err := resolveKeys("CopyBackup", c.GetEncryptionType().String(), named, srcBackup.keys())
+	if err != nil {
+		return nil, err
+	}
+	if err := s.checkKeyLocations(ctx, "CopyBackup", req.GetParent(), keys); err != nil {
+		return nil, err
 	}
 	if _, err := s.emu.GetInstance(ctx, instanceReq(req.GetParent())); err != nil {
 		return nil, err
@@ -255,12 +276,27 @@ func (d databases) CopyBackup(ctx context.Context, req *databasepb.CopyBackupReq
 	if err := checkCustom(ctx, name, orgpolicy.TypeSpannerBackup, orgpolicy.MethodCreate, b); err != nil {
 		return nil, err
 	}
+	stored := &backup{pb: b, snap: srcBackup.snap}
+	if srcBackup.sealed != nil || len(keys) > 0 {
+		snap, err := s.openSnapshot(ctx, "CopyBackup", req.GetSourceBackup(), srcBackup)
+		if err != nil {
+			return nil, err
+		}
+		stored.snap = snap
+		if len(keys) > 0 {
+			if stored.sealed, err = s.sealSnapshot(ctx, "CopyBackup", name, keys, snap); err != nil {
+				return nil, err
+			}
+			stored.snap = nil
+		}
+	}
+	setBackupEncryption(b, stored.sealed)
 	s.mu.Lock()
 	if _, exists := s.backups[name]; exists {
 		s.mu.Unlock()
 		return nil, status.Errorf(codes.AlreadyExists, "Backup already exists: %s", name)
 	}
-	s.backups[name] = &backup{pb: b, snap: snap}
+	s.backups[name] = stored
 	s.mu.Unlock()
 	meta := &databasepb.CopyBackupMetadata{Name: name, SourceBackup: req.GetSourceBackup(),
 		Progress: &databasepb.OperationProgress{ProgressPercent: 100, StartTime: timestamppb.New(start), EndTime: timestamppb.New(s.now())}}
@@ -443,10 +479,10 @@ func (d databases) RestoreDatabase(ctx context.Context, req *databasepb.RestoreD
 	if !databaseIDRe.MatchString(req.GetDatabaseId()) {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid RestoreDatabase request: database_id %q must match [a-z][a-z0-9_\\-]*[a-z0-9] and be 2 to 30 characters long.", req.GetDatabaseId())
 	}
-	if c := req.GetEncryptionConfig(); c != nil {
-		if err := refuseCMEK("RestoreDatabase", c.GetEncryptionType(), c.GetKmsKeyName()); err != nil {
-			return nil, err
-		}
+	c := req.GetEncryptionConfig()
+	named, err := keyNames("RestoreDatabase", c.GetKmsKeyName(), c.GetKmsKeyNames())
+	if err != nil {
+		return nil, err
 	}
 	src := req.GetBackup()
 	if src == "" {
@@ -456,14 +492,36 @@ func (d databases) RestoreDatabase(ctx context.Context, req *databasepb.RestoreD
 	if err := checkCustom(ctx, restored.GetName(), orgpolicy.TypeSpannerDatabase, orgpolicy.MethodCreate, restored); err != nil {
 		return nil, err
 	}
-	b, snap, ok := s.backupCopy(src)
+	b, srcBackup, ok := s.backupCopy(src)
 	if !ok {
 		return nil, backupNotFound(src)
 	}
+	keys, err := resolveKeys("RestoreDatabase", c.GetEncryptionType().String(), named, srcBackup.keys())
+	if err != nil {
+		return nil, err
+	}
 	start := s.now()
 	name := req.GetParent() + "/databases/" + req.GetDatabaseId()
+	// "Restoring a CMEK backup requires the key and key version used to
+	// encrypt it to be available."
+	snap, err := s.openSnapshot(ctx, "RestoreDatabase", src, srcBackup)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.checkKeyLocations(ctx, "RestoreDatabase", req.GetParent(), keys); err != nil {
+		return nil, err
+	}
+	record, err := s.databaseKeyRecord(ctx, "RestoreDatabase", name, keys)
+	if err != nil {
+		return nil, err
+	}
 	if err := s.restore(ctx, req.GetParent(), req.GetDatabaseId(), snap); err != nil {
 		return nil, err
+	}
+	if record != nil {
+		s.mu.Lock()
+		s.dbKeys[name] = record
+		s.mu.Unlock()
 	}
 	info := &databasepb.RestoreInfo{SourceType: databasepb.RestoreSourceType_BACKUP,
 		SourceInfo: &databasepb.RestoreInfo_BackupInfo{BackupInfo: &databasepb.BackupInfo{

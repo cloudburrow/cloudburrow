@@ -9,6 +9,7 @@ import (
 	"cloud.google.com/go/spanner/admin/database/apiv1/databasepb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 )
@@ -107,9 +108,37 @@ func (d databases) CreateDatabase(ctx context.Context, req *databasepb.CreateDat
 			return nil, status.Error(codes.PermissionDenied, databaseDenied)
 		}
 	}
+	// A customer-managed key (cmek.go, #1950) is checked and wraps the
+	// database's data key before the emulator creates it; the emulator is
+	// not given the config.
+	var record *dbKey
+	if c := req.GetEncryptionConfig(); c != nil {
+		m := createDatabaseRe.FindStringSubmatch(req.GetCreateStatement())
+		if m == nil {
+			return nil, status.Error(codes.InvalidArgument, "Invalid CreateDatabase request: create_statement must be CREATE DATABASE.")
+		}
+		keys, err := keyNames("CreateDatabase", c.GetKmsKeyName(), c.GetKmsKeyNames())
+		if err != nil {
+			return nil, err
+		}
+		if err := d.s.checkKeyLocations(ctx, "CreateDatabase", req.GetParent(), keys); err != nil {
+			return nil, err
+		}
+		if record, err = d.s.databaseKeyRecord(ctx, "CreateDatabase", req.GetParent()+"/databases/"+m[1], keys); err != nil {
+			return nil, err
+		}
+		req = proto.Clone(req).(*databasepb.CreateDatabaseRequest)
+		req.EncryptionConfig = nil
+	}
 	op, err := d.s.emuDB.CreateDatabase(ctx, req)
 	if err != nil {
 		return nil, err
+	}
+	if record != nil && op.GetError() == nil {
+		m := createDatabaseRe.FindStringSubmatch(req.GetCreateStatement())
+		d.s.mu.Lock()
+		d.s.dbKeys[req.GetParent()+"/databases/"+m[1]] = record
+		d.s.mu.Unlock()
 	}
 	d.s.trackEmuOp(op.GetName())
 	if m := createDatabaseRe.FindStringSubmatch(req.GetCreateStatement()); m != nil {

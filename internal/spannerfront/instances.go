@@ -49,6 +49,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/cloudburrow/cloudburrow/internal/cmek"
 	"github.com/cloudburrow/cloudburrow/internal/frontstate"
 	"github.com/cloudburrow/cloudburrow/internal/grpchttp"
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
@@ -106,6 +107,10 @@ type Instances struct {
 	// splitPoints are each database's unexpired split points
 	// (splitpoints.go).
 	splitPoints map[string][]*databasepb.SplitPoints
+	// keys are the customer-managed keys (cmek.go, #1950), nil without
+	// Cloud KMS; dbKeys the customer-managed databases' keys, by name.
+	keys   *cmek.Keys
+	dbKeys map[string]*dbKey
 
 	// state is the front's state directory (state.go, #1514); nil keeps
 	// the state in memory alone.
@@ -135,7 +140,7 @@ func newWith(emulator string, opts ...grpc.ServerOption) (*Instances, error) {
 		changes: map[string]*change{}, ops: map[string]*longrunningpb.Operation{}, protected: map[string]bool{}, policies: map[string]*iampolicy.Stored{},
 		backups: map[string]*backup{}, restored: map[string]*databasepb.RestoreInfo{}, schedules: map[string]*schedule{},
 		roleStmts: map[string][]string{}, configs: map[string]*instancepb.InstanceConfig{}, partitions: map[string]*partitionChange{},
-		splitPoints: map[string][]*databasepb.SplitPoints{}}
+		splitPoints: map[string][]*databasepb.SplitPoints{}, dbKeys: map[string]*dbKey{}}
 	s.grpc = grpchttp.NewServer(append([]grpc.ServerOption{grpc.ChainUnaryInterceptor(s.persistAfter)}, opts...)...)
 	instancepb.RegisterInstanceAdminServer(s.grpc, s)
 	databasepb.RegisterDatabaseAdminServer(s.grpc, databases{s: s})
@@ -176,11 +181,17 @@ func (s *Instances) Claims(r *http.Request) bool {
 		if r.URL.Path == getOperation || r.URL.Path == fetchCacheUpdate {
 			return true
 		}
+		if m, ok := strings.CutPrefix(r.URL.Path, dataService); ok && keyedDataMethods[m] {
+			return s.hasDatabaseKeys()
+		}
 		if m, ok := strings.CutPrefix(r.URL.Path, databaseService); ok {
 			return databaseClaimed[m] || iamMethods[m]
 		}
 		m, ok := strings.CutPrefix(r.URL.Path, instanceService)
 		return ok && (claimed[m] || iamMethods[m])
+	}
+	if restDataDatabase(r) != "" {
+		return s.restDataRefusal(r) != nil
 	}
 	if r.Method == http.MethodPost && restCacheUpdate.MatchString(r.URL.Path) {
 		return true
@@ -220,6 +231,10 @@ func (s *Instances) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
 		s.grpc.ServeHTTP(w, r)
+		return
+	}
+	if restDataDatabase(r) != "" {
+		s.serveRESTDataRefusal(w, r)
 		return
 	}
 	// The state is written as the call returns (state.go); a gRPC call's

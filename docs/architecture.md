@@ -130,6 +130,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/bigqueryimage/bigqueryimagetest/` | Tests only: stand-in embedded emulator builds, present or missing (#1061). |
 | `internal/buildpacks/` | Turns source into a runnable image with Google Buildpacks and `pack`. |
 | `internal/calllog/` | The call log the Pub/Sub, Bigtable and call fronts keep in their pods (#1266, #1267, #1288): each call's method, resource, code, duration and `traceparent`, never a payload, in a bounded ring at `/_cloudburrow/calls?after=N` that the CLI reads through the tunnel into `/metrics`, `/admin/events` and traces. |
+| `internal/cmek/` | The customer-managed encryption key helper Cloud Logging, Spanner, Document AI and Speech-to-Text share (#1950): checks a key in the instance's Cloud KMS (exists, ENCRYPT_DECRYPT, primary version ENABLED) and, with IAM enforcement on, the service agent's `cloudkms.cryptoKeyVersions.useToEncrypt`/`useToDecrypt` through the host's evaluator; seals a value with a fresh data key wrapped by the key, so a disabled or destroyed version refuses the read. |
 | `internal/cluster/` | The local kind cluster: create, discover, stop, start, delete, with an explicit kubeconfig. |
 | `internal/components/` | Installs and manages the in-cluster backends and Knative Serving from pinned manifests. |
 | `internal/config/` | Configuration model, precedence (flags over environment over file over defaults), validation. |

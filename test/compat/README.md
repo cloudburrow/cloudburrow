@@ -95,6 +95,7 @@ Set by `scripts/compat-env.sh` from a running instance:
 | `CLOUDBURROW_TEST_RUN_STORAGE`, `CLOUDBURROW_TEST_RUN_PUBSUB` | as `STORAGE` and `PUBSUB` | the Cloud Run revision tests; see below |
 | `CLOUDBURROW_TEST_RUN_FIRESTORE` | as `FIRESTORE` | the Eventarc Firestore triggers (#1877), on the run shard |
 | `CLOUDBURROW_TEST_RUN_KMS`, `CLOUDBURROW_TEST_RUN_SCHEDULER`, `CLOUDBURROW_TEST_RUN_LOGGING` | as `KMS`, `SCHEDULER` and `LOGGING` | the Cloud Run revision tests; see below |
+| `CLOUDBURROW_TEST_RUN_LOCALAI` | as `LOCALAI`: the local Vertex AI endpoint, which Cloud Run starts without a model | the run shard's Document AI and Speech-to-Text customer-managed key tests (#1972), with `RUN_KMS` |
 | `CLOUDBURROW_TEST_TASKS_LOGGING` | as `LOGGING` | the Cloud Tasks dispatch log (#1256), in the storage shard, so the Logging tests stay in served |
 | `CLOUDBURROW_TEST_BIGQUERY_RESOURCEMANAGER` | as `RESOURCEMANAGER` | BigQuery's `JOBS_BY_FOLDER` and `JOBS_BY_ORGANIZATION` (#1392) and the purged project's emulator data (#1568), in the emulators shard, so the Resource Manager tests stay in storage |
 | `CLOUDBURROW_TEST_MEMORYSTORE_RESOURCEMANAGER` | as `RESOURCEMANAGER` | the principals the Memorystore IAM auth tests grant the connect roles to (#1614), in the memorystore shard, so the Resource Manager tests stay in storage |
@@ -106,7 +107,7 @@ Set by `scripts/compat-env.sh` from a running instance:
 | `CLOUDBURROW_TEST_GKE_SERVICEUSAGE` | as `SERVICEUSAGE` | gcloud's Service Usage override in the served shard: `gcloud container clusters create` checks `container.googleapis.com` is enabled through it (#1913), so the Service Usage suite does not run there too |
 | `CLOUDBURROW_TEST_LOGGING_RESOURCEMANAGER` | as `RESOURCEMANAGER` | the Cloud Logging folder and organization tests, which make a folder (#1395), in the served shard, so the Resource Manager tests stay in storage |
 | `CLOUDBURROW_TEST_SINK_LOGGING`, `CLOUDBURROW_TEST_SINK_STORAGE`, `CLOUDBURROW_TEST_SINK_PUBSUB` | as `LOGGING`, `STORAGE` and `PUBSUB` | the Cloud Logging sinks that deliver to Cloud Storage, Pub/Sub and BigQuery (#1404), in the emulators shard beside BigQuery, and `gcloud logging copy` and `CopyLogEntries` to a bucket (#1394) |
-| `CLOUDBURROW_TEST_CMEK_KMS` | as `KMS` | the customer-managed keys of Memorystore (memorystore shard) and of Cloud SQL and a Backup and DR vault (sql shard) (#1568), so the Cloud KMS tests stay in served |
+| `CLOUDBURROW_TEST_CMEK_KMS` | as `KMS` | the customer-managed keys of Memorystore (memorystore shard) and of Cloud SQL and a Backup and DR vault (sql shard) (#1568), and of Spanner's databases and backups (emulators shard, #1950), so the Cloud KMS tests stay in served |
 | `CLOUDBURROW_TEST_SQL_SERVICEUSAGE` | as `SERVICEUSAGE` | gcloud privateca roots create's `generateServiceIdentity` of the CA service agent (#1834), in the sql shard, so the Service Usage tests stay in storage |
 | `CLOUDBURROW_TEST_SQL_COMPUTE` | as `COMPUTE` | Cloud SQL's private networks checked against Compute Engine's (#1936), in the sql shard, so the Compute Engine suite stays in served |
 | `CLOUDBURROW_TEST_MEMORYSTORE_COMPUTE` | as `COMPUTE` | Memorystore's networks and reserved ranges checked against Compute Engine's (#1936), in the memorystore shard |

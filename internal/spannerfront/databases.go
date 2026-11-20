@@ -50,6 +50,7 @@ func (d databases) GetDatabase(ctx context.Context, req *databasepb.GetDatabaseR
 	defer d.s.mu.Unlock()
 	db.EnableDropProtection = d.s.protected[db.GetName()]
 	d.s.overlayRestore(db)
+	d.s.overlayKeys(db)
 	return db, nil
 }
 
@@ -63,6 +64,7 @@ func (d databases) ListDatabases(ctx context.Context, req *databasepb.ListDataba
 	for _, db := range resp.Databases {
 		db.EnableDropProtection = d.s.protected[db.GetName()]
 		d.s.overlayRestore(db)
+		d.s.overlayKeys(db)
 	}
 	return resp, nil
 }
@@ -81,6 +83,7 @@ func (d databases) DropDatabase(ctx context.Context, req *databasepb.DropDatabas
 	d.s.mu.Lock()
 	delete(d.s.protected, req.GetDatabase())
 	delete(d.s.restored, req.GetDatabase())
+	delete(d.s.dbKeys, req.GetDatabase())
 	d.s.dropSplitPoints(req.GetDatabase())
 	d.s.mu.Unlock()
 	d.s.dropPolicies(req.GetDatabase())

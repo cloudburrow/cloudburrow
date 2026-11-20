@@ -215,9 +215,13 @@ func TestLoggingFolderOrganizationAndBillingParents(t *testing.T) {
 	if st, err := cc.GetSettings(ctx, &loggingpb.GetSettingsRequest{Name: folder + "/settings"}); err != nil || st.GetName() != folder+"/settings" {
 		t.Errorf("GetSettings(folder) = %v, %v", st, err)
 	}
-	_, err = cc.UpdateSettings(ctx, &loggingpb.UpdateSettingsRequest{Name: folder + "/settings", Settings: &loggingpb.Settings{DisableDefaultSink: true},
+	// UpdateSettings' reference names organizations and folders (#1972).
+	if st, err := cc.UpdateSettings(ctx, &loggingpb.UpdateSettingsRequest{Name: folder + "/settings", Settings: &loggingpb.Settings{DisableDefaultSink: true},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"disable_default_sink"}}}); err != nil || !st.GetDisableDefaultSink() {
+		t.Errorf("UpdateSettings(folder) = %v, %v", st, err)
+	}
+	_, _ = cc.UpdateSettings(ctx, &loggingpb.UpdateSettingsRequest{Name: folder + "/settings", Settings: &loggingpb.Settings{},
 		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"disable_default_sink"}}})
-	wantLoggingCode(t, "UpdateSettings(folder): settings are configured for organizations", err, codes.FailedPrecondition)
 
 	// The organization: a sink, a bucket and its settings, restored after.
 	orgSink := "org-" + suffix

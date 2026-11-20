@@ -150,9 +150,9 @@ resource "google_logging_organization_bucket_config" "o" {
 // which only drops it from the state (settings cannot be deleted), so the
 // organization's settings are put back after. The data sources
 // google_logging_folder_settings and google_logging_organization_settings
-// read both. google_logging_folder_settings does not apply: UpdateSettings
-// configures only organizations, as logging_config.proto documents, and the
-// provider reports the API's FAILED_PRECONDITION, which REST carries as 400.
+// read both. google_logging_folder_settings applies too (#1972), as
+// UpdateSettings' reference names folders beside organizations, and plans
+// clean.
 // covers: google.logging.v2.ConfigServiceV2/GetSettings, google.logging.v2.ConfigServiceV2/UpdateSettings
 func TestTerraformLoggingOrganizationAndFolderSettings(t *testing.T) {
 	h := New(t)
@@ -220,7 +220,8 @@ output "folder_settings" {
 	m.must("destroy", "-auto-approve", "-input=false", "-no-color")
 	check("after destroy, which leaves settings as they are", "us-central1")
 
-	// A folder's settings are read, not configured.
+	// A folder's settings are configured too: UpdateSettings' reference
+	// names organizations/{o}/settings and folders/{f}/settings (#1972).
 	f := newTFModule(t)
 	f.write(fmt.Sprintf(`
 resource "google_logging_folder_settings" "f" {
@@ -229,13 +230,12 @@ resource "google_logging_folder_settings" "f" {
 }
 `, strings.TrimPrefix(folder, "folders/")))
 	f.must("init", "-input=false", "-no-color")
-	out, err := f.tf("apply", "-auto-approve", "-input=false", "-no-color")
-	if err == nil || !strings.Contains(out, "Error 400") || !strings.Contains(out, "can only be configured for organizations") {
-		t.Errorf("google_logging_folder_settings apply = %v; want the API's 400 refusal:\n%s", err, lastLines(out, 20))
+	f.apply()
+	if st, err := config.GetSettings(ctx, &loggingpb.GetSettingsRequest{Name: folder + "/settings"}); err != nil || !st.GetDisableDefaultSink() {
+		t.Errorf("the folder's settings after apply = %v, %v", st, err)
 	}
-	if st, err := config.GetSettings(ctx, &loggingpb.GetSettingsRequest{Name: folder + "/settings"}); err != nil || st.GetDisableDefaultSink() {
-		t.Errorf("the folder's settings after the refused apply = %v, %v", st, err)
-	}
+	f.planClean()
+	f.must("destroy", "-auto-approve", "-input=false", "-no-color")
 }
 
 // TestTerraformLoggingBillingAccount (#1403): google_logging_billing_account_sink

@@ -54,7 +54,14 @@ func checkSchedule(method string, in *databasepb.BackupSchedule) (cron.Schedule,
 		return nil, status.Errorf(codes.Unimplemented, "%s of incremental backups is not served here: they need the Enterprise edition, which the emulator does not have", method)
 	}
 	if e := in.GetEncryptionConfig(); e != nil {
-		if err := refuseCMEK(method, e.GetEncryptionType(), e.GetKmsKeyName()); err != nil {
+		named, err := keyNames(method, e.GetKmsKeyName(), e.GetKmsKeyNames())
+		if err != nil {
+			return nil, err
+		}
+		if _, err := resolveKeys(method, e.GetEncryptionType().String(), named, nil); err != nil {
+			return nil, err
+		}
+		if err := checkKeyNames(method, named); err != nil {
 			return nil, err
 		}
 	}
@@ -197,6 +204,7 @@ func (s *Instances) runSchedules(ctx context.Context) {
 		name, database string
 		at             time.Time
 		retention      time.Duration
+		encryption     *databasepb.CreateBackupEncryptionConfig
 	}
 	now := s.now()
 	var todo []due
@@ -213,7 +221,8 @@ func (s *Instances) runSchedules(ctx context.Context) {
 		}
 		sc.last = next
 		m := scheduleNameRe.FindStringSubmatch(name)
-		todo = append(todo, due{name: name, database: m[1], at: next, retention: sc.pb.GetRetentionDuration().AsDuration()})
+		todo = append(todo, due{name: name, database: m[1], at: next, retention: sc.pb.GetRetentionDuration().AsDuration(),
+			encryption: sc.pb.GetEncryptionConfig()})
 	}
 	s.mu.Unlock()
 	for _, t := range todo {
@@ -223,8 +232,15 @@ func (s *Instances) runSchedules(ctx context.Context) {
 			id = id[:44]
 		}
 		backupID := strings.TrimRight(id, "-_") + "-" + t.at.UTC().Format("20060102150405")
+		// The schedule's encryption_config, checked when it was set: a
+		// key that cannot be used fails this backup alone.
+		named, _ := keyNames("CreateBackup", t.encryption.GetKmsKeyName(), t.encryption.GetKmsKeyNames())
+		keys, err := resolveKeys("CreateBackup", t.encryption.GetEncryptionType().String(), named, s.databaseKeys(t.database))
+		if err != nil {
+			continue
+		}
 		_, _ = s.takeBackup(ctx, m[1]+"/backups/"+backupID, t.database, nil,
-			timestamppb.New(s.now().Add(t.retention)), []string{t.name})
+			timestamppb.New(s.now().Add(t.retention)), []string{t.name}, keys)
 	}
 }
 

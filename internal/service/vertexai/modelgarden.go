@@ -636,7 +636,7 @@ func documentAIPath(p string) bool {
 // or answers the not-found body when Model Garden is not served.
 func (s *Server) serveREST(w http.ResponseWriter, r *http.Request, body []byte) {
 	v2 := strings.HasPrefix(r.URL.Path, "/v2/") && (strings.Contains(r.URL.Path, "/recognizers") || strings.Contains(r.URL.Path, "/customClasses") ||
-		strings.Contains(r.URL.Path, "/phraseSets") || strings.Contains(r.URL.Path, "/operations/"))
+		strings.Contains(r.URL.Path, "/phraseSets") || strings.Contains(r.URL.Path, "/operations/") || strings.HasSuffix(r.URL.Path, "/config"))
 	// gcloud ai endpoints deploy-model polls its operation under v1beta1
 	// (#1940).
 	beta := r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1beta1/") && strings.Contains(r.URL.Path, "/operations/")

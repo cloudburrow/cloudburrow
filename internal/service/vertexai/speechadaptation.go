@@ -69,6 +69,7 @@ func adaptFiles(recognizers string) (string, string) {
 func (st *speechStore) loadAdaptation() {
 	st.classes = map[string]*speechpb.CustomClass{}
 	st.phraseSets = map[string]*speechpb.PhraseSet{}
+	defer st.loadCMEK()
 	cf, pf := adaptFiles(st.file)
 	if cf == "" {
 		return
@@ -100,12 +101,12 @@ func (st *speechStore) saveAdaptation() {
 	}
 	cl := &speechpb.ListCustomClassesResponse{}
 	for _, x := range st.classes {
-		cl.CustomClasses = append(cl.CustomClasses, x)
+		cl.CustomClasses = append(cl.CustomClasses, strippedClass(x))
 	}
 	sort.Slice(cl.CustomClasses, func(i, j int) bool { return cl.CustomClasses[i].Name < cl.CustomClasses[j].Name })
 	pl := &speechpb.ListPhraseSetsResponse{}
 	for _, x := range st.phraseSets {
-		pl.PhraseSets = append(pl.PhraseSets, x)
+		pl.PhraseSets = append(pl.PhraseSets, strippedPhraseSet(x))
 	}
 	sort.Slice(pl.PhraseSets, func(i, j int) bool { return pl.PhraseSets[i].Name < pl.PhraseSets[j].Name })
 	for f, m := range map[string]proto.Message{cf: cl, pf: pl} {
@@ -115,6 +116,7 @@ func (st *speechStore) saveAdaptation() {
 			_ = os.Rename(f+".tmp", f)
 		}
 	}
+	st.saveCMEK()
 }
 
 // checkAdaptCommon checks the display name and annotations.
@@ -222,6 +224,10 @@ func (v *speechService) CreateCustomClass(_ context.Context, req *speechpb.Creat
 		v.s.mu.Unlock()
 		return nil, grpcError(apierror.AlreadyExists("CustomClass %s already exists", name))
 	}
+	if err := v.s.sealClass(c, !req.GetValidateOnly()); err != nil {
+		v.s.mu.Unlock()
+		return nil, grpcError(err)
+	}
 	if !req.GetValidateOnly() {
 		st.classes[name] = c
 		st.saveAdaptation()
@@ -248,6 +254,9 @@ func (v *speechService) GetCustomClass(_ context.Context, req *speechpb.GetCusto
 	if err != nil {
 		return nil, grpcError(err)
 	}
+	if err := v.s.unsealClass(c); err != nil {
+		return nil, grpcError(err)
+	}
 	return proto.Clone(c).(*speechpb.CustomClass), nil
 }
 
@@ -259,6 +268,10 @@ func (v *speechService) ListCustomClasses(_ context.Context, req *speechpb.ListC
 	var all []*speechpb.CustomClass
 	for _, c := range v.s.speechRecognizers().classes {
 		if strings.HasPrefix(c.GetName(), req.GetParent()+"/customClasses/") && (req.GetShowDeleted() || c.GetState() != speechpb.CustomClass_DELETED) {
+			if err := v.s.unsealClass(c); err != nil {
+				v.s.mu.Unlock()
+				return nil, grpcError(err)
+			}
 			all = append(all, proto.Clone(c).(*speechpb.CustomClass))
 		}
 	}
@@ -283,10 +296,23 @@ func (v *speechService) changeClass(name, etag, method string, validateOnly bool
 		v.s.mu.Unlock()
 		return nil, grpcError(apierror.Aborted("The etag %q does not match the custom class's current etag", etag))
 	}
+	update := method == "UpdateCustomClass"
+	if update {
+		if err := v.s.unsealClass(c); err != nil {
+			v.s.mu.Unlock()
+			return nil, grpcError(err)
+		}
+	}
 	next := proto.Clone(c).(*speechpb.CustomClass)
 	if err := f(next); err != nil {
 		v.s.mu.Unlock()
 		return nil, grpcError(err)
+	}
+	if update {
+		if err := v.s.sealClass(next, !validateOnly); err != nil {
+			v.s.mu.Unlock()
+			return nil, grpcError(err)
+		}
 	}
 	if !validateOnly {
 		next.UpdateTime, next.Etag = timestamppb.Now(), newEtag()
@@ -374,6 +400,10 @@ func (v *speechService) CreatePhraseSet(_ context.Context, req *speechpb.CreateP
 		v.s.mu.Unlock()
 		return nil, grpcError(apierror.AlreadyExists("PhraseSet %s already exists", name))
 	}
+	if err := v.s.sealPhraseSet(p, !req.GetValidateOnly()); err != nil {
+		v.s.mu.Unlock()
+		return nil, grpcError(err)
+	}
 	if !req.GetValidateOnly() {
 		st.phraseSets[name] = p
 		st.saveAdaptation()
@@ -400,6 +430,9 @@ func (v *speechService) GetPhraseSet(_ context.Context, req *speechpb.GetPhraseS
 	if err != nil {
 		return nil, grpcError(err)
 	}
+	if err := v.s.unsealPhraseSet(p); err != nil {
+		return nil, grpcError(err)
+	}
 	return proto.Clone(p).(*speechpb.PhraseSet), nil
 }
 
@@ -411,6 +444,10 @@ func (v *speechService) ListPhraseSets(_ context.Context, req *speechpb.ListPhra
 	var all []*speechpb.PhraseSet
 	for _, p := range v.s.speechRecognizers().phraseSets {
 		if strings.HasPrefix(p.GetName(), req.GetParent()+"/phraseSets/") && (req.GetShowDeleted() || p.GetState() != speechpb.PhraseSet_DELETED) {
+			if err := v.s.unsealPhraseSet(p); err != nil {
+				v.s.mu.Unlock()
+				return nil, grpcError(err)
+			}
 			all = append(all, proto.Clone(p).(*speechpb.PhraseSet))
 		}
 	}
@@ -435,10 +472,23 @@ func (v *speechService) changePhraseSet(name, etag, method string, validateOnly 
 		v.s.mu.Unlock()
 		return nil, grpcError(apierror.Aborted("The etag %q does not match the phrase set's current etag", etag))
 	}
+	update := method == "UpdatePhraseSet"
+	if update {
+		if err := v.s.unsealPhraseSet(p); err != nil {
+			v.s.mu.Unlock()
+			return nil, grpcError(err)
+		}
+	}
 	next := proto.Clone(p).(*speechpb.PhraseSet)
 	if err := f(next); err != nil {
 		v.s.mu.Unlock()
 		return nil, grpcError(err)
+	}
+	if update {
+		if err := v.s.sealPhraseSet(next, !validateOnly); err != nil {
+			v.s.mu.Unlock()
+			return nil, grpcError(err)
+		}
 	}
 	if !validateOnly {
 		next.UpdateTime, next.Etag = timestamppb.Now(), newEtag()

@@ -65,6 +65,9 @@ func (s *Server) batchProcess(ctx context.Context, req *documentaipb.BatchProces
 	if p.GetState() != documentaipb.Processor_ENABLED {
 		return nil, apierror.FailedPrecondition("Processor %s is not enabled: its state is %s", p.GetName(), p.GetState())
 	}
+	if err := s.docAIKeyUsable(ctx, p); err != nil {
+		return nil, err
+	}
 	if req.GetSkipHumanReview() {
 		return nil, apierror.Unimplemented("Not implemented here: skip_human_review: the local processors have no human review")
 	}
