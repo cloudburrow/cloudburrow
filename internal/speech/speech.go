@@ -77,6 +77,9 @@ type Segment struct {
 	// Confidence is the mean probability of the segment's text tokens.
 	Confidence float64
 	Words      []Word
+	// Channel is the 1-based audio channel the segment was heard on with
+	// per-channel recognition, 0 otherwise.
+	Channel int
 }
 
 // Result is a transcription.

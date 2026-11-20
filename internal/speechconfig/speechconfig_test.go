@@ -37,14 +37,51 @@ func TestParse(t *testing.T) {
 		{`{"model": "chirp", "languageCodes": ["en-US"], "autoDecodingConfig": {}, "features": {"profanityFilter": true}}`, 501, "profanityFilter"},
 		{`{"model": "chirp", "languageCodes": ["en-US"], "autoDecodingConfig": {}, "features": {"diarizationConfig": {}}}`, 501, "diarizationConfig"},
 		{`{"model": "chirp", "languageCodes": ["en-US"], "autoDecodingConfig": {}, "translationConfig": {"targetLanguage": "de"}}`, 501, "translationConfig"},
-		{`{"model": "chirp", "languageCodes": ["en-US"], "explicitDecodingConfig": {"encoding": "OGG_OPUS"}}`, 501, "OGG_OPUS"},
+		{`{"model": "chirp", "languageCodes": ["en-US"], "explicitDecodingConfig": {"encoding": "AMR_WB"}}`, 501, "AMR_WB"},
 		{`{"model": "chirp", "languageCodes": ["en-US"], "explicitDecodingConfig": {"encoding": "WAV"}}`, 400, "invalid explicitDecodingConfig.encoding"},
 		{`{"model": "chirp", "languageCodes": ["en-US"], "autoDecodingConfig": {}, "features": {"maxAlternatives": 31}}`, 400, "maxAlternatives"},
 		{`[1]`, 400, "JSON object"},
+		{`{"model": "chirp", "languageCodes": ["en-US"], "autoDecodingConfig": {}, "transcriptNormalization": {"entries": [{"replace": "x"}]}}`, 400, "search is empty"},
+		{`{"model": "chirp", "languageCodes": ["en-US"], "autoDecodingConfig": {}, "transcriptNormalization": {"entries": [{"search": "x", "replace": "` + strings.Repeat("y", 101) + `"}]}}`, 400, "replace is longer than 100"},
+		{`{"model": "chirp", "languageCodes": ["en-US"], "autoDecodingConfig": {}, "transcriptNormalization": {"entries": [` + strings.Repeat(`{"search": "a"},`, 100) + `{"search": "b"}]}}`, 400, "at most 100"},
 	} {
 		_, code, err := Parse([]byte(tc.cfg))
 		if code != tc.code || err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: %d %v, want %d %q", tc.cfg, code, err, tc.code, tc.want)
+		}
+	}
+}
+
+// TestParsePerChannel (#1799): SEPARATE_RECOGNITION_PER_CHANNEL is read
+// as PerChannel; an unknown mode is 400.
+func TestParsePerChannel(t *testing.T) {
+	c, code, err := Parse([]byte(`{"model": "chirp", "languageCodes": ["en-US"], "autoDecodingConfig": {}, "features": {"multiChannelMode": "SEPARATE_RECOGNITION_PER_CHANNEL"}}`))
+	if code != 0 || err != nil || !c.PerChannel {
+		t.Errorf("SEPARATE_RECOGNITION_PER_CHANNEL: %+v %d %v", c.Options, code, err)
+	}
+	if _, code, _ := Parse([]byte(`{"model": "chirp", "languageCodes": ["en-US"], "autoDecodingConfig": {}, "features": {"multiChannelMode": "BOTH"}}`)); code != 400 {
+		t.Errorf("unknown mode: %d, want 400", code)
+	}
+}
+
+// TestNormalize (#1799): transcriptNormalization's entries apply in order,
+// case-insensitively unless caseSensitive, an earlier one keeping a later
+// one from matching (the reference's "cat" before "mountain cat").
+func TestNormalize(t *testing.T) {
+	c, code, err := Parse([]byte(`{"model": "chirp", "language_codes": ["en-US"], "auto_decoding_config": {}, "transcript_normalization": {"entries": [
+		{"search": "cat", "replace": "dog"}, {"search": "mountain cat", "replace": "puma"},
+		{"search": "Country", "replace": "nation", "case_sensitive": true}, {"search": "ÉTÉ", "replace": "summer"}]}}`))
+	if code != 0 || err != nil || len(c.Normalization) != 4 {
+		t.Fatalf("Parse: %d %v %+v", code, err, c.Normalization)
+	}
+	for in, want := range map[string]string{
+		"A mountain Cat and a CAT.":             "A mountain dog and a dog.",
+		"ask not what your country can do":      "ask not what your country can do",
+		"ask what you can do for your Country.": "ask what you can do for your nation.",
+		"en été":                                "en summer",
+	} {
+		if got := c.Normalize(in); got != want {
+			t.Errorf("Normalize(%q) = %q, want %q", in, got, want)
 		}
 	}
 }

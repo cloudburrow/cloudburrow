@@ -225,6 +225,31 @@ func decodeFLACFrame(b []byte, si flacStreamInfo) (flacFrame, error) {
 // which IsTooLong reports. Frame CRCs are not checked; a stream that does
 // not parse is an error, never partial audio.
 func DecodeFLACFile(data []byte, maxSeconds int) (mono []float32, rate int, err error) {
+	return decodeFLACFile(data, maxSeconds, false)
+}
+
+// DecodeFLACChannels is DecodeFLACFile with the channels kept apart:
+// interleaved samples in [-1, 1], their count, and the rate (#1799,
+// Speech-to-Text's per-channel recognition).
+func DecodeFLACChannels(data []byte, maxSeconds int) (interleaved []float32, channels, rate int, err error) {
+	s, rate, err := decodeFLACFile(data, maxSeconds, true)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	return s, flacChannels(data), rate, nil
+}
+
+// flacChannels is the channel count of a FLAC file DecodeFLACFile read.
+func flacChannels(data []byte) int {
+	if len(data) >= 8+18 {
+		if si, err := parseFLACStreamInfo(data[8:]); err == nil {
+			return si.channels
+		}
+	}
+	return 1
+}
+
+func decodeFLACFile(data []byte, maxSeconds int, keep bool) (mono []float32, rate int, err error) {
 	if len(data) < 4 || string(data[:4]) != "fLaC" {
 		return nil, 0, errors.New("the data is not a FLAC stream")
 	}
@@ -259,6 +284,19 @@ func DecodeFLACFile(data []byte, maxSeconds int) (mono []float32, rate int, err 
 		}
 		if f.rate != si.rate {
 			return nil, 0, notDecodedf("its FLAC frames change from %d Hz to %d Hz, which is not decoded", si.rate, f.rate)
+		}
+		if keep {
+			scale := float32(int64(1) << (f.bits - 1))
+			for j := range f.ch[0] {
+				for c := range f.ch {
+					mono = append(mono, float32(f.ch[c][j])/scale)
+				}
+			}
+			if len(mono) > maxSeconds*si.rate*len(f.ch) {
+				return nil, 0, &tooLongError{float64(len(mono)) / float64(si.rate*len(f.ch))}
+			}
+			pos += f.size
+			continue
 		}
 		scale := float32(int64(1)<<(f.bits-1)) * float32(len(f.ch))
 		for j := range f.ch[0] {
