@@ -51,7 +51,7 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 	config.ServiceCloudSQLMySQL: {Providers: []string{"cloudsql-mysql", "cloudsql-instances", "cloudsql-backups"}},
 	config.ServiceBackupDR:      {Providers: []string{"backupdr"}},
 	config.ServicePrivateCA:     {Providers: []string{"privateca", "privateca-templates"}},
-	config.ServiceMonitoring:    {Providers: []string{"monitoring-explorer", "monitoring-metrics"}},
+	config.ServiceMonitoring:    {Providers: []string{"monitoring-explorer", "monitoring-metrics", "monitoring-alerting", "monitoring-incidents", "monitoring-channels", "monitoring-uptime", "monitoring-dashboards", "monitoring-groups", "monitoring-services", "monitoring-snoozes"}},
 }
 
 // clusterScreens are the registry's screens that belong to no selectable

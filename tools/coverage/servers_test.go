@@ -14,7 +14,6 @@ import (
 
 	iamadminpb "cloud.google.com/go/iam/admin/apiv1/adminpb"
 	iamv2pb "cloud.google.com/go/iam/apiv2/iampb"
-	"cloud.google.com/go/monitoring/apiv3/v2/monitoringpb"
 	"cloud.google.com/go/orgpolicy/apiv2/orgpolicypb"
 	rmpb "cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
 	"cloud.google.com/go/security/privateca/apiv1/privatecapb"
@@ -72,7 +71,7 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	monitoringpb.RegisterMetricServiceServer(srv, mon)
+	mon.Register(srv)
 	rmReg := resourcemanager.New(store.NewMemory())
 	rmpb.RegisterProjectsServer(srv, resourcemanager.NewProjectsServer(rmReg))
 	rmpb.RegisterFoldersServer(srv, resourcemanager.NewFoldersServer(rmReg))

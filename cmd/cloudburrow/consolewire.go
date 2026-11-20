@@ -279,6 +279,13 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	if enabled[config.ServiceMonitoring] && d.monitoring != nil {
 		screen := monitoringScreen{api: monitoringAPIOf(d.monitoring)}
 		providers = append(providers, monitoringExplorerProvider{screen}, monitoringMetricsProvider{screen})
+		// Alerting, uptime checks, dashboards, groups, services and
+		// snoozes (#1964).
+		admin := monitoringAdmin{api: monitoringServerOf(d.monitoring)}
+		providers = append(providers, monitoringAlertingProvider{admin}, monitoringIncidentsProvider{admin},
+			monitoringChannelsProvider{admin}, monitoringUptimeProvider{admin},
+			monitoringDashboardsProvider{monitoringAdmin: admin, metrics: screen}, monitoringGroupsProvider{admin},
+			monitoringServicesProvider{admin}, monitoringSnoozesProvider{admin})
 	}
 	if enabled[config.ServiceScheduler] && d.scheduler != nil {
 		providers = append(providers, schedulerProvider{svc: d.scheduler, faults: d.faults})

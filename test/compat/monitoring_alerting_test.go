@@ -96,7 +96,7 @@ func writeGauge(t *testing.T, h *Harness, c *monitoring.MetricClient, metric str
 // cloud.google.com/go/monitoring/apiv3/v2:
 //   - the channel descriptors are listed and one is got;
 //   - a webhook_tokenauth channel to a local receiver, a basic-auth one,
-//     and an email one (UNVERIFIED, its verification code recorded, never
+//     and an email one (not yet verified, its verification code recorded, never
 //     sent) are created, listed by a type filter, got and updated;
 //   - a threshold policy over a custom gauge is created, listed, got and
 //     updated with a mask; a point above the threshold opens an incident
