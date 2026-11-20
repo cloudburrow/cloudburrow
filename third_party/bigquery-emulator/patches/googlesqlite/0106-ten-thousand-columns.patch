@@ -1,0 +1,192 @@
+CloudBurrow patch 106 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#2012). Applies after patch 0104.
+
+BigQuery: "Each table, query result, or view definition can have up to
+10,000 columns. This includes nested and repeated columns."
+(https://docs.cloud.google.com/bigquery/quotas). The engine's SQLite
+holds 32,767 columns (go-sqlite3-wasm patch 0105), and CloudBurrow's
+front checked only tables.insert and tables.patch, so a query, CREATE
+TABLE, CREATE TABLE ... AS SELECT or CREATE VIEW of more columns ran.
+
+The analyzer now refuses each of them over 10,000 columns, a STRUCT's
+fields (at every depth, and an ARRAY of STRUCT's) counted, before
+anything runs or is made, with "Too many columns: the <query result |
+table | view> has N columns, including nested and repeated columns; a
+table, query result, or view definition can have up to 10000 columns".
+BigQuery documents no message for it. The column of the time a row was
+streamed the engine adds to a table (_PARTITION_STREAMED) is not
+counted. Regression test TestTenThousandColumnLimit.
+
+Derived from github.com/goccy/googlesqlite v0.3.1, under its MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch is
+offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- a/internal/analyzer.go
++++ b/internal/analyzer.go
+@@ -2272,6 +2272,9 @@
+ 
+ func (a *Analyzer) newCreateTableStmtAction(ctx context.Context, query string, args []driver.NamedValue, node *googlesql.ResolvedCreateTableStmt) (*CreateTableStmtAction, error) {
+ 	spec := newTableSpecWithQuery(ctx, a.namePath, query, node)
++	if err := columnLimitError("table", spec.Columns); err != nil { // CloudBurrow patch (#2012)
++		return nil, err
++	}
+ 	queryArgs, err := getArgsFromParams(args, nil)
+ 	if err != nil {
+ 		return nil, err
+@@ -2291,6 +2294,9 @@
+ 		return nil, err
+ 	}
+ 	spec := newTableAsSelectSpec(ctx, a.namePath, query, node)
++	if err := columnLimitError("table", spec.Columns); err != nil { // CloudBurrow patch (#2012)
++		return nil, err
++	}
+ 	queryArgs, err := getArgsFromParams(args, params)
+ 	if err != nil {
+ 		return nil, err
+@@ -2336,6 +2342,9 @@
+ 		return nil, err
+ 	}
+ 	spec := newTableAsViewSpec(a.namePath, query, node)
++	if err := columnLimitError("view", spec.Columns); err != nil { // CloudBurrow patch (#2012)
++		return nil, err
++	}
+ 	return &CreateViewStmtAction{
+ 		query:   query,
+ 		spec:    spec,
+@@ -2692,6 +2701,9 @@
+ 			Type: newType(m1(m1(col.Column()).Type())),
+ 		})
+ 	}
++	if err := columnLimitError("query result", outputColumns); err != nil { // CloudBurrow patch (#2012)
++		return nil, err
++	}
+ 	formattedQuery, params, err := collectFormatParams(ctx, node)
+ 	if err != nil {
+ 		return nil, fmt.Errorf("failed to format query %s: %w", query, err)
+--- /dev/null
++++ b/internal/column_limit.go
+@@ -0,0 +1,50 @@
++package internal
++
++import "fmt"
++
++// CloudBurrow patch (cloudburrow/cloudburrow#2012): BigQuery's "Maximum
++// number of columns": "Each table, query result, or view definition can
++// have up to 10,000 columns. This includes nested and repeated columns."
++// (https://docs.cloud.google.com/bigquery/quotas). The engine's SQLite
++// holds 32,767 columns (go-sqlite3-wasm patch 0105), so the analyzer
++// refuses a query, CREATE TABLE, CREATE TABLE ... AS SELECT or CREATE VIEW
++// of more before anything runs or is made. A RECORD's subfields count, at
++// every depth, as an ARRAY of STRUCT's do; the column of the time a row was
++// streamed the engine adds to a table (streamedAtColumn) does not.
++const maxColumns = 10000
++
++// typeColumns is the columns a column of type t holds besides itself: a
++// STRUCT's fields and theirs, an ARRAY's element's.
++func typeColumns(t *Type) int {
++	if t == nil {
++		return 0
++	}
++	n := typeColumns(t.ElementType)
++	for _, f := range t.FieldTypes {
++		n += 1 + typeColumns(f.Type)
++	}
++	return n
++}
++
++// countColumns counts cols as the limit does.
++func countColumns(cols []*ColumnSpec) int {
++	n := 0
++	for _, c := range cols {
++		if c.Name == streamedAtColumn {
++			continue
++		}
++		n += 1 + typeColumns(c.Type)
++	}
++	return n
++}
++
++// columnLimitError is the error of a statement whose what (a query result,
++// a table, a view) has cols, or nil. BigQuery's documentation gives no
++// message for it; the reason the front answers is invalidQuery.
++func columnLimitError(what string, cols []*ColumnSpec) error {
++	if n := countColumns(cols); n > maxColumns {
++		return fmt.Errorf("Too many columns: the %s has %d columns, including nested and repeated columns; "+
++			"a table, query result, or view definition can have up to %d columns", what, n, maxColumns)
++	}
++	return nil
++}
+--- /dev/null
++++ b/column_limit_test.go
+@@ -0,0 +1,69 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"fmt"
++	"strings"
++	"testing"
++
++	_ "github.com/goccy/googlesqlite"
++)
++
++// TestTenThousandColumnLimit is CloudBurrow's regression test of its patch
++// 0106 (cloudburrow/cloudburrow#2012): a query result, CREATE TABLE,
++// CREATE TABLE ... AS SELECT and CREATE VIEW of 10,000 columns, nested
++// ones counted, are taken; of 10,001 each is refused before anything is
++// made.
++func TestTenThousandColumnLimit(t *testing.T) {
++	db, err := sql.Open("googlesqlite", ":memory:")
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer db.Close()
++	db.SetMaxOpenConns(1)
++	ctx := context.Background()
++	list := func(n int, def bool) string {
++		parts := make([]string, n)
++		for i := range parts {
++			if def {
++				parts[i] = fmt.Sprintf("c%d INT64", i)
++			} else {
++				parts[i] = fmt.Sprintf("%d AS c%d", i, i)
++			}
++		}
++		return strings.Join(parts, ", ")
++	}
++	ok := func(q string) {
++		t.Helper()
++		if _, err := db.ExecContext(ctx, q); err != nil {
++			t.Fatalf("%.60s...: %v", q, err)
++		}
++	}
++	refused := func(q string) {
++		t.Helper()
++		_, err := db.ExecContext(ctx, q)
++		if err == nil || !strings.Contains(err.Error(), "can have up to 10000 columns") {
++			t.Errorf("%.60s...: %v, want the 10,000-column error", q, err)
++		}
++	}
++	ok("CREATE TABLE `p.d.t10000` (" + list(10000, true) + ")")
++	ok("CREATE TABLE `p.d.a10000` AS SELECT " + list(10000, false))
++	ok("CREATE VIEW `p.d.v10000` AS SELECT " + list(10000, false))
++	ok("SELECT " + list(10000, false))
++	ok("SELECT * FROM `p.d.t10000`")
++	refused("CREATE TABLE `p.d.t10001` (" + list(10001, true) + ")")
++	refused("CREATE TABLE `p.d.n10001` (" + list(9999, true) + ", r STRUCT<x INT64>)")
++	refused("CREATE TABLE `p.d.ar10001` (" + list(9999, true) + ", r ARRAY<STRUCT<x INT64>>)")
++	refused("CREATE TABLE `p.d.a10001` AS SELECT " + list(10001, false))
++	refused("CREATE VIEW `p.d.v10001` AS SELECT " + list(10001, false))
++	refused("SELECT " + list(10001, false))
++	refused("SELECT *, 1 AS extra FROM `p.d.t10000`")
++	refused("SELECT t FROM `p.d.t10000` AS t")
++	for _, name := range []string{"t10001", "n10001", "ar10001", "a10001", "v10001"} {
++		if _, err := db.ExecContext(ctx, "SELECT 1 FROM `p.d."+name+"`"); err == nil {
++			t.Errorf("the refused %s was made", name)
++		}
++	}
++	ok("CREATE TABLE `p.d.arr` (" + list(9999, true) + ", r ARRAY<INT64>)")
++}

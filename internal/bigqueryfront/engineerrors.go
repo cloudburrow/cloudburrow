@@ -118,6 +118,12 @@ type engineContext struct {
 // patch 0072).
 const errorFunctionPrefix = "ERROR function: "
 
+// engineColumnLimit starts the engine's error of a query result, table or
+// view over BigQuery's 10,000 columns (googlesqlite patch 0106, #2012),
+// answered invalidQuery as the engine's other errors of a query that
+// cannot run. BigQuery documents no message for it.
+const engineColumnLimit = "Too many columns: "
+
 // enginePosition is the position the engine ends an error with.
 var enginePosition = regexp.MustCompile(` \[at ([0-9]+):([0-9]+)\]$`)
 
@@ -222,6 +228,10 @@ func (c *engineContext) runtimeError(msg string) (string, bool) {
 		return msg[i:], true
 	}
 	if i := strings.Index(msg, "int64 overflow: "); i >= 0 {
+		return msg[i:], true
+	}
+	if i := strings.Index(msg, engineColumnLimit); i >= 0 {
+		// The 10,000-column limit (googlesqlite patch 0106, #2012).
 		return msg[i:], true
 	}
 	if strings.HasSuffix(msg, "not enough query arguments") {

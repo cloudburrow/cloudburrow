@@ -11857,6 +11857,8 @@
           "test/compat/bigquerytransactions_test.go:118 TestBigQueryScriptTransactionsMore",
           "test/compat/bigquerytransactions_test.go:236 TestBigQueryScriptRangeVariables",
           "test/compat/bigquerytransactions_test.go:24 TestBigQueryScriptTransactions",
+          "test/compat/bigquerytxncolumns2012_test.go:114 TestBigQueryTenThousandColumnsQueriesAndDDL",
+          "test/compat/bigquerytxncolumns2012_test.go:35 TestBigQueryStreamingBufferDMLInTransaction",
           "test/compat/bigqueryundelete1483_test.go:204 TestBigQueryTableDecorators",
           "test/compat/bigqueryundelete1483_test.go:41 TestBigQueryUndeleteKeepsMore",
           "test/compat/bigqueryundelete_test.go:46 TestBigQueryUndeleteAndRestore",
@@ -12148,6 +12150,8 @@
           "test/compat/bigquerytransactions_test.go:118 TestBigQueryScriptTransactionsMore",
           "test/compat/bigquerytransactions_test.go:236 TestBigQueryScriptRangeVariables",
           "test/compat/bigquerytransactions_test.go:24 TestBigQueryScriptTransactions",
+          "test/compat/bigquerytxncolumns2012_test.go:114 TestBigQueryTenThousandColumnsQueriesAndDDL",
+          "test/compat/bigquerytxncolumns2012_test.go:35 TestBigQueryStreamingBufferDMLInTransaction",
           "test/compat/bigqueryundelete1483_test.go:41 TestBigQueryUndeleteKeepsMore",
           "test/compat/bigqueryundelete_test.go:46 TestBigQueryUndeleteAndRestore",
           "test/compat/bigqueryundeleteroutines_test.go:43 TestBigQueryUndeleteKeepsRoutinesAndModels",
@@ -12430,7 +12434,8 @@
           "test/compat/bigquerystreamtime_test.go:19 TestBigQueryStreamTimeOfEveryTable",
           "test/compat/bigquerystreamtimemore_test.go:22 TestBigQueryStreamTimeOfMadeTables",
           "test/compat/bigquerystructjson_test.go:26 TestBigQueryStructJSONField",
-          "test/compat/bigquerytimezonecolumns_test.go:27 TestBigQueryDefaultTimeZoneOfColumns"
+          "test/compat/bigquerytimezonecolumns_test.go:27 TestBigQueryDefaultTimeZoneOfColumns",
+          "test/compat/bigquerytxncolumns2012_test.go:35 TestBigQueryStreamingBufferDMLInTransaction"
         ]
       },
       {

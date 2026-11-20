@@ -233,8 +233,13 @@ func hasTransaction(nodes []scriptNode) bool {
 
 // txnFail is a failed flow with a BigQuery error body.
 func txnFail(msg, text string, pos int) *scriptFlow {
+	return txnFailReason(msg, "invalidQuery", text, pos)
+}
+
+// txnFailReason is txnFail with the error's reason.
+func txnFailReason(msg, reason, text string, pos int) *scriptFlow {
 	body, _ := json.Marshal(map[string]any{"error": map[string]any{"code": http.StatusBadRequest, "message": msg,
-		"errors": []map[string]string{{"message": msg, "domain": "global", "reason": "invalidQuery"}}, "status": "INVALID_ARGUMENT"}})
+		"errors": []map[string]string{{"message": msg, "domain": "global", "reason": reason}}, "status": "INVALID_ARGUMENT"}})
 	return &scriptFlow{failed: true, status: http.StatusBadRequest, body: body, msg: msg, text: text, pos: pos, hasPos: true}
 }
 
@@ -444,6 +449,13 @@ func (s *scriptRun) sendInTxn(text string) (*recorder, *scriptFlow) {
 		// It reads nothing the transaction changed.
 		return s.send(text)
 	}
+	if kind == "dml" {
+		if msg := s.bufferedInTxn(text); msg != "" {
+			flow := txnFailReason(msg, "badRequest", text, 0)
+			flow.hasPos = false
+			return nil, flow
+		}
+	}
 	probe := "BEGIN TRANSACTION;\n"
 	for _, d := range txn.kept {
 		probe += d + ";\n"
@@ -491,4 +503,39 @@ func (s *scriptRun) sendTxn(text string) (*recorder, *scriptFlow) {
 // queries, DML, and DDL of temporary entities).
 func schemaDDLInTxn(t []token) bool {
 	return len(t) > 2 && (t[0].is("UNDROP") || t[0].is("ALTER")) && t[1].is("SCHEMA")
+}
+
+// bufferedInTxn returns the streaming buffer's error (bufferedChange) of
+// text, a DML statement of the open transaction, or "" (#2012): rows
+// "recently written ... can't be modified with data manipulation language
+// (DML), such as UPDATE, DELETE, MERGE, or TRUNCATE statements"
+// (https://docs.cloud.google.com/bigquery/docs/data-manipulation-language),
+// and BigQuery's transactions page makes no exception for DML inside a
+// transaction (https://docs.cloud.google.com/bigquery/docs/transactions,
+// read 2026-11-20). The statement fails inside the transaction, as any
+// error there does: an exception handler sees it, and with none the
+// script fails and the transaction is rolled back. The rows are counted
+// in the table as committed, before the transaction's earlier
+// statements: those cannot have changed a buffered row, which would have
+// failed so too.
+func (s *scriptRun) bufferedInTxn(text string) string {
+	d, ok := parseDML(text)
+	if !ok {
+		return ""
+	}
+	if d.kind == "UPDATE" && d.fromGap == "" && d.asMerge != "" {
+		if md, ok := parseDML(d.asMerge); ok {
+			d = md
+		}
+	}
+	if len(d.target) == 1 && s.txn != nil {
+		if _, temp := s.txn.temps[strings.ToLower(d.target[0])]; temp {
+			return "" // a TEMP table the transaction made: never streamed to
+		}
+	}
+	ds, table, ok := tableOf(s.q, d.target)
+	if !ok {
+		return ""
+	}
+	return s.f.bufferedChange(s.r, s.q, d, ds, table)
 }
