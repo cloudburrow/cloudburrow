@@ -1,4 +1,4 @@
-# Every api_endpoint_overrides property of gcloud 586.0.0, from its lib/googlecloudsdk/core/properties.py (scripts/endpoint-inventory.sh, #1975).
+# Every api_endpoint_overrides property of gcloud 593.0.0, from its lib/googlecloudsdk/core/properties/sections/api_endpoint_overrides.py (scripts/endpoint-inventory.sh, #1975).
 accessapproval
 accesscontextmanager
 agentidentity
@@ -94,7 +94,6 @@ firebaserules
 firestore
 ftp
 geminicloudassist
-genomics
 gkebackup
 gkehub
 gkemulticloud
@@ -106,6 +105,7 @@ iam
 iamconnectors
 iamcredentials
 iap
+identitytoolkit
 ids
 kmsinventory
 krmapihosting
@@ -114,7 +114,6 @@ language
 logging
 looker
 lustre
-managedflink
 managedidentities
 managedkafka
 manager
@@ -122,6 +121,7 @@ marketplacesolutions
 mediaasset
 memcache
 memorystore
+meridian
 metastore
 ml
 modelarmor
@@ -135,11 +135,11 @@ notebooks
 observability
 ondemandscanning
 oracledatabase
+orchestration
 orglifecycle
 orgpolicy
 osconfig
 oslogin
-parallelstore
 parametermanager
 policyanalyzer
 policysimulator
@@ -149,6 +149,7 @@ privilegedaccessmanager
 publicca
 pubsub
 pubsublite
+ratelimiting
 recaptchaenterprise
 recommender
 redis
@@ -181,7 +182,6 @@ storage_grpc
 storagebatchoperations
 storageinsights
 stream
-telcoautomation
 testing
 toolresults
 tpu
@@ -198,4 +198,6 @@ workflowexecutions
 workflows
 workloadcertificate
 workloadidentity
+workloadmanager
+workspacekeyaccess
 workstations

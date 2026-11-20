@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"regexp"
 	"sort"
 	"strings"
@@ -84,6 +85,8 @@ func TestServiceUsageServices(t *testing.T) {
 	}
 	disabled, err := c.Services.List(p).Filter("state:DISABLED").Context(ctx).Do()
 	// The Container Scanning API is off until enabled, as on Google (#1912).
+	// It is served with Cloud Run, so only an instance serving Cloud Run
+	// lists it: the storage shard's does not.
 	var off []string
 	if err == nil {
 		for _, s := range disabled.Services {
@@ -91,8 +94,12 @@ func TestServiceUsageServices(t *testing.T) {
 		}
 	}
 	sort.Strings(off)
-	if err != nil || strings.Join(off, ",") != "containerscanning.googleapis.com,storage.googleapis.com" {
-		t.Errorf("list state:DISABLED = %v, %v; want containerscanning and storage", off, err)
+	want := "storage.googleapis.com"
+	if os.Getenv(EnvRun) != "" {
+		want = "containerscanning.googleapis.com," + want
+	}
+	if err != nil || strings.Join(off, ",") != want {
+		t.Errorf("list state:DISABLED = %v, %v; want %s", off, err, want)
 	}
 
 	// Per project: another project still has it.

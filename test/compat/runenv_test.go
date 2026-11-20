@@ -258,4 +258,7 @@ const (
 	// CUSTOMER_MANAGED_CAS_CA instances, whose CA pools issue their server
 	// certificates (#1834).
 	envSQLPrivateCA = "CLOUDBURROW_TEST_SQL_PRIVATECA"
+	// The API Keys API for the run shard's Cloud Build webhook triggers,
+	// whose URLs carry a key of the project's (#1915).
+	envRunAPIKeys = "CLOUDBURROW_TEST_RUN_APIKEYS"
 )

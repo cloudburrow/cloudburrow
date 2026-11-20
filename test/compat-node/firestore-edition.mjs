@@ -24,8 +24,11 @@ async function enterpriseDatabase(project, id) {
   return async () => { await fetch(`${base}/${id}`, { method: 'DELETE', headers }); };
 }
 
+// No apiKey: the SDK sends the app's key as X-Goog-Api-Key on every call,
+// and Google refuses a key no project has (API_KEY_INVALID, #1915), which a
+// made-up one is; Firestore needs none, as the caller's token authorizes.
 function firestoreFor(sdk, settings, project, database) {
-  const app = initializeApp({ projectId: project, apiKey: 'fake-api-key' }, `edition-${database}-${suffix()}`);
+  const app = initializeApp({ projectId: project }, `edition-${database}-${suffix()}`);
   const db = sdk.initializeFirestore(app, settings, database);
   const [host, port] = process.env.FIRESTORE_EMULATOR_HOST.split(':');
   sdk.connectFirestoreEmulator(db, host, Number(port));

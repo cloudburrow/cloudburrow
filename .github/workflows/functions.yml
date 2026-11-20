@@ -75,8 +75,8 @@ jobs:
       # (#1377), whose deploys from source are gated as the Functions tests are.
       - name: Install the Google Cloud CLI
         run: |
-          curl --retry 5 --retry-all-errors -fsSLo "$RUNNER_TEMP/gcloud.tar.gz" https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-586.0.0-linux-x86_64.tar.gz
-          echo "6c774c76793eedd501150b59da653610fbe3eaac169e822965b722de75a2f001  $RUNNER_TEMP/gcloud.tar.gz" | sha256sum -c -
+          curl --retry 5 --retry-all-errors -fsSLo "$RUNNER_TEMP/gcloud.tar.gz" https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-593.0.0-linux-x86_64.tar.gz
+          echo "42c32b7553c712f71fcf6f124546c0519437f53755f47f9bd0c957998cd6b826  $RUNNER_TEMP/gcloud.tar.gz" | sha256sum -c -
           tar -xzf "$RUNNER_TEMP/gcloud.tar.gz" -C "$RUNNER_TEMP" && rm "$RUNNER_TEMP/gcloud.tar.gz"
           # The beta commands (gcloud beta run domain-mappings, #1349) need the
           # beta component, installed here, at the release pinned above,

@@ -183,7 +183,13 @@ func TestPinnedToolsGainNoUnmappedEndpoint(t *testing.T) {
 		if err != nil {
 			t.Fatalf("gcloud info: %v", err)
 		}
-		src, err := os.ReadFile(filepath.Join(strings.TrimSpace(string(root)), "lib", "googlecloudsdk", "core", "properties.py"))
+		// gcloud 593 moved the section into core/properties/sections;
+		// earlier releases keep it in core/properties.py.
+		lib := filepath.Join(strings.TrimSpace(string(root)), "lib", "googlecloudsdk", "core")
+		src, err := os.ReadFile(filepath.Join(lib, "properties", "sections", "api_endpoint_overrides.py"))
+		if os.IsNotExist(err) {
+			src, err = os.ReadFile(filepath.Join(lib, "properties.py"))
+		}
 		if err != nil {
 			t.Fatal(err)
 		}
