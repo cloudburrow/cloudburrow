@@ -99,6 +99,37 @@ type Resource struct {
 	// Spanner Instances list opens a checked instance's Labels tab, where
 	// its labels are added, updated and deleted (#1859).
 	Info []InfoTab `json:"info,omitempty"`
+	// Panel is a side panel a link on the row opens, its text the panel's
+	// Label: Google's Vulnerabilities rows link View or View Fixed, which
+	// open the Vulnerability details panel (#2066).
+	Panel *SidePanel `json:"panel,omitempty"`
+}
+
+// SidePanel is a panel drawn at the side of the page, over the info
+// panel's place, holding what the provider gives: Google's repository
+// Setup Instructions and a vulnerability's Vulnerability details (#2066).
+// It changes nothing, so it is never sent anywhere.
+type SidePanel struct {
+	// Label is the button or link that opens it; Title heads it.
+	Label string `json:"label"`
+	Title string `json:"title"`
+	// Intro is a line under the title.
+	Intro string `json:"intro,omitempty"`
+	// Text is preformatted text, such as commands, and Copy the label of
+	// the button that copies it.
+	Text string `json:"text,omitempty"`
+	Copy string `json:"copy,omitempty"`
+	// Groups are headed label/value pairs.
+	Groups []PropertyGroup `json:"groups,omitempty"`
+	// Tables are headed tables: the File location(s) table.
+	Tables []PanelTable `json:"tables,omitempty"`
+}
+
+// PanelTable is one table of a SidePanel.
+type PanelTable struct {
+	Title   string     `json:"title"`
+	Columns []string   `json:"columns"`
+	Rows    [][]string `json:"rows"`
 }
 
 // InfoTab is one tab of the info panel for a row (Resource.Info).
@@ -417,7 +448,11 @@ type Field struct {
 	// as Google's Choose Destination does (#1845); "kms" is a symmetric key
 	// of this instance's Cloud KMS in the location the form's
 	// locationType, multiRegion and region fields hold, filled in as its
-	// resource name (#1881).
+	// resource name (#1881); "artifact-registry" is a standard
+	// repository of this instance's Artifact Registry of the format and in
+	// the location the form's format, locationType, location and
+	// multiRegion fields hold, filled in as its resource name, as Google's
+	// remote repository's Browse does (#2066).
 	Browse string `json:"browse,omitempty"`
 	// Unavailable, on a checkbox, is why the choice cannot be made on this
 	// instance: the box is drawn as Google's page has it, unchecked and
@@ -877,6 +912,10 @@ type Detail struct {
 	// (#1860), and Google's Spanner instance and database pages have
 	// Overview, Spanner Studio, Backup/Restore and the rest (#1859).
 	SideNav bool `json:"sideNav,omitempty"`
+	// Panels are side panels opened by buttons beside the title, before
+	// the page's actions: Google's repository page has Setup Instructions,
+	// which opens its commands in a panel (#2066).
+	Panels []SidePanel `json:"panels,omitempty"`
 }
 
 // Crumb is one breadcrumb: its text, and the path it opens (none for the
@@ -1043,6 +1082,10 @@ type Section struct {
 	// another section is ShownIn it: "Live and noncurrent objects" on an
 	// object's Version history (#1843). Empty is "Live objects only".
 	Show string `json:"show,omitempty"`
+	// ShowLabel names this tab's Show list where Google's is not Show:
+	// the Vulnerabilities tab's Layer bar lists each layer with
+	// vulnerabilities, ShownIn it, after Show "All layers" (#2066).
+	ShowLabel string `json:"showLabel,omitempty"`
 }
 
 // dropBlankProperties removes every Property whose Value is empty or
@@ -1118,6 +1161,10 @@ type PropertyGroup struct {
 	Section string `json:"section,omitempty"`
 	// Properties are the pairs, in the order the provider gives them.
 	Properties []Property `json:"properties"`
+	// Bars draws the group as a bar graph, a bar per property whose Value
+	// is a count: Google's Dependencies tab's Most common licenses
+	// (#2066).
+	Bars bool `json:"bars,omitempty"`
 }
 
 // ChartSeries is one line on a chart, with its own points and unit.

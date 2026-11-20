@@ -150,4 +150,52 @@ func TestCloudRunArtifactRegistryVulnerabilitiesTabThroughThePage(t *testing.T) 
 			t.Errorf("the Dependencies tab %q lacks %q", deps, want)
 		}
 	}
+	// The scanner records each package's license (#2066): Most common
+	// licenses is a bar graph, and zlib's License type is Zlib.
+	var bars, zrow string
+	p.eval(`[...document.querySelectorAll("#view [role=tabpanel] .bar-graph .bar-row")].map((r) => r.textContent).join("|")`, &bars)
+	p.eval(`[...document.querySelectorAll("#view [role=tabpanel] tbody tr")].map((r) => r.textContent).find((x) => x.includes("zlib")) || ""`, &zrow)
+	if bars != "Zlib1" || !strings.Contains(zrow, "Zlib") {
+		t.Errorf("Most common licenses bars %q, zlib's row %q; want a Zlib bar of 1 and License type Zlib", bars, zrow)
+	}
+
+	// The Vulnerabilities row's View Fixed opens Vulnerability details with
+	// its File location(s) and their layer; the Layer bar lists the layer
+	// with its build command and count, and choosing it shows its
+	// vulnerabilities (#2066).
+	p.navigate(path)
+	p.waitFor(`document.querySelector("#view [role=tabpanel] tbody tr") !== null`)
+	var layerBar struct {
+		Label   string
+		Options []string
+	}
+	p.eval(`(() => { const s = document.querySelector("#vulnerabilities-show"); return s ? { Label: s.closest("label").firstChild.textContent.trim(),
+		Options: [...s.options].map((o) => o.textContent) } : {}; })()`, &layerBar)
+	if layerBar.Label != "Layer" || len(layerBar.Options) != 2 || layerBar.Options[0] != "All layers" ||
+		!strings.HasPrefix(layerBar.Options[1], "Layer 0: browser test layer (") || !strings.HasSuffix(layerBar.Options[1], "vulnerabilities)") && !strings.HasSuffix(layerBar.Options[1], "vulnerability)") {
+		t.Errorf("the Layer bar = %+v", layerBar)
+	}
+	p.eval(`(() => { const s = document.querySelector("#vulnerabilities-show"); s.value = s.options[1].value; s.dispatchEvent(new Event("change")); return true; })()`, nil)
+	p.waitFor(`document.querySelector("#vulnerabilities-show").selectedIndex === 1 && document.querySelector("#view [role=tabpanel] tbody tr") !== null`)
+	var layerRows string
+	p.eval(`[...document.querySelectorAll("#view [role=tabpanel] tbody tr")].map((r) => r.textContent).join("|")`, &layerRows)
+	if !strings.Contains(layerRows, "CVE-2022-37434") {
+		t.Errorf("Layer 0's rows %q lack CVE-2022-37434", layerRows)
+	}
+	p.clickText("#view [role=tabpanel] tbody .row-panel-link", "View Fixed")
+	p.waitFor(`document.querySelector("#side-panel") !== null`)
+	var details struct{ Title, Body, Table string }
+	p.eval(`(() => ({ Title: document.querySelector("#side-panel h2").textContent, Body: document.querySelector("#side-panel").textContent,
+		Table: [...document.querySelectorAll("#side-panel table tr")].map((r) => r.textContent).join("|") }))()`, &details)
+	if details.Title != "Vulnerability details" || !strings.Contains(details.Body, "CVE-2022-37434") || !strings.Contains(details.Body, "File location(s)") ||
+		!strings.Contains(details.Table, "/lib/apk/db/installed") || !strings.Contains(details.Table, "browser test layer") || !strings.Contains(details.Table, "sha256:") {
+		t.Errorf("Vulnerability details = %+v", details)
+	}
+
+	auditScreens(t, []a11yPage{
+		{"image digest vulnerabilities with the layer bar", path, settled, ""},
+		{"vulnerability details panel", path, `document.querySelector("#view [role=tabpanel] tbody .row-panel-link") !== null`,
+			`document.querySelector("#view [role=tabpanel] tbody .row-panel-link").click()`},
+		{"image digest dependencies with the licenses graph", strings.Replace(path, "tab=vulnerabilities", "tab=dependencies", 1), settled, ""},
+	})
 }

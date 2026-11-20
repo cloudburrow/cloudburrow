@@ -58,7 +58,7 @@ func clickRadio(p *tab, field string, i int) {
 // Docker repository made with its labels, a customer-managed key,
 // immutable image tags and a cleanup policy in dry run reads back so
 // through the official client's GetRepository. On its page, Setup
-// Instructions opens the tab with this instance's docker push address, and
+// Instructions opens a side panel with this instance's docker push address, and
 // Edit Repository changes the description and labels and turns the
 // immutable tags off.
 func TestCloudRunArtifactRegistryCreateAndEditRepositoryThroughThePage(t *testing.T) {
@@ -136,9 +136,9 @@ func TestCloudRunArtifactRegistryCreateAndEditRepositoryThroughThePage(t *testin
 	}
 
 	p.navigate("/artifact-registry/" + id + "?project=" + project)
+	// Setup Instructions open a side panel (#2066).
 	p.clickText("#view .page-actions a, #view .page-actions button", "Setup Instructions")
-	p.waitFor(`new URLSearchParams(location.search).get("tab") === "setup"`)
-	p.waitFor(`document.querySelector("#view").textContent.includes("docker push us-east1-docker.pkg.localhost:")`)
+	p.waitFor(`(document.querySelector("#side-panel") || {}).textContent.includes("docker push us-east1-docker.pkg.localhost:")`)
 	// Edit Repository is Google's page (#1855), ending in Update.
 	p.clickText("#view .page-actions a", "Edit Repository")
 	p.waitFor(`document.querySelector("#edit-page-form #f-description") !== null`)

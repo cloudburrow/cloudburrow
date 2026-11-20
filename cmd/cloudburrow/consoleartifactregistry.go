@@ -128,8 +128,8 @@ func (p artifactRegistryProvider) repositoryDetail(ctx context.Context, st *regi
 	return console.Detail{
 		Edit:    editRepositoryForm(r),
 		Summary: p.repositorySummary(ctx, r, dockerMode(r)),
+		Panels:  []console.SidePanel{p.setupPanel(r)},
 		Sections: []console.Section{{ID: "images", Label: "Images", Listing: images},
-			{ID: "setup", Label: "Setup instructions", Kind: console.KindText, Text: p.setupInstructions(r)},
 			{ID: "rules", Label: "Rules", Listing: rules},
 			{ID: "attachments", Label: "Attachments", Listing: attachments}},
 	}
@@ -210,7 +210,7 @@ func (p artifactRegistryProvider) imageDetail(st *registry.Store, repo registry.
 	for _, m := range ms {
 		versions.Items = append(versions.Items, console.Resource{Name: m.Digest, Selectable: true, Fields: map[string]string{
 			"Tags": orDash(strings.Join(m.Tags, ", ")), "Virtual size": humanBytes(m.ImageSize), "Media type": m.MediaType,
-			"Created": arTimeOf(m.Uploaded), "Uploaded": arTimeOf(m.Uploaded),
+			"Created": arImageCreated(st, repo, image, m), "Uploaded": arTimeOf(m.Uploaded),
 			"Vulnerabilities": arVulnerabilityTotals(repo, image, m.Digest)},
 			Actions: []console.Action{arEditTagsAction(m.Tags)}})
 		for _, t := range m.Tags {
@@ -285,23 +285,37 @@ func (p artifactRegistryProvider) versionDetail(st *registry.Store, repo registr
 			{Label: "Repository", Value: repo.Repository, Link: "/artifact-registry/" + url.PathEscape(repo.Repository) + "?project=" + url.QueryEscape(repo.Project)},
 			{Label: "Image digest", Value: m.Digest}, {Label: "Virtual size", Value: humanBytes(m.ImageSize)},
 			{Label: "Media type", Value: m.MediaType}, {Label: "Tags", Value: orDash(strings.Join(m.Tags, ", "))},
+			{Label: "Created", Value: arImageCreated(st, repo, image, m)},
 			{Label: "Uploaded", Value: arTimeOf(m.Uploaded)}, {Label: "Annotations", Value: annotations},
 			{Label: "Image URL", Value: pull, Copy: "Copy image URL"}}}}}
 	return console.Detail{
 		Summary: []console.Property{{Label: "Pull by digest", Value: pull},
 			{Label: "Uploaded", Value: stampAge(timestamppb.New(m.Uploaded))}},
-		Sections: []console.Section{overview, vulnerabilitiesSection(repo, image, m.Digest), dependenciesSection(repo, image, m.Digest),
-			{ID: "files", Label: "Layers", Listing: files}, manifest},
+		Sections: append(append([]console.Section{overview}, vulnerabilitiesSections(repo, image, m.Digest)...),
+			dependenciesSection(repo, image, m.Digest), console.Section{ID: "files", Label: "Layers", Listing: files}, manifest),
 	}, nil
 }
 
-// vulnerabilitiesSection is an image version's Vulnerabilities tab
+// vulnerabilitiesSections are an image version's Vulnerabilities tab
 // (#1912): Artifact Analysis's scan status and the VULNERABILITY
-// occurrences it wrote, most severe first, as Google's tab lists them.
-func vulnerabilitiesSection(repo registry.Repo, image, digest string) console.Section {
+// occurrences it wrote, most severe first, as Google's tab lists them,
+// each row's View or View Fixed opening its Vulnerability details; then
+// the tab's Layer bar, a section per layer with vulnerabilities, ShownIn
+// the tab (#2066).
+func vulnerabilitiesSections(repo registry.Repo, image, digest string) []console.Section {
+	sec, layers := vulnerabilitiesSection(repo, image, digest)
+	bar := arLayerSections(sec, layers)
+	if len(bar) > 0 {
+		sec.Show, sec.ShowLabel = "All layers", "Layer"
+	}
+	return append([]console.Section{sec}, bar...)
+}
+
+// vulnerabilitiesSection is the tab's own rows, and the layer each came
+// from (nil where the scan names none).
+func vulnerabilitiesSection(repo registry.Repo, image, digest string) (console.Section, []*grafeaspb.LayerDetails) {
 	sec := console.Section{ID: "vulnerabilities", Label: "Vulnerabilities", Listing: console.Listing{
-		Columns: []string{"Effective severity", "CVSS", "Fix available", "Package", "Package type", "Installed version", "Fixed version",
-			"File location(s)"},
+		Columns:    []string{"Effective severity", "CVSS", "Fix available", "Package", "Package type", "Installed version", "Fixed version"},
 		NameColumn: "Name", Noun: "vulnerabilities"}}
 	var vulns []*grafeaspb.Occurrence
 	var disc *grafeaspb.DiscoveryOccurrence
@@ -320,15 +334,15 @@ func vulnerabilitiesSection(repo registry.Repo, image, digest string) console.Se
 		} else {
 			sec.Listing.Unavailable = "This image was not scanned: it was pushed before scanning was active. Push it again under a new digest to scan it."
 		}
-		return sec
+		return sec, nil
 	}
 	switch disc.GetAnalysisStatus() {
 	case grafeaspb.DiscoveryOccurrence_PENDING, grafeaspb.DiscoveryOccurrence_SCANNING:
 		sec.Listing.Unavailable = "Scanning: the results appear here when the scan finishes."
-		return sec
+		return sec, nil
 	case grafeaspb.DiscoveryOccurrence_FINISHED_FAILED, grafeaspb.DiscoveryOccurrence_FINISHED_UNSUPPORTED:
 		sec.Listing.Unavailable = "The scan did not complete: " + disc.GetAnalysisStatusError().GetMessage()
-		return sec
+		return sec, nil
 	}
 	sort.SliceStable(vulns, func(i, j int) bool {
 		a, b := vulns[i].GetVulnerability(), vulns[j].GetVulnerability()
@@ -337,6 +351,7 @@ func vulnerabilitiesSection(repo registry.Repo, image, digest string) console.Se
 		}
 		return a.GetCvssScore() > b.GetCvssScore()
 	})
+	var layers []*grafeaspb.LayerDetails
 	for _, o := range vulns {
 		v := o.GetVulnerability()
 		fix := "No"
@@ -356,20 +371,23 @@ func vulnerabilitiesSection(repo registry.Repo, image, digest string) console.Se
 			cvss = strconv.FormatFloat(float64(v.GetCvssScore()), 'f', 1, 32)
 		}
 		sev := arSeverityWord(v.GetEffectiveSeverity())
-		var locs []string
+		row := console.Resource{Name: v.GetShortDescription(), Fields: map[string]string{
+			"Effective severity": sev, "CVSS": cvss, "Fix available": fix, "Package": orDash(pi.GetAffectedPackage()),
+			"Package type": orDash(pi.GetPackageType()), "Installed version": orDash(pi.GetAffectedVersion().GetFullName()), "Fixed version": fixed}}
+		row.Panel = arVulnerabilityPanel(row, v, pi)
+		sec.Listing.Items = append(sec.Listing.Items, row)
+		var layer *grafeaspb.LayerDetails
 		for _, l := range pi.GetFileLocation() {
-			if l.GetFilePath() != "" {
-				locs = append(locs, l.GetFilePath())
+			if l.GetLayerDetails() != nil {
+				layer = l.GetLayerDetails()
+				break
 			}
 		}
-		sec.Listing.Items = append(sec.Listing.Items, console.Resource{Name: v.GetShortDescription(), Fields: map[string]string{
-			"Effective severity": sev, "CVSS": cvss, "Fix available": fix, "Package": orDash(pi.GetAffectedPackage()),
-			"Package type": orDash(pi.GetPackageType()), "Installed version": orDash(pi.GetAffectedVersion().GetFullName()), "Fixed version": fixed,
-			"File location(s)": orDash(strings.Join(locs, ", "))}})
+		layers = append(layers, layer)
 	}
 	sec.Listing.Total = len(sec.Listing.Items)
 	sec.Groups = []console.PropertyGroup{arScanResults(vulns, runadapter.ImageOccurrences(repo, image, digest))}
-	return sec
+	return sec, layers
 }
 
 // DetailActions are Delete at each level, and Add tag and Remove tag on a
@@ -382,7 +400,6 @@ func (p artifactRegistryProvider) DetailActions(ctx context.Context, project str
 	case 1:
 		var acts []console.Action
 		if r, _, err := p.repository(project, path[0]); err == nil {
-			acts = append(acts, console.Action{ID: "setup", Label: "Setup Instructions", Href: "/artifact-registry/" + url.PathEscape(path[0]) + "?tab=setup"})
 			if a, ok := editRuleAction(ctx, r.GetName()); ok {
 				acts = append(acts, a)
 			}

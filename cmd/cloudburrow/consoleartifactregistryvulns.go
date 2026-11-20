@@ -10,10 +10,12 @@ package main
 // (https://docs.cloud.google.com/artifact-analysis/docs/view-licenses-dependencies).
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	grafeaspb "google.golang.org/genproto/googleapis/grafeas/v1"
 
@@ -238,7 +240,10 @@ func dependenciesOf(occs []*grafeaspb.Occurrence) console.Section {
 	if len(sbom) > 0 {
 		sbomText = strings.Join(sbom, ", ")
 	}
-	lic := "No license was detected in this image's packages."
+	// Most common licenses, as Google's bar graph (#2066): the five
+	// licenses most packages carry, each a bar of its count.
+	licGroup := console.PropertyGroup{Heading: "Licenses", Properties: []console.Property{
+		{Label: "Most common licenses", Value: "No license was detected in this image's packages."}}}
 	if len(licenses) > 0 {
 		keys := make([]string, 0, len(licenses))
 		for k := range licenses {
@@ -253,12 +258,134 @@ func dependenciesOf(occs []*grafeaspb.Occurrence) console.Section {
 		if len(keys) > 5 {
 			keys = keys[:5]
 		}
-		for i, k := range keys {
-			keys[i] = k + " (" + strconv.Itoa(licenses[k]) + ")"
+		licGroup = console.PropertyGroup{Heading: "Most common licenses", Bars: true}
+		for _, k := range keys {
+			licGroup.Properties = append(licGroup.Properties, console.Property{Label: k, Value: strconv.Itoa(licenses[k])})
 		}
-		lic = strings.Join(keys, ", ")
 	}
-	sec.Groups = []console.PropertyGroup{{Heading: "SBOM", Properties: []console.Property{{Label: "SBOM", Value: sbomText}}},
-		{Heading: "Licenses", Properties: []console.Property{{Label: "Most common licenses", Value: lic}}}}
+	sec.Groups = []console.PropertyGroup{{Heading: "SBOM", Properties: []console.Property{{Label: "SBOM", Value: sbomText}}}, licGroup}
 	return sec
+}
+
+// arVulnerabilityPanel is a Vulnerabilities row's Vulnerability details
+// (#2066): "Click VIEW or VIEW FIX beside a vulnerability to open a side
+// panel" with the file locations where the vulnerable package was found,
+// each with its layer's index, build command, digest and base image (the
+// table's question mark on Google's page). The link reads View Fixed
+// when a fix is available, View when none is.
+func arVulnerabilityPanel(row console.Resource, v *grafeaspb.VulnerabilityOccurrence, pi *grafeaspb.VulnerabilityOccurrence_PackageIssue) *console.SidePanel {
+	label := "View"
+	if v.GetFixAvailable() {
+		label = "View Fixed"
+	}
+	props := []console.Property{{Label: "Name", Value: row.Name}}
+	for _, c := range []string{"Effective severity", "CVSS", "Fix available", "Package", "Package type", "Installed version", "Fixed version"} {
+		props = append(props, console.Property{Label: c, Value: row.Fields[c]})
+	}
+	if d := v.GetLongDescription(); d != "" {
+		props = append(props, console.Property{Label: "Description", Value: d})
+	}
+	for _, u := range v.GetRelatedUrls() {
+		if u.GetUrl() != "" {
+			props = append(props, console.Property{Label: "More info", Value: u.GetUrl()})
+			break
+		}
+	}
+	locs := console.PanelTable{Title: "File location(s)", Columns: []string{"File path", "Layer", "Layer build command", "Layer digest", "Base image"}}
+	for _, l := range pi.GetFileLocation() {
+		if l.GetFilePath() == "" {
+			continue
+		}
+		layer, cmd, diff, base := "-", "-", "-", "-"
+		if d := l.GetLayerDetails(); d != nil {
+			layer, cmd, diff = strconv.Itoa(int(d.GetIndex())), orDash(d.GetCommand()), orDash(d.GetDiffId())
+			var names []string
+			for _, b := range d.GetBaseImages() {
+				names = append(names, b.GetName())
+			}
+			base = orDash(strings.Join(names, ", "))
+		}
+		locs.Rows = append(locs.Rows, []string{l.GetFilePath(), layer, cmd, diff, base})
+	}
+	return &console.SidePanel{Label: label, Title: "Vulnerability details",
+		Groups: []console.PropertyGroup{{Properties: props}}, Tables: []console.PanelTable{locs}}
+}
+
+// arLayerSections are the Vulnerabilities tab's Layer bar (Preview,
+// #2066): "a drop-down list of numbered layers", layer 0 the bottom one,
+// listing only layers with vulnerabilities, each with its build command
+// and its count; choosing one shows that layer's vulnerabilities. "The
+// Layer bar appears only when layer-based metadata is available": none
+// when the scan named no layer.
+func arLayerSections(sec console.Section, layers []*grafeaspb.LayerDetails) []console.Section {
+	byIndex := map[int32][]console.Resource{}
+	details := map[int32]*grafeaspb.LayerDetails{}
+	for i, l := range layers {
+		if l == nil || i >= len(sec.Listing.Items) {
+			continue
+		}
+		byIndex[l.GetIndex()] = append(byIndex[l.GetIndex()], sec.Listing.Items[i])
+		details[l.GetIndex()] = l
+	}
+	if len(byIndex) == 0 {
+		return nil
+	}
+	idx := make([]int32, 0, len(byIndex))
+	for i := range byIndex {
+		idx = append(idx, i)
+	}
+	sort.Slice(idx, func(a, b int) bool { return idx[a] < idx[b] })
+	out := make([]console.Section, 0, len(idx))
+	for _, i := range idx {
+		rows := byIndex[i]
+		cmd := details[i].GetCommand()
+		if len(cmd) > 80 {
+			cmd = cmd[:77] + "..."
+		}
+		if cmd == "" {
+			cmd = "no build command recorded"
+		}
+		n := "vulnerabilities"
+		if len(rows) == 1 {
+			n = "vulnerability"
+		}
+		l := sec.Listing
+		l.Items, l.Total = rows, len(rows)
+		out = append(out, console.Section{ID: "layer-" + strconv.Itoa(int(i)), Label: "Layer " + strconv.Itoa(int(i)), ShownIn: sec.ID,
+			ShowAs:  fmt.Sprintf("Layer %d: %s (%d %s)", i, cmd, len(rows), n),
+			Listing: l})
+	}
+	return out
+}
+
+// arImageCreated is a version's Created: when the image was built, its
+// config's created time, as Google's versions list shows it beside
+// Uploaded (#2066). An index is its first platform image's; "-" when the
+// image records none.
+func arImageCreated(st *registry.Store, repo registry.Repo, image string, m registry.ManifestInfo) string {
+	doc := m.Doc
+	for depth := 0; doc != nil && depth < 2; depth++ {
+		if doc.Config != nil {
+			b, err := st.ReadRepoBlob(repo, doc.Config.Digest)
+			if err != nil {
+				return "-"
+			}
+			var cfg struct {
+				Created *time.Time `json:"created"`
+			}
+			if json.Unmarshal(b, &cfg) != nil || cfg.Created == nil || cfg.Created.IsZero() {
+				return "-"
+			}
+			return arTimeOf(*cfg.Created)
+		}
+		if len(doc.Manifests) == 0 {
+			break
+		}
+		child, err := st.Manifest(repo, image, doc.Manifests[0].Digest)
+		if err != nil {
+			break
+		}
+		doc = child.Doc
+	}
+	return "-"
 }

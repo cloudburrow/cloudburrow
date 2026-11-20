@@ -11,6 +11,8 @@ import (
 	arpb "cloud.google.com/go/artifactregistry/apiv1/artifactregistrypb"
 	"cloud.google.com/go/iam/apiv1/iampb"
 	"github.com/google/go-containerregistry/pkg/crane"
+	v1 "github.com/google/go-containerregistry/pkg/v1"
+	"github.com/google/go-containerregistry/pkg/v1/mutate"
 	"github.com/google/go-containerregistry/pkg/v1/random"
 
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
@@ -46,8 +48,10 @@ func TestConsoleArtifactRegistryImagesAndTags(t *testing.T) {
 	digest, _ := img.Digest()
 	p := artifactRegistryProvider{defaultProject: "console-ar"}
 	d, err := p.Detail(ctx, "", []string{"images"})
-	if err != nil || len(d.Sections) != 4 || len(d.Sections[0].Listing.Items) != 1 || d.Sections[0].Listing.Items[0].Name != "web" ||
-		d.Sections[1].ID != "setup" || !strings.Contains(d.Sections[1].Text, "docker push us-central1-docker.pkg.localhost:") {
+	// Setup Instructions open a side panel beside the title (#2066).
+	if err != nil || len(d.Sections) != 3 || len(d.Sections[0].Listing.Items) != 1 || d.Sections[0].Listing.Items[0].Name != "web" ||
+		len(d.Panels) != 1 || d.Panels[0].Label != "Setup Instructions" || d.Panels[0].Copy == "" ||
+		!strings.Contains(d.Panels[0].Text, "docker push us-central1-docker.pkg.localhost:") {
 		t.Fatalf("repository page = %+v, %v", d, err)
 	}
 	if d, err := p.Detail(ctx, "", []string{"images", "web", digest.String()}); err != nil || len(d.Sections) != 5 ||
@@ -59,6 +63,26 @@ func TestConsoleArtifactRegistryImagesAndTags(t *testing.T) {
 	d, err = p.Detail(ctx, "", []string{"images", "web"})
 	if err != nil || d.Sections[0].Listing.Items[0].Name != digest.String() || d.Sections[1].Listing.Items[0].Name != "v1" {
 		t.Fatalf("image page = %+v, %v", d, err)
+	}
+	// A version's Created is its image's build time, its config's created
+	// (#2066): random.Image records none, so it is "-", not the upload.
+	if c := d.Sections[0].Listing.Items[0].Fields["Created"]; c != "-" {
+		t.Errorf("Created of an image with no build time = %q", c)
+	}
+	built := time.Date(2024, 3, 1, 9, 30, 0, 0, time.UTC)
+	dated, err := mutate.CreatedAt(img, v1.Time{Time: built})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := crane.Push(dated, host+"/console-ar/images/built:v1"); err != nil {
+		t.Fatal(err)
+	}
+	if bd, err := p.Detail(ctx, "", []string{"images", "built"}); err != nil || bd.Sections[0].Listing.Items[0].Fields["Created"] != arTimeOf(built) ||
+		bd.Sections[0].Listing.Items[0].Fields["Uploaded"] == arTimeOf(built) {
+		t.Errorf("Created of an image built %s = %+v, %v", built, bd.Sections[0].Listing.Items, err)
+	}
+	if err := p.ActAt(ctx, "", []string{"images", "built"}, "delete", nil); err != nil {
+		t.Fatal(err)
 	}
 	vpath := []string{"images", "web", digest.String()}
 	d, err = p.Detail(ctx, "", vpath)
@@ -96,8 +120,8 @@ func TestConsoleArtifactRegistryImagesAndTags(t *testing.T) {
 		t.Fatal(err)
 	}
 	settings := func() string { l, _ := sp.List(ctx, ""); return fmt.Sprint(l.Items) }
-	if d, _ := p.Detail(ctx, "", []string{"images"}); len(d.Sections[2].Listing.Items) != 1 || !strings.Contains(settings(), "VPC-SC policy (us-central1)  map[Scope:us-central1 Value:ALLOW]") {
-		t.Errorf("rules = %+v, settings %v", d.Sections[2].Listing.Items, settings())
+	if d, _ := p.Detail(ctx, "", []string{"images"}); len(arSectionOf(d, "rules").Listing.Items) != 1 || !strings.Contains(settings(), "VPC-SC policy (us-central1)  map[Scope:us-central1 Value:ALLOW]") {
+		t.Errorf("rules = %+v, settings %v", arSectionOf(d, "rules").Listing.Items, settings())
 	}
 	if err := p.ActAt(ctx, "", []string{"images"}, "delete-rule", map[string]string{"id": "deny-all"}); err != nil {
 		t.Fatal(err)
@@ -121,8 +145,8 @@ func TestConsoleArtifactRegistryImagesAndTags(t *testing.T) {
 	if err := p.ActAt(ctx, "", vpath, "attach", map[string]string{"id": "sbom", "type": "application/spdx", "file": file}); err != nil {
 		t.Fatal(err)
 	}
-	if d, _ := p.Detail(ctx, "", []string{"images"}); len(d.Sections[3].Listing.Items) != 1 {
-		t.Errorf("attachments = %+v", d.Sections[3].Listing.Items)
+	if d, _ := p.Detail(ctx, "", []string{"images"}); len(arSectionOf(d, "attachments").Listing.Items) != 1 {
+		t.Errorf("attachments = %+v", arSectionOf(d, "attachments").Listing.Items)
 	}
 	if err := p.ActAt(ctx, "", []string{"images"}, "delete-attachment", map[string]string{"id": "sbom"}); err != nil {
 		t.Fatal(err)
