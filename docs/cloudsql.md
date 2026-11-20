@@ -369,7 +369,7 @@ request), or **refused** with 400 or 501 naming it. A field the discovery docume
 | `connectionName`, `ipAddresses`, `state`, `gceZone`, `serverCaCert`, `selfLink` and the other output fields | Ignored, as Cloud SQL ignores them. |
 | `users`: `databaseRoles`, `passwordPolicy`, `dualPasswordType` (other than `NO_DUAL_PASSWORD`), `iamEmail` | 501. `serverRoles` and `sqlserverUserDetails` are 400 (SQL Server). |
 | `databases`: `sqlserverDatabaseDetails` | 400 (SQL Server). |
-| `backupRuns.insert`: `backupKind` `PHYSICAL`, `location` other than `us-central1` | 501: a backup is a logical dump, kept in the one region. `diskEncryptionConfiguration` is 400 (a backup inherits its instance's), `timeZone` 400 (SQL Server). |
+| `backupRuns.insert`: `backupKind` `PHYSICAL` | 501: a backup is a logical dump. `location` is taken (see Backup locations); `diskEncryptionConfiguration` is 400 (a backup inherits its instance's), `timeZone` 400 (SQL Server). |
 
 ### Customer-managed encryption keys (#1538)
 
@@ -401,9 +401,37 @@ and reached through the API and the connectors.
 primary version, which `diskEncryptionStatus.kmsKeyVersionName` then names, so the version that
 wrapped it before can be disabled or destroyed without suspending the instance. It is a `REENCRYPT`
 operation, and the server keeps running. An instance without a key is 400, and a data key whose
-wrapping version is disabled cannot be unwrapped, so it is refused naming the key. Its
-`backupReencryptionConfig` is 501: a backup here is a dump of the server's databases and records no
-key version, so there is no backup to re-encrypt.
+wrapping version is disabled cannot be unwrapped, so it is refused naming the key.
+
+**Backups' keys (#1956).** A backup of a CMEK instance inherits its key and is wrapped with the
+key's *latest primary version* when it is taken ("Automated and manual backups use the latest
+primary key version"), even when the instance itself is still on an older one: the instance's data
+key is wrapped again for the backup, which answers `diskEncryptionConfiguration.kmsKeyName` and
+`diskEncryptionStatus.kmsKeyVersionName` (a backup run) or `kmsKey` and `kmsKeyVersion` (the
+project's Backups API). `reencrypt` alone leaves the backups on their versions, as on Cloud SQL
+("Backups aren't automatically re-encrypted with the new key version when you re-encrypt your
+instance"). With `backupReencryptionConfig` it re-encrypts the instance and then wraps its backups of
+`backupType` (`AUTOMATED`, the default, or `ON_DEMAND`) again with the primary version, newest
+first, at most `backupLimit` of them (0: every one; Google documents the field only as "Backup
+re-encryption limit"). A backup whose version is disabled or destroyed cannot be restored
+(`restoreBackup`, to the instance or a new one, is 400 naming the version) nor re-encrypted (the
+whole call is refused and nothing changes), as Google documents that the backup's data is lost
+while its key version is gone. The dump files themselves are not encrypted with the key, as the
+data volume is not.
+
+### Backup locations (#1956)
+
+A backup is kept in a location: the region or multi-region (`us`, `eu`, `asia`) that an on-demand
+backup names (`backupRuns.insert`'s and `backups.create`'s `location`, `gcloud sql backups create
+--location`), else `settings.backupConfiguration.location` (`gcloud sql instances patch
+--backup-location`, Terraform's `backup_configuration.location`, the console's Edit **Backup
+location**), else the multi-region nearest the instance, `us` for `us-central1`, as Cloud SQL's
+default is. Every backup is still a dump on this host: the location is recorded and answered, and
+the console's Backups page shows it ("Multi-region: us", "Region: europe-west1"). A location that is
+no region or multi-region is 400. A chosen location other than the instance's region must be
+allowed by `gcp.resourceLocations` or the backup fails ("Backups fail if they are in a region the
+organization policy does not allow"); one in the instance's region always succeeds. Changing the
+configured location does not move the backups already taken.
 
 ### Read replicas (#1330)
 

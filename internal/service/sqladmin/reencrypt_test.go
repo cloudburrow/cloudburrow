@@ -41,7 +41,8 @@ func (k *versionedKMS) Decrypt(_ context.Context, key string, ct []byte) ([]byte
 
 // TestSQLReencrypt (#1614): reencrypt wraps the instance's data key with
 // the key's primary version, after which the old version can be disabled;
-// an instance without a key is 400, backupReencryptionConfig 501, and a
+// an instance without a key is 400, backupReencryptionConfig 501 on a
+// server without a backup store, and a
 // data key whose version is disabled cannot be re-encrypted.
 func TestSQLReencrypt(t *testing.T) {
 	srv := NewServer("", newFake())

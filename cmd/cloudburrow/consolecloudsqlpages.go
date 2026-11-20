@@ -366,7 +366,7 @@ var sqlOverviewGroups = map[string]string{
 	"Automated backups": "Data protection", "Backup start time (UTC)": "Data protection",
 	"Retained automated backups": "Data protection", "Point-in-time recovery": "Data protection",
 	"Transaction log retention (days)": "Data protection", "Earliest recovery time": "Data protection",
-	"Latest recovery time": "Data protection", "Deletion protection": "Data protection",
+	"Latest recovery time": "Data protection", "Deletion protection": "Data protection", "Backup location": "Data protection",
 	"Instance type": "Replication", "Primary instance": "Replication", "Read replicas": "Replication",
 	"DR replica": "Replication", "Disaster recovery role": "Replication",
 	"Blue-green deployment": "Replication", "Blue-green deployment state": "Replication",

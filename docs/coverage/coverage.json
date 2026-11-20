@@ -12562,6 +12562,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqladminverbs_test.go:25 TestCloudSQLProjectBackups",
+          "test/compat/cloudsqlbackupkeys_test.go:30 TestCloudSQLBackupLocationsAndReencryption",
           "test/compat/consolecloudsqldataapi_test.go:27 TestConsoleCloudSQLDataAPIAndProjectBackups"
         ]
       },
@@ -12588,6 +12589,7 @@
         "tests": [
           "test/compat/cloudsqladminverbs_test.go:137 TestCloudSQLDataAPIAndFinalBackup",
           "test/compat/cloudsqladminverbs_test.go:25 TestCloudSQLProjectBackups",
+          "test/compat/cloudsqlbackupkeys_test.go:30 TestCloudSQLBackupLocationsAndReencryption",
           "test/compat/consolecloudsqldataapi_test.go:27 TestConsoleCloudSQLDataAPIAndProjectBackups"
         ]
       },
@@ -12620,6 +12622,8 @@
         "method": "sql.backupRuns.insert",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudsqlbackupkeys_test.go:212 TestTerraformSQLBackupLocation",
+          "test/compat/cloudsqlbackupkeys_test.go:30 TestCloudSQLBackupLocationsAndReencryption",
           "test/compat/cloudsqlbackups_test.go:248 TestGcloudSQLBackups",
           "test/compat/cloudsqlbackups_test.go:99 TestCloudSQLBackups",
           "test/compat/cloudsqlfields_test.go:65 TestCloudSQLFieldsNeverSilentlyDropped",
@@ -12632,6 +12636,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqladminverbs_test.go:25 TestCloudSQLProjectBackups",
+          "test/compat/cloudsqlbackupkeys_test.go:30 TestCloudSQLBackupLocationsAndReencryption",
           "test/compat/cloudsqlbackups_test.go:248 TestGcloudSQLBackups",
           "test/compat/cloudsqlbackups_test.go:99 TestCloudSQLBackups",
           "test/compat/cloudsqlpitr_test.go:273 TestCloudSQLPointInTimeRetention",
@@ -13070,6 +13075,7 @@
           "test/compat/backupdr1922_test.go:31 TestBackupDRRestoreToANewInstance",
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
           "test/compat/cloudsqladminverbs_test.go:137 TestCloudSQLDataAPIAndFinalBackup",
+          "test/compat/cloudsqlbackupkeys_test.go:212 TestTerraformSQLBackupLocation",
           "test/compat/cloudsqlbluegreen_test.go:31 TestCloudSQLBlueGreenDeployment",
           "test/compat/cloudsqlbluegreenha_test.go:28 TestCloudSQLBlueGreenDeploymentHA",
           "test/compat/cloudsqlcustomerca_test.go:210 TestCloudSQLCustomerManagedCA",
@@ -13152,6 +13158,8 @@
         "method": "sql.instances.patch",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudsqlbackupkeys_test.go:212 TestTerraformSQLBackupLocation",
+          "test/compat/cloudsqlbackupkeys_test.go:30 TestCloudSQLBackupLocationsAndReencryption",
           "test/compat/cloudsqlcustomerca_test.go:210 TestCloudSQLCustomerManagedCA",
           "test/compat/cloudsqldemotepg_test.go:23 TestCloudSQLDemotePostgres",
           "test/compat/cloudsqlexternalpg_test.go:28 TestCloudSQLExternalPostgresPrimary",
@@ -13223,6 +13231,7 @@
         "method": "sql.instances.reencrypt",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudsqlbackupkeys_test.go:30 TestCloudSQLBackupLocationsAndReencryption",
           "test/compat/cloudsqlreencrypt_test.go:25 TestCloudSQLReencrypt"
         ]
       },
@@ -13259,6 +13268,7 @@
           "test/compat/backupdr1922_test.go:31 TestBackupDRRestoreToANewInstance",
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
           "test/compat/cloudsqladminverbs_test.go:25 TestCloudSQLProjectBackups",
+          "test/compat/cloudsqlbackupkeys_test.go:30 TestCloudSQLBackupLocationsAndReencryption",
           "test/compat/cloudsqlbackups_test.go:248 TestGcloudSQLBackups",
           "test/compat/cloudsqlbackups_test.go:99 TestCloudSQLBackups",
           "test/compat/consolecloudsqldataapi_test.go:27 TestConsoleCloudSQLDataAPIAndProjectBackups"

@@ -240,8 +240,8 @@ func sqlSSLModeLabel(m string) string {
 // list (a FINAL one) is in it too.
 func sqlMergedBackups(runs, proj console.Section) console.Section {
 	out := runs
-	l := console.Listing{Columns: []string{"Type", "Location", "Description", "Created", "Expires"}, NameColumn: "Backup ID",
-		Noun: "backups", AlwaysStatus: true, Unavailable: runs.Listing.Unavailable,
+	l := console.Listing{Columns: []string{"Type", "Location", "Description", "Encryption key version", "Created", "Expires"},
+		NameColumn: "Backup ID", Noun: "backups", AlwaysStatus: true, Unavailable: runs.Listing.Unavailable,
 		Note: "The instance's backups, automated, on-demand and final; the project's Backups API names the same ones, with when each expires."}
 	byID := map[string]console.Resource{}
 	for _, r := range proj.Listing.Items {
@@ -254,9 +254,14 @@ func sqlMergedBackups(runs, proj console.Section) console.Section {
 		if c := pr.Fields["Created"]; c != "" {
 			created = c
 		}
+		loc := r.Fields["Location"]
+		if loc == "" {
+			loc = sqlBackupLocationLabel(pr.Fields["Location"])
+		}
 		l.Items = append(l.Items, console.Resource{Name: r.Name, Status: r.Status, Actions: r.Actions, ActsOn: r.ActsOn,
-			Fields: map[string]string{"Type": r.Fields["Type"], "Location": orDash(pr.Fields["Location"]),
-				"Description": r.Fields["Description"], "Created": created, "Expires": orDash(pr.Fields["Expires"])}})
+			Fields: map[string]string{"Type": r.Fields["Type"], "Location": orDash(loc),
+				"Description": r.Fields["Description"], "Encryption key version": orDash(r.Fields["Encryption key version"]),
+				"Created": created, "Expires": orDash(pr.Fields["Expires"])}})
 		seen[r.Name] = true
 	}
 	var extra []string
@@ -269,7 +274,8 @@ func sqlMergedBackups(runs, proj console.Section) console.Section {
 	for _, id := range extra {
 		pr := byID[id]
 		l.Items = append(l.Items, console.Resource{Name: id, Status: pr.Status, Fields: map[string]string{"Type": pr.Fields["Type"],
-			"Location": orDash(pr.Fields["Location"]), "Description": pr.Fields["Description"], "Created": pr.Fields["Created"],
+			"Location": orDash(sqlBackupLocationLabel(pr.Fields["Location"])), "Description": pr.Fields["Description"],
+			"Encryption key version": "—", "Created": pr.Fields["Created"],
 			"Expires": orDash(pr.Fields["Expires"])}})
 	}
 	l.Total = len(l.Items)

@@ -464,6 +464,15 @@ func (b instanceBody) unsupported() error {
 			if err := retentionInvalid(bc, ed); err != nil {
 				return err
 			}
+			if loc, ok := bc["location"]; ok && loc != nil {
+				l, isString := loc.(string)
+				if !isString {
+					return Errorf(http.StatusBadRequest, "Invalid value for settings.backupConfiguration.location: %v.", loc)
+				}
+				if err := checkBackupLocation("settings.backupConfiguration.location", l); err != nil {
+					return err
+				}
+			}
 		}
 		if bc := b.Settings.BackupConfiguration; bc != nil {
 			if bc.StartTime != "" {
