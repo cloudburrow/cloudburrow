@@ -41,8 +41,8 @@ func TestConsoleArtifactRegistryEditRuleAndCleanupPolicies(t *testing.T) {
 		}
 		return out
 	}
-	if acts := ids(); acts["edit-rule"] || !acts["edit-repository"] {
-		t.Errorf("a repository with no rules offers %v; want Edit Repository and no Edit rule", acts)
+	if acts := ids(); acts["edit-rule"] {
+		t.Errorf("a repository with no rules offers %v; want no Edit rule", acts)
 	}
 	if _, err := runadapter.ConfigServer().CreateRule(ctx, &arpb.CreateRuleRequest{Parent: "projects/console-ar-rules/locations/us-east1/repositories/rules",
 		RuleId: "deny-all", Rule: &arpb.Rule{Action: arpb.Rule_DENY, Operation: arpb.Rule_DOWNLOAD}}); err != nil {
@@ -68,7 +68,7 @@ func TestConsoleArtifactRegistryEditRuleAndCleanupPolicies(t *testing.T) {
 	// Keep count, in Dry run.
 	pols := `[{"name":"old","type":"Conditional delete","tagState":"Untagged","olderThan":"1d"},
 		{"name":"recent","type":"Keep most recent versions","keepCount":"5","packagePrefixes":"web, api"}]`
-	if err := p.ActAt(ctx, "", []string{"rules"}, "edit-repository", map[string]string{"cleanupPolicies": pols, "cleanupMode": arCleanupDryRun}); err != nil {
+	if err := p.Edit(ctx, "", []string{"rules"}, map[string]string{"cleanupPolicies": pols, "cleanupMode": arCleanupDryRun}); err != nil {
 		t.Fatal(err)
 	}
 	repo, _, err := p.repository("console-ar-rules", "rules")
@@ -79,23 +79,21 @@ func TestConsoleArtifactRegistryEditRuleAndCleanupPolicies(t *testing.T) {
 		strings.Join(repo.GetCleanupPolicies()["recent"].GetMostRecentVersions().GetPackageNamePrefixes(), ",") != "web,api" {
 		t.Fatalf("the repository after Edit Repository's cleanup policies = %v, %v", repo, err)
 	}
-	for _, a := range p.DetailActions(ctx, "", []string{"rules"}) {
-		for _, f := range a.Fields {
-			if a.ID == "edit-repository" && f.Name == "cleanupPolicies" && (!strings.Contains(f.Default, `"keepCount":"5"`) || !strings.Contains(f.Default, `"olderThan":"1d"`)) {
-				t.Errorf("Edit Repository's cleanup policies open on %q", f.Default)
-			}
-			if a.ID == "edit-repository" && f.Name == "cleanupMode" && f.Default != arCleanupDryRun {
-				t.Errorf("Edit Repository's cleanup mode opens on %q", f.Default)
-			}
+	for _, f := range editRepositoryForm(repo).Fields {
+		if f.Name == "cleanupPolicies" && (!strings.Contains(f.Default, `"keepCount":"5"`) || !strings.Contains(f.Default, `"olderThan":"1d"`)) {
+			t.Errorf("Edit Repository's cleanup policies open on %q", f.Default)
+		}
+		if f.Name == "cleanupMode" && f.Default != arCleanupDryRun {
+			t.Errorf("Edit Repository's cleanup mode opens on %q", f.Default)
 		}
 	}
 	for _, bad := range []string{`[{"type":"Conditional keep"}]`, `[{"name":"a","tagState":"Untagged","tagPrefixes":"v"}]`,
 		`[{"name":"a","type":"Keep most recent versions"}]`, `[{"name":"a"},{"name":"a"}]`, `[{"name":"a","olderThan":"3 weeks"}]`} {
-		if err := p.ActAt(ctx, "", []string{"rules"}, "edit-repository", map[string]string{"cleanupPolicies": bad}); err == nil {
+		if err := p.Edit(ctx, "", []string{"rules"}, map[string]string{"cleanupPolicies": bad}); err == nil {
 			t.Errorf("cleanup policies %s were sent", bad)
 		}
 	}
-	if err := p.ActAt(ctx, "", []string{"rules"}, "edit-repository", map[string]string{"cleanupPolicies": "", "cleanupMode": arCleanupDelete}); err != nil {
+	if err := p.Edit(ctx, "", []string{"rules"}, map[string]string{"cleanupPolicies": "", "cleanupMode": arCleanupDelete}); err != nil {
 		t.Fatal(err)
 	}
 	if repo, _, _ := p.repository("console-ar-rules", "rules"); len(repo.GetCleanupPolicies()) != 0 || repo.GetCleanupPolicyDryRun() {
