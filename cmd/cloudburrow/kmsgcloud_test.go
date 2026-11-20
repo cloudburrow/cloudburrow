@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/cloudburrow/cloudburrow/internal/unserved"
 )
 
 // gcloud kms is pointed at the local JSON API only when kms is enabled and
@@ -12,12 +14,14 @@ func TestGcloudSetupWritesTheCloudKMSOverride(t *testing.T) {
 	if got := gcloudConfiguration(cfg, "/adc.json"); !strings.Contains(got, "cloudkms = http://127.0.0.1:9018/\n") {
 		t.Errorf("kms enabled, but no cloudkms override:\n%s", got)
 	}
-	if got := gcloudConfiguration(formatsConfig(t, "storage"), "/adc.json"); strings.Contains(got, "cloudkms") {
-		t.Errorf("kms disabled, but a cloudkms line:\n%s", got)
+	// Otherwise the override is the local refusal (#1975), never Google.
+	refused := "cloudkms = http://127.0.0.1:9007" + unserved.PathPrefix + "cloudkms/\n"
+	if got := gcloudConfiguration(formatsConfig(t, "storage"), "/adc.json"); !strings.Contains(got, refused) {
+		t.Errorf("kms disabled, but cloudkms is not refused locally:\n%s", got)
 	}
 	cfg.Endpoints.KMS = 0
-	if got := gcloudConfiguration(cfg, "/adc.json"); strings.Contains(got, "cloudkms") {
-		t.Errorf("kms on an OS-assigned port, but a cloudkms line:\n%s", got)
+	if got := gcloudConfiguration(cfg, "/adc.json"); !strings.Contains(got, refused) {
+		t.Errorf("kms on an OS-assigned port, but cloudkms is not refused locally:\n%s", got)
 	}
 }
 

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/cloudburrow/cloudburrow/internal/unserved"
 )
 
 // The unit tests for the target check (#927). They carry no build tag, so
@@ -143,17 +145,32 @@ cloudresourcemanager = http://127.0.0.1:57008/
 disable_credentials = true
 `
 
-// The overrides the harness vouches for are kept, the others dropped, and
-// the rest of the file is untouched.
+// The overrides the harness vouches for are kept, the others replaced by a
+// local refusal (#1975), and the rest of the file is untouched.
 func TestGcloudRestrictConfigKeepsOnlyTheHarnessEndpoints(t *testing.T) {
 	kept, problems := gcloudRestrictConfig(gcloudSetupConf, map[string]string{
 		"STORAGE": "http://127.0.0.1:57003", "PUBSUB": "127.0.0.1:57004"})
 	if len(problems) > 0 {
 		t.Fatal(problems)
 	}
-	want := strings.Replace(gcloudSetupConf, "cloudresourcemanager = http://127.0.0.1:57008/\n", "", 1)
+	want := strings.Replace(gcloudSetupConf, "cloudresourcemanager = http://127.0.0.1:57008/\n", "cloudresourcemanager = http://127.0.0.1:1/\n", 1)
 	if kept != want {
 		t.Errorf("kept:\n%s\nwant:\n%s", kept, want)
+	}
+	// With a Resource Manager vouched for, the refusal is its own, which
+	// answers with CloudBurrow's message; gcloud-setup's refusals on it
+	// are kept, and one on another port is replaced.
+	conf := gcloudSetupConf + "[api_endpoint_overrides]\nworkflows = http://127.0.0.1:57008" + unserved.PathPrefix + "workflows/\n" +
+		"dns = http://127.0.0.1:9007" + unserved.PathPrefix + "dns/\ntransfer = http://127.0.0.1:57099/\n"
+	kept, problems = gcloudRestrictConfig(conf, map[string]string{"STORAGE": "127.0.0.1:57003", "PUBSUB": "127.0.0.1:57004", "RESOURCEMANAGER": "127.0.0.1:57008"})
+	for _, want := range []string{
+		"workflows = http://127.0.0.1:57008" + unserved.PathPrefix + "workflows/\n",
+		"dns = http://127.0.0.1:57008" + unserved.PathPrefix + "dns/\n",
+		"transfer = http://127.0.0.1:57008" + unserved.PathPrefix + "transfer/\n",
+	} {
+		if len(problems) > 0 || !strings.Contains(kept, want) {
+			t.Errorf("want %q (problems %q) in:\n%s", want, problems, kept)
+		}
 	}
 }
 
@@ -181,8 +198,8 @@ func TestGcloudRestrictConfigVouchesForLoggingWithRunLogging(t *testing.T) {
 	if _, problems := gcloudRestrictConfig(conf, map[string]string{"RUN_LOGGING": "10.96.0.12:8080"}); len(problems) != 1 {
 		t.Errorf("an in-cluster RUN_LOGGING: problems = %q; want one", problems)
 	}
-	if kept, _ := gcloudRestrictConfig(conf, map[string]string{}); strings.Contains(kept, "logging =") {
-		t.Errorf("no logging variable kept the override:\n%s", kept)
+	if kept, _ := gcloudRestrictConfig(conf, map[string]string{}); !strings.Contains(kept, "logging = http://127.0.0.1:1/\n") {
+		t.Errorf("no logging variable, but the override is not refused:\n%s", kept)
 	}
 }
 

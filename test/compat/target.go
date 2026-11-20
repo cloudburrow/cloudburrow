@@ -8,6 +8,8 @@ import (
 	"net"
 	"path/filepath"
 	"strings"
+
+	"github.com/cloudburrow/cloudburrow/internal/unserved"
 )
 
 // The instance a CLI- or gcloud-driving test reaches must be the one the
@@ -241,10 +243,13 @@ var gcloudOverrides = []struct {
 // wrote against the harness and keeps only the endpoint overrides the
 // harness vouches for. An override naming another endpoint than the
 // harness's for its service is a problem, and the test must not run; one
-// for a service the harness has no endpoint for is dropped, so a command
-// for that service fails at the egress guard rather than reaching an
-// address nothing checked. Everything outside [api_endpoint_overrides] is
-// kept as written.
+// for a service the harness has no endpoint for is replaced by a local
+// refusal (#1975): the harness's Resource Manager's, which answers it with
+// CloudBurrow's message, or a closed loopback port. It was dropped, which
+// left gcloud at that API's googleapis.com default, held back only by the
+// egress guard (#1957's transfer commands reached it so). gcloud-setup's
+// own refusals are kept when they name the harness's Resource Manager.
+// Everything outside [api_endpoint_overrides] is kept as written.
 func gcloudRestrictConfig(conf string, harness map[string]string) (string, []string) {
 	want := map[string]string{}
 	for _, o := range gcloudOverrides {
@@ -266,9 +271,15 @@ func gcloudRestrictConfig(conf string, harness map[string]string) (string, []str
 		} else if k, v, ok := strings.Cut(t, "="); in && ok {
 			k, v = strings.TrimSpace(k), strings.TrimSpace(v)
 			h, known := want[k]
+			refusal := "http://127.0.0.1:1/"
+			if rm := strings.TrimSpace(harness["RESOURCEMANAGER"]); rm != "" {
+				refusal = "http://" + normalizeEndpoint(rm) + unserved.PathPrefix + k + "/"
+			}
 			switch {
 			case !known || h == "":
-				continue
+				if !strings.Contains(v, unserved.PathPrefix) || normalizeEndpoint(v) != normalizeEndpoint(refusal) {
+					line = k + " = " + refusal
+				}
 			case normalizeEndpoint(h) != normalizeEndpoint(v):
 				problems = append(problems, fmt.Sprintf("gcloud-setup wrote %s = %s, but the harness's endpoint for it is %s", k, v, h))
 				continue

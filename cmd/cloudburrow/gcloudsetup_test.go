@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/cloudburrow/cloudburrow/internal/unserved"
 )
 
 func TestGcloudSetupWritesOnlyItsOwnConfiguration(t *testing.T) {
@@ -112,8 +114,25 @@ func testGcloudSetup(t *testing.T, gdir, stateDir string) string {
 		// Eventarc under its prefix on the Run port (#1877).
 		"eventarc": "http://127.0.0.1:9004/eventarc/",
 	}
-	if got := sections["api_endpoint_overrides"]; !reflect.DeepEqual(got, wantOverrides) {
-		t.Errorf("api_endpoint_overrides = %v, want %v:\n%s", got, wantOverrides, conf)
+	// Every other override of the pinned gcloud is the local refusal on the
+	// Resource Manager port (#1975), so none is left at googleapis.com.
+	local := map[string]string{}
+	for k, v := range sections["api_endpoint_overrides"] {
+		if v == unserved.URL("http://127.0.0.1:9007", k) {
+			continue
+		}
+		local[k] = v
+	}
+	if !reflect.DeepEqual(local, wantOverrides) {
+		t.Errorf("api_endpoint_overrides pointed here = %v, want %v:\n%s", local, wantOverrides, conf)
+	}
+	for _, p := range unserved.GcloudOverrides() {
+		if _, ok := sections["api_endpoint_overrides"][p]; !ok {
+			t.Errorf("gcloud's %s override is not written, so gcloud would call Google for it", p)
+		}
+	}
+	if got := sections["auth"]["token_host"]; !strings.HasPrefix(got, "http://127.0.0.1:") {
+		t.Errorf("auth/token_host = %q, want this instance's token endpoint", got)
 	}
 	if p := sections["core"]["project"]; p == "" {
 		t.Errorf("configuration sets no core/project:\n%s", conf)

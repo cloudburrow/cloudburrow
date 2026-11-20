@@ -16,6 +16,7 @@ import (
 	"syscall"
 
 	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/unserved"
 )
 
 // `cloudburrow terraform` (#283): run Terraform or OpenTofu with the Google
@@ -304,13 +305,29 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 	return set, skipped
 }
 
-// terraformProvider renders the provider configuration and names the
-// enabled services it deliberately left out.
+// terraformProvider renders the google provider's configuration and names
+// the enabled services it deliberately left out.
 func terraformProvider(cfg config.Config, override bool) (string, []config.Service) {
 	set, skipped := terraformSettings(cfg)
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n# Instance %q.\n", generatedMarker, cfg.Name)
-	b.WriteString("provider \"google\" {\n")
+	b.WriteString(terraformProviderBlock(cfg, "google", override, set))
+	return b.String(), skipped
+}
+
+// terraformProviderBlock is one provider block: the project, the token, the
+// endpoints set at this instance, and the refusals the provider reads from
+// no environment variable (unserved.TerraformNoEnv), each limited to the
+// arguments name's pinned schema has. Every other refusal is passed in the
+// environment (terraformRefusalEnv), which a provider of another version
+// ignores where it has no such argument, rather than failing on it.
+func terraformProviderBlock(cfg config.Config, name string, override bool, set []terraformURL) string {
+	has := map[string]bool{}
+	for _, a := range unserved.TerraformEndpoints(name == "google-beta") {
+		has[a] = true
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "provider %q {\n", name)
 	fmt.Fprintf(&b, "  project      = %q\n", cfg.DefaultProject())
 	fmt.Fprintf(&b, "  access_token = %q\n", terraformAccessToken)
 	if override {
@@ -319,10 +336,82 @@ func terraformProvider(cfg config.Config, override bool) (string, []config.Servi
 		b.WriteString("  credentials  = null\n")
 	}
 	for _, e := range set {
-		fmt.Fprintf(&b, "  %s = %q\n", e.attr, e.url)
+		if name == "google" || has[e.attr] {
+			fmt.Fprintf(&b, "  %s = %q\n", e.attr, e.url)
+		}
+	}
+	for _, r := range terraformRefusals(cfg, set) {
+		if has[r.attr] && unserved.TerraformNoEnv[r.attr] {
+			fmt.Fprintf(&b, "  %s = %q # not served here: refused locally (#1975)\n", r.attr, r.url)
+		}
 	}
 	b.WriteString("}\n")
-	return b.String(), skipped
+	return b.String()
+}
+
+// terraformRefusals are the local refusals (#1975) for every endpoint
+// argument of the pinned google and google-beta providers this instance
+// does not point at itself: without one the provider would send that
+// API's calls to its googleapis.com default.
+func terraformRefusals(cfg config.Config, set []terraformURL) []terraformURL {
+	local := map[string]bool{}
+	for _, e := range set {
+		local[e.attr] = true
+	}
+	base := refusalBase(cfg)
+	var out []terraformURL
+	for _, a := range unserved.AllTerraformEndpoints() {
+		if !local[a] {
+			out = append(out, terraformURL{terraformEndpoint{attr: a, env: unserved.TerraformEnv(a)}, unserved.URL(base, a)})
+		}
+	}
+	return out
+}
+
+// terraformRefusalEnv is the environment the wrapper adds for the binary it
+// runs: every refusal the provider reads from an environment variable. Both
+// google and google-beta read the same variables, so a module using either
+// is covered without a block of its own.
+func terraformRefusalEnv(cfg config.Config) []string {
+	set, _ := terraformSettings(cfg)
+	var env []string
+	for _, r := range terraformRefusals(cfg, set) {
+		if !unserved.TerraformNoEnv[r.attr] {
+			env = append(env, r.env+"="+r.url)
+		}
+	}
+	return env
+}
+
+// refusalBase is the server the refusals point at: the Resource Manager
+// port, which every instance serves and which answers them (unserved.Handler).
+// An instance without one still gets a loopback URL, which then fails to
+// connect, locally.
+func refusalBase(cfg config.Config) string {
+	port := cfg.Endpoints.ResourceManager
+	if port == 0 {
+		port = 1
+	}
+	return "http://" + net.JoinHostPort(cfg.BindAddress, strconv.Itoa(port))
+}
+
+var googleBetaReference = regexp.MustCompile(`google-beta`)
+
+// moduleUsesGoogleBeta reports whether any *.tf file of the module names
+// google-beta: a provider block, a required_providers entry or a
+// resource's provider argument. Its block is written only then, since a
+// block for a provider the module does not use would make init install it.
+func moduleUsesGoogleBeta(dir string) bool {
+	files, _ := filepath.Glob(filepath.Join(dir, "*.tf"))
+	for _, f := range files {
+		if strings.HasPrefix(filepath.Base(f), "cloudburrow_providers") {
+			continue
+		}
+		if b, err := os.ReadFile(f); err == nil && googleBetaReference.Match(b) {
+			return true
+		}
+	}
+	return false
 }
 
 // unpointedPrefix is a family of the provider's resources and data sources
@@ -454,23 +543,57 @@ func subcommand(theirs []string) string {
 	return ""
 }
 
-var googleProviderBlock = regexp.MustCompile(`(?m)^\s*provider\s+"google"\s*\{`)
-
 // moduleDeclaresGoogle reports whether the module already configures the
 // google provider. An override file needs a block to merge into, and a plain
 // one would duplicate an existing block, so which file is written depends on
 // the answer.
-func moduleDeclaresGoogle(dir string) bool {
+func moduleDeclaresGoogle(dir string) bool { return moduleDeclaresProvider(dir, "google") }
+
+// moduleDeclaresProvider reports whether the module has a provider block
+// for name.
+func moduleDeclaresProvider(dir, name string) bool {
+	block := regexp.MustCompile(`(?m)^\s*provider\s+"` + regexp.QuoteMeta(name) + `"\s*\{`)
 	files, _ := filepath.Glob(filepath.Join(dir, "*.tf"))
 	for _, f := range files {
 		if strings.HasPrefix(filepath.Base(f), "cloudburrow_providers") {
 			continue
 		}
-		if b, err := os.ReadFile(f); err == nil && googleProviderBlock.Match(b) {
+		if b, err := os.ReadFile(f); err == nil && block.Match(b) {
 			return true
 		}
 	}
 	return false
+}
+
+// terraformProviderFiles are the files the wrapper writes into dir, by
+// name: a plain file for the providers the module does not configure and
+// an override file for those it does (Terraform refuses an override with no
+// block to merge into), each carrying generatedMarker. google is always
+// written; google-beta only when the module uses it (#1975: before, a
+// google-beta resource got no endpoint at all and went to real Google).
+func terraformProviderFiles(cfg config.Config, dir string) (map[string]string, []config.Service) {
+	set, skipped := terraformSettings(cfg)
+	providers := []string{"google"}
+	if moduleUsesGoogleBeta(dir) {
+		providers = append(providers, "google-beta")
+	}
+	var plain, over strings.Builder
+	for _, p := range providers {
+		if moduleDeclaresProvider(dir, p) {
+			over.WriteString(terraformProviderBlock(cfg, p, true, set))
+		} else {
+			plain.WriteString(terraformProviderBlock(cfg, p, false, set))
+		}
+	}
+	head := fmt.Sprintf("%s\n# Instance %q.\n", generatedMarker, cfg.Name)
+	files := map[string]string{}
+	if plain.Len() > 0 {
+		files["cloudburrow_providers.tf"] = head + plain.String()
+	}
+	if over.Len() > 0 {
+		files["cloudburrow_providers_override.tf"] = head + over.String()
+	}
+	return files, skipped
 }
 
 // terraformArgs splits `cloudburrow terraform [flags] [--] args...`.
@@ -539,28 +662,31 @@ func runTerraform(args []string, stdout, stderr io.Writer) error {
 		return fmt.Errorf("refusing to run %s %s: the module declares resources cloudburrow cannot point at this instance, "+
 			"which the provider would send to real Google:\n  %s", binary, subcommand(theirs), strings.Join(bad, "\n  "))
 	}
-	override := moduleDeclaresGoogle(dir)
-	name := "cloudburrow_providers.tf"
-	if override {
-		name = "cloudburrow_providers_override.tf"
+	files, skipped := terraformProviderFiles(cfg, dir)
+	for name := range files {
+		path := filepath.Join(dir, name)
+		if b, err := os.ReadFile(path); err == nil && !strings.HasPrefix(string(b), generatedMarker) {
+			return fmt.Errorf("%s exists and was not written by cloudburrow; refusing to replace it", path)
+		}
 	}
-	path := filepath.Join(dir, name)
-	if b, err := os.ReadFile(path); err == nil && !strings.HasPrefix(string(b), generatedMarker) {
-		return fmt.Errorf("%s exists and was not written by cloudburrow; refusing to replace it", path)
-	}
-	body, skipped := terraformProvider(cfg, override)
 	for _, s := range skipped {
 		fmt.Fprintf(stderr, "cloudburrow terraform: %s is enabled but has no Verified Terraform support, "+
-			"so no endpoint is set for it; resources for it would go to real Google\n", s)
+			"so its endpoints are refused locally rather than pointed here\n", s)
 	}
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		return err
+	for name, body := range files {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			return err
+		}
+		defer func() { _ = os.Remove(path) }()
 	}
-	defer func() { _ = os.Remove(path) }()
 
 	cmd := exec.Command(binary, theirs...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, stdout, stderr
-	env := os.Environ()
+	// Every endpoint argument the instance does not serve is refused
+	// locally (#1975); the environment carries those the provider reads
+	// from one, after the user's own, so these win.
+	env := append(os.Environ(), terraformRefusalEnv(cfg)...)
 	if h := bigtableHost(cfg); h != "" {
 		env = append(env, "BIGTABLE_EMULATOR_HOST="+h)
 	}
