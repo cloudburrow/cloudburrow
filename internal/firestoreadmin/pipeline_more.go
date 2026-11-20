@@ -249,6 +249,9 @@ func usesTextSearch(v *firestorepb.Value) bool {
 // matching the query, newest first unless sorted, with the added fields,
 // after the offset and up to the limit.
 func (p *pipelineRun) search(opts map[string]*firestorepb.Value, rows []row) ([]row, error) {
+	was := p.inSearch
+	p.inSearch = true
+	defer func() { p.inSearch = was }()
 	for k, v := range opts {
 		switch k {
 		case "query", "sort", "add_fields", "limit", "offset", "retrieval_depth", "language_code":
@@ -309,11 +312,6 @@ func absent(v *firestorepb.Value) bool { return v == nil || isNull(v) }
 
 func init() {
 	f := pipelineFunctions
-	for _, n := range []string{"regex_find", "regex_find_all", "array_first_n", "array_last_n", "array_index_of_all",
-		"minimum_n", "maximum_n", "array_filter", "array_transform", "timestamp_trunc", "timestamp_diff",
-		"timestamp_extract", "geo_distance", "current_document", "map_entries", "cmp", "switch_on", "rand", "offset"} {
-		delete(pipelineUnserved, n)
-	}
 	argc := func(name string, args []*firestorepb.Value, lo, hi int) error {
 		if len(args) < lo || len(args) > hi {
 			if lo == hi {
@@ -366,32 +364,34 @@ func init() {
 		return int(n), nil
 	}
 
-	// Regular expressions (RE2): the first match, and every match; with
-	// one capturing group, its text.
+	// Regular expressions (RE2): "the first substring in value that
+	// matches regexp, or NULL if there is no match", and "an array of
+	// all substrings in value that match regexp, or an empty array"; the
+	// pattern is a string or a REGEX value (its options i, m and s).
 	regex := func(name string, all bool) {
 		def(name, 2, 2, func(_ *pipelineRun, vs []*firestorepb.Value, _ row) (*firestorepb.Value, error) {
 			s, ok := vs[0].GetValueType().(*firestorepb.Value_StringValue)
 			if !ok {
 				return nil, evalErrf("%s: %s is not a string", name, typeName(vs[0]))
 			}
-			rx, err := regexp.Compile(vs[1].GetStringValue())
+			if absent(vs[1]) {
+				return nullValue(), nil
+			}
+			rx, err := pipelineRegex(name, vs[1], false)
 			if err != nil {
-				return nil, evalErrf("%s: invalid regular expression %q: %v", name, vs[1].GetStringValue(), err)
+				return nil, err
 			}
-			if rx.NumSubexp() > 1 {
-				return nil, evalErrf("%s: the regular expression has more than one capturing group", name)
-			}
-			matches := rx.FindAllStringSubmatch(s.StringValue, -1)
-			pick := func(m []string) *firestorepb.Value { return stringValue(m[len(m)-1]) }
 			if !all {
-				if len(matches) == 0 {
+				loc := rx.FindStringIndex(s.StringValue)
+				if loc == nil {
 					return nullValue(), nil
 				}
-				return pick(matches[0]), nil
+				return stringValue(s.StringValue[loc[0]:loc[1]]), nil
 			}
+			matches := rx.FindAllString(s.StringValue, -1)
 			out := make([]*firestorepb.Value, 0, len(matches))
 			for _, m := range matches {
-				out = append(out, pick(m))
+				out = append(out, stringValue(m))
 			}
 			return arrayValue(out), nil
 		})
@@ -460,7 +460,16 @@ func init() {
 	}
 	extremes("minimum_n", false)
 	extremes("maximum_n", true)
-	def("offset", 2, 2, func(_ *pipelineRun, vs []*firestorepb.Value, _ row) (*firestorepb.Value, error) {
+	// offset is a field access: absent when the input is not an array
+	// or the index is out of bounds (the client's documentation).
+	f["offset"] = func(p *pipelineRun, args []*firestorepb.Value, r row) (*firestorepb.Value, error) {
+		if err := argc("offset", args, 2, 2); err != nil {
+			return nil, err
+		}
+		vs, err := evals(p, args, r)
+		if err != nil {
+			return nil, err
+		}
 		a := vs[0].GetArrayValue()
 		i, ok := asInt(vs[1])
 		if a == nil || !ok {
@@ -473,7 +482,7 @@ func init() {
 			return nil, nil
 		}
 		return a.GetValues()[i], nil
-	})
+	}
 
 	// Lambdas: array_filter(array, param, body) and
 	// array_transform(array, param[, index param], body), the body
@@ -510,8 +519,16 @@ func init() {
 			if err != nil {
 				return nil, err
 			}
-			if ok.GetBooleanValue() {
-				out = append(out, e)
+			// "Elements where it returns false or null are dropped"; any
+			// other result is an error.
+			switch b := ok.GetValueType().(type) {
+			case *firestorepb.Value_BooleanValue:
+				if b.BooleanValue {
+					out = append(out, e)
+				}
+			case nil, *firestorepb.Value_NullValue:
+			default:
+				return nil, evalErrf("array_filter: the predicate is %s, not a boolean", typeName(ok))
 			}
 		}
 		return arrayValue(out), nil
@@ -552,9 +569,13 @@ func init() {
 		if i >= len(vs) || absent(vs[i]) {
 			return time.UTC, nil
 		}
-		loc, err := time.LoadLocation(vs[i].GetStringValue())
-		if err != nil {
-			return nil, evalErrf("%s: invalid time zone %q", name, vs[i].GetStringValue())
+		name0 := vs[i].GetStringValue()
+		if loc, ok := gmtOffsetZone(name0); ok {
+			return loc, nil
+		}
+		loc, err := time.LoadLocation(name0)
+		if err != nil || name0 == "" || name0 == "Local" {
+			return nil, evalErrf("%s: invalid time zone %q", name, name0)
 		}
 		return loc, nil
 	}
@@ -615,6 +636,8 @@ func init() {
 		case "day":
 			out = midnight(t)
 		case "isoweek":
+			// Not in the reference's list, but Google's Go client accepts
+			// it (validateTimestampGranularity): the ISO week, from Monday.
 			out = weekStart(t, time.Monday)
 		case "month":
 			out = time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, loc)
@@ -710,12 +733,15 @@ func init() {
 		if !ok {
 			return nil, evalErrf("timestamp_diff: unit %q is invalid: want microsecond, millisecond, second, minute, hour or day", vs[2].GetStringValue())
 		}
-		return intValue(int64(end.Sub(start) / u)), nil
+		// In whole microseconds (Firestore's precision), so the ten
+		// thousand years timestamps span do not overflow a Duration.
+		micros := (end.Unix()-start.Unix())*1e6 + int64(end.Nanosecond()/1000-start.Nanosecond()/1000)
+		return intValue(micros / int64(u/time.Microsecond)), nil
 	})
 
 	// Geography: the great-circle distance in meters between two
 	// GeoPoints.
-	def("geo_distance", 2, 2, func(_ *pipelineRun, vs []*firestorepb.Value, _ row) (*firestorepb.Value, error) {
+	geo := func(_ *pipelineRun, vs []*firestorepb.Value, _ row) (*firestorepb.Value, error) {
 		a, b := vs[0].GetGeoPointValue(), vs[1].GetGeoPointValue()
 		if a == nil || b == nil {
 			return nil, evalErrf("geo_distance: both arguments must be GeoPoints")
@@ -724,7 +750,18 @@ func init() {
 		dLat, dLng := rad(b.GetLatitude()-a.GetLatitude()), rad(b.GetLongitude()-a.GetLongitude())
 		h := math.Sin(dLat/2)*math.Sin(dLat/2) + math.Cos(rad(a.GetLatitude()))*math.Cos(rad(b.GetLatitude()))*math.Sin(dLng/2)*math.Sin(dLng/2)
 		return doubleValue(2 * earthRadiusMeters * math.Asin(math.Min(1, math.Sqrt(h)))), nil
-	})
+	}
+	def("geo_distance", 2, 2, geo)
+	geoAnywhere := f["geo_distance"]
+	// "This Expression can only be used within a Search stage" (the
+	// client's documentation; Google's geospatial query guide uses it in
+	// the search stage's query).
+	f["geo_distance"] = func(p *pipelineRun, args []*firestorepb.Value, r row) (*firestorepb.Value, error) {
+		if !p.inSearch {
+			return nil, status.Error(codes.InvalidArgument, "geo_distance can only be used within a search stage.")
+		}
+		return geoAnywhere(p, args, r)
+	}
 
 	// The rest of the reference's general functions.
 	f["current_document"] = func(_ *pipelineRun, args []*firestorepb.Value, r row) (*firestorepb.Value, error) {
@@ -732,6 +769,30 @@ func init() {
 			return nil, err
 		}
 		return mapValue(cloneFields(r.fields)), nil
+	}
+	// current_context: "a map consisting of all available fields in the
+	// current point of execution", the row's fields as current_document.
+	f["current_context"] = func(_ *pipelineRun, args []*firestorepb.Value, r row) (*firestorepb.Value, error) {
+		if err := argc("current_context", args, 0, 0); err != nil {
+			return nil, err
+		}
+		return mapValue(cloneFields(r.fields)), nil
+	}
+	// error(message): the expression's result is an error with message,
+	// which is_error and if_error catch.
+	f["error"] = func(p *pipelineRun, args []*firestorepb.Value, r row) (*firestorepb.Value, error) {
+		if err := argc("error", args, 1, 1); err != nil {
+			return nil, err
+		}
+		v, err := p.eval(args[0], r)
+		if err != nil {
+			return nil, err
+		}
+		msg, ok := v.GetValueType().(*firestorepb.Value_StringValue)
+		if !ok {
+			return nil, evalErrf("error: the message is %s, not a string", typeName(v))
+		}
+		return nil, evalErrf("%s", msg.StringValue)
 	}
 	f["rand"] = func(_ *pipelineRun, args []*firestorepb.Value, _ row) (*firestorepb.Value, error) {
 		if err := argc("rand", args, 0, 0); err != nil {
@@ -758,10 +819,16 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		if vs[0] == nil || vs[1] == nil {
-			return nullValue(), nil
+		// Across types, in the sort stage's order; absent orders as null
+		// (Google's example: cmp(NULL, ABSENT) is 0).
+		a, b := vs[0], vs[1]
+		if a == nil {
+			a = nullValue()
 		}
-		return intValue(int64(compareValues(vs[0], vs[1]))), nil
+		if b == nil {
+			b = nullValue()
+		}
+		return intValue(int64(compareValues(a, b))), nil
 	}
 	f["switch_on"] = func(p *pipelineRun, args []*firestorepb.Value, r row) (*firestorepb.Value, error) {
 		if len(args) < 2 {
@@ -779,6 +846,85 @@ func init() {
 		if len(args)%2 == 1 {
 			return p.eval(args[len(args)-1], r)
 		}
-		return nullValue(), nil
+		// "If no default value is provided, an error is thrown if no
+		// other conditions evaluated to TRUE."
+		return nil, evalErrf("switch_on: no condition is true, and there is no default")
 	}
+}
+
+// pipelineRegex compiles a regular expression argument (RE2): a string, or
+// a REGEX value ({"__regex__": {"pattern", "options"}}) whose options are
+// any of i (case-insensitive), m (multi-line) and s (dot matches newline),
+// as Google documents for regex("pattern", "options"). anchored matches
+// the whole string. An invalid expression is an error.
+func pipelineRegex(name string, v *firestorepb.Value, anchored bool) (*regexp.Regexp, error) {
+	var pat, opts string
+	switch x := v.GetValueType().(type) {
+	case *firestorepb.Value_StringValue:
+		pat = x.StringValue
+	case *firestorepb.Value_MapValue:
+		inner := x.MapValue.GetFields()["__regex__"].GetMapValue()
+		if inner == nil || len(x.MapValue.GetFields()) != 1 {
+			return nil, evalErrf("%s: the pattern is a map, not a string or a regex", name)
+		}
+		pat, opts = inner.GetFields()["pattern"].GetStringValue(), inner.GetFields()["options"].GetStringValue()
+	default:
+		return nil, evalErrf("%s: the pattern is %s, not a string or a regex", name, typeName(v))
+	}
+	for _, o := range opts {
+		if o != 'i' && o != 'm' && o != 's' {
+			return nil, evalErrf("%s: the regex option %q is not supported: want i, m or s", name, o)
+		}
+	}
+	full := pat
+	if anchored {
+		full = `^(?:` + pat + `)$`
+	}
+	if opts != "" {
+		full = "(?" + opts + ")" + full
+	}
+	rx, err := regexp.Compile(full)
+	if err != nil {
+		return nil, evalErrf("%s: invalid regular expression %q: %v", name, pat, err)
+	}
+	return rx, nil
+}
+
+// gmtOffsetZone is a time zone named as an offset from GMT ("GMT+06:32:43",
+// "GMT-5", "GMT+05:30"). Google's reference allows "a custom time offset
+// ... from GMT", and its one example, 2026-01-24 20:00 UTC truncated to the
+// month in "GMT+06:32:43" giving 2026-01-01 06:32:43 UTC, reads the sign
+// as POSIX and the tz database's Etc/GMT+N zones do: GMT+h is h hours
+// west of Greenwich.
+func gmtOffsetZone(name string) (*time.Location, bool) {
+	rest, ok := strings.CutPrefix(name, "GMT")
+	if !ok || len(rest) < 2 || (rest[0] != '+' && rest[0] != '-') {
+		return nil, false
+	}
+	sign := 1
+	if rest[0] == '+' {
+		sign = -1 // POSIX: west of Greenwich
+	}
+	parts := strings.Split(rest[1:], ":")
+	if len(parts) > 3 {
+		return nil, false
+	}
+	secs := 0
+	for i, p := range parts {
+		if len(p) == 0 || len(p) > 2 {
+			return nil, false
+		}
+		n := 0
+		for _, c := range p {
+			if c < '0' || c > '9' {
+				return nil, false
+			}
+			n = n*10 + int(c-'0')
+		}
+		if (i == 0 && n > 24) || (i > 0 && n > 59) {
+			return nil, false
+		}
+		secs += n * []int{3600, 60, 1}[i]
+	}
+	return time.FixedZone(name, sign*secs), true
 }

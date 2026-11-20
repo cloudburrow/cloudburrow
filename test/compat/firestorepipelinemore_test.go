@@ -149,10 +149,18 @@ func TestFirestorePipelinesMore(t *testing.T) {
 	want("timestamp_diff days", got["days"], int64(290))
 
 	// Geography: Paris to London is 343556.6 m on a sphere of S2's
-	// radius, 6371010 m (haversine, computed by hand).
-	got = one("geo_distance", gadget().Select(firestore.Fields(firestore.GeoDistance("loc", paris).As("d"))))
+	// radius, 6371010 m (haversine, computed by hand). geo_distance "can
+	// only be used within a Search stage" (#1951): a select refuses it.
+	got = one("geo_distance", c.Pipeline().Collection("items").
+		Search(firestore.WithSearchQuery(firestore.LessThanOrEqual(firestore.GeoDistance("loc", paris), 400000)),
+			firestore.WithSearchAddFields(firestore.GeoDistance("loc", paris).As("d"))).
+		Where(firestore.Equal(firestore.FieldOf("name"), "Gadget")))
 	if d, ok := got["d"].(float64); !ok || math.Abs(d-343556.6) > 1 {
 		t.Errorf("geo_distance Paris-London = %v, want 343556.6 m", got["d"])
+	}
+	_, err = gadget().Select(firestore.Fields(firestore.GeoDistance("loc", paris).As("d"))).Execute(ctx).Results().GetAll()
+	if status.Code(err) != codes.InvalidArgument {
+		t.Errorf("geo_distance in a select = %v, want INVALID_ARGUMENT", err)
 	}
 	rs, err = c.Pipeline().Collection("items").
 		Search(firestore.WithSearchQuery(firestore.LessThanOrEqual(firestore.GeoDistance("loc", paris), 1000))).

@@ -269,6 +269,9 @@ type pipelineRun struct {
 	// plan is explain mode "explain": the pipeline is planned, and a
 	// write stage writes nothing.
 	plan bool
+	// inSearch is set while a search stage evaluates its options:
+	// geo_distance is served only there, as Google documents.
+	inSearch bool
 }
 
 func (p *pipelineRun) all() ([]*firestorepb.Document, error) {
@@ -717,7 +720,6 @@ func (p *pipelineRun) aggregate(accs, groups map[string]*firestorepb.Value, rows
 var pipelineAggregates = map[string]bool{
 	"count": true, "count_if": true, "count_distinct": true, "sum": true, "average": true,
 	"minimum": true, "maximum": true, "first": true, "last": true, "array_agg": true, "array_agg_distinct": true,
-	"minimum_n": false, "maximum_n": false,
 }
 
 func (p *pipelineRun) accumulate(fn *firestorepb.Function, rows []row) (*firestorepb.Value, error) {
@@ -1024,27 +1026,8 @@ var pipelineFunctions = map[string]func(p *pipelineRun, args []*firestorepb.Valu
 // pipelineUnserved are the functions Google's reference documents that are
 // not evaluated here.
 var pipelineUnserved = map[string]string{
-	"score":              "full-text search scores need a search index",
-	"document_matches":   "full-text search needs a search index",
-	"geo_distance":       "geographic distance is not evaluated here",
-	"array_filter":       "lambda expressions are not evaluated here",
-	"array_transform":    "lambda expressions are not evaluated here",
-	"switch_on":          "switch_on is not evaluated here",
-	"rand":               "rand is not evaluated here",
-	"current_document":   "current_document is not evaluated here",
-	"timestamp_trunc":    "timestamp_trunc is not evaluated here",
-	"timestamp_diff":     "timestamp_diff is not evaluated here",
-	"timestamp_extract":  "timestamp_extract is not evaluated here",
-	"regex_find":         "regex_find is not evaluated here",
-	"regex_find_all":     "regex_find_all is not evaluated here",
-	"minimum_n":          "minimum_n is not evaluated here",
-	"maximum_n":          "maximum_n is not evaluated here",
-	"array_first_n":      "array_first_n is not evaluated here",
-	"array_last_n":       "array_last_n is not evaluated here",
-	"array_index_of_all": "array_index_of_all is not evaluated here",
-	"map_entries":        "map_entries is not evaluated here",
-	"offset":             "offset is not evaluated here",
-	"cmp":                "cmp is not evaluated here",
+	"score":            "full-text search scores need a search index",
+	"document_matches": "full-text search needs a search index",
 }
 
 func (p *pipelineRun) eval(v *firestorepb.Value, r row) (*firestorepb.Value, error) {
@@ -1863,16 +1846,19 @@ func init() {
 		return arrayValue(vals), nil
 	})
 	re := func(name string, anchored bool) {
-		strFn(name, 2, func(ss []string) (*firestorepb.Value, error) {
-			pat := ss[1]
-			if anchored {
-				pat = `^(?:` + pat + `)$`
+		simple(name, 2, func(vs []*firestorepb.Value) (*firestorepb.Value, error) {
+			if absent(vs[0]) || absent(vs[1]) {
+				return nullValue(), nil
 			}
-			rx, err := regexp.Compile(pat)
+			s, err := str(name, vs[0])
 			if err != nil {
-				return nil, evalErrf("%s: invalid regular expression %q: %v", name, ss[1], err)
+				return nil, err
 			}
-			return boolValue(rx.MatchString(ss[0])), nil
+			rx, err := pipelineRegex(name, vs[1], anchored)
+			if err != nil {
+				return nil, err
+			}
+			return boolValue(rx.MatchString(s)), nil
 		})
 	}
 	re("regex_contains", false)
