@@ -97,7 +97,7 @@ func testGcloudSetup(t *testing.T, gdir, stateDir string) string {
 		"serviceusage":         "http://127.0.0.1:9023/",
 		"apikeys":              "http://127.0.0.1:9029/",
 		// The Cloud Storage companion APIs (#1957), served with Cloud Storage.
-		"storagetransfer":        "http://127.0.0.1:9037/",
+		"transfer":               "http://127.0.0.1:9037/",
 		"storagebatchoperations": "http://127.0.0.1:9035/",
 		"storageinsights":        "http://127.0.0.1:9036/",
 		"iam":                    "http://127.0.0.1:9007/",

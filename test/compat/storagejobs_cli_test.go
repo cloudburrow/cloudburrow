@@ -14,12 +14,15 @@ import (
 	"cloud.google.com/go/storagetransfer/apiv1/storagetransferpb"
 )
 
-// Not yet passing: gcloud transfer escapes the override (#1975), so it covers nothing:
+// covers: storagetransfer.transferJobs.create, storagetransfer.transferJobs.list, storagetransfer.transferJobs.get, storagetransfer.transferJobs.run, storagetransfer.transferJobs.patch, storagetransfer.transferOperations.list, storagetransfer.transferOperations.get
 //
 // TestGcloudTransferJobs (#1957): gcloud transfer jobs create (a bucket to
 // bucket job with an include prefix, not run on create), list, describe,
 // run (waiting for it), gcloud transfer operations list and describe, and
-// jobs delete, against the local Storage Transfer Service.
+// jobs delete, against the local Storage Transfer Service, with egress to
+// Google blocked. It reaches the instance through the `transfer` override,
+// gcloud's property for the API; a `storagetransfer` line, which gcloud
+// ignores, sent it to storagetransfer.googleapis.com (#1975).
 func TestGcloudTransferJobs(t *testing.T) {
 	h := New(t)
 	sc := storageClient(t, h)

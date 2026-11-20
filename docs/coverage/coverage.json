@@ -14975,7 +14975,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/storagejobs_batch_test.go:198 TestStorageBatchOperationsJobs",
-          "test/compat/storagejobs_cli_test.go:73 TestGcloudStorageBatchOperations"
+          "test/compat/storagejobs_cli_test.go:76 TestGcloudStorageBatchOperations"
         ]
       },
       {
@@ -14985,7 +14985,7 @@
           "test/compat/storagejobs_batch_test.go:198 TestStorageBatchOperationsJobs",
           "test/compat/storagejobs_batch_test.go:362 TestStorageBatchOperationsRefusals",
           "test/compat/storagejobs_batch_test.go:426 TestStorageBatchOperationsRewriteToKMSKey",
-          "test/compat/storagejobs_cli_test.go:73 TestGcloudStorageBatchOperations"
+          "test/compat/storagejobs_cli_test.go:76 TestGcloudStorageBatchOperations"
         ]
       },
       {
@@ -14993,7 +14993,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/storagejobs_batch_test.go:198 TestStorageBatchOperationsJobs",
-          "test/compat/storagejobs_cli_test.go:73 TestGcloudStorageBatchOperations"
+          "test/compat/storagejobs_cli_test.go:76 TestGcloudStorageBatchOperations"
         ]
       },
       {
@@ -15002,7 +15002,7 @@
         "tests": [
           "test/compat/storagejobs_batch_test.go:198 TestStorageBatchOperationsJobs",
           "test/compat/storagejobs_batch_test.go:426 TestStorageBatchOperationsRewriteToKMSKey",
-          "test/compat/storagejobs_cli_test.go:73 TestGcloudStorageBatchOperations"
+          "test/compat/storagejobs_cli_test.go:76 TestGcloudStorageBatchOperations"
         ]
       },
       {
@@ -15010,7 +15010,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/storagejobs_batch_test.go:198 TestStorageBatchOperationsJobs",
-          "test/compat/storagejobs_cli_test.go:73 TestGcloudStorageBatchOperations"
+          "test/compat/storagejobs_cli_test.go:76 TestGcloudStorageBatchOperations"
         ]
       },
       {
@@ -15145,8 +15145,8 @@
         "method": "storageinsights.projects.locations.reportConfigs.create",
         "status": "Verified",
         "tests": [
-          "test/compat/storagejobs_cli_test.go:124 TestGcloudStorageInsightsInventoryReports",
-          "test/compat/storagejobs_cli_test.go:263 TestTerraformStorageInsightsReportConfig",
+          "test/compat/storagejobs_cli_test.go:127 TestGcloudStorageInsightsInventoryReports",
+          "test/compat/storagejobs_cli_test.go:266 TestTerraformStorageInsightsReportConfig",
           "test/compat/storagejobs_insights_test.go:134 TestStorageInsightsInventoryReports",
           "test/compat/storagejobs_insights_test.go:243 TestStorageInsightsParquetReport",
           "test/compat/storagejobs_insights_test.go:283 TestStorageInsightsReportConfigChecks"
@@ -15156,8 +15156,8 @@
         "method": "storageinsights.projects.locations.reportConfigs.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/storagejobs_cli_test.go:124 TestGcloudStorageInsightsInventoryReports",
-          "test/compat/storagejobs_cli_test.go:263 TestTerraformStorageInsightsReportConfig",
+          "test/compat/storagejobs_cli_test.go:127 TestGcloudStorageInsightsInventoryReports",
+          "test/compat/storagejobs_cli_test.go:266 TestTerraformStorageInsightsReportConfig",
           "test/compat/storagejobs_insights_test.go:134 TestStorageInsightsInventoryReports"
         ]
       },
@@ -15165,8 +15165,8 @@
         "method": "storageinsights.projects.locations.reportConfigs.get",
         "status": "Verified",
         "tests": [
-          "test/compat/storagejobs_cli_test.go:124 TestGcloudStorageInsightsInventoryReports",
-          "test/compat/storagejobs_cli_test.go:263 TestTerraformStorageInsightsReportConfig",
+          "test/compat/storagejobs_cli_test.go:127 TestGcloudStorageInsightsInventoryReports",
+          "test/compat/storagejobs_cli_test.go:266 TestTerraformStorageInsightsReportConfig",
           "test/compat/storagejobs_insights_test.go:134 TestStorageInsightsInventoryReports"
         ]
       },
@@ -15174,7 +15174,7 @@
         "method": "storageinsights.projects.locations.reportConfigs.list",
         "status": "Verified",
         "tests": [
-          "test/compat/storagejobs_cli_test.go:124 TestGcloudStorageInsightsInventoryReports",
+          "test/compat/storagejobs_cli_test.go:127 TestGcloudStorageInsightsInventoryReports",
           "test/compat/storagejobs_insights_test.go:134 TestStorageInsightsInventoryReports"
         ]
       },
@@ -15182,7 +15182,7 @@
         "method": "storageinsights.projects.locations.reportConfigs.patch",
         "status": "Verified",
         "tests": [
-          "test/compat/storagejobs_cli_test.go:263 TestTerraformStorageInsightsReportConfig",
+          "test/compat/storagejobs_cli_test.go:266 TestTerraformStorageInsightsReportConfig",
           "test/compat/storagejobs_insights_test.go:134 TestStorageInsightsInventoryReports"
         ]
       },
@@ -15205,7 +15205,7 @@
         "method": "storagetransfer.googleServiceAccounts.get",
         "status": "Verified",
         "tests": [
-          "test/compat/storagejobs_cli_test.go:172 TestTerraformStorageTransferJob",
+          "test/compat/storagejobs_cli_test.go:175 TestTerraformStorageTransferJob",
           "test/compat/storagejobs_transfer_test.go:156 TestStorageTransferBetweenBuckets"
         ]
       },
@@ -15248,7 +15248,8 @@
         "method": "storagetransfer.transferJobs.create",
         "status": "Verified",
         "tests": [
-          "test/compat/storagejobs_cli_test.go:172 TestTerraformStorageTransferJob",
+          "test/compat/storagejobs_cli_test.go:175 TestTerraformStorageTransferJob",
+          "test/compat/storagejobs_cli_test.go:26 TestGcloudTransferJobs",
           "test/compat/storagejobs_transfer_test.go:156 TestStorageTransferBetweenBuckets",
           "test/compat/storagejobs_transfer_test.go:294 TestStorageTransferScheduleFollowsTheInstanceClock",
           "test/compat/storagejobs_transfer_test.go:439 TestStorageTransferNotifiesPubSub"
@@ -15265,7 +15266,8 @@
         "method": "storagetransfer.transferJobs.get",
         "status": "Verified",
         "tests": [
-          "test/compat/storagejobs_cli_test.go:172 TestTerraformStorageTransferJob",
+          "test/compat/storagejobs_cli_test.go:175 TestTerraformStorageTransferJob",
+          "test/compat/storagejobs_cli_test.go:26 TestGcloudTransferJobs",
           "test/compat/storagejobs_transfer_test.go:156 TestStorageTransferBetweenBuckets",
           "test/compat/storagejobs_transfer_test.go:294 TestStorageTransferScheduleFollowsTheInstanceClock"
         ]
@@ -15274,6 +15276,7 @@
         "method": "storagetransfer.transferJobs.list",
         "status": "Verified",
         "tests": [
+          "test/compat/storagejobs_cli_test.go:26 TestGcloudTransferJobs",
           "test/compat/storagejobs_transfer_test.go:156 TestStorageTransferBetweenBuckets"
         ]
       },
@@ -15281,7 +15284,8 @@
         "method": "storagetransfer.transferJobs.patch",
         "status": "Verified",
         "tests": [
-          "test/compat/storagejobs_cli_test.go:172 TestTerraformStorageTransferJob",
+          "test/compat/storagejobs_cli_test.go:175 TestTerraformStorageTransferJob",
+          "test/compat/storagejobs_cli_test.go:26 TestGcloudTransferJobs",
           "test/compat/storagejobs_transfer_test.go:156 TestStorageTransferBetweenBuckets"
         ]
       },
@@ -15289,6 +15293,7 @@
         "method": "storagetransfer.transferJobs.run",
         "status": "Verified",
         "tests": [
+          "test/compat/storagejobs_cli_test.go:26 TestGcloudTransferJobs",
           "test/compat/storagejobs_transfer_test.go:156 TestStorageTransferBetweenBuckets",
           "test/compat/storagejobs_transfer_test.go:439 TestStorageTransferNotifiesPubSub"
         ]
@@ -15304,6 +15309,7 @@
         "method": "storagetransfer.transferOperations.get",
         "status": "Verified",
         "tests": [
+          "test/compat/storagejobs_cli_test.go:26 TestGcloudTransferJobs",
           "test/compat/storagejobs_transfer_test.go:156 TestStorageTransferBetweenBuckets",
           "test/compat/storagejobs_transfer_test.go:294 TestStorageTransferScheduleFollowsTheInstanceClock"
         ]
@@ -15312,6 +15318,7 @@
         "method": "storagetransfer.transferOperations.list",
         "status": "Verified",
         "tests": [
+          "test/compat/storagejobs_cli_test.go:26 TestGcloudTransferJobs",
           "test/compat/storagejobs_transfer_test.go:156 TestStorageTransferBetweenBuckets"
         ]
       },
