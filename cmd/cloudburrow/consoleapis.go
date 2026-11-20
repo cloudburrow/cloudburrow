@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
+	"github.com/cloudburrow/cloudburrow/internal/resource"
 )
 
 // The APIs & Services pages (#1866): Enabled APIs & services (the
@@ -283,9 +285,12 @@ func (p serviceUsageProvider) StudioCall(_ context.Context, project, call string
 				}
 				sort.Slice(methods, func(i, j int) bool { return methods[i].Method < methods[j].Method })
 			}
-			return map[string]any{"project": project, "api": e, "methods": methods, "countersNote": apiCountersNote}, nil
+			return map[string]any{"project": project, "api": e, "methods": methods, "countersNote": apiCountersNote,
+				"quotas": p.apiQuotas(e.Name, project)}, nil
 		}
 		return nil, fmt.Errorf("CloudBurrow does not serve %s", strings.TrimSpace(req.Service))
+	case "setquota", "resetquota":
+		return p.quotaCall(project, call, body)
 	case "enable", "disable":
 		if req.Service == "" {
 			return nil, errors.New("a service is required")
@@ -300,3 +305,62 @@ func (p serviceUsageProvider) StudioCall(_ context.Context, project, call string
 
 const apiCountersNote = "Calls this instance has served since it started, from its own request counters (/metrics). " +
 	"They are counted per API for every project together, not per project."
+
+// apiQuota is one request quota on an API's Quotas & System Limits tab
+// (#2063): the limit in force for the project, its default, and whether
+// the project has a value of its own.
+type apiQuota struct {
+	Metric     string `json:"metric"`
+	Title      string `json:"title"`
+	LimitTitle string `json:"limitTitle"`
+	Value      int64  `json:"value"`
+	Default    int64  `json:"default"`
+	Adjusted   bool   `json:"adjusted"`
+}
+
+// apiQuotas are service's request quotas as project has them.
+func (p serviceUsageProvider) apiQuotas(service, project string) []apiQuota {
+	out := []apiQuota{}
+	if p.quotas == nil {
+		return out
+	}
+	number := strconv.FormatInt(resource.ProjectNumber(project), 10)
+	for _, q := range p.quotas.Quotas() {
+		if q.Service != service {
+			continue
+		}
+		v, own := q.Projects[number]
+		if !own {
+			v = q.Value
+		}
+		out = append(out, apiQuota{Metric: q.Name, Title: q.Title, LimitTitle: q.LimitTitle, Value: v, Default: q.Default, Adjusted: own})
+	}
+	return out
+}
+
+// quotaCall is Edit quota (setquota {metric, limit}) and Reset to default
+// (resetquota {metric}) for the project, as /admin/quotas sets one.
+func (p serviceUsageProvider) quotaCall(project, call string, body json.RawMessage) (any, error) {
+	if p.quotas == nil {
+		return nil, errors.New("this instance enforces no request quotas")
+	}
+	var req struct {
+		Metric string `json:"metric"`
+		Limit  string `json:"limit"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		return nil, fmt.Errorf("bad request: %v", err)
+	}
+	if call == "resetquota" {
+		p.quotas.Clear(req.Metric, project)
+		return map[string]any{"metric": req.Metric}, nil
+	}
+	n, err := strconv.ParseInt(strings.TrimSpace(req.Limit), 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("the value must be a whole number of requests per minute")
+	}
+	if err := p.quotas.Set(req.Metric, project, n); err != nil {
+		return nil, err
+	}
+	return map[string]any{"metric": req.Metric, "value": n}, nil
+}

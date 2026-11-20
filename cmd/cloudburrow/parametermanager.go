@@ -47,7 +47,7 @@ type parameterManagerService struct {
 	// quotas are the instance's request quotas; nil enforces none.
 	quotas *ratequota.Limiter
 	server *grpctransport.Server
-	api      *parametermanager.Server
+	api    *parametermanager.Server
 }
 
 func newParameterManagerService(cfg config.Config) *parameterManagerService {

@@ -5175,6 +5175,7 @@
         "method": "google.cloud.resourcemanager.v3.TagBindings/ListEffectiveTags",
         "status": "Verified",
         "tests": [
+          "test/compat/parametermanager2063_test.go:197 TestParameterManagerTags",
           "test/compat/resourcemanagerregionaltags_test.go:54 TestResourceManagerRegionalTagBindings",
           "test/compat/resourcemanagertags_test.go:94 TestResourceManagerV3Tags",
           "test/compat/secrettags1961_test.go:31 TestSecretManagerTagsAndAliasesAtCreation"
@@ -5184,6 +5185,7 @@
         "method": "google.cloud.resourcemanager.v3.TagBindings/ListTagBindings",
         "status": "Verified",
         "tests": [
+          "test/compat/parametermanager2063_test.go:197 TestParameterManagerTags",
           "test/compat/resourcemanagerregionaltags_test.go:54 TestResourceManagerRegionalTagBindings",
           "test/compat/resourcemanagertags_test.go:94 TestResourceManagerV3Tags",
           "test/compat/secrettags1961_test.go:157 TestTerraformSecretTags",
@@ -17134,148 +17136,172 @@
     "Key": "parametermanager",
     "Title": "Parameter Manager (v1)",
     "counts": {
-      "Unimplemented": 11,
-      "Verified": 11
+      "Verified": 22
     },
     "rows": [
       {
         "method": "google.cloud.parametermanager.v1.ParameterManager/CreateParameter",
         "status": "Verified",
         "tests": [
-          "test/compat/parametermanager_test.go:108 TestParameterManagerLifecycle",
-          "test/compat/parametermanager_test.go:376 TestParameterManagerCMEK"
+          "test/compat/parametermanager2063_test.go:197 TestParameterManagerTags",
+          "test/compat/parametermanager_test.go:110 TestParameterManagerLifecycle",
+          "test/compat/parametermanager_test.go:378 TestParameterManagerCMEK"
         ]
       },
       {
         "method": "google.cloud.parametermanager.v1.ParameterManager/CreateParameterVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/parametermanager_test.go:108 TestParameterManagerLifecycle",
-          "test/compat/parametermanager_test.go:275 TestParameterManagerRenderSecretReference",
-          "test/compat/parametermanager_test.go:376 TestParameterManagerCMEK"
+          "test/compat/parametermanager_test.go:110 TestParameterManagerLifecycle",
+          "test/compat/parametermanager_test.go:277 TestParameterManagerRenderSecretReference",
+          "test/compat/parametermanager_test.go:378 TestParameterManagerCMEK"
         ]
       },
       {
         "method": "google.cloud.parametermanager.v1.ParameterManager/CreateTemplate",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/parametermanager2063_test.go:33 TestParameterManagerTemplates"
+        ]
       },
       {
         "method": "google.cloud.parametermanager.v1.ParameterManager/CreateTemplateVersion",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/parametermanager2063_test.go:33 TestParameterManagerTemplates"
+        ]
       },
       {
         "method": "google.cloud.parametermanager.v1.ParameterManager/DeleteParameter",
         "status": "Verified",
         "tests": [
-          "test/compat/parametermanager_test.go:108 TestParameterManagerLifecycle"
+          "test/compat/parametermanager2063_test.go:197 TestParameterManagerTags",
+          "test/compat/parametermanager_test.go:110 TestParameterManagerLifecycle"
         ]
       },
       {
         "method": "google.cloud.parametermanager.v1.ParameterManager/DeleteParameterVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/parametermanager_test.go:108 TestParameterManagerLifecycle"
+          "test/compat/parametermanager_test.go:110 TestParameterManagerLifecycle"
         ]
       },
       {
         "method": "google.cloud.parametermanager.v1.ParameterManager/DeleteTemplate",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/parametermanager2063_test.go:33 TestParameterManagerTemplates"
+        ]
       },
       {
         "method": "google.cloud.parametermanager.v1.ParameterManager/DeleteTemplateVersion",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/parametermanager2063_test.go:33 TestParameterManagerTemplates"
+        ]
       },
       {
         "method": "google.cloud.parametermanager.v1.ParameterManager/GetParameter",
         "status": "Verified",
         "tests": [
-          "test/compat/parametermanager_test.go:108 TestParameterManagerLifecycle"
+          "test/compat/parametermanager2063_test.go:197 TestParameterManagerTags",
+          "test/compat/parametermanager_test.go:110 TestParameterManagerLifecycle"
         ]
       },
       {
         "method": "google.cloud.parametermanager.v1.ParameterManager/GetParameterVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/parametermanager_test.go:108 TestParameterManagerLifecycle",
-          "test/compat/parametermanager_test.go:376 TestParameterManagerCMEK"
+          "test/compat/parametermanager_test.go:110 TestParameterManagerLifecycle",
+          "test/compat/parametermanager_test.go:378 TestParameterManagerCMEK"
         ]
       },
       {
         "method": "google.cloud.parametermanager.v1.ParameterManager/GetTemplate",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/parametermanager2063_test.go:33 TestParameterManagerTemplates"
+        ]
       },
       {
         "method": "google.cloud.parametermanager.v1.ParameterManager/GetTemplateVersion",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/parametermanager2063_test.go:33 TestParameterManagerTemplates"
+        ]
       },
       {
         "method": "google.cloud.parametermanager.v1.ParameterManager/ListParameterVersions",
         "status": "Verified",
         "tests": [
-          "test/compat/parametermanager_test.go:108 TestParameterManagerLifecycle"
+          "test/compat/parametermanager_test.go:110 TestParameterManagerLifecycle"
         ]
       },
       {
         "method": "google.cloud.parametermanager.v1.ParameterManager/ListParameters",
         "status": "Verified",
         "tests": [
-          "test/compat/parametermanager_test.go:108 TestParameterManagerLifecycle"
+          "test/compat/parametermanager_test.go:110 TestParameterManagerLifecycle"
         ]
       },
       {
         "method": "google.cloud.parametermanager.v1.ParameterManager/ListTemplateVersions",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/parametermanager2063_test.go:33 TestParameterManagerTemplates"
+        ]
       },
       {
         "method": "google.cloud.parametermanager.v1.ParameterManager/ListTemplates",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/parametermanager2063_test.go:33 TestParameterManagerTemplates"
+        ]
       },
       {
         "method": "google.cloud.parametermanager.v1.ParameterManager/RenderParameterVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/parametermanager_test.go:108 TestParameterManagerLifecycle",
-          "test/compat/parametermanager_test.go:275 TestParameterManagerRenderSecretReference",
-          "test/compat/parametermanager_test.go:439 TestIAMEnforcementParameterManagerRender"
+          "test/compat/parametermanager_test.go:110 TestParameterManagerLifecycle",
+          "test/compat/parametermanager_test.go:277 TestParameterManagerRenderSecretReference",
+          "test/compat/parametermanager_test.go:441 TestIAMEnforcementParameterManagerRender"
         ]
       },
       {
         "method": "google.cloud.parametermanager.v1.ParameterManager/RenderTemplateVersion",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/parametermanager2063_test.go:33 TestParameterManagerTemplates"
+        ]
       },
       {
         "method": "google.cloud.parametermanager.v1.ParameterManager/UpdateParameter",
         "status": "Verified",
         "tests": [
-          "test/compat/parametermanager_test.go:108 TestParameterManagerLifecycle",
-          "test/compat/parametermanager_test.go:376 TestParameterManagerCMEK"
+          "test/compat/parametermanager_test.go:110 TestParameterManagerLifecycle",
+          "test/compat/parametermanager_test.go:378 TestParameterManagerCMEK"
         ]
       },
       {
         "method": "google.cloud.parametermanager.v1.ParameterManager/UpdateParameterVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/parametermanager_test.go:108 TestParameterManagerLifecycle"
+          "test/compat/parametermanager_test.go:110 TestParameterManagerLifecycle"
         ]
       },
       {
         "method": "google.cloud.parametermanager.v1.ParameterManager/UpdateTemplate",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/parametermanager2063_test.go:33 TestParameterManagerTemplates"
+        ]
       },
       {
         "method": "google.cloud.parametermanager.v1.ParameterManager/UpdateTemplateVersion",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/parametermanager2063_test.go:33 TestParameterManagerTemplates"
+        ]
       }
     ]
   },

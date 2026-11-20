@@ -19,7 +19,8 @@ import (
 //
 // "Shared across all applications and IP addresses using that project": a
 // call is charged to the project its resource is in. The metric and limit
-// names are UNVERIFIED (the page gives none): they follow
+// names are UNVERIFIED (docs re-read 2026-11-20:
+// https://docs.cloud.google.com/secret-manager/quotas, which gives none): they follow
 // error_reason.proto's example, "<service>/read_requests" and
 // "ReadRequestsPerMinutePerProject". The Locations mixin is not charged.
 

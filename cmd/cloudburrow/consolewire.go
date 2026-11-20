@@ -23,6 +23,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
 	"github.com/cloudburrow/cloudburrow/internal/modelgarden"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
+	"github.com/cloudburrow/cloudburrow/internal/ratequota"
 	"github.com/cloudburrow/cloudburrow/internal/service/apikeys"
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
 	"github.com/cloudburrow/cloudburrow/internal/service/datatransfer"
@@ -83,6 +84,9 @@ type consoleDeps struct {
 	// requestMetrics are the request counters, which APIs & Services
 	// counts each API's calls from (#1866).
 	requestMetrics *metrics.Registry
+	// requestQuotas are the request quotas (#2063), which an API's Quotas
+	// & System Limits tab lists and edits.
+	requestQuotas *ratequota.Limiter
 	// backupdr is the Backup and DR Service (#1433), nil unless enabled.
 	backupdr *backupdr.Server
 	// privateCA is Certificate Authority Service (#1834), nil unless enabled.
@@ -325,7 +329,8 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	}
 	// Parameter Manager (#2054), in process, under Secret Manager.
 	if enabled[config.ServiceParameterManager] && d.parameterManager != nil {
-		providers = append(providers, parameterManagerProvider{svc: d.parameterManager})
+		providers = append(providers, parameterManagerProvider{svc: d.parameterManager},
+			parameterTemplatesProvider{svc: d.parameterManager})
 	}
 	// Workflows (#1986), in process.
 	if enabled[config.ServiceWorkflows] && d.workflows != nil {
@@ -370,7 +375,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	}
 	// APIs & Services (#1352): always served, as projects are.
 	if d.serviceUsage != nil {
-		providers = append(providers, serviceUsageProvider{api: d.serviceUsage, metrics: d.requestMetrics, apiKeys: d.apiKeys}, serviceUsageOperationsProvider{api: d.serviceUsage})
+		providers = append(providers, serviceUsageProvider{api: d.serviceUsage, metrics: d.requestMetrics, apiKeys: d.apiKeys, quotas: d.requestQuotas}, serviceUsageOperationsProvider{api: d.serviceUsage})
 	}
 	// Backup and DR (#1433), in process, restoring through Cloud SQL.
 	if enabled[config.ServiceBackupDR] && d.backupdr != nil {

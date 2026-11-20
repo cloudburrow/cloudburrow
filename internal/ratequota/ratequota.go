@@ -9,7 +9,8 @@
 // and a google.rpc.Help link to the console's Quotas page. The ErrorInfo's
 // shape is error_reason.proto's own RATE_LIMIT_EXCEEDED example; the
 // message is the text Google's front end answers every API's rate quota
-// with (UNVERIFIED for a given API: its quotas page gives none).
+// with (UNVERIFIED (docs re-read 2026-11-20:
+// https://docs.cloud.google.com/secret-manager/quotas): the page gives none).
 //
 // The minute is the calendar minute, as Google's per-minute quotas refill.
 //

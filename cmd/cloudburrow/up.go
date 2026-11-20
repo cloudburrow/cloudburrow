@@ -1104,6 +1104,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		serviceUsage:     serviceUsageSrv,
 		apiKeys:          apiKeysSrv,
 		requestMetrics:   requestMetrics,
+		requestQuotas:    requestQuotas,
 		backupdr:         backupDRSrv,
 		sqlAdmin:         sqlAdminSrv,
 		privateCA:        privateCASvc,

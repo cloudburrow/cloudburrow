@@ -34,6 +34,7 @@ func TestAdminRoutesRequireTheToken(t *testing.T) {
 		{"POST", "/admin/reset"}, {"POST", "/admin/seed"}, {"GET", "/admin/events"},
 		{"POST", "/admin/state/export"}, {"POST", "/admin/state/import"},
 		{"POST", "/admin/faults"}, {"GET", "/admin/faults"}, {"DELETE", "/admin/faults"},
+		{"GET", "/admin/quotas"}, {"PUT", "/admin/quotas"}, {"DELETE", "/admin/quotas"},
 	} {
 		if code := do(c.method, c.path, ""); code != http.StatusUnauthorized {
 			t.Errorf("%s %s without a token = %d, want 401", c.method, c.path, code)

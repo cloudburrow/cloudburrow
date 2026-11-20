@@ -10,6 +10,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
+	"github.com/cloudburrow/cloudburrow/internal/ratequota"
 	"github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
 )
 
@@ -25,6 +26,9 @@ type serviceUsageProvider struct {
 	// apiKeys is the API Keys API (#1915), whose keys the Credentials page
 	// lists and edits; nil says it is not served.
 	apiKeys *apikeys.Server
+	// quotas are the request quotas (#2063) the Quotas & System Limits
+	// tab lists and edits for the project; nil lists none.
+	quotas *ratequota.Limiter
 }
 
 func (serviceUsageProvider) ID() string    { return "serviceusage" }

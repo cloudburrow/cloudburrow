@@ -31,7 +31,8 @@ package parametermanager
 //   - a disabled template version is metadata only: its payload is never
 //     returned (the proto's TemplateVersion.disabled).
 //
-// Not documented, and decided here (UNVERIFIED): a variable the parameter
+// Not documented, and decided here (UNVERIFIED (docs re-read 2026-11-20:
+// https://docs.cloud.google.com/secret-manager/parameter-manager/docs/render-parameter-template-version)): a variable the parameter
 // version lacks fails the render INVALID_ARGUMENT naming it; the parameter
 // version must be in the template's project and location; a template with
 // versions cannot be deleted, as a parameter with versions cannot.
