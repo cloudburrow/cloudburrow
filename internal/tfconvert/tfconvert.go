@@ -23,8 +23,9 @@ type Refusal struct {
 	// Kind is "format" (not a SavedModel), "signature" (no
 	// serving_default), "flex" (needs TensorFlow ops TensorFlow Lite's
 	// builtins lack), "ragged" (a RaggedTensor input, output or
-	// tf.train.Example feature), "sparse" (a SparseTensor input or
-	// VarLenFeature, which CloudBurrow cannot feed), "convert" (any other
+	// tf.train.Example feature), "sparse" (a SparseTensor of rank other
+	// than 2 or a SparseTensor output, which no column fills; rank-2
+	// SparseTensor inputs and VarLenFeatures convert), "convert" (any other
 	// converter failure), "limit"
 	// (too large) or "unavailable" (no docker, or the image would not
 	// build).

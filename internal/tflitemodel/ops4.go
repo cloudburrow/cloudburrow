@@ -57,7 +57,7 @@ func listOutput(code int32) bool {
 	switch code {
 	case opNonMaxSuppressionV4, opNonMaxSuppressionV5, opBidirectionalSequenceLSTM, opBidirectionalSequenceRNN,
 		opCallOnce, opHashtable, opHashtableFind, opHashtableImport, opHashtableSize, opVarHandle, opReadVariable, opAssignVariable,
-		opUnique, opHashtableLookup, opStablehloComposite, opDetectionPostProcess:
+		opUnique, opHashtableLookup, opStablehloComposite, opDetectionPostProcess, opStablehloCase:
 		return true
 	}
 	return false
@@ -87,6 +87,8 @@ func (m *Model) evalList(o op, a []*Tensor, n, depth int, st *runState) ([]*Tens
 			return nil, fmt.Errorf("operator STABLEHLO_COMPOSITE names subgraph %d, which the model does not have", k)
 		}
 		return m.call(k, a, depth, st)
+	case opStablehloCase:
+		return m.stablehloCase(o, a, depth, st)
 	}
 	return m.evalResource(o, a, depth, st) // resource.go
 }
@@ -551,4 +553,42 @@ func rfft2D(o op, x *Tensor, fl []int) (*Tensor, error) {
 		}
 	}
 	return t, nil
+}
+
+// opStablehloCase is schema.fbs's STABLEHLO_CASE (#1775), which
+// TFLiteConverter writes for a stablehlo.case of a SavedModel's
+// XlaCallModule (a jax2tf model).
+const opStablehloCase = 209
+
+func init() { opNames[opStablehloCase] = "STABLEHLO_CASE" }
+
+// stablehloCase runs STABLEHLO_CASE (StablehloCaseOptions:
+// branch_subgraph_indices) as the StableHLO specification defines case:
+// input 0 is the index, a scalar; the branch it names (the last one when
+// it is negative or past the last, "if index < 0 or index >= N, index =
+// N-1") is called with the operator's other inputs, and its outputs are
+// the operator's.
+func (m *Model) stablehloCase(o op, a []*Tensor, depth int, st *runState) ([]*Tensor, error) {
+	var branches []int
+	if o.opts != nil {
+		branches = ints(o.opts, 4)
+	}
+	if len(branches) == 0 {
+		return nil, fmt.Errorf("operator STABLEHLO_CASE has no branches")
+	}
+	if len(a) == 0 || a[0] == nil || a[0].Len() != 1 {
+		return nil, fmt.Errorf("operator STABLEHLO_CASE takes a scalar index")
+	}
+	i := int64(a[0].f(0))
+	if a[0].I != nil {
+		i = a[0].I[0]
+	}
+	if i < 0 || i >= int64(len(branches)) {
+		i = int64(len(branches) - 1)
+	}
+	k := branches[i]
+	if k < 0 || k >= len(m.graphs) {
+		return nil, fmt.Errorf("operator STABLEHLO_CASE names subgraph %d, which the model does not have", k)
+	}
+	return m.call(k, a[1:], depth, st)
 }

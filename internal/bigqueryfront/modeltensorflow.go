@@ -67,17 +67,50 @@ import (
 //     serving_default whose one input is a string tensor of serialized
 //     tf.train.Example protos parsed by ParseExample is converted from the
 //     parse's dense outputs on, so its inputs are the features' names, of
-//     the feature's dtype and shape (deploy/tfconvert/convert.py).
+//     the feature's dtype and shape (deploy/tfconvert/convert.py);
+//   - SparseTensors: "The model input columns can be either dense Tensors
+//     or SparseTensors" and "You can pass SparseTensors as dense arrays
+//     and BigQuery ML automatically converts them into Sparse format",
+//     the type table's "A NULL, the associated BigQuery ML type, or an
+//     ARRAY of the associated BigQuery ML type": a serving_default input
+//     whose TensorInfo is coo_sparse (tf.compat.v1's sparse_placeholder
+//     and predict_signature_def) and a VarLenFeature tf.train.Example
+//     feature are, after the converter, a dense [batch, n] input whose
+//     row's n values become the SparseTensor's values at [0, 0] ..
+//     [0, n-1], of dense shape [batch, n] (or the model's fixed one), as
+//     tf.io.parse_example makes a VarLenFeature's; the model's
+//     cloudburrow_sparse_inputs metadata marks them, and ML.PREDICT takes
+//     a NULL (no values), a value or an ARRAY for them (modeltflite.go).
+//     The sparse operators TensorFlow Lite has no builtin for and a dense
+//     one answers exactly (SparseReduceSum, SparseTensorDenseMatMul and
+//     SparseSegmentSum, Mean and SqrtN, which embedding_lookup_sparse
+//     uses) are rewritten to builtins before converting; any other is
+//     Flex, 501. A SparseTensor of rank other than 2, which one column
+//     cannot fill, and a SparseTensor output are 501;
+//   - a SavedModel's XlaCallModule (jax2tf's, a core TensorFlow op) is
+//     converted as TFLiteConverter lowers its StableHLO, stablehlo.case
+//     to STABLEHLO_CASE, which internal/tflitemodel runs.
 //
 // UNVERIFIED (docs re-read 2026-11-20: bigqueryml-syntax-create-tensorflow), as Google does not say: BigQuery's own error texts (the
 // page names none but the out-of-memory one); a NULL input in place of a
 // tf.train.Example feature's default value (a NULL input is 400, as for
 // any model); what counts as an unreleased TensorFlow (CloudBurrow refuses
 // a tensorflow_version with "dev" or "nightly" in it, as tf-nightly and
-// source builds write); SparseTensor inputs and VarLenFeature
-// tf.train.Example features, which BigQuery supports, are 501 here (the
-// converter's "sparse"); ML.EXPLAIN_PREDICT and other functions the page
-// does not name are 501; each row runs as a batch of one.
+// source builds write); that BigQuery's dense-to-sparse conversion keeps
+// every value of the ARRAY (zeros too) at consecutive indices, as
+// tf.io.parse_example does for a VarLenFeature, and that a NULL is a
+// SparseTensor with no values; a SparseFeature or a SparseTensor of rank
+// other than 2 (501); ML.EXPLAIN_PREDICT, which Google runs on imported
+// TensorFlow models (troubleshoot-queries#tensorflow_worker_oom) but
+// whose attribution method for them no page documents (explain-predict,
+// xai-overview and e2e-journey-import re-read 2026-11-20), and other
+// functions the page does not name are 501; each row runs as a batch of
+// one.
+
+// tensorflowSparseMetadata is the converted model's metadata entry naming
+// its SparseTensor inputs (deploy/tfconvert/convert.py): {name: the dense
+// shape after the batch, -1 where free}.
+const tensorflowSparseMetadata = "cloudburrow_sparse_inputs"
 
 // tfConverter converts a SavedModel's files to TensorFlow Lite: the CLI's
 // converter, *tfconvert.Client.
@@ -197,8 +230,8 @@ func tensorflowRefusal(uri string, err error) (int, string) {
 	case "ragged":
 		return 400, "Failed to load the TensorFlow model " + uri + ": RaggedTensors aren't supported: " + rf.Message
 	case "sparse":
-		return 501, "Not implemented here: the TensorFlow model " + uri + " takes a SparseTensor (" + rf.Message +
-			"), which CloudBurrow's TensorFlow Lite run of imported TensorFlow models cannot feed. Nothing was run."
+		return 501, "Not implemented here: the TensorFlow model " + uri + " has a SparseTensor CloudBurrow cannot map to a column (" + rf.Message +
+			"): CloudBurrow feeds a SparseTensor input of rank 2, [batch, n], from a NULL, a value or an ARRAY. Nothing was run."
 	case "limit":
 		return 400, "The TensorFlow model " + uri + " is too large: models are limited to 450 MB in size"
 	case "flex":
