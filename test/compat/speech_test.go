@@ -80,7 +80,10 @@ func createRecognizer(t *testing.T, h *Harness, c *speech.Client, parent, id str
 func TestSpeechRecognizers(t *testing.T) {
 	h := New(t)
 	g, r := speechClients(t, h)
-	ctx := h.Context()
+	// Several whisper recognitions with local whisper: more than h.Context()'s minute
+	// on a 4-vCPU runner (main run 44709318191 timed out at 60s).
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
 	parent := "projects/" + h.Project() + "/locations/us"
 	wav, err := os.ReadFile("../../internal/speech/testdata/jfk.wav")
 	if err != nil {
