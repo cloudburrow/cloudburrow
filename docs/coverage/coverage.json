@@ -1063,7 +1063,7 @@
         "tests": [
           "test/compat/artifactregistry_formats_test.go:288 TestArtifactRegistryNpmRepository",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
-          "test/compat/artifactregistry_yum_test.go:134 TestArtifactRegistryYumRepodata",
+          "test/compat/artifactregistry_yum_test.go:133 TestArtifactRegistryYumRepodata",
           "test/compat/artifactregistryconfig_test.go:266 TestGcloudArtifactsVPCSCAndVersions"
         ]
       },
@@ -1203,7 +1203,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/artifactregistry_formats_test.go:581 TestArtifactRegistryAptAndYumImports",
-          "test/compat/artifactregistry_yum_test.go:134 TestArtifactRegistryYumRepodata"
+          "test/compat/artifactregistry_yum_test.go:133 TestArtifactRegistryYumRepodata"
         ]
       },
       {
@@ -6249,7 +6249,7 @@
           "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
           "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints",
           "test/compat/modelregistrycli_test.go:96 TestTerraformVertexAIEndpoint",
-          "test/compat/modelregistrypython_test.go:127 TestPythonAIPlatformUploadAndDeploy"
+          "test/compat/modelregistrypython_test.go:124 TestPythonAIPlatformUploadAndDeploy"
         ]
       },
       {
@@ -6260,7 +6260,7 @@
           "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
           "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints",
           "test/compat/modelregistrycli_test.go:96 TestTerraformVertexAIEndpoint",
-          "test/compat/modelregistrypython_test.go:127 TestPythonAIPlatformUploadAndDeploy"
+          "test/compat/modelregistrypython_test.go:124 TestPythonAIPlatformUploadAndDeploy"
         ]
       },
       {
@@ -6270,7 +6270,7 @@
           "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
           "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints",
           "test/compat/modelregistryexport_test.go:58 TestModelRegistryExportsTheImageToArtifactRegistry",
-          "test/compat/modelregistrypython_test.go:127 TestPythonAIPlatformUploadAndDeploy"
+          "test/compat/modelregistrypython_test.go:124 TestPythonAIPlatformUploadAndDeploy"
         ]
       },
       {
@@ -6281,7 +6281,7 @@
           "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
           "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints",
           "test/compat/modelregistrycli_test.go:96 TestTerraformVertexAIEndpoint",
-          "test/compat/modelregistrypython_test.go:127 TestPythonAIPlatformUploadAndDeploy"
+          "test/compat/modelregistrypython_test.go:124 TestPythonAIPlatformUploadAndDeploy"
         ]
       },
       {
@@ -6291,7 +6291,7 @@
           "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels",
           "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
           "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints",
-          "test/compat/modelregistrypython_test.go:127 TestPythonAIPlatformUploadAndDeploy"
+          "test/compat/modelregistrypython_test.go:124 TestPythonAIPlatformUploadAndDeploy"
         ]
       },
       {
@@ -6308,7 +6308,7 @@
           "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels",
           "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
           "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints",
-          "test/compat/modelregistrypython_test.go:127 TestPythonAIPlatformUploadAndDeploy"
+          "test/compat/modelregistrypython_test.go:124 TestPythonAIPlatformUploadAndDeploy"
         ]
       },
       {
@@ -6376,7 +6376,7 @@
           "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels",
           "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
           "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints",
-          "test/compat/modelregistrypython_test.go:127 TestPythonAIPlatformUploadAndDeploy"
+          "test/compat/modelregistrypython_test.go:124 TestPythonAIPlatformUploadAndDeploy"
         ]
       },
       {
@@ -6384,7 +6384,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
-          "test/compat/modelregistrypython_test.go:127 TestPythonAIPlatformUploadAndDeploy"
+          "test/compat/modelregistrypython_test.go:124 TestPythonAIPlatformUploadAndDeploy"
         ]
       },
       {
@@ -6403,7 +6403,7 @@
           "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
           "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints",
           "test/compat/modelregistryexport_test.go:58 TestModelRegistryExportsTheImageToArtifactRegistry",
-          "test/compat/modelregistrypython_test.go:127 TestPythonAIPlatformUploadAndDeploy"
+          "test/compat/modelregistrypython_test.go:124 TestPythonAIPlatformUploadAndDeploy"
         ]
       },
       {
@@ -6447,7 +6447,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
-          "test/compat/modelregistrypython_test.go:127 TestPythonAIPlatformUploadAndDeploy"
+          "test/compat/modelregistrypython_test.go:124 TestPythonAIPlatformUploadAndDeploy"
         ]
       },
       {
@@ -6457,7 +6457,7 @@
           "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels",
           "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
           "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints",
-          "test/compat/modelregistrypython_test.go:127 TestPythonAIPlatformUploadAndDeploy"
+          "test/compat/modelregistrypython_test.go:124 TestPythonAIPlatformUploadAndDeploy"
         ]
       },
       {
@@ -6486,7 +6486,7 @@
           "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
           "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints",
           "test/compat/modelregistryexport_test.go:58 TestModelRegistryExportsTheImageToArtifactRegistry",
-          "test/compat/modelregistrypython_test.go:127 TestPythonAIPlatformUploadAndDeploy"
+          "test/compat/modelregistrypython_test.go:124 TestPythonAIPlatformUploadAndDeploy"
         ]
       },
       {
@@ -6555,7 +6555,7 @@
           "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
           "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints",
           "test/compat/modelregistryexport_test.go:58 TestModelRegistryExportsTheImageToArtifactRegistry",
-          "test/compat/modelregistrypython_test.go:127 TestPythonAIPlatformUploadAndDeploy",
+          "test/compat/modelregistrypython_test.go:124 TestPythonAIPlatformUploadAndDeploy",
           "test/compat/predictiongrpc_test.go:63 TestPredictionClientReachesACustomEndpoint"
         ]
       },

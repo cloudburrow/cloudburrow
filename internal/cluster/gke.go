@@ -245,7 +245,8 @@ func (g *GKE) join(ctx context.Context, kind, image, pool, name string) error {
 }
 
 // joinConfig is kind's JoinConfiguration and KubeletConfiguration for a
-// worker (kind v0.33's), with the pool's GKE node label.
+// worker (kind v0.33's), with the pool's GKE node label, and the
+// control plane's imagePullCredentialsVerificationPolicy (kindconfig.go).
 func joinConfig(kind, name, ip, token, pool string) string {
 	return `apiVersion: kubeadm.k8s.io/v1beta4
 kind: JoinConfiguration
@@ -275,6 +276,7 @@ evictionHard:
   nodefs.inodesFree: 0%
 failSwapOn: false
 imageGCHighThresholdPercent: 100
+imagePullCredentialsVerificationPolicy: NeverVerify
 kind: KubeletConfiguration
 `
 }
