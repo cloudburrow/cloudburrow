@@ -301,6 +301,7 @@ func (s *streamer) final(samples []float32, end int) error {
 	if err != nil || len(segs) == 0 {
 		return err
 	}
+	normalize(segs, s.st.cfg) // final results only: interims are not stable
 	return s.emit(streamEvent{kind: evResult, final: true, offset: samplesDur(end), segs: segs, language: s.language})
 }
 

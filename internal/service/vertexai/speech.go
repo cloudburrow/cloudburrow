@@ -42,11 +42,13 @@ import (
 //     allows) and enableAutomaticPunctuation (whisper punctuates
 //     regardless) are read; profanityFilter, enableSpokenPunctuation,
 //     enableSpokenEmojis, diarizationConfig and SEPARATE_RECOGNITION_PER_CHANNEL
-//     are UNIMPLEMENTED, as are adaptation, transcriptNormalization,
-//     translationConfig and denoiserConfig.
+//     are UNIMPLEMENTED, as are translationConfig and denoiserConfig;
+//     adaptation biases whisper (speechbias.go), and transcriptNormalization
+//     rewrites each final transcript (speechconfig's Normalize, #1799).
 //   - decoding (speech/audio.go): WAV, headerless LINEAR16, MULAW and ALAW,
-//     MP3, AAC in MP4, M4A or MOV, and FLAC (internal/speech/flac.go, #1799);
-//     Opus and AMR are UNIMPLEMENTED.
+//     MP3, AAC in MP4, M4A or MOV, FLAC (internal/speech/flac.go, #1799),
+//     and Opus in Ogg or WebM (internal/speech/opus.go, #1799); AMR and
+//     AMR-WB are UNIMPLEMENTED.
 //   - each whisper segment is one result, its resultEndOffset the segment's
 //     end; metadata.totalBilledDuration is the audio's length rounded up to
 //     a second.
@@ -197,6 +199,7 @@ func (s *Server) transcribeAudioMax(ctx context.Context, name string, config jso
 	if err != nil {
 		return none, nil, cfg, speechError(err)
 	}
+	normalize(res.Segments, cfg)
 	return res, samples, cfg, nil
 }
 
@@ -208,6 +211,17 @@ func (s *Server) transcribeOptions(cfg speechconfig.Config) (speech.Options, err
 		return speech.Options{}, err
 	}
 	return speech.Options{Language: cfg.Language, Words: cfg.Words, Phrases: phrases, Prompt: prompt}, nil
+}
+
+// normalize applies the config's transcriptNormalization to each final
+// segment's transcript (speechconfig's Normalize).
+func normalize(segs []speech.Segment, cfg speechconfig.Config) {
+	if len(cfg.Normalization) == 0 {
+		return
+	}
+	for i := range segs {
+		segs[i].Text = cfg.Normalize(segs[i].Text)
+	}
 }
 
 // decodeError is a speech.Decode error as the API answers it.

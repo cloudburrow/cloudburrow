@@ -50,7 +50,14 @@ func mlRows() []*mlRow {
 // mlQuery reads every row of sql as name -> value.
 func mlQuery(t *testing.T, h *Harness, c *bigquery.Client, sql string) []map[string]bigquery.Value {
 	t.Helper()
-	it, err := c.Query(sql).Read(h.Context())
+	return mlQueryCtx(t, h.Context(), c, sql)
+}
+
+// mlQueryCtx is mlQuery within ctx, for queries that run longer than the
+// harness's minute (local transcription).
+func mlQueryCtx(t *testing.T, ctx context.Context, c *bigquery.Client, sql string) []map[string]bigquery.Value {
+	t.Helper()
+	it, err := c.Query(sql).Read(ctx)
 	if err != nil {
 		t.Fatalf("%s: %v", sql, err)
 	}

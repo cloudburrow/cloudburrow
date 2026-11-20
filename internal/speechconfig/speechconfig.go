@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // Decoding is a config's decoding_config: autoDecodingConfig, or
@@ -36,7 +37,7 @@ type Options struct {
 var Encodings = map[string]bool{
 	"LINEAR16": true, "MULAW": true, "ALAW": true, "MP3": true, "FLAC": true,
 	"MP4_AAC": true, "M4A_AAC": true, "MOV_AAC": true,
-	"AMR": false, "AMR_WB": false, "OGG_OPUS": false, "WEBM_OPUS": false,
+	"AMR": false, "AMR_WB": false, "OGG_OPUS": true, "WEBM_OPUS": true,
 }
 
 // Config is a checked RecognitionConfig.
@@ -54,6 +55,68 @@ type Config struct {
 	// the Speech-to-Text front resolves its phrase sets and custom
 	// classes and biases whisper with them (#1930).
 	Adaptation json.RawMessage
+	// Normalization is transcriptNormalization's entries, applied to
+	// each final transcript in order (Normalize).
+	Normalization []NormalizationEntry
+}
+
+// NormalizationEntry is one TranscriptNormalization.Entry.
+type NormalizationEntry struct {
+	Search        string `json:"search"`
+	Replace       string `json:"replace"`
+	CaseSensitive bool   `json:"caseSensitive"`
+}
+
+// maxNormalization are TranscriptNormalization's documented limits: at
+// most 100 entries, search and replace at most 100 characters each.
+const maxNormalization = 100
+
+// Normalize applies the config's transcriptNormalization to a transcript,
+// as the reference documents it (read 2026-11-20): each entry in turn
+// replaces every occurrence of its search with its replace, matched case
+// sensitively or not, so an earlier entry's replacement can keep a later
+// one from matching ("cat" before "mountain cat").
+//
+// UNVERIFIED (re-read 2026-11-20:
+// https://docs.cloud.google.com/speech-to-text/docs/reference/rest/v2/projects.locations.recognizers#TranscriptNormalization,
+// which does not say): whether a search matches inside a word (here it
+// does, as a plain substring), and that words[] keep the recognised words.
+func (c Config) Normalize(text string) string {
+	for _, e := range c.Normalization {
+		if e.CaseSensitive {
+			text = strings.ReplaceAll(text, e.Search, e.Replace)
+			continue
+		}
+		text = replaceFold(text, e.Search, e.Replace)
+	}
+	return text
+}
+
+// replaceFold replaces every case-insensitive (Unicode simple folding)
+// occurrence of search in text.
+func replaceFold(text, search, replace string) string {
+	if search == "" {
+		return text
+	}
+	var b strings.Builder
+	n := utf8.RuneCountInString(search)
+	for i := 0; i < len(text); {
+		j, k := i, 0
+		for k < n && j < len(text) {
+			_, size := utf8.DecodeRuneInString(text[j:])
+			j += size
+			k++
+		}
+		if k == n && strings.EqualFold(text[i:j], search) {
+			b.WriteString(replace)
+			i = j
+			continue
+		}
+		_, size := utf8.DecodeRuneInString(text[i:])
+		b.WriteString(text[i : i+size])
+		i += size
+	}
+	return b.String()
 }
 
 // Parse reads a RecognitionConfig in JSON (camelCase or snake_case keys)
@@ -69,6 +132,9 @@ func Parse(raw []byte) (c Config, code int, err error) {
 	var rc recognitionConfig
 	_ = json.Unmarshal(norm, &rc)
 	c = Config{Decoding: d, Language: lang, Options: opt, Model: rc.Model}
+	if rc.TranscriptNormalization != nil {
+		c.Normalization = rc.TranscriptNormalization.Entries
+	}
 	if len(rc.Adaptation) > 0 && string(rc.Adaptation) != "null" {
 		c.Adaptation = rc.Adaptation
 	}
@@ -169,9 +235,11 @@ type recognitionConfig struct {
 		MaxAlternatives            int             `json:"maxAlternatives"`
 	} `json:"features"`
 	Adaptation              json.RawMessage `json:"adaptation"`
-	TranscriptNormalization json.RawMessage `json:"transcriptNormalization"`
-	TranslationConfig       json.RawMessage `json:"translationConfig"`
-	DenoiserConfig          json.RawMessage `json:"denoiserConfig"`
+	TranscriptNormalization *struct {
+		Entries []NormalizationEntry `json:"entries"`
+	} `json:"transcriptNormalization"`
+	TranslationConfig json.RawMessage `json:"translationConfig"`
+	DenoiserConfig    json.RawMessage `json:"denoiserConfig"`
 }
 
 // parse reads a RecognitionConfig in JSON (camelCase or
@@ -208,8 +276,8 @@ func parse(raw []byte) (Decoding, string, Options, int, error) {
 		return d, "", opt, 400, errors.New("RecognitionConfig.languageCodes is required: the default recognizer has no language")
 	case len(c.LanguageCodes) > 1:
 		return unimpl("recognising one of several languageCodes")
-	case c.TranscriptNormalization != nil:
-		return unimpl("transcriptNormalization")
+	case c.TranscriptNormalization != nil && len(c.TranscriptNormalization.Entries) > maxNormalization:
+		return d, "", opt, 400, fmt.Errorf("transcriptNormalization has %d entries: at most %d are allowed", len(c.TranscriptNormalization.Entries), maxNormalization)
 	case c.TranslationConfig != nil:
 		return unimpl("translationConfig")
 	case c.DenoiserConfig != nil:
@@ -218,6 +286,18 @@ func parse(raw []byte) (Decoding, string, Options, int, error) {
 		return d, "", opt, 400, errors.New("RecognitionConfig takes one of autoDecodingConfig and explicitDecodingConfig")
 	case c.AutoDecodingConfig == nil && c.ExplicitDecodingConfig == nil:
 		return d, "", opt, 400, errors.New("RecognitionConfig requires autoDecodingConfig or explicitDecodingConfig")
+	}
+	if tn := c.TranscriptNormalization; tn != nil {
+		for i, e := range tn.Entries {
+			switch {
+			case e.Search == "":
+				return d, "", opt, 400, fmt.Errorf("transcriptNormalization.entries[%d].search is empty", i)
+			case utf8.RuneCountInString(e.Search) > maxNormalization:
+				return d, "", opt, 400, fmt.Errorf("transcriptNormalization.entries[%d].search is longer than %d characters", i, maxNormalization)
+			case utf8.RuneCountInString(e.Replace) > maxNormalization:
+				return d, "", opt, 400, fmt.Errorf("transcriptNormalization.entries[%d].replace is longer than %d characters", i, maxNormalization)
+			}
+		}
 	}
 	if f := c.Features; f != nil {
 		switch {
