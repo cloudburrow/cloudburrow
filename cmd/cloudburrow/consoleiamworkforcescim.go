@@ -75,7 +75,7 @@ func (p iamWorkforceIdentityProvider) wfScimSection(ctx context.Context, project
 func wfScimTenantFields() []console.Field {
 	return []console.Field{
 		{Name: "tenantDisplayName", Label: "Display name", Type: "text", Help: "At most 32 characters."},
-		{Name: "tenantId", Label: "SCIM tenant ID", Type: "text", Required: true, Pattern: `^[a-z0-9-]{4,32}$`, DeriveFrom: "tenantDisplayName",
+		{Name: "tenantId", Label: "SCIM tenant ID", Type: "text", Required: true, Pattern: `^[a-z0-9\-]{4,32}$`, DeriveFrom: "tenantDisplayName",
 			Help: "4 to 32 lowercase letters, digits and dashes; the prefix gcp- is Google's. It cannot be changed."},
 		{Name: "tenantDescription", Label: "Description", Type: "text", Help: "At most 256 characters."},
 		{Name: "claimMapping", Label: "Claim mapping", Type: "map", Required: true, Default: "google.subject=user.externalId\ngoogle.group=group.displayName",
@@ -184,7 +184,7 @@ func (p iamWorkforceIdentityProvider) scimActions(path []string) []console.Actio
 	return []console.Action{
 		{ID: "create-token", Label: "Create token", Fields: []console.Field{
 			{Name: "tokenDisplayName", Label: "Display name", Type: "text", Help: "At most 32 characters."},
-			{Name: "tokenId", Label: "Token ID", Type: "text", Required: true, Pattern: `^[a-z][a-z0-9-]{2,30}[a-z0-9]$`, DeriveFrom: "tokenDisplayName",
+			{Name: "tokenId", Label: "Token ID", Type: "text", Required: true, Pattern: `^[a-z][a-z0-9\-]{2,30}[a-z0-9]$`, DeriveFrom: "tokenDisplayName",
 				Help: "4 to 32 lowercase letters, digits and dashes, starting with a letter. The security token is shown once."},
 		}},
 		{ID: "delete-tenant", Label: "Delete", Destructive: true},
