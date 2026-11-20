@@ -208,6 +208,9 @@ type rawFlags struct {
 	gke              int
 	monitoring       int
 	compute          int
+	storageBatch     int
+	storageInsights  int
+	storageTransfer  int
 	onnx             int
 	tfconvert        int
 	firestore        int
@@ -290,6 +293,9 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.IntVar(&r.sqladmin, "port-sqladmin", 0, "Cloud SQL Admin API host port (0 = OS-assigned; default 9020)")
 	fs.IntVar(&r.backupdr, "port-backupdr", 0, "Backup and DR Service API host port (0 = OS-assigned; default 9024)")
 	fs.IntVar(&r.privateca, "port-privateca", 0, "Certificate Authority Service API host port (0 = OS-assigned; default 9028)")
+	fs.IntVar(&r.storageBatch, "port-storagebatchoperations", 0, "Storage Batch Operations API (storagebatchoperations.googleapis.com) host port (0 = OS-assigned; default 9035)")
+	fs.IntVar(&r.storageInsights, "port-storageinsights", 0, "Storage Insights API (storageinsights.googleapis.com) host port (0 = OS-assigned; default 9036)")
+	fs.IntVar(&r.storageTransfer, "port-storagetransfer", 0, "Storage Transfer Service API (storagetransfer.googleapis.com) host port (0 = OS-assigned; default 9037)")
 	fs.IntVar(&r.gke, "port-gke", 0, "Kubernetes Engine API host port (0 = OS-assigned; default 9030)")
 	fs.IntVar(&r.monitoring, "port-monitoring", 0, "Cloud Monitoring API host port (0 = OS-assigned; default 9033)")
 	fs.IntVar(&r.compute, "port-compute", 0, "Compute Engine API (VPC networking) host port (0 = OS-assigned; default 9031)")
@@ -504,6 +510,9 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 		{"PORT_GKE", &cfg.Endpoints.GKE},
 		{"PORT_MONITORING", &cfg.Endpoints.Monitoring},
 		{"PORT_COMPUTE", &cfg.Endpoints.Compute},
+		{"PORT_STORAGEBATCHOPERATIONS", &cfg.Endpoints.StorageBatchOperations},
+		{"PORT_STORAGEINSIGHTS", &cfg.Endpoints.StorageInsights},
+		{"PORT_STORAGETRANSFER", &cfg.Endpoints.StorageTransfer},
 		{"PORT_ONNX", &cfg.Endpoints.ONNX},
 		{"PORT_TFCONVERT", &cfg.Endpoints.TFConvert},
 		{"PORT_FIRESTORE", &cfg.Endpoints.Firestore},
@@ -655,6 +664,9 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 		{"port-gke", raw.gke, &cfg.Endpoints.GKE},
 		{"port-monitoring", raw.monitoring, &cfg.Endpoints.Monitoring},
 		{"port-compute", raw.compute, &cfg.Endpoints.Compute},
+		{"port-storagebatchoperations", raw.storageBatch, &cfg.Endpoints.StorageBatchOperations},
+		{"port-storageinsights", raw.storageInsights, &cfg.Endpoints.StorageInsights},
+		{"port-storagetransfer", raw.storageTransfer, &cfg.Endpoints.StorageTransfer},
 		{"port-onnx", raw.onnx, &cfg.Endpoints.ONNX},
 		{"port-tfconvert", raw.tfconvert, &cfg.Endpoints.TFConvert},
 		{"port-firestore", raw.firestore, &cfg.Endpoints.Firestore},

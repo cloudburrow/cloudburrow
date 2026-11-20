@@ -139,6 +139,12 @@ Flags:
     	Cloud SQL Admin API host port (0 = OS-assigned; default 9020)
   -port-storage int
     	Cloud Storage host port (0 = OS-assigned)
+  -port-storagebatchoperations int
+    	Storage Batch Operations API (storagebatchoperations.googleapis.com) host port (0 = OS-assigned; default 9035)
+  -port-storageinsights int
+    	Storage Insights API (storageinsights.googleapis.com) host port (0 = OS-assigned; default 9036)
+  -port-storagetransfer int
+    	Storage Transfer Service API (storagetransfer.googleapis.com) host port (0 = OS-assigned; default 9037)
   -port-tasks int
     	Cloud Tasks host port (0 = OS-assigned)
   -port-tfconvert int

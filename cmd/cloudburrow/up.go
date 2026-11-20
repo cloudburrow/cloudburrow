@@ -16,6 +16,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
 	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
+	"github.com/cloudburrow/cloudburrow/internal/service/storagejobs"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
@@ -439,6 +440,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	var serviceUsageRef *serviceusage.Server
 	// And the API Keys API (#1915).
 	var apiKeysRef *apikeys.Server
+	// And the Cloud Storage companion APIs (#1957).
+	var storageJobsRef *storageJobs
 	// And the Cloud SQL Admin API and Backup and DR (#1541, #1542).
 	var sqlAdminRef *sqladmin.Server
 	var backupDRRef *backupdr.Server
@@ -470,6 +473,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		registry:     func() *resourcemanager.Registry { return projectRegistry },
 		serviceUsage: func() *serviceusage.Server { return serviceUsageRef },
 		apiKeys:      func() *apikeys.Server { return apiKeysRef },
+		storageJobs:  func() *storageJobs { return storageJobsRef },
 		sqlAdmin:     func() *sqladmin.Server { return sqlAdminRef },
 		backupDR:     func() *backupdr.Server { return backupDRRef },
 		projectStore: func() store.Store {
@@ -661,8 +665,30 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	coord.RegisterConcurrent(tunnels...)
 	// Ready only once Knative is, before anything that could deploy to it.
 	coord.Register(comps.KnativeReady())
+	var storageRequests *storageRequestScraper
 	if f := forwarderFor(forwarders, "storage"); f != nil {
-		coord.Register(newStorageEventScraper(f, recorder, requestMetrics))
+		scraper := newStorageEventScraper(f, recorder, requestMetrics)
+		// Cloud Storage's audit log entries and request activity (#1979):
+		// the registry, Logging and the companions are read at each batch,
+		// as they are set up below.
+		scraper.requests = &storageRequestScraper{tunnel: f, audit: &storageAudit{
+			registry: func() *resourcemanager.Registry { return projectRegistry },
+			write: func(ctx context.Context, entries []*loggingpb.LogEntry) error {
+				if loggingSvc == nil {
+					return nil
+				}
+				_, err := loggingSvc.api.WriteLogEntries(ctx, &loggingpb.WriteLogEntriesRequest{Entries: entries})
+				return err
+			},
+			jobs: func() *storagejobs.Runtime {
+				if storageJobsRef == nil {
+					return nil
+				}
+				return storageJobsRef.rt
+			},
+		}}
+		storageRequests = scraper.requests
+		coord.Register(scraper)
 		coord.Register(newStorageChannelRelay(f, stdout))
 	}
 	for _, svc := range []config.Service{config.ServicePubSub, config.ServiceBigtable,
@@ -773,6 +799,20 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if apiKeysSrv != nil {
 		apiKeysRef = apiKeysSrv
 		coord.Register(apiKeysSrv)
+	}
+
+	// The Cloud Storage companion APIs (#1957): batch operations,
+	// inventory reports and transfers over the instance's buckets.
+	storageJobsSrv := newStorageJobs(cfg, func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") },
+		func() *netfwd.Forwarder { return forwarderFor(forwarders, "pubsub") },
+		func() *netfwd.Forwarder { return forwarderFor(forwarders, "bigquery") }, projects)
+	if storageJobsSrv != nil {
+		storageJobsRef = storageJobsSrv
+		// A snapshot counts the requests up to its time (#1979).
+		storageJobsSrv.rt.UseActivityFlush(storageRequests.Flush)
+		for _, s := range storageJobsSrv.servers() {
+			coord.Register(s)
+		}
 	}
 
 	// The Cloud SQL Admin API (#1301), over whichever database servers run.
@@ -1007,6 +1047,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if a := monitoringSvc.Addr(); a != "" {
 			live["monitoring"] = a
 		}
+		storageJobsSrv.live(live)
 		if backupDRSrv != nil && backupDRSrv.Addr() != "" {
 			live["backupdr"] = backupDRSrv.Addr()
 		}
@@ -1057,6 +1098,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// SQL volumes (#1346): the Auth Proxy a revision runs reaches both.
 		published := map[string]bool{"run": true, "tasks": true, "secretmanager": true, "kms": true,
 			"scheduler": true, "logging": true, "resourcemanager": true, "serviceusage": true, "apikeys": true, "metadata": true,
+			"storagebatchoperations": true, "storageinsights": true, "storagetransfer": true,
 			"sqladmin": true, "cloudsql-connector": true, "onnx": true, "tfconvert": true, "localai": true}
 		if !runEnabled {
 			published = map[string]bool{"resourcemanager": true, "onnx": true, "tfconvert": true, "localai": true}

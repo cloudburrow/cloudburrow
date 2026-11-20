@@ -66,6 +66,16 @@ var DeleteConfirmRules = map[string]DeleteConfirmRule{
 	"iam-labels": {Style: DeleteConfirmClick, Source: "https://docs.cloud.google.com/resource-manager/docs/creating-managing-labels", Verified: true},
 	// "confirm you want to delete the bucket and its contents. Click Delete."
 	"storage": {Style: DeleteConfirmClick, Source: "https://docs.cloud.google.com/storage/docs/deleting-buckets", Verified: true},
+	// UNVERIFIED: no console steps for deleting a batch operations job (docs re-read 2026-11-19)
+	"storage-batch-operations": unverified,
+	// UNVERIFIED: "On the Report configuration details page, click Delete." No dialog described (docs re-read 2026-11-19).
+	"storage-inventory-reports": unverified,
+	// UNVERIFIED: "Select the dataset configuration ... click Delete." No dialog described (docs re-read 2026-11-19).
+	"storage-insights-datasets": unverified,
+	// UNVERIFIED: no console steps for deleting a transfer job read (docs re-read 2026-11-19)
+	"storage-transfer": unverified,
+	// UNVERIFIED: no console steps for deleting an agent pool read (docs re-read 2026-11-19)
+	"storage-transfer-agent-pools": unverified,
 	// "Enter delete and then click Delete."
 	"pubsub": {Style: DeleteConfirmWord, Source: "https://docs.cloud.google.com/pubsub/docs/delete-topic", Verified: true},
 	// UNVERIFIED: "Select the subscription to delete. Click Delete." No dialog described (docs re-read 2026-11-19).

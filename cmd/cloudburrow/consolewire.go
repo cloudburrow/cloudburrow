@@ -195,6 +195,12 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			// Storage Intelligence (#1519): the project's, the
 			// organization's and each folder's configuration.
 			storageIntelligenceProvider{endpoint: storageAddr, registry: d.projects})
+		// The Cloud Storage companion APIs (#1957), served in process beside
+		// Cloud Storage: Batch operations, Inventory reports, and Storage
+		// Transfer Service's Transfer jobs and Agent pools.
+		e := d.cfg.Endpoints
+		providers = append(providers, storageJobsProviders(storageAddr, companionAddr(d.cfg, e.StorageBatchOperations),
+			companionAddr(d.cfg, e.StorageInsights), companionAddr(d.cfg, e.StorageTransfer))...)
 	}
 	if enabled[config.ServicePubSub] && pubsubAddr != "" {
 		// Four screens of one product: topics, every subscription of the

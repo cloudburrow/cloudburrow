@@ -218,13 +218,15 @@ const ROUTES = [
   { path: "/kubernetes/events", service: "events", title: "Events", kind: "Event", navHidden: true, section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine" },
 
   // Cloud Storage is one product. Its menu follows Google's (#1843):
-  // Buckets, Observability, Storage Intelligence's Configuration, Inventory
-  // reports, Transfer data and Settings. Observability, Inventory reports
-  // and Transfer data are other services (Cloud Monitoring, Storage
-  // Insights, Storage Transfer Service) CloudBurrow does not run, so their
-  // pages say so in Google's place. The project's soft-deleted buckets
-  // (#789) are on Buckets through View options, as Google shows them;
-  // /storage/deleted, their page before, leads there.
+  // Buckets, Observability, Storage Intelligence's Configuration and Batch
+  // operations, Inventory reports, Transfer data and Settings. Observability
+  // is Cloud Monitoring's, which CloudBurrow does not run, so its page says so
+  // in Google's place. Batch operations (Storage Batch Operations) and
+  // Inventory reports (Storage Insights) are served in process (#1957);
+  // Transfer data opens Storage Transfer Service's Transfer jobs, as on
+  // Google's console. The project's soft-deleted buckets (#789) are on
+  // Buckets through View options, as Google shows them; /storage/deleted,
+  // their page before, leads there.
   { path: "/storage/browser",  service: "storage",          title: "Buckets", kind: "Bucket",         section: "Storage",
     product: "storage", productTitle: "Cloud Storage" },
   { path: "/storage/observability", screen: "unavailable", icon: "storage", title: "Observability", section: "Storage",
@@ -233,19 +235,27 @@ const ROUTES = [
       "emulate. Each bucket's requests are in Logs Explorer and in the console's Requests page." },
   { path: "/storage/intelligence", service: "storage-intelligence", icon: "storage", title: "Configuration",
     navTitle: "Storage Intelligence", section: "Storage", product: "storage", productTitle: "Cloud Storage" },
-  { path: "/storage/inventory-reports", screen: "unavailable", icon: "storage", title: "Inventory reports", section: "Storage",
-    product: "storage", productTitle: "Cloud Storage",
-    unavailable: "Inventory reports are written by Storage Insights, which CloudBurrow does not run. " +
-      "A bucket's objects can be listed on its Objects tab or with objects.list." },
-  { path: "/storage/transfer", screen: "unavailable", icon: "storage", title: "Transfer data", section: "Storage",
-    product: "storage", productTitle: "Cloud Storage",
-    unavailable: "Transfer data opens Storage Transfer Service, which CloudBurrow does not run. Objects can be " +
-      "copied between buckets with an object's Copy, or uploaded with Upload files and Upload folder." },
+  { path: "/storage/batch-operations", service: "storage-batch-operations", icon: "storage", title: "Batch operations",
+    kind: "Job", section: "Storage", product: "storage", productTitle: "Cloud Storage" },
+  { path: "/storage/inventory-reports", service: "storage-inventory-reports", icon: "storage", title: "Inventory reports",
+    kind: "Inventory report configuration", section: "Storage", product: "storage", productTitle: "Cloud Storage" },
+  { path: "/storage/insights-datasets", service: "storage-insights-datasets", icon: "storage", title: "Insights datasets",
+    kind: "Dataset configuration", section: "Storage", product: "storage", productTitle: "Cloud Storage" },
+  { path: "/storage/transfer", service: "storage-transfer", icon: "storage", title: "Transfer data", section: "Storage", redirect: "/transfer/jobs",
+    product: "storage", productTitle: "Cloud Storage" },
   { path: "/storage/settings", service: "storage-settings", icon: "storage", title: "Settings",        section: "Storage",
     product: "storage", productTitle: "Cloud Storage" },
   { path: "/storage/deleted",  service: "storage-deleted", icon: "storage",  title: "Deleted buckets", kind: "Deleted bucket", section: "Storage",
     navTitle: "Soft-deleted buckets", navHidden: true, redirect: "/storage/browser?view=softdeleted",
     product: "storage", productTitle: "Cloud Storage" },
+
+  // Storage Transfer Service (#1957), Google's Data Transfer pages: Transfer
+  // jobs, with each job's run history, and Agent pools for POSIX file
+  // systems, whose agent is CloudBurrow's own.
+  { path: "/transfer/jobs", service: "storage-transfer", icon: "storage", title: "Transfer jobs", kind: "Transfer job",
+    section: "Storage", product: "transfer", productTitle: "Storage Transfer Service" },
+  { path: "/transfer/agent-pools", service: "storage-transfer-agent-pools", icon: "storage", title: "Agent pools", kind: "Agent pool",
+    section: "Storage", product: "transfer", productTitle: "Storage Transfer Service" },
 
   // Firestore's menu is Google's (#1845): Databases first, then a
   // database's own pages. `tabOf` makes a menu entry a tab of the database

@@ -205,6 +205,13 @@ var terraformEndpoints = []terraformEndpoint{
 	// TestTerraformAPIKeysKey applies one with restrictions, plans clean,
 	// updates it in place and destroys it.
 	{apiKeysService, "apikeys_custom_endpoint", "GOOGLE_APIKEYS_CUSTOM_ENDPOINT", "/v2/", true, ""},
+	// google_storage_transfer_job and google_storage_insights_report_config
+	// (#1957), on their own ports beside Cloud Storage.
+	// TestTerraformStorageTransferJob and
+	// TestTerraformStorageInsightsReportConfig apply, plan clean, update
+	// and destroy them.
+	{storageTransferService, "storage_transfer_custom_endpoint", "GOOGLE_STORAGE_TRANSFER_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	{storageInsightsService, "storage_insights_custom_endpoint", "GOOGLE_STORAGE_INSIGHTS_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	{resourceManagerEndpoint, "resource_manager_custom_endpoint", "GOOGLE_RESOURCE_MANAGER_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	// google_project_iam_custom_role and google_organization_iam_custom_role
 	// (#1743): the IAM API's roles, on the Resource Manager port, in
@@ -293,6 +300,8 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 		config.ServiceMonitoring: cfg.Endpoints.Monitoring,
 		config.ServiceCompute:    cfg.Endpoints.Compute,
 		localAIEndpoint:          cfg.Endpoints.LocalAI,
+		storageTransferService:   cfg.Endpoints.StorageTransfer,
+		storageInsightsService:   cfg.Endpoints.StorageInsights,
 	}
 	enabled := map[config.Service]bool{resourceManagerEndpoint: true, serviceUsageService: true, apiKeysService: true, sqlAdminEndpoint: sqlAdminEnabled(cfg),
 		memorystoreAdminEndpoint: serviceEnabled(cfg, config.ServiceMemorystore)}
@@ -303,6 +312,8 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 	enabled[config.ServicePrivateCA] = privateCAEnabled(cfg)
 	enabled[config.ServiceMonitoring] = monitoringEnabled(cfg)
 	enabled[localAIEndpoint] = serviceEnabled(cfg, config.ServiceRun)
+	enabled[storageTransferService] = storageJobsEnabled(cfg)
+	enabled[storageInsightsService] = storageJobsEnabled(cfg)
 	var set []terraformURL
 	var skipped []config.Service
 	for _, e := range terraformEndpoints {

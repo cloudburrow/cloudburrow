@@ -359,6 +359,14 @@ type Endpoints struct {
 	// enabled it also answers the Kubernetes Engine node pools' instance
 	// group managers, which the GKE port answers without it.
 	Compute int `json:"compute"`
+	// StorageBatchOperations, StorageInsights and StorageTransfer are the
+	// host ports of the Cloud Storage companion APIs (#1957), served in
+	// process over the instance's buckets whenever Cloud Storage is:
+	// storagebatchoperations.googleapis.com, storageinsights.googleapis.com
+	// (inventory reports) and storagetransfer.googleapis.com, JSON each.
+	StorageBatchOperations int `json:"storageBatchOperations"`
+	StorageInsights        int `json:"storageInsights"`
+	StorageTransfer        int `json:"storageTransfer"`
 	// ONNX is the host port of the ONNX runner (#1711), which runs BigQuery
 	// ML's imported ONNX models for the BigQuery front, published to the
 	// cluster through cloudburrow-host. CloudBurrow's own API, not a
@@ -434,6 +442,9 @@ func (e *Endpoints) fields() []endpointField {
 		{"gke", &e.GKE},
 		{"monitoring", &e.Monitoring},
 		{"compute", &e.Compute},
+		{"storagebatchoperations", &e.StorageBatchOperations},
+		{"storageinsights", &e.StorageInsights},
+		{"storagetransfer", &e.StorageTransfer},
 		{"onnx", &e.ONNX},
 		{"tfconvert", &e.TFConvert},
 	}
@@ -839,6 +850,11 @@ func Default() Config {
 			// compute.googleapis.com is its own API, the next free one
 			// after Kubernetes Engine's 9030.
 			Compute: 9031,
+			// The Cloud Storage companion APIs (#1957): 9029-9034 are taken
+			// by branches in flight, so the next three after them.
+			StorageBatchOperations: 9035,
+			StorageInsights:        9036,
+			StorageTransfer:        9037,
 			// OS-assigned. The port is not what enables local AI —
 			// LocalAI.ModelPath is. A configured port with no model binds
 			// nothing, so there is no endpoint answering every request with

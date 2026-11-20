@@ -166,6 +166,8 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		// (internal/service/compute).
 		if strings.HasPrefix(m, "sql.") || strings.HasPrefix(m, "serviceusage.") || strings.HasPrefix(m, "apikeys.") || strings.HasPrefix(m, "backupdr.") ||
 			strings.HasPrefix(m, "cloudidentity.") || strings.HasPrefix(m, "compute.") ||
+			strings.HasPrefix(m, "storagebatchoperations.") ||
+			strings.HasPrefix(m, "storageinsights.") || strings.HasPrefix(m, "storagetransfer.") ||
 			// Workload Identity Federation's (#1941) is
 			// workloadidentity_methods.go's table, its 501s checked over
 			// HTTP by TestWorkloadIdentityUnservedAre501.

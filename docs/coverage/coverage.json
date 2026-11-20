@@ -4954,6 +4954,7 @@
           "test/compat/resourcemanageriam_test.go:276 TestConsoleProjectIAM",
           "test/compat/resourcemanageriam_test.go:70 TestResourceManagerProjectIAM",
           "test/compat/resourcemanageriamconditions1742_test.go:29 TestResourceManagerIAMConditions",
+          "test/compat/storage_audit_test.go:116 TestStorageDataAccessAuditLogs",
           "test/compat/storediam_test.go:517 TestResourceManagerAuditConfigs",
           "test/compat/terraform_batch9_test.go:356 TestTerraformProjectIAMMemberRemove"
         ]
@@ -5976,6 +5977,8 @@
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/loggingviews_test.go:83 TestLoggingViewFiltersAndRetention",
           "test/compat/runlogs_test.go:189 TestGcloudRunLogsRead",
+          "test/compat/storage_audit_test.go:116 TestStorageDataAccessAuditLogs",
+          "test/compat/storage_audit_test.go:198 TestStorageDataAccessAuditLogsOffByDefault",
           "test/compat/taskslogging_test.go:35 TestTasksStackdriverLoggingConfig"
         ]
       },
