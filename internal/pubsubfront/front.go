@@ -227,6 +227,10 @@ type Front struct {
 	// the emulator refuses to store (#949, labels.go), by topic or
 	// subscription name.
 	labels map[string]map[string]string
+	// storagePolicies are the message storage policies UpdateTopic set,
+	// which the emulator refuses to store (#2000, storagepolicy.go), by
+	// topic name.
+	storagePolicies map[string]*pubsubpb.MessageStoragePolicy
 	// iam are the IAM policies set on topics, subscriptions, snapshots and
 	// schemas (iam.go, #1367), by resource name: stored, never enforced.
 	iam map[string]iampolicy.Stored
@@ -313,7 +317,8 @@ func New(upstream string, logf func(format string, args ...any)) (*Front, error)
 		policies: map[string]*pubsubpb.ExpirationPolicy{}, labels: map[string]map[string]string{},
 		iam: map[string]iampolicy.Stored{}, detached: map[string]*pubsubpb.Subscription{},
 		snapshots: map[string]keptSnapshot{}, protoSchemas: map[string]*protoSchema{},
-		topicSchemas: map[string]*pubsubpb.SchemaSettings{}, defs: newDefinitions()}, nil
+		topicSchemas: map[string]*pubsubpb.SchemaSettings{}, defs: newDefinitions(),
+		storagePolicies: map[string]*pubsubpb.MessageStoragePolicy{}}, nil
 }
 
 // Close releases the connection to the emulator.
@@ -512,8 +517,10 @@ func (f *Front) forget(name string) {
 	_, keptLabels := f.labels[name]
 	_, keptSnapshot := f.snapshots[name]
 	_, keptTopicSchema := f.topicSchemas[name]
-	kept = f.dropIAMLocked(name) || kept || keptLabels || keptSnapshot || keptTopicSchema
+	_, keptStorage := f.storagePolicies[name]
+	kept = f.dropIAMLocked(name) || kept || keptLabels || keptSnapshot || keptTopicSchema || keptStorage
 	delete(f.topicSchemas, name)
+	delete(f.storagePolicies, name)
 	delete(f.subs, name)
 	delete(f.policies, name)
 	delete(f.labels, name)
@@ -541,9 +548,11 @@ func (f *Front) dropKept(name string) {
 	f.mu.Lock()
 	_, kept := f.policies[name]
 	_, keptLabels := f.labels[name]
-	kept = f.dropIAMLocked(name) || kept || keptLabels
+	_, keptStorage := f.storagePolicies[name]
+	kept = f.dropIAMLocked(name) || kept || keptLabels || keptStorage
 	delete(f.policies, name)
 	delete(f.labels, name)
+	delete(f.storagePolicies, name)
 	f.mu.Unlock()
 	if kept {
 		f.persist()
@@ -890,6 +899,9 @@ func (f *Front) handleUpdate(ctx context.Context, ss grpc.ServerStream, method s
 	if call.labels != nil {
 		f.setLabels(call.resource, call.labels)
 	}
+	if call.storagePolicy != nil {
+		f.setStoragePolicy(call.resource, call.storagePolicy)
+	}
 	if call.schemaUpdate != nil {
 		call.schemaUpdate.apply(f)
 	}
@@ -962,6 +974,9 @@ type observed struct {
 	policy *pubsubpb.ExpirationPolicy
 	labels map[string]string
 	local  bool
+	// storagePolicy is the message storage policy an UpdateTopic sets
+	// (never nil when it names one, #2000), kept once the rest succeeds.
+	storagePolicy *pubsubpb.MessageStoragePolicy
 	// topicSchema is the binding to a front-kept schema a CreateTopic
 	// names, kept once the emulator creates the topic.
 	topicSchema *pubsubpb.SchemaSettings
@@ -1014,27 +1029,47 @@ func (o *observed) request(fr frame) (frame, error) {
 			return fr, nil
 		}
 		o.resource = r.GetTopic().GetName()
-		if masks(r.GetUpdateMask().GetPaths(), "kms_key_name") {
-			if err := o.f.checkTopicKey(context.Background(), r.GetTopic()); err != nil {
+		paths := r.GetUpdateMask().GetPaths()
+		storage := masks(paths, "message_storage_policy")
+		if masks(paths, "kms_key_name") {
+			t := r.GetTopic()
+			if !storage {
+				// The key is checked against the policy the topic has.
+				t = proto.Clone(t).(*pubsubpb.Topic)
+				t.MessageStoragePolicy = o.f.topicStoragePolicy(o.resource)
+			}
+			if err := o.f.checkTopicKey(context.Background(), t); err != nil {
 				return nil, err
 			}
+		}
+		if storage {
+			if err := o.f.checkStoragePolicyUpdate(o.context(), o.resource, r.GetTopic(), paths); err != nil {
+				return nil, err
+			}
+			o.storagePolicy = updatedStoragePolicy(r.GetTopic().GetMessageStoragePolicy())
 		}
 		plan, err := o.f.planTopicSchemaUpdate(&r)
 		if err != nil {
 			return nil, err
 		}
 		o.schemaUpdate = plan
-		if !masks(r.GetUpdateMask().GetPaths(), "labels") {
+		labels := masks(paths, "labels")
+		if !labels && !storage {
 			if plan != nil {
 				return reencode(&r)
 			}
 			return fr, nil
 		}
-		if err := CheckLabels(r.GetTopic().GetLabels()); err != nil {
-			return nil, err
+		if labels {
+			if err := CheckLabels(r.GetTopic().GetLabels()); err != nil {
+				return nil, err
+			}
+			o.labels = updatedLabels(r.GetTopic().GetLabels())
+			r.UpdateMask.Paths = without(r.GetUpdateMask().GetPaths(), "labels")
 		}
-		o.labels = updatedLabels(r.GetTopic().GetLabels())
-		r.UpdateMask.Paths = without(r.GetUpdateMask().GetPaths(), "labels")
+		if storage {
+			r.UpdateMask.Paths = without(r.GetUpdateMask().GetPaths(), "message_storage_policy")
+		}
 		o.local = len(r.UpdateMask.Paths) == 0
 		return reencode(&r)
 	case publisher + "CreateTopic":
@@ -1045,6 +1080,9 @@ func (o *observed) request(fr frame) (frame, error) {
 			}
 			// A state load restores a topic whose Cloud KMS key has since
 			// been disabled or destroyed as it was saved (StateLoadHeader).
+			if err := checkStoragePolicy(t.GetMessageStoragePolicy()); err != nil {
+				return nil, err
+			}
 			if !stateLoad(o.context()) {
 				if err := o.f.checkTopicKey(context.Background(), &t); err != nil {
 					return nil, err
@@ -1439,6 +1477,7 @@ func (o *observed) topicResponse(fr frame) frame {
 			o.f.setTopicSchema(t.GetName(), o.topicSchema)
 		}
 		changed := o.f.withTopicLabels(&t)
+		changed = o.f.withTopicStoragePolicy(&t) || changed
 		if !o.f.withTopicSchema(&t) && !changed {
 			return fr
 		}
@@ -1453,6 +1492,7 @@ func (o *observed) topicResponse(fr frame) frame {
 		changed := false
 		for _, t := range l.GetTopics() {
 			changed = o.f.withTopicLabels(t) || changed
+			changed = o.f.withTopicStoragePolicy(t) || changed
 			changed = o.f.withTopicSchema(t) || changed
 		}
 		if !changed {

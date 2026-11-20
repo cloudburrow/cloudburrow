@@ -64,7 +64,8 @@
 # (UP_FLAGS) and runs only the enforcement tests (COMPAT_RUN,
 # ^TestIAMEnforcement), which skip on every other shard's instance, as
 # those run with enforcement off (#1879): Cloud Storage, Pub/Sub, Cloud
-# Tasks, Secret Manager, Cloud KMS and Cloud Run (for run.routes.invoke).
+# Tasks, Secret Manager, Cloud KMS, Cloud Run (for run.routes.invoke) and
+# BigQuery (for Pub/Sub's BigQuery subscriptions, #1998).
 
 # A tenth, sqlreplicas, is the sql shard's instance again for the Cloud SQL
 # tests that make replicas, standbys and external primaries
@@ -295,8 +296,10 @@ compat_shard() {
       # IAM enforcement (#1879): every TestIAMEnforcement* test, against
       # an instance that enforces, and nothing else, so the shard is a few
       # minutes; the other suites ran with enforcement off in their shards.
-      SERVICES=storage,pubsub,tasks,secretmanager,kms,run
-      TEST_VARS+=,STORAGE,PUBSUB,TASKS,SECRETS,KMS,RUN,RESOURCEMANAGER,IAM_ENFORCEMENT
+      # BigQuery for the Pub/Sub BigQuery subscriptions' writer roles
+      # (#1998), with the one project its emulator serves.
+      SERVICES=storage,pubsub,tasks,secretmanager,kms,run,bigquery
+      TEST_VARS+=,STORAGE,PUBSUB,TASKS,SECRETS,KMS,RUN,RESOURCEMANAGER,IAM_ENFORCEMENT,BIGQUERY,BIGQUERY_PROJECT
       UP_FLAGS=(--iam-enforcement=on)
       COMPAT_RUN='^TestIAMEnforcement' ;;
     emulators)

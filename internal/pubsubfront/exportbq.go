@@ -217,6 +217,9 @@ func (f *Front) checkBigQueryConfig(ctx context.Context, s *pubsubpb.Subscriptio
 	if err := checkServiceAccount(cfg.GetServiceAccountEmail()); err != nil {
 		return err
 	}
+	if err := f.checkActAs(ctx, s.GetName(), cfg.GetServiceAccountEmail()); err != nil {
+		return err
+	}
 	t, err := parseTable(cfg.GetTable())
 	if err != nil {
 		return err
@@ -250,7 +253,7 @@ func (f *Front) checkBigQueryConfig(ctx context.Context, s *pubsubpb.Subscriptio
 	if err := checkTable(cfg, cols, schema); err != nil {
 		return apierror.InvalidArgument("Incompatible table schema: %s", err.Error())
 	}
-	return nil
+	return f.checkWriterAtCreate(ctx, s)
 }
 
 // runBigQueryExport delivers s until ctx ends.
@@ -277,6 +280,10 @@ func (f *Front) runBigQueryExport(ctx context.Context, s *pubsubpb.Subscription)
 		cols, err := f.exp.tableSchema(ctx, t)
 		if err == nil {
 			err = checkTable(cfg, cols, schema)
+		}
+		if err == nil {
+			// The writing account's roles (#1998, exportiam.go).
+			err = f.checkWriter(ctx, s)
 		}
 		if err == nil && f.enforcesInTransit(s.GetTopic()) {
 			var loc string
