@@ -75,6 +75,18 @@ Cloud SQL restores its Backup and DR backups, as it does at Google:
   (`projects/…/locations/…/backupVaults/…/dataSources/…/backups/…`), instead of
   `restoreBackupContext` (giving both is 400). The target's databases are dropped and the
   backup's loaded, as any restore; the source instance may since have been deleted.
+- **A backup into a new instance (#1922):** the same call on an instance name that does not
+  exist yet (gcloud `sql backups restore BACKUP --restore-instance NEW --region R`; the console's
+  Restore, "Restore to a new instance"). The instance is created with the backup's settings, as
+  Google's "creates a new instance based on the configuration stored in your backup" says,
+  overridden by `restoreInstanceSettings`, and the backup is loaded into it. Refused as Google
+  refuses them: a different major `databaseVersion` (400, "You can't change the instance's major
+  database version"), a `restoreInstanceSettings.name` other than the instance restored to (400),
+  a read replica's fields (400), a backup that does not exist (404), and a
+  `restoreBackupContext` into a missing instance (404). A smaller `dataDiskSizeGb` is raised to
+  the backup's, as Cloud SQL's restore guide says. Terraform's `google_sql_database_instance`
+  with `backupdr_backup` inserts the instance and then restores the backup into it
+  (`TestBackupDRRestoreToANewInstance`).
 - **A point in time into a new instance:** `instances.pointInTimeRestore` (gcloud `sql
   instances point-in-time-restore DATASOURCE TARGET POINT_IN_TIME`) with the data source. The
   request is checked as Google checks it (#1425), the data source is resolved to the instance it
@@ -84,6 +96,35 @@ Cloud SQL restores its Backup and DR backups, as it does at Google:
   recovery window, as for `instances.clone` with `pointInTime`.
 
 Without `--services backupdr`, both answer 501 saying the Backup and DR Service is not served.
+
+## Job logs (#1924)
+
+Each backup and restore job is written to this instance's Cloud Logging (start `logging` beside
+`backupdr`) as Google writes it
+(<https://docs.cloud.google.com/backup-disaster-recovery/docs/monitor-reports/backupvault-backup-recovery-jobs>):
+
+- `backupdr.googleapis.com/bdr_backup_restore_jobs`, on the monitored resource
+  `backupdr.googleapis.com/BackupDRProject` (`resource_container`, `location`): each scheduled
+  and on-demand backup, each restore (`instances.restoreBackup` with `backupdrBackup`) and each
+  point-in-time restore, once RUNNING when it starts and once SUCCESSFUL or FAILED when it ends,
+  with one `jobId`. The `jsonPayload` holds `jobCategory` (`SCHEDULED_BACKUP`,
+  `ON_DEMAND_BACKUP`, `RESTORE`, `PITR`), `jobStatus`, `startTime`, `endTime`, `duration`,
+  `sourceResourceName`, `sourceResourceId`, `sourceResourceLocation`, `resourceType`,
+  `backupRule`, `backupVaultName`, `backupPlanName`, `dataSourceName`, `backupName`,
+  `incrementalBackupSizeGib`, `restoreResourceName`, `recoveryPointTime`, and, when it failed,
+  `errorType`, `errorCode` and `errorMessage` (a backup of a deleted instance is `NOT_FOUND`,
+  code 5). A failed entry's severity is ERROR.
+- `backupdr.googleapis.com/bdr_backup_plan_jobs`, on `backupdr.googleapis.com/BackupPlan`:
+  each backup plan and backup plan association create, update and delete.
+
+The entries go through Cloud Logging's own write path, so a sink routes them to BigQuery. The
+console's **Jobs** page lists the same jobs: backup and restore jobs on its Jobs tab, with
+**Current failures** (per error type, the resources whose last backup job failed), plan and
+association jobs on System Jobs, and Google's time range (1h, 6h, 12h, 24h by default, 7d or
+14d; any other is refused). Google's Reports, Looker Studio over that BigQuery sink, are not
+run. `TestBackupDRJobLogsStoredBytesAndOnDemandRetention` and `TestBackupDRRestoreToANewInstance`
+read the entries through `cloud.google.com/go/logging/logadmin`;
+`TestBackupDRRestoreToANewInstanceAndJobsThroughThePages` drives the Jobs page.
 
 ## What is refused
 
@@ -170,7 +211,9 @@ Assured Workloads**.
 `backups` reach the server through the configuration `gcloud-setup` writes (`TestGcloudBackupDR`),
 and so does `resource-backup-config list` with its `--filter` and `--sort-by`
 (`TestGcloudBackupDRResourceBackupConfigFilter`). gcloud has no command for trials or compliance
-metadata, and the Terraform provider no resource for them.
+metadata, and the Terraform provider no resource for them. gcloud's `backup-dr backups restore`
+has only `compute` and `disk`: a Cloud SQL backup is restored with `gcloud sql backups restore`,
+as Google's guide does (`TestBackupDRRestoreToANewInstance`).
 The Terraform provider's `google_backup_dr_backup_vault`, `google_backup_dr_backup_plan` and
 `google_backup_dr_backup_plan_association` apply, plan clean and destroy through
 `backup_dr_custom_endpoint` (`TestTerraformBackupDR`).
