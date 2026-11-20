@@ -2287,7 +2287,11 @@ function statusIcon(status) {
 //   f.active()        whether anything is filtering
 //   f.clear()         drops every chip and the typed text
 //   f.input           the text box (input.filter)
-function filterBar({ noun, columns, onChange, extra = [] }) {
+//
+// valuesOf(column), when given, is the values a property can take: choosing
+// the property then lists them, and choosing one makes its chip, as Google's
+// "Filter services > Deployment type > Function" does (#1852).
+function filterBar({ noun, columns, onChange, extra = [], valuesOf = null }) {
   let chips = [];
   const input = el("input", {
     class: "filter", type: "search", placeholder: `Filter ${noun}`,
@@ -2306,14 +2310,38 @@ function filterBar({ noun, columns, onChange, extra = [] }) {
     return { column: null, value: text.trim() };
   };
   const closeMenu = () => { menu.hidden = true; input.setAttribute("aria-expanded", "false"); };
+  const addChip = (chip) => {
+    chips.push(chip);
+    input.value = "";
+    drawChips();
+    onChange();
+    announce(`Filter ${chip.column || ""} ${chip.value} added`);
+  };
+  // A property chosen and no value typed yet: the values it has.
+  const valuesMenu = () => {
+    const m = valuesOf && /^([^:]+):\s*$/.exec(input.value);
+    const column = m && columns().find((c) => c.toLowerCase() === m[1].trim().toLowerCase());
+    const values = column ? valuesOf(column) : [];
+    if (!values.length) return false;
+    setChildren(menu,
+      el("li", { class: "filter-menu-title", role: "presentation", text: column }),
+      ...values.map((v) => el("li", { role: "presentation" },
+        el("button", { type: "button", role: "option", class: "filter-menu-item", text: v,
+          onmousedown: (e) => e.preventDefault(),
+          onclick: () => { addChip({ column, value: v }); closeMenu(); input.focus(); } }))));
+    menu.hidden = false;
+    input.setAttribute("aria-expanded", "true");
+    return true;
+  };
   const openMenu = () => {
+    if (valuesMenu()) return;
     if (input.value.trim()) return closeMenu();
     setChildren(menu,
       el("li", { class: "filter-menu-title", role: "presentation", text: "Properties" }),
       ...columns().map((c) => el("li", { role: "presentation" },
         el("button", { type: "button", role: "option", class: "filter-menu-item", text: c,
           onmousedown: (e) => e.preventDefault(),
-          onclick: () => { input.value = `${c}: `; closeMenu(); input.focus(); } }))));
+          onclick: () => { input.value = `${c}: `; closeMenu(); input.focus(); valuesMenu(); } }))));
     menu.hidden = false;
     input.setAttribute("aria-expanded", "true");
   };
@@ -2330,7 +2358,7 @@ function filterBar({ noun, columns, onChange, extra = [] }) {
   input.addEventListener("focus", openMenu);
   input.addEventListener("click", openMenu);
   input.addEventListener("blur", () => setTimeout(closeMenu, 150));
-  input.addEventListener("input", () => { if (input.value.trim()) closeMenu(); else openMenu(); onChange(); });
+  input.addEventListener("input", () => { openMenu(); onChange(); });
   input.addEventListener("keydown", (e) => {
     if (e.key === "Escape") { closeMenu(); return; }
     if (e.key === "ArrowDown" && !menu.hidden) {
@@ -2343,11 +2371,7 @@ function filterBar({ noun, columns, onChange, extra = [] }) {
     e.preventDefault();
     const chip = parse(input.value);
     if (!chip.value) return;
-    chips.push(chip);
-    input.value = "";
-    drawChips();
-    onChange();
-    announce(`Filter ${chip.column || ""} ${chip.value} added`);
+    addChip(chip);
   });
   menu.addEventListener("keydown", (e) => {
     const items = [...menu.querySelectorAll("button")];
@@ -3007,7 +3031,11 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   // location and getting nothing reads as "there are none". A chip names
   // one column (#1842).
   const filterColumns = () => [nameColumn(), ...allDataColumns(), ...(hasStatus() ? ["Status"] : [])];
-  const bar = filterBar({ noun, columns: filterColumns, onChange: () => { page = 0; draw(); } });
+  // A property's values, for the filter's menu (#1852): those the rows
+  // have, as Google's offers Deployment type's Container and Function.
+  const valuesOf = (column) => [...new Set(data.items.map((i) => valueOf(i, column))
+    .filter((v) => v && v !== "—" && v.length <= 40))].sort().slice(0, 20);
+  const bar = filterBar({ noun, columns: filterColumns, onChange: () => { page = 0; draw(); }, valuesOf });
   const matches = (item) => bar.matches((column) => column === null
     ? filterColumns().map((c) => valueOf(item, c))
     : valueOf(item, column));
@@ -5377,10 +5405,13 @@ function openEditForm(route, segments, spec, onDone) {
   const cancel = el("button", { type: "button", class: "secondary", text: "Cancel",
                                 onclick: () => close() });
 
+  const initial = fields.values();
   const submit = async (e) => {
     e.preventDefault();
     error.hidden = true;
     if (submitting || !fields.validate()) return;
+    // Google's View diff & redeploy (#1852): the changes, then Deploy changes.
+    if (spec.review && !(await reviewChanges(spec, initial, fields.values()))) return;
     submitting = true;
     primary.disabled = true;
     const op = recordOperation(`Update ${name}`);
@@ -5413,6 +5444,39 @@ function openEditForm(route, segments, spec, onDone) {
   fields.focusFirst();
 }
 
+// reviewChanges is an edit form's review step (EditForm.Review, #1852):
+// Google's View diff & redeploy shows what the change makes different, and
+// Deploy changes sends it. It resolves true when the change is to be sent,
+// false when the dialog is cancelled, which leaves the form as it was.
+function reviewChanges(spec, before, after) {
+  const label = (name) => ((spec.fields || []).find((f) => f.name === name) || {}).label || name;
+  const shown = (v) => (v === undefined || v === "" ? "—" : String(v));
+  const changed = Object.keys(after).filter((k) => !k.startsWith("tab:") && shown(before[k]) !== shown(after[k]));
+  return new Promise((resolve) => {
+    let answer = false;
+    const { dialog, close } = openModal({ labelledBy: "review-title" });
+    dialog.addEventListener("cb-closed", () => resolve(answer));
+    const deploy = el("button", { type: "button", class: "primary", id: "review-deploy", text: spec.review,
+      onclick: () => { answer = true; close(); } });
+    const cancel = el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() });
+    dialog.append(el("div", { class: "modal-body" },
+      el("h2", { id: "review-title", text: spec.submit || "Review changes" }),
+      changed.length
+        ? el("div", { class: "table-wrap" }, el("table", { class: "table", id: "review-diff" },
+          el("caption", { class: "sr-only", text: "Changes to deploy" }),
+          el("thead", {}, el("tr", {},
+            el("th", { scope: "col", text: "Setting" }), el("th", { scope: "col", text: "Current" }),
+            el("th", { scope: "col", text: "New" }))),
+          el("tbody", {}, ...changed.map((k) => el("tr", {},
+            el("th", { scope: "row", text: label(k) }),
+            el("td", { class: "review-old", text: shown(before[k]) }),
+            el("td", { class: "review-new", text: shown(after[k]) }))))))
+        : el("p", { class: "form-help", id: "review-none", text: "No changes. Deploying creates a new revision with the same configuration." }),
+      el("div", { class: "modal-actions" }, cancel, deploy)));
+    deploy.focus();
+  });
+}
+
 // inlineEditForm is a section's own edit form (Section.Edit, #1864), sent
 // as the page's Edit is, through PATCH /api/resources/{service}.
 function inlineEditForm(route, segments, section, onDone) {
@@ -5423,10 +5487,12 @@ function inlineEditForm(route, segments, section, onDone) {
   const titleId = `inline-edit-${section.id}`;
   const primary = el("button", { type: "submit", class: "primary", id: `${titleId}-save`, text: spec.submit || "Save" });
   let submitting = false;
+  const initial = fields.values();
   const submit = async (e) => {
     e.preventDefault();
     error.hidden = true;
     if (submitting || !fields.validate()) return;
+    if (spec.review && !(await reviewChanges(spec, initial, fields.values()))) return;
     submitting = true;
     primary.disabled = true;
     const op = recordOperation(`Update ${name}`);
@@ -8703,6 +8769,16 @@ async function renderCreatePage(view, route) {
       formFields = (await api(`/api/createform/${target.service}?project=${encodeURIComponent(project)}`)).fields || formFields;
     } catch (err) {
       notify(`The form's choices could not be read for ${project}: ${err.message}`, "error");
+    }
+  }
+  // The copy of a resource (#1852): Google's Services list's Copy opens
+  // the service copy page, the form holding the checked service's settings.
+  if (caps.create.copies && given.get("from")) {
+    try {
+      formFields = (await api(`/api/createform/${target.service}?project=${encodeURIComponent(project)}` +
+        `&from=${encodeURIComponent(given.get("from"))}`)).fields || formFields;
+    } catch (err) {
+      notify(`${given.get("from")} could not be copied: ${err.message}`, "error");
     }
   }
   const fields = buildCreateForm({ ...caps.create, fields: formFields.map((f) =>

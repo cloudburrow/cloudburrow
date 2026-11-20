@@ -274,6 +274,9 @@ func (p runProvider) Edit(ctx context.Context, project string, path []string, va
 	if project == "" {
 		return fmt.Errorf("choose a project before deploying a service")
 	}
+	// A service tab's View diff & redeploy sends that tab's fields only
+	// (#1852): the other tabs' are the service's own, as it holds them now.
+	values = withTabDefaults(values, p.tabDefaults(ctx, project, service))
 
 	form, err := runFormTemplate(values)
 	if err != nil {
