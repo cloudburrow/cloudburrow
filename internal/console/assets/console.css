@@ -365,7 +365,7 @@ input[type="datetime-local"]:focus-within {
    to, the title, and the screen's own controls beside it, as Google's
    console puts "+ Create  Refresh" and "Edit  Delete" on the title's line. */
 .page-title-row { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 16px; min-height: 40px; }
-.page-title-row h1 { margin: 0; }
+.page-title-row h1 { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .page-header-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; flex: 1 1 auto; }
 .page-header-actions:empty { display: none; }
 .page-header-actions .info-toggle { margin-left: auto; }

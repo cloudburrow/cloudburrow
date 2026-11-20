@@ -287,7 +287,7 @@ func (p storageIntelligenceProvider) ListActions(ctx context.Context, project st
 				Options: locOpts, OptionLabels: locLabels, Default: filterNone},
 			{Name: "locations", Label: "Locations", Type: console.GroupFieldType, Section: intelligenceFilters,
 				AddLabel: "Add location", ShowWhen: "locationFilter=" + filterInclude + "|" + filterExclude,
-				Group: []console.Field{{Name: "location", Label: "Location", Type: "text", Pattern: `[a-zA-Z0-9-]+`,
+				Group: []console.Field{{Name: "location", Label: "Location", Type: "text", Pattern: `[a-zA-Z0-9\-]+`,
 					Help: "A Cloud Storage location, such as us-central1, us or eu."}}},
 			{Name: "bucketFilter", Label: "Filter by bucket name", Type: "select", Section: intelligenceFilters,
 				Options: nameOpts, OptionLabels: nameLabels, Default: filterNone},
