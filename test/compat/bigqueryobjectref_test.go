@@ -224,7 +224,9 @@ func TestBigQueryObjectRef(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	before := time.Now()
+	// expiry_time is by the instance's BigQuery clock, which other tests in
+	// the shard move with clock:advance.
+	before := advanceBigQueryClock(t, h, 0)
 	var rt struct {
 		ObjRef struct {
 			URI        string `json:"uri"`
@@ -244,7 +246,7 @@ func TestBigQueryObjectRef(t *testing.T) {
 		t.Fatalf("GET_ACCESS_URL 'r': %s", raw)
 	}
 	exp, err := time.Parse("2006-01-02T15:04:05Z", rt.AccessURLs.ExpiryTime)
-	if err != nil || exp.Before(before.Add(44*time.Minute)) || exp.After(time.Now().Add(46*time.Minute)) {
+	if err != nil || exp.Before(before.Add(44*time.Minute)) || exp.After(advanceBigQueryClock(t, h, 0).Add(46*time.Minute)) {
 		t.Fatalf("expiry_time %q: %v", rt.AccessURLs.ExpiryTime, err)
 	}
 	ru, err := url.Parse(rt.AccessURLs.ReadURL)
