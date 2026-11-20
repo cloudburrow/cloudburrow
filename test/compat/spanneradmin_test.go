@@ -60,6 +60,21 @@ func newSpannerAdmin(t *testing.T, instanceID, dbID string) *spannerAdminFixture
 	}
 }
 
+// spannerEnterprisePlus upgrades the instance name to the Enterprise Plus
+// edition, which geo-partitioning (instance partitions) needs (#1974).
+func spannerEnterprisePlus(t *testing.T, ctx context.Context, ic *instance.InstanceAdminClient, name string) {
+	t.Helper()
+	op, err := ic.UpdateInstance(ctx, &instancepb.UpdateInstanceRequest{
+		Instance:  &instancepb.Instance{Name: name, Edition: instancepb.Instance_ENTERPRISE_PLUS},
+		FieldMask: &fieldmaskpb.FieldMask{Paths: []string{"edition"}}})
+	if err == nil {
+		_, err = op.Wait(ctx)
+	}
+	if err != nil {
+		t.Fatalf("UpdateInstance %s to the Enterprise Plus edition: %v", name, err)
+	}
+}
+
 func (f *spannerAdminFixture) config() string {
 	return fmt.Sprintf("projects/%s/instanceConfigs/emulator-config", f.project)
 }
@@ -139,6 +154,7 @@ func TestSpannerInstancePartitionLifecycle(t *testing.T) {
 	f := newSpannerAdmin(t, "cb-ipart", "ipartdb")
 	ctx := f.ctx
 	name := f.instance + "/instancePartitions/p1"
+	spannerEnterprisePlus(t, ctx, f.inst, f.instance)
 
 	op, err := f.inst.CreateInstancePartition(ctx, &instancepb.CreateInstancePartitionRequest{
 		Parent: f.instance, InstancePartitionId: "p1",

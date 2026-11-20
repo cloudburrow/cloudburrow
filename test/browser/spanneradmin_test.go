@@ -19,7 +19,8 @@ import (
 // TABLE typed into its form is confirmed by typing the database's name back,
 // a wrong name is refused with nothing sent, and once confirmed the console
 // API lists the new table. The instance's page shows the Instance
-// configurations tab with the one in use; Create instance partition there
+// configurations tab with the one in use; once Edit instance has made it
+// Enterprise Plus (#1974), Create instance partition there
 // adds a row to the Instance partitions tab, which opens the partition's
 // page; the row's Delete instance partition, confirmed by its name, removes
 // it, as the console API reads it.
@@ -40,6 +41,13 @@ func TestSpannerSchemaAndPartitionsThroughThePage(t *testing.T) {
 		consoleDo(t, http.MethodPost, "/api/actions/spanner"+q, string(b))
 	})
 	const actions = "/api/actions/spanner"
+	// Geo-partitioning needs the Enterprise Plus edition (#1974): the
+	// instance's Edit instance upgrades it.
+	up, _ := json.Marshal(map[string]any{"Path": []string{inst}, "Action": "editinstance", "Values": map[string]string{
+		"displayName": "Browser partitions", "edition": "Enterprise Plus", "scaling": "Manual allocation", "processingUnits": "1000"}})
+	if code, out := consoleDo(t, http.MethodPost, actions+q, string(up)); code != http.StatusOK {
+		t.Fatalf("upgrade the instance to Enterprise Plus through the console API = %d: %s", code, out)
+	}
 
 	p.navigate("/spanner" + q)
 	p.clickText("#view tbody a", inst)

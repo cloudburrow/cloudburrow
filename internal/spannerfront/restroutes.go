@@ -239,6 +239,14 @@ var routes = []route{
 		req.Name = r.m[1]
 		return s.MoveInstance(ctx, req)
 	}},
+	{http.MethodPost, rx(`(` + pInst + `)/instancePartitions`), func(ctx context.Context, s *Instances, r restReq) (proto.Message, error) {
+		req := &instancepb.CreateInstancePartitionRequest{}
+		if err := r.into(req); err != nil {
+			return nil, err
+		}
+		req.Parent = r.m[1]
+		return s.CreateInstancePartition(ctx, req)
+	}},
 	{http.MethodGet, rx(`(` + pInst + `)/instancePartitions`), func(ctx context.Context, s *Instances, r restReq) (proto.Message, error) {
 		return s.ListInstancePartitions(ctx, &instancepb.ListInstancePartitionsRequest{Parent: r.m[1], PageSize: r.size(), PageToken: r.q.Get("pageToken")})
 	}},

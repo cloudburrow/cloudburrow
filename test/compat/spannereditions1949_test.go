@@ -4,6 +4,7 @@ package compat
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -301,5 +302,79 @@ resource "google_spanner_instance" "i" {
 	m.must("destroy", "-auto-approve", "-input=false", "-no-color")
 	if _, err := f.inst.GetInstance(f.ctx, &instancepb.GetInstanceRequest{Name: name}); status.Code(err) != codes.NotFound {
 		t.Errorf("the instance after destroy = %v, want NotFound", err)
+	}
+}
+
+// TestSpannerInstancePartitionNeedsEnterprisePlus (#1974): geo-partitioning
+// is an Enterprise Plus feature, so CreateInstancePartition on a Standard
+// and on an Enterprise instance is FAILED_PRECONDITION naming it, with no
+// partition made; once the instance is upgraded to Enterprise Plus the
+// partition is created, and a downgrade while it exists is refused.
+//
+// covers: google.spanner.admin.instance.v1.InstanceAdmin/CreateInstancePartition, google.spanner.admin.instance.v1.InstanceAdmin/UpdateInstance, google.spanner.admin.instance.v1.InstanceAdmin/ListInstancePartitions, google.spanner.admin.instance.v1.InstanceAdmin/DeleteInstancePartition
+func TestSpannerInstancePartitionNeedsEnterprisePlus(t *testing.T) {
+	f := newSpannerAdmin(t, "cb-partedition", "parteddb")
+	ctx := f.ctx
+	name := f.instance + "/instancePartitions/p1"
+	create := func() error {
+		op, err := f.inst.CreateInstancePartition(ctx, &instancepb.CreateInstancePartitionRequest{Parent: f.instance, InstancePartitionId: "p1",
+			InstancePartition: &instancepb.InstancePartition{Name: name, Config: f.config(), DisplayName: "partition one",
+				ComputeCapacity: &instancepb.InstancePartition_NodeCount{NodeCount: 1}}})
+		if err != nil {
+			return err
+		}
+		_, err = op.Wait(ctx)
+		return err
+	}
+	edition := func(e instancepb.Instance_Edition) error {
+		op, err := f.inst.UpdateInstance(ctx, &instancepb.UpdateInstanceRequest{Instance: &instancepb.Instance{Name: f.instance, Edition: e},
+			FieldMask: &fieldmaskpb.FieldMask{Paths: []string{"edition"}}})
+		if err != nil {
+			return err
+		}
+		_, err = op.Wait(ctx)
+		return err
+	}
+	partitions := func() int {
+		n := 0
+		it := f.inst.ListInstancePartitions(ctx, &instancepb.ListInstancePartitionsRequest{Parent: f.instance})
+		for {
+			_, err := it.Next()
+			if errors.Is(err, iterator.Done) {
+				return n
+			}
+			if err != nil {
+				t.Fatalf("ListInstancePartitions: %v", err)
+			}
+			n++
+		}
+	}
+	for _, e := range []instancepb.Instance_Edition{instancepb.Instance_STANDARD, instancepb.Instance_ENTERPRISE} {
+		if err := edition(e); err != nil {
+			t.Fatalf("UpdateInstance to %s: %v", e, err)
+		}
+		err := create()
+		want := "CreateInstancePartition: geo-partitioning requires the ENTERPRISE_PLUS edition or higher; the instance is " + e.String() + " edition: upgrade it with UpdateInstance (edition) first."
+		if status.Code(err) != codes.FailedPrecondition || status.Convert(err).Message() != want {
+			t.Errorf("CreateInstancePartition on a %s instance = %v; want FAILED_PRECONDITION %q", e, err, want)
+		}
+		if n := partitions(); n != 0 {
+			t.Fatalf("after the refused create on a %s instance ListInstancePartitions lists %d partitions, want none", e, n)
+		}
+	}
+	if err := edition(instancepb.Instance_ENTERPRISE_PLUS); err != nil {
+		t.Fatalf("UpdateInstance to ENTERPRISE_PLUS: %v", err)
+	}
+	if err := create(); err != nil {
+		t.Fatalf("CreateInstancePartition on an Enterprise Plus instance: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = f.inst.DeleteInstancePartition(context.WithoutCancel(ctx), &instancepb.DeleteInstancePartitionRequest{Name: name})
+	})
+	if n := partitions(); n != 1 {
+		t.Errorf("ListInstancePartitions lists %d partitions after the create, want 1", n)
+	}
+	if err := edition(instancepb.Instance_ENTERPRISE); status.Code(err) != codes.FailedPrecondition || !strings.Contains(status.Convert(err).Message(), "geo-partitioning") {
+		t.Errorf("downgrading to ENTERPRISE with a partition = %v; want FAILED_PRECONDITION naming geo-partitioning", err)
 	}
 }

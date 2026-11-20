@@ -1780,7 +1780,7 @@ var parityRows = []parityRow{
 	{Resource: "Spanner instance partitions", Service: "spanner",
 		Methods: []string{"InstanceAdmin/CreateInstancePartition", "InstanceAdmin/GetInstancePartition", "InstanceAdmin/ListInstancePartitions",
 			"InstanceAdmin/DeleteInstancePartition", "InstanceAdmin/ListInstancePartitionOperations"},
-		Provider: "spanner", Offers: "An instance's Instance partitions tab, whose rows open a partition's page and delete it; Create instance partition (ID, display name, configuration, nodes) on the instance's page; a Partition operations tab listing their long-running operations (#1207)",
+		Provider: "spanner", Offers: "An instance's Instance partitions tab, whose rows open a partition's page and delete it; Create instance partition (ID, display name, configuration, nodes) on the instance's page, refused below the Enterprise Plus edition, which Edit instance sets (#1974); a Partition operations tab listing their long-running operations (#1207)",
 		Tests: []string{"TestConsoleSpannerSchemaConfigurationsAndPartitions", "TestSpannerAdminActionsAreOfferedWhereTheyBelong",
 			"TestSpannerSchemaAndPartitionsThroughThePage"}},
 	{Resource: "Spanner backups and restores", Service: "spanner",
