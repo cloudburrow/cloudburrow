@@ -72,27 +72,25 @@ func DecodeMax(d speechconfig.Decoding, data []byte, maxSeconds int) ([]float32,
 				"MP3, Opus in Ogg or WebM, and AAC in MP4, M4A or MOV")
 		}
 	}
+	switch format {
+	case "WAV", "LINEAR16", "MULAW", "ALAW", "FLAC", "OGG_OPUS", "WEBM_OPUS":
+		// MultiChannelMode's default: "If the audio contains multiple
+		// channels, only the first channel will be transcribed; other
+		// channels will be ignored" (the v2 reference, read 2026-11-20).
+		chans, err := DecodeChannelsMax(d, data, maxSeconds)
+		if err != nil {
+			return nil, err
+		}
+		if len(chans[0]) > maxSeconds*SampleRate {
+			return nil, ErrTooLong
+		}
+		return chans[0], nil
+	}
 	var (
 		mono []float32
 		err  error
 	)
 	switch format {
-	case "WAV":
-		mono, err = embedding.DecodeWAVSpeech(data)
-	case "LINEAR16", "MULAW", "ALAW":
-		if sniff(data) == "WAV" {
-			// A WAV file sent with an explicit encoding: its header
-			// is read, as the service reads it.
-			mono, err = embedding.DecodeWAVSpeech(data)
-			break
-		}
-		mono, err = headerless(format, d.SampleRate, d.Channels, data)
-	case "FLAC":
-		mono, err = DecodeFLAC(data) // flac.go, #1799
-	case "OGG_OPUS":
-		mono, err = DecodeOggOpus(data, maxSeconds) // opus.go, #1799
-	case "WEBM_OPUS":
-		mono, err = DecodeWebMOpus(data, maxSeconds)
 	case "MP3":
 		mono, err = embedding.DecodeAudio("audio/mpeg", data)
 	case "MP4_AAC", "M4A_AAC", "MOV_AAC":
@@ -120,34 +118,108 @@ func DecodeMax(d speechconfig.Decoding, data []byte, maxSeconds int) ([]float32,
 	return mono, nil
 }
 
-// headerless decodes LINEAR16 (16-bit signed little-endian), MULAW or ALAW
-// samples of channels interleaved channels at rate Hz.
-func headerless(enc string, rate, channels int, b []byte) ([]float32, error) {
-	if rate < 8000 || rate > 48000 {
-		return nil, fmt.Errorf("explicitDecodingConfig.sampleRateHertz %d is out of range: valid values are 8000-48000", rate)
+// DecodeChannelsMax decodes audio as DecodeMax does but keeps each channel
+// apart, for SEPARATE_RECOGNITION_PER_CHANNEL (#1799): each channel's
+// samples at SampleRate. WAV, headerless LINEAR16, MULAW and ALAW, FLAC
+// and Opus in Ogg or WebM are read per channel; MP3 and AAC, whose
+// decoders here mix to mono, are ErrUnsupported.
+func DecodeChannelsMax(d speechconfig.Decoding, data []byte, maxSeconds int) ([][]float32, error) {
+	if len(data) == 0 {
+		return nil, errors.New("the audio is empty")
 	}
-	if channels == 0 {
+	format := d.Encoding
+	if d.Auto || (format == "LINEAR16" || format == "MULAW" || format == "ALAW") && sniff(data) == "WAV" {
+		if format = sniff(data); format == "" {
+			_, err := DecodeMax(d, data, maxSeconds) // DecodeMax's error
+			return nil, err
+		}
+	}
+	var (
+		pcm            []float32
+		channels, rate int
+		err            error
+	)
+	switch format {
+	case "WAV":
+		pcm, channels, rate, err = embedding.DecodeWAVChannels(data)
+	case "LINEAR16", "MULAW", "ALAW":
+		pcm, channels, rate, err = headerlessChannels(format, d.SampleRate, d.Channels, data)
+	case "FLAC":
+		pcm, channels, rate, err = embedding.DecodeFLACChannels(data, maxSeconds)
+		if embedding.IsTooLong(err) {
+			return nil, ErrTooLong
+		}
+	case "OGG_OPUS", "WEBM_OPUS":
+		var p *opusPCM
+		if format == "OGG_OPUS" {
+			p, err = oggOpusPCM(data, maxSeconds)
+		} else {
+			p, err = webmOpusPCM(data, maxSeconds)
+		}
+		if err == nil {
+			pcm, channels, rate = p.pcm, p.h.channels, opusRate
+		}
+	case "MP3", "MP4_AAC", "M4A_AAC", "MOV_AAC":
+		return nil, fmt.Errorf("%w: recognising each channel of %s audio: CloudBurrow's MP3 and AAC decoders mix to mono "+
+			"(WAV, headerless audio, FLAC and Opus are read per channel)", ErrUnsupported, format)
+	default:
+		return nil, unsupported(format)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if channels < 1 {
 		channels = 1
 	}
-	if channels < 1 || channels > 8 {
-		return nil, fmt.Errorf("explicitDecodingConfig.audioChannelCount %d is out of range: at most 8", channels)
+	n := len(pcm) / channels
+	if n > maxSeconds*rate {
+		return nil, ErrTooLong
 	}
+	out := make([][]float32, channels)
+	for c := range out {
+		ch := make([]float32, n)
+		for i := range ch {
+			ch[i] = pcm[i*channels+c]
+		}
+		out[c] = embedding.Resample(ch, rate, SampleRate)
+	}
+	return out, nil
+}
+
+// headerlessSamples are headerless LINEAR16 (16-bit signed
+// little-endian), MULAW or ALAW bytes as samples in [-1, 1].
+func headerlessSamples(enc string, b []byte) []float32 {
 	var s []float32
 	if enc == "LINEAR16" {
 		s = make([]float32, len(b)/2)
 		for i := range s {
 			s[i] = float32(int16(binary.LittleEndian.Uint16(b[2*i:]))) / 32768
 		}
-	} else {
-		s = make([]float32, len(b))
-		for i, c := range b {
-			if enc == "MULAW" {
-				s[i] = embedding.MuLaw(c)
-			} else {
-				s[i] = embedding.ALaw(c)
-			}
+		return s
+	}
+	s = make([]float32, len(b))
+	for i, c := range b {
+		if enc == "MULAW" {
+			s[i] = embedding.MuLaw(c)
+		} else {
+			s[i] = embedding.ALaw(c)
 		}
 	}
-	s = s[:len(s)/channels*channels]
-	return embedding.Resample(embedding.Average(s, channels), rate, SampleRate), nil
+	return s
+}
+
+// headerlessChannels reads headerless audio as headerless does, its
+// channels kept interleaved.
+func headerlessChannels(enc string, rate, channels int, b []byte) ([]float32, int, int, error) {
+	if rate < 8000 || rate > 48000 {
+		return nil, 0, 0, fmt.Errorf("explicitDecodingConfig.sampleRateHertz %d is out of range: valid values are 8000-48000", rate)
+	}
+	if channels == 0 {
+		channels = 1
+	}
+	if channels < 1 || channels > 8 {
+		return nil, 0, 0, fmt.Errorf("explicitDecodingConfig.audioChannelCount %d is out of range: at most 8", channels)
+	}
+	s := headerlessSamples(enc, b)
+	return s[:len(s)/channels*channels], channels, rate, nil
 }

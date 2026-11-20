@@ -23,7 +23,7 @@ func TestDecode(t *testing.T) {
 	if s2, err := Decode(speechconfig.Decoding{Encoding: "LINEAR16", SampleRate: 16000, Channels: 1}, wav); err != nil || len(s2) != len(s) {
 		t.Errorf("WAV as LINEAR16: %d, %v", len(s2), err)
 	}
-	// Headerless stereo LINEAR16 at 8 kHz: averaged and resampled.
+	// Headerless stereo LINEAR16 at 8 kHz: its first channel, resampled.
 	pcm := make([]byte, 8000*2*2)
 	for i := 0; i < 8000; i++ {
 		v := int16(10000 * math.Sin(float64(i)/10))

@@ -105,14 +105,46 @@ func (p *opusPCM) mono() []float32 {
 // DecodeOggOpus decodes Opus in Ogg to mono samples at SampleRate, chained
 // streams one after another.
 func DecodeOggOpus(data []byte, maxSeconds int) ([]float32, error) {
+	links, err := oggOpusLinks(data, maxSeconds)
+	if err != nil {
+		return nil, err
+	}
+	var mono []float32
+	for _, p := range links {
+		mono = append(mono, p.mono()...)
+	}
+	return mono, nil
+}
+
+// oggOpusPCM is an Ogg Opus file's samples at 48 kHz, its channels
+// interleaved; chained streams must have the same channel count.
+func oggOpusPCM(data []byte, maxSeconds int) (*opusPCM, error) {
+	links, err := oggOpusLinks(data, maxSeconds)
+	if err != nil {
+		return nil, err
+	}
+	p := links[0]
+	for _, l := range links[1:] {
+		if l.h.channels != p.h.channels {
+			return nil, fmt.Errorf("%w: recognising each channel of chained Ogg Opus streams of %d and %d channels",
+				ErrUnsupported, p.h.channels, l.h.channels)
+		}
+		p.pcm = append(p.pcm, l.pcm...)
+	}
+	return p, nil
+}
+
+// oggOpusLinks decodes each chained stream of an Ogg Opus file.
+func oggOpusLinks(data []byte, maxSeconds int) ([]*opusPCM, error) {
 	r, err := oggopus.NewReader(bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("the Ogg Opus stream: %v", err)
 	}
 	var (
-		mono []float32
-		p    *opusPCM
-		link = -1
+		links []*opusPCM
+		p     *opusPCM
+		link  = -1
+		total int
 	)
 	for {
 		pk, err := r.NextPacket()
@@ -124,12 +156,14 @@ func DecodeOggOpus(data []byte, maxSeconds int) ([]float32, error) {
 		}
 		if pk.LinkIndex != link {
 			if p != nil {
-				mono = append(mono, p.mono()...)
+				total += len(p.pcm) / p.h.channels
 			}
 			link = pk.LinkIndex
 			if p, err = newOpusPCM(headOf(r.Head), maxSeconds); err != nil {
 				return nil, err
 			}
+			p.max -= total
+			links = append(links, p)
 		}
 		if _, err := p.add(pk.Data, pk.DiscardStart, pk.DiscardEnd); err != nil {
 			if errors.Is(err, ErrTooLong) {
@@ -138,10 +172,10 @@ func DecodeOggOpus(data []byte, maxSeconds int) ([]float32, error) {
 			return nil, fmt.Errorf("the Ogg Opus stream's packet: %v", err)
 		}
 	}
-	if p == nil {
+	if len(links) == 0 {
 		return nil, errors.New("the Ogg Opus stream has no audio")
 	}
-	return append(mono, p.mono()...), nil
+	return links, nil
 }
 
 // Matroska element IDs (https://www.matroska.org/technical/elements.html)
@@ -316,6 +350,16 @@ func mkvElement(b []byte) (id uint64, body, rest []byte, master bool, err error)
 // SimpleBlock's or BlockGroup's frames are decoded in file order, a
 // BlockGroup's DiscardPadding trimming its last frame.
 func DecodeWebMOpus(data []byte, maxSeconds int) ([]float32, error) {
+	p, err := webmOpusPCM(data, maxSeconds)
+	if err != nil {
+		return nil, err
+	}
+	return p.mono(), nil
+}
+
+// webmOpusPCM is a WebM file's Opus samples at 48 kHz, its channels
+// interleaved.
+func webmOpusPCM(data []byte, maxSeconds int) (*opusPCM, error) {
 	var (
 		tracks  []*mkvTrack
 		cur     *mkvTrack
@@ -461,5 +505,5 @@ func DecodeWebMOpus(data []byte, maxSeconds int) ([]float32, error) {
 			return nil, err
 		}
 	}
-	return p.mono(), nil
+	return p, nil
 }

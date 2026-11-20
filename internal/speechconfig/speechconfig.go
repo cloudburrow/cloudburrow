@@ -30,6 +30,10 @@ type Options struct {
 	// Words asks for word offsets or confidences (WordOffsets,
 	// WordConfidence).
 	Words, WordOffsets, WordConfidence bool
+	// PerChannel is features.multiChannelMode
+	// SEPARATE_RECOGNITION_PER_CHANNEL: each channel is transcribed on
+	// its own, its results carrying its channelTag.
+	PerChannel bool
 }
 
 // Encodings are ExplicitDecodingConfig's AudioEncoding values, true for
@@ -309,14 +313,13 @@ func parse(raw []byte) (Decoding, string, Options, int, error) {
 			return unimpl("features.enableSpokenEmojis")
 		case f.DiarizationConfig != nil:
 			return unimpl("features.diarizationConfig")
-		case f.MultiChannelMode == "SEPARATE_RECOGNITION_PER_CHANNEL":
-			return unimpl("features.multiChannelMode SEPARATE_RECOGNITION_PER_CHANNEL")
-		case f.MultiChannelMode != "" && f.MultiChannelMode != "MULTI_CHANNEL_MODE_UNSPECIFIED":
+		case f.MultiChannelMode != "" && f.MultiChannelMode != "MULTI_CHANNEL_MODE_UNSPECIFIED" && f.MultiChannelMode != "SEPARATE_RECOGNITION_PER_CHANNEL":
 			return d, "", opt, 400, fmt.Errorf("invalid features.multiChannelMode %q", f.MultiChannelMode)
 		case f.MaxAlternatives < 0 || f.MaxAlternatives > 30:
 			return d, "", opt, 400, fmt.Errorf("features.maxAlternatives %d is out of range: valid values are 0-30", f.MaxAlternatives)
 		}
-		opt = Options{Words: f.EnableWordTimeOffsets || f.EnableWordConfidence, WordOffsets: f.EnableWordTimeOffsets, WordConfidence: f.EnableWordConfidence}
+		opt = Options{Words: f.EnableWordTimeOffsets || f.EnableWordConfidence, WordOffsets: f.EnableWordTimeOffsets, WordConfidence: f.EnableWordConfidence,
+			PerChannel: f.MultiChannelMode == "SEPARATE_RECOGNITION_PER_CHANNEL"}
 	}
 	if e := c.ExplicitDecodingConfig; e != nil {
 		served, known := Encodings[e.Encoding]

@@ -250,3 +250,92 @@ func TestMKVLacing(t *testing.T) {
 		}
 	}
 }
+
+// stereoWAV writes two channels as a 16-bit stereo WAV at SampleRate, the
+// shorter padded with silence.
+func stereoWAV(left, right []float32) []byte {
+	n := max(len(left), len(right))
+	var b bytes.Buffer
+	b.WriteString("RIFF")
+	_ = binary.Write(&b, binary.LittleEndian, uint32(36+4*n))
+	b.WriteString("WAVEfmt ")
+	for _, v := range []any{uint32(16), uint16(1), uint16(2), uint32(SampleRate), uint32(4 * SampleRate), uint16(4), uint16(16)} {
+		_ = binary.Write(&b, binary.LittleEndian, v)
+	}
+	b.WriteString("data")
+	_ = binary.Write(&b, binary.LittleEndian, uint32(4*n))
+	at := func(s []float32, i int) int16 {
+		if i >= len(s) {
+			return 0
+		}
+		return int16(max(-32768, min(32767, math.Round(float64(s[i])*32767))))
+	}
+	for i := range n {
+		_ = binary.Write(&b, binary.LittleEndian, []int16{at(left, i), at(right, i)})
+	}
+	return b.Bytes()
+}
+
+// TestDecodeChannels (#1799): per-channel decoding keeps a stereo WAV's
+// channels apart (JFK left, adaptation.wav's speech right), as headerless
+// LINEAR16 too, and the stereo WebM's two copies; MP3 and AAC are
+// refused as ErrUnsupported. Decode, without it, reads the first channel.
+func TestDecodeChannels(t *testing.T) {
+	read := func(name string) []float32 {
+		b, err := os.ReadFile("testdata/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s, err := Decode(speechconfig.Decoding{Auto: true}, b)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	jfk, other := read("jfk.wav"), read("adaptation.wav")
+	wav := stereoWAV(jfk, other)
+	for name, d := range map[string]struct {
+		dec  speechconfig.Decoding
+		data []byte
+	}{
+		"WAV":        {speechconfig.Decoding{Auto: true}, wav},
+		"LINEAR16":   {speechconfig.Decoding{Encoding: "LINEAR16", SampleRate: SampleRate, Channels: 2}, wav[44:]},
+		"WAV as PCM": {speechconfig.Decoding{Encoding: "LINEAR16", SampleRate: 8000, Channels: 1}, wav},
+	} {
+		ch, err := DecodeChannelsMax(d.dec, d.data, MaxSeconds)
+		if err != nil || len(ch) != 2 {
+			t.Fatalf("%s: %d channels, %v", name, len(ch), err)
+		}
+		if r := correlation(jfk, ch[0][:len(jfk)]); r < 0.99 {
+			t.Errorf("%s: left correlation %.3f to JFK", name, r)
+		}
+		if r := correlation(other, ch[1][:len(other)]); r < 0.99 {
+			t.Errorf("%s: right correlation %.3f to adaptation.wav", name, r)
+		}
+	}
+	// Without per-channel recognition only the first channel is read, as
+	// MultiChannelMode's default documents.
+	if s, err := Decode(speechconfig.Decoding{Auto: true}, wav); err != nil || correlation(jfk, s[:len(jfk)]) < 0.99 || correlation(other, s[:len(other)]) > 0.2 {
+		t.Errorf("stereo WAV, default mode: %v", err)
+	}
+	webm, err := os.ReadFile("testdata/jfk-stereo.webm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ch, err := DecodeChannelsMax(speechconfig.Decoding{Auto: true}, webm, MaxSeconds); err != nil || len(ch) != 2 || correlation(jfk, ch[1]) < 0.9 {
+		t.Errorf("WebM: %d channels, %v", len(ch), err)
+	}
+	flac, err := os.ReadFile("testdata/jfk-stereo24.flac")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ch, err := DecodeChannelsMax(speechconfig.Decoding{Auto: true}, flac, MaxSeconds); err != nil || len(ch) != 2 {
+		t.Errorf("stereo FLAC: %d channels, %v", len(ch), err)
+	}
+	if _, err := DecodeChannelsMax(speechconfig.Decoding{Encoding: "MP3"}, []byte("ID3\x04"), MaxSeconds); !errors.Is(err, ErrUnsupported) {
+		t.Errorf("MP3: %v, want ErrUnsupported", err)
+	}
+	if _, err := DecodeChannelsMax(speechconfig.Decoding{Auto: true}, wav, 5); !errors.Is(err, ErrTooLong) {
+		t.Errorf("over 5 s: %v, want ErrTooLong", err)
+	}
+}

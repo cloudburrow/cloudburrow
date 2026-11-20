@@ -4,8 +4,10 @@ package compat
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"testing"
@@ -14,6 +16,8 @@ import (
 	"cloud.google.com/go/bigquery"
 	"cloud.google.com/go/bigquery/connection/apiv1/connectionpb"
 	"cloud.google.com/go/iam"
+
+	"github.com/cloudburrow/cloudburrow/internal/embedding"
 )
 
 // TestBigQueryMLAnnotateImage (#1773): a remote model over a Cloud AI
@@ -305,6 +309,8 @@ func TestBigQueryMLAnnotateImageDetections(t *testing.T) {
 // a text file are their rows' errors. transcript_normalization's entries
 // rewrite the transcripts in order, case-insensitively unless
 // case_sensitive, and an entry over the documented limits is refused.
+// SEPARATE_RECOGNITION_PER_CHANNEL transcribes a stereo WAV's channels
+// (JFK left, other speech right) apart, each result with its channel_tag.
 // A model with SPEECH_RECOGNIZER, a recognizer made with the official
 // cloud.google.com/go/speech client on the local endpoint, transcribes with
 // no recognition_config (the recognizer's chirp and word offsets apply); a
@@ -372,6 +378,7 @@ func TestBigQueryMLTranscribe(t *testing.T) {
 		"audio/jfk.webm":  {"audio/webm", webmOpus},
 		"audio/song.ogg":  {"audio/ogg", []byte("OggS\x00\x02 not really")},
 		"audio/notes.txt": {"text/plain", []byte("not audio at all")},
+		"stereo/call.wav": {"audio/wav", stereoCall(t)},
 	} {
 		w := bh.Object(name).NewWriter(ctx)
 		w.ContentType = o.ct
@@ -394,6 +401,10 @@ func TestBigQueryMLTranscribe(t *testing.T) {
 	if err := run(fmt.Sprintf("CREATE EXTERNAL TABLE `%s.audio` WITH CONNECTION `%s` OPTIONS(object_metadata = 'SIMPLE', uris = ['gs://%s/audio/*'])",
 		ds, conn, bh.BucketName())); err != nil {
 		t.Fatalf("CREATE EXTERNAL TABLE: %v", err)
+	}
+	if err := run(fmt.Sprintf("CREATE EXTERNAL TABLE `%s.stereo` WITH CONNECTION `%s` OPTIONS(object_metadata = 'SIMPLE', uris = ['gs://%s/stereo/*'])",
+		ds, conn, bh.BucketName())); err != nil {
+		t.Fatalf("CREATE EXTERNAL TABLE stereo: %v", err)
 	}
 	if err := run(fmt.Sprintf("CREATE MODEL `%s.refused` REMOTE WITH CONNECTION `%s` OPTIONS(REMOTE_SERVICE_TYPE = 'CLOUD_AI_SPEECH_TO_TEXT_V2', "+
 		"SPEECH_RECOGNIZER = 'projects/%s/locations/us/recognizers/none')", ds, conn, h.Project())); err == nil || !strings.Contains(err.Error(), "doesn't exist") {
@@ -468,6 +479,45 @@ func TestBigQueryMLTranscribe(t *testing.T) {
 	if len(normRows) != 1 || normRows[0]["status"] != "" || normRows[0]["transcripts"] != wantNorm ||
 		strings.Contains(strings.ToLower(fmt.Sprint(normRows[0]["first"])), "country") || !strings.Contains(wantNorm, "nation") {
 		t.Errorf("transcript_normalization: %v, want %q", normRows, wantNorm)
+	}
+
+	// SEPARATE_RECOGNITION_PER_CHANNEL (#1799): JFK on the left channel,
+	// the adaptation sample on the right, each transcribed on its own and
+	// tagged with its channel; the billed duration counts both channels.
+	chRows := mlQueryCtx(t, ctx, c, fmt.Sprintf("SELECT transcripts, ml_transcribe_status AS status, TO_JSON_STRING(ml_transcribe_result) AS result "+
+		`FROM ML.TRANSCRIBE(MODEL `+"`%s.speech`, TABLE `%s.stereo`"+`, recognition_config => (JSON '{"language_codes": ["en-US"], "model": "chirp", `+
+		`"auto_decoding_config": {}, "features": {"multi_channel_mode": "SEPARATE_RECOGNITION_PER_CHANNEL"}}'))`, ds, ds))
+	if len(chRows) != 1 || chRows[0]["status"] != "" {
+		t.Fatalf("per-channel rows: %v", chRows)
+	}
+	var chResult struct {
+		Results []struct {
+			ChannelTag   int `json:"channel_tag"`
+			Alternatives []struct {
+				Transcript string `json:"transcript"`
+			} `json:"alternatives"`
+		} `json:"results"`
+		Metadata struct {
+			TotalBilledDuration struct {
+				Seconds int `json:"seconds"`
+			} `json:"total_billed_duration"`
+		} `json:"metadata"`
+	}
+	if err := json.Unmarshal([]byte(fmt.Sprint(chRows[0]["result"])), &chResult); err != nil {
+		t.Fatalf("per-channel result: %v", err)
+	}
+	byChannel := map[int]string{}
+	for _, r := range chResult.Results {
+		if len(r.Alternatives) > 0 {
+			byChannel[r.ChannelTag] += strings.ToLower(r.Alternatives[0].Transcript) + " "
+		}
+	}
+	if len(byChannel) != 2 || !strings.Contains(byChannel[1], "ask not what your country can do for you") || strings.Contains(byChannel[1], "station") ||
+		!strings.Contains(byChannel[2], "station") || strings.Contains(byChannel[2], "country") || chResult.Metadata.TotalBilledDuration.Seconds != 22 {
+		t.Errorf("per-channel result: channels %v, billed %d s", byChannel, chResult.Metadata.TotalBilledDuration.Seconds)
+	}
+	if text, _ := chRows[0]["transcripts"].(string); !strings.Contains(strings.ToLower(text), "station") || !strings.Contains(strings.ToLower(text), "country") {
+		t.Errorf("per-channel transcripts: %q", text)
 	}
 
 	recRows := mlQueryCtx(t, ctx, c, fmt.Sprintf("SELECT uri, transcripts, ml_transcribe_status AS status, "+
@@ -880,4 +930,48 @@ func TestBigQueryMLUnderstandText(t *testing.T) {
 		!strings.Contains(err.Error(), "ML.UNDERSTAND_TEXT") {
 		t.Errorf("ML.TRANSLATE of the Natural Language model: %v", err)
 	}
+}
+
+// stereoCall is a stereo WAV at 16 kHz: JFK's sample on the left channel,
+// internal/speech's adaptation sample on the right, the shorter padded
+// with silence (#1799, per-channel recognition).
+func stereoCall(t *testing.T) []byte {
+	t.Helper()
+	read := func(name string) []float32 {
+		b, err := os.ReadFile("../../internal/speech/testdata/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s, err := embedding.DecodeWAVSpeech(b)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	left, right := read("jfk.wav"), read("adaptation.wav")
+	n := max(len(left), len(right))
+	b := make([]byte, 44+4*n)
+	copy(b, "RIFF")
+	binary.LittleEndian.PutUint32(b[4:], uint32(36+4*n))
+	copy(b[8:], "WAVEfmt ")
+	binary.LittleEndian.PutUint32(b[16:], 16)
+	binary.LittleEndian.PutUint16(b[20:], 1)
+	binary.LittleEndian.PutUint16(b[22:], 2)
+	binary.LittleEndian.PutUint32(b[24:], 16000)
+	binary.LittleEndian.PutUint32(b[28:], 4*16000)
+	binary.LittleEndian.PutUint16(b[32:], 4)
+	binary.LittleEndian.PutUint16(b[34:], 16)
+	copy(b[36:], "data")
+	binary.LittleEndian.PutUint32(b[40:], uint32(4*n))
+	at := func(s []float32, i int) uint16 {
+		if i >= len(s) {
+			return 0
+		}
+		return uint16(int16(max(-32768, min(32767, math.Round(float64(s[i])*32767)))))
+	}
+	for i := range n {
+		binary.LittleEndian.PutUint16(b[44+4*i:], at(left, i))
+		binary.LittleEndian.PutUint16(b[46+4*i:], at(right, i))
+	}
+	return b
 }

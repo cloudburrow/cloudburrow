@@ -52,6 +52,18 @@ func TestParse(t *testing.T) {
 	}
 }
 
+// TestParsePerChannel (#1799): SEPARATE_RECOGNITION_PER_CHANNEL is read
+// as PerChannel; an unknown mode is 400.
+func TestParsePerChannel(t *testing.T) {
+	c, code, err := Parse([]byte(`{"model": "chirp", "languageCodes": ["en-US"], "autoDecodingConfig": {}, "features": {"multiChannelMode": "SEPARATE_RECOGNITION_PER_CHANNEL"}}`))
+	if code != 0 || err != nil || !c.PerChannel {
+		t.Errorf("SEPARATE_RECOGNITION_PER_CHANNEL: %+v %d %v", c.Options, code, err)
+	}
+	if _, code, _ := Parse([]byte(`{"model": "chirp", "languageCodes": ["en-US"], "autoDecodingConfig": {}, "features": {"multiChannelMode": "BOTH"}}`)); code != 400 {
+		t.Errorf("unknown mode: %d, want 400", code)
+	}
+}
+
 // TestNormalize (#1799): transcriptNormalization's entries apply in order,
 // case-insensitively unless caseSensitive, an earlier one keeping a later
 // one from matching (the reference's "cat" before "mountain cat").
