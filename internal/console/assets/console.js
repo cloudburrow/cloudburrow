@@ -507,7 +507,7 @@ const ROUTES = [
     section: "Security and identity", product: "secrets", productTitle: "Secret Manager",
     unavailable: "Google's Secret Manager settings are the project's own Google Cloud configuration, which Google's documentation does not describe and a local instance does not hold. A secret's replication, encryption, rotation, expiration and destruction delay are set on the secret itself, with Create secret and Edit secret." },
   // Key Management (#1851), in Google's menu order: Key management (the key
-  // rings), Autokey, EKM connections, KMS config, Key inventory; then
+  // rings), Autokey, EKM connections, KMS Controls, Key inventory; then
   // CloudBurrow's Single-tenant HSM, whose instances Google manages with
   // gcloud only.
   { path: "/kms/keyrings", service: "kms", title: "Key management", navTitle: "Key management", kind: "Key ring",
@@ -518,9 +518,10 @@ const ROUTES = [
     product: "kms", productTitle: "Key Management" },
   { path: "/kms/ekm", service: "kms-ekm", icon: "kms", title: "EKM connections", kind: "EKM connection", section: "Security and identity",
     product: "kms", productTitle: "Key Management" },
-  { path: "/kms/config", title: "KMS config", service: null, requires: "kms", screen: "unavailable", icon: "kms",
-    section: "Security and identity", product: "kms", productTitle: "Key Management",
-    unavailable: "KMS config holds a project's and an organization's Cloud KMS settings, such as the default Key Access Justifications policy for new keys, which Google serves through an API CloudBurrow does not run. Autokey's configuration is on the Autokey page, the default EKM connection on EKM connections, and a key's own settings on its page." },
+  // KMS Controls (#2053): the default Key Access Justifications policy of
+  // the project, its folders and its organization.
+  { path: "/kms/config", service: "kms-config", icon: "kms", title: "KMS Controls", kind: "Configuration",
+    section: "Security and identity", product: "kms", productTitle: "Key Management" },
   { path: "/kms/inventory", service: "kms-inventory", icon: "kms", title: "Key inventory", section: "Security and identity",
     product: "kms", productTitle: "Key Management" },
   { path: "/kms/hsm", service: "kms-hsm", icon: "kms", title: "Single-tenant HSM", kind: "Single-tenant HSM instance", section: "Security and identity",
@@ -4149,6 +4150,10 @@ async function renderDetail(view, route, resourcePath) {
   const drawListingSection = (into, section, note, reload) => {
     let list = section.listing || {};
     const noun = list.noun || section.label.toLowerCase();
+    // A tab's own summary cards over its rows: a key's Usage tracking
+    // tab draws its key usage summary over the protected resources (#2053).
+    const cards = listingSummary(list);
+    if (cards.length) note = note ? el("div", {}, note, ...cards) : el("div", {}, ...cards);
     // A workflow execution's Steps (#2004): the visualization panel of
     // the revision that ran, over the step entries' table.
     if (section.graph) {
@@ -4644,8 +4649,11 @@ function openActionForm(route, segments, action, onDone, title = null, host = nu
 
   // A checked box that puts something at risk — Replace the destination —
   // asks first, and wants the thing at risk named back (#790).
-  const risky = (values) => (action.fields || []).find((f) =>
-    f.type === "checkbox" && f.confirm && values[f.name] === "true");
+  // A choice that puts something at risk — Disable autokey — asks too,
+  // with Google's Confirm and nothing typed (#2053).
+  const risky = (values) => (action.fields || []).find((f) => f.confirm &&
+    ((f.type === "checkbox" && !f.confirmValue && values[f.name] === "true") ||
+     (f.confirmValue && values[f.name] === f.confirmValue)));
 
   const submit = async (e) => {
     e.preventDefault();
@@ -4661,7 +4669,7 @@ function openActionForm(route, segments, action, onDone, title = null, host = nu
         // Remove asks "Remove user account?" with nothing typed.
         title: action.confirmTitle || `${action.label}: ${name}?`,
         detail: action.confirm,
-        confirmWord: name,
+        confirmWord: action.confirmWord || name,
         confirmLabel: action.label,
         consequence: "",
         style: action.confirmStyle || "name",
@@ -4673,6 +4681,22 @@ function openActionForm(route, segments, action, onDone, title = null, host = nu
       return;
     }
     const risk = risky(values);
+    if (risk && risk.confirmValue) {
+      // Cancelled, the form stays open with what was chosen.
+      await confirmDestructive({
+        title: risk.confirmTitle || `${action.label}?`,
+        detail: risk.confirm,
+        confirmWord: name,
+        confirmLabel: "Confirm",
+        consequence: "",
+        style: "confirm",
+        onConfirm: async () => {
+          const failure = await perform(values);
+          if (failure) throw failure;
+        },
+      });
+      return;
+    }
     if (risk) {
       const word = (values[risk.confirmWith] || "").trim() || name;
       // Cancelled, the form stays open with what was typed. Refused, the
@@ -9496,7 +9520,7 @@ async function runAction(route, target, action, onDone, row = NO_ROW, title = nu
     // Cloud SQL's "Stop database instance?".
     title: action.confirmTitle || `${action.label} ${name}?`,
     detail: action.confirm || undefined,
-    confirmWord: name,
+    confirmWord: action.confirmWord || name,
     confirmLabel: action.confirm ? (action.submit || action.label) : undefined,
     consequence: action.destructive ? undefined : "",
     // As Google's console confirms this action (#1931): BigQuery's Delete

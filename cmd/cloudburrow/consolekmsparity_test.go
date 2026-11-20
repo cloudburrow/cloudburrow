@@ -44,7 +44,7 @@ func TestConsoleKMSGooglesKeyPages(t *testing.T) {
 	if f := byName["rotationPeriod"]; f.Default != "90d" || f.OptionLabels[""] != "Never (manual rotation)" {
 		t.Errorf("Rotation period starts at %q with Never as %q", f.Default, f.OptionLabels[""])
 	}
-	if f := byName["nextRotationTime"]; f.Default != "2027-02-17T00:00:00Z" {
+	if f := byName["nextRotationTime"]; f.Default != "2027-02-17" || f.Type != "date" {
 		t.Errorf("Starting on starts at %q, want one rotation period on", f.Default)
 	}
 	if f := byName["destroyScheduledDays"]; f.Default != "30" || f.Section != "Additional settings" {
@@ -84,8 +84,8 @@ func TestConsoleKMSGooglesKeyPages(t *testing.T) {
 	for _, s := range d.Sections {
 		tabs = append(tabs, s.ID)
 	}
-	if strings.Join(tabs, ",") != "overview,versions,permissions,logs" {
-		t.Errorf("a key's tabs are %v; want Overview, Versions, Permissions, Logs", tabs)
+	if strings.Join(tabs, ",") != "overview,versions,usage,permissions,logs" {
+		t.Errorf("a key's tabs are %v; want Overview, Versions, Usage tracking, Permissions, Logs", tabs)
 	}
 	ids := kmsActionIDs(p, []string{ring, "sym"})
 	for _, want := range []string{"rotate", "editrotation", "disableversions", "enableversions", "destroyversions", "restoreversions"} {

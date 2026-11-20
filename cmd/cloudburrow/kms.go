@@ -21,6 +21,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/sched"
 	"github.com/cloudburrow/cloudburrow/internal/service/kms"
+	"github.com/cloudburrow/cloudburrow/internal/service/kmsinventory"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 	"github.com/cloudburrow/cloudburrow/internal/telemetry"
@@ -63,6 +64,18 @@ type kmsService struct {
 	// hierarchy is Resource Manager's registry, which Autokey resolves
 	// folder configs through (#1452); nil means project configs only.
 	hierarchy *resourcemanager.Registry
+	// inventory is the Cloud KMS Inventory API (#2053), served on this
+	// port; inventorySources are what it reads usage from.
+	inventory        *kmsinventory.Server
+	inventorySources *kmsInventoryWiring
+}
+
+// Inventory is the Inventory API's key tracking, nil before Start.
+func (s *kmsService) Inventory() kmsinventory.Tracker {
+	if s == nil || s.inventory == nil {
+		return nil
+	}
+	return s.inventory
 }
 
 // useHierarchy makes Autokey see the registry's folders. Call it before
@@ -206,7 +219,26 @@ func (s *kmsService) Start(ctx context.Context) error {
 	// effective state itself.
 	_, _ = s.api.Sweep()
 	// One port for gRPC and JSON, as cloudkms.googleapis.com (#414).
-	var jsonAPI http.Handler = kms.NewRESTHandler(s.api)
+	s.inventory = &kmsinventory.Server{KMS: func() kmsinventory.Keys {
+		if s.api == nil {
+			return nil
+		}
+		return s.api
+	}}
+	if w := s.inventorySources; w != nil {
+		s.inventory.Sources = w.sources
+	}
+	if s.hierarchy != nil {
+		s.inventory.Projects = inventoryProjects{reg: s.hierarchy}
+	}
+	kmsJSON, inventoryJSON := kms.NewRESTHandler(s.api), kmsinventory.NewRESTHandler(s.inventory)
+	var jsonAPI http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if kmsinventory.Owns(r) {
+			inventoryJSON.ServeHTTP(w, r)
+			return
+		}
+		kmsJSON.ServeHTTP(w, r)
+	})
 	if s.wrapJSON != nil {
 		jsonAPI = s.wrapJSON(jsonAPI)
 	}
@@ -214,7 +246,7 @@ func (s *kmsService) Start(ctx context.Context) error {
 		jsonAPI = rest.Observe(jsonAPI, s.requests)
 	}
 	s.server.ServeHTTP(jsonAPI)
-	if err := s.server.Register(func(g *grpc.Server) { s.api.Register(g); s.api.Operations().Register(g) }); err != nil {
+	if err := s.server.Register(func(g *grpc.Server) { s.api.Register(g); s.api.Operations().Register(g); s.inventory.Register(g) }); err != nil {
 		return err
 	}
 	if err := s.server.Start(ctx); err != nil {

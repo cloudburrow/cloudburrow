@@ -37,6 +37,8 @@ var serviceUsageAPIs = []struct {
 	{config.ServiceRun, serviceusage.API{Name: "containerscanning.googleapis.com", Title: "Container Scanning API", Disabled: true}},
 	{config.ServiceSecrets, serviceusage.API{Name: "secretmanager.googleapis.com", Title: "Secret Manager API"}},
 	{config.ServiceKMS, serviceusage.API{Name: "cloudkms.googleapis.com", Title: "Cloud Key Management Service (KMS) API"}},
+	// The Inventory API (#2053), on Cloud KMS's port.
+	{config.ServiceKMS, serviceusage.API{Name: "kmsinventory.googleapis.com", Title: "KMS Inventory API"}},
 	{config.ServiceScheduler, serviceusage.API{Name: "cloudscheduler.googleapis.com", Title: "Cloud Scheduler API"}},
 	{config.ServiceLogging, serviceusage.API{Name: "logging.googleapis.com", Title: "Cloud Logging API"}},
 	{config.ServiceFirestore, serviceusage.API{Name: "firestore.googleapis.com", Title: "Cloud Firestore API"}},

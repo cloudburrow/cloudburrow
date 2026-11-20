@@ -305,13 +305,14 @@ func (p kmsProvider) keyDetail(ctx context.Context, key string) (console.Detail,
 	versions.Note = strings.TrimSpace(versions.Note + " " + kmsProtectionNote +
 		" Key material is never shown: no Cloud KMS method returns it; a public key is, through Get public key.")
 	// Google's key page tabs: Overview (the key's details), Versions,
-	// Permissions and Logs (#1851).
+	// Usage tracking (#2053), Permissions and Logs (#1851).
 	return console.Detail{
 		Edit: kmsKeyEditForm(k),
 		Sections: []console.Section{
 			{ID: "overview", Label: "Overview", Kind: console.KindProperties,
 				Groups: []console.PropertyGroup{{Heading: "Key details", Properties: summary}}},
 			{ID: "versions", Label: "Versions", Listing: versions},
+			p.usageTracking(ctx, k.GetName()),
 			{ID: "permissions", Kind: console.KindPermissions},
 			{ID: "logs", Label: "Logs", Kind: console.KindLogs},
 		},
@@ -325,7 +326,10 @@ func (p kmsProvider) keyDetail(ctx context.Context, key string) (console.Detail,
 func kmsVersionLifecycle(k *kmspb.CryptoKey, v *kmspb.CryptoKeyVersion) []console.Action {
 	// Google's Destroy asks for the key's name, then Schedule Destruction
 	// (https://docs.cloud.google.com/kms/docs/destroy-restore).
+	// A version row's (and page's) Destroy asks for the key's name too, as
+	// the key page's does (#2053), not the version number.
 	destroy := console.Action{ID: "destroy", Label: "Destroy", Destructive: true, Submit: "Schedule Destruction",
+		ConfirmWord:  lastSegment(k.GetName()),
 		ConfirmTitle: "Destroy key version?", Confirm: "The version is scheduled for destruction: it can be restored for " +
 			kmsPeriodWords(k.GetDestroyScheduledDuration().AsDuration()) + ", then its key material is destroyed."}
 	switch v.GetState() {
@@ -398,7 +402,7 @@ func kmsEditRotationAction(k *kmspb.CryptoKey) console.Action {
 	return console.Action{ID: "editrotation", Label: "Edit Rotation Period", Fields: []console.Field{
 		{Name: "rotationPeriod", Label: "Rotation period", Type: "select", Default: cur, Options: opts,
 			OptionLabels: kmsLabelsFor(opts, kmsPeriodLabel), Help: kmsRotationPeriodHelp},
-		{Name: "nextRotationTime", Label: "Starting on", Type: "text", Default: kmsFormatTime(k.GetNextRotationTime()),
+		{Name: "nextRotationTime", Label: "Starting on", Type: "date", Default: kmsFormatDate(k.GetNextRotationTime()),
 			Help: kmsNextRotationHelp + " Never (manual rotation) clears it."},
 	}}
 }
@@ -604,8 +608,8 @@ func kmsCreateKeyFieldsAt(now time.Time) []console.Field {
 		{Name: "rotationPeriod", Label: "Rotation period", Type: "select", Default: kmsFormatPeriod(durationpb.New(kmsDefaultRotation)),
 			Options: kmsRotationPresets, OptionLabels: kmsLabelsFor(kmsRotationPresets, kmsPeriodLabel),
 			Help: "Symmetric keys only: Cloud KMS rotates other keys by hand. " + kmsRotationPeriodHelp},
-		{Name: "nextRotationTime", Label: "Starting on", Type: "text",
-			Default: now.UTC().Add(kmsDefaultRotation).Truncate(time.Second).Format(time.RFC3339),
+		{Name: "nextRotationTime", Label: "Starting on", Type: "date",
+			Default: now.UTC().Add(kmsDefaultRotation).Format(time.DateOnly),
 			Help:    "The first automatic rotation, one rotation period from now unless changed. " + kmsNextRotationHelp},
 		{Name: "labels", Label: "Labels", Type: "map", Section: "Additional settings",
 			Help: "Optional. Lowercase keys and values."},
@@ -717,9 +721,9 @@ func kmsCreateKeyRequest(ring string, values map[string]string) (*kmspb.CreateCr
 		key.RotationSchedule = &kmspb.CryptoKey_RotationPeriod{RotationPeriod: durationpb.New(d)}
 	}
 	if raw := strings.TrimSpace(values["nextRotationTime"]); raw != "" {
-		t, err := time.Parse(time.RFC3339, raw)
+		t, _, err := kmsParseNextRotation(raw)
 		if err != nil {
-			return nil, fmt.Errorf("next rotation time: %q is not an RFC 3339 time such as 2026-10-01T00:00:00Z", raw)
+			return nil, err
 		}
 		key.NextRotationTime = timestamppb.New(t)
 	}

@@ -15,8 +15,8 @@ import (
 
 // TestKMSKeyManagementIsGooglesFlow (#1851), in the run shard: Key
 // Management's menu is Google's (Key management, Autokey, EKM connections,
-// KMS config, Key inventory, then Single-tenant HSM), KMS config says it is
-// not available locally, Create key ring is a page that goes on to the
+// KMS Controls, Key inventory, then Single-tenant HSM), KMS Controls lists
+// the project's Key Access Justifications configuration, Create key ring is a page that goes on to the
 // ring's Create key page, whose form starts at Google's defaults; the key's
 // page has Overview, Versions, Permissions and Logs; Rotate, confirmed with
 // its button alone, makes version 2 primary; the checked versions are
@@ -37,12 +37,12 @@ func TestKMSKeyManagementIsGooglesFlow(t *testing.T) {
 	p.waitFor(`document.querySelector("#product-nav a[aria-current=page]") !== null`)
 	var menu []string
 	p.eval(`[...document.querySelectorAll("#product-nav li a")].map((a) => a.textContent)`, &menu)
-	if got := strings.Join(menu, ","); !strings.HasPrefix(got, "Key management,Autokey,EKM connections,KMS config,Key inventory") {
+	if got := strings.Join(menu, ","); !strings.HasPrefix(got, "Key management,Autokey,EKM connections,KMS Controls,Key inventory") {
 		t.Errorf("Key Management's menu is %v", menu)
 	}
 
 	p.navigate("/kms/config?project=" + project)
-	p.waitFor(`document.querySelector("#view").textContent.includes("Not available locally") || document.querySelector("#view").textContent.includes("not available")`)
+	p.waitFor(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes("projects/` + project + `/kajPolicyConfig"))`)
 
 	// Create key ring, then Create key on the new ring.
 	p.navigate("/kms/keyrings?project=" + project)

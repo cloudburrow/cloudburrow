@@ -317,6 +317,13 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	secretsSvc.register(coord)
 	kmsSvc := newKMSService(cfg)
 	kmsSvc.register(coord)
+	if kmsSvc != nil {
+		// The Inventory API reads key usage from the products (#2053).
+		kmsSvc.inventorySources = &kmsInventoryWiring{cfg: cfg, secrets: secretsSvc,
+			storage:  func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") },
+			bigquery: func() *netfwd.Forwarder { return forwarderFor(forwarders, "bigquery") },
+			pubsub:   func() *netfwd.Forwarder { return forwarderFor(forwarders, "pubsub") }}
+	}
 	if secretsSvc != nil && kmsSvc != nil {
 		// A secret's customer-managed keys (#1453) are this instance's Cloud KMS.
 		secretsSvc.kms = kmsSvc.API

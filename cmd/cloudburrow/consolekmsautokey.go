@@ -460,7 +460,7 @@ func (p kmsAutokeyProvider) DetailActions(ctx context.Context, project string, p
 	// Configuration source (Configure for project or folder, or Inherit,
 	// which clears the configuration so the parent folder's applies), then
 	// the Configuration in words, the key project for dedicated-project
-	// storage, Submit; turning Autokey off is confirmed (#1851). The enums
+	// storage, Submit; turning Autokey off asks Confirm in a prompt (#2053). The enums
 	// stay the values, as UpdateAutokeyConfig takes them.
 	kind := "project"
 	if strings.HasPrefix(path[0], "folders/") {
@@ -482,12 +482,13 @@ func (p kmsAutokeyProvider) DetailActions(ctx context.Context, project string, p
 			ShowWhen: configure,
 			OptionLabels: map[string]string{"DEDICATED_KEY_PROJECT": "Enable dedicated-project key storage",
 				"RESOURCE_PROJECT": "Enable same-project key storage", "DISABLED": "Disable autokey for " + kind},
-			Help: "Where Autokey makes keys: a dedicated key project, the resource's own project, or nowhere (Autokey off below here)."},
+			Help: "Where Autokey makes keys: a dedicated key project, the resource's own project, or nowhere (Autokey off below here).",
+			// Google's Disable asks Confirm in a prompt after Submit
+			// (https://docs.cloud.google.com/kms/docs/enable-autokey).
+			ConfirmValue: "DISABLED", ConfirmTitle: "Disable autokey?",
+			Confirm: "Resources created from now on get no Autokey key. Existing keys and key handles stay."},
 		{Name: "keyProject", Label: "Key project", Type: "text", ShowWhen: configure + "&keyProjectResolutionMode=DEDICATED_KEY_PROJECT",
 			Help: "projects/PROJECT, the dedicated key project."},
-		{Name: "confirmDisable", Label: "Confirm: resources created from now on get no Autokey key", Type: "checkbox",
-			ShowWhen: configure + "&keyProjectResolutionMode=DISABLED",
-			Help:     "Disabling Autokey needs this confirmation, as Google's Confirm; existing keys and key handles stay."},
 	}}}
 }
 
@@ -514,9 +515,6 @@ func (p kmsAutokeyProvider) ActAt(ctx context.Context, project string, path []st
 	}
 	mode := kmspb.AutokeyConfig_KeyProjectResolutionMode(kmspb.AutokeyConfig_KeyProjectResolutionMode_value[strings.TrimSpace(values["keyProjectResolutionMode"])])
 	kp := strings.TrimSpace(values["keyProject"])
-	if mode == kmspb.AutokeyConfig_DISABLED && values["confirmDisable"] != "" && !checked(values, "confirmDisable") {
-		return fmt.Errorf("check the confirmation to disable Autokey")
-	}
 	if mode != kmspb.AutokeyConfig_DEDICATED_KEY_PROJECT {
 		// The key project is hidden for the other choices.
 		kp = ""

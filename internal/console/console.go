@@ -358,6 +358,12 @@ type Field struct {
 	// default, and choosing to is a destructive act of its own.
 	Confirm     string `json:"confirm,omitempty"`
 	ConfirmWith string `json:"confirmWith,omitempty"`
+	// ConfirmValue, on a radio or select field with Confirm, is the choice
+	// that asks first: a submit with it chosen opens a prompt naming
+	// Confirm under ConfirmTitle, ended by Confirm with nothing typed, as
+	// Cloud KMS's Disable autokey asks after Submit (#2053).
+	ConfirmValue string `json:"confirmValue,omitempty"`
+	ConfirmTitle string `json:"confirmTitle,omitempty"`
 	// Options are the values a "select" field offers, in order; its value is
 	// one of them. A bucket notification's topic is chosen from the
 	// project's topics this way (#791), so the form cannot name one that
@@ -1337,6 +1343,10 @@ type Action struct {
 	// kind of resource rather than the one acted on: Cloud SQL's Stop asks
 	// "Stop database instance?" (#1860). Empty is "<Label> <name>?".
 	ConfirmTitle string `json:"confirmTitle,omitempty"`
+	// ConfirmWord is what a name-typed confirmation asks for where it is
+	// not the resource's own name: a key version row's Destroy asks for the
+	// key's name, as the key page's Destroy does (#2053).
+	ConfirmWord string `json:"confirmWord,omitempty"`
 	// Confirm is what performing the action changes or puts at stake, and
 	// asks for the resource's name back before anything is sent.
 	//
