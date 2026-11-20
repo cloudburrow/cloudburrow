@@ -229,7 +229,14 @@ func TestProjectPageShutDownAndRestore(t *testing.T) {
 	if page.Scope || !strings.Contains(page.Note, "A local registry") {
 		t.Errorf("the project page has a Scope tab (%v), or its Details lack the registry's note", page.Scope)
 	}
+	// The list pages at 25 rows, so on an instance holding more projects
+	// this one can be past the first page. Found the way Google's docs say
+	// to (resource-manager/docs/listing-all-resources): its ID typed into the
+	// list's Filter box.
 	p.navigate("/projects?project=" + project)
+	p.waitFor(`document.querySelector('#view input.filter[aria-label="Filter projects"]') !== null && document.querySelector("#view tbody tr") !== null`)
+	p.run(chromedp.SendKeys(`#view input.filter[aria-label="Filter projects"]`, project))
+	p.waitFor(fmt.Sprintf(`[...document.querySelectorAll("#view tbody tr")].every((r) => r.textContent.includes(%q))`, project))
 	p.tagKeyMenu(project, "Delete")
 	p.waitFor(`document.querySelector(".modal.is-open #confirm-input") !== null`)
 	var dialog struct{ Title, Button string }
