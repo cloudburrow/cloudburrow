@@ -25,6 +25,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/service/apikeys"
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
+	"github.com/cloudburrow/cloudburrow/internal/service/datatransfer"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
 	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
@@ -92,6 +93,8 @@ type consoleDeps struct {
 	monitoring *monitoringService
 	// compute is the Compute Engine API (#1936), nil unless enabled.
 	compute *computeService
+	// dataTransfer is the BigQuery Data Transfer Service (#1948).
+	dataTransfer *dataTransferSvc
 	// sqlAdmin is the Cloud SQL Admin API, which restores Backup and DR
 	// backups; nil unless a Cloud SQL service is enabled.
 	sqlAdmin *sqladmin.Server
@@ -195,6 +198,12 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			// Storage Intelligence (#1519): the project's, the
 			// organization's and each folder's configuration.
 			storageIntelligenceProvider{endpoint: storageAddr, registry: d.projects})
+		// The Cloud Storage companion APIs (#1957), served in process beside
+		// Cloud Storage: Batch operations, Inventory reports, and Storage
+		// Transfer Service's Transfer jobs and Agent pools.
+		e := d.cfg.Endpoints
+		providers = append(providers, storageJobsProviders(storageAddr, companionAddr(d.cfg, e.StorageBatchOperations),
+			companionAddr(d.cfg, e.StorageInsights), companionAddr(d.cfg, e.StorageTransfer))...)
 	}
 	if enabled[config.ServicePubSub] && pubsubAddr != "" {
 		// Four screens of one product: topics, every subscription of the
@@ -313,7 +322,16 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	if enabled[config.ServiceCompute] && d.compute != nil {
 		screen := computeScreen{svc: d.compute}
 		providers = append(providers, computeNetworksProvider{screen}, computeFirewallsProvider{screen},
-			computeRoutesProvider{screen}, computeAddressesProvider{screen})
+			computeRoutesProvider{screen}, computeAddressesProvider{screen},
+			// Compute Engine (#1965): VM instances, disks, snapshots,
+			// images and machine types, over the same API.
+			computeInstancesProvider{screen}, computeDisksProvider{screen}, computeSnapshotsProvider{screen},
+			computeImagesProvider{screen}, computeMachineTypesProvider{screen}, computeMetadataProvider{screen})
+	}
+	// BigQuery's Data transfers and Scheduled queries pages (#1948).
+	if d.dataTransfer != nil {
+		providers = append(providers, dataTransferProvider{svc: d.dataTransfer},
+			dataTransferProvider{svc: d.dataTransfer, only: datatransfer.ScheduledQuery})
 	}
 	if enabled[config.ServiceScheduler] && d.scheduler != nil {
 		providers = append(providers, schedulerProvider{svc: d.scheduler, faults: d.faults})

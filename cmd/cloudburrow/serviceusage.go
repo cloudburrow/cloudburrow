@@ -23,6 +23,10 @@ var serviceUsageAPIs = []struct {
 	{"", serviceusage.API{Name: "serviceusage.googleapis.com", Title: "Service Usage API"}},
 	{"", serviceusage.API{Name: "apikeys.googleapis.com", Title: "API Keys API"}},
 	{config.ServiceStorage, serviceusage.API{Name: "storage.googleapis.com", Title: "Cloud Storage API"}},
+	// The Cloud Storage companion APIs (#1957), served with Cloud Storage.
+	{config.ServiceStorage, serviceusage.API{Name: "storagebatchoperations.googleapis.com", Title: "Storage Batch Operations API"}},
+	{config.ServiceStorage, serviceusage.API{Name: "storageinsights.googleapis.com", Title: "Storage Insights API"}},
+	{config.ServiceStorage, serviceusage.API{Name: "storagetransfer.googleapis.com", Title: "Storage Transfer API"}},
 	{config.ServicePubSub, serviceusage.API{Name: "pubsub.googleapis.com", Title: "Cloud Pub/Sub API"}},
 	{config.ServiceTasks, serviceusage.API{Name: "cloudtasks.googleapis.com", Title: "Cloud Tasks API"}},
 	{config.ServiceRun, serviceusage.API{Name: "run.googleapis.com", Title: "Cloud Run Admin API"}},
@@ -42,6 +46,7 @@ var serviceUsageAPIs = []struct {
 	{config.ServiceSpanner, serviceusage.API{Name: "spanner.googleapis.com", Title: "Cloud Spanner API"}},
 	{config.ServiceBigQuery, serviceusage.API{Name: "bigquery.googleapis.com", Title: "BigQuery API"}},
 	{config.ServiceBigQuery, serviceusage.API{Name: "bigquerystorage.googleapis.com", Title: "BigQuery Storage API"}},
+	{config.ServiceBigQuery, serviceusage.API{Name: "bigquerydatatransfer.googleapis.com", Title: "BigQuery Data Transfer API"}},
 	{config.ServiceMemorystore, serviceusage.API{Name: "redis.googleapis.com", Title: "Google Cloud Memorystore for Redis API"}},
 	{sqlAdminEndpoint, serviceusage.API{Name: "sqladmin.googleapis.com", Title: "Cloud SQL Admin API"}},
 	{config.ServiceBackupDR, serviceusage.API{Name: "backupdr.googleapis.com", Title: "Backup and DR Service API"}},

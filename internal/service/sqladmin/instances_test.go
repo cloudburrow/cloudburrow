@@ -113,7 +113,7 @@ func TestInstanceWritesThroughTheGoClient(t *testing.T) {
 		{Name: "xy", DatabaseVersion: "POSTGRES_8_4", Settings: &sqladmin.Settings{Tier: "db-f1-micro"}},
 		{Name: "xy", DatabaseVersion: "MYSQL_5_7", Settings: &sqladmin.Settings{Tier: "db-f1-micro"}},
 		{Name: "xy", DatabaseVersion: "POSTGRES_17", Settings: &sqladmin.Settings{Tier: "t",
-			DatabaseFlags: []*sqladmin.DatabaseFlags{{Name: "cloudsql.iam_authentication", Value: "on"}}}},
+			DatabaseFlags: []*sqladmin.DatabaseFlags{{Name: "cloudsql.enable_pgaudit", Value: "on"}}}},
 	} {
 		if _, err := svc.Instances.Insert("proj", bad).Do(); err == nil || !strings.Contains(err.Error(), "501") {
 			t.Errorf("insert %s %s: %v, want 501", bad.DatabaseVersion, bad.MasterInstanceName, err)

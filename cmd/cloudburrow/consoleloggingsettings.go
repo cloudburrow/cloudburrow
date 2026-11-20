@@ -5,8 +5,9 @@ package main
 // ConfigServiceV2 the transports serve (#1292), with the instance's fault
 // rules applied first. The list holds the project's one settings resource;
 // its page shows the settings and the CMEK settings as served, and Edit
-// settings is UpdateSettings, so a refusal (a KMS key, a malformed location)
-// is the API's own.
+// settings is UpdateSettings, so a refusal (a key outside the storage
+// location, a disabled key, a malformed location) is the API's own. A KMS
+// key is the project's default key for its new buckets (#1972).
 
 import (
 	"context"
@@ -26,7 +27,7 @@ func (loggingSettingsProvider) ID() string    { return "logging-settings" }
 func (loggingSettingsProvider) Title() string { return "Settings" }
 
 const loggingSettingsNote = "Stored and read back; a storage location and the default sink change nothing that is written or read here. " +
-	"Customer-managed encryption (a KMS key) is not supported: the API refuses one."
+	"A KMS key is the default customer-managed key of new log buckets: it must be in the storage location, and the KMS service account needs roles/cloudkms.cryptoKeyEncrypterDecrypter on it."
 
 func settingsName(project string) string { return "projects/" + project + "/settings" }
 
@@ -124,13 +125,13 @@ func (p loggingSettingsProvider) Detail(ctx context.Context, project string, pat
 			}},
 			cmekGroup,
 		}}},
-		Edit: &console.EditForm{Label: "Edit settings", Note: "UpdateSettings: a KMS key is refused as UNIMPLEMENTED.", Fields: []console.Field{
+		Edit: &console.EditForm{Label: "Edit settings", Note: "UpdateSettings: a KMS key must be in the default storage location.", Fields: []console.Field{
 			{Name: "storageLocation", Label: "Default storage location", Type: "text", Default: st.GetStorageLocation(),
 				Help: "Where new buckets are made by default: global, or a region such as us-central1. Empty for none."},
 			{Name: "disableDefaultSink", Label: "Disable the _Default sink for new projects", Type: "checkbox",
 				Default: strconv.FormatBool(st.GetDisableDefaultSink())},
 			{Name: "kmsKeyName", Label: "KMS key name", Type: "text", Default: st.GetKmsKeyName(),
-				Help: "projects/P/locations/L/keyRings/R/cryptoKeys/K. Not supported: the API refuses a key."},
+				Help: "projects/P/locations/L/keyRings/R/cryptoKeys/K, in the default storage location; empty for none. New log buckets are encrypted with it."},
 		}},
 	}, nil
 }

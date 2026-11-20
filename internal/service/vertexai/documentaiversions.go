@@ -39,8 +39,8 @@ import (
 //   - TrainProcessorVersion: neither Enterprise Document OCR nor the Layout
 //     Parser is a trainable processor (training is the custom extractor's,
 //     classifier's and splitter's, which are not served): INVALID_ARGUMENT.
-//     EvaluateProcessorVersion and
-//     evaluations, which need a labelled dataset, are UNIMPLEMENTED.
+//     EvaluateProcessorVersion and the evaluations, which need a labelled
+//     dataset, are in documentaioutput.go (#1953).
 //
 // UNVERIFIED (re-read 2026-11-19: the manage-processor-versions page and the processorVersions reference do not say): the version display names and create times (taken from the
 // IDs), the codes and texts of the refusals, and that a refusal is the RPC's
@@ -111,15 +111,18 @@ func (s *Server) processorVersion(name string) (*documentaipb.Processor, docAIVe
 	return nil, docAIVersion{}, apierror.NotFound("Processor version %s not found", name)
 }
 
-func (d *documentAIService) GetProcessorVersion(_ context.Context, req *documentaipb.GetProcessorVersionRequest) (*documentaipb.ProcessorVersion, error) {
+func (d *documentAIService) GetProcessorVersion(ctx context.Context, req *documentaipb.GetProcessorVersionRequest) (*documentaipb.ProcessorVersion, error) {
 	p, v, err := d.s.processorVersion(req.GetName())
 	if err != nil {
 		return nil, grpcError(err)
 	}
-	return versionProto(p, v), nil
+	if err := d.s.docAIKeyUsable(ctx, p); err != nil {
+		return nil, grpcError(err)
+	}
+	return d.s.withKey(versionProto(p, v), p), nil
 }
 
-func (d *documentAIService) ListProcessorVersions(_ context.Context, req *documentaipb.ListProcessorVersionsRequest) (*documentaipb.ListProcessorVersionsResponse, error) {
+func (d *documentAIService) ListProcessorVersions(ctx context.Context, req *documentaipb.ListProcessorVersionsRequest) (*documentaipb.ListProcessorVersionsResponse, error) {
 	p, err := d.s.processor(req.GetParent())
 	if err != nil {
 		return nil, grpcError(err)
@@ -127,9 +130,12 @@ func (d *documentAIService) ListProcessorVersions(_ context.Context, req *docume
 	if strings.Contains(req.GetParent(), "/processorVersions/") {
 		return nil, grpcError(apierror.InvalidArgument("parent %q is not a processor", req.GetParent()))
 	}
+	if err := d.s.docAIKeyUsable(ctx, p); err != nil {
+		return nil, grpcError(err)
+	}
 	var all []*documentaipb.ProcessorVersion
 	for _, v := range docAIVersions[p.GetType()] {
-		all = append(all, versionProto(p, v))
+		all = append(all, d.s.withKey(versionProto(p, v), p))
 	}
 	// Newest first, as the console lists them.
 	sort.SliceStable(all, func(i, j int) bool { return all[i].GetName() > all[j].GetName() })

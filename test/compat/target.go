@@ -75,6 +75,9 @@ var targetEndpoints = []targetEndpoint{
 	{"RESOURCEMANAGER", envKey("CLOUDBURROW_RESOURCEMANAGER_ENDPOINT")},
 	{"SERVICEUSAGE", envKey("CLOUDBURROW_SERVICEUSAGE_ENDPOINT")},
 	{"APIKEYS", envKey("CLOUDBURROW_APIKEYS_ENDPOINT")},
+	{"STORAGE_BATCH", envKey("CLOUDBURROW_STORAGEBATCHOPERATIONS_ENDPOINT")},
+	{"STORAGE_INSIGHTS", envKey("CLOUDBURROW_STORAGEINSIGHTS_ENDPOINT")},
+	{"STORAGE_TRANSFER", envKey("CLOUDBURROW_STORAGETRANSFER_ENDPOINT")},
 	{"SPANNER", envKey("SPANNER_EMULATOR_HOST")},
 	{"SPANNER_REST", envKey("CLOUDBURROW_SPANNER_REST_ENDPOINT")},
 	{"DATASTORE", envKey("DATASTORE_EMULATOR_HOST")},
@@ -93,6 +96,7 @@ var targetEndpoints = []targetEndpoint{
 	{"PRIVATECA", envKey("CLOUDBURROW_PRIVATECA_ENDPOINT")},
 	{"GKE", envKey("CLOUDBURROW_GKE_ENDPOINT")},
 	{"COMPUTE", envKey("CLOUDBURROW_COMPUTE_ENDPOINT")},
+	{"DATATRANSFER", envKey("CLOUDBURROW_DATATRANSFER_ENDPOINT")},
 }
 
 // normalizeEndpoint reduces an address to host:port, so that
@@ -217,6 +221,11 @@ var gcloudOverrides = []struct {
 	{"orgpolicy", []string{"RESOURCEMANAGER"}},
 	{"serviceusage", []string{"SERVICEUSAGE", "RUN_SERVICEUSAGE"}},
 	{"apikeys", []string{"APIKEYS", "RUN_APIKEYS"}},
+	// The Cloud Storage companion APIs (#1957), each on its own port.
+	{"storagebatchoperations", []string{"STORAGE_BATCH"}},
+	{"storageinsights", []string{"STORAGE_INSIGHTS"}},
+	// gcloud's Storage Transfer property is `transfer` (#1975).
+	{"transfer", []string{"STORAGE_TRANSFER"}},
 	{"run", []string{"RUN"}},
 	// Served on the Run port (#1347).
 	{"artifactregistry", []string{"RUN"}},

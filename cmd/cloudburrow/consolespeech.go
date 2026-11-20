@@ -370,7 +370,36 @@ func (p speechRecognizersProvider) DetailActions(ctx context.Context, project st
 	}
 }
 
+// ListActions implements console.ListActor: Encryption settings, a
+// location's Config and its customer-managed key (#1950), which encrypts
+// the recognizers, custom classes and phrase sets created after it.
+func (p speechRecognizersProvider) ListActions(ctx context.Context, project string) []console.Action {
+	return []console.Action{{ID: "encryption", Label: "Encryption settings", Submit: "Save", Fields: []console.Field{
+		{Name: "region", Label: "Region", Type: "select", Options: speechRegions, Default: "global"},
+		{Name: "kmsKeyName", Label: "Customer-managed encryption key", Type: "text", Browse: "kms",
+			Help: "A key of this instance's Cloud KMS in the region: the recognizers, custom classes and phrase sets created " +
+				"after it are encrypted with it, and an existing one when it is next updated. Empty removes it. The Speech-to-Text " +
+				"service agent needs Cloud KMS CryptoKey Encrypter/Decrypter on it."},
+	}}}
+}
+
+// setEncryption is Encryption settings: UpdateConfig of the region's Config.
+func (p speechRecognizersProvider) setEncryption(ctx context.Context, project string, v map[string]string) error {
+	region := strings.TrimSpace(v["region"])
+	if region == "" {
+		region = "global"
+	}
+	return p.s.withClient(ctx, func(c *speech.Client) error {
+		_, err := c.UpdateConfig(ctx, &speechpb.UpdateConfigRequest{Config: &speechpb.Config{
+			Name: "projects/" + p.s.project(project) + "/locations/" + region + "/config", KmsKeyName: strings.TrimSpace(v["kmsKeyName"])}})
+		return err
+	})
+}
+
 func (p speechRecognizersProvider) ActAt(ctx context.Context, project string, path []string, action string, v map[string]string) error {
+	if len(path) == 0 && action == "encryption" {
+		return p.setEncryption(ctx, project, v)
+	}
 	if len(path) != 1 {
 		return fmt.Errorf("unknown action %q", action)
 	}

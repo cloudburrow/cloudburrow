@@ -36,8 +36,10 @@ func TestTheTerraformProviderNeverPointsAtGoogle(t *testing.T) {
 			}
 			set, rows := 0, 0
 			for _, e := range terraformEndpoints {
-				if slices.Contains(services, e.service) || (e.service == localAIEndpoint && slices.Contains(services, config.ServiceRun)) {
-					rows++ // Run has three: Cloud Run v2, Artifact Registry and Cloud Build (#1304); Vertex AI is served with it (#1940)
+				if slices.Contains(services, e.service) || (e.service == localAIEndpoint && slices.Contains(services, config.ServiceRun)) ||
+					((e.service == storageTransferService || e.service == storageInsightsService) &&
+						slices.Contains(services, config.ServiceStorage)) {
+					rows++ // Run has three: Cloud Run v2, Artifact Registry and Cloud Build (#1304); Vertex AI and Document AI are served with it (#1940, #1953)
 				}
 				in := strings.Contains(body, e.attr)
 				if in && !e.verified {
@@ -305,5 +307,31 @@ resource "google_storage_bucket" "b" {}
 		if got := subcommand(c.args); got != c.want {
 			t.Errorf("subcommand(%q) = %q, want %q", c.args, got, c.want)
 		}
+	}
+}
+
+// TestTerraformGetsDocumentAI (#1953): with the local AI endpoint served
+// (Cloud Run starts it) and its port pinned, document_ai_custom_endpoint is
+// that port's /v1/; without it, a google_document_ai_ resource is refused,
+// never sent to Google.
+func TestTerraformGetsDocumentAI(t *testing.T) {
+	cfg := config.Default()
+	cfg.Services = []config.Service{config.ServiceRun}
+	cfg.Endpoints.LocalAI = 29650
+	body, _ := terraformProvider(cfg, false)
+	if !strings.Contains(body, `document_ai_custom_endpoint = "http://127.0.0.1:29650/v1/"`) {
+		t.Errorf("provider lacks Document AI:\n%s", body)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "main.tf"), []byte(`resource "google_document_ai_processor" "p" {}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := unpointed(dir, unpointedResources(cfg)); len(got) != 0 {
+		t.Errorf("with the local AI endpoint: unpointed = %q", got)
+	}
+	none := config.Default()
+	none.Services = []config.Service{config.ServiceStorage}
+	if got := unpointed(dir, unpointedResources(none)); len(got) != 1 || !strings.HasPrefix(got[0], "google_document_ai_processor ") {
+		t.Errorf("without it: unpointed = %q", got)
 	}
 }

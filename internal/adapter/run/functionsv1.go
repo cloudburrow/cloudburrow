@@ -306,10 +306,12 @@ func (v *FunctionsV1Server) GetFunction(_ context.Context, req *fv1.GetFunctionR
 	if err != nil {
 		return nil, err
 	}
-	if req.GetVersionId() != 0 && req.GetVersionId() != sf.version {
-		return nil, apierror.Unimplemented("GetFunction version_id is not supported: only the current version is kept")
+	// An earlier version is kept as it last stood (#1958).
+	at, err := sf.atVersion(req.GetVersionId())
+	if err != nil {
+		return nil, err
 	}
-	return v1Of(sf), nil
+	return v1Of(at), nil
 }
 
 // ListFunctions lists a location's 1st-gen functions, or every location's
@@ -560,6 +562,7 @@ func (v *FunctionsV1Server) UpdateFunction(ctx context.Context, req *fv1.UpdateF
 	if build || serve || trig {
 		fn.State = functionspb.Function_DEPLOYING
 	}
+	sf.keepVersion()
 	sf.fn, sf.v1 = fn, spec
 	sf.version++
 	version := sf.version
@@ -608,18 +611,27 @@ func (v *FunctionsV1Server) GenerateUploadUrl(ctx context.Context, req *fv1.Gene
 func (v *FunctionsV1Server) GenerateDownloadUrl(ctx context.Context, req *fv1.GenerateDownloadUrlRequest) (*fv1.GenerateDownloadUrlResponse, error) {
 	functions.mu.Lock()
 	sf, err := gen1(req.GetName())
+	var at *storedFunction
+	if err == nil {
+		at, err = sf.atVersion(int64(req.GetVersionId()))
+	}
 	functions.mu.Unlock()
 	if err != nil {
 		return nil, err
 	}
-	if req.GetVersionId() != 0 && int64(req.GetVersionId()) != sf.version {
-		return nil, apierror.Unimplemented("GenerateDownloadUrl version_id is not supported: only the current version is kept")
+	if at == sf {
+		resp, err := v.f.GenerateDownloadUrl(ctx, &functionspb.GenerateDownloadUrlRequest{Name: req.GetName()})
+		if err != nil {
+			return nil, err
+		}
+		return &fv1.GenerateDownloadUrlResponse{DownloadUrl: resp.GetDownloadUrl()}, nil
 	}
-	resp, err := v.f.GenerateDownloadUrl(ctx, &functionspb.GenerateDownloadUrlRequest{Name: req.GetName()})
+	// An earlier version's source (#1958).
+	bucket, object, _, err := sourceOf(at.fn.GetBuildConfig())
 	if err != nil {
-		return nil, err
+		return nil, apierror.FailedPrecondition("version %d of the function has no source to download", req.GetVersionId())
 	}
-	return &fv1.GenerateDownloadUrlResponse{DownloadUrl: resp.GetDownloadUrl()}, nil
+	return &fv1.GenerateDownloadUrlResponse{DownloadUrl: v.f.base() + downloadPrefix + bucket + "/" + object}, nil
 }
 
 // maxCallResult caps the response body a call answers: call is for
@@ -629,17 +641,15 @@ const maxCallResult = 100 << 10
 // CallFunction invokes an HTTP function with data as its request body,
 // through the cluster's ingress, and answers its response body as result,
 // or its error as error when it answers an error status. An event
-// function is not called: publish to its topic or write to its bucket.
+// function gets data as its event's data (callEvent).
 func (v *FunctionsV1Server) CallFunction(ctx context.Context, req *fv1.CallFunctionRequest) (*fv1.CallFunctionResponse, error) {
 	functions.mu.Lock()
 	sf, err := gen1(req.GetName())
 	var fn *functionspb.Function
+	event := false
 	if err == nil {
 		fn = cloneFunction(sf.fn)
-		if sf.v1.GetHttpsTrigger() == nil {
-			err = apierror.Unimplemented("call of an event-triggered function is not supported: its events are delivered " +
-				"through its trigger, so publish to its topic or write to its bucket")
-		}
+		event = sf.v1.GetHttpsTrigger() == nil
 	}
 	functions.mu.Unlock()
 	if err != nil {
@@ -647,6 +657,10 @@ func (v *FunctionsV1Server) CallFunction(ctx context.Context, req *fv1.CallFunct
 	}
 	if fn.GetState() != functionspb.Function_ACTIVE {
 		return nil, apierror.FailedPrecondition("Function %s is not ACTIVE", req.GetName())
+	}
+	if event {
+		// An event-triggered function gets data as its event (#1958).
+		return v.callEvent(ctx, req.GetName(), fn, req.GetData())
 	}
 	ingress := v.f.ingress
 	if ingress == "" {

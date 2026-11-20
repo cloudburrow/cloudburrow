@@ -63,6 +63,9 @@ type adminDeps struct {
 	// apiKeys is the API Keys API (#1915), for its per-project keys'
 	// reset; read at reset time for the same reason.
 	apiKeys func() *apikeys.Server
+	// storageJobs is the Cloud Storage companion APIs (#1957), for their
+	// per-project reset; read at reset time.
+	storageJobs func() *storageJobs
 	// sqlAdmin and backupDR are the Cloud SQL Admin API and Backup and
 	// DR, for their per-project resets (#1541, #1542); built after the
 	// routes are mounted, so read at reset time.
@@ -76,6 +79,8 @@ type adminDeps struct {
 	monitoring *monitoringService
 	// compute is the Compute Engine API (#1936), nil unless enabled.
 	compute *computeService
+	// dataTransfer is the BigQuery Data Transfer Service (#1948).
+	dataTransfer *dataTransferSvc
 }
 
 // mountAdmin attaches the admin API to the control server.
@@ -164,6 +169,10 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 		// (#1537), kept in the registry's store.
 		api.RegisterResetter(&serviceUsageResetter{srv: d.serviceUsage})
 	}
+	if d.storageJobs != nil {
+		// Batch jobs, report configurations, transfer jobs (#1957).
+		api.RegisterResetter(&storageJobsResetter{jobs: d.storageJobs})
+	}
 	if d.apiKeys != nil {
 		// Each project's API keys (#1915), kept in the registry's store.
 		api.RegisterResetter(&apiKeysResetter{srv: d.apiKeys})
@@ -171,6 +180,9 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 	if d.run != nil {
 		// Repositories and projects' settings (#1543), served beside Cloud Run.
 		api.RegisterResetter(artifactRegistryResetter{})
+	}
+	if d.dataTransfer != nil {
+		api.RegisterResetter(&dataTransferResetter{svc: d.dataTransfer})
 	}
 	if d.gke != nil {
 		api.RegisterResetter(&gkeResetter{svc: d.gke})

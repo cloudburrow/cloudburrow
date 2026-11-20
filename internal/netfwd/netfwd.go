@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"sort"
 	"strconv"
 	"strings"
@@ -111,6 +112,11 @@ type Forwarder struct {
 	// tunnel carries (observe.go, #1267). An unguarded tunnel copies bytes
 	// and sees no request.
 	Observe func(Call)
+	// Local, when set before Start, is asked about each HTTP request (not
+	// gRPC) a Guarded tunnel carries, after its Host and Origin checks; a
+	// handler it returns serves the request in place of the backend. bq
+	// sends BigQuery Data Transfer calls to BigQuery's address (#1948).
+	Local func(*http.Request) http.Handler
 }
 
 // New returns a Forwarder for one target.
@@ -242,7 +248,7 @@ func (f *Forwarder) Start(ctx context.Context) error {
 		f.mu.Lock()
 		public := net.JoinHostPort(f.bindAddr, strconv.Itoa(f.hostPort))
 		f.mu.Unlock()
-		g, err := startObservedGuardFunc(public, f.kubeAddr, f.logf, f.Observe)
+		g, err := startObservedGuardFunc(public, f.kubeAddr, f.logf, f.Observe, f.Local)
 		if err != nil {
 			f.stopProcess(context.Background())
 			return fmt.Errorf("%w: listen on %s: %w", ErrForwardFailed, public, err)

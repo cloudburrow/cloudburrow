@@ -273,13 +273,6 @@ jobs:
           cp bigquery-emulator-* "$GITHUB_WORKSPACE/internal/bigqueryimage/bin/"
       - run: make build
 
-      # The four release targets, which make build (host only) does not
-      # compile; release.yml is otherwise the first to build them (#713).
-      # This row also runs in merge groups.
-      - name: Cross-compile the release targets
-        if: runner.os == 'Linux' && matrix.go == '1.27'
-        run: make cross
-
       - name: Verify the binary runs
         run: ./bin/cloudburrow version
 
@@ -388,6 +381,45 @@ jobs:
           shellcheck -s bash scripts/endpoint-inventory.sh
           # The compat job's shards and their local run (#705), as bash.
           shellcheck -x -s bash scripts/compat-shards.sh scripts/verify-local.sh
+
+  # The four release targets, which make build (host only) does not compile;
+  # release.yml is otherwise the first to build them (#713). Its own job, one
+  # target a row, since PR #1987's check job reached its 60 minutes in make
+  # cross after make test-race (2026-11-20), as main's run 44588485912 had at
+  # 45: four targets one after another took about 16 minutes of it.
+  cross:
+    name: cross (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: bigquery-emulator
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [darwin/amd64, darwin/arm64, linux/amd64, linux/arm64]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27"
+          check-latest: false
+      # The emulator binaries the embedded image holds, checked as the check
+      # job checks them (#1087).
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: bigquery-emulator
+          path: ${{ runner.temp }}/bigquery-emulator
+      - name: Check the emulator binaries and put them in place
+        shell: bash
+        env:
+          SUMS: ${{ needs.bigquery-emulator.outputs.sums }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/bigquery-emulator"
+          echo "$SUMS  SHA256SUMS" | shasum -a 256 -c -
+          shasum -a 256 -c SHA256SUMS
+          cp bigquery-emulator-* "$GITHUB_WORKSPACE/internal/bigqueryimage/bin/"
+      - name: Cross-compile ${{ matrix.target }}
+        run: make cross CROSS_TARGETS=${{ matrix.target }}
 
   modules:
     name: modules and vulnerabilities
@@ -1016,14 +1048,16 @@ jobs:
           BROWSER_VARS=CONSOLE,CONTROL,ADMIN_TOKEN,CLUSTER
           # And Cloud KMS, whose key the Create a Firestore database page
           # chooses (#1881).
-          if [ "$SHARD" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE,BIGTABLE,SPANNER,KMS; fi
+          # And the BigQuery Data Transfer Service, whose scheduled query the
+          # Scheduled queries page makes is read back through it (#1948).
+          if [ "$SHARD" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE,BIGTABLE,SPANNER,KMS,DATATRANSFER; fi
           # The memorystore shard's read back through the Memorystore admin API.
           if [ "$SHARD" = memorystore ]; then BROWSER_VARS+=,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT; fi
           # The Logs Explorer reads entries written through the Logging API (#1410).
           # And the kubeconfig, with which the Kubernetes Engine test removes the
           # deployment its Deploy made (#1857), and Cloud Monitoring, which the
           # Metrics explorer test writes to (#1939).
-          if [ "$SHARD" = storage ]; then BROWSER_VARS+=,LOGGING,STORAGE,PUBSUB,TASKS,SCHEDULER,RESOURCEMANAGER,SERVICEUSAGE,APIKEYS,KUBECONFIG,MONITORING; fi
+          if [ "$SHARD" = storage ]; then BROWSER_VARS+=,LOGGING,STORAGE,PUBSUB,TASKS,SCHEDULER,RESOURCEMANAGER,SERVICEUSAGE,APIKEYS,STORAGE_BATCH,STORAGE_INSIGHTS,STORAGE_TRANSFER,KUBECONFIG,MONITORING; fi
           # The run shard's read back through Cloud Run, Cloud KMS, Secret Manager,
           # Cloud Logging and BigQuery's official clients, and enable the
           # Container Scanning API through its Service Usage, RUN_SERVICEUSAGE
@@ -1207,7 +1241,7 @@ jobs:
   # failure, so a broken main is a single thing to watch.
   report-main-failure:
     name: report main failure
-    needs: [bigquery-emulator, bigquery-emulator-patches, check, modules, integration, compat, compat-coverage]
+    needs: [bigquery-emulator, bigquery-emulator-patches, check, cross, modules, integration, compat, compat-coverage]
     if: failure() && github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -1237,7 +1271,7 @@ jobs:
   # And a green main closes that issue, so it never outlives the problem.
   report-main-recovered:
     name: report main recovered
-    needs: [bigquery-emulator, bigquery-emulator-patches, check, modules, integration, compat, compat-coverage]
+    needs: [bigquery-emulator, bigquery-emulator-patches, check, cross, modules, integration, compat, compat-coverage]
     if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -1264,7 +1298,7 @@ jobs:
     name: ci-green
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [changes, bigquery-emulator, bigquery-emulator-patches, modules, check, integration, compat, compat-coverage]
+    needs: [changes, bigquery-emulator, bigquery-emulator-patches, modules, check, cross, integration, compat, compat-coverage]
     if: always()
     steps:
       - name: Every job passed or was skipped

@@ -466,11 +466,11 @@ browser_suite() {  # <shard> <dir> <flags...>
   # Datastore, Firestore and Bigtable emulators (#895, #1198).
   # And Cloud KMS, whose key the Create a Firestore database page chooses
   # (#1881).
-  if [ "$shard" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE,BIGTABLE,SPANNER,KMS; fi
+  if [ "$shard" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE,BIGTABLE,SPANNER,KMS,DATATRANSFER; fi
   # The memorystore shard's read back through the Memorystore admin API.
   if [ "$shard" = memorystore ]; then BROWSER_VARS+=,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT; fi
   # The Logs Explorer reads entries written through the Logging API (#1410).
-  if [ "$shard" = storage ]; then BROWSER_VARS+=,LOGGING,STORAGE,PUBSUB,TASKS,SCHEDULER,RESOURCEMANAGER,SERVICEUSAGE,APIKEYS,KUBECONFIG,MONITORING; fi
+  if [ "$shard" = storage ]; then BROWSER_VARS+=,LOGGING,STORAGE,PUBSUB,TASKS,SCHEDULER,RESOURCEMANAGER,SERVICEUSAGE,APIKEYS,STORAGE_BATCH,STORAGE_INSIGHTS,STORAGE_TRANSFER,KUBECONFIG,MONITORING; fi
   # The run shard's read back through Cloud Run, Cloud KMS, Secret Manager,
   # Cloud Logging and BigQuery's official clients, and enable the Container
   # Scanning API through its Service Usage, RUN_SERVICEUSAGE (#1912).

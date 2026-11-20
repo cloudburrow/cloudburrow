@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"cloud.google.com/go/datastore"
 	"cloud.google.com/go/firestore"
 	adminpb "cloud.google.com/go/firestore/apiv1/admin/adminpb"
 	"google.golang.org/grpc/codes"
@@ -212,33 +211,4 @@ func nextWholeMinute() time.Time {
 	m := time.Now().Truncate(time.Minute).Add(time.Minute)
 	time.Sleep(time.Until(m.Add(time.Second)))
 	return m
-}
-
-// TestDatastoreReadAtAnEarlierTimeIsRefused (#1942): the Datastore
-// emulator keeps no earlier versions of its entities, so the official Go
-// client's read at an earlier read time is refused UNIMPLEMENTED rather
-// than answered with the entities as they are now; a read now is served.
-//
-// covers: google.datastore.v1.Datastore/Lookup
-func TestDatastoreReadAtAnEarlierTimeIsRefused(t *testing.T) {
-	h := New(t)
-	ds := datastoreClient(t, h, h.Project())
-	ctx := h.Context()
-	key := datastore.NameKey("PITR", "e1", nil)
-	type ent struct{ V int }
-	if _, err := ds.Put(ctx, key, &ent{V: 1}); err != nil {
-		t.Fatalf("Put: %v", err)
-	}
-	var got ent
-	if err := ds.Get(ctx, key, &got); err != nil || got.V != 1 {
-		t.Fatalf("Get now = %v, %v", got, err)
-	}
-	tx, err := ds.NewTransaction(ctx, datastore.ReadOnly, datastore.WithReadTime(time.Now().Add(-time.Minute)))
-	if err == nil {
-		err = tx.Get(key, &got)
-		_ = tx.Rollback()
-	}
-	if status.Code(err) != codes.Unimplemented {
-		t.Errorf("a read-only transaction a minute back: %v, want Unimplemented", err)
-	}
 }

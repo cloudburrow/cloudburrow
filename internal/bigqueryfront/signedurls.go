@@ -166,6 +166,12 @@ func (a *agentKeys) serveCerts(w http.ResponseWriter, r *http.Request) bool {
 // signURL is a V4 signed GET URL of gs://bucket/object at public
 // (http[s]://host[:port]), signed as email with k at now.
 func signURL(k *agentKey, email, public, bucket, object string, now time.Time) (string, error) {
+	return signURLFor(k, email, public, http.MethodGet, bucket, object, now, signedURLExpiry)
+}
+
+// signURLFor is a V4 signed URL of method on gs://bucket/object, valid
+// for expiry from now (OBJ.GET_ACCESS_URL's read and write URLs, #1980).
+func signURLFor(k *agentKey, email, public, method, bucket, object string, now time.Time, expiry time.Duration) (string, error) {
 	u, err := url.Parse(public)
 	if err != nil || u.Host == "" {
 		return "", fmt.Errorf("the client-facing Cloud Storage address %q is not a URL", public)
@@ -177,12 +183,12 @@ func signURL(k *agentKey, email, public, bucket, object string, now time.Time) (
 		"X-Goog-Algorithm":     {"GOOG4-RSA-SHA256"},
 		"X-Goog-Credential":    {email + "/" + scope},
 		"X-Goog-Date":          {stamp},
-		"X-Goog-Expires":       {fmt.Sprint(int(signedURLExpiry.Seconds()))},
+		"X-Goog-Expires":       {fmt.Sprint(int(expiry.Seconds()))},
 		"X-Goog-SignedHeaders": {"host"},
 	}
 	query := strings.ReplaceAll(q.Encode(), "+", "%20")
 	path := encodePathV4("/" + bucket + "/" + object)
-	canonical := "GET\n" + path + "\n" + query + "\nhost:" + u.Host + "\n\nhost\nUNSIGNED-PAYLOAD"
+	canonical := method + "\n" + path + "\n" + query + "\nhost:" + u.Host + "\n\nhost\nUNSIGNED-PAYLOAD"
 	sum := sha256.Sum256([]byte(canonical))
 	sts := "GOOG4-RSA-SHA256\n" + stamp + "\n" + scope + "\n" + hex.EncodeToString(sum[:])
 	digest := sha256.Sum256([]byte(sts))

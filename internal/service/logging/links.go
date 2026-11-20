@@ -14,8 +14,8 @@ package logging
 //     documents, so a link on another parent's bucket is refused.
 //     CreateLink and DeleteLink answer done Operations with a LinkMetadata.
 //   - Settings and CmekSettings are read and written per parent (#1395). A KMS key
-//     is refused UNIMPLEMENTED, as a bucket's cmek_settings is: entries are
-//     not encrypted with a customer key here. The service account IDs are
+//     is the parent's default customer-managed key (settingscmek.go, #1972):
+//     its new custom buckets are encrypted with it. The service account IDs are
 //     made up from the project ID (UNVERIFIED: Google's use the project
 // Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/logging/docs/export/configure_export_v2
 //     number).
@@ -38,6 +38,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/cmek"
 	"github.com/cloudburrow/cloudburrow/internal/paging"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 )
@@ -384,17 +385,18 @@ func (s configServer) GetSettings(_ context.Context, req *loggingpb.GetSettingsR
 }
 
 // UpdateSettings applies the update_mask (every settable field when it is
-// empty): storage_location and disable_default_sink; a kms_key_name is
-// refused.
-func (s configServer) UpdateSettings(_ context.Context, req *loggingpb.UpdateSettingsRequest) (*loggingpb.Settings, error) {
+// empty): kms_key_name (settingscmek.go, #1972), storage_location and
+// disable_default_sink. Google documents the method for organizations and
+// folders; projects are accepted here too, as before.
+func (s configServer) UpdateSettings(ctx context.Context, req *loggingpb.UpdateSettingsRequest) (*loggingpb.Settings, error) {
 	project, err := s.a.parseSettings("name", req.GetName(), "settings")
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	if project.coll == collFolders || project.coll == collBilling {
-		// logging_config.proto: settings "can currently only be configured
-		// for Google Cloud organizations"; they are read for all four.
-		return nil, apierror.Wrap(apierror.FailedPrecondition("%s: Log Router settings can only be configured for organizations (and, here, projects); they are read for folders and billing accounts", req.GetName()))
+	if project.coll == collBilling {
+		// UpdateSettings' reference names organizations/{o}/settings and
+		// folders/{f}/settings; settings are read for all four parents.
+		return nil, apierror.Wrap(apierror.FailedPrecondition("%s: Log Router settings can only be configured for organizations and folders (and, here, projects); they are read for billing accounts", req.GetName()))
 	}
 	in := req.GetSettings()
 	if in == nil {
@@ -410,50 +412,106 @@ func (s configServer) UpdateSettings(_ context.Context, req *loggingpb.UpdateSet
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
+	keyChanged := false
 	for _, p := range paths {
 		switch p {
-		case "kms_key_name":
-			if in.GetKmsKeyName() != "" {
-				return nil, apierror.Wrap(apierror.Unimplemented("kms_key_name: customer-managed encryption of log entries is not supported"))
-			}
-		case "storage_location":
+		case "kms_key_name", "kmsKeyName":
+			keyChanged = in.GetKmsKeyName() != st.GetKmsKeyName()
+			st.KmsKeyName = in.GetKmsKeyName()
+		case "storage_location", "storageLocation":
 			if l := in.GetStorageLocation(); l != "" && !locationRe.MatchString(l) {
 				return nil, apierror.Wrap(apierror.InvalidArgument("storage_location %q is not a location", l))
 			}
 			st.StorageLocation = in.GetStorageLocation()
-		case "disable_default_sink":
+		case "disable_default_sink", "disableDefaultSink":
 			st.DisableDefaultSink = in.GetDisableDefaultSink()
 		default:
 			return nil, apierror.Wrap(apierror.InvalidArgument("update_mask: %q is not a field UpdateSettings changes", p))
 		}
 	}
-	raw, err := protojson.Marshal(&loggingpb.Settings{StorageLocation: st.GetStorageLocation(), DisableDefaultSink: st.GetDisableDefaultSink()})
-	if err != nil {
-		return nil, apierror.Wrap(apierror.Internal(err, "encoding the settings"))
+	version := s.a.settingsKeyVersion(project)
+	if st.GetKmsKeyName() != "" {
+		// The default storage location must be the key's
+		// (routing/managed-encryption: "If it isn't set or doesn't match,
+		// append --storage-location=KMS_KEY_LOCATION").
+		if loc, ok := cmek.Location(st.GetKmsKeyName()); ok && loc != st.GetStorageLocation() {
+			return nil, apierror.Wrap(apierror.InvalidArgument("kms_key_name: the KMS key location must match the storage location. Received KMS key location: %s, storage location: %s", loc, orNone(st.GetStorageLocation())))
+		}
+		if keyChanged || version == "" {
+			if version, err = s.a.checkSettingsKey(ctx, project, st.GetKmsKeyName()); err != nil {
+				return nil, apierror.Wrap(err)
+			}
+		}
+	} else {
+		version = ""
 	}
-	if err := s.a.db.Put(settingsKey(project), raw); err != nil {
-		return nil, apierror.Wrap(apierror.Internal(err, "writing the settings"))
+	if err := s.a.putSettings(project, st, version); err != nil {
+		return nil, apierror.Wrap(err)
 	}
-	return st, nil
+	return s.a.settings(project)
 }
 
-// GetCmekSettings answers the project's CMEK settings: no key, and the
-// service account a key would be granted to.
+// GetCmekSettings answers the parent's Log Router CMEK settings: its key
+// (Settings.kms_key_name, the same setting), the key version it was set
+// with, and the service account the key is granted to.
 func (s configServer) GetCmekSettings(_ context.Context, req *loggingpb.GetCmekSettingsRequest) (*loggingpb.CmekSettings, error) {
 	project, err := s.a.parseSettings("name", req.GetName(), "cmekSettings")
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	return &loggingpb.CmekSettings{Name: project.String() + "/cmekSettings", ServiceAccountId: serviceAccount(project)}, nil
-}
-
-// UpdateCmekSettings accepts only clearing the key, which is never set.
-func (s configServer) UpdateCmekSettings(ctx context.Context, req *loggingpb.UpdateCmekSettingsRequest) (*loggingpb.CmekSettings, error) {
-	if _, err := s.a.parseSettings("name", req.GetName(), "cmekSettings"); err != nil {
+	s.a.mu.Lock()
+	defer s.a.mu.Unlock()
+	st, err := s.a.settings(project)
+	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	if req.GetCmekSettings().GetKmsKeyName() != "" {
-		return nil, apierror.Wrap(apierror.Unimplemented("kms_key_name: customer-managed encryption of log entries is not supported"))
+	return &loggingpb.CmekSettings{Name: project.String() + "/cmekSettings", KmsKeyName: st.GetKmsKeyName(),
+		KmsKeyVersionName: s.a.settingsKeyVersion(project), ServiceAccountId: serviceAccount(project)}, nil
+}
+
+// UpdateCmekSettings sets the Log Router's key, which "can currently only
+// be configured for Google Cloud organizations" (UpdateCmekSettings'
+// reference); clearing it is accepted for any parent. It fails when the key
+// name is invalid (INVALID_ARGUMENT), or when the service account lacks
+// roles/cloudkms.cryptoKeyEncrypterDecrypter or the key is disabled
+// (FAILED_PRECONDITION).
+func (s configServer) UpdateCmekSettings(ctx context.Context, req *loggingpb.UpdateCmekSettingsRequest) (*loggingpb.CmekSettings, error) {
+	project, err := s.a.parseSettings("name", req.GetName(), "cmekSettings")
+	if err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	in := req.GetCmekSettings()
+	set := true
+	if paths := req.GetUpdateMask().GetPaths(); len(paths) > 0 {
+		set = false
+		for _, p := range paths {
+			switch p {
+			case "kms_key_name", "kmsKeyName":
+				set = true
+			default:
+				return nil, apierror.Wrap(apierror.InvalidArgument("update_mask: %q is not a field UpdateCmekSettings changes", p))
+			}
+		}
+	}
+	if set {
+		key := in.GetKmsKeyName()
+		if key != "" && project.coll != collOrgs {
+			return nil, apierror.Wrap(apierror.FailedPrecondition("%s: CMEK for the Log Router can currently only be configured for Google Cloud organizations", req.GetName()))
+		}
+		s.a.mu.Lock()
+		st, err := s.a.settings(project)
+		version := ""
+		if err == nil && key != "" {
+			version, err = s.a.checkSettingsKey(ctx, project, key)
+		}
+		if err == nil {
+			st.KmsKeyName = key
+			err = s.a.putSettings(project, st, version)
+		}
+		s.a.mu.Unlock()
+		if err != nil {
+			return nil, apierror.Wrap(err)
+		}
 	}
 	return s.GetCmekSettings(ctx, &loggingpb.GetCmekSettingsRequest{Name: req.GetName()})
 }

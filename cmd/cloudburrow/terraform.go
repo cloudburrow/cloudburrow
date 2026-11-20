@@ -147,6 +147,10 @@ var terraformEndpoints = []terraformEndpoint{
 	// clean, update in place and destroy in
 	// TestTerraformContainerClusterAndNodePool.
 	{config.ServiceGKE, "container_custom_endpoint", "GOOGLE_CONTAINER_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	// The BigQuery Data Transfer Service (#1948): a scheduled query's
+	// google_bigquery_data_transfer_config applies, plans clean, updates in
+	// place and destroys in TestTerraformBigQueryDataTransferConfig.
+	{dataTransferService, "bigquery_data_transfer_custom_endpoint", "GOOGLE_BIGQUERY_DATA_TRANSFER_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	// Compute Engine, for the one read google_container_node_pool makes of
 	// it: a pool's node_count is its instance group managers' targetSize,
 	// which the Kubernetes Engine port answers for its own pools' groups
@@ -206,6 +210,13 @@ var terraformEndpoints = []terraformEndpoint{
 	// TestTerraformAPIKeysKey applies one with restrictions, plans clean,
 	// updates it in place and destroys it.
 	{apiKeysService, "apikeys_custom_endpoint", "GOOGLE_APIKEYS_CUSTOM_ENDPOINT", "/v2/", true, ""},
+	// google_storage_transfer_job and google_storage_insights_report_config
+	// (#1957), on their own ports beside Cloud Storage.
+	// TestTerraformStorageTransferJob and
+	// TestTerraformStorageInsightsReportConfig apply, plan clean, update
+	// and destroy them.
+	{storageTransferService, "storage_transfer_custom_endpoint", "GOOGLE_STORAGE_TRANSFER_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	{storageInsightsService, "storage_insights_custom_endpoint", "GOOGLE_STORAGE_INSIGHTS_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	{resourceManagerEndpoint, "resource_manager_custom_endpoint", "GOOGLE_RESOURCE_MANAGER_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	// google_project_iam_custom_role and google_organization_iam_custom_role
 	// (#1743): the IAM API's roles, on the Resource Manager port, in
@@ -232,7 +243,19 @@ var terraformEndpoints = []terraformEndpoint{
 	// by default; the one v3 server binds any location's resource, in
 	// TestTerraformTagsLocationTagBinding.
 	{resourceManagerEndpoint, "tags_location_custom_endpoint", "GOOGLE_TAGS_LOCATION_CUSTOM_ENDPOINT", "/v3/", true, ""},
+	// Document AI (#1953), on the local AI endpoint: the provider's base
+	// path is https://{{location}}-documentai.googleapis.com/v1/, and the
+	// resources' URLs carry projects/{project}/locations/{location}, so the
+	// one port serves us and eu. google_document_ai_processor and
+	// google_document_ai_processor_default_version apply, plan clean and
+	// destroy in TestTerraformDocumentAIProcessorDefaultVersion.
+	{localAIEndpoint, "document_ai_custom_endpoint", "GOOGLE_DOCUMENT_AI_CUSTOM_ENDPOINT", "/v1/", true, ""},
 }
+
+// localAIEndpoint (gcloudsetup.go) keys the local AI endpoint's rows here
+// too, Vertex AI's (#1940) and Document AI's (#1953): the provider is given
+// them whenever the endpoint is served, with a model, with embeddings or
+// with Cloud Run (localAIServed).
 
 // resourceManagerEndpoint keys the Resource Manager rows. It is not a
 // selectable service: the project registry, and so its API, always runs.
@@ -294,6 +317,9 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 		config.ServiceMonitoring: cfg.Endpoints.Monitoring,
 		config.ServiceCompute:    cfg.Endpoints.Compute,
 		localAIEndpoint:          cfg.Endpoints.LocalAI,
+		storageTransferService:   cfg.Endpoints.StorageTransfer,
+		storageInsightsService:   cfg.Endpoints.StorageInsights,
+		dataTransferService:      cfg.Endpoints.DataTransfer,
 	}
 	enabled := map[config.Service]bool{resourceManagerEndpoint: true, serviceUsageService: true, apiKeysService: true, sqlAdminEndpoint: sqlAdminEnabled(cfg),
 		memorystoreAdminEndpoint: serviceEnabled(cfg, config.ServiceMemorystore)}
@@ -303,7 +329,10 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 	enabled[config.ServiceBackupDR] = backupDREnabled(cfg)
 	enabled[config.ServicePrivateCA] = privateCAEnabled(cfg)
 	enabled[config.ServiceMonitoring] = monitoringEnabled(cfg)
-	enabled[localAIEndpoint] = serviceEnabled(cfg, config.ServiceRun)
+	enabled[localAIEndpoint] = localAIServed(cfg)
+	enabled[storageTransferService] = storageJobsEnabled(cfg)
+	enabled[storageInsightsService] = storageJobsEnabled(cfg)
+	enabled[dataTransferService] = dataTransferEnabled(cfg)
 	var set []terraformURL
 	var skipped []config.Service
 	for _, e := range terraformEndpoints {
@@ -467,9 +496,13 @@ func unpointedResources(cfg config.Config) []unpointedPrefix {
 	if bigtableHost(cfg) == "" {
 		out = append(out, unpointedPrefix{"google_bigtable_", "this instance does not serve Bigtable"})
 	}
-	run := false
+	run, docai := false, false
 	for _, e := range set {
 		run = run || e.service == config.ServiceRun
+		docai = docai || e.service == localAIEndpoint
+	}
+	if !docai {
+		out = append(out, unpointedPrefix{"google_document_ai_", "this instance does not serve Document AI (it is on the local AI endpoint)"})
 	}
 	if !run {
 		out = append(out,

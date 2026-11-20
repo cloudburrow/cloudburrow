@@ -9,12 +9,15 @@ import (
 	"testing"
 	"time"
 
+	"cloud.google.com/go/longrunning/autogen/longrunningpb"
 	"cloud.google.com/go/spanner/admin/database/apiv1/databasepb"
 	"cloud.google.com/go/spanner/admin/instance/apiv1/instancepb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -49,6 +52,15 @@ func (f *fakeEmulator) ListInstances(context.Context, *instancepb.ListInstancesR
 func (f *fakeEmulator) DeleteInstance(_ context.Context, r *instancepb.DeleteInstanceRequest) (*emptypb.Empty, error) {
 	delete(f.insts, r.Name)
 	return &emptypb.Empty{}, nil
+}
+
+// CreateInstance keeps the instance as given, its operation done.
+func (f *fakeEmulator) CreateInstance(_ context.Context, r *instancepb.CreateInstanceRequest) (*longrunningpb.Operation, error) {
+	in := proto.Clone(r.GetInstance()).(*instancepb.Instance)
+	in.Name = r.GetParent() + "/instances/" + r.GetInstanceId()
+	f.insts[in.Name] = in
+	a, _ := anypb.New(in)
+	return &longrunningpb.Operation{Name: in.Name + "/operations/create", Done: true, Result: &longrunningpb.Operation_Response{Response: a}}, nil
 }
 
 var lastConn *grpc.ClientConn
@@ -120,7 +132,7 @@ func TestUpdateInstanceOverGRPC(t *testing.T) {
 	if err != nil || len(list.Instances) != 1 || list.Instances[0].DisplayName != "renamed" {
 		t.Fatalf("ListInstances = %v, %v", list, err)
 	}
-	for mask, want := range map[string]codes.Code{"autoscaling_config": codes.Unimplemented, "config": codes.Unimplemented, "state": codes.InvalidArgument} {
+	for mask, want := range map[string]codes.Code{"autoscaling_config": codes.InvalidArgument, "config": codes.Unimplemented, "state": codes.InvalidArgument} {
 		_, err := c.UpdateInstance(ctx, &instancepb.UpdateInstanceRequest{Instance: &instancepb.Instance{Name: name, Config: "projects/p/instanceConfigs/other",
 			AutoscalingConfig: &instancepb.AutoscalingConfig{}},
 			FieldMask: &fieldmaskpb.FieldMask{Paths: []string{mask}}})
@@ -172,8 +184,8 @@ func TestUpdateInstanceOverREST(t *testing.T) {
 	if code, got = do("PATCH", "/v1/projects/p/instances/i/databases/d?updateMask=enableDropProtection", `{"enableDropProtection":true}`); code != 200 || got["done"] != true {
 		t.Errorf("UpdateDatabase over REST = %d %v", code, got)
 	}
-	if code, got = do("PATCH", "/v1/projects/p/instances/i", `{"instance":{"autoscalingConfig":{}},"fieldMask":"autoscalingConfig"}`); code != 501 {
-		t.Errorf("autoscaling = %d %v, want 501", code, got)
+	if code, got = do("PATCH", "/v1/projects/p/instances/i", `{"instance":{"autoscalingConfig":{}},"fieldMask":"autoscalingConfig"}`); code != 400 {
+		t.Errorf("an autoscaling configuration without limits = %d %v, want 400", code, got)
 	}
 }
 

@@ -21,6 +21,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoregistry"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/sysparams"
 )
 
 // Transcoder serves gRPC methods as Google's JSON/HTTP API (#591), by the
@@ -296,20 +297,30 @@ func (t *Transcoder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	writeStatusError(w, apierror.NotFound("no method is bound to %s %s", r.Method, r.URL.Path))
+	sysparams.MarkHandled(r)
+	sysparams.WriteError(w, r, apierror.NotFound("no method is bound to %s %s", r.Method, r.URL.Path))
 }
 
 func (t *Transcoder) serve(w http.ResponseWriter, r *http.Request, rt *Route, captures []string) {
+	// The system parameters are read first, so an error is written in the
+	// format ($.xgafv) and wrapper (callback) they ask for; a malformed
+	// one is reported again, in order, by decode.
+	sys, _ := sysparams.FromRequest(r)
+	sysparams.MarkHandled(r)
+	fail := func(err error) { sys.WriteError(w, err) }
+	if sys.Alt == "proto" {
+		fail = func(err error) { writeProtoError(w, err) }
+	}
 	t.mu.RLock()
 	svc, ok := t.services[rt.Service]
 	t.mu.RUnlock()
 	md, bound := svc.methods[rt.MethodName]
 	switch {
 	case !ok || !bound: // a streaming method is not in methods
-		writeStatusError(w, apierror.Unimplemented("%s is not implemented over JSON", rt.RPC))
+		fail(apierror.Unimplemented("%s is not implemented over JSON", rt.RPC))
 		return
 	case rt.ResponseBody != "":
-		writeStatusError(w, apierror.Unimplemented("%s: a response_body binding is not implemented over JSON", rt.RPC))
+		fail(apierror.Unimplemented("%s: a response_body binding is not implemented over JSON", rt.RPC))
 		return
 	}
 	var q query
@@ -319,8 +330,15 @@ func (t *Transcoder) serve(w http.ResponseWriter, r *http.Request, rt *Route, ca
 			return apierror.Internal(nil, "%s: the request is not a proto message", rt.RPC)
 		}
 		var err error
-		q, err = t.decode(r, rt, captures, msg)
-		return err
+		if q, err = t.decode(r, rt, captures, msg); err != nil {
+			return err
+		}
+		// A mask naming a field the response has not is refused before
+		// the method runs, as Google refuses it.
+		if out := t.output(rt); out != nil {
+			return q.sys.Fields.Validate(out)
+		}
+		return nil
 	}
 	// The request's credentials reach the method as a gRPC call's do, in
 	// its incoming metadata.
@@ -330,28 +348,82 @@ func (t *Transcoder) serve(w http.ResponseWriter, r *http.Request, rt *Route, ca
 	}
 	resp, err := md.Handler(svc.impl, ctx, dec, nil)
 	if err != nil {
-		writeStatusError(w, err)
+		fail(err)
 		return
 	}
 	msg, ok := resp.(proto.Message)
 	if !ok {
-		writeStatusError(w, apierror.Internal(nil, "%s: the response is not a proto message", rt.RPC))
+		fail(apierror.Internal(nil, "%s: the response is not a proto message", rt.RPC))
+		return
+	}
+	if q.sys.Alt == "proto" {
+		// The binary message, pruned to the mask; the clone, since the
+		// method may hold what it returned.
+		c := proto.Clone(msg)
+		q.sys.Fields.PruneProto(c.ProtoReflect())
+		b, err := proto.Marshal(c)
+		if err != nil {
+			fail(apierror.Internal(err, "encode the response"))
+			return
+		}
+		w.Header().Set("Content-Type", ContentTypeProto)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(b)
 		return
 	}
 	b, err := t.Overlay.MarshalOptions(q.marshal(), msg)
 	if err != nil {
-		writeStatusError(w, apierror.Internal(err, "encode the response"))
+		fail(apierror.Internal(err, "encode the response"))
 		return
 	}
-	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+	b, ct := q.sys.Body(b, true)
+	w.Header().Set("Content-Type", ct)
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(b)
+}
+
+// ContentTypeProto is the content type of an alt=proto answer.
+const ContentTypeProto = "application/x-protobuf"
+
+// writeProtoError writes err, under alt=proto, as the binary
+// google.rpc.Status.
+func writeProtoError(w http.ResponseWriter, err error) {
+	e := apierror.From(err)
+	b, merr := proto.Marshal(e.GRPCStatus().Proto())
+	if merr != nil {
+		apierror.WriteJSON(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", ContentTypeProto)
+	w.WriteHeader(e.HTTPStatus())
+	_, _ = w.Write(b)
+}
+
+// output is the descriptor of rt's response message, through the Overlay
+// when it has the message (so a field it adds can be selected), nil when
+// the method is not in the registry.
+func (t *Transcoder) output(rt *Route) protoreflect.MessageDescriptor {
+	d, err := protoregistry.GlobalFiles.FindDescriptorByName(protoreflect.FullName(rt.Service + "." + rt.MethodName))
+	if err != nil {
+		return nil
+	}
+	m, ok := d.(protoreflect.MethodDescriptor)
+	if !ok {
+		return nil
+	}
+	out := m.Output()
+	if t.Overlay != nil {
+		if mt, err := t.Overlay.FindMessageByName(out.FullName()); err == nil {
+			return mt.Descriptor()
+		}
+	}
+	return out
 }
 
 // decode builds the request: the query, then the body, then the path.
 func (t *Transcoder) decode(r *http.Request, rt *Route, captures []string, req proto.Message) (query, error) {
 	root := req.ProtoReflect()
-	q, err := parseQuery(r.URL.RawQuery, root, rt)
+	q, err := parseQuery(r.URL.RawQuery, r.Header, root, rt)
 	if err != nil {
 		return q, err
 	}

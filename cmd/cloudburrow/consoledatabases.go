@@ -1394,6 +1394,8 @@ func (p spannerProvider) instanceDetail(ctx context.Context, project, instanceID
 			{Label: "Edition", Value: spannerEdition(inst.GetEdition())},
 			{Label: "Configuration", Value: lastSegment(inst.GetConfig())},
 			{Label: "Compute capacity", Value: spannerCapacity(inst.GetNodeCount(), inst.GetProcessingUnits())},
+			{Label: "Autoscaling", Value: orDash(spannerAutoscalingLabel(inst.GetAutoscalingConfig()))},
+			{Label: "Default backup schedules", Value: spannerDefaultBackupsLabel(inst.GetDefaultBackupScheduleType())},
 			{Label: "Databases", Value: fmt.Sprint(databases.Total)},
 			{Label: "Labels", Value: orDash(spannerLabels(inst.GetLabels()))},
 		},
@@ -1520,6 +1522,7 @@ func (p spannerProvider) databaseDetail(ctx context.Context, project, instanceID
 			{Label: "Tables", Value: fmt.Sprint(tables.Total)},
 			{Label: "Created", Value: created},
 			{Label: "State", Value: db.GetState().String()},
+			{Label: "Encryption", Value: spannerDatabaseEncryptionLabel(db)},
 		},
 		Sections: []console.Section{
 			{ID: "tables", Label: "Overview", Listing: tables},
@@ -1543,7 +1546,9 @@ func (p spannerProvider) databaseDetail(ctx context.Context, project, instanceID
 						{Label: "State", Value: db.GetState().String()},
 						{Label: "Dialect", Value: spannerDialectOf(db)},
 						{Label: "Version retention", Value: orDash(db.GetVersionRetentionPeriod())},
-						{Label: "Encryption", Value: "Google-managed"},
+						{Label: "Encryption type", Value: spannerDatabaseEncryptionLabel(db)},
+						{Label: "Encryption key", Value: orDash(spannerDatabaseKeys(db))},
+						{Label: "Encryption key versions in use", Value: orDash(spannerKeyVersionsInUse(db))},
 						{Label: "Deletion protection", Value: yesNo(db.GetEnableDropProtection())},
 						{Label: "Created", Value: created},
 					},
@@ -1551,6 +1556,38 @@ func (p spannerProvider) databaseDetail(ctx context.Context, project, instanceID
 			},
 		},
 	}, nil
+}
+
+// spannerDatabaseEncryptionLabel is a database's encryption type as
+// Google's console names it (#1972): Cloud KMS key when the database has a
+// customer-managed key, Google-managed otherwise.
+func spannerDatabaseEncryptionLabel(db *databasepb.Database) string {
+	if spannerDatabaseKeys(db) != "" {
+		return "Cloud KMS key"
+	}
+	return "Google-managed"
+}
+
+// spannerDatabaseKeys is a database's customer-managed key, or its keys
+// (a multi-region configuration's), comma-separated; "" for none.
+func spannerDatabaseKeys(db *databasepb.Database) string {
+	c := db.GetEncryptionConfig()
+	if k := c.GetKmsKeyName(); k != "" {
+		return k
+	}
+	return strings.Join(c.GetKmsKeyNames(), ", ")
+}
+
+// spannerKeyVersionsInUse are the key versions a database's encryption_info
+// names, comma-separated.
+func spannerKeyVersionsInUse(db *databasepb.Database) string {
+	var out []string
+	for _, e := range db.GetEncryptionInfo() {
+		if v := e.GetKmsKeyVersion(); v != "" {
+			out = append(out, v)
+		}
+	}
+	return strings.Join(out, ", ")
 }
 
 // spannerTableDetail is one table's columns and indexes.

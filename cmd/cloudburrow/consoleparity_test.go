@@ -101,12 +101,41 @@ var parityRows = []parityRow{
 			"compute.globalOperations.delete", "compute.globalOperations.wait", "compute.regionOperations.get", "compute.regionOperations.list",
 			"compute.regionOperations.delete", "compute.regionOperations.wait", "compute.zoneOperations.get", "compute.zoneOperations.list",
 			"compute.zoneOperations.delete", "compute.zoneOperations.wait"},
-		Excluded: "every networking operation completes at once, DONE when its call returns, so a page's change is shown done or refused with its reason as it is made; there is nothing running to watch or cancel"},
-	// Compute Engine VM instances, disks and images (#1963): their console
-	// pages are #1965.
-	{Resource: "Compute Engine VM instances, disks and images", Service: "compute",
-		Methods: []string{"compute.images.get", "compute.images.getFromFamily", "compute.images.list", "compute.machineTypes.get", "compute.machineTypes.list", "compute.diskTypes.get", "compute.diskTypes.list", "compute.disks.aggregatedList", "compute.disks.createSnapshot", "compute.disks.delete", "compute.disks.get", "compute.disks.insert", "compute.disks.list", "compute.disks.resize", "compute.disks.setLabels", "compute.snapshots.delete", "compute.snapshots.get", "compute.snapshots.insert", "compute.snapshots.list", "compute.snapshots.setLabels", "compute.instances.aggregatedList", "compute.instances.attachDisk", "compute.instances.delete", "compute.instances.detachDisk", "compute.instances.get", "compute.instances.getSerialPortOutput", "compute.instances.insert", "compute.instances.list", "compute.instances.reset", "compute.instances.resume", "compute.instances.setDeletionProtection", "compute.instances.setLabels", "compute.instances.setMachineType", "compute.instances.setMetadata", "compute.instances.setTags", "compute.instances.start", "compute.instances.stop", "compute.instances.suspend", "compute.projects.get", "compute.projects.setCommonInstanceMetadata"},
-		Issue:   1965},
+		Excluded: "every networking operation completes at once, DONE when its call returns, so a page's change is shown done or refused with its reason as it is made; a VM's operation runs while it boots or stops, and the VM instances list shows the instance's status meanwhile, as Google's does; there is nothing to cancel"},
+	// Compute Engine (#1963, #1965): VM instances, disks, snapshots, images
+	// and machine types.
+	{Resource: "Compute Engine VM instances", Service: "compute",
+		Methods:  []string{"compute.instances.aggregatedList", "compute.instances.attachDisk", "compute.instances.delete", "compute.instances.detachDisk", "compute.instances.get", "compute.instances.getSerialPortOutput", "compute.instances.insert", "compute.instances.list", "compute.instances.reset", "compute.instances.resume", "compute.instances.setDeletionProtection", "compute.instances.setLabels", "compute.instances.setMachineType", "compute.instances.setMetadata", "compute.instances.setTags", "compute.instances.start", "compute.instances.stop", "compute.instances.suspend"},
+		Provider: "compute-instances", Offers: "VM instances (/compute/instances): every instance of the project across zones with its status, zone, machine type, internal and external IP and Connect (the forwarded SSH port); on each row SSH (the gcloud compute ssh and ssh commands for its port) and its menu, Start / Resume, Stop, Suspend and Reset as its status allows, and Delete; Create an instance (name, labels, region and zone, machine type, boot disk image, type and size, network, subnetwork, external IPv4 address, network tags, service account and access scopes, startup script, metadata, deletion protection); an instance's page with its Details (basic information, machine configuration, networking, metadata, service account, Connect), Storage, Networking and Serial port 1 (console) tabs, Edit (labels, network tags, machine type while stopped, deletion protection, metadata), Attach existing disk and Detach disk (#1965)",
+		Tests: []string{"TestConsoleComputeVMs", "TestComputeEngineThroughTheBrowser", "TestComputeEngineScreensMeetWCAG"}},
+	{Resource: "Compute Engine disks and snapshots", Service: "compute",
+		Methods:  []string{"compute.diskTypes.get", "compute.diskTypes.list", "compute.disks.aggregatedList", "compute.disks.createSnapshot", "compute.disks.delete", "compute.disks.get", "compute.disks.insert", "compute.disks.list", "compute.disks.resize", "compute.snapshots.delete", "compute.snapshots.get", "compute.snapshots.list", "compute.disks.setLabels", "compute.snapshots.setLabels", "compute.snapshots.insert"},
+		Provider: "compute-disks", Offers: "Disks (/compute/disks): every disk across zones with its status, type, size, zone and the instance using it; Create a disk (name, description, zone, blank, from an image or from a snapshot, disk type, size, labels); on each row and page Create snapshot, Edit size (larger only, the API's refusal otherwise), Edit labels and Delete, unavailable while attached; Snapshots (/compute/snapshots): each snapshot's status, location, sizes, source disk and creation time, Create snapshot of a disk (snapshots.insert), Edit labels, Create disk from a snapshot, Delete (#1965)",
+		Tests: []string{"TestConsoleComputeVMs", "TestComputeEngineThroughTheBrowser", "TestComputeEngineScreensMeetWCAG"}},
+
+	{Resource: "Compute Engine images and machine types", Service: "compute",
+		Methods:  []string{"compute.images.get", "compute.images.getFromFamily", "compute.images.list", "compute.machineTypes.get", "compute.machineTypes.list"},
+		Provider: "compute-images", Offers: "Images (/compute/images): the public images served (debian-12, ubuntu-2404-lts, rocky-linux-9) with family, project, status, disk size and description, and the public image projects that are refused with their reasons (Container-Optimized OS, Windows, Fedora CoreOS, licensed images); the Image field of Create an instance and Create a disk; Machine types (/compute/machineTypes): every predefined type with its series, vCPUs, memory and shared core (#1965)",
+		Tests: []string{"TestConsoleComputeVMs", "TestComputeEngineThroughTheBrowser", "TestComputeEngineScreensMeetWCAG"}},
+	{Resource: "Compute Engine project metadata", Service: "compute",
+		Methods:  []string{"compute.projects.get", "compute.projects.setCommonInstanceMetadata"},
+		Provider: "compute-metadata", Offers: "Metadata (/compute/metadata): the project's common instance metadata, key and value, ssh-keys as gcloud compute ssh adds them included; Edit, every item at once under the metadata's fingerprint (#1965)",
+		Tests: []string{"TestConsoleComputeVMs", "TestComputeEngineThroughTheBrowser", "TestComputeEngineScreensMeetWCAG"}},
+	// The BigQuery Data Transfer Service (#1948), on BigQuery's Data
+	// transfers and Scheduled queries pages.
+	{Resource: "BigQuery transfer configs", Service: "datatransfer",
+		Methods: []string{"DataTransferService/CreateTransferConfig", "DataTransferService/GetTransferConfig", "DataTransferService/ListTransferConfigs",
+			"DataTransferService/UpdateTransferConfig", "DataTransferService/DeleteTransferConfig", "DataTransferService/ListDataSources", "DataTransferService/GetDataSource"},
+		Provider: "bigquery-transfers", Offers: "BigQuery > Data transfers (/bigquery-transfers) and Scheduled queries (/bigquery-scheduled-queries): each transfer config's display name, source, schedule, region, destination dataset, next run and last run state; Create transfer (Scheduled Query or Dataset Copy: name, schedule, dataset, query, destination table template, write preference, source project and dataset, overwrite, Pub/Sub topic, failure email); a transfer's Configuration; Disable and Enable transfer; Delete (#1948)",
+		Tests: []string{"TestConsoleDataTransfer", "TestBigQueryScheduledQueryThroughThePage"}},
+	{Resource: "BigQuery transfer runs", Service: "datatransfer",
+		Methods: []string{"DataTransferService/StartManualTransferRuns", "DataTransferService/GetTransferRun", "DataTransferService/ListTransferRuns",
+			"DataTransferService/ListTransferLogs", "DataTransferService/DeleteTransferRun"},
+		Provider: "bigquery-transfers", Offers: "a transfer's Run history: each run's run time, status, start and end and its last log message or error; Run transfer now; Schedule backfill (a start and end date, end excluded: a run per scheduled time); Delete run (#1948)",
+		Tests: []string{"TestConsoleDataTransfer", "TestBigQueryScheduledQueryThroughThePage"}},
+	{Resource: "BigQuery transfer deprecated backfill and enrollment", Service: "datatransfer",
+		Methods:  []string{"DataTransferService/ScheduleTransferRuns", "DataTransferService/EnrollDataSources", "DataTransferService/UnenrollDataSources", "DataTransferService/CheckValidCreds"},
+		Excluded: "ScheduleTransferRuns, deprecated for StartManualTransferRuns, which Schedule backfill calls; data source enrollment, which Google's console makes on a project's first visit with no surface of its own; and CheckValidCreds, which the console asks behind Create transfer's authorization step, which neither data source served has"},
 	// The Kubernetes Engine API (#1913), on the Kubernetes clusters page.
 	{Resource: "Kubernetes Engine clusters", Service: "gke",
 		Methods: []string{"ClusterManager/CreateCluster", "ClusterManager/GetCluster", "ClusterManager/ListClusters",
@@ -488,9 +517,12 @@ var parityRows = []parityRow{
 		Provider: "run-worker-pools", Offers: "Worker pools page (/run/worker-pools): pools list, a pool's page with its revisions and configuration, Deploy container (the Create worker pool page in Google's order, #1852), Edit and deploy new revision (Deploy worker pool revision, ending in Deploy, #1852), Scale (the instance count, the revision kept), Split instances (instanceSplits across revisions, sent with an update_mask of instance_splits; each revision's instances in the revisions list, #1387), Delete (#1300)",
 		Tests: []string{"TestConsoleRunWorkerPoolDeployEditScaleDelete", "TestNoDetailShowsABlankProperty", "TestConsoleRunWorkerPoolSplit", "TestRunWorkerPoolFormsAreGoogles"}},
 	{Resource: "Cloud Run instances", Service: "run",
-		Methods:  []string{"Instances/CreateInstance", "Instances/DeleteInstance", "Instances/GetInstance", "Instances/ListInstances", "Instances/StartInstance", "Instances/StopInstance"},
-		Provider: "run-instances", Offers: "Instances page (/run/instances): instances list, an instance's page with its status, URL and configuration, Create instance, Stop, Start, Delete (#1299; the URL and operations that wait for the instance, #1348)",
+		Methods:  []string{"Instances/CreateInstance", "Instances/DeleteInstance", "Instances/GetInstance", "Instances/ListInstances", "Instances/StartInstance", "Instances/StopInstance", "Instances/UpdateInstance"},
+		Provider: "run-instances", Offers: "Instances page (/run/instances): instances list, an instance's page with its status, URL and configuration, Create instance, Edit (description, image and environment variables, sent as UpdateInstance with a mask, #1958), Stop, Start, Delete (#1299; the URL and operations that wait for the instance, #1348)",
 		Tests: []string{"TestConsoleRunInstanceCreateStopStartDelete", "TestNoDetailShowsABlankProperty"}},
+	{Resource: "Cloud Run source uploads", Service: "run",
+		Methods:  []string{"SourceUpload/UploadSource"},
+		Excluded: "the Cloud Run API's own upload of a source archive, which gcloud beta run deploy --source --run-upload makes; Google's console uploads a source through Cloud Storage, as the service page's Deploy from source does here (#1958)"},
 	{Resource: "Cloud Run builds", Service: "run",
 		Methods:  []string{"Builds/SubmitBuild"},
 		Provider: "run", Offers: "Deploy from source on a service's page: a .tar.gz uploaded to run-sources-{project}-{region} in this instance's Cloud Storage, built with its Dockerfile or Buildpacks through SubmitBuild, and deployed as a new revision (#1268); Create service from source on the list screen: a service name, the region and the same archive and build, then CreateService with the image (#1289)",
@@ -1274,6 +1306,55 @@ var parityRows = []parityRow{
 			"StorageControl/GetOrganizationIntelligenceConfig", "StorageControl/UpdateOrganizationIntelligenceConfig"},
 		Provider: "storage-intelligence", Offers: "Storage Intelligence: the project's, the organization's and each folder's configuration (edition, effective edition and where it comes from, filter, trial end); Enable Storage Intelligence, Start trial, Disable and Inherit from parent on each; Edit filter (locations and bucket ID regexes, included or excluded) on a configuration's page (#1519)",
 		Tests: []string{"TestConsoleStorageIntelligence", "TestStorageIntelligenceConfigs", "TestStorageIntelligenceThroughThePage"}},
+	// The Cloud Storage companion APIs (#1957).
+	{Resource: "Storage batch operations jobs", Service: "storagejobs",
+		Methods: []string{"storagebatchoperations.projects.locations.jobs.create", "storagebatchoperations.projects.locations.jobs.list",
+			"storagebatchoperations.projects.locations.jobs.get", "storagebatchoperations.projects.locations.jobs.cancel",
+			"storagebatchoperations.projects.locations.jobs.delete", "storagebatchoperations.projects.locations.jobs.bucketOperations.list"},
+		Provider: "storage-batch-operations", Offers: "Cloud Storage > Batch operations (#1957): the project's jobs (Job ID, status, transformation, buckets, objects done of found, failed, dry run, created, completed); Create job over a bucket's object prefixes or a CSV manifest, deleting objects, updating their metadata, setting or removing holds or rewriting them to a Cloud KMS key, or as a dry run; each job's page with its progress, bucket operations and errors; Cancel on a running job; Delete",
+		Tests: []string{"TestConsoleStorageBatchOperations", "TestStorageBatchOperationsThroughThePage"}},
+	{Resource: "Storage batch operations reads and operations", Service: "storagejobs",
+		Methods: []string{"storagebatchoperations.projects.locations.get", "storagebatchoperations.projects.locations.list",
+			"storagebatchoperations.projects.locations.jobs.bucketOperations.get", "storagebatchoperations.projects.locations.operations.get",
+			"storagebatchoperations.projects.locations.operations.list", "storagebatchoperations.projects.locations.operations.cancel",
+			"storagebatchoperations.projects.locations.operations.delete"},
+		Excluded: "the one location (global), one bucket operation's own read, which the job's page lists, and the long-running operation of a job's creation, whose job the page shows and cancels instead, as Google's console does"},
+	{Resource: "Storage Insights inventory report configurations", Service: "storagejobs",
+		Methods: []string{"storageinsights.projects.locations.reportConfigs.create", "storageinsights.projects.locations.reportConfigs.list",
+			"storageinsights.projects.locations.reportConfigs.get", "storageinsights.projects.locations.reportConfigs.patch",
+			"storageinsights.projects.locations.reportConfigs.delete", "storageinsights.projects.locations.reportConfigs.reportDetails.list"},
+		Provider: "storage-inventory-reports", Offers: "Cloud Storage > Inventory reports (#1957): the configurations in the locations of the project's buckets; Create report configuration (display name, source bucket, metadata fields, CSV or Apache Parquet, destination bucket and path, daily or weekly from a start to an end date); each configuration's page with its Report history; Edit; Delete; Advance clock (CloudBurrow extension), which writes the reports it passes",
+		Tests: []string{"TestConsoleStorageInventoryReports", "TestStorageInventoryReportsThroughThePage"}},
+	{Resource: "Storage Insights dataset configurations", Service: "storagejobs",
+		Methods: []string{"storageinsights.projects.locations.datasetConfigs.create", "storageinsights.projects.locations.datasetConfigs.list",
+			"storageinsights.projects.locations.datasetConfigs.patch", "storageinsights.projects.locations.datasetConfigs.delete",
+			"storageinsights.projects.locations.datasetConfigs.linkDataset", "storageinsights.projects.locations.datasetConfigs.unlinkDataset"},
+		Provider: "storage-insights-datasets", Offers: "Cloud Storage > Insights datasets (#1976): the configurations in the nine linked-dataset locations; Create dataset configuration (name, description, location, projects, folders or organization scope, bucket location and name filters, newly created buckets, retention, activity data retention, service agent type); each configuration's page with its BigQuery linked dataset; Link dataset; Unlink dataset; Edit (description, retention); Delete; Advance clock (CloudBurrow extension)",
+		Tests: []string{"TestConsoleStorageInsightsDatasets", "TestStorageInsightsDatasetsThroughThePage"}},
+	{Resource: "Storage Insights dataset reads and operations", Service: "storagejobs",
+		Methods: []string{"storageinsights.projects.locations.datasetConfigs.get", "storageinsights.projects.locations.operations.get",
+			"storageinsights.projects.locations.operations.list", "storageinsights.projects.locations.operations.cancel",
+			"storageinsights.projects.locations.operations.delete"},
+		Excluded: "one configuration's own read, which the screen takes from the list, and the long-running operations, which are done when they answer: the page shows the configuration they made instead"},
+	{Resource: "Storage Insights reads", Service: "storagejobs",
+		Methods: []string{"storageinsights.projects.locations.get", "storageinsights.projects.locations.list",
+			"storageinsights.projects.locations.reportConfigs.reportDetails.get"},
+		Excluded: "the locations, which the screen takes from the project's buckets, and one report's own read, which Report history lists"},
+	{Resource: "Storage Transfer Service transfer jobs and runs", Service: "storagejobs",
+		Methods: []string{"storagetransfer.transferJobs.create", "storagetransfer.transferJobs.list", "storagetransfer.transferJobs.get",
+			"storagetransfer.transferJobs.patch", "storagetransfer.transferJobs.run", "storagetransfer.transferJobs.delete",
+			"storagetransfer.transferOperations.list", "storagetransfer.transferOperations.get", "storagetransfer.transferOperations.pause",
+			"storagetransfer.transferOperations.resume", "storagetransfer.transferOperations.cancel"},
+		Provider: "storage-transfer", Offers: "Storage Transfer Service > Transfer jobs (#1957), which Cloud Storage's Transfer data opens: Create transfer job from a bucket or a POSIX file system to a bucket or a file system (Amazon S3, Azure and URL lists drawn disabled, Not available locally), run now, once, repeating or on demand, with prefix and age conditions, overwrite and delete options and Pub/Sub notifications; each job's Run history and Configuration; Start a run, Disable job, Enable job, Delete; a run's page with its counters and errors, Pause run, Resume run, Cancel run; Advance clock (CloudBurrow extension)",
+		Tests: []string{"TestConsoleStorageTransfer", "TestStorageTransferThroughThePage"}},
+	{Resource: "Storage Transfer Service agent pools", Service: "storagejobs",
+		Methods: []string{"storagetransfer.projects.agentPools.create", "storagetransfer.projects.agentPools.list",
+			"storagetransfer.projects.agentPools.get", "storagetransfer.projects.agentPools.patch", "storagetransfer.projects.agentPools.delete"},
+		Provider: "storage-transfer-agent-pools", Offers: "Storage Transfer Service > Agent pools (#1957): the project's pools (name, display name, status, bandwidth limit); Create pool; each pool's page with Edit (display name, bandwidth limit); Delete",
+		Tests: []string{"TestConsoleStorageTransfer", "TestStorageTransferThroughThePage"}},
+	{Resource: "Storage Transfer Service service account", Service: "storagejobs",
+		Methods:  []string{"storagetransfer.googleServiceAccounts.get"},
+		Excluded: "the project's Storage Transfer service agent, which Google's console shows nowhere on the transfer pages; IAM lists it"},
 	{Resource: "Cloud Storage buckets over gRPC", Service: "storagegrpc",
 		Methods:  []string{"Storage/CreateBucket", "Storage/GetBucket", "Storage/ListBuckets", "Storage/UpdateBucket", "Storage/DeleteBucket", "Storage/LockBucketRetentionPolicy"},
 		Excluded: "the gRPC transport of the buckets the Cloud Storage pages show and change through the JSON API (buckets.insert, get, list, patch, delete and lockRetentionPolicy), as Google's console does; a bucket made or changed over gRPC shows there, as both read one store (#1321, #1491)"},
@@ -1985,7 +2066,8 @@ var parityRows = []parityRow{
 			"locally, the processors and how many are enabled); Processor gallery (documentai-gallery: every type of Google's " +
 			"gallery, Enterprise Document OCR and Layout Parser Available (FetchProcessorTypes) with Create processor (name, region), " +
 			"each other type's page saying Not available locally and why); My processors (ListProcessors in us and eu: Processor ID, " +
-			"Name, Region, Type, Status), Create processor (type, name, region), Enable processor and Disable processor on each " +
+			"Name, Region, Type, Status), Create processor (type, name, region, and under Advanced options Google-managed or a " +
+			"customer-managed encryption key, #1950, the page's Encryption key showing it), Enable processor and Disable processor on each " +
 			"row and on its page, and Delete; a processor's page with its Overview (Name, ID, Type, Prediction endpoint) and " +
 			"Upload test document, which sends the file to ProcessDocument and draws each page image it answers with the blocks, " +
 			"paragraphs and lines boxed over it, beside the extracted text and the elements' rows (confidence, bounding box), a " +
@@ -2003,13 +2085,19 @@ var parityRows = []parityRow{
 	{Resource: "Document AI: batch processing", Service: "vertexai",
 		Methods:  []string{"DocumentProcessorService/BatchProcessDocuments"},
 		Provider: "documentai", Offers: "A processor's Batch process (#1930): a gs:// source (a folder, or one document) and a gs:// " +
-			"destination sent to BatchProcessDocuments, waited on, and each document's status and the folder its Document was " +
-			"written to shown",
+			"destination sent to BatchProcessDocuments, with the processor version to use and an optional pages per shard (#1953), " +
+			"waited on, and each document's status and the folder its Document (or its shards) was written to shown",
 		Tests: []string{"TestConsoleDocumentAIProcessors", "TestDocumentAIBatchProcessThroughThePage"}},
-	{Resource: "Document AI: training", Service: "vertexai",
-		Methods: []string{"DocumentProcessorService/TrainProcessorVersion"},
-		Excluded: "TrainProcessorVersion creates versions of custom extractors, classifiers and splitters, which are not served; " +
-			"for the served types it is only ever refused, and Google's console offers no training for them"},
+	{Resource: "Document AI: evaluations", Service: "vertexai",
+		Methods:  []string{"DocumentProcessorService/ListEvaluations", "DocumentProcessorService/GetEvaluation"},
+		Provider: "documentai", Offers: "A processor's Evaluate & test tab (#1953): ListEvaluations of the default version, which " +
+			"no served type has, and why (evaluation measures a custom processor's entities against a labeled dataset)",
+		Tests: []string{"TestConsoleDocumentAIProcessors", "TestDocumentAIProcessorVersionsAndEvaluationsThroughThePage"}},
+	{Resource: "Document AI: training and evaluation runs", Service: "vertexai",
+		Methods: []string{"DocumentProcessorService/TrainProcessorVersion", "DocumentProcessorService/EvaluateProcessorVersion"},
+		Excluded: "TrainProcessorVersion and EvaluateProcessorVersion train and score versions of custom extractors, classifiers " +
+			"and splitters on a labeled dataset, none of which is served; for the served types they are only ever refused, and " +
+			"Google's console offers neither for them"},
 	{Resource: "Speech-to-Text: recognizers", Service: "vertexai",
 		Methods: []string{"Speech/CreateRecognizer", "Speech/GetRecognizer", "Speech/ListRecognizers", "Speech/UpdateRecognizer",
 			"Speech/DeleteRecognizer", "Speech/UndeleteRecognizer", "Speech/Recognize"},
@@ -2020,6 +2108,12 @@ var parityRows = []parityRow{
 			"word-level confidence, automatic punctuation), a recognizer's page with its default recognition config, Edit " +
 			"(UpdateRecognizer), Transcribe (an uploaded audio file, its transcript), Delete, and Undelete on a deleted one",
 		Tests: []string{"TestConsoleSpeechRecognizers", "TestSpeechRecognizersThroughThePage"}},
+	{Resource: "Speech-to-Text: encryption settings", Service: "vertexai",
+		Methods:  []string{"Speech/GetConfig", "Speech/UpdateConfig"},
+		Provider: "speech-recognizers", Offers: "Recognizers' Encryption settings (#1950): a region and a customer-managed " +
+			"key of the instance's Cloud KMS (Browse lists them), sent to UpdateConfig; the recognizers, custom classes and " +
+			"phrase sets created after it report the key and its version",
+		Tests: []string{"TestConsoleSpeechEncryptionSettings"}},
 	{Resource: "Speech-to-Text: batch transcription", Service: "vertexai",
 		Methods:  []string{"Speech/BatchRecognize"},
 		Provider: "speech-transcriptions", Offers: "Transcriptions' Transcribe from Cloud Storage (#1930): a recognizer, a gs:// " +

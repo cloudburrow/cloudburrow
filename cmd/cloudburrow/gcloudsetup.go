@@ -103,6 +103,18 @@ var gcloudVerified = []struct {
 	// gcloud appends. TestGcloudServicesAPIKeys drives create, list,
 	// describe, get-key-string, update, lookup, delete and undelete.
 	{apiKeysService, "apikeys", "/", true, false},
+	// The Cloud Storage companion APIs (#1957), served with Cloud Storage:
+	// gcloud transfer, gcloud storage batch-operations and gcloud storage
+	// insights call v1, which gcloud appends. TestGcloudTransferJobs,
+	// TestGcloudStorageBatchOperations and
+	// TestGcloudStorageInsightsInventoryReports drive them.
+	// The property is `transfer`, not `storagetransfer`: gcloud aliases the
+	// API (api_lib/util/apis_util.py), and every gcloud transfer command but
+	// `authorize` asks for the client as `transfer`. A `storagetransfer`
+	// line is no property, so gcloud ignored it and called Google (#1975).
+	{storageTransferService, "transfer", "/", false, false},
+	{storageBatchService, "storagebatchoperations", "/", false, false},
+	{storageInsightsService, "storageinsights", "/", false, false},
 	// Cloud Run (#1293): gcloud run calls the v1 (Knative) API, served on
 	// the Run port beside v2. A command given --region calls
 	// {region}-{host}, which gcloud derives from this override, so on
@@ -261,7 +273,8 @@ func gcloudConfiguration(cfg config.Config, adcPath string) string {
 		config.ServiceBigtable: cfg.Endpoints.Bigtable, spannerRESTEndpoint: cfg.Endpoints.SpannerREST,
 		config.ServiceFirestore: cfg.Endpoints.Firestore, config.ServicePrivateCA: cfg.Endpoints.PrivateCA, config.ServiceDatastore: cfg.Endpoints.Datastore,
 		config.ServiceGKE: cfg.Endpoints.GKE, config.ServiceMonitoring: cfg.Endpoints.Monitoring, config.ServiceCompute: cfg.Endpoints.Compute,
-		localAIEndpoint: cfg.Endpoints.LocalAI}
+		localAIEndpoint: cfg.Endpoints.LocalAI, storageTransferService: cfg.Endpoints.StorageTransfer,
+		storageBatchService: cfg.Endpoints.StorageBatchOperations, storageInsightsService: cfg.Endpoints.StorageInsights}
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n# Instance %q.\n", gcloudMarker, cfg.Name)
 	// should_prompt_to_enable_api is off because gcloud would otherwise ask
@@ -289,6 +302,9 @@ func gcloudConfiguration(cfg config.Config, adcPath string) string {
 		}
 		if v.service == localAIEndpoint {
 			on = serviceEnabled(cfg, config.ServiceRun)
+		}
+		if v.service == storageTransferService || v.service == storageBatchService || v.service == storageInsightsService {
+			on = storageJobsEnabled(cfg)
 		}
 		if on && ports[v.service] != 0 {
 			addr := host(ports[v.service])

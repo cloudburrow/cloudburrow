@@ -129,6 +129,9 @@ type statusRecorder struct {
 	http.ResponseWriter
 	status int
 	wrote  bool
+	n      int64
+	// bucket is the bucket a request names in its body (noteBucket).
+	bucket string
 }
 
 func (s *statusRecorder) WriteHeader(code int) {
@@ -140,7 +143,9 @@ func (s *statusRecorder) WriteHeader(code int) {
 
 func (s *statusRecorder) Write(b []byte) (int, error) {
 	s.wrote = true
-	return s.ResponseWriter.Write(b)
+	n, err := s.ResponseWriter.Write(b)
+	s.n += int64(n)
+	return n, err
 }
 
 func (s *statusRecorder) Flush() {
@@ -158,6 +163,23 @@ func (s *Server) observed(w http.ResponseWriter, r *http.Request, serve func(htt
 	}
 	start := s.now()
 	rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+	if !s.noRequestLog {
+		body := &countingBody{ReadCloser: r.Body}
+		if r.Body != nil && r.Body != http.NoBody {
+			r.Body = body
+		}
+		surface := "json"
+		if strings.HasPrefix(method, "xml.") {
+			surface = "xml"
+		}
+		defer func() {
+			b := bucket
+			if b == "" {
+				b = rec.bucket
+			}
+			s.logRequest(s.newRequest(r, surface, method, b, object, rec.status, body.n, rec.n, start, s.now()))
+		}()
+	}
 	resource := ""
 	if bucket != "" {
 		resource = "b/" + bucket
@@ -199,6 +221,12 @@ func (s *Server) report(c Call) {
 // serveEvents is GET /_cloudburrow/events?after=N.
 func (s *Server) serveEvents(w http.ResponseWriter, r *http.Request) {
 	after, _ := strconv.ParseUint(r.URL.Query().Get("after"), 10, 64)
+	if r.URL.Query().Get("requests") != "" {
+		reqs, dropped := s.requestsAfter(after)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"requests": reqs, "dropped": dropped})
+		return
+	}
 	calls := s.ring.after(after)
 	if calls == nil {
 		calls = []Call{}

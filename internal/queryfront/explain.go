@@ -23,6 +23,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"github.com/cloudburrow/cloudburrow/internal/datastoreversions"
 	"io"
 	"net/http"
 	"regexp"
@@ -81,6 +82,26 @@ func asksExplain(r *http.Request) bool {
 // RunQuery answers a query with explain_options, and any query in a named
 // database (databases.go); the front claims no other.
 func (d *Datastore) RunQuery(ctx context.Context, req *pb.RunQueryRequest) (*pb.RunQueryResponse, error) {
+	if d.versions != nil {
+		// A read at an earlier time reads a snapshot of the
+		// database then (#1967).
+		t, ok, err := d.versions.ReadTime(req.GetReadOptions())
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			at, restore, err := datastoreversions.Retarget(forward(ctx), d.versions, req, t)
+			if err != nil {
+				return nil, err
+			}
+			resp, err := d.RunQuery(ctx, at)
+			if err != nil {
+				return nil, err
+			}
+			restore(resp)
+			return resp, nil
+		}
+	}
 	client, err := d.emulator()
 	if err != nil {
 		return nil, err

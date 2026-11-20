@@ -554,6 +554,15 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 			envVar{cliEndpointVar("monitoring"), mo,
 				"Cloud Monitoring API v3, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint"})
 	}
+	// The BigQuery Data Transfer Service (#1948): Terraform's
+	// google_bigquery_data_transfer_config through
+	// bigquery_data_transfer_custom_endpoint.
+	if dataTransferEnabled(cfg) && cfg.Endpoints.DataTransfer != 0 {
+		dt := addr(cfg.Endpoints.DataTransfer)
+		vars = append(vars,
+			envVar{cliEndpointVar("datatransfer"), dt,
+				"the BigQuery Data Transfer Service v1, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint"})
+	}
 
 	// Service Usage (#1352): gcloud services, and Terraform's
 	// google_project_service through service_usage_custom_endpoint.
@@ -575,6 +584,30 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 				"read by gcloud; gcloud services api-keys"},
 			envVar{cliEndpointVar("apikeys"), ak,
 				"the API Keys API v2, REST, plaintext; read by no client library: pass http://" + ak + "/ to option.WithEndpoint"})
+	}
+
+	// The Cloud Storage companion APIs (#1957), beside Cloud Storage: gcloud
+	// transfer, storage batch-operations and storage insights, and
+	// Terraform's storage_transfer and storage_insights endpoints.
+	if storageJobsEnabled(cfg) {
+		for _, c := range []struct {
+			port         int
+			name, gcloud string
+			title        string
+		}{
+			{cfg.Endpoints.StorageBatchOperations, "storagebatchoperations", "STORAGEBATCHOPERATIONS", "the Storage Batch Operations API v1"},
+			{cfg.Endpoints.StorageInsights, "storageinsights", "STORAGEINSIGHTS", "the Storage Insights API v1"},
+			{cfg.Endpoints.StorageTransfer, "storagetransfer", "TRANSFER", "the Storage Transfer Service API v1"}, // gcloud's property is `transfer` (#1975)
+		} {
+			if c.port <= 0 {
+				continue
+			}
+			a := addr(c.port)
+			vars = append(vars,
+				envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_" + c.gcloud, "http://" + a + "/", "read by gcloud"},
+				envVar{cliEndpointVar(c.name), a,
+					c.title + ", REST, plaintext; read by no client library: pass http://" + a + " to option.WithEndpoint"})
+		}
 	}
 
 	// Resource Manager (#298). gcloud reads the override; the client
@@ -706,13 +739,19 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 		"memorystore-admin": &e.MemorystoreAdmin,
 		"serviceusage":      &e.ServiceUsage,
 		"apikeys":           &e.APIKeys,
-		"backupdr":          &e.BackupDR,
-		"privateca":         &e.PrivateCA,
-		"gke":               &e.GKE,
-		"monitoring":        &e.Monitoring,
-		"compute":           &e.Compute,
+		// The Cloud Storage companion APIs (#1957).
+		"storagebatchoperations": &e.StorageBatchOperations,
+		"storageinsights":        &e.StorageInsights,
+		"storagetransfer":        &e.StorageTransfer,
+		"backupdr":               &e.BackupDR,
+		"privateca":              &e.PrivateCA,
+		"gke":                    &e.GKE,
+		"monitoring":             &e.Monitoring,
+		"datatransfer":           &e.DataTransfer,
+		"compute":                &e.Compute,
 		// The local AI endpoint, which serves Vertex AI's Model Registry
-		// and Endpoints (#1940) to gcloud-setup and terraform.
+		// and Endpoints (#1940) to gcloud-setup and terraform, and Document
+		// AI (#1953), which terraform points document_ai_custom_endpoint at.
 		"localai":   &e.LocalAI,
 		"onnx":      &e.ONNX,
 		"tfconvert": &e.TFConvert,

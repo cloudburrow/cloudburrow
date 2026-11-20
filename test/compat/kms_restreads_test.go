@@ -114,8 +114,10 @@ func TestKMSReadsAgreeOverREST(t *testing.T) {
 	if code, e := get(loc + "/keyRings?bogus=1"); code != 400 || !strings.Contains(e["error"].(map[string]any)["message"].(string), "bogus") {
 		t.Errorf("bogus=1 = %d %v; want 400 naming bogus", code, e)
 	}
-	if code, e := get(loc + "/keyRings?fields=name"); code != 501 || !strings.Contains(e["error"].(map[string]any)["message"].(string), "fields") {
-		t.Errorf("fields=name = %d %v; want 501 naming fields", code, e)
+	// fields names fields of the response, and ListKeyRingsResponse has no
+	// name (#1954): Google's 400.
+	if code, e := get(loc + "/keyRings?fields=name"); code != 400 || !strings.Contains(e["error"].(map[string]any)["message"].(string), "Invalid field selection name") {
+		t.Errorf("fields=name = %d %v; want 400 Invalid field selection name", code, e)
 	}
 	if _, k := get(key.GetName()); k["createTime"] == nil || k["create_time"] != nil {
 		t.Errorf("a key over REST = %v; want protojson names", k)

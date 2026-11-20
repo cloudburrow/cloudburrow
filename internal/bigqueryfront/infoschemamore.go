@@ -49,8 +49,9 @@ import (
 // The constraint views read each table's tableConstraints: the primary
 // key, named "<table>.pk$" as BigQuery names it, and its foreign keys.
 // ROUTINE_OPTIONS gives a routine's description and library. The search
-// and vector index views are always empty: the instance makes no index
-// (CREATE SEARCH INDEX and CREATE VECTOR INDEX fail in the engine).
+// index views are always empty: the instance makes no search index
+// (CREATE SEARCH INDEX fails in the engine). The vector index views give
+// the indexes CREATE VECTOR INDEX makes (vectorindex.go, #1952).
 //
 // MATERIALIZED_VIEWS and SCHEMATA_OPTIONS: infoschemaschemata.go (#1351).
 // OBJECT_PRIVILEGES and SCHEMATA_LINKS, region-qualified: infoschemaprivileges.go (#1355).
@@ -67,9 +68,9 @@ func init() {
 		"SEARCH_INDEXES":          emptyRows(searchIndexesColumns),
 		"SEARCH_INDEX_COLUMNS":    emptyRows(indexColumnsColumns),
 		"SEARCH_INDEX_OPTIONS":    emptyRows(indexOptionsColumns),
-		"VECTOR_INDEXES":          emptyRows(vectorIndexesColumns),
-		"VECTOR_INDEX_COLUMNS":    emptyRows(indexColumnsColumns),
-		"VECTOR_INDEX_OPTIONS":    emptyRows(indexOptionsColumns),
+		"VECTOR_INDEXES":          vectorIndexRowsOf("VECTOR_INDEXES"), // vectorindex.go, #1952
+		"VECTOR_INDEX_COLUMNS":    vectorIndexRowsOf("VECTOR_INDEX_COLUMNS"),
+		"VECTOR_INDEX_OPTIONS":    vectorIndexRowsOf("VECTOR_INDEX_OPTIONS"),
 	} {
 		infoSchemaBuilders[k] = v
 		delete(unbuiltInfoSchema, k)
@@ -387,7 +388,9 @@ const searchIndexesColumns = "STRUCT<index_catalog STRING, index_schema STRING, 
 const vectorIndexesColumns = "STRUCT<index_catalog STRING, index_schema STRING, table_name STRING, index_name STRING, " +
 	"index_status STRING, creation_time TIMESTAMP, last_modification_time TIMESTAMP, last_refresh_time TIMESTAMP, " +
 	"disable_time TIMESTAMP, disable_reason STRING, ddl STRING, coverage_percentage INT64, unindexed_row_count INT64, " +
-	"total_logical_bytes INT64, total_storage_bytes INT64>"
+	"total_logical_bytes INT64, total_storage_bytes INT64, last_index_alteration_info STRUCT<status STRING, " +
+	"message STRUCT<reason STRING, location STRING, debug_info STRING, message STRING>, new_coverage_percentage INT64, " +
+	"start_time TIMESTAMP, end_time TIMESTAMP, ddl STRING>, last_model_build_time TIMESTAMP>"
 
 const indexColumnsColumns = "STRUCT<index_catalog STRING, index_schema STRING, table_name STRING, index_name STRING, " +
 	"index_column_name STRING, index_field_path STRING>"

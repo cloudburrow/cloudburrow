@@ -49,6 +49,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"github.com/cloudburrow/cloudburrow/internal/store"
+	"github.com/cloudburrow/cloudburrow/internal/sysparams"
 )
 
 // API is one entry of the catalogue.
@@ -135,7 +136,7 @@ func (s *Server) Start(context.Context) error {
 	s.ln = ln
 	// Loopback-only, but a rebound or cross-site page reaches
 	// loopback too (#676, #1586).
-	s.srv = &http.Server{Handler: hostguard.Wrap(s), ReadHeaderTimeout: 10 * time.Second}
+	s.srv = &http.Server{Handler: hostguard.Wrap(sysparams.Wrap(s, sysparams.Options{})), ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = s.srv.Serve(ln) }()
 	return nil
 }

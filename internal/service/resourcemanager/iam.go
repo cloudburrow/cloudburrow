@@ -17,7 +17,8 @@ package resourcemanager
 // a set returns a new etag and a stale one is ABORTED, conditions are
 // UNIMPLEMENTED naming the field, and a version 3 policy without conditions
 // is accepted. Audit configs are stored on a project, a folder and the
-// organization as update_mask says (#1486), and configure no audit log.
+// organization as update_mask says (#1486); Cloud Storage's Data Access
+// audit logs follow them (#1979), no other service's do.
 //
 // Tag keys and tag values keep a policy too (#1486), served by TagKeysServer
 // and TagValuesServer, with no audit configs (Google keeps those on projects,

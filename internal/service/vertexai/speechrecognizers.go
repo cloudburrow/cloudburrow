@@ -19,6 +19,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/cmek"
 	"github.com/cloudburrow/cloudburrow/internal/lro"
 )
 
@@ -66,6 +67,13 @@ type speechStore struct {
 	// (speechadaptation.go, #1930), kept beside file.
 	classes    map[string]*speechpb.CustomClass
 	phraseSets map[string]*speechpb.PhraseSet
+	// configs are each location's Config, by name; sealed the encrypted
+	// parts of the resources with a customer-managed key, by name; locked
+	// those loaded without their part, until it is opened (speechcmek.go,
+	// #1950).
+	configs map[string]savedConfig
+	sealed  map[string]cmek.Sealed
+	locked  map[string]bool
 }
 
 // SetSpeechState keeps Speech-to-Text's recognizers in file, loading those it
@@ -103,7 +111,7 @@ func (st *speechStore) save() {
 	}
 	p := &speechpb.ListRecognizersResponse{}
 	for _, x := range st.recognizers {
-		p.Recognizers = append(p.Recognizers, x)
+		p.Recognizers = append(p.Recognizers, strippedRecognizer(x))
 	}
 	sort.Slice(p.Recognizers, func(i, j int) bool { return p.Recognizers[i].Name < p.Recognizers[j].Name })
 	b, _ := protojson.Marshal(p)
@@ -112,6 +120,7 @@ func (st *speechStore) save() {
 	if os.WriteFile(tmp, b, 0o600) == nil {
 		_ = os.Rename(tmp, st.file)
 	}
+	st.saveCMEK()
 }
 
 // speechService implements speechpb.SpeechServer.
@@ -145,8 +154,6 @@ func checkRecognizer(r *speechpb.Recognizer) error {
 	switch {
 	case r.GetModel() != "" || len(r.GetLanguageCodes()) > 0:
 		return apierror.Unimplemented("Recognizer.model and Recognizer.language_codes are deprecated: set them in default_recognition_config")
-	case r.GetKmsKeyName() != "":
-		return apierror.Unimplemented("Not implemented here: Recognizer.kms_key_name: nothing is encrypted with a key")
 	case len(r.GetDisplayName()) > 63:
 		return apierror.InvalidArgument("display_name must be at most 63 characters")
 	}
@@ -180,6 +187,10 @@ func (v *speechService) CreateRecognizer(_ context.Context, req *speechpb.Create
 		v.s.mu.Unlock()
 		return nil, grpcError(apierror.AlreadyExists("Recognizer %s already exists", name))
 	}
+	if err := v.s.sealRecognizer(r, !req.GetValidateOnly()); err != nil {
+		v.s.mu.Unlock()
+		return nil, grpcError(err)
+	}
 	if !req.GetValidateOnly() {
 		st.recognizers[name] = r
 		st.save()
@@ -207,6 +218,9 @@ func (v *speechService) GetRecognizer(_ context.Context, req *speechpb.GetRecogn
 	if err != nil {
 		return nil, grpcError(err)
 	}
+	if err := v.s.unsealRecognizer(r); err != nil {
+		return nil, grpcError(err)
+	}
 	return cloneRecognizer(r), nil
 }
 
@@ -218,6 +232,10 @@ func (v *speechService) ListRecognizers(_ context.Context, req *speechpb.ListRec
 	var all []*speechpb.Recognizer
 	for _, r := range v.s.speechRecognizers().recognizers {
 		if strings.HasPrefix(r.GetName(), req.GetParent()+"/recognizers/") && (req.GetShowDeleted() || r.GetState() != speechpb.Recognizer_DELETED) {
+			if err := v.s.unsealRecognizer(r); err != nil {
+				v.s.mu.Unlock()
+				return nil, grpcError(err)
+			}
 			all = append(all, cloneRecognizer(r))
 		}
 	}
@@ -243,10 +261,23 @@ func (v *speechService) change(name, etag, method string, validateOnly bool, f f
 		v.s.mu.Unlock()
 		return nil, grpcError(apierror.Aborted("The etag %q does not match the recognizer's current etag", etag))
 	}
+	update := method == "UpdateRecognizer"
+	if update {
+		if err := v.s.unsealRecognizer(r); err != nil {
+			v.s.mu.Unlock()
+			return nil, grpcError(err)
+		}
+	}
 	next := cloneRecognizer(r)
 	if err := f(next); err != nil {
 		v.s.mu.Unlock()
 		return nil, grpcError(err)
+	}
+	if update {
+		if err := v.s.sealRecognizer(next, !validateOnly); err != nil {
+			v.s.mu.Unlock()
+			return nil, grpcError(err)
+		}
 	}
 	if !validateOnly {
 		next.UpdateTime, next.Etag = timestamppb.Now(), newEtag()
@@ -496,6 +527,10 @@ func (s *Server) maskedRecognizerConfig(name string, config json.RawMessage, mas
 	r, ok := s.speechRecognizers().recognizers[name]
 	var base *speechpb.RecognitionConfig
 	if ok {
+		if err := s.unsealRecognizer(r); err != nil {
+			s.mu.Unlock()
+			return nil, err
+		}
 		base = r.GetDefaultRecognitionConfig()
 	}
 	deleted := ok && r.GetState() == speechpb.Recognizer_DELETED
