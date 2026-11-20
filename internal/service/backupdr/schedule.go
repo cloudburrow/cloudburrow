@@ -53,7 +53,7 @@ func (s *Server) tick(now time.Time) {
 	}
 	s.mu.Unlock()
 	for _, id := range expired {
-		_ = s.sql.DeleteRun(id)
+		_ = s.deleteRun(id)
 	}
 	for _, d := range todo {
 		_, _, _ = s.backup(d.assoc, d.rule, false, 0, nil)

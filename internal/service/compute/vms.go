@@ -494,6 +494,11 @@ func (s *Server) createSnapshot(project, diskRel string, b obj, scope string) (o
 	if si := str(d, "sourceImage"); si != "" {
 		snap["_sourceImage"] = si
 	}
+	if v, _ := b[VaultSnapshot].(bool); v {
+		// A Backup and DR vault's (#2075): kept out of the project's own
+		// snapshots, as a vaulted backup is not one of them.
+		snap[VaultSnapshot] = true
+	}
 	s.res[rel] = norm(snap)
 	spec := s.diskSpecLocked(d)
 	key := vmKey("snap", s.res[rel])
@@ -510,6 +515,11 @@ func (s *Server) createSnapshot(project, diskRel string, b obj, scope string) (o
 	})
 }
 
+// VaultSnapshot marks a snapshot a Backup and DR vault holds (#2075): set
+// in an in-process createSnapshot's body, and the query parameter that
+// reaches it with snapshots.get and delete.
+const VaultSnapshot = "_backupdr"
+
 func regionOfZone(zone string) string {
 	if i := strings.LastIndex(zone, "-"); i > 0 {
 		return zone[:i]
@@ -524,7 +534,13 @@ func (s *Server) snapshots(c call) (obj, error) {
 	coll := "projects/" + c.project + "/global/snapshots"
 	switch {
 	case n == 2 && c.method == http.MethodGet:
-		return s.listOut("compute#snapshotList", coll, s.res, c.query)
+		own := map[string]obj{}
+		for k, o := range s.res {
+			if v, _ := o[VaultSnapshot].(bool); !v && strings.HasPrefix(k, coll+"/") {
+				own[k] = o
+			}
+		}
+		return s.listOut("compute#snapshotList", coll, own, c.query)
 	case n == 2 && c.method == http.MethodPost:
 		if s.opts.VMs == nil {
 			return nil, noVMs()
@@ -543,6 +559,9 @@ func (s *Server) snapshots(c call) (obj, error) {
 	}
 	rel := coll + "/" + p[2]
 	o, ok := s.res[rel]
+	if v, _ := o[VaultSnapshot].(bool); v && first(c.query, VaultSnapshot) == "" {
+		ok = false // only the vault reaches its snapshots
+	}
 	if !ok {
 		return nil, notFound(rel)
 	}
