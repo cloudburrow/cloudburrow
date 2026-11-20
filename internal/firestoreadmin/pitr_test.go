@@ -102,10 +102,12 @@ func TestReadTimeWindow(t *testing.T) {
 }
 
 // TestReadTimeGuardClaimsOldReads: the guard claims a gRPC or REST read
-// outside the window, and leaves the rest to the emulator.
+// outside the window, or finer than a microsecond, and leaves the rest to
+// the emulator. "now" is at microsecond precision, as a client's read_time
+// must be: Linux clocks have nanoseconds, which the guard refuses.
 func TestReadTimeGuardClaimsOldReads(t *testing.T) {
 	a := New("")
-	now := time.Now().UTC()
+	now := time.Now().UTC().Truncate(time.Microsecond)
 	a.now = func() time.Time { return now }
 	g := a.EditionGuard()
 	name := "projects/p/databases/(default)/documents/c/d"
@@ -117,6 +119,9 @@ func TestReadTimeGuardClaimsOldReads(t *testing.T) {
 	}
 	if grpcReq(now.Add(-time.Minute)) {
 		t.Error("a read a minute back was claimed")
+	}
+	if !grpcReq(now.Add(-time.Minute + 123)) {
+		t.Error("a read a minute back with nanoseconds was not claimed")
 	}
 	if !grpcReq(now.Add(-2 * time.Hour)) {
 		t.Error("a read two hours back was not claimed")
