@@ -13,6 +13,7 @@ require (
 	cloud.google.com/go/cloudbuild v1.35.0
 	cloud.google.com/go/cloudsqlconn v1.24.0
 	cloud.google.com/go/cloudtasks v1.20.0
+	cloud.google.com/go/compute v1.62.0
 	cloud.google.com/go/compute/metadata v0.10.0
 	cloud.google.com/go/container v1.56.1
 	cloud.google.com/go/containeranalysis v0.21.1
@@ -134,7 +135,7 @@ require (
 require (
 	cel.dev/expr v0.25.3 // indirect
 	cloud.google.com/go/auth/oauth2adapt v0.3.1 // indirect
-	cloud.google.com/go/monitoring v1.30.0 // indirect
+	cloud.google.com/go/monitoring v1.30.0
 	cloud.google.com/go/redis v1.27.0
 	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp v1.6.0 // indirect

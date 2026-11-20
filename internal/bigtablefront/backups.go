@@ -19,6 +19,8 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
+
+	"github.com/cloudburrow/cloudburrow/internal/aipfilter"
 )
 
 // Backups and snapshots (#1499). The emulator keeps neither, so the front
@@ -420,28 +422,42 @@ func under[V any](m map[string]V, parent, kind string) []string {
 	return names
 }
 
+// btBackupFields are the fields ListBackupsRequest documents for filter and
+// order_by.
+var btBackupFields = aipfilter.Fields("name", "source_table", "state", "start_time", "end_time", "expire_time", "size_bytes")
+
 func (c *copies) listBackups(_ context.Context, req *btapb.ListBackupsRequest) (proto.Message, error) {
 	if err := c.checkCluster(req.GetParent(), true); err != nil {
 		return nil, err
 	}
-	if req.GetFilter() != "" {
-		return nil, status.Error(codes.Unimplemented, "the emulator does not currently support filter in ListBackups")
-	}
-	if ob := req.GetOrderBy(); ob != "" && ob != "name" && ob != "name asc" {
-		return nil, status.Error(codes.Unimplemented, "the emulator does not currently support order_by in ListBackups other than name")
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	names := under(c.backups, req.GetParent(), "backups")
-	start, end, next, err := page(len(names), req.GetPageToken(), req.GetPageSize())
+	// ListBackupsRequest documents its filter's fields and an order_by of
+	// one of them, optionally " desc".
+	var zero *btapb.Backup
+	flt, err := aipfilter.Compile(req.GetFilter(), zero.ProtoReflect().Descriptor(), btBackupFields)
 	if err != nil {
 		return nil, err
 	}
-	out := &btapb.ListBackupsResponse{NextPageToken: next}
-	for _, n := range names[start:end] {
-		out.Backups = append(out.Backups, proto.Clone(c.backups[n].pb).(*btapb.Backup))
+	if strings.Contains(req.GetOrderBy(), ",") {
+		return nil, status.Errorf(codes.InvalidArgument, "order_by %q must name only one field", req.GetOrderBy())
 	}
-	return out, nil
+	ord, err := aipfilter.CompileOrder(req.GetOrderBy(), zero.ProtoReflect().Descriptor(), btBackupFields)
+	if err != nil {
+		return nil, err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var all []*btapb.Backup
+	for _, n := range under(c.backups, req.GetParent(), "backups") {
+		if b := c.backups[n].pb; flt.Match(b) {
+			all = append(all, proto.Clone(b).(*btapb.Backup))
+		}
+	}
+	aipfilter.Sort(ord, all)
+	start, end, next, err := page(len(all), req.GetPageToken(), req.GetPageSize())
+	if err != nil {
+		return nil, err
+	}
+	return &btapb.ListBackupsResponse{NextPageToken: next, Backups: all[start:end]}, nil
 }
 
 func (c *copies) updateBackup(_ context.Context, req *btapb.UpdateBackupRequest) (proto.Message, error) {

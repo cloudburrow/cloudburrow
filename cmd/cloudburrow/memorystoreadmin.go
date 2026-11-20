@@ -63,10 +63,12 @@ type memorystoreAdminService struct {
 	// events records what the service does on its own (an automatic
 	// failover, #1657) in /admin/events; nil records nothing.
 	events redisadmin.EventRecorder
-	server *grpctransport.Server
-	api    *redisadmin.Server
-	db     store.Store
-	prov   *memorystoreProvisioner
+	// networks are Compute Engine's (#1936), nil without compute.
+	networks func() redisadmin.Networks
+	server   *grpctransport.Server
+	api      *redisadmin.Server
+	db       store.Store
+	prov     *memorystoreProvisioner
 	// kms is Cloud KMS, for customer_managed_key (#1463); nil without it.
 	kms *kmsService
 	// privateca is Certificate Authority Service, for a Redis cluster's
@@ -136,6 +138,9 @@ func (s *memorystoreAdminService) Start(ctx context.Context) error {
 	be := memorystoreBackend(s.tunnel)
 	s.api = redisadmin.NewServer(memorystoreInstance(s.cfg, time.Now(), be.Addr), be)
 	s.api.RecordEvents(s.events)
+	if s.networks != nil {
+		s.api.SetNetworks(s.networks)
+	}
 	// CreateInstance (#1302): a server per instance, of its redis_version's
 	// image (memorystoreImages, #1386), kept across a
 	// restart in persistent mode, as the instance `up` runs keeps its data.

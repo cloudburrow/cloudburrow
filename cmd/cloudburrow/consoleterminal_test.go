@@ -36,6 +36,8 @@ func TestTerminalEnvIsGcloudSetupAtInClusterAddresses(t *testing.T) {
 		"backupdr":          "cloudburrow-host.cloudburrow.svc.cluster.local:9024",
 		"privateca":         "cloudburrow-host.cloudburrow.svc.cluster.local:9025",
 		"gke":               "cloudburrow-host.cloudburrow.svc.cluster.local:9026",
+		"monitoring":        "cloudburrow-host.cloudburrow.svc.cluster.local:9033",
+		"compute":           "cloudburrow-host.cloudburrow.svc.cluster.local:9031",
 		// The Bigtable front, which serves the admin REST API (#1440).
 		"bigtable": "bigtable.cloudburrow.svc.cluster.local:8086",
 		// Spanner's REST port and Firestore, with the admin APIs (#1461).
@@ -77,8 +79,11 @@ func TestTerminalEnvIsGcloudSetupAtInClusterAddresses(t *testing.T) {
 			t.Errorf("%s=%s is a host address a pod cannot reach", name, value)
 		}
 	}
-	if overrides != len(gcloudVerified) {
-		t.Errorf("%d overrides; gcloud-setup writes %d", overrides, len(gcloudVerified))
+	// The local AI endpoint, which serves Vertex AI's Model Registry and
+	// Endpoints (#1940), is the CLI's and has no in-cluster address, so
+	// its override is not given to a pod.
+	if overrides != len(gcloudVerified)-1 {
+		t.Errorf("%d overrides; gcloud-setup writes %d, one of them (aiplatform) host-only", overrides, len(gcloudVerified))
 	}
 
 	// Without cloudburrow-host (no Cloud Run), only what is in the cluster.

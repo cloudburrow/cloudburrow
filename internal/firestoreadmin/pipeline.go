@@ -159,6 +159,12 @@ func (a *Admin) executePipeline(ctx context.Context, req *firestorepb.ExecutePip
 		tx, newTx = b.GetTransaction(), b.GetTransaction()
 	case *firestorepb.ExecutePipelineRequest_ReadTime:
 		readTime = sel.ReadTime
+		// Within the database's version window (pitr.go, #1942).
+		if readTime.CheckValid() == nil {
+			if err := a.checkReadTime(req.GetDatabase(), readTime.AsTime()); err != nil {
+				return nil, err
+			}
+		}
 	}
 	if tx != nil && pipelineWrites(sp.GetPipeline()) {
 		return nil, status.Error(codes.InvalidArgument, "Pipeline operations with update(...) and delete() stages aren't supported within a transaction.")

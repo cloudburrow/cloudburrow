@@ -1,0 +1,10 @@
+[Unit]
+Description=Google Compute Engine guest agent (CloudBurrow accounts)
+After=cloudburrow-network.service
+[Service]
+PassEnvironment=CLOUDBURROW_GUEST_METADATA
+ExecStart=/usr/lib/cloudburrow/guest-agent
+Restart=always
+RestartSec=2
+[Install]
+WantedBy=multi-user.target

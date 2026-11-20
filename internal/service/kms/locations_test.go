@@ -67,13 +67,23 @@ func TestLocations(t *testing.T) {
 		}
 	}
 	for _, req := range []*locationpb.ListLocationsRequest{{Name: "projects/x"}, {Name: "projects/demo-project/locations"}, {Name: "projects/demo-project", Filter: "a=b"}} {
-		want := codes.InvalidArgument
-		if req.Filter != "" {
-			want = codes.Unimplemented
-		}
+		want := codes.InvalidArgument // a=b names no Location field (#1943)
 		if _, err := l.ListLocations(ctx, req); status.Code(err) != want {
 			t.Errorf("ListLocations(%v) = %v; want %v", req, err, want)
 		}
+	}
+	// The mixin's AIP-160 filter (#1943).
+	got, err := l.ListLocations(ctx, &locationpb.ListLocationsRequest{Name: "projects/demo-project", Filter: `locationId = "us-central1" OR displayName = "global"`})
+	if err != nil {
+		t.Fatalf("filtered ListLocations: %v", err)
+	}
+	for _, loc := range got.GetLocations() {
+		if loc.GetLocationId() != "us-central1" && loc.GetDisplayName() != "global" {
+			t.Errorf("filter let %s through", loc.GetName())
+		}
+	}
+	if len(got.GetLocations()) == 0 {
+		t.Errorf("filter locationId = us-central1 matched nothing")
 	}
 }
 

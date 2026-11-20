@@ -67,6 +67,8 @@ type endpointAnswer struct {
 	status      int
 	contentType string
 	body        []byte
+	// deployedModel is the registry's deployed model that answered (#1940).
+	deployedModel string
 }
 
 // relay sends body to endpoint's predict route and returns what came back.
@@ -80,8 +82,18 @@ func (s *Server) relay(ctx context.Context, project, location, endpoint string, 
 		}
 		return &endpointAnswer{status: status, contentType: ct, body: out}, nil
 	}
+	if target, dm, ok, err := s.regTarget(project, location, endpoint); ok {
+		if err != nil {
+			return nil, err
+		}
+		a, err := s.forward(ctx, endpoint, target, body, contentType)
+		if a != nil {
+			a.deployedModel = dm
+		}
+		return a, err
+	}
 	s.mu.RLock()
-	res, ingress, client := s.endpoints, s.ingress, s.client
+	res := s.endpoints
 	s.mu.RUnlock()
 	if res == nil {
 		return nil, apierror.Unimplemented(
@@ -92,6 +104,15 @@ func (s *Server) relay(ctx context.Context, project, location, endpoint string, 
 	if err != nil {
 		return nil, err
 	}
+	return s.forward(ctx, endpoint, target, body, contentType)
+}
+
+// forward posts body to a workload's URL in the cluster, through the
+// cluster ingress.
+func (s *Server) forward(ctx context.Context, endpoint, target string, body []byte, contentType string) (*endpointAnswer, error) {
+	s.mu.RLock()
+	ingress, client := s.ingress, s.client
+	s.mu.RUnlock()
 	gateway := ""
 	if ingress != nil {
 		gateway = ingress()
@@ -227,6 +248,9 @@ func (s *Server) endpointPredict(ctx context.Context, project, location, endpoin
 	if err := prediction.ValidateResponse(req, resp); err != nil {
 		return nil, apierror.Internal(err, "endpoint %s broke the prediction contract: %v", endpoint, err)
 	}
+	if a.deployedModel != "" {
+		return withDeployedModelID(a.body, a.deployedModel), nil
+	}
 	return a.body, nil
 }
 
@@ -275,7 +299,7 @@ func (s *Server) handleEndpoint(w http.ResponseWriter, r *http.Request) {
 		// The container's contract has no streaming route: its one answer (#1285).
 		s.streamRawPredictREST(w, r, target{project: project, location: location, endpoint: endpoint}, body)
 	default:
-		if s.modelGarden() != nil {
+		if s.modelGarden() != nil || s.registry() != nil {
 			// :undeployModel and the rest of EndpointService (#1840).
 			s.serveREST(w, r, body)
 			return

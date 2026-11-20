@@ -20,6 +20,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/cloudburrow/cloudburrow/internal/aipfilter"
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/paging"
 )
@@ -77,16 +78,18 @@ func checkID(field, id string) error {
 	return nil
 }
 
-// refuseFilter answers 501 for a list filter or order_by CloudBurrow does
-// not evaluate, rather than ignoring it.
-func refuseFilter(filter, orderBy string) error {
-	if strings.TrimSpace(filter) != "" {
-		return apierror.Unimplemented("list filter is not implemented in CloudBurrow yet")
+// filteredPage is page with a list's AIP-160 filter and AIP-132 order_by
+// (#1943): without either it pages keys as before; with one it reads every
+// resource, filters and orders them, and pages the result in that order.
+func filteredPage[T proto.Message](filter, orderBy, scope string, keys []string, token string, size int32, get func(string) T) ([]T, string, error) {
+	if strings.TrimSpace(filter) == "" && strings.TrimSpace(orderBy) == "" {
+		return page(scope, keys, token, size, get)
 	}
-	if o := strings.TrimSpace(orderBy); o != "" && o != "name" && o != "name asc" {
-		return apierror.Unimplemented("order_by %q is not implemented in CloudBurrow yet: only name", orderBy)
+	all := make([]T, 0, len(keys))
+	for _, k := range keys {
+		all = append(all, get(k))
 	}
-	return nil
+	return aipfilter.ListPage(scope, filter, orderBy, all, token, int(size))
 }
 
 func page[T any](scope string, keys []string, token string, size int32, get func(string) T) ([]T, string, error) {
@@ -181,9 +184,6 @@ func (a *API) ListCaPools(_ context.Context, req *privatecapb.ListCaPoolsRequest
 	if err := checkLocation("parent", req.GetParent()); err != nil {
 		return nil, err
 	}
-	if err := refuseFilter(req.GetFilter(), req.GetOrderBy()); err != nil {
-		return nil, err
-	}
 	a.s.mu.Lock()
 	defer a.s.mu.Unlock()
 	var keys []string
@@ -192,7 +192,7 @@ func (a *API) ListCaPools(_ context.Context, req *privatecapb.ListCaPoolsRequest
 			keys = append(keys, k)
 		}
 	}
-	out, next, err := page("privateca-pools:"+req.GetParent(), keys, req.GetPageToken(), req.GetPageSize(),
+	out, next, err := filteredPage(req.GetFilter(), req.GetOrderBy(), "privateca-pools:"+req.GetParent(), keys, req.GetPageToken(), req.GetPageSize(),
 		func(k string) *privatecapb.CaPool { return clone(a.s.pools[k].Pool) })
 	if err != nil {
 		return nil, err
@@ -470,13 +470,6 @@ func (a *API) GetCertificateAuthority(_ context.Context, req *privatecapb.GetCer
 }
 
 func (a *API) ListCertificateAuthorities(_ context.Context, req *privatecapb.ListCertificateAuthoritiesRequest) (*privatecapb.ListCertificateAuthoritiesResponse, error) {
-	match, err := caFilter(req.GetFilter())
-	if err != nil {
-		return nil, err
-	}
-	if err := refuseFilter("", req.GetOrderBy()); err != nil {
-		return nil, err
-	}
 	s := a.s
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -484,13 +477,9 @@ func (a *API) ListCertificateAuthorities(_ context.Context, req *privatecapb.Lis
 		return nil, apierror.InvalidArgument("parent %q must be a CaPool name", req.GetParent())
 	}
 	s.purge()
-	var keys []string
-	for _, k := range sortedKeys(s.cas, req.GetParent()+"/certificateAuthorities/") {
-		if match(s.cas[k].CA) {
-			keys = append(keys, k)
-		}
-	}
-	out, next, err := page("privateca-cas:"+req.GetParent()+"?"+req.GetFilter(), keys, req.GetPageToken(), req.GetPageSize(),
+	// gcloud's roots list and subordinates list send type="SELF_SIGNED" or
+	// type:SUBORDINATE; any AIP-160 filter and order_by applies.
+	out, next, err := filteredPage(req.GetFilter(), req.GetOrderBy(), "privateca-cas:"+req.GetParent(), sortedKeys(s.cas, req.GetParent()+"/certificateAuthorities/"), req.GetPageToken(), req.GetPageSize(),
 		func(k string) *privatecapb.CertificateAuthority { return clone(s.cas[k].CA) })
 	if err != nil {
 		return nil, err
@@ -916,9 +905,6 @@ func (a *API) GetCertificate(_ context.Context, req *privatecapb.GetCertificateR
 }
 
 func (a *API) ListCertificates(_ context.Context, req *privatecapb.ListCertificatesRequest) (*privatecapb.ListCertificatesResponse, error) {
-	if err := refuseFilter(req.GetFilter(), req.GetOrderBy()); err != nil {
-		return nil, err
-	}
 	s := a.s
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -929,7 +915,7 @@ func (a *API) ListCertificates(_ context.Context, req *privatecapb.ListCertifica
 	if k := sortedKeys(s.sealed, req.GetParent()+"/certificates/"); len(k) > 0 {
 		return nil, sealedErr(k[0], s.sealed[k[0]].Key)
 	}
-	out, next, err := page("privateca-certs:"+req.GetParent(), sortedKeys(s.certs, req.GetParent()+"/certificates/"), req.GetPageToken(), req.GetPageSize(),
+	out, next, err := filteredPage(req.GetFilter(), req.GetOrderBy(), "privateca-certs:"+req.GetParent(), sortedKeys(s.certs, req.GetParent()+"/certificates/"), req.GetPageToken(), req.GetPageSize(),
 		func(k string) *privatecapb.Certificate { return clone(s.certs[k]) })
 	if err != nil {
 		return nil, err

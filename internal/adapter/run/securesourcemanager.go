@@ -14,6 +14,7 @@ import (
 
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
 	ssmpb "cloud.google.com/go/securesourcemanager/apiv1/securesourcemanagerpb"
+	"github.com/cloudburrow/cloudburrow/internal/aipfilter"
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
@@ -233,18 +234,23 @@ func (m *SecureSourceManagerServer) ListInstances(_ context.Context, req *ssmpb.
 	if _, _, err := resource.ParseLocation(req.GetParent()); err != nil {
 		return nil, apierror.InvalidArgument("%v", err)
 	}
-	if req.GetPageToken() != "" || req.GetFilter() != "" || req.GetOrderBy() != "" {
-		return nil, apierror.Unimplemented("ListInstances page_token, filter and order_by are not supported")
-	}
 	ssmState.mu.Lock()
-	defer ssmState.mu.Unlock()
-	out := &ssmpb.ListInstancesResponse{}
+	var all []*ssmpb.Instance
 	for _, name := range sortedKeys(ssmState.instances) {
 		if strings.HasPrefix(name, req.GetParent()+"/instances/") {
-			out.Instances = append(out.Instances, proto.Clone(ssmState.instances[name]).(*ssmpb.Instance))
+			all = append(all, proto.Clone(ssmState.instances[name]).(*ssmpb.Instance))
 		}
 	}
-	return out, nil
+	ssmState.mu.Unlock()
+	all, err := aipfilter.List(req.GetFilter(), req.GetOrderBy(), all)
+	if err != nil {
+		return nil, err
+	}
+	items, next, err := page(all, req.GetPageSize(), req.GetPageToken(), req.GetParent()+"/instances|"+req.GetFilter()+"|"+req.GetOrderBy())
+	if err != nil {
+		return nil, err
+	}
+	return &ssmpb.ListInstancesResponse{Instances: items, NextPageToken: next}, nil
 }
 
 // GetInstance reads an instance.
@@ -339,19 +345,24 @@ func (m *SecureSourceManagerServer) ListRepositories(_ context.Context, req *ssm
 	if _, _, err := resource.ParseLocation(req.GetParent()); err != nil {
 		return nil, apierror.InvalidArgument("%v", err)
 	}
-	if req.GetPageToken() != "" || req.GetFilter() != "" {
-		return nil, apierror.Unimplemented("ListRepositories page_token and filter are not supported")
-	}
 	ssmState.mu.Lock()
-	defer ssmState.mu.Unlock()
-	out := &ssmpb.ListRepositoriesResponse{}
+	var all []*ssmpb.Repository
 	for _, name := range sortedKeys(ssmState.repos) {
 		r := ssmState.repos[name]
 		if strings.HasPrefix(name, req.GetParent()+"/repositories/") && (req.GetInstance() == "" || r.GetInstance() == req.GetInstance()) {
-			out.Repositories = append(out.Repositories, proto.Clone(r).(*ssmpb.Repository))
+			all = append(all, proto.Clone(r).(*ssmpb.Repository))
 		}
 	}
-	return out, nil
+	ssmState.mu.Unlock()
+	all, err := aipfilter.Apply(req.GetFilter(), all)
+	if err != nil {
+		return nil, err
+	}
+	items, next, err := page(all, req.GetPageSize(), req.GetPageToken(), req.GetParent()+"/repositories|"+req.GetInstance()+"|"+req.GetFilter())
+	if err != nil {
+		return nil, err
+	}
+	return &ssmpb.ListRepositoriesResponse{Repositories: items, NextPageToken: next}, nil
 }
 
 // GetRepository reads a repository.

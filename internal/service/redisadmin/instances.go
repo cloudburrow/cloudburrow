@@ -544,6 +544,9 @@ func (s *Server) CreateInstance(ctx context.Context, req *redispb.CreateInstance
 	if r.AuthorizedNetwork, r.ConnectMode, r.ReservedIPRange, err = instanceNetwork(in, name, m[1]); err != nil {
 		return nil, err
 	}
+	if err := s.checkInstanceVPC(in, r); err != nil {
+		return nil, err
+	}
 	if err := standard(in, r); err != nil {
 		return nil, err
 	}

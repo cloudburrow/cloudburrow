@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	locationpb "google.golang.org/genproto/googleapis/cloud/location"
@@ -51,8 +52,18 @@ func TestLocations(t *testing.T) {
 			t.Errorf("GetLocation(%s) = %v, %v; want %v", name, got, err, want)
 		}
 	}
-	if _, err := l.ListLocations(ctx, &locationpb.ListLocationsRequest{Name: "projects/demo-project", Filter: "x"}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("filter: %v; want UNIMPLEMENTED", err)
+	if _, err := l.ListLocations(ctx, &locationpb.ListLocationsRequest{Name: "projects/demo-project", Filter: "x"}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("bad filter: %v; want INVALID_ARGUMENT", err)
+	}
+	// The mixin's AIP-160 filter (#1943).
+	got, err := l.ListLocations(ctx, &locationpb.ListLocationsRequest{Name: "projects/demo-project", Filter: `locationId = "us-*" AND NOT locationId = us-central1`})
+	if err != nil || len(got.GetLocations()) == 0 {
+		t.Fatalf("filtered ListLocations: %v, %v", got, err)
+	}
+	for _, loc := range got.GetLocations() {
+		if !strings.HasPrefix(loc.GetLocationId(), "us-") || loc.GetLocationId() == "us-central1" {
+			t.Errorf("filter let %s through", loc.GetName())
+		}
 	}
 	if _, err := l.ListLocations(ctx, &locationpb.ListLocationsRequest{Name: "demo-project"}); status.Code(err) != codes.InvalidArgument {
 		t.Errorf("malformed name: %v; want INVALID_ARGUMENT", err)

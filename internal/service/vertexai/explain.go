@@ -190,6 +190,14 @@ func (s *Server) explain(ctx context.Context, t target, req *aiplatformpb.Explai
 	if len(req.GetInstances()) == 0 {
 		return nil, apierror.InvalidArgument("instances is empty: at least one instance is required")
 	}
+	if r := s.registry(); r != nil && req.GetExplanationSpecOverride().GetParameters() == nil && r.hasEndpoint(t.project, t.location, t.endpoint) {
+		// A registry endpoint's deployed model carries its spec (#1940).
+		if es := r.explanationSpec(t.project, t.location, t.endpoint, req.GetDeployedModelId()); es != nil {
+			req = proto.Clone(req).(*aiplatformpb.ExplainRequest)
+			req.ExplanationSpecOverride = &aiplatformpb.ExplanationSpecOverride{Parameters: es.GetParameters(),
+				Metadata: &aiplatformpb.ExplanationMetadataOverride{Inputs: overrideInputs(es.GetMetadata())}}
+		}
+	}
 	spec, err := explainSpecOf(t.endpoint, req)
 	if err != nil {
 		return nil, err
@@ -385,4 +393,14 @@ func (s *Server) explainREST(w http.ResponseWriter, r *http.Request, t target, b
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write(out)
+}
+
+// overrideInputs turns a model's explanation metadata inputs into the
+// override's, which carry only the baselines Explain reads.
+func overrideInputs(m *aiplatformpb.ExplanationMetadata) map[string]*aiplatformpb.ExplanationMetadataOverride_InputMetadataOverride {
+	out := map[string]*aiplatformpb.ExplanationMetadataOverride_InputMetadataOverride{}
+	for k, in := range m.GetInputs() {
+		out[k] = &aiplatformpb.ExplanationMetadataOverride_InputMetadataOverride{InputBaselines: in.GetInputBaselines()}
+	}
+	return out
 }

@@ -107,6 +107,9 @@ type Server struct {
 	// events records what the service does on its own, such as an
 	// automatic failover, in /admin/events; nil records nothing.
 	events EventRecorder
+	// networks are the Compute Engine networks checked against (vpc.go,
+	// #1936); nil, or nil from it, checks none.
+	networks func() Networks
 }
 
 // EventRecorder records an event of service, of kind, about target, as

@@ -401,16 +401,16 @@ func (a *AutokeyServer) GetKeyHandle(_ context.Context, req *kmspb.GetKeyHandleR
 	return h.proto(), nil
 }
 
-// keyHandleFilterFields: the filter the proto shows,
-// resource_type_selector="{SERVICE}.googleapis.com/{TYPE}".
-var keyHandleFilterFields = fieldSupport{"resource_type_selector": {"=", "!="}, "name": {"=", "!=", ":"}}
+// ListKeyHandles takes the filter the proto shows,
+// resource_type_selector="{SERVICE}.googleapis.com/{TYPE}", or any other
+// AIP-160 filter over a KeyHandle.
 
 func (a *AutokeyServer) ListKeyHandles(_ context.Context, req *kmspb.ListKeyHandlesRequest) (*kmspb.ListKeyHandlesResponse, error) {
 	s := a.s
 	if err := parseLocation("parent", req.GetParent()); err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	filter, err := parseFilter(req.GetFilter(), keyHandleFilterFields)
+	filter, err := parseFilter(req.GetFilter(), &kmspb.KeyHandle{})
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -425,15 +425,7 @@ func (a *AutokeyServer) ListKeyHandles(_ context.Context, req *kmspb.ListKeyHand
 		if err != nil {
 			return nil, apierror.Wrap(err)
 		}
-		if !found || (filter != nil && !filter.match(func(field string) (string, bool) {
-			switch field {
-			case "name":
-				return h.Name, true
-			case "resource_type_selector":
-				return h.ResourceType, true
-			}
-			return "", false
-		})) {
+		if !found || !filter.Match(h.proto()) {
 			continue
 		}
 		handles = append(handles, h)

@@ -427,14 +427,12 @@ func (h *HsmManagementServer) GetSingleTenantHsmInstance(_ context.Context, req 
 	return i.proto(), nil
 }
 
-var hsmFilterFields = fieldSupport{"name": {"=", "!=", ":"}, "state": {"=", "!="}}
-
 func (h *HsmManagementServer) ListSingleTenantHsmInstances(_ context.Context, req *kmspb.ListSingleTenantHsmInstancesRequest) (*kmspb.ListSingleTenantHsmInstancesResponse, error) {
 	s := h.s
 	if err := parseLocation("parent", req.GetParent()); err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	filter, err := parseFilter(req.GetFilter(), hsmFilterFields)
+	filter, err := parseFilter(req.GetFilter(), &kmspb.SingleTenantHsmInstance{})
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -456,15 +454,7 @@ func (h *HsmManagementServer) ListSingleTenantHsmInstances(_ context.Context, re
 		if i.state() == kmspb.SingleTenantHsmInstance_DELETED && !req.GetShowDeleted() {
 			continue
 		}
-		if filter != nil && !filter.match(func(f string) (string, bool) {
-			switch f {
-			case "name":
-				return i.Name, true
-			case "state":
-				return i.State, true
-			}
-			return "", false
-		}) {
+		if !filter.Match(i.proto()) {
 			continue
 		}
 		byN[n] = i
@@ -694,7 +684,7 @@ func (h *HsmManagementServer) ListSingleTenantHsmInstanceProposals(_ context.Con
 	if _, err := parseHsmInstance("parent", req.GetParent()); err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	filter, err := parseFilter(req.GetFilter(), hsmFilterFields)
+	filter, err := parseFilter(req.GetFilter(), &kmspb.SingleTenantHsmInstanceProposal{})
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -719,15 +709,7 @@ func (h *HsmManagementServer) ListSingleTenantHsmInstanceProposals(_ context.Con
 		if !found || (p.state() == kmspb.SingleTenantHsmInstanceProposal_DELETED && !req.GetShowDeleted()) {
 			continue
 		}
-		if filter != nil && !filter.match(func(f string) (string, bool) {
-			switch f {
-			case "name":
-				return p.Name, true
-			case "state":
-				return p.State, true
-			}
-			return "", false
-		}) {
+		if !filter.Match(p.proto()) {
 			continue
 		}
 		byN[n] = p

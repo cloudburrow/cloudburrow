@@ -1,0 +1,58 @@
+# Cloud Monitoring
+
+CloudBurrow serves the Cloud Monitoring API v3 (`monitoring.googleapis.com`, #1939, #1964) and the Dashboards API v1 in the CLI process. Google publishes no emulator, so it is built to Google's reference: metric descriptors, monitored resource descriptors, user-defined time series written with Google's write rules, and reads with filters, alignment and reduction. The instance's own measurements are built-in metrics: its log-based metrics and log entry counts, from the local Cloud Logging, and the API requests it serves, per project.
+
+```sh
+cloudburrow up --services logging,monitoring
+eval "$(cloudburrow env)"
+```
+
+The API is gRPC and JSON on one port, `--port-monitoring` (default `9033`). `env` exports `CLOUDBURROW_MONITORING_ENDPOINT`; pass it to the official client:
+
+```go
+c, err := monitoring.NewMetricClient(ctx,
+	option.WithEndpoint(os.Getenv("CLOUDBURROW_MONITORING_ENDPOINT")),
+	option.WithoutAuthentication(),
+	option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
+```
+
+OpenTelemetry's Google Cloud exporter takes the same endpoint and options.
+
+## What is served
+
+- **Metric descriptors**: create, get, list and delete user-defined ones (`custom.googleapis.com/`, `external.googleapis.com/`, `workload.googleapis.com/`); list and get the built-in ones.
+- **Monitored resource descriptors**: the types user-defined metrics may be written against, and the ones the built-in metrics and log entries name.
+- **Writing points** (`CreateTimeSeries`): one point per series per request, up to 200 series, in order, at most one point every 5 seconds per series, end times from 25 hours back to 5 minutes ahead; a descriptor is auto-created for a type that has none.
+- **Reading series** (`ListTimeSeries`): a filter naming one metric type, an interval, every aligner and reducer, `group_by_fields`, the FULL and HEADERS views.
+- **Built-in metrics**:
+  - `logging.googleapis.com/user/NAME` for each enabled log-based metric (counter or distribution, one-minute DELTA points, labels from its extractors), counting the entries received after the metric was created;
+  - `logging.googleapis.com/log_entry_count`, per log and severity;
+  - `serviceruntime.googleapis.com/api/request_count` and `api/request_latencies` on `consumed_api`, for the APIs CloudBurrow serves itself, attributed to the project each call names (a call that names none to the instance's default project).
+
+User-defined descriptors and points are kept in `monitoring.json` in the instance directory in persistent mode. Log-based values come from Cloud Logging's in-memory entries, and request metrics are kept in memory for a week.
+
+Terraform's `google_monitoring_metric_descriptor` works through `cloudburrow terraform` (`monitoring_custom_endpoint`). gcloud has no command for metric descriptors or time series.
+
+## Console
+
+Operations > Monitoring has **Metrics explorer** (`/monitoring/metrics-explorer`): select a resource type and a metric, filter by label, choose an aligner, alignment period, reducer and group-by labels and a time range, and see the series charted and listed. **Metrics management** (`/monitoring/metrics-management`) lists the descriptors, creates user-defined ones and deletes them.
+
+## Alerting, uptime checks, groups, SLOs and dashboards (#1964)
+
+The other v3 services and the Dashboards API v1 are on the same port (`cloud.google.com/go/monitoring/apiv3/v2` clients and `cloud.google.com/go/monitoring/dashboard/apiv1`, with the same options):
+
+- **Alert policies** with metric-threshold, metric-absence and log-match conditions, evaluated every 15 seconds over the series above and the local Cloud Logging. Each series that meets a condition opens an **incident**, which closes when it stops meeting it. Google has no incident API; the console's Alerting and Incidents pages list them, and acknowledge and close them. MQL and PromQL conditions are refused with `UNIMPLEMENTED`.
+- **Notification channels**. Delivery never leaves the machine. Webhook channels (`webhook_tokenauth`, `webhook_basicauth`) are posted Google's incident JSON (schema 1.2) only when their host is local: localhost, a loopback or private address, a cluster service name or `host.docker.internal`. A `pubsub` channel publishes to the instance's own Pub/Sub topic (with `--services pubsub`). Email, SMS, Slack, PagerDuty and Google Chat notifications are recorded and never sent; so are verification codes, which the console shows.
+- **Snoozes**: while one is active, its policies open no incidents.
+- **Uptime checks**: HTTP(S) and TCP checks of local hosts only, run once per period from one local checker. Each run writes `monitoring.googleapis.com/uptime_check/check_passed` and `request_latency`, which policies can alert on.
+- **Groups**: their members are the monitored resources of the project's series.
+- **Services and SLOs** are stored; their compliance is not computed.
+- **Dashboards** are stored with an etag, and drawn on the console's Dashboards page.
+
+Terraform's `google_monitoring_notification_channel`, `_alert_policy`, `_uptime_check_config`, `_group` and `_dashboard` work through `cloudburrow terraform`. `cloudburrow gcloud-setup` writes the `monitoring` override, so `gcloud monitoring dashboards`, `gcloud alpha|beta monitoring channels` and `policies` reach the instance.
+
+Operations > Monitoring adds **Alerting**, **Incidents**, **Notification channels**, **Uptime checks**, **Dashboards**, **Groups**, **Services** and **Snoozes** pages.
+
+## Not served
+
+The Query service (MQL, `QueryTimeSeries`) answers `UNIMPLEMENTED`. See [compatibility.md](compatibility.md#cloud-monitoring--googlemonitoringv3) for every claim and its gaps.

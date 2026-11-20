@@ -195,7 +195,7 @@ func TestFirestoreBackupRestoreClone(t *testing.T) {
 	h := New(t)
 	c := firestoreAdmin(t, h)
 	fs := firestoreClient(t, h)
-	ctx := h.Context()
+	ctx := minuteContext(t) // waits for a whole minute (#1942)
 	project := "projects/" + h.Project()
 	db := project + "/databases/(default)"
 	seedFirestore(t, fs)
@@ -240,7 +240,9 @@ func TestFirestoreBackupRestoreClone(t *testing.T) {
 		t.Errorf("restored documents = %v", got)
 	}
 
-	now := time.Now().UTC().Truncate(time.Minute)
+	// A clone holds the documents as they were at its whole minute
+	// (#1942): the next one, which every write above precedes.
+	now := nextWholeMinute()
 	cop, err := c.CloneDatabase(ctx, &adminpb.CloneDatabaseRequest{Parent: project, DatabaseId: "cloned",
 		PitrSnapshot: &adminpb.PitrSnapshot{Database: db, SnapshotTime: timestamppb.New(now)}})
 	if err != nil {
@@ -259,8 +261,8 @@ func TestFirestoreBackupRestoreClone(t *testing.T) {
 	}
 	_, err = c.CloneDatabase(ctx, &adminpb.CloneDatabaseRequest{Parent: project, DatabaseId: "older",
 		PitrSnapshot: &adminpb.PitrSnapshot{Database: db, SnapshotTime: timestamppb.New(now.Add(-time.Hour))}})
-	if status.Code(err) != codes.Unimplemented {
-		t.Errorf("clone an hour back: %v, want UNIMPLEMENTED", err)
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("clone an hour back, before the earliest version time: %v, want FAILED_PRECONDITION", err)
 	}
 
 	if err := c.DeleteBackup(ctx, &adminpb.DeleteBackupRequest{Name: b.Name}); err != nil {

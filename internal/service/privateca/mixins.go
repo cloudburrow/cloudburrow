@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	"github.com/cloudburrow/cloudburrow/internal/aipfilter"
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 	"github.com/cloudburrow/cloudburrow/internal/locations"
@@ -45,12 +46,9 @@ func (o *operations) ListOperations(_ context.Context, req *longrunningpb.ListOp
 	if err := checkLocation("name", req.GetName()); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(req.GetFilter()) != "" {
-		return nil, apierror.Unimplemented("operations filter is not implemented in CloudBurrow yet")
-	}
 	o.s.mu.Lock()
 	defer o.s.mu.Unlock()
-	out, next, err := page("privateca-ops:"+req.GetName(), sortedKeys(o.s.ops, req.GetName()+"/operations/"), req.GetPageToken(), req.GetPageSize(),
+	out, next, err := filteredPage(req.GetFilter(), "", "privateca-ops:"+req.GetName(), sortedKeys(o.s.ops, req.GetName()+"/operations/"), req.GetPageToken(), req.GetPageSize(),
 		func(k string) *longrunningpb.Operation { return clone(o.s.ops[k]) })
 	if err != nil {
 		return nil, err
@@ -121,13 +119,14 @@ func (l *locationsServer) ListLocations(_ context.Context, req *locationpb.ListL
 	if !projectRE.MatchString(req.GetName()) {
 		return nil, apierror.InvalidArgument("name %q must be projects/{project}", req.GetName())
 	}
-	if strings.TrimSpace(req.GetFilter()) != "" {
-		return nil, apierror.Unimplemented("locations filter is not implemented in CloudBurrow yet")
+	mk := func(id string) *locationpb.Location {
+		return &locationpb.Location{Name: req.GetName() + "/locations/" + id, LocationId: id, DisplayName: id}
 	}
-	out, next, err := page("privateca-locations:"+req.GetName(), l.ids(req.GetName()), req.GetPageToken(), req.GetPageSize(),
-		func(id string) *locationpb.Location {
-			return &locationpb.Location{Name: req.GetName() + "/locations/" + id, LocationId: id, DisplayName: id}
-		})
+	ids, err := aipfilter.LocationIDs(req.GetFilter(), l.ids(req.GetName()), func(id string) (*locationpb.Location, error) { return mk(id), nil })
+	if err != nil {
+		return nil, err
+	}
+	out, next, err := page("privateca-locations:"+req.GetName()+"|"+req.GetFilter(), ids, req.GetPageToken(), req.GetPageSize(), mk)
 	if err != nil {
 		return nil, err
 	}

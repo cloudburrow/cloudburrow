@@ -68,6 +68,8 @@ var emulatorOnly = map[string]string{
 	"k8sobjects":           "Object Browser lists kubectl api-resources, which the fake kubectl does not serve (TestGKEObjectBrowserParsesAPIResources)",
 	"bigquery-jobs":        "BigQuery's Job history reads the same emulator, through the validating front",
 	"eventarc":             "a trigger needs Pub/Sub, its transport, which this test does not run (TestEventarcTriggersPageThroughTheBrowser drives the page)",
+	"vertex-models":        "the Model Registry is read from the local AI endpoint over gRPC, which this test does not start (TestModelRegistryAndEndpointsThroughThePages drives the page)",
+	"vertex-endpoints":     "Endpoints are read from the local AI endpoint over gRPC, which this test does not start (TestModelRegistryAndEndpointsThroughThePages drives the page)",
 	"run-domains":          "the Cloud Run Admin API v1's domain mappings, which this test's in-process adapter does not serve over HTTP (TestCloudRunGooglePagesThroughTheBrowser drives the page)",
 	"cloudsql-instances":   "the Cloud SQL Admin API over PostgreSQL and MySQL servers; there is no in-process one",
 }
@@ -264,6 +266,16 @@ func blankCheckDeps(t *testing.T) consoleDeps {
 		ServiceAccount: &adminpb.ServiceAccount{DisplayName: "Blank account", Description: "Blank account"}}); err != nil {
 		t.Fatal(err)
 	} else if _, err := d.projects.CreateServiceAccountKey(&adminpb.CreateServiceAccountKeyRequest{Name: sa.GetName()}); err != nil {
+		t.Fatal(err)
+	}
+	// A workload identity pool (#1941), with an OIDC provider.
+	if _, err := d.projects.CreateWorkloadIdentityPool(blankProject, "blank-pool", resourcemanager.WorkloadIdentityPool{
+		DisplayName: "Blank pool", Description: "Blank pool"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.projects.CreateWorkloadIdentityPoolProvider(blankProject, "blank-pool", "blank-provider", resourcemanager.WorkloadIdentityPoolProvider{
+		DisplayName: "Blank provider", Description: "Blank provider", AttributeMapping: map[string]string{"google.subject": "assertion.sub"},
+		Oidc: &resourcemanager.WIFOidc{IssuerURI: "https://idp.example.test", AllowedAudiences: []string{"blank"}}}); err != nil {
 		t.Fatal(err)
 	}
 	tk, err := d.projects.CreateTagKey(&rmpb.TagKey{Parent: resourcemanager.OrganizationName, ShortName: "blank-key", Description: "Blank key"}, false)

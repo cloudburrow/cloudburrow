@@ -67,6 +67,10 @@ func TestNameAndLabelFilters(t *testing.T) {
 		"name:dev":                "dev",
 		"labels.env=dev name:dev": "dev",
 		"labels.missing=anything": "",
+		// Any CryptoKey field, through the shared AIP-160 filter (#1943).
+		"labels.env!=prod":                        "bare,dev",
+		`create_time>"2020-01-01T00:00:00Z"`:      "bare,dev,prod",
+		"purpose=ENCRYPT_DECRYPT AND labels:team": "dev",
 	} {
 		if got, err := keys(f); err != nil || got != want {
 			t.Errorf("keys %s = %q (%v), want %q", f, got, err, want)
@@ -74,15 +78,15 @@ func TestNameAndLabelFilters(t *testing.T) {
 	}
 	code := func(err error) codes.Code { return status.Code(apierror.Wrap(err)) }
 	for f, want := range map[string]codes.Code{
-		"create_time>2020": codes.Unimplemented,
-		"labels.env!=prod": codes.Unimplemented,
+		"create_time>2020": codes.InvalidArgument, // not RFC 3339
+		"nosuch=1":         codes.InvalidArgument,
 		"labels.env=":      codes.InvalidArgument,
 	} {
 		if _, err := keys(f); code(err) != want {
 			t.Errorf("keys %s = %v, want %s", f, err, want)
 		}
 	}
-	if _, err := rings("labels.env=prod"); code(err) != codes.Unimplemented {
-		t.Errorf("a labels filter on key rings = %v, want UNIMPLEMENTED: key rings have no labels", err)
+	if _, err := rings("labels.env=prod"); code(err) != codes.InvalidArgument {
+		t.Errorf("a labels filter on key rings = %v, want INVALID_ARGUMENT: key rings have no labels", err)
 	}
 }

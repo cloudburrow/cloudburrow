@@ -29,8 +29,8 @@ func TestOrderByAndItsPageTokens(t *testing.T) {
 	if _, err := s.ListKeyRings(ctx, &kmspb.ListKeyRingsRequest{Parent: loc, OrderBy: "create_time"}); code(err) != codes.InvalidArgument {
 		t.Errorf("order_by create_time = %v, want INVALID_ARGUMENT", err)
 	}
-	if _, err := s.ListKeyRings(ctx, &kmspb.ListKeyRingsRequest{Parent: loc, Filter: "create_time>2020"}); code(err) != codes.Unimplemented {
-		t.Errorf("a filter = %v, want UNIMPLEMENTED", err)
+	if r, err := s.ListKeyRings(ctx, &kmspb.ListKeyRingsRequest{Parent: loc, Filter: `create_time>"2020-01-01T00:00:00Z"`}); err != nil || len(r.GetKeyRings()) != 3 {
+		t.Errorf("a create_time filter = %v, %v; want all three", r, err)
 	}
 	desc, err := s.ListKeyRings(ctx, &kmspb.ListKeyRingsRequest{Parent: loc, OrderBy: "name desc"})
 	if err != nil || len(desc.GetKeyRings()) != 3 || desc.GetKeyRings()[0].GetName() != loc+"/keyRings/c" {

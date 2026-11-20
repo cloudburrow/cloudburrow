@@ -10,6 +10,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/anypb"
 
+	"github.com/cloudburrow/cloudburrow/internal/aipfilter"
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/locations"
 	"github.com/cloudburrow/cloudburrow/internal/paging"
@@ -69,19 +70,23 @@ func location(project, region string) *locationpb.Location {
 	return loc
 }
 
-// ListLocations lists a project's locations, in name order and paged.
+// ListLocations lists a project's locations, in name order and paged, with
+// the mixin's AIP-160 filter.
 func (l *LocationsServer) ListLocations(ctx context.Context, req *locationpb.ListLocationsRequest) (*locationpb.ListLocationsResponse, error) {
 	m := projectNameRE.FindStringSubmatch(req.GetName())
 	if m == nil {
 		return nil, apierror.InvalidArgument("name must be projects/{project}, not %q", req.GetName())
 	}
-	if req.GetFilter() != "" {
-		return nil, apierror.Unimplemented("filtering locations is not supported")
-	}
 	if req.GetPageSize() < 0 {
 		return nil, apierror.InvalidArgument("page_size must not be negative")
 	}
-	page, next, err := paging.Page("redis-locations:"+req.GetName(), l.regions(ctx, m[1]), req.GetPageToken(), int(req.GetPageSize()))
+	ids, err := aipfilter.LocationIDs(req.GetFilter(), l.regions(ctx, m[1]), func(id string) (*locationpb.Location, error) {
+		return location(m[1], id), nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	page, next, err := paging.Page("redis-locations:"+req.GetName()+"|"+req.GetFilter(), ids, req.GetPageToken(), int(req.GetPageSize()))
 	if err != nil {
 		return nil, apierror.InvalidArgument("invalid page_token %q", req.GetPageToken())
 	}

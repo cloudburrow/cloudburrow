@@ -64,6 +64,14 @@ func waitSQL(t *testing.T, svc *sqladmin.Service, project string, op *sqladmin.O
 // rows the action answers with, "" when it answers none.
 func (p *tab) pageAction(label string, values map[string]string, confirm string) string {
 	p.t.Helper()
+	return p.pageActionWithin(label, values, confirm, 30*time.Second)
+}
+
+// pageActionWithin is pageAction allowing limit for the action's answer, for
+// an action whose operation runs a while, as a model's deploy waits for its
+// container to be ready.
+func (p *tab) pageActionWithin(label string, values map[string]string, confirm string, limit time.Duration) string {
+	p.t.Helper()
 	p.waitFor(`document.querySelector(".modal") === null`)
 	// Beside the title, or at the top of the tab whose action it is (#1845).
 	where := p.findAction(label)
@@ -81,8 +89,8 @@ func (p *tab) pageAction(label string, values map[string]string, confirm string)
 	if confirm != "" {
 		p.confirmByName(confirm)
 	}
-	p.waitFor(`document.querySelector(".modal.is-open") === null || document.querySelector("#action-result-table") !== null ||
-		[...document.querySelectorAll(".modal.is-open .form-error")].some((e) => !e.hidden && e.textContent)`)
+	p.waitForWithin(`document.querySelector(".modal.is-open") === null || document.querySelector("#action-result-table") !== null ||
+		[...document.querySelectorAll(".modal.is-open .form-error")].some((e) => !e.hidden && e.textContent)`, limit)
 	var res struct{ Rows, Error string }
 	p.eval(`(() => { const t = document.querySelector("#action-result-table");
 		const e = [...document.querySelectorAll(".modal.is-open .form-error")].filter((e) => !e.hidden).map((e) => e.textContent).join(" ");

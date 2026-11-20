@@ -378,12 +378,14 @@ jobs:
         run: |
           # scripts/compat-env.sh, compat-shards.sh, verify-local.sh and
           # bigquery-engine-soak.sh are bash, and checked as bash below.
-          find scripts -maxdepth 1 -name '*.sh' ! -name compat-env.sh ! -name compat-shards.sh ! -name verify-local.sh ! -name bigquery-engine-soak.sh -exec shellcheck -s sh {} +
+          find scripts -maxdepth 1 -name '*.sh' ! -name compat-env.sh ! -name compat-shards.sh ! -name verify-local.sh ! -name bigquery-engine-soak.sh ! -name endpoint-inventory.sh -exec shellcheck -s sh {} +
           # Bash helpers the workflows source (#675), and the compat
           # environment generator (#711), checked as bash.
           shellcheck -s bash .github/scripts/*.sh scripts/compat-env.sh
           # The BigQuery engine soak that reproduces #989, as bash.
           shellcheck -s bash scripts/bigquery-engine-soak.sh
+          # The endpoint inventory of the pinned tools (#1975), as bash.
+          shellcheck -s bash scripts/endpoint-inventory.sh
           # The compat job's shards and their local run (#705), as bash.
           shellcheck -x -s bash scripts/compat-shards.sh scripts/verify-local.sh
 
@@ -1019,8 +1021,9 @@ jobs:
           if [ "$SHARD" = memorystore ]; then BROWSER_VARS+=,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT; fi
           # The Logs Explorer reads entries written through the Logging API (#1410).
           # And the kubeconfig, with which the Kubernetes Engine test removes the
-          # deployment its Deploy made (#1857).
-          if [ "$SHARD" = storage ]; then BROWSER_VARS+=,LOGGING,STORAGE,PUBSUB,TASKS,SCHEDULER,RESOURCEMANAGER,SERVICEUSAGE,APIKEYS,KUBECONFIG; fi
+          # deployment its Deploy made (#1857), and Cloud Monitoring, which the
+          # Metrics explorer test writes to (#1939).
+          if [ "$SHARD" = storage ]; then BROWSER_VARS+=,LOGGING,STORAGE,PUBSUB,TASKS,SCHEDULER,RESOURCEMANAGER,SERVICEUSAGE,APIKEYS,KUBECONFIG,MONITORING; fi
           # The run shard's read back through Cloud Run, Cloud KMS, Secret Manager,
           # Cloud Logging and BigQuery's official clients, and enable the
           # Container Scanning API through its Service Usage, RUN_SERVICEUSAGE

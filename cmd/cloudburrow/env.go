@@ -527,12 +527,32 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 	// The Kubernetes Engine API (#1913): gcloud container clusters and
 	// node-pools, and Terraform's google_container_* through
 	// container_custom_endpoint.
+	// The Compute Engine API's VPC networking (#1936): gcloud compute
+	// networks, subnets, firewall-rules, routes and addresses, the Go
+	// client's REST endpoint, and Terraform's google_compute_*.
+	if computeEnabled(cfg) && cfg.Endpoints.Compute != 0 {
+		ce := addr(cfg.Endpoints.Compute)
+		vars = append(vars,
+			envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_COMPUTE", "http://" + ce + "/compute/v1/", "read by gcloud; gcloud compute networks, subnets, firewall-rules, routes and addresses"},
+			envVar{cliEndpointVar("compute"), ce,
+				"the Compute Engine API v1's VPC networking, JSON, plaintext; read by no client library: pass http://ADDR to option.WithEndpoint"})
+	}
 	if gkeEnabled(cfg) && cfg.Endpoints.GKE != 0 {
 		ge := addr(cfg.Endpoints.GKE)
 		vars = append(vars,
 			envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_CONTAINER", "http://" + ge + "/", "read by gcloud; gcloud container clusters, node-pools and operations"},
 			envVar{cliEndpointVar("gke"), ge,
 				"the Kubernetes Engine API v1, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint"})
+	}
+
+	// Cloud Monitoring (#1939): gcloud monitoring, and Terraform's
+	// google_monitoring_* through monitoring_custom_endpoint.
+	if monitoringEnabled(cfg) && cfg.Endpoints.Monitoring != 0 {
+		mo := addr(cfg.Endpoints.Monitoring)
+		vars = append(vars,
+			envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_MONITORING", "http://" + mo + "/", "read by gcloud; gcloud monitoring"},
+			envVar{cliEndpointVar("monitoring"), mo,
+				"Cloud Monitoring API v3, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint"})
 	}
 
 	// Service Usage (#1352): gcloud services, and Terraform's
@@ -689,8 +709,13 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 		"backupdr":          &e.BackupDR,
 		"privateca":         &e.PrivateCA,
 		"gke":               &e.GKE,
-		"onnx":              &e.ONNX,
-		"tfconvert":         &e.TFConvert,
+		"monitoring":        &e.Monitoring,
+		"compute":           &e.Compute,
+		// The local AI endpoint, which serves Vertex AI's Model Registry
+		// and Endpoints (#1940) to gcloud-setup and terraform.
+		"localai":   &e.LocalAI,
+		"onnx":      &e.ONNX,
+		"tfconvert": &e.TFConvert,
 		// The ingress gateway, which kind publishes where `up` configured
 		// it: without this, `env --name x` for an instance started with
 		// --port-base exported the default ingress port (#863).

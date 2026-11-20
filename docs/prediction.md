@@ -62,8 +62,21 @@ The one-per-instance rule is enforced, not assumed. A container returning a diff
 has produced results that cannot be matched to inputs, and silently accepting that would let
 a caller mis-attribute predictions. `prediction.ValidateResponse` refuses it.
 
-`AIP_STORAGE_URI` is recognised but nothing fetches from it: it names a GCS prefix, and the
-offline test path downloads no cloud artifacts and loads no credentials.
+`AIP_STORAGE_URI` is set for a model deployed through the Model Registry (#1940): `UploadModel`'s
+`artifactUri`, a directory in the instance's Cloud Storage, is copied into the managed bucket
+`cloudburrow-vertex-models-{project}` and the variable names that copy, which the container reads
+through `STORAGE_EMULATOR_HOST`. A container deployed directly as a Cloud Run service sets what it
+sets itself; nothing is copied for it, and nothing is fetched from Google.
+
+## The Model Registry and Endpoints
+
+`ModelService` and `EndpointService` (`gcloud ai models` and `gcloud ai endpoints`, the SDKs'
+`Model.upload` and `Endpoint.deploy`, Terraform's `google_vertex_ai_endpoint`, and Agent Platform →
+Model Registry and Endpoints in the console) keep models with versions and aliases and endpoints with
+a traffic split. `DeployModel` runs the version's serving container as a Cloud Run service in the
+instance's cluster with Google's `AIP_*` variables and its health route as the startup probe; Predict,
+RawPredict and Explain reach the deployed model the traffic split picks. The methods and their limits
+are in [compatibility.md](compatibility.md#model-registry-and-endpoints-1940).
 
 ## Deploying a predictor
 

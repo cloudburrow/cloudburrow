@@ -20,6 +20,8 @@ cloud.google.com/go/orgpolicy v1.22.1 h1:7ALTEnwYhRc2P0I83IoUHxkAZTR4E63OXBL0wrU
 cloud.google.com/go/orgpolicy v1.22.1/go.mod h1:yleebuPUQYw8z6yHHYogRE0Q9ZYJqNF0pqnOLKpwM3E=
 cloud.google.com/go/scheduler v1.17.0 h1:jFAEvWG9QDwDWYMgrXZBFi+f1EehetCmM0VE7OpPqJw=
 cloud.google.com/go/scheduler v1.17.0/go.mod h1:16h1vcu+XuadWlJjfKaUn3TWyzedOH+RGoylY2EQix8=
+cloud.google.com/go/secretmanager v1.22.0 h1:c9nPLiK4IZeT/zDyLjvNaBw1BHNkp0Ysybj1FfFIAPQ=
+cloud.google.com/go/secretmanager v1.22.0/go.mod h1:aDN9cW5x6Y8QVj32snakZv96vYyW7Nf1P+eqZGH8408=
 github.com/antlr4-go/antlr/v4 v4.13.1 h1:SqQKkuVZ+zWkMMNkjy5FZe5mr5WURWnlpmOuzYWrPrQ=
 github.com/antlr4-go/antlr/v4 v4.13.1/go.mod h1:GKmUxMtwp6ZgGwZSva4eWPC5mS6vUAmOABFgjdkM7Nw=
 github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=

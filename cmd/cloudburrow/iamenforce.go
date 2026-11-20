@@ -161,6 +161,12 @@ func newIAMEnforcer(cfg config.Config, creds *metadata.Credentials, reg func() *
 			case strings.EqualFold(email, creds.Email):
 				return iameval.Caller{Email: email, Owner: true}
 			}
+			if strings.HasPrefix(email, "principal://") {
+				// A federated subject (#1941) keeps its case: its
+				// identifier is case-sensitive, and Google's errors
+				// name it as it is.
+				return iameval.Caller{Email: email}
+			}
 			return iameval.Caller{Email: strings.ToLower(email)}
 		},
 		Policies:   map[string]iameval.PolicyGetter{},
