@@ -185,6 +185,7 @@ func (a *Admin) KeepDocuments(ctx context.Context, dir string, interval time.Dur
 		}
 	}
 	d.removeOtherGenerations(d.current.Generation)
+	a.documents.Store(d) // the Admin API's own calls pass the gate too (compact.go)
 	go d.run(ctx)
 	return d, nil
 }
@@ -469,7 +470,9 @@ func (d *Documents) Wrap(next http.Handler) http.Handler {
 		}
 		// Registered as it passes the gate, so a compaction (compact.go)
 		// lets it finish, or ends it, before it exports.
-		c := d.enter(r)
+		ctx, cancel := context.WithCancel(r.Context())
+		defer cancel()
+		c := d.enter(r, cancel)
 		defer d.leave(c)
 		if write {
 			d.writes.Add(1)
@@ -478,7 +481,7 @@ func (d *Documents) Wrap(next http.Handler) http.Handler {
 				w = &markingWriter{ResponseWriter: w, writes: &d.writes}
 			}
 		}
-		d.serveCall(c, next, w, r)
+		d.serveCall(ctx, c, next, w, r)
 	})
 }
 
@@ -566,6 +569,11 @@ func mayWrite(r *http.Request) bool {
 		}
 		return false
 	}
+	// The web SDKs' WebChannel (Write/channel, Listen/channel), which
+	// is not gRPC's content type: a Write channel writes (#1969).
+	if strings.HasPrefix(r.URL.Path, "/google.firestore.v1.Firestore/") {
+		return strings.HasPrefix(r.URL.Path, "/google.firestore.v1.Firestore/Write/")
+	}
 	if !strings.HasPrefix(r.URL.Path, "/v1/projects/") {
 		return false
 	}
@@ -588,5 +596,5 @@ func isDocumentsCall(r *http.Request) bool {
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
 		return strings.HasPrefix(r.URL.Path, "/google.firestore.v1.Firestore/")
 	}
-	return documentsPath.MatchString(r.URL.Path)
+	return documentsPath.MatchString(r.URL.Path) || strings.HasPrefix(r.URL.Path, "/google.firestore.v1.Firestore/")
 }

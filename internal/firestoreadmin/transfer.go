@@ -67,7 +67,9 @@ func (a *Admin) docs() (firestorepb.FirestoreClient, error) {
 			a.connErr = status.Error(codes.Unavailable, "no emulator to read the documents from")
 			return
 		}
-		a.conn, a.connErr = grpc.NewClient(a.emulator, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		// Through the documents' gate (compact.go, #1969).
+		a.conn, a.connErr = grpc.NewClient(a.emulator, grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithChainUnaryInterceptor(a.gateUnary), grpc.WithChainStreamInterceptor(a.gateStream))
 	})
 	if a.connErr != nil {
 		return nil, a.connErr

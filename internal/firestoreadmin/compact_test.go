@@ -14,6 +14,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"google.golang.org/grpc"
 )
 
 // TestHeapWatchReadsFullCollections (#1969): the heap's maximum is read
@@ -287,5 +289,85 @@ func TestACompactionLosesNoAcknowledgedWrite(t *testing.T) {
 	}
 	if after := historySince(); !after.After(before) {
 		t.Errorf("the earliest version time is %v after the compaction, %v before; want it moved to the compaction", after, before)
+	}
+}
+
+// TestTheFrontsOwnWritesPassTheGate (#1969): a write of the Admin API's
+// own to the emulator (an import's, a restore's, a clone's Commit), made
+// through its connection's interceptor, is held while a compaction runs
+// and lands in the restarted emulator; one already in the emulator when
+// the compaction starts is let finish before the export, so the export
+// keeps it. Neither is lost with the old JVM.
+func TestTheFrontsOwnWritesPassTheGate(t *testing.T) {
+	dir := t.TempDir()
+	host, _ := os.Hostname()
+	emu := &restartingEmulator{dir: dir, host: host, docs: map[string]string{}}
+	srv := httptest.NewServer(emu)
+	t.Cleanup(srv.Close)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go emu.shell(ctx)
+	a := New(strings.TrimPrefix(srv.URL, "http://"))
+	a.SawResource("projects/p/databases/(default)/documents/c/d")
+	d, err := a.KeepDocuments(ctx, dir, time.Hour, false, t.Logf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cancel(); <-d.Done() })
+	for deadline := time.Now().Add(10 * time.Second); !d.isRestored(); time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the documents were never restored")
+		}
+	}
+	const commit = "/google.firestore.v1.Firestore/Commit"
+	// internal is an internal Commit of key, which takes took in the
+	// emulator; it reports the JVM it landed in.
+	internal := func(key string, took time.Duration, jvm chan<- int) {
+		err := a.gateUnary(ctx, commit, nil, nil, nil, func(ctx context.Context, _ string, _, _ any, _ *grpc.ClientConn, _ ...grpc.CallOption) error {
+			time.Sleep(took)
+			if !emu.commit(key, "v") {
+				return fmt.Errorf("the emulator is down")
+			}
+			emu.mu.Lock()
+			jvm <- emu.jvm
+			emu.mu.Unlock()
+			return nil
+		})
+		if err != nil {
+			t.Errorf("internal Commit %s: %v", key, err)
+			jvm <- -1
+		}
+	}
+
+	slow := make(chan int, 1)
+	go internal("slow", 500*time.Millisecond, slow) // in the emulator as the compaction starts
+	time.Sleep(50 * time.Millisecond)
+	compacted := make(chan error, 1)
+	go func() { compacted <- d.Compact(ctx) }()
+	for deadline := time.Now().Add(5 * time.Second); d.isRestored(); time.Sleep(5 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the compaction never closed the gate")
+		}
+	}
+	held := make(chan int, 1)
+	go internal("held", 0, held) // made while the gate is closed
+	if err := <-compacted; err != nil {
+		t.Fatalf("Compact: %v", err)
+	}
+	if got := <-slow; got != 0 {
+		t.Errorf("the internal write already in the emulator landed in JVM %d; want 0, before the compaction", got)
+	}
+	if got := <-held; got != 1 {
+		t.Errorf("the internal write made during the compaction landed in JVM %d; want 1, the restarted one", got)
+	}
+	emu.mu.Lock()
+	defer emu.mu.Unlock()
+	for _, k := range []string{"slow", "held"} {
+		if _, ok := emu.docs[k]; !ok {
+			t.Errorf("the internal write %q is not in the emulator after the compaction", k)
+		}
+	}
+	if !d.dirty() {
+		t.Error("the documents are not dirty after an internal write: the next export would skip it")
 	}
 }

@@ -1150,7 +1150,7 @@ versions, measured: a 160 MiB heap holding 6,000 versions of a 10 KB document st
 itself on 9,000 more after it). The new JVM is given the export, as after any restart, and the gate
 opens: about 1.2 seconds in all, measured with a 256 MiB heap. A call it ended was never answered,
 and every answered write is in the export, so no acknowledged write is lost; a failed export, or
-a container that does not take the restart, leaves the emulator as it was. The cost is the
+a container that does not take the restart, leaves the emulator as it was. The front's own calls to the emulator pass the same gate: the Admin API's reads and writes of documents (exports and imports, backups, restores and clones, bulk deletes, the `Write` streams, WebChannels and pipelines it passes on) and its clearing of a database in a purge wait while a compaction runs, and one already in the emulator is let finish before the export (unit `TestTheFrontsOwnWritesPassTheGate`), so none lands in the JVM that is about to restart. The cost is the
 versions: the emulator holds none from before the compaction, so the database's
 `earliest_version_time` moves to it, and a read at an earlier `read_time`, an export at an earlier
 `snapshot_time` or a clone of an earlier minute is refused `FAILED_PRECONDITION`, even within the

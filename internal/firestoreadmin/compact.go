@@ -57,6 +57,7 @@ import (
 	"time"
 
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
@@ -185,10 +186,15 @@ type call struct {
 // enter waits at the gate and registers r's call, atomically with the
 // gate being open, so a compaction that closes it sees every call that
 // got through.
-func (d *Documents) enter(r *http.Request) *call {
-	c := &call{stream: isStream(r)}
+func (d *Documents) enter(r *http.Request, cancel context.CancelFunc) *call {
+	return d.enterCtx(r.Context(), isStream(r), cancel)
+}
+
+// enterCtx is enter for a call made in ctx, which cancel ends.
+func (d *Documents) enterCtx(ctx context.Context, stream bool, cancel context.CancelFunc) *call {
+	c := &call{stream: stream, cancel: cancel}
 	for deadline := time.Now().Add(gateWait); ; {
-		d.wait(r.Context())
+		d.wait(ctx)
 		d.mu.Lock()
 		open := false
 		select {
@@ -196,7 +202,7 @@ func (d *Documents) enter(r *http.Request) *call {
 			open = true
 		default:
 		}
-		if open || r.Context().Err() != nil || !time.Now().Before(deadline) {
+		if open || ctx.Err() != nil || !time.Now().Before(deadline) {
 			if d.inflight == nil {
 				d.inflight = map[*call]struct{}{}
 			}
@@ -228,16 +234,17 @@ func isStream(r *http.Request) bool {
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
 		return p == "/google.firestore.v1.Firestore/Listen" || p == "/google.firestore.v1.Firestore/Write"
 	}
+	// A WebChannel's back channel is a GET held open for its answers.
+	if strings.HasPrefix(p, "/google.firestore.v1.Firestore/") && strings.HasSuffix(p, "/channel") {
+		return r.Method == http.MethodGet
+	}
 	return strings.HasSuffix(p, ":listen") || strings.HasSuffix(p, ":write")
 }
 
 // serveCall serves r through next as the call c, which a compaction may
 // end (cutCalls): its context is cancelled, what the emulator still sends
 // is dropped, and the client is answered UNAVAILABLE with a RetryInfo.
-func (d *Documents) serveCall(c *call, next http.Handler, w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithCancel(r.Context())
-	defer cancel()
-	c.cancel = cancel
+func (d *Documents) serveCall(ctx context.Context, c *call, next http.Handler, w http.ResponseWriter, r *http.Request) {
 	cw := &cutWriter{ResponseWriter: w, c: c}
 	func() {
 		defer func() {
@@ -510,4 +517,81 @@ func dirBytes(dir string) int64 {
 		return nil
 	})
 	return n
+}
+
+// The front's own calls to the emulator (#1969): the Admin API's reads
+// and writes of documents (exports and imports, backups, restores and
+// clones, bulk deletes, the Write streams and pipelines it passes on) and
+// its clearing of a database's documents (a purge) dial the emulator
+// directly, not through Wrap, so they pass the same gate: each waits
+// while a compaction runs and is registered while it is in the emulator,
+// so the compaction lets it finish, or ends it, before it exports; a
+// write that landed after the export would go with the restarted JVM.
+// Each that may write counts as a write, as a client's does, so the next
+// export keeps it.
+
+// gate holds an internal call to the emulator at the documents' gate:
+// done ends it. Without Documents (no --firestore-documents) it is free.
+func (a *Admin) gate(ctx context.Context, write bool) (context.Context, func()) {
+	d := a.documents.Load()
+	if d == nil {
+		return ctx, func() {}
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	c := d.enterCtx(ctx, false, cancel)
+	if write {
+		d.writes.Add(1)
+	}
+	var once sync.Once
+	return ctx, func() {
+		once.Do(func() {
+			if write {
+				d.writes.Add(1)
+			}
+			d.leave(c)
+			cancel()
+		})
+	}
+}
+
+// internalWrite reports whether the Firestore method may write.
+func internalWrite(method string) bool {
+	return !readMethods[method[strings.LastIndexByte(method, '/')+1:]]
+}
+
+// gateUnary is the interceptor of the Admin API's connection to the
+// emulator (transfer.go, docs).
+func (a *Admin) gateUnary(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+	ctx, done := a.gate(ctx, internalWrite(method))
+	defer done()
+	return invoker(ctx, method, req, reply, cc, opts...)
+}
+
+// gateStream is gateUnary for a stream, which is in the emulator until it
+// ends: its receive fails (io.EOF included) or its context ends.
+func (a *Admin) gateStream(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+	ctx, done := a.gate(ctx, internalWrite(method))
+	cs, err := streamer(ctx, desc, cc, method, opts...)
+	if err != nil {
+		done()
+		return nil, err
+	}
+	go func() {
+		<-ctx.Done()
+		done()
+	}()
+	return &gatedStream{ClientStream: cs, done: done}, nil
+}
+
+type gatedStream struct {
+	grpc.ClientStream
+	done func()
+}
+
+func (s *gatedStream) RecvMsg(m any) error {
+	err := s.ClientStream.RecvMsg(m)
+	if err != nil {
+		s.done()
+	}
+	return err
 }
