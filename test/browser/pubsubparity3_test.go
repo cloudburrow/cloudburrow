@@ -145,8 +145,8 @@ func TestPubSubInfoPanelAndEditPages(t *testing.T) {
 	}
 	var exportDisabled bool
 	p.eval(`document.querySelector("form.edit-page #f-deliveryType-2").disabled`, &exportDisabled)
-	if !exportDisabled {
-		t.Error("Edit subscription offers switching a pull subscription to Write to BigQuery, which this instance does not do")
+	if exportDisabled {
+		t.Error("Edit subscription draws Write to BigQuery disabled on a pull subscription; Google's page offers it (#2051)")
 	}
 
 	edit := func(path string) string { return path + q + "&edit=1" }

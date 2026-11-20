@@ -38,10 +38,67 @@ import (
 // actEditLabels is the info panel's Labels tab, saved with Save.
 const actEditLabels = "edit-labels"
 
-// pubsubNoExportOnEdit is why Edit subscription draws the export delivery
-// types disabled on a pull or push subscription.
-const pubsubNoExportOnEdit = "Not available on Edit locally: CloudBurrow does not yet switch an existing pull or push " +
-	"subscription to an export subscription. Create a subscription with this delivery type instead."
+// editDelivery is a subscription's choice on Edit subscription's Delivery
+// type, "" for one the page leaves as it is (Bigtable).
+func editDelivery(s *pubsubpb.Subscription) string {
+	switch deliveryType(s) {
+	case "Pull":
+		return deliveryPull
+	case "Push":
+		return deliveryPush
+	case "BigQuery":
+		return deliveryBigQuery
+	case "Cloud Storage":
+		return deliveryStorage
+	}
+	return ""
+}
+
+// exportEditDefaults are the Write to BigQuery and Write to Cloud Storage
+// fields prefilled from an export subscription, Create subscription's
+// defaults for one that is not (#2051).
+func exportEditDefaults(s *pubsubpb.Subscription) map[string]string {
+	bq, cs := s.GetBigqueryConfig(), s.GetCloudStorageConfig()
+	schema := schemaNone
+	switch {
+	case bq.GetUseTopicSchema():
+		schema = schemaTopic
+	case bq.GetUseTableSchema():
+		schema = schemaTable
+	}
+	format := formatText
+	if cs.GetAvroConfig() != nil {
+		format = formatAvro
+	}
+	minutes := "5"
+	if d := cs.GetMaxDuration(); d != nil {
+		minutes = strconv.FormatInt(int64(d.AsDuration()/time.Minute), 10)
+	}
+	optional := func(n int64) string {
+		if n == 0 {
+			return ""
+		}
+		return strconv.FormatInt(n, 10)
+	}
+	return map[string]string{
+		"bigqueryTable": bq.GetTable(), "bigquerySchema": schema,
+		"bigqueryDropUnknown":    strconv.FormatBool(bq.GetDropUnknownFields()),
+		"bigqueryWriteMetadata":  strconv.FormatBool(bq.GetWriteMetadata()),
+		"bigqueryServiceAccount": bq.GetServiceAccountEmail(),
+		"storageBucket":          cs.GetBucket(), "filenamePrefix": cs.GetFilenamePrefix(),
+		"filenameSuffix": cs.GetFilenameSuffix(), "filenameDatetimeFormat": cs.GetFilenameDatetimeFormat(),
+		"storageFormat":         format,
+		"storageUseTopicSchema": strconv.FormatBool(cs.GetAvroConfig().GetUseTopicSchema()),
+		"storageWriteMetadata":  strconv.FormatBool(cs.GetAvroConfig().GetWriteMetadata()),
+		"maxDurationMinutes":    minutes, "maxBytes": optional(cs.GetMaxBytes()), "maxMessages": optional(cs.GetMaxMessages()),
+	}
+}
+
+// exportEditFields are Create subscription's Write to BigQuery and Write to
+// Cloud Storage fields, in its order.
+var exportEditFields = []string{"bigqueryTable", "bigquerySchema", "bigqueryDropUnknown", "bigqueryWriteMetadata",
+	"bigqueryServiceAccount", "storageBucket", "filenamePrefix", "filenameSuffix", "filenameDatetimeFormat",
+	"storageFormat", "storageUseTopicSchema", "storageWriteMetadata", "maxDurationMinutes", "maxBytes", "maxMessages"}
 
 // --- the info panel ---------------------------------------------------------
 
@@ -207,10 +264,16 @@ func subscriptionEditForm(s *pubsubpb.Subscription) *console.EditForm {
 		{Name: "topic", Label: "Pub/Sub topic", Type: "text", Default: subscriptionTopic(s), Immutable: true,
 			Help: "A subscription's topic cannot be changed: the emulator says the topic field is not mutable."},
 	}
-	delivery := field("deliveryType", deliveryType(s))
-	if pushOrPull(s) {
-		delivery.UnavailableOptions = map[string]string{deliveryBigQuery: pubsubNoExportOnEdit, deliveryStorage: pubsubNoExportOnEdit}
-		fields = append(fields, delivery,
+	delivery := field("deliveryType", editDelivery(s))
+	if editDelivery(s) != "" {
+		// Any of the four, as Google's page offers (#2051): the front
+		// applies bigquery_config and cloud_storage_config.
+		fields = append(fields, delivery)
+		exports := exportEditDefaults(s)
+		for _, n := range exportEditFields {
+			fields = append(fields, field(n, exports[n]))
+		}
+		fields = append(fields,
 			field("pushEndpoint", s.GetPushConfig().GetPushEndpoint()),
 			field("pushAttributes", console.FormatMap(s.GetPushConfig().GetAttributes())))
 	} else {
@@ -251,9 +314,14 @@ func subscriptionEditForm(s *pubsubpb.Subscription) *console.EditForm {
 	}
 	return &console.EditForm{Label: "Edit", Title: "Edit subscription", Submit: "Update", Layout: console.EditLayoutPage,
 		Fields: fields,
-		Note: "Saved through UpdateSubscription, with an update mask naming each field that changed; switching between " +
-			"Pull and Push is its push_config."}
+		Note: "Saved through UpdateSubscription, with an update mask naming each field that changed. A new delivery " +
+			"type clears the old one's configuration and sets the new one's (push_config, bigquery_config, " +
+			"cloud_storage_config), as Google's Edit subscription does; the table or bucket must exist."}
 }
+
+// editDeliveryKey is the values key of the delivery type chosen on Edit
+// subscription, for Edit.
+const editDeliveryKey = "_delivery"
 
 // subscriptionEditValues turns the Edit subscription page's fields into
 // the values Edit reads: a hidden choice's fields dropped, Pull an empty
@@ -265,9 +333,11 @@ func subscriptionEditValues(project string, cur *pubsubpb.Subscription, values m
 		return nil, err
 	}
 	out := subscriptionPageValues(project, values)
-	if values["deliveryType"] == deliveryPull {
+	if values["deliveryType"] != deliveryPush {
 		out["pushEndpoint"], out["pushAttributes"] = "", ""
 	}
+	// The chosen delivery, which Edit sets the export configs from.
+	out[editDeliveryKey] = values["deliveryType"]
 	if _, ok := values["retryPolicy"]; ok && values["retryPolicy"] != retryBackoff {
 		out["minBackoff"], out["maxBackoff"] = "", ""
 	}

@@ -271,12 +271,58 @@ func (p pubsubProvider) Edit(ctx context.Context, project string, path []string,
 
 // ---------------------------------------------------------- subscriptions
 
-// pushOrPull is whether a subscription's delivery is its push config, the
-// only delivery the form edits. A BigQuery, Cloud Storage or Bigtable
-// subscription keeps its delivery as it is.
+// pushOrPull is whether a subscription's delivery is its push config. A
+// Bigtable subscription keeps its delivery as it is; a BigQuery or Cloud
+// Storage one is changed on Edit subscription's page (#2051).
 func pushOrPull(s *pubsubpb.Subscription) bool {
 	d := deliveryType(s)
 	return d == "Push" || d == "Pull"
+}
+
+// exportUpdates are the export configs an edit changes, by update mask
+// path: each one the chosen delivery sets or clears that differs from the
+// subscription's, read from Create subscription's fields.
+func exportUpdates(cur *pubsubpb.Subscription, delivery string, values map[string]string) (*pubsubpb.Subscription, []string, error) {
+	want := &pubsubpb.Subscription{}
+	form := map[string]string{}
+	for k, v := range values {
+		form[k] = v
+	}
+	form["deliveryType"] = delivery
+	if err := exportFromForm(want, form); err != nil {
+		return nil, nil, err
+	}
+	if delivery == deliveryBigQuery && want.GetBigqueryConfig().GetTable() == "" {
+		return nil, nil, errors.New("table is required to write to BigQuery")
+	}
+	if delivery == deliveryStorage && want.GetCloudStorageConfig().GetBucket() == "" {
+		return nil, nil, errors.New("Cloud Storage bucket is required to write to Cloud Storage")
+	}
+	var paths []string
+	bq := proto.Clone(cur).(*pubsubpb.Subscription).GetBigqueryConfig()
+	if bq != nil {
+		bq.State = 0
+	}
+	if !proto.Equal(bq, want.GetBigqueryConfig()) {
+		paths = append(paths, "bigquery_config")
+	}
+	cs := proto.Clone(cur).(*pubsubpb.Subscription).GetCloudStorageConfig()
+	if cs != nil {
+		cs.State = 0
+		if w := want.GetCloudStorageConfig(); w != nil {
+			if cs.MaxDuration != nil && w.MaxDuration == nil {
+				w.MaxDuration = cs.MaxDuration
+			}
+			// No output format is text, which the form shows.
+			if cs.OutputFormat == nil && w.GetTextConfig() != nil {
+				w.OutputFormat = nil
+			}
+		}
+	}
+	if !proto.Equal(cs, want.GetCloudStorageConfig()) {
+		paths = append(paths, "cloud_storage_config")
+	}
+	return want, paths, nil
 }
 
 // formatPubSubExpiration shows a policy the way the expiration field reads
@@ -389,7 +435,19 @@ func (p pubsubSubscriptionsProvider) Edit(ctx context.Context, project string, p
 		paths = append(paths, "labels")
 	}
 
-	if pushOrPull(cur) {
+	// Edit subscription's page chose a delivery type (#2051): the export
+	// configs it sets or clears.
+	delivery, onPage := values[editDeliveryKey]
+	if onPage && editDelivery(cur) != "" {
+		want, exportPaths, err := exportUpdates(cur, delivery, values)
+		if err != nil {
+			errs = append(errs, err)
+		} else {
+			upd.BigqueryConfig, upd.CloudStorageConfig = want.GetBigqueryConfig(), want.GetCloudStorageConfig()
+			paths = append(paths, exportPaths...)
+		}
+	}
+	if pushOrPull(cur) || (onPage && editDelivery(cur) != "") {
 		endpoint := strings.TrimSpace(values["pushEndpoint"])
 		attrs, err := console.ParseMap(values["pushAttributes"])
 		switch {
@@ -448,10 +506,14 @@ func (p pubsubSubscriptionsProvider) Edit(ctx context.Context, project string, p
 
 	// The pair the front refuses, refused here with the form's words.
 	resultPush := cur.GetPushConfig().GetPushEndpoint()
-	if pushOrPull(cur) {
+	resultExport := !pushOrPull(cur)
+	if pushOrPull(cur) || (onPage && editDelivery(cur) != "") {
 		resultPush = strings.TrimSpace(values["pushEndpoint"])
 	}
-	if exactlyOnce && (resultPush != "" || !pushOrPull(cur)) {
+	if onPage && editDelivery(cur) != "" {
+		resultExport = delivery == deliveryBigQuery || delivery == deliveryStorage
+	}
+	if exactlyOnce && (resultPush != "" || resultExport) {
 		errs = append(errs, errors.New(pubsubExactlyOncePush))
 	}
 

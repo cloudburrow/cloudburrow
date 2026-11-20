@@ -240,8 +240,8 @@ func TestPubSubEditSubscriptionThroughUpdateSubscription(t *testing.T) {
 	if f, _ := fieldNamed(form, "filter"); f.Default != `attributes.kind = "a"` || !strings.Contains(f.Help, pubsubFilterRefusal) {
 		t.Errorf("filter field = %+v", f)
 	}
-	if f, _ := fieldNamed(form, "deliveryType"); f.UnavailableOptions[deliveryBigQuery] == "" || f.UnavailableOptions[deliveryStorage] == "" {
-		t.Errorf("delivery type = %+v; want the export types drawn unavailable on a pull subscription", f)
+	if f, _ := fieldNamed(form, "deliveryType"); len(f.UnavailableOptions) != 0 || len(f.Options) != 4 {
+		t.Errorf("delivery type = %+v; want all four types offered on a pull subscription (#2051)", f)
 	}
 	values := pubsubSubmitted(form)
 	want := map[string]string{
@@ -315,14 +315,33 @@ func TestPubSubEditSubscriptionThroughUpdateSubscription(t *testing.T) {
 	if got := pubsubSubmitted(pubsubEditOf(t, p, project, name)); got["expirationMode"] != expireNever {
 		t.Errorf("a subscription that never expires is prefilled with %q, want %s", got["expirationMode"], expireNever)
 	}
-	// An export delivery type is refused on Edit, as the page draws it.
+	// An export delivery type is offered on Edit (#2051): its fields set
+	// bigquery_config, and Pull clears it again; the table is required.
 	toExport := map[string]string{}
 	for k, x := range values {
 		toExport[k] = x
 	}
 	toExport["deliveryType"] = deliveryBigQuery
-	if err := p.Edit(ctx, project, []string{name}, toExport); err == nil || !strings.Contains(err.Error(), pubsubNoExportOnEdit) {
-		t.Errorf("Edit to Write to BigQuery = %v; want %q", err, pubsubNoExportOnEdit)
+	if err := p.Edit(ctx, project, []string{name}, toExport); err == nil || !strings.Contains(err.Error(), "table is required") {
+		t.Errorf("Edit to Write to BigQuery without a table = %v; want the refusal", err)
+	}
+	toExport["bigqueryTable"], toExport["bigqueryWriteMetadata"] = "p.d.t", "true"
+	if err := p.Edit(ctx, project, []string{name}, toExport); err != nil {
+		t.Fatalf("Edit to Write to BigQuery: %v", err)
+	}
+	if s, _ := c.SubscriptionAdminClient.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: name}); s.GetBigqueryConfig().GetTable() != "p.d.t" ||
+		!s.GetBigqueryConfig().GetWriteMetadata() || s.GetPushConfig().GetPushEndpoint() != "" {
+		t.Errorf("after the switch to BigQuery GetSubscription reads %v", s)
+	}
+	if got := pubsubSubmitted(pubsubEditOf(t, p, project, name)); got["deliveryType"] != deliveryBigQuery ||
+		got["bigqueryTable"] != "p.d.t" || got["bigqueryWriteMetadata"] != "true" {
+		t.Errorf("a BigQuery subscription's form is prefilled with %v", got)
+	}
+	if err := p.Edit(ctx, project, []string{name}, values); err != nil {
+		t.Fatalf("Edit from BigQuery back to pull: %v", err)
+	}
+	if s, _ := c.SubscriptionAdminClient.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: name}); s.GetBigqueryConfig() != nil {
+		t.Errorf("after the switch back to pull GetSubscription reads %v", s)
 	}
 
 	// Exactly-once on, refused with a push endpoint, and off again.
@@ -455,16 +474,28 @@ func TestPubSubEditSubscriptionSendsOnlyChangesAndKeepsWhatItDoesNotShow(t *test
 // which would replace its delivery, and the note says so; durations read back
 // in the form they are written (#786).
 func TestPubSubEditFormLeavesOtherDeliveriesAndReadsDurations(t *testing.T) {
+	// A BigQuery subscription's delivery can change (#2051), prefilled.
 	form := subscriptionEditForm(&pubsubpb.Subscription{Name: "projects/p/subscriptions/s", Topic: "projects/p/topics/t",
-		BigqueryConfig: &pubsubpb.BigQueryConfig{Table: "p.d.t"}})
+		BigqueryConfig: &pubsubpb.BigQueryConfig{Table: "p.d.t", UseTableSchema: true}})
+	if f, _ := fieldNamed(form, "deliveryType"); f.Immutable || f.Default != deliveryBigQuery || len(f.UnavailableOptions) != 0 {
+		t.Errorf("a BigQuery subscription's delivery type: %+v", f)
+	}
+	if f, _ := fieldNamed(form, "bigqueryTable"); f.Default != "p.d.t" {
+		t.Errorf("the table is prefilled with %q", f.Default)
+	}
+	if f, _ := fieldNamed(form, "bigquerySchema"); f.Default != schemaTable {
+		t.Errorf("the schema configuration is prefilled with %q", f.Default)
+	}
+	// A Bigtable one keeps its delivery as it is.
+	form = subscriptionEditForm(&pubsubpb.Subscription{Name: "projects/p/subscriptions/s", Topic: "projects/p/topics/t",
+		BigtableConfig: &pubsubpb.BigtableConfig{Table: "projects/p/instances/i/tables/t"}})
 	for _, f := range form.Fields {
-		if f.Name == "pushEndpoint" || f.Name == "pushAttributes" {
-			t.Errorf("a BigQuery subscription's form offers %s", f.Name)
+		if f.Name == "pushEndpoint" || f.Name == "bigqueryTable" {
+			t.Errorf("a Bigtable subscription's form offers %s", f.Name)
 		}
 	}
-	if f, _ := fieldNamed(form, "deliveryType"); !f.Immutable || f.Default != deliveryType(&pubsubpb.Subscription{
-		BigqueryConfig: &pubsubpb.BigQueryConfig{Table: "p.d.t"}}) || !strings.Contains(f.Help, "BigQuery") {
-		t.Errorf("the delivery type does not say the BigQuery delivery is left as it is: %+v", f)
+	if f, _ := fieldNamed(form, "deliveryType"); !f.Immutable || !strings.Contains(f.Help, "Bigtable") {
+		t.Errorf("the delivery type does not say the Bigtable delivery is left as it is: %+v", f)
 	}
 	for in, want := range map[string]time.Duration{"7d": 7 * 24 * time.Hour, "36h": 36 * time.Hour, "10m": 10 * time.Minute, "90s": 90 * time.Second} {
 		d, err := parsePubSubDuration("x", in)

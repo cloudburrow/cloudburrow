@@ -45,6 +45,9 @@ type pending struct {
 	labels map[string]string
 	// storagePolicy is a topic's message storage policy (#2000).
 	storagePolicy *pubsubpb.MessageStoragePolicy
+	// export is a subscription's export configuration (#2051,
+	// exportswitch.go).
+	export *pubsubpb.Subscription
 }
 
 // exportPaths are the export configs a subscription may have.
@@ -158,6 +161,18 @@ func (f *Front) restPatch(w http.ResponseWriter, r *http.Request, name string, b
 			o[subKey], edited = b, true
 		}
 	}
+	// The export configs (#2051, exportswitch.go).
+	if k, masked := f.exportUpdate(r.Context(), req); masked {
+		kept.export = k
+		forward = withoutExports(forward)
+		if b, changed := editObject(o[subKey], func(s jsonObject) {
+			for _, key := range []string{"bigqueryConfig", "bigquery_config", "cloudStorageConfig", "cloud_storage_config"} {
+				delete(s, key)
+			}
+		}); changed {
+			o[subKey], edited = b, true
+		}
+	}
 	if exports := noopExports(r.Context(), f, name, &s, forward); len(exports) > 0 {
 		for _, p := range exports {
 			forward = without(forward, p)
@@ -167,7 +182,7 @@ func (f *Front) restPatch(w http.ResponseWriter, r *http.Request, name string, b
 		// Nothing is left for the emulator.
 		return f.restAnswerLocally(w, r, name, kept)
 	}
-	if kept.policy != nil || kept.labels != nil {
+	if kept.policy != nil || kept.labels != nil || kept.export != nil {
 		*r = *r.WithContext(context.WithValue(r.Context(), pendingKey{}, &kept))
 	}
 	if len(paths) == 0 {
@@ -288,6 +303,11 @@ func (f *Front) restAnswerLocally(w http.ResponseWriter, r *http.Request, name s
 	if kept.labels != nil {
 		f.setLabels(name, kept.labels)
 	}
+	if kept.export != nil {
+		f.setExport(name, kept.export)
+		f.withExport(cur)
+	}
+	f.withExportState(cur)
 	f.withPolicy(cur)
 	f.withLabels(name, &cur.Labels)
 	f.fromRelay(cur)

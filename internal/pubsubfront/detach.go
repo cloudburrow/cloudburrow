@@ -132,6 +132,7 @@ func (f *Front) DetachSubscription(ctx context.Context, req *pubsubpb.DetachSubs
 	delete(f.subs, name)
 	delete(f.policies, name)
 	delete(f.labels, name)
+	delete(f.exports, name)
 	f.mu.Unlock()
 	f.persist()
 	return &pubsubpb.DetachSubscriptionResponse{}, nil
