@@ -725,7 +725,9 @@ func TestNavigationLinksCarryOnlyTheScope(t *testing.T) {
 	// be updated every time a screen invents a parameter.
 	block := js[strings.Index(js, "function scopeSearch()"):]
 	block = block[:strings.Index(block, "\n}")]
-	if !strings.Contains(block, `["project"]`) {
+	// The project, and the folder or organization the toolbar's resource
+	// selector chose (#2023).
+	if !strings.Contains(block, `["project", "folder", "organizationId"]`) {
 		t.Error("scopeSearch does not copy a named set of parameters")
 	}
 	for _, leaked := range []string{"resource", "\"q\""} {

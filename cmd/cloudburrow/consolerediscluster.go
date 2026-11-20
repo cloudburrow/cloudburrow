@@ -315,12 +315,12 @@ func (p redisClusterProvider) Detail(ctx context.Context, project string, path [
 		{Label: "Capacity", Value: fmt.Sprintf("%g GB", c.GetPreciseSizeGb())},
 		{Label: "Zonal availability", Value: memorystoreZones(c.GetZoneDistributionConfig().GetMode().String(), c.GetZoneDistributionConfig().GetZone())},
 		{Label: "Deletion protection", Value: strconv.FormatBool(c.GetDeletionProtectionEnabled())},
-		{Label: "Encryption", Value: c.GetEncryptionInfo().GetEncryptionType().String()},
+		{Label: "Encryption", Value: memorystoreEncryptionText(c.GetEncryptionInfo().GetEncryptionType().String())},
 		{Label: "Customer-managed key", Value: orDash(c.GetKmsKey())},
 	}
 	config := []console.Property{
-		{Label: "Authorization", Value: c.GetAuthorizationMode().String()},
-		{Label: "In-transit encryption", Value: c.GetTransitEncryptionMode().String()},
+		{Label: "Security", Value: memorystoreAuthText(c.GetAuthorizationMode().String())},
+		{Label: "In-transit encryption", Value: memorystoreTLSText(c.GetTransitEncryptionMode().String())},
 		{Label: "Server CA mode", Value: orDash(memorystoreCAModeText(c.GetServerCaMode().String(), c.ServerCaMode != nil))},
 		{Label: "Server CA pool", Value: orDash(c.GetServerCaPool())},
 	}
@@ -333,7 +333,7 @@ func (p redisClusterProvider) Detail(ctx context.Context, project string, path [
 	config = append(config, []console.Property{
 		{Label: "Redis configs", Value: orDash(memorystorePairs(c.GetRedisConfigs()))},
 		{Label: "ACL policy", Value: orDash(c.GetAclPolicy())},
-		{Label: "Persistence", Value: c.GetPersistenceConfig().GetMode().String()},
+		{Label: "Data persistence strategy", Value: memorystorePersistenceText(c.GetPersistenceConfig().GetMode().String(), "Redis Database (RDB)")},
 		{Label: "Automated backups", Value: memorystoreAutoBackupText(ab.GetAutomatedBackupMode() == clusterpb.AutomatedBackupConfig_ENABLED,
 			ab.GetFixedFrequencySchedule().GetStartTime().GetHours(), ab.GetRetention().AsDuration())},
 		{Label: "Backup collection", Value: orDash(c.GetBackupCollection())},
@@ -363,7 +363,7 @@ func (p redisClusterProvider) Detail(ctx context.Context, project string, path [
 	d.Sections = append(d.Sections, p.authSections(ctx, api, c)...)
 	d.Sections = append(d.Sections, memorystorePropsTab("maintenance", "Maintenance", redisClusterMaintenance(c).summary()), memorystoreMonitoring("cluster"))
 	d.Edit = &console.EditForm{
-		Label: "Edit", Title: "Edit cluster", Submit: "Save",
+		Label: "Edit", Title: "Edit cluster", Submit: "Save", Page: true,
 		Fields: []console.Field{
 			{Name: "shardCount", Label: "Shards", Type: "number", Required: true, Pattern: `^[0-9]{1,3}$`,
 				Default: strconv.Itoa(int(c.GetShardCount())), Help: "Slots and their keys move to or off the primaries added or removed."},

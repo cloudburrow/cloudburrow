@@ -366,6 +366,12 @@ func (r *Registry) newID(prefix string) string {
 // CreateTagKey adds a tag key under the organization or a project. With
 // validateOnly it checks and stores nothing.
 func (r *Registry) CreateTagKey(in *rmpb.TagKey, validateOnly bool) (*rmpb.TagKey, error) {
+	return r.createTagKey(in, "", validateOnly)
+}
+
+// createTagKey makes a key, of dynamic values when re is set
+// (tagsdynamic.go).
+func (r *Registry) createTagKey(in *rmpb.TagKey, re string, validateOnly bool) (*rmpb.TagKey, error) {
 	if in == nil {
 		return nil, apierror.InvalidArgument("tag_key is required")
 	}
@@ -398,9 +404,12 @@ func (r *Registry) CreateTagKey(in *rmpb.TagKey, validateOnly bool) (*rmpb.TagKe
 	now := r.nowTS()
 	k := &rmpb.TagKey{Name: "tagKeys/" + id, Parent: in.GetParent(), ShortName: in.GetShortName(), NamespacedName: namespaced,
 		Description: in.GetDescription(), CreateTime: now, UpdateTime: now, Purpose: in.GetPurpose(), PurposeData: in.GetPurposeData()}
-	k.Etag = protoEtag(k)
+	k.Etag = tagKeyEtag(k, re)
 	if validateOnly {
 		return k, nil
+	}
+	if err := r.putTagKeyRegexLocked(id, re); err != nil {
+		return nil, err
 	}
 	return k, r.putProto(tagKeyPrefix+id, k)
 }
@@ -474,18 +483,43 @@ func checkEtag(given, cur, name string) error {
 	return nil
 }
 
-// UpdateTagKey changes a tag key's description: the one field that changes.
+// UpdateTagKey changes a tag key's description: the one field the gRPC
+// TagKey carries that changes.
+// The gRPC message has no allowed_values_regex, so its mask cannot name it.
 func (r *Registry) UpdateTagKey(in *rmpb.TagKey, paths []string, validateOnly bool) (*rmpb.TagKey, error) {
-	if in == nil {
-		return nil, apierror.InvalidArgument("tag_key is required")
-	}
 	for _, p := range paths {
 		if p != "description" {
 			return nil, apierror.InvalidArgument("update_mask path %q cannot be updated; only description", p)
 		}
 	}
+	return r.UpdateTagKeyWithRegex(in, "", paths, validateOnly)
+}
+
+// UpdateTagKeyWithRegex changes a tag key's description and, when the mask
+// names allowed_values_regex, its validation regular expression (re; ""
+// clears it). An empty mask changes the description only.
+func (r *Registry) UpdateTagKeyWithRegex(in *rmpb.TagKey, re string, paths []string, validateOnly bool) (*rmpb.TagKey, error) {
+	if in == nil {
+		return nil, apierror.InvalidArgument("tag_key is required")
+	}
+	setDescription, setRegex := len(paths) == 0, false
+	for _, p := range paths {
+		switch p {
+		case "description":
+			setDescription = true
+		case "allowed_values_regex", "allowedValuesRegex":
+			setRegex = true
+		default:
+			return nil, apierror.InvalidArgument("update_mask path %q cannot be updated; only description and allowed_values_regex", p)
+		}
+	}
 	if err := validateDescription(in.GetDescription()); err != nil {
 		return nil, err
+	}
+	if setRegex && re != "" {
+		if _, err := compileAllowedValuesRegex(re); err != nil {
+			return nil, err
+		}
 	}
 	r.mu.Lock()
 	defer r.unlock()
@@ -496,10 +530,40 @@ func (r *Registry) UpdateTagKey(in *rmpb.TagKey, paths []string, validateOnly bo
 	if err := checkEtag(in.GetEtag(), k.GetEtag(), k.GetName()); err != nil {
 		return nil, err
 	}
-	k.Description, k.UpdateTime = in.GetDescription(), r.nowTS()
-	k.Etag = protoEtag(k)
+	cur := r.tagKeyRegexLocked(id)
+	if setRegex && re != cur {
+		if re != "" && cur == "" {
+			values, err := listProtos(r, tagValuePrefix, func() *rmpb.TagValue { return &rmpb.TagValue{} })
+			if err != nil {
+				return nil, err
+			}
+			for _, v := range values {
+				if v.GetParent() == k.GetName() {
+					return nil, apierror.FailedPrecondition("tag key %s has predefined tag value %s; "+
+						"a tag key that supports dynamic values can't also have predefined values", k.GetName(), v.GetName())
+				}
+			}
+		}
+		if re == "" {
+			if n, err := r.dynamicBindingsOfLocked(k.GetName()); err != nil {
+				return nil, err
+			} else if n > 0 {
+				return nil, apierror.FailedPrecondition("tag key %s has %d bindings of dynamic values; delete them before clearing allowed_values_regex", k.GetName(), n)
+			}
+		}
+		cur = re
+	}
+	if setDescription {
+		k.Description = in.GetDescription()
+	}
+	k.UpdateTime = r.nowTS()
+	k.Etag = ""
+	k.Etag = tagKeyEtag(k, cur)
 	if validateOnly {
 		return k, nil
+	}
+	if err := r.putTagKeyRegexLocked(id, cur); err != nil {
+		return nil, err
 	}
 	return k, r.putProto(tagKeyPrefix+id, k)
 }
@@ -524,11 +588,19 @@ func (r *Registry) DeleteTagKey(name, etag string, validateOnly bool) (*rmpb.Tag
 			return nil, apierror.FailedPrecondition("tag key %s has tag value %s; delete its values first", k.GetName(), v.GetName())
 		}
 	}
+	if n, err := r.dynamicBindingsOfLocked(k.GetName()); err != nil {
+		return nil, err
+	} else if n > 0 {
+		return nil, apierror.FailedPrecondition("tag key %s has %d bindings of dynamic values; delete its bindings first", k.GetName(), n)
+	}
 	if validateOnly {
 		return k, nil
 	}
 	if err := r.st.Delete(tagKeyPrefix + id); err != nil {
 		return nil, apierror.Internal(err, "delete tag key")
+	}
+	if err := r.putTagKeyRegexLocked(id, ""); err != nil {
+		return nil, err
 	}
 	r.dropIAM(k.GetName())
 	return k, nil
@@ -547,9 +619,13 @@ func (r *Registry) CreateTagValue(in *rmpb.TagValue, validateOnly bool) (*rmpb.T
 	}
 	r.mu.Lock()
 	defer r.unlock()
-	k, _, err := r.tagKeyLocked(in.GetParent())
+	k, kid, err := r.tagKeyLocked(in.GetParent())
 	if err != nil {
 		return nil, err
+	}
+	if r.tagKeyRegexLocked(kid) != "" {
+		return nil, apierror.FailedPrecondition("tag key %s supports dynamic values (allowed_values_regex); "+
+			"a tag key that supports dynamic values can't also have predefined values", k.GetName())
 	}
 	namespaced := k.GetNamespacedName() + "/" + in.GetShortName()
 	values, err := listProtos(r, tagValuePrefix, func() *rmpb.TagValue { return &rmpb.TagValue{} })
@@ -767,12 +843,16 @@ func bindingKey(canonicalParent, value string) string {
 }
 
 // ParseTagBindingName splits "tagBindings/{escaped parent}/tagValues/{id}",
+// or, for a dynamic value, "tagBindings/{escaped parent}/tagKeys/{id}",
 // however many times the parent was escaped on its way here.
 func ParseTagBindingName(name string) (parent, value string, err error) {
 	rest, ok := strings.CutPrefix(name, "tagBindings/")
 	i := strings.LastIndex(rest, "/tagValues/")
+	if j := strings.LastIndex(rest, "/tagKeys/"); j > i {
+		i = j
+	}
 	if !ok || i <= 0 {
-		return "", "", apierror.InvalidArgument("tag binding name %q must be tagBindings/{parent}/tagValues/{id}", name)
+		return "", "", apierror.InvalidArgument("tag binding name %q must be tagBindings/{parent}/tagValues/{id} or tagBindings/{parent}/tagKeys/{id}", name)
 	}
 	parent, value = rest[:i], rest[i+1:]
 	for n := 0; n < 3 && strings.Contains(parent, "%"); n++ {
@@ -797,6 +877,9 @@ func (r *Registry) CreateTagBinding(in *rmpb.TagBinding, validateOnly bool) (*rm
 	if err != nil {
 		return nil, err
 	}
+	if in.GetTagValue() != "" && in.GetTagValueNamespacedName() != "" {
+		return nil, apierror.InvalidArgument("only one of tag_value or tag_value_namespaced_name may be set")
+	}
 	var v *rmpb.TagValue
 	switch {
 	case in.GetTagValue() != "":
@@ -805,7 +888,13 @@ func (r *Registry) CreateTagBinding(in *rmpb.TagBinding, validateOnly bool) (*rm
 		}
 	case in.GetTagValueNamespacedName() != "":
 		if v, err = r.namespacedTagValueLocked(in.GetTagValueNamespacedName()); err != nil {
-			return nil, err
+			// A dynamic value has no TagValue: its key's
+			// allowed_values_regex validates it (tagsdynamic.go).
+			k, derr := r.dynamicValueLocked(in.GetTagValueNamespacedName())
+			if derr != nil {
+				return nil, derr
+			}
+			v = &rmpb.TagValue{Parent: k.GetName(), NamespacedName: in.GetTagValueNamespacedName()}
 		}
 	default:
 		return nil, apierror.InvalidArgument("tag_value or tag_value_namespaced_name is required")
@@ -819,20 +908,27 @@ func (r *Registry) CreateTagBinding(in *rmpb.TagBinding, validateOnly bool) (*rm
 		if err != nil || bt != target {
 			continue
 		}
-		if b.GetTagValue() == v.GetName() {
-			return nil, apierror.AlreadyExists("tag value %s is already bound to %s", v.GetName(), in.GetParent())
+		if v.GetName() != "" && b.GetTagValue() == v.GetName() ||
+			v.GetName() == "" && b.GetTagValueNamespacedName() == v.GetNamespacedName() {
+			return nil, apierror.AlreadyExists("tag value %s is already bound to %s", v.GetNamespacedName(), in.GetParent())
 		}
-		if bv, _, err := r.tagValueLocked(b.GetTagValue()); err == nil && bv.GetParent() == v.GetParent() {
+		if r.keyOfBindingLocked(b) == v.GetParent() {
 			return nil, apierror.FailedPrecondition("%s already has a value of tag key %s (%s); a resource carries one value per key",
-				in.GetParent(), v.GetParent(), bv.GetNamespacedName())
+				in.GetParent(), v.GetParent(), b.GetTagValueNamespacedName())
 		}
 	}
-	b := &rmpb.TagBinding{Name: TagBindingName(in.GetParent(), v.GetName()), Parent: in.GetParent(), TagValue: v.GetName(),
+	// A dynamic value's binding is named by its key (tagBindings/{parent}/
+	// tagKeys/{id}), as Google's TagBinding name documents.
+	ref := v.GetName()
+	if ref == "" {
+		ref = v.GetParent()
+	}
+	b := &rmpb.TagBinding{Name: TagBindingName(in.GetParent(), ref), Parent: in.GetParent(), TagValue: v.GetName(),
 		TagValueNamespacedName: v.GetNamespacedName()}
 	if validateOnly {
 		return b, nil
 	}
-	return b, r.putProto(bindingKey(target, v.GetName()), b)
+	return b, r.putProto(bindingKey(target, ref), b)
 }
 
 // TagBindings lists the bindings on one resource.
@@ -960,8 +1056,11 @@ func (r *Registry) EffectiveTags(parent string) ([]*rmpb.EffectiveTag, error) {
 			return nil, err
 		}
 		for _, b := range bindings {
-			v, _, err := r.tagValueLocked(b.GetTagValue())
-			if err != nil {
+			var v *rmpb.TagValue
+			if b.GetTagValue() == "" {
+				// A dynamic value: no TagValue, its key from the name.
+				v = &rmpb.TagValue{Parent: r.keyOfBindingLocked(b), NamespacedName: b.GetTagValueNamespacedName()}
+			} else if v, _, err = r.tagValueLocked(b.GetTagValue()); err != nil {
 				continue
 			}
 			if seen[v.GetParent()] {

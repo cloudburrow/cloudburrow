@@ -14,7 +14,8 @@ import (
 // Google's headings: Security is one choice whose IAM Auth checks and
 // locks Enable In-Transit Encryption (TLS) and reveals Certificate
 // authority management, where Customer-managed CA and Shared CA cannot be
-// chosen, and Choose version draws Valkey 9.1 disabled. Create a Redis
+// chosen, and Choose version offers Valkey 7.2 to 9.1, every one served
+// (#2019). Create a Redis
 // instance puts Tier before Region and ends in Create.
 func TestMemorystoreConsoleFollowsGoogle(t *testing.T) {
 	needService(t, "memorystore-valkey")
@@ -58,8 +59,8 @@ func TestMemorystoreConsoleFollowsGoogle(t *testing.T) {
 	if want := "Set up connection,Security,Certificate authority management,Encryption,ACL policy,Data persistence strategy,Automated backups,Maintenance,Choose version"; !strings.HasPrefix(form.Headings, want) {
 		t.Errorf("the create page's headings are %q; want %q first", form.Headings, want)
 	}
-	if form.Versions != "VALKEY_7_2,VALKEY_8_0,VALKEY_9_0,VALKEY_9_1:off" {
-		t.Errorf("Choose version = %q; want 7.2, 8.0, 9.0 and 9.1 not available", form.Versions)
+	if form.Versions != "VALKEY_7_2,VALKEY_8_0,VALKEY_9_0,VALKEY_9_1" {
+		t.Errorf("Choose version = %q; want 7.2, 8.0, 9.0 and 9.1, each available", form.Versions)
 	}
 	if !form.CANotShown || !form.TLSFree {
 		t.Errorf("with Security Disabled: CA management hidden %v, TLS free %v; want both", form.CANotShown, form.TLSFree)

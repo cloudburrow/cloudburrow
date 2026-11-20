@@ -66,12 +66,8 @@ func (d cacheData) DeleteSession(ctx context.Context, req *spannerpb.DeleteSessi
 	return d.s.data.DeleteSession(ctx, req)
 }
 
-func (d cacheData) ExecuteSql(ctx context.Context, req *spannerpb.ExecuteSqlRequest) (*spannerpb.ResultSet, error) {
-	if err := d.check(ctx, req.GetSession()); err != nil {
-		return nil, err
-	}
-	return d.s.data.ExecuteSql(ctx, req)
-}
+// ExecuteSql and ExecuteStreamingSql are in querymode.go: the front
+// claims them always, for their query mode (#2017).
 
 func (d cacheData) ExecuteBatchDml(ctx context.Context, req *spannerpb.ExecuteBatchDmlRequest) (*spannerpb.ExecuteBatchDmlResponse, error) {
 	if err := d.check(ctx, req.GetSession()); err != nil {
@@ -136,17 +132,6 @@ func relay[T any](in interface{ Recv() (*T, error) }, out interface{ Send(*T) er
 			return err
 		}
 	}
-}
-
-func (d cacheData) ExecuteStreamingSql(req *spannerpb.ExecuteSqlRequest, stream spannerpb.Spanner_ExecuteStreamingSqlServer) error {
-	if err := d.check(stream.Context(), req.GetSession()); err != nil {
-		return err
-	}
-	in, err := d.s.data.ExecuteStreamingSql(stream.Context(), req)
-	if err != nil {
-		return err
-	}
-	return relay[spannerpb.PartialResultSet](in, stream)
 }
 
 func (d cacheData) StreamingRead(req *spannerpb.ReadRequest, stream spannerpb.Spanner_StreamingReadServer) error {

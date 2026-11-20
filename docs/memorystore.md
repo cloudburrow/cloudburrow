@@ -684,7 +684,8 @@ gcloud memorystore instances create cache --location=us-central1 --shard-count=3
   --node-type=shared-core-nano --psc-auto-connections=network=projects/PROJECT/global/networks/default,projectId=PROJECT
 ```
 
-An instance is built as a Redis cluster is (§8), of the same Valkey 8.1 image:
+An instance is built as a Redis cluster is (§8), of the image of its `engine_version` (Valkey 9.1
+for the default `VALKEY_9_1`, below):
 
 - **`CLUSTER` mode** (the default): `shard_count` primaries (1 to 250) with `replica_count`
   replicas each (0 to 5), the slots spread over the primaries. `endpoints` asked with a
@@ -759,9 +760,23 @@ RDB or AOF persistence, and empty without, as a Redis cluster does (§8, Across 
 console's **Memorystore for Valkey** page lists, creates (either mode), edits and deletes
 instances.
 
-**Engine versions** (#1557): `VALKEY_7_2` runs Valkey 7.2.14 (`valkey/valkey:7.2-alpine`),
-`VALKEY_8_0` (the default) Valkey 8.1 and `VALKEY_9_0` Valkey 9.0.6 (`valkey/valkey:9.0-alpine`),
-each pinned by digest, for amd64 and arm64. Valkey 7.2 has no `cluster-announce-client-ipv4`, so
+**Engine versions** (#1557, #2019): `VALKEY_7_2` runs Valkey 7.2.14 (`valkey/valkey:7.2-alpine`),
+`VALKEY_8_0` Valkey 8.1, `VALKEY_9_0` Valkey 9.0.6 (`valkey/valkey:9.0-alpine`) and `VALKEY_9_1`
+Valkey 9.1.4 (`valkey/valkey:9.1-alpine`), each pinned by digest, for amd64 and arm64. As Google
+documents ([supported versions](https://docs.cloud.google.com/memorystore/docs/valkey/supported-versions),
+[create instances](https://docs.cloud.google.com/memorystore/docs/valkey/create-instances)), the
+versions offered are 7.2, 8.0, 9.0 and 9.1, and `VALKEY_9_1` is the default: an instance created
+without `engine_version` (the API, gcloud, Terraform or the console's **Choose version**, which
+starts on Valkey 9.1) runs Valkey 9.1 (`TestMemorystoreValkeyDefaultVersion`). An instance stored
+before engine versions were, with none recorded, keeps Valkey 8.1, as a Redis cluster's nodes do.
+What Google lists as new in 9.1 is the server's own and so served as it is: `HGETDEL`, `MSETEX`
+(several keys with one expiration; Google's page calls it `MSETNX`), `HSETEX`'s `NX` and `XX`,
+`CLUSTERSCAN` (`TestMemorystoreValkey91`), and database-level access control, an ACL policy rule's
+`db=N` (`TestMemorystoreValkeyDefaultVersion`: a user of `db=1` writes to database 1 and is NOPERM
+in database 0). Any version upgrades to any later one, 8.0 and 9.0 to 9.1 included, and never down
+(`TestMemorystoreValkeyUpgrade90To91`, keys, a hash, a TTL and every write acknowledged during the
+rolling upgrade kept; `TestMemorystoreValkeyUpgrade80To91`, a 2-shard `CLUSTER` instance).
+Valkey 7.2 has no `cluster-announce-client-ipv4`, so
 a 7.2 node in `CLUSTER` mode announces the host's address to clients as its hostname
 (`cluster-preferred-endpoint-type hostname`). An `UpdateInstance` of `engine_version` to a later
 version is a rolling upgrade (#1563): new nodes of the new image join as replicas of the old ones,

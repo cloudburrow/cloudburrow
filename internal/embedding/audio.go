@@ -455,6 +455,17 @@ func DecodeWAVSpeech(data []byte) ([]float32, error) {
 	return Resample(Average(w.samples, w.channels), w.rate, AudioSampleRate), nil
 }
 
+// DecodeWAVChannels decodes a WAV file as DecodeWAVSpeech does but keeps
+// its channels apart: interleaved samples in [-1, 1], their count and the
+// file's rate (#1799, Speech-to-Text's per-channel recognition).
+func DecodeWAVChannels(data []byte) (interleaved []float32, channels, rate int, err error) {
+	w, err := decodeWAV(data)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("the data is not a valid WAV file: %v", err)
+	}
+	return w.samples, w.channels, w.rate, nil
+}
+
 // Average makes interleaved samples of channels channels mono, averaging
 // them.
 func Average(s []float32, channels int) []float32 {

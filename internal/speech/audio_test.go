@@ -23,7 +23,7 @@ func TestDecode(t *testing.T) {
 	if s2, err := Decode(speechconfig.Decoding{Encoding: "LINEAR16", SampleRate: 16000, Channels: 1}, wav); err != nil || len(s2) != len(s) {
 		t.Errorf("WAV as LINEAR16: %d, %v", len(s2), err)
 	}
-	// Headerless stereo LINEAR16 at 8 kHz: averaged and resampled.
+	// Headerless stereo LINEAR16 at 8 kHz: its first channel, resampled.
 	pcm := make([]byte, 8000*2*2)
 	for i := 0; i < 8000; i++ {
 		v := int16(10000 * math.Sin(float64(i)/10))
@@ -39,8 +39,7 @@ func TestDecode(t *testing.T) {
 	if _, err := Decode(speechconfig.Decoding{Encoding: "LINEAR16", SampleRate: 4000, Channels: 1}, pcm); err == nil {
 		t.Error("4 kHz LINEAR16 accepted")
 	}
-	for name, data := range map[string][]byte{"OGG_OPUS": []byte("OggS\x00\x02"),
-		"WEBM_OPUS": {0x1a, 0x45, 0xdf, 0xa3, 0x01}, "AMR": []byte("#!AMR\n\x3c")} {
+	for name, data := range map[string][]byte{"AMR": []byte("#!AMR\n\x3c"), "AMR_WB": []byte("#!AMR-WB\n\x3c")} {
 		if _, err := Decode(speechconfig.Decoding{Auto: true}, data); !errors.Is(err, ErrUnsupported) {
 			t.Errorf("%s: %v", name, err)
 		}

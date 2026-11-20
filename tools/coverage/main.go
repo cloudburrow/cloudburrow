@@ -55,11 +55,13 @@ import (
 	bqconnection "google.golang.org/api/bigqueryconnection/v1"
 	crmv1 "google.golang.org/api/cloudresourcemanager/v1"
 	runv1 "google.golang.org/api/run/v1"
+	sitev1 "google.golang.org/api/siteverification/v1"
 
 	apikeyssvc "github.com/cloudburrow/cloudburrow/internal/service/apikeys"
 	computesvc "github.com/cloudburrow/cloudburrow/internal/service/compute"
 	rmsvc "github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	serviceusagesvc "github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
+	siteverificationsvc "github.com/cloudburrow/cloudburrow/internal/service/siteverification"
 	sqladminsvc "github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
 	storagejobssvc "github.com/cloudburrow/cloudburrow/internal/service/storagejobs"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -73,6 +75,7 @@ import (
 	_ "cloud.google.com/go/bigtable/admin/apiv2/adminpb"
 	_ "cloud.google.com/go/bigtable/apiv2/bigtablepb"
 	_ "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
+	_ "cloud.google.com/go/cloudquotas/apiv1/cloudquotaspb"
 	_ "cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
 	_ "cloud.google.com/go/container/apiv1/containerpb"
 	_ "cloud.google.com/go/datastore/admin/apiv1/adminpb"
@@ -290,6 +293,14 @@ var areas = []area{
 	// Resource Manager's port. Its methods are the official generated
 	// client's (google.golang.org/api/cloudidentity/v1).
 	{Key: "cloudidentity", Title: "Cloud Identity API (v1)", Own: true, Methods: cloudidentityMethods()},
+	// The Cloud Quotas API (#2030): CloudBurrow's own, gRPC and JSON on
+	// Resource Manager's port.
+	{Key: "cloudquotas", Title: "Cloud Quotas API (v1)", Own: true, Services: []string{"google.api.cloudquotas.v1.CloudQuotas",
+		"google.api.cloudquotas.v1.QuotaAdjusterSettingsManager"}},
+	// The Site Verification API (#2030): CloudBurrow's own, JSON only, on
+	// Resource Manager's port. Its methods are the official generated
+	// client's (google.golang.org/api/siteverification/v1).
+	{Key: "siteverification", Title: "Site Verification API (v1)", Own: true, Methods: discoveryMethods("siteVerification", reflect.TypeOf(sitev1.Service{}))},
 	// Workload Identity Federation (#1941): the IAM API's workload
 	// identity pools, JSON only, on Resource Manager's port, and the
 	// Security Token Service's token method on the metadata port. Its
@@ -831,7 +842,7 @@ func loadRegistry(root string) (map[string]string, error) {
 	// The Cloud SQL Admin API's too (#1301), and Service Usage's (#1352).
 	// And Cloud Run v1's (#1533).
 	for _, statuses := range []map[string]bool{sqladminsvc.MethodStatuses(), serviceusagesvc.MethodStatuses(), apikeyssvc.MethodStatuses(), computesvc.MethodStatuses(), storagejobssvc.MethodStatuses(), backupdrStatuses, runadapter.V1MethodStatuses(),
-		rmsvc.CloudIdentityMethodStatuses(), rmsvc.WorkloadIdentityMethodStatuses()} {
+		rmsvc.CloudIdentityMethodStatuses(), rmsvc.WorkloadIdentityMethodStatuses(), siteverificationsvc.MethodStatuses()} {
 		for id, isBuilt := range statuses {
 			if isBuilt {
 				r[id] = regImplemented

@@ -115,7 +115,7 @@ func TestMemorystoreValkeyInstance(t *testing.T) {
 		t.Fatalf("CreateInstance operation: %v", err)
 	}
 	if inst.GetName() != name || inst.GetState() != memorystorepb.Instance_ACTIVE || inst.GetShardCount() != 3 || inst.GetReplicaCount() != 1 ||
-		inst.GetMode() != memorystorepb.Instance_CLUSTER || inst.GetEngineVersion() != "VALKEY_8_0" || inst.GetNodeConfig().GetSizeGb() != 1.4 ||
+		inst.GetMode() != memorystorepb.Instance_CLUSTER || inst.GetEngineVersion() != "VALKEY_9_1" || inst.GetNodeConfig().GetSizeGb() != 1.4 ||
 		len(inst.GetDiscoveryEndpoints()) != 1 || len(inst.GetEndpoints()) != 1 || len(inst.GetPscAutoConnections()) != 0 || inst.GetLabels()["env"] != "compat" {
 		t.Fatalf("created instance = %v", inst)
 	}

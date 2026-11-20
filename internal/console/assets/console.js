@@ -597,8 +597,9 @@ const ROUTES = [
     unavailable: "Essential Contacts is the Essential Contacts API's, which CloudBurrow does not serve: a local instance sends no notifications." },
   { path: "/iam-admin/asset-inventory", title: "Asset Inventory", service: null, requires: "iam", screen: "unavailable", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin",
     unavailable: "Asset Inventory is the Cloud Asset API's, which CloudBurrow does not serve. The toolbar's search finds every served resource, and each product's list holds its own." },
-  { path: "/iam-admin/quotas", title: "Quotas & System Limits", service: null, requires: "iam", screen: "unavailable", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin",
-    unavailable: "Quotas are the Cloud Quotas API's, which CloudBurrow does not serve. The limits Google documents per API are enforced by the services themselves." },
+  // Quotas & System Limits (#2030): the Cloud Quotas API's quota infos and
+  // preferences, over every API, with Edit quotas.
+  { path: "/iam-admin/quotas", title: "Quotas & System Limits", service: "serviceusage", screen: "apis-quotas", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin" },
   { path: "/iam-admin/pam", title: "Privileged Access Manager", service: null, requires: "iam", screen: "unavailable", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin",
     unavailable: "Privileged Access Manager (entitlements and grants) is the Privileged Access Manager API's, which CloudBurrow does not serve. Grant a role on the IAM page; an IAM condition on request.time makes it temporary." },
   { path: "/iam-admin/principal-access-boundary", title: "Principal Access Boundary", service: null, requires: "iam", screen: "unavailable", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin",
@@ -707,15 +708,18 @@ const ROUTES = [
     product: "serviceusage", productTitle: "APIs & Services" },
   { path: "/apis/credentials", service: "serviceusage", screen: "apis-credentials", icon: "serviceusage", title: "Credentials", section: "Management tools",
     product: "serviceusage", productTitle: "APIs & Services" },
-  { path: "/apis/credentials/consent", title: "OAuth consent screen", service: null, requires: "serviceusage", screen: "unavailable", icon: "serviceusage",
-    section: "Management tools", product: "serviceusage", productTitle: "APIs & Services",
-    unavailable: "The OAuth consent screen is Google Auth Platform's (Branding, Audience, Clients, Data Access, Verification Center), which CloudBurrow does not serve: a local instance signs no user in with OAuth, and its APIs take a service account key or no credentials at all." },
+  // The OAuth consent screen (#2030): Google Auth Platform's Overview,
+  // Branding, Audience, Clients and Data Access over the local app and
+  // clients (internal/authplatform).
+  { path: "/apis/credentials/consent", title: "OAuth consent screen", service: "serviceusage", screen: "auth-platform", icon: "serviceusage",
+    section: "Management tools", product: "serviceusage", productTitle: "APIs & Services" },
   { path: "/apis/credentials/agreements", title: "Page usage agreements", service: null, requires: "serviceusage", screen: "unavailable", icon: "serviceusage",
     section: "Management tools", product: "serviceusage", productTitle: "APIs & Services",
     unavailable: "Page usage agreements are the terms of service a project has accepted for Google's APIs. A local instance has no terms to accept." },
-  { path: "/apis/credentials/domainverification", title: "Domain verification", service: null, requires: "serviceusage", screen: "unavailable", icon: "serviceusage",
-    section: "Management tools", product: "serviceusage", productTitle: "APIs & Services",
-    unavailable: "Domain verification proves to Google that a project owns a domain, for push notifications and OAuth redirects. A local instance reaches no outside domain, so there is nothing to verify." },
+  // Domain verification (#2030): the Site Verification API's verified
+  // sites and domains, with Add domain.
+  { path: "/apis/credentials/domainverification", title: "Domain verification", service: "serviceusage", screen: "apis-domains", icon: "serviceusage",
+    section: "Management tools", product: "serviceusage", productTitle: "APIs & Services" },
   // Service Usage operations (#1530): what operations.list answers, with
   // Delete. Google's menu has no such page; it is kept after Google's.
   { path: "/apis/operations", service: "serviceusage-operations", icon: "serviceusage", title: "Operations", kind: "Operation", section: "Management tools",
@@ -1066,7 +1070,7 @@ async function api(path, options = {}) {
     else outer.addEventListener("abort", onOuter, { once: true });
   }
 
-  path = scopedAPIPath(path);
+  path = resourceScopedAPIPath(scopedAPIPath(path));
   let res;
   try {
     res = await fetch(path, {
@@ -1705,7 +1709,9 @@ function navLink(entry, onPinChange, nested = false, draggable = false) {
 function scopeSearch() {
   const from = new URLSearchParams(location.search);
   const scope = new URLSearchParams();
-  for (const key of ["project"]) {
+  // The folder or organization chosen in the toolbar travels too (#2023);
+  // a page that does not work at that level drops it (syncResourceScope).
+  for (const key of ["project", "folder", "organizationId"]) {
     const value = from.get(key);
     if (value) scope.set(key, value);
   }
@@ -2971,6 +2977,9 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   // flight looks identical to one that is idle unless something says so, and
   // the user's reading of "nothing happened" is a second click.
   const operating = new Set();
+  // Rows whose children are shown: a Bigtable table's replications, behind
+  // the arrow beside its ID (#2027).
+  const expanded = new Set();
 
   const nameColumn = () => data.nameColumn || "Name";
   const allDataColumns = () => data.columns || [];
@@ -3182,7 +3191,29 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
     const start = page * pageSize;
     const shown = rows.slice(start, start + pageSize);
 
-    setChildren(body, ...shown.map((item) => {
+    // A row's children, under it while its arrow is open: they carry the
+    // listing's columns and nothing to act on (#2027).
+    const childRows = (item) => (expanded.has(item.name) ? item.children || [] : []).map((child) => el("tr", { class: "child-row" },
+      ...(selectable ? [el("td", { class: "select-cell" })] : []),
+      ...(hasStatus() ? [el("td", { class: "status-cell" }, child.status ? statusIcon(child.status) : null)] : []),
+      el("td", { class: "child-name" }, child.name),
+      ...dataColumns().map((c) => el("td", { text: (child.fields || {})[c] || "" })),
+      ...(hasActions() ? [el("td", {})] : [])));
+    const expander = (item) => {
+      if (!(item.children || []).length) return null;
+      const open = expanded.has(item.name);
+      return el("button", { type: "button", class: "icon-button row-expander" + (open ? " is-open" : ""),
+        "aria-expanded": open ? "true" : "false",
+        "aria-label": `${open ? "Hide" : "Show"} ${data.childNoun || "rows"} of ${item.name}`,
+        html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>',
+        onclick: (e) => {
+          e.stopPropagation();
+          if (open) expanded.delete(item.name); else expanded.add(item.name);
+          draw();
+          body.querySelector(`button.row-expander[aria-label$=" of ${CSS.escape(item.name)}"]`)?.focus();
+        } });
+    };
+    setChildren(body, ...shown.flatMap((item) => {
       const cells = [];
       if (selectable && !canSelect(item)) {
         cells.push(el("td", { class: "select-cell" }));
@@ -3217,7 +3248,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
               spinner(`${item.name} is being changed`)))
           : el("td", { class: "status-cell" }, statusIcon(item.status)));
       }
-      cells.push(el("td", {}, item.link
+      cells.push(el("td", {}, expander(item), item.link
         ? el("a", { href: item.link, text: item.name })
         : (item.opens || []).length
           ? el("a", { href: detailHref(route, item.opens), text: item.name })
@@ -3273,7 +3304,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
           inspect();
         });
       }
-      return row;
+      return [row, ...childRows(item)];
     }));
 
     if (!shown.length) {
@@ -3731,6 +3762,12 @@ async function renderDetail(view, route, resourcePath) {
   // sharing's My subscriptions, #1989) is headed by its own name, not
   // "<Kind> details".
   if (data.heading) crumb.querySelector("h1, h2").textContent = data.heading;
+  // An edit form that is a page of its own (#1862), as Google's Edit opens
+  // the Edit Redis instance page: the resource's address with ?edit=1 draws
+  // the form instead of the resource's tabs.
+  if (data.edit && data.edit.page && new URLSearchParams(location.search).get("edit") === "1") {
+    return renderEditPage(view, route, segments, data, crumb);
+  }
   const sections = (data.sections || []).slice();
   // A Logs tab where Google's page has one (#1842, audit item 9): a Cloud
   // Run service's, job's and worker pool's, a function's, and a GKE
@@ -4432,7 +4469,15 @@ async function renderDetail(view, route, resourcePath) {
       setTimeout(() => revealValue(route, segments, data.reveal), 0);
     }
   }
-  if (data.edit) {
+  DETAIL_EDIT = data.edit ? () => openEditForm(route, segments, data.edit, reloadPage) : null;
+  if (data.edit && data.edit.page) {
+    const editHref = new URL(detailHref(route, segments), location.origin);
+    editHref.searchParams.set("edit", "1");
+    pageActions.unshift(el("a", {
+      class: "button primary", id: "detail-edit", href: editHref.pathname + editHref.search,
+      text: data.edit.label || "Edit",
+    }));
+  } else if (data.edit && !data.edit.inline) {
     pageActions.unshift(el("button", {
       class: "primary", text: data.edit.label || "Edit",
       onclick: () => openEditForm(route, segments, data.edit, reloadPage),
@@ -5348,6 +5393,12 @@ async function editFromRow(route, segments, onDone) {
     const data = await api(`/api/detail/${route.service}?project=${encodeURIComponent(project)}` +
       segments.map((sg) => `&name=${encodeURIComponent(sg)}`).join(""));
     if (!data.edit) throw new Error("This resource has nothing that can be edited.");
+    // An edit form that is a page of its own (#1862) opens that page.
+    if (data.edit.page) {
+      const url = new URL(detailHref(route, segments), location.origin);
+      url.searchParams.set("edit", "1");
+      return navigate(url.pathname + url.search);
+    }
     openEditForm(route, segments, data.edit, onDone);
   } catch (err) {
     notify(String(err.message), "error");
@@ -5450,6 +5501,60 @@ function inlineEditForm(route, segments, section, onDone) {
     spec.note ? el("p", { class: "form-help", text: spec.note }) : null,
     error, ...fields.nodes,
     el("div", { class: "picklist-actions" }, primary));
+}
+
+// renderEditPage draws an edit form that is a page of its own (#1862):
+// Google's Edit opens the "Edit Redis instance" page, under the resource's
+// crumbs, which saves with Save and goes back to the resource's page;
+// Cancel goes back without saving.
+function renderEditPage(view, route, segments, data, crumb) {
+  const spec = data.edit;
+  const name = segments[segments.length - 1];
+  const here = detailHref(route, segments);
+  const title = spec.title || spec.label || "Edit";
+  // The resource's crumbs, its own now a link back to it, then the form.
+  const nav = crumb.querySelector(".breadcrumb").cloneNode(true);
+  const last = nav.lastElementChild;
+  if (last && last.tagName === "SPAN") last.replaceWith(el("a", { href: here, text: last.textContent }));
+  nav.append(el("span", { "aria-hidden": "true", text: "/" }), el("span", { text: title }));
+  const header = pageHeader(title, `${name} · ` + (currentProject() ? `Project ${currentProject()}` : "All projects"),
+    { back: here, backLabel: `Back to ${name}` });
+  header.prepend(nav);
+
+  const fields = buildCreateForm(spec);
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  const primary = el("button", { type: "submit", class: "primary", id: "edit-page-save", text: spec.submit || "Save" });
+  const cancel = el("a", { class: "button secondary", href: here, text: "Cancel" });
+  const submit = async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    if (!fields.validate()) return;
+    setBusy(primary, true);
+    const op = recordOperation(`Update ${name}`);
+    try {
+      const res = await send(
+        `/api/resources/${route.service}?project=${encodeURIComponent(currentProject())}`,
+        "PATCH", { Path: segments, Values: fields.values() });
+      op.succeeded("", res.operation);
+      notify(`Updated ${name}`);
+      announce(`Updated ${name}`);
+      navigate(here);
+    } catch (err) {
+      // The API's own message, on the page where the change was made.
+      op.failed(err.message, err.operation);
+      setBusy(primary, false);
+      error.textContent = err.message;
+      error.hidden = false;
+    }
+  };
+  setChildren(view, header,
+    el("form", { class: "create-page is-single-page edit-page", novalidate: true, onsubmit: submit },
+      spec.note ? el("p", { class: "form-help", text: spec.note }) : null,
+      error,
+      ...fields.nodes,
+      el("div", { class: "form-actions" }, primary, cancel)));
+  fields.focusFirst();
+  announce(`${title} form`);
 }
 
 // pageTabStrip is a route's `pageTabs` as a tablist of links, the route
@@ -5664,6 +5769,11 @@ function serverFilterBox(spec, reload) {
 
 // propertyValue is a property's <dd>: its value, as a link when the
 // provider names the page it opens (#1554).
+// A property with an Edit (#1865: Google's Edit next to a tag key's
+// Description) opens the page's edit form, which the resource page puts
+// in DETAIL_EDIT while it is drawn.
+let DETAIL_EDIT = null;
+
 function propertyValue(prop) {
   const value = prop.link ? el("a", { href: prop.link, text: prop.value }) : prop.value;
   // A link beside the value that opens one of the page's actions, as
@@ -5676,6 +5786,11 @@ function propertyValue(prop) {
       el("a", { class: "property-action", href: here.pathname + here.search,
                 "aria-label": `${prop.actionText || prop.action} ${prop.label.toLowerCase()}`,
                 text: prop.actionText || prop.action }));
+  }
+  if (prop.edit) {
+    return el("dd", { class: "has-copy" }, el("span", { class: "property-copy-value" }, value),
+      el("button", { type: "button", class: "link-button is-inline property-edit", text: prop.edit,
+        "aria-label": `${prop.edit} ${prop.label}`, onclick: () => DETAIL_EDIT && DETAIL_EDIT() }));
   }
   if (!prop.copy) return el("dd", {}, value);
   // A Copy button of its own, labelled as Google labels it: Copy URL,
@@ -8945,6 +9060,79 @@ function currentProject() {
   return new URLSearchParams(location.search).get("project") || "";
 }
 
+// --- the folder or organization chosen in the toolbar (#2023) ------------
+//
+// Google's resource selector chooses a project, a folder or the
+// organization, and the pages that work at that level (IAM, Organization
+// Policies, Tags) then show that resource; its address carries
+// ?folder=N or ?organizationId=N, as console.cloud.google.com's does. The
+// project stays in the address for every per-project page, and a page that
+// does not work at the folder's or organization's level drops the choice,
+// so the toolbar always names what the page reads.
+const RESOURCE_SCOPE_KEYS = ["folder", "organizationId"];
+const RESOURCE_SCOPED_PATHS = ["/iam-admin/iam", "/iam-admin/orgpolicies", "/iam-admin/tags", "/tags"];
+const resourceScopedPath = (pathname) => RESOURCE_SCOPED_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"));
+// RESOURCE_NAMES are the folders' and the organization's display names, as
+// the picker last read them: "folder:N" and "organization:N".
+let RESOURCE_NAMES = {};
+
+function currentResource() {
+  const q = new URLSearchParams(location.search);
+  if (q.get("folder")) return { kind: "folder", id: q.get("folder") };
+  if (q.get("organizationId")) return { kind: "organization", id: q.get("organizationId") };
+  return null;
+}
+
+// resourceLabel is how the toolbar and a page name a chosen resource.
+function resourceLabel(r) {
+  return RESOURCE_NAMES[`${r.kind}:${r.id}`] || (r.kind === "folder" ? `Folder ${r.id}` : `Organization ${r.id}`);
+}
+
+// resourceScopedAPIPath adds the chosen folder or organization to a
+// console API request made from a page that works at its level.
+function resourceScopedAPIPath(path) {
+  if (typeof path !== "string" || !path.startsWith("/api/") || !resourceScopedPath(location.pathname)) return path;
+  const here = new URLSearchParams(location.search);
+  const url = new URL(path, location.origin);
+  let changed = false;
+  for (const k of RESOURCE_SCOPE_KEYS) {
+    if (here.get(k) && !url.searchParams.has(k)) { url.searchParams.set(k, here.get(k)); changed = true; }
+  }
+  return changed ? url.pathname + url.search : path;
+}
+
+// syncResourceScope drops a choice the page cannot use, names what the
+// page reads in the toolbar, and moves the links to the pages that work at
+// the folder's or organization's level onto the choice.
+function syncResourceScope() {
+  if (currentResource() && !resourceScopedPath(location.pathname)) {
+    const u = new URL(location.href);
+    for (const k of RESOURCE_SCOPE_KEYS) u.searchParams.delete(k);
+    history.replaceState(history.state, "", u.pathname + u.search + u.hash);
+  }
+  const res = currentResource();
+  const current = document.getElementById("project-current");
+  if (current) {
+    current.textContent = res ? resourceLabel(res) : (currentProject() || "Select a project");
+    current.dataset.kind = res ? res.kind : "project";
+  }
+  const here = new URLSearchParams(location.search);
+  for (const a of document.querySelectorAll("a[href]")) {
+    const href = a.getAttribute("href");
+    if (!href.startsWith("/")) continue;
+    const u = new URL(href, location.origin);
+    const scoped = resourceScopedPath(u.pathname);
+    let changed = false;
+    for (const k of RESOURCE_SCOPE_KEYS) {
+      const want = scoped ? (here.get(k) || "") : "";
+      if ((u.searchParams.get(k) || "") === want) continue;
+      if (want) u.searchParams.set(k, want); else u.searchParams.delete(k);
+      changed = true;
+    }
+    if (changed) a.setAttribute("href", u.pathname + u.search + u.hash);
+  }
+}
+
 // notify shows the outcome of something the user did.
 //
 // window.alert blocks the page, cannot be styled, cannot be dismissed by
@@ -9159,24 +9347,26 @@ const DELETE_DETAIL = {
   "logging-buckets": "The bucket is kept as Delete requested for 7 days and can be undeleted until then. No log entry is removed.",
   "pubsub-schemas": "Every revision is deleted with it. A topic that uses it keeps its " +
             "schema settings, which then name _deleted-schema_.",
-  projects: "This removes the project's registration only. Buckets, topics, " +
-            "queues, secrets and services created under the identifier stay " +
-            "where they are, in the services that own them — nothing here " +
-            "reaches into those. Re-registering the same identifier makes them " +
-            "visible again.",
+  projects: "This shuts down the project: all traffic serving stops, and every resource in it is scheduled for deletion. " +
+            "The project is pending deletion for 30 days, when Restore on its page or under Manage resources' " +
+            "Resources pending deletion brings it back; then it is deleted.",
 };
 
 async function deleteResource(route, name, onDone, row = NO_ROW) {
   // Awaited, so the caller knows when the row stops being busy. The interval
   // that matters starts when the request goes out, not when the dialog opens:
   // a row marked busy while someone reads a confirmation would be lying.
+  // A project is shut down, as Google's Delete under Manage resources
+  // says: its ID typed back, then Shut down (#1865).
+  const shutDown = route.service === "projects";
   await confirmDestructive({
-    title: `Delete ${name}?`,
+    title: shutDown ? `Shut down ${name}?` : `Delete ${name}?`,
     detail: DELETE_DETAIL[route.service],
     confirmWord: name,
+    ...(shutDown ? { confirmLabel: "Shut down", consequence: "" } : {}),
     style: capabilityOf(route.service).deleteConfirm || "name",
     onConfirm: async () => {
-      const op = recordOperation(`Delete ${name}`);
+      const op = recordOperation(shutDown ? `Shut down project ${name}` : `Delete ${name}`);
       row.start();
       try {
         const res = await send(
@@ -9184,7 +9374,7 @@ async function deleteResource(route, name, onDone, row = NO_ROW) {
           `&name=${encodeURIComponent(name)}`, "DELETE");
         op.succeeded("", res.operation);
         row.end();
-        notify(`Deleted ${name}`);
+        notify(shutDown ? `Shut down project ${name}` : `Deleted ${name}`);
         // The picker holds a copy of the registry, and a project it still lists
         // after the delete is one the toolbar will keep offering. Announced
         // rather than reached into, so the picker owns its own state.
@@ -9349,6 +9539,7 @@ function notFound(view, path) {
 // dispatch() returns the render's promise, which nobody used to await: a
 // throw inside a render function left the skeleton on screen permanently.
 function route() {
+  syncResourceScope();
   const view = document.getElementById("view");
   // An action's info panel (#2013) belongs to the screen that opened it.
   closeActionPanel();
@@ -9360,8 +9551,11 @@ function route() {
     const pending = dispatch(view);
     if (pending && typeof pending.catch === "function") {
       pending.then(syncStickyOffsets, (err) => screenFailed(err, title()));
+      // The page's links drawn, they follow the toolbar's choice (#2023).
+      pending.then(syncResourceScope, () => {});
     } else {
       syncStickyOffsets();
+      syncResourceScope();
     }
     return pending;
   } catch (err) {
@@ -9543,6 +9737,9 @@ function dispatch(view) {
   if (match.screen === "apis-dashboard" && !resourcePath.length) return renderAPIsDashboard(view);
   if (match.screen === "apis-dashboard" && resourcePath[0] === "api" && resourcePath[1]) return renderAPIPage(view, resourcePath[1], resourcePath[2] || "overview");
   if (match.screen === "apis-library") return renderAPILibrary(view, resourcePath[0] || "");
+  if (match.screen === "apis-quotas") return renderQuotasPage(view);
+  if (match.screen === "auth-platform") return renderAuthPlatform(view, resourcePath[0] || "overview", resourcePath[1] || "");
+  if (match.screen === "apis-domains") return renderDomainVerification(view);
   if (match.screen === "apis-credentials" && !resourcePath.length) return renderAPICredentials(view);
   if (match.screen === "apis-credentials" && resourcePath[0] === "key" && resourcePath[1]) return renderAPIKeyPage(view, resourcePath[1]);
   if (match.screen === "apis-credentials" && resourcePath[0] === "restore") return renderAPIKeysRestore(view);
@@ -10220,10 +10417,13 @@ async function initProjects() {
     const url = new URL(location.href);
     if (id) url.searchParams.set("project", id);
     else url.searchParams.delete("project");
+    // A project chosen replaces a folder or the organization (#2023).
+    for (const k of RESOURCE_SCOPE_KEYS) url.searchParams.delete(k);
     history.pushState({}, "", url);
     rescopeLinks(selected, id);
     selected = id;
     current.textContent = id || "Select a project";
+    current.dataset.kind = "project";
     closePicker();
     route();
     // The terminal follows the toolbar's project (#781).
@@ -10259,16 +10459,37 @@ async function initProjects() {
     if (view === "recent") {
       pool = recents.map((id) => projects.find((p) => p.id === id)).filter(Boolean);
     }
-    const shown = pool.filter((p) =>
-      !q || p.id.toLowerCase().includes(q) || (p.name || "").toLowerCase().includes(q));
+    const hit = (p) => !q || p.id.toLowerCase().includes(q) || (p.name || "").toLowerCase().includes(q);
+    // All is Google's resource selector (#1865): the organization, its
+    // folders and the projects under each, as a tree; a search lists
+    // whatever matches. Choosing a folder or the organization opens its
+    // page (its IAM, organization policies, tags and log router), and the
+    // project stays the one per-project pages read.
+    if (view === "all" && hierarchy.length) {
+      const rows = hierarchyRows().filter((r) => hit(r));
+      setChildren(list, ...rows.map((r) => r.kind === "project" ? projectRow(r, q ? 0 : r.depth) : resourceRow(r, q ? 0 : r.depth)));
+      if (!rows.length) list.append(el("li", {}, el("p", { class: "panel-empty", text: "No matching resources." })));
+      return;
+    }
+    const shown = pool.filter(hit);
 
     // No "All projects" entry: Google's console always works in one
     // selected project (#1842).
-    setChildren(list,
-      ...shown.map((p) =>
-        el("li", { class: "picker-row" },
+    setChildren(list, ...shown.map((p) => projectRow(p, 0)));
+
+    if (!shown.length) {
+      list.append(el("li", {}, el("p", { class: "panel-empty",
+        text: q ? "No matching projects."
+          : view === "starred" ? "No starred projects. Star a project from All." : "No recent projects." })));
+    }
+  };
+  const indent = (depth) => depth ? `padding-left:${10 + depth * 16}px` : null;
+  const projectRow = (p, depth) => {
+    const stars = starred();
+    return el("li", { class: "picker-row", "data-kind": "project" },
           el("button", {
-            class: "picker-item" + (selected === p.id ? " is-selected" : ""),
+            class: "picker-item" + (selected === p.id && !currentResource() ? " is-selected" : ""),
+            style: indent(depth),
             onclick: () => select(p.id),
           },
             el("span", { class: "picker-item-name", text: p.name || p.id }),
@@ -10279,13 +10500,60 @@ async function initProjects() {
             "aria-label": `Star ${p.name || p.id}`, title: stars.includes(p.id) ? "Unstar" : "Star",
             html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/></svg>',
             onclick: () => toggleStar(p.id),
-          }))));
-
-    if (!shown.length) {
-      list.append(el("li", {}, el("p", { class: "panel-empty",
-        text: q ? "No matching projects."
-          : view === "starred" ? "No starred projects. Star a project from All." : "No recent projects." })));
+          }));
+  };
+  // Choosing a folder or the organization (#2023) scopes the page to it
+  // when the page works at that level (IAM, Organization Policies, Tags),
+  // and otherwise opens its own page, the project kept.
+  const resourceHref = (r) => {
+    const u = new URL(location.href);
+    for (const k of RESOURCE_SCOPE_KEYS) u.searchParams.delete(k);
+    u.searchParams.set(r.kind === "organization" ? "organizationId" : "folder", r.id);
+    if (!resourceScopedPath(u.pathname)) {
+      u.pathname = r.kind === "organization" ? "/resource-hierarchy/organization" : `/resource-hierarchy/${encodeURIComponent(r.id)}`;
     }
+    for (const k of [...u.searchParams.keys()]) if (k !== "project" && !RESOURCE_SCOPE_KEYS.includes(k)) u.searchParams.delete(k);
+    return u.pathname + u.search;
+  };
+  const resourceRow = (r, depth) => {
+    const word = r.kind === "organization" ? "Organization" : "Folder";
+    const res = currentResource();
+    const chosen = res && res.kind === r.kind && res.id === r.id;
+    return el("li", { class: "picker-row", "data-kind": r.kind },
+      el("a", { class: "picker-item" + (chosen ? " is-selected" : ""), href: resourceHref(r), style: indent(depth),
+        "aria-current": chosen ? "true" : null,
+        onclick: (e) => {
+          e.preventDefault();
+          closePicker();
+          history.pushState({}, "", resourceHref(r));
+          route();
+        } },
+        el("span", { class: "picker-item-name" }, el("span", { class: "picker-item-kind", text: `${word} ` }), r.name),
+        el("span", { class: "picker-item-id", text: r.id })),
+      el("span", { class: "picker-star-space", "aria-hidden": "true" }));
+  };
+  // The organization, its folders and their projects in tree order; a
+  // project with no parent comes after the organization's tree.
+  let hierarchy = [];
+  const hierarchyRows = () => {
+    const live = hierarchy.filter((n) => n.state === "ACTIVE");
+    const parentOf = (n) => n.kind === "organization" ? null
+      : !n.parent ? "none" : n.parent.startsWith("organizations/") ? "organization" : "folder:" + n.parent.split("/")[1];
+    const keyOf = (n) => n.kind === "organization" ? "organization" : `${n.kind}:${n.id}`;
+    const kids = new Map();
+    for (const n of live) {
+      const k = parentOf(n);
+      if (!kids.has(k)) kids.set(k, []);
+      kids.get(k).push(n);
+    }
+    for (const l of kids.values()) l.sort((a, b) => (a.kind === b.kind ? 0 : a.kind === "folder" ? -1 : 1) || (a.name || a.id).localeCompare(b.name || b.id));
+    const out = [];
+    const walk = (n, depth) => {
+      out.push({ ...n, depth, name: n.name || n.id });
+      for (const c of kids.get(keyOf(n)) || []) walk(c, depth + 1);
+    };
+    for (const n of [...(kids.get(null) || []), ...(kids.get("none") || [])]) walk(n, 0);
+    return out;
   };
 
   const load = async () => {
@@ -10295,6 +10563,11 @@ async function initProjects() {
         id: i.name, name: (i.fields || {}).Name || i.name,
       }));
       KNOWN_PROJECTS = projects.map((p) => p.id);
+      // The tree for All; a failure leaves the flat list of projects.
+      try { hierarchy = (await send("/api/studio/projects?call=tree", "POST", {})).nodes || []; } catch { hierarchy = []; }
+      RESOURCE_NAMES = {};
+      for (const n of hierarchy) if (n.kind !== "project") RESOURCE_NAMES[`${n.kind}:${n.id}`] = n.name || n.id;
+      syncResourceScope();
     } catch {
       // The picker still shows what is selected; it simply cannot offer
       // alternatives, which is better than showing none at all. KNOWN_PROJECTS
@@ -18075,7 +18348,11 @@ function iamRows(data) {
 
 function renderIAMPage(view, route) {
   const project = currentProject();
-  if (!project) {
+  // A folder or the organization chosen in the toolbar is the page's
+  // resource (#2023).
+  const res = currentResource();
+  const scopeWord = res ? `${res.kind} "${resourceLabel(res)}"` : `project "${project}"`;
+  if (!project && !res) {
     setChildren(view, pageHeader("IAM", ""), emptyState("No project is selected", "Choose a project in the toolbar."));
     return;
   }
@@ -18127,7 +18404,7 @@ function renderIAMPage(view, route) {
     const own = iamRows(data).filter((r) => members.includes(r.member));
     confirmDestructive({
       title: members.length === 1 ? `Remove access for ${members[0]}?` : `Remove access for ${members.length} principals?`,
-      detail: `Every role ${members.length === 1 ? "this principal holds" : "these principals hold"} on project ${project} is removed. ` +
+      detail: `Every role ${members.length === 1 ? "this principal holds" : "these principals hold"} on ${scopeWord} is removed. ` +
         "Roles inherited from a folder or the organization stay, and are removed there.",
       confirmWord: members.length === 1 ? members[0] : "remove",
       confirmLabel: "Remove",
@@ -18136,7 +18413,7 @@ function renderIAMPage(view, route) {
         for (const r of own) {
           const removes = r.roles.filter((x) => !x.from).map((x) => ({ role: x.role, condition: x.condition }));
           if (!removes.length) continue;
-          const op = recordOperation(`Remove access for ${r.member} on ${project}`);
+          const op = recordOperation(`Remove access for ${r.member} on ${res ? resourceLabel(res) : project}`);
           try {
             await iamCall("change", { etag: data.etag, members: [r.member], add: [], remove: removes });
             op.succeeded("");
@@ -18281,8 +18558,9 @@ function renderIAMPage(view, route) {
     el("label", { class: "check-line" }, google, el("span", { text: "Include Google-provided role grants" })));
   allowOnly.push(actionBar, bar.chips);
   setChildren(view, header,
-    el("h2", { id: "iam-scope-title", text: `Permissions for project "${project}"` }),
-    el("p", { class: "subtitle", text: "These permissions affect this project and all of its resources." }),
+    el("h2", { id: "iam-scope-title", text: `Permissions for ${scopeWord}` }),
+    el("p", { class: "subtitle", text: res ? `These permissions affect this ${res.kind} and all of its resources.`
+      : "These permissions affect this project and all of its resources." }),
     noteBanner(PROJECT_IAM_NOTE_TEXT()),
     tabs,
     actionBar,
@@ -18290,7 +18568,8 @@ function renderIAMPage(view, route) {
     body,
     el("p", { class: "form-help" },
       el("span", { text: "Test permissions and the condition linter are on " }),
-      el("a", { href: `/iam-admin/iam/${encodeURIComponent(project)}?tab=permissions`, text: "the policy's Permissions tab" }),
+      el("a", { href: res ? (res.kind === "organization" ? "/resource-hierarchy/organization?tab=permissions" : `/resource-hierarchy/${encodeURIComponent(res.id)}?tab=permissions`)
+        : `/iam-admin/iam/${encodeURIComponent(project)}?tab=permissions`, text: "the policy's Permissions tab" }),
       el("span", { text: ". " }),
       el("a", { href: "/iam-admin/troubleshooter", text: "Policy Troubleshooter" }),
       el("span", { text: " explains a principal's access, and " }),
@@ -18498,8 +18777,9 @@ function openIAMDenyPanel(resource, policy, onDone) {
 // the Org Policy v2 registry (cmd/cloudburrow/consoleorgpolicyedit.go).
 function renderOrgPolicyEdit(view, constraint) {
   const project = currentProject();
+  const res = currentResource();
   const back = `/iam-admin/orgpolicies/${encodeURIComponent(constraint)}`;
-  if (!project) {
+  if (!project && !res) {
     setChildren(view, pageHeader("Edit policy", ""), emptyState("No project is selected", "Choose a project in the toolbar."));
     return;
   }
@@ -18596,7 +18876,7 @@ function renderOrgPolicyEdit(view, constraint) {
       e.preventDefault();
       error.hidden = true;
       save.disabled = true;
-      const op = recordOperation(`Set ${dryRun ? "dry run " : ""}policy ${d.constraint} on ${project}`);
+      const op = recordOperation(`Set ${dryRun ? "dry run " : ""}policy ${d.constraint} on ${res ? resourceLabel(res) : project}`);
       try {
         await call("policy-set", { constraint: d.constraint, dryRun, etag: d.etag, source: picked("orgpolicy-source"),
           merge: picked("orgpolicy-enforcement") === "merge", rules: rules.map((r) => r.value()) });
@@ -19144,6 +19424,26 @@ async function openIAMEditPanel(data, row, rolesNow, onDone) {
 // ReadRows), the Query editor (GoogleSQL for Bigtable, ExecuteQuery), and
 // the results with a Row details pane and Export. Its calls are the
 // provider's Studio (POST /api/studio/bigtable-instances).
+//
+// Saved queries (https://docs.cloud.google.com/bigtable/docs/create-manage-saved-queries):
+// the Query editor's Save and Save as (Save as query, Save as logical view,
+// Save as materialized view), and the Explorer's Queries section, each
+// query with View actions Open query, Manage queries and Delete query.
+// They are CloudBurrow's own record (consolebigtablestudio.go) and say so.
+
+const BT_SAVED_NOTE = "CloudBurrow-only: Google keeps a saved query as a Studio asset of the project, which CloudBurrow does not serve. " +
+  "This one is kept in the instance's state directory, listed under Queries in the Explorer of every instance of the project, and reachable by no API.";
+const BT_UNAVAILABLE_MANAGE = "Not available locally: the Saved queries page lists the project's saved queries of every Google Cloud product, " +
+  "which CloudBurrow does not serve. The Queries section lists this project's Bigtable ones.";
+
+// btSampleQuery is a table's View a sample query: GoogleSQL for Bigtable
+// over its first column family, else its row keys.
+function btSampleQuery(t, quote) {
+  const f = (t.families || [])[0];
+  return f
+    ? `SELECT _key, ${quote(f.name)} FROM ${quote(t.name)} LIMIT 10`
+    : `SELECT _key FROM ${quote(t.name)} LIMIT 10`;
+}
 
 function renderBigtableStudio(panel, route, segments, project) {
   const [instance] = segments;
@@ -19163,6 +19463,9 @@ function renderBigtableStudio(panel, route, segments, project) {
   let state = store.tabs[store.current];
   const save = () => { try { sessionStorage.setItem(key, JSON.stringify(store)); } catch { /* per-tab only */ } };
   let catalog = { tables: [] };
+  let openedFromAddress = false;
+  let saved = [];
+  let regions = [];
   let last = null;
   const lastOf = new Map();
   const queryTabs = el("div", { class: "tab-strip spanner-editor-tabs", id: "bigtable-query-tabs", role: "tablist", "aria-label": "Query tabs" });
@@ -19205,6 +19508,17 @@ function renderBigtableStudio(panel, route, segments, project) {
   const runEditor = el("button", { class: "primary", id: "bigtable-editor-run", type: "button", text: "Run" });
   const clear = el("button", { class: "secondary", id: "bigtable-editor-clear", type: "button", text: "Clear",
     onclick: () => { editor.value = ""; state.sql = ""; save(); editor.focus(); } });
+  // Save: a new version of this tab's saved query, or Save query's dialog.
+  const saveButton = el("button", { class: "secondary", id: "bigtable-editor-save", type: "button", text: "Save",
+    onclick: () => saveQuery(false) });
+  const saveAs = bqMenu("Save as", [
+    { label: "Save as query", run: () => saveQuery(true) },
+    { label: "Save as logical view", run: () => saveView(false) },
+    { label: "Save as materialized view", run: () => saveView(true) },
+  ]);
+  bqMenuButton(saveAs, "Save as", "Save as a new query or view");
+  saveAs.querySelector("button").id = "bigtable-editor-save-as";
+  const savedNote = el("p", { class: "unavailable", id: "bigtable-saved-note", text: BT_SAVED_NOTE, hidden: true });
 
   const showDetails = (row) => {
     details.hidden = false;
@@ -19280,6 +19594,40 @@ function renderBigtableStudio(panel, route, segments, project) {
   }));
   runEditor.addEventListener("click", () => { if (editor.value.trim()) execute(runEditor, "sql", { sql: editor.value }); });
 
+  const saveQuery = async (asNew) => {
+    if (!editor.value.trim()) { notify("The editor is empty: write a query to save.", "error"); editor.focus(); return; }
+    if (state.savedId && !asNew) {
+      try {
+        const sq = await call("savequery", { id: state.savedId, name: state.title, sql: editor.value });
+        notify(`Saved query ${sq.name}`);
+        await loadSaved();
+      } catch (err) {
+        notify(`Save query failed: ${err.message}`, "error");
+      }
+      return;
+    }
+    const sq = await btSaveDialog({ title: asNew ? "Save as query" : "Save query", label: "Query name",
+      value: state.savedId ? `Copy of ${state.title}` : "", regions,
+      submit: (name, region) => call("savequery", { name, region, sql: editor.value }) });
+    if (!sq) return;
+    state.savedId = sq.id;
+    state.title = sq.name;
+    save();
+    drawQueryTabs();
+    notify(`Saved query ${sq.name}`);
+    await loadSaved();
+  };
+  const saveView = async (materialized) => {
+    if (!editor.value.trim()) { notify("The editor is empty: write a query to save.", "error"); editor.focus(); return; }
+    const kind = materialized ? "materialized view" : "logical view";
+    const done = await btSaveDialog({ title: `Save as ${kind}`, label: "View ID", value: "",
+      submit: (view) => send(`/api/actions/bigtable-instances?project=${encodeURIComponent(project)}`, "POST",
+        { Path: [instance], Action: materialized ? "creatematerialized" : "createlogical", Values: { view, query: editor.value } }) });
+    if (!done) return;
+    notify(`Created the ${kind}`);
+    loadExplorer();
+  };
+
   const label = (text, control) => el("label", { class: "form-row" }, el("span", { class: "form-label", text }), control);
   const drawMode = () => {
     setChildren(modes, ...[["builder", "Query builder"], ["editor", "Query editor"]].map(([id, text]) =>
@@ -19288,7 +19636,7 @@ function renderBigtableStudio(panel, route, segments, project) {
         onclick: () => { state.mode = id; save(); drawMode(); } })));
     if (state.mode === "editor") {
       setChildren(body, el("p", { class: "form-help", text: "GoogleSQL for Bigtable: SELECT over a table, a logical view or a materialized view, read with ExecuteQuery." }),
-        editor, el("div", { class: "action-bar spanner-editor-actions" }, runEditor, clear));
+        editor, el("div", { class: "action-bar spanner-editor-actions" }, runEditor, saveButton, saveAs, clear), savedNote);
     } else {
       setChildren(body, el("div", { class: "bigtable-builder", id: "bigtable-builder" },
         label("Table", tableSelect),
@@ -19314,6 +19662,7 @@ function renderBigtableStudio(panel, route, segments, project) {
     latest.checked = !!b.latest; limit.value = b.limit || "100";
     drawKeyInputs();
     editor.value = state.sql || "";
+    savedNote.hidden = !state.savedId;
     last = lastOf.get(state) || null;
     details.hidden = true;
     drawMode();
@@ -19359,6 +19708,17 @@ function renderBigtableStudio(panel, route, segments, project) {
     el("summary", { text: `${title} (${items.length})` }),
     items.length ? el("ul", {}, ...items.map(row)) : el("p", { class: "unavailable", text: `No ${title.toLowerCase()}` }));
   const quote = (n) => `\`${n.replaceAll("`", "\\`")}\``;
+  // A table's View actions in Google's order (#2027): those the instance
+  // page performs (Create a new table, Create a backup, Prevent deletion,
+  // Edit, Delete) in its forms, View a sample query in a new editor tab,
+  // View backups on the instance's Backups page, and the two Google runs
+  // on Cloud Monitoring and Dataflow disabled with the reason.
+  const tableAction = (t) => (a) => {
+    if (a.unavailable) return { label: a.label, disabled: true, title: a.unavailable, run: () => {} };
+    if (a.id === "samplequery") return { label: a.label, run: () => openEditor(btSampleQuery(t, quote)) };
+    return { label: a.label, danger: a.destructive,
+      run: () => runAction(route, a.target || [instance], a, () => loadExplorer()) };
+  };
   const loadExplorer = async () => {
     try {
       catalog = await call("explorer");
@@ -19371,7 +19731,9 @@ function renderBigtableStudio(panel, route, segments, project) {
             bqMenu(`View actions for ${t.name}`, [
               { label: "Query", run: () => openBuilder(t.name) },
               { label: "Open in query editor", run: () => openEditor(`SELECT * FROM ${quote(t.name)} LIMIT 100`) },
-              { label: "Open table page", run: () => navigate(`/bigtable/${encodeURIComponent(t.name)}?project=${encodeURIComponent(project)}&instance=${encodeURIComponent(instance)}`) },
+              ...(t.actions || []).map(tableAction(t)),
+              { label: "Open table page", title: "CloudBurrow's page of the table's rows, schema, change stream, snapshots, authorized views and schema bundles",
+                run: () => navigate(`/bigtable/${encodeURIComponent(t.name)}?project=${encodeURIComponent(project)}&instance=${encodeURIComponent(instance)}`) },
             ])),
           el("ul", { class: "spanner-columns" },
             ...t.families.map((f) => el("li", {}, el("span", { class: "mono", text: f.name }), el("span", { class: "unavailable", text: ` ${f.gc}` }))),
@@ -19383,9 +19745,54 @@ function renderBigtableStudio(panel, route, segments, project) {
         group("Tables", tables, tableRow),
         group("Logical views", catalog.logicalViews || [], viewRow),
         group("Materialized views", catalog.materializedViews || [], viewRow),
+        queriesGroup,
         ...Object.entries(catalog.errors || {}).map(([k, v]) => el("p", { class: "unavailable", text: `${k}: ${v}` })));
+      await loadSaved();
+      // A table opened from the Tables page (?table=), in a query tab of its
+      // own, as Google reaches a table in Bigtable Studio (#2027).
+      const wanted = new URLSearchParams(location.search).get("table");
+      if (wanted && !openedFromAddress && tables.some((t) => t.name === wanted)) {
+        openedFromAddress = true;
+        const at = store.tabs.findIndex((x) => x.mode === "builder" && x.table === wanted && !x.savedId);
+        if (at >= 0) selectTab(at); else openBuilder(wanted);
+      }
     } catch (err) {
       setChildren(explorer, el("h3", { text: "Explorer" }), el("p", { class: "form-error", role: "alert", text: err.message }));
+    }
+  };
+
+  // The Explorer's Queries section: the project's saved queries.
+  const queriesGroup = el("div", { id: "bigtable-explorer-queries" });
+  const openSaved = (sq) => {
+    const open = store.tabs.findIndex((t) => t.savedId === sq.id);
+    if (open >= 0) { store.tabs[open].sql = sq.query; selectTab(open); return; }
+    openTab({ title: sq.name, mode: "editor", sql: sq.query, table: state.table, savedId: sq.id });
+  };
+  const deleteSaved = async (sq) => {
+    await confirmDestructive({ title: "Delete query", detail: sq.name, style: "confirm",
+      consequence: "The saved query is deleted. Tabs that hold it keep their text.",
+      onConfirm: () => call("deletequery", { id: sq.id }) });
+    await loadSaved();
+    save();
+    savedNote.hidden = !state.savedId;
+  };
+  const drawSaved = () => setChildren(queriesGroup, group("Queries", saved, (sq) => el("li", { class: "bigtable-saved-query" },
+    el("button", { class: "link-button", type: "button", text: sq.name, title: `Open query ${sq.name}`, onclick: () => openSaved(sq) }),
+    bqMenu(`View actions for ${sq.name}`, [
+      { label: "Open query", run: () => openSaved(sq) },
+      { label: "Manage queries", disabled: true, title: BT_UNAVAILABLE_MANAGE, run: () => {} },
+      { label: "Delete query", danger: true, run: () => deleteSaved(sq) },
+    ]))));
+  const loadSaved = async () => {
+    try {
+      const res = await call("savedqueries");
+      saved = res.queries || [];
+      regions = res.regions || [];
+      // A deleted saved query's tabs are plain query tabs again.
+      for (const t of store.tabs) if (t.savedId && !saved.some((x) => x.id === t.savedId)) delete t.savedId;
+      drawSaved();
+    } catch (err) {
+      setChildren(queriesGroup, el("p", { class: "unavailable", text: `Queries: ${err.message}` }));
     }
   };
 
@@ -19407,6 +19814,57 @@ function renderBigtableStudio(panel, route, segments, project) {
 // Results and Explanation tabs under the editor. Its calls are the
 // provider's Studio (POST /api/studio/spanner). A statement that changes
 // data or schema runs after a confirmation that names the database.
+
+// btSaveDialog is Bigtable Studio's Save query dialog (a name and, under
+// Show advanced options, a Region) or a Save as view's (a View ID). It
+// settles with submit's answer, or null when cancelled.
+function btSaveDialog({ title, label, value, regions, submit }) {
+  return new Promise((settle) => {
+    let result = null;
+    const { dialog, close } = openModal({ labelledBy: "bigtable-save-title" });
+    const input = el("input", { type: "text", id: "bigtable-save-name", value, required: true, maxlength: "256" });
+    const error = el("p", { class: "form-error", role: "alert", hidden: true });
+    const primary = el("button", { type: "submit", class: "primary", id: "bigtable-save-submit", text: "Save" });
+    let region = null;
+    let advanced = [];
+    if (regions) {
+      region = el("select", { id: "bigtable-save-region" },
+        el("option", { value: "", text: "Default" }), ...regions.map((r) => el("option", { value: r.id, text: r.label })));
+      const box = el("div", { id: "bigtable-save-advanced", hidden: true },
+        el("label", { for: "bigtable-save-region", text: "Region" }), region,
+        el("p", { class: "form-help", text: "Optional. A saved query's region cannot be changed after it is created." }));
+      const toggle = el("button", { type: "button", class: "link-button", id: "bigtable-save-show-advanced", text: "Show advanced options",
+        "aria-expanded": "false", "aria-controls": "bigtable-save-advanced",
+        onclick: () => {
+          box.hidden = !box.hidden;
+          toggle.setAttribute("aria-expanded", box.hidden ? "false" : "true");
+          toggle.textContent = box.hidden ? "Show advanced options" : "Hide advanced options";
+        } });
+      advanced = [toggle, box, el("p", { class: "unavailable", text: BT_SAVED_NOTE })];
+    }
+    dialog.append(el("form", { class: "modal-body", novalidate: true, onsubmit: async (e) => {
+      e.preventDefault();
+      if (!input.value.trim()) { error.textContent = `Enter a ${label.toLowerCase()}.`; error.hidden = false; input.focus(); return; }
+      setBusy(primary, true);
+      try {
+        result = (await submit(input.value.trim(), region ? region.value : "")) || {};
+        close();
+      } catch (err) {
+        setBusy(primary, false);
+        error.textContent = err.message;
+        error.hidden = false;
+      }
+    } },
+      el("h2", { id: "bigtable-save-title", text: title }),
+      error,
+      el("label", { for: "bigtable-save-name", text: label }), input,
+      ...advanced,
+      el("div", { class: "modal-actions" },
+        el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }), primary)));
+    dialog.addEventListener("cb-closed", () => settle(result));
+    input.focus();
+  });
+}
 
 const STUDIO_SECTIONS = { spanner: renderSpannerStudio, "bigtable-instances": renderBigtableStudio };
 
@@ -19729,13 +20187,59 @@ function renderManageResources(view) {
     submit: (v) => run(`Saved the labels of ${n.id}`, "labels", { id: n.id, labels: v.labels ? JSON.parse(v.labels) : {} }),
   });
 
-  const addTag = (n) => mrForm({
-    id: "mr-add-tag", title: `Add tag to ${label(n)}`, label: "Save",
-    note: "Each resource carries one value of a tag key. Tag keys and values are made on the Tags page.",
-    fields: [{ name: "value", label: "Value", type: "select", required: true, options: tree.tagValues,
-      help: "The tag key and its value, as KEY_NAMESPACE/KEY/VALUE." }],
-    submit: (v) => run(`Added tag ${v.value} to ${label(n)}`, "tag", { kind: n.kind, id: n.id, value: v.value }),
-  });
+  // The Tags panel, Google's steps (tags-creating-and-managing, read
+  // 2026-11-20): Select scope (the organization or a project holding the
+  // tag keys, then Open), Add tag (a Key, then its Value), Delete item
+  // beside a tag, and Save, which asks Confirm before it attaches or
+  // detaches anything (#1865). A namespaced value is SCOPE/KEY/VALUE.
+  const tagParts = (v) => { const [scope, k, ...rest] = v.split("/"); return { scope, key: k, value: rest.join("/") }; };
+  const scopeLabels = () => {
+    const out = {};
+    for (const x of tree.nodes) {
+      if (x.kind === "organization") out[x.id] = `${x.name} (organization ${x.id})`;
+      if (x.kind === "project" && x.state === "ACTIVE") out[x.id] = `${x.name || x.id} (project ${x.id})`;
+    }
+    return out;
+  };
+  const selectScope = (current, done) => {
+    const labels = scopeLabels();
+    mrForm({
+      id: "mr-tag-scope", title: "Select scope", label: "Open",
+      note: "The organization or project that contains your tags.",
+      fields: [{ name: "scope", label: "Organization or project", type: "radio", required: true,
+        options: Object.keys(labels), optionLabels: labels, default: current || Object.keys(labels)[0] }],
+      submit: async (v) => done(v.scope),
+    });
+  };
+  const confirmTags = (row, adds, removes, done) => {
+    const { dialog, close } = openModal({ labelledBy: "mr-tag-confirm-title" });
+    const error = el("p", { class: "form-error", role: "alert", hidden: true });
+    const go = el("button", { type: "submit", class: "primary", id: "mr-tag-confirm", text: "Confirm" });
+    dialog.append(el("form", { class: "modal-body", novalidate: true, onsubmit: async (e) => {
+      e.preventDefault();
+      go.disabled = true;
+      error.hidden = true;
+      try {
+        for (const v of removes) await run(`Detached tag ${v} from ${label(row)}`, "untag", { kind: row.kind, id: row.id, value: v });
+        for (const v of adds) await run(`Attached tag ${v} to ${label(row)}`, "tag", { kind: row.kind, id: row.id, value: v });
+        close();
+        done();
+      } catch (err) {
+        error.textContent = err.message;
+        error.hidden = false;
+        go.disabled = false;
+      }
+    } },
+      el("h2", { id: "mr-tag-confirm-title", text: "Confirm" }),
+      el("p", { text: `Save these tag changes on ${kindWord(row).toLowerCase()} ${label(row)}?` }),
+      el("ul", { id: "mr-tag-confirm-list" },
+        ...adds.map((v) => el("li", { text: `Attach ${v}` })),
+        ...removes.map((v) => el("li", { text: `Detach ${v}` }))),
+      error,
+      el("div", { class: "modal-actions" },
+        el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }), go)));
+    go.focus();
+  };
 
   // The info panel: the selected row's Permissions, Labels and Tags.
   const openPanel = async (n) => {
@@ -19748,6 +20252,9 @@ function renderManageResources(view) {
     const content = el("div", { id: "mr-panel-content" }, el("p", { class: "unavailable", text: "reading…" }));
     const tabs = ["permissions", ...(n.kind === "project" ? ["labels"] : []), "tags"];
     let tab = "permissions";
+    // The Tags tab's scope and unsaved changes, kept while the panel is open.
+    let tagScope = "";
+    let tagDraft = { adds: [], removes: new Set() };
     const strip = el("div", { class: "tab-strip", role: "tablist", "aria-label": "Info panel" });
     const drawStrip = () => setChildren(strip, ...tabs.map((t) => el("button", {
       type: "button", role: "tab", id: `mr-panel-tab-${t}`, class: "tab" + (t === tab ? " is-selected" : ""),
@@ -19780,15 +20287,85 @@ function renderManageResources(view) {
             : el("p", { class: "form-help", text: "No labels." }));
       }
       if (tab === "tags") {
+        const bound = row.tags || [];
+        const inScope = tree.tagValues.filter((v) => tagScope && tagParts(v).scope === tagScope);
+        // A key of dynamic values (#2023) has no values to pick: its Value
+        // is typed, and must match the key's validation regular expression.
+        const dynamic = {};
+        for (const [k, re] of Object.entries(tree.dynamicKeys || {})) {
+          const [scope, short] = k.split("/");
+          if (tagScope && scope === tagScope) dynamic[short] = re;
+        }
+        const keys = [...new Set([...inScope.map((v) => tagParts(v).key), ...Object.keys(dynamic)])].sort();
+        const changed = () => tagDraft.removes.size > 0 || tagDraft.adds.some((a) => a.key && a.value);
+        const save = el("button", { type: "button", class: "primary", id: "mr-panel-tags-save", text: "Save",
+          disabled: changed() ? null : "disabled",
+          onclick: () => {
+            const adds = tagDraft.adds.filter((a) => a.key && a.value).map((a) => `${tagScope}/${a.key}/${a.value}`)
+              .filter((v) => !bound.includes(v));
+            confirmTags(row, [...new Set(adds)], [...tagDraft.removes], () => { tagDraft = { adds: [], removes: new Set() }; draw(); });
+          } });
+        const refreshSave = () => { save.disabled = !changed(); };
+        const addRow = (a, i) => {
+          const keySelect = el("select", { "aria-label": `Key ${i + 1}`, class: "mr-tag-key" },
+            el("option", { value: "", text: "Select a key" }),
+            ...keys.map((k) => el("option", { value: k, text: k, selected: a.key === k ? true : null })));
+          const valueSelect = el("select", { "aria-label": `Value ${i + 1}`, class: "mr-tag-value" });
+          const helpID = `mr-tag-dynamic-help-${i}`;
+          const valueInput = el("input", { type: "text", class: "mr-tag-value mr-tag-dynamic", "aria-label": `Value ${i + 1}`,
+            "aria-describedby": helpID, value: a.value || "", autocomplete: "off" });
+          const help = el("p", { class: "form-help", id: helpID });
+          const valueCell = el("td", {});
+          // The Value drop-down holds the chosen key's values; it is
+          // refilled in place, so focus stays on the Key. A dynamic key's
+          // Value is a text box, as Google's: "enter a string that matches
+          // the validation regular expression configured for that tag key".
+          const fillValues = () => {
+            if (a.key && dynamic[a.key] !== undefined) {
+              help.textContent = `Enter a value matching ${dynamic[a.key]}`;
+              setChildren(valueCell, valueInput, help);
+              return;
+            }
+            const values = inScope.filter((v) => tagParts(v).key === a.key).map((v) => tagParts(v).value);
+            setChildren(valueSelect, el("option", { value: "", text: "Select a value" }),
+              ...values.map((v) => el("option", { value: v, text: v, selected: a.value === v ? true : null })));
+            valueSelect.disabled = !a.key;
+            setChildren(valueCell, valueSelect);
+          };
+          fillValues();
+          keySelect.addEventListener("change", () => { a.key = keySelect.value; a.value = ""; valueInput.value = ""; fillValues(); refreshSave(); });
+          valueSelect.addEventListener("change", () => { a.value = valueSelect.value; refreshSave(); });
+          valueInput.addEventListener("input", () => { a.value = valueInput.value.trim(); refreshSave(); });
+          return el("tr", { class: "mr-tag-new" },
+            el("td", {}, keySelect), valueCell,
+            el("td", {}, el("button", { type: "button", class: "secondary", "aria-label": `Delete item ${i + 1}`, text: "Delete item",
+              onclick: () => { tagDraft.adds.splice(i, 1); draw(); } })));
+        };
+        const boundRow = (t) => {
+          const parts = tagParts(t);
+          return el("tr", { "data-tag": t },
+            el("td", { class: "mono", text: `${parts.scope}/${parts.key}` }), el("td", { class: "mono", text: parts.value }),
+            el("td", {}, el("button", { type: "button", class: "secondary", "aria-label": `Delete item ${t}`, text: "Delete item",
+              onclick: () => { tagDraft.removes.add(t); draw(); } })));
+        };
+        const shownBound = bound.filter((t) => !tagDraft.removes.has(t));
+        const rowsNow = [...shownBound.map(boundRow), ...tagDraft.adds.map(addRow)];
+        const scopeName = tagScope ? (scopeLabels()[tagScope] || tagScope) : "";
         return setChildren(content,
-          el("div", { class: "section-actions" }, el("button", { type: "button", class: "secondary", id: "mr-panel-add-tag",
-            text: "Add tag", disabled: tree.tagValues.length ? null : "disabled", onclick: () => addTag(row) })),
-          tree.tagValues.length ? null : el("p", { class: "form-help", text: "No tag values exist yet: create a tag key and its values on the Tags page." }),
-          (row.tags || []).length ? el("table", { id: "mr-panel-tags" }, el("thead", {}, el("tr", {}, el("th", { text: "Tag" }), el("th", {}, el("span", { class: "sr-only", text: "Remove" })))),
-            el("tbody", {}, ...row.tags.map((t) => el("tr", {}, el("td", { class: "mono", text: t }),
-              el("td", {}, el("button", { type: "button", class: "secondary", "aria-label": `Remove tag ${t}`, text: "Remove",
-                onclick: async () => { try { await run(`Removed tag ${t} from ${label(row)}`, "untag", { kind: row.kind, id: row.id, value: t }); draw(); } catch (err) { notify(err.message, "error"); } } }))))))
-            : el("p", { class: "form-help", text: "No tags are bound here." }));
+          el("div", { class: "section-actions" },
+            el("button", { type: "button", class: "secondary", id: "mr-panel-select-scope", text: "Select scope",
+              onclick: () => selectScope(tagScope, (v) => { tagScope = v; draw(); }) }),
+            el("button", { type: "button", class: "secondary", id: "mr-panel-add-tag", text: "Add tag",
+              disabled: tagScope && keys.length ? null : "disabled",
+              onclick: () => { tagDraft.adds.push({ key: "", value: "" }); draw(); } })),
+          el("p", { class: "form-help", id: "mr-panel-tag-scope",
+            text: !tagScope ? "Select the organization or project that contains your tags, then Add tag."
+              : keys.length ? `Scope: ${scopeName}` : `Scope: ${scopeName}. It has no tag keys with values: create them on the Tags page.` }),
+          rowsNow.length ? el("table", { id: "mr-panel-tags" },
+            el("thead", {}, el("tr", {}, el("th", { text: "Key" }), el("th", { text: "Value" }), el("th", {}, el("span", { class: "sr-only", text: "Delete item" })))),
+            el("tbody", {}, ...rowsNow))
+            : el("p", { class: "form-help", text: "No tags are attached here." }),
+          el("div", { class: "section-actions" }, save));
       }
       let section;
       try {
@@ -20019,61 +20596,76 @@ const apisNumber = (n) => Number(n || 0).toLocaleString("en-US");
 const apisErrors = (t) => !t.measured ? "Not counted" : t.requests ? `${((t.errors / t.requests) * 100).toFixed(1)}%` : "0%";
 const apisLatency = (v, t) => !t.measured ? "Not counted" : v === null || v === undefined ? "—" : `${v.toFixed(1)} ms`;
 
-// apisSeries adds up the request charts' series of the given services,
-// sample by sample: calls per second, the share that failed, and the
-// call-weighted median latency.
-function apisSeries(data, names) {
-  const byAt = new Map();
-  for (const svc of (data && data.services) || []) {
-    if (!names.has(svc.service)) continue;
-    for (const p of svc.points || []) {
-      const at = p.at;
-      const acc = byAt.get(at) || { at, rate: 0, failed: 0, weighted: 0, weight: 0 };
-      acc.rate += p.rate;
-      if (p.error_rate !== null && p.error_rate !== undefined) acc.failed += p.rate * p.error_rate;
-      if (p.p50_ms !== null && p.p50_ms !== undefined && p.rate > 0) { acc.weighted += p.rate * p.p50_ms; acc.weight += p.rate; }
-      byAt.set(at, acc);
-    }
-  }
-  return [...byAt.values()].sort((a, b) => (a.at < b.at ? -1 : 1)).map((a) => ({
-    at: a.at, rate: a.rate,
-    errorPct: a.rate > 0 ? (a.failed / a.rate) * 100 : null,
-    p50: a.weight > 0 ? a.weighted / a.weight : null,
-  }));
+// The charts are the server's (consoleapicharts.go): the project's calls
+// over the selected time range, from the instance's one-minute request
+// history, as Google draws them from serviceruntime.googleapis.com/api.
+let apisRange = "PT1H";
+
+// apisRangeBar is Google's row of time ranges above the charts.
+function apisRangeBar(data, onChange) {
+  const ranges = (data && data.ranges) || [];
+  const current = (data && data.range) || apisRange;
+  const bar = el("div", { class: "apis-ranges", role: "group", id: "apis-range", "aria-label": "Time range" },
+    ...ranges.map((r) => el("button", { type: "button", class: "chip" + (r.ID === current ? " is-selected" : ""),
+      "data-range": r.ID, "aria-pressed": String(r.ID === current), text: r.Label,
+      onclick: () => { apisRange = r.ID; onChange(); } })));
+  return bar;
 }
 
-async function apisCharts(names, idPrefix) {
-  let data = null;
-  try { data = await api("/api/metrics/requests"); } catch (err) {
-    return el("p", { class: "unavailable", id: `${idPrefix}-charts`, text: `Request charts unavailable: ${err.message}` });
-  }
-  if (!names.size) {
+// apisChartCard draws one of the server's charts, every series on one axis.
+function apisChartCard(chart, idPrefix) {
+  const rows = (chart.series || []).map((s) => ({ name: s.name,
+    fields: { points: JSON.stringify((s.points || []).map((p) => ({ at: p.at, value: p.value === null ? null : p.value }))) } }));
+  return el("div", { class: "chart-card apis-chart", id: `${idPrefix}-chart-${chart.id}`, "data-chart": chart.id },
+    el("div", { class: "chart-head" }, el("h3", { text: chart.title }), el("span", { class: "chart-now", text: chart.unit || "" })),
+    explorerChart(rows, chart.title));
+}
+
+// apisChartsBlock is the charts, or why there are none.
+function apisChartsBlock(data, idPrefix, opts = {}) {
+  if (opts.counted === false) {
     return el("p", { class: "unavailable", id: `${idPrefix}-charts`, text: "Not available locally: this API's calls are not counted by this instance." });
   }
-  const pts = apisSeries(data, names);
-  const last = pts.length ? pts[pts.length - 1] : null;
-  return el("div", { class: "charts", id: `${idPrefix}-charts` },
-    chartCard("Traffic", pts.map((p) => ({ value: p.rate })), {
-      label: "Requests per second", current: last ? `${last.rate.toFixed(2)}/s` : "",
-      foot: "Requests per second, every project on this instance",
-    }),
-    chartCard("Errors", pts.map((p) => ({ value: p.errorPct })), {
-      label: "Errors as a percentage of requests", max: 100,
-      current: last && last.errorPct !== null ? `${last.errorPct.toFixed(1)}%` : "",
-      foot: "Percent of requests that failed (any code but OK, or HTTP 4xx and 5xx)",
-    }),
-    chartCard("Median latency", pts.map((p) => ({ value: p.p50 })), {
-      label: "Median latency in milliseconds",
-      current: last && last.p50 !== null ? `${last.p50.toFixed(1)} ms` : "",
-      foot: "Median estimated from the latency histogram",
+  if (!data.charts) {
+    return el("p", { class: "unavailable", id: `${idPrefix}-charts`,
+      text: "Not available locally: this instance keeps no request history, so there are no charts." });
+  }
+  const charts = data.charts.filter((c) => !opts.only || opts.only.includes(c.id));
+  const wrap = el("div", { class: "charts apis-charts", id: `${idPrefix}-charts` });
+  if (!opts.select) {
+    setChildren(wrap, ...charts.map((c) => apisChartCard(c, idPrefix)));
+    return wrap;
+  }
+  // Select Graphs: the four Google shows by default, and the others it
+  // offers, each a checkbox; the choice holds until the page is left.
+  const chosen = opts.chosen;
+  const draw = () => setChildren(wrap, ...charts.filter((c) => chosen.has(c.id)).map((c) => apisChartCard(c, idPrefix)));
+  // A disclosure button rather than <details>, so the closed list's
+  // checkboxes are out of the Tab order (as playgroundDisclosure).
+  const list = el("fieldset", { id: `${idPrefix}-select-graphs-list` },
+    el("legend", { class: "sr-only", text: "Graphs to show" }),
+    ...charts.map((c) => {
+      const box = el("input", { type: "checkbox", id: `${idPrefix}-graph-${c.id}`, value: c.id, checked: chosen.has(c.id) });
+      box.addEventListener("change", () => { if (box.checked) chosen.add(c.id); else chosen.delete(c.id); draw(); });
+      return el("label", { class: "apis-graph-option", for: `${idPrefix}-graph-${c.id}` }, box, el("span", { text: " " + c.title }));
     }));
+  list.hidden = true;
+  const toggle = el("button", { type: "button", class: "header-button", id: `${idPrefix}-select-graphs`, "aria-expanded": "false",
+    "aria-controls": `${idPrefix}-select-graphs-list`, text: "Select Graphs" });
+  toggle.addEventListener("click", () => {
+    list.hidden = !list.hidden;
+    toggle.setAttribute("aria-expanded", String(!list.hidden));
+  });
+  const menu = el("div", { class: "apis-select-graphs" }, toggle, list);
+  draw();
+  return el("div", {}, menu, wrap);
 }
 
 function apisDisable(name, title, project, after) {
   mrForm({
     id: "api-disable", title: `Disable ${title}?`, label: "Disable", destructive: true, fields: [],
-    note: `${name} is recorded as disabled for project ${project}: Service Usage, gcloud and Terraform report it DISABLED. ` +
-      "Re-enable it from the Library.",
+    note: `Calls to ${name} in project ${project} fail with SERVICE_DISABLED, as on Google, until it is enabled again. ` +
+      "Service Usage, gcloud and Terraform report it DISABLED. Re-enable it from the Library.",
     submit: async () => {
       const op = recordOperation(`Disable ${name} on ${project}`);
       try { await apisCall("disable", { service: name }); op.succeeded(""); } catch (err) { op.failed(err.message); throw err; }
@@ -20111,13 +20703,14 @@ function renderAPIsDashboard(view) {
   };
   filter.addEventListener("input", draw);
   const charts = el("div", { id: "apis-dashboard-charts-slot" });
+  const banner = el("div", { id: "apis-counters-note" });
   const reload = async () => {
     try {
-      const data = await apisCall("apis");
+      const data = await apisCall("apis", { range: apisRange });
       list = data.apis || [];
       draw();
-      const names = new Set(list.filter((a) => a.state === "ENABLED" && a.metricsService).map((a) => a.metricsService));
-      setChildren(charts, await apisCharts(names, "apis-dashboard"));
+      setChildren(banner, noteBanner(data.countersNote || ""));
+      setChildren(charts, apisRangeBar(data, reload), apisChartsBlock(data, "apis-dashboard"));
     } catch (err) {
       setChildren(body, errorState("Could not list the project's APIs", err.message, reload));
     }
@@ -20125,12 +20718,17 @@ function renderAPIsDashboard(view) {
   const enable = el("a", { class: "header-button primary", id: "apis-enable", href: "/apis/library" + scopeSearch(), html: ICON_ADD },
     el("span", { text: "Enable APIs and services" }));
   setChildren(view, pageHeader("APIs & Services", "", { actions: [enable, refreshButton(() => reload())] }),
-    noteBanner(apiCountersNote), charts, el("div", { class: "filter-bar" }, filter), body);
+    banner, charts, el("div", { class: "filter-bar" }, filter), body);
   reload();
 }
 
-const apiCountersNote = "Requests, errors and latency are this instance's own request counters (/metrics), " +
-  "for every project together: CloudBurrow does not keep them per project.";
+// apisGraphs is the Select Graphs choice for an API, kept while its page
+// is redrawn (a new time range, Enable): Google's defaults at first.
+const apisChosenGraphs = new Map();
+function apisGraphs(name, charts) {
+  if (!apisChosenGraphs.has(name)) apisChosenGraphs.set(name, new Set((charts || []).filter((c) => c.default).map((c) => c.id)));
+  return apisChosenGraphs.get(name);
+}
 
 const API_TABS = [["overview", "Overview"], ["metrics", "Metrics"], ["quotas", "Quotas & System Limits"], ["credentials", "Credentials"]];
 
@@ -20140,7 +20738,7 @@ async function renderAPIPage(view, name, tab) {
   if (!API_TABS.some(([id]) => id === tab)) tab = "overview";
   setChildren(view, pageHeader("API/Service details", "", { back: "/apis" + scopeSearch() }), loadingState(4, { what: name }));
   let data;
-  try { data = await apisCall("api", { service: name }); } catch (err) {
+  try { data = await apisCall("api", { service: name, range: apisRange }); } catch (err) {
     setChildren(view, pageHeader("API/Service details", "", { back: "/apis" + scopeSearch() }), errorState(`Could not read ${name}`, err.message));
     return;
   }
@@ -20165,12 +20763,15 @@ async function renderAPIPage(view, name, tab) {
       dl([["Service name", a.name], ["Type", "Public API"], ["Status", a.state === "ENABLED" ? "Enabled" : a.state === "DISABLED" ? "Disabled" : "Not available locally"],
         ["Category", a.category || ""], ["Served by", "This CloudBurrow instance"]]),
       a.unavailable ? el("p", { class: "unavailable", text: `Not available locally: ${a.unavailable}.` }) : null,
-      el("h2", { text: "Traffic" }), await apisCharts(new Set(a.metricsService ? [a.metricsService] : []), "api-overview"));
+      el("h2", { text: "Traffic" }), apisRangeBar(data, redraw),
+      apisChartsBlock(data, "api-overview", { only: ["traffic-by-code"], counted: !!a.metricsService }));
   } else if (tab === "metrics") {
     const methods = data.methods || [];
     setChildren(panel,
       a.sharedWith && a.sharedWith.length ? el("p", { class: "form-help", text: `Counted together with ${a.sharedWith.join(", ")}, which the same local server serves.` }) : null,
-      await apisCharts(new Set(a.metricsService ? [a.metricsService] : []), "api-metrics"),
+      noteBanner(data.countersNote || ""), apisRangeBar(data, redraw),
+      apisChartsBlock(data, "api-metrics", { counted: !!a.metricsService, select: true,
+        chosen: apisGraphs(name, data.charts) }),
       el("h2", { text: "Methods" }),
       !a.totals.measured ? el("p", { class: "unavailable", id: "api-methods", text: "Not available locally: this API's calls are not counted by this instance." })
         : el("div", { class: "table-wrap" }, el("table", { class: "table", id: "api-methods" },
@@ -20180,15 +20781,138 @@ async function renderAPIPage(view, name, tab) {
             el("td", { text: apisLatency(m.p50Ms, m) }), el("td", { text: apisLatency(m.p95Ms, m) })))
             : [el("tr", {}, el("td", { colspan: "5", text: "No calls yet." }))])))));
   } else if (tab === "quotas") {
-    setChildren(panel, el("div", { class: "state", id: "api-quotas" },
-      el("h2", { text: "Not available locally" }),
-      el("p", { text: "Quotas are the Cloud Quotas and Service Usage consumer quota APIs', which CloudBurrow does not serve. " +
-        "The per-request limits Google documents for this API, such as sizes and counts, are enforced by the local service itself." })));
+    setChildren(panel, quotasBlock(a.name, redraw));
   } else {
     setChildren(panel, apisCredentialSections("api-credentials"));
   }
   setChildren(view, pageHeader(a.title, `${a.name} · project ${project}`, { back: "/apis" + scopeSearch(), actions }), strip, panel);
   announce(`${a.title}: ${API_TABS.find(([id]) => id === tab)[1]}`);
+}
+
+// quotasBlock is Quotas & System Limits (#2030): the Cloud Quotas API's
+// quota infos of one API (service) or of every one, each row's value and
+// the project's preference, with Edit quotas on an adjustable quota.
+function quotasBlock(service, redraw) {
+  const id = service ? "api-quotas" : "quotas";
+  const box = el("div", { id }, loadingState(3, { what: "quotas" }));
+  const filter = el("input", { type: "search", class: "filter", id: `${id}-filter`, placeholder: "Filter", "aria-label": "Filter quotas and system limits" });
+  let rows = [];
+  const dims = (d) => Object.keys(d || {}).length ? Object.entries(d).map(([k, v]) => `${k}: ${v}`).join(", ") : "";
+  const draw = () => {
+    const q = filter.value.trim().toLowerCase();
+    const shown = rows.filter((r) => !q || [r.name, r.service, r.metric, dims(r.dimensions)].some((t) => (t || "").toLowerCase().includes(q)));
+    const head = ["Type", ...(service ? [] : ["Service"]), "Name", "Dimensions (e.g. location)", "Value", "Adjustable", "Enforced locally", "Actions"];
+    setChildren(table, el("thead", {}, el("tr", {}, ...head.map((h) => el("th", { scope: "col", text: h })))),
+      el("tbody", {}, ...(shown.length ? shown.map((r) => el("tr", {},
+        el("td", { text: r.type }),
+        service ? null : el("td", { class: "mono", text: r.service }),
+        el("td", {}, el("span", { text: r.name }), el("br"), el("span", { class: "form-help mono", text: r.metric })),
+        el("td", { text: dims(r.dimensions) }),
+        el("td", { text: apisNumber(r.value) + (r.value !== r.default ? ` (default ${apisNumber(r.default)})` : "") }),
+        el("td", { text: r.adjustable ? "Yes" : "No" }),
+        el("td", { text: r.enforced ? "Yes" : "No" }),
+        el("td", {}, r.adjustable ? el("button", { type: "button", class: "secondary", text: "Edit quota",
+          "aria-label": `Edit quota ${r.name}${dims(r.dimensions) ? " " + dims(r.dimensions) : ""}`,
+          onclick: () => quotaEdit(r, reload) }) : null)))
+        : [el("tr", {}, el("td", { colspan: String(head.length), text: rows.length ? "No quota matches the filter." : "This API has no quota CloudBurrow describes." }))])));
+  };
+  const table = el("table", { class: "table", id: `${id}-table` });
+  const reload = async () => {
+    try {
+      const data = await apisCall("quotas", { service: service || "" });
+      rows = data.quotas || [];
+      setChildren(box, el("p", { class: "form-help", text: "The Cloud Quotas API's quotas for this project, with Google's documented defaults. " +
+        "A quota marked Enforced locally refuses calls past its value, so a granted preference changes what the API allows; the others are described, not applied." }),
+        el("div", { class: "filter-bar" }, filter), el("div", { class: "table-wrap" }, table));
+      draw();
+    } catch (err) {
+      setChildren(box, errorState("Could not read the quotas", err.message, reload));
+    }
+  };
+  filter.addEventListener("input", draw);
+  reload();
+  return box;
+}
+
+function quotaEdit(r, after) {
+  const region = (r.dimensions || {}).region || "";
+  mrForm({
+    id: "quota-edit", title: "Edit quotas", label: "Submit request",
+    note: `${r.name} (${r.service})${region ? `, region ${region}` : ""}: current value ${r.value}. A local instance grants the new value at once; ` +
+      "a decrease below current usage, or by more than 10%, is refused as Google's safety checks refuse it.",
+    fields: [
+      { name: "value", label: "New value", type: "text", required: true, default: String(r.value) },
+      ...(r.dimensionKeys && r.dimensionKeys.includes("region") && !region ? [{ name: "region", label: "Region (empty for every region)", type: "text" }] : []),
+      { name: "justification", label: "Request description", type: "textarea" },
+    ],
+    submit: async (v) => {
+      const out = await apisCall("quota-set", { service: r.service, quotaId: r.quotaId, region: region || v.region || "", value: v.value, justification: v.justification || "" });
+      notify(`Quota ${r.name} is now ${out.granted}`);
+      after();
+    },
+  });
+}
+
+async function renderQuotasPage(view) {
+  const project = currentProject();
+  if (!project) return apisNeedProject(view, "Quotas & System Limits");
+  setChildren(view, pageHeader("Quotas & System Limits", `Project ${project}`), quotasBlock("", () => renderQuotasPage(view)));
+  announce("Quotas & System Limits");
+}
+
+// renderDomainVerification is Domain verification (#2030): the Site
+// Verification API's verified sites and domains, Add domain (a token,
+// then Verify) and Remove.
+async function renderDomainVerification(view) {
+  const project = currentProject();
+  if (!project) return apisNeedProject(view, "Domain verification");
+  const body = el("div", { id: "domains-body" }, loadingState(3, { what: "verified domains" }));
+  const reload = async () => {
+    let data;
+    try { data = await apisCall("domains"); } catch (err) { setChildren(body, errorState("Could not list verified domains", err.message, reload)); return; }
+    const list = data.resources || [];
+    setChildren(body,
+      el("p", { class: "form-help", text: "Sites and domains verified through the Site Verification API. A local instance checks a FILE or META token on a site served on this machine; " +
+        "DNS records are not looked up, as the instance makes no calls off the machine." }),
+      el("div", { class: "table-wrap" }, el("table", { class: "table", id: "domains-table" },
+        el("thead", {}, el("tr", {}, ...["Domain", "Type", "Owners", "Actions"].map((h) => el("th", { scope: "col", text: h })))),
+        el("tbody", {}, ...(list.length ? list.map((r) => el("tr", {},
+          el("td", { class: "mono", text: r.site.identifier }), el("td", { text: r.site.type }), el("td", { text: (r.owners || []).join(", ") }),
+          el("td", {}, el("button", { type: "button", class: "secondary", text: "Remove", "aria-label": `Remove ${r.site.identifier}`,
+            onclick: () => mrForm({ id: "domain-remove", title: `Remove ${r.site.identifier}?`, label: "Remove", destructive: true, fields: [],
+              note: `You are no longer a verified owner of ${r.site.identifier}.`,
+              submit: async () => { await apisCall("domain-delete", { id: r.id }); notify(`Removed ${r.site.identifier}`); reload(); } }) }))))
+          : [el("tr", {}, el("td", { colspan: "4", text: "No domain is verified." }))])))));
+  };
+  const add = el("button", { type: "button", class: "header-button primary", id: "domains-add", html: ICON_ADD,
+    onclick: () => domainAdd(reload) }, el("span", { text: "Add domain" }));
+  setChildren(view, pageHeader("Domain verification", `Project ${project}`, { actions: [add, refreshButton(() => reload())] }), body);
+  reload();
+  announce("Domain verification");
+}
+
+function domainAdd(after) {
+  mrForm({
+    id: "domain-add", title: "Add domain", label: "Get token",
+    note: "Enter the site's URL (ending in a slash). The next step shows the token to place: a file in the site's top directory (FILE) or a meta tag on its home page (META).",
+    fields: [
+      { name: "identifier", label: "Site URL", type: "text", required: true, default: "http://localhost:8080/" },
+      { name: "method", label: "Verification method", type: "select", required: true, options: ["FILE", "META"], default: "FILE" },
+    ],
+    submit: async (v) => {
+      const t = await apisCall("domain-token", { type: "SITE", identifier: v.identifier, method: v.method });
+      setTimeout(() => mrForm({
+        id: "domain-verify", title: "Verify ownership", label: "Verify", fields: [],
+        note: v.method === "FILE" ? `Serve ${v.identifier}${t.token} with the content "google-site-verification: ${t.token}", then choose Verify.`
+          : `Add ${t.token} to the head of ${v.identifier}, then choose Verify.`,
+        submit: async () => {
+          await apisCall("domain-verify", { type: "SITE", identifier: v.identifier, method: v.method });
+          notify(`Verified ${v.identifier}`);
+          after();
+        },
+      }), 0);
+    },
+  });
 }
 
 const API_CATEGORIES = ["Big data", "Compute", "Databases", "Developer tools", "Management tools", "Security", "Storage"];
@@ -20283,7 +21007,7 @@ function apisCredentialSections(idPrefix) {
   return el("div", { class: "api-credentials", id: idPrefix },
     el("h2", { text: "API Keys" }), apiKeysTable(idPrefix),
     el("h2", { text: "OAuth 2.0 Client IDs" }),
-    el("p", { class: "unavailable", id: `${idPrefix}-oauth`, text: "Not available locally: OAuth clients are Google Auth Platform's, which CloudBurrow does not serve." }),
+    oauthClientsTable(`${idPrefix}-oauth`),
     el("h2", { text: "Service Accounts" }), accounts);
 }
 
@@ -20298,7 +21022,7 @@ function renderAPICredentials(view) {
       onclick: () => { menu.hidden = true; trigger.setAttribute("aria-expanded", "false"); apiKeyCreate(project); } }),
     // Google's label, its reason as the tooltip and description, as every
     // row menu draws an item this instance cannot perform (#1868).
-    unavailableMenuItem("OAuth client ID", "Not available locally: OAuth clients are Google Auth Platform's, which CloudBurrow does not serve."),
+    el("a", { class: "overflow-item", role: "menuitem", id: "credentials-create-oauth", href: "/apis/credentials/consent/clients/create" + scopeSearch(), text: "OAuth client ID" }),
     served.has("iam-service-accounts")
       ? el("a", { class: "overflow-item", role: "menuitem", href: "/iam-admin/serviceaccounts/create" + scopeSearch(), text: "Service account" })
       : unavailableMenuItem("Service account", "Not available locally: this instance was not started with IAM service accounts."));
@@ -20310,6 +21034,217 @@ function renderAPICredentials(view) {
   setChildren(view, pageHeader("Credentials", "", { actions: [el("div", { class: "menu-anchor" }, trigger, menu), restore] }),
     el("p", { class: "subtitle", text: "Create credentials to access your enabled APIs." }),
     apisCredentialSections("credentials"));
+}
+
+// Google Auth Platform (#2030): the OAuth consent screen's tabs and the
+// OAuth 2.0 Client IDs, over the local app and clients. Google's pages are
+// console-only (the IAP OAuth Admin API that made brands and clients was
+// shut down on 2026-03-19), so these are the only way to make them.
+
+const AUTH_TABS = [["overview", "Overview"], ["branding", "Branding"], ["audience", "Audience"], ["clients", "Clients"], ["scopes", "Data Access"]];
+const AUTH_TYPES = [["WEB", "Web application"], ["ANDROID", "Android"], ["IOS", "iOS"], ["CHROME_EXTENSION", "Chrome Extension"],
+  ["TV_LIMITED_INPUT", "TVs and Limited Input devices"], ["DESKTOP", "Desktop app"]];
+const authLines = (v) => (v || "").split(/[\n,]/).map((x) => x.trim()).filter(Boolean);
+
+function oauthClientsTable(id, opts = {}) {
+  const box = el("div", { id }, loadingState(2));
+  apisCall(opts.deleted ? "oauth-clients" : "oauth-app", { deleted: !!opts.deleted }).then((data) => {
+    const list = data.clients || [];
+    setChildren(box, el("div", { class: "table-wrap" }, el("table", { class: "table", id: `${id}-table` },
+      el("thead", {}, el("tr", {}, ...["Name", "Creation date", "Type", "Client ID", "Actions"].map((h) => el("th", { scope: "col", text: h })))),
+      el("tbody", {}, ...(list.length ? list.map((c) => el("tr", {},
+        el("td", {}, opts.deleted ? el("span", { text: c.name }) : el("a", { href: `/apis/credentials/consent/clients/${encodeURIComponent(c.clientId)}${scopeSearch()}`, text: c.name })),
+        el("td", { text: formatTime(c.createTime) }), el("td", { text: c.typeLabel }), el("td", { class: "mono", text: c.clientId }),
+        el("td", {}, opts.deleted
+          ? el("button", { type: "button", class: "secondary", text: "Restore", "aria-label": `Restore ${c.name}`,
+            onclick: async () => { await apisCall("oauth-client-restore", { id: c.clientId }); notify(`Restored ${c.name}`); opts.after && opts.after(); } })
+          : el("button", { type: "button", class: "secondary", text: "Delete", "aria-label": `Delete OAuth client ${c.name}`,
+            onclick: () => oauthClientDelete(c, () => (opts.after ? opts.after() : navigate(location.pathname + location.search))) }))))
+        : [el("tr", {}, el("td", { colspan: "5", text: opts.deleted ? "No deleted OAuth clients." : "No OAuth clients to display" }))])))),
+    opts.deleted ? null : el("p", {}, el("a", { href: "/apis/credentials/consent/clients/create" + scopeSearch(), id: `${id}-create`, text: "Create client" })));
+  }).catch((err) => setChildren(box, el("p", { class: "unavailable", text: err.message })));
+  return box;
+}
+
+function oauthClientDelete(c, after) {
+  mrForm({ id: "oauth-client-delete", title: `Delete OAuth client ${c.name}?`, label: "Delete", destructive: true, fields: [],
+    note: "Applications using this client can no longer sign users in, and its refresh tokens stop working. You can restore it for 30 days from Deleted credentials on the Clients tab.",
+    submit: async () => { await apisCall("oauth-client-delete", { id: c.clientId }); notify(`Deleted ${c.name}`); after(); } });
+}
+
+function oauthSecretShown(title, clientId, secret) {
+  const { dialog, close } = openModal({ labelledBy: "oauth-created-title" });
+  const field = (label, id, value) => el("label", { class: "form-field" }, el("span", { class: "form-label", text: label }),
+    el("input", { type: "text", id, class: "mono", readonly: "readonly", value, "aria-label": label }));
+  dialog.append(el("div", { class: "modal-body", id: "oauth-created" },
+    el("h2", { id: "oauth-created-title", text: title }),
+    el("p", { class: "form-help", text: secret ? "The client secret is shown only now: store it somewhere safe, such as Secret Manager. Afterwards only its last four characters are shown."
+      : "This type of client has no secret." }),
+    field("Client ID", "oauth-created-id", clientId), secret ? field("Client secret", "oauth-created-secret", secret) : null,
+    el("div", { class: "modal-actions" }, el("button", { type: "button", class: "primary", id: "oauth-created-close", text: "OK", onclick: () => close() }))));
+  dialog.querySelector("input").focus();
+}
+
+function authBrandForm(id, b, project, onSaved, only) {
+  const v = b || {};
+  const all = {
+    branding: [
+      { name: "appName", label: "App name", type: "text", required: true, default: v.appName || "" },
+      { name: "supportEmail", label: "User support email", type: "text", required: true, default: v.supportEmail || "" },
+      { name: "homePage", label: "Application home page", type: "text", default: v.homePage || "" },
+      { name: "privacyPolicy", label: "Application privacy policy link", type: "text", default: v.privacyPolicy || "" },
+      { name: "termsOfService", label: "Application terms of service link", type: "text", default: v.termsOfService || "" },
+      { name: "authorizedDomains", label: "Authorized domains (one per line)", type: "textarea", default: (v.authorizedDomains || []).join("\n") },
+      { name: "developerEmails", label: "Developer contact information (email addresses, one per line)", type: "textarea", required: true, default: (v.developerEmails || []).join("\n") },
+    ],
+    audience: [
+      { name: "userType", label: "User type", type: "select", required: true, options: ["EXTERNAL", "INTERNAL"], optionLabels: { EXTERNAL: "External", INTERNAL: "Internal" }, default: v.userType || "EXTERNAL" },
+      { name: "publishingStatus", label: "Publishing status", type: "select", required: true, options: ["TESTING", "IN_PRODUCTION"], optionLabels: { TESTING: "Testing", IN_PRODUCTION: "In production" }, default: v.publishingStatus || "TESTING" },
+      { name: "testUsers", label: "Test users (email addresses, one per line)", type: "textarea", default: (v.testUsers || []).join("\n") },
+    ],
+    scopes: [
+      { name: "scopes", label: "Scopes (one per line)", type: "textarea", default: (v.scopes || ["openid", "https://www.googleapis.com/auth/userinfo.email"]).join("\n") },
+    ],
+  };
+  const fields = only ? all[only] : [...all.branding, ...all.audience.slice(0, 1)];
+  const form = buildCreateForm({ label: "Save", fields });
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  const submit = el("button", { type: "submit", class: "primary", id: `${id}-save`, text: b ? "Save" : "Create" });
+  return el("form", { id, novalidate: true, onsubmit: async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    if (!form.validate()) return;
+    const f = form.values();
+    const next = { ...v };
+    for (const [k, val] of Object.entries(f)) next[k] = ["authorizedDomains", "developerEmails", "testUsers", "scopes"].includes(k) ? authLines(val) : val;
+    submit.disabled = true;
+    try { await apisCall("oauth-app-set", { brand: next }); notify(b ? "Saved" : "Google Auth Platform configured"); onSaved(); }
+    catch (err) { error.textContent = err.message; error.hidden = false; }
+    submit.disabled = false;
+  } }, error, ...form.nodes, el("div", { class: "form-actions" }, submit));
+}
+
+async function renderAuthPlatform(view, tab, sub) {
+  const project = currentProject();
+  if (!project) return apisNeedProject(view, "Google Auth Platform");
+  if (!AUTH_TABS.some(([t]) => t === tab)) tab = "overview";
+  setChildren(view, pageHeader("Google Auth Platform", ""), loadingState(3, { what: "the OAuth app" }));
+  let data;
+  try { data = await apisCall("oauth-app"); } catch (err) {
+    setChildren(view, pageHeader("Google Auth Platform", ""), errorState("Could not read the OAuth app", err.message));
+    return;
+  }
+  const redraw = () => renderAuthPlatform(view, tab, sub);
+  const b = data.brand;
+  const base = "/apis/credentials/consent";
+  const strip = el("div", { class: "tab-strip", role: "tablist", "aria-label": "Google Auth Platform sections" },
+    ...AUTH_TABS.map(([id, label]) => el("a", { role: "tab", id: `auth-tab-${id}`, class: "tab" + (id === tab ? " is-selected" : ""),
+      "aria-selected": String(id === tab), href: `${base}/${id}${scopeSearch()}`, text: label })));
+  const panel = el("div", { role: "tabpanel", id: "auth-panel", "aria-labelledby": `auth-tab-${tab}` });
+  if (!b) {
+    setChildren(panel, el("h2", { text: "Google Auth Platform not configured yet" }),
+      el("p", { text: "Get started: give the app's information, its audience and a contact. Clients can be created once the app is configured." }),
+      authBrandForm("auth-get-started", null, project, redraw));
+  } else if (tab === "overview") {
+    setChildren(panel, el("dl", { class: "api-facts", id: "auth-overview" },
+      ...[["App name", b.appName], ["User support email", b.supportEmail], ["User type", b.userType === "INTERNAL" ? "Internal" : "External"],
+        ["Publishing status", b.publishingStatus === "TESTING" ? "Testing" : "In production"], ["OAuth clients", String((data.clients || []).length)],
+        ["Authorization endpoint", `${data.base}${data.authorizePath}`],
+        ["Token endpoint", `${data.base}/token`], ["Revocation endpoint", `${data.base}${data.revokePath}`]]
+        .flatMap(([k, val]) => [el("dt", { text: k }), el("dd", { class: k.endsWith("endpoint") ? "mono" : "", text: val })])),
+      el("p", { class: "form-help", text: "A local client signs in the instance's user: point your OAuth library's authorization and token URIs at these endpoints. " +
+        "Brand verification and the Verification Center are Google's review, which a local app does not need." }));
+  } else if (tab === "branding") {
+    setChildren(panel, el("h2", { text: "Branding" }), authBrandForm("auth-branding", b, project, redraw, "branding"));
+  } else if (tab === "audience") {
+    setChildren(panel, el("h2", { text: "Audience" }),
+      el("p", { class: "form-help", text: "An External app in Testing can only be used by its test users; Internal is your organization's users." }),
+      authBrandForm("auth-audience", b, project, redraw, "audience"));
+  } else if (tab === "scopes") {
+    setChildren(panel, el("h2", { text: "Data Access" }), authBrandForm("auth-scopes", b, project, redraw, "scopes"));
+  } else if (sub === "create") {
+    setChildren(panel, authClientForm(null, async (c) => {
+      const out = await apisCall("oauth-client-create", { client: c });
+      navigate(`${base}/clients/${encodeURIComponent(out.client.clientId)}${scopeSearch()}`);
+      oauthSecretShown("OAuth client created", out.client.clientId, out.secret);
+    }));
+  } else if (sub === "deleted") {
+    setChildren(panel, el("h2", { text: "Deleted credentials" }), oauthClientsTable("auth-deleted", { deleted: true, after: redraw }));
+  } else if (sub) {
+    let c;
+    try { c = await apisCall("oauth-client", { id: sub }); } catch (err) { setChildren(panel, errorState("Could not read the client", err.message)); }
+    if (c) setChildren(panel, authClientPage(c, redraw));
+  } else {
+    const create = el("a", { class: "header-button primary", id: "auth-clients-create", href: `${base}/clients/create${scopeSearch()}`, html: ICON_ADD }, el("span", { text: "Create client" }));
+    const deleted = el("a", { class: "header-button", id: "auth-clients-deleted", href: `${base}/clients/deleted${scopeSearch()}`, text: "Deleted credentials" });
+    setChildren(panel, el("div", { class: "title-actions" }, create, deleted), oauthClientsTable("auth-clients", { after: redraw }));
+  }
+  setChildren(view, pageHeader("Google Auth Platform", b ? b.appName : "", {}), strip, panel);
+  announce(`Google Auth Platform: ${AUTH_TABS.find(([t]) => t === tab)[1]}`);
+}
+
+function formatTime(t) {
+  return t ? new Date(t).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" }) : "";
+}
+
+function authClientForm(c, save) {
+  const v = c || {};
+  let type = v.type || "WEB";
+  const typeSelect = el("select", { id: "auth-client-type", "aria-label": "Application type", disabled: c ? "disabled" : null },
+    ...AUTH_TYPES.map(([t, l]) => el("option", { value: t, text: l, selected: t === type ? "selected" : null })));
+  const slot = el("div", { id: "auth-client-fields" });
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  let form;
+  const draw = () => {
+    const fields = [{ name: "name", label: "Name", type: "text", required: true, default: v.name || `${AUTH_TYPES.find(([t]) => t === type)[1]} client 1` }];
+    if (type === "WEB") fields.push({ name: "javascriptOrigins", label: "Authorized JavaScript origins (one per line)", type: "textarea", default: (v.javascriptOrigins || []).join("\n") },
+      { name: "redirectUris", label: "Authorized redirect URIs (one per line)", type: "textarea", default: (v.redirectUris || []).join("\n") });
+    if (type === "ANDROID") fields.push({ name: "packageName", label: "Package name", type: "text", required: true, default: v.packageName || "" },
+      { name: "sha1", label: "SHA-1 certificate fingerprint", type: "text", required: true, default: v.sha1 || "" });
+    if (type === "IOS") fields.push({ name: "bundleId", label: "Bundle ID", type: "text", required: true, default: v.bundleId || "" },
+      { name: "appStoreId", label: "App Store ID", type: "text", default: v.appStoreId || "" }, { name: "teamId", label: "Team ID", type: "text", default: v.teamId || "" });
+    if (type === "CHROME_EXTENSION") fields.push({ name: "extensionId", label: "Item ID", type: "text", required: true, default: v.extensionId || "" });
+    form = buildCreateForm({ label: "Save", fields });
+    setChildren(slot, ...form.nodes);
+  };
+  typeSelect.addEventListener("change", () => { type = typeSelect.value; draw(); });
+  draw();
+  const submit = el("button", { type: "submit", class: "primary", id: "auth-client-save", text: c ? "Save" : "Create" });
+  return el("form", { id: "auth-client-form", novalidate: true, onsubmit: async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    if (!form.validate()) return;
+    const f = form.values();
+    const out = { ...v, ...f, type, javascriptOrigins: authLines(f.javascriptOrigins), redirectUris: authLines(f.redirectUris) };
+    delete out.typeLabel; delete out.secrets;
+    submit.disabled = true;
+    try { await save(out); } catch (err) { error.textContent = err.message; error.hidden = false; }
+    submit.disabled = false;
+  } }, el("h2", { text: c ? `Client ${v.name}` : "Create OAuth client ID" }), error,
+    el("label", { class: "form-field" }, el("span", { class: "form-label", text: "Application type" }), typeSelect), slot,
+    el("div", { class: "form-actions" }, submit));
+}
+
+function authClientPage(c, redraw) {
+  const secrets = (c.secrets || []);
+  const secretRows = el("div", { class: "table-wrap" }, el("table", { class: "table", id: "auth-secrets" },
+    el("thead", {}, el("tr", {}, ...["Client secret", "Creation date", "Status", "Actions"].map((h) => el("th", { scope: "col", text: h })))),
+    el("tbody", {}, ...(secrets.length ? secrets.map((sec) => el("tr", {},
+      el("td", { class: "mono", text: `****${sec.last4}` }), el("td", { text: formatTime(sec.createTime) }), el("td", { text: sec.enabled ? "Enabled" : "Disabled" }),
+      el("td", {}, el("button", { type: "button", class: "secondary", text: sec.enabled ? "Disable" : "Enable", "aria-label": `${sec.enabled ? "Disable" : "Enable"} secret ending ${sec.last4}`,
+        onclick: async () => { await apisCall("oauth-secret-set", { id: c.clientId, secretId: sec.id, action: sec.enabled ? "disable" : "enable" }); redraw(); } }),
+      sec.enabled ? null : el("button", { type: "button", class: "secondary", text: "Delete", "aria-label": `Delete secret ending ${sec.last4}`,
+        onclick: async () => { await apisCall("oauth-secret-set", { id: c.clientId, secretId: sec.id, action: "delete" }); redraw(); } }))))
+      : [el("tr", {}, el("td", { colspan: "4", text: "This type of client has no secret." }))]))));
+  const addSecret = el("button", { type: "button", class: "secondary", id: "auth-secret-add", text: "Add secret",
+    disabled: secrets.length >= 2 || !["WEB", "DESKTOP", "TV_LIMITED_INPUT"].includes(c.type) ? "disabled" : null,
+    onclick: async () => { const out = await apisCall("oauth-secret-add", { id: c.clientId }); oauthSecretShown("Secret added", c.clientId, out.secret); redraw(); } });
+  return el("div", { id: "auth-client" },
+    el("dl", { class: "api-facts" }, ...[["Client ID", c.clientId], ["Type", c.typeLabel], ["Creation date", formatTime(c.createTime)]]
+      .flatMap(([k, val]) => [el("dt", { text: k }), el("dd", { class: k === "Client ID" ? "mono" : "", id: k === "Client ID" ? "auth-client-id" : null, text: val })])),
+    el("h2", { text: "Client secrets" }), secretRows, addSecret,
+    authClientForm(c, async (next) => { await apisCall("oauth-client-update", { id: c.clientId, client: next }); notify("Saved"); redraw(); }),
+    el("button", { type: "button", class: "secondary danger", id: "auth-client-delete", text: "Delete", onclick: () => oauthClientDelete(c, () => navigate("/apis/credentials/consent/clients" + scopeSearch())) }));
 }
 
 // API keys (#1915): the Credentials page's table, Create credentials > API

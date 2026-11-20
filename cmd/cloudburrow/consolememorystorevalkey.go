@@ -162,10 +162,9 @@ func (valkeyProvider) CreateForm() (string, []console.Field) {
 	fields = append(fields, memorystoreMaintenanceFields()...)
 	fields = append(fields,
 		console.Field{Name: "engineVersion", Label: "Choose version", Type: "radio", Default: redisadmin.DefaultValkeyVersion, Section: "Choose version",
-			Options:            []string{"VALKEY_7_2", "VALKEY_8_0", "VALKEY_9_0", "VALKEY_9_1"},
-			OptionLabels:       map[string]string{"VALKEY_7_2": "Valkey 7.2", "VALKEY_8_0": "Valkey 8.0", "VALKEY_9_0": "Valkey 9.0", "VALKEY_9_1": "Valkey 9.1"},
-			UnavailableOptions: map[string]string{"VALKEY_9_1": "Not available locally: CloudBurrow does not run a Valkey 9.1 server yet."},
-			Help:               "A version cannot be downgraded later."},
+			Options:      valkeyEngineVersions,
+			OptionLabels: valkeyVersionLabels,
+			Help:         "Valkey 9.1 is the default, as Google's. A version cannot be downgraded later."},
 		console.Field{Name: "engineConfigs", Label: "Engine configs", Type: "map", Section: msSectionAdvanced,
 			Help: "Optional. One key=value per line, such as maxmemory-policy."},
 		console.Field{Name: "restoreBackup", Label: "Restore from backup", Type: "text", Section: msSectionAdvanced,
@@ -183,8 +182,9 @@ func (valkeyProvider) CreateTitle() string { return "Create a Valkey instance" }
 // headings, as Google's.
 func (valkeyProvider) CreateLayout() string { return console.CreateLayoutPage }
 
-// valkeyEngineVersions are the engine_version values served (#1557).
-var valkeyEngineVersions = []string{"VALKEY_7_2", "VALKEY_8_0", "VALKEY_9_0"}
+// valkeyEngineVersions are the engine_version values served (#1557, 9.1
+// since #2019), Google's Choose version options.
+var valkeyEngineVersions = []string{"VALKEY_7_2", "VALKEY_8_0", "VALKEY_9_0", "VALKEY_9_1"}
 
 // CreateOnPage implements console.PageCreator.
 func (valkeyProvider) CreateOnPage() bool { return true }
@@ -332,16 +332,16 @@ func (p valkeyProvider) Detail(ctx context.Context, project string, path []strin
 	// Maintenance, and Monitoring, which reads Cloud Monitoring's metrics.
 	overview := []console.Property{
 		{Label: "State", Value: i.GetState().String()},
-		{Label: "Mode", Value: i.GetMode().String()},
+		{Label: "Cluster Mode", Value: memorystoreOnOff(i.GetMode() != memorystorepb.Instance_CLUSTER_DISABLED)},
 		{Label: "Shards", Value: strconv.Itoa(int(i.GetShardCount()))},
 		{Label: "Replicas per shard", Value: strconv.Itoa(int(i.GetReplicaCount()))},
 		{Label: "Node type", Value: memorystoreOption(valkeyNodeTypeLabels, i.GetNodeType().String())},
 		{Label: "Node capacity", Value: fmt.Sprintf("%g GB", i.GetNodeConfig().GetSizeGb())},
-		{Label: "Engine version", Value: i.GetEngineVersion()},
+		{Label: "Version", Value: memorystoreOption(valkeyVersionLabels, i.GetEngineVersion())},
 		{Label: "Zonal availability", Value: memorystoreZones(i.GetZoneDistributionConfig().GetMode().String(), i.GetZoneDistributionConfig().GetZone())},
 		{Label: "Labels", Value: orDash(memorystorePairs(i.GetLabels()))},
 		{Label: "Deletion protection", Value: strconv.FormatBool(i.GetDeletionProtectionEnabled())},
-		{Label: "Encryption", Value: i.GetEncryptionInfo().GetEncryptionType().String()},
+		{Label: "Encryption", Value: memorystoreEncryptionText(i.GetEncryptionInfo().GetEncryptionType().String())},
 		{Label: "Customer-managed key", Value: orDash(i.GetKmsKey())},
 	}
 	if ks := i.GetEncryptionInfo().GetKmsKeyPrimaryState(); i.GetKmsKey() != "" && ks != memorystorepb.EncryptionInfo_KMS_KEY_STATE_UNSPECIFIED {
@@ -349,15 +349,15 @@ func (p valkeyProvider) Detail(ctx context.Context, project string, path []strin
 	}
 	ab := i.GetAutomatedBackupConfig()
 	config := []console.Property{
-		{Label: "Persistence", Value: i.GetPersistenceConfig().GetMode().String()},
+		{Label: "Data persistence strategy", Value: memorystorePersistenceText(i.GetPersistenceConfig().GetMode().String(), "Memory Snapshot")},
 		{Label: "Automated backups", Value: memorystoreAutoBackupText(ab.GetAutomatedBackupMode() == memorystorepb.AutomatedBackupConfig_ENABLED,
 			ab.GetFixedFrequencySchedule().GetStartTime().GetHours(), ab.GetRetention().AsDuration())},
-		{Label: "Authorization", Value: i.GetAuthorizationMode().String()},
+		{Label: "Security", Value: memorystoreAuthText(i.GetAuthorizationMode().String())},
 		{Label: "ACL policy", Value: orDash(i.GetAclPolicy())},
 		// IAM auth checks the token (#1614): who may connect is the
 		// project's IAM policy, granted on the IAM page.
 		{Label: "IAM connect role", Value: valkeyIAMRole(i)},
-		{Label: "In-transit encryption", Value: i.GetTransitEncryptionMode().String()},
+		{Label: "In-transit encryption", Value: memorystoreTLSText(i.GetTransitEncryptionMode().String())},
 		{Label: "Server CA mode", Value: orDash(memorystoreCAModeText(i.GetServerCaMode().String(), i.ServerCaMode != nil))},
 		{Label: "Server CA pool", Value: orDash(i.GetServerCaPool())},
 		{Label: "Engine configs", Value: orDash(memorystorePairs(i.GetEngineConfigs()))},
@@ -404,7 +404,7 @@ func (p valkeyProvider) Detail(ctx context.Context, project string, path []strin
 		console.Field{Name: "deletionProtection", Label: "Deletion protection", Type: "checkbox", Default: strconv.FormatBool(i.GetDeletionProtectionEnabled())},
 		console.Field{Name: "engineVersion", Label: "Engine version", Type: "select", Default: i.GetEngineVersion(), Options: valkeyEngineVersions, OptionLabels: valkeyVersionLabels,
 			Help: "A later version upgrades the instance: new nodes are formed and loaded with a snapshot of its data."})
-	d.Edit = &console.EditForm{Label: "Edit", Title: "Edit instance", Submit: "Save", Fields: fields,
+	d.Edit = &console.EditForm{Label: "Edit", Title: "Edit instance", Submit: "Save", Page: true, Fields: fields,
 		Note: "Saved through UpdateInstance, shards or replicas one change at a time."}
 	return d, nil
 }

@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -43,7 +44,7 @@ func bigtableInstancesConsole(t *testing.T) (bigtableInstancesProvider, *httptes
 	done := make(chan struct{})
 	go func() { _ = f.Serve(ctx, l); close(done) }()
 	t.Cleanup(func() { cancel(); <-done })
-	p := bigtableInstancesProvider{endpoint: l.Addr().String()}
+	p := bigtableInstancesProvider{endpoint: l.Addr().String(), savedQueries: filepath.Join(t.TempDir(), bigtableSavedQueriesFile)}
 	srv := httptest.NewServer(console.New("127.0.0.1:0", nil, p).Handler())
 	t.Cleanup(srv.Close)
 	iac, err := bigtable.NewInstanceAdminClient(context.Background(), "demo", localOpts(p.endpoint)...)

@@ -235,6 +235,12 @@ var terraformEndpoints = []terraformEndpoint{
 	{resourceManagerEndpoint, "iam_custom_endpoint", "GOOGLE_IAM_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	{resourceManagerEndpoint, "iam_beta_custom_endpoint", "GOOGLE_IAM_BETA_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	{resourceManagerEndpoint, "cloud_billing_custom_endpoint", "GOOGLE_CLOUD_BILLING_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	// google_cloud_quotas_quota_preference and the Site Verification
+	// resources (#2030), on the Resource Manager port.
+	// TestTerraformCloudQuotasPreference and TestTerraformSiteVerification
+	// apply them and plan clean.
+	{resourceManagerEndpoint, "cloud_quotas_custom_endpoint", "GOOGLE_CLOUD_QUOTAS_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	{resourceManagerEndpoint, "site_verification_custom_endpoint", "GOOGLE_SITE_VERIFICATION_CUSTOM_ENDPOINT", "/siteVerification/v1/", true, ""},
 	// google_folder (#1294): Resource Manager v3 Folders, on the same port,
 	// in TestTerraformGoogleFolder.
 	{resourceManagerEndpoint, "resource_manager_v3_custom_endpoint", "GOOGLE_RESOURCE_MANAGER_V3_CUSTOM_ENDPOINT", "/v3/", true, ""},

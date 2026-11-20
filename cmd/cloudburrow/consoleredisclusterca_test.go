@@ -45,7 +45,7 @@ func TestConsoleRedisClusterServerCA(t *testing.T) {
 			if ca == nil || ca.Label != "Server CA" || !strings.Contains(ca.Text, "BEGIN CERTIFICATE") {
 				t.Errorf("%s with in-transit encryption: Server CA tab = %+v", tc.id, ca)
 			}
-			if !strings.Contains(props["In-transit encryption"], "SERVER_AUTHENTICATION") || !strings.Contains(props["Authorization"], "IAM_AUTH") {
+			if props["In-transit encryption"] != "Enabled (TLS)" || props["Security"] != "IAM Auth" {
 				t.Errorf("%s with in-transit encryption and IAM auth: page shows %v", tc.id, props)
 			}
 			// IAM auth checks the token (#1614): the page names the role

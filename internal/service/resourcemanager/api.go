@@ -556,7 +556,8 @@ type Server struct {
 	options   []grpc.ServerOption
 	// extra are JSON APIs served on this port beside Resource Manager's
 	// (Policy Troubleshooter and Cloud Asset's analyzeIamPolicy, #1879).
-	extra []extraJSON
+	extra    []extraJSON
+	services []extraService
 	// unguarded are served before the Host check (HandleUnguarded).
 	unguarded []extraJSON
 
@@ -594,6 +595,28 @@ type extraJSON struct {
 // Resource Manager's own routes. It must be called before Start.
 func (s *Server) HandleJSON(match func(*http.Request) bool, h http.Handler) {
 	s.extra = append(s.extra, extraJSON{match: match, h: h})
+}
+
+// extraService is a gRPC service another package serves on this port, with
+// its JSON bindings transcoded.
+type extraService struct {
+	pkg   string
+	match func(*http.Request) bool
+	impls []Impl
+}
+
+// Impl is one gRPC service's implementation.
+type Impl struct {
+	Desc *grpc.ServiceDesc
+	Impl any
+}
+
+// HandleService serves impls over gRPC, and their HTTP bindings in proto
+// package pkg for the JSON requests match accepts, before Resource
+// Manager's own routes (the Cloud Quotas API, #2030). It must be called
+// before Start.
+func (s *Server) HandleService(pkg string, match func(*http.Request) bool, impls ...Impl) {
+	s.services = append(s.services, extraService{pkg: pkg, match: match, impls: impls})
 }
 
 // HandleUnguarded serves the requests match accepts before the server's
@@ -671,6 +694,16 @@ func (s *Server) Start(ctx context.Context) error {
 	orgPolicyREST := &rest.Transcoder{Packages: []string{"google.cloud.orgpolicy.v2"}}
 	orgPolicyREST.RegisterService(&orgpolicypb.OrgPolicy_ServiceDesc, orgPolicy)
 
+	extra := append([]extraJSON(nil), s.extra...)
+	for _, x := range s.services {
+		t := &rest.Transcoder{Packages: []string{x.pkg}}
+		for _, i := range x.impls {
+			g.RegisterService(i.Desc, i.Impl)
+			t.RegisterService(i.Desc, i.Impl)
+		}
+		extra = append(extra, extraJSON{match: x.match, h: t})
+	}
+
 	router := rest.NewRouter()
 	s.projects.restRoutes(router)
 	ops := &v1Ops{}
@@ -681,7 +714,7 @@ func (s *Server) Start(ctx context.Context) error {
 	s.tags.restRoutes(router)
 	s.projects.reg.identityRoutes(router)
 	var jsonAPI http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		for _, x := range s.extra {
+		for _, x := range extra {
 			if x.match(r) {
 				x.h.ServeHTTP(w, r)
 				return

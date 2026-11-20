@@ -132,7 +132,11 @@ func TestSpannerInfoPanelLabelsAndUpgradeThroughThePage(t *testing.T) {
 	auditScreens(t, []a11yPage{
 		{"Spanner Info panel Labels tab", "/spanner" + q, rowReady(inst),
 			checkRow + `; document.querySelector("#info-tab-labels").click()`},
-		{"Spanner Update edition dialog", "/spanner/" + inst + "-a" + q, `document.querySelector("#view a.property-action") !== null`,
-			`document.querySelector("#view a.property-action").click()`},
+		// Upgrade's link is the page's own address with ?action=, which
+		// reloads the page and opens the dialog once it has drawn: the
+		// audit opens that address and waits for the dialog, as a click
+		// on the link and a check straight after raced the reload (#2017).
+		{"Spanner Update edition dialog", "/spanner/" + inst + "-a" + q + "&action=upgradeedition",
+			`document.querySelector(".modal.is-open") !== null`, `void 0`},
 	})
 }

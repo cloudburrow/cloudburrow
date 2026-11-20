@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/bigtable"
+	btapb "cloud.google.com/go/bigtable/admin/apiv2/adminpb"
 )
 
 // TestBigtableConsoleParity (#1858): Create instance's steps (edition, 2x
@@ -168,5 +169,178 @@ func TestBigtableConsoleParity(t *testing.T) {
 	}
 	if _, err := studio("sql", map[string]any{"sql": "SELECT nope FROM missing"}); err == nil {
 		t.Error("a query of a missing table was answered")
+	}
+}
+
+// TestBigtableStudioSavedQueries (#1858): Save query (a name and an
+// optional region of Create instance's), a new version on Save, the
+// project's list under the Explorer's Queries, Delete query; and the
+// Tables page's Status from each cluster's replication state.
+func TestBigtableStudioSavedQueries(t *testing.T) {
+	p, _, iac := bigtableInstancesConsole(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	if err := iac.CreateInstance(ctx, &bigtable.InstanceConf{InstanceId: "saved-inst", DisplayName: "saved-inst",
+		ClusterId: "saved-c1", Zone: "us-central1-b", NumNodes: 1, StorageType: bigtable.SSD}); err != nil {
+		t.Fatal(err)
+	}
+	call := func(name string, body map[string]any) (any, error) {
+		body["instance"] = "saved-inst"
+		raw, _ := json.Marshal(body)
+		return p.StudioCall(ctx, "demo", name, raw)
+	}
+	if _, err := call("savequery", map[string]any{"name": " ", "sql": "SELECT 1"}); err == nil {
+		t.Error("a saved query without a name was saved")
+	}
+	if _, err := call("savequery", map[string]any{"name": "q", "region": "atlantis1", "sql": "SELECT 1"}); err == nil || !strings.Contains(err.Error(), "Bigtable region") {
+		t.Errorf("a saved query in an unknown region: %v", err)
+	}
+	out, err := call("savequery", map[string]any{"name": "Daily orders", "region": "us-east1", "sql": "SELECT _key FROM orders"})
+	sq, _ := out.(bqSavedQuery)
+	if err != nil || sq.ID == "" || sq.Version != 1 || sq.Region != "us-east1" {
+		t.Fatalf("savequery = %+v, %v", out, err)
+	}
+	if _, err := call("savequery", map[string]any{"name": "daily ORDERS", "sql": "SELECT 2"}); err == nil {
+		t.Error("a second saved query of the same name was saved")
+	}
+	out, err = call("savequery", map[string]any{"id": sq.ID, "name": "Daily orders", "sql": "SELECT _key FROM orders LIMIT 5"})
+	if v, _ := out.(bqSavedQuery); err != nil || v.Version != 2 || v.Query != "SELECT _key FROM orders LIMIT 5" {
+		t.Fatalf("Save of the open query = %+v, %v", out, err)
+	}
+	out, err = call("savedqueries", map[string]any{})
+	m, _ := out.(map[string]any)
+	if qs, _ := m["queries"].([]bqSavedQuery); err != nil || len(qs) != 1 || qs[0].Name != "Daily orders" {
+		t.Fatalf("savedqueries = %+v, %v", out, err)
+	}
+	if rs, _ := m["regions"].([]map[string]string); len(rs) == 0 || rs[0]["id"] == "" || rs[0]["label"] == "" {
+		t.Errorf("savedqueries regions = %v", m["regions"])
+	}
+	// Saved queries are the project's: another project lists none.
+	raw, _ := json.Marshal(map[string]any{"instance": "saved-inst"})
+	if out, err := p.StudioCall(ctx, "other", "savedqueries", raw); err != nil || len(out.(map[string]any)["queries"].([]bqSavedQuery)) != 0 {
+		t.Errorf("another project's savedqueries = %+v, %v", out, err)
+	}
+	if _, err := call("deletequery", map[string]any{"id": sq.ID}); err != nil {
+		t.Fatalf("deletequery: %v", err)
+	}
+	if _, err := call("deletequery", map[string]any{"id": sq.ID}); err == nil {
+		t.Error("a deleted saved query was deleted again")
+	}
+
+	// The Tables page's Status.
+	admin, err := bigtable.NewAdminClient(ctx, "demo", "saved-inst", localOpts(p.endpoint)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close()
+	if err := admin.CreateTable(ctx, "orders"); err != nil {
+		t.Fatal(err)
+	}
+	d, err := p.Detail(ctx, "demo", []string{"saved-inst"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := bigtableSection(d, "tables").Listing.Items
+	if len(rows) != 1 || rows[0].Fields["Status"] != "Ready" || rows[0].Fields["Storage utilization"] != "0 B" {
+		t.Errorf("the Tables page = %+v", rows)
+	}
+}
+
+func TestBigtableTableStatus(t *testing.T) {
+	for want, states := range map[string]map[string]*btapb.Table_ClusterState{
+		"—":     nil,
+		"Ready": {"a": {ReplicationState: btapb.Table_ClusterState_READY}, "b": {ReplicationState: btapb.Table_ClusterState_READY}},
+		"a: Ready, b: Initializing": {"b": {ReplicationState: btapb.Table_ClusterState_INITIALIZING},
+			"a": {ReplicationState: btapb.Table_ClusterState_READY}},
+	} {
+		if got := bigtableTableStatus(states); got != want {
+			t.Errorf("bigtableTableStatus(%v) = %q, want %q", states, got, want)
+		}
+	}
+}
+
+// TestBigtableTablesReplicationsAndExplorerActions (#2027): a Tables row
+// opens Bigtable Studio on its table, lists each cluster's replication
+// under it, and offers Open table page; the Studio Explorer's View actions
+// are Google's, in Google's order, Monitor and Export disabled with the
+// reason; Prevent deletion protects the table and lifts it.
+func TestBigtableTablesReplicationsAndExplorerActions(t *testing.T) {
+	p, _, iac := bigtableInstancesConsole(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	if err := iac.CreateInstanceWithClusters(ctx, &bigtable.InstanceWithClustersConfig{InstanceID: "rep-inst", DisplayName: "rep-inst",
+		Clusters: []bigtable.ClusterConfig{{ClusterID: "rep-c1", Zone: "us-central1-b", NumNodes: 1, StorageType: bigtable.SSD},
+			{ClusterID: "rep-c2", Zone: "us-east1-b", NumNodes: 1, StorageType: bigtable.SSD}}}); err != nil {
+		t.Fatal(err)
+	}
+	admin, err := bigtable.NewAdminClient(ctx, "demo", "rep-inst", localOpts(p.endpoint)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close()
+	if err := admin.CreateTable(ctx, "orders"); err != nil {
+		t.Fatal(err)
+	}
+	if err := admin.CreateColumnFamily(ctx, "orders", "cf1"); err != nil {
+		t.Fatal(err)
+	}
+	client, err := bigtable.NewClient(ctx, "demo", "rep-inst", localOpts(p.endpoint)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	m := bigtable.NewMutation()
+	m.Set("cf1", "v", bigtable.Timestamp(1000), make([]byte, 2048))
+	if err := client.Open("orders").Apply(ctx, "k1", m); err != nil {
+		t.Fatal(err)
+	}
+	d, err := p.Detail(ctx, "demo", []string{"rep-inst"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	list := bigtableSection(d, "tables").Listing
+	if len(list.Items) != 1 || list.ChildNoun != "replications" {
+		t.Fatalf("the Tables page = %+v", list)
+	}
+	row := list.Items[0]
+	if got := row.Fields["Storage utilization"]; !strings.HasSuffix(got, " KiB") {
+		t.Errorf("Storage utilization of a table of 2 KiB = %q", got)
+	}
+	if row.Link != "/bigtable-instances/rep-inst?project=demo&tab=studio&table=orders" {
+		t.Errorf("a table opens %q, want its instance's Studio", row.Link)
+	}
+	if len(row.Children) != 2 || row.Children[0].Name != "rep-c1" || row.Children[1].Name != "rep-c2" ||
+		row.Children[0].Fields["Status"] != "Ready" {
+		t.Errorf("the table's replications = %+v", row.Children)
+	}
+	if last := row.Actions[len(row.Actions)-1]; last.Label != "Open table page" || !strings.HasPrefix(last.Href, "/bigtable/orders?") {
+		t.Errorf("the row's last action = %+v, want Open table page", last)
+	}
+
+	raw, _ := json.Marshal(map[string]any{"instance": "rep-inst"})
+	out, err := p.StudioCall(ctx, "demo", "explorer", raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ex := out.(*bigtableStudioExplorer)
+	var labels []string
+	for _, a := range ex.Tables[0].Actions {
+		labels = append(labels, a.Label)
+		if (a.ID == "systeminsights" || a.ID == "export") && a.Unavailable == "" {
+			t.Errorf("%s is not drawn disabled", a.Label)
+		}
+	}
+	want := "Create a new table,Create a backup,Prevent deletion,Edit,Delete,View a sample query,View backups,Monitor by viewing system insights,Export to Cloud Storage"
+	if got := strings.Join(labels, ","); got != want {
+		t.Errorf("the Explorer's table actions = %s\nwant %s", got, want)
+	}
+	for _, protected := range []string{"true", "false"} {
+		if err := p.ActAt(ctx, "demo", []string{"rep-inst", bigtableTablesSegment, "orders"}, "preventdeletion", map[string]string{"protected": protected}); err != nil {
+			t.Fatalf("Prevent deletion %s: %v", protected, err)
+		}
+		info, err := admin.TableInfo(ctx, "orders")
+		if err != nil || (info.DeletionProtection == bigtable.Protected) != (protected == "true") {
+			t.Errorf("after Prevent deletion %s, TableInfo = %+v, %v", protected, info, err)
+		}
 	}
 }

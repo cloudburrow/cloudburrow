@@ -1098,6 +1098,13 @@ tr.is-operating { background: var(--surface-alt); }
    Firestore document with no fields whose subcollections do (#875) — is in
    italics, as Google's console draws it. */
 tr.is-absent td { font-style: italic; color: var(--text-muted); }
+/* A row's arrow and the rows it lists under it: a Bigtable table's
+   replications (#2027). 24px keeps the target at WCAG 2.2's minimum. */
+.row-expander { width: 24px; height: 24px; margin-right: 4px; vertical-align: middle; }
+.row-expander svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; transition: transform 0.15s; }
+.row-expander.is-open svg { transform: rotate(90deg); }
+tr.child-row td { color: var(--text-muted); }
+tr.child-row td.child-name { padding-left: 40px; }
 tr.is-operating td { color: var(--text-muted); }
 tr.is-operating td:first-child {
   background-image: linear-gradient(90deg,
@@ -1277,6 +1284,11 @@ td.mono { word-break: break-word; }
 .picker-columns { padding: 4px 10px; font-size: var(--text-caption-size); color: var(--text-muted); border-bottom: 1px solid var(--border); }
 .picker-item-name, .picker-item-id { min-width: 0; overflow-wrap: anywhere; }
 .picker-manage { display: inline-block; margin-top: 8px; }
+/* The resource selector's folders and organization (#1865): a link row,
+ * its type before its name, the star column left empty. */
+a.picker-item { text-decoration: none; }
+.picker-item-kind { font-weight: 400; font-size: var(--text-caption-size); color: var(--text-muted); }
+.picker-item.is-selected .picker-item-kind { color: inherit; }
 /* Narrower windows: the dialog gives up width rather than run past the
    window's right edge (the reflow audit at 640px). */
 @media (max-width: 959px) {
@@ -1898,6 +1910,7 @@ tr.is-inspected { background: var(--nav-selected); }
 @media (prefers-reduced-motion: reduce) {
   #nav,
   .nav-chevron,
+  .row-expander svg,
   .meter-fill,
   .panel,
   .picker-panel,
@@ -2035,6 +2048,7 @@ dd.has-property-action { display: flex; flex-wrap: wrap; align-items: baseline; 
 .picker-star svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linejoin: round; }
 .picker-star[aria-pressed="true"] svg { fill: currentColor; color: var(--accent); }
 .picker-columns { padding-right: 46px; }
+.picker-star-space { width: 40px; flex: none; }
 
 /* Logs Explorer (#1863): the query pane, the Fields pane beside the Query
    results, and an entry expanded to its fields. */
@@ -2517,3 +2531,12 @@ svg.bq-chart { display: block; border: 1px solid var(--border); border-radius: v
    leaves beside Delete. */
 .orgpolicy-rule { min-inline-size: 0; }
 .orgpolicy-custom-line input { flex: 1 1 0; width: 0; min-width: 0; }
+/* APIs & Services charts (#1866): the time ranges and Select Graphs. */
+.apis-ranges { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.apis-ranges .chip { border: 1px solid var(--border); background: var(--surface); color: var(--text); padding: 4px 12px; cursor: pointer; font: inherit; }
+.apis-ranges .chip.is-selected { background: var(--nav-selected); color: var(--nav-selected-text); }
+.apis-select-graphs { margin: 0 0 12px; }
+.apis-select-graphs fieldset { border: 1px solid var(--border); background: var(--surface); margin: 8px 0 0; padding: 8px 12px; max-width: 420px; }
+.apis-graph-option { display: block; padding: 4px 0; }
+.apis-charts { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(min(420px, 100%), 1fr)); }
+.apis-chart .explorer-chart { width: 100%; height: auto; }

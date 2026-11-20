@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -243,17 +244,20 @@ func TestGcloudServices(t *testing.T) {
 	enabled := func() string {
 		return g.must("services", "list", "--enabled", "--project", project, "--format=value(config.name)")
 	}
-	if out := enabled(); !strings.Contains(out, "storage.googleapis.com") || !strings.Contains(out, "serviceusage.googleapis.com") {
+	// Whole lines: bigquerystorage.googleapis.com contains
+	// storage.googleapis.com, and is listed where BigQuery is served.
+	listed := func(out, api string) bool { return slices.Contains(strings.Fields(out), api) }
+	if out := enabled(); !listed(out, "storage.googleapis.com") || !listed(out, "serviceusage.googleapis.com") {
 		t.Fatalf("services list --enabled:\n%s", out)
 	}
 	g.must("services", "disable", "storage.googleapis.com", "--project", project, "--force")
 	if st := serviceState(t, h, c, project, "storage.googleapis.com"); st != "DISABLED" {
 		t.Errorf("after gcloud services disable storage is %s", st)
 	}
-	if out := enabled(); strings.Contains(out, "storage.googleapis.com") {
+	if out := enabled(); listed(out, "storage.googleapis.com") {
 		t.Errorf("a disabled API is listed enabled:\n%s", out)
 	}
-	if out := g.must("services", "list", "--available", "--project", project, "--format=value(config.name)"); !strings.Contains(out, "storage.googleapis.com") {
+	if out := g.must("services", "list", "--available", "--project", project, "--format=value(config.name)"); !listed(out, "storage.googleapis.com") {
 		t.Errorf("services list --available lacks storage:\n%s", out)
 	}
 	g.must("services", "enable", "storage.googleapis.com", "--project", project)

@@ -47,6 +47,28 @@ func (p *tab) mrSubmitTop(field, value string) {
 	p.waitFor(fmt.Sprintf(`document.querySelector(".modal.is-open #f-%s") === null`, field))
 }
 
+// mrAttachTag attaches a tag in the open info panel's Tags tab by
+// Google's steps: Select scope, the scope, Open; Add tag; the Key, then
+// the Value; Save; Confirm.
+func (p *tab) mrAttachTag(scope, key, value string) {
+	p.t.Helper()
+	p.waitFor(`document.querySelector("#mr-panel-select-scope") !== null`)
+	p.run(chromedp.Click(chromedp.CSS(`#mr-panel-select-scope`)))
+	p.mrSubmitTop("scope", scope)
+	p.waitFor(`document.querySelector("#mr-panel-add-tag") !== null && !document.querySelector("#mr-panel-add-tag").disabled`)
+	p.run(chromedp.Click(chromedp.CSS(`#mr-panel-add-tag`)))
+	p.waitFor(`[...document.querySelectorAll("#mr-panel select.mr-tag-key")].length > 0`)
+	p.eval(fmt.Sprintf(`(() => { const k = [...document.querySelectorAll("#mr-panel select.mr-tag-key")].pop();
+		k.value = %q; k.dispatchEvent(new Event("change", { bubbles: true }));
+		const v = k.closest("tr").querySelector("select.mr-tag-value");
+		v.value = %q; v.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`, key, value), nil)
+	p.waitFor(`!document.querySelector("#mr-panel-tags-save").disabled`)
+	p.run(chromedp.Click(chromedp.CSS(`#mr-panel-tags-save`)))
+	p.waitFor(`document.querySelector("#mr-tag-confirm") !== null`)
+	p.run(chromedp.Click(chromedp.CSS(`#mr-tag-confirm`)))
+	p.waitFor(`document.querySelector("#mr-tag-confirm") === null`)
+}
+
 // TestManageResourcesTreeThroughThePage (#1865), in the storage shard.
 // Google's Manage resources page: the organization over its folders and
 // their projects in one tree; Create folder makes a folder the v3 Folders
@@ -252,9 +274,7 @@ func TestManageResourcesTreeThroughThePage(t *testing.T) {
 	p.waitFor(`document.querySelector("#view [aria-busy=true]") === null`)
 	p.waitFor(fmt.Sprintf(`document.querySelector(%q) !== null`, mrRow("project", project)))
 	p.mrMenu("project", project, project, "Tags")
-	p.waitFor(`document.querySelector("#mr-panel-add-tag") !== null && !document.querySelector("#mr-panel-add-tag").disabled`)
-	p.eval(`document.querySelector("#mr-panel-add-tag").click(), true`, nil)
-	p.mrSubmitTop("value", value.GetNamespacedName())
+	p.mrAttachTag(strings.TrimPrefix(org.GetName(), "organizations/"), short, "prod")
 	p.waitFor(fmt.Sprintf(`(document.querySelector(%q) || {}).textContent?.includes(%q)`, mrRow("project", project), value.GetNamespacedName()))
 	b, err := bindings.ListTagBindings(ctx, &rmpb.ListTagBindingsRequest{Parent: target}).Next()
 	if err != nil || b.GetTagValue() != value.GetName() {

@@ -43,7 +43,7 @@ func TestMemorystoreCreateFormsFollowGoogle(t *testing.T) {
 		return console.Field{}
 	}
 	_, redis := (memorystoreProvider{}).CreateForm()
-	if got, want := names(redis), "id,displayName,tier,region,zone,redisVersion,memorySizeGb,authEnabled,transitEncryption,authorizedNetwork,redisConfigs,"+
+	if got, want := names(redis), "id,displayName,tier,region,zone,redisVersion,memorySizeGb,authEnabled,transitEncryption,authorizedNetwork,connectMode,reservedIpRange,redisConfigs,"+
 		"readReplicas,replicaCount,customerManagedKey,labels"; got != want {
 		t.Errorf("Create a Redis instance fields = %s, want %s", got, want)
 	}
@@ -83,7 +83,10 @@ func TestMemorystoreCreateFormsFollowGoogle(t *testing.T) {
 			t.Errorf("Days to retain backups default %q, want 35", f.Default)
 		}
 	}
-	if f := byName(valkey, "engineVersion"); f.UnavailableOptions["VALKEY_9_1"] == "" || f.OptionLabels["VALKEY_9_0"] != "Valkey 9.0" {
+	// Google's Choose version: 7.2, 8.0, 9.0 and 9.1, every one served, and
+	// 9.1 the default (#2019).
+	if f := byName(valkey, "engineVersion"); len(f.UnavailableOptions) != 0 || f.Default != "VALKEY_9_1" ||
+		strings.Join(f.Options, ",") != "VALKEY_7_2,VALKEY_8_0,VALKEY_9_0,VALKEY_9_1" || f.OptionLabels["VALKEY_9_1"] != "Valkey 9.1" {
 		t.Errorf("Choose version = %+v", f)
 	}
 	for _, tc := range []struct {

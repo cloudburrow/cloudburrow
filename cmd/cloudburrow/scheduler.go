@@ -50,6 +50,8 @@ type schedulerService struct {
 	// (#314), which is what `cloudburrow logs --service scheduler` reads
 	// (#587), then fault injection (#600), so the log sees injected faults.
 	interpose []grpc.UnaryServerInterceptor
+	// wrapJSON wraps the JSON API (IAM enforcement, #1879); nil is none.
+	wrapJSON func(http.Handler) http.Handler
 	// apiGate refuses calls in a project where the API is disabled
 	// (#1914); nil refuses none.
 	apiGate apienable.Decider
@@ -168,6 +170,9 @@ func (s *schedulerService) Start(ctx context.Context) error {
 	locations := scheduler.NewLocationsServer(s.store)
 	register := func(g grpc.ServiceRegistrar) { s.api.Register(g); locations.Register(g) }
 	var jsonAPI http.Handler = scheduler.NewRESTHandler(register)
+	if s.wrapJSON != nil {
+		jsonAPI = s.wrapJSON(jsonAPI)
+	}
 	if s.requests != nil {
 		jsonAPI = rest.Observe(jsonAPI, s.requests)
 	}
