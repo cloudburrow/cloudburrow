@@ -1,0 +1,46 @@
+#!/bin/bash
+# The guest agent's account manager (#1963): keeps a local account, its
+# authorized_keys and google-sudoers membership for every user named in
+# the instance's and (unless block-project-ssh-keys is TRUE) the project's
+# ssh-keys metadata, as Google's guest agent does, polling every 2 seconds.
+set -u
+M=/usr/lib/cloudburrow/metadata
+last=""
+while true; do
+  keys="$($M instance/attributes/ssh-keys 2>/dev/null)"
+  block="$($M instance/attributes/block-project-ssh-keys 2>/dev/null)"
+  if [ "${block,,}" != "true" ]; then
+    keys="$keys"$'\n'"$($M project/attributes/ssh-keys 2>/dev/null)"
+  fi
+  if [ "$keys" != "$last" ]; then
+    declare -A want=()
+    while IFS= read -r line; do
+      line="${line%$'\r'}"
+      [ -z "$line" ] && continue
+      user="${line%%:*}"
+      key="${line#*:}"
+      [[ "$user" =~ ^[a-z_][a-z0-9_.-]*$ ]] || continue
+      want[$user]+="$key"$'\n'
+    done <<< "$keys"
+    for user in "${!want[@]}"; do
+      if ! id "$user" >/dev/null 2>&1; then
+        useradd -m -s /bin/bash "$user" && echo "Created user $user" | /usr/lib/cloudburrow/console google_guest_agent
+      fi
+      usermod -aG google-sudoers "$user" 2>/dev/null
+      home=$(getent passwd "$user" | cut -d: -f6)
+      install -d -m 0700 -o "$user" -g "$(id -gn "$user")" "$home/.ssh"
+      printf '%s' "${want[$user]}" > "$home/.ssh/authorized_keys"
+      chown "$user:$(id -gn "$user")" "$home/.ssh/authorized_keys"
+      chmod 0600 "$home/.ssh/authorized_keys"
+    done
+    # Users whose keys were removed lose their keys, as on Google.
+    for f in /home/*/.ssh/authorized_keys; do
+      [ -e "$f" ] || continue
+      u=$(basename "$(dirname "$(dirname "$f")")")
+      [ -n "${want[$u]+x}" ] || : > "$f"
+    done
+    unset want
+    last="$keys"
+  fi
+  sleep 2
+done

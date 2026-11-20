@@ -1,0 +1,8 @@
+#!/bin/sh
+# Writes stdin to the serial console (the container's log), one line at a
+# time with the syslog-style prefix Google's guest environment writes.
+tag="$1"
+host=$(hostname)
+while IFS= read -r line; do
+  printf '%s %s %s: %s\n' "$(date '+%b %d %H:%M:%S')" "$host" "$tag" "$line" > /dev/console
+done

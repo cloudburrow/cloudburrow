@@ -1,6 +1,7 @@
 package compute
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -24,6 +25,10 @@ type call struct {
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/batch/compute/v1" || r.URL.Path == "/batch" {
 		s.serveBatch(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, GuestPrefix) {
+		s.serveGuest(w, r)
 		return
 	}
 	if !strings.HasPrefix(r.URL.Path, Prefix) {
@@ -54,6 +59,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if c.body == nil {
 		c.body = obj{}
+	}
+	if isZoneOpWait(c) {
+		s.waitOp(r.Context(), "projects/"+c.project+"/zones/"+c.parts[1]+"/operations/"+c.parts[3])
 	}
 	out, err := s.Do(c)
 	if err != nil {
@@ -106,7 +114,11 @@ func (s *Server) Call(method, project, path string, query map[string][]string, b
 		body = obj{}
 	}
 	parts := strings.Split(strings.Trim(path, "/"), "/")
-	out, err := s.Do(call{method: method, project: project, parts: parts, query: query, body: body})
+	c := call{method: method, project: project, parts: parts, query: query, body: body}
+	if isZoneOpWait(c) {
+		s.waitOp(context.Background(), "projects/"+project+"/zones/"+parts[1]+"/operations/"+parts[3])
+	}
+	out, err := s.Do(c)
 	if err != nil || out == nil {
 		return out, err
 	}
@@ -124,6 +136,11 @@ func (s *Server) Do(c call) (obj, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if len(c.parts) >= 2 && c.parts[0] == "global" && c.parts[1] == "images" {
+		// Public image projects are not projects of the caller's: no
+		// default network is made in them.
+		return s.images(c)
+	}
 	if err := s.ensureProjectLocked(c.project); err != nil {
 		return nil, err
 	}
@@ -133,7 +150,9 @@ func (s *Server) Do(c call) (obj, error) {
 	n := len(p)
 	switch {
 	case n == 0 && get:
-		return nil, unimplemented("projects.get is not served here")
+		return s.project(c)
+	case n == 1 && post && p[0] == "setCommonInstanceMetadata":
+		return s.setCommonInstanceMetadata(c)
 	case n >= 2 && p[0] == "global":
 		coll := p[1]
 		rel := "projects/" + c.project + "/global/" + coll
@@ -192,6 +211,8 @@ func (s *Server) Do(c call) (obj, error) {
 			}
 		case "operations":
 			return s.operation(c, rel)
+		case "snapshots":
+			return s.snapshots(c)
 		}
 	case n >= 1 && p[0] == "regions":
 		if n == 1 && get {
@@ -261,10 +282,13 @@ func (s *Server) Do(c call) (obj, error) {
 		if n >= 3 && p[2] == "operations" {
 			return s.operation(c, "projects/"+c.project+"/zones/"+zone+"/operations")
 		}
+		if n >= 3 {
+			return s.zonal(c, zone)
+		}
 	case n == 2 && p[0] == "aggregated" && get:
 		return s.aggregated(c, p[1])
 	}
-	return nil, unimplemented("%s %sprojects/%s/%s is not served: CloudBurrow's Compute Engine API serves VPC networks, subnetworks, firewall rules, routes, addresses, operations, regions and zones; VM instances, disks and images are not served (#1936).",
+	return nil, unimplemented("%s %sprojects/%s/%s is not served: CloudBurrow's Compute Engine API serves VPC networks, subnetworks, firewall rules, routes, addresses, operations, regions, zones, VM instances, disks, snapshots, machine types and public images (#1936, #1963).",
 		c.method, Prefix, c.project, strings.Join(p, "/"))
 }
 
@@ -354,6 +378,10 @@ func (s *Server) aggregated(c call, coll string) (obj, error) {
 		m, kind = s.res, "compute#subnetworkAggregatedList"
 	case "operations":
 		m, kind = s.ops, "compute#operationAggregatedList"
+	case "instances":
+		m, kind = s.res, "compute#instanceAggregatedList"
+	case "disks":
+		m, kind = s.res, "compute#diskAggregatedList"
 	default:
 		return nil, unimplemented("aggregated/%s is not served", coll)
 	}
@@ -455,3 +483,9 @@ func strs(o obj, k string) []string {
 }
 
 func lastSeg(rel string) string { return rel[strings.LastIndex(rel, "/")+1:] }
+
+// isZoneOpWait is whether c is zoneOperations.wait.
+func isZoneOpWait(c call) bool {
+	p := c.parts
+	return c.method == http.MethodPost && len(p) == 5 && p[0] == "zones" && p[2] == "operations" && p[4] == "wait"
+}

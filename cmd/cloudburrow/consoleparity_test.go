@@ -102,6 +102,11 @@ var parityRows = []parityRow{
 			"compute.regionOperations.delete", "compute.regionOperations.wait", "compute.zoneOperations.get", "compute.zoneOperations.list",
 			"compute.zoneOperations.delete", "compute.zoneOperations.wait"},
 		Excluded: "every networking operation completes at once, DONE when its call returns, so a page's change is shown done or refused with its reason as it is made; there is nothing running to watch or cancel"},
+	// Compute Engine VM instances, disks and images (#1963): their console
+	// pages are #1965.
+	{Resource: "Compute Engine VM instances, disks and images", Service: "compute",
+		Methods: []string{"compute.images.get", "compute.images.getFromFamily", "compute.images.list", "compute.machineTypes.get", "compute.machineTypes.list", "compute.diskTypes.get", "compute.diskTypes.list", "compute.disks.aggregatedList", "compute.disks.createSnapshot", "compute.disks.delete", "compute.disks.get", "compute.disks.insert", "compute.disks.list", "compute.disks.resize", "compute.disks.setLabels", "compute.snapshots.delete", "compute.snapshots.get", "compute.snapshots.insert", "compute.snapshots.list", "compute.snapshots.setLabels", "compute.instances.aggregatedList", "compute.instances.attachDisk", "compute.instances.delete", "compute.instances.detachDisk", "compute.instances.get", "compute.instances.getSerialPortOutput", "compute.instances.insert", "compute.instances.list", "compute.instances.reset", "compute.instances.resume", "compute.instances.setDeletionProtection", "compute.instances.setLabels", "compute.instances.setMachineType", "compute.instances.setMetadata", "compute.instances.setTags", "compute.instances.start", "compute.instances.stop", "compute.instances.suspend", "compute.projects.get", "compute.projects.setCommonInstanceMetadata"},
+		Issue:   1965},
 	// The Kubernetes Engine API (#1913), on the Kubernetes clusters page.
 	{Resource: "Kubernetes Engine clusters", Service: "gke",
 		Methods: []string{"ClusterManager/CreateCluster", "ClusterManager/GetCluster", "ClusterManager/ListClusters",

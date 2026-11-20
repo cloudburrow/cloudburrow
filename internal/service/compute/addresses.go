@@ -185,6 +185,14 @@ func (s *Server) usedInSubnetLocked(sub string) map[string]string {
 		if strings.Contains(k, "/addresses/") && str(a, "subnetwork") == sub {
 			used[str(a, "address")] = k
 		}
+		if strings.Contains(k, "/instances/") {
+			nics, _ := a["networkInterfaces"].([]any)
+			for _, e := range nics {
+				if nic, ok := e.(map[string]any); ok && str(nic, "subnetwork") == sub {
+					used[str(nic, "networkIP")] = k
+				}
+			}
+		}
 	}
 	return used
 }

@@ -1041,7 +1041,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// verify the URLs those accounts sign (#1787).
 	runEnabled := serviceEnabled(cfg, config.ServiceRun)
 	pubsubKMS := serviceEnabled(cfg, config.ServicePubSub) && serviceEnabled(cfg, config.ServiceKMS)
-	if runEnabled || serviceEnabled(cfg, config.ServiceBigQuery) || serviceEnabled(cfg, config.ServiceStorage) || pubsubKMS || firestoreKMS(cfg) {
+	if runEnabled || serviceEnabled(cfg, config.ServiceBigQuery) || serviceEnabled(cfg, config.ServiceStorage) || pubsubKMS || firestoreKMS(cfg) || computeEnabled(cfg) {
 		// The Cloud SQL Admin API and its connector are published for Cloud
 		// SQL volumes (#1346): the Auth Proxy a revision runs reaches both.
 		published := map[string]bool{"run": true, "tasks": true, "secretmanager": true, "kms": true,
@@ -1067,6 +1067,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 				published["kms"] = true
 			}
 		}
+		// A VM reads its metadata from the Compute port and its service
+		// account's tokens from the metadata server (#1963).
+		if computeEnabled(cfg) {
+			published["compute"], published["metadata"] = true, true
+		}
 		hostComp = newClusterHost(cfg, stdout, func() map[string]string {
 			out := map[string]string{}
 			for k, v := range liveEndpoints() {
@@ -1087,6 +1092,15 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// the tunnelled backends' Service names, known now, and the CLI-hosted
 	// services' cloudburrow-host name, known once hostComp has started —
 	// after the adapter — so the table is read per request, not at Start.
+	if computeSvc != nil {
+		computeSvc.guestBase = func() string {
+			if a := hostComp.InCluster("compute"); a != "" {
+				return "http://" + a
+			}
+			return ""
+		}
+		computeSvc.metadataHost = func() string { return hostComp.InCluster("metadata") }
+	}
 	if runSvc != nil {
 		// A build step reaches the metadata server as its build's account (#1854).
 		runSvc.stepMetadata = func() string { return hostComp.HostAddr("metadata") }
