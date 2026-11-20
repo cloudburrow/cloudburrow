@@ -34,11 +34,16 @@ import (
 //     GOOGLE_APPLICATION_CREDENTIALS for its own calls, so there is no source
 //     credential and it fails before sending anything.
 //   - A source credential (the fixture as auth/credential_file_override, with
-//     credentials enabled): gcloud refreshes it at oauth2.googleapis.com, not
-//     at the fixture's local token_uri, before it ever reaches the IAM
-//     Credentials override. So local gcloud impersonation does not work in
-//     any configuration, and outside the guard that refresh would leave the
-//     machine.
+//     credentials enabled): gcloud refreshes it at auth/token_host, never at
+//     the fixture's token_uri (store.py's _LoadFromFileOverride), and
+//     auth/token_host defaults to oauth2.googleapis.com. Measured again with
+//     Cloud SDK 593.0.0 (#2034): with `cloudburrow env` exporting no
+//     CLOUDSDK_AUTH_TOKEN_HOST that refresh went to oauth2.googleapis.com:443,
+//     which only the guard stopped. `cloudburrow env` now exports
+//     CLOUDSDK_AUTH_TOKEN_HOST (and CLOUDSDK_AUTH_MTLS_TOKEN_HOST) at the
+//     instance's token endpoint, as gcloud-setup's configuration sets
+//     auth/token_host (#1975), so the refresh stays local and gcloud reaches
+//     the IAM Credentials override, which refuses generateAccessToken.
 
 // iamRecorder is a reverse proxy in front of the metadata server that
 // records the path of every request, so a test can tell whether gcloud
@@ -147,40 +152,17 @@ func refreshRecorder(t *testing.T) ([]string, func() []string) {
 		func() []string { mu.Lock(); defer mu.Unlock(); return append([]string(nil), hosts...) }
 }
 
-// assertRefreshGoesToGoogle checks the measured outcome of impersonating
-// with a source credential: gcloud fails refreshing it, the only request
-// off the machine was to oauth2.googleapis.com (refused by the proxy), and
-// nothing reached the IAM Credentials override.
-func assertRefreshGoesToGoogle(t *testing.T, out string, err error, hosts []string, rec *iamRecorder) {
-	t.Helper()
-	t.Logf("gcloud storage ls --impersonate-service-account:\n%s", out)
-	if err == nil {
-		t.Fatalf("gcloud impersonated successfully; docs/credentials.md says it refreshes at oauth2.googleapis.com and fails")
-	}
-	if !strings.Contains(out, "problem refreshing your current auth tokens") {
-		t.Errorf("gcloud failed otherwise than refreshing its source credential")
-	}
-	if len(hosts) == 0 {
-		t.Errorf("gcloud sent nothing off the machine; docs/credentials.md says it refreshes at oauth2.googleapis.com")
-	}
-	for _, h := range hosts {
-		if h != "oauth2.googleapis.com:443" {
-			t.Errorf("gcloud tried to reach %s as well", h)
-		}
-	}
-	if got := rec.seen(); len(got) != 0 {
-		t.Errorf("gcloud reached the IAM Credentials override: %v", got)
-	}
-}
-
 const impersonationWarning = "This command is using service account impersonation"
 
 // TestGcloudImpersonationThroughEnv (#697): `gcloud storage ls
 // --impersonate-service-account` in a fresh configuration set up by
 // `cloudburrow env`. With the exported variables alone gcloud has no source
 // credential and fails before any request. With the exported ADC fixture
-// also named as auth/credential_file_override, gcloud refreshes it at
-// oauth2.googleapis.com, which the proxy refuses, and fails.
+// also named as auth/credential_file_override, gcloud refreshes it at the
+// exported CLOUDSDK_AUTH_TOKEN_HOST, this instance's token endpoint (#2034),
+// and the IAM Credentials override refuses generateAccessToken. A request
+// bound off the machine, such as a refresh at oauth2.googleapis.com, fails
+// the test.
 func TestGcloudImpersonationThroughEnv(t *testing.T) {
 	h := New(t)
 	h.Endpoint(EnvStorage)
@@ -188,6 +170,14 @@ func TestGcloudImpersonationThroughEnv(t *testing.T) {
 	override, fixture := vars["CLOUDSDK_API_ENDPOINT_OVERRIDES_IAMCREDENTIALS"], vars["GOOGLE_APPLICATION_CREDENTIALS"]
 	if override == "" || fixture == "" || vars["CLOUDSDK_CORE_PROJECT"] == "" {
 		t.Fatalf("cloudburrow env exported no IAM Credentials override, fixture or project: %v", vars)
+	}
+	// gcloud refreshes a credential_file_override at auth/token_host, whose
+	// default is oauth2.googleapis.com (#2034).
+	for _, k := range []string{"CLOUDSDK_AUTH_TOKEN_HOST", "CLOUDSDK_AUTH_MTLS_TOKEN_HOST"} {
+		if vars[k] == "" {
+			t.Fatalf("cloudburrow env exported no %s: gcloud would refresh at Google's token endpoint", k)
+		}
+		h.requireLocal(vars[k])
 	}
 	project := vars["CLOUDSDK_CORE_PROJECT"]
 	bucket := h.Project() + "-imp"
