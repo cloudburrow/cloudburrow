@@ -20,8 +20,8 @@ import (
 )
 
 // covers: google.logging.v2.ConfigServiceV2/CreateView, google.logging.v2.ConfigServiceV2/UpdateView
-// unverified: google.logging.v2.ConfigServiceV2/CreateView INVALID_ARGUMENT: a log view filter outside the documented subset
-// unverified: google.logging.v2.ConfigServiceV2/UpdateView INVALID_ARGUMENT: a log view filter outside the documented subset
+// unverified: google.logging.v2.ConfigServiceV2/CreateView INVALID_ARGUMENT: a log view filter outside the documented subset (docs re-read 2026-11-20, still unanswered: https://docs.cloud.google.com/logging/docs/logs-views)
+// unverified: google.logging.v2.ConfigServiceV2/UpdateView INVALID_ARGUMENT: a log view filter outside the documented subset (docs re-read 2026-11-20, still unanswered: https://docs.cloud.google.com/logging/docs/logs-views)
 //
 // TestLoggingViewFilterSubset (#2028): through the official ConfigClient, a
 // log view takes the filter Google's log views docs list

@@ -125,7 +125,7 @@ func TestLoggingExplorerRound3(t *testing.T) {
 	p.waitFor(`document.querySelector("#log-library-tab-recent") !== null`)
 	var tabs string
 	p.eval(`[...document.querySelectorAll(".modal [role=tab]")].map((b) => b.textContent).join("|")`, &tabs)
-	if tabs != "Recent queries|Saved queries|Suggested queries" {
+	if tabs != "Recent queries|Saved queries|Suggested queries|Queries provided by Google Cloud" {
 		t.Errorf("the Query library's tabs = %q", tabs)
 	}
 	p.waitFor(`[...document.querySelectorAll(".modal .query-library-text")].some((s) => s.textContent === "severity>=ERROR")`)
@@ -226,7 +226,7 @@ func TestLoggingScopesAndRowMenus(t *testing.T) {
 	p.navigate("/logs/sinks?project=" + project)
 	p.run(chromedp.Click(chromedp.CSS(fmt.Sprintf(`button[aria-label=%q]`, "Actions for "+sink))))
 	p.eval(menuItems, &items)
-	if items != "View sink details|Edit sink|Disable sink|Delete sink|Troubleshoot sink" {
+	if items != "View sink details|Edit sink|Disable sink|Delete sink|Troubleshoot sink|View sink log volume and error rates" {
 		t.Errorf("a sink's More actions = %q", items)
 	}
 	p.clickText(`.overflow-menu:not([hidden]) [role="menuitem"]`, "Troubleshoot sink")

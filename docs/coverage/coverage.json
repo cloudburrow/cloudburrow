@@ -5879,7 +5879,7 @@
         "unverified": [
           {
             "code": "INVALID_ARGUMENT",
-            "case": "a log view filter outside the documented subset",
+            "case": "a log view filter outside the documented subset (docs re-read 2026-11-20, still unanswered: https://docs.cloud.google.com/logging/docs/logs-views)",
             "test": "test/compat/logging2028_test.go:34 TestLoggingViewFilterSubset"
           }
         ]
@@ -6138,7 +6138,7 @@
         "unverified": [
           {
             "code": "INVALID_ARGUMENT",
-            "case": "a log view filter outside the documented subset",
+            "case": "a log view filter outside the documented subset (docs re-read 2026-11-20, still unanswered: https://docs.cloud.google.com/logging/docs/logs-views)",
             "test": "test/compat/logging2028_test.go:34 TestLoggingViewFilterSubset"
           }
         ]
@@ -17812,6 +17812,7 @@
         "method": "google.monitoring.v3.MetricService/GetMetricDescriptor",
         "status": "Verified",
         "tests": [
+          "test/compat/logging2021_test.go:34 TestMonitoringSinkVolumeAndIngestion",
           "test/compat/monitoring_test.go:242 TestMonitoringLogBasedMetrics",
           "test/compat/monitoring_test.go:365 TestTerraformMonitoringMetricDescriptor",
           "test/compat/monitoring_test.go:88 TestMonitoringCustomMetrics"
@@ -17821,6 +17822,7 @@
         "method": "google.monitoring.v3.MetricService/GetMonitoredResourceDescriptor",
         "status": "Verified",
         "tests": [
+          "test/compat/logging2021_test.go:34 TestMonitoringSinkVolumeAndIngestion",
           "test/compat/monitoring_test.go:88 TestMonitoringCustomMetrics"
         ]
       },
@@ -17842,6 +17844,7 @@
         "method": "google.monitoring.v3.MetricService/ListTimeSeries",
         "status": "Verified",
         "tests": [
+          "test/compat/logging2021_test.go:34 TestMonitoringSinkVolumeAndIngestion",
           "test/compat/monitoring_query_test.go:288 TestMonitoringSLOCompliance",
           "test/compat/monitoring_test.go:242 TestMonitoringLogBasedMetrics",
           "test/compat/monitoring_test.go:324 TestMonitoringRequestCounts",

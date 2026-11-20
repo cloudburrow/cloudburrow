@@ -225,8 +225,10 @@ func (a *Admin) CallObservability(method, path string, body []byte) (int, []byte
 }
 
 // forgetDefaultLogScope makes the project's own _Default its default log
-// scope again when the deleted log scope id was its default (UNVERIFIED:
-// Google does not say what a deleted default leaves). The caller holds a.mu.
+// scope again when the deleted log scope id was its default. The caller
+// holds a.mu. UNVERIFIED (docs re-read 2026-11-20, still unanswered:
+// https://docs.cloud.google.com/logging/docs/log-scope/create-and-manage):
+// Google does not say what a deleted default leaves.
 func (a *Admin) forgetDefaultLogScope(project, id string) error {
 	s, err := a.observabilityScope(project)
 	if err != nil {

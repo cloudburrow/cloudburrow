@@ -57,5 +57,5 @@ stays UNVERIFIED until a recorded observation pins it (see test/compat/README.md
 
 | Method | Code | Case | Test |
 |---|---|---|---|
-| `google.logging.v2.ConfigServiceV2/CreateView` | `INVALID_ARGUMENT` | a log view filter outside the documented subset | [`TestLoggingViewFilterSubset`](../../test/compat/logging2028_test.go#L34) |
-| `google.logging.v2.ConfigServiceV2/UpdateView` | `INVALID_ARGUMENT` | a log view filter outside the documented subset | [`TestLoggingViewFilterSubset`](../../test/compat/logging2028_test.go#L34) |
+| `google.logging.v2.ConfigServiceV2/CreateView` | `INVALID_ARGUMENT` | a log view filter outside the documented subset (docs re-read 2026-11-20, still unanswered: https://docs.cloud.google.com/logging/docs/logs-views) | [`TestLoggingViewFilterSubset`](../../test/compat/logging2028_test.go#L34) |
+| `google.logging.v2.ConfigServiceV2/UpdateView` | `INVALID_ARGUMENT` | a log view filter outside the documented subset (docs re-read 2026-11-20, still unanswered: https://docs.cloud.google.com/logging/docs/logs-views) | [`TestLoggingViewFilterSubset`](../../test/compat/logging2028_test.go#L34) |

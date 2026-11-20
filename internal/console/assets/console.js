@@ -5835,11 +5835,15 @@ function queryPane(route, segments, spec, onDone) {
     if (writing) return executeWrite(statement);
     setBusy(run, true);
     const started = performance.now();
+    // The result, for a page that draws more from it: Log Analytics'
+    // chart (#2021). Null when the query failed.
+    let result = null;
     try {
       const data = await send(
         `/api/query/${route.service}?project=${encodeURIComponent(currentProject())}`,
         "POST", { Path: segments, Statement: statement });
       const listing = data.listing || {};
+      result = listing;
       const took = Math.round(performance.now() - started);
 
       if (!(listing.items || []).length) {
@@ -5863,7 +5867,7 @@ function queryPane(route, segments, spec, onDone) {
     } finally {
       setBusy(run, false);
     }
-    if (onDone) onDone();
+    if (onDone) onDone(result);
   };
 
   run.addEventListener("click", execute);
@@ -8003,9 +8007,12 @@ function route() {
 // CloudBurrow does not run (#1843): its place in the menu, and why.
 // Log Analytics (#1863), as Google's page: the Log views panel beside a
 // SQL editor whose FROM names a view as PROJECT_ID.LOCATION.BUCKET_ID.
-// LOG_VIEW_ID. The logging-analytics provider runs it over the bucket's
-// linked dataset in this instance's BigQuery; a view's name in the panel
-// puts Google's default query on it in the editor.
+// LOG_VIEW_ID. The logging-analytics provider runs it in this instance's
+// BigQuery, over the bucket's linked dataset when it has one and over the
+// bucket's entries directly when it has none (#2021); a view's name in the
+// panel puts Google's default query on it in the editor. The results are
+// a table and, as Google's page lets them be, a chart (#2021), drawn as
+// BigQuery's Visualization draws one, from the result's column types.
 async function renderLogAnalytics(view, match) {
   const caps = capabilityOf("logging-analytics");
   if (!caps.id) return renderUnavailable(view, match);
@@ -8023,7 +8030,24 @@ async function renderLogAnalytics(view, match) {
   const views = data.items || [];
   // The query route asks for a resource: the page's is the project's log
   // views, which the statement itself names.
-  const pane = queryPane(route, ["log-views"], caps.query, () => {});
+  const chart = el("section", { class: "card log-analytics-chart", id: "log-analytics-chart", "aria-labelledby": "log-analytics-chart-title", hidden: true });
+  const chartTab = {};
+  const drawResultChart = (listing) => {
+    if (!listing || !(listing.items || []).length) { chart.hidden = true; return; }
+    const types = listing.columnTypes || {};
+    const cols = [listing.nameColumn, ...(listing.columns || [])].filter(Boolean);
+    const res = {
+      schema: cols.map((c) => ({ name: c, type: types[c] === "REPEATED" ? "STRING" : (types[c] || "STRING"),
+        mode: types[c] === "REPEATED" ? "REPEATED" : "NULLABLE" })),
+      rows: listing.items.map((it) => ({ [listing.nameColumn]: it.name, ...(it.fields || {}) })),
+    };
+    res.totalRows = res.rows.length;
+    const draw = () => setChildren(chart, el("h2", { id: "log-analytics-chart-title", text: "Chart" }),
+      bqVisualization(res, chartTab, draw));
+    draw();
+    chart.hidden = false;
+  };
+  const pane = queryPane(route, ["log-views"], caps.query, drawResultChart);
   const editor = pane.querySelector("textarea.query-editor");
   editor.setAttribute("aria-label", "Query");
   const run = [...pane.querySelectorAll("button")].find((b) => b.textContent === "Run");
@@ -8042,12 +8066,89 @@ async function renderLogAnalytics(view, match) {
           el("button", { type: "button", class: "link-button mono", text: v.name,
             title: `Query ${v.name}`,
             onclick: () => { editor.value = defaultQuery(v.name); editor.dispatchEvent(new Event("input")); editor.focus(); } }),
-          el("span", { class: "unavailable", text: ` Linked dataset: ${(v.fields || {})["Linked dataset in BigQuery"] || "—"}` }))))
+          el("span", { class: "unavailable", text: ` Linked dataset: ${(v.fields || {})["Linked dataset in BigQuery"] || "none needed"}` }))))
       : el("p", { class: "unavailable", text: data.prompt ||
-          "No bucket of this project is upgraded to use Log Analytics. Upgrade one in Logs Storage, and Create link to query it here." }));
-  setChildren(view, header, el("div", { class: "log-analytics" }, panel, pane));
+          "No bucket of this project is upgraded to use Log Analytics. Upgrade one in Logs Storage to query it here." }));
+  setChildren(view, header, el("div", { class: "log-analytics" }, panel, el("div", { class: "log-analytics-main" }, pane, chart)));
   announce("Log Analytics");
 }
+
+// LOG_QUERY_LIBRARY is the Query library's Queries provided by Google Cloud
+// tab (#2021): Google's sample queries, by product, as
+// docs.cloud.google.com/logging/docs/view/query-library-preview publishes
+// them (read 2026-11-20), for the products CloudBurrow serves. Upper-case
+// words such as BUCKET_NAME are Google's placeholders, to replace.
+const LOG_QUERY_LIBRARY = [
+  ["API enable and disable", [
+    ["Audit API enable logs", 'protoPayload.methodName="google.api.serviceusage.v1.ServiceUsage.EnableService"'],
+    ["Audit API disable logs", 'protoPayload.methodName="google.api.serviceusage.v1.ServiceUsage.DisableService"'],
+  ]],
+  ["BigQuery", [
+    ["BigQuery audit logs", 'resource.type= ("bigquery_dataset" OR "bigquery_project") AND logName:"cloudaudit.googleapis.com"'],
+    ["BigQuery audit logs for a project", 'resource.type="bigquery_project" AND logName:"cloudaudit.googleapis.com"'],
+    ["BigQuery audit logs for a dataset", 'resource.type="bigquery_dataset" AND logName:"cloudaudit.googleapis.com"'],
+    ["BigQuery dataset updates", 'resource.type="bigquery_dataset" AND log_id("cloudaudit.googleapis.com/activity") AND protoPayload.methodName= "google.cloud.bigquery.v2.DatasetService.UpdateDataset"'],
+    ["BigQuery jobs completed", 'resource.type="bigquery_project" AND log_id("cloudaudit.googleapis.com/data_access") AND protoPayload.methodName= ("google.cloud.bigquery.v2.JobService.InsertJob" OR "google.cloud.bigquery.v2.JobService.Query")'],
+    ["BigQuery quota exceeded", 'resource.type= ("bigquery_dataset" OR "bigquery_project") AND protoPayload.status.code=8 AND severity>=WARNING'],
+  ]],
+  ["Cloud Monitoring", [
+    ["Show all notification channel errors", 'resource.type="stackdriver_notification_channel" AND severity>=ERROR'],
+    ["Show logs written by the uptime resource", 'resource.type="uptime_url"'],
+    ["Alerting policy incident violations", 'log_id("monitoring.googleapis.com/Violation") AND labels.policy_id="POLICY_ID"'],
+  ]],
+  ["Cloud Run functions", [
+    ["Cloud Run functions errors", 'resource.type="cloud_function" AND log_id("cloudfunctions.googleapis.com/cloud-functions") AND severity>=ERROR'],
+    ["Cloud Run functions execution logs", 'resource.type="cloud_function" AND resource.labels.function_name="FUNCTION_NAME" AND resource.labels.region="REGION"'],
+    ["Cloud Run functions build logs", 'resource.type="build" AND resource.labels.build_id="BUILD_ID" AND log_id("cloudbuild")'],
+  ]],
+  ["Cloud Run", [
+    ["Cloud Run logs for a specific job", 'resource.type="cloud_run_job" AND resource.labels.job_name="JOB_NAME"'],
+    ["Cloud Run logs for a specific revision and service", 'resource.type="cloud_run_revision" AND resource.labels.service_name="SERVICE_NAME"'],
+  ]],
+  ["Cloud SQL", [
+    ["Cloud SQL audit logs", 'resource.type="cloudsql_database" AND resource.labels.database_id="DATABASE_ID" AND log_id("cloudaudit.googleapis.com/activity")'],
+    ["Cloud SQL instance deletion logs", 'resource.type="cloudsql_database" AND resource.labels.database_id="PROJECT_ID:INSTANCE_ID" AND protoPayload.methodName="cloudsql.instances.delete"'],
+    ["Cloud SQL MySQL error logs", 'resource.type="cloudsql_database" AND log_id("cloudsql.googleapis.com/mysql.err")'],
+    ["Cloud SQL Postgres-based databases", 'resource.type="cloudsql_database" AND resource.labels.database_id="DATABASE_ID" AND log_id("cloudsql.googleapis.com/postgres.log")'],
+    ["Cloud SQL SQL Server error logs", 'resource.type="cloudsql_database" AND log_id("cloudsql.googleapis.com/sqlserver.err")'],
+  ]],
+  ["Cloud Storage", [
+    ["Cloud Storage bucket logs", 'resource.type="gcs_bucket" AND resource.labels.bucket_name="BUCKET_NAME"'],
+    ["Cloud Storage bucket audit logs", 'resource.type="gcs_bucket" AND logName:"cloudaudit.googleapis.com"'],
+    ["Cloud Storage bucket creation logs", 'resource.type="gcs_bucket" AND log_id("cloudaudit.googleapis.com/activity") AND protoPayload.methodName="storage.buckets.create"'],
+    ["Cloud Storage bucket deletion logs", 'resource.type="gcs_bucket" AND log_id("cloudaudit.googleapis.com/activity") AND protoPayload.methodName="storage.buckets.delete"'],
+  ]],
+  ["Cloud Tasks", [
+    ["Cloud Tasks queue logs", 'resource.type="cloud_tasks_queue" AND resource.labels.queue_id="QUEUE_ID"'],
+  ]],
+  ["Compute Engine", [
+    ["Compute Engine Admin Activity logs", 'resource.type="gce_instance" AND log_id("cloudaudit.googleapis.com/activity")'],
+    ["Compute Engine VM syslogs", 'resource.type="gce_instance" AND log_id("syslog")'],
+    ["Compute Engine VM authlogs", 'resource.type="gce_instance" AND log_id("authlog")'],
+  ]],
+  ["Google Cloud Observability", [
+    ["Log sink activities", 'resource.type="logging_sink" AND log_id("cloudaudit.googleapis.com/activity")'],
+    ["Log-based metric create or update activities", 'resource.type="metric" AND log_id("cloudaudit.googleapis.com/activity") AND protoPayload.methodName:(UpdateLogMetric OR CreateLogMetric)'],
+    ["Uptime URL checks for a host", 'resource.type="uptime_url" AND resource.labels.host="URL"'],
+  ]],
+  ["Identity and Access Management", [
+    ["Service account creation logs", 'resource.type="service_account" AND log_id("cloudaudit.googleapis.com/activity") AND protoPayload.methodName="google.iam.admin.v1.CreateServiceAccount"'],
+    ["Service account creation key logs", 'resource.type="service_account" AND log_id("cloudaudit.googleapis.com/activity") AND protoPayload.methodName="google.iam.admin.v1.CreateServiceAccountKey"'],
+    ["Set access control policy logs", 'resource.type="project" AND log_id("cloudaudit.googleapis.com/activity") AND protoPayload.methodName="SetIamPolicy"'],
+    ["Resource creation, modification, or deletion", 'log_id("cloudaudit.googleapis.com/activity") AND protoPayload.methodName:("create" OR "delete" OR "update")'],
+  ]],
+  ["Kubernetes", [
+    ["Stdout container logs across all pods and containers in a cluster", 'resource.type="k8s_container" AND log_id("stdout")'],
+    ["Container error logs across all pods and containers in a cluster", 'resource.type="k8s_container" AND log_id("stderr") AND severity=ERROR'],
+    ["Container error logs for a pod with a specific name", 'resource.type="k8s_container" AND resource.labels.pod_name="POD_NAME" AND severity=ERROR'],
+    ["Container errors logs in the kube-system namespace", 'resource.type="k8s_container" AND resource.labels.namespace_name="kube-system" AND severity=ERROR'],
+    ["Kubernetes container logs", 'resource.type="k8s_container" AND resource.labels.container_name="CONTAINER_NAME"'],
+    ["Kubernetes events", 'resource.type="k8s_cluster" AND log_id("events")'],
+  ]],
+  ["Spanner", [
+    ["Cloud Spanner logs for a specific spanner instance", 'resource.type="spanner_instance" AND resource.labels.instance_id="SPANNER_INSTANCE"'],
+  ]],
+];
 
 function renderUnavailable(view, route) {
   setChildren(view, pageHeader(route.title, "Not available locally"),
@@ -12061,7 +12162,8 @@ async function renderLogs(view) {
   // .delete); suggestions come from the entries the query has read.
   const openQueryLibrary = async () => {
     const { dialog, close } = openModal({ labelledBy: "log-library-title" });
-    const tabs = [["recent", "Recent queries"], ["saved", "Saved queries"], ["suggested", "Suggested queries"]];
+    const tabs = [["recent", "Recent queries"], ["saved", "Saved queries"], ["suggested", "Suggested queries"],
+      ["google", "Queries provided by Google Cloud"]];
     let current = "recent";
     const panel = el("div", { class: "query-library-panel", role: "tabpanel", id: "log-library-panel", tabindex: "0" });
     const use = (q, stream) => {
@@ -12072,7 +12174,7 @@ async function renderLogs(view) {
       if (stream && paused) pauseButton.click();
     };
     const item = (q, extra) => el("li", { class: "query-library-item" },
-      q.title ? el("h3", { text: q.title }) : null,
+      q.title ? el(q.level || "h3", { text: q.title }) : null,
       el("span", { class: "mono query-library-text", text: q.query || "(empty query: every entry)" }),
       el("button", { type: "button", class: "secondary", text: "Run", "aria-label": `Run ${q.title || q.query}`, onclick: () => use(q, false) }),
       el("button", { type: "button", class: "secondary", text: "Stream", "aria-label": `Stream ${q.title || q.query}`, onclick: () => use(q, true) }),
@@ -12091,6 +12193,11 @@ async function renderLogs(view) {
           ? el("ul", { class: "query-library-list" }, ...recent.map((r) => item({ query: r.query },
               el("span", { class: "unavailable", text: relativeTime(new Date(r.at)) }))))
           : el("p", { class: "unavailable", text: "No recent queries. A query you run is listed here, in this browser." }));
+      }
+      if (current === "google") {
+        return setChildren(panel, ...LOG_QUERY_LIBRARY.map(([section, queries]) => el("section", { class: "query-library-section" },
+          el("h3", { class: "query-library-heading", text: section }),
+          el("ul", { class: "query-library-list" }, ...queries.map(([title, query]) => item({ title, query, level: "h4" }))))));
       }
       if (current === "suggested") {
         const list = suggestedQueries();
