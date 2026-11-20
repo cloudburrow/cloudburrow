@@ -104,14 +104,18 @@ func TestStorageGoogleRound2ThroughTheBrowser(t *testing.T) {
 	// The soft-deleted buckets page leads to Buckets' View options.
 	p.navigate("/storage/deleted?project=" + project)
 	p.waitFor(`location.pathname === "/storage/browser" && new URLSearchParams(location.search).get("view") === "softdeleted"`)
-	p.waitFor(`document.querySelector("#scope-view") !== null && document.querySelector("#scope-view").value === "softdeleted"`)
+	// View options is Google's dialog (#1843), with the choice checked.
+	p.clickText("#view button", "View options")
+	p.waitFor(`document.querySelector(".modal.is-open #view-options-view-softdeleted")?.checked === true`)
+	p.clickText(".modal.is-open button", "Cancel")
+	p.waitFor(`document.querySelector(".modal") === null`)
 
 	// Observability: in Google's place, not available locally.
 	p.navigate("/storage/observability?project=" + project)
 	p.waitFor(`[...document.querySelectorAll("#view h2")].some((h) => h.textContent === "Not available locally")`)
 	var menu string
 	p.eval(`[...document.querySelectorAll("#product-nav a")].map((a) => a.textContent).join("|")`, &menu)
-	if menu != "Buckets|Observability|Storage Intelligence|Inventory reports|Transfer data|Settings" {
+	if menu != "Buckets|Observability|Storage Intelligence|Batch operations|Inventory reports|Insights datasets|Transfer data|Settings" {
 		t.Errorf("the Cloud Storage menu reads %q", menu)
 	}
 

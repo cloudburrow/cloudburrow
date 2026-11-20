@@ -94,6 +94,12 @@ func (p *tab) dialogFailures(want bool) []string {
 // the skip link, every visible, enabled control is reached, each stop is on
 // screen with a focus indicator drawn, and focus comes back round rather
 // than being trapped (WCAG 2.1.1, 2.1.2, 2.4.1, 2.4.7).
+//
+// The page is walked once, and must hold still for it: every control tagged
+// before the first Tab is still in the document after the last. A page
+// that rebuilds its controls under a keyboard user (a list's poll landing
+// between two presses) drops their focus to the top of the page, so that
+// is a failure of its own, not a reason to walk again (#2047).
 func (p *tab) keyboardFailures() []string {
 	p.t.Helper()
 	var want []string
@@ -129,6 +135,11 @@ func (p *tab) keyboardFailures() []string {
 		if !reached[w] {
 			out = append(out, fmt.Sprintf("Tab never reaches %q", w))
 		}
+	}
+	var stable bool
+	p.eval(fmt.Sprintf(`document.querySelectorAll("[data-a11y-key]").length === %d`, len(want)), &stable)
+	if !stable {
+		out = append(out, "the page rebuilt its controls during the Tab walk, taking the keyboard user's place")
 	}
 	return out
 }
