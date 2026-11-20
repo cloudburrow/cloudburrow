@@ -65,7 +65,7 @@ http://localhost:9033/v1/projects/PROJECT/location/global/prometheus/api/v1/quer
 
 MQL is deprecated by Google but still runs through the API, so `QueryService.QueryTimeSeries` and `conditionMonitoringQueryLanguage` are served for the core of the language: `fetch`, `metric`, `filter`, `align`, `every`, `within`, `group_by` and `condition val() > N`. Other table operations answer `UNIMPLEMENTED`.
 
-These run through the API; the console's PromQL tab and PromQL conditions, an SLO's compliance and repeat notifications are [#1991](https://github.com/cloudburrow/cloudburrow/issues/1991). MQL has no console page, as at Google.
+The console offers them too ([#1991](https://github.com/cloudburrow/cloudburrow/issues/1991)): Metrics explorer's **PromQL** tab charts a range query; Create policy's **PromQL** condition takes a query, an evaluation interval and a retest window, and **Repeat notifications** sets `renotifyInterval` for the policy's channels (also on a policy's page); a service's page shows each SLO's status, compliance, error budget remaining and 1-hour burn rate, with Service level indicator and Error budget charts. MQL has no console page, as at Google.
 
 ## Not served
 

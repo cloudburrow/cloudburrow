@@ -10229,7 +10229,9 @@ async function productActivity() {
 // Aggregation (the aligner and its alignment period applied to each series,
 // then the reducer that combines series and the labels it keeps), with a
 // time range above a line chart and the table of its series. Each Apply is
-// one ListTimeSeries, run by the server's builder query.
+// one ListTimeSeries, run by the server's builder query. The PromQL tab
+// beside Builder (#1991, docs.cloud.google.com/monitoring/promql/promql-in-monitoring)
+// is the code editor: its Run query is one range query over the same series.
 
 const EXPLORER_RANGES = [
   { label: "5 min", seconds: 300 }, { label: "15 min", seconds: 900 }, { label: "1 hour", seconds: 3600 },
@@ -10370,7 +10372,45 @@ async function renderMetricsExplorer(view, match) {
 
   const field = (label, control, help) => el("div", { class: "explorer-field" },
     el("label", { for: control.id, text: label }), control, help ? el("p", { class: "field-help", text: help }) : null);
-  const builder = el("aside", { class: "card explorer-builder", "aria-label": "Builder" },
+  // PromQL: the code editor, a query and its minimum interval.
+  const promqlInput = el("textarea", { id: "explorer-promql", rows: "6", class: "mono", spellcheck: "false",
+    "aria-label": "PromQL query", placeholder: '{"custom.googleapis.com/shop/sales"}' });
+  promqlInput.value = params.get("promql") || "";
+  const stepInput = el("input", { id: "explorer-step", type: "number", min: "1", "aria-label": "Minimum interval (seconds)",
+    placeholder: "auto", value: params.get("step") || "" });
+  const runQuery = el("button", { type: "button", class: "primary", text: "Run query" });
+  promqlInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); run(); }
+  });
+  let mode = params.get("language") === "promql" ? "promql" : "builder";
+  const builderPanel = el("div", { id: "explorer-panel-builder", role: "tabpanel", "aria-labelledby": "explorer-tab-builder" });
+  const promqlPanel = el("div", { id: "explorer-panel-promql", role: "tabpanel", "aria-labelledby": "explorer-tab-promql" },
+    el("h2", { text: "PromQL" }),
+    field("PromQL query", promqlInput, "Metric names are Google's: quoted, as {\"custom.googleapis.com/shop/sales\"}, or custom_googleapis_com:shop_sales. Ctrl+Enter runs it."),
+    field("Minimum interval (seconds)", stepInput, "Empty to fit the time range."),
+    runQuery);
+  const modes = [["builder", "Builder"], ["promql", "PromQL"]];
+  const tabs = modes.map(([id, label]) => el("button", { type: "button", role: "tab", class: "tab", id: `explorer-tab-${id}`,
+    "aria-controls": `explorer-panel-${id}`, text: label, onclick: () => { if (mode !== id) { mode = id; drawMode(); run(); } } }));
+  const tabStrip = el("div", { class: "tab-strip explorer-tabs", role: "tablist", "aria-label": "Query language" }, ...tabs);
+  tabStrip.addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+    const i = modes.findIndex(([id]) => id === mode);
+    const next = modes[(i + (e.key === "ArrowRight" ? 1 : modes.length - 1)) % modes.length][0];
+    mode = next; drawMode(); tabs[modes.findIndex(([id]) => id === next)].focus(); run();
+  });
+  function drawMode() {
+    modes.forEach(([id], k) => {
+      const on = id === mode;
+      tabs[k].setAttribute("aria-selected", on ? "true" : "false");
+      tabs[k].setAttribute("tabindex", on ? "0" : "-1");
+      tabs[k].classList.toggle("is-selected", on);
+    });
+    builderPanel.hidden = mode !== "builder";
+    promqlPanel.hidden = mode !== "promql";
+  }
+  const builder = el("aside", { class: "card explorer-builder", "aria-label": "Query" }, tabStrip, builderPanel, promqlPanel);
+  setChildren(builderPanel,
     el("h2", { text: "Select a metric" }),
     field("Resource type", resourceSelect), field("Metric", metricSelect),
     el("h2", { text: "Filter" }),
@@ -10381,8 +10421,60 @@ async function renderMetricsExplorer(view, match) {
     field("Reducer", reducerSelect, "Combines the aligned time series."),
     field("Group by", groupInput, "Comma separated labels the reducer keeps."),
     apply);
+  drawMode();
+
+  // drawResults is the chart and the table of one run's series.
+  function drawResults(data, title) {
+    const rows = data.items || [];
+    setChildren(chartHost,
+      el("div", { class: "chart-head" }, el("h3", { class: "mono", text: title }),
+        el("span", { class: "chart-now", text: `${rows.length} time series` })),
+      explorerChart(rows, title),
+      data.note ? el("p", { class: "chart-foot unavailable mono", text: data.note }) : null);
+    const cols = ["Time series", ...(data.columns || [])];
+    // The table scrolls in its own region, never the page (#1991: a
+    // PromQL result's label set is one long word).
+    setChildren(tableHost, rows.length
+      ? el("div", { class: "table-wrap explorer-table-wrap" }, el("table", { class: "explorer-table", "aria-label": "Time series" },
+          el("thead", {}, el("tr", {}, ...cols.map((c) => el("th", { scope: "col", text: c })))),
+          el("tbody", {}, ...rows.map((r) => el("tr", {},
+            el("td", { class: "mono", text: r.name }),
+            ...(data.columns || []).map((c) => el("td", { text: (r.fields || {})[c] || "" })))))))
+      : el("p", { class: "unavailable", text: "No time series match." }));
+    announce(`Metrics explorer: ${rows.length} time series`);
+  }
+
+  async function runPromql() {
+    const query = promqlInput.value.trim();
+    const q = new URLSearchParams(location.search);
+    q.set("language", "promql");
+    for (const [k, v] of Object.entries({ promql: query, step: stepInput.value, range: String(range) })) {
+      if (v) q.set(k, v); else q.delete(k);
+    }
+    history.replaceState(history.state, "", location.pathname + "?" + q.toString());
+    if (!query) {
+      setChildren(chartHost, el("p", { class: "unavailable", text: "Enter a PromQL query and select Run query." }));
+      setChildren(tableHost);
+      return;
+    }
+    setChildren(chartHost, loadingState(2, { what: "time series" }));
+    let data;
+    try {
+      data = (await send(`/api/query/monitoring-explorer?project=${encodeURIComponent(project)}`, "POST",
+        { Path: ["promql"], Values: { query, step: stepInput.value, range: String(range) } })).listing || {};
+    } catch (err) {
+      setChildren(chartHost, errorState("Query failed", String(err.message), runPromql));
+      setChildren(tableHost);
+      return;
+    }
+    drawResults(data, query);
+  }
+  runQuery.addEventListener("click", runPromql);
 
   async function run() {
+    if (mode === "promql") return runPromql();
+    const q0 = new URLSearchParams(location.search);
+    if (q0.has("language")) { q0.delete("language"); history.replaceState(history.state, "", location.pathname + "?" + q0.toString()); }
     const metric = metricSelect.value;
     if (!metric) {
       setChildren(chartHost, el("p", { class: "unavailable", text: "Select a metric to chart it." }));
@@ -10407,21 +10499,7 @@ async function renderMetricsExplorer(view, match) {
       setChildren(tableHost);
       return;
     }
-    const rows = data.items || [];
-    setChildren(chartHost,
-      el("div", { class: "chart-head" }, el("h3", { text: metric }),
-        el("span", { class: "chart-now", text: `${rows.length} time series` })),
-      explorerChart(rows, metric),
-      data.note ? el("p", { class: "chart-foot unavailable mono", text: data.note }) : null);
-    const cols = ["Time series", ...(data.columns || [])];
-    setChildren(tableHost, rows.length
-      ? el("table", { class: "explorer-table", "aria-label": "Time series" },
-          el("thead", {}, el("tr", {}, ...cols.map((c) => el("th", { scope: "col", text: c })))),
-          el("tbody", {}, ...rows.map((r) => el("tr", {},
-            el("td", { class: "mono", text: r.name }),
-            ...(data.columns || []).map((c) => el("td", { text: (r.fields || {})[c] || "" }))))))
-      : el("p", { class: "unavailable", text: "No time series match." }));
-    announce(`Metrics explorer: ${rows.length} time series`);
+    drawResults(data, metric);
   }
   apply.addEventListener("click", run);
   metricSelect.addEventListener("change", run);
