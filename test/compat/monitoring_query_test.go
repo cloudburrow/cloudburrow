@@ -365,6 +365,9 @@ var verificationCodeRE = regexp.MustCompile(`G-[0-9]{6}`)
 func TestMonitoringPubSubChannelAndVerification(t *testing.T) {
 	h := New(t)
 	pubsubAddr := h.Endpoint(EnvPubSub)
+	// The storage shard's instance serves both: its Monitoring is exported
+	// as PUBSUB_MONITORING, so the Monitoring suite stays in served.
+	shardEndpoint(h, "CLOUDBURROW_TEST_PUBSUB_MONITORING", EnvMonitoring)
 	consoleAt := consoleAddr(t, h)
 	opts := monitoringOpts(h)
 	ctx := h.Context()

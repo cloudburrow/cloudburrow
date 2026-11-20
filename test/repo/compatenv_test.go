@@ -384,6 +384,7 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"GKE":                      "127.0.0.1:9030",
 		"ANALYTICSHUB":             "127.0.0.1:9042",
 		"MONITORING":               "127.0.0.1:9033",
+		"PUBSUB_MONITORING":        "127.0.0.1:9033",
 		"WORKFLOWS":                "127.0.0.1:9038",
 		"COMPUTE":                  "127.0.0.1:9031",
 		"DATATRANSFER":             "127.0.0.1:9034",

@@ -159,7 +159,8 @@ COMPAT_SQL_REPLICA_TESTS='^Test[A-Za-z]*SQL[A-Za-z0-9]*(HighAvailability|Replica
 # its Cloud KMS, and Eventarc's (TestEventarc*, #1877), whose triggers
 # deliver to a Cloud Run service, and Document AI's and Speech-to-Text's
 # (TestDocumentAI*, TestSpeech*, #1930), served by the local AI
-# endpoint Cloud Run starts; the BigQuery,
+# endpoint Cloud Run starts, and Workflows' (TestWorkflows*, #1986), whose
+# instance is the run shard's; the BigQuery,
 # Firestore, Datastore (#854) and Spanner screens and the Bigtable screen's
 # actions (#1198) only by the emulators shard's; the Memorystore screens
 # only by the memorystore shard's (#1568); and the Cloud SQL screens, MySQL
@@ -192,7 +193,7 @@ COMPAT_SQL_REPLICA_TESTS='^Test[A-Za-z]*SQL[A-Za-z0-9]*(HighAvailability|Replica
 COMPAT_BROWSER_SHARDS="storage served run emulators memorystore sql localai"
 COMPAT_BROWSER_SERVED_SHARD_TESTS='^Test(GKEServed|KubernetesEnginePages|VPCNetwork|ComputeEngine)'
 COMPAT_BROWSER_SERVED_ONLY_TESTS='^Test(GKEServed|VPCNetwork|ComputeEngine)'
-COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|LoggingAdmin|SecretManager|Eventarc|DocumentAI|Speech)'
+COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|LoggingAdmin|SecretManager|Eventarc|DocumentAI|Speech|Workflows)'
 COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|Bigtable|Spanner)'
 COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS='^TestMemorystore'
 COMPAT_BROWSER_SQL_SHARD_TESTS='^Test(CloudSQL|BackupDR|PrivateCAKMS)'
@@ -247,7 +248,9 @@ compat_shard() {
       # kms for Cloud Storage's customer-managed keys (#1938), exported as
       # CMEK_KMS only, so the KMS suite stays in served. monitoring for the
       # Metrics explorer (TestMonitoringThroughThePage, #1939), whose browser
-      # step alone is given MONITORING.
+      # step alone is given MONITORING; and as PUBSUB_MONITORING for
+      # TestMonitoringPubSubChannelAndVerification (#1966), which needs
+      # Pub/Sub beside it, so the Monitoring suite stays in served.
       SERVICES=storage,pubsub,tasks,secretmanager,scheduler,logging,privateca,kms,monitoring
       # The hooks are the #285 fixtures (two ready.d scripts, the second
       # creating a bucket, and a shutdown.d script checked after stop), and
@@ -266,7 +269,7 @@ compat_shard() {
       # Service Usage (#1352), always served, with the Terraform and gcloud
       # tests that need Cloud Storage beside it; and the API Keys API
       # (#1915), always served too.
-      TEST_VARS+=,STORAGE,CORS_ORIGIN,PUBSUB,TASKS,SECRETS,SCHEDULER,TOFU,RESOURCEMANAGER,SERVICEUSAGE,APIKEYS,STORAGE_BATCH,STORAGE_INSIGHTS,STORAGE_TRANSFER,TASKS_LOGGING,CMEK_KMS
+      TEST_VARS+=,STORAGE,CORS_ORIGIN,PUBSUB,TASKS,SECRETS,SCHEDULER,TOFU,RESOURCEMANAGER,SERVICEUSAGE,APIKEYS,STORAGE_BATCH,STORAGE_INSIGHTS,STORAGE_TRANSFER,TASKS_LOGGING,PUBSUB_MONITORING,CMEK_KMS
       # The restart probes' fixtures, left just before stop so no
       # suite-level reset wipes them: Secret Manager (#483), a secret and a
       # version; Cloud Tasks and Cloud Scheduler (#596), a paused queue with
