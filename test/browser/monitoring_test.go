@@ -255,7 +255,8 @@ func TestMonitoringAlertingThroughThePage(t *testing.T) {
 	p.waitFor(prow + ` !== undefined`)
 	p.eval(prow+`.querySelector(".overflow-trigger").click()`, nil)
 	p.clickText("#view .overflow-item, .overflow-item", "Delete policy")
-	p.confirmByName(policy.GetName()[strings.LastIndex(policy.GetName(), "/")+1:])
+	// "In the confirmation dialog, select Delete." (docs/monitoring/alerts/manage-alerts)
+	p.pressConfirm("Delete")
 	p.waitFor(`![...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes("Backlog too long"))`)
 	if _, err := ac.GetAlertPolicy(ctx, &monitoringpb.GetAlertPolicyRequest{Name: policy.GetName()}); err == nil {
 		t.Error("the policy Delete policy deleted is still there")
