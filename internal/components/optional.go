@@ -304,6 +304,16 @@ const FirestoreExportInterval = "30s"
 
 const firestoreEmulator = "/google-cloud-sdk/platform/cloud-firestore-emulator"
 
+// FirestoreHeapLog is the Firestore emulator JVM's collection log, which
+// the front reads for its heap's use (#1969): firestoreadmin.HeapLogFile
+// in the documents directory.
+const FirestoreHeapLog = FirestoreDocumentsDir + "/emulator-gc.log"
+
+// FirestoreRestartFile, followed by the pod's host name, in the documents
+// directory, is the front's request for a restart of the emulator's JVM
+// (#1969): firestoreadmin.RestartFile.
+const FirestoreRestartFile = "restart-"
+
 // firestoreBackend runs the Firestore emulator, its documents kept by the
 // front (internal/firestoreadmin, documents.go, #1615): exported to the
 // pod's shared volume every FirestoreExportInterval while calls write,
@@ -323,13 +333,26 @@ const firestoreEmulator = "/google-cloud-sdk/platform/cloud-firestore-emulator"
 // its StoppedFile, named for the pod (at most 10 seconds) and then kills the JVM; the JVM's own
 // exit ends the shell with it, so the kubelet restarts the container as
 // before.
+//
+// The front compacts the emulator's versions before they fill its heap
+// (#1969, firestoreadmin/compact.go): the JVM logs its collections to the
+// shared volume (FirestoreHeapLog), and the front, once it has exported
+// the documents, asks for a restart by creating FirestoreRestartFile. A
+// watcher in the shell then kills the JVM, marking the exit as planned,
+// and removes the request; the shell starts another JVM in the same
+// container, whose documents the front imports. Any other exit of the JVM
+// still ends the container.
 func firestoreBackend(persistent bool) Backend {
 	stopped := FirestoreDocumentsDir + "/stopped-$HOSTNAME"
-	script := `trap '' TERM; ` +
-		`java -Duser.language=en -cp ` + firestoreEmulator + `/cloud-firestore-emulator.jar com.google.cloud.datastore.emulator.firestore.CloudFirestore start ` +
-		fmt.Sprintf(`--host=127.0.0.1 --port=%d --database-mode=firestore-native --database-edition=enterprise & pid=$!; `, FirestoreEmulatorPort) +
+	restart := FirestoreDocumentsDir + "/" + FirestoreRestartFile + "$HOSTNAME"
+	const pidFile, planned = "/tmp/emulator.pid", "/tmp/emulator.planned"
+	script := `trap '' TERM; rm -f ` + restart + ` ` + planned + `; ` +
+		`start() { java -Duser.language=en -Xlog:gc,gc+init:file=` + FirestoreHeapLog + `:uptime:filecount=2,filesize=4m ` +
+		`-cp ` + firestoreEmulator + `/cloud-firestore-emulator.jar com.google.cloud.datastore.emulator.firestore.CloudFirestore start ` +
+		fmt.Sprintf(`--host=127.0.0.1 --port=%d --database-mode=firestore-native --database-edition=enterprise & pid=$!; echo $pid > %s; }; start; `, FirestoreEmulatorPort, pidFile) +
+		`(while :; do if [ -e ` + restart + ` ]; then touch ` + planned + `; kill -KILL "$(cat ` + pidFile + `)" 2>/dev/null; rm -f ` + restart + `; fi; sleep 0.2; done) & ` +
 		`trap 'i=0; while [ ! -e ` + stopped + ` ] && [ $i -lt 100 ]; do sleep 0.1; i=$((i+1)); done; kill -KILL $pid 2>/dev/null; wait $pid; exit 0' TERM; ` +
-		`wait $pid`
+		`while :; do wait $pid; rc=$?; if [ -e ` + planned + ` ]; then rm -f ` + planned + `; echo "restarting the emulator to compact its versions"; start; continue; fi; exit $rc; done`
 	b := Backend{
 		Name:      "firestore",
 		Image:     PubSubImage, // the same digest-pinned Cloud SDK emulators image

@@ -117,6 +117,15 @@ type Documents struct {
 	done     chan struct{}
 	stopped  string
 	lock     *os.File
+
+	// The compaction of the emulator's versions (compact.go, #1969).
+	host        string             // the pod's, naming its RestartFile
+	heap        *heapWatch         // nil without the emulator's collection log
+	inflight    map[*call]struct{} // the calls let through, under mu
+	idle        chan struct{}      // signalled when the last one ends
+	lastCompact time.Time          // the run loop's
+	compactWait time.Duration      // the run loop's: the least time to the next compaction
+	compactions atomic.Int64
 }
 
 // removeOldMarkers removes the StoppedFiles of pods stopped more than a
@@ -163,7 +172,9 @@ func (a *Admin) KeepDocuments(ctx context.Context, dir string, interval time.Dur
 	removeOldMarkers(dir)
 	d := &Documents{admin: a, emulator: a.emulator, dir: dir, interval: interval,
 		client: &http.Client{Timeout: 5 * time.Minute}, logf: logf,
-		restored: make(chan struct{}), done: make(chan struct{}), stopped: stopped, lock: lock}
+		restored: make(chan struct{}), done: make(chan struct{}), stopped: stopped, lock: lock,
+		host: host, heap: &heapWatch{path: filepath.Join(dir, HeapLogFile)}, idle: make(chan struct{}, 1)}
+	_ = os.Remove(filepath.Join(dir, RestartFile+host))
 	if fresh {
 		_ = os.Remove(filepath.Join(dir, manifestFile))
 	}
@@ -185,6 +196,10 @@ func (d *Documents) run(ctx context.Context) {
 	defer close(d.done)
 	check := time.NewTicker(time.Second)
 	defer check.Stop()
+	// The emulator's heap is read four times a second: a write-heavy
+	// client fills what is left of it in seconds (compact.go).
+	heap := time.NewTicker(250 * time.Millisecond)
+	defer heap.Stop()
 	export := time.NewTicker(d.interval)
 	defer export.Stop()
 	d.checkRestored(ctx)
@@ -207,6 +222,8 @@ func (d *Documents) run(ctx context.Context) {
 			return
 		case <-check.C:
 			d.checkRestored(ctx)
+		case <-heap.C:
+			d.maybeCompact(ctx)
 		case <-export.C:
 			if d.dirty() && d.isRestored() {
 				if err := d.Export(ctx); err != nil && ctx.Err() == nil {
@@ -445,17 +462,23 @@ func (d *Documents) Wrap(next http.Handler) http.Handler {
 			d.serveExport(w, r)
 			return
 		}
-		if mayWrite(r) {
-			d.wait(r.Context())
+		write := mayWrite(r)
+		if !write && !isDocumentsCall(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		// Registered as it passes the gate, so a compaction (compact.go)
+		// lets it finish, or ends it, before it exports.
+		c := d.enter(r)
+		defer d.leave(c)
+		if write {
 			d.writes.Add(1)
 			defer d.writes.Add(1)
 			if strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
 				w = &markingWriter{ResponseWriter: w, writes: &d.writes}
 			}
-		} else if isDocumentsCall(r) {
-			d.wait(r.Context())
 		}
-		next.ServeHTTP(w, r)
+		d.serveCall(c, next, w, r)
 	})
 }
 

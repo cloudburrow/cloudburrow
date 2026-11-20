@@ -9441,6 +9441,7 @@
           "test/compat/consoledocs_test.go:108 TestConsoleFirestoreDocumentCreateEditDelete",
           "test/compat/consolefirestorenested_test.go:102 TestConsoleFirestoreEditValuesInsideMapsAndArrays",
           "test/compat/emulatorkill1611_test.go:111 TestFirestoreAfterTheEmulatorIsKilled",
+          "test/compat/firestorecompact1969_test.go:40 TestFirestoreCompactsItsVersionsBeforeTheHeapFills",
           "test/compat/firestorepersist1615_test.go:165 TestFirestoreAcrossRestart",
           "test/compat/firestorepersist1615_test.go:64 TestFirestoreSurvivesAPodRestart",
           "test/compat/optional_test.go:43 TestFirestoreDocumentCRUD"
@@ -9466,6 +9467,7 @@
         "tests": [
           "test/compat/consolefirestoreforeignref_test.go:26 TestConsoleFirestoreEditFieldRefusesAForeignReference",
           "test/compat/consolefirestorenested_test.go:102 TestConsoleFirestoreEditValuesInsideMapsAndArrays",
+          "test/compat/firestorecompact1969_test.go:40 TestFirestoreCompactsItsVersionsBeforeTheHeapFills",
           "test/compat/firestorepersist1615_test.go:120 TestFirestoreRestartSetup",
           "test/compat/firestorepersist1615_test.go:64 TestFirestoreSurvivesAPodRestart",
           "test/compat/optional_test.go:43 TestFirestoreDocumentCRUD"
@@ -9521,6 +9523,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/emulatorkill1611_test.go:111 TestFirestoreAfterTheEmulatorIsKilled",
+          "test/compat/firestorecompact1969_test.go:40 TestFirestoreCompactsItsVersionsBeforeTheHeapFills",
           "test/compat/firestoremethods_test.go:247 TestFirestoreSnapshotListener"
         ]
       },
@@ -9721,6 +9724,7 @@
           "test/compat/consolefirestoreadmin_test.go:89 TestConsoleFirestoreDatabaseEditsIndexesAndFieldOverrides",
           "test/compat/emulatorkill1611_test.go:111 TestFirestoreAfterTheEmulatorIsKilled",
           "test/compat/firestoreadmin_test.go:47 TestFirestoreAdminDatabases",
+          "test/compat/firestorecompact1969_test.go:40 TestFirestoreCompactsItsVersionsBeforeTheHeapFills",
           "test/compat/firestoredatastoremode1880_test.go:231 TestFirestoreCMEK",
           "test/compat/firestoredatastoremode1880_test.go:354 TestGcloudFirestoreDatastoreModeAndKMSKey",
           "test/compat/firestoredatastoremode1880_test.go:69 TestFirestoreDatastoreModeDatabases",

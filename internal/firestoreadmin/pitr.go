@@ -22,7 +22,8 @@ package firestoreadmin
 // export or clone is read at its snapshot time. The emulator keeps no
 // versions across its own restart, when the documents are imported again
 // (documents.go), so earliestVersionTime is never earlier than that import.
-// Nor does it drop old versions: they stay in its heap until it restarts.
+// Nor does it drop old versions: they stay in its heap until it restarts,
+// which the front makes it do before they fill it (compact.go, #1969).
 //
 // A Datastore mode database's versions are the Datastore front's
 // (internal/datastoreversions, #1967): its reads are checked there, by
