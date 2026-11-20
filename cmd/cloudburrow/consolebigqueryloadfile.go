@@ -61,6 +61,10 @@ func (p bigqueryProvider) ActAtFile(ctx context.Context, project string, path []
 	if err := p.writable(project); err != nil {
 		return nil, err
 	}
+	path, err := createTableTarget(p.project, path, action, values) // #1861: Create table's Destination
+	if err != nil {
+		return nil, err
+	}
 	if action == "createtable" && len(path) == 1 {
 		return p.createTableFromUpload(ctx, project, path[0], values, file)
 	}

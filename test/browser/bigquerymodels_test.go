@@ -72,8 +72,9 @@ func TestBigQueryModelsThroughThePage(t *testing.T) {
 	}
 
 	p.navigate("/bigquery/" + ds + q)
-	p.waitFor(`document.querySelector("#tab-models") !== null`)
-	p.run(chromedp.Click(chromedp.CSS(`#tab-models`)))
+	// Models is on the Overview tab's own strip (#1861).
+	p.waitFor(`document.querySelector("#subtab-models") !== null`)
+	p.run(chromedp.Click(chromedp.CSS(`#subtab-models`)))
 	p.waitFor(`document.querySelector("#view").textContent.includes("LINEAR_REGRESSION")`)
 	p.waitFor(`document.querySelector('button[aria-label="Actions for m"]') !== null`)
 	if got := models(); strings.Join(got, ",") != "m" {

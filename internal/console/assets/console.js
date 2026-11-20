@@ -15169,8 +15169,12 @@ function diagnoseCard(data) {
 // click replaces the preview tab (its name in italics), Ctrl or Command
 // click and a double click on the tab keep it, as Google's do
 // (https://docs.cloud.google.com/bigquery/docs/bigquery-web-ui). The
-// standalone pages stay as deep links. Personal history and Project history
-// are below. Every call goes to POST /api/studio/bigquery
+// standalone pages stay as deep links. The left pane's tabs are Google's:
+// Explorer, Data (the data hierarchy, without code assets), Files (saved
+// queries) and Source control (not served). Job history is opened from the
+// Explorer, as a tab with Personal history and Project history
+// (https://docs.cloud.google.com/bigquery/docs/managing-jobs). Every call
+// goes to POST /api/studio/bigquery
 // (cmd/cloudburrow/consolebigquerystudio.go).
 //
 // Saved queries are CloudBurrow's own: Google keeps them as Dataform code
@@ -15381,6 +15385,9 @@ function renderBigQueryStudio(view) {
   const strip = el("div", { class: "tab-strip bq-tabs", role: "tablist", "aria-label": "Editor tabs" });
   const panel = el("div", { class: "bq-tab-panel" });
   const history = el("section", { class: "bq-history card", "aria-label": "Job history" });
+  // The left pane's tab: explorer, data, files or source (#1861).
+  let pane = "explorer";
+  const paneHost = el("div", { class: "bq-pane", id: "bq-pane", role: "tabpanel" });
 
   let tree = null;
   let saved = [];
@@ -15398,7 +15405,7 @@ function renderBigQueryStudio(view) {
     setChildren(explorerBody, el("p", { class: "unavailable" }, spinner("Loading the Explorer"), " Loading…"));
     try {
       [tree] = await Promise.all([bqStudioCall("explorer"), loadSaved()]);
-      drawTree();
+      if (pane === "files") drawFiles(); else drawTree();
     } catch (err) {
       setChildren(explorerBody, el("p", { class: "form-error", role: "alert", text: err.message }));
     }
@@ -15406,6 +15413,15 @@ function renderBigQueryStudio(view) {
 
   const select = (tab) => { current = tab; drawTabs(); };
   const openQuery = (sql, title = null) => select(newTab(sql, title));
+  // openJobs opens Job history as a tab, or selects the one open, as the
+  // Explorer's Job history does in Google's Studio.
+  const openJobs = () => {
+    const open = tabs.find((t) => t.kind === "jobs");
+    if (open) return select(open);
+    const tab = { id: ++counter, kind: "jobs", title: "Job history" };
+    tabs.push(tab);
+    select(tab);
+  };
   const openHome = () => {
     const home = tabs.find((t) => t.kind === "home");
     if (home) return select(home);
@@ -15498,7 +15514,9 @@ function renderBigQueryStudio(view) {
         { label: "Manage permissions", disabled: true, title: BQ_UNAVAILABLE_PERMISSIONS, run: () => {} },
         { label: "Delete", danger: true, run: () => bqDeleteSaved(sq, async () => { await loadSaved(); drawTree(); }) },
       ], null, "/bigquery-studio?" + new URLSearchParams({ project: proj, savedQuery: sq.id }), () => openSaved(sq)));
-    const queriesNode = (!q && !onlyStarred) || queryKids.length
+    // The Data pane lists the data hierarchy only: "Code assets aren't
+    // listed in the Data pane" (bigquery-web-ui).
+    const queriesNode = pane === "data" ? null : (!q && !onlyStarred) || queryKids.length
       ? node(`${proj}.queries`, "Queries", "folder", 2, null, queryKids.length ? queryKids
           : [el("li", { class: "bq-node-empty unavailable", text: "No saved queries. Save a query from its tab." })])
       : null;
@@ -15545,10 +15563,76 @@ function renderBigQueryStudio(view) {
       { label: "Copy ID", run: () => bqCopy(proj, "ID") },
     ], [queriesNode, ...dsNodes].filter(Boolean), "/bigquery");
     setChildren(explorerBody,
-      el("ul", { class: "bq-tree", role: "tree", "aria-label": "Explorer" }, projectNode),
+      el("ul", { class: "bq-tree", role: "tree", "aria-label": pane === "data" ? "Data" : "Explorer" }, projectNode),
       tree.datasets.length ? null
         : el("p", { class: "unavailable", text: "No datasets yet. Create dataset from the project's View actions." }),
       (q || onlyStarred) && !dsNodes.length && !queryKids.length ? el("p", { class: "unavailable", text: "No resources match." }) : null);
+  };
+
+  // drawFiles is the Files pane: the project's saved queries. Google
+  // organizes code assets (saved queries, notebooks) in folders there; a
+  // CloudBurrow saved query is a record of its own (above), with no folder.
+  const drawFiles = () => {
+    const proj = tree ? tree.project : project;
+    setChildren(explorerBody,
+      el("p", { class: "unavailable bq-files-note", text: BQ_SAVED_NOTE + " Folders and notebooks are Dataform's, which is not served." }),
+      saved.length
+        ? el("ul", { class: "bq-files", "aria-label": "Saved queries" }, ...saved.map((sq) => el("li", { class: "bq-node-row" },
+            el("a", { class: "bq-node-name", href: "/bigquery-studio?" + new URLSearchParams({ project: proj, savedQuery: sq.id }),
+              text: sq.name, onclick: (e) => { if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return; e.preventDefault(); openSaved(sq); } }),
+            bqMenu(`View actions for ${sq.name}`, [
+              { label: "Open", run: () => openSaved(sq) },
+              { label: "Copy link", run: () => bqCopy(bqSavedLink(sq.id), "the link to this saved query") },
+              { label: "Delete", danger: true, run: () => bqDeleteSaved(sq, async () => { await loadSaved(); drawPane(); }) },
+            ]))))
+        : el("p", { class: "unavailable", text: "No saved queries. Save a query from its tab." }));
+  };
+
+  // drawPane draws the left pane's chosen tab, in Google's order:
+  // Explorer, Data, Files, Source control.
+  const PANES = [["explorer", "Explorer"], ["data", "Data"], ["files", "Files"], ["source", "Source control"]];
+  const paneTabs = el("div", { class: "tab-strip bq-pane-tabs", role: "tablist", "aria-label": "Left pane" });
+  // Arrow keys move between the pane's tabs, as a tablist's do.
+  paneTabs.addEventListener("keydown", (e) => {
+    const step = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0;
+    if (!step) return;
+    e.preventDefault();
+    const i = PANES.findIndex(([id]) => id === pane);
+    pane = PANES[(i + step + PANES.length) % PANES.length][0];
+    drawPane();
+    paneTabs.querySelector(".tab.is-selected").focus();
+  });
+  const drawPane = () => {
+    setChildren(paneTabs, ...PANES.map(([id, label]) => el("button", {
+      type: "button", role: "tab", id: "bq-pane-" + id, class: "tab" + (pane === id ? " is-selected" : ""),
+      "aria-selected": pane === id ? "true" : "false", "aria-controls": "bq-pane", tabindex: pane === id ? "0" : "-1",
+      text: label, onclick: () => { pane = id; drawPane(); },
+    })));
+    paneHost.setAttribute("aria-labelledby", "bq-pane-" + pane);
+    const title = PANES.find(([id]) => id === pane)[1];
+    const head = el("div", { class: "bq-explorer-head" }, el("h2", { text: title }),
+      pane === "explorer" || pane === "data"
+        ? el("button", { type: "button", class: "secondary", text: "+ Add data", title: "Create dataset",
+                         onclick: () => bqCreateDataset(() => loadExplorer()) })
+        : null);
+    if (pane === "source") {
+      setChildren(paneHost, head, el("p", { class: "unavailable", text:
+        "Not available locally: Source control keeps code assets in a Git repository through Dataform, which CloudBurrow does not serve. " +
+        "Saved queries are listed under Files." }));
+      return;
+    }
+    if (pane === "files") {
+      setChildren(paneHost, head, explorerBody);
+      drawFiles();
+      return;
+    }
+    setChildren(paneHost, head,
+      pane === "explorer" ? el("button", { type: "button", class: "bq-explorer-home", text: "Home", onclick: () => openHome() }) : null,
+      pane === "explorer" ? el("button", { type: "button", class: "bq-explorer-home bq-explorer-jobs", text: "Job history", onclick: () => openJobs() }) : null,
+      search,
+      el("label", { class: "bq-starred", for: "bq-starred-only" }, starredOnly, el("span", { text: " Show starred resources only" })),
+      explorerBody);
+    drawTree();
   };
   search.addEventListener("input", drawTree);
   starredOnly.addEventListener("change", drawTree);
@@ -15586,6 +15670,9 @@ function renderBigQueryStudio(view) {
         createTable: (ds) => bqDetailAction([ds], "createtable", loadExplorer, true),
         loadFile: (ds) => bqDetailAction([ds], "loadfile", loadExplorer, true),
       }));
+    } else if (kind === "jobs") {
+      setChildren(panel, history);
+      drawHistory();
     } else if (kind === "resource") {
       const host = el("div", { class: "bq-resource-tab", "data-embedded": "true" });
       if (current.subtab) host.dataset.tab = current.subtab;
@@ -15596,11 +15683,11 @@ function renderBigQueryStudio(view) {
     } else {
       setChildren(panel, bqQueryTab(current, {
         save: () => bqWriteTabs(tabs),
-        onRan: () => drawHistory(),
+        onRan: () => {},
         saved: () => saved,
         onSaved: async (sq) => {
           await loadSaved();
-          drawTree();
+          if (pane === "files") drawFiles(); else drawTree();
           bqRemember({ kind: "query", savedId: sq.id, title: sq.name });
           drawTabs();
         },
@@ -15644,17 +15731,10 @@ function renderBigQueryStudio(view) {
   setChildren(view,
     pageHeader("BigQuery Studio", null),
     el("div", { class: "bq-studio" },
-      el("aside", { class: "bq-explorer card", "aria-label": "Explorer" },
-        el("div", { class: "bq-explorer-head" },
-          el("h2", { text: "Explorer" }),
-          el("button", { type: "button", class: "secondary", text: "+ Add data", title: "Create dataset",
-                         onclick: () => bqCreateDataset(() => loadExplorer()) })),
-        el("button", { type: "button", class: "bq-explorer-home", text: "Home", onclick: () => openHome() }),
-        search,
-        el("label", { class: "bq-starred", for: "bq-starred-only" }, starredOnly, el("span", { text: " Show starred resources only" })),
-        explorerBody),
+      el("aside", { class: "bq-explorer card", "aria-label": "Left pane" }, paneTabs, paneHost),
       el("main", { class: "bq-workspace" },
-        strip, panel, history)));
+        strip, panel)));
+  drawPane();
   drawTabs();
   loadExplorer().then(() => {
     // A link to a saved query (Copy link) opens it once the list is read.
@@ -15666,7 +15746,6 @@ function renderBigQueryStudio(view) {
     const home = panel.querySelector(".bq-home");
     if (home && home.bqRefresh) home.bqRefresh();
   });
-  drawHistory();
   announce("BigQuery Studio");
 }
 

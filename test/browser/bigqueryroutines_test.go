@@ -71,8 +71,9 @@ func TestBigQueryRoutinesThroughThePage(t *testing.T) {
 	}
 
 	p.navigate("/bigquery/" + ds + q)
-	p.waitFor(`document.querySelector("#tab-routines") !== null`)
-	p.run(chromedp.Click(chromedp.CSS(`#tab-routines`)))
+	// Routines is on the Overview tab's own strip (#1861).
+	p.waitFor(`document.querySelector("#subtab-routines") !== null`)
+	p.run(chromedp.Click(chromedp.CSS(`#subtab-routines`)))
 	p.waitFor(`document.querySelector("#view").textContent.includes("Table function")`)
 	var text string
 	p.eval(`document.querySelector("#view").textContent`, &text)

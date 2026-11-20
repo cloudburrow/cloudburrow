@@ -2177,7 +2177,8 @@ tr.log-entry.is-pinned { background: var(--state-hover); }
 .bq-job-info dt { color: var(--text-muted); }
 .bq-job-info dd { margin: 0; font-family: var(--mono); overflow-wrap: anywhere; }
 .bq-json { overflow-x: auto; max-height: 480px; }
-.bq-history { overflow-x: auto; }
+/* Positioned, so a state icon's sr-only text (absolute) scrolls with the table rather than widening the page. */
+.bq-history { overflow-x: auto; position: relative; }
 .bq-settings fieldset { border: 1px solid var(--border); border-radius: var(--radius); margin: 0 0 12px; padding: 8px 12px; }
 .bq-radio { display: block; margin: 4px 0; }
 .bq-dest-fields { display: grid; gap: 4px; margin-top: 8px; }
@@ -2371,3 +2372,8 @@ svg.bq-chart { display: block; border: 1px solid var(--border); border-radius: v
 .result-box.kind-line { border-color: #e37400; }
 .result-box.is-lit { background: rgba(26, 115, 232, 0.25); border-width: 2.5px; }
 #action-result-table tr.is-lit { background: var(--nav-selected); }
+/* BigQuery Studio's left pane: Explorer, Data, Files, Source control (#1861). */
+.bq-pane-tabs { margin: 0 0 8px; overflow-x: auto; }
+.bq-files { list-style: none; margin: 8px 0 0; padding: 0; }
+.bq-files .bq-node-row { padding: 2px 0; }
+.bq-files-note { font-size: var(--text-caption-size); }
