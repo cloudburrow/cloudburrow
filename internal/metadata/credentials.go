@@ -57,6 +57,9 @@ type Credentials struct {
 	// dir is the IAM service accounts (serviceaccounts.go), nil until set.
 	dirMu sync.Mutex
 	dir   ServiceAccountDirectory
+	// fed is the workload identity pools the STS exchanges against
+	// (#1941, sts.go).
+	fed FederationDirectory
 }
 
 // adcFile is the JSON layout Google's clients expect for a service account.

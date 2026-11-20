@@ -234,13 +234,11 @@ func (s *Server) GetImportJob(_ context.Context, req *kmspb.GetImportJobRequest)
 	return s.toImportJob(j)
 }
 
-var importJobFilterFields = fieldSupport{"state": {"=", "!="}}
-
 func (s *Server) ListImportJobs(_ context.Context, req *kmspb.ListImportJobsRequest) (*kmspb.ListImportJobsResponse, error) {
 	if err := parseKeyRing("parent", req.GetParent()); err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	filter, err := parseFilter(req.GetFilter(), importJobFilterFields)
+	filter, err := parseFilter(req.GetFilter(), &kmspb.ImportJob{})
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -258,7 +256,6 @@ func (s *Server) ListImportJobs(_ context.Context, req *kmspb.ListImportJobsRequ
 	}
 	jobs := map[string]importJob{}
 	var matched []string
-	now := s.now()
 	for _, n := range names {
 		var j importJob
 		found, err := s.get(dbKey(importJobPrefix, n), &j)
@@ -268,7 +265,11 @@ func (s *Server) ListImportJobs(_ context.Context, req *kmspb.ListImportJobsRequ
 		if !found {
 			continue
 		}
-		if filter == nil || filter.match(func(field string) (string, bool) { return j.state(now).String(), field == "state" }) {
+		pj, err := s.toImportJob(j)
+		if err != nil {
+			return nil, err
+		}
+		if filter.Match(pj) {
 			jobs[n] = j
 			matched = append(matched, n)
 		}

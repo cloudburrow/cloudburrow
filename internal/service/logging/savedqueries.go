@@ -397,7 +397,10 @@ func (a *Admin) listExtra(w http.ResponseWriter, r *http.Request, c extraCollect
 	var keep func(*savedQuery) bool
 	if f := q.Get("filter"); f != "" {
 		if c.name != "savedQueries" {
-			return apierror.Unimplemented("filtering a %s list is not implemented", c.name)
+			// ListLogScopesRequest has no filter field (google/logging/v2/
+			// logging_config.proto), so the REST binding refuses the query
+			// parameter as Google's ESF does for any unknown one (#1943).
+			return apierror.InvalidArgument("Invalid JSON payload received. Unknown name \"filter\": Cannot bind query parameter. Field 'filter' could not be found in request message.")
 		}
 		var err error
 		if keep, err = savedQueryFilter(f); err != nil {

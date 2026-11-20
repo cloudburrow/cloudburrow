@@ -10,6 +10,7 @@ import (
 
 	secretmanagerpb "cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -243,6 +244,14 @@ func TestListSecretVersionsFilters(t *testing.T) {
 		"state=ENABLED":                               "3",
 		"create_time>2026-10-01T01:30:00Z":            "3 2",
 		"name:versions/3":                             "3",
+		// AND and NOT inside a value list (#1943).
+		"state:(NOT DESTROYED)":                "3 2",
+		"state:(NOT ENABLED AND NOT DISABLED)": "1",
+		"name:(versions AND 2)":                "2",
+	}
+	if _, err := g.ListSecretVersions(context.Background(), &secretmanagerpb.ListSecretVersionsRequest{Parent: "projects/demo/secrets/a",
+		Filter: "state:(ENABLED OR DISABLED AND DESTROYED)"}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("mixed value list = %v, want INVALID_ARGUMENT", err)
 	}
 	for filter, want := range cases {
 		resp, err := g.ListSecretVersions(context.Background(), &secretmanagerpb.ListSecretVersionsRequest{Parent: "projects/demo/secrets/a", Filter: filter})

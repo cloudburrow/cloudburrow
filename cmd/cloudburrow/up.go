@@ -332,6 +332,16 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// The Kubernetes Engine API (#1913), in process; its clusters are
 	// kind clusters of their own.
 	gkeSvc := newGKEService(cfg)
+	// The Compute Engine API's VPC networking (#1936), in process, before
+	// the services that check their networks against it.
+	computeSvc := newComputeService(cfg)
+	if computeSvc != nil {
+		computeSvc.gke = gkeSvc
+		if gkeSvc != nil {
+			gkeSvc.networks = computeSvc.gkeNetworks
+		}
+	}
+	computeSvc.register(coord)
 	gkeSvc.register(coord)
 	// The Memorystore admin API (#1302), over the Valkey server's tunnel.
 	memorystoreAdminSvc := newMemorystoreAdminService(cfg, func() *netfwd.Forwarder { return forwarderFor(forwarders, "memorystore") })
@@ -341,6 +351,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// A Redis cluster's customer-managed CA (#1907): this instance's
 		// Certificate Authority Service, in process.
 		memorystoreAdminSvc.privateca = privateCASvc
+		// Networks and reserved ranges are checked against Compute
+		// Engine's when compute is served (#1936).
+		if computeSvc != nil {
+			memorystoreAdminSvc.networks = computeSvc.memorystoreNetworks
+		}
 		// A Redis before 6.0 with in-transit encryption is served TLS by
 		// a front from the storage image (#1768).
 		memorystoreAdminSvc.storageImage = lazyStorageImage(newStorageImageComponent(cfg.KubeconfigPath(), cfg.ClusterName(), comps, stdout), comps)
@@ -351,6 +366,18 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	memorystoreAdminSvc.register(coord)
 	loggingSvc := newLoggingService(cfg)
 	loggingSvc.register(coord)
+	// Cloud Monitoring (#1939), in process: log-based metrics' values come
+	// from this instance's Cloud Logging, request metrics from its counters.
+	monitoringSvc := newMonitoringService(cfg)
+	if monitoringSvc != nil {
+		monitoringSvc.logging = loggingSvc
+		// Pub/Sub notification channels publish to this instance's Pub/Sub
+		// (#1964).
+		if serviceEnabled(cfg, config.ServicePubSub) {
+			monitoringSvc.pubsub = func() *netfwd.Forwarder { return forwarderFor(forwarders, "pubsub") }
+		}
+	}
+	monitoringSvc.register(coord)
 	if loggingSvc != nil {
 		// CopyLogEntries writes to the instance's Cloud Storage (#1394).
 		loggingSvc.storage = func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") }
@@ -434,6 +461,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		scheduler:    schedulerSvc,
 		privateCA:    privateCASvc,
 		gke:          gkeSvc,
+		monitoring:   monitoringSvc,
+		compute:      computeSvc,
 		logging:      loggingSvc,
 		run:          runSvc,
 		memorystore:  memorystoreAdminSvc,
@@ -460,6 +489,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// service ends up with none (#600), never a list kept here.
 	requestMetrics := metrics.New(metricsServices(cfg)...)
 	control.Mount(func(mux *http.ServeMux) { mux.Handle("GET /metrics", metricsHandler(requestMetrics)) })
+	if monitoringSvc != nil {
+		// serviceruntime.googleapis.com/api/* are sampled from these.
+		monitoringSvc.counters = requestMetrics
+	}
 	// Fault injection (#306) on the services CloudBurrow serves itself. Each
 	// faults.Interceptor below is what makes its service's rules accepted
 	// (#600), so the fault-injectable set is exactly the wiring. The builtin
@@ -511,6 +544,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		gkeSvc.interpose = append(gkeSvc.interpose, grpctransport.LogInterceptor(logger, "gke"), faults.Interceptor("gke"))
 		gkeSvc.requests = requestEvents(recorder, requestMetrics, "gke")
 	}
+	if monitoringSvc != nil {
+		monitoringSvc.tracing = tracing
+	}
+	if computeSvc != nil {
+		computeSvc.requests = requestEvents(recorder, requestMetrics, "compute")
+	}
 	if loggingSvc != nil {
 		loggingSvc.tracing = tracing
 	}
@@ -538,6 +577,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		schedulerSvc.calls = callEvents(recorder, requestMetrics, "scheduler")
 		schedulerSvc.interpose = append(schedulerSvc.interpose, grpctransport.LogInterceptor(logger, "scheduler"), faults.Interceptor("scheduler"))
 		schedulerSvc.requests = requestEvents(recorder, requestMetrics, "scheduler")
+	}
+	if monitoringSvc != nil {
+		monitoringSvc.calls = callEvents(recorder, requestMetrics, "monitoring")
+		monitoringSvc.interpose = append(monitoringSvc.interpose, grpctransport.LogInterceptor(logger, "monitoring"), faults.Interceptor("monitoring"))
+		monitoringSvc.requests = requestEvents(recorder, requestMetrics, "monitoring")
 	}
 	if privateCASvc != nil {
 		privateCASvc.calls = callEvents(recorder, requestMetrics, "privateca")
@@ -643,6 +687,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// resolve accounts and keys in the registry.
 		projects.SetServiceAccountTokenURI(tokenURI(cfg))
 		creds.SetServiceAccounts(serviceAccountDirectory{reg: projects})
+		// Workload Identity Federation (#1941): the STS exchanges
+		// against the registry's pools and providers.
+		creds.SetFederation(projects)
 		projects.SetSignAuthorizer(signAuthorizer(creds, serviceAccountDirectory{reg: projects}))
 		projects.SetCallerResolver(func(bearer string) (string, bool) { return creds.TokenAccount(bearer, time.Now()) })
 		wireProjectNumbers(ctx, projects, map[string]func() *netfwd.Forwarder{
@@ -732,6 +779,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	sqlAdminSrv := newSQLAdminServer(cfg, forwarders, mysqlCreds, stderr)
 	if sqlAdminSrv != nil {
 		sqlAdminRef = sqlAdminSrv
+		// settings.ipConfiguration.privateNetwork is checked against
+		// Compute Engine's networks when compute is served (#1936).
+		if computeSvc != nil {
+			sqlAdminSrv.SetNetworks(computeSvc.sqlNetworks)
+		}
 		// executeSql reads a user's password from Secret Manager (#1462).
 		if secretsSvc != nil {
 			sqlAdminSrv.SetSecretAccessor(buildSecretAccessor{svc: secretsSvc})
@@ -808,6 +860,14 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		localAISrv.SetDocumentAIState(filepath.Join(cfg.StateDir, "documentai", "processors.json"))
 		localAISrv.SetSpeechState(filepath.Join(cfg.StateDir, "speech", "recognizers.json"))
 	}
+	// The Model Registry and Endpoints (#1940): deployed models run as
+	// Cloud Run services; artifacts are copied in this Cloud Storage.
+	withModelRegistry(cfg, localAISrv, runSvc, func() string {
+		if f := forwarderFor(forwarders, "storage"); f != nil {
+			return f.HostAddr()
+		}
+		return ""
+	})
 	if garden != nil {
 		defer garden.Close()
 	}
@@ -851,6 +911,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		sqlAdmin:       sqlAdminSrv,
 		privateCA:      privateCASvc,
 		gke:            gkeSvc,
+		monitoring:     monitoringSvc,
+		compute:        computeSvc,
 	})
 	if consoleSrv != nil {
 		// The Request Log reads the same recorder /admin/events does.
@@ -936,8 +998,14 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if a := gkeSvc.Addr(); a != "" {
 			live["gke"] = a
 		}
+		if a := computeSvc.Addr(); a != "" {
+			live["compute"] = a
+		}
 		if a := apiKeysSrv.Addr(); a != "" {
 			live["apikeys"] = a
+		}
+		if a := monitoringSvc.Addr(); a != "" {
+			live["monitoring"] = a
 		}
 		if backupDRSrv != nil && backupDRSrv.Addr() != "" {
 			live["backupdr"] = backupDRSrv.Addr()
@@ -984,7 +1052,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// verify the URLs those accounts sign (#1787).
 	runEnabled := serviceEnabled(cfg, config.ServiceRun)
 	pubsubKMS := serviceEnabled(cfg, config.ServicePubSub) && serviceEnabled(cfg, config.ServiceKMS)
-	if runEnabled || serviceEnabled(cfg, config.ServiceBigQuery) || serviceEnabled(cfg, config.ServiceStorage) || pubsubKMS || firestoreKMS(cfg) {
+	if runEnabled || serviceEnabled(cfg, config.ServiceBigQuery) || serviceEnabled(cfg, config.ServiceStorage) || pubsubKMS || firestoreKMS(cfg) || computeEnabled(cfg) {
 		// The Cloud SQL Admin API and its connector are published for Cloud
 		// SQL volumes (#1346): the Auth Proxy a revision runs reaches both.
 		published := map[string]bool{"run": true, "tasks": true, "secretmanager": true, "kms": true,
@@ -1010,6 +1078,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 				published["kms"] = true
 			}
 		}
+		// A VM reads its metadata from the Compute port and its service
+		// account's tokens from the metadata server (#1963).
+		if computeEnabled(cfg) {
+			published["compute"], published["metadata"] = true, true
+		}
 		hostComp = newClusterHost(cfg, stdout, func() map[string]string {
 			out := map[string]string{}
 			for k, v := range liveEndpoints() {
@@ -1030,6 +1103,15 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// the tunnelled backends' Service names, known now, and the CLI-hosted
 	// services' cloudburrow-host name, known once hostComp has started —
 	// after the adapter — so the table is read per request, not at Start.
+	if computeSvc != nil {
+		computeSvc.guestBase = func() string {
+			if a := hostComp.InCluster("compute"); a != "" {
+				return "http://" + a
+			}
+			return ""
+		}
+		computeSvc.metadataHost = func() string { return hostComp.InCluster("metadata") }
+	}
 	if runSvc != nil {
 		// A build step reaches the metadata server as its build's account (#1854).
 		runSvc.stepMetadata = func() string { return hostComp.HostAddr("metadata") }

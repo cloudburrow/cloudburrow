@@ -119,6 +119,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/ac3/` | An AC-3 and E-AC-3 decoder written from ATSC A/52, for a video's audio track in Vertex AI EmbedContent (#1739). |
 | `internal/adapter/run/` | Cloud Run v2 API mapped onto Knative Serving (services, revisions) and Kubernetes batch Jobs (jobs, executions); refuses what it cannot map (ADR-0005). |
 | `internal/admin/` | The loopback-only control API: seed, reset, event inspection. |
+| `internal/aipfilter/` | The shared list `filter` (AIP-160) and `order_by` (AIP-132) evaluator (#1943): compiles a filter or order against a resource's message descriptor (INVALID_ARGUMENT for an unknown field, a wrong-typed value or bad syntax), matches and sorts protocol buffer resources, the Locations mixin's filter, and an order-preserving pager. |
 | `internal/apicontract/` | Pins the Google API contracts CloudBurrow implements against, and where each comes from. |
 | `internal/apienable/` | Refuses calls to an API disabled in their project with Google's `SERVICE_DISABLED` (#1914): the gRPC interceptors and HTTP gate the in-process services and the in-cluster servers wrap, the Service Usage server's decision, and the host endpoint the in-cluster servers ask, with a one-second cache. |
 | `internal/apierror/` | One internal cause mapped to a Google-style gRPC status and JSON error body. |
@@ -155,6 +156,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/hostrelay/` | TCP relay that lets pods reach services the CLI serves on loopback (#575). |
 | `internal/iamcheck/` | How the servers CloudBurrow runs in the cluster (Cloud Storage, Pub/Sub's front) ask the host's one evaluator, `internal/iameval`, whether a request's caller holds a permission, under `up --iam-enforcement=on` (#1879). |
 | `internal/iamcond/` | Compiles and evaluates IAM Conditions: the CEL subset Google accepts on a role binding (#1742, #1745). |
+| `internal/wif/` | Workload Identity Federation (#1941): CEL attribute mappings and conditions, OIDC token verification against a JWKS, and the `principal://` and `principalSet://` identifiers of a federated subject. |
 | `internal/iameval/` | CloudBurrow's one evaluator of IAM allow policies (#1879): whether a principal holds a permission on a resource, and why, for `--iam-enforcement`, Policy Troubleshooter and Policy Analyzer. |
 | `internal/grafeas/` | Container Analysis (#1912): the Grafeas v1 API's notes and occurrences, their AIP-160 filters and IAM, and the vulnerability summary, persisted in the instance's state directory. |
 | `internal/iampolicy/` | IAM policy storage without enforcement (ADR-0006). |
@@ -199,7 +201,9 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/service/backupdr/` | The Backup and DR Service API v1 for Cloud SQL (vaults, plans, associations, data sources, backups over Cloud SQL backup runs), built by us (#1433). |
 | `internal/service/apikeys/` | The API Keys API v2 (each project's API keys and their restrictions), built by us; `Authorize` is Google's decision on a request that carries a key, with its API_KEY_* errors (#1915). |
 | `internal/service/gke/` | The Kubernetes Engine API v1 (clusters, node pools, operations), built by us (#1913); each cluster is a kind cluster that `internal/cluster`'s `GKE` makes and resizes. |
+| `internal/service/compute/` | The Compute Engine API v1's VPC networking (networks, subnetworks, firewall rules, routes, addresses, operations, regions and zones), built by us (#1936); records other services check their network fields against, no traffic. |
 | `internal/service/privateca/` | Certificate Authority Service v1 (CA pools, CAs, certificates, real X.509 signed in process), built by us (#1834). |
+| `internal/service/monitoring/` | Cloud Monitoring API v3 MetricService (metric and monitored resource descriptors, time series with alignment and reduction, log-based and request metrics), built by us (#1939). |
 | `internal/service/serviceusage/` | The Service Usage API v1 (which APIs each project has enabled), built by us; enabling an API not served is refused, and a disabled API's calls are refused SERVICE_DISABLED, through `internal/apienable` (#1352, #1914). |
 | `internal/service/sqladmin/` | The Cloud SQL Admin API (sqladmin v1 and v1beta4) over the PostgreSQL and MySQL servers, built by us (#1301). |
 | `internal/service/storage/` | Cloud Storage, built by us to Google's spec (#485), the only storage backend (#519). |

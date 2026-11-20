@@ -291,6 +291,10 @@ func (e *Evaluator) Members(email string) []string {
 // Member is an account's own policy member: serviceAccount: for a service
 // account, user: for anyone else.
 func Member(email string) string {
+	if l := strings.ToLower(email); strings.HasPrefix(l, "principal://") || strings.HasPrefix(l, "principalset://") {
+		// A federated identity (#1941) is its own member.
+		return email
+	}
 	if strings.HasSuffix(strings.ToLower(email), ".gserviceaccount.com") {
 		return "serviceAccount:" + email
 	}

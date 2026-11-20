@@ -843,6 +843,9 @@ func (s *ClusterServer) CreateCluster(ctx context.Context, req *clusterpb.Create
 	for _, p := range in.GetPscConfigs() {
 		r.PscConfigs = append(r.PscConfigs, p.GetNetwork())
 	}
+	if err := s.api.checkPSCNetworks("psc_configs.network", r.PscConfigs...); err != nil {
+		return nil, err
+	}
 	keepJSON(&r.Persistence, in.GetPersistenceConfig())
 	if err := clusterZoneDist(in.GetZoneDistributionConfig()).check(m[2]); err != nil {
 		return nil, err

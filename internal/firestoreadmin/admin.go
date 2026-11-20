@@ -42,6 +42,7 @@ import (
 	"encoding/hex"
 	"net/http"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -102,6 +103,12 @@ type Admin struct {
 	// backups by name, and the time each schedule last took one.
 	backups    map[string]*backup
 	lastBackup map[string]time.Time
+	// pitrSince is when each database's point-in-time recovery was last
+	// enabled, and historySince when the emulator last started with the
+	// documents imported, before which it holds no versions (pitr.go,
+	// #1942).
+	pitrSince    map[string]time.Time
+	historySince time.Time
 	// seen is every database a documents call has named (seen.go,
 	// #1550), by name.
 	seen map[string]bool
@@ -154,6 +161,7 @@ func newWith(emulator string, opts ...grpc.ServerOption) *Admin {
 
 		backups:    map[string]*backup{},
 		lastBackup: map[string]time.Time{},
+		pitrSince:  map[string]time.Time{},
 		seen:       map[string]bool{},
 		userCreds:  map[string]*creds{},
 
@@ -293,15 +301,8 @@ func (a *Admin) seed(project string) {
 // earliest version time and etag follow from its state now.
 func (a *Admin) describe(db *adminpb.Database) *adminpb.Database {
 	out := proto.Clone(db).(*adminpb.Database)
-	retention := hour
-	if out.PointInTimeRecoveryEnablement == adminpb.Database_POINT_IN_TIME_RECOVERY_ENABLED {
-		retention = week
-	}
+	retention, earliest := a.versionWindow(db)
 	out.VersionRetentionPeriod = durationpb.New(retention)
-	earliest := a.now().Add(-retention)
-	if c := out.CreateTime.AsTime(); earliest.Before(c) {
-		earliest = c
-	}
 	out.EarliestVersionTime = timestamppb.New(earliest)
 	out.Etag = etag(out)
 	return out
@@ -429,6 +430,7 @@ func (a *Admin) CreateDatabase(ctx context.Context, req *adminpb.CreateDatabaseR
 	}
 	a.databases[name] = db
 	a.forgetKey(name)
+	a.notePITR(db, false)
 	return a.done(name, &adminpb.CreateDatabaseMetadata{}, a.describe(db))
 }
 
@@ -480,6 +482,13 @@ func (a *Admin) UpdateDatabase(ctx context.Context, req *adminpb.UpdateDatabaseR
 		}
 		sort.Strings(paths)
 	}
+	// gcloud's `databases update` names the database's own name in the
+	// mask beside the field it changes (measured, #1942); the name names
+	// the database and changes nothing.
+	paths = slices.DeleteFunc(slices.Clone(paths), func(p string) bool { return p == "name" })
+	if len(paths) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "update_mask names no field that can be updated: concurrency_mode, point_in_time_recovery_enablement, app_engine_integration_mode or delete_protection_state")
+	}
 	for i, p := range paths {
 		paths[i] = snake(p)
 		if mutableDatabaseFields[paths[i]] == nil {
@@ -503,9 +512,11 @@ func (a *Admin) UpdateDatabase(ctx context.Context, req *adminpb.UpdateDatabaseR
 	if err := checkDatabaseCustom(ctx, next, orgpolicy.MethodUpdate); err != nil {
 		return nil, err
 	}
+	wasPITR := db.PointInTimeRecoveryEnablement == adminpb.Database_POINT_IN_TIME_RECOVERY_ENABLED
 	for _, p := range paths {
 		mutableDatabaseFields[p](db, in)
 	}
+	a.notePITR(db, wasPITR)
 	db.UpdateTime = timestamppb.New(a.now())
 	return a.done(db.Name, &adminpb.UpdateDatabaseMetadata{}, a.describe(db))
 }

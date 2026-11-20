@@ -81,7 +81,9 @@ func (c *Credentials) tokenAccount(tok string, now time.Time) (string, bool) {
 	h := TokenHash(tok)
 	for _, t := range c.LiveTokens(now) {
 		if t.Hash == h {
-			return t.Email, t.Email != ""
+			// A federated subject's token (#1941) grants nothing while
+			// its pool is disabled or deleted.
+			return t.Email, t.Email != "" && c.federatedLive(t.Email)
 		}
 	}
 	return "", false
@@ -89,6 +91,9 @@ func (c *Credentials) tokenAccount(tok string, now time.Time) (string, bool) {
 
 // member is an email's IAM principal.
 func member(email string) string {
+	if l := strings.ToLower(email); strings.HasPrefix(l, "principal://") || strings.HasPrefix(l, "principalset://") {
+		return email
+	}
 	if strings.HasSuffix(email, ".gserviceaccount.com") {
 		return "serviceAccount:" + email
 	}

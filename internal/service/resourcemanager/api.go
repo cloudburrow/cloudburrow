@@ -694,6 +694,11 @@ func (s *Server) Start(ctx context.Context) error {
 			iamV2REST.ServeHTTP(w, r)
 			return
 		}
+		if isWIFPath(r.URL.Path) {
+			// Workload Identity Federation (#1941, workloadidentity.go).
+			s.projects.reg.ServeWorkloadIdentity(w, r)
+			return
+		}
 		if isIAMAdminPath(r.URL.Path) {
 			iamREST.ServeHTTP(w, r)
 			return

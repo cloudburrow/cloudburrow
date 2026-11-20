@@ -1,0 +1,18 @@
+# A Compute Engine VM's image as a systemd container (#1963): the official
+# Rocky Linux container image, by pinned digest, with systemd, sshd and
+# CloudBurrow's guest scripts. Distribution packages are installed from the
+# distribution's own repositories; nothing here is linked into CloudBurrow.
+ARG BASE
+FROM ${BASE}
+ENV container=docker
+RUN dnf -y install --setopt=install_weak_deps=False systemd openssh-server openssh-clients sudo iproute procps-ng passwd shadow-utils less \
+ && dnf clean all && rm -rf /var/cache/dnf \
+ && rm -f /etc/ssh/ssh_host_*
+COPY root/ /
+RUN chmod 0755 /usr/lib/cloudburrow/* \
+ && systemctl mask systemd-udevd.service systemd-udevd-kernel.socket systemd-udevd-control.socket getty.target console-getty.service systemd-logind.service \
+ && systemctl enable cloudburrow-network.service cloudburrow-guest-agent.service google-startup-scripts.service sshd.service \
+ && echo '%google-sudoers ALL=(ALL:ALL) NOPASSWD:ALL' > /etc/sudoers.d/google_sudoers && chmod 0440 /etc/sudoers.d/google_sudoers \
+ && groupadd -f google-sudoers
+STOPSIGNAL SIGRTMIN+3
+CMD ["/sbin/init"]

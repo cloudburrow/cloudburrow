@@ -33,6 +33,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/gke"
 	"github.com/cloudburrow/cloudburrow/internal/service/kms"
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
+	"github.com/cloudburrow/cloudburrow/internal/service/monitoring"
 	"github.com/cloudburrow/cloudburrow/internal/service/privateca"
 	"github.com/cloudburrow/cloudburrow/internal/service/redisadmin"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
@@ -73,6 +74,11 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		t.Fatal(err)
 	}
 	gkeSrv.Register(srv)
+	mon, err := monitoring.NewServer("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mon.Register(srv)
 	rmReg := resourcemanager.New(store.NewMemory())
 	rmpb.RegisterProjectsServer(srv, resourcemanager.NewProjectsServer(rmReg))
 	rmpb.RegisterFoldersServer(srv, resourcemanager.NewFoldersServer(rmReg))
@@ -100,6 +106,9 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	// reaches: no state file is written, no container started.
 	ai := vertexai.NewServer(nil)
 	ai.SetModelGarden(&modelgarden.Manager{})
+	// And the Model Registry (#1940), in memory, with nothing to run a
+	// model or copy an artifact: an empty request is refused first.
+	ai.SetRegistry("", nil, nil)
 	ai.RegisterGRPC(srv)
 	adminpb.RegisterFirestoreAdminServer(srv, firestoreadmin.New(""))
 	dsadminpb.RegisterDatastoreAdminServer(srv, callfront.NewDatastoreAdmin("127.0.0.1:1", ""))
@@ -152,8 +161,15 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		// Cloud Identity's (#1812) is groups_methods.go's table, and
 		// TestCloudIdentityUnservedAre501 checks its 501s over HTTP
 		// (internal/service/resourcemanager).
+		// Compute Engine's (#1936) is methods.go's table, and
+		// TestEveryUnservedMethodIsNotImplemented checks its 501s over HTTP
+		// (internal/service/compute).
 		if strings.HasPrefix(m, "sql.") || strings.HasPrefix(m, "serviceusage.") || strings.HasPrefix(m, "apikeys.") || strings.HasPrefix(m, "backupdr.") ||
-			strings.HasPrefix(m, "cloudidentity.") {
+			strings.HasPrefix(m, "cloudidentity.") || strings.HasPrefix(m, "compute.") ||
+			// Workload Identity Federation's (#1941) is
+			// workloadidentity_methods.go's table, its 501s checked over
+			// HTTP by TestWorkloadIdentityUnservedAre501.
+			strings.HasPrefix(m, "iam.projects.locations.workloadIdentityPools.") || m == "sts.token" {
 			continue
 		}
 		// Cloud Run v1's is the adapter's method table, and

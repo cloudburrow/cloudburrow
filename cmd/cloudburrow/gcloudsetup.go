@@ -166,6 +166,15 @@ var gcloudVerified = []struct {
 	// TestGcloudContainerClusters drives clusters create, list, describe,
 	// get-credentials and delete.
 	{config.ServiceGKE, "container", "/", false, false},
+	// Cloud Monitoring (#1964): gcloud monitoring appends v3/ (policies,
+	// channels, uptime, snoozes) and v1/ (dashboards) to the one JSON port.
+	// TestGcloudMonitoring drives dashboards, channels and policies.
+	{config.ServiceMonitoring, "monitoring", "/", false, false},
+	// The Compute Engine API's VPC networking (#1936): gcloud compute
+	// takes the override with its version, and sends its calls in
+	// batches to /batch/compute/v1 beside it. TestGcloudComputeNetworks
+	// drives networks, subnets, firewall-rules and addresses.
+	{config.ServiceCompute, "compute", "/compute/v1/", false, false},
 	// Bigtable's admin REST API (#1440), on the Bigtable port beside gRPC;
 	// gcloud bigtable appends v2/. TestGcloudBigtableAppProfiles creates,
 	// lists, updates and deletes app profiles.
@@ -184,7 +193,17 @@ var gcloudVerified = []struct {
 	// datastore appends v1/. TestGcloudDatastoreExportImport drives export
 	// and import.
 	{config.ServiceDatastore, "datastore", "/", false, false},
+	// Vertex AI's Model Registry and Endpoints (#1940), on the local AI
+	// endpoint, served with Cloud Run; gcloud ai appends v1/, and keeps an
+	// override whose host does not start with "aiplatform" as it is, for
+	// every --region. TestGcloudAIModelsAndEndpoints uploads, deploys,
+	// predicts, undeploys and deletes.
+	{localAIEndpoint, "aiplatform", "/", false, false},
 }
+
+// localAIEndpoint keys the local AI endpoint's row (#1940): served when
+// Cloud Run is, which runs its deployed models.
+const localAIEndpoint config.Service = "aiplatform"
 
 // spannerRESTEndpoint keys the Spanner admin REST row (#1461): Spanner's
 // second port, served when Spanner is.
@@ -240,7 +259,8 @@ func gcloudConfiguration(cfg config.Config, adcPath string) string {
 		apiKeysService:         cfg.Endpoints.APIKeys,
 		config.ServiceBigtable: cfg.Endpoints.Bigtable, spannerRESTEndpoint: cfg.Endpoints.SpannerREST,
 		config.ServiceFirestore: cfg.Endpoints.Firestore, config.ServicePrivateCA: cfg.Endpoints.PrivateCA, config.ServiceDatastore: cfg.Endpoints.Datastore,
-		config.ServiceGKE: cfg.Endpoints.GKE}
+		config.ServiceGKE: cfg.Endpoints.GKE, config.ServiceMonitoring: cfg.Endpoints.Monitoring, config.ServiceCompute: cfg.Endpoints.Compute,
+		localAIEndpoint: cfg.Endpoints.LocalAI}
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n# Instance %q.\n", gcloudMarker, cfg.Name)
 	// should_prompt_to_enable_api is off because gcloud would otherwise ask
@@ -261,6 +281,12 @@ func gcloudConfiguration(cfg config.Config, adcPath string) string {
 		}
 		if v.service == config.ServicePrivateCA {
 			on = privateCAEnabled(cfg)
+		}
+		if v.service == config.ServiceMonitoring {
+			on = monitoringEnabled(cfg)
+		}
+		if v.service == localAIEndpoint {
+			on = serviceEnabled(cfg, config.ServiceRun)
 		}
 		if on && ports[v.service] != 0 {
 			addr := host(ports[v.service])

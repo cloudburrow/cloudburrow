@@ -19,11 +19,13 @@ package tasks
 //     "-"); OR binds tighter than AND, and parentheses group.
 //
 // A path that is no Queue field, or a value its field cannot hold, is
-// INVALID_ARGUMENT. Regular expressions ("=~") are refused UNIMPLEMENTED:
-// an ignored filter would return every queue and look like a filter that
-// matched them all (#578).
+// INVALID_ARGUMENT. Cloud Logging's regular-expression operators, "=~"
+// (matches) and "!~" (does not match), take an RE2 expression, matched
+// anywhere in a string field or an enum value's name (#1943); a bad
+// expression is INVALID_ARGUMENT.
 
 import (
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -42,6 +44,7 @@ type qfilterNode struct {
 	path  []protoreflect.FieldDescriptor
 	cmp   string
 	value string
+	re    *regexp.Regexp // for =~ and !~
 }
 
 // queueFilter compiles a ListQueues filter into a predicate.
@@ -200,9 +203,7 @@ func (p *qfilterParser) restriction() (*qfilterNode, error) {
 	op := p.toks[p.pos].text
 	p.pos++
 	switch op {
-	case "=", "!=", "<", ">", "<=", ">=", ":":
-	case "=~", "!~", "~":
-		return nil, apierror.Unimplemented("ListQueues filter %q: regular expressions (%s) are not implemented", p.filter, op)
+	case "=", "!=", "<", ">", "<=", ">=", ":", "=~", "!~":
 	default:
 		return nil, apierror.InvalidArgument("ListQueues filter %q: %q is not an operator", p.filter, op)
 	}
@@ -216,6 +217,18 @@ func (p *qfilterParser) restriction() (*qfilterNode, error) {
 		return nil, apierror.InvalidArgument("ListQueues filter %q: %v", p.filter, err)
 	}
 	n := &qfilterNode{path: path, cmp: op, value: value}
+	if op == "=~" || op == "!~" {
+		fd := path[len(path)-1]
+		if fd.Kind() != protoreflect.StringKind && fd.Kind() != protoreflect.EnumKind {
+			return nil, apierror.InvalidArgument("ListQueues filter %q: %s applies to a string or enum field, not %s", p.filter, op, field)
+		}
+		re, err := regexp.Compile(value)
+		if err != nil {
+			return nil, apierror.InvalidArgument("ListQueues filter %q: %q is not a regular expression: %v", p.filter, value, err)
+		}
+		n.re = re
+		return n, nil
+	}
 	if err := n.check(); err != nil {
 		return nil, apierror.InvalidArgument("ListQueues filter %q: %v", p.filter, err)
 	}
@@ -328,6 +341,13 @@ func (n *qfilterNode) eval(m protoreflect.Message) bool {
 		m = m.Get(fd).Message()
 	}
 	fd := n.path[len(n.path)-1]
+	if n.re != nil {
+		s := m.Get(fd).String()
+		if fd.Kind() == protoreflect.EnumKind {
+			s = string(fd.Enum().Values().ByNumber(m.Get(fd).Enum()).Name())
+		}
+		return n.re.MatchString(s) == (n.cmp == "=~")
+	}
 	if n.value == "*" {
 		return m.Has(fd)
 	}

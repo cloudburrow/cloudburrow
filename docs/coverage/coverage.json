@@ -26,7 +26,7 @@
         "tests": [
           "test/compat/appengine1447_test.go:210 TestTerraformAppEngineTargets",
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
-          "test/compat/tasks_test.go:64 TestTasksQueueLifecycle",
+          "test/compat/tasks_test.go:65 TestTasksQueueLifecycle",
           "test/compat/taskshttptarget_test.go:33 TestTasksQueueHTTPTarget",
           "test/compat/taskslogging_test.go:35 TestTasksStackdriverLoggingConfig",
           "test/compat/terraform_batch9_test.go:36 TestTerraformCloudTasksQueueIAM",
@@ -43,7 +43,7 @@
           "test/compat/consoletasksattempts_test.go:23 TestConsoleTasksAttemptHistory",
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
           "test/compat/iamenforcement1879_test.go:282 TestIAMEnforcementTasks",
-          "test/compat/tasks_test.go:145 TestTasksTaskLifecycle",
+          "test/compat/tasks_test.go:146 TestTasksTaskLifecycle",
           "test/compat/tasktokens_test.go:115 TestTasksOIDCAndOAuthTokens"
         ]
       },
@@ -62,7 +62,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
-          "test/compat/tasks_test.go:145 TestTasksTaskLifecycle"
+          "test/compat/tasks_test.go:146 TestTasksTaskLifecycle"
         ]
       },
       {
@@ -93,7 +93,7 @@
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
           "test/compat/iamenforcement1879_test.go:282 TestIAMEnforcementTasks",
           "test/compat/iamenforcement1879_test.go:499 TestIAMEnforcementJSON",
-          "test/compat/tasks_test.go:64 TestTasksQueueLifecycle",
+          "test/compat/tasks_test.go:65 TestTasksQueueLifecycle",
           "test/compat/taskshttptarget_test.go:33 TestTasksQueueHTTPTarget",
           "test/compat/taskslogging_test.go:35 TestTasksStackdriverLoggingConfig",
           "test/compat/terraform_batch9_test.go:36 TestTerraformCloudTasksQueueIAM",
@@ -108,7 +108,7 @@
           "test/compat/appengine1447_test.go:35 TestTasksAppEngineTargets",
           "test/compat/appengine1506_test.go:101 TestTasksAppEngineDelivery",
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
-          "test/compat/tasks_test.go:145 TestTasksTaskLifecycle",
+          "test/compat/tasks_test.go:146 TestTasksTaskLifecycle",
           "test/compat/tasktokens_test.go:115 TestTasksOIDCAndOAuthTokens"
         ]
       },
@@ -117,9 +117,9 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
-          "test/compat/tasks_test.go:258 TestTasksListQueuesFiltersOnQueueFields",
-          "test/compat/tasks_test.go:314 TestTasksListQueuesFiltersByState",
-          "test/compat/tasks_test.go:92 TestTasksListQueues"
+          "test/compat/tasks_test.go:260 TestTasksListQueuesFiltersOnQueueFields",
+          "test/compat/tasks_test.go:316 TestTasksListQueuesFiltersByState",
+          "test/compat/tasks_test.go:93 TestTasksListQueues"
         ]
       },
       {
@@ -134,14 +134,14 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
-          "test/compat/tasks_test.go:121 TestTasksPauseAndResume"
+          "test/compat/tasks_test.go:122 TestTasksPauseAndResume"
         ]
       },
       {
         "method": "google.cloud.tasks.v2.CloudTasks/PurgeQueue",
         "status": "Verified",
         "tests": [
-          "test/compat/tasks_test.go:349 TestTasksPurgeQueue"
+          "test/compat/tasks_test.go:351 TestTasksPurgeQueue"
         ]
       },
       {
@@ -149,7 +149,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
-          "test/compat/tasks_test.go:121 TestTasksPauseAndResume"
+          "test/compat/tasks_test.go:122 TestTasksPauseAndResume"
         ]
       },
       {
@@ -1210,7 +1210,8 @@
           "test/compat/artifactregistry_formats_test.go:158 TestArtifactRegistryPythonRepository",
           "test/compat/artifactregistry_formats_test.go:678 TestGcloudArtifactsPackageFormats",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
-          "test/compat/artifactregistry_remote_test.go:123 TestArtifactRegistryRemotePackageRepositories"
+          "test/compat/artifactregistry_remote_test.go:123 TestArtifactRegistryRemotePackageRepositories",
+          "test/compat/listfilters1943_test.go:141 TestListFiltersArtifactRegistry"
         ]
       },
       {
@@ -1238,6 +1239,7 @@
           "test/compat/artifactregistry_formats_test.go:678 TestGcloudArtifactsPackageFormats",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
           "test/compat/artifactregistrygo_test.go:59 TestArtifactRegistryGoRepository",
+          "test/compat/listfilters1943_test.go:141 TestListFiltersArtifactRegistry",
           "test/compat/terraform_batch11_run_test.go:264 TestTerraformArtifactRegistryPackageDataSources"
         ]
       },
@@ -1286,6 +1288,7 @@
           "test/compat/artifactregistrycmek_test.go:30 TestArtifactRegistryCMEK",
           "test/compat/artifactregistrygo_test.go:147 TestArtifactRegistryKfpRepository",
           "test/compat/artifactregistrygo_test.go:59 TestArtifactRegistryGoRepository",
+          "test/compat/listfilters1943_test.go:141 TestListFiltersArtifactRegistry",
           "test/compat/terraform_batch11_run_test.go:264 TestTerraformArtifactRegistryPackageDataSources"
         ]
       },
@@ -2295,14 +2298,16 @@
         "method": "google.cloud.eventarc.v1.Eventarc/ListProviders",
         "status": "Verified",
         "tests": [
-          "test/compat/eventarc_test.go:42 TestEventarcTriggersToCloudRun"
+          "test/compat/eventarc_test.go:42 TestEventarcTriggersToCloudRun",
+          "test/compat/listfilters1943_test.go:53 TestListFiltersEventarc"
         ]
       },
       {
         "method": "google.cloud.eventarc.v1.Eventarc/ListTriggers",
         "status": "Verified",
         "tests": [
-          "test/compat/eventarc_test.go:42 TestEventarcTriggersToCloudRun"
+          "test/compat/eventarc_test.go:42 TestEventarcTriggersToCloudRun",
+          "test/compat/listfilters1943_test.go:53 TestListFiltersEventarc"
         ]
       },
       {
@@ -2544,14 +2549,16 @@
         "method": "google.cloud.functions.v2.FunctionService/ListFunctions",
         "status": "Verified",
         "tests": [
-          "test/compat/functionsapi_test.go:76 TestFunctionsAPI"
+          "test/compat/functionsapi_test.go:76 TestFunctionsAPI",
+          "test/compat/listfilters1943_test.go:97 TestListFiltersFunctions"
         ]
       },
       {
         "method": "google.cloud.functions.v2.FunctionService/ListRuntimes",
         "status": "Verified",
         "tests": [
-          "test/compat/functionsapi_test.go:76 TestFunctionsAPI"
+          "test/compat/functionsapi_test.go:76 TestFunctionsAPI",
+          "test/compat/listfilters1943_test.go:97 TestListFiltersFunctions"
         ]
       },
       {
@@ -4236,6 +4243,10 @@
         "tests": [
           "test/compat/artifactregistrylocations_test.go:42 TestArtifactRegistryLocations",
           "test/compat/kmslocations_test.go:24 TestKMSLocations",
+          "test/compat/listfilters1943_test.go:141 TestListFiltersArtifactRegistry",
+          "test/compat/listfilters1943_test.go:192 TestListFiltersMemorystore",
+          "test/compat/listfilters1943_test.go:216 TestListFiltersPrivateCA",
+          "test/compat/listfilters1943_test.go:97 TestListFiltersFunctions",
           "test/compat/memorystoreops_test.go:34 TestMemorystoreLocationsOperationsMaintenance",
           "test/compat/schedulerlocations_test.go:23 TestSchedulerLocations"
         ]
@@ -5509,6 +5520,10 @@
         "tests": [
           "test/compat/artifactregistrylocations_test.go:42 TestArtifactRegistryLocations",
           "test/compat/kmslocations_test.go:24 TestKMSLocations",
+          "test/compat/listfilters1943_test.go:141 TestListFiltersArtifactRegistry",
+          "test/compat/listfilters1943_test.go:192 TestListFiltersMemorystore",
+          "test/compat/listfilters1943_test.go:216 TestListFiltersPrivateCA",
+          "test/compat/listfilters1943_test.go:97 TestListFiltersFunctions",
           "test/compat/memorystoreops_test.go:34 TestMemorystoreLocationsOperationsMaintenance",
           "test/compat/schedulerlocations_test.go:23 TestSchedulerLocations"
         ]
@@ -6051,62 +6066,85 @@
     "Key": "vertexai",
     "Title": "Vertex AI PredictionService",
     "counts": {
-      "Unimplemented": 28,
-      "Verified": 63
+      "Implemented": 1,
+      "Unimplemented": 12,
+      "Verified": 78
     },
     "rows": [
       {
         "method": "google.cloud.aiplatform.v1.EndpointService/CreateEndpoint",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
+          "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints",
+          "test/compat/modelregistrycli_test.go:96 TestTerraformVertexAIEndpoint"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.EndpointService/DeleteEndpoint",
         "status": "Verified",
         "tests": [
-          "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels"
+          "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels",
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
+          "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints",
+          "test/compat/modelregistrycli_test.go:96 TestTerraformVertexAIEndpoint"
         ]
       },
       {
         "method": "google.cloud.aiplatform.v1.EndpointService/DeployModel",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
+          "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.EndpointService/GetEndpoint",
         "status": "Verified",
         "tests": [
-          "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels"
+          "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels",
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
+          "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints",
+          "test/compat/modelregistrycli_test.go:96 TestTerraformVertexAIEndpoint"
         ]
       },
       {
         "method": "google.cloud.aiplatform.v1.EndpointService/ListEndpoints",
         "status": "Verified",
         "tests": [
-          "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels"
+          "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels",
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
+          "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints"
         ]
       },
       {
         "method": "google.cloud.aiplatform.v1.EndpointService/MutateDeployedModel",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.EndpointService/UndeployModel",
         "status": "Verified",
         "tests": [
-          "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels"
+          "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels",
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
+          "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints"
         ]
       },
       {
         "method": "google.cloud.aiplatform.v1.EndpointService/UpdateEndpoint",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
+          "test/compat/modelregistrycli_test.go:96 TestTerraformVertexAIEndpoint"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.EndpointService/UpdateEndpointLongRunning",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "google.cloud.aiplatform.v1.LlmUtilityService/ComputeTokens",
@@ -6131,8 +6169,10 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.ModelGardenService/GetPublisherModel",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelregistry_test.go:485 TestGetPublisherModelDescribesTheServedModels"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.ModelService/BatchImportEvaluatedAnnotations",
@@ -6146,37 +6186,49 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.ModelService/CopyModel",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.ModelService/DeleteModel",
         "status": "Verified",
         "tests": [
-          "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels"
+          "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels",
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
+          "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints"
         ]
       },
       {
         "method": "google.cloud.aiplatform.v1.ModelService/DeleteModelVersion",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.ModelService/ExportModel",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.ModelService/GetModel",
         "status": "Verified",
         "tests": [
-          "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels"
+          "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels",
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
+          "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints"
         ]
       },
       {
         "method": "google.cloud.aiplatform.v1.ModelService/GetModelEvaluation",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.ModelService/GetModelEvaluationSlice",
@@ -6185,8 +6237,10 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.ModelService/ImportModelEvaluation",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.ModelService/ListModelEvaluationSlices",
@@ -6195,8 +6249,10 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.ModelService/ListModelEvaluations",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.ModelService/ListModelVersionCheckpoints",
@@ -6205,20 +6261,26 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.ModelService/ListModelVersions",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.ModelService/ListModels",
         "status": "Verified",
         "tests": [
-          "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels"
+          "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels",
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
+          "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints"
         ]
       },
       {
         "method": "google.cloud.aiplatform.v1.ModelService/MergeVersionAliases",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.ModelService/UpdateExplanationDataset",
@@ -6227,13 +6289,18 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.ModelService/UpdateModel",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.ModelService/UploadModel",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
+          "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.PredictionService/DirectPredict",
@@ -6282,6 +6349,7 @@
         "method": "google.cloud.aiplatform.v1.PredictionService/Explain",
         "status": "Verified",
         "tests": [
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
           "test/compat/predictiongrpc_test.go:214 TestConsoleExplainMatchesThePredictionClient",
           "test/compat/predictiongrpc_test.go:63 TestPredictionClientReachesACustomEndpoint"
         ]
@@ -6297,6 +6365,8 @@
         "method": "google.cloud.aiplatform.v1.PredictionService/Predict",
         "status": "Verified",
         "tests": [
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
+          "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints",
           "test/compat/predictiongrpc_test.go:63 TestPredictionClientReachesACustomEndpoint"
         ]
       },
@@ -6304,6 +6374,7 @@
         "method": "google.cloud.aiplatform.v1.PredictionService/RawPredict",
         "status": "Verified",
         "tests": [
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
           "test/compat/predictiongrpc_test.go:63 TestPredictionClientReachesACustomEndpoint",
           "test/compat/rawpredict_test.go:26 TestRawPredictOnTheEmbeddingModel",
           "test/compat/rawpredict_test.go:71 TestRawPredictOnTheGenerationModel"
@@ -7057,6 +7128,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudmemorystore_test.go:24 TestGcloudMemorystoreValkey",
+          "test/compat/listfilters1943_test.go:192 TestListFiltersMemorystore",
           "test/compat/memorystorevalkey_test.go:85 TestMemorystoreValkeyInstance"
         ]
       },
@@ -8892,6 +8964,7 @@
           "test/compat/cloudbuilddefaultlogs_test.go:132 TestGcloudBuildsSubmitDefaultLogsBucket",
           "test/compat/cloudbuilddefaultlogs_test.go:47 TestCloudBuildDefaultLogsBucket",
           "test/compat/iamenforcementstorage1879_test.go:102 TestIAMEnforcementStorage",
+          "test/compat/iamworkloadidentity1941_test.go:496 TestWorkloadIdentityFederationStorage",
           "test/compat/storage_test.go:92 TestStorageObjectRoundTrip",
           "test/compat/storagecmek1938_test.go:137 TestStorageCMEK",
           "test/compat/storagegrpccsek_test.go:28 TestStorageCSEKParity",
@@ -9591,6 +9664,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/datastoreadmin1884_test.go:275 TestFirestoreAdminCopiesADatastoreModeDatabase",
+          "test/compat/firestorepitr1942_test.go:30 TestFirestorePointInTimeRecovery",
           "test/compat/firestoretransfer_test.go:194 TestFirestoreBackupRestoreClone",
           "test/compat/gcloudfirestoretransfer_test.go:24 TestGcloudFirestoreTransfer"
         ]
@@ -9690,6 +9764,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/datastoreadmin1884_test.go:275 TestFirestoreAdminCopiesADatastoreModeDatabase",
+          "test/compat/firestorepitr1942_test.go:30 TestFirestorePointInTimeRecovery",
           "test/compat/firestoretransfer_test.go:94 TestFirestoreExportImport",
           "test/compat/gcloudfirestoretransfer_test.go:24 TestGcloudFirestoreTransfer"
         ]
@@ -9724,6 +9799,7 @@
           "test/compat/firestoredatastoremode1880_test.go:69 TestFirestoreDatastoreModeDatabases",
           "test/compat/firestorepersist1615_test.go:165 TestFirestoreAcrossRestart",
           "test/compat/firestorepersist1615_test.go:64 TestFirestoreSurvivesAPodRestart",
+          "test/compat/firestorepitr1942_test.go:30 TestFirestorePointInTimeRecovery",
           "test/compat/frontstate1514_test.go:310 TestFirestoreFrontRestartKeepsItsState"
         ]
       },
@@ -9841,6 +9917,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/firestoreadmin_test.go:47 TestFirestoreAdminDatabases",
+          "test/compat/firestorepitr1942_test.go:30 TestFirestorePointInTimeRecovery",
           "test/compat/orgpolicycustom1891_test.go:484 TestOrgPolicyCustomConstraintsFirestore"
         ]
       },
@@ -9893,6 +9970,7 @@
           "test/compat/datastoredatabases1885_test.go:49 TestDatastoreNamedDatabasesKeepTheirEntitiesApart",
           "test/compat/datastoreupgrade1885_test.go:90 TestDatastoreNamedDatabaseEntitiesSurviveTheUpgrade",
           "test/compat/emulatorkill1611_test.go:281 TestDatastoreAfterTheEmulatorIsKilled",
+          "test/compat/firestorepitr1942_test.go:223 TestDatastoreReadAtAnEarlierTimeIsRefused",
           "test/compat/optional_test.go:130 TestDatastoreEntityCRUD"
         ]
       },
@@ -10450,7 +10528,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigtablebackups_test.go:32 TestBigtableBackups",
-          "test/compat/bigtableviewstools_test.go:114 TestGcloudBigtableBackups"
+          "test/compat/bigtableviewstools_test.go:114 TestGcloudBigtableBackups",
+          "test/compat/listfilters1943_test.go:262 TestListFiltersBigtableBackups"
         ]
       },
       {
@@ -13729,6 +13808,999 @@
     ]
   },
   {
+    "Key": "compute",
+    "Title": "Compute Engine API (v1): VPC networking",
+    "counts": {
+      "Implemented": 25,
+      "Unimplemented": 74,
+      "Verified": 67
+    },
+    "rows": [
+      {
+        "method": "compute.addresses.aggregatedList",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:299 TestGcloudComputeNetworks",
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.addresses.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.addresses.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.addresses.insert",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.addresses.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.addresses.move",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.addresses.setLabels",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.addresses.testIamPermissions",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.diskTypes.aggregatedList",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.diskTypes.get",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.diskTypes.list",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.disks.addResourcePolicies",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.disks.aggregatedList",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.disks.bulkInsert",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.disks.createSnapshot",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.disks.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.disks.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.disks.getIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.disks.insert",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.disks.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.disks.removeResourcePolicies",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.disks.resize",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.disks.setIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.disks.setLabels",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.disks.startAsyncReplication",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.disks.stopAsyncReplication",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.disks.stopGroupAsyncReplication",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.disks.testIamPermissions",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.disks.update",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.firewalls.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:299 TestGcloudComputeNetworks",
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.firewalls.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.firewalls.insert",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:299 TestGcloudComputeNetworks",
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.firewalls.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:299 TestGcloudComputeNetworks",
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.firewalls.patch",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.firewalls.testIamPermissions",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.firewalls.update",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.globalAddresses.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:299 TestGcloudComputeNetworks",
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.globalAddresses.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.globalAddresses.insert",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:299 TestGcloudComputeNetworks",
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.globalAddresses.list",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.globalAddresses.move",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.globalAddresses.setLabels",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.globalAddresses.testIamPermissions",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.globalOperations.aggregatedList",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.globalOperations.delete",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.globalOperations.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.globalOperations.list",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.globalOperations.wait",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.images.delete",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.images.deprecate",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.images.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.images.getFromFamily",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.images.getIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.images.insert",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.images.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.images.patch",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.images.setIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.images.setLabels",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.images.testIamPermissions",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.addAccessConfig",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.addResourcePolicies",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.aggregatedList",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.instances.attachDisk",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.instances.bulkInsert",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.instances.deleteAccessConfig",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.detachDisk",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.instances.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.instances.getEffectiveFirewalls",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.getGuestAttributes",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.getIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.getScreenshot",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.getSerialPortOutput",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.instances.getShieldedInstanceIdentity",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.insert",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.instances.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.instances.performMaintenance",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.removeResourcePolicies",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.reset",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.instances.resume",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.instances.setDeletionProtection",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.instances.setIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.setLabels",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.instances.setMachineType",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.instances.setMetadata",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.instances.setMinCpuPlatform",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.setName",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.setScheduling",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.setServiceAccount",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.setShieldedInstanceIntegrityPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.setTags",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.instances.simulateMaintenanceEvent",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.start",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.instances.startWithEncryptionKey",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.stop",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.instances.suspend",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.instances.testIamPermissions",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.update",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.updateAccessConfig",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.updateDisplayDevice",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.updateNetworkInterface",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.updateShieldedInstanceConfig",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.machineTypes.aggregatedList",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.machineTypes.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.machineTypes.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.networks.addPeering",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.networks.cancelRequestRemovePeering",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.networks.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.networks.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.networks.getEffectiveFirewalls",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.networks.insert",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.networks.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:299 TestGcloudComputeNetworks",
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.networks.listPeeringRoutes",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.networks.patch",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.networks.removePeering",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.networks.requestRemovePeering",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.networks.switchToCustomMode",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.networks.updatePeering",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.projects.disableXpnHost",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.projects.enableXpnHost",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.projects.get",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.projects.getXpnHost",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.projects.getXpnResources",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.projects.listXpnHosts",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.projects.moveDisk",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.projects.moveInstance",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.projects.setCommonInstanceMetadata",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.projects.setDefaultNetworkTier",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.projects.setUsageExportBucket",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.regionOperations.delete",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionOperations.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.regionOperations.list",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.regionOperations.wait",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.regions.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.regions.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.routes.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.routes.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.routes.insert",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.routes.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.routes.testIamPermissions",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.snapshots.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.snapshots.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.snapshots.getIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.snapshots.insert",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.snapshots.list",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.snapshots.setIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.snapshots.setLabels",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.snapshots.testIamPermissions",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.subnetworks.aggregatedList",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.subnetworks.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.subnetworks.expandIpCidrRange",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:299 TestGcloudComputeNetworks",
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.subnetworks.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.subnetworks.getIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.subnetworks.insert",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.subnetworks.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.subnetworks.listUsable",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.subnetworks.patch",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.subnetworks.setIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.subnetworks.setPrivateIpGoogleAccess",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.subnetworks.testIamPermissions",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.zoneOperations.delete",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.zoneOperations.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.zoneOperations.list",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.zoneOperations.wait",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.zones.get",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.zones.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient"
+        ]
+      }
+    ]
+  },
+  {
     "Key": "backupdr",
     "Title": "Backup and DR Service API (v1)",
     "counts": {
@@ -14654,6 +15726,307 @@
     ]
   },
   {
+    "Key": "workloadidentity",
+    "Title": "Workload Identity Federation (IAM v1 pools, STS v1)",
+    "counts": {
+      "Unimplemented": 25,
+      "Verified": 22
+    },
+    "rows": [
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.addAttestationRule",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.create",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkloadidentity1941_test.go:152 TestWorkloadIdentityPools",
+          "test/compat/iamworkloadidentity1941_test.go:593 TestGcloudIAMWorkloadIdentityPools"
+        ]
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkloadidentity1941_test.go:152 TestWorkloadIdentityPools",
+          "test/compat/iamworkloadidentity1941_test.go:593 TestGcloudIAMWorkloadIdentityPools"
+        ]
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkloadidentity1941_test.go:152 TestWorkloadIdentityPools",
+          "test/compat/iamworkloadidentity1941_test.go:593 TestGcloudIAMWorkloadIdentityPools"
+        ]
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.getIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkloadidentity1941_test.go:152 TestWorkloadIdentityPools",
+          "test/compat/iamworkloadidentity1941_test.go:593 TestGcloudIAMWorkloadIdentityPools"
+        ]
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.listAttestationRules",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkloadidentity1941_test.go:639 TestTerraformIAMWorkloadIdentityPool"
+        ]
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.namespaces.create",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.namespaces.delete",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.namespaces.get",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.namespaces.list",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.namespaces.managedIdentities.addAttestationRule",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.namespaces.managedIdentities.create",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.namespaces.managedIdentities.delete",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.namespaces.managedIdentities.get",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.namespaces.managedIdentities.list",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.namespaces.managedIdentities.listAttestationRules",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.namespaces.managedIdentities.operations.get",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.namespaces.managedIdentities.patch",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.namespaces.managedIdentities.removeAttestationRule",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.namespaces.managedIdentities.setAttestationRules",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.namespaces.managedIdentities.undelete",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.namespaces.managedIdentities.workloadSources.operations.get",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.namespaces.operations.get",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.namespaces.patch",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.namespaces.undelete",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.operations.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkloadidentity1941_test.go:152 TestWorkloadIdentityPools"
+        ]
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.patch",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkloadidentity1941_test.go:152 TestWorkloadIdentityPools",
+          "test/compat/iamworkloadidentity1941_test.go:593 TestGcloudIAMWorkloadIdentityPools"
+        ]
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.providers.create",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkloadidentity1941_test.go:152 TestWorkloadIdentityPools",
+          "test/compat/iamworkloadidentity1941_test.go:593 TestGcloudIAMWorkloadIdentityPools"
+        ]
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.providers.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkloadidentity1941_test.go:152 TestWorkloadIdentityPools",
+          "test/compat/iamworkloadidentity1941_test.go:593 TestGcloudIAMWorkloadIdentityPools"
+        ]
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.providers.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkloadidentity1941_test.go:152 TestWorkloadIdentityPools",
+          "test/compat/iamworkloadidentity1941_test.go:593 TestGcloudIAMWorkloadIdentityPools"
+        ]
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.providers.keys.create",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkloadidentity1941_test.go:152 TestWorkloadIdentityPools"
+        ]
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.providers.keys.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkloadidentity1941_test.go:152 TestWorkloadIdentityPools"
+        ]
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.providers.keys.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkloadidentity1941_test.go:152 TestWorkloadIdentityPools"
+        ]
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.providers.keys.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkloadidentity1941_test.go:152 TestWorkloadIdentityPools"
+        ]
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.providers.keys.operations.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkloadidentity1941_test.go:152 TestWorkloadIdentityPools"
+        ]
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.providers.keys.undelete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkloadidentity1941_test.go:152 TestWorkloadIdentityPools"
+        ]
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.providers.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkloadidentity1941_test.go:152 TestWorkloadIdentityPools",
+          "test/compat/iamworkloadidentity1941_test.go:593 TestGcloudIAMWorkloadIdentityPools"
+        ]
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.providers.operations.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkloadidentity1941_test.go:152 TestWorkloadIdentityPools"
+        ]
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.providers.patch",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkloadidentity1941_test.go:152 TestWorkloadIdentityPools",
+          "test/compat/iamworkloadidentity1941_test.go:593 TestGcloudIAMWorkloadIdentityPools"
+        ]
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.providers.undelete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkloadidentity1941_test.go:152 TestWorkloadIdentityPools",
+          "test/compat/iamworkloadidentity1941_test.go:593 TestGcloudIAMWorkloadIdentityPools"
+        ]
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.removeAttestationRule",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.setAttestationRules",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.setIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.testIamPermissions",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.undelete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkloadidentity1941_test.go:152 TestWorkloadIdentityPools",
+          "test/compat/iamworkloadidentity1941_test.go:593 TestGcloudIAMWorkloadIdentityPools"
+        ]
+      },
+      {
+        "method": "sts.token",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkloadidentity1941_test.go:433 TestWorkloadIdentityFederationSTS"
+        ]
+      }
+    ]
+  },
+  {
     "Key": "privateca",
     "Title": "Certificate Authority Service (v1)",
     "counts": {
@@ -14822,6 +16195,7 @@
         "method": "google.cloud.security.privateca.v1.CertificateAuthorityService/ListCaPools",
         "status": "Verified",
         "tests": [
+          "test/compat/listfilters1943_test.go:216 TestListFiltersPrivateCA",
           "test/compat/privateca_test.go:103 TestPrivateCAPoolsRootsAndCertificates"
         ]
       },
@@ -15146,6 +16520,436 @@
         "status": "Verified",
         "tests": [
           "test/compat/gke_test.go:125 TestGKEClustersNodePoolsAndOperations"
+        ]
+      }
+    ]
+  },
+  {
+    "Key": "monitoring",
+    "Title": "Cloud Monitoring API (v3) and Dashboards API (v1)",
+    "counts": {
+      "Implemented": 2,
+      "Unimplemented": 2,
+      "Verified": 52
+    },
+    "rows": [
+      {
+        "method": "google.monitoring.dashboard.v1.DashboardsService/CreateDashboard",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_alerting_test.go:543 TestMonitoringDashboards",
+          "test/compat/monitoring_alerting_test.go:593 TestTerraformMonitoringAlerting",
+          "test/compat/monitoring_alerting_test.go:702 TestGcloudMonitoring"
+        ]
+      },
+      {
+        "method": "google.monitoring.dashboard.v1.DashboardsService/DeleteDashboard",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_alerting_test.go:543 TestMonitoringDashboards",
+          "test/compat/monitoring_alerting_test.go:593 TestTerraformMonitoringAlerting",
+          "test/compat/monitoring_alerting_test.go:702 TestGcloudMonitoring"
+        ]
+      },
+      {
+        "method": "google.monitoring.dashboard.v1.DashboardsService/GetDashboard",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_alerting_test.go:543 TestMonitoringDashboards",
+          "test/compat/monitoring_alerting_test.go:593 TestTerraformMonitoringAlerting",
+          "test/compat/monitoring_alerting_test.go:702 TestGcloudMonitoring"
+        ]
+      },
+      {
+        "method": "google.monitoring.dashboard.v1.DashboardsService/ListDashboards",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_alerting_test.go:543 TestMonitoringDashboards",
+          "test/compat/monitoring_alerting_test.go:702 TestGcloudMonitoring"
+        ]
+      },
+      {
+        "method": "google.monitoring.dashboard.v1.DashboardsService/UpdateDashboard",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_alerting_test.go:543 TestMonitoringDashboards"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.AlertPolicyService/CreateAlertPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_alerting_test.go:110 TestMonitoringAlertPoliciesAndChannels",
+          "test/compat/monitoring_alerting_test.go:281 TestMonitoringLogMatchAlert",
+          "test/compat/monitoring_alerting_test.go:593 TestTerraformMonitoringAlerting",
+          "test/compat/monitoring_alerting_test.go:702 TestGcloudMonitoring"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.AlertPolicyService/DeleteAlertPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_alerting_test.go:110 TestMonitoringAlertPoliciesAndChannels",
+          "test/compat/monitoring_alerting_test.go:593 TestTerraformMonitoringAlerting",
+          "test/compat/monitoring_alerting_test.go:702 TestGcloudMonitoring"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.AlertPolicyService/GetAlertPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_alerting_test.go:110 TestMonitoringAlertPoliciesAndChannels",
+          "test/compat/monitoring_alerting_test.go:593 TestTerraformMonitoringAlerting",
+          "test/compat/monitoring_alerting_test.go:702 TestGcloudMonitoring"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.AlertPolicyService/ListAlertPolicies",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_alerting_test.go:110 TestMonitoringAlertPoliciesAndChannels",
+          "test/compat/monitoring_alerting_test.go:702 TestGcloudMonitoring"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.AlertPolicyService/UpdateAlertPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_alerting_test.go:110 TestMonitoringAlertPoliciesAndChannels",
+          "test/compat/monitoring_alerting_test.go:593 TestTerraformMonitoringAlerting"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.GroupService/CreateGroup",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_alerting_test.go:344 TestMonitoringUptimeGroupsServicesSnoozes",
+          "test/compat/monitoring_alerting_test.go:593 TestTerraformMonitoringAlerting"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.GroupService/DeleteGroup",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_alerting_test.go:344 TestMonitoringUptimeGroupsServicesSnoozes",
+          "test/compat/monitoring_alerting_test.go:593 TestTerraformMonitoringAlerting"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.GroupService/GetGroup",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_alerting_test.go:344 TestMonitoringUptimeGroupsServicesSnoozes",
+          "test/compat/monitoring_alerting_test.go:593 TestTerraformMonitoringAlerting"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.GroupService/ListGroupMembers",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_alerting_test.go:344 TestMonitoringUptimeGroupsServicesSnoozes"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.GroupService/ListGroups",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_alerting_test.go:344 TestMonitoringUptimeGroupsServicesSnoozes"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.GroupService/UpdateGroup",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_alerting_test.go:344 TestMonitoringUptimeGroupsServicesSnoozes"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.MetricService/CreateMetricDescriptor",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_test.go:365 TestTerraformMonitoringMetricDescriptor",
+          "test/compat/monitoring_test.go:88 TestMonitoringCustomMetrics"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.MetricService/CreateServiceTimeSeries",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.monitoring.v3.MetricService/CreateTimeSeries",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_test.go:88 TestMonitoringCustomMetrics"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.MetricService/DeleteMetricDescriptor",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_test.go:365 TestTerraformMonitoringMetricDescriptor",
+          "test/compat/monitoring_test.go:88 TestMonitoringCustomMetrics"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.MetricService/GetMetricDescriptor",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_test.go:242 TestMonitoringLogBasedMetrics",
+          "test/compat/monitoring_test.go:365 TestTerraformMonitoringMetricDescriptor",
+          "test/compat/monitoring_test.go:88 TestMonitoringCustomMetrics"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.MetricService/GetMonitoredResourceDescriptor",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_test.go:88 TestMonitoringCustomMetrics"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.MetricService/ListMetricDescriptors",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_test.go:88 TestMonitoringCustomMetrics"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.MetricService/ListMonitoredResourceDescriptors",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_test.go:88 TestMonitoringCustomMetrics"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.MetricService/ListTimeSeries",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_test.go:242 TestMonitoringLogBasedMetrics",
+          "test/compat/monitoring_test.go:324 TestMonitoringRequestCounts",
+          "test/compat/monitoring_test.go:88 TestMonitoringCustomMetrics"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.NotificationChannelService/CreateNotificationChannel",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_alerting_test.go:110 TestMonitoringAlertPoliciesAndChannels",
+          "test/compat/monitoring_alerting_test.go:593 TestTerraformMonitoringAlerting",
+          "test/compat/monitoring_alerting_test.go:702 TestGcloudMonitoring"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.NotificationChannelService/DeleteNotificationChannel",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_alerting_test.go:110 TestMonitoringAlertPoliciesAndChannels",
+          "test/compat/monitoring_alerting_test.go:593 TestTerraformMonitoringAlerting",
+          "test/compat/monitoring_alerting_test.go:702 TestGcloudMonitoring"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.NotificationChannelService/GetNotificationChannel",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_alerting_test.go:110 TestMonitoringAlertPoliciesAndChannels",
+          "test/compat/monitoring_alerting_test.go:593 TestTerraformMonitoringAlerting",
+          "test/compat/monitoring_alerting_test.go:702 TestGcloudMonitoring"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.NotificationChannelService/GetNotificationChannelDescriptor",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_alerting_test.go:110 TestMonitoringAlertPoliciesAndChannels"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.NotificationChannelService/GetNotificationChannelVerificationCode",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.monitoring.v3.NotificationChannelService/ListNotificationChannelDescriptors",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_alerting_test.go:110 TestMonitoringAlertPoliciesAndChannels"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.NotificationChannelService/ListNotificationChannels",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_alerting_test.go:110 TestMonitoringAlertPoliciesAndChannels",
+          "test/compat/monitoring_alerting_test.go:702 TestGcloudMonitoring"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.NotificationChannelService/SendNotificationChannelVerificationCode",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_alerting_test.go:110 TestMonitoringAlertPoliciesAndChannels"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.NotificationChannelService/UpdateNotificationChannel",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_alerting_test.go:110 TestMonitoringAlertPoliciesAndChannels"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.NotificationChannelService/VerifyNotificationChannel",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.monitoring.v3.QueryService/QueryTimeSeries",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.monitoring.v3.ServiceMonitoringService/CreateService",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_alerting_test.go:344 TestMonitoringUptimeGroupsServicesSnoozes"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.ServiceMonitoringService/CreateServiceLevelObjective",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_alerting_test.go:344 TestMonitoringUptimeGroupsServicesSnoozes"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.ServiceMonitoringService/DeleteService",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_alerting_test.go:344 TestMonitoringUptimeGroupsServicesSnoozes"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.ServiceMonitoringService/DeleteServiceLevelObjective",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_alerting_test.go:344 TestMonitoringUptimeGroupsServicesSnoozes"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.ServiceMonitoringService/GetService",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_alerting_test.go:344 TestMonitoringUptimeGroupsServicesSnoozes"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.ServiceMonitoringService/GetServiceLevelObjective",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_alerting_test.go:344 TestMonitoringUptimeGroupsServicesSnoozes"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.ServiceMonitoringService/ListServiceLevelObjectives",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_alerting_test.go:344 TestMonitoringUptimeGroupsServicesSnoozes"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.ServiceMonitoringService/ListServices",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_alerting_test.go:344 TestMonitoringUptimeGroupsServicesSnoozes"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.ServiceMonitoringService/UpdateService",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_alerting_test.go:344 TestMonitoringUptimeGroupsServicesSnoozes"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.ServiceMonitoringService/UpdateServiceLevelObjective",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_alerting_test.go:344 TestMonitoringUptimeGroupsServicesSnoozes"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.SnoozeService/CreateSnooze",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_alerting_test.go:344 TestMonitoringUptimeGroupsServicesSnoozes"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.SnoozeService/GetSnooze",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_alerting_test.go:344 TestMonitoringUptimeGroupsServicesSnoozes"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.SnoozeService/ListSnoozes",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_alerting_test.go:344 TestMonitoringUptimeGroupsServicesSnoozes"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.SnoozeService/UpdateSnooze",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_alerting_test.go:344 TestMonitoringUptimeGroupsServicesSnoozes"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.UptimeCheckService/CreateUptimeCheckConfig",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_alerting_test.go:344 TestMonitoringUptimeGroupsServicesSnoozes",
+          "test/compat/monitoring_alerting_test.go:593 TestTerraformMonitoringAlerting"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.UptimeCheckService/DeleteUptimeCheckConfig",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_alerting_test.go:344 TestMonitoringUptimeGroupsServicesSnoozes",
+          "test/compat/monitoring_alerting_test.go:593 TestTerraformMonitoringAlerting"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.UptimeCheckService/GetUptimeCheckConfig",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_alerting_test.go:344 TestMonitoringUptimeGroupsServicesSnoozes",
+          "test/compat/monitoring_alerting_test.go:593 TestTerraformMonitoringAlerting"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.UptimeCheckService/ListUptimeCheckConfigs",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_alerting_test.go:344 TestMonitoringUptimeGroupsServicesSnoozes"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.UptimeCheckService/ListUptimeCheckIps",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_alerting_test.go:344 TestMonitoringUptimeGroupsServicesSnoozes"
+        ]
+      },
+      {
+        "method": "google.monitoring.v3.UptimeCheckService/UpdateUptimeCheckConfig",
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring_alerting_test.go:344 TestMonitoringUptimeGroupsServicesSnoozes"
         ]
       }
     ]

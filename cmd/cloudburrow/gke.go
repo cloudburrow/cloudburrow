@@ -39,6 +39,8 @@ type gkeService struct {
 	requests  func(rest.Request)
 	server    *grpctransport.Server
 	api       *gke.Server
+	// networks are Compute Engine's (#1936), nil without compute.
+	networks func() gke.Networks
 }
 
 func newGKEService(cfg config.Config) *gkeService {
@@ -129,6 +131,7 @@ func (s *gkeService) Start(ctx context.Context) error {
 		State:        state,
 		Versions:     []gke.Version{{GKE: gkeVersion(s.cfg.Cluster.NodeImage), Image: s.cfg.Cluster.NodeImage}},
 		MinFreeBytes: gkeMinFree(),
+		Networks:     s.networks,
 	})
 	if err != nil {
 		return err

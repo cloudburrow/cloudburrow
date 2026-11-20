@@ -1,0 +1,195 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net"
+	"net/http"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/hostguard"
+	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
+	"github.com/cloudburrow/cloudburrow/internal/service/compute"
+	"github.com/cloudburrow/cloudburrow/internal/service/gke"
+	"github.com/cloudburrow/cloudburrow/internal/service/redisadmin"
+	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
+	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
+)
+
+// computeService serves the Compute Engine API (#1936, #1963)
+// in the CLI process, on a port of its own (endpoints.compute), as
+// compute.googleapis.com is an API of its own. With Kubernetes Engine
+// enabled too, it also answers the node pools' instance group managers
+// (gke.Server.ServeInstanceGroupManagers), which the GKE port answers on
+// its own without Compute, so an instance without compute keeps today's
+// behaviour and cloudburrow terraform points compute_custom_endpoint here
+// when compute is on.
+type computeService struct {
+	cfg      config.Config
+	requests func(rest.Request)
+	gke      *gkeService
+	api      *compute.Server
+	// vms runs the VM instances (#1963); guestBase and metadataHost are
+	// set by up once the cluster host is known.
+	vms          *computeVMs
+	guestBase    func() string
+	metadataHost func() string
+	cancel       context.CancelFunc
+	srv          *http.Server
+	ln           net.Listener
+}
+
+func newComputeService(cfg config.Config) *computeService {
+	if !computeEnabled(cfg) {
+		return nil
+	}
+	return &computeService{cfg: cfg}
+}
+
+// computeEnabled is whether `up` binds the Compute Engine API's port.
+func computeEnabled(cfg config.Config) bool {
+	return serviceEnabled(cfg, config.ServiceCompute) && cfg.Endpoints.Compute >= 0
+}
+
+func (s *computeService) Name() string { return "compute" }
+
+// API is the server, available after Start; nil without compute.
+func (s *computeService) API() *compute.Server {
+	if s == nil {
+		return nil
+	}
+	return s.api
+}
+
+// Addr is the bound address.
+func (s *computeService) Addr() string {
+	if s == nil || s.ln == nil {
+		return ""
+	}
+	return s.ln.Addr().String()
+}
+
+func (s *computeService) Start(ctx context.Context) error {
+	state := ""
+	if s.cfg.Mode == config.ModePersistent {
+		state = filepath.Join(s.cfg.InstanceDir(), "compute.json")
+	}
+	bg, cancel := context.WithCancel(context.Background())
+	s.cancel = cancel
+	s.vms = newComputeVMs(s.cfg, bg)
+	s.vms.guestBase = func() string {
+		if s.guestBase == nil {
+			return ""
+		}
+		return s.guestBase()
+	}
+	s.vms.metadataHost = func() string {
+		if s.metadataHost == nil {
+			return ""
+		}
+		return s.metadataHost()
+	}
+	api, err := compute.New(compute.Options{State: state, Extra: s.instanceGroupManagers, NetworkUsers: s.networkUsers, VMs: s.vms})
+	if err != nil {
+		return err
+	}
+	s.api = api
+	ln, err := net.Listen("tcp", net.JoinHostPort(s.cfg.BindAddress, strconv.Itoa(s.cfg.Endpoints.Compute)))
+	if err != nil {
+		return fmt.Errorf("compute: %w", err)
+	}
+	s.ln = ln
+	var h http.Handler = api
+	if s.requests != nil {
+		h = rest.Observe(h, s.requests)
+	}
+	s.srv = &http.Server{Handler: hostguard.Wrap(h), ReadHeaderTimeout: 10 * time.Second}
+	go func() { _ = s.srv.Serve(ln) }()
+	return nil
+}
+
+func (s *computeService) Stop(ctx context.Context) error {
+	if s.vms != nil {
+		s.vms.stopAll()
+	}
+	if s.cancel != nil {
+		s.cancel()
+	}
+	if s.srv == nil {
+		return nil
+	}
+	return s.srv.Shutdown(ctx)
+}
+
+// instanceGroupManagers answers Kubernetes Engine's instance group
+// managers (#1913) on the Compute port.
+func (s *computeService) instanceGroupManagers(w http.ResponseWriter, r *http.Request) bool {
+	if !strings.Contains(r.URL.Path, "/instanceGroupManagers") {
+		return false
+	}
+	api := s.gke.API()
+	if api == nil {
+		return false
+	}
+	return api.ServeInstanceGroupManagers(w, r)
+}
+
+func (s *computeService) register(coord *lifecycle.Coordinator) {
+	if s != nil {
+		coord.Register(s)
+	}
+}
+
+// networkUsers are the Kubernetes Engine clusters on a network or subnet,
+// which keep it from being deleted, as on Google.
+func (s *computeService) networkUsers(rel string) []string {
+	if api := s.gke.API(); api != nil {
+		return api.NetworkUsers(rel)
+	}
+	return nil
+}
+
+// The networks each service checks against: nil interfaces (not a nil
+// *compute.Server in one) without Compute, so each checks nothing.
+
+func (s *computeService) memorystoreNetworks() redisadmin.Networks {
+	if api := s.API(); api != nil {
+		return api
+	}
+	return nil
+}
+
+func (s *computeService) gkeNetworks() gke.Networks {
+	if api := s.API(); api != nil {
+		return api
+	}
+	return nil
+}
+
+func (s *computeService) sqlNetworks() sqladmin.Networks {
+	if api := s.API(); api != nil {
+		return api
+	}
+	return nil
+}
+
+// computeResetter forgets the networks, as a reset forgets every
+// service's resources.
+type computeResetter struct{ svc *computeService }
+
+func (r *computeResetter) Name() string { return "compute" }
+
+func (r *computeResetter) Reset(ctx context.Context) error { return r.ResetProject(ctx, "") }
+
+func (r *computeResetter) ResetProject(_ context.Context, project string) error {
+	api := r.svc.API()
+	if api == nil {
+		return errors.New("the Compute Engine API has not started")
+	}
+	return api.ResetProject(project)
+}

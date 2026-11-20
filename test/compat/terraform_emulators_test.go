@@ -360,7 +360,7 @@ func TestTerraformFirestoreDatabaseIndexAndField(t *testing.T) {
 	const dbID = "tf-database"
 	dbName := "projects/" + h.Project() + "/databases/" + dbID
 
-	write := func(mode, retention string) {
+	write := func(mode, retention, pitr string) {
 		t.Helper()
 		module := googleProviderRequirement + fmt.Sprintf(`resource "google_firestore_database" "db" {
   project          = %q
@@ -369,6 +369,7 @@ func TestTerraformFirestoreDatabaseIndexAndField(t *testing.T) {
   type             = "FIRESTORE_NATIVE"
   concurrency_mode = %q
   deletion_policy  = "DELETE"
+  point_in_time_recovery_enablement = %q
 }
 resource "google_firestore_index" "i" {
   project    = %q
@@ -397,7 +398,7 @@ resource "google_firestore_backup_schedule" "daily" {
   retention = %q
   daily_recurrence {}
 }
-`, h.Project(), dbID, mode, h.Project(), h.Project(), h.Project(), retention)
+`, h.Project(), dbID, mode, pitr, h.Project(), h.Project(), h.Project(), retention)
 		if err := os.WriteFile(filepath.Join(dir, "main.tf"), []byte(module), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -427,7 +428,7 @@ resource "google_firestore_backup_schedule" "daily" {
 			t.Errorf("plan %s is not clean (%v):\n%s", when, err, lastLines(out, 40))
 		}
 	}
-	check := func(when string, mode adminpb.Database_ConcurrencyMode, retention time.Duration) {
+	check := func(when string, mode adminpb.Database_ConcurrencyMode, retention time.Duration, pitr adminpb.Database_PointInTimeRecoveryEnablement) {
 		t.Helper()
 		ss, err := c.ListBackupSchedules(ctx, &adminpb.ListBackupSchedulesRequest{Parent: dbName})
 		if err != nil || len(ss.GetBackupSchedules()) != 1 || ss.BackupSchedules[0].GetDailyRecurrence() == nil ||
@@ -441,6 +442,15 @@ resource "google_firestore_backup_schedule" "daily" {
 		if db.LocationId != "nam5" || db.Type != adminpb.Database_FIRESTORE_NATIVE || db.ConcurrencyMode != mode {
 			t.Errorf("the database %s = %v, want nam5, FIRESTORE_NATIVE, %v", when, db, mode)
 		}
+		// Point-in-time recovery (#1942): 7 days' versions with it, an
+		// hour's without.
+		wantRetention := time.Hour
+		if pitr == adminpb.Database_POINT_IN_TIME_RECOVERY_ENABLED {
+			wantRetention = 7 * 24 * time.Hour
+		}
+		if db.PointInTimeRecoveryEnablement != pitr || db.GetVersionRetentionPeriod().AsDuration() != wantRetention {
+			t.Errorf("the database %s: PITR %v, retention %v; want %v, %v", when, db.PointInTimeRecoveryEnablement, db.GetVersionRetentionPeriod().AsDuration(), pitr, wantRetention)
+		}
 		it := c.ListIndexes(ctx, &adminpb.ListIndexesRequest{Parent: dbName + "/collectionGroups/cities"})
 		idx, err := it.Next()
 		if err != nil || idx.State != adminpb.Index_READY || len(idx.Fields) < 2 || idx.Fields[1].FieldPath != "pop" {
@@ -452,20 +462,20 @@ resource "google_firestore_backup_schedule" "daily" {
 		}
 	}
 
-	write("OPTIMISTIC", "604800s")
+	write("OPTIMISTIC", "604800s", "POINT_IN_TIME_RECOVERY_ENABLED")
 	useGoogleProviderLock(t, dir)
 	run("init", "-input=false", "-no-color")
 	run("apply", "-auto-approve", "-input=false", "-no-color")
-	check("after apply", adminpb.Database_OPTIMISTIC, 7*24*time.Hour)
+	check("after apply", adminpb.Database_OPTIMISTIC, 7*24*time.Hour, adminpb.Database_POINT_IN_TIME_RECOVERY_ENABLED)
 	cleanPlan("right after apply")
 
-	write("PESSIMISTIC", "259200s")
+	write("PESSIMISTIC", "259200s", "POINT_IN_TIME_RECOVERY_DISABLED")
 	out, err := tf("plan", "-input=false", "-no-color")
 	if err != nil || !strings.Contains(out, "0 to add, 2 to change, 0 to destroy") {
 		t.Errorf("the updates are not planned in place (%v):\n%s", err, lastLines(out, 20))
 	}
 	run("apply", "-auto-approve", "-input=false", "-no-color")
-	check("after the update", adminpb.Database_PESSIMISTIC, 3*24*time.Hour)
+	check("after the update", adminpb.Database_PESSIMISTIC, 3*24*time.Hour, adminpb.Database_POINT_IN_TIME_RECOVERY_DISABLED)
 	cleanPlan("after the update")
 
 	run("destroy", "-auto-approve", "-input=false", "-no-color")

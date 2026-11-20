@@ -109,6 +109,10 @@ type Options struct {
 	MinFreeBytes uint64
 	// Now is time.Now when nil.
 	Now func() time.Time
+	// Networks are the Compute Engine networks a cluster's network and
+	// subnetwork are checked against (vpc.go, #1936); nil, or nil from it,
+	// checks none.
+	Networks func() Networks
 }
 
 // Server is the Kubernetes Engine API.

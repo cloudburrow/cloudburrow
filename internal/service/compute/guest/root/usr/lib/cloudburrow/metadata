@@ -1,0 +1,6 @@
+#!/bin/sh
+# Reads one value of this instance's metadata from CloudBurrow's Compute
+# Engine API (#1963), as the guest environment reads the metadata server's.
+# CLOUDBURROW_GUEST_METADATA is the instance's own guest URL, which its pod
+# is given.
+exec curl -sf -H 'Metadata-Flavor: Google' "${CLOUDBURROW_GUEST_METADATA}/computeMetadata/v1/$1"

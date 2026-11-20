@@ -37,7 +37,7 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 	config.ServiceStorage:       {Providers: []string{"storage", "storage-deleted", "storage-settings", "storage-intelligence"}},
 	config.ServicePubSub:        {Providers: []string{"pubsub", "pubsub-subscriptions", "pubsub-snapshots", "pubsub-schemas"}},
 	config.ServiceTasks:         {Providers: []string{"tasks"}},
-	config.ServiceRun:           {Providers: []string{"run", "run-jobs", "run-worker-pools", "run-domains", "run-instances", "run-builds", "cloud-build-triggers", "cloud-build-worker-pools", "cloud-build-dashboard", "cloud-build-repositories", "cloud-build-settings", "secure-source-manager", "artifact-registry", "artifact-registry-settings", "functions", "eventarc"}},
+	config.ServiceRun:           {Providers: []string{"run", "run-jobs", "run-worker-pools", "run-domains", "run-instances", "run-builds", "cloud-build-triggers", "cloud-build-worker-pools", "cloud-build-dashboard", "cloud-build-repositories", "cloud-build-settings", "secure-source-manager", "artifact-registry", "artifact-registry-settings", "functions", "eventarc", "vertex-models", "vertex-endpoints"}},
 	config.ServiceSecrets:       {Providers: []string{"secrets", "secrets-regional"}},
 	config.ServiceFirestore:     {Providers: []string{"firestore", "firestore-databases"}},
 	config.ServiceDatastore:     {Providers: []string{"datastore"}},
@@ -56,6 +56,10 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 	// The Kubernetes Engine API (#1913): its clusters are on Kubernetes
 	// clusters, beside the instance's own.
 	config.ServiceGKE: {Providers: []string{"gkeclusters"}},
+	config.ServiceMonitoring: {Providers: []string{"monitoring-explorer", "monitoring-metrics", "monitoring-alerting", "monitoring-incidents",
+		"monitoring-channels", "monitoring-uptime", "monitoring-dashboards", "monitoring-groups", "monitoring-services", "monitoring-snoozes"}},
+	// VPC network (#1936): the Compute Engine API's networking.
+	config.ServiceCompute: {Providers: []string{"vpc-networks", "vpc-firewalls", "vpc-routes", "vpc-addresses"}},
 }
 
 // clusterScreens are the registry's screens that belong to no selectable
@@ -63,7 +67,7 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 // Speech-to-Text on the local AI endpoint (#1930), and CloudBurrow's own
 // cluster.
 var clusterScreens = []string{
-	"projects", "hierarchy", "tags", "iam", "iam-roles", "iam-groups", "iam-service-accounts", "iam-audit", "iam-orgpolicies", "iam-labels", "iam-settings", "serviceusage", "serviceusage-operations", "ai",
+	"projects", "hierarchy", "tags", "iam", "iam-roles", "iam-groups", "iam-service-accounts", "iam-workload-identity", "iam-audit", "iam-orgpolicies", "iam-labels", "iam-settings", "serviceusage", "serviceusage-operations", "ai",
 	"documentai-overview", "documentai-gallery", "documentai", "speech-transcriptions", "speech-recognizers",
 	"speech-custom-classes", "speech-phrase-sets",
 	"workloads", "pods", "k8sservices", "jobs", "nodes", "k8sstorage", "events",
@@ -148,14 +152,16 @@ func coverageDeps(t *testing.T) consoleDeps {
 	}
 	projects := resourcemanager.New(store.NewMemory())
 	d := consoleDeps{
-		cfg:       cfg,
-		projects:  projects,
-		tasks:     &tasksService{},
-		secrets:   &secretsService{},
-		kms:       &kmsService{},
-		privateCA: &privateCAService{},
-		scheduler: &schedulerService{},
-		logging:   &loggingService{},
+		cfg:        cfg,
+		projects:   projects,
+		tasks:      &tasksService{},
+		secrets:    &secretsService{},
+		kms:        &kmsService{},
+		privateCA:  &privateCAService{},
+		monitoring: &monitoringService{},
+		compute:    &computeService{},
+		scheduler:  &schedulerService{},
+		logging:    &loggingService{},
 		// The APIs & Services page (#1352) reads the Service Usage server.
 		serviceUsage: newServiceUsageServer(cfg, projects, store.NewMemory()),
 		// The Backup and DR page (#1433) reads the Backup and DR server.
