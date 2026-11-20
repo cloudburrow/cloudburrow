@@ -30,7 +30,16 @@ package firestoreadmin
 //     keeps their versions (Compact). The new JVM is given the export, as
 //     after any restart, and the gate opens again. A failed export, or a
 //     container that never takes the request, changes nothing: the gate
-//     opens and the emulator keeps its documents and versions.
+//     opens and the emulator keeps its documents and versions;
+//   - nothing opens the gate while a compaction runs (#2018): no call
+//     held at it goes through, however long it waits; the run loop's
+//     check of the emulator waits for the compaction, so it never takes
+//     the old JVM's sentinel for the new one's; the compaction itself
+//     gives the documents back only to an emulator without the sentinel,
+//     so an old JVM still answering after the shell took the request is
+//     waited out; and no export runs between the restart and the import,
+//     which would replace the documents' exports with the new JVM's empty
+//     databases.
 //
 // What a compaction costs is the versions: the emulator holds none from
 // before the import, so the database's earliestVersionTime moves to the
@@ -185,7 +194,10 @@ type call struct {
 
 // enter waits at the gate and registers r's call, atomically with the
 // gate being open, so a compaction that closes it sees every call that
-// got through.
+// got through. A call held longer than gateWait goes through, but never
+// while a compaction runs: past its drain, a write would land in the JVM
+// it is about to restart, after the export, or in the new one before the
+// import, which overwrites it (#2018).
 func (d *Documents) enter(r *http.Request, cancel context.CancelFunc) *call {
 	return d.enterCtx(r.Context(), isStream(r), cancel)
 }
@@ -193,7 +205,11 @@ func (d *Documents) enter(r *http.Request, cancel context.CancelFunc) *call {
 // enterCtx is enter for a call made in ctx, which cancel ends.
 func (d *Documents) enterCtx(ctx context.Context, stream bool, cancel context.CancelFunc) *call {
 	c := &call{stream: stream, cancel: cancel}
-	for deadline := time.Now().Add(gateWait); ; {
+	wait := d.gateWait
+	if wait <= 0 {
+		wait = gateWait
+	}
+	for deadline := time.Now().Add(wait); ; {
 		d.wait(ctx)
 		d.mu.Lock()
 		open := false
@@ -202,7 +218,7 @@ func (d *Documents) enterCtx(ctx context.Context, stream bool, cancel context.Ca
 			open = true
 		default:
 		}
-		if open || ctx.Err() != nil || !time.Now().Before(deadline) {
+		if open || ctx.Err() != nil || (!d.compacting && !time.Now().Before(deadline)) {
 			if d.inflight == nil {
 				d.inflight = map[*call]struct{}{}
 			}
@@ -415,16 +431,19 @@ func (w *cutWriter) refuse(r *http.Request) {
 // maybeCompact compacts the emulator's versions when its heap is past
 // compactAt (above).
 func (d *Documents) maybeCompact(ctx context.Context) {
+	d.heapMu.Lock()
 	if d.heap == nil {
+		d.heapMu.Unlock()
 		return
 	}
 	d.heap.read()
 	if !d.heap.full() || !d.isRestored() || time.Since(d.lastCompact) < d.compactWait {
+		d.heapMu.Unlock()
 		return
 	}
-	d.lastCompact, d.compactWait = time.Now(), compactGap
 	d.logf("firestore documents: the emulator's heap holds %d of %d MiB after a full collection: compacting its versions",
 		d.heap.used>>20, d.heap.maxBytes>>20)
+	d.heapMu.Unlock()
 	if err := d.Compact(ctx); err != nil && ctx.Err() == nil {
 		d.logf("firestore documents: compaction: %v", err)
 	}
@@ -448,15 +467,33 @@ const restartWait = 2 * time.Minute
 // after any restart (checkRestored).
 func (d *Documents) Compact(ctx context.Context) error {
 	start := time.Now()
-	d.close()
+	// No import runs while it does (restoreMu): one would open the gate
+	// on the old JVM's sentinel, between the export and the restart, or
+	// before the new JVM is given the documents (#2018).
+	d.restoreMu.Lock()
+	defer d.restoreMu.Unlock()
+	if !d.isRestored() {
+		return fmt.Errorf("the emulator does not hold the documents yet")
+	}
+	d.heapMu.Lock()
+	d.lastCompact, d.compactWait = start, compactGap
+	d.heapMu.Unlock()
+	// The gate stays closed until the compaction ends, whatever else
+	// opens it, and no call held at it goes through (enterCtx).
+	d.setCompacting(true)
+	defer d.setCompacting(false)
 	d.drain(ctx)
-	if err := d.Export(ctx); err != nil {
-		d.open()
+	if err := d.exportHeld(ctx); err != nil {
 		return fmt.Errorf("export (the emulator keeps its versions): %w", err)
 	}
+	// From here the emulator is taken not to hold the documents: no
+	// export (exportHeld) replaces theirs with the restarted JVM's.
+	d.exportMu.Lock()
+	d.setHeld(false)
+	d.exportMu.Unlock()
 	req := filepath.Join(d.dir, RestartFile+d.host)
 	if err := os.WriteFile(req, nil, 0o644); err != nil {
-		d.open()
+		d.setHeld(true) // the old JVM runs on, with everything
 		return fmt.Errorf("asking for the emulator's restart: %w", err)
 	}
 	deadline := time.Now().Add(restartWait)
@@ -468,12 +505,13 @@ func (d *Documents) Compact(ctx context.Context) error {
 			// The shell never took it: the old JVM still runs, with
 			// every document and version.
 			_ = os.Remove(req)
-			d.open()
+			d.setHeld(true)
 			return fmt.Errorf("the emulator's container did not take the restart request in %s", restartWait)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
 	d.compactions.Add(1)
+	d.heapMu.Lock()
 	if d.heap != nil {
 		d.heap.used, d.heap.latest = 0, 0
 		// The documents alone, as exported, near the heap: compacting
@@ -484,16 +522,36 @@ func (d *Documents) Compact(ctx context.Context) error {
 				b>>20, d.heap.maxBytes>>20, compactBackoff)
 		}
 	}
-	for !d.isRestored() {
+	d.heapMu.Unlock()
+	// The old JVM may answer for a moment after the shell took the
+	// request (a kill is not instant, and one that failed leaves it
+	// running): it is the one whose sentinel is there, since nothing
+	// but this import writes one into the new JVM. Only an emulator
+	// without it, the new JVM, is given the documents.
+	for {
+		code, err := d.call(ctx, http.MethodGet, sentinelPath, nil)
+		switch {
+		case err == nil && code == http.StatusOK:
+			if time.Now().After(deadline) || ctx.Err() != nil {
+				// The old JVM never went: it holds every document
+				// and version still.
+				d.setHeld(true)
+				return fmt.Errorf("the emulator's JVM was not restarted in %s; it keeps its documents and versions", restartWait)
+			}
+		case err == nil && code < 500:
+			if err := d.restore(ctx); err != nil {
+				d.logf("firestore documents: %v", err)
+			} else {
+				d.logf("firestore documents: compacted the emulator's versions in %s: it was restarted and given its documents back; their earliest version time is now",
+					time.Since(start).Round(time.Millisecond))
+				return nil
+			}
+		}
 		if time.Now().After(deadline) || ctx.Err() != nil {
 			return fmt.Errorf("the emulator has not come back in %s; the documents are imported once it does", restartWait)
 		}
 		time.Sleep(100 * time.Millisecond)
-		d.checkRestored(ctx)
 	}
-	d.logf("firestore documents: compacted the emulator's versions in %s: it was restarted and given its documents back; their earliest version time is now",
-		time.Since(start).Round(time.Millisecond))
-	return nil
 }
 
 // Compactions is how many compactions have restarted the emulator.

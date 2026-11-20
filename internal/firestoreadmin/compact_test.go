@@ -79,6 +79,14 @@ type restartingEmulator struct {
 	docs     map[string]string
 	sentinel bool
 	dead     bool // between the kill and the next JVM's start
+
+	// The orderings a CI run can take (#2018), injected: taken, when
+	// set, runs once the shell has seen a restart request and before it
+	// kills the JVM; takeFirst has it remove the request before the kill
+	// (a kill is not instant, so the old JVM can answer after the
+	// request is gone).
+	taken     func()
+	takeFirst bool
 }
 
 func (e *restartingEmulator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -133,6 +141,12 @@ func (e *restartingEmulator) shell(ctx context.Context) {
 		if _, err := os.Stat(req); err != nil {
 			continue
 		}
+		if e.takeFirst {
+			_ = os.Remove(req)
+		}
+		if e.taken != nil {
+			e.taken()
+		}
 		e.mu.Lock()
 		e.dead, e.docs, e.sentinel = true, map[string]string{}, false
 		e.jvm++
@@ -157,13 +171,66 @@ func (e *restartingEmulator) commit(key, value string) bool {
 	return true
 }
 
-// TestACompactionLosesNoAcknowledgedWrite (#1969): writes keep going
-// through the front while it compacts the emulator's versions twice: each
-// is held at the gate, or finishes before the export, so every write
-// acknowledged is in the emulator after the restarts; a Listen stream open
-// across the compaction is ended UNAVAILABLE with a RetryInfo; and the
-// database's earliest version time moves to the compaction.
+// TestACompactionLosesNoAcknowledgedWrite (#1969, #2018): writes keep
+// going through the front while it compacts the emulator's versions twice:
+// each is held at the gate, or finishes before the export, so every write
+// acknowledged is in the emulator once each compaction returns, and after
+// both; a Listen stream open across the compaction is ended UNAVAILABLE
+// with a RetryInfo; and the database's earliest version time moves to the
+// compaction. Each case injects an ordering a loaded CI run can take
+// between the export and the restarted JVM's import (#2018, where 1941 of
+// 2104 acknowledged writes were lost).
 func TestACompactionLosesNoAcknowledgedWrite(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		// setup injects the ordering into the emulator's shell and
+		// the front's documents.
+		setup func(ctx context.Context, emu *restartingEmulator, d *Documents)
+	}{
+		{"as the shell takes the request at once", func(context.Context, *restartingEmulator, *Documents) {}},
+		{
+			// The run loop's check of the sentinel lands between the
+			// export and the kill: it saw the old JVM's, and opened
+			// the gate on writes to the JVM about to go; the
+			// compaction then took the gate as the import's and
+			// returned, and the next export took the empty new JVM's.
+			"with the run loop's check between the export and the kill",
+			func(ctx context.Context, emu *restartingEmulator, d *Documents) {
+				emu.taken = func() {
+					checked := make(chan struct{})
+					go func() { d.checkRestored(ctx); close(checked) }()
+					select {
+					case <-checked:
+					case <-time.After(300 * time.Millisecond): // held for the compaction
+					}
+					time.Sleep(100 * time.Millisecond)
+				}
+			},
+		},
+		{
+			// The request is gone before the old JVM is: its sentinel
+			// still answers, as the import's would.
+			"when the old JVM answers after the request is taken",
+			func(_ context.Context, emu *restartingEmulator, _ *Documents) {
+				emu.takeFirst = true
+				emu.taken = func() { time.Sleep(300 * time.Millisecond) }
+			},
+		},
+		{
+			// A call held past gateWait went through the closed gate,
+			// to the JVM about to go.
+			"when calls are held past the gate's wait",
+			func(_ context.Context, emu *restartingEmulator, d *Documents) {
+				d.gateWait = 20 * time.Millisecond
+				emu.taken = func() { time.Sleep(300 * time.Millisecond) }
+			},
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) { testCompactionKeepsAcknowledgedWrites(t, c.setup) })
+	}
+}
+
+func testCompactionKeepsAcknowledgedWrites(t *testing.T, setup func(context.Context, *restartingEmulator, *Documents)) {
 	dir := t.TempDir()
 	host, _ := os.Hostname()
 	emu := &restartingEmulator{dir: dir, host: host, docs: map[string]string{}}
@@ -171,7 +238,6 @@ func TestACompactionLosesNoAcknowledgedWrite(t *testing.T) {
 	t.Cleanup(srv.Close)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go emu.shell(ctx)
 	a := New(strings.TrimPrefix(srv.URL, "http://"))
 	a.SawResource("projects/p/databases/(default)/documents/c/d")
 	d, err := a.KeepDocuments(ctx, dir, time.Hour, false, t.Logf)
@@ -179,6 +245,8 @@ func TestACompactionLosesNoAcknowledgedWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { cancel(); <-d.Done() })
+	setup(ctx, emu, d)
+	go emu.shell(ctx)
 
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/Listen") {
@@ -228,6 +296,12 @@ func TestACompactionLosesNoAcknowledgedWrite(t *testing.T) {
 	var n atomic.Int64
 	var wg sync.WaitGroup
 	stop := make(chan struct{})
+	// Each writer keeps its connection: with the default transport's 2
+	// idle connections a host, the others were closed after each write,
+	// and a -count=50 run used up the machine's ephemeral ports.
+	tr := &http.Transport{MaxIdleConnsPerHost: 16}
+	t.Cleanup(tr.CloseIdleConnections)
+	client := &http.Client{Transport: tr}
 	for w := 0; w < 8; w++ {
 		wg.Add(1)
 		go func(w int) {
@@ -239,10 +313,11 @@ func TestACompactionLosesNoAcknowledgedWrite(t *testing.T) {
 				default:
 				}
 				key := fmt.Sprintf("w%d-%d", w, i)
-				res, err := http.Post(front.URL+"/v1/projects/p/databases/(default)/documents:commit?k="+key, "application/json", nil)
+				res, err := client.Post(front.URL+"/v1/projects/p/databases/(default)/documents:commit?k="+key, "application/json", nil)
 				if err != nil {
 					continue
 				}
+				_, _ = io.Copy(io.Discard, res.Body)
 				_ = res.Body.Close()
 				if res.StatusCode == http.StatusOK {
 					acked.Store(key, true)
@@ -251,30 +326,42 @@ func TestACompactionLosesNoAcknowledgedWrite(t *testing.T) {
 			}
 		}(w)
 	}
+	// lost counts the acknowledged writes the emulator does not hold. A
+	// write is acknowledged once the emulator holds it, and only a
+	// restart drops one, so at any moment no compaction runs it is 0.
+	lost := func() int {
+		emu.mu.Lock()
+		defer emu.mu.Unlock()
+		lost := 0
+		acked.Range(func(k, _ any) bool {
+			if _, ok := emu.docs[k.(string)]; !ok {
+				lost++
+			}
+			return true
+		})
+		return lost
+	}
 	time.Sleep(200 * time.Millisecond)
 	for i := 0; i < 2; i++ {
 		if err := d.Compact(ctx); err != nil {
 			t.Fatalf("compaction %d: %v", i+1, err)
+		}
+		if l := lost(); l > 0 {
+			t.Errorf("as compaction %d returned, %d of %d acknowledged writes are not in the emulator", i+1, l, n.Load())
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
 	close(stop)
 	wg.Wait()
 
-	if d.Compactions() != 2 || emu.jvm != 2 {
-		t.Errorf("compactions %d, emulator restarts %d; want 2 and 2", d.Compactions(), emu.jvm)
-	}
 	emu.mu.Lock()
-	lost := 0
-	acked.Range(func(k, _ any) bool {
-		if _, ok := emu.docs[k.(string)]; !ok {
-			lost++
-		}
-		return true
-	})
+	jvm := emu.jvm
 	emu.mu.Unlock()
-	if lost > 0 || n.Load() == 0 {
-		t.Errorf("%d of %d acknowledged writes lost across the compactions", lost, n.Load())
+	if d.Compactions() != 2 || jvm != 2 {
+		t.Errorf("compactions %d, emulator restarts %d; want 2 and 2", d.Compactions(), jvm)
+	}
+	if l := lost(); l > 0 || n.Load() == 0 {
+		t.Errorf("%d of %d acknowledged writes lost across the compactions", l, n.Load())
 	}
 	select {
 	case res := <-listen:
