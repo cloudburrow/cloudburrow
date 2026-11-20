@@ -277,7 +277,14 @@ func TestSourceManagerHooksReviewsAndRules(t *testing.T) {
 	if closed.body == nil || closed.body["pull_request"].(map[string]any)["merged"] != true {
 		t.Fatalf("no closed, merged pull_request delivery")
 	}
-	if ds := SourceManagerHookDeliveries(h.GetName()); len(ds) < 5 || ds[0].Status != 200 {
+	// The receiver can answer before the delivery is recorded (PR #1982's
+	// check job saw 4 of the 5), so the record is waited for.
+	ds := SourceManagerHookDeliveries(h.GetName())
+	for deadline := time.Now().Add(10 * time.Second); len(ds) < 5 && time.Now().Before(deadline); {
+		time.Sleep(20 * time.Millisecond)
+		ds = SourceManagerHookDeliveries(h.GetName())
+	}
+	if len(ds) < 5 || ds[0].Status != 200 {
 		t.Errorf("deliveries = %d, first %+v", len(ds), ds)
 	}
 	if err := SourceManagerTestDelivery(ctx, h.GetName()); err != nil {
