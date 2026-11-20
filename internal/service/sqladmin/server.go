@@ -82,6 +82,13 @@ type apiError struct {
 
 func (e *apiError) Error() string { return e.msg }
 
+// HTTPStatus is the HTTP status the error answers, for the services that
+// call this one (Backup and DR's job logs, #1924).
+func (e *apiError) HTTPStatus() int { return e.code }
+
+// GoogleStatus is the error's Google status, such as NOT_FOUND.
+func (e *apiError) GoogleStatus() string { return e.status }
+
 // Errorf is an error the server answers with code and the matching status.
 func Errorf(code int, format string, args ...any) error {
 	st := map[int]string{
