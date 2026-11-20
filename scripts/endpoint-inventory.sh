@@ -36,11 +36,18 @@ for p in google google-beta; do
   } >"$out/terraform-$p-$provider.txt"
 done
 
+# gcloud 593 split core/properties.py into a package; earlier releases keep
+# the section in properties.py.
+src=$sdk/lib/googlecloudsdk/core/properties/sections/api_endpoint_overrides.py
+[ -f "$src" ] || src=$sdk/lib/googlecloudsdk/core/properties.py
+[ -f "$src" ] || { echo "no api_endpoint_overrides section under $sdk" >&2; exit 1; }
+rel=${src#"$sdk/"}
 {
-  echo "# Every api_endpoint_overrides property of gcloud $gcloud, from its lib/googlecloudsdk/core/properties.py (scripts/endpoint-inventory.sh, #1975)."
-  awk '/^class _SectionApiEndpointOverrides/{f=1;next} f&&/^class /{exit} f' "$sdk/lib/googlecloudsdk/core/properties.py" |
+  echo "# Every api_endpoint_overrides property of gcloud $gcloud, from its $rel (scripts/endpoint-inventory.sh, #1975)."
+  awk '/^class _SectionApiEndpointOverrides/{f=1;next} f&&/^class /{exit} f' "$src" |
     tr -d '\n' | grep -oE "_Add\(\s*'[a-z0-9_]+'" | sed -E "s/.*'(.*)'/\1/" | LC_ALL=C sort
 } >"$out/gcloud-$gcloud.txt"
+[ "$(grep -vc '^#' "$out/gcloud-$gcloud.txt")" -gt 0 ] || { echo "found no gcloud overrides in $src" >&2; exit 1; }
 
 echo "wrote $out/terraform-google-$provider.txt, terraform-google-beta-$provider.txt and gcloud-$gcloud.txt;"
 echo "update the versions and embeds in internal/unserved/unserved.go, and TerraformNoEnv and GcloudUnoverridable by hand"

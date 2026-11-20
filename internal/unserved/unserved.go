@@ -32,7 +32,7 @@ import (
 // dependencies.json's realTools entries.
 const (
 	TerraformProviderVersion = "8.4.0"
-	GcloudVersion            = "586.0.0"
+	GcloudVersion            = "593.0.0"
 )
 
 //go:embed terraform-google-8.4.0.txt
@@ -41,7 +41,7 @@ var terraformGoogle string
 //go:embed terraform-google-beta-8.4.0.txt
 var terraformGoogleBeta string
 
-//go:embed gcloud-586.0.0.txt
+//go:embed gcloud-593.0.0.txt
 var gcloudOverrides string
 
 // TerraformNoEnv are the endpoint arguments of the pinned providers that
@@ -55,7 +55,7 @@ var TerraformNoEnv = map[string]bool{
 	"resource_manager3_custom_endpoint": true, "runtimeconfig_custom_endpoint": true,
 }
 
-// GcloudUnoverridable are the APIs gcloud 586.0.0 has a client for
+// GcloudUnoverridable are the APIs gcloud 593.0.0 has a client for
 // (generated_clients/apis/apis_map.py) but no api_endpoint_overrides
 // property: gcloud resolves their endpoint with no override to read, so no
 // configuration can point them anywhere but googleapis.com. gcloud-setup
@@ -64,10 +64,10 @@ var GcloudUnoverridable = []string{
 	"admin", "agenticapplications", "artifactscanguard", "bigquerydatatransfer", "billingbudgets",
 	"blockchainnodeengine", "blockchainvalidatormanager", "connectors", "dataform", "dialogflow", "dlp",
 	"essentialcontacts", "gsuiteaddons", "hstprof", "microservices", "serviceconsumermanagement",
-	"servicenetworking", "translate", "videointelligence", "websecurityscanner",
+	"servicenetworking", "telemetrymanagement", "translate", "videointelligence", "websecurityscanner",
 }
 
-// GcloudHardcoded are gcloud 586.0.0 commands that name an API by a name
+// GcloudHardcoded are gcloud 593.0.0 commands that name an API by a name
 // with no property even though its alias has one, so the alias's override
 // does not reach them either (read in the SDK's sources, #1975).
 var GcloudHardcoded = map[string]string{
