@@ -101,7 +101,8 @@ COMPAT_SQL_REPLICA_TESTS='^Test[A-Za-z]*SQL[A-Za-z0-9]*(HighAvailability|Replica
 # whose instance serves the services they read back.
 # The accessibility audit (#1604) follows the same split: its Cloud Storage,
 # Pub/Sub and Logs Explorer pages run in storage, and
-# TestBigQueryScreensAreNamedAndLegible in emulators; the rest of the
+# TestBigQueryScreensAreNamedAndLegible and TestBigQueryTransferScreensMeetWCAG
+# (#1948) in emulators; the rest of the
 # console's screens are TestCloudRunAndCICDScreensMeetWCAG (run),
 # TestDocumentAIAndSpeechScreensMeetWCAG and
 # TestSpeechAdaptationScreensMeetWCAG (run),
@@ -331,7 +332,8 @@ compat_shard() {
       # the copies from a folder LOGGING_RESOURCEMANAGER (#1568).
       # Cloud KMS as CMEK_KMS, for Firestore's customer-managed keys
       # (#1881), so the KMS suite stays in served.
-      TEST_VARS+=,LOGGING_RESOURCEMANAGER,SPANNER,SPANNER_REST,DATASTORE,FIRESTORE,FIRESTORE_MONGODB,FIRESTORE_MONGODB_CA,FIRESTORE_RESOURCEMANAGER,BIGTABLE,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT,BIGQUERY_RESOURCEMANAGER,SINK_LOGGING,SINK_STORAGE,SINK_PUBSUB,FIRESTORE_STORAGE,BQML_STORAGE,CMEK_KMS
+      # The BigQuery Data Transfer Service (#1948), served with BigQuery.
+      TEST_VARS+=,DATATRANSFER,LOGGING_RESOURCEMANAGER,SPANNER,SPANNER_REST,DATASTORE,FIRESTORE,FIRESTORE_MONGODB,FIRESTORE_MONGODB_CA,FIRESTORE_RESOURCEMANAGER,BIGTABLE,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT,BIGQUERY_RESOURCEMANAGER,SINK_LOGGING,SINK_STORAGE,SINK_PUBSUB,FIRESTORE_STORAGE,BQML_STORAGE,CMEK_KMS
       # Firestore's probe documents and named database (#1636): written
       # alone, as a front-state reset in the suite forgets the database.
       SETUP_TESTS="TestFirestoreRestartSetup"

@@ -508,6 +508,15 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 			envVar{cliEndpointVar("monitoring"), mo,
 				"Cloud Monitoring API v3, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint"})
 	}
+	// The BigQuery Data Transfer Service (#1948): Terraform's
+	// google_bigquery_data_transfer_config through
+	// bigquery_data_transfer_custom_endpoint.
+	if dataTransferEnabled(cfg) && cfg.Endpoints.DataTransfer != 0 {
+		dt := addr(cfg.Endpoints.DataTransfer)
+		vars = append(vars,
+			envVar{cliEndpointVar("datatransfer"), dt,
+				"the BigQuery Data Transfer Service v1, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint"})
+	}
 
 	// Service Usage (#1352): gcloud services, and Terraform's
 	// google_project_service through service_usage_custom_endpoint.
@@ -683,6 +692,7 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 		"privateca":              &e.PrivateCA,
 		"gke":                    &e.GKE,
 		"monitoring":             &e.Monitoring,
+		"datatransfer":           &e.DataTransfer,
 		"compute":                &e.Compute,
 		// The local AI endpoint, which serves Vertex AI's Model Registry
 		// and Endpoints (#1940) to gcloud-setup and terraform, and Document

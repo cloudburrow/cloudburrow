@@ -66,6 +66,8 @@ var serviceAgents = map[string]string{
 	"sqladmin.googleapis.com": "gcp-sa-cloud-sql.iam.gserviceaccount.com",
 	// Cloud Tasks Service Account.
 	"cloudtasks.googleapis.com": "gcp-sa-cloudtasks.iam.gserviceaccount.com",
+	// BigQuery Data Transfer Service Agent (#1948); https://cloud.google.com/iam/docs/service-agents
+	"bigquerydatatransfer.googleapis.com": "gcp-sa-bigquerydatatransfer.iam.gserviceaccount.com",
 	// Cloud Scheduler Service Account.
 	"cloudscheduler.googleapis.com": "gcp-sa-cloudscheduler.iam.gserviceaccount.com",
 	// Google Cloud Run Service Agent.

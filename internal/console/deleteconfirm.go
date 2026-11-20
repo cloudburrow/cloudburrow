@@ -147,7 +147,11 @@ var DeleteConfirmRules = map[string]DeleteConfirmRule{
 	// "In the dialog, enter the instance ID, and then click Delete."
 	"memorystore-valkey": {Style: DeleteConfirmName, Source: "https://docs.cloud.google.com/memorystore/docs/valkey/delete-instances", Verified: true},
 	// "In the Delete dataset dialog, type delete into the field, and then click Delete."
-	"bigquery": {Style: DeleteConfirmWord, Source: "https://docs.cloud.google.com/bigquery/docs/managing-datasets", Verified: true},
+	// UNVERIFIED: the scheduling-queries and transfer pages say only "click Delete"; no dialog described (docs re-read 2026-11-19).
+	"bigquery-transfers": unverified,
+	// UNVERIFIED: as bigquery-transfers (docs re-read 2026-11-19).
+	"bigquery-scheduled-queries": unverified,
+	"bigquery":                   {Style: DeleteConfirmWord, Source: "https://docs.cloud.google.com/bigquery/docs/managing-datasets", Verified: true},
 	// UNVERIFIED: no console delete for a job's history (docs re-read 2026-11-19)
 	"bigquery-jobs": unverified,
 	// UNVERIFIED: "Next to your processor, in the Action menu, click Delete

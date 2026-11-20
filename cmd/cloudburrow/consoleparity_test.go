@@ -121,6 +121,21 @@ var parityRows = []parityRow{
 		Methods:  []string{"compute.projects.get", "compute.projects.setCommonInstanceMetadata"},
 		Provider: "compute-metadata", Offers: "Metadata (/compute/metadata): the project's common instance metadata, key and value, ssh-keys as gcloud compute ssh adds them included; Edit, every item at once under the metadata's fingerprint (#1965)",
 		Tests: []string{"TestConsoleComputeVMs", "TestComputeEngineThroughTheBrowser", "TestComputeEngineScreensMeetWCAG"}},
+	// The BigQuery Data Transfer Service (#1948), on BigQuery's Data
+	// transfers and Scheduled queries pages.
+	{Resource: "BigQuery transfer configs", Service: "datatransfer",
+		Methods: []string{"DataTransferService/CreateTransferConfig", "DataTransferService/GetTransferConfig", "DataTransferService/ListTransferConfigs",
+			"DataTransferService/UpdateTransferConfig", "DataTransferService/DeleteTransferConfig", "DataTransferService/ListDataSources", "DataTransferService/GetDataSource"},
+		Provider: "bigquery-transfers", Offers: "BigQuery > Data transfers (/bigquery-transfers) and Scheduled queries (/bigquery-scheduled-queries): each transfer config's display name, source, schedule, region, destination dataset, next run and last run state; Create transfer (Scheduled Query or Dataset Copy: name, schedule, dataset, query, destination table template, write preference, source project and dataset, overwrite, Pub/Sub topic, failure email); a transfer's Configuration; Disable and Enable transfer; Delete (#1948)",
+		Tests: []string{"TestConsoleDataTransfer", "TestBigQueryScheduledQueryThroughThePage"}},
+	{Resource: "BigQuery transfer runs", Service: "datatransfer",
+		Methods: []string{"DataTransferService/StartManualTransferRuns", "DataTransferService/GetTransferRun", "DataTransferService/ListTransferRuns",
+			"DataTransferService/ListTransferLogs", "DataTransferService/DeleteTransferRun"},
+		Provider: "bigquery-transfers", Offers: "a transfer's Run history: each run's run time, status, start and end and its last log message or error; Run transfer now; Schedule backfill (a start and end date, end excluded: a run per scheduled time); Delete run (#1948)",
+		Tests: []string{"TestConsoleDataTransfer", "TestBigQueryScheduledQueryThroughThePage"}},
+	{Resource: "BigQuery transfer deprecated backfill and enrollment", Service: "datatransfer",
+		Methods:  []string{"DataTransferService/ScheduleTransferRuns", "DataTransferService/EnrollDataSources", "DataTransferService/UnenrollDataSources", "DataTransferService/CheckValidCreds"},
+		Excluded: "ScheduleTransferRuns, deprecated for StartManualTransferRuns, which Schedule backfill calls; data source enrollment, which Google's console makes on a project's first visit with no surface of its own; and CheckValidCreds, which the console asks behind Create transfer's authorization step, which neither data source served has"},
 	// The Kubernetes Engine API (#1913), on the Kubernetes clusters page.
 	{Resource: "Kubernetes Engine clusters", Service: "gke",
 		Methods: []string{"ClusterManager/CreateCluster", "ClusterManager/GetCluster", "ClusterManager/ListClusters",

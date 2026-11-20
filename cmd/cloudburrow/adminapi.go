@@ -79,6 +79,8 @@ type adminDeps struct {
 	monitoring *monitoringService
 	// compute is the Compute Engine API (#1936), nil unless enabled.
 	compute *computeService
+	// dataTransfer is the BigQuery Data Transfer Service (#1948).
+	dataTransfer *dataTransferSvc
 }
 
 // mountAdmin attaches the admin API to the control server.
@@ -178,6 +180,9 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 	if d.run != nil {
 		// Repositories and projects' settings (#1543), served beside Cloud Run.
 		api.RegisterResetter(artifactRegistryResetter{})
+	}
+	if d.dataTransfer != nil {
+		api.RegisterResetter(&dataTransferResetter{svc: d.dataTransfer})
 	}
 	if d.gke != nil {
 		api.RegisterResetter(&gkeResetter{svc: d.gke})

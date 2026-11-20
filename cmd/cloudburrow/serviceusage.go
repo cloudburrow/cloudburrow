@@ -46,6 +46,7 @@ var serviceUsageAPIs = []struct {
 	{config.ServiceSpanner, serviceusage.API{Name: "spanner.googleapis.com", Title: "Cloud Spanner API"}},
 	{config.ServiceBigQuery, serviceusage.API{Name: "bigquery.googleapis.com", Title: "BigQuery API"}},
 	{config.ServiceBigQuery, serviceusage.API{Name: "bigquerystorage.googleapis.com", Title: "BigQuery Storage API"}},
+	{config.ServiceBigQuery, serviceusage.API{Name: "bigquerydatatransfer.googleapis.com", Title: "BigQuery Data Transfer API"}},
 	{config.ServiceMemorystore, serviceusage.API{Name: "redis.googleapis.com", Title: "Google Cloud Memorystore for Redis API"}},
 	{sqlAdminEndpoint, serviceusage.API{Name: "sqladmin.googleapis.com", Title: "Cloud SQL Admin API"}},
 	{config.ServiceBackupDR, serviceusage.API{Name: "backupdr.googleapis.com", Title: "Backup and DR Service API"}},

@@ -46,7 +46,7 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 	config.ServiceBigtable:      {Providers: []string{"bigtable", "bigtable-instances"}},
 	config.ServiceSpanner:       {Providers: []string{"spanner"}},
 	config.ServiceCloudSQL:      {Providers: []string{"cloudsql", "cloudsql-instances", "cloudsql-backups"}},
-	config.ServiceBigQuery:      {Providers: []string{"bigquery", "bigquery-jobs"}},
+	config.ServiceBigQuery:      {Providers: []string{"bigquery", "bigquery-jobs", "bigquery-transfers", "bigquery-scheduled-queries"}},
 	config.ServiceScheduler:     {Providers: []string{"scheduler"}},
 	config.ServiceKMS:           {Providers: []string{"kms", "kms-ekm", "kms-autokey", "kms-inventory", "kms-hsm"}},
 	config.ServiceLogging:       {Providers: []string{"logging-metrics", "logging-sinks", "logging-exclusions", "logging-buckets", "logging-settings", "logging-saved-queries", "logging-log-scopes", "logging-analytics"}, Screen: "/logs"},
@@ -158,16 +158,17 @@ func coverageDeps(t *testing.T) consoleDeps {
 	}
 	projects := resourcemanager.New(store.NewMemory())
 	d := consoleDeps{
-		cfg:        cfg,
-		projects:   projects,
-		tasks:      &tasksService{},
-		secrets:    &secretsService{},
-		kms:        &kmsService{},
-		privateCA:  &privateCAService{},
-		monitoring: &monitoringService{},
-		compute:    &computeService{},
-		scheduler:  &schedulerService{},
-		logging:    &loggingService{},
+		cfg:          cfg,
+		projects:     projects,
+		tasks:        &tasksService{},
+		secrets:      &secretsService{},
+		kms:          &kmsService{},
+		privateCA:    &privateCAService{},
+		monitoring:   &monitoringService{},
+		compute:      &computeService{},
+		dataTransfer: &dataTransferSvc{},
+		scheduler:    &schedulerService{},
+		logging:      &loggingService{},
 		// The APIs & Services page (#1352) reads the Service Usage server.
 		serviceUsage: newServiceUsageServer(cfg, projects, store.NewMemory()),
 		// The Backup and DR page (#1433) reads the Backup and DR server.

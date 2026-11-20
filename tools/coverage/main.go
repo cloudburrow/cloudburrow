@@ -68,6 +68,7 @@ import (
 	_ "cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
 	_ "cloud.google.com/go/aiplatform/apiv1beta1/aiplatformpb"
 	_ "cloud.google.com/go/artifactregistry/apiv1/artifactregistrypb"
+	_ "cloud.google.com/go/bigquery/datatransfer/apiv1/datatransferpb"
 	_ "cloud.google.com/go/bigtable/admin/apiv2/adminpb"
 	_ "cloud.google.com/go/bigtable/apiv2/bigtablepb"
 	_ "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
@@ -303,6 +304,9 @@ var areas = []area{
 		"google.monitoring.v3.AlertPolicyService", "google.monitoring.v3.NotificationChannelService", "google.monitoring.v3.UptimeCheckService",
 		"google.monitoring.v3.GroupService", "google.monitoring.v3.ServiceMonitoringService", "google.monitoring.v3.SnoozeService",
 		"google.monitoring.v3.QueryService", "google.monitoring.dashboard.v1.DashboardsService"}},
+	// The BigQuery Data Transfer Service (#1948): CloudBurrow's own, gRPC
+	// and JSON on one port. Its Locations mixin is the row other areas list.
+	{Key: "datatransfer", Title: "BigQuery Data Transfer Service (v1)", Own: true, Services: []string{"google.cloud.bigquery.datatransfer.v1.DataTransferService"}},
 }
 
 // workloadIdentityMethods is every workload identity pool method of the

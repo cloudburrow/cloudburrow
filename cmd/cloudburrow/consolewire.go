@@ -25,6 +25,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/service/apikeys"
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
+	"github.com/cloudburrow/cloudburrow/internal/service/datatransfer"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
 	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
@@ -92,6 +93,8 @@ type consoleDeps struct {
 	monitoring *monitoringService
 	// compute is the Compute Engine API (#1936), nil unless enabled.
 	compute *computeService
+	// dataTransfer is the BigQuery Data Transfer Service (#1948).
+	dataTransfer *dataTransferSvc
 	// sqlAdmin is the Cloud SQL Admin API, which restores Backup and DR
 	// backups; nil unless a Cloud SQL service is enabled.
 	sqlAdmin *sqladmin.Server
@@ -324,6 +327,11 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			// images and machine types, over the same API.
 			computeInstancesProvider{screen}, computeDisksProvider{screen}, computeSnapshotsProvider{screen},
 			computeImagesProvider{screen}, computeMachineTypesProvider{screen}, computeMetadataProvider{screen})
+	}
+	// BigQuery's Data transfers and Scheduled queries pages (#1948).
+	if d.dataTransfer != nil {
+		providers = append(providers, dataTransferProvider{svc: d.dataTransfer},
+			dataTransferProvider{svc: d.dataTransfer, only: datatransfer.ScheduledQuery})
 	}
 	if enabled[config.ServiceScheduler] && d.scheduler != nil {
 		providers = append(providers, schedulerProvider{svc: d.scheduler, faults: d.faults})

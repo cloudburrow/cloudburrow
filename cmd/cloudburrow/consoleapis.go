@@ -47,6 +47,7 @@ var apiLibrary = map[string]apiLibraryInfo{
 	"spanner.googleapis.com":              {"Databases", "Manages Spanner instances and databases, and runs transactions on them.", "spanner"},
 	"bigquery.googleapis.com":             {"Big data", "Creates datasets and tables, loads data and runs queries.", "bigquery"},
 	"bigquerystorage.googleapis.com":      {"Big data", "Reads and writes BigQuery table data in streams.", "bigquery"},
+	"bigquerydatatransfer.googleapis.com": {"Big data", "Schedules queries and copies datasets on a recurring schedule.", "bigquery"},
 	"redis.googleapis.com":                {"Databases", "Creates and manages Redis instances.", "memorystore"},
 	"sqladmin.googleapis.com":             {"Databases", "Administers Cloud SQL instances, databases, users and backups.", ""},
 	"backupdr.googleapis.com":             {"Storage", "Manages backup vaults, backup plans and the backups in them.", ""},
