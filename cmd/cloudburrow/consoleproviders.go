@@ -576,11 +576,17 @@ func (p runProvider) List(ctx context.Context, project string) (console.Listing,
 	}
 	items := make([]console.Resource, 0, len(svcs))
 	latest := p.runLatestCreated(ctx, svcs)
+	if project == "" {
+		project = p.defaultProject
+	}
+	// Deployed by: the Run API's last_modifier (#2049).
+	by := p.runLastModifiers(ctx, project)
 	for _, s := range svcs {
 		r := s.resource()
 		for k, v := range p.runGoogleFields(ctx, project, s, latest[s.Metadata.Name]) {
 			r.Fields[k] = v
 		}
+		r.Fields["Deployed by"] = orDash(by[s.Metadata.Name])
 		items = append(items, r)
 	}
 	return console.Listing{

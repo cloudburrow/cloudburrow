@@ -213,7 +213,7 @@ func runServiceLabels(s ksvcStatus) map[string]string {
 func (p runProvider) runGoogleFields(ctx context.Context, project string, s ksvcStatus, lastDeployed string) map[string]string {
 	kind, by := "Container", ""
 	if runIsFunction(s) {
-		kind, by = "Function", "Cloud Functions"
+		kind = "Function"
 	}
 	return map[string]string{
 		"Deployment type": kind, "Region": p.location(), "Authentication": p.runAuthentication(ctx, project, s.Metadata.Name),
@@ -268,14 +268,12 @@ func (p runProvider) runServiceSections(ctx context.Context, project, name strin
 	domains := p.domainsSection(ctx, project, serviceIDOf(name))
 	domains.Actions = p.domainActions(svc)
 	return []console.Section{
-		runNotLocal("metrics", "Metrics", "Request count, latency, container instance count and the other "+
-			"Cloud Run metrics are Cloud Monitoring's, which CloudBurrow does not run. Each request a "+
-			"service answers is in its Logs tab and in Logs Explorer."),
+		runMetricsSection(ctx, project, p.location(), serviceIDOf(name)),
 		runNotLocal("slos", "SLOs", "Service level objectives are Cloud Monitoring's service monitoring, "+
 			"which CloudBurrow does not run."),
 		{ID: "logs", Label: "Logs", Kind: console.KindLogs},
 		revisions,
-		p.runSourceSection(svc),
+		p.runSourceTab(ctx, project, svc),
 		p.triggersSection(ctx, project, svc),
 		p.runNetworkingSection(svc),
 		p.runSecuritySection(ctx, project, svc),
@@ -319,13 +317,18 @@ func runRevisionTraffic(l *console.Listing, svc *ksvcStatus) {
 	}
 }
 
+// runSourceTab is the Source tab: a function's (#2049), or a container's.
+func (p runProvider) runSourceTab(ctx context.Context, project string, svc *ksvcStatus) console.Section {
+	if sec, ok := p.runFunctionSourceSection(ctx, project, svc); ok {
+		return sec
+	}
+	return p.runSourceSection(svc)
+}
+
 // runSourceSection is the Source tab: what the service runs, and Deploy
 // from source.
 func (p runProvider) runSourceSection(svc *ksvcStatus) console.Section {
 	props := []console.Property{{Label: "Container image URL", Value: orDash(svc.image())}}
-	if runIsFunction(*svc) {
-		props = append(props, console.Property{Label: "Deployed by", Value: "Cloud Functions"})
-	}
 	return console.Section{ID: "source", Label: "Source", Kind: console.KindProperties,
 		Groups:  []console.PropertyGroup{{Properties: props}},
 		Actions: p.sourceActions(),

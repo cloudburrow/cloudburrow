@@ -189,6 +189,9 @@ func renderService(svc *runpb.Service, kname, namespace, instance string, secret
 	if err := checkScaling(svc); err != nil {
 		return "", err
 	}
+	if err := checkBuildConfig(svc.GetBuildConfig()); err != nil {
+		return "", err
+	}
 	// secretKeyRef env vars, recorded so they read back as set (#581).
 	secretEnv := secretEnvRefs(tmpl.GetContainers())
 
@@ -217,6 +220,7 @@ metadata:
 		raw, _ := protojson.Marshal(sc)
 		fmt.Fprintf(&b, "    %s: %q\n", annServiceScaling, string(raw))
 	}
+	renderRecord(&b, svc)
 	b.WriteString(`spec:
   template:
     metadata:
@@ -317,6 +321,11 @@ func secretEnvRefs(containers []*runpb.Container) map[string]secretEnvRef {
 func renderContainers(b *strings.Builder, containers []*runpb.Container, o containerRender) error {
 	for i, c := range containers {
 		image := containerImage(c.GetImage())
+		if c.GetImage() == PlaceholderImage && placeholderRef() == "" {
+			// Never pulled from Google's registry: it runs as the gateway's
+			// image (servicerecord.go), which a service's create reads.
+			return apierror.FailedPrecondition("%s runs only in a service's revision here", PlaceholderImage)
+		}
 		if err := images.RequireTagged(image); err != nil {
 			return apierror.InvalidArgument("%v", err)
 		}
@@ -341,11 +350,15 @@ func renderContainers(b *strings.Builder, containers []*runpb.Container, o conta
 		if err := renderProbe(b, "livenessProbe", c.GetLivenessProbe(), servingPort); err != nil {
 			return err
 		}
-		if len(c.GetCommand()) > 0 {
-			fmt.Fprintf(b, "          command: [%s]\n", quote(c.GetCommand()))
+		command, args := c.GetCommand(), c.GetArgs()
+		if c.GetImage() == PlaceholderImage && len(command) == 0 {
+			command, args = placeholderCommand(c)
 		}
-		if len(c.GetArgs()) > 0 {
-			fmt.Fprintf(b, "          args: [%s]\n", quote(c.GetArgs()))
+		if len(command) > 0 {
+			fmt.Fprintf(b, "          command: [%s]\n", quote(command))
+		}
+		if len(args) > 0 {
+			fmt.Fprintf(b, "          args: [%s]\n", quote(args))
 		}
 		if ports := c.GetPorts(); len(ports) > 0 {
 			b.WriteString("          ports:\n")
@@ -519,6 +532,7 @@ func FromKnative(k ksvc, parent string) *runpb.Service {
 			svc.BinaryAuthorization = &ba
 		}
 	}
+	readRecord(k.Metadata.Annotations, svc)
 	readJSONAnnotation(k.Metadata.Annotations, annServiceLabels, &svc.Labels)
 	readJSONAnnotation(k.Metadata.Annotations, annServiceAnnotations, &svc.Annotations)
 	tann := k.Spec.Template.Metadata.Annotations
@@ -548,6 +562,9 @@ func FromKnative(k ksvc, parent string) *runpb.Service {
 		container := &runpb.Container{Image: image, WorkingDir: c.WorkingDir,
 			StartupProbe: c.StartupProbe.toProbe(), LivenessProbe: c.LivenessProbe.toProbe(),
 			Command: c.Command, Args: c.Args}
+		if image == PlaceholderImage {
+			container.Command, container.Args = nil, nil // the placeholder's own
+		}
 		// Read back what ToKnative renders, so a masked update (#1260) that
 		// leaves the containers alone re-renders them unchanged.
 		if len(c.Resources.Limits) > 0 {

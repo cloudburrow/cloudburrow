@@ -1177,7 +1177,9 @@ jobs:
           # Cloud Logging and BigQuery's official clients, and enable the
           # Container Scanning API through its Service Usage, RUN_SERVICEUSAGE
           # (#1912): the scanner is the one prefetched into the state dir above.
-          if [ "$SHARD" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT,RUN_SERVICEUSAGE,WORKFLOWS; fi
+          # Cloud Monitoring's Cloud Run metrics, and the kubeconfig that
+          # port-forwards the gateway a service's URL is reached through (#2049).
+          if [ "$SHARD" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT,RUN_SERVICEUSAGE,WORKFLOWS,MONITORING,KUBECONFIG; fi
           # The sql shard's read back through the Cloud SQL Admin API, the Backup
           # and DR Service and Secret Manager, which holds Run SQL's password.
           if [ "$SHARD" = sql ]; then BROWSER_VARS+=,SQLADMIN,BACKUPDR,SECRETS; fi

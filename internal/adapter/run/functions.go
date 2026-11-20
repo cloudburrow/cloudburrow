@@ -371,6 +371,7 @@ func (f *FunctionsServer) CreateFunction(ctx context.Context, req *functionspb.C
 		fn.ServiceConfig = &functionspb.ServiceConfig{}
 	}
 	defaultServiceConfig(fn)
+	defaultUpdatePolicy(fn)
 	defaultEventTrigger(fn)
 	if fn.EventTrigger != nil {
 		fn.EventTrigger.Trigger = ""
@@ -576,7 +577,8 @@ func (f *FunctionsServer) deploy(ctx context.Context, opName, name string, build
 		svc := functionService(fn, image)
 		var op *longrunningpb.Operation
 		var err error
-		if _, gerr := f.s.GetService(ctx, &runpb.GetServiceRequest{Name: svcName}); gerr == nil {
+		if existing, gerr := f.s.GetService(ctx, &runpb.GetServiceRequest{Name: svcName}); gerr == nil {
+			keepRunSettings(svc, existing)
 			svc.Name = svcName
 			op, err = f.s.UpdateService(ctx, &runpb.UpdateServiceRequest{Service: svc})
 		} else {
@@ -619,6 +621,10 @@ func (f *FunctionsServer) deploy(ctx context.Context, opName, name string, build
 		return
 	}
 	sf.fn.State, sf.fn.StateMessages, sf.fn.UpdateTime = functionspb.Function_ACTIVE, nil, timestamppb.Now()
+	if od := sf.fn.GetBuildConfig().GetOnDeployUpdatePolicy(); od != nil && build {
+		// The base image this deploy built on (functionsrun.go).
+		od.RuntimeVersion = BaseImage(functionRegion(name), sf.fn.GetBuildConfig().GetRuntime())
+	}
 	var done proto.Message = cloneFunction(sf.fn)
 	if sf.v1 != nil {
 		done = f.finishV1(opName, sf)
@@ -687,7 +693,7 @@ func functionService(fn *functionspb.Function, image string) *runpb.Service {
 	for k, v := range fn.GetLabels() {
 		labels[k] = v
 	}
-	svc := &runpb.Service{Template: t, Labels: labels}
+	svc := &runpb.Service{Template: t, Labels: labels, BuildConfig: serviceBuildConfig(fn, image)}
 	// The policy is the service's binaryAuthorization, stored and returned
 	// as Cloud Run's is and not enforced: no attestation is checked here.
 	switch p := sc.GetBinaryAuthorizationPolicy(); p {
@@ -801,6 +807,7 @@ func (f *FunctionsServer) UpdateFunction(ctx context.Context, req *functionspb.U
 		}
 	}
 	defaultServiceConfig(fn)
+	defaultUpdatePolicy(fn)
 	defaultEventTrigger(fn)
 	// The service a function runs as is the server's to name.
 	fn.ServiceConfig.Service, fn.ServiceConfig.Uri = sf.fn.GetServiceConfig().GetService(), sf.fn.GetServiceConfig().GetUri()

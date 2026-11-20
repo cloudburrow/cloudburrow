@@ -96,6 +96,9 @@ func (p runProvider) DetailActions(ctx context.Context, project string, path []s
 	if len(path) == 1 {
 		out := append(p.trafficAction(svc, p.revisionIDs(ctx, path[0], svc)), p.sourceActions()...)
 		out = append(append(out, p.domainActions(svc)...), p.triggerActions(ctx, project, svc)...)
+		if sec, ok := p.runFunctionSourceSection(ctx, project, svc); ok {
+			out = append(out, sec.Actions...)
+		}
 		return append(out, p.copyAction(svc)...)
 	}
 	return p.revisionActions(svc, path[1])
@@ -116,7 +119,10 @@ func (p runProvider) ActAt(ctx context.Context, project string, path []string, a
 		return p.actOnTriggers(ctx, project, serviceIDOf(path[0]), action, values)
 	}
 	if action == runWriteFunction && len(path) == 0 {
-		return p.writeFunctionInline(ctx, project, values)
+		return p.writeFunctionPlaceholder(ctx, project, values)
+	}
+	if (action == functionsEditSourceAction || action == functionsEditRuntimeAction) && len(path) == 1 {
+		return p.actOnFunctionSource(ctx, project, serviceIDOf(path[0]), action, values)
 	}
 	if action == runConnectRepo && len(path) == 0 {
 		if p.runEndpoint() == "" {

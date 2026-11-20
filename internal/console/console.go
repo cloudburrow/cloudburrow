@@ -1357,6 +1357,11 @@ type Action struct {
 	// parameter, comma-separated: Roles' Create custom role from selection
 	// opens Create custom role with ?roles= (#2013).
 	Href string `json:"href,omitempty"`
+	// Terminal, when set, makes the action Google's Run in Cloud Shell: it
+	// opens the console's terminal (#781) and runs this command line in its
+	// active tab, as a Testing tab's test command runs (#2049). The action
+	// route never receives it.
+	Terminal string `json:"terminal,omitempty"`
 	// Then, when set, is the console route the form's action opens once it
 	// succeeds, each {field} in it replaced by the value submitted for that
 	// field: Write a function's Create lands on the function's Source tab,

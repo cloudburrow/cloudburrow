@@ -144,7 +144,7 @@ func TestConsoleFunctionsParity(t *testing.T) {
 	}
 	for _, it := range l.Items {
 		if it.Fields["Memory allocated"] != "512 MiB" || it.Fields["Executed function"] != "hello" || it.Fields["Trigger"] != "HTTP" ||
-			!strings.Contains(it.Fields["Deployed by"], "Cloud Functions") {
+			it.Fields["Deployed by"] == "" || strings.Contains(it.Fields["Deployed by"], "API") {
 			t.Errorf("%s's row = %v", it.Name, it.Fields)
 		}
 	}
@@ -162,9 +162,20 @@ func TestConsoleFunctionsParity(t *testing.T) {
 			t.Errorf("%s's tabs = %v; want Google's", id, ids)
 		}
 		srcTab, _ := fnSection(d, "source")
+		acts := srcTab.Actions
+		if id == "par-gen2" {
+			// Base image's Edit runtime and security updates (#2049), a
+			// 2nd gen function's.
+			if len(acts) != 4 || acts[1].Label != "Edit runtime and security updates" ||
+				!strings.Contains(srcTab.Note, "Base image: us-central1-docker.pkg.dev/serverless-runtimes/") {
+				t.Errorf("%s's Base image = %q, %v", id, srcTab.Note, actionIDs(acts))
+			} else {
+				acts = append(acts[:1:1], acts[2:]...)
+			}
+		}
 		if len(srcTab.Tabs) != 2 || srcTab.Tabs[0].Label != "index.js" || !strings.Contains(srcTab.Tabs[0].Text, "'v1'") ||
-			len(srcTab.Actions) != 3 || srcTab.Actions[0].Submit != "Save and redeploy" ||
-			srcTab.Actions[1].Label != "Show Payload" || srcTab.Actions[2].Label != "Test" {
+			len(acts) != 3 || acts[0].Submit != "Save and redeploy" ||
+			acts[1].Label != "Show Payload" || acts[2].Label != "Test" {
 			t.Errorf("%s's Source tab = %+v", id, srcTab)
 		}
 		trig, _ := fnSection(d, "triggers")
@@ -176,7 +187,8 @@ func TestConsoleFunctionsParity(t *testing.T) {
 		if id == "par-gen2" {
 			want = "no URL yet"
 		}
-		if !strings.Contains(testing.Text, want) || len(testing.Actions) != 1 || testing.Actions[0].ID != functionsTestAction {
+		if !strings.Contains(testing.Text, want) || len(testing.Actions) != 2 || testing.Actions[0].ID != functionsTestAction ||
+			testing.Actions[1].Label != "Run in Cloud Shell" || testing.Actions[1].Terminal == "" {
 			t.Errorf("%s's Testing tab = %+v; want %q", id, testing, want)
 		}
 	}

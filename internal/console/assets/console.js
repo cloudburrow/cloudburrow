@@ -9272,6 +9272,8 @@ async function runAction(route, target, action, onDone, row = NO_ROW, title = nu
   // An action that is a link opens its page (#1847): a topic row's Create
   // subscription.
   if (action.href) return navigate(action.href);
+  // Run in Cloud Shell (#2049): the command, in the terminal's active tab.
+  if (action.terminal) return runInTerminal(action.terminal);
   const path = Array.isArray(target) ? target : null;
   // A page's own heading, when its last segment is an address no reader
   // recognises: a Datastore entity's encoded key (#875). A delete is
@@ -11278,6 +11280,7 @@ function connectTerminal(tab) {
         break;
       case "session":
         attached = true;
+        tab.attached = ws;
         tab.id = m.id;
         saveTerminalTabs();
         tab.project = m.project || "";
@@ -11569,6 +11572,27 @@ async function openTerminal() {
   saveTerminalTabs();
   selectTerminalTab(TERMINAL.active);
   TERMINAL.tabs.forEach(connectTerminal);
+}
+
+// runInTerminal opens the terminal and runs a command line in its active
+// tab once that tab's shell is connected, as Google's Run in Cloud Shell
+// pastes a command into Cloud Shell and runs it (#2049).
+async function runInTerminal(command) {
+  await openTerminal();
+  const tab = TERMINAL.active;
+  if (!tab) return;
+  const deadline = Date.now() + 120000;
+  while (Date.now() < deadline) {
+    const ws = tab.socket;
+    if (ws && ws.readyState === WebSocket.OPEN && tab.attached === ws) {
+      ws.send(new TextEncoder().encode(command.replace(/\\\n\s*/g, "") + "\r"));
+      tab.term.focus();
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  terminalNotice(tab, "The terminal did not connect, so the command was not run.",
+    { label: "Try again", run: () => runInTerminal(command) });
 }
 
 function closeTerminal() {

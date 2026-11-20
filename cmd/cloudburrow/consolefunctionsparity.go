@@ -329,6 +329,10 @@ func (p functionsProvider) sourceSection(ctx context.Context, fn *functionspb.Fu
 	if a, ok := editSourceAction(fn, runtime, entryPoint, files); ok {
 		sec.Actions = []console.Action{a}
 	}
+	if a, ok := editRuntimeAction(fn); ok {
+		sec.Note += baseImageNote(fn)
+		sec.Actions = append(sec.Actions, a)
+	}
 	sec.Actions = append(sec.Actions, sourceTabActions()...)
 	return sec
 }
@@ -512,7 +516,7 @@ func (p functionsProvider) triggersSection(ctx context.Context, fn *functionspb.
 				"Region": strings.Split(t.GetName(), "/")[3], "Destination": dest,
 				"Transport topic": lastSegment(t.GetTransport().GetPubsub().GetTopic())}})
 		}
-		sec.Actions = p.triggerActions(fn)
+		sec.Actions = p.triggerActions(ctx, fn)
 		if sec.Note == "" {
 			sec.Note = "Each event reaches the function as a CloudEvent (binary content mode) over a Pub/Sub push subscription Eventarc makes. " +
 				"Cloud Pub/Sub, Cloud Storage, Cloud Firestore and Cloud Audit Logs (Admin Activity) events are delivered locally."
@@ -523,8 +527,9 @@ func (p functionsProvider) triggersSection(ctx context.Context, fn *functionspb.
 }
 
 // triggerActions are a 2nd-gen function's Edit trigger (its own event
-// trigger), Add trigger and Delete trigger (Eventarc triggers to it).
-func (p functionsProvider) triggerActions(fn *functionspb.Function) []console.Action {
+// trigger), Add trigger (Google's Eventarc trigger pane, to the function's
+// Cloud Run service) and Delete trigger (Eventarc triggers to it).
+func (p functionsProvider) triggerActions(ctx context.Context, fn *functionspb.Function) []console.Action {
 	if fn.GetEnvironment() == functionspb.Environment_GEN_1 {
 		return nil
 	}
@@ -533,19 +538,21 @@ func (p functionsProvider) triggerActions(fn *functionspb.Function) []console.Ac
 		acts = append(acts, console.Action{ID: functionsEditTriggerAction, Label: "Edit trigger", Submit: "Save",
 			Fields: functionTriggerFields(false, functionTriggerValues(et))})
 	}
-	add := append([]console.Field{{Name: "name", Label: "Trigger name", Type: "text", Required: true, Pattern: `^[a-z][a-z0-9\-]{0,62}$`,
-		Help: "1 to 63 lowercase letters, digits and hyphens, starting with a letter."}}, functionTriggerFields(false, nil)...)
-	for i := range add {
-		if add[i].Name == "topic" {
-			add[i].Help = "A topic ID in this project, or projects/{project}/topics/{topic}; empty, Eventarc makes one"
-		}
-	}
-	add = append(add, console.Field{Name: "serviceAccount", Label: "Service account", Type: "text",
-		Help: "Optional. The account the delivery authenticates as; the default compute account when empty."})
+	parts := strings.Split(fn.GetName(), "/")
 	return append(acts,
-		console.Action{ID: functionsAddTriggerAction, Label: "Add trigger", Submit: "Save trigger", Fields: add},
+		console.Action{ID: functionsAddTriggerAction, Label: "Add trigger", Submit: "Save trigger",
+			Fields: p.eventarcPaneFields(ctx, parts[1], parts[3])},
 		console.Action{ID: functionsDeleteTriggerAction, Label: "Delete trigger", Destructive: true, Fields: []console.Field{
 			{Name: "name", Label: "Trigger name", Type: "text", Required: true, Help: "An Eventarc trigger on this tab."}}})
+}
+
+// functionServiceID is the Cloud Run service a function runs as: its
+// service's ID, or the function's own, which its service takes.
+func functionServiceID(fn *functionspb.Function) string {
+	if s := lastSegment(fn.GetServiceConfig().GetService()); s != "" {
+		return s
+	}
+	return lastSegment(fn.GetName())
 }
 
 // editTrigger is Edit trigger: UpdateFunction with event_trigger.
@@ -580,51 +587,27 @@ func (p functionsProvider) actOnEventarc(ctx context.Context, fn *functionspb.Fu
 	if id == "" {
 		return errors.New("a trigger name is required")
 	}
+	if action != functionsDeleteTriggerAction {
+		parts := strings.Split(fn.GetName(), "/")
+		if fn.GetServiceConfig().GetService() == "" {
+			return p.createEventarcTriggerTo(ctx, parts[1], parts[3], functionServiceID(fn), fn.GetName(), v)
+		}
+		return p.createEventarcTrigger(ctx, parts[1], parts[3], functionServiceID(fn), v)
+	}
+	parent := functionParent(fn.GetName())
+	ts, err := p.eventarcTriggers(ctx, fn)
+	if err != nil {
+		return err
+	}
+	if !slices.ContainsFunc(ts, func(t *eventarcpb.Trigger) bool { return t.GetName() == parent+"/triggers/"+id }) {
+		return fmt.Errorf("%s is not an Eventarc trigger of function %s", id, lastSegment(fn.GetName()))
+	}
 	c, err := p.eventarcClient(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = c.Close() }()
-	parent := functionParent(fn.GetName())
-	if action == functionsDeleteTriggerAction {
-		ts, err := p.eventarcTriggers(ctx, fn)
-		if err != nil {
-			return err
-		}
-		if !slices.ContainsFunc(ts, func(t *eventarcpb.Trigger) bool { return t.GetName() == parent+"/triggers/"+id }) {
-			return fmt.Errorf("%s is not an Eventarc trigger of function %s", id, lastSegment(fn.GetName()))
-		}
-		op, err := c.DeleteTrigger(ctx, &eventarcpb.DeleteTriggerRequest{Name: parent + "/triggers/" + id})
-		if err != nil {
-			return err
-		}
-		_, err = op.Wait(ctx)
-		return err
-	}
-	var et *functionspb.EventTrigger
-	if strings.TrimSpace(v["trigger"]) == functionTriggerPubSub && strings.TrimSpace(v["topic"]) == "" {
-		// No topic: Eventarc makes one, as Google's Create a topic does.
-		et = &functionspb.EventTrigger{EventType: functionPubSubEvent}
-	} else {
-		spec, err := functionTriggerOf(strings.Split(fn.GetName(), "/")[1], v)
-		if err != nil {
-			return err
-		}
-		et = spec.v2()
-	}
-	if et == nil {
-		return errors.New("an Eventarc trigger takes an event: choose Cloud Pub/Sub, Cloud Storage, Cloud Firestore or Cloud Audit Logs")
-	}
-	t := &eventarcpb.Trigger{EventFilters: []*eventarcpb.EventFilter{{Attribute: "type", Value: et.GetEventType()}},
-		ServiceAccount: strings.TrimSpace(v["serviceAccount"]),
-		Destination:    &eventarcpb.Destination{Descriptor_: &eventarcpb.Destination_CloudFunction{CloudFunction: fn.GetName()}}}
-	for _, f := range et.GetEventFilters() {
-		t.EventFilters = append(t.EventFilters, &eventarcpb.EventFilter{Attribute: f.GetAttribute(), Value: f.GetValue(), Operator: f.GetOperator()})
-	}
-	if topic := et.GetPubsubTopic(); topic != "" {
-		t.Transport = &eventarcpb.Transport{Intermediary: &eventarcpb.Transport_Pubsub{Pubsub: &eventarcpb.Pubsub{Topic: topic}}}
-	}
-	op, err := c.CreateTrigger(ctx, &eventarcpb.CreateTriggerRequest{Parent: parent, TriggerId: id, Trigger: t})
+	op, err := c.DeleteTrigger(ctx, &eventarcpb.DeleteTriggerRequest{Name: parent + "/triggers/" + id})
 	if err != nil {
 		return err
 	}
@@ -654,7 +637,7 @@ func testingSection(fn *functionspb.Function, url string, gen1 bool, event bool)
 	if event && !gen1 {
 		sec.Text += "\n\nAn event function receives CloudEvents: send the event's ce-* headers with its data, as its trigger does."
 	}
-	sec.Actions = []console.Action{testAction()}
+	sec.Actions = []console.Action{testAction(), cloudShellAction(testCommand(sec.Text), gen1)}
 	return sec
 }
 
@@ -788,8 +771,7 @@ func (p functionsProvider) functionTabs(ctx context.Context, fn *functionspb.Fun
 	runtime, entry, url string, runtimeEnv, buildEnv map[string]string, et *functionspb.EventTrigger) []console.Section {
 	gen1 := fn.GetEnvironment() == functionspb.Environment_GEN_1
 	return []console.Section{
-		runNotLocal("metrics", "Metrics", "A function's metrics (invocations, execution times, memory) are Cloud Monitoring's "+
-			"cloudfunctions.googleapis.com and run.googleapis.com metrics, which this instance's Cloud Monitoring does not produce."),
+		functionMetricsSection(ctx, fn),
 		{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Heading: "General information", Properties: summary}}},
 		p.sourceSection(ctx, fn, runtime, entry),
 		variablesSection(runtimeEnv, buildEnv, functionSecretsListing(fn.GetServiceConfig())),

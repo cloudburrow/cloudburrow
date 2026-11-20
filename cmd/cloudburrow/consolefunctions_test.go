@@ -225,7 +225,7 @@ func TestConsoleFunctionsCreateGenerations(t *testing.T) {
 		t.Errorf("the 2nd-gen function = %v, %v", fn, err)
 	}
 	if ids := strings.Join(actionIDs(p.DetailActions(ctx, "", []string{"gen2-bucket"})), ","); ids !=
-		"edit-function,copy-function,download-source,delete-function,edit-trigger,add-trigger,delete-trigger,test-function,show-payload,source-test,edit-source" {
+		"edit-function,copy-function,download-source,delete-function,edit-trigger,add-trigger,delete-trigger,test-function,show-payload,source-test,edit-source,edit-runtime" {
 		t.Errorf("a 2nd-gen event function's actions = %s", ids)
 	}
 

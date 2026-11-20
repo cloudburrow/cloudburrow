@@ -16,9 +16,6 @@ import (
 
 	functions "cloud.google.com/go/functions/apiv2"
 	functionspb "cloud.google.com/go/functions/apiv2/functionspb"
-	"cloud.google.com/go/iam/apiv1/iampb"
-	runclient "cloud.google.com/go/run/apiv2"
-	"github.com/chromedp/chromedp"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -33,11 +30,7 @@ import (
 //   - the Source tab has Show Payload (the example payload: an HTTP
 //     function's JSON body) and Test beside Edit source, and the inline
 //     editor has Rename file;
-//   - where builds are asked for (CLOUDBURROW_TEST_FUNCTIONS) and can run
-//     (amd64 nodes, the Google builder's), Write a
-//     function's Create with Allow public access lands on the function's
-//     Source tab, and the function's Cloud Run service grants allUsers
-//     roles/run.invoker, which the official Run client reads.
+//   - Write a function's Create is round 4's (#2049).
 //
 // Then the screens pass the console's WCAG 2.1 AA audit.
 func TestCloudRunFunctionsRound3ThroughTheBrowser(t *testing.T) {
@@ -133,7 +126,7 @@ func TestCloudRunFunctionsRound3ThroughTheBrowser(t *testing.T) {
 	var labels string
 	p.eval(`[...document.querySelectorAll(".modal.is-open form label, .modal.is-open form legend")].map((n) => n.textContent.trim()).join("|")`, &labels)
 	at := func(l string) int { return strings.Index("|"+labels+"|", "|"+l) }
-	order := []string{"Service name", "Region", "Runtime", "Trigger type", "Authentication", "Billing", "Minimum number of instances",
+	order := []string{"Service name", "Region", "Runtime", "Add trigger", "Authentication", "Billing", "Minimum number of instances",
 		"Maximum number of instances", "Ingress"}
 	for i, l := range order {
 		if at(l) < 0 {
@@ -148,57 +141,10 @@ func TestCloudRunFunctionsRound3ThroughTheBrowser(t *testing.T) {
 			t.Errorf("Authentication lacks %s: %q", l, labels)
 		}
 	}
-	builds, why := amd64FunctionBuilds(ctx, t)
-	if !builds {
-		t.Logf("Write a function's Create is not submitted: %s", why)
-	}
-	if builds {
-		writeID := fmt.Sprintf("browser-wf-%d", suffix)
-		p.eval(fmt.Sprintf(`(() => { const f = document.querySelector(".modal.is-open #f-name"); f.value = %q;
-			f.dispatchEvent(new Event("input", { bubbles: true }));
-			const r = [...document.querySelectorAll(".modal.is-open input[type=radio]")].find((r) => r.value === "Allow public access");
-			r.checked = true; r.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`, writeID), nil)
-		p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
-		wfName := parent + "/functions/" + writeID
-		t.Cleanup(func() {
-			if op, err := c.DeleteFunction(context.Background(), &functionspb.DeleteFunctionRequest{Name: wfName}); err == nil {
-				_ = op.Wait(context.Background())
-			}
-		})
-		p.waitForWithin(fmt.Sprintf(`location.pathname === "/functions/%s" && new URLSearchParams(location.search).get("tab") === "source" ||
-			[...document.querySelectorAll(".modal.is-open .form-error")].some((e) => !e.hidden && e.textContent)`, writeID), 10*time.Minute)
-		var where string
-		p.eval(`location.pathname + location.search + " " + [...document.querySelectorAll(".modal.is-open .form-error")].map((e) => e.textContent).join(" ")`, &where)
-		if !strings.HasPrefix(where, "/functions/"+writeID) || !strings.Contains(where, "tab=source") {
-			t.Fatalf("Write a function's Create went to %q; want the function's Source tab", where)
-		}
-		p.waitFor(`document.querySelector("#view .tab-strip .tab.is-selected, #view .tab-strip .tab[aria-selected=true]") !== null`)
-		var sel string
-		p.eval(`document.querySelector("#view .tab-strip .tab[aria-selected=true]").textContent.trim()`, &sel)
-		if sel != "Source" {
-			t.Errorf("the page opened on %q; want Source", sel)
-		}
-		fn, err := c.GetFunction(ctx, &functionspb.GetFunctionRequest{Name: wfName})
-		if err != nil {
-			t.Fatalf("GetFunction %s: %v", writeID, err)
-		}
-		rc, err := runclient.NewServicesClient(ctx, opts...)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = rc.Close() })
-		pol, err := rc.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: fn.GetServiceConfig().GetService()})
-		public := false
-		for _, b := range pol.GetBindings() {
-			public = public || b.GetRole() == "roles/run.invoker" && slices.Contains(b.GetMembers(), "allUsers")
-		}
-		if err != nil || !public {
-			t.Errorf("the service's policy after Allow public access = %v, %v; want allUsers as roles/run.invoker", pol, err)
-		}
-	} else {
-		p.clickText(".modal.is-open button", "Cancel")
-		p.waitFor(`document.querySelector(".modal.is-open") === null`)
-	}
+	// Create, which makes the service with its placeholder revision, is
+	// round 4's (functionsparity4_test.go, #2049).
+	p.clickText(".modal.is-open button", "Cancel")
+	p.waitFor(`document.querySelector(".modal.is-open") === null`)
 
 	// The Source tab: Show Payload, Test and Edit source with Rename file.
 	source := "/functions/" + id + "?project=" + project + "&tab=source"

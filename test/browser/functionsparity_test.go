@@ -205,9 +205,12 @@ func TestCloudRunFunctionsPagesThroughTheBrowser(t *testing.T) {
 	p.navigate(page + "&tab=triggers")
 	p.waitFor(`document.querySelector("#view table tbody") !== null && document.querySelector("#view table tbody").textContent.includes("HTTP")`)
 	triggerID := fmt.Sprintf("browser-tr-%d", suffix)
-	p.pageAction("Add trigger", map[string]string{"name": triggerID, "trigger": "Cloud Pub/Sub"}, "")
+	// Add trigger is Google's Eventarc pane (#2049), its destination the
+	// function's Cloud Run service; the id's dots are escaped for CSS.
+	p.pageAction("Add trigger", map[string]string{"name": triggerID, "triggerType": "Google Sources", "provider": "pubsub.googleapis.com",
+		`eventType\\.pubsub\\.googleapis\\.com`: "google.cloud.pubsub.topic.v1.messagePublished"}, "")
 	tr, err := ea.GetTrigger(ctx, &eventarcpb.GetTriggerRequest{Name: parent + "/triggers/" + triggerID})
-	if err != nil || tr.GetDestination().GetCloudFunction() != httpName {
+	if err != nil || tr.GetDestination().GetCloudRun().GetService() == "" && tr.GetDestination().GetCloudFunction() != httpName {
 		t.Fatalf("GetTrigger after Add trigger = %v, %v; want one to the function", tr, err)
 	}
 	p.waitFor(fmt.Sprintf(`document.querySelector("#view table tbody").textContent.includes(%q)`, triggerID))
