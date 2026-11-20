@@ -49,7 +49,7 @@ Do not edit these files by hand.
 | [Cloud Identity API (v1)](cloudidentity.md) | 70 | 18 | 0 | 52 | 0 | 0 | 0 | 0 |
 | [Certificate Authority Service (v1)](privateca.md) | 29 | 29 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Kubernetes Engine API (v1)](gke.md) | 37 | 16 | 0 | 19 | 2 | 0 | 0 | 0 |
-| [Cloud Monitoring API (v3)](monitoring.md) | 9 | 8 | 0 | 1 | 0 | 0 | 0 | 0 |
+| [Cloud Monitoring API (v3) and Dashboards API (v1)](monitoring.md) | 56 | 52 | 0 | 2 | 2 | 0 | 0 | 0 |
 
 **Statuses.** *Verified*: an official-SDK compat test, linked, exercises it. *Refused*: a compat
 test proves the upstream emulator refuses it. *Unimplemented*: CloudBurrow returns `UNIMPLEMENTED`, proven

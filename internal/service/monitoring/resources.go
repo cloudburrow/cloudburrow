@@ -56,6 +56,8 @@ var resourceDescriptors = []*monitoredres.MonitoredResourceDescriptor{
 		"project_id", "location", "cluster_name", "namespace_name", "pod_name"),
 	res("pubsub_subscription", "Cloud Pub/Sub Subscription", "A Pub/Sub subscription.",
 		"project_id", "subscription_id"),
+	res("uptime_url", "Uptime Check URL", "A URL checked by an uptime check.",
+		"project_id", "host"),
 	res("pubsub_topic", "Cloud Pub/Sub Topic", "A Pub/Sub topic.",
 		"project_id", "topic_id"),
 }

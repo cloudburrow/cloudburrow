@@ -15,9 +15,9 @@ import (
 )
 
 // Alignment and reduction as monitoring/v3/common.proto documents each
-// Aligner and Reducer. An alignment period with no data produces no point
-// (Google interpolates ALIGN_DELTA and ALIGN_RATE across such periods), and
-// ALIGN_PERCENT_CHANGE compares the period's mean with the previous
+// Aligner and Reducer. An alignment period with no data produces no point,
+// except for ALIGN_DELTA and ALIGN_RATE, which Google documents as "created
+// by interpolation" (fillGap), and ALIGN_PERCENT_CHANGE compares the period's mean with the previous
 // period's, without Google's 10-minute moving mean.
 
 var (
@@ -222,11 +222,51 @@ func align(ts *monitoringpb.TimeSeries, a monitoringpb.Aggregation_Aligner, peri
 	return out, nil
 }
 
+// fillGap is ALIGN_DELTA's or ALIGN_RATE's value for a window (t-period, t]
+// with no point, between the points before and after it (common.proto:
+// "If the selected alignment period results in periods with no data, then
+// the aligned value for such a period is created by interpolation"). A
+// cumulative series' value is interpolated linearly between the two
+// points, so the window's delta is its share of their difference; a delta
+// series' next point is spread evenly over the time since the point
+// before, so the window gets its share of that point's value. Without a
+// point on each side, or across a cumulative reset, there is no point.
+// Distributions are not interpolated.
+func fillGap(a monitoringpb.Aggregation_Aligner, ts *monitoringpb.TimeSeries, before, after *monitoringpb.Point, t time.Time, period time.Duration) (*monitoringpb.TypedValue, bool) {
+	vt := ts.GetValueType()
+	if before == nil || after == nil || !numeric(vt) {
+		return nil, false
+	}
+	span := endOf(after).Sub(endOf(before))
+	if span <= 0 {
+		return nil, false
+	}
+	var d float64
+	switch ts.GetMetricKind() {
+	case cumulative:
+		if !after.GetInterval().GetStartTime().AsTime().Equal(before.GetInterval().GetStartTime().AsTime()) {
+			return nil, false
+		}
+		d = (asFloat(after.GetValue()) - asFloat(before.GetValue())) * float64(period) / float64(span)
+	case delta:
+		d = asFloat(after.GetValue()) * float64(period) / float64(span)
+	default:
+		return nil, false
+	}
+	if a == monitoringpb.Aggregation_ALIGN_RATE {
+		return typed(tDouble, d/period.Seconds()), true
+	}
+	return typed(vt, d), true
+}
+
 func endOf(p *monitoringpb.Point) time.Time { return p.GetInterval().GetEndTime().AsTime() }
 
 // alignWindow is one aligned value from the points in (t-period, t].
 func alignWindow(a monitoringpb.Aggregation_Aligner, ts *monitoringpb.TimeSeries, win []*monitoringpb.Point, before, after *monitoringpb.Point, t time.Time, period time.Duration) (*monitoringpb.TypedValue, bool) {
 	vt := ts.GetValueType()
+	if len(win) == 0 && (a == monitoringpb.Aggregation_ALIGN_DELTA || a == monitoringpb.Aggregation_ALIGN_RATE) {
+		return fillGap(a, ts, before, after, t, period)
+	}
 	if len(win) == 0 && a != monitoringpb.Aggregation_ALIGN_INTERPOLATE {
 		return nil, false
 	}
@@ -249,6 +289,19 @@ func alignWindow(a monitoringpb.Aggregation_Aligner, ts *monitoringpb.TimeSeries
 			d = subtract(vt, last.GetValue(), base)
 		} else {
 			d = sumValues(vt, win)
+		}
+		// After a filled gap (fillGap gave the empty windows their share),
+		// this window keeps only its own share of the change since before,
+		// so the gap is not counted twice.
+		if lo := t.Add(-period); before != nil && numeric(vt) && lo.Sub(endOf(before)) >= period {
+			first := win[0]
+			share := float64(endOf(first).Sub(lo)) / float64(endOf(first).Sub(endOf(before)))
+			switch {
+			case ts.GetMetricKind() == cumulative && before.GetInterval().GetStartTime().AsTime().Equal(first.GetInterval().GetStartTime().AsTime()):
+				d = typed(vt, asFloat(d)-(asFloat(first.GetValue())-asFloat(before.GetValue()))*(1-share))
+			case ts.GetMetricKind() == delta:
+				d = typed(vt, asFloat(d)-asFloat(first.GetValue())*(1-share))
+			}
 		}
 		if a == monitoringpb.Aggregation_ALIGN_DELTA {
 			return d, true

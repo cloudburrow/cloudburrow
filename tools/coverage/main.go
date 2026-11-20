@@ -87,6 +87,7 @@ import (
 	_ "cloud.google.com/go/logging/apiv2/loggingpb"
 	_ "cloud.google.com/go/memorystore/apiv1/memorystorepb"
 	_ "cloud.google.com/go/monitoring/apiv3/v2/monitoringpb"
+	_ "cloud.google.com/go/monitoring/dashboard/apiv1/dashboardpb"
 	_ "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	_ "cloud.google.com/go/redis/apiv1/redispb"
 	_ "cloud.google.com/go/redis/cluster/apiv1/clusterpb"
@@ -278,10 +279,13 @@ var areas = []area{
 	// The Kubernetes Engine API (#1913): CloudBurrow's own, gRPC and JSON
 	// on one port, each cluster a kind cluster of its own.
 	{Key: "gke", Title: "Kubernetes Engine API (v1)", Own: true, Services: []string{"google.container.v1.ClusterManager"}},
-	// Cloud Monitoring (#1939): CloudBurrow's own, gRPC and JSON on one
-	// port. Only MetricService is served; the API's other services answer
-	// UNIMPLEMENTED.
-	{Key: "monitoring", Title: "Cloud Monitoring API (v3)", Own: true, Services: []string{"google.monitoring.v3.MetricService"}},
+	// Cloud Monitoring (#1939, #1964): CloudBurrow's own, gRPC and JSON on
+	// one port, with the Dashboards API v1 beside v3. The Query service
+	// (MQL) is not registered and answers UNIMPLEMENTED.
+	{Key: "monitoring", Title: "Cloud Monitoring API (v3) and Dashboards API (v1)", Own: true, Services: []string{"google.monitoring.v3.MetricService",
+		"google.monitoring.v3.AlertPolicyService", "google.monitoring.v3.NotificationChannelService", "google.monitoring.v3.UptimeCheckService",
+		"google.monitoring.v3.GroupService", "google.monitoring.v3.ServiceMonitoringService", "google.monitoring.v3.SnoozeService",
+		"google.monitoring.v3.QueryService", "google.monitoring.dashboard.v1.DashboardsService"}},
 }
 
 // cloudidentityMethods is every method of the cloudidentity v1 discovery

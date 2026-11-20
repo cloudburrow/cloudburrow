@@ -13,10 +13,12 @@ import (
 
 	"google.golang.org/genproto/googleapis/api/monitoredres"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
+	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
 	"github.com/cloudburrow/cloudburrow/internal/service/monitoring"
 	"github.com/cloudburrow/cloudburrow/internal/telemetry"
@@ -43,6 +45,11 @@ type monitoringService struct {
 	counters *metrics.Registry
 	reqs     *monitoring.RequestBuiltin
 	stop     chan struct{}
+	// pubsub is the instance's Pub/Sub tunnel, for Pub/Sub notification
+	// channels (#1964); nil, or nil from it, when Pub/Sub is not served.
+	pubsub func() *netfwd.Forwarder
+	// cancel stops alert evaluation and uptime checks.
+	cancel context.CancelFunc
 }
 
 func newMonitoringService(cfg config.Config) *monitoringService {
@@ -98,6 +105,22 @@ func (s *monitoringService) Start(ctx context.Context) error {
 	if s.logging != nil {
 		api.AddBuiltin(monitoring.NewLogBuiltin(monitoringLogs{svc: s.logging}))
 	}
+	if s.logging != nil {
+		api.SetLogMatcher(monitoringLogs{svc: s.logging})
+	}
+	if s.pubsub != nil {
+		tunnel := s.pubsub
+		api.SetPublisher(func(ctx context.Context, topic string, data []byte, attrs map[string]string) error {
+			return sinkPublisher{tunnel: tunnel}.Publish(ctx, topic, []logging.Message{{Data: data, Attributes: attrs}})
+		})
+	}
+	if s.cfg.Endpoints.Console > 0 {
+		api.SetConsoleURL("http://" + net.JoinHostPort("localhost", strconv.Itoa(s.cfg.Endpoints.Console)))
+	}
+	// Alert policies are evaluated, and uptime checks run, until Stop.
+	evalCtx, cancel := context.WithCancel(context.Background())
+	s.cancel = cancel
+	api.StartEvaluating(evalCtx)
 	if s.counters != nil {
 		s.reqs = monitoring.NewRequestBuiltin(monitoringCounters{reg: s.counters}, s.cfg.DefaultProject(), time.Now)
 		api.AddBuiltin(s.reqs)
@@ -135,6 +158,10 @@ func (s *monitoringService) Start(ctx context.Context) error {
 }
 
 func (s *monitoringService) Stop(ctx context.Context) error {
+	if s.cancel != nil {
+		s.cancel()
+		s.cancel = nil
+	}
 	if s.stop != nil {
 		close(s.stop)
 		s.stop = nil
@@ -222,6 +249,35 @@ func (l monitoringLogs) LogEntries(project string, from, to time.Time) []monitor
 	return out
 }
 
+// MatchLogEntries is monitoring.LogMatcher over the instance's Cloud
+// Logging, for log-match alert conditions.
+func (l monitoringLogs) MatchLogEntries(project, filter string, extractors map[string]string, after, until time.Time) ([]monitoring.LogMatch, error) {
+	api := l.api()
+	if api == nil {
+		return nil, errors.New("Cloud Logging has not started")
+	}
+	ss, err := api.MatchEntries(project, filter, extractors, after, until)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]monitoring.LogMatch, 0, len(ss))
+	for _, s := range ss {
+		e := s.Entry
+		summary := e.GetTextPayload()
+		if summary == "" && e.GetJsonPayload() != nil {
+			if b, err := protojson.Marshal(e.GetJsonPayload()); err == nil {
+				summary = string(b)
+			}
+		}
+		if len(summary) > 200 {
+			summary = summary[:200] + "..."
+		}
+		out = append(out, monitoring.LogMatch{Time: e.GetTimestamp().AsTime(), Log: e.GetLogName() + "/" + e.GetInsertId(),
+			Type: e.GetResource().GetType(), Resource: e.GetResource().GetLabels(), Labels: s.Labels, Summary: summary})
+	}
+	return out, nil
+}
+
 func entryResource(r *monitoredres.MonitoredResource) *monitoredres.MonitoredResource {
 	if r == nil {
 		return nil
@@ -233,10 +289,10 @@ func entryResource(r *monitoredres.MonitoredResource) *monitoredres.MonitoredRes
 type monitoringCounters struct{ reg *metrics.Registry }
 
 func (c monitoringCounters) Snapshot() []monitoring.RequestCount {
-	snap := c.reg.Snapshot()
+	snap := c.reg.ProjectSnapshot()
 	out := make([]monitoring.RequestCount, len(snap))
 	for i, p := range snap {
-		out[i] = monitoring.RequestCount{Service: p.Service, Method: p.Method, Code: p.Code, Count: p.Count, Sum: p.Sum, Buckets: p.Buckets}
+		out[i] = monitoring.RequestCount{Service: p.Service, Method: p.Method, Code: p.Code, Project: p.Project, Count: p.Count, Sum: p.Sum, Buckets: p.Buckets}
 	}
 	return out
 }

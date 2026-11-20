@@ -226,3 +226,46 @@ func (x extractor) apply(fields map[string]any) (string, bool) {
 	}
 	return sm[1], true
 }
+
+// MatchEntries are a project's stored entries the filter matches that were
+// received in (after, until], with label extractors applied, for Cloud
+// Monitoring's log-match alert conditions (#1964). The filter is compiled
+// as ListLogEntries compiles it.
+func (s *Server) MatchEntries(project, filter string, extractors map[string]string, after, until time.Time) ([]MetricSample, error) {
+	match, err := compile(filter)
+	if err != nil {
+		return nil, err
+	}
+	labels := map[string]extractor{}
+	for k, expr := range extractors {
+		x, err := parseExtractor(expr)
+		if err != nil {
+			return nil, err
+		}
+		labels[k] = x
+	}
+	var out []MetricSample
+	for _, e := range s.store.snapshot() {
+		p, _, err := resource.ParseLogName(e.GetLogName())
+		if err != nil || p != project {
+			continue
+		}
+		received := e.GetTimestamp().AsTime()
+		if e.GetReceiveTimestamp() != nil {
+			received = e.GetReceiveTimestamp().AsTime()
+		}
+		if !received.After(after) || received.After(until) || !match(e) {
+			continue
+		}
+		smp := MetricSample{Entry: e, Labels: map[string]string{}}
+		if len(labels) > 0 {
+			fields := entryFields(e)
+			for k, x := range labels {
+				v, _ := x.apply(fields)
+				smp.Labels[k] = v
+			}
+		}
+		out = append(out, smp)
+	}
+	return out, nil
+}

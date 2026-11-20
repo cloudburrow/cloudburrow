@@ -5,12 +5,20 @@ package browser
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	monitoring "cloud.google.com/go/monitoring/apiv3/v2"
 	"cloud.google.com/go/monitoring/apiv3/v2/monitoringpb"
+	dashboard "cloud.google.com/go/monitoring/dashboard/apiv1"
+	"cloud.google.com/go/monitoring/dashboard/apiv1/dashboardpb"
+	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 	metricpb "google.golang.org/genproto/googleapis/api/metric"
 	monitoredres "google.golang.org/genproto/googleapis/api/monitoredres"
@@ -99,4 +107,278 @@ func TestMonitoringThroughThePage(t *testing.T) {
 	if _, err := c.GetMetricDescriptor(ctx, &monitoringpb.GetMetricDescriptorRequest{Name: "projects/" + project + "/metricDescriptors/" + created}); err == nil {
 		t.Error("the metric Delete metric deleted is still there")
 	}
+}
+
+// monitoringOpts are the official clients' options for the instance's
+// Monitoring endpoint, never Google's.
+func monitoringOpts(t *testing.T) []option.ClientOption {
+	t.Helper()
+	addr := endpoint(t, envMonitoring)
+	if addr == "" {
+		t.Fatal("no Monitoring endpoint")
+	}
+	return []option.ClientOption{option.WithEndpoint(addr), option.WithoutAuthentication(),
+		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials()))}
+}
+
+func writeBrowserGauge(t *testing.T, c *monitoring.MetricClient, project, metricType string, v float64) {
+	t.Helper()
+	err := c.CreateTimeSeries(context.Background(), &monitoringpb.CreateTimeSeriesRequest{Name: "projects/" + project, TimeSeries: []*monitoringpb.TimeSeries{{
+		Metric:   &metricpb.Metric{Type: metricType},
+		Resource: &monitoredres.MonitoredResource{Type: "global", Labels: map[string]string{"project_id": project}},
+		Points: []*monitoringpb.Point{{Interval: &monitoringpb.TimeInterval{EndTime: timestamppb.New(time.Now())},
+			Value: &monitoringpb.TypedValue{Value: &monitoringpb.TypedValue_DoubleValue{DoubleValue: v}}}}}}})
+	if err != nil {
+		t.Fatalf("write a point: %v", err)
+	}
+}
+
+// TestMonitoringAlertingThroughThePage (#1964): Notification channels'
+// Create channel makes a webhook channel to a server on this machine,
+// Alerting's Create policy a threshold policy notifying it, each read back
+// with the official clients; a point above the threshold opens an incident,
+// which the webhook receives and the Incidents page lists, and Close
+// incident closes it; Delete policy and Delete channel remove both.
+func TestMonitoringAlertingThroughThePage(t *testing.T) {
+	needService(t, "monitoring-alerting")
+	opts := monitoringOpts(t)
+	ctx := context.Background()
+	mc, err := monitoring.NewMetricClient(ctx, opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mc.Close()
+	ac, err := monitoring.NewAlertPolicyClient(ctx, opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ac.Close()
+	nc, err := monitoring.NewNotificationChannelClient(ctx, opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer nc.Close()
+	project := uniqueProject(t)
+
+	var mu sync.Mutex
+	var received []string
+	hook := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		received = append(received, string(b))
+		mu.Unlock()
+	}))
+	defer hook.Close()
+
+	p := open(t)
+	p.navigate("/monitoring/alerting/channels?project=" + project)
+	p.clickText("#view button", "Create channel")
+	p.submitForm(map[string]string{"type": "webhook_tokenauth", "displayName": "Browser hook", "url": hook.URL + "/alerts"}, "type")
+	p.waitFor(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes("Browser hook"))`)
+	var channel string
+	it := nc.ListNotificationChannels(ctx, &monitoringpb.ListNotificationChannelsRequest{Name: "projects/" + project})
+	for {
+		c, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c.GetDisplayName() == "Browser hook" && c.GetLabels()["url"] == hook.URL+"/alerts" {
+			channel = c.GetName()
+		}
+	}
+	if channel == "" {
+		t.Fatal("the channel Create channel made is not listed by the official client")
+	}
+
+	metricType := "custom.googleapis.com/browser/backlog"
+	writeBrowserGauge(t, mc, project, metricType, 1)
+	p.navigate("/monitoring/alerting?project=" + project)
+	p.clickText("#view button", "Create policy")
+	p.submitForm(map[string]string{"displayName": "Backlog too long", "conditionType": "threshold", "conditionName": "Backlog above 5",
+		"metric": metricType, "resource": "global", "comparison": "COMPARISON_GT", "threshold": "5", "duration": "0",
+		"channels": channel[strings.LastIndex(channel, "/")+1:]}, "displayName")
+	p.waitFor(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes("Backlog too long"))`)
+	var policy *monitoringpb.AlertPolicy
+	pit := ac.ListAlertPolicies(ctx, &monitoringpb.ListAlertPoliciesRequest{Name: "projects/" + project})
+	for {
+		pol, err := pit.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if pol.GetDisplayName() == "Backlog too long" {
+			policy = pol
+		}
+	}
+	if policy == nil || len(policy.GetNotificationChannels()) != 1 || policy.GetNotificationChannels()[0] != channel ||
+		policy.GetConditions()[0].GetConditionThreshold().GetThresholdValue() != 5 {
+		t.Fatalf("the policy Create policy made = %v", policy)
+	}
+
+	// Above the threshold: the next evaluation opens an incident and posts
+	// it. A series takes at most one point every 5 seconds.
+	time.Sleep(6 * time.Second)
+	writeBrowserGauge(t, mc, project, metricType, 9)
+	deadline := time.Now().Add(90 * time.Second)
+	for {
+		mu.Lock()
+		n := len(received)
+		mu.Unlock()
+		if n > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the webhook received no notification in 90 seconds")
+		}
+		time.Sleep(time.Second)
+	}
+	mu.Lock()
+	first := received[0]
+	mu.Unlock()
+	if !strings.Contains(first, `"state":"open"`) || !strings.Contains(first, "Backlog too long") {
+		t.Errorf("the webhook's notification = %s", first)
+	}
+	p.navigate("/monitoring/alerting/incidents?project=" + project)
+	row := `[...document.querySelectorAll("#view tbody tr")].find((r) => r.textContent.includes("Backlog too long"))`
+	p.waitFor(row + ` !== undefined`)
+	p.eval(row+`.querySelector(".overflow-trigger").click()`, nil)
+	p.clickText("#view .overflow-item, .overflow-item", "Close incident")
+	p.waitFor(row + ` !== undefined && ` + row + `.textContent.includes("closed")`)
+
+	p.navigate("/monitoring/alerting?project=" + project)
+	prow := `[...document.querySelectorAll("#view tbody tr")].find((r) => r.textContent.includes("Backlog too long"))`
+	p.waitFor(prow + ` !== undefined`)
+	p.eval(prow+`.querySelector(".overflow-trigger").click()`, nil)
+	p.clickText("#view .overflow-item, .overflow-item", "Delete policy")
+	p.confirmByName(policy.GetName()[strings.LastIndex(policy.GetName(), "/")+1:])
+	p.waitFor(`![...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes("Backlog too long"))`)
+	if _, err := ac.GetAlertPolicy(ctx, &monitoringpb.GetAlertPolicyRequest{Name: policy.GetName()}); err == nil {
+		t.Error("the policy Delete policy deleted is still there")
+	}
+}
+
+// TestMonitoringUptimeAndDashboardsThroughThePage (#1964): Uptime checks'
+// Create uptime check makes an HTTP check of a server on this machine,
+// read back with the official client, whose row shows it passed; the
+// Dashboards page's Create dashboard makes one from its JSON, read back
+// with the official Dashboards client, whose page draws its chart widget.
+func TestMonitoringUptimeAndDashboardsThroughThePage(t *testing.T) {
+	needService(t, "monitoring-uptime")
+	opts := monitoringOpts(t)
+	ctx := context.Background()
+	uc, err := monitoring.NewUptimeCheckClient(ctx, opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer uc.Close()
+	dc, err := dashboard.NewDashboardsClient(ctx, opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dc.Close()
+	mc, err := monitoring.NewMetricClient(ctx, opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mc.Close()
+	project := uniqueProject(t)
+	site := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, "healthy") }))
+	defer site.Close()
+	port := site.URL[strings.LastIndex(site.URL, ":")+1:]
+	portNum, err := strconv.Atoi(port)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	p := open(t)
+	p.navigate("/monitoring/uptime?project=" + project)
+	p.clickText("#view button", "Create uptime check")
+	p.submitForm(map[string]string{"displayName": "Browser site", "protocol": "HTTP", "host": "127.0.0.1", "port": port,
+		"path": "/", "period": "60", "timeout": "5", "content": "healthy"}, "displayName")
+	p.waitFor(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes("Browser site"))`)
+	var check *monitoringpb.UptimeCheckConfig
+	uit := uc.ListUptimeCheckConfigs(ctx, &monitoringpb.ListUptimeCheckConfigsRequest{Parent: "projects/" + project})
+	for {
+		c, err := uit.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c.GetDisplayName() == "Browser site" {
+			check = c
+		}
+	}
+	if check == nil || check.GetHttpCheck().GetPort() != int32(portNum) || check.GetMonitoredResource().GetLabels()["host"] != "127.0.0.1" {
+		t.Fatalf("the check Create uptime check made = %v", check)
+	}
+	// The check runs at the next tick; reload until its row says Passed.
+	deadline := time.Now().Add(90 * time.Second)
+	for {
+		p.navigate("/monitoring/uptime?project=" + project)
+		p.waitFor(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes("Browser site"))`)
+		var passed bool
+		p.eval(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes("Browser site") && r.textContent.includes("Passed"))`, &passed)
+		if passed {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the uptime check did not pass in 90 seconds")
+		}
+		time.Sleep(3 * time.Second)
+	}
+
+	metricType := "custom.googleapis.com/browser/orders"
+	writeBrowserGauge(t, mc, project, metricType, 4)
+	p.navigate("/monitoring/dashboards?project=" + project)
+	p.clickText("#view button", "Create dashboard")
+	p.submitForm(map[string]string{"displayName": "Browser board",
+		"json": `{"gridLayout":{"widgets":[{"title":"Orders","xyChart":{"dataSets":[{"timeSeriesQuery":{"timeSeriesFilter":{"filter":"metric.type=\"` + metricType + `\""}}}]}}]}}`},
+		"displayName")
+	p.waitFor(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes("Browser board"))`)
+	var board *dashboardpb.Dashboard
+	dit := dc.ListDashboards(ctx, &dashboardpb.ListDashboardsRequest{Parent: "projects/" + project})
+	for {
+		d, err := dit.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d.GetDisplayName() == "Browser board" {
+			board = d
+		}
+	}
+	if board == nil || len(board.GetGridLayout().GetWidgets()) != 1 || board.GetGridLayout().GetWidgets()[0].GetTitle() != "Orders" {
+		t.Fatalf("the dashboard Create dashboard made = %v", board)
+	}
+	p.navigate("/monitoring/dashboards/" + board.GetName()[strings.LastIndex(board.GetName(), "/")+1:] + "?project=" + project)
+	p.waitFor(`document.querySelector("#view").textContent.includes("Orders")`)
+}
+
+// TestMonitoringAlertingUptimeAndDashboardsScreensMeetWCAG (#1964): the
+// Alerting, Incidents, Notification channels, Uptime checks, Dashboards,
+// Groups, Services and Snoozes screens and their create forms, through the
+// console's WCAG 2.1 AA audit.
+func TestMonitoringAlertingUptimeAndDashboardsScreensMeetWCAG(t *testing.T) {
+	needService(t, "monitoring-alerting")
+	project := servedProject(t)
+	var pages []a11yPage
+	for _, l := range []struct{ name, path string }{
+		{"Alerting", "/monitoring/alerting"}, {"Notification channels", "/monitoring/alerting/channels"},
+		{"Uptime checks", "/monitoring/uptime"}, {"Dashboards", "/monitoring/dashboards"},
+		{"Monitoring groups", "/monitoring/groups"}, {"Monitoring services", "/monitoring/services"},
+		{"Snoozes", "/monitoring/snoozes"},
+	} {
+		pages = append(pages, listAndCreate(l.name, l.path, project)...)
+	}
+	pages = append(pages, screen("Incidents", "/monitoring/alerting/incidents", project))
+	auditScreens(t, pages)
 }

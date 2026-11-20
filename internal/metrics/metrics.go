@@ -20,7 +20,8 @@ import (
 // Buckets are the latency histogram's upper bounds, in seconds.
 var Buckets = []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10}
 
-type key struct{ service, method, code string }
+// key is one counter: project is the project the call named, or "".
+type key struct{ service, method, code, project string }
 
 type series struct {
 	count   uint64
@@ -57,6 +58,12 @@ func (r *Registry) Measure(service string) {
 
 // Observe counts one call. method is the short RPC name, such as CreateTask.
 func (r *Registry) Observe(service, method, code string, d time.Duration) {
+	r.ObserveIn("", service, method, code, d)
+}
+
+// ObserveIn counts one call that named project ("" when it named none), so
+// Cloud Monitoring can attribute request metrics per project (#1964).
+func (r *Registry) ObserveIn(project, service, method, code string, d time.Duration) {
 	if r == nil {
 		return
 	}
@@ -66,7 +73,7 @@ func (r *Registry) Observe(service, method, code string, d time.Duration) {
 	secs := d.Seconds()
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	k := key{service, method, code}
+	k := key{service, method, code, project}
 	s := r.series[k]
 	if s == nil {
 		s = &series{buckets: make([]uint64, len(Buckets))}
@@ -81,21 +88,49 @@ func (r *Registry) Observe(service, method, code string, d time.Duration) {
 	}
 }
 
-// Point is one series at one moment, for charts.
+// Point is one series at one moment, for charts. Project is set only by
+// ProjectSnapshot.
 type Point struct {
 	Service, Method, Code string
+	Project               string
 	Count                 uint64
 	Sum                   float64
 	Buckets               []uint64
 }
 
-// Snapshot copies every series.
+// Snapshot copies every series, summed over projects.
 func (r *Registry) Snapshot() []Point {
+	return r.snapshot(false)
+}
+
+// ProjectSnapshot copies every series per project.
+func (r *Registry) ProjectSnapshot() []Point {
+	return r.snapshot(true)
+}
+
+func (r *Registry) snapshot(byProject bool) []Point {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	out := make([]Point, 0, len(r.series))
+	merged := map[key]*Point{}
 	for k, s := range r.series {
-		out = append(out, Point{k.service, k.method, k.code, s.count, s.sum, append([]uint64(nil), s.buckets...)})
+		mk := k
+		if !byProject {
+			mk.project = ""
+		}
+		p := merged[mk]
+		if p == nil {
+			p = &Point{Service: k.service, Method: k.method, Code: k.code, Project: mk.project, Buckets: make([]uint64, len(s.buckets))}
+			merged[mk] = p
+		}
+		p.Count += s.count
+		p.Sum += s.sum
+		for i, b := range s.buckets {
+			p.Buckets[i] += b
+		}
+	}
+	out := make([]Point, 0, len(merged))
+	for _, p := range merged {
+		out = append(out, *p)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		a, b := out[i], out[j]
@@ -105,7 +140,10 @@ func (r *Registry) Snapshot() []Point {
 		if a.Method != b.Method {
 			return a.Method < b.Method
 		}
-		return a.Code < b.Code
+		if a.Code != b.Code {
+			return a.Code < b.Code
+		}
+		return a.Project < b.Project
 	})
 	return out
 }

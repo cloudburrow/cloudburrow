@@ -55,8 +55,9 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 	config.ServicePrivateCA: {Providers: []string{"privateca", "privateca-templates"}},
 	// The Kubernetes Engine API (#1913): its clusters are on Kubernetes
 	// clusters, beside the instance's own.
-	config.ServiceGKE:        {Providers: []string{"gkeclusters"}},
-	config.ServiceMonitoring: {Providers: []string{"monitoring-explorer", "monitoring-metrics"}},
+	config.ServiceGKE: {Providers: []string{"gkeclusters"}},
+	config.ServiceMonitoring: {Providers: []string{"monitoring-explorer", "monitoring-metrics", "monitoring-alerting", "monitoring-incidents",
+		"monitoring-channels", "monitoring-uptime", "monitoring-dashboards", "monitoring-groups", "monitoring-services", "monitoring-snoozes"}},
 }
 
 // clusterScreens are the registry's screens that belong to no selectable
