@@ -127,6 +127,10 @@ var noPrimaryAgent = map[string]string{
 	// Its only agent is per organization (service-org-...), not primary.
 	"cloudresourcemanager.googleapis.com": "Resource Manager",
 	"serviceusage.googleapis.com":         "Service Usage",
+	// The page lists no agent of Cloud Quotas or Site Verification
+	// (read 2026-11-20, #2030).
+	"cloudquotas.googleapis.com":      "Cloud Quotas",
+	"siteverification.googleapis.com": "Site Verification",
 }
 
 // ServiceAgent is the email of svc's primary service agent in project, or

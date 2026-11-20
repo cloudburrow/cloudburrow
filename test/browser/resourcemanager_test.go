@@ -377,8 +377,8 @@ func TestServiceUsageDisableAndEnableThroughThePage(t *testing.T) {
 // Credentials has Create credentials, whose Service account opens IAM's
 // form and whose API key and OAuth client ID say they are not available
 // locally, and lists API Keys and OAuth 2.0 Client IDs as not served; the
-// OAuth consent screen, Page usage agreements and Domain verification say
-// why a local instance has none; a library entry this instance does not
+// Page usage agreements says why a local instance has none (the OAuth
+// consent screen and Domain verification are served since #2030); a library entry this instance does not
 // serve has Enable disabled with the --services value that would serve it.
 func TestAPIsCredentialsAndUnservedPages(t *testing.T) {
 	needService(t, "serviceusage")
@@ -394,17 +394,16 @@ func TestAPIsCredentialsAndUnservedPages(t *testing.T) {
 		!strings.HasPrefix(items[1], "OAuth client ID") || !strings.HasPrefix(items[2], "Service account") {
 		t.Errorf("Create credentials = %q", items)
 	}
-	for _, id := range []string{"#credentials-oauth"} {
-		var text string
-		p.eval(fmt.Sprintf(`document.querySelector(%q).textContent`, id), &text)
-		if !strings.Contains(text, "Not available locally") {
-			t.Errorf("%s = %q, want not available locally", id, text)
-		}
+	// OAuth client ID goes to Google Auth Platform's Create client since
+	// #2030 (TestGoogleAuthPlatformThroughThePages).
+	var href string
+	p.eval(`document.querySelector("#credentials-create-oauth").getAttribute("href")`, &href)
+	if !strings.HasPrefix(href, "/apis/credentials/consent/clients/create") {
+		t.Errorf("OAuth client ID links to %q", href)
 	}
-	for _, path := range []string{"/apis/credentials/consent", "/apis/credentials/agreements", "/apis/credentials/domainverification"} {
-		p.navigate(path + "?project=" + project)
-		p.waitFor(`[...document.querySelectorAll(".state h2")].some((n) => n.textContent === "Not available locally")`)
-	}
+	// Page usage agreements are Google's terms acceptance, console-only.
+	p.navigate("/apis/credentials/agreements?project=" + project)
+	p.waitFor(`[...document.querySelectorAll(".state h2")].some((n) => n.textContent === "Not available locally")`)
 	// Spanner is not in the storage shard's --services.
 	p.navigate("/apis/library/spanner.googleapis.com?project=" + project)
 	p.waitFor(`document.querySelector("#library-unavailable") !== null`)

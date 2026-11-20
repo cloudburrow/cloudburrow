@@ -13,6 +13,7 @@ import (
 	"time"
 
 	ahpb "cloud.google.com/go/bigquery/analyticshub/apiv1/analyticshubpb"
+	"cloud.google.com/go/cloudquotas/apiv1/cloudquotaspb"
 	iamadminpb "cloud.google.com/go/iam/admin/apiv1/adminpb"
 	iamv2pb "cloud.google.com/go/iam/apiv2/iampb"
 	"cloud.google.com/go/orgpolicy/apiv2/orgpolicypb"
@@ -35,6 +36,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/modelgarden"
 	"github.com/cloudburrow/cloudburrow/internal/sched"
 	"github.com/cloudburrow/cloudburrow/internal/service/analyticshub"
+	"github.com/cloudburrow/cloudburrow/internal/service/cloudquotas"
 	"github.com/cloudburrow/cloudburrow/internal/service/datatransfer"
 	"github.com/cloudburrow/cloudburrow/internal/service/gke"
 	"github.com/cloudburrow/cloudburrow/internal/service/kms"
@@ -116,6 +118,9 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	iamadminpb.RegisterIAMServer(srv, resourcemanager.NewIAMAdminServer(rmReg))
 	iamv2pb.RegisterPoliciesServer(srv, resourcemanager.NewPoliciesServer(rmReg))
 	orgpolicypb.RegisterOrgPolicyServer(srv, resourcemanager.NewOrgPolicyServer(rmReg))
+	quotas := cloudquotas.NewServer(store.NewMemory(), nil, nil)
+	cloudquotaspb.RegisterCloudQuotasServer(srv, quotas)
+	cloudquotaspb.RegisterQuotaAdjusterSettingsManagerServer(srv, quotas.Adjuster())
 	schedStore := scheduler.NewStore(store.NewMemory())
 	scheduler.NewGRPCServer(schedStore, scheduler.NewRunner(schedStore, nil, nil, nil, time.Second), nil).Register(srv)
 	// The Locations mixin is registered once, by KMS above (#1291): Cloud
@@ -193,7 +198,7 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		// TestEveryUnservedMethodIsNotImplemented checks its 501s over HTTP
 		// (internal/service/compute).
 		if strings.HasPrefix(m, "sql.") || strings.HasPrefix(m, "serviceusage.") || strings.HasPrefix(m, "apikeys.") || strings.HasPrefix(m, "backupdr.") ||
-			strings.HasPrefix(m, "cloudidentity.") || strings.HasPrefix(m, "compute.") ||
+			strings.HasPrefix(m, "cloudidentity.") || strings.HasPrefix(m, "compute.") || strings.HasPrefix(m, "siteVerification.") ||
 			strings.HasPrefix(m, "storagebatchoperations.") ||
 			strings.HasPrefix(m, "storageinsights.") || strings.HasPrefix(m, "storagetransfer.") ||
 			// Workload Identity Federation's (#1941) is

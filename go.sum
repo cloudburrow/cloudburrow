@@ -160,6 +160,8 @@ cloud.google.com/go/cloudbuild v1.32.0/go.mod h1:mYgcM8CMaPmAnO7GxSQ9ADAxVRwS+1b
 cloud.google.com/go/cloudbuild v1.35.0 h1:D4qZsyuOPqMkdnsh6jgOJBi8IN0NZOXVi1I/2EnYVVM=
 cloud.google.com/go/cloudbuild v1.35.0/go.mod h1:l61dO9wnjSWD2HZMMTXwxL5bWKBhN/yXaDaHCX5+stY=
 cloud.google.com/go/clouddms v1.14.0/go.mod h1:qSwET2Q27cJ4wCDsPsbkagXqQqkWfOy+gU3RjMsT/c8=
+cloud.google.com/go/cloudquotas v1.14.1 h1:PnDUV7SIb/+8bWTVP+nY3kvcpGcFWA76DbyyZrt6FiM=
+cloud.google.com/go/cloudquotas v1.14.1/go.mod h1:yLJwJSPnLnR6uF+H02ENSECuudQTm4GAOFGNKdq4evI=
 cloud.google.com/go/cloudsqlconn v1.24.0 h1:rMna5Tk00O10QY/9vgOcuzk1dXvRKCUS49AgQhbwYJ4=
 cloud.google.com/go/cloudsqlconn v1.24.0/go.mod h1:NS1CEi6zVhrSSK1ZQ1AYqWqrzoYR89jhSaElU9JHaNI=
 cloud.google.com/go/cloudtasks v1.18.0/go.mod h1:3KeCxwtGEyaySL7CR3lMmEa2I4mq1ynXdgmfNiO4RYE=

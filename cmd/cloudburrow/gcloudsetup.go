@@ -99,6 +99,11 @@ var gcloudVerified = []gcloudEndpoint{
 	// TestGcloudOrgPolicies drives set-policy, describe (--effective),
 	// list and delete.
 	{resourceManagerService, "orgpolicy", "/", true, false},
+	// The Cloud Quotas API (#2030): gcloud quotas info, preferences and
+	// adjuster settings call v1 on the Resource Manager port.
+	// TestGcloudQuotas drives info list and describe and preferences
+	// create, describe, list and update.
+	{resourceManagerService, "cloudquotas", "/", true, false},
 	// Service Usage (#1352): gcloud services list, enable and disable call
 	// v1, which gcloud appends. TestGcloudServices drives them.
 	{serviceUsageService, "serviceusage", "/", true, false},

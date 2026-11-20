@@ -6,16 +6,21 @@ import (
 	"errors"
 	"fmt"
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
+	"github.com/cloudburrow/cloudburrow/internal/authplatform"
 	"github.com/cloudburrow/cloudburrow/internal/egress"
 	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/iamcheck"
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
 	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
+	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"github.com/cloudburrow/cloudburrow/internal/service/apikeys"
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
+	"github.com/cloudburrow/cloudburrow/internal/service/cloudquotas"
+	"github.com/cloudburrow/cloudburrow/internal/service/monitoring"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
+	"github.com/cloudburrow/cloudburrow/internal/service/siteverification"
 	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
 	"github.com/cloudburrow/cloudburrow/internal/service/storagejobs"
 	"github.com/cloudburrow/cloudburrow/internal/store"
@@ -494,6 +499,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	var serviceUsageRef *serviceusage.Server
 	// And the API Keys API (#1915).
 	var apiKeysRef *apikeys.Server
+	// And the Cloud Quotas and Site Verification APIs (#2030).
+	var cloudQuotasRef *cloudquotas.Server
+	var siteVerificationRef *siteverification.Server
+	var authPlatformRef *authplatform.Store
 	// And the Cloud Storage companion APIs (#1957).
 	var storageJobsRef *storageJobs
 	// And the Cloud SQL Admin API and Backup and DR (#1541, #1542).
@@ -530,6 +539,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		registry:     func() *resourcemanager.Registry { return projectRegistry },
 		serviceUsage: func() *serviceusage.Server { return serviceUsageRef },
 		apiKeys:      func() *apikeys.Server { return apiKeysRef },
+		cloudQuotas:  func() *cloudquotas.Server { return cloudQuotasRef },
+		siteVerify:   func() *siteverification.Server { return siteVerificationRef },
+		authPlatform: func() *authplatform.Store { return authPlatformRef },
 		storageJobs:  func() *storageJobs { return storageJobsRef },
 		sqlAdmin:     func() *sqladmin.Server { return sqlAdminRef },
 		backupDR:     func() *backupdr.Server { return backupDRRef },
@@ -550,9 +562,14 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// service ends up with none (#600), never a list kept here.
 	requestMetrics := metrics.New(metricsServices(cfg)...)
 	control.Mount(func(mux *http.ServeMux) { mux.Handle("GET /metrics", metricsHandler(requestMetrics)) })
+	// The request history: one-minute deltas of the counters per project,
+	// which Cloud Monitoring serves as serviceruntime.googleapis.com/api/*
+	// and APIs & Services charts over a time range (#1866).
+	requestHistory := monitoring.NewRequestBuiltin(monitoringCounters{reg: requestMetrics}, cfg.DefaultProject(), time.Now)
+	coord.Register(&requestSampler{history: requestHistory})
 	if monitoringSvc != nil {
-		// serviceruntime.googleapis.com/api/* are sampled from these.
 		monitoringSvc.counters = requestMetrics
+		monitoringSvc.reqs = requestHistory
 	}
 	// Fault injection (#306) on the services CloudBurrow serves itself. Each
 	// faults.Interceptor below is what makes its service's rules accepted
@@ -869,6 +886,14 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// instance does not serve points here, and is refused with a message,
 	// whatever Host the tool derived (regional hosts among them).
 	rmSrv.HandleUnguarded(unserved.Match, unserved.Handler())
+	// The Cloud Quotas API and the Site Verification API (#2030), on the
+	// same port, in the registry's store.
+	cloudQuotasRef, siteVerificationRef = serveCloudQuotas(rmSrv, projects, func() *serviceusage.Server { return serviceUsageRef },
+		creds.Email, func(bearer string) (string, bool) { return creds.TokenAccount(bearer, time.Now()) })
+	// Google Auth Platform's app and OAuth clients (#2030), whose
+	// authorization code flow the metadata server's token endpoint serves.
+	authPlatformRef = authplatform.NewStore(projects.Backing(), resource.ProjectNumber)
+	metaSrv.WithOAuth(&authplatform.Endpoints{Store: authPlatformRef, User: creds.Email})
 	coord.Register(rmSrv)
 	// A build's serviceAccount names an IAM account of this registry (#1854).
 	runadapter.UseServiceAccounts(func(name string) (string, bool, bool) {
@@ -1052,7 +1077,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		mysql:          mysqlCreds,
 		serviceUsage:   serviceUsageSrv,
 		apiKeys:        apiKeysSrv,
+		cloudQuotas:    cloudQuotasRef,
+		siteVerify:     siteVerificationRef,
+		authPlatform:   authPlatformRef,
 		requestMetrics: requestMetrics,
+		requestHistory: requestHistory,
 		backupdr:       backupDRSrv,
 		sqlAdmin:       sqlAdminSrv,
 		privateCA:      privateCASvc,

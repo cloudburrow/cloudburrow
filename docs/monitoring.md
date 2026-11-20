@@ -29,7 +29,7 @@ OpenTelemetry's Google Cloud exporter takes the same endpoint and options.
   - `logging.googleapis.com/log_entry_count`, per log and severity;
   - `serviceruntime.googleapis.com/api/request_count` and `api/request_latencies` on `consumed_api`, for the APIs CloudBurrow serves itself, attributed to the project each call names (a call that names none to the instance's default project).
 
-User-defined descriptors and points are kept in `monitoring.json` in the instance directory in persistent mode. Log-based values come from Cloud Logging's in-memory entries, and request metrics are kept in memory for a week.
+User-defined descriptors and points are kept in `monitoring.json` in the instance directory in persistent mode. Log-based values come from Cloud Logging's in-memory entries, and request metrics are kept in memory for 30 days, the longest time range the APIs & Services charts offer (#1866).
 
 Terraform's `google_monitoring_metric_descriptor` works through `cloudburrow terraform` (`monitoring_custom_endpoint`). gcloud has no command for metric descriptors or time series.
 

@@ -221,6 +221,8 @@ var gcloudOverrides = []struct {
 	{"policytroubleshooter", []string{"RESOURCEMANAGER"}},
 	// The Organization Policy API v2 (#1890), on the Resource Manager port.
 	{"orgpolicy", []string{"RESOURCEMANAGER"}},
+	// The Cloud Quotas API (#2030), on the Resource Manager port.
+	{"cloudquotas", []string{"RESOURCEMANAGER"}},
 	{"serviceusage", []string{"SERVICEUSAGE", "RUN_SERVICEUSAGE"}},
 	{"apikeys", []string{"APIKEYS", "RUN_APIKEYS"}},
 	// The Cloud Storage companion APIs (#1957), each on its own port.

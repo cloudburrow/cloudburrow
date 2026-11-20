@@ -100,6 +100,8 @@ func TestGenerateServiceIdentityEveryEntry(t *testing.T) {
 		"bigtable.googleapis.com":               "",
 		"cloudresourcemanager.googleapis.com":   "",
 		"serviceusage.googleapis.com":           "",
+		"cloudquotas.googleapis.com":            "",
+		"siteverification.googleapis.com":       "",
 		"analyticshub.googleapis.com":           "gcp-sa-analyticshub.iam.gserviceaccount.com",
 		"workflows.googleapis.com":              "gcp-sa-workflows.iam.gserviceaccount.com",
 		"workflowexecutions.googleapis.com":     "",
