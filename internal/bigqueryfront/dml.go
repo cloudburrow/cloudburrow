@@ -1153,7 +1153,9 @@ func (f front) bufferedChange(r *http.Request, q queryOptions, d dmlStmt, ds, ta
 	// The rows in the streaming buffer, and those streamed in the last 30
 	// minutes (#1370, streamingbuffer.go).
 	var conds []string
-	if win, ok := f.buffers.window(projectOf(f.base), ds, table); ok {
+	// A window whose held rows all carry their stream time is checked by
+	// them: the Write API's rows (gRPC) in it may be changed (#2007).
+	if win, ok := f.buffers.window(projectOf(f.base), ds, table); ok && !win.Stamped {
 		conds = append(conds, win.cond())
 	}
 	if c := f.buffers.streamedRecently(projectOf(f.base), ds, table); c != "" {

@@ -36,9 +36,9 @@ import (
 // stream that has applied changes is open, UPDATE, DELETE, MERGE and
 // TRUNCATE TABLE on the table fail (jobs.query and jobs.insert), nothing
 // changed; INSERT, not a mutating statement, runs; DML on another table
-// runs. Once the writer is closed, DELETE runs: after the front's clock is
-// advanced 31 minutes, as CloudBurrow holds rows the Write API appended
-// from DML for 30 minutes, which BigQuery does not for gRPC writes (#2007).
+// runs. Once the writer is closed, DELETE runs at once: BigQuery holds
+// from DML rows written by tabledata.insertAll for 30 minutes, not those
+// the Write API (gRPC) wrote (#2007).
 //
 // covers: bigquery.jobs.query, bigquery.jobs.insert
 func TestBigQueryChangeDataCaptureBlocksDML(t *testing.T) {
@@ -125,7 +125,6 @@ func TestBigQueryChangeDataCaptureBlocksDML(t *testing.T) {
 	// The stream ends: no active upsert stream, nothing unmerged.
 	ms.Close()
 	closed = true
-	advanceBigQueryClock(t, h, 31*time.Minute)
 	deadline := time.Now().Add(15 * time.Second)
 	for {
 		_, err = c.Query("DELETE FROM " + full + " WHERE id = 2").Read(ctx)
@@ -205,9 +204,9 @@ func TestBigQueryChangeDataCaptureArrowRefused(t *testing.T) {
 // top-level columns defined by the table's schema". Through the managed
 // writer, an UPSERT to a table whose key has 17 columns is
 // INVALID_ARGUMENT, nothing written; a key of 16 columns is written, and so
-// is a table of 1,990 columns, near the most the engine's tables hold (a
-// table of more than 2,000 cannot be made, so that refusal is not
-// reachable, #2008).
+// is a table of 2,000 columns; one of 2,001 is INVALID_ARGUMENT, nothing
+// written (reachable since the engine holds BigQuery's 10,000 columns,
+// #2008).
 //
 // covers: bigquery.tables.insert
 func TestBigQueryChangeDataCaptureTableLimits(t *testing.T) {
@@ -283,9 +282,6 @@ func TestBigQueryChangeDataCaptureTableLimits(t *testing.T) {
 	}
 	check("a key of 16 columns", mk("key16", 17, 16), 16, false, "")
 	check("a key of 17 columns", mk("key17", 17, 17), 17, true, "up to 16 columns")
-	// The engine's tables hold fewer than 2,000 columns (SQLite's 2,000
-	// include the stream time and, in the change history table, the
-	// change columns), so the 2,000-column refusal cannot be reached: a
-	// table of 1,990 columns is written.
-	check("1,990 columns", mk("cols1990", 1990, 1), 1, false, "")
+	check("2,000 columns", mk("cols2000", 2000, 1), 1, false, "")
+	check("2,001 columns", mk("cols2001", 2001, 1), 1, true, "cannot have more than 2000")
 }

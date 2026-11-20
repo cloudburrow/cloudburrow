@@ -12,12 +12,13 @@ of the emulator or its dependencies is committed here, only the pins and the pat
 | [`github.com/goccy/bigquery-emulator`](https://github.com/goccy/bigquery-emulator) | v0.8.1 | `a531d3deb716eaba4972f9afa88e03e2c0f1a1af` | MIT | forty patches |
 | [`github.com/goccy/googlesqlite`](https://github.com/goccy/googlesqlite) | v0.3.1 | `36f6275991c003cde752014fa886eae33df6615d` | MIT (one file Apache-2.0, below) | fifty-six patches |
 | [`github.com/goccy/go-googlesql`](https://github.com/goccy/go-googlesql) | v0.3.0 | `eb229fca73e7dca3fc9e8e8be733d14a565f912c` | MIT | three patches |
+| [`github.com/ncruces/go-sqlite3-wasm/v2`](https://github.com/ncruces/go-sqlite3-wasm) | v2.2.35301 | `6883554ff2e3d225ecb1cf35f9174bc1b253b752` | MIT-0; SQLite public domain | one patch and one replaced file (SQLite rebuilt with `SQLITE_MAX_COLUMN` 32767, #2008) |
 | every other module the emulator links | v0.8.1's `go.sum` | | each its own | no |
 
-The three MIT licence texts are in [licenses/](licenses/). Each version is v0.8.1's own choice:
+The three MIT licence texts are in [licenses/](licenses/) (go-sqlite3-wasm's MIT-0 licence is in its module, and the build's licence bundle carries it). Each version is v0.8.1's own choice:
 [go.mod](go.mod) requires the emulator and nothing else, and its build list for the command
 linked is, module by module, the same as v0.8.1's own (checked with `go list -deps`), except that
-the three modules above are replaced by the patched copies.
+the four modules above are replaced by the patched copies.
 
 ## How it is built and checked
 
@@ -29,6 +30,8 @@ the three modules above are replaced by the patched copies.
    module cache, against [sources.json](sources.json);
 2. copies it to `build/` (not committed) and applies its patches in order, strictly: a hunk that
    does not match its lines exactly fails the build, with no fuzz and no search;
+   then writes each of its `files` (a binary file a patch cannot change) from this directory,
+   once its SHA-256 is the one sources.json pins;
 3. checks that [go.mod](go.mod)'s replacements are in force, so a version bump that forgot the
    patches cannot build unpatched;
 4. builds `github.com/goccy/bigquery-emulator/cmd/bigquery-emulator` for linux/amd64 and
@@ -186,6 +189,7 @@ GOFLAGS=-mod=readonly GOWORK=off go test -tags http2legacy github.com/goccy/bigq
 | [bigquery-emulator 0102](patches/bigquery-emulator/0102-reads-beside-a-running-statement.patch) | The emulator answered one request at a time, so while a slow statement ran every other request waited for its end, a `jobs.list` and an `INFORMATION_SCHEMA.JOBS` query among them, and a running job could not be seen `RUNNING`; BigQuery runs jobs side by side. The temporary database is in WAL mode, without a shared cache, and a request that only reads (a GET method, or a `jobs.query` or query `jobs.insert` of one SELECT statement) runs without the write lock, reading the last commit; its job and destination table are written after its statement under the lock, in a transaction of their own. Writes stay one at a time. The job order's index is made at start, not by the first jobs.list after a job, which ran beside a writer; a read request that adds a project on first use takes the write lock; the write-ahead log is cut back to 1 MiB once checkpointed, so freed pages still go back to the filesystem. Regression tests `TestReadsBesideARunningStatement`, `TestSelectStatement` (#1823) | CloudBurrow's, MIT |
 | [googlesqlite 0103](patches/googlesqlite/0103-catalog-sync-on-an-older-snapshot.patch) | The catalog's Sync, on the connection of the statement analyzed, read the catalog table's rows from that connection's snapshot, which since bigquery-emulator 0102 may be older than what the shared catalog holds; a row a later save replaced or a later delete removed could pass its filter of times (the front's clock moves, and the times compare as trimmed RFC3339Nano text) and put the older spec, or a dropped table, back. The catalog now records the rows it writes or deletes, and Sync skips them: it is their only writer. Regression test `TestCatalogSyncOnAnOlderSnapshot` (#1823) | CloudBurrow's, MIT |
 | [googlesqlite 0104](patches/googlesqlite/0104-new-columns-in-the-catalog.patch) | A column `CREATE OR REPLACE TABLE` or `ALTER TABLE ADD COLUMN` added was "Unrecognized name" in the next statement: the catalog kept the old spec's analyzer handle under every name of the table unless a change table's replacement rebuilt it (not for a table named by dataset and name, in a CloudBurrow dataset, or TEMP), and ALTER TABLE was a no-op. A spec of another shape now rebuilds the catalog; CREATE TABLE IF NOT EXISTS of a table there keeps its spec; ALTER TABLE ADD COLUMN [IF NOT EXISTS] adds the column to the SQLite table and the spec; a script's replaced TEMP table no longer fails its cleanup. Not reached through CloudBurrow's front (measured, `TestBigQueryNewColumn1827`). Applies after googlesqlite 0103 (#1823). Regression test `TestNewColumnSelected` (#1827) | CloudBurrow's, MIT |
+| [go-sqlite3-wasm 0105](patches/go-sqlite3-wasm/0105-max-column-32767.patch) | A table of about 1,996 columns or more could not be made ("too many columns"): the engine's SQLite was built with SQLite's default `SQLITE_MAX_COLUMN` of 2,000, and BigQuery allows 10,000 (#2008). The patch is the module's own reproducible build (wasi-sdk 33, binaryen 129, wasm2go v0.4.3, SQLite 3.53.1) with `SQLITE_MAX_COLUMN 32767` in `build/sqlite_opt.h`; the same build without that line reproduces the published files byte for byte. Its binary data segment, `sqlite3.dat`, is copied whole from [0105-max-column-32767.sqlite3.dat](patches/go-sqlite3-wasm/0105-max-column-32767.sqlite3.dat), pinned by SHA-256 in sources.json (`files`) | CloudBurrow's, MIT (the define); MIT-0 and public domain (the build) |
 
 Nothing here has been filed or proposed upstream; whether to is the maintainer's decision (#974).
 When an upstream release carries a fix, drop its patch and bump the pin in sources.json, go.mod,

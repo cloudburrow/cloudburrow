@@ -653,7 +653,8 @@ func (w *storageWrite) insertBatch(ctx context.Context, t readTable, rows []json
 	if err != nil {
 		return status.Error(codes.Internal, err.Error())
 	}
-	code, got := w.call(ctx, http.MethodPost, t, "/insertAll", body)
+	// Not tabledata.insertAll's 30-minute hold from DML (#2007).
+	code, got := w.call(withWriteAPIAppend(ctx), http.MethodPost, t, "/insertAll", body)
 	if code != http.StatusOK {
 		return restStatus(code, got, "writing the rows to "+t.path())
 	}

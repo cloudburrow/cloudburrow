@@ -2,6 +2,7 @@ package bigqueryfront
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -133,7 +134,14 @@ type streamWindow struct {
 	Rows    int64     `json:"rows"`
 	// Column is whether the table is partitioned by a column or an
 	// integer range, whose buffered rows _PARTITION_BUFFERED marks.
-	Column bool `json:"column,omitempty"`
+	Column bool `json:"column,omitempty"` // Stamped is whether every row of the window that DML must refuse
+	// carries its stream time, so that DML is checked against the stream
+	// times (streamedRecently) rather than the whole window: true unless a
+	// tabledata.insertAll into a table with no stream time added rows. A
+	// window kept from before the field is false, and holds every row.
+	// The Write API's rows (gRPC) have no stream time and DML may change
+	// them (#2007).
+	Stamped bool `json:"stamped,omitempty"`
 }
 
 // cond is the condition of the rows of w's table that are in its
@@ -486,7 +494,13 @@ func (f front) streamIngestion(w http.ResponseWriter, r *http.Request, dataset, 
 			return false
 		}
 	}
-	cols := map[string]any{streamedAt: now.Format(time.RFC3339Nano)}
+	// The Write API's rows (gRPC) are not held from DML (#2007): they get
+	// no stream time.
+	writeAPI := isWriteAPIAppend(r.Context())
+	cols := map[string]any{}
+	if !writeAPI {
+		cols[streamedAt] = now.Format(time.RFC3339Nano)
+	}
 	unit := ""
 	switch {
 	case plain:
@@ -521,8 +535,8 @@ func (f front) streamIngestion(w http.ResponseWriter, r *http.Request, dataset, 
 	}
 	path := tablePath(dataset, base) + "/insertAll"
 	status, got := f.sendStreamed(r, path, out, cols)
-	stamped := true
-	if status != http.StatusOK && bytes.Contains(got, []byte(streamedAt)) {
+	stamped := !writeAPI
+	if status != http.StatusOK && stamped && bytes.Contains(got, []byte(streamedAt)) {
 		// A table with no stream time (above): its rows are held only
 		// while in the buffer.
 		delete(cols, streamedAt)
@@ -569,18 +583,8 @@ func (f front) streamIngestion(w http.ResponseWriter, r *http.Request, dataset, 
 	if plain {
 		return true
 	}
-	f.buffers.mu.Lock()
-	if f.buffers.wins == nil {
-		f.buffers.wins = map[string]*streamWindow{}
-	}
-	if cur, ok := f.buffers.wins[key]; ok && cur.Target.Equal(target) {
-		cur.Rows += n
-	} else {
-		f.buffers.wins[key] = &streamWindow{Base: f.base, Dataset: dataset, Table: base, Unit: unit,
-			Target: target, Oldest: now, Rows: n, Column: column}
-	}
-	f.buffers.saveLocked()
-	f.buffers.mu.Unlock()
+	f.buffers.addRows(streamWindow{Base: f.base, Dataset: dataset, Table: base, Unit: unit,
+		Target: target, Oldest: now, Rows: n, Column: column, Stamped: stamped || writeAPI}, key)
 	return true
 }
 
@@ -741,11 +745,18 @@ func (f front) streamThroughScratch(w http.ResponseWriter, r *http.Request, data
 		return f.runDML(r, "INSERT INTO "+quotePath([]string{project, dataset, base})+" ("+list+pcols+") SELECT "+list+
 			pvals+" FROM "+quotePath([]string{project, dataset, scratch.TableID}))
 	}
-	// The time of the rows, which DML reads (#1370, above).
+	// The time of the rows, which DML reads (#1370, above); the Write
+	// API's rows (gRPC) have none (#2007).
+	writeAPI := isWriteAPIAppend(r.Context())
 	stamp := ", TIMESTAMP '" + now.Format(streamStamp) + "'"
-	why = insert(pcols+", "+streamedAt, pvals+stamp)
-	stamped := why == ""
-	if why != "" && strings.Contains(why, streamedAt) {
+	stamped := false
+	if writeAPI {
+		why = insert(pcols, pvals)
+	} else {
+		why = insert(pcols+", "+streamedAt, pvals+stamp)
+		stamped = why == ""
+	}
+	if why != "" && !writeAPI && strings.Contains(why, streamedAt) {
 		// A table with no stream time (above): its rows are held only
 		// while in the buffer.
 		why = insert(pcols, pvals)
@@ -777,19 +788,45 @@ func (f front) streamThroughScratch(w http.ResponseWriter, r *http.Request, data
 	if plain {
 		return true
 	}
-	f.buffers.mu.Lock()
-	if f.buffers.wins == nil {
-		f.buffers.wins = map[string]*streamWindow{}
-	}
-	if cur, ok := f.buffers.wins[key]; ok && cur.Target.Equal(target) {
-		cur.Rows += n
-	} else {
-		f.buffers.wins[key] = &streamWindow{Base: f.base, Dataset: dataset, Table: base, Unit: unit,
-			Target: target, Oldest: now, Rows: n, Column: column}
-	}
-	f.buffers.saveLocked()
-	f.buffers.mu.Unlock()
+	f.buffers.addRows(streamWindow{Base: f.base, Dataset: dataset, Table: base, Unit: unit,
+		Target: target, Oldest: now, Rows: n, Column: column, Stamped: stamped || writeAPI}, key)
 	return true
+}
+
+// addRows adds a stream's rows to the table's window, w a new window of
+// them; one for another partition was flushed before. The window stays
+// Stamped only while every append to it was.
+func (s *streamBuffers) addRows(w streamWindow, key string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.wins == nil {
+		s.wins = map[string]*streamWindow{}
+	}
+	if cur, ok := s.wins[key]; ok && cur.Target.Equal(w.Target) {
+		cur.Rows += w.Rows
+		cur.Stamped = cur.Stamped && w.Stamped
+	} else {
+		s.wins[key] = &w
+	}
+	s.saveLocked()
+}
+
+// writeAPIKey marks the Write API's tabledata.insertAll of the rows an
+// AppendRows request carries (storagewrite.go): BigQuery lets DML change
+// rows "recently written using the Storage Write API (gRPC)", and holds
+// for 30 minutes only those of the Storage Write API (REST), that is
+// tabledata.insertAll
+// (https://cloud.google.com/bigquery/docs/data-manipulation-language,
+// https://cloud.google.com/bigquery/docs/write-api, #2007).
+type writeAPIKey struct{}
+
+func withWriteAPIAppend(ctx context.Context) context.Context {
+	return context.WithValue(ctx, writeAPIKey{}, true)
+}
+
+func isWriteAPIAppend(ctx context.Context) bool {
+	v, _ := ctx.Value(writeAPIKey{}).(bool)
+	return v
 }
 
 // withStreamingBuffer adds the streamingBuffer section of tables.get to
