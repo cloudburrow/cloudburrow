@@ -44,6 +44,12 @@ func TestUpdateTopicStoragePolicy(t *testing.T) {
 	if !fx.front.inTransitAllowed(name, "us-central1") || fx.front.inTransitAllowed(name, "us-east1") {
 		t.Errorf("the export check does not read the new regions")
 	}
+	// The periodic reconcile reads the emulator, which holds the old
+	// policy: the export check still reads the update's.
+	fx.front.reconcileAll(ctx, false)
+	if !fx.front.inTransitAllowed(name, "us-central1") || fx.front.inTransitAllowed(name, "us-east1") {
+		t.Errorf("after a reconcile the export check reads the emulator's regions, not the update's")
+	}
 	for _, bad := range []string{"us", "us-central1-a", "nam4"} {
 		_, err := pub.UpdateTopic(ctx, &pubsubpb.UpdateTopicRequest{Topic: &pubsubpb.Topic{Name: name,
 			MessageStoragePolicy: &pubsubpb.MessageStoragePolicy{AllowedPersistenceRegions: []string{bad}}}, UpdateMask: mask})
