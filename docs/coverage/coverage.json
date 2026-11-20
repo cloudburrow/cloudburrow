@@ -9591,6 +9591,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/datastoreadmin1884_test.go:275 TestFirestoreAdminCopiesADatastoreModeDatabase",
+          "test/compat/firestorepitr1942_test.go:29 TestFirestorePointInTimeRecovery",
           "test/compat/firestoretransfer_test.go:194 TestFirestoreBackupRestoreClone",
           "test/compat/gcloudfirestoretransfer_test.go:24 TestGcloudFirestoreTransfer"
         ]
@@ -9690,6 +9691,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/datastoreadmin1884_test.go:275 TestFirestoreAdminCopiesADatastoreModeDatabase",
+          "test/compat/firestorepitr1942_test.go:29 TestFirestorePointInTimeRecovery",
           "test/compat/firestoretransfer_test.go:94 TestFirestoreExportImport",
           "test/compat/gcloudfirestoretransfer_test.go:24 TestGcloudFirestoreTransfer"
         ]
@@ -9724,6 +9726,7 @@
           "test/compat/firestoredatastoremode1880_test.go:69 TestFirestoreDatastoreModeDatabases",
           "test/compat/firestorepersist1615_test.go:165 TestFirestoreAcrossRestart",
           "test/compat/firestorepersist1615_test.go:64 TestFirestoreSurvivesAPodRestart",
+          "test/compat/firestorepitr1942_test.go:29 TestFirestorePointInTimeRecovery",
           "test/compat/frontstate1514_test.go:310 TestFirestoreFrontRestartKeepsItsState"
         ]
       },
@@ -9841,6 +9844,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/firestoreadmin_test.go:47 TestFirestoreAdminDatabases",
+          "test/compat/firestorepitr1942_test.go:29 TestFirestorePointInTimeRecovery",
           "test/compat/orgpolicycustom1891_test.go:484 TestOrgPolicyCustomConstraintsFirestore"
         ]
       },
@@ -9893,6 +9897,7 @@
           "test/compat/datastoredatabases1885_test.go:49 TestDatastoreNamedDatabasesKeepTheirEntitiesApart",
           "test/compat/datastoreupgrade1885_test.go:90 TestDatastoreNamedDatabaseEntitiesSurviveTheUpgrade",
           "test/compat/emulatorkill1611_test.go:281 TestDatastoreAfterTheEmulatorIsKilled",
+          "test/compat/firestorepitr1942_test.go:214 TestDatastoreReadAtAnEarlierTimeIsRefused",
           "test/compat/optional_test.go:130 TestDatastoreEntityCRUD"
         ]
       },

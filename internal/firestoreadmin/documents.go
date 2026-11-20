@@ -248,6 +248,9 @@ func (d *Documents) checkRestored(ctx context.Context) {
 		d.logf("firestore documents: import: %v", err)
 		return
 	}
+	// The emulator started empty: it holds no versions from before the
+	// import (pitr.go, #1942).
+	d.admin.sawImport(d.admin.now())
 	body := []byte(`{"fields":{"at":{"stringValue":"` + time.Now().UTC().Format(time.RFC3339Nano) + `"}}}`)
 	if code, err := d.call(ctx, http.MethodPatch, sentinelPath, body); err != nil || code != http.StatusOK {
 		d.logf("firestore documents: the sentinel document: %d, %v", code, err)

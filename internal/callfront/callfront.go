@@ -344,6 +344,11 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// other intercept or the emulator sees it.
 		icpts = append(icpts, newDatastoreGate(*firestoreAdminAddr))
 	}
+	if *datastoreDBs || *queries == "datastore" {
+		// A read at an earlier read time is refused, not answered with
+		// the entities as they are now (#1942, datastorereadtime.go).
+		icpts = append(icpts, newDatastoreReadTimes())
+	}
 	var dbs *datastoreDatabases
 	if *datastoreDBs {
 		dbs = newDatastoreDatabases(*upstream, logger.Printf)

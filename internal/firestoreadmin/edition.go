@@ -319,11 +319,12 @@ func grpcMessage(b []byte, encoding string) ([]byte, bool) {
 }
 
 // Claims reports whether r is a documents call on a Standard database
-// carrying an Enterprise-only value, or a Write stream, which the guard
+// carrying an Enterprise-only value, a read at a read time outside the
+// database's version window (pitr.go, #1942), or a Write stream, which the guard
 // passes on itself: over gRPC (editionstream.go, #1738), and over
 // WebChannel on a Standard database (editionchannel.go, #1744).
 func (g *EditionGuard) Claims(r *http.Request) bool {
-	return claimsWriteStream(r) || g.claimsWriteChannel(r) || g.refusal(r) != nil
+	return claimsWriteStream(r) || g.claimsWriteChannel(r) || g.refusal(r) != nil || g.readTimeRefusal(r) != nil
 }
 
 // ServeHTTP answers a call Claims claimed with its refusal.
@@ -337,6 +338,9 @@ func (g *EditionGuard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err := g.refusal(r)
+	if err == nil {
+		err = g.readTimeRefusal(r) // a read outside the version window (pitr.go)
+	}
 	if err == nil {
 		err = status.Error(codes.Internal, "the call was claimed but not refused")
 	}

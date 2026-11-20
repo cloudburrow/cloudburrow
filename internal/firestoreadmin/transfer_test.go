@@ -157,8 +157,8 @@ func TestBackupRestoreClone(t *testing.T) {
 		t.Fatalf("cloned = %v, %v", db, err)
 	}
 	if _, err := c.CloneDatabase(ctx, &adminpb.CloneDatabaseRequest{Parent: "projects/p", DatabaseId: "older",
-		PitrSnapshot: &adminpb.PitrSnapshot{Database: src, SnapshotTime: timestamppb.New(now.Add(-time.Hour))}}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("clone an hour back: %v, want Unimplemented", err)
+		PitrSnapshot: &adminpb.PitrSnapshot{Database: src, SnapshotTime: timestamppb.New(now.Add(-time.Hour))}}); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("clone from before the source was created: %v, want FailedPrecondition", err)
 	}
 
 	if err := c.DeleteBackup(ctx, &adminpb.DeleteBackupRequest{Name: b.Name}); err != nil {
