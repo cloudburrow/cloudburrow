@@ -260,6 +260,16 @@
             "patches": [
               "CloudBurrow's: addresses WebAssembly memory with unsigned 32-bit offsets, so a call past 2 GiB of engine heap no longer panics (#989)"
             ]
+          },
+          {
+            "module": "github.com/ncruces/go-sqlite3-wasm/v2",
+            "version": "v2.2.35301",
+            "sum": "h1:PPb3vECU21cZr2CrzYG7idXLBpWETDcdVEnXg3vqRpM=",
+            "commit": "6883554ff2e3d225ecb1cf35f9174bc1b253b752",
+            "license": "MIT-0 (SQLite: public domain)",
+            "patches": [
+              "CloudBurrow's: the module's own reproducible build of SQLite 3.53.1 (wasi-sdk 33, binaryen 129, wasm2go v0.4.3) with SQLITE_MAX_COLUMN 32767, so a table can have BigQuery's 10,000 columns; sqlite3.dat, binary, is replaced whole from a pinned file (#2008)"
+            ]
           }
         ],
         "buildTags": [

@@ -140,7 +140,8 @@
         "patches/googlesqlite/0097-typed-positional-parameters.patch",
         "patches/googlesqlite/0099-typed-null-array-struct-parameters.patch",
         "patches/googlesqlite/0103-catalog-sync-on-an-older-snapshot.patch",
-        "patches/googlesqlite/0104-new-columns-in-the-catalog.patch"
+        "patches/googlesqlite/0104-new-columns-in-the-catalog.patch",
+        "patches/googlesqlite/0106-ten-thousand-columns.patch"
       ]
     },
     {
@@ -153,6 +154,23 @@
         "patches/go-googlesql/0001-unsigned-wasm-addresses.patch",
         "patches/go-googlesql/0002-utc-time-zone.patch",
         "patches/go-googlesql/0003-annotated-type-argument.patch"
+      ]
+    },
+    {
+      "path": "github.com/ncruces/go-sqlite3-wasm/v2",
+      "version": "v2.2.35301",
+      "sum": "h1:PPb3vECU21cZr2CrzYG7idXLBpWETDcdVEnXg3vqRpM=",
+      "commit": "6883554ff2e3d225ecb1cf35f9174bc1b253b752",
+      "dir": "build/go-sqlite3-wasm",
+      "patches": [
+        "patches/go-sqlite3-wasm/0105-max-column-32767.patch"
+      ],
+      "files": [
+        {
+          "path": "sqlite3.dat",
+          "from": "patches/go-sqlite3-wasm/0105-max-column-32767.sqlite3.dat",
+          "sha256": "ec62558a766f54d98f1701732503606e72c2cdd6929df414710207a8406c2e28"
+        }
       ]
     }
   ],

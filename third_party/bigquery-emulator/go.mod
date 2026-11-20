@@ -123,4 +123,5 @@ replace (
 	github.com/goccy/bigquery-emulator v0.8.1 => ./build/bigquery-emulator
 	github.com/goccy/go-googlesql v0.3.0 => ./build/go-googlesql
 	github.com/goccy/googlesqlite v0.3.1 => ./build/googlesqlite
+	github.com/ncruces/go-sqlite3-wasm/v2 v2.2.35301 => ./build/go-sqlite3-wasm
 )

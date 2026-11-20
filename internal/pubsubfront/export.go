@@ -73,6 +73,10 @@ type exporter struct {
 	// bigquery, storage and kms are the base URLs of the instance's
 	// BigQuery, Cloud Storage and Cloud KMS, "" when it does not serve one.
 	bigquery, storage, kms string
+	// bigqueryStorage is the instance's BigQuery Storage API (host:port),
+	// which changes are written to (exportcdc.go, #1999); writer its client.
+	bigqueryStorage string
+	writer          storageWriter
 	// project is the one project the local BigQuery serves, "" for any.
 	client *http.Client
 

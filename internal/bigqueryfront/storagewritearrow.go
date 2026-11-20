@@ -95,6 +95,14 @@ func arrowWriterSchema(serialized []byte) (*arrow.Schema, error) {
 
 // newArrowConv matches the schema's fields to the table's columns.
 func newArrowConv(schema *arrow.Schema, fields []field) (*arrowConv, error) {
+	for _, af := range schema.Fields() {
+		if pc := changePseudoColumn(af.Name); pc != "" {
+			// "You must use the protobuf format as the ingestion format.
+			// The Apache Arrow format isn't supported." (#1999)
+			return nil, status.Errorf(codes.InvalidArgument,
+				"Change data capture (%s) requires the protobuf format: the Apache Arrow format is not supported", pc)
+		}
+	}
 	cols, err := arrowCols(schema.Fields(), fields, "")
 	if err != nil {
 		return nil, err
