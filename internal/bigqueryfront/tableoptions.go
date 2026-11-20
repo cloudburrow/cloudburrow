@@ -222,12 +222,15 @@ type tableSetting struct {
 	// Embedding is the table's autonomous embedding generation column
 	// (autoembed.go, #1778), or nil.
 	Embedding *genEmbedding `json:"embedding,omitempty"`
+	// VectorIndex is the table's vector index (vectorindex.go, #1952), or
+	// nil.
+	VectorIndex *vectorIndex `json:"vectorIndex,omitempty"`
 }
 
 // zero reports whether t keeps nothing.
 func (t tableSetting) zero() bool {
 	return t.Created == "" && t.ChangeHistory == nil && t.FineGrainedMutations == nil && t.PrivacyPolicy == nil && !t.MVChanged &&
-		len(t.Transactions) == 0 && len(t.GovernanceTags) == 0 && t.Embedding == nil
+		len(t.Transactions) == 0 && len(t.GovernanceTags) == 0 && t.Embedding == nil && t.VectorIndex == nil
 }
 
 // tableSettings are the settings of every table, by project, dataset and
