@@ -37,7 +37,8 @@ func gkePoolNodes(np *containerpb.NodePool) int {
 }
 
 // poolListing is the Node pools tab: each pool, with its actions.
-func (p gkeClustersProvider) poolListing(c *containerpb.Cluster) console.Listing {
+func (p gkeClustersProvider) poolListing(ctx context.Context, project string, c *containerpb.Cluster) console.Listing {
+	versions := p.servedVersions(ctx, project, c)
 	l := console.Listing{Columns: []string{"Number of nodes", "Machine type", "Image type", "Version", "Labels"}, NameColumn: "Name",
 		Noun: "node pools", AlwaysStatus: true}
 	for _, np := range c.GetNodePools() {
@@ -48,7 +49,7 @@ func (p gkeClustersProvider) poolListing(c *containerpb.Cluster) console.Listing
 		}}
 		if !c.GetAutopilot().GetEnabled() {
 			r.Target = []string{c.GetName(), gkePoolSeg, np.GetName()}
-			r.Actions = p.poolActions(np)
+			r.Actions = p.poolActions(c, np, versions)
 		}
 		l.Items = append(l.Items, r)
 	}
@@ -75,7 +76,7 @@ func (p gkeClustersProvider) addPoolAction(c *containerpb.Cluster) console.Actio
 	}}
 }
 
-func (p gkeClustersProvider) poolActions(np *containerpb.NodePool) []console.Action {
+func (p gkeClustersProvider) poolActions(c *containerpb.Cluster, np *containerpb.NodePool, versions []string) []console.Action {
 	labels := ""
 	keys := make([]string, 0, len(np.GetConfig().GetResourceLabels()))
 	for k := range np.GetConfig().GetResourceLabels() {
@@ -97,8 +98,26 @@ func (p gkeClustersProvider) poolActions(np *containerpb.NodePool) []console.Act
 			{Name: "image", Label: "Image type", Type: "select", Options: gkeImageTypes, Default: image},
 			{Name: "labels", Label: "Labels", Type: "textarea", Default: strings.TrimSpace(labels), Help: "The nodes' resource labels, one key=value per line."},
 		}},
+		gkePoolUpgrade(c, np, versions),
 		{ID: "delete", Label: "Delete", Destructive: true, Confirm: np.GetName()},
 	}
+}
+
+// gkePoolUpgrade is a node pool's Upgrade: Google's node pool page has
+// Upgrade beside the node version, to a version no newer than the
+// control plane's.
+func gkePoolUpgrade(c *containerpb.Cluster, np *containerpb.NodePool, versions []string) console.Action {
+	targets := gkePoolTargets(versions, c, np)
+	if len(targets) == 0 {
+		why := "This node pool runs the newest version served locally (" + np.GetVersion() + ")."
+		if len(gkeNewer(versions, np.GetVersion())) > 0 {
+			why = "This node pool runs the control plane's version (" + np.GetVersion() + "): upgrade the control plane first."
+		}
+		return console.Action{ID: "upgrade", Label: "Upgrade", Unavailable: why}
+	}
+	return console.Action{ID: "upgrade", Label: "Upgrade", Title: "Upgrade node pool", Submit: "Save changes", Fields: []console.Field{
+		{Name: "version", Label: "Target version", Type: "select", Options: targets, Default: targets[0],
+			Help: "Current version: " + np.GetVersion() + ". Control plane version: " + c.GetCurrentMasterVersion() + "."}}}
 }
 
 // gkeParseLabels reads key=value lines.
@@ -148,6 +167,17 @@ func (p gkeClustersProvider) poolAct(ctx context.Context, cluster string, c *con
 	switch action {
 	case "delete":
 		_, err := api.DeleteNodePool(ctx, &containerpb.DeleteNodePoolRequest{Name: name})
+		return gkeStatusErr(err)
+	case "upgrade":
+		v := strings.TrimSpace(v["version"])
+		if v == "" {
+			return fmt.Errorf("choose a target version")
+		}
+		image := np.GetConfig().GetImageType()
+		if image == "" {
+			image = gkeImageTypes[0]
+		}
+		_, err := api.UpdateNodePool(ctx, &containerpb.UpdateNodePoolRequest{Name: name, NodeVersion: v, ImageType: image})
 		return gkeStatusErr(err)
 	case "resize":
 		n, err := strconv.Atoi(strings.TrimSpace(v["nodes"]))
@@ -245,7 +275,7 @@ func (p gkeClustersProvider) servedSubActions(ctx context.Context, project strin
 		}
 		for _, np := range c.GetNodePools() {
 			if np.GetName() == name {
-				return p.poolActions(np)
+				return p.poolActions(c, np, p.servedVersions(ctx, project, c))
 			}
 		}
 	case gkeOpSeg:

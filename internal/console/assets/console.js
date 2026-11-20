@@ -3248,6 +3248,9 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
       ...(caps.editRowFirst ? edit : []),
       ...(item.actions || []).filter((a) => !a.button && !a.panel).map((a) => ({
         label: a.label, destructive: a.destructive,
+        // An action the row cannot take here is drawn disabled with its
+        // reason, as on a page (#1857: a node pool's Upgrade).
+        unavailable: a.unavailable,
         // A row whose actions address a path of their own is named by its
         // row, not the path's last segment: a value inside a Datastore
         // property is addressed by its steps as JSON, [6,"when"], and its
@@ -7005,7 +7008,13 @@ function buildCreateForm(spec) {
     // Escape handler never hears the key (#700, measured in #765's CI).
     focusFirst() {
       const e = entries.find((x) => !x.control.disabled);
-      if (e) (e.focus || (() => e.control.focus()))();
+      if (e) { (e.focus || (() => e.control.focus()))(); return; }
+      // Every field immutable, as a GKE cluster's Connect shows only its
+      // command (#1857): focus the dialog's first button, so focus is in
+      // the dialog and Escape reaches it.
+      const at = entries.length && entries[0].node && entries[0].node.closest ? entries[0].node.closest(".modal") : null;
+      const b = at && at.querySelector("button:not([disabled])");
+      if (b) b.focus();
     },
     // Anything the user changed away from what the form offered. A form
     // holding only its own defaults has nothing to lose.
