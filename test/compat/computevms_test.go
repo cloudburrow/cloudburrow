@@ -189,7 +189,7 @@ func TestComputeVMsThroughTheGoClient(t *testing.T) {
 			time.Sleep(2 * time.Second)
 		}
 	}
-	if out := run("cat /var/tmp/boots; ip -4 addr show eth0; sudo -n true && echo SUDO-OK"); !strings.Contains(out, "boot") || !strings.Contains(out, ip) || !strings.Contains(out, "SUDO-OK") {
+	if out := run("cat /var/tmp/boots; ip -4 addr show vpc0; sudo -n true && echo SUDO-OK"); !strings.Contains(out, "boot") || !strings.Contains(out, ip) || !strings.Contains(out, "SUDO-OK") {
 		t.Fatalf("over SSH: %s", out)
 	}
 

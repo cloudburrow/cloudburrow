@@ -82,6 +82,9 @@ type Server struct {
 	seeded map[string]bool
 	// waiters are the running operations, closed when each is done.
 	waiters map[string]chan struct{}
+	// pods are the pod IPs the running VMs' guests last reported (#1968),
+	// by instance.
+	pods map[string]podSeen
 
 	srv *http.Server
 	ln  net.Listener
