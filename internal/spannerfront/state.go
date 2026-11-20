@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
@@ -67,6 +68,9 @@ type savedState struct {
 	// SplitPoints are each database's split points (#1523), in their wire
 	// form.
 	SplitPoints map[string][][]byte `json:"splitPoints,omitempty"`
+	// DBKeys are the customer-managed databases' keys and wrapped data
+	// keys (#1950).
+	DBKeys map[string]*dbKey `json:"dbKeys,omitempty"`
 }
 
 // snapshotHead is a backup's copy without its rows, the first part of its
@@ -205,6 +209,15 @@ func (s *Instances) restoreState(st *frontstate.Store, in *savedState) error {
 		if err != nil {
 			return fmt.Errorf("the rows of the backup %s: %w", name, err)
 		}
+		sealed, err := decodeSealed(raw)
+		if err != nil {
+			return fmt.Errorf("the sealed rows of the backup %s: %w", name, err)
+		}
+		if sealed != nil {
+			backups[name] = &backup{pb: pb, sealed: sealed}
+			st.MarkRead(name, sealed)
+			continue
+		}
 		sn, err := decodeSnapshot(raw)
 		if err != nil {
 			return fmt.Errorf("the rows of the backup %s: %w", name, err)
@@ -267,6 +280,12 @@ func (s *Instances) restoreState(st *frontstate.Store, in *savedState) error {
 	}
 	s.emuOpNames, s.configs, s.partitions = in.EmuOpNames, configs, partitions
 	s.splitPoints = splits
+	s.dbKeys = map[string]*dbKey{}
+	for name, k := range in.DBKeys {
+		if k != nil {
+			s.dbKeys[name] = k
+		}
+	}
 	return nil
 }
 
@@ -329,6 +348,10 @@ func (s *Instances) snapshotState() (*savedState, map[string]frontstate.Copy, er
 	copies := make(map[string]frontstate.Copy, len(s.backups))
 	for name, b := range s.backups {
 		pbs[name] = b.pb
+		if sl := b.sealed; sl != nil {
+			copies[name] = frontstate.Copy{Data: sl, Encode: func() ([]byte, error) { return encodeSealed(sl) }}
+			continue
+		}
 		sn := b.snap
 		if sn == nil {
 			continue
@@ -350,6 +373,12 @@ func (s *Instances) snapshotState() (*savedState, map[string]frontstate.Copy, er
 			return nil, nil, err
 		}
 		out.Schedules[name] = savedSchedule{Schedule: b, Last: sc.last}
+	}
+	if len(s.dbKeys) > 0 {
+		out.DBKeys = make(map[string]*dbKey, len(s.dbKeys))
+		for name, k := range s.dbKeys {
+			out.DBKeys[name] = k
+		}
 	}
 	if len(s.splitPoints) > 0 {
 		out.SplitPoints = make(map[string][][]byte, len(s.splitPoints))
@@ -414,6 +443,7 @@ func (s *Instances) ResetState() error {
 	s.configs = map[string]*instancepb.InstanceConfig{}
 	s.partitions = map[string]*partitionChange{}
 	s.splitPoints = map[string][]*databasepb.SplitPoints{}
+	s.dbKeys = map[string]*dbKey{}
 	st := s.state
 	s.mu.Unlock()
 	if st == nil {
@@ -426,8 +456,12 @@ func (s *Instances) ResetState() error {
 }
 
 // persistAfter writes the state a gRPC call changed before it is answered.
-func (x *Instances) persistAfter(ctx context.Context, req any, _ *grpc.UnaryServerInfo, h grpc.UnaryHandler) (any, error) {
+func (x *Instances) persistAfter(ctx context.Context, req any, info *grpc.UnaryServerInfo, h grpc.UnaryHandler) (any, error) {
 	resp, err := h(ctx, req)
+	if strings.HasPrefix(info.FullMethod, dataService) {
+		// A data call (cmekdata.go) changes nothing the front keeps.
+		return resp, err
+	}
 	x.persist()
 	return resp, err
 }

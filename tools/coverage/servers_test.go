@@ -30,6 +30,8 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
 	"github.com/cloudburrow/cloudburrow/internal/grafeas"
 	"github.com/cloudburrow/cloudburrow/internal/modelgarden"
+	"github.com/cloudburrow/cloudburrow/internal/sched"
+	"github.com/cloudburrow/cloudburrow/internal/service/datatransfer"
 	"github.com/cloudburrow/cloudburrow/internal/service/gke"
 	"github.com/cloudburrow/cloudburrow/internal/service/kms"
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
@@ -79,6 +81,11 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		t.Fatal(err)
 	}
 	mon.Register(srv)
+	dts, err := datatransfer.NewServer(store.NewMemory(), sched.RealClock{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dts.Register(srv)
 	rmReg := resourcemanager.New(store.NewMemory())
 	rmpb.RegisterProjectsServer(srv, resourcemanager.NewProjectsServer(rmReg))
 	rmpb.RegisterFoldersServer(srv, resourcemanager.NewFoldersServer(rmReg))
@@ -124,6 +131,7 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	runSrv.Executions().Register(srv)
 	runSrv.Tasks().Register(srv)
 	runSrv.Builds(nil, nil).Register(srv)
+	runSrv.Builds(nil, nil).SourceUpload().Register(srv) // #1958
 	runSrv.ArtifactRegistry().Register(srv)
 	runSrv.CloudBuild().Register(srv)
 	runSrv.SecureSourceManager(func() string { return "" }).Register(srv)
@@ -166,6 +174,8 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		// (internal/service/compute).
 		if strings.HasPrefix(m, "sql.") || strings.HasPrefix(m, "serviceusage.") || strings.HasPrefix(m, "apikeys.") || strings.HasPrefix(m, "backupdr.") ||
 			strings.HasPrefix(m, "cloudidentity.") || strings.HasPrefix(m, "compute.") ||
+			strings.HasPrefix(m, "storagebatchoperations.") ||
+			strings.HasPrefix(m, "storageinsights.") || strings.HasPrefix(m, "storagetransfer.") ||
 			// Workload Identity Federation's (#1941) is
 			// workloadidentity_methods.go's table, its 501s checked over
 			// HTTP by TestWorkloadIdentityUnservedAre501.

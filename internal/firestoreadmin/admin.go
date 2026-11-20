@@ -47,6 +47,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	adminpb "cloud.google.com/go/firestore/apiv1/admin/adminpb"
@@ -87,8 +88,11 @@ type Admin struct {
 	// database's documents; "" clears nothing (tests).
 	emulator string
 	client   *http.Client
-	now      func() time.Time
-	grpc     *grpc.Server
+	// documents is the emulator's documents' keeper, whose gate the
+	// API's own calls to the emulator pass (compact.go, #1969).
+	documents atomic.Pointer[Documents]
+	now       func() time.Time
+	grpc      *grpc.Server
 
 	mu sync.Mutex
 	// databases by name, per project; a project absent from seeded has
@@ -577,6 +581,8 @@ func (a *Admin) clearDocuments(ctx context.Context, dbName string) error {
 	if a.emulator == "" {
 		return nil
 	}
+	ctx, done := a.gate(ctx, true) // compact.go (#1969)
+	defer done()
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, "http://"+a.emulator+"/emulator/v1/"+dbName+"/documents", nil)
 	if err != nil {
 		return status.Errorf(codes.Internal, "clearing %s: %v", dbName, err)

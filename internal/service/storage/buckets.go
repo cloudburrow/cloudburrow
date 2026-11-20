@@ -419,6 +419,7 @@ func (s *Server) bucketsInsert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name, _ := body["name"].(string)
+	noteBucket(w, name)
 	if name == "" {
 		writeError(w, required("name"))
 		return

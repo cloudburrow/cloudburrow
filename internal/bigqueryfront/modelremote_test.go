@@ -84,20 +84,20 @@ func TestRemoteRowsOnTheLocalVertexEndpoint(t *testing.T) {
 	f := front{vertexai: srv.URL}
 	ctx := context.Background()
 	gen := &remoteModel{Model: "gemma-4-e2b-it-community", Location: "US"}
-	got := f.generateRow(ctx, "p", gen, "capital of France?", true, nil)
+	got := f.generateRow(ctx, "p", gen, rowInput{text: "capital of France?"}, true, nil)
 	if got[0] != sqlString("Paris") || got[3] != sqlString("") {
 		t.Errorf("flattened: %v", got)
 	}
-	got = f.generateRow(ctx, "p", gen, "x", false, nil)
+	got = f.generateRow(ctx, "p", gen, rowInput{text: "x"}, false, nil)
 	if !strings.HasPrefix(got[0], "PARSE_JSON(") || !strings.Contains(got[0], "candidates") || got[1] != sqlString("") {
 		t.Errorf("unflattened: %v", got)
 	}
-	got = f.generateRow(ctx, "p", &remoteModel{Model: "missing", Location: "US"}, "x", true, nil)
+	got = f.generateRow(ctx, "p", &remoteModel{Model: "missing", Location: "US"}, rowInput{text: "x"}, true, nil)
 	if got[0] != "CAST(NULL AS STRING)" || !strings.Contains(got[3], "NOT_FOUND") {
 		t.Errorf("refused: %v", got)
 	}
 	emb := &remoteModel{Model: "embeddinggemma-300m-onnx-community", Location: "EU", Embedding: true}
-	got = f.embedRow(ctx, "p", emb, "hello", true, "RETRIEVAL_QUERY", 2)
+	got = f.embedRow(ctx, "p", emb, rowInput{text: "hello"}, true, "RETRIEVAL_QUERY", 2)
 	if got[0] != "ARRAY<FLOAT64>[0.5, (-0.25)]" || !strings.Contains(got[1], "token_count") || got[2] != sqlString("") {
 		t.Errorf("embedding: %v", got)
 	}

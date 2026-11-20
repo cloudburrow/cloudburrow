@@ -26,8 +26,12 @@ func hostPorts(cfg config.Config) map[string]int {
 		"resourcemanager": e.ResourceManager,
 		"serviceusage":    e.ServiceUsage,
 		"apikeys":         e.APIKeys,
-		"console":         e.Console,
-		"ingress":         e.Ingress,
+		// The Cloud Storage companion APIs (#1957).
+		"storagebatchoperations": e.StorageBatchOperations,
+		"storageinsights":        e.StorageInsights,
+		"storagetransfer":        e.StorageTransfer,
+		"console":                e.Console,
+		"ingress":                e.Ingress,
 	}
 	if strings.TrimSpace(cfg.LocalAI.ModelPath) != "" {
 		ports["localai"] = e.LocalAI

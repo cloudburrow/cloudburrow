@@ -26,6 +26,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/cmek"
 	"github.com/cloudburrow/cloudburrow/internal/embedding"
 	"github.com/cloudburrow/cloudburrow/internal/lro"
 	"github.com/cloudburrow/cloudburrow/internal/ocr"
@@ -51,8 +52,9 @@ import (
 //     type's pretrained default version), GetProcessor, ListProcessors,
 //     DeleteProcessor, EnableProcessor and DisableProcessor (operations,
 //     done when returned), kept in <state-dir>/documentai/processors.json.
-//   - ProcessDocument reads raw_document or inline_document content, or a
-//     gcs_document from the instance's Cloud Storage, of the documented
+//   - ProcessDocument reads raw_document or inline_document content (or
+//     the object its uri names, #1953), or a gcs_document from the
+//     instance's Cloud Storage, of the documented
 //     types (https://docs.cloud.google.com/document-ai/docs/file-types):
 //     PDF (each page rendered by PDFium at 300 DPI), PNG, JPEG, GIF, TIFF
 //     (its first page), BMP and WebP. Each page is read with Tesseract
@@ -64,7 +66,8 @@ import (
 //     FAILED_PRECONDITION. process_options' page_range selects pages;
 //     ocr_config.enable_symbol adds symbols; layout_config.chunking_config
 //     sets the chunk size; every other option is UNIMPLEMENTED rather
-//     than ignored, as are field_mask and schema_override.
+//     than ignored, as is schema_override. field_mask trims the Document
+//     (documentaioutput.go, #1953).
 //   - OCR_PROCESSOR answers Document.text and, a page each, pageNumber,
 //     dimension (pixels), layout, blocks, paragraphs, lines and tokens
 //     (each with textAnchor, confidence and boundingPoly, vertices and
@@ -120,6 +123,17 @@ const (
 type docAIStore struct {
 	file       string
 	processors map[string]*documentaipb.Processor
+	// keys are the data keys of the processors with a customer-managed
+	// key (#1950), wrapped by it, kept in processorkeys.json beside file.
+	keys map[string]cmek.Sealed
+}
+
+// keysFile is where the processors' wrapped data keys are kept.
+func (d *docAIStore) keysFile() string {
+	if d.file == "" {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(d.file), "processorkeys.json")
 }
 
 // SetDocumentAIState keeps Document AI's processors in file, loading those
@@ -128,6 +142,7 @@ func (s *Server) SetDocumentAIState(file string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.docai = &docAIStore{file: file, processors: map[string]*documentaipb.Processor{}}
+	s.docai.keys = readSealed(s.docai.keysFile())
 	if b, err := os.ReadFile(file); err == nil {
 		var p documentaipb.ListProcessorsResponse
 		if protojson.Unmarshal(b, &p) == nil {
@@ -141,7 +156,7 @@ func (s *Server) SetDocumentAIState(file string) {
 // docAI returns the store, made in memory when none was set.
 func (s *Server) docAI() *docAIStore {
 	if s.docai == nil {
-		s.docai = &docAIStore{processors: map[string]*documentaipb.Processor{}}
+		s.docai = &docAIStore{processors: map[string]*documentaipb.Processor{}, keys: map[string]cmek.Sealed{}}
 	}
 	if s.ops == nil {
 		s.ops = lro.NewStore(nil)
@@ -165,6 +180,7 @@ func (d *docAIStore) save() {
 	if os.WriteFile(tmp, b, 0o600) == nil {
 		_ = os.Rename(tmp, d.file)
 	}
+	writeSealed(d.keysFile(), d.keys)
 }
 
 // documentAIService implements documentaipb.DocumentProcessorServiceServer.
@@ -266,7 +282,7 @@ func docAIPage[T any](items []T, size int32, token string) ([]T, string, error) 
 	return items[start:end], next, nil
 }
 
-func (d *documentAIService) CreateProcessor(_ context.Context, req *documentaipb.CreateProcessorRequest) (*documentaipb.Processor, error) {
+func (d *documentAIService) CreateProcessor(ctx context.Context, req *documentaipb.CreateProcessorRequest) (*documentaipb.Processor, error) {
 	if _, _, err := docAIParent(req.GetParent()); err != nil {
 		return nil, grpcError(err)
 	}
@@ -286,14 +302,19 @@ func (d *documentAIService) CreateProcessor(_ context.Context, req *documentaipb
 		}
 		return nil, grpcError(apierror.InvalidArgument("Invalid processor type %q", t))
 	}
-	if in.GetKmsKeyName() != "" {
-		return nil, grpcError(apierror.Unimplemented("Not implemented here: processor.kms_key_name: nothing is stored encrypted by a key"))
-	}
 	id := make([]byte, 8)
 	_, _ = rand.Read(id)
 	name := req.GetParent() + "/processors/" + hex.EncodeToString(id)
 	p := &documentaipb.Processor{Name: name, Type: t, DisplayName: in.GetDisplayName(), State: documentaipb.Processor_ENABLED,
 		DefaultProcessorVersion: name + "/processorVersions/" + dt.version, CreateTime: timestamppb.Now()}
+	var sealed cmek.Sealed
+	if key := in.GetKmsKeyName(); key != "" {
+		var err error
+		if sealed, err = d.s.docAIKey(ctx, req.GetParent(), name, key); err != nil {
+			return nil, grpcError(err)
+		}
+		p.KmsKeyName = key
+	}
 	d.s.mu.Lock()
 	defer d.s.mu.Unlock()
 	st := d.s.docAI()
@@ -303,6 +324,9 @@ func (d *documentAIService) CreateProcessor(_ context.Context, req *documentaipb
 		}
 	}
 	st.processors[name] = p
+	if p.GetKmsKeyName() != "" {
+		st.keys[name] = sealed
+	}
 	st.save()
 	return cloneProcessor(p), nil
 }
@@ -403,6 +427,7 @@ func (d *documentAIService) processorOp(name string, change func(st *docAIStore,
 func (d *documentAIService) DeleteProcessor(_ context.Context, req *documentaipb.DeleteProcessorRequest) (*longrunningpb.Operation, error) {
 	return d.processorOp(req.GetName(), func(st *docAIStore, p *documentaipb.Processor) error {
 		delete(st.processors, p.GetName())
+		delete(st.keys, p.GetName())
 		return nil
 	}, func(c *documentaipb.CommonOperationMetadata) any {
 		return &documentaipb.DeleteProcessorMetadata{CommonMetadata: c}
@@ -432,7 +457,12 @@ func (d *documentAIService) ProcessDocument(ctx context.Context, req *documentai
 	if err != nil {
 		return nil, grpcError(err)
 	}
-	return &documentaipb.ProcessResponse{Document: doc}, nil
+	// The local processors have no human review (#1953).
+	review := humanReviewSkipped()
+	if req.GetSkipHumanReview() {
+		review.StateMessage = humanReviewSkippedByRequest
+	}
+	return &documentaipb.ProcessResponse{Document: doc, HumanReviewStatus: review}, nil
 }
 
 // processDocument runs a ProcessRequest.
@@ -444,8 +474,13 @@ func (s *Server) processDocument(ctx context.Context, req *documentaipb.ProcessR
 	if p.GetState() != documentaipb.Processor_ENABLED {
 		return nil, apierror.FailedPrecondition("Processor %s is not enabled: its state is %s", p.GetName(), p.GetState())
 	}
+	if err := s.docAIKeyUsable(ctx, p); err != nil {
+		return nil, err
+	}
 	if req.GetFieldMask() != nil {
-		return nil, apierror.Unimplemented("Not implemented here: field_mask: the whole Document is answered")
+		if err := checkDocumentMask(req.GetFieldMask()); err != nil {
+			return nil, err
+		}
 	}
 	opts := req.GetProcessOptions()
 	if err := checkProcessOptions(p.GetType(), opts); err != nil {
@@ -458,8 +493,26 @@ func (s *Server) processDocument(ctx context.Context, req *documentaipb.ProcessR
 		content, mimeType = src.RawDocument.GetContent(), src.RawDocument.GetMimeType()
 	case *documentaipb.ProcessRequest_InlineDocument:
 		content, mimeType = src.InlineDocument.GetContent(), src.InlineDocument.GetMimeType()
-		if src.InlineDocument.GetUri() != "" && content == nil {
-			return nil, apierror.Unimplemented("Not implemented here: an inline_document with a uri and no content")
+		if uri := src.InlineDocument.GetUri(); uri != "" && content == nil {
+			// Document.uri: "Currently supports Google Cloud Storage URI of
+			// the form gs://bucket_name/object_name" (#1953).
+			bucket, object, ok := splitGCS(uri, false)
+			if !ok {
+				return nil, apierror.InvalidArgument("Invalid inline_document.uri %q: it must be gs://bucket_name/object_name", uri)
+			}
+			s.mu.RLock()
+			objs := s.objects
+			s.mu.RUnlock()
+			if objs == nil {
+				return nil, apierror.FailedPrecondition("inline_document.uri needs Cloud Storage, which this instance does not serve")
+			}
+			var ct string
+			if content, ct, err = objs.Read(ctx, bucket, object, docAIMaxBytes+1); err != nil {
+				return nil, err
+			}
+			if mimeType == "" {
+				mimeType = ct
+			}
 		}
 	case *documentaipb.ProcessRequest_GcsDocument:
 		mimeType = src.GcsDocument.GetMimeType()
@@ -489,7 +542,12 @@ func (s *Server) processDocument(ctx context.Context, req *documentaipb.ProcessR
 	if req.GetImagelessMode() && p.GetType() == "OCR_PROCESSOR" {
 		limit = docAIMaxImagelessPages
 	}
-	return readDocument(ctx, p, content, mimeType, opts, limit, req.GetImagelessMode())
+	doc, err := readDocument(ctx, p, content, mimeType, opts, limit, req.GetImagelessMode())
+	if err != nil {
+		return nil, err
+	}
+	maskDocument(doc, req.GetFieldMask())
+	return doc, nil
 }
 
 // readDocument reads a document's pages, at most limit, with p's type.
@@ -832,4 +890,76 @@ func layoutDocument(mimeType string, numbers []int, read []ocr.Result, chunkWord
 	}
 	flush()
 	return &documentaipb.Document{MimeType: mimeType, DocumentLayout: layout, ChunkedDocument: chunked}
+}
+
+// Document AI's customer-managed keys (#1950), as
+// https://docs.cloud.google.com/document-ai/docs/cmek documents them (read
+// 2026-11-19): processor.kms_key_name is set at CreateProcessor and never
+// changed ("Once a processor has been created, you cannot change its
+// encryption settings"); the key is in the processor's location, us-central1
+// for the us multi-region and europe-west4 for eu; the Document AI Service
+// Agent, service-PROJECT_NUMBER@gcp-sa-prod-dai-core.iam.gserviceaccount.com,
+// needs roles/cloudkms.cryptoKeyEncrypterDecrypter on it. "The Processor
+// resource: no user data, but a specified CMEK key must be valid": the
+// processor gets a data key of its own, wrapped by the key's primary version
+// and kept only wrapped (processorkeys.json), which its processor versions
+// report as kms_key_name and kms_key_version_name. "API requests that access
+// encrypted resources fail if the key is disabled or is unreachable":
+// GetProcessorVersion, ListProcessorVersions, ProcessDocument and
+// BatchProcessDocuments unwrap it first, and are FAILED_PRECONDITION while
+// that version is disabled or destroyed. The served versions are pretrained,
+// so no trained material is stored; ProcessDocument saves nothing.
+
+// docAIKeyLocations are the key locations of Document AI's multi-regions.
+var docAIKeyLocations = map[string]string{"us": "us-central1", "eu": "europe-west4"}
+
+// docAIKey checks key for a new processor name of parent and wraps the
+// processor's data key with it.
+func (s *Server) docAIKey(ctx context.Context, parent, name, key string) (cmek.Sealed, error) {
+	project, loc, _ := parseParent("parent", parent)
+	if want := docAIKeyLocations[loc]; want != "" {
+		loc = want
+	}
+	if err := cmek.CheckName("processor.kms_key_name", key, loc); err != nil {
+		return cmek.Sealed{}, cmekError("processor "+name, err)
+	}
+	agent := cmek.ServiceAgent(project, docAIAgentDomain)
+	keys := s.keysOf()
+	if err := keys.Usable(ctx, project, agent, key); err != nil {
+		return cmek.Sealed{}, cmekError("processor "+name, err)
+	}
+	sealed, err := keys.Seal(ctx, project, agent, key, nil, []byte(name))
+	if err != nil {
+		return cmek.Sealed{}, cmekError("processor "+name, err)
+	}
+	return sealed, nil
+}
+
+// docAIKeyUsable unwraps p's data key when it has a customer-managed key:
+// a disabled or destroyed version refuses the request.
+func (s *Server) docAIKeyUsable(ctx context.Context, p *documentaipb.Processor) error {
+	if p.GetKmsKeyName() == "" {
+		return nil
+	}
+	s.mu.Lock()
+	sealed, ok := s.docAI().keys[p.GetName()]
+	s.mu.Unlock()
+	if !ok {
+		return apierror.FailedPrecondition("Processor %s has no wrapped data key for its key %s", p.GetName(), p.GetKmsKeyName())
+	}
+	project, _, _, _ := parseChild("name", "processors", p.GetName())
+	_, err := s.openSealed(ctx, project, cmek.ServiceAgent(project, docAIAgentDomain), "processor "+p.GetName(), p.GetName(), sealed)
+	return err
+}
+
+// withKey gives a version of p its processor's key and key version.
+func (s *Server) withKey(v *documentaipb.ProcessorVersion, p *documentaipb.Processor) *documentaipb.ProcessorVersion {
+	if p.GetKmsKeyName() == "" {
+		return v
+	}
+	s.mu.Lock()
+	sealed := s.docAI().keys[p.GetName()]
+	s.mu.Unlock()
+	v.KmsKeyName, v.KmsKeyVersionName = p.GetKmsKeyName(), sealed.KeyVersion
+	return v
 }

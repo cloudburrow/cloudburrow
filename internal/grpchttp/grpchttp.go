@@ -15,12 +15,21 @@ import (
 	"context"
 
 	"google.golang.org/grpc"
+
+	"github.com/cloudburrow/cloudburrow/internal/sysparams"
 )
 
 // Options returns opts after grpc.WaitForHandlers(true), for a server served
-// through ServeHTTP.
+// through ServeHTTP, and the interceptors that apply the x-goog-fieldmask
+// response mask (#1954, internal/sysparams), so every gRPC surface built
+// here prunes its answers as Google's do. A server whose codec is raw bytes
+// (a proxy to an emulator) passes its messages through unpruned.
 func Options(opts ...grpc.ServerOption) []grpc.ServerOption {
-	return append([]grpc.ServerOption{grpc.WaitForHandlers(true)}, opts...)
+	return append([]grpc.ServerOption{
+		grpc.WaitForHandlers(true),
+		grpc.ChainUnaryInterceptor(sysparams.UnaryServerInterceptor()),
+		grpc.ChainStreamInterceptor(sysparams.StreamServerInterceptor()),
+	}, opts...)
 }
 
 // NewServer returns grpc.NewServer(Options(opts...)...).

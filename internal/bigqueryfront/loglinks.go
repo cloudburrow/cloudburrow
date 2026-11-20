@@ -15,7 +15,9 @@ import (
 	"sync"
 )
 
-// Log Analytics linked datasets (#1423).
+// Log Analytics linked datasets (#1423), and Storage Insights linked
+// datasets (#1976), which the storage companions make the same way, with
+// the same header.
 //
 // Cloud Logging's CreateLink makes a dataset here, through the front, with
 // the bucket's entries and an _AllLogs view of them
@@ -48,6 +50,10 @@ const (
 	linkedWriterHeader = "X-Cloudburrow-Logging-Link"
 	// linkedEntriesTable is logging.LinkedEntriesTable.
 	linkedEntriesTable = "_cloudburrow_log_entries"
+	// hiddenLinkedPrefix starts every table of a linked dataset that
+	// tables.list leaves out: linkedEntriesTable, and the tables of a
+	// Storage Insights linked dataset (storagejobs.hiddenTablePrefix).
+	hiddenLinkedPrefix = "_cloudburrow_"
 )
 
 // linkedDatasets are the linked datasets the Logging server made through
@@ -192,8 +198,9 @@ func (f front) isLinked(_ *http.Request, dataset string) bool {
 // with (Google's wording UNVERIFIED).
 // Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/logging/docs/analyze/query-linked-dataset
 func linkedWriteMessage(project, dataset, what string) string {
-	return fmt.Sprintf("Access Denied: Dataset %s:%s is a Log Analytics linked dataset, which is read-only: %s cannot write to it. "+
-		"Its views read the Cloud Logging bucket it is linked to; write log entries with Cloud Logging instead.", project, dataset, what)
+	return fmt.Sprintf("Access Denied: Dataset %s:%s is a linked dataset, which is read-only: %s cannot write to it. "+
+		"Its views read the Cloud Logging bucket or the Storage Insights dataset configuration it is linked to; write log entries "+
+		"with Cloud Logging, or change the buckets, instead.", project, dataset, what)
 }
 
 // refuseLinkedWrite answers 403 accessDenied when dataset is a linked
@@ -324,15 +331,17 @@ func (f front) refuseLinkedQuery(w http.ResponseWriter, r *http.Request, q query
 	return true
 }
 
-// withoutLinkedEntries drops LinkedEntriesTable from a tables.list answer
-// of a linked dataset, and reports whether it did.
+// withoutLinkedEntries drops LinkedEntriesTable, and every other table
+// whose ID starts with "_cloudburrow_" (the tables a Storage Insights
+// linked dataset's views read, #1976), from a tables.list answer of a
+// linked dataset, and reports whether it did.
 func withoutLinkedEntries(list map[string]any) bool {
 	tables, _ := list["tables"].([]any)
 	out := tables[:0:0]
 	for _, t := range tables {
 		m, _ := t.(map[string]any)
 		ref, _ := m["tableReference"].(map[string]any)
-		if id, _ := ref["tableId"].(string); id == linkedEntriesTable {
+		if id, _ := ref["tableId"].(string); strings.HasPrefix(id, hiddenLinkedPrefix) {
 			continue
 		}
 		out = append(out, t)

@@ -49,6 +49,9 @@ func (s *Server) TailLogEntries(stream loggingpb.LoggingServiceV2_TailLogEntries
 	if err != nil {
 		return err
 	}
+	if err := s.readableSources(stream.Context(), sources); err != nil {
+		return apierror.Wrap(err)
+	}
 	return s.tail(stream, sources, match, window)
 }
 

@@ -380,7 +380,7 @@ func toV1Instance(in *runpb.Instance) *runv1.Instance {
 }
 
 // replaceInstance replaces a stored instance's configuration, keeping
-// whether it runs; v1's replaceInstance, as v2 has no UpdateInstance. A
+// whether it runs: v1's replaceInstance, and v2's UpdateInstance. A
 // non-empty etag must be the stored one.
 func (i *InstancesServer) replaceInstance(ctx context.Context, in *runpb.Instance, validateOnly bool) (*runpb.Instance, error) {
 	s := i.s

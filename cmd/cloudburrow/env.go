@@ -17,6 +17,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
 	"github.com/cloudburrow/cloudburrow/internal/metadata"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
+	"github.com/cloudburrow/cloudburrow/internal/unserved"
 )
 
 // runEnv prints the environment that points Google tooling at this instance.
@@ -80,6 +81,15 @@ func runEnv(_ context.Context, args []string, stdout, stderr io.Writer) error {
 	for _, w := range unexportableWarnings(cfg) {
 		fmt.Fprintf(stderr, "cloudburrow env: %s\n", w)
 	}
+	// The local-only guard (#1977): in the formats a shell, a docker
+	// --env-file or the GitHub action applies, every gcloud override this
+	// instance does not serve is refused locally, so a gcloud command for
+	// any other API fails here instead of calling googleapis.com. Pod env
+	// and the console's Connect page stay without them (see
+	// gcloudRefusalVars).
+	if *format == "shell" || *format == "plain" || *format == "json" {
+		vars = append(vars, gcloudRefusalVars(cfg, vars)...)
+	}
 	if err := writeEnvFormat(stdout, *format, cfg, vars); err != nil {
 		fmt.Fprintf(stderr, "unknown format %q; use shell, json, plain, terraform, docker-compose or kubernetes\n", *format)
 		return errUsage
@@ -134,6 +144,42 @@ func exportedEnv(cfg config.Config, info runtimeInfo, live bool) (config.Config,
 	}
 
 	return cfg, envVars(cfg, proj, adcPath), nil
+}
+
+// gcloudOverridePrefix heads the variable gcloud reads each
+// api_endpoint_overrides property from.
+const gcloudOverridePrefix = "CLOUDSDK_API_ENDPOINT_OVERRIDES_"
+
+// gcloudRefusalComment is the comment of every refusal gcloudRefusalVars
+// returns.
+const gcloudRefusalComment = "not served by this instance: refused locally, so gcloud never calls Google for it (#1977)"
+
+// gcloudRefusalVars is, for every api_endpoint_overrides property of the
+// pinned gcloud that vars does not already set, the override pointing it at
+// this instance's refusal (internal/unserved, on the Resource Manager
+// port), sorted by name. A property left unset sends that API's commands to
+// googleapis.com (#1977: 168 of gcloud 586.0.0's 200 were).
+//
+// They are added only to `env`'s shell, plain and json output and to hook
+// environments, where gcloud may run. Pod env (podenv) does not get them:
+// the console terminal's pod reads its own overrides, and a container
+// spec of 170 refusals is noise. Nor does the console's Connect page,
+// whose formats name the variables a developer reads; it says that `env`
+// adds them.
+func gcloudRefusalVars(cfg config.Config, vars []envVar) []envVar {
+	set := map[string]bool{}
+	for _, v := range vars {
+		set[v.Name] = true
+	}
+	base := refusalBase(cfg)
+	var out []envVar
+	for _, p := range unserved.GcloudOverrides() {
+		name := gcloudOverridePrefix + strings.ToUpper(p)
+		if !set[name] {
+			out = append(out, envVar{name, unserved.URL(base, p), gcloudRefusalComment})
+		}
+	}
+	return out
 }
 
 // unexportableWarnings says, for each enabled emulator whose port `env`
@@ -508,6 +554,15 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 			envVar{cliEndpointVar("monitoring"), mo,
 				"Cloud Monitoring API v3, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint"})
 	}
+	// The BigQuery Data Transfer Service (#1948): Terraform's
+	// google_bigquery_data_transfer_config through
+	// bigquery_data_transfer_custom_endpoint.
+	if dataTransferEnabled(cfg) && cfg.Endpoints.DataTransfer != 0 {
+		dt := addr(cfg.Endpoints.DataTransfer)
+		vars = append(vars,
+			envVar{cliEndpointVar("datatransfer"), dt,
+				"the BigQuery Data Transfer Service v1, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint"})
+	}
 
 	// Service Usage (#1352): gcloud services, and Terraform's
 	// google_project_service through service_usage_custom_endpoint.
@@ -529,6 +584,30 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 				"read by gcloud; gcloud services api-keys"},
 			envVar{cliEndpointVar("apikeys"), ak,
 				"the API Keys API v2, REST, plaintext; read by no client library: pass http://" + ak + "/ to option.WithEndpoint"})
+	}
+
+	// The Cloud Storage companion APIs (#1957), beside Cloud Storage: gcloud
+	// transfer, storage batch-operations and storage insights, and
+	// Terraform's storage_transfer and storage_insights endpoints.
+	if storageJobsEnabled(cfg) {
+		for _, c := range []struct {
+			port         int
+			name, gcloud string
+			title        string
+		}{
+			{cfg.Endpoints.StorageBatchOperations, "storagebatchoperations", "STORAGEBATCHOPERATIONS", "the Storage Batch Operations API v1"},
+			{cfg.Endpoints.StorageInsights, "storageinsights", "STORAGEINSIGHTS", "the Storage Insights API v1"},
+			{cfg.Endpoints.StorageTransfer, "storagetransfer", "TRANSFER", "the Storage Transfer Service API v1"}, // gcloud's property is `transfer` (#1975)
+		} {
+			if c.port <= 0 {
+				continue
+			}
+			a := addr(c.port)
+			vars = append(vars,
+				envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_" + c.gcloud, "http://" + a + "/", "read by gcloud"},
+				envVar{cliEndpointVar(c.name), a,
+					c.title + ", REST, plaintext; read by no client library: pass http://" + a + " to option.WithEndpoint"})
+		}
 	}
 
 	// Resource Manager (#298). gcloud reads the override; the client
@@ -594,7 +673,16 @@ func writeShell(w io.Writer, vars []envVar) {
 	fmt.Fprintln(w, "# None of this authenticates anything: CloudBurrow serves every caller,")
 	fmt.Fprintln(w, "# and the credentials file exists only so tools that insist on having one")
 	fmt.Fprintln(w, "# can run offline. See docs/credentials.md.")
+	refusals := false
 	for _, v := range vars {
+		if v.Comment == gcloudRefusalComment {
+			if !refusals {
+				fmt.Fprintf(w, "# gcloud overrides for the APIs this instance does not serve: %s.\n", gcloudRefusalComment)
+				refusals = true
+			}
+			fmt.Fprintf(w, "export %s=%q\n", v.Name, v.Value)
+			continue
+		}
 		fmt.Fprintf(w, "export %s=%q  # %s\n", v.Name, v.Value, v.Comment)
 	}
 }
@@ -651,13 +739,19 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 		"memorystore-admin": &e.MemorystoreAdmin,
 		"serviceusage":      &e.ServiceUsage,
 		"apikeys":           &e.APIKeys,
-		"backupdr":          &e.BackupDR,
-		"privateca":         &e.PrivateCA,
-		"gke":               &e.GKE,
-		"monitoring":        &e.Monitoring,
-		"compute":           &e.Compute,
+		// The Cloud Storage companion APIs (#1957).
+		"storagebatchoperations": &e.StorageBatchOperations,
+		"storageinsights":        &e.StorageInsights,
+		"storagetransfer":        &e.StorageTransfer,
+		"backupdr":               &e.BackupDR,
+		"privateca":              &e.PrivateCA,
+		"gke":                    &e.GKE,
+		"monitoring":             &e.Monitoring,
+		"datatransfer":           &e.DataTransfer,
+		"compute":                &e.Compute,
 		// The local AI endpoint, which serves Vertex AI's Model Registry
-		// and Endpoints (#1940) to gcloud-setup and terraform.
+		// and Endpoints (#1940) to gcloud-setup and terraform, and Document
+		// AI (#1953), which terraform points document_ai_custom_endpoint at.
 		"localai":   &e.LocalAI,
 		"onnx":      &e.ONNX,
 		"tfconvert": &e.TFConvert,
@@ -695,7 +789,23 @@ func writeTerraformEnv(w io.Writer, cfg config.Config) {
 		fmt.Fprintf(w, "export %s=%q\n", e.env, e.url)
 	}
 	for _, s := range skipped {
-		fmt.Fprintf(w, "# %s: no Verified Terraform support, so no endpoint is set; its resources would reach real Google\n", s)
+		fmt.Fprintf(w, "# %s: no Verified Terraform support, so its endpoints are refused locally rather than pointed here\n", s)
+	}
+	// The local-only guard (#1975): every other endpoint argument of the
+	// pinned google and google-beta providers is refused by this instance,
+	// so a resource it does not serve fails here instead of reaching Google.
+	fmt.Fprintln(w, "# Every other endpoint is refused locally (#1975); none is left at its Google default.")
+	var noEnv []string
+	for _, r := range terraformRefusals(cfg, set) {
+		if unserved.TerraformNoEnv[r.attr] {
+			noEnv = append(noEnv, r.attr)
+			continue
+		}
+		fmt.Fprintf(w, "export %s=%q\n", r.env, r.url)
+	}
+	if len(noEnv) > 0 {
+		fmt.Fprintf(w, "# The provider reads no variable for %s: they keep their Google default here; "+
+			"`cloudburrow terraform` sets them in the provider block.\n", strings.Join(noEnv, ", "))
 	}
 }
 

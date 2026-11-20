@@ -81,6 +81,8 @@ type grpcRecorder struct {
 	header http.Header
 	status int
 	buf    bytes.Buffer
+	// bucket is the bucket a request names in its body (noteBucket).
+	bucket string
 }
 
 func (r *grpcRecorder) Header() http.Header { return r.header }
@@ -122,7 +124,18 @@ func (g *grpcStorage) call(ctx context.Context, method, path string, q url.Value
 	// Stored bytes are served as stored: gRPC never transcodes.
 	req.Header.Set("Accept-Encoding", "gzip")
 	rec := &grpcRecorder{header: http.Header{}}
+	start := g.s.now()
 	g.s.route(rec, req)
+	if m, bucket, object := g.s.resolveMethod(req); m != "admin" && !g.s.noRequestLog {
+		st := rec.status
+		if st == 0 {
+			st = http.StatusOK
+		}
+		if bucket == "" {
+			bucket = rec.bucket
+		}
+		g.s.logRequest(g.s.newRequest(req, "grpc", m, bucket, object, st, int64(len(body)), int64(rec.buf.Len()), start, g.s.now()))
+	}
 	g.s.wakeNotifier()
 	g.s.wakeChannels()
 	if rec.status == 0 {

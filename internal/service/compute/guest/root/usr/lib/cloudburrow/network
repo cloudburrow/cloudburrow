@@ -1,11 +1,8 @@
 #!/bin/sh
-# Gives the guest the internal IP Compute Engine reserved for it in its
-# subnet (#1963), on eth0 beside the pod's own address, and the metadata
-# endpoint's environment to every login.
+# Gives every login the metadata endpoint's environment (#1963). The
+# internal IP Compute Engine reserved for the guest in its subnet is on
+# vpc0, which cloudburrow-vpc.service keeps (#1968).
 set -u
-if [ -n "${CLOUDBURROW_INTERNAL_IP:-}" ]; then
-  ip addr add "${CLOUDBURROW_INTERNAL_IP}/32" dev eth0 2>/dev/null || true
-fi
 {
   [ -n "${GCE_METADATA_HOST:-}" ] && echo "GCE_METADATA_HOST=${GCE_METADATA_HOST}"
   [ -n "${GOOGLE_CLOUD_PROJECT:-}" ] && echo "GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT}"

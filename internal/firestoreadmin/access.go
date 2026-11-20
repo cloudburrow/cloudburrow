@@ -25,6 +25,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 
 	adminpb "cloud.google.com/go/firestore/apiv1/admin/adminpb"
 	"google.golang.org/grpc/codes"
@@ -74,6 +75,12 @@ func (a *Admin) Access(ctx context.Context, name, api string) error {
 type AccessAnswer struct {
 	Code    codes.Code `json:"code"`
 	Message string     `json:"message,omitempty"`
+	// The database's version window, for the Datastore front's reads at
+	// an earlier time (#1967): its earliest version time and whether
+	// point-in-time recovery is enabled, when the API knows the
+	// database.
+	EarliestVersionTime *time.Time `json:"earliestVersionTime,omitempty"`
+	PITR                bool       `json:"pitr,omitempty"`
 }
 
 // serveAccess answers AccessPath: GET ?name=projects/p/databases/d&api=datastore.
@@ -93,6 +100,9 @@ func (a *Admin) serveAccess(w http.ResponseWriter, r *http.Request) {
 	if err := a.Access(r.Context(), q.Get("name"), api); err != nil {
 		st, _ := status.FromError(err)
 		out = AccessAnswer{Code: st.Code(), Message: st.Message()}
+	}
+	if earliest, pitr, ok := a.Window(q.Get("name")); ok && api == APIDatastore {
+		out.EarliestVersionTime, out.PITR = &earliest, pitr
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)

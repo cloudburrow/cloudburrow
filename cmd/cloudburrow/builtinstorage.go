@@ -73,6 +73,8 @@ type storageEventScraper struct {
 	tunnel   *netfwd.Forwarder
 	record   func(gcsbuiltin.Call)
 	interval time.Duration
+	// requests reads the request records (storageaudit.go, #1979), or nil.
+	requests *storageRequestScraper
 
 	mu     sync.Mutex
 	after  uint64
@@ -95,6 +97,7 @@ func (s *storageEventScraper) Start(context.Context) error {
 		defer t.Stop()
 		for {
 			s.scrape(ctx)
+			s.requests.Flush(ctx)
 			select {
 			case <-ctx.Done():
 				return

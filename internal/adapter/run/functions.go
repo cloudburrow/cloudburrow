@@ -97,6 +97,8 @@ type storedFunction struct {
 	// (#1428), nil for a 2nd-gen one; version is its v1 versionId.
 	v1      *fv1.CloudFunction
 	version int64
+	// history is a 1st-gen function's earlier versions (#1958).
+	history map[int64]functionVersion
 }
 
 // functions is process-wide, like repositories.
@@ -152,16 +154,18 @@ func (f *FunctionsServer) GetFunction(_ context.Context, req *functionspb.GetFun
 	if _, _, err := parseFunctionName(req.GetName()); err != nil {
 		return nil, err
 	}
-	if req.GetRevision() != "" {
-		return nil, apierror.Unimplemented("GetFunction revision is not supported: only the current function is kept")
-	}
 	functions.mu.Lock()
 	defer functions.mu.Unlock()
 	sf, ok := functions.fns[req.GetName()]
 	if !ok {
 		return nil, functionNotFound(req.GetName())
 	}
-	return cloneFunction(sf.fn), nil
+	// revision is a 1st-gen function's version (#1958).
+	at, err := revisionOf(sf, req.GetRevision())
+	if err != nil {
+		return nil, err
+	}
+	return cloneFunction(at.fn), nil
 }
 
 // ListFunctions lists a location's functions, or every location's for

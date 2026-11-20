@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -794,5 +795,47 @@ func TestGuardKeepsGRPCAndH2CRESTApart(t *testing.T) {
 	}
 	if want := []string{"grpc", "h2c", "h2c", "http1", "grpc"}; fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Errorf("transports used = %v, want %v", got, want)
+	}
+}
+
+// TestGuardLocalServesWhatItClaims (#1948): a request Local returns a
+// handler for is served by it, after the Host check; the rest reach the
+// backend.
+func TestGuardLocalServesWhatItClaims(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, "backend") }))
+	t.Cleanup(backend.Close)
+	local := func(r *http.Request) http.Handler {
+		if r.URL.Path != "/local" {
+			return nil
+		}
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, "local") })
+	}
+	g, err := startObservedGuardFunc("127.0.0.1:0", func() string { return strings.TrimPrefix(backend.URL, "http://") }, t.Logf, nil, local)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(g.close)
+	addr := g.ln.Addr().String()
+	for path, want := range map[string]string{"/local": "local", "/other": "backend"} {
+		resp, err := http.Get("http://" + addr + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if string(b) != want {
+			t.Errorf("GET %s = %q, want %q", path, b, want)
+		}
+	}
+	req, _ := http.NewRequest(http.MethodGet, "http://"+addr+"/local", nil)
+	req.Host = "evil.example"
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if string(b) == "local" {
+		t.Error("Local served a request whose Host the guard refuses")
 	}
 }

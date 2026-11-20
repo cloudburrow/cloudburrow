@@ -46,8 +46,10 @@ type Stored struct {
 }
 
 // AuditConfig is a policy's audit logging configuration for one service
-// ("allServices" for every one). It is stored and returned; no audit log is
-// written or withheld because of it (#1486).
+// ("allServices" for every one). It is stored and returned (#1486); Cloud
+// Storage writes its Data Access audit log entries by a project's, its
+// folders' and its organization's (#1979, cmd/cloudburrow/storageaudit.go).
+// No other service's audit log is written or withheld because of it.
 type AuditConfig struct {
 	Service    string           `json:"service"`
 	LogConfigs []AuditLogConfig `json:"auditLogConfigs,omitempty"`

@@ -30,11 +30,16 @@ const EnvCloudSQLConnector = "CLOUDBURROW_TEST_CLOUDSQL_CONNECTOR"
 // address at 3307 to the listener. The connector still dials the host
 // connect.get reported, at 3307, and the redirect checks it.
 func connectorOptions(h *Harness) []cloudsqlconn.Option {
-	opts := []cloudsqlconn.Option{
+	return connectorDialOptions(h, cloudsqlconn.WithTokenSource(oauth2.StaticTokenSource(&oauth2.Token{
+		AccessToken: "cloudburrow", Expiry: time.Now().Add(time.Hour)})))
+}
+
+// connectorDialOptions are connectorOptions with the given token options
+// in place of the static token (IAM database authentication's, #1944).
+func connectorDialOptions(h *Harness, tokens ...cloudsqlconn.Option) []cloudsqlconn.Option {
+	opts := append([]cloudsqlconn.Option{
 		cloudsqlconn.WithAdminAPIEndpoint("http://" + h.Endpoint(EnvSQLAdmin) + "/"),
-		cloudsqlconn.WithTokenSource(oauth2.StaticTokenSource(&oauth2.Token{
-			AccessToken: "cloudburrow", Expiry: time.Now().Add(time.Hour)})),
-	}
+	}, tokens...)
 	listener := os.Getenv(EnvCloudSQLConnector)
 	host, port, err := net.SplitHostPort(listener)
 	if err != nil || port == "3307" {

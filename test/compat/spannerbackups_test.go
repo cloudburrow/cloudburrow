@@ -239,8 +239,8 @@ func TestSpannerBackupAndRestore(t *testing.T) {
 
 // TestSpannerBackupSchedules (#1498): a schedule of full daily backups is
 // created, got, listed, changed (its cron and retention) and deleted; an
-// incremental schedule is refused UNIMPLEMENTED (the emulator has no
-// Enterprise edition), a missing retention INVALID_ARGUMENT.
+// incremental schedule is refused FAILED_PRECONDITION on the Standard
+// edition instance (#1949), a missing retention INVALID_ARGUMENT.
 //
 // covers: google.spanner.admin.database.v1.DatabaseAdmin/CreateBackupSchedule, google.spanner.admin.database.v1.DatabaseAdmin/GetBackupSchedule, google.spanner.admin.database.v1.DatabaseAdmin/ListBackupSchedules, google.spanner.admin.database.v1.DatabaseAdmin/UpdateBackupSchedule, google.spanner.admin.database.v1.DatabaseAdmin/DeleteBackupSchedule
 func TestSpannerBackupSchedules(t *testing.T) {
@@ -260,8 +260,8 @@ func TestSpannerBackupSchedules(t *testing.T) {
 	}
 	inc := sched("0 2 * * *", 24*time.Hour)
 	inc.BackupTypeSpec = &databasepb.BackupSchedule_IncrementalBackupSpec{IncrementalBackupSpec: &databasepb.IncrementalBackupSpec{}}
-	if _, err := f.db.CreateBackupSchedule(ctx, &databasepb.CreateBackupScheduleRequest{Parent: f.database, BackupScheduleId: "inc", BackupSchedule: inc}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("an incremental schedule = %v, want Unimplemented", err)
+	if _, err := f.db.CreateBackupSchedule(ctx, &databasepb.CreateBackupScheduleRequest{Parent: f.database, BackupScheduleId: "inc", BackupSchedule: inc}); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("an incremental schedule on a Standard edition instance = %v, want FailedPrecondition", err)
 	}
 	created, err := f.db.CreateBackupSchedule(ctx, &databasepb.CreateBackupScheduleRequest{Parent: f.database, BackupScheduleId: "daily",
 		BackupSchedule: sched("0 2 * * *", 7*24*time.Hour)})
@@ -412,7 +412,8 @@ func TestSpannerInstanceConfigs(t *testing.T) {
 
 // TestSpannerUpdateInstancePartition (#1498): a partition's display name
 // and node count are changed, and GetInstancePartition returns them;
-// autoscaling is refused UNIMPLEMENTED.
+// autoscaling without limits is INVALID_ARGUMENT, and a managed autoscaler
+// configuration is kept, the partition at its minimum (#1949).
 //
 // covers: google.spanner.admin.instance.v1.InstanceAdmin/UpdateInstancePartition
 func TestSpannerUpdateInstancePartition(t *testing.T) {
@@ -447,8 +448,26 @@ func TestSpannerUpdateInstancePartition(t *testing.T) {
 	_, err = f.inst.UpdateInstancePartition(ctx, &instancepb.UpdateInstancePartitionRequest{
 		InstancePartition: &instancepb.InstancePartition{Name: name, AutoscalingConfig: &instancepb.AutoscalingConfig{}},
 		FieldMask:         &fieldmaskpb.FieldMask{Paths: []string{"autoscaling_config"}}})
-	if status.Code(err) != codes.Unimplemented {
-		t.Errorf("autoscaling a partition = %v, want Unimplemented", err)
+	if status.Code(err) != codes.InvalidArgument {
+		t.Errorf("autoscaling a partition with no limits = %v, want InvalidArgument (#1949)", err)
+	}
+	ac := &instancepb.AutoscalingConfig{
+		AutoscalingLimits: &instancepb.AutoscalingConfig_AutoscalingLimits{
+			MinLimit: &instancepb.AutoscalingConfig_AutoscalingLimits_MinNodes{MinNodes: 3},
+			MaxLimit: &instancepb.AutoscalingConfig_AutoscalingLimits_MaxNodes{MaxNodes: 6}},
+		AutoscalingTargets: &instancepb.AutoscalingConfig_AutoscalingTargets{HighPriorityCpuUtilizationPercent: 65, StorageUtilizationPercent: 95}}
+	op, err = f.inst.UpdateInstancePartition(ctx, &instancepb.UpdateInstancePartitionRequest{
+		InstancePartition: &instancepb.InstancePartition{Name: name, AutoscalingConfig: ac},
+		FieldMask:         &fieldmaskpb.FieldMask{Paths: []string{"autoscaling_config"}}})
+	if err == nil {
+		_, err = op.Wait(ctx)
+	}
+	if err != nil {
+		t.Fatalf("autoscaling a partition: %v", err)
+	}
+	if p, err := f.inst.GetInstancePartition(ctx, &instancepb.GetInstancePartitionRequest{Name: name}); err != nil ||
+		p.GetAutoscalingConfig().GetAutoscalingLimits().GetMaxNodes() != 6 || p.GetNodeCount() != 3 {
+		t.Errorf("the autoscaled partition = %v, %v; want 3 to 6 nodes, at its minimum", p, err)
 	}
 }
 

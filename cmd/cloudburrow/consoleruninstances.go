@@ -21,6 +21,7 @@ import (
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
 )
@@ -196,19 +197,81 @@ func (p runInstancesProvider) DetailActions(ctx context.Context, project string,
 		if err != nil {
 			return err
 		}
-		actions = runInstanceActions(in)
+		actions = append([]console.Action{runInstanceEditAction(in)}, runInstanceActions(in)...)
 		return nil
 	})
 	return actions
 }
 
-func (p runInstancesProvider) ActAt(ctx context.Context, project string, path []string, action string, _ map[string]string) error {
+// runInstanceEditAction is the detail page's Edit (#1958), as Google's
+// console edits an instance: its description, image and environment
+// variables, filled in from the instance and sent as UpdateInstance with
+// a mask of the two fields, which rolls the instance's container.
+func runInstanceEditAction(in *runpb.Instance) console.Action {
+	image, env := "", map[string]string{}
+	if cs := in.GetContainers(); len(cs) > 0 {
+		image = cs[0].GetImage()
+		for _, e := range cs[0].GetEnv() {
+			env[e.GetName()] = e.GetValue()
+		}
+	}
+	return console.Action{ID: "edit", Label: "Edit", Submit: "Deploy", Fields: []console.Field{
+		{Name: "description", Label: "Description", Type: "text", Default: in.GetDescription(), Help: "Optional."},
+		{Name: "image", Label: "Container image URL", Type: "text", Required: true, Default: image},
+		{Name: "env", Label: "Environment variables", Type: "map", Default: console.FormatMap(env),
+			Help: "The first container's variables; a secret reference is kept."},
+	}}
+}
+
+// editInstance applies the Edit form through UpdateInstance.
+func editInstance(ctx context.Context, c *runclient.InstancesClient, name string, values map[string]string) error {
+	in, err := c.GetInstance(ctx, &runpb.GetInstanceRequest{Name: name})
+	if err != nil {
+		return err
+	}
+	image := strings.TrimSpace(values["image"])
+	if image == "" {
+		return errors.New("a container image is required")
+	}
+	env, err := console.ParseMap(values["env"])
+	if err != nil {
+		return fmt.Errorf("environment variables: %w", err)
+	}
+	containers := in.GetContainers()
+	if len(containers) == 0 {
+		containers = []*runpb.Container{{}}
+	}
+	first := containers[0]
+	first.Image = image
+	var vars []*runpb.EnvVar
+	for _, e := range first.GetEnv() {
+		if e.GetValueSource() != nil {
+			vars = append(vars, e)
+		}
+	}
+	for _, k := range sortedKeys(env) {
+		vars = append(vars, &runpb.EnvVar{Name: k, Values: &runpb.EnvVar_Value{Value: env[k]}})
+	}
+	first.Env = vars
+	op, err := c.UpdateInstance(ctx, &runpb.UpdateInstanceRequest{
+		Instance:   &runpb.Instance{Name: name, Etag: in.GetEtag(), Description: strings.TrimSpace(values["description"]), Containers: containers},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"description", "containers"}}})
+	if err != nil {
+		return err
+	}
+	_, err = op.Wait(ctx)
+	return err
+}
+
+func (p runInstancesProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
 	if len(path) != 1 {
 		return fmt.Errorf("unknown action %q", action)
 	}
 	name := p.instanceName(p.jobs().project(project), path[0])
 	return p.withClient(ctx, func(c *runclient.InstancesClient) error {
 		switch action {
+		case "edit":
+			return editInstance(ctx, c, name, values)
 		case "stop":
 			op, err := c.StopInstance(ctx, &runpb.StopInstanceRequest{Name: name})
 			if err != nil {

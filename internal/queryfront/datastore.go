@@ -15,6 +15,7 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/cloudburrow/cloudburrow/internal/datastoreversions"
 	"github.com/cloudburrow/cloudburrow/internal/grpchttp"
 )
 
@@ -42,7 +43,15 @@ type Datastore struct {
 	// hold, if not nil, holds calls naming a named database until it
 	// closes (HoldUntil).
 	hold <-chan struct{}
+	// versions, if not nil, records every commit and serves the reads
+	// at an earlier time (KeepVersions, #1967).
+	versions *datastoreversions.Log
 }
+
+// KeepVersions has the front record every commit in v and answer the
+// reads at an earlier time from it (#1967). Call it before the front
+// serves.
+func (d *Datastore) KeepVersions(v *datastoreversions.Log) { d.versions = v }
 
 // HoldUntil has every call naming a named database wait until done closes:
 // the move of the entities kept the old way to their emulator projects
@@ -80,6 +89,9 @@ func (d *Datastore) Stop(ctx context.Context) error { return grpchttp.Stop(ctx, 
 // call with explain_options (explain.go) or a filter the emulator does
 // not serve (operators.go), over gRPC or REST.
 func (d *Datastore) Claims(r *http.Request) bool {
+	if d.versions != nil && d.versions.Claims(r) {
+		return true
+	}
 	if d.databases && namesDatabase(r) != "" {
 		return true
 	}
@@ -120,12 +132,33 @@ func (d *Datastore) emulator() (pb.DatastoreClient, error) {
 	if d.databases {
 		c = DatabasesClientHeld(c, d.hold)
 	}
+	if d.versions != nil {
+		c = d.versions.Client(c)
+	}
 	return c, nil
 }
 
 // RunAggregationQuery runs the nested query through the emulator and
 // aggregates its results.
 func (d *Datastore) RunAggregationQuery(ctx context.Context, req *pb.RunAggregationQueryRequest) (*pb.RunAggregationQueryResponse, error) {
+	if d.versions != nil {
+		t, ok, err := d.versions.ReadTime(req.GetReadOptions())
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			at, restore, err := datastoreversions.Retarget(forward(ctx), d.versions, req, t)
+			if err != nil {
+				return nil, err
+			}
+			resp, err := d.runAggregation(ctx, at)
+			if err != nil {
+				return nil, err
+			}
+			restore(resp)
+			return resp, nil
+		}
+	}
 	return d.runAggregation(ctx, req)
 }
 

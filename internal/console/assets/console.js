@@ -218,13 +218,15 @@ const ROUTES = [
   { path: "/kubernetes/events", service: "events", title: "Events", kind: "Event", navHidden: true, section: "Containers", product: "kubernetes", productTitle: "Kubernetes Engine" },
 
   // Cloud Storage is one product. Its menu follows Google's (#1843):
-  // Buckets, Observability, Storage Intelligence's Configuration, Inventory
-  // reports, Transfer data and Settings. Observability, Inventory reports
-  // and Transfer data are other services (Cloud Monitoring, Storage
-  // Insights, Storage Transfer Service) CloudBurrow does not run, so their
-  // pages say so in Google's place. The project's soft-deleted buckets
-  // (#789) are on Buckets through View options, as Google shows them;
-  // /storage/deleted, their page before, leads there.
+  // Buckets, Observability, Storage Intelligence's Configuration and Batch
+  // operations, Inventory reports, Transfer data and Settings. Observability
+  // is Cloud Monitoring's, which CloudBurrow does not run, so its page says so
+  // in Google's place. Batch operations (Storage Batch Operations) and
+  // Inventory reports (Storage Insights) are served in process (#1957);
+  // Transfer data opens Storage Transfer Service's Transfer jobs, as on
+  // Google's console. The project's soft-deleted buckets (#789) are on
+  // Buckets through View options, as Google shows them; /storage/deleted,
+  // their page before, leads there.
   { path: "/storage/browser",  service: "storage",          title: "Buckets", kind: "Bucket",         section: "Storage",
     product: "storage", productTitle: "Cloud Storage" },
   { path: "/storage/observability", screen: "unavailable", icon: "storage", title: "Observability", section: "Storage",
@@ -233,19 +235,27 @@ const ROUTES = [
       "emulate. Each bucket's requests are in Logs Explorer and in the console's Requests page." },
   { path: "/storage/intelligence", service: "storage-intelligence", icon: "storage", title: "Configuration",
     navTitle: "Storage Intelligence", section: "Storage", product: "storage", productTitle: "Cloud Storage" },
-  { path: "/storage/inventory-reports", screen: "unavailable", icon: "storage", title: "Inventory reports", section: "Storage",
-    product: "storage", productTitle: "Cloud Storage",
-    unavailable: "Inventory reports are written by Storage Insights, which CloudBurrow does not run. " +
-      "A bucket's objects can be listed on its Objects tab or with objects.list." },
-  { path: "/storage/transfer", screen: "unavailable", icon: "storage", title: "Transfer data", section: "Storage",
-    product: "storage", productTitle: "Cloud Storage",
-    unavailable: "Transfer data opens Storage Transfer Service, which CloudBurrow does not run. Objects can be " +
-      "copied between buckets with an object's Copy, or uploaded with Upload files and Upload folder." },
+  { path: "/storage/batch-operations", service: "storage-batch-operations", icon: "storage", title: "Batch operations",
+    kind: "Job", section: "Storage", product: "storage", productTitle: "Cloud Storage" },
+  { path: "/storage/inventory-reports", service: "storage-inventory-reports", icon: "storage", title: "Inventory reports",
+    kind: "Inventory report configuration", section: "Storage", product: "storage", productTitle: "Cloud Storage" },
+  { path: "/storage/insights-datasets", service: "storage-insights-datasets", icon: "storage", title: "Insights datasets",
+    kind: "Dataset configuration", section: "Storage", product: "storage", productTitle: "Cloud Storage" },
+  { path: "/storage/transfer", service: "storage-transfer", icon: "storage", title: "Transfer data", section: "Storage", redirect: "/transfer/jobs",
+    product: "storage", productTitle: "Cloud Storage" },
   { path: "/storage/settings", service: "storage-settings", icon: "storage", title: "Settings",        section: "Storage",
     product: "storage", productTitle: "Cloud Storage" },
   { path: "/storage/deleted",  service: "storage-deleted", icon: "storage",  title: "Deleted buckets", kind: "Deleted bucket", section: "Storage",
     navTitle: "Soft-deleted buckets", navHidden: true, redirect: "/storage/browser?view=softdeleted",
     product: "storage", productTitle: "Cloud Storage" },
+
+  // Storage Transfer Service (#1957), Google's Data Transfer pages: Transfer
+  // jobs, with each job's run history, and Agent pools for POSIX file
+  // systems, whose agent is CloudBurrow's own.
+  { path: "/transfer/jobs", service: "storage-transfer", icon: "storage", title: "Transfer jobs", kind: "Transfer job",
+    section: "Storage", product: "transfer", productTitle: "Storage Transfer Service" },
+  { path: "/transfer/agent-pools", service: "storage-transfer-agent-pools", icon: "storage", title: "Agent pools", kind: "Agent pool",
+    section: "Storage", product: "transfer", productTitle: "Storage Transfer Service" },
 
   // Firestore's menu is Google's (#1845): Databases first, then a
   // database's own pages. `tabOf` makes a menu entry a tab of the database
@@ -367,12 +377,10 @@ const ROUTES = [
     product: "bigquery", productTitle: "BigQuery" },
   { path: "/bigquery-jobs", service: "bigquery-jobs", icon: "bigquery", title: "Job history", kind: "Job", section: "Databases",
     product: "bigquery", productTitle: "BigQuery", icon: "bigquery" },
-  { path: "/bigquery-transfers", service: null, requires: "bigquery", screen: "unavailable", icon: "bigquery", title: "Data transfers",
-    section: "Databases", product: "bigquery", productTitle: "BigQuery",
-    unavailable: "Data transfers are the BigQuery Data Transfer Service's, which CloudBurrow does not run. A dataset's or table's Load from Cloud Storage and Load from a file load data, and Export to Cloud Storage exports it." },
-  { path: "/bigquery-scheduled-queries", service: null, requires: "bigquery", screen: "unavailable", icon: "bigquery", title: "Scheduled queries",
-    section: "Databases", product: "bigquery", productTitle: "BigQuery",
-    unavailable: "A scheduled query is a BigQuery Data Transfer Service transfer, which CloudBurrow does not run. Run a query in Studio, or from a client on a schedule of its own." },
+  { path: "/bigquery-transfers", service: "bigquery-transfers", icon: "bigquery", title: "Data transfers", kind: "Transfer",
+    section: "Databases", product: "bigquery", productTitle: "BigQuery" },
+  { path: "/bigquery-scheduled-queries", service: "bigquery-scheduled-queries", icon: "bigquery", title: "Scheduled queries",
+    kind: "Scheduled query", section: "Databases", product: "bigquery", productTitle: "BigQuery" },
   { path: "/bigquery-sharing", service: null, requires: "bigquery", screen: "unavailable", icon: "bigquery", title: "Analytics Hub",
     section: "Databases", product: "bigquery", productTitle: "BigQuery",
     unavailable: "Analytics Hub (Sharing) exchanges and listings are the Analytics Hub API's, which CloudBurrow does not run. A dataset is shared through its Permissions tab." },
@@ -442,6 +450,22 @@ const ROUTES = [
     section: "AI and machine learning", product: "speech", productTitle: "Speech-to-Text" },
   { path: "/speech/phrase-sets", service: "speech-phrase-sets", icon: "ai", title: "Phrase sets", kind: "Phrase set",
     section: "AI and machine learning", product: "speech", productTitle: "Speech-to-Text" },
+  // Compute Engine (#1965): Google's menu, at Google's paths: VM
+  // instances (an instance's page has its Details, Storage, Networking and
+  // Serial port tabs), Disks, Snapshots, Images, and Machine types, over the
+  // Compute Engine API in process.
+  { path: "/compute/instances", service: "compute-instances", icon: "compute", title: "VM instances", kind: "Instance",
+    section: "Compute", product: "compute", productTitle: "Compute Engine" },
+  { path: "/compute/disks", service: "compute-disks", icon: "compute", title: "Disks", kind: "Disk",
+    section: "Compute", product: "compute", productTitle: "Compute Engine" },
+  { path: "/compute/snapshots", service: "compute-snapshots", icon: "compute", title: "Snapshots", kind: "Snapshot",
+    section: "Compute", product: "compute", productTitle: "Compute Engine" },
+  { path: "/compute/images", service: "compute-images", icon: "compute", title: "Images", kind: "Image",
+    section: "Compute", product: "compute", productTitle: "Compute Engine" },
+  { path: "/compute/machineTypes", service: "compute-machinetypes", icon: "compute", title: "Machine types", kind: "Machine type",
+    section: "Compute", product: "compute", productTitle: "Compute Engine" },
+  { path: "/compute/metadata", service: "compute-metadata", icon: "compute", title: "Metadata", kind: "Metadata item",
+    section: "Compute", product: "compute", productTitle: "Compute Engine" },
 
   // VPC network (#1936): Google's menu, at Google's paths: VPC networks
   // (a network's page has its subnets, firewall rules and routes),
@@ -776,6 +800,8 @@ const ICONS = {
   // Cloud KMS: a key inside a shield.
   kms:       '<path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6z"/><circle cx="10" cy="11" r="2"/><path d="M12 11h4M15 11v2"/>',
   // Certificate Authority Service: a certificate with a seal.
+  // Compute Engine: a chip with its pins.
+  compute: '<rect x="6" y="6" width="12" height="12" rx="1.5"/><rect x="9.5" y="9.5" width="5" height="5"/><path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3"/>',
   // VPC network: three connected nodes.
   vpc: '<circle cx="12" cy="5" r="2.5"/><circle cx="5" cy="18" r="2.5"/><circle cx="19" cy="18" r="2.5"/><path d="M11 7.2L6.2 15.8M13 7.2l4.8 8.6M7.5 18h9"/>',
   privateca: '<rect x="3" y="4" width="18" height="12" rx="1"/><path d="M7 8h10M7 11h6"/><circle cx="17" cy="16" r="3"/><path d="M15.5 18.5L15 22l2-1 2 1-.5-3.5"/>',
@@ -836,6 +862,8 @@ const ICONS = {
 const CATEGORY_ICONS = {
   // A lightning bolt: code that runs on demand.
   "Serverless computing": '<path d="M13 3L5 13h6l-1 8 8-10h-6z"/>',
+  // A server rack: virtual machines.
+  "Compute": '<rect x="4" y="4" width="16" height="6" rx="1"/><rect x="4" y="14" width="16" height="6" rx="1"/><path d="M8 7h.01M8 17h.01"/>',
   // A shipping container.
   "Containers": '<rect x="3" y="6" width="18" height="12" rx="1"/><path d="M7 6v12M11 6v12M15 6v12M19 6v12"/>',
   // A drive.

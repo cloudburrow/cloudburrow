@@ -323,6 +323,15 @@ func (c *LifecycleComponent) Backends() []Backend {
 				if s == config.ServiceFirestore && c.kms != "" {
 					b.Front.Args = append(append([]string{}, b.Front.Args...), "--kms", c.kms)
 				}
+				// Spanner's customer-managed keys (#1950) too, and with
+				// IAM enforcement on the Spanner service agent's use of a
+				// key is checked by the host's evaluator.
+				if s == config.ServiceSpanner && c.kms != "" && b.Front != nil {
+					b.Front.Args = append(append([]string{}, b.Front.Args...), "--kms", c.kms)
+					if c.iamCheck && c.resourceManager != "" {
+						b.Front.Args = append(b.Front.Args, "--iam-check", "http://"+c.resourceManager)
+					}
+				}
 				// BigQuery's front runs from the storage image (#902).
 				if s == config.ServiceBigQuery {
 					b.Image = c.bigQueryImage

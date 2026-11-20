@@ -61,7 +61,7 @@ func TestCloudSQLConsoleInstanceDatabasesAndUsers(t *testing.T) {
 	for _, a := range d.Actions {
 		ids[a.ID] = true
 	}
-	for _, want := range []string{"create-database", "drop-database", "add-user", "change-password", "remove-user"} {
+	for _, want := range []string{"create-database", "drop-database", "add-user", "add-iam-user", "change-password", "remove-user"} {
 		if !ids[want] {
 			t.Errorf("the instance's page has no %s", want)
 		}
@@ -75,6 +75,7 @@ func TestCloudSQLConsoleInstanceDatabasesAndUsers(t *testing.T) {
 		{"create-database", map[string]string{"dbName": "orders", "charset": "utf8mb4"}, `POST /v1/projects/proj/instances/my/databases?alt=json&prettyPrint=false {"charset":"utf8mb4","name":"orders"}`},
 		{"drop-database", map[string]string{"dbName": "shop"}, "DELETE /v1/projects/proj/instances/my/databases/shop?"},
 		{"add-user", map[string]string{"userName": "ro", "password": "Pw-1", "host": "%"}, `POST /v1/projects/proj/instances/my/users?alt=json&prettyPrint=false {"host":"%","name":"ro","password":"Pw-1"}`},
+		{"add-iam-user", map[string]string{"principal": "sa@proj.iam.gserviceaccount.com", "type": "CLOUD_IAM_SERVICE_ACCOUNT"}, `POST /v1/projects/proj/instances/my/users?alt=json&prettyPrint=false {"name":"sa@proj.iam.gserviceaccount.com","type":"CLOUD_IAM_SERVICE_ACCOUNT"}`},
 		{"change-password", map[string]string{"user": "app@10.0.0.%", "password": "Pw-2"}, `PUT /v1/projects/proj/instances/my/users?alt=json&host=10.0.0.%25&name=app&prettyPrint=false {"host":"10.0.0.%","name":"app","password":"Pw-2"}`},
 		{"remove-user", map[string]string{"user": "root"}, "DELETE /v1/projects/proj/instances/my/users?alt=json&name=root&prettyPrint=false"},
 	} {

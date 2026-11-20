@@ -19,11 +19,13 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	adminpb "cloud.google.com/go/firestore/apiv1/admin/adminpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/cloudburrow/cloudburrow/internal/frontstate"
 )
@@ -76,6 +78,8 @@ type datastoreCopyRequest struct {
 	OutputURIPrefix string   `json:"outputUriPrefix,omitempty"`
 	Exact           bool     `json:"exact,omitempty"`
 	InputURI        string   `json:"inputUri,omitempty"`
+	// ReadTime reads the entities as they were then (#1967), RFC 3339.
+	ReadTime string `json:"readTime,omitempty"`
 }
 
 // callDatastore posts body to the Datastore front's path for the database
@@ -134,8 +138,12 @@ func (a *Admin) copyDatastore(ctx context.Context, path, dbName string, req data
 
 // dumpEntities is every entity of the Datastore mode database dbName, each
 // a google.datastore.v1 Entity message.
-func (a *Admin) dumpEntities(ctx context.Context, dbName string) ([][]byte, error) {
-	b, err := a.callDatastore(ctx, frontstate.DatastoreDumpPath, dbName, nil)
+func (a *Admin) dumpEntities(ctx context.Context, dbName string, at *timestamppb.Timestamp) ([][]byte, error) {
+	var body []byte
+	if at != nil {
+		body, _ = json.Marshal(datastoreCopyRequest{ReadTime: at.AsTime().UTC().Format(time.RFC3339Nano)})
+	}
+	b, err := a.callDatastore(ctx, frontstate.DatastoreDumpPath, dbName, body)
 	if err != nil {
 		return nil, err
 	}

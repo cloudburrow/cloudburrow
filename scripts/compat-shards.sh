@@ -170,7 +170,8 @@ COMPAT_SQL_REPLICA_TESTS='^Test[A-Za-z]*SQL[A-Za-z0-9]*(HighAvailability|Replica
 # whose instance serves the services they read back.
 # The accessibility audit (#1604) follows the same split: its Cloud Storage,
 # Pub/Sub and Logs Explorer pages run in storage, and
-# TestBigQueryScreensAreNamedAndLegible in emulators; the rest of the
+# TestBigQueryScreensAreNamedAndLegible and TestBigQueryTransferScreensMeetWCAG
+# (#1948) in emulators; the rest of the
 # console's screens are TestCloudRunAndCICDScreensMeetWCAG (run),
 # TestDocumentAIAndSpeechScreensMeetWCAG and
 # TestSpeechAdaptationScreensMeetWCAG (run),
@@ -183,10 +184,13 @@ COMPAT_SQL_REPLICA_TESTS='^Test[A-Za-z]*SQL[A-Za-z0-9]*(HighAvailability|Replica
 # the test that makes a cluster through the pages runs there, and
 # TestKubernetesEnginePagesThroughTheBrowser, which holds with and without
 # the API, runs there as well as in storage. Only the first is kept out of
-# storage (COMPAT_BROWSER_SERVED_ONLY_TESTS), where it would skip.
+# storage (COMPAT_BROWSER_SERVED_ONLY_TESTS), where it would skip. The
+# served shard serves the Compute Engine API too, so the VPC network and
+# Compute Engine pages' tests (TestVPCNetwork*, #1936; TestComputeEngine*,
+# #1965, which boots a VM) run there and only there.
 COMPAT_BROWSER_SHARDS="storage served run emulators memorystore sql localai"
-COMPAT_BROWSER_SERVED_SHARD_TESTS='^Test(GKEServed|KubernetesEnginePages)'
-COMPAT_BROWSER_SERVED_ONLY_TESTS='^TestGKEServed'
+COMPAT_BROWSER_SERVED_SHARD_TESTS='^Test(GKEServed|KubernetesEnginePages|VPCNetwork|ComputeEngine)'
+COMPAT_BROWSER_SERVED_ONLY_TESTS='^Test(GKEServed|VPCNetwork|ComputeEngine)'
 COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|LoggingAdmin|SecretManager|Eventarc|DocumentAI|Speech)'
 COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|Bigtable|Spanner)'
 COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS='^TestMemorystore'
@@ -261,7 +265,7 @@ compat_shard() {
       # Service Usage (#1352), always served, with the Terraform and gcloud
       # tests that need Cloud Storage beside it; and the API Keys API
       # (#1915), always served too.
-      TEST_VARS+=,STORAGE,CORS_ORIGIN,PUBSUB,TASKS,SECRETS,SCHEDULER,TOFU,RESOURCEMANAGER,SERVICEUSAGE,APIKEYS,TASKS_LOGGING,CMEK_KMS
+      TEST_VARS+=,STORAGE,CORS_ORIGIN,PUBSUB,TASKS,SECRETS,SCHEDULER,TOFU,RESOURCEMANAGER,SERVICEUSAGE,APIKEYS,STORAGE_BATCH,STORAGE_INSIGHTS,STORAGE_TRANSFER,TASKS_LOGGING,CMEK_KMS
       # The restart probes' fixtures, left just before stop so no
       # suite-level reset wipes them: Secret Manager (#483), a secret and a
       # version; Cloud Tasks and Cloud Scheduler (#596), a paused queue with
@@ -340,7 +344,11 @@ compat_shard() {
       # and TestArtifactRegistryCleanupPolicies, which skips without one
       # of 2m or less, reads the same, so it runs here.
       export CLOUDBURROW_ARTIFACT_REGISTRY_CLEANUP_INTERVAL=1m
-      TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_FIRESTORE,RUN_KMS,RUN_SCHEDULER,RUN_LOGGING,RUN_BIGQUERY,RUN_SQLADMIN,RUN_RESOURCEMANAGER,RUN_SERVICEUSAGE,RUN_APIKEYS,RUN_MYSQL,MYSQL_PASSWORD,BIGQUERY_PROJECT,APPENGINE_URL ;;
+      # RUN_LOCALAI (#1972): the local Vertex AI endpoint Cloud Run starts
+      # without a model, for the Document AI and Speech-to-Text
+      # customer-managed key tests (with RUN_KMS); LOCALAI, which the
+      # generation tests read, is not exported, so they still skip.
+      TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_FIRESTORE,RUN_KMS,RUN_LOCALAI,RUN_SCHEDULER,RUN_LOGGING,RUN_BIGQUERY,RUN_SQLADMIN,RUN_RESOURCEMANAGER,RUN_SERVICEUSAGE,RUN_APIKEYS,RUN_MYSQL,MYSQL_PASSWORD,BIGQUERY_PROJECT,APPENGINE_URL ;;
     scale)
       # The tests that take minutes each (#1821), split from run: Cloud
       # Run's CPU, automatic and manual scaling and instance splits, through
@@ -416,7 +424,8 @@ compat_shard() {
       # the copies from a folder LOGGING_RESOURCEMANAGER (#1568).
       # Cloud KMS as CMEK_KMS, for Firestore's customer-managed keys
       # (#1881), so the KMS suite stays in served.
-      TEST_VARS+=,LOGGING_RESOURCEMANAGER,SPANNER,SPANNER_REST,DATASTORE,FIRESTORE,FIRESTORE_MONGODB,FIRESTORE_MONGODB_CA,FIRESTORE_RESOURCEMANAGER,BIGTABLE,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT,BIGQUERY_RESOURCEMANAGER,SINK_LOGGING,SINK_STORAGE,SINK_PUBSUB,FIRESTORE_STORAGE,BQML_STORAGE,CMEK_KMS
+      # The BigQuery Data Transfer Service (#1948), served with BigQuery.
+      TEST_VARS+=,DATATRANSFER,LOGGING_RESOURCEMANAGER,SPANNER,SPANNER_REST,DATASTORE,FIRESTORE,FIRESTORE_MONGODB,FIRESTORE_MONGODB_CA,FIRESTORE_RESOURCEMANAGER,BIGTABLE,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT,BIGQUERY_RESOURCEMANAGER,SINK_LOGGING,SINK_STORAGE,SINK_PUBSUB,FIRESTORE_STORAGE,BQML_STORAGE,CMEK_KMS
       # Firestore's probe documents and named database (#1636): written
       # alone, as a front-state reset in the suite forgets the database.
       SETUP_TESTS="TestFirestoreRestartSetup"

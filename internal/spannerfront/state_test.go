@@ -17,6 +17,7 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/structpb"
 
+	"github.com/cloudburrow/cloudburrow/internal/cmek"
 	"github.com/cloudburrow/cloudburrow/internal/frontstate"
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 )
@@ -54,6 +55,9 @@ func TestStateRoundTripsThroughItsDirectory(t *testing.T) {
 		snap: &snapshot{dialect: databasepb.DatabaseDialect_GOOGLE_STANDARD_SQL, ddl: []string{"CREATE TABLE t (k STRING(10)) PRIMARY KEY (k)"}, size: 9,
 			tables: []tableRows{{name: "t", columns: []string{"k", "v"}, rows: rows}}}}
 	a.restored["projects/p/instances/i/databases/r"] = &databasepb.RestoreInfo{SourceType: databasepb.RestoreSourceType_BACKUP}
+	a.backups["projects/p/instances/i/backups/sealed"] = &backup{pb: &databasepb.Backup{Name: "projects/p/instances/i/backups/sealed", Database: db},
+		sealed: &sealedSnap{Keys: []string{"k"}, Sealed: []cmek.Sealed{{KeyVersion: "k/cryptoKeyVersions/1", Wrapped: []byte("w"), Ciphertext: []byte("c")}}}}
+	a.dbKeys[db] = &dbKey{Keys: []string{"k"}, Sealed: []cmek.Sealed{{KeyVersion: "k/cryptoKeyVersions/1", Wrapped: []byte("w")}}}
 	a.schedules[pb.Name] = &schedule{pb: pb, cron: c, last: at}
 	a.roleStmts[db] = []string{"CREATE ROLE reader"}
 	a.protected[db] = true
@@ -75,6 +79,10 @@ func TestStateRoundTripsThroughItsDirectory(t *testing.T) {
 	if got == nil || got.snap == nil || len(got.snap.tables) != 1 || got.snap.tables[0].name != "t" ||
 		!proto.Equal(got.snap.tables[0].rows[0], rows[0]) || got.snap.ddl[0] != "CREATE TABLE t (k STRING(10)) PRIMARY KEY (k)" || got.snap.size != 9 {
 		t.Fatalf("the backup after the restart = %+v", got)
+	}
+	if sl := b.backups["projects/p/instances/i/backups/sealed"]; sl == nil || sl.snap != nil || sl.sealed == nil ||
+		string(sl.sealed.Sealed[0].Ciphertext) != "c" || b.dbKeys[db] == nil || b.dbKeys[db].Sealed[0].KeyVersion != "k/cryptoKeyVersions/1" {
+		t.Errorf("the customer-managed backup and database after the restart: %+v, %+v", sl, b.dbKeys[db])
 	}
 	if sc == nil || !sc.last.Equal(at) || sc.cron.Next(at).IsZero() {
 		t.Errorf("the schedule after the restart = %+v", sc)

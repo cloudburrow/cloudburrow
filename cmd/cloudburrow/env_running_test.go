@@ -175,7 +175,10 @@ func TestEnvReportsTheIngressOfAnInstanceAtAPortBase(t *testing.T) {
 			"control": host(served.Endpoints.Control), "metadata": host(served.Endpoints.Metadata),
 			"storage": host(served.Endpoints.Storage), "resourcemanager": host(served.Endpoints.ResourceManager),
 			"serviceusage": host(served.Endpoints.ServiceUsage), "apikeys": host(served.Endpoints.APIKeys),
-			"console": host(served.Endpoints.Console), "ingress": ingress,
+			"storagebatchoperations": host(served.Endpoints.StorageBatchOperations),
+			"storageinsights":        host(served.Endpoints.StorageInsights),
+			"storagetransfer":        host(served.Endpoints.StorageTransfer),
+			"console":                host(served.Endpoints.Console), "ingress": ingress,
 		}}
 	b, err := json.Marshal(info)
 	if err != nil {

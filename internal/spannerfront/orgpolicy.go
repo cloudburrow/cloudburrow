@@ -59,7 +59,18 @@ func (s *Instances) CreateInstance(ctx context.Context, req *instancepb.CreateIn
 	if err := checkCustom(ctx, inst.GetName(), orgpolicy.TypeSpannerInstance, orgpolicy.MethodCreate, inst); err != nil {
 		return nil, err
 	}
-	return s.emu.CreateInstance(ctx, req)
+	// The edition, default backup schedule type and autoscaling, which the
+	// emulator does not keep (editions.go, #1949).
+	fwd, rec, err := s.prepareCreate(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	op, err := s.emu.CreateInstance(ctx, fwd)
+	if err != nil {
+		return nil, err
+	}
+	s.created(inst.GetName(), rec, op)
+	return op, nil
 }
 
 func policyMembers(p *iampb.Policy) []string {

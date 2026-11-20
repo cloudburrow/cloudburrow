@@ -71,13 +71,13 @@ func startGuard(addr, upstream string, logf func(string, ...any)) (*guardProxy, 
 // startObservedGuard is startGuard, telling observe about each request
 // (observe.go, #1267) when it is not nil.
 func startObservedGuard(addr, upstream string, logf func(string, ...any), observe func(Call)) (*guardProxy, error) {
-	return startObservedGuardFunc(addr, func() string { return upstream }, logf, observe)
+	return startObservedGuardFunc(addr, func() string { return upstream }, logf, observe, nil)
 }
 
 // startObservedGuardFunc is startObservedGuard with an upstream read on
 // each request, so a tunnel whose kubectl moves to another port
 // (repickRefusedKubePort) keeps its guard.
-func startObservedGuardFunc(addr string, upstream func() string, logf func(string, ...any), observe func(Call)) (*guardProxy, error) {
+func startObservedGuardFunc(addr string, upstream func() string, logf func(string, ...any), observe func(Call), local func(*http.Request) http.Handler) (*guardProxy, error) {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, err
@@ -90,7 +90,7 @@ func startObservedGuardFunc(addr string, upstream func() string, logf func(strin
 	protocols.SetHTTP1(true)
 	protocols.SetUnencryptedHTTP2(true)
 	srv := &http.Server{
-		Handler:   observeGuard(guardHandler(upstream, logf), observe),
+		Handler:   observeGuard(guardHandler(upstream, logf, local), observe),
 		Protocols: &protocols,
 		// grpc-java, the server behind the Java emulators, sets no stream
 		// limit; the Go default of 250 per connection could leave a
@@ -156,17 +156,24 @@ func setClientAddr(r *http.Request) {
 	r.Header.Set(ClientAddrHeader, host)
 }
 
-// guardHandler checks Host and Origin, then proxies to upstream.
+// guardHandler checks Host and Origin, then proxies to upstream, or
+// serves the request with the handler local returns for it (Forwarder.Local).
 //
 // gRPC (cleartext HTTP/2 with an application/grpc content type) is not
 // checked, as hostguard.Wrap does not check it: browsers speak HTTP/2 only
 // over TLS, so no page can send it, and a gRPC client's :authority is
 // whatever name it dialed, which a check could only break. Everything else,
 // HTTP/1.1 and any other h2c request, is checked.
-func guardHandler(upstream func() string, logf func(string, ...any)) http.Handler {
-	proxy := passThrough(upstream, logf)
+func guardHandler(upstream func() string, logf func(string, ...any), local func(*http.Request) http.Handler) http.Handler {
+	direct := passThrough(upstream, logf)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		setClientAddr(r)
+		var proxy http.Handler = direct
+		if local != nil && !isGRPC(r) {
+			if h := local(r); h != nil {
+				proxy = h
+			}
+		}
 		if isGRPC(r) {
 			proxy.ServeHTTP(w, r)
 			return

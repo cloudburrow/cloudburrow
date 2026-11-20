@@ -130,10 +130,12 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/bigqueryimage/bigqueryimagetest/` | Tests only: stand-in embedded emulator builds, present or missing (#1061). |
 | `internal/buildpacks/` | Turns source into a runnable image with Google Buildpacks and `pack`. |
 | `internal/calllog/` | The call log the Pub/Sub, Bigtable and call fronts keep in their pods (#1266, #1267, #1288): each call's method, resource, code, duration and `traceparent`, never a payload, in a bounded ring at `/_cloudburrow/calls?after=N` that the CLI reads through the tunnel into `/metrics`, `/admin/events` and traces. |
+| `internal/cmek/` | The customer-managed encryption key helper Cloud Logging, Spanner, Document AI and Speech-to-Text share (#1950): checks a key in the instance's Cloud KMS (exists, ENCRYPT_DECRYPT, primary version ENABLED) and, with IAM enforcement on, the service agent's `cloudkms.cryptoKeyVersions.useToEncrypt`/`useToDecrypt` through the host's evaluator; seals a value with a fresh data key wrapped by the key, so a disabled or destroyed version refuses the read. |
 | `internal/cluster/` | The local kind cluster: create, discover, stop, start, delete, with an explicit kubeconfig. |
 | `internal/components/` | Installs and manages the in-cluster backends and Knative Serving from pinned manifests. |
 | `internal/config/` | Configuration model, precedence (flags over environment over file over defaults), validation. |
 | `internal/console/` | The local web console: a view over the same surfaces an SDK uses, never a store of its own. |
+| `internal/datastoreversions/` | The versions of the Datastore emulator's entities (#1967), kept by the Datastore pod's call front, which the emulator does not keep: every commit is recorded with its time, a key's entity before its first recorded commit beside it, so lookups, queries (over a snapshot written into the emulator), aggregations and read-only transactions at an earlier `read_time`, and exports and clones at a snapshot time, read the entities as they were. Kept in the front's state directory, pruned to the retention and bounded in size, and discarded when the emulator's entities are not the ones it was kept for. |
 | `internal/debugpprof/` | Serves the Go runtime's profiles on a loopback address when `CLOUDBURROW_DEBUG_PPROF` names one, for a soak or a leak hunt ([soak.md](soak.md)); off by default. |
 | `internal/doctor/` | Diagnoses a workstation before a cluster is created. |
 | `internal/embedding/` | Runs the community ONNX int8 conversion of EmbeddingGemma for the Vertex-style `:predict` embedding endpoint (#41), labelled as NOT an official Google artifact; the ONNX Runtime and tokenizer need cgo and the `onnx` build tag, and the default build answers 501. |
@@ -153,6 +155,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/hooks/` | Runs the `ready.d` and `shutdown.d` lifecycle script directories (#285). |
 | `internal/grpchttp/` | Builds gRPC servers that are served through `ServeHTTP` (h2c) with `WaitForHandlers`, and stops them so `Stop` waits for every call's handler, its stats `End` included, before returning (#1804). `grpchttptest` holds the shared regression-test helpers. |
 | `internal/hostguard/` | Refuses HTTP requests whose Host header names a host CloudBurrow does not answer to: the DNS-rebinding defence on every HTTP listener (#676). |
+| `internal/unserved/` | The local-only guard (#1975): the inventories of every endpoint setting of the pinned hashicorp/google, google-beta and gcloud (`scripts/endpoint-inventory.sh`), and the refusal the Resource Manager port serves at `/_cloudburrow/unserved/` for every one this instance does not serve, which `cloudburrow terraform`, `env --format terraform` and `gcloud-setup` point them at. |
 | `internal/hostrelay/` | TCP relay that lets pods reach services the CLI serves on loopback (#575). |
 | `internal/iamcheck/` | How the servers CloudBurrow runs in the cluster (Cloud Storage, Pub/Sub's front) ask the host's one evaluator, `internal/iameval`, whether a request's caller holds a permission, under `up --iam-enforcement=on` (#1879). |
 | `internal/iamcond/` | Compiles and evaluates IAM Conditions: the CEL subset Google accepts on a role binding (#1742, #1745). |
@@ -199,6 +202,8 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/service/scheduler/` | Cloud Scheduler, built by us (#302). |
 | `internal/service/secrets/` | Secret Manager v1, built by us; with a cluster, versions are kept as Kubernetes Secrets in the workload namespace. |
 | `internal/service/backupdr/` | The Backup and DR Service API v1 for Cloud SQL (vaults, plans, associations, data sources, backups over Cloud SQL backup runs), built by us (#1433). |
+| `internal/service/storagejobs/` | The Cloud Storage companion APIs, built by us over the instance's buckets: Storage Batch Operations jobs, Storage Insights inventory reports and Storage Transfer Service jobs with local agent pools, on one shared clock (#1957). |
+| `internal/service/datatransfer/` | The BigQuery Data Transfer Service v1 (scheduled queries and dataset copies: transfer configs, runs, logs, BigQuery's schedule syntax and table templates), built by us (#1948); runs execute on the instance's BigQuery through an `Executor` `cmd/cloudburrow` wires. |
 | `internal/service/apikeys/` | The API Keys API v2 (each project's API keys and their restrictions), built by us; `Authorize` is Google's decision on a request that carries a key, with its API_KEY_* errors (#1915). |
 | `internal/service/gke/` | The Kubernetes Engine API v1 (clusters, node pools, operations), built by us (#1913); each cluster is a kind cluster that `internal/cluster`'s `GKE` makes and resizes. |
 | `internal/service/compute/` | The Compute Engine API v1's VPC networking (networks, subnetworks, firewall rules, routes, addresses, operations, regions and zones), built by us (#1936); records other services check their network fields against, no traffic. |
@@ -214,6 +219,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/storageserver/` | Runs the builtin Cloud Storage server as a process. |
 | `internal/supervisor/` | `cloudburrow-storage supervise`: runs a backend's process inside its container and starts it again within a second when it ends or the front beside it fails its liveness path, so Kubernetes' restart back-off never applies (the BigQuery emulator, #1091); `install-self` copies the binary in from an init container. |
 | `internal/store/` | Resource metadata storage: in-memory and durable modes, atomic multi-key commits, single-instance ownership of a data directory. |
+| `internal/sysparams/` | Google's REST system parameters (#1954): the `fields` / `X-Goog-FieldMask` / `x-goog-fieldmask` mask parser and pruners, `prettyPrint`, `$.xgafv`, JSONP `callback`, and `Wrap` for the hand-written JSON fronts. |
 | `internal/telemetry/` | OpenTelemetry traces of the requests CloudBurrow serves itself (#313). |
 | `internal/terminal/` | The console's Cloud Shell-style terminal (#781): the pinned Cloud SDK pod in the instance's namespace, with the instance's pod environment and gcloud configuration and read-only kubectl, and the interactive `kubectl exec` into it, through the `internal/k8s` runner. |
 | `internal/transport/grpc/` | The gRPC server CloudBurrow's own services run on: one listener, shared interceptors and message-size limit. |

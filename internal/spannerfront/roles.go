@@ -9,6 +9,7 @@ import (
 	"cloud.google.com/go/spanner/admin/database/apiv1/databasepb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 )
@@ -101,25 +102,65 @@ func (s *Instances) roles(database string) map[string]bool {
 var createDatabaseRe = regexp.MustCompile("(?is)^\\s*CREATE\\s+DATABASE\\s+[`\"]?([^`\"\\s]+)")
 
 func (d databases) CreateDatabase(ctx context.Context, req *databasepb.CreateDatabaseRequest) (*longrunningpb.Operation, error) {
+	if err := d.s.checkEditionDDL("CreateDatabase", req.GetParent(), req.GetExtraStatements()); err != nil {
+		return nil, err
+	}
 	if m := createDatabaseRe.FindStringSubmatch(req.GetCreateStatement()); m != nil {
 		db := &databasepb.Database{Name: req.GetParent() + "/databases/" + m[1]}
 		if customViolation(ctx, db.GetName(), orgpolicy.TypeSpannerDatabase, orgpolicy.MethodCreate, db) != nil {
 			return nil, status.Error(codes.PermissionDenied, databaseDenied)
 		}
 	}
+	// A customer-managed key (cmek.go, #1950) is checked and wraps the
+	// database's data key before the emulator creates it; the emulator is
+	// not given the config.
+	var record *dbKey
+	if c := req.GetEncryptionConfig(); c != nil {
+		m := createDatabaseRe.FindStringSubmatch(req.GetCreateStatement())
+		if m == nil {
+			return nil, status.Error(codes.InvalidArgument, "Invalid CreateDatabase request: create_statement must be CREATE DATABASE.")
+		}
+		keys, err := keyNames("CreateDatabase", c.GetKmsKeyName(), c.GetKmsKeyNames())
+		if err != nil {
+			return nil, err
+		}
+		if err := d.s.checkKeyLocations(ctx, "CreateDatabase", req.GetParent(), keys); err != nil {
+			return nil, err
+		}
+		if record, err = d.s.databaseKeyRecord(ctx, "CreateDatabase", req.GetParent()+"/databases/"+m[1], keys); err != nil {
+			return nil, err
+		}
+		req = proto.Clone(req).(*databasepb.CreateDatabaseRequest)
+		req.EncryptionConfig = nil
+	}
 	op, err := d.s.emuDB.CreateDatabase(ctx, req)
 	if err != nil {
 		return nil, err
+	}
+	if record != nil && op.GetError() == nil {
+		m := createDatabaseRe.FindStringSubmatch(req.GetCreateStatement())
+		d.s.mu.Lock()
+		d.s.dbKeys[req.GetParent()+"/databases/"+m[1]] = record
+		d.s.mu.Unlock()
 	}
 	d.s.trackEmuOp(op.GetName())
 	if m := createDatabaseRe.FindStringSubmatch(req.GetCreateStatement()); m != nil {
 		d.s.dropRoles(req.GetParent() + "/databases/" + m[1])
 		d.s.trackRoles(req.GetParent()+"/databases/"+m[1], req.GetExtraStatements())
+		// AUTOMATIC's default backup schedule (editions.go, #1949).
+		if op.GetError() == nil {
+			d.s.addDefaultSchedule(req.GetParent() + "/databases/" + m[1])
+		}
 	}
 	return op, nil
 }
 
 func (d databases) UpdateDatabaseDdl(ctx context.Context, req *databasepb.UpdateDatabaseDdlRequest) (*longrunningpb.Operation, error) {
+	if m := databaseNameRe.FindStringSubmatch(req.GetDatabase()); m != nil {
+		if err := d.s.checkEditionDDL("UpdateDatabaseDdl", m[1], req.GetStatements()); err != nil {
+			return nil, err
+		}
+	}
 	op, err := d.s.emuDB.UpdateDatabaseDdl(ctx, req)
 	if err != nil {
 		return nil, err

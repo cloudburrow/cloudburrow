@@ -13,6 +13,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/metadata"
+	"github.com/cloudburrow/cloudburrow/internal/unserved"
 )
 
 // `cloudburrow gcloud-setup` and `gcloud-teardown` (#305): a gcloud
@@ -102,6 +103,18 @@ var gcloudVerified = []struct {
 	// gcloud appends. TestGcloudServicesAPIKeys drives create, list,
 	// describe, get-key-string, update, lookup, delete and undelete.
 	{apiKeysService, "apikeys", "/", true, false},
+	// The Cloud Storage companion APIs (#1957), served with Cloud Storage:
+	// gcloud transfer, gcloud storage batch-operations and gcloud storage
+	// insights call v1, which gcloud appends. TestGcloudTransferJobs,
+	// TestGcloudStorageBatchOperations and
+	// TestGcloudStorageInsightsInventoryReports drive them.
+	// The property is `transfer`, not `storagetransfer`: gcloud aliases the
+	// API (api_lib/util/apis_util.py), and every gcloud transfer command but
+	// `authorize` asks for the client as `transfer`. A `storagetransfer`
+	// line is no property, so gcloud ignored it and called Google (#1975).
+	{storageTransferService, "transfer", "/", false, false},
+	{storageBatchService, "storagebatchoperations", "/", false, false},
+	{storageInsightsService, "storageinsights", "/", false, false},
 	// Cloud Run (#1293): gcloud run calls the v1 (Knative) API, served on
 	// the Run port beside v2. A command given --region calls
 	// {region}-{host}, which gcloud derives from this override, so on
@@ -260,7 +273,8 @@ func gcloudConfiguration(cfg config.Config, adcPath string) string {
 		config.ServiceBigtable: cfg.Endpoints.Bigtable, spannerRESTEndpoint: cfg.Endpoints.SpannerREST,
 		config.ServiceFirestore: cfg.Endpoints.Firestore, config.ServicePrivateCA: cfg.Endpoints.PrivateCA, config.ServiceDatastore: cfg.Endpoints.Datastore,
 		config.ServiceGKE: cfg.Endpoints.GKE, config.ServiceMonitoring: cfg.Endpoints.Monitoring, config.ServiceCompute: cfg.Endpoints.Compute,
-		localAIEndpoint: cfg.Endpoints.LocalAI}
+		localAIEndpoint: cfg.Endpoints.LocalAI, storageTransferService: cfg.Endpoints.StorageTransfer,
+		storageBatchService: cfg.Endpoints.StorageBatchOperations, storageInsightsService: cfg.Endpoints.StorageInsights}
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n# Instance %q.\n", gcloudMarker, cfg.Name)
 	// should_prompt_to_enable_api is off because gcloud would otherwise ask
@@ -270,6 +284,7 @@ func gcloudConfiguration(cfg config.Config, adcPath string) string {
 	// would only stand between a command and an API that answers anyway.
 	fmt.Fprintf(&b, "[core]\nproject = %s\ndisable_usage_reporting = true\nshould_prompt_to_enable_api = false\n", cfg.DefaultProject())
 	b.WriteString("\n[api_endpoint_overrides]\n")
+	written := map[string]bool{}
 	for _, v := range gcloudVerified {
 		on := v.always || serviceEnabled(cfg, v.service) || (v.service == sqlAdminEndpoint && sqlAdminEnabled(cfg)) ||
 			(v.service == memorystoreAdminEndpoint && serviceEnabled(cfg, config.ServiceMemorystore))
@@ -288,17 +303,40 @@ func gcloudConfiguration(cfg config.Config, adcPath string) string {
 		if v.service == localAIEndpoint {
 			on = serviceEnabled(cfg, config.ServiceRun)
 		}
+		if v.service == storageTransferService || v.service == storageBatchService || v.service == storageInsightsService {
+			on = storageJobsEnabled(cfg)
+		}
 		if on && ports[v.service] != 0 {
 			addr := host(ports[v.service])
 			if ip := net.ParseIP(cfg.BindAddress); v.regional && ip != nil && ip.IsLoopback() {
 				addr = net.JoinHostPort(v.property+".localhost", strconv.Itoa(ports[v.service]))
 			}
 			fmt.Fprintf(&b, "%s = http://%s%s\n", v.property, addr, v.path)
+			written[v.property] = true
 		}
 	}
+	// The local-only guard (#1975): every other override the pinned gcloud
+	// has points at this instance's refusal, so a command for an API it
+	// does not serve fails here, naming the API, instead of calling
+	// googleapis.com. gcloud reads no override for the APIs below, which
+	// no configuration can redirect.
+	b.WriteString("# Not served by this instance: refused locally (#1975).\n")
+	base := refusalBase(cfg)
+	for _, p := range unserved.GcloudOverrides() {
+		if !written[p] {
+			fmt.Fprintf(&b, "%s = %s\n", p, unserved.URL(base, p))
+		}
+	}
+	fmt.Fprintf(&b, "# gcloud %s has no override for %s, and `gcloud transfer authorize` calls Google's Storage\n"+
+		"# Transfer host whatever `transfer` says: those commands reach Google unless egress is blocked (docs/security.md).\n",
+		unserved.GcloudVersion, strings.Join(unserved.GcloudUnoverridable, ", "))
 	// No credential is sent: CloudBurrow authenticates nothing. The ADC
-	// fixture is named for tools that insist on one being configured.
-	fmt.Fprintf(&b, "\n[auth]\ndisable_credentials = true\ncredential_file_override = %s\n", adcPath)
+	// fixture is named for tools that insist on one being configured. A
+	// command that refreshes a credential anyway (`gcloud transfer
+	// authorize` does) asks this instance's token endpoint, not
+	// oauth2.googleapis.com, gcloud's default token_host (#1975).
+	fmt.Fprintf(&b, "\n[auth]\ndisable_credentials = true\ncredential_file_override = %s\ntoken_host = %s\nmtls_token_host = %s\n",
+		adcPath, tokenURI(cfg), tokenURI(cfg))
 	b.WriteString("\n[component_manager]\ndisable_update_check = true\n")
 	return b.String()
 }
@@ -337,6 +375,9 @@ func runGcloudSetup(args []string, stdout, stderr io.Writer) error {
 	}
 	fmt.Fprintf(stderr, "cloudburrow: wrote gcloud configuration %s (%s); your default configuration is unchanged\n",
 		gcloudConfigName(cfg), path)
+	fmt.Fprintf(stderr, "cloudburrow: every API this instance does not serve is refused locally; gcloud has no override for %s, "+
+		"nor for `gcloud transfer authorize`, so those reach Google unless egress is blocked (docs/security.md)\n",
+		strings.Join(unserved.GcloudUnoverridable, ", "))
 	if hint := dockerRegistryHint(cfg); hint != "" {
 		fmt.Fprintln(stderr, hint)
 	}

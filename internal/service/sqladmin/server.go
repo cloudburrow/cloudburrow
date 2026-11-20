@@ -9,7 +9,7 @@
 //
 // What cannot be faithful is refused with 501 and says why: creating,
 // patching, restarting or deleting an instance (that would mean starting or
-// stopping a server) and IAM database authentication. The connector path
+// stopping a server). IAM database authentication is in iamauth.go. The connector path
 // (connectSettings, generateEphemeralCert and the TLS listener on 3307) is
 // in connector.go (#1330).
 package sqladmin
@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
+	"github.com/cloudburrow/cloudburrow/internal/sysparams"
 )
 
 // Region is the region every instance reports. CloudBurrow has no regions;
@@ -45,6 +46,9 @@ type Database struct {
 // is empty, as Cloud SQL's is.
 type User struct {
 	Name, Host string
+	// Type is the Admin API's user type, "" for BUILT_IN; IAMEmail is an
+	// IAM user's full email, which MySQL's user name drops (#1944).
+	Type, IAMEmail string
 }
 
 // Engine is one running server.
@@ -84,6 +88,7 @@ func Errorf(code int, format string, args ...any) error {
 		http.StatusBadRequest: "INVALID_ARGUMENT", http.StatusNotFound: "NOT_FOUND",
 		http.StatusConflict: "ALREADY_EXISTS", http.StatusNotImplemented: "UNIMPLEMENTED",
 		http.StatusPreconditionFailed: "FAILED_PRECONDITION", http.StatusServiceUnavailable: "UNAVAILABLE",
+		http.StatusUnauthorized: "UNAUTHENTICATED", http.StatusForbidden: "PERMISSION_DENIED",
 	}[code]
 	if st == "" {
 		st = "UNKNOWN"
@@ -107,6 +112,8 @@ type Server struct {
 	ln  net.Listener
 	// conn is the connector path, nil unless EnableConnector was called.
 	conn *connector
+	// iam is IAM database authentication (#1944, iamauth.go).
+	iam iamAuth
 	// mssqlEULA is the acceptance of Microsoft's SQL Server licence `up`
 	// was given for every SQL Server instance (#1916), nil for none;
 	// guarded by emu.
@@ -209,7 +216,7 @@ func (s *Server) Start(context.Context) error {
 	if s.Wrap != nil {
 		h = s.Wrap(h)
 	}
-	s.srv = &http.Server{Handler: hostguard.Wrap(h), ReadHeaderTimeout: 10 * time.Second}
+	s.srv = &http.Server{Handler: hostguard.Wrap(sysparams.Wrap(h, sysparams.Options{})), ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = s.srv.Serve(ln) }()
 	return nil
 }
@@ -863,6 +870,12 @@ func (s *Server) users(r *http.Request, base, project string, e Engine, rest []s
 				return u, nil
 			}
 		}
+		// An IAM user is named by its email too (#1944).
+		for _, u := range us {
+			if u.IAMEmail != "" && strings.EqualFold(u.IAMEmail, name) && (host == "" || host == u.Host) {
+				return u, nil
+			}
+		}
 		return User{}, Errorf(http.StatusNotFound, "Not Found: user %s does not exist in instance %s.", name, e.Instance())
 	}
 	if len(rest) == 1 && r.Method == http.MethodGet {
@@ -888,17 +901,24 @@ func (s *Server) users(r *http.Request, base, project string, e Engine, rest []s
 		return "sql.users.list", map[string]any{"kind": "sql#usersList", "items": items}, nil
 	case http.MethodPost:
 		var u struct {
-			Name, Host, Password, Type string
+			Name, Host, Password, Type, IamEmail string
 		}
 		if err := readChecked(r, "user", userFields, &u); err != nil {
 			return "sql.users.insert", nil, err
 		}
+		if u.IamEmail != "" && ((u.Type != TypeIAMUser && u.Type != TypeIAMServiceAccount) || !strings.EqualFold(u.IamEmail, u.Name)) {
+			return "sql.users.insert", nil, Errorf(http.StatusBadRequest, "Invalid request: iamEmail is an IAM user's email, which its name gives; it is not set on its own.")
+		}
 		if u.Name == "" {
 			return "sql.users.insert", nil, Errorf(http.StatusBadRequest, "Missing parameter: name.")
 		}
-		if u.Type != "" && u.Type != "BUILT_IN" {
+		if u.Type == TypeIAMUser || u.Type == TypeIAMServiceAccount {
+			op, err := s.insertIAMUser(ctx, base, project, e, u.Type, u.Name, u.Host, u.Password)
+			return "sql.users.insert", op, err
+		}
+		if u.Type != "" && u.Type != TypeBuiltIn {
 			return "sql.users.insert", nil, unimplemented("users of type "+u.Type,
-				iamWhy+", so only BUILT_IN users are served")
+				"only BUILT_IN, CLOUD_IAM_USER and CLOUD_IAM_SERVICE_ACCOUNT users are served (IAM groups are not)")
 		}
 		if err := s.checkPassword(project, e.Instance(), u.Name, u.Host, u.Password, false); err != nil {
 			return "sql.users.insert", nil, err
@@ -920,6 +940,13 @@ func (s *Server) users(r *http.Request, base, project string, e Engine, rest []s
 		cur, err := find(name, host)
 		if err != nil {
 			return "sql.users.update", nil, err
+		}
+		if cur.Type == TypeIAMUser || cur.Type == TypeIAMServiceAccount {
+			// An IAM user signs in with an access token, never a password.
+			if u.Password != "" {
+				return "sql.users.update", nil, Errorf(http.StatusBadRequest, "Invalid request: %s is an IAM user, which has no password.", cur.Name)
+			}
+			return "sql.users.update", s.done(base, project, e, "UPDATE_USER", name), nil
 		}
 		if err := s.checkPassword(project, e.Instance(), cur.Name, cur.Host, u.Password, true); err != nil {
 			return "sql.users.update", nil, err
@@ -944,10 +971,17 @@ func (s *Server) users(r *http.Request, base, project string, e Engine, rest []s
 }
 
 func userJSON(project string, e Engine, u User) map[string]any {
+	typ := u.Type
+	if typ == "" {
+		typ = TypeBuiltIn
+	}
 	m := map[string]any{"kind": "sql#user", "name": u.Name, "instance": e.Instance(), "project": project,
-		"type": "BUILT_IN"}
+		"type": typ}
 	if u.Host != "" {
 		m["host"] = u.Host
+	}
+	if u.IAMEmail != "" {
+		m["iamEmail"] = u.IAMEmail
 	}
 	return m
 }

@@ -39,6 +39,12 @@ func cliEndpointVar(service string) string {
 		return "CLOUDBURROW_SQLADMIN_ENDPOINT"
 	case "serviceusage":
 		return "CLOUDBURROW_SERVICEUSAGE_ENDPOINT"
+	case "storagebatchoperations":
+		return "CLOUDBURROW_STORAGEBATCHOPERATIONS_ENDPOINT"
+	case "storageinsights":
+		return "CLOUDBURROW_STORAGEINSIGHTS_ENDPOINT"
+	case "storagetransfer":
+		return "CLOUDBURROW_STORAGETRANSFER_ENDPOINT"
 	case "apikeys":
 		return "CLOUDBURROW_APIKEYS_ENDPOINT"
 	case "backupdr":
@@ -51,6 +57,8 @@ func cliEndpointVar(service string) string {
 		return "CLOUDBURROW_MONITORING_ENDPOINT"
 	case "compute":
 		return "CLOUDBURROW_COMPUTE_ENDPOINT"
+	case "datatransfer":
+		return "CLOUDBURROW_DATATRANSFER_ENDPOINT"
 	case "run":
 		// Cloud Run v2, gRPC and JSON (#661), for code that deploys or lists
 		// services; given to pods too, since the adapter is published to them

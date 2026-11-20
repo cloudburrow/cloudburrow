@@ -333,7 +333,7 @@ var sqlPlace = map[string]string{
 	"add-server-ca": "connections", "rotate-server-ca": "connections", "add-server-cert": "connections",
 	"rotate-server-cert": "connections", "resolve-dns": "connections",
 
-	"add-user": "users", "change-password": "users", "remove-user": "users",
+	"add-user": "users", "add-iam-user": "users", "change-password": "users", "remove-user": "users",
 	"create-database": "databases", "drop-database": "databases",
 	"create-backup": "backups", "restore-backup": "backups", "delete-backup": "backups",
 	"pitr-restore": "backups", "binlog-clone": "backups",

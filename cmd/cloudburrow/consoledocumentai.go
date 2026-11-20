@@ -19,7 +19,10 @@ package main
 //     endpoint), Manage versions (ListProcessorVersions' pretrained
 //     versions, the Default version picker, SetDefaultProcessorVersion, and
 //     Deploy, Undeploy and Delete over the checked versions, which Google
-//     refuses for a pretrained or default version), and Upload test
+//     refuses for a pretrained or default version), Evaluate & test (the
+//     default version's evaluations, which no served type has, #1953),
+//     Batch process (a gs:// source and destination, the version, and
+//     pages per shard, #1953), and Upload test
 //     document, which sends the file to ProcessDocument and draws the page
 //     images it answers with the blocks, paragraphs and lines boxed over
 //     them, beside the extracted text and the elements' rows (the layout
@@ -191,7 +194,7 @@ func (d docAI) processor(ctx context.Context, project, id string) (*documentaipb
 	return nil, fmt.Errorf("processor %q not found", id)
 }
 
-func (d docAI) create(ctx context.Context, project, typ, name, region string) (*documentaipb.Processor, error) {
+func (d docAI) create(ctx context.Context, project, typ, name, region, kmsKey string) (*documentaipb.Processor, error) {
 	if region == "" {
 		region = "us"
 	}
@@ -199,20 +202,36 @@ func (d docAI) create(ctx context.Context, project, typ, name, region string) (*
 	err := d.withClient(ctx, func(c *documentai.DocumentProcessorClient) error {
 		var e error
 		p, e = c.CreateProcessor(ctx, &documentaipb.CreateProcessorRequest{Parent: "projects/" + d.project(project) + "/locations/" + region,
-			Processor: &documentaipb.Processor{Type: typ, DisplayName: strings.TrimSpace(name)}})
+			Processor: &documentaipb.Processor{Type: typ, DisplayName: strings.TrimSpace(name), KmsKeyName: strings.TrimSpace(kmsKey)}})
 		return e
 	})
 	return p, err
 }
 
-// processorFields are Google's Create processor side panel: a name and a
-// region.
+// processorFields are Google's Create processor side panel: a name, a
+// region, and under Advanced options the encryption (#1950): Google-managed,
+// or a customer-managed key of this instance's Cloud KMS.
 func processorFields() []console.Field {
 	return []console.Field{
 		{Name: "name", Label: "Processor name", Type: "text", Required: true, Pattern: "^.{1,63}$",
 			Help: "a display name for the processor"},
 		{Name: "region", Label: "Region", Type: "select", Options: docAIRegions, OptionLabels: docAIRegionLabels, Default: "us"},
+		{Name: "encryption", Label: "Encryption", Type: "radio", Section: "Advanced options", Default: "google",
+			Options: []string{"google", "cmek"}, OptionLabels: map[string]string{"google": "Google-managed encryption key",
+				"cmek": "Customer-managed encryption key (CMEK)"}},
+		{Name: "kmsKeyName", Label: "Customer-managed encryption key", Type: "text", Section: "Advanced options", ShowWhen: "encryption=cmek",
+			Browse: "kms", Help: "A key of this instance's Cloud KMS in us-central1 for the US region, europe-west4 for the EU. " +
+				"The Document AI service agent needs Cloud KMS CryptoKey Encrypter/Decrypter on it. It cannot be changed once the processor is created."},
 	}
+}
+
+// processorKey is the key a Create processor form names, "" for
+// Google-managed encryption.
+func processorKey(v map[string]string) string {
+	if v["encryption"] != "cmek" {
+		return ""
+	}
+	return v["kmsKeyName"]
 }
 
 // --- Overview -------------------------------------------------------------
@@ -376,7 +395,7 @@ func (p docAIGalleryProvider) ActAtResult(ctx context.Context, project string, p
 	if len(path) != 1 || action != "create-processor" {
 		return nil, fmt.Errorf("unknown action %q", action)
 	}
-	pr, err := p.d.create(ctx, project, path[0], v["name"], v["region"])
+	pr, err := p.d.create(ctx, project, path[0], v["name"], v["region"], processorKey(v))
 	if err != nil {
 		return nil, err
 	}
@@ -424,7 +443,7 @@ func (p docAIProcessorsProvider) CreateForm() (string, []console.Field) {
 }
 
 func (p docAIProcessorsProvider) Create(ctx context.Context, project string, v map[string]string) (string, error) {
-	pr, err := p.d.create(ctx, project, v["type"], v["name"], v["region"])
+	pr, err := p.d.create(ctx, project, v["type"], v["name"], v["region"], processorKey(v))
 	if err != nil {
 		return "", err
 	}
@@ -511,6 +530,11 @@ func (p docAIProcessorsProvider) Detail(ctx context.Context, project string, pat
 		{Label: "Status", Value: stateWord(pr.GetState().String())},
 		{Label: "Prediction endpoint", Value: p.predictionEndpoint(pr), Copy: "Copy"},
 		{Label: "Resource name", Value: pr.GetName()}, {Label: "Created", Value: stampAge(pr.GetCreateTime())}}
+	enc := "Google-managed"
+	if k := pr.GetKmsKeyName(); k != "" {
+		enc = k
+	}
+	overview = append(overview, console.Property{Label: "Encryption key", Value: enc})
 	d := console.Detail{Title: pr.GetDisplayName(), Summary: overview}
 	vers, err := p.d.versions(ctx, pr.GetName())
 	if err != nil {
@@ -542,8 +566,37 @@ func (p docAIProcessorsProvider) Detail(ctx context.Context, project string, pat
 	d.Sections = []console.Section{
 		{ID: "overview", Label: "Overview", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Properties: overview}}},
 		versions,
+		p.d.evaluations(ctx, pr),
 	}
 	return d, nil
+}
+
+// evaluations is Google's Evaluate & test tab (#1953): the default
+// version's evaluations, ListEvaluations', which no served type has.
+func (d docAI) evaluations(ctx context.Context, pr *documentaipb.Processor) console.Section {
+	sec := console.Section{ID: "evaluate", Label: "Evaluate & test", Listing: console.Listing{
+		Columns: []string{"Created", "Documents"}, NameColumn: "Evaluation", Noun: "evaluations"},
+		Note: "Evaluations of " + lastSegment(pr.GetDefaultProcessorVersion()) + ". Google evaluates the entities a custom extractor, " +
+			"classifier or splitter finds against a labeled dataset; " + docAITypeLabel(pr.GetType()) + " extracts none, so it cannot be evaluated."}
+	err := d.withClient(ctx, func(c *documentai.DocumentProcessorClient) error {
+		it := c.ListEvaluations(ctx, &documentaipb.ListEvaluationsRequest{Parent: pr.GetDefaultProcessorVersion()})
+		for {
+			e, err := it.Next()
+			if err == iterator.Done {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			sec.Listing.Items = append(sec.Listing.Items, console.Resource{Name: lastSegment(e.GetName()), Fields: map[string]string{
+				"Created": stampAge(e.GetCreateTime()), "Documents": strconv.Itoa(int(e.GetDocumentCounters().GetEvaluatedDocumentsCount()))}})
+		}
+	})
+	if err != nil {
+		sec.Unavailable = consoleErr(err)
+	}
+	sec.Listing.Total = len(sec.Listing.Items)
+	return sec
 }
 
 // docAIMaxUpload is Document AI's online file limit.
@@ -561,15 +614,26 @@ func (p docAIProcessorsProvider) DetailActions(ctx context.Context, project stri
 	acts := []console.Action{{ID: "upload-test", Label: "Upload test document", Submit: "Upload", Fields: []console.Field{
 		{Name: "file", Label: "Document", Type: console.FileFieldType, Required: true,
 			Help: "PDF, PNG, JPEG, GIF, TIFF, BMP or WebP, at most 40 MB and 15 pages"}}}}
-	if vers, err := p.d.versions(ctx, pr.GetName()); err == nil {
+	vers, verr := p.d.versions(ctx, pr.GetName())
+	if verr == nil {
 		acts = append(acts, docAIDefaultVersionAction(pr, vers))
 	}
 	acts = append(acts, docAIVersionSelectActions()...)
-	acts = append(acts, console.Action{ID: "batch-process", Label: "Batch process", Submit: "Process", Fields: []console.Field{
+	batch := []console.Field{
 		{Name: "input", Label: "Source path", Type: "text", Required: true, Pattern: `^gs://[^\/]+(\/.*)?$`,
 			Help: "gs://bucket/folder/ to process every document under it, or gs://bucket/file.pdf for one"},
 		{Name: "output", Label: "Destination path", Type: "text", Required: true, Pattern: `^gs://[^\/]+(\/.*)?$`,
-			Help: "gs://bucket/folder: each result is written under {operation ID}/{index}/"}}})
+			Help: "gs://bucket/folder: each result is written under {operation ID}/{index}/"}}
+	// The version to process with, the default unless another is chosen,
+	// and the output's sharding (#1953).
+	if verr == nil {
+		def := docAIDefaultVersionAction(pr, vers).Fields[0]
+		batch = append(batch, console.Field{Name: "version", Label: "Processor version", Type: "select", Options: def.Options,
+			OptionLabels: def.OptionLabels, Default: def.Default, Help: "the processor's default unless you choose another"})
+	}
+	batch = append(batch, console.Field{Name: "pagesPerShard", Label: "Pages per shard", Type: "number",
+		Help: "optional: split each result into {file name}-{shard}.json files of this many pages"})
+	acts = append(acts, console.Action{ID: "batch-process", Label: "Batch process", Submit: "Process", Fields: batch})
 	if pr.GetState() == documentaipb.Processor_ENABLED {
 		acts = append(acts, console.Action{ID: "disable", Label: "Disable processor"})
 	} else {
@@ -600,11 +664,23 @@ func (p docAIProcessorsProvider) ActAtResult(ctx context.Context, project string
 		src = &documentaipb.BatchDocumentsInputConfig{Source: &documentaipb.BatchDocumentsInputConfig_GcsDocuments{
 			GcsDocuments: &documentaipb.GcsDocuments{Documents: []*documentaipb.GcsDocument{{GcsUri: in, MimeType: mt}}}}}
 	}
+	name := pr.GetName()
+	if id := strings.TrimSpace(v["version"]); id != "" {
+		name += "/processorVersions/" + id
+	}
+	gcs := &documentaipb.DocumentOutputConfig_GcsOutputConfig{GcsUri: strings.TrimSpace(v["output"])}
+	if n := strings.TrimSpace(v["pagesPerShard"]); n != "" {
+		pages, err := strconv.Atoi(n)
+		if err != nil || pages <= 0 {
+			return nil, fmt.Errorf("pages per shard must be a positive number, not %q", n)
+		}
+		gcs.ShardingConfig = &documentaipb.DocumentOutputConfig_GcsOutputConfig_ShardingConfig{PagesPerShard: int32(pages)}
+	}
 	out := &console.Listing{Columns: []string{"Status", "Result"}, NameColumn: "Document", Noun: "documents"}
 	err = p.d.withClient(ctx, func(c *documentai.DocumentProcessorClient) error {
-		op, err := c.BatchProcessDocuments(ctx, &documentaipb.BatchProcessRequest{Name: pr.GetName(), InputDocuments: src,
+		op, err := c.BatchProcessDocuments(ctx, &documentaipb.BatchProcessRequest{Name: name, InputDocuments: src,
 			DocumentOutputConfig: &documentaipb.DocumentOutputConfig{Destination: &documentaipb.DocumentOutputConfig_GcsOutputConfig_{
-				GcsOutputConfig: &documentaipb.DocumentOutputConfig_GcsOutputConfig{GcsUri: strings.TrimSpace(v["output"])}}}})
+				GcsOutputConfig: gcs}}})
 		if err != nil {
 			return err
 		}
