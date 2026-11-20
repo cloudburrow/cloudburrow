@@ -52,6 +52,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
+	"github.com/cloudburrow/cloudburrow/internal/sysparams"
 )
 
 // apiError is an error with the HTTP status and Google status it answers.
@@ -304,7 +305,7 @@ func (s *server) Start(context.Context) error {
 		return fmt.Errorf("%s: listen on %s: %w", s.name, s.addr, err)
 	}
 	s.ln = ln
-	s.srv = &http.Server{Handler: hostguard.Wrap(s), ReadHeaderTimeout: 10 * time.Second}
+	s.srv = &http.Server{Handler: hostguard.Wrap(sysparams.Wrap(s, sysparams.Options{})), ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = s.srv.Serve(ln) }()
 	s.rt.start()
 	return nil

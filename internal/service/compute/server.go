@@ -37,6 +37,7 @@ import (
 	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
+	"github.com/cloudburrow/cloudburrow/internal/sysparams"
 )
 
 // Options configure a Server.
@@ -116,7 +117,7 @@ func (s *Server) Start(context.Context) error {
 		return fmt.Errorf("compute: %w", err)
 	}
 	s.ln = ln
-	s.srv = &http.Server{Handler: hostguard.Wrap(s), ReadHeaderTimeout: 10 * time.Second}
+	s.srv = &http.Server{Handler: hostguard.Wrap(sysparams.Wrap(s, sysparams.Options{V1Errors: true})), ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = s.srv.Serve(ln) }()
 	return nil
 }
