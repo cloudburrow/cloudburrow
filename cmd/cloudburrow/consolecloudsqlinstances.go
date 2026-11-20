@@ -191,6 +191,12 @@ func (p cloudSQLInstancesProvider) Create(ctx context.Context, project string, v
 		Name: name, DatabaseVersion: v["databaseVersion"], RootPassword: v["rootPassword"], Region: regionOr(v["region"]), Settings: st,
 	}
 	withServerCAMode(st, nil, v)
+	if err := sqlCreateConnections(st, v); err != nil {
+		return "", err
+	}
+	if v["encryption"] == sqlEncryptionCMEK && strings.TrimSpace(v["kmsKeyName"]) == "" {
+		return "", fmt.Errorf("choose the customer-managed encryption key")
+	}
 	if st.PasswordValidationPolicy, err = passwordPolicyOf(v, false); err != nil {
 		return "", fmt.Errorf("password policy: %w", err)
 	}
@@ -981,7 +987,7 @@ func certActions(fps []string, cas bool) []console.Action {
 }
 
 func (p cloudSQLInstancesProvider) backupActions(ids []string) []console.Action {
-	acts := []console.Action{{ID: "create-backup", Label: "Create backup",
+	acts := []console.Action{{ID: "create-backup", Label: "Create backup", Submit: "Create",
 		Fields: []console.Field{{Name: "description", Label: "Description", Type: "text"}}},
 		{ID: "clone", Label: "Clone", Fields: []console.Field{{Name: "destination", Label: "New instance ID", Type: "text", Required: true,
 			Pattern: "^[a-z][a-z0-9\\-]{0,53}[a-z0-9]$", Help: "A new instance with this instance's settings and a copy of its databases as they are now."}}}}
@@ -990,7 +996,9 @@ func (p cloudSQLInstancesProvider) backupActions(ids []string) []console.Action 
 			console.Action{ID: "restore-backup", Label: "Restore", Destructive: true,
 				Confirm: "Restoring replaces every database of the instance with the backup's; what was written since is lost.",
 				Fields:  []console.Field{{Name: "backup", Label: "Backup ID", Type: "select", Required: true, Options: ids, Default: ids[0]}}},
+			// Google's Delete backup window asks for the word Delete.
 			console.Action{ID: "delete-backup", Label: "Delete backup", Destructive: true, Confirm: "The backup's dump is deleted.",
+				ConfirmTitle: "Delete backup", ConfirmStyle: console.DeleteConfirmWordTitle,
 				Fields: []console.Field{{Name: "backup", Label: "Backup ID", Type: "select", Required: true, Options: ids, Default: ids[0]}}})
 	}
 	return acts

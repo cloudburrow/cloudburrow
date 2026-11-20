@@ -12,6 +12,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
 	"strconv"
 	"strings"
 
@@ -160,8 +161,13 @@ func (p cloudSQLInstancesProvider) sqlCreateForm() []console.Field {
 	}
 	const engineSec, editionSec, infoSec, regionSec = "Choose your database engine", "Choose a Cloud SQL edition",
 		"Instance info", "Choose region and zonal availability"
-	const machineSec, storageSec, connSec, protectSec, maintSec, flagsSec, labelsSec, externalSec = "Machine configuration", "Storage",
-		"Connections", "Data protection", "Maintenance", "Flags", "Labels", "Source representation (external server)"
+	// Customize your instance's groups, in Google's order: Machine
+	// configuration, Data cache, Storage, Encryption, Connections,
+	// Security, Data protection, Maintenance, Flags, Query insights, Labels.
+	const machineSec, storageSec, encryptSec, connSec, securitySec, protectSec = "Machine configuration", "Storage",
+		"Encryption", "Connections", "Security", "Data protection"
+	const maintSec, flagsSec, insightsSec, labelsSec, externalSec = "Maintenance", "Flags", "Query insights", "Labels",
+		"Source representation (external server)"
 	pgOnly := map[string]string{"engine": sqlEnginePostgres}
 	msOnly := map[string]string{"engine": sqlEngineSQLServer}
 	engineLabels := []string{"MySQL", "PostgreSQL", "SQL Server"}
@@ -223,21 +229,34 @@ func (p cloudSQLInstancesProvider) sqlCreateForm() []console.Field {
 		dataCacheField("Data cache"),
 		{Name: "dataDiskSizeGb", Label: "Storage capacity (GB)", Type: "number", Section: storageSec,
 			Help: "Empty is 10 GB. Storage shrink, on the instance's page, makes it smaller later."},
-		serverCAModeSection(serverCAModeField(internalCAMode), connSec),
-		serverCAModeSection(serverCAPoolFields(nil)[0], connSec), serverCAModeSection(serverCAPoolFields(nil)[1], connSec),
+		{Name: "encryption", Label: "Encryption", Type: "radio", Section: encryptSec, Default: sqlEncryptionGoogle,
+			Options: []string{sqlEncryptionGoogle, sqlEncryptionCMEK},
+			OptionLabels: map[string]string{sqlEncryptionGoogle: "Google-managed encryption key",
+				sqlEncryptionCMEK: "Customer-managed encryption key (CMEK)"},
+			Help: "Google-managed: no key to manage. CMEK: a key of this instance's Cloud KMS, which you control."},
+		{Name: "kmsKeyName", Label: "Customer-managed encryption key", Type: "text", Section: encryptSec,
+			VisibleWhen: map[string]string{"encryption": sqlEncryptionCMEK}, Required: true,
+			Help: "projects/P/locations/REGION/keyRings/R/cryptoKeys/K, a key of this instance's Cloud KMS in the instance's region (needs kms in --services). " +
+				"The instance is SUSPENDED while the key's version is disabled or destroyed. The key cannot be changed later, and the server's data volume is not encrypted with it."},
+		{Name: "publicIp", Label: "Public IP", Type: "checkbox", Section: connSec, Default: "true",
+			Help: "Instance IP assignment (ipv4Enabled). Every connection reaches the server through its local tunnel or the connectors, whatever this says."},
+		{Name: "authorizedNetworks", Label: "Authorized networks", Type: "text", Section: connSec,
+			VisibleWhen: map[string]string{"publicIp": "true"},
+			Help:        "CIDR ranges allowed to connect, separated by commas, such as 203.0.113.0/24. Recorded and shown on Connections > Networking."},
+		serverCAModeSection(serverCAModeField(internalCAMode), securitySec),
+		serverCAModeSection(serverCAPoolFields(nil)[0], securitySec), serverCAModeSection(serverCAPoolFields(nil)[1], securitySec),
 		{Name: "backupsEnabled", Label: "Automate daily backups", Type: "checkbox", Section: protectSec, Default: "true"},
 		{Name: "pitr", Label: "Enable point-in-time recovery", Type: "checkbox", Section: protectSec, Default: "true",
 			Help: "Keeps the transaction log, PostgreSQL's archived WAL or MySQL's binary log, so a clone can be restored to any time since the instance started."},
 		{Name: "deletionProtection", Label: "Enable deletion protection", Type: "checkbox", Section: protectSec, Default: "true",
 			Help: "The instance cannot be deleted until this is turned off."},
-		{Name: "kmsKeyName", Label: "Customer-managed encryption key (CMEK)", Type: "text", Section: protectSec,
-			Help: "projects/P/locations/REGION/keyRings/R/cryptoKeys/K, a key of this instance's Cloud KMS in the instance's region (needs kms in --services). " +
-				"The instance is SUSPENDED while the key's version is disabled or destroyed. The key cannot be changed later, and the server's data volume is not encrypted with it."},
 		{Name: "maintenanceDay", Label: "Window", Type: "select", Section: maintSec, Options: days, OptionLabels: zipLabels(days, dayLabels),
 			Help: "The day of the week maintenance may restart the instance."},
 		{Name: "maintenanceHour", Label: "Time", Type: "select", Section: maintSec, Options: hours, OptionLabels: zipLabels(hours, hourLabels)},
 		{Name: "flags", Label: "Database flags", Type: "text", Section: flagsSec,
 			Help: "name=value pairs, separated by commas, passed to the server."},
+		{Name: "queryInsightsEnabled", Label: "Enable Query insights", Type: "checkbox", Section: insightsSec,
+			Help: "Recorded on the instance (settings.insightsConfig). The Query insights page itself is not available locally."},
 		{Name: "labels", Label: "Labels", Type: "text", Section: labelsSec, Help: "key=value pairs, separated by commas."},
 		{Name: "sourceHostPort", Label: "External server host:port", Type: "text", Section: externalSec,
 			Help: "Set to record a MySQL or PostgreSQL server outside Cloud SQL as a source representation instance (ON_PREMISES_INSTANCE) instead: " +
@@ -248,6 +267,39 @@ func (p cloudSQLInstancesProvider) sqlCreateForm() []console.Field {
 		{Name: "sourceDatabases", Label: "Databases to migrate (PostgreSQL)", Type: "text", Section: externalSec,
 			Help: "Comma-separated databases (selectedObjects); empty migrates every database but the templates."},
 	})
+}
+
+// The create page's Encryption choices.
+const sqlEncryptionGoogle, sqlEncryptionCMEK = "GOOGLE_MANAGED", "CMEK"
+
+// sqlCreateConnections sets the create page's Connections and Query
+// insights on st: Public IP (ipv4Enabled), the authorized networks, and
+// insightsConfig. It keeps the ipConfiguration the Security group set.
+func sqlCreateConnections(st *sqladminapi.Settings, v map[string]string) error {
+	if pub, nets := v["publicIp"], strings.TrimSpace(v["authorizedNetworks"]); pub != "" || nets != "" {
+		ic := st.IpConfiguration
+		if ic == nil {
+			ic = &sqladminapi.IpConfiguration{}
+		}
+		ic.Ipv4Enabled = pub != "false"
+		ic.ForceSendFields = append(ic.ForceSendFields, "Ipv4Enabled")
+		for _, n := range strings.Split(nets, ",") {
+			if n = strings.TrimSpace(n); n == "" {
+				continue
+			}
+			if _, _, err := net.ParseCIDR(n); err != nil {
+				if net.ParseIP(n) == nil {
+					return fmt.Errorf("authorized network %q is not a CIDR range", n)
+				}
+			}
+			ic.AuthorizedNetworks = append(ic.AuthorizedNetworks, &sqladminapi.AclEntry{Value: n, Kind: "sql#aclEntry"})
+		}
+		st.IpConfiguration = ic
+	}
+	if v["queryInsightsEnabled"] == "true" {
+		st.InsightsConfig = &sqladminapi.InsightsConfig{QueryInsightsEnabled: true}
+	}
+	return nil
 }
 
 func serverCAModeSection(f console.Field, section string) console.Field {
@@ -494,7 +546,8 @@ func googleLayout(ctx context.Context, svc *sqladminapi.Service, project string,
 func sqlAttachRowAction(s *console.Section, instance string, a console.Action, label, field string) {
 	for i := range s.Listing.Items {
 		r := &s.Listing.Items[i]
-		row := console.Action{ID: a.ID, Label: label, Destructive: a.Destructive, Confirm: a.Confirm}
+		row := console.Action{ID: a.ID, Label: label, Destructive: a.Destructive, Confirm: a.Confirm, Submit: a.Submit,
+			ConfirmTitle: a.ConfirmTitle, ConfirmStyle: a.ConfirmStyle}
 		row.Fields = []console.Field{{Name: field, Type: "hidden", Default: r.Name}}
 		for _, f := range a.Fields {
 			if f.Name != field {

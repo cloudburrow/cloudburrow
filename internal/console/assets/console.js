@@ -4410,11 +4410,14 @@ function openActionForm(route, segments, action, onDone, title = null) {
     // before it is sent (#787). Cancelled, the form stays open.
     if (action.confirm) {
       await confirmDestructive({
-        title: `${action.label}: ${name}?`,
+        // As Google's console confirms it (#1860, #1931): Cloud SQL's
+        // Remove asks "Remove user account?" with nothing typed.
+        title: action.confirmTitle || `${action.label}: ${name}?`,
         detail: action.confirm,
         confirmWord: name,
         confirmLabel: action.label,
         consequence: "",
+        style: action.confirmStyle || "name",
         onConfirm: async () => {
           const failure = await perform(values);
           if (failure) throw failure;
@@ -4483,7 +4486,9 @@ function openActionForm(route, segments, action, onDone, title = null) {
   };
 
   dialog.append(el("form", { class: "modal-body", novalidate: true, onsubmit: submit },
-    el("h2", { id: "action-title", text: segments.length ? `${action.label} for ${name}` : action.label }),
+    // Google's title where it is not the action's label (Action.Title,
+    // #1860): Cloud SQL's Create database opens "New database".
+    el("h2", { id: "action-title", text: action.title || (segments.length ? `${action.label} for ${name}` : action.label) }),
     error,
     ...actionSteps.nodes,
     el("div", { class: "modal-actions" }, cancel, primary)));
@@ -6305,7 +6310,8 @@ function buildCreateForm(spec) {
       const on = when.every(([n, v]) => byName.has(n) && valueText(byName.get(n)) === v);
       entry.node.hidden = !on;
       entry.inactive = !on;
-      entry.control.disabled = !on || !!entry.field.immutable;
+      // Shown, a choice this instance cannot make stays disabled (#1860).
+      entry.control.disabled = !on || !!entry.field.immutable || !!entry.field.unavailable;
     };
     for (const [n] of when) {
       const other = byName.get(n);
@@ -6355,6 +6361,75 @@ function buildCreateForm(spec) {
     });
   }
 
+  // Fields held in a dialog of their own (Field.Panel, #1860): Google's
+  // create page has Set password policy under Enable password policies, a
+  // button whose dialog holds the policy's options and ends in Save. The
+  // fields stay the form's entries, so they are validated and submitted
+  // with it; the button stands where the first of them would be, drawn
+  // while any of them is visible, and Cancel (or Escape) puts back what
+  // they held when it opened.
+  for (const e of entries) e.slot = e.node;
+  const panels = new Map();
+  for (const e of entries) {
+    const name = e.field.panel;
+    if (!name) continue;
+    if (!panels.has(name)) panels.set(name, []);
+    panels.get(name).push(e);
+  }
+  for (const [name, members] of panels) {
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    const titleId = `panel-${slug}-title`;
+    const holder = el("div", { class: "field-panel", hidden: true }, ...members.map((m) => m.node));
+    const visible = (m) => !m.inactive && !m.node.hidden;
+    let openPanel;
+    const button = el("button", { type: "button", class: "secondary", id: `panel-${slug}`, text: name,
+      onclick: () => openPanel() });
+    const row = el("div", { class: "form-row field-panel-row" }, button, holder);
+    const refresh = () => { row.hidden = !members.some(visible); };
+    openPanel = (focusOn) => {
+      const before = members.map((m) => (m.isCheck ? m.control.checked : m.control.value));
+      let saved = false;
+      const { dialog, close } = openModal({ labelledBy: titleId });
+      const cancel = el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() });
+      const save = el("button", { type: "submit", class: "primary", text: "Save" });
+      holder.hidden = false;
+      dialog.append(el("form", { class: "modal-body field-panel-dialog", novalidate: true,
+        onsubmit: (ev) => {
+          ev.preventDefault();
+          const bad = members.filter((m) => !check(m));
+          if (bad.length) { bad[0].control.focus(); return; }
+          saved = true;
+          close();
+        } },
+        el("h2", { id: titleId, text: name }), holder, el("div", { class: "modal-actions" }, cancel, save)));
+      dialog.addEventListener("cb-closed", () => {
+        if (!saved) {
+          members.forEach((m, i) => {
+            if (m.isCheck) m.control.checked = before[i];
+            else m.control.value = before[i];
+            m.control.dispatchEvent(new Event("change", { bubbles: true }));
+            markValid(m);
+          });
+        }
+        holder.hidden = true;
+        row.append(holder);
+      });
+      const first = focusOn || members.find((m) => visible(m) && !m.control.disabled);
+      if (first) first.control.focus();
+    };
+    for (const m of members) {
+      m.slot = null;
+      m.openPanel = () => openPanel(m);
+      for (const n of [...Object.keys(m.field.visibleWhen || {}),
+        ...(m.field.showWhen || "").split("&").map((t) => t.split("=")[0])]) {
+        const other = byName.get(n);
+        if (other) other.control.addEventListener("change", refresh);
+      }
+    }
+    members[0].slot = row;
+    refresh();
+  }
+
   // Fields group under their section heading, in the order the backend gave
   // them. A form whose fields declare no section renders as one block, which
   // is what a two-field form should look like.
@@ -6369,7 +6444,7 @@ function buildCreateForm(spec) {
     ? [el("section", { class: "form-section" },
         el("h3", { class: "form-section-title", text: g.name }),
         ...formTabs(g.name, g.entries))]
-    : g.entries.map((e) => e.node));
+    : g.entries.map((e) => e.slot).filter(Boolean));
 
   // Stated once, not once per field: the marker means nothing until something
   // says what it means.
@@ -6409,7 +6484,9 @@ function buildCreateForm(spec) {
         // A field on a tab that is not showing: show its tab first (#1852).
         const panel = first.node.closest && first.node.closest(".form-tab-panel");
         if (panel && panel.hidden) panel.dispatchEvent(new Event("form-tab-show"));
-        (first.focus || (() => first.control.focus()))();
+        // A field held in a dialog (Field.Panel) opens it, on that field.
+        if (first.openPanel) first.openPanel();
+        else (first.focus || (() => first.control.focus()))();
       }
       return !first;
     },
@@ -6467,7 +6544,7 @@ function uploadIntoTextarea(f, control) {
 // Variables & Secrets, Volumes, Networking and Security (#1852). Every field
 // stays in the form whichever tab shows, so Create submits them all.
 function formTabs(section, entries) {
-  const plain = entries.filter((e) => !e.field.tab).map((e) => e.node);
+  const plain = entries.filter((e) => !e.field.tab).map((e) => e.slot || (e.slot === undefined ? e.node : null)).filter(Boolean);
   const tabs = [];
   for (const e of entries.filter((x) => x.field.tab)) {
     let t = tabs.find((x) => x.name === e.field.tab);
@@ -7599,7 +7676,7 @@ function notify(message, kind = "info") {
 // "confirm" for nothing typed, the dialog's button alone, as a Cloud Storage
 // bucket's or a Cloud Run service's does.
 function confirmDestructive({ title, detail, confirmWord, onConfirm, confirmLabel = "Delete", consequence = "This cannot be undone.", style = "name" }) {
-  if (style === "delete" || style === "DELETE") confirmWord = style;
+  if (style === "delete" || style === "DELETE" || style === "Delete") confirmWord = style;
   const typed = style !== "confirm";
   return new Promise((settle) => {
     const error = el("p", { class: "form-error", role: "alert", hidden: true });
@@ -7885,7 +7962,9 @@ async function runAction(route, target, action, onDone, row = NO_ROW, title = nu
   // same way before it is sent, as its Confirm promises, without the
   // closing "cannot be undone".
   await confirmDestructive({
-    title: `${action.label} ${name}?`,
+    // Google's title where it names the kind, not the resource (#1860):
+    // Cloud SQL's "Stop database instance?".
+    title: action.confirmTitle || `${action.label} ${name}?`,
     detail: action.confirm || undefined,
     confirmWord: name,
     confirmLabel: action.confirm ? action.label : undefined,

@@ -11,7 +11,7 @@ import (
 )
 
 // Users on the Cloud SQL pages (#1301): a database's page offers Add user
-// and Delete user, which run the same statements the Cloud SQL Admin API's
+// account and Remove, which run the same statements the Cloud SQL Admin API's
 // users.insert and users.delete do, through the same engine, so a user made
 // on either is the other's.
 
@@ -38,8 +38,11 @@ func userActions(withHost bool, note string) []console.Action {
 		del = append(del, host)
 	}
 	return []console.Action{
-		{ID: "add-user", Label: "Add user", Fields: add},
-		{ID: "delete-user", Label: "Delete user", Destructive: true, Fields: del,
+		// Google's words (#1860): Add user account, ending in Add, and
+		// Remove, confirmed by Remove with nothing typed.
+		{ID: "add-user", Label: "Add user account", Submit: "Add", Fields: add},
+		{ID: "delete-user", Label: "Remove", Destructive: true, Fields: del,
+			ConfirmTitle: "Remove user account?", ConfirmStyle: console.DeleteConfirmClick,
 			Confirm: "the user is dropped from the server, as users.delete does"},
 	}
 }
