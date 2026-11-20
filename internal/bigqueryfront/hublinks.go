@@ -61,7 +61,7 @@ import (
 //     it is refused 403 accessDenied.
 //
 // Google publishes none of these errors' wording; the front's is
-// UNVERIFIED.
+// UNVERIFIED (docs re-read 2026-11-20, below).
 // Docs read 2026-11-20: https://docs.cloud.google.com/bigquery/docs/analytics-hub-introduction,
 // https://docs.cloud.google.com/bigquery/docs/analytics-hub-manage-subscriptions
 
