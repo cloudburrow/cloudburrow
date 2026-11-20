@@ -304,7 +304,17 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 		{"GCE_METADATA_HOST", addr(cfg.Endpoints.Metadata),
 			"points Google's metadata lookups at this instance, not 169.254.169.254"},
 		{"CLOUDSDK_API_ENDPOINT_OVERRIDES_IAMCREDENTIALS", "http://" + addr(cfg.Endpoints.Metadata) + "/",
-			"read by gcloud, whose impersonation first refreshes at Google's token endpoint, so it does not work locally (docs/credentials.md)"},
+			"read by gcloud for --impersonate-service-account (docs/credentials.md)"},
+		// gcloud refreshes a credential_file_override service account at
+		// auth/token_host, never at the file's token_uri, and that defaults
+		// to oauth2.googleapis.com; a user account refreshes there too, or at
+		// auth/mtls_token_host under client certificates. Both name this
+		// instance's token endpoint, as gcloud-setup's configuration does
+		// (#1975), so no refresh leaves the machine.
+		{"CLOUDSDK_AUTH_TOKEN_HOST", tokenURI(cfg),
+			"read by gcloud: every credential refresh goes to this instance, not Google's token endpoint"},
+		{"CLOUDSDK_AUTH_MTLS_TOKEN_HOST", tokenURI(cfg),
+			"read by gcloud under client certificates: refreshes go to this instance"},
 		{"CLOUDSDK_CORE_PROJECT", project,
 			"gcloud's project"},
 	}
