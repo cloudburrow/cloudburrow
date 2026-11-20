@@ -312,7 +312,10 @@ compat_shard() {
       # revision and task that query PostgreSQL, and Cloud SQL for MySQL for
       # the revision that queries MySQL, through a Cloud SQL volume (#1346).
       # Firestore, as RUN_FIRESTORE, for the Eventarc Firestore triggers (#1877).
-      SERVICES=run,secretmanager,tasks,storage,pubsub,firestore,kms,scheduler,logging,bigquery,cloudsql,cloudsql-mysql
+      # Datastore, as RUN_DATASTORE, for its Datastore mode triggers, and
+      # the Kubernetes Engine API, as RUN_GKE, for a GKE destination (#1877;
+      # its test makes one Autopilot kind cluster beside the instance's).
+      SERVICES=run,secretmanager,tasks,storage,pubsub,firestore,datastore,gke,kms,scheduler,logging,bigquery,cloudsql,cloudsql-mysql
       # Cloud Run (#336). For the revisions that reach Storage and Pub/Sub
       # with no client options (#576) and call KMS, Scheduler and Logging
       # (#681), the RUN_* names, so those suites do not run a second time
@@ -349,7 +352,7 @@ compat_shard() {
       # without a model, for the Document AI and Speech-to-Text
       # customer-managed key tests (with RUN_KMS); LOCALAI, which the
       # generation tests read, is not exported, so they still skip.
-      TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_FIRESTORE,RUN_KMS,RUN_LOCALAI,RUN_SCHEDULER,RUN_LOGGING,RUN_BIGQUERY,RUN_SQLADMIN,RUN_RESOURCEMANAGER,RUN_SERVICEUSAGE,RUN_APIKEYS,RUN_MYSQL,MYSQL_PASSWORD,BIGQUERY_PROJECT,APPENGINE_URL ;;
+      TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_FIRESTORE,RUN_DATASTORE,RUN_GKE,RUN_KMS,RUN_LOCALAI,RUN_SCHEDULER,RUN_LOGGING,RUN_BIGQUERY,RUN_SQLADMIN,RUN_RESOURCEMANAGER,RUN_SERVICEUSAGE,RUN_APIKEYS,RUN_MYSQL,MYSQL_PASSWORD,BIGQUERY_PROJECT,APPENGINE_URL ;;
     scale)
       # The tests that take minutes each (#1821), split from run: Cloud
       # Run's CPU, automatic and manual scaling and instance splits, through

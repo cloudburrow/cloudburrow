@@ -86,7 +86,10 @@ func TestEventTriggersAreChecked(t *testing.T) {
 		// Audit logs are served (#1853), published by an instance that can
 		// publish; this transport cannot.
 		{&functionspb.EventTrigger{EventType: "google.cloud.audit.log.v1.written"}, codes.FailedPrecondition},
-		{&functionspb.EventTrigger{EventType: "google.cloud.datastore.entity.v1.written"}, codes.Unimplemented},
+		// So are Datastore mode's (#1877), which need a database filter.
+		{&functionspb.EventTrigger{EventType: "google.cloud.datastore.entity.v1.written",
+			EventFilters: []*functionspb.EventFilter{{Attribute: "database", Value: "(default)"}}}, codes.FailedPrecondition},
+		{&functionspb.EventTrigger{EventType: "google.firebase.database.ref.v1.written"}, codes.Unimplemented},
 		{&functionspb.EventTrigger{EventType: pubsubPublished, PubsubTopic: "projects/p/topics/t", Channel: "c"}, codes.Unimplemented},
 	} {
 		err := on.checkEventTrigger(c.trig)

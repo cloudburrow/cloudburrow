@@ -16,6 +16,7 @@ import (
 
 	"google.golang.org/grpc"
 
+	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/cluster"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
@@ -69,6 +70,17 @@ func (s *gkeService) API() *gke.Server {
 		return nil
 	}
 	return s.api
+}
+
+// clusterAccess reaches a running cluster's Kubernetes API, for
+// Eventarc's GKE destinations (#1877).
+func (s *gkeService) clusterAccess(name string) (runadapter.GKEAccess, bool) {
+	api := s.API()
+	if api == nil {
+		return runadapter.GKEAccess{}, false
+	}
+	a, ok := api.ClusterAccess(name)
+	return runadapter.GKEAccess(a), ok
 }
 
 // Addr is the bound address.

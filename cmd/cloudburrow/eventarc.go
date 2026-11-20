@@ -176,6 +176,9 @@ type eventsConfig struct {
 	tokens    *metadata.Credentials
 	// pushBase is the Run port as the cluster reaches it.
 	pushBase func() string
+	// gke reaches a Kubernetes Engine cluster of this instance, for
+	// Eventarc's GKE destinations (#1877); nil without gke.
+	gke func(cluster string) (runadapter.GKEAccess, bool)
 }
 
 // Publish publishes one event Eventarc sources itself (audit logs,
