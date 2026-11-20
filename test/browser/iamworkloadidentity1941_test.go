@@ -67,6 +67,8 @@ func TestIAMWorkloadIdentityFederationPage(t *testing.T) {
 
 	// The pool's page lists the provider; Add provider makes an AWS one.
 	p.navigate("/iam-admin/workload-identity-pools/ci-pool?project=" + project)
+	p.waitFor(`document.querySelector("#view [role=tab]") !== null`)
+	p.clickText("#view [role=tab]", "Providers")
 	p.waitFor(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes("github"))`)
 	p.pageAction("Add provider", map[string]string{"providerType": "AWS", "providerId": "aws-prod", "accountId": "123456789012"}, "")
 	aws, err := svc.Projects.Locations.WorkloadIdentityPools.Providers.Get(parent + "ci-pool/providers/aws-prod").Context(ctx).Do()

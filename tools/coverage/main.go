@@ -246,10 +246,27 @@ var areas = []area{
 	// Resource Manager's port. Its methods are the official generated
 	// client's (google.golang.org/api/cloudidentity/v1).
 	{Key: "cloudidentity", Title: "Cloud Identity API (v1)", Own: true, Methods: cloudidentityMethods()},
+	// Workload Identity Federation (#1941): the IAM API's workload
+	// identity pools, JSON only, on Resource Manager's port, and the
+	// Security Token Service's token method on the metadata port. Its
+	// methods are the official generated clients'
+	// (google.golang.org/api/iam/v1 and sts/v1).
+	{Key: "workloadidentity", Title: "Workload Identity Federation (IAM v1 pools, STS v1)", Own: true, Methods: workloadIdentityMethods()},
 	// Certificate Authority Service (#1834): CloudBurrow's own, gRPC and
 	// JSON on one port. Its Locations, Operations and IAMPolicy mixins are
 	// the rows the scheduler and kms areas list (mixin keys are global).
 	{Key: "privateca", Title: "Certificate Authority Service (v1)", Own: true, Services: []string{"google.cloud.security.privateca.v1.CertificateAuthorityService"}},
+}
+
+// workloadIdentityMethods is every workload identity pool method of the
+// IAM v1 discovery document, and sts.token, from the server's own table.
+func workloadIdentityMethods() []string {
+	var out []string
+	for id := range rmsvc.WorkloadIdentityMethodStatuses() {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // cloudidentityMethods is every method of the cloudidentity v1 discovery
@@ -716,7 +733,7 @@ func loadRegistry(root string) (map[string]string, error) {
 	// The Cloud SQL Admin API's too (#1301), and Service Usage's (#1352).
 	// And Cloud Run v1's (#1533).
 	for _, statuses := range []map[string]bool{sqladminsvc.MethodStatuses(), serviceusagesvc.MethodStatuses(), backupdrStatuses, runadapter.V1MethodStatuses(),
-		rmsvc.CloudIdentityMethodStatuses()} {
+		rmsvc.CloudIdentityMethodStatuses(), rmsvc.WorkloadIdentityMethodStatuses()} {
 		for id, isBuilt := range statuses {
 			if isBuilt {
 				r[id] = regImplemented

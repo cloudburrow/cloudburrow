@@ -70,6 +70,8 @@ var compatSections = map[string]string{
 	"backupdr": "## Backup and DR Service — `backupdr.googleapis.com` v1",
 	// Cloud Identity's groups (#1812), named by whole discovery ID.
 	"cloudidentity": "## Cloud Identity groups — `cloudidentity.googleapis.com` v1",
+	// Workload Identity Federation (#1941), named by whole discovery ID.
+	"workloadidentity": "## Workload Identity Federation — `iam.googleapis.com` v1 pools, `sts.googleapis.com` v1",
 	// Certificate Authority Service (#1834), named by gRPC method.
 	"privateca": "## Certificate Authority Service — `google.cloud.security.privateca.v1`",
 }
@@ -163,7 +165,7 @@ func namedMethods(key, op string, report map[string]string) (ids, ambiguous []st
 	// Cloud SQL Admin API (#1301), Resource Manager v1 REST (#1296) and
 	// Service Usage (#1352).
 	if key == "bigquery" || key == "runv1" || key == "sqladmin" || key == "resourcemanagerv1" || key == "serviceusage" || key == "backupdr" ||
-		key == "cloudidentity" {
+		key == "cloudidentity" || key == "workloadidentity" {
 		for _, tok := range storageToken.FindAllStringSubmatch(op, -1) {
 			if _, ok := report[tok[1]]; ok {
 				ids = append(ids, tok[1])

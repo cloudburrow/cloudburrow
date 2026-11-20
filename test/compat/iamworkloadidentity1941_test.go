@@ -138,8 +138,8 @@ func samlMetadata(t *testing.T) string {
 }
 
 // covers: iam.projects.locations.workloadIdentityPools.create, iam.projects.locations.workloadIdentityPools.get, iam.projects.locations.workloadIdentityPools.list, iam.projects.locations.workloadIdentityPools.patch, iam.projects.locations.workloadIdentityPools.delete, iam.projects.locations.workloadIdentityPools.undelete, iam.projects.locations.workloadIdentityPools.operations.get
-// covers: iam.projects.locations.workloadIdentityPools.providers.create, iam.projects.locations.workloadIdentityPools.providers.get, iam.projects.locations.workloadIdentityPools.providers.list, iam.projects.locations.workloadIdentityPools.providers.patch, iam.projects.locations.workloadIdentityPools.providers.delete, iam.projects.locations.workloadIdentityPools.providers.undelete
-// covers: iam.projects.locations.workloadIdentityPools.providers.keys.create, iam.projects.locations.workloadIdentityPools.providers.keys.get, iam.projects.locations.workloadIdentityPools.providers.keys.list, iam.projects.locations.workloadIdentityPools.providers.keys.delete, iam.projects.locations.workloadIdentityPools.providers.keys.undelete
+// covers: iam.projects.locations.workloadIdentityPools.providers.create, iam.projects.locations.workloadIdentityPools.providers.get, iam.projects.locations.workloadIdentityPools.providers.list, iam.projects.locations.workloadIdentityPools.providers.patch, iam.projects.locations.workloadIdentityPools.providers.delete, iam.projects.locations.workloadIdentityPools.providers.undelete, iam.projects.locations.workloadIdentityPools.providers.operations.get
+// covers: iam.projects.locations.workloadIdentityPools.providers.keys.create, iam.projects.locations.workloadIdentityPools.providers.keys.get, iam.projects.locations.workloadIdentityPools.providers.keys.list, iam.projects.locations.workloadIdentityPools.providers.keys.delete, iam.projects.locations.workloadIdentityPools.providers.keys.undelete, iam.projects.locations.workloadIdentityPools.providers.keys.operations.get
 //
 // TestWorkloadIdentityPools (#1941), with google.golang.org/api/iam/v1:
 // a pool is created (a done Operation, named under the project number),
@@ -215,10 +215,14 @@ func TestWorkloadIdentityPools(t *testing.T) {
 	} else {
 		wantWIFError(t, "two kinds", err, 400)
 	}
-	if _, err := provs.Create(poolName, &iamv1.WorkloadIdentityPoolProvider{DisplayName: "GitHub", Oidc: &iamv1.Oidc{IssuerUri: "https://idp.example.test",
+	pop, err := provs.Create(poolName, &iamv1.WorkloadIdentityPoolProvider{DisplayName: "GitHub", Oidc: &iamv1.Oidc{IssuerUri: "https://idp.example.test",
 		AllowedAudiences: []string{"ci"}}, AttributeMapping: mapping, AttributeCondition: "attribute.repo.startsWith('org/')"}).
-		WorkloadIdentityPoolProviderId("oidc-prov").Context(ctx).Do(); err != nil {
+		WorkloadIdentityPoolProviderId("oidc-prov").Context(ctx).Do()
+	if err != nil {
 		t.Fatalf("create OIDC provider: %v", err)
+	}
+	if got, err := provs.Operations.Get(pop.Name).Context(ctx).Do(); err != nil || !got.Done {
+		t.Fatalf("providers.operations.get = %v, %v", got, err)
 	}
 	if _, err := provs.Create(poolName, &iamv1.WorkloadIdentityPoolProvider{Aws: &iamv1.Aws{AccountId: "123456789012"}}).
 		WorkloadIdentityPoolProviderId("aws-prov").Context(ctx).Do(); err != nil {
@@ -246,6 +250,9 @@ func TestWorkloadIdentityPools(t *testing.T) {
 		WorkloadIdentityPoolProviderKeyId("enc-key1").Context(ctx).Do()
 	if err != nil || !kop.Done {
 		t.Fatalf("create key = %v, %v", kop, err)
+	}
+	if got, err := keys.Operations.Get(kop.Name).Context(ctx).Do(); err != nil || !got.Done {
+		t.Fatalf("keys.operations.get = %v, %v", got, err)
 	}
 	k, err := keys.Get(samlName + "/keys/enc-key1").Context(ctx).Do()
 	if err != nil || k.KeyData == nil || !strings.Contains(k.KeyData.Key, "BEGIN CERTIFICATE") || k.KeyData.Format != "RSA_X509_PEM" {
@@ -409,7 +416,7 @@ func authToken(t *testing.T, ctx context.Context, path string) (string, error) {
 	return tok.Value, nil
 }
 
-// covers: sts.token, iamcredentials.projects.serviceAccounts.generateAccessToken
+// covers: sts.token
 //
 // TestWorkloadIdentityFederationSTS (#1941): the official STS client
 // (google.golang.org/api/sts/v1) exchanges a token from a local IdP, whose
@@ -574,4 +581,115 @@ func TestWorkloadIdentityFederationStorage(t *testing.T) {
 	})
 	asSA := newStorageAs(t, h, saTok)
 	waitGranted(t, "read as the impersonated account", func() error { _, err := storageRead(t, h, asSA.json, bucket, "a.txt"); return err })
+}
+
+// covers: iam.projects.locations.workloadIdentityPools.create, iam.projects.locations.workloadIdentityPools.get, iam.projects.locations.workloadIdentityPools.list, iam.projects.locations.workloadIdentityPools.patch, iam.projects.locations.workloadIdentityPools.delete, iam.projects.locations.workloadIdentityPools.undelete
+// covers: iam.projects.locations.workloadIdentityPools.providers.create, iam.projects.locations.workloadIdentityPools.providers.get, iam.projects.locations.workloadIdentityPools.providers.list, iam.projects.locations.workloadIdentityPools.providers.patch, iam.projects.locations.workloadIdentityPools.providers.delete, iam.projects.locations.workloadIdentityPools.providers.undelete
+//
+// TestGcloudIAMWorkloadIdentityPools (#1941): gcloud iam
+// workload-identity-pools create, describe, list, update, delete and
+// undelete, and providers create-oidc, describe, list, update-oidc, delete
+// and undelete, through gcloud-setup's iam override alone.
+func TestGcloudIAMWorkloadIdentityPools(t *testing.T) {
+	h := New(t)
+	h.Endpoint(EnvResourceManager)
+	project := iamProject(t, h, "wifgc-")
+	g := newGcloudSession(t, h)
+	pool := []string{"--location=global", "--project", project}
+	g.must(append([]string{"iam", "workload-identity-pools", "create", "gc-pool", "--display-name", "gcloud pool"}, pool...)...)
+	if out := g.must(append([]string{"iam", "workload-identity-pools", "describe", "gc-pool", "--format=value(displayName,state)"}, pool...)...); !strings.Contains(out, "gcloud pool") || !strings.Contains(out, "ACTIVE") {
+		t.Errorf("describe pool:\n%s", out)
+	}
+	g.must(append([]string{"iam", "workload-identity-pools", "update", "gc-pool", "--description", "updated"}, pool...)...)
+	if out := g.must(append([]string{"iam", "workload-identity-pools", "list", "--format=value(name,description)"}, pool...)...); !strings.Contains(out, "gc-pool") || !strings.Contains(out, "updated") {
+		t.Errorf("list pools:\n%s", out)
+	}
+	prov := append([]string{"--workload-identity-pool=gc-pool"}, pool...)
+	g.must(append([]string{"iam", "workload-identity-pools", "providers", "create-oidc", "gc-prov", "--issuer-uri=https://idp.example.test",
+		"--allowed-audiences=ci", "--attribute-mapping=google.subject=assertion.sub,attribute.repo=assertion.repo",
+		"--attribute-condition=attribute.repo.startsWith('org/')"}, prov...)...)
+	if out := g.must(append([]string{"iam", "workload-identity-pools", "providers", "describe", "gc-prov", "--format=value(oidc.issuerUri,attributeCondition)"}, prov...)...); !strings.Contains(out, "https://idp.example.test") {
+		t.Errorf("describe provider:\n%s", out)
+	}
+	g.must(append([]string{"iam", "workload-identity-pools", "providers", "update-oidc", "gc-prov", "--allowed-audiences=ci,cd"}, prov...)...)
+	if out := g.must(append([]string{"iam", "workload-identity-pools", "providers", "list", "--format=value(name,oidc.allowedAudiences)"}, prov...)...); !strings.Contains(out, "cd") {
+		t.Errorf("list providers:\n%s", out)
+	}
+	if _, err := g.run(nil, append([]string{"iam", "workload-identity-pools", "providers", "create-oidc", "gcp-prov", "--issuer-uri=https://idp.example.test",
+		"--attribute-mapping=google.subject=assertion.sub"}, prov...)...); err == nil {
+		t.Error("a gcp- provider ID was accepted")
+	}
+	g.must(append([]string{"iam", "workload-identity-pools", "providers", "delete", "gc-prov", "--quiet"}, prov...)...)
+	g.must(append([]string{"iam", "workload-identity-pools", "providers", "undelete", "gc-prov"}, prov...)...)
+	g.must(append([]string{"iam", "workload-identity-pools", "delete", "gc-pool", "--quiet"}, pool...)...)
+	if out := g.must(append([]string{"iam", "workload-identity-pools", "describe", "gc-pool", "--format=value(state)"}, pool...)...); !strings.Contains(out, "DELETED") {
+		t.Errorf("describe after delete:\n%s", out)
+	}
+	g.must(append([]string{"iam", "workload-identity-pools", "undelete", "gc-pool"}, pool...)...)
+}
+
+// covers: iam.projects.locations.workloadIdentityPools.listAttestationRules
+//
+// TestTerraformIAMWorkloadIdentityPool (#1941):
+// google_iam_workload_identity_pool and
+// google_iam_workload_identity_pool_provider (OIDC) apply through
+// cloudburrow terraform, read back through the official client, plan
+// clean, change in place (the provider's attribute condition) and destroy
+// (both soft-deleted).
+func TestTerraformIAMWorkloadIdentityPool(t *testing.T) {
+	h := New(t)
+	h.Endpoint(EnvResourceManager)
+	ctx := h.Context()
+	project := iamProject(t, h, "wiftf-")
+	svc := iamREST(t, h)
+	m := newTFModule(t)
+	module := func(cond string) string {
+		return fmt.Sprintf(`
+resource "google_iam_workload_identity_pool" "p" {
+  project                   = %q
+  workload_identity_pool_id = "tf-pool"
+  display_name              = "tf pool"
+  description               = "made by terraform"
+}
+
+resource "google_iam_workload_identity_pool_provider" "o" {
+  project                            = %q
+  workload_identity_pool_id          = google_iam_workload_identity_pool.p.workload_identity_pool_id
+  workload_identity_pool_provider_id = "tf-oidc"
+  display_name                       = "tf oidc"
+  attribute_mapping = {
+    "google.subject" = "assertion.sub"
+    "attribute.repo" = "assertion.repo"
+  }
+  attribute_condition = %q
+  oidc {
+    issuer_uri        = "https://idp.example.test"
+    allowed_audiences = ["ci"]
+  }
+}
+`, project, project, cond)
+	}
+	m.write(module("attribute.repo.startsWith('org/')"))
+	m.must("init", "-input=false", "-no-color")
+	m.apply()
+	poolName := "projects/" + project + "/locations/global/workloadIdentityPools/tf-pool"
+	pool, err := svc.Projects.Locations.WorkloadIdentityPools.Get(poolName).Context(ctx).Do()
+	if err != nil || pool.DisplayName != "tf pool" || pool.Description != "made by terraform" {
+		t.Fatalf("pool after apply = %+v, %v", pool, err)
+	}
+	prov, err := svc.Projects.Locations.WorkloadIdentityPools.Providers.Get(poolName + "/providers/tf-oidc").Context(ctx).Do()
+	if err != nil || prov.Oidc == nil || prov.AttributeMapping["attribute.repo"] != "assertion.repo" {
+		t.Fatalf("provider after apply = %+v, %v", prov, err)
+	}
+	m.planClean()
+	m.write(module("attribute.repo == 'org/app'"))
+	m.apply()
+	if prov, err := svc.Projects.Locations.WorkloadIdentityPools.Providers.Get(poolName + "/providers/tf-oidc").Context(ctx).Do(); err != nil || prov.AttributeCondition != "attribute.repo == 'org/app'" {
+		t.Errorf("provider after the change = %+v, %v", prov, err)
+	}
+	m.planClean()
+	m.must("destroy", "-auto-approve", "-input=false", "-no-color")
+	if pool, err := svc.Projects.Locations.WorkloadIdentityPools.Get(poolName).Context(ctx).Do(); err != nil || pool.State != "DELETED" {
+		t.Errorf("pool after destroy = %+v, %v; want DELETED", pool, err)
+	}
 }

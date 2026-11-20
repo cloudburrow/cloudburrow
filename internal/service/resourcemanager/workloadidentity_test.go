@@ -137,3 +137,34 @@ func TestWorkloadIdentityPoolsAndProviders(t *testing.T) {
 		t.Fatalf("get after the undelete period = %d", code)
 	}
 }
+
+// Every unserved workload identity method (managed workload identity's
+// namespaces and attestation rules, the pools' IAM policies) answers 501.
+func TestWorkloadIdentityUnservedAre501(t *testing.T) {
+	r := New(store.NewMemory())
+	if _, err := r.Create(Project{ProjectID: "wif-unserved"}); err != nil {
+		t.Fatal(err)
+	}
+	pool := "/v1/projects/wif-unserved/locations/global/workloadIdentityPools/p-one"
+	if code, _ := wifCall(t, r, "POST", "/v1/projects/wif-unserved/locations/global/workloadIdentityPools?workloadIdentityPoolId=p-one", map[string]any{}); code != 200 {
+		t.Fatal(code)
+	}
+	n := 0
+	for id, served := range WorkloadIdentityMethods {
+		if served {
+			continue
+		}
+		n++
+		tail := strings.TrimPrefix(id, "iam.projects.locations.workloadIdentityPools.")
+		method, path := "POST", pool+":"+tail
+		if strings.HasPrefix(tail, "namespaces.") {
+			method, path = "GET", pool+"/namespaces/ns-one"
+		}
+		if code, _ := wifCall(t, r, method, path, map[string]any{}); code != 501 {
+			t.Errorf("%s (%s %s) = %d; want 501", id, method, path, code)
+		}
+	}
+	if n == 0 {
+		t.Fatal("no unserved methods")
+	}
+}

@@ -1082,6 +1082,9 @@ func (r *Registry) serveWIF(w http.ResponseWriter, req *http.Request) error {
 	if len(seg) < 5 || seg[0] != "projects" || seg[2] != "locations" || seg[4] != "workloadIdentityPools" {
 		return apierror.NotFound("no such method: %s %s", req.Method, req.URL.Path)
 	}
+	if len(seg) >= 7 && seg[6] != "providers" && seg[6] != "operations" {
+		return apierror.Unimplemented("workloadIdentityPools.%s (managed workload identity) is not implemented by CloudBurrow.", seg[6])
+	}
 	if seg[3] != "global" {
 		return apierror.InvalidArgument("The only supported location is global; got %q.", seg[3])
 	}
@@ -1125,7 +1128,7 @@ func (r *Registry) serveWIF(w http.ResponseWriter, req *http.Request) error {
 			return rest.WriteJSON(w, http.StatusOK, map[string]any{"workloadIdentityPools": page, "nextPageToken": next})
 		case http.MethodPost:
 			var in WorkloadIdentityPool
-			if err := rest.DecodeJSON(req, &in); err != nil {
+			if err := decodeWIF(req, &in); err != nil {
 				return err
 			}
 			out, err := r.CreateWorkloadIdentityPool(project, q.Get("workloadIdentityPoolId"), in)
@@ -1145,9 +1148,17 @@ func (r *Registry) serveWIF(w http.ResponseWriter, req *http.Request) error {
 				return err
 			}
 			return rest.WriteJSON(w, http.StatusOK, out)
+		case req.Method == http.MethodGet && verb == "listAttestationRules":
+			// Attestation rules are managed workload identity's
+			// (TRUST_DOMAIN pools); a federation pool has none, which
+			// Terraform reads after every apply.
+			if _, err := r.WorkloadIdentityPool(project, pool); err != nil {
+				return err
+			}
+			return rest.WriteJSON(w, http.StatusOK, map[string]any{})
 		case req.Method == http.MethodPatch && verb == "":
 			var in WorkloadIdentityPool
-			if err := rest.DecodeJSON(req, &in); err != nil {
+			if err := decodeWIF(req, &in); err != nil {
 				return err
 			}
 			out, err = r.UpdateWorkloadIdentityPool(project, pool, in, mask)
@@ -1182,7 +1193,7 @@ func (r *Registry) serveWIF(w http.ResponseWriter, req *http.Request) error {
 			return rest.WriteJSON(w, http.StatusOK, map[string]any{"workloadIdentityPoolProviders": page, "nextPageToken": next})
 		case http.MethodPost:
 			var in WorkloadIdentityPoolProvider
-			if err := rest.DecodeJSON(req, &in); err != nil {
+			if err := decodeWIF(req, &in); err != nil {
 				return err
 			}
 			out, err := r.CreateWorkloadIdentityPoolProvider(project, pool, q.Get("workloadIdentityPoolProviderId"), in)
@@ -1207,7 +1218,7 @@ func (r *Registry) serveWIF(w http.ResponseWriter, req *http.Request) error {
 			return rest.WriteJSON(w, http.StatusOK, out)
 		case req.Method == http.MethodPatch && verb == "":
 			var in WorkloadIdentityPoolProvider
-			if err := rest.DecodeJSON(req, &in); err != nil {
+			if err := decodeWIF(req, &in); err != nil {
 				return err
 			}
 			out, err = r.UpdateWorkloadIdentityPoolProvider(project, pool, prov, in, mask)
@@ -1240,7 +1251,7 @@ func (r *Registry) serveWIF(w http.ResponseWriter, req *http.Request) error {
 			return rest.WriteJSON(w, http.StatusOK, map[string]any{"workloadIdentityPoolProviderKeys": page, "nextPageToken": next})
 		case http.MethodPost:
 			var in WorkloadIdentityPoolProviderKey
-			if err := rest.DecodeJSON(req, &in); err != nil {
+			if err := decodeWIF(req, &in); err != nil {
 				return err
 			}
 			out, err := r.CreateWorkloadIdentityPoolProviderKey(project, pool, prov, q.Get("workloadIdentityPoolProviderKeyId"), in)
@@ -1326,4 +1337,17 @@ func wifPage[T any](list []T, q url.Values, def, max int) ([]T, string, error) {
 		return list[start:], "", nil
 	}
 	return list[start:end], strconv.Itoa(end), nil
+}
+
+// decodeWIF reads a request body, ignoring fields this server does not
+// model: gcloud and Terraform send fields newer than the discovery
+// document (enableMeshCaCompatibility), which Google accepts.
+func decodeWIF(req *http.Request, dst any) error {
+	if req.Body == nil {
+		return apierror.InvalidArgument("request body is required")
+	}
+	if err := json.NewDecoder(req.Body).Decode(dst); err != nil && err.Error() != "EOF" {
+		return apierror.InvalidArgument("malformed request body: %v", err)
+	}
+	return nil
 }
