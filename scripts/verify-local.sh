@@ -468,7 +468,7 @@ browser_suite() {  # <shard> <dir> <flags...>
   # The memorystore shard's read back through the Memorystore admin API.
   if [ "$shard" = memorystore ]; then BROWSER_VARS+=,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT; fi
   # The Logs Explorer reads entries written through the Logging API (#1410).
-  if [ "$shard" = storage ]; then BROWSER_VARS+=,LOGGING,STORAGE,PUBSUB,TASKS,SCHEDULER,RESOURCEMANAGER,SERVICEUSAGE,APIKEYS,KUBECONFIG; fi
+  if [ "$shard" = storage ]; then BROWSER_VARS+=,LOGGING,STORAGE,PUBSUB,TASKS,SCHEDULER,RESOURCEMANAGER,SERVICEUSAGE,APIKEYS,STORAGE_BATCH,STORAGE_INSIGHTS,STORAGE_TRANSFER,KUBECONFIG; fi
   # The run shard's read back through Cloud Run, Cloud KMS, Secret Manager,
   # Cloud Logging and BigQuery's official clients, and enable the Container
   # Scanning API through its Service Usage, RUN_SERVICEUSAGE (#1912).

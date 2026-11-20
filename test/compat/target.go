@@ -73,6 +73,9 @@ var targetEndpoints = []targetEndpoint{
 	{"RESOURCEMANAGER", envKey("CLOUDBURROW_RESOURCEMANAGER_ENDPOINT")},
 	{"SERVICEUSAGE", envKey("CLOUDBURROW_SERVICEUSAGE_ENDPOINT")},
 	{"APIKEYS", envKey("CLOUDBURROW_APIKEYS_ENDPOINT")},
+	{"STORAGE_BATCH", envKey("CLOUDBURROW_STORAGEBATCHOPERATIONS_ENDPOINT")},
+	{"STORAGE_INSIGHTS", envKey("CLOUDBURROW_STORAGEINSIGHTS_ENDPOINT")},
+	{"STORAGE_TRANSFER", envKey("CLOUDBURROW_STORAGETRANSFER_ENDPOINT")},
 	{"SPANNER", envKey("SPANNER_EMULATOR_HOST")},
 	{"SPANNER_REST", envKey("CLOUDBURROW_SPANNER_REST_ENDPOINT")},
 	{"DATASTORE", envKey("DATASTORE_EMULATOR_HOST")},
@@ -214,6 +217,10 @@ var gcloudOverrides = []struct {
 	{"orgpolicy", []string{"RESOURCEMANAGER"}},
 	{"serviceusage", []string{"SERVICEUSAGE", "RUN_SERVICEUSAGE"}},
 	{"apikeys", []string{"APIKEYS"}},
+	// The Cloud Storage companion APIs (#1957), each on its own port.
+	{"storagebatchoperations", []string{"STORAGE_BATCH"}},
+	{"storageinsights", []string{"STORAGE_INSIGHTS"}},
+	{"storagetransfer", []string{"STORAGE_TRANSFER"}},
 	{"run", []string{"RUN"}},
 	// Served on the Run port (#1347).
 	{"artifactregistry", []string{"RUN"}},

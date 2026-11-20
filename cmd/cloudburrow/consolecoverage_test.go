@@ -34,7 +34,8 @@ type consoleCoverage struct {
 }
 
 var consoleCoverages = map[config.Service]consoleCoverage{
-	config.ServiceStorage:       {Providers: []string{"storage", "storage-deleted", "storage-settings", "storage-intelligence"}},
+	config.ServiceStorage: {Providers: []string{"storage", "storage-deleted", "storage-settings", "storage-intelligence",
+		"storage-batch-operations", "storage-inventory-reports", "storage-transfer", "storage-transfer-agent-pools"}},
 	config.ServicePubSub:        {Providers: []string{"pubsub", "pubsub-subscriptions", "pubsub-snapshots", "pubsub-schemas"}},
 	config.ServiceTasks:         {Providers: []string{"tasks"}},
 	config.ServiceRun:           {Providers: []string{"run", "run-jobs", "run-worker-pools", "run-domains", "run-instances", "run-builds", "cloud-build-triggers", "cloud-build-worker-pools", "cloud-build-dashboard", "cloud-build-repositories", "cloud-build-settings", "secure-source-manager", "artifact-registry", "artifact-registry-settings", "functions", "eventarc"}},
@@ -145,6 +146,9 @@ func coverageDeps(t *testing.T) consoleDeps {
 		Name: "coverage", Project: "coverage", BindAddress: "127.0.0.1",
 		StateDir: t.TempDir(), Mode: config.ModeEphemeral,
 		Services: config.KnownServices(),
+		// The Cloud Storage companion APIs' screens (#1957) are built for
+		// their bound ports.
+		Endpoints: config.Endpoints{StorageBatchOperations: 1, StorageInsights: 1, StorageTransfer: 1},
 	}
 	projects := resourcemanager.New(store.NewMemory())
 	d := consoleDeps{

@@ -153,7 +153,8 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		// TestCloudIdentityUnservedAre501 checks its 501s over HTTP
 		// (internal/service/resourcemanager).
 		if strings.HasPrefix(m, "sql.") || strings.HasPrefix(m, "serviceusage.") || strings.HasPrefix(m, "apikeys.") || strings.HasPrefix(m, "backupdr.") ||
-			strings.HasPrefix(m, "cloudidentity.") {
+			strings.HasPrefix(m, "cloudidentity.") || strings.HasPrefix(m, "storagebatchoperations.") ||
+			strings.HasPrefix(m, "storageinsights.") || strings.HasPrefix(m, "storagetransfer.") {
 			continue
 		}
 		// Cloud Run v1's is the adapter's method table, and

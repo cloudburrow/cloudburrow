@@ -81,6 +81,8 @@ var serviceAgents = map[string]string{
 	"apikeys.googleapis.com": "gcp-sa-apikeys.iam.gserviceaccount.com",
 	// Container Analysis Service Agent.
 	"containeranalysis.googleapis.com": "container-analysis.iam.gserviceaccount.com",
+	// Storage Insights Service Account (#1957).
+	"storageinsights.googleapis.com": "gcp-sa-storageinsights.iam.gserviceaccount.com",
 	// Container Scanning Service Agent.
 	"containerscanning.googleapis.com": "gcp-sa-containerscanning.iam.gserviceaccount.com",
 }
@@ -89,6 +91,12 @@ var serviceAgents = map[string]string{
 // https://cloud.google.com/iam/docs/service-agents gives no primary
 // service agent, so generateServiceIdentity names none for them.
 var noPrimaryAgent = map[string]string{
+	// The Storage Transfer Service Service Agent (project-NUMBER@storage-
+	// transfer-service) is not primary; googleServiceAccounts.get names it
+	// (#1957).
+	"storagetransfer.googleapis.com": "Storage Transfer Service",
+	// The page lists no agent of Storage Batch Operations (#1957).
+	"storagebatchoperations.googleapis.com": "Storage Batch Operations",
 	// Its agents (gcp-sa-logging, service-folder-/service-org-, pNUMBER-ID)
 	// are not primary; Logging's CMEK names its account through
 	// getCmekSettings instead.

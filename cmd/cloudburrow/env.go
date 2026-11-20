@@ -511,6 +511,30 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 				"the API Keys API v2, REST, plaintext; read by no client library: pass http://" + ak + "/ to option.WithEndpoint"})
 	}
 
+	// The Cloud Storage companion APIs (#1957), beside Cloud Storage: gcloud
+	// transfer, storage batch-operations and storage insights, and
+	// Terraform's storage_transfer and storage_insights endpoints.
+	if storageJobsEnabled(cfg) {
+		for _, c := range []struct {
+			port         int
+			name, gcloud string
+			title        string
+		}{
+			{cfg.Endpoints.StorageBatchOperations, "storagebatchoperations", "STORAGEBATCHOPERATIONS", "the Storage Batch Operations API v1"},
+			{cfg.Endpoints.StorageInsights, "storageinsights", "STORAGEINSIGHTS", "the Storage Insights API v1"},
+			{cfg.Endpoints.StorageTransfer, "storagetransfer", "STORAGETRANSFER", "the Storage Transfer Service API v1"},
+		} {
+			if c.port <= 0 {
+				continue
+			}
+			a := addr(c.port)
+			vars = append(vars,
+				envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_" + c.gcloud, "http://" + a + "/", "read by gcloud"},
+				envVar{cliEndpointVar(c.name), a,
+					c.title + ", REST, plaintext; read by no client library: pass http://" + a + " to option.WithEndpoint"})
+		}
+	}
+
 	// Resource Manager (#298). gcloud reads the override; the client
 	// libraries do not, and need the endpoint in client options. gcloud's
 	// projects commands call v1, served beside v3 since #301
@@ -631,11 +655,15 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 		"memorystore-admin": &e.MemorystoreAdmin,
 		"serviceusage":      &e.ServiceUsage,
 		"apikeys":           &e.APIKeys,
-		"backupdr":          &e.BackupDR,
-		"privateca":         &e.PrivateCA,
-		"gke":               &e.GKE,
-		"onnx":              &e.ONNX,
-		"tfconvert":         &e.TFConvert,
+		// The Cloud Storage companion APIs (#1957).
+		"storagebatchoperations": &e.StorageBatchOperations,
+		"storageinsights":        &e.StorageInsights,
+		"storagetransfer":        &e.StorageTransfer,
+		"backupdr":               &e.BackupDR,
+		"privateca":              &e.PrivateCA,
+		"gke":                    &e.GKE,
+		"onnx":                   &e.ONNX,
+		"tfconvert":              &e.TFConvert,
 		// The ingress gateway, which kind publishes where `up` configured
 		// it: without this, `env --name x` for an instance started with
 		// --port-base exported the default ingress port (#863).

@@ -438,7 +438,13 @@ cloud.google.com/go/storage v1.56.0/go.mod h1:Tpuj6t4NweCLzlNbw9Z9iwxEkrSem20Aet
 cloud.google.com/go/storage v1.62.3/go.mod h1:cpYz/kRVZ+UQAF1uHeea10/9ewcRbxGoGNKsS9daSXA=
 cloud.google.com/go/storage v1.70.0 h1:LQNHn0rRF94jVFfF3e416IzdQqIufa5GfF6HilQxb80=
 cloud.google.com/go/storage v1.70.0/go.mod h1:W84cNa070TZIegvTW67CBY+f5rxux8EJMb7YyiHdrls=
+cloud.google.com/go/storagebatchoperations v1.3.1 h1:YizdQouB26dGKDdBqqgHcNpkkIEn891CJ2lS1hXY/5M=
+cloud.google.com/go/storagebatchoperations v1.3.1/go.mod h1:45qsjpWpts2l91klYI3s257Pf8pPFgwt/UaPuKjkKKo=
+cloud.google.com/go/storageinsights v1.10.1 h1:PU+AC+OyfHiSKg84nclJdlMpWlON1kReGF22lFauKZ8=
+cloud.google.com/go/storageinsights v1.10.1/go.mod h1:r9atmF/pP7Mm5JlvtC5cVgLi1Gyi7JkE0bICcBaJmNc=
 cloud.google.com/go/storagetransfer v1.19.0/go.mod h1:sy4ImXynHkm9CKmbILtmzLN36PHh7JOhUTpqXf5SvMs=
+cloud.google.com/go/storagetransfer v1.21.1 h1:XLCp4u5e1wGfb32V63Gn4WNxkAplCmBCL5Xxvsawv88=
+cloud.google.com/go/storagetransfer v1.21.1/go.mod h1:amWVgEF65ZMGxpfbSl+uFEoHqjVxLAAt6X8bc/kR5FA=
 cloud.google.com/go/talent v1.14.0/go.mod h1:jieYQngp1YqRtqV2t92w3LTrjuLV05kMM4BZMUUneaw=
 cloud.google.com/go/texttospeech v1.22.0/go.mod h1:bAksATiWPKaw8r8wVgANa4GkVdsyFE4y9ulRzKyuJec=
 cloud.google.com/go/tpu v1.14.0/go.mod h1:1pggTTG5npfxea6vYjyl60Fg09VgbM7efBgVjnFZjpo=

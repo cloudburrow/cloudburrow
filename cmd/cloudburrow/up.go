@@ -412,6 +412,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	var serviceUsageRef *serviceusage.Server
 	// And the API Keys API (#1915).
 	var apiKeysRef *apikeys.Server
+	// And the Cloud Storage companion APIs (#1957).
+	var storageJobsRef *storageJobs
 	// And the Cloud SQL Admin API and Backup and DR (#1541, #1542).
 	var sqlAdminRef *sqladmin.Server
 	var backupDRRef *backupdr.Server
@@ -441,6 +443,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		registry:     func() *resourcemanager.Registry { return projectRegistry },
 		serviceUsage: func() *serviceusage.Server { return serviceUsageRef },
 		apiKeys:      func() *apikeys.Server { return apiKeysRef },
+		storageJobs:  func() *storageJobs { return storageJobsRef },
 		sqlAdmin:     func() *sqladmin.Server { return sqlAdminRef },
 		backupDR:     func() *backupdr.Server { return backupDRRef },
 		projectStore: func() store.Store {
@@ -728,6 +731,17 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		coord.Register(apiKeysSrv)
 	}
 
+	// The Cloud Storage companion APIs (#1957): batch operations,
+	// inventory reports and transfers over the instance's buckets.
+	storageJobsSrv := newStorageJobs(cfg, func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") },
+		func() *netfwd.Forwarder { return forwarderFor(forwarders, "pubsub") })
+	if storageJobsSrv != nil {
+		storageJobsRef = storageJobsSrv
+		for _, s := range storageJobsSrv.servers() {
+			coord.Register(s)
+		}
+	}
+
 	// The Cloud SQL Admin API (#1301), over whichever database servers run.
 	sqlAdminSrv := newSQLAdminServer(cfg, forwarders, mysqlCreds, stderr)
 	if sqlAdminSrv != nil {
@@ -939,6 +953,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if a := apiKeysSrv.Addr(); a != "" {
 			live["apikeys"] = a
 		}
+		storageJobsSrv.live(live)
 		if backupDRSrv != nil && backupDRSrv.Addr() != "" {
 			live["backupdr"] = backupDRSrv.Addr()
 		}
@@ -989,6 +1004,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// SQL volumes (#1346): the Auth Proxy a revision runs reaches both.
 		published := map[string]bool{"run": true, "tasks": true, "secretmanager": true, "kms": true,
 			"scheduler": true, "logging": true, "resourcemanager": true, "serviceusage": true, "apikeys": true, "metadata": true,
+			"storagebatchoperations": true, "storageinsights": true, "storagetransfer": true,
 			"sqladmin": true, "cloudsql-connector": true, "onnx": true, "tfconvert": true, "localai": true}
 		if !runEnabled {
 			published = map[string]bool{"resourcemanager": true, "onnx": true, "tfconvert": true, "localai": true}

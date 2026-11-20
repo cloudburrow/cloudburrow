@@ -53,6 +53,11 @@ var apiLibrary = map[string]apiLibraryInfo{
 	"container.googleapis.com":            {"Compute", "Builds and manages container-based applications, powered by the open source Kubernetes technology.", ""},
 	"containeranalysis.googleapis.com":    {"Developer tools", "Stores and reads the notes and occurrences of software artifacts, vulnerabilities among them.", ""},
 	"containerscanning.googleapis.com":    {"Security", "Scans the container images pushed to Artifact Registry for vulnerabilities.", ""},
+
+	// The Cloud Storage companion APIs (#1957).
+	"storagebatchoperations.googleapis.com": {"Storage", "Runs jobs that delete, update or rewrite many Cloud Storage objects at once.", ""},
+	"storageinsights.googleapis.com":        {"Storage", "Writes scheduled inventory reports of the objects in a bucket.", ""},
+	"storagetransfer.googleapis.com":        {"Storage", "Transfers data between Cloud Storage buckets and file systems.", ""},
 }
 
 // apiTotals is an API's calls since the instance started, from the request
