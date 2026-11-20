@@ -49,9 +49,14 @@ func (p tagsProvider) List(context.Context, string) (console.Listing, error) {
 		if vs, err := p.registry.TagValues(k.GetName()); err == nil {
 			n = len(vs)
 		}
+		// Google's row menu: Actions, View details, and Manage access, the
+		// key's IAM policy (#1865).
+		page := "/tags/" + tagID(k.GetName())
 		l.Items = append(l.Items, console.Resource{Name: tagID(k.GetName()), Fields: map[string]string{
 			"Short name": k.GetShortName(), "Namespaced name": k.GetNamespacedName(), "Parent": k.GetParent(),
-			"Values": strconv.Itoa(n), "Description": k.GetDescription()}})
+			"Values": strconv.Itoa(n), "Description": k.GetDescription()},
+			Actions: []console.Action{{ID: "view", Label: "View details", Href: page},
+				{ID: "access", Label: "Manage access", Href: page + "?tab=permissions"}}})
 	}
 	l.Total = len(l.Items)
 	return l, nil
@@ -70,9 +75,12 @@ func (p tagsProvider) parentOptions() []string {
 }
 
 // CreateForm is Google's Create tag key (#1865, "Creating and managing
-// tags", read 2026-11-19): Tag key, Tag key description, the purpose
+// tags", read 2026-11-20): Tag key, Tag key description, the purpose
 // (For use with network firewall, GCE_FIREWALL, with its network), then
-// the Tag values, each a value and its description, made with the key.
+// the Tag values section: Predefined values, a row per value made with
+// Add value, each its Tag value and Tag value description, or Dynamic
+// values, which the TagKeys API served here has no allowed values regex
+// for, so it is drawn and not choosable. The page ends in Create tag key.
 // The key is made in the organization or a project, as the resource
 // selector names it on Google's page.
 func (p tagsProvider) CreateForm() (string, []console.Field) {
@@ -84,12 +92,35 @@ func (p tagsProvider) CreateForm() (string, []console.Field) {
 			Help: "A key for network firewall policies (purpose GCE_FIREWALL): its values can be bound to the VPC network below only."},
 		{Name: "network", Label: "Network", Type: "text", ShowWhen: "purpose",
 			Help: "The VPC network the key's values apply to, as PROJECT_ID/NETWORK or projects/PROJECT_ID/global/networks/NETWORK."},
-		{Name: "values", Label: "Tag values", Type: "map",
-			Help: "One per line: the tag value, then = and its tag value description, such as production=Serving traffic. Values can also be added later on the key's page."},
+		{Name: "valueType", Label: "Tag values", Type: "radio", Default: tagValuesPredefined,
+			Options:      []string{tagValuesPredefined, tagValuesDynamic},
+			OptionLabels: map[string]string{tagValuesPredefined: "Predefined values", tagValuesDynamic: "Dynamic values"},
+			UnavailableOptions: map[string]string{tagValuesDynamic: "Dynamic values need a tag key's allowed values regex, " +
+				"which the TagKeys API CloudBurrow serves does not have."},
+			Help: "Predefined values: a fixed list of allowed values. Values can also be added later on the key's page."},
+		{Name: "values", Label: "Tag value", Type: console.GroupFieldType, AddLabel: "Add value", ShowWhen: "valueType=" + tagValuesPredefined,
+			Group: []console.Field{
+				{Name: "shortName", Label: "Tag value", Type: "text", Required: true, Pattern: tagShortNamePattern,
+					Help: "up to 256 characters, starting and ending with a letter or digit"},
+				{Name: "description", Label: "Tag value description", Type: "text"},
+			}},
 		{Name: "parent", Label: "Organization or project", Type: "select", Required: true, Options: p.parentOptions(), Default: resourcemanager.OrganizationName,
 			Help: "The key's namespace: the organization, or a project."},
 	}
 }
+
+// The Tag values choices of Create tag key.
+const (
+	tagValuesPredefined = "predefined"
+	tagValuesDynamic    = "dynamic"
+)
+
+// CreateSubmit implements console.CreateSubmitter: Google's page ends in
+// Create tag key.
+func (tagsProvider) CreateSubmit() string { return "Create tag key" }
+
+// CreateLayout implements console.CreateLayouter: one page, as Google's.
+func (tagsProvider) CreateLayout() string { return console.CreateLayoutPage }
 
 func (p tagsProvider) Create(_ context.Context, _ string, values map[string]string) (string, error) {
 	in := &rmpb.TagKey{Parent: values["parent"], ShortName: strings.TrimSpace(values["shortName"]), Description: values["description"]}
@@ -97,9 +128,20 @@ func (p tagsProvider) Create(_ context.Context, _ string, values map[string]stri
 		in.Purpose = rmpb.Purpose_GCE_FIREWALL
 		in.PurposeData = map[string]string{"network": strings.TrimSpace(values["network"])}
 	}
-	tagValues, err := console.ParseMap(values["values"])
+	if values["valueType"] == tagValuesDynamic {
+		return "", fmt.Errorf("dynamic values are not available: the TagKeys API served here has no allowed values regex")
+	}
+	rows, err := console.ParseGroup(values["values"])
 	if err != nil {
 		return "", fmt.Errorf("tag values: %w", err)
+	}
+	tagValues := map[string]string{}
+	for _, r := range rows {
+		v := strings.TrimSpace(r["shortName"])
+		if _, dup := tagValues[v]; dup {
+			return "", fmt.Errorf("tag value %q is listed twice", v)
+		}
+		tagValues[v] = strings.TrimSpace(r["description"])
 	}
 	// Every value is checked before the key is made, so a bad one leaves
 	// nothing behind.
@@ -153,11 +195,10 @@ func (p tagsProvider) Detail(_ context.Context, _ string, path []string) (consol
 			{Label: "Description", Value: orDash(v.GetDescription())},
 			{Label: "Created", Value: v.GetCreateTime().AsTime().Local().Format("2006-01-02 15:04")},
 		}
-		return console.Detail{Summary: props[:2],
+		return console.Detail{Summary: []console.Property{props[0], props[1], {Label: "Description", Value: orDash(v.GetDescription()), Edit: "Edit"}},
 			Sections: []console.Section{{ID: "details", Label: "Details", Kind: console.KindProperties,
 				Groups: []console.PropertyGroup{{Heading: "Tag value", Properties: props}}}},
-			Edit: &console.EditForm{Label: "Edit description", Fields: []console.Field{
-				{Name: "description", Label: "Description", Type: "text", Default: v.GetDescription()}}},
+			Edit: tagDescriptionEdit(v.GetDescription(), ""),
 		}, nil
 	}
 	props := []console.Property{
@@ -179,15 +220,21 @@ func (p tagsProvider) Detail(_ context.Context, _ string, path []string) (consol
 		}
 	}
 	values.Total = len(values.Items)
-	return console.Detail{Summary: props[:2],
+	return console.Detail{Summary: []console.Property{props[0], props[1], {Label: "Description", Value: orDash(k.GetDescription()), Edit: "Edit"}},
 		Sections: []console.Section{
 			{ID: "values", Label: "Values", Listing: values},
 			{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Heading: "Tag key", Properties: props}}},
 		},
-		Edit: &console.EditForm{Label: "Edit description", Fields: []console.Field{
-			{Name: "description", Label: "Description", Type: "text", Default: k.GetDescription()}},
-			Note: "The short name and parent cannot change, as on Google."},
+		Edit: tagDescriptionEdit(k.GetDescription(), "The short name and parent cannot change, as on Google."),
 	}, nil
+}
+
+// tagDescriptionEdit is the edit panel Google's Edit next to a tag key's or
+// value's Description opens (#1865): Description, then Save.
+func tagDescriptionEdit(description, note string) *console.EditForm {
+	return &console.EditForm{Label: "Edit", Title: "Edit description", Submit: "Save", Inline: true, Note: note,
+		Fields: []console.Field{{Name: "description", Label: "Description", Type: "text", Default: description,
+			Help: "At most 256 characters."}}}
 }
 
 func (p tagsProvider) Edit(_ context.Context, _ string, path []string, values map[string]string) error {

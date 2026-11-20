@@ -791,6 +791,10 @@ type EditForm struct {
 	// opens Deploy worker pool revision, ending in Deploy (#1852).
 	Title  string `json:"title,omitempty"`
 	Submit string `json:"submit,omitempty"`
+	// Inline means the form opens only from the Edit beside a property
+	// that names it (Property.Edit), not from a button by the title:
+	// Google's tag key page has Edit next to Description (#1865).
+	Inline bool `json:"inline,omitempty"`
 }
 
 // Property is one label/value pair on a resource's summary.
@@ -804,6 +808,10 @@ type Property struct {
 	// copies it: Google's object page has Copy URL and Copy gsutil URI
 	// (#1843).
 	Copy string `json:"copy,omitempty"`
+	// Edit, when set, is the label of a button beside the value that opens
+	// the page's EditForm, as Google's tag key page has Edit next to
+	// Description (#1865).
+	Edit string `json:"edit,omitempty"`
 }
 
 // SectionKind says what a section actually holds.

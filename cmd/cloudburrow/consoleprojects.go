@@ -60,8 +60,8 @@ func (p projectsProvider) List(ctx context.Context, project string) (console.Lis
 		Noun:       "projects",
 		Items:      out,
 		Total:      len(out),
-		Note: "Projects are a local registry. Deleting one marks it DELETE_REQUESTED for 30 days, " +
-			"when Undelete project on its page restores it; then it is purged with what every service keeps under it (#1537).",
+		Note: "Projects are a local registry. A project shut down is pending deletion (DELETE_REQUESTED) for 30 days, " +
+			"when Restore on its page brings it back; then it is purged with what every service keeps under it (#1537).",
 	}, nil
 }
 
@@ -114,31 +114,14 @@ func (p projectsProvider) Detail(_ context.Context, _ string, path []string) (co
 		})
 	}
 
-	// What Resource Manager has and this does not. Said on the page rather than
-	// only in the docs: an operator looking for a folder or an IAM policy should
-	// find out here, not by concluding the console is broken.
-	scope := console.Section{
-		ID: "scope", Label: "Scope", Kind: console.KindText,
-		Text: "CloudBurrow keeps a local project registry, not Resource Manager.\n\n" +
-			"Present: project identifiers, display names, labels, and the state " +
-			"every service uses to keep one project's resources apart from " +
-			"another's.\n\n" +
-			"One fixed organization, " + resourcemanager.OrganizationName + ", and the " +
-			"folders under it (Resource hierarchy), which a project can be moved into " +
-			"with Move project.\n\n" +
-			"Tags (Tags screen; bound and inherited ones under Tags here) and " +
-			"liens: a lien restricting resourcemanager.projects.delete makes " +
-			"deleting this project fail, as on Google. Tags are stored, not enforced.\n\n" +
-			"IAM policies (IAM & Admin > IAM): stored and never enforced, and " +
-			"inherited by nothing (ADR-0006, #1368).\n\n" +
-			"Absent: billing, which returns UNIMPLEMENTED " +
-			"rather than a plausible answer.\n\n" +
-			"Deleting this project marks it DELETE_REQUESTED for 30 days, as Google " +
-			"does, and Undelete project restores it, whole, until then. Then it is " +
-			"purged (or at once with Purge project now): its IAM and org policies, " +
-			"tags, liens, API states and the resources every service that can reset " +
-			"one project keeps under it go too, and its ID is free (#1537).",
-	}
+	// What the local registry has and Google's does not, said on the
+	// Details tab: Google's project page has no tab for it (#1865), so it
+	// is that tab's note rather than a Scope tab of its own.
+	note := "A local registry: one fixed organization, " + resourcemanager.OrganizationName +
+		", and its folders. IAM policies, organization policies and tags are stored, not enforced (ADR-0006); " +
+		"a lien restricting resourcemanager.projects.delete makes shutting this project down fail, as on Google. " +
+		"Billing returns UNIMPLEMENTED. A project shut down is pending deletion for 30 days, when Restore brings it back whole; " +
+		"then it is purged (or at once with Purge project now) with what every service keeps under it, and its ID is free (#1537)."
 
 	return console.Detail{
 		Summary: []console.Property{
@@ -149,11 +132,10 @@ func (p projectsProvider) Detail(_ context.Context, _ string, path []string) (co
 			{Label: "Created", Value: created},
 		},
 		Sections: []console.Section{
-			{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: groups},
+			{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: groups, Note: note},
 			{ID: "org-policies", Label: "Organization policies", Listing: p.orgPolicies(path[0])},
 			tagSection(p.registry, projectTarget(project.ProjectID)),
 			lienSection(p.registry, project.ProjectID),
-			scope,
 		},
 		Edit: &console.EditForm{
 			Label: "Edit project",
@@ -257,15 +239,16 @@ func (p projectsProvider) Delete(ctx context.Context, project, name string) erro
 	return err
 }
 
-// projectUndelete is the Undelete project action on a deleted project.
+// projectUndelete is Restore on a project pending deletion, Google's
+// word for it under Manage resources (#1865).
 const projectUndelete = "undelete"
 
 // projectPurge is Purge project now on a deleted project (#1537): the purge
 // Google makes 30 days after the delete, now, as POST /admin/purge does.
 const projectPurge = "purge"
 
-// DetailActions implements console.PathActor: Undelete project, on a project
-// pending deletion only (#1216).
+// DetailActions implements console.PathActor: Restore, on a project
+// pending deletion only (#1216, #1865).
 func (p projectsProvider) DetailActions(_ context.Context, _ string, path []string) []console.Action {
 	if len(path) != 1 {
 		return nil
@@ -275,7 +258,7 @@ func (p projectsProvider) DetailActions(_ context.Context, _ string, path []stri
 		return nil
 	}
 	if project.State == resourcemanager.StateDeleteRequested {
-		return []console.Action{{ID: projectUndelete, Label: "Undelete project"},
+		return []console.Action{{ID: projectUndelete, Label: "Restore"},
 			{ID: projectPurge, Label: "Purge project now", Destructive: true,
 				Confirm: "the project and everything kept under it in every service, which Google drops 30 days after the delete; its ID is then free"}}
 	}

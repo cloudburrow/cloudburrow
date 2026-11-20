@@ -58,7 +58,7 @@ func consoleProjects(t *testing.T, addr, project string) []string {
 // The v3 Projects API (#298) through cloud.google.com/go/resourcemanager/
 // apiv3 against the CI instance: create, get, search, update labels,
 // delete and undelete (#1216), with the console's project list agreeing in
-// both directions, and the console's Undelete project.
+// both directions, and the console's Restore (#1865).
 func TestResourceManagerV3Projects(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
@@ -166,7 +166,7 @@ func TestResourceManagerV3Projects(t *testing.T) {
 		t.Errorf("the console lists the undeleted project %s as %q, want ACTIVE", id, st)
 	}
 
-	// From the console: Delete, then Undelete project on its page.
+	// From the console: Delete, then Restore on its page.
 	if code, body := consoleDo(t, console, http.MethodDelete, "/api/resources/projects?name="+cid+"&project="+h.Project(), ""); code != http.StatusOK {
 		t.Fatalf("console delete project = %d: %s", code, body)
 	}
@@ -175,7 +175,7 @@ func TestResourceManagerV3Projects(t *testing.T) {
 	}
 	if code, body := consoleDo(t, console, http.MethodPost, "/api/actions/projects?project="+h.Project(),
 		fmt.Sprintf(`{"Path":[%q],"Action":"undelete"}`, cid)); code != http.StatusOK {
-		t.Fatalf("console Undelete project = %d: %s", code, body)
+		t.Fatalf("console Restore = %d: %s", code, body)
 	}
 	if p, err := c.GetProject(ctx, &rmpb.GetProjectRequest{Name: "projects/" + cid}); err != nil || p.GetState() != rmpb.Project_ACTIVE {
 		t.Errorf("GetProject after the console's undelete = %v, %v; want ACTIVE", p, err)
