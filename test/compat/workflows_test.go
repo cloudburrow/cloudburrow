@@ -132,7 +132,7 @@ func errorTags(t *testing.T, ex *executionspb.Execution) (map[string]any, string
 	return p, string(tags)
 }
 
-// (No covers line yet: not run against an instance, #1986.)
+// covers: google.cloud.workflows.v1.Workflows/CreateWorkflow, google.cloud.workflows.v1.Workflows/GetWorkflow, google.cloud.workflows.v1.Workflows/ListWorkflows, google.cloud.workflows.v1.Workflows/UpdateWorkflow, google.cloud.workflows.v1.Workflows/ListWorkflowRevisions, google.cloud.workflows.v1.Workflows/DeleteWorkflow, google.cloud.workflows.executions.v1.Executions/CreateExecution, google.cloud.workflows.executions.v1.Executions/GetExecution, google.cloud.workflows.executions.v1.Executions/ListExecutions
 //
 // TestWorkflowsLifecycleTryRetryParallelAndLimits (#1986), with the official
 // workflows and executions clients: a workflow deploys, lists, gets, runs
@@ -141,8 +141,9 @@ func errorTags(t *testing.T, ex *executionspb.Execution) (map[string]any, string
 // test that answers 503 twice, http.default_retry retries and succeeds; a
 // 404 is caught by try/except as an HttpError whose code is 404. Parallel
 // branches update a shared variable. An http.get to a host outside the
-// machine is refused before anything is sent, as ConnectionFailedError
-// naming why. A source over 128 KB and a call to an undefined subworkflow
+// machine, and one to a googleapis.com API this instance does not serve,
+// are refused before anything is sent, as ConnectionFailedError naming
+// why. A source over 128 KB and a call to an undefined subworkflow
 // are refused at deployment; a loop past 100,000 steps fails with
 // ResourceLimitError; an unhandled raise fails the execution with its
 // payload and a stack trace.
@@ -206,6 +207,18 @@ func TestWorkflowsLifecycleTryRetryParallelAndLimits(t *testing.T) {
                 assign:
                   - outsideTags: ${e.tags}
                   - outsideMessage: ${e.message}
+    - unserved:
+        try:
+          call: http.get
+          args:
+            url: https://translate.googleapis.com/language/translate/v2/languages
+        except:
+          as: e
+          steps:
+            - refusedUnserved:
+                assign:
+                  - unservedTags: ${e.tags}
+                  - unservedMessage: ${e.message}
     - sum:
         parallel:
           shared: [total]
@@ -224,6 +237,8 @@ func TestWorkflowsLifecycleTryRetryParallelAndLimits(t *testing.T) {
           missingTags: ${missingTags}
           outsideTags: ${outsideTags}
           outsideMessage: ${outsideMessage}
+          unservedTags: ${unservedTags}
+          unservedMessage: ${unservedMessage}
           total: ${total}
 `
 	id := fmt.Sprintf("compat-wf-%d", n)
@@ -256,13 +271,15 @@ func TestWorkflowsLifecycleTryRetryParallelAndLimits(t *testing.T) {
 		t.Fatalf("execution %v: %v", ex.GetState(), ex.GetError())
 	}
 	var res struct {
-		Greeting       string
-		Flaky          map[string]any
-		MissingCode    float64
-		MissingTags    []string
-		OutsideTags    []string
-		OutsideMessage string
-		Total          float64
+		Greeting        string
+		Flaky           map[string]any
+		MissingCode     float64
+		MissingTags     []string
+		OutsideTags     []string
+		OutsideMessage  string
+		UnservedTags    []string
+		UnservedMessage string
+		Total           float64
 	}
 	if err := json.Unmarshal([]byte(ex.GetResult()), &res); err != nil {
 		t.Fatalf("result %q: %v", ex.GetResult(), err)
@@ -273,6 +290,9 @@ func TestWorkflowsLifecycleTryRetryParallelAndLimits(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(res.OutsideTags, ","), "ConnectionFailedError") || !strings.Contains(res.OutsideMessage, "outside this CloudBurrow instance") {
 		t.Errorf("an outside URL: tags %v, %q; want ConnectionFailedError naming the refusal", res.OutsideTags, res.OutsideMessage)
+	}
+	if !strings.Contains(strings.Join(res.UnservedTags, ","), "ConnectionFailedError") || !strings.Contains(res.UnservedMessage, "translate.googleapis.com is not served by this CloudBurrow instance") {
+		t.Errorf("an unserved googleapis.com URL: tags %v, %q; want ConnectionFailedError naming the refusal", res.UnservedTags, res.UnservedMessage)
 	}
 	if ex.GetWorkflowRevisionId() != wf.GetRevisionId() || ex.GetDuration() == nil {
 		t.Errorf("execution revision %q duration %v", ex.GetWorkflowRevisionId(), ex.GetDuration())
@@ -357,9 +377,21 @@ func TestWorkflowsLifecycleTryRetryParallelAndLimits(t *testing.T) {
 	if _, tags := errorTags(t, lx); !strings.Contains(tags, "ResourceLimitError") {
 		t.Errorf("an endless loop failed with %s; want ResourceLimitError", lx.GetError().GetPayload())
 	}
+
+	// DeleteWorkflow's operation completes, and the workflow is gone.
+	dop, err := w.wf.DeleteWorkflow(ctx, &workflowspb.DeleteWorkflowRequest{Name: loop.GetName()})
+	if err != nil {
+		t.Fatalf("DeleteWorkflow: %v", err)
+	}
+	if err := dop.Wait(ctx); err != nil {
+		t.Fatalf("DeleteWorkflow operation: %v", err)
+	}
+	if _, err := w.wf.GetWorkflow(ctx, &workflowspb.GetWorkflowRequest{Name: loop.GetName()}); status.Code(err) != codes.NotFound {
+		t.Errorf("GetWorkflow after DeleteWorkflow: %v; want NOT_FOUND", err)
+	}
 }
 
-// (No covers line yet: not run against an instance, #1986.)
+// covers: google.cloud.workflows.executions.v1.Executions/CreateExecution, google.cloud.workflows.executions.v1.Executions/GetExecution, google.cloud.workflows.executions.v1.Executions/CancelExecution
 //
 // TestWorkflowsCallbackAndCancel (#1986): a workflow creates a callback
 // endpoint and awaits it; the callback lists through the official REST
@@ -431,6 +463,8 @@ func TestWorkflowsCallbackAndCancel(t *testing.T) {
 	}
 }
 
+// covers: google.cloud.workflows.v1.Workflows/CreateWorkflow, google.cloud.workflows.executions.v1.Executions/CreateExecution, google.cloud.workflows.executions.v1.Executions/GetExecution
+//
 // TestWorkflowsCallRunStorageAndPubSub (#1986), in the run shard: a
 // workflow calls a Cloud Run service of this instance with http.post and
 // an OIDC token, writes the service's response to Cloud Storage with the

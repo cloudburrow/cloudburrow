@@ -24,7 +24,7 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// (No covers line yet: not run against an instance, #1986.)
+// covers: google.cloud.workflows.v1.Workflows/GetWorkflow
 //
 // TestGcloudWorkflows (#1986): `gcloud workflows deploy` with a source
 // file, `gcloud workflows run` with --data, which waits for the result,
@@ -58,8 +58,14 @@ func TestGcloudWorkflows(t *testing.T) {
 		t.Fatalf("the workflow gcloud deployed: %v %v", got, err)
 	}
 	out := run("run", id, "--data", `{"who":"gcloud"}`, "--format", "json")
+	// gcloud writes its "Waiting for execution" progress to stderr, which
+	// run combines with the JSON on stdout.
+	doc := out
+	if i := strings.Index(doc, "{"); i >= 0 {
+		doc = doc[i:]
+	}
 	var ex struct{ Name, State, Result string }
-	if err := json.Unmarshal([]byte(out), &ex); err != nil {
+	if err := json.Unmarshal([]byte(doc), &ex); err != nil {
 		t.Fatalf("gcloud workflows run: %v\n%s", err, out)
 	}
 	if ex.State != "SUCCEEDED" || ex.Result != `"hi gcloud"` {
@@ -72,7 +78,7 @@ func TestGcloudWorkflows(t *testing.T) {
 	}
 }
 
-// (No covers line yet: not run against an instance, #1986.)
+// covers: google.cloud.workflows.v1.Workflows/GetWorkflow
 //
 // TestTerraformWorkflowsWorkflow (#1986): Terraform's
 // google_workflows_workflow creates a workflow with a description, labels,
@@ -128,6 +134,8 @@ resource "google_workflows_workflow" "w" {
 	}
 }
 
+// covers: google.cloud.workflows.v1.Workflows/GetWorkflow, google.cloud.workflows.executions.v1.Executions/ListExecutions, google.cloud.workflows.executions.v1.Executions/CreateExecution, google.cloud.workflows.executions.v1.Executions/GetExecution
+//
 // TestConsoleWorkflows (#1986): the console's Workflows page lists a
 // workflow made by Create workflow, which the official client reads back;
 // Execute on its page runs it, the Executions tab lists the execution, and
@@ -211,7 +219,7 @@ func TestConsoleWorkflows(t *testing.T) {
 	}
 }
 
-// (No covers line yet: not run against an instance, #1986.)
+// covers: google.cloud.eventarc.v1.Eventarc/CreateTrigger, google.cloud.workflows.executions.v1.Executions/ListExecutions
 //
 // TestEventarcTriggerStartsAWorkflow (#1986), in the run shard: an
 // Eventarc messagePublished trigger whose destination is a workflow starts

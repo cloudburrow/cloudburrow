@@ -85,8 +85,9 @@ pin in `dependencies.json` moves without them, and the compat test
 `TestPinnedToolsGainNoUnmappedEndpoint` reads the real provider schema and gcloud's
 `api_endpoint_overrides` section and fails when either has a setting the inventory lacks.
 `TestTerraformRefusesAnUnservedResourceLocally` and `TestGcloudRefusesAnUnservedAPILocally` apply
-a `google_workflows_workflow` and run `gcloud workflows list` with egress to Google blocked, and
-see the refusal. `TestEnvRefusesAnUnservedGcloudAPILocally` runs `gcloud workflows list` in a shell
+a `google_dns_managed_zone` and run `gcloud dns managed-zones list` (Cloud DNS, which no instance
+serves; Workflows until #1986) with egress to Google blocked, and see the refusal.
+`TestEnvRefusesAnUnservedGcloudAPILocally` runs `gcloud dns managed-zones list` in a shell
 that only ran `eval "$(cloudburrow env)"` (a fresh gcloud configuration, credentials disabled),
 behind a proxy that fails the test on any request off the machine, and sees the refusal.
 

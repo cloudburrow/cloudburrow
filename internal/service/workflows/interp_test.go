@@ -272,6 +272,16 @@ func TestHTTPErrorAndEgress(t *testing.T) {
 	if !errors.As(err, &we) || we.val.(map[string]any)["code"] != int64(404) {
 		t.Fatalf("served connector reached the local server? %v", err)
 	}
+	// A local server's redirect off the machine is refused at the dial,
+	// before a connection is opened: 192.0.2.1 is TEST-NET-1 (RFC 5737).
+	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "http://192.0.2.1/escape", http.StatusFound)
+	}))
+	defer redirect.Close()
+	_, err = runSrc(t, "- g:\n    call: http.get\n    args:\n      url: "+redirect.URL+"\n", "", nil)
+	if err == nil || !strings.Contains(err.Error(), "refused to connect to 192.0.2.1") {
+		t.Fatalf("redirect off the machine: %v", err)
+	}
 }
 
 func TestParallelAndShared(t *testing.T) {
