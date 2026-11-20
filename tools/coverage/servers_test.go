@@ -131,6 +131,7 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	runSrv.Executions().Register(srv)
 	runSrv.Tasks().Register(srv)
 	runSrv.Builds(nil, nil).Register(srv)
+	runSrv.Builds(nil, nil).SourceUpload().Register(srv) // #1958
 	runSrv.ArtifactRegistry().Register(srv)
 	runSrv.CloudBuild().Register(srv)
 	runSrv.SecureSourceManager(func() string { return "" }).Register(srv)
