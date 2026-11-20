@@ -101,6 +101,12 @@ func TestEventarcAdvancedPipelineStartsAWorkflow(t *testing.T) {
 		t.Errorf("GetPipeline = %v, %v", got, err)
 	}
 
+	// The payload is reserved in a match ("Use Common Expression Language":
+	// message.data and message.data_base64 can't be used in expressions).
+	if _, err := ec.CreateEnrollment(ctx, &eventarcpb.CreateEnrollmentRequest{Parent: parent, EnrollmentId: fmt.Sprintf("by-data-%d", n),
+		Enrollment: &eventarcpb.Enrollment{CelMatch: `message.data.order == 42`, MessageBus: bus.GetName(), Destination: pl.GetName()}}); status.Code(err) != codes.InvalidArgument || !strings.Contains(err.Error(), "cel_match") {
+		t.Errorf("an enrollment matching on message.data = %v; want INVALID_ARGUMENT naming cel_match", err)
+	}
 	enOp, err := ec.CreateEnrollment(ctx, &eventarcpb.CreateEnrollmentRequest{Parent: parent, EnrollmentId: fmt.Sprintf("orders-%d", n),
 		Enrollment: &eventarcpb.Enrollment{CelMatch: `message.type == "com.example.order.created" && message.source.startsWith("//shop")`,
 			MessageBus: bus.GetName(), Destination: pl.GetName()}})

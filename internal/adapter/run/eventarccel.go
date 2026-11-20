@@ -21,6 +21,8 @@ import (
 	"time"
 
 	"cel.dev/cel-go/cel"
+	celast "cel.dev/cel-go/common/ast"
+	"cel.dev/cel-go/common/operators"
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/common/types/ref"
 	"cel.dev/cel-go/common/types/traits"
@@ -213,10 +215,49 @@ func eaCompileMatch(expr string) (cel.Program, error) {
 	if iss.Err() != nil {
 		return nil, iss.Err()
 	}
+	if name := eaReservedRef(ast.NativeRep().Expr()); name != "" {
+		return nil, fmt.Errorf("%s is a reserved variable and can't be used in an enrollment's expression: "+
+			"message.data and message.data_base64 are reserved, so an enrollment matches only on the event's context attributes", name)
+	}
 	if ast.OutputType() != cel.BoolType && ast.OutputType() != cel.DynType {
 		return nil, fmt.Errorf("the expression's type is %s, not bool", ast.OutputType())
 	}
 	return env.Program(ast)
+}
+
+// eaReservedRef names the first use of message.data or message.data_base64
+// in a match ("" when none). Google's "Use Common Expression Language" page:
+// "Both message.data and message.data_base64 are reserved variables and
+// can't be used in expressions"; an enrollment can't match on the payload.
+// It finds message.data, has(message.data) and message["data"].
+func eaReservedRef(root celast.Expr) string {
+	reserved := func(f string) bool { return f == "data" || f == "data_base64" }
+	isMessage := func(e celast.Expr) bool {
+		return e.Kind() == celast.IdentKind && e.AsIdent() == "message"
+	}
+	found := ""
+	celast.PreOrderVisit(root, celast.NewExprVisitor(func(e celast.Expr) {
+		if found != "" {
+			return
+		}
+		switch e.Kind() {
+		case celast.SelectKind:
+			if s := e.AsSelect(); isMessage(s.Operand()) && reserved(s.FieldName()) {
+				found = "message." + s.FieldName()
+			}
+		case celast.CallKind:
+			c := e.AsCall()
+			if c.FunctionName() != operators.Index {
+				return
+			}
+			if args := c.Args(); len(args) == 2 && isMessage(args[0]) && args[1].Kind() == celast.LiteralKind {
+				if f, ok := args[1].AsLiteral().Value().(string); ok && reserved(f) {
+					found = "message." + f
+				}
+			}
+		}
+	}))
+	return found
 }
 
 // eaCompileTemplate compiles a transformation or binding template.

@@ -2173,28 +2173,28 @@
         "method": "google.cloud.eventarc.publishing.v1.Publisher/PublishChannelConnectionEvents",
         "status": "Verified",
         "tests": [
-          "test/compat/eventarcadvanced_test.go:447 TestEventarcChannelsToCloudRun"
+          "test/compat/eventarcadvanced_test.go:465 TestEventarcChannelsToCloudRun"
         ]
       },
       {
         "method": "google.cloud.eventarc.publishing.v1.Publisher/PublishEvents",
         "status": "Verified",
         "tests": [
-          "test/compat/eventarcadvanced_test.go:447 TestEventarcChannelsToCloudRun"
+          "test/compat/eventarcadvanced_test.go:465 TestEventarcChannelsToCloudRun"
         ]
       },
       {
         "method": "google.cloud.eventarc.v1.Eventarc/CreateChannel",
         "status": "Verified",
         "tests": [
-          "test/compat/eventarcadvanced_test.go:447 TestEventarcChannelsToCloudRun"
+          "test/compat/eventarcadvanced_test.go:465 TestEventarcChannelsToCloudRun"
         ]
       },
       {
         "method": "google.cloud.eventarc.v1.Eventarc/CreateChannelConnection",
         "status": "Verified",
         "tests": [
-          "test/compat/eventarcadvanced_test.go:447 TestEventarcChannelsToCloudRun"
+          "test/compat/eventarcadvanced_test.go:465 TestEventarcChannelsToCloudRun"
         ]
       },
       {
@@ -2250,14 +2250,14 @@
         "method": "google.cloud.eventarc.v1.Eventarc/DeleteChannel",
         "status": "Verified",
         "tests": [
-          "test/compat/eventarcadvanced_test.go:447 TestEventarcChannelsToCloudRun"
+          "test/compat/eventarcadvanced_test.go:465 TestEventarcChannelsToCloudRun"
         ]
       },
       {
         "method": "google.cloud.eventarc.v1.Eventarc/DeleteChannelConnection",
         "status": "Verified",
         "tests": [
-          "test/compat/eventarcadvanced_test.go:447 TestEventarcChannelsToCloudRun"
+          "test/compat/eventarcadvanced_test.go:465 TestEventarcChannelsToCloudRun"
         ]
       },
       {
@@ -2304,14 +2304,14 @@
         "method": "google.cloud.eventarc.v1.Eventarc/GetChannel",
         "status": "Verified",
         "tests": [
-          "test/compat/eventarcadvanced_test.go:447 TestEventarcChannelsToCloudRun"
+          "test/compat/eventarcadvanced_test.go:465 TestEventarcChannelsToCloudRun"
         ]
       },
       {
         "method": "google.cloud.eventarc.v1.Eventarc/GetChannelConnection",
         "status": "Verified",
         "tests": [
-          "test/compat/eventarcadvanced_test.go:447 TestEventarcChannelsToCloudRun"
+          "test/compat/eventarcadvanced_test.go:465 TestEventarcChannelsToCloudRun"
         ]
       },
       {
@@ -2332,7 +2332,7 @@
         "method": "google.cloud.eventarc.v1.Eventarc/GetGoogleChannelConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/eventarcadvanced_test.go:447 TestEventarcChannelsToCloudRun"
+          "test/compat/eventarcadvanced_test.go:465 TestEventarcChannelsToCloudRun"
         ]
       },
       {
@@ -2374,14 +2374,14 @@
         "method": "google.cloud.eventarc.v1.Eventarc/ListChannelConnections",
         "status": "Verified",
         "tests": [
-          "test/compat/eventarcadvanced_test.go:447 TestEventarcChannelsToCloudRun"
+          "test/compat/eventarcadvanced_test.go:465 TestEventarcChannelsToCloudRun"
         ]
       },
       {
         "method": "google.cloud.eventarc.v1.Eventarc/ListChannels",
         "status": "Verified",
         "tests": [
-          "test/compat/eventarcadvanced_test.go:447 TestEventarcChannelsToCloudRun"
+          "test/compat/eventarcadvanced_test.go:465 TestEventarcChannelsToCloudRun"
         ]
       },
       {
@@ -2441,7 +2441,7 @@
         "method": "google.cloud.eventarc.v1.Eventarc/UpdateChannel",
         "status": "Verified",
         "tests": [
-          "test/compat/eventarcadvanced_test.go:447 TestEventarcChannelsToCloudRun"
+          "test/compat/eventarcadvanced_test.go:465 TestEventarcChannelsToCloudRun"
         ]
       },
       {
@@ -2462,7 +2462,7 @@
         "method": "google.cloud.eventarc.v1.Eventarc/UpdateGoogleChannelConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/eventarcadvanced_test.go:447 TestEventarcChannelsToCloudRun"
+          "test/compat/eventarcadvanced_test.go:465 TestEventarcChannelsToCloudRun"
         ]
       },
       {

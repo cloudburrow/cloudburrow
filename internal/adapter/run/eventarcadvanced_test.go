@@ -13,6 +13,8 @@ import (
 	eventarcpb "cloud.google.com/go/eventarc/apiv1/eventarcpb"
 	publishingpb "cloud.google.com/go/eventarc/publishing/apiv1/publishingpb"
 	"github.com/linkedin/goavro/v2"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -60,7 +62,16 @@ func TestBusEventFlowsThroughEnrollmentAndPipeline(t *testing.T) {
 	other.Name = loc + "/pipelines/other"
 	eaPut(t, eaAdv.pipelines, other)
 	en := &eventarcpb.Enrollment{Name: loc + "/enrollments/e", MessageBus: bus, Destination: p.Name,
-		CelMatch: `message.type == "order.created" && message.data.total > 10`}
+		CelMatch: `message.type == "order.created" && message.region == "eu"`}
+	// Google's CEL page: message.data and message.data_base64 are reserved
+	// in an enrollment's match, which reads only the context attributes.
+	for _, m := range []string{`message.data.total > 10`, `has(message.data_base64)`, `message["data"] != null`} {
+		bad := proto.Clone(en).(*eventarcpb.Enrollment)
+		bad.CelMatch = m
+		if err := eaCheckEnrollment(bad); status.Code(err) != codes.InvalidArgument || !strings.Contains(err.Error(), "enrollment.cel_match") || !strings.Contains(err.Error(), "reserved") {
+			t.Errorf("cel_match %s: err = %v; want INVALID_ARGUMENT naming enrollment.cel_match", m, err)
+		}
+	}
 	if err := eaCheckEnrollment(en); err != nil {
 		t.Fatalf("check the enrollment: %v", err)
 	}
@@ -91,9 +102,9 @@ func TestBusEventFlowsThroughEnrollmentAndPipeline(t *testing.T) {
 		t.Errorf("a second delivery: %v %s", g.header, g.body)
 	case <-time.After(300 * time.Millisecond):
 	}
-	// A total of 5 does not match.
+	// An event from another region does not match.
 	_, _ = pub.Publish(context.Background(), &publishingpb.PublishRequest{MessageBus: bus, Format: &publishingpb.PublishRequest_JsonMessage{
-		JsonMessage: `{"specversion":"1.0","id":"e2","source":"//shop","type":"order.created","data":{"total":5}}`}})
+		JsonMessage: `{"specversion":"1.0","id":"e2","source":"//shop","type":"order.created","region":"us","data":{"total":42}}`}})
 	select {
 	case g := <-got:
 		t.Errorf("an unmatched event was delivered: %v", g.header)
@@ -373,7 +384,16 @@ func TestTransformationFunctions(t *testing.T) {
 	if _, err := eaCompileMatch(`message.type ==`); err == nil {
 		t.Error("a bad CEL match compiled")
 	}
-	if ok, err := eaEvalMatch(`message.data.a.b == 1 && message.id == "1"`, msg); !ok || err != nil {
+	if ok, err := eaEvalMatch(`message.id == "1"`, msg); !ok || err != nil {
 		t.Errorf("match = %v, %v", ok, err)
+	}
+	// Transformations read message.data; a match can't.
+	for _, m := range []string{`message.data.a.b == 1`, `message['data_base64'] != ""`, `has(message.data)`, `message.type == "t" || message.data.x == 1`} {
+		if _, err := eaCompileMatch(m); err == nil || !strings.Contains(err.Error(), "reserved") {
+			t.Errorf("match %s compiled: %v", m, err)
+		}
+	}
+	if _, err := eaCompileMatch(`message.datacontenttype == "application/json" && message.dataschema != ""`); err != nil {
+		t.Errorf("datacontenttype/dataschema refused: %v", err)
 	}
 }
