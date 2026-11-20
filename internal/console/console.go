@@ -319,6 +319,13 @@ type Provider interface {
 // accept it — a form offering something the API refuses is the working-looking
 // control the parity specification forbids.
 // Link is a document a Field names: its label and its https URL.
+// ConditionalOptions are a select's options while When holds
+// (Field.OptionsWhen).
+type ConditionalOptions struct {
+	When    string   `json:"when"`
+	Options []string `json:"options"`
+}
+
 type Link struct {
 	Label string `json:"label"`
 	URL   string `json:"url"`
@@ -374,6 +381,12 @@ type Field struct {
 	// "PostgreSQL 17" (#1860), and BigQuery's Region list shows
 	// "us-central1 (Iowa)" and submits us-central1 (#1861).
 	OptionLabels map[string]string `json:"optionLabels,omitempty"`
+	// OptionsWhen, on a "select", are the options it offers while other
+	// fields hold values, each condition in ShowWhen's form ("region=a|b",
+	// joined by "&"); the first that holds wins, else Options. A choice no
+	// longer offered moves to the first that is. Create private pool's
+	// Series and Machine type offer the chosen region's (#2073).
+	OptionsWhen []ConditionalOptions `json:"optionsWhen,omitempty"`
 	// Follows and Templates, on a "sourcefiles" field (Google's inline
 	// source editor, #1852), name the select field whose choice picks the
 	// files the editor starts with, and those files by choice: a function's

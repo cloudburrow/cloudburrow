@@ -683,11 +683,13 @@ func poolEtag(p *cbpb.WorkerPool) string {
 	return fmt.Sprintf("W/\"%x\"", resource.ProjectNumber(string(raw)))
 }
 
-func validatePool(p *cbpb.WorkerPool) error {
+// validatePool checks a pool in a region: its machine type is one the
+// region offers (cloudbuildpoolmachines.go, #2073).
+func validatePool(region string, p *cbpb.WorkerPool) error {
 	if p.GetPrivatePoolV1Config().GetPrivateServiceConnect() != nil {
 		return apierror.Unimplemented("WorkerPool field privatePoolV1Config.privateServiceConnect is not supported: it attaches a VPC network, which builds here do not use")
 	}
-	return nil
+	return checkPoolMachineType(region, p.GetPrivatePoolV1Config().GetWorkerConfig().GetMachineType())
 }
 
 // CreateWorkerPool stores a pool, RUNNING at once, and returns its finished
@@ -704,7 +706,7 @@ func (c *CloudBuildServer) CreateWorkerPool(_ context.Context, req *cbpb.CreateW
 	if in == nil {
 		in = &cbpb.WorkerPool{}
 	}
-	if err := validatePool(in); err != nil {
+	if err := validatePool(location, in); err != nil {
 		return nil, err
 	}
 	p := proto.Clone(in).(*cbpb.WorkerPool)
@@ -791,7 +793,8 @@ func (c *CloudBuildServer) UpdateWorkerPool(_ context.Context, req *cbpb.UpdateW
 	next := proto.Clone(p).(*cbpb.WorkerPool)
 	err := applyMask(next, in, req.GetUpdateMask(), poolOutputOnly)
 	if err == nil {
-		err = validatePool(next)
+		_, region, _ := poolLocation(strings.SplitN(next.GetName(), "/workerPools/", 2)[0])
+		err = validatePool(region, next)
 	}
 	if err != nil {
 		triggerStore.mu.Unlock()

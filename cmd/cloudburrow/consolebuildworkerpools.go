@@ -90,8 +90,14 @@ func (p buildWorkerPoolsProvider) Detail(ctx context.Context, project string, pa
 func editPoolForm(w *cbpb.WorkerPool) *console.EditForm {
 	cfg := w.GetPrivatePoolV1Config()
 	wc := cfg.GetWorkerConfig()
-	series, _, _ := strings.Cut(wc.GetMachineType(), "-")
-	if poolMachineTypes[series] == nil {
+	// The pool's region is fixed: Series and Machine type offer its
+	// machine types (#2073).
+	region := ""
+	if parts := strings.Split(w.GetName(), "/"); len(parts) == 6 {
+		region = parts[3]
+	}
+	series, _, _ := strings.Cut(orText(wc.GetMachineType(), runadapter.PoolDefaultMachineType), "-")
+	if !slices.Contains(runadapter.PoolSeries, series) {
 		series = "e2"
 	}
 	disk := ""
@@ -116,8 +122,16 @@ func editPoolForm(w *cbpb.WorkerPool) *console.EditForm {
 		case f.Name == "name" || f.Name == "region" || f.Section == "Network type" && f.Name != "externalIPs":
 			continue
 		case f.Name == "series":
-			f.Default = series
+			f.Default, f.Options, f.OptionsWhen = series, runadapter.PoolRegionSeries(region), nil
+			if !slices.Contains(f.Options, series) {
+				f.Options = append(f.Options, series)
+			}
 		case strings.HasPrefix(f.Name, "machineType-"):
+			f.Options = runadapter.PoolMachineTypes(region, strings.TrimPrefix(f.Name, "machineType-"))
+			f.Default, f.OptionsWhen = poolDefaultMachineType(f.Options), nil
+			if len(f.Options) == 0 {
+				continue
+			}
 			if f.Name == "machineType-"+series && wc.GetMachineType() != "" {
 				f.Default = wc.GetMachineType()
 				if !slices.Contains(f.Options, f.Default) {

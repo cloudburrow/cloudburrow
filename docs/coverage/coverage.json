@@ -1429,6 +1429,7 @@
           "test/compat/cloudbuildcreate_test.go:45 TestCloudBuildCreateBuild",
           "test/compat/cloudbuilddefaultlogs_test.go:132 TestGcloudBuildsSubmitDefaultLogsBucket",
           "test/compat/cloudbuilddefaultlogs_test.go:47 TestCloudBuildDefaultLogsBucket",
+          "test/compat/cloudbuilddeps_test.go:41 TestCloudBuildGitDependencies",
           "test/compat/cloudbuildsecrets_test.go:231 TestGcloudBuildsSecretsAndScript",
           "test/compat/cloudbuildsecrets_test.go:87 TestCloudBuildSecretsScriptAndAllowFailure",
           "test/compat/cloudbuildserviceaccount_test.go:92 TestCloudBuildServiceAccount",
@@ -1457,6 +1458,7 @@
         "method": "google.devtools.cloudbuild.v1.CloudBuild/CreateWorkerPool",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudbuilddeps_test.go:182 TestCloudBuildWorkerPoolMachineTypes",
           "test/compat/cloudbuildtriggers_test.go:75 TestCloudBuildTriggersAndWorkerPools",
           "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
         ]
@@ -1490,6 +1492,7 @@
           "test/compat/cloudbuildcreate_test.go:182 TestGcloudBuildsSubmit",
           "test/compat/cloudbuildcreate_test.go:45 TestCloudBuildCreateBuild",
           "test/compat/cloudbuilddefaultlogs_test.go:132 TestGcloudBuildsSubmitDefaultLogsBucket",
+          "test/compat/cloudbuilddeps_test.go:41 TestCloudBuildGitDependencies",
           "test/compat/cloudbuildsecrets_test.go:231 TestGcloudBuildsSecretsAndScript",
           "test/compat/cloudbuildsecrets_test.go:87 TestCloudBuildSecretsScriptAndAllowFailure",
           "test/compat/cloudbuildserviceaccount_test.go:92 TestCloudBuildServiceAccount",
@@ -1592,6 +1595,7 @@
         "method": "google.devtools.cloudbuild.v1.CloudBuild/UpdateWorkerPool",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudbuilddeps_test.go:182 TestCloudBuildWorkerPoolMachineTypes",
           "test/compat/cloudbuildtriggers_test.go:75 TestCloudBuildTriggersAndWorkerPools",
           "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
         ]

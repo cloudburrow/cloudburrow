@@ -492,15 +492,6 @@ func unsupportedCreate(b *cbpb.Build) error {
 	}
 	add(b.GetArtifacts() != nil, "artifacts")
 	add(b.GetGitConfig() != nil, "gitConfig")
-	// A git source dependency is fetched into the workspace by Google's
-	// workers before the steps run; the local builder fetches none, so it
-	// is refused rather than ignored. An empty dependency is a no-op.
-	for _, d := range b.GetDependencies() {
-		if d.GetGitSource() != nil {
-			add(true, "dependencies.gitSource")
-			break
-		}
-	}
 	if o := b.GetOptions(); o != nil {
 		add(len(o.GetSourceProvenanceHash()) > 0, "options.sourceProvenanceHash")
 		add(o.GetMachineType() != cbpb.BuildOptions_UNSPECIFIED, "options.machineType")
@@ -596,6 +587,12 @@ func (c *CloudBuildServer) createBuild(ctx context.Context, project, location st
 		return nil, err
 	}
 	pool, err := buildPool(location, in.GetOptions())
+	if err != nil {
+		return nil, err
+	}
+	// The dependencies are cloned from this instance's repositories
+	// (cloudbuilddeps.go, #2074).
+	gitDeps, noFetch, err := planDependencies(in.GetDependencies())
 	if err != nil {
 		return nil, err
 	}
@@ -746,8 +743,26 @@ func (c *CloudBuildServer) createBuild(ctx context.Context, project, location st
 				"an arbitrary step needs the host's Docker, which runs it")
 		}
 	}
+	if len(gitDeps) > 0 && runner == nil {
+		// The dependencies are cloned into a /workspace, which a docker
+		// build or pack step then builds.
+		var ok bool
+		if runner, ok = c.builds.builder.(StepRunner); !ok {
+			return nil, apierror.Unimplemented("this instance's builder has no /workspace to clone the build's dependencies into")
+		}
+	}
+	// "Once dependencies are specified, only those listed in dependencies
+	// are cloned": a triggered build's repository is not; {empty: true}
+	// fetches nothing, "ignoring the default source as well".
+	archive, runSrc := trig.repoArchive(), src.GetStorageSource()
+	if len(in.GetDependencies()) > 0 {
+		archive = nil
+	}
+	if noFetch {
+		archive, runSrc, gitDeps = nil, nil, nil
+	}
 	for i, p := range plan {
-		if (p.kind == stepDockerBuild || p.kind == stepPack) && src == nil && trig.repoArchive() == nil && !containers {
+		if (p.kind == stepDockerBuild || p.kind == stepPack) && src == nil && trig.repoArchive() == nil && len(gitDeps) == 0 && !containers {
 			return nil, apierror.InvalidArgument("invalid build: step %d builds /workspace, but the build has no source", i)
 		}
 	}
@@ -827,8 +842,8 @@ func (c *CloudBuildServer) createBuild(ctx context.Context, project, location st
 	op := s.ops.CreateNamed(opName, b.Name)
 	_ = s.ops.SetMetadata(op.Name, &cbpb.BuildOperationMetadata{Build: queued})
 
-	r := &buildRun{c: c, name: b.Name, op: op.Name, project: project, plan: plan, deps: deps, src: src.GetStorageSource(),
-		archive: trig.repoArchive(), runner: runner, logsBucket: b.LogsBucket, createBucket: createBucket, secretDefs: secretDefs}
+	r := &buildRun{c: c, name: b.Name, op: op.Name, project: project, plan: plan, deps: deps, src: runSrc,
+		archive: archive, gitDeps: gitDeps, runner: runner, logsBucket: b.LogsBucket, createBucket: createBucket, secretDefs: secretDefs}
 	base := context.WithoutCancel(ctx)
 	start := func() {
 		// The build's timeout starts when it runs, not while it waits.
@@ -861,7 +876,10 @@ type buildRun struct {
 	src      *cbpb.StorageSource
 	// archive, when set, is the build's /workspace from a repository
 	// push (securesourcemanagergit.go, #1521), in place of src.
-	archive      func(context.Context) (io.ReadCloser, error)
+	archive func(context.Context) (io.ReadCloser, error)
+	// gitDeps are the build's git dependencies (#2074), cloned into
+	// /workspace in order before any step runs.
+	gitDeps      []gitDependency
 	runner       StepRunner     // nil: no arbitrary steps
 	ws           BuildWorkspace // the build's /workspace, with runner
 	logsBucket   string
@@ -1094,6 +1112,14 @@ func (r *buildRun) run(ctx context.Context, cancel context.CancelFunc) {
 		}
 		r.ws = ws
 		defer ws.Close()
+		if err := r.fetchDependencies(ctx); err != nil {
+			if st, done := ctxStatus(); done {
+				failed(st, -1, "build "+strings.ToLower(st.String()))
+				return
+			}
+			failed(cbpb.Build_FAILURE, -1, err.Error())
+			return
+		}
 	}
 	if err := r.resolveSecrets(ctx); err != nil {
 		if st, done := ctxStatus(); done {

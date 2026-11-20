@@ -60,6 +60,7 @@ type SecureSourceManagerServer struct {
 // SecureSourceManager returns the Secure Source Manager service; gitBase is
 // the port's base URL, which repositories' git URLs name.
 func (s *Server) SecureSourceManager(gitBase func() string) *SecureSourceManagerServer {
+	ssmGitBase.Store(gitBase)
 	return &SecureSourceManagerServer{s: s, gitBase: gitBase}
 }
 

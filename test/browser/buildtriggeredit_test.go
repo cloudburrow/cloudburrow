@@ -244,7 +244,7 @@ func TestCloudRunBuildConsoleRound2ThroughThePages(t *testing.T) {
 			t.Errorf("Create private pool has no %q", want)
 		}
 	}
-	p.submitForm(map[string]string{"name": pool, "region": "us-east1", "series": "n1", "machineType-n1": "n1-standard-4", "diskSizeGb": "250"}, "name")
+	p.submitForm(map[string]string{"name": pool, "region": "us-east1", "series": "n2d", "machineType-n2d": "n2d-standard-4", "diskSizeGb": "250"}, "name")
 	var w *cbpb.WorkerPool
 	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(200 * time.Millisecond) {
 		if w, err = c.GetWorkerPool(ctx, &cbpb.GetWorkerPoolRequest{Name: poolName}); err == nil {
@@ -252,7 +252,7 @@ func TestCloudRunBuildConsoleRound2ThroughThePages(t *testing.T) {
 		}
 	}
 	if wc, nc := w.GetPrivatePoolV1Config().GetWorkerConfig(), w.GetPrivatePoolV1Config().GetNetworkConfig(); err != nil ||
-		wc.GetMachineType() != "n1-standard-4" || wc.GetDiskSizeGb() != 250 || wc.GetWorkerRelease() != "regular" ||
+		wc.GetMachineType() != "n2d-standard-4" || wc.GetDiskSizeGb() != 250 || wc.GetWorkerRelease() != "regular" ||
 		nc.GetEgressOption() != cbpb.PrivatePoolV1Config_NetworkConfig_PUBLIC_EGRESS {
 		t.Fatalf("GetWorkerPool after Create private pool = %v, %v", w, err)
 	}

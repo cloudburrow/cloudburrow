@@ -145,9 +145,14 @@ func TestCreateBuildRefusals(t *testing.T) {
 		"bad waitFor":   {&cbpb.Build{Source: cbSource(), Steps: []*cbpb.BuildStep{{Name: "docker", WaitFor: []string{"later"}, Args: []string{"push", "x"}}}}, codes.InvalidArgument},
 		"escaping dir":  {&cbpb.Build{Source: cbSource(), Steps: []*cbpb.BuildStep{{Name: "docker", Dir: "../x", Args: []string{"build", "-t", "x", "."}}}}, codes.Unimplemented},
 		"bad subst key": {&cbpb.Build{Source: cbSource(), Substitutions: map[string]string{"FOO": "x"}, Steps: []*cbpb.BuildStep{{Name: "docker", Args: []string{"push", "x"}}}}, codes.InvalidArgument},
-		// A git dependency is fetched by Google's workers, not here (#1854).
-		"git dependency": {&cbpb.Build{Source: cbSource(), Dependencies: []*cbpb.Dependency{{Dep: &cbpb.Dependency_GitSource{
-			GitSource: &cbpb.Dependency_GitSourceDependency{Revision: "main"}}}}, Steps: []*cbpb.BuildStep{{Name: "docker", Args: []string{"push", "x"}}}}, codes.Unimplemented},
+		// A git dependency needs its repository and destPath (#2074),
+		// and one on another host is refused: it cannot be reached.
+		"git dependency without repository": {&cbpb.Build{Source: cbSource(), Dependencies: []*cbpb.Dependency{{Dep: &cbpb.Dependency_GitSource{
+			GitSource: &cbpb.Dependency_GitSourceDependency{Revision: "main", DestPath: "dep"}}}}, Steps: []*cbpb.BuildStep{{Name: "docker", Args: []string{"push", "x"}}}}, codes.InvalidArgument},
+		"hosted git dependency": {&cbpb.Build{Source: cbSource(), Dependencies: []*cbpb.Dependency{{Dep: &cbpb.Dependency_GitSource{
+			GitSource: &cbpb.Dependency_GitSourceDependency{Repository: &cbpb.Dependency_GitSourceRepository{
+				Repotype: &cbpb.Dependency_GitSourceRepository_Url{Url: "https://github.com/googleapis/googleapis.git"}},
+				Revision: "master", DestPath: "dep"}}}}, Steps: []*cbpb.BuildStep{{Name: "docker", Args: []string{"push", "x"}}}}, codes.FailedPrecondition},
 	} {
 		_, err := cb.CreateBuild(context.Background(), &cbpb.CreateBuildRequest{ProjectId: "p", Build: tc.b})
 		if status.Code(err) != tc.code {

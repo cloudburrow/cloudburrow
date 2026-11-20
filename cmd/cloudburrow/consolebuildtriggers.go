@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -262,14 +263,16 @@ func (buildWorkerPoolsProvider) CreateForm() (string, []console.Field) {
 	fields := []console.Field{
 		{Name: "name", Label: "Name", Type: "text", Required: true, Pattern: "^[a-z]([\\-a-z0-9]{0,61}[a-z0-9])?$",
 			Help: "Can only contain alphanumeric characters [a-z][0-9] or dashes -; 1 to 63 characters."},
-		{Name: "region", Label: "Region", Type: "select", Required: true, Options: poolRegions, Default: "us-central1"},
-		{Name: "series", Label: "Series", Type: "select", Section: "Machine configuration", Options: []string{"e2", "n1", "c3"},
-			OptionLabels: map[string]string{"e2": "E2", "n1": "N1", "c3": "C3"}, Default: "e2"},
+		{Name: "region", Label: "Region", Type: "select", Required: true, Options: runadapter.PoolRegions(), Default: "us-central1"},
+		{Name: "series", Label: "Series", Type: "select", Section: "Machine configuration", Options: runadapter.PoolRegionSeries("us-central1"),
+			OptionLabels: poolSeriesLabels, Default: "e2", OptionsWhen: poolOptionsByRegion(runadapter.PoolRegionSeries)},
 	}
-	for _, series := range []string{"e2", "n1", "c3"} {
+	for _, series := range runadapter.PoolSeries {
+		series := series
+		opts := runadapter.PoolMachineTypes("us-central1", series)
 		fields = append(fields, console.Field{Name: "machineType-" + series, Label: "Machine type", Type: "select",
-			Section: "Machine configuration", Options: poolMachineTypes[series], Default: poolMachineTypes[series][0],
-			ShowWhen: "series=" + series})
+			Section: "Machine configuration", Options: opts, Default: poolDefaultMachineType(opts),
+			ShowWhen: "series=" + series, OptionsWhen: poolOptionsByRegion(func(r string) []string { return runadapter.PoolMachineTypes(r, series) })})
 	}
 	return "Create private pool", append(fields,
 		console.Field{Name: "diskSizeGb", Label: "Disk size", Type: "number", Section: "Machine configuration",
@@ -296,17 +299,38 @@ func (buildWorkerPoolsProvider) CreateForm() (string, []console.Field) {
 	)
 }
 
-// poolRegions are the regions Create private pool offers.
-var poolRegions = []string{"us-central1", "us-east1", "us-west1", "europe-west1", "europe-west2", "asia-east1", "asia-northeast1"}
+// poolSeriesLabels name the series as Google's drop-down does.
+var poolSeriesLabels = map[string]string{"e2": "E2", "n2d": "N2D", "c3": "C3"}
 
-// poolMachineTypes are each series' machine types, as Google's drop-down
-// lists them.
-var poolMachineTypes = map[string][]string{
-	"e2": {"e2-standard-2", "e2-standard-4", "e2-standard-8", "e2-standard-16", "e2-standard-32", "e2-medium",
-		"e2-highcpu-2", "e2-highcpu-4", "e2-highcpu-8", "e2-highcpu-16", "e2-highcpu-32", "e2-highmem-2", "e2-highmem-4", "e2-highmem-8", "e2-highmem-16"},
-	"n1": {"n1-standard-1", "n1-standard-2", "n1-standard-4", "n1-standard-8", "n1-standard-16", "n1-standard-32", "n1-standard-64", "n1-standard-96",
-		"n1-highcpu-8", "n1-highcpu-32"},
-	"c3": {"c3-standard-4", "c3-standard-8", "c3-standard-22", "c3-standard-44", "c3-standard-88", "c3-standard-176"},
+// poolDefaultMachineType is a machine type list's default: e2-medium,
+// Cloud Build's own, where it is offered, else the first.
+func poolDefaultMachineType(opts []string) string {
+	if slices.Contains(opts, runadapter.PoolDefaultMachineType) {
+		return runadapter.PoolDefaultMachineType
+	}
+	if len(opts) == 0 {
+		return ""
+	}
+	return opts[0]
+}
+
+// poolOptionsByRegion is a drop-down's options per region (#2073), as
+// the availability table of Google's private pool config file schema
+// has them: one condition per distinct list, naming its regions.
+func poolOptionsByRegion(of func(region string) []string) []console.ConditionalOptions {
+	var out []console.ConditionalOptions
+	index := map[string]int{}
+	for _, r := range runadapter.PoolRegions() {
+		opts := of(r)
+		key := strings.Join(opts, ",")
+		if i, ok := index[key]; ok {
+			out[i].When += "|" + r
+			continue
+		}
+		index[key] = len(out)
+		out = append(out, console.ConditionalOptions{When: "region=" + r, Options: opts})
+	}
+	return out
 }
 
 // CreateOnPage, CreateLayout and CreateSubmit draw Create private pool as

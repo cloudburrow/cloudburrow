@@ -6981,6 +6981,39 @@ function buildCreateForm(spec) {
     entry.follow(other.control.value);
   }
 
+  // A select whose options follow other fields (optionsWhen, #2073):
+  // Create private pool's Series and Machine type offer the chosen
+  // region's. The first condition that holds gives the options, else the
+  // field's own; a choice no longer offered moves to the first that is,
+  // and the change is announced so the fields that follow it follow too.
+  const holds = (cond) => cond.split("&").every((t) => {
+    const [name, choice] = t.split("=");
+    const other = byName.get(name);
+    if (!other) return false;
+    if (choice === undefined) return other.isCheck ? other.control.checked : !!other.control.value;
+    return choice.split("|").includes(other.control.value);
+  });
+  for (const entry of entries) {
+    const f = entry.field;
+    if (!(f.optionsWhen || []).length || entry.control.tagName !== "SELECT") continue;
+    const refresh = () => {
+      const match = f.optionsWhen.find((o) => holds(o.when));
+      const options = match ? match.options : (f.options || []);
+      const before = entry.control.value;
+      const now = [...entry.control.options].map((o) => o.value);
+      if (now.length === options.length && now.every((v, i) => v === options[i])) return;
+      entry.control.replaceChildren(...options.map((o) => el("option", { value: o, text: (f.optionLabels || {})[o] || o || "None" })));
+      entry.control.value = options.includes(before) ? before : (options.includes(f.default) ? f.default : (options[0] || ""));
+      if (entry.control.value !== before) entry.control.dispatchEvent(new Event("change"));
+    };
+    const names = new Set(f.optionsWhen.flatMap((o) => o.when.split("&").map((t) => t.split("=")[0])));
+    for (const n of names) {
+      const other = byName.get(n);
+      if (other) other.control.addEventListener("change", refresh);
+    }
+    refresh();
+  }
+
   // A field shown only while another holds a value (#1847): "name" for a
   // checked checkbox, "name=value" for a radio or select choice, as Google's
   // Create topic reveals the retention period under Enable message retention.
