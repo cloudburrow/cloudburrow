@@ -76,6 +76,8 @@ func pmCode(err error) codes.Code {
 			return codes.NotFound
 		case 409:
 			return codes.AlreadyExists
+		case 429:
+			return codes.ResourceExhausted
 		}
 	}
 	if ae, ok := gaxerr.FromError(err); ok && ae.GRPCStatus() != nil {

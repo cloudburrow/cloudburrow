@@ -24,6 +24,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/localai"
+	"github.com/cloudburrow/cloudburrow/internal/ratequota"
 )
 
 // Event is an observable thing that happened, recorded for inspection.
@@ -212,6 +213,8 @@ type API struct {
 
 	// faults are the active fault-injection rules (#306).
 	faults *Faults
+	// quotas are the request quotas (#2063); nil until `up` sets them.
+	quotas *ratequota.Limiter
 	// token, when set, is required on every admin route (#553).
 	token string
 	// localModels manages the local AI models (#1396), the same manager
@@ -250,6 +253,7 @@ func (a *API) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /admin/state/import", a.authorized(a.handleStateImport))
 	mux.HandleFunc("GET /admin/instance", a.authorized(a.handleInstance))
 	a.faults.routes(mux, a.authorized)
+	a.quotaRoutes(mux)
 	mux.HandleFunc("GET /admin/local-models", a.authorized(a.handleLocalModels))
 	mux.HandleFunc("POST /admin/local-models/{id}/{action}", a.authorized(a.handleLocalModelAction))
 }

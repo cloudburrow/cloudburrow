@@ -765,6 +765,14 @@ type Config struct {
 	// collections, which a soak read as growth.
 	BigQueryHeapMiB int `json:"bigQueryHeapMiB"`
 
+	// RequestQuotas sets per-minute request quotas for every project, by
+	// quota metric ("parametermanager.googleapis.com/read_requests": 600),
+	// in place of Google's documented defaults (#2063). A metric no
+	// enabled service enforces is refused at `up`; the admin API's
+	// /admin/quotas changes them, also for one project, while the
+	// instance runs.
+	RequestQuotas map[string]int64 `json:"requestQuotas,omitempty"`
+
 	// SeedFile is a seed document, the /admin/seed body, that `up` applies
 	// once the services start and before the instance reports ready (#286).
 	// Empty applies nothing.
@@ -1172,6 +1180,12 @@ func (c *Config) Validate() error {
 		add("bigQueryHeapMiB", strconv.Itoa(h), fmt.Sprintf("must be 0 (no limit) or between %d and %d", MinEmulatorHeapMiB, MaxEmulatorHeapMiB))
 	}
 
+	for _, m := range sortedQuotaMetrics(c.RequestQuotas) {
+		if v := c.RequestQuotas[m]; v < 0 {
+			add("requestQuotas."+m, strconv.FormatInt(v, 10), "must be a count of requests per minute, 0 or more")
+		}
+	}
+
 	// Instance name. It becomes a cluster name and a label value, so its
 	// character set is not ours to choose.
 	switch {
@@ -1391,3 +1405,12 @@ const (
 
 // IAMEnforced reports whether served APIs check IAM permissions (#1879).
 func (c Config) IAMEnforced() bool { return c.IAMEnforcement == IAMEnforcementOn }
+
+func sortedQuotaMetrics(m map[string]int64) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}

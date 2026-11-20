@@ -15,7 +15,9 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/iameval"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
+	"github.com/cloudburrow/cloudburrow/internal/ratequota"
 	"github.com/cloudburrow/cloudburrow/internal/service/parametermanager"
+	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/secrets"
 	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
@@ -40,7 +42,11 @@ type parameterManagerService struct {
 	// enforcer, when IAM is enforced, checks a parameter's principal may
 	// access each secret it references.
 	enforcer *iameval.Enforcer
-	server   *grpctransport.Server
+	// registry is Resource Manager's, which binds a parameter's tags.
+	registry func() *resourcemanager.Registry
+	// quotas are the instance's request quotas; nil enforces none.
+	quotas *ratequota.Limiter
+	server *grpctransport.Server
 	api      *parametermanager.Server
 }
 
@@ -85,7 +91,15 @@ func (s *parameterManagerService) Start(ctx context.Context) error {
 	if s.cfg.Mode == config.ModePersistent {
 		state = filepath.Join(s.cfg.InstanceDir(), "parametermanager.json")
 	}
-	opts := parametermanager.Options{Keys: s.keys}
+	opts := parametermanager.Options{Keys: s.keys, Quotas: s.quotas}
+	if s.registry != nil {
+		opts.Tags = func() parametermanager.TagBinder {
+			if reg := s.registry(); reg != nil {
+				return reg
+			}
+			return nil
+		}
+	}
 	if s.secrets != nil {
 		opts.AccessSecret = s.accessSecret
 	}
@@ -96,6 +110,9 @@ func (s *parameterManagerService) Start(ctx context.Context) error {
 				return nil
 			}
 			return iameval.SecretManager.Deny(permission, name)
+		}
+		opts.CheckCaller = func(ctx context.Context, permission, resource string) error {
+			return e.AuthorizeCaller(ctx, iameval.ParameterManager, permission, resource)
 		}
 	}
 	api, err := parametermanager.NewServer(state, opts)

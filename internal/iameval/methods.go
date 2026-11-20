@@ -364,7 +364,7 @@ func ServiceByHost(host string) *Service {
 var ParameterManager = &Service{
 	Name: "parametermanager.googleapis.com",
 	Types: map[string]string{"parameters": "parametermanager.googleapis.com/Parameter",
-		"versions": "parametermanager.googleapis.com/ParameterVersion"},
+		"versions": "parametermanager.googleapis.com/ParameterVersion", "templates": "parametermanager.googleapis.com/Template"},
 	Methods: sm(map[string][2]string{
 		"ListParameters":         {"parametermanager.parameters.list", "parent"},
 		"GetParameter":           {"parametermanager.parameters.get", "name"},
@@ -377,6 +377,21 @@ var ParameterManager = &Service{
 		"UpdateParameterVersion": {"parametermanager.parameterVersions.update", "parameter_version.name"},
 		"DeleteParameterVersion": {"parametermanager.parameterVersions.delete", "name"},
 		"RenderParameterVersion": {"parametermanager.parameterVersions.render", "name"},
+		// Templates (#2063): "Render a parameter template version" names
+		// parametermanager.templateversions.render on the template version,
+		// and parameterversions.render on the parameter version, which the
+		// server checks itself; the rest follow the roles catalogue.
+		"ListTemplates":         {"parametermanager.templates.list", "parent"},
+		"GetTemplate":           {"parametermanager.templates.get", "name"},
+		"CreateTemplate":        {"parametermanager.templates.create", "parent"},
+		"UpdateTemplate":        {"parametermanager.templates.update", "template.name"},
+		"DeleteTemplate":        {"parametermanager.templates.delete", "name"},
+		"ListTemplateVersions":  {"parametermanager.templateVersions.list", "parent"},
+		"GetTemplateVersion":    {"parametermanager.templateVersions.get", "name"},
+		"CreateTemplateVersion": {"parametermanager.templateVersions.create", "parent"},
+		"UpdateTemplateVersion": {"parametermanager.templateVersions.update", "template_version.name"},
+		"DeleteTemplateVersion": {"parametermanager.templateVersions.delete", "name"},
+		"RenderTemplateVersion": {"parametermanager.templateVersions.render", "name"},
 	}, "/google.cloud.parametermanager.v1.ParameterManager/"),
 	Deny: func(permission, resource string) error {
 		return grpcDenied(fmt.Sprintf("Permission '%s' denied for resource '%s' (or it may not exist).", permission, resource),

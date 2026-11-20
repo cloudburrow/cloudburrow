@@ -378,6 +378,15 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if parameterManagerSvc != nil {
 		parameterManagerSvc.secrets = secretsSvc
 	}
+	// The request quotas (#2063): Google's documented per-minute limits,
+	// those the configuration sets, and the admin API's overrides.
+	requestQuotas, err := newRequestQuotas(cfg)
+	if err != nil {
+		return err
+	}
+	if parameterManagerSvc != nil {
+		parameterManagerSvc.quotas = requestQuotas
+	}
 	parameterManagerSvc.register(coord)
 	// The Kubernetes Engine API (#1913), in process; its clusters are
 	// kind clusters of their own.
@@ -494,6 +503,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if secretsSvc != nil {
 		// Secret.tags are Resource Manager's tag bindings (#1961).
 		secretsSvc.registry = func() *resourcemanager.Registry { return projectRegistry }
+		if parameterManagerSvc != nil {
+			parameterManagerSvc.registry = func() *resourcemanager.Registry { return projectRegistry }
+		}
 	}
 	if serviceEnabled(cfg, config.ServiceFirestore) {
 		// Firestore with MongoDB compatibility's token sign-in (#1738)
@@ -583,6 +595,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// (#600), so the fault-injectable set is exactly the wiring. The builtin
 	// Cloud Storage server runs in the cluster, where a rule cannot reach it,
 	// so storage is not interposed and its rules stay refused.
+	adminAPI.SetQuotas(requestQuotas)
 	faults := adminAPI.Faults()
 	// One logger for the process, at --log-level (#314): the request log of
 	// every service CloudBurrow serves, and anything else that uses slog.

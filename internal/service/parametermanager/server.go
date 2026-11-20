@@ -31,8 +31,8 @@
 // with `up --iam-enforcement=on`; without it IAM is recorded and every
 // identity may read every secret, as on the rest of the instance (ADR-0006).
 //
-// Templates (the Template and TemplateVersion methods, in preview) are not
-// served: they answer UNIMPLEMENTED.
+// Templates (in preview) are templates.go's; a parameter's tags, bound
+// through Resource Manager, tags.go's; the request quotas, quotas.go's.
 package parametermanager
 
 import (
@@ -64,6 +64,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/cmek"
 	"github.com/cloudburrow/cloudburrow/internal/locations"
 	"github.com/cloudburrow/cloudburrow/internal/paging"
+	"github.com/cloudburrow/cloudburrow/internal/ratequota"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
 )
 
@@ -89,6 +90,15 @@ type Options struct {
 	Keys cmek.Keys
 	// Now is the clock; nil is time.Now.
 	Now func() time.Time
+	// CheckCaller checks the caller holds permission on resource, for the
+	// second resource a call names (RenderTemplateVersion's parameter
+	// version); nil checks nothing (IAM enforcement off).
+	CheckCaller func(ctx context.Context, permission, resource string) error
+	// Tags binds a parameter's tags through Resource Manager; nil (or one
+	// answering nil) refuses a parameter with tags UNIMPLEMENTED.
+	Tags func() TagBinder
+	// Quotas are the instance's request quotas; nil enforces none.
+	Quotas *ratequota.Limiter
 }
 
 // Server serves ParameterManager.
@@ -98,8 +108,9 @@ type Server struct {
 	opts  Options
 	state string
 
-	mu     sync.Mutex
-	params map[string]*paramRecord
+	mu        sync.Mutex
+	params    map[string]*paramRecord
+	templates map[string]*templateRecord
 }
 
 type paramRecord struct {
@@ -118,7 +129,8 @@ type versionRecord struct {
 
 // NewServer loads the records in state ("" keeps them in memory).
 func NewServer(state string, opts Options) (*Server, error) {
-	s := &Server{opts: opts, state: state, params: map[string]*paramRecord{}}
+	s := &Server{opts: opts, state: state, params: map[string]*paramRecord{}, templates: map[string]*templateRecord{}}
+	opts.Quotas.Register(Quotas()...)
 	if state != "" {
 		if err := s.load(); err != nil {
 			return nil, err
@@ -227,10 +239,13 @@ func namePrincipal(project, location, id string) string {
 
 func clone[T proto.Message](m T) T { return proto.Clone(m).(T) }
 
-// CreateParameter creates a parameter.
-func (s *Server) CreateParameter(_ context.Context, req *pmpb.CreateParameterRequest) (*pmpb.Parameter, error) {
+// CreateParameter creates a parameter, binding its tags.
+func (s *Server) CreateParameter(ctx context.Context, req *pmpb.CreateParameterRequest) (*pmpb.Parameter, error) {
 	project, location, err := checkParent(req.GetParent())
 	if err != nil {
+		return nil, err
+	}
+	if err := s.charge(ctx, quotaWrite, project); err != nil {
 		return nil, err
 	}
 	id := req.GetParameterId()
@@ -247,9 +262,6 @@ func (s *Server) CreateParameter(_ context.Context, req *pmpb.CreateParameterReq
 	if err := checkKMSKey(in.GetKmsKey(), location); err != nil {
 		return nil, err
 	}
-	if len(in.GetTags()) > 0 {
-		return nil, apierror.Unimplemented("parameter.tags: tag bindings on parameters are not served by this CloudBurrow instance")
-	}
 	format := in.GetFormat()
 	if format == pmpb.ParameterFormat_PARAMETER_FORMAT_UNSPECIFIED {
 		format = pmpb.ParameterFormat_UNFORMATTED
@@ -263,6 +275,9 @@ func (s *Server) CreateParameter(_ context.Context, req *pmpb.CreateParameterReq
 	if _, ok := s.params[name]; ok {
 		return nil, apierror.AlreadyExists("Parameter %s already exists", name)
 	}
+	if err := s.checkTags(name, in.GetTags()); err != nil {
+		return nil, err
+	}
 	now := timestamppb.New(s.now())
 	uid := newUID()
 	p := &pmpb.Parameter{Name: name, CreateTime: now, UpdateTime: now, Labels: in.GetLabels(), Format: format,
@@ -273,11 +288,21 @@ func (s *Server) CreateParameter(_ context.Context, req *pmpb.CreateParameterReq
 		p.KmsKey = &k
 	}
 	s.params[name] = &paramRecord{P: p, UID: uid, Versions: map[string]*versionRecord{}}
-	return clone(p), apierror.Wrap(s.save())
+	if err := s.save(); err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	if err := s.bindTags(name, in.GetTags()); err != nil {
+		delete(s.params, name)
+		return nil, errors.Join(err, s.save())
+	}
+	return clone(p), nil
 }
 
-// GetParameter reads a parameter.
-func (s *Server) GetParameter(_ context.Context, req *pmpb.GetParameterRequest) (*pmpb.Parameter, error) {
+// GetParameter reads a parameter. Its tags are input only.
+func (s *Server) GetParameter(ctx context.Context, req *pmpb.GetParameterRequest) (*pmpb.Parameter, error) {
+	if err := s.chargeName(ctx, quotaRead, req.GetName()); err != nil {
+		return nil, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	rec, err := s.param(req.GetName())
@@ -300,8 +325,12 @@ func (s *Server) param(name string) (*paramRecord, error) {
 }
 
 // ListParameters lists a location's parameters.
-func (s *Server) ListParameters(_ context.Context, req *pmpb.ListParametersRequest) (*pmpb.ListParametersResponse, error) {
-	if _, _, err := checkParent(req.GetParent()); err != nil {
+func (s *Server) ListParameters(ctx context.Context, req *pmpb.ListParametersRequest) (*pmpb.ListParametersResponse, error) {
+	project, _, err := checkParent(req.GetParent())
+	if err != nil {
+		return nil, err
+	}
+	if err := s.charge(ctx, quotaRead, project); err != nil {
 		return nil, err
 	}
 	prefix := req.GetParent() + "/parameters/"
@@ -313,7 +342,7 @@ func (s *Server) ListParameters(_ context.Context, req *pmpb.ListParametersReque
 		}
 	}
 	s.mu.Unlock()
-	items, err := aipfilter.List(req.GetFilter(), req.GetOrderBy(), items)
+	items, err = aipfilter.List(req.GetFilter(), req.GetOrderBy(), items)
 	if err != nil {
 		return nil, err
 	}
@@ -327,10 +356,13 @@ func (s *Server) ListParameters(_ context.Context, req *pmpb.ListParametersReque
 
 // UpdateParameter changes a parameter's labels or key. Its format is
 // immutable.
-func (s *Server) UpdateParameter(_ context.Context, req *pmpb.UpdateParameterRequest) (*pmpb.Parameter, error) {
+func (s *Server) UpdateParameter(ctx context.Context, req *pmpb.UpdateParameterRequest) (*pmpb.Parameter, error) {
 	in := req.GetParameter()
 	if in == nil {
 		return nil, apierror.InvalidArgument("parameter is required")
+	}
+	if err := s.chargeName(ctx, quotaWrite, in.GetName()); err != nil {
+		return nil, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -374,6 +406,8 @@ func (s *Server) UpdateParameter(_ context.Context, req *pmpb.UpdateParameterReq
 			}
 		case "name", "create_time", "update_time", "policy_member":
 			return nil, apierror.InvalidArgument("update_mask path %q is an output-only field", p)
+		case "tags":
+			return nil, apierror.InvalidArgument("update_mask path %q: a parameter's tags are immutable, set when it is created; change its tag bindings through Resource Manager", p)
 		default:
 			return nil, apierror.InvalidArgument("update_mask path %q is not a field of Parameter that can be updated", p)
 		}
@@ -397,7 +431,10 @@ func snake(p string) string {
 }
 
 // DeleteParameter deletes a parameter that has no versions.
-func (s *Server) DeleteParameter(_ context.Context, req *pmpb.DeleteParameterRequest) (*emptypb.Empty, error) {
+func (s *Server) DeleteParameter(ctx context.Context, req *pmpb.DeleteParameterRequest) (*emptypb.Empty, error) {
+	if err := s.chargeName(ctx, quotaWrite, req.GetName()); err != nil {
+		return nil, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	rec, err := s.param(req.GetName())
@@ -408,6 +445,7 @@ func (s *Server) DeleteParameter(_ context.Context, req *pmpb.DeleteParameterReq
 		return nil, apierror.FailedPrecondition("Parameter %s has %d versions: delete its versions, enabled or disabled, before the parameter", req.GetName(), n)
 	}
 	delete(s.params, req.GetName())
+	s.unbindTags(req.GetName())
 	return &emptypb.Empty{}, apierror.Wrap(s.save())
 }
 
@@ -458,6 +496,9 @@ func validatePayload(format pmpb.ParameterFormat, data []byte) error {
 // CreateParameterVersion adds a version, encrypted with the parameter's
 // customer-managed key when it has one.
 func (s *Server) CreateParameterVersion(ctx context.Context, req *pmpb.CreateParameterVersionRequest) (*pmpb.ParameterVersion, error) {
+	if err := s.chargeName(ctx, quotaWrite, req.GetParent()); err != nil {
+		return nil, err
+	}
 	id := req.GetParameterVersionId()
 	if !idRE.MatchString(id) {
 		return nil, apierror.InvalidArgument("parameter_version_id %q must be 1 to 63 letters, digits, hyphens or underscores", id)
@@ -533,6 +574,9 @@ func (s *Server) view(vr *versionRecord, view pmpb.View, data []byte) *pmpb.Para
 // GetParameterVersion reads a version; the FULL view (the default) carries
 // the payload of an enabled version.
 func (s *Server) GetParameterVersion(ctx context.Context, req *pmpb.GetParameterVersionRequest) (*pmpb.ParameterVersion, error) {
+	if err := s.chargeName(ctx, quotaRead, req.GetName()); err != nil {
+		return nil, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	rec, vr, err := s.version(req.GetName())
@@ -553,7 +597,10 @@ func (s *Server) GetParameterVersion(ctx context.Context, req *pmpb.GetParameter
 }
 
 // ListParameterVersions lists a parameter's versions, without payloads.
-func (s *Server) ListParameterVersions(_ context.Context, req *pmpb.ListParameterVersionsRequest) (*pmpb.ListParameterVersionsResponse, error) {
+func (s *Server) ListParameterVersions(ctx context.Context, req *pmpb.ListParameterVersionsRequest) (*pmpb.ListParameterVersionsResponse, error) {
+	if err := s.chargeName(ctx, quotaRead, req.GetParent()); err != nil {
+		return nil, err
+	}
 	s.mu.Lock()
 	rec, err := s.param(req.GetParent())
 	if err != nil {
@@ -579,10 +626,13 @@ func (s *Server) ListParameterVersions(_ context.Context, req *pmpb.ListParamete
 
 // UpdateParameterVersion enables or disables a version: disabled is its
 // one mutable field.
-func (s *Server) UpdateParameterVersion(_ context.Context, req *pmpb.UpdateParameterVersionRequest) (*pmpb.ParameterVersion, error) {
+func (s *Server) UpdateParameterVersion(ctx context.Context, req *pmpb.UpdateParameterVersionRequest) (*pmpb.ParameterVersion, error) {
 	in := req.GetParameterVersion()
 	if in == nil {
 		return nil, apierror.InvalidArgument("parameter_version is required")
+	}
+	if err := s.chargeName(ctx, quotaWrite, in.GetName()); err != nil {
+		return nil, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -613,7 +663,10 @@ func (s *Server) UpdateParameterVersion(_ context.Context, req *pmpb.UpdateParam
 }
 
 // DeleteParameterVersion deletes a version.
-func (s *Server) DeleteParameterVersion(_ context.Context, req *pmpb.DeleteParameterVersionRequest) (*emptypb.Empty, error) {
+func (s *Server) DeleteParameterVersion(ctx context.Context, req *pmpb.DeleteParameterVersionRequest) (*emptypb.Empty, error) {
+	if err := s.chargeName(ctx, quotaWrite, req.GetName()); err != nil {
+		return nil, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	rec, _, err := s.version(req.GetName())
@@ -628,6 +681,16 @@ func (s *Server) DeleteParameterVersion(_ context.Context, req *pmpb.DeleteParam
 // YAML parameter, the payload with each secret reference replaced by the
 // secret version's payload, read as the parameter's principal.
 func (s *Server) RenderParameterVersion(ctx context.Context, req *pmpb.RenderParameterVersionRequest) (*pmpb.RenderParameterVersionResponse, error) {
+	if err := s.chargeName(ctx, quotaRender, req.GetName()); err != nil {
+		return nil, err
+	}
+	return s.renderVersion(ctx, req.GetName())
+}
+
+// renderVersion is RenderParameterVersion's answer for the version name,
+// charged to no quota.
+func (s *Server) renderVersion(ctx context.Context, name string) (*pmpb.RenderParameterVersionResponse, error) {
+	req := &pmpb.RenderParameterVersionRequest{Name: name}
 	s.mu.Lock()
 	rec, vr, err := s.version(req.GetName())
 	if err != nil {
@@ -706,13 +769,20 @@ func (s *Server) resolve(ctx context.Context, principal, name string) ([]byte, e
 	return b, nil
 }
 
-// ResetProject forgets one project's parameters, or every project's for "".
+// ResetProject forgets one project's parameters and templates, or every
+// project's for "".
 func (s *Server) ResetProject(project string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for name := range s.params {
 		if project == "" || strings.HasPrefix(name, "projects/"+project+"/") {
 			delete(s.params, name)
+			s.unbindTags(name)
+		}
+	}
+	for name := range s.templates {
+		if project == "" || strings.HasPrefix(name, "projects/"+project+"/") {
+			delete(s.templates, name)
 		}
 	}
 	return s.save()
@@ -763,6 +833,18 @@ type diskVersion struct {
 	Sealed  *cmek.Sealed    `json:"sealed,omitempty"`
 }
 
+type diskTemplate struct {
+	Template json.RawMessage `json:"template"`
+	Versions []diskVersion   `json:"versions,omitempty"`
+}
+
+// diskState is the state file: before templates (#2063) it was the
+// parameters' array alone, which load still reads.
+type diskState struct {
+	Parameters []diskParam    `json:"parameters"`
+	Templates  []diskTemplate `json:"templates,omitempty"`
+}
+
 func (s *Server) load() error {
 	b, err := os.ReadFile(s.state)
 	if errors.Is(err, os.ErrNotExist) {
@@ -771,11 +853,34 @@ func (s *Server) load() error {
 	if err != nil {
 		return err
 	}
-	var d []diskParam
-	if err := json.Unmarshal(b, &d); err != nil {
+	var st diskState
+	if b = bytes.TrimSpace(b); len(b) > 0 && b[0] == '[' {
+		err = json.Unmarshal(b, &st.Parameters)
+	} else {
+		err = json.Unmarshal(b, &st)
+	}
+	if err != nil {
 		return fmt.Errorf("parameter manager state %s: %w", s.state, err)
 	}
-	for _, dp := range d {
+	for _, dt := range st.Templates {
+		rec := &templateRecord{T: &pmpb.Template{}, Versions: map[string]*templateVersionRecord{}}
+		if err := protojson.Unmarshal(dt.Template, rec.T); err != nil {
+			return err
+		}
+		for _, dv := range dt.Versions {
+			vr := &templateVersionRecord{V: &pmpb.TemplateVersion{}, Data: dv.Data}
+			if err := protojson.Unmarshal(dv.Version, vr.V); err != nil {
+				return err
+			}
+			m := templateVersionRE.FindStringSubmatch(vr.V.GetName())
+			if m == nil {
+				return fmt.Errorf("parameter manager state %s: template version %q", s.state, vr.V.GetName())
+			}
+			rec.Versions[m[5]] = vr
+		}
+		s.templates[rec.T.GetName()] = rec
+	}
+	for _, dp := range st.Parameters {
 		rec := &paramRecord{P: &pmpb.Parameter{}, UID: dp.UID, Versions: map[string]*versionRecord{}}
 		if err := protojson.Unmarshal(dp.Parameter, rec.P); err != nil {
 			return err
@@ -801,7 +906,23 @@ func (s *Server) save() error {
 	if s.state == "" {
 		return nil
 	}
-	d := []diskParam{}
+	st := diskState{Parameters: []diskParam{}}
+	for _, name := range sortedKeys(s.templates) {
+		rec := s.templates[name]
+		tb, err := protojson.Marshal(rec.T)
+		if err != nil {
+			return err
+		}
+		dt := diskTemplate{Template: tb}
+		for _, id := range sortedKeys(rec.Versions) {
+			vb, err := protojson.Marshal(rec.Versions[id].V)
+			if err != nil {
+				return err
+			}
+			dt.Versions = append(dt.Versions, diskVersion{Version: vb, Data: rec.Versions[id].Data})
+		}
+		st.Templates = append(st.Templates, dt)
+	}
 	for _, name := range sortedKeys(s.params) {
 		rec := s.params[name]
 		pb, err := protojson.Marshal(rec.P)
@@ -817,9 +938,9 @@ func (s *Server) save() error {
 			}
 			dp.Versions = append(dp.Versions, diskVersion{Version: vb, Data: vr.Data, Sealed: vr.Sealed})
 		}
-		d = append(d, dp)
+		st.Parameters = append(st.Parameters, dp)
 	}
-	b, err := json.Marshal(d)
+	b, err := json.Marshal(st)
 	if err != nil {
 		return err
 	}

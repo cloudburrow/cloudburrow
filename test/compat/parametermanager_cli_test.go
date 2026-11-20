@@ -155,3 +155,137 @@ resource "google_parameter_manager_regional_parameter_version" "rv" {
 		}
 	}
 }
+
+// TestGcloudParameterManagerTemplates (#2063): gcloud beta parametermanager
+// templates, through gcloud-setup's parametermanager override alone,
+// creates a global and a regional template, a version from a file,
+// describes and lists them, renders the version with a YAML parameter
+// version's values, disables and deletes it and the template; the
+// official client reads back what gcloud made.
+func TestGcloudParameterManagerTemplates(t *testing.T) {
+	h := New(t)
+	c := parameterManagerClients(t, h)["grpc"] // skips without CLOUDBURROW_TEST_PARAMETERMANAGER
+	ctx := h.Context()
+	g := newGcloudSession(t, h)
+	for _, loc := range []string{"global", "us-central1"} {
+		id := fmt.Sprintf("gcloud-tpl-%s-%d", loc, time.Now().UnixNano()%1e6)
+		args := []string{"--location", loc, "--project", g.project, "--quiet"}
+		run := func(a ...string) string {
+			t.Helper()
+			out, err := g.run(nil, append(append([]string{"beta", "parametermanager", "templates"}, a...), args...)...)
+			if err != nil {
+				t.Fatalf("gcloud beta parametermanager templates %s: %v\n%s", strings.Join(a, " "), err, out)
+			}
+			return out
+		}
+		parent := "projects/" + g.project + "/locations/" + loc
+		p, err := c.CreateParameter(ctx, &pmpb.CreateParameterRequest{Parent: parent, ParameterId: id + "-vals",
+			Parameter: &pmpb.Parameter{Format: pmpb.ParameterFormat_YAML}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := c.CreateParameterVersion(ctx, &pmpb.CreateParameterVersionRequest{Parent: p.GetName(), ParameterVersionId: "v1",
+			ParameterVersion: &pmpb.ParameterVersion{Payload: &pmpb.ParameterVersionPayload{Data: []byte("log_level: info\n")}}}); err != nil {
+			t.Fatal(err)
+		}
+		run("create", id, "--template-format", "template-format-yaml", "--labels", "team=burrow")
+		name := parent + "/templates/" + id
+		tpl, err := c.GetTemplate(ctx, &pmpb.GetTemplateRequest{Name: name})
+		if err != nil || tpl.GetFormat() != pmpb.TemplateFormat_TEMPLATE_FORMAT_YAML || tpl.GetLabels()["team"] != "burrow" {
+			t.Fatalf("the template gcloud created: %+v, %v", tpl, err)
+		}
+		file := filepath.Join(t.TempDir(), "tv1.yaml")
+		payload := "app: burrow\nlevel: {{.log_level}}\n"
+		if err := os.WriteFile(file, []byte(payload), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		run("versions", "create", "tv1", "--template", id, "--payload-data-from-file", file)
+		if v, err := c.GetTemplateVersion(ctx, &pmpb.GetTemplateVersionRequest{Name: name + "/versions/tv1"}); err != nil || string(v.GetPayload().GetData()) != payload {
+			t.Fatalf("the version gcloud created: %+v, %v", v, err)
+		}
+		if out := run("describe", id, "--format", "value(format)"); !strings.Contains(out, "TEMPLATE_FORMAT_YAML") {
+			t.Errorf("gcloud beta parametermanager templates describe: %s", out)
+		}
+		if out := run("list", "--format", "value(name)"); !strings.Contains(out, id) {
+			t.Errorf("gcloud beta parametermanager templates list: %s", out)
+		}
+		if out := run("versions", "list", "--template", id, "--format", "value(name)"); !strings.Contains(out, "tv1") {
+			t.Errorf("gcloud beta parametermanager templates versions list: %s", out)
+		}
+		out := run("versions", "render", "tv1", "--template", id, "--parameter-version", p.GetName()+"/versions/v1", "--format", "value(renderedPayload)")
+		rendered := strings.TrimSpace(out)
+		if b, err := base64.StdEncoding.DecodeString(rendered); err == nil {
+			rendered = string(b)
+		}
+		if !strings.Contains(rendered, "level: info") {
+			t.Errorf("gcloud beta parametermanager templates versions render: %s", out)
+		}
+		run("versions", "update", "tv1", "--template", id, "--disabled")
+		if v, err := c.GetTemplateVersion(ctx, &pmpb.GetTemplateVersionRequest{Name: name + "/versions/tv1"}); err != nil || !v.GetDisabled() {
+			t.Errorf("after gcloud versions update --disabled: %+v, %v", v, err)
+		}
+		run("versions", "delete", "tv1", "--template", id)
+		run("delete", id)
+		if _, err := c.GetTemplate(ctx, &pmpb.GetTemplateRequest{Name: name}); status.Code(err) != codes.NotFound {
+			t.Errorf("after gcloud delete: %v, want NOT_FOUND", err)
+		}
+		_ = c.DeleteParameterVersion(ctx, &pmpb.DeleteParameterVersionRequest{Name: p.GetName() + "/versions/v1"})
+		_ = c.DeleteParameter(ctx, &pmpb.DeleteParameterRequest{Name: p.GetName()})
+	}
+}
+
+// TestTerraformParameterManagerTemplate (#2063): google-beta's
+// google_parameter_manager_template (global; hashicorp/google 8.4.0 has
+// none) applies through parameter_manager_custom_endpoint, plans clean,
+// updates its labels in place and destroys; the official client reads
+// back what Terraform made.
+func TestTerraformParameterManagerTemplate(t *testing.T) {
+	h := New(t)
+	c := parameterManagerClients(t, h)["grpc"] // skips without CLOUDBURROW_TEST_PARAMETERMANAGER
+	ctx := h.Context()
+	m := newTFModule(t)
+	id := fmt.Sprintf("tf-tpl-%d", time.Now().UnixNano()%1e6)
+	conf := func(team string) string {
+		return fmt.Sprintf(`
+terraform {
+  required_providers {
+    google      = { source = "hashicorp/google", version = %[4]q }
+    google-beta = { source = "hashicorp/google-beta", version = %[4]q }
+  }
+}
+
+resource "google_parameter_manager_template" "t" {
+  provider    = google-beta
+  project     = %[1]q
+  template_id = %[2]q
+  format      = "TEMPLATE_FORMAT_JSON"
+  labels      = { team = %[3]q }
+}
+`, m.project, id, team, googleProviderVersion)
+	}
+	// Its own terraform block, which names google-beta beside google.
+	write := func(body string) {
+		if err := os.WriteFile(filepath.Join(m.dir, "main.tf"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(conf("one"))
+	m.must("init", "-input=false", "-no-color")
+	m.apply()
+	name := "projects/" + m.project + "/locations/global/templates/" + id
+	tpl, err := c.GetTemplate(ctx, &pmpb.GetTemplateRequest{Name: name})
+	if err != nil || tpl.GetFormat() != pmpb.TemplateFormat_TEMPLATE_FORMAT_JSON || tpl.GetLabels()["team"] != "one" {
+		t.Fatalf("the template Terraform made: %+v, %v", tpl, err)
+	}
+	m.planClean()
+	write(conf("two"))
+	m.apply()
+	if tpl, err := c.GetTemplate(ctx, &pmpb.GetTemplateRequest{Name: name}); err != nil || tpl.GetLabels()["team"] != "two" {
+		t.Fatalf("after the update: %+v, %v", tpl, err)
+	}
+	m.planClean()
+	m.must("destroy", "-auto-approve", "-input=false", "-no-color")
+	if _, err := c.GetTemplate(ctx, &pmpb.GetTemplateRequest{Name: name}); status.Code(err) != codes.NotFound {
+		t.Errorf("after destroy: %v; want NOT_FOUND", err)
+	}
+}
