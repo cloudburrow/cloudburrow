@@ -2973,6 +2973,9 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   // flight looks identical to one that is idle unless something says so, and
   // the user's reading of "nothing happened" is a second click.
   const operating = new Set();
+  // Rows whose children are shown: a Bigtable table's replications, behind
+  // the arrow beside its ID (#2027).
+  const expanded = new Set();
 
   const nameColumn = () => data.nameColumn || "Name";
   const allDataColumns = () => data.columns || [];
@@ -3184,7 +3187,29 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
     const start = page * pageSize;
     const shown = rows.slice(start, start + pageSize);
 
-    setChildren(body, ...shown.map((item) => {
+    // A row's children, under it while its arrow is open: they carry the
+    // listing's columns and nothing to act on (#2027).
+    const childRows = (item) => (expanded.has(item.name) ? item.children || [] : []).map((child) => el("tr", { class: "child-row" },
+      ...(selectable ? [el("td", { class: "select-cell" })] : []),
+      ...(hasStatus() ? [el("td", { class: "status-cell" }, child.status ? statusIcon(child.status) : null)] : []),
+      el("td", { class: "child-name" }, child.name),
+      ...dataColumns().map((c) => el("td", { text: (child.fields || {})[c] || "" })),
+      ...(hasActions() ? [el("td", {})] : [])));
+    const expander = (item) => {
+      if (!(item.children || []).length) return null;
+      const open = expanded.has(item.name);
+      return el("button", { type: "button", class: "icon-button row-expander" + (open ? " is-open" : ""),
+        "aria-expanded": open ? "true" : "false",
+        "aria-label": `${open ? "Hide" : "Show"} ${data.childNoun || "rows"} of ${item.name}`,
+        html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>',
+        onclick: (e) => {
+          e.stopPropagation();
+          if (open) expanded.delete(item.name); else expanded.add(item.name);
+          draw();
+          body.querySelector(`button.row-expander[aria-label$=" of ${CSS.escape(item.name)}"]`)?.focus();
+        } });
+    };
+    setChildren(body, ...shown.flatMap((item) => {
       const cells = [];
       if (selectable && !canSelect(item)) {
         cells.push(el("td", { class: "select-cell" }));
@@ -3219,7 +3244,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
               spinner(`${item.name} is being changed`)))
           : el("td", { class: "status-cell" }, statusIcon(item.status)));
       }
-      cells.push(el("td", {}, item.link
+      cells.push(el("td", {}, expander(item), item.link
         ? el("a", { href: item.link, text: item.name })
         : (item.opens || []).length
           ? el("a", { href: detailHref(route, item.opens), text: item.name })
@@ -3275,7 +3300,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
           inspect();
         });
       }
-      return row;
+      return [row, ...childRows(item)];
     }));
 
     if (!shown.length) {
@@ -19392,6 +19417,26 @@ async function openIAMEditPanel(data, row, rolesNow, onDone) {
 // ReadRows), the Query editor (GoogleSQL for Bigtable, ExecuteQuery), and
 // the results with a Row details pane and Export. Its calls are the
 // provider's Studio (POST /api/studio/bigtable-instances).
+//
+// Saved queries (https://docs.cloud.google.com/bigtable/docs/create-manage-saved-queries):
+// the Query editor's Save and Save as (Save as query, Save as logical view,
+// Save as materialized view), and the Explorer's Queries section, each
+// query with View actions Open query, Manage queries and Delete query.
+// They are CloudBurrow's own record (consolebigtablestudio.go) and say so.
+
+const BT_SAVED_NOTE = "CloudBurrow-only: Google keeps a saved query as a Studio asset of the project, which CloudBurrow does not serve. " +
+  "This one is kept in the instance's state directory, listed under Queries in the Explorer of every instance of the project, and reachable by no API.";
+const BT_UNAVAILABLE_MANAGE = "Not available locally: the Saved queries page lists the project's saved queries of every Google Cloud product, " +
+  "which CloudBurrow does not serve. The Queries section lists this project's Bigtable ones.";
+
+// btSampleQuery is a table's View a sample query: GoogleSQL for Bigtable
+// over its first column family, else its row keys.
+function btSampleQuery(t, quote) {
+  const f = (t.families || [])[0];
+  return f
+    ? `SELECT _key, ${quote(f.name)} FROM ${quote(t.name)} LIMIT 10`
+    : `SELECT _key FROM ${quote(t.name)} LIMIT 10`;
+}
 
 function renderBigtableStudio(panel, route, segments, project) {
   const [instance] = segments;
@@ -19411,6 +19456,9 @@ function renderBigtableStudio(panel, route, segments, project) {
   let state = store.tabs[store.current];
   const save = () => { try { sessionStorage.setItem(key, JSON.stringify(store)); } catch { /* per-tab only */ } };
   let catalog = { tables: [] };
+  let openedFromAddress = false;
+  let saved = [];
+  let regions = [];
   let last = null;
   const lastOf = new Map();
   const queryTabs = el("div", { class: "tab-strip spanner-editor-tabs", id: "bigtable-query-tabs", role: "tablist", "aria-label": "Query tabs" });
@@ -19453,6 +19501,17 @@ function renderBigtableStudio(panel, route, segments, project) {
   const runEditor = el("button", { class: "primary", id: "bigtable-editor-run", type: "button", text: "Run" });
   const clear = el("button", { class: "secondary", id: "bigtable-editor-clear", type: "button", text: "Clear",
     onclick: () => { editor.value = ""; state.sql = ""; save(); editor.focus(); } });
+  // Save: a new version of this tab's saved query, or Save query's dialog.
+  const saveButton = el("button", { class: "secondary", id: "bigtable-editor-save", type: "button", text: "Save",
+    onclick: () => saveQuery(false) });
+  const saveAs = bqMenu("Save as", [
+    { label: "Save as query", run: () => saveQuery(true) },
+    { label: "Save as logical view", run: () => saveView(false) },
+    { label: "Save as materialized view", run: () => saveView(true) },
+  ]);
+  bqMenuButton(saveAs, "Save as", "Save as a new query or view");
+  saveAs.querySelector("button").id = "bigtable-editor-save-as";
+  const savedNote = el("p", { class: "unavailable", id: "bigtable-saved-note", text: BT_SAVED_NOTE, hidden: true });
 
   const showDetails = (row) => {
     details.hidden = false;
@@ -19528,6 +19587,40 @@ function renderBigtableStudio(panel, route, segments, project) {
   }));
   runEditor.addEventListener("click", () => { if (editor.value.trim()) execute(runEditor, "sql", { sql: editor.value }); });
 
+  const saveQuery = async (asNew) => {
+    if (!editor.value.trim()) { notify("The editor is empty: write a query to save.", "error"); editor.focus(); return; }
+    if (state.savedId && !asNew) {
+      try {
+        const sq = await call("savequery", { id: state.savedId, name: state.title, sql: editor.value });
+        notify(`Saved query ${sq.name}`);
+        await loadSaved();
+      } catch (err) {
+        notify(`Save query failed: ${err.message}`, "error");
+      }
+      return;
+    }
+    const sq = await btSaveDialog({ title: asNew ? "Save as query" : "Save query", label: "Query name",
+      value: state.savedId ? `Copy of ${state.title}` : "", regions,
+      submit: (name, region) => call("savequery", { name, region, sql: editor.value }) });
+    if (!sq) return;
+    state.savedId = sq.id;
+    state.title = sq.name;
+    save();
+    drawQueryTabs();
+    notify(`Saved query ${sq.name}`);
+    await loadSaved();
+  };
+  const saveView = async (materialized) => {
+    if (!editor.value.trim()) { notify("The editor is empty: write a query to save.", "error"); editor.focus(); return; }
+    const kind = materialized ? "materialized view" : "logical view";
+    const done = await btSaveDialog({ title: `Save as ${kind}`, label: "View ID", value: "",
+      submit: (view) => send(`/api/actions/bigtable-instances?project=${encodeURIComponent(project)}`, "POST",
+        { Path: [instance], Action: materialized ? "creatematerialized" : "createlogical", Values: { view, query: editor.value } }) });
+    if (!done) return;
+    notify(`Created the ${kind}`);
+    loadExplorer();
+  };
+
   const label = (text, control) => el("label", { class: "form-row" }, el("span", { class: "form-label", text }), control);
   const drawMode = () => {
     setChildren(modes, ...[["builder", "Query builder"], ["editor", "Query editor"]].map(([id, text]) =>
@@ -19536,7 +19629,7 @@ function renderBigtableStudio(panel, route, segments, project) {
         onclick: () => { state.mode = id; save(); drawMode(); } })));
     if (state.mode === "editor") {
       setChildren(body, el("p", { class: "form-help", text: "GoogleSQL for Bigtable: SELECT over a table, a logical view or a materialized view, read with ExecuteQuery." }),
-        editor, el("div", { class: "action-bar spanner-editor-actions" }, runEditor, clear));
+        editor, el("div", { class: "action-bar spanner-editor-actions" }, runEditor, saveButton, saveAs, clear), savedNote);
     } else {
       setChildren(body, el("div", { class: "bigtable-builder", id: "bigtable-builder" },
         label("Table", tableSelect),
@@ -19562,6 +19655,7 @@ function renderBigtableStudio(panel, route, segments, project) {
     latest.checked = !!b.latest; limit.value = b.limit || "100";
     drawKeyInputs();
     editor.value = state.sql || "";
+    savedNote.hidden = !state.savedId;
     last = lastOf.get(state) || null;
     details.hidden = true;
     drawMode();
@@ -19607,6 +19701,17 @@ function renderBigtableStudio(panel, route, segments, project) {
     el("summary", { text: `${title} (${items.length})` }),
     items.length ? el("ul", {}, ...items.map(row)) : el("p", { class: "unavailable", text: `No ${title.toLowerCase()}` }));
   const quote = (n) => `\`${n.replaceAll("`", "\\`")}\``;
+  // A table's View actions in Google's order (#2027): those the instance
+  // page performs (Create a new table, Create a backup, Prevent deletion,
+  // Edit, Delete) in its forms, View a sample query in a new editor tab,
+  // View backups on the instance's Backups page, and the two Google runs
+  // on Cloud Monitoring and Dataflow disabled with the reason.
+  const tableAction = (t) => (a) => {
+    if (a.unavailable) return { label: a.label, disabled: true, title: a.unavailable, run: () => {} };
+    if (a.id === "samplequery") return { label: a.label, run: () => openEditor(btSampleQuery(t, quote)) };
+    return { label: a.label, danger: a.destructive,
+      run: () => runAction(route, a.target || [instance], a, () => loadExplorer()) };
+  };
   const loadExplorer = async () => {
     try {
       catalog = await call("explorer");
@@ -19619,7 +19724,9 @@ function renderBigtableStudio(panel, route, segments, project) {
             bqMenu(`View actions for ${t.name}`, [
               { label: "Query", run: () => openBuilder(t.name) },
               { label: "Open in query editor", run: () => openEditor(`SELECT * FROM ${quote(t.name)} LIMIT 100`) },
-              { label: "Open table page", run: () => navigate(`/bigtable/${encodeURIComponent(t.name)}?project=${encodeURIComponent(project)}&instance=${encodeURIComponent(instance)}`) },
+              ...(t.actions || []).map(tableAction(t)),
+              { label: "Open table page", title: "CloudBurrow's page of the table's rows, schema, change stream, snapshots, authorized views and schema bundles",
+                run: () => navigate(`/bigtable/${encodeURIComponent(t.name)}?project=${encodeURIComponent(project)}&instance=${encodeURIComponent(instance)}`) },
             ])),
           el("ul", { class: "spanner-columns" },
             ...t.families.map((f) => el("li", {}, el("span", { class: "mono", text: f.name }), el("span", { class: "unavailable", text: ` ${f.gc}` }))),
@@ -19631,9 +19738,54 @@ function renderBigtableStudio(panel, route, segments, project) {
         group("Tables", tables, tableRow),
         group("Logical views", catalog.logicalViews || [], viewRow),
         group("Materialized views", catalog.materializedViews || [], viewRow),
+        queriesGroup,
         ...Object.entries(catalog.errors || {}).map(([k, v]) => el("p", { class: "unavailable", text: `${k}: ${v}` })));
+      await loadSaved();
+      // A table opened from the Tables page (?table=), in a query tab of its
+      // own, as Google reaches a table in Bigtable Studio (#2027).
+      const wanted = new URLSearchParams(location.search).get("table");
+      if (wanted && !openedFromAddress && tables.some((t) => t.name === wanted)) {
+        openedFromAddress = true;
+        const at = store.tabs.findIndex((x) => x.mode === "builder" && x.table === wanted && !x.savedId);
+        if (at >= 0) selectTab(at); else openBuilder(wanted);
+      }
     } catch (err) {
       setChildren(explorer, el("h3", { text: "Explorer" }), el("p", { class: "form-error", role: "alert", text: err.message }));
+    }
+  };
+
+  // The Explorer's Queries section: the project's saved queries.
+  const queriesGroup = el("div", { id: "bigtable-explorer-queries" });
+  const openSaved = (sq) => {
+    const open = store.tabs.findIndex((t) => t.savedId === sq.id);
+    if (open >= 0) { store.tabs[open].sql = sq.query; selectTab(open); return; }
+    openTab({ title: sq.name, mode: "editor", sql: sq.query, table: state.table, savedId: sq.id });
+  };
+  const deleteSaved = async (sq) => {
+    await confirmDestructive({ title: "Delete query", detail: sq.name, style: "confirm",
+      consequence: "The saved query is deleted. Tabs that hold it keep their text.",
+      onConfirm: () => call("deletequery", { id: sq.id }) });
+    await loadSaved();
+    save();
+    savedNote.hidden = !state.savedId;
+  };
+  const drawSaved = () => setChildren(queriesGroup, group("Queries", saved, (sq) => el("li", { class: "bigtable-saved-query" },
+    el("button", { class: "link-button", type: "button", text: sq.name, title: `Open query ${sq.name}`, onclick: () => openSaved(sq) }),
+    bqMenu(`View actions for ${sq.name}`, [
+      { label: "Open query", run: () => openSaved(sq) },
+      { label: "Manage queries", disabled: true, title: BT_UNAVAILABLE_MANAGE, run: () => {} },
+      { label: "Delete query", danger: true, run: () => deleteSaved(sq) },
+    ]))));
+  const loadSaved = async () => {
+    try {
+      const res = await call("savedqueries");
+      saved = res.queries || [];
+      regions = res.regions || [];
+      // A deleted saved query's tabs are plain query tabs again.
+      for (const t of store.tabs) if (t.savedId && !saved.some((x) => x.id === t.savedId)) delete t.savedId;
+      drawSaved();
+    } catch (err) {
+      setChildren(queriesGroup, el("p", { class: "unavailable", text: `Queries: ${err.message}` }));
     }
   };
 
@@ -19655,6 +19807,57 @@ function renderBigtableStudio(panel, route, segments, project) {
 // Results and Explanation tabs under the editor. Its calls are the
 // provider's Studio (POST /api/studio/spanner). A statement that changes
 // data or schema runs after a confirmation that names the database.
+
+// btSaveDialog is Bigtable Studio's Save query dialog (a name and, under
+// Show advanced options, a Region) or a Save as view's (a View ID). It
+// settles with submit's answer, or null when cancelled.
+function btSaveDialog({ title, label, value, regions, submit }) {
+  return new Promise((settle) => {
+    let result = null;
+    const { dialog, close } = openModal({ labelledBy: "bigtable-save-title" });
+    const input = el("input", { type: "text", id: "bigtable-save-name", value, required: true, maxlength: "256" });
+    const error = el("p", { class: "form-error", role: "alert", hidden: true });
+    const primary = el("button", { type: "submit", class: "primary", id: "bigtable-save-submit", text: "Save" });
+    let region = null;
+    let advanced = [];
+    if (regions) {
+      region = el("select", { id: "bigtable-save-region" },
+        el("option", { value: "", text: "Default" }), ...regions.map((r) => el("option", { value: r.id, text: r.label })));
+      const box = el("div", { id: "bigtable-save-advanced", hidden: true },
+        el("label", { for: "bigtable-save-region", text: "Region" }), region,
+        el("p", { class: "form-help", text: "Optional. A saved query's region cannot be changed after it is created." }));
+      const toggle = el("button", { type: "button", class: "link-button", id: "bigtable-save-show-advanced", text: "Show advanced options",
+        "aria-expanded": "false", "aria-controls": "bigtable-save-advanced",
+        onclick: () => {
+          box.hidden = !box.hidden;
+          toggle.setAttribute("aria-expanded", box.hidden ? "false" : "true");
+          toggle.textContent = box.hidden ? "Show advanced options" : "Hide advanced options";
+        } });
+      advanced = [toggle, box, el("p", { class: "unavailable", text: BT_SAVED_NOTE })];
+    }
+    dialog.append(el("form", { class: "modal-body", novalidate: true, onsubmit: async (e) => {
+      e.preventDefault();
+      if (!input.value.trim()) { error.textContent = `Enter a ${label.toLowerCase()}.`; error.hidden = false; input.focus(); return; }
+      setBusy(primary, true);
+      try {
+        result = (await submit(input.value.trim(), region ? region.value : "")) || {};
+        close();
+      } catch (err) {
+        setBusy(primary, false);
+        error.textContent = err.message;
+        error.hidden = false;
+      }
+    } },
+      el("h2", { id: "bigtable-save-title", text: title }),
+      error,
+      el("label", { for: "bigtable-save-name", text: label }), input,
+      ...advanced,
+      el("div", { class: "modal-actions" },
+        el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }), primary)));
+    dialog.addEventListener("cb-closed", () => settle(result));
+    input.focus();
+  });
+}
 
 const STUDIO_SECTIONS = { spanner: renderSpannerStudio, "bigtable-instances": renderBigtableStudio };
 

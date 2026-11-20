@@ -19,6 +19,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -26,7 +28,10 @@ import (
 
 	"cloud.google.com/go/bigtable"
 	btapb "cloud.google.com/go/bigtable/admin/apiv2/adminpb"
+	"cloud.google.com/go/bigtable/apiv2/bigtablepb"
 	"google.golang.org/api/iterator"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
@@ -644,10 +649,15 @@ func clusterScalingMode(c *bigtable.ClusterInfo) string {
 }
 
 // tablesListing is an instance's Tables page: Google's columns, each table
-// a link to its page, with Edit table and Delete table on its row.
+// opening in Bigtable Studio as Google's table is reached there (#2027),
+// with Edit table and Delete table on its row, Open table page (the
+// CloudBurrow page of its rows, schema and extras), and an arrow listing
+// its replications, each cluster with its replication state ("Click the
+// arrow next to the table ID to expand a list of replications of the
+// table", https://docs.cloud.google.com/bigtable/docs/managing-tables).
 func (p bigtableInstancesProvider) tablesListing(ctx context.Context, project, instance string, clusters int) console.Listing {
-	list := console.Listing{Columns: []string{"Clusters", "Column families", "Change stream", "Deletion protection", "Current backups"},
-		NameColumn: "Table ID", Noun: "tables"}
+	list := console.Listing{Columns: []string{"Clusters", "Status", "Storage utilization", "Column families", "Change stream", "Deletion protection", "Current backups"},
+		NameColumn: "Table ID", Noun: "tables", ChildNoun: "replications"}
 	admin, err := bigtable.NewAdminClient(ctx, project, instance, localOpts(p.endpoint)...)
 	if err != nil {
 		list.Unavailable = "cannot reach the Bigtable admin API: " + err.Error()
@@ -669,9 +679,23 @@ func (p bigtableInstancesProvider) tablesListing(ctx context.Context, project, i
 		backups[lastSegment(b.GetSourceTable())]++
 	}
 	sort.Strings(tables)
+	var data bigtablepb.BigtableClient
+	if conn, err := grpc.NewClient(p.endpoint, grpc.WithTransportCredentials(insecure.NewCredentials())); err == nil {
+		defer conn.Close()
+		data = bigtablepb.NewBigtableClient(conn)
+	}
 	for _, t := range tables {
-		fields := map[string]string{"Clusters": strconv.Itoa(clusters), "Column families": "—", "Change stream": "Disabled",
-			"Deletion protection": "Disabled", "Current backups": strconv.Itoa(backups[t])}
+		fields := map[string]string{"Clusters": strconv.Itoa(clusters), "Status": "—", "Storage utilization": "—", "Column families": "—",
+			"Change stream": "Disabled", "Deletion protection": "Disabled", "Current backups": strconv.Itoa(backups[t])}
+		if n, ok := bigtableTableBytes(ctx, data, "projects/"+project+"/instances/"+instance+"/tables/"+t); ok {
+			fields["Storage utilization"] = bigtableBytes(n)
+		}
+		var replications []console.Resource
+		if rt, err := admin.TableAdminClientV2().GetTable(ctx, &btapb.GetTableRequest{
+			Name: "projects/" + project + "/instances/" + instance + "/tables/" + t, View: btapb.Table_REPLICATION_VIEW}); err == nil {
+			fields["Status"] = bigtableTableStatus(rt.GetClusterStates())
+			replications = bigtableReplications(rt.GetClusterStates())
+		}
 		var info *bigtable.TableInfo
 		if info, err = admin.TableInfo(ctx, t); err == nil {
 			names := make([]string, 0, len(info.FamilyInfos))
@@ -689,13 +713,107 @@ func (p bigtableInstancesProvider) tablesListing(ctx context.Context, project, i
 				fields["Deletion protection"] = "Enabled"
 			}
 		}
-		list.Items = append(list.Items, console.Resource{Name: t, Link: bigtableTablesHref(project, instance, t), Fields: fields,
-			Actions: tableRowActions(info, t), ActsOn: []string{instance, bigtableTablesSegment, t}})
+		actions := append(tableRowActions(info, t), console.Action{ID: "opentablepage", Label: "Open table page", Href: bigtableTablesHref(project, instance, t)})
+		list.Items = append(list.Items, console.Resource{Name: t, Link: bigtableStudioHref(project, instance, t), Fields: fields,
+			Actions: actions, ActsOn: []string{instance, bigtableTablesSegment, t}, Children: replications})
 	}
 	list.Total = len(list.Items)
-	list.Note = "Each table's page holds its rows, column families and every table action; Bigtable Studio queries them. " +
-		"Storage utilization is not shown: the emulator keeps every table in memory and reports no size."
+	list.Note = "A table opens in Bigtable Studio, as on Google's console; Open table page is CloudBurrow's page of its rows, schema, change stream, snapshots, authorized views and schema bundles. " +
+		"Status is each cluster's replication state (GetTable's REPLICATION_VIEW), and the arrow beside a table lists its replications. " +
+		"Storage utilization is the size of the table's data, the last offset_bytes SampleRowKeys reports (the bytes of every row before the table's end); " +
+		"Google's figure comes from Cloud Monitoring's disk metrics, compressed and replicated, which the emulator, holding each table in memory once, does not have."
 	return list
+}
+
+// bigtableTableStatus is a Tables row's Status: Ready when the table is
+// ready in every cluster, else each cluster with its replication state
+// (Initializing, Unplanned maintenance, ...), as GetTable reports them.
+func bigtableTableStatus(states map[string]*btapb.Table_ClusterState) string {
+	if len(states) == 0 {
+		return "—"
+	}
+	ids := make([]string, 0, len(states))
+	ready := true
+	for id, cs := range states {
+		ids = append(ids, id)
+		ready = ready && cs.GetReplicationState() == btapb.Table_ClusterState_READY
+	}
+	if ready {
+		return "Ready"
+	}
+	sort.Strings(ids)
+	parts := make([]string, 0, len(ids))
+	for _, id := range ids {
+		parts = append(parts, id+": "+bigtableReplicationState(states[id].GetReplicationState()))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// bigtableTableBytes is the size of a table's data: SampleRowKeys's last
+// offset_bytes, "approximate total storage space used by all rows in the
+// table which precede row_key" (bigtable.proto), where the last row key is
+// the table's end.
+func bigtableTableBytes(ctx context.Context, data bigtablepb.BigtableClient, table string) (int64, bool) {
+	if data == nil {
+		return 0, false
+	}
+	st, err := data.SampleRowKeys(ctx, &bigtablepb.SampleRowKeysRequest{TableName: table})
+	if err != nil {
+		return 0, false
+	}
+	var last int64
+	seen := false
+	for {
+		r, err := st.Recv()
+		if errors.Is(err, io.EOF) {
+			return last, seen
+		}
+		if err != nil {
+			return 0, false
+		}
+		last, seen = r.GetOffsetBytes(), true
+	}
+}
+
+// bigtableBytes is a table's size in binary units, "0 B" when it is empty.
+func bigtableBytes(n int64) string {
+	if n <= 0 {
+		return "0 B"
+	}
+	return formatBytes(n)
+}
+
+// bigtableReplications are a Tables row's replications: each cluster of
+// the table with its replication state, as GetTable's REPLICATION_VIEW
+// reports it.
+func bigtableReplications(states map[string]*btapb.Table_ClusterState) []console.Resource {
+	ids := make([]string, 0, len(states))
+	for id := range states {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	out := make([]console.Resource, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, console.Resource{Name: id, Fields: map[string]string{"Status": bigtableReplicationState(states[id].GetReplicationState())}})
+	}
+	return out
+}
+
+// bigtableReplicationState is a replication state in words: Ready,
+// Initializing, Planned maintenance, ...
+func bigtableReplicationState(s btapb.Table_ClusterState_ReplicationState) string {
+	word := strings.ReplaceAll(strings.ToLower(s.String()), "_", " ")
+	return strings.ToUpper(word[:1]) + word[1:]
+}
+
+// bigtableStudioHref opens an instance's Bigtable Studio, with a query tab
+// on table when one is named.
+func bigtableStudioHref(project, instance, table string) string {
+	href := bigtableInstanceTabHref(project, instance, "studio")
+	if table != "" {
+		href += "&table=" + url.QueryEscape(table)
+	}
+	return href
 }
 
 // --- tables ---
@@ -1157,7 +1275,8 @@ func (p bigtableInstancesProvider) DetailActions(ctx context.Context, project st
 		if err != nil {
 			return nil
 		}
-		return tableRowActions(info, path[2])
+		// The Explorer's Prevent deletion (#2027) is performed here too.
+		return append(tableRowActions(info, path[2]), preventDeletionAction(info))
 	case bigtableBackupsSegment:
 		return bigtableBackupActions()
 	case bigtableLogicalSegment:
@@ -1261,6 +1380,14 @@ func (p bigtableInstancesProvider) ActAt(ctx context.Context, project string, pa
 		return c.DeleteInstance(ctx, inst)
 	case len(path) == 3 && path[1] == bigtableTablesSegment && action == "edittable":
 		return tableAdmin(func(a *bigtable.AdminClient) error { return editTable(ctx, a, path[2], values) })
+	case len(path) == 3 && path[1] == bigtableTablesSegment && action == "preventdeletion":
+		protection := bigtable.Unprotected
+		if values["protected"] == "true" {
+			protection = bigtable.Protected
+		}
+		return tableAdmin(func(a *bigtable.AdminClient) error {
+			return a.UpdateTableWithDeletionProtection(ctx, path[2], protection)
+		})
 	case len(path) == 3 && path[1] == bigtableTablesSegment && action == "deletetable":
 		return tableAdmin(func(a *bigtable.AdminClient) error { return a.DeleteTable(ctx, path[2]) })
 	case len(path) == 3 && path[1] == bigtableClustersSegment && action == "editnodes":

@@ -39,7 +39,12 @@ import (
 )
 
 // bigtableInstancesProvider is Bigtable's second screen.
-type bigtableInstancesProvider struct{ endpoint string }
+type bigtableInstancesProvider struct {
+	endpoint string
+	// savedQueries is the record of Bigtable Studio's saved queries in the
+	// instance's state directory (bigtableSavedQueriesFile, #1858).
+	savedQueries string
+}
 
 func (bigtableInstancesProvider) ID() string    { return "bigtable-instances" }
 func (bigtableInstancesProvider) Title() string { return "Bigtable instances" }

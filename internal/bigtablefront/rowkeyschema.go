@@ -246,7 +246,7 @@ func (f *Front) listTables(ctx context.Context, req *btapb.ListTablesRequest) (p
 	if err != nil {
 		return nil, err
 	}
-	if v := req.GetView(); v == btapb.Table_SCHEMA_VIEW || v == btapb.Table_FULL {
+	if v := req.GetView(); v == btapb.Table_SCHEMA_VIEW || v == btapb.Table_FULL || v == btapb.Table_REPLICATION_VIEW || v == btapb.Table_ENCRYPTION_VIEW {
 		for _, t := range resp.GetTables() {
 			f.withConfig(t, v)
 		}

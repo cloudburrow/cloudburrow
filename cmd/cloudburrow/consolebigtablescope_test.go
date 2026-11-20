@@ -251,7 +251,7 @@ func TestConsoleBigtableInstancePicker(t *testing.T) {
 		}
 	}
 	if tab == nil || len(tab.Listing.Items) != 1 || tab.Listing.Items[0].Name != "audit" ||
-		tab.Listing.Items[0].Link != "/bigtable/audit?instance="+inst+"&project=demo" {
+		tab.Listing.Items[0].Link != "/bigtable-instances/"+inst+"?project=demo&tab=studio&table=audit" {
 		t.Errorf("the instance's Tables tab = %+v", tab)
 	}
 	if got := bigtableTablesHref("demo", bigtableInstance, "t"); got != "/bigtable/t?project=demo" {

@@ -1098,6 +1098,13 @@ tr.is-operating { background: var(--surface-alt); }
    Firestore document with no fields whose subcollections do (#875) — is in
    italics, as Google's console draws it. */
 tr.is-absent td { font-style: italic; color: var(--text-muted); }
+/* A row's arrow and the rows it lists under it: a Bigtable table's
+   replications (#2027). 24px keeps the target at WCAG 2.2's minimum. */
+.row-expander { width: 24px; height: 24px; margin-right: 4px; vertical-align: middle; }
+.row-expander svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; transition: transform 0.15s; }
+.row-expander.is-open svg { transform: rotate(90deg); }
+tr.child-row td { color: var(--text-muted); }
+tr.child-row td.child-name { padding-left: 40px; }
 tr.is-operating td { color: var(--text-muted); }
 tr.is-operating td:first-child {
   background-image: linear-gradient(90deg,
@@ -1903,6 +1910,7 @@ tr.is-inspected { background: var(--nav-selected); }
 @media (prefers-reduced-motion: reduce) {
   #nav,
   .nav-chevron,
+  .row-expander svg,
   .meter-fill,
   .panel,
   .picker-panel,

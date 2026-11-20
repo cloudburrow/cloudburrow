@@ -110,7 +110,15 @@ func TestBigtableInstancePickerThroughTheBrowser(t *testing.T) {
 	p.navigate("/bigtable-instances/" + id + q)
 	p.waitFor(`document.querySelector("#tab-tables") !== null`)
 	p.run(chromedp.Click(chromedp.CSS(`#tab-tables`)))
+	// The instance's Tables page opens a table in Bigtable Studio, as
+	// Google's does (#2027); its row's Open table page is the table's page.
 	p.clickText("#view td a", table)
+	p.waitFor(fmt.Sprintf(`location.pathname === "/bigtable-instances/%s" && new URLSearchParams(location.search).get("table") === %q`, id, table))
+	p.waitFor(fmt.Sprintf(`document.querySelector("#bigtable-builder-table")?.value === %q`, table))
+	p.navigate("/bigtable-instances/" + id + q + "&tab=tables")
+	p.waitFor(`document.querySelector("#view .overflow-trigger") !== null`)
+	p.run(chromedp.Click(chromedp.CSS(`#view .overflow-trigger`)))
+	p.clickText("[role=menu] button, .overflow-menu button", "Open table page")
 	p.waitFor(fmt.Sprintf(`location.pathname === "/bigtable/%s" && new URLSearchParams(location.search).get("instance") === %q`, table, id))
 	p.waitFor(`document.querySelector("#tab-families") !== null`)
 
