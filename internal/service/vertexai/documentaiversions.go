@@ -39,8 +39,8 @@ import (
 //   - TrainProcessorVersion: neither Enterprise Document OCR nor the Layout
 //     Parser is a trainable processor (training is the custom extractor's,
 //     classifier's and splitter's, which are not served): INVALID_ARGUMENT.
-//     EvaluateProcessorVersion and
-//     evaluations, which need a labelled dataset, are UNIMPLEMENTED.
+//     EvaluateProcessorVersion and the evaluations, which need a labelled
+//     dataset, are in documentaioutput.go (#1953).
 //
 // UNVERIFIED (re-read 2026-11-19: the manage-processor-versions page and the processorVersions reference do not say): the version display names and create times (taken from the
 // IDs), the codes and texts of the refusals, and that a refusal is the RPC's

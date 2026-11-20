@@ -52,8 +52,9 @@ import (
 //     type's pretrained default version), GetProcessor, ListProcessors,
 //     DeleteProcessor, EnableProcessor and DisableProcessor (operations,
 //     done when returned), kept in <state-dir>/documentai/processors.json.
-//   - ProcessDocument reads raw_document or inline_document content, or a
-//     gcs_document from the instance's Cloud Storage, of the documented
+//   - ProcessDocument reads raw_document or inline_document content (or
+//     the object its uri names, #1953), or a gcs_document from the
+//     instance's Cloud Storage, of the documented
 //     types (https://docs.cloud.google.com/document-ai/docs/file-types):
 //     PDF (each page rendered by PDFium at 300 DPI), PNG, JPEG, GIF, TIFF
 //     (its first page), BMP and WebP. Each page is read with Tesseract
@@ -65,7 +66,8 @@ import (
 //     FAILED_PRECONDITION. process_options' page_range selects pages;
 //     ocr_config.enable_symbol adds symbols; layout_config.chunking_config
 //     sets the chunk size; every other option is UNIMPLEMENTED rather
-//     than ignored, as are field_mask and schema_override.
+//     than ignored, as is schema_override. field_mask trims the Document
+//     (documentaioutput.go, #1953).
 //   - OCR_PROCESSOR answers Document.text and, a page each, pageNumber,
 //     dimension (pixels), layout, blocks, paragraphs, lines and tokens
 //     (each with textAnchor, confidence and boundingPoly, vertices and
@@ -455,7 +457,12 @@ func (d *documentAIService) ProcessDocument(ctx context.Context, req *documentai
 	if err != nil {
 		return nil, grpcError(err)
 	}
-	return &documentaipb.ProcessResponse{Document: doc}, nil
+	// The local processors have no human review (#1953).
+	review := humanReviewSkipped()
+	if req.GetSkipHumanReview() {
+		review.StateMessage = humanReviewSkippedByRequest
+	}
+	return &documentaipb.ProcessResponse{Document: doc, HumanReviewStatus: review}, nil
 }
 
 // processDocument runs a ProcessRequest.
@@ -471,7 +478,9 @@ func (s *Server) processDocument(ctx context.Context, req *documentaipb.ProcessR
 		return nil, err
 	}
 	if req.GetFieldMask() != nil {
-		return nil, apierror.Unimplemented("Not implemented here: field_mask: the whole Document is answered")
+		if err := checkDocumentMask(req.GetFieldMask()); err != nil {
+			return nil, err
+		}
 	}
 	opts := req.GetProcessOptions()
 	if err := checkProcessOptions(p.GetType(), opts); err != nil {
@@ -484,8 +493,26 @@ func (s *Server) processDocument(ctx context.Context, req *documentaipb.ProcessR
 		content, mimeType = src.RawDocument.GetContent(), src.RawDocument.GetMimeType()
 	case *documentaipb.ProcessRequest_InlineDocument:
 		content, mimeType = src.InlineDocument.GetContent(), src.InlineDocument.GetMimeType()
-		if src.InlineDocument.GetUri() != "" && content == nil {
-			return nil, apierror.Unimplemented("Not implemented here: an inline_document with a uri and no content")
+		if uri := src.InlineDocument.GetUri(); uri != "" && content == nil {
+			// Document.uri: "Currently supports Google Cloud Storage URI of
+			// the form gs://bucket_name/object_name" (#1953).
+			bucket, object, ok := splitGCS(uri, false)
+			if !ok {
+				return nil, apierror.InvalidArgument("Invalid inline_document.uri %q: it must be gs://bucket_name/object_name", uri)
+			}
+			s.mu.RLock()
+			objs := s.objects
+			s.mu.RUnlock()
+			if objs == nil {
+				return nil, apierror.FailedPrecondition("inline_document.uri needs Cloud Storage, which this instance does not serve")
+			}
+			var ct string
+			if content, ct, err = objs.Read(ctx, bucket, object, docAIMaxBytes+1); err != nil {
+				return nil, err
+			}
+			if mimeType == "" {
+				mimeType = ct
+			}
 		}
 	case *documentaipb.ProcessRequest_GcsDocument:
 		mimeType = src.GcsDocument.GetMimeType()
@@ -515,7 +542,12 @@ func (s *Server) processDocument(ctx context.Context, req *documentaipb.ProcessR
 	if req.GetImagelessMode() && p.GetType() == "OCR_PROCESSOR" {
 		limit = docAIMaxImagelessPages
 	}
-	return readDocument(ctx, p, content, mimeType, opts, limit, req.GetImagelessMode())
+	doc, err := readDocument(ctx, p, content, mimeType, opts, limit, req.GetImagelessMode())
+	if err != nil {
+		return nil, err
+	}
+	maskDocument(doc, req.GetFieldMask())
+	return doc, nil
 }
 
 // readDocument reads a document's pages, at most limit, with p's type.

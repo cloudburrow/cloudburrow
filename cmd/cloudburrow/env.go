@@ -685,7 +685,8 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 		"monitoring":             &e.Monitoring,
 		"compute":                &e.Compute,
 		// The local AI endpoint, which serves Vertex AI's Model Registry
-		// and Endpoints (#1940) to gcloud-setup and terraform.
+		// and Endpoints (#1940) to gcloud-setup and terraform, and Document
+		// AI (#1953), which terraform points document_ai_custom_endpoint at.
 		"localai":   &e.LocalAI,
 		"onnx":      &e.ONNX,
 		"tfconvert": &e.TFConvert,

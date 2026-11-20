@@ -6084,8 +6084,8 @@
     "Title": "Vertex AI PredictionService",
     "counts": {
       "Implemented": 1,
-      "Unimplemented": 10,
-      "Verified": 80
+      "Unimplemented": 7,
+      "Verified": 83
     },
     "rows": [
       {
@@ -6452,6 +6452,7 @@
         "method": "google.cloud.documentai.v1.DocumentProcessorService/BatchProcessDocuments",
         "status": "Verified",
         "tests": [
+          "test/compat/documentai1953_test.go:69 TestDocumentAIBatchShardsAndFieldMask",
           "test/compat/documentai_test.go:344 TestDocumentAIBatchProcess"
         ]
       },
@@ -6459,6 +6460,7 @@
         "method": "google.cloud.documentai.v1.DocumentProcessorService/CreateProcessor",
         "status": "Verified",
         "tests": [
+          "test/compat/documentai1953_test.go:200 TestTerraformDocumentAIProcessorDefaultVersion",
           "test/compat/documentai_test.go:72 TestDocumentAIProcessors",
           "test/compat/documentaicmek1950_test.go:67 TestDocumentAICMEK"
         ]
@@ -6467,6 +6469,7 @@
         "method": "google.cloud.documentai.v1.DocumentProcessorService/DeleteProcessor",
         "status": "Verified",
         "tests": [
+          "test/compat/documentai1953_test.go:200 TestTerraformDocumentAIProcessorDefaultVersion",
           "test/compat/documentai_test.go:72 TestDocumentAIProcessors"
         ]
       },
@@ -6500,8 +6503,10 @@
       },
       {
         "method": "google.cloud.documentai.v1.DocumentProcessorService/EvaluateProcessorVersion",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/documentai1953_test.go:29 TestDocumentAIEvaluationsAndReview"
+        ]
       },
       {
         "method": "google.cloud.documentai.v1.DocumentProcessorService/FetchProcessorTypes",
@@ -6512,13 +6517,16 @@
       },
       {
         "method": "google.cloud.documentai.v1.DocumentProcessorService/GetEvaluation",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/documentai1953_test.go:29 TestDocumentAIEvaluationsAndReview"
+        ]
       },
       {
         "method": "google.cloud.documentai.v1.DocumentProcessorService/GetProcessor",
         "status": "Verified",
         "tests": [
+          "test/compat/documentai1953_test.go:200 TestTerraformDocumentAIProcessorDefaultVersion",
           "test/compat/documentai_test.go:72 TestDocumentAIProcessors"
         ]
       },
@@ -6539,8 +6547,10 @@
       },
       {
         "method": "google.cloud.documentai.v1.DocumentProcessorService/ListEvaluations",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/documentai1953_test.go:29 TestDocumentAIEvaluationsAndReview"
+        ]
       },
       {
         "method": "google.cloud.documentai.v1.DocumentProcessorService/ListProcessorTypes",
@@ -6567,6 +6577,7 @@
         "method": "google.cloud.documentai.v1.DocumentProcessorService/ProcessDocument",
         "status": "Verified",
         "tests": [
+          "test/compat/documentai1953_test.go:69 TestDocumentAIBatchShardsAndFieldMask",
           "test/compat/documentai_test.go:72 TestDocumentAIProcessors",
           "test/compat/documentaicmek1950_test.go:67 TestDocumentAICMEK"
         ]
@@ -6580,6 +6591,7 @@
         "method": "google.cloud.documentai.v1.DocumentProcessorService/SetDefaultProcessorVersion",
         "status": "Verified",
         "tests": [
+          "test/compat/documentai1953_test.go:200 TestTerraformDocumentAIProcessorDefaultVersion",
           "test/compat/documentai_test.go:276 TestDocumentAIProcessorVersions"
         ]
       },
