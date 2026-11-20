@@ -640,6 +640,9 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 		// it: without this, `env --name x` for an instance started with
 		// --port-base exported the default ingress port (#863).
 		"ingress": &e.Ingress,
+		// The local AI endpoint (#1953), Document AI's, which
+		// `cloudburrow terraform` points document_ai_custom_endpoint at.
+		"localai": &e.LocalAI,
 	} {
 		addr, ok := live[name]
 		if !ok {

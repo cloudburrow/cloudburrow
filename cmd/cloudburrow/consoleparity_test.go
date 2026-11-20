@@ -1873,13 +1873,19 @@ var parityRows = []parityRow{
 	{Resource: "Document AI: batch processing", Service: "vertexai",
 		Methods:  []string{"DocumentProcessorService/BatchProcessDocuments"},
 		Provider: "documentai", Offers: "A processor's Batch process (#1930): a gs:// source (a folder, or one document) and a gs:// " +
-			"destination sent to BatchProcessDocuments, waited on, and each document's status and the folder its Document was " +
-			"written to shown",
+			"destination sent to BatchProcessDocuments, with the processor version to use and an optional pages per shard (#1953), " +
+			"waited on, and each document's status and the folder its Document (or its shards) was written to shown",
 		Tests: []string{"TestConsoleDocumentAIProcessors", "TestDocumentAIBatchProcessThroughThePage"}},
-	{Resource: "Document AI: training", Service: "vertexai",
-		Methods: []string{"DocumentProcessorService/TrainProcessorVersion"},
-		Excluded: "TrainProcessorVersion creates versions of custom extractors, classifiers and splitters, which are not served; " +
-			"for the served types it is only ever refused, and Google's console offers no training for them"},
+	{Resource: "Document AI: evaluations", Service: "vertexai",
+		Methods:  []string{"DocumentProcessorService/ListEvaluations", "DocumentProcessorService/GetEvaluation"},
+		Provider: "documentai", Offers: "A processor's Evaluate & test tab (#1953): ListEvaluations of the default version, which " +
+			"no served type has, and why (evaluation measures a custom processor's entities against a labeled dataset)",
+		Tests: []string{"TestConsoleDocumentAIProcessors", "TestDocumentAIProcessorVersionsAndEvaluationsThroughThePage"}},
+	{Resource: "Document AI: training and evaluation runs", Service: "vertexai",
+		Methods: []string{"DocumentProcessorService/TrainProcessorVersion", "DocumentProcessorService/EvaluateProcessorVersion"},
+		Excluded: "TrainProcessorVersion and EvaluateProcessorVersion train and score versions of custom extractors, classifiers " +
+			"and splitters on a labeled dataset, none of which is served; for the served types they are only ever refused, and " +
+			"Google's console offers neither for them"},
 	{Resource: "Speech-to-Text: recognizers", Service: "vertexai",
 		Methods: []string{"Speech/CreateRecognizer", "Speech/GetRecognizer", "Speech/ListRecognizers", "Speech/UpdateRecognizer",
 			"Speech/DeleteRecognizer", "Speech/UndeleteRecognizer", "Speech/Recognize"},

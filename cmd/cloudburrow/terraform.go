@@ -218,7 +218,19 @@ var terraformEndpoints = []terraformEndpoint{
 	// by default; the one v3 server binds any location's resource, in
 	// TestTerraformTagsLocationTagBinding.
 	{resourceManagerEndpoint, "tags_location_custom_endpoint", "GOOGLE_TAGS_LOCATION_CUSTOM_ENDPOINT", "/v3/", true, ""},
+	// Document AI (#1953), on the local AI endpoint: the provider's base
+	// path is https://{{location}}-documentai.googleapis.com/v1/, and the
+	// resources' URLs carry projects/{project}/locations/{location}, so the
+	// one port serves us and eu. google_document_ai_processor and
+	// google_document_ai_processor_default_version apply, plan clean and
+	// destroy in TestTerraformDocumentAIProcessorDefaultVersion.
+	{localAIEndpoint, "document_ai_custom_endpoint", "GOOGLE_DOCUMENT_AI_CUSTOM_ENDPOINT", "/v1/", true, ""},
 }
+
+// localAIEndpoint keys the local AI endpoint's rows (#1953): it is served
+// with a model, with embeddings or with Cloud Run (localAIServed), and is
+// not a service of its own.
+const localAIEndpoint config.Service = "localai"
 
 // resourceManagerEndpoint keys the Resource Manager rows. It is not a
 // selectable service: the project registry, and so its API, always runs.
@@ -277,6 +289,7 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 		config.ServiceBackupDR:   cfg.Endpoints.BackupDR,
 		config.ServicePrivateCA:  cfg.Endpoints.PrivateCA,
 		config.ServiceGKE:        cfg.Endpoints.GKE,
+		localAIEndpoint:          cfg.Endpoints.LocalAI,
 	}
 	enabled := map[config.Service]bool{resourceManagerEndpoint: true, serviceUsageService: true, apiKeysService: true, sqlAdminEndpoint: sqlAdminEnabled(cfg),
 		memorystoreAdminEndpoint: serviceEnabled(cfg, config.ServiceMemorystore)}
@@ -285,6 +298,7 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 	}
 	enabled[config.ServiceBackupDR] = backupDREnabled(cfg)
 	enabled[config.ServicePrivateCA] = privateCAEnabled(cfg)
+	enabled[localAIEndpoint] = localAIServed(cfg)
 	var set []terraformURL
 	var skipped []config.Service
 	for _, e := range terraformEndpoints {
@@ -355,9 +369,13 @@ func unpointedResources(cfg config.Config) []unpointedPrefix {
 	if bigtableHost(cfg) == "" {
 		out = append(out, unpointedPrefix{"google_bigtable_", "this instance does not serve Bigtable"})
 	}
-	run := false
+	run, docai := false, false
 	for _, e := range set {
 		run = run || e.service == config.ServiceRun
+		docai = docai || e.service == localAIEndpoint
+	}
+	if !docai {
+		out = append(out, unpointedPrefix{"google_document_ai_", "this instance does not serve Document AI (it is on the local AI endpoint)"})
 	}
 	if !run {
 		out = append(out,
