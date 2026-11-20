@@ -3116,8 +3116,10 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   const body = el("tbody");
   const headRow = el("tr");
   const footer = el("div", { class: "table-footer" });
+  // Named as Google's header button names it where the provider does
+  // (DeleteWorder, #1848): Cloud Tasks' Delete queue.
   const bulk = el("button", {
-    class: "secondary danger", text: "Delete", disabled: "disabled",
+    class: "secondary danger", text: caps.deleteSelected || "Delete", disabled: "disabled",
     onclick: () => deleteSelected(),
   });
   const selectionLabel = el("span", { class: "selection-count unavailable", text: "" });
@@ -3175,6 +3177,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
       title: `Delete ${names.length} ${names.length === 1 ? noun.replace(/s$/, "") : noun}?`,
       detail: [names.join(", "), DELETE_DETAIL[route.service]].filter(Boolean).join("\n\n"),
       confirmWord: names.length === 1 ? names[0] : String(names.length),
+      confirmLabel: caps.deleteSubmit || "Delete",
       style: caps.deleteConfirm || "name",
       onConfirm: async () => {
         for (const name of names) operating.add(name);
@@ -9321,6 +9324,7 @@ async function deleteResource(route, name, onDone, row = NO_ROW) {
     title: `Delete ${name}?`,
     detail: DELETE_DETAIL[route.service],
     confirmWord: name,
+    confirmLabel: capabilityOf(route.service).deleteSubmit || "Delete",
     style: capabilityOf(route.service).deleteConfirm || "name",
     onConfirm: async () => {
       const op = recordOperation(`Delete ${name}`);

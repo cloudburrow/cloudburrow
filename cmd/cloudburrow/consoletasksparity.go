@@ -93,24 +93,99 @@ func tasksDepthFields(fields map[string]string, ts []tasks.Task, now time.Time) 
 // tasksQueueActions are a queue row's menu: Pause queue or Resume queue by
 // its state, and Purge queue. Delete is the list's own.
 func tasksQueueActions(state string) []console.Action {
-	purge := console.Action{ID: "purge", Label: "Purge queue", Destructive: true, Confirm: tasksPurgeConfirm}
 	if strings.EqualFold(state, string(tasks.StatePaused)) {
-		return []console.Action{{ID: "resume", Label: "Resume queue"}, purge}
+		return []console.Action{tasksResume("resume"), tasksPurge("purge")}
 	}
-	return []console.Action{{ID: "pause", Label: "Pause queue"}, purge}
+	return []console.Action{tasksPause("pause"), tasksPurge("purge")}
 }
 
-const tasksPurgeConfirm = "Purge deletes every task in the queue. Tasks created up to about a minute " +
-	"after the purge may be deleted too, as on Cloud Tasks."
+// Google's prompts, from
+// https://docs.cloud.google.com/tasks/docs/deleting-appengine-queues-and-tasks
+// (read 2026-11-20): Pause queue, "At the prompt, click Pause"; Resume
+// queue, no prompt; Purge queue, "At the prompt, click Purge"; Delete
+// queue, "type the queue name, and then click Confirm"; Delete task, "At
+// the prompt, click Delete". Nothing is typed but the queue's name.
+const (
+	tasksPauseConfirm = "The queue stops dispatching its tasks until it is resumed. Tasks can still be " +
+		"added to it."
+	tasksPurgeConfirm = "Purge deletes every task in the queue. Tasks created up to about a minute " +
+		"after the purge may be deleted too, as on Cloud Tasks."
+	tasksDeleteQueueConfirm = "Deleting the queue deletes its tasks. A queue of the same name cannot be " +
+		"created for 3 days after, as on Cloud Tasks."
+	tasksDeleteTaskConfirm = "The task is deleted and is not dispatched again."
+)
+
+// tasksPause is Pause queue under id, confirmed by Pause alone.
+func tasksPause(id string) console.Action {
+	return console.Action{ID: id, Label: "Pause queue", Confirm: tasksPauseConfirm,
+		Submit: "Pause", ConfirmStyle: console.DeleteConfirmClick}
+}
+
+// tasksResume is Resume queue under id, performed on click.
+func tasksResume(id string) console.Action {
+	return console.Action{ID: id, Label: "Resume queue"}
+}
+
+// tasksPurge is Purge queue under id, confirmed by Purge alone.
+func tasksPurge(id string) console.Action {
+	return console.Action{ID: id, Label: "Purge queue", Destructive: true, Confirm: tasksPurgeConfirm,
+		Submit: "Purge", ConfirmStyle: console.DeleteConfirmClick}
+}
 
 // tasksTaskActions are a task's Run now and Delete task, on its row in the
-// queue's Tasks tab and on its own page.
+// queue's Tasks tab and on its own page; Delete task asks for Delete alone.
 func tasksTaskActions() []console.Action {
 	return []console.Action{
 		{ID: "runtask", Label: "Run now"},
-		{ID: "deletetask", Label: "Delete task", Destructive: true},
+		{ID: "deletetask", Label: "Delete task", Destructive: true, Confirm: tasksDeleteTaskConfirm,
+			Submit: "Delete", ConfirmStyle: console.DeleteConfirmClick},
 	}
 }
+
+// tasksDeleteSelected is the Tasks tab's header Delete task over the
+// checked tasks: "Select the checkbox for the task ... Click Delete task.
+// At the prompt, click Delete."
+const tasksDeleteSelected = "deletetasks"
+
+func tasksDeleteTasksAction() console.Action {
+	return console.Action{ID: tasksDeleteSelected, Label: "Delete task", Destructive: true,
+		SelectionField: "tasks", Fields: []console.Field{{Name: "tasks", Type: "hidden"}},
+		ConfirmTitle: "Delete task?", Confirm: "The checked tasks are deleted and are not dispatched again.",
+		Submit: "Delete", ConfirmStyle: console.DeleteConfirmClick}
+}
+
+// deleteTasks deletes the checked tasks of queue, each a task ID or its
+// full name inside the queue.
+func (p tasksProvider) deleteTasks(project, queue string, values map[string]string) error {
+	if err := tasksInProject(project, queue); err != nil {
+		return err
+	}
+	names := strings.Fields(values["tasks"])
+	if len(names) == 0 {
+		return errors.New("check at least one task")
+	}
+	for _, n := range names {
+		full := n
+		if !strings.Contains(n, "/tasks/") {
+			full = queue + "/tasks/" + n
+		}
+		if !strings.HasPrefix(full, queue+"/tasks/") {
+			return fmt.Errorf("%s is not a task of %s", n, queue)
+		}
+		if err := p.svc.Store().DeleteTask(full); err != nil {
+			return fmt.Errorf("%s: %w", n, err)
+		}
+	}
+	return nil
+}
+
+// DeleteWords name the list's Delete queue over the checked queues and its
+// prompt's Confirm (console.DeleteWorder).
+func (tasksProvider) DeleteWords() console.DeleteWords {
+	return console.DeleteWords{Selected: "Delete queue", Submit: "Confirm"}
+}
+
+var _ console.DeleteWorder = tasksProvider{}
 
 // Selection actions on the Queues list: Google selects queues, then the
 // header's Pause queue, Resume queue or Purge queue.
@@ -125,15 +200,17 @@ func (p tasksProvider) ListActions(context.Context, string) []console.Action {
 	if p.svc.Store() == nil {
 		return nil
 	}
-	field := func() []console.Field {
-		return []console.Field{{Name: "queues", Label: "Queues", Type: "textarea", Required: true,
-			Help: "The queues checked in the list, one per line."}}
+	// The checked queues, as hidden as Google's checkboxes: the header
+	// button acts at once, or after its prompt, with no form between.
+	sel := func(a console.Action) console.Action {
+		a.SelectionField = "queues"
+		a.Fields = []console.Field{{Name: "queues", Type: "hidden"}}
+		return a
 	}
 	return []console.Action{
-		{ID: tasksPauseSelected, Label: "Pause queue", SelectionField: "queues", Fields: field()},
-		{ID: tasksResumeSelected, Label: "Resume queue", SelectionField: "queues", Fields: field()},
-		{ID: tasksPurgeSelected, Label: "Purge queue", SelectionField: "queues", Fields: field(),
-			Destructive: true, Confirm: tasksPurgeConfirm},
+		sel(tasksPause(tasksPauseSelected)),
+		sel(tasksResume(tasksResumeSelected)),
+		sel(tasksPurge(tasksPurgeSelected)),
 	}
 }
 
@@ -166,31 +243,31 @@ func (p tasksProvider) actOnSelection(ctx context.Context, project, action strin
 
 // queuePageActions are the queue page's title line: Create task, Pause
 // queue or Resume queue, Purge queue and Delete queue, then the Logs tab's
-// Configure logging.
+// Enable logs or Disable logs and the Tasks tab's Delete task.
 func (p tasksProvider) queuePageActions(name string) []console.Action {
 	state := ""
 	var q tasks.Queue
 	if got, err := p.svc.Store().GetQueue(name); err == nil {
 		q, state = got, string(got.State)
 	}
-	pause := console.Action{ID: "pausequeue", Label: "Pause queue"}
+	pause := tasksPause("pausequeue")
 	if strings.EqualFold(state, string(tasks.StatePaused)) {
-		pause = console.Action{ID: "resumequeue", Label: "Resume queue"}
+		pause = tasksResume("resumequeue")
 	}
 	return []console.Action{
 		{ID: "createtask", Label: "Create task", Fields: tasksCreateTaskFields()},
 		pause,
-		{ID: "purgequeue", Label: "Purge queue", Destructive: true, Confirm: tasksPurgeConfirm},
+		tasksPurge("purgequeue"),
 		{ID: "deletequeue", Label: "Delete queue", Destructive: true, Leaves: true,
-			Confirm: "Deleting the queue deletes its tasks. A queue of the same name cannot be created for 3 days " +
-				"after, as on Cloud Tasks."},
+			Confirm: tasksDeleteQueueConfirm, Submit: "Confirm"},
 		tasksLoggingAction(q),
+		tasksDeleteTasksAction(),
 	}
 }
 
 func tasksQueuePageAction(action string) bool {
 	switch action {
-	case "pausequeue", "resumequeue", "purgequeue", "deletequeue", "logging":
+	case "pausequeue", "resumequeue", "purgequeue", "deletequeue", tasksEnableLogs, tasksDisableLogs, tasksDeleteSelected:
 		return true
 	}
 	return false
@@ -206,6 +283,8 @@ func (p tasksProvider) actOnQueue(ctx context.Context, project, name, action str
 	}
 	var err error
 	switch action {
+	case tasksDeleteSelected:
+		err = p.deleteTasks(project, name, values)
 	case "pausequeue":
 		_, err = api.PauseQueue(ctx, &cloudtaskspb.PauseQueueRequest{Name: name})
 	case "resumequeue":
@@ -214,39 +293,39 @@ func (p tasksProvider) actOnQueue(ctx context.Context, project, name, action str
 		_, err = api.PurgeQueue(ctx, &cloudtaskspb.PurgeQueueRequest{Name: name})
 	case "deletequeue":
 		_, err = api.DeleteQueue(ctx, &cloudtaskspb.DeleteQueueRequest{Name: name})
-	case "logging":
-		err = p.setLogging(ctx, name, values)
+	case tasksEnableLogs:
+		err = p.setSampling(ctx, name, 1)
+	case tasksDisableLogs:
+		err = p.setSampling(ctx, name, 0)
 	}
 	return err
 }
 
-// tasksLoggingAction is Configure logging on the Logs tab: logging on, with
-// the fraction of attempts written, or off.
+// tasksLoggingAction is the Logs tab's Enable logs, or Disable logs when
+// the queue logs, as https://docs.cloud.google.com/tasks/docs/monitor
+// (read 2026-11-20) has them: "Click Enable logs and, to confirm, click
+// Enable", and "Disable logs. To confirm, click Disable". The sampling
+// ratio is Edit queue's.
 func tasksLoggingAction(q tasks.Queue) console.Action {
-	on, ratio := "Off", "1.0"
 	if q.Logging != nil && q.Logging.SamplingRatio > 0 {
-		on, ratio = "On", strconv.FormatFloat(q.Logging.SamplingRatio, 'f', -1, 64)
+		return console.Action{ID: tasksDisableLogs, Label: "Disable logs", Submit: "Disable",
+			ConfirmStyle: console.DeleteConfirmClick,
+			Confirm:      "The queue's dispatch attempts stop being written to Cloud Logging. Entries already written are kept."}
 	}
-	return console.Action{ID: "logging", Label: "Configure logging", Fields: []console.Field{
-		{Name: "logging", Label: "Logs", Type: "radio", Required: true, Default: on, Options: []string{"On", "Off"},
-			Help: "On writes the queue's dispatch attempts to Cloud Logging, in the log " +
-				"cloudtasks.googleapis.com/task_operations_log."},
-		{Name: "samplingRatio", Label: "Sampling ratio", Type: "text", Default: ratio, ShowWhen: "logging=On",
-			Pattern: `^(0(\.[0-9]+)?|1(\.0+)?)$`,
-			Help:    "The fraction of attempts written, from 0.0 to 1.0. 1.0 logs every attempt."},
-	}}
+	return console.Action{ID: tasksEnableLogs, Label: "Enable logs", Submit: "Enable",
+		ConfirmStyle: console.DeleteConfirmClick,
+		Confirm: "Every dispatch attempt of the queue is written to Cloud Logging, in the log " +
+			"cloudtasks.googleapis.com/task_operations_log (sampling ratio 1.0; Edit queue changes it)."}
 }
 
-// setLogging is UpdateQueue of stackdriver_logging_config alone.
-func (p tasksProvider) setLogging(ctx context.Context, name string, values map[string]string) error {
-	ratio := 0.0
-	if values["logging"] == "On" {
-		v, err := strconv.ParseFloat(strings.TrimSpace(values["samplingRatio"]), 64)
-		if err != nil || v <= 0 || v > 1 {
-			return fmt.Errorf("sampling ratio %q is not a number above 0 and at most 1.0", values["samplingRatio"])
-		}
-		ratio = v
-	}
+// The Logs tab's actions.
+const (
+	tasksEnableLogs  = "enablelogs"
+	tasksDisableLogs = "disablelogs"
+)
+
+// setSampling is UpdateQueue of stackdriver_logging_config alone.
+func (p tasksProvider) setSampling(ctx context.Context, name string, ratio float64) error {
 	_, err := p.api().UpdateQueue(ctx, &cloudtaskspb.UpdateQueueRequest{
 		Queue: &cloudtaskspb.Queue{Name: name,
 			StackdriverLoggingConfig: &cloudtaskspb.StackdriverLoggingConfig{SamplingRatio: ratio}},
@@ -256,22 +335,29 @@ func (p tasksProvider) setLogging(ctx context.Context, name string, values map[s
 }
 
 // tasksLogsSection is the queue's Logs tab: its lines in the instance's
-// Cloud Logging, with Configure logging at the top, where Google's console
-// turns a queue's logging on or off.
+// Cloud Logging, with Enable logs or Disable logs at the top, where Google's
+// console turns a queue's logging on or off.
 func tasksLogsSection(q tasks.Queue) console.Section {
 	return console.Section{ID: "logs", Label: "Logs", Kind: console.KindLogs,
 		Note:    "Logging: " + tasksSamplingText(q) + ".",
 		Actions: []console.Action{tasksLoggingAction(q)}}
 }
 
-// tasksMetricsSection is the Metrics tab: Cloud Monitoring's charts, which
-// no local service provides.
-func tasksMetricsSection() console.Section {
+// tasksMetricsSection is the Metrics tab: Google's queue metrics, from
+// https://docs.cloud.google.com/tasks/docs/monitor (read 2026-11-20): API
+// requests, Queue depth, Task attempt count and Task attempt delays. They
+// are Cloud Monitoring time series, which no local service provides; the
+// queue's depth now is read from its tasks.
+func tasksMetricsSection(depth int) console.Section {
+	na := "Not available locally (Cloud Monitoring)"
 	return console.Section{ID: "metrics", Label: "Metrics", Kind: console.KindProperties,
-		Note: "Not available locally: a queue's metrics are Cloud Monitoring time series, and this instance " +
-			"does not run Cloud Monitoring. The Tasks tab and the Queues list show its depth.",
+		Note: "A queue's metrics are Cloud Monitoring time series, and this instance does not run " +
+			"Cloud Monitoring, so no chart is drawn. Queue depth is the number of tasks in the queue now.",
 		Groups: []console.PropertyGroup{{Heading: "Metrics", Properties: []console.Property{
-			{Label: "Cloud Monitoring", Value: "Not available locally"},
+			{Label: "API requests", Value: na},
+			{Label: "Queue depth", Value: strconv.Itoa(depth) + " now; " + na + " over time"},
+			{Label: "Task attempt count", Value: na},
+			{Label: "Task attempt delays", Value: na},
 		}}}}
 }
 
@@ -334,11 +420,11 @@ var _ console.ListActor = tasksProvider{}
 var _ console.CreateLayouter = tasksProvider{}
 
 // titleActions are the queue page's actions beside its title: all but
-// Configure logging, which is drawn on the Logs tab.
+// the Logs tab's and the Tasks tab's, which are drawn on those tabs.
 func (p tasksProvider) titleActions(name string) []console.Action {
 	var out []console.Action
 	for _, a := range p.queuePageActions(name) {
-		if a.ID != "logging" {
+		if a.ID != tasksEnableLogs && a.ID != tasksDisableLogs && a.ID != tasksDeleteSelected {
 			out = append(out, a)
 		}
 	}

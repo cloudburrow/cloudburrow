@@ -250,6 +250,9 @@ func (p tasksProvider) Detail(_ context.Context, project string, path []string) 
 		// A task carries the request it will make. That is what an operator
 		// opens a queue to check, and it was reachable from nowhere.
 		RowsOpenable: true,
+		// Google's checkbox on each task, then Delete task over the
+		// checked ones (#1848).
+		SelectActions: []console.Action{tasksDeleteTasksAction()},
 	}
 	tasks, err := st.ListTasks(name)
 	if err != nil {
@@ -266,8 +269,9 @@ func (p tasksProvider) Detail(_ context.Context, project string, path []string) 
 				last = fmt.Sprint(t.LastResponseCode)
 			}
 			listing.Items = append(listing.Items, console.Resource{
-				Name:    t.Name,
-				Actions: tasksTaskActions(),
+				Name:       t.Name,
+				Selectable: true,
+				Actions:    tasksTaskActions(),
 				Fields: map[string]string{
 					"Scheduled":     t.ScheduleTime.Format(time.RFC3339),
 					"Attempts":      fmt.Sprint(t.DispatchCount),
@@ -311,7 +315,7 @@ func (p tasksProvider) Detail(_ context.Context, project string, path []string) 
 		// the Logs tab is where the queue's logging is turned on or off.
 		Sections: []console.Section{
 			{ID: "tasks", Label: "Tasks", Listing: listing},
-			tasksMetricsSection(),
+			tasksMetricsSection(len(tasks)),
 			tasksLogsSection(queue),
 			config,
 			{ID: "permissions", Kind: console.KindPermissions},
@@ -5336,10 +5340,7 @@ func (p tasksProvider) DetailActions(_ context.Context, _ string, path []string)
 	case 2:
 		// Run now is RunTask (#1215): dispatched on the next pass, even on a
 		// paused queue or one at its rate limits.
-		return []console.Action{
-			{ID: "runtask", Label: "Run now"},
-			{ID: "deletetask", Label: "Delete task", Destructive: true},
-		}
+		return tasksTaskActions()
 	}
 	return nil
 }
