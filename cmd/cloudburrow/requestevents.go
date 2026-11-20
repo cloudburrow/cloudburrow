@@ -38,7 +38,7 @@ func callEvents(rec *admin.Recorder, reg *metrics.Registry, service string) grpc
 		code := rpccode.Code(c.Code).String()
 		// Counted with the same code the event records, so /metrics and
 		// /admin/events can never disagree about a call.
-		reg.Observe(service, c.Method, code, c.Duration)
+		reg.ObserveIn(projectOf(c.Resource), service, c.Method, code, c.Duration)
 		detail := map[string]string{
 			"code":        code,
 			"duration_ms": strconv.FormatInt(c.Duration.Milliseconds(), 10),
@@ -67,15 +67,15 @@ func requestEvents(rec *admin.Recorder, reg *metrics.Registry, service string) f
 	return func(r rest.Request) {
 		// The verb, not the path: a path names resources, and a label per
 		// secret would grow without bound.
-		reg.Observe(service, "JSON "+r.Method, strconv.Itoa(r.Status), r.Duration)
+		// The path after its version segment: /v1/ for KMS and Secret
+		// Manager, /v2/ for Cloud Run (#591).
+		_, res, _ := strings.Cut(strings.TrimPrefix(r.Path, "/"), "/")
+		reg.ObserveIn(projectOf(res), service, "JSON "+r.Method, strconv.Itoa(r.Status), r.Duration)
 		detail := map[string]string{
 			"code":        strconv.Itoa(r.Status),
 			"duration_ms": strconv.FormatInt(r.Duration.Milliseconds(), 10),
 			"transport":   "http",
 		}
-		// The path after its version segment: /v1/ for KMS and Secret
-		// Manager, /v2/ for Cloud Run (#591).
-		_, res, _ := strings.Cut(strings.TrimPrefix(r.Path, "/"), "/")
 		if p := projectOf(res); p != "" {
 			detail["project"] = p
 		}

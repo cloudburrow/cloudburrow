@@ -88,6 +88,10 @@ type consoleDeps struct {
 	privateCA *privateCAService
 	// gke is the Kubernetes Engine API (#1913), nil unless enabled.
 	gke *gkeService
+	// monitoring is Cloud Monitoring (#1939), nil unless enabled.
+	monitoring *monitoringService
+	// compute is the Compute Engine API (#1936), nil unless enabled.
+	compute *computeService
 	// sqlAdmin is the Cloud SQL Admin API, which restores Backup and DR
 	// backups; nil unless a Cloud SQL service is enabled.
 	sqlAdmin *sqladmin.Server
@@ -172,7 +176,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		}
 		providers = append(providers, projectsProvider{registry: d.projects}, h, tagsProvider{registry: d.projects},
 			projectIAMProvider{registry: d.projects, iam: d.iam}, iamRolesProvider{registry: d.projects}, iamGroupsProvider{registry: d.projects},
-			iamServiceAccountsProvider{registry: d.projects}, iamAuditProvider{registry: d.projects},
+			iamServiceAccountsProvider{registry: d.projects}, iamWorkloadIdentityProvider{registry: d.projects}, iamAuditProvider{registry: d.projects},
 			iamOrgPoliciesProvider{registry: d.projects}, iamLabelsProvider{registry: d.projects}, iamSettingsProvider{registry: d.projects})
 	}
 	if enabled[config.ServiceStorage] && storageAddr != "" {
@@ -203,6 +207,16 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	}
 	if enabled[config.ServiceTasks] && d.tasks != nil {
 		providers = append(providers, tasksProvider{svc: d.tasks, faults: d.faults})
+	}
+	if enabled[config.ServiceRun] {
+		// Agent Platform's Model Registry and Endpoints (#1940), through
+		// the official aiplatform client on the local AI endpoint, which
+		// Cloud Run starts.
+		var api vertexAPI
+		if d.localAI != nil {
+			api.addr = d.localAI.Addr
+		}
+		providers = append(providers, vertexModelsProvider{api: api}, vertexEndpointsProvider{api: api})
 	}
 	if enabled[config.ServiceRun] {
 		// Two screens of one product: services, and jobs with their
@@ -280,6 +294,26 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	// Certificate Authority Service (#1834) runs in this process too.
 	if enabled[config.ServicePrivateCA] && d.privateCA != nil {
 		providers = append(providers, privateCAProvider{svc: d.privateCA}, privateCATemplatesProvider{svc: d.privateCA})
+	}
+	// Cloud Monitoring (#1939) runs in this process too: Metrics explorer
+	// and Metrics management.
+	if enabled[config.ServiceMonitoring] && d.monitoring != nil {
+		screen := monitoringScreen{api: monitoringAPIOf(d.monitoring)}
+		providers = append(providers, monitoringExplorerProvider{screen}, monitoringMetricsProvider{screen})
+		// Alerting, uptime checks, dashboards, groups, services and
+		// snoozes (#1964).
+		admin := monitoringAdmin{api: monitoringServerOf(d.monitoring)}
+		providers = append(providers, monitoringAlertingProvider{admin}, monitoringIncidentsProvider{admin},
+			monitoringChannelsProvider{admin}, monitoringUptimeProvider{admin},
+			monitoringDashboardsProvider{monitoringAdmin: admin, metrics: screen}, monitoringGroupsProvider{admin},
+			monitoringServicesProvider{admin}, monitoringSnoozesProvider{admin})
+	}
+	// VPC network (#1936): the Compute Engine API's networks, subnets,
+	// firewall rules, routes and addresses, in this process.
+	if enabled[config.ServiceCompute] && d.compute != nil {
+		screen := computeScreen{svc: d.compute}
+		providers = append(providers, computeNetworksProvider{screen}, computeFirewallsProvider{screen},
+			computeRoutesProvider{screen}, computeAddressesProvider{screen})
 	}
 	if enabled[config.ServiceScheduler] && d.scheduler != nil {
 		providers = append(providers, schedulerProvider{svc: d.scheduler, faults: d.faults})
@@ -640,6 +674,8 @@ var serviceTitles = map[config.Service]string{
 	config.ServiceBackupDR:      "Backup and DR",
 	config.ServicePrivateCA:     "Certificate Authority Service",
 	config.ServiceGKE:           "Kubernetes Engine",
+	config.ServiceMonitoring:    "Cloud Monitoring",
+	config.ServiceCompute:       "VPC network",
 }
 
 func serviceTitle(s config.Service) string {

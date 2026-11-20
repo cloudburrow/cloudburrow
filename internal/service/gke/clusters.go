@@ -222,6 +222,9 @@ func (s *Server) CreateCluster(_ context.Context, req *containerpb.CreateCluster
 				n, len(zones), MaxNodesPerCluster)
 		}
 	}
+	if err := s.checkClusterVPC(c, p.project, p.location); err != nil {
+		return nil, err
+	}
 	if err := s.checkDisk(); err != nil {
 		return nil, err
 	}

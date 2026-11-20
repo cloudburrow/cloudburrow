@@ -1,0 +1,21 @@
+# A Compute Engine VM's image as a systemd container (#1963): the official
+# Debian or Ubuntu container image, by pinned digest, with systemd, sshd and
+# CloudBurrow's guest scripts. Distribution packages are installed from the
+# distribution's own archive; nothing here is linked into CloudBurrow.
+ARG BASE
+FROM ${BASE}
+ENV container=docker DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends systemd systemd-sysv dbus openssh-server sudo curl ca-certificates iproute2 procps less \
+ && apt-get clean && rm -rf /var/lib/apt/lists/* \
+ && rm -f /etc/ssh/ssh_host_* \
+ && (userdel -r ubuntu 2>/dev/null || true)
+COPY root/ /
+RUN chmod 0755 /usr/lib/cloudburrow/* \
+ && systemctl mask systemd-udevd.service systemd-udevd-kernel.socket systemd-udevd-control.socket getty.target console-getty.service systemd-logind.service \
+ && systemctl enable cloudburrow-network.service cloudburrow-guest-agent.service google-startup-scripts.service \
+ && (systemctl enable ssh.service 2>/dev/null || systemctl enable sshd.service) \
+ && echo '%google-sudoers ALL=(ALL:ALL) NOPASSWD:ALL' > /etc/sudoers.d/google_sudoers && chmod 0440 /etc/sudoers.d/google_sudoers \
+ && groupadd -f google-sudoers
+STOPSIGNAL SIGRTMIN+3
+CMD ["/sbin/init"]

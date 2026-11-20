@@ -11,9 +11,11 @@ import (
 	"cloud.google.com/go/iam/apiv1/iampb"
 	runpb "cloud.google.com/go/run/apiv2/runpb"
 	runv1 "google.golang.org/api/run/v1"
+	locationpb "google.golang.org/genproto/googleapis/cloud/location"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/cloudburrow/cloudburrow/internal/aipfilter"
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/paging"
 	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
@@ -61,13 +63,10 @@ type v1IAMServer interface {
 }
 
 // v1Locations lists a project's locations: the regions, and each location
-// holding one of its services, paged with pageSize and pageToken.
+// holding one of its services, paged with pageSize and pageToken and
+// filtered by an AIP-160 filter.
 func (s *Server) v1Locations(w http.ResponseWriter, r *http.Request) {
 	project := r.PathValue("ns")
-	if r.URL.Query().Get("filter") != "" {
-		v1Write(w, apierror.Unimplemented("projects.locations.list filter is not supported"), nil)
-		return
-	}
 	seen := map[string]bool{}
 	for _, id := range Regions {
 		seen[id] = true
@@ -87,8 +86,18 @@ func (s *Server) v1Locations(w http.ResponseWriter, r *http.Request) {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
+	// The AIP-160 filter, over each location as google.cloud.location
+	// describes it (the fields runv1.Location carries).
+	filter := r.URL.Query().Get("filter")
+	ids, err = aipfilter.LocationIDs(filter, ids, func(id string) (*locationpb.Location, error) {
+		return &locationpb.Location{Name: "projects/" + project + "/locations/" + id, LocationId: id, DisplayName: id}, nil
+	})
+	if err != nil {
+		v1Write(w, err, nil)
+		return
+	}
 	size, _ := strconv.Atoi(r.URL.Query().Get("pageSize"))
-	page, next, err := paging.Page("run-v1-locations:"+project, ids, r.URL.Query().Get("pageToken"), size)
+	page, next, err := paging.Page("run-v1-locations:"+project+"|"+filter, ids, r.URL.Query().Get("pageToken"), size)
 	if err != nil {
 		v1Write(w, apierror.InvalidArgument("%v", err), nil)
 		return

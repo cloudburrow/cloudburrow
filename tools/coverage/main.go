@@ -57,6 +57,7 @@ import (
 	runv1 "google.golang.org/api/run/v1"
 
 	apikeyssvc "github.com/cloudburrow/cloudburrow/internal/service/apikeys"
+	computesvc "github.com/cloudburrow/cloudburrow/internal/service/compute"
 	rmsvc "github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	serviceusagesvc "github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
 	sqladminsvc "github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
@@ -86,6 +87,8 @@ import (
 	_ "cloud.google.com/go/kms/apiv1/kmspb"
 	_ "cloud.google.com/go/logging/apiv2/loggingpb"
 	_ "cloud.google.com/go/memorystore/apiv1/memorystorepb"
+	_ "cloud.google.com/go/monitoring/apiv3/v2/monitoringpb"
+	_ "cloud.google.com/go/monitoring/dashboard/apiv1/dashboardpb"
 	_ "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	_ "cloud.google.com/go/redis/apiv1/redispb"
 	_ "cloud.google.com/go/redis/cluster/apiv1/clusterpb"
@@ -262,6 +265,10 @@ var areas = []area{
 	// Terraform call it. Its methods are the official generated client's
 	// (google.golang.org/api/apikeys/v2), from the server's own table.
 	{Key: "apikeys", Title: "API Keys API (v2)", Own: true, Methods: apikeysMethods()},
+	// The Compute Engine API's VPC networking (#1936), by discovery ID
+	// (google.golang.org/api/compute/v1), from the server's own table:
+	// the resources it serves, every one of their methods.
+	{Key: "compute", Title: "Compute Engine API (v1): VPC networking", Own: true, Methods: computeMethods()},
 	// The Backup and DR Service (#1433): CloudBurrow's own, JSON only, for
 	// Cloud SQL. Its methods are the official generated client's
 	// (google.golang.org/api/backupdr/v1).
@@ -270,6 +277,12 @@ var areas = []area{
 	// Resource Manager's port. Its methods are the official generated
 	// client's (google.golang.org/api/cloudidentity/v1).
 	{Key: "cloudidentity", Title: "Cloud Identity API (v1)", Own: true, Methods: cloudidentityMethods()},
+	// Workload Identity Federation (#1941): the IAM API's workload
+	// identity pools, JSON only, on Resource Manager's port, and the
+	// Security Token Service's token method on the metadata port. Its
+	// methods are the official generated clients'
+	// (google.golang.org/api/iam/v1 and sts/v1).
+	{Key: "workloadidentity", Title: "Workload Identity Federation (IAM v1 pools, STS v1)", Own: true, Methods: workloadIdentityMethods()},
 	// Certificate Authority Service (#1834): CloudBurrow's own, gRPC and
 	// JSON on one port. Its Locations, Operations and IAMPolicy mixins are
 	// the rows the scheduler and kms areas list (mixin keys are global).
@@ -277,6 +290,24 @@ var areas = []area{
 	// The Kubernetes Engine API (#1913): CloudBurrow's own, gRPC and JSON
 	// on one port, each cluster a kind cluster of its own.
 	{Key: "gke", Title: "Kubernetes Engine API (v1)", Own: true, Services: []string{"google.container.v1.ClusterManager"}},
+	// Cloud Monitoring (#1939, #1964): CloudBurrow's own, gRPC and JSON on
+	// one port, with the Dashboards API v1 beside v3. The Query service
+	// (MQL) is not registered and answers UNIMPLEMENTED.
+	{Key: "monitoring", Title: "Cloud Monitoring API (v3) and Dashboards API (v1)", Own: true, Services: []string{"google.monitoring.v3.MetricService",
+		"google.monitoring.v3.AlertPolicyService", "google.monitoring.v3.NotificationChannelService", "google.monitoring.v3.UptimeCheckService",
+		"google.monitoring.v3.GroupService", "google.monitoring.v3.ServiceMonitoringService", "google.monitoring.v3.SnoozeService",
+		"google.monitoring.v3.QueryService", "google.monitoring.dashboard.v1.DashboardsService"}},
+}
+
+// workloadIdentityMethods is every workload identity pool method of the
+// IAM v1 discovery document, and sts.token, from the server's own table.
+func workloadIdentityMethods() []string {
+	var out []string
+	for id := range rmsvc.WorkloadIdentityMethodStatuses() {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // cloudidentityMethods is every method of the cloudidentity v1 discovery
@@ -403,6 +434,17 @@ func serviceusageMethods() []string {
 func apikeysMethods() []string {
 	var out []string
 	for id := range apikeyssvc.MethodStatuses() {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// computeMethods is every method of the Compute Engine resources served,
+// from the server's own table (internal/service/compute).
+func computeMethods() []string {
+	var out []string
+	for id := range computesvc.MethodStatuses() {
 		out = append(out, id)
 	}
 	sort.Strings(out)
@@ -753,8 +795,8 @@ func loadRegistry(root string) (map[string]string, error) {
 	}
 	// The Cloud SQL Admin API's too (#1301), and Service Usage's (#1352).
 	// And Cloud Run v1's (#1533).
-	for _, statuses := range []map[string]bool{sqladminsvc.MethodStatuses(), serviceusagesvc.MethodStatuses(), apikeyssvc.MethodStatuses(), backupdrStatuses, runadapter.V1MethodStatuses(),
-		rmsvc.CloudIdentityMethodStatuses()} {
+	for _, statuses := range []map[string]bool{sqladminsvc.MethodStatuses(), serviceusagesvc.MethodStatuses(), apikeyssvc.MethodStatuses(), computesvc.MethodStatuses(), backupdrStatuses, runadapter.V1MethodStatuses(),
+		rmsvc.CloudIdentityMethodStatuses(), rmsvc.WorkloadIdentityMethodStatuses()} {
 		for id, isBuilt := range statuses {
 			if isBuilt {
 				r[id] = regImplemented

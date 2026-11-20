@@ -151,8 +151,21 @@ var terraformEndpoints = []terraformEndpoint{
 	// it: a pool's node_count is its instance group managers' targetSize,
 	// which the Kubernetes Engine port answers for its own pools' groups
 	// (internal/service/gke/compute.go), and every other Compute call 501,
-	// so a google_compute_* resource never reaches Google either.
+	// so a google_compute_* resource never reaches Google either. With
+	// the compute service enabled the next row sets it instead.
 	{config.ServiceGKE, "compute_custom_endpoint", "GOOGLE_COMPUTE_CUSTOM_ENDPOINT", "/compute/v1/", true, ""},
+	// Cloud Monitoring (#1939): google_monitoring_metric_descriptor.
+	{config.ServiceMonitoring, "monitoring_custom_endpoint", "GOOGLE_MONITORING_CUSTOM_ENDPOINT", "/", true, ""},
+	// The Compute Engine API's VPC networking (#1936), on its own port,
+	// which also answers the node pools' instance group managers:
+	// google_compute_network and google_compute_subnetwork apply, plan
+	// clean, update and destroy in TestTerraformComputeNetworkAndSubnetwork.
+	{config.ServiceCompute, "compute_custom_endpoint", "GOOGLE_COMPUTE_CUSTOM_ENDPOINT", "/compute/v1/", true, ""},
+	// Vertex AI (#1940), on the local AI endpoint, served with Cloud Run:
+	// google_vertex_ai_endpoint applies, is read back through the official
+	// client, plans clean, updates its labels and destroys in
+	// TestTerraformVertexAIEndpoint.
+	{localAIEndpoint, "vertex_ai_custom_endpoint", "GOOGLE_VERTEX_AI_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	// Firestore (#1331): google_firestore_document applies, plans clean,
 	// updates its fields and destroys in TestTerraformFirestoreDocument,
 	// over the documents REST API the emulator serves on its port. On the
@@ -278,6 +291,9 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 		config.ServiceBackupDR:   cfg.Endpoints.BackupDR,
 		config.ServicePrivateCA:  cfg.Endpoints.PrivateCA,
 		config.ServiceGKE:        cfg.Endpoints.GKE,
+		config.ServiceMonitoring: cfg.Endpoints.Monitoring,
+		config.ServiceCompute:    cfg.Endpoints.Compute,
+		localAIEndpoint:          cfg.Endpoints.LocalAI,
 	}
 	enabled := map[config.Service]bool{resourceManagerEndpoint: true, serviceUsageService: true, apiKeysService: true, sqlAdminEndpoint: sqlAdminEnabled(cfg),
 		memorystoreAdminEndpoint: serviceEnabled(cfg, config.ServiceMemorystore)}
@@ -286,10 +302,17 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 	}
 	enabled[config.ServiceBackupDR] = backupDREnabled(cfg)
 	enabled[config.ServicePrivateCA] = privateCAEnabled(cfg)
+	enabled[config.ServiceMonitoring] = monitoringEnabled(cfg)
+	enabled[localAIEndpoint] = serviceEnabled(cfg, config.ServiceRun)
 	var set []terraformURL
 	var skipped []config.Service
 	for _, e := range terraformEndpoints {
 		if !enabled[e.service] {
+			continue
+		}
+		// Compute Engine's own port, when served, answers what the GKE
+		// port's stub does (#1936).
+		if e.service == config.ServiceGKE && e.attr == "compute_custom_endpoint" && enabled[config.ServiceCompute] && ports[config.ServiceCompute] != 0 {
 			continue
 		}
 		if !e.verified || ports[e.service] == 0 {

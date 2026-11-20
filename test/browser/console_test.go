@@ -591,7 +591,14 @@ func decodeRemoteObject(v *runtime.RemoteObject, res any) error {
 // started again in the new context, within the same 30 seconds.
 func (p *tab) waitFor(expr string) {
 	p.t.Helper()
-	deadline := time.Now().Add(30 * time.Second)
+	p.waitForWithin(expr, 30*time.Second)
+}
+
+// waitForWithin is waitFor with its own limit, for what the page waits on
+// a long-running operation to show, as a model's deploy does.
+func (p *tab) waitForWithin(expr string, limit time.Duration) {
+	p.t.Helper()
+	deadline := time.Now().Add(limit)
 	for {
 		ok, err := chromedp.Run(p.ctx, chromedp.Poll[bool](expr, chromedp.WithPollingTimeout(time.Until(deadline))))
 		if err == nil && ok {

@@ -36,8 +36,8 @@ func TestTheTerraformProviderNeverPointsAtGoogle(t *testing.T) {
 			}
 			set, rows := 0, 0
 			for _, e := range terraformEndpoints {
-				if slices.Contains(services, e.service) {
-					rows++ // Run has three: Cloud Run v2, Artifact Registry and Cloud Build (#1304)
+				if slices.Contains(services, e.service) || (e.service == localAIEndpoint && slices.Contains(services, config.ServiceRun)) {
+					rows++ // Run has three: Cloud Run v2, Artifact Registry and Cloud Build (#1304); Vertex AI is served with it (#1940)
 				}
 				in := strings.Contains(body, e.attr)
 				if in && !e.verified {
@@ -84,6 +84,27 @@ func TestTerraformGetsTheKubernetesEngineAPI(t *testing.T) {
 	}
 	if slices.Contains(skipped, config.ServiceGKE) {
 		t.Errorf("gke is named as skipped: %v", skipped)
+	}
+}
+
+// TestTerraformComputeEndpointFollowsTheComputeService (#1936): with gke
+// alone compute_custom_endpoint is the GKE port's instance group managers;
+// with compute it is the Compute Engine port, named once.
+func TestTerraformComputeEndpointFollowsTheComputeService(t *testing.T) {
+	for _, tc := range []struct {
+		services []config.Service
+		want     string
+	}{
+		{[]config.Service{config.ServiceGKE}, `compute_custom_endpoint = "http://127.0.0.1:9030/compute/v1/"`},
+		{[]config.Service{config.ServiceGKE, config.ServiceCompute}, `compute_custom_endpoint = "http://127.0.0.1:9031/compute/v1/"`},
+		{[]config.Service{config.ServiceCompute}, `compute_custom_endpoint = "http://127.0.0.1:9031/compute/v1/"`},
+	} {
+		cfg := config.Default()
+		cfg.Services = tc.services
+		body, _ := terraformProvider(cfg, false)
+		if !strings.Contains(body, tc.want) || strings.Count(body, "compute_custom_endpoint") != 1 {
+			t.Errorf("%v: want %s once:\n%s", tc.services, tc.want, body)
+		}
 	}
 }
 

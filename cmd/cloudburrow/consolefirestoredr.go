@@ -57,7 +57,7 @@ func retentionDaysOf(s *adminpb.BackupSchedule, def int) int {
 
 // disasterRecoveryEdit is the tab's Edit, its values the database's
 // schedules as they are.
-func disasterRecoveryEdit(daily, weekly *adminpb.BackupSchedule) console.Action {
+func disasterRecoveryEdit(daily, weekly *adminpb.BackupSchedule, db *adminpb.Database) console.Action {
 	day := "SUNDAY"
 	if weekly != nil {
 		day = weekly.GetWeeklyRecurrence().GetDay().String()
@@ -66,7 +66,10 @@ func disasterRecoveryEdit(daily, weekly *adminpb.BackupSchedule) console.Action 
 	if weeks < 1 {
 		weeks = 1
 	}
+	pitr := db.GetPointInTimeRecoveryEnablement() == adminpb.Database_POINT_IN_TIME_RECOVERY_ENABLED
 	return console.Action{ID: editDisasterRecovery, Label: "Edit", Fields: []console.Field{
+		{Name: "pitr", Label: "Enable point-in-time recovery", Type: "checkbox", Default: strconv.FormatBool(pitr),
+			Help: "Keeps the database's versions for 7 days, readable at whole minutes beyond the past hour, for reads, exports and clones (#1942)."},
 		{Name: "daily", Label: "Daily", Type: "checkbox", Default: strconv.FormatBool(daily != nil),
 			Help: "A backup of the database each day."},
 		{Name: "dailyRetention", Label: "Daily retention period (days)", Type: "text", Pattern: `^[0-9]{1,2}$`,
@@ -80,6 +83,24 @@ func disasterRecoveryEdit(daily, weekly *adminpb.BackupSchedule) console.Action 
 			Default: strconv.Itoa(weeks), ShowWhen: "weekly",
 			Help: "How long each weekly backup is kept: up to 14 weeks."},
 	}}
+}
+
+// pitrNote is the point-in-time recovery settings Google's page shows: its
+// status, the retention period and the earliest version time.
+func pitrNote(db *adminpb.Database) string {
+	if db == nil {
+		return ""
+	}
+	state := "off"
+	if db.GetPointInTimeRecoveryEnablement() == adminpb.Database_POINT_IN_TIME_RECOVERY_ENABLED {
+		state = "on"
+	}
+	retention := "1 hour"
+	if r := db.GetVersionRetentionPeriod().AsDuration(); r >= 24*time.Hour {
+		retention = fmt.Sprintf("%d days", r/(24*time.Hour))
+	}
+	return fmt.Sprintf("Point-in-time recovery: %s. Retention period: %s. Earliest version time: %s. ",
+		state, retention, db.GetEarliestVersionTime().AsTime().UTC().Format(time.RFC3339))
 }
 
 // disasterRecoveryNote describes the schedules above the Backups table.
@@ -105,8 +126,11 @@ func (p firestoreDatabasesProvider) disasterRecovery(ctx context.Context, c *adm
 		sec.Unavailable = "listing backup schedules: " + err.Error()
 		return sec
 	}
-	sec.Note = disasterRecoveryNote(daily, weekly)
-	sec.Actions = []console.Action{disasterRecoveryEdit(daily, weekly)}
+	// Point-in-time recovery's settings, as Google's page shows them
+	// (#1942); a database that cannot be read shows the schedules alone.
+	d, _ := c.GetDatabase(ctx, &adminpb.GetDatabaseRequest{Name: db})
+	sec.Note = pitrNote(d) + disasterRecoveryNote(daily, weekly)
+	sec.Actions = []console.Action{disasterRecoveryEdit(daily, weekly, d)}
 	sec.Listing.Noun = "backups"
 	return sec
 }
@@ -125,6 +149,28 @@ func actDisasterRecovery(ctx context.Context, c *admin.FirestoreAdminClient, db 
 	daily, weekly, err := drSchedules(ctx, c, db)
 	if err != nil {
 		return err
+	}
+	// Enable point-in-time recovery (#1942), when the form names it.
+	if v := values["pitr"]; v == "true" || v == "false" {
+		d, err := c.GetDatabase(ctx, &adminpb.GetDatabaseRequest{Name: db})
+		if err != nil {
+			return err
+		}
+		want := adminpb.Database_POINT_IN_TIME_RECOVERY_DISABLED
+		if v == "true" {
+			want = adminpb.Database_POINT_IN_TIME_RECOVERY_ENABLED
+		}
+		if d.GetPointInTimeRecoveryEnablement() != want {
+			op, err := c.UpdateDatabase(ctx, &adminpb.UpdateDatabaseRequest{
+				Database:   &adminpb.Database{Name: db, PointInTimeRecoveryEnablement: want, Etag: d.GetEtag()},
+				UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"point_in_time_recovery_enablement"}}})
+			if err == nil {
+				_, err = op.Wait(ctx)
+			}
+			if err != nil {
+				return fmt.Errorf("point-in-time recovery: %w", err)
+			}
+		}
 	}
 	retain := func(s *adminpb.BackupSchedule, d time.Duration) error {
 		if s.GetRetention().AsDuration() == d {

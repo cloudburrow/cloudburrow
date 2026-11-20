@@ -11,6 +11,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/iamroles"
 	"github.com/cloudburrow/cloudburrow/internal/metadata"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
+	"github.com/cloudburrow/cloudburrow/internal/wif"
 )
 
 // serviceAccountDirectory is the metadata server's view of the IAM service
@@ -130,6 +131,16 @@ func signAuthorizer(creds *metadata.Credentials, d serviceAccountDirectory) reso
 // (serviceAccount:EMAIL): itself, a group it is in (nested too) or its
 // domain (#1812).
 func (d serviceAccountDirectory) heldBy(m, member string) bool {
+	if _, _, ok := wif.PoolOfPrincipal(member); ok {
+		// A federated subject (#1941) holds what its principal:// or
+		// one of its principalSet:// identifiers is granted.
+		for _, p := range d.reg.Principals(member) {
+			if strings.EqualFold(m, p) {
+				return true
+			}
+		}
+		return false
+	}
 	_, email, _ := strings.Cut(member, ":")
 	return strings.EqualFold(m, member) || d.reg.MemberNames(m, email)
 }

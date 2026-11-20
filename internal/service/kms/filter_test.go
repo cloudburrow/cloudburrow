@@ -76,15 +76,18 @@ func TestVersionStateFilter(t *testing.T) {
 		"(state=ENABLED":   codes.InvalidArgument,
 		"state ENABLED":    codes.InvalidArgument,
 		`state="ENABLED`:   codes.InvalidArgument,
-		"labels.env=prod":  codes.Unimplemented,
-		"state:ENABLED":    codes.Unimplemented,
-		"create_time>2020": codes.Unimplemented,
+		"labels.env=prod":  codes.InvalidArgument, // versions have no labels
+		"state>ENABLED":    codes.InvalidArgument, // enums take = != : only
+		"create_time>2020": codes.InvalidArgument, // not RFC 3339
 	} {
 		if _, err := list(filter, 0, ""); code(err) != want {
 			t.Errorf("%s = %v, want %s", filter, err, want)
 		}
 	}
-	if _, err := s.ListKeyRings(ctx, &kmspb.ListKeyRingsRequest{Parent: loc, Filter: "create_time>2020"}); code(err) != codes.Unimplemented {
-		t.Errorf("create_time>2020 on ListKeyRings = %v, want UNIMPLEMENTED", err)
+	if r, err := list("state:ENABLED", 0, ""); err != nil || numbers(r) != "1" {
+		t.Errorf("state:ENABLED = %q, %v; want 1", numbers(r), err)
+	}
+	if _, err := s.ListKeyRings(ctx, &kmspb.ListKeyRingsRequest{Parent: loc, Filter: "create_time>2020"}); code(err) != codes.InvalidArgument {
+		t.Errorf("create_time>2020 on ListKeyRings = %v, want INVALID_ARGUMENT", err)
 	}
 }

@@ -150,6 +150,42 @@ var DeleteConfirmRules = map[string]DeleteConfirmRule{
 	"speech-recognizers":    unverified,
 	"speech-custom-classes": unverified,
 	"speech-phrase-sets":    unverified,
+	// Workload Identity Federation (#1941): "Click Delete pool, then click
+	// Delete." and, for a provider, "Click Delete to delete the provider."
+	"iam-workload-identity": {Style: DeleteConfirmClick, Source: "https://docs.cloud.google.com/iam/docs/manage-workload-identity-pools-providers", Verified: true},
+	// Model Registry (#1940): "Click Delete on the confirmation screen."
+	"vertex-models": {Style: DeleteConfirmClick, Source: "https://docs.cloud.google.com/vertex-ai/docs/model-registry/delete-model", Verified: true},
+	// UNVERIFIED: "click Actions, and then click Delete endpoint." No dialog
+	// described (docs re-read 2026-11-19:
+	// https://docs.cloud.google.com/vertex-ai/docs/predictions/undeploy-model).
+	"vertex-endpoints": unverified,
+	// UNVERIFIED: Metrics management documents deleting exclusion rules
+	// only, not a metric (docs re-read 2026-11-19:
+	// https://docs.cloud.google.com/monitoring/metrics-management).
+	"monitoring-metrics": unverified,
+	// "In the confirmation dialog, select Delete."
+	"monitoring-alerting": {Style: DeleteConfirmClick, Source: "https://docs.cloud.google.com/monitoring/alerts/manage-alerts", Verified: true},
+	// "Click Delete in the confirmation dialog."
+	"monitoring-channels": {Style: DeleteConfirmClick, Source: "https://docs.cloud.google.com/monitoring/support/notification-options", Verified: true},
+	// UNVERIFIED: "open its More menu and choose Delete". No dialog
+	// described (docs re-read 2026-11-19:
+	// https://docs.cloud.google.com/monitoring/uptime-checks/manage).
+	"monitoring-uptime": unverified,
+	// "In the confirmation dialog, click Delete."
+	"monitoring-dashboards": {Style: DeleteConfirmClick, Source: "https://docs.cloud.google.com/monitoring/charts/dashboards", Verified: true},
+	// "In the Delete group and subgroup dialog, click Delete".
+	"monitoring-groups": {Style: DeleteConfirmClick, Source: "https://docs.cloud.google.com/monitoring/groups", Verified: true},
+	// UNVERIFIED: Delete service is offered for custom services; no dialog
+	// described (docs re-read 2026-11-19:
+	// https://docs.cloud.google.com/stackdriver/docs/solutions/slo-monitoring/ui/svc-overview).
+	"monitoring-services": unverified,
+	// VPC network (#1936): "In the message that appears, click Delete to
+	// confirm."
+	"vpc-networks": {Style: DeleteConfirmClick, Source: "https://docs.cloud.google.com/vpc/docs/create-modify-vpc-networks", Verified: true},
+	// "Click Delete again to confirm."
+	"vpc-firewalls": {Style: DeleteConfirmClick, Source: "https://docs.cloud.google.com/firewall/docs/using-firewalls", Verified: true},
+	// "Click Delete again to confirm."
+	"vpc-routes": {Style: DeleteConfirmClick, Source: "https://docs.cloud.google.com/vpc/docs/using-routes", Verified: true},
 }
 
 // deleteConfirmOf is p's confirmation style, empty for the default.

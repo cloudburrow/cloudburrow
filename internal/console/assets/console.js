@@ -75,12 +75,17 @@ function agentPlatformRoutes() {
       "Studio sends your own prompts to the local model."),
     // Models.
     page(AP_PATHS.localModels, "Local models", "Models", { service: "ai-local", screen: "local-models", listedWhenOff: true }),
-    absent(`${AP}/models`, "Model Registry", "Models", "projects.locations.models",
-      "Models uploaded or trained in a project, with their versions", AP_DOCS + "models"),
+    // The Model Registry (#1940), served with Cloud Run, which runs its
+    // deployed models; its off state is the not-served page.
+    page(`${AP}/models`, "Model Registry", "Models", { service: "vertex-models", listedWhenOff: true,
+      api: "projects.locations.models", about: "Models uploaded or trained in a project, with their versions",
+      docs: AP_DOCS + "models", instead: "Start CloudBurrow with --services including run, which runs deployed models." }),
     absent(`${AP}/tuning`, "Tuning", "Models", "projects.locations.tuningJobs",
       "Supervised and preference tuning jobs for Gemini and open models", AP_DOCS + "models"),
     page(AP_PATHS.predict, "Online prediction", "Models", { service: "ai-predict", screen: "predict", listedWhenOff: true }),
-    page(AP_PATHS.endpoints, "Endpoints", "Models", { service: null, screen: "ap-endpoints" }),
+    // Every endpoint (#1940): the registry's and Model Garden's, whose
+    // own page (?endpoint=) keeps its deploy progress and test.
+    page(AP_PATHS.endpoints, "Endpoints", "Models", { service: "vertex-endpoints", screen: "ap-endpoints", listedWhenOff: true }),
     absent(`${AP}/batch-predictions`, "Batch inference", "Models", "projects.locations.batchPredictionJobs",
       "Batch prediction jobs over Cloud Storage or BigQuery input", AP_DOCS + "models"),
     // Notebooks.
@@ -438,6 +443,19 @@ const ROUTES = [
   { path: "/speech/phrase-sets", service: "speech-phrase-sets", icon: "ai", title: "Phrase sets", kind: "Phrase set",
     section: "AI and machine learning", product: "speech", productTitle: "Speech-to-Text" },
 
+  // VPC network (#1936): Google's menu, at Google's paths: VPC networks
+  // (a network's page has its subnets, firewall rules and routes),
+  // Firewall, Routes and IP addresses, over the Compute Engine API's VPC
+  // networking in process.
+  { path: "/networking/networks/list", service: "vpc-networks", icon: "vpc", title: "VPC networks", kind: "VPC network",
+    section: "Networking", product: "vpc", productTitle: "VPC network" },
+  { path: "/networking/firewalls/list", service: "vpc-firewalls", icon: "vpc", title: "Firewall", kind: "Firewall rule",
+    section: "Networking", product: "vpc", productTitle: "VPC network" },
+  { path: "/networking/routes/list", service: "vpc-routes", icon: "vpc", title: "Routes", kind: "Route",
+    section: "Networking", product: "vpc", productTitle: "VPC network" },
+  { path: "/networking/addresses/list", service: "vpc-addresses", icon: "vpc", title: "IP addresses", kind: "IP address",
+    section: "Networking", product: "vpc", productTitle: "VPC network" },
+
   // Secret Manager (#1850): Google's menu, Secret Manager (the global
   // secrets), Regional secrets and Settings.
   { path: "/secrets", service: "secrets", title: "Secret Manager", navTitle: "Secret Manager", kind: "Secret",
@@ -498,8 +516,11 @@ const ROUTES = [
   // Undelete, Create key and Upload key.
   { path: "/iam-admin/serviceaccounts", service: "iam-service-accounts", icon: "iam", title: "Service Accounts", kind: "Service account", section: "IAM & Admin", logs: true,
     product: "iam", productTitle: "IAM & Admin" },
-  { path: "/iam-admin/workload-identity-pools", title: "Workload Identity Federation", service: null, requires: "iam", screen: "unavailable", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin",
-    unavailable: "Workload identity pools and providers are the IAM API's projects.locations.workloadIdentityPools, which CloudBurrow does not serve. A workload reaches this instance with a service account key, or with no credentials at all." },
+  // IAM & Admin > Workload Identity Federation (#1941): the project's
+  // workload identity pools, a pool's providers, Create pool with a first
+  // provider, Add provider, Edit, Disable, Enable, Delete and Restore.
+  { path: "/iam-admin/workload-identity-pools", service: "iam-workload-identity", icon: "iam", title: "Workload Identity Federation", kind: "Workload identity pool", section: "IAM & Admin",
+    product: "iam", productTitle: "IAM & Admin" },
   { path: "/iam-admin/workforce-identity-pools", title: "Workforce Identity Federation", service: null, requires: "iam", screen: "unavailable", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin",
     unavailable: "Workforce identity pools are the IAM API's locations.workforcePools, which CloudBurrow does not serve." },
   // Labels (#1864): the selected project's labels, Resource Manager's.
@@ -534,7 +555,33 @@ const ROUTES = [
   { path: "/iam-admin/principal-access-boundary", title: "Principal Access Boundary", service: null, requires: "iam", screen: "unavailable", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin",
     unavailable: "Principal access boundary policies are the IAM v3 API's, which CloudBurrow does not serve." },
 
-  { path: "/monitoring", service: null, screen: "monitoring", title: "Monitoring", section: "Operations" },
+  { path: "/monitoring", service: null, screen: "monitoring", title: "Monitoring", section: "Operations",
+    product: "monitoring", productTitle: "Monitoring" },
+  // Cloud Monitoring's Metrics explorer and Metrics management (#1939),
+  // over the Monitoring API v3 this instance serves.
+  { path: "/monitoring/metrics-explorer", service: "monitoring-explorer", screen: "metrics-explorer", icon: "monitoring",
+    title: "Metrics explorer", section: "Operations", product: "monitoring", productTitle: "Monitoring" },
+  { path: "/monitoring/metrics-management", service: "monitoring-metrics", icon: "monitoring", title: "Metrics management",
+    kind: "Metric descriptor", section: "Operations", product: "monitoring", productTitle: "Monitoring" },
+  // Alerting, its incidents and notification channels, Uptime checks,
+  // Dashboards, Groups, Services (SLOs) and Snoozes (#1964), over the same
+  // in-process API.
+  { path: "/monitoring/alerting", service: "monitoring-alerting", icon: "monitoring", title: "Alerting",
+    kind: "Alert policy", section: "Operations", product: "monitoring", productTitle: "Monitoring" },
+  { path: "/monitoring/alerting/incidents", service: "monitoring-incidents", icon: "monitoring", title: "Incidents",
+    kind: "Incident", section: "Operations", product: "monitoring", productTitle: "Monitoring" },
+  { path: "/monitoring/alerting/channels", service: "monitoring-channels", icon: "monitoring", title: "Notification channels",
+    kind: "Notification channel", section: "Operations", product: "monitoring", productTitle: "Monitoring" },
+  { path: "/monitoring/uptime", service: "monitoring-uptime", icon: "monitoring", title: "Uptime checks",
+    kind: "Uptime check", section: "Operations", product: "monitoring", productTitle: "Monitoring" },
+  { path: "/monitoring/dashboards", service: "monitoring-dashboards", icon: "monitoring", title: "Dashboards",
+    kind: "Dashboard", section: "Operations", product: "monitoring", productTitle: "Monitoring" },
+  { path: "/monitoring/groups", service: "monitoring-groups", icon: "monitoring", title: "Groups",
+    kind: "Group", section: "Operations", product: "monitoring", productTitle: "Monitoring" },
+  { path: "/monitoring/services", service: "monitoring-services", icon: "monitoring", title: "Services",
+    kind: "Service", section: "Operations", product: "monitoring", productTitle: "Monitoring" },
+  { path: "/monitoring/snoozes", service: "monitoring-snoozes", icon: "monitoring", title: "Snoozes",
+    kind: "Snooze", section: "Operations", product: "monitoring", productTitle: "Monitoring" },
   // Cloud Logging's menu in Google's order (#1863): Logs Explorer, Log
   // Analytics, Logs Dashboard, Log-based Metrics, Log Router, Logs Storage,
   // then the pages Google keeps elsewhere that CloudBurrow serves here
@@ -729,6 +776,8 @@ const ICONS = {
   // Cloud KMS: a key inside a shield.
   kms:       '<path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6z"/><circle cx="10" cy="11" r="2"/><path d="M12 11h4M15 11v2"/>',
   // Certificate Authority Service: a certificate with a seal.
+  // VPC network: three connected nodes.
+  vpc: '<circle cx="12" cy="5" r="2.5"/><circle cx="5" cy="18" r="2.5"/><circle cx="19" cy="18" r="2.5"/><path d="M11 7.2L6.2 15.8M13 7.2l4.8 8.6M7.5 18h9"/>',
   privateca: '<rect x="3" y="4" width="18" height="12" rx="1"/><path d="M7 8h10M7 11h6"/><circle cx="17" cy="16" r="3"/><path d="M15.5 18.5L15 22l2-1 2 1-.5-3.5"/>',
   // BigQuery: a magnifier over a bar chart.
   bigquery:  '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.2 15.2L21 21"/><path d="M8 12.5v-2M10.5 12.5v-4M13 12.5v-3"/>',
@@ -806,6 +855,8 @@ const CATEGORY_ICONS = {
   // A person: who may do what.
   "IAM & Admin": '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
   // A wrench.
+  // A network: nodes joined by links.
+  "Networking": '<circle cx="12" cy="5" r="2.5"/><circle cx="5" cy="18" r="2.5"/><circle cx="19" cy="18" r="2.5"/><path d="M11 7.2L6.2 15.8M13 7.2l4.8 8.6M7.5 18h9"/>',
   "Management tools": '<path d="M14.5 6.5a4 4 0 0 0 5 5L21 13l-2 2-1.5-1.5a4 4 0 0 1-5-5L5 16v3h3l7.5-7.5"/>',
 };
 
@@ -7639,6 +7690,13 @@ const DELETE_DETAIL = {
   "pubsub-snapshots": "Subscriptions can no longer seek to this snapshot. " +
             "No message is removed, and no subscription's delivery changes.",
   "logging-metrics": "The metric's definition is deleted. No log entry is removed.",
+  "monitoring-metrics": "The metric descriptor and every time series written to it are deleted.",
+  "monitoring-alerting": "The policy is deleted and its open incidents close. No time series is removed.",
+  "monitoring-channels": "The channel is deleted and removed from every policy that notifies it.",
+  "monitoring-uptime": "The check stops running. Its results are no longer charted.",
+  "monitoring-dashboards": "The dashboard is deleted. No time series is removed.",
+  "monitoring-groups": "The group and its subgroups are deleted. No resource is changed.",
+  "monitoring-services": "The service and its service-level objectives are deleted.",
   "logging-sinks": "The sink's definition is deleted. It delivered nothing, so nothing downstream changes.",
   "logging-exclusions": "Entries it matches are stored again from now on. Entries it dropped are not brought back.",
   "logging-saved-queries": "The saved query is deleted. No log entry is removed.",
@@ -7987,12 +8045,27 @@ function dispatch(view) {
   if (match.screen === "embeddings") return renderEmbeddings(view);
   if (match.screen === "local-models") return renderLocalModels(view);
   if (match.screen === "model-garden") return renderModelGarden(view);
-  if (match.screen === "ap-endpoints") return renderHFEndpoints(view);
+  if (match.screen === "ap-endpoints") {
+    // The registry's endpoints list and pages when served (#1940); Model
+    // Garden's deployment page otherwise, and for ?endpoint=.
+    const registry = SERVICES.some((sv) => sv.id === "vertex-endpoints");
+    if (!registry || new URLSearchParams(location.search).get("endpoint")) return renderHFEndpoints(view);
+    // Its own screen, so no create route is generated for it.
+    if (resourcePath.length === 1 && resourcePath[0] === "create") {
+      return renderCreatePage(view, { path: `${match.path}/create`, service: match.service, screen: "create",
+        title: `Create in ${match.title}`, of: match });
+    }
+    return resourcePath.length ? renderDetail(view, match, resourcePath) : renderList(view, match);
+  }
+  if (match.service === "vertex-models" && !SERVICES.some((sv) => sv.id === "vertex-models")) {
+    return renderNotServed(view, { ...match, api: null });
+  }
   if (match.screen === "agent-garden") return renderAgentGarden(view);
   if (match.screen === "not-served") return renderNotServed(view, match);
   if (match.screen === "ap-overview") return renderAgentPlatformOverview(view);
   if (match.screen === "instance") return renderInstance(view);
   if (match.screen === "monitoring") return renderMonitoring(view);
+  if (match.screen === "metrics-explorer") return renderMetricsExplorer(view, match);
   if (match.screen === "logs") return renderLogs(view);
   if (match.screen === "logs-dashboard") return renderLogsDashboard(view);
   if (match.screen === "log-analytics") return renderLogAnalytics(view, match);
@@ -10147,6 +10220,219 @@ async function productActivity() {
       foot: "Counted from the entries this instance still holds; the Logs " +
             "Explorer's timeline uses the same buckets.",
     })));
+}
+
+// --- Metrics explorer (#1939) -------------------------------------------
+//
+// Google's builder (docs.cloud.google.com/monitoring/charts/metrics-explorer):
+// Select a metric (a resource type, then a metric of it), Filter, and
+// Aggregation (the aligner and its alignment period applied to each series,
+// then the reducer that combines series and the labels it keeps), with a
+// time range above a line chart and the table of its series. Each Apply is
+// one ListTimeSeries, run by the server's builder query.
+
+const EXPLORER_RANGES = [
+  { label: "5 min", seconds: 300 }, { label: "15 min", seconds: 900 }, { label: "1 hour", seconds: 3600 },
+  { label: "6 hours", seconds: 21600 }, { label: "1 day", seconds: 86400 }, { label: "1 week", seconds: 604800 },
+];
+const EXPLORER_ALIGNERS = ["ALIGN_NONE", "ALIGN_DELTA", "ALIGN_RATE", "ALIGN_INTERPOLATE", "ALIGN_NEXT_OLDER", "ALIGN_MIN",
+  "ALIGN_MAX", "ALIGN_MEAN", "ALIGN_COUNT", "ALIGN_SUM", "ALIGN_STDDEV", "ALIGN_COUNT_TRUE", "ALIGN_COUNT_FALSE",
+  "ALIGN_FRACTION_TRUE", "ALIGN_PERCENTILE_99", "ALIGN_PERCENTILE_95", "ALIGN_PERCENTILE_50", "ALIGN_PERCENTILE_05",
+  "ALIGN_PERCENT_CHANGE"];
+const EXPLORER_REDUCERS = ["REDUCE_NONE", "REDUCE_MEAN", "REDUCE_MIN", "REDUCE_MAX", "REDUCE_SUM", "REDUCE_STDDEV",
+  "REDUCE_COUNT", "REDUCE_COUNT_TRUE", "REDUCE_COUNT_FALSE", "REDUCE_FRACTION_TRUE", "REDUCE_PERCENTILE_99",
+  "REDUCE_PERCENTILE_95", "REDUCE_PERCENTILE_50", "REDUCE_PERCENTILE_05"];
+
+// explorerChart draws every series against one time axis.
+function explorerChart(rows, label) {
+  const NS = "http://www.w3.org/2000/svg";
+  const W = 720, H = 260, L = 56, R = 12, T = 12, B = 28;
+  const series = rows.map((r) => {
+    let pts = [];
+    try { pts = JSON.parse((r.fields || {}).points || "[]"); } catch { pts = []; }
+    return { name: r.name, pts: pts.map((p) => ({ t: new Date(p.at).getTime(), v: p.value })) };
+  });
+  const all = series.flatMap((s) => s.pts.filter((p) => Number.isFinite(p.v)));
+  if (!all.length) return el("p", { class: "unavailable", text: "No data is available for the selected time frame." });
+  let tMin = Math.min(...all.map((p) => p.t)), tMax = Math.max(...all.map((p) => p.t));
+  if (tMax === tMin) { tMin -= 30000; tMax += 30000; }
+  let yMin = Math.min(0, ...all.map((p) => p.v)), yMax = Math.max(...all.map((p) => p.v));
+  if (yMax === yMin) yMax = yMin + 1;
+  const sx = (t) => L + (t - tMin) / (tMax - tMin) * (W - L - R);
+  const sy = (v) => T + (1 - (v - yMin) / (yMax - yMin)) * (H - T - B);
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("class", "explorer-chart");
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", `${label}: ${series.length} time series, ${all.length} points`);
+  const add = (tag, attrs, text) => {
+    const n = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, String(v));
+    if (text !== undefined) n.textContent = text;
+    svg.append(n);
+    return n;
+  };
+  for (let i = 0; i <= 4; i++) {
+    const v = yMin + (yMax - yMin) * i / 4;
+    add("line", { x1: L, x2: W - R, y1: sy(v), y2: sy(v), class: "explorer-grid" });
+    add("text", { x: L - 6, y: sy(v) + 4, "text-anchor": "end", "font-size": 11, class: "explorer-axis" }, bqShortNumber(v));
+  }
+  for (let i = 0; i <= 4; i++) {
+    const t = tMin + (tMax - tMin) * i / 4;
+    add("text", { x: sx(t), y: H - 8, "text-anchor": "middle", "font-size": 11, class: "explorer-axis" },
+      new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+  }
+  series.forEach((s, k) => {
+    const colour = BQ_SERIES_COLOURS[k % BQ_SERIES_COLOURS.length];
+    const pts = s.pts.filter((p) => Number.isFinite(p.v));
+    if (pts.length > 1) {
+      add("polyline", { points: pts.map((p) => `${sx(p.t).toFixed(1)},${sy(p.v).toFixed(1)}`).join(" "),
+        fill: "none", stroke: colour, "stroke-width": 2, class: "explorer-line" });
+    }
+    pts.forEach((p) => add("circle", { cx: sx(p.t), cy: sy(p.v), r: 2.5, fill: colour })
+      .append(Object.assign(document.createElementNS(NS, "title"),
+        { textContent: `${s.name}: ${p.v} at ${new Date(p.t).toLocaleString()}` })));
+  });
+  return el("div", { class: "explorer-chart-wrap" }, svg,
+    el("ul", { class: "bq-chart-legend" }, ...series.map((s, k) => el("li", {},
+      el("span", { class: "bq-swatch", style: `background:${BQ_SERIES_COLOURS[k % BQ_SERIES_COLOURS.length]}` }),
+      el("span", { text: " " + s.name })))));
+}
+
+async function renderMetricsExplorer(view, match) {
+  const caps = capabilityOf("monitoring-explorer");
+  if (!caps.id) return renderUnavailable(view, { ...match, unavailable:
+    "Metrics explorer reads Cloud Monitoring, which this instance does not serve. Start it with --services including monitoring." });
+  const project = currentProject();
+  const header = pageHeader("Metrics explorer", project ? `Project ${project}` : "All projects");
+  setChildren(view, header, loadingState(3, { what: "metrics" }));
+  let metrics, resources;
+  try {
+    [metrics, resources] = await Promise.all([
+      api(`/api/resources/monitoring-explorer?project=${encodeURIComponent(project)}`),
+      project
+        ? send(`/api/query/monitoring-explorer?project=${encodeURIComponent(project)}`, "POST", { Path: ["resource-types"], Values: {} })
+            .then((r) => r.listing || {})
+        : Promise.resolve({ items: [] }),
+    ]);
+  } catch (err) {
+    return setChildren(view, header, errorState("Metrics unavailable", String(err.message),
+      () => renderMetricsExplorer(view, match)));
+  }
+  if (metrics.prompt) return setChildren(view, header, emptyState("Choose a project", metrics.prompt));
+  const descriptors = metrics.items || [];
+  const resourceTypes = (resources.items || []).map((r) => r.name);
+  const params = new URLSearchParams(location.search);
+
+  const select = (id, label, options, value) => {
+    const s = el("select", { id, "aria-label": label },
+      ...options.map((o) => el("option", { value: o.value, text: o.label, selected: o.value === value })));
+    return s;
+  };
+  // Select a metric: the resource type narrows the metrics to those written
+  // against it; "" is every resource type.
+  const resourceSelect = select("explorer-resource", "Resource type",
+    [{ value: "", label: "All resource types" }, ...resourceTypes.map((r) => ({ value: r, label: r }))], params.get("resource") || "");
+  const metricSelect = el("select", { id: "explorer-metric", "aria-label": "Metric" });
+  const fillMetrics = () => {
+    const r = resourceSelect.value;
+    const shown = descriptors.filter((d) => {
+      const types = ((d.fields || {})["Resource types"] || "").split(", ").filter(Boolean);
+      return !r || !types.length || types.includes(r);
+    });
+    const want = metricSelect.value || params.get("metric") || "";
+    setChildren(metricSelect, el("option", { value: "", text: "Select a metric" }),
+      ...shown.map((d) => el("option", { value: d.name, selected: d.name === want,
+        text: (d.fields || {})["Display name"] && d.fields["Display name"] !== "—" ? `${d.fields["Display name"]} (${d.name})` : d.name })));
+  };
+  fillMetrics();
+  resourceSelect.addEventListener("change", fillMetrics);
+  const filterInput = el("input", { id: "explorer-filter", type: "text", "aria-label": "Filter",
+    placeholder: 'metric.labels.env = "prod"', value: params.get("filter") || "" });
+  const alignerSelect = select("explorer-aligner", "Aligner",
+    EXPLORER_ALIGNERS.map((a) => ({ value: a, label: a })), params.get("aligner") || "ALIGN_NONE");
+  const periodInput = el("input", { id: "explorer-period", type: "number", min: "1", "aria-label": "Alignment period (seconds)",
+    value: params.get("period") || "60" });
+  const reducerSelect = select("explorer-reducer", "Reducer",
+    EXPLORER_REDUCERS.map((r) => ({ value: r, label: r })), params.get("reducer") || "REDUCE_NONE");
+  const groupInput = el("input", { id: "explorer-groupby", type: "text", "aria-label": "Group by",
+    placeholder: "metric.labels.env", value: params.get("groupBy") || "" });
+  let range = Number(params.get("range") || 3600);
+  const rangeGroup = el("div", { class: "actions", role: "group", "aria-label": "Time range" });
+  const drawRanges = () => setChildren(rangeGroup, ...EXPLORER_RANGES.map((r) => el("button", {
+    type: "button", class: r.seconds === range ? "primary" : "secondary", "aria-pressed": String(r.seconds === range),
+    text: r.label, onclick: () => { range = r.seconds; drawRanges(); run(); } })));
+  drawRanges();
+
+  const chartHost = el("div", { class: "explorer-chart-host", "aria-live": "polite" });
+  const tableHost = el("div", { class: "explorer-table-host" });
+  const apply = el("button", { type: "button", class: "primary", text: "Apply" });
+
+  const field = (label, control, help) => el("div", { class: "explorer-field" },
+    el("label", { for: control.id, text: label }), control, help ? el("p", { class: "field-help", text: help }) : null);
+  const builder = el("aside", { class: "card explorer-builder", "aria-label": "Builder" },
+    el("h2", { text: "Select a metric" }),
+    field("Resource type", resourceSelect), field("Metric", metricSelect),
+    el("h2", { text: "Filter" }),
+    field("Filter", filterInput, "ANDed terms on metric.labels.* and resource.labels.*, with = != starts_with() …"),
+    el("h2", { text: "Aggregation" }),
+    field("Aligner", alignerSelect, "Applied to each time series over the alignment period."),
+    field("Alignment period (seconds)", periodInput),
+    field("Reducer", reducerSelect, "Combines the aligned time series."),
+    field("Group by", groupInput, "Comma separated labels the reducer keeps."),
+    apply);
+
+  async function run() {
+    const metric = metricSelect.value;
+    if (!metric) {
+      setChildren(chartHost, el("p", { class: "unavailable", text: "Select a metric to chart it." }));
+      setChildren(tableHost);
+      return;
+    }
+    const values = { metric, resource: resourceSelect.value, filter: filterInput.value, aligner: alignerSelect.value,
+      alignmentPeriod: periodInput.value, reducer: reducerSelect.value, groupBy: groupInput.value, range: String(range) };
+    const q = new URLSearchParams(location.search);
+    for (const [k, v] of Object.entries({ metric, resource: values.resource, filter: values.filter, aligner: values.aligner,
+      period: values.alignmentPeriod, reducer: values.reducer, groupBy: values.groupBy, range: values.range })) {
+      if (v) q.set(k, v); else q.delete(k);
+    }
+    history.replaceState(history.state, "", location.pathname + "?" + q.toString());
+    setChildren(chartHost, loadingState(2, { what: "time series" }));
+    let data;
+    try {
+      data = (await send(`/api/query/monitoring-explorer?project=${encodeURIComponent(project)}`, "POST",
+        { Path: ["time-series"], Values: values })).listing || {};
+    } catch (err) {
+      setChildren(chartHost, errorState("Time series unavailable", String(err.message), run));
+      setChildren(tableHost);
+      return;
+    }
+    const rows = data.items || [];
+    setChildren(chartHost,
+      el("div", { class: "chart-head" }, el("h3", { text: metric }),
+        el("span", { class: "chart-now", text: `${rows.length} time series` })),
+      explorerChart(rows, metric),
+      data.note ? el("p", { class: "chart-foot unavailable mono", text: data.note }) : null);
+    const cols = ["Time series", ...(data.columns || [])];
+    setChildren(tableHost, rows.length
+      ? el("table", { class: "explorer-table", "aria-label": "Time series" },
+          el("thead", {}, el("tr", {}, ...cols.map((c) => el("th", { scope: "col", text: c })))),
+          el("tbody", {}, ...rows.map((r) => el("tr", {},
+            el("td", { class: "mono", text: r.name }),
+            ...(data.columns || []).map((c) => el("td", { text: (r.fields || {})[c] || "" }))))))
+      : el("p", { class: "unavailable", text: "No time series match." }));
+    announce(`Metrics explorer: ${rows.length} time series`);
+  }
+  apply.addEventListener("click", run);
+  metricSelect.addEventListener("change", run);
+
+  setChildren(view, header,
+    el("div", { class: "explorer-toolbar" }, rangeGroup),
+    descriptors.length ? null : el("p", { class: "unavailable",
+      text: "This project has no metrics yet. Write a time series, create a metric in Metrics management, or create a log-based metric." }),
+    el("div", { class: "explorer" }, builder, el("section", { class: "card explorer-results", "aria-label": "Chart" }, chartHost, tableHost)));
+  announce("Metrics explorer");
+  run();
 }
 
 async function renderMonitoring(view) {

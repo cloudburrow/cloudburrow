@@ -21,6 +21,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/cloudburrow/cloudburrow/internal/aipfilter"
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/lro"
 	"github.com/cloudburrow/cloudburrow/internal/modelgarden"
@@ -266,6 +267,10 @@ func (es *endpointService) garden() (*modelgarden.Manager, error) {
 }
 
 func (es *endpointService) GetEndpoint(_ context.Context, req *aiplatformpb.GetEndpointRequest) (*aiplatformpb.Endpoint, error) {
+	if r := es.s.regEndpoint(req.GetName()); r != nil {
+		e, err := r.getEndpoint(req.GetName())
+		return e, grpcError(err)
+	}
 	m, err := es.garden()
 	if err != nil {
 		return nil, grpcError(err)
@@ -281,26 +286,57 @@ func (es *endpointService) GetEndpoint(_ context.Context, req *aiplatformpb.GetE
 	return endpointProto(m, e), nil
 }
 
+var vertexEndpointFilter = []aipfilter.Option{
+	aipfilter.Fields("endpoint", "display_name", "labels"),
+	aipfilter.Computed("endpoint", func(m proto.Message) string {
+		n := m.(*aiplatformpb.Endpoint).GetName()
+		return n[strings.LastIndexByte(n, '/')+1:]
+	}),
+}
+
 func (es *endpointService) ListEndpoints(_ context.Context, req *aiplatformpb.ListEndpointsRequest) (*aiplatformpb.ListEndpointsResponse, error) {
-	m, err := es.garden()
-	if err != nil {
-		return nil, grpcError(err)
+	m, r := es.s.modelGarden(), es.s.registry()
+	if m == nil && r == nil {
+		return nil, grpcError(gardenUnavailable())
 	}
 	p, l, err := parseParent("parent", req.GetParent())
 	if err != nil {
 		return nil, grpcError(err)
 	}
-	if req.GetFilter() != "" {
-		return nil, grpcError(apierror.Unimplemented("ListEndpoints filter is not supported"))
+	if strings.Contains(req.GetFilter(), "base_model_name") {
+		return nil, grpcError(apierror.Unimplemented("ListEndpoints filter on base_model_name is not supported"))
 	}
-	out := &aiplatformpb.ListEndpointsResponse{}
-	for _, e := range m.Endpoints(p, l) {
-		out.Endpoints = append(out.Endpoints, endpointProto(m, e))
+	// Model Garden's endpoints and the Model Registry's (#1940).
+	var all []*aiplatformpb.Endpoint
+	if m != nil {
+		for _, e := range m.Endpoints(p, l) {
+			all = append(all, endpointProto(m, e))
+		}
 	}
-	return out, nil
+	if r != nil {
+		all = append(all, r.listEndpoints(p, l)...)
+	}
+	// ListEndpointsRequest documents the filter's fields (endpoint, the ID;
+	// display_name; labels) and order_by's (display_name, create_time,
+	// update_time).
+	all, err = aipfilter.Apply(req.GetFilter(), all, vertexEndpointFilter...)
+	if err != nil {
+		return nil, grpcError(err)
+	}
+	if err := aipfilter.SortBy(req.GetOrderBy(), all, aipfilter.Fields("display_name", "create_time", "update_time")); err != nil {
+		return nil, grpcError(err)
+	}
+	items, next, err := aipfilter.Page("vertex-endpoints:"+req.GetParent()+"|"+req.GetFilter()+"|"+req.GetOrderBy(), all, req.GetPageToken(), int(req.GetPageSize()))
+	if err != nil {
+		return nil, grpcError(err)
+	}
+	return &aiplatformpb.ListEndpointsResponse{Endpoints: items, NextPageToken: next}, nil
 }
 
-func (es *endpointService) UndeployModel(_ context.Context, req *aiplatformpb.UndeployModelRequest) (*longrunningpb.Operation, error) {
+func (es *endpointService) UndeployModel(ctx context.Context, req *aiplatformpb.UndeployModelRequest) (*longrunningpb.Operation, error) {
+	if r := es.s.regEndpoint(req.GetEndpoint()); r != nil {
+		return es.s.regUndeploy(ctx, r, req)
+	}
 	m, err := es.garden()
 	if err != nil {
 		return nil, grpcError(err)
@@ -328,6 +364,12 @@ func (es *endpointService) UndeployModel(_ context.Context, req *aiplatformpb.Un
 }
 
 func (es *endpointService) DeleteEndpoint(_ context.Context, req *aiplatformpb.DeleteEndpointRequest) (*longrunningpb.Operation, error) {
+	if r := es.s.regEndpoint(req.GetName()); r != nil {
+		if err := r.deleteEndpoint(req.GetName()); err != nil {
+			return nil, grpcError(err)
+		}
+		return es.s.doneDelete(req.GetName())
+	}
 	m, err := es.garden()
 	if err != nil {
 		return nil, grpcError(err)
@@ -406,6 +448,10 @@ func (ms *modelService) garden() (*modelgarden.Manager, error) {
 }
 
 func (ms *modelService) GetModel(_ context.Context, req *aiplatformpb.GetModelRequest) (*aiplatformpb.Model, error) {
+	if r := ms.s.regModel(req.GetName()); r != nil {
+		x, err := r.get(req.GetName())
+		return x, grpcError(err)
+	}
 	m, err := ms.garden()
 	if err != nil {
 		return nil, grpcError(err)
@@ -423,25 +469,51 @@ func (ms *modelService) GetModel(_ context.Context, req *aiplatformpb.GetModelRe
 }
 
 func (ms *modelService) ListModels(_ context.Context, req *aiplatformpb.ListModelsRequest) (*aiplatformpb.ListModelsResponse, error) {
-	m, err := ms.garden()
-	if err != nil {
-		return nil, grpcError(err)
+	m, r := ms.s.modelGarden(), ms.s.registry()
+	if m == nil && r == nil {
+		return nil, grpcError(gardenUnavailable())
 	}
 	p, l, err := parseParent("parent", req.GetParent())
 	if err != nil {
 		return nil, grpcError(err)
 	}
-	if req.GetFilter() != "" {
-		return nil, grpcError(apierror.Unimplemented("ListModels filter is not supported"))
+	filter, err := parseListFilter(req.GetFilter())
+	if err != nil {
+		return nil, grpcError(err)
 	}
-	out := &aiplatformpb.ListModelsResponse{}
-	for _, x := range m.ModelList(p, l) {
-		out.Models = append(out.Models, modelProto(m, x))
+	var all []*aiplatformpb.Model
+	if m != nil {
+		for _, x := range m.ModelList(p, l) {
+			all = append(all, modelProto(m, x))
+		}
+	}
+	if r != nil {
+		all = append(all, r.list(p, l)...)
+	}
+	var items []listItem
+	for _, x := range all {
+		if filter.match(x.GetDisplayName(), x.GetLabels()) {
+			items = append(items, x)
+		}
+	}
+	page, next, err := pageOf(items, req.GetPageSize(), req.GetPageToken())
+	if err != nil {
+		return nil, grpcError(err)
+	}
+	out := &aiplatformpb.ListModelsResponse{NextPageToken: next}
+	for _, x := range page {
+		out.Models = append(out.Models, x.(*aiplatformpb.Model))
 	}
 	return out, nil
 }
 
 func (ms *modelService) DeleteModel(_ context.Context, req *aiplatformpb.DeleteModelRequest) (*longrunningpb.Operation, error) {
+	if r := ms.s.regModel(req.GetName()); r != nil {
+		if err := r.delete(req.GetName()); err != nil {
+			return nil, grpcError(err)
+		}
+		return ms.s.doneDelete(req.GetName())
+	}
 	m, err := ms.garden()
 	if err != nil {
 		return nil, grpcError(err)
@@ -538,6 +610,11 @@ func (s *Server) restTranscoder() *rest.Transcoder {
 			opRule("/v1/{name=projects/*/locations/*/operations/*}"),
 			opRule("/v1/{name=projects/*/locations/*/endpoints/*/operations/*}"),
 			opRule("/v1/{name=projects/*/locations/*/models/*/operations/*}"),
+			// gcloud ai endpoints deploy-model polls its operation under
+			// v1beta1 (#1940); it is the same operation.
+			opRule("/v1beta1/{name=projects/*/locations/*/operations/*}"),
+			opRule("/v1beta1/{name=projects/*/locations/*/endpoints/*/operations/*}"),
+			opRule("/v1beta1/{name=projects/*/locations/*/models/*/operations/*}"),
 		}}
 		s.registerModelGarden(t)
 		documentaipb.RegisterDocumentProcessorServiceServer(t, &documentAIService{s: s}) // documentai.go, #1799
@@ -560,7 +637,11 @@ func documentAIPath(p string) bool {
 func (s *Server) serveREST(w http.ResponseWriter, r *http.Request, body []byte) {
 	v2 := strings.HasPrefix(r.URL.Path, "/v2/") && (strings.Contains(r.URL.Path, "/recognizers") || strings.Contains(r.URL.Path, "/customClasses") ||
 		strings.Contains(r.URL.Path, "/phraseSets") || strings.Contains(r.URL.Path, "/operations/"))
-	if !v2 && (!strings.HasPrefix(r.URL.Path, "/v1/") || (s.modelGarden() == nil && !documentAIPath(r.URL.Path))) {
+	// gcloud ai endpoints deploy-model polls its operation under v1beta1
+	// (#1940).
+	beta := r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1beta1/") && strings.Contains(r.URL.Path, "/operations/")
+	if !v2 && ((!strings.HasPrefix(r.URL.Path, "/v1/") && !beta) ||
+		(s.modelGarden() == nil && s.registry() == nil && !documentAIPath(r.URL.Path))) {
 		s.notFound(w, r)
 		return
 	}

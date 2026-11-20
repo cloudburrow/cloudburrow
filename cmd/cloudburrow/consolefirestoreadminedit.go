@@ -275,7 +275,7 @@ func firestoreTabActions() map[string][]console.Action {
 			{ID: "createvectorindex", Label: "Create vector index", Fields: createVectorIndexFields()}},
 		"fields":       {{ID: "addfield", Label: "Add Exemption", Fields: add}},
 		"importexport": transfer[:2],
-		"schedules":    {disasterRecoveryEdit(nil, nil)},
+		"schedules":    {disasterRecoveryEdit(nil, nil, nil)},
 		"ttl":          {createTTLAction()},
 	}
 }

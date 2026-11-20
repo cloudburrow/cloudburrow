@@ -16,10 +16,13 @@ import (
 // and the API's clients read a pool's size from them, not from the pool:
 // Terraform's google_container_node_pool reads node_count as the instance
 // group managers' targetSize, through Compute Engine's
-// instanceGroupManagers.get. CloudBurrow does not serve Compute Engine, so
+// instanceGroupManagers.get. Without the compute service (#1936),
 // this port answers those reads (get, and list by name) for its own pools' groups, under
 // /compute/v1/ as Compute's paths are, and every other Compute path with
-// 501: a client pointed here never falls through to Google.
+// 501: a client pointed here never falls through to Google. With it, the
+// Compute Engine API's own port answers them too, through
+// ServeInstanceGroupManagers, and cloudburrow terraform points
+// compute_custom_endpoint there.
 
 const computeBase = "https://www.googleapis.com/compute/v1/"
 
@@ -87,6 +90,17 @@ func (s *Server) zoneIGMsLocked(project, zone string) map[string]map[string]any 
 // serveCompute answers instanceGroupManagers.get and .list for the pools'
 // groups.
 func (s *Server) serveCompute(w http.ResponseWriter, r *http.Request) {
+	if s.ServeInstanceGroupManagers(w, r) {
+		return
+	}
+	computeError(w, http.StatusNotImplemented, "notImplemented",
+		fmt.Sprintf("Not available locally: CloudBurrow serves no Compute Engine API on the Kubernetes Engine port, only a node pool's instance group managers (%s %s); enable the compute service for its VPC networking.", r.Method, r.URL.Path))
+}
+
+// ServeInstanceGroupManagers answers instanceGroupManagers.get and .list
+// for the pools' groups, and reports whether r was one of them: the
+// Compute Engine API's own port (#1936) answers them through it.
+func (s *Server) ServeInstanceGroupManagers(w http.ResponseWriter, r *http.Request) bool {
 	if r.Method == http.MethodGet {
 		if m := igmPath.FindStringSubmatch(r.URL.Path); m != nil {
 			s.mu.Lock()
@@ -95,10 +109,10 @@ func (s *Server) serveCompute(w http.ResponseWriter, r *http.Request) {
 			if igm == nil {
 				computeError(w, http.StatusNotFound, "notFound",
 					fmt.Sprintf("The resource 'projects/%s/zones/%s/instanceGroupManagers/%s' was not found", m[1], m[2], m[3]))
-				return
+				return true
 			}
 			writeJSON(w, igm)
-			return
+			return true
 		}
 		if m := igmListPath.FindStringSubmatch(r.URL.Path); m != nil {
 			want := ""
@@ -107,7 +121,7 @@ func (s *Server) serveCompute(w http.ResponseWriter, r *http.Request) {
 				if fm == nil {
 					computeError(w, http.StatusNotImplemented, "notImplemented",
 						fmt.Sprintf("Not available locally: a filter other than one name comparison (%q).", f))
-					return
+					return true
 				}
 				want = fm[1]
 			}
@@ -127,11 +141,10 @@ func (s *Server) serveCompute(w http.ResponseWriter, r *http.Request) {
 			}
 			writeJSON(w, map[string]any{"kind": "compute#instanceGroupManagerList", "items": items,
 				"selfLink": computeBase + "projects/" + m[1] + "/zones/" + m[2] + "/instanceGroupManagers"})
-			return
+			return true
 		}
 	}
-	computeError(w, http.StatusNotImplemented, "notImplemented",
-		fmt.Sprintf("Not available locally: CloudBurrow serves no Compute Engine API, only a Kubernetes Engine node pool's instance group managers (%s %s).", r.Method, r.URL.Path))
+	return false
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

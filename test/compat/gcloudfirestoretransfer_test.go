@@ -27,7 +27,7 @@ func TestGcloudFirestoreTransfer(t *testing.T) {
 	sc := firestoreStorage(t, h) // asks for CLOUDBURROW_TEST_FIRESTORE_STORAGE
 	fs := firestoreClient(t, h)
 	gc := gcloudAdminSession(t, h.Project(), "firestore")
-	ctx := h.Context()
+	ctx := minuteContext(t) // waits for a whole minute (#1942)
 	project := "projects/" + h.Project()
 	db := project + "/databases/(default)"
 	bh := bucket(t, h, sc)
@@ -74,7 +74,7 @@ func TestGcloudFirestoreTransfer(t *testing.T) {
 		t.Errorf("gcloud's restored database: %s, want %s", got, all)
 	}
 	gc("firestore", "databases", "clone", "--source-database", db,
-		"--snapshot-time", time.Now().UTC().Truncate(time.Minute).Format(time.RFC3339), "--destination-database", "gcloud-cloned")
+		"--snapshot-time", nextWholeMinute().UTC().Format(time.RFC3339), "--destination-database", "gcloud-cloned")
 	cloned, err := firestore.NewClientWithDatabase(ctx, h.Project(), "gcloud-cloned")
 	if err != nil {
 		t.Fatal(err)

@@ -291,8 +291,16 @@ func (a *Admin) ExportDocuments(ctx context.Context, req *adminpb.ExportDocument
 		return nil, err
 	}
 	start := a.now()
-	if st := req.GetSnapshotTime(); st != nil {
-		return nil, status.Error(codes.Unimplemented, "snapshot_time is not served here: the emulator keeps no earlier versions of the documents, so an export is of the documents as they are now")
+	// An export at a snapshot time (#1942) reads the documents as they
+	// were then, which the emulator keeps (pitr.go).
+	snapshot := req.GetSnapshotTime()
+	if snapshot != nil {
+		if err := a.checkSnapshotTime(dbName, "snapshot_time", snapshot, true); err != nil {
+			return nil, err
+		}
+		if entities {
+			return nil, status.Error(codes.Unimplemented, "snapshot_time is not served here for a Datastore mode database: the Datastore emulator keeps no earlier versions of its entities")
+		}
 	}
 	if entities {
 		// A Datastore mode database's entities, exported by the
@@ -320,7 +328,7 @@ func (a *Admin) ExportDocuments(ctx context.Context, req *adminpb.ExportDocument
 	if err := gcs.bucketExists(ctx, bucket); err != nil {
 		return nil, err
 	}
-	all, err := a.readAll(ctx, dbName)
+	all, err := a.readAllAt(ctx, dbName, nil, snapshot)
 	if err != nil {
 		return nil, err
 	}
@@ -359,6 +367,9 @@ func (a *Admin) ExportDocuments(ctx context.Context, req *adminpb.ExportDocument
 		ProgressBytes:     &adminpb.Progress{EstimatedWork: docBytes(docs), CompletedWork: docBytes(docs)},
 		CollectionIds:     req.GetCollectionIds(), NamespaceIds: req.GetNamespaceIds(), OutputUriPrefix: outURI,
 		SnapshotTime: timestamppb.New(start)}
+	if snapshot != nil {
+		md.SnapshotTime = snapshot
+	}
 	overall, _ := proto.Marshal(md)
 	if err := gcs.put(ctx, bucket, prefix+"/"+path.Base(prefix)+".overall_export_metadata", overall); err != nil {
 		return nil, err
