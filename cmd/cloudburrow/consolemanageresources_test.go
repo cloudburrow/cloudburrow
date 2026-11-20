@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"github.com/cloudburrow/cloudburrow/internal/console"
 	"testing"
 
 	rmpb "cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
@@ -67,7 +68,7 @@ func TestManageResourcesStudio(t *testing.T) {
 	}
 	tg := tagsProvider{registry: reg}
 	if _, err := tg.Create(ctx, "", map[string]string{"parent": resourcemanager.OrganizationName, "shortName": "env",
-		"values": `{"prod":"Serving traffic","dev":"Development"}`}); err != nil {
+		"values": `[{"shortName":"prod","description":"Serving traffic"},{"shortName":"dev","description":"Development"}]`}); err != nil {
 		t.Fatal(err)
 	}
 	tree := mrDo(t, p, "tree", nil).(mrTree)
@@ -125,11 +126,93 @@ func TestTagKeyCreateForm(t *testing.T) {
 		t.Errorf("the firewall key = %v", k)
 	}
 	if _, err := tg.Create(ctx, "", map[string]string{"parent": resourcemanager.OrganizationName, "shortName": "bad",
-		"values": `{"-nope":"x"}`}); err == nil {
+		"valueType": tagValuesPredefined, "values": `[{"shortName":"-nope","description":"x"}]`}); err == nil {
 		t.Error("a key with a bad value was created")
 	}
 	if _, err := reg.NamespacedTagKey(resourcemanager.OrganizationNumber + "/bad"); err == nil {
 		t.Error("a refused key was left behind")
+	}
+}
+
+// TestTagKeyCreateFormValuesAndPage (#1865): Create tag key's Tag values
+// section is Predefined values (a row per Add value, each its Tag value and
+// Tag value description) or Dynamic values (#2023: made with ".*" without
+// value constraints, consolerm2023_test.go has the rest); the page
+// ends in Create tag key. A key's row menu has View details and Manage
+// access, and its page has Edit next to Description, which opens the
+// edit panel ending in Save.
+func TestTagKeyCreateFormValuesAndPage(t *testing.T) {
+	reg := resourcemanager.New(store.NewMemory())
+	tg := tagsProvider{registry: reg}
+	ctx := context.Background()
+	_, fields := tg.CreateForm()
+	byName := map[string]console.Field{}
+	for _, f := range fields {
+		byName[f.Name] = f
+	}
+	vt := byName["valueType"]
+	if vt.Type != "radio" || vt.OptionLabels[tagValuesPredefined] != "Predefined values" || vt.OptionLabels[tagValuesDynamic] != "Dynamic values" ||
+		vt.UnavailableOptions[tagValuesDynamic] != "" {
+		t.Errorf("Tag values = %+v", vt)
+	}
+	vs := byName["values"]
+	if vs.Type != console.GroupFieldType || vs.AddLabel != "Add value" || len(vs.Group) != 2 ||
+		vs.Group[0].Label != "Tag value" || vs.Group[1].Label != "Tag value description" {
+		t.Errorf("the value rows = %+v", vs)
+	}
+	if tg.CreateSubmit() != "Create tag key" {
+		t.Errorf("the page ends in %q", tg.CreateSubmit())
+	}
+	if dyn, err := tg.Create(ctx, "", map[string]string{"parent": resourcemanager.OrganizationName, "shortName": "dyn",
+		"valueType": tagValuesDynamic}); err != nil || reg.TagKeyAllowedValuesRegex("tagKeys/"+dyn) != ".*" {
+		t.Errorf("a key with dynamic values = %q, %v; want one allowing .*", dyn, err)
+	}
+	id, err := tg.Create(ctx, "", map[string]string{"parent": resourcemanager.OrganizationName, "shortName": "env",
+		"valueType": tagValuesPredefined,
+		"values":    `[{"shortName":"prod","description":"Serving"},{"shortName":"dev","description":""},{"shortName":"","description":""}]`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	vals, err := reg.TagValues("tagKeys/" + id)
+	if err != nil || len(vals) != 2 {
+		t.Fatalf("the key's values = %v, %v; want prod and dev", vals, err)
+	}
+	for _, v := range vals {
+		if v.GetShortName() == "prod" && v.GetDescription() != "Serving" {
+			t.Errorf("prod's description = %q", v.GetDescription())
+		}
+	}
+	if _, err := tg.Create(ctx, "", map[string]string{"parent": resourcemanager.OrganizationName, "shortName": "twice",
+		"values": `[{"shortName":"a"},{"shortName":"a"}]`}); err == nil {
+		t.Error("a value listed twice was accepted")
+	}
+
+	l, err := tg.List(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var acts []console.Action
+	for _, it := range l.Items {
+		if it.Name == id {
+			acts = it.Actions
+		}
+	}
+	if len(acts) != 2 || acts[0].Label != "View details" || acts[0].Href != "/tags/"+id ||
+		acts[1].Label != "Manage access" || acts[1].Href != "/tags/"+id+"?tab=permissions" {
+		t.Errorf("the key's row menu = %+v", acts)
+	}
+	d, err := tg.Detail(ctx, "", []string{id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var desc console.Property
+	for _, pr := range d.Summary {
+		if pr.Label == "Description" {
+			desc = pr
+		}
+	}
+	if desc.Edit != "Edit" || d.Edit == nil || !d.Edit.Inline || d.Edit.Submit != "Save" {
+		t.Errorf("the key page's Description = %+v, its edit form %+v", desc, d.Edit)
 	}
 }
 

@@ -11,7 +11,7 @@ import (
 )
 
 // TestProjectUndeleteIsOfferedOnlyWhenDeleted (#1216): a project the console
-// deletes is kept in DELETE_REQUESTED, its page offers Undelete project, and
+// deletes is kept in DELETE_REQUESTED, its page offers Restore, and
 // the action restores it; an active project's page offers no Undelete (only
 // the org policy actions, #1296).
 func TestProjectUndeleteIsOfferedOnlyWhenDeleted(t *testing.T) {
@@ -34,8 +34,8 @@ func TestProjectUndeleteIsOfferedOnlyWhenDeleted(t *testing.T) {
 		t.Fatalf("list after delete = %+v, %v; want the project DELETE_REQUESTED", l.Items, err)
 	}
 	a := p.DetailActions(ctx, "", []string{"undelete-me"})
-	if len(a) != 2 || a[0].ID != projectUndelete || a[0].Label != "Undelete project" || a[1].ID != projectPurge || !a[1].Destructive {
-		t.Fatalf("a deleted project's page offers %+v, want Undelete project and Purge project now", a)
+	if len(a) != 2 || a[0].ID != projectUndelete || a[0].Label != "Restore" || a[1].ID != projectPurge || !a[1].Destructive {
+		t.Fatalf("a deleted project's page offers %+v, want Restore and Purge project now", a)
 	}
 	if err := p.ActAt(ctx, "", []string{"undelete-me"}, projectUndelete, nil); err != nil {
 		t.Fatal(err)

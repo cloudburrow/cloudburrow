@@ -274,45 +274,66 @@ func (t *tagServers) restRoutes(r *rest.Router) {
 		if err != nil {
 			return err
 		}
-		return writeProto(w, resp)
+		return t.reg.writeTagKeyJSON(w, resp, nil)
 	})
 	r.Handle("GET /v3/tagKeys/namespaced", func(w http.ResponseWriter, req *http.Request) error {
 		k, err := t.keys.GetNamespacedTagKey(req.Context(), &rmpb.GetNamespacedTagKeyRequest{Name: req.URL.Query().Get("name")})
 		if err != nil {
 			return err
 		}
-		return writeProto(w, k)
+		return t.reg.writeTagKeyJSON(w, k, nil)
 	})
 	r.Handle("POST /v3/tagKeys", func(w http.ResponseWriter, req *http.Request) error {
-		var k rmpb.TagKey
-		if err := readProto(req, &k); err != nil {
-			return err
-		}
-		op, err := t.keys.CreateTagKey(req.Context(), &rmpb.CreateTagKeyRequest{TagKey: &k, ValidateOnly: req.URL.Query().Get("validateOnly") == "true"})
+		k, re, _, err := readTagKeyJSON(req)
 		if err != nil {
 			return err
 		}
-		return writeProto(w, op)
+		created, err := t.reg.CreateTagKeyWithRegex(k, re, req.URL.Query().Get("validateOnly") == "true")
+		if err != nil {
+			return apierror.Wrap(err)
+		}
+		op, err := doneOperation("ctk", idOf(created.GetName()), created)
+		if err != nil {
+			return err
+		}
+		return t.reg.writeTagKeyJSON(w, op, map[string]string{created.GetName(): re})
 	})
 	r.Handle("GET /v3/tagKeys/{id}", func(w http.ResponseWriter, req *http.Request) error {
 		k, err := t.keys.GetTagKey(req.Context(), &rmpb.GetTagKeyRequest{Name: "tagKeys/" + req.PathValue("id")})
 		if err != nil {
 			return err
 		}
-		return writeProto(w, k)
+		return t.reg.writeTagKeyJSON(w, k, nil)
 	})
 	r.Handle("PATCH /v3/tagKeys/{id}", func(w http.ResponseWriter, req *http.Request) error {
-		var k rmpb.TagKey
-		if err := readProto(req, &k); err != nil {
-			return err
-		}
-		k.Name = "tagKeys/" + req.PathValue("id")
-		op, err := t.keys.UpdateTagKey(req.Context(), &rmpb.UpdateTagKeyRequest{TagKey: &k, UpdateMask: splitMask(req.URL.Query().Get("updateMask")),
-			ValidateOnly: req.URL.Query().Get("validateOnly") == "true"})
+		k, re, set, err := readTagKeyJSON(req)
 		if err != nil {
 			return err
 		}
-		return writeProto(w, op)
+		k.Name = "tagKeys/" + req.PathValue("id")
+		// A mask that names allowedValuesRegex sets it, to "" when the body
+		// leaves it out; no mask takes the description and whatever regex
+		// the body names.
+		paths := splitMask(req.URL.Query().Get("updateMask")).GetPaths()
+		if len(paths) == 0 {
+			paths = []string{"description"}
+			if set {
+				paths = append(paths, "allowed_values_regex")
+			}
+		}
+		updated, err := t.reg.UpdateTagKeyWithRegex(k, re, paths, req.URL.Query().Get("validateOnly") == "true")
+		if err != nil {
+			return apierror.Wrap(err)
+		}
+		op, err := doneOperation("utk", idOf(updated.GetName()), updated)
+		if err != nil {
+			return err
+		}
+		extra := map[string]string{}
+		if req.URL.Query().Get("validateOnly") == "true" {
+			extra[updated.GetName()] = re
+		}
+		return t.reg.writeTagKeyJSON(w, op, extra)
 	})
 	r.Handle("DELETE /v3/tagKeys/{id}", func(w http.ResponseWriter, req *http.Request) error {
 		q := req.URL.Query()

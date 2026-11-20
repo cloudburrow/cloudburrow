@@ -59,7 +59,11 @@ type mrTree struct {
 	Nodes []mrNode `json:"nodes"`
 	// TagValues are the namespaced names Add tag offers.
 	TagValues []string `json:"tagValues"`
-	Note      string   `json:"note"`
+	// DynamicKeys are the keys of dynamic values (#2023), by namespaced
+	// name, each with its validation regular expression: Add tag takes a
+	// typed value for them.
+	DynamicKeys map[string]string `json:"dynamicKeys"`
+	Note        string            `json:"note"`
 }
 
 type mrRequest struct {
@@ -96,7 +100,7 @@ func (p projectsProvider) mrTags(target string) []string {
 }
 
 func (p projectsProvider) mrTree() (mrTree, error) {
-	t := mrTree{Note: mrNote, TagValues: []string{}}
+	t := mrTree{Note: mrNote, TagValues: []string{}, DynamicKeys: map[string]string{}}
 	org := resourcemanager.OrganizationName
 	t.Nodes = append(t.Nodes, mrNode{Kind: "organization", ID: strings.TrimPrefix(org, "organizations/"), Name: resourcemanager.OrganizationDomain,
 		State: string(resourcemanager.StateActive), Tags: p.mrTags(resourcemanager.CRMPrefix + org), ResourceRef: org})
@@ -127,6 +131,10 @@ func (p projectsProvider) mrTree() (mrTree, error) {
 	}
 	if keys, err := p.registry.AllTagKeys(); err == nil {
 		for _, k := range keys {
+			if re := p.registry.TagKeyAllowedValuesRegex(k.GetName()); re != "" {
+				t.DynamicKeys[k.GetNamespacedName()] = re
+				continue
+			}
 			if vs, err := p.registry.TagValues(k.GetName()); err == nil {
 				for _, v := range vs {
 					t.TagValues = append(t.TagValues, v.GetNamespacedName())

@@ -1066,7 +1066,7 @@ async function api(path, options = {}) {
     else outer.addEventListener("abort", onOuter, { once: true });
   }
 
-  path = scopedAPIPath(path);
+  path = resourceScopedAPIPath(scopedAPIPath(path));
   let res;
   try {
     res = await fetch(path, {
@@ -1705,7 +1705,9 @@ function navLink(entry, onPinChange, nested = false, draggable = false) {
 function scopeSearch() {
   const from = new URLSearchParams(location.search);
   const scope = new URLSearchParams();
-  for (const key of ["project"]) {
+  // The folder or organization chosen in the toolbar travels too (#2023);
+  // a page that does not work at that level drops it (syncResourceScope).
+  for (const key of ["project", "folder", "organizationId"]) {
     const value = from.get(key);
     if (value) scope.set(key, value);
   }
@@ -4438,6 +4440,7 @@ async function renderDetail(view, route, resourcePath) {
       setTimeout(() => revealValue(route, segments, data.reveal), 0);
     }
   }
+  DETAIL_EDIT = data.edit ? () => openEditForm(route, segments, data.edit, reloadPage) : null;
   if (data.edit && data.edit.page) {
     const editHref = new URL(detailHref(route, segments), location.origin);
     editHref.searchParams.set("edit", "1");
@@ -4445,7 +4448,7 @@ async function renderDetail(view, route, resourcePath) {
       class: "button primary", id: "detail-edit", href: editHref.pathname + editHref.search,
       text: data.edit.label || "Edit",
     }));
-  } else if (data.edit) {
+  } else if (data.edit && !data.edit.inline) {
     pageActions.unshift(el("button", {
       class: "primary", text: data.edit.label || "Edit",
       onclick: () => openEditForm(route, segments, data.edit, reloadPage),
@@ -5737,6 +5740,11 @@ function serverFilterBox(spec, reload) {
 
 // propertyValue is a property's <dd>: its value, as a link when the
 // provider names the page it opens (#1554).
+// A property with an Edit (#1865: Google's Edit next to a tag key's
+// Description) opens the page's edit form, which the resource page puts
+// in DETAIL_EDIT while it is drawn.
+let DETAIL_EDIT = null;
+
 function propertyValue(prop) {
   const value = prop.link ? el("a", { href: prop.link, text: prop.value }) : prop.value;
   // A link beside the value that opens one of the page's actions, as
@@ -5749,6 +5757,11 @@ function propertyValue(prop) {
       el("a", { class: "property-action", href: here.pathname + here.search,
                 "aria-label": `${prop.actionText || prop.action} ${prop.label.toLowerCase()}`,
                 text: prop.actionText || prop.action }));
+  }
+  if (prop.edit) {
+    return el("dd", { class: "has-copy" }, el("span", { class: "property-copy-value" }, value),
+      el("button", { type: "button", class: "link-button is-inline property-edit", text: prop.edit,
+        "aria-label": `${prop.edit} ${prop.label}`, onclick: () => DETAIL_EDIT && DETAIL_EDIT() }));
   }
   if (!prop.copy) return el("dd", {}, value);
   // A Copy button of its own, labelled as Google labels it: Copy URL,
@@ -9018,6 +9031,79 @@ function currentProject() {
   return new URLSearchParams(location.search).get("project") || "";
 }
 
+// --- the folder or organization chosen in the toolbar (#2023) ------------
+//
+// Google's resource selector chooses a project, a folder or the
+// organization, and the pages that work at that level (IAM, Organization
+// Policies, Tags) then show that resource; its address carries
+// ?folder=N or ?organizationId=N, as console.cloud.google.com's does. The
+// project stays in the address for every per-project page, and a page that
+// does not work at the folder's or organization's level drops the choice,
+// so the toolbar always names what the page reads.
+const RESOURCE_SCOPE_KEYS = ["folder", "organizationId"];
+const RESOURCE_SCOPED_PATHS = ["/iam-admin/iam", "/iam-admin/orgpolicies", "/iam-admin/tags", "/tags"];
+const resourceScopedPath = (pathname) => RESOURCE_SCOPED_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"));
+// RESOURCE_NAMES are the folders' and the organization's display names, as
+// the picker last read them: "folder:N" and "organization:N".
+let RESOURCE_NAMES = {};
+
+function currentResource() {
+  const q = new URLSearchParams(location.search);
+  if (q.get("folder")) return { kind: "folder", id: q.get("folder") };
+  if (q.get("organizationId")) return { kind: "organization", id: q.get("organizationId") };
+  return null;
+}
+
+// resourceLabel is how the toolbar and a page name a chosen resource.
+function resourceLabel(r) {
+  return RESOURCE_NAMES[`${r.kind}:${r.id}`] || (r.kind === "folder" ? `Folder ${r.id}` : `Organization ${r.id}`);
+}
+
+// resourceScopedAPIPath adds the chosen folder or organization to a
+// console API request made from a page that works at its level.
+function resourceScopedAPIPath(path) {
+  if (typeof path !== "string" || !path.startsWith("/api/") || !resourceScopedPath(location.pathname)) return path;
+  const here = new URLSearchParams(location.search);
+  const url = new URL(path, location.origin);
+  let changed = false;
+  for (const k of RESOURCE_SCOPE_KEYS) {
+    if (here.get(k) && !url.searchParams.has(k)) { url.searchParams.set(k, here.get(k)); changed = true; }
+  }
+  return changed ? url.pathname + url.search : path;
+}
+
+// syncResourceScope drops a choice the page cannot use, names what the
+// page reads in the toolbar, and moves the links to the pages that work at
+// the folder's or organization's level onto the choice.
+function syncResourceScope() {
+  if (currentResource() && !resourceScopedPath(location.pathname)) {
+    const u = new URL(location.href);
+    for (const k of RESOURCE_SCOPE_KEYS) u.searchParams.delete(k);
+    history.replaceState(history.state, "", u.pathname + u.search + u.hash);
+  }
+  const res = currentResource();
+  const current = document.getElementById("project-current");
+  if (current) {
+    current.textContent = res ? resourceLabel(res) : (currentProject() || "Select a project");
+    current.dataset.kind = res ? res.kind : "project";
+  }
+  const here = new URLSearchParams(location.search);
+  for (const a of document.querySelectorAll("a[href]")) {
+    const href = a.getAttribute("href");
+    if (!href.startsWith("/")) continue;
+    const u = new URL(href, location.origin);
+    const scoped = resourceScopedPath(u.pathname);
+    let changed = false;
+    for (const k of RESOURCE_SCOPE_KEYS) {
+      const want = scoped ? (here.get(k) || "") : "";
+      if ((u.searchParams.get(k) || "") === want) continue;
+      if (want) u.searchParams.set(k, want); else u.searchParams.delete(k);
+      changed = true;
+    }
+    if (changed) a.setAttribute("href", u.pathname + u.search + u.hash);
+  }
+}
+
 // notify shows the outcome of something the user did.
 //
 // window.alert blocks the page, cannot be styled, cannot be dismissed by
@@ -9232,24 +9318,26 @@ const DELETE_DETAIL = {
   "logging-buckets": "The bucket is kept as Delete requested for 7 days and can be undeleted until then. No log entry is removed.",
   "pubsub-schemas": "Every revision is deleted with it. A topic that uses it keeps its " +
             "schema settings, which then name _deleted-schema_.",
-  projects: "This removes the project's registration only. Buckets, topics, " +
-            "queues, secrets and services created under the identifier stay " +
-            "where they are, in the services that own them — nothing here " +
-            "reaches into those. Re-registering the same identifier makes them " +
-            "visible again.",
+  projects: "This shuts down the project: all traffic serving stops, and every resource in it is scheduled for deletion. " +
+            "The project is pending deletion for 30 days, when Restore on its page or under Manage resources' " +
+            "Resources pending deletion brings it back; then it is deleted.",
 };
 
 async function deleteResource(route, name, onDone, row = NO_ROW) {
   // Awaited, so the caller knows when the row stops being busy. The interval
   // that matters starts when the request goes out, not when the dialog opens:
   // a row marked busy while someone reads a confirmation would be lying.
+  // A project is shut down, as Google's Delete under Manage resources
+  // says: its ID typed back, then Shut down (#1865).
+  const shutDown = route.service === "projects";
   await confirmDestructive({
-    title: `Delete ${name}?`,
+    title: shutDown ? `Shut down ${name}?` : `Delete ${name}?`,
     detail: DELETE_DETAIL[route.service],
     confirmWord: name,
+    ...(shutDown ? { confirmLabel: "Shut down", consequence: "" } : {}),
     style: capabilityOf(route.service).deleteConfirm || "name",
     onConfirm: async () => {
-      const op = recordOperation(`Delete ${name}`);
+      const op = recordOperation(shutDown ? `Shut down project ${name}` : `Delete ${name}`);
       row.start();
       try {
         const res = await send(
@@ -9257,7 +9345,7 @@ async function deleteResource(route, name, onDone, row = NO_ROW) {
           `&name=${encodeURIComponent(name)}`, "DELETE");
         op.succeeded("", res.operation);
         row.end();
-        notify(`Deleted ${name}`);
+        notify(shutDown ? `Shut down project ${name}` : `Deleted ${name}`);
         // The picker holds a copy of the registry, and a project it still lists
         // after the delete is one the toolbar will keep offering. Announced
         // rather than reached into, so the picker owns its own state.
@@ -9422,6 +9510,7 @@ function notFound(view, path) {
 // dispatch() returns the render's promise, which nobody used to await: a
 // throw inside a render function left the skeleton on screen permanently.
 function route() {
+  syncResourceScope();
   const view = document.getElementById("view");
   // An action's info panel (#2013) belongs to the screen that opened it.
   closeActionPanel();
@@ -9433,8 +9522,11 @@ function route() {
     const pending = dispatch(view);
     if (pending && typeof pending.catch === "function") {
       pending.then(syncStickyOffsets, (err) => screenFailed(err, title()));
+      // The page's links drawn, they follow the toolbar's choice (#2023).
+      pending.then(syncResourceScope, () => {});
     } else {
       syncStickyOffsets();
+      syncResourceScope();
     }
     return pending;
   } catch (err) {
@@ -10293,10 +10385,13 @@ async function initProjects() {
     const url = new URL(location.href);
     if (id) url.searchParams.set("project", id);
     else url.searchParams.delete("project");
+    // A project chosen replaces a folder or the organization (#2023).
+    for (const k of RESOURCE_SCOPE_KEYS) url.searchParams.delete(k);
     history.pushState({}, "", url);
     rescopeLinks(selected, id);
     selected = id;
     current.textContent = id || "Select a project";
+    current.dataset.kind = "project";
     closePicker();
     route();
     // The terminal follows the toolbar's project (#781).
@@ -10332,16 +10427,37 @@ async function initProjects() {
     if (view === "recent") {
       pool = recents.map((id) => projects.find((p) => p.id === id)).filter(Boolean);
     }
-    const shown = pool.filter((p) =>
-      !q || p.id.toLowerCase().includes(q) || (p.name || "").toLowerCase().includes(q));
+    const hit = (p) => !q || p.id.toLowerCase().includes(q) || (p.name || "").toLowerCase().includes(q);
+    // All is Google's resource selector (#1865): the organization, its
+    // folders and the projects under each, as a tree; a search lists
+    // whatever matches. Choosing a folder or the organization opens its
+    // page (its IAM, organization policies, tags and log router), and the
+    // project stays the one per-project pages read.
+    if (view === "all" && hierarchy.length) {
+      const rows = hierarchyRows().filter((r) => hit(r));
+      setChildren(list, ...rows.map((r) => r.kind === "project" ? projectRow(r, q ? 0 : r.depth) : resourceRow(r, q ? 0 : r.depth)));
+      if (!rows.length) list.append(el("li", {}, el("p", { class: "panel-empty", text: "No matching resources." })));
+      return;
+    }
+    const shown = pool.filter(hit);
 
     // No "All projects" entry: Google's console always works in one
     // selected project (#1842).
-    setChildren(list,
-      ...shown.map((p) =>
-        el("li", { class: "picker-row" },
+    setChildren(list, ...shown.map((p) => projectRow(p, 0)));
+
+    if (!shown.length) {
+      list.append(el("li", {}, el("p", { class: "panel-empty",
+        text: q ? "No matching projects."
+          : view === "starred" ? "No starred projects. Star a project from All." : "No recent projects." })));
+    }
+  };
+  const indent = (depth) => depth ? `padding-left:${10 + depth * 16}px` : null;
+  const projectRow = (p, depth) => {
+    const stars = starred();
+    return el("li", { class: "picker-row", "data-kind": "project" },
           el("button", {
-            class: "picker-item" + (selected === p.id ? " is-selected" : ""),
+            class: "picker-item" + (selected === p.id && !currentResource() ? " is-selected" : ""),
+            style: indent(depth),
             onclick: () => select(p.id),
           },
             el("span", { class: "picker-item-name", text: p.name || p.id }),
@@ -10352,13 +10468,60 @@ async function initProjects() {
             "aria-label": `Star ${p.name || p.id}`, title: stars.includes(p.id) ? "Unstar" : "Star",
             html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/></svg>',
             onclick: () => toggleStar(p.id),
-          }))));
-
-    if (!shown.length) {
-      list.append(el("li", {}, el("p", { class: "panel-empty",
-        text: q ? "No matching projects."
-          : view === "starred" ? "No starred projects. Star a project from All." : "No recent projects." })));
+          }));
+  };
+  // Choosing a folder or the organization (#2023) scopes the page to it
+  // when the page works at that level (IAM, Organization Policies, Tags),
+  // and otherwise opens its own page, the project kept.
+  const resourceHref = (r) => {
+    const u = new URL(location.href);
+    for (const k of RESOURCE_SCOPE_KEYS) u.searchParams.delete(k);
+    u.searchParams.set(r.kind === "organization" ? "organizationId" : "folder", r.id);
+    if (!resourceScopedPath(u.pathname)) {
+      u.pathname = r.kind === "organization" ? "/resource-hierarchy/organization" : `/resource-hierarchy/${encodeURIComponent(r.id)}`;
     }
+    for (const k of [...u.searchParams.keys()]) if (k !== "project" && !RESOURCE_SCOPE_KEYS.includes(k)) u.searchParams.delete(k);
+    return u.pathname + u.search;
+  };
+  const resourceRow = (r, depth) => {
+    const word = r.kind === "organization" ? "Organization" : "Folder";
+    const res = currentResource();
+    const chosen = res && res.kind === r.kind && res.id === r.id;
+    return el("li", { class: "picker-row", "data-kind": r.kind },
+      el("a", { class: "picker-item" + (chosen ? " is-selected" : ""), href: resourceHref(r), style: indent(depth),
+        "aria-current": chosen ? "true" : null,
+        onclick: (e) => {
+          e.preventDefault();
+          closePicker();
+          history.pushState({}, "", resourceHref(r));
+          route();
+        } },
+        el("span", { class: "picker-item-name" }, el("span", { class: "picker-item-kind", text: `${word} ` }), r.name),
+        el("span", { class: "picker-item-id", text: r.id })),
+      el("span", { class: "picker-star-space", "aria-hidden": "true" }));
+  };
+  // The organization, its folders and their projects in tree order; a
+  // project with no parent comes after the organization's tree.
+  let hierarchy = [];
+  const hierarchyRows = () => {
+    const live = hierarchy.filter((n) => n.state === "ACTIVE");
+    const parentOf = (n) => n.kind === "organization" ? null
+      : !n.parent ? "none" : n.parent.startsWith("organizations/") ? "organization" : "folder:" + n.parent.split("/")[1];
+    const keyOf = (n) => n.kind === "organization" ? "organization" : `${n.kind}:${n.id}`;
+    const kids = new Map();
+    for (const n of live) {
+      const k = parentOf(n);
+      if (!kids.has(k)) kids.set(k, []);
+      kids.get(k).push(n);
+    }
+    for (const l of kids.values()) l.sort((a, b) => (a.kind === b.kind ? 0 : a.kind === "folder" ? -1 : 1) || (a.name || a.id).localeCompare(b.name || b.id));
+    const out = [];
+    const walk = (n, depth) => {
+      out.push({ ...n, depth, name: n.name || n.id });
+      for (const c of kids.get(keyOf(n)) || []) walk(c, depth + 1);
+    };
+    for (const n of [...(kids.get(null) || []), ...(kids.get("none") || [])]) walk(n, 0);
+    return out;
   };
 
   const load = async () => {
@@ -10368,6 +10531,11 @@ async function initProjects() {
         id: i.name, name: (i.fields || {}).Name || i.name,
       }));
       KNOWN_PROJECTS = projects.map((p) => p.id);
+      // The tree for All; a failure leaves the flat list of projects.
+      try { hierarchy = (await send("/api/studio/projects?call=tree", "POST", {})).nodes || []; } catch { hierarchy = []; }
+      RESOURCE_NAMES = {};
+      for (const n of hierarchy) if (n.kind !== "project") RESOURCE_NAMES[`${n.kind}:${n.id}`] = n.name || n.id;
+      syncResourceScope();
     } catch {
       // The picker still shows what is selected; it simply cannot offer
       // alternatives, which is better than showing none at all. KNOWN_PROJECTS
@@ -18148,7 +18316,11 @@ function iamRows(data) {
 
 function renderIAMPage(view, route) {
   const project = currentProject();
-  if (!project) {
+  // A folder or the organization chosen in the toolbar is the page's
+  // resource (#2023).
+  const res = currentResource();
+  const scopeWord = res ? `${res.kind} "${resourceLabel(res)}"` : `project "${project}"`;
+  if (!project && !res) {
     setChildren(view, pageHeader("IAM", ""), emptyState("No project is selected", "Choose a project in the toolbar."));
     return;
   }
@@ -18200,7 +18372,7 @@ function renderIAMPage(view, route) {
     const own = iamRows(data).filter((r) => members.includes(r.member));
     confirmDestructive({
       title: members.length === 1 ? `Remove access for ${members[0]}?` : `Remove access for ${members.length} principals?`,
-      detail: `Every role ${members.length === 1 ? "this principal holds" : "these principals hold"} on project ${project} is removed. ` +
+      detail: `Every role ${members.length === 1 ? "this principal holds" : "these principals hold"} on ${scopeWord} is removed. ` +
         "Roles inherited from a folder or the organization stay, and are removed there.",
       confirmWord: members.length === 1 ? members[0] : "remove",
       confirmLabel: "Remove",
@@ -18209,7 +18381,7 @@ function renderIAMPage(view, route) {
         for (const r of own) {
           const removes = r.roles.filter((x) => !x.from).map((x) => ({ role: x.role, condition: x.condition }));
           if (!removes.length) continue;
-          const op = recordOperation(`Remove access for ${r.member} on ${project}`);
+          const op = recordOperation(`Remove access for ${r.member} on ${res ? resourceLabel(res) : project}`);
           try {
             await iamCall("change", { etag: data.etag, members: [r.member], add: [], remove: removes });
             op.succeeded("");
@@ -18354,8 +18526,9 @@ function renderIAMPage(view, route) {
     el("label", { class: "check-line" }, google, el("span", { text: "Include Google-provided role grants" })));
   allowOnly.push(actionBar, bar.chips);
   setChildren(view, header,
-    el("h2", { id: "iam-scope-title", text: `Permissions for project "${project}"` }),
-    el("p", { class: "subtitle", text: "These permissions affect this project and all of its resources." }),
+    el("h2", { id: "iam-scope-title", text: `Permissions for ${scopeWord}` }),
+    el("p", { class: "subtitle", text: res ? `These permissions affect this ${res.kind} and all of its resources.`
+      : "These permissions affect this project and all of its resources." }),
     noteBanner(PROJECT_IAM_NOTE_TEXT()),
     tabs,
     actionBar,
@@ -18363,7 +18536,8 @@ function renderIAMPage(view, route) {
     body,
     el("p", { class: "form-help" },
       el("span", { text: "Test permissions and the condition linter are on " }),
-      el("a", { href: `/iam-admin/iam/${encodeURIComponent(project)}?tab=permissions`, text: "the policy's Permissions tab" }),
+      el("a", { href: res ? (res.kind === "organization" ? "/resource-hierarchy/organization?tab=permissions" : `/resource-hierarchy/${encodeURIComponent(res.id)}?tab=permissions`)
+        : `/iam-admin/iam/${encodeURIComponent(project)}?tab=permissions`, text: "the policy's Permissions tab" }),
       el("span", { text: ". " }),
       el("a", { href: "/iam-admin/troubleshooter", text: "Policy Troubleshooter" }),
       el("span", { text: " explains a principal's access, and " }),
@@ -18571,8 +18745,9 @@ function openIAMDenyPanel(resource, policy, onDone) {
 // the Org Policy v2 registry (cmd/cloudburrow/consoleorgpolicyedit.go).
 function renderOrgPolicyEdit(view, constraint) {
   const project = currentProject();
+  const res = currentResource();
   const back = `/iam-admin/orgpolicies/${encodeURIComponent(constraint)}`;
-  if (!project) {
+  if (!project && !res) {
     setChildren(view, pageHeader("Edit policy", ""), emptyState("No project is selected", "Choose a project in the toolbar."));
     return;
   }
@@ -18669,7 +18844,7 @@ function renderOrgPolicyEdit(view, constraint) {
       e.preventDefault();
       error.hidden = true;
       save.disabled = true;
-      const op = recordOperation(`Set ${dryRun ? "dry run " : ""}policy ${d.constraint} on ${project}`);
+      const op = recordOperation(`Set ${dryRun ? "dry run " : ""}policy ${d.constraint} on ${res ? resourceLabel(res) : project}`);
       try {
         await call("policy-set", { constraint: d.constraint, dryRun, etag: d.etag, source: picked("orgpolicy-source"),
           merge: picked("orgpolicy-enforcement") === "merge", rules: rules.map((r) => r.value()) });
@@ -19802,13 +19977,59 @@ function renderManageResources(view) {
     submit: (v) => run(`Saved the labels of ${n.id}`, "labels", { id: n.id, labels: v.labels ? JSON.parse(v.labels) : {} }),
   });
 
-  const addTag = (n) => mrForm({
-    id: "mr-add-tag", title: `Add tag to ${label(n)}`, label: "Save",
-    note: "Each resource carries one value of a tag key. Tag keys and values are made on the Tags page.",
-    fields: [{ name: "value", label: "Value", type: "select", required: true, options: tree.tagValues,
-      help: "The tag key and its value, as KEY_NAMESPACE/KEY/VALUE." }],
-    submit: (v) => run(`Added tag ${v.value} to ${label(n)}`, "tag", { kind: n.kind, id: n.id, value: v.value }),
-  });
+  // The Tags panel, Google's steps (tags-creating-and-managing, read
+  // 2026-11-20): Select scope (the organization or a project holding the
+  // tag keys, then Open), Add tag (a Key, then its Value), Delete item
+  // beside a tag, and Save, which asks Confirm before it attaches or
+  // detaches anything (#1865). A namespaced value is SCOPE/KEY/VALUE.
+  const tagParts = (v) => { const [scope, k, ...rest] = v.split("/"); return { scope, key: k, value: rest.join("/") }; };
+  const scopeLabels = () => {
+    const out = {};
+    for (const x of tree.nodes) {
+      if (x.kind === "organization") out[x.id] = `${x.name} (organization ${x.id})`;
+      if (x.kind === "project" && x.state === "ACTIVE") out[x.id] = `${x.name || x.id} (project ${x.id})`;
+    }
+    return out;
+  };
+  const selectScope = (current, done) => {
+    const labels = scopeLabels();
+    mrForm({
+      id: "mr-tag-scope", title: "Select scope", label: "Open",
+      note: "The organization or project that contains your tags.",
+      fields: [{ name: "scope", label: "Organization or project", type: "radio", required: true,
+        options: Object.keys(labels), optionLabels: labels, default: current || Object.keys(labels)[0] }],
+      submit: async (v) => done(v.scope),
+    });
+  };
+  const confirmTags = (row, adds, removes, done) => {
+    const { dialog, close } = openModal({ labelledBy: "mr-tag-confirm-title" });
+    const error = el("p", { class: "form-error", role: "alert", hidden: true });
+    const go = el("button", { type: "submit", class: "primary", id: "mr-tag-confirm", text: "Confirm" });
+    dialog.append(el("form", { class: "modal-body", novalidate: true, onsubmit: async (e) => {
+      e.preventDefault();
+      go.disabled = true;
+      error.hidden = true;
+      try {
+        for (const v of removes) await run(`Detached tag ${v} from ${label(row)}`, "untag", { kind: row.kind, id: row.id, value: v });
+        for (const v of adds) await run(`Attached tag ${v} to ${label(row)}`, "tag", { kind: row.kind, id: row.id, value: v });
+        close();
+        done();
+      } catch (err) {
+        error.textContent = err.message;
+        error.hidden = false;
+        go.disabled = false;
+      }
+    } },
+      el("h2", { id: "mr-tag-confirm-title", text: "Confirm" }),
+      el("p", { text: `Save these tag changes on ${kindWord(row).toLowerCase()} ${label(row)}?` }),
+      el("ul", { id: "mr-tag-confirm-list" },
+        ...adds.map((v) => el("li", { text: `Attach ${v}` })),
+        ...removes.map((v) => el("li", { text: `Detach ${v}` }))),
+      error,
+      el("div", { class: "modal-actions" },
+        el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }), go)));
+    go.focus();
+  };
 
   // The info panel: the selected row's Permissions, Labels and Tags.
   const openPanel = async (n) => {
@@ -19821,6 +20042,9 @@ function renderManageResources(view) {
     const content = el("div", { id: "mr-panel-content" }, el("p", { class: "unavailable", text: "reading…" }));
     const tabs = ["permissions", ...(n.kind === "project" ? ["labels"] : []), "tags"];
     let tab = "permissions";
+    // The Tags tab's scope and unsaved changes, kept while the panel is open.
+    let tagScope = "";
+    let tagDraft = { adds: [], removes: new Set() };
     const strip = el("div", { class: "tab-strip", role: "tablist", "aria-label": "Info panel" });
     const drawStrip = () => setChildren(strip, ...tabs.map((t) => el("button", {
       type: "button", role: "tab", id: `mr-panel-tab-${t}`, class: "tab" + (t === tab ? " is-selected" : ""),
@@ -19853,15 +20077,85 @@ function renderManageResources(view) {
             : el("p", { class: "form-help", text: "No labels." }));
       }
       if (tab === "tags") {
+        const bound = row.tags || [];
+        const inScope = tree.tagValues.filter((v) => tagScope && tagParts(v).scope === tagScope);
+        // A key of dynamic values (#2023) has no values to pick: its Value
+        // is typed, and must match the key's validation regular expression.
+        const dynamic = {};
+        for (const [k, re] of Object.entries(tree.dynamicKeys || {})) {
+          const [scope, short] = k.split("/");
+          if (tagScope && scope === tagScope) dynamic[short] = re;
+        }
+        const keys = [...new Set([...inScope.map((v) => tagParts(v).key), ...Object.keys(dynamic)])].sort();
+        const changed = () => tagDraft.removes.size > 0 || tagDraft.adds.some((a) => a.key && a.value);
+        const save = el("button", { type: "button", class: "primary", id: "mr-panel-tags-save", text: "Save",
+          disabled: changed() ? null : "disabled",
+          onclick: () => {
+            const adds = tagDraft.adds.filter((a) => a.key && a.value).map((a) => `${tagScope}/${a.key}/${a.value}`)
+              .filter((v) => !bound.includes(v));
+            confirmTags(row, [...new Set(adds)], [...tagDraft.removes], () => { tagDraft = { adds: [], removes: new Set() }; draw(); });
+          } });
+        const refreshSave = () => { save.disabled = !changed(); };
+        const addRow = (a, i) => {
+          const keySelect = el("select", { "aria-label": `Key ${i + 1}`, class: "mr-tag-key" },
+            el("option", { value: "", text: "Select a key" }),
+            ...keys.map((k) => el("option", { value: k, text: k, selected: a.key === k ? true : null })));
+          const valueSelect = el("select", { "aria-label": `Value ${i + 1}`, class: "mr-tag-value" });
+          const helpID = `mr-tag-dynamic-help-${i}`;
+          const valueInput = el("input", { type: "text", class: "mr-tag-value mr-tag-dynamic", "aria-label": `Value ${i + 1}`,
+            "aria-describedby": helpID, value: a.value || "", autocomplete: "off" });
+          const help = el("p", { class: "form-help", id: helpID });
+          const valueCell = el("td", {});
+          // The Value drop-down holds the chosen key's values; it is
+          // refilled in place, so focus stays on the Key. A dynamic key's
+          // Value is a text box, as Google's: "enter a string that matches
+          // the validation regular expression configured for that tag key".
+          const fillValues = () => {
+            if (a.key && dynamic[a.key] !== undefined) {
+              help.textContent = `Enter a value matching ${dynamic[a.key]}`;
+              setChildren(valueCell, valueInput, help);
+              return;
+            }
+            const values = inScope.filter((v) => tagParts(v).key === a.key).map((v) => tagParts(v).value);
+            setChildren(valueSelect, el("option", { value: "", text: "Select a value" }),
+              ...values.map((v) => el("option", { value: v, text: v, selected: a.value === v ? true : null })));
+            valueSelect.disabled = !a.key;
+            setChildren(valueCell, valueSelect);
+          };
+          fillValues();
+          keySelect.addEventListener("change", () => { a.key = keySelect.value; a.value = ""; valueInput.value = ""; fillValues(); refreshSave(); });
+          valueSelect.addEventListener("change", () => { a.value = valueSelect.value; refreshSave(); });
+          valueInput.addEventListener("input", () => { a.value = valueInput.value.trim(); refreshSave(); });
+          return el("tr", { class: "mr-tag-new" },
+            el("td", {}, keySelect), valueCell,
+            el("td", {}, el("button", { type: "button", class: "secondary", "aria-label": `Delete item ${i + 1}`, text: "Delete item",
+              onclick: () => { tagDraft.adds.splice(i, 1); draw(); } })));
+        };
+        const boundRow = (t) => {
+          const parts = tagParts(t);
+          return el("tr", { "data-tag": t },
+            el("td", { class: "mono", text: `${parts.scope}/${parts.key}` }), el("td", { class: "mono", text: parts.value }),
+            el("td", {}, el("button", { type: "button", class: "secondary", "aria-label": `Delete item ${t}`, text: "Delete item",
+              onclick: () => { tagDraft.removes.add(t); draw(); } })));
+        };
+        const shownBound = bound.filter((t) => !tagDraft.removes.has(t));
+        const rowsNow = [...shownBound.map(boundRow), ...tagDraft.adds.map(addRow)];
+        const scopeName = tagScope ? (scopeLabels()[tagScope] || tagScope) : "";
         return setChildren(content,
-          el("div", { class: "section-actions" }, el("button", { type: "button", class: "secondary", id: "mr-panel-add-tag",
-            text: "Add tag", disabled: tree.tagValues.length ? null : "disabled", onclick: () => addTag(row) })),
-          tree.tagValues.length ? null : el("p", { class: "form-help", text: "No tag values exist yet: create a tag key and its values on the Tags page." }),
-          (row.tags || []).length ? el("table", { id: "mr-panel-tags" }, el("thead", {}, el("tr", {}, el("th", { text: "Tag" }), el("th", {}, el("span", { class: "sr-only", text: "Remove" })))),
-            el("tbody", {}, ...row.tags.map((t) => el("tr", {}, el("td", { class: "mono", text: t }),
-              el("td", {}, el("button", { type: "button", class: "secondary", "aria-label": `Remove tag ${t}`, text: "Remove",
-                onclick: async () => { try { await run(`Removed tag ${t} from ${label(row)}`, "untag", { kind: row.kind, id: row.id, value: t }); draw(); } catch (err) { notify(err.message, "error"); } } }))))))
-            : el("p", { class: "form-help", text: "No tags are bound here." }));
+          el("div", { class: "section-actions" },
+            el("button", { type: "button", class: "secondary", id: "mr-panel-select-scope", text: "Select scope",
+              onclick: () => selectScope(tagScope, (v) => { tagScope = v; draw(); }) }),
+            el("button", { type: "button", class: "secondary", id: "mr-panel-add-tag", text: "Add tag",
+              disabled: tagScope && keys.length ? null : "disabled",
+              onclick: () => { tagDraft.adds.push({ key: "", value: "" }); draw(); } })),
+          el("p", { class: "form-help", id: "mr-panel-tag-scope",
+            text: !tagScope ? "Select the organization or project that contains your tags, then Add tag."
+              : keys.length ? `Scope: ${scopeName}` : `Scope: ${scopeName}. It has no tag keys with values: create them on the Tags page.` }),
+          rowsNow.length ? el("table", { id: "mr-panel-tags" },
+            el("thead", {}, el("tr", {}, el("th", { text: "Key" }), el("th", { text: "Value" }), el("th", {}, el("span", { class: "sr-only", text: "Delete item" })))),
+            el("tbody", {}, ...rowsNow))
+            : el("p", { class: "form-help", text: "No tags are attached here." }),
+          el("div", { class: "section-actions" }, save));
       }
       let section;
       try {

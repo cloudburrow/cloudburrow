@@ -904,6 +904,10 @@ type EditForm struct {
 	// Google's Edit opens the "Edit Redis instance" page, which saves with
 	// Save (#1862).
 	Page bool `json:"page,omitempty"`
+	// Inline means the form opens only from the Edit beside a property
+	// that names it (Property.Edit), not from a button by the title:
+	// Google's tag key page has Edit next to Description (#1865).
+	Inline bool `json:"inline,omitempty"`
 }
 
 // Property is one label/value pair on a resource's summary.
@@ -922,6 +926,10 @@ type Property struct {
 	// instance's edition (#1859).
 	Action     string `json:"action,omitempty"`
 	ActionText string `json:"actionText,omitempty"`
+	// Edit, when set, is the label of a button beside the value that opens
+	// the page's EditForm, as Google's tag key page has Edit next to
+	// Description (#1865).
+	Edit string `json:"edit,omitempty"`
 }
 
 // SectionKind says what a section actually holds.

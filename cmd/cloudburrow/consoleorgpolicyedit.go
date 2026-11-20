@@ -192,8 +192,11 @@ func (p iamOrgPoliciesProvider) StudioCall(ctx context.Context, project, call st
 	if strings.HasPrefix(call, "custom-") {
 		return p.customCall(ctx, call, body) // consoleorgpolicycustom.go
 	}
-	if project == "" {
-		return nil, errors.New("choose a project in the toolbar")
+	// The project, or the folder or organization chosen in the toolbar
+	// (#2023).
+	resource, _, err := p.resourceOf(ctx, project)
+	if err != nil {
+		return nil, err
 	}
 	var c orgPolicyEditChange
 	if len(body) > 0 {
@@ -201,7 +204,6 @@ func (p iamOrgPoliciesProvider) StudioCall(ctx context.Context, project, call st
 			return nil, fmt.Errorf("malformed request: %v", err)
 		}
 	}
-	resource := "projects/" + project
 	short := shortConstraint(c.Constraint)
 	if short == "" {
 		return nil, errors.New("name a constraint")

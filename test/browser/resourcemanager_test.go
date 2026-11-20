@@ -209,7 +209,7 @@ func TestResourceHierarchyAndTagsThroughTheDrawer(t *testing.T) {
 	var tagLabels []string
 	p.clickText("#view button", "Create tag key")
 	p.waitFor(`document.querySelector("#f-shortName") !== null`)
-	p.eval(`[...document.querySelectorAll("label[for^=f-] > span:first-child")].map((s) => s.textContent.trim())`, &tagLabels)
+	p.eval(`[...document.querySelectorAll("label[for^=f-] > span:first-child, #view form fieldset > legend")].map((s) => s.textContent.trim())`, &tagLabels)
 	for _, want := range []string{"Tag key", "Tag key description", "For use with network firewall", "Tag values"} {
 		if !contains(tagLabels, want) {
 			t.Errorf("Create tag key's fields are %q; want Google's %q among them", tagLabels, want)
