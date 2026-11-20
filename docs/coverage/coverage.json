@@ -1425,7 +1425,7 @@
           "test/compat/cloudbuildpubsub_test.go:31 TestCloudBuildPubsubTrigger",
           "test/compat/cloudbuildserviceaccount_test.go:92 TestCloudBuildServiceAccount",
           "test/compat/cloudbuildssm_test.go:183 TestCloudBuildSourceManagerTriggerFilters",
-          "test/compat/cloudbuildssm_test.go:453 TestTerraformCloudBuildSourceManagerTrigger",
+          "test/compat/cloudbuildssm_test.go:455 TestTerraformCloudBuildSourceManagerTrigger",
           "test/compat/cloudbuildtriggers_test.go:75 TestCloudBuildTriggersAndWorkerPools",
           "test/compat/runconnectrepo_test.go:37 TestCloudRunContinuousDeployFromRepository",
           "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
@@ -1446,7 +1446,7 @@
           "test/compat/cloudbuildapproval_test.go:308 TestTerraformCloudBuildTriggerApproval",
           "test/compat/cloudbuildpubsub_test.go:108 TestTerraformCloudBuildPubsubTrigger",
           "test/compat/cloudbuildpubsub_test.go:31 TestCloudBuildPubsubTrigger",
-          "test/compat/cloudbuildssm_test.go:453 TestTerraformCloudBuildSourceManagerTrigger",
+          "test/compat/cloudbuildssm_test.go:455 TestTerraformCloudBuildSourceManagerTrigger",
           "test/compat/cloudbuildtriggers_test.go:75 TestCloudBuildTriggersAndWorkerPools",
           "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
         ]
@@ -1482,7 +1482,7 @@
           "test/compat/cloudbuildapproval_test.go:126 TestCloudBuildApproveBuild",
           "test/compat/cloudbuildapproval_test.go:308 TestTerraformCloudBuildTriggerApproval",
           "test/compat/cloudbuildpubsub_test.go:108 TestTerraformCloudBuildPubsubTrigger",
-          "test/compat/cloudbuildssm_test.go:453 TestTerraformCloudBuildSourceManagerTrigger",
+          "test/compat/cloudbuildssm_test.go:455 TestTerraformCloudBuildSourceManagerTrigger",
           "test/compat/cloudbuildtriggers_test.go:75 TestCloudBuildTriggersAndWorkerPools",
           "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
         ]
@@ -1560,7 +1560,7 @@
         "tests": [
           "test/compat/cloudbuildapproval_test.go:308 TestTerraformCloudBuildTriggerApproval",
           "test/compat/cloudbuildpubsub_test.go:31 TestCloudBuildPubsubTrigger",
-          "test/compat/cloudbuildssm_test.go:453 TestTerraformCloudBuildSourceManagerTrigger",
+          "test/compat/cloudbuildssm_test.go:455 TestTerraformCloudBuildSourceManagerTrigger",
           "test/compat/cloudbuildtriggers_test.go:75 TestCloudBuildTriggersAndWorkerPools",
           "test/compat/runconnectrepo_test.go:37 TestCloudRunContinuousDeployFromRepository",
           "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
