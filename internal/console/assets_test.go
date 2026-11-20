@@ -1,6 +1,7 @@
 package console
 
 import (
+	"encoding/json"
 	"io/fs"
 	"os"
 	"regexp"
@@ -2622,5 +2623,33 @@ func TestShowListAndViewOptionsDialog(t *testing.T) {
 	}
 	if strings.Contains(js, "object-versions-toggle") {
 		t.Error("Show versions is still a checkbox beside Google's Show list")
+	}
+}
+
+// An EditForm with Page set is drawn at the resource's own address with
+// ?edit=1, opened by the Edit button and a row's Edit item, as Google's
+// Edit Repository is a page ending in Update (#1855); and a listing
+// section's Groups are drawn as cards over its rows, as Google's
+// Vulnerabilities tab has Scan results above its table.
+func TestAnEditFormCanBeAPageAndAListingHasGroupsOverItsRows(t *testing.T) {
+	b, err := json.Marshal(EditForm{Label: "Edit Repository", Page: true})
+	if err != nil || !strings.Contains(string(b), `"page":true`) {
+		t.Errorf("EditForm.Page marshals as %s, %v", b, err)
+	}
+	js := consoleAsset(t, "console.js")
+	for _, want := range []string{
+		"if (data.edit && data.edit.page) {",
+		"href: editPageHref(route, segments),",
+		`u.searchParams.set("edit", "1");`,
+		`new URLSearchParams(location.search).get("edit") === "1"`,
+		"return renderEditPage(view, route, segments, data);",
+		"if (data.edit.page) return navigate(editPageHref(route, segments));",
+		`el("form", { class: "create-page edit-page", id: "edit-page-form", novalidate: true, onsubmit: submit },`,
+		"navigate(pageHref);",
+		"const cards = (section.groups || []).filter((g) => (g.properties || []).length).map((group) =>",
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("console.js is missing %q", want)
+		}
 	}
 }
