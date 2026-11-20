@@ -86,6 +86,7 @@ import (
 	_ "cloud.google.com/go/kms/apiv1/kmspb"
 	_ "cloud.google.com/go/logging/apiv2/loggingpb"
 	_ "cloud.google.com/go/memorystore/apiv1/memorystorepb"
+	_ "cloud.google.com/go/monitoring/apiv3/v2/monitoringpb"
 	_ "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	_ "cloud.google.com/go/redis/apiv1/redispb"
 	_ "cloud.google.com/go/redis/cluster/apiv1/clusterpb"
@@ -277,6 +278,10 @@ var areas = []area{
 	// The Kubernetes Engine API (#1913): CloudBurrow's own, gRPC and JSON
 	// on one port, each cluster a kind cluster of its own.
 	{Key: "gke", Title: "Kubernetes Engine API (v1)", Own: true, Services: []string{"google.container.v1.ClusterManager"}},
+	// Cloud Monitoring (#1939): CloudBurrow's own, gRPC and JSON on one
+	// port. Only MetricService is served; the API's other services answer
+	// UNIMPLEMENTED.
+	{Key: "monitoring", Title: "Cloud Monitoring API (v3)", Own: true, Services: []string{"google.monitoring.v3.MetricService"}},
 }
 
 // cloudidentityMethods is every method of the cloudidentity v1 discovery

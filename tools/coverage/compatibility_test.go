@@ -78,6 +78,8 @@ var compatSections = map[string]string{
 	"privateca": "## Certificate Authority Service — `google.cloud.security.privateca.v1`",
 	// The Kubernetes Engine API (#1913), named by gRPC method.
 	"gke": "## Kubernetes Engine API — `google.container.v1`",
+	// Cloud Monitoring (#1939), named by gRPC method.
+	"monitoring": "## Cloud Monitoring — `google.monitoring.v3`",
 }
 
 // acceptedStatuses maps a status cell of docs/compatibility.md to the

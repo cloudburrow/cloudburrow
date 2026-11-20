@@ -55,7 +55,8 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 	config.ServicePrivateCA: {Providers: []string{"privateca", "privateca-templates"}},
 	// The Kubernetes Engine API (#1913): its clusters are on Kubernetes
 	// clusters, beside the instance's own.
-	config.ServiceGKE: {Providers: []string{"gkeclusters"}},
+	config.ServiceGKE:        {Providers: []string{"gkeclusters"}},
+	config.ServiceMonitoring: {Providers: []string{"monitoring-explorer", "monitoring-metrics"}},
 }
 
 // clusterScreens are the registry's screens that belong to no selectable
@@ -148,14 +149,15 @@ func coverageDeps(t *testing.T) consoleDeps {
 	}
 	projects := resourcemanager.New(store.NewMemory())
 	d := consoleDeps{
-		cfg:       cfg,
-		projects:  projects,
-		tasks:     &tasksService{},
-		secrets:   &secretsService{},
-		kms:       &kmsService{},
-		privateCA: &privateCAService{},
-		scheduler: &schedulerService{},
-		logging:   &loggingService{},
+		cfg:        cfg,
+		projects:   projects,
+		tasks:      &tasksService{},
+		secrets:    &secretsService{},
+		kms:        &kmsService{},
+		privateCA:  &privateCAService{},
+		monitoring: &monitoringService{},
+		scheduler:  &schedulerService{},
+		logging:    &loggingService{},
 		// The APIs & Services page (#1352) reads the Service Usage server.
 		serviceUsage: newServiceUsageServer(cfg, projects, store.NewMemory()),
 		// The Backup and DR page (#1433) reads the Backup and DR server.

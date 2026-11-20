@@ -14,6 +14,7 @@ import (
 
 	iamadminpb "cloud.google.com/go/iam/admin/apiv1/adminpb"
 	iamv2pb "cloud.google.com/go/iam/apiv2/iampb"
+	"cloud.google.com/go/monitoring/apiv3/v2/monitoringpb"
 	"cloud.google.com/go/orgpolicy/apiv2/orgpolicypb"
 	rmpb "cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
 	"cloud.google.com/go/security/privateca/apiv1/privatecapb"
@@ -33,6 +34,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/gke"
 	"github.com/cloudburrow/cloudburrow/internal/service/kms"
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
+	"github.com/cloudburrow/cloudburrow/internal/service/monitoring"
 	"github.com/cloudburrow/cloudburrow/internal/service/privateca"
 	"github.com/cloudburrow/cloudburrow/internal/service/redisadmin"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
@@ -73,6 +75,11 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		t.Fatal(err)
 	}
 	gkeSrv.Register(srv)
+	mon, err := monitoring.NewServer("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	monitoringpb.RegisterMetricServiceServer(srv, mon)
 	rmReg := resourcemanager.New(store.NewMemory())
 	rmpb.RegisterProjectsServer(srv, resourcemanager.NewProjectsServer(rmReg))
 	rmpb.RegisterFoldersServer(srv, resourcemanager.NewFoldersServer(rmReg))

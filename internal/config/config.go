@@ -111,6 +111,11 @@ const (
 	// #1913), served in the CLI process: each cluster it makes is a local
 	// kind cluster of its own. Opt-in, since every cluster costs disk.
 	ServiceGKE Service = "gke"
+	// ServiceMonitoring is the Cloud Monitoring API v3
+	// (monitoring.googleapis.com, #1939), served in the CLI process:
+	// metric descriptors, user-defined time series, and the built-in
+	// metrics of the instance's log-based metrics and API requests.
+	ServiceMonitoring Service = "monitoring"
 )
 
 // AllServices lists the default services in a stable order, so startup
@@ -123,7 +128,7 @@ func AllServices() []Service {
 
 // OptionalServices lists the opt-in services, in a stable order.
 func OptionalServices() []Service {
-	return []Service{ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceCloudSQL, ServiceBigQuery, ServiceMemorystore, ServiceCloudSQLMySQL, ServiceScheduler, ServiceLogging, ServiceKMS, ServiceBackupDR, ServicePrivateCA, ServiceGKE}
+	return []Service{ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceCloudSQL, ServiceBigQuery, ServiceMemorystore, ServiceCloudSQLMySQL, ServiceScheduler, ServiceLogging, ServiceKMS, ServiceBackupDR, ServicePrivateCA, ServiceGKE, ServiceMonitoring}
 }
 
 // KnownServices lists every selectable service.
@@ -184,7 +189,7 @@ func (s Service) Persistence() Persistence {
 		// Key material is in Kubernetes Secrets, like Secret Manager's
 		// payloads, which the cluster keeps.
 		return PersistenceVolume
-	case ServiceStorage, ServiceTasks, ServiceSecrets, ServiceScheduler, ServiceBackupDR, ServicePrivateCA, ServiceGKE:
+	case ServiceStorage, ServiceTasks, ServiceSecrets, ServiceScheduler, ServiceBackupDR, ServicePrivateCA, ServiceGKE, ServiceMonitoring:
 		return PersistenceVolume
 	case ServiceRun:
 		// Workload definitions live in the Kubernetes API, which the cluster
@@ -339,6 +344,9 @@ type Endpoints struct {
 	// GKE is the host port of the Kubernetes Engine API
 	// (container.googleapis.com, #1913): gRPC and JSON on one port.
 	GKE int `json:"gke"`
+	// Monitoring is the host port of the Cloud Monitoring API v3
+	// (monitoring.googleapis.com, #1939): gRPC and JSON on one port.
+	Monitoring int `json:"monitoring"`
 	// ONNX is the host port of the ONNX runner (#1711), which runs BigQuery
 	// ML's imported ONNX models for the BigQuery front, published to the
 	// cluster through cloudburrow-host. CloudBurrow's own API, not a
@@ -412,6 +420,7 @@ func (e *Endpoints) fields() []endpointField {
 		{"backupdr", &e.BackupDR},
 		{"privateca", &e.PrivateCA},
 		{"gke", &e.GKE},
+		{"monitoring", &e.Monitoring},
 		{"onnx", &e.ONNX},
 		{"tfconvert", &e.TFConvert},
 	}
@@ -483,6 +492,8 @@ func (e Endpoints) OptionalPort(s Service) int {
 		return e.PrivateCA
 	case ServiceGKE:
 		return e.GKE
+	case ServiceMonitoring:
+		return e.Monitoring
 	default:
 		return 0
 	}
@@ -806,6 +817,9 @@ func Default() Config {
 			// The Kubernetes Engine API (#1913): the next free port after the
 			// API Keys API's 9029.
 			GKE: 9030,
+			// Cloud Monitoring (#1939): after 9029-9030 (API Keys, GKE)
+			// and the ports other open branches took.
+			Monitoring: 9033,
 			// OS-assigned. The port is not what enables local AI —
 			// LocalAI.ModelPath is. A configured port with no model binds
 			// nothing, so there is no endpoint answering every request with

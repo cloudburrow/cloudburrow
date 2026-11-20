@@ -72,6 +72,8 @@ type adminDeps struct {
 	privateCA *privateCAService
 	// gke is the Kubernetes Engine API (#1913), nil unless enabled.
 	gke *gkeService
+	// monitoring is Cloud Monitoring (#1939), nil unless enabled.
+	monitoring *monitoringService
 }
 
 // mountAdmin attaches the admin API to the control server.
@@ -173,6 +175,9 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 	}
 	if d.privateCA != nil {
 		api.RegisterResetter(&privateCAResetter{svc: d.privateCA})
+	}
+	if d.monitoring != nil {
+		api.RegisterResetter(&monitoringResetter{svc: d.monitoring})
 	}
 	// Backup and DR before the Admin API it takes its backups through.
 	if d.backupDR != nil && backupDREnabled(cfg) {

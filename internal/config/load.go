@@ -206,6 +206,7 @@ type rawFlags struct {
 	backupdr         int
 	privateca        int
 	gke              int
+	monitoring       int
 	onnx             int
 	tfconvert        int
 	firestore        int
@@ -289,6 +290,7 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.IntVar(&r.backupdr, "port-backupdr", 0, "Backup and DR Service API host port (0 = OS-assigned; default 9024)")
 	fs.IntVar(&r.privateca, "port-privateca", 0, "Certificate Authority Service API host port (0 = OS-assigned; default 9028)")
 	fs.IntVar(&r.gke, "port-gke", 0, "Kubernetes Engine API host port (0 = OS-assigned; default 9030)")
+	fs.IntVar(&r.monitoring, "port-monitoring", 0, "Cloud Monitoring API host port (0 = OS-assigned; default 9033)")
 	fs.IntVar(&r.onnx, "port-onnx", 0, "ONNX runner host port, for BigQuery ML's imported ONNX models in the onnx build (0 = OS-assigned; default 9025)")
 	fs.IntVar(&r.tfconvert, "port-tfconvert", 0, "TensorFlow SavedModel converter host port, for BigQuery ML's imported TENSORFLOW models (0 = OS-assigned; default 9027)")
 	fs.IntVar(&r.firestore, "port-firestore", 0, "Firestore emulator host port (0 = OS-assigned; default 9010)")
@@ -498,6 +500,7 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 		{"PORT_BACKUPDR", &cfg.Endpoints.BackupDR},
 		{"PORT_PRIVATECA", &cfg.Endpoints.PrivateCA},
 		{"PORT_GKE", &cfg.Endpoints.GKE},
+		{"PORT_MONITORING", &cfg.Endpoints.Monitoring},
 		{"PORT_ONNX", &cfg.Endpoints.ONNX},
 		{"PORT_TFCONVERT", &cfg.Endpoints.TFConvert},
 		{"PORT_FIRESTORE", &cfg.Endpoints.Firestore},
@@ -647,6 +650,7 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 		{"port-backupdr", raw.backupdr, &cfg.Endpoints.BackupDR},
 		{"port-privateca", raw.privateca, &cfg.Endpoints.PrivateCA},
 		{"port-gke", raw.gke, &cfg.Endpoints.GKE},
+		{"port-monitoring", raw.monitoring, &cfg.Endpoints.Monitoring},
 		{"port-onnx", raw.onnx, &cfg.Endpoints.ONNX},
 		{"port-tfconvert", raw.tfconvert, &cfg.Endpoints.TFConvert},
 		{"port-firestore", raw.firestore, &cfg.Endpoints.Firestore},

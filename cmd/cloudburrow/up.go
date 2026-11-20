@@ -351,6 +351,13 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	memorystoreAdminSvc.register(coord)
 	loggingSvc := newLoggingService(cfg)
 	loggingSvc.register(coord)
+	// Cloud Monitoring (#1939), in process: log-based metrics' values come
+	// from this instance's Cloud Logging, request metrics from its counters.
+	monitoringSvc := newMonitoringService(cfg)
+	if monitoringSvc != nil {
+		monitoringSvc.logging = loggingSvc
+	}
+	monitoringSvc.register(coord)
 	if loggingSvc != nil {
 		// CopyLogEntries writes to the instance's Cloud Storage (#1394).
 		loggingSvc.storage = func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") }
@@ -434,6 +441,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		scheduler:    schedulerSvc,
 		privateCA:    privateCASvc,
 		gke:          gkeSvc,
+		monitoring:   monitoringSvc,
 		logging:      loggingSvc,
 		run:          runSvc,
 		memorystore:  memorystoreAdminSvc,
@@ -460,6 +468,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// service ends up with none (#600), never a list kept here.
 	requestMetrics := metrics.New(metricsServices(cfg)...)
 	control.Mount(func(mux *http.ServeMux) { mux.Handle("GET /metrics", metricsHandler(requestMetrics)) })
+	if monitoringSvc != nil {
+		// serviceruntime.googleapis.com/api/* are sampled from these.
+		monitoringSvc.counters = requestMetrics
+	}
 	// Fault injection (#306) on the services CloudBurrow serves itself. Each
 	// faults.Interceptor below is what makes its service's rules accepted
 	// (#600), so the fault-injectable set is exactly the wiring. The builtin
@@ -511,6 +523,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		gkeSvc.interpose = append(gkeSvc.interpose, grpctransport.LogInterceptor(logger, "gke"), faults.Interceptor("gke"))
 		gkeSvc.requests = requestEvents(recorder, requestMetrics, "gke")
 	}
+	if monitoringSvc != nil {
+		monitoringSvc.tracing = tracing
+	}
 	if loggingSvc != nil {
 		loggingSvc.tracing = tracing
 	}
@@ -538,6 +553,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		schedulerSvc.calls = callEvents(recorder, requestMetrics, "scheduler")
 		schedulerSvc.interpose = append(schedulerSvc.interpose, grpctransport.LogInterceptor(logger, "scheduler"), faults.Interceptor("scheduler"))
 		schedulerSvc.requests = requestEvents(recorder, requestMetrics, "scheduler")
+	}
+	if monitoringSvc != nil {
+		monitoringSvc.calls = callEvents(recorder, requestMetrics, "monitoring")
+		monitoringSvc.interpose = append(monitoringSvc.interpose, grpctransport.LogInterceptor(logger, "monitoring"), faults.Interceptor("monitoring"))
+		monitoringSvc.requests = requestEvents(recorder, requestMetrics, "monitoring")
 	}
 	if privateCASvc != nil {
 		privateCASvc.calls = callEvents(recorder, requestMetrics, "privateca")
@@ -851,6 +871,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		sqlAdmin:       sqlAdminSrv,
 		privateCA:      privateCASvc,
 		gke:            gkeSvc,
+		monitoring:     monitoringSvc,
 	})
 	if consoleSrv != nil {
 		// The Request Log reads the same recorder /admin/events does.
@@ -938,6 +959,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		if a := apiKeysSrv.Addr(); a != "" {
 			live["apikeys"] = a
+		}
+		if a := monitoringSvc.Addr(); a != "" {
+			live["monitoring"] = a
 		}
 		if backupDRSrv != nil && backupDRSrv.Addr() != "" {
 			live["backupdr"] = backupDRSrv.Addr()
