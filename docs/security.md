@@ -113,14 +113,13 @@ What no configuration can redirect, and so only an egress block (a proxy or fire
   the code does not configure it calls Google. The environment alone cannot redirect it: the one
   catch-all the libraries read, `GOOGLE_CLOUD_UNIVERSE_DOMAIN`, breaks served clients in one
   library or another whichever way it is set (measured below), so `env` does not export it.
-- **Python's Regional Access Boundary lookup.** google-auth 2.62.2 (Python) starts a background
-  lookup at `iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/<email>/allowedLocations`
+- **Python's Regional Access Boundary lookup** (#1981). google-auth 2.62.2 (Python) starts a
+  background lookup at `iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/<email>/allowedLocations`
   for a service-account credential in the default universe, the ADC fixture included, even for a
-  client pointed at the instance: measured, four CONNECTs to `iamcredentials.googleapis.com:443`
-  from one served KMS call. No variable turns it off (`GOOGLE_AUTH_TRUST_BOUNDARY_ENABLED` is
-  deprecated and ignored); only a credential in another universe skips it. Go's
-  `cloud.google.com/go/auth` 0.24.1 does it only with `GOOGLE_AUTH_TRUST_BOUNDARY_ENABLED=true`,
-  and Node's google-auth-library 11.3.4 not at all (#1981).
+  client pointed at the instance. No configuration CloudBurrow writes can stop it without breaking
+  served clients in another language (measured below), so only an egress block does. Go's
+  `cloud.google.com/go/auth` 0.24.1 looks up only with `GOOGLE_AUTH_TRUST_BOUNDARY_ENABLED=true`,
+  and Node's google-auth-library 11.3.4 not at all.
 - **gcloud with a real account under `env`.** `env` does not disable gcloud's credentials, so a
   gcloud that has an account refreshes its token at `oauth2.googleapis.com` before it calls the
   (local or refusing) override. `gcloud-setup` disables them; with no account gcloud stops
@@ -148,6 +147,48 @@ So no setting keeps every served client working: the variable alone breaks Go cl
 the fixture, and the variable with the fixture breaks every Node client. `env` exports neither.
 Node's REST transport (gaxios on Node 26's `fetch`) also ignores `HTTPS_PROXY`, so an egress proxy
 is no catch-all for it either; Go, Python and Node's gRPC transport honour it.
+
+### Python's Regional Access Boundary lookup (measured, #1981)
+
+Measured on 2026-11-20 at the network layer, not through a proxy: each client ran in a container
+on an internal Docker network (no route out) whose nat table sent every TCP connection, UDP
+datagram and DNS query bound off the machine to a sink that logged it and answered nothing real.
+The clients were Cloud KMS over gRPC and REST, pointed at the instance with the fixture as
+`GOOGLE_APPLICATION_CREDENTIALS`, at the versions in the table above. Every attempt below stopped
+in the container.
+
+| Fixture | Go | Node | Python |
+|---|---|---|---|
+| Today's `service_account` | Works, no attempt | Works, no attempt | Works, and 5 DNS queries and 5 connections to `iamcredentials.googleapis.com:443` from one gRPC and one REST call |
+| `universe_domain` in the fixture (no variable) | **Fails**: "the configured universe domain (googleapis.com) does not match ... (cloudburrow.localhost)" | **Fails**: the same, thrown unhandled from `createStub` | Works, no attempt |
+| `authorized_user`, `token_uri` at the instance | **Fails**, and refreshes at `oauth2.googleapis.com` | REST **refreshes at `oauth2.googleapis.com`** (google-auth-library reads no `token_uri` for this type) | **Refreshes at `oauth2.googleapis.com`** |
+
+What the libraries' source leaves:
+
+- **No override for the lookup.** Python builds the URL from the constant `googleapis.com`
+  (`_regional_access_boundary_utils._get_domain`; only `GOOGLE_API_USE_CLIENT_CERTIFICATE` changes
+  it, to `iamcredentials.mtls.googleapis.com`). It skips the lookup only for a credential whose
+  universe is not `googleapis.com`, for a request to a `*.rep.googleapis.com` host, or for a
+  boundary seeded in code (`_set_regional_access_boundary`, which gcloud uses). Serving the lookup
+  locally would take a DNS or network interception on the developer's machine.
+- **A universe in the fixture**, read by Python, is read by every library alike: `""`, `null` or
+  `0` mean the default to Python (`universe_domain or DEFAULT`) as they do to Node
+  (`json.universe_domain || ...`), so there is no value only Python sees. The variable
+  `GOOGLE_CLOUD_UNIVERSE_DOMAIN` with it fixes Go but not Node (the table above).
+- **Another credential type** loses the private key, so signing (signed URLs, ID tokens, custom
+  tokens) falls back to IAM `signBlob` at `iamcredentials.googleapis.com`, as Node's
+  `GoogleAuth.sign` does for any client without a key, besides the refreshes above.
+  `external_account` (a local `token_url`) has the same loss.
+  Java was not measured: no Google Java client is installed or pinned here.
+
+So the fixture stays a `service_account` file in the default universe. A Python program that must
+send nothing can move the credential to another universe itself, as the second row does
+(google-api-core's universe validation is off, so the client still works):
+`google.auth.default()[0].with_universe_domain("cloudburrow.localhost")`, passed as
+`credentials=` (measured the same way: no attempt). The compat test
+`TestServedClientsSendNothingOffTheMachine` runs the Go, Node and Python clients in that
+container: Go and Node must make no attempt, and Python fails on any attempt but this lookup and
+skips, naming #1981, while the lookup remains.
 
 ## What remains
 
