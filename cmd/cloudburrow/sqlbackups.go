@@ -128,8 +128,9 @@ func (d dirEntries) List(prefix string) []string {
 }
 
 // mysqlArchiver dumps each application database of a MySQL server with
-// mysqldump, as root, whose password the server's container holds in
-// MYSQL_ROOT_PASSWORD: it never passes through the host's command line.
+// mysqldump, as the server's administrative account (mysqlRootEnv), whose
+// password the server's container holds in MYSQL_ROOT_PASSWORD: it never
+// passes through the host's command line.
 type mysqlArchiver struct {
 	exec func(ctx context.Context, stdin io.Reader, stdout io.Writer, argv ...string) error
 	// bare is a created instance's server, which has no default database
@@ -151,19 +152,24 @@ func (m *mysqlArchiver) sh(ctx context.Context, stdin io.Reader, stdout io.Write
 }
 
 // mysqlRootEnv starts every script run in a MySQL server's container: the
-// clients sign in as root over TCP to 127.0.0.1:3306 ($MYSQL_LOCAL), not over
+// clients sign in as sqladmin.MySQLAdminUser (#1993), or as root on a
+// server that has none (`up`'s, or one made before #1993 until its next
+// start), over TCP to 127.0.0.1:3306 ($MYSQL_LOCAL), not over
 // the unix socket, and wait until the server answers there. On CI's runners
 // the server's classic socket, /var/run/mysqld/mysqld.sock, was missing
 // while the server served TCP (only mysqlx.sock was there), so a backup or a
 // replica's setup failed with ERROR 2002; TCP is what the pod's readiness
 // probe checks. The flags are explicit because not every client reads
-// MYSQL_HOST (mysqladmin pinged over the socket with it set). The image's
-// root is root@'%', which a TCP sign-in from 127.0.0.1 is. mysqladmin ping
-// succeeds once the server runs, even when it refuses the login.
-const mysqlRootEnv = `export MYSQL_PWD="${MYSQL_ROOT_PASSWORD:-}"; MYSQL_LOCAL="-uroot -h127.0.0.1 -P3306 --protocol=TCP"; ` +
+// MYSQL_HOST (mysqladmin pinged over the socket with it set). The
+// administrative account is at 127.0.0.1, and the image's root is
+// root@'%', which a TCP sign-in from 127.0.0.1 is too, unless the user
+// deleted it. mysqladmin ping succeeds once the server runs, even when it
+// refuses the login.
+const mysqlRootEnv = `export MYSQL_PWD="${MYSQL_ROOT_PASSWORD:-}"; MYSQL_LOCAL="-u` + sqladmin.MySQLAdminUser + ` -h127.0.0.1 -P3306 --protocol=TCP"; ` +
 	`i=0; until mysqladmin $MYSQL_LOCAL --connect-timeout=2 ping >/dev/null 2>&1; do ` +
 	`i=$((i+1)); if [ "$i" -ge 120 ]; then ` +
 	`echo "mysqld did not answer on 127.0.0.1:3306 in 120s" >&2; exit 1; fi; sleep 1; done
+mysql $MYSQL_LOCAL -N -e 'SELECT 1' >/dev/null 2>&1 || MYSQL_LOCAL="-uroot -h127.0.0.1 -P3306 --protocol=TCP"
 `
 
 func (m *mysqlArchiver) query(ctx context.Context, stmt string) (string, error) {

@@ -50,10 +50,13 @@ func (p *sqlProvisioner) Upgrade(ctx context.Context, from, to sqladmin.Spec) er
 }
 
 // mysqlAccounts prints the statements that recreate every account but
-// root, the image's own and the replication user, with its grants.
+// root, the image's own, CloudBurrow's (the new server's Start made it)
+// and the replication user, with its grants; and the drop of the new
+// server's 'root'@'%' when the user deleted the old one's (#1993).
 const mysqlAccounts = mysqlRootEnv + `set -e
+[ "$(mysql $MYSQL_LOCAL -N -B -e "SELECT COUNT(*) FROM mysql.user WHERE user = 'root' AND host = '%'")" != 0 ] || echo "DROP USER IF EXISTS 'root'@'%';"
 for u in $(mysql $MYSQL_LOCAL -N -B -e "SELECT CONCAT(QUOTE(user), '@', QUOTE(host)) FROM mysql.user WHERE user NOT LIKE 'mysql.%' AND user NOT IN ('root', '` +
-	components.SQLReplicaUser + `')"); do
+	sqladmin.MySQLAdminUser + `', '` + components.SQLReplicaUser + `')"); do
   mysql $MYSQL_LOCAL -N -B -r -e "SET SESSION print_identified_with_as_hex = ON; SHOW CREATE USER $u" | sed 's/$/;/'
   mysql $MYSQL_LOCAL -N -B -r -e "SHOW GRANTS FOR $u" | sed 's/$/;/'
 done
