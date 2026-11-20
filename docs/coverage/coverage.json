@@ -9514,6 +9514,7 @@
           "test/compat/consoledocs_test.go:108 TestConsoleFirestoreDocumentCreateEditDelete",
           "test/compat/consolefirestorenested_test.go:102 TestConsoleFirestoreEditValuesInsideMapsAndArrays",
           "test/compat/emulatorkill1611_test.go:111 TestFirestoreAfterTheEmulatorIsKilled",
+          "test/compat/firestorecompact1969_test.go:40 TestFirestoreCompactsItsVersionsBeforeTheHeapFills",
           "test/compat/firestorepersist1615_test.go:165 TestFirestoreAcrossRestart",
           "test/compat/firestorepersist1615_test.go:64 TestFirestoreSurvivesAPodRestart",
           "test/compat/optional_test.go:43 TestFirestoreDocumentCRUD"
@@ -9539,6 +9540,7 @@
         "tests": [
           "test/compat/consolefirestoreforeignref_test.go:26 TestConsoleFirestoreEditFieldRefusesAForeignReference",
           "test/compat/consolefirestorenested_test.go:102 TestConsoleFirestoreEditValuesInsideMapsAndArrays",
+          "test/compat/firestorecompact1969_test.go:40 TestFirestoreCompactsItsVersionsBeforeTheHeapFills",
           "test/compat/firestorepersist1615_test.go:120 TestFirestoreRestartSetup",
           "test/compat/firestorepersist1615_test.go:64 TestFirestoreSurvivesAPodRestart",
           "test/compat/optional_test.go:43 TestFirestoreDocumentCRUD"
@@ -9594,6 +9596,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/emulatorkill1611_test.go:111 TestFirestoreAfterTheEmulatorIsKilled",
+          "test/compat/firestorecompact1969_test.go:40 TestFirestoreCompactsItsVersionsBeforeTheHeapFills",
           "test/compat/firestoremethods_test.go:247 TestFirestoreSnapshotListener"
         ]
       },
@@ -9664,7 +9667,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/datastoreadmin1884_test.go:275 TestFirestoreAdminCopiesADatastoreModeDatabase",
-          "test/compat/firestorepitr1942_test.go:30 TestFirestorePointInTimeRecovery",
+          "test/compat/firestorepitr1942_test.go:29 TestFirestorePointInTimeRecovery",
           "test/compat/firestoretransfer_test.go:194 TestFirestoreBackupRestoreClone",
           "test/compat/gcloudfirestoretransfer_test.go:24 TestGcloudFirestoreTransfer"
         ]
@@ -9764,7 +9767,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/datastoreadmin1884_test.go:275 TestFirestoreAdminCopiesADatastoreModeDatabase",
-          "test/compat/firestorepitr1942_test.go:30 TestFirestorePointInTimeRecovery",
+          "test/compat/firestorepitr1942_test.go:29 TestFirestorePointInTimeRecovery",
           "test/compat/firestoretransfer_test.go:94 TestFirestoreExportImport",
           "test/compat/gcloudfirestoretransfer_test.go:24 TestGcloudFirestoreTransfer"
         ]
@@ -9794,12 +9797,13 @@
           "test/compat/consolefirestoreadmin_test.go:89 TestConsoleFirestoreDatabaseEditsIndexesAndFieldOverrides",
           "test/compat/emulatorkill1611_test.go:111 TestFirestoreAfterTheEmulatorIsKilled",
           "test/compat/firestoreadmin_test.go:47 TestFirestoreAdminDatabases",
+          "test/compat/firestorecompact1969_test.go:40 TestFirestoreCompactsItsVersionsBeforeTheHeapFills",
           "test/compat/firestoredatastoremode1880_test.go:231 TestFirestoreCMEK",
           "test/compat/firestoredatastoremode1880_test.go:354 TestGcloudFirestoreDatastoreModeAndKMSKey",
           "test/compat/firestoredatastoremode1880_test.go:69 TestFirestoreDatastoreModeDatabases",
           "test/compat/firestorepersist1615_test.go:165 TestFirestoreAcrossRestart",
           "test/compat/firestorepersist1615_test.go:64 TestFirestoreSurvivesAPodRestart",
-          "test/compat/firestorepitr1942_test.go:30 TestFirestorePointInTimeRecovery",
+          "test/compat/firestorepitr1942_test.go:29 TestFirestorePointInTimeRecovery",
           "test/compat/frontstate1514_test.go:310 TestFirestoreFrontRestartKeepsItsState"
         ]
       },
@@ -9917,7 +9921,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/firestoreadmin_test.go:47 TestFirestoreAdminDatabases",
-          "test/compat/firestorepitr1942_test.go:30 TestFirestorePointInTimeRecovery",
+          "test/compat/firestorepitr1942_test.go:29 TestFirestorePointInTimeRecovery",
           "test/compat/orgpolicycustom1891_test.go:484 TestOrgPolicyCustomConstraintsFirestore"
         ]
       },
@@ -9949,6 +9953,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/datastoredatabases1885_test.go:49 TestDatastoreNamedDatabasesKeepTheirEntitiesApart",
+          "test/compat/datastorepitr1967_test.go:39 TestDatastorePointInTimeReads",
           "test/compat/optional_test.go:130 TestDatastoreEntityCRUD"
         ]
       },
@@ -9968,9 +9973,9 @@
         "tests": [
           "test/compat/consoledocs_test.go:289 TestConsoleDatastoreEntityCreateEditDelete",
           "test/compat/datastoredatabases1885_test.go:49 TestDatastoreNamedDatabasesKeepTheirEntitiesApart",
+          "test/compat/datastorepitr1967_test.go:39 TestDatastorePointInTimeReads",
           "test/compat/datastoreupgrade1885_test.go:90 TestDatastoreNamedDatabaseEntitiesSurviveTheUpgrade",
           "test/compat/emulatorkill1611_test.go:281 TestDatastoreAfterTheEmulatorIsKilled",
-          "test/compat/firestorepitr1942_test.go:223 TestDatastoreReadAtAnEarlierTimeIsRefused",
           "test/compat/optional_test.go:130 TestDatastoreEntityCRUD"
         ]
       },
@@ -9997,7 +10002,8 @@
           "test/compat/datastoregql_test.go:24 TestDatastoreGQLAggregation",
           "test/compat/datastoregqlkeys1885_test.go:30 TestDatastoreNamedDatabaseKeysInGQLCursorsAndErrors",
           "test/compat/datastoremethods_test.go:92 TestDatastoreAggregation",
-          "test/compat/datastoreoperators1888_test.go:35 TestDatastoreNotEqualInNotInAndOr"
+          "test/compat/datastoreoperators1888_test.go:35 TestDatastoreNotEqualInNotInAndOr",
+          "test/compat/datastorepitr1967_test.go:39 TestDatastorePointInTimeReads"
         ]
       },
       {
@@ -10009,6 +10015,7 @@
           "test/compat/datastoregql_test.go:84 TestDatastoreExplain",
           "test/compat/datastoregqlkeys1885_test.go:30 TestDatastoreNamedDatabaseKeysInGQLCursorsAndErrors",
           "test/compat/datastoreoperators1888_test.go:35 TestDatastoreNotEqualInNotInAndOr",
+          "test/compat/datastorepitr1967_test.go:39 TestDatastorePointInTimeReads",
           "test/compat/datastoreupgrade1885_test.go:90 TestDatastoreNamedDatabaseEntitiesSurviveTheUpgrade",
           "test/compat/optional_test.go:105 TestDatastoreQueriesSeeAFreshWrite",
           "test/compat/optional_test.go:130 TestDatastoreEntityCRUD"
@@ -10042,7 +10049,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/datastoreadmin1884_test.go:122 TestDatastoreAdminExportImport",
-          "test/compat/datastoreadmin1884_test.go:395 TestGcloudDatastoreExportImport"
+          "test/compat/datastoreadmin1884_test.go:397 TestGcloudDatastoreExportImport"
         ]
       },
       {
@@ -10057,7 +10064,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/datastoreadmin1884_test.go:122 TestDatastoreAdminExportImport",
-          "test/compat/datastoreadmin1884_test.go:395 TestGcloudDatastoreExportImport"
+          "test/compat/datastoreadmin1884_test.go:397 TestGcloudDatastoreExportImport"
         ]
       },
       {

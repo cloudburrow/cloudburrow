@@ -19,6 +19,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/encoding/protowire"
 
+	"github.com/cloudburrow/cloudburrow/internal/datastoreversions"
 	"github.com/cloudburrow/cloudburrow/internal/frontstate"
 	"github.com/cloudburrow/cloudburrow/internal/queryfront"
 )
@@ -62,6 +63,9 @@ type datastoreDatabases struct {
 	// gate is the front's access gate (datastoregate.go), nil without
 	// the Firestore Admin API.
 	gate *datastoreGate
+	// versions records the front's own commits too (#1967), nil when
+	// none are kept.
+	versions *datastoreversions.Log
 }
 
 func newDatastoreDatabases(upstream string, logf func(string, ...any)) *datastoreDatabases {
@@ -69,6 +73,17 @@ func newDatastoreDatabases(upstream string, logf func(string, ...any)) *datastor
 }
 
 func (d *datastoreDatabases) client() (pb.DatastoreClient, error) {
+	c, err := d.unversionedClient()
+	if err != nil || d.versions == nil {
+		return c, err
+	}
+	// The front's own writes (imports, loads, bulk deletes) are
+	// versions as a call's are (#1967).
+	return d.versions.Client(c), nil
+}
+
+// unversionedClient is client, its commits unrecorded.
+func (d *datastoreDatabases) unversionedClient() (pb.DatastoreClient, error) {
 	d.once.Do(func() {
 		d.conn, d.err = grpc.NewClient(d.addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	})
@@ -153,6 +168,10 @@ func (d *datastoreDatabases) forget(ctx context.Context, project string) ([]stri
 		}
 	}
 	d.mu.Unlock()
+	if d.versions != nil {
+		// A purged project's versions go with its entities.
+		d.versions.Forget(project)
+	}
 	resp, err := c.RunQuery(withRouting(ctx), &pb.RunQueryRequest{ProjectId: MarkerProject,
 		QueryType: &pb.RunQueryRequest_Query{Query: &pb.Query{
 			Kind: []*pb.KindExpression{{Name: markerKind}},

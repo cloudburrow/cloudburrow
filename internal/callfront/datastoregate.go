@@ -61,6 +61,14 @@ type datastoreGate struct {
 type gateAnswer struct {
 	at  time.Time
 	err error
+	// win is the database's version window, when the Admin API knows
+	// the database (#1967).
+	win *gateWindow
+}
+
+type gateWindow struct {
+	earliest time.Time
+	pitr     bool
 }
 
 func newDatastoreGate(admin string) *datastoreGate {
@@ -117,7 +125,7 @@ func (g *datastoreGate) access(ctx context.Context, db string) error {
 		return a.err
 	}
 	g.mu.Unlock()
-	err := g.ask(ctx, db)
+	win, err := g.ask(ctx, db)
 	if status.Code(err) == codes.Unavailable {
 		// The Admin API did not answer (the Firestore pod restarting):
 		// its last answer stands, and a database it never answered for
@@ -131,33 +139,56 @@ func (g *datastoreGate) access(ctx context.Context, db string) error {
 		return nil
 	}
 	g.mu.Lock()
-	g.answers[db] = gateAnswer{at: now, err: err}
+	g.answers[db] = gateAnswer{at: now, err: err, win: win}
 	g.mu.Unlock()
 	return err
 }
 
-func (g *datastoreGate) ask(ctx context.Context, db string) error {
+// window is the database's version window as the Admin API last said,
+// asking it again after gateTTL; nil when it does not know the database.
+func (g *datastoreGate) window(ctx context.Context, db string) *gateWindow {
+	_ = g.access(ctx, db)
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.answers[db].win
+}
+
+// lastWindow is the database's version window as the Admin API last said,
+// without asking.
+func (g *datastoreGate) lastWindow(db string) *gateWindow {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.answers[db].win
+}
+
+func (g *datastoreGate) ask(ctx context.Context, db string) (*gateWindow, error) {
 	u := "http://" + g.admin + frontstate.FirestoreAccessPath + "?api=datastore&name=" + url.QueryEscape(db)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
-		return status.Errorf(codes.Internal, "the database %s: %v", db, err)
+		return nil, status.Errorf(codes.Internal, "the database %s: %v", db, err)
 	}
 	resp, err := g.client.Do(req)
 	if err != nil {
-		return status.Errorf(codes.Unavailable, "the Firestore Admin API did not answer for %s: %v", db, err)
+		return nil, status.Errorf(codes.Unavailable, "the Firestore Admin API did not answer for %s: %v", db, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	var ans struct {
-		Code    codes.Code `json:"code"`
-		Message string     `json:"message"`
+		Code                codes.Code `json:"code"`
+		Message             string     `json:"message"`
+		EarliestVersionTime *time.Time `json:"earliestVersionTime"`
+		PITR                bool       `json:"pitr"`
 	}
 	if resp.StatusCode != http.StatusOK || json.NewDecoder(resp.Body).Decode(&ans) != nil {
-		return status.Errorf(codes.Unavailable, "the Firestore Admin API answered %s for %s", resp.Status, db)
+		return nil, status.Errorf(codes.Unavailable, "the Firestore Admin API answered %s for %s", resp.Status, db)
+	}
+	var win *gateWindow
+	if ans.EarliestVersionTime != nil {
+		win = &gateWindow{earliest: *ans.EarliestVersionTime, pitr: ans.PITR}
 	}
 	if ans.Code == codes.OK {
-		return nil
+		return win, nil
 	}
-	return status.Error(ans.Code, ans.Message)
+	return win, status.Error(ans.Code, ans.Message)
 }
 
 func (g *datastoreGate) refusal(r *http.Request) error {
@@ -306,6 +337,10 @@ func (d *datastoreDatabases) serveClear(w http.ResponseWriter, r *http.Request) 
 	if err := d.clearDatabase(r.Context(), project, database); err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
+	}
+	if d.versions != nil {
+		// A deleted database's versions go with it (#1967).
+		d.versions.Drop(project, database)
 	}
 	if d.gate != nil {
 		d.gate.forgetDatabase("projects/" + project + "/databases/" + database)

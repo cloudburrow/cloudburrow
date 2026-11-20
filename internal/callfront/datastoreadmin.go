@@ -303,7 +303,7 @@ func (a *datastoreAdmin) ExportEntities(ctx context.Context, req *adminpb.Export
 		return nil, err
 	}
 	start := a.now()
-	res, err := a.export(ctx, req.GetProjectId(), database, filterOf(req.GetEntityFilter()), req.GetOutputUrlPrefix(), false)
+	res, err := a.export(ctx, req.GetProjectId(), database, filterOf(req.GetEntityFilter()), req.GetOutputUrlPrefix(), false, "")
 	if err != nil {
 		return nil, err
 	}
@@ -392,7 +392,7 @@ func (e exportFolder) takes(ent *pb.Entity) bool {
 // export writes the database's entities the filter takes to Cloud
 // Storage, under outputPrefix, in a folder named after its start time
 // unless exact, and answers the overall_export_metadata file's URL.
-func (a *datastoreAdmin) export(ctx context.Context, project, database string, f entityFilter, outputPrefix string, exact bool) (copyResult, error) {
+func (a *datastoreAdmin) export(ctx context.Context, project, database string, f entityFilter, outputPrefix string, exact bool, readTime string) (copyResult, error) {
 	if err := a.needStorage(); err != nil {
 		return copyResult{}, err
 	}
@@ -409,7 +409,10 @@ func (a *datastoreAdmin) export(ctx context.Context, project, database string, f
 	if err := a.gcs.BucketExists(ctx, bucket); err != nil {
 		return copyResult{}, err
 	}
-	es, err := a.dbs.readEntities(ctx, project, database, f)
+	es, err := a.dbs.readEntitiesAt(ctx, project, database, f, readTime)
+	if code := status.Code(err); code == codes.FailedPrecondition || code == codes.InvalidArgument {
+		return copyResult{}, err
+	}
 	if err != nil {
 		return copyResult{}, status.Errorf(codes.Unavailable, "reading the entities: %v", err)
 	}
