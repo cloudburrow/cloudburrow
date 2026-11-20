@@ -60,7 +60,7 @@ func TestStorageHMACKeySecretShownOnce(t *testing.T) {
 	p.waitFor(`[...document.querySelectorAll("#view .listing-summary dd")].some((n) => n.textContent.endsWith("@gs-project-accounts.iam.gserviceaccount.com"))`)
 	var pages string
 	p.eval(`[...document.querySelectorAll("#product-nav a")].map((a) => a.textContent).join(" | ")`, &pages)
-	if pages != "Buckets | Observability | Storage Intelligence | Inventory reports | Transfer data | Settings" {
+	if pages != "Buckets | Observability | Storage Intelligence | Batch operations | Inventory reports | Insights datasets | Transfer data | Settings" {
 		t.Errorf("the Cloud Storage product's pages read %q", pages)
 	}
 

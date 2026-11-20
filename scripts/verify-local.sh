@@ -497,8 +497,9 @@ browser_suite() {  # <shard> <dir> <flags...>
   if [ "$shard" = storage ]; then BROWSER_VARS+=,LOGGING,STORAGE,PUBSUB,TASKS,SCHEDULER,RESOURCEMANAGER,SERVICEUSAGE,APIKEYS,STORAGE_BATCH,STORAGE_INSIGHTS,STORAGE_TRANSFER,KUBECONFIG,MONITORING; fi
   # The run shard's read back through Cloud Run, Cloud KMS, Secret Manager,
   # Cloud Logging and BigQuery's official clients, and enable the Container
-  # Scanning API through its Service Usage, RUN_SERVICEUSAGE (#1912).
-  if [ "$shard" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT,RUN_SERVICEUSAGE,WORKFLOWS; fi
+  # Scanning API through its Service Usage, RUN_SERVICEUSAGE (#1912), and
+  # Cloud Storage, for the Document AI and Speech batch pages' output.
+  if [ "$shard" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT,RUN_SERVICEUSAGE,WORKFLOWS,STORAGE; fi
   # The sql shard's read back through the Cloud SQL Admin API, the Backup
   # and DR Service and Secret Manager, which holds Run SQL's password.
   if [ "$shard" = sql ]; then BROWSER_VARS+=,SQLADMIN,BACKUPDR,SECRETS; fi
@@ -509,10 +510,13 @@ browser_suite() {  # <shard> <dir> <flags...>
   BROWSER_ENV=$(scripts/compat-env.sh --only "$BROWSER_VARS" --cli "$CLI" -- "$@" 2>/dev/null)
   (
     eval "$BROWSER_ENV"
+    # As in CI: 20m in served and run, 10m elsewhere.
+    local timeout=10m
+    case "$shard" in served|run) timeout=20m ;; esac
     # As in CI: what the restarted instance needs before its tests (#1985).
     compat_browser_prepare "$shard" 2>> "$dir/browser-prepare.err" || true
     export CLOUDBURROW_TEST_CHROME="$chrome" CLOUDBURROW_TEST_SCREENSHOTS="$dir/browser-screenshots"
-    go test -tags=browser -count=1 -timeout 10m -v "$select" "$pattern" ${skip[@]+"${skip[@]}"} ./test/browser/ > "$dir/browser.log" 2>&1 || true
+    go test -tags=browser -count=1 -timeout "$timeout" -v "$select" "$pattern" ${skip[@]+"${skip[@]}"} ./test/browser/ > "$dir/browser.log" 2>&1 || true
   )
   go_suite browser "$dir/browser.log" "$("$chrome" --version 2>/dev/null || echo chrome)" strict
   # As in CI: every test of this shard's selection must have passed, so one

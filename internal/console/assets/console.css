@@ -2510,4 +2510,10 @@ svg.bq-chart { display: block; border: 1px solid var(--border); border-radius: v
 .action-panel .group-row { flex-wrap: wrap; }
 .orgpolicy-custom-values { display: grid; gap: 4px; margin-bottom: 4px; }
 .orgpolicy-custom-line { display: flex; gap: 8px; align-items: center; }
-.orgpolicy-custom-line input { flex: 1 1 auto; min-width: 0; }
+/* A rule's fieldset would otherwise be as wide as its widest row's
+   min-content (a fieldset's min-inline-size), and a value box's is its
+   size attribute's width: with Linux Chrome's font that row passed 320 CSS
+   pixels (WCAG 1.4.10, main run 44774469756). The box takes what the row
+   leaves beside Delete. */
+.orgpolicy-rule { min-inline-size: 0; }
+.orgpolicy-custom-line input { flex: 1 1 0; width: 0; min-width: 0; }

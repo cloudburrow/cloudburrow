@@ -222,11 +222,15 @@ COMPAT_SQL_REPLICA_TESTS='^Test[A-Za-z]*SQL[A-Za-z0-9]*(HighAvailability|Replica
 # storage (COMPAT_BROWSER_SERVED_ONLY_TESTS), where it would skip. The
 # served shard serves the Compute Engine API too, so the VPC network and
 # Compute Engine pages' tests (TestVPCNetwork*, #1936; TestComputeEngine*,
-# #1965, which boots a VM) run there and only there.
+# #1965, which boots a VM) run there and only there. Agent Platform's Model
+# Registry and Endpoints screens are drawn only where Cloud Run is served,
+# which starts the local AI endpoint they call (#1940): their test,
+# TestModelRegistryAndEndpointsThroughThePages, runs in run, as the scale
+# shard runs no browser test.
 COMPAT_BROWSER_SHARDS="storage served run emulators memorystore sql localai"
 COMPAT_BROWSER_SERVED_SHARD_TESTS='^Test(GKEServed|KubernetesEnginePages|VPCNetwork|ComputeEngine)'
 COMPAT_BROWSER_SERVED_ONLY_TESTS='^Test(GKEServed|VPCNetwork|ComputeEngine)'
-COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|LoggingAdmin|SecretManager|Eventarc|DocumentAI|Speech|Workflows)'
+COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|LoggingAdmin|SecretManager|Eventarc|DocumentAI|Speech|Workflows|ModelRegistry)'
 COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|Bigtable|Spanner)'
 COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS='^TestMemorystore'
 COMPAT_BROWSER_SQL_SHARD_TESTS='^Test(CloudSQL|BackupDR|PrivateCAKMS)'

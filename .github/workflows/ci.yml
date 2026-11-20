@@ -1177,7 +1177,10 @@ jobs:
           # Cloud Logging and BigQuery's official clients, and enable the
           # Container Scanning API through its Service Usage, RUN_SERVICEUSAGE
           # (#1912): the scanner is the one prefetched into the state dir above.
-          if [ "$SHARD" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT,RUN_SERVICEUSAGE,WORKFLOWS; fi
+          # And Cloud Storage, which the Document AI batch, processor version
+          # and evaluation pages and Speech-to-Text's batch transcription read
+          # their output back through (#1930, #1953).
+          if [ "$SHARD" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT,RUN_SERVICEUSAGE,WORKFLOWS,STORAGE; fi
           # The sql shard's read back through the Cloud SQL Admin API, the Backup
           # and DR Service and Secret Manager, which holds Run SQL's password.
           if [ "$SHARD" = sql ]; then BROWSER_VARS+=,SQLADMIN,BACKUPDR,SECRETS; fi
@@ -1219,8 +1222,12 @@ jobs:
           rc=0
           # 10m, and 20m in served, whose test makes a Kubernetes Engine
           # cluster and node pool, real kind nodes, through the pages (#1913,
-          # #1925): about a minute on a laptop, several on a runner.
-          BROWSER_TIMEOUT=10m; [ "$SHARD" = served ] && BROWSER_TIMEOUT=20m
+          # #1925): about a minute on a laptop, several on a runner. And 20m
+          # in run, whose suite took 527 s in main run 44774469756 before the
+          # Model Registry's Deploy, which waits up to four minutes for the
+          # serving container (#1940), and the Document AI and Speech batch
+          # pages joined it.
+          BROWSER_TIMEOUT=10m; case "$SHARD" in served|run) BROWSER_TIMEOUT=20m ;; esac
           go test -tags=browser -count=1 -timeout "$BROWSER_TIMEOUT" -v "${SELECT[@]}" ./test/browser/ | tee browser.log || rc=1
           for t in $(go test -tags=browser -list '.*' ./test/browser/ | grep '^Test' | "${PICK[@]}" | grep -vE "$NEVER_TESTS"); do
             grep -q -- "^--- PASS: $t (" browser.log ||
