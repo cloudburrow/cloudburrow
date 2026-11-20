@@ -66,8 +66,10 @@ func aiServiceAgent(project, domain string) string {
 // covers: google.cloud.documentai.v1.DocumentProcessorService/CreateProcessor, google.cloud.documentai.v1.DocumentProcessorService/GetProcessorVersion, google.cloud.documentai.v1.DocumentProcessorService/ProcessDocument
 func TestDocumentAICMEK(t *testing.T) {
 	h := New(t)
-	h.Endpoint(EnvLocalAI)
-	shardEndpoint(h, envCMEKKMS, EnvKMS)
+	// The run shard's local AI endpoint, which Cloud Run starts without a
+	// model, and its Cloud KMS (#1972).
+	shardEndpoint(h, envRunLocalAI, EnvLocalAI)
+	shardEndpoint(h, envRunKMS, EnvKMS)
 	g, r := documentAIClients(t, h)
 	k := kmsClients(t, h)["grpc"]
 	ctx := h.Context()

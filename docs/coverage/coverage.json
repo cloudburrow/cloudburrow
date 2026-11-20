@@ -5634,6 +5634,7 @@
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
           "test/compat/loggingcmek1950_test.go:70 TestLoggingBucketCMEK",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
+          "test/compat/loggingsettingscmek1972_test.go:41 TestLoggingSettingsCMEK",
           "test/compat/terraform_logging_buckets_test.go:33 TestTerraformLoggingBucketsAndLinks",
           "test/compat/terraform_loggingcmek1950_test.go:22 TestTerraformLoggingBucketCMEK"
         ]
@@ -5663,7 +5664,7 @@
           "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
           "test/compat/logginganalyticsviews_test.go:188 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
           "test/compat/logginganalyticsviews_test.go:266 TestLoggingLinkedDatasetAcrossRestarts",
-          "test/compat/logginglinks_test.go:117 TestLoggingLinksToBigQuery",
+          "test/compat/logginglinks_test.go:119 TestLoggingLinksToBigQuery",
           "test/compat/terraform_logging_buckets_test.go:33 TestTerraformLoggingBucketsAndLinks"
         ]
       },
@@ -5723,7 +5724,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
-          "test/compat/logginglinks_test.go:117 TestLoggingLinksToBigQuery",
+          "test/compat/logginglinks_test.go:119 TestLoggingLinksToBigQuery",
           "test/compat/terraform_logging_buckets_test.go:33 TestTerraformLoggingBucketsAndLinks"
         ]
       },
@@ -5772,6 +5773,7 @@
           "test/compat/loggingcmek1950_test.go:70 TestLoggingBucketCMEK",
           "test/compat/logginglinks_test.go:34 TestLoggingLinksSettingsAndAsyncBuckets",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
+          "test/compat/loggingsettingscmek1972_test.go:41 TestLoggingSettingsCMEK",
           "test/compat/terraform_batch11_test.go:59 TestTerraformLoggingSavedQueryAndLogScope"
         ]
       },
@@ -5791,7 +5793,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
-          "test/compat/logginglinks_test.go:117 TestLoggingLinksToBigQuery",
+          "test/compat/logginglinks_test.go:119 TestLoggingLinksToBigQuery",
           "test/compat/terraform_logging_buckets_test.go:33 TestTerraformLoggingBucketsAndLinks"
         ]
       },
@@ -5801,6 +5803,7 @@
         "tests": [
           "test/compat/logginglinks_test.go:34 TestLoggingLinksSettingsAndAsyncBuckets",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
+          "test/compat/loggingsettingscmek1972_test.go:41 TestLoggingSettingsCMEK",
           "test/compat/terraform_batch12_test.go:188 TestTerraformLoggingProjectSettings",
           "test/compat/terraform_logging_parents_test.go:157 TestTerraformLoggingOrganizationAndFolderSettings"
         ]
@@ -5848,7 +5851,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
-          "test/compat/logginglinks_test.go:117 TestLoggingLinksToBigQuery"
+          "test/compat/logginglinks_test.go:119 TestLoggingLinksToBigQuery"
         ]
       },
       {
@@ -5900,7 +5903,8 @@
         "method": "google.logging.v2.ConfigServiceV2/UpdateCmekSettings",
         "status": "Verified",
         "tests": [
-          "test/compat/logginglinks_test.go:34 TestLoggingLinksSettingsAndAsyncBuckets"
+          "test/compat/logginglinks_test.go:34 TestLoggingLinksSettingsAndAsyncBuckets",
+          "test/compat/loggingsettingscmek1972_test.go:41 TestLoggingSettingsCMEK"
         ]
       },
       {
@@ -5919,6 +5923,7 @@
         "tests": [
           "test/compat/logginglinks_test.go:34 TestLoggingLinksSettingsAndAsyncBuckets",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
+          "test/compat/loggingsettingscmek1972_test.go:41 TestLoggingSettingsCMEK",
           "test/compat/terraform_logging_parents_test.go:157 TestTerraformLoggingOrganizationAndFolderSettings"
         ]
       },
@@ -5967,6 +5972,7 @@
           "test/compat/logging_test.go:34 TestLoggingWriteAndRead",
           "test/compat/loggingcmek1950_test.go:70 TestLoggingBucketCMEK",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
+          "test/compat/loggingsettingscmek1972_test.go:41 TestLoggingSettingsCMEK",
           "test/compat/loggingviews_test.go:83 TestLoggingViewFiltersAndRetention",
           "test/compat/runlogs_test.go:189 TestGcloudRunLogsRead",
           "test/compat/taskslogging_test.go:35 TestTasksStackdriverLoggingConfig"
@@ -10719,7 +10725,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/spannerbackups_test.go:67 TestSpannerBackupAndRestore",
-          "test/compat/spannercmek1950_test.go:48 TestSpannerCMEK"
+          "test/compat/spannercmek1950_test.go:52 TestSpannerCMEK"
         ]
       },
       {
@@ -10729,7 +10735,7 @@
           "test/compat/orgpolicycustom1895_spanner_test.go:38 TestOrgPolicyCustomConstraintsSpanner",
           "test/compat/spannerbackups_test.go:67 TestSpannerBackupAndRestore",
           "test/compat/spannerbackupstools_test.go:26 TestGcloudSpannerBackups",
-          "test/compat/spannercmek1950_test.go:48 TestSpannerCMEK"
+          "test/compat/spannercmek1950_test.go:52 TestSpannerCMEK"
         ]
       },
       {
@@ -10748,7 +10754,7 @@
           "test/compat/orgpolicycustom1895_spanner_test.go:38 TestOrgPolicyCustomConstraintsSpanner",
           "test/compat/spanner_test.go:104 TestSpannerReadWriteTransactionIsAtomic",
           "test/compat/spanner_test.go:202 TestSpannerDatabasesAreIsolated",
-          "test/compat/spannercmek1950_test.go:48 TestSpannerCMEK"
+          "test/compat/spannercmek1950_test.go:52 TestSpannerCMEK"
         ]
       },
       {
@@ -10781,7 +10787,7 @@
           "test/compat/frontstate1514_test.go:50 TestSpannerFrontRestartKeepsItsState",
           "test/compat/spannerbackups_test.go:67 TestSpannerBackupAndRestore",
           "test/compat/spannerbackupstools_test.go:26 TestGcloudSpannerBackups",
-          "test/compat/spannercmek1950_test.go:48 TestSpannerCMEK"
+          "test/compat/spannercmek1950_test.go:52 TestSpannerCMEK"
         ]
       },
       {
@@ -10798,7 +10804,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consoledatabases_test.go:120 TestConsoleSpannerCreateAndDropDatabase",
-          "test/compat/spannercmek1950_test.go:48 TestSpannerCMEK"
+          "test/compat/spannercmek1950_test.go:52 TestSpannerCMEK"
         ]
       },
       {
@@ -10881,7 +10887,7 @@
           "test/compat/frontstate1514_test.go:50 TestSpannerFrontRestartKeepsItsState",
           "test/compat/spannerbackups_test.go:67 TestSpannerBackupAndRestore",
           "test/compat/spannerbackupstools_test.go:26 TestGcloudSpannerBackups",
-          "test/compat/spannercmek1950_test.go:48 TestSpannerCMEK"
+          "test/compat/spannercmek1950_test.go:52 TestSpannerCMEK"
         ]
       },
       {
@@ -11154,7 +11160,8 @@
         "tests": [
           "test/compat/optional_test.go:264 TestSpannerSchemaAndQuery",
           "test/compat/spanner_test.go:104 TestSpannerReadWriteTransactionIsAtomic",
-          "test/compat/spanner_test.go:202 TestSpannerDatabasesAreIsolated"
+          "test/compat/spanner_test.go:202 TestSpannerDatabasesAreIsolated",
+          "test/compat/spannercmek1950_test.go:52 TestSpannerCMEK"
         ]
       },
       {
@@ -11175,6 +11182,7 @@
         "method": "google.spanner.v1.Spanner/ExecuteSql",
         "status": "Verified",
         "tests": [
+          "test/compat/spannercmek1950_test.go:52 TestSpannerCMEK",
           "test/compat/spannerdata_test.go:137 TestSpannerUnaryQueryDMLAndRollback"
         ]
       },
@@ -13664,7 +13672,7 @@
         "method": "serviceusage.services.list",
         "status": "Verified",
         "tests": [
-          "test/compat/loggingparents_test.go:278 TestServiceUsageFolderParentRefused",
+          "test/compat/loggingparents_test.go:282 TestServiceUsageFolderParentRefused",
           "test/compat/serviceusage_test.go:158 TestTerraformProjectService",
           "test/compat/serviceusage_test.go:229 TestGcloudServices",
           "test/compat/serviceusage_test.go:51 TestServiceUsageServices"

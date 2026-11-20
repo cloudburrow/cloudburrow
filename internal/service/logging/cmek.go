@@ -29,7 +29,8 @@ package logging
 // What the bucket holds is really encrypted: each entry routed to it is
 // kept, for the bucket, as its wire form sealed with a fresh data key that
 // the bucket's key wrapped (cmek.Keys.Seal, the bucket's name as additional
-// data), and a read of the bucket opens each through Cloud KMS. The bucket
+// data), and a read of the bucket opens each through Cloud KMS. An entry
+// only such buckets hold is not kept in the clear at all (atRest, #1972). The bucket
 // also keeps a data key wrapped when its key was set, which every read
 // opens first, so a disabled version refuses the read whatever the entries.
 // An entry written while the key cannot encrypt is kept unsealed until it
@@ -39,10 +40,10 @@ package logging
 // Choices Google does not document, pinned by unit tests (UNVERIFIED):
 // removing a bucket's key is FAILED_PRECONDITION; a key that does not exist
 // or is not ENABLED at create or update is FAILED_PRECONDITION naming it;
-// an instance without Cloud KMS is FAILED_PRECONDITION. Project and folder
-// default CMEK (Settings.kms_key_name, UpdateCmekSettings) stays
-// UNIMPLEMENTED: it encrypts the Log Router's own buffer, which CloudBurrow
-// does not keep. Docs re-read 2026-11-19, still unanswered:
+// an instance without Cloud KMS is FAILED_PRECONDITION. A parent's default
+// key (Settings.kms_key_name, UpdateCmekSettings) is settingscmek.go's
+// (#1972).
+// Docs re-read 2026-11-19, still unanswered:
 // https://docs.cloud.google.com/logging/docs/routing/managed-encryption-storage
 
 import (
@@ -274,6 +275,7 @@ func (s *Server) readBucket(ctx context.Context, ref bucketRef) ([]*loggingpb.Lo
 						r.sealed = map[string]cmek.Sealed{}
 					}
 					r.sealed[name] = sealed
+					s.store.toRest(e)
 					s.store.mu.Unlock()
 				}
 			}
@@ -293,6 +295,89 @@ func (s *Server) readBucket(ctx context.Context, ref bucketRef) ([]*loggingpb.Lo
 		out = append(out, opened)
 	}
 	return out, nil
+}
+
+// At rest (#1972): an entry that only customer-managed buckets hold (an
+// exclusion or an intercepting sink kept it out of its own _Default, and
+// every bucket it was routed to sealed its copy) is not kept in the clear:
+// the store holds a stub of it, with what the store indexes it by (log
+// name, timestamps, insert ID), and its sealed copies. A read of one of its
+// buckets opens the copy through Cloud KMS, so while the key cannot unwrap
+// the data key nothing of the entry's payload can be read. An entry that is
+// also in its own _Default bucket, which is Google-managed, is kept as
+// written there.
+
+// stub is what the store keeps of a sealed-only entry.
+func stub(e *loggingpb.LogEntry) *loggingpb.LogEntry {
+	return &loggingpb.LogEntry{LogName: e.GetLogName(), Timestamp: e.GetTimestamp(), ReceiveTimestamp: e.GetReceiveTimestamp(),
+		InsertId: e.GetInsertId()}
+}
+
+// sealedOnly is whether r keeps its entry only in sealed copies.
+func sealedOnly(r *route) bool {
+	if r == nil || !r.hidden || len(r.buckets) == 0 {
+		return false
+	}
+	for _, b := range r.buckets {
+		if _, ok := r.sealed[b]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// atRest is what the store keeps of es: each sealed-only entry as its stub,
+// with its route under the stub.
+func atRest(es []*loggingpb.LogEntry, routes map[*loggingpb.LogEntry]*route) ([]*loggingpb.LogEntry, map[*loggingpb.LogEntry]*route) {
+	var out []*loggingpb.LogEntry
+	var outRoutes map[*loggingpb.LogEntry]*route
+	for i, e := range es {
+		r := routes[e]
+		if !sealedOnly(r) {
+			if out != nil {
+				out = append(out, e)
+				if r != nil {
+					outRoutes[e] = r
+				}
+			}
+			continue
+		}
+		if out == nil {
+			out = append(make([]*loggingpb.LogEntry, 0, len(es)), es[:i]...)
+			outRoutes = make(map[*loggingpb.LogEntry]*route, len(routes))
+			for _, p := range es[:i] {
+				if r := routes[p]; r != nil {
+					outRoutes[p] = r
+				}
+			}
+		}
+		st := stub(e)
+		out = append(out, st)
+		outRoutes[st] = r
+	}
+	if out == nil {
+		return es, routes
+	}
+	return out, outRoutes
+}
+
+// toRest replaces e in the store by its stub once its route is sealed-only
+// (an entry written while the key could not encrypt, sealed on a later
+// read). s.mu is held.
+func (s *Store) toRest(e *loggingpb.LogEntry) {
+	r := s.routed[e]
+	if !sealedOnly(r) {
+		return
+	}
+	for i, x := range s.entries {
+		if x == e {
+			st := stub(e)
+			s.entries[i] = st
+			delete(s.routed, e)
+			s.routed[st] = r
+			return
+		}
+	}
 }
 
 // readableSources checks each source's bucket can be read.

@@ -85,16 +85,18 @@ func TestLoggingLinksSettingsAndAsyncBuckets(t *testing.T) {
 		t.Errorf("GetSettings after UpdateSettings = %v, %v", got, err)
 	}
 	if _, err := c.UpdateSettings(ctx, &loggingpb.UpdateSettingsRequest{Name: project + "/settings",
-		Settings: &loggingpb.Settings{KmsKeyName: "projects/p/locations/global/keyRings/r/cryptoKeys/k"}}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("UpdateSettings with a KMS key = %v; want UNIMPLEMENTED", err)
+		Settings: &loggingpb.Settings{KmsKeyName: "projects/p/locations/global/keyRings/r/cryptoKeys/k"}}); status.Code(err) != codes.InvalidArgument {
+		// Since #1972 a key is served (TestLoggingSettingsCMEK); one in
+		// another location than the storage location is refused.
+		t.Errorf("UpdateSettings with a KMS key outside the storage location = %v; want INVALID_ARGUMENT", err)
 	}
 	cmek, err := c.GetCmekSettings(ctx, &loggingpb.GetCmekSettingsRequest{Name: project + "/cmekSettings"})
 	if err != nil || cmek.GetKmsKeyName() != "" || cmek.GetServiceAccountId() == "" {
 		t.Errorf("GetCmekSettings = %v, %v", cmek, err)
 	}
 	if _, err := c.UpdateCmekSettings(ctx, &loggingpb.UpdateCmekSettingsRequest{Name: project + "/cmekSettings",
-		CmekSettings: &loggingpb.CmekSettings{KmsKeyName: "projects/p/locations/global/keyRings/r/cryptoKeys/k"}}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("UpdateCmekSettings with a key = %v; want UNIMPLEMENTED", err)
+		CmekSettings: &loggingpb.CmekSettings{KmsKeyName: "projects/p/locations/global/keyRings/r/cryptoKeys/k"}}); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("UpdateCmekSettings of a project with a key = %v; want FAILED_PRECONDITION (organizations only)", err)
 	}
 	// Since #1395 the local organization's settings are served
 	// (TestLoggingFolderOrganizationAndBillingParents); another is NOT_FOUND.

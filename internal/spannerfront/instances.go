@@ -190,6 +190,9 @@ func (s *Instances) Claims(r *http.Request) bool {
 		m, ok := strings.CutPrefix(r.URL.Path, instanceService)
 		return ok && (claimed[m] || iamMethods[m])
 	}
+	if restDataDatabase(r) != "" {
+		return s.restDataRefusal(r) != nil
+	}
 	if r.Method == http.MethodPost && restCacheUpdate.MatchString(r.URL.Path) {
 		return true
 	}
@@ -228,6 +231,10 @@ func (s *Instances) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
 		s.grpc.ServeHTTP(w, r)
+		return
+	}
+	if restDataDatabase(r) != "" {
+		s.serveRESTDataRefusal(w, r)
 		return
 	}
 	// The state is written as the call returns (state.go); a gRPC call's

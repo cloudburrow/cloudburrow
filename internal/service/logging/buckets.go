@@ -334,6 +334,9 @@ func (s configServer) CreateBucket(ctx context.Context, req *loggingpb.CreateBuc
 	if b.GetRetentionDays() == 0 {
 		b.RetentionDays = defaultRetention
 	}
+	if err := s.a.applyDefaultKey(ref, b); err != nil {
+		return nil, apierror.Wrap(err)
+	}
 	if c := b.GetCmekSettings(); c != nil {
 		if err := s.a.setBucketKey(ctx, ref, b, c.GetKmsKeyName()); err != nil {
 			return nil, apierror.Wrap(err)

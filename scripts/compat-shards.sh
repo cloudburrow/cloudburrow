@@ -247,7 +247,11 @@ compat_shard() {
       # and TestArtifactRegistryCleanupPolicies, which skips without one
       # of 2m or less, reads the same, so it runs here.
       export CLOUDBURROW_ARTIFACT_REGISTRY_CLEANUP_INTERVAL=1m
-      TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_FIRESTORE,RUN_KMS,RUN_SCHEDULER,RUN_LOGGING,RUN_BIGQUERY,RUN_SQLADMIN,RUN_RESOURCEMANAGER,RUN_SERVICEUSAGE,RUN_MYSQL,MYSQL_PASSWORD,BIGQUERY_PROJECT,APPENGINE_URL ;;
+      # RUN_LOCALAI (#1972): the local Vertex AI endpoint Cloud Run starts
+      # without a model, for the Document AI and Speech-to-Text
+      # customer-managed key tests (with RUN_KMS); LOCALAI, which the
+      # generation tests read, is not exported, so they still skip.
+      TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_FIRESTORE,RUN_KMS,RUN_LOCALAI,RUN_SCHEDULER,RUN_LOGGING,RUN_BIGQUERY,RUN_SQLADMIN,RUN_RESOURCEMANAGER,RUN_SERVICEUSAGE,RUN_MYSQL,MYSQL_PASSWORD,BIGQUERY_PROJECT,APPENGINE_URL ;;
     scale)
       # The tests that take minutes each (#1821), split from run: Cloud
       # Run's CPU, automatic and manual scaling and instance splits, through

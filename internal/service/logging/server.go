@@ -122,6 +122,13 @@ func (s *Store) ResetProject(names ...string) {
 }
 
 func (s *Store) append(es []*loggingpb.LogEntry, routes map[*loggingpb.LogEntry]*route) {
+	s.appendAs(es, routes, es)
+}
+
+// appendAs stores es with their routes, and tells the observer and the
+// tails about notify: the entries as written, where es may hold sealed
+// entries' stubs (atRest, cmek.go).
+func (s *Store) appendAs(es []*loggingpb.LogEntry, routes map[*loggingpb.LogEntry]*route, notify []*loggingpb.LogEntry) {
 	s.mu.Lock()
 	s.entries = append(s.entries, es...)
 	if len(routes) > 0 && s.routed == nil {
@@ -147,7 +154,7 @@ func (s *Store) append(es []*loggingpb.LogEntry, routes map[*loggingpb.LogEntry]
 		tails = append(tails, fn)
 	}
 	s.mu.Unlock()
-	for _, e := range es {
+	for _, e := range notify {
 		if obs != nil {
 			obs(e)
 		}
@@ -433,7 +440,8 @@ func (s *Server) WriteLogEntries(ctx context.Context, req *loggingpb.WriteLogEnt
 		if s.admin != nil {
 			gens, release = s.admin.linkSync.hold()
 		}
-		s.store.append(out, routes)
+		stored, storedRoutes := atRest(out, routes)
+		s.store.appendAs(stored, storedRoutes, out)
 		release()
 		s.deliver(deliveries)
 		s.linkWrites(out, routes, gens) // #1423, analytics.go

@@ -17,7 +17,9 @@ import (
 // Encryption choice (Use database encryption, Google-managed encryption
 // key, Cloud KMS key), the key field shown only for Cloud KMS key; a
 // backup made there with a key of the instance's Cloud KMS opens on a page
-// whose properties name Cloud KMS key and the key's first version.
+// whose properties name Cloud KMS key and the key's first version; and a
+// database created with that key opens on a page whose summary says Cloud
+// KMS key and whose properties name the key and its version in use (#1972).
 func TestSpannerCMEKThroughThePage(t *testing.T) {
 	needService(t, "spanner")
 	needService(t, "kms")
@@ -79,4 +81,20 @@ func TestSpannerCMEKThroughThePage(t *testing.T) {
 	p.waitFor(`[...document.querySelectorAll("#view dd, #view td")].some((e) => e.textContent.includes("/backups/keyed"))`)
 	p.waitFor(fmt.Sprintf(`[...document.querySelectorAll("#view dd, #view td")].some((e) => e.textContent.trim() === %q)`, key+"/cryptoKeyVersions/1"))
 	p.waitFor(`[...document.querySelectorAll("#view dd, #view td")].some((e) => e.textContent.trim() === "Cloud KMS key")`)
+
+	// The database page's encryption fields (#1972).
+	const keyedDB = "keyeddb"
+	mk, _ := json.Marshal(map[string]any{"Path": []string{inst}, "Action": "createdatabase",
+		"Values": map[string]string{"database": keyedDB, "encryption": "Cloud KMS key", "kmsKey": key}})
+	if code, out := consoleDo(t, http.MethodPost, "/api/actions/spanner"+q, string(mk)); code != http.StatusOK {
+		t.Fatalf("create a customer-managed database through the console API = %d: %s", code, out)
+	}
+	p.navigate("/spanner" + q)
+	p.clickText("#view tbody a", inst)
+	p.clickText("#view tbody a", keyedDB)
+	p.waitFor(`document.querySelector(".modal") === null`)
+	p.waitFor(`[...document.querySelectorAll("#view dd, #view td")].some((e) => e.textContent.trim() === "Cloud KMS key")`)
+	p.eval(`(() => { const t = document.querySelector("#tab-properties"); if (t) t.click(); return true })()`, nil)
+	p.waitFor(fmt.Sprintf(`[...document.querySelectorAll("#view dd, #view td")].some((e) => e.textContent.trim() === %q)`, key))
+	p.waitFor(fmt.Sprintf(`[...document.querySelectorAll("#view dd, #view td")].some((e) => e.textContent.trim() === %q)`, key+"/cryptoKeyVersions/1"))
 }

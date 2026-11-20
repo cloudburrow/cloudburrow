@@ -25,8 +25,10 @@ import (
 // covers: google.cloud.speech.v2.Speech/GetConfig, google.cloud.speech.v2.Speech/UpdateConfig, google.cloud.speech.v2.Speech/CreateRecognizer, google.cloud.speech.v2.Speech/GetRecognizer, google.cloud.speech.v2.Speech/UpdateRecognizer, google.cloud.speech.v2.Speech/CreatePhraseSet, google.cloud.speech.v2.Speech/GetPhraseSet
 func TestSpeechCMEK(t *testing.T) {
 	h := New(t)
-	h.Endpoint(EnvLocalAI)
-	shardEndpoint(h, envCMEKKMS, EnvKMS)
+	// The run shard's local AI endpoint, which Cloud Run starts without a
+	// model, and its Cloud KMS (#1972).
+	shardEndpoint(h, envRunLocalAI, EnvLocalAI)
+	shardEndpoint(h, envRunKMS, EnvKMS)
 	g, r := speechClients(t, h)
 	k := kmsClients(t, h)["grpc"]
 	ctx := h.Context()

@@ -4,6 +4,7 @@ package compat
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +15,9 @@ import (
 	databasepb "cloud.google.com/go/spanner/admin/database/apiv1/databasepb"
 	instance "cloud.google.com/go/spanner/admin/instance/apiv1"
 	instancepb "cloud.google.com/go/spanner/admin/instance/apiv1/instancepb"
+	sp "cloud.google.com/go/spanner/apiv1"
+	"cloud.google.com/go/spanner/apiv1/spannerpb"
+	"google.golang.org/api/option"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
@@ -31,6 +35,15 @@ func wantSpannerKeyRefusal(t *testing.T, what string, err error) {
 	}
 }
 
+// wantSpannerRESTKeyRefusal is wantSpannerKeyRefusal for a REST client's
+// error: 400 with FAILED_PRECONDITION and Google's message in the body.
+func wantSpannerRESTKeyRefusal(t *testing.T, what string, err error) {
+	t.Helper()
+	if !restFailedPrecondition(err) || !strings.Contains(err.Error(), spannerKeyText) {
+		t.Errorf("%s = %v, want 400 FAILED_PRECONDITION %q", what, err, spannerKeyText)
+	}
+}
+
 // TestSpannerCMEK (#1950): customer-managed encryption keys from the
 // instance's Cloud KMS, with the official Go admin client, on an instance
 // in regional-us-central1: CreateDatabase with encryption_config reports
@@ -44,7 +57,7 @@ func wantSpannerKeyRefusal(t *testing.T, what string, err error) {
 // while the database key's version is disabled, the database's sessions
 // are refused the same way; both work again once enabled.
 //
-// covers: google.spanner.admin.database.v1.DatabaseAdmin/CreateDatabase, google.spanner.admin.database.v1.DatabaseAdmin/GetDatabase, google.spanner.admin.database.v1.DatabaseAdmin/CreateBackup, google.spanner.admin.database.v1.DatabaseAdmin/CopyBackup, google.spanner.admin.database.v1.DatabaseAdmin/RestoreDatabase, google.spanner.admin.database.v1.DatabaseAdmin/GetBackup
+// covers: google.spanner.admin.database.v1.DatabaseAdmin/CreateDatabase, google.spanner.admin.database.v1.DatabaseAdmin/GetDatabase, google.spanner.admin.database.v1.DatabaseAdmin/CreateBackup, google.spanner.admin.database.v1.DatabaseAdmin/CopyBackup, google.spanner.admin.database.v1.DatabaseAdmin/RestoreDatabase, google.spanner.admin.database.v1.DatabaseAdmin/GetBackup, google.spanner.v1.Spanner/CreateSession, google.spanner.v1.Spanner/ExecuteSql
 func TestSpannerCMEK(t *testing.T) {
 	h := New(t)
 	addr := h.Endpoint(EnvSpanner)
@@ -204,7 +217,45 @@ func TestSpannerCMEK(t *testing.T) {
 		c2.Close()
 	}
 	wantSpannerKeyRefusal(t, "a read of the database with its key version disabled", err)
+	// The REST bindings are refused alike (#1972), with the official
+	// client's REST transport: CreateSession, and ExecuteSql on a session
+	// made before the key was disabled.
+	var restSession string
+	var rc *sp.Client
+	if os.Getenv(EnvSpannerREST) != "" {
+		rest := h.Endpoint(EnvSpannerREST)
+		rc, err = sp.NewRESTClient(ctx, option.WithEndpoint(rest), option.WithoutAuthentication())
+		if err != nil {
+			t.Fatalf("spanner.NewRESTClient: %v", err)
+		}
+		defer rc.Close()
+		_, err = rc.CreateSession(ctx, &spannerpb.CreateSessionRequest{Database: db})
+		wantSpannerRESTKeyRefusal(t, "REST CreateSession with the key version disabled", err)
+		setState(dbKey, kmspb.CryptoKeyVersion_ENABLED)
+		sess, err := rc.CreateSession(ctx, &spannerpb.CreateSessionRequest{Database: db})
+		if err != nil {
+			t.Fatalf("REST CreateSession with the key enabled: %v", err)
+		}
+		restSession = sess.GetName()
+		setState(dbKey, kmspb.CryptoKeyVersion_DISABLED)
+		_, err = rc.ExecuteSql(ctx, &spannerpb.ExecuteSqlRequest{Session: restSession, Sql: "SELECT Name FROM Items"})
+		wantSpannerRESTKeyRefusal(t, "REST ExecuteSql with the key version disabled", err)
+		if err := rc.DeleteSession(ctx, &spannerpb.DeleteSessionRequest{Name: restSession}); err != nil {
+			t.Errorf("REST DeleteSession with the key version disabled: %v; closing a session is never refused", err)
+		}
+	}
 	setState(dbKey, kmspb.CryptoKeyVersion_ENABLED)
+	if rc != nil {
+		sess, err := rc.CreateSession(ctx, &spannerpb.CreateSessionRequest{Database: db})
+		if err != nil {
+			t.Fatalf("REST CreateSession with the key enabled again: %v", err)
+		}
+		rs, err := rc.ExecuteSql(ctx, &spannerpb.ExecuteSqlRequest{Session: sess.GetName(), Sql: "SELECT Name FROM Items"})
+		if err != nil || len(rs.GetRows()) != 1 || rs.GetRows()[0].GetValues()[0].GetStringValue() != "one" {
+			t.Errorf("REST ExecuteSql with the key enabled again = %v, %v", rs, err)
+		}
+		_ = rc.DeleteSession(ctx, &spannerpb.DeleteSessionRequest{Name: sess.GetName()})
+	}
 	if rows := spannerRows1950(t, addr, db); rows != "1=one" {
 		t.Errorf("the database's rows with its key enabled again = %q", rows)
 	}

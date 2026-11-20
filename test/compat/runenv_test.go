@@ -252,7 +252,14 @@ const (
 	// emulators shard's beside BigQuery, Bigtable and Spanner; before these
 	// names those tests asked for RESOURCEMANAGER, which only the storage
 	// and iam shards export, and ran in no shard (main run 44560144998).
-	envRunResourceManager      = "CLOUDBURROW_TEST_RUN_RESOURCEMANAGER"
+	envRunResourceManager = "CLOUDBURROW_TEST_RUN_RESOURCEMANAGER"
+	// The local Vertex AI endpoint Cloud Run starts without a model, and
+	// Cloud KMS, for the run shard's Document AI and Speech-to-Text
+	// customer-managed key tests (#1972): their OCR and Whisper need no
+	// generation model, and LOCALAI, which the generation tests read, stays
+	// unexported in CI.
+	envRunLocalAI              = "CLOUDBURROW_TEST_RUN_LOCALAI"
+	envRunKMS                  = "CLOUDBURROW_TEST_RUN_KMS"
 	envBigQueryResourceManager = "CLOUDBURROW_TEST_BIGQUERY_RESOURCEMANAGER"
 	// Certificate Authority Service for the sql shard's
 	// CUSTOMER_MANAGED_CAS_CA instances, whose CA pools issue their server
