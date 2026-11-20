@@ -570,7 +570,7 @@ func (f *FunctionsServer) eaDeliverHTTP(ctx context.Context, pipeline string, d 
 		}
 		req.Header.Set("Authorization", "Bearer "+tok)
 	}
-	client := http.DefaultClient
+	client := guardedDefault
 	if f.events != nil && f.events.Client != nil {
 		client = f.events.Client
 	}

@@ -51,6 +51,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/cloudburrow/cloudburrow/internal/egress"
 )
 
 const (
@@ -585,9 +587,11 @@ func LocalChannelClient() *http.Client {
 		}
 		return nil
 	}}
-	return &http.Client{Timeout: 10 * time.Second,
+	// The local-only guard (#2015) refuses a Google host on its name,
+	// before it is resolved.
+	return egress.Client(&http.Client{Timeout: 10 * time.Second,
 		Transport:     &http.Transport{Proxy: nil, DialContext: dialer.DialContext, ForceAttemptHTTP2: true, TLSHandshakeTimeout: 5 * time.Second},
-		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }})
 }
 
 // LocalChannelAddress reports whether a channel message may be sent to ip.

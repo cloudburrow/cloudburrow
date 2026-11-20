@@ -126,9 +126,11 @@ func TestServiceUsageServices(t *testing.T) {
 			t.Errorf("a refused batch changed storage to %s", st)
 		}
 	}
-	if _, err := c.Services.Enable(p+"/services/compute.googleapis.com", &su.EnableServiceRequest{}).Context(ctx).Do(); err == nil ||
+	// Dataflow is an API CloudBurrow serves under no --services (Compute
+	// Engine, the earlier example, is now served with --services compute).
+	if _, err := c.Services.Enable(p+"/services/dataflow.googleapis.com", &su.EnableServiceRequest{}).Context(ctx).Do(); err == nil ||
 		!strings.Contains(err.Error(), "not served by CloudBurrow") {
-		t.Errorf("enable compute.googleapis.com = %v; want a refusal", err)
+		t.Errorf("enable dataflow.googleapis.com = %v; want a refusal", err)
 	}
 
 	op, err = c.Services.BatchEnable(p, &su.BatchEnableServicesRequest{
@@ -212,14 +214,14 @@ resource "google_project_service" "rm" {
 	}
 
 	m.write(module(fmt.Sprintf(`
-resource "google_project_service" "compute" {
+resource "google_project_service" "dataflow" {
   project = %q
-  service = "compute.googleapis.com"
+  service = "dataflow.googleapis.com"
 }
 `, project)))
 	out, err := m.tf("apply", "-auto-approve", "-input=false", "-no-color")
 	if err == nil || !strings.Contains(out, "not served by CloudBurrow") {
-		t.Errorf("apply enabling compute.googleapis.com = %v; want the refusal:\n%s", err, lastLines(out, 30))
+		t.Errorf("apply enabling dataflow.googleapis.com = %v; want the refusal:\n%s", err, lastLines(out, 30))
 	}
 }
 
@@ -258,9 +260,9 @@ func TestGcloudServices(t *testing.T) {
 	if st := serviceState(t, h, c, project, "storage.googleapis.com"); st != "ENABLED" {
 		t.Errorf("after gcloud services enable storage is %s", st)
 	}
-	if out, err := g.run(nil, "services", "enable", "compute.googleapis.com", "--project", project); err == nil ||
+	if out, err := g.run(nil, "services", "enable", "dataflow.googleapis.com", "--project", project); err == nil ||
 		!strings.Contains(out, "not served by CloudBurrow") {
-		t.Errorf("gcloud services enable compute = %v; want the refusal:\n%s", err, out)
+		t.Errorf("gcloud services enable dataflow = %v; want the refusal:\n%s", err, out)
 	}
 }
 

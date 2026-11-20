@@ -69,6 +69,12 @@ func (c consoleConnect) Connect(context.Context) (console.Connect, error) {
 	for _, v := range withheld {
 		out.Withheld = append(out.Withheld, console.WithheldVar{Name: v.Name, Reason: envSecrets[v.Name]})
 	}
+	// The gcloud refusals `env --format json` adds, from the same function
+	// (envOutputVars), so the page cannot drift from it.
+	refusals := envOutputVars("json", exported, vars)[len(vars):]
+	for _, v := range refusals {
+		out.Refusals = append(out.Refusals, console.EnvVar{Name: v.Name, Value: v.Value, Comment: v.Comment})
+	}
 	for _, f := range envFormats {
 		var b strings.Builder
 		if err := writeEnvFormat(&b, f, exported, shown); err != nil {
@@ -78,7 +84,7 @@ func (c consoleConnect) Connect(context.Context) (console.Connect, error) {
 		// these formats rather than listing them (#1977).
 		if f == "shell" {
 			fmt.Fprintf(&b, "# `cloudburrow env` also exports %d CLOUDSDK_API_ENDPOINT_OVERRIDES_* refusals, one per gcloud API "+
-				"this instance does not serve, so gcloud never calls Google for one.\n", len(gcloudRefusalVars(exported, shown)))
+				"this instance does not serve, so gcloud never calls Google for one.\n", len(refusals))
 		}
 		out.Formats = append(out.Formats, console.EnvFormat{ID: f, Label: envFormatLabels[f], Text: b.String()})
 	}

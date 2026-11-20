@@ -29,8 +29,8 @@ const EnvLogging = "CLOUDBURROW_TEST_LOGGING"
 //
 // TestLoggingWriteAndRead (#304), with cloud.google.com/go/logging and
 // logadmin against the CI instance: structured entries written, read back
-// with severity and logName filters, an unsupported filter refused naming
-// its term, and the entries visible in the console's Logs Explorer.
+// with severity, logName and jsonPayload filters, an undefined field refused
+// naming it, and the entries visible in the console's Logs Explorer.
 func TestLoggingWriteAndRead(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
@@ -76,9 +76,14 @@ func TestLoggingWriteAndRead(t *testing.T) {
 		t.Errorf("severity >= WARNING entries = %v, want the slow and crash entries", events)
 	}
 
-	if _, err := ac.Entries(ctx, logadmin.Filter(`jsonPayload.event = "boot"`)).Next(); status.Code(err) != codes.InvalidArgument ||
-		!strings.Contains(err.Error(), "jsonPayload.event") {
-		t.Errorf("unsupported filter = %v, want InvalidArgument naming jsonPayload.event", err)
+	if e, err := ac.Entries(ctx, logadmin.Filter(`logName = "`+logName+`" AND jsonPayload.event = "boot"`)).Next(); err != nil {
+		t.Errorf("jsonPayload.event = boot: %v; want the boot entry", err)
+	} else if b, _ := json.Marshal(e.Payload); !strings.Contains(string(b), "boot") {
+		t.Errorf("jsonPayload.event = boot read %s; want the boot entry", b)
+	}
+	if _, err := ac.Entries(ctx, logadmin.Filter(`nosuch.event = "boot"`)).Next(); status.Code(err) != codes.InvalidArgument ||
+		!strings.Contains(err.Error(), "nosuch.event") {
+		t.Errorf("an undefined field = %v, want InvalidArgument naming nosuch.event", err)
 	}
 
 	// In the console's Logs Explorer, attributed to the log.

@@ -36,6 +36,13 @@ func TestCompileQuery(t *testing.T) {
 		{"-- a comment\nresource.labels.name=api-00001", false, true},
 		{`timestamp>="2026-11-19T10:00:30Z"`, false, true},
 		{"operation.id=x", false, false},
+		{"(severity=ERROR)", true, false},
+		{`textPayload=~"^pay.*\\d+$"`, true, false},
+		{"jsonPayload.x=1", false, false},
+		{"severity>=LOUD", false, false},
+		{`severity=ERROR OR resource.type=run AND textPayload:listening`, false, true},
+		{`SEARCH("order")`, true, false},
+		{`log_id("app")`, true, false},
 	} {
 		pred, err := CompileQuery(c.query)
 		if err != nil {
@@ -47,8 +54,7 @@ func TestCompileQuery(t *testing.T) {
 			t.Errorf("%q: app %v pod %v, want %v %v", c.query, match(app), match(pod), c.app, c.pod)
 		}
 	}
-	for _, bad := range []string{"(severity=ERROR)", "textPayload=~\"a.*\"", "jsonPayload.x=1", "severity>=LOUD",
-		"severity=", `"open`, "a OR"} {
+	for _, bad := range []string{"(severity=ERROR", "textPayload=~\"(\"", "nosuch.x=1", "severity=", `"open`, "a OR"} {
 		if _, err := CompileQuery(bad); err == nil {
 			t.Errorf("%q was accepted", bad)
 		}

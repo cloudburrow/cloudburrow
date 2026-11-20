@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -85,10 +84,8 @@ func internalNetwork(t *testing.T, ctx context.Context, relayImage, port string)
 		t.Fatalf("create the internal network: %v\n%s", err, b)
 	}
 	t.Cleanup(func() { _ = exec.Command("docker", "network", "rm", network).Run() })
-	args := []string{"run", "-d", "--name", relay, "-v", dir + ":/relay:ro", "--entrypoint", "/relay/relay"}
-	if runtime.GOOS == "linux" {
-		args = append(args, "--add-host", "host.docker.internal:host-gateway")
-	}
+	args := append([]string{"run", "-d", "--name", relay, "-v", dir + ":/relay:ro", "--entrypoint", "/relay/relay"},
+		hostRelayArgs(t, ctx)...)
 	args = append(args, relayImage, ":"+port, "host.docker.internal:"+port)
 	if b, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput(); err != nil {
 		t.Fatalf("start the relay: %v\n%s", err, b)

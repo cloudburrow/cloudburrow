@@ -101,14 +101,21 @@ func TestConnectVariablesAreEnvJSON(t *testing.T) {
 	if len(withheld) != 1 || !withheld["MYSQL_PASSWORD"] {
 		t.Errorf("withheld %v, want MYSQL_PASSWORD only", c.Withheld)
 	}
+	refused := map[string]string{}
+	for _, v := range c.Refusals {
+		refused[v.Name] = v.Value
+	}
 	refusals := 0
 	for name, want := range env {
-		// The gcloud refusals (#1977) are `env`'s alone: the page names
-		// them in a line rather than listing them.
+		// The gcloud refusals (#1977) are listed apart from the variables
+		// table, each as `env` prints it.
 		if strings.Contains(want, unserved.PathPrefix) {
 			refusals++
 			if _, shown := got[name]; shown {
-				t.Errorf("the page lists the refusal %s", name)
+				t.Errorf("the page lists the refusal %s among its variables", name)
+			}
+			if refused[name] != want {
+				t.Errorf("the page's refusal %s = %q, env --format json prints %q", name, refused[name], want)
 			}
 			continue
 		}
@@ -125,6 +132,11 @@ func TestConnectVariablesAreEnvJSON(t *testing.T) {
 	for name := range got {
 		if _, ok := env[name]; !ok {
 			t.Errorf("the page shows %s, which env --format json does not print", name)
+		}
+	}
+	for name, v := range refused {
+		if env[name] != v || !strings.Contains(v, unserved.PathPrefix) {
+			t.Errorf("the page refuses %s = %q, which env --format json does not print as a refusal", name, v)
 		}
 	}
 	if got["STORAGE_EMULATOR_HOST"] != "http://127.0.0.1:41101" {

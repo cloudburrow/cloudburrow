@@ -137,6 +137,49 @@ What no configuration can redirect, and so only an egress block (a proxy or fire
 - **Hard-coded Google URLs in the provider**, which `unpointedResources` refuses by resource
   type and `--intercept-hardcoded` serves locally (#1578).
 
+### Outbound dispatchers (#2015)
+
+Every request CloudBurrow itself sends to a URL a user stored goes through one guard,
+`internal/egress`. A `*.googleapis.com` URL (`www.googleapis.com/storage/...` included, and a
+regional host such as `us-central1-run.googleapis.com` when only `run` is served) is sent to this
+instance's own endpoint of the API it names, the endpoints `gcloud-setup` writes, when the
+instance serves it, and is refused locally when it does not. Every other Google host is refused:
+`*.google.com`, `*.googleusercontent.com`, `*.run.app`, `*.cloudfunctions.net`, `*.appspot.com`,
+`*.sourcemanager.dev`, `metadata.google.internal`, `*.gcr.io`, `*.pkg.dev` and the metadata
+server's `169.254.169.254`. The decision is made on the URL in the client's `RoundTrip`, before
+any DNS lookup, proxy or dial, and again on every redirect, so a local URL that redirects to
+Google is refused too. A URL off the machine that is not Google's stays the user's choice, as on
+GCP, unless the dispatcher is stricter. Until a cause showed up in code (Cloud Scheduler sent
+`j.HTTP.URI` with an ordinary client from #302 until #2011) no request is known to have left;
+none is proven not to have.
+
+| Dispatcher | Before #2015, for a `*.googleapis.com` target | Now |
+|---|---|---|
+| Cloud Scheduler HTTP jobs | Sent to Google (until #2011's `localapis.go`) | Mapped or refused; redirects guarded |
+| Cloud Tasks HTTP targets | **Sent to Google** | Mapped or refused (the attempt fails and is retried) |
+| Pub/Sub push (the front's relay, in the pod) | **Sent to Google** | Refused: the pod serves no API |
+| Eventarc trigger `http_endpoint`, pipeline HTTP destinations | **Sent to Google** | Mapped or refused |
+| Workflows `http.*` steps and connectors | Mapped or refused; other hosts refused | The same, through the guard; redirects guarded |
+| Secure Source Manager hooks | Refused by host; a redirect was followed | Refused, redirects included |
+| Monitoring webhooks, uptime checks | Not sent (local hosts only), but the metadata server's link-local address passed | Not sent; `169.254.169.254` refused |
+| Cloud Storage notification channels | Refused after DNS resolution (non-local address) | Refused on the name, before any lookup; `169.254.169.254` refused |
+
+Fixed local targets need no guard: Eventarc to Cloud Run and functions (the ingress), Eventarc
+GKE destinations (the local cluster's API server), BigQuery remote models (the local Vertex AI),
+Cloud Build's Pub/Sub events and logging sinks (local services), and Storage Transfer's URL-list
+source, refused outright. Code a user runs in a Cloud Run service, a function or a build is not a
+dispatcher: only its client configuration or an egress block keeps it local.
+
+Each dispatcher's test (`TestHTTPJobsSendNothingToGoogle`, `TestHTTPTargetsSendNothingToGoogle`,
+`TestPushesSendNothingToGoogle`, `TestEventarcHTTPDestinationsSendNothingToGoogle`,
+`TestSourceManagerHooksSendNothingToGoogle`, `TestWebhooksAndUptimeChecksSendNothingToGoogle`,
+`TestChannelMessagesSendNothingToGoogle`, `TestHTTPStepsSendNothingToGoogle`) puts the
+loopback-only sink of `internal/egress/egresstest` beneath the dispatcher's own client: it counts
+and refuses every dial to an address that is not loopback, resolves no name, and must count a
+control dial to `192.0.2.1` first. Each aims the dispatcher at a served API (delivered to a local
+server standing in for it), an unserved API, another Google host and a local URL redirecting to
+`storage.googleapis.com`, and requires zero attempts off the machine.
+
 ### `GOOGLE_CLOUD_UNIVERSE_DOMAIN` as a catch-all (measured, not adopted, #1977)
 
 Every official library reads `GOOGLE_CLOUD_UNIVERSE_DOMAIN` and builds its default endpoint as

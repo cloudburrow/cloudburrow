@@ -19,6 +19,7 @@ import (
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
 	ssmpb "cloud.google.com/go/securesourcemanager/apiv1/securesourcemanagerpb"
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/egress"
 	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -150,16 +151,9 @@ func ssmGlobRE(p string) (*regexp.Regexp, error) {
 	return regexp.Compile(b.String())
 }
 
-// googleHost reports whether a host is Google's, which nothing here calls.
-func googleHost(host string) bool {
-	host = strings.ToLower(strings.TrimSuffix(host, "."))
-	for _, d := range []string{"googleapis.com", "google.com", "sourcemanager.dev", "run.app", "cloudfunctions.net", "appspot.com"} {
-		if host == d || strings.HasSuffix(host, "."+d) {
-			return true
-		}
-	}
-	return false
-}
+// googleHost reports whether a host is Google's, which nothing here calls
+// (internal/egress).
+func googleHost(host string) bool { return egress.GoogleHost(host) }
 
 func checkHook(h *ssmpb.Hook) error {
 	u, err := url.Parse(h.GetTargetUri())
@@ -398,7 +392,9 @@ func hookURL(target, query string) string {
 	return target + "?" + query
 }
 
-var ssmHookClient = &http.Client{Timeout: 10 * time.Second}
+// ssmHookClient sends through the local-only guard (#2015), so a redirect
+// to a Google host is refused too.
+var ssmHookClient = egress.Client(&http.Client{Timeout: 10 * time.Second})
 
 // deliver sends one event to one hook and records it.
 func deliver(ctx context.Context, t ssmTarget, event string, payload any) SourceManagerDelivery {

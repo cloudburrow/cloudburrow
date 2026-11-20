@@ -63,7 +63,7 @@ func TestConsoleLoggingLinks(t *testing.T) {
 	}
 	// The link's row lists the dataset's views, one per log view (#1435).
 	if _, err := svc.admin.ConfigServer().CreateView(ctx, &loggingpb.CreateViewRequest{Parent: name, ViewId: "errors",
-		View: &loggingpb.LogView{Filter: "severity>=ERROR"}}); err != nil {
+		View: &loggingpb.LogView{Filter: `LOG_ID("errors")`}}); err != nil {
 		t.Fatal(err)
 	}
 	if l := p.links(ctx, name); len(l.Items) != 1 || l.Items[0].Fields["BigQuery views"] != "_AllLogs, errors" {

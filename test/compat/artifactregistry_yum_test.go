@@ -16,7 +16,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -297,6 +296,42 @@ func main() {
 }
 `
 
+// hostRelayArgs are the docker run flags that let a relay container dial
+// the instance's published ports at host.docker.internal, where the
+// cluster's pods reach them (cmd/cloudburrow/clusterhost.go). Docker
+// Desktop names the host's loopback host.docker.internal itself. Docker
+// Engine reaches the host only at a bridge gateway, and the instance's
+// ports are bound on loopback and relayed on the kind network's gateway
+// alone, so the relay joins the kind network and dials that gateway:
+// host-gateway, the default bridge's, has nothing listening, and the
+// relay's close of an accepted connection reached the client as a reset
+// (run 44709318191, TestPythonAIPlatformUploadAndDeploy).
+func hostRelayArgs(t *testing.T, ctx context.Context) []string {
+	t.Helper()
+	cluster := strings.TrimSpace(os.Getenv("CLOUDBURROW_TEST_CLUSTER"))
+	if cluster != "" {
+		// What `up` asks: does the kind node resolve host.docker.internal?
+		if out, err := exec.CommandContext(ctx, "docker", "exec", cluster+"-control-plane", "getent", "ahostsv4",
+			"host.docker.internal").Output(); err == nil {
+			if f := strings.Fields(string(out)); len(f) > 0 && net.ParseIP(f[0]) != nil {
+				return nil
+			}
+		}
+	}
+	out, err := exec.CommandContext(ctx, "docker", "network", "inspect", "kind",
+		"--format", "{{range .IPAM.Config}}{{.Gateway}} {{end}}").Output()
+	if err != nil {
+		t.Fatalf("find the kind network's gateway: %v", err)
+	}
+	for _, f := range strings.Fields(string(out)) {
+		if ip := net.ParseIP(f); ip != nil && ip.To4() != nil {
+			return []string{"--network", "kind", "--add-host", "host.docker.internal:" + f}
+		}
+	}
+	t.Fatalf("the kind network has no IPv4 gateway (%q)", strings.TrimSpace(string(out)))
+	return nil
+}
+
 // yumInstall installs cbhello with the image's dnf from the repository at
 // path on the Run port. The dnf container is on an internal Docker
 // network, with no route out; a relay on that network and the default
@@ -340,10 +375,8 @@ func yumInstall(t *testing.T, h *Harness, path string) {
 		t.Fatalf("create the internal network: %v\n%s", err, b)
 	}
 	t.Cleanup(func() { _ = exec.Command("docker", "network", "rm", network).Run() })
-	args := []string{"run", "-d", "--name", relay, "-v", dir + ":/relay:ro", "--entrypoint", "/relay/relay"}
-	if runtime.GOOS == "linux" {
-		args = append(args, "--add-host", "host.docker.internal:host-gateway")
-	}
+	args := append([]string{"run", "-d", "--name", relay, "-v", dir + ":/relay:ro", "--entrypoint", "/relay/relay"},
+		hostRelayArgs(t, ctx)...)
 	args = append(args, image, ":"+port, "host.docker.internal:"+port)
 	if b, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput(); err != nil {
 		t.Fatalf("start the relay: %v\n%s", err, b)

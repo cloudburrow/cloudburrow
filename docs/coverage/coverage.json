@@ -456,7 +456,7 @@
           "test/compat/secretregional_test.go:219 TestTerraformRegionalSecret",
           "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secretreplication_test.go:53 TestSecretManagerUserManagedReplicasRoundTrip",
-          "test/compat/secrets_test.go:360 TestSecretUpdateAppliesOnlyTheMask",
+          "test/compat/secrets_test.go:361 TestSecretUpdateAppliesOnlyTheMask",
           "test/compat/secretschedule_test.go:53 TestSecretManagerRotationAndDelayedDestroy",
           "test/compat/secrettopics_test.go:33 TestSecretManagerTopicNotifications",
           "test/compat/terraform_secrets_test.go:21 TestTerraformSecretLabelChangeInPlace",
@@ -1063,7 +1063,7 @@
         "tests": [
           "test/compat/artifactregistry_formats_test.go:288 TestArtifactRegistryNpmRepository",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
-          "test/compat/artifactregistry_yum_test.go:134 TestArtifactRegistryYumRepodata",
+          "test/compat/artifactregistry_yum_test.go:133 TestArtifactRegistryYumRepodata",
           "test/compat/artifactregistryconfig_test.go:266 TestGcloudArtifactsVPCSCAndVersions"
         ]
       },
@@ -1203,7 +1203,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/artifactregistry_formats_test.go:581 TestArtifactRegistryAptAndYumImports",
-          "test/compat/artifactregistry_yum_test.go:134 TestArtifactRegistryYumRepodata"
+          "test/compat/artifactregistry_yum_test.go:133 TestArtifactRegistryYumRepodata"
         ]
       },
       {
@@ -5827,6 +5827,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1226_test.go:279 TestLoggingExclusions",
+          "test/compat/logging2026_test.go:32 TestLoggingQueryLanguage",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
           "test/compat/terraform_logging_parents_test.go:60 TestTerraformLoggingFolderAndOrganizationExclusionsAndBuckets",
@@ -5838,8 +5839,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
-          "test/compat/logginganalyticsviews_test.go:188 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
-          "test/compat/logginganalyticsviews_test.go:266 TestLoggingLinkedDatasetAcrossRestarts",
+          "test/compat/logginganalyticsviews_test.go:191 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
+          "test/compat/logginganalyticsviews_test.go:269 TestLoggingLinkedDatasetAcrossRestarts",
           "test/compat/logginglinks_test.go:119 TestLoggingLinksToBigQuery",
           "test/compat/terraform_logging_buckets_test.go:33 TestTerraformLoggingBucketsAndLinks"
         ]
@@ -5856,6 +5857,7 @@
           "test/compat/logging1521_test.go:63 TestLoggingInterceptingSinks",
           "test/compat/logging1577_test.go:28 TestLoggingListSinksInScope",
           "test/compat/logging1595_test.go:27 TestLoggingOldTimestampsFollowEachBucketsRetention",
+          "test/compat/logging2026_test.go:32 TestLoggingQueryLanguage",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/loggingparentstools_test.go:87 TestTerraformLoggingFolderAndOrganizationSinks",
           "test/compat/terraform_batch11_test.go:59 TestTerraformLoggingSavedQueryAndLogScope",
@@ -5868,10 +5870,18 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1519_test.go:63 TestLoggingViewIAMSavedQueriesAndLogScopes",
-          "test/compat/logginganalyticsviews_test.go:188 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
+          "test/compat/logging2028_test.go:34 TestLoggingViewFilterSubset",
+          "test/compat/logginganalyticsviews_test.go:191 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
           "test/compat/loggingviews_test.go:83 TestLoggingViewFiltersAndRetention",
           "test/compat/terraform_logging_buckets_test.go:151 TestTerraformLoggingLogView"
+        ],
+        "unverified": [
+          {
+            "code": "INVALID_ARGUMENT",
+            "case": "a log view filter outside the documented subset",
+            "test": "test/compat/logging2028_test.go:34 TestLoggingViewFilterSubset"
+          }
         ]
       },
       {
@@ -5924,7 +5934,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1519_test.go:63 TestLoggingViewIAMSavedQueriesAndLogScopes",
-          "test/compat/logginganalyticsviews_test.go:188 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
+          "test/compat/logginganalyticsviews_test.go:191 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
           "test/compat/terraform_logging_buckets_test.go:151 TestTerraformLoggingLogView"
         ]
@@ -6060,7 +6070,7 @@
         "method": "google.logging.v2.ConfigServiceV2/UpdateBucket",
         "status": "Verified",
         "tests": [
-          "test/compat/logginganalyticsviews_test.go:188 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
+          "test/compat/logginganalyticsviews_test.go:191 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
           "test/compat/loggingcmek1950_test.go:70 TestLoggingBucketCMEK",
           "test/compat/terraform_logging_buckets_test.go:33 TestTerraformLoggingBucketsAndLinks",
@@ -6120,9 +6130,17 @@
         "method": "google.logging.v2.ConfigServiceV2/UpdateView",
         "status": "Verified",
         "tests": [
-          "test/compat/logginganalyticsviews_test.go:188 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
+          "test/compat/logging2028_test.go:34 TestLoggingViewFilterSubset",
+          "test/compat/logginganalyticsviews_test.go:191 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
           "test/compat/terraform_logging_buckets_test.go:151 TestTerraformLoggingLogView"
+        ],
+        "unverified": [
+          {
+            "code": "INVALID_ARGUMENT",
+            "case": "a log view filter outside the documented subset",
+            "test": "test/compat/logging2028_test.go:34 TestLoggingViewFilterSubset"
+          }
         ]
       },
       {
@@ -6130,8 +6148,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:79 TestGcloudLogging",
-          "test/compat/logging_test.go:106 TestConsoleDeleteLogIsSeenByTheOfficialClient",
-          "test/compat/logginganalyticsviews_test.go:188 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
+          "test/compat/logging_test.go:111 TestConsoleDeleteLogIsSeenByTheOfficialClient",
+          "test/compat/logginganalyticsviews_test.go:191 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents"
         ]
       },
@@ -6145,6 +6163,7 @@
           "test/compat/gcloudschedulerlogging_test.go:79 TestGcloudLogging",
           "test/compat/logging1521_test.go:63 TestLoggingInterceptingSinks",
           "test/compat/logging1595_test.go:27 TestLoggingOldTimestampsFollowEachBucketsRetention",
+          "test/compat/logging2026_test.go:32 TestLoggingQueryLanguage",
           "test/compat/logging_fidelity_test.go:31 TestLoggingPartialSuccessAndScopedPaging",
           "test/compat/logging_test.go:34 TestLoggingWriteAndRead",
           "test/compat/loggingcmek1950_test.go:70 TestLoggingBucketCMEK",
@@ -6195,7 +6214,7 @@
           "test/compat/logging_fidelity_test.go:31 TestLoggingPartialSuccessAndScopedPaging",
           "test/compat/logging_test.go:34 TestLoggingWriteAndRead",
           "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
-          "test/compat/logginganalyticsviews_test.go:188 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
+          "test/compat/logginganalyticsviews_test.go:191 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/observability2020_test.go:44 TestObservabilityDefaultLogScope"
         ]
@@ -6257,7 +6276,7 @@
           "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
           "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints",
           "test/compat/modelregistrycli_test.go:96 TestTerraformVertexAIEndpoint",
-          "test/compat/modelregistrypython_test.go:127 TestPythonAIPlatformUploadAndDeploy"
+          "test/compat/modelregistrypython_test.go:124 TestPythonAIPlatformUploadAndDeploy"
         ]
       },
       {
@@ -6268,7 +6287,7 @@
           "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
           "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints",
           "test/compat/modelregistrycli_test.go:96 TestTerraformVertexAIEndpoint",
-          "test/compat/modelregistrypython_test.go:127 TestPythonAIPlatformUploadAndDeploy"
+          "test/compat/modelregistrypython_test.go:124 TestPythonAIPlatformUploadAndDeploy"
         ]
       },
       {
@@ -6278,7 +6297,7 @@
           "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
           "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints",
           "test/compat/modelregistryexport_test.go:58 TestModelRegistryExportsTheImageToArtifactRegistry",
-          "test/compat/modelregistrypython_test.go:127 TestPythonAIPlatformUploadAndDeploy"
+          "test/compat/modelregistrypython_test.go:124 TestPythonAIPlatformUploadAndDeploy"
         ]
       },
       {
@@ -6289,7 +6308,7 @@
           "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
           "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints",
           "test/compat/modelregistrycli_test.go:96 TestTerraformVertexAIEndpoint",
-          "test/compat/modelregistrypython_test.go:127 TestPythonAIPlatformUploadAndDeploy"
+          "test/compat/modelregistrypython_test.go:124 TestPythonAIPlatformUploadAndDeploy"
         ]
       },
       {
@@ -6299,7 +6318,7 @@
           "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels",
           "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
           "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints",
-          "test/compat/modelregistrypython_test.go:127 TestPythonAIPlatformUploadAndDeploy"
+          "test/compat/modelregistrypython_test.go:124 TestPythonAIPlatformUploadAndDeploy"
         ]
       },
       {
@@ -6316,7 +6335,7 @@
           "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels",
           "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
           "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints",
-          "test/compat/modelregistrypython_test.go:127 TestPythonAIPlatformUploadAndDeploy"
+          "test/compat/modelregistrypython_test.go:124 TestPythonAIPlatformUploadAndDeploy"
         ]
       },
       {
@@ -6384,7 +6403,7 @@
           "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels",
           "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
           "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints",
-          "test/compat/modelregistrypython_test.go:127 TestPythonAIPlatformUploadAndDeploy"
+          "test/compat/modelregistrypython_test.go:124 TestPythonAIPlatformUploadAndDeploy"
         ]
       },
       {
@@ -6392,7 +6411,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
-          "test/compat/modelregistrypython_test.go:127 TestPythonAIPlatformUploadAndDeploy"
+          "test/compat/modelregistrypython_test.go:124 TestPythonAIPlatformUploadAndDeploy"
         ]
       },
       {
@@ -6411,7 +6430,7 @@
           "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
           "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints",
           "test/compat/modelregistryexport_test.go:58 TestModelRegistryExportsTheImageToArtifactRegistry",
-          "test/compat/modelregistrypython_test.go:127 TestPythonAIPlatformUploadAndDeploy"
+          "test/compat/modelregistrypython_test.go:124 TestPythonAIPlatformUploadAndDeploy"
         ]
       },
       {
@@ -6455,7 +6474,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
-          "test/compat/modelregistrypython_test.go:127 TestPythonAIPlatformUploadAndDeploy"
+          "test/compat/modelregistrypython_test.go:124 TestPythonAIPlatformUploadAndDeploy"
         ]
       },
       {
@@ -6465,7 +6484,7 @@
           "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels",
           "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
           "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints",
-          "test/compat/modelregistrypython_test.go:127 TestPythonAIPlatformUploadAndDeploy"
+          "test/compat/modelregistrypython_test.go:124 TestPythonAIPlatformUploadAndDeploy"
         ]
       },
       {
@@ -6494,7 +6513,7 @@
           "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
           "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints",
           "test/compat/modelregistryexport_test.go:58 TestModelRegistryExportsTheImageToArtifactRegistry",
-          "test/compat/modelregistrypython_test.go:127 TestPythonAIPlatformUploadAndDeploy"
+          "test/compat/modelregistrypython_test.go:124 TestPythonAIPlatformUploadAndDeploy"
         ]
       },
       {
@@ -6563,7 +6582,7 @@
           "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
           "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints",
           "test/compat/modelregistryexport_test.go:58 TestModelRegistryExportsTheImageToArtifactRegistry",
-          "test/compat/modelregistrypython_test.go:127 TestPythonAIPlatformUploadAndDeploy",
+          "test/compat/modelregistrypython_test.go:124 TestPythonAIPlatformUploadAndDeploy",
           "test/compat/predictiongrpc_test.go:63 TestPredictionClientReachesACustomEndpoint"
         ]
       },
@@ -6793,21 +6812,21 @@
         "method": "google.cloud.speech.v2.Speech/BatchRecognize",
         "status": "Verified",
         "tests": [
-          "test/compat/speech_test.go:316 TestSpeechBatchRecognize"
+          "test/compat/speech_test.go:321 TestSpeechBatchRecognize"
         ]
       },
       {
         "method": "google.cloud.speech.v2.Speech/CreateCustomClass",
         "status": "Verified",
         "tests": [
-          "test/compat/speech_test.go:187 TestSpeechAdaptationResources"
+          "test/compat/speech_test.go:192 TestSpeechAdaptationResources"
         ]
       },
       {
         "method": "google.cloud.speech.v2.Speech/CreatePhraseSet",
         "status": "Verified",
         "tests": [
-          "test/compat/speech_test.go:187 TestSpeechAdaptationResources",
+          "test/compat/speech_test.go:192 TestSpeechAdaptationResources",
           "test/compat/speechcmek1950_test.go:26 TestSpeechCMEK"
         ]
       },
@@ -6823,14 +6842,14 @@
         "method": "google.cloud.speech.v2.Speech/DeleteCustomClass",
         "status": "Verified",
         "tests": [
-          "test/compat/speech_test.go:187 TestSpeechAdaptationResources"
+          "test/compat/speech_test.go:192 TestSpeechAdaptationResources"
         ]
       },
       {
         "method": "google.cloud.speech.v2.Speech/DeletePhraseSet",
         "status": "Verified",
         "tests": [
-          "test/compat/speech_test.go:187 TestSpeechAdaptationResources"
+          "test/compat/speech_test.go:192 TestSpeechAdaptationResources"
         ]
       },
       {
@@ -6851,14 +6870,14 @@
         "method": "google.cloud.speech.v2.Speech/GetCustomClass",
         "status": "Verified",
         "tests": [
-          "test/compat/speech_test.go:187 TestSpeechAdaptationResources"
+          "test/compat/speech_test.go:192 TestSpeechAdaptationResources"
         ]
       },
       {
         "method": "google.cloud.speech.v2.Speech/GetPhraseSet",
         "status": "Verified",
         "tests": [
-          "test/compat/speech_test.go:187 TestSpeechAdaptationResources",
+          "test/compat/speech_test.go:192 TestSpeechAdaptationResources",
           "test/compat/speechcmek1950_test.go:26 TestSpeechCMEK"
         ]
       },
@@ -6874,14 +6893,14 @@
         "method": "google.cloud.speech.v2.Speech/ListCustomClasses",
         "status": "Verified",
         "tests": [
-          "test/compat/speech_test.go:187 TestSpeechAdaptationResources"
+          "test/compat/speech_test.go:192 TestSpeechAdaptationResources"
         ]
       },
       {
         "method": "google.cloud.speech.v2.Speech/ListPhraseSets",
         "status": "Verified",
         "tests": [
-          "test/compat/speech_test.go:187 TestSpeechAdaptationResources"
+          "test/compat/speech_test.go:192 TestSpeechAdaptationResources"
         ]
       },
       {
@@ -6895,7 +6914,7 @@
         "method": "google.cloud.speech.v2.Speech/Recognize",
         "status": "Verified",
         "tests": [
-          "test/compat/speech_test.go:316 TestSpeechBatchRecognize",
+          "test/compat/speech_test.go:321 TestSpeechBatchRecognize",
           "test/compat/speech_test.go:80 TestSpeechRecognizers",
           "test/compat/speechstream_test.go:58 TestSpeechAdaptationBoost"
         ]
@@ -6911,14 +6930,14 @@
         "method": "google.cloud.speech.v2.Speech/UndeleteCustomClass",
         "status": "Verified",
         "tests": [
-          "test/compat/speech_test.go:187 TestSpeechAdaptationResources"
+          "test/compat/speech_test.go:192 TestSpeechAdaptationResources"
         ]
       },
       {
         "method": "google.cloud.speech.v2.Speech/UndeletePhraseSet",
         "status": "Verified",
         "tests": [
-          "test/compat/speech_test.go:187 TestSpeechAdaptationResources"
+          "test/compat/speech_test.go:192 TestSpeechAdaptationResources"
         ]
       },
       {
@@ -6939,14 +6958,14 @@
         "method": "google.cloud.speech.v2.Speech/UpdateCustomClass",
         "status": "Verified",
         "tests": [
-          "test/compat/speech_test.go:187 TestSpeechAdaptationResources"
+          "test/compat/speech_test.go:192 TestSpeechAdaptationResources"
         ]
       },
       {
         "method": "google.cloud.speech.v2.Speech/UpdatePhraseSet",
         "status": "Verified",
         "tests": [
-          "test/compat/speech_test.go:187 TestSpeechAdaptationResources"
+          "test/compat/speech_test.go:192 TestSpeechAdaptationResources"
         ]
       },
       {
@@ -12036,7 +12055,7 @@
           "test/compat/consolebigqueryloadfile_test.go:97 TestConsoleBigQueryLoadFromAFile",
           "test/compat/consolebigqueryorc_test.go:17 TestConsoleBigQueryLoadORCThroughTheForm",
           "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
-          "test/compat/logginganalyticsviews_test.go:188 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
+          "test/compat/logginganalyticsviews_test.go:191 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
           "test/compat/terraform_bigquery_tables_test.go:24 TestTerraformBigQueryPartitionedTableAndJob"
         ]
       },
@@ -12225,12 +12244,12 @@
           "test/compat/bigquerymlseries_test.go:140 TestBigQueryMLSeqSplit",
           "test/compat/bigquerymlseries_test.go:21 TestBigQueryMLXregDetectAnomalies",
           "test/compat/bigquerymlseries_test.go:72 TestBigQueryMLSeveralSeriesIDs",
-          "test/compat/bigquerymlservice_test.go:198 TestBigQueryMLAnnotateImageLabels",
-          "test/compat/bigquerymlservice_test.go:249 TestBigQueryMLAnnotateImageDetections",
-          "test/compat/bigquerymlservice_test.go:312 TestBigQueryMLTranscribe",
-          "test/compat/bigquerymlservice_test.go:35 TestBigQueryMLAnnotateImage",
-          "test/compat/bigquerymlservice_test.go:473 TestBigQueryMLTranslate",
-          "test/compat/bigquerymlservice_test.go:655 TestBigQueryMLUnderstandText",
+          "test/compat/bigquerymlservice_test.go:200 TestBigQueryMLAnnotateImageLabels",
+          "test/compat/bigquerymlservice_test.go:251 TestBigQueryMLAnnotateImageDetections",
+          "test/compat/bigquerymlservice_test.go:314 TestBigQueryMLTranscribe",
+          "test/compat/bigquerymlservice_test.go:37 TestBigQueryMLAnnotateImage",
+          "test/compat/bigquerymlservice_test.go:480 TestBigQueryMLTranslate",
+          "test/compat/bigquerymlservice_test.go:662 TestBigQueryMLUnderstandText",
           "test/compat/bigquerymltensorflow_test.go:41 TestBigQueryMLImportedTensorFlowModel",
           "test/compat/bigquerymltflite_test.go:35 TestBigQueryMLImportedTFLiteModel",
           "test/compat/bigquerymltflitegaps_test.go:29 TestBigQueryMLImportedTFLiteGaps",
@@ -12323,8 +12342,8 @@
           "test/compat/consolebigquerywrites_test.go:398 TestConsoleBigQueryReadWriteEditorRunsDML",
           "test/compat/documentai_test.go:201 TestBigQueryMLProcessDocument",
           "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
-          "test/compat/logginganalyticsviews_test.go:188 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
-          "test/compat/logginganalyticsviews_test.go:266 TestLoggingLinkedDatasetAcrossRestarts",
+          "test/compat/logginganalyticsviews_test.go:191 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
+          "test/compat/logginganalyticsviews_test.go:269 TestLoggingLinkedDatasetAcrossRestarts",
           "test/compat/orgpolicycustom1891_test.go:436 TestOrgPolicyEnforcementBigQueryDDL"
         ]
       },
@@ -12369,8 +12388,8 @@
           "test/compat/bigquerymlremote_test.go:94 TestBigQueryMLRemoteGenerateText",
           "test/compat/bigquerymlseries_test.go:140 TestBigQueryMLSeqSplit",
           "test/compat/bigquerymlseries_test.go:72 TestBigQueryMLSeveralSeriesIDs",
-          "test/compat/bigquerymlservice_test.go:35 TestBigQueryMLAnnotateImage",
-          "test/compat/bigquerymlservice_test.go:655 TestBigQueryMLUnderstandText",
+          "test/compat/bigquerymlservice_test.go:37 TestBigQueryMLAnnotateImage",
+          "test/compat/bigquerymlservice_test.go:662 TestBigQueryMLUnderstandText",
           "test/compat/bigquerymltensorflow_test.go:41 TestBigQueryMLImportedTensorFlowModel",
           "test/compat/bigquerymltflite_test.go:35 TestBigQueryMLImportedTFLiteModel",
           "test/compat/bigquerymltflitegaps_test.go:29 TestBigQueryMLImportedTFLiteGaps",
@@ -12740,7 +12759,7 @@
           "test/compat/bigqueryviewcolumns_test.go:29 TestBigQueryCreateViewWithAColumnList",
           "test/compat/bqcopysnapshot_test.go:25 TestBqCopySnapshotCloneAndRestore",
           "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
-          "test/compat/logginganalyticsviews_test.go:188 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
+          "test/compat/logginganalyticsviews_test.go:191 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
           "test/compat/terraform_batch6_test.go:318 TestTerraformBigQueryDatasetCMEK",
           "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess",
           "test/compat/terraform_bigquery_tables_test.go:24 TestTerraformBigQueryPartitionedTableAndJob",
@@ -12790,7 +12809,7 @@
           "test/compat/bigqueryprojectconfig_test.go:34 TestBigQueryProjectConfigurations",
           "test/compat/bigquerytimes_test.go:22 TestBigQueryResourceTimesInMilliseconds",
           "test/compat/bigquerytimezonecolumns_test.go:27 TestBigQueryDefaultTimeZoneOfColumns",
-          "test/compat/logginganalyticsviews_test.go:266 TestLoggingLinkedDatasetAcrossRestarts",
+          "test/compat/logginganalyticsviews_test.go:269 TestLoggingLinkedDatasetAcrossRestarts",
           "test/compat/orgpolicycustom1895_bigquery_test.go:27 TestOrgPolicyCustomConstraintsBigQuery",
           "test/compat/terraform_batch6_test.go:318 TestTerraformBigQueryDatasetCMEK",
           "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess",
@@ -12806,7 +12825,7 @@
           "test/compat/bigqueryobjecttables_test.go:48 TestBigQueryObjectTables",
           "test/compat/consolebigquery_test.go:89 TestConsoleBigQueryDatasetsSchemaAndQuery",
           "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
-          "test/compat/logginganalyticsviews_test.go:188 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
+          "test/compat/logginganalyticsviews_test.go:191 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
           "test/compat/terraform_batch12_emulators_test.go:28 TestTerraformBigQueryListsAndServiceAccount"
         ]
       },
@@ -13959,21 +13978,21 @@
         "method": "serviceusage.operations.cancel",
         "status": "Verified",
         "tests": [
-          "test/compat/serviceusage_test.go:275 TestServiceUsageOperations"
+          "test/compat/serviceusage_test.go:277 TestServiceUsageOperations"
         ]
       },
       {
         "method": "serviceusage.operations.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/serviceusage_test.go:275 TestServiceUsageOperations"
+          "test/compat/serviceusage_test.go:277 TestServiceUsageOperations"
         ]
       },
       {
         "method": "serviceusage.operations.get",
         "status": "Verified",
         "tests": [
-          "test/compat/serviceusage_test.go:275 TestServiceUsageOperations",
+          "test/compat/serviceusage_test.go:277 TestServiceUsageOperations",
           "test/compat/serviceusage_test.go:52 TestServiceUsageServices"
         ]
       },
@@ -13981,14 +14000,14 @@
         "method": "serviceusage.operations.list",
         "status": "Verified",
         "tests": [
-          "test/compat/serviceusage_test.go:275 TestServiceUsageOperations"
+          "test/compat/serviceusage_test.go:277 TestServiceUsageOperations"
         ]
       },
       {
         "method": "serviceusage.services.batchEnable",
         "status": "Verified",
         "tests": [
-          "test/compat/serviceusage_test.go:165 TestTerraformProjectService",
+          "test/compat/serviceusage_test.go:167 TestTerraformProjectService",
           "test/compat/serviceusage_test.go:52 TestServiceUsageServices"
         ]
       },
@@ -14009,8 +14028,8 @@
           "test/compat/apienable_test.go:211 TestServiceDisabledBigQuery",
           "test/compat/apienable_test.go:244 TestServiceDisabledFirestore",
           "test/compat/apienable_test.go:270 TestGcloudServicesDisableEnforced",
-          "test/compat/serviceusage_test.go:165 TestTerraformProjectService",
-          "test/compat/serviceusage_test.go:236 TestGcloudServices",
+          "test/compat/serviceusage_test.go:167 TestTerraformProjectService",
+          "test/compat/serviceusage_test.go:238 TestGcloudServices",
           "test/compat/serviceusage_test.go:52 TestServiceUsageServices"
         ]
       },
@@ -14024,8 +14043,8 @@
           "test/compat/apienable_test.go:211 TestServiceDisabledBigQuery",
           "test/compat/apienable_test.go:244 TestServiceDisabledFirestore",
           "test/compat/apienable_test.go:270 TestGcloudServicesDisableEnforced",
-          "test/compat/serviceusage_test.go:165 TestTerraformProjectService",
-          "test/compat/serviceusage_test.go:236 TestGcloudServices",
+          "test/compat/serviceusage_test.go:167 TestTerraformProjectService",
+          "test/compat/serviceusage_test.go:238 TestGcloudServices",
           "test/compat/serviceusage_test.go:52 TestServiceUsageServices"
         ]
       },
@@ -14033,8 +14052,8 @@
         "method": "serviceusage.services.get",
         "status": "Verified",
         "tests": [
-          "test/compat/serviceusage_test.go:165 TestTerraformProjectService",
-          "test/compat/serviceusage_test.go:236 TestGcloudServices",
+          "test/compat/serviceusage_test.go:167 TestTerraformProjectService",
+          "test/compat/serviceusage_test.go:238 TestGcloudServices",
           "test/compat/serviceusage_test.go:52 TestServiceUsageServices"
         ]
       },
@@ -14043,8 +14062,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/loggingparents_test.go:282 TestServiceUsageFolderParentRefused",
-          "test/compat/serviceusage_test.go:165 TestTerraformProjectService",
-          "test/compat/serviceusage_test.go:236 TestGcloudServices",
+          "test/compat/serviceusage_test.go:167 TestTerraformProjectService",
+          "test/compat/serviceusage_test.go:238 TestGcloudServices",
           "test/compat/serviceusage_test.go:52 TestServiceUsageServices"
         ]
       }

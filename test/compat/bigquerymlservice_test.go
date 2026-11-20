@@ -3,11 +3,13 @@
 package compat
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"cloud.google.com/go/bigquery"
 	"cloud.google.com/go/bigquery/connection/apiv1/connectionpb"
@@ -315,7 +317,12 @@ func TestBigQueryMLTranscribe(t *testing.T) {
 	c, project := bigqueryClient(t, h)
 	cc, _ := remoteConnectionClient(t, h)
 	sc := storageClient(t, h)
-	ctx := h.Context()
+	// Whisper transcriptions of every row with local whisper: more than h.Context()'s minute
+	// on a 4-vCPU runner (main run 44709318191 timed out at 60s).
+	// Ended by t.Cleanup, registered first so it runs last, after the
+	// test's own cleanups that still use ctx.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	t.Cleanup(cancel)
 	wav, err := os.ReadFile("../../internal/speech/testdata/jfk.wav")
 	if err != nil {
 		t.Fatal(err)
