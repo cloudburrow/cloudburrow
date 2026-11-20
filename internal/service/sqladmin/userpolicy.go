@@ -15,13 +15,15 @@ package sqladmin
 // policy is a member of pgPolicyGroup, which pg_hba.conf holds to its
 // password, so the server checks it (and its VALID UNTIL) rather than
 // trusting the connection. PostgreSQL itself does not count failed
-// sign-ins, so a lock after failed attempts is not served there (#2014).
+// sign-ins: CloudBurrow counts them from the server's log, and locks the
+// role NOLOGIN (pglockout.go, #2014).
 
 import (
 	"context"
 	"fmt"
 	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -174,9 +176,9 @@ func checkUserPolicy(e Engine, in *userPolicyIn) (int64, error) {
 	switch {
 	case !mysql && verify:
 		return 0, bad("passwordPolicy.enablePasswordVerification is supported only for MySQL.")
-	case !mysql && locking:
-		return 0, unimplemented("passwordPolicy.allowedFailedAttempts and enableFailedAttemptsCheck on PostgreSQL",
-			"PostgreSQL does not count a role's failed sign-ins, and the lock Cloud SQL adds to it is not served (#2014)")
+	case !mysql && locking && !countsSignIns(e):
+		return 0, unimplemented("passwordPolicy.allowedFailedAttempts and enableFailedAttemptsCheck on "+v,
+			"CloudBurrow cannot read this server's log, whose failed sign-ins lock the user (#2014)")
 	case mysqlOld(v) && (locking || verify):
 		return 0, bad("passwordPolicy.allowedFailedAttempts, enableFailedAttemptsCheck and enablePasswordVerification are supported on Cloud SQL for MySQL 8.0 and later.")
 	}
@@ -200,6 +202,13 @@ func checkDual(e Engine, dual, password string) error {
 		return Errorf(http.StatusBadRequest, "Invalid request: dualPasswordType DUAL_PASSWORD retains the current password while a new one is set: a password is required.")
 	}
 	return nil
+}
+
+// countsSignIns is whether e, a PostgreSQL server, has a log CloudBurrow
+// reads its failed sign-ins from.
+func countsSignIns(e Engine) bool {
+	p, ok := e.(*Postgres)
+	return ok && p.countsSignIns()
 }
 
 // withPolicies fills in us' policies, where e serves them.
@@ -407,26 +416,48 @@ func (p *Postgres) UserPolicies(ctx context.Context) (map[string]UserPolicy, err
 	rows, err := c.Query(ctx, `SELECT r.rolname, NOT r.rolcanlogin,
 		CASE WHEN r.rolvaliduntil IS NULL OR r.rolvaliduntil = 'infinity' THEN ''
 			ELSE to_char(r.rolvaliduntil AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') END,
-		split_part(x, '=', 2)
-		FROM pg_catalog.pg_roles r JOIN pg_catalog.pg_db_role_setting s ON s.setrole = r.oid AND s.setdatabase = 0,
-		unnest(s.setconfig) x WHERE x LIKE '`+pgExpirationSetting+`=%'`)
+		s.setconfig
+		FROM pg_catalog.pg_roles r JOIN pg_catalog.pg_db_role_setting s ON s.setrole = r.oid AND s.setdatabase = 0`)
 	if err != nil {
 		return nil, pgError(err)
 	}
 	defer rows.Close()
 	out := map[string]UserPolicy{}
+	lockout := false
 	for rows.Next() {
-		var name, secs string
+		var name string
+		var cfg []string
 		var up UserPolicy
-		if err := rows.Scan(&name, &up.Locked, &up.ExpirationTime, &secs); err != nil {
+		var noLogin bool
+		if err := rows.Scan(&name, &noLogin, &up.ExpirationTime, &cfg); err != nil {
 			return nil, err
 		}
-		_, _ = fmt.Sscan(secs, &up.ExpirationSeconds)
+		set := settingsMap(cfg)
+		_, _ = fmt.Sscan(set[pgExpirationSetting], &up.ExpirationSeconds)
+		up.AllowedFailedAttempts, _ = strconv.ParseInt(set[pgAllowedFailedSetting], 10, 64)
+		up.FailedAttemptsCheck = set[pgFailedCheckSetting] == "on"
+		if up.ExpirationSeconds == 0 {
+			up.ExpirationTime = ""
+		}
+		if lockoutOf(set) > 0 {
+			// Locked: the role has lost its login privilege
+			// (User.PasswordStatus.locked).
+			up.Locked = noLogin
+			lockout = true
+		}
 		if up.set() {
 			out[passwordKey(name, "")] = up
 		}
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if lockout && p.countsSignIns() {
+		// After a restart of CloudBurrow, before the instance's start
+		// has started it.
+		p.watch()
+	}
+	return out, nil
 }
 
 func (p *Postgres) SetUserPolicy(ctx context.Context, u User, up UserPolicy) error {
@@ -438,8 +469,30 @@ func (p *Postgres) SetUserPolicy(ctx context.Context, u User, up UserPolicy) err
 	}
 	defer c.Close(context.Background())
 	role := pgx.Identifier{u.Name}.Sanitize()
-	var stmts []string
+	// Setting the policy unlocks the role and forgets its failures.
+	stmts := []string{"ALTER ROLE " + role + " LOGIN", "ALTER ROLE " + role + " RESET " + pgFailedCountSetting}
 	if up.ExpirationSeconds > 0 {
+		until := time.Now().UTC().Add(time.Duration(up.ExpirationSeconds) * time.Second).Format(time.RFC3339)
+		stmts = append(stmts, "ALTER ROLE "+role+" VALID UNTIL "+quotePGString(until),
+			fmt.Sprintf("ALTER ROLE %s SET %s = '%d'", role, pgExpirationSetting, up.ExpirationSeconds))
+	} else {
+		stmts = append(stmts, "ALTER ROLE "+role+" VALID UNTIL 'infinity'", "ALTER ROLE "+role+" RESET "+pgExpirationSetting)
+	}
+	if up.AllowedFailedAttempts > 0 {
+		stmts = append(stmts, fmt.Sprintf("ALTER ROLE %s SET %s = '%d'", role, pgAllowedFailedSetting, up.AllowedFailedAttempts))
+	} else {
+		stmts = append(stmts, "ALTER ROLE "+role+" RESET "+pgAllowedFailedSetting)
+	}
+	if up.FailedAttemptsCheck {
+		stmts = append(stmts, "ALTER ROLE "+role+" SET "+pgFailedCheckSetting+" = 'on'")
+	} else {
+		stmts = append(stmts, "ALTER ROLE "+role+" RESET "+pgFailedCheckSetting)
+	}
+	locks := up.FailedAttemptsCheck && up.AllowedFailedAttempts > 0
+	// A role whose password expires, or whose failed sign-ins lock it, is
+	// held to its password by pg_hba.conf.
+	held := up.ExpirationSeconds > 0 || locks
+	if held {
 		var exists bool
 		if err := c.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1)", pgPolicyGroup).Scan(&exists); err != nil {
 			return pgError(err)
@@ -447,41 +500,62 @@ func (p *Postgres) SetUserPolicy(ctx context.Context, u User, up UserPolicy) err
 		if !exists {
 			stmts = append(stmts, "CREATE ROLE "+pgPolicyGroup+" NOLOGIN")
 		}
-		until := time.Now().UTC().Add(time.Duration(up.ExpirationSeconds) * time.Second).Format(time.RFC3339)
-		stmts = append(stmts, "GRANT "+pgPolicyGroup+" TO "+role,
-			"ALTER ROLE "+role+" LOGIN VALID UNTIL "+quotePGString(until),
-			fmt.Sprintf("ALTER ROLE %s SET %s = '%d'", role, pgExpirationSetting, up.ExpirationSeconds))
+		stmts = append(stmts, "GRANT "+pgPolicyGroup+" TO "+role)
 	} else {
-		stmts = append(stmts, "ALTER ROLE "+role+" LOGIN VALID UNTIL 'infinity'", "ALTER ROLE "+role+" RESET "+pgExpirationSetting)
 		var member bool
 		if err := c.QueryRow(ctx, "SELECT pg_has_role($1, $2, 'MEMBER') AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $2)",
 			u.Name, pgPolicyGroup).Scan(&member); err == nil && member {
 			stmts = append(stmts, "REVOKE "+pgPolicyGroup+" FROM "+role)
 		}
 	}
+	if locks {
+		// "connection authorized" lines, so a sign-in that passes
+		// forgets the failures before it.
+		stmts = append(stmts, "ALTER SYSTEM SET log_connections = on", "SELECT pg_reload_conf()")
+	}
 	for _, s := range stmts {
 		if _, err := c.Exec(ctx, s); err != nil {
 			return pgError(err)
 		}
 	}
-	if up.ExpirationSeconds > 0 {
-		return pgEnsureHBA(ctx, c, "host all +"+pgPolicyGroup+" all md5")
+	if held {
+		if err := pgEnsureHBA(ctx, c, "host all +"+pgPolicyGroup+" all md5"); err != nil {
+			return err
+		}
+	}
+	if locks {
+		p.watch()
 	}
 	return nil
 }
 
-// PasswordChanged restarts the role's expiration from now.
+// PasswordChanged restarts the role's expiration from now and, as a new
+// password unlocks a user Cloud SQL locked, unlocks a role with a lock
+// after failed attempts.
 func (p *Postgres) PasswordChanged(ctx context.Context, u User) error {
 	ps, err := p.UserPolicies(ctx)
 	if err != nil {
 		return err
 	}
 	up, ok := ps[passwordKey(u.Name, "")]
-	if !ok || up.ExpirationSeconds == 0 {
+	if !ok {
 		return nil
 	}
-	until := time.Now().UTC().Add(time.Duration(up.ExpirationSeconds) * time.Second).Format(time.RFC3339)
-	return p.exec(ctx, "ALTER ROLE "+pgx.Identifier{u.Name}.Sanitize()+" VALID UNTIL "+quotePGString(until))
+	role := pgx.Identifier{u.Name}.Sanitize()
+	var stmts []string
+	if up.FailedAttemptsCheck && up.AllowedFailedAttempts > 0 {
+		stmts = append(stmts, "ALTER ROLE "+role+" LOGIN", "ALTER ROLE "+role+" RESET "+pgFailedCountSetting)
+	}
+	if up.ExpirationSeconds > 0 {
+		until := time.Now().UTC().Add(time.Duration(up.ExpirationSeconds) * time.Second).Format(time.RFC3339)
+		stmts = append(stmts, "ALTER ROLE "+role+" VALID UNTIL "+quotePGString(until))
+	}
+	for _, s := range stmts {
+		if err := p.exec(ctx, s); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (p *Postgres) ChangeDualPassword(context.Context, User, string, string) error {

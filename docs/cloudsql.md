@@ -361,9 +361,21 @@ is the server's own:
   password change, and `status.passwordExpirationTime` is it. A role with a policy is a member of
   `cloudsqlpasswordpolicy`, which `pg_hba.conf` holds to its password (`md5`), so the server checks
   the password and its expiry rather than trusting the connection, as it does other users.
-  `enablePasswordVerification` is 400 ("supported only for MySQL"). `allowedFailedAttempts` and
-  `enableFailedAttemptsCheck` are 501: PostgreSQL does not count failed sign-ins, and the lock Cloud
-  SQL adds is not served yet (#2014).
+  `enablePasswordVerification` is 400 ("supported only for MySQL").
+- **PostgreSQL's lock after failed attempts** (#2014): `allowedFailedAttempts` with
+  `enableFailedAttemptsCheck` locks the role once its password has been tried incorrectly that many
+  times in a row: it loses its login privilege (`NOLOGIN`), which is what `status.locked` reports
+  ("If true, user does not have login privileges"), so even its right password is then refused
+  (`role "NAME" is not permitted to log in`). PostgreSQL does not count failed sign-ins itself; its
+  log says each one (`password authentication failed for user`), on the server container's stderr,
+  which CloudBurrow follows through the cluster (`kubectl logs --follow`) while a role of that
+  server has the lock. The count is kept in the role's setting `cloudsql.failed_sign_ins`, and a
+  sign-in that passes forgets it (the policy turns `log_connections` on, through `ALTER SYSTEM`, for
+  its `connection authorized` lines; a `log_connections` database flag of `off` keeps the count
+  running across sign-ins). A `users.update` of the policy (the Users page's Unlock), a new
+  password, or `ALTER USER NAME WITH LOGIN`, as Google documents, unlocks it. The count runs on a
+  primary only (a replica's users are its primary's), and only while CloudBurrow runs: a failed
+  sign-in while it is stopped is not counted.
 
 `users.update` with `dualPasswordType` `DUAL_PASSWORD` and a password is MySQL's Retain current
 password (`ALTER USER ... RETAIN CURRENT PASSWORD`, `gcloud sql users set-password
@@ -406,7 +418,7 @@ request), or **refused** with 400 or 501 naming it. A field the discovery docume
 | `databaseCenterIntegration` `ENABLED` | 501, as `databaseCenterIntegrationEnabled` `true` is: Database Center is not served. `DISABLED` and `DATABASE_CENTER_INTEGRATION_UNSPECIFIED` are taken (#1700). |
 | `skipPrecheck` | Taken. A major version upgrade here has no separate precheck step to skip: what `preCheckMajorVersionUpgrade` reports is the validation `instances.patch` makes either way (#1700). |
 | `connectionName`, `ipAddresses`, `state`, `gceZone`, `serverCaCert`, `selfLink` and the other output fields | Ignored, as Cloud SQL ignores them. |
-| `users`: `databaseRoles`; `passwordPolicy.allowedFailedAttempts` and `enableFailedAttemptsCheck` on PostgreSQL (#2014) | 501. `serverRoles` and `sqlserverUserDetails` are 400 (SQL Server). `passwordPolicy` and `dualPasswordType` are served (#2009). |
+| `users`: `databaseRoles` | 501. `serverRoles` and `sqlserverUserDetails` are 400 (SQL Server). `passwordPolicy` and `dualPasswordType` are served (#2009). |
 | `databases`: `sqlserverDatabaseDetails` | 400 (SQL Server). |
 | `backupRuns.insert`: `backupKind` `PHYSICAL` | 501: a backup is a logical dump. `location` is taken (see Backup locations); `diskEncryptionConfiguration` is 400 (a backup inherits its instance's), `timeZone` 400 (SQL Server). |
 

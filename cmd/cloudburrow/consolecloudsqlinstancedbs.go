@@ -167,7 +167,7 @@ func databaseUserActions(in *sqladminapi.DatabaseInstance, dbNames, userRefs []s
 
 // sqlUserPolicyFields are a user's own password policy (#2009), as the
 // Add user account dialog's User password policy has them: Lock after
-// failed attempts (MySQL; PostgreSQL's is #2014), Set password to expire,
+// failed attempts (PostgreSQL's since #2014), Set password to expire,
 // and on MySQL Require current password.
 func sqlUserPolicyFields(mysql bool, when map[string]string) []console.Field {
 	with := func(k, v string) map[string]string {
@@ -179,15 +179,9 @@ func sqlUserPolicyFields(mysql bool, when map[string]string) []console.Field {
 	}
 	lock := console.Field{Name: "policyLock", Label: "Lock after failed attempts", Type: "checkbox", VisibleWhen: when,
 		Help: "The user is locked after that many failed sign-ins in a row, until it is unlocked."}
-	if !mysql {
-		lock.Help = ""
-		lock.Unavailable = "Not available locally on PostgreSQL: the server does not count failed sign-ins (#2014)."
-	}
-	out := []console.Field{lock}
-	if mysql {
-		out = append(out, console.Field{Name: "policyAttempts", Label: "Number of failed attempts", Type: "number", Default: "5",
-			Required: true, VisibleWhen: with("policyLock", "true")})
-	}
+	out := []console.Field{lock,
+		{Name: "policyAttempts", Label: "Number of failed attempts", Type: "number", Default: "5",
+			Required: true, VisibleWhen: with("policyLock", "true")}}
 	out = append(out,
 		console.Field{Name: "policyExpire", Label: "Set password to expire", Type: "checkbox", VisibleWhen: when},
 		console.Field{Name: "policyExpireDays", Label: "Days until the password expires", Type: "number", Default: "90", Required: true,

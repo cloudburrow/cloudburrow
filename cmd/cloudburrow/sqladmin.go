@@ -35,6 +35,7 @@ func newSQLAdminServer(cfg config.Config, fwds []*netfwd.Forwarder, creds compon
 		engines = append(engines, &sqladmin.Postgres{
 			Name: sqlAdminPostgresInstance, Version: "POSTGRES_17",
 			User: components.CloudSQLUser, Database: components.CloudSQLDatabase, HostAddr: f.HostAddr,
+			SignInLog: pgSignInLog(cfg, string(config.ServiceCloudSQL), false),
 		})
 	}
 	if f := forwarderFor(fwds, string(config.ServiceCloudSQLMySQL)); f != nil {

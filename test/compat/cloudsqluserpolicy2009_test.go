@@ -33,7 +33,11 @@ import (
 // NO_DUAL_PASSWORD discards the old one. On PostgreSQL 17 the
 // expiration is the role's VALID UNTIL: its password signs in until it
 // expires, then is refused; enablePasswordVerification is MySQL's only,
-// and dual passwords are refused.
+// and dual passwords are refused; and (#2014) allowedFailedAttempts with
+// enableFailedAttemptsCheck locks the user after that many failed
+// sign-ins in a row (a sign-in that passes forgets them), its right
+// password is then refused, users.get and list answer status.locked, and
+// a users.update of the policy, or of the password, unlocks it.
 func TestCloudSQLUserPasswordPolicy(t *testing.T) {
 	h := New(t)
 	if os.Getenv(EnvCloudSQL) == "" && os.Getenv(EnvMySQL) == "" {
@@ -165,6 +169,69 @@ func TestCloudSQLUserPasswordPolicy(t *testing.T) {
 				wantHTTP(t, "enablePasswordVerification on PostgreSQL", err, http.StatusBadRequest)
 				err = update(&sqladmin.User{Name: "expiring", Password: "Exp-pass-3", DualPasswordType: "DUAL_PASSWORD"})
 				wantHTTP(t, "DUAL_PASSWORD on PostgreSQL", err, http.StatusBadRequest)
+
+				// PostgreSQL: failed sign-ins lock the user (#2014).
+				insert(&sqladmin.User{Name: "locky", Password: "Lock-pass-1",
+					PasswordPolicy: &sqladmin.UserPasswordValidationPolicy{AllowedFailedAttempts: 2, EnableFailedAttemptsCheck: true}})
+				p := get("locky").PasswordPolicy
+				if p == nil || p.AllowedFailedAttempts != 2 || !p.EnableFailedAttemptsCheck || (p.Status != nil && p.Status.Locked) {
+					t.Fatalf("users.get of a new user with a lock: %+v", p)
+				}
+				locked := func() bool {
+					u := get("locky")
+					return u.PasswordPolicy != nil && u.PasswordPolicy.Status != nil && u.PasswordPolicy.Status.Locked
+				}
+				// The lock follows the server's log: wait for it.
+				waitLocked := func(what string) {
+					t.Helper()
+					for end := time.Now().Add(20 * time.Second); !locked(); time.Sleep(500 * time.Millisecond) {
+						if time.Now().After(end) {
+							t.Fatalf("%s: users.get does not answer status.locked", what)
+						}
+					}
+				}
+				signsIn("the right password", "locky", "Lock-pass-1")
+				refused("a first wrong password", "locky", "Wrong-1", "password authentication failed")
+				// A sign-in that passes forgets the failures before it.
+				signsIn("the right password after one failure", "locky", "Lock-pass-1")
+				refused("a wrong password after a sign-in", "locky", "Wrong-2", "password authentication failed")
+				time.Sleep(4 * time.Second)
+				if locked() {
+					t.Fatal("locked after failures that a sign-in separated")
+				}
+				refused("a second wrong password in a row", "locky", "Wrong-3", "password authentication failed")
+				waitLocked("two failed sign-ins in a row")
+				refused("the right password once locked", "locky", "Lock-pass-1", "not permitted to log in")
+				list, err := svc.Users.List(project, inst).Do()
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, lu := range list.Items {
+					if lu.Name == "locky" && (lu.PasswordPolicy == nil || lu.PasswordPolicy.Status == nil || !lu.PasswordPolicy.Status.Locked) {
+						t.Errorf("users.list: locky's policy %+v; want status.locked", lu.PasswordPolicy)
+					}
+				}
+				// Updating the policy unlocks the user, and keeps what is not sent.
+				if err := update(&sqladmin.User{Name: "locky", PasswordPolicy: &sqladmin.UserPasswordValidationPolicy{AllowedFailedAttempts: 3}}); err != nil {
+					t.Fatal(err)
+				}
+				if u := get("locky"); u.PasswordPolicy == nil || u.PasswordPolicy.AllowedFailedAttempts != 3 || !u.PasswordPolicy.EnableFailedAttemptsCheck ||
+					(u.PasswordPolicy.Status != nil && u.PasswordPolicy.Status.Locked) {
+					t.Errorf("users.get after the policy's update: %+v", u.PasswordPolicy)
+				}
+				signsIn("the right password once unlocked", "locky", "Lock-pass-1")
+				// Three in a row lock it again; a new password unlocks it.
+				for i := 1; i <= 3; i++ {
+					refused(fmt.Sprintf("wrong password %d of 3", i), "locky", fmt.Sprintf("Wrong-%d", 10+i), "password authentication failed")
+				}
+				waitLocked("three failed sign-ins in a row")
+				if err := update(&sqladmin.User{Name: "locky", Password: "Lock-pass-2"}); err != nil {
+					t.Fatal(err)
+				}
+				if locked() {
+					t.Error("still locked after a new password")
+				}
+				signsIn("a new password unlocks", "locky", "Lock-pass-2")
 				return
 			}
 

@@ -183,10 +183,10 @@ func TestCloudSQLConsoleRound3(t *testing.T) {
 		}
 		if a.ID == "add-user" {
 			for _, f := range a.Fields {
-				if f.Name == "policyLock" && f.Unavailable == "" {
-					t.Error("Lock after failed attempts is offered on PostgreSQL (#2014)")
+				if (f.Name == "policyLock" || f.Name == "policyAttempts") && f.Unavailable != "" {
+					t.Errorf("%s is not offered on PostgreSQL (#2014): %s", f.Name, f.Unavailable)
 				}
-				if f.Name == "policyAttempts" || f.Name == "policyRequireCurrent" {
+				if f.Name == "policyRequireCurrent" {
 					t.Errorf("%s on PostgreSQL", f.Name)
 				}
 			}
