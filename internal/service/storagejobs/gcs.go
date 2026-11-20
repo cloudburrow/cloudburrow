@@ -150,6 +150,9 @@ func (g *GCS) do(ctx context.Context, method, path string, q url.Values, body an
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	if ctx.Value(snapshotRead{}) != nil {
+		req.Header.Set("User-Agent", SnapshotUserAgent)
+	}
 	resp, err := g.client().Do(req)
 	if err != nil {
 		return err
@@ -157,6 +160,15 @@ func (g *GCS) do(ctx context.Context, method, path string, q url.Values, body an
 	defer resp.Body.Close()
 	return answer(resp, out)
 }
+
+// SnapshotUserAgent names the reads a Storage Insights snapshot makes of
+// the instance's buckets. On Google a dataset is filled from inside Cloud
+// Storage, not through its API, so they are neither audit logged nor
+// counted as activity (#1979).
+const SnapshotUserAgent = "cloudburrow-storageinsights-snapshot"
+
+// snapshotRead marks a snapshot's context.
+type snapshotRead struct{}
 
 func answer(resp *http.Response, out any) error {
 	if resp.StatusCode/100 != 2 {

@@ -306,10 +306,12 @@ func TestStorageInsightsReportConfigChecks(t *testing.T) {
 			t.Errorf("%s: %v (%v), want INVALID_ARGUMENT", tc.what, err, code)
 		}
 	}
+	// Dataset configurations are served since #1976: an empty one is
+	// refused for what it lacks, not as unimplemented.
 	_, err := c.CreateDatasetConfig(ctx, &storageinsightspb.CreateDatasetConfigRequest{Parent: parent, DatasetConfigId: "ds",
 		DatasetConfig: &storageinsightspb.DatasetConfig{}})
-	if storageJobsCode(err) != codes.Unimplemented {
-		t.Errorf("CreateDatasetConfig: %v, want UNIMPLEMENTED", err)
+	if err == nil || storageJobsCode(err) == codes.Unimplemented {
+		t.Errorf("CreateDatasetConfig of an empty configuration: %v, want a refusal", err)
 	}
 }
 

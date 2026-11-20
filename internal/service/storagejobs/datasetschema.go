@@ -100,9 +100,11 @@ var errorAttributesSchema = []Field{
 	rec("projectErrorRecord", col("projectNumber", "INTEGER"), col("organizationName", "STRING")),
 }
 
-// The activity views. Google lists bucket_activity_view's topPrefixes*
-// columns as repeated records without naming their fields, so they are
-// left out.
+// The activity views (activity.go, #1979). Google describes each of
+// bucket_activity_view's topPrefixes* columns as a repeated RECORD of "the
+// prefix as a STRING and the count as an INTEGER" without naming the two
+// fields; they are prefix and count here (UNVERIFIED names, re-read 2026-11-19,
+// https://docs.cloud.google.com/storage/docs/insights/dataset-tables-and-schemas).
 var objectEventsSchema = []Field{
 	col("requestCompletionTimestamp", "TIMESTAMP"), col("project", "INTEGER"), col("bucketName", "STRING"), col("objectName", "STRING"),
 	col("requestOperation", "STRING"), col("requestBytes", "INTEGER"), col("responseBytes", "INTEGER"),
@@ -124,8 +126,14 @@ func activityCounts() []Field {
 var projectActivitySchema = append([]Field{col("snapshotStartTime", "TIMESTAMP"), col("snapshotEndTime", "TIMESTAMP"),
 	col("project", "INTEGER")}, activityCounts()...)
 
-var bucketActivitySchema = append([]Field{col("snapshotStartTime", "TIMESTAMP"), col("snapshotEndTime", "TIMESTAMP"),
-	col("name", "STRING"), col("generation", "INTEGER"), col("project", "INTEGER"), col("location", "STRING")}, activityCounts()...)
+func topPrefixesField(name string) Field {
+	return reps(name, col("prefix", "STRING"), col("count", "INTEGER"))
+}
+
+var bucketActivitySchema = append(append([]Field{col("snapshotStartTime", "TIMESTAMP"), col("snapshotEndTime", "TIMESTAMP"),
+	col("name", "STRING"), col("generation", "INTEGER"), col("project", "INTEGER"), col("location", "STRING")}, activityCounts()...),
+	topPrefixesField("topPrefixes429Errors"), topPrefixesField("topPrefixesRequestBytes"),
+	topPrefixesField("topPrefixesResponseBytes"), topPrefixesField("topPrefixesHighestOperations"))
 
 var bucketRegionActivitySchema = []Field{
 	col("snapshotStartTime", "TIMESTAMP"), col("snapshotEndTime", "TIMESTAMP"), col("project", "INTEGER"), col("name", "STRING"),

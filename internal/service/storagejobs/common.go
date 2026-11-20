@@ -112,6 +112,10 @@ type Runtime struct {
 	// scope; nil scopes each configuration to its own project.
 	Projects ProjectLister
 
+	// activity is the Cloud Storage requests the activity views are made
+	// from (activity.go, #1979).
+	activity activityLog
+
 	once    sync.Once
 	cancel  context.CancelFunc
 	mu      sync.Mutex
@@ -182,6 +186,28 @@ type Clock struct {
 	now    func() time.Time
 	mu     sync.Mutex
 	offset time.Duration
+	// moves are when, on the wall clock, the offset changed, and to what.
+	moves []clockMove
+}
+
+type clockMove struct {
+	at     time.Time
+	offset time.Duration
+}
+
+// At is the clock's time at wall-clock time t: t with the offset in force
+// then.
+func (c *Clock) At(t time.Time) time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var off time.Duration
+	for _, m := range c.moves {
+		if m.at.After(t) {
+			break
+		}
+		off = m.offset
+	}
+	return t.Add(off).UTC()
 }
 
 // NewClock returns a clock reading now.
@@ -198,6 +224,10 @@ func (c *Clock) Now() time.Time {
 func (c *Clock) Advance(d time.Duration) time.Time {
 	c.mu.Lock()
 	c.offset += d
+	c.moves = append(c.moves, clockMove{at: c.now(), offset: c.offset})
+	if len(c.moves) > 1000 {
+		c.moves = c.moves[len(c.moves)-1000:]
+	}
 	c.mu.Unlock()
 	return c.Now()
 }

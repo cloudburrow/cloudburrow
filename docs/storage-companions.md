@@ -111,9 +111,18 @@ views with Google's columns:
 | `object_attributes_view`, `object_attributes_latest_snapshot_view` | each live object (no checksums for a Cloud KMS-encrypted object) |
 | `project_attributes_view` | each project in scope |
 | `object_contexts_catalog_view` | the latest snapshot's objects that have contexts |
-| `events_view` | `eventCode` 1 per view refreshed and 2 per snapshot |
+| `events_view` | `eventCode` 1 per view refreshed and 2 per snapshot, and 3 per activity view refreshed |
 | `error_attributes_view` | the projects and buckets left out, and why |
-| `object_events_view`, `project_activity_view`, `bucket_activity_view`, `bucket_region_activity_view` | empty: the instance keeps no request log to aggregate (#1979) |
+| `object_events_view` | each object write, update and delete, and each 429, since the previous snapshot, with the object's size, generation and storage class from this one (#1979) |
+| `project_activity_view`, `bucket_activity_view` | per project and per bucket in scope, the requests since the previous snapshot (`snapshotStartTime` to `snapshotEndTime`) by kind and status, and bytes each way; a bucket's `topPrefixes*` records are its top 5 object prefixes (the name up to its last `/`), as `prefix` and `count` (Google names neither field: UNVERIFIED (docs re-read 2026-11-19: <https://docs.cloud.google.com/storage/docs/insights/dataset-tables-and-schemas>)) |
+| `bucket_region_activity_view` | per bucket, its bytes each way; `requestLocation` is null, since every request comes from this machine, in no Google Cloud location |
+
+The activity views are made from the instance's Cloud Storage request log, the record its Data
+Access audit log entries come from (docs/compatibility.md, #1979): every request on a bucket in scope
+counts, audit logging on or off, except the snapshot's own reads. Activity rows are kept for
+`activityDataRetentionPeriodDays` (the dataset's retention when it is unset, as Google documents; 0
+keeps none), also past the dataset's retention, up to 365 days. The requests between snapshots are
+kept in memory (at most 200,000), so a restart of the CLI loses those not yet in a snapshot.
 
 Each snapshot refreshes the dataset. It is read-only to every client: the views read tables that
 `tables.list` does not show, and the BigQuery front refuses writes into the dataset (403

@@ -16,6 +16,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
 	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
+	"github.com/cloudburrow/cloudburrow/internal/service/storagejobs"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
@@ -620,8 +621,30 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	coord.RegisterConcurrent(tunnels...)
 	// Ready only once Knative is, before anything that could deploy to it.
 	coord.Register(comps.KnativeReady())
+	var storageRequests *storageRequestScraper
 	if f := forwarderFor(forwarders, "storage"); f != nil {
-		coord.Register(newStorageEventScraper(f, recorder, requestMetrics))
+		scraper := newStorageEventScraper(f, recorder, requestMetrics)
+		// Cloud Storage's audit log entries and request activity (#1979):
+		// the registry, Logging and the companions are read at each batch,
+		// as they are set up below.
+		scraper.requests = &storageRequestScraper{tunnel: f, audit: &storageAudit{
+			registry: func() *resourcemanager.Registry { return projectRegistry },
+			write: func(ctx context.Context, entries []*loggingpb.LogEntry) error {
+				if loggingSvc == nil {
+					return nil
+				}
+				_, err := loggingSvc.api.WriteLogEntries(ctx, &loggingpb.WriteLogEntriesRequest{Entries: entries})
+				return err
+			},
+			jobs: func() *storagejobs.Runtime {
+				if storageJobsRef == nil {
+					return nil
+				}
+				return storageJobsRef.rt
+			},
+		}}
+		storageRequests = scraper.requests
+		coord.Register(scraper)
 		coord.Register(newStorageChannelRelay(f, stdout))
 	}
 	for _, svc := range []config.Service{config.ServicePubSub, config.ServiceBigtable,
@@ -738,6 +761,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		func() *netfwd.Forwarder { return forwarderFor(forwarders, "bigquery") }, projects)
 	if storageJobsSrv != nil {
 		storageJobsRef = storageJobsSrv
+		// A snapshot counts the requests up to its time (#1979).
+		storageJobsSrv.rt.UseActivityFlush(storageRequests.Flush)
 		for _, s := range storageJobsSrv.servers() {
 			coord.Register(s)
 		}

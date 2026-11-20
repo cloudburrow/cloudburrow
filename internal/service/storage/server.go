@@ -59,6 +59,10 @@ type Server struct {
 	observe func(Call)
 	faults  Faulter
 	ring    callRing
+	// requests is the request log (requestlog.go, #1979).
+	requests requestLog
+	// noRequestLog turns the request log off (benchmarks only).
+	noRequestLog bool
 	// allowOrigins are the origins, beyond loopback, whose browser requests
 	// are served (#677).
 	allowOrigins map[string]bool
@@ -260,7 +264,10 @@ const (
 // down: a gRPC call's handler can outlive ServeHTTP, and Stop waits for
 // every one to return, until ctx ends (#1804), so none is still at the
 // stores when they are closed.
-func (s *Server) Stop(ctx context.Context) error { return grpchttp.Stop(ctx, s.grpc) }
+func (s *Server) Stop(ctx context.Context) error {
+	defer s.stopRequestLog()
+	return grpchttp.Stop(ctx, s.grpc)
+}
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if isGRPC(r) {

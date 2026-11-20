@@ -30,8 +30,8 @@ package storagejobs
 // Google's views (datasetschema.go), each over a table of its own that the
 // front hides and keeps read-only; each snapshot refreshes the tables.
 // unlinkDataset deletes it; a linked configuration cannot be deleted.
-// The activity views are made with Google's schemas and stay empty: the
-// instance's Cloud Storage keeps no request log to aggregate (#1979).
+// The activity views are aggregated from the instance's Cloud Storage
+// request log on each snapshot (activity.go, #1979).
 
 import (
 	"context"
@@ -475,7 +475,8 @@ func (s *InsightsServer) readScopeFile(ctx context.Context, c *sipb.DatasetConfi
 
 // identityName is the service agent of a configuration: the project's
 // for IDENTITY_TYPE_PER_PROJECT, as Google documents it, and one of the
-// configuration's own otherwise (its form UNVERIFIED).
+// configuration's own otherwise (its form UNVERIFIED, re-read 2026-11-19,
+// https://docs.cloud.google.com/storage/docs/insights/datasets).
 func identityName(c *sipb.DatasetConfig, number int64) string {
 	if c.GetIdentity().GetType() == sipb.Identity_IDENTITY_TYPE_PER_PROJECT {
 		return fmt.Sprintf("service-%d@gcp-sa-storageinsights.iam.gserviceaccount.com", number)
@@ -884,15 +885,44 @@ func (s *InsightsServer) deleteOp(name string) error {
 }
 
 // prune drops the snapshots older than the retention period.
+// A snapshot older than the retention period and within the activity
+// data's keeps its activity rows alone.
 func (c *datasetConfig) prune(now time.Time) {
-	cut := now.Add(-time.Duration(c.Config.GetRetentionPeriodDays()) * snapshotInterval)
+	days := c.Config.GetRetentionPeriodDays()
+	act := activityDays(days, c.Activity)
+	cut := now.Add(-time.Duration(days) * snapshotInterval)
+	actCut := now.Add(-time.Duration(act) * snapshotInterval)
 	keep := c.Snapshots[:0]
 	for _, sn := range c.Snapshots {
-		if sn.Time.After(cut) {
+		switch {
+		case sn.Time.After(cut):
 			keep = append(keep, sn)
+		case sn.Time.After(actCut):
+			rows := map[string][]map[string]any{}
+			for k, v := range sn.Rows {
+				if activityKeys[k] {
+					rows[k] = v
+				}
+			}
+			for _, e := range sn.Rows["events"] {
+				if e["eventCode"] == "3" {
+					rows["events"] = append(rows["events"], e)
+				}
+			}
+			keep = append(keep, snapshot{Time: sn.Time, Rows: rows})
 		}
 	}
 	c.Snapshots = keep
+}
+
+// keeps reports whether a configuration's dataset shows a snapshot's rows
+// of table key (an events row of eventCode 3 is activity data) at now.
+func (c *datasetConfig) keeps(key string, row map[string]any, sn snapshot, now time.Time) bool {
+	days := c.Config.GetRetentionPeriodDays()
+	if activityKeys[key] || (key == "events" && row["eventCode"] == "3") {
+		days = activityDays(days, c.Activity)
+	}
+	return sn.Time.After(now.Add(-time.Duration(days) * snapshotInterval))
 }
 
 // snapshotDue takes every configuration's snapshots due by now and
@@ -900,6 +930,8 @@ func (c *datasetConfig) prune(now time.Time) {
 func (s *InsightsServer) snapshotDue(ctx context.Context, now time.Time) {
 	s.ds.snap.Lock()
 	defer s.ds.snap.Unlock()
+	// The requests the activity views count, up to now.
+	s.rt.flushActivity(ctx)
 	type job struct {
 		name string
 		at   []time.Time
@@ -927,8 +959,14 @@ func (s *InsightsServer) snapshotDue(ctx context.Context, now time.Time) {
 		c, ok := s.ds.configs[j.name]
 		var cfg *sipb.DatasetConfig
 		var number int64
+		var act int32
+		var from time.Time
 		if ok {
 			cfg, number = proto.Clone(c.Config).(*sipb.DatasetConfig), c.Number
+			act = activityDays(c.Config.GetRetentionPeriodDays(), c.Activity)
+			if n := len(c.Snapshots); n > 0 {
+				from = c.Snapshots[n-1].Time
+			}
 		}
 		s.mu.Unlock()
 		if !ok {
@@ -936,7 +974,11 @@ func (s *InsightsServer) snapshotDue(ctx context.Context, now time.Time) {
 		}
 		var snaps []snapshot
 		for _, at := range j.at {
-			snaps = append(snaps, s.take(ctx, cfg, number, at))
+			if from.IsZero() || !from.Before(at) {
+				from = at.Add(-snapshotInterval)
+			}
+			snaps = append(snaps, s.take(ctx, cfg, number, from, at, act))
+			from = at
 		}
 		s.mu.Lock()
 		linked := false
@@ -965,7 +1007,9 @@ func (s *InsightsServer) refresh(ctx context.Context, name string) error {
 	project := c.Project
 	_, ds, _ := strings.Cut(c.Config.GetLink().GetDataset(), ".")
 	snaps := append([]snapshot{}, c.Snapshots...)
+	cc := &datasetConfig{Config: proto.Clone(c.Config).(*sipb.DatasetConfig), Activity: c.Activity}
 	s.mu.Unlock()
+	now := s.rt.Clock.Now()
 	for _, t := range insightsTables {
 		var rows []map[string]any
 		if t.key == "object_contexts_catalog" {
@@ -974,7 +1018,11 @@ func (s *InsightsServer) refresh(ctx context.Context, name string) error {
 			}
 		} else {
 			for _, sn := range snaps {
-				rows = append(rows, sn.Rows[t.key]...)
+				for _, row := range sn.Rows[t.key] {
+					if cc.keeps(t.key, row, sn, now) {
+						rows = append(rows, row)
+					}
+				}
 			}
 		}
 		if err := s.rt.Linked.ReplaceTable(ctx, project, ds, LinkedTable{ID: t.tableID(), Description: t.desc, Schema: t.schema},
@@ -988,7 +1036,10 @@ func (s *InsightsServer) refresh(ctx context.Context, name string) error {
 func ts(t time.Time) string { return t.UTC().Format("2006-01-02T15:04:05.000000Z") }
 
 // take takes one snapshot of a configuration's scope, stamped at.
-func (s *InsightsServer) take(ctx context.Context, c *sipb.DatasetConfig, number int64, at time.Time) snapshot {
+// Its activity rows count the requests in (from, at], unless the
+// configuration keeps no activity data (act 0).
+func (s *InsightsServer) take(ctx context.Context, c *sipb.DatasetConfig, number int64, from, at time.Time, act int32) snapshot {
+	ctx = context.WithValue(ctx, snapshotRead{}, true)
 	sn := snapshot{Time: at, Rows: map[string][]map[string]any{}}
 	loc := strings.Split(c.Name, "/")[3]
 	add := func(table string, row map[string]any) { sn.Rows[table] = append(sn.Rows[table], row) }
@@ -1046,7 +1097,11 @@ func (s *InsightsServer) take(ctx context.Context, c *sipb.DatasetConfig, number
 		projects = append(projects, p)
 	}
 	sort.Slice(projects, func(i, k int) bool { return projects[i].Number < projects[k].Number })
+	inProjects := map[int64]bool{}
+	scoped := map[string]map[string]any{}
+	objects := map[string]map[string]any{}
 	for _, p := range projects {
+		inProjects[p.Number] = true
 		add("project_attributes", map[string]any{"snapshotTime": ts(at), "name": p.Name, "id": p.ID, "number": p.Number})
 		buckets, err := s.listBuckets(ctx, p.ID)
 		if err != nil {
@@ -1063,8 +1118,10 @@ func (s *InsightsServer) take(ctx context.Context, c *sipb.DatasetConfig, number
 						"serviceAccount": c.GetIdentity().GetName()}})
 				continue
 			}
+			scoped[str(b["name"])] = b
 			var total int64
 			for _, o := range objs {
+				objects[str(b["name"])+"/"+str(o["name"])] = o
 				row := objectRow(o, b, p.Number, at)
 				total += toInt(o["size"])
 				add("object_attributes", row)
@@ -1088,6 +1145,9 @@ func (s *InsightsServer) take(ctx context.Context, c *sipb.DatasetConfig, number
 	}
 	add("events", map[string]any{"globalManifest": map[string]any{"snapshotTime": ts(at)}, "eventTime": ts(s.rt.Clock.Now()),
 		"eventCode": "2"})
+	if act != 0 {
+		s.activityRows(&sn, from, at, loc, inProjects, scoped, objects)
+	}
 	return sn
 }
 
