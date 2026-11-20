@@ -140,6 +140,54 @@ func (s *Server) Do(c call) (obj, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	out, err := s.doLocked(c)
+	// What a call returns can be the stored resource itself, which an
+	// operation's goroutine goes on changing under the lock (vms.go): the
+	// caller renders it after the lock is released, so it gets its own copy
+	// ("concurrent map iteration and map write" in TestConsoleComputeVMs,
+	// Landing 157).
+	return deepCopy(out).(obj), err
+}
+
+// deepCopy copies maps and lists all the way down, keeping their types
+// ([]obj stays []obj, as renderAny tells lists from objects by it).
+func deepCopy(v any) any {
+	switch t := v.(type) {
+	case map[string]any:
+		if t == nil {
+			return obj(nil)
+		}
+		out := make(obj, len(t))
+		for k, e := range t {
+			out[k] = deepCopy(e)
+		}
+		return out
+	case []map[string]any:
+		if t == nil {
+			return t
+		}
+		out := make([]obj, len(t))
+		for i, e := range t {
+			out[i] = deepCopy(e).(obj)
+		}
+		return out
+	case []any:
+		if t == nil {
+			return t
+		}
+		out := make([]any, len(t))
+		for i, e := range t {
+			out[i] = deepCopy(e)
+		}
+		return out
+	case []string:
+		return append([]string(nil), t...)
+	}
+	return v
+}
+
+// doLocked is Do with s.mu held.
+func (s *Server) doLocked(c call) (obj, error) {
 	if len(c.parts) >= 2 && c.parts[0] == "global" && c.parts[1] == "images" {
 		// Public image projects are not projects of the caller's: no
 		// default network is made in them.
