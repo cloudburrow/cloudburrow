@@ -39,7 +39,10 @@ type workflowsService struct {
 	tokens    workflows.TokenMinter
 	// kms is the instance's Cloud KMS, for workflows' customer-managed
 	// keys; nil without it.
-	kms    *kmsService
+	kms *kmsService
+	// live is `up`'s bound addresses, for the connectors' endpoints
+	// (localAPIs); nil uses the configured ports.
+	live   func() map[string]string
 	server *grpctransport.Server
 	api    *workflows.Server
 }
@@ -83,8 +86,24 @@ func (s *workflowsService) Addr() string {
 // localAPIs is the "http://host:port" of each API this instance serves, by
 // the first label of its googleapis.com host: the endpoints gcloud-setup
 // writes, which a workflow's connectors and googleapis.com URLs are sent
-// to. An API not served answers "".
-func localAPIs(cfg config.Config) func(api string) string {
+// to. An API not served answers "". live, when not nil, is `up`'s bound
+// addresses, read at each call: a port configured as 0 (OS-assigned, as
+// CI starts Cloud Storage, Pub/Sub and Cloud Run) is known only once its
+// listener or tunnel is up, so the configured ports alone left those APIs
+// unserved, and a workflow's storage connector answered 403
+// SERVICE_DISABLED on an instance serving storage.
+func localAPIs(cfg config.Config, live func() map[string]string) func(api string) string {
+	if live == nil {
+		bases := localAPIBases(cfg)
+		return func(api string) string { return bases[api] }
+	}
+	return func(api string) string {
+		return localAPIBases(withLivePorts(cfg, live()))[api]
+	}
+}
+
+// localAPIBases is localAPIs' map for cfg's ports.
+func localAPIBases(cfg config.Config) map[string]string {
 	host := cfg.BindAddress
 	if ip := net.ParseIP(host); host == "" || (ip != nil && ip.IsUnspecified()) {
 		host = "127.0.0.1"
@@ -99,7 +118,7 @@ func localAPIs(cfg config.Config) func(api string) string {
 			bases[v.property] = "http://" + net.JoinHostPort(host, strconv.Itoa(ports[v.service]))
 		}
 	}
-	return func(api string) string { return bases[api] }
+	return bases
 }
 
 func (s *workflowsService) Start(ctx context.Context) error {
@@ -107,7 +126,7 @@ func (s *workflowsService) Start(ctx context.Context) error {
 	if s.cfg.Mode == config.ModePersistent {
 		state = filepath.Join(s.cfg.InstanceDir(), "workflows.json")
 	}
-	local := localAPIs(s.cfg)
+	local := localAPIs(s.cfg, s.live)
 	api, err := workflows.NewServer(state, workflows.Options{
 		Local:   local,
 		Tokens:  s.tokens,
