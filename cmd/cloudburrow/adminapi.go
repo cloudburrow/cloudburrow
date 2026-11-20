@@ -70,6 +70,8 @@ type adminDeps struct {
 	backupDR func() *backupdr.Server
 	// privateCA is Certificate Authority Service (#1834), nil unless enabled.
 	privateCA *privateCAService
+	// analyticsHub is BigQuery sharing (#1960), nil without BigQuery.
+	analyticsHub *analyticsHubSvc
 	// gke is the Kubernetes Engine API (#1913), nil unless enabled.
 	gke *gkeService
 	// monitoring is Cloud Monitoring (#1939), nil unless enabled.
@@ -180,6 +182,9 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 	}
 	if d.privateCA != nil {
 		api.RegisterResetter(&privateCAResetter{svc: d.privateCA})
+	}
+	if d.analyticsHub != nil {
+		api.RegisterResetter(&analyticsHubResetter{svc: d.analyticsHub})
 	}
 	if d.monitoring != nil {
 		api.RegisterResetter(&monitoringResetter{svc: d.monitoring})

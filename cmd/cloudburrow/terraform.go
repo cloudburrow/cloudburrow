@@ -147,6 +147,10 @@ var terraformEndpoints = []terraformEndpoint{
 	// clean, update in place and destroy in
 	// TestTerraformContainerClusterAndNodePool.
 	{config.ServiceGKE, "container_custom_endpoint", "GOOGLE_CONTAINER_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	// BigQuery sharing (#1960): google_bigquery_analytics_hub_data_exchange,
+	// _listing and _listing_subscription apply, plan clean, update in place
+	// and destroy in TestTerraformBigQueryAnalyticsHub.
+	{analyticsHubService, "bigquery_analytics_hub_custom_endpoint", "GOOGLE_BIGQUERY_ANALYTICS_HUB_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	// Compute Engine, for the one read google_container_node_pool makes of
 	// it: a pool's node_count is its instance group managers' targetSize,
 	// which the Kubernetes Engine port answers for its own pools' groups
@@ -291,6 +295,7 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 		config.ServiceBackupDR:   cfg.Endpoints.BackupDR,
 		config.ServicePrivateCA:  cfg.Endpoints.PrivateCA,
 		config.ServiceGKE:        cfg.Endpoints.GKE,
+		analyticsHubService:      cfg.Endpoints.AnalyticsHub,
 		config.ServiceMonitoring: cfg.Endpoints.Monitoring,
 		config.ServiceCompute:    cfg.Endpoints.Compute,
 		localAIEndpoint:          cfg.Endpoints.LocalAI,
@@ -302,6 +307,7 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 	}
 	enabled[config.ServiceBackupDR] = backupDREnabled(cfg)
 	enabled[config.ServicePrivateCA] = privateCAEnabled(cfg)
+	enabled[analyticsHubService] = analyticsHubEnabled(cfg)
 	enabled[config.ServiceMonitoring] = monitoringEnabled(cfg)
 	enabled[localAIEndpoint] = serviceEnabled(cfg, config.ServiceRun)
 	var set []terraformURL

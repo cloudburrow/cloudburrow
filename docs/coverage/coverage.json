@@ -16525,6 +16525,215 @@
     ]
   },
   {
+    "Key": "analyticshub",
+    "Title": "BigQuery sharing (Analytics Hub) API (v1)",
+    "counts": {
+      "Implemented": 1,
+      "Unimplemented": 8,
+      "Verified": 20
+    },
+    "rows": [
+      {
+        "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/ApproveQueryTemplate",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/CreateDataExchange",
+        "status": "Verified",
+        "tests": [
+          "test/compat/analyticshub_test.go:116 TestAnalyticsHubPublishSubscribeQuery",
+          "test/compat/terraform_analyticshub_test.go:24 TestTerraformBigQueryAnalyticsHub"
+        ]
+      },
+      {
+        "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/CreateListing",
+        "status": "Verified",
+        "tests": [
+          "test/compat/analyticshub_test.go:116 TestAnalyticsHubPublishSubscribeQuery",
+          "test/compat/analyticshub_test.go:342 TestAnalyticsHubRestrictedExport",
+          "test/compat/terraform_analyticshub_test.go:24 TestTerraformBigQueryAnalyticsHub"
+        ]
+      },
+      {
+        "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/CreateQueryTemplate",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/DeleteDataExchange",
+        "status": "Verified",
+        "tests": [
+          "test/compat/analyticshub_test.go:116 TestAnalyticsHubPublishSubscribeQuery",
+          "test/compat/terraform_analyticshub_test.go:24 TestTerraformBigQueryAnalyticsHub"
+        ]
+      },
+      {
+        "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/DeleteListing",
+        "status": "Verified",
+        "tests": [
+          "test/compat/analyticshub_test.go:116 TestAnalyticsHubPublishSubscribeQuery",
+          "test/compat/analyticshub_test.go:342 TestAnalyticsHubRestrictedExport",
+          "test/compat/terraform_analyticshub_test.go:24 TestTerraformBigQueryAnalyticsHub"
+        ]
+      },
+      {
+        "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/DeleteQueryTemplate",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/DeleteSubscription",
+        "status": "Verified",
+        "tests": [
+          "test/compat/analyticshub_test.go:116 TestAnalyticsHubPublishSubscribeQuery",
+          "test/compat/terraform_analyticshub_test.go:24 TestTerraformBigQueryAnalyticsHub"
+        ]
+      },
+      {
+        "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/GetDataExchange",
+        "status": "Verified",
+        "tests": [
+          "test/compat/analyticshub_test.go:116 TestAnalyticsHubPublishSubscribeQuery",
+          "test/compat/terraform_analyticshub_test.go:24 TestTerraformBigQueryAnalyticsHub"
+        ]
+      },
+      {
+        "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/GetIamPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/analyticshub_test.go:116 TestAnalyticsHubPublishSubscribeQuery"
+        ]
+      },
+      {
+        "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/GetListing",
+        "status": "Verified",
+        "tests": [
+          "test/compat/analyticshub_test.go:116 TestAnalyticsHubPublishSubscribeQuery",
+          "test/compat/terraform_analyticshub_test.go:24 TestTerraformBigQueryAnalyticsHub"
+        ]
+      },
+      {
+        "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/GetQueryTemplate",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/GetSubscription",
+        "status": "Verified",
+        "tests": [
+          "test/compat/analyticshub_test.go:116 TestAnalyticsHubPublishSubscribeQuery",
+          "test/compat/terraform_analyticshub_test.go:24 TestTerraformBigQueryAnalyticsHub"
+        ]
+      },
+      {
+        "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/ListDataExchanges",
+        "status": "Verified",
+        "tests": [
+          "test/compat/analyticshub_test.go:116 TestAnalyticsHubPublishSubscribeQuery"
+        ]
+      },
+      {
+        "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/ListListings",
+        "status": "Verified",
+        "tests": [
+          "test/compat/analyticshub_test.go:116 TestAnalyticsHubPublishSubscribeQuery"
+        ]
+      },
+      {
+        "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/ListOrgDataExchanges",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/ListQueryTemplates",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/ListSharedResourceSubscriptions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/analyticshub_test.go:116 TestAnalyticsHubPublishSubscribeQuery"
+        ]
+      },
+      {
+        "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/ListSubscriptions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/analyticshub_test.go:116 TestAnalyticsHubPublishSubscribeQuery"
+        ]
+      },
+      {
+        "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/RefreshSubscription",
+        "status": "Verified",
+        "tests": [
+          "test/compat/analyticshub_test.go:116 TestAnalyticsHubPublishSubscribeQuery"
+        ]
+      },
+      {
+        "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/RevokeSubscription",
+        "status": "Verified",
+        "tests": [
+          "test/compat/analyticshub_test.go:116 TestAnalyticsHubPublishSubscribeQuery"
+        ]
+      },
+      {
+        "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/SetIamPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/analyticshub_test.go:116 TestAnalyticsHubPublishSubscribeQuery"
+        ]
+      },
+      {
+        "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/SubmitQueryTemplate",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/SubscribeDataExchange",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/SubscribeListing",
+        "status": "Verified",
+        "tests": [
+          "test/compat/analyticshub_test.go:116 TestAnalyticsHubPublishSubscribeQuery",
+          "test/compat/analyticshub_test.go:342 TestAnalyticsHubRestrictedExport",
+          "test/compat/terraform_analyticshub_test.go:24 TestTerraformBigQueryAnalyticsHub"
+        ]
+      },
+      {
+        "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/TestIamPermissions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/analyticshub_test.go:116 TestAnalyticsHubPublishSubscribeQuery"
+        ]
+      },
+      {
+        "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/UpdateDataExchange",
+        "status": "Verified",
+        "tests": [
+          "test/compat/analyticshub_test.go:116 TestAnalyticsHubPublishSubscribeQuery"
+        ]
+      },
+      {
+        "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/UpdateListing",
+        "status": "Verified",
+        "tests": [
+          "test/compat/analyticshub_test.go:116 TestAnalyticsHubPublishSubscribeQuery",
+          "test/compat/terraform_analyticshub_test.go:24 TestTerraformBigQueryAnalyticsHub"
+        ]
+      },
+      {
+        "method": "google.cloud.bigquery.analyticshub.v1.AnalyticsHubService/UpdateQueryTemplate",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      }
+    ]
+  },
+  {
     "Key": "monitoring",
     "Title": "Cloud Monitoring API (v3) and Dashboards API (v1)",
     "counts": {

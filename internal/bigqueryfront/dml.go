@@ -172,6 +172,9 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && !dryRun(r, insert) && f.refuseLinkedQuery(w, r, q, insert) { // #1423, loglinks.go
 		return
 	}
+	if !insert && !dryRun(r, insert) && f.refuseHubQuery(w, r, q, insert, false) { // #1960, hublinks.go; a query job's is checkJob's
+		return
+	}
 	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && dryRun(r, insert) && f.dryRunUntilStop(w, r, q, insert) { // #1456, scriptdrystop.go
 		return
 	}

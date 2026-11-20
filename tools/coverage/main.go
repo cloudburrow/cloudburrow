@@ -67,6 +67,7 @@ import (
 	_ "cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
 	_ "cloud.google.com/go/aiplatform/apiv1beta1/aiplatformpb"
 	_ "cloud.google.com/go/artifactregistry/apiv1/artifactregistrypb"
+	_ "cloud.google.com/go/bigquery/analyticshub/apiv1/analyticshubpb"
 	_ "cloud.google.com/go/bigtable/admin/apiv2/adminpb"
 	_ "cloud.google.com/go/bigtable/apiv2/bigtablepb"
 	_ "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
@@ -290,6 +291,10 @@ var areas = []area{
 	// The Kubernetes Engine API (#1913): CloudBurrow's own, gRPC and JSON
 	// on one port, each cluster a kind cluster of its own.
 	{Key: "gke", Title: "Kubernetes Engine API (v1)", Own: true, Services: []string{"google.container.v1.ClusterManager"}},
+	// BigQuery sharing, formerly Analytics Hub (#1960): CloudBurrow's own,
+	// gRPC and JSON on one port; its subscriptions make linked datasets in
+	// the instance's BigQuery.
+	{Key: "analyticshub", Title: "BigQuery sharing (Analytics Hub) API (v1)", Own: true, Services: []string{"google.cloud.bigquery.analyticshub.v1.AnalyticsHubService"}},
 	// Cloud Monitoring (#1939, #1964): CloudBurrow's own, gRPC and JSON on
 	// one port, with the Dashboards API v1 beside v3. The Query service
 	// (MQL) is not registered and answers UNIMPLEMENTED.

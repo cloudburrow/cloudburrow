@@ -133,6 +133,7 @@ Set by `scripts/compat-env.sh` from a running instance:
 | `CLOUDBURROW_TEST_BACKUPDR` | `CLOUDBURROW_BACKUPDR_ENDPOINT` | the Backup and DR Service (#1433), `--services backupdr` with either Cloud SQL service; gcloud backup-dr and Terraform's `google_backup_dr_*` |
 | `CLOUDBURROW_TEST_COMPUTE` | `CLOUDBURROW_COMPUTE_ENDPOINT` | the Compute Engine API's VPC networking (#1936), `--services compute`; JSON under `/compute/v1/`, in process |
 | `CLOUDBURROW_TEST_GKE` | `CLOUDBURROW_GKE_ENDPOINT` | the Kubernetes Engine API (#1913), `--services gke`; gRPC and JSON on one port; its clusters are kind clusters, so it needs Docker, kind and kubectl |
+| `CLOUDBURROW_TEST_ANALYTICSHUB` | `CLOUDBURROW_ANALYTICSHUB_ENDPOINT` | BigQuery sharing, formerly Analytics Hub (#1960), served with `bigquery`; gRPC and JSON on one port; its subscriptions make linked datasets in the instance's BigQuery |
 | `CLOUDBURROW_TEST_PRIVATECA` | `CLOUDBURROW_PRIVATECA_ENDPOINT` | Certificate Authority Service (#1834), `--services privateca`; gRPC and JSON on one port |
 | `CLOUDBURROW_TEST_MONITORING` | `CLOUDBURROW_MONITORING_ENDPOINT` | Cloud Monitoring (#1939), `--services monitoring`; gRPC and JSON on one port |
 | `CLOUDBURROW_TEST_CLOUDSQL_CONNECTOR` | `CLOUDBURROW_CLOUDSQL_CONNECTOR_ENDPOINT` | the Cloud SQL connectors' TLS listener (#1364); `TestCloudSQLConnectorDialsBothServers` redirects the connector's dial of port 3307 to it only when an instance was started with `--cloudsql-connector` on another port |

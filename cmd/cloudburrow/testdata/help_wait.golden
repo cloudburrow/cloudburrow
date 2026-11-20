@@ -61,6 +61,8 @@ Flags:
     	namespace for CloudBurrow-managed workloads
   -node-image string
     	pinned kind node image, which fixes the Kubernetes version
+  -port-analyticshub int
+    	BigQuery sharing (Analytics Hub) API host port (0 = OS-assigned; default 9042)
   -port-apikeys int
     	API Keys API (apikeys.googleapis.com) host port (0 = OS-assigned; default 9029)
   -port-backupdr int

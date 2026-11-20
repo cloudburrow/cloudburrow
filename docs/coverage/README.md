@@ -51,6 +51,7 @@ Do not edit these files by hand.
 | [Workload Identity Federation (IAM v1 pools, STS v1)](workloadidentity.md) | 47 | 22 | 0 | 25 | 0 | 0 | 0 | 0 |
 | [Certificate Authority Service (v1)](privateca.md) | 29 | 29 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Kubernetes Engine API (v1)](gke.md) | 37 | 16 | 0 | 19 | 2 | 0 | 0 | 0 |
+| [BigQuery sharing (Analytics Hub) API (v1)](analyticshub.md) | 29 | 20 | 0 | 8 | 1 | 0 | 0 | 0 |
 | [Cloud Monitoring API (v3) and Dashboards API (v1)](monitoring.md) | 56 | 52 | 0 | 2 | 2 | 0 | 0 | 0 |
 
 **Statuses.** *Verified*: an official-SDK compat test, linked, exercises it. *Refused*: a compat

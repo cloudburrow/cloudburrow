@@ -373,9 +373,10 @@ const ROUTES = [
   { path: "/bigquery-scheduled-queries", service: null, requires: "bigquery", screen: "unavailable", icon: "bigquery", title: "Scheduled queries",
     section: "Databases", product: "bigquery", productTitle: "BigQuery",
     unavailable: "A scheduled query is a BigQuery Data Transfer Service transfer, which CloudBurrow does not run. Run a query in Studio, or from a client on a schedule of its own." },
-  { path: "/bigquery-sharing", service: null, requires: "bigquery", screen: "unavailable", icon: "bigquery", title: "Analytics Hub",
-    section: "Databases", product: "bigquery", productTitle: "BigQuery",
-    unavailable: "Analytics Hub (Sharing) exchanges and listings are the Analytics Hub API's, which CloudBurrow does not run. A dataset is shared through its Permissions tab." },
+  // BigQuery sharing (Analytics Hub, #1960): exchanges, their listings
+  // and subscriptions.
+  { path: "/bigquery-sharing", service: "bigquery-sharing", icon: "bigquery", title: "Analytics Hub", kind: "Exchange",
+    section: "Databases", product: "bigquery", productTitle: "BigQuery" },
   { path: "/bigquery-dataform", service: null, requires: "bigquery", screen: "unavailable", icon: "bigquery", title: "Dataform",
     section: "Databases", product: "bigquery", productTitle: "BigQuery",
     unavailable: "Dataform repositories and workflows are the Dataform API's, which CloudBurrow does not run." },

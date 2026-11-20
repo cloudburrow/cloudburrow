@@ -330,6 +330,13 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		privateCASvc.storage = func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") }
 	}
 	privateCASvc.register(coord)
+	// BigQuery sharing (Analytics Hub, #1960), in process; its linked
+	// datasets are made on the instance's BigQuery.
+	analyticsHub := newAnalyticsHubService(cfg)
+	if analyticsHub != nil {
+		analyticsHub.bigquery = func() *netfwd.Forwarder { return forwarderFor(forwarders, "bigquery") }
+	}
+	analyticsHub.register(coord)
 	// The Kubernetes Engine API (#1913), in process; its clusters are
 	// kind clusters of their own.
 	gkeSvc := newGKEService(cfg)
@@ -461,6 +468,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		mysql:        mysqlCreds,
 		scheduler:    schedulerSvc,
 		privateCA:    privateCASvc,
+		analyticsHub: analyticsHub,
 		gke:          gkeSvc,
 		monitoring:   monitoringSvc,
 		compute:      computeSvc,
@@ -583,6 +591,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		monitoringSvc.calls = callEvents(recorder, requestMetrics, "monitoring")
 		monitoringSvc.interpose = append(monitoringSvc.interpose, grpctransport.LogInterceptor(logger, "monitoring"), faults.Interceptor("monitoring"))
 		monitoringSvc.requests = requestEvents(recorder, requestMetrics, "monitoring")
+	}
+	if analyticsHub != nil {
+		analyticsHub.tracing = tracing
+		analyticsHub.calls = callEvents(recorder, requestMetrics, "analyticshub")
+		analyticsHub.interpose = append(analyticsHub.interpose, grpctransport.LogInterceptor(logger, "analyticshub"), faults.Interceptor("analyticshub"))
+		analyticsHub.requests = requestEvents(recorder, requestMetrics, "analyticshub")
 	}
 	if privateCASvc != nil {
 		privateCASvc.calls = callEvents(recorder, requestMetrics, "privateca")
@@ -916,6 +930,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		backupdr:       backupDRSrv,
 		sqlAdmin:       sqlAdminSrv,
 		privateCA:      privateCASvc,
+		analyticsHub:   analyticsHub,
 		gke:            gkeSvc,
 		monitoring:     monitoringSvc,
 		compute:        computeSvc,
@@ -1003,6 +1018,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		if a := gkeSvc.Addr(); a != "" {
 			live["gke"] = a
+		}
+		if a := analyticsHub.Addr(); a != "" {
+			live["analyticshub"] = a
 		}
 		if a := computeSvc.Addr(); a != "" {
 			live["compute"] = a

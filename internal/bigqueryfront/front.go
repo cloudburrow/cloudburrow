@@ -232,6 +232,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	open := &openJobs{}                                               // jobsopen.go, #1633
 	tables := &tableSettings{}                                        // tableoptions.go, #1390
 	linked := &linkedDatasets{}                                       // loglinks.go, #1423
+	hubs := &hubLinks{}                                               // hublinks.go, #1960
 	icebergs := &icebergTables{}                                      // iceberg.go, #1427
 	dropped := &droppedStore{}                                        // dropped.go, #1460
 	models := &bqModels{}                                             // models.go, #1465
@@ -306,6 +307,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		failed.mapped.keep(jobErrorsStateFile(o.stateDir), o.logf) // joberrorsmemo.go, #1628
 		views.keep(viewTextsStateFile(o.stateDir), o.logf)         // viewtextstate.go, #1028
 		linked.keep(linkedDatasetsStateFile(o.stateDir), o.logf)   // loglinks.go, #1435
+		hubs.keep(hubLinksStateFile(o.stateDir), o.logf)           // hublinks.go, #1960
 		numbers.keep(projectNumbersStateFile(o.stateDir), o.logf)  // projectnumbers.go, #1551
 	}
 	ids := o.ids // #1063
@@ -333,6 +335,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			async.reset()
 			tables.reset()
 			linked.reset()
+			hubs.reset()
 			models.reset()
 			buffers.syncEngine(next, o.logf) // #1487: a restarted engine's clock is the system's
 		})
@@ -451,7 +454,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, texts: texts, storage: storage, storageHost: storageHost,
 				configs: configs, jobs: own, records: records, functions: functions, views: views, ids: ids, policies: policies,
 				listJobs: listJobs, iam: iam, buffers: buffers, settings: settings, jobsTable: jobRows, newest: newest, open: open,
-				resourceManager: o.resourceManager, tables: tables, linked: linked, icebergs: icebergs, dropped: dropped, models: models,
+				resourceManager: o.resourceManager, tables: tables, linked: linked, hubs: hubs, icebergs: icebergs, dropped: dropped, models: models,
 				onnx: o.onnx, tfconvert: o.tfconvert, vertexai: o.vertexai, connections: connections, numbers: numbers, objects: objects}
 			if j[3] == "jobs" {
 				f.withDefaultJobKey(w, r, func(w http.ResponseWriter) { f.insertJob(w, r) }) // #1456, defaultjobkey.go
@@ -515,9 +518,20 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			return
 		}
 		f := front{next: next, base: prefix + "/projects/" + project, failed: failed, records: records, views: views, ids: ids, policies: policies,
-			buffers: buffers, tables: tables, linked: linked, settings: settings, icebergs: icebergs, storageHost: storageHost,
+			buffers: buffers, tables: tables, linked: linked, hubs: hubs, settings: settings, icebergs: icebergs, storageHost: storageHost,
 			dropped: dropped, iam: iam, functions: functions, models: models, open: open, // functions, models: #1483, droppedroutines.go; open: purge.go
 			storage: storage, connections: connections, numbers: numbers, objects: objects, resourceManager: o.resourceManager} // #1783, objecttables.go
+		if f.serveHubWriter(w, r, dataset, func(w http.ResponseWriter, r *http.Request) { // #1960, hublinks.go
+			datasetInsertLocation(r, settings.defaultLocation(projectOf(f.base)))
+			datasetInsertDefaults(r, settings, projectOf(f.base))
+			f.insertDataset(w, r)
+		}) {
+			return
+		}
+		if _, hub := f.hubLink(dataset); hub && r.Method == http.MethodDelete && m[4] == "" && !strings.HasSuffix(r.URL.EscapedPath(), "/tables") {
+			f.deleteHubLinked(w, r, dataset) // #1960: deleting a linked dataset is not a write into it
+			return
+		}
 		if f.serveLinkedWriter(w, r, m[3], func(w http.ResponseWriter, r *http.Request) { // #1423, loglinks.go
 			if r.Method == http.MethodPost {
 				datasetInsertLocation(r, settings.defaultLocation(projectOf(f.base)))
@@ -539,6 +553,9 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			return
 		}
 		if what := linkedRequestWhat(r.Method, m[4], m[5]); m[3] != "" && what != "" && f.refuseLinkedWrite(w, r, dataset, what) { // #1423, loglinks.go
+			return
+		}
+		if f.serveHubRead(w, r, dataset, table, m[5]) { // #1960, hublinks.go
 			return
 		}
 		if r.Method == http.MethodDelete && m[3] != "" && m[4] == "" && !strings.HasSuffix(r.URL.EscapedPath(), "/tables") {
@@ -714,6 +731,9 @@ type front struct {
 	// linked are the Log Analytics linked datasets, read-only to clients
 	// (loglinks.go, #1423), or nil.
 	linked *linkedDatasets
+	// hubs are the Analytics Hub linked datasets (hublinks.go, #1960), or
+	// nil.
+	hubs *hubLinks
 	// dropped are the deleted tables and datasets kept for their time
 	// travel window (dropped.go, #1460), or nil.
 	dropped *droppedStore

@@ -479,6 +479,16 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 				"Certificate Authority Service v1, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint"})
 	}
 
+	// BigQuery sharing (Analytics Hub, #1960): the Go client's endpoint,
+	// and Terraform's google_bigquery_analytics_hub_* through
+	// bigquery_analytics_hub_custom_endpoint. gcloud has no command for it.
+	if analyticsHubEnabled(cfg) && cfg.Endpoints.AnalyticsHub != 0 {
+		ah := addr(cfg.Endpoints.AnalyticsHub)
+		vars = append(vars,
+			envVar{cliEndpointVar("analyticshub"), ah,
+				"BigQuery sharing (Analytics Hub) v1, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint"})
+	}
+
 	// The Kubernetes Engine API (#1913): gcloud container clusters and
 	// node-pools, and Terraform's google_container_* through
 	// container_custom_endpoint.
@@ -655,6 +665,7 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 		"backupdr":          &e.BackupDR,
 		"privateca":         &e.PrivateCA,
 		"gke":               &e.GKE,
+		"analyticshub":      &e.AnalyticsHub,
 		"monitoring":        &e.Monitoring,
 		"compute":           &e.Compute,
 		// The local AI endpoint, which serves Vertex AI's Model Registry

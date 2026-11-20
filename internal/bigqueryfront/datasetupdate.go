@@ -78,6 +78,15 @@ func (f front) getDataset(w http.ResponseWriter, r *http.Request, dataset string
 		f.next.ServeHTTP(w, r)
 		return
 	}
+	if _, hub := f.hubLink(dataset); hub { // #1960, hublinks.go
+		var content map[string]json.RawMessage
+		if json.Unmarshal(got, &content) == nil && content != nil {
+			f.hubDatasetFields(dataset, content)
+			if b, err := json.Marshal(content); err == nil {
+				got = b
+			}
+		}
+	}
 	b, ok := withDatasetEtag(got)
 	if !ok {
 		f.next.ServeHTTP(w, r)

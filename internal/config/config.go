@@ -359,6 +359,10 @@ type Endpoints struct {
 	// enabled it also answers the Kubernetes Engine node pools' instance
 	// group managers, which the GKE port answers without it.
 	Compute int `json:"compute"`
+	// AnalyticsHub is the host port of BigQuery sharing, formerly
+	// Analytics Hub (analyticshub.googleapis.com, #1960): gRPC and JSON on
+	// one port, served when BigQuery is.
+	AnalyticsHub int `json:"analyticsHub"`
 	// ONNX is the host port of the ONNX runner (#1711), which runs BigQuery
 	// ML's imported ONNX models for the BigQuery front, published to the
 	// cluster through cloudburrow-host. CloudBurrow's own API, not a
@@ -434,6 +438,7 @@ func (e *Endpoints) fields() []endpointField {
 		{"gke", &e.GKE},
 		{"monitoring", &e.Monitoring},
 		{"compute", &e.Compute},
+		{"analyticshub", &e.AnalyticsHub},
 		{"onnx", &e.ONNX},
 		{"tfconvert", &e.TFConvert},
 	}
@@ -839,6 +844,10 @@ func Default() Config {
 			// compute.googleapis.com is its own API, the next free one
 			// after Kubernetes Engine's 9030.
 			Compute: 9031,
+			// BigQuery sharing (#1960): 9034 to 9041 are taken by open
+			// branches (BigQuery Data Transfer, the Storage companions,
+			// Workflows), so 9042.
+			AnalyticsHub: 9042,
 			// OS-assigned. The port is not what enables local AI —
 			// LocalAI.ModelPath is. A configured port with no model binds
 			// nothing, so there is no endpoint answering every request with

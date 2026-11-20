@@ -64,6 +64,8 @@ var serviceAgents = map[string]string{
 	// Cloud SQL Service Account; https://cloud.google.com/sql/docs/mysql/configure-cmek
 	// creates it with `gcloud beta services identity create`.
 	"sqladmin.googleapis.com": "gcp-sa-cloud-sql.iam.gserviceaccount.com",
+	// Analytics Hub Service Agent (#1960); https://cloud.google.com/iam/docs/service-agents
+	"analyticshub.googleapis.com": "gcp-sa-analyticshub.iam.gserviceaccount.com",
 	// Cloud Tasks Service Account.
 	"cloudtasks.googleapis.com": "gcp-sa-cloudtasks.iam.gserviceaccount.com",
 	// Cloud Scheduler Service Account.

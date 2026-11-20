@@ -80,6 +80,8 @@ var compatSections = map[string]string{
 	"privateca": "## Certificate Authority Service — `google.cloud.security.privateca.v1`",
 	// The Kubernetes Engine API (#1913), named by gRPC method.
 	"gke": "## Kubernetes Engine API — `google.container.v1`",
+	// BigQuery sharing (#1960), named by gRPC method.
+	"analyticshub": "## BigQuery sharing (Analytics Hub) — `google.cloud.bigquery.analyticshub.v1`",
 	// Cloud Monitoring (#1939), named by gRPC method.
 	"monitoring": "## Cloud Monitoring — `google.monitoring.v3`",
 	// The Compute Engine API's VPC networking (#1936), by discovery ID.
