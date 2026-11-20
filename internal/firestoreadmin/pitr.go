@@ -111,11 +111,26 @@ func errTooOld(t time.Time, earliest time.Time) error {
 		t.Format(time.RFC3339Nano), earliest.Format(time.RFC3339Nano))
 }
 
-// checkReadTime refuses a read of the database dbName at t outside its
-// version window. A database the API does not know is the emulator's to
-// answer, as is a time in the future (the emulator refuses it: "The
-// requested 'read_time' cannot be in the future.").
+// errNotMicroseconds is the refusal of a read_time finer than a
+// microsecond: it "must be a microsecond precision timestamp" (the
+// google.firestore.v1 reference, every read method's read_time, re-read
+// 2026-11-20: https://docs.cloud.google.com/firestore/docs/reference/rpc/google.firestore.v1).
+// The words are the Firestore emulator's (measured: GetDocument,
+// BatchGetDocuments, ListDocuments, RunQuery, RunAggregationQuery,
+// PartitionQuery and BeginTransaction refuse it so), which answers a
+// ListCollectionIds at such a time instead; the front refuses it there
+// too, as Google's reference documents the same field.
+var errNotMicroseconds = status.Error(codes.InvalidArgument, "timestamp cannot have more than microseconds precision")
+
+// checkReadTime refuses a read of the database dbName at t finer than a
+// microsecond, or outside its version window. A database the API does
+// not know is otherwise the emulator's to answer, as is a time in the
+// future (the emulator refuses it: "The requested 'read_time' cannot be
+// in the future.").
 func (a *Admin) checkReadTime(dbName string, t time.Time) error {
+	if t.Nanosecond()%1000 != 0 {
+		return errNotMicroseconds
+	}
 	a.mu.Lock()
 	db, err := a.database(dbName)
 	if err != nil {
