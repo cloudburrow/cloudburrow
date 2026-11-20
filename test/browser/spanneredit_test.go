@@ -187,7 +187,7 @@ func TestSpannerCreateInstanceThroughTheListScreen(t *testing.T) {
 	}
 	var disabled []string
 	p.eval(`[...document.querySelectorAll("#view input[type=radio]:disabled, #view input[type=checkbox]:disabled")].map((r) => r.value || r.id)`, &disabled)
-	for _, w := range []string{"Enterprise", "Enterprise Plus", "Dual-region", "Autoscaling"} {
+	for _, w := range []string{"Dual-region"} {
 		if !slices.Contains(disabled, w) {
 			t.Errorf("%s is not drawn disabled (not available locally); disabled are %v", w, disabled)
 		}

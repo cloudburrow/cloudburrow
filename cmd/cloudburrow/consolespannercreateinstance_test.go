@@ -57,7 +57,20 @@ func TestConsoleSpannerCreateInstance(t *testing.T) {
 		r.GetInstance().GetProcessingUnits() != 2000 || r.GetInstance().GetLabels()["env"] != "dev" {
 		t.Errorf("Create instance's page sent CreateInstance = %v", r)
 	}
-	for _, refused := range []map[string]string{{"edition": "Enterprise"}, {"scaling": "Autoscaling"}, {"configType": "Dual-region"}} {
+	// The Enterprise editions, autoscaling and default backup schedules
+	// are sent (#1949).
+	if _, err := p.Create(ctx, "proj", map[string]string{"edition": "Enterprise", "displayName": "Autoscaled", "instance": "auto",
+		"configType": "Regional", "regionalConfig": "regional-us-central1", "unit": "Nodes", "scaling": "Autoscaling",
+		"minimum": "2", "maximum": "6", "highPriorityCPU": "60", "storageTarget": "90", "defaultBackups": "false"}); err != nil {
+		t.Fatal(err)
+	}
+	if in := f.got.GetInstance(); in.GetEdition() != instancepb.Instance_ENTERPRISE || in.GetAutoscalingConfig().GetAutoscalingLimits().GetMinNodes() != 2 ||
+		in.GetAutoscalingConfig().GetAutoscalingLimits().GetMaxNodes() != 6 || in.GetAutoscalingConfig().GetAutoscalingTargets().GetHighPriorityCpuUtilizationPercent() != 60 ||
+		in.GetAutoscalingConfig().GetAutoscalingTargets().GetStorageUtilizationPercent() != 90 || in.GetProcessingUnits() != 0 ||
+		in.GetDefaultBackupScheduleType() != instancepb.Instance_NONE {
+		t.Errorf("an autoscaled Enterprise instance sent %v", in)
+	}
+	for _, refused := range []map[string]string{{"configType": "Dual-region"}} {
 		f.got = nil
 		v := map[string]string{"displayName": "Refused", "instance": "refused", "unit": "Nodes", "nodes": "1"}
 		for k, val := range refused {

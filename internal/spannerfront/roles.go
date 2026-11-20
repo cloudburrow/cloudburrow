@@ -102,6 +102,9 @@ func (s *Instances) roles(database string) map[string]bool {
 var createDatabaseRe = regexp.MustCompile("(?is)^\\s*CREATE\\s+DATABASE\\s+[`\"]?([^`\"\\s]+)")
 
 func (d databases) CreateDatabase(ctx context.Context, req *databasepb.CreateDatabaseRequest) (*longrunningpb.Operation, error) {
+	if err := d.s.checkEditionDDL("CreateDatabase", req.GetParent(), req.GetExtraStatements()); err != nil {
+		return nil, err
+	}
 	if m := createDatabaseRe.FindStringSubmatch(req.GetCreateStatement()); m != nil {
 		db := &databasepb.Database{Name: req.GetParent() + "/databases/" + m[1]}
 		if customViolation(ctx, db.GetName(), orgpolicy.TypeSpannerDatabase, orgpolicy.MethodCreate, db) != nil {
@@ -144,11 +147,20 @@ func (d databases) CreateDatabase(ctx context.Context, req *databasepb.CreateDat
 	if m := createDatabaseRe.FindStringSubmatch(req.GetCreateStatement()); m != nil {
 		d.s.dropRoles(req.GetParent() + "/databases/" + m[1])
 		d.s.trackRoles(req.GetParent()+"/databases/"+m[1], req.GetExtraStatements())
+		// AUTOMATIC's default backup schedule (editions.go, #1949).
+		if op.GetError() == nil {
+			d.s.addDefaultSchedule(req.GetParent() + "/databases/" + m[1])
+		}
 	}
 	return op, nil
 }
 
 func (d databases) UpdateDatabaseDdl(ctx context.Context, req *databasepb.UpdateDatabaseDdlRequest) (*longrunningpb.Operation, error) {
+	if m := databaseNameRe.FindStringSubmatch(req.GetDatabase()); m != nil {
+		if err := d.s.checkEditionDDL("UpdateDatabaseDdl", m[1], req.GetStatements()); err != nil {
+			return nil, err
+		}
+	}
 	op, err := d.s.emuDB.UpdateDatabaseDdl(ctx, req)
 	if err != nil {
 		return nil, err

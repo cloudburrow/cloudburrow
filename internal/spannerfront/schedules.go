@@ -18,10 +18,10 @@ import (
 
 // Backup schedules (#1498), kept in memory beside the backups, and run:
 // every minute the front takes the backups whose cron time has come, as
-// full backups (backups.go) named after the schedule and kept for its
-// retention duration. Times are UTC, as Google's are. Incremental backups
-// are refused: they need the Enterprise edition, which the emulator does
-// not have.
+// backups (backups.go) named after the schedule and kept for its retention
+// duration. Times are UTC, as Google's are. An incremental schedule needs
+// an Enterprise edition, and its backups form chains (incremental.go,
+// #1949).
 
 const creationWindow = 4 * time.Hour
 
@@ -49,9 +49,6 @@ func checkSchedule(method string, in *databasepb.BackupSchedule) (cron.Schedule,
 	}
 	if d := r.AsDuration(); d < minBackupLife || d > maxBackupLife {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid %s request: retention_duration must be from 6 hours to 366 days.", method)
-	}
-	if in.GetIncrementalBackupSpec() != nil {
-		return nil, status.Errorf(codes.Unimplemented, "%s of incremental backups is not served here: they need the Enterprise edition, which the emulator does not have", method)
 	}
 	if e := in.GetEncryptionConfig(); e != nil {
 		named, err := keyNames(method, e.GetKmsKeyName(), e.GetKmsKeyNames())
@@ -90,6 +87,9 @@ func (d databases) CreateBackupSchedule(ctx context.Context, req *databasepb.Cre
 	in := proto.Clone(req.GetBackupSchedule()).(*databasepb.BackupSchedule)
 	c, err := checkSchedule("CreateBackupSchedule", in)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.checkIncremental("CreateBackupSchedule", req.GetParent(), in); err != nil {
 		return nil, err
 	}
 	in.Name = req.GetParent() + "/backupSchedules/" + req.GetBackupScheduleId()
@@ -147,6 +147,9 @@ func (d databases) UpdateBackupSchedule(_ context.Context, req *databasepb.Updat
 	}
 	c, err := checkSchedule("UpdateBackupSchedule", next)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.checkIncrementalLocked("UpdateBackupSchedule", in.GetName()[:strings.Index(in.GetName(), "/backupSchedules/")], next); err != nil {
 		return nil, err
 	}
 	s.normalize(next)

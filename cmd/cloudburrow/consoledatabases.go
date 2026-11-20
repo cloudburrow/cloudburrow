@@ -1394,6 +1394,8 @@ func (p spannerProvider) instanceDetail(ctx context.Context, project, instanceID
 			{Label: "Edition", Value: spannerEdition(inst.GetEdition())},
 			{Label: "Configuration", Value: lastSegment(inst.GetConfig())},
 			{Label: "Compute capacity", Value: spannerCapacity(inst.GetNodeCount(), inst.GetProcessingUnits())},
+			{Label: "Autoscaling", Value: orDash(spannerAutoscalingLabel(inst.GetAutoscalingConfig()))},
+			{Label: "Default backup schedules", Value: spannerDefaultBackupsLabel(inst.GetDefaultBackupScheduleType())},
 			{Label: "Databases", Value: fmt.Sprint(databases.Total)},
 			{Label: "Labels", Value: orDash(spannerLabels(inst.GetLabels()))},
 		},

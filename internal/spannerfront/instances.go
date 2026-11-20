@@ -13,10 +13,10 @@
 // the emulator's own answer to GetInstance and ListInstances; DeleteInstance
 // passes to the emulator and drops them.
 //
-// What an emulator instance cannot carry is refused UNIMPLEMENTED, naming
-// why: autoscaling (the emulator does not scale), the edition and the
-// default backup schedule type (the emulator has no editions). A move to
-// another configuration is MoveInstance (configs.go).
+// The edition, the default backup schedule type and the autoscaling
+// configuration are kept the same way, and checked as Google documents
+// them (editions.go, #1949). A move to another configuration is
+// MoveInstance (configs.go).
 //
 // Since #1498 the front also serves what the emulator does not keep:
 // backups and restores (backups.go), backup schedules (schedules.go),
@@ -278,6 +278,7 @@ func apply(dst, src *instancepb.Instance, paths map[string]bool) {
 	if paths["config"] {
 		dst.Config = src.Config
 	}
+	applyEditions(dst, src, paths)
 }
 
 func (s *Instances) GetInstance(ctx context.Context, req *instancepb.GetInstanceRequest) (*instancepb.Instance, error) {
@@ -342,11 +343,8 @@ func (s *Instances) DeleteInstance(ctx context.Context, req *instancepb.DeleteIn
 
 // refused are the update paths an emulator instance cannot carry.
 var refused = map[string]string{
-	"config":                       "a move to another instance configuration is MoveInstance",
-	"autoscaling_config":           "the emulator does not autoscale: set node_count or processing_units",
-	"edition":                      "the emulator has no editions",
-	"default_backup_schedule_type": "new databases get no default backup schedule here: create one with CreateBackupSchedule",
-	"instance_type":                "an instance's type cannot change",
+	"config":        "a move to another instance configuration is MoveInstance",
+	"instance_type": "an instance's type cannot change",
 }
 
 // UpdateInstance changes the display name, compute capacity and labels of
@@ -359,8 +357,15 @@ func (s *Instances) UpdateInstance(ctx context.Context, req *instancepb.UpdateIn
 	}
 	paths := map[string]bool{}
 	named := len(req.GetFieldMask().GetPaths()) > 0
+	var autoscalingSub []string
 	for _, p := range req.GetFieldMask().GetPaths() {
 		p = snake(p)
+		if strings.HasPrefix(p, pathAutoscaling+".") {
+			// A field of the configuration, as Terraform names them.
+			paths[pathAutoscaling] = true
+			autoscalingSub = append(autoscalingSub, p)
+			continue
+		}
 		if why, ok := refused[p]; ok {
 			// Clearing what the emulator never has is no change: gcloud
 			// clears autoscaling_config when it sets a node count.
@@ -371,6 +376,13 @@ func (s *Instances) UpdateInstance(ctx context.Context, req *instancepb.UpdateIn
 		}
 		switch p {
 		case "display_name", "node_count", "processing_units", "labels":
+			paths[p] = true
+		case pathEdition, pathDefaultBkup:
+			// Clearing them is no change (editions.go, #1949).
+			if !unset(in, p) {
+				paths[p] = true
+			}
+		case pathAutoscaling:
 			paths[p] = true
 		default:
 			return nil, status.Errorf(codes.InvalidArgument, "Invalid UpdateInstance request: field_mask path %q is not a field of Instance that can be updated.", p)
@@ -408,6 +420,20 @@ func (s *Instances) UpdateInstance(ctx context.Context, req *instancepb.UpdateIn
 	cur, err := s.emu.GetInstance(ctx, &instancepb.GetInstanceRequest{Name: in.GetName()})
 	if err != nil {
 		return nil, err
+	}
+	if paths[pathEdition] || paths[pathAutoscaling] || paths[pathDefaultBkup] || paths["node_count"] || paths["processing_units"] {
+		now := proto.Clone(cur).(*instancepb.Instance)
+		s.mu.Lock()
+		s.overlay(now)
+		s.mu.Unlock()
+		if len(autoscalingSub) > 0 {
+			if want.AutoscalingConfig, err = mergeAutoscaling(now.GetAutoscalingConfig(), in.GetAutoscalingConfig(), autoscalingSub); err != nil {
+				return nil, err
+			}
+		}
+		if err := s.checkEditionUpdate(ctx, now, want, paths); err != nil {
+			return nil, err
+		}
 	}
 	if orgpolicy.SourceSet() {
 		next := proto.Clone(cur).(*instancepb.Instance)
