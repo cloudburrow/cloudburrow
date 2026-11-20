@@ -176,6 +176,9 @@ type wifRecord struct {
 	PoolV      *WorkloadIdentityPool            `json:"poolValue,omitempty"`
 	ProviderV  *WorkloadIdentityPoolProvider    `json:"providerValue,omitempty"`
 	KeyV       *WorkloadIdentityPoolProviderKey `json:"keyValue,omitempty"`
+	// PrivateKey is a key's PKCS #8 private key, which decrypts SAML
+	// assertions (#2065) and is never rendered.
+	PrivateKey []byte `json:"privateKey,omitempty"`
 }
 
 var wifMu sync.Mutex
@@ -848,11 +851,11 @@ func (r *Registry) CreateWorkloadIdentityPoolProviderKey(project, pool, prov, id
 	if r.wifLoad(wifKeyKey(project, pool, prov, id)) != nil {
 		return in, apierror.AlreadyExists("Requested entity already exists")
 	}
-	v, err := newProviderKey(r.now(), id, in)
+	v, priv, err := newProviderKey(r.now(), id, in)
 	if err != nil {
 		return in, err
 	}
-	rec := &wifRecord{Project: project, Pool: pool, Provider: prov, Key: id, KeyV: &v}
+	rec := &wifRecord{Project: project, Pool: pool, Provider: prov, Key: id, KeyV: &v, PrivateKey: priv}
 	if err := r.wifSave(wifKeyKey(project, pool, prov, id), rec); err != nil {
 		return in, err
 	}
@@ -885,16 +888,17 @@ func newProviderKeySpec(in WorkloadIdentityPoolProviderKey) (int, error) {
 }
 
 // newProviderKey makes a provider's encryption key pair, certified for
-// ten years; the record keeps its public certificate.
-func newProviderKey(at time.Time, id string, in WorkloadIdentityPoolProviderKey) (WorkloadIdentityPoolProviderKey, error) {
+// ten years; the API renders its public certificate, and the record keeps
+// its PKCS #8 private key for decrypting SAML assertions (#2065).
+func newProviderKey(at time.Time, id string, in WorkloadIdentityPoolProviderKey) (WorkloadIdentityPoolProviderKey, []byte, error) {
 	bits, err := newProviderKeySpec(in)
 	if err != nil {
-		return in, err
+		return in, nil, err
 	}
 	spec := in.KeyData.KeySpec
 	key, err := rsa.GenerateKey(rand.Reader, bits)
 	if err != nil {
-		return in, apierror.Internal(err, "generate key")
+		return in, nil, apierror.Internal(err, "generate key")
 	}
 	now := at.UTC().Truncate(time.Second)
 	serial, _ := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 62))
@@ -902,12 +906,16 @@ func newProviderKey(at time.Time, id string, in WorkloadIdentityPoolProviderKey)
 		NotBefore: now, NotAfter: now.AddDate(10, 0, 0), KeyUsage: x509.KeyUsageKeyEncipherment}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
 	if err != nil {
-		return in, apierror.Internal(err, "certify key")
+		return in, nil, apierror.Internal(err, "certify key")
+	}
+	priv, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		return in, nil, apierror.Internal(err, "encode key")
 	}
 	v := WorkloadIdentityPoolProviderKey{Use: "ENCRYPTION", KeyData: &WIFKeyData{Format: "RSA_X509_PEM", KeySpec: spec,
 		NotBeforeTime: tmpl.NotBefore.Format(time.RFC3339), NotAfterTime: tmpl.NotAfter.Format(time.RFC3339),
 		Key: string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))}}
-	return v, nil
+	return v, priv, nil
 }
 
 func (r *Registry) wifKey(project, pool, prov, id string) (*wifRecord, error) {
@@ -1017,10 +1025,41 @@ func (r *Registry) FederationProvider(audience string) (wif.Provider, bool) {
 		out.Kind = wif.KindAWS
 	case v.Saml != nil:
 		out.Kind = wif.KindSAML
+		out.SAMLMetadata = v.Saml.IdpMetadataXML
+		out.DecryptionKeys = r.liveDecryptionKeys(wifKeyPrefix + project + "/" + parts[5] + "/" + parts[7] + "/")
 	case v.X509 != nil:
 		out.Kind = wif.KindX509
 	}
 	return out, true
+}
+
+// liveDecryptionKeys are the private keys of the provider keys under
+// prefix that are not deleted (#2065). The caller holds wifMu.
+func (r *Registry) liveDecryptionKeys(prefix string) []*rsa.PrivateKey {
+	names, err := r.st.List(prefix)
+	if err != nil {
+		return nil
+	}
+	sort.Strings(names)
+	var out []*rsa.PrivateKey
+	for _, n := range names {
+		b, err := r.st.Get(n)
+		if err != nil {
+			continue
+		}
+		var rec struct {
+			Deleted    bool   `json:"deleted"`
+			PrivateKey []byte `json:"privateKey"`
+		}
+		if json.Unmarshal(b, &rec) != nil || rec.Deleted || len(rec.PrivateKey) == 0 {
+			continue
+		}
+		k, err := x509.ParsePKCS8PrivateKey(rec.PrivateKey)
+		if rk, ok := k.(*rsa.PrivateKey); err == nil && ok {
+			out = append(out, rk)
+		}
+	}
+	return out
 }
 
 type wifPrincipalRecord struct {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/cloudburrow/cloudburrow/internal/iameval"
@@ -21,8 +22,19 @@ func useIAMEnforcementWorkforce(e *iameval.Enforcer, rm *resourcemanager.Server)
 }
 
 func workforceEnforcer(e *iameval.Enforcer, next http.Handler) http.Handler {
-	items := e.HTTPPaths(iameval.WorkforceIdentity, iameval.WorkforceIdentityJSON, next)
+	methods := append(append([]iameval.JSONMethod{}, iameval.WorkforceIdentityJSON...), iameval.WorkforceScimJSON...)
+	items := e.HTTPPaths(iameval.WorkforceIdentity, methods, next)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			// testIamPermissions on a pool or a SCIM tenant (#2065): the
+			// permissions asked that the caller holds there.
+			for _, rx := range []*regexp.Regexp{iameval.WorkforcePoolTestIAM, iameval.WorkforceScimTestIAM} {
+				if m := rx.FindStringSubmatch(r.URL.Path); m != nil {
+					e.TestPermissionsJSON(w, r, iameval.WorkforceIdentity, m[1], next)
+					return
+				}
+			}
+		}
 		if !iameval.WorkforcePoolsCollection.MatchString(r.URL.Path) {
 			items.ServeHTTP(w, r)
 			return
@@ -51,14 +63,20 @@ func workforceEnforcer(e *iameval.Enforcer, next http.Handler) http.Handler {
 	})
 }
 
-// workforceScope is a workforce pool resource's scope: its own name, and
-// its organization's ancestry above it.
+// workforceScope is a workforce pool resource's scope: a SCIM tenant's own
+// policy and its pool's (#2065), deepest first, and the organization's
+// ancestry above them.
 func workforceScope(reg *resourcemanager.Registry, resource string) (iameval.Scope, bool) {
 	rest, ok := strings.CutPrefix(resource, "locations/global/workforcePools/")
 	if !ok {
 		return iameval.Scope{}, false
 	}
-	pool, _, _ := strings.Cut(rest, "/")
+	pool, below, _ := strings.Cut(rest, "/")
+	own := []string{}
+	if parts := strings.Split(below, "/"); len(parts) >= 4 && parts[0] == "providers" && parts[2] == "scimTenants" {
+		own = append(own, "locations/global/workforcePools/"+pool+"/providers/"+parts[1]+"/scimTenants/"+parts[3])
+	}
+	own = append(own, "locations/global/workforcePools/"+pool)
 	parent := ""
 	if reg != nil {
 		parent = reg.WorkforcePoolParent(pool)
@@ -68,5 +86,5 @@ func workforceScope(reg *resourcemanager.Registry, resource string) (iameval.Sco
 		// holds the permission there learns it does not exist.
 		parent = resourcemanager.OrganizationName
 	}
-	return iameval.Scope{Own: []string{}, Parent: parent}, true
+	return iameval.Scope{Own: own, Parent: parent}, true
 }

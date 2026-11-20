@@ -22,6 +22,8 @@ var WorkforceIdentity = &Service{
 		"providers":      "iam.googleapis.com/WorkforcePoolProvider",
 		"keys":           "iam.googleapis.com/WorkforcePoolProviderKey",
 		"subjects":       "iam.googleapis.com/WorkforcePoolSubject",
+		"scimTenants":    "iam.googleapis.com/WorkforcePoolProviderScimTenant",
+		"tokens":         "iam.googleapis.com/WorkforcePoolProviderScimToken",
 	},
 	Deny: iamDeny,
 }
@@ -37,12 +39,20 @@ const (
 // resource is the parent query parameter, its create's the body's parent.
 var WorkforcePoolsCollection = regexp.MustCompile(`^/v1/locations/[^/]+/workforcePools$`)
 
+// WorkforcePoolTestIAM is a pool's testIamPermissions, answered with the
+// permissions the caller holds on the pool (#2065).
+var WorkforcePoolTestIAM = regexp.MustCompile(wfPool + `:testIamPermissions$`)
+
 // WorkforceIdentityJSON are the served workforce methods below a pool.
 var WorkforceIdentityJSON = []JSONMethod{
 	{Method: "GET", Pattern: regexp.MustCompile(wfPool + `$`), Permission: "iam.workforcePools.get"},
 	{Method: "PATCH", Pattern: regexp.MustCompile(wfPool + `$`), Permission: "iam.workforcePools.update"},
 	{Method: "DELETE", Pattern: regexp.MustCompile(wfPool + `$`), Permission: "iam.workforcePools.delete"},
 	{Method: "POST", Pattern: regexp.MustCompile(wfPool + `:undelete$`), Permission: "iam.workforcePools.undelete"},
+	// The pool's own IAM policy (#2065): the getIamPolicy and setIamPolicy
+	// pages name these; testIamPermissions needs none (WorkforcePoolTestIAM).
+	{Method: "POST", Pattern: regexp.MustCompile(wfPool + `:getIamPolicy$`), Permission: "iam.workforcePools.getIamPolicy"},
+	{Method: "POST", Pattern: regexp.MustCompile(wfPool + `:setIamPolicy$`), Permission: "iam.workforcePools.setIamPolicy"},
 	{Method: "GET", Pattern: regexp.MustCompile(wfPool + `/providers$`), Permission: "iam.workforcePoolProviders.list"},
 	{Method: "POST", Pattern: regexp.MustCompile(wfPool + `/providers$`), Permission: "iam.workforcePoolProviders.create"},
 	{Method: "GET", Pattern: regexp.MustCompile(wfProvider + `$`), Permission: "iam.workforcePoolProviders.get"},

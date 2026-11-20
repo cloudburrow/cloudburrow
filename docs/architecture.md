@@ -164,7 +164,8 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/iamcheck/` | How the servers CloudBurrow runs in the cluster (Cloud Storage, Pub/Sub's front) ask the host's one evaluator, `internal/iameval`, whether a request's caller holds a permission, under `up --iam-enforcement=on` (#1879). |
 | `internal/iamgate/` | IAM enforcement in the fronts beside the Google emulators (Firestore's and Spanner's call fronts, Bigtable's front): each method's documented permissions on the resource its request names, over gRPC and REST, decided by the host's evaluator through `internal/iamcheck` (#1879). |
 | `internal/iamcond/` | Compiles and evaluates IAM Conditions: the CEL subset Google accepts on a role binding (#1742, #1745). |
-| `internal/wif/` | Workload Identity Federation (#1941): CEL attribute mappings and conditions, OIDC token verification against a JWKS, and the `principal://` and `principalSet://` identifiers of a federated subject. |
+| `internal/wif/` | Workload Identity Federation (#1941): CEL attribute mappings and conditions, OIDC token verification against a JWKS, SAML 2.0 assertion verification against IdP metadata (#2065, XML-DSig by goxmldsig, xmlenc decryption), and the `principal://` and `principalSet://` identifiers of a federated subject. |
+| `internal/wif/samltest/` | A throwaway SAML 2.0 IdP for tests (#2065): an in-memory signing key, its metadata, and signed or encrypted responses. |
 | `internal/iameval/` | CloudBurrow's one evaluator of IAM allow policies (#1879): whether a principal holds a permission on a resource, and why, for `--iam-enforcement`, Policy Troubleshooter and Policy Analyzer. |
 | `internal/grafeas/` | Container Analysis (#1912): the Grafeas v1 API's notes and occurrences, their AIP-160 filters and IAM, and the vulnerability summary, persisted in the instance's state directory. |
 | `internal/iampolicy/` | IAM policy storage without enforcement (ADR-0006). |

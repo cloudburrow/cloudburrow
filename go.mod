@@ -47,6 +47,7 @@ require (
 	github.com/Eyevinn/mp4ff v0.63.0
 	github.com/apache/arrow-go/v18 v18.8.0
 	github.com/apache/iceberg-go v0.7.0
+	github.com/beevik/etree v1.7.0
 	github.com/chromedp/cdproto v0.158.4
 	github.com/chromedp/chromedp v0.21.0
 	github.com/cloudflare/circl v1.6.5
@@ -73,6 +74,7 @@ require (
 	github.com/prometheus/prometheus v0.316.0
 	github.com/redis/go-redis/v9 v9.23.0
 	github.com/robfig/cron/v3 v3.0.1
+	github.com/russellhaering/goxmldsig v1.6.1
 	github.com/scritchley/orc v0.0.0-20210513144143-06dddf1ad665
 	github.com/tetratelabs/wazero v1.12.0
 	github.com/tink-crypto/tink-go-gcpkms/v2 v2.4.0
@@ -124,6 +126,7 @@ require (
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/jolestar/go-commons-pool/v2 v2.1.2 // indirect
+	github.com/jonboulle/clockwork v0.5.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect

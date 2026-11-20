@@ -9294,6 +9294,7 @@
           "test/compat/cloudbuilddefaultlogs_test.go:47 TestCloudBuildDefaultLogsBucket",
           "test/compat/iamenforcementstorage1879_test.go:102 TestIAMEnforcementStorage",
           "test/compat/iamworkforceidentity2056_test.go:375 TestWorkforceIdentityFederationStorage",
+          "test/compat/iamworkforcesaml2065_test.go:44 TestWorkforceIdentityFederationSAML",
           "test/compat/iamworkloadidentity1941_test.go:496 TestWorkloadIdentityFederationStorage",
           "test/compat/storage_test.go:92 TestStorageObjectRoundTrip",
           "test/compat/storagecmek1938_test.go:137 TestStorageCMEK",
@@ -16680,8 +16681,8 @@
     "Key": "workloadidentity",
     "Title": "Workload Identity Federation (IAM v1 pools, STS v1)",
     "counts": {
-      "Unimplemented": 42,
-      "Verified": 46
+      "Unimplemented": 25,
+      "Verified": 63
     },
     "rows": [
       {
@@ -16711,8 +16712,11 @@
       },
       {
         "method": "iam.locations.workforcePools.getIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkforcesaml2065_test.go:247 TestWorkforcePoolIAMPolicy",
+          "test/compat/iamworkforcesaml2065_test.go:315 TestGcloudIAMWorkforcePoolIAMPolicy"
+        ]
       },
       {
         "method": "iam.locations.workforcePools.list",
@@ -16831,73 +16835,107 @@
       },
       {
         "method": "iam.locations.workforcePools.providers.scimTenants.create",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkforcesaml2065_test.go:315 TestGcloudIAMWorkforcePoolIAMPolicy",
+          "test/compat/iamworkforcescim2065_test.go:26 TestWorkforceScimTenants"
+        ]
       },
       {
         "method": "iam.locations.workforcePools.providers.scimTenants.delete",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkforcesaml2065_test.go:315 TestGcloudIAMWorkforcePoolIAMPolicy",
+          "test/compat/iamworkforcescim2065_test.go:26 TestWorkforceScimTenants"
+        ]
       },
       {
         "method": "iam.locations.workforcePools.providers.scimTenants.get",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkforcesaml2065_test.go:315 TestGcloudIAMWorkforcePoolIAMPolicy",
+          "test/compat/iamworkforcescim2065_test.go:26 TestWorkforceScimTenants"
+        ]
       },
       {
         "method": "iam.locations.workforcePools.providers.scimTenants.getIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkforcescim2065_test.go:26 TestWorkforceScimTenants"
+        ]
       },
       {
         "method": "iam.locations.workforcePools.providers.scimTenants.list",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkforcesaml2065_test.go:315 TestGcloudIAMWorkforcePoolIAMPolicy",
+          "test/compat/iamworkforcescim2065_test.go:26 TestWorkforceScimTenants"
+        ]
       },
       {
         "method": "iam.locations.workforcePools.providers.scimTenants.patch",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkforcescim2065_test.go:26 TestWorkforceScimTenants"
+        ]
       },
       {
         "method": "iam.locations.workforcePools.providers.scimTenants.setIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkforcescim2065_test.go:26 TestWorkforceScimTenants"
+        ]
       },
       {
         "method": "iam.locations.workforcePools.providers.scimTenants.testIamPermissions",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkforcescim2065_test.go:26 TestWorkforceScimTenants"
+        ]
       },
       {
         "method": "iam.locations.workforcePools.providers.scimTenants.tokens.create",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkforcesaml2065_test.go:315 TestGcloudIAMWorkforcePoolIAMPolicy",
+          "test/compat/iamworkforcescim2065_test.go:26 TestWorkforceScimTenants"
+        ]
       },
       {
         "method": "iam.locations.workforcePools.providers.scimTenants.tokens.delete",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkforcescim2065_test.go:26 TestWorkforceScimTenants"
+        ]
       },
       {
         "method": "iam.locations.workforcePools.providers.scimTenants.tokens.get",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkforcescim2065_test.go:26 TestWorkforceScimTenants"
+        ]
       },
       {
         "method": "iam.locations.workforcePools.providers.scimTenants.tokens.list",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkforcesaml2065_test.go:315 TestGcloudIAMWorkforcePoolIAMPolicy",
+          "test/compat/iamworkforcescim2065_test.go:26 TestWorkforceScimTenants"
+        ]
       },
       {
         "method": "iam.locations.workforcePools.providers.scimTenants.tokens.patch",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkforcescim2065_test.go:26 TestWorkforceScimTenants"
+        ]
       },
       {
         "method": "iam.locations.workforcePools.providers.scimTenants.undelete",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkforcescim2065_test.go:26 TestWorkforceScimTenants"
+        ]
       },
       {
         "method": "iam.locations.workforcePools.providers.undelete",
@@ -16909,8 +16947,11 @@
       },
       {
         "method": "iam.locations.workforcePools.setIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkforcesaml2065_test.go:247 TestWorkforcePoolIAMPolicy",
+          "test/compat/iamworkforcesaml2065_test.go:315 TestGcloudIAMWorkforcePoolIAMPolicy"
+        ]
       },
       {
         "method": "iam.locations.workforcePools.subjects.delete",
@@ -16942,8 +16983,10 @@
       },
       {
         "method": "iam.locations.workforcePools.testIamPermissions",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkforcesaml2065_test.go:247 TestWorkforcePoolIAMPolicy"
+        ]
       },
       {
         "method": "iam.locations.workforcePools.undelete",
@@ -17247,6 +17290,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/iamworkforceidentity2056_test.go:308 TestWorkforceIdentityFederationSTS",
+          "test/compat/iamworkforcesaml2065_test.go:44 TestWorkforceIdentityFederationSAML",
           "test/compat/iamworkloadidentity1941_test.go:433 TestWorkloadIdentityFederationSTS"
         ]
       }

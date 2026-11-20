@@ -13,6 +13,7 @@
 package wif
 
 import (
+	"crypto/rsa"
 	"fmt"
 	"regexp"
 	"sort"
@@ -480,6 +481,24 @@ type Provider struct {
 	ProgrammaticDisabled bool
 	// SAMLMetadata is a SAML provider's IdP metadata document.
 	SAMLMetadata string
+	// DecryptionKeys are a SAML provider's live encryption keys (#2065).
+	DecryptionKeys []*rsa.PrivateKey
+}
+
+// SAMLAudience is the Audience a SAML assertion for p must name: its
+// name with an https: scheme.
+func (p Provider) SAMLAudience() string { return "https:" + p.Name() }
+
+// SAMLRecipients are the Recipients a workforce provider's assertion may
+// name: its sign-in callback (Google's ACS URL for the provider) and the
+// Security Token Service's token URL; a workload provider's are not
+// restricted (Google documents none).
+func (p Provider) SAMLRecipients() []string {
+	if !p.Workforce {
+		return nil
+	}
+	return []string{"https://auth.cloud.google/signin-callback/" + WorkforcePoolName(p.Pool) + "/providers/" + p.ID,
+		"https://sts.googleapis.com/v1/token"}
 }
 
 // Name is the provider's canonical resource name, //iam.googleapis.com/....

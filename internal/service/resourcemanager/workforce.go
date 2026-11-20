@@ -174,6 +174,8 @@ type wfRecord struct {
 	PoolV      *WorkforcePool                   `json:"poolValue,omitempty"`
 	ProviderV  *WorkforcePoolProvider           `json:"providerValue,omitempty"`
 	KeyV       *WorkloadIdentityPoolProviderKey `json:"keyValue,omitempty"`
+	// PrivateKey is a key's PKCS #8 private key (#2065), never rendered.
+	PrivateKey []byte `json:"privateKey,omitempty"`
 }
 
 func wfPoolKey(pool string) string           { return wfPoolPrefix + pool }
@@ -789,13 +791,13 @@ func (r *Registry) CreateWorkforcePoolProviderKey(pool, prov, id string, in Work
 	if err != nil {
 		return in, err
 	}
-	v, err := newProviderKey(r.now(), id, in)
+	v, priv, err := newProviderKey(r.now(), id, in)
 	if err != nil {
 		return in, err
 	}
 	wifMu.Lock()
 	defer wifMu.Unlock()
-	rec := &wfRecord{Pool: pool, Provider: prov, Key: id, KeyV: &v, CreateTime: r.now().UTC()}
+	rec := &wfRecord{Pool: pool, Provider: prov, Key: id, KeyV: &v, PrivateKey: priv, CreateTime: r.now().UTC()}
 	if err := r.wfSave(wfKeyKey(pool, prov, id), rec); err != nil {
 		return in, err
 	}
@@ -1000,6 +1002,7 @@ func (r *Registry) workforceProvider(audience string) (wif.Provider, bool) {
 	case v.Saml != nil:
 		out.Kind = wif.KindSAML
 		out.SAMLMetadata = v.Saml.IdpMetadataXML
+		out.DecryptionKeys = r.liveDecryptionKeys(wfKeyPrefix + parts[3] + "/" + parts[5] + "/")
 	}
 	return out, true
 }
@@ -1111,7 +1114,8 @@ func (r *Registry) serveWF(w http.ResponseWriter, req *http.Request) error {
 		return apierror.NotFound("no such method: %s %s", req.Method, req.URL.Path)
 	}
 	if len(seg) >= 7 && seg[4] == "providers" && seg[6] == "scimTenants" {
-		return apierror.Unimplemented("workforcePools.providers.scimTenants (SCIM, for Gemini Enterprise and Looker) is not implemented by CloudBurrow.")
+		// SCIM tenants and their tokens (#2065, workforce_scim.go).
+		return r.serveWFScim(w, req, seg, verb)
 	}
 	q := req.URL.Query()
 	showDeleted := q.Get("showDeleted") == "true"
@@ -1161,6 +1165,9 @@ func (r *Registry) serveWF(w http.ResponseWriter, req *http.Request) error {
 			out, err = r.DeleteWorkforcePool(pool)
 		case req.Method == http.MethodPost && verb == "undelete":
 			out, err = r.UndeleteWorkforcePool(pool)
+		case req.Method == http.MethodPost && isIAMVerb(verb):
+			// The pool's own IAM policy (#2065, workforce_iam.go).
+			return r.serveWFIAM(w, req, wfResourcePrefix+pool, verb)
 		case req.Method == http.MethodPost:
 			return apierror.Unimplemented("workforcePools.%s is not implemented by CloudBurrow.", verb)
 		default:

@@ -38,9 +38,12 @@ import (
 //   - the token is opaque and lasts an hour; its account is the subject's
 //     principal:// identifier, which IAM checks (and the principalSet://
 //     identifiers its mapping gave, kept by the directory);
-//   - AWS, SAML and X.509 (mTLS) credentials, and Credential Access
-//     Boundary downscoping of a Google token, are not exchanged:
-//     501 with an OAuth error.
+//   - a SAML assertion (saml2, #2065) is verified against the provider's
+//     IdP metadata (internal/wif's saml.go) and mapped as assertion.subject
+//     and assertion.attributes; its SessionNotOnOrAfter bounds the token;
+//   - AWS and X.509 (mTLS) credentials, and Credential Access Boundary
+//     downscoping of a Google token, are not exchanged: 501 with an
+//     OAuth error.
 
 // FederationDirectory is what the STS needs of the IAM API's pools.
 type FederationDirectory interface {
@@ -219,12 +222,12 @@ func (s *Server) sts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch in.SubjectTokenType {
-	case stsJWTType, stsIDTokenType:
+	case stsJWTType, stsIDTokenType, stsSAMLType:
 	case stsAccessTokenType:
 		stsError(w, http.StatusNotImplemented, "invalid_request", "Exchanging a Google access token (Credential Access Boundary) is not implemented by CloudBurrow.")
 		return
-	case stsAWSType, stsSAMLType, stsMTLSType:
-		stsError(w, http.StatusNotImplemented, "invalid_request", "Exchanging a "+in.SubjectTokenType+" credential is not implemented by CloudBurrow: only OIDC tokens are verified locally.")
+	case stsAWSType, stsMTLSType:
+		stsError(w, http.StatusNotImplemented, "invalid_request", "Exchanging a "+in.SubjectTokenType+" credential is not implemented by CloudBurrow: only OIDC tokens and SAML assertions are verified locally.")
 		return
 	default:
 		stsError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("Invalid value for \"subject_token_type\": %s.", in.SubjectTokenType))
@@ -251,12 +254,22 @@ func (s *Server) sts(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if p.Kind != wif.KindOIDC {
+	wantKind := wif.KindOIDC
+	if in.SubjectTokenType == stsSAMLType {
+		wantKind = wif.KindSAML
+	}
+	if p.Kind != wantKind {
 		stsError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("Invalid value for \"subject_token_type\": %s is not supported by the %s provider %s.", in.SubjectTokenType, p.Kind, p.Name()))
 		return
 	}
 	now := time.Now()
-	attrs, err := s.exchangeOIDC(r.Context(), p, in.SubjectToken, now)
+	var attrs wif.Attributes
+	var session time.Time
+	if wantKind == wif.KindSAML {
+		attrs, session, err = exchangeSAML(p, in.SubjectToken, now)
+	} else {
+		attrs, err = s.exchangeOIDC(r.Context(), p, in.SubjectToken, now)
+	}
 	if err != nil {
 		stsError(w, http.StatusBadRequest, "invalid_grant", err.Error())
 		return
@@ -270,6 +283,14 @@ func (s *Server) sts(w http.ResponseWriter, r *http.Request) {
 		principal, sets = wif.WorkforcePrincipal(p.Pool, attrs.Subject), wif.WorkforceSets(p.Pool, attrs)
 		if p.SessionTTL > 0 {
 			ttl = p.SessionTTL
+		}
+	}
+	if !session.IsZero() && session.Sub(now) < ttl {
+		// A SAML assertion's SessionNotOnOrAfter bounds the token
+		// (#2065), to the second.
+		ttl = session.Sub(now).Truncate(time.Second)
+		if ttl < time.Second {
+			ttl = time.Second
 		}
 	}
 	if err := d.RecordFederatedPrincipal(principal, sets); err != nil {
@@ -288,6 +309,31 @@ func (s *Server) sts(w http.ResponseWriter, r *http.Request) {
 		"token_type":        "Bearer",
 		"expires_in":        int(ttl.Seconds()),
 	})
+}
+
+// exchangeSAML verifies a base64 SAML response or assertion for p
+// (#2065, internal/wif's saml.go) and maps its attributes; session is its
+// SessionNotOnOrAfter, zero for none.
+func exchangeSAML(p wif.Provider, token string, now time.Time) (wif.Attributes, time.Time, error) {
+	md, err := wif.ParseSAMLMetadata(p.SAMLMetadata)
+	if err != nil {
+		return wif.Attributes{}, time.Time{}, err
+	}
+	a, err := wif.VerifySAML(token, md, p.DecryptionKeys, wif.SAMLExpect{Audience: p.SAMLAudience(), Recipients: p.SAMLRecipients()}, now)
+	if err != nil {
+		return wif.Attributes{}, time.Time{}, err
+	}
+	mapping := p.Mapping
+	if len(mapping) == 0 {
+		mapping = map[string]string{"google.subject": "assertion.subject"}
+	}
+	var attrs wif.Attributes
+	if p.Workforce {
+		attrs, err = wif.ApplyWorkforce(mapping, p.Condition, a.Map())
+	} else {
+		attrs, err = wif.Apply(mapping, p.Condition, a.Map())
+	}
+	return attrs, a.SessionNotOnOrAfter, err
 }
 
 // exchangeOIDC verifies an OIDC token for p and maps its attributes.
