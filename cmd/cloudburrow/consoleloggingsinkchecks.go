@@ -48,7 +48,6 @@ func (p loggingSinksProvider) CheckCreate(ctx context.Context, project, check st
 }
 
 func (p loggingSinksProvider) troubleshoot(ctx context.Context, values map[string]string) (string, error) {
-	var ok []string
 	dest, err := sinkDestination(values["service"], values["destination"])
 	if err != nil {
 		return "", fmt.Errorf("sink destination: %w", err)
@@ -56,48 +55,89 @@ func (p loggingSinksProvider) troubleshoot(ctx context.Context, values map[strin
 	if strings.TrimSpace(values["destination"]) == "" {
 		return "", fmt.Errorf("sink destination: none is given")
 	}
+	rows, err := console.ParseGroup(values["exclusions"])
+	if err != nil {
+		return "", fmt.Errorf("exclusion filters: %w", err)
+	}
+	var excl []sinkExclusionCheck
+	for _, r := range rows {
+		excl = append(excl, sinkExclusionCheck{strings.TrimSpace(r["name"]), r["filter"]})
+	}
+	ok, err := p.checkSink(ctx, dest, values["filter"], excl)
+	if err != nil {
+		return "", err
+	}
+	return "No problems found: " + strings.Join(ok, "; ") + ".", nil
+}
+
+type sinkExclusionCheck struct{ name, filter string }
+
+// checkSink is Troubleshoot sink's checks, on the create page's form or a
+// sink's row: the destination resolves (a log bucket destination exists),
+// the inclusion filter and each exclusion filter parse, and no exclusion
+// is named twice. It answers what passed, or the first problem.
+func (p loggingSinksProvider) checkSink(ctx context.Context, dest, filter string, excl []sinkExclusionCheck) ([]string, error) {
+	var ok []string
 	ok = append(ok, "destination "+dest)
 	if rest, found := strings.CutPrefix(dest, "logging.googleapis.com/"); found {
 		a, err := p.admin()
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		if strings.Contains(rest, "/buckets/") {
 			if _, err := a.ConfigServer().GetBucket(ctx, &loggingpb.GetBucketRequest{Name: rest}); err != nil {
-				return "", fmt.Errorf("sink destination: the log bucket %s: %v", rest, err)
+				return nil, fmt.Errorf("sink destination: the log bucket %s: %v", rest, err)
 			}
 			ok = append(ok, "the log bucket exists")
 		}
 	} else {
 		ok = append(ok, "its existence is checked by the destination's service when entries are routed")
 	}
-	if f := strings.TrimSpace(values["filter"]); f != "" {
+	if f := strings.TrimSpace(filter); f != "" {
 		if _, err := console.CompileQuery(f); err != nil {
-			return "", fmt.Errorf("inclusion filter: %v", err)
+			return nil, fmt.Errorf("inclusion filter: %v", err)
 		}
 		ok = append(ok, "the inclusion filter parses")
 	} else {
 		ok = append(ok, "no inclusion filter: every entry is included")
 	}
-	rows, err := console.ParseGroup(values["exclusions"])
-	if err != nil {
-		return "", fmt.Errorf("exclusion filters: %w", err)
-	}
 	seen := map[string]bool{}
-	for _, r := range rows {
-		n := strings.TrimSpace(r["name"])
-		if seen[n] {
-			return "", fmt.Errorf("exclusion filter %q is named twice", n)
+	for _, e := range excl {
+		if seen[e.name] {
+			return nil, fmt.Errorf("exclusion filter %q is named twice", e.name)
 		}
-		seen[n] = true
-		if _, err := console.CompileQuery(r["filter"]); err != nil {
-			return "", fmt.Errorf("exclusion filter %s: %v", n, err)
+		seen[e.name] = true
+		if _, err := console.CompileQuery(e.filter); err != nil {
+			return nil, fmt.Errorf("exclusion filter %s: %v", e.name, err)
 		}
 	}
-	if len(rows) > 0 {
-		ok = append(ok, fmt.Sprintf("%d exclusion filter(s) parse", len(rows)))
+	if len(excl) > 0 {
+		ok = append(ok, fmt.Sprintf("%d exclusion filter(s) parse", len(excl)))
 	}
-	return "No problems found: " + strings.Join(ok, "; ") + ".", nil
+	return ok, nil
+}
+
+// troubleshootStored is a sink row's Troubleshoot sink: checkSink on the
+// stored sink, its findings one row each.
+func (p loggingSinksProvider) troubleshootStored(ctx context.Context, project, name string) (*console.Listing, error) {
+	sk, err := p.get(ctx, project, name)
+	if err != nil {
+		return nil, err
+	}
+	var excl []sinkExclusionCheck
+	for _, e := range sk.GetExclusions() {
+		excl = append(excl, sinkExclusionCheck{e.GetName(), e.GetFilter()})
+	}
+	ok, err := p.checkSink(ctx, sk.GetDestination(), sk.GetFilter(), excl)
+	if err != nil {
+		return nil, err
+	}
+	l := &console.Listing{Columns: []string{"Check"}, NameColumn: "Result", Noun: "checks"}
+	for _, c := range ok {
+		l.Items = append(l.Items, console.Resource{Name: "OK", Fields: map[string]string{"Check": c}})
+	}
+	l.Total = len(l.Items)
+	return l, nil
 }
 
 var _ console.CreateChecker = loggingSinksProvider{}

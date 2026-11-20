@@ -32,7 +32,7 @@ func loggingConsole(t *testing.T) (*httptest.Server, *loggingService) {
 	svc.api.UseAdmin(svc.admin)
 	screen := loggingAdminScreen{svc: svc}
 	srv := httptest.NewServer(console.New("127.0.0.1:0", nil,
-		loggingMetricsProvider{screen}, loggingSinksProvider{screen}, loggingExclusionsProvider{screen}, loggingBucketsProvider{screen},
+		loggingMetricsProvider{loggingAdminScreen: screen}, loggingSinksProvider{screen}, loggingExclusionsProvider{screen}, loggingBucketsProvider{screen},
 		loggingSettingsProvider{screen}).Handler())
 	t.Cleanup(srv.Close)
 	return srv, svc

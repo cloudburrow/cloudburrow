@@ -3113,7 +3113,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
     // where Google's menu begins with it, as a trigger's Edit, Disable,
     // Delete (#1854).
     const edit = caps.editRow ? [{
-      label: caps.editRow,
+      key: "edit", label: caps.editRow,
       run: () => editFromRow(route, (item.opens || []).length ? item.opens : [item.name], refresh),
     }] : [];
     // A row's own buttons, before its menu: a trigger's Run (#1854).
@@ -3123,7 +3123,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
     const actions = [
       ...(caps.editRowFirst ? edit : []),
       ...(item.actions || []).filter((a) => !a.button).map((a) => ({
-        label: a.label, destructive: a.destructive,
+        key: a.id, label: a.label, destructive: a.destructive,
         // A row whose actions address a path of their own is named by its
         // row, not the path's last segment: a value inside a Datastore
         // property is addressed by its steps as JSON, [6,"when"], and its
@@ -3133,11 +3133,17 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
       })),
       ...(caps.editRowFirst ? [] : edit),
       ...(caps.delete ? [{
-        label: caps.deleteLabel || "Delete", destructive: true,
+        key: "delete", label: caps.deleteLabel || "Delete", destructive: true,
         run: () => deleteResource(route, item.name, refresh, rowBusy(item.name)),
       }] : []),
       ...(item.object ? objectActions(route, item, refresh, rowBusy(item.name)) : []),
     ];
+    // Google's order, where the provider gives it (#1863: Log Router's View
+    // sink details, Edit sink, Disable sink, Delete sink, Troubleshoot sink).
+    if ((caps.rowMenuOrder || []).length) {
+      const rank = (a) => { const i = caps.rowMenuOrder.indexOf(a.key); return i < 0 ? caps.rowMenuOrder.length : i; };
+      actions.sort((a, b) => rank(a) - rank(b));
+    }
     if (!actions.length && !buttons.length) return el("td", {});
     if (!actions.length) return el("td", { class: "row-actions" }, ...buttons);
     // Suppressed rather than merely ignored while the row is busy: a live
@@ -10834,9 +10840,9 @@ const LOG_SEVERITIES = ["DEFAULT", "DEBUG", "INFO", "NOTICE", "WARNING", "ERROR"
 const logQueryValue = (v) => JSON.stringify(String(v));
 
 // logJSONTree draws an entry's LogEntry as Google's expanded entry does:
-// nested fields that fold, each value with Show matching entries and Hide
-// matching entries.
-function logJSONTree(value, path, onMatch) {
+// nested fields that fold, each value with Show matching entries, Hide
+// matching entries and Pin to Fields pane.
+function logJSONTree(value, path, onMatch, onPin) {
   if (value && typeof value === "object") {
     const keys = Object.keys(value).sort();
     return el("ul", { class: "log-json" }, ...keys.map((k) => {
@@ -10845,7 +10851,7 @@ function logJSONTree(value, path, onMatch) {
       if (child && typeof child === "object") {
         return el("li", {}, el("details", { class: "log-json-node", open: true },
           el("summary", {}, el("span", { class: "log-json-key", text: k }), el("span", { text: ": {…}" })),
-          logJSONTree(child, p, onMatch)));
+          logJSONTree(child, p, onMatch, onPin)));
       }
       return el("li", { class: "log-json-leaf", "data-field": p },
         el("span", { class: "log-json-key", text: k }), el("span", { text: ": " }),
@@ -10853,6 +10859,7 @@ function logJSONTree(value, path, onMatch) {
         overflowMenu([
           { label: "Show matching entries", run: () => onMatch(`${p}=${logQueryValue(child)}`) },
           { label: "Hide matching entries", run: () => onMatch(`-${p}=${logQueryValue(child)}`) },
+          ...(onPin ? [{ label: "Pin to Fields pane", run: () => onPin(p) }] : []),
         ], `${p} ${child}`));
     }));
   }
@@ -11052,8 +11059,18 @@ async function renderLogs(view) {
   // Summary fields (#1863), Google's Preferences > Manage summary fields:
   // custom fields drawn as chips at the start of each entry's summary,
   // optionally truncated; and Show summary chips. Per viewer.
+  // Recent queries (#1863): the last 20 queries run, in this browser.
+  const RECENT_KEY = "cloudburrow.logs.recentQueries";
+  const recentQueries = () => {
+    try { return JSON.parse(readStored(RECENT_KEY, "[]")).filter((r) => r && typeof r.query === "string"); } catch { return []; }
+  };
+  const rememberQuery = (query) => {
+    if (!query) return;
+    const list = [{ query, at: Date.now() }, ...recentQueries().filter((r) => r.query !== query)].slice(0, 20);
+    writeStored(RECENT_KEY, JSON.stringify(list));
+  };
   const SUMMARY_KEY = "cloudburrow.logs.summary";
-  let summary = { fields: [], truncate: false, chars: 30, fromEnd: false, show: true };
+  let summary = { fields: [], truncate: false, chars: 30, fromEnd: false, show: true, defaults: true };
   try { summary = { ...summary, ...JSON.parse(readStored(SUMMARY_KEY, "{}")) }; } catch { /* the defaults */ }
   const saveSummary = () => writeStored(SUMMARY_KEY, JSON.stringify(summary));
   const fieldValue = (entry, path) => path.split(".").map((k) => k.replace(/^"|"$/g, ""))
@@ -11193,16 +11210,35 @@ async function renderLogs(view) {
   const fieldsPane = el("aside", { class: "card log-fields", id: "log-fields", "aria-label": "Log fields" });
   const LOG_FIELD_GROUPS = [["resource.type", "Resource type"], ["severity", "Severity"],
     ["logName", "Log name"], ["resource.labels.project_id", "Project ID"]];
+  // Pin to Fields pane (#1863): a field of an expanded entry gets a group of
+  // its own under Pinned, at the top of the pane. Per viewer.
+  const PINNED_FIELDS_KEY = "cloudburrow.logs.pinnedFields";
+  let pinnedFields = [];
+  try { pinnedFields = JSON.parse(readStored(PINNED_FIELDS_KEY, "[]")).filter((f) => typeof f === "string"); } catch { /* none */ }
+  let fieldEntries = [];
+  const pinField = (path) => {
+    if (!pinnedFields.includes(path)) pinnedFields.push(path);
+    writeStored(PINNED_FIELDS_KEY, JSON.stringify(pinnedFields));
+    drawFields(fieldEntries);
+    announce(`Pinned ${path} to the Fields pane`);
+  };
+  const unpinField = (path) => {
+    pinnedFields = pinnedFields.filter((f) => f !== path);
+    writeStored(PINNED_FIELDS_KEY, JSON.stringify(pinnedFields));
+    drawFields(fieldEntries);
+    announce(`Unpinned ${path}`);
+  };
   const drawFields = (entries) => {
-    const groups = LOG_FIELD_GROUPS.map(([path, label]) => {
+    fieldEntries = entries;
+    const groups = [...pinnedFields.map((f) => [f, f, true]), ...LOG_FIELD_GROUPS].map(([path, label, isPinned]) => {
       const counts = new Map();
       for (const e of entries) {
         const v = path.split(".").reduce((o, k) => (o && typeof o === "object" ? o[k] : undefined), e.logEntry || {});
         if (v !== undefined && v !== "") counts.set(v, (counts.get(v) || 0) + 1);
       }
-      return { path, label, values: [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 20) };
+      return { path, label, pinned: !!isPinned, values: [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 20) };
     });
-    const types = groups[0].values.map(([v]) => v);
+    const types = groups.find((g) => g.path === "resource.type" && !g.pinned).values.map(([v]) => v);
     const keep = resourceType.value;
     setChildren(resourceType, el("option", { value: "", text: "All resources" }),
       ...[...new Set([...types, ...(keep ? [keep] : [])])].sort().map((v) => el("option", { value: v, text: v })));
@@ -11211,8 +11247,13 @@ async function renderLogs(view) {
       el("div", { class: "log-fields-head" }, el("h2", { text: "Log fields" }),
         el("button", { class: "link-button is-inline", text: "Clear", onclick: () => {
           queryEditor.value = ""; severity.value = ""; resourceType.value = ""; runQuery(); } })),
-      ...groups.map((g) => el("section", { class: "log-field-group", "data-field": g.path },
-        el("h3", { text: g.label }),
+      pinnedFields.length ? el("h3", { class: "log-fields-subhead", text: "Pinned" }) : null,
+      ...groups.map((g) => el("section", { class: "log-field-group" + (g.pinned ? " is-pinned" : ""), "data-field": g.path },
+        g.pinned
+          ? el("div", { class: "log-fields-head" }, el("h3", { class: "mono", text: g.label }),
+              el("button", { class: "link-button is-inline", text: "Unpin", "aria-label": `Unpin ${g.path}`,
+                onclick: () => unpinField(g.path) }))
+          : el("h3", { text: g.label }),
         g.values.length
           ? el("ul", {}, ...g.values.map(([v, n]) => el("li", {},
               el("button", { class: "log-field-value", "data-value": v,
@@ -11298,6 +11339,36 @@ async function renderLogs(view) {
     announce(pinned.has(id) ? "Pinned the log entry" : "Unpinned the log entry");
   };
 
+  // The range the query reads: the custom one, or the preset ending now.
+  const currentRange = () => {
+    if (timeRange.value === "custom" && customFrom) {
+      return [new Date(customFrom), customTo ? new Date(customTo) : new Date()];
+    }
+    const preset = LOG_TIME_RANGES.find(([v]) => v === timeRange.value) || LOG_TIME_RANGES[3];
+    return [new Date(Date.now() - preset[2] * 60000), new Date()];
+  };
+  const setRange = (from, to) => {
+    customFrom = from.toISOString();
+    customTo = to.toISOString();
+    timeRange.value = "custom";
+    runQuery();
+  };
+  // Scroll to time: the first result at or after the time, or the last.
+  const scrollToTime = (at, width) => {
+    const rowsNow = [...body.querySelectorAll("tr.log-entry")];
+    const end = at.getTime() + Math.max(width, 1000);
+    const row = rowsNow.find((r) => {
+      const t = new Date((r.logEntryData || {}).timestamp).getTime();
+      return t >= at.getTime() && t < end;
+    });
+    if (!row) return notify(`No result held at ${at.toLocaleTimeString()}`);
+    row.scrollIntoView({ block: "center" });
+    row.classList.add("is-located");
+    setTimeout(() => row.classList.remove("is-located"), 2000);
+    row.querySelector("button").focus();
+    announce(`Scrolled to ${at.toLocaleTimeString()}`);
+  };
+
   const drawTimeline = async () => {
     const query = filterQuery();
     query.set("limit", "1000");
@@ -11317,7 +11388,26 @@ async function renderLogs(view) {
       "aria-expanded": timelineCollapsed ? "false" : "true",
       text: timelineCollapsed ? "Expand timeline" : "Collapse timeline",
       onclick: () => { timelineCollapsed = !timelineCollapsed; drawTimeline(); } });
+    // Google's Timeline controls: Zoom-out and Zoom-in about the range's
+    // middle, and the backward and forward arrows sliding it by half its
+    // width (logs-explorer-interface, re-read 2026-11-20).
+    const rangeButton = (id, label, run) => el("button", { type: "button", class: "secondary", id, text: label, onclick: run });
+    const zoomBy = (factor) => {
+      const [from, to] = currentRange();
+      const mid = (from.getTime() + to.getTime()) / 2, half = Math.max(1000, (to - from) * factor / 2);
+      setRange(new Date(mid - half), new Date(Math.min(Date.now(), mid + half)));
+    };
+    const slide = (dir) => {
+      const [from, to] = currentRange();
+      const step = (to - from) / 2 * dir;
+      setRange(new Date(from.getTime() + step), new Date(to.getTime() + step));
+    };
     const head = el("div", { class: "log-timeline-head" }, el("h2", { text: "Timeline" }), collapse,
+      el("div", { class: "actions timeline-controls" },
+        rangeButton("timeline-back", "Backward", () => slide(-1)),
+        rangeButton("timeline-zoom-out", "Zoom out", () => zoomBy(2)),
+        rangeButton("timeline-zoom-in", "Zoom in", () => zoomBy(0.5)),
+        rangeButton("timeline-forward", "Forward", () => slide(1))),
       timeRange.value === "custom"
         ? el("button", { class: "link-button is-inline", text: "Jump to now", onclick: () => {
             timeRange.value = "1h"; runQuery(); } })
@@ -11333,21 +11423,28 @@ async function renderLogs(view) {
 
     setChildren(timeline,
       head,
-      el("div", { class: "timeline-bars", role: "img",
+      el("div", { class: "timeline-bars", role: "group",
         "aria-label": `${total} entries over ${first && last ? relativeTime(first) : "the retained window"}` +
                       `, ${errors} of them errors` },
         ...buckets.map((b) => {
           const counts = b.counts || {};
-          // Zoom to time: a column's click narrows the range to it.
-          const column = el("div", { class: "timeline-column",
-            title: `${new Date(b.at).toLocaleTimeString()} · ${b.total || 0} entries · click to zoom to time`,
-            onclick: () => {
-              customFrom = new Date(b.at).toISOString();
-              customTo = new Date(new Date(b.at).getTime() + Math.max(width, 1000)).toISOString();
-              timeRange.value = "custom";
-              runQuery();
-              announce(`Zoomed to ${new Date(b.at).toLocaleTimeString()}`);
-            } });
+          const at = new Date(b.at);
+          // A bar's pop-up, as Google's Timeline: Scroll to time brings the
+          // results to the bar's first entry, Zoom to time narrows the range
+          // to the bar.
+          const popup = overflowMenu([
+            { label: "Scroll to time", run: () => scrollToTime(at, width) },
+            { label: "Zoom to time", run: () => {
+              setRange(at, new Date(at.getTime() + Math.max(width, 1000)));
+              announce(`Zoomed to ${at.toLocaleTimeString()}`);
+            } },
+          ], `${at.toLocaleTimeString()}`);
+          popup.classList.add("timeline-popup");
+          const column = popup.querySelector(".overflow-trigger");
+          column.className = "timeline-column overflow-trigger";
+          column.setAttribute("aria-label", `${at.toLocaleTimeString()}, ${b.total || 0} entries`);
+          column.title = `${at.toLocaleTimeString()} · ${b.total || 0} entries`;
+          column.replaceChildren();
           // Stacked in severity order with the worst on top, so a column that
           // contains an error is unmistakable however few of them there are.
           for (const [name, state] of [["ERROR", "error"], ["WARNING", "warn"],
@@ -11361,7 +11458,7 @@ async function renderLogs(view) {
               style: `height: ${Math.max(2, (n / peak) * 100)}%`,
             }));
           }
-          return column;
+          return popup;
         })),
       timelineHandles(buckets, width),
       pinStrip,
@@ -11417,10 +11514,10 @@ async function renderLogs(view) {
     el("span", { text: "connecting…" }));
   const chips = el("div", { class: "filter-chips" });
   const body = el("tbody");
-  const table = el("table", {},
+  const table = el("table", { class: summary.defaults ? null : "hide-default-summary" },
     el("thead", {}, el("tr", {},
       el("th", { scope: "col" }, el("span", { class: "sr-only", text: "Expand" })),
-      LOG_COLUMNS.map((c) => el("th", { scope: "col", text: c })),
+      LOG_COLUMNS.map((c) => el("th", { scope: "col", text: c, class: c === "Resource" ? "log-default-summary" : null })),
       logDelete ? el("th", { scope: "col" }, el("span", { class: "sr-only", text: "Actions" })) : null)),
     body);
 
@@ -11597,7 +11694,7 @@ async function renderLogs(view) {
         expand.setAttribute("aria-expanded", "false");
         return;
       }
-      const tree = logJSONTree(entry.logEntry || {}, "", onMatch);
+      const tree = logJSONTree(entry.logEntry || {}, "", onMatch, pinField);
       const setOpen = (open) => { for (const d of tree.querySelectorAll("details")) d.open = open; };
       detail = el("tr", { class: "log-detail" }, el("td", { colspan: String(columns) },
         el("div", { class: "log-detail-actions" },
@@ -11619,7 +11716,7 @@ async function renderLogs(view) {
       el("td", { class: "mono", text: new Date(entry.timestamp).toLocaleString() }),
       // Project and operation ride along in the title, so an entry that
       // carries them can be traced without a column per field.
-      el("td", { class: "mono", text: entry.resource || "—",
+      el("td", { class: "mono log-default-summary", text: entry.resource || "—",
                  title: [entry.project ? `project ${entry.project}` : "no project",
                          entry.operationId ? `operation ${entry.operationId}` : null]
                    .filter(Boolean).join(" · ") }),
@@ -11778,11 +11875,17 @@ async function renderLogs(view) {
   // Run query: the editor, the menus and the time range, read once.
   const runQuery = () => {
     severity.value = (/^\s*severity\s*>=\s*(\w+)/m.exec(queryEditor.value) || [])[1] || "";
+    rememberQuery(queryEditor.value.trim());
     writeFilters();
     connect();
     announce("Query run");
   };
   const runButton = el("button", { class: "primary", id: "log-run-query", text: "Run query", onclick: runQuery });
+  // Save (#1863), in the Query pane as Google's: the Save query dialog.
+  const saveButton = el("button", { type: "button", class: "secondary", id: "log-save-query", text: "Save",
+    "aria-haspopup": "dialog", disabled: project ? null : "disabled",
+    title: project ? null : "Choose a project in the toolbar: a saved query belongs to one.",
+    onclick: () => openSaveQuery() });
   queryEditor.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); runQuery(); }
   });
@@ -11800,10 +11903,13 @@ async function renderLogs(view) {
   const queryActions = overflowMenu([
     { label: "Create metric", run: () => navigate(`/logs/metrics/create?${new URLSearchParams({ filter: queryEditor.value.trim() })}`) },
     { label: "Create sink", run: () => navigate(`/logs/sinks/create?${new URLSearchParams({ filter: queryEditor.value.trim() })}`) },
-    // Google's Create log alert makes a Cloud Monitoring alerting policy,
-    // which this instance does not serve (#1863).
-    { label: "Create log alert", run: () => {},
-      unavailable: "Not available locally: a log alert is a Cloud Monitoring alerting policy, and this instance does not serve Cloud Monitoring." },
+    // Google's Create log alert makes a Cloud Monitoring alerting policy
+    // whose condition is a log match on the query (#1863): Alerting's
+    // create page, its condition type and log filter given.
+    { label: "Create log alert",
+      run: () => navigate(`/monitoring/alerting/create?${new URLSearchParams({ conditionType: "log-match", logFilter: queryEditor.value.trim() })}`),
+      unavailable: SERVICES.some((sv) => sv.id === "monitoring-alerting") ? ""
+        : "Not available locally: a log alert is a Cloud Monitoring alerting policy, and this instance does not serve Cloud Monitoring." },
     { label: "Highlight in results", run: () => openHighlight() },
     { label: "Download", run: async () => {
       const query = filterQuery();
@@ -11861,10 +11967,16 @@ async function renderLogs(view) {
     const fromEnd = el("select", { id: "log-summary-from", "aria-label": "Truncate from" },
       el("option", { value: "start", text: "Show the beginning" }), el("option", { value: "end", text: "Show the end" }));
     fromEnd.value = summary.fromEnd ? "end" : "start";
+    // Hide or show default summary fields: here the Resource each entry is
+    // summarised under, beside its summary.
+    const defaults = el("input", { type: "checkbox", id: "log-summary-defaults" });
+    defaults.checked = summary.defaults !== false;
     drawList();
     dialog.append(el("form", { class: "modal-body", onsubmit: (e) => {
         e.preventDefault();
-        summary = { ...summary, fields, truncate: truncate.checked, chars: Math.max(1, +chars.value || 30), fromEnd: fromEnd.value === "end" };
+        summary = { ...summary, fields, truncate: truncate.checked, chars: Math.max(1, +chars.value || 30), fromEnd: fromEnd.value === "end",
+          defaults: defaults.checked };
+        table.classList.toggle("hide-default-summary", !summary.defaults);
         saveSummary(); redrawSummaries(); close(); announce("Summary fields applied"); } },
       el("h2", { id: "log-summary-title", text: "Manage summary fields" }),
       el("h3", { text: "Custom summary fields" }), list,
@@ -11872,6 +11984,8 @@ async function renderLogs(view) {
         el("label", { for: "log-summary-input", class: "sr-only", text: "Field name" }), input, options, add),
       el("div", { class: "check-line" }, truncate, el("label", { for: "log-summary-truncate", text: "Truncate custom summary fields" })),
       el("div", { class: "actions" }, chars, fromEnd),
+      el("h3", { text: "Hide or show default summary fields" }),
+      el("div", { class: "check-line" }, defaults, el("label", { for: "log-summary-defaults", text: "Show default summary fields (Resource)" })),
       el("div", { class: "modal-actions" },
         el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }),
         el("button", { type: "submit", class: "primary", text: "Apply" }))));
@@ -11885,11 +11999,187 @@ async function renderLogs(view) {
   ], "the query results' preferences");
   preferences.querySelector(".overflow-trigger").setAttribute("aria-label", "Preferences");
 
+  // The Query library (#1863), from building-queries and
+  // logs-explorer-interface (re-read 2026-11-20): Recent queries, Saved
+  // queries and Suggested queries, each with Run and Stream; a saved
+  // query's More options has Edit and Delete. Recent queries are the
+  // viewer's own, kept in this browser; saved queries are Cloud Logging's
+  // SavedQuery resources of the project (savedQueries.create, .patch,
+  // .delete); suggestions come from the entries the query has read.
+  const openQueryLibrary = async () => {
+    const { dialog, close } = openModal({ labelledBy: "log-library-title" });
+    const tabs = [["recent", "Recent queries"], ["saved", "Saved queries"], ["suggested", "Suggested queries"]];
+    let current = "recent";
+    const panel = el("div", { class: "query-library-panel", role: "tabpanel", id: "log-library-panel", tabindex: "0" });
+    const use = (q, stream) => {
+      queryEditor.value = q.query;
+      if (q.summary) { summary = { ...summary, ...q.summary }; saveSummary(); }
+      close();
+      runQuery();
+      if (stream && paused) pauseButton.click();
+    };
+    const item = (q, extra) => el("li", { class: "query-library-item" },
+      q.title ? el("h3", { text: q.title }) : null,
+      el("span", { class: "mono query-library-text", text: q.query || "(empty query: every entry)" }),
+      el("button", { type: "button", class: "secondary", text: "Run", "aria-label": `Run ${q.title || q.query}`, onclick: () => use(q, false) }),
+      el("button", { type: "button", class: "secondary", text: "Stream", "aria-label": `Stream ${q.title || q.query}`, onclick: () => use(q, true) }),
+      extra || null);
+    const drawPanel = async () => {
+      for (const b of strip.querySelectorAll("[role=tab]")) {
+        const on = b.dataset.tab === current;
+        b.classList.toggle("is-selected", on);
+        b.setAttribute("aria-selected", on ? "true" : "false");
+        b.tabIndex = on ? 0 : -1;
+      }
+      panel.setAttribute("aria-labelledby", `log-library-tab-${current}`);
+      if (current === "recent") {
+        const recent = recentQueries();
+        return setChildren(panel, recent.length
+          ? el("ul", { class: "query-library-list" }, ...recent.map((r) => item({ query: r.query },
+              el("span", { class: "unavailable", text: relativeTime(new Date(r.at)) }))))
+          : el("p", { class: "unavailable", text: "No recent queries. A query you run is listed here, in this browser." }));
+      }
+      if (current === "suggested") {
+        const list = suggestedQueries();
+        return setChildren(panel, list.length
+          ? el("ul", { class: "query-library-list" }, ...list.map((q) => item(q)))
+          : el("p", { class: "unavailable", text: "No suggestions: run a query that reads entries first." }));
+      }
+      if (!project) return setChildren(panel, el("p", { class: "unavailable", text: "Choose a project in the toolbar: saved queries belong to one." }));
+      setChildren(panel, el("p", { class: "unavailable", text: "Loading saved queries…" }));
+      let saved;
+      try {
+        saved = ((await api(`/api/resources/logging-saved-queries?project=${encodeURIComponent(project)}`)).items || [])
+          .filter((r) => (r.fields || {}).kind !== "sql");
+      } catch (err) {
+        return setChildren(panel, el("p", { class: "form-error", role: "alert", text: err.message }));
+      }
+      setChildren(panel, saved.length
+        ? el("ul", { class: "query-library-list" }, ...saved.map((r) => {
+            const f = r.fields || {};
+            const q = { title: f["Display name"] || r.name, query: f.filter || "", summary: savedSummary(f) };
+            return item(q, overflowMenu([
+              { label: "Edit", run: () => { close(); openSaveQuery(r); } },
+              { label: "Delete", destructive: true, run: () => confirmDestructive({
+                title: `Delete saved query ${q.title}?`,
+                detail: "The saved query is deleted from Cloud Logging. No log entry is removed.",
+                confirmWord: q.title, confirmLabel: "Delete",
+                onConfirm: async () => {
+                  await send(`/api/resources/logging-saved-queries?project=${encodeURIComponent(project)}&name=${encodeURIComponent(r.name)}`, "DELETE");
+                  notify(`Deleted saved query ${q.title}`);
+                  drawPanel();
+                } }) },
+            ], `saved query ${q.title}`));
+          }))
+        : el("p", { class: "unavailable", text: "No saved queries in this project. Save a query from the Query pane." }));
+    };
+    const strip = el("div", { class: "tab-strip", role: "tablist", "aria-label": "Query library" },
+      ...tabs.map(([id, label]) => el("button", { type: "button", class: "tab", role: "tab", id: `log-library-tab-${id}`,
+        "data-tab": id, "aria-controls": "log-library-panel", text: label,
+        onclick: () => { current = id; drawPanel(); },
+        onkeydown: (e) => {
+          if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+          const i = tabs.findIndex(([t]) => t === current);
+          current = tabs[(i + (e.key === "ArrowRight" ? 1 : tabs.length - 1)) % tabs.length][0];
+          drawPanel();
+          strip.querySelector(`[data-tab="${current}"]`).focus();
+        } })));
+    dialog.append(el("div", { class: "modal-body" },
+      el("h2", { id: "log-library-title", text: "Query library" }),
+      strip, panel,
+      el("div", { class: "modal-actions" },
+        el("button", { type: "button", class: "secondary", text: "Close", onclick: () => close() }))));
+    await drawPanel();
+    strip.querySelector("[aria-selected=true]").focus();
+  };
+  // A saved query's summary fields, as the Explorer's preferences take them.
+  const savedSummary = (f) => {
+    const fields = (f.summaryFields || "").split(",").map((x) => x.trim()).filter(Boolean);
+    if (!fields.length) return null;
+    const start = +f.summaryFieldStart || 0, end = +f.summaryFieldEnd || 0;
+    return { fields, truncate: !!(start || end), chars: start || end || 30, fromEnd: !start && !!end };
+  };
+  const suggestedQueries = () => {
+    const out = [];
+    const sev = new Set(fieldEntries.map((e) => (e.logEntry || {}).severity));
+    if (["ERROR", "CRITICAL", "ALERT", "EMERGENCY"].some((v) => sev.has(v))) out.push({ title: "Errors", query: "severity>=ERROR" });
+    if (fieldEntries.some((e) => ((e.logEntry || {}).httpRequest || {}).status >= 400)) {
+      out.push({ title: "HTTP requests that failed", query: "httpRequest.status>=400" });
+    }
+    const types = new Map();
+    for (const e of fieldEntries) {
+      const t = ((e.logEntry || {}).resource || {}).type;
+      if (t) types.set(t, (types.get(t) || 0) + 1);
+    }
+    for (const [t] of [...types.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5)) {
+      out.push({ title: `Entries of ${t}`, query: `resource.type=${logQueryValue(t)}` });
+    }
+    return out;
+  };
+  // The Save query dialog, or a saved query's Edit: Name, Description,
+  // Include custom summary fields, Truncate summary fields, Share with
+  // project, then Save query (building-queries, re-read 2026-11-20).
+  const openSaveQuery = (existing) => {
+    const f = existing ? existing.fields || {} : {};
+    const { dialog, close } = openModal({ labelledBy: "log-save-title" });
+    const error = el("p", { class: "form-error", role: "alert", hidden: true });
+    const name = el("input", { type: "text", id: "log-save-name", required: true, value: existing ? f["Display name"] || "" : "" });
+    const description = el("input", { type: "text", id: "log-save-description", value: f.description || "" });
+    const text = el("textarea", { id: "log-save-query-text", class: "mono", rows: "3" });
+    text.value = existing ? f.filter || "" : queryEditor.value.trim();
+    const hasFields = existing ? !!f.summaryFields : summary.fields.length > 0;
+    const include = el("input", { type: "checkbox", id: "log-save-summary" });
+    include.checked = hasFields;
+    const truncate = el("input", { type: "checkbox", id: "log-save-truncate" });
+    truncate.checked = existing ? !!(+f.summaryFieldStart || +f.summaryFieldEnd) : summary.truncate;
+    const share = el("input", { type: "checkbox", id: "log-save-share" });
+    share.checked = f.visibility === "SHARED";
+    const fieldsNote = el("p", { class: "unavailable", id: "log-save-summary-note", text: summary.fields.length
+      ? `Custom summary fields: ${summary.fields.join(", ")}` : "No custom summary fields: add them in Preferences > Manage summary fields." });
+    const submit = el("button", { type: "submit", class: "primary", text: existing ? "Save" : "Save query" });
+    dialog.append(el("form", { class: "modal-body", onsubmit: async (e) => {
+        e.preventDefault();
+        error.hidden = true;
+        const fields = existing && !summary.fields.length ? (f.summaryFields || "") : summary.fields.join(",");
+        const chars = String(summary.chars || 30);
+        const values = { displayName: name.value.trim(), description: description.value.trim(), kind: "Logging query",
+          query: text.value.trim(), visibility: share.checked ? "SHARED" : "PRIVATE",
+          summaryFields: include.checked ? fields : "",
+          summaryFieldStart: include.checked && truncate.checked && !summary.fromEnd ? chars : "",
+          summaryFieldEnd: include.checked && truncate.checked && summary.fromEnd ? chars : "" };
+        submit.disabled = true;
+        try {
+          const base = `/api/resources/logging-saved-queries?project=${encodeURIComponent(project)}`;
+          if (existing) await send(base, "PATCH", { Path: [existing.name], Values: values });
+          else await send(base, "POST", { ...values, location: "global" });
+          close();
+          notify(existing ? `Saved query ${values.displayName} updated` : `Saved query ${values.displayName}`);
+        } catch (err) {
+          error.textContent = err.message;
+          error.hidden = false;
+          submit.disabled = false;
+        }
+      } },
+      el("h2", { id: "log-save-title", text: existing ? "Edit query" : "Save query" }),
+      el("label", { for: "log-save-name", text: "Name" }), name,
+      el("label", { for: "log-save-description", text: "Description (optional)" }), description,
+      el("label", { for: "log-save-query-text", text: "Query" }), text,
+      el("div", { class: "check-line" }, include, el("label", { for: "log-save-summary", text: "Include custom summary fields" })),
+      fieldsNote,
+      el("div", { class: "check-line" }, truncate, el("label", { for: "log-save-truncate", text: "Truncate summary fields" })),
+      el("div", { class: "check-line" }, share, el("label", { for: "log-save-share", text: "Share with project" })),
+      error,
+      el("div", { class: "modal-actions" },
+        el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }),
+        submit)));
+    name.focus();
+  };
+
   drawScope();
   const shareLink = el("button", { class: "secondary", text: "Share link",
     onclick: () => copy(location.href, "link to this query") });
-  const queryLibrary = el("a", { class: "button secondary", href: "/logs/saved-queries", text: "Query library",
-    onclick: (e) => { e.preventDefault(); navigate("/logs/saved-queries"); } });
+  const queryLibrary = el("button", { type: "button", class: "secondary", id: "log-query-library", text: "Query library",
+    "aria-haspopup": "dialog", onclick: () => openQueryLibrary() });
   setChildren(view,
     pageHeader("Logs Explorer",
       "Live from the local stack. Credentials are redacted before an entry is stored.",
@@ -11907,7 +12197,7 @@ async function renderLogs(view) {
       queryEditor,
       suggestions,
       queryError,
-      el("div", { class: "actions" }, runButton)),
+      el("div", { class: "actions" }, runButton, saveButton)),
     chips,
     timeline,
     el("div", { class: "log-panes" },

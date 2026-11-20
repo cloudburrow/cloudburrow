@@ -39,7 +39,7 @@ func TestConsoleSavedQueriesAndLogScopes(t *testing.T) {
 		t.Error("deleted another project's saved query")
 	}
 
-	ls := loggingLogScopesProvider{screen}
+	ls := loggingLogScopesProvider{loggingAdminScreen: screen}
 	scope, err := ls.Create(ctx, project, map[string]string{"id": "mine", "resourceNames": "projects/proj-1\nprojects/proj-2", "description": "d"})
 	if err != nil || scope != "projects/proj-1/locations/global/logScopes/mine" {
 		t.Fatalf("Create = %q, %v", scope, err)
@@ -48,13 +48,13 @@ func TestConsoleSavedQueriesAndLogScopes(t *testing.T) {
 		t.Error("a resource that is neither a project nor a view was accepted")
 	}
 	l, err = ls.List(ctx, project)
-	if err != nil || len(l.Items) != 1 || l.Items[0].Fields["Resources"] != "projects/proj-1, projects/proj-2" {
+	if err != nil || len(l.Items) != 2 || l.Items[1].Fields["Projects"] != "projects/proj-1, projects/proj-2" {
 		t.Fatalf("List = %+v, %v", l.Items, err)
 	}
 	if err := ls.Delete(ctx, project, scope); err != nil {
 		t.Fatal(err)
 	}
-	if l, _ := ls.List(ctx, project); len(l.Items) != 0 {
+	if l, _ := ls.List(ctx, project); len(l.Items) != 1 || l.Items[0].Name != defaultLogScopeName(project) {
 		t.Errorf("after Delete, %+v", l.Items)
 	}
 }

@@ -1115,6 +1115,20 @@ type DeleteLabeler interface {
 	DeleteLabel() string
 }
 
+// RowMenuOrderer orders a list row's menu (#1863): the row's action IDs,
+// with RowMenuEdit and RowMenuDelete for its Edit and Delete, as Google's
+// Log Router reads View sink details, Edit sink, Disable sink, Delete
+// sink, Troubleshoot sink. Items it does not name follow, in their order.
+type RowMenuOrderer interface {
+	RowMenuOrder() []string
+}
+
+// The RowMenuOrder names of a row's Edit and Delete.
+const (
+	RowMenuEdit   = "edit"
+	RowMenuDelete = "delete"
+)
+
 // RowEditLeader is a RowEditor whose rows' menus begin with Edit, as
 // Google's Triggers menu reads Edit, Disable, Delete (#1854).
 type RowEditLeader interface {
@@ -1699,7 +1713,7 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 			"id": p.ID(), "title": p.Title(),
 			"create": caps.Create, "delete": caps.Delete, "detail": caps.Detail,
 			"query": caps.Query, "edit": caps.Edit, "reveal": caps.Reveal,
-			"deleteLabel": caps.DeleteLabel, "deleteConfirm": caps.DeleteConfirm, "editRow": caps.EditRow, "editRowFirst": caps.EditRowFirst,
+			"deleteLabel": caps.DeleteLabel, "deleteConfirm": caps.DeleteConfirm, "editRow": caps.EditRow, "editRowFirst": caps.EditRowFirst, "rowMenuOrder": caps.RowMenuOrder,
 			"page": caps.Page, "scope": caps.Scope, "filters": caps.Filters,
 		})
 	}
@@ -1894,6 +1908,8 @@ type capabilities struct {
 	EditRow       string `json:"editRow,omitempty"`
 	// EditRowFirst puts the rows' Edit first in their menus (RowEditLeader).
 	EditRowFirst bool `json:"editRowFirst,omitempty"`
+	// RowMenuOrder is RowMenuOrderer's order of a row's menu.
+	RowMenuOrder []string `json:"rowMenuOrder,omitempty"`
 	// Detail means a row can be opened to show what is inside it.
 	Detail bool `json:"detail,omitempty"`
 	// Edit means a resource's detail page can offer an edit form. The form
@@ -2056,6 +2072,9 @@ func (s *Server) capabilitiesOf(p Provider) capabilities {
 	}
 	if rl, ok := p.(RowEditLeader); ok {
 		c.EditRowFirst = rl.RowEditFirst()
+	}
+	if ro, ok := p.(RowMenuOrderer); ok {
+		c.RowMenuOrder = ro.RowMenuOrder()
 	}
 	if re, ok := p.(RowEditor); ok {
 		c.EditRow = re.RowEditLabel()

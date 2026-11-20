@@ -370,10 +370,12 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	// Cloud Logging's admin screens, beside the Logs Explorer (#1226).
 	if enabled[config.ServiceLogging] && d.logging != nil {
 		screen := loggingAdminScreen{svc: d.logging, faults: d.faults}
-		providers = append(providers, loggingMetricsProvider{screen}, loggingSinksProvider{screen}, loggingExclusionsProvider{screen}, loggingBucketsProvider{screen},
+		metrics := loggingMetricsProvider{loggingAdminScreen: screen, monitoring: enabled[config.ServiceMonitoring] && d.monitoring != nil}
+		providers = append(providers, metrics, loggingSinksProvider{screen}, loggingExclusionsProvider{screen}, loggingBucketsProvider{screen},
 			loggingSettingsProvider{screen},
 			// Saved queries and log scopes (#1519).
-			loggingSavedQueriesProvider{screen}, loggingLogScopesProvider{screen})
+			loggingSavedQueriesProvider{screen},
+			loggingLogScopesProvider{loggingAdminScreen: screen, defaults: filepath.Join(d.cfg.InstanceDir(), loggingDefaultScopesFile)})
 		// Log Analytics (#1863), over the buckets' linked datasets in the
 		// instance's BigQuery; without BigQuery the page says it is not
 		// available.
