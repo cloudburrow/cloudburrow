@@ -174,6 +174,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/egress/` | The outbound dispatchers' local-only guard (#2015): a `*.googleapis.com` URL goes to this instance's endpoint of a served API and every other Google host is refused, before any lookup and on every redirect; `egresstest/` is the loopback-only sink their tests dial through. |
 | `internal/localhost/` | Dials any name under `.localhost` on loopback without a DNS lookup, for the dispatchers the CLI runs (#714). |
 | `internal/locations/` | The `google.cloud.location.Locations` mixin Cloud KMS and Cloud Scheduler serve (#1237, #1291). |
+| `internal/logfilter/` | Cloud Logging's query language (#2026): one parser and evaluator for every Logging filter (entries.list, tail, sinks, exclusions, log views, log-based metrics, CopyLogEntries) and the console's Logs Explorer. |
 | `internal/lro/` | Long-running operations: pending, completed and failed. |
 | `internal/metadata/` | A local GCE metadata server and the fixture credentials that point Google tooling at CloudBurrow. |
 | `internal/metrics/` | Counts the calls CloudBurrow serves itself, in the Prometheus text format (#292). |

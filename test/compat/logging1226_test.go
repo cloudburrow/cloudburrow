@@ -138,9 +138,9 @@ func TestLoggingLogBasedMetrics(t *testing.T) {
 	_, err = c.CreateLogMetric(ctx, &loggingpb.CreateLogMetricRequest{Parent: parent, Metric: &loggingpb.LogMetric{Name: counterID, Filter: "severity=INFO"}})
 	wantLoggingCode(t, "a duplicate", err, codes.AlreadyExists)
 	for what, m := range map[string]*loggingpb.LogMetric{
-		"no filter":                   {Name: "nofilter-" + suffix},
-		"a leading slash":             {Name: "/x" + suffix, Filter: "severity=INFO"},
-		"a filter it cannot evaluate": {Name: "bad-" + suffix, Filter: "jsonPayload.x:y"},
+		"no filter":             {Name: "nofilter-" + suffix},
+		"a leading slash":       {Name: "/x" + suffix, Filter: "severity=INFO"},
+		"an unparseable filter": {Name: "bad-" + suffix, Filter: "jsonPayload.x:("},
 		"a distribution with no value_extractor": {Name: "d1-" + suffix, Filter: "severity=INFO",
 			MetricDescriptor: &metric.MetricDescriptor{MetricKind: metric.MetricDescriptor_DELTA, ValueType: metric.MetricDescriptor_DISTRIBUTION},
 			BucketOptions:    dist.GetBucketOptions()},

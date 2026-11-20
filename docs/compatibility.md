@@ -2277,7 +2277,7 @@ and is opt-in: `--services logging`, on `--port-logging` (default `9009`). `env`
 |---|---|---|
 | `WriteLogEntries`, `ListLogEntries`, `ListLogs` | **Verified** | `TestLoggingWriteAndRead`, with `cloud.google.com/go/logging` and `logadmin` against the CI instance: structured entries are written, then read back with `logName` and `severity >= WARNING`. |
 | API-written entries in the Logs Explorer | **Verified** | The same test finds them in the console's `/api/logs`, under the log's name and the project. Severities are folded onto the console's four levels: `TestConsoleFoldsLoggingSeverities` (#1576) writes one entry at each of the nine with the official client and reads `DEFAULT` and `DEBUG` as DEFAULT, `INFO` and `NOTICE` as INFO, `WARNING` as WARNING, and `ERROR`, `CRITICAL`, `ALERT` and `EMERGENCY` as ERROR. Tests: `TestLoggingWriteAndRead`, `TestConsoleFoldsLoggingSeverities`. |
-| Unsupported filters | **Verified** | INVALID_ARGUMENT naming the term, never a silent match: tested with `jsonPayload.event = "boot"`. Tests: `TestLoggingWriteAndRead`. |
+| The Logging query language in filters (#2026): `ListLogEntries`, `TailLogEntries`, sinks, exclusions, log views, log-based metrics, `CopyLogEntries` and the console's Logs Explorer | **Verified** (error message wording UNVERIFIED (docs re-read 2026-11-20: <https://docs.cloud.google.com/logging/docs/view/logging-query-language>)) | `TestLoggingQueryLanguage`, with `logadmin` and the official `ConfigClient`: `ListLogEntries` with `OR`, `NOT`, `-`, `:`, `:*`, parentheses, a value list (`severity = (WARNING OR CRITICAL)`), `jsonPayload` paths, `=~`, `SEARCH`, `log_id` and a global restriction; a sink created with `logadmin` whose `OR`/`NOT`/`:` filter routes exactly its entries to another project; an exclusion whose `OR`/`=~` filter keeps its entries out of the bucket; and malformed filters refused. `TestLoggingWriteAndRead` reads with `jsonPayload.event = "boot"` and is refused an undefined field. One parser, `internal/logfilter`, serves every filter; see the grammar below. Unit: `TestLanguage`, `TestErrors`, `TestCheckView` (internal/logfilter), `TestFilterOverLogEntries`, `TestCompileQuery`. |
 | `DeleteLog` | **Verified** | Removes one log's entries. `TestGcloudLogging`: `gcloud logging logs delete` over JSON (#591). |
 | The store | **Implemented** | Bounded at 20,000 entries (the oldest go first), in memory in every mode, cleared by `/admin/reset`. It keeps nothing across a restart. |
 | `TailLogEntries`, `ListMonitoredResourceDescriptors` | **Verified** | Since #1215. TailLogEntries is a gRPC stream of entries written after it opens, for parent resource names (`projects/*`, and since #1395 `folders/*`, `organizations/*` and `billingAccounts/*`) and, since #1410, bucket views (`{bucket}/views/{view}`: the bucket's new entries the view's filter matches, `TestLoggingViewFiltersAndRetention`), with the ListLogEntries filter subset and `buffer_window` (default 2s, 0–60s); each response is ordered by timestamp. `suppression_info` is never set, since nothing is dropped. Over JSON (#1410), `POST /v2/entries:tail` takes one `TailLogEntriesRequest` body and streams a JSON array of `TailLogEntriesResponse`, opened at once and one element per send, until the client disconnects (unit `TestTailOverJSON`); the array framing is gRPC transcoding's for a streamed response and is UNVERIFIED (docs re-read 2026-10-17: <https://raw.githubusercontent.com/googleapis/googleapis/master/google/logging/v2/logging.proto>), since no official client reads it (Go's apiv2 REST transport says TailLogEntries is not supported for REST). The console's Logs Explorer has its own live stream. ListMonitoredResourceDescriptors returns Google's `global` descriptor, the one resource type CloudBurrow emits, paged (`TestLoggingTailLogEntries`, `TestLoggingListMonitoredResourceDescriptors`). |
@@ -2316,30 +2316,35 @@ and is opt-in: `--services logging`, on `--port-logging` (default `9009`). `env`
 | Terraform `google_sql_provision_script` | **Verified** | `TestTerraformSQLProvisionScript` (#1304), in the sql shard, with `hashicorp/google` 8.4.0 and egress blocked: a `POSTGRES_17` instance with `data_api_access = "ALLOW_DATA_API"`, a `google_secret_manager_regional_secret` and `_version` holding its root password, and a provision script run as `postgres` with that version (`instances.executeSql`) apply; the official client's `executeSql` reads the rows the script wrote; the plan is clean; a new description applies in place without running the script; a new script replaces the resource, as the provider plans it, and runs; the plan is clean after each; destroy abandons the script's tables (`deletion_policy = "ABANDON"`) and deletes the instance and the secret. The test finds the sql shard's Secret Manager with `cloudburrow env`. |
 | Terraform `google_sql_source_representation_instance` (`instanceType` `ON_PREMISES_INSTANCE`, `onPremisesConfiguration`) | **Verified** (MySQL, #1501; PostgreSQL and `dump_file_path`, #1524) | `TestTerraformSQLSourceRepresentation` (#1304, #1501, #1524), with egress blocked: a MySQL source representation instance with a `dump_file_path` and a PostgreSQL one apply, are read back as `ON_PREMISES_INSTANCE` with their `hostPort` (and `dumpFilePath`) and no password, plan no changes and are destroyed. |
 
-**The filter grammar ListLogEntries accepts:**
+**The Logging query language** (#2026) is served in full, as its reference documents
+(<https://docs.cloud.google.com/logging/docs/view/logging-query-language>), by one parser and
+evaluator, `internal/logfilter`, for `ListLogEntries`, `TailLogEntries`, sinks, exclusions,
+log views, log-based metrics, `CopyLogEntries` and the console's Logs Explorer:
 
 ```
-filter = term { [ "AND" ] term }
-term   = field op value
-field  = logName | severity | resource.type | timestamp
-       | resource.labels.KEY | labels.KEY      (KEY a bare word, or double-quoted: labels."a/b")
-op     = "=" | "!=" | ">" | ">=" | "<" | "<="   (logName and resource.type take = and != only)
-value  = a bare word, or a double-quoted string
+expr       = orExpr { [ "AND" ] orExpr }      (adjacent terms are ANDed; so are lines)
+orExpr     = unary { "OR" unary }             (OR binds tighter than AND)
+unary      = ( "NOT" | "-" ) unary | primary  (NOT binds tightest)
+primary    = "(" expr ")" | lhs op rhs | lhs ":*" | function | value
+lhs        = path | cast(path, TYPE[, TIME_ZONE("zone")]) | regexp_extract(path, "re")
+op         = "=" | "!=" | "<" | "<=" | ">" | ">=" | ":" | "=~" | "!~"
+rhs        = value | "(" values joined by NOT, OR, AND ")"
+function   = SEARCH([path,] "q") | log_id("id") | sample(path, f) | ip_in_net(path, "net") | source("res")
+path       = segment { "." segment }          (labels."a/b", jsonPayload.x.y, protoPayload.@type)
 ```
 
-Terms are ANDed, and an explicit `AND` is optional. `severity` compares by level:
-`DEFAULT < DEBUG < INFO < NOTICE < WARNING < ERROR < CRITICAL < ALERT < EMERGENCY`, or by its
-number (`severity >= 500`). `timestamp` values are RFC 3339. Since #1333 a label term compares
-the monitored resource's label (`resource.labels.service_name`) or the entry's own
-(`labels.instanceId`) as the query language documents for strings: the key is case-sensitive,
-the comparison ignores letter case and is lexicographic, and every comparison on a missing label
-is false, `!=` included (unit `TestLabelFiltersWithLogadmin`, with `logadmin`; the gcloud Cloud
-Run logs commands, `TestGcloudRunLogsRead`). Log-based metrics, sinks, exclusions and
-TailLogEntries compile the same grammar, so their filters take label terms too. Since #1410 `LOG_ID("id")` and `NOT` before one
-term are accepted, and log view filters also take `SOURCE("projects/P")` (unit `TestViewFilterAndRetentionOnRead`). Everything else is refused with INVALID_ARGUMENT
-naming the term: `OR`, `NOT` on a compound statement, parentheses, the `:` has-operator, other functions, a nested label path
-(`labels.a.b`), and any other field such as `jsonPayload.*`, `httpRequest.*` or `textPayload`. `logadmin` appends its own
-`timestamp >= "…"` term, which this grammar accepts.
+- **Keywords:** `AND`, `OR` and `NOT` only in upper case; lower case they are search terms. `--` starts a comment.
+- **Types:** the right side converts to the field's type, from LogEntry's schema, or from the JSON value under a payload. A failed conversion fails the comparison.
+  - Strings compare ignoring case (NFKC case folding); `:` is a substring test.
+  - Numbers, booleans (`true > false`), durations (`httpRequest.latency > "1s"`) and timestamps (RFC 3339 or ISO 8601; a bare date is midnight UTC) compare by value.
+  - `severity` compares by level (`DEFAULT` < `DEBUG` < … < `EMERGENCY`) or by number. `NULL_VALUE` matches a null.
+- **Missing and defaulted fields:** a comparison on a missing payload or label field is false, `!=` included; `NOT` inverts it. A LogEntry field the entry lacks compares as its default. `:*` tests explicit presence.
+- **Field names:** repeated fields match on any element. Map and `jsonPayload` keys are case-sensitive; `protoPayload` names are not. A field LogEntry does not define is an error.
+- **Global restrictions** and `SEARCH`: a bare value is searched across every field. `SEARCH` matches whole tokens, ignoring case, with `` `phrases` ``.
+- **Log views** take comparisons, `source()` and `log_id()`, joined by `AND` and `OR`, with `NOT` on one term only, never on a compound statement (<https://docs.cloud.google.com/logging/docs/logs-views>). A view filter with anything else is UNIMPLEMENTED when read.
+  - In a view, `source()` of a folder or organization also takes its descendants (#1410). Elsewhere it matches the resource's own entries.
+- **Errors:** a malformed filter is INVALID_ARGUMENT. A syntax error reads `Unparseable filter: syntax error at line L, column C, token 'T'`. An undefined field, a bad regular expression, a regular expression that is not double-quoted, a bad function argument and a filter over 20,000 characters each get their own message. The wording is ours: Google documents the cases, not the messages.
+- **Not served:** the Logs Explorer's custom indexes. These change speed, not results.
 
 ## Cloud KMS — `google.cloud.kms.v1`
 

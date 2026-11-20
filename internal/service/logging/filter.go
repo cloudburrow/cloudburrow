@@ -1,208 +1,73 @@
 package logging
 
 import (
-	"net/url"
-	"strconv"
-	"strings"
-	"time"
+	"encoding/json"
 
-	ltype "google.golang.org/genproto/googleapis/logging/type"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 
 	"cloud.google.com/go/logging/apiv2/loggingpb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/logfilter"
 )
 
-// The filter grammar ListLogEntries accepts (#304), a documented subset of
-// the Logging query language:
+// Filters — ListLogEntries, TailLogEntries, sinks, exclusions, log views,
+// log-based metrics and CopyLogEntries — are Cloud Logging's query language
+// in full (#2026), parsed and evaluated by internal/logfilter, which the
+// console's Logs Explorer also uses: comparisons (= != < <= > >= : =~ !~ and
+// :*), NOT, OR and AND with the language's precedence (NOT, then OR, then
+// AND; adjacent terms ANDed), parentheses, field paths over every LogEntry
+// field (labels."a/b", jsonPayload.x.y, protoPayload.@type), global
+// restrictions, SEARCH, log_id, sample, ip_in_net, cast, regexp_extract and
+// source (docs.cloud.google.com/logging/docs/view/logging-query-language).
 //
-//	filter     = term { [ "AND" ] term }
-//	term       = [ "NOT" ] ( field op value | function )
-//	function   = "LOG_ID(" string ")" | "SOURCE(" string ")"
-//	field      = "logName" | "severity" | "resource.type" | "timestamp"
-//	           | "resource.labels." key | "labels." key
-//	key        = a bare word, or a double-quoted string (labels."a/b")
-//	op         = "=" | "!=" | ">" | ">=" | "<" | "<="    (logName and resource.type: "=" and "!=" only)
-//	value      = a bare word, or a double-quoted string
+// source("projects/P") matches that parent's own entries; in a log view
+// filter (compileWith, which has the hierarchy) a folder or organization
+// also takes what Resource Manager holds under it (#1410), as log views
+// document (docs.cloud.google.com/logging/docs/logs-views).
 //
-// Terms are ANDed; an explicit AND is optional, as in the real language.
-// severity compares by level (DEFAULT < DEBUG < INFO < NOTICE < WARNING <
-// ERROR < CRITICAL < ALERT < EMERGENCY), or by its number (severity >= 400).
-// timestamp values are RFC 3339.
-//
-// A label term compares the monitored resource's label (resource.labels.*)
-// or the entry's own label (labels.*) as the query language documents for
-// strings: keys are case-sensitive, comparisons ignore letter case and are
-// lexicographic, and every comparison on a missing label is false, != included
-// (docs.cloud.google.com/logging/docs/view/logging-query-language).
-//
-// LOG_ID("ID") matches the entries of any parent's log ID (decoded), and
-// SOURCE("projects/P") those of a project, folder, organization or billing
-// account and, for a folder or an organization, of what Resource Manager
-// holds under it (#1410). These are the functions log view filters are made
-// of (docs.cloud.google.com/logging/docs/logs-views). SOURCE needs the
-// hierarchy, so only the reads that have it (compileWith) accept it. NOT
-// negates one term, as the view docs allow; not a compound one.
-//
-// Anything else — OR, parentheses, a field outside these, the ":"
-// has operator, a function — is INVALID_ARGUMENT naming the term. A filter
-// that ignored a term it did not understand would return entries the caller
-// excluded, which is worse than refusing.
+// A filter the language refuses — a syntax error, an undefined field, a bad
+// regular expression or function argument — is INVALID_ARGUMENT with the
+// language's message.
 
 type pred func(*loggingpb.LogEntry) bool
 
-// tokens splits a filter into words, keeping double-quoted strings whole and
-// splitting operators from their operands.
-func tokens(f string) ([]string, error) {
-	var out []string
-	i := 0
-	for i < len(f) {
-		c := f[i]
-		switch {
-		case c == ' ' || c == '\t' || c == '\n':
-			i++
-		case c == '"':
-			j := i + 1
-			for j < len(f) && f[j] != '"' {
-				if f[j] == '\\' {
-					j++
-				}
-				j++
-			}
-			if j >= len(f) {
-				return nil, apierror.InvalidArgument("filter has an unterminated string")
-			}
-			out = append(out, f[i:j+1])
-			i = j + 1
-		case strings.ContainsRune("<>=!:()", rune(c)):
-			j := i + 1
-			if j < len(f) && f[j] == '=' {
-				j++
-			}
-			out = append(out, f[i:j])
-			i = j
-		default:
-			j := i
-			for j < len(f) && !strings.ContainsRune(" \t\n\"<>=!:()", rune(f[j])) {
-				j++
-			}
-			out = append(out, f[i:j])
-			i = j
-		}
-	}
-	return out, nil
-}
-
-func unquote(v string) string {
-	if len(v) >= 2 && v[0] == '"' && v[len(v)-1] == '"' {
-		return strings.ReplaceAll(v[1:len(v)-1], `\"`, `"`)
-	}
-	return v
-}
-
-// compile turns a filter into a predicate; SOURCE() is refused.
+// compile turns a filter into a predicate.
 func compile(filter string) (pred, error) { return compileWith(filter, nil) }
 
-// compileWith is compile with SOURCE() accepted, ancestors answering what a
-// project or folder sits under, nearest first.
+// compileWith compiles a log view filter: the restricted set log views take
+// (logfilter's CheckView), with source() taking a folder's or organization's
+// descendants, ancestors answering what a project or folder sits under,
+// nearest first. compile passes nil ancestors: any filter, and source()
+// matching the parent's own entries only.
 func compileWith(filter string, ancestors func(parent) []parent) (pred, error) {
-	toks, err := tokens(filter)
+	f, err := logfilter.Parse(filter, logfilter.Options{Source: func(arg string) (func(logfilter.Record) bool, error) {
+		return sourcePred(arg, ancestors)
+	}})
+	if err == nil && ancestors != nil {
+		err = f.CheckView()
+	}
 	if err != nil {
-		return nil, err
+		return nil, apierror.InvalidArgument("%s", err.Error())
 	}
-	var preds []pred
-	for i := 0; i < len(toks); {
-		if toks[i] == "AND" {
-			i++
-			continue
-		}
-		negate := false
-		if toks[i] == "NOT" {
-			negate = true
-			i++
-			if i >= len(toks) || toks[i] == "(" || toks[i] == "NOT" {
-				return nil, apierror.InvalidArgument("filter: NOT takes one term, not a compound statement")
-			}
-		}
-		add := func(p pred) {
-			if negate {
-				q := p
-				p = func(e *loggingpb.LogEntry) bool { return !q(e) }
-			}
-			preds = append(preds, p)
-		}
-		if fn := strings.ToUpper(toks[i]); (fn == "LOG_ID" || fn == "SOURCE") && i+1 < len(toks) && toks[i+1] == "(" {
-			if i+3 >= len(toks) || toks[i+3] != ")" || !strings.HasPrefix(toks[i+2], `"`) {
-				return nil, apierror.InvalidArgument("filter: %s takes one double-quoted string, %s(\"...\")", fn, fn)
-			}
-			p, err := funcPred(fn, unquote(toks[i+2]), ancestors)
-			if err != nil {
-				return nil, err
-			}
-			add(p)
-			i += 4
-			continue
-		}
-		if i+2 >= len(toks) {
-			return nil, apierror.InvalidArgument("filter term %q is incomplete; the supported form is field op value",
-				strings.Join(toks[i:], " "))
-		}
-		// A map key with special characters is double-quoted after its dot,
-		// labels."compute.googleapis.com/resource_id": one field.
-		if i+1 < len(toks) && strings.HasSuffix(toks[i], ".") && strings.HasPrefix(toks[i+1], `"`) {
-			joined := toks[i] + toks[i+1]
-			toks = append(append(toks[:i:i], joined), toks[i+2:]...)
-		}
-		if i+2 >= len(toks) {
-			return nil, apierror.InvalidArgument("filter term %q is incomplete; the supported form is field op value",
-				strings.Join(toks[i:], " "))
-		}
-		field, op, value := toks[i], toks[i+1], unquote(toks[i+2])
-		term := toks[i] + " " + toks[i+1] + " " + toks[i+2]
-		p, err := termPred(field, op, value, term)
-		if err != nil {
-			return nil, err
-		}
-		add(p)
-		i += 3
+	if f == nil {
+		return func(*loggingpb.LogEntry) bool { return true }, nil
 	}
-	return func(e *loggingpb.LogEntry) bool {
-		for _, p := range preds {
-			if !p(e) {
-				return false
-			}
-		}
-		return true
-	}, nil
+	return func(e *loggingpb.LogEntry) bool { return f.Match(&entryRecord{e: e}) }, nil
 }
 
-// funcPred is LOG_ID(arg) or SOURCE(arg).
-func funcPred(fn, arg string, ancestors func(parent) []parent) (pred, error) {
-	if fn == "LOG_ID" {
-		return func(e *loggingpb.LogEntry) bool {
-			_, raw, ok := strings.Cut(e.GetLogName(), "/logs/")
-			if !ok {
-				return false
-			}
-			if id, err := url.PathUnescape(raw); err == nil {
-				raw = id
-			}
-			return raw == arg
-		}, nil
-	}
-	if ancestors == nil {
-		return nil, apierror.InvalidArgument("filter: SOURCE() is supported in log view filters only")
-	}
+func sourcePred(arg string, ancestors func(parent) []parent) (func(logfilter.Record) bool, error) {
 	want, rest, err := cutParent("SOURCE", arg)
 	if err != nil || rest != "" {
-		return nil, apierror.InvalidArgument("filter: SOURCE(%q) does not name a project, folder, organization or billing account", arg)
+		return nil, &logfilter.Error{Msg: "Invalid filter: source(\"" + arg + "\") does not name a project, folder, organization or billing account"}
 	}
-	return func(e *loggingpb.LogEntry) bool {
-		p := entryParent(e)
+	return func(r logfilter.Record) bool {
+		p := entryParent(r.(*entryRecord).e)
 		if p == want {
 			return true
 		}
-		if !want.hasChildren() {
+		if ancestors == nil || !want.hasChildren() {
 			return false
 		}
 		for _, a := range ancestors(p) {
@@ -214,104 +79,86 @@ func funcPred(fn, arg string, ancestors func(parent) []parent) (pred, error) {
 	}, nil
 }
 
-func termPred(field, op, value, term string) (pred, error) {
-	if field == "OR" || field == "NOT" || field == "(" || field == ")" || strings.HasPrefix(field, "-") {
-		return nil, apierror.InvalidArgument("filter term %q is not supported: only ANDed field op value terms are", field)
-	}
-	switch op {
-	case "=", "!=", ">", ">=", "<", "<=":
-	default:
-		return nil, apierror.InvalidArgument("filter term %q is not supported: operator %q is not one of = != > >= < <=", term, op)
-	}
-	eq := func(got string) bool {
-		if op == "=" {
-			return got == value
-		}
-		return got != value
-	}
-	switch field {
+// entryRecord is a LogEntry as the query language sees it: its JSON form.
+// The fields filters name most are read straight from the message; the
+// rest, and global restrictions, use its protojson form, built once.
+type entryRecord struct {
+	e    *loggingpb.LogEntry
+	root map[string]any
+}
+
+func (r *entryRecord) Field(name string) (any, bool) {
+	e := r.e
+	switch name {
 	case "logName":
-		if op != "=" && op != "!=" {
-			return nil, apierror.InvalidArgument("filter term %q is not supported: logName takes = or !=", term)
-		}
-		return func(e *loggingpb.LogEntry) bool { return eq(e.GetLogName()) }, nil
-	case "resource.type":
-		if op != "=" && op != "!=" {
-			return nil, apierror.InvalidArgument("filter term %q is not supported: resource.type takes = or !=", term)
-		}
-		return func(e *loggingpb.LogEntry) bool { return eq(e.GetResource().GetType()) }, nil
+		return e.GetLogName(), e.GetLogName() != ""
 	case "severity":
-		want, ok := ltype.LogSeverity_value[strings.ToUpper(value)]
-		if n, err := strconv.ParseInt(value, 10, 32); err == nil {
-			want, ok = int32(n), true
-		}
-		if !ok {
-			return nil, apierror.InvalidArgument("filter term %q is not supported: %q is not a severity", term, value)
-		}
-		return func(e *loggingpb.LogEntry) bool { return compare(int64(e.GetSeverity()), int64(want), op) }, nil
+		return int(e.GetSeverity()), e.GetSeverity() != 0
 	case "timestamp":
-		t, err := time.Parse(time.RFC3339Nano, value)
-		if err != nil {
-			return nil, apierror.InvalidArgument("filter term %q is not supported: timestamps are RFC 3339", term)
+		if e.GetTimestamp() == nil {
+			return nil, false
 		}
-		return func(e *loggingpb.LogEntry) bool {
-			return compare(e.GetTimestamp().AsTime().UnixNano(), t.UnixNano(), op)
-		}, nil
-	}
-	if key, ok := labelKey(field, "resource.labels."); ok {
-		return labelPred(op, value, func(e *loggingpb.LogEntry) map[string]string { return e.GetResource().GetLabels() }, key), nil
-	}
-	if key, ok := labelKey(field, "labels."); ok {
-		return labelPred(op, value, func(e *loggingpb.LogEntry) map[string]string { return e.GetLabels() }, key), nil
-	}
-	return nil, apierror.InvalidArgument(
-		"filter term %q is not supported: the fields supported are logName, severity, resource.type, timestamp, resource.labels.* and labels.*", term)
-}
-
-// labelKey returns the map key a label field names: the rest of the path
-// after prefix, unquoted when it was double-quoted. A key holding a further
-// unquoted dot is a nested path, which a string map does not have.
-func labelKey(field, prefix string) (string, bool) {
-	if !strings.HasPrefix(field, prefix) || len(field) == len(prefix) {
-		return "", false
-	}
-	key := field[len(prefix):]
-	if strings.HasPrefix(key, `"`) {
-		return unquote(key), true
-	}
-	if strings.Contains(key, ".") {
-		return "", false
-	}
-	return key, true
-}
-
-// labelPred compares a string label as the query language documents:
-// ignoring letter case, lexicographically, and false whenever the label is
-// missing, for != as for every other operator.
-func labelPred(op, value string, labels func(*loggingpb.LogEntry) map[string]string, key string) pred {
-	want := strings.ToLower(value)
-	return func(e *loggingpb.LogEntry) bool {
-		got, ok := labels(e)[key]
+		return e.GetTimestamp().AsTime(), true
+	case "receiveTimestamp":
+		if e.GetReceiveTimestamp() == nil {
+			return nil, false
+		}
+		return e.GetReceiveTimestamp().AsTime(), true
+	case "insertId":
+		return e.GetInsertId(), e.GetInsertId() != ""
+	case "trace":
+		return e.GetTrace(), e.GetTrace() != ""
+	case "spanId":
+		return e.GetSpanId(), e.GetSpanId() != ""
+	case "traceSampled":
+		return e.GetTraceSampled(), e.GetTraceSampled()
+	case "textPayload":
+		p, ok := e.GetPayload().(*loggingpb.LogEntry_TextPayload)
 		if !ok {
-			return false
+			return nil, false
 		}
-		return compare(int64(strings.Compare(strings.ToLower(got), want)), 0, op)
+		return p.TextPayload, true
+	case "labels":
+		if len(e.GetLabels()) == 0 {
+			return nil, false
+		}
+		return e.GetLabels(), true
+	case "resource":
+		if e.GetResource() == nil {
+			return nil, false
+		}
+		m := map[string]any{"type": e.GetResource().GetType()}
+		if l := e.GetResource().GetLabels(); len(l) > 0 {
+			m["labels"] = l
+		}
+		return m, true
+	case "jsonPayload":
+		if e.GetJsonPayload() == nil {
+			return nil, false
+		}
+		return e.GetJsonPayload().AsMap(), true
 	}
+	v, ok := r.Root()[name]
+	return v, ok
 }
 
-func compare(got, want int64, op string) bool {
-	switch op {
-	case "=":
-		return got == want
-	case "!=":
-		return got != want
-	case ">":
-		return got > want
-	case ">=":
-		return got >= want
-	case "<":
-		return got < want
-	default:
-		return got <= want
+func (r *entryRecord) Root() map[string]any {
+	if r.root != nil {
+		return r.root
 	}
+	m := map[string]any{}
+	b, err := protojson.Marshal(r.e)
+	if err != nil {
+		// A protoPayload whose type is not linked in: everything else, and
+		// the payload's @type.
+		c := proto.Clone(r.e).(*loggingpb.LogEntry)
+		c.Payload = nil
+		b, _ = protojson.Marshal(c)
+	}
+	_ = json.Unmarshal(b, &m)
+	if pp := r.e.GetProtoPayload(); err != nil && pp != nil {
+		m["protoPayload"] = map[string]any{"@type": pp.GetTypeUrl()}
+	}
+	r.root = m
+	return m
 }

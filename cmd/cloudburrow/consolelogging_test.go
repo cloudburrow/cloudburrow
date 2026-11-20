@@ -75,7 +75,7 @@ func TestConsoleLoggingMetrics(t *testing.T) {
 		m.GetBucketOptions().GetLinearBuckets().GetNumFiniteBuckets() != 10 || m.GetLabelExtractors()["path"] != "EXTRACT(labels.path)" {
 		t.Fatalf("the API reads the distribution as %v, %v", m, err)
 	}
-	if code, out := consolePost(t, base, map[string]string{"name": "bad", "filter": "jsonPayload.x:y"}); code == http.StatusOK || !strings.Contains(out, "not supported") {
+	if code, out := consolePost(t, base, map[string]string{"name": "bad", "filter": "jsonPayload.x:("}); code == http.StatusOK || !strings.Contains(out, "Unparseable filter") {
 		t.Errorf("a filter the API refuses = %d %s; want its message", code, out)
 	}
 
@@ -98,7 +98,7 @@ func TestConsoleLoggingMetrics(t *testing.T) {
 	if m.GetFilter() != "severity>=WARNING" || !m.GetDisabled() {
 		t.Errorf("after edit the API reads %v", m)
 	}
-	if code, _ := consolePatch(t, edit, []string{"projects/proj-1/metrics/errors"}, map[string]string{"filter": "a OR b"}); code == http.StatusOK {
+	if code, _ := consolePatch(t, edit, []string{"projects/proj-1/metrics/errors"}, map[string]string{"filter": "a OR"}); code == http.StatusOK {
 		t.Error("an edit to a filter the API refuses succeeded")
 	}
 

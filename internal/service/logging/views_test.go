@@ -26,7 +26,9 @@ func TestViewFilterAndRetentionOnRead(t *testing.T) {
 	for _, v := range []*loggingpb.LogView{
 		{Name: "stdout", Filter: `SOURCE("projects/proj-1") AND LOG_ID("stdout")`},
 		{Name: "notgce", Filter: `NOT resource.type = "gce_instance"`},
-		{Name: "or", Filter: `resource.type = "a" OR resource.type = "b"`},
+		{Name: "or", Filter: `LOG_ID("stderr") OR resource.type = "gce_instance"`},
+		{Name: "compound", Filter: `NOT (LOG_ID("stdout") AND resource.type = "global")`},
+		{Name: "search", Filter: `SEARCH("x")`},
 	} {
 		if _, err := cs.CreateView(ctx, &loggingpb.CreateViewRequest{Parent: g + "/buckets/_Default", ViewId: v.Name,
 			View: &loggingpb.LogView{Filter: v.Filter}}); err != nil {
@@ -55,13 +57,18 @@ func TestViewFilterAndRetentionOnRead(t *testing.T) {
 	for name, want := range map[string]int{
 		"projects/proj-1": 3, g + "/buckets/_Default/views/_AllLogs": 3,
 		g + "/buckets/_Default/views/stdout": 2, g + "/buckets/_Default/views/notgce": 2,
+		g + "/buckets/_Default/views/or": 2,
 	} {
 		if got, code := read(name); len(got) != want || code != codes.OK {
 			t.Errorf("read %s = %v, %v; want %d entries", name, got, code, want)
 		}
 	}
-	if _, code := read(g + "/buckets/_Default/views/or"); code != codes.Unimplemented {
-		t.Errorf("a view with OR = %v, want UNIMPLEMENTED", code)
+	// Log views take OR (flexible filters), but not NOT on a compound
+	// statement, nor SEARCH.
+	for _, v := range []string{"compound", "search"} {
+		if _, code := read(g + "/buckets/_Default/views/" + v); code != codes.Unimplemented {
+			t.Errorf("the view %s = %v, want UNIMPLEMENTED", v, code)
+		}
 	}
 
 	// Retention: one day on _Default ages the two-day-old entry out, and
