@@ -48,6 +48,7 @@ Do not edit these files by hand.
 | [Compute Engine API (v1): VPC networking](compute.md) | 166 | 67 | 0 | 74 | 25 | 0 | 0 | 0 |
 | [Backup and DR Service API (v1)](backupdr.md) | 61 | 46 | 0 | 15 | 0 | 0 | 0 | 0 |
 | [Cloud Identity API (v1)](cloudidentity.md) | 70 | 18 | 0 | 52 | 0 | 0 | 0 | 0 |
+| [Workload Identity Federation (IAM v1 pools, STS v1)](workloadidentity.md) | 47 | 22 | 0 | 25 | 0 | 0 | 0 | 0 |
 | [Certificate Authority Service (v1)](privateca.md) | 29 | 29 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Kubernetes Engine API (v1)](gke.md) | 37 | 16 | 0 | 19 | 2 | 0 | 0 | 0 |
 | [Cloud Monitoring API (v3) and Dashboards API (v1)](monitoring.md) | 56 | 52 | 0 | 2 | 2 | 0 | 0 | 0 |

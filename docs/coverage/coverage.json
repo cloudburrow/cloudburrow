@@ -8948,6 +8948,7 @@
           "test/compat/cloudbuilddefaultlogs_test.go:132 TestGcloudBuildsSubmitDefaultLogsBucket",
           "test/compat/cloudbuilddefaultlogs_test.go:47 TestCloudBuildDefaultLogsBucket",
           "test/compat/iamenforcementstorage1879_test.go:102 TestIAMEnforcementStorage",
+          "test/compat/iamworkloadidentity1941_test.go:496 TestWorkloadIdentityFederationStorage",
           "test/compat/storage_test.go:92 TestStorageObjectRoundTrip",
           "test/compat/storagecmek1938_test.go:137 TestStorageCMEK",
           "test/compat/storagegrpccsek_test.go:28 TestStorageCSEKParity",
@@ -15699,6 +15700,307 @@
         "method": "cloudidentity.policies.patch",
         "status": "Unimplemented",
         "note": "returns UNIMPLEMENTED (in-process check)"
+      }
+    ]
+  },
+  {
+    "Key": "workloadidentity",
+    "Title": "Workload Identity Federation (IAM v1 pools, STS v1)",
+    "counts": {
+      "Unimplemented": 25,
+      "Verified": 22
+    },
+    "rows": [
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.addAttestationRule",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.create",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkloadidentity1941_test.go:152 TestWorkloadIdentityPools",
+          "test/compat/iamworkloadidentity1941_test.go:593 TestGcloudIAMWorkloadIdentityPools"
+        ]
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkloadidentity1941_test.go:152 TestWorkloadIdentityPools",
+          "test/compat/iamworkloadidentity1941_test.go:593 TestGcloudIAMWorkloadIdentityPools"
+        ]
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkloadidentity1941_test.go:152 TestWorkloadIdentityPools",
+          "test/compat/iamworkloadidentity1941_test.go:593 TestGcloudIAMWorkloadIdentityPools"
+        ]
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.getIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkloadidentity1941_test.go:152 TestWorkloadIdentityPools",
+          "test/compat/iamworkloadidentity1941_test.go:593 TestGcloudIAMWorkloadIdentityPools"
+        ]
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.listAttestationRules",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkloadidentity1941_test.go:639 TestTerraformIAMWorkloadIdentityPool"
+        ]
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.namespaces.create",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.namespaces.delete",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.namespaces.get",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.namespaces.list",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.namespaces.managedIdentities.addAttestationRule",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.namespaces.managedIdentities.create",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.namespaces.managedIdentities.delete",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.namespaces.managedIdentities.get",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.namespaces.managedIdentities.list",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.namespaces.managedIdentities.listAttestationRules",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.namespaces.managedIdentities.operations.get",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.namespaces.managedIdentities.patch",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.namespaces.managedIdentities.removeAttestationRule",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.namespaces.managedIdentities.setAttestationRules",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.namespaces.managedIdentities.undelete",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.namespaces.managedIdentities.workloadSources.operations.get",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.namespaces.operations.get",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.namespaces.patch",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.namespaces.undelete",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.operations.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkloadidentity1941_test.go:152 TestWorkloadIdentityPools"
+        ]
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.patch",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkloadidentity1941_test.go:152 TestWorkloadIdentityPools",
+          "test/compat/iamworkloadidentity1941_test.go:593 TestGcloudIAMWorkloadIdentityPools"
+        ]
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.providers.create",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkloadidentity1941_test.go:152 TestWorkloadIdentityPools",
+          "test/compat/iamworkloadidentity1941_test.go:593 TestGcloudIAMWorkloadIdentityPools"
+        ]
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.providers.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkloadidentity1941_test.go:152 TestWorkloadIdentityPools",
+          "test/compat/iamworkloadidentity1941_test.go:593 TestGcloudIAMWorkloadIdentityPools"
+        ]
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.providers.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkloadidentity1941_test.go:152 TestWorkloadIdentityPools",
+          "test/compat/iamworkloadidentity1941_test.go:593 TestGcloudIAMWorkloadIdentityPools"
+        ]
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.providers.keys.create",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkloadidentity1941_test.go:152 TestWorkloadIdentityPools"
+        ]
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.providers.keys.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkloadidentity1941_test.go:152 TestWorkloadIdentityPools"
+        ]
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.providers.keys.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkloadidentity1941_test.go:152 TestWorkloadIdentityPools"
+        ]
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.providers.keys.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkloadidentity1941_test.go:152 TestWorkloadIdentityPools"
+        ]
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.providers.keys.operations.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkloadidentity1941_test.go:152 TestWorkloadIdentityPools"
+        ]
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.providers.keys.undelete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkloadidentity1941_test.go:152 TestWorkloadIdentityPools"
+        ]
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.providers.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkloadidentity1941_test.go:152 TestWorkloadIdentityPools",
+          "test/compat/iamworkloadidentity1941_test.go:593 TestGcloudIAMWorkloadIdentityPools"
+        ]
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.providers.operations.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkloadidentity1941_test.go:152 TestWorkloadIdentityPools"
+        ]
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.providers.patch",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkloadidentity1941_test.go:152 TestWorkloadIdentityPools",
+          "test/compat/iamworkloadidentity1941_test.go:593 TestGcloudIAMWorkloadIdentityPools"
+        ]
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.providers.undelete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkloadidentity1941_test.go:152 TestWorkloadIdentityPools",
+          "test/compat/iamworkloadidentity1941_test.go:593 TestGcloudIAMWorkloadIdentityPools"
+        ]
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.removeAttestationRule",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.setAttestationRules",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.setIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.testIamPermissions",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "iam.projects.locations.workloadIdentityPools.undelete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkloadidentity1941_test.go:152 TestWorkloadIdentityPools",
+          "test/compat/iamworkloadidentity1941_test.go:593 TestGcloudIAMWorkloadIdentityPools"
+        ]
+      },
+      {
+        "method": "sts.token",
+        "status": "Verified",
+        "tests": [
+          "test/compat/iamworkloadidentity1941_test.go:433 TestWorkloadIdentityFederationSTS"
+        ]
       }
     ]
   },

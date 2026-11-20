@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc/codes"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/wif"
 )
 
 // Cloud Identity groups (cloudidentity.googleapis.com v1, #1812, the last item of #1780),
@@ -755,6 +756,14 @@ func InDomain(email string) bool {
 // directly or through nested groups, and domain:D when it is an account of
 // the instance's domain. All lower case.
 func (r *Registry) Principals(email string) []string {
+	if _, _, ok := wif.PoolOfPrincipal(strings.TrimSpace(email)); ok {
+		// A federated subject (#1941): its principal:// identifier and
+		// the principalSet:// identifiers its last exchange mapped.
+		if r == nil {
+			return []string{strings.TrimSpace(email)}
+		}
+		return r.federatedPrincipals(strings.TrimSpace(email))
+	}
 	email = normEmail(email)
 	if email == "" {
 		return nil

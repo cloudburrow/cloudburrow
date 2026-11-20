@@ -155,6 +155,9 @@ func denyIdentifiers(members map[string]bool) map[string]bool {
 			out["principal://iam.googleapis.com/projects/-/serviceaccounts/"+strings.TrimPrefix(m, "serviceaccount:")] = true
 		case strings.HasPrefix(m, "group:"):
 			out["principalset://goog/group/"+strings.TrimPrefix(m, "group:")] = true
+		case strings.HasPrefix(m, "principal://"), strings.HasPrefix(m, "principalset://"):
+			// A federated identity's (#1941) are the same in both.
+			out[m] = true
 		}
 	}
 	return out

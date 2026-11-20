@@ -516,8 +516,11 @@ const ROUTES = [
   // Undelete, Create key and Upload key.
   { path: "/iam-admin/serviceaccounts", service: "iam-service-accounts", icon: "iam", title: "Service Accounts", kind: "Service account", section: "IAM & Admin", logs: true,
     product: "iam", productTitle: "IAM & Admin" },
-  { path: "/iam-admin/workload-identity-pools", title: "Workload Identity Federation", service: null, requires: "iam", screen: "unavailable", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin",
-    unavailable: "Workload identity pools and providers are the IAM API's projects.locations.workloadIdentityPools, which CloudBurrow does not serve. A workload reaches this instance with a service account key, or with no credentials at all." },
+  // IAM & Admin > Workload Identity Federation (#1941): the project's
+  // workload identity pools, a pool's providers, Create pool with a first
+  // provider, Add provider, Edit, Disable, Enable, Delete and Restore.
+  { path: "/iam-admin/workload-identity-pools", service: "iam-workload-identity", icon: "iam", title: "Workload Identity Federation", kind: "Workload identity pool", section: "IAM & Admin",
+    product: "iam", productTitle: "IAM & Admin" },
   { path: "/iam-admin/workforce-identity-pools", title: "Workforce Identity Federation", service: null, requires: "iam", screen: "unavailable", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin",
     unavailable: "Workforce identity pools are the IAM API's locations.workforcePools, which CloudBurrow does not serve." },
   // Labels (#1864): the selected project's labels, Resource Manager's.
