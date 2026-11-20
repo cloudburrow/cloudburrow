@@ -358,3 +358,24 @@ func (e *Enforcer) testPermissionsJSON(w http.ResponseWriter, r *http.Request, s
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(b)
 }
+
+// HTTPPaths checks svc's methods served over JSON alone, matched by their
+// paths (WorkflowsJSON), as HTTP checks the bound ones.
+func (e *Enforcer) HTTPPaths(svc *Service, methods []JSONMethod, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if e == nil || e.On == nil || !e.On() {
+			next.ServeHTTP(w, r)
+			return
+		}
+		permission, resource, ok := MatchJSON(methods, r.Method, r.URL.Path)
+		if !ok {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if err := e.Authorize(r.Context(), svc, Bearer(r.Header.Get("Authorization")), permission, resource); err != nil {
+			WriteJSONStatus(w, err)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}

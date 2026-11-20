@@ -2,6 +2,7 @@ package iameval
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
@@ -103,6 +104,9 @@ var Services = map[string]*Service{
 	"google.cloud.kms.v1.KeyManagementService":                  KMS,
 	"google.cloud.tasks.v2.CloudTasks":                          Tasks,
 	"google.cloud.bigquery.analyticshub.v1.AnalyticsHubService": AnalyticsHub,
+	"google.cloud.scheduler.v1.CloudScheduler":                  Scheduler,
+	"google.cloud.workflows.v1.Workflows":                       Workflows,
+	"google.cloud.workflows.executions.v1.Executions":           Workflows,
 }
 
 // ForMethod is the service and method row of a gRPC full method on the
@@ -322,6 +326,149 @@ func analyticsHubMethods() map[string]Method {
 	m[prefix+"SetIamPolicy"] = Method{Field: "resource", PermissionFor: verb("setIamPolicy")}
 	m[prefix+"ListSharedResourceSubscriptions"] = Method{Field: "resource", PermissionFor: verb("viewSubscriptions")}
 	return m
+}
+
+// Scheduler is Cloud Scheduler's table: the permission each method's REST
+// reference names
+// (https://docs.cloud.google.com/scheduler/docs/reference/rest/v1/projects.locations.jobs,
+// read 2026-11-20): create and list on the location, get, delete, pause,
+// resume (cloudscheduler.jobs.enable) and run on the job; patch's
+// reference names none, and cloudscheduler.jobs.update is the permission
+// of its name in "Cloud Scheduler roles and permissions"
+// (https://docs.cloud.google.com/iam/docs/roles-permissions/cloudscheduler),
+// as are the Locations mixin's cloudscheduler.locations.get and list.
+// "Cloud Scheduler doesn't support resource-level IAM policies"
+// (https://docs.cloud.google.com/scheduler/docs/access-control), so only
+// the project's, folders' and organization's policies apply. Google's
+// wording of a denial is UNVERIFIED (docs re-read 2026-11-20:
+// https://docs.cloud.google.com/scheduler/docs/access-control gives none):
+// Cloud Tasks', 'The principal (user or service account) lacks IAM
+// permission "P" for the resource "R" (or the resource may not exist).',
+// with no ErrorInfo.
+var Scheduler = &Service{
+	Name:  "cloudscheduler.googleapis.com",
+	Types: map[string]string{"jobs": "cloudscheduler.googleapis.com/Job", "locations": "cloudscheduler.googleapis.com/Location"},
+	Methods: func() map[string]Method {
+		m := sm(map[string][2]string{
+			"ListJobs":  {"cloudscheduler.jobs.list", "parent"},
+			"CreateJob": {"cloudscheduler.jobs.create", "parent"},
+			"GetJob":    {"cloudscheduler.jobs.get", "name"},
+			"UpdateJob": {"cloudscheduler.jobs.update", "job.name"},
+			"DeleteJob": {"cloudscheduler.jobs.delete", "name"},
+			"PauseJob":  {"cloudscheduler.jobs.pause", "name"},
+			"ResumeJob": {"cloudscheduler.jobs.enable", "name"},
+			"RunJob":    {"cloudscheduler.jobs.run", "name"},
+		}, "/google.cloud.scheduler.v1.CloudScheduler/")
+		for k, v := range sm(map[string][2]string{
+			"GetLocation":   {"cloudscheduler.locations.get", "name"},
+			"ListLocations": {"cloudscheduler.locations.list", "name"},
+		}, "/google.cloud.location.Locations/") {
+			m[k] = v
+		}
+		return m
+	}(),
+	Deny: func(permission, resource string) error {
+		return grpcDenied(fmt.Sprintf("The principal (user or service account) lacks IAM permission \"%s\" for the resource \"%s\" (or the resource may not exist).", permission, resource),
+			permission, resource, false)
+	},
+}
+
+// Workflows is Workflows' and Workflow Executions' table, one port and one
+// permission namespace (workflows.*): the permission each method's REST
+// reference names (https://docs.cloud.google.com/workflows/docs/reference/rest
+// and https://docs.cloud.google.com/workflows/docs/reference/executions/rest,
+// read 2026-11-20); patch's names none, and workflows.workflows.update is
+// the permission of its name in "Workflows access control"
+// (https://docs.cloud.google.com/workflows/docs/access-control), as are the
+// Locations' and Operations' mixins' workflows.locations.* and
+// workflows.operations.get and list (DeleteOperation's has no permission
+// there, so it is not checked). The JSON-only methods (step entries,
+// callbacks, exportData, deleteExecutionHistory, triggerPubsubExecution)
+// are WorkflowsJSON's. Its roles are granted on the project at the
+// lowest, so only the project's, folders' and organization's policies
+// apply. Google's wording of a denial is UNVERIFIED, re-read 2026-11-20:
+// https://docs.cloud.google.com/workflows/docs/access-control gives none.
+// Its newer APIs' "Permission 'P' denied on resource 'R' (or it may not
+// exist).", with ErrorInfo IAM_PERMISSION_DENIED.
+var Workflows = &Service{
+	Name: "workflows.googleapis.com",
+	Types: map[string]string{"workflows": "workflows.googleapis.com/Workflow",
+		"executions": "workflowexecutions.googleapis.com/Execution"},
+	Methods: func() map[string]Method {
+		m := sm(map[string][2]string{
+			"ListWorkflows":         {"workflows.workflows.list", "parent"},
+			"GetWorkflow":           {"workflows.workflows.get", "name"},
+			"CreateWorkflow":        {"workflows.workflows.create", "parent"},
+			"DeleteWorkflow":        {"workflows.workflows.delete", "name"},
+			"UpdateWorkflow":        {"workflows.workflows.update", "workflow.name"},
+			"ListWorkflowRevisions": {"workflows.workflows.listRevision", "name"},
+		}, "/google.cloud.workflows.v1.Workflows/")
+		for prefix, rows := range map[string]map[string][2]string{
+			"/google.cloud.workflows.executions.v1.Executions/": {
+				"ListExecutions":  {"workflows.executions.list", "parent"},
+				"CreateExecution": {"workflows.executions.create", "parent"},
+				"GetExecution":    {"workflows.executions.get", "name"},
+				"CancelExecution": {"workflows.executions.cancel", "name"},
+			},
+			"/google.cloud.location.Locations/": {
+				"GetLocation":   {"workflows.locations.get", "name"},
+				"ListLocations": {"workflows.locations.list", "name"},
+			},
+			"/google.longrunning.Operations/": {
+				"GetOperation":   {"workflows.operations.get", "name"},
+				"ListOperations": {"workflows.operations.list", "name"},
+			},
+		} {
+			for k, v := range sm(rows, prefix) {
+				m[k] = v
+			}
+		}
+		return m
+	}(),
+	Deny: func(permission, resource string) error {
+		return grpcDenied(fmt.Sprintf("Permission '%s' denied on resource '%s' (or it may not exist).", permission, resource),
+			permission, resource, true)
+	},
+}
+
+// WorkflowsJSON are the Workflow Executions methods the gRPC API has no
+// methods for, served over JSON alone, by their path's pattern: the
+// permission each one's REST reference names, on the resource the
+// pattern's first group names (read 2026-11-20). A callback endpoint's
+// request needs workflows.callbacks.send ("Workflows Invoker" holds it,
+// https://docs.cloud.google.com/workflows/docs/access-control), checked
+// on the execution, as the callback's own name is not a policy resource.
+var WorkflowsJSON = []JSONMethod{
+	{Method: "GET", Pattern: regexp.MustCompile(`^/v1/(projects/[^/]+/locations/[^/]+/workflows/[^/]+/executions/[^/:]+)/stepEntries$`), Permission: "workflows.stepEntries.list"},
+	{Method: "GET", Pattern: regexp.MustCompile(`^/v1/(projects/[^/]+/locations/[^/]+/workflows/[^/]+/executions/[^/:]+/stepEntries/[^/]+)$`), Permission: "workflows.stepEntries.get"},
+	{Method: "GET", Pattern: regexp.MustCompile(`^/v1/(projects/[^/]+/locations/[^/]+/workflows/[^/]+/executions/[^/:]+)/callbacks$`), Permission: "workflows.callbacks.list"},
+	{Pattern: regexp.MustCompile(`^/v1/(projects/[^/]+/locations/[^/]+/workflows/[^/]+/executions/[^/:]+)/callbacks/[^/]+$`), Permission: "workflows.callbacks.send"},
+	{Method: "GET", Pattern: regexp.MustCompile(`^/v1/(projects/[^/]+/locations/[^/]+/workflows/[^/]+/executions/[^/:]+):exportData$`), Permission: "workflows.executions.get"},
+	{Method: "POST", Pattern: regexp.MustCompile(`^/v1/(projects/[^/]+/locations/[^/]+/workflows/[^/]+/executions/[^/:]+):deleteExecutionHistory$`), Permission: "workflows.executions.cancel"},
+	{Method: "POST", Pattern: regexp.MustCompile(`^/v1/(projects/[^/]+/locations/[^/]+/workflows/[^/:]+):triggerPubsubExecution$`), Permission: "workflows.executions.create"},
+}
+
+// JSONMethod is a method served over JSON alone, matched by its path.
+type JSONMethod struct {
+	// Method is the HTTP method, "" for any.
+	Method string
+	// Pattern matches the path; its first group is the resource.
+	Pattern    *regexp.Regexp
+	Permission string
+}
+
+// MatchJSON is the permission and resource of a request to one of
+// methods, ok false for none.
+func MatchJSON(methods []JSONMethod, httpMethod, path string) (permission, resource string, ok bool) {
+	for _, m := range methods {
+		if m.Method != "" && m.Method != httpMethod {
+			continue
+		}
+		if g := m.Pattern.FindStringSubmatch(path); g != nil {
+			return m.Permission, g[1], true
+		}
+	}
+	return "", "", false
 }
 
 func sm(rows map[string][2]string, prefix string) map[string]Method {

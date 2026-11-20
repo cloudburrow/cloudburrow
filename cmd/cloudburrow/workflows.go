@@ -33,10 +33,12 @@ type workflowsService struct {
 	tracing   *telemetry.Tracing
 	calls     grpctransport.Observer
 	interpose []grpc.UnaryServerInterceptor
-	requests  func(rest.Request)
-	tokens    workflows.TokenMinter
-	server    *grpctransport.Server
-	api       *workflows.Server
+	// wrapJSON wraps the JSON API (IAM enforcement, #1879); nil is none.
+	wrapJSON func(http.Handler) http.Handler
+	requests func(rest.Request)
+	tokens   workflows.TokenMinter
+	server   *grpctransport.Server
+	api      *workflows.Server
 }
 
 func newWorkflowsService(cfg config.Config) *workflowsService {
@@ -123,6 +125,9 @@ func (s *workflowsService) Start(ctx context.Context) error {
 		s.server.Interpose(i)
 	}
 	var jsonAPI http.Handler = workflows.NewRESTHandler(api)
+	if s.wrapJSON != nil {
+		jsonAPI = s.wrapJSON(jsonAPI)
+	}
 	if s.requests != nil {
 		jsonAPI = rest.Observe(jsonAPI, s.requests)
 	}
