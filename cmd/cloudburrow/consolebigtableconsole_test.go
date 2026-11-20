@@ -241,7 +241,7 @@ func TestBigtableStudioSavedQueries(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows := bigtableSection(d, "tables").Listing.Items
-	if len(rows) != 1 || rows[0].Fields["Status"] != "Ready" || rows[0].Fields["Storage utilization"] != "—" {
+	if len(rows) != 1 || rows[0].Fields["Status"] != "Ready" || rows[0].Fields["Storage utilization"] != "0 B" {
 		t.Errorf("the Tables page = %+v", rows)
 	}
 }
@@ -255,6 +255,92 @@ func TestBigtableTableStatus(t *testing.T) {
 	} {
 		if got := bigtableTableStatus(states); got != want {
 			t.Errorf("bigtableTableStatus(%v) = %q, want %q", states, got, want)
+		}
+	}
+}
+
+// TestBigtableTablesReplicationsAndExplorerActions (#2027): a Tables row
+// opens Bigtable Studio on its table, lists each cluster's replication
+// under it, and offers Open table page; the Studio Explorer's View actions
+// are Google's, in Google's order, Monitor and Export disabled with the
+// reason; Prevent deletion protects the table and lifts it.
+func TestBigtableTablesReplicationsAndExplorerActions(t *testing.T) {
+	p, _, iac := bigtableInstancesConsole(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	if err := iac.CreateInstanceWithClusters(ctx, &bigtable.InstanceWithClustersConfig{InstanceID: "rep-inst", DisplayName: "rep-inst",
+		Clusters: []bigtable.ClusterConfig{{ClusterID: "rep-c1", Zone: "us-central1-b", NumNodes: 1, StorageType: bigtable.SSD},
+			{ClusterID: "rep-c2", Zone: "us-east1-b", NumNodes: 1, StorageType: bigtable.SSD}}}); err != nil {
+		t.Fatal(err)
+	}
+	admin, err := bigtable.NewAdminClient(ctx, "demo", "rep-inst", localOpts(p.endpoint)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close()
+	if err := admin.CreateTable(ctx, "orders"); err != nil {
+		t.Fatal(err)
+	}
+	if err := admin.CreateColumnFamily(ctx, "orders", "cf1"); err != nil {
+		t.Fatal(err)
+	}
+	client, err := bigtable.NewClient(ctx, "demo", "rep-inst", localOpts(p.endpoint)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	m := bigtable.NewMutation()
+	m.Set("cf1", "v", bigtable.Timestamp(1000), make([]byte, 2048))
+	if err := client.Open("orders").Apply(ctx, "k1", m); err != nil {
+		t.Fatal(err)
+	}
+	d, err := p.Detail(ctx, "demo", []string{"rep-inst"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	list := bigtableSection(d, "tables").Listing
+	if len(list.Items) != 1 || list.ChildNoun != "replications" {
+		t.Fatalf("the Tables page = %+v", list)
+	}
+	row := list.Items[0]
+	if got := row.Fields["Storage utilization"]; !strings.HasSuffix(got, " KiB") {
+		t.Errorf("Storage utilization of a table of 2 KiB = %q", got)
+	}
+	if row.Link != "/bigtable-instances/rep-inst?project=demo&tab=studio&table=orders" {
+		t.Errorf("a table opens %q, want its instance's Studio", row.Link)
+	}
+	if len(row.Children) != 2 || row.Children[0].Name != "rep-c1" || row.Children[1].Name != "rep-c2" ||
+		row.Children[0].Fields["Status"] != "Ready" {
+		t.Errorf("the table's replications = %+v", row.Children)
+	}
+	if last := row.Actions[len(row.Actions)-1]; last.Label != "Open table page" || !strings.HasPrefix(last.Href, "/bigtable/orders?") {
+		t.Errorf("the row's last action = %+v, want Open table page", last)
+	}
+
+	raw, _ := json.Marshal(map[string]any{"instance": "rep-inst"})
+	out, err := p.StudioCall(ctx, "demo", "explorer", raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ex := out.(*bigtableStudioExplorer)
+	var labels []string
+	for _, a := range ex.Tables[0].Actions {
+		labels = append(labels, a.Label)
+		if (a.ID == "systeminsights" || a.ID == "export") && a.Unavailable == "" {
+			t.Errorf("%s is not drawn disabled", a.Label)
+		}
+	}
+	want := "Create a new table,Create a backup,Prevent deletion,Edit,Delete,View a sample query,View backups,Monitor by viewing system insights,Export to Cloud Storage"
+	if got := strings.Join(labels, ","); got != want {
+		t.Errorf("the Explorer's table actions = %s\nwant %s", got, want)
+	}
+	for _, protected := range []string{"true", "false"} {
+		if err := p.ActAt(ctx, "demo", []string{"rep-inst", bigtableTablesSegment, "orders"}, "preventdeletion", map[string]string{"protected": protected}); err != nil {
+			t.Fatalf("Prevent deletion %s: %v", protected, err)
+		}
+		info, err := admin.TableInfo(ctx, "orders")
+		if err != nil || (info.DeletionProtection == bigtable.Protected) != (protected == "true") {
+			t.Errorf("after Prevent deletion %s, TableInfo = %+v, %v", protected, info, err)
 		}
 	}
 }

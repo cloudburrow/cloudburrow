@@ -2967,6 +2967,9 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
   // flight looks identical to one that is idle unless something says so, and
   // the user's reading of "nothing happened" is a second click.
   const operating = new Set();
+  // Rows whose children are shown: a Bigtable table's replications, behind
+  // the arrow beside its ID (#2027).
+  const expanded = new Set();
 
   const nameColumn = () => data.nameColumn || "Name";
   const allDataColumns = () => data.columns || [];
@@ -3162,7 +3165,29 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
     const start = page * pageSize;
     const shown = rows.slice(start, start + pageSize);
 
-    setChildren(body, ...shown.map((item) => {
+    // A row's children, under it while its arrow is open: they carry the
+    // listing's columns and nothing to act on (#2027).
+    const childRows = (item) => (expanded.has(item.name) ? item.children || [] : []).map((child) => el("tr", { class: "child-row" },
+      ...(selectable ? [el("td", { class: "select-cell" })] : []),
+      ...(hasStatus() ? [el("td", { class: "status-cell" }, child.status ? statusIcon(child.status) : null)] : []),
+      el("td", { class: "child-name" }, child.name),
+      ...dataColumns().map((c) => el("td", { text: (child.fields || {})[c] || "" })),
+      ...(hasActions() ? [el("td", {})] : [])));
+    const expander = (item) => {
+      if (!(item.children || []).length) return null;
+      const open = expanded.has(item.name);
+      return el("button", { type: "button", class: "icon-button row-expander" + (open ? " is-open" : ""),
+        "aria-expanded": open ? "true" : "false",
+        "aria-label": `${open ? "Hide" : "Show"} ${data.childNoun || "rows"} of ${item.name}`,
+        html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>',
+        onclick: (e) => {
+          e.stopPropagation();
+          if (open) expanded.delete(item.name); else expanded.add(item.name);
+          draw();
+          body.querySelector(`button.row-expander[aria-label$=" of ${CSS.escape(item.name)}"]`)?.focus();
+        } });
+    };
+    setChildren(body, ...shown.flatMap((item) => {
       const cells = [];
       if (selectable && !canSelect(item)) {
         cells.push(el("td", { class: "select-cell" }));
@@ -3188,7 +3213,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
               spinner(`${item.name} is being changed`)))
           : el("td", { class: "status-cell" }, statusIcon(item.status)));
       }
-      cells.push(el("td", {}, item.link
+      cells.push(el("td", {}, expander(item), item.link
         ? el("a", { href: item.link, text: item.name })
         : (item.opens || []).length
           ? el("a", { href: detailHref(route, item.opens), text: item.name })
@@ -3244,7 +3269,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
           inspect();
         });
       }
-      return row;
+      return [row, ...childRows(item)];
     }));
 
     if (!shown.length) {
@@ -17475,6 +17500,15 @@ const BT_SAVED_NOTE = "CloudBurrow-only: Google keeps a saved query as a Studio 
 const BT_UNAVAILABLE_MANAGE = "Not available locally: the Saved queries page lists the project's saved queries of every Google Cloud product, " +
   "which CloudBurrow does not serve. The Queries section lists this project's Bigtable ones.";
 
+// btSampleQuery is a table's View a sample query: GoogleSQL for Bigtable
+// over its first column family, else its row keys.
+function btSampleQuery(t, quote) {
+  const f = (t.families || [])[0];
+  return f
+    ? `SELECT _key, ${quote(f.name)} FROM ${quote(t.name)} LIMIT 10`
+    : `SELECT _key FROM ${quote(t.name)} LIMIT 10`;
+}
+
 function renderBigtableStudio(panel, route, segments, project) {
   const [instance] = segments;
   const call = (name, body = {}) => send(
@@ -17493,6 +17527,7 @@ function renderBigtableStudio(panel, route, segments, project) {
   let state = store.tabs[store.current];
   const save = () => { try { sessionStorage.setItem(key, JSON.stringify(store)); } catch { /* per-tab only */ } };
   let catalog = { tables: [] };
+  let openedFromAddress = false;
   let saved = [];
   let regions = [];
   let last = null;
@@ -17737,6 +17772,17 @@ function renderBigtableStudio(panel, route, segments, project) {
     el("summary", { text: `${title} (${items.length})` }),
     items.length ? el("ul", {}, ...items.map(row)) : el("p", { class: "unavailable", text: `No ${title.toLowerCase()}` }));
   const quote = (n) => `\`${n.replaceAll("`", "\\`")}\``;
+  // A table's View actions in Google's order (#2027): those the instance
+  // page performs (Create a new table, Create a backup, Prevent deletion,
+  // Edit, Delete) in its forms, View a sample query in a new editor tab,
+  // View backups on the instance's Backups page, and the two Google runs
+  // on Cloud Monitoring and Dataflow disabled with the reason.
+  const tableAction = (t) => (a) => {
+    if (a.unavailable) return { label: a.label, disabled: true, title: a.unavailable, run: () => {} };
+    if (a.id === "samplequery") return { label: a.label, run: () => openEditor(btSampleQuery(t, quote)) };
+    return { label: a.label, danger: a.destructive,
+      run: () => runAction(route, a.target || [instance], a, () => loadExplorer()) };
+  };
   const loadExplorer = async () => {
     try {
       catalog = await call("explorer");
@@ -17749,7 +17795,9 @@ function renderBigtableStudio(panel, route, segments, project) {
             bqMenu(`View actions for ${t.name}`, [
               { label: "Query", run: () => openBuilder(t.name) },
               { label: "Open in query editor", run: () => openEditor(`SELECT * FROM ${quote(t.name)} LIMIT 100`) },
-              { label: "Open table page", run: () => navigate(`/bigtable/${encodeURIComponent(t.name)}?project=${encodeURIComponent(project)}&instance=${encodeURIComponent(instance)}`) },
+              ...(t.actions || []).map(tableAction(t)),
+              { label: "Open table page", title: "CloudBurrow's page of the table's rows, schema, change stream, snapshots, authorized views and schema bundles",
+                run: () => navigate(`/bigtable/${encodeURIComponent(t.name)}?project=${encodeURIComponent(project)}&instance=${encodeURIComponent(instance)}`) },
             ])),
           el("ul", { class: "spanner-columns" },
             ...t.families.map((f) => el("li", {}, el("span", { class: "mono", text: f.name }), el("span", { class: "unavailable", text: ` ${f.gc}` }))),
@@ -17764,6 +17812,14 @@ function renderBigtableStudio(panel, route, segments, project) {
         queriesGroup,
         ...Object.entries(catalog.errors || {}).map(([k, v]) => el("p", { class: "unavailable", text: `${k}: ${v}` })));
       await loadSaved();
+      // A table opened from the Tables page (?table=), in a query tab of its
+      // own, as Google reaches a table in Bigtable Studio (#2027).
+      const wanted = new URLSearchParams(location.search).get("table");
+      if (wanted && !openedFromAddress && tables.some((t) => t.name === wanted)) {
+        openedFromAddress = true;
+        const at = store.tabs.findIndex((x) => x.mode === "builder" && x.table === wanted && !x.savedId);
+        if (at >= 0) selectTab(at); else openBuilder(wanted);
+      }
     } catch (err) {
       setChildren(explorer, el("h3", { text: "Explorer" }), el("p", { class: "form-error", role: "alert", text: err.message }));
     }

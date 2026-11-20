@@ -153,25 +153,38 @@ func TestConsoleBigtableInstancePicker(t *testing.T) {
 	var page struct {
 		Sections []struct {
 			ID      string
-			Listing struct{ Items []struct{ Name, Link string } }
+			Listing struct {
+				Items []struct {
+					Name, Link string
+					Actions    []struct{ Label, Href string }
+				}
+			}
 		}
 	}
 	if err := json.Unmarshal([]byte(out), &page); err != nil {
 		t.Fatalf("decode the instance's page: %v: %s", err, out)
 	}
-	want := fmt.Sprintf("/bigtable/%s?instance=%s&project=%s", table, id, url.QueryEscape(project))
-	var link string
+	// A table opens in the instance's Bigtable Studio, as Google's does
+	// (#2027); its row's Open table page is the table's own page.
+	want := fmt.Sprintf("/bigtable-instances/%s?project=%s&tab=studio&table=%s", id, url.QueryEscape(project), table)
+	wantPage := fmt.Sprintf("/bigtable/%s?instance=%s&project=%s", table, id, url.QueryEscape(project))
+	var link, tablePage string
 	for _, s := range page.Sections {
 		if s.ID == "tables" {
 			for _, it := range s.Listing.Items {
 				if it.Name == table {
 					link = it.Link
+					for _, a := range it.Actions {
+						if a.Label == "Open table page" {
+							tablePage = a.Href
+						}
+					}
 				}
 			}
 		}
 	}
-	if link != want {
-		t.Errorf("the instance's Tables tab links %s to %q, want %q: %s", table, link, want, out)
+	if link != want || tablePage != wantPage {
+		t.Errorf("the instance's Tables tab links %s to %q and its table page %q, want %q and %q: %s", table, link, tablePage, want, wantPage, out)
 	}
 
 	if code, out := consoleDo(t, addr, http.MethodDelete, "/api/resources/bigtable?"+scoped+"&name="+table, ""); code/100 != 2 {

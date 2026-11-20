@@ -10762,6 +10762,7 @@
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/GetTable",
         "status": "Verified",
         "tests": [
+          "test/compat/bigtableclusterstates_test.go:27 TestBigtableTableClusterStates",
           "test/compat/bigtablerowkeyschema_test.go:30 TestBigtableRowKeySchemas",
           "test/compat/consolebigtableactions_test.go:37 TestConsoleBigtableTableAndCellActions",
           "test/compat/consolebigtableedit_test.go:103 TestConsoleBigtableFamiliesAndRowWrites",
@@ -10804,6 +10805,7 @@
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/ListTables",
         "status": "Verified",
         "tests": [
+          "test/compat/bigtableclusterstates_test.go:27 TestBigtableTableClusterStates",
           "test/compat/bigtablerowkeyschema_test.go:30 TestBigtableRowKeySchemas",
           "test/compat/consolebigtablepicker_test.go:33 TestConsoleBigtableInstancePicker",
           "test/compat/consoledatabases_test.go:47 TestConsoleBigtableCreateAndDeleteTable"

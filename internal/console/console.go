@@ -95,6 +95,13 @@ type Resource struct {
 	// preview only where the server would give one.
 	Size        int64  `json:"size,omitempty"`
 	ContentType string `json:"contentType,omitempty"`
+	// Children are rows listed under this one, behind an arrow beside its
+	// name: a Bigtable table's replications, one per cluster with its
+	// replication state ("Click the arrow next to the table ID to expand
+	// a list of replications of the table", #2027). They carry the
+	// listing's columns, have no actions, and are not counted, filtered or
+	// paged on their own.
+	Children []Resource `json:"children,omitempty"`
 }
 
 // Listing is a page of resources.
@@ -134,6 +141,9 @@ type Listing struct {
 	// rows do not look identical from the client's side, and guessing wrong
 	// either hides a level or offers a link that 501s.
 	RowsOpenable bool `json:"rowsOpenable,omitempty"`
+	// ChildNoun is the plural word for the rows' Children, which names
+	// each row's expand arrow ("Show replications of orders").
+	ChildNoun string `json:"childNoun,omitempty"`
 	// AlwaysStatus declares that this listing has a status column even when no
 	// row currently carries one.
 	//

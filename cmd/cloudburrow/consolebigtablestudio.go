@@ -25,6 +25,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"regexp"
 	"slices"
 	"sort"
@@ -35,6 +36,8 @@ import (
 	"cloud.google.com/go/bigtable"
 	btapb "cloud.google.com/go/bigtable/admin/apiv2/adminpb"
 	"google.golang.org/api/iterator"
+
+	"github.com/cloudburrow/cloudburrow/internal/console"
 )
 
 type bigtableStudioRequest struct {
@@ -76,6 +79,71 @@ type bigtableStudioTable struct {
 	Name            string                 `json:"name"`
 	Families        []bigtableStudioFamily `json:"families"`
 	AuthorizedViews []string               `json:"authorizedViews"`
+	// Actions are the table's View actions in the Explorer, in Google's
+	// order (#2027), each performed at its Target on the instance page's
+	// provider.
+	Actions []bigtableStudioAction `json:"actions"`
+}
+
+// bigtableStudioAction is one of a table's Explorer actions: a console
+// action and the path it is performed at ([instance] for Create a new
+// table and Create a backup, [instance, tables, table] for the table's
+// own). An action with no ID is the Studio's own (View a sample query).
+type bigtableStudioAction struct {
+	Target []string `json:"target,omitempty"`
+	console.Action
+}
+
+// Why the Explorer's Monitor and Export to Cloud Storage are drawn
+// disabled (#2027).
+const (
+	bigtableNoSystemInsights = "Not available locally: system insights are Cloud Monitoring dashboards over Bigtable's metrics, which the emulator does not report."
+	bigtableNoExport         = "Not available locally: Export to Cloud Storage runs Google's Bigtable to Cloud Storage Dataflow template, and CloudBurrow does not run Dataflow templates."
+)
+
+// studioTableActions are a table's View actions in Bigtable Studio's
+// Explorer, as Google lists them
+// (https://docs.cloud.google.com/bigtable/docs/manage-data-using-console):
+// Create a new table, Create a backup, Prevent deletion, Edit, Delete,
+// View a sample query, View backups, Monitor by viewing system insights
+// and Export to Cloud Storage. The last two need Cloud Monitoring and
+// Dataflow, and are drawn disabled with the reason.
+func studioTableActions(project, instance, table string, tables []string, clusters []*bigtable.ClusterInfo, info *bigtable.TableInfo) []bigtableStudioAction {
+	inst := []string{instance}
+	self := []string{instance, bigtableTablesSegment, table}
+	backup := createBackupFields(tables, clusters)
+	backup[0].Default = table
+	out := []bigtableStudioAction{
+		{inst, console.Action{ID: "createtable", Label: "Create a new table", Fields: bigtableCreateTableFields(), Submit: "Create"}},
+		{inst, console.Action{ID: "createbackup", Label: "Create a backup", Fields: backup, Submit: "Create"}},
+	}
+	out = append(out, bigtableStudioAction{self, preventDeletionAction(info)})
+	for _, a := range tableRowActions(info, table) {
+		out = append(out, bigtableStudioAction{self, a})
+	}
+	return append(out,
+		bigtableStudioAction{nil, console.Action{ID: "samplequery", Label: "View a sample query"}},
+		bigtableStudioAction{nil, console.Action{ID: "viewbackups", Label: "View backups", Href: bigtableInstanceTabHref(project, instance, "backups")}},
+		bigtableStudioAction{nil, console.Action{ID: "systeminsights", Label: "Monitor by viewing system insights", Unavailable: bigtableNoSystemInsights}},
+		bigtableStudioAction{nil, console.Action{ID: "export", Label: "Export to Cloud Storage", Unavailable: bigtableNoExport}},
+	)
+}
+
+// preventDeletionAction is the Explorer's Prevent deletion: the table's
+// deletion protection, prefilled.
+func preventDeletionAction(info *bigtable.TableInfo) console.Action {
+	protected := info != nil && info.DeletionProtection == bigtable.Protected
+	return console.Action{ID: "preventdeletion", Label: "Prevent deletion", Submit: "Save",
+		Fields: []console.Field{{Name: "protected", Label: "Prevent deletion", Type: "checkbox", Default: strconv.FormatBool(protected),
+			Help: "A protected table, and its column families, cannot be deleted."}}}
+}
+
+// bigtableInstanceTabHref is an instance page's tab.
+func bigtableInstanceTabHref(project, instance, tab string) string {
+	q := url.Values{}
+	q.Set("project", project)
+	q.Set("tab", tab)
+	return "/bigtable-instances/" + url.PathEscape(instance) + "?" + q.Encode()
 }
 
 type bigtableStudioExplorer struct {
@@ -165,9 +233,16 @@ func (p bigtableInstancesProvider) studioExplorer(ctx context.Context, project, 
 	}
 	sort.Strings(tables)
 	parent := "projects/" + project + "/instances/" + instance
+	var clusters []*bigtable.ClusterInfo
+	if iac, err := p.client(ctx, project); err == nil {
+		clusters, _ = iac.Clusters(ctx, instance)
+		_ = iac.Close()
+	}
 	for _, t := range tables {
 		st := bigtableStudioTable{Name: t, Families: []bigtableStudioFamily{}, AuthorizedViews: []string{}}
-		if info, err := admin.TableInfo(ctx, t); err == nil {
+		info, err := admin.TableInfo(ctx, t)
+		st.Actions = studioTableActions(project, instance, t, tables, clusters, info)
+		if err == nil {
 			for _, f := range info.FamilyInfos {
 				gc := f.GCPolicy
 				if strings.TrimSpace(gc) == "" {
