@@ -1739,6 +1739,28 @@ var parityRows = []parityRow{
 			"endpoint and its model, keeping the downloaded files, which Model Garden's Delete files removes; the details show the " +
 			"model's container image (the Model's containerSpec)",
 		Tests: []string{"TestModelGardenDeploysADownloadedHuggingFaceModel", "TestModelGardenDeploysHuggingFaceModels"}},
+	// The Model Registry and Endpoints (#1940).
+	{Resource: "Model Registry: models and versions", Service: "vertexai",
+		Methods: []string{"ModelService/UploadModel", "ModelService/ListModelVersions", "ModelService/UpdateModel",
+			"ModelService/MergeVersionAliases", "ModelService/DeleteModelVersion", "ModelService/CopyModel", "ModelService/ExportModel"},
+		Provider: "vertex-models", Offers: "Model Registry: Import uploads a custom container model (or a new version of one, with " +
+			"aliases, an artifact location, routes, port and environment); a model's page lists its versions with their aliases, " +
+			"artifacts and endpoints, and offers Edit, Edit version aliases, Delete version, Copy and Export",
+		Tests: []string{"TestModelRegistryAndEndpointsThroughThePages", "TestModelRegistryDeploysACustomContainer"}},
+	{Resource: "Model Registry: evaluations", Service: "vertexai",
+		Methods:  []string{"ModelService/ImportModelEvaluation", "ModelService/ListModelEvaluations", "ModelService/GetModelEvaluation"},
+		Provider: "vertex-models", Offers: "A model's Evaluate tab lists its evaluations; Import evaluation stores one and View evaluation shows its metrics",
+		Tests:    []string{"TestModelRegistryDeploysACustomContainer"}},
+	{Resource: "Endpoints: create, deploy and manage", Service: "vertexai",
+		Methods: []string{"EndpointService/CreateEndpoint", "EndpointService/DeployModel", "EndpointService/UpdateEndpoint",
+			"EndpointService/MutateDeployedModel"},
+		Provider: "vertex-endpoints", Offers: "Endpoints: Create endpoint; a model's Deploy to endpoint runs a version's container in the " +
+			"cluster with its machine type, compute nodes and traffic share; an endpoint's page lists its deployed models with their " +
+			"traffic split, and offers Test model, Edit traffic split, Edit compute nodes, Edit settings and Undeploy model",
+		Tests: []string{"TestModelRegistryAndEndpointsThroughThePages", "TestModelRegistryDeploysACustomContainer"}},
+	{Resource: "Endpoints: long-running update", Service: "vertexai",
+		Methods:  []string{"EndpointService/UpdateEndpointLongRunning"},
+		Excluded: "the same update as UpdateEndpoint, answered as an operation, which the endpoint page's Edit settings and Edit traffic split send"},
 	{Resource: "Model Garden: chat completions", Service: "vertexaiv1beta1",
 		Methods: []string{"PredictionService/ChatCompletions"},
 		Screen:  "/agent-platform/endpoints", Offers: "Endpoints' Test your model: Predict sends Model Garden's prompt instance (or TEI's " +

@@ -93,6 +93,9 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	// reaches: no state file is written, no container started.
 	ai := vertexai.NewServer(nil)
 	ai.SetModelGarden(&modelgarden.Manager{})
+	// And the Model Registry (#1940), in memory, with nothing to run a
+	// model or copy an artifact: an empty request is refused first.
+	ai.SetRegistry("", nil, nil)
 	ai.RegisterGRPC(srv)
 	adminpb.RegisterFirestoreAdminServer(srv, firestoreadmin.New(""))
 	dsadminpb.RegisterDatastoreAdminServer(srv, callfront.NewDatastoreAdmin("127.0.0.1:1", ""))

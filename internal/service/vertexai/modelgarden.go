@@ -598,6 +598,11 @@ func (s *Server) restTranscoder() *rest.Transcoder {
 			opRule("/v1/{name=projects/*/locations/*/operations/*}"),
 			opRule("/v1/{name=projects/*/locations/*/endpoints/*/operations/*}"),
 			opRule("/v1/{name=projects/*/locations/*/models/*/operations/*}"),
+			// gcloud ai endpoints deploy-model polls its operation under
+			// v1beta1 (#1940); it is the same operation.
+			opRule("/v1beta1/{name=projects/*/locations/*/operations/*}"),
+			opRule("/v1beta1/{name=projects/*/locations/*/endpoints/*/operations/*}"),
+			opRule("/v1beta1/{name=projects/*/locations/*/models/*/operations/*}"),
 		}}
 		s.registerModelGarden(t)
 		longrunningpb.RegisterOperationsServer(t, &operations{s: s})
@@ -609,7 +614,8 @@ func (s *Server) restTranscoder() *rest.Transcoder {
 // serveREST hands a request the routes above did not take to the transcoder,
 // or answers the not-found body when Model Garden is not served.
 func (s *Server) serveREST(w http.ResponseWriter, r *http.Request, body []byte) {
-	if (s.modelGarden() == nil && s.registry() == nil) || !strings.HasPrefix(r.URL.Path, "/v1/") {
+	beta := r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1beta1/") && strings.Contains(r.URL.Path, "/operations/")
+	if (s.modelGarden() == nil && s.registry() == nil) || (!strings.HasPrefix(r.URL.Path, "/v1/") && !beta) {
 		s.notFound(w, r)
 		return
 	}

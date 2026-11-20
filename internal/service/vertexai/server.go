@@ -45,7 +45,7 @@ type Server struct {
 
 	// garden serves Model Garden's Hugging Face deployments (#1840,
 	// modelgarden.go), with their operations and REST transcoder.
-	garden   *modelgarden.Manager
+	garden *modelgarden.Manager
 	// reg serves the Model Registry and Endpoints (#1940, registry.go).
 	reg      *registry
 	ops      *lro.Store

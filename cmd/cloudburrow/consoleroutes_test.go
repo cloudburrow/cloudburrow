@@ -37,6 +37,15 @@ func TestEveryProviderHasAConsoleRoute(t *testing.T) {
 			routed[m[1]] = true
 		}
 	}
+	// Agent Platform's pages (#1940) are built by agentPlatformRoutes,
+	// every one in the product's section, and spread into ROUTES.
+	if j := strings.Index(js, "function agentPlatformRoutes() {"); j >= 0 {
+		ap := js[j:]
+		ap = ap[:strings.Index(ap, "\n}")]
+		for _, m := range regexp.MustCompile(`service: "([a-z0-9-]+)"`).FindAllStringSubmatch(ap, -1) {
+			routed[m[1]] = true
+		}
+	}
 	d := coverageDeps(t)
 	for _, p := range consoleProviders(d, clusterMetrics(d.cfg.KubeconfigPath()), console.NewSeries(console.SeriesLimit, nil)) {
 		if !routed[p.ID()] {

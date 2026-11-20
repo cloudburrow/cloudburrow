@@ -75,8 +75,11 @@ func TestTerminalEnvIsGcloudSetupAtInClusterAddresses(t *testing.T) {
 			t.Errorf("%s=%s is a host address a pod cannot reach", name, value)
 		}
 	}
-	if overrides != len(gcloudVerified) {
-		t.Errorf("%d overrides; gcloud-setup writes %d", overrides, len(gcloudVerified))
+	// The local AI endpoint, which serves Vertex AI's Model Registry and
+	// Endpoints (#1940), is the CLI's and has no in-cluster address, so
+	// its override is not given to a pod.
+	if overrides != len(gcloudVerified)-1 {
+		t.Errorf("%d overrides; gcloud-setup writes %d, one of them (aiplatform) host-only", overrides, len(gcloudVerified))
 	}
 
 	// Without cloudburrow-host (no Cloud Run), only what is in the cluster.

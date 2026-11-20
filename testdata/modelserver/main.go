@@ -6,8 +6,9 @@
 // the directory AIP_STORAGE_URI names, then serves AIP_HEALTH_ROUTE and
 // AIP_PREDICT_ROUTE on AIP_HTTP_PORT. The model is a linear one,
 // prediction = weight * instance + bias, so a prediction proves which
-// artifacts were loaded. Each prediction also reports the AIP_* variables
-// the container was given. Cloud Storage is read through its JSON API at
+// artifacts were loaded. With parameters {"report": "env"} each
+// prediction is instead the AIP_* variables the container was given, and
+// with {"report": "model"} the loaded model's name. Cloud Storage is read through its JSON API at
 // STORAGE_EMULATOR_HOST (CloudBurrow sets it on every workload), with the
 // standard library only.
 package main
@@ -53,7 +54,10 @@ func main() {
 	mux.HandleFunc(health, func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	mux.HandleFunc(predict, func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
-			Instances []float64 `json:"instances"`
+			Instances  []float64 `json:"instances"`
+			Parameters struct {
+				Report string `json:"report"`
+			} `json:"parameters"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.Instances) == 0 {
 			w.WriteHeader(http.StatusBadRequest)
@@ -61,10 +65,17 @@ func main() {
 			return
 		}
 		var out struct {
-			Predictions []map[string]any `json:"predictions"`
+			Predictions []any `json:"predictions"`
 		}
 		for _, x := range req.Instances {
-			out.Predictions = append(out.Predictions, map[string]any{"value": m.Weight*x + m.Bias, "model": m.Name, "env": env})
+			switch req.Parameters.Report {
+			case "env":
+				out.Predictions = append(out.Predictions, env)
+			case "model":
+				out.Predictions = append(out.Predictions, m.Name)
+			default:
+				out.Predictions = append(out.Predictions, m.Weight*x+m.Bias)
+			}
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(out)
