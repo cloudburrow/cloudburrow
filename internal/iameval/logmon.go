@@ -1,35 +1,37 @@
 package iameval
 
-import (
-	"fmt"
-
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-)
+import "fmt"
 
 func init() {
 	for name, svc := range map[string]*Service{
-		"google.logging.v2.LoggingServiceV2":               Logging,
-		"google.logging.v2.ConfigServiceV2":                Logging,
-		"google.logging.v2.MetricsServiceV2":               Logging,
-		"google.monitoring.v3.MetricService":               Monitoring,
-		"google.monitoring.v3.AlertPolicyService":          Monitoring,
-		"google.monitoring.v3.NotificationChannelService":  Monitoring,
-		"google.monitoring.v3.UptimeCheckService":          Monitoring,
-		"google.monitoring.v3.GroupService":                Monitoring,
-		"google.monitoring.v3.ServiceMonitoringService":    Monitoring,
-		"google.monitoring.v3.SnoozeService":               Monitoring,
-		"google.monitoring.v3.QueryService":                Monitoring,
-		"google.monitoring.dashboard.v1.DashboardsService": Monitoring,
-		"google.cloud.run.v2.Services":                     Run,
-		"google.cloud.run.v2.Jobs":                         Run,
-		"google.cloud.run.v2.WorkerPools":                  Run,
-		"google.cloud.functions.v2.FunctionService":        Functions,
-		"google.cloud.functions.v1.CloudFunctionsService":  Functions,
-		"google.cloud.eventarc.v1.Eventarc":                Eventarc,
-		"google.cloud.redis.v1.CloudRedis":                 Redis,
-		"google.cloud.redis.cluster.v1.CloudRedisCluster":  RedisCluster,
-		"google.cloud.memorystore.v1.Memorystore":          Valkey,
+		"google.logging.v2.LoggingServiceV2":                   Logging,
+		"google.logging.v2.ConfigServiceV2":                    Logging,
+		"google.logging.v2.MetricsServiceV2":                   Logging,
+		"google.monitoring.v3.MetricService":                   Monitoring,
+		"google.monitoring.v3.AlertPolicyService":              Monitoring,
+		"google.monitoring.v3.NotificationChannelService":      Monitoring,
+		"google.monitoring.v3.UptimeCheckService":              Monitoring,
+		"google.monitoring.v3.GroupService":                    Monitoring,
+		"google.monitoring.v3.ServiceMonitoringService":        Monitoring,
+		"google.monitoring.v3.SnoozeService":                   Monitoring,
+		"google.monitoring.v3.QueryService":                    Monitoring,
+		"google.monitoring.dashboard.v1.DashboardsService":     Monitoring,
+		"google.cloud.run.v2.Services":                         Run,
+		"google.cloud.run.v2.Jobs":                             Run,
+		"google.cloud.run.v2.WorkerPools":                      Run,
+		"google.cloud.functions.v2.FunctionService":            Functions,
+		"google.cloud.functions.v1.CloudFunctionsService":      Functions,
+		"google.cloud.eventarc.v1.Eventarc":                    Eventarc,
+		"google.cloud.redis.v1.CloudRedis":                     Redis,
+		"google.cloud.redis.cluster.v1.CloudRedisCluster":      RedisCluster,
+		"google.cloud.memorystore.v1.Memorystore":              Valkey,
+		"google.cloud.run.v2.Revisions":                        Run,
+		"google.cloud.run.v2.Executions":                       Run,
+		"google.cloud.run.v2.Tasks":                            Run,
+		"google.cloud.run.v2.Instances":                        Run,
+		"google.cloud.run.v2.Builds":                           Run,
+		"google.devtools.artifactregistry.v1.ArtifactRegistry": ArtifactRegistry,
+		"google.devtools.cloudbuild.v1.CloudBuild":             CloudBuild,
 	} {
 		Services[name] = svc
 	}
@@ -62,13 +64,13 @@ func rows(byPrefix map[string]map[string][2]string) map[string]Method {
 // log view keeps its own policy (roles/logging.viewAccessor on one view).
 // TailLogEntries is a stream, and saved queries and log scopes are served
 // over JSON alone (no published proto), so they are not checked.
-// A resource under an organization, folder or billing account rather than
-// a project has no project ancestry here, so only the instance's own
-// account passes there (a gap, #1879). A sink's custom writer identity's
-// iam.serviceAccounts.actAs
-// (https://docs.cloud.google.com/logging/docs/routing/user-managed-service-accounts)
-// is not checked yet: a sink's update sends back the writer identity
-// Logging chose. Google's wording of a
+// A resource under a folder, the organization or a billing account is
+// checked against that root's policy and its ancestors' (HierarchyRoot;
+// a billing account's is its organization's, hierarchy.go). A sink's
+// customWriterIdentity, a query parameter over JSON, needs
+// iam.serviceAccounts.actAs on that account
+// (https://docs.cloud.google.com/logging/docs/routing/user-managed-service-accounts,
+// read 2026-11-20). Google's wording of a
 // denial is UNVERIFIED (re-read 2026-11-20:
 // https://docs.cloud.google.com/logging/docs/access-control gives none):
 // IAM Credentials' "Permission 'P' denied on resource (or it may not
@@ -137,6 +139,15 @@ var Logging = &Service{
 				"SetIamPolicy": {"logging.views.setIamPolicy", "resource"},
 			},
 		})
+		// A sink's custom writer identity, over JSON alone: "If you use
+		// custom roles, then the principal needs the
+		// iam.serviceAccounts.actAs permission" (the page above; the
+		// writer identity is in internal/service/logging).
+		for _, k := range []string{"CreateSink", "UpdateSink"} {
+			row := m["/google.logging.v2.ConfigServiceV2/"+k]
+			row.ActAsQuery = []string{"customWriterIdentity"}
+			m["/google.logging.v2.ConfigServiceV2/"+k] = row
+		}
 		return m
 	}(),
 	Deny: func(permission, resource string) error {
@@ -245,73 +256,6 @@ var Monitoring = &Service{
 	Deny: func(permission, resource string) error {
 		return grpcDenied(fmt.Sprintf("Permission '%s' denied on resource '%s' (or it may not exist).", permission, resource),
 			permission, resource, true)
-	},
-}
-
-// Run is Cloud Run Admin API v2's table for the checks this round makes:
-// a service's, job's or worker pool's template service account needs
-// iam.serviceAccounts.actAs on it, "required to attach a service account
-// on the service or revision" (and "on the job", "on the worker pool":
-// https://docs.cloud.google.com/run/docs/configuring/services/service-identity,
-// .../jobs/service-identity, .../workerpools/service-identity, read
-// 2026-11-20). Cloud Run's own permissions (run.services.create, ...) are
-// not checked yet: their rows have no permission. The denial is the
-// troubleshooting page's "Permission 'iam.serviceaccounts.actAs' denied on
-// service account E" (https://docs.cloud.google.com/run/docs/troubleshooting).
-var Run = &Service{
-	Name: "run.googleapis.com",
-	Methods: func() map[string]Method {
-		m := map[string]Method{}
-		for svc, rows := range map[string]map[string][2]string{
-			"Services":    {"CreateService": {"parent", "service.template.service_account"}, "UpdateService": {"service.name", "service.template.service_account"}},
-			"Jobs":        {"CreateJob": {"parent", "job.template.template.service_account"}, "UpdateJob": {"job.name", "job.template.template.service_account"}},
-			"WorkerPools": {"CreateWorkerPool": {"parent", "worker_pool.template.service_account"}, "UpdateWorkerPool": {"worker_pool.name", "worker_pool.template.service_account"}},
-		} {
-			for name, r := range rows {
-				m["/google.cloud.run.v2."+svc+"/"+name] = Method{Field: r[0], ActAs: []string{r[1]}}
-			}
-		}
-		return m
-	}(),
-	Deny: func(permission, resource string) error {
-		return grpcDenied(fmt.Sprintf("Permission '%s' denied on resource '%s' (or it may not exist).", permission, resource),
-			permission, resource, true)
-	},
-	DenyActAs: func(account, resource string) error {
-		return grpcDenied("Permission 'iam.serviceaccounts.actAs' denied on service account "+account, ActAs, resource, true)
-	},
-}
-
-// Functions is Cloud Functions v2's table for the checks this round
-// makes: deployers need "Service Account User role
-// (roles/iam.serviceAccountUser) on the runtime service account", and on
-// the build's (https://docs.cloud.google.com/functions/docs/reference/iam/roles,
-// read 2026-11-20), so CreateFunction and UpdateFunction check
-// iam.serviceAccounts.actAs on serviceConfig.serviceAccountEmail and
-// buildConfig.serviceAccount (which may be
-// projects/{p}/serviceAccounts/{email}). The denial is the
-// troubleshooting page's "Caller is missing permission
-// 'iam.serviceaccounts.actAs' on service account
-// projects/-/serviceAccounts/E." (https://docs.cloud.google.com/functions/docs/troubleshooting;
-// its final period UNVERIFIED, re-read 2026-11-20).
-var Functions = &Service{
-	Name: "cloudfunctions.googleapis.com",
-	Methods: map[string]Method{
-		"/google.cloud.functions.v2.FunctionService/CreateFunction": {Field: "parent",
-			ActAs: []string{"function.service_config.service_account_email", "function.build_config.service_account"}},
-		"/google.cloud.functions.v2.FunctionService/UpdateFunction": {Field: "function.name",
-			ActAs: []string{"function.service_config.service_account_email", "function.build_config.service_account"}},
-		// 1st gen: the function's runtime account and its build's.
-		"/google.cloud.functions.v1.CloudFunctionsService/CreateFunction": {Field: "location",
-			ActAs: []string{"function.service_account_email", "function.build_service_account"}},
-		"/google.cloud.functions.v1.CloudFunctionsService/UpdateFunction": {Field: "function.name",
-			ActAs: []string{"function.service_account_email", "function.build_service_account"}},
-	},
-	Deny: func(permission, resource string) error {
-		return grpcDenied(fmt.Sprintf("Permission '%s' denied on '%s'", permission, resource), permission, resource, false)
-	},
-	DenyActAs: func(account, resource string) error {
-		return status.Error(codes.PermissionDenied, "Caller is missing permission 'iam.serviceaccounts.actAs' on service account projects/-/serviceAccounts/"+account+".")
 	},
 }
 

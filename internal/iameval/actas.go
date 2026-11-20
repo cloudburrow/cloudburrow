@@ -176,10 +176,24 @@ func lowerCamel(s string) string {
 func fieldValues(m protoreflect.Message, spec string) []string {
 	for _, p := range strings.Split(spec, "|") {
 		if v := valuesAt(m, strings.Split(p, ".")); len(v) > 0 {
-			return v
+			return projectIDs(p, v)
 		}
 	}
 	return []string{""}
+}
+
+// projectIDs are values of the field path p as resource names: a
+// project_id field (Cloud Build's) holds a bare project ID, the resource
+// "projects/ID".
+func projectIDs(p string, v []string) []string {
+	if p != "project_id" {
+		return v
+	}
+	out := make([]string, len(v))
+	for i, id := range v {
+		out[i] = "projects/" + id
+	}
+	return out
 }
 
 // jsonResources is fieldValues of a JSON request: a path the URL sets,
@@ -187,10 +201,10 @@ func fieldValues(m protoreflect.Message, spec string) []string {
 func jsonResources(fields map[string]string, raw []byte, body, spec string) []string {
 	for _, p := range strings.Split(spec, "|") {
 		if v := fields[p]; v != "" {
-			return []string{v}
+			return projectIDs(p, []string{v})
 		}
 		if v := jsonActAs(raw, body, []string{p}); len(v) > 0 {
-			return v
+			return projectIDs(p, v)
 		}
 	}
 	return []string{""}

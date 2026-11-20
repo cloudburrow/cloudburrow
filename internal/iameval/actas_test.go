@@ -96,7 +96,7 @@ func (s actAsSource) Policy(resource string) *iampolicy.Stored {
 	if resource == "projects/p/serviceAccounts/"+s.account {
 		return &iampolicy.Stored{Bindings: []iampolicy.Binding{{Role: "roles/iam.serviceAccountUser", Members: []string{"serviceAccount:" + s.user}}}}
 	}
-	return nil
+	return s.policies[resource]
 }
 
 // TestActAs (#1879): a Cloud Run service whose template names a service
@@ -106,7 +106,9 @@ func (s actAsSource) Policy(resource string) *iampolicy.Stored {
 // token account is checked with Scheduler's.
 func TestActAs(t *testing.T) {
 	const allowed = "ok@p.iam.gserviceaccount.com"
-	src := actAsSource{user: sa, account: allowed}
+	// Cloud Run Admin on the project: run.services.create, not actAs.
+	src := actAsSource{fakeSource: fakeSource{policies: map[string]*iampolicy.Stored{"projects/p": pol(iampolicy.Binding{
+		Role: "roles/run.admin", Members: []string{"serviceAccount:" + sa}})}}, user: sa, account: allowed}
 	e := &Enforcer{Eval: &Evaluator{Source: src}, On: func() bool { return true },
 		CallerOf: func(string) Caller { return Caller{Email: sa} },
 		Policies: map[string]PolicyGetter{IAM.Name: func(_ context.Context, r string) *iampolicy.Stored { return src.Policy(r) }}}

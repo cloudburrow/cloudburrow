@@ -47,8 +47,8 @@ const CloudSQLDenied = "The client isn't authorized to make this request."
 // list cloudsql.instances.get. connectSettings and generateEphemeralCert,
 // what a connector calls to connect, check cloudsql.instances.connect, the
 // permission "Connect using the Cloud SQL Auth Proxy" says a 403
-// notAuthorized lacks (UNVERIFIED that these methods check it, re-read
-// 2026-11-20). Not checked, with no permission documented: flags.list and
+// notAuthorized lacks (UNVERIFIED, re-read 2026-11-20, that these methods
+// check it). Not checked, with no permission documented: flags.list and
 // tiers.list (the table: "None"), pointInTimeRestore, switchover, demote,
 // operations.cancel, getLatestRecoveryTime, rescheduleMaintenance,
 // createEphemeral, the SSRS leases and resolveConnectSettings.

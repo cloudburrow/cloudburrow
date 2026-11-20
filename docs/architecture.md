@@ -71,7 +71,8 @@ Out of contract, not merely unscheduled:
   `internal/iamroles`), and BigQuery remote models' connection permissions; and, with
   `up --iam-enforcement=on` (#1879, off by default), the methods `internal/iameval` maps on Secret
   Manager, Cloud KMS, Cloud Tasks, Cloud Storage, Pub/Sub, Cloud Run invoke, BigQuery sharing, Cloud
-  Scheduler, Workflows, Cloud Logging, Cloud Monitoring, Memorystore and the Cloud SQL Admin API, and
+  Scheduler, Workflows, Cloud Logging, Cloud Monitoring, Memorystore, the Cloud SQL Admin API, the
+  Cloud Run Admin API (v2 and v1), Cloud Functions, Artifact Registry and Cloud Build, and
   `iam.serviceAccounts.actAs` where an API attaches a service account
   ([compatibility.md](compatibility.md#iam-enforcement)).
 - **GKE-specific APIs**, Google-managed load balancing, storage classes and identity.

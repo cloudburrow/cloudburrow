@@ -1311,3 +1311,9 @@ func isFunctionsPath(p string) bool {
 	}
 	return false
 }
+
+// IAMPolicy is a function's stored policy, as GetIamPolicy answers it:
+// what IAM enforcement reads of a function (#1879).
+func (f *FunctionsServer) IAMPolicy(ctx context.Context, req *iampb.GetIamPolicyRequest) (*iampb.Policy, error) {
+	return functionsIAM{f}.GetIamPolicy(ctx, req)
+}

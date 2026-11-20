@@ -55,6 +55,12 @@ type Request struct {
 	// Project is the project (ID or number) whose ancestry applies.
 	Project string   `json:"project,omitempty"`
 	Own     []Policy `json:"own,omitempty"`
+	// ActAs, when set, is a service account (an email) the request
+	// attaches to a resource in Project (#1879): the host checks
+	// iam.serviceAccounts.actAs on it, by the account's own policy, which
+	// the host keeps, and its project's ancestry; Resource, Type, Service,
+	// Own and Permissions are ignored.
+	ActAs string `json:"actAs,omitempty"`
 }
 
 // Decision is the host's answer.

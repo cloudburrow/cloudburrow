@@ -15,7 +15,9 @@ import (
 	"google.golang.org/grpc/codes"
 	grpcmd "google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
+	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/iamcond"
 	"github.com/cloudburrow/cloudburrow/internal/iameval"
@@ -89,6 +91,42 @@ func (s registrySource) Ancestry(project string) []string {
 			out = append(out, "folders/"+a.ID)
 		case "organization":
 			out = append(out, "organizations/"+a.ID)
+		}
+	}
+	return out
+}
+
+// HierarchyAncestry is a folder's, the organization's or a billing
+// account's ancestry (#1879): a folder, its parent folders and the
+// organization; the organization alone; a billing account and the
+// organization, as "the billing account inherits IAM permissions from its
+// parent organization" (https://docs.cloud.google.com/billing/docs/how-to/billing-access,
+// read 2026-11-20). Cloud Billing is not served, so nothing here keeps a
+// billing account's own policy, and every billing account is taken to be
+// the instance's organization's (UNVERIFIED for an account Google holds
+// under no organization, re-read 2026-11-20).
+func (s registrySource) HierarchyAncestry(root string) []string {
+	reg := s.registry()
+	switch {
+	case reg == nil:
+		return nil
+	case root == resourcemanager.OrganizationName:
+		return []string{root}
+	case strings.HasPrefix(root, "billingAccounts/"):
+		return []string{root, resourcemanager.OrganizationName}
+	case !strings.HasPrefix(root, "folders/"):
+		return nil
+	}
+	var out []string
+	for p, i := root, 0; strings.HasPrefix(p, "folders/") && i <= resourcemanager.MaxFolderDepth+1; i++ {
+		f, err := reg.Folder(p)
+		if err != nil {
+			return out
+		}
+		out = append(out, p)
+		p = f.Parent
+		if p == resourcemanager.OrganizationName {
+			out = append(out, p)
 		}
 	}
 	return out
@@ -233,7 +271,52 @@ func (s iamEnforced) use(e *iameval.Enforcer) {
 		}
 	}
 	if s.run != nil {
-		s.run.interpose = append(s.run.interpose, e.Interceptor(iameval.Run), e.Interceptor(iameval.Functions), e.Interceptor(iameval.Eventarc))
+		runCheck := e.Interceptor(iameval.Run)
+		// The v1 (Knative-shaped) API serves its requests through the v2
+		// methods in process: each is checked as its v2 request.
+		runadapter.UseV1Authorize(&runadapter.V1Authorizer{
+			Method: func(ctx context.Context, full string, req proto.Message) error {
+				_, err := runCheck(ctx, req, &grpc.UnaryServerInfo{FullMethod: full}, func(context.Context, any) (any, error) { return nil, nil })
+				return err
+			},
+			Permission: func(ctx context.Context, permission, resource string) error {
+				return e.Authorize(ctx, iameval.Run, iameval.IncomingBearer(ctx), permission, resource)
+			},
+		})
+		// Cloud Run's services, jobs and worker pools keep their own
+		// policies, as do functions and Artifact Registry repositories.
+		e.Policies[iameval.Run.Name] = func(ctx context.Context, resource string) *iampolicy.Stored {
+			a := s.run.adapter.Load()
+			if a == nil {
+				return nil
+			}
+			get := a.GetIamPolicy
+			switch {
+			case strings.Contains(resource, "/jobs/"):
+				get = a.Jobs().GetIamPolicy
+			case strings.Contains(resource, "/workerPools/"):
+				get = a.WorkerPools().GetIamPolicy
+			case strings.Contains(resource, "/instances/"):
+				get = a.Instances().GetIamPolicy
+			}
+			return iameval.GRPCPolicyGetter(func() func(context.Context, *iampb.GetIamPolicyRequest) (*iampb.Policy, error) { return get })(ctx, resource)
+		}
+		e.Policies[iameval.Functions.Name] = iameval.GRPCPolicyGetter(func() func(context.Context, *iampb.GetIamPolicyRequest) (*iampb.Policy, error) {
+			f := s.run.functions.Load()
+			if f == nil {
+				return nil
+			}
+			return f.IAMPolicy
+		})
+		e.Policies[iameval.ArtifactRegistry.Name] = iameval.GRPCPolicyGetter(func() func(context.Context, *iampb.GetIamPolicyRequest) (*iampb.Policy, error) {
+			a := s.run.adapter.Load()
+			if a == nil {
+				return nil
+			}
+			return a.ArtifactRegistry().GetIamPolicy
+		})
+		s.run.interpose = append(s.run.interpose, runCheck, e.Interceptor(iameval.Functions), e.Interceptor(iameval.Eventarc),
+			e.Interceptor(iameval.ArtifactRegistry), e.Interceptor(iameval.CloudBuild))
 		run, functions := jsonEnforcer(e, iameval.Run, nil), jsonEnforcer(e, iameval.Functions, nil)
 		eventarc := jsonEnforcer(e, iameval.Eventarc, nil)
 		s.run.wrapJSON = func(next http.Handler) http.Handler {

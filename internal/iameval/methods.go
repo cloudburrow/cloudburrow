@@ -26,6 +26,14 @@ type Method struct {
 	// account the call attaches to its resource: each one set needs
 	// iam.serviceAccounts.actAs on that account (actas.go).
 	ActAs []string
+	// ActAsQuery are JSON query parameters naming such an account (an
+	// email, or "serviceAccount:EMAIL"), for a field the gRPC request
+	// lacks (a Logging sink's customWriterIdentity).
+	ActAsQuery []string
+	// IfSet, when set, is a request field (a dotted path) whose presence
+	// needs IfSetPermission too, on the same resource (Cloud Run's RunJob
+	// with overrides).
+	IfSet, IfSetPermission string
 }
 
 // Service is one API's table: its methods by gRPC full method, the

@@ -1,6 +1,7 @@
 package iameval
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -67,6 +68,15 @@ func (e *Enforcer) CheckRemote(in iamcheck.Request) iamcheck.Decision {
 	req := Request{Email: email, Resource: in.Resource, Type: in.Type, Service: in.Service, Project: project, Time: e.now()}
 	for _, p := range in.Own {
 		req.Own = append(req.Own, Attached{Resource: p.Resource, Policy: p.Policy})
+	}
+	if in.ActAs != "" {
+		// A service account the server's request attaches (a Pub/Sub
+		// push subscription's OIDC token): its own policy is IAM's,
+		// which this host keeps.
+		resource := ServiceAccountResource(project, in.ActAs)
+		req = e.Request(context.Background(), IAM, email, ActAs, resource)
+		in.Permissions = []string{ActAs}
+		project = req.Project
 	}
 	if project != "" {
 		out.Teams = e.Eval.ProjectTeams(project, email, req.Time)

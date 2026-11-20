@@ -64,9 +64,11 @@
 # (UP_FLAGS) and runs only the enforcement tests (COMPAT_RUN,
 # ^TestIAMEnforcement), which skip on every other shard's instance, as
 # those run with enforcement off (#1879): Cloud Storage, Pub/Sub, Cloud
-# Tasks, Secret Manager, Cloud KMS, Cloud Run (for run.routes.invoke and
-# iam.serviceAccounts.actAs), Cloud Scheduler, Workflows, Cloud Logging,
-# Cloud Monitoring, Memorystore and the Cloud SQL Admin API.
+# Tasks, Secret Manager, Cloud KMS, Cloud Run (for run.routes.invoke,
+# iam.serviceAccounts.actAs and, since the sixth round, its admin API and
+# Cloud Functions, Artifact Registry and Cloud Build on its port), Cloud
+# Scheduler, Workflows, Cloud Logging, Cloud Monitoring, Memorystore and
+# the Cloud SQL Admin API.
 
 # A tenth, sqlreplicas, is the sql shard's instance again for the Cloud SQL
 # tests that make replicas, standbys and external primaries

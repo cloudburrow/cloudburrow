@@ -94,7 +94,7 @@ func (e *Enforcer) Interceptor(svc *Service) grpc.UnaryServerInterceptor {
 		if e == nil || e.On == nil || !e.On() {
 			return handler(ctx, req)
 		}
-		if strings.HasSuffix(info.FullMethod, "/TestIamPermissions") && svc.checksPolicies() {
+		if strings.HasSuffix(info.FullMethod, "/TestIamPermissions") && svc.answersTestIAM(info.FullMethod) {
 			return e.testPermissions(ctx, svc, req, handler)
 		}
 		_, m := ForMethod(svc, info.FullMethod)
@@ -112,6 +112,11 @@ func (e *Enforcer) Interceptor(svc *Service) grpc.UnaryServerInterceptor {
 			}
 		}
 		resource := resources[0]
+		if m.IfSet != "" && hasField(msg.ProtoReflect(), m.IfSet) {
+			if err := e.Authorize(ctx, svc, bearer(ctx), m.IfSetPermission, resource); err != nil {
+				return nil, err
+			}
+		}
 		for _, account := range actAsFields(msg.ProtoReflect(), m.ActAs) {
 			if err := e.AuthorizeActAs(ctx, svc, bearer(ctx), Project(resource), account); err != nil {
 				return nil, err
@@ -182,6 +187,11 @@ func (e *Enforcer) Request(ctx context.Context, svc *Service, email, permission,
 			req.Own = append(req.Own, Attached{Resource: "//" + svc.Name + "/" + r, Policy: get(ctx, r)})
 		}
 	}
+	if req.Project == "" && e.Eval != nil {
+		// A folder's, the organization's or a billing account's resource:
+		// its root's policy and the root's ancestors' apply (#1879).
+		req.Own = append(req.Own, e.Eval.hierarchyPolicies(resource)...)
+	}
 	return req
 }
 
@@ -226,6 +236,10 @@ func bearer(ctx context.Context) string {
 	}
 	return ""
 }
+
+// IncomingBearer is the bearer token of a call's incoming gRPC metadata,
+// "" for none.
+func IncomingBearer(ctx context.Context) string { return bearer(ctx) }
 
 // Bearer is an Authorization header's bearer token, "" for none.
 func Bearer(header string) string {
@@ -277,7 +291,7 @@ func (e *Enforcer) HTTP(svc *Service, m *rest.Matcher, next http.Handler) http.H
 			next.ServeHTTP(w, r)
 			return
 		}
-		if strings.HasSuffix(full, "/TestIamPermissions") && svc.checksPolicies() {
+		if strings.HasSuffix(full, "/TestIamPermissions") && svc.answersTestIAM(full) {
 			e.testPermissionsJSON(w, r, svc, fields["resource"], next)
 			return
 		}
@@ -303,7 +317,19 @@ func (e *Enforcer) HTTP(svc *Service, m *rest.Matcher, next http.Handler) http.H
 			}
 		}
 		resource := resources[0]
-		for _, account := range jsonActAs(raw, route.Body, row.ActAs) {
+		if row.IfSet != "" && jsonHas(raw, route.Body, row.IfSet) {
+			if err := e.Authorize(r.Context(), svc, Bearer(r.Header.Get("Authorization")), row.IfSetPermission, resource); err != nil {
+				WriteJSONStatus(w, err)
+				return
+			}
+		}
+		accounts := jsonActAs(raw, route.Body, row.ActAs)
+		for _, q := range row.ActAsQuery {
+			if v := strings.TrimPrefix(r.URL.Query().Get(q), "serviceAccount:"); v != "" {
+				accounts = append(accounts, v)
+			}
+		}
+		for _, account := range accounts {
 			if err := e.AuthorizeActAs(r.Context(), svc, Bearer(r.Header.Get("Authorization")), Project(resource), account); err != nil {
 				WriteJSONStatus(w, err)
 				return
@@ -420,4 +446,74 @@ func (s *Service) checksPolicies() bool {
 		}
 	}
 	return false
+}
+
+// answersTestIAM is whether svc's table answers a TestIamPermissions call
+// of full with what the caller holds: its own service's method, or the
+// IAMPolicy mixin's when the table checks that mixin's methods. Several
+// APIs share a port (Cloud Run's serves Cloud Functions, Artifact Registry
+// and Cloud Build), so each table answers only its own.
+func (s *Service) answersTestIAM(full string) bool {
+	if !s.checksPolicies() {
+		return false
+	}
+	service, _, _ := strings.Cut(strings.TrimPrefix(full, "/"), "/")
+	if service == "google.iam.v1.IAMPolicy" {
+		_, ok := s.Methods["/google.iam.v1.IAMPolicy/GetIamPolicy"]
+		return ok
+	}
+	return Services[service] == s
+}
+
+// hasField is whether m sets the message field at the dotted path.
+func hasField(m protoreflect.Message, path string) bool {
+	parts := strings.Split(path, ".")
+	for i, p := range parts {
+		fd := m.Descriptor().Fields().ByName(protoreflect.Name(p))
+		if fd == nil || !m.Has(fd) {
+			return false
+		}
+		if i == len(parts)-1 {
+			return true
+		}
+		if fd.Kind() != protoreflect.MessageKind || fd.IsList() || fd.IsMap() {
+			return false
+		}
+		m = m.Get(fd).Message()
+	}
+	return false
+}
+
+// jsonHas is whether a JSON request's body sets the field at path, a
+// request field path as jsonActAs reads it.
+func jsonHas(raw []byte, body, path string) bool {
+	if body == "" || len(raw) == 0 {
+		return false
+	}
+	var doc any
+	if json.Unmarshal(raw, &doc) != nil {
+		return false
+	}
+	parts := strings.Split(path, ".")
+	if body != "*" {
+		if parts[0] != body {
+			return false
+		}
+		parts = parts[1:]
+	}
+	for _, p := range parts {
+		m, ok := doc.(map[string]any)
+		if !ok {
+			return false
+		}
+		v, ok := m[lowerCamel(p)]
+		if !ok {
+			v, ok = m[p]
+		}
+		if !ok || v == nil {
+			return false
+		}
+		doc = v
+	}
+	return true
 }

@@ -704,12 +704,18 @@ func (s configServer) GetSink(_ context.Context, req *loggingpb.GetSinkRequest) 
 // configure_export_v2 says "All sinks have a writer identity except for
 // sinks that write to a log bucket in the same Google Cloud project in
 // which the log entries originate" (#1595).
-func (a *Admin) stampSink(p parent, sk *loggingpb.LogSink, old *loggingpb.LogSink) {
+//
+// A custom writer identity (writeridentity.go), the request's or the one
+// old keeps, is the writer identity instead.
+func (a *Admin) stampSink(p parent, sk *loggingpb.LogSink, old *loggingpb.LogSink, custom string) {
 	now := timestamppb.New(a.now())
 	sk.CreateTime, sk.UpdateTime = now, now
 	sk.WriterIdentity = "serviceAccount:" + serviceAccount(p)
 	if sameProjectBucket(p, sk.GetDestination()) {
 		sk.WriterIdentity = ""
+	}
+	if custom != "" {
+		sk.WriterIdentity = custom
 	}
 	if old != nil {
 		sk.CreateTime = old.GetCreateTime()
@@ -741,12 +747,18 @@ func (s configServer) CreateSink(ctx context.Context, req *loggingpb.CreateSinkR
 	if err := checkIntercept(project, sk, intercept); err != nil {
 		return nil, apierror.Wrap(err)
 	}
+	writer := requestWriter(ctx)
+	if writer != "" {
+		if err := checkCustomWriter(project, sk, writer); err != nil {
+			return nil, apierror.Wrap(err)
+		}
+	}
 	s.a.mu.Lock()
 	defer s.a.mu.Unlock()
 	if _, err := s.a.get(kindSink, project, sk.GetName()); err == nil {
 		return nil, apierror.Wrap(apierror.AlreadyExists("sink %s already exists", kindSink.name(project, sk.GetName())))
 	}
-	s.a.stampSink(project, sk, nil)
+	s.a.stampSink(project, sk, nil, writer)
 	if err := s.a.put(kindSink, project, sk.GetName(), sk); err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -796,7 +808,16 @@ func (s configServer) UpdateSink(ctx context.Context, req *loggingpb.UpdateSinkR
 	if err := checkIntercept(project, sk, intercept); err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	s.a.stampSink(project, sk, old)
+	writer := requestWriter(ctx)
+	if writer == "" && sinkBucketDestination(project, sk.GetDestination()) {
+		writer = customWriter(project, old)
+	}
+	if writer != "" {
+		if err := checkCustomWriter(project, sk, writer); err != nil {
+			return nil, apierror.Wrap(err)
+		}
+	}
+	s.a.stampSink(project, sk, old, writer)
 	if err := s.a.put(kindSink, project, id, sk); err != nil {
 		return nil, apierror.Wrap(err)
 	}
