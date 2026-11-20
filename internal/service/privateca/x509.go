@@ -132,9 +132,6 @@ func applySANs(t *x509.Certificate, san *privatecapb.SubjectAltNames) error {
 	if san == nil {
 		return nil
 	}
-	if len(san.GetCustomSans()) > 0 {
-		return apierror.Unimplemented("subject_alt_name.custom_sans is not implemented in CloudBurrow yet")
-	}
 	t.DNSNames = append(t.DNSNames, san.GetDnsNames()...)
 	t.EmailAddresses = append(t.EmailAddresses, san.GetEmailAddresses()...)
 	for _, ip := range san.GetIpAddresses() {
@@ -151,7 +148,8 @@ func applySANs(t *x509.Certificate, san *privatecapb.SubjectAltNames) error {
 		}
 		t.URIs = append(t.URIs, p)
 	}
-	return nil
+	// After the other names, which the extension it writes carries too.
+	return applyCustomSANs(t, san.GetCustomSans())
 }
 
 func oid(o *privatecapb.ObjectId) asn1.ObjectIdentifier {
@@ -353,6 +351,7 @@ func describe(c *x509.Certificate) *privatecapb.CertificateDescription {
 	for _, u := range c.URIs {
 		san.Uris = append(san.Uris, u.String())
 	}
+	san.CustomSans = customSANsOf(c)
 	d := &privatecapb.CertificateDescription{
 		SubjectDescription: &privatecapb.CertificateDescription_SubjectDescription{
 			Subject:         subjectProto(c.Subject),

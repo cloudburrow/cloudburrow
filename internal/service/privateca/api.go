@@ -682,6 +682,7 @@ func (a *API) CreateCertificate(_ context.Context, req *privatecapb.CreateCertif
 	}
 	t := &x509.Certificate{SerialNumber: serial(), SignatureAlgorithm: signatureAlgorithm(issuer)}
 	var x509Req *privatecapb.X509Parameters
+	var requestedKID []byte // config.subject_key_id (#1961)
 	var pub any
 	switch cfg := in.GetCertificateConfig().(type) {
 	case *privatecapb.Certificate_PemCsr:
@@ -745,8 +746,8 @@ func (a *API) CreateCertificate(_ context.Context, req *privatecapb.CreateCertif
 			}
 		}
 		x509Req = c.GetX509Config()
-		if kid := c.GetSubjectKeyId().GetKeyId(); kid != "" {
-			return nil, apierror.Unimplemented("config.subject_key_id is not implemented in CloudBurrow yet")
+		if requestedKID, err = requestedKeyID(c.GetSubjectKeyId()); err != nil {
+			return nil, err
 		}
 	default:
 		return nil, apierror.InvalidArgument("certificate needs pem_csr or config")
@@ -754,7 +755,7 @@ func (a *API) CreateCertificate(_ context.Context, req *privatecapb.CreateCertif
 	if err := checkKeyType(pub, policy.GetAllowedKeyTypes()); err != nil {
 		return nil, err
 	}
-	if t.Subject.String() == "" && len(t.DNSNames)+len(t.EmailAddresses)+len(t.IPAddresses)+len(t.URIs) == 0 {
+	if t.Subject.String() == "" && len(t.DNSNames)+len(t.EmailAddresses)+len(t.IPAddresses)+len(t.URIs) == 0 && !hasCustomSANs(t) {
 		return nil, apierror.InvalidArgument("the certificate needs a subject or a subject alternative name")
 	}
 	// passthrough_extensions: the request's extensions outside the pool's
@@ -811,6 +812,10 @@ func (a *API) CreateCertificate(_ context.Context, req *privatecapb.CreateCertif
 	}
 	if t.SubjectKeyId, err = keyID(pub); err != nil {
 		return nil, apierror.InvalidArgument("the public key: %v", err)
+	}
+	if requestedKID != nil {
+		// config.subject_key_id (#1961) replaces the computed one.
+		t.SubjectKeyId = requestedKID
 	}
 	der, err := x509.CreateCertificate(nil, t, issuer.Cert, pub, issuer.Key)
 	if err != nil {

@@ -4362,6 +4362,13 @@ func (p secretsProvider) Create(_ context.Context, project string, values map[st
 	if err != nil {
 		return "", err
 	}
+	tags, err := console.ParseMap(values["tags"])
+	if err != nil {
+		return "", fmt.Errorf("tags: %w", err)
+	}
+	if err := st.CheckTags(secrets.SecretName(project, id), tags); err != nil {
+		return "", err
+	}
 	sec, err := st.CreateSecretEncrypted(project, id, labels, annotations, expire,
 		secretTopicsValue(values["topics"]), sch, keys, kind, locations...)
 	if err != nil {
@@ -4386,6 +4393,10 @@ func (p secretsProvider) Create(_ context.Context, project string, values map[st
 			_ = st.DeleteSecret(project, id)
 			return "", fmt.Errorf("the version aliases were refused, so the secret was not created: %w", err)
 		}
+	}
+	if err := st.BindTags(sec.Name, tags); err != nil {
+		_ = st.DeleteSecret(project, id)
+		return "", fmt.Errorf("the tags were refused, so the secret was not created: %w", err)
 	}
 	return sec.Name, nil
 }

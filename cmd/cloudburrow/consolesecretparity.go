@@ -285,6 +285,10 @@ func secretCreateFields(regional bool) []console.Field {
 				secretEncryptionCMEK: "Customer-managed encryption key (CMEK)"}},
 		keys)
 	fields = append(fields, secretOptionalFields(nil)...)
+	// Tags are given at creation only ("Input only. Immutable.", #1961).
+	fields = append(fields, console.Field{Name: "tags", Label: "Tags", Type: "map", Section: "Tags",
+		Help: "Optional. One tag key=value per line, each by its namespaced name or ID (tagKeys/…, tagValues/…), such as " +
+			"100000000001/env=prod; bound through Resource Manager to the secret, and fixed once it is created."})
 	return fields
 }
 

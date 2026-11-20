@@ -23,14 +23,24 @@ func checkCreatable(sec *secretmanagerpb.Secret, regional bool) error {
 		field string
 		set   bool
 	}{
-		{"version_aliases", len(sec.GetVersionAliases()) > 0},
 		{"customer_managed_encryption", !regional && sec.GetCustomerManagedEncryption() != nil},
-		{"tags", len(sec.GetTags()) > 0},
 	}
 	for _, u := range unsupported {
 		if u.set {
 			return apierror.Unimplemented("Secret.%s is not implemented by CloudBurrow's Secret Manager; "+
 				"the secret would be stored without it, so the request is refused", u.field)
+		}
+	}
+	// version_aliases at creation are checked as UpdateSecret checks them
+	// (#1961): a new secret has no versions, so an alias naming one is
+	// refused after the name rules and the limit of 50.
+	if va := sec.GetVersionAliases(); len(va) > 0 {
+		aliases := make(map[string]int, len(va))
+		for a, n := range va {
+			aliases[a] = int(n)
+		}
+		if err := checkVersionAliases(aliases, func(int) bool { return false }); err != nil {
+			return err
 		}
 	}
 	if regional {

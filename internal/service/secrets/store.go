@@ -161,6 +161,8 @@ type Store struct {
 	offset atomic.Int64
 	// keys is Cloud KMS, for customer-managed encryption (#1453).
 	keys func() KeyService
+	// tags is Resource Manager's tag bindings, for Secret.tags (#1961).
+	tags func() TagBinder
 }
 
 // NewStore returns a store backed by db.
@@ -840,6 +842,8 @@ func (s *Store) DeleteSecret(project, id string) error {
 
 // deleteSecret removes a secret and its versions. The caller holds s.mu.
 func (s *Store) deleteSecret(project, id string) error {
+	// Resource Manager has nothing left to bind its tags to (#1961).
+	s.unbindTagsLocked(SecretName(project, id))
 	if bd, ok := s.db.(secretDeleter); ok {
 		// One request, however many versions the secret has (#1596).
 		if err := bd.DeleteSecretRecords(project, id); err != nil {
