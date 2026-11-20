@@ -33,8 +33,8 @@ func kmsVersionCryptoActions(p kmspb.CryptoKey_CryptoKeyPurpose) []console.Actio
 	// Get public key asks for its format, so its answer has a dialog to be
 	// shown in: an action with no fields is performed on click.
 	pub := console.Action{ID: "publickey", Label: "Get public key", Fields: []console.Field{
-		{Name: "format", Label: "Format", Type: "select", Default: "PEM", Options: []string{"PEM", "DER"},
-			Help: "PEM is shown as text, DER base64-encoded."}}}
+		{Name: "format", Label: "Format", Type: "select", Default: "PEM", Options: []string{"PEM", "DER", "NIST_PQC"},
+			Help: "PEM is shown as text, DER and NIST_PQC base64-encoded. A post-quantum key needs NIST_PQC (ML-DSA also takes PEM and DER)."}}}
 	switch p {
 	case kmspb.CryptoKey_ASYMMETRIC_SIGN:
 		return []console.Action{
@@ -71,11 +71,11 @@ func kmsVersionCryptoActions(p kmspb.CryptoKey_CryptoKeyPurpose) []console.Actio
 				{Name: "iv", Label: "Initialization vector (base64)", Type: "text", Required: true}}},
 		}
 	case kmspb.CryptoKey_KEY_ENCAPSULATION:
-		pub.Fields = []console.Field{{Name: "format", Label: "Format", Type: "select", Default: "NIST_PQC", Options: []string{"NIST_PQC"},
-			Help: "FIPS 203's encoding, base64-encoded: the format post-quantum keys need."}}
+		pub.Fields = []console.Field{{Name: "format", Label: "Format", Type: "select", Default: "NIST_PQC", Options: []string{"NIST_PQC", "XWING_RAW_BYTES"},
+			Help: "Base64-encoded: NIST_PQC (FIPS 203) for ML-KEM, XWING_RAW_BYTES for X-Wing."}}
 		return []console.Action{
 			{ID: "decapsulate", Label: "Decapsulate", Fields: []console.Field{
-				b64("ciphertext", "Ciphertext (base64)", "An ML-KEM ciphertext made with this version's public key.")}},
+				b64("ciphertext", "Ciphertext (base64)", "An ML-KEM or X-Wing ciphertext made with this version's public key.")}},
 			pub,
 		}
 	}
@@ -110,11 +110,27 @@ func kmsVersionCryptoAct(ctx context.Context, api *kms.Server, version, action s
 		if err != nil {
 			return nil, true, err
 		}
+		v, err := api.GetCryptoKeyVersion(ctx, &kmspb.GetCryptoKeyVersionRequest{Name: version})
+		if err != nil {
+			return nil, true, err
+		}
+		var ok bool
+		if kms.PostQuantum(v.GetAlgorithm()) {
+			pk, err := api.GetPublicKey(ctx, &kmspb.GetPublicKeyRequest{Name: version, PublicKeyFormat: kmspb.PublicKey_NIST_PQC})
+			if err != nil {
+				return nil, true, err
+			}
+			ok, err = kms.VerifyPQSignature(pk.GetPublicKey().GetData(), pk.GetAlgorithm(), data, sig)
+			if err != nil {
+				return nil, true, err
+			}
+			return kmsResult("Signature", map[bool]string{true: "Valid", false: "Invalid"}[ok], ""), true, nil
+		}
 		pk, err := api.GetPublicKey(ctx, &kmspb.GetPublicKeyRequest{Name: version})
 		if err != nil {
 			return nil, true, err
 		}
-		ok, err := kms.VerifySignature(pk.GetPem(), pk.GetAlgorithm(), data, sig)
+		ok, err = kms.VerifySignature(pk.GetPem(), pk.GetAlgorithm(), data, sig)
 		if err != nil {
 			return nil, true, err
 		}
@@ -258,7 +274,7 @@ func kmsAlgorithmField() console.Field {
 	}
 	return console.Field{Name: "algorithm", Label: "Algorithm", Type: "select", Options: opts,
 		Help: "Empty is GOOGLE_SYMMETRIC_ENCRYPTION, for ENCRYPT_DECRYPT. Another purpose needs one of its own: " +
-			"EC_SIGN_* and RSA_SIGN_* sign (EC_SIGN_SECP256K1_SHA256 at HSM or HSM_SINGLE_TENANT only, as on Google), RSA_DECRYPT_OAEP_* decrypt, HMAC_* MAC, AES_* raw encryption, ML_KEM_* key encapsulation, AES_256_KWP (AES_WRAPPING, HSM_SINGLE_TENANT only) trusted key wrapping."}
+			"EC_SIGN_* and RSA_SIGN_* sign (EC_SIGN_SECP256K1_SHA256 at HSM or HSM_SINGLE_TENANT only, as on Google), RSA_DECRYPT_OAEP_* decrypt, HMAC_* MAC, AES_* raw encryption, ML_KEM_* and KEM_XWING key encapsulation, PQ_SIGN_* post-quantum signing (ML-DSA, SLH-DSA; SOFTWARE only, as on Google), AES_256_KWP (AES_WRAPPING, HSM_SINGLE_TENANT only) trusted key wrapping."}
 }
 
 // Import jobs and retired resources (#1219). An import job's page is

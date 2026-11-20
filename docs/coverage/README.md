@@ -22,7 +22,7 @@ Do not edit these files by hand.
 | [Cloud Functions v2](functions.md) | 8 | 8 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Functions v1](functionsv1.md) | 11 | 11 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Run v1 (Knative API)](runv1.md) | 76 | 76 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Cloud KMS](kms.md) | 63 | 63 | 0 | 0 | 0 | 0 | 0 | 88 |
+| [Cloud KMS](kms.md) | 63 | 63 | 0 | 0 | 0 | 0 | 0 | 90 |
 | [IAM (custom roles, service accounts, deny policies, organization policies)](iam.md) | 48 | 48 | 0 | 0 | 0 | 0 | 0 | 4 |
 | [Resource Manager v3 (Projects, Folders, Organizations, Tags)](resourcemanager.md) | 54 | 54 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Resource Manager v1 REST (projects, org policies; liens on v1 and v3)](resourcemanagerv1.md) | 38 | 38 | 0 | 0 | 0 | 0 | 0 | 0 |

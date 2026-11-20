@@ -49,7 +49,7 @@ func TestRESTIam(t *testing.T) {
 		{"IAM on a version", "POST", ring + "/cryptoKeys/k/cryptoKeyVersions/1:setIamPolicy", "{}", 404, "NOT_FOUND"},
 		{"unknown body field", "POST", ring + ":setIamPolicy", `{"policy":{},"bogus":1}`, 400, "INVALID_ARGUMENT"},
 		{"stale etag", "POST", ring + ":setIamPolicy", `{"policy":{"etag":"c3RhbGU="}}`, 409, "ABORTED"},
-		{"import job", "POST", ring + "/importJobs/j:setIamPolicy", `{"policy":{}}`, 501, "UNIMPLEMENTED"},
+		{"absent import job", "POST", ring + "/importJobs/j:setIamPolicy", `{"policy":{}}`, 404, "NOT_FOUND"},
 		{"unknown parameter", "GET", ring + ":getIamPolicy?bogus=1", "", 400, "INVALID_ARGUMENT"},
 	} {
 		code, m, raw := restDo(t, c.method, c.url, c.body)

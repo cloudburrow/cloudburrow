@@ -59,6 +59,12 @@ func kmsAlgorithmWords(a string) string {
 		return "Elliptic Curve Ed25519"
 	case "AES_256_KWP":
 		return "AES-256 key wrapping (KWP)"
+	case "KEM_XWING":
+		return "X-Wing (ML-KEM-768 + X25519)"
+	case "PQ_SIGN_SLH_DSA_SHA2_128S":
+		return "SLH-DSA-SHA2-128s"
+	case "PQ_SIGN_HASH_SLH_DSA_SHA2_128S_SHA256":
+		return "HashSLH-DSA-SHA2-128s - SHA256 Digest"
 	}
 	parts := strings.Split(a, "_")
 	switch {
@@ -84,6 +90,10 @@ func kmsAlgorithmWords(a string) string {
 		return "AES-" + parts[1] + " " + parts[2]
 	case strings.HasPrefix(a, "ML_KEM_") && len(parts) == 3:
 		return "ML-KEM-" + parts[2]
+	case strings.HasPrefix(a, "PQ_SIGN_ML_DSA_") && len(parts) == 5:
+		return "ML-DSA-" + parts[4]
+	case strings.HasPrefix(a, "PQ_SIGN_ML_DSA_") && strings.HasSuffix(a, "_EXTERNAL_MU") && len(parts) == 7:
+		return "ML-DSA-" + parts[4] + " - external μ"
 	}
 	return a
 }

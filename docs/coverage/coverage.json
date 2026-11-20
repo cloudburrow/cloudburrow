@@ -3572,6 +3572,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_external_test.go:39 TestKMSExternalKeys",
+          "test/compat/kms_pq_test.go:73 TestKMSPostQuantumSignatures",
           "test/compat/kms_purposes_test.go:87 TestKMSAsymmetricSignVerifiesWithThePublicKeyPEM",
           "test/compat/kms_secp256k1_test.go:34 TestKMSSecp256k1SignsAndVerifiesWithThePublicKey"
         ],
@@ -3600,12 +3601,13 @@
           "test/compat/kms1577_test.go:34 TestKMSDefaultKeyAccessJustificationsPolicies",
           "test/compat/kms_external_test.go:39 TestKMSExternalKeys",
           "test/compat/kms_hsm_ekm_autokey_test.go:54 TestKMSHSMKeysAndKeyAccessJustifications",
+          "test/compat/kms_pq_test.go:230 TestKMSImportOnlyKeys",
           "test/compat/kms_purposes_test.go:87 TestKMSAsymmetricSignVerifiesWithThePublicKeyPEM",
           "test/compat/kms_rotation_test.go:33 TestKMSRotationSchedule",
           "test/compat/kms_secp256k1_test.go:34 TestKMSSecp256k1SignsAndVerifiesWithThePublicKey",
           "test/compat/kms_test.go:47 TestKMSResources",
           "test/compat/orgpolicycustom1895_kms_test.go:28 TestOrgPolicyCustomConstraintsKMS",
-          "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
+          "test/compat/terraform_kms_purposes_test.go:29 TestTerraformKMSPurposesAndImportJob"
         ],
         "unverified": [
           {
@@ -3655,6 +3657,11 @@
           },
           {
             "code": "INVALID_ARGUMENT",
+            "case": "import_only without skip_initial_version_creation, or with a rotation schedule",
+            "test": "test/compat/kms_pq_test.go:230 TestKMSImportOnlyKeys"
+          },
+          {
+            "code": "INVALID_ARGUMENT",
             "case": "purpose CRYPTO_KEY_PURPOSE_UNSPECIFIED",
             "test": "test/compat/kms_test.go:374 TestKMSCreateCryptoKeyFields"
           },
@@ -3672,6 +3679,7 @@
           "test/compat/cloudsqlreencrypt_test.go:25 TestCloudSQLReencrypt",
           "test/compat/kms_external_test.go:39 TestKMSExternalKeys",
           "test/compat/kms_hsm_ekm_autokey_test.go:54 TestKMSHSMKeysAndKeyAccessJustifications",
+          "test/compat/kms_pq_test.go:230 TestKMSImportOnlyKeys",
           "test/compat/kms_purposes_test.go:386 TestKMSAsymmetricVersionsStartPendingGeneration",
           "test/compat/kms_secp256k1_test.go:34 TestKMSSecp256k1SignsAndVerifiesWithThePublicKey",
           "test/compat/kms_test.go:224 TestKMSVersionCanStartDisabled",
@@ -3682,6 +3690,11 @@
             "code": "FAILED_PRECONDITION",
             "case": "an invalid external key URI",
             "test": "test/compat/kms_external_test.go:39 TestKMSExternalKeys"
+          },
+          {
+            "code": "FAILED_PRECONDITION",
+            "case": "on an import_only key",
+            "test": "test/compat/kms_pq_test.go:230 TestKMSImportOnlyKeys"
           },
           {
             "code": "INVALID_ARGUMENT",
@@ -3708,7 +3721,7 @@
           "test/compat/kms_import_test.go:33 TestKMSImportManuallyWrappedKeys",
           "test/compat/kms_trusted_test.go:57 TestKMSTrustedKeyWrapping",
           "test/compat/orgpolicycustom1895_kms_test.go:28 TestOrgPolicyCustomConstraintsKMS",
-          "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
+          "test/compat/terraform_kms_purposes_test.go:29 TestTerraformKMSPurposesAndImportJob"
         ]
       },
       {
@@ -3720,7 +3733,7 @@
           "test/compat/kms_test.go:47 TestKMSResources",
           "test/compat/orgpolicy1890_test.go:392 TestOrgPolicyEnforcementKMSLocations",
           "test/compat/sysparams1954_test.go:77 TestSystemParametersKMS",
-          "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
+          "test/compat/terraform_kms_purposes_test.go:29 TestTerraformKMSPurposesAndImportJob"
         ],
         "unverified": [
           {
@@ -3734,7 +3747,8 @@
         "method": "google.cloud.kms.v1.KeyManagementService/Decapsulate",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_import_test.go:128 TestKMSDecapsulateMLKEM"
+          "test/compat/kms_import_test.go:128 TestKMSDecapsulateMLKEM",
+          "test/compat/kms_pq_test.go:179 TestKMSDecapsulateXWing"
         ]
       },
       {
@@ -3824,7 +3838,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_test.go:424 TestKMSDestroyCryptoKeyVersion",
-          "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
+          "test/compat/terraform_kms_purposes_test.go:29 TestTerraformKMSPurposesAndImportJob"
         ],
         "unverified": [
           {
@@ -3921,7 +3935,7 @@
           "test/compat/kms_test.go:224 TestKMSVersionCanStartDisabled",
           "test/compat/kms_test.go:47 TestKMSResources",
           "test/compat/terraform_batch6_test.go:477 TestTerraformDataSources",
-          "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
+          "test/compat/terraform_kms_purposes_test.go:29 TestTerraformKMSPurposesAndImportJob"
         ],
         "unverified": [
           {
@@ -3982,7 +3996,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_import_test.go:33 TestKMSImportManuallyWrappedKeys",
-          "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
+          "test/compat/terraform_kms_purposes_test.go:29 TestTerraformKMSPurposesAndImportJob"
         ]
       },
       {
@@ -3994,7 +4008,7 @@
           "test/compat/kms_test.go:47 TestKMSResources",
           "test/compat/sysparams1954_test.go:77 TestSystemParametersKMS",
           "test/compat/terraform_batch10_test.go:164 TestTerraformDataSourcesBatch10",
-          "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
+          "test/compat/terraform_kms_purposes_test.go:29 TestTerraformKMSPurposesAndImportJob"
         ],
         "unverified": [
           {
@@ -4035,6 +4049,8 @@
         "tests": [
           "test/compat/kms_external_test.go:39 TestKMSExternalKeys",
           "test/compat/kms_import_test.go:128 TestKMSDecapsulateMLKEM",
+          "test/compat/kms_pq_test.go:179 TestKMSDecapsulateXWing",
+          "test/compat/kms_pq_test.go:73 TestKMSPostQuantumSignatures",
           "test/compat/kms_purposes_test.go:160 TestKMSAsymmetricDecryptOpensWhatThePublicKeyEncrypted",
           "test/compat/kms_purposes_test.go:386 TestKMSAsymmetricVersionsStartPendingGeneration",
           "test/compat/kms_purposes_test.go:87 TestKMSAsymmetricSignVerifiesWithThePublicKeyPEM",
@@ -4054,6 +4070,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_import_test.go:33 TestKMSImportManuallyWrappedKeys",
+          "test/compat/kms_pq_test.go:230 TestKMSImportOnlyKeys",
+          "test/compat/kms_pq_test.go:311 TestIAMEnforcementKMSImportJobs",
           "test/compat/kms_trusted_test.go:57 TestKMSTrustedKeyWrapping"
         ],
         "unverified": [
@@ -4080,7 +4098,7 @@
           "test/compat/kms_test.go:47 TestKMSResources",
           "test/compat/kms_test.go:950 TestKMSFullViewAddsNothingForSoftwareKeys",
           "test/compat/terraform_batch10_test.go:164 TestTerraformDataSourcesBatch10",
-          "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
+          "test/compat/terraform_kms_purposes_test.go:29 TestTerraformKMSPurposesAndImportJob"
         ],
         "unverified": [
           {
@@ -4238,7 +4256,7 @@
           "test/compat/kms_rotation_test.go:33 TestKMSRotationSchedule",
           "test/compat/kms_test.go:905 TestKMSUpdateCryptoKey",
           "test/compat/orgpolicycustom1895_kms_test.go:28 TestOrgPolicyCustomConstraintsKMS",
-          "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
+          "test/compat/terraform_kms_purposes_test.go:29 TestTerraformKMSPurposesAndImportJob"
         ],
         "unverified": [
           {
@@ -4387,6 +4405,8 @@
           "test/compat/iamenforcementpubsub1879_test.go:59 TestIAMEnforcementPubSub",
           "test/compat/kms_ekm_iam_test.go:31 TestKMSEkmIamPolicyIsStoredNotEnforced",
           "test/compat/kms_iam_test.go:35 TestKMSIamPolicyIsStoredNotEnforced",
+          "test/compat/kms_otherservices_test.go:23 TestKMSImportJobIamPolicy",
+          "test/compat/kms_pq_test.go:311 TestIAMEnforcementKMSImportJobs",
           "test/compat/terraform_batch11_test.go:699 TestTerraformKMSDataSourcesBatch11",
           "test/compat/terraform_batch9_test.go:127 TestTerraformCloudFunctions2FunctionIAM",
           "test/compat/terraform_iam_more_test.go:119 TestTerraformKMSStoredIAM"
@@ -4419,6 +4439,8 @@
           "test/compat/iamenforcementpubsub1879_test.go:59 TestIAMEnforcementPubSub",
           "test/compat/kms_ekm_iam_test.go:31 TestKMSEkmIamPolicyIsStoredNotEnforced",
           "test/compat/kms_iam_test.go:35 TestKMSIamPolicyIsStoredNotEnforced",
+          "test/compat/kms_otherservices_test.go:23 TestKMSImportJobIamPolicy",
+          "test/compat/kms_pq_test.go:311 TestIAMEnforcementKMSImportJobs",
           "test/compat/orgpolicylocations1890_test.go:49 TestOrgPolicyEnforcementPubSub",
           "test/compat/terraform_batch9_test.go:127 TestTerraformCloudFunctions2FunctionIAM",
           "test/compat/terraform_iam_more_test.go:119 TestTerraformKMSStoredIAM"
@@ -4444,7 +4466,8 @@
           "test/compat/consolepermissions_test.go:294 TestConsolePermissionsOnAnEkmConnection",
           "test/compat/iamenforcementpubsub1879_test.go:59 TestIAMEnforcementPubSub",
           "test/compat/kms_ekm_iam_test.go:31 TestKMSEkmIamPolicyIsStoredNotEnforced",
-          "test/compat/kms_iam_test.go:35 TestKMSIamPolicyIsStoredNotEnforced"
+          "test/compat/kms_iam_test.go:35 TestKMSIamPolicyIsStoredNotEnforced",
+          "test/compat/kms_otherservices_test.go:23 TestKMSImportJobIamPolicy"
         ]
       }
     ]

@@ -29,9 +29,9 @@ func TestRESTAnswersGoogleBindingsAndNothingElse(t *testing.T) {
 		// answers for it; TestRESTReads covers the rest.
 		{"GET", "/v1/projects/demo-project/locations/global/keyRings/absent", 404},
 		// Transcoded (#429): the server answers for a ring that does not
-		// exist; import jobs stay 501.
+		// exist, and for an import job that does not (#1946).
 		{"GET", "/v1/projects/demo-project/locations/global/keyRings/absent:getIamPolicy", 404},
-		{"POST", kr + "/importJobs/j:setIamPolicy", 501},
+		{"POST", "/v1/projects/demo-project/locations/global/keyRings/r/importJobs/j:setIamPolicy", 404},
 		// Locations is served since #1291; TestLocationsOverREST lists them.
 		{"GET", "/v1/projects/demo-project/locations/no-such-region", 404},
 		// GetOperation is served since #1452, for CreateKeyHandle.

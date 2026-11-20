@@ -113,17 +113,7 @@ func TestUnsupportedKMSIsUnimplemented(t *testing.T) {
 	c := client(t)
 	ctx := context.Background()
 	ring, _ := c.CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: loc, KeyRingId: "r2"})
-	// Documented algorithms Go's standard library does not compute (#1212).
-	for purpose, alg := range map[kmspb.CryptoKey_CryptoKeyPurpose]kmspb.CryptoKeyVersion_CryptoKeyVersionAlgorithm{
-		kmspb.CryptoKey_ASYMMETRIC_SIGN:   kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_65,
-		kmspb.CryptoKey_KEY_ENCAPSULATION: kmspb.CryptoKeyVersion_KEM_XWING,
-	} {
-		_, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(), CryptoKeyId: "a",
-			CryptoKey: &kmspb.CryptoKey{Purpose: purpose, VersionTemplate: &kmspb.CryptoKeyVersionTemplate{Algorithm: alg}}})
-		if status.Code(err) != codes.Unimplemented {
-			t.Errorf("purpose %s = %v, want Unimplemented", purpose, err)
-		}
-	}
+	// Every documented algorithm is served since #1946 (pq_test.go).
 	if _, err := c.CreateImportJob(ctx, &kmspb.CreateImportJobRequest{Parent: ring.GetName(), ImportJobId: "j",
 		ImportJob: &kmspb.ImportJob{ImportMethod: kmspb.ImportJob_HPKE_KEM_ML_KEM_768_HKDF_SHA256_AES_256_GCM, ProtectionLevel: kmspb.ProtectionLevel_SOFTWARE}}); status.Code(err) != codes.Unimplemented {
 		t.Errorf("an HPKE CreateImportJob = %v", err)

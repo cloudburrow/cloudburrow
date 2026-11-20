@@ -14,7 +14,9 @@ import (
 
 // TestTerraformKMSPurposesAndImportJob (#1304): crypto keys of the purposes
 // beyond ENCRYPT_DECRYPT (#1212), an ASYMMETRIC_SIGN, an ASYMMETRIC_DECRYPT
-// and a MAC key, each with a version_template, and a
+// and a MAC key, each with a version_template, post-quantum
+// PQ_SIGN_ML_DSA_65 and KEM_XWING keys (#1946), an import_only key with
+// skip_initial_version_creation, and a
 // google_kms_key_ring_import_job, apply through `cloudburrow terraform` with
 // egress blocked; the official gRPC client reads back each key's purpose,
 // algorithm, and first version, with no primary, and the import job's method,
@@ -41,6 +43,8 @@ func TestTerraformKMSPurposesAndImportJob(t *testing.T) {
 		{"sign", kmspb.CryptoKey_ASYMMETRIC_SIGN, kmspb.CryptoKeyVersion_EC_SIGN_P256_SHA256},
 		{"decrypt", kmspb.CryptoKey_ASYMMETRIC_DECRYPT, kmspb.CryptoKeyVersion_RSA_DECRYPT_OAEP_2048_SHA256},
 		{"mac", kmspb.CryptoKey_MAC, kmspb.CryptoKeyVersion_HMAC_SHA256},
+		{"mldsa", kmspb.CryptoKey_ASYMMETRIC_SIGN, kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_65},
+		{"xwing", kmspb.CryptoKey_KEY_ENCAPSULATION, kmspb.CryptoKeyVersion_KEM_XWING},
 	}
 	module := func(label string) string {
 		src := fmt.Sprintf(`
@@ -55,7 +59,14 @@ resource "google_kms_key_ring_import_job" "j" {
   import_method    = "RSA_OAEP_3072_SHA1_AES_256"
   protection_level = "SOFTWARE"
 }
-`, project, ringID)
+resource "google_kms_crypto_key" "imported" {
+  name                          = "imported"
+  key_ring                      = google_kms_key_ring.kr.id
+  import_only                   = true
+  skip_initial_version_creation = true
+  labels                        = { env = %q }
+}
+`, project, ringID, label)
 		for _, k := range keys {
 			src += fmt.Sprintf(`
 resource "google_kms_crypto_key" %[1]q {
@@ -91,6 +102,10 @@ resource "google_kms_crypto_key" %[1]q {
 			if err != nil || v.GetAlgorithm() != k.alg || v.GetState() != kmspb.CryptoKeyVersion_ENABLED {
 				t.Errorf("%s, key %s version 1 = %v %v, %v; want %v ENABLED", when, k.id, v.GetAlgorithm(), v.GetState(), err, k.alg)
 			}
+		}
+		io, err := c.GetCryptoKey(ctx, &kmspb.GetCryptoKeyRequest{Name: ring + "/cryptoKeys/imported"})
+		if err != nil || !io.GetImportOnly() || io.GetPrimary() != nil || io.GetLabels()["env"] != label {
+			t.Errorf("%s, the import_only key = %v, %v", when, io, err)
 		}
 		j, err := c.GetImportJob(ctx, &kmspb.GetImportJobRequest{Name: job})
 		if err != nil {

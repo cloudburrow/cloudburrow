@@ -21,6 +21,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 )
 
@@ -65,6 +66,8 @@ type importJob struct {
 	// Backend is an HSM_SINGLE_TENANT job's crypto_key_backend, its
 	// SingleTenantHsmInstance (#1521).
 	Backend string `json:"cryptoKeyBackend,omitempty"`
+	// IAMPolicy is the job's own policy (#1946; iam.go).
+	IAMPolicy *iampolicy.Stored `json:"iamPolicy,omitempty"`
 }
 
 type importSpec struct {
@@ -372,6 +375,9 @@ func unwrapKWP(kek, c []byte) ([]byte, error) {
 // the asymmetric ones. Stored material is re-encoded PKCS #8.
 func importedMaterial(a algo, key []byte) ([]byte, error) {
 	spec := algorithms[a]
+	if spec.pq() {
+		return nil, apierror.Wrap(apierror.Unimplemented("importing %s keys is not implemented: Google documents no import encoding of post-quantum key material", a))
+	}
 	bad := func(why string) error {
 		return apierror.Wrap(apierror.InvalidArgument("the imported key is not a valid %s key: %s", a, why))
 	}
