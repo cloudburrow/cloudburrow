@@ -615,7 +615,9 @@ func TestEveryWorkflowJobHasATimeout(t *testing.T) {
 	if err != nil || len(files) == 0 {
 		t.Fatalf("no workflows found: %v", err)
 	}
-	timeout := regexp.MustCompile(`(?m)^    timeout-minutes: [1-9][0-9]*$`)
+	// A literal, or a two-way choice between literals (the compat job's
+	// localai shard needs longer than the others, #1985).
+	timeout := regexp.MustCompile(`(?m)^    timeout-minutes: ([1-9][0-9]*|\$\{\{ [^}]+ && [1-9][0-9]* \|\| [1-9][0-9]* \}\})$`)
 	reusable := regexp.MustCompile(`(?m)^    uses: `)
 	for _, f := range files {
 		for name, j := range workflowJobs(t, f) {
