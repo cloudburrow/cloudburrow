@@ -77,6 +77,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// records, which leave the Storage Read front's queries out of
 	// jobs.list (storagerows.go, #1095).
 	ids, records, policies := &tableIDs{}, &jobRecords{}, &rowPolicies{}
+	cdcs := &cdcStreams{} // tables receiving change data capture, #2003
 	go watch.run(ctx)
 	go results.expire(ctx) // #1059
 	var readL net.Listener
@@ -98,6 +99,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	handler := Wrap(results, WithStorage(*storage), WithStoragePublic(*storagePublic), func(o *options) {
 		o.restarts, o.ids, o.records, o.stateDir, o.logf = watch, ids, records, *stateDir, logger.Printf
 		o.policies, o.resourceManager = policies, *resourceManager
+		o.cdcStreams = cdcs // storagewritecdc.go, #2003
 		o.vertexai = *vertexai
 		if *onnx != "" {
 			o.onnx = onnxrunner.NewClient(*onnx, nil)
@@ -132,7 +134,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		go func() {
 			// The Write API writes through handler (#1102).
 			err := serveStorageRead(readCtx, readL, *readUpstream, results, records, handler,
-				&writeOptions{stateDir: writeStateDir(*stateDir), logf: logger.Printf, policies: policies})
+				&writeOptions{stateDir: writeStateDir(*stateDir), logf: logger.Printf, policies: policies, cdcStreams: cdcs})
 			if err == nil && readCtx.Err() == nil {
 				err = errors.New("the Storage Read API front stopped")
 			}

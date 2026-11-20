@@ -128,6 +128,9 @@ type storageWrite struct {
 	// table's keys (storagewritecdc.go, #1999); cdcKeys under mu.
 	cdc     cdcState
 	cdcKeys map[string]*cdcKeys
+	// active are the tables receiving change data capture, shared with
+	// the REST front's DML (storagewritecdc.go, #2003), or nil.
+	active *cdcStreams
 }
 
 // writeStream is a write stream the front made, or a table's default
@@ -685,6 +688,9 @@ type appendConn struct {
 	// missing is the connection's default_missing_value_interpretation,
 	// as its last request to give one set it (#1391).
 	missing storagepb.AppendRowsRequest_MissingValueInterpretation
+	// cdcTables are the tables the connection has applied changes to,
+	// receiving change data capture until it ends (#2003).
+	cdcTables map[string]bool
 }
 
 type arrowConvResult struct {
@@ -705,6 +711,11 @@ type convResult struct {
 // its error, and the connection goes on.
 func (w *storageWrite) appendRows(ss grpc.ServerStream) error {
 	c := &appendConn{convs: map[string]convResult{}, arrowConvs: map[string]arrowConvResult{}}
+	defer func() {
+		for key := range c.cdcTables {
+			w.active.end(key)
+		}
+	}()
 	for {
 		var in rawFrame
 		if err := ss.RecvMsg(&in); err != nil {
@@ -811,7 +822,15 @@ func (w *storageWrite) appendOne(ctx context.Context, c *appendConn, req *storag
 			return appendFailed(name, cr.err), nil
 		}
 		if cr.conv.cdc() {
-			return w.appendChanges(ctx, name, st, cr, req, missing), nil
+			resp := w.appendChanges(ctx, name, st, cr, req, missing)
+			if key := cdcStreamKey(st.table.project, st.table.dataset, st.table.table); resp.GetError() == nil && !c.cdcTables[key] {
+				if c.cdcTables == nil {
+					c.cdcTables = map[string]bool{}
+				}
+				c.cdcTables[key] = true
+				w.active.begin(key)
+			}
+			return resp, nil
 		}
 		serialized := pr.GetRows().GetSerializedRows()
 		rows, rowErrs, err = convertRows(cr.fields, len(serialized), func(i int) (map[string]any, error) {

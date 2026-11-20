@@ -35,3 +35,35 @@ func TestChangeSequenceOrder(t *testing.T) {
 		}
 	}
 }
+
+// TestCDCStreamsWindow (#2003): a table receives change data capture from
+// the first connection's changes until the last such connection ends, and
+// only mutating DML is refused meanwhile.
+func TestCDCStreamsWindow(t *testing.T) {
+	var s cdcStreams
+	key := cdcStreamKey("p", "d", "t")
+	if s.active("p", "d", "t") {
+		t.Fatal("active before any connection")
+	}
+	s.begin(key)
+	s.begin(key)
+	s.end(key)
+	if !s.active("p", "d", "t") || s.active("p", "d", "other") {
+		t.Fatal("one connection open: want the table alone active")
+	}
+	s.end(key)
+	if s.active("p", "d", "t") {
+		t.Fatal("active after every connection ended")
+	}
+	var none *cdcStreams
+	none.begin(key)
+	none.end(key)
+	if none.active("p", "d", "t") {
+		t.Fatal("a nil cdcStreams is active")
+	}
+	for kind, want := range map[string]bool{"UPDATE": true, "DELETE": true, "MERGE": true, "TRUNCATE_TABLE": true, "INSERT": false} {
+		if got := cdcMutatingDML(kind); got != want {
+			t.Errorf("cdcMutatingDML(%s) = %v, want %v", kind, got, want)
+		}
+	}
+}

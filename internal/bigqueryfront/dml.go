@@ -478,6 +478,12 @@ func (f front) serveDML(w http.ResponseWriter, r *http.Request, q queryOptions, 
 		}
 		d, base = md, d.asMerge
 	}
+	// A table receiving change data capture refuses mutating DML
+	// (storagewritecdc.go, #2003).
+	if msg := f.cdcDMLRefusal(r, d, ds, table); msg != "" {
+		f.failBeforeRun(w, r, q, insert, ds, http.StatusBadRequest, rowError{Reason: "invalidQuery", Message: msg})
+		return
+	}
 	// The front's own change data capture DELETEs (storagewritecdc.go,
 	// #1999) change rows just streamed, as BigQuery's apply jobs do.
 	if msg := f.bufferedChange(r, q, d, ds, table); msg != "" && !isChangeApply(r.Context()) {

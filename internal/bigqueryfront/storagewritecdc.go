@@ -546,3 +546,80 @@ func paramText(v any) string {
 	b, _ := json.Marshal(v)
 	return strings.Trim(string(b), `"`)
 }
+
+// cdcStreams are the tables actively receiving change data capture: each
+// table's count of open AppendRows connections that have applied changes
+// to it. "Mutating DML statements are blocked while a table is actively
+// receiving CDC streams or while unmerged changes remain on the table"
+// (https://docs.cloud.google.com/bigquery/docs/change-data-capture,
+// Limitations, #2003); CloudBurrow merges each append's changes before it
+// answers it, so none remain unmerged, and the window is the connection's
+// life: from its first change applied to the table until it ends. Shared
+// by the REST front, which refuses the DML (dml.go), and the Write API.
+type cdcStreams struct {
+	mu   sync.Mutex
+	open map[string]int
+}
+
+func cdcStreamKey(project, dataset, table string) string {
+	return project + ":" + dataset + "." + table
+}
+
+// begin records one more connection streaming changes to the table.
+func (s *cdcStreams) begin(key string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.open == nil {
+		s.open = map[string]int{}
+	}
+	s.open[key]++
+}
+
+// end records that one such connection ended.
+func (s *cdcStreams) end(key string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.open[key]--; s.open[key] <= 0 {
+		delete(s.open, key)
+	}
+}
+
+// active is whether the table is receiving change data capture streams.
+func (s *cdcStreams) active(project, dataset, table string) bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.open[cdcStreamKey(project, dataset, table)] > 0
+}
+
+// cdcMutatingDML is BigQuery's mutating DML: "The UPDATE, DELETE, and
+// MERGE DML statements are called mutating DML statements", and TRUNCATE
+// named with them ("a mutating DML statement, such as DELETE, UPDATE,
+// MERGE, or TRUNCATE", data-manipulation-language). INSERT is not.
+func cdcMutatingDML(kind string) bool {
+	switch kind {
+	case "UPDATE", "DELETE", "MERGE", "TRUNCATE_TABLE":
+		return true
+	}
+	return false
+}
+
+// cdcDMLRefusal is the refusal of a mutating DML statement on a table
+// receiving change data capture, or "". BigQuery does not document its
+// wording; CloudBurrow's names the documented rule.
+func (f front) cdcDMLRefusal(r *http.Request, d dmlStmt, ds, table string) string {
+	if !cdcMutatingDML(d.kind) || isChangeApply(r.Context()) || !f.cdcStreams.active(projectOf(f.base), ds, table) {
+		return ""
+	}
+	return fmt.Sprintf("%s statement over table %s.%s.%s is not supported while the table is actively receiving change data capture (CDC) "+
+		"streams through the Storage Write API: mutating DML statements are blocked while a table is actively receiving CDC streams "+
+		"or while unmerged changes remain on the table", strings.ReplaceAll(d.kind, "_", " "), projectOf(f.base), ds, table)
+}
