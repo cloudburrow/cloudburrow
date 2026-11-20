@@ -89,6 +89,7 @@ func TestGenerateServiceIdentityEveryEntry(t *testing.T) {
 		"apikeys.googleapis.com":                "gcp-sa-apikeys.iam.gserviceaccount.com",
 		"containeranalysis.googleapis.com":      "container-analysis.iam.gserviceaccount.com",
 		"containerscanning.googleapis.com":      "gcp-sa-containerscanning.iam.gserviceaccount.com",
+		"observability.googleapis.com":          "gcp-sa-observability.iam.gserviceaccount.com",
 		"logging.googleapis.com":                "",
 		"storageinsights.googleapis.com":        "gcp-sa-storageinsights.iam.gserviceaccount.com",
 		"storagetransfer.googleapis.com":        "",

@@ -375,7 +375,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			loggingSettingsProvider{screen},
 			// Saved queries and log scopes (#1519).
 			loggingSavedQueriesProvider{screen},
-			loggingLogScopesProvider{loggingAdminScreen: screen, defaults: filepath.Join(d.cfg.InstanceDir(), loggingDefaultScopesFile)})
+			loggingLogScopesProvider{loggingAdminScreen: screen})
 		// Log Analytics (#1863), over the buckets' linked datasets in the
 		// instance's BigQuery; without BigQuery the page says it is not
 		// available.

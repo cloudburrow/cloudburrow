@@ -39,6 +39,7 @@ var apiLibrary = map[string]apiLibraryInfo{
 	"cloudkms.googleapis.com":             {"Security", "Manages cryptographic keys and performs operations with them.", "kms"},
 	"cloudscheduler.googleapis.com":       {"Developer tools", "Runs jobs on a schedule: HTTP targets, Pub/Sub topics and App Engine.", "scheduler"},
 	"logging.googleapis.com":              {"Management tools", "Writes and queries log entries, and routes them with sinks.", "logging"},
+	"observability.googleapis.com":        {"Management tools", "Keeps a project's default log scope, the one the Logs Explorer opens on.", ""},
 	"monitoring.googleapis.com":           {"Management tools", "Manages your Cloud Monitoring data and configurations: metrics, alerting policies, uptime checks, groups, services and dashboards.", ""},
 	"firestore.googleapis.com":            {"Databases", "Accesses a Firestore database, documents and indexes.", "firestore"},
 	"datastore.googleapis.com":            {"Databases", "Accesses a schemaless NoSQL database in Datastore mode.", "datastore"},

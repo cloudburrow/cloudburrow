@@ -96,6 +96,8 @@ var serviceAgents = map[string]string{
 	"storageinsights.googleapis.com": "gcp-sa-storageinsights.iam.gserviceaccount.com",
 	// Container Scanning Service Agent.
 	"containerscanning.googleapis.com": "gcp-sa-containerscanning.iam.gserviceaccount.com",
+	// Cloud Observability Service Account (#2020).
+	"observability.googleapis.com": "gcp-sa-observability.iam.gserviceaccount.com",
 }
 
 // noPrimaryAgent are the served services

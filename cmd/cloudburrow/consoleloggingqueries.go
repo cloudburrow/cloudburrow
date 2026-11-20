@@ -11,12 +11,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
@@ -248,24 +245,15 @@ func (p loggingSavedQueriesProvider) Delete(_ context.Context, project, name str
 // Default marker. The _Default scope lists the project and cannot be edited
 // or deleted.
 //
-// Google keeps a project's default log scope in the Observability API
-// (projects.locations.scopes/_Default's logScope), which CloudBurrow does
-// not serve, so Set as default writes it to the instance's state directory
-// (logging-default-log-scopes.json) and the page says so.
+// The default is Google's: the Observability API's
+// projects/PROJECT/locations/global/scopes/_Default, whose logScope Set as
+// default patches (#2020), in process on the API the Logging port serves.
 type loggingLogScopesProvider struct {
 	loggingAdminScreen
-	// defaults is the file of each project's default log scope.
-	defaults string
 }
 
 func (loggingLogScopesProvider) ID() string    { return "logging-log-scopes" }
-func (loggingLogScopesProvider) Title() string { return "Log scopes" }
-
-// loggingDefaultScopesFile is the default scopes' record in the instance
-// directory.
-const loggingDefaultScopesFile = "logging-default-log-scopes.json"
-
-var loggingDefaultScopesMu sync.Mutex
+func (loggingLogScopesProvider) Title() string { return "Log Scopes" }
 
 type consoleLogScope struct {
 	Name          string   `json:"name"`
@@ -280,62 +268,72 @@ func defaultLogScopeName(project string) string {
 	return "projects/" + project + "/locations/global/logScopes/" + defaultLogScopeID
 }
 
-// defaultScope is the project's default log scope: the one Set as default
-// named, or _Default.
+func observabilityScopePath(project string) string {
+	return "/v1/projects/" + url.PathEscape(project) + "/locations/global/scopes/" + logging.DefaultScopeID
+}
+
+// callObservabilityJSON calls the Observability scopes API in process.
+func callObservabilityJSON(a *logging.Admin, method, path string, body any, out any) error {
+	var raw []byte
+	if body != nil {
+		var err error
+		if raw, err = json.Marshal(body); err != nil {
+			return err
+		}
+	}
+	code, resp := a.CallObservability(method, path, raw)
+	if code != http.StatusOK {
+		var e struct {
+			Error struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if json.Unmarshal(resp, &e) == nil && e.Error.Message != "" {
+			return errors.New(e.Error.Message)
+		}
+		return fmt.Errorf("HTTP %d", code)
+	}
+	if out == nil {
+		return nil
+	}
+	return json.Unmarshal(resp, out)
+}
+
+// projectDefaultLogScope is the project's default log scope, the logScope
+// of its Observability _Default scope, as a Logging resource name.
+func projectDefaultLogScope(a *logging.Admin, project string) (string, error) {
+	var sc logging.ObservabilityScope
+	if err := callObservabilityJSON(a, http.MethodGet, observabilityScopePath(project), nil, &sc); err != nil {
+		return "", err
+	}
+	if n, ok := strings.CutPrefix(sc.LogScope, logging.LogScopeServicePrefix); ok {
+		return n, nil
+	}
+	return defaultLogScopeName(project), nil
+}
+
+// defaultScope is the project's default log scope, or _Default when it
+// cannot be read.
 func (p loggingLogScopesProvider) defaultScope(project string) string {
-	loggingDefaultScopesMu.Lock()
-	defer loggingDefaultScopesMu.Unlock()
-	if m, err := p.readDefaults(); err == nil && m[project] != "" {
-		return m[project]
-	}
-	return defaultLogScopeName(project)
-}
-
-func (p loggingLogScopesProvider) readDefaults() (map[string]string, error) {
-	m := map[string]string{}
-	if p.defaults == "" {
-		return m, nil
-	}
-	b, err := os.ReadFile(p.defaults)
-	if errors.Is(err, os.ErrNotExist) {
-		return m, nil
-	}
+	a, err := p.admin()
 	if err != nil {
-		return nil, err
+		return defaultLogScopeName(project)
 	}
-	if err := json.Unmarshal(b, &m); err != nil {
-		return nil, fmt.Errorf("the default log scopes record %s: %w", p.defaults, err)
+	n, err := projectDefaultLogScope(a, project)
+	if err != nil {
+		return defaultLogScopeName(project)
 	}
-	return m, nil
+	return n
 }
 
+// setDefault is Set as default: scopes.patch of logScope.
 func (p loggingLogScopesProvider) setDefault(project, name string) error {
-	if p.defaults == "" {
-		return errors.New("a default log scope is kept in the instance's state directory, which this console has none of")
-	}
-	loggingDefaultScopesMu.Lock()
-	defer loggingDefaultScopesMu.Unlock()
-	m, err := p.readDefaults()
+	a, err := p.admin()
 	if err != nil {
 		return err
 	}
-	if name == defaultLogScopeName(project) {
-		delete(m, project)
-	} else {
-		m[project] = name
-	}
-	b, err := json.MarshalIndent(m, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(p.defaults), 0o700); err != nil {
-		return err
-	}
-	tmp := p.defaults + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, p.defaults)
+	return callObservabilityJSON(a, http.MethodPatch, observabilityScopePath(project)+"?updateMask=logScope",
+		map[string]string{"logScope": logging.LogScopeServicePrefix + name}, nil)
 }
 
 func (p loggingLogScopesProvider) scopes(project string) ([]consoleLogScope, error) {
@@ -359,7 +357,7 @@ func (p loggingLogScopesProvider) scopes(project string) ([]consoleLogScope, err
 
 func (p loggingLogScopesProvider) List(_ context.Context, project string) (console.Listing, error) {
 	out := console.Listing{Columns: []string{"Default", "Description", "Projects", "Log views", "Updated"}, NameColumn: "Name", Noun: "log scopes",
-		Note: "A log scope's Set as default is kept in the instance's state directory: Google keeps it in the Observability API, which CloudBurrow does not serve."}
+		Note: "The default log scope is the one the Logs Explorer searches when it opens. Set as default keeps it in the Observability API's _Default scope."}
 	if _, err := p.admin(); err != nil {
 		return console.Listing{}, err
 	}
@@ -615,14 +613,9 @@ func (p loggingLogScopesProvider) Delete(_ context.Context, project, name string
 	if strings.HasSuffix(name, "/"+defaultLogScopeID) {
 		return errors.New("the _Default log scope cannot be deleted")
 	}
-	if err := callLoggingJSON(a, http.MethodDelete, "/v2/"+name, nil, nil); err != nil {
-		return err
-	}
-	// A deleted default leaves _Default the default again.
-	if p.defaultScope(project) == name {
-		return p.setDefault(project, defaultLogScopeName(project))
-	}
-	return nil
+	// A deleted default leaves _Default the default again: logScopes.delete
+	// resets the Observability scope.
+	return callLoggingJSON(a, http.MethodDelete, "/v2/"+name, nil, nil)
 }
 
 var (

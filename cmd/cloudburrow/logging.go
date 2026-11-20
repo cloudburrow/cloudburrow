@@ -343,6 +343,12 @@ func (s *loggingService) Start(ctx context.Context) error {
 		if s.admin.ServeExtra(w, r) {
 			return
 		}
+		// The Observability API's scopes (#2020), observability.googleapis.com
+		// v1, whose _Default scope's logScope is the project's default log
+		// scope: served on this port, as gcloud-setup and the provider map it.
+		if s.admin.ServeObservability(w, r) {
+			return
+		}
 		transcoded.ServeHTTP(w, r)
 	})
 	if s.requests != nil {

@@ -6196,7 +6196,8 @@
           "test/compat/logging_test.go:34 TestLoggingWriteAndRead",
           "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
           "test/compat/logginganalyticsviews_test.go:188 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
-          "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents"
+          "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
+          "test/compat/observability2020_test.go:44 TestObservabilityDefaultLogScope"
         ]
       },
       {

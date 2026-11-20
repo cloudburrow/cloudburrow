@@ -1524,6 +1524,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/logs", s.handleLogs)
 	mux.HandleFunc("GET /api/logs/buckets", s.handleLogBuckets)
 	mux.HandleFunc("GET /api/logs/names", s.handleLogNames)
+	mux.HandleFunc("GET /api/logs/scopes", s.handleLogScopes)
 	mux.HandleFunc("DELETE /api/logs", s.handleDeleteLog)
 	mux.HandleFunc("GET /api/operations", s.handleOperations)
 	mux.HandleFunc("GET /api/instance", s.handleInstance)

@@ -39,6 +39,8 @@ var serviceUsageAPIs = []struct {
 	{config.ServiceKMS, serviceusage.API{Name: "cloudkms.googleapis.com", Title: "Cloud Key Management Service (KMS) API"}},
 	{config.ServiceScheduler, serviceusage.API{Name: "cloudscheduler.googleapis.com", Title: "Cloud Scheduler API"}},
 	{config.ServiceLogging, serviceusage.API{Name: "logging.googleapis.com", Title: "Cloud Logging API"}},
+	// The Observability API's scopes (#2020), on the Logging port.
+	{config.ServiceLogging, serviceusage.API{Name: "observability.googleapis.com", Title: "Observability API"}},
 	{config.ServiceFirestore, serviceusage.API{Name: "firestore.googleapis.com", Title: "Cloud Firestore API"}},
 	{config.ServiceDatastore, serviceusage.API{Name: "datastore.googleapis.com", Title: "Cloud Datastore API"}},
 	{config.ServiceBigtable, serviceusage.API{Name: "bigtable.googleapis.com", Title: "Cloud Bigtable API"}},

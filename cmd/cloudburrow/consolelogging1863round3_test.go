@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -14,14 +13,13 @@ import (
 // _Default scope is listed, marked Default, and can be neither edited nor
 // deleted; Create log scope takes Add projects and Add log views rows and
 // the Name log scope section; Edit scope patches the scope; Set as default
-// moves the Default marker (kept in the instance directory) and a deleted
+// moves the Default marker (the Observability API's _Default scope, #2020) and a deleted
 // default leaves _Default the default again.
 func TestConsoleLogScopesGoogleLayout(t *testing.T) {
 	_, svc := loggingConsole(t)
 	ctx := context.Background()
 	const project = "proj-1"
-	ls := loggingLogScopesProvider{loggingAdminScreen: loggingAdminScreen{svc: svc},
-		defaults: filepath.Join(t.TempDir(), loggingDefaultScopesFile)}
+	ls := loggingLogScopesProvider{loggingAdminScreen: loggingAdminScreen{svc: svc}}
 
 	label, fields := ls.CreateForm()
 	var sections []string

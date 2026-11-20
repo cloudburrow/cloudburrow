@@ -121,6 +121,9 @@ const AP_ROUTES = agentPlatformRoutes();
 // Kubernetes Engine's pages drawn as one page's tabs (#1857).
 const GKE_DISCOVERY = ["/kubernetes/gateways", "/kubernetes/services", "/kubernetes/ingress"];
 const GKE_STORAGE = ["/kubernetes/storage", "/kubernetes/storage-classes"];
+// Cloud Logging's Settings and its Log Scopes tab (#2020), as Google's
+// Settings page has a Log Scopes tab (log-scope/create-and-manage).
+const LOGGING_SETTINGS = ["/logs/settings", "/logs/log-scopes"];
 
 
 const ROUTES = [
@@ -661,12 +664,14 @@ const ROUTES = [
   // Saved queries and log scopes (#1519).
   { path: "/logs/saved-queries", service: "logging-saved-queries", icon: "logs", title: "Saved queries", kind: "Saved query",
     section: "Operations", product: "logging", productTitle: "Cloud Logging" },
-  { path: "/logs/log-scopes", service: "logging-log-scopes", icon: "logs", title: "Log scopes", kind: "Log scope",
+  // Log Scopes is a tab of Settings (#2020), as on Google.
+  { path: "/logs/log-scopes", service: "logging-log-scopes", icon: "logs", title: "Settings", tabTitle: "Log Scopes", kind: "Log scope",
+    navHidden: true, navAs: "/logs/settings", pageTabs: LOGGING_SETTINGS,
     section: "Operations", product: "logging", productTitle: "Cloud Logging" },
   { path: "/logs/exclusions", service: "logging-exclusions", icon: "logs", title: "Exclusions", kind: "Exclusion",
     section: "Operations", product: "logging", productTitle: "Cloud Logging" },
   // Logging's Settings (#1311): GetSettings, UpdateSettings, GetCmekSettings.
-  { path: "/logs/settings",   service: "logging-settings",   icon: "logs", title: "Settings",
+  { path: "/logs/settings",   service: "logging-settings",   icon: "logs", title: "Settings", tabTitle: "Settings", pageTabs: LOGGING_SETTINGS,
     section: "Operations", product: "logging", productTitle: "Cloud Logging" },
   { path: "/activity", service: null, screen: "activity", title: "Activity",      section: "Operations" },
   { path: "/requests", service: null, screen: "requests", title: "Request Log",   section: "Operations" },
@@ -10884,7 +10889,14 @@ async function renderLogs(view) {
   // views, of a project, folder, organization or billing account, read with
   // ListLogEntries and tailed with TailLogEntries, so the view's filter and
   // the bucket's retention apply.
-  let scope = ["project", "parent", "view"].includes(params.get("scope")) ? params.get("scope") : "all";
+  let scope = ["project", "parent", "view", "logScope"].includes(params.get("scope")) ? params.get("scope") : "all";
+  // Or a log scope (#2020), as Google's Refine scope picks one: its
+  // projects and log views, read together through ListLogEntries. When the
+  // address names no scope, the Explorer opens on the project's default log
+  // scope (the Observability API's _Default scope's logScope) once one has
+  // been set as default; with _Default the default, it opens on All sources
+  // as before, as _Default names only the project and pod lines carry none.
+  const scopeChosen = params.has("scope");
   // Followed from a failed operation in Activity. The server has always
   // supported the filter; the client simply never read it, so the one path
   // built to explain a failure landed on the unfiltered stream of the whole
@@ -10898,8 +10910,36 @@ async function renderLogs(view) {
     el("option", { value: "project", text: project ? `Project logs (${project})` : "Project logs",
                    disabled: project ? null : "disabled" }),
     el("option", { value: "parent", text: "A folder or organization" }),
-    el("option", { value: "view", text: "Through a log view" }));
+    el("option", { value: "view", text: "Through a log view" }),
+    el("option", { value: "logScope", text: "Log scope", disabled: project ? null : "disabled" }));
   scopeSelect.value = scope;
+
+  // The log scope picker: the project's log scopes, the default marked.
+  const logScopeSelect = el("select", { id: "log-scope-name", "aria-label": "Log scope" });
+  const logScopeNote = el("p", { class: "unavailable", id: "log-scope-note" });
+  let logScopes = { default: "", scopes: [] };
+  const drawLogScopeNote = (error) => {
+    if (error) return setChildren(logScopeNote, el("span", { text: error }));
+    const sc = logScopes.scopes.find((x) => x.name === logScopeSelect.value);
+    if (!sc) return setChildren(logScopeNote, el("span", { text: "No log scope chosen." }));
+    setChildren(logScopeNote, el("span", { text: `Searching ${sc.resourceNames.join(", ")}.` }));
+  };
+  const loadLogScopes = async (want) => {
+    if (!project) return false;
+    try {
+      logScopes = await api(`/api/logs/scopes?${new URLSearchParams({ project })}`);
+    } catch (err) {
+      logScopes = { default: "", scopes: [] };
+      drawLogScopeNote(err.message);
+      return false;
+    }
+    setChildren(logScopeSelect, ...logScopes.scopes.map((sc) => el("option", { value: sc.name,
+      text: sc.name.slice(sc.name.lastIndexOf("/") + 1) + (sc.name === logScopes.default ? " (default)" : "") })));
+    const pick = want && logScopes.scopes.some((x) => x.name === want) ? want : logScopes.default;
+    if (pick) logScopeSelect.value = pick;
+    drawLogScopeNote();
+    return true;
+  };
 
   // The view scope's pickers: whose buckets, which bucket, which view.
   const initialView = params.get("view") || "";
@@ -10917,6 +10957,8 @@ async function renderLogs(view) {
   const showViewControls = () => {
     viewControls.hidden = scope !== "view";
     viewNote.hidden = scope !== "view";
+    logScopeSelect.hidden = scope !== "logScope";
+    logScopeNote.hidden = scope !== "logScope";
   };
   const drawViewNote = (error) => {
     if (error) return setChildren(viewNote, el("span", { text: error }));
@@ -11475,6 +11517,7 @@ async function renderLogs(view) {
     if (scope === "project" && project) query.set("project", project);
     if (scope === "parent" && parentInput.value.trim()) query.set("parent", parentInput.value.trim());
     if (scope === "view" && viewSelect.value) query.set("view", viewSelect.value);
+    if (scope === "logScope" && logScopeSelect.value) query.set("logScope", logScopeSelect.value);
     if (operation) query.set("operation", operation);
     if (source.value) query.set("source", source.value);
     if (resource.value) query.set("resource", resource.value);
@@ -11591,18 +11634,24 @@ async function renderLogs(view) {
     else url.searchParams.delete("parent");
     if (next === "view" && viewSelect.value) url.searchParams.set("view", viewSelect.value);
     else url.searchParams.delete("view");
+    if (next === "logScope" && logScopeSelect.value) url.searchParams.set("logScope", logScopeSelect.value);
+    else url.searchParams.delete("logScope");
     history.replaceState({}, "", url);
     parentInput.hidden = next !== "parent";
     showViewControls();
     loadLogNames();
     connect();
     announce(next === "project" ? `Scoped to project ${project}`
-      : next === "parent" ? `Scoped to ${parentInput.value.trim() || "a folder or organization"}` : "Showing all sources");
+      : next === "parent" ? `Scoped to ${parentInput.value.trim() || "a folder or organization"}`
+      : next === "logScope" ? `Scoped to log scope ${logScopeSelect.value.slice(logScopeSelect.value.lastIndexOf("/") + 1)}`
+      : "Showing all sources");
   };
   scopeSelect.addEventListener("change", async () => {
     if (scopeSelect.value === "view" && !viewBuckets.length) await loadBuckets("");
+    if (scopeSelect.value === "logScope" && !logScopes.scopes.length) await loadLogScopes("");
     setScope(scopeSelect.value);
   });
+  logScopeSelect.addEventListener("change", () => { drawLogScopeNote(); setScope("logScope"); });
   parentInput.addEventListener("change", () => setScope("parent"));
   viewParentInput.addEventListener("change", async () => { await loadBuckets(""); setScope("view"); });
   bucketSelect.addEventListener("change", () => { fillViews(`${bucketSelect.value}/views/_AllLogs`); setScope("view"); });
@@ -11811,6 +11860,10 @@ async function renderLogs(view) {
     query.set("limit", "200");
     if (scope === "view" && !viewSelect.value) {
       setStatus("choose a log view", "warn");
+      return;
+    }
+    if (scope === "logScope" && !logScopeSelect.value) {
+      setStatus("choose a log scope", "warn");
       return;
     }
 
@@ -12189,9 +12242,10 @@ async function renderLogs(view) {
           text: "Delete log is on the Cloud Logging entries (source logging/…) of the selected project. " +
                 "Pod logs and CloudBurrow's own request log are not held by the Logging API, so they cannot be deleted here." })
       : null,
-    el("div", { class: "actions log-toolbar" }, scopeSelect, parentInput, viewControls, timeRange,
+    el("div", { class: "actions log-toolbar" }, scopeSelect, parentInput, viewControls, logScopeSelect, timeRange,
        pauseButton, reconnectButton, status),
     viewNote,
+    logScopeNote,
     el("section", { class: "card log-query", "aria-label": "Query" },
       el("div", { class: "actions" }, contains, resourceType, logName, severity, source, resource),
       queryEditor,
@@ -12208,6 +12262,21 @@ async function renderLogs(view) {
 
   showViewControls();
   if (scope === "view") await loadBuckets(initialView);
+  if (scope === "logScope") await loadLogScopes(params.get("logScope") || "");
+  // No scope in the address: open on the project's default log scope when
+  // one other than _Default has been set as default (#2020).
+  if (!scopeChosen && !operation && project && SERVICES.some((sv) => sv.id === "logging-log-scopes") && await loadLogScopes("") &&
+      logScopes.default && !logScopes.default.endsWith("/logScopes/_Default")) {
+    logScopeSelect.value = logScopes.default;
+    drawLogScopeNote();
+    scope = "logScope";
+    scopeSelect.value = scope;
+    const url = new URL(location.href);
+    url.searchParams.set("scope", scope);
+    url.searchParams.set("logScope", logScopes.default);
+    history.replaceState({}, "", url);
+  }
+  showViewControls();
   loadLogNames();
   connect();
   announce(operation ? `Logs Explorer opened, scoped to operation ${operation}`
