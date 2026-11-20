@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -81,20 +82,25 @@ func runEnv(_ context.Context, args []string, stdout, stderr io.Writer) error {
 	for _, w := range unexportableWarnings(cfg) {
 		fmt.Fprintf(stderr, "cloudburrow env: %s\n", w)
 	}
-	// The local-only guard (#1977): in the formats a shell, a docker
-	// --env-file or the GitHub action applies, every gcloud override this
-	// instance does not serve is refused locally, so a gcloud command for
-	// any other API fails here instead of calling googleapis.com. Pod env
-	// and the console's Connect page stay without them (see
-	// gcloudRefusalVars).
-	if *format == "shell" || *format == "plain" || *format == "json" {
-		vars = append(vars, gcloudRefusalVars(cfg, vars)...)
-	}
-	if err := writeEnvFormat(stdout, *format, cfg, vars); err != nil {
+	if err := writeEnvFormat(stdout, *format, cfg, envOutputVars(*format, cfg, vars)); err != nil {
 		fmt.Fprintf(stderr, "unknown format %q; use shell, json, plain, terraform, docker-compose or kubernetes\n", *format)
 		return errUsage
 	}
 	return nil
+}
+
+// envOutputVars is what `env --format format` prints for vars. The
+// local-only guard (#1977): in the formats a shell, a docker --env-file or
+// the GitHub action applies, every gcloud override this instance does not
+// serve is refused locally, appended after vars, so a gcloud command for any
+// other API fails here instead of calling googleapis.com. Pod env stays
+// without them (see gcloudRefusalVars). The console's Connect page takes its
+// Refusals from this too, so it lists exactly what `env --format json` adds.
+func envOutputVars(format string, cfg config.Config, vars []envVar) []envVar {
+	if format == "shell" || format == "plain" || format == "json" {
+		return append(slices.Clip(vars), gcloudRefusalVars(cfg, vars)...)
+	}
+	return vars
 }
 
 // servedConfig is cfg with the services a running instance serves. They are
@@ -163,9 +169,9 @@ const gcloudRefusalComment = "not served by this instance: refused locally, so g
 // They are added only to `env`'s shell, plain and json output and to hook
 // environments, where gcloud may run. Pod env (podenv) does not get them:
 // the console terminal's pod reads its own overrides, and a container
-// spec of 170 refusals is noise. Nor does the console's Connect page,
-// whose formats name the variables a developer reads; it says that `env`
-// adds them.
+// spec of 170 refusals is noise. The console's Connect page lists them
+// apart (console.Connect.Refusals), and its formats, which name the
+// variables a developer reads, say that `env` adds them.
 func gcloudRefusalVars(cfg config.Config, vars []envVar) []envVar {
 	set := map[string]bool{}
 	for _, v := range vars {

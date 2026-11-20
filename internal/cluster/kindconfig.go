@@ -29,8 +29,25 @@ type PortMapping struct {
 const ConfigFileName = "kind.yaml"
 
 // kubeadmPatches start the controller manager and the scheduler without
-// leader election (#1610). The cluster has one control-plane node, so there
-// is nothing to elect; and a restarted one waited out its own lease from
+// leader election (#1610), and set the kubelet's
+// imagePullCredentialsVerificationPolicy to NeverVerify.
+//
+// The kubelet (v1.36 in kind v0.33, KubeletEnsureSecretPulledImages) records
+// each image it pulls by image ID, with the repository it pulled it from.
+// An image with such a record is then usable under no other name until
+// the kubelet has re-verified it by pulling, and a pod that names it with
+// imagePullPolicy Never fails with ErrImageNeverPull ("is not present
+// with pull policy of Never") while the node holds it. So one build both
+// pushed to Artifact Registry and pulled from there, and loaded into the
+// cluster as dev.local/... (a build of this instance is both, as is a
+// user's image they kind-load and push), stopped running as dev.local
+// once a revision had pulled its Artifact Registry name (run 44709318191).
+// The cluster has one tenant, the developer, so there are no other pods
+// whose credentials the check protects; NeverVerify is the kubelet's
+// behaviour before the check.
+//
+// Leader election: the cluster has one control-plane node, so there is
+// nothing to elect; and a restarted one waited out its own lease from
 // before the stop, about 20 s in which no Deployment made a pod and no pod
 // was scheduled. The controller manager's list is the whole list, since
 // kind replaces it: enable-hostpath-provisioner is the one kind sets.
@@ -48,6 +65,10 @@ const kubeadmPatches = `kubeadmConfigPatches:
       extraArgs:
         - name: leader-elect
           value: "false"
+  - |
+    apiVersion: kubelet.config.k8s.io/v1beta1
+    kind: KubeletConfiguration
+    imagePullCredentialsVerificationPolicy: NeverVerify
 `
 
 // RenderConfig produces a kind cluster configuration.

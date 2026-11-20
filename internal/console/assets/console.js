@@ -15129,6 +15129,13 @@ async function renderConnect(view) {
     (data.warnings || []).length
       ? el("ul", { class: "unmeasured", id: "connect-warnings" }, ...data.warnings.map((w) => el("li", { text: w })))
       : null,
+    // The gcloud refusals `env` also exports (#1977), apart from the table.
+    (data.refusals || []).length
+      ? el("details", { id: "connect-refusals" },
+          el("summary", { text: `${data.refusals.length} gcloud APIs this instance does not serve are refused locally` }),
+          el("ul", {}, ...data.refusals.map((v) => el("li", { "data-name": v.name },
+            el("code", { text: v.name }), el("span", { text: " = " }), el("code", { text: v.value })))))
+      : null,
     el("div", { class: "table-wrap" }, el("table", { class: "table", id: "connect-vars" },
       el("thead", {}, el("tr", {}, ...["Variable", "Value", "Read by"].map((h) => el("th", { scope: "col", text: h })))),
       el("tbody", {}, ...(data.variables || []).map((v) => el("tr", { "data-name": v.name },

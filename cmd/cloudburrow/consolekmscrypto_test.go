@@ -188,7 +188,8 @@ func TestConsoleKMSVersionCryptoActions(t *testing.T) {
 
 	// The post-quantum algorithms (#1946): Sign, then Verify against the
 	// NIST_PQC key; X-Wing's public key in XWING_RAW_BYTES.
-	for _, a := range []string{"PQ_SIGN_ML_DSA_65", "PQ_SIGN_SLH_DSA_SHA2_128S", "PQ_SIGN_HASH_SLH_DSA_SHA2_128S_SHA256"} {
+	// ML-DSA only where the build has crypto/mldsa (Go 1.27).
+	for _, a := range append(slices.Clone(consoleMLDSAAlgorithms), "PQ_SIGN_SLH_DSA_SHA2_128S", "PQ_SIGN_HASH_SLH_DSA_SHA2_128S_SHA256") {
 		v := mk(strings.ToLower(strings.ReplaceAll(a, "_", "-")), "ASYMMETRIC_SIGN", a)
 		sig := kmsActResult(t, p, v, "sign", map[string]string{"data": "pq"})["Signature"]
 		if got := kmsActResult(t, p, v, "verify", map[string]string{"data": "pq", "signature": sig})["Signature"]; got != "Valid" {

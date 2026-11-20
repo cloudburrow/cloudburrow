@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -219,7 +220,19 @@ func TestGcloudImpersonationThroughEnv(t *testing.T) {
 		proxy, hosts := refreshRecorder(t)
 		out, err := g.run(append([]string{"CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE=" + fixture}, proxy...),
 			"storage", "ls", "--impersonate-service-account="+sa)
-		assertRefreshGoesToGoogle(t, out, err, hosts(), rec)
+		t.Logf("gcloud storage ls --impersonate-service-account:\n%s", out)
+		if err == nil {
+			t.Fatal("gcloud impersonated without roles/iam.serviceAccountTokenCreator; want PERMISSION_DENIED")
+		}
+		if !strings.Contains(out, "PERMISSION_DENIED") || !strings.Contains(out, "iam.serviceAccounts.getAccessToken") {
+			t.Errorf("gcloud failed otherwise than the IAM Credentials refusal")
+		}
+		if got := hosts(); len(got) != 0 {
+			t.Errorf("gcloud tried to leave the machine (refused by the proxy): %v; its token_host is the instance's", got)
+		}
+		if got := rec.seen(); !slices.ContainsFunc(got, func(p string) bool { return strings.HasSuffix(p, ":generateAccessToken") }) {
+			t.Errorf("gcloud did not reach the IAM Credentials override's generateAccessToken: %v", got)
+		}
 	})
 }
 
@@ -234,10 +247,13 @@ func TestGcloudImpersonationThroughEnv(t *testing.T) {
 // and local rather than that it works.
 //
 // The second subtest turns credentials back on and adds the exported
-// override, as a gcloud-setup that supported impersonation would have to:
-// gcloud then refreshes the fixture (the configuration's
-// credential_file_override) at oauth2.googleapis.com and fails, so turning
-// credentials on would not make impersonation work.
+// override, as a gcloud-setup that supported impersonation would have to.
+// Since #1975 the configuration's auth/token_host is this instance's token
+// endpoint, so gcloud refreshes the fixture (its credential_file_override)
+// there, not at oauth2.googleapis.com, and sends nothing off the machine. It
+// then asks the IAM Credentials override, which refuses: the fixture's
+// account holds no roles/iam.serviceAccountTokenCreator on the account, so
+// generateAccessToken is PERMISSION_DENIED, as on Google.
 func TestGcloudImpersonationUnderGcloudSetup(t *testing.T) {
 	h := New(t)
 	h.Endpoint(EnvStorage)
@@ -274,6 +290,18 @@ func TestGcloudImpersonationUnderGcloudSetup(t *testing.T) {
 		out, err := g.run(append([]string{"CLOUDSDK_AUTH_DISABLE_CREDENTIALS=false",
 			"CLOUDSDK_API_ENDPOINT_OVERRIDES_IAMCREDENTIALS=" + rec.url}, proxy...),
 			"storage", "ls", "--impersonate-service-account="+sa)
-		assertRefreshGoesToGoogle(t, out, err, hosts(), rec)
+		t.Logf("gcloud storage ls --impersonate-service-account:\n%s", out)
+		if err == nil {
+			t.Fatal("gcloud impersonated without roles/iam.serviceAccountTokenCreator; want PERMISSION_DENIED")
+		}
+		if !strings.Contains(out, "PERMISSION_DENIED") || !strings.Contains(out, "iam.serviceAccounts.getAccessToken") {
+			t.Errorf("gcloud failed otherwise than the IAM Credentials refusal")
+		}
+		if got := hosts(); len(got) != 0 {
+			t.Errorf("gcloud tried to leave the machine (refused by the proxy): %v; its token_host is the instance's", got)
+		}
+		if got := rec.seen(); !slices.ContainsFunc(got, func(p string) bool { return strings.HasSuffix(p, ":generateAccessToken") }) {
+			t.Errorf("gcloud did not reach the IAM Credentials override's generateAccessToken: %v", got)
+		}
 	})
 }
