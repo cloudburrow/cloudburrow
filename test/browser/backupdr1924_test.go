@@ -151,14 +151,14 @@ func TestBackupDRRestoreToANewInstanceAndJobsThroughThePages(t *testing.T) {
 			t.Errorf("the Jobs page lacks %q", want)
 		}
 	}
-	setField(p, "#view", "server-filter", "1h")
-	p.run(chromedp.Click(chromedp.CSS(`#server-filter-apply`)))
+	// Google's time range is a list (#1844): Last 1 hour still holds the
+	// restore just run.
+	p.waitFor(`[...document.querySelectorAll("#scope-range option")].map((o) => o.textContent).join(",") === ` +
+		`"Last 1 hour,Last 6 hours,Last 12 hours,Last 24 hours,Last 7 days,Last 14 days"`)
+	p.eval(`(() => { const s = document.querySelector("#scope-range"); s.value = "1h";
+		s.dispatchEvent(new Event("change")); return true; })()`, nil)
+	p.waitFor(`new URLSearchParams(location.search).get("range") === "1h"`)
 	p.waitForWithin(restoreRow, time.Minute)
-	setField(p, "#view", "server-filter", "2h")
-	p.run(chromedp.Click(chromedp.CSS(`#server-filter-apply`)))
-	p.waitFor(`document.querySelector("#server-filter-error") !== null`)
-	p.eval(`document.querySelector("#server-filter-error").textContent`, &text)
-	if !strings.Contains(text, "1h, 6h, 12h, 24h") {
-		t.Errorf("a time range Google does not offer is refused with %q", text)
-	}
+	p.navigate("/backupdr-jobs?project=" + project + "&range=2h")
+	p.waitFor(`document.querySelector("#view").textContent.includes("1h, 6h, 12h, 24h")`)
 }

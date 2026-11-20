@@ -15776,7 +15776,7 @@
         "method": "backupdr.projects.locations.backupVaults.dataSources.abandonBackup",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/backupdr1462_test.go:232 TestBackupDRRefusals"
+          "test/compat/backupdr1462_test.go:236 TestBackupDRRefusals"
         ],
         "note": "returns UNIMPLEMENTED (in-process check): the backup/recovery appliance's and agent's protocol for Compute Engine workloads (the appliance streams a backup in and finalizes it); CloudBurrow runs no appliance and no Compute Engine, and a Cloud SQL data source's backups are taken by the Cloud SQL Admin API"
       },
@@ -15831,7 +15831,7 @@
         "method": "backupdr.projects.locations.backupVaults.dataSources.fetchAccessToken",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/backupdr1462_test.go:232 TestBackupDRRefusals"
+          "test/compat/backupdr1462_test.go:236 TestBackupDRRefusals"
         ],
         "note": "returns UNIMPLEMENTED (in-process check): the backup/recovery appliance's and agent's protocol for Compute Engine workloads (the appliance streams a backup in and finalizes it); CloudBurrow runs no appliance and no Compute Engine, and a Cloud SQL data source's backups are taken by the Cloud SQL Admin API"
       },
@@ -15839,7 +15839,7 @@
         "method": "backupdr.projects.locations.backupVaults.dataSources.finalizeBackup",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/backupdr1462_test.go:232 TestBackupDRRefusals"
+          "test/compat/backupdr1462_test.go:236 TestBackupDRRefusals"
         ],
         "note": "returns UNIMPLEMENTED (in-process check): the backup/recovery appliance's and agent's protocol for Compute Engine workloads (the appliance streams a backup in and finalizes it); CloudBurrow runs no appliance and no Compute Engine, and a Cloud SQL data source's backups are taken by the Cloud SQL Admin API"
       },
@@ -15856,7 +15856,7 @@
         "method": "backupdr.projects.locations.backupVaults.dataSources.initiateBackup",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/backupdr1462_test.go:232 TestBackupDRRefusals"
+          "test/compat/backupdr1462_test.go:236 TestBackupDRRefusals"
         ],
         "note": "returns UNIMPLEMENTED (in-process check): the backup/recovery appliance's and agent's protocol for Compute Engine workloads (the appliance streams a backup in and finalizes it); CloudBurrow runs no appliance and no Compute Engine, and a Cloud SQL data source's backups are taken by the Cloud SQL Admin API"
       },
@@ -15880,7 +15880,7 @@
         "method": "backupdr.projects.locations.backupVaults.dataSources.remove",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/backupdr1462_test.go:232 TestBackupDRRefusals"
+          "test/compat/backupdr1462_test.go:236 TestBackupDRRefusals"
         ],
         "note": "returns UNIMPLEMENTED (in-process check): removes a data source made by a backup appliance (the reference: external clients never delete one); CloudBurrow runs no appliance, and a Cloud SQL data source goes with its backup plan association"
       },
@@ -15888,7 +15888,7 @@
         "method": "backupdr.projects.locations.backupVaults.dataSources.setInternalStatus",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/backupdr1462_test.go:232 TestBackupDRRefusals"
+          "test/compat/backupdr1462_test.go:236 TestBackupDRRefusals"
         ],
         "note": "returns UNIMPLEMENTED (in-process check): an appliance's report of a Compute Engine data source's internal state; CloudBurrow runs no appliance and no Compute Engine, and a Cloud SQL data source's state is its association's"
       },
@@ -16000,7 +16000,7 @@
         "method": "backupdr.projects.locations.managementServers.create",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/backupdr1462_test.go:232 TestBackupDRRefusals"
+          "test/compat/backupdr1462_test.go:236 TestBackupDRRefusals"
         ],
         "note": "returns UNIMPLEMENTED (in-process check): a management server is the Backup and DR appliance's console, a Google-managed VM on Compute Engine reached over VPC peering with your network; CloudBurrow runs neither, so none can exist, and backup vaults and plans protect Cloud SQL instances without one"
       },
@@ -16008,7 +16008,7 @@
         "method": "backupdr.projects.locations.managementServers.delete",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/backupdr1462_test.go:232 TestBackupDRRefusals"
+          "test/compat/backupdr1462_test.go:236 TestBackupDRRefusals"
         ],
         "note": "returns UNIMPLEMENTED (in-process check): a management server is the Backup and DR appliance's console, a Google-managed VM on Compute Engine reached over VPC peering with your network; CloudBurrow runs neither, so none can exist, and backup vaults and plans protect Cloud SQL instances without one"
       },
@@ -16016,7 +16016,7 @@
         "method": "backupdr.projects.locations.managementServers.get",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/backupdr1462_test.go:232 TestBackupDRRefusals"
+          "test/compat/backupdr1462_test.go:236 TestBackupDRRefusals"
         ],
         "note": "returns UNIMPLEMENTED (in-process check): a management server is the Backup and DR appliance's console, a Google-managed VM on Compute Engine reached over VPC peering with your network; CloudBurrow runs neither, so none can exist, and backup vaults and plans protect Cloud SQL instances without one"
       },
@@ -16024,7 +16024,7 @@
         "method": "backupdr.projects.locations.managementServers.getIamPolicy",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/backupdr1462_test.go:232 TestBackupDRRefusals"
+          "test/compat/backupdr1462_test.go:236 TestBackupDRRefusals"
         ],
         "note": "returns UNIMPLEMENTED (in-process check): a management server is the Backup and DR appliance's console, a Google-managed VM on Compute Engine reached over VPC peering with your network; CloudBurrow runs neither, so none can exist, and backup vaults and plans protect Cloud SQL instances without one"
       },
@@ -16032,7 +16032,7 @@
         "method": "backupdr.projects.locations.managementServers.list",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/backupdr1462_test.go:232 TestBackupDRRefusals"
+          "test/compat/backupdr1462_test.go:236 TestBackupDRRefusals"
         ],
         "note": "returns UNIMPLEMENTED (in-process check): a management server is the Backup and DR appliance's console, a Google-managed VM on Compute Engine reached over VPC peering with your network; CloudBurrow runs neither, so none can exist, and backup vaults and plans protect Cloud SQL instances without one"
       },
@@ -16047,7 +16047,7 @@
         "method": "backupdr.projects.locations.managementServers.setIamPolicy",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/backupdr1462_test.go:232 TestBackupDRRefusals"
+          "test/compat/backupdr1462_test.go:236 TestBackupDRRefusals"
         ],
         "note": "returns UNIMPLEMENTED (in-process check): a management server is the Backup and DR appliance's console, a Google-managed VM on Compute Engine reached over VPC peering with your network; CloudBurrow runs neither, so none can exist, and backup vaults and plans protect Cloud SQL instances without one"
       },
@@ -16055,7 +16055,7 @@
         "method": "backupdr.projects.locations.managementServers.testIamPermissions",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/backupdr1462_test.go:232 TestBackupDRRefusals"
+          "test/compat/backupdr1462_test.go:236 TestBackupDRRefusals"
         ],
         "note": "returns UNIMPLEMENTED (in-process check): a management server is the Backup and DR appliance's console, a Google-managed VM on Compute Engine reached over VPC peering with your network; CloudBurrow runs neither, so none can exist, and backup vaults and plans protect Cloud SQL instances without one"
       },
@@ -16110,7 +16110,7 @@
         "method": "backupdr.projects.locations.serviceConfig.initialize",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/backupdr1462_test.go:232 TestBackupDRRefusals"
+          "test/compat/backupdr1462_test.go:236 TestBackupDRRefusals"
         ],
         "note": "returns UNIMPLEMENTED (in-process check): creates Google's default backup vault and backup plan for the resource type, whose names, rules and retention Google chooses and does not document; create them with backupVaults.create and backupPlans.create"
       },

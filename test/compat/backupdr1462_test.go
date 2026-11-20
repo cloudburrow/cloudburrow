@@ -194,6 +194,10 @@ func TestBackupDRUpdatesAndViews(t *testing.T) {
 		_, err = bdr.Projects.Locations.BackupVaults.DataSources.Backups.Patch(bk.Name, &backupdr.Backup{
 			EnforcedRetentionEndTime: exp.Format(time.RFC3339)}).UpdateMask("enforcedRetentionEndTime").Do()
 		wantBackupDRCode(t, "reducing enforced retention", err, http.StatusBadRequest, "not reduced")
+		// "You can delete a backup only after it exceeds its minimum
+		// enforced retention period" (bv-backup-manage, #1844).
+		_, err = bdr.Projects.Locations.BackupVaults.DataSources.Backups.Delete(bk.Name).Do()
+		wantBackupDRCode(t, "deleting a backup inside its enforced retention", err, http.StatusBadRequest, "enforced retention")
 
 		wait(bdr.Projects.Locations.BackupPlanAssociations.Patch(assocName, &backupdr.BackupPlanAssociation{BackupPlan: planB}).
 			UpdateMask("backupPlan").Do())

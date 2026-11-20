@@ -609,6 +609,12 @@ func (s *Server) deleteBackup(name string) (any, error) {
 		s.mu.Unlock()
 		return nil, precondition("Backup %s is still being taken.", name)
 	}
+	// "You can delete a backup only after it exceeds its minimum enforced
+	// retention period" (bv-backup-manage, #1844).
+	if end, err := time.Parse(time.RFC3339Nano, b.enforcedEnd()); err == nil && s.now().Before(end) {
+		s.mu.Unlock()
+		return nil, precondition("Backup %s cannot be deleted before its enforced retention ends, at %s.", name, b.enforcedEnd())
+	}
 	delete(s.st.Backups, name)
 	err := s.saveLocked()
 	s.mu.Unlock()

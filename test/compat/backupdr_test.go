@@ -109,7 +109,9 @@ func TestBackupDRCloudSQLRestore(t *testing.T) {
 
 	vaultID := "vault-" + suffix
 	wait(bdr.Projects.Locations.BackupVaults.Create(loc, &backupdr.BackupVault{
-		BackupMinimumEnforcedRetentionDuration: "86400s", Description: "compat"}).BackupVaultId(vaultID).Do())
+		// No minimum enforced retention, so the backup can be deleted at the
+		// end (one inside its enforced retention cannot: TestBackupDRUpdatesAndViews).
+		BackupMinimumEnforcedRetentionDuration: "0s", Description: "compat"}).BackupVaultId(vaultID).Do())
 	vaultName := loc + "/backupVaults/" + vaultID
 	defer func() {
 		if op, err := bdr.Projects.Locations.BackupVaults.Delete(vaultName).Force(true).Do(); err == nil {
