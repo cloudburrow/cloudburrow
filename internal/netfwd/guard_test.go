@@ -675,9 +675,13 @@ func TestAGuardedTunnelPublishesTheGuard(t *testing.T) {
 		t.Fatal(err)
 	}
 	podsJSON(t, dir, fakePod{"pubsub-b", true})
+	// The new kubectl can find its port still held by the old one for a
+	// moment ("bind: address already in use", PR #1973's check job) and is
+	// launched again, as the supervisor's retry is for: what counts is that
+	// one restart ended bound to pod/pubsub-b.
 	waitFor(t, 30*time.Second, "the tunnel re-established to pod/pubsub-b", func() bool {
 		got := launches(t, dir)
-		return f.Restarts() == 1 && len(got) == 2 && got[1] == "pod/pubsub-b"
+		return f.Restarts() == 1 && len(got) >= 2 && got[len(got)-1] == "pod/pubsub-b"
 	})
 	if now := kubeAddr(); f.HostAddr() != host || now != kube {
 		t.Errorf("after the restart the tunnel is %s behind %s; want %s behind %s", f.HostAddr(), now, host, kube)
