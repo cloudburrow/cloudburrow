@@ -137,8 +137,9 @@ func TestTasksCreateTaskFromTheQueuePage(t *testing.T) {
 
 	actions := p.DetailActions(ctx, "edit-proj", []string{name})
 	// Create task first, then Pause queue, Purge queue, Delete queue and
-	// the Logs tab's Configure logging (#1848).
-	if len(actions) != 5 || actions[0].ID != "createtask" || len(actions[0].Fields) == 0 {
+	// the Logs tab's Enable logs, then the Tasks tab's Delete task over
+	// the checked tasks (#1848).
+	if len(actions) != 6 || actions[0].ID != "createtask" || len(actions[0].Fields) == 0 {
 		t.Fatalf("queue page actions = %+v; want Create task with fields first", actions)
 	}
 
