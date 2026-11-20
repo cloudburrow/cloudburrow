@@ -25,6 +25,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -170,10 +171,14 @@ func (f *Front) checkStorageConfig(ctx context.Context, s *pubsubpb.Subscription
 		return apierror.InvalidArgument("max_messages must be at least 1000.")
 	}
 	if cfg.GetAvroConfig().GetUseTopicSchema() {
-		return apierror.InvalidArgument("avro_config.use_topic_schema is not supported by CloudBurrow yet (#1874).")
+		_, err := f.storageTopicSchema(ctx, s)
+		if _, ok := destinationState(err); ok {
+			return apierror.InvalidArgument("%s", err.Error())
+		}
+		// Any other error: the emulator answers for the topic.
 	}
 	f.exp.init()
-	err := f.exp.bucket(ctx, cfg.GetBucket())
+	_, err := f.exp.bucket(forProject(ctx, projectOf(s.GetName())), cfg.GetBucket())
 	if st, ok := destinationState(err); ok {
 		if stateLoad(ctx) {
 			return nil // restored as saved; its delivery reports the state
@@ -189,31 +194,96 @@ func (f *Front) checkStorageConfig(ctx context.Context, s *pubsubpb.Subscription
 	return nil
 }
 
-// bucket checks a bucket exists.
-func (e *exporter) bucket(ctx context.Context, name string) error {
+// bucket checks a bucket exists, and returns its location.
+func (e *exporter) bucket(ctx context.Context, name string) (string, error) {
 	if e.storage == "" {
-		return &errDestination{int32(pubsubpb.CloudStorageConfig_PERMISSION_DENIED),
+		return "", &errDestination{int32(pubsubpb.CloudStorageConfig_PERMISSION_DENIED),
 			"Cannot write to the Cloud Storage bucket: storage.googleapis.com is not enabled for the project."}
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, e.storage+"/storage/v1/b/"+url.PathEscape(name), nil)
 	if err != nil {
-		return err
+		return "", err
 	}
-	resp, err := e.client.Do(req)
+	resp, err := e.do(req)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, resp.Body)
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	switch {
 	case resp.StatusCode == http.StatusNotFound:
-		return &errDestination{int32(pubsubpb.CloudStorageConfig_NOT_FOUND), "Cannot write to the Cloud Storage bucket " + name + ": it does not exist."}
+		return "", &errDestination{int32(pubsubpb.CloudStorageConfig_NOT_FOUND), "Cannot write to the Cloud Storage bucket " + name + ": it does not exist."}
 	case resp.StatusCode == http.StatusForbidden:
-		return &errDestination{int32(pubsubpb.CloudStorageConfig_PERMISSION_DENIED), "Cannot write to the Cloud Storage bucket " + name + ": permission denied."}
+		return "", &errDestination{int32(pubsubpb.CloudStorageConfig_PERMISSION_DENIED), "Cannot write to the Cloud Storage bucket " + name + ": permission denied."}
 	case resp.StatusCode/100 != 2:
-		return fmt.Errorf("Cloud Storage buckets.get %s: %s", name, resp.Status)
+		return "", fmt.Errorf("Cloud Storage buckets.get %s: %s", name, resp.Status)
 	}
-	return nil
+	var b struct {
+		Location string `json:"location"`
+	}
+	_ = json.Unmarshal(body, &b)
+	return b.Location, nil
+}
+
+// storageTopicSchema is the topic's schema an Avro subscription with
+// use_topic_schema writes in. Its errors with a state are the
+// subscription's SCHEMA_MISMATCH: the topic has no schema, or one that
+// is not Avro, or, with write_metadata, one whose root is not a record or
+// has a field of a metadata name.
+func (f *Front) storageTopicSchema(ctx context.Context, s *pubsubpb.Subscription) (*topicMsgSchema, error) {
+	bad := func(format string, a ...any) error {
+		return &errDestination{int32(pubsubpb.CloudStorageConfig_SCHEMA_MISMATCH), fmt.Sprintf(format, a...)}
+	}
+	schema, err := f.topicMessageSchema(ctx, s.GetTopic())
+	if err == errNoTopicSchema {
+		return nil, bad("avro_config.use_topic_schema is set, and the topic %s has no schema.", s.GetTopic())
+	}
+	if err != nil {
+		return nil, err
+	}
+	meta := s.GetCloudStorageConfig().GetAvroConfig().GetWriteMetadata()
+	for _, r := range schema.revisions {
+		if r.codec == nil {
+			return nil, bad("avro_config.use_topic_schema needs the topic's schema to be in Avro format.")
+		}
+		if !meta {
+			continue
+		}
+		if r.root.kind != "record" {
+			return nil, bad("With avro_config.write_metadata, the topic's schema must have a Record at its root.")
+		}
+		for _, m := range r.root.fields {
+			for _, md := range metadataColumns {
+				if m.name == md.name {
+					return nil, bad("With avro_config.write_metadata, the topic's schema cannot contain a field named %s.", m.name)
+				}
+			}
+		}
+	}
+	return schema, nil
+}
+
+// avroWriterSchema is the schema of the objects a revision's messages are
+// written in: the topic's, with write_metadata's fields first in its root
+// record.
+func avroWriterSchema(r schemaRevision, meta bool) (string, error) {
+	if !meta {
+		return r.codec.Schema(), nil
+	}
+	var root map[string]any
+	if err := json.Unmarshal([]byte(r.codec.Schema()), &root); err != nil {
+		return "", err
+	}
+	fields, _ := root["fields"].([]any)
+	var withMeta []any
+	if err := json.Unmarshal([]byte(`[{"name":"subscription_name","type":"string"},{"name":"message_id","type":"string"},`+
+		`{"name":"publish_time","type":{"type":"long","logicalType":"timestamp-micros"}},`+
+		`{"name":"attributes","type":{"type":"map","values":"string"}}]`), &withMeta); err != nil {
+		return "", err
+	}
+	root["fields"] = append(withMeta, fields...)
+	b, err := json.Marshal(root)
+	return string(b), err
 }
 
 // upload writes an object.
@@ -224,7 +294,7 @@ func (e *exporter) upload(ctx context.Context, bucket, name, contentType string,
 		return err
 	}
 	req.Header.Set("Content-Type", contentType)
-	resp, err := e.client.Do(req)
+	resp, err := e.do(req)
 	if err != nil {
 		return err
 	}
@@ -241,49 +311,131 @@ func (e *exporter) upload(ctx context.Context, bucket, name, contentType string,
 	return nil
 }
 
-// encodeBatch is a batch's object and its content type.
-func encodeBatch(s *pubsubpb.Subscription, ps []pulled) ([]byte, string, error) {
+// batchObject is one object of a batch, and the messages it holds.
+type batchObject struct {
+	body        []byte
+	contentType string
+	msgs        []pulled
+}
+
+// metadataRecord adds write_metadata's fields to an Avro record.
+func metadataRecord(s *pubsubpb.Subscription, r map[string]any, m *pubsubpb.PubsubMessage) {
+	attrs := map[string]any{}
+	for k, v := range m.GetAttributes() {
+		attrs[k] = v
+	}
+	r["subscription_name"] = s.GetName()
+	r["message_id"] = m.GetMessageId()
+	r["publish_time"] = m.GetPublishTime().AsTime().UTC()
+	r["attributes"] = attrs
+}
+
+// encodeBatch is a batch's objects, and the messages that could not be
+// written in any (in the topic's schema, for use_topic_schema).
+func encodeBatch(s *pubsubpb.Subscription, schema *topicMsgSchema, ps []pulled) ([]batchObject, []failed, error) {
 	cfg := s.GetCloudStorageConfig()
 	if cfg.GetAvroConfig() == nil {
 		parts := make([][]byte, len(ps))
 		for i, p := range ps {
 			parts[i] = p.msg.GetData()
 		}
-		return bytes.Join(parts, []byte("\n")), "text/plain", nil
+		return []batchObject{{bytes.Join(parts, []byte("\n")), "text/plain", ps}}, nil, nil
 	}
 	meta := cfg.GetAvroConfig().GetWriteMetadata()
-	schema := avroMessageSchema
-	if meta {
-		schema = avroMetadataSchema
+	if cfg.GetAvroConfig().GetUseTopicSchema() && schema != nil {
+		return encodeTopicSchemaBatch(s, schema, ps)
 	}
-	var buf bytes.Buffer
-	w, err := goavro.NewOCFWriter(goavro.OCFConfig{W: &buf, Schema: schema})
-	if err != nil {
-		return nil, "", err
+	schemaText := avroMessageSchema
+	if meta {
+		schemaText = avroMetadataSchema
 	}
 	recs := make([]any, 0, len(ps))
 	for _, p := range ps {
 		r := map[string]any{"data": p.msg.GetData()}
 		if meta {
-			attrs := map[string]any{}
-			for k, v := range p.msg.GetAttributes() {
-				attrs[k] = v
-			}
-			r["subscription_name"] = s.GetName()
-			r["message_id"] = p.msg.GetMessageId()
-			r["publish_time"] = p.msg.GetPublishTime().AsTime().UTC()
-			r["attributes"] = attrs
+			metadataRecord(s, r, p.msg)
 		}
 		recs = append(recs, r)
 	}
-	if err := w.Append(recs); err != nil {
-		return nil, "", err
+	body, err := avroFile(schemaText, recs)
+	if err != nil {
+		return nil, nil, err
 	}
-	return buf.Bytes(), "application/octet-stream", nil
+	return []batchObject{{body, "application/octet-stream", ps}}, nil, nil
+}
+
+func avroFile(schema string, recs []any) ([]byte, error) {
+	var buf bytes.Buffer
+	w, err := goavro.NewOCFWriter(goavro.OCFConfig{W: &buf, Schema: schema})
+	if err != nil {
+		return nil, err
+	}
+	if err := w.Append(recs); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// encodeTopicSchemaBatch writes each message in the newest revision of
+// the topic's schema it decodes in, one object per revision.
+func encodeTopicSchemaBatch(s *pubsubpb.Subscription, schema *topicMsgSchema, ps []pulled) ([]batchObject, []failed, error) {
+	meta := s.GetCloudStorageConfig().GetAvroConfig().GetWriteMetadata()
+	recs := make([][]any, len(schema.revisions))
+	msgs := make([][]pulled, len(schema.revisions))
+	var bad []failed
+	for _, p := range ps {
+		var last error
+		done := false
+		for i, r := range schema.revisions {
+			var native any
+			var err error
+			if schema.enc == pubsubpb.Encoding_JSON {
+				native, _, err = r.codec.NativeFromTextual(p.msg.GetData())
+			} else {
+				native, _, err = r.codec.NativeFromBinary(p.msg.GetData())
+			}
+			if err != nil {
+				last = err
+				continue
+			}
+			if meta {
+				rec, _ := native.(map[string]any)
+				if rec == nil {
+					rec = map[string]any{}
+				}
+				metadataRecord(s, rec, p.msg)
+				native = rec
+			}
+			recs[i] = append(recs[i], native)
+			msgs[i] = append(msgs[i], p)
+			done = true
+			break
+		}
+		if !done {
+			bad = append(bad, failed{p, fmt.Sprintf("the message does not match the topic's schema: %v", last)})
+		}
+	}
+	var out []batchObject
+	for i, r := range schema.revisions {
+		if len(recs[i]) == 0 {
+			continue
+		}
+		text, err := avroWriterSchema(r, meta)
+		if err != nil {
+			return nil, nil, err
+		}
+		body, err := avroFile(text, recs[i])
+		if err != nil {
+			return nil, nil, err
+		}
+		out = append(out, batchObject{body, "application/octet-stream", msgs[i]})
+	}
+	return out, bad, nil
 }
 
 // runStorageExport delivers s until ctx ends.
 func (f *Front) runStorageExport(ctx context.Context, s *pubsubpb.Subscription) {
+	ctx = forProject(ctx, projectOf(s.GetName()))
 	cfg := s.GetCloudStorageConfig()
 	var batch []pulled
 	var size int64
@@ -300,7 +452,16 @@ func (f *Front) runStorageExport(ctx context.Context, s *pubsubpb.Subscription) 
 	}
 	defer func() { release() }()
 	for ctx.Err() == nil {
-		if err := f.exp.bucket(ctx, cfg.GetBucket()); err != nil {
+		var schema *topicMsgSchema
+		loc, err := f.exp.bucket(ctx, cfg.GetBucket())
+		if err == nil && !f.inTransitAllowed(s.GetTopic(), loc) {
+			err = &errDestination{int32(pubsubpb.CloudStorageConfig_IN_TRANSIT_LOCATION_RESTRICTION),
+				"Cannot write to the Cloud Storage bucket " + cfg.GetBucket() + ": enforce_in_transit is set and its location " + loc + " is not one of the topic's allowed regions."}
+		}
+		if err == nil && cfg.GetAvroConfig().GetUseTopicSchema() {
+			schema, err = f.storageTopicSchema(ctx, s)
+		}
+		if err != nil {
 			if st, ok := destinationState(err); ok {
 				f.exp.setState(s.GetName(), st)
 			}
@@ -341,7 +502,7 @@ func (f *Front) runStorageExport(ctx context.Context, s *pubsubpb.Subscription) 
 			(cfg.GetMaxBytes() > 0 && size >= cfg.GetMaxBytes()) ||
 			f.clock.Now().Sub(began) >= storageMaxDuration(cfg))
 		if full {
-			f.writeBatch(ctx, s, batch, began)
+			f.writeBatch(ctx, s, schema, batch, began)
 			batch, size = nil, 0
 			continue
 		}
@@ -351,30 +512,46 @@ func (f *Front) runStorageExport(ctx context.Context, s *pubsubpb.Subscription) 
 	}
 }
 
-// writeBatch writes one object and acknowledges its messages, or fails
-// them.
-func (f *Front) writeBatch(ctx context.Context, s *pubsubpb.Subscription, batch []pulled, began time.Time) {
+// writeBatch writes a batch's objects and acknowledges their messages,
+// and fails the messages it could not write. When the bucket itself
+// fails, an object's messages are left in the backlog, not dead-lettered,
+// until it is back.
+func (f *Front) writeBatch(ctx context.Context, s *pubsubpb.Subscription, schema *topicMsgSchema, batch []pulled, began time.Time) {
 	cfg := s.GetCloudStorageConfig()
-	body, ct, err := encodeBatch(s, batch)
-	if err == nil {
-		err = f.exp.upload(ctx, cfg.GetBucket(), objectName(cfg, began), ct, body)
-	}
+	objs, bad, err := encodeBatch(s, schema, batch)
+	var fs []failed
 	if err != nil {
-		f.logf("pubsub front: export %s: %v", s.GetName(), err)
-		if st, ok := destinationState(err); ok {
-			f.exp.setState(s.GetName(), st)
-		}
-		fs := make([]failed, len(batch))
-		for i, p := range batch {
-			fs[i] = failed{p, err.Error()}
+		for _, p := range batch {
+			fs = append(fs, failed{p, err.Error()})
 		}
 		f.fail(ctx, s, fs)
 		return
 	}
-	ids := make([]string, len(batch))
-	for i, p := range batch {
-		ids[i] = p.ackID
+	fs = bad
+	for _, o := range objs {
+		err := f.exp.upload(ctx, cfg.GetBucket(), objectName(cfg, began), o.contentType, o.body)
+		if err != nil {
+			f.logf("pubsub front: export %s: %v", s.GetName(), err)
+			if st, ok := destinationState(err); ok {
+				f.exp.setState(s.GetName(), st)
+				var ids []string
+				for _, p := range o.msgs {
+					ids = append(ids, p.ackID)
+				}
+				f.extend(ctx, s.GetName(), ids, 0)
+				continue
+			}
+			for _, p := range o.msgs {
+				fs = append(fs, failed{p, err.Error()})
+			}
+			continue
+		}
+		ids := make([]string, len(o.msgs))
+		for i, p := range o.msgs {
+			ids[i] = p.ackID
+		}
+		f.ack(ctx, s.GetName(), ids)
+		f.exp.forgetAttempts(s.GetName(), o.msgs)
 	}
-	f.ack(ctx, s.GetName(), ids)
-	f.exp.forgetAttempts(s.GetName(), batch)
+	f.fail(ctx, s, fs)
 }

@@ -77,7 +77,7 @@ func (e *exporter) tableSchema(ctx context.Context, t bqTable) ([]bqField, error
 	if err != nil {
 		return nil, err
 	}
-	resp, err := e.client.Do(req)
+	resp, err := e.do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -100,6 +100,32 @@ func (e *exporter) tableSchema(ctx context.Context, t bqTable) ([]bqField, error
 		return nil, err
 	}
 	return tbl.Schema.Fields, nil
+}
+
+// datasetLocation is the location of a table's dataset.
+func (e *exporter) datasetLocation(ctx context.Context, t bqTable) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, e.bigquery+"/bigquery/v2/projects/"+url.PathEscape(t.project)+
+		"/datasets/"+url.PathEscape(t.dataset), nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := e.do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	switch {
+	case resp.StatusCode == http.StatusNotFound:
+		return "", &errDestination{int32(pubsubpb.BigQueryConfig_NOT_FOUND), "Cannot write to the BigQuery table " + t.String() + ": its dataset does not exist."}
+	case resp.StatusCode/100 != 2:
+		return "", fmt.Errorf("BigQuery datasets.get %s.%s: %s", t.project, t.dataset, resp.Status)
+	}
+	var d struct {
+		Location string `json:"location"`
+	}
+	_ = json.Unmarshal(body, &d)
+	return d.Location, nil
 }
 
 func mismatch(format string, a ...any) error {
@@ -184,6 +210,7 @@ func metadataFree(cols []bqField, cfg *pubsubpb.BigQueryConfig) []bqField {
 // check of a bigquery_config.
 func (f *Front) checkBigQueryConfig(ctx context.Context, s *pubsubpb.Subscription) error {
 	cfg := s.GetBigqueryConfig()
+	ctx = forProject(ctx, projectOf(s.GetName()))
 	if cfg.GetUseTopicSchema() && cfg.GetUseTableSchema() {
 		return apierror.InvalidArgument("At most one of use_topic_schema and use_table_schema can be set.")
 	}
@@ -228,6 +255,7 @@ func (f *Front) checkBigQueryConfig(ctx context.Context, s *pubsubpb.Subscriptio
 
 // runBigQueryExport delivers s until ctx ends.
 func (f *Front) runBigQueryExport(ctx context.Context, s *pubsubpb.Subscription) {
+	ctx = forProject(ctx, projectOf(s.GetName()))
 	cfg := s.GetBigqueryConfig()
 	t, err := parseTable(cfg.GetTable())
 	if err != nil {
@@ -249,6 +277,13 @@ func (f *Front) runBigQueryExport(ctx context.Context, s *pubsubpb.Subscription)
 		cols, err := f.exp.tableSchema(ctx, t)
 		if err == nil {
 			err = checkTable(cfg, cols, schema)
+		}
+		if err == nil && f.enforcesInTransit(s.GetTopic()) {
+			var loc string
+			if loc, err = f.exp.datasetLocation(ctx, t); err == nil && !f.inTransitAllowed(s.GetTopic(), loc) {
+				err = &errDestination{int32(pubsubpb.BigQueryConfig_IN_TRANSIT_LOCATION_RESTRICTION),
+					"Cannot write to the BigQuery table " + t.String() + ": enforce_in_transit is set and its location " + loc + " is not one of the topic's allowed regions."}
+			}
 		}
 		if err != nil {
 			if st, ok := destinationState(err); ok {
@@ -382,7 +417,7 @@ func (e *exporter) insert(ctx context.Context, t bqTable, rows []insertRow) (map
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := e.client.Do(req)
+	resp, err := e.do(req)
 	if err != nil {
 		return nil, err
 	}

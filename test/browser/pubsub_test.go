@@ -352,6 +352,15 @@ func TestPubSubIdleTimeAndPushAttributesThroughTheForms(t *testing.T) {
 	if !shown("f-storageBucket") || !shown("f-filenamePrefix") || !shown("f-maxDurationMinutes") || shown("f-bigqueryTable") {
 		t.Error("Write to Cloud Storage does not reveal only its bucket, file names and batching")
 	}
+	// Avro reveals Use topic schema and Write metadata (#1874).
+	if shown("f-storageUseTopicSchema") {
+		t.Error("Use topic schema shows with the Text file format")
+	}
+	p.run(chromedp.Click(chromedp.CSS(`#view #f-storageFormat-1`)))
+	if !shown("f-storageUseTopicSchema") || !shown("f-storageWriteMetadata") {
+		t.Error("the Avro file format does not reveal Use topic schema and Write metadata")
+	}
+	p.run(chromedp.Click(chromedp.CSS(`#view #f-storageFormat-0`)))
 	p.run(chromedp.Click(chromedp.CSS(`#view #f-deliveryType-1`)))
 	setField(p, "#view", "f-name", "browser-idle-push")
 	setField(p, "#view", "f-pushEndpoint", "http://127.0.0.1:1/push")
