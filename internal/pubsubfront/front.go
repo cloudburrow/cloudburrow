@@ -110,6 +110,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/grpchttp"
 	"github.com/cloudburrow/cloudburrow/internal/iamcheck"
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
+	"github.com/cloudburrow/cloudburrow/internal/sysparams"
 )
 
 const (
@@ -355,7 +356,7 @@ func (f *Front) Server() *grpc.Server {
 // lower-performance than its own transport (measured: BenchmarkTransport*,
 // #950); only such a connection's gRPC requests take it.
 func (f *Front) Handler(grpcSrv *grpc.Server) http.Handler {
-	rest := f.recordREST(f.RESTHandler())
+	rest := f.recordREST(sysparams.Wrap(f.RESTHandler(), sysparams.Options{})) // #1954
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.ProtoMajor == 2 && isGRPCContentType(r.Header.Get("Content-Type")) {
 			grpcSrv.ServeHTTP(w, r)

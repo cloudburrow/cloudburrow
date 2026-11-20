@@ -14,6 +14,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/lro"
 	"github.com/cloudburrow/cloudburrow/internal/modelgarden"
+	"github.com/cloudburrow/cloudburrow/internal/sysparams"
 	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
 )
 
@@ -116,7 +117,7 @@ func (s *Server) Handler() http.Handler {
 	// operations through the REST transcoder when served (modelgarden.go).
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { s.serveREST(w, r, nil) })
 	// The playground page and any browser tab can reach this port (#676).
-	return hostguard.Wrap(mux)
+	return hostguard.Wrap(sysparams.Wrap(mux, sysparams.Options{}))
 }
 
 // notFound answers an unrouted path with the supported surface rather than an

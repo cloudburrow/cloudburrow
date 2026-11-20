@@ -44,6 +44,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 	"github.com/cloudburrow/cloudburrow/internal/queryfront"
 	"github.com/cloudburrow/cloudburrow/internal/spannerfront"
+	"github.com/cloudburrow/cloudburrow/internal/sysparams"
 )
 
 // ErrUsage means the arguments were refused; the reason has been written.
@@ -197,7 +198,7 @@ func Server(h http.Handler, logf func(string, ...any), service ...string) *http.
 	protocols.SetHTTP1(true)
 	protocols.SetUnencryptedHTTP2(true)
 	return &http.Server{
-		Handler:   hostguard.WrapService(gateAPI(h, name), name),
+		Handler:   hostguard.WrapService(sysparams.Wrap(gateAPI(h, name), sysparams.Options{}), name), // #1954
 		Protocols: &protocols,
 		// The emulators set no stream limit; Go's default of 250 could
 		// queue a client's new calls behind its long-lived streams.

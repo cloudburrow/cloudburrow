@@ -102,9 +102,11 @@ func TestRESTReads(t *testing.T) {
 	}{
 		{loc + "/keyRings?bogus=1", 400, "INVALID_ARGUMENT", "bogus"},
 		{ring.GetName() + "?pageSize=1", 400, "INVALID_ARGUMENT", "pageSize"}, // Get takes no parameters
-		{loc + "/keyRings?fields=name", 501, "UNIMPLEMENTED", "fields"},
-		{loc + "/keyRings?$fields=name", 501, "UNIMPLEMENTED", "$fields"},
-		{loc + "/keyRings?alt=proto", 501, "UNIMPLEMENTED", "alt"},
+		// fields names the response's fields: ListKeyRingsResponse has no
+		// name (#1954).
+		{loc + "/keyRings?fields=name", 400, "INVALID_ARGUMENT", "Invalid field selection name"},
+		{loc + "/keyRings?$fields=keyRings(bogus)", 400, "INVALID_ARGUMENT", "Invalid field selection keyRings/bogus"},
+		{loc + "/keyRings?alt=sse", 501, "UNIMPLEMENTED", "alt=sse"},
 		{loc + "/keyRings?pageSize=two", 400, "INVALID_ARGUMENT", "pageSize"},
 		{ring.GetName() + "/cryptoKeys?versionView=SIDEWAYS", 400, "INVALID_ARGUMENT", "versionView"},
 		{loc + "/keyRings/absent", 404, "NOT_FOUND", "absent"},

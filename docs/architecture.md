@@ -210,6 +210,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/storageserver/` | Runs the builtin Cloud Storage server as a process. |
 | `internal/supervisor/` | `cloudburrow-storage supervise`: runs a backend's process inside its container and starts it again within a second when it ends or the front beside it fails its liveness path, so Kubernetes' restart back-off never applies (the BigQuery emulator, #1091); `install-self` copies the binary in from an init container. |
 | `internal/store/` | Resource metadata storage: in-memory and durable modes, atomic multi-key commits, single-instance ownership of a data directory. |
+| `internal/sysparams/` | Google's REST system parameters (#1954): the `fields` / `X-Goog-FieldMask` / `x-goog-fieldmask` mask parser and pruners, `prettyPrint`, `$.xgafv`, JSONP `callback`, and `Wrap` for the hand-written JSON fronts. |
 | `internal/telemetry/` | OpenTelemetry traces of the requests CloudBurrow serves itself (#313). |
 | `internal/terminal/` | The console's Cloud Shell-style terminal (#781): the pinned Cloud SDK pod in the instance's namespace, with the instance's pod environment and gcloud configuration and read-only kubectl, and the interactive `kubectl exec` into it, through the `internal/k8s` runner. |
 | `internal/transport/grpc/` | The gRPC server CloudBurrow's own services run on: one listener, shared interceptors and message-size limit. |

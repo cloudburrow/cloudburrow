@@ -118,7 +118,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// way, comes here directly. Pods name the Service (ServiceName), and
 	// a kubelet probe the pod's address, which the Host check passes.
 	srv := &http.Server{
-		Handler:           hostguard.WrapService(frontready.Wrap(apienable.Gate(nil, "bigquery.googleapis.com", handler), ready...), ServiceName),
+		Handler:           hostguard.WrapService(frontready.Wrap(apienable.Gate(nil, "bigquery.googleapis.com", SystemParams(handler)), ready...), ServiceName),
 		ReadHeaderTimeout: 30 * time.Second,
 		ErrorLog:          log.New(stderr, "bigquery-front: ", log.LstdFlags|log.LUTC),
 	}

@@ -31,6 +31,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/iamcheck"
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
+	"github.com/cloudburrow/cloudburrow/internal/sysparams"
 )
 
 // Server serves Cloud Storage.
@@ -433,38 +434,24 @@ func checkSystemParams(r *http.Request) error {
 	return nil
 }
 
-// writeResponse writes v as the JSON API does: trimmed to fields, when the
-// request names them, and indented unless prettyPrint=false.
+// writeResponse writes v as the JSON API does, under the request's system
+// parameters (internal/sysparams, #1954): trimmed to fields, $fields or
+// X-Goog-FieldMask when the request names one, indented unless
+// prettyPrint=false, and wrapped in a JSONP callback when one is named.
 func writeResponse(w http.ResponseWriter, r *http.Request, status int, v any) {
-	q := r.URL.Query()
-	if spec := q.Get("fields"); spec != "" {
-		sel, err := parseFields(spec)
-		if err != nil {
-			apierror.WriteStorageJSON(w, err)
-			return
-		}
-		v = sel.apply(toGeneric(v))
-	}
-	var b []byte
-	if q.Get("prettyPrint") == "false" {
-		b, _ = json.Marshal(v)
-	} else {
-		b, _ = json.MarshalIndent(v, "", "  ")
-	}
-	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
-	w.WriteHeader(status)
-	_, _ = w.Write(append(b, '\n'))
-}
-
-// toGeneric round-trips v through JSON so a field selection can walk it.
-func toGeneric(v any) any {
-	b, err := json.Marshal(v)
+	p, err := sysparams.FromRequest(r)
 	if err != nil {
-		return v
+		apierror.WriteStorageJSON(w, err)
+		return
 	}
-	var out any
-	_ = json.Unmarshal(b, &out)
-	return out
+	sysparams.MarkHandled(r)
+	// The JSON API indents unless prettyPrint=false.
+	p.PrettySet = true
+	raw, _ := json.Marshal(v)
+	b, ct := p.Body(raw, true)
+	w.Header().Set("Content-Type", ct)
+	w.WriteHeader(status)
+	_, _ = w.Write(b)
 }
 
 // baseURL is the scheme and host the request reached this server by. Every
