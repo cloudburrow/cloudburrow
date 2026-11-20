@@ -37,9 +37,11 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/apienable"
 	"github.com/cloudburrow/cloudburrow/internal/calllog"
+	"github.com/cloudburrow/cloudburrow/internal/cmek"
 	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
 	"github.com/cloudburrow/cloudburrow/internal/frontready"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
+	"github.com/cloudburrow/cloudburrow/internal/iamcheck"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 	"github.com/cloudburrow/cloudburrow/internal/queryfront"
@@ -296,7 +298,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// front serves their entities, and the host's Cloud KMS their keys.
 	firestoreAdminAddr := fs.String("firestore-admin-addr", "", "the Firestore front (host:port), whose Admin API says which databases the Datastore API serves (with --datastore-databases)")
 	datastoreAddr := fs.String("datastore", "", "the Datastore front (host:port), which clears a deleted Datastore mode database's entities (with --firestore-admin)")
-	kmsAddr := fs.String("kms", "", "the instance's Cloud KMS (host:port, gRPC), which customer-managed keys are checked against (with --firestore-admin)")
+	kmsAddr := fs.String("kms", "", "the instance's Cloud KMS (host:port, gRPC), which customer-managed keys are checked against (with --firestore-admin or --spanner-instances)")
+	iamCheck := fs.String("iam-check", "", "http://host:port of the host's IAM evaluator, which checks the Spanner service agent's use of a customer-managed key (with --spanner-instances and --kms; what `up --iam-enforcement=on` passes, #1950)")
 	queries := fs.String("queries", "", "answer the query RPCs the emulator does not serve: datastore (RunAggregationQuery) or firestore (PartitionQuery)")
 	if err := fs.Parse(args); err != nil {
 		return ErrUsage
@@ -309,8 +312,12 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		fmt.Fprintln(stderr, "call-front: --mongodb-listen needs --firestore-admin")
 		return ErrUsage
 	}
-	if (*datastoreAddr != "" || *kmsAddr != "") && !*firestoreAdmin {
-		fmt.Fprintln(stderr, "call-front: --datastore and --kms need --firestore-admin")
+	if *datastoreAddr != "" && !*firestoreAdmin || *kmsAddr != "" && !*firestoreAdmin && !*spannerInstances {
+		fmt.Fprintln(stderr, "call-front: --datastore needs --firestore-admin, and --kms --firestore-admin or --spanner-instances")
+		return ErrUsage
+	}
+	if *iamCheck != "" && (!*spannerInstances || *kmsAddr == "") {
+		fmt.Fprintln(stderr, "call-front: --iam-check needs --spanner-instances and --kms")
 		return ErrUsage
 	}
 	if *firestoreAdminAddr != "" && !*datastoreDBs {
@@ -433,6 +440,14 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		si, err := spannerfront.New(*upstream)
 		if err != nil {
 			return fmt.Errorf("the Spanner instance front: %w", err)
+		}
+		if *kmsAddr != "" {
+			k, conn, err := cmek.Dial(*kmsAddr)
+			if err != nil {
+				return fmt.Errorf("Cloud KMS at %s: %w", *kmsAddr, err)
+			}
+			defer conn.Close()
+			si.UseKeys(cmek.Keys{KMS: func() cmek.KMS { return k }, Check: cmek.Remote(&iamcheck.Client{Base: *iamCheck})})
 		}
 		if *stateDir != "" {
 			if err := si.KeepState(ctx, *stateDir, logger.Printf); err != nil {

@@ -126,6 +126,11 @@ func (loggingBucketsProvider) CreateForm() (string, []console.Field) {
 		{Name: "linkId", Label: "BigQuery dataset name", Type: "text", Required: true, Section: details, ShowWhen: "analytics&link",
 			Pattern: `^[A-Za-z0-9][A-Za-z0-9_\-.]{0,99}$`, Help: "The link's name, which names the dataset too, with hyphens as underscores."},
 		{Name: "location", Label: "Select log bucket region", Type: "select", Required: true, Default: "global", Options: bucketRegions(), Section: details},
+		{Name: "encryption", Label: "Encryption", Type: "radio", Section: details, Options: []string{arEncGoogle, arEncCMEK}, Default: arEncGoogle,
+			Help: "A customer-managed key needs a region other than global (#1950)."},
+		{Name: "kmsKey", Label: "Select a customer-managed key", Type: "text", Section: details, Required: true, ShowWhen: "encryption=" + arEncCMEK,
+			Help: "A Cloud KMS key of this instance in the bucket's region, projects/P/locations/L/keyRings/R/cryptoKeys/K, which the Logging service account " +
+				"can use (roles/cloudkms.cryptoKeyEncrypterDecrypter). The entries routed to the bucket are encrypted with it; while its key version is disabled or destroyed, the bucket cannot be read."},
 		{Name: "retention", Label: "Retention period", Type: "number", Default: "30", Section: retention, Help: "1 to 3650 days."},
 	}
 }
@@ -163,8 +168,11 @@ func (p loggingBucketsProvider) Create(ctx context.Context, project string, valu
 		return "", err
 	}
 	analytics := values["analytics"] == "true"
-	b, err := a.ConfigServer().CreateBucket(ctx, &loggingpb.CreateBucketRequest{Parent: parent, BucketId: strings.TrimSpace(values["name"]),
-		Bucket: &loggingpb.LogBucket{Description: values["description"], RetentionDays: days, AnalyticsEnabled: analytics}})
+	in := &loggingpb.LogBucket{Description: values["description"], RetentionDays: days, AnalyticsEnabled: analytics}
+	if values["encryption"] == arEncCMEK {
+		in.CmekSettings = &loggingpb.CmekSettings{KmsKeyName: strings.TrimSpace(values["kmsKey"])}
+	}
+	b, err := a.ConfigServer().CreateBucket(ctx, &loggingpb.CreateBucketRequest{Parent: parent, BucketId: strings.TrimSpace(values["name"]), Bucket: in})
 	if err != nil {
 		return "", err
 	}
@@ -246,6 +254,8 @@ func (p loggingBucketsProvider) Detail(ctx context.Context, project string, path
 					{Label: "Lock", Value: lockedWord(b.GetLocked())},
 					{Label: "State", Value: bucketState(b)},
 					{Label: "Observability Analytics", Value: map[bool]string{true: "Enabled", false: "Disabled"}[b.GetAnalyticsEnabled()]},
+					{Label: "Encryption", Value: bucketEncryptionWord(b)},
+					{Label: "Key version", Value: orDash(b.GetCmekSettings().GetKmsKeyVersionName())},
 					{Label: "Created", Value: loggingTime(b.GetCreateTime())},
 					{Label: "Updated", Value: loggingTime(b.GetUpdateTime())},
 				}}}, Note: bucketNote},
@@ -521,3 +531,12 @@ var (
 	_ console.CreateLayouter  = loggingBucketsProvider{}
 	_ console.CreateSubmitter = loggingBucketsProvider{}
 )
+
+// bucketEncryptionWord is a bucket's encryption, as the console's bucket
+// details word it: its customer-managed key, or Google-managed (#1950).
+func bucketEncryptionWord(b *loggingpb.LogBucket) string {
+	if k := b.GetCmekSettings().GetKmsKeyName(); k != "" {
+		return arEncCMEK + ": " + k
+	}
+	return arEncGoogle
+}

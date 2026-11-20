@@ -91,7 +91,7 @@ type copies struct {
 	ops     map[string]*copyOp
 	order   []string
 	storage ObjectWriter
-	entries func(bucketRef) []*loggingpb.LogEntry
+	entries func(bucketRef) ([]*loggingpb.LogEntry, error)
 	delay   time.Duration
 	// pace is waited between objects, for tests that cancel mid-copy.
 	pace time.Duration
@@ -104,7 +104,7 @@ func (a *Admin) UseStorage(w ObjectWriter) {
 	a.copies.mu.Unlock()
 }
 
-func (a *Admin) useEntries(fn func(bucketRef) []*loggingpb.LogEntry) {
+func (a *Admin) useEntries(fn func(bucketRef) ([]*loggingpb.LogEntry, error)) {
 	a.copies.mu.Lock()
 	a.copies.entries = fn
 	a.copies.mu.Unlock()
@@ -218,7 +218,11 @@ func (s configServer) CopyLogEntries(_ context.Context, req *loggingpb.CopyLogEn
 	// Only entries stored when the copy starts are copied.
 	var picked []*loggingpb.LogEntry
 	if c.entries != nil {
-		for _, e := range c.entries(ref) {
+		es, err := c.entries(ref)
+		if err != nil {
+			return nil, apierror.Wrap(err)
+		}
+		for _, e := range es {
 			if match(e) {
 				picked = append(picked, e)
 			}

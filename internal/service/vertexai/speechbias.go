@@ -97,6 +97,9 @@ func (s *Server) adaptationOptions(raw json.RawMessage) ([]speech.Phrase, string
 			return c, nil
 		}
 		if c, ok := st.classes[name]; ok && c.GetState() != speechpb.CustomClass_DELETED {
+			if err := s.unsealClass(c); err != nil {
+				return nil, err
+			}
 			return c, nil
 		}
 		if !strings.Contains(name, "/customClasses/") && strings.ToUpper(name) == name {
@@ -115,6 +118,8 @@ func (s *Server) adaptationOptions(raw json.RawMessage) ([]speech.Phrase, string
 			ps, ok := st.phraseSets[aps.GetPhraseSet()]
 			if !ok || ps.GetState() == speechpb.PhraseSet_DELETED {
 				err = apierror.InvalidArgument("Unable to find PhraseSet %s from storage", aps.GetPhraseSet())
+			} else {
+				err = s.unsealPhraseSet(ps)
 			}
 			sets = append(sets, ps)
 		default:

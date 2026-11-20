@@ -32,6 +32,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/cmek"
 	"github.com/cloudburrow/cloudburrow/internal/paging"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
 )
@@ -85,6 +86,9 @@ func (s *Store) Observe(fn func(*loggingpb.LogEntry)) { s.mu.Lock(); s.observe =
 type route struct {
 	buckets []string // projects/{p}/locations/{l}/buckets/{b}
 	hidden  bool
+	// sealed are the entry's copies in the buckets with a customer-managed
+	// key, by bucket name (cmek.go, #1950).
+	sealed map[string]cmek.Sealed
 }
 
 // Reset removes every entry.
@@ -218,7 +222,7 @@ type Server struct {
 // by in a linked dataset (#1602).
 func (s *Server) UseAdmin(a *Admin) {
 	s.admin = a
-	a.useEntries(s.store.bucketEntries)
+	a.useEntries(func(ref bucketRef) ([]*loggingpb.LogEntry, error) { return s.readBucket(context.Background(), ref) })
 	a.copies.mu.Lock()
 	a.clock = s.clock
 	a.copies.mu.Unlock()
@@ -366,7 +370,7 @@ func (s *Server) prepare(req *loggingpb.WriteLogEntriesRequest, in *loggingpb.Lo
 // written and the call fails with the first failed entry's status, carrying
 // WriteLogEntriesPartialErrors keyed by index; when every entry failed nothing
 // is written and no per-entry errors are attached, as the proto documents.
-func (s *Server) WriteLogEntries(_ context.Context, req *loggingpb.WriteLogEntriesRequest) (*loggingpb.WriteLogEntriesResponse, error) {
+func (s *Server) WriteLogEntries(ctx context.Context, req *loggingpb.WriteLogEntriesRequest) (*loggingpb.WriteLogEntriesResponse, error) {
 	if len(req.GetEntries()) == 0 {
 		return nil, apierror.Wrap(apierror.InvalidArgument("entries is required"))
 	}
@@ -421,6 +425,7 @@ func (s *Server) WriteLogEntries(_ context.Context, req *loggingpb.WriteLogEntri
 			}
 		}
 		s.store.mu.Unlock()
+		s.sealRoutes(ctx, routes)
 		// Stored under the links' snapshot lock, so a linked dataset made
 		// again meanwhile has them once (analytics.go, #1435).
 		var gens map[string]uint64
@@ -504,7 +509,7 @@ func cmpInt(a, b int64) int {
 //
 // The page token is a paging token scoped to the resource names, filter and
 // order, so a token from one listing is INVALID_ARGUMENT on another.
-func (s *Server) ListLogEntries(_ context.Context, req *loggingpb.ListLogEntriesRequest) (*loggingpb.ListLogEntriesResponse, error) {
+func (s *Server) ListLogEntries(ctx context.Context, req *loggingpb.ListLogEntriesRequest) (*loggingpb.ListLogEntriesResponse, error) {
 	if len(req.GetResourceNames()) == 0 {
 		return nil, apierror.Wrap(apierror.InvalidArgument("resource_names is required"))
 	}
@@ -546,12 +551,16 @@ func (s *Server) ListLogEntries(_ context.Context, req *loggingpb.ListLogEntries
 	}
 
 	var found []*loggingpb.LogEntry
-	seen := map[*loggingpb.LogEntry]bool{}
+	seen := map[cursor]bool{}
 	now := s.clock()
 	for _, src := range sources {
-		for _, e := range s.store.bucketEntries(src.bucket) {
-			if !seen[e] && src.holds(e, now) && match(e) {
-				seen[e] = true
+		es, err := s.readBucket(ctx, src.bucket)
+		if err != nil {
+			return nil, apierror.Wrap(err)
+		}
+		for _, e := range es {
+			if c := cursorOf(e); !seen[c] && src.holds(e, now) && match(e) {
+				seen[c] = true
 				found = append(found, e)
 			}
 		}

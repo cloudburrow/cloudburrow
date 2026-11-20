@@ -538,7 +538,11 @@ func (a *Admin) syncLink(ctx context.Context, ref bucketRef, l *loggingpb.Link, 
 	a.linkSync.gen[key]++
 	var entries []*loggingpb.LogEntry
 	if entriesOf != nil {
-		entries = entriesOf(ref)
+		var err error
+		if entries, err = entriesOf(ref); err != nil {
+			a.linkSync.snap.Unlock()
+			return err
+		}
 	}
 	a.linkSync.snap.Unlock()
 	if !fresh {

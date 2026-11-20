@@ -40,6 +40,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
@@ -202,6 +203,7 @@ func (a *Admin) purgeBucket(ref bucketRef) error {
 	for _, k := range keys {
 		_ = a.db.Delete(k)
 	}
+	a.dropBucketKey(ref)
 	return a.db.Delete(ref.key())
 }
 
@@ -211,9 +213,6 @@ func checkBucket(b *loggingpb.LogBucket) error {
 	}
 	if d := b.GetRetentionDays(); d < 0 || d > maxRetention {
 		return apierror.InvalidArgument("retention_days must be between 1 and %d, or 0 for the default of %d", maxRetention, defaultRetention)
-	}
-	if b.GetCmekSettings() != nil {
-		return apierror.Unimplemented("cmek_settings: customer-managed encryption of a log bucket is not supported")
 	}
 	return nil
 }
@@ -298,7 +297,7 @@ func (s configServer) GetBucket(_ context.Context, req *loggingpb.GetBucketReque
 	return b, apierror.Wrap(err)
 }
 
-func (s configServer) CreateBucket(_ context.Context, req *loggingpb.CreateBucketRequest) (*loggingpb.LogBucket, error) {
+func (s configServer) CreateBucket(ctx context.Context, req *loggingpb.CreateBucketRequest) (*loggingpb.LogBucket, error) {
 	p, err := splitName("parent", req.GetParent())
 	if err != nil {
 		return nil, apierror.Wrap(err)
@@ -335,6 +334,11 @@ func (s configServer) CreateBucket(_ context.Context, req *loggingpb.CreateBucke
 	if b.GetRetentionDays() == 0 {
 		b.RetentionDays = defaultRetention
 	}
+	if c := b.GetCmekSettings(); c != nil {
+		if err := s.a.setBucketKey(ctx, ref, b, c.GetKmsKeyName()); err != nil {
+			return nil, apierror.Wrap(err)
+		}
+	}
 	if err := s.a.putBucket(ref, b); err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -366,8 +370,27 @@ func (s configServer) UpdateBucket(ctx context.Context, req *loggingpb.UpdateBuc
 		return nil, apierror.Wrap(apierror.FailedPrecondition("bucket %s is %s; undelete it before updating it", ref.name(), old.GetLifecycleState()))
 	}
 	b := proto.Clone(old).(*loggingpb.LogBucket)
-	if err := applyMask(b, req.GetBucket(), req.GetUpdateMask(), bucketUpdatable); err != nil {
+	mask, setKey := &fieldmaskpb.FieldMask{}, false
+	for _, p := range req.GetUpdateMask().GetPaths() {
+		if cmekPaths[p] {
+			setKey = true
+			continue
+		}
+		mask.Paths = append(mask.Paths, p)
+	}
+	if err := applyMask(b, req.GetBucket(), mask, bucketUpdatable); err != nil {
 		return nil, apierror.Wrap(err)
+	}
+	if setKey {
+		key := req.GetBucket().GetCmekSettings().GetKmsKeyName()
+		switch {
+		case key == "" && old.GetCmekSettings().GetKmsKeyName() != "":
+			return nil, apierror.Wrap(apierror.FailedPrecondition("bucket %s: CMEK cannot be removed from a log bucket once it is configured", ref.name()))
+		case key != "" && key != old.GetCmekSettings().GetKmsKeyName():
+			if err := s.a.setBucketKey(ctx, ref, b, key); err != nil {
+				return nil, apierror.Wrap(err)
+			}
+		}
 	}
 	if old.GetLocked() {
 		switch {

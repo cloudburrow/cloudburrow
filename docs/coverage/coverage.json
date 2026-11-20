@@ -5632,8 +5632,10 @@
         "tests": [
           "test/compat/logging1595_test.go:27 TestLoggingOldTimestampsFollowEachBucketsRetention",
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
+          "test/compat/loggingcmek1950_test.go:70 TestLoggingBucketCMEK",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
-          "test/compat/terraform_logging_buckets_test.go:33 TestTerraformLoggingBucketsAndLinks"
+          "test/compat/terraform_logging_buckets_test.go:33 TestTerraformLoggingBucketsAndLinks",
+          "test/compat/terraform_loggingcmek1950_test.go:22 TestTerraformLoggingBucketCMEK"
         ]
       },
       {
@@ -5701,7 +5703,8 @@
         "tests": [
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
-          "test/compat/terraform_logging_buckets_test.go:33 TestTerraformLoggingBucketsAndLinks"
+          "test/compat/terraform_logging_buckets_test.go:33 TestTerraformLoggingBucketsAndLinks",
+          "test/compat/terraform_loggingcmek1950_test.go:22 TestTerraformLoggingBucketCMEK"
         ]
       },
       {
@@ -5754,16 +5757,19 @@
         "status": "Verified",
         "tests": [
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
+          "test/compat/loggingcmek1950_test.go:70 TestLoggingBucketCMEK",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/terraform_logging_buckets_test.go:33 TestTerraformLoggingBucketsAndLinks",
           "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
-          "test/compat/terraform_logging_parents_test.go:60 TestTerraformLoggingFolderAndOrganizationExclusionsAndBuckets"
+          "test/compat/terraform_logging_parents_test.go:60 TestTerraformLoggingFolderAndOrganizationExclusionsAndBuckets",
+          "test/compat/terraform_loggingcmek1950_test.go:22 TestTerraformLoggingBucketCMEK"
         ]
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/GetCmekSettings",
         "status": "Verified",
         "tests": [
+          "test/compat/loggingcmek1950_test.go:70 TestLoggingBucketCMEK",
           "test/compat/logginglinks_test.go:34 TestLoggingLinksSettingsAndAsyncBuckets",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/terraform_batch11_test.go:59 TestTerraformLoggingSavedQueryAndLogScope"
@@ -5877,6 +5883,7 @@
         "tests": [
           "test/compat/logginganalyticsviews_test.go:188 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
+          "test/compat/loggingcmek1950_test.go:70 TestLoggingBucketCMEK",
           "test/compat/terraform_logging_buckets_test.go:33 TestTerraformLoggingBucketsAndLinks",
           "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
           "test/compat/terraform_logging_parents_test.go:60 TestTerraformLoggingFolderAndOrganizationExclusionsAndBuckets"
@@ -5958,6 +5965,7 @@
           "test/compat/logging1595_test.go:27 TestLoggingOldTimestampsFollowEachBucketsRetention",
           "test/compat/logging_fidelity_test.go:31 TestLoggingPartialSuccessAndScopedPaging",
           "test/compat/logging_test.go:34 TestLoggingWriteAndRead",
+          "test/compat/loggingcmek1950_test.go:70 TestLoggingBucketCMEK",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/loggingviews_test.go:83 TestLoggingViewFiltersAndRetention",
           "test/compat/runlogs_test.go:189 TestGcloudRunLogsRead",
@@ -6051,7 +6059,8 @@
     "Key": "vertexai",
     "Title": "Vertex AI PredictionService",
     "counts": {
-      "Unimplemented": 28,
+      "Implemented": 2,
+      "Unimplemented": 26,
       "Verified": 63
     },
     "rows": [
@@ -6371,7 +6380,8 @@
         "method": "google.cloud.documentai.v1.DocumentProcessorService/CreateProcessor",
         "status": "Verified",
         "tests": [
-          "test/compat/documentai_test.go:72 TestDocumentAIProcessors"
+          "test/compat/documentai_test.go:72 TestDocumentAIProcessors",
+          "test/compat/documentaicmek1950_test.go:64 TestDocumentAICMEK"
         ]
       },
       {
@@ -6444,7 +6454,8 @@
         "method": "google.cloud.documentai.v1.DocumentProcessorService/GetProcessorVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/documentai_test.go:276 TestDocumentAIProcessorVersions"
+          "test/compat/documentai_test.go:276 TestDocumentAIProcessorVersions",
+          "test/compat/documentaicmek1950_test.go:64 TestDocumentAICMEK"
         ]
       },
       {
@@ -6477,7 +6488,8 @@
         "method": "google.cloud.documentai.v1.DocumentProcessorService/ProcessDocument",
         "status": "Verified",
         "tests": [
-          "test/compat/documentai_test.go:72 TestDocumentAIProcessors"
+          "test/compat/documentai_test.go:72 TestDocumentAIProcessors",
+          "test/compat/documentaicmek1950_test.go:64 TestDocumentAICMEK"
         ]
       },
       {
@@ -6524,14 +6536,16 @@
         "method": "google.cloud.speech.v2.Speech/CreatePhraseSet",
         "status": "Verified",
         "tests": [
-          "test/compat/speech_test.go:187 TestSpeechAdaptationResources"
+          "test/compat/speech_test.go:187 TestSpeechAdaptationResources",
+          "test/compat/speechcmek1950_test.go:26 TestSpeechCMEK"
         ]
       },
       {
         "method": "google.cloud.speech.v2.Speech/CreateRecognizer",
         "status": "Verified",
         "tests": [
-          "test/compat/speech_test.go:80 TestSpeechRecognizers"
+          "test/compat/speech_test.go:80 TestSpeechRecognizers",
+          "test/compat/speechcmek1950_test.go:26 TestSpeechCMEK"
         ]
       },
       {
@@ -6557,8 +6571,8 @@
       },
       {
         "method": "google.cloud.speech.v2.Speech/GetConfig",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "google.cloud.speech.v2.Speech/GetCustomClass",
@@ -6571,14 +6585,16 @@
         "method": "google.cloud.speech.v2.Speech/GetPhraseSet",
         "status": "Verified",
         "tests": [
-          "test/compat/speech_test.go:187 TestSpeechAdaptationResources"
+          "test/compat/speech_test.go:187 TestSpeechAdaptationResources",
+          "test/compat/speechcmek1950_test.go:26 TestSpeechCMEK"
         ]
       },
       {
         "method": "google.cloud.speech.v2.Speech/GetRecognizer",
         "status": "Verified",
         "tests": [
-          "test/compat/speech_test.go:80 TestSpeechRecognizers"
+          "test/compat/speech_test.go:80 TestSpeechRecognizers",
+          "test/compat/speechcmek1950_test.go:26 TestSpeechCMEK"
         ]
       },
       {
@@ -6641,8 +6657,8 @@
       },
       {
         "method": "google.cloud.speech.v2.Speech/UpdateConfig",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "google.cloud.speech.v2.Speech/UpdateCustomClass",
@@ -6662,7 +6678,8 @@
         "method": "google.cloud.speech.v2.Speech/UpdateRecognizer",
         "status": "Verified",
         "tests": [
-          "test/compat/speech_test.go:80 TestSpeechRecognizers"
+          "test/compat/speech_test.go:80 TestSpeechRecognizers",
+          "test/compat/speechcmek1950_test.go:26 TestSpeechCMEK"
         ]
       }
     ]
@@ -10698,7 +10715,8 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/CopyBackup",
         "status": "Verified",
         "tests": [
-          "test/compat/spannerbackups_test.go:67 TestSpannerBackupAndRestore"
+          "test/compat/spannerbackups_test.go:67 TestSpannerBackupAndRestore",
+          "test/compat/spannercmek1950_test.go:48 TestSpannerCMEK"
         ]
       },
       {
@@ -10707,7 +10725,8 @@
         "tests": [
           "test/compat/orgpolicycustom1895_spanner_test.go:38 TestOrgPolicyCustomConstraintsSpanner",
           "test/compat/spannerbackups_test.go:67 TestSpannerBackupAndRestore",
-          "test/compat/spannerbackupstools_test.go:26 TestGcloudSpannerBackups"
+          "test/compat/spannerbackupstools_test.go:26 TestGcloudSpannerBackups",
+          "test/compat/spannercmek1950_test.go:48 TestSpannerCMEK"
         ]
       },
       {
@@ -10725,7 +10744,8 @@
           "test/compat/optional_test.go:264 TestSpannerSchemaAndQuery",
           "test/compat/orgpolicycustom1895_spanner_test.go:38 TestOrgPolicyCustomConstraintsSpanner",
           "test/compat/spanner_test.go:104 TestSpannerReadWriteTransactionIsAtomic",
-          "test/compat/spanner_test.go:202 TestSpannerDatabasesAreIsolated"
+          "test/compat/spanner_test.go:202 TestSpannerDatabasesAreIsolated",
+          "test/compat/spannercmek1950_test.go:48 TestSpannerCMEK"
         ]
       },
       {
@@ -10757,7 +10777,8 @@
         "tests": [
           "test/compat/frontstate1514_test.go:50 TestSpannerFrontRestartKeepsItsState",
           "test/compat/spannerbackups_test.go:67 TestSpannerBackupAndRestore",
-          "test/compat/spannerbackupstools_test.go:26 TestGcloudSpannerBackups"
+          "test/compat/spannerbackupstools_test.go:26 TestGcloudSpannerBackups",
+          "test/compat/spannercmek1950_test.go:48 TestSpannerCMEK"
         ]
       },
       {
@@ -10773,7 +10794,8 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/GetDatabase",
         "status": "Verified",
         "tests": [
-          "test/compat/consoledatabases_test.go:120 TestConsoleSpannerCreateAndDropDatabase"
+          "test/compat/consoledatabases_test.go:120 TestConsoleSpannerCreateAndDropDatabase",
+          "test/compat/spannercmek1950_test.go:48 TestSpannerCMEK"
         ]
       },
       {
@@ -10855,7 +10877,8 @@
         "tests": [
           "test/compat/frontstate1514_test.go:50 TestSpannerFrontRestartKeepsItsState",
           "test/compat/spannerbackups_test.go:67 TestSpannerBackupAndRestore",
-          "test/compat/spannerbackupstools_test.go:26 TestGcloudSpannerBackups"
+          "test/compat/spannerbackupstools_test.go:26 TestGcloudSpannerBackups",
+          "test/compat/spannercmek1950_test.go:48 TestSpannerCMEK"
         ]
       },
       {

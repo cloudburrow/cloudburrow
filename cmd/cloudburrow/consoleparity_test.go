@@ -1855,7 +1855,8 @@ var parityRows = []parityRow{
 			"locally, the processors and how many are enabled); Processor gallery (documentai-gallery: every type of Google's " +
 			"gallery, Enterprise Document OCR and Layout Parser Available (FetchProcessorTypes) with Create processor (name, region), " +
 			"each other type's page saying Not available locally and why); My processors (ListProcessors in us and eu: Processor ID, " +
-			"Name, Region, Type, Status), Create processor (type, name, region), Enable processor and Disable processor on each " +
+			"Name, Region, Type, Status), Create processor (type, name, region, and under Advanced options Google-managed or a " +
+			"customer-managed encryption key, #1950, the page's Encryption key showing it), Enable processor and Disable processor on each " +
 			"row and on its page, and Delete; a processor's page with its Overview (Name, ID, Type, Prediction endpoint) and " +
 			"Upload test document, which sends the file to ProcessDocument and draws each page image it answers with the blocks, " +
 			"paragraphs and lines boxed over it, beside the extracted text and the elements' rows (confidence, bounding box), a " +
@@ -1890,6 +1891,12 @@ var parityRows = []parityRow{
 			"word-level confidence, automatic punctuation), a recognizer's page with its default recognition config, Edit " +
 			"(UpdateRecognizer), Transcribe (an uploaded audio file, its transcript), Delete, and Undelete on a deleted one",
 		Tests: []string{"TestConsoleSpeechRecognizers", "TestSpeechRecognizersThroughThePage"}},
+	{Resource: "Speech-to-Text: encryption settings", Service: "vertexai",
+		Methods:  []string{"Speech/GetConfig", "Speech/UpdateConfig"},
+		Provider: "speech-recognizers", Offers: "Recognizers' Encryption settings (#1950): a region and a customer-managed " +
+			"key of the instance's Cloud KMS (Browse lists them), sent to UpdateConfig; the recognizers, custom classes and " +
+			"phrase sets created after it report the key and its version",
+		Tests: []string{"TestConsoleSpeechEncryptionSettings"}},
 	{Resource: "Speech-to-Text: batch transcription", Service: "vertexai",
 		Methods:  []string{"Speech/BatchRecognize"},
 		Provider: "speech-transcriptions", Offers: "Transcriptions' Transcribe from Cloud Storage (#1930): a recognizer, a gs:// " +

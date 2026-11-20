@@ -191,7 +191,7 @@ func (d docAI) processor(ctx context.Context, project, id string) (*documentaipb
 	return nil, fmt.Errorf("processor %q not found", id)
 }
 
-func (d docAI) create(ctx context.Context, project, typ, name, region string) (*documentaipb.Processor, error) {
+func (d docAI) create(ctx context.Context, project, typ, name, region, kmsKey string) (*documentaipb.Processor, error) {
 	if region == "" {
 		region = "us"
 	}
@@ -199,20 +199,36 @@ func (d docAI) create(ctx context.Context, project, typ, name, region string) (*
 	err := d.withClient(ctx, func(c *documentai.DocumentProcessorClient) error {
 		var e error
 		p, e = c.CreateProcessor(ctx, &documentaipb.CreateProcessorRequest{Parent: "projects/" + d.project(project) + "/locations/" + region,
-			Processor: &documentaipb.Processor{Type: typ, DisplayName: strings.TrimSpace(name)}})
+			Processor: &documentaipb.Processor{Type: typ, DisplayName: strings.TrimSpace(name), KmsKeyName: strings.TrimSpace(kmsKey)}})
 		return e
 	})
 	return p, err
 }
 
-// processorFields are Google's Create processor side panel: a name and a
-// region.
+// processorFields are Google's Create processor side panel: a name, a
+// region, and under Advanced options the encryption (#1950): Google-managed,
+// or a customer-managed key of this instance's Cloud KMS.
 func processorFields() []console.Field {
 	return []console.Field{
 		{Name: "name", Label: "Processor name", Type: "text", Required: true, Pattern: "^.{1,63}$",
 			Help: "a display name for the processor"},
 		{Name: "region", Label: "Region", Type: "select", Options: docAIRegions, OptionLabels: docAIRegionLabels, Default: "us"},
+		{Name: "encryption", Label: "Encryption", Type: "radio", Section: "Advanced options", Default: "google",
+			Options: []string{"google", "cmek"}, OptionLabels: map[string]string{"google": "Google-managed encryption key",
+				"cmek": "Customer-managed encryption key (CMEK)"}},
+		{Name: "kmsKeyName", Label: "Customer-managed encryption key", Type: "text", Section: "Advanced options", ShowWhen: "encryption=cmek",
+			Browse: "kms", Help: "A key of this instance's Cloud KMS in us-central1 for the US region, europe-west4 for the EU. " +
+				"The Document AI service agent needs Cloud KMS CryptoKey Encrypter/Decrypter on it. It cannot be changed once the processor is created."},
 	}
+}
+
+// processorKey is the key a Create processor form names, "" for
+// Google-managed encryption.
+func processorKey(v map[string]string) string {
+	if v["encryption"] != "cmek" {
+		return ""
+	}
+	return v["kmsKeyName"]
 }
 
 // --- Overview -------------------------------------------------------------
@@ -376,7 +392,7 @@ func (p docAIGalleryProvider) ActAtResult(ctx context.Context, project string, p
 	if len(path) != 1 || action != "create-processor" {
 		return nil, fmt.Errorf("unknown action %q", action)
 	}
-	pr, err := p.d.create(ctx, project, path[0], v["name"], v["region"])
+	pr, err := p.d.create(ctx, project, path[0], v["name"], v["region"], processorKey(v))
 	if err != nil {
 		return nil, err
 	}
@@ -424,7 +440,7 @@ func (p docAIProcessorsProvider) CreateForm() (string, []console.Field) {
 }
 
 func (p docAIProcessorsProvider) Create(ctx context.Context, project string, v map[string]string) (string, error) {
-	pr, err := p.d.create(ctx, project, v["type"], v["name"], v["region"])
+	pr, err := p.d.create(ctx, project, v["type"], v["name"], v["region"], processorKey(v))
 	if err != nil {
 		return "", err
 	}
@@ -511,6 +527,11 @@ func (p docAIProcessorsProvider) Detail(ctx context.Context, project string, pat
 		{Label: "Status", Value: stateWord(pr.GetState().String())},
 		{Label: "Prediction endpoint", Value: p.predictionEndpoint(pr), Copy: "Copy"},
 		{Label: "Resource name", Value: pr.GetName()}, {Label: "Created", Value: stampAge(pr.GetCreateTime())}}
+	enc := "Google-managed"
+	if k := pr.GetKmsKeyName(); k != "" {
+		enc = k
+	}
+	overview = append(overview, console.Property{Label: "Encryption key", Value: enc})
 	d := console.Detail{Title: pr.GetDisplayName(), Summary: overview}
 	vers, err := p.d.versions(ctx, pr.GetName())
 	if err != nil {

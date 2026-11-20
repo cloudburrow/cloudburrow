@@ -570,6 +570,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// interceptors pass every call through until --iam-enforcement=on.
 	iamEnforcer := newIAMEnforcer(cfg, creds, func() *resourcemanager.Registry { return projectRegistry })
 	useIAMEnforcement(iamEnforcer, secretsSvc, kmsSvc, tasksSvc)
+	// Log buckets' customer-managed keys (#1950).
+	if loggingSvc != nil {
+		keys := cmekKeys(kmsSvc, iamEnforcer)
+		loggingSvc.keys = &keys
+	}
 
 	// The runtime file straight after the control server, so it names an
 	// address already listening and `wait` can follow startup from the start.
@@ -807,6 +812,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if localAISrv != nil {
 		localAISrv.SetDocumentAIState(filepath.Join(cfg.StateDir, "documentai", "processors.json"))
 		localAISrv.SetSpeechState(filepath.Join(cfg.StateDir, "speech", "recognizers.json"))
+		// Their customer-managed keys (#1950), through Cloud KMS.
+		localAISrv.UseCMEK(cmekKeys(kmsSvc, iamEnforcer))
 	}
 	if garden != nil {
 		defer garden.Close()

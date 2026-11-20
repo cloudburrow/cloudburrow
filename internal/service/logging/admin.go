@@ -32,11 +32,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/cloudburrow/cloudburrow/internal/cmek"
 	"net/url"
 	"regexp"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"cloud.google.com/go/logging/apiv2/loggingpb"
@@ -96,6 +98,9 @@ type Admin struct {
 	// order (links.go).
 	done      map[string]*longrunningpb.Operation
 	doneOrder []string
+	// keys are log buckets' customer-managed keys (cmek.go, #1950), read
+	// without mu: a read of a linked bucket holds it.
+	keys atomic.Pointer[cmek.Keys]
 }
 
 // NewAdmin returns the admin services over db.
