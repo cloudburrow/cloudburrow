@@ -15,8 +15,9 @@
 // over these series and the local Cloud Logging (evaluate.go), with
 // incidents and notifications delivered only on the machine (notify.go);
 // notification channels, uptime checks run against local hosts, groups,
-// services and SLOs, snoozes, and the Dashboards API v1. The Query service
-// (MQL) is not registered and answers UNIMPLEMENTED.
+// services and SLOs (with select_slo_* reads, sloseries.go), snoozes, the
+// Query service (MQL, mql.go), PromQL conditions and the Prometheus HTTP
+// API (promql.go, promhttp.go), and the Dashboards API v1.
 // docs/monitoring.md is the user's guide.
 package monitoring
 
@@ -108,6 +109,7 @@ type Server struct {
 	monitoringpb.UnimplementedGroupServiceServer
 	monitoringpb.UnimplementedServiceMonitoringServiceServer
 	monitoringpb.UnimplementedSnoozeServiceServer
+	monitoringpb.UnimplementedQueryServiceServer
 	dashboardpb.UnimplementedDashboardsServiceServer
 
 	state string // the file; "" keeps everything in memory
@@ -129,6 +131,8 @@ type Server struct {
 	publish    Publisher
 	consoleURL string
 	uptime     uptimeState
+	// promStates are PromQL and MQL conditions' evaluation state.
+	promStates map[string]*promCondState
 
 	builtins []Builtin
 	// now is the clock, for tests.
@@ -170,6 +174,7 @@ func (s *Server) Register(g grpc.ServiceRegistrar) {
 	monitoringpb.RegisterGroupServiceServer(g, s)
 	monitoringpb.RegisterServiceMonitoringServiceServer(g, s)
 	monitoringpb.RegisterSnoozeServiceServer(g, s)
+	monitoringpb.RegisterQueryServiceServer(g, s)
 	dashboardpb.RegisterDashboardsServiceServer(g, s)
 }
 

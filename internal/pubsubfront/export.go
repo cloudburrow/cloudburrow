@@ -18,14 +18,18 @@ package pubsubfront
 // CloudPubSubDeadLetterSourceDeliveryErrorMessage naming why.
 //
 // A subscription's state (ACTIVE, PERMISSION_DENIED, NOT_FOUND,
-// SCHEMA_MISMATCH) is the front's: the last outcome of a write to its
+// SCHEMA_MISMATCH, IN_TRANSIT_LOCATION_RESTRICTION) is the front's: the last outcome of a write to its
 // destination, and it reads back on every subscription the front answers.
 // The destination is checked again every exportCheck while the
 // subscription is not ACTIVE, and messages wait in the backlog meanwhile.
 //
+// While a subscription is in error its messages stay in the backlog and
+// are not dead-lettered, as Google's troubleshooting pages say.
+//
 // Locally nothing is authorized: service_account_email is kept and checked
-// for its form, and PERMISSION_DENIED is the state when the instance does
-// not serve the destination's service at all, which Google gives when
+// for its form (#1998), and PERMISSION_DENIED is the state when the
+// instance does not serve the destination's service, or serves it with
+// its API disabled in the subscription's project, which Google gives when
 // "bigquery.googleapis.com API is not enabled for the project".
 
 import (
@@ -532,4 +536,57 @@ func (o *observed) context() context.Context {
 		return context.Background()
 	}
 	return o.ctx
+}
+
+// inTransitAllowed reports whether a topic's messages may be written to a
+// destination in location: a topic whose message storage policy sets
+// enforce_in_transit allows only its allowed_persistence_regions, and an
+// export to anywhere else is IN_TRANSIT_LOCATION_RESTRICTION ("Cannot
+// write to the destination because enforce_in_transit is set to true and
+// the destination locations are not in the allowed regions",
+// google.pubsub.v1). A multi-region or dual-region location is not one
+// region, so it is never among them.
+func (f *Front) inTransitAllowed(topic, location string) bool {
+	if !f.enforcesInTransit(topic) {
+		return true
+	}
+	f.mu.Lock()
+	p := f.defs.topics[topic].GetMessageStoragePolicy()
+	f.mu.Unlock()
+	for _, r := range p.GetAllowedPersistenceRegions() {
+		if strings.EqualFold(r, location) {
+			return true
+		}
+	}
+	return false
+}
+
+// enforcesInTransit reports whether a topic's message storage policy sets
+// enforce_in_transit with allowed regions.
+func (f *Front) enforcesInTransit(topic string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	p := f.defs.topics[topic].GetMessageStoragePolicy()
+	return p.GetEnforceInTransit() && len(p.GetAllowedPersistenceRegions()) > 0
+}
+
+// consumerKey is the context key of the project an export's calls to
+// BigQuery and Cloud Storage are made for.
+type consumerKey struct{}
+
+// forProject makes an export's calls in ctx for project: they name it as
+// their quota project (x-goog-user-project), so a project whose BigQuery
+// or Cloud Storage API is disabled has its exports PERMISSION_DENIED, as
+// Google gives "when bigquery.googleapis.com API is not enabled for the
+// project", whatever project the table or bucket is in.
+func forProject(ctx context.Context, project string) context.Context {
+	return context.WithValue(ctx, consumerKey{}, project)
+}
+
+// do sends an export's request, naming its project.
+func (e *exporter) do(req *http.Request) (*http.Response, error) {
+	if p, _ := req.Context().Value(consumerKey{}).(string); p != "" {
+		req.Header.Set("x-goog-user-project", p)
+	}
+	return e.client.Do(req)
 }

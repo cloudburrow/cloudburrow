@@ -261,14 +261,53 @@ func TestEventarcDeliversToAFunction(t *testing.T) {
 		tokens.audience != "http://ea-fn.ns.cloudburrow.localhost" {
 		t.Errorf("delivery = %d, %v; host %q path %q auth %q audience %q", code, err, host, path, auth, tokens.audience)
 	}
-	for _, d := range []*eventarcpb.Destination{
-		{Descriptor_: &eventarcpb.Destination_Gke{Gke: &eventarcpb.GKE{Cluster: "c", Service: "s"}}},
-		{Descriptor_: &eventarcpb.Destination_Workflow{Workflow: "projects/p/locations/us-central1/workflows/w"}},
-	} {
-		_, err := eaSpec(&eventarcpb.Trigger{EventFilters: []*eventarcpb.EventFilter{{Attribute: "type", Value: pubsubPublished}}, Destination: d}, "us-central1")
-		if apierror.From(err).Code != codes.Unimplemented {
-			t.Errorf("destination %v = %v; want Unimplemented", d, err)
-		}
+}
+
+type fakeWorkflows struct{ name, arg string }
+
+func (w *fakeWorkflows) WorkflowExists(name string) bool {
+	return name == "projects/p/locations/us-central1/workflows/w"
+}
+func (w *fakeWorkflows) StartWorkflow(_ context.Context, name, arg string) error {
+	w.name, w.arg = name, arg
+	return nil
+}
+
+// A workflow destination (#1986): refused without Workflows, and with it the
+// event, as a CloudEvent in JSON, is the argument of an execution.
+func TestEventarcWorkflowDestination(t *testing.T) {
+	wf := "projects/p/locations/us-central1/workflows/w"
+	d := &eventarcpb.Destination{Descriptor_: &eventarcpb.Destination_Workflow{Workflow: wf}}
+	tr := &eventarcpb.Trigger{Name: "projects/p/locations/us-central1/triggers/t", Destination: d,
+		EventFilters: []*eventarcpb.EventFilter{{Attribute: "type", Value: pubsubPublished}}}
+	if _, err := eaSpec(tr, "us-central1"); err != nil {
+		t.Fatalf("eaSpec: %v", err)
+	}
+	bad := &eventarcpb.Destination{Descriptor_: &eventarcpb.Destination_Workflow{Workflow: "w"}}
+	if _, err := eaSpec(&eventarcpb.Trigger{EventFilters: tr.GetEventFilters(), Destination: bad}, "us-central1"); apierror.From(err).Code != codes.InvalidArgument {
+		t.Errorf("a bad workflow name = %v", err)
+	}
+	if err := (&FunctionsServer{}).WithEvents(Events{}).checkWorkflow(wf); apierror.From(err).Code != codes.FailedPrecondition {
+		t.Errorf("without Workflows = %v", err)
+	}
+	w := &fakeWorkflows{}
+	f := (&FunctionsServer{}).WithEvents(Events{Workflows: w})
+	if err := f.checkWorkflow(wf + "x"); apierror.From(err).Code != codes.InvalidArgument {
+		t.Errorf("a missing workflow = %v", err)
+	}
+	spec := &functionspb.EventTrigger{EventType: pubsubPublished, PubsubTopic: "projects/p/topics/t"}
+	body := `{"message":{"data":"aGk=","messageId":"7"},"subscription":"s"}`
+	code, err := f.deliverEventarc(context.Background(), tr, spec, []byte(body))
+	if err != nil || code != http.StatusOK || w.name != wf {
+		t.Fatalf("delivery = %d, %v to %q", code, err, w.name)
+	}
+	var arg map[string]any
+	if err := json.Unmarshal([]byte(w.arg), &arg); err != nil || arg["id"] != "7" || arg["type"] != pubsubPublished ||
+		arg["source"] != "//pubsub.googleapis.com/projects/p/topics/t" {
+		t.Errorf("argument %s (%v)", w.arg, err)
+	}
+	if data, _ := arg["data"].(map[string]any); data["message"] == nil {
+		t.Errorf("argument's data %v", arg["data"])
 	}
 }
 

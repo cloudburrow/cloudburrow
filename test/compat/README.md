@@ -94,9 +94,12 @@ Set by `scripts/compat-env.sh` from a running instance:
 | `CLOUDBURROW_TEST_STORAGE_TRANSFER` | `CLOUDBURROW_STORAGETRANSFER_ENDPOINT` | the Storage Transfer Service API v1 (#1957), gcloud transfer and Terraform's `google_storage_transfer_job` |
 | `CLOUDBURROW_TEST_RUN_STORAGE`, `CLOUDBURROW_TEST_RUN_PUBSUB` | as `STORAGE` and `PUBSUB` | the Cloud Run revision tests; see below |
 | `CLOUDBURROW_TEST_RUN_FIRESTORE` | as `FIRESTORE` | the Eventarc Firestore triggers (#1877), on the run shard |
+| `CLOUDBURROW_TEST_RUN_DATASTORE` | as `DATASTORE` | the Eventarc Datastore mode triggers (#1877), on the run shard |
+| `CLOUDBURROW_TEST_RUN_GKE` | as `GKE` | the Eventarc GKE destination (#1877), on the run shard |
 | `CLOUDBURROW_TEST_RUN_KMS`, `CLOUDBURROW_TEST_RUN_SCHEDULER`, `CLOUDBURROW_TEST_RUN_LOGGING` | as `KMS`, `SCHEDULER` and `LOGGING` | the Cloud Run revision tests; see below |
 | `CLOUDBURROW_TEST_RUN_LOCALAI` | as `LOCALAI`: the local Vertex AI endpoint, which Cloud Run starts without a model | the run shard's Document AI and Speech-to-Text customer-managed key tests (#1972), with `RUN_KMS` |
 | `CLOUDBURROW_TEST_TASKS_LOGGING` | as `LOGGING` | the Cloud Tasks dispatch log (#1256), in the storage shard, so the Logging tests stay in served |
+| `CLOUDBURROW_TEST_PUBSUB_MONITORING` | as `MONITORING` | the Pub/Sub notification channel test (#1966), in the storage shard beside its Pub/Sub, so the Monitoring tests stay in served |
 | `CLOUDBURROW_TEST_BIGQUERY_RESOURCEMANAGER` | as `RESOURCEMANAGER` | BigQuery's `JOBS_BY_FOLDER` and `JOBS_BY_ORGANIZATION` (#1392) and the purged project's emulator data (#1568), in the emulators shard, so the Resource Manager tests stay in storage |
 | `CLOUDBURROW_TEST_MEMORYSTORE_RESOURCEMANAGER` | as `RESOURCEMANAGER` | the principals the Memorystore IAM auth tests grant the connect roles to (#1614), in the memorystore shard, so the Resource Manager tests stay in storage |
 | `CLOUDBURROW_TEST_FIRESTORE_RESOURCEMANAGER` | as `RESOURCEMANAGER` | the roles the Firestore with MongoDB compatibility tests grant a sign-in's principal (#1738, #1742, #1743), in the emulators shard, so the Resource Manager tests stay in storage (#1761) |
@@ -140,6 +143,7 @@ Set by `scripts/compat-env.sh` from a running instance:
 | `CLOUDBURROW_TEST_DATATRANSFER` | `CLOUDBURROW_DATATRANSFER_ENDPOINT` | the BigQuery Data Transfer Service (#1948), served with `bigquery`; gRPC and JSON on one port |
 | `CLOUDBURROW_TEST_ANALYTICSHUB` | `CLOUDBURROW_ANALYTICSHUB_ENDPOINT` | BigQuery sharing, formerly Analytics Hub (#1960), served with `bigquery`; gRPC and JSON on one port; its subscriptions make linked datasets in the instance's BigQuery |
 | `CLOUDBURROW_TEST_PRIVATECA` | `CLOUDBURROW_PRIVATECA_ENDPOINT` | Certificate Authority Service (#1834), `--services privateca`; gRPC and JSON on one port |
+| `CLOUDBURROW_TEST_WORKFLOWS` | `CLOUDBURROW_WORKFLOWS_ENDPOINT` | Workflows and Workflow Executions (#1986), `--services workflows`; gRPC and JSON on one port; run in the run shard, beside the Cloud Run, Cloud Storage and Pub/Sub its workflows call |
 | `CLOUDBURROW_TEST_MONITORING` | `CLOUDBURROW_MONITORING_ENDPOINT` | Cloud Monitoring (#1939), `--services monitoring`; gRPC and JSON on one port |
 | `CLOUDBURROW_TEST_CLOUDSQL_CONNECTOR` | `CLOUDBURROW_CLOUDSQL_CONNECTOR_ENDPOINT` | the Cloud SQL connectors' TLS listener (#1364); `TestCloudSQLConnectorDialsBothServers` redirects the connector's dial of port 3307 to it only when an instance was started with `--cloudsql-connector` on another port |
 | `CLOUDBURROW_TEST_BIGQUERY`, `CLOUDBURROW_TEST_BIGQUERY_STORAGE`, `CLOUDBURROW_TEST_BIGQUERY_PROJECT` | `CLOUDBURROW_BIGQUERY_ENDPOINT`, `CLOUDBURROW_BIGQUERY_STORAGE_ENDPOINT`, `GOOGLE_CLOUD_PROJECT` | BigQuery, whose emulator serves the instance's one project |

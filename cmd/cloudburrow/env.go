@@ -539,6 +539,17 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 			envVar{cliEndpointVar("analyticshub"), ah,
 				"BigQuery sharing (Analytics Hub) v1, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint"})
 	}
+	// Workflows (#1986): gcloud workflows, the Go clients of both APIs, and
+	// Terraform's google_workflows_workflow through
+	// workflows_custom_endpoint.
+	if workflowsEnabled(cfg) && cfg.Endpoints.Workflows != 0 {
+		wf := addr(cfg.Endpoints.Workflows)
+		vars = append(vars,
+			envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_WORKFLOWS", "http://" + wf + "/", "read by gcloud; gcloud workflows deploy, describe, list and delete"},
+			envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_WORKFLOWEXECUTIONS", "http://" + wf + "/", "read by gcloud; gcloud workflows run and executions"},
+			envVar{cliEndpointVar("workflows"), wf,
+				"Workflows and Workflow Executions v1, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint"})
+	}
 
 	// The Kubernetes Engine API (#1913): gcloud container clusters and
 	// node-pools, and Terraform's google_container_* through
@@ -766,6 +777,7 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 		"datatransfer":           &e.DataTransfer,
 		"compute":                &e.Compute,
 		"analyticshub":           &e.AnalyticsHub,
+		"workflows":              &e.Workflows,
 		// The local AI endpoint, which serves Vertex AI's Model Registry
 		// and Endpoints (#1940) to gcloud-setup and terraform, and Document
 		// AI (#1953), which terraform points document_ai_custom_endpoint at.

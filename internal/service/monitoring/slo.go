@@ -15,8 +15,9 @@ import (
 // ServiceMonitoringService (#1964): services and their service-level
 // objectives are kept in the instance's state with Google's rules
 // (docs.cloud.google.com/monitoring/api/ref_v3/rest/v3/services and
-// /services.serviceLevelObjectives, read 2026-11-19). An SLO's compliance
-// is not computed: ListTimeSeries' select_slo_* filters are not served.
+// /services.serviceLevelObjectives, read 2026-11-19). An SLO's compliance,
+// budget and burn rate are read with ListTimeSeries' select_slo_* filters
+// (sloseries.go).
 
 var serviceIDRE = regexp.MustCompile(`^[a-zA-Z0-9\-_:.]+$`)
 

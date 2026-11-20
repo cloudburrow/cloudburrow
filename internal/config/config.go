@@ -123,6 +123,12 @@ const (
 	// SQL check their network fields against its networks and subnets, as
 	// Google does; without it they keep accepting any network.
 	ServiceCompute Service = "compute"
+	// ServiceWorkflows is Workflows and Workflow Executions
+	// (workflows.googleapis.com and workflowexecutions.googleapis.com,
+	// #1986), served in the CLI process on one port, with an interpreter of
+	// Google's workflow syntax whose http.* calls and connectors reach this
+	// instance's own endpoints only.
+	ServiceWorkflows Service = "workflows"
 )
 
 // AllServices lists the default services in a stable order, so startup
@@ -135,7 +141,7 @@ func AllServices() []Service {
 
 // OptionalServices lists the opt-in services, in a stable order.
 func OptionalServices() []Service {
-	return []Service{ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceCloudSQL, ServiceBigQuery, ServiceMemorystore, ServiceCloudSQLMySQL, ServiceScheduler, ServiceLogging, ServiceKMS, ServiceBackupDR, ServicePrivateCA, ServiceGKE, ServiceMonitoring, ServiceCompute}
+	return []Service{ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceCloudSQL, ServiceBigQuery, ServiceMemorystore, ServiceCloudSQLMySQL, ServiceScheduler, ServiceLogging, ServiceKMS, ServiceBackupDR, ServicePrivateCA, ServiceGKE, ServiceMonitoring, ServiceCompute, ServiceWorkflows}
 }
 
 // KnownServices lists every selectable service.
@@ -196,7 +202,7 @@ func (s Service) Persistence() Persistence {
 		// Key material is in Kubernetes Secrets, like Secret Manager's
 		// payloads, which the cluster keeps.
 		return PersistenceVolume
-	case ServiceStorage, ServiceTasks, ServiceSecrets, ServiceScheduler, ServiceBackupDR, ServicePrivateCA, ServiceGKE, ServiceMonitoring, ServiceCompute:
+	case ServiceStorage, ServiceTasks, ServiceSecrets, ServiceScheduler, ServiceBackupDR, ServicePrivateCA, ServiceGKE, ServiceMonitoring, ServiceCompute, ServiceWorkflows:
 		return PersistenceVolume
 	case ServiceRun:
 		// Workload definitions live in the Kubernetes API, which the cluster
@@ -375,6 +381,11 @@ type Endpoints struct {
 	// Analytics Hub (analyticshub.googleapis.com, #1960): gRPC and JSON on
 	// one port, served when BigQuery is.
 	AnalyticsHub int `json:"analyticsHub"`
+	// Workflows is the host port of Workflows and Workflow Executions
+	// (workflows.googleapis.com and workflowexecutions.googleapis.com,
+	// #1986): gRPC and JSON on one port, with the executions' callback
+	// endpoints.
+	Workflows int `json:"workflows"`
 	// ONNX is the host port of the ONNX runner (#1711), which runs BigQuery
 	// ML's imported ONNX models for the BigQuery front, published to the
 	// cluster through cloudburrow-host. CloudBurrow's own API, not a
@@ -455,6 +466,7 @@ func (e *Endpoints) fields() []endpointField {
 		{"storagetransfer", &e.StorageTransfer},
 		{"datatransfer", &e.DataTransfer},
 		{"analyticshub", &e.AnalyticsHub},
+		{"workflows", &e.Workflows},
 		{"onnx", &e.ONNX},
 		{"tfconvert", &e.TFConvert},
 	}
@@ -530,6 +542,8 @@ func (e Endpoints) OptionalPort(s Service) int {
 		return e.Monitoring
 	case ServiceCompute:
 		return e.Compute
+	case ServiceWorkflows:
+		return e.Workflows
 	default:
 		return 0
 	}
@@ -872,6 +886,10 @@ func Default() Config {
 			// branches (BigQuery Data Transfer, the Storage companions,
 			// Workflows), so 9042.
 			AnalyticsHub: 9042,
+			// Workflows (#1986): after 9029-9037, which the API Keys API,
+			// Kubernetes Engine, Compute Engine, Monitoring and other open
+			// branches took.
+			Workflows: 9038,
 			// OS-assigned. The port is not what enables local AI —
 			// LocalAI.ModelPath is. A configured port with no model binds
 			// nothing, so there is no endpoint answering every request with

@@ -11,8 +11,14 @@ import (
 	"testing"
 	"time"
 
+	"cloud.google.com/go/logging/logadmin"
 	backupdr "google.golang.org/api/backupdr/v1"
+	"google.golang.org/api/iterator"
+	"google.golang.org/api/option"
 	sqladmin "google.golang.org/api/sqladmin/v1"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // TestBackupDRRestoreToANewInstance (#1922): a vaulted Cloud SQL backup is
@@ -25,9 +31,18 @@ import (
 // restoreInstanceSettings cannot change the major database version
 // ("You can't change the instance's major database version"), and a backup
 // run (restoreBackupContext) still restores only into an instance that
-// exists. Then `gcloud sql backups restore NAME --restore-instance NEW
-// --region R`, Google's documented command, does the same.
-// covers: sql.instances.restoreBackup, sql.instances.get, sql.instances.insert, sql.instances.delete, backupdr.projects.locations.backupPlanAssociations.triggerBackup, backupdr.projects.locations.backupVaults.dataSources.backups.list
+// exists; restoreInstanceSettings naming another instance and a backup
+// that does not exist are refused. The new instance carries
+// restoreInstanceSettings' labels over the backup's settings. Then
+// `gcloud sql backups restore NAME --restore-instance NEW --region R`,
+// Google's documented command, does the same, and Terraform's
+// google_sql_database_instance with backupdr_backup brings the rows into
+// the instance it makes. Last (#1924), the official Logging client reads
+// the restore job in bdr_backup_restore_jobs, RUNNING then SUCCESSFUL with
+// one jobId, its backupName and restoreResourceName, and, once the source
+// instance is deleted, its failed on-demand backup job: FAILED, errorType
+// NOT_FOUND, errorCode 5 and the error message.
+// covers: sql.instances.restoreBackup, sql.instances.get, sql.instances.insert, sql.instances.delete, backupdr.projects.locations.backupPlanAssociations.triggerBackup, backupdr.projects.locations.backupVaults.dataSources.backups.list, google.logging.v2.LoggingServiceV2/ListLogEntries
 func TestBackupDRRestoreToANewInstance(t *testing.T) {
 	h := New(t)
 	if os.Getenv(EnvBackupDR) == "" {
@@ -138,9 +153,18 @@ func TestBackupDRRestoreToANewInstance(t *testing.T) {
 		t.Errorf("a refused restore left the instance %s-x", c.instance)
 	}
 
-	// Restore to a new instance, through the client.
+	_, err = svc.Instances.RestoreBackup(project, c.instance+"-x", &sqladmin.InstancesRestoreBackupRequest{BackupdrBackup: bk,
+		RestoreInstanceSettings: &sqladmin.DatabaseInstance{Name: c.instance + "-y"}}).Do()
+	wantBackupDRCode(t, "restoreInstanceSettings naming another instance", err, http.StatusBadRequest, "is not the instance restored to")
+	_, err = svc.Instances.RestoreBackup(project, c.instance+"-x", &sqladmin.InstancesRestoreBackupRequest{BackupdrBackup: bk + "0"}).Do()
+	wantBackupDRCode(t, "a backup that does not exist", err, http.StatusNotFound, "")
+
+	// Restore to a new instance, through the client, with the backup's
+	// settings and restoreInstanceSettings' labels over them.
+	restoreStart := time.Now()
 	target := c.instance + "-new"
-	rop, err := svc.Instances.RestoreBackup(project, target, &sqladmin.InstancesRestoreBackupRequest{BackupdrBackup: bk}).Do()
+	rop, err := svc.Instances.RestoreBackup(project, target, &sqladmin.InstancesRestoreBackupRequest{BackupdrBackup: bk,
+		RestoreInstanceSettings: &sqladmin.DatabaseInstance{Settings: &sqladmin.Settings{UserLabels: map[string]string{"restored": "bdr"}}}}).Do()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +174,8 @@ func TestBackupDRRestoreToANewInstance(t *testing.T) {
 		t.Fatalf("restoreBackup's operation: %v %+v", err, rop)
 	}
 	in, err := svc.Instances.Get(project, target).Do()
-	if err != nil || in.State != "RUNNABLE" || in.DatabaseVersion != c.version || in.Settings == nil || in.Settings.Tier != "db-custom-1-3840" {
+	if err != nil || in.State != "RUNNABLE" || in.DatabaseVersion != c.version || in.Settings == nil || in.Settings.Tier != "db-custom-1-3840" ||
+		in.Settings.UserLabels["restored"] != "bdr" {
 		t.Fatalf("the new instance: %v %+v", err, in)
 	}
 	if rows := sqlBackupRows(t, h, c, project+":us-central1:"+target); !reflect.DeepEqual(rows, backedUp) {
@@ -182,4 +207,134 @@ func TestBackupDRRestoreToANewInstance(t *testing.T) {
 			t.Errorf("rows in the instance gcloud restored to: %v, want %v", rows, backedUp)
 		}
 	})
+
+	// Terraform's google_sql_database_instance with backupdr_backup: the
+	// provider (v8.5.0) inserts the instance with the resource's settings,
+	// then restores the backup into it (instances.restoreBackup with
+	// backupdrBackup), so the rows are the backup's.
+	t.Run("terraform", func(t *testing.T) {
+		h := h.For(t)
+		m := newTFModule(t)
+		target := c.instance + "-tf"
+		defer deleteInstance(target)
+		m.write(fmt.Sprintf(`
+resource "google_sql_database_instance" "restored" {
+  project             = %q
+  name                = %q
+  region              = "us-central1"
+  database_version    = %q
+  backupdr_backup     = %q
+  deletion_protection = false
+  settings {
+    tier        = "db-custom-1-3840"
+    user_labels = { restored = "terraform" }
+  }
+}
+`, project, target, c.version, bk))
+		m.must("init", "-input=false", "-no-color")
+		m.apply()
+		in, err := svc.Instances.Get(project, target).Do()
+		if err != nil || in.State != "RUNNABLE" || in.Settings == nil || in.Settings.UserLabels["restored"] != "terraform" {
+			t.Fatalf("the instance Terraform restored to: %v %+v", err, in)
+		}
+		if rows := sqlBackupRows(t, h, c, project+":us-central1:"+target); !reflect.DeepEqual(rows, backedUp) {
+			t.Errorf("rows in the instance Terraform restored to: %v, want %v", rows, backedUp)
+		}
+		m.planClean()
+		m.must("destroy", "-auto-approve", "-input=false", "-no-color")
+		_, err = svc.Instances.Get(project, target).Do()
+		wantHTTP(t, "instances.get after destroy", err, http.StatusNotFound)
+	})
+
+	// The restore job, and a failed backup job once the source instance is
+	// gone, in Cloud Logging's bdr_backup_restore_jobs (#1924), read with
+	// the official Logging client.
+	t.Run("job logs", func(t *testing.T) {
+		h := h.For(t)
+		logAddr := shardEndpoint(h, envSQLLogging, EnvLogging)
+		deleteInstance(c.instance)
+		failStart := time.Now()
+		_, err := bdr.Projects.Locations.BackupPlanAssociations.TriggerBackup(assocName, &backupdr.TriggerBackupRequest{RuleId: "daily"}).Do()
+		if err == nil {
+			t.Fatal("triggerBackup of a deleted instance succeeded")
+		}
+		jobs := func(since time.Time, match func(map[string]any) bool, enough int) []map[string]any {
+			var out []map[string]any
+			for deadline := time.Now().Add(15 * time.Second); ; time.Sleep(300 * time.Millisecond) {
+				out = out[:0]
+				for _, p := range backupDRJobLogEntries(t, h, logAddr, project, "bdr_backup_restore_jobs", since) {
+					if match(p) {
+						out = append(out, p)
+					}
+				}
+				if len(out) >= enough || time.Now().After(deadline) {
+					return out
+				}
+			}
+		}
+		restores := jobs(restoreStart, func(p map[string]any) bool {
+			return p["jobCategory"] == "RESTORE" && p["restoreResourceName"] == "projects/"+project+"/instances/"+target
+		}, 2)
+		status := map[string]string{}
+		for _, p := range restores {
+			s, _ := p["jobStatus"].(string)
+			id, _ := p["jobId"].(string)
+			status[s] = id
+			if p["backupName"] != bk || p["dataSourceName"] != assoc.DataSource || p["sourceResourceName"] != "projects/"+project+"/instances/"+c.instance {
+				t.Errorf("the restore job's entry: %v", p)
+			}
+		}
+		if status["RUNNING"] == "" || status["RUNNING"] != status["SUCCESSFUL"] {
+			t.Errorf("the restore to %s: %v; want one jobId RUNNING then SUCCESSFUL (%v)", target, status, restores)
+		}
+		failed := jobs(failStart, func(p map[string]any) bool {
+			return p["jobStatus"] == "FAILED" && p["dataSourceName"] == assoc.DataSource
+		}, 1)
+		if len(failed) != 1 {
+			t.Fatalf("failed backup jobs of %s: %v; want 1", assoc.DataSource, failed)
+		}
+		f := failed[0]
+		if f["jobCategory"] != "ON_DEMAND_BACKUP" || f["backupRule"] != "daily" || f["errorType"] != "NOT_FOUND" || f["errorCode"] != float64(5) ||
+			!strings.Contains(fmt.Sprint(f["errorMessage"]), c.instance) || f["endTime"] == nil {
+			t.Errorf("the failed backup job's entry: %v", f)
+		}
+	})
+}
+
+// backupDRJobLogEntries are the jsonPayloads of project's Backup and DR job
+// log entries in log (bdr_backup_restore_jobs or bdr_backup_plan_jobs)
+// since since, read through the official Logging client at logAddr.
+func backupDRJobLogEntries(t *testing.T, h *Harness, logAddr, project, log string, since time.Time) []map[string]any {
+	t.Helper()
+	if logAddr == "" {
+		t.Fatal("no Cloud Logging endpoint")
+	}
+	ctx := h.Context()
+	ac, err := logadmin.NewClient(ctx, "projects/"+project, option.WithEndpoint(logAddr), option.WithoutAuthentication(),
+		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ac.Close()
+	filter := `logName = "projects/` + project + `/logs/backupdr.googleapis.com%2F` + log + `" AND timestamp >= "` +
+		since.Add(-time.Minute).UTC().Format(time.RFC3339) + `"`
+	var out []map[string]any
+	it := ac.Entries(ctx, logadmin.Filter(filter))
+	for {
+		e, err := it.Next()
+		if err == iterator.Done {
+			return out
+		}
+		if err != nil {
+			t.Fatalf("entries of %s: %v", log, err)
+		}
+		switch v := e.Payload.(type) {
+		case map[string]any:
+			out = append(out, v)
+		case *structpb.Struct:
+			out = append(out, v.AsMap())
+		default:
+			t.Fatalf("%s: payload %T", log, e.Payload)
+		}
+	}
 }

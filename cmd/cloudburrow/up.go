@@ -339,6 +339,17 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		analyticsHub.bigquery = func() *netfwd.Forwarder { return forwarderFor(forwarders, "bigquery") }
 	}
 	analyticsHub.register(coord)
+	// Workflows and Workflow Executions (#1986), in process; executions
+	// call this instance's own endpoints, with tokens minted locally.
+	workflowsSvc := newWorkflowsService(cfg)
+	if workflowsSvc != nil {
+		workflowsSvc.tokens = creds
+		// Eventarc's workflow destination (#1986).
+		if runSvc != nil && runSvc.events != nil {
+			runSvc.events.workflows = workflowsSvc
+		}
+	}
+	workflowsSvc.register(coord)
 	// The Kubernetes Engine API (#1913), in process; its clusters are
 	// kind clusters of their own.
 	gkeSvc := newGKEService(cfg)
@@ -353,6 +364,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	computeSvc.register(coord)
 	gkeSvc.register(coord)
+	if gkeSvc != nil && runSvc != nil && runSvc.events != nil {
+		// Eventarc's GKE destinations (#1877) reach its clusters' services.
+		runSvc.events.gke = gkeSvc.clusterAccess
+	}
 	// The BigQuery Data Transfer Service (#1948), in process; its runs
 	// execute on the instance's BigQuery and notify its Pub/Sub.
 	dataTransfer := newDataTransferService(cfg)
@@ -497,6 +512,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		scheduler:    schedulerSvc,
 		privateCA:    privateCASvc,
 		analyticsHub: analyticsHub,
+		workflows:    workflowsSvc,
 		gke:          gkeSvc,
 		monitoring:   monitoringSvc,
 		compute:      computeSvc,
@@ -577,6 +593,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if privateCASvc != nil {
 		privateCASvc.tracing = tracing
 	}
+	if workflowsSvc != nil {
+		workflowsSvc.tracing = tracing
+		workflowsSvc.calls = callEvents(recorder, requestMetrics, "workflows")
+		workflowsSvc.interpose = append(workflowsSvc.interpose, grpctransport.LogInterceptor(logger, "workflows"), faults.Interceptor("workflows"))
+		workflowsSvc.requests = requestEvents(recorder, requestMetrics, "workflows")
+	}
 	if dataTransfer != nil {
 		dataTransfer.tracing = tracing
 		dataTransfer.calls = callEvents(recorder, requestMetrics, "datatransfer")
@@ -614,6 +636,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			if slices.Contains(cfg.EnabledServices(), config.ServiceFirestore) {
 				// Firestore events (#1877), from Firestore's Listen.
 				go feedFirestoreEvents(func() *netfwd.Forwarder { return forwarderFor(forwarders, "firestore") },
+					runSvc.functions.Load, "us-central1")
+			}
+			if slices.Contains(cfg.EnabledServices(), config.ServiceDatastore) {
+				// Firestore in Datastore mode events (#1877), by polling.
+				go feedDatastoreEvents(func() *netfwd.Forwarder { return forwarderFor(forwarders, string(config.ServiceDatastore)) },
 					runSvc.functions.Load, "us-central1")
 			}
 		}
@@ -1018,6 +1045,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		sqlAdmin:       sqlAdminSrv,
 		privateCA:      privateCASvc,
 		analyticsHub:   analyticsHub,
+		workflows:      workflowsSvc,
 		gke:            gkeSvc,
 		monitoring:     monitoringSvc,
 		compute:        computeSvc,
@@ -1104,6 +1132,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if a := privateCASvc.Addr(); a != "" {
 			live["privateca"] = a
 		}
+		if a := workflowsSvc.Addr(); a != "" {
+			live["workflows"] = a
+		}
 		if a := gkeSvc.Addr(); a != "" {
 			live["gke"] = a
 		}
@@ -1174,7 +1205,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		published := map[string]bool{"run": true, "tasks": true, "secretmanager": true, "kms": true,
 			"scheduler": true, "logging": true, "resourcemanager": true, "serviceusage": true, "apikeys": true, "metadata": true,
 			"storagebatchoperations": true, "storageinsights": true, "storagetransfer": true,
-			"sqladmin": true, "cloudsql-connector": true, "onnx": true, "tfconvert": true, "localai": true}
+			"sqladmin": true, "cloudsql-connector": true, "onnx": true, "tfconvert": true, "localai": true, "workflows": true}
 		if !runEnabled {
 			published = map[string]bool{"resourcemanager": true, "onnx": true, "tfconvert": true, "localai": true}
 			// The storage server reads IAM service accounts' certificates

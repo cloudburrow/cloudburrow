@@ -127,6 +127,10 @@ func conditionSummary(c *monitoringpb.AlertPolicy_Condition) string {
 		return fmt.Sprintf("%s: %s absent for %s", c.GetDisplayName(), a.GetFilter(), a.GetDuration().AsDuration())
 	case c.GetConditionMatchedLog() != nil:
 		return fmt.Sprintf("%s: log entries matching %s", c.GetDisplayName(), c.GetConditionMatchedLog().GetFilter())
+	case c.GetConditionPrometheusQueryLanguage() != nil:
+		q := c.GetConditionPrometheusQueryLanguage()
+		return fmt.Sprintf("%s: PromQL %s, evaluated every %s, for %s", c.GetDisplayName(), q.GetQuery(),
+			q.GetEvaluationInterval().AsDuration(), q.GetDuration().AsDuration())
 	}
 	return c.GetDisplayName()
 }
@@ -185,8 +189,13 @@ func (monitoringAlertingProvider) CreateForm() (string, []console.Field) {
 		{Name: "severity", Label: "Severity", Type: "select", Options: []string{"SEVERITY_UNSPECIFIED", "CRITICAL", "ERROR", "WARNING"},
 			Default: "SEVERITY_UNSPECIFIED", Section: "Policy"},
 		{Name: "documentation", Label: "Documentation", Type: "textarea", Section: "Policy", Help: "Markdown sent with each notification."},
-		{Name: "conditionType", Label: "Condition type", Type: "select", Options: []string{"threshold", "absence", "log-match"}, Default: "threshold",
-			Section: "Condition", Help: "Metric threshold, metric absence, or a match on log entries."},
+		{Name: "conditionType", Label: "Condition type", Type: "select", Options: []string{"threshold", "absence", "log-match", "promql"}, Default: "threshold",
+			Section: "Condition", OptionLabels: map[string]string{"promql": "PromQL"},
+			Help: "Metric threshold, metric absence, a match on log entries, or a PromQL query (the code editor's PromQL)."},
+		{Name: "promqlQuery", Label: "PromQL query", Type: "textarea", Section: "Condition", ShowWhen: "conditionType=promql",
+			Help: `The condition is met for each series the query returns, such as {"custom.googleapis.com/shop/backlog"} > 5.`},
+		{Name: "evaluationInterval", Label: "Evaluation interval (seconds)", Type: "number", Default: "30", Section: "Condition",
+			ShowWhen: "conditionType=promql", Help: "How often the query is evaluated: a multiple of 30 seconds."},
 		{Name: "conditionName", Label: "Condition name", Type: "text", Section: "Condition", Default: "Condition"},
 		{Name: "metric", Label: "Metric type", Type: "text", Section: "Condition", Help: "Threshold and absence: such as custom.googleapis.com/shop/sales."},
 		{Name: "resource", Label: "Resource type", Type: "text", Section: "Condition", Help: "Such as global; empty for any."},
@@ -196,13 +205,15 @@ func (monitoringAlertingProvider) CreateForm() (string, []console.Field) {
 		{Name: "reducer", Label: "Reducer", Type: "select", Options: explorerReducers, Default: "REDUCE_NONE", Section: "Condition"},
 		{Name: "comparison", Label: "Comparison", Type: "select", Options: policyComparisons, Default: "COMPARISON_GT", Section: "Condition"},
 		{Name: "threshold", Label: "Threshold", Type: "number", Default: "0", Section: "Condition"},
-		{Name: "duration", Label: "Duration (seconds)", Type: "number", Default: "0", Section: "Condition",
-			Help: "How long the condition must hold: whole minutes; at least 120 for absence."},
+		{Name: "duration", Label: "Retest window (seconds)", Type: "number", Default: "0", Section: "Condition",
+			Help: "How long the condition must hold before an incident opens: whole minutes; at least 120 for absence."},
 		{Name: "logFilter", Label: "Log filter", Type: "text", Section: "Condition", Help: `Log match: a Logging filter, such as severity>=ERROR.`},
 		{Name: "rateLimit", Label: "Notification rate limit (seconds)", Type: "number", Default: "300", Section: "Condition",
 			Help: "Log match: at most one notification per period."},
 		{Name: "channels", Label: "Notification channels", Type: "text", Section: "Notifications",
 			Help: "Channel IDs from Notification channels, comma separated."},
+		{Name: "renotify", Label: "Repeat notifications every (minutes)", Type: "number", Section: "Notifications",
+			Help: "Empty to notify once. From 30 to 1440 minutes: an open incident's notification is sent again to the channels above. Not for log match."},
 	}
 }
 
@@ -271,6 +282,17 @@ func policyFromForm(project string, values map[string]string) (*monitoringpb.Ale
 		}
 		cond.Condition = &monitoringpb.AlertPolicy_Condition_ConditionThreshold{ConditionThreshold: &monitoringpb.AlertPolicy_Condition_MetricThreshold{
 			Filter: filter, Aggregations: aggs, Comparison: monitoringpb.ComparisonType(cmp), ThresholdValue: threshold, Duration: durationpb.New(dur)}}
+	case "promql":
+		q := strings.TrimSpace(values["promqlQuery"])
+		if q == "" {
+			return nil, errors.New("a PromQL condition needs a query")
+		}
+		every, err := seconds("evaluation interval", values["evaluationInterval"], 30)
+		if err != nil {
+			return nil, err
+		}
+		cond.Condition = &monitoringpb.AlertPolicy_Condition_ConditionPrometheusQueryLanguage{ConditionPrometheusQueryLanguage: &monitoringpb.AlertPolicy_Condition_PrometheusQueryLanguageCondition{
+			Query: q, Duration: durationpb.New(dur), EvaluationInterval: durationpb.New(every)}}
 	case "log-match":
 		lf := strings.TrimSpace(values["logFilter"])
 		if lf == "" {
@@ -283,7 +305,7 @@ func policyFromForm(project string, values map[string]string) (*monitoringpb.Ale
 		cond.Condition = &monitoringpb.AlertPolicy_Condition_ConditionMatchedLog{ConditionMatchedLog: &monitoringpb.AlertPolicy_Condition_LogMatch{Filter: lf}}
 		pol.AlertStrategy = &monitoringpb.AlertPolicy_AlertStrategy{NotificationRateLimit: &monitoringpb.AlertPolicy_AlertStrategy_NotificationRateLimit{Period: durationpb.New(rate)}}
 	default:
-		return nil, fmt.Errorf("condition type %q is not threshold, absence or log-match", kind)
+		return nil, fmt.Errorf("condition type %q is not threshold, absence, log-match or promql", kind)
 	}
 	pol.Conditions = []*monitoringpb.AlertPolicy_Condition{cond}
 	for _, c := range splitList(values["channels"]) {
@@ -292,7 +314,71 @@ func policyFromForm(project string, values map[string]string) (*monitoringpb.Ale
 		}
 		pol.NotificationChannels = append(pol.NotificationChannels, c)
 	}
+	if err := setRenotify(pol, values["renotify"]); err != nil {
+		return nil, err
+	}
 	return pol, nil
+}
+
+// setRenotify sets a policy's repeat notifications (#1991): one
+// notificationChannelStrategy naming every channel of the policy, with
+// renotifyInterval minutes; empty or 0 removes it, so each channel is told
+// once (docs.cloud.google.com/monitoring/alerts/policies-in-api).
+func setRenotify(pol *monitoringpb.AlertPolicy, minutes string) error {
+	minutes = strings.TrimSpace(minutes)
+	n := 0
+	if minutes != "" {
+		var err error
+		if n, err = strconv.Atoi(minutes); err != nil || n < 0 {
+			return fmt.Errorf("repeat notifications %q is not a number of minutes", minutes)
+		}
+	}
+	if n == 0 {
+		if pol.GetAlertStrategy() != nil {
+			pol.AlertStrategy.NotificationChannelStrategy = nil
+		}
+		return nil
+	}
+	if len(pol.GetNotificationChannels()) == 0 {
+		return errors.New("repeat notifications need at least one notification channel")
+	}
+	if pol.AlertStrategy == nil {
+		pol.AlertStrategy = &monitoringpb.AlertPolicy_AlertStrategy{}
+	}
+	pol.AlertStrategy.NotificationChannelStrategy = []*monitoringpb.AlertPolicy_AlertStrategy_NotificationChannelStrategy{{
+		NotificationChannelNames: append([]string(nil), pol.GetNotificationChannels()...),
+		RenotifyInterval:         durationpb.New(time.Duration(n) * time.Minute)}}
+	return nil
+}
+
+// renotifyText is how a policy's page says its repeat notifications.
+func renotifyText(pol *monitoringpb.AlertPolicy) string {
+	var parts []string
+	for _, st := range pol.GetAlertStrategy().GetNotificationChannelStrategy() {
+		if st.GetRenotifyInterval() == nil {
+			continue
+		}
+		var names []string
+		for _, n := range st.GetNotificationChannelNames() {
+			names = append(names, lastSegment(n))
+		}
+		parts = append(parts, fmt.Sprintf("Every %d minutes to %s", int(st.GetRenotifyInterval().AsDuration().Minutes()), strings.Join(names, ", ")))
+	}
+	if len(parts) == 0 {
+		return "Not repeated"
+	}
+	return strings.Join(parts, "; ")
+}
+
+// renotifyMinutes is the interval the Repeat notifications form starts
+// from: the first strategy's, or empty.
+func renotifyMinutes(pol *monitoringpb.AlertPolicy) string {
+	for _, st := range pol.GetAlertStrategy().GetNotificationChannelStrategy() {
+		if r := st.GetRenotifyInterval(); r != nil {
+			return strconv.Itoa(int(r.AsDuration().Minutes()))
+		}
+	}
+	return ""
 }
 
 func (p monitoringAlertingProvider) Create(ctx context.Context, project string, values map[string]string) (string, error) {
@@ -349,6 +435,13 @@ func (p monitoringAlertingProvider) DetailActions(ctx context.Context, project s
 	if enabledText(pol.GetEnabled()) == "Disabled" {
 		acts = []console.Action{{ID: "enable", Label: "Enable"}}
 	}
+	if pol.GetConditions() != nil && pol.GetConditions()[0].GetConditionMatchedLog() == nil {
+		acts = append(acts, console.Action{ID: "renotify", Label: "Repeat notifications", Fields: []console.Field{
+			{Name: "renotify", Label: "Repeat notifications every (minutes)", Type: "number", Default: renotifyMinutes(pol),
+				Help: "Empty or 0 to notify once; from 30 to 1440 minutes, to every notification channel of the policy."},
+			{Name: "etag", Type: "hidden", Default: fmtTS(pol.GetMutationRecord().GetMutateTime())},
+		}})
+	}
 	return append(acts, console.Action{ID: "snooze", Label: "Snooze", Fields: []console.Field{
 		{Name: "displayName", Label: "Snooze name", Type: "text", Required: true, Default: "Snooze " + pol.GetDisplayName()},
 		{Name: "minutes", Label: "Duration (minutes)", Type: "number", Required: true, Default: "60"},
@@ -369,6 +462,19 @@ func (p monitoringAlertingProvider) ActAt(ctx context.Context, project string, p
 		_, err = s.UpdateAlertPolicy(ctx, &monitoringpb.UpdateAlertPolicyRequest{
 			AlertPolicy: &monitoringpb.AlertPolicy{Name: name, Enabled: wrapperspb.Bool(action == "enable")},
 			UpdateMask:  &fieldmaskpb.FieldMask{Paths: []string{"enabled"}}})
+		return err
+	case "renotify":
+		pol, err := s.GetAlertPolicy(ctx, &monitoringpb.GetAlertPolicyRequest{Name: name})
+		if err != nil {
+			return err
+		}
+		if e := values["etag"]; e != "" && e != fmtTS(pol.GetMutationRecord().GetMutateTime()) {
+			return errors.New("the policy changed since this page was drawn; reload it and try again")
+		}
+		if err := setRenotify(pol, values["renotify"]); err != nil {
+			return err
+		}
+		_, err = s.UpdateAlertPolicy(ctx, &monitoringpb.UpdateAlertPolicyRequest{AlertPolicy: pol})
 		return err
 	case "snooze":
 		mins, err := strconv.Atoi(strings.TrimSpace(values["minutes"]))
@@ -421,6 +527,7 @@ func (p monitoringAlertingProvider) Detail(ctx context.Context, project string, 
 		{Label: "Name", Value: pol.GetName()}, {Label: "Enabled", Value: enabledText(pol.GetEnabled())},
 		{Label: "Severity", Value: pol.GetSeverity().String()}, {Label: "Combiner", Value: pol.GetCombiner().String()},
 		{Label: "Notification channels", Value: orDash(strings.Join(chans, ", "))},
+		{Label: "Repeat notifications", Value: renotifyText(pol)},
 		{Label: "Created", Value: fmtTS(pol.GetCreationRecord().GetMutateTime())},
 		{Label: "Last changed", Value: fmtTS(pol.GetMutationRecord().GetMutateTime())},
 	}}
@@ -1377,7 +1484,7 @@ func (monitoringServicesProvider) Title() string { return "Services" }
 
 func (p monitoringServicesProvider) List(ctx context.Context, project string) (console.Listing, error) {
 	out := console.Listing{Columns: []string{"Display name", "SLOs"}, NameColumn: "Service", Noun: "services", RowsOpenable: true,
-		Note: "Service-level objectives are stored; their compliance and error budget are not computed."}
+		Note: "A service's page shows each SLO's compliance, error budget and burn rate, computed from its indicator over this instance's time series."}
 	s, err := p.server()
 	if err != nil {
 		return console.Listing{}, err
@@ -1448,7 +1555,11 @@ func (p monitoringServicesProvider) Detail(ctx context.Context, project string, 
 	d := console.Detail{Title: orDash(sv.GetDisplayName()), Summary: []console.Property{{Label: "Name", Value: sv.GetName()}},
 		Edit: &console.EditForm{Label: "Edit", Title: "Edit service", Submit: "Save", Fields: []console.Field{
 			{Name: "displayName", Label: "Display name", Type: "text", Default: sv.GetDisplayName()}}}}
-	slos := console.Listing{Columns: []string{"Display name", "Goal", "Period", "Indicator"}, NameColumn: "SLO", Noun: "service-level objectives"}
+	slos := console.Listing{Columns: []string{"Display name", "Status", "Goal", "Compliance", "Error budget", "Burn rate (1 h)", "Period", "Indicator"},
+		NameColumn: "SLO", Noun: "service-level objectives", AlwaysStatus: true,
+		Note: "Compliance, error budget and burn rate are read with ListTimeSeries' select_slo_compliance, select_slo_budget_fraction and select_slo_burn_rate."}
+	now := time.Now().Truncate(time.Second)
+	var compliance, budget []console.ChartSeries
 	resp, err := s.ListServiceLevelObjectives(ctx, &monitoringpb.ListServiceLevelObjectivesRequest{Parent: name, PageSize: 1000})
 	if err != nil {
 		return console.Detail{}, err
@@ -1462,12 +1573,120 @@ func (p monitoringServicesProvider) Detail(ctx context.Context, project string, 
 		if r := o.GetServiceLevelIndicator().GetRequestBased().GetGoodTotalRatio(); r != nil {
 			ind = "good " + orDash(r.GetGoodServiceFilter()) + " / total " + orDash(r.GetTotalServiceFilter())
 		}
-		slos.Items = append(slos.Items, console.Resource{Name: lastSegment(o.GetName()), Fields: map[string]string{
-			"Display name": orDash(o.GetDisplayName()), "Goal": strconv.FormatFloat(o.GetGoal()*100, 'g', 6, 64) + "%", "Period": period, "Indicator": ind}})
+		v := sloValues(ctx, s, project, o, now)
+		slos.Items = append(slos.Items, console.Resource{Name: lastSegment(o.GetName()), Status: v.status, Fields: map[string]string{
+			"Display name": orDash(o.GetDisplayName()), "Status": v.statusText, "Goal": percentText(o.GetGoal()),
+			"Compliance": v.compliance, "Error budget": v.budget, "Burn rate (1 h)": v.burn,
+			"Period": period, "Indicator": ind}})
+		label := orDash(o.GetDisplayName()) + " (" + lastSegment(o.GetName()) + ")"
+		compliance = append(compliance, sloChart(ctx, s, project, `select_slo_compliance("`+o.GetName()+`")`, label, now))
+		budget = append(budget, sloChart(ctx, s, project, `select_slo_budget_fraction("`+o.GetName()+`")`, label, now))
 	}
 	slos.Total = len(slos.Items)
 	d.Sections = []console.Section{{ID: "slos", Label: "Service-level objectives", Listing: slos}}
+	if len(slos.Items) > 0 {
+		d.Sections = append(d.Sections,
+			console.Section{ID: "compliance", Label: "Service level indicator", Kind: console.KindChart, Series: compliance,
+				Note: "Each SLO's compliance over the last 6 hours, in percent: good / total since its compliance period began, every 15 minutes."},
+			console.Section{ID: "error-budget", Label: "Error budget", Kind: console.KindChart, Series: budget,
+				Note: "The error budget remaining over the last 6 hours, in percent of the budget: 1 - bad / ((1 - goal) × total)."})
+	}
 	return d, nil
+}
+
+// sloNow is an SLO's computed values as its row shows them.
+type sloNow struct {
+	status, statusText, compliance, budget, burn string
+}
+
+func percentText(f float64) string {
+	switch {
+	case math.IsInf(f, -1):
+		return "-∞"
+	case math.IsNaN(f):
+		return "—"
+	}
+	return strconv.FormatFloat(math.Round(f*100000)/1000, 'f', -1, 64) + "%"
+}
+
+// sloLatest is the newest value of a select_slo_* read at now, and whether
+// there was one: an SLO with no requests yet has none.
+func sloLatest(ctx context.Context, s *monitoring.Server, project, filter string, now time.Time) (float64, bool, error) {
+	resp, err := s.ListTimeSeries(ctx, &monitoringpb.ListTimeSeriesRequest{Name: "projects/" + project, Filter: filter,
+		Interval: &monitoringpb.TimeInterval{StartTime: timestamppb.New(now), EndTime: timestamppb.New(now)},
+		View:     monitoringpb.ListTimeSeriesRequest_FULL})
+	if err != nil {
+		return 0, false, err
+	}
+	for _, ts := range resp.GetTimeSeries() {
+		if pp := ts.GetPoints(); len(pp) > 0 {
+			return pp[0].GetValue().GetDoubleValue(), true, nil
+		}
+	}
+	return 0, false, nil
+}
+
+// sloValues reads an SLO's compliance, error budget left and burn rate
+// over the last hour, as Google's SLO details show them
+// (docs.cloud.google.com/stackdriver/docs/solutions/slo-monitoring/ui/svc-dashboard: Status, Error budget and its Error budget tab).
+func sloValues(ctx context.Context, s *monitoring.Server, project string, o *monitoringpb.ServiceLevelObjective, now time.Time) sloNow {
+	v := sloNow{status: "unknown", statusText: "No data", compliance: "—", budget: "—", burn: "—"}
+	read := func(filter string) (float64, bool, string) {
+		f, ok, err := sloLatest(ctx, s, project, filter, now)
+		if err != nil {
+			return 0, false, "Unavailable: " + err.Error()
+		}
+		return f, ok, ""
+	}
+	c, ok, failed := read(`select_slo_compliance("` + o.GetName() + `")`)
+	if failed != "" {
+		v.compliance, v.statusText, v.status = failed, "Unavailable", "error"
+		return v
+	}
+	if ok {
+		v.compliance = percentText(c)
+		if c >= o.GetGoal() {
+			v.status, v.statusText = "healthy", "Healthy"
+		} else {
+			v.status, v.statusText = "unhealthy", "Out of SLO"
+		}
+	}
+	if b, ok, failed := read(`select_slo_budget_fraction("` + o.GetName() + `")`); failed != "" {
+		v.budget = failed
+	} else if ok {
+		v.budget = percentText(b)
+	}
+	if r, ok, failed := read(`select_slo_burn_rate("` + o.GetName() + `", "3600s")`); failed != "" {
+		v.burn = failed
+	} else if ok {
+		v.burn = strconv.FormatFloat(math.Round(r*1000)/1000, 'f', -1, 64)
+	}
+	return v
+}
+
+// sloChart is a select_slo_* read over the last 6 hours, every 15 minutes,
+// in percent.
+func sloChart(ctx context.Context, s *monitoring.Server, project, filter, label string, now time.Time) console.ChartSeries {
+	out := console.ChartSeries{Label: label, Unit: "%", Points: []console.ChartPoint{}}
+	resp, err := s.ListTimeSeries(ctx, &monitoringpb.ListTimeSeriesRequest{Name: "projects/" + project, Filter: filter,
+		Interval:    &monitoringpb.TimeInterval{StartTime: timestamppb.New(now.Add(-6 * time.Hour)), EndTime: timestamppb.New(now)},
+		Aggregation: &monitoringpb.Aggregation{AlignmentPeriod: durationpb.New(15 * time.Minute)},
+		View:        monitoringpb.ListTimeSeriesRequest_FULL})
+	if err != nil {
+		return out
+	}
+	for _, ts := range resp.GetTimeSeries() {
+		pp := ts.GetPoints()
+		for i := len(pp) - 1; i >= 0; i-- {
+			f := pp[i].GetValue().GetDoubleValue() * 100
+			pt := console.ChartPoint{At: pp[i].GetInterval().GetEndTime().AsTime().UTC().Format(time.RFC3339)}
+			if !math.IsInf(f, 0) && !math.IsNaN(f) {
+				pt.Value = &f
+			}
+			out.Points = append(out.Points, pt)
+		}
+	}
+	return out
 }
 
 func (p monitoringServicesProvider) Edit(ctx context.Context, project string, path []string, values map[string]string) error {
