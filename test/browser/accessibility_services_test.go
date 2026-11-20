@@ -402,6 +402,14 @@ func TestSecretsSchedulerTasksProjectsIAMAndAIScreensMeetWCAG(t *testing.T) {
 		// Create queue is a page of its own since #1842.
 		a11yPage{"create queue page", "/tasks/queues/create?project=" + project,
 			`document.querySelector("#view form.create-page #f-name") !== null`, ""},
+		// Create project and Create folder are pages since #1932, Create
+		// folder also from Manage resources, which it goes back to.
+		a11yPage{"new project page", "/projectcreate?project=" + project,
+			`document.querySelector("#view form.create-page #new-project-name") !== null`, ""},
+		a11yPage{"create folder page", "/resource-hierarchy/create?project=" + project,
+			`document.querySelector("#view form.create-page #f-displayName") !== null`, ""},
+		a11yPage{"create folder page from Manage resources", "/resource-hierarchy/create?return=/cloud-resource-manager&project=" + project,
+			`document.querySelector("#view form.create-page #f-displayName") !== null`, ""},
 	)
 	auditScreens(t, pages)
 }

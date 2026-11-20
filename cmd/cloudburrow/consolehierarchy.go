@@ -134,9 +134,35 @@ func (p hierarchyProvider) CreateForm() (string, []console.Field) {
 		{Name: "displayName", Label: "Folder name", Type: "text", Required: true,
 			Help:    "1 to 30 letters, digits, spaces, hyphens and underscores, starting and ending with a letter or digit; unique among its siblings.",
 			Pattern: `^[\p{L}\p{N}]([\p{L}\p{N} _\-]{0,28}[\p{L}\p{N}])?$`},
-		{Name: "parent", Label: "Parent", Type: "select", Required: true, Options: p.parentOptions(""), Default: resourcemanager.OrganizationName,
-			Help: "The organization, or a folder."},
+		{Name: "parent", Label: "Location", Type: "select", Required: true, Options: p.parentOptions(""), OptionLabels: p.parentLabels(),
+			Default: resourcemanager.OrganizationName, Help: "Parent organization or folder."},
 	}
+}
+
+// CreateOnPage, CreateTitle, CreateSubmit and CreateLayout make Create folder
+// a page of its own, one form without numbered sections, ending in Create
+// (#1932). Google's steps for it (resource-manager/docs/creating-managing-folders:
+// Folder name, the parent resource chosen with Browse, then Create) are those
+// of Create project, whose form is the New project page, and both open from
+// Manage resources' title line; Manage resources' Create folder opens this
+// page too.
+func (hierarchyProvider) CreateOnPage() bool   { return true }
+func (hierarchyProvider) CreateTitle() string  { return "Create folder" }
+func (hierarchyProvider) CreateSubmit() string { return "Create" }
+func (hierarchyProvider) CreateLayout() string { return console.CreateLayoutPage }
+
+// parentLabels names each parent parentOptions offers: the organization by
+// its domain, a folder by its name and number.
+func (p hierarchyProvider) parentLabels() map[string]string {
+	out := map[string]string{resourcemanager.OrganizationName: resourcemanager.OrganizationDomain + " (organization)"}
+	_, all, err := p.folders()
+	if err != nil {
+		return out
+	}
+	for _, f := range all {
+		out[f.Name] = f.DisplayName + " (folder " + f.ID() + ")"
+	}
+	return out
 }
 
 func (p hierarchyProvider) Create(_ context.Context, _ string, values map[string]string) (string, error) {
