@@ -21,7 +21,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
 )
 
-// computeService serves the Compute Engine API's VPC networking (#1936)
+// computeService serves the Compute Engine API (#1936, #1963)
 // in the CLI process, on a port of its own (endpoints.compute), as
 // compute.googleapis.com is an API of its own. With Kubernetes Engine
 // enabled too, it also answers the node pools' instance group managers
@@ -34,8 +34,14 @@ type computeService struct {
 	requests func(rest.Request)
 	gke      *gkeService
 	api      *compute.Server
-	srv      *http.Server
-	ln       net.Listener
+	// vms runs the VM instances (#1963); guestBase and metadataHost are
+	// set by up once the cluster host is known.
+	vms          *computeVMs
+	guestBase    func() string
+	metadataHost func() string
+	cancel       context.CancelFunc
+	srv          *http.Server
+	ln           net.Listener
 }
 
 func newComputeService(cfg config.Config) *computeService {
@@ -73,7 +79,22 @@ func (s *computeService) Start(ctx context.Context) error {
 	if s.cfg.Mode == config.ModePersistent {
 		state = filepath.Join(s.cfg.InstanceDir(), "compute.json")
 	}
-	api, err := compute.New(compute.Options{State: state, Extra: s.instanceGroupManagers, NetworkUsers: s.networkUsers})
+	bg, cancel := context.WithCancel(context.Background())
+	s.cancel = cancel
+	s.vms = newComputeVMs(s.cfg, bg)
+	s.vms.guestBase = func() string {
+		if s.guestBase == nil {
+			return ""
+		}
+		return s.guestBase()
+	}
+	s.vms.metadataHost = func() string {
+		if s.metadataHost == nil {
+			return ""
+		}
+		return s.metadataHost()
+	}
+	api, err := compute.New(compute.Options{State: state, Extra: s.instanceGroupManagers, NetworkUsers: s.networkUsers, VMs: s.vms})
 	if err != nil {
 		return err
 	}
@@ -93,6 +114,12 @@ func (s *computeService) Start(ctx context.Context) error {
 }
 
 func (s *computeService) Stop(ctx context.Context) error {
+	if s.vms != nil {
+		s.vms.stopAll()
+	}
+	if s.cancel != nil {
+		s.cancel()
+	}
 	if s.srv == nil {
 		return nil
 	}

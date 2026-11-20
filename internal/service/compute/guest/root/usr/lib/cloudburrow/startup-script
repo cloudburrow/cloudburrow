@@ -1,0 +1,22 @@
+#!/bin/bash
+# Runs the instance's startup-script metadata at every boot, as
+# google_metadata_script_runner does, its output on the serial console.
+M=/usr/lib/cloudburrow/metadata
+for i in $(seq 1 30); do $M instance/id >/dev/null && break; sleep 1; done
+script="$($M instance/attributes/startup-script)"
+log=/usr/lib/cloudburrow/console
+tag="google_metadata_script_runner[$$]"
+if [ -z "$script" ]; then
+  echo "No startup scripts to run." | $log "$tag"
+  exit 0
+fi
+f=$(mktemp /tmp/startup-script.XXXXXX)
+printf '%s\n' "$script" > "$f"
+chmod 0700 "$f"
+echo "Starting startup scripts." | $log "$tag"
+echo "Found startup-script in metadata." | $log "$tag"
+"$f" 2>&1 | sed -u 's/^/startup-script: /' | $log "$tag"
+rc=${PIPESTATUS[0]}
+echo "startup-script exit status $rc" | $log "$tag"
+echo "Finished running startup scripts." | $log "$tag"
+rm -f "$f"

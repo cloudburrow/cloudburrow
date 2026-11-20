@@ -11,8 +11,10 @@
 // once, and answers with a DONE operation in Compute's own shape
 // (compute#operation), which clients poll or wait on as they do Google's.
 //
-// VM instances, disks and images are not served: their paths, and every
-// other path outside the resources above, answer 501.
+// VM instances, disks, snapshots, machine types and the public images
+// (#1963) are served too: each instance runs on a VMBackend (a systemd
+// container in the instance's kind cluster), and its mutations answer
+// operations that really run. Every other path answers 501.
 package compute
 
 import (
@@ -55,6 +57,11 @@ type Options struct {
 	// network (projects/P/global/networks/N), which a network's deletion is
 	// refused while they exist, as Google refuses it.
 	NetworkUsers func(network string) []string
+	// VMs runs VM instances and keeps their disks (#1963); nil answers
+	// instances, disks and snapshots with 501.
+	VMs VMBackend
+	// MinFreeBytes is DefaultMinFreeBytes when zero.
+	MinFreeBytes uint64
 }
 
 // obj is one resource, as its JSON is kept: link fields hold relative
@@ -73,6 +80,8 @@ type Server struct {
 	defaultDeleted map[string]bool
 	// seeded are the projects whose default network has been made.
 	seeded map[string]bool
+	// waiters are the running operations, closed when each is done.
+	waiters map[string]chan struct{}
 
 	srv *http.Server
 	ln  net.Listener
@@ -84,7 +93,7 @@ func New(opts Options) (*Server, error) {
 		opts.Now = time.Now
 	}
 	s := &Server{opts: opts, res: map[string]obj{}, ops: map[string]obj{},
-		defaultDeleted: map[string]bool{}, seeded: map[string]bool{}}
+		defaultDeleted: map[string]bool{}, seeded: map[string]bool{}, waiters: map[string]chan struct{}{}}
 	if err := s.restore(); err != nil {
 		return nil, err
 	}
@@ -289,7 +298,24 @@ func (s *Server) stamp() string {
 // on the way out.
 var linkKeys = map[string]bool{"selfLink": true, "network": true, "subnetwork": true, "region": true, "zone": true,
 	"targetLink": true, "nextHopGateway": true, "nextHopNetwork": true, "nextHopInstance": true, "nextHopVpnTunnel": true,
-	"subnetworks": true, "users": true, "zones": true}
+	"subnetworks": true, "users": true, "zones": true, "machineType": true, "source": true, "sourceImage": true,
+	"sourceSnapshot": true, "sourceDisk": true, "type": true}
+
+// renderNested makes the link fields of objects inside lists and objects
+// absolute (an instance's disks and network interfaces).
+func renderNested(v any, base string) any {
+	switch t := v.(type) {
+	case map[string]any:
+		return render(t, base)
+	case []any:
+		l := make([]any, len(t))
+		for i, e := range t {
+			l[i] = renderNested(e, base)
+		}
+		return l
+	}
+	return v
+}
 
 // render is o with its link fields made absolute under base.
 func render(o obj, base string) obj {
@@ -315,6 +341,9 @@ func render(o obj, base string) obj {
 				out[k] = l
 				continue
 			}
+		}
+		if k != "items" {
+			v = renderNested(v, base)
 		}
 		out[k] = v
 	}

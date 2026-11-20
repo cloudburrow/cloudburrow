@@ -13605,9 +13605,9 @@
     "Key": "compute",
     "Title": "Compute Engine API (v1): VPC networking",
     "counts": {
-      "Implemented": 15,
-      "Unimplemented": 17,
-      "Verified": 37
+      "Implemented": 25,
+      "Unimplemented": 74,
+      "Verified": 67
     },
     "rows": [
       {
@@ -13658,6 +13658,123 @@
       },
       {
         "method": "compute.addresses.testIamPermissions",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.diskTypes.aggregatedList",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.diskTypes.get",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.diskTypes.list",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.disks.addResourcePolicies",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.disks.aggregatedList",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.disks.bulkInsert",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.disks.createSnapshot",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.disks.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.disks.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.disks.getIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.disks.insert",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.disks.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.disks.removeResourcePolicies",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.disks.resize",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.disks.setIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.disks.setLabels",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.disks.startAsyncReplication",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.disks.stopAsyncReplication",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.disks.stopGroupAsyncReplication",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.disks.testIamPermissions",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.disks.update",
         "status": "Unimplemented",
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
@@ -13783,6 +13900,331 @@
         ]
       },
       {
+        "method": "compute.images.delete",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.images.deprecate",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.images.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.images.getFromFamily",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.images.getIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.images.insert",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.images.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.images.patch",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.images.setIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.images.setLabels",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.images.testIamPermissions",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.addAccessConfig",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.addResourcePolicies",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.aggregatedList",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.instances.attachDisk",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.instances.bulkInsert",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.instances.deleteAccessConfig",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.detachDisk",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.instances.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.instances.getEffectiveFirewalls",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.getGuestAttributes",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.getIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.getScreenshot",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.getSerialPortOutput",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.instances.getShieldedInstanceIdentity",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.insert",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.instances.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.instances.performMaintenance",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.removeResourcePolicies",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.reset",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.instances.resume",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.instances.setDeletionProtection",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.instances.setIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.setLabels",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.instances.setMachineType",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.instances.setMetadata",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.instances.setMinCpuPlatform",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.setName",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.setScheduling",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.setServiceAccount",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.setShieldedInstanceIntegrityPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.setTags",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.instances.simulateMaintenanceEvent",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.start",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.instances.startWithEncryptionKey",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.stop",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.instances.suspend",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.instances.testIamPermissions",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.update",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.updateAccessConfig",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.updateDisplayDevice",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.updateNetworkInterface",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.instances.updateShieldedInstanceConfig",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.machineTypes.aggregatedList",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.machineTypes.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.machineTypes.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
         "method": "compute.networks.addPeering",
         "status": "Unimplemented",
         "note": "returns UNIMPLEMENTED (in-process check)"
@@ -13862,6 +14304,61 @@
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
+        "method": "compute.projects.disableXpnHost",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.projects.enableXpnHost",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.projects.get",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.projects.getXpnHost",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.projects.getXpnResources",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.projects.listXpnHosts",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.projects.moveDisk",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.projects.moveInstance",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.projects.setCommonInstanceMetadata",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.projects.setDefaultNetworkTier",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.projects.setUsageExportBucket",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
         "method": "compute.regionOperations.delete",
         "status": "Implemented",
         "note": "no official-SDK test proves it yet"
@@ -13930,6 +14427,50 @@
       },
       {
         "method": "compute.routes.testIamPermissions",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.snapshots.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.snapshots.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.snapshots.getIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.snapshots.insert",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.snapshots.list",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.snapshots.setIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "compute.snapshots.setLabels",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "compute.snapshots.testIamPermissions",
         "status": "Unimplemented",
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
@@ -14022,8 +14563,10 @@
       },
       {
         "method": "compute.zoneOperations.get",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.zoneOperations.list",
@@ -14032,8 +14575,10 @@
       },
       {
         "method": "compute.zoneOperations.wait",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.zones.get",

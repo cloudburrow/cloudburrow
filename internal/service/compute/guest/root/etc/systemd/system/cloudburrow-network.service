@@ -1,0 +1,10 @@
+[Unit]
+Description=CloudBurrow guest network setup
+Before=network-online.target ssh.service sshd.service
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+PassEnvironment=CLOUDBURROW_INTERNAL_IP GCE_METADATA_HOST GOOGLE_CLOUD_PROJECT
+ExecStart=/usr/lib/cloudburrow/network
+[Install]
+WantedBy=multi-user.target
