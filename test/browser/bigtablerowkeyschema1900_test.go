@@ -98,6 +98,11 @@ func TestBigtableRowKeySchema1900(t *testing.T) {
 	p.navigate("/bigtable-instances/" + id + q)
 	p.waitFor(`document.querySelector("#tab-studio") !== null`)
 	p.run(chromedp.Click(chromedp.CSS(`#tab-studio`)))
+	// The Studio draws its mode tabs again once its Explorer has loaded
+	// (loadExplorer's loadTab), so a Query editor button found before then
+	// is gone by the click ("Could not find node with given id"): wait for
+	// the table in the builder's list, then click the button drawn after.
+	p.waitFor(`[...document.querySelectorAll("#bigtable-builder-table option")].some((o) => o.value === "sales")`)
 	p.run(chromedp.Click(chromedp.CSS(`#bigtable-mode-editor`)))
 	p.waitFor(`document.querySelector("#bigtable-editor") !== null`)
 	setField(p, "#view", "bigtable-editor", `SELECT purchase_date FROM sales WHERE user_id = b"user2"`)

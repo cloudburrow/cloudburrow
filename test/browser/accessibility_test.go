@@ -132,6 +132,16 @@ func (p *tab) show(pg a11yPage) {
 	if pg.then != "" {
 		p.eval(`(() => { `+pg.then+`; return true; })()`, nil)
 	}
+	// A dialog the action opens after a fetch (Spanner's Upgrade link goes
+	// to the page's own address with ?action=, which opens Update edition
+	// once the page has loaded again) is waited for, so every audit
+	// measures the dialog rather than the page before it. One that never
+	// opens is still reported, by dialogFailures, as no dialog opened.
+	if strings.HasSuffix(pg.name, " dialog") {
+		p.eval(`new Promise((r) => { const end = Date.now() + 10000;
+			const look = () => document.querySelector(".modal.is-open") !== null || Date.now() > end ? r(true) : setTimeout(look, 50);
+			look(); })`, nil, awaitPromise)
+	}
 	// What it opened has finished fading or sliding in, so it is measured as
 	// it is seen rather than part-way to opaque.
 	// An overlay is made visible a frame after it is shown, so two frames
