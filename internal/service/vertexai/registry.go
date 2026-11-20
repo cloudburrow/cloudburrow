@@ -69,11 +69,23 @@ type ArtifactStore interface {
 	ManagedBucket(project string) string
 }
 
+// ModelImages is this instance's Artifact Registry, as the Model Registry
+// uses it: ExportModel's image_destination and the prebuilt containers.
+type ModelImages interface {
+	// Export copies the image src to dst, an Artifact Registry path
+	// ([:tag], "latest" when it has none), and returns the image's full
+	// path.
+	Export(ctx context.Context, src, dst string) (string, error)
+	// Held reports whether ref names an image the registry holds.
+	Held(ref string) bool
+}
+
 // registry keeps the uploaded models and the endpoints.
 type registry struct {
 	stateFile string
 	runner    ModelRunner
 	artifacts ArtifactStore
+	images    ModelImages
 	now       func() time.Time
 
 	mu        sync.Mutex
@@ -118,6 +130,17 @@ func (s *Server) SetRegistry(stateFile string, runner ModelRunner, store Artifac
 	s.reg = r
 	if s.ops == nil {
 		s.ops = lro.NewStore(nil)
+	}
+}
+
+// SetModelImages names the Artifact Registry ExportModel pushes images to
+// and DeployModel looks Google's prebuilt containers up in; call it after
+// SetRegistry.
+func (s *Server) SetModelImages(img ModelImages) {
+	if r := s.registry(); r != nil {
+		r.mu.Lock()
+		r.images = img
+		r.mu.Unlock()
 	}
 }
 
@@ -513,6 +536,7 @@ func (r *registry) upload(ctx context.Context, req *aiplatformpb.UploadModelRequ
 	v.SupportedInputStorageFormats = []string{"jsonl", "csv", "tf-record", "tf-record-gzip", "file-list"}
 	v.SupportedOutputStorageFormats = []string{"jsonl"}
 	v.ModelSourceInfo = &aiplatformpb.ModelSourceInfo{SourceType: aiplatformpb.ModelSourceInfo_CUSTOM}
+	v.SupportedExportFormats = exportFormats(storage != "")
 	if v.Labels == nil {
 		v.Labels = map[string]string{}
 	}
@@ -1178,6 +1202,9 @@ func (r *registry) prepareDeploy(req *aiplatformpb.DeployModelRequest) (*regEndp
 	}
 
 	spec := v.GetContainerSpec()
+	if err := r.checkPrebuilt(spec.GetImageUri()); err != nil {
+		return nil, nil, ContainerRun{}, err
+	}
 	port := 8080
 	if ps := spec.GetPorts(); len(ps) > 0 {
 		port = int(ps[0].GetContainerPort())
@@ -1464,4 +1491,68 @@ func (r *registry) explanationSpec(project, location, id, deployedModelID string
 		}
 	}
 	return nil
+}
+
+// exportFormats is an uploaded model's supported_export_formats: the
+// "custom-trained" format, its image always and its artifacts when it has
+// some.
+func exportFormats(artifacts bool) []*aiplatformpb.Model_ExportFormat {
+	f := &aiplatformpb.Model_ExportFormat{Id: "custom-trained",
+		ExportableContents: []aiplatformpb.Model_ExportFormat_ExportableContent{aiplatformpb.Model_ExportFormat_IMAGE}}
+	if artifacts {
+		f.ExportableContents = append([]aiplatformpb.Model_ExportFormat_ExportableContent{aiplatformpb.Model_ExportFormat_ARTIFACT},
+			f.ExportableContents...)
+	}
+	return []*aiplatformpb.Model_ExportFormat{f}
+}
+
+// prebuiltHosts are the registries Google's prebuilt prediction containers
+// are published in: Artifact Registry's us, europe and asia multi-regions,
+// under vertex-ai/prediction and vertex-ai-restricted/prediction, each
+// tagged :latest (re-read 2026-11-20:
+// https://docs.cloud.google.com/vertex-ai/docs/predictions/pre-built-containers).
+// The older gcr.io/cloud-aiplatform paths, which that page no longer
+// names, are recognised too, so they are refused rather than pulled.
+var prebuiltHosts = []string{"us-docker.pkg.dev/", "europe-docker.pkg.dev/", "asia-docker.pkg.dev/"}
+
+// IsPrebuiltImage reports whether uri is one of Google's prebuilt
+// prediction (or training) container images.
+func IsPrebuiltImage(uri string) bool {
+	u := strings.ToLower(uri)
+	for _, h := range prebuiltHosts {
+		if rest, ok := strings.CutPrefix(u, h); ok {
+			return strings.HasPrefix(rest, "vertex-ai/") || strings.HasPrefix(rest, "vertex-ai-restricted/")
+		}
+	}
+	for _, h := range []string{"gcr.io/", "us.gcr.io/", "eu.gcr.io/", "asia.gcr.io/"} {
+		if strings.HasPrefix(u, h+"cloud-aiplatform/") {
+			return true
+		}
+	}
+	return false
+}
+
+// checkPrebuilt refuses to deploy one of Google's prebuilt containers that
+// this instance's Artifact Registry does not hold. They are several GB
+// each, in Google's registry, and nothing here downloads them: the image
+// is served only when it was pushed to the local repository its path names
+// (us-docker.pkg.dev/vertex-ai/prediction/IMAGE:TAG is the image IMAGE:TAG
+// of the repository projects/vertex-ai/locations/us/repositories/prediction
+// of this instance). A gcr.io path is never served (no Container Registry).
+func (r *registry) checkPrebuilt(uri string) error {
+	if !IsPrebuiltImage(uri) {
+		return nil
+	}
+	if strings.Contains(strings.ToLower(uri), "gcr.io/") {
+		return apierror.FailedPrecondition("the model's image %s is one of Google's prebuilt containers in Container Registry, which "+
+			"this instance does not serve or download: use its Artifact Registry path (us-docker.pkg.dev/vertex-ai/prediction/...), "+
+			"pushed to this instance's Artifact Registry, or a serving image of your own", uri)
+	}
+	if r.images != nil && r.images.Held(uri) {
+		return nil
+	}
+	return apierror.FailedPrecondition("the model's image %s is one of Google's prebuilt prediction containers, which this instance "+
+		"does not download (each is several GB, from Google's registry): push that image, or one serving the same contract, to the "+
+		"repository its path names in this instance's Artifact Registry (create the DOCKER repository in project vertex-ai at that "+
+		"location, then docker push it there), or upload the model with a serving image of your own", uri)
 }

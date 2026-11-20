@@ -40,7 +40,20 @@ func withModelRegistry(cfg config.Config, srv *vertexai.Server, run interface{ A
 		store = vertexArtifacts{addr: storageAddr, cfg: cfg, client: &http.Client{Timeout: 5 * time.Minute}}
 	}
 	srv.SetRegistry(filepath.Join(cfg.StateDir, "vertexai", "registry.json"), runner, store)
+	srv.SetModelImages(vertexImages{saver: newLocalImageBuilder(cfg)})
 }
+
+// vertexImages is the Model Registry's view of this instance's Artifact
+// Registry (#1940): ExportModel's image_destination is pushed to it, from
+// the registry itself or from the local Docker daemon (`docker save`,
+// never a pull), and a prebuilt container is served only when it holds it.
+type vertexImages struct{ saver runadapter.ImageSaver }
+
+func (v vertexImages) Export(ctx context.Context, src, dst string) (string, error) {
+	return runadapter.ExportImage(ctx, v.saver, src, dst)
+}
+
+func (v vertexImages) Held(ref string) bool { return runadapter.HeldImage(ref) }
 
 // vertexRunner runs deployed models as Cloud Run services.
 type vertexRunner struct{ run runProvider }

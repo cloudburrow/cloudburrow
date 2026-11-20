@@ -6207,7 +6207,8 @@
         "tests": [
           "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
           "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints",
-          "test/compat/modelregistrycli_test.go:96 TestTerraformVertexAIEndpoint"
+          "test/compat/modelregistrycli_test.go:96 TestTerraformVertexAIEndpoint",
+          "test/compat/modelregistrypython_test.go:127 TestPythonAIPlatformUploadAndDeploy"
         ]
       },
       {
@@ -6217,7 +6218,8 @@
           "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels",
           "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
           "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints",
-          "test/compat/modelregistrycli_test.go:96 TestTerraformVertexAIEndpoint"
+          "test/compat/modelregistrycli_test.go:96 TestTerraformVertexAIEndpoint",
+          "test/compat/modelregistrypython_test.go:127 TestPythonAIPlatformUploadAndDeploy"
         ]
       },
       {
@@ -6225,7 +6227,9 @@
         "status": "Verified",
         "tests": [
           "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
-          "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints"
+          "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints",
+          "test/compat/modelregistryexport_test.go:58 TestModelRegistryExportsTheImageToArtifactRegistry",
+          "test/compat/modelregistrypython_test.go:127 TestPythonAIPlatformUploadAndDeploy"
         ]
       },
       {
@@ -6235,7 +6239,8 @@
           "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels",
           "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
           "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints",
-          "test/compat/modelregistrycli_test.go:96 TestTerraformVertexAIEndpoint"
+          "test/compat/modelregistrycli_test.go:96 TestTerraformVertexAIEndpoint",
+          "test/compat/modelregistrypython_test.go:127 TestPythonAIPlatformUploadAndDeploy"
         ]
       },
       {
@@ -6244,7 +6249,8 @@
         "tests": [
           "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels",
           "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
-          "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints"
+          "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints",
+          "test/compat/modelregistrypython_test.go:127 TestPythonAIPlatformUploadAndDeploy"
         ]
       },
       {
@@ -6260,7 +6266,8 @@
         "tests": [
           "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels",
           "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
-          "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints"
+          "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints",
+          "test/compat/modelregistrypython_test.go:127 TestPythonAIPlatformUploadAndDeploy"
         ]
       },
       {
@@ -6301,7 +6308,7 @@
         "method": "google.cloud.aiplatform.v1.ModelGardenService/GetPublisherModel",
         "status": "Verified",
         "tests": [
-          "test/compat/modelregistry_test.go:485 TestGetPublisherModelDescribesTheServedModels"
+          "test/compat/modelregistry_test.go:490 TestGetPublisherModelDescribesTheServedModels"
         ]
       },
       {
@@ -6327,21 +6334,24 @@
         "tests": [
           "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels",
           "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
-          "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints"
+          "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints",
+          "test/compat/modelregistrypython_test.go:127 TestPythonAIPlatformUploadAndDeploy"
         ]
       },
       {
         "method": "google.cloud.aiplatform.v1.ModelService/DeleteModelVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer"
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
+          "test/compat/modelregistrypython_test.go:127 TestPythonAIPlatformUploadAndDeploy"
         ]
       },
       {
         "method": "google.cloud.aiplatform.v1.ModelService/ExportModel",
         "status": "Verified",
         "tests": [
-          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer"
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
+          "test/compat/modelregistryexport_test.go:58 TestModelRegistryExportsTheImageToArtifactRegistry"
         ]
       },
       {
@@ -6350,7 +6360,9 @@
         "tests": [
           "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels",
           "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
-          "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints"
+          "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints",
+          "test/compat/modelregistryexport_test.go:58 TestModelRegistryExportsTheImageToArtifactRegistry",
+          "test/compat/modelregistrypython_test.go:127 TestPythonAIPlatformUploadAndDeploy"
         ]
       },
       {
@@ -6393,7 +6405,8 @@
         "method": "google.cloud.aiplatform.v1.ModelService/ListModelVersions",
         "status": "Verified",
         "tests": [
-          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer"
+          "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
+          "test/compat/modelregistrypython_test.go:127 TestPythonAIPlatformUploadAndDeploy"
         ]
       },
       {
@@ -6402,7 +6415,8 @@
         "tests": [
           "test/compat/modelgardendeploy_test.go:61 TestModelGardenDeploysHuggingFaceModels",
           "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
-          "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints"
+          "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints",
+          "test/compat/modelregistrypython_test.go:127 TestPythonAIPlatformUploadAndDeploy"
         ]
       },
       {
@@ -6429,7 +6443,9 @@
         "status": "Verified",
         "tests": [
           "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
-          "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints"
+          "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints",
+          "test/compat/modelregistryexport_test.go:58 TestModelRegistryExportsTheImageToArtifactRegistry",
+          "test/compat/modelregistrypython_test.go:127 TestPythonAIPlatformUploadAndDeploy"
         ]
       },
       {
@@ -6497,6 +6513,8 @@
         "tests": [
           "test/compat/modelregistry_test.go:94 TestModelRegistryDeploysACustomContainer",
           "test/compat/modelregistrycli_test.go:26 TestGcloudAIModelsAndEndpoints",
+          "test/compat/modelregistryexport_test.go:58 TestModelRegistryExportsTheImageToArtifactRegistry",
+          "test/compat/modelregistrypython_test.go:127 TestPythonAIPlatformUploadAndDeploy",
           "test/compat/predictiongrpc_test.go:63 TestPredictionClientReachesACustomEndpoint"
         ]
       },

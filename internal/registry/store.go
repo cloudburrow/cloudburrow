@@ -501,34 +501,59 @@ func (s *Store) putManifest(r Repo, image, ref, contentType string, b []byte) (s
 // image to another's, with the manifests an index names; the blobs are
 // shared by digest, so none is copied. A tag is set to the same digest.
 func (s *Store) CopyManifest(from, to Repo, image, ref string) error {
-	b, d, mt, err := s.GetManifest(from, image, ref)
+	_, err := s.copyManifest(from, image, ref, to, image, ref)
+	return err
+}
+
+// CopyImage copies the manifest fromImage:ref (a tag or digest) of one
+// repository to toImage:tag of another, or of the same one, with the
+// manifests an index names, as a pull and push of it would (#1940: a
+// Vertex AI model's image exported to Artifact Registry). It returns the
+// manifest's digest, which the copy keeps.
+func (s *Store) CopyImage(from Repo, fromImage, ref string, to Repo, toImage, tag string) (string, error) {
+	if !ValidImage(toImage) {
+		return "", ErrNameInvalid
+	}
+	if !ValidTag(tag) {
+		return "", ErrTagInvalid
+	}
+	return s.copyManifest(from, fromImage, ref, to, toImage, tag)
+}
+
+// copyManifest copies fromImage's manifest ref to toImage as toRef (a
+// tag, or the same digest), returning its digest.
+func (s *Store) copyManifest(from Repo, fromImage, ref string, to Repo, toImage, toRef string) (string, error) {
+	b, d, mt, err := s.GetManifest(from, fromImage, ref)
 	if err != nil {
-		return err
+		return "", err
+	}
+	if ValidDigest(toRef) {
+		toRef = d
 	}
 	if IsIndex(mt) {
 		m, _, err := ParseManifest(mt, b)
 		if err != nil {
-			return err
+			return "", err
 		}
 		for _, x := range m.Manifests {
-			if err := s.CopyManifest(from, to, image, x.Digest); err != nil {
-				return err
+			if _, err := s.copyManifest(from, fromImage, x.Digest, to, toImage, x.Digest); err != nil {
+				return "", err
 			}
 		}
 	}
-	if !ValidDigest(ref) {
-		if cur, _, err := s.Resolve(to, image, ref); err == nil && cur == d {
-			return nil
+	if !ValidDigest(toRef) {
+		if cur, _, err := s.Resolve(to, toImage, toRef); err == nil && cur == d {
+			return d, nil
 		}
-	} else if _, _, err := s.Resolve(to, image, ref); err == nil {
-		return nil
+	} else if _, _, err := s.Resolve(to, toImage, toRef); err == nil {
+		return d, nil
 	}
 	// Each repository holds its own copy of an encrypted repository's
 	// blobs; between plaintext ones they are shared and nothing is copied.
 	if !IsIndex(mt) {
 		m, _, err := ParseManifest(mt, b)
 		if err != nil {
-			return err
+			return "", err
 		}
 		refs := m.Layers
 		if m.Config != nil {
@@ -537,13 +562,15 @@ func (s *Store) CopyManifest(from, to Repo, image, ref string) error {
 		for _, x := range refs {
 			if _, err := s.RepoBlobSize(to, x.Digest); err != nil {
 				if err := s.MountBlob(from, to, x.Digest); err != nil {
-					return err
+					return "", err
 				}
 			}
 		}
 	}
-	_, err = s.PutManifest(to, image, ref, mt, b)
-	return err
+	if _, err := s.PutManifest(to, toImage, toRef, mt, b); err != nil {
+		return "", err
+	}
+	return d, nil
 }
 
 // ManifestInvalidError is a manifest the registry refuses.

@@ -12,13 +12,13 @@ import (
 	"strings"
 	"sync"
 
+	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/doctor"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/hostrelay"
 	"github.com/cloudburrow/cloudburrow/internal/images"
 	"github.com/cloudburrow/cloudburrow/internal/k8s"
-	"github.com/cloudburrow/cloudburrow/internal/locations"
 	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
 )
 
@@ -347,7 +347,10 @@ func registryMirrorHosts(addr string) string {
 
 // registryMirror writes registryMirrorHosts into every node's
 // /etc/containerd/certs.d, the registry configuration directory containerd
-// reads on each pull, for every region Artifact Registry serves.
+// reads on each pull, for every location Artifact Registry serves: the
+// regions and the us, europe and asia multi-regions, whose hosts are
+// Google's prebuilt prediction containers' (#1940), so a pull of one is
+// answered by this instance's registry and never goes to Google.
 func (h *clusterHost) registryMirror(ctx context.Context, addr string) error {
 	out, err := h.docker.Run(ctx, "kind", "get", "nodes", "--name", h.cfg.ClusterName())
 	if err != nil {
@@ -355,7 +358,7 @@ func (h *clusterHost) registryMirror(ctx context.Context, addr string) error {
 	}
 	var script strings.Builder
 	script.WriteString("set -e\n")
-	for _, r := range locations.Regions {
+	for _, r := range runadapter.ArtifactRegistryLocations {
 		dir := "/etc/containerd/certs.d/" + r + "-docker.pkg.dev"
 		fmt.Fprintf(&script, "mkdir -p %s && printf '%%s' '%s' > %s/hosts.toml\n", dir, registryMirrorHosts(addr), dir)
 	}
