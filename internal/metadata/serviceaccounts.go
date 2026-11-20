@@ -83,7 +83,7 @@ func (c *Credentials) tokenAccount(tok string, now time.Time) (string, bool) {
 		if t.Hash == h {
 			// A federated subject's token (#1941) grants nothing while
 			// its pool is disabled or deleted.
-			return t.Email, t.Email != "" && c.federatedLive(t.Email)
+			return t.Email, t.Email != "" && c.federatedLive(t.Email, t.Issued)
 		}
 	}
 	return "", false

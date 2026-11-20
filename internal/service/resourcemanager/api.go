@@ -704,6 +704,11 @@ func (s *Server) Start(ctx context.Context) error {
 			s.projects.reg.ServeWorkloadIdentity(w, r)
 			return
 		}
+		if isWorkforcePath(r.URL.Path) {
+			// Workforce Identity Federation (#2056, workforce.go).
+			s.projects.reg.ServeWorkforceIdentity(w, r)
+			return
+		}
 		if isIAMAdminPath(r.URL.Path) {
 			iamREST.ServeHTTP(w, r)
 			return

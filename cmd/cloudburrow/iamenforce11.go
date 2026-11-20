@@ -120,6 +120,10 @@ func tagScope(reg *resourcemanager.Registry, resource string) iameval.Scope {
 // by its project, "-" or its unique ID: its own policy and its project's
 // ancestry; and to a deny policy, its attachment point.
 func iamScope(reg *resourcemanager.Registry, resource string) iameval.Scope {
+	if sc, ok := workforceScope(reg, resource); ok {
+		// A workforce pool's (#2056, iamenforce_workforce.go).
+		return sc
+	}
 	if strings.HasPrefix(resource, "policies/") {
 		if a := iameval.DenyAttachment(resource); a != "" {
 			return iameval.Scope{Resource: a, Own: []string{}, Parent: a}

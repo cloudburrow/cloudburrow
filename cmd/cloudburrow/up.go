@@ -900,6 +900,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return ""
 	}, func() *resourcemanager.Registry { return projects })
 	useIAMEnforcement12Identity(iamEnforcer, rmSrv, func() *resourcemanager.Registry { return projects })
+	useIAMEnforcementWorkforce(iamEnforcer, rmSrv)
 	coord.Register(rmSrv)
 	// A build's serviceAccount names an IAM account of this registry (#1854).
 	runadapter.UseServiceAccounts(func(name string) (string, bool, bool) {

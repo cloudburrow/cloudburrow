@@ -3,6 +3,7 @@ package metadata
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -67,12 +68,22 @@ func (c *Credentials) federation() FederationDirectory {
 
 // federatedLive reports whether a token minted for email may be used: an
 // account's always is; a federated subject's only while its pool is live.
-func (c *Credentials) federatedLive(email string) bool {
+func (c *Credentials) federatedLive(email string, issued time.Time) bool {
 	if !strings.HasPrefix(strings.ToLower(email), "principal://") {
 		return true
 	}
 	d := c.federation()
-	return d != nil && d.FederatedPrincipalActive(email)
+	if d == nil || !d.FederatedPrincipalActive(email) {
+		return false
+	}
+	// A workforce subject's sessions revoked after the token was issued
+	// (#2056, subjects.revokeSessions).
+	if sl, ok := d.(interface {
+		FederatedSessionLive(string, time.Time) bool
+	}); ok && !sl.FederatedSessionLive(email, issued) {
+		return false
+	}
+	return true
 }
 
 // Token types.
@@ -181,15 +192,26 @@ func (s *Server) sts(w http.ResponseWriter, r *http.Request) {
 		stsError(w, http.StatusBadRequest, "invalid_request", "Missing required parameter: subject_token_type.")
 		return
 	}
+	userProject := ""
 	if in.Options != "" {
 		var opts map[string]any
-		if json.Unmarshal([]byte(in.Options), &opts) != nil {
+		if len(in.Options) > 4<<20 || json.Unmarshal([]byte(in.Options), &opts) != nil {
 			stsError(w, http.StatusBadRequest, "invalid_request", "Invalid value for \"options\": it must be a JSON object.")
 			return
 		}
 		if _, ok := opts["accessBoundary"]; ok {
 			stsError(w, http.StatusNotImplemented, "invalid_request", "Credential Access Boundary (options.accessBoundary) is not implemented by CloudBurrow.")
 			return
+		}
+		if v, ok := opts["userProject"]; ok {
+			// The project for quota and billing (#2056): a project
+			// number or ID of at most 32 characters.
+			up, isString := v.(string)
+			if !isString || up == "" || len(up) > 32 {
+				stsError(w, http.StatusBadRequest, "invalid_request", "Invalid value for \"options.userProject\": it must be a project number or project ID of at most 32 characters.")
+				return
+			}
+			userProject = up
 		}
 	}
 	if in.ActorToken != "" {
@@ -212,15 +234,22 @@ func (s *Server) sts(w http.ResponseWriter, r *http.Request) {
 		stsError(w, http.StatusBadRequest, "invalid_request", "Missing required parameter: audience.")
 		return
 	}
-	if strings.Contains(in.Audience, "/workforcePools/") {
-		stsError(w, http.StatusNotImplemented, "invalid_request", "Workforce Identity Federation (workforcePools) is not implemented by CloudBurrow.")
-		return
-	}
 	p, ok := d.FederationProvider(in.Audience)
 	if !ok {
 		stsError(w, http.StatusBadRequest, "invalid_target", "The target service indicated by the \"audience\" parameters is invalid. "+
 			"This might either be because the pool or provider is disabled or deleted or because it doesn't exist.")
 		return
+	}
+	if p.Workforce && p.ProgrammaticDisabled {
+		// The pool's accessRestrictions.disableProgrammaticSignin (#2056).
+		stsError(w, http.StatusBadRequest, "invalid_request", "Programmatic sign-in is disabled for the workforce pool "+wif.WorkforcePoolName(p.Pool)+" (accessRestrictions.disableProgrammaticSignin).")
+		return
+	}
+	if userProject != "" {
+		if up, isDir := d.(interface{ FederationUserProject(string) bool }); isDir && !up.FederationUserProject(userProject) {
+			stsError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("Invalid value for \"options.userProject\": the project %s does not exist.", userProject))
+			return
+		}
 	}
 	if p.Kind != wif.KindOIDC {
 		stsError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("Invalid value for \"subject_token_type\": %s is not supported by the %s provider %s.", in.SubjectTokenType, p.Kind, p.Name()))
@@ -233,17 +262,31 @@ func (s *Server) sts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	principal := wif.Principal(p.ProjectNumber, p.Pool, attrs.Subject)
-	if err := d.RecordFederatedPrincipal(principal, wif.Sets(p.ProjectNumber, p.Pool, attrs)); err != nil {
+	sets := wif.Sets(p.ProjectNumber, p.Pool, attrs)
+	ttl := FederatedTokenTTL
+	if p.Workforce {
+		// A workforce pool's subject (#2056), for the pool's session
+		// duration.
+		principal, sets = wif.WorkforcePrincipal(p.Pool, attrs.Subject), wif.WorkforceSets(p.Pool, attrs)
+		if p.SessionTTL > 0 {
+			ttl = p.SessionTTL
+		}
+	}
+	if err := d.RecordFederatedPrincipal(principal, sets); err != nil {
+		if errors.Is(err, wif.ErrSubjectDeleted) {
+			stsError(w, http.StatusBadRequest, "invalid_grant", err.Error())
+			return
+		}
 		stsError(w, http.StatusInternalServerError, "server_error", "record the federated principal: "+err.Error())
 		return
 	}
-	tok := s.creds.MintAccessTokenFor(principal, FederatedTokenTTL)
+	tok := s.creds.MintAccessTokenFor(principal, ttl)
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, map[string]any{
 		"access_token":      tok,
 		"issued_token_type": stsAccessTokenType,
 		"token_type":        "Bearer",
-		"expires_in":        int(FederatedTokenTTL.Seconds()),
+		"expires_in":        int(ttl.Seconds()),
 	})
 }
 
@@ -288,12 +331,18 @@ func (s *Server) exchangeOIDC(ctx context.Context, p wif.Provider, token string,
 			}
 		}
 	}
+	if !match && p.Workforce {
+		return wif.Attributes{}, fmt.Errorf("The audience in ID Token [%s] does not match the expected audience %s: a workforce provider's tokens are for its client ID.", strings.Join(auds, ", "), p.ClientID)
+	}
 	if !match {
 		return wif.Attributes{}, fmt.Errorf("The audience in ID Token [%s] does not match the expected audience %s.", strings.Join(auds, ", "), strings.Join(allowed, ", "))
 	}
 	mapping := p.Mapping
 	if len(mapping) == 0 {
 		mapping = map[string]string{"google.subject": "assertion.sub"}
+	}
+	if p.Workforce {
+		return wif.ApplyWorkforce(mapping, p.Condition, t.Assertion())
 	}
 	return wif.Apply(mapping, p.Condition, t.Assertion())
 }

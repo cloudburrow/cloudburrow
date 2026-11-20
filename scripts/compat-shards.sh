@@ -453,8 +453,9 @@ compat_shard() {
       TEST_VARS+=,STORAGE,PUBSUB,TASKS,SECRETS,KMS,RUN,RESOURCEMANAGER,ANALYTICSHUB,BIGQUERY,BIGQUERY_PROJECT,SCHEDULER,WORKFLOWS,LOGGING,MONITORING,MEMORYSTORE_ADMIN,SQLADMIN,PRIVATECA,GKE,COMPUTE,APIKEYS,SERVICEUSAGE,LOCALAI,FIRESTORE,DATASTORE,SPANNER,BIGTABLE,DATATRANSFER,BACKUPDR,STORAGE_BATCH,STORAGE_INSIGHTS,STORAGE_TRANSFER,IAM_ENFORCEMENT
       UP_FLAGS=(--iam-enforcement=on)
       # And Workload Identity Federation's federated principal reading a
-      # bucket, refused until it is granted (#1941), which needs enforcement.
-      COMPAT_RUN='^Test(IAMEnforcement|WorkloadIdentityFederationStorage$)' ;;
+      # bucket, refused until it is granted (#1941), and Workforce Identity
+      # Federation's (#2056), which need enforcement.
+      COMPAT_RUN='^Test(IAMEnforcement|WorkloadIdentityFederationStorage$|WorkforceIdentityFederationStorage$)' ;;
     localai)
       # The local AI tests (#1985): BigQuery and Cloud Storage for the AI
       # and ML functions' tables and object tables, Resource Manager (every
