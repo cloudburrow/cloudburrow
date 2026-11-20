@@ -522,7 +522,7 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 		}{
 			{cfg.Endpoints.StorageBatchOperations, "storagebatchoperations", "STORAGEBATCHOPERATIONS", "the Storage Batch Operations API v1"},
 			{cfg.Endpoints.StorageInsights, "storageinsights", "STORAGEINSIGHTS", "the Storage Insights API v1"},
-			{cfg.Endpoints.StorageTransfer, "storagetransfer", "STORAGETRANSFER", "the Storage Transfer Service API v1"},
+			{cfg.Endpoints.StorageTransfer, "storagetransfer", "TRANSFER", "the Storage Transfer Service API v1"}, // gcloud's property is `transfer` (#1975)
 		} {
 			if c.port <= 0 {
 				continue

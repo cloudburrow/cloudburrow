@@ -24,7 +24,7 @@ environment:
   CLOUDSDK_API_ENDPOINT_OVERRIDES_STORAGE: "http://host.docker.internal:9001/storage/v1/"
   CLOUDSDK_API_ENDPOINT_OVERRIDES_STORAGEBATCHOPERATIONS: "http://host.docker.internal:9035/"
   CLOUDSDK_API_ENDPOINT_OVERRIDES_STORAGEINSIGHTS: "http://host.docker.internal:9036/"
-  CLOUDSDK_API_ENDPOINT_OVERRIDES_STORAGETRANSFER: "http://host.docker.internal:9037/"
+  CLOUDSDK_API_ENDPOINT_OVERRIDES_TRANSFER: "http://host.docker.internal:9037/"
   CLOUDSDK_CORE_PROJECT: "golden"
   GCE_METADATA_HOST: "host.docker.internal:9005"
   GOOGLE_CLOUD_PROJECT: "golden"

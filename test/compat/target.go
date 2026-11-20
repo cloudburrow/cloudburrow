@@ -220,7 +220,8 @@ var gcloudOverrides = []struct {
 	// The Cloud Storage companion APIs (#1957), each on its own port.
 	{"storagebatchoperations", []string{"STORAGE_BATCH"}},
 	{"storageinsights", []string{"STORAGE_INSIGHTS"}},
-	{"storagetransfer", []string{"STORAGE_TRANSFER"}},
+	// gcloud's Storage Transfer property is `transfer` (#1975).
+	{"transfer", []string{"STORAGE_TRANSFER"}},
 	{"run", []string{"RUN"}},
 	// Served on the Run port (#1347).
 	{"artifactregistry", []string{"RUN"}},

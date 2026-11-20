@@ -107,7 +107,11 @@ var gcloudVerified = []struct {
 	// insights call v1, which gcloud appends. TestGcloudTransferJobs,
 	// TestGcloudStorageBatchOperations and
 	// TestGcloudStorageInsightsInventoryReports drive them.
-	{storageTransferService, "storagetransfer", "/", false, false},
+	// The property is `transfer`, not `storagetransfer`: gcloud aliases the
+	// API (api_lib/util/apis_util.py), and every gcloud transfer command but
+	// `authorize` asks for the client as `transfer`. A `storagetransfer`
+	// line is no property, so gcloud ignored it and called Google (#1975).
+	{storageTransferService, "transfer", "/", false, false},
 	{storageBatchService, "storagebatchoperations", "/", false, false},
 	{storageInsightsService, "storageinsights", "/", false, false},
 	// Cloud Run (#1293): gcloud run calls the v1 (Knative) API, served on

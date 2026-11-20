@@ -7,7 +7,7 @@ the CLI process whenever `storage` is enabled, each on its own port, JSON only:
 |---|---|---|---|
 | Storage Batch Operations v1 (`storagebatchoperations.googleapis.com`) | `--port-storagebatchoperations` | `9035` | `CLOUDBURROW_STORAGEBATCHOPERATIONS_ENDPOINT`, `CLOUDSDK_API_ENDPOINT_OVERRIDES_STORAGEBATCHOPERATIONS` |
 | Storage Insights v1, inventory reports (`storageinsights.googleapis.com`) | `--port-storageinsights` | `9036` | `CLOUDBURROW_STORAGEINSIGHTS_ENDPOINT`, `CLOUDSDK_API_ENDPOINT_OVERRIDES_STORAGEINSIGHTS` |
-| Storage Transfer Service v1 (`storagetransfer.googleapis.com`) | `--port-storagetransfer` | `9037` | `CLOUDBURROW_STORAGETRANSFER_ENDPOINT`, `CLOUDSDK_API_ENDPOINT_OVERRIDES_STORAGETRANSFER` |
+| Storage Transfer Service v1 (`storagetransfer.googleapis.com`) | `--port-storagetransfer` | `9037` | `CLOUDBURROW_STORAGETRANSFER_ENDPOINT`, `CLOUDSDK_API_ENDPOINT_OVERRIDES_TRANSFER` (gcloud's property is `transfer`) |
 
 Use the official clients' REST transports with the endpoint and no credentials:
 
