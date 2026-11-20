@@ -4,6 +4,7 @@ import (
 	functionspb "cloud.google.com/go/functions/apiv2/functionspb"
 	"cloud.google.com/go/iam/admin/apiv1/adminpb"
 	"cloud.google.com/go/kms/apiv1/kmspb"
+	ci "google.golang.org/api/cloudidentity/v1"
 	"google.golang.org/grpc"
 	"time"
 
@@ -245,6 +246,20 @@ func blankCheckDeps(t *testing.T) consoleDeps {
 		t.Fatal(err)
 	}
 	if _, _, err := d.projects.CreateMembership(blankGroup.Name(), "member@example.com", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	// SSO profiles with no display name, and an assignment (#1959).
+	blankSAML, err := d.projects.CreateSAMLProfile(ci.InboundSamlSsoProfile{Customer: resourcemanager.CustomerName,
+		IdpConfig: &ci.SamlIdpConfig{EntityId: "https://idp.example.com", SingleSignOnServiceUri: "https://idp.example.com/sso"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.projects.CreateOIDCProfile(ci.InboundOidcSsoProfile{Customer: resourcemanager.CustomerName,
+		IdpConfig: &ci.OidcIdpConfig{IssuerUri: "https://issuer.example.com"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.projects.CreateSSOAssignment(ci.InboundSsoAssignment{Customer: resourcemanager.CustomerName, TargetGroup: blankGroup.Name(), Rank: 1,
+		SsoMode: resourcemanager.SSOModeSAML, SamlSsoInfo: &ci.SamlSsoInfo{InboundSamlSsoProfile: blankSAML.Profile.Name}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := d.projects.Create(resourcemanager.Project{

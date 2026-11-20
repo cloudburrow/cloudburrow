@@ -544,6 +544,14 @@ const ROUTES = [
     product: "iam", productTitle: "IAM & Admin" },
   { path: "/iam-admin/groups", service: "iam-groups", icon: "iam", title: "Groups", kind: "Group", section: "IAM & Admin",
     product: "iam", productTitle: "IAM & Admin" },
+  // Third-party SSO (#1959): Cloud Identity's inbound SAML and OIDC SSO
+  // profiles with their IdP certificates, and the profile assignments of
+  // groups (by priority) and organizational units, as the Admin console's
+  // Security > Authentication > SSO with third-party IdP has them.
+  { path: "/iam-admin/sso", service: "iam-sso-profiles", icon: "iam", title: "SSO profiles", kind: "SSO profile", section: "IAM & Admin",
+    product: "iam", productTitle: "IAM & Admin" },
+  { path: "/iam-admin/sso-assignments", service: "iam-sso-assignments", icon: "iam", title: "SSO profile assignments", kind: "SSO profile assignment", section: "IAM & Admin",
+    product: "iam", productTitle: "IAM & Admin" },
   { path: "/iam-admin/essential-contacts", title: "Essential Contacts", service: null, requires: "iam", screen: "unavailable", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin",
     unavailable: "Essential Contacts is the Essential Contacts API's, which CloudBurrow does not serve: a local instance sends no notifications." },
   { path: "/iam-admin/asset-inventory", title: "Asset Inventory", service: null, requires: "iam", screen: "unavailable", icon: "iam", section: "IAM & Admin", product: "iam", productTitle: "IAM & Admin",

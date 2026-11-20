@@ -60,6 +60,9 @@ var DeleteConfirmRules = map[string]DeleteConfirmRule{
 	"iam-roles": unverified,
 	// "Confirm that you want to delete the group by clicking Confirm in the confirmation dialog."
 	"iam-groups": {Style: DeleteConfirmClick, Source: "https://docs.cloud.google.com/iam/docs/groups-in-cloud-console", Verified: true},
+	// UNVERIFIED: no console steps for deleting an SSO profile or an assignment (https://knowledge.workspace.google.com/admin/apps/setting-up-sso re-read 2026-11-20)
+	"iam-sso-profiles":    unverified,
+	"iam-sso-assignments": unverified,
 	// UNVERIFIED: "Select the service account ... click Delete." No dialog described (docs re-read 2026-11-19).
 	"iam-service-accounts": unverified,
 	// a label is removed with its delete icon, then Save: nothing typed.

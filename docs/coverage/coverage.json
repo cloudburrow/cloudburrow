@@ -15328,8 +15328,8 @@
     "Key": "cloudidentity",
     "Title": "Cloud Identity API (v1)",
     "counts": {
-      "Unimplemented": 52,
-      "Verified": 18
+      "Unimplemented": 31,
+      "Verified": 39
     },
     "rows": [
       {
@@ -15487,8 +15487,10 @@
       },
       {
         "method": "cloudidentity.groups.getSecuritySettings",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudidentitysso1959_test.go:32 TestCloudIdentityMemberRestriction1959"
+        ]
       },
       {
         "method": "cloudidentity.groups.list",
@@ -15600,103 +15602,143 @@
       },
       {
         "method": "cloudidentity.groups.updateSecuritySettings",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudidentitysso1959_test.go:32 TestCloudIdentityMemberRestriction1959"
+        ]
       },
       {
         "method": "cloudidentity.inboundOidcSsoProfiles.create",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudidentitysso1959_test.go:118 TestCloudIdentityInboundSSO1959"
+        ]
       },
       {
         "method": "cloudidentity.inboundOidcSsoProfiles.delete",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudidentitysso1959_test.go:118 TestCloudIdentityInboundSSO1959"
+        ]
       },
       {
         "method": "cloudidentity.inboundOidcSsoProfiles.get",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudidentitysso1959_test.go:118 TestCloudIdentityInboundSSO1959"
+        ]
       },
       {
         "method": "cloudidentity.inboundOidcSsoProfiles.list",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudidentitysso1959_test.go:118 TestCloudIdentityInboundSSO1959"
+        ]
       },
       {
         "method": "cloudidentity.inboundOidcSsoProfiles.patch",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudidentitysso1959_test.go:118 TestCloudIdentityInboundSSO1959"
+        ]
       },
       {
         "method": "cloudidentity.inboundSamlSsoProfiles.create",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudidentitysso1959_test.go:118 TestCloudIdentityInboundSSO1959"
+        ]
       },
       {
         "method": "cloudidentity.inboundSamlSsoProfiles.delete",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudidentitysso1959_test.go:118 TestCloudIdentityInboundSSO1959"
+        ]
       },
       {
         "method": "cloudidentity.inboundSamlSsoProfiles.get",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudidentitysso1959_test.go:118 TestCloudIdentityInboundSSO1959"
+        ]
       },
       {
         "method": "cloudidentity.inboundSamlSsoProfiles.idpCredentials.add",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudidentitysso1959_test.go:118 TestCloudIdentityInboundSSO1959"
+        ]
       },
       {
         "method": "cloudidentity.inboundSamlSsoProfiles.idpCredentials.delete",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudidentitysso1959_test.go:118 TestCloudIdentityInboundSSO1959"
+        ]
       },
       {
         "method": "cloudidentity.inboundSamlSsoProfiles.idpCredentials.get",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudidentitysso1959_test.go:118 TestCloudIdentityInboundSSO1959"
+        ]
       },
       {
         "method": "cloudidentity.inboundSamlSsoProfiles.idpCredentials.list",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudidentitysso1959_test.go:118 TestCloudIdentityInboundSSO1959"
+        ]
       },
       {
         "method": "cloudidentity.inboundSamlSsoProfiles.list",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudidentitysso1959_test.go:118 TestCloudIdentityInboundSSO1959"
+        ]
       },
       {
         "method": "cloudidentity.inboundSamlSsoProfiles.patch",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudidentitysso1959_test.go:118 TestCloudIdentityInboundSSO1959"
+        ]
       },
       {
         "method": "cloudidentity.inboundSsoAssignments.create",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudidentitysso1959_test.go:118 TestCloudIdentityInboundSSO1959"
+        ]
       },
       {
         "method": "cloudidentity.inboundSsoAssignments.delete",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudidentitysso1959_test.go:118 TestCloudIdentityInboundSSO1959"
+        ]
       },
       {
         "method": "cloudidentity.inboundSsoAssignments.get",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudidentitysso1959_test.go:118 TestCloudIdentityInboundSSO1959"
+        ]
       },
       {
         "method": "cloudidentity.inboundSsoAssignments.list",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudidentitysso1959_test.go:118 TestCloudIdentityInboundSSO1959"
+        ]
       },
       {
         "method": "cloudidentity.inboundSsoAssignments.patch",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudidentitysso1959_test.go:118 TestCloudIdentityInboundSSO1959"
+        ]
       },
       {
         "method": "cloudidentity.policies.create",
