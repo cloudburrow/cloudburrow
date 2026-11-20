@@ -116,7 +116,7 @@ func TestSchedulerEditAppEngineJob(t *testing.T) {
 		t.Fatal(err)
 	}
 	form := schedulerEditOf(t, p, project, name)
-	if f, _ := aeField(form, "targetType"); f.Default != "App Engine" || !f.Immutable {
+	if f, _ := aeField(form, "targetType"); f.Default != "App Engine HTTP" || !f.Immutable {
 		t.Errorf("target type field = %+v", f)
 	}
 	for _, f := range []string{"uri", "topic", "attributes"} {

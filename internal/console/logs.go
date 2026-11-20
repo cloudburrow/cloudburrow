@@ -52,6 +52,12 @@ type Entry struct {
 	// what makes "click a failed operation to see its logs" possible.
 	OperationID string `json:"operationId,omitempty"`
 	Message     string `json:"message"`
+	// ResourceType and ResourceLabels are the monitored resource of an
+	// entry written to Cloud Logging, so the query editor matches
+	// resource.type="cloud_scheduler_job" and resource.labels.job_id as
+	// Google's Logs Explorer does (#1849). Empty for a pod's line.
+	ResourceType   string            `json:"resourceType,omitempty"`
+	ResourceLabels map[string]string `json:"resourceLabels,omitempty"`
 }
 
 // OperationState is the lifecycle of a tracked operation.

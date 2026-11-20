@@ -58,3 +58,27 @@ func TestCompileQuery(t *testing.T) {
 		t.Errorf("the entry's JSON does not carry its LogEntry form: %s %v", b, err)
 	}
 }
+
+// A Cloud Logging entry's monitored resource is queried as Google's Logs
+// Explorer queries it (#1849): resource.type is its type and each label is
+// resource.labels.<key>; a label the entry lacks matches nothing.
+func TestCompileQueryMonitoredResource(t *testing.T) {
+	job := Entry{Source: LoggingSourcePrefix + "cloudscheduler.googleapis.com%2Fexecutions", Project: "p1",
+		Resource: "projects/p1/logs/cloudscheduler.googleapis.com%2Fexecutions", ResourceType: "cloud_scheduler_job",
+		ResourceLabels: map[string]string{"project_id": "p1", "location": "us-central1", "job_id": "nightly"}}
+	pod := Entry{Source: "run/web", Project: "p1", Message: "hello"}
+	for q, want := range map[string][2]bool{
+		`resource.type="cloud_scheduler_job"` + "\n" + `resource.labels.job_id="nightly"`: {true, false},
+		`resource.labels.location="us-central1"`:                                          {true, false},
+		`resource.labels.job_id="other"`:                                                  {false, false},
+		`resource.type="run"`:                                                             {false, true},
+	} {
+		match, err := CompileQuery(q)
+		if err != nil {
+			t.Fatalf("%q: %v", q, err)
+		}
+		if got := [2]bool{match(job), match(pod)}; got != want {
+			t.Errorf("%q matches the job's entry and the pod's line %v, want %v", q, got, want)
+		}
+	}
+}

@@ -69,6 +69,16 @@ type schedulerService struct {
 	// live is `up`'s bound addresses, for a googleapis.com target's local
 	// endpoint (localAPIs); nil uses the configured ports.
 	live func() map[string]string
+	// logs writes each attempt's start and end to the instance's Cloud
+	// Logging (#1849); nil when logging is not served.
+	logs scheduler.LogWriter
+}
+
+// useLogging writes attempts' execution logs with w. Called before Start.
+func (s *schedulerService) useLogging(w scheduler.LogWriter) {
+	if s != nil {
+		s.logs = w
+	}
 }
 
 // useTokens mints job tokens with m. Called before Start.
@@ -142,6 +152,9 @@ func (s *schedulerService) Start(ctx context.Context) error {
 	s.runner = scheduler.NewRunner(s.store, &http.Client{Transport: localhost.Transport()}, clock, s.publish, time.Second)
 	if s.tokens != nil {
 		s.runner.WithTokens(s.tokens)
+	}
+	if s.logs != nil {
+		s.runner.WithLogging(s.logs)
 	}
 	// A googleapis.com target, such as a workflow's Cloud Scheduler
 	// trigger, reaches this instance's own API, never Google (#2011, #2015).

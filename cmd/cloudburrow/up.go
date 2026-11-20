@@ -460,6 +460,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			_, err := api.WriteLogEntries(ctx, &loggingpb.WriteLogEntriesRequest{Entries: []*loggingpb.LogEntry{e}})
 			return err
 		})
+		// Cloud Scheduler's execution logs (#1849).
+		schedulerSvc.useLogging(func(ctx context.Context, e *loggingpb.LogEntry) error {
+			_, err := api.WriteLogEntries(ctx, &loggingpb.WriteLogEntriesRequest{Entries: []*loggingpb.LogEntry{e}})
+			return err
+		})
 	}
 	if secretsSvc != nil {
 		runSvc.useSecrets(lazySecretResolver{svc: secretsSvc})

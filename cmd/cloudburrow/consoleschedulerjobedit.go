@@ -73,18 +73,22 @@ func schedulerEditForm(j scheduler.Job) *console.EditForm {
 	if r.MaxRetryDuration > 0 {
 		retryFor = r.MaxRetryDuration.String()
 	}
-	const target, retries = "Target", "Retries"
+	// Edit follows Create job's three steps: "Follow the steps to define
+	// the schedule, configure the execution, and configure optional
+	// settings when creating a job" (docs.cloud.google.com/scheduler/docs/
+	// creating, read 2026-11-20).
+	const schedule, target, retries = schedulerStepSchedule, schedulerStepExecution, schedulerStepOptional
 	fields := []console.Field{
-		{Name: "name", Label: "Name", Type: "text", Default: id, Immutable: true,
+		{Name: "name", Label: "Name", Type: "text", Default: id, Immutable: true, Section: schedule,
 			Help: "A job's name cannot be changed."},
-		{Name: "location", Label: "Region", Type: "text", Default: location, Immutable: true,
+		{Name: "location", Label: "Region", Type: "text", Default: location, Immutable: true, Section: schedule,
 			Help: "A job's region is part of its name and cannot be changed."},
-		{Name: "description", Label: "Description", Type: "text", Default: j.Description},
-		{Name: "schedule", Label: "Frequency", Type: "text", Required: true, Default: j.Schedule,
+		{Name: "description", Label: "Description", Type: "text", Default: j.Description, Section: schedule},
+		{Name: "schedule", Label: "Frequency", Type: "text", Required: true, Default: j.Schedule, Section: schedule,
 			Help: "unix-cron format, e.g. \"0 9 * * 1\" for 09:00 every Monday."},
 		{Name: "timeZone", Label: "Timezone", Type: "select", Required: true, Default: j.TimeZone,
-			Options: schedulerTimeZonesWith(j.TimeZone),
-			Help:    "The time zone the schedule is read in."},
+			Options: schedulerTimeZonesWith(j.TimeZone), Section: schedule,
+			Help: "The time zone the schedule is read in. Daylight saving time can make a job run twice or not at all."},
 	}
 	if j.HTTP != nil {
 		shown := map[string]string{}
@@ -94,21 +98,17 @@ func schedulerEditForm(j scheduler.Job) *console.EditForm {
 			}
 		}
 		fields = append(fields,
-			console.Field{Name: "targetType", Label: "Target type", Type: "text", Default: "HTTP", Immutable: true,
+			console.Field{Name: "targetType", Label: "Target type", Type: "text", Default: schedulerTargetHTTP, Immutable: true,
 				Section: target, Help: "A job's target type cannot be changed from the console."},
 			console.Field{Name: "uri", Label: "URL", Type: "text", Required: true, Default: j.HTTP.URI, Section: target,
 				Help: "An http or https URL, reached from this machine."},
-			console.Field{Name: "httpMethod", Label: "HTTP method", Type: "text", Required: true, Default: j.HTTP.Method,
-				Section: target, Pattern: `^(POST|GET|HEAD|PUT|DELETE|PATCH|OPTIONS)$`,
-				Help: "One of " + schedulerHTTPMethods + ", in capitals."},
-			console.Field{Name: "headers", Label: "Headers", Type: "map", Default: console.FormatMap(shown), Section: target,
+			console.Field{Name: "httpMethod", Label: "HTTP method", Type: "select", Required: true, Default: j.HTTP.Method,
+				Options: schedulerMethods, Section: target, Help: "One of " + schedulerHTTPMethods + "."},
+			console.Field{Name: "headers", Label: "HTTP headers", Type: "map", Default: console.FormatMap(shown), Section: target,
 				Help: "Optional. One Name=value per line. Authorization and headers naming a token, secret or API key " +
 					"are not shown and are kept as they are; name one here to replace its value."},
 			console.Field{Name: "body", Label: "Body", Type: "textarea", Default: string(j.HTTP.Body), Section: target,
 				Help: "Optional. Allowed only with POST, PUT or PATCH."},
-			console.Field{Name: "attemptDeadline", Label: "Attempt deadline", Type: "text", Required: true,
-				Default: j.AttemptDeadline.String(), Section: target,
-				Help: "How long one attempt may take, 15s to 30m. " + schedulerDurationHelp},
 		)
 		var tok authToken
 		switch {
@@ -119,16 +119,16 @@ func schedulerEditForm(j scheduler.Job) *console.EditForm {
 		}
 		fields = append(fields, authTokenFieldsFor(target, tok)...)
 	} else if a := j.AppEngine; a != nil {
-		fields = append(fields, schedulerAppEngineEditFields(a, j.AttemptDeadline, target)...)
+		fields = append(fields, schedulerAppEngineEditFields(a, target)...)
 	} else {
 		fields = append(fields,
-			console.Field{Name: "targetType", Label: "Target type", Type: "text", Default: "Pub/Sub", Immutable: true,
+			console.Field{Name: "targetType", Label: "Target type", Type: "text", Default: schedulerTargetPubSub, Immutable: true,
 				Section: target, Help: "A job's target type cannot be changed from the console."},
-			console.Field{Name: "topic", Label: "Pub/Sub topic", Type: "text", Required: true, Default: j.PubSub.Topic,
+			console.Field{Name: "topic", Label: "Select a Cloud Pub/Sub topic", Type: "text", Required: true, Default: j.PubSub.Topic,
 				Section: target, Help: "projects/{project}/topics/{topic}, published to the local emulator."},
 			console.Field{Name: "body", Label: "Message body", Type: "textarea", Default: string(j.PubSub.Data), Section: target,
 				Help: "The message data. A Pub/Sub target needs data or at least one attribute."},
-			console.Field{Name: "attributes", Label: "Attributes", Type: "map", Default: console.FormatMap(j.PubSub.Attributes),
+			console.Field{Name: "attributes", Label: "Message attributes", Type: "map", Default: console.FormatMap(j.PubSub.Attributes),
 				Section: target, Help: "Optional. One key=value per line."},
 		)
 	}
@@ -146,8 +146,14 @@ func schedulerEditForm(j scheduler.Job) *console.EditForm {
 			Default: strconv.Itoa(r.MaxDoublings), Section: retries,
 			Help: "How many times the wait between retries doubles before it grows linearly. 0 sets the default, 5."},
 	)
+	if j.HTTP != nil || j.AppEngine != nil {
+		fields = append(fields, console.Field{Name: "attemptDeadline", Label: "Attempt deadline config", Type: "text",
+			Required: true, Default: j.AttemptDeadline.String(), Section: retries,
+			Help: "How long one attempt may take, 15s to 30m. " + schedulerDurationHelp})
+	}
 	return &console.EditForm{
 		Label:  "Edit job",
+		Steps:  "continue",
 		Fields: fields,
 		Note: "Saved through UpdateJob; the next run follows the new schedule. The name, region and target type " +
 			"cannot be changed, and the state changes with Pause and Resume.",
@@ -302,7 +308,7 @@ func schedulerDuration(values map[string]string, key, label string, errs *[]erro
 // schedulerAppEngineEditFields are an App Engine job's target on Edit job
 // (#1447): the relative URI, method, headers, body and routing UpdateJob
 // takes. The routing's host is output only and is shown on the job's page.
-func schedulerAppEngineEditFields(a *scheduler.AppEngineTarget, deadline time.Duration, section string) []console.Field {
+func schedulerAppEngineEditFields(a *scheduler.AppEngineTarget, section string) []console.Field {
 	shown := map[string]string{}
 	for k, v := range a.Headers {
 		if !schedulerSensitiveHeader(k) {
@@ -310,29 +316,25 @@ func schedulerAppEngineEditFields(a *scheduler.AppEngineTarget, deadline time.Du
 		}
 	}
 	return []console.Field{
-		{Name: "targetType", Label: "Target type", Type: "text", Default: "App Engine", Immutable: true,
+		{Name: "targetType", Label: "Target type", Type: "text", Default: schedulerTargetAppEngine, Immutable: true,
 			Section: section, Help: "A job's target type cannot be changed from the console."},
-		{Name: "relativeUri", Label: "Relative URI", Type: "text", Required: true, Default: a.RelativeURI,
-			Section: section, Pattern: `^/.*$`,
-			Help: "The path and query, beginning with /. There is no App Engine here: each attempt goes to the " +
-				"--appengine-url server standing in for the app, or, without one, fails with NOT_FOUND (HTTP 404)."},
-		{Name: "httpMethod", Label: "HTTP method", Type: "text", Required: true, Default: a.Method,
-			Section: section, Pattern: `^(POST|GET|HEAD|PUT|DELETE|PATCH|OPTIONS)$`,
-			Help: "One of " + schedulerHTTPMethods + ", in capitals."},
-		{Name: "headers", Label: "Headers", Type: "map", Default: console.FormatMap(shown), Section: section,
+		{Name: "appEngineService", Label: "Service", Type: "text", Default: a.Routing.Service,
+			Section: section, Help: "Optional; empty is the default service. There is no App Engine here: each " +
+				"attempt goes to the --appengine-url server standing in for the app, or, without one, fails with " +
+				"NOT_FOUND (HTTP 404)."},
+		{Name: "appEngineVersion", Label: "Version", Type: "text", Default: a.Routing.Version,
+			Section: section, Help: "Optional; empty is the default version."},
+		{Name: "appEngineInstance", Label: "Instance", Type: "text", Default: a.Routing.Instance,
+			Section: section, Help: "Optional; empty is any available instance."},
+		{Name: "relativeUri", Label: "URL", Type: "text", Required: true, Default: a.RelativeURI,
+			Section: section, Pattern: `^/.*$`, Help: "The relative URL, beginning with /."},
+		{Name: "httpMethod", Label: "HTTP method", Type: "select", Required: true, Default: a.Method,
+			Options: schedulerMethods, Section: section, Help: "One of " + schedulerHTTPMethods + "."},
+		{Name: "headers", Label: "HTTP headers", Type: "map", Default: console.FormatMap(shown), Section: section,
 			Help: "Optional. One Name=value per line. Authorization and headers naming a token, secret or API key " +
 				"are not shown and are kept as they are; name one here to replace its value."},
 		{Name: "body", Label: "Body", Type: "textarea", Default: string(a.Body), Section: section,
 			Help: "Optional. Allowed only with POST or PUT."},
-		{Name: "appEngineService", Label: "App Engine service", Type: "text", Default: a.Routing.Service,
-			Section: section, Help: "Optional; empty is the default service."},
-		{Name: "appEngineVersion", Label: "App Engine version", Type: "text", Default: a.Routing.Version,
-			Section: section, Help: "Optional; empty is the default version."},
-		{Name: "appEngineInstance", Label: "App Engine instance", Type: "text", Default: a.Routing.Instance,
-			Section: section, Help: "Optional; empty is any available instance."},
-		{Name: "attemptDeadline", Label: "Attempt deadline", Type: "text", Required: true,
-			Default: deadline.String(), Section: section,
-			Help: "How long one attempt may take, 15s to 30m. " + schedulerDurationHelp},
 	}
 }
 

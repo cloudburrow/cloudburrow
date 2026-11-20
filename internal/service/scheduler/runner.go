@@ -51,6 +51,9 @@ type Runner struct {
 	// local is this instance's endpoint of each API, by the first label of
 	// its googleapis.com host (localapis.go).
 	local func(api string) string
+	// logs writes each attempt's AttemptStarted and AttemptFinished to the
+	// instance's Cloud Logging (#1849); nil writes nothing.
+	logs LogWriter
 
 	mu       sync.Mutex
 	inflight map[string]bool
@@ -190,8 +193,10 @@ func (r *Runner) deliver(ctx context.Context, j Job, scheduled time.Time) {
 	}.WithDefaults()
 	start := r.clock.Now()
 	for attempt := 1; ; attempt++ {
+		r.logAttempt(ctx, AttemptStartedEntry(j, scheduled, r.clock.Now()))
 		code, err := r.attempt(ctx, j, scheduled, attempt)
 		now := r.clock.Now().UTC()
+		r.logAttempt(ctx, AttemptFinishedEntry(j, scheduled, now, code, err))
 		grpcCode, msg := codes.OK, ""
 		if err != nil {
 			grpcCode, msg = codes.Unknown, err.Error()

@@ -55,6 +55,16 @@ func LogEntryFields(e Entry) map[string]string {
 	if e.OperationID != "" {
 		f["operation.id"] = e.OperationID
 	}
+	// A Cloud Logging entry's own monitored resource (#1849).
+	if e.ResourceType != "" {
+		f["resource.type"] = e.ResourceType
+	}
+	for k, v := range e.ResourceLabels {
+		if k == "" || f["resource.labels."+k] != "" {
+			continue
+		}
+		f["resource.labels."+k] = v
+	}
 	return f
 }
 
@@ -276,7 +286,9 @@ var queryFields = []string{"insertId", "timestamp", "severity", "logName", "reso
 	"resource.labels.source", "resource.labels.name", "resource.labels.project_id", "textPayload", "operation.id"}
 
 func comparison(field, op, value string) (entryPred, error) {
-	known := false
+	// Any resource label: a Cloud Logging entry carries its monitored
+	// resource's (#1849), and one without the label does not match.
+	known := strings.HasPrefix(field, "resource.labels.") && len(field) > len("resource.labels.")
 	for _, k := range queryFields {
 		if k == field {
 			known = true

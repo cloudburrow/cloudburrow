@@ -362,7 +362,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			dataTransferProvider{svc: d.dataTransfer, only: datatransfer.ScheduledQuery})
 	}
 	if enabled[config.ServiceScheduler] && d.scheduler != nil {
-		providers = append(providers, schedulerProvider{svc: d.scheduler, faults: d.faults})
+		providers = append(providers, schedulerProvider{svc: d.scheduler, faults: d.faults, logs: d.logging})
 	}
 	// APIs & Services (#1352): always served, as projects are.
 	if d.serviceUsage != nil {

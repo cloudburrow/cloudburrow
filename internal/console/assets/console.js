@@ -5505,6 +5505,8 @@ async function editFromRow(route, segments, onDone) {
 function openEditForm(route, segments, spec, onDone) {
   const name = segments[segments.length - 1];
   const fields = buildCreateForm(spec);
+  // Google's Edit job follows Create job's steps (EditForm.Steps, #1849).
+  const steps = spec.steps ? createSteps(fields.nodes, spec.steps === "next" ? "Next" : "Continue") : null;
   const error = el("p", { class: "form-error", role: "alert", hidden: true });
   let submitting = false;
 
@@ -5522,7 +5524,11 @@ function openEditForm(route, segments, spec, onDone) {
   const submit = async (e) => {
     e.preventDefault();
     error.hidden = true;
-    if (submitting || !fields.validate()) return;
+    if (submitting) return;
+    if (!fields.validate()) {
+      if (steps) steps.revealInvalid();
+      return;
+    }
     submitting = true;
     primary.disabled = true;
     const op = recordOperation(`Update ${name}`);
@@ -5550,7 +5556,7 @@ function openEditForm(route, segments, spec, onDone) {
     el("h2", { id: "edit-title", text: `${spec.title || spec.label || "Edit"} ${name}` }),
     spec.note ? el("p", { class: "form-help", text: spec.note }) : null,
     error,
-    ...fields.nodes,
+    ...(steps ? steps.nodes : fields.nodes),
     el("div", { class: "modal-actions" }, cancel, primary)));
   fields.focusFirst();
 }

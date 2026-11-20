@@ -899,6 +899,11 @@ type EditForm struct {
 	// opens Deploy worker pool revision, ending in Deploy (#1852).
 	Title  string `json:"title,omitempty"`
 	Submit string `json:"submit,omitempty"`
+	// Steps lays the form out as the create page's numbered steps, its
+	// fields' Sections each a step with Continue, as Google's Edit job
+	// follows Create job's steps (#1849): "continue" for Continue, "next"
+	// for Next.
+	Steps string `json:"steps,omitempty"`
 }
 
 // Property is one label/value pair on a resource's summary.
