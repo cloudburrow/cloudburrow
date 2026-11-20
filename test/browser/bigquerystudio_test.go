@@ -100,7 +100,7 @@ func TestBigQueryStudioExplorerEditorAndHistory(t *testing.T) {
 	p.clickExpr(node(tableKey) + `.querySelector(".bq-node-menu")`)
 	var items []string
 	p.eval(node(tableKey)+`.querySelectorAll(".bq-menu-item").length ? [...`+node(tableKey)+`.querySelectorAll(".bq-menu-item")].map((b) => b.textContent) : []`, &items)
-	if strings.Join(items, "|") != "Open|Open in new tab|Query|Copy ID|Delete" {
+	if strings.Join(items, "|") != "Open|Open in new tab|Query|Query in split tab|Copy ID|Delete" {
 		t.Errorf("a table's View actions are %q", items)
 	}
 	p.clickText(".bq-menu-item", "Query")

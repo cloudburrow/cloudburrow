@@ -15211,8 +15211,8 @@ function bqReadTabs() {
 }
 
 function bqWriteTabs(tabs) {
-  try { sessionStorage.setItem(BQ_STUDIO_TABS, JSON.stringify(tabs.map(({ id, kind, title, query, settings, path, savedId, preview, subtab, viz }) =>
-    ({ id, kind, title, query, settings, path, savedId, preview, subtab, viz })))); } catch { /* not kept */ }
+  try { sessionStorage.setItem(BQ_STUDIO_TABS, JSON.stringify(tabs.map(({ id, kind, title, query, settings, path, savedId, preview, subtab, viz, pane, selected }) =>
+    ({ id, kind, title, query, settings, path, savedId, preview, subtab, viz, pane, selected })))); } catch { /* not kept */ }
 }
 
 // bqRecent are the ten resources most recently opened, newest first, for
@@ -15274,7 +15274,16 @@ function bqMenu(label, items) {
       if (first) first.focus();
     }
   });
-  menu.addEventListener("keydown", (e) => { if (e.key === "Escape") { close(); button.focus(); } });
+  menu.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { close(); button.focus(); return; }
+    // Up and Down move between the menu's items, as a menu's do.
+    const step = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
+    if (!step) return;
+    e.preventDefault();
+    const all = [...menu.querySelectorAll("button:not([disabled])")];
+    const i = all.indexOf(document.activeElement);
+    if (all.length) all[(i + step + all.length) % all.length].focus();
+  });
   // A click anywhere else closes it, as a menu does.
   const outside = (e) => {
     if (!menu.isConnected) { document.removeEventListener("click", outside); return; }
@@ -15366,24 +15375,76 @@ function renderBigQueryStudio(view) {
   const linkedSaved = params.get("savedQuery");
   let counter = tabs.reduce((n, t) => Math.max(n, t.id), 0);
   const queryCount = () => tabs.filter((t) => (t.kind || "query") === "query" && !t.savedId).length;
+  // Split tabs (#2005): Google's workspace can "split the tabs into two
+  // panes and view them side by side" (bigquery-web-ui). Each tab is in the
+  // left or the right pane (t.pane, kept with the tabs in this browser) and
+  // each pane keeps its own selected tab (t.selected). The pane last used
+  // is where a new tab opens.
+  for (const t of tabs) if (t.pane !== "right") t.pane = "left";
+  let active = "left";
   const newTab = (query = "", title = null, extra = {}) => {
     counter += 1;
     const n = queryCount() + 1;
     const tab = { id: counter, kind: "query", title: title || (n === 1 ? "Untitled query" : `Untitled query ${n}`),
-                  query, settings: {}, ...extra };
+                  query, settings: {}, pane: active, ...extra };
     tabs.push(tab);
     return tab;
   };
   if (linked !== null) newTab(linked);
-  if (!tabs.length) tabs.push({ id: ++counter, kind: "home", title: "Home" });
-  let current = tabs[tabs.length - 1];
+  if (!tabs.length) tabs.push({ id: ++counter, kind: "home", title: "Home", pane: "left" });
+  const inPane = (side) => tabs.filter((t) => t.pane === side);
+  const isSplit = () => tabs.some((t) => t.pane === "right") && tabs.some((t) => t.pane === "left");
+  // A pane left with no tab closes: its tabs are all in the other, which
+  // becomes the left one.
+  const currents = { left: null, right: null };
+  const unsplitIfEmpty = () => {
+    if (isSplit()) return;
+    for (const t of tabs) t.pane = "left";
+    active = "left";
+    if (currents.right) currents.left = currents.right;
+    currents.right = null;
+  };
+  unsplitIfEmpty();
+  const pickCurrent = (side) => {
+    const list = inPane(side);
+    if (list.includes(currents[side])) return;
+    currents[side] = list.find((t) => t.selected) || list[list.length - 1] || null;
+  };
+  pickCurrent("left");
+  pickCurrent("right");
+  // A link that opened a query selects its tab.
+  if (linked !== null) currents.left = tabs[tabs.length - 1];
 
   const explorerBody = el("div", { class: "bq-explorer-body" });
   const search = el("input", { type: "search", class: "bq-explorer-search", placeholder: "Search BigQuery resources",
                                "aria-label": "Search BigQuery resources" });
   const starredOnly = el("input", { type: "checkbox", id: "bq-starred-only" });
-  const strip = el("div", { class: "tab-strip bq-tabs", role: "tablist", "aria-label": "Editor tabs" });
-  const panel = el("div", { class: "bq-tab-panel" });
+  const makeSide = (side) => {
+    const strip = el("div", { class: "tab-strip bq-tabs", role: "tablist", "aria-label": "Editor tabs", "data-pane": side });
+    const panel = el("div", { class: "bq-tab-panel", role: "tabpanel", id: "bq-tab-panel-" + side });
+    const box = el("section", { class: "bq-split-pane bq-split-" + side, "data-pane": side }, strip, panel);
+    // The pane a click or a key lands in is where the next tab opens.
+    box.addEventListener("focusin", () => { active = side; });
+    box.addEventListener("pointerdown", () => { active = side; });
+    // Arrow keys, Home and End move between a strip's tabs, as a
+    // tablist's do; Enter or Space selects (the tab is a button).
+    strip.addEventListener("keydown", (e) => {
+      const all = [...strip.querySelectorAll(".tab")];
+      const i = all.indexOf(document.activeElement);
+      if (i < 0) return;
+      let j = -1;
+      if (e.key === "ArrowRight") j = (i + 1) % all.length;
+      else if (e.key === "ArrowLeft") j = (i - 1 + all.length) % all.length;
+      else if (e.key === "Home") j = 0;
+      else if (e.key === "End") j = all.length - 1;
+      if (j < 0) return;
+      e.preventDefault();
+      all[j].focus();
+    });
+    return { strip, panel, box };
+  };
+  const sides = { left: makeSide("left"), right: makeSide("right") };
+  const splitHost = el("div", { class: "bq-split" }, sides.left.box, sides.right.box);
   const history = el("section", { class: "bq-history card", "aria-label": "Job history" });
   // The left pane's tab: explorer, data, files or source (#1861).
   let pane = "explorer";
@@ -15411,14 +15472,23 @@ function renderBigQueryStudio(view) {
     }
   };
 
-  const select = (tab) => { current = tab; drawTabs(); };
+  const select = (tab) => { currents[tab.pane] = tab; active = tab.pane; drawSide(tab.pane); };
   const openQuery = (sql, title = null) => select(newTab(sql, title));
+  // openQuerySplit is Query > In split tab: the query opens in the other
+  // pane, splitting the workspace when it is not split.
+  const openQuerySplit = (sql, title = null) => {
+    const other = isSplit() && active === "right" ? "left" : "right";
+    const tab = newTab(sql, title, { pane: other });
+    currents[other] = tab;
+    active = other;
+    drawTabs();
+  };
   // openJobs opens Job history as a tab, or selects the one open, as the
   // Explorer's Job history does in Google's Studio.
   const openJobs = () => {
     const open = tabs.find((t) => t.kind === "jobs");
     if (open) return select(open);
-    const tab = { id: ++counter, kind: "jobs", title: "Job history" };
+    const tab = { id: ++counter, kind: "jobs", title: "Job history", pane: active };
     tabs.push(tab);
     select(tab);
   };
@@ -15426,7 +15496,7 @@ function renderBigQueryStudio(view) {
     const home = tabs.find((t) => t.kind === "home");
     if (home) return select(home);
     counter += 1;
-    const tab = { id: counter, kind: "home", title: "Home" };
+    const tab = { id: counter, kind: "home", title: "Home", pane: active };
     tabs.unshift(tab);
     select(tab);
   };
@@ -15447,8 +15517,8 @@ function renderBigQueryStudio(view) {
       if (keep) same.preview = false;
       return select(same);
     }
-    const tab = { id: ++counter, kind: "resource", resourceKind: kind, title, path, preview: !keep };
-    const preview = keep ? -1 : tabs.findIndex((t) => t.kind === "resource" && t.preview);
+    const tab = { id: ++counter, kind: "resource", resourceKind: kind, title, path, preview: !keep, pane: active };
+    const preview = keep ? -1 : tabs.findIndex((t) => t.kind === "resource" && t.preview && t.pane === active);
     if (preview >= 0) tabs.splice(preview, 1, tab);
     else tabs.push(tab);
     select(tab);
@@ -15534,6 +15604,7 @@ function renderBigQueryStudio(view) {
         ];
         if (isTable) {
           items.push({ label: "Query", run: () => openQuery(`SELECT * FROM \`${proj}.${ds.id}.${id}\` LIMIT 1000`, id) });
+          items.push({ label: "Query in split tab", run: () => openQuerySplit(`SELECT * FROM \`${proj}.${ds.id}.${id}\` LIMIT 1000`, id) });
         }
         items.push({ label: "Copy ID", run: () => bqCopy(key, "ID") });
         if (isTable) items.push({ label: "Delete", danger: true, run: () => bqDetailAction(path, "deletetable", loadExplorer) });
@@ -15638,30 +15709,110 @@ function renderBigQueryStudio(view) {
   starredOnly.addEventListener("change", drawTree);
 
   const closeTab = (t) => {
+    const side = t.pane;
     tabs.splice(tabs.indexOf(t), 1);
-    if (!tabs.length) openHome();
-    else if (current === t) current = tabs[tabs.length - 1];
+    if (!tabs.length) { active = "left"; openHome(); return; }
+    if (currents[side] === t) currents[side] = null;
+    unsplitIfEmpty();
     drawTabs();
+  };
+  // Close other tabs keeps only t, in the left pane.
+  const closeOthers = (t) => {
+    tabs.splice(0, tabs.length, t);
+    t.pane = "left";
+    active = "left";
+    currents.left = t;
+    currents.right = null;
+    drawTabs();
+    focusTab(t);
+  };
+  const focusTab = (t) => {
+    const b = sides[t.pane].strip.querySelector(`.tab[data-tab="${t.id}"]`);
+    if (b) b.focus();
+  };
+  // moveTab puts t in the side pane: Split tab to left or right when the
+  // workspace is not split (the other tabs go to the other pane), Move tab
+  // to left or right pane when it is. Focus follows the tab.
+  const moveTab = (t, side) => {
+    if (!isSplit()) for (const o of tabs) o.pane = side === "left" ? "right" : "left";
+    t.pane = side;
+    unsplitIfEmpty();
+    currents[t.pane] = t;
+    active = t.pane;
+    drawTabs();
+    focusTab(t);
+    announce(isSplit() ? `${t.title} is in the ${t.pane} pane` : `${t.title}: the workspace is no longer split`);
+  };
+  const tabMenu = (t) => {
+    const items = [];
+    if (!isSplit()) {
+      const one = tabs.length < 2;
+      const why = one ? "Only one tab is open" : null;
+      items.push({ label: "Split tab to left", disabled: one, title: why, run: () => moveTab(t, "left") });
+      items.push({ label: "Split tab to right", disabled: one, title: why, run: () => moveTab(t, "right") });
+    } else if (t.pane === "left") {
+      items.push({ label: "Move tab to right pane", run: () => moveTab(t, "right") });
+    } else {
+      items.push({ label: "Move tab to left pane", run: () => moveTab(t, "left") });
+    }
+    items.push({ label: "Close tab", run: () => closeTab(t) });
+    items.push({ label: "Close other tabs", disabled: tabs.length < 2, run: () => closeOthers(t) });
+    const menu = bqMenu(`Open menu for ${t.title}`, items);
+    const button = menu.querySelector("button");
+    button.setAttribute("title", "Open menu");
+    // The strip scrolls sideways, which would clip a menu inside it: the
+    // open menu is placed on the page, under its button, within the window.
+    button.addEventListener("click", () => {
+      const list = menu.querySelector(".bq-menu");
+      if (list.hidden) return;
+      const r = button.getBoundingClientRect();
+      list.style.position = "fixed";
+      list.style.top = `${Math.round(r.bottom)}px`;
+      list.style.right = "auto";
+      const left = Math.min(r.right - list.offsetWidth, window.innerWidth - list.offsetWidth - 8);
+      list.style.left = `${Math.max(8, Math.round(left))}px`;
+    });
+    return menu;
   };
 
   const drawTabs = () => {
+    const split = isSplit();
+    splitHost.classList.toggle("is-split", split);
+    sides.right.box.hidden = !split;
+    if (!split) setChildren(sides.right.strip);
+    drawSide("left");
+    if (split) drawSide("right");
+  };
+
+  // drawSide draws one pane's strip and its selected tab.
+  const drawSide = (side) => {
+    pickCurrent(side);
+    for (const t of tabs) t.selected = t === currents.left || t === currents.right;
     bqWriteTabs(tabs);
-    setChildren(strip, ...tabs.map((t) => el("span", { class: "bq-tab-wrap" },
+    const { strip, panel } = sides[side];
+    const current = currents[side];
+    const split = isSplit();
+    strip.setAttribute("aria-label", split ? `Editor tabs, ${side} pane` : "Editor tabs");
+    sides[side].box.setAttribute("aria-label", split ? `${side === "left" ? "Left" : "Right"} pane` : "Editor");
+    setChildren(strip, ...inPane(side).map((t) => el("span", { class: "bq-tab-wrap" },
       el("button", {
         type: "button", role: "tab", class: "tab bq-tab-" + (t.kind || "query") + (t === current ? " is-selected" : "") +
-          (t.preview ? " is-preview" : ""),
-        "aria-selected": t === current ? "true" : "false", text: t.title,
+          (t.preview ? " is-preview" : ""), id: `bq-tab-${t.id}`, "data-tab": String(t.id),
+        "aria-selected": t === current ? "true" : "false", "aria-controls": "bq-tab-panel-" + side, text: t.title,
         title: t.preview ? "Preview tab: double-click to keep it open" : null,
         onclick: () => select(t),
-        ondblclick: () => { if (t.preview) { t.preview = false; drawTabs(); } },
+        ondblclick: () => { if (t.preview) { t.preview = false; drawSide(t.pane); } },
       }),
+      tabMenu(t),
       el("button", {
         type: "button", class: "icon-button bq-tab-close", "aria-label": `Close ${t.title}`, title: "Close tab",
         html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
         onclick: () => closeTab(t),
       }))),
       el("button", { type: "button", class: "secondary bq-new-query", text: "SQL query",
-        "aria-label": "SQL query: open a new query tab", onclick: () => openQuery("") }));
+        "aria-label": "SQL query: open a new query tab", onclick: () => { active = side; openQuery(""); } }));
+    if (!current) { setChildren(panel); return; }
+    panel.setAttribute("aria-labelledby", `bq-tab-${current.id}`);
     const kind = current.kind || "query";
     if (kind === "home") {
       setChildren(panel, bqHomeTab({
@@ -15733,7 +15884,7 @@ function renderBigQueryStudio(view) {
     el("div", { class: "bq-studio" },
       el("aside", { class: "bq-explorer card", "aria-label": "Left pane" }, paneTabs, paneHost),
       el("main", { class: "bq-workspace" },
-        strip, panel)));
+        splitHost)));
   drawPane();
   drawTabs();
   loadExplorer().then(() => {
@@ -15743,7 +15894,7 @@ function renderBigQueryStudio(view) {
       if (sq) openSaved(sq);
       else notify(`No saved query ${linkedSaved} in ${project}`, "error");
     }
-    const home = panel.querySelector(".bq-home");
+    const home = splitHost.querySelector(".bq-home");
     if (home && home.bqRefresh) home.bqRefresh();
   });
   announce("BigQuery Studio");

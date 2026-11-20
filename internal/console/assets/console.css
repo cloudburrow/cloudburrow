@@ -2157,6 +2157,18 @@ tr.log-entry.is-pinned { background: var(--state-hover); }
 .bq-menu-item:hover { background: var(--state-hover); }
 .bq-menu-item.danger { color: var(--error); }
 .bq-workspace { min-width: 0; display: grid; gap: 12px; }
+/* Split tabs (#2005): two panes side by side, each its own strip and
+   panel; below 960px, where the Explorer stacks, the panes stack too. */
+.bq-split { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; min-width: 0; }
+.bq-split-pane { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-content: start; }
+.bq-split-pane > * { min-width: 0; }
+.bq-split.is-split { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.bq-split.is-split .bq-split-pane + .bq-split-pane { border-left: 1px solid var(--border); padding-left: 12px; }
+@media (max-width: 959px) {
+  .bq-split.is-split { grid-template-columns: minmax(0, 1fr); }
+  .bq-split.is-split .bq-split-pane + .bq-split-pane { border-left: 0; padding-left: 0; border-top: 1px solid var(--border); padding-top: 12px; }
+}
+.bq-tab-wrap .bq-menu-wrap .icon-button { width: 28px; height: 28px; }
 .bq-tabs { margin: 0; align-items: center; border-bottom: 1px solid var(--border); }
 .bq-tab-wrap { display: inline-flex; align-items: center; }
 .bq-tab-close { width: 28px; height: 28px; }
