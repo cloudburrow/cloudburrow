@@ -478,7 +478,9 @@ func (f front) serveDML(w http.ResponseWriter, r *http.Request, q queryOptions, 
 		}
 		d, base = md, d.asMerge
 	}
-	if msg := f.bufferedChange(r, q, d, ds, table); msg != "" {
+	// The front's own change data capture DELETEs (storagewritecdc.go,
+	// #1999) change rows just streamed, as BigQuery's apply jobs do.
+	if msg := f.bufferedChange(r, q, d, ds, table); msg != "" && !isChangeApply(r.Context()) {
 		f.failBeforeRun(w, r, q, insert, ds, http.StatusBadRequest, rowError{Reason: "badRequest", Message: msg})
 		return
 	}

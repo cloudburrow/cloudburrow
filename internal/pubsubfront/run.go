@@ -32,6 +32,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		"each subscription's activity in, and the emulator's definitions it creates again after an emulator restart (#1608), "+
 		"restored when it starts (#898); empty: kept in memory only")
 	bigquery := fs.String("bigquery", "", "base URL of the instance's BigQuery, which BigQuery subscriptions write to (#1874); empty: not served")
+	bigqueryStorage := fs.String("bigquery-storage", "", "host:port of the instance's BigQuery Storage API (gRPC), which BigQuery subscriptions write change data capture to (#1999); empty: not served")
 	storage := fs.String("storage", "", "base URL of the instance's Cloud Storage, which Cloud Storage subscriptions write to (#1874); empty: not served")
 	kms := fs.String("kms", "", "base URL of the instance's Cloud KMS, which CMEK topics' keys are checked against (#1874); empty: not served")
 	resourceManager := fs.String("resourcemanager", "", "http://host:port of the host's Resource Manager, asked for organization policies whatever --iam-check (what `up` passes, #1890)")
@@ -50,6 +51,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	defer f.Close()
 	f.UseExports(*bigquery, *storage, *kms)
+	f.UseBigQueryStorage(*bigqueryStorage)
 	go f.RunExports(ctx)
 	if *resourceManager != "" {
 		orgpolicy.Use(orgpolicy.Remote{Base: *resourceManager})

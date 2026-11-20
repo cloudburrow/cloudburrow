@@ -212,7 +212,7 @@ func TestBigQueryTopicSchemaAvro(t *testing.T) {
 	}
 	s := &topicMsgSchema{enc: pubsubpb.Encoding_JSON, revisions: []schemaRevision{{root: root, codec: codec}}}
 	cfg := &pubsubpb.BigQueryConfig{UseTopicSchema: true}
-	if err := checkTable(cfg, d.columns, s); err != nil {
+	if err := checkTable(cfg, d.columns, nil, s); err != nil {
 		t.Fatal(err)
 	}
 	row, err := s.decode([]byte(`{"name":"x","when":1700000000000000,"color":"GREEN"}`), d.columns)
@@ -222,10 +222,10 @@ func TestBigQueryTopicSchemaAvro(t *testing.T) {
 	if row["name"] != "x" || row["color"] != 1 || row["when"] != "2023-11-14T22:13:20Z" {
 		t.Errorf("row = %v", row)
 	}
-	if err := checkTable(cfg, []bqField{{Name: "name", Type: "INTEGER"}}, s); err == nil {
+	if err := checkTable(cfg, []bqField{{Name: "name", Type: "INTEGER"}}, nil, s); err == nil {
 		t.Error("a string field in an INTEGER column was accepted")
 	}
-	if err := checkTable(&pubsubpb.BigQueryConfig{UseTopicSchema: true, DropUnknownFields: true}, []bqField{{Name: "name", Type: "STRING"}}, s); err != nil {
+	if err := checkTable(&pubsubpb.BigQueryConfig{UseTopicSchema: true, DropUnknownFields: true}, []bqField{{Name: "name", Type: "STRING"}}, nil, s); err != nil {
 		t.Errorf("drop_unknown_fields: %v", err)
 	}
 	_ = fx

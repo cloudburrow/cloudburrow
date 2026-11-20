@@ -485,6 +485,13 @@ func InClusterBigQueryHost(namespace string) string {
 	return fmt.Sprintf("bigquery.%s.svc.cluster.local:%d", namespace, BigQueryPort)
 }
 
+// InClusterBigQueryStorageHost is the in-cluster address of the BigQuery
+// Storage API (gRPC), which the Pub/Sub front writes BigQuery
+// subscriptions' changes to (#1999).
+func InClusterBigQueryStorageHost(namespace string) string {
+	return fmt.Sprintf("bigquery.%s.svc.cluster.local:%d", namespace, BigQueryStoragePort)
+}
+
 // InClusterPubSubHost is the Pub/Sub emulator's in-cluster address, where
 // the storage server publishes notifications (#506).
 func InClusterPubSubHost(namespace string) string {
