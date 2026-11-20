@@ -2,6 +2,7 @@ package vertexai
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -188,7 +189,7 @@ func (s *Server) translateText(r *http.Request, body []byte) (any, error) {
 			src = code
 			t["detectedLanguageCode"] = code
 		}
-		tr, err := s.translateOne(r, text, src, req.TargetLanguageCode)
+		tr, err := s.translateOne(r.Context(), text, src, req.TargetLanguageCode)
 		if err != nil {
 			return nil, err
 		}
@@ -221,7 +222,7 @@ func sameLanguage(a, b string) bool {
 // translateOne translates one text with the local Gemma model and
 // TranslateGemma's prompt (its chat template's, as
 // litert-community/TranslateGemma-4B-IT's model card spells it).
-func (s *Server) translateOne(r *http.Request, text, src, tgt string) (string, error) {
+func (s *Server) translateOne(ctx context.Context, text, src, tgt string) (string, error) {
 	if strings.TrimSpace(text) == "" || sameLanguage(src, tgt) {
 		return text, nil
 	}
@@ -246,7 +247,7 @@ func (s *Server) translateOne(r *http.Request, text, src, tgt string) (string, e
 		gr.GenerationConfig = &GenerationConfig{Temperature: &zero, TopK: &one}
 	}
 	req, _ := json.Marshal(gr)
-	resp, err := s.generateUnary(r.Context(), s.gen.Model(), bytes.NewReader(req))
+	resp, err := s.generateUnary(ctx, s.gen.Model(), bytes.NewReader(req))
 	if err != nil {
 		return "", err
 	}

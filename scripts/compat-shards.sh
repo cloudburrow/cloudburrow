@@ -136,7 +136,7 @@ COMPAT_LOCALAI_TEST_NAMES="
   GenerationNeverUsesApplicationDefaultCredentials
   RawPredictOnTheEmbeddingModel RawPredictOnTheGenerationModel
   SpeechAdaptationBoost SpeechAdaptationResources SpeechBatchRecognize
-  SpeechRecognizers SpeechStreamingRecognize SpeechV1
+  SpeechRecognitionFeatures1799 SpeechRecognizers SpeechStreamingRecognize SpeechV1
   StreamGenerateContentThroughTheOfficialSDK
   StreamGenerateContentThroughThePredictionClient
   StreamingPredictOnTheEmbeddingModel StreamingPredictOnTheGenerationModel

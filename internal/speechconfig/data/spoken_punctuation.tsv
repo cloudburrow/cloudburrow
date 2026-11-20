@@ -1,0 +1,1771 @@
+cs_cz	⏎	nová řádka|nový řádek
+cs_cz	⏎⏎	nový odstavec
+cs_cz	!	vykřičník
+cs_cz	"	dolní dvojité uvozovky|dolní uvozovky|dvojité dolní uvozovky|dvojité horní uvozovky|dvojité spodní uvozovky|dvojité uvozovky|dvojité vrchní uvozovky|horní dvojité uvozovky|horní uvozovky|spodní dvojité uvozovky|spodní uvozovky|uvozovky|vrchní dvojité uvozovky|vrchní uvozovky
+cs_cz	#	hashtag|křížek
+cs_cz	&	ampersand
+cs_cz	'	apostrof|dolní jednoduché uvozovky|horní jednoduché uvozovky|jednoduché dolní uvozovky|jednoduché horní uvozovky|jednoduché spodní uvozovky|jednoduché uvozovky|jednoduché vrchní uvozovky|spodní jednoduché uvozovky|vrchní jednoduché uvozovky
+cs_cz	(	kulatá závorka|levá kulatá závorka|levá závorka|otevírací kulatá závorka|otevírací závorka|otevřít kulatou závorku|otevřít závorku|overvřená závorka|závorka
+cs_cz	)	kulatá závorka|pravá kulatá závorka|pravá závorka|uzavírací kulatá závorka|uzavírací závorka|uzavřená závorka|uzavřít kulatou závorku|uzavřít závorku|závorka
+cs_cz	*	hvězdička
+cs_cz	,	čárka
+cs_cz	-	spojovník
+cs_cz	.	tečka
+cs_cz	...	tečka tečka tečka|trojtečka|tři tečky|výpustek|výpustka
+cs_cz	/	lomeno|lomítko
+cs_cz	:	dvojtečka
+cs_cz	;	středník
+cs_cz	?	otazník
+cs_cz	@	zavináč
+cs_cz	[	hranatá závorka|levá hranatá závorka|otevřená hranatá závorka|otevřít hranatou závorku
+cs_cz	\	obrácené lomeno|obrácené lomítko|zpětné lomeno|zpětné lomítko
+cs_cz	]	hranatá závorka|pravá hranatá závorka|uzavřená hranatá závorka|uzavřít hranatou závorku
+cs_cz	^	cirkumflex|stříška
+cs_cz	_	podtržítko
+cs_cz	{	levá složená závorka|otevřená složená závorka|otevřít složenou závorku|složená závorka
+cs_cz	}	pravá složená závorka|složená závorka|uzavřená složená závorka|uzavřít složenou závorku
+cs_cz	~	tilda|vlnovka
+cs_cz	–	krátká pomlčka|pomlčka|půlčtverčíková pomlčka
+cs_cz	—	dlouhá pomlčka|čtverčíková pomlčka
+da_dk	⏎	ny linje
+da_dk	⏎⏎	nyt afsnit
+da_dk	!	udråbstegn
+da_dk	"	anførselstegn|citat slut|citat start|citationstegn|gåseøjne
+da_dk	#	hashtag
+da_dk	&	ampersand|og-tegn
+da_dk	'	apostrof
+da_dk	(	parentes|parentes start|venstre parentes
+da_dk	)	højre parentes|parentes|parentes slut
+da_dk	*	asterisk
+da_dk	,	komma
+da_dk	-	bindestreg
+da_dk	.	punktum
+da_dk	...	prik prik prik|punktum punktum punktum
+da_dk	/	skråstreg
+da_dk	:	kolon
+da_dk	;	semikolon
+da_dk	?	spørgsmålstegn
+da_dk	@	snabel a|snabel-a
+da_dk	[	firkantet parentes|firkantet parentes start|venstre firkantet parentes
+da_dk	\	backslash|baglæns skråstreg|omvendt skråstreg
+da_dk	]	firkantet parentes slut|højre firkantet parentes
+da_dk	_	bundstreg|underscore
+da_dk	{	krølleparentes|tuborgklamme|venstre krølleparentes|venstre tuborgklamme
+da_dk	|	lodret streg
+da_dk	}	højre krølleparentes|højre tuborgklamme|tuborgklamme
+da_dk	–	en tankestreg
+da_dk	—	em tankestreg
+de_at	⏎	neue zeile|zeilenumbruch
+de_at	⏎⏎	neuer absatz|neuer abschnitt
+de_at	!	Ausrufezeichen|ausrufezeichen|ausrufungszeichen
+de_at	"	anführungszeichen|anführungszeichen oben|anführungszeichen unten|gänsefüßchen
+de_at	#	doppelkreuz|hash|hash zeichen|hash-zeichen|hashtag|nummernzeichen|raute|rautenzeichen|rautezeichen
+de_at	&	et zeichen|et-zeichen|firmen-und|kaufmannsund|kaufmännisches und|und zeichen|und-zeichen
+de_at	'	apostroph|einfache anführungszeichen|einfaches anführungszeichen|einfaches anführungszeichen oben|einfaches anführungszeichen unten|einzelnes anführungszeichen|einzelnes anführungszeichen oben|einzelnes anführungszeichen unten|halbe anführungszeichen|halbe anführungszeichen oben|halbe anführungszeichen unten
+de_at	(	klammer auf|linke klammer|runde klammer auf
+de_at	)	klammer zu|rechte klammer|runde klammer zu
+de_at	*	asterisk|malzeichen|sternchen
+de_at	,	beistrich|komma
+de_at	-	bindestrich|ergänzungsstrich|trennstrich
+de_at	.	punkt
+de_at	...	auslassungspunkte|auslassungszeichen|punkt punkt punkt
+de_at	/	schrägstrich|slash
+de_at	:	doppelpunkt
+de_at	;	semikolon|strichpunkt
+de_at	?	Fragezeichen|fragezeichen
+de_at	@	at zeichen|at-zeichen
+de_at	[	eckige klammer auf
+de_at	\	backslash|umgekehrter schrägstrich
+de_at	]	eckige klammer zu
+de_at	^	zirkumflex
+de_at	_	unterstrich
+de_at	{	geschweifte klammer auf|geschwungene klammer auf
+de_at	|	längsstrich|pipe|pipe-symbol|senkrechter strich|verkettungszeichen
+de_at	}	geschweifte klammer zu|geschwungene klammer zu
+de_at	~	tilde
+de_at	–	gedankenstrich
+de_ch	⏎	neue zeile|zeilenumbruch
+de_ch	⏎⏎	neuer absatz|neuer abschnitt
+de_ch	!	Ausrufezeichen|ausrufezeichen|ausrufungszeichen
+de_ch	"	anführungszeichen|anführungszeichen oben|anführungszeichen unten|gänsefüßchen
+de_ch	#	doppelkreuz|hash|hash zeichen|hash-zeichen|hashtag|nummernzeichen|raute|rautenzeichen|rautezeichen
+de_ch	&	et zeichen|et-zeichen|firmen-und|kaufmannsund|kaufmännisches und|und zeichen|und-zeichen
+de_ch	'	apostroph|einfache anführungszeichen|einfaches anführungszeichen|einfaches anführungszeichen oben|einfaches anführungszeichen unten|einzelnes anführungszeichen|einzelnes anführungszeichen oben|einzelnes anführungszeichen unten|halbe anführungszeichen|halbe anführungszeichen oben|halbe anführungszeichen unten
+de_ch	(	klammer auf|linke klammer|runde klammer auf
+de_ch	)	klammer zu|rechte klammer|runde klammer zu
+de_ch	*	asterisk|malzeichen|sternchen
+de_ch	,	beistrich|komma
+de_ch	-	bindestrich|ergänzungsstrich|trennstrich
+de_ch	.	punkt
+de_ch	...	auslassungspunkte|auslassungszeichen|punkt punkt punkt
+de_ch	/	schrägstrich|slash
+de_ch	:	doppelpunkt
+de_ch	;	semikolon|strichpunkt
+de_ch	?	Fragezeichen|fragezeichen
+de_ch	@	at zeichen|at-zeichen
+de_ch	[	eckige klammer auf
+de_ch	\	backslash|umgekehrter schrägstrich
+de_ch	]	eckige klammer zu
+de_ch	^	zirkumflex
+de_ch	_	unterstrich
+de_ch	{	geschweifte klammer auf|geschwungene klammer auf
+de_ch	|	längsstrich|pipe|pipe-symbol|senkrechter strich|verkettungszeichen
+de_ch	}	geschweifte klammer zu|geschwungene klammer zu
+de_ch	~	tilde
+de_ch	–	gedankenstrich
+de_de	⏎	neue zeile|zeilenumbruch
+de_de	⏎⏎	neuer absatz|neuer abschnitt
+de_de	!	Ausrufezeichen|ausrufezeichen|ausrufungszeichen
+de_de	"	anführungszeichen|anführungszeichen oben|anführungszeichen unten|gänsefüßchen
+de_de	#	doppelkreuz|hash|hash zeichen|hash-zeichen|hashtag|nummernzeichen|raute|rautenzeichen|rautezeichen
+de_de	&	et zeichen|et-zeichen|firmen-und|kaufmannsund|kaufmännisches und|und zeichen|und-zeichen
+de_de	'	apostroph|einfache anführungszeichen|einfaches anführungszeichen|einfaches anführungszeichen oben|einfaches anführungszeichen unten|einzelnes anführungszeichen|einzelnes anführungszeichen oben|einzelnes anführungszeichen unten|halbe anführungszeichen|halbe anführungszeichen oben|halbe anführungszeichen unten
+de_de	(	klammer auf|linke klammer|runde klammer auf
+de_de	)	klammer zu|rechte klammer|runde klammer zu
+de_de	*	asterisk|malzeichen|sternchen
+de_de	,	beistrich|komma
+de_de	-	bindestrich|ergänzungsstrich|trennstrich
+de_de	.	punkt
+de_de	...	auslassungspunkte|auslassungszeichen|punkt punkt punkt
+de_de	/	schrägstrich|slash
+de_de	:	doppelpunkt
+de_de	;	semikolon|strichpunkt
+de_de	?	Fragezeichen|fragezeichen
+de_de	@	at zeichen|at-zeichen
+de_de	[	eckige klammer auf
+de_de	\	backslash|umgekehrter schrägstrich
+de_de	]	eckige klammer zu
+de_de	^	zirkumflex
+de_de	_	unterstrich
+de_de	{	geschweifte klammer auf|geschwungene klammer auf
+de_de	|	längsstrich|pipe|pipe-symbol|senkrechter strich|verkettungszeichen
+de_de	}	geschweifte klammer zu|geschwungene klammer zu
+de_de	~	tilde
+de_de	–	gedankenstrich
+en_au	⏎	new line|newline
+en_au	⏎⏎	new paragraph
+en_au	!	exclamation mark|exclamation point
+en_au	"	close quotes|double quotation mark|double quote|double quote mark|double quotes|end quotes|open quotes|quotation marks|quote marks
+en_au	#	hash sign|hash symbol|hashtag|number sign|number symbol|pound sign
+en_au	&	ampersand|and sign|and symbol
+en_au	'	close single quotes|end single quotes|open single quotes|single quotation mark|single quote|single quote mark|single quote marks|single quotes|start single quotes
+en_au	(	bracket|brackets|open bracket|open brackets|open parentheses|open parenthesis|parentheses|parenthesis
+en_au	)	bracket|brackets|close bracket|close brackets|close parentheses|close parenthesis|parentheses|parenthesis
+en_au	*	asterisk
+en_au	,	comma
+en_au	-	hyphen
+en_au	.	full stop
+en_au	...	dot dot dot|ellipsis
+en_au	/	forward slash|slash
+en_au	:	colon
+en_au	;	semicolon
+en_au	?	question mark
+en_au	@	at sign|at symbol
+en_au	[	open square bracket|open square brackets|square bracket|square brackets
+en_au	\	back slash|backslash
+en_au	]	close square bracket|close square brackets|square bracket|square brackets
+en_au	_	underscore
+en_au	{	curly brace|curly braces|curly bracket|curly brackets|open curly brace|open curly braces|open curly bracket|open curly brackets
+en_au	}	close curly brace|close curly braces|close curly bracket|close curly brackets|curly brace|curly braces|curly bracket|curly brackets
+en_au	–	dash|en dash|endash|medium dash
+en_au	—	em dash|emdash|long dash
+en_ca	⏎	new line|newline
+en_ca	⏎⏎	new paragraph
+en_ca	!	exclamation mark|exclamation point
+en_ca	"	close quotation mark|close quote|double quotation mark|double quote|double quote mark|end quote|left quote|open quotation mark|open quote|quotation mark|quote mark|right quote|unquote
+en_ca	#	hashtag|number sign|number symbol|pound sign
+en_ca	&	ampersand|and sign|and symbol
+en_ca	'	close single quote|close single quote mark|open single quote|open single quote mark|single quotation mark|single quote|single quote mark
+en_ca	(	left paren|left parentheses|left parenthesis|open paren|open parentheses|open parenthesis|paren|parentheses|parenthesis
+en_ca	)	close paren|close parentheses|close parenthesis|paren|parentheses|parenthesis|right paren|right parentheses|right parenthesis
+en_ca	*	asterisk
+en_ca	,	comma
+en_ca	-	hyphen
+en_ca	.	full stop|period
+en_ca	...	dot dot dot|ellipsis|period period period
+en_ca	/	forward slash|slash
+en_ca	:	colon
+en_ca	;	semicolon
+en_ca	?	question mark
+en_ca	@	at sign|at symbol
+en_ca	[	left square bracket|left square brackets|open square bracket|open square brackets|square bracket|square brackets
+en_ca	\	back slash|backslash
+en_ca	]	close square bracket|close square brackets|right square bracket|right square brackets|square bracket|square brackets
+en_ca	_	underscore
+en_ca	{	curly brace|curly braces|curly bracket|curly brackets|left curly brace|left curly braces|left curly bracket|left curly brackets|open curly brace|open curly braces|open curly bracket|open curly brackets
+en_ca	}	close curly brace|close curly braces|close curly bracket|close curly brackets|curly brace|curly braces|curly bracket|curly brackets|right curly brace|right curly braces|right curly bracket|right curly brackets
+en_ca	–	dash|en dash|endash|medium dash
+en_ca	—	em dash|emdash|long dash
+en_gb	⏎	new line|newline
+en_gb	⏎⏎	new paragraph
+en_gb	!	exclamation mark|exclamation point
+en_gb	"	close quotes|double quotation mark|double quote|double quote mark|double quotes|end quotes|open quotes|quotation marks|quote marks
+en_gb	#	hash sign|hash symbol|hashtag|number sign|number symbol|pound sign
+en_gb	&	ampersand|and sign|and symbol
+en_gb	'	close single quotes|end single quotes|open single quotes|single quotation mark|single quote|single quote mark|single quote marks|single quotes|start single quotes
+en_gb	(	bracket|brackets|open bracket|open brackets|open parentheses|open parenthesis|parentheses|parenthesis
+en_gb	)	bracket|brackets|close bracket|close brackets|close parentheses|close parenthesis|parentheses|parenthesis
+en_gb	*	asterisk
+en_gb	,	comma
+en_gb	-	hyphen
+en_gb	.	full stop
+en_gb	...	dot dot dot|ellipsis
+en_gb	/	forward slash|slash
+en_gb	:	colon
+en_gb	;	semicolon
+en_gb	?	question mark
+en_gb	@	at sign|at symbol
+en_gb	[	open square bracket|open square brackets|square bracket|square brackets
+en_gb	\	back slash|backslash
+en_gb	]	close square bracket|close square brackets|square bracket|square brackets
+en_gb	_	underscore
+en_gb	{	curly brace|curly braces|curly bracket|curly brackets|open curly brace|open curly braces|open curly bracket|open curly brackets
+en_gb	}	close curly brace|close curly braces|close curly bracket|close curly brackets|curly brace|curly braces|curly bracket|curly brackets
+en_gb	–	dash|en dash|endash|medium dash
+en_gb	—	em dash|emdash|long dash
+en_gh	⏎	new line|newline
+en_gh	⏎⏎	new paragraph
+en_gh	!	exclamation mark|exclamation point
+en_gh	"	close quotes|double quotation mark|double quote|double quote mark|double quotes|end quotes|left quote|left quotes|open quote|open quotes|quotation mark|quotation marks|quote mark|quote marks|right quote|right quotes
+en_gh	#	hash|hash sign|hash symbol|hashtag|number sign|number symbol
+en_gh	&	ampersand|and sign|and symbol
+en_gh	'	close single quotes|end single quotes|left single quotes|open single quotes|right single quotes|single quotation mark|single quote|single quote mark|single quote marks|single quotes|start single quotes
+en_gh	(	bracket|brackets|left bracket|left brackets|left paren|left parentheses|left parenthesis|open bracket|open brackets|open paren|open parentheses|open parenthesis|parentheses|parenthesis
+en_gh	)	bracket|brackets|close bracket|close brackets|close paren|close parentheses|close parenthesis|paren|parentheses|parenthesis|right bracket|right brackets|right paren|right parentheses|right parenthesis
+en_gh	*	asterisk
+en_gh	,	comma
+en_gh	-	hyphen
+en_gh	.	full stop|period
+en_gh	...	dot dot dot|ellipsis|period period period
+en_gh	/	forward slash|slash
+en_gh	:	colon
+en_gh	;	semicolon
+en_gh	?	question mark
+en_gh	@	at sign|at symbol
+en_gh	[	left square bracket|left square brackets|open square bracket|open square brackets|square bracket|square brackets
+en_gh	\	back slash|backslash
+en_gh	]	close square bracket|close square brackets|right square bracket|right square brackets|square bracket|square brackets
+en_gh	_	underscore
+en_gh	{	curly brace|curly braces|curly bracket|curly brackets|left curly brace|left curly braces|left curly bracket|left curly brackets|open curly brace|open curly braces|open curly bracket|open curly brackets
+en_gh	}	close curly brace|close curly braces|close curly bracket|close curly brackets|curly brace|curly braces|curly bracket|curly brackets|right curly brace|right curly braces|right curly bracket|right curly brackets
+en_gh	–	dash|en dash|endash|medium dash
+en_gh	—	em dash|emdash|long dash
+en_hk	⏎	new line|newline
+en_hk	⏎⏎	new paragraph
+en_hk	!	exclamation mark|exclamation point
+en_hk	"	close quotes|double quotation mark|double quote|double quote mark|double quotes|end quotes|open quotes|quotation marks|quote marks
+en_hk	#	hash sign|hash symbol|hashtag|number sign|number symbol|pound sign
+en_hk	&	ampersand|and sign|and symbol
+en_hk	'	close single quotes|end single quotes|open single quotes|single quotation mark|single quote|single quote mark|single quote marks|single quotes|start single quotes
+en_hk	(	bracket|brackets|open bracket|open brackets|open parentheses|open parenthesis|parentheses|parenthesis
+en_hk	)	bracket|brackets|close bracket|close brackets|close parentheses|close parenthesis|parentheses|parenthesis
+en_hk	*	asterisk
+en_hk	,	comma
+en_hk	-	hyphen
+en_hk	.	full stop
+en_hk	...	dot dot dot|ellipsis
+en_hk	/	forward slash|slash
+en_hk	:	colon
+en_hk	;	semicolon
+en_hk	?	question mark
+en_hk	@	at sign|at symbol
+en_hk	[	open square bracket|open square brackets|square bracket|square brackets
+en_hk	\	back slash|backslash
+en_hk	]	close square bracket|close square brackets|square bracket|square brackets
+en_hk	_	underscore
+en_hk	{	curly brace|curly braces|curly bracket|curly brackets|open curly brace|open curly braces|open curly bracket|open curly brackets
+en_hk	}	close curly brace|close curly braces|close curly bracket|close curly brackets|curly brace|curly braces|curly bracket|curly brackets
+en_hk	–	dash|en dash|endash|medium dash
+en_hk	—	em dash|emdash|long dash
+en_ie	⏎	new line|newline
+en_ie	⏎⏎	new paragraph
+en_ie	!	exclamation mark|exclamation point
+en_ie	"	close quotes|double quotation mark|double quote|double quote mark|double quotes|end quotes|open quotes|quotation marks|quote marks
+en_ie	#	hash sign|hash symbol|hashtag|number sign|number symbol|pound sign
+en_ie	&	ampersand|and sign|and symbol
+en_ie	'	close single quotes|end single quotes|open single quotes|single quotation mark|single quote|single quote mark|single quote marks|single quotes|start single quotes
+en_ie	(	bracket|brackets|open bracket|open brackets|open parentheses|open parenthesis|parentheses|parenthesis
+en_ie	)	bracket|brackets|close bracket|close brackets|close parentheses|close parenthesis|parentheses|parenthesis
+en_ie	*	asterisk
+en_ie	,	comma
+en_ie	-	hyphen
+en_ie	.	full stop
+en_ie	...	dot dot dot|ellipsis
+en_ie	/	forward slash|slash
+en_ie	:	colon
+en_ie	;	semicolon
+en_ie	?	question mark
+en_ie	@	at sign|at symbol
+en_ie	[	open square bracket|open square brackets|square bracket|square brackets
+en_ie	\	back slash|backslash
+en_ie	]	close square bracket|close square brackets|square bracket|square brackets
+en_ie	_	underscore
+en_ie	{	curly brace|curly braces|curly bracket|curly brackets|open curly brace|open curly braces|open curly bracket|open curly brackets
+en_ie	}	close curly brace|close curly braces|close curly bracket|close curly brackets|curly brace|curly braces|curly bracket|curly brackets
+en_ie	–	dash|en dash|endash|medium dash
+en_ie	—	em dash|emdash|long dash
+en_in	⏎	new line|newline
+en_in	⏎⏎	new paragraph
+en_in	!	exclamation mark|exclamation point
+en_in	"	close quotes|double quotation mark|double quote|double quote mark|double quotes|end quotes|open quotes|quotation marks|quote marks
+en_in	#	hash sign|hash symbol|hashtag|number sign|number symbol|pound sign
+en_in	&	ampersand|and sign|and symbol
+en_in	'	close single quotes|end single quotes|open single quotes|single quotation mark|single quote|single quote mark|single quote marks|single quotes|start single quotes
+en_in	(	bracket|brackets|open bracket|open brackets|open parentheses|open parenthesis|parentheses|parenthesis
+en_in	)	bracket|brackets|close bracket|close brackets|close parentheses|close parenthesis|parentheses|parenthesis
+en_in	*	asterisk
+en_in	,	comma
+en_in	-	hyphen
+en_in	.	full stop
+en_in	...	dot dot dot|ellipsis
+en_in	/	forward slash|slash
+en_in	:	colon
+en_in	;	semicolon
+en_in	?	question mark
+en_in	@	at sign|at symbol
+en_in	[	open square bracket|open square brackets|square bracket|square brackets
+en_in	\	back slash|backslash
+en_in	]	close square bracket|close square brackets|square bracket|square brackets
+en_in	_	underscore
+en_in	{	curly brace|curly braces|curly bracket|curly brackets|open curly brace|open curly braces|open curly bracket|open curly brackets
+en_in	}	close curly brace|close curly braces|close curly bracket|close curly brackets|curly brace|curly braces|curly bracket|curly brackets
+en_in	–	dash|en dash|endash|medium dash
+en_in	—	em dash|emdash|long dash
+en_ke	⏎	new line|newline
+en_ke	⏎⏎	new paragraph
+en_ke	!	exclamation mark|exclamation point
+en_ke	"	close quotes|double quotation mark|double quote|double quote mark|double quotes|end quotes|left quote|left quotes|open quote|open quotes|quotation mark|quotation marks|quote mark|quote marks|right quote|right quotes
+en_ke	#	hash|hash sign|hash symbol|hashtag|number sign|number symbol
+en_ke	&	ampersand|and sign|and symbol
+en_ke	'	close single quotes|end single quotes|left single quotes|open single quotes|right single quotes|single quotation mark|single quote|single quote mark|single quote marks|single quotes|start single quotes
+en_ke	(	bracket|brackets|left bracket|left brackets|left paren|left parentheses|left parenthesis|open bracket|open brackets|open paren|open parentheses|open parenthesis|parentheses|parenthesis
+en_ke	)	bracket|brackets|close bracket|close brackets|close paren|close parentheses|close parenthesis|paren|parentheses|parenthesis|right bracket|right brackets|right paren|right parentheses|right parenthesis
+en_ke	*	asterisk
+en_ke	,	comma
+en_ke	-	hyphen
+en_ke	.	full stop|period
+en_ke	...	dot dot dot|ellipsis|period period period
+en_ke	/	forward slash|slash
+en_ke	:	colon
+en_ke	;	semicolon
+en_ke	?	question mark
+en_ke	@	at sign|at symbol
+en_ke	[	left square bracket|left square brackets|open square bracket|open square brackets|square bracket|square brackets
+en_ke	\	back slash|backslash
+en_ke	]	close square bracket|close square brackets|right square bracket|right square brackets|square bracket|square brackets
+en_ke	_	underscore
+en_ke	{	curly brace|curly braces|curly bracket|curly brackets|left curly brace|left curly braces|left curly bracket|left curly brackets|open curly brace|open curly braces|open curly bracket|open curly brackets
+en_ke	}	close curly brace|close curly braces|close curly bracket|close curly brackets|curly brace|curly braces|curly bracket|curly brackets|right curly brace|right curly braces|right curly bracket|right curly brackets
+en_ke	–	dash|en dash|endash|medium dash
+en_ke	—	em dash|emdash|long dash
+en_ng	⏎	new line|newline
+en_ng	⏎⏎	new paragraph
+en_ng	!	exclamation mark|exclamation point
+en_ng	"	close quotes|double quotation mark|double quote|double quote mark|double quotes|end quotes|left quote|left quotes|open quote|open quotes|quotation mark|quotation marks|quote mark|quote marks|right quote|right quotes
+en_ng	#	hash|hash sign|hash symbol|hashtag|number sign|number symbol
+en_ng	&	ampersand|and sign|and symbol
+en_ng	'	close single quotes|end single quotes|left single quotes|open single quotes|right single quotes|single quotation mark|single quote|single quote mark|single quote marks|single quotes|start single quotes
+en_ng	(	bracket|brackets|left bracket|left brackets|left paren|left parentheses|left parenthesis|open bracket|open brackets|open paren|open parentheses|open parenthesis|parentheses|parenthesis
+en_ng	)	bracket|brackets|close bracket|close brackets|close paren|close parentheses|close parenthesis|paren|parentheses|parenthesis|right bracket|right brackets|right paren|right parentheses|right parenthesis
+en_ng	*	asterisk
+en_ng	,	comma
+en_ng	-	hyphen
+en_ng	.	full stop|period
+en_ng	...	dot dot dot|ellipsis|period period period
+en_ng	/	forward slash|slash
+en_ng	:	colon
+en_ng	;	semicolon
+en_ng	?	question mark
+en_ng	@	at sign|at symbol
+en_ng	[	left square bracket|left square brackets|open square bracket|open square brackets|square bracket|square brackets
+en_ng	\	back slash|backslash
+en_ng	]	close square bracket|close square brackets|right square bracket|right square brackets|square bracket|square brackets
+en_ng	_	underscore
+en_ng	{	curly brace|curly braces|curly bracket|curly brackets|left curly brace|left curly braces|left curly bracket|left curly brackets|open curly brace|open curly braces|open curly bracket|open curly brackets
+en_ng	}	close curly brace|close curly braces|close curly bracket|close curly brackets|curly brace|curly braces|curly bracket|curly brackets|right curly brace|right curly braces|right curly bracket|right curly brackets
+en_ng	–	dash|en dash|endash|medium dash
+en_ng	—	em dash|emdash|long dash
+en_nz	⏎	new line|newline
+en_nz	⏎⏎	new paragraph
+en_nz	!	exclamation mark|exclamation point
+en_nz	"	close quotes|double quotation mark|double quote|double quote mark|double quotes|end quotes|open quotes|quotation marks|quote marks
+en_nz	#	hash sign|hash symbol|hashtag|number sign|number symbol|pound sign
+en_nz	&	ampersand|and sign|and symbol
+en_nz	'	close single quotes|end single quotes|open single quotes|single quotation mark|single quote|single quote mark|single quote marks|single quotes|start single quotes
+en_nz	(	bracket|brackets|open bracket|open brackets|open parentheses|open parenthesis|parentheses|parenthesis
+en_nz	)	bracket|brackets|close bracket|close brackets|close parentheses|close parenthesis|parentheses|parenthesis
+en_nz	*	asterisk
+en_nz	,	comma
+en_nz	-	hyphen
+en_nz	.	full stop
+en_nz	...	dot dot dot|ellipsis
+en_nz	/	forward slash|slash
+en_nz	:	colon
+en_nz	;	semicolon
+en_nz	?	question mark
+en_nz	@	at sign|at symbol
+en_nz	[	open square bracket|open square brackets|square bracket|square brackets
+en_nz	\	back slash|backslash
+en_nz	]	close square bracket|close square brackets|square bracket|square brackets
+en_nz	_	underscore
+en_nz	{	curly brace|curly braces|curly bracket|curly brackets|open curly brace|open curly braces|open curly bracket|open curly brackets
+en_nz	}	close curly brace|close curly braces|close curly bracket|close curly brackets|curly brace|curly braces|curly bracket|curly brackets
+en_nz	–	dash|en dash|endash|medium dash
+en_nz	—	em dash|emdash|long dash
+en_pk	⏎	new line|newline
+en_pk	⏎⏎	new paragraph
+en_pk	!	exclamation mark|exclamation point
+en_pk	"	close quotes|double quotation mark|double quote|double quote mark|double quotes|end quotes|open quotes|quotation marks|quote marks
+en_pk	#	hash sign|hash symbol|hashtag|number sign|number symbol|pound sign
+en_pk	&	ampersand|and sign|and symbol
+en_pk	'	close single quotes|end single quotes|open single quotes|single quotation mark|single quote|single quote mark|single quote marks|single quotes|start single quotes
+en_pk	(	bracket|brackets|open bracket|open brackets|open parentheses|open parenthesis|parentheses|parenthesis
+en_pk	)	bracket|brackets|close bracket|close brackets|close parentheses|close parenthesis|parentheses|parenthesis
+en_pk	*	asterisk
+en_pk	,	comma
+en_pk	-	hyphen
+en_pk	.	full stop
+en_pk	...	dot dot dot|ellipsis
+en_pk	/	forward slash|slash
+en_pk	:	colon
+en_pk	;	semicolon
+en_pk	?	question mark
+en_pk	@	at sign|at symbol
+en_pk	[	open square bracket|open square brackets|square bracket|square brackets
+en_pk	\	back slash|backslash
+en_pk	]	close square bracket|close square brackets|square bracket|square brackets
+en_pk	_	underscore
+en_pk	{	curly brace|curly braces|curly bracket|curly brackets|open curly brace|open curly braces|open curly bracket|open curly brackets
+en_pk	}	close curly brace|close curly braces|close curly bracket|close curly brackets|curly brace|curly braces|curly bracket|curly brackets
+en_pk	–	dash|en dash|endash|medium dash
+en_pk	—	em dash|emdash|long dash
+en_sg	⏎	new line|newline
+en_sg	⏎⏎	new paragraph
+en_sg	!	exclamation mark|exclamation point
+en_sg	"	close quotation mark|close quote|double quotation mark|double quote|double quote mark|end quote|left quote|open quotation mark|open quote|quotation mark|quote mark|right quote|unquote
+en_sg	#	hashtag|number sign|number symbol|pound sign
+en_sg	&	ampersand|and sign|and symbol
+en_sg	'	close single quote|close single quote mark|open single quote|open single quote mark|single quotation mark|single quote|single quote mark
+en_sg	(	left paren|left parentheses|left parenthesis|open paren|open parentheses|open parenthesis|paren|parentheses|parenthesis
+en_sg	)	close paren|close parentheses|close parenthesis|paren|parentheses|parenthesis|right paren|right parentheses|right parenthesis
+en_sg	*	asterisk
+en_sg	,	comma
+en_sg	-	hyphen
+en_sg	.	full stop|period
+en_sg	...	dot dot dot|ellipsis|period period period
+en_sg	/	forward slash|slash
+en_sg	:	colon
+en_sg	;	semicolon
+en_sg	?	question mark
+en_sg	@	at sign|at symbol
+en_sg	[	left square bracket|left square brackets|open square bracket|open square brackets|square bracket|square brackets
+en_sg	\	back slash|backslash
+en_sg	]	close square bracket|close square brackets|right square bracket|right square brackets|square bracket|square brackets
+en_sg	_	underscore
+en_sg	{	curly brace|curly braces|curly bracket|curly brackets|left curly brace|left curly braces|left curly bracket|left curly brackets|open curly brace|open curly braces|open curly bracket|open curly brackets
+en_sg	}	close curly brace|close curly braces|close curly bracket|close curly brackets|curly brace|curly braces|curly bracket|curly brackets|right curly brace|right curly braces|right curly bracket|right curly brackets
+en_sg	–	dash|en dash|endash|medium dash
+en_sg	—	em dash|emdash|long dash
+en_tz	⏎	new line|newline
+en_tz	⏎⏎	new paragraph
+en_tz	!	exclamation mark|exclamation point
+en_tz	"	close quotes|double quotation mark|double quote|double quote mark|double quotes|end quotes|left quote|left quotes|open quote|open quotes|quotation mark|quotation marks|quote mark|quote marks|right quote|right quotes
+en_tz	#	hash|hash sign|hash symbol|hashtag|number sign|number symbol
+en_tz	&	ampersand|and sign|and symbol
+en_tz	'	close single quotes|end single quotes|left single quotes|open single quotes|right single quotes|single quotation mark|single quote|single quote mark|single quote marks|single quotes|start single quotes
+en_tz	(	bracket|brackets|left bracket|left brackets|left paren|left parentheses|left parenthesis|open bracket|open brackets|open paren|open parentheses|open parenthesis|parentheses|parenthesis
+en_tz	)	bracket|brackets|close bracket|close brackets|close paren|close parentheses|close parenthesis|paren|parentheses|parenthesis|right bracket|right brackets|right paren|right parentheses|right parenthesis
+en_tz	*	asterisk
+en_tz	,	comma
+en_tz	-	hyphen
+en_tz	.	full stop|period
+en_tz	...	dot dot dot|ellipsis|period period period
+en_tz	/	forward slash|slash
+en_tz	:	colon
+en_tz	;	semicolon
+en_tz	?	question mark
+en_tz	@	at sign|at symbol
+en_tz	[	left square bracket|left square brackets|open square bracket|open square brackets|square bracket|square brackets
+en_tz	\	back slash|backslash
+en_tz	]	close square bracket|close square brackets|right square bracket|right square brackets|square bracket|square brackets
+en_tz	_	underscore
+en_tz	{	curly brace|curly braces|curly bracket|curly brackets|left curly brace|left curly braces|left curly bracket|left curly brackets|open curly brace|open curly braces|open curly bracket|open curly brackets
+en_tz	}	close curly brace|close curly braces|close curly bracket|close curly brackets|curly brace|curly braces|curly bracket|curly brackets|right curly brace|right curly braces|right curly bracket|right curly brackets
+en_tz	–	dash|en dash|endash|medium dash
+en_tz	—	em dash|emdash|long dash
+en_us	⏎	new line|newline
+en_us	⏎⏎	new paragraph
+en_us	!	exclamation mark|exclamation point
+en_us	"	close quotation mark|close quote|double quotation mark|double quote|double quote mark|end quote|left quote|open quotation mark|open quote|quotation mark|quote mark|right quote|unquote
+en_us	#	hashtag|number sign|number symbol|pound sign
+en_us	&	ampersand|and sign|and symbol
+en_us	'	close single quote|close single quote mark|open single quote|open single quote mark|single quotation mark|single quote|single quote mark
+en_us	(	left paren|left parentheses|left parenthesis|open paren|open parentheses|open parenthesis|paren|parentheses|parenthesis
+en_us	)	close paren|close parentheses|close parenthesis|paren|parentheses|parenthesis|right paren|right parentheses|right parenthesis
+en_us	*	asterisk
+en_us	,	comma
+en_us	-	hyphen
+en_us	.	full stop|period
+en_us	...	dot dot dot|ellipsis|period period period
+en_us	/	forward slash|slash
+en_us	:	colon
+en_us	;	semicolon
+en_us	?	question mark
+en_us	@	at sign|at symbol
+en_us	[	left square bracket|left square brackets|open square bracket|open square brackets|square bracket|square brackets
+en_us	\	back slash|backslash
+en_us	]	close square bracket|close square brackets|right square bracket|right square brackets|square bracket|square brackets
+en_us	_	underscore
+en_us	{	curly brace|curly braces|curly bracket|curly brackets|left curly brace|left curly braces|left curly bracket|left curly brackets|open curly brace|open curly braces|open curly bracket|open curly brackets
+en_us	}	close curly brace|close curly braces|close curly bracket|close curly brackets|curly brace|curly braces|curly bracket|curly brackets|right curly brace|right curly braces|right curly bracket|right curly brackets
+en_us	–	dash|en dash|endash|medium dash
+en_us	—	em dash|emdash|long dash
+en_za	⏎	new line|newline
+en_za	⏎⏎	new paragraph
+en_za	!	exclamation mark|exclamation point
+en_za	"	close quotes|double quotation mark|double quote|double quote mark|double quotes|end quotes|left quote|left quotes|open quote|open quotes|quotation mark|quotation marks|quote mark|quote marks|right quote|right quotes
+en_za	#	hash|hash sign|hash symbol|hashtag|number sign|number symbol
+en_za	&	ampersand|and sign|and symbol
+en_za	'	close single quotes|end single quotes|left single quotes|open single quotes|right single quotes|single quotation mark|single quote|single quote mark|single quote marks|single quotes|start single quotes
+en_za	(	bracket|brackets|left bracket|left brackets|left paren|left parentheses|left parenthesis|open bracket|open brackets|open paren|open parentheses|open parenthesis|parentheses|parenthesis
+en_za	)	bracket|brackets|close bracket|close brackets|close paren|close parentheses|close parenthesis|paren|parentheses|parenthesis|right bracket|right brackets|right paren|right parentheses|right parenthesis
+en_za	*	asterisk
+en_za	,	comma
+en_za	-	hyphen
+en_za	.	full stop|period
+en_za	...	dot dot dot|ellipsis|period period period
+en_za	/	forward slash|slash
+en_za	:	colon
+en_za	;	semicolon
+en_za	?	question mark
+en_za	@	at sign|at symbol
+en_za	[	left square bracket|left square brackets|open square bracket|open square brackets|square bracket|square brackets
+en_za	\	back slash|backslash
+en_za	]	close square bracket|close square brackets|right square bracket|right square brackets|square bracket|square brackets
+en_za	_	underscore
+en_za	{	curly brace|curly braces|curly bracket|curly brackets|left curly brace|left curly braces|left curly bracket|left curly brackets|open curly brace|open curly braces|open curly bracket|open curly brackets
+en_za	}	close curly brace|close curly braces|close curly bracket|close curly brackets|curly brace|curly braces|curly bracket|curly brackets|right curly brace|right curly braces|right curly bracket|right curly brackets
+en_za	–	dash|en dash|endash|medium dash
+en_za	—	em dash|emdash|long dash
+es_ar	⏎	línea nueva|nueva línea|otra línea|salto de línea
+es_ar	⏎⏎	nuevo párrafo|otro párrafo|párrafo nuevo
+es_ar	!	cerrar exclamación|cierra exclamación|exclamación|exclamación de cierre|signo de exclamación|signo de exclamación de cierre
+es_ar	"	abre comillas|abrir comillas|cerrar comillas|cierra comillas|comillas|comillas de apertura|comillas de cierre|comillas dobles
+es_ar	#	almohadilla
+es_ar	&	ampersand|e comercial
+es_ar	'	abre comilla simple|abre comillas simples|abrir comilla simple|abrir comillas simples|cerrar comilla simple|cerrar comillas simples|cierra comilla simple|cierra comillas simples|comilla simple|comilla simple de apertura|comilla simple de cierre|comillas simples|comillas simples de apertura|comillas simples de cierre
+es_ar	(	abre paréntesis|abrir paréntesis|paréntesis de apertura
+es_ar	)	cerrar paréntesis|cierra paréntesis|paréntesis de cierre
+es_ar	*	asterisco
+es_ar	,	coma
+es_ar	-	guion|guión
+es_ar	.	punto|punto y seguido
+es_ar	...	punto punto punto|puntos suspensivos
+es_ar	/	barra diagonal|barra inclinada|barra oblicua|barra simple
+es_ar	:	dos puntos
+es_ar	;	punto y coma
+es_ar	<	abre comilla angular|abrir comilla angular|comilla angular|comilla angular de apertura
+es_ar	>	cerrar comilla angular|cierra comilla angular|comilla angular|comilla angular de cierre
+es_ar	?	cerrar interrogación|cierra interrogación|interrogación|interrogación de cierre|signo de interrogación|signo de interrogación de cierre
+es_ar	@	arroba
+es_ar	[	abre corchete|abre corchetes|abrir corchete|abrir corchetes|corchete|corchete de apertura|corchetes|corchetes de apertura
+es_ar	\	barra diagonal inversa|barra inversa|barra invertida|barra oblicua inversa
+es_ar	]	cerrar corchete|cerrar corchetes|cierra corchete|cierra corchetes|corchete|corchete de cierre|corchetes|corchetes de cierre
+es_ar	_	guión bajo
+es_ar	{	abre llave|abre llaves|abrir llave|abrir llaves|llave de apertura|llaves de apertura
+es_ar	}	cerrar llave|cerrar llaves|cierra llave|cierra llaves|llave de cierre|llaves de cierre
+es_ar	¡	signo de exclamación de apertura
+es_ar	«	abre comillas angulares|abrir comillas angulares|comillas angulares|comillas angulares de apertura|comillas castellanas|comillas españolas|comillas latinas|guillemet
+es_ar	»	cerrar comillas angulares|cierra comillas angulares|comillas angulares|comillas angulares de cierre|comillas castellanas|comillas españolas|comillas latinas|guillemet
+es_ar	¿	signo de interrogación de apertura
+es_ar	—	guion largo|guion largo de apertura|guion largo de cierre|raya de apertura|raya de cierre
+es_bo	⏎	línea nueva|nueva línea|otra línea|salto de línea
+es_bo	⏎⏎	nuevo párrafo|otro párrafo|párrafo nuevo
+es_bo	!	cerrar exclamación|cierra exclamación|exclamación|exclamación de cierre|signo de exclamación|signo de exclamación de cierre
+es_bo	"	abre comillas|abrir comillas|cerrar comillas|cierra comillas|comillas|comillas de apertura|comillas de cierre|comillas dobles
+es_bo	#	almohadilla
+es_bo	&	ampersand|e comercial
+es_bo	'	abre comilla simple|abre comillas simples|abrir comilla simple|abrir comillas simples|cerrar comilla simple|cerrar comillas simples|cierra comilla simple|cierra comillas simples|comilla simple|comilla simple de apertura|comilla simple de cierre|comillas simples|comillas simples de apertura|comillas simples de cierre
+es_bo	(	abre paréntesis|abrir paréntesis|paréntesis de apertura
+es_bo	)	cerrar paréntesis|cierra paréntesis|paréntesis de cierre
+es_bo	*	asterisco
+es_bo	,	coma
+es_bo	-	guion|guión
+es_bo	.	punto|punto y seguido
+es_bo	...	punto punto punto|puntos suspensivos
+es_bo	/	barra diagonal|barra inclinada|barra oblicua|barra simple
+es_bo	:	dos puntos
+es_bo	;	punto y coma
+es_bo	<	abre comilla angular|abrir comilla angular|comilla angular|comilla angular de apertura
+es_bo	>	cerrar comilla angular|cierra comilla angular|comilla angular|comilla angular de cierre
+es_bo	?	cerrar interrogación|cierra interrogación|interrogación|interrogación de cierre|signo de interrogación|signo de interrogación de cierre
+es_bo	@	arroba
+es_bo	[	abre corchete|abre corchetes|abrir corchete|abrir corchetes|corchete|corchete de apertura|corchetes|corchetes de apertura
+es_bo	\	barra diagonal inversa|barra inversa|barra invertida|barra oblicua inversa
+es_bo	]	cerrar corchete|cerrar corchetes|cierra corchete|cierra corchetes|corchete|corchete de cierre|corchetes|corchetes de cierre
+es_bo	_	guión bajo
+es_bo	{	abre llave|abre llaves|abrir llave|abrir llaves|llave de apertura|llaves de apertura
+es_bo	}	cerrar llave|cerrar llaves|cierra llave|cierra llaves|llave de cierre|llaves de cierre
+es_bo	¡	signo de exclamación de apertura
+es_bo	«	abre comillas angulares|abrir comillas angulares|comillas angulares|comillas angulares de apertura|comillas castellanas|comillas españolas|comillas latinas|guillemet
+es_bo	»	cerrar comillas angulares|cierra comillas angulares|comillas angulares|comillas angulares de cierre|comillas castellanas|comillas españolas|comillas latinas|guillemet
+es_bo	¿	signo de interrogación de apertura
+es_bo	—	guion largo|guion largo de apertura|guion largo de cierre|raya de apertura|raya de cierre
+es_cl	⏎	línea nueva|nueva línea|otra línea|salto de línea
+es_cl	⏎⏎	nuevo párrafo|otro párrafo|párrafo nuevo
+es_cl	!	cerrar exclamación|cierra exclamación|exclamación|exclamación de cierre|signo de exclamación|signo de exclamación de cierre
+es_cl	"	abre comillas|abrir comillas|cerrar comillas|cierra comillas|comillas|comillas de apertura|comillas de cierre|comillas dobles
+es_cl	#	almohadilla
+es_cl	&	ampersand|e comercial
+es_cl	'	abre comilla simple|abre comillas simples|abrir comilla simple|abrir comillas simples|cerrar comilla simple|cerrar comillas simples|cierra comilla simple|cierra comillas simples|comilla simple|comilla simple de apertura|comilla simple de cierre|comillas simples|comillas simples de apertura|comillas simples de cierre
+es_cl	(	abre paréntesis|abrir paréntesis|paréntesis de apertura
+es_cl	)	cerrar paréntesis|cierra paréntesis|paréntesis de cierre
+es_cl	*	asterisco
+es_cl	,	coma
+es_cl	-	guion|guión
+es_cl	.	punto|punto y seguido
+es_cl	...	punto punto punto|puntos suspensivos
+es_cl	/	barra diagonal|barra inclinada|barra oblicua|barra simple
+es_cl	:	dos puntos
+es_cl	;	punto y coma
+es_cl	<	abre comilla angular|abrir comilla angular|comilla angular|comilla angular de apertura
+es_cl	>	cerrar comilla angular|cierra comilla angular|comilla angular|comilla angular de cierre
+es_cl	?	cerrar interrogación|cierra interrogación|interrogación|interrogación de cierre|signo de interrogación|signo de interrogación de cierre
+es_cl	@	arroba
+es_cl	[	abre corchete|abre corchetes|abrir corchete|abrir corchetes|corchete|corchete de apertura|corchetes|corchetes de apertura
+es_cl	\	barra diagonal inversa|barra inversa|barra invertida|barra oblicua inversa
+es_cl	]	cerrar corchete|cerrar corchetes|cierra corchete|cierra corchetes|corchete|corchete de cierre|corchetes|corchetes de cierre
+es_cl	_	guión bajo
+es_cl	{	abre llave|abre llaves|abrir llave|abrir llaves|llave de apertura|llaves de apertura
+es_cl	}	cerrar llave|cerrar llaves|cierra llave|cierra llaves|llave de cierre|llaves de cierre
+es_cl	¡	signo de exclamación de apertura
+es_cl	«	abre comillas angulares|abrir comillas angulares|comillas angulares|comillas angulares de apertura|comillas castellanas|comillas españolas|comillas latinas|guillemet
+es_cl	»	cerrar comillas angulares|cierra comillas angulares|comillas angulares|comillas angulares de cierre|comillas castellanas|comillas españolas|comillas latinas|guillemet
+es_cl	¿	signo de interrogación de apertura
+es_cl	—	guion largo|guion largo de apertura|guion largo de cierre|raya de apertura|raya de cierre
+es_co	⏎	línea nueva|nueva línea|otra línea|salto de línea
+es_co	⏎⏎	nuevo párrafo|otro párrafo|párrafo nuevo
+es_co	!	cerrar exclamación|cierra exclamación|exclamación|exclamación de cierre|signo de exclamación|signo de exclamación de cierre
+es_co	"	abre comillas|abrir comillas|cerrar comillas|cierra comillas|comillas|comillas de apertura|comillas de cierre|comillas dobles
+es_co	#	almohadilla
+es_co	&	ampersand|e comercial
+es_co	'	abre comilla simple|abre comillas simples|abrir comilla simple|abrir comillas simples|cerrar comilla simple|cerrar comillas simples|cierra comilla simple|cierra comillas simples|comilla simple|comilla simple de apertura|comilla simple de cierre|comillas simples|comillas simples de apertura|comillas simples de cierre
+es_co	(	abre paréntesis|abrir paréntesis|paréntesis de apertura
+es_co	)	cerrar paréntesis|cierra paréntesis|paréntesis de cierre
+es_co	*	asterisco
+es_co	,	coma
+es_co	-	guion|guión
+es_co	.	punto|punto y seguido
+es_co	...	punto punto punto|puntos suspensivos
+es_co	/	barra diagonal|barra inclinada|barra oblicua|barra simple
+es_co	:	dos puntos
+es_co	;	punto y coma
+es_co	<	abre comilla angular|abrir comilla angular|comilla angular|comilla angular de apertura
+es_co	>	cerrar comilla angular|cierra comilla angular|comilla angular|comilla angular de cierre
+es_co	?	cerrar interrogación|cierra interrogación|interrogación|interrogación de cierre|signo de interrogación|signo de interrogación de cierre
+es_co	@	arroba
+es_co	[	abre corchete|abre corchetes|abrir corchete|abrir corchetes|corchete|corchete de apertura|corchetes|corchetes de apertura
+es_co	\	barra diagonal inversa|barra inversa|barra invertida|barra oblicua inversa
+es_co	]	cerrar corchete|cerrar corchetes|cierra corchete|cierra corchetes|corchete|corchete de cierre|corchetes|corchetes de cierre
+es_co	_	guión bajo
+es_co	{	abre llave|abre llaves|abrir llave|abrir llaves|llave de apertura|llaves de apertura
+es_co	}	cerrar llave|cerrar llaves|cierra llave|cierra llaves|llave de cierre|llaves de cierre
+es_co	¡	signo de exclamación de apertura
+es_co	«	abre comillas angulares|abrir comillas angulares|comillas angulares|comillas angulares de apertura|comillas castellanas|comillas españolas|comillas latinas|guillemet
+es_co	»	cerrar comillas angulares|cierra comillas angulares|comillas angulares|comillas angulares de cierre|comillas castellanas|comillas españolas|comillas latinas|guillemet
+es_co	¿	signo de interrogación de apertura
+es_co	—	guion largo|guion largo de apertura|guion largo de cierre|raya de apertura|raya de cierre
+es_cr	⏎	línea nueva|nueva línea|otra línea|salto de línea
+es_cr	⏎⏎	nuevo párrafo|otro párrafo|párrafo nuevo
+es_cr	!	cerrar exclamación|cierra exclamación|exclamación|exclamación de cierre|signo de exclamación|signo de exclamación de cierre
+es_cr	"	abre comillas|abrir comillas|cerrar comillas|cierra comillas|comillas|comillas de apertura|comillas de cierre|comillas dobles
+es_cr	#	almohadilla
+es_cr	&	ampersand|e comercial
+es_cr	'	abre comilla simple|abre comillas simples|abrir comilla simple|abrir comillas simples|cerrar comilla simple|cerrar comillas simples|cierra comilla simple|cierra comillas simples|comilla simple|comilla simple de apertura|comilla simple de cierre|comillas simples|comillas simples de apertura|comillas simples de cierre
+es_cr	(	abre paréntesis|abrir paréntesis|paréntesis de apertura
+es_cr	)	cerrar paréntesis|cierra paréntesis|paréntesis de cierre
+es_cr	*	asterisco
+es_cr	,	coma
+es_cr	-	guion|guión
+es_cr	.	punto|punto y seguido
+es_cr	...	punto punto punto|puntos suspensivos
+es_cr	/	barra diagonal|barra inclinada|barra oblicua|barra simple
+es_cr	:	dos puntos
+es_cr	;	punto y coma
+es_cr	<	abre comilla angular|abrir comilla angular|comilla angular|comilla angular de apertura
+es_cr	>	cerrar comilla angular|cierra comilla angular|comilla angular|comilla angular de cierre
+es_cr	?	cerrar interrogación|cierra interrogación|interrogación|interrogación de cierre|signo de interrogación|signo de interrogación de cierre
+es_cr	@	arroba
+es_cr	[	abre corchete|abre corchetes|abrir corchete|abrir corchetes|corchete|corchete de apertura|corchetes|corchetes de apertura
+es_cr	\	barra diagonal inversa|barra inversa|barra invertida|barra oblicua inversa
+es_cr	]	cerrar corchete|cerrar corchetes|cierra corchete|cierra corchetes|corchete|corchete de cierre|corchetes|corchetes de cierre
+es_cr	_	guión bajo
+es_cr	{	abre llave|abre llaves|abrir llave|abrir llaves|llave de apertura|llaves de apertura
+es_cr	}	cerrar llave|cerrar llaves|cierra llave|cierra llaves|llave de cierre|llaves de cierre
+es_cr	¡	signo de exclamación de apertura
+es_cr	«	abre comillas angulares|abrir comillas angulares|comillas angulares|comillas angulares de apertura|comillas castellanas|comillas españolas|comillas latinas|guillemet
+es_cr	»	cerrar comillas angulares|cierra comillas angulares|comillas angulares|comillas angulares de cierre|comillas castellanas|comillas españolas|comillas latinas|guillemet
+es_cr	¿	signo de interrogación de apertura
+es_cr	—	guion largo|guion largo de apertura|guion largo de cierre|raya de apertura|raya de cierre
+es_do	⏎	línea nueva|nueva línea|otra línea|salto de línea
+es_do	⏎⏎	nuevo párrafo|otro párrafo|párrafo nuevo
+es_do	!	cerrar exclamación|cierra exclamación|exclamación|exclamación de cierre|signo de exclamación|signo de exclamación de cierre
+es_do	"	abre comillas|abrir comillas|cerrar comillas|cierra comillas|comillas|comillas de apertura|comillas de cierre|comillas dobles
+es_do	#	almohadilla
+es_do	&	ampersand|e comercial
+es_do	'	abre comilla simple|abre comillas simples|abrir comilla simple|abrir comillas simples|cerrar comilla simple|cerrar comillas simples|cierra comilla simple|cierra comillas simples|comilla simple|comilla simple de apertura|comilla simple de cierre|comillas simples|comillas simples de apertura|comillas simples de cierre
+es_do	(	abre paréntesis|abrir paréntesis|paréntesis de apertura
+es_do	)	cerrar paréntesis|cierra paréntesis|paréntesis de cierre
+es_do	*	asterisco
+es_do	,	coma
+es_do	-	guion|guión
+es_do	.	punto|punto y seguido
+es_do	...	punto punto punto|puntos suspensivos
+es_do	/	barra diagonal|barra inclinada|barra oblicua|barra simple
+es_do	:	dos puntos
+es_do	;	punto y coma
+es_do	<	abre comilla angular|abrir comilla angular|comilla angular|comilla angular de apertura
+es_do	>	cerrar comilla angular|cierra comilla angular|comilla angular|comilla angular de cierre
+es_do	?	cerrar interrogación|cierra interrogación|interrogación|interrogación de cierre|signo de interrogación|signo de interrogación de cierre
+es_do	@	arroba
+es_do	[	abre corchete|abre corchetes|abrir corchete|abrir corchetes|corchete|corchete de apertura|corchetes|corchetes de apertura
+es_do	\	barra diagonal inversa|barra inversa|barra invertida|barra oblicua inversa
+es_do	]	cerrar corchete|cerrar corchetes|cierra corchete|cierra corchetes|corchete|corchete de cierre|corchetes|corchetes de cierre
+es_do	_	guión bajo
+es_do	{	abre llave|abre llaves|abrir llave|abrir llaves|llave de apertura|llaves de apertura
+es_do	}	cerrar llave|cerrar llaves|cierra llave|cierra llaves|llave de cierre|llaves de cierre
+es_do	¡	signo de exclamación de apertura
+es_do	«	abre comillas angulares|abrir comillas angulares|comillas angulares|comillas angulares de apertura|comillas castellanas|comillas españolas|comillas latinas|guillemet
+es_do	»	cerrar comillas angulares|cierra comillas angulares|comillas angulares|comillas angulares de cierre|comillas castellanas|comillas españolas|comillas latinas|guillemet
+es_do	¿	signo de interrogación de apertura
+es_do	—	guion largo|guion largo de apertura|guion largo de cierre|raya de apertura|raya de cierre
+es_ec	⏎	línea nueva|nueva línea|otra línea|salto de línea
+es_ec	⏎⏎	nuevo párrafo|otro párrafo|párrafo nuevo
+es_ec	!	cerrar exclamación|cierra exclamación|exclamación|exclamación de cierre|signo de exclamación|signo de exclamación de cierre
+es_ec	"	abre comillas|abrir comillas|cerrar comillas|cierra comillas|comillas|comillas de apertura|comillas de cierre|comillas dobles
+es_ec	#	almohadilla
+es_ec	&	ampersand|e comercial
+es_ec	'	abre comilla simple|abre comillas simples|abrir comilla simple|abrir comillas simples|cerrar comilla simple|cerrar comillas simples|cierra comilla simple|cierra comillas simples|comilla simple|comilla simple de apertura|comilla simple de cierre|comillas simples|comillas simples de apertura|comillas simples de cierre
+es_ec	(	abre paréntesis|abrir paréntesis|paréntesis de apertura
+es_ec	)	cerrar paréntesis|cierra paréntesis|paréntesis de cierre
+es_ec	*	asterisco
+es_ec	,	coma
+es_ec	-	guion|guión
+es_ec	.	punto|punto y seguido
+es_ec	...	punto punto punto|puntos suspensivos
+es_ec	/	barra diagonal|barra inclinada|barra oblicua|barra simple
+es_ec	:	dos puntos
+es_ec	;	punto y coma
+es_ec	<	abre comilla angular|abrir comilla angular|comilla angular|comilla angular de apertura
+es_ec	>	cerrar comilla angular|cierra comilla angular|comilla angular|comilla angular de cierre
+es_ec	?	cerrar interrogación|cierra interrogación|interrogación|interrogación de cierre|signo de interrogación|signo de interrogación de cierre
+es_ec	@	arroba
+es_ec	[	abre corchete|abre corchetes|abrir corchete|abrir corchetes|corchete|corchete de apertura|corchetes|corchetes de apertura
+es_ec	\	barra diagonal inversa|barra inversa|barra invertida|barra oblicua inversa
+es_ec	]	cerrar corchete|cerrar corchetes|cierra corchete|cierra corchetes|corchete|corchete de cierre|corchetes|corchetes de cierre
+es_ec	_	guión bajo
+es_ec	{	abre llave|abre llaves|abrir llave|abrir llaves|llave de apertura|llaves de apertura
+es_ec	}	cerrar llave|cerrar llaves|cierra llave|cierra llaves|llave de cierre|llaves de cierre
+es_ec	¡	signo de exclamación de apertura
+es_ec	«	abre comillas angulares|abrir comillas angulares|comillas angulares|comillas angulares de apertura|comillas castellanas|comillas españolas|comillas latinas|guillemet
+es_ec	»	cerrar comillas angulares|cierra comillas angulares|comillas angulares|comillas angulares de cierre|comillas castellanas|comillas españolas|comillas latinas|guillemet
+es_ec	¿	signo de interrogación de apertura
+es_ec	—	guion largo|guion largo de apertura|guion largo de cierre|raya de apertura|raya de cierre
+es_es	⏎	línea nueva|nueva línea|otra línea|salto de línea
+es_es	⏎⏎	nuevo párrafo|otro párrafo|párrafo nuevo
+es_es	!	cerrar exclamación|cierra exclamación|exclamación|exclamación de cierre|signo de exclamación|signo de exclamación de cierre
+es_es	"	abre comillas|abrir comillas|cerrar comillas|cierra comillas|comillas|comillas de apertura|comillas de cierre|comillas dobles
+es_es	#	almohadilla
+es_es	&	ampersand|e comercial
+es_es	'	abre comilla simple|abre comillas simples|abrir comilla simple|abrir comillas simples|cerrar comilla simple|cerrar comillas simples|cierra comilla simple|cierra comillas simples|comilla simple|comilla simple de apertura|comilla simple de cierre|comillas simples|comillas simples de apertura|comillas simples de cierre
+es_es	(	abre paréntesis|abrir paréntesis|paréntesis de apertura
+es_es	)	cerrar paréntesis|cierra paréntesis|paréntesis de cierre
+es_es	*	asterisco
+es_es	,	coma
+es_es	-	guion|guión
+es_es	.	punto|punto y seguido
+es_es	...	punto punto punto|puntos suspensivos
+es_es	/	barra diagonal|barra inclinada|barra oblicua|barra simple
+es_es	:	dos puntos
+es_es	;	punto y coma
+es_es	<	abre comilla angular|abrir comilla angular|comilla angular|comilla angular de apertura
+es_es	>	cerrar comilla angular|cierra comilla angular|comilla angular|comilla angular de cierre
+es_es	?	cerrar interrogación|cierra interrogación|interrogación|interrogación de cierre|signo de interrogación|signo de interrogación de cierre
+es_es	@	arroba
+es_es	[	abre corchete|abre corchetes|abrir corchete|abrir corchetes|corchete|corchete de apertura|corchetes|corchetes de apertura
+es_es	\	barra diagonal inversa|barra inversa|barra invertida|barra oblicua inversa
+es_es	]	cerrar corchete|cerrar corchetes|cierra corchete|cierra corchetes|corchete|corchete de cierre|corchetes|corchetes de cierre
+es_es	_	guión bajo
+es_es	{	abre llave|abre llaves|abrir llave|abrir llaves|llave de apertura|llaves de apertura
+es_es	}	cerrar llave|cerrar llaves|cierra llave|cierra llaves|llave de cierre|llaves de cierre
+es_es	¡	signo de exclamación de apertura
+es_es	«	abre comillas angulares|abrir comillas angulares|comillas angulares|comillas angulares de apertura|comillas castellanas|comillas españolas|comillas latinas|guillemet
+es_es	»	cerrar comillas angulares|cierra comillas angulares|comillas angulares|comillas angulares de cierre|comillas castellanas|comillas españolas|comillas latinas|guillemet
+es_es	¿	signo de interrogación de apertura
+es_es	—	guion largo|guion largo de apertura|guion largo de cierre|raya de apertura|raya de cierre
+es_gt	⏎	línea nueva|nueva línea|otra línea|salto de línea
+es_gt	⏎⏎	nuevo párrafo|otro párrafo|párrafo nuevo
+es_gt	!	cerrar exclamación|cierra exclamación|exclamación|exclamación de cierre|signo de exclamación|signo de exclamación de cierre
+es_gt	"	abre comillas|abrir comillas|cerrar comillas|cierra comillas|comillas|comillas de apertura|comillas de cierre|comillas dobles
+es_gt	#	almohadilla
+es_gt	&	ampersand|e comercial
+es_gt	'	abre comilla simple|abre comillas simples|abrir comilla simple|abrir comillas simples|cerrar comilla simple|cerrar comillas simples|cierra comilla simple|cierra comillas simples|comilla simple|comilla simple de apertura|comilla simple de cierre|comillas simples|comillas simples de apertura|comillas simples de cierre
+es_gt	(	abre paréntesis|abrir paréntesis|paréntesis de apertura
+es_gt	)	cerrar paréntesis|cierra paréntesis|paréntesis de cierre
+es_gt	*	asterisco
+es_gt	,	coma
+es_gt	-	guion|guión
+es_gt	.	punto|punto y seguido
+es_gt	...	punto punto punto|puntos suspensivos
+es_gt	/	barra diagonal|barra inclinada|barra oblicua|barra simple
+es_gt	:	dos puntos
+es_gt	;	punto y coma
+es_gt	<	abre comilla angular|abrir comilla angular|comilla angular|comilla angular de apertura
+es_gt	>	cerrar comilla angular|cierra comilla angular|comilla angular|comilla angular de cierre
+es_gt	?	cerrar interrogación|cierra interrogación|interrogación|interrogación de cierre|signo de interrogación|signo de interrogación de cierre
+es_gt	@	arroba
+es_gt	[	abre corchete|abre corchetes|abrir corchete|abrir corchetes|corchete|corchete de apertura|corchetes|corchetes de apertura
+es_gt	\	barra diagonal inversa|barra inversa|barra invertida|barra oblicua inversa
+es_gt	]	cerrar corchete|cerrar corchetes|cierra corchete|cierra corchetes|corchete|corchete de cierre|corchetes|corchetes de cierre
+es_gt	_	guión bajo
+es_gt	{	abre llave|abre llaves|abrir llave|abrir llaves|llave de apertura|llaves de apertura
+es_gt	}	cerrar llave|cerrar llaves|cierra llave|cierra llaves|llave de cierre|llaves de cierre
+es_gt	¡	signo de exclamación de apertura
+es_gt	«	abre comillas angulares|abrir comillas angulares|comillas angulares|comillas angulares de apertura|comillas castellanas|comillas españolas|comillas latinas|guillemet
+es_gt	»	cerrar comillas angulares|cierra comillas angulares|comillas angulares|comillas angulares de cierre|comillas castellanas|comillas españolas|comillas latinas|guillemet
+es_gt	¿	signo de interrogación de apertura
+es_gt	—	guion largo|guion largo de apertura|guion largo de cierre|raya de apertura|raya de cierre
+es_hn	⏎	línea nueva|nueva línea|otra línea|salto de línea
+es_hn	⏎⏎	nuevo párrafo|otro párrafo|párrafo nuevo
+es_hn	!	cerrar exclamación|cierra exclamación|exclamación|exclamación de cierre|signo de exclamación|signo de exclamación de cierre
+es_hn	"	abre comillas|abrir comillas|cerrar comillas|cierra comillas|comillas|comillas de apertura|comillas de cierre|comillas dobles
+es_hn	#	almohadilla
+es_hn	&	ampersand|e comercial
+es_hn	'	abre comilla simple|abre comillas simples|abrir comilla simple|abrir comillas simples|cerrar comilla simple|cerrar comillas simples|cierra comilla simple|cierra comillas simples|comilla simple|comilla simple de apertura|comilla simple de cierre|comillas simples|comillas simples de apertura|comillas simples de cierre
+es_hn	(	abre paréntesis|abrir paréntesis|paréntesis de apertura
+es_hn	)	cerrar paréntesis|cierra paréntesis|paréntesis de cierre
+es_hn	*	asterisco
+es_hn	,	coma
+es_hn	-	guion|guión
+es_hn	.	punto|punto y seguido
+es_hn	...	punto punto punto|puntos suspensivos
+es_hn	/	barra diagonal|barra inclinada|barra oblicua|barra simple
+es_hn	:	dos puntos
+es_hn	;	punto y coma
+es_hn	<	abre comilla angular|abrir comilla angular|comilla angular|comilla angular de apertura
+es_hn	>	cerrar comilla angular|cierra comilla angular|comilla angular|comilla angular de cierre
+es_hn	?	cerrar interrogación|cierra interrogación|interrogación|interrogación de cierre|signo de interrogación|signo de interrogación de cierre
+es_hn	@	arroba
+es_hn	[	abre corchete|abre corchetes|abrir corchete|abrir corchetes|corchete|corchete de apertura|corchetes|corchetes de apertura
+es_hn	\	barra diagonal inversa|barra inversa|barra invertida|barra oblicua inversa
+es_hn	]	cerrar corchete|cerrar corchetes|cierra corchete|cierra corchetes|corchete|corchete de cierre|corchetes|corchetes de cierre
+es_hn	_	guión bajo
+es_hn	{	abre llave|abre llaves|abrir llave|abrir llaves|llave de apertura|llaves de apertura
+es_hn	}	cerrar llave|cerrar llaves|cierra llave|cierra llaves|llave de cierre|llaves de cierre
+es_hn	¡	signo de exclamación de apertura
+es_hn	«	abre comillas angulares|abrir comillas angulares|comillas angulares|comillas angulares de apertura|comillas castellanas|comillas españolas|comillas latinas|guillemet
+es_hn	»	cerrar comillas angulares|cierra comillas angulares|comillas angulares|comillas angulares de cierre|comillas castellanas|comillas españolas|comillas latinas|guillemet
+es_hn	¿	signo de interrogación de apertura
+es_hn	—	guion largo|guion largo de apertura|guion largo de cierre|raya de apertura|raya de cierre
+es_mx	⏎	línea nueva|nueva línea|otra línea|salto de línea
+es_mx	⏎⏎	nuevo párrafo|otro párrafo|párrafo nuevo
+es_mx	!	cerrar exclamación|cierra exclamación|exclamación|exclamación de cierre|signo de exclamación|signo de exclamación de cierre
+es_mx	"	abre comillas|abrir comillas|cerrar comillas|cierra comillas|comillas|comillas de apertura|comillas de cierre|comillas dobles
+es_mx	#	almohadilla
+es_mx	&	ampersand|e comercial
+es_mx	'	abre comilla simple|abre comillas simples|abrir comilla simple|abrir comillas simples|cerrar comilla simple|cerrar comillas simples|cierra comilla simple|cierra comillas simples|comilla simple|comilla simple de apertura|comilla simple de cierre|comillas simples|comillas simples de apertura|comillas simples de cierre
+es_mx	(	abre paréntesis|abrir paréntesis|paréntesis de apertura
+es_mx	)	cerrar paréntesis|cierra paréntesis|paréntesis de cierre
+es_mx	*	asterisco
+es_mx	,	coma
+es_mx	-	guion|guión
+es_mx	.	punto|punto y seguido
+es_mx	...	punto punto punto|puntos suspensivos
+es_mx	/	barra diagonal|barra inclinada|barra oblicua|barra simple
+es_mx	:	dos puntos
+es_mx	;	punto y coma
+es_mx	<	abre comilla angular|abrir comilla angular|comilla angular|comilla angular de apertura
+es_mx	>	cerrar comilla angular|cierra comilla angular|comilla angular|comilla angular de cierre
+es_mx	?	cerrar interrogación|cierra interrogación|interrogación|interrogación de cierre|signo de interrogación|signo de interrogación de cierre
+es_mx	@	arroba
+es_mx	[	abre corchete|abre corchetes|abrir corchete|abrir corchetes|corchete|corchete de apertura|corchetes|corchetes de apertura
+es_mx	\	barra diagonal inversa|barra inversa|barra invertida|barra oblicua inversa
+es_mx	]	cerrar corchete|cerrar corchetes|cierra corchete|cierra corchetes|corchete|corchete de cierre|corchetes|corchetes de cierre
+es_mx	_	guión bajo
+es_mx	{	abre llave|abre llaves|abrir llave|abrir llaves|llave de apertura|llaves de apertura
+es_mx	}	cerrar llave|cerrar llaves|cierra llave|cierra llaves|llave de cierre|llaves de cierre
+es_mx	¡	signo de exclamación de apertura
+es_mx	«	abre comillas angulares|abrir comillas angulares|comillas angulares|comillas angulares de apertura|comillas castellanas|comillas españolas|comillas latinas|guillemet
+es_mx	»	cerrar comillas angulares|cierra comillas angulares|comillas angulares|comillas angulares de cierre|comillas castellanas|comillas españolas|comillas latinas|guillemet
+es_mx	¿	signo de interrogación de apertura
+es_mx	—	guion largo|guion largo de apertura|guion largo de cierre|raya de apertura|raya de cierre
+es_ni	⏎	línea nueva|nueva línea|otra línea|salto de línea
+es_ni	⏎⏎	nuevo párrafo|otro párrafo|párrafo nuevo
+es_ni	!	cerrar exclamación|cierra exclamación|exclamación|exclamación de cierre|signo de exclamación|signo de exclamación de cierre
+es_ni	"	abre comillas|abrir comillas|cerrar comillas|cierra comillas|comillas|comillas de apertura|comillas de cierre|comillas dobles
+es_ni	#	almohadilla
+es_ni	&	ampersand|e comercial
+es_ni	'	abre comilla simple|abre comillas simples|abrir comilla simple|abrir comillas simples|cerrar comilla simple|cerrar comillas simples|cierra comilla simple|cierra comillas simples|comilla simple|comilla simple de apertura|comilla simple de cierre|comillas simples|comillas simples de apertura|comillas simples de cierre
+es_ni	(	abre paréntesis|abrir paréntesis|paréntesis de apertura
+es_ni	)	cerrar paréntesis|cierra paréntesis|paréntesis de cierre
+es_ni	*	asterisco
+es_ni	,	coma
+es_ni	-	guion|guión
+es_ni	.	punto|punto y seguido
+es_ni	...	punto punto punto|puntos suspensivos
+es_ni	/	barra diagonal|barra inclinada|barra oblicua|barra simple
+es_ni	:	dos puntos
+es_ni	;	punto y coma
+es_ni	<	abre comilla angular|abrir comilla angular|comilla angular|comilla angular de apertura
+es_ni	>	cerrar comilla angular|cierra comilla angular|comilla angular|comilla angular de cierre
+es_ni	?	cerrar interrogación|cierra interrogación|interrogación|interrogación de cierre|signo de interrogación|signo de interrogación de cierre
+es_ni	@	arroba
+es_ni	[	abre corchete|abre corchetes|abrir corchete|abrir corchetes|corchete|corchete de apertura|corchetes|corchetes de apertura
+es_ni	\	barra diagonal inversa|barra inversa|barra invertida|barra oblicua inversa
+es_ni	]	cerrar corchete|cerrar corchetes|cierra corchete|cierra corchetes|corchete|corchete de cierre|corchetes|corchetes de cierre
+es_ni	_	guión bajo
+es_ni	{	abre llave|abre llaves|abrir llave|abrir llaves|llave de apertura|llaves de apertura
+es_ni	}	cerrar llave|cerrar llaves|cierra llave|cierra llaves|llave de cierre|llaves de cierre
+es_ni	¡	signo de exclamación de apertura
+es_ni	«	abre comillas angulares|abrir comillas angulares|comillas angulares|comillas angulares de apertura|comillas castellanas|comillas españolas|comillas latinas|guillemet
+es_ni	»	cerrar comillas angulares|cierra comillas angulares|comillas angulares|comillas angulares de cierre|comillas castellanas|comillas españolas|comillas latinas|guillemet
+es_ni	¿	signo de interrogación de apertura
+es_ni	—	guion largo|guion largo de apertura|guion largo de cierre|raya de apertura|raya de cierre
+es_pa	⏎	línea nueva|nueva línea|otra línea|salto de línea
+es_pa	⏎⏎	nuevo párrafo|otro párrafo|párrafo nuevo
+es_pa	!	cerrar exclamación|cierra exclamación|exclamación|exclamación de cierre|signo de exclamación|signo de exclamación de cierre
+es_pa	"	abre comillas|abrir comillas|cerrar comillas|cierra comillas|comillas|comillas de apertura|comillas de cierre|comillas dobles
+es_pa	#	almohadilla
+es_pa	&	ampersand|e comercial
+es_pa	'	abre comilla simple|abre comillas simples|abrir comilla simple|abrir comillas simples|cerrar comilla simple|cerrar comillas simples|cierra comilla simple|cierra comillas simples|comilla simple|comilla simple de apertura|comilla simple de cierre|comillas simples|comillas simples de apertura|comillas simples de cierre
+es_pa	(	abre paréntesis|abrir paréntesis|paréntesis de apertura
+es_pa	)	cerrar paréntesis|cierra paréntesis|paréntesis de cierre
+es_pa	*	asterisco
+es_pa	,	coma
+es_pa	-	guion|guión
+es_pa	.	punto|punto y seguido
+es_pa	...	punto punto punto|puntos suspensivos
+es_pa	/	barra diagonal|barra inclinada|barra oblicua|barra simple
+es_pa	:	dos puntos
+es_pa	;	punto y coma
+es_pa	<	abre comilla angular|abrir comilla angular|comilla angular|comilla angular de apertura
+es_pa	>	cerrar comilla angular|cierra comilla angular|comilla angular|comilla angular de cierre
+es_pa	?	cerrar interrogación|cierra interrogación|interrogación|interrogación de cierre|signo de interrogación|signo de interrogación de cierre
+es_pa	@	arroba
+es_pa	[	abre corchete|abre corchetes|abrir corchete|abrir corchetes|corchete|corchete de apertura|corchetes|corchetes de apertura
+es_pa	\	barra diagonal inversa|barra inversa|barra invertida|barra oblicua inversa
+es_pa	]	cerrar corchete|cerrar corchetes|cierra corchete|cierra corchetes|corchete|corchete de cierre|corchetes|corchetes de cierre
+es_pa	_	guión bajo
+es_pa	{	abre llave|abre llaves|abrir llave|abrir llaves|llave de apertura|llaves de apertura
+es_pa	}	cerrar llave|cerrar llaves|cierra llave|cierra llaves|llave de cierre|llaves de cierre
+es_pa	¡	signo de exclamación de apertura
+es_pa	«	abre comillas angulares|abrir comillas angulares|comillas angulares|comillas angulares de apertura|comillas castellanas|comillas españolas|comillas latinas|guillemet
+es_pa	»	cerrar comillas angulares|cierra comillas angulares|comillas angulares|comillas angulares de cierre|comillas castellanas|comillas españolas|comillas latinas|guillemet
+es_pa	¿	signo de interrogación de apertura
+es_pa	—	guion largo|guion largo de apertura|guion largo de cierre|raya de apertura|raya de cierre
+es_pe	⏎	línea nueva|nueva línea|otra línea|salto de línea
+es_pe	⏎⏎	nuevo párrafo|otro párrafo|párrafo nuevo
+es_pe	!	cerrar exclamación|cierra exclamación|exclamación|exclamación de cierre|signo de exclamación|signo de exclamación de cierre
+es_pe	"	abre comillas|abrir comillas|cerrar comillas|cierra comillas|comillas|comillas de apertura|comillas de cierre|comillas dobles
+es_pe	#	almohadilla
+es_pe	&	ampersand|e comercial
+es_pe	'	abre comilla simple|abre comillas simples|abrir comilla simple|abrir comillas simples|cerrar comilla simple|cerrar comillas simples|cierra comilla simple|cierra comillas simples|comilla simple|comilla simple de apertura|comilla simple de cierre|comillas simples|comillas simples de apertura|comillas simples de cierre
+es_pe	(	abre paréntesis|abrir paréntesis|paréntesis de apertura
+es_pe	)	cerrar paréntesis|cierra paréntesis|paréntesis de cierre
+es_pe	*	asterisco
+es_pe	,	coma
+es_pe	-	guion|guión
+es_pe	.	punto|punto y seguido
+es_pe	...	punto punto punto|puntos suspensivos
+es_pe	/	barra diagonal|barra inclinada|barra oblicua|barra simple
+es_pe	:	dos puntos
+es_pe	;	punto y coma
+es_pe	<	abre comilla angular|abrir comilla angular|comilla angular|comilla angular de apertura
+es_pe	>	cerrar comilla angular|cierra comilla angular|comilla angular|comilla angular de cierre
+es_pe	?	cerrar interrogación|cierra interrogación|interrogación|interrogación de cierre|signo de interrogación|signo de interrogación de cierre
+es_pe	@	arroba
+es_pe	[	abre corchete|abre corchetes|abrir corchete|abrir corchetes|corchete|corchete de apertura|corchetes|corchetes de apertura
+es_pe	\	barra diagonal inversa|barra inversa|barra invertida|barra oblicua inversa
+es_pe	]	cerrar corchete|cerrar corchetes|cierra corchete|cierra corchetes|corchete|corchete de cierre|corchetes|corchetes de cierre
+es_pe	_	guión bajo
+es_pe	{	abre llave|abre llaves|abrir llave|abrir llaves|llave de apertura|llaves de apertura
+es_pe	}	cerrar llave|cerrar llaves|cierra llave|cierra llaves|llave de cierre|llaves de cierre
+es_pe	¡	signo de exclamación de apertura
+es_pe	«	abre comillas angulares|abrir comillas angulares|comillas angulares|comillas angulares de apertura|comillas castellanas|comillas españolas|comillas latinas|guillemet
+es_pe	»	cerrar comillas angulares|cierra comillas angulares|comillas angulares|comillas angulares de cierre|comillas castellanas|comillas españolas|comillas latinas|guillemet
+es_pe	¿	signo de interrogación de apertura
+es_pe	—	guion largo|guion largo de apertura|guion largo de cierre|raya de apertura|raya de cierre
+es_pr	⏎	línea nueva|nueva línea|otra línea|salto de línea
+es_pr	⏎⏎	nuevo párrafo|otro párrafo|párrafo nuevo
+es_pr	!	cerrar exclamación|cierra exclamación|exclamación|exclamación de cierre|signo de exclamación|signo de exclamación de cierre
+es_pr	"	abre comillas|abrir comillas|cerrar comillas|cierra comillas|comillas|comillas de apertura|comillas de cierre|comillas dobles
+es_pr	#	almohadilla
+es_pr	&	ampersand|e comercial
+es_pr	'	abre comilla simple|abre comillas simples|abrir comilla simple|abrir comillas simples|cerrar comilla simple|cerrar comillas simples|cierra comilla simple|cierra comillas simples|comilla simple|comilla simple de apertura|comilla simple de cierre|comillas simples|comillas simples de apertura|comillas simples de cierre
+es_pr	(	abre paréntesis|abrir paréntesis|paréntesis de apertura
+es_pr	)	cerrar paréntesis|cierra paréntesis|paréntesis de cierre
+es_pr	*	asterisco
+es_pr	,	coma
+es_pr	-	guion|guión
+es_pr	.	punto|punto y seguido
+es_pr	...	punto punto punto|puntos suspensivos
+es_pr	/	barra diagonal|barra inclinada|barra oblicua|barra simple
+es_pr	:	dos puntos
+es_pr	;	punto y coma
+es_pr	<	abre comilla angular|abrir comilla angular|comilla angular|comilla angular de apertura
+es_pr	>	cerrar comilla angular|cierra comilla angular|comilla angular|comilla angular de cierre
+es_pr	?	cerrar interrogación|cierra interrogación|interrogación|interrogación de cierre|signo de interrogación|signo de interrogación de cierre
+es_pr	@	arroba
+es_pr	[	abre corchete|abre corchetes|abrir corchete|abrir corchetes|corchete|corchete de apertura|corchetes|corchetes de apertura
+es_pr	\	barra diagonal inversa|barra inversa|barra invertida|barra oblicua inversa
+es_pr	]	cerrar corchete|cerrar corchetes|cierra corchete|cierra corchetes|corchete|corchete de cierre|corchetes|corchetes de cierre
+es_pr	_	guión bajo
+es_pr	{	abre llave|abre llaves|abrir llave|abrir llaves|llave de apertura|llaves de apertura
+es_pr	}	cerrar llave|cerrar llaves|cierra llave|cierra llaves|llave de cierre|llaves de cierre
+es_pr	¡	signo de exclamación de apertura
+es_pr	«	abre comillas angulares|abrir comillas angulares|comillas angulares|comillas angulares de apertura|comillas castellanas|comillas españolas|comillas latinas|guillemet
+es_pr	»	cerrar comillas angulares|cierra comillas angulares|comillas angulares|comillas angulares de cierre|comillas castellanas|comillas españolas|comillas latinas|guillemet
+es_pr	¿	signo de interrogación de apertura
+es_pr	—	guion largo|guion largo de apertura|guion largo de cierre|raya de apertura|raya de cierre
+es_py	⏎	línea nueva|nueva línea|otra línea|salto de línea
+es_py	⏎⏎	nuevo párrafo|otro párrafo|párrafo nuevo
+es_py	!	cerrar exclamación|cierra exclamación|exclamación|exclamación de cierre|signo de exclamación|signo de exclamación de cierre
+es_py	"	abre comillas|abrir comillas|cerrar comillas|cierra comillas|comillas|comillas de apertura|comillas de cierre|comillas dobles
+es_py	#	almohadilla
+es_py	&	ampersand|e comercial
+es_py	'	abre comilla simple|abre comillas simples|abrir comilla simple|abrir comillas simples|cerrar comilla simple|cerrar comillas simples|cierra comilla simple|cierra comillas simples|comilla simple|comilla simple de apertura|comilla simple de cierre|comillas simples|comillas simples de apertura|comillas simples de cierre
+es_py	(	abre paréntesis|abrir paréntesis|paréntesis de apertura
+es_py	)	cerrar paréntesis|cierra paréntesis|paréntesis de cierre
+es_py	*	asterisco
+es_py	,	coma
+es_py	-	guion|guión
+es_py	.	punto|punto y seguido
+es_py	...	punto punto punto|puntos suspensivos
+es_py	/	barra diagonal|barra inclinada|barra oblicua|barra simple
+es_py	:	dos puntos
+es_py	;	punto y coma
+es_py	<	abre comilla angular|abrir comilla angular|comilla angular|comilla angular de apertura
+es_py	>	cerrar comilla angular|cierra comilla angular|comilla angular|comilla angular de cierre
+es_py	?	cerrar interrogación|cierra interrogación|interrogación|interrogación de cierre|signo de interrogación|signo de interrogación de cierre
+es_py	@	arroba
+es_py	[	abre corchete|abre corchetes|abrir corchete|abrir corchetes|corchete|corchete de apertura|corchetes|corchetes de apertura
+es_py	\	barra diagonal inversa|barra inversa|barra invertida|barra oblicua inversa
+es_py	]	cerrar corchete|cerrar corchetes|cierra corchete|cierra corchetes|corchete|corchete de cierre|corchetes|corchetes de cierre
+es_py	_	guión bajo
+es_py	{	abre llave|abre llaves|abrir llave|abrir llaves|llave de apertura|llaves de apertura
+es_py	}	cerrar llave|cerrar llaves|cierra llave|cierra llaves|llave de cierre|llaves de cierre
+es_py	¡	signo de exclamación de apertura
+es_py	«	abre comillas angulares|abrir comillas angulares|comillas angulares|comillas angulares de apertura|comillas castellanas|comillas españolas|comillas latinas|guillemet
+es_py	»	cerrar comillas angulares|cierra comillas angulares|comillas angulares|comillas angulares de cierre|comillas castellanas|comillas españolas|comillas latinas|guillemet
+es_py	¿	signo de interrogación de apertura
+es_py	—	guion largo|guion largo de apertura|guion largo de cierre|raya de apertura|raya de cierre
+es_sv	⏎	línea nueva|nueva línea|otra línea|salto de línea
+es_sv	⏎⏎	nuevo párrafo|otro párrafo|párrafo nuevo
+es_sv	!	cerrar exclamación|cierra exclamación|exclamación|exclamación de cierre|signo de exclamación|signo de exclamación de cierre
+es_sv	"	abre comillas|abrir comillas|cerrar comillas|cierra comillas|comillas|comillas de apertura|comillas de cierre|comillas dobles
+es_sv	#	almohadilla
+es_sv	&	ampersand|e comercial
+es_sv	'	abre comilla simple|abre comillas simples|abrir comilla simple|abrir comillas simples|cerrar comilla simple|cerrar comillas simples|cierra comilla simple|cierra comillas simples|comilla simple|comilla simple de apertura|comilla simple de cierre|comillas simples|comillas simples de apertura|comillas simples de cierre
+es_sv	(	abre paréntesis|abrir paréntesis|paréntesis de apertura
+es_sv	)	cerrar paréntesis|cierra paréntesis|paréntesis de cierre
+es_sv	*	asterisco
+es_sv	,	coma
+es_sv	-	guion|guión
+es_sv	.	punto|punto y seguido
+es_sv	...	punto punto punto|puntos suspensivos
+es_sv	/	barra diagonal|barra inclinada|barra oblicua|barra simple
+es_sv	:	dos puntos
+es_sv	;	punto y coma
+es_sv	<	abre comilla angular|abrir comilla angular|comilla angular|comilla angular de apertura
+es_sv	>	cerrar comilla angular|cierra comilla angular|comilla angular|comilla angular de cierre
+es_sv	?	cerrar interrogación|cierra interrogación|interrogación|interrogación de cierre|signo de interrogación|signo de interrogación de cierre
+es_sv	@	arroba
+es_sv	[	abre corchete|abre corchetes|abrir corchete|abrir corchetes|corchete|corchete de apertura|corchetes|corchetes de apertura
+es_sv	\	barra diagonal inversa|barra inversa|barra invertida|barra oblicua inversa
+es_sv	]	cerrar corchete|cerrar corchetes|cierra corchete|cierra corchetes|corchete|corchete de cierre|corchetes|corchetes de cierre
+es_sv	_	guión bajo
+es_sv	{	abre llave|abre llaves|abrir llave|abrir llaves|llave de apertura|llaves de apertura
+es_sv	}	cerrar llave|cerrar llaves|cierra llave|cierra llaves|llave de cierre|llaves de cierre
+es_sv	¡	signo de exclamación de apertura
+es_sv	«	abre comillas angulares|abrir comillas angulares|comillas angulares|comillas angulares de apertura|comillas castellanas|comillas españolas|comillas latinas|guillemet
+es_sv	»	cerrar comillas angulares|cierra comillas angulares|comillas angulares|comillas angulares de cierre|comillas castellanas|comillas españolas|comillas latinas|guillemet
+es_sv	¿	signo de interrogación de apertura
+es_sv	—	guion largo|guion largo de apertura|guion largo de cierre|raya de apertura|raya de cierre
+es_us	⏎	línea nueva|nueva línea|otra línea|salto de línea
+es_us	⏎⏎	nuevo párrafo|otro párrafo|párrafo nuevo
+es_us	!	cerrar exclamación|cierra exclamación|exclamación|exclamación de cierre|signo de exclamación|signo de exclamación de cierre
+es_us	"	abre comillas|abrir comillas|cerrar comillas|cierra comillas|comillas|comillas de apertura|comillas de cierre|comillas dobles
+es_us	#	almohadilla
+es_us	&	ampersand|e comercial
+es_us	'	abre comilla simple|abre comillas simples|abrir comilla simple|abrir comillas simples|cerrar comilla simple|cerrar comillas simples|cierra comilla simple|cierra comillas simples|comilla simple|comilla simple de apertura|comilla simple de cierre|comillas simples|comillas simples de apertura|comillas simples de cierre
+es_us	(	abre paréntesis|abrir paréntesis|paréntesis de apertura
+es_us	)	cerrar paréntesis|cierra paréntesis|paréntesis de cierre
+es_us	*	asterisco
+es_us	,	coma
+es_us	-	guion|guión
+es_us	.	punto|punto y seguido
+es_us	...	punto punto punto|puntos suspensivos
+es_us	/	barra diagonal|barra inclinada|barra oblicua|barra simple
+es_us	:	dos puntos
+es_us	;	punto y coma
+es_us	<	abre comilla angular|abrir comilla angular|comilla angular|comilla angular de apertura
+es_us	>	cerrar comilla angular|cierra comilla angular|comilla angular|comilla angular de cierre
+es_us	?	cerrar interrogación|cierra interrogación|interrogación|interrogación de cierre|signo de interrogación|signo de interrogación de cierre
+es_us	@	arroba
+es_us	[	abre corchete|abre corchetes|abrir corchete|abrir corchetes|corchete|corchete de apertura|corchetes|corchetes de apertura
+es_us	\	barra diagonal inversa|barra inversa|barra invertida|barra oblicua inversa
+es_us	]	cerrar corchete|cerrar corchetes|cierra corchete|cierra corchetes|corchete|corchete de cierre|corchetes|corchetes de cierre
+es_us	_	guión bajo
+es_us	{	abre llave|abre llaves|abrir llave|abrir llaves|llave de apertura|llaves de apertura
+es_us	}	cerrar llave|cerrar llaves|cierra llave|cierra llaves|llave de cierre|llaves de cierre
+es_us	¡	signo de exclamación de apertura
+es_us	«	abre comillas angulares|abrir comillas angulares|comillas angulares|comillas angulares de apertura|comillas castellanas|comillas españolas|comillas latinas|guillemet
+es_us	»	cerrar comillas angulares|cierra comillas angulares|comillas angulares|comillas angulares de cierre|comillas castellanas|comillas españolas|comillas latinas|guillemet
+es_us	¿	signo de interrogación de apertura
+es_us	—	guion largo|guion largo de apertura|guion largo de cierre|raya de apertura|raya de cierre
+es_uy	⏎	línea nueva|nueva línea|otra línea|salto de línea
+es_uy	⏎⏎	nuevo párrafo|otro párrafo|párrafo nuevo
+es_uy	!	cerrar exclamación|cierra exclamación|exclamación|exclamación de cierre|signo de exclamación|signo de exclamación de cierre
+es_uy	"	abre comillas|abrir comillas|cerrar comillas|cierra comillas|comillas|comillas de apertura|comillas de cierre|comillas dobles
+es_uy	#	almohadilla
+es_uy	&	ampersand|e comercial
+es_uy	'	abre comilla simple|abre comillas simples|abrir comilla simple|abrir comillas simples|cerrar comilla simple|cerrar comillas simples|cierra comilla simple|cierra comillas simples|comilla simple|comilla simple de apertura|comilla simple de cierre|comillas simples|comillas simples de apertura|comillas simples de cierre
+es_uy	(	abre paréntesis|abrir paréntesis|paréntesis de apertura
+es_uy	)	cerrar paréntesis|cierra paréntesis|paréntesis de cierre
+es_uy	*	asterisco
+es_uy	,	coma
+es_uy	-	guion|guión
+es_uy	.	punto|punto y seguido
+es_uy	...	punto punto punto|puntos suspensivos
+es_uy	/	barra diagonal|barra inclinada|barra oblicua|barra simple
+es_uy	:	dos puntos
+es_uy	;	punto y coma
+es_uy	<	abre comilla angular|abrir comilla angular|comilla angular|comilla angular de apertura
+es_uy	>	cerrar comilla angular|cierra comilla angular|comilla angular|comilla angular de cierre
+es_uy	?	cerrar interrogación|cierra interrogación|interrogación|interrogación de cierre|signo de interrogación|signo de interrogación de cierre
+es_uy	@	arroba
+es_uy	[	abre corchete|abre corchetes|abrir corchete|abrir corchetes|corchete|corchete de apertura|corchetes|corchetes de apertura
+es_uy	\	barra diagonal inversa|barra inversa|barra invertida|barra oblicua inversa
+es_uy	]	cerrar corchete|cerrar corchetes|cierra corchete|cierra corchetes|corchete|corchete de cierre|corchetes|corchetes de cierre
+es_uy	_	guión bajo
+es_uy	{	abre llave|abre llaves|abrir llave|abrir llaves|llave de apertura|llaves de apertura
+es_uy	}	cerrar llave|cerrar llaves|cierra llave|cierra llaves|llave de cierre|llaves de cierre
+es_uy	¡	signo de exclamación de apertura
+es_uy	«	abre comillas angulares|abrir comillas angulares|comillas angulares|comillas angulares de apertura|comillas castellanas|comillas españolas|comillas latinas|guillemet
+es_uy	»	cerrar comillas angulares|cierra comillas angulares|comillas angulares|comillas angulares de cierre|comillas castellanas|comillas españolas|comillas latinas|guillemet
+es_uy	¿	signo de interrogación de apertura
+es_uy	—	guion largo|guion largo de apertura|guion largo de cierre|raya de apertura|raya de cierre
+es_ve	⏎	línea nueva|nueva línea|otra línea|salto de línea
+es_ve	⏎⏎	nuevo párrafo|otro párrafo|párrafo nuevo
+es_ve	!	cerrar exclamación|cierra exclamación|exclamación|exclamación de cierre|signo de exclamación|signo de exclamación de cierre
+es_ve	"	abre comillas|abrir comillas|cerrar comillas|cierra comillas|comillas|comillas de apertura|comillas de cierre|comillas dobles
+es_ve	#	almohadilla
+es_ve	&	ampersand|e comercial
+es_ve	'	abre comilla simple|abre comillas simples|abrir comilla simple|abrir comillas simples|cerrar comilla simple|cerrar comillas simples|cierra comilla simple|cierra comillas simples|comilla simple|comilla simple de apertura|comilla simple de cierre|comillas simples|comillas simples de apertura|comillas simples de cierre
+es_ve	(	abre paréntesis|abrir paréntesis|paréntesis de apertura
+es_ve	)	cerrar paréntesis|cierra paréntesis|paréntesis de cierre
+es_ve	*	asterisco
+es_ve	,	coma
+es_ve	-	guion|guión
+es_ve	.	punto|punto y seguido
+es_ve	...	punto punto punto|puntos suspensivos
+es_ve	/	barra diagonal|barra inclinada|barra oblicua|barra simple
+es_ve	:	dos puntos
+es_ve	;	punto y coma
+es_ve	<	abre comilla angular|abrir comilla angular|comilla angular|comilla angular de apertura
+es_ve	>	cerrar comilla angular|cierra comilla angular|comilla angular|comilla angular de cierre
+es_ve	?	cerrar interrogación|cierra interrogación|interrogación|interrogación de cierre|signo de interrogación|signo de interrogación de cierre
+es_ve	@	arroba
+es_ve	[	abre corchete|abre corchetes|abrir corchete|abrir corchetes|corchete|corchete de apertura|corchetes|corchetes de apertura
+es_ve	\	barra diagonal inversa|barra inversa|barra invertida|barra oblicua inversa
+es_ve	]	cerrar corchete|cerrar corchetes|cierra corchete|cierra corchetes|corchete|corchete de cierre|corchetes|corchetes de cierre
+es_ve	_	guión bajo
+es_ve	{	abre llave|abre llaves|abrir llave|abrir llaves|llave de apertura|llaves de apertura
+es_ve	}	cerrar llave|cerrar llaves|cierra llave|cierra llaves|llave de cierre|llaves de cierre
+es_ve	¡	signo de exclamación de apertura
+es_ve	«	abre comillas angulares|abrir comillas angulares|comillas angulares|comillas angulares de apertura|comillas castellanas|comillas españolas|comillas latinas|guillemet
+es_ve	»	cerrar comillas angulares|cierra comillas angulares|comillas angulares|comillas angulares de cierre|comillas castellanas|comillas españolas|comillas latinas|guillemet
+es_ve	¿	signo de interrogación de apertura
+es_ve	—	guion largo|guion largo de apertura|guion largo de cierre|raya de apertura|raya de cierre
+fr_be	⏎	aller à la ligne|nouvelle ligne|saut de ligne|va à la ligne|à la ligne
+fr_be	⏎⏎	fin de paragraphe|nouveau paragraphe
+fr_be	!	point d'exclamation
+fr_be	"	entre guillemets anglais|ferme les guillemets anglais|fermer les guillemets anglais|fermez les guillemets anglais|guillemet anglais|guillemet anglais fermant|guillemet anglais ouvrant|guillemets anglais|guillemets anglais fermants|guillemets anglais ouvrants|ouvre les guillemets anglais|ouvrez les guillemets anglais|ouvrir les guillemets anglais
+fr_be	#	dièse|hashtag
+fr_be	&	e commercial|esperluette|perluette
+fr_be	(	entre parenthèses|ouvre la parenthèse|ouvre les parenthèses|ouvrez la parenthèse|ouvrez les parenthèses|ouvrir la parenthèse|ouvrir les parenthèses|parenthèse|parenthèse ouvrante
+fr_be	)	ferme la parenthèse|ferme les parenthèses|fermer la parenthèse|fermer les parenthèses|fermez la parenthèse|fermez les parenthèses|parenthèse|parenthèse fermante
+fr_be	*	astérisque
+fr_be	,	virgule
+fr_be	-	signe moins|tiret|tiret court|tiret du 6|tiret du six|tiret quart de cadratin|trait d'union
+fr_be	.	point|point final
+fr_be	...	point point point|points de suspension|trois petits points
+fr_be	/	barre oblique|slash
+fr_be	:	deux points|deux-points|double point
+fr_be	;	point virgule|point-virgule
+fr_be	?	point d'interrogation
+fr_be	@	a commercial|arobase|at
+fr_be	[	crochet ouvrant|entre crochets|ouvre les crochets|ouvrez les crochets|ouvrir les crochets
+fr_be	\	antislash|barre oblique inverse
+fr_be	]	crochet fermant|ferme les crochets|fermer les crochets|fermez les crochets
+fr_be	_	souligner|souligné|tiret du 8|tiret du bas|tiret du huit|underscore
+fr_be	{	accolade ouverte|accolade ouvrante|entre accolades|ouvre les accolades|ouvrez les accolades|ouvrir les accolades
+fr_be	}	accolade fermante|ferme les accolades|fermer les accolades|fermez les accolades
+fr_be	«	début de citation|entre guillemets|guillemet|guillemet ouvrant|guillemets|guillemets ouvrants|ouvre les guillemets|ouvrez les guillemets|ouvrir les guillemets
+fr_be	»	ferme les guillemets|fermer les guillemets|fermez les guillemets|fin de citation|guillemet|guillemet fermant|guillemets|guillemets fermants
+fr_be	–	demi cadratin|demi-cadratin|tiret demi cadratin|tiret demi-cadratin|tiret moyen
+fr_be	—	cadratin|tiret cadratin|tiret double longueur|tiret long
+fr_ca	⏎	aller à la ligne|nouvelle ligne|saut de ligne|va à la ligne|à la ligne
+fr_ca	⏎⏎	fin de paragraphe|nouveau paragraphe
+fr_ca	!	point d'exclamation
+fr_ca	"	entre guillemets anglais|ferme les guillemets anglais|fermer les guillemets anglais|fermez les guillemets anglais|guillemet anglais|guillemet anglais fermant|guillemet anglais ouvrant|guillemets anglais|guillemets anglais fermants|guillemets anglais ouvrants|ouvre les guillemets anglais|ouvrez les guillemets anglais|ouvrir les guillemets anglais
+fr_ca	#	dièse|hashtag
+fr_ca	&	e commercial|esperluette|perluette
+fr_ca	(	entre parenthèses|ouvre la parenthèse|ouvre les parenthèses|ouvrez la parenthèse|ouvrez les parenthèses|ouvrir la parenthèse|ouvrir les parenthèses|parenthèse|parenthèse ouvrante
+fr_ca	)	ferme la parenthèse|ferme les parenthèses|fermer la parenthèse|fermer les parenthèses|fermez la parenthèse|fermez les parenthèses|parenthèse|parenthèse fermante
+fr_ca	*	astérisque
+fr_ca	,	virgule
+fr_ca	-	signe moins|tiret|tiret court|tiret du 6|tiret du six|tiret quart de cadratin|trait d'union
+fr_ca	.	point|point final
+fr_ca	...	point point point|points de suspension|trois petits points
+fr_ca	/	barre oblique|slash
+fr_ca	:	deux points|deux-points|double point
+fr_ca	;	point virgule|point-virgule
+fr_ca	?	point d'interrogation
+fr_ca	@	a commercial|arobase|at
+fr_ca	[	crochet ouvrant|entre crochets|ouvre les crochets|ouvrez les crochets|ouvrir les crochets
+fr_ca	\	antislash|barre oblique inverse
+fr_ca	]	crochet fermant|ferme les crochets|fermer les crochets|fermez les crochets
+fr_ca	_	souligner|souligné|tiret du 8|tiret du bas|tiret du huit|underscore
+fr_ca	{	accolade ouverte|accolade ouvrante|entre accolades|ouvre les accolades|ouvrez les accolades|ouvrir les accolades
+fr_ca	}	accolade fermante|ferme les accolades|fermer les accolades|fermez les accolades
+fr_ca	«	début de citation|entre guillemets|guillemet|guillemet ouvrant|guillemets|guillemets ouvrants|ouvre les guillemets|ouvrez les guillemets|ouvrir les guillemets
+fr_ca	»	ferme les guillemets|fermer les guillemets|fermez les guillemets|fin de citation|guillemet|guillemet fermant|guillemets|guillemets fermants
+fr_ca	–	demi cadratin|demi-cadratin|tiret demi cadratin|tiret demi-cadratin|tiret moyen
+fr_ca	—	cadratin|tiret cadratin|tiret double longueur|tiret long
+fr_ch	⏎	aller à la ligne|nouvelle ligne|saut de ligne|va à la ligne|à la ligne
+fr_ch	⏎⏎	fin de paragraphe|nouveau paragraphe
+fr_ch	!	point d'exclamation
+fr_ch	"	entre guillemets anglais|ferme les guillemets anglais|fermer les guillemets anglais|fermez les guillemets anglais|guillemet anglais|guillemet anglais fermant|guillemet anglais ouvrant|guillemets anglais|guillemets anglais fermants|guillemets anglais ouvrants|ouvre les guillemets anglais|ouvrez les guillemets anglais|ouvrir les guillemets anglais
+fr_ch	#	dièse|hashtag
+fr_ch	&	e commercial|esperluette|perluette
+fr_ch	(	entre parenthèses|ouvre la parenthèse|ouvre les parenthèses|ouvrez la parenthèse|ouvrez les parenthèses|ouvrir la parenthèse|ouvrir les parenthèses|parenthèse|parenthèse ouvrante
+fr_ch	)	ferme la parenthèse|ferme les parenthèses|fermer la parenthèse|fermer les parenthèses|fermez la parenthèse|fermez les parenthèses|parenthèse|parenthèse fermante
+fr_ch	*	astérisque
+fr_ch	,	virgule
+fr_ch	-	signe moins|tiret|tiret court|tiret du 6|tiret du six|tiret quart de cadratin|trait d'union
+fr_ch	.	point|point final
+fr_ch	...	point point point|points de suspension|trois petits points
+fr_ch	/	barre oblique|slash
+fr_ch	:	deux points|deux-points|double point
+fr_ch	;	point virgule|point-virgule
+fr_ch	?	point d'interrogation
+fr_ch	@	a commercial|arobase|at
+fr_ch	[	crochet ouvrant|entre crochets|ouvre les crochets|ouvrez les crochets|ouvrir les crochets
+fr_ch	\	antislash|barre oblique inverse
+fr_ch	]	crochet fermant|ferme les crochets|fermer les crochets|fermez les crochets
+fr_ch	_	souligner|souligné|tiret du 8|tiret du bas|tiret du huit|underscore
+fr_ch	{	accolade ouverte|accolade ouvrante|entre accolades|ouvre les accolades|ouvrez les accolades|ouvrir les accolades
+fr_ch	}	accolade fermante|ferme les accolades|fermer les accolades|fermez les accolades
+fr_ch	«	début de citation|entre guillemets|guillemet|guillemet ouvrant|guillemets|guillemets ouvrants|ouvre les guillemets|ouvrez les guillemets|ouvrir les guillemets
+fr_ch	»	ferme les guillemets|fermer les guillemets|fermez les guillemets|fin de citation|guillemet|guillemet fermant|guillemets|guillemets fermants
+fr_ch	–	demi cadratin|demi-cadratin|tiret demi cadratin|tiret demi-cadratin|tiret moyen
+fr_ch	—	cadratin|tiret cadratin|tiret double longueur|tiret long
+fr_fr	⏎	aller à la ligne|nouvelle ligne|saut de ligne|va à la ligne|à la ligne
+fr_fr	⏎⏎	fin de paragraphe|nouveau paragraphe
+fr_fr	!	point d'exclamation
+fr_fr	"	entre guillemets anglais|ferme les guillemets anglais|fermer les guillemets anglais|fermez les guillemets anglais|guillemet anglais|guillemet anglais fermant|guillemet anglais ouvrant|guillemets anglais|guillemets anglais fermants|guillemets anglais ouvrants|ouvre les guillemets anglais|ouvrez les guillemets anglais|ouvrir les guillemets anglais
+fr_fr	#	dièse|hashtag
+fr_fr	&	e commercial|esperluette|perluette
+fr_fr	(	entre parenthèses|ouvre la parenthèse|ouvre les parenthèses|ouvrez la parenthèse|ouvrez les parenthèses|ouvrir la parenthèse|ouvrir les parenthèses|parenthèse|parenthèse ouvrante
+fr_fr	)	ferme la parenthèse|ferme les parenthèses|fermer la parenthèse|fermer les parenthèses|fermez la parenthèse|fermez les parenthèses|parenthèse|parenthèse fermante
+fr_fr	*	astérisque
+fr_fr	,	virgule
+fr_fr	-	signe moins|tiret|tiret court|tiret du 6|tiret du six|tiret quart de cadratin|trait d'union
+fr_fr	.	point|point final
+fr_fr	...	point point point|points de suspension|trois petits points
+fr_fr	/	barre oblique|slash
+fr_fr	:	deux points|deux-points|double point
+fr_fr	;	point virgule|point-virgule
+fr_fr	?	point d'interrogation
+fr_fr	@	a commercial|arobase|at
+fr_fr	[	crochet ouvrant|entre crochets|ouvre les crochets|ouvrez les crochets|ouvrir les crochets
+fr_fr	\	antislash|barre oblique inverse
+fr_fr	]	crochet fermant|ferme les crochets|fermer les crochets|fermez les crochets
+fr_fr	_	souligner|souligné|tiret du 8|tiret du bas|tiret du huit|underscore
+fr_fr	{	accolade ouverte|accolade ouvrante|entre accolades|ouvre les accolades|ouvrez les accolades|ouvrir les accolades
+fr_fr	}	accolade fermante|ferme les accolades|fermer les accolades|fermez les accolades
+fr_fr	«	début de citation|entre guillemets|guillemet|guillemet ouvrant|guillemets|guillemets ouvrants|ouvre les guillemets|ouvrez les guillemets|ouvrir les guillemets
+fr_fr	»	ferme les guillemets|fermer les guillemets|fermez les guillemets|fin de citation|guillemet|guillemet fermant|guillemets|guillemets fermants
+fr_fr	–	demi cadratin|demi-cadratin|tiret demi cadratin|tiret demi-cadratin|tiret moyen
+fr_fr	—	cadratin|tiret cadratin|tiret double longueur|tiret long
+he_il	⏎	מעבר שורה|שורה חדשה
+he_il	⏎⏎	פסקה חדשה
+he_il	!	סימן קריאה
+he_il	"	במרכאות|במרכאות כפולות|מרכאות|מרכאות כפולות|סגור מרכאות|פתח מרכאות
+he_il	#	סולמית
+he_il	(	בסוגריים|פתח סוגריים
+he_il	)	סגור סוגריים
+he_il	*	כוכבית
+he_il	,	פסיק
+he_il	.	נקודה
+he_il	...	נקודה נקודה נקודה|שלוש נקודות
+he_il	/	לוכסן|סלאש|קו נטוי
+he_il	:	נקודותיים
+he_il	;	נקודה ופסיק|נקודה פסיק
+he_il	?	סימן שאלה
+he_il	[	סוגריים מרובעים|פתח סוגריים מרובעים
+he_il	]	סגור סוגריים מרובעים
+he_il	_	קו תחתון|קו תחתי
+he_il	–	מקף
+hi_in	⏎	new line|newline|नया वाक्य
+hi_in	⏎⏎	new paragraph|नया पेंराग्राफ
+hi_in	!	exclamation|exclamation mark|एक्सक्लेमेशन|एक्सक्लेमेशन मार्क|विस्मयादिबोधक चिन्ह|विस्मयादिबोधक चिह्न
+hi_in	"	close quotation|close quotation mark|close quotations|close quotes|double quotes|open quotation|open quotation mark|open quotations|open quotes|quote|quotes|अवतरण|उदहारणचिन्ह|उदहारणचिह्न|उद्धरण चिन्ह|उद्धरण चिह्न
+hi_in	#	hash|hashtag|हैश|हैशटैग
+hi_in	&	ampersand|ऐंपरसेंड
+hi_in	'	single quote|single quotes|इकहरा उद्ध रण चिह्न
+hi_in	(	open bracket|ओपन ब्रैकेट|कोष्ठक|कोष्ठक चिन्ह|कोष्ठक चिह्न
+hi_in	)	close bracket|कोष्ठक|कोष्ठक चिन्ह|कोष्ठक चिह्न|क्लोज़ ब्रैकेट
+hi_in	*	asterisk|तारांकन|तारे का चिहन
+hi_in	,	comma|अल्प विराम|कॉमा
+hi_in	-	योजक चिन्ह|योजक चिह्न
+hi_in	...	dot dot dot|dots|three dots|डॉट डॉट डॉट|दीर्घवृत्त|पदलोप चिन्ह|पदलोप चिह्न
+hi_in	/	forward slash|slash|फ़ॉर्वर्ड स्लैश|स्लेश
+hi_in	:	colon|अपूर्ण विराम|उप विराम|कॉलन|विसर्ग
+hi_in	:-	आदेश चिन्ह|आदेश चिह्न|विवरण चिन्ह
+hi_in	;	semi colon|अर्द्ध विराम|अर्ध विराम|सेमि कोलन
+hi_in	?	question mark|क्वेश्चन मार्क|प्रश्न  चिन्ह|प्रश्न चिह्न
+hi_in	@	at|at sign|at symbol|at the rate|at the rate of|एट चिह्न|एट प्रतीक
+hi_in	[	open square bracket|वर्गाकार कोष्ठक
+hi_in	\	backslash|बैकस्लेश
+hi_in	]	close square bracket|वर्गाकार कोष्ठक
+hi_in	^	caret sign|विस्मरण चिन्ह या त्रुटिपूरक चिन्ह|विस्मरण चिन्ह या त्रुटिपूरक चिह्न
+hi_in	_	underscore|रेखांकन चिन्ह|रेखांकन चिह्न
+hi_in	{	curly bracket|open brace|open curly bracket|धनु धनुकोष्ठक|धनुकोष्ठक
+hi_in	}	close brace|close curly bracket|curly bracket|धनु धनुकोष्ठक|धनुकोष्ठक
+hi_in	।	full stop|खड़ी पाई|पूर्ण विराम|फुल स्टॉप
+hi_in	॰	लाघव चिन्ह|लाघव चिह्न
+hi_in	–	dash|en dash|endash|medium dash|डैश|निर्देशक चिन्ह|निर्देशक चिह्न
+hi_in	—	em dash|emdash|long dash|एम डैश
+id_id	⏎	baris baru
+id_id	⏎⏎	paragraf baru
+id_id	!	tanda seru
+id_id	"	tanda kutip|tanda kutip akhir|tanda kutip awal|tanda petik|tanda petik akhir|tanda petik awal|tanda petik dua|tanda petik pembuka|tanda petik penutup
+id_id	#	hashtag|tagar|tanda pagar
+id_id	&	ampersand|simbol dan|tanda dan
+id_id	'	apostrof|tanda apostrof|tanda kutip tunggal|tanda kutip tunggal akhir|tanda kutip tunggal awal|tanda kutip tunggal pembuka|tanda kutip tunggal penutup|tanda penyingkat|tanda petik penutup|tanda petik tunggal|tanda petik tunggal pembuka
+id_id	(	kurung buka|tanda kurung buka
+id_id	)	kurung tutup|tanda kurung tutup
+id_id	*	asterik|bintang|tanda bintang
+id_id	,	koma|tanda koma
+id_id	-	dash|hyphen|setrip|strip|tanda hubung|tanda penghubung
+id_id	.	dot|tanda titik|titik
+id_id	...	elipsis|tanda elipsis|tanda titik tiga|titik tiga|titik titik titik
+id_id	/	garing|garis miring|tanda atau
+id_id	:	tanda titik dua|titik dua
+id_id	;	semicolon|tanda titik koma|titik koma
+id_id	?	tanda tanya
+id_id	@	at|tanda at
+id_id	[	kurung siku buka|tanda kurung siku buka
+id_id	\	garis miring terbalik|tanda garis miring terbalik
+id_id	]	kurung siku tutup|tanda kurung siku tutup
+id_id	_	garis bawah|tanda garis bawah
+id_id	{	kurung kurawal buka|tanda kurung kurawal buka
+id_id	}	kurung kurawal tutup|tanda kurung kurawal tutup
+id_id	–	tanda pemisah|tanda pisah
+it_ch	⏎	a capo|nuova riga|ritorno a capo|vai a capo
+it_ch	⏎⏎	fine paragrafo|nuovo paragrafo
+it_ch	!	punto esclamativo
+it_ch	"	aperte virgolette alte|aperte virgolette alte doppie|apri virgolette|apri virgolette alte|apri virgolette alte doppie|chiudi virgolette|chiudi virgolette alte doppie|chiuse virgolette alte|chiuse virgolette alte doppie|virgolette|virgolette alte|virgolette alte aperte|virgolette alte chiuse|virgolette alte doppie|virgolette alte doppie aperte|virgolette alte doppie chiuse|virgolette chiuse|virgolette di apertura|virgolette di chiusura
+it_ch	#	cancelletto|hashtag
+it_ch	&	e commerciale
+it_ch	'	aperta virgolette alte singole|apici singoli|apri virgolette alte singole|chiudi virgolette alte singole|chiuse virgolette alte singole|virgoletta singola di apertura|virgoletta singola di chiusura|virgolette alte singole|virgolette alte singole aperte|virgolette alte singole chiuse|virgolette inglesi
+it_ch	(	aperta parentesi tonda|apri parentesi tonda|apri tonda|parentesi aperta|parentesi tonda|parentesi tonda aperta|tonda aperta
+it_ch	)	chiudi parentesi tonda|chiudi tonda|chiusa parentesi tonda|chiusa tonda|parentesi tonda chiusa|tonda chiusa
+it_ch	*	asterisco
+it_ch	,	virgola
+it_ch	-	trattino|tratto d'unione|tratto piccolo
+it_ch	.	punto|punto fermo
+it_ch	...	ellissi|punti di sospensione|punti sospensivi|puntini|puntini di sospensione|puntini puntini|puntini sospensivi|tre puntini
+it_ch	/	barra|barra obliqua|sbarra|slash
+it_ch	:	due punti
+it_ch	;	punto e virgola
+it_ch	?	punto di domanda|punto interrogativo
+it_ch	@	at|chiocciola|chiocciolina
+it_ch	[	aperta parentesi quadra|aperta quadra|apri parentesi quadra|apri quadra|parentesi quadra|parentesi quadra aperta|quadra aperta
+it_ch	\	barra inversa
+it_ch	]	chiudi parentesi quadra|chiudi quadra|chiusa parentesi quadra|parentesi quadra chiusa|quadra chiusa
+it_ch	_	trattino basso|underscore
+it_ch	{	aperta graffa|aperta parentesi graffa|apri graffa|apri parentesi graffa|graffa aperta|parentesi graffa|parentesi graffa aperta
+it_ch	|	barra verticale|pipe
+it_ch	}	chiudi graffa|chiudi parentesi graffa|chiusa graffa|chiusa parentesi graffa|graffa chiusa|parentesi graffa chiusa
+it_ch	~	tilde
+it_ch	«	aperte virgolette basse|aperte virgolette basse doppie|apri virgolette basse|apri virgolette basse doppie|virgolette basse|virgolette basse doppie|virgolette basse doppie aperte|virgolette caporali|virgolette francesi|virgolette sergenti
+it_ch	»	chiudi virgolette basse|chiudi virgolette basse doppie|chiuse virgolette basse|chiuse virgolette basse doppie|virgolette basse|virgolette basse doppie|virgolette basse doppie chiuse|virgolette caporali|virgolette francesi|virgolette sergenti
+it_ch	–	lineetta
+it_ch	—	em dash|em rule|lineetta emme
+it_ch	⁓	lineetta ondulata
+it_it	⏎	a capo|nuova riga|ritorno a capo|vai a capo
+it_it	⏎⏎	fine paragrafo|nuovo paragrafo
+it_it	!	punto esclamativo
+it_it	"	aperte virgolette alte|aperte virgolette alte doppie|apri virgolette|apri virgolette alte|apri virgolette alte doppie|chiudi virgolette|chiudi virgolette alte doppie|chiuse virgolette alte|chiuse virgolette alte doppie|virgolette|virgolette alte|virgolette alte aperte|virgolette alte chiuse|virgolette alte doppie|virgolette alte doppie aperte|virgolette alte doppie chiuse|virgolette chiuse|virgolette di apertura|virgolette di chiusura
+it_it	#	cancelletto|hashtag
+it_it	&	e commerciale
+it_it	'	aperta virgolette alte singole|apici singoli|apri virgolette alte singole|chiudi virgolette alte singole|chiuse virgolette alte singole|virgoletta singola di apertura|virgoletta singola di chiusura|virgolette alte singole|virgolette alte singole aperte|virgolette alte singole chiuse|virgolette inglesi
+it_it	(	aperta parentesi tonda|apri parentesi tonda|apri tonda|parentesi aperta|parentesi tonda|parentesi tonda aperta|tonda aperta
+it_it	)	chiudi parentesi tonda|chiudi tonda|chiusa parentesi tonda|chiusa tonda|parentesi tonda chiusa|tonda chiusa
+it_it	*	asterisco
+it_it	,	virgola
+it_it	-	trattino|tratto d'unione|tratto piccolo
+it_it	.	punto|punto fermo
+it_it	...	ellissi|punti di sospensione|punti sospensivi|puntini|puntini di sospensione|puntini puntini|puntini sospensivi|tre puntini
+it_it	/	barra|barra obliqua|sbarra|slash
+it_it	:	due punti
+it_it	;	punto e virgola
+it_it	?	punto di domanda|punto interrogativo
+it_it	@	at|chiocciola|chiocciolina
+it_it	[	aperta parentesi quadra|aperta quadra|apri parentesi quadra|apri quadra|parentesi quadra|parentesi quadra aperta|quadra aperta
+it_it	\	barra inversa
+it_it	]	chiudi parentesi quadra|chiudi quadra|chiusa parentesi quadra|parentesi quadra chiusa|quadra chiusa
+it_it	_	trattino basso|underscore
+it_it	{	aperta graffa|aperta parentesi graffa|apri graffa|apri parentesi graffa|graffa aperta|parentesi graffa|parentesi graffa aperta
+it_it	|	barra verticale|pipe
+it_it	}	chiudi graffa|chiudi parentesi graffa|chiusa graffa|chiusa parentesi graffa|graffa chiusa|parentesi graffa chiusa
+it_it	~	tilde
+it_it	«	aperte virgolette basse|aperte virgolette basse doppie|apri virgolette basse|apri virgolette basse doppie|virgolette basse|virgolette basse doppie|virgolette basse doppie aperte|virgolette caporali|virgolette francesi|virgolette sergenti
+it_it	»	chiudi virgolette basse|chiudi virgolette basse doppie|chiuse virgolette basse|chiuse virgolette basse doppie|virgolette basse|virgolette basse doppie|virgolette basse doppie chiuse|virgolette caporali|virgolette francesi|virgolette sergenti
+it_it	–	lineetta
+it_it	—	em dash|em rule|lineetta emme
+it_it	⁓	lineetta ondulata
+ja_jp	⏎	新しい行
+ja_jp	⏎⏎	新しい段落
+ja_jp	"	ダブルクォーテーション
+ja_jp	#	シャープ
+ja_jp	'	アポストロフィー|クォーテーション|シングルクォーテーション
+ja_jp	*	アスタリスク|星印
+ja_jp	,	コンマ
+ja_jp	-	ハイフン
+ja_jp	@	アットマーク
+ja_jp	…	てんてんてん|三点リーダー
+ja_jp	※	米印
+ja_jp	、	読点
+ja_jp	。	まる|句点
+ja_jp	「	鉤括弧|鉤括弧開き
+ja_jp	」	鉤括弧|鉤括弧閉じ
+ja_jp	『	二重鉤括弧|二重鉤括弧開き
+ja_jp	』	二重鉤括弧|二重鉤括弧閉じ
+ja_jp	〜	チルダ
+ja_jp	・	中黒
+ja_jp	！	エクスクラメーションマーク|ビックリマーク|感嘆符
+ja_jp	＆	アンパサンド
+ja_jp	（	丸括弧|丸括弧開き
+ja_jp	）	丸括弧|丸括弧閉じ
+ja_jp	／	スラッシュ
+ja_jp	：	コロン
+ja_jp	；	セミコロン
+ja_jp	？	はてなマーク|クエスチョンマーク|疑問符
+ja_jp	＼	バックスラッシュ
+ja_jp	＿	アンダーバー
+ko_kr	⏎	새 줄|새줄|줄 바꿈|줄 추가|줄바꿈|줄추가
+ko_kr	⏎⏎	단락 추가|새 단락
+ko_kr	!	감탄 부호|감탄부호|느낌표
+ko_kr	"	겹따옴표|큰 따옴표|큰따옴표
+ko_kr	#	샤프|샵|우물 정|우물 정 자|우물 정자|우물정|우물정자
+ko_kr	&	앰퍼샌드
+ko_kr	'	작은 따옴표|작은따옴표|홑따옴표
+ko_kr	(	괄호 열고|여는 괄호|여는 둥근 괄호|여는괄호
+ko_kr	)	괄호 닫고|닫는 괄호|닫는 둥근 괄호
+ko_kr	*	별|별표
+ko_kr	,	쉼표|콤마
+ko_kr	-	중간 줄|중간줄|하이픈
+ko_kr	.	닷|마침표|점|쩜
+ko_kr	...	땡 땡 땡|땡땡땡|말 줄임표|말줄임표|점 점 점|점점점|쩜 쩜 쩜|쩜쩜쩜
+ko_kr	/	빗금
+ko_kr	:	땡 땡|땡땡|콜론
+ko_kr	;	세미 콜론|세미콜론|쌍 반점|쌍반점
+ko_kr	?	물음표|의문 부호|의문부호
+ko_kr	@	골뱅이|앳
+ko_kr	[	대괄호
+ko_kr	\	백슬 래시|백슬래시|역슬 래시|역슬래시
+ko_kr	]	대괄호
+ko_kr	_	밑줄 문자
+ko_kr	{	중괄호
+ko_kr	}	중괄호
+ko_kr	~	물결 표|물결표
+ko_kr	·	가운뎃 점|가운뎃점
+ko_kr	–	줄 표|줄표
+ko_kr	〈	거듭 인용 표|거듭 인용표
+ko_kr	〉	거듭 인용 표|거듭 인용표
+ko_kr	《	인용표
+ko_kr	》	인용표
+ko_kr	「	낫표
+ko_kr	」	낫표
+ko_kr	『	겹낫표
+ko_kr	』	겹낫표
+ml_in	⏎	പുതിയ വരി
+ml_in	⏎⏎	പുതിയ ഖണ്ഡിക|പുതിയ പാരഗ്രാഫ്
+ml_in	!	ആശ്ചര്യചിഹ്നം|എക്സ്ക്ലമേഷൻ മാർക്ക്
+ml_in	"	അടയ്ക്കൽ ഉദ്ധരണിം|ഉദ്ധരണി|ഓപ്പണിങ് ഉദ്ധരണി|ഓപ്പണിങ് ഉദ്ധരണി അടയാളം|ക്ലോസിംഗ് ഉദ്ധരണി|ഡബിൾ ക്വോട്സ്|തുറക്കല് ഉദ്ധരണി അടയാളം|തുറക്കൽ ഉദ്ധരണിം
+ml_in	#	ഹാഷ്
+ml_in	&	ആന്‍ഡ്
+ml_in	'	ക്വോട്ട്|സിംഗിൾ ക്വോട്ട്
+ml_in	(	തുറക്കുന്ന ബ്രാക്കറ്റ്|തുറന്ന ബ്രാക്കറ്റ്|ബ്രാക്കറ്റ്‌ തുറക്കുന്നു
+ml_in	)	അടഞ്ഞ ബ്രാക്കറ്റ്|ബ്രാക്കറ്റ്‌ അടക്കുന്നു
+ml_in	*	നക്ഷതചിഹ്നം
+ml_in	,	അങ്കുശം|അല്പവിരാമം|അല്‍പവിരാമ ചിഹ്നം|കോമാ
+ml_in	-	ഡാഷ്|തുടര്‍ക്കുറി|ഹൈഫന്‍
+ml_in	.	കുത്ത്|ഡോട്ട്
+ml_in	...	കുത്ത് കുത്ത് കുത്ത്|ഡോട്ട് ഡോട്ട് ഡോട്ട്
+ml_in	/	സ്ലാഷ്
+ml_in	:	കോളൻ
+ml_in	;	അർദ്ധവിരാമം|കുത്തു കോമ
+ml_in	?	ക്വസ്റ്റ്യൻ മാർക്ക്|ചോദ്യചിഹ്നം
+ml_in	@	അറ്റ്
+ml_in	[	ഇടത് സ്ക്വയർ ബ്രാക്കറ്റ്|ഇടത്തെ സ്ക്വയർ ബ്രാക്കറ്റ്|ലെഫ്റ്റ് സ്ക്വയർ ബ്രാക്കറ്റ്
+ml_in	\	ഇടതു സ്ലാഷ്|ലെഫ്റ്റ് സ്ലാഷ്
+ml_in	]	റൈറ്റ് സ്ക്വയർ ബ്രാക്കറ്റ്|വലത് സ്ക്വയർ ബ്രാക്കറ്റ്|വലത്തെ സ്ക്വയർ ബ്രാക്കറ്റ്ം
+ml_in	_	അടിവര|അടിവരയിടുക|അണ്ടർസ്കോർ
+ml_in	{	കേർളി ബ്രാക്കറ്റ്
+ml_in	}	കേർളി ബ്രാക്കറ്റ്
+ml_in	~	ടിൽഡ
+ml_in	―	രേഖ
+nb_no	⏎	ny linje
+nb_no	⏎⏎	nytt avsnitt
+nb_no	!	utropstegn
+nb_no	"	anførselstegn|gåseøyne|høyre anførselstegn|sitat slutt|sitat start|venstre anførselstegn
+nb_no	#	hashtag|nummertegn|pundtegn
+nb_no	&	ampersand|og tegn|og-tegn
+nb_no	'	apostrof|enkelt anførselstegn|høyre enkelt anførselstegn|venstre enkelt anførselstegn
+nb_no	(	bueparentes|bueparentes start|parentes|parentes start|venstre bueparentes|venstre parentes
+nb_no	)	bueparentes|bueparentes slutt|høyre bueparentes|høyre parentes|parentes|parentes slutt
+nb_no	*	asterisk
+nb_no	,	komma
+nb_no	-	bindestrek
+nb_no	.	punktum
+nb_no	...	dot dot dot|ellipse|punktum punktum punktum
+nb_no	/	skråstrek|slash
+nb_no	:	kolon
+nb_no	;	semikolon
+nb_no	?	spørsmålstegn
+nb_no	@	alfakrøll|krøllalfa
+nb_no	[	firkantparentes|firkantparentes start|hakeparentes|hakeparentes start|klamme|klamme start|klammeparentes|klammeparentes start|venstre firkantparentes|venstre hakeparentes|venstre klamme|venstre klammeparentes
+nb_no	\	backslash|baklengs skråstrek|bakstrek|bakvendt skråstrek|omvendt skråstrek
+nb_no	]	firkantparentes|firkantparentes slutt|hakeparentes|hakeparentes slutt|høyre firkantparentes|høyre hakeparentes|høyre klamme|høyre klammeparentes|klamme|klamme slutt|klammeparentes|klammeparentes slutt
+nb_no	_	underscore|understrek
+nb_no	{	krøllparentes|krøllparentes start|sløyfeparentes|sløyfeparentes start|venstre krøllparentes|venstre sløyfeparentes
+nb_no	}	høyre krøllparentes|høyre sløyfeparentes|krøllparentes|krøllparentes slutt|sløyfeparentes|sløyfeparentes slutt
+nb_no	–	tankestrek
+nl_be	⏎	enter|nieuwe regel
+nl_be	⏎⏎	nieuwe alinea
+nl_be	!	uitroepteken
+nl_be	"	dubbele aanhalingstekens
+nl_be	#	hekje
+nl_be	&	ampersand|en-teken
+nl_be	(	haakje openen
+nl_be	)	haakje sluiten
+nl_be	*	asterisk|sterretje
+nl_be	,	komma
+nl_be	-	afbreekstreepje|afbreekteken|koppelteken|liggend streepje|streepje
+nl_be	.	punt
+nl_be	...	puntje puntje puntje
+nl_be	/	schuine streep naar rechts|slash
+nl_be	:	dubbele punt
+nl_be	;	puntkomma
+nl_be	?	vraagteken
+nl_be	@	apenstaartje|at-teken
+nl_be	[	vierkant haakje|vierkant haakje openen
+nl_be	\	backslash|schuine streep naar links
+nl_be	]	vierkant haakje|vierkant haakje sluiten
+nl_be	_	laag streepje|underscore
+nl_be	{	accolade|accolade openen
+nl_be	}	accolade|accolade sluiten
+nl_nl	⏎	enter|nieuwe regel
+nl_nl	⏎⏎	nieuwe alinea
+nl_nl	!	uitroepteken
+nl_nl	"	dubbele aanhalingstekens
+nl_nl	#	hekje
+nl_nl	&	ampersand|en-teken
+nl_nl	(	haakje openen
+nl_nl	)	haakje sluiten
+nl_nl	*	asterisk|sterretje
+nl_nl	,	komma
+nl_nl	-	afbreekstreepje|afbreekteken|koppelteken|liggend streepje|streepje
+nl_nl	.	punt
+nl_nl	...	puntje puntje puntje
+nl_nl	/	schuine streep naar rechts|slash
+nl_nl	:	dubbele punt
+nl_nl	;	puntkomma
+nl_nl	?	vraagteken
+nl_nl	@	apenstaartje|at-teken
+nl_nl	[	vierkant haakje|vierkant haakje openen
+nl_nl	\	backslash|schuine streep naar links
+nl_nl	]	vierkant haakje|vierkant haakje sluiten
+nl_nl	_	laag streepje|underscore
+nl_nl	{	accolade|accolade openen
+nl_nl	}	accolade|accolade sluiten
+pl_pl	⏎	nowa linia|nowy wiersz
+pl_pl	⏎⏎	nowy akapit
+pl_pl	!	wykrzyknik|znak wykrzyknienia
+pl_pl	"	cudzysłów|cudzysłów otwierający|cudzysłów zamykający|otwórz cudzysłów|zamknij cudzysłów|znak cudzysłowu otwierającego|znak cudzysłowu zamykającego
+pl_pl	#	hash|hashtag|kratka|krzyżyk|krzyżyk numeryczny|płotek|znak numeru
+pl_pl	&	ampersand|etka
+pl_pl	'	cudzysłów pojedynczy|otwórz cudzysłów pojedynczy|zamknij cudzysłów pojedynczy
+pl_pl	(	nawias|nawias otwierający|okrągły nawias otwierający|otwórz nawias
+pl_pl	)	nawias|nawias zamykający|okrągły nawias zamykający|zamknij nawias
+pl_pl	*	asterysk|gwiazdka
+pl_pl	,	przecinek
+pl_pl	-	dywiz|tiret
+pl_pl	.	kropka
+pl_pl	...	trzykropek|wielokropek
+pl_pl	/	slash|ukośnik|łamane na|łamane przez
+pl_pl	:	dwukropek
+pl_pl	;	średnik
+pl_pl	?	pytajnik|znak zapytania
+pl_pl	@	małpa|znak małpa|znak małpka|znak małpki|znak małpy
+pl_pl	[	nawias kwadratowy otwierający|otwórz nawias kwadratowy
+pl_pl	\	backslash|lewy ukośnik|ukośnik odwrócony|ukośnik wsteczny
+pl_pl	]	nawias kwadratowy zamykający|zamknij nawias kwadratowy
+pl_pl	_	podkreślnik|underscore|znak podkreślenia
+pl_pl	{	klamra otwierająca|nawias klamrowy otwierający|otwórz klamrę
+pl_pl	}	klamra zamykająca|nawias klamrowy zamykający|zamknij klamrę
+pl_pl	–	myślnik|myślnik krótki|pauza dialogowa|półpauza
+pl_pl	—	myślnik długi
+pt_br	⏎	linha nova|nova linha|outra linha
+pt_br	⏎⏎	novo parágrafo|outro parágrafo
+pt_br	!	ponto de exclamação
+pt_br	"	abre aspas|aspas|fecha aspas
+pt_br	#	cerquilha|jogo da velha|sinal de sustenido|tralha
+pt_br	&	ampersand|e comercial
+pt_br	(	abre parênteses|parêntese de abertura|parêntese que fecha
+pt_br	)	fecha parênteses|parêntese de fechamento|parêntese que abre
+pt_br	*	asterisco
+pt_br	,	vírgula
+pt_br	-	hífen|traço de união
+pt_br	.	pontinho|ponto|ponto final
+pt_br	...	reticências|três pontinhos|três pontos
+pt_br	/	barra
+pt_br	:	cólon|dois pontos
+pt_br	;	ponto e vírgula
+pt_br	?	ponto de interrogação
+pt_br	@	arroba
+pt_br	[	abre colchetes
+pt_br	\	barra invertida
+pt_br	]	fecha colchetes
+pt_br	{	abre chaves
+pt_br	}	fecha chaves
+pt_pt	⏎	linha nova|muda de linha|mudança de linha|nova linha|outra linha|parágrafo espaço|quebra de linha
+pt_pt	⏎⏎	abre parágrafo|novo parágrafo|outro parágrafo
+pt_pt	!	ponto de exclamação|ponto exclamação
+pt_pt	"	abre aspas|aspas|fecha aspas
+pt_pt	#	cardinal
+pt_pt	&	e comercial
+pt_pt	'	aspas simples
+pt_pt	(	abre parênteses|abre parêntesis|abrir parênteses|abrir parêntesis|parêntese de abertura
+pt_pt	)	fecha parênteses|fecha parêntesis|fechar parênteses|fechar parêntesis|parêntese de fecho
+pt_pt	*	asterisco|estrelinha
+pt_pt	,	vírgula
+pt_pt	-	hífen|tracinho
+pt_pt	.	ponto|ponto final
+pt_pt	...	reticências|três pontinhos|três pontos
+pt_pt	/	barra|barra oblíqua
+pt_pt	:	dois pontos
+pt_pt	;	ponto e vírgula
+pt_pt	?	ponto de interrogação|ponto interrogação
+pt_pt	@	arroba
+pt_pt	[	abre colchetes|abre parênteses retos|abre parêntesis retos|abrir parênteses retos|abrir parêntesis retos
+pt_pt	\	backslash|barra invertida
+pt_pt	]	fecha colchetes|fecha parênteses retos|fecha parêntesis retos|fechar parênteses retos|fechar parêntesis retos
+pt_pt	_	sublinhado|traço baixo
+pt_pt	{	abre chavetas|abrir chavetas
+pt_pt	}	fecha chavetas|fechar chavetas
+pt_pt	«	abre aspas angulares|aspas angulares
+pt_pt	»	aspas angulares|fecha aspas angulares
+pt_pt	–	meia risca|meia-risca|meio-traço|traço de ligação,|traço médio
+pt_pt	—	travessão
+ru_ru	⏎	новая строка|перевод строки
+ru_ru	⏎⏎	новый абзац|новый параграф
+ru_ru	!	восклицание|восклицательный знак
+ru_ru	"	закрывающие кавычки|закрыть кавычки|кавычки|открывающие кавычки|открыть кавычки
+ru_ru	#	диез|решетка|решётка|хэштег
+ru_ru	&	амперсанд
+ru_ru	'	апостроф|закрывающие одиночные кавычки|одиночные кавычки|открывающие одиночные кавычки
+ru_ru	(	закрывающая круглая скобка|круглая скобка
+ru_ru	)	круглая скобка|открывающая круглая скобка
+ru_ru	*	астериск
+ru_ru	,	запятая
+ru_ru	-	дефис|тире
+ru_ru	.	конец предложения|точка
+ru_ru	...	многоточие
+ru_ru	/	дробь|косая черта|слэш
+ru_ru	:	двоеточие
+ru_ru	;	точка с запятой
+ru_ru	?	вопросительный знак|знак вопроса
+ru_ru	@	собака|эт
+ru_ru	[	квадратные скобка|открывающая квадратные скобка
+ru_ru	\	бэкслэш
+ru_ru	]	закрывающая квадратные скобка|квадратные скобка
+ru_ru	_	нижнее подчеркивание|подчеркивание
+ru_ru	{	открывающая фигурная скобка|фигурная скобка
+ru_ru	}	закрывающая фигурная скобка|фигурная скобка
+ru_ru	«	кавычки ёлочки|открывающие кавычки ёлочки|открыть кавычки ёлочки
+ru_ru	»	закрывающие кавычки ёлочки|закрыть кавычки ёлочки|кавычки ёлочки
+ru_ru	—	Длинное тире
+sv_se	⏎	ny rad|radbrytning
+sv_se	⏎⏎	blankrad|ny paragraf|nytt avsnitt|nytt stycke|stycketecken
+sv_se	!	utropstecken
+sv_se	"	citat slut|citat start|citationstecken|citationstecken slut|citationstecken start|citattecken|citattecken slut|citattecken start|dubbelfnuttar|dubbelfnuttar slut|dubbelfnuttar start|quote|slut citat|slut citationstecken|slut citattecken|slut dubbelfnuttar|start citat|start citationstecken|start citattecken|start dubbelfnuttar
+sv_se	#	brädgård|hashmark|hashtag|nummertecken
+sv_se	&	ampersand|et tecken|et-tecken|och tecken|och-tecken
+sv_se	'	apostrof|börja enkla citationstecken|enkelt citationstecken|enkelt citationstecken slut|enkelt citationstecken start|enkla citationstecken|enkla citationstecken slut|enkla citationstecken start|höger enkelt citationstecken|höger enkla citationstecken|slut enkelt citationstecken|slut enkla citationstecken|sluta enkla citationstecken|start enkelt citationstecken|start enkla citationstecken|vänster enkelt citationstecken|vänster enkla citationstecken
+sv_se	(	bågparentes|bågparentes start|parentes|parentes start|rundparentes|rundparentes start|start bågparentes|start parentes|start rundparentes|vänster bågparentes|vänster parentes|vänster rundparentes
+sv_se	)	bågparentes|bågparentes slut|höger bågparentes|höger parentes|höger rundparentes|parentes|parentes slut|rundparentes|rundparentes slut|slut bågparentes|slut parentes|slut rundparentes
+sv_se	*	asterisk
+sv_se	,	komma|kommatecken
+sv_se	-	bindestreck
+sv_se	.	punkt
+sv_se	...	dot dot dot|ellips|punkt punkt punkt|tre punkter|uteslutningstecken
+sv_se	/	slash|snedstreck
+sv_se	:	kolon
+sv_se	;	semikolon
+sv_se	?	frågetecken
+sv_se	@	kringel a|kringel-a|snabel a|snabel-a
+sv_se	[	hakparentes|hakparentes start|hård parentes|hård parentes start|start hakparentes|start hård parentes|vänster hakparentes|vänster hård parentes
+sv_se	\	backslash|bakvänt snedstreck|omvänt snedstreck
+sv_se	]	hakparentes|hakparentes slut|hård parentes|hård parentes slut|höger hakparentes|höger hård parentes|slut hakparentes|slut hård parentes
+sv_se	_	underscore|understreck
+sv_se	{	klammerparentes|klammerparentes start|krullparentes|krullparentes start|måsvinge|måsvinge start|spetsparentes|spetsparentes start|start klammerparentes|start krullparentes|start måsvinge|start spetsparentes|vänster klammerparentes|vänster krullparentes|vänster måsvinge|vänster spetsparentes
+sv_se	|	lodrätt streck|lodstreck|vertical bar|vertikalis|vertikalstreck
+sv_se	}	höger klammerparentes|höger krullparentes|höger måsvinge|höger spetsparentes|klammerparentes|klammerparentes slut|krullparentes|krullparentes slut|måsvinge|måsvinge slut|slut klammerparentes|slut krullparentes|slut måsvinge|slut spetsparentes|spetsparentes|spetsparentes slut
+sv_se	~	tilde|tildeoperator
+sv_se	«	gåsögon|gåsögon slut|höger gåsögon|höger vinkelcitationstecken|höger vinkelcitattecken|slut gåsögon|slut vinkelcitationstecken|slut vinkelcitattecken|vinkelcitationstecken|vinkelcitationstecken slut|vinkelcitattecken|vinkelcitattecken slut
+sv_se	»	gåsögon|gåsögon start|start gåsögon|start vinkelcitationstecken|start vinkelcitattecken|vinkelcitationstecken|vinkelcitationstecken start|vinkelcitattecken|vinkelcitattecken start|vänster gåsögon|vänster vinkelcitationstecken|vänster vinkelcitattecken
+sv_se	–	pratminus|talstreck|tankestreck|tankstreck
+sv_se	〈	start vinkelparentes|vinkelparentes|vinkelparentes start|vänster vinkelparentes
+sv_se	〉	höger vinkelparentes|slut vinkelparentes|vinkelparentes|vinkelparentes slut
+tr_tr	⏎	satır başı|yeni satır
+tr_tr	⏎⏎	paragraf başı|yeni paragraf
+tr_tr	!	ünlem|ünlem işareti
+tr_tr	"	denden|tırnak işareti|çift tırnak|çift tırnak başlangıcı|çift tırnak bitişi|çift tırnak işareti
+tr_tr	#	diyez|diyez işareti|haştag|heşteg|kare tuşu
+tr_tr	&	ampersand|ve işareti
+tr_tr	'	kesme işareti|tek tırnak|tek tırnak başlangıcı|tek tırnak bitişi|tek tırnak işareti
+tr_tr	(	aç parantez|parantez aç|parantez açma
+tr_tr	)	kapa parantez|kapat parantez|parantez kapa|parantez kapama|parantez kapat|parantez kapatma
+tr_tr	*	asterisk|yıldız işareti
+tr_tr	,	virgül
+tr_tr	-	kısa çizgi|tire
+tr_tr	.	nokta
+tr_tr	...	üç nokta
+tr_tr	/	bölü|eğik çizgi|öne eğik çizgi
+tr_tr	:	iki nokta|iki nokta üst üste
+tr_tr	;	noktalı virgül
+tr_tr	?	soru işareti
+tr_tr	@	at işareti|et işareti|kuyruklu a
+tr_tr	[	köşeli ayraç aç|köşeli ayraç açma|köşeli parantez aç|köşeli parantez açma
+tr_tr	\	ters bölü|ters eğik çizgi
+tr_tr	]	köşeli ayraç kapa|köşeli ayraç kapama|köşeli parantez kapa|köşeli parantez kapama
+tr_tr	_	alt çizgi
+tr_tr	{	büyük parantez aç|büyük parantez açma|kaşlı ayraç aç|kaşlı ayraç açma|küme parantezi aç|küme parantezi açma|süslü parantez aç|süslü parantez açma
+tr_tr	}	büyük parantez kapa|büyük parantez kapama|kaşlı ayraç kapa|kaşlı ayraç kapama|küme parantezi kapa|küme parantezi kapama|süslü parantez kapa|süslü parantez kapama
+tr_tr	—	uzun çizgi

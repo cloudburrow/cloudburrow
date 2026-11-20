@@ -207,7 +207,7 @@ func recognizerConfigFields(cur *speechpb.Recognizer) []console.Field {
 	c := cur.GetDefaultRecognitionConfig()
 	lang := "en-US"
 	if l := c.GetLanguageCodes(); len(l) > 0 {
-		lang = l[0]
+		lang = strings.Join(l, ", ")
 	}
 	f := c.GetFeatures()
 	model := c.GetModel()
@@ -219,10 +219,14 @@ func recognizerConfigFields(cur *speechpb.Recognizer) []console.Field {
 		{Name: "model", Label: "Model", Type: "select", Options: speechconfig.Models(), Default: model,
 			Help: "each runs on local whisper.cpp; the medical models are not available locally"},
 		{Name: "language", Label: "Language", Type: "text", Required: true, Default: lang,
-			Help: "a BCP-47 language code such as en-US, or auto to detect it", Pattern: "^([A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*|auto)$"},
+			Help:    "a BCP-47 language code such as en-US, auto to detect it, or up to three codes separated by commas (long, short and telephony)",
+			Pattern: "^(([A-Za-z]{2,3}(-[A-Za-z0-9]{1,8})*)(, *[A-Za-z]{2,3}(-[A-Za-z0-9]{1,8})*){0,2}|auto)$"},
 		{Name: "wordTimeOffsets", Label: "Word timestamps", Type: "checkbox", Default: strconv.FormatBool(f.GetEnableWordTimeOffsets())},
 		{Name: "wordConfidence", Label: "Word-level confidence", Type: "checkbox", Default: strconv.FormatBool(f.GetEnableWordConfidence())},
 		{Name: "punctuation", Label: "Automatic punctuation", Type: "checkbox", Default: strconv.FormatBool(f.GetEnableAutomaticPunctuation())},
+		{Name: "profanityFilter", Label: "Profanity filter", Type: "checkbox", Default: strconv.FormatBool(f.GetProfanityFilter())},
+		{Name: "spokenPunctuation", Label: "Spoken punctuation", Type: "checkbox", Default: strconv.FormatBool(f.GetEnableSpokenPunctuation())},
+		{Name: "spokenEmojis", Label: "Spoken emojis", Type: "checkbox", Default: strconv.FormatBool(f.GetEnableSpokenEmojis())},
 	}
 }
 
@@ -232,10 +236,18 @@ func recognitionConfig(v map[string]string) *speechpb.RecognitionConfig {
 	if model == "" {
 		model = "chirp"
 	}
-	return &speechpb.RecognitionConfig{Model: model, LanguageCodes: []string{strings.TrimSpace(v["language"])},
+	var langs []string
+	for _, l := range strings.Split(v["language"], ",") {
+		if l = strings.TrimSpace(l); l != "" {
+			langs = append(langs, l)
+		}
+	}
+	return &speechpb.RecognitionConfig{Model: model, LanguageCodes: langs,
 		DecodingConfig: &speechpb.RecognitionConfig_AutoDecodingConfig{AutoDecodingConfig: &speechpb.AutoDetectDecodingConfig{}},
 		Features: &speechpb.RecognitionFeatures{EnableWordTimeOffsets: v["wordTimeOffsets"] == "true",
-			EnableWordConfidence: v["wordConfidence"] == "true", EnableAutomaticPunctuation: v["punctuation"] == "true"}}
+			EnableWordConfidence: v["wordConfidence"] == "true", EnableAutomaticPunctuation: v["punctuation"] == "true",
+			ProfanityFilter: v["profanityFilter"] == "true", EnableSpokenPunctuation: v["spokenPunctuation"] == "true",
+			EnableSpokenEmojis: v["spokenEmojis"] == "true"}}
 }
 
 func (p speechRecognizersProvider) CreateForm() (string, []console.Field) {

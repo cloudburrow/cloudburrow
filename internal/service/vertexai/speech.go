@@ -36,15 +36,21 @@ import (
 //     confidences differ (#1930). The medical models are UNIMPLEMENTED.
 //   - languageCodes: one BCP-47 code, whose language whisper knows (its
 //     primary subtag, cmn as zh, iw as he, fil as tl, nb as no), or "auto"
-//     to detect it. Several codes are UNIMPLEMENTED.
+//     to detect it, or up to three (long, short and telephony, in global,
+//     us and eu), the audio recognised in the best fit (transcribeBestFit,
+//     #1799).
 //   - features: enableWordTimeOffsets (each word's startOffset and
 //     endOffset, from whisper's token timestamps), enableWordConfidence,
 //     maxAlternatives (one alternative is returned, which the reference
 //     allows) and enableAutomaticPunctuation (whisper punctuates
 //     regardless) are read, and SEPARATE_RECOGNITION_PER_CHANNEL
 //     transcribes each channel on its own (transcribeChannels, #1799);
-//     profanityFilter, enableSpokenPunctuation, enableSpokenEmojis and
-//     diarizationConfig are UNIMPLEMENTED, as are translationConfig and denoiserConfig;
+//     profanityFilter, enableSpokenPunctuation and enableSpokenEmojis
+//     rewrite each final transcript (speechconfig's Format, #1799), and
+//     translationConfig (chirp_2) translates it with the served
+//     Translation API's model (translateSegments, #1799);
+//     diarizationConfig and denoiserConfig are UNIMPLEMENTED (no
+//     permissive local model, docs/compatibility.md);
 //     adaptation biases whisper (speechbias.go), and transcriptNormalization
 //     rewrites each final transcript (speechconfig's Normalize, #1799).
 //   - decoding (speech/audio.go): WAV, headerless LINEAR16, MULAW and ALAW,
@@ -161,6 +167,15 @@ func (s *Server) checkedConfig(name string, config json.RawMessage) (speechconfi
 	if _, _, err := s.adaptationOptions(cfg.Adaptation); err != nil {
 		return cfg, err
 	}
+	if len(cfg.Candidates) > 0 {
+		loc := ""
+		if _, rest, ok := strings.Cut(name, "/locations/"); ok {
+			loc, _, _ = strings.Cut(rest, "/")
+		}
+		if !speechconfig.MultiLanguageLocations[loc] {
+			return cfg, apierror.InvalidArgument("several languageCodes are only available in the global location and the us and eu multi-regions, not %q", loc)
+		}
+	}
 	return cfg, nil
 }
 
@@ -193,12 +208,133 @@ func (s *Server) transcribeAudioMax(ctx context.Context, name string, config jso
 	}
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Hour)
 	defer cancel()
+	res, cfg, err := transcribeBestFit(ctx, samples, opt, cfg)
+	if err != nil {
+		return none, nil, cfg, err
+	}
+	normalize(res.Segments, cfg, resultLanguage(cfg, res))
+	if err := s.translateSegments(ctx, res.Segments, cfg, resultLanguage(cfg, res)); err != nil {
+		return none, nil, cfg, err
+	}
+	return res, samples, cfg, nil
+}
+
+// transcribeBestFit transcribes samples in the config's language or, for
+// several languageCodes (#1799), in the best fit of them, which it sets as
+// the config's LanguageCode: the language whisper detects when it is one of
+// them, else the one whose transcript whisper is most confident of (its
+// segments' mean token probability, weighted by their length).
+//
+// UNVERIFIED (the multiple-languages page, read 2026-11-20, says "the
+// best-fit language from the list", not how it is chosen): this choice,
+// which is whisper's, not Google's.
+func transcribeBestFit(ctx context.Context, samples []float32, opt speech.Options, cfg speechconfig.Config) (speech.Result, speechconfig.Config, error) {
+	if len(cfg.Candidates) == 0 {
+		res, err := speech.Transcribe(ctx, samples, opt)
+		if err != nil {
+			return res, cfg, speechError(err)
+		}
+		return res, cfg, nil
+	}
+	opt.Language = ""
 	res, err := speech.Transcribe(ctx, samples, opt)
 	if err != nil {
-		return none, nil, cfg, speechError(err)
+		return res, cfg, speechError(err)
 	}
-	normalize(res.Segments, cfg)
-	return res, samples, cfg, nil
+	for _, c := range cfg.Candidates {
+		if strings.EqualFold(c.Whisper, res.Language) {
+			cfg.LanguageCode, cfg.Language = c.Code, c.Whisper
+			return res, cfg, nil
+		}
+	}
+	var (
+		best      speech.Result
+		bestScore = -1.0
+	)
+	for _, c := range cfg.Candidates {
+		known, err := speech.LanguageKnown(ctx, c.Whisper)
+		if err != nil {
+			return res, cfg, speechError(err)
+		}
+		if !known {
+			continue
+		}
+		opt.Language = c.Whisper
+		r, err := speech.Transcribe(ctx, samples, opt)
+		if err != nil {
+			return res, cfg, speechError(err)
+		}
+		var sum, weight float64
+		for _, seg := range r.Segments {
+			w := max((seg.End - seg.Start).Seconds(), 0.01)
+			sum += seg.Confidence * w
+			weight += w
+		}
+		score := 0.0
+		if weight > 0 {
+			score = sum / weight
+		}
+		if score > bestScore {
+			best, bestScore = r, score
+			cfg.LanguageCode, cfg.Language = c.Code, c.Whisper
+		}
+	}
+	if bestScore < 0 {
+		return res, cfg, apierror.Unimplemented("Not implemented here: none of the languageCodes is a language CloudBurrow's local Whisper model " +
+			"recognises, and CloudBurrow never calls Google")
+	}
+	return best, cfg, nil
+}
+
+// resultLanguage is the language code results are labelled with: the
+// config's, else the detected one.
+func resultLanguage(cfg speechconfig.Config, res speech.Result) string {
+	if cfg.LanguageCode != "" {
+		return cfg.LanguageCode
+	}
+	return strings.ToLower(res.Language)
+}
+
+// translateSegments translates each segment's transcript to the config's
+// translationConfig.targetLanguage (#1799) with the served Translation
+// API's model (translate.go's translateOne): Chirp 2's speech translation,
+// from the spoken language. Its words and confidences are dropped, as
+// Chirp 2's page says of translation ("confidence scores are not
+// returned").
+//
+// UNVERIFIED (Chirp 2's page, read 2026-11-20, shows the translated
+// transcript only): that each result is translated on its own, that words
+// are dropped, and that results keep the spoken languageCode.
+func (s *Server) translateSegments(ctx context.Context, segs []speech.Segment, cfg speechconfig.Config, code string) error {
+	if cfg.TranslateTo == "" {
+		return nil
+	}
+	src, tgt := translationCode(code), translationCode(cfg.TranslateTo)
+	for i := range segs {
+		tr, err := s.translateOne(ctx, segs[i].Text, src, tgt)
+		if err != nil {
+			return err
+		}
+		segs[i].Text, segs[i].Words = tr, nil
+	}
+	return nil
+}
+
+// translationCode is a Speech-to-Text language code as Translation's:
+// cmn-Hans-CN as zh-CN, a dialect (ar-x-gulf, es-419) as its language.
+func translationCode(code string) string {
+	c := strings.ToLower(code)
+	switch {
+	case strings.HasPrefix(c, "cmn-hans") || c == "cmn":
+		return "zh-CN"
+	case strings.HasPrefix(c, "cmn-hant"):
+		return "zh-TW"
+	}
+	if LanguageName(code) != "" {
+		return code
+	}
+	p, _, _ := strings.Cut(c, "-")
+	return p
 }
 
 // transcribeOptions are whisper's options for a checked config, its
@@ -260,9 +396,12 @@ func (s *Server) transcribeChannels(ctx context.Context, cfg speechconfig.Config
 		samples []float32
 	)
 	for c, ch := range chans {
-		res, err := speech.Transcribe(ctx, ch, opt)
+		res, chCfg, err := transcribeBestFit(ctx, ch, opt, cfg)
 		if err != nil {
-			return none, nil, cfg, speechError(err)
+			return none, nil, cfg, err
+		}
+		if c == 0 {
+			cfg = chCfg
 		}
 		if out.Language == "" {
 			out.Language = res.Language
@@ -280,18 +419,25 @@ func (s *Server) transcribeChannels(ctx context.Context, cfg speechconfig.Config
 		}
 		return a.Channel < b.Channel
 	})
-	normalize(out.Segments, cfg)
+	normalize(out.Segments, cfg, resultLanguage(cfg, out))
+	if err := s.translateSegments(ctx, out.Segments, cfg, resultLanguage(cfg, out)); err != nil {
+		return none, nil, cfg, err
+	}
 	return out, samples, cfg, nil
 }
 
-// normalize applies the config's transcriptNormalization to each final
-// segment's transcript (speechconfig's Normalize).
-func normalize(segs []speech.Segment, cfg speechconfig.Config) {
-	if len(cfg.Normalization) == 0 {
-		return
-	}
+// normalize applies the config's spoken punctuation and emojis, profanity
+// filter and transcriptNormalization to each final segment's transcript
+// (speechconfig's Format), recognised in the language code, and the
+// profanity filter to its words.
+func normalize(segs []speech.Segment, cfg speechconfig.Config, code string) {
 	for i := range segs {
-		segs[i].Text = cfg.Normalize(segs[i].Text)
+		segs[i].Text = cfg.Format(segs[i].Text, code)
+		if cfg.ProfanityFilter {
+			for j := range segs[i].Words {
+				segs[i].Words[j].Text = speechconfig.MaskWord(segs[i].Words[j].Text)
+			}
+		}
 	}
 }
 
@@ -321,8 +467,11 @@ func recognizeResponse(res speech.Result, samples []float32, f speechconfig.Conf
 	}
 	var results []any
 	for _, seg := range res.Segments {
-		alt := map[string]any{"transcript": seg.Text, "confidence": math.Round(seg.Confidence*1e6) / 1e6}
-		if f.WordOffsets || f.WordConfidence {
+		alt := map[string]any{"transcript": seg.Text}
+		if f.TranslateTo == "" {
+			alt["confidence"] = math.Round(seg.Confidence*1e6) / 1e6
+		}
+		if (f.WordOffsets || f.WordConfidence) && f.TranslateTo == "" {
 			var words []any
 			for _, wd := range seg.Words {
 				m := map[string]any{"word": wd.Text}

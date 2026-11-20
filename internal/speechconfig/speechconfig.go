@@ -34,6 +34,9 @@ type Options struct {
 	// SEPARATE_RECOGNITION_PER_CHANNEL: each channel is transcribed on
 	// its own, its results carrying its channelTag.
 	PerChannel bool
+	// ProfanityFilter, SpokenPunctuation and SpokenEmojis are the
+	// features of those names, applied to each final transcript (Format).
+	ProfanityFilter, SpokenPunctuation, SpokenEmojis bool
 }
 
 // Encodings are ExplicitDecodingConfig's AudioEncoding values, true for
@@ -62,6 +65,36 @@ type Config struct {
 	// Normalization is transcriptNormalization's entries, applied to
 	// each final transcript in order (Normalize).
 	Normalization []NormalizationEntry
+	// Candidates are languageCodes when there are several (at most
+	// three): each code in lower case and whisper's code for it. The
+	// audio is recognised in the best-fit one, which the results name.
+	Candidates []Candidate
+	// TranslateTo is translationConfig.targetLanguage, "" for none: each
+	// final transcript is translated to it with the served Translation
+	// API's model.
+	TranslateTo string
+}
+
+// Candidate is one of several languageCodes.
+type Candidate struct {
+	Code    string // the languageCodes entry, lower case
+	Whisper string // whisper's code for it
+}
+
+// Format applies the config's spoken punctuation and emojis, profanity
+// filter and transcriptNormalization, in that order, to a final transcript
+// recognised in the language code.
+func (c Config) Format(text, code string) string {
+	if c.SpokenPunctuation {
+		text = SpokenPunctuation(text, code)
+	}
+	if c.SpokenEmojis {
+		text = SpokenEmojis(text, code)
+	}
+	if c.ProfanityFilter {
+		text = FilterProfanity(text, code)
+	}
+	return c.Normalize(text)
 }
 
 // NormalizationEntry is one TranscriptNormalization.Entry.
@@ -144,6 +177,19 @@ func Parse(raw []byte) (c Config, code int, err error) {
 	}
 	if !strings.EqualFold(rc.LanguageCodes[0], "auto") {
 		c.LanguageCode = strings.ToLower(rc.LanguageCodes[0])
+	}
+	if len(rc.LanguageCodes) > 1 {
+		c.LanguageCode = ""
+		for _, l := range rc.LanguageCodes {
+			c.Candidates = append(c.Candidates, Candidate{Code: strings.ToLower(l), Whisper: whisperLanguage(l)})
+		}
+	}
+	if len(rc.TranslationConfig) > 0 && string(rc.TranslationConfig) != "null" {
+		var tc struct {
+			TargetLanguage string `json:"targetLanguage"`
+		}
+		_ = json.Unmarshal(rc.TranslationConfig, &tc)
+		c.TranslateTo = tc.TargetLanguage
 	}
 	return c, 0, nil
 }
@@ -278,12 +324,16 @@ func parse(raw []byte) (Decoding, string, Options, int, error) {
 		return unimpl("the " + strconv.Quote(c.Model) + " model (served: " + strings.Join(Models(), ", ") + ")")
 	case len(c.LanguageCodes) == 0:
 		return d, "", opt, 400, errors.New("RecognitionConfig.languageCodes is required: the default recognizer has no language")
-	case len(c.LanguageCodes) > 1:
-		return unimpl("recognising one of several languageCodes")
+	case len(c.LanguageCodes) > maxLanguageCodes:
+		return d, "", opt, 400, fmt.Errorf("languageCodes has %d entries: at most %d languages can be listed", len(c.LanguageCodes), maxLanguageCodes)
+	case len(c.LanguageCodes) > 1 && !multiLanguageModels[c.Model]:
+		return d, "", opt, 400, fmt.Errorf("several languageCodes are only supported by the long, short and telephony models, not %q", c.Model)
 	case c.TranscriptNormalization != nil && len(c.TranscriptNormalization.Entries) > maxNormalization:
 		return d, "", opt, 400, fmt.Errorf("transcriptNormalization has %d entries: at most %d are allowed", len(c.TranscriptNormalization.Entries), maxNormalization)
-	case c.TranslationConfig != nil:
-		return unimpl("translationConfig")
+	case c.TranslationConfig != nil && string(c.TranslationConfig) != "null":
+		if code, err := checkTranslation(c.Model, c.LanguageCodes, c.TranslationConfig); err != nil {
+			return d, "", opt, code, err
+		}
 	case c.DenoiserConfig != nil:
 		return unimpl("denoiserConfig")
 	case c.AutoDecodingConfig != nil && c.ExplicitDecodingConfig != nil:
@@ -305,12 +355,6 @@ func parse(raw []byte) (Decoding, string, Options, int, error) {
 	}
 	if f := c.Features; f != nil {
 		switch {
-		case f.ProfanityFilter:
-			return unimpl("features.profanityFilter")
-		case f.EnableSpokenPunctuation:
-			return unimpl("features.enableSpokenPunctuation")
-		case f.EnableSpokenEmojis:
-			return unimpl("features.enableSpokenEmojis")
 		case f.DiarizationConfig != nil:
 			return unimpl("features.diarizationConfig")
 		case f.MultiChannelMode != "" && f.MultiChannelMode != "MULTI_CHANNEL_MODE_UNSPECIFIED" && f.MultiChannelMode != "SEPARATE_RECOGNITION_PER_CHANNEL":
@@ -319,7 +363,8 @@ func parse(raw []byte) (Decoding, string, Options, int, error) {
 			return d, "", opt, 400, fmt.Errorf("features.maxAlternatives %d is out of range: valid values are 0-30", f.MaxAlternatives)
 		}
 		opt = Options{Words: f.EnableWordTimeOffsets || f.EnableWordConfidence, WordOffsets: f.EnableWordTimeOffsets, WordConfidence: f.EnableWordConfidence,
-			PerChannel: f.MultiChannelMode == "SEPARATE_RECOGNITION_PER_CHANNEL"}
+			PerChannel:      f.MultiChannelMode == "SEPARATE_RECOGNITION_PER_CHANNEL",
+			ProfanityFilter: f.ProfanityFilter, SpokenPunctuation: f.EnableSpokenPunctuation, SpokenEmojis: f.EnableSpokenEmojis}
 	}
 	if e := c.ExplicitDecodingConfig; e != nil {
 		served, known := Encodings[e.Encoding]
@@ -334,6 +379,14 @@ func parse(raw []byte) (Decoding, string, Options, int, error) {
 		d = Decoding{Encoding: e.Encoding, SampleRate: e.SampleRateHertz, Channels: e.AudioChannelCount}
 	} else {
 		d.Auto = true
+	}
+	if len(c.LanguageCodes) > 1 {
+		for _, l := range c.LanguageCodes {
+			if strings.EqualFold(l, "auto") || whisperLanguage(l) == "" {
+				return d, "", opt, 400, fmt.Errorf("invalid language code %q among several languageCodes", l)
+			}
+		}
+		return d, "", opt, 0, nil // detected among them
 	}
 	lang := c.LanguageCodes[0]
 	if strings.EqualFold(lang, "auto") {

@@ -39,7 +39,8 @@ import (
 //     (speechbias.go); adaptation's phrase_set_references and abnf_grammar
 //     are UNIMPLEMENTED (v1's Adaptation service is not served), as are
 //     alternative_language_codes, enable_separate_recognition_per_channel,
-//     diarization, spoken punctuation and emojis and transcript_normalization.
+//     diarization and transcript_normalization (spoken punctuation and emojis
+//     and the profanity filter are v2's, #1799).
 //   - Recognize reads at most a minute of audio ("Sync input too long. For
 //     audio longer than 1 min use LongRunningRecognize with a 'uri'
 //     parameter."), from content or a gs:// uri of this instance's Cloud
@@ -78,10 +79,6 @@ func v1Config(c *speechv1pb.RecognitionConfig) (json.RawMessage, error) {
 		return nil, unimpl("enable_separate_recognition_per_channel")
 	case c.GetDiarizationConfig().GetEnableSpeakerDiarization():
 		return nil, unimpl("diarization_config")
-	case c.GetEnableSpokenPunctuation().GetValue():
-		return nil, unimpl("enable_spoken_punctuation")
-	case c.GetEnableSpokenEmojis().GetValue():
-		return nil, unimpl("enable_spoken_emojis")
 	case c.GetTranscriptNormalization() != nil:
 		return nil, unimpl("transcript_normalization")
 	case len(c.GetAdaptation().GetPhraseSetReferences()) > 0:
@@ -138,6 +135,12 @@ func v1Config(c *speechv1pb.RecognitionConfig) (json.RawMessage, error) {
 	}
 	if c.GetProfanityFilter() {
 		features["profanityFilter"] = true
+	}
+	if c.GetEnableSpokenPunctuation().GetValue() {
+		features["enableSpokenPunctuation"] = true
+	}
+	if c.GetEnableSpokenEmojis().GetValue() {
+		features["enableSpokenEmojis"] = true
 	}
 	if n := c.GetMaxAlternatives(); n != 0 {
 		features["maxAlternatives"] = n
