@@ -1103,7 +1103,12 @@ func (r *Registry) federatedPrincipals(principal string) []string {
 			out = append(out, rec.Sets...)
 		}
 	}
-	return out
+	// SCIM's groups and attributes for a workforce subject (#2068).
+	sets, ok := r.scimAdjustSets(principal, out[1:])
+	if !ok {
+		return nil
+	}
+	return append([]string{principal}, sets...)
 }
 
 // FederatedPrincipalActive reports whether a principal:// identifier's

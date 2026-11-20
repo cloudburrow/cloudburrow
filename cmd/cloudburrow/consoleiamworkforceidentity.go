@@ -176,18 +176,33 @@ func (p iamWorkforceIdentityProvider) Create(_ context.Context, _ string, values
 }
 
 func (p iamWorkforceIdentityProvider) Detail(ctx context.Context, project string, path []string) (console.Detail, error) {
-	if len(path) > 2 {
-		return console.DeeperThan(2, path), nil
+	if len(path) > 4 {
+		return console.DeeperThan(4, path), nil
 	}
 	pool, err := p.registry.WorkforcePool(path[0])
 	if err != nil {
 		return console.Detail{Unavailable: "cannot read the pool: " + consoleErr(err)}, nil
 	}
+	if len(path) >= 3 {
+		// A provider's SCIM tenant and its tokens (#2067).
+		tenant, ok := strings.CutPrefix(path[2], wfScimRow)
+		if !ok {
+			return console.DeeperThan(2, path), nil
+		}
+		if len(path) == 4 {
+			token, ok := strings.CutPrefix(path[3], wfTokenRow)
+			if !ok {
+				return console.DeeperThan(3, path), nil
+			}
+			return p.tokenDetail(path[0], path[1], tenant, token)
+		}
+		return p.scimTenantDetail(ctx, project, path[0], path[1], tenant)
+	}
 	if len(path) == 2 {
 		if s, ok := strings.CutPrefix(path[1], wfSubjectRow); ok {
 			return p.subjectDetail(pool, s)
 		}
-		return p.providerDetail(pool, path[1])
+		return p.providerDetail(ctx, project, pool, path[1])
 	}
 	props := []console.Property{
 		{Label: "Pool ID", Value: path[0]},
@@ -233,6 +248,8 @@ func (p iamWorkforceIdentityProvider) Detail(ctx context.Context, project string
 		{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Heading: "Pool", Properties: props}}},
 		{ID: "providers", Label: "Providers", Listing: provs},
 		{ID: "subjects", Label: "Subjects", Listing: subs},
+		// The pool's own IAM policy (#2067).
+		{ID: "permissions", Kind: console.KindPermissions},
 	}}
 	if pool.State != "DELETED" {
 		d.Edit = &console.EditForm{Label: "Edit pool", Note: "The pool ID and its organization cannot change, as on Google.", Fields: []console.Field{
@@ -280,7 +297,7 @@ func (p iamWorkforceIdentityProvider) subjectDetail(pool resourcemanager.Workfor
 	return console.Detail{Unavailable: "no subject " + subject + " in the pool"}, nil
 }
 
-func (p iamWorkforceIdentityProvider) providerDetail(pool resourcemanager.WorkforcePool, id string) (console.Detail, error) {
+func (p iamWorkforceIdentityProvider) providerDetail(ctx context.Context, project string, pool resourcemanager.WorkforcePool, id string) (console.Detail, error) {
 	v, err := p.registry.WorkforcePoolProvider(lastSegment(pool.Name), id)
 	if err != nil {
 		return console.Detail{Unavailable: "cannot read the provider: " + consoleErr(err)}, nil
@@ -293,6 +310,7 @@ func (p iamWorkforceIdentityProvider) providerDetail(pool resourcemanager.Workfo
 		{Label: "Type", Value: typ},
 		{Label: "Description", Value: orDash(v.Description)},
 		{Label: "Audience", Value: "//iam.googleapis.com/" + v.Name},
+		{Label: "SCIM usage", Value: wfScimUsageLabel(v.ScimUsage)},
 	}
 	var cfg []console.Property
 	switch {
@@ -322,6 +340,7 @@ func (p iamWorkforceIdentityProvider) providerDetail(pool resourcemanager.Workfo
 	d := console.Detail{Summary: props[:3], Sections: []console.Section{
 		{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{
 			{Heading: "Provider", Properties: props}, {Heading: "Provider details", Properties: cfg}, {Heading: "Attribute mapping", Properties: attrs}}},
+		p.wfScimSection(ctx, project, lastSegment(pool.Name), id),
 	}}
 	if v.State != "DELETED" {
 		fields := []console.Field{
@@ -336,7 +355,10 @@ func (p iamWorkforceIdentityProvider) providerDetail(pool resourcemanager.Workfo
 		}
 		fields = append(fields,
 			console.Field{Name: "attributeMapping", Label: "Attribute mapping", Type: "map", Default: console.FormatMap(v.AttributeMapping)},
-			console.Field{Name: "attributeCondition", Label: "Attribute condition", Type: "textarea", Default: v.AttributeCondition})
+			console.Field{Name: "attributeCondition", Label: "Attribute condition", Type: "textarea", Default: v.AttributeCondition},
+			console.Field{Name: "scimUsage", Label: "SCIM usage", Type: "select", Default: wfScimUsageLabel(v.ScimUsage),
+				Options: []string{wfScimUsageNone, wfScimUsageGroups, wfScimUsageUsersGroups},
+				Help:    "Whether IAM reads groups, or users and groups, from the pool's SCIM tenant, which must be under this provider."})
 		d.Edit = &console.EditForm{Label: "Edit provider", Fields: fields, Note: "The provider ID and type cannot change, as on Google."}
 	}
 	return d, nil
@@ -359,7 +381,8 @@ func (p iamWorkforceIdentityProvider) Edit(_ context.Context, _ string, path []s
 		if in.AttributeMapping, err = console.ParseMap(values["attributeMapping"]); err != nil {
 			return err
 		}
-		mask := []string{"displayName", "description", "attributeMapping", "attributeCondition"}
+		in.ScimUsage = wfScimUsageValue(values["scimUsage"])
+		mask := []string{"displayName", "description", "attributeMapping", "attributeCondition", "scimUsage"}
 		if cur.Oidc != nil {
 			in.Oidc = &resourcemanager.WFOidc{IssuerURI: strings.TrimSpace(values["issuerUri"]), ClientID: strings.TrimSpace(values["clientId"]),
 				JwksJSON: strings.TrimSpace(values["jwksJson"])}
@@ -367,8 +390,16 @@ func (p iamWorkforceIdentityProvider) Edit(_ context.Context, _ string, path []s
 		}
 		_, err = p.registry.UpdateWorkforcePoolProvider(path[0], path[1], in, mask)
 		return err
+	case 3:
+		tenant, ok := strings.CutPrefix(path[2], wfScimRow)
+		if !ok {
+			break
+		}
+		_, err := p.registry.UpdateWorkforcePoolProviderScimTenant(path[0], path[1], tenant, resourcemanager.WorkforcePoolProviderScimTenant{
+			DisplayName: values["tenantDisplayName"], Description: values["tenantDescription"]}, []string{"displayName", "description"})
+		return err
 	}
-	return fmt.Errorf("only a pool or a provider can be edited")
+	return fmt.Errorf("only a pool, a provider or a SCIM tenant can be edited")
 }
 
 func (p iamWorkforceIdentityProvider) Delete(_ context.Context, _, row string) error {
@@ -434,13 +465,33 @@ func (p iamWorkforceIdentityProvider) DetailActions(_ context.Context, _ string,
 		case "DISABLED":
 			return []console.Action{{ID: "enable-provider", Label: "Enable"}, {ID: "delete-provider", Label: "Delete", Destructive: true}}
 		}
-		return []console.Action{{ID: "disable-provider", Label: "Disable", Confirm: "the provider exchanges no token; the tokens it issued still grant"},
+		out := []console.Action{{ID: "disable-provider", Label: "Disable", Confirm: "the provider exchanges no token; the tokens it issued still grant"},
 			{ID: "delete-provider", Label: "Delete", Destructive: true}}
+		if ts, err := p.registry.WorkforcePoolProviderScimTenants(path[0], path[1], true); err == nil && len(ts) == 0 {
+			out = append([]console.Action{{ID: "create-scim-tenant", Label: "Create SCIM tenant", Fields: wfScimTenantFields()}}, out...)
+		}
+		return out
+	case 3, 4:
+		return p.scimActions(path)
 	}
 	return nil
 }
 
-func (p iamWorkforceIdentityProvider) ActAt(_ context.Context, _ string, path []string, action string, values map[string]string) error {
+func (p iamWorkforceIdentityProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
+	_, err := p.ActAtResult(ctx, project, path, action, values)
+	return err
+}
+
+// ActAtResult performs an action; a SCIM token's Create answers its
+// security token, to the response only, never to the operations ledger.
+func (p iamWorkforceIdentityProvider) ActAtResult(_ context.Context, _ string, path []string, action string, values map[string]string) (*console.Listing, error) {
+	if len(path) >= 3 || (len(path) == 2 && action == "create-scim-tenant") {
+		return p.actScim(path, action, values)
+	}
+	return nil, p.actAt(path, action, values)
+}
+
+func (p iamWorkforceIdentityProvider) actAt(path []string, action string, values map[string]string) error {
 	if len(path) == 0 {
 		return fmt.Errorf("unknown action %q", action)
 	}

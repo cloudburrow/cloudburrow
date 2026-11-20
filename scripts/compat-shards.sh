@@ -455,8 +455,9 @@ compat_shard() {
       # And Workload Identity Federation's federated principal reading a
       # bucket, refused until it is granted (#1941), and Workforce Identity
       # Federation's (#2056), its SAML exchange read through Cloud Storage
-      # and its pools' own IAM policies (#2065), which need enforcement.
-      COMPAT_RUN='^Test(IAMEnforcement|WorkloadIdentityFederationStorage$|WorkforceIdentityFederationStorage$|WorkforceIdentityFederationSAML$|WorkforcePoolIAMPolicy$)' ;;
+      # and its pools' own IAM policies (#2065), and SCIM-provisioned users and
+      # groups read through Cloud Storage (#2068), which need enforcement.
+      COMPAT_RUN='^Test(IAMEnforcement|WorkloadIdentityFederationStorage$|WorkforceIdentityFederationStorage$|WorkforceIdentityFederationSAML$|WorkforcePoolIAMPolicy$|WorkforceScimProvisioning$)' ;;
     localai)
       # The local AI tests (#1985): BigQuery and Cloud Storage for the AI
       # and ML functions' tables and object tables, Resource Manager (every

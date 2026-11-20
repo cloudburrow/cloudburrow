@@ -84,3 +84,15 @@ func (r *Registry) wfScimTenantForIAM(pool, prov, tenant string) (deleted, ok bo
 	}
 	return rec.Deleted, true
 }
+
+// WorkforceIAMServer is the IAM methods of workforce pools and their SCIM
+// tenants, by full resource name (locations/global/workforcePools/...).
+type WorkforceIAMServer interface {
+	GetIamPolicy(context.Context, *iampb.GetIamPolicyRequest) (*iampb.Policy, error)
+	SetIamPolicy(context.Context, *iampb.SetIamPolicyRequest) (*iampb.Policy, error)
+	TestIamPermissions(context.Context, *iampb.TestIamPermissionsRequest) (*iampb.TestIamPermissionsResponse, error)
+}
+
+// WorkforceIAM serves the console's Permissions tabs of pools and SCIM
+// tenants (#2067) as the IAM API serves them.
+func (r *Registry) WorkforceIAM() WorkforceIAMServer { return wfIAMServer{reg: r} }

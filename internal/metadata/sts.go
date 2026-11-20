@@ -284,6 +284,16 @@ func (s *Server) sts(w http.ResponseWriter, r *http.Request) {
 		if p.SessionTTL > 0 {
 			ttl = p.SessionTTL
 		}
+		// A provider using SCIM (#2068): its tenant must be attached, and
+		// with ENABLED_FOR_USERS_GROUPS the subject provisioned.
+		if sc, ok := d.(interface {
+			WorkforceScimSignIn(pool, provider, subject string) error
+		}); ok {
+			if err := sc.WorkforceScimSignIn(p.Pool, p.ID, attrs.Subject); err != nil {
+				stsError(w, http.StatusBadRequest, "invalid_grant", err.Error())
+				return
+			}
+		}
 	}
 	if !session.IsZero() && session.Sub(now) < ttl {
 		// A SAML assertion's SessionNotOnOrAfter bounds the token

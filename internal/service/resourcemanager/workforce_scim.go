@@ -17,8 +17,8 @@ package resourcemanager
 //     most 32 characters, description 256;
 //   - the tenant's baseUri is https://iamscim.googleapis.com/v1alpha1/tenants/UID
 //     and its service agent o-ORGANIZATION_ID-UID@gcp-sa-iamscim.iam.gserviceaccount.com;
-//     CloudBurrow serves no SCIM protocol endpoint (iamscim.googleapis.com),
-//     so these are names only;
+//     the SCIM protocol endpoint itself is served at /v1alpha1/tenants/UID
+//     on the IAM API's port (#2068, workforce_scimapi.go);
 //   - delete is soft (DELETED, purgeTime 30 days on; the ID and the pool's
 //     one tenant not reusable until then), or immediate with hardDelete;
 //     a deleted tenant is listed with showDeleted and cannot be updated;
@@ -42,6 +42,7 @@ import (
 	"time"
 
 	"cel.dev/cel-go/cel"
+	"cel.dev/cel-go/ext"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
@@ -168,26 +169,72 @@ var (
 	scimEnvErr  error
 )
 
+// The claim mapping's documented forms ("Configure SCIM in OIDC or SAML
+// IdP", read 2026-11-20): google.subject is user.externalId, user.userName
+// or user.emails[0].value, the last two optionally .lowerAscii() (the only
+// case folding offered, and only on those two); google.group is
+// group.externalId or group.displayName; google.display_name,
+// google.profile_photo, google.email and google.posix_username are any
+// expression over `user`; and at most 50 attribute.KEY rules of at most
+// 256 characters each.
+var (
+	scimSubjectExpr = regexp.MustCompile(`^user\.(externalId|(userName|emails\[0\]\.value)(\.lowerAscii\(\))?)$`)
+	scimGroupExpr   = regexp.MustCompile(`^group\.(externalId|displayName)$`)
+	scimAttrKey     = regexp.MustCompile(`^attribute\.[a-z_][a-z0-9_]{0,99}$`)
+)
+
+const (
+	scimMaxCustomRules = 50
+	scimMaxRuleChars   = 256
+)
+
+func scimCELEnv() (*cel.Env, error) {
+	scimEnvOnce.Do(func() {
+		scimEnv, scimEnvErr = cel.NewEnv(cel.Variable("user", cel.DynType), cel.Variable("group", cel.DynType), ext.Strings())
+	})
+	return scimEnv, scimEnvErr
+}
+
 // checkScimClaimMapping validates a tenant's claim mapping: google.subject
-// is required, google.group optional, each a CEL expression over `user`
-// and `group`.
+// is required, every expression a CEL expression over `user` or `group` in
+// the documented forms.
 func checkScimClaimMapping(m map[string]string) error {
 	if m["google.subject"] == "" {
 		return apierror.InvalidArgument("claim_mapping is required and must map google.subject.")
 	}
-	scimEnvOnce.Do(func() {
-		scimEnv, scimEnvErr = cel.NewEnv(cel.Variable("user", cel.DynType), cel.Variable("group", cel.DynType))
-	})
-	if scimEnvErr != nil {
-		return apierror.Internal(scimEnvErr, "SCIM CEL environment")
+	env, err := scimCELEnv()
+	if err != nil {
+		return apierror.Internal(err, "SCIM CEL environment")
 	}
+	custom := 0
 	for k, v := range m {
-		if k != "google.subject" && k != "google.group" {
-			return apierror.InvalidArgument("claim_mapping key %q is not supported: the keys are google.subject and google.group.", k)
+		switch {
+		case k == "google.subject":
+			if !scimSubjectExpr.MatchString(strings.TrimSpace(v)) {
+				return apierror.InvalidArgument("claim_mapping[\"google.subject\"] must be user.externalId, user.userName or user.emails[0].value (the last two optionally with .lowerAscii()); got %q.", v)
+			}
+		case k == "google.group":
+			if !scimGroupExpr.MatchString(strings.TrimSpace(v)) {
+				return apierror.InvalidArgument("claim_mapping[\"google.group\"] must be group.externalId or group.displayName; got %q.", v)
+			}
+		case k == "google.display_name", k == "google.profile_photo", k == "google.email", k == "google.posix_username":
+		case strings.HasPrefix(k, "attribute."):
+			if !scimAttrKey.MatchString(k) {
+				return apierror.InvalidArgument("claim_mapping key %q is not a valid custom attribute: attribute.KEY, KEY of [a-z0-9_] starting with a letter or _.", k)
+			}
+			custom++
+		default:
+			return apierror.InvalidArgument("claim_mapping key %q is not supported: the keys are google.subject, google.group, google.display_name, google.profile_photo, google.email, google.posix_username and attribute.KEY.", k)
 		}
-		if _, iss := scimEnv.Compile(v); iss.Err() != nil {
+		if len(v) > scimMaxRuleChars {
+			return apierror.InvalidArgument("claim_mapping[%q] is longer than %d characters.", k, scimMaxRuleChars)
+		}
+		if _, iss := env.Compile(v); iss.Err() != nil {
 			return apierror.InvalidArgument("claim_mapping[%q] is not a valid CEL expression: %v", k, iss.Err())
 		}
+	}
+	if custom > scimMaxCustomRules {
+		return apierror.InvalidArgument("claim_mapping has %d custom attribute rules: at most %d are allowed.", custom, scimMaxCustomRules)
 	}
 	return nil
 }
@@ -365,6 +412,7 @@ func (r *Registry) DeleteWorkforcePoolProviderScimTenant(pool, prov, id string, 
 		for _, k := range tokens {
 			_ = r.st.Delete(k)
 		}
+		r.scimPurge(rec.UID)
 		if err := r.st.Delete(wfScimTenantKey(pool, prov, id)); err != nil {
 			return view, apierror.Internal(err, "delete the SCIM tenant")
 		}
@@ -545,8 +593,7 @@ func (r *Registry) DeleteWorkforcePoolProviderScimToken(pool, prov, tenant, id s
 }
 
 // ScimTokenLive reports whether secret is a live token of a live tenant:
-// what a SCIM endpoint would check. No SCIM endpoint is served; unit tests
-// use it.
+// what the SCIM endpoint checks (workforce_scimapi.go).
 func (r *Registry) ScimTokenLive(pool, prov, tenant, secret string) bool {
 	wifMu.Lock()
 	defer wifMu.Unlock()

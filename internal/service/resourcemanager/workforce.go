@@ -474,9 +474,11 @@ func checkWFProvider(p *WorkforcePoolProvider) error {
 		return apierror.Unimplemented("extraAttributesOauth2Client and extendedAttributesOauth2Client call the identity provider's own APIs, which CloudBurrow never reaches: they are not supported.")
 	}
 	switch p.ScimUsage {
-	case "", "SCIM_USAGE_UNSPECIFIED":
+	case "", "SCIM_USAGE_UNSPECIFIED", scimUsageGroups, scimUsageUsersGroups:
+		// SCIM-managed groups, or users and groups (#2068,
+		// workforce_scimauthz.go).
 	default:
-		return apierror.Unimplemented("scimUsage (SCIM tenants, for Gemini Enterprise and Looker) is not supported by CloudBurrow.")
+		return apierror.InvalidArgument("Invalid value for scim_usage: %q.", p.ScimUsage)
 	}
 	if p.AttributeSyncInterval != "" {
 		d, ok := parseWFDuration(p.AttributeSyncInterval)
@@ -584,6 +586,9 @@ func (r *Registry) CreateWorkforcePoolProvider(pool, id string, in WorkforcePool
 	if r.wfLoad(wfProviderKey(pool, id)) != nil {
 		return in, apierror.AlreadyExists("Requested entity already exists")
 	}
+	if err := r.checkWFScimUsage(pool, id, &in); err != nil {
+		return in, err
+	}
 	rec := &wfRecord{Pool: pool, Provider: id, ProviderV: &in, CreateTime: r.now().UTC()}
 	if err := r.wfSave(wfProviderKey(pool, id), rec); err != nil {
 		return in, err
@@ -661,6 +666,8 @@ func (r *Registry) UpdateWorkforcePoolProvider(pool, id string, in WorkforcePool
 			v.AttributeSyncInterval = in.AttributeSyncInterval
 		case "vendorType", "vendor_type":
 			v.VendorType = in.VendorType
+		case "scimUsage", "scim_usage":
+			v.ScimUsage = in.ScimUsage
 		case "oidc":
 			if v.Oidc == nil || in.Oidc == nil {
 				return in, apierror.InvalidArgument("A provider's type cannot change.")
@@ -721,6 +728,9 @@ func (r *Registry) UpdateWorkforcePoolProvider(pool, id string, in WorkforcePool
 		}
 	}
 	if err := checkWFProvider(&v); err != nil {
+		return in, err
+	}
+	if err := r.checkWFScimUsage(pool, id, &v); err != nil {
 		return in, err
 	}
 	sealSecret(v.Oidc)

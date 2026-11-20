@@ -725,6 +725,13 @@ func (s *Server) Start(ctx context.Context) error {
 				return
 			}
 		}
+		if IsScimPath(r.URL.Path) {
+			// A SCIM tenant's provisioning endpoint (#2068): authenticated
+			// by the tenant's SCIM tokens, not by Google credentials, so
+			// outside the IAM API's wrappers.
+			s.projects.reg.ServeScim(w, r)
+			return
+		}
 		apis.ServeHTTP(w, r)
 	})
 	if s.requests != nil {

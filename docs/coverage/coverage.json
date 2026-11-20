@@ -16830,7 +16830,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/iamworkforceidentity2056_test.go:523 TestGcloudIAMWorkforcePools",
-          "test/compat/iamworkforceidentity2056_test.go:54 TestWorkforcePools"
+          "test/compat/iamworkforceidentity2056_test.go:54 TestWorkforcePools",
+          "test/compat/iamworkforcescimapi2068_test.go:83 TestWorkforceScimProvisioning"
         ]
       },
       {
