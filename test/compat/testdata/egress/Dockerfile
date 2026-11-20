@@ -3,7 +3,7 @@
 # client libraries at the versions docs/security.md measured, plus
 # iptables to count connection attempts. The Go probe and the sink are
 # mounted at /egress when it runs.
-FROM node:24.11.1-bookworm-slim
+FROM node:24.11.1-bookworm-slim@sha256:48abc13a19400ca3985071e287bd405a1d99306770eb81d61202fb6b65cf0b57
 RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-venv iptables iproute2 ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 RUN python3 -m venv /py && /py/bin/pip install --no-cache-dir \
