@@ -6792,21 +6792,21 @@
         "method": "google.cloud.speech.v2.Speech/BatchRecognize",
         "status": "Verified",
         "tests": [
-          "test/compat/speech_test.go:319 TestSpeechBatchRecognize"
+          "test/compat/speech_test.go:321 TestSpeechBatchRecognize"
         ]
       },
       {
         "method": "google.cloud.speech.v2.Speech/CreateCustomClass",
         "status": "Verified",
         "tests": [
-          "test/compat/speech_test.go:190 TestSpeechAdaptationResources"
+          "test/compat/speech_test.go:192 TestSpeechAdaptationResources"
         ]
       },
       {
         "method": "google.cloud.speech.v2.Speech/CreatePhraseSet",
         "status": "Verified",
         "tests": [
-          "test/compat/speech_test.go:190 TestSpeechAdaptationResources",
+          "test/compat/speech_test.go:192 TestSpeechAdaptationResources",
           "test/compat/speechcmek1950_test.go:26 TestSpeechCMEK"
         ]
       },
@@ -6822,14 +6822,14 @@
         "method": "google.cloud.speech.v2.Speech/DeleteCustomClass",
         "status": "Verified",
         "tests": [
-          "test/compat/speech_test.go:190 TestSpeechAdaptationResources"
+          "test/compat/speech_test.go:192 TestSpeechAdaptationResources"
         ]
       },
       {
         "method": "google.cloud.speech.v2.Speech/DeletePhraseSet",
         "status": "Verified",
         "tests": [
-          "test/compat/speech_test.go:190 TestSpeechAdaptationResources"
+          "test/compat/speech_test.go:192 TestSpeechAdaptationResources"
         ]
       },
       {
@@ -6850,14 +6850,14 @@
         "method": "google.cloud.speech.v2.Speech/GetCustomClass",
         "status": "Verified",
         "tests": [
-          "test/compat/speech_test.go:190 TestSpeechAdaptationResources"
+          "test/compat/speech_test.go:192 TestSpeechAdaptationResources"
         ]
       },
       {
         "method": "google.cloud.speech.v2.Speech/GetPhraseSet",
         "status": "Verified",
         "tests": [
-          "test/compat/speech_test.go:190 TestSpeechAdaptationResources",
+          "test/compat/speech_test.go:192 TestSpeechAdaptationResources",
           "test/compat/speechcmek1950_test.go:26 TestSpeechCMEK"
         ]
       },
@@ -6873,14 +6873,14 @@
         "method": "google.cloud.speech.v2.Speech/ListCustomClasses",
         "status": "Verified",
         "tests": [
-          "test/compat/speech_test.go:190 TestSpeechAdaptationResources"
+          "test/compat/speech_test.go:192 TestSpeechAdaptationResources"
         ]
       },
       {
         "method": "google.cloud.speech.v2.Speech/ListPhraseSets",
         "status": "Verified",
         "tests": [
-          "test/compat/speech_test.go:190 TestSpeechAdaptationResources"
+          "test/compat/speech_test.go:192 TestSpeechAdaptationResources"
         ]
       },
       {
@@ -6894,7 +6894,7 @@
         "method": "google.cloud.speech.v2.Speech/Recognize",
         "status": "Verified",
         "tests": [
-          "test/compat/speech_test.go:319 TestSpeechBatchRecognize",
+          "test/compat/speech_test.go:321 TestSpeechBatchRecognize",
           "test/compat/speech_test.go:80 TestSpeechRecognizers",
           "test/compat/speechstream_test.go:58 TestSpeechAdaptationBoost"
         ]
@@ -6910,14 +6910,14 @@
         "method": "google.cloud.speech.v2.Speech/UndeleteCustomClass",
         "status": "Verified",
         "tests": [
-          "test/compat/speech_test.go:190 TestSpeechAdaptationResources"
+          "test/compat/speech_test.go:192 TestSpeechAdaptationResources"
         ]
       },
       {
         "method": "google.cloud.speech.v2.Speech/UndeletePhraseSet",
         "status": "Verified",
         "tests": [
-          "test/compat/speech_test.go:190 TestSpeechAdaptationResources"
+          "test/compat/speech_test.go:192 TestSpeechAdaptationResources"
         ]
       },
       {
@@ -6938,14 +6938,14 @@
         "method": "google.cloud.speech.v2.Speech/UpdateCustomClass",
         "status": "Verified",
         "tests": [
-          "test/compat/speech_test.go:190 TestSpeechAdaptationResources"
+          "test/compat/speech_test.go:192 TestSpeechAdaptationResources"
         ]
       },
       {
         "method": "google.cloud.speech.v2.Speech/UpdatePhraseSet",
         "status": "Verified",
         "tests": [
-          "test/compat/speech_test.go:190 TestSpeechAdaptationResources"
+          "test/compat/speech_test.go:192 TestSpeechAdaptationResources"
         ]
       },
       {
@@ -12228,8 +12228,8 @@
           "test/compat/bigquerymlservice_test.go:251 TestBigQueryMLAnnotateImageDetections",
           "test/compat/bigquerymlservice_test.go:314 TestBigQueryMLTranscribe",
           "test/compat/bigquerymlservice_test.go:37 TestBigQueryMLAnnotateImage",
-          "test/compat/bigquerymlservice_test.go:478 TestBigQueryMLTranslate",
-          "test/compat/bigquerymlservice_test.go:660 TestBigQueryMLUnderstandText",
+          "test/compat/bigquerymlservice_test.go:480 TestBigQueryMLTranslate",
+          "test/compat/bigquerymlservice_test.go:662 TestBigQueryMLUnderstandText",
           "test/compat/bigquerymltensorflow_test.go:41 TestBigQueryMLImportedTensorFlowModel",
           "test/compat/bigquerymltflite_test.go:35 TestBigQueryMLImportedTFLiteModel",
           "test/compat/bigquerymltflitegaps_test.go:29 TestBigQueryMLImportedTFLiteGaps",
@@ -12369,7 +12369,7 @@
           "test/compat/bigquerymlseries_test.go:140 TestBigQueryMLSeqSplit",
           "test/compat/bigquerymlseries_test.go:72 TestBigQueryMLSeveralSeriesIDs",
           "test/compat/bigquerymlservice_test.go:37 TestBigQueryMLAnnotateImage",
-          "test/compat/bigquerymlservice_test.go:660 TestBigQueryMLUnderstandText",
+          "test/compat/bigquerymlservice_test.go:662 TestBigQueryMLUnderstandText",
           "test/compat/bigquerymltensorflow_test.go:41 TestBigQueryMLImportedTensorFlowModel",
           "test/compat/bigquerymltflite_test.go:35 TestBigQueryMLImportedTFLiteModel",
           "test/compat/bigquerymltflitegaps_test.go:29 TestBigQueryMLImportedTFLiteGaps",
