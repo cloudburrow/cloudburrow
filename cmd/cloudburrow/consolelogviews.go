@@ -58,6 +58,14 @@ func consoleEntry(e *loggingpb.LogEntry) console.Entry {
 			out.JSONPayload = console.RedactJSON(b)
 		}
 	}
+	// Its labels, for labels.KEY and the Fields pane's label dimensions
+	// (#2032).
+	if l := e.GetLabels(); len(l) > 0 {
+		out.Labels = make(map[string]string, len(l))
+		for k, v := range l {
+			out.Labels[k] = console.Redact(v)
+		}
+	}
 	return out
 }
 

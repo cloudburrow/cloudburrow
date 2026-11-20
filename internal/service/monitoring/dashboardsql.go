@@ -30,7 +30,9 @@ import (
 // it beside the dashboard by the query's place in it, and puts it back in
 // every dashboard it answers. Over gRPC the field does not exist, as for a
 // client built on those protos. The etag covers the rest of the dashboard
-// (UNVERIFIED whether Google's also covers the SQL).
+// (UNVERIFIED whether Google's also covers the SQL, re-read 2026-11-20:
+// the etag is "a version of the Dashboard configuration", no more,
+// https://docs.cloud.google.com/monitoring/api/ref_v3/rest/v1/projects.dashboards).
 
 // kindDashboardSQL keeps each dashboard's opsAnalyticsQuery values, a
 // Struct from the query's place ("widgets/0/xyChart/dataSets/0") to the

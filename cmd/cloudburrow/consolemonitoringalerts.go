@@ -1096,6 +1096,54 @@ func (p monitoringUptimeProvider) Edit(ctx context.Context, project string, path
 type monitoringDashboardsProvider struct {
 	monitoringAdmin
 	metrics monitoringScreen
+	// analytics runs a Log Analytics chart's SQL through Log Analytics
+	// (#2032), or is nil where the instance does not serve it (no Cloud
+	// Logging or no BigQuery): the chart then says why it is not drawn.
+	analytics func(ctx context.Context, project, sql string) (console.Listing, error)
+}
+
+// analyticsUnavailable is why a Log Analytics chart is not drawn here.
+const analyticsUnavailable = "Not available locally: this chart's query is Log Analytics SQL, and this instance does not serve " +
+	"Log Analytics (it needs Cloud Logging and BigQuery)."
+
+var errAnalyticsUnavailable = errors.New(analyticsUnavailable)
+
+// analyticsVisualization is how a widget whose query is SQL is drawn: a
+// table for a timeSeriesTable, a line chart for a LINE data set, and
+// otherwise a bar chart, as Log Analytics saves them.
+func analyticsVisualization(w *dashboardpb.Widget) string {
+	if w.GetTimeSeriesTable() != nil {
+		return "Table"
+	}
+	for _, ds := range w.GetXyChart().GetDataSets() {
+		if ds.GetPlotType() == dashboardpb.XyChart_DataSet_LINE {
+			return "Line"
+		}
+	}
+	return "Bar"
+}
+
+// analyticsSection runs a widget's SQL through Log Analytics and draws its
+// results as Log Analytics does: a dashboard's chart of a saved query.
+func (p monitoringDashboardsProvider) analyticsSection(ctx context.Context, project, id, title string, w *dashboardpb.Widget, sqls []string) console.Section {
+	sec := console.Section{ID: id, Label: title, Group: "Charts", Kind: console.KindAnalytics,
+		Visualization: analyticsVisualization(w), Note: "Log Analytics query: " + strings.Join(sqls, "; ")}
+	if p.analytics == nil {
+		sec.Unavailable = analyticsUnavailable
+		return sec
+	}
+	// Log Analytics saves one query a widget; the first is drawn.
+	res, err := p.analytics(ctx, project, sqls[0])
+	if errors.Is(err, errAnalyticsUnavailable) {
+		sec.Unavailable = analyticsUnavailable
+		return sec
+	}
+	if err != nil {
+		sec.Unavailable = "The query failed: " + err.Error()
+		return sec
+	}
+	sec.Listing = res
+	return sec
 }
 
 func (monitoringDashboardsProvider) ID() string    { return "monitoring-dashboards" }
@@ -1339,8 +1387,13 @@ func (p monitoringDashboardsProvider) Detail(ctx context.Context, project string
 		switch {
 		case len(sql) > 0:
 			// A Log Analytics chart (#2031): its query is SQL, which Log
-			// Analytics runs; the dashboard lists it.
+			// Analytics runs, and the dashboard draws its results (#2032).
+			sec := p.analyticsSection(ctx, project, fmt.Sprintf("chart-%d", i+1), title, w, sql)
+			out.Sections = append(out.Sections, sec)
 			detail = "Log Analytics query: " + strings.Join(sql, "; ")
+			if sec.Unavailable == "" {
+				detail += fmt.Sprintf(" (%d rows)", len(sec.Listing.Items))
+			}
 		case w.GetXyChart() != nil:
 			series, note := p.widgetSeries(ctx, project, w)
 			out.Sections = append(out.Sections, console.Section{ID: fmt.Sprintf("chart-%d", i+1), Label: title, Group: "Charts",

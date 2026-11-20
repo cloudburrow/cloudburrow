@@ -64,3 +64,38 @@ func TestCompileQuery(t *testing.T) {
 		t.Errorf("the entry's JSON does not carry its LogEntry form: %s %v", b, err)
 	}
 }
+
+// TestQueryMatchesEntryLabels (#2032): an entry's labels are one map in
+// its LogEntry, a key with dots or a slash staying one key, which the
+// query editor matches as labels."KEY" and the Fields pane's label
+// dimensions count.
+func TestQueryMatchesEntryLabels(t *testing.T) {
+	e := Entry{ID: 1, Timestamp: time.Now(), Severity: SeverityInfo, Source: "logging/app", Message: "hi",
+		Labels: map[string]string{"k8s-pod/app": "frontend", "service.name": "checkout"}}
+	j := logEntryJSON(e)
+	labels, ok := j["labels"].(map[string]any)
+	if !ok || labels["k8s-pod/app"] != "frontend" || labels["service.name"] != "checkout" {
+		t.Fatalf("the LogEntry's labels = %#v", j["labels"])
+	}
+	if _, nested := j["service"]; nested {
+		t.Error("a label key's dots nested it as a path")
+	}
+	for q, want := range map[string]bool{
+		`labels."k8s-pod/app"="frontend"`: true,
+		`labels."service.name"=checkout`:  true,
+		`labels."k8s-pod/app"="backend"`:  false,
+		`labels.missing:*`:                false,
+	} {
+		m, err := CompileQuery(q)
+		if err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+		if got := m(e); got != want {
+			t.Errorf("%s matched %v, want %v", q, got, want)
+		}
+	}
+	b, _ := json.Marshal(e)
+	if !strings.Contains(string(b), `"labels":{"k8s-pod/app":"frontend"`) {
+		t.Errorf("the entry's JSON = %s", b)
+	}
+}

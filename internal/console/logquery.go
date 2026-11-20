@@ -55,6 +55,15 @@ func logEntryJSON(e Entry) map[string]any {
 		delete(fields, "textPayload")
 		out["jsonPayload"] = e.JSONPayload
 	}
+	// Labels are one map: a key may hold dots (service.name), so they are
+	// not nested by path as the fields are (#2032).
+	if len(e.Labels) > 0 {
+		labels := make(map[string]any, len(e.Labels))
+		for k, v := range e.Labels {
+			labels[k] = v
+		}
+		out["labels"] = labels
+	}
 	for path, v := range fields {
 		parts := strings.Split(path, ".")
 		m := out

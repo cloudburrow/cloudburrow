@@ -38,8 +38,9 @@ import (
 // the instance's own account, as everywhere else that a caller is named
 // (SetCallerResolver). The list's filter is `type("Logging")` or
 // `type("OpsAnalytics")`, the only values the reference documents; any
-// other is INVALID_ARGUMENT. The list is most recent first (UNVERIFIED:
-// the reference names no order).
+// other is INVALID_ARGUMENT. The list is most recent first (UNVERIFIED,
+// re-read 2026-11-20: the reference names no order,
+// https://docs.cloud.google.com/logging/docs/reference/v2/rest/v2/projects.locations.recentQueries/list).
 
 // recentQuery is a RecentQuery resource.
 type recentQuery struct {

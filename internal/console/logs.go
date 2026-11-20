@@ -57,6 +57,11 @@ type Entry struct {
 	// editor matches jsonPayload.* against and the Fields pane's Frequent
 	// fields count (#2031).
 	JSONPayload map[string]any `json:"jsonPayload,omitempty"`
+	// Labels are a Cloud Logging entry's user-defined labels, their values
+	// redacted as Message is, or nil: what the query editor matches
+	// labels.KEY against and the Fields pane's label dimensions (Workload /
+	// Service) count (#2032).
+	Labels map[string]string `json:"labels,omitempty"`
 }
 
 // RedactJSON is a JSON payload with Redact applied to its text, or nil when

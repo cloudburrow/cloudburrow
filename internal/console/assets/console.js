@@ -3871,6 +3871,8 @@ async function renderDetail(view, route, resourcePath) {
         return drawTextSection(panel, section, note);
       case "chart":
         return drawChartSection(panel, section, note);
+      case "analytics":
+        return drawAnalyticsSection(panel, section, note);
       case "logs":
         return drawLogsSection(panel, section, note);
       case "permissions":
@@ -8114,14 +8116,7 @@ async function renderLogAnalytics(view, match) {
   const drawResultChart = (listing) => {
     if (!listing || !(listing.items || []).length) { chart.hidden = true; return; }
     chartedSQL = editor.value.trim();
-    const types = listing.columnTypes || {};
-    const cols = [listing.nameColumn, ...(listing.columns || [])].filter(Boolean);
-    const res = {
-      schema: cols.map((c) => ({ name: c, type: types[c] === "REPEATED" ? "STRING" : (types[c] || "STRING"),
-        mode: types[c] === "REPEATED" ? "REPEATED" : "NULLABLE" })),
-      rows: listing.items.map((it) => ({ [listing.nameColumn]: it.name, ...(it.fields || {}) })),
-    };
-    res.totalRows = res.rows.length;
+    const res = analyticsResultSet(listing);
     const draw = () => setChildren(chart,
       el("div", { class: "log-fields-head" }, el("h2", { id: "log-analytics-chart-title", text: "Chart" }), saveToDashboard),
       bqVisualization(res, chartTab, draw));
@@ -11043,6 +11038,10 @@ const LOG_SEVERITIES = ["DEFAULT", "DEBUG", "INFO", "NOTICE", "WARNING", "ERROR"
 // logQueryValue quotes a value for the Logging query language.
 const logQueryValue = (v) => JSON.stringify(String(v));
 
+// logFieldKey is a key as a field path names it: quoted unless it is an
+// identifier, as labels."k8s-pod/app" (#2032).
+const logFieldKey = (k) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(k) ? k : JSON.stringify(k);
+
 // logJSONTree draws an entry's LogEntry as Google's expanded entry does:
 // nested fields that fold, each value with Show matching entries, Hide
 // matching entries and Pin to Fields pane.
@@ -11051,7 +11050,7 @@ function logJSONTree(value, path, onMatch, onPin) {
     const keys = Object.keys(value).sort();
     return el("ul", { class: "log-json" }, ...keys.map((k) => {
       const child = value[k];
-      const p = path ? `${path}.${k}` : k;
+      const p = path ? `${path}.${logFieldKey(k)}` : logFieldKey(k);
       if (child && typeof child === "object") {
         return el("li", {}, el("details", { class: "log-json-node", open: true },
           el("summary", {}, el("span", { class: "log-json-key", text: k }), el("span", { text: ": {…}" })),
@@ -11237,7 +11236,7 @@ async function renderLogs(view) {
   const learnFields = (obj, prefix) => {
     if (!obj || typeof obj !== "object" || knownFields.size > 2000) return;
     for (const [k, v] of Object.entries(obj)) {
-      const path = prefix ? `${prefix}.${k}` : k;
+      const path = prefix ? `${prefix}.${logFieldKey(k)}` : logFieldKey(k);
       if (v && typeof v === "object" && !Array.isArray(v)) { learnFields(v, path); continue; }
       if (Array.isArray(v)) continue;
       if (!knownFields.has(path)) knownFields.set(path, new Set());
@@ -11307,7 +11306,10 @@ async function renderLogs(view) {
   let summary = { fields: [], truncate: false, chars: 30, fromEnd: false, show: true, defaults: true };
   try { summary = { ...summary, ...JSON.parse(readStored(SUMMARY_KEY, "{}")) }; } catch { /* the defaults */ }
   const saveSummary = () => writeStored(SUMMARY_KEY, JSON.stringify(summary));
-  const fieldValue = (entry, path) => path.split(".").map((k) => k.replace(/^"|"$/g, ""))
+  // A field's value in an entry; a quoted part of the path is one key,
+  // dots and all (labels."service.name", #2032).
+  const fieldValue = (entry, path) => (path.match(/"(?:[^"\\]|\\.)*"|[^.]+/g) || [])
+    .map((k) => { if (!k.startsWith('"')) return k; try { return JSON.parse(k); } catch { return k.slice(1, -1); } })
     .reduce((o, k) => (o && typeof o === "object" ? o[k] : undefined), entry.logEntry || {});
   const summaryChips = (entry) => {
     if (!summary.show) return [];
@@ -11449,6 +11451,13 @@ async function renderLogs(view) {
   const fieldsPane = el("aside", { class: "card log-fields", id: "log-fields", "aria-label": "Fields" });
   const LOG_FIELD_GROUPS = [["resource.type", "Resource type"], ["severity", "Severity"],
     ["logName", "Log name"], ["resource.labels.project_id", "Project ID"]];
+  // The label dimensions (#2032): System metadata dimensions that appear
+  // only when the entries carry the labels they are made from
+  // (logs-explorer-interface, read 2026-11-20). Workload / Service is made
+  // from the k8s-pod/app label (a Kubernetes container's workload) and
+  // from service.name, each value adding the clause of the label it came
+  // from.
+  const LABEL_DIMENSIONS = [["Workload / Service", ['labels."k8s-pod/app"', 'labels."service.name"']]];
   // How many json_payload fields Frequent fields lists, and values a field.
   const FREQUENT_FIELDS = 10;
   const FIELD_VALUES = 20;
@@ -11485,14 +11494,34 @@ async function renderLogs(view) {
     }
     f(path, v);
   };
+  // A field's scalar value in an entry, or undefined.
+  const scalarValue = (e, path) => {
+    const v = fieldValue(e, path);
+    return v !== undefined && v !== "" && v !== null && typeof v !== "object" ? v : undefined;
+  };
   const countValues = (entries, path) => {
     const counts = new Map();
     for (const e of entries) {
-      const v = path.split(".").map((k) => k.replace(/^"|"$/g, ""))
-        .reduce((o, k) => (o && typeof o === "object" ? o[k] : undefined), e.logEntry || {});
-      if (v !== undefined && v !== "" && v !== null && typeof v !== "object") counts.set(v, (counts.get(v) || 0) + 1);
+      const v = scalarValue(e, path);
+      if (v !== undefined) counts.set(v, (counts.get(v) || 0) + 1);
     }
     return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, FIELD_VALUES);
+  };
+  // A label dimension's values: each entry's from the first of the
+  // dimension's labels it carries, with that label's path.
+  const dimensionValues = (entries, paths) => {
+    const counts = new Map();
+    for (const e of entries) {
+      for (const path of paths) {
+        const v = scalarValue(e, path);
+        if (v === undefined) continue;
+        const key = JSON.stringify([path, v]);
+        counts.set(key, (counts.get(key) || 0) + 1);
+        break;
+      }
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, FIELD_VALUES)
+      .map(([k, n]) => { const [path, v] = JSON.parse(k); return [v, n, path]; });
   };
   const frequentFields = (entries) => {
     const seen = new Map();
@@ -11512,10 +11541,10 @@ async function renderLogs(view) {
             onclick: () => unpinField(g.path) }))
       : el("h4", { class: g.mono ? "mono" : null, text: g.label }),
     g.values.length
-      ? el("ul", {}, ...g.values.map(([v, n]) => el("li", {},
+      ? el("ul", {}, ...g.values.map(([v, n, at = g.path]) => el("li", {},
           el("button", { class: "log-field-value", "data-value": String(v),
-            title: `Add ${g.path}=${logQueryValue(String(v))} to the query`,
-            onclick: () => { addClause(`${g.path}=${logQueryValue(String(v))}`); runQuery(); } },
+            title: `Add ${at}=${logQueryValue(String(v))} to the query`,
+            onclick: () => { addClause(`${at}=${logQueryValue(String(v))}`); runQuery(); } },
             el("span", { class: "mono", text: g.path === "logName" ? decodeURIComponent(String(v).slice(String(v).indexOf("/logs/") + 6)) : String(v) }),
             el("span", { class: "log-field-count", "aria-label": `about ${n} entries`, text: String(n) })))))
       : el("p", { class: "unavailable", text: "No values" }));
@@ -11523,6 +11552,11 @@ async function renderLogs(view) {
     fieldEntries = entries;
     const pinned = pinnedFields.map((path) => ({ path, label: path, pinned: true, values: countValues(entries, path) }));
     const system = LOG_FIELD_GROUPS.map(([path, label]) => ({ path, label, values: countValues(entries, path) }));
+    // After Resource type and Severity, each label dimension the entries
+    // carry values for (#2032).
+    const dimensions = LABEL_DIMENSIONS.map(([label, paths]) => ({ path: paths[0], label, values: dimensionValues(entries, paths) }))
+      .filter((g) => g.values.length);
+    system.splice(2, 0, ...dimensions);
     const frequent = frequentFields(entries).map((path) => ({ path, label: path, mono: true, values: countValues(entries, path) }));
     const types = system.find((g) => g.path === "resource.type").values.map(([v]) => v);
     const keep = resourceType.value;
@@ -16814,22 +16848,20 @@ const BQ_MEASURE_TYPES = ["INTEGER", "INT64", "FLOAT", "FLOAT64", "NUMERIC", "BI
 const BQ_DIMENSION_TYPES = [...BQ_MEASURE_TYPES, "TIMESTAMP", "DATE", "DATETIME", "TIME", "STRING"];
 const BQ_SERIES_COLOURS = ["#1a73e8", "#e8710a", "#188038", "#d93025", "#9334e6", "#12b5cb"];
 
-// bqVisualization is the Visualization tab: the chart of the result set,
-// drawn here as SVG from the rows the query returned, and the
-// Visualization configuration pane (Visualization type, Dimension,
-// Measures), prefilled from the schema and kept on the tab across runs.
-// The chart zooms, toggles its legend and downloads as a PNG.
-function bqVisualization(res, tab, save) {
+// bqVizDefaults fills viz (type, dimension, measures, legend, zoom) from
+// the result's schema, as Visualization prefills its configuration, and
+// gives the dimension and measure columns, or, when nothing can be
+// charted, the paragraph that says why (empty).
+function bqVizDefaults(res, viz) {
   const schema = (res.schema || []).filter((f) => (f.mode || "NULLABLE") !== "REPEATED");
   const dims = schema.filter((f) => BQ_DIMENSION_TYPES.includes(f.type));
   const measures = schema.filter((f) => BQ_MEASURE_TYPES.includes(f.type));
   const geo = schema.some((f) => f.type === "GEOGRAPHY");
   if (!dims.length || !measures.length) {
-    return el("p", { class: "unavailable", text: geo
+    return { empty: el("p", { class: "unavailable", text: geo
       ? "Not available locally: a GEOGRAPHY result is drawn on Google Maps' map, which CloudBurrow does not reach. Line, Bar and Scatter need a numeric measure."
-      : "There is nothing to chart: a chart needs a dimension column (a number, a date or time, or a string) and a numeric measure column." });
+      : "There is nothing to chart: a chart needs a dimension column (a number, a date or time, or a string) and a numeric measure column." }) };
   }
-  const viz = tab.viz || (tab.viz = {});
   if (!dims.some((f) => f.name === viz.dimension)) {
     const firstOther = dims.find((f) => !BQ_MEASURE_TYPES.includes(f.type)) || dims[0];
     viz.dimension = firstOther.name;
@@ -16842,6 +16874,19 @@ function bqVisualization(res, tab, save) {
   if (!["Bar", "Line", "Scatter"].includes(viz.type)) viz.type = "Bar";
   if (viz.legend === undefined) viz.legend = true;
   viz.zoom = viz.zoom || 1;
+  return { dims, measures };
+}
+
+// bqVisualization is the Visualization tab: the chart of the result set,
+// drawn here as SVG from the rows the query returned, and the
+// Visualization configuration pane (Visualization type, Dimension,
+// Measures), prefilled from the schema and kept on the tab across runs.
+// The chart zooms, toggles its legend and downloads as a PNG.
+function bqVisualization(res, tab, save) {
+  const viz = tab.viz || (tab.viz = {});
+  const fit = bqVizDefaults(res, viz);
+  if (!fit.dims) return fit.empty;
+  const { dims, measures } = fit;
 
   const chartHost = el("div", { class: "bq-chart-host" });
   const redraw = () => { save(); drawChart(); };
@@ -16876,95 +16921,7 @@ function bqVisualization(res, tab, save) {
       onclick: (e) => { viz.legend = !viz.legend; e.target.setAttribute("aria-pressed", String(viz.legend)); redraw(); } }),
     el("button", { type: "button", class: "secondary", text: "Download PNG", onclick: () => bqChartPNG(chartHost.querySelector("svg")) }));
 
-  const drawChart = () => {
-    const rows = res.rows || [];
-    const dimType = (dims.find((f) => f.name === viz.dimension) || {}).type;
-    const numericDim = BQ_MEASURE_TYPES.includes(dimType);
-    const timeDim = ["TIMESTAMP", "DATE", "DATETIME"].includes(dimType);
-    const xOf = (v) => numericDim ? Number(v) : timeDim ? Date.parse(String(v).replace(" UTC", "Z").replace(" ", "T")) : NaN;
-    const continuous = viz.type !== "Bar" && (numericDim || timeDim);
-    const points = rows.map((r) => ({ label: cellText(r[viz.dimension]), x: xOf(r[viz.dimension]),
-      ys: viz.measures.map((m) => (r[m] === null || r[m] === undefined ? NaN : Number(r[m]))) }))
-      .filter((p) => !continuous || Number.isFinite(p.x));
-    if (continuous) points.sort((a, b) => a.x - b.x);
-    // As wide as its column (once drawn), times the zoom.
-    const fit = chartHost.isConnected && chartHost.clientWidth > 0 ? Math.max(320, chartHost.clientWidth - 2) : 640;
-    const W = Math.round(fit * viz.zoom), H = 320, L = 56, R = 16, T = 16, B = 56;
-    const ys = points.flatMap((p) => p.ys).filter(Number.isFinite);
-    let yMin = Math.min(0, ...ys), yMax = Math.max(0, ...ys);
-    if (yMin === yMax) yMax = yMin + 1;
-    const sy = (v) => T + (H - T - B) * (1 - (v - yMin) / (yMax - yMin));
-    let sx;
-    if (continuous) {
-      const xs = points.map((p) => p.x);
-      const x0 = Math.min(...xs), x1 = Math.max(...xs);
-      sx = (p) => L + (W - L - R) * (x1 === x0 ? 0.5 : (p.x - x0) / (x1 - x0));
-    } else {
-      const step = (W - L - R) / Math.max(1, points.length);
-      sx = (p, i) => L + step * (i + 0.5);
-    }
-    const NS = "http://www.w3.org/2000/svg";
-    const svg = document.createElementNS(NS, "svg");
-    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
-    svg.setAttribute("width", String(W));
-    svg.setAttribute("height", String(H));
-    // Its own size, which the console's icon rules for svg would shrink.
-    svg.setAttribute("style", `width:${W}px;height:${H}px;max-width:none`);
-    svg.setAttribute("role", "img");
-    svg.setAttribute("class", "bq-chart");
-    svg.setAttribute("aria-label", `${viz.type} chart of ${viz.measures.join(", ")} by ${viz.dimension}, ${points.length} points`);
-    const add = (tag, attrs, text) => {
-      const n = document.createElementNS(NS, tag);
-      for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, String(v));
-      if (text !== undefined) n.textContent = text;
-      svg.append(n);
-      return n;
-    };
-    add("rect", { x: 0, y: 0, width: W, height: H, fill: "#ffffff" });
-    // Axes and four gridlines with their values.
-    for (let i = 0; i <= 4; i++) {
-      const v = yMin + (yMax - yMin) * i / 4;
-      add("line", { x1: L, x2: W - R, y1: sy(v), y2: sy(v), stroke: "#e0e0e0" });
-      add("text", { x: L - 6, y: sy(v) + 4, "text-anchor": "end", "font-size": 11, fill: "#5f6368" }, bqShortNumber(v));
-    }
-    add("line", { x1: L, x2: W - R, y1: sy(0), y2: sy(0), stroke: "#5f6368" });
-    const labelEvery = Math.max(1, Math.ceil(points.length / Math.floor((W - L - R) / 72)));
-    points.forEach((p, i) => {
-      if (i % labelEvery) return;
-      add("text", { x: sx(p, i), y: H - B + 16, "text-anchor": "middle", "font-size": 11, fill: "#5f6368" },
-        p.label.length > 14 ? p.label.slice(0, 13) + "…" : p.label);
-    });
-    add("text", { x: (L + W - R) / 2, y: H - 8, "text-anchor": "middle", "font-size": 12, fill: "#202124" }, viz.dimension);
-    const n = viz.measures.length;
-    viz.measures.forEach((m, k) => {
-      const colour = BQ_SERIES_COLOURS[k % BQ_SERIES_COLOURS.length];
-      if (viz.type === "Bar") {
-        const step = (W - L - R) / Math.max(1, points.length);
-        const bw = Math.max(1, (step * 0.8) / n);
-        points.forEach((p, i) => {
-          const v = p.ys[k];
-          if (!Number.isFinite(v)) return;
-          const x = sx(p, i) - (step * 0.8) / 2 + bw * k;
-          add("rect", { x, y: Math.min(sy(v), sy(0)), width: bw, height: Math.abs(sy(v) - sy(0)), fill: colour },
-          ).append(Object.assign(document.createElementNS(NS, "title"), { textContent: `${p.label}: ${m} ${v}` }));
-        });
-      } else {
-        const pts = points.map((p, i) => [sx(p, i), p.ys[k]]).filter(([, v]) => Number.isFinite(v));
-        if (viz.type === "Line" && pts.length > 1) {
-          add("polyline", { points: pts.map(([x, v]) => `${x},${sy(v)}`).join(" "), fill: "none", stroke: colour, "stroke-width": 2 });
-        }
-        pts.forEach(([x, v]) => add("circle", { cx: x, cy: sy(v), r: viz.type === "Scatter" ? 4 : 2.5, fill: colour }));
-      }
-    });
-    const legend = viz.legend
-      ? el("ul", { class: "bq-chart-legend" }, ...viz.measures.map((m, k) => el("li", {},
-          el("span", { class: "bq-swatch", style: `background:${BQ_SERIES_COLOURS[k % BQ_SERIES_COLOURS.length]}` }),
-          el("span", { text: " " + m }))))
-      : null;
-    setChildren(chartHost, el("div", { class: "bq-chart-scroll" }, svg), legend,
-      rows.length < res.totalRows
-        ? el("p", { class: "unavailable", text: `Charted from the ${rows.length} rows read of ${res.totalRows}.` }) : null);
-  };
+  const drawChart = () => bqDrawChart(chartHost, res, dims, viz);
   drawChart();
   requestAnimationFrame(() => { if (chartHost.isConnected) drawChart(); });
   return el("div", { class: "bq-viz" },
@@ -16974,6 +16931,140 @@ function bqVisualization(res, tab, save) {
       el("label", { for: "bq-viz-type", text: "Visualization type" }), typeSelect,
       el("label", { for: "bq-viz-dimension", text: "Dimension" }), dimSelect,
       measureBoxes));
+}
+
+// bqDrawChart draws viz's chart of the result's rows into chartHost, as
+// SVG: Visualization's, Log Analytics' and a dashboard's Log Analytics
+// chart's (#2032).
+function bqDrawChart(chartHost, res, dims, viz) {
+  const rows = res.rows || [];
+  const dimType = (dims.find((f) => f.name === viz.dimension) || {}).type;
+  const numericDim = BQ_MEASURE_TYPES.includes(dimType);
+  const timeDim = ["TIMESTAMP", "DATE", "DATETIME"].includes(dimType);
+  const xOf = (v) => numericDim ? Number(v) : timeDim ? Date.parse(String(v).replace(" UTC", "Z").replace(" ", "T")) : NaN;
+  const continuous = viz.type !== "Bar" && (numericDim || timeDim);
+  const points = rows.map((r) => ({ label: cellText(r[viz.dimension]), x: xOf(r[viz.dimension]),
+    ys: viz.measures.map((m) => (r[m] === null || r[m] === undefined ? NaN : Number(r[m]))) }))
+    .filter((p) => !continuous || Number.isFinite(p.x));
+  if (continuous) points.sort((a, b) => a.x - b.x);
+  // As wide as its column (once drawn), times the zoom.
+  const fit = chartHost.isConnected && chartHost.clientWidth > 0 ? Math.max(320, chartHost.clientWidth - 2) : 640;
+  const W = Math.round(fit * viz.zoom), H = 320, L = 56, R = 16, T = 16, B = 56;
+  const ys = points.flatMap((p) => p.ys).filter(Number.isFinite);
+  let yMin = Math.min(0, ...ys), yMax = Math.max(0, ...ys);
+  if (yMin === yMax) yMax = yMin + 1;
+  const sy = (v) => T + (H - T - B) * (1 - (v - yMin) / (yMax - yMin));
+  let sx;
+  if (continuous) {
+    const xs = points.map((p) => p.x);
+    const x0 = Math.min(...xs), x1 = Math.max(...xs);
+    sx = (p) => L + (W - L - R) * (x1 === x0 ? 0.5 : (p.x - x0) / (x1 - x0));
+  } else {
+    const step = (W - L - R) / Math.max(1, points.length);
+    sx = (p, i) => L + step * (i + 0.5);
+  }
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("width", String(W));
+  svg.setAttribute("height", String(H));
+  // Its own size, which the console's icon rules for svg would shrink.
+  svg.setAttribute("style", `width:${W}px;height:${H}px;max-width:none`);
+  svg.setAttribute("role", "img");
+  svg.setAttribute("class", "bq-chart");
+  svg.setAttribute("aria-label", `${viz.type} chart of ${viz.measures.join(", ")} by ${viz.dimension}, ${points.length} points`);
+  const add = (tag, attrs, text) => {
+    const n = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, String(v));
+    if (text !== undefined) n.textContent = text;
+    svg.append(n);
+    return n;
+  };
+  add("rect", { x: 0, y: 0, width: W, height: H, fill: "#ffffff" });
+  // Axes and four gridlines with their values.
+  for (let i = 0; i <= 4; i++) {
+    const v = yMin + (yMax - yMin) * i / 4;
+    add("line", { x1: L, x2: W - R, y1: sy(v), y2: sy(v), stroke: "#e0e0e0" });
+    add("text", { x: L - 6, y: sy(v) + 4, "text-anchor": "end", "font-size": 11, fill: "#5f6368" }, bqShortNumber(v));
+  }
+  add("line", { x1: L, x2: W - R, y1: sy(0), y2: sy(0), stroke: "#5f6368" });
+  const labelEvery = Math.max(1, Math.ceil(points.length / Math.floor((W - L - R) / 72)));
+  points.forEach((p, i) => {
+    if (i % labelEvery) return;
+    add("text", { x: sx(p, i), y: H - B + 16, "text-anchor": "middle", "font-size": 11, fill: "#5f6368" },
+      p.label.length > 14 ? p.label.slice(0, 13) + "…" : p.label);
+  });
+  add("text", { x: (L + W - R) / 2, y: H - 8, "text-anchor": "middle", "font-size": 12, fill: "#202124" }, viz.dimension);
+  const n = viz.measures.length;
+  viz.measures.forEach((m, k) => {
+    const colour = BQ_SERIES_COLOURS[k % BQ_SERIES_COLOURS.length];
+    if (viz.type === "Bar") {
+      const step = (W - L - R) / Math.max(1, points.length);
+      const bw = Math.max(1, (step * 0.8) / n);
+      points.forEach((p, i) => {
+        const v = p.ys[k];
+        if (!Number.isFinite(v)) return;
+        const x = sx(p, i) - (step * 0.8) / 2 + bw * k;
+        add("rect", { x, y: Math.min(sy(v), sy(0)), width: bw, height: Math.abs(sy(v) - sy(0)), fill: colour },
+        ).append(Object.assign(document.createElementNS(NS, "title"), { textContent: `${p.label}: ${m} ${v}` }));
+      });
+    } else {
+      const pts = points.map((p, i) => [sx(p, i), p.ys[k]]).filter(([, v]) => Number.isFinite(v));
+      if (viz.type === "Line" && pts.length > 1) {
+        add("polyline", { points: pts.map(([x, v]) => `${x},${sy(v)}`).join(" "), fill: "none", stroke: colour, "stroke-width": 2 });
+      }
+      pts.forEach(([x, v]) => add("circle", { cx: x, cy: sy(v), r: viz.type === "Scatter" ? 4 : 2.5, fill: colour }));
+    }
+  });
+  const legend = viz.legend
+    ? el("ul", { class: "bq-chart-legend" }, ...viz.measures.map((m, k) => el("li", {},
+        el("span", { class: "bq-swatch", style: `background:${BQ_SERIES_COLOURS[k % BQ_SERIES_COLOURS.length]}` }),
+        el("span", { text: " " + m }))))
+    : null;
+  setChildren(chartHost, el("div", { class: "bq-chart-scroll" }, svg), legend,
+    rows.length < res.totalRows
+      ? el("p", { class: "unavailable", text: `Charted from the ${rows.length} rows read of ${res.totalRows}.` }) : null);
+}
+
+// analyticsResultSet is a Log Analytics query's listing as a result set
+// the charts draw: its columns with their types, and its rows.
+function analyticsResultSet(listing) {
+  const types = listing.columnTypes || {};
+  const cols = [listing.nameColumn, ...(listing.columns || [])].filter(Boolean);
+  const res = {
+    schema: cols.map((c) => ({ name: c, type: types[c] === "REPEATED" ? "STRING" : (types[c] || "STRING"),
+      mode: types[c] === "REPEATED" ? "REPEATED" : "NULLABLE" })),
+    rows: (listing.items || []).map((it) => ({ [listing.nameColumn]: it.name, ...(it.fields || {}) })),
+  };
+  res.totalRows = res.rows.length;
+  return res;
+}
+
+// drawAnalyticsSection is a dashboard's Log Analytics chart (#2032): the
+// widget's SQL, run through Log Analytics by the provider, drawn as Log
+// Analytics draws its results' chart, with the chart's default
+// configuration (Google's dashboard keeps no custom chart configuration),
+// or as a table when the widget was saved as one.
+function drawAnalyticsSection(panel, section, note) {
+  const res = analyticsResultSet(section.listing || {});
+  const head = note || null;
+  if (!res.rows.length) {
+    return setChildren(panel, head, el("p", { class: "unavailable", text: "This query returned no results." }));
+  }
+  if (section.visualization === "Table") {
+    const cols = res.schema.map((f) => f.name);
+    return setChildren(panel, head, el("div", { class: "bq-results-scroll" }, el("table", { class: "bq-results-table analytics-widget-table" },
+      el("caption", { class: "sr-only", text: section.label }),
+      el("thead", {}, el("tr", {}, ...cols.map((c) => el("th", { scope: "col", text: c })))),
+      el("tbody", {}, ...res.rows.map((r) => el("tr", {}, ...cols.map((c) => el("td", { class: "mono", text: cellText(r[c]) }))))))));
+  }
+  const viz = { type: section.visualization === "Line" ? "Line" : "Bar" };
+  const fit = bqVizDefaults(res, viz);
+  if (!fit.dims) return setChildren(panel, head, fit.empty);
+  const host = el("div", { class: "bq-chart-host analytics-widget-chart" });
+  setChildren(panel, head, host);
+  bqDrawChart(host, res, fit.dims, viz);
+  requestAnimationFrame(() => { if (host.isConnected) bqDrawChart(host, res, fit.dims, viz); });
 }
 
 function cellText(v) {

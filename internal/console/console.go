@@ -844,6 +844,11 @@ const (
 	// provider's Studio: Spanner Studio on a database's page (#1859). The
 	// page then has no separate Query tab, the Studio's editor being it.
 	KindStudio SectionKind = "studio"
+	// KindAnalytics is a Log Analytics query's results drawn as the Log
+	// Analytics page draws them (#2032): a dashboard's opsAnalyticsQuery
+	// widget, its SQL run through Log Analytics. Listing holds the rows
+	// (with ColumnTypes) and Visualization says Bar, Line or Table.
+	KindAnalytics SectionKind = "analytics"
 )
 
 // Section is one aspect of a resource, rendered as a tab.
@@ -876,6 +881,9 @@ type Section struct {
 	Text string `json:"text,omitempty"`
 	// Series is the content when Kind is KindChart.
 	Series []ChartSeries `json:"series,omitempty"`
+	// Visualization is how a KindAnalytics section draws its rows: Bar,
+	// Line or Table (#2032).
+	Visualization string `json:"visualization,omitempty"`
 	// Unavailable explains why this one section has no content, so a section
 	// that cannot be read shows its own error inside its own panel rather
 	// than an empty table claiming the resource holds nothing.
