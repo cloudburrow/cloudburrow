@@ -13,6 +13,7 @@ export CLOUDSDK_API_ENDPOINT_OVERRIDES_APIKEYS="http://127.0.0.1:9029/"  # read 
 export CLOUDSDK_API_ENDPOINT_OVERRIDES_CLOUDRESOURCEMANAGER="http://127.0.0.1:9007/"  # read by gcloud; its projects commands use the v1 API, served here with v3
 export CLOUDSDK_API_ENDPOINT_OVERRIDES_IAMCREDENTIALS="http://127.0.0.1:9005/"  # read by gcloud for --impersonate-service-account (docs/credentials.md)
 export CLOUDSDK_API_ENDPOINT_OVERRIDES_SERVICEUSAGE="http://127.0.0.1:9023/"  # read by gcloud; gcloud services list, enable and disable
+export CLOUDSDK_AUTH_DISABLE_CREDENTIALS="true"  # read by gcloud: sends no credential (CloudBurrow authenticates nothing), so it never looks up a service account's Regional Access Boundary at Google
 export CLOUDSDK_AUTH_MTLS_TOKEN_HOST="http://127.0.0.1:9005/token"  # read by gcloud under client certificates: refreshes go to this instance
 export CLOUDSDK_AUTH_TOKEN_HOST="http://127.0.0.1:9005/token"  # read by gcloud: every credential refresh goes to this instance, not Google's token endpoint
 export CLOUDSDK_COMPONENT_MANAGER_DISABLE_UPDATE_CHECK="true"  # read by gcloud: does not ask Google for component updates

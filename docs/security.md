@@ -130,10 +130,11 @@ What no configuration can redirect, and so only an egress block (a proxy or fire
   served clients in another language (measured below), so only an egress block does. Go's
   `cloud.google.com/go/auth` 0.24.1 looks up only with `GOOGLE_AUTH_TRUST_BOUNDARY_ENABLED=true`,
   and Node's google-auth-library 11.3.4 not at all.
-- **gcloud with a real account under `env`.** `env` does not disable gcloud's credentials, so a
-  gcloud that has an account refreshes its token at `oauth2.googleapis.com` before it calls the
-  (local or refusing) override. `gcloud-setup` disables them; with no account gcloud stops
-  locally (docs/credentials.md).
+- **gcloud with a real account under `env`.** `env` exports `CLOUDSDK_AUTH_DISABLE_CREDENTIALS=true`
+  (#2040), as `gcloud-setup` writes `auth/disable_credentials`, so gcloud sends no credential and
+  loads none for its requests; a command that refreshes one anyway does so at the exported
+  `CLOUDSDK_AUTH_TOKEN_HOST`, the instance (#2034). Turning credentials back on with
+  `CLOUDSDK_AUTH_DISABLE_CREDENTIALS=false` brings back the lookup below (docs/credentials.md).
 - **Hard-coded Google URLs in the provider**, which `unpointedResources` refuses by resource
   type and `--intercept-hardcoded` serves locally (#1578).
 
@@ -167,15 +168,32 @@ Python, Node and Java auth libraries (Application Default Credentials from the f
 Compute Engine credentials and project from the metadata server). A control lookup of
 `control.googleapis.com` must be logged, and gcloud under the variables before #2038 must be seen
 looking up `metadata.google.internal`; any other lookup of a Google name, or any connection off
-the machine, fails it. Measured on 2026-11-20 with nothing looked up. Two lookups remain, which no
-variable stops, and the test skips naming them while they do (every one stopped in the container):
+the machine, fails it. Measured on 2026-11-20 with nothing looked up, gcloud with the fixture as
+its credential included. The test skipped two cases by name; one is fixed, and the other, which
+nothing `env` can export stops, is still skipped naming its issue (every attempt stopped in the
+container):
 
-- **gcloud with the fixture as `auth/credential_file_override`**: its bundled google-auth starts
-  the Regional Access Boundary lookup at `iamcredentials.googleapis.com`, as Python's does (#1981).
-- **Node's `getAccessToken()` for the fixture** (`google-auth-library` 11.3.4): gtoken exchanges
-  the signed JWT at its hard-coded `https://oauth2.googleapis.com/token`, never the file's
-  `token_uri` (#2040). Served clients are unaffected: google-gax sets `useJWTAccessWithScope`, a
-  self-signed JWT with no exchange, which the test's Node probe uses.
+- **gcloud with the fixture as `auth/credential_file_override`** no longer looks anything up
+  (#2040). With credentials on, gcloud 593.0.0's bundled google-auth starts the Regional Access
+  Boundary lookup at `iamcredentials.googleapis.com` before each request, as Python's does
+  (#1981). No property moves that host: `_regional_access_boundary_utils._get_domain` builds it
+  from the constant `googleapis.com`, and `api_endpoint_overrides/iamcredentials`, which `env`
+  already exports, reaches only `google.auth.iam`'s `generateAccessToken`, `signBlob` and
+  `generateIdToken` URLs (`iam_endpoint.py`). So `env` exports `CLOUDSDK_AUTH_DISABLE_CREDENTIALS=true`,
+  as `gcloud-setup` and the console terminal set it: no credential is loaded, so no lookup starts,
+  and CloudBurrow serves the unauthenticated request.
+- **Node's `getAccessToken()` for the fixture** (`google-auth-library` 11.3.4, a program's own
+  call): gtoken posts the signed JWT to its hard-coded `https://oauth2.googleapis.com/token`
+  (`build/src/gtoken/getToken.js`; the assertion's `aud` is the same constant in `jwsSign.js`).
+  For a `service_account` file `JWT.fromJSON` reads no `token_uri`, `refreshTokenNoCache` always
+  calls gtoken whatever the universe, and neither google-auth-library nor gaxios 8.3.3 reads a
+  variable that moves it (gaxios reads only `NO_PROXY`). The only types whose token URL Node reads
+  from the file are `external_account`, `external_account_authorized_user` and
+  `gdch_service_account`, and each has no `client_email` with a private key, so
+  `GoogleAuth.sign`, Storage signed URLs and Firebase custom tokens would go to IAM `signBlob` at
+  `iamcredentials.${universe}` instead: a new Google call on a commoner path. The fixture stays a
+  `service_account` file and #2040 stays open. Served clients are unaffected: google-gax sets
+  `useJWTAccessWithScope`, a self-signed JWT with no exchange, which the test's Node probe uses.
 
 The instance's metadata server now answers `instance/service-accounts/<account>/?recursive=true`
 with the account's JSON, as GCE does: Python's `compute_engine.Credentials` reads it before every

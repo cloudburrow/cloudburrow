@@ -156,13 +156,16 @@ const impersonationWarning = "This command is using service account impersonatio
 
 // TestGcloudImpersonationThroughEnv (#697): `gcloud storage ls
 // --impersonate-service-account` in a fresh configuration set up by
-// `cloudburrow env`. With the exported variables alone gcloud has no source
-// credential and fails before any request. With the exported ADC fixture
-// also named as auth/credential_file_override, gcloud refreshes it at the
-// exported CLOUDSDK_AUTH_TOKEN_HOST, this instance's token endpoint (#2034),
-// and the IAM Credentials override refuses generateAccessToken. A request
-// bound off the machine, such as a refresh at oauth2.googleapis.com, fails
-// the test.
+// `cloudburrow env`. `env` exports CLOUDSDK_AUTH_DISABLE_CREDENTIALS (#2040),
+// as gcloud-setup writes auth/disable_credentials, so as exported the flag
+// is ignored and the buckets are listed unauthenticated, even with the
+// fixture as auth/credential_file_override. With credentials turned back on
+// and the exported variables alone gcloud has no source credential and
+// fails before any request. With the exported ADC fixture also named as
+// auth/credential_file_override, gcloud refreshes it at the exported
+// CLOUDSDK_AUTH_TOKEN_HOST, this instance's token endpoint (#2034), and the
+// IAM Credentials override refuses generateAccessToken. A request bound off
+// the machine, such as a refresh at oauth2.googleapis.com, fails the test.
 func TestGcloudImpersonationThroughEnv(t *testing.T) {
 	h := New(t)
 	h.Endpoint(EnvStorage)
@@ -187,11 +190,34 @@ func TestGcloudImpersonationThroughEnv(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = sc.Bucket(bucket).Delete(h.Context()) })
 	sa := "worker@" + project + ".iam.gserviceaccount.com"
+	if vars["CLOUDSDK_AUTH_DISABLE_CREDENTIALS"] != "true" {
+		t.Fatalf("cloudburrow env does not export CLOUDSDK_AUTH_DISABLE_CREDENTIALS=true (#2040)")
+	}
+	credentialsOn := "CLOUDSDK_AUTH_DISABLE_CREDENTIALS=false"
 
-	t.Run("exported variables alone", func(t *testing.T) {
+	t.Run("as exported, fixture as credential_file_override", func(t *testing.T) {
 		rec := newIAMRecorder(t, override)
 		g := newEnvGcloudSession(t, vars, rec)
-		out, err := g.run(nil, "storage", "ls", "--impersonate-service-account="+sa)
+		out, err := g.run([]string{"CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE=" + fixture},
+			"storage", "ls", "--impersonate-service-account="+sa)
+		if err != nil {
+			t.Fatalf("gcloud storage ls --impersonate-service-account: %v\n%s", err, out)
+		}
+		if !strings.Contains(out, "gs://"+bucket+"/") {
+			t.Errorf("gcloud storage ls does not show gs://%s/:\n%s", bucket, out)
+		}
+		if strings.Contains(out, impersonationWarning) {
+			t.Errorf("gcloud impersonated under CLOUDSDK_AUTH_DISABLE_CREDENTIALS; docs/credentials.md says it does not:\n%s", out)
+		}
+		if got := rec.seen(); len(got) != 0 {
+			t.Errorf("gcloud reached the IAM Credentials override with credentials disabled: %v", got)
+		}
+	})
+
+	t.Run("credentials enabled, exported variables alone", func(t *testing.T) {
+		rec := newIAMRecorder(t, override)
+		g := newEnvGcloudSession(t, vars, rec)
+		out, err := g.run([]string{credentialsOn}, "storage", "ls", "--impersonate-service-account="+sa)
 		t.Logf("gcloud storage ls --impersonate-service-account:\n%s", out)
 		if err == nil {
 			t.Fatalf("gcloud succeeded with no source credential; docs/credentials.md says it fails")
@@ -204,11 +230,11 @@ func TestGcloudImpersonationThroughEnv(t *testing.T) {
 		}
 	})
 
-	t.Run("fixture as credential_file_override", func(t *testing.T) {
+	t.Run("credentials enabled, fixture as credential_file_override", func(t *testing.T) {
 		rec := newIAMRecorder(t, override)
 		g := newEnvGcloudSession(t, vars, rec)
 		proxy, hosts := refreshRecorder(t)
-		out, err := g.run(append([]string{"CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE=" + fixture}, proxy...),
+		out, err := g.run(append([]string{credentialsOn, "CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE=" + fixture}, proxy...),
 			"storage", "ls", "--impersonate-service-account="+sa)
 		t.Logf("gcloud storage ls --impersonate-service-account:\n%s", out)
 		if err == nil {

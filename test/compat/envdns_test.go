@@ -55,7 +55,7 @@ func TestEnvResolvesNoGoogleName(t *testing.T) {
 	}
 	vars := envVarsFromCLI(t)
 	for _, k := range []string{"GOOGLE_APPLICATION_CREDENTIALS", "GCE_METADATA_HOST", "GCE_METADATA_ROOT", "GCE_METADATA_IP",
-		"CLOUDSDK_METRICS_ENVIRONMENT", "CLOUDSDK_CORE_CHECK_GCE_METADATA", "CLOUDSDK_AUTH_TOKEN_HOST"} {
+		"CLOUDSDK_METRICS_ENVIRONMENT", "CLOUDSDK_CORE_CHECK_GCE_METADATA", "CLOUDSDK_AUTH_TOKEN_HOST", "CLOUDSDK_AUTH_DISABLE_CREDENTIALS"} {
 		if vars[k] == "" {
 			t.Fatalf("cloudburrow env exported no %s", k)
 		}
@@ -233,10 +233,17 @@ func TestEnvResolvesNoGoogleName(t *testing.T) {
 		{client: "python", withEnv: true, want: []string{"python adc", "python metadata"}},
 		{client: "node", withEnv: true, want: []string{"node adc", "node metadata"}},
 		{client: "java", withEnv: true, want: []string{"java adc", "java metadata"}},
-		// gcloud's bundled google-auth starts the Regional Access Boundary
-		// lookup for a service-account credential, as Python's does.
-		{client: "gcloud-fixture", withEnv: true, known: "iamcredentials.googleapis.com", issue: "#1981"},
-		// gtoken's hard-coded token URL.
+		// The fixture as gcloud's credential: gcloud's bundled google-auth
+		// would look up its Regional Access Boundary at
+		// iamcredentials.googleapis.com, a host no property moves, but
+		// `env` exports CLOUDSDK_AUTH_DISABLE_CREDENTIALS, as gcloud-setup
+		// writes auth/disable_credentials, so no credential is loaded
+		// (#2040).
+		{client: "gcloud-fixture", withEnv: true, want: []string{"gcloud storage-ls"}},
+		// gtoken's hard-coded token URL: a program's own getAccessToken()
+		// for a service-account key. No variable, fixture field or
+		// universe moves it (#2040); another fixture type would lose the
+		// key, and signing would go to iamcredentials.googleapis.com.
 		{client: "node-token", withEnv: true, known: "oauth2.googleapis.com", issue: "#2040"},
 	} {
 		t.Run(c.client, func(t *testing.T) {
