@@ -40,6 +40,9 @@ require (
 	cloud.google.com/go/spanner v1.96.1
 	cloud.google.com/go/speech v1.36.0
 	cloud.google.com/go/storage v1.70.0
+	cloud.google.com/go/storagebatchoperations v1.3.1
+	cloud.google.com/go/storageinsights v1.10.1
+	cloud.google.com/go/storagetransfer v1.21.1
 	github.com/Eyevinn/mp4ff v0.63.0
 	github.com/apache/arrow-go/v18 v18.8.0
 	github.com/apache/iceberg-go v0.7.0
@@ -95,9 +98,6 @@ require (
 )
 
 require (
-	cloud.google.com/go/storagebatchoperations v1.3.1 // indirect
-	cloud.google.com/go/storageinsights v1.10.1 // indirect
-	cloud.google.com/go/storagetransfer v1.21.1 // indirect
 	github.com/RoaringBitmap/roaring/v2 v2.26.0 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
 	github.com/apache/arrow/go/v15 v15.0.2 // indirect
