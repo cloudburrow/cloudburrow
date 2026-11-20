@@ -614,6 +614,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// resolve accounts and keys in the registry.
 		projects.SetServiceAccountTokenURI(tokenURI(cfg))
 		creds.SetServiceAccounts(serviceAccountDirectory{reg: projects})
+		// Workload Identity Federation (#1941): the STS exchanges
+		// against the registry's pools and providers.
+		creds.SetFederation(projects)
 		projects.SetSignAuthorizer(signAuthorizer(creds, serviceAccountDirectory{reg: projects}))
 		projects.SetCallerResolver(func(bearer string) (string, bool) { return creds.TokenAccount(bearer, time.Now()) })
 		wireProjectNumbers(ctx, projects, map[string]func() *netfwd.Forwarder{

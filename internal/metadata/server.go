@@ -193,6 +193,9 @@ func (s *Server) Handler() http.Handler {
 	}
 	// IAM Credentials (#303), for impersonation; see iamcredentials.go.
 	mux.HandleFunc(iamPrefix, s.iamCredentials)
+	// The Security Token Service (#1941), for workload identity
+	// federation; see sts.go.
+	mux.HandleFunc(STSPath, s.sts)
 
 	// metadata.google.internal is the name clients use on GCE; it is in a
 	// top-level domain no attacker can register, so a client that maps it
@@ -232,7 +235,8 @@ func (s *Server) requireFlavor(next http.Handler) http.Handler {
 		// clients, which have never heard of the metadata header.
 		// And a service account's public certificates (#1750), which any
 		// verifier fetches as www.googleapis.com serves them.
-		if r.URL.Path == "/token" || r.URL.Path == "/certs" || strings.HasPrefix(r.URL.Path, iamPrefix) || isCertPath(r.URL.Path) {
+		// And the Security Token Service (#1941), another Google API.
+		if r.URL.Path == "/token" || r.URL.Path == "/certs" || r.URL.Path == STSPath || strings.HasPrefix(r.URL.Path, iamPrefix) || isCertPath(r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
 		}

@@ -265,6 +265,16 @@ func blankCheckDeps(t *testing.T) consoleDeps {
 	} else if _, err := d.projects.CreateServiceAccountKey(&adminpb.CreateServiceAccountKeyRequest{Name: sa.GetName()}); err != nil {
 		t.Fatal(err)
 	}
+	// A workload identity pool (#1941), with an OIDC provider.
+	if _, err := d.projects.CreateWorkloadIdentityPool(blankProject, "blank-pool", resourcemanager.WorkloadIdentityPool{
+		DisplayName: "Blank pool", Description: "Blank pool"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.projects.CreateWorkloadIdentityPoolProvider(blankProject, "blank-pool", "blank-provider", resourcemanager.WorkloadIdentityPoolProvider{
+		DisplayName: "Blank provider", Description: "Blank provider", AttributeMapping: map[string]string{"google.subject": "assertion.sub"},
+		Oidc: &resourcemanager.WIFOidc{IssuerURI: "https://idp.example.test", AllowedAudiences: []string{"blank"}}}); err != nil {
+		t.Fatal(err)
+	}
 	tk, err := d.projects.CreateTagKey(&rmpb.TagKey{Parent: resourcemanager.OrganizationName, ShortName: "blank-key", Description: "Blank key"}, false)
 	if err != nil {
 		t.Fatal(err)
