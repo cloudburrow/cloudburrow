@@ -10715,7 +10715,9 @@
         "status": "Verified",
         "tests": [
           "test/compat/spannerbackups_test.go:246 TestSpannerBackupSchedules",
-          "test/compat/spannerbackupstools_test.go:74 TestTerraformSpannerBackupScheduleAndInstanceConfig"
+          "test/compat/spannerbackupstools_test.go:74 TestTerraformSpannerBackupScheduleAndInstanceConfig",
+          "test/compat/spannereditions1949_test.go:206 TestGcloudSpannerEditions",
+          "test/compat/spannereditions1949_test.go:77 TestSpannerEditionsAutoscalingAndSchedules"
         ]
       },
       {
@@ -10725,7 +10727,8 @@
           "test/compat/optional_test.go:264 TestSpannerSchemaAndQuery",
           "test/compat/orgpolicycustom1895_spanner_test.go:38 TestOrgPolicyCustomConstraintsSpanner",
           "test/compat/spanner_test.go:104 TestSpannerReadWriteTransactionIsAtomic",
-          "test/compat/spanner_test.go:202 TestSpannerDatabasesAreIsolated"
+          "test/compat/spanner_test.go:202 TestSpannerDatabasesAreIsolated",
+          "test/compat/spannereditions1949_test.go:77 TestSpannerEditionsAutoscalingAndSchedules"
         ]
       },
       {
@@ -10766,7 +10769,8 @@
         "tests": [
           "test/compat/frontstate1514_test.go:50 TestSpannerFrontRestartKeepsItsState",
           "test/compat/spannerbackups_test.go:246 TestSpannerBackupSchedules",
-          "test/compat/spannerbackupstools_test.go:74 TestTerraformSpannerBackupScheduleAndInstanceConfig"
+          "test/compat/spannerbackupstools_test.go:74 TestTerraformSpannerBackupScheduleAndInstanceConfig",
+          "test/compat/spannereditions1949_test.go:77 TestSpannerEditionsAutoscalingAndSchedules"
         ]
       },
       {
@@ -10816,7 +10820,9 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/ListBackupSchedules",
         "status": "Verified",
         "tests": [
-          "test/compat/spannerbackups_test.go:246 TestSpannerBackupSchedules"
+          "test/compat/spannerbackups_test.go:246 TestSpannerBackupSchedules",
+          "test/compat/spannereditions1949_test.go:206 TestGcloudSpannerEditions",
+          "test/compat/spannereditions1949_test.go:77 TestSpannerEditionsAutoscalingAndSchedules"
         ]
       },
       {
@@ -10839,7 +10845,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/frontstate1514_test.go:50 TestSpannerFrontRestartKeepsItsState",
-          "test/compat/spannerbackups_test.go:461 TestSpannerDatabaseRoles"
+          "test/compat/spannerbackups_test.go:480 TestSpannerDatabaseRoles"
         ]
       },
       {
@@ -10905,7 +10911,8 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/UpdateDatabaseDdl",
         "status": "Verified",
         "tests": [
-          "test/compat/spanneradmin_test.go:215 TestSpannerDatabaseAdminSchemaListAndDrop"
+          "test/compat/spanneradmin_test.go:215 TestSpannerDatabaseAdminSchemaListAndDrop",
+          "test/compat/spannereditions1949_test.go:77 TestSpannerEditionsAutoscalingAndSchedules"
         ]
       },
       {
@@ -10916,7 +10923,10 @@
           "test/compat/orgpolicycustom1895_spanner_test.go:38 TestOrgPolicyCustomConstraintsSpanner",
           "test/compat/orgpolicylocations1890_test.go:83 TestOrgPolicyEnforcementSpanner",
           "test/compat/spanner_test.go:104 TestSpannerReadWriteTransactionIsAtomic",
-          "test/compat/spanner_test.go:202 TestSpannerDatabasesAreIsolated"
+          "test/compat/spanner_test.go:202 TestSpannerDatabasesAreIsolated",
+          "test/compat/spannereditions1949_test.go:206 TestGcloudSpannerEditions",
+          "test/compat/spannereditions1949_test.go:252 TestTerraformSpannerInstanceEdition",
+          "test/compat/spannereditions1949_test.go:77 TestSpannerEditionsAutoscalingAndSchedules"
         ]
       },
       {
@@ -10939,7 +10949,8 @@
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/DeleteInstance",
         "status": "Verified",
         "tests": [
-          "test/compat/spanneradmin_test.go:73 TestSpannerInstanceAdminListsAndDeletes"
+          "test/compat/spanneradmin_test.go:73 TestSpannerInstanceAdminListsAndDeletes",
+          "test/compat/spannereditions1949_test.go:252 TestTerraformSpannerInstanceEdition"
         ]
       },
       {
@@ -10975,7 +10986,9 @@
         "tests": [
           "test/compat/consoledatabases_test.go:120 TestConsoleSpannerCreateAndDropDatabase",
           "test/compat/frontstate1514_test.go:50 TestSpannerFrontRestartKeepsItsState",
-          "test/compat/gcloudspannerfirestore_test.go:53 TestGcloudSpannerInstances"
+          "test/compat/gcloudspannerfirestore_test.go:53 TestGcloudSpannerInstances",
+          "test/compat/spannereditions1949_test.go:252 TestTerraformSpannerInstanceEdition",
+          "test/compat/spannereditions1949_test.go:77 TestSpannerEditionsAutoscalingAndSchedules"
         ]
       },
       {
@@ -11072,7 +11085,10 @@
           "test/compat/consolespanneradmin_test.go:271 TestConsoleSpannerEditInstance",
           "test/compat/gcloudspannerfirestore_test.go:53 TestGcloudSpannerInstances",
           "test/compat/orgpolicycustom1895_spanner_test.go:38 TestOrgPolicyCustomConstraintsSpanner",
-          "test/compat/spanneradmin_test.go:320 TestSpannerUpdateInstance"
+          "test/compat/spanneradmin_test.go:320 TestSpannerUpdateInstance",
+          "test/compat/spannereditions1949_test.go:206 TestGcloudSpannerEditions",
+          "test/compat/spannereditions1949_test.go:252 TestTerraformSpannerInstanceEdition",
+          "test/compat/spannereditions1949_test.go:77 TestSpannerEditionsAutoscalingAndSchedules"
         ]
       },
       {
@@ -11086,7 +11102,7 @@
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/UpdateInstancePartition",
         "status": "Verified",
         "tests": [
-          "test/compat/spannerbackups_test.go:418 TestSpannerUpdateInstancePartition",
+          "test/compat/spannerbackups_test.go:419 TestSpannerUpdateInstancePartition",
           "test/compat/terraform_batch11_test.go:347 TestTerraformSpannerInstancePartition"
         ]
       },

@@ -207,6 +207,8 @@ func (s *Instances) takeBackup(ctx context.Context, name, database string, versi
 	s.mu.Unlock()
 	meta := &databasepb.CreateBackupMetadata{Name: name, Database: database,
 		Progress: &databasepb.OperationProgress{ProgressPercent: 100, StartTime: timestamppb.New(start), EndTime: timestamppb.New(s.now())}}
+	// An incremental schedule's backup joins its chain (incremental.go).
+	s.chainBackup(b, schedules)
 	return s.doneOp(name, meta, b)
 }
 
@@ -313,8 +315,11 @@ func (d databases) DeleteBackup(_ context.Context, req *databasepb.DeleteBackupR
 	s := d.s
 	s.mu.Lock()
 	s.expireBackups()
-	_, ok := s.backups[req.GetName()]
+	b, ok := s.backups[req.GetName()]
 	delete(s.backups, req.GetName())
+	if ok {
+		s.unchainBackupLocked(b.pb)
+	}
 	s.mu.Unlock()
 	if !ok {
 		return nil, backupNotFound(req.GetName())

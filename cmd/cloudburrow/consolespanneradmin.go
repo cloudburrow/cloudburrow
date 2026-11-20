@@ -472,8 +472,10 @@ func (p spannerProvider) spannerAdminAct(ctx context.Context, project string, pa
 }
 
 // spannerEditInstanceAction is Edit instance (#1461), prefilled from the
-// instance: its display name and compute capacity, which the call front in
-// the Spanner pod updates (the emulator refuses UpdateInstance).
+// instance: its display name, edition, compute capacity (manual, or the
+// managed autoscaler's limits and targets) and default backup schedules
+// (#1949), which the call front in the Spanner pod updates (the emulator
+// refuses UpdateInstance).
 func (p spannerProvider) spannerEditInstanceAction(ctx context.Context, project, instanceID string) (console.Action, bool) {
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
@@ -486,29 +488,86 @@ func (p spannerProvider) spannerEditInstanceAction(ctx context.Context, project,
 	if err != nil {
 		return console.Action{}, false
 	}
+	edition := spannerEdition(inst.GetEdition())
+	if edition == "—" {
+		edition = "Standard"
+	}
+	scaling, lo, hi, cpu, st := "Manual allocation", "1", "10", "65", "95"
+	if ac := inst.GetAutoscalingConfig(); ac != nil {
+		scaling = "Autoscaling"
+		l := ac.GetAutoscalingLimits()
+		lo, hi = strconv.Itoa(int(l.GetMinNodes())), strconv.Itoa(int(l.GetMaxNodes()))
+		if l.GetMinNodes() == 0 {
+			lo, hi = strconv.Itoa(int(l.GetMinProcessingUnits()/1000)), strconv.Itoa(int(l.GetMaxProcessingUnits()/1000))
+		}
+		if c := ac.GetAutoscalingTargets().GetHighPriorityCpuUtilizationPercent(); c != 0 {
+			cpu = strconv.Itoa(int(c))
+		}
+		st = strconv.Itoa(int(ac.GetAutoscalingTargets().GetStorageUtilizationPercent()))
+	}
+	backups := "false"
+	if inst.GetDefaultBackupScheduleType() == instancepb.Instance_AUTOMATIC {
+		backups = "true"
+	}
 	return console.Action{ID: "editinstance", Label: "Edit instance", Fields: []console.Field{
 		{Name: "displayName", Label: "Display name", Type: "text", Required: true, Default: inst.GetDisplayName(), Pattern: `^.{4,30}$`,
 			Help: "4 to 30 characters."},
+		{Name: "edition", Label: "Edition", Type: "radio", Options: []string{"Standard", "Enterprise", "Enterprise Plus"}, Default: edition,
+			Help: "An upgrade keeps everything; a downgrade needs the instance to stop using the higher edition's features (the managed autoscaler, incremental backups, multi-region configurations, partitions)."},
+		{Name: "scaling", Label: "Scaling mode", Type: "radio", Options: []string{"Manual allocation", "Autoscaling"}, Default: scaling},
 		{Name: "processingUnits", Label: "Processing units", Type: "text", Required: true, Pattern: `^[0-9]+$`,
-			Default: strconv.Itoa(int(inst.GetProcessingUnits())),
-			Help:    "A multiple of 100 below 1000, and of 1000 (a node) from 1000. The emulator serves every instance the same."},
+			Default: strconv.Itoa(int(inst.GetProcessingUnits())), ShowWhen: "scaling=Manual allocation",
+			Help: "A multiple of 100 below 1000, and of 1000 (a node) from 1000. The emulator serves every instance the same."},
+		{Name: "minimum", Label: "Minimum (nodes)", Type: "text", Required: true, Pattern: `^[1-9][0-9]*$`, Default: lo, ShowWhen: "scaling=Autoscaling",
+			Help: "At least 1 node. " + spannerAutoscaleNote},
+		{Name: "maximum", Label: "Maximum (nodes)", Type: "text", Required: true, Pattern: `^[1-9][0-9]*$`, Default: hi, ShowWhen: "scaling=Autoscaling",
+			Help: "At least the minimum, and at most 10 times it."},
+		{Name: "highPriorityCPU", Label: "High priority CPU utilization target (%)", Type: "text", Required: true, Pattern: `^[0-9]+$`, Default: cpu,
+			ShowWhen: "scaling=Autoscaling", Help: "10 to 90."},
+		{Name: "storageTarget", Label: "Storage utilization target (%)", Type: "text", Required: true, Pattern: `^[0-9]+$`, Default: st,
+			ShowWhen: "scaling=Autoscaling", Help: "10 to 99."},
+		{Name: "defaultBackups", Label: "Enable default backup schedules", Type: "checkbox", Default: backups,
+			Help: "New databases get a schedule of full backups every 24 hours, kept for 7 days; existing databases are not changed."},
 	}}, true
 }
 
 func (p spannerProvider) spannerEditInstance(ctx context.Context, project, instanceID string, values map[string]string) error {
-	pu, err := strconv.ParseInt(strings.TrimSpace(values["processingUnits"]), 10, 32)
-	if err != nil {
-		return fmt.Errorf("processing units %q is not a whole number", values["processingUnits"])
+	in := &instancepb.Instance{Name: fmt.Sprintf("projects/%s/instances/%s", project, instanceID), DisplayName: strings.TrimSpace(values["displayName"])}
+	paths := []string{"display_name"}
+	if strings.TrimSpace(values["scaling"]) == "Autoscaling" {
+		ac, err := spannerAutoscalingConfig(map[string]string{"unit": "Nodes", "minimum": values["minimum"], "maximum": values["maximum"],
+			"highPriorityCPU": values["highPriorityCPU"], "storageTarget": values["storageTarget"]})
+		if err != nil {
+			return err
+		}
+		in.AutoscalingConfig = ac
+		paths = append(paths, "autoscaling_config")
+	} else {
+		pu, err := strconv.ParseInt(strings.TrimSpace(values["processingUnits"]), 10, 32)
+		if err != nil {
+			return fmt.Errorf("processing units %q is not a whole number", values["processingUnits"])
+		}
+		in.ProcessingUnits = int32(pu)
+		// Clearing autoscaling_config is no change for a manual instance.
+		paths = append(paths, "processing_units", "autoscaling_config")
+	}
+	if e, ok := spannerEditions[strings.TrimSpace(values["edition"])]; ok {
+		in.Edition = e
+		paths = append(paths, "edition")
+	}
+	if d, ok := values["defaultBackups"]; ok {
+		in.DefaultBackupScheduleType = instancepb.Instance_NONE
+		if d == "true" || d == "on" {
+			in.DefaultBackupScheduleType = instancepb.Instance_AUTOMATIC
+		}
+		paths = append(paths, "default_backup_schedule_type")
 	}
 	instAdmin, err := instance.NewInstanceAdminClient(ctx, localOpts(p.endpoint)...)
 	if err != nil {
 		return fmt.Errorf("cannot reach Spanner: %w", err)
 	}
 	defer instAdmin.Close()
-	op, err := instAdmin.UpdateInstance(ctx, &instancepb.UpdateInstanceRequest{
-		Instance: &instancepb.Instance{Name: fmt.Sprintf("projects/%s/instances/%s", project, instanceID),
-			DisplayName: strings.TrimSpace(values["displayName"]), ProcessingUnits: int32(pu)},
-		FieldMask: &fieldmaskpb.FieldMask{Paths: []string{"display_name", "processing_units"}}})
+	op, err := instAdmin.UpdateInstance(ctx, &instancepb.UpdateInstanceRequest{Instance: in, FieldMask: &fieldmaskpb.FieldMask{Paths: paths}})
 	if err != nil {
 		return err
 	}

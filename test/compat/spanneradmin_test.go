@@ -312,8 +312,8 @@ func TestSpannerAdminRefusals(t *testing.T) {
 // TestSpannerUpdateInstance (#1461): the call front in the Spanner pod
 // answers UpdateInstance, which the emulator refuses, for the display name,
 // compute capacity and labels; the official client's operation is done,
-// GetInstance and ListInstances return the changes, and what an emulator
-// instance cannot carry (autoscaling) is refused UNIMPLEMENTED, naming why.
+// GetInstance and ListInstances return the changes, and an autoscaling
+// configuration without limits is INVALID_ARGUMENT (#1949).
 // A capacity Google refuses (1500 processing units) is INVALID_ARGUMENT.
 //
 // covers: google.spanner.admin.instance.v1.InstanceAdmin/UpdateInstance
@@ -369,8 +369,8 @@ func TestSpannerUpdateInstance(t *testing.T) {
 	}
 	_, err = f.inst.UpdateInstance(ctx, &instancepb.UpdateInstanceRequest{
 		Instance: &instancepb.Instance{Name: f.instance, AutoscalingConfig: &instancepb.AutoscalingConfig{}}, FieldMask: mask("autoscaling_config")})
-	if status.Code(err) != codes.Unimplemented || !strings.Contains(status.Convert(err).Message(), "autoscale") {
-		t.Errorf("autoscaling: %v, want UNIMPLEMENTED naming why", err)
+	if status.Code(err) != codes.InvalidArgument || !strings.Contains(status.Convert(err).Message(), "autoscaling_limits") {
+		t.Errorf("autoscaling with no limits: %v, want INVALID_ARGUMENT naming them (#1949)", err)
 	}
 }
 

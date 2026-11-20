@@ -559,7 +559,11 @@ func spannerCreateScheduleAction() console.Action {
 		{Name: "cron", Label: "Cron schedule", Type: "text", Required: true, Default: "0 2 * * *",
 			Help: "When to take a backup, in UTC: five crontab fields, such as 0 2 * * * (daily at 02:00)."},
 		{Name: "retentionDays", Label: "Retention (days)", Type: "number", Required: true, Default: "7",
-			Help: "How long each backup is kept: at most 366 days. Each is a full backup."},
+			Help: "How long each backup is kept: at most 366 days."},
+		// Google's Backup type (#1949): incremental backups need the
+		// Enterprise or Enterprise Plus edition, at most one every 4 hours.
+		{Name: "backupType", Label: "Backup type", Type: "radio", Options: []string{"Full backup", "Incremental backup"}, Default: "Full backup",
+			Help: "An incremental backup holds the changes since the chain's previous backup; it needs the Enterprise or Enterprise Plus edition and a schedule of every 4 hours or more."},
 	}}
 }
 
@@ -719,6 +723,9 @@ func spannerDatabaseAct(ctx context.Context, dbAdmin *database.DatabaseAdminClie
 			return errors.New("a backup schedule ID is required")
 		}
 		s.BackupTypeSpec = &databasepb.BackupSchedule_FullBackupSpec{FullBackupSpec: &databasepb.FullBackupSpec{}}
+		if val("backupType") == "Incremental backup" {
+			s.BackupTypeSpec = &databasepb.BackupSchedule_IncrementalBackupSpec{IncrementalBackupSpec: &databasepb.IncrementalBackupSpec{}}
+		}
 		_, err = dbAdmin.CreateBackupSchedule(ctx, &databasepb.CreateBackupScheduleRequest{Parent: dbName, BackupScheduleId: id, BackupSchedule: s})
 		return err
 	case "deleteschedule":
