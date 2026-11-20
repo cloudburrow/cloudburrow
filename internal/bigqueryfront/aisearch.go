@@ -34,7 +34,11 @@ import (
 // (hybridsearch.go); rerank => TRUE reranks on the local model
 // (rerank.go).
 //
-// 501, named: an ObjectRef source or query value (#1798). UNVERIFIED (re-read 2026-11-18, the page quotes no error text,
+// An ObjectRef source column (autoembed.go) and an ObjectRef query value
+// ("A string literal or ObjectRef value", #1983) are served: the value is
+// embedded by :embedContent; rerank refuses ObjectRefs ("ObjectRef values
+// aren't supported"), and HYBRID an ObjectRef value (UNVERIFIED: the
+// lexical half needs text; the page states no rule). UNVERIFIED (re-read 2026-11-18, the page quotes no error text,
 // and gives no formula): the refusals' words; DOT_PRODUCT's distance as
 // the negative dot product, as VECTOR_SEARCH's order (nearest first)
 // implies; a top_k of 0 giving no rows; a NULL query value failing 400.
@@ -228,8 +232,9 @@ func (f front) aiSearchSubquery(r *http.Request, q queryOptions, c aiSearchCall,
 			return "", code, msg
 		}
 	}
-	// The query value.
+	// The query value: "A string literal or ObjectRef value" (#1983).
 	var value *string
+	var valueRef *objRef
 	if s, ok := unquoteString(c.value); ok {
 		value = &s
 	} else if strings.HasPrefix(c.value, "@") {
@@ -239,10 +244,30 @@ func (f front) aiSearchSubquery(r *http.Request, q queryOptions, c aiSearchCall,
 		}
 		value = v
 	} else {
-		return "", 400, "The query_value of AI.SEARCH must be a STRING literal or a STRING query parameter (ObjectRef query values are not served, #1798)"
+		ps, isVec, code, msg := f.searchValuePieces(r, q, c.value)
+		if code != 0 {
+			return "", code, msg
+		}
+		switch {
+		case isVec:
+			return "", 400, "The query_value of AI.SEARCH must be a STRING literal, a STRING query parameter or an ObjectRef"
+		case ps == nil:
+		case ps[0].ref != nil:
+			valueRef = ps[0].ref
+		default:
+			value = &ps[0].text
+		}
+		if value == nil && valueRef == nil {
+			return "", 400, "The query_value of AI.SEARCH can't be NULL"
+		}
 	}
-	if value == nil {
+	if value == nil && valueRef == nil {
 		return "", 400, "The query_value of AI.SEARCH can't be NULL"
+	}
+	if rerank && (valueRef != nil || e.SourceRef) {
+		// "column_to_search must be a STRING, and query_value must be a
+		// non-empty STRING ... ObjectRef values aren't supported."
+		return "", 400, "With rerank => TRUE, column_to_search and query_value of AI.SEARCH must be STRING: ObjectRef values aren't supported"
 	}
 	if rerank && *value == "" {
 		return "", 400, "With rerank => TRUE, the query_value of AI.SEARCH must be a non-empty STRING"
@@ -262,7 +287,13 @@ func (f front) aiSearchSubquery(r *http.Request, q queryOptions, c aiSearchCall,
 		task = "RETRIEVAL_QUERY"
 	}
 	a := aiResolved{rm: &remoteModel{Model: e.Model, Endpoint: e.Endpoint, Location: e.Location, Embedding: true}, taskType: task, dims: e.Dims}
-	vec, status := f.embedVector(r.Context(), project, a, *value)
+	var vec []float64
+	var status string
+	if valueRef != nil {
+		vec, status = f.embedPieces(r, project, a, []promptPiece{{ref: valueRef}})
+	} else {
+		vec, status = f.embedVector(r.Context(), project, a, *value)
+	}
 	if status != "" {
 		return "", 400, "AI.SEARCH could not embed its query_value: " + status
 	}
@@ -279,7 +310,13 @@ func (f front) aiSearchSubquery(r *http.Request, q queryOptions, c aiSearchCall,
 			return "", 400, "AI.SEARCH with mode => 'HYBRID' needs a hybrid index: a vector index on " + e.Column + " of " + dataset + "." + table +
 				" with the lexical_search_columns option"
 		}
-		if hybridIndex {
+		if hybridIndex && valueRef != nil && mode == "HYBRID" {
+			// The lexical half searches text: an ObjectRef has none
+			// (UNVERIFIED, re-read 2026-11-20: the page states no rule; AUTO
+			// searches vectors).
+			return "", 400, "AI.SEARCH with mode => 'HYBRID' needs a STRING query_value for its lexical search, not an ObjectRef"
+		}
+		if hybridIndex && valueRef == nil {
 			var quoted []string
 			for _, l := range x.Lexical {
 				quoted = append(quoted, sqlString(l))

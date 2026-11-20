@@ -87,8 +87,8 @@ func TestBigQueryAICountTokens(t *testing.T) {
 	t.Logf("token counts (recorded): %v", counts)
 
 	// The default endpoint (AI.GENERATE's, no alias): an API error, NULL.
-	rows = mlQuery(t, h, c, "SELECT AI.COUNT_TOKENS('hi').result AS result, AI.COUNT_TOKENS('hi').full_response AS full")
-	if len(rows) != 1 || rows[0]["result"] != nil || rows[0]["full"] != nil {
+	rows = mlQuery(t, h, c, "SELECT AI.COUNT_TOKENS('hi').result AS result, AI.COUNT_TOKENS('hi').full_response AS full_resp")
+	if len(rows) != 1 || rows[0]["result"] != nil || rows[0]["full_resp"] != nil {
 		t.Errorf("the default endpoint with no alias: %v", rows)
 	}
 	// INPUT is a STRING.

@@ -1,8 +1,11 @@
 package bigqueryfront
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -85,13 +88,15 @@ func (f front) rewriteObjFunctions(r *http.Request, q queryOptions, text string)
 		if code != 0 || len(calls) == 0 {
 			return text, code, msg
 		}
-		// OBJ.MAKE_REF first (it is SQL alone), then the deepest call,
-		// so that a probe of a block's rows holds no OBJ call.
+		// OBJ.MAKE_REF and OBJ.LIST first (each is SQL alone, needing no
+		// probe), then the deepest call, so that a probe of a block's rows
+		// holds no OBJ call.
+		alone := func(fn string) bool { return fn == "MAKE_REF" || fn == "LIST" }
 		var c objCall
 		for _, k := range calls {
 			switch {
 			case k.inner:
-			case c.fn == "", k.fn == "MAKE_REF" && c.fn != "MAKE_REF", (k.fn == "MAKE_REF") == (c.fn == "MAKE_REF") && k.depth > c.depth:
+			case c.fn == "", alone(k.fn) && !alone(c.fn), alone(k.fn) == alone(c.fn) && k.depth > c.depth:
 				c = k
 			}
 		}
@@ -112,8 +117,7 @@ func (f front) objCallSQL(r *http.Request, q queryOptions, text string, toks []t
 	name := "OBJ." + c.fn
 	switch c.fn {
 	case "LIST":
-		return "", 501, "Not implemented here: OBJ.LIST, the table function over a Cloud Storage listing: list the objects with an object table " +
-			"(CREATE EXTERNAL TABLE ... OPTIONS(object_metadata = 'SIMPLE', uris = [...])), whose ref column is each object's ObjectRef. Nothing was run."
+		return f.objListSQL(r, c)
 	case "MAKE_REF":
 		return f.makeRefSQL(r, q, text, toks, depth, c)
 	}
@@ -125,26 +129,25 @@ func (f front) objCallSQL(r *http.Request, q queryOptions, text string, toks []t
 		return "", 400, "No matching signature for function " + name + " with " + strconv.Itoa(len(c.pos)) + " arguments"
 	}
 	write, dur := false, signedURLExpiry
+	// perRow: a mode or duration that is an expression rather than a
+	// literal (#1983), read with each ref from the block's rows.
+	perRow := false
 	if c.fn == "GET_ACCESS_URL" {
-		mode, ok := unquoteString(c.pos[1])
-		if !ok {
-			return "", 501, "Not implemented here: an OBJ.GET_ACCESS_URL mode that is not a STRING literal ('r' or 'rw'). Nothing was run."
-		}
-		switch strings.ToLower(mode) {
-		case "r":
-		case "rw":
-			write = true
-		default:
-			return "", 400, "OBJ.GET_ACCESS_URL's mode must be 'r' or 'rw', not " + c.pos[1]
+		if mode, ok := unquoteString(c.pos[1]); ok {
+			if write, ok = accessMode(mode); !ok {
+				return "", 400, "OBJ.GET_ACCESS_URL's mode must be 'r' or 'rw', not " + c.pos[1]
+			}
+		} else {
+			perRow = true
 		}
 		if len(c.pos) == 3 {
-			ms, ok := intervalLiteralMs(lexOrNone(c.pos[2]))
-			if !ok {
-				return "", 501, "Not implemented here: an OBJ.GET_ACCESS_URL duration that is not an INTERVAL literal. Nothing was run."
-			}
-			dur = time.Duration(ms) * time.Millisecond
-			if dur < 30*time.Minute || dur > 6*time.Hour {
-				return "", 400, "OBJ.GET_ACCESS_URL's duration must be between 30 minutes and 6 hours"
+			if ms, ok := intervalLiteralMs(lexOrNone(c.pos[2])); ok {
+				dur = time.Duration(ms) * time.Millisecond
+				if !validAccessDuration(dur) {
+					return "", 400, accessDurationError
+				}
+			} else {
+				perRow = true
 			}
 		}
 	}
@@ -152,6 +155,14 @@ func (f front) objCallSQL(r *http.Request, q queryOptions, text string, toks []t
 		return "", 501, "Not implemented here: " + name + " outside a SELECT query block. Nothing was run."
 	}
 	arg := c.pos[0]
+	if perRow {
+		// The ref, the mode and the duration in milliseconds, one key.
+		d := "CAST(NULL AS INT64)"
+		if len(c.pos) == 3 {
+			d = "UNIX_MILLIS(TIMESTAMP '1970-01-01 00:00:00+00' + (" + c.pos[2] + "))"
+		}
+		arg = "STRUCT(" + c.pos[0] + " AS r, CAST(" + c.pos[1] + " AS STRING) AS m, " + d + " AS d)"
+	}
 	probe := blockProbe(text, toks, depth, c.block, arg)
 	if strings.Contains(probe, text[c.start:c.end]) {
 		return "", 501, "Not implemented here: " + name + " inside a FROM clause (such as a JOIN's ON condition): filter in WHERE instead. Nothing was run."
@@ -168,14 +179,41 @@ func (f front) objCallSQL(r *http.Request, q queryOptions, text string, toks []t
 			continue
 		}
 		key := *row[0]
+		refKey := key
+		if perRow {
+			var t struct {
+				R json.RawMessage `json:"r"`
+				M *string         `json:"m"`
+				D *int64          `json:"d"`
+			}
+			if json.Unmarshal([]byte(key), &t) != nil {
+				return "", 500, "cloudburrow: unreadable OBJ.GET_ACCESS_URL arguments " + key
+			}
+			if t.M == nil || string(bytes.TrimSpace(t.R)) == "null" || len(c.pos) == 3 && t.D == nil {
+				// A NULL argument: a NULL result.
+				continue
+			}
+			var ok bool
+			if write, ok = accessMode(*t.M); !ok {
+				return "", 400, "OBJ.GET_ACCESS_URL's mode must be 'r' or 'rw', not " + strconv.Quote(*t.M)
+			}
+			dur = signedURLExpiry
+			if t.D != nil {
+				dur = time.Duration(*t.D) * time.Millisecond
+				if !validAccessDuration(dur) {
+					return "", 400, accessDurationError
+				}
+			}
+			refKey = string(t.R)
+		}
 		var refs []objRef
-		if strings.HasPrefix(strings.TrimSpace(key), "[") {
+		if strings.HasPrefix(strings.TrimSpace(refKey), "[") {
 			if c.fn == "GET_READ_URL" {
 				return "", 400, "No matching signature for function OBJ.GET_READ_URL for argument types: ARRAY"
 			}
 			isArray = true
 			var items []json.RawMessage
-			if json.Unmarshal([]byte(key), &items) != nil {
+			if json.Unmarshal([]byte(refKey), &items) != nil {
 				return "", 400, name + " takes an ObjectRef or ARRAY<ObjectRef>"
 			}
 			for _, it := range items {
@@ -186,9 +224,9 @@ func (f front) objCallSQL(r *http.Request, q queryOptions, text string, toks []t
 				refs = append(refs, o)
 			}
 		} else {
-			o, ok := parseObjRef([]byte(key))
+			o, ok := parseObjRef([]byte(refKey))
 			if !ok {
-				return "", 400, name + " takes an ObjectRef or ARRAY<ObjectRef>, not " + key
+				return "", 400, name + " takes an ObjectRef or ARRAY<ObjectRef>, not " + refKey
 			}
 			refs = []objRef{o}
 		}
@@ -325,4 +363,107 @@ func isStringLiteral(s string) bool {
 
 func hasPrefixFold(s, p string) bool {
 	return len(s) >= len(p) && strings.EqualFold(s[:len(p)], p)
+}
+
+// accessMode reads OBJ.GET_ACCESS_URL's mode: whether it is 'rw', and
+// whether it is valid.
+func accessMode(mode string) (write, ok bool) {
+	switch strings.ToLower(mode) {
+	case "r":
+		return false, true
+	case "rw":
+		return true, true
+	}
+	return false, false
+}
+
+const accessDurationError = "OBJ.GET_ACCESS_URL's duration must be between 30 minutes and 6 hours"
+
+// validAccessDuration reports whether d is a duration the page allows:
+// "between 30 minutes and 6 hours".
+func validAccessDuration(d time.Duration) bool {
+	return d >= 30*time.Minute && d <= 6*time.Hour
+}
+
+// objListSQL is OBJ.LIST(uri [, authorizer]) (#1983), as
+// https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/objectref_functions
+// documents it: a table of the objects uri names (one * wildcard), with
+// the columns uri, content_type, size, md5_hash, updated, metadata,
+// generation and ref, each ref carrying the authorizer, or NULL for direct
+// access. The listing is read from the instance's Cloud Storage when the
+// query runs and written into it as a literal table. "Scalar subqueries
+// and string functions such as CONCAT aren't supported" for uri, and "URIs
+// that end in a slash or contain consecutive slashes return an error".
+// Delegated access checks the caller's bigquery.objectRefs.read on the
+// connection and its service account's storage.objects.list on the bucket,
+// as an object table's; direct access, the caller's own (the instance
+// grants it).
+//
+// UNVERIFIED (re-read 2026-11-20, the page above quotes no error text):
+// the wording of the refusals; md5_hash written as Cloud Storage's base64,
+// as object tables write it.
+func (f front) objListSQL(r *http.Request, c objCall) (string, int, string) {
+	if len(c.named) > 0 {
+		return "", 400, "OBJ.LIST takes no named arguments"
+	}
+	if len(c.pos) < 1 || len(c.pos) > 2 {
+		return "", 400, "No matching signature for function OBJ.LIST with " + strconv.Itoa(len(c.pos)) + " arguments: it takes (uri [, authorizer])"
+	}
+	uri, ok := unquoteString(c.pos[0])
+	if !ok {
+		return "", 400, "OBJ.LIST's uri must be a STRING literal: scalar subqueries and string functions such as CONCAT aren't supported"
+	}
+	rest, isGS := strings.CutPrefix(uri, "gs://")
+	bucket, name, _ := strings.Cut(rest, "/")
+	switch {
+	case !isGS || bucket == "" || name == "":
+		return "", 400, "Invalid Cloud Storage URI " + strconv.Quote(uri) + " of OBJ.LIST: it is gs://BUCKET/OBJECT, with at most one * wildcard"
+	case strings.HasSuffix(uri, "/"):
+		return "", 400, "Invalid Cloud Storage URI " + strconv.Quote(uri) + " of OBJ.LIST: a URI must not end in a slash"
+	case strings.Contains(rest, "//"):
+		return "", 400, "Invalid Cloud Storage URI " + strconv.Quote(uri) + " of OBJ.LIST: a URI must not contain consecutive slashes"
+	case strings.Count(name, "*") > 1:
+		return "", 400, "Invalid Cloud Storage URI " + strconv.Quote(uri) + " of OBJ.LIST: only one * wildcard is supported"
+	}
+	if f.storage == nil {
+		return "", 501, "Not implemented here: OBJ.LIST reads the instance's Cloud Storage, which the BigQuery front was not given (enable Cloud Storage). Nothing was run."
+	}
+	authorizer := "CAST(NULL AS STRING)"
+	auth := ""
+	if len(c.pos) == 2 {
+		a, ok := unquoteString(c.pos[1])
+		if !ok {
+			return "", 400, "OBJ.LIST's authorizer must be a STRING literal: a Cloud resource connection"
+		}
+		// The connection, the caller's use of it and its service
+		// account's reading of the object, as an ObjectRef's (refAccess),
+		// then its listing of the bucket.
+		sa, cname, code, msg := f.refAccess(r, objRef{URI: "gs://" + bucket + "/" + strings.ReplaceAll(name, "*", "x"), Authorizer: &a}, false)
+		if code != 0 {
+			return "", code, msg
+		}
+		if code, msg := f.checkBucketAccess(r, projectOf(f.base), sa, bucket); code != 0 {
+			return "", code, msg
+		}
+		auth = cname
+		authorizer = sqlString(cname)
+	}
+	objs, status, err := f.storage.listObjects(r.Context(), uri)
+	if err != nil {
+		return "", 500, "cloudburrow: the instance's Cloud Storage did not answer listing " + uri + ": " + err.Error()
+	}
+	if status != http.StatusOK && status != http.StatusNotFound {
+		return "", 400, fmt.Sprintf("Cloud Storage answered HTTP %d listing %s", status, uri)
+	}
+	sort.Slice(objs, func(i, j int) bool { return objs[i].Name < objs[j].Name })
+	var rows []string
+	for _, o := range objs {
+		row := objectRow(o, auth)
+		rows = append(rows, objectRowSQL(row))
+	}
+	typ := "STRUCT<uri STRING, generation INT64, content_type STRING, size INT64, md5_hash STRING, updated TIMESTAMP, " +
+		"metadata ARRAY<STRUCT<name STRING, value STRING>>, ref " + objRefType + ">"
+	return "(SELECT _cbol.uri, _cbol.content_type, _cbol.size, _cbol.md5_hash, _cbol.updated, _cbol.metadata, _cbol.generation, " +
+		"STRUCT(_cbol.ref.uri AS uri, _cbol.ref.version AS version, " + authorizer + " AS authorizer, _cbol.ref.details AS details) AS ref " +
+		"FROM UNNEST(ARRAY<" + typ + ">[" + strings.Join(rows, ", ") + "]) AS _cbol)", 0, ""
 }

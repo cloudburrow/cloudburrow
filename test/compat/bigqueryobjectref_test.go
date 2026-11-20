@@ -119,7 +119,9 @@ func objRefBucket(t *testing.T, h *Harness, suffix string) (*storage.BucketHandl
 // tampered with; 'rw', whose write_url a plain HTTP PUT writes a new
 // object through; the documented errors without delegated access and the
 // duration's bounds; OBJ.GET_READ_URL; an object table's ref column into
-// OBJ.GET_ACCESS_URL; and OBJ.LIST refused.
+// OBJ.GET_ACCESS_URL; a mode and a duration that are columns (#1983);
+// and OBJ.LIST, the listing as a table, with and without an authorizer,
+// its refs into OBJ.GET_ACCESS_URL, and the documented bad URIs refused.
 //
 // covers: bigquery.jobs.query
 func TestBigQueryObjectRef(t *testing.T) {
@@ -339,8 +341,48 @@ func TestBigQueryObjectRef(t *testing.T) {
 		t.Fatalf("GET of the object table ref's read_url: %d", code)
 	}
 
-	if err := mlRun(h, c, fmt.Sprintf("SELECT * FROM OBJ.LIST('gs://%s/img/*')", bh.BucketName())); err == nil || !strings.Contains(err.Error(), "OBJ.LIST") {
-		t.Fatalf("OBJ.LIST: %v", err)
+	// OBJ.GET_ACCESS_URL with a mode and a duration that are columns
+	// (#1983): each row's own.
+	rows = mlQuery(t, h, c, fmt.Sprintf("SELECT m, JSON_VALUE(u, '$.access_urls.read_url') AS r, JSON_VALUE(u, '$.access_urls.write_url') AS w FROM ("+
+		"SELECT m, OBJ.GET_ACCESS_URL(OBJ.MAKE_REF('%s', '%s'), m, INTERVAL d MINUTE) AS u FROM UNNEST([STRUCT('r' AS m, 45 AS d), ('rw', 90)])) ORDER BY m", uri, conn))
+	if len(rows) != 2 || rows[0]["w"] != nil || rows[1]["w"] == nil || !strings.Contains(fmt.Sprint(rows[0]["r"]), "X-Goog-Expires=2700") ||
+		!strings.Contains(fmt.Sprint(rows[1]["w"]), "X-Goog-Expires=5400") {
+		t.Fatalf("GET_ACCESS_URL with column arguments: %v", rows)
+	}
+	if code, b := get(rows[0]["r"].(string)); code != http.StatusOK || !bytes.Equal(b, img) {
+		t.Fatalf("GET of a per-row read_url: %d", code)
+	}
+	if err := mlRun(h, c, fmt.Sprintf("SELECT OBJ.GET_ACCESS_URL(OBJ.MAKE_REF('%s', '%s'), m) FROM UNNEST(['r', 'x']) AS m", uri, conn)); err == nil ||
+		!strings.Contains(err.Error(), "'r' or 'rw'") {
+		t.Fatalf("GET_ACCESS_URL with a column mode 'x': %v", err)
+	}
+	if err := mlRun(h, c, fmt.Sprintf("SELECT OBJ.GET_ACCESS_URL(OBJ.MAKE_REF('%s', '%s'), 'r', INTERVAL n MINUTE) FROM UNNEST([10]) AS n", uri, conn)); err == nil ||
+		!strings.Contains(err.Error(), "30 minutes and 6 hours") {
+		t.Fatalf("GET_ACCESS_URL with a column duration of 10 minutes: %v", err)
+	}
+
+	// OBJ.LIST (#1983): the listing as a table, direct access and delegated.
+	rows = mlQuery(t, h, c, fmt.Sprintf("SELECT uri, content_type, size, md5_hash, updated, metadata, generation, ref.uri AS ref_uri, ref.authorizer AS a "+
+		"FROM OBJ.LIST('gs://%s/img/*.png')", bh.BucketName()))
+	if len(rows) != 1 || rows[0]["uri"] != uri || rows[0]["content_type"] != "image/png" || rows[0]["size"] != int64(len(img)) ||
+		rows[0]["generation"] != attrs.Generation || rows[0]["ref_uri"] != uri || rows[0]["a"] != nil || rows[0]["md5_hash"] == nil || rows[0]["updated"] == nil {
+		t.Fatalf("OBJ.LIST of *.png: %v", rows)
+	}
+	rows = mlQuery(t, h, c, fmt.Sprintf("SELECT uri, ref.authorizer AS a, JSON_VALUE(OBJ.GET_ACCESS_URL(ref, 'r'), '$.access_urls.read_url') AS u "+
+		"FROM OBJ.LIST('gs://%s/img/*', 'us.%s') ORDER BY uri", bh.BucketName(), id))
+	if len(rows) != 2 || rows[0]["uri"] != uri || rows[1]["uri"] != newURI || rows[0]["a"] != conn {
+		t.Fatalf("OBJ.LIST with an authorizer: %v", rows)
+	}
+	if code, b := get(rows[0]["u"].(string)); code != http.StatusOK || !bytes.Equal(b, img) {
+		t.Fatalf("GET of an OBJ.LIST ref's read_url: %d", code)
+	}
+	if got := one(fmt.Sprintf("SELECT COUNT(*) FROM OBJ.LIST('gs://%s/none/*')", bh.BucketName())); got != int64(0) {
+		t.Fatalf("OBJ.LIST of nothing: %v", got)
+	}
+	for _, bad := range []string{"'gs://%s/img/'", "'gs://%s//img/pixel.png'", "'gs://%s/*/*.png'", "CONCAT('gs://', '%s', '/img/*')"} {
+		if err := mlRun(h, c, "SELECT * FROM OBJ.LIST("+fmt.Sprintf(bad, bh.BucketName())+")"); err == nil || !strings.Contains(err.Error(), "OBJ.LIST") {
+			t.Fatalf("OBJ.LIST(%s): %v", bad, err)
+		}
 	}
 }
 
@@ -433,5 +475,6 @@ func TestBigQueryObjectRefAIFunctions(t *testing.T) {
 		if r, _ := rows[0]["result"].(string); strings.TrimSpace(r) == "" {
 			t.Fatalf("AI.GENERATE of an image ref: empty result: %v", rows)
 		}
+		t.Logf("AI.GENERATE of an image ref (recorded, not asserted): %q", rows[0]["result"])
 	})
 }
