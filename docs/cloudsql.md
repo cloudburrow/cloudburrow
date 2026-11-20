@@ -336,8 +336,47 @@ only); `passwordChangeInterval` on MySQL ("only supported for PostgreSQL") or no
 another `complexity`. The previous passwords are kept only as SHA-256 hashes in the instance's
 record. Not as Google: a password set in SQL (`ALTER USER`, `ALTER ROLE ... PASSWORD`) is not
 checked, as the policy is the Admin API's here, not a server plugin; the 400's wording is
-CloudBurrow's (Google documents none). A user's own `passwordPolicy` (expiry, lockout) is still
-501.
+CloudBurrow's (Google documents none). A user's own `passwordPolicy` is the next section.
+
+### A user's own password policy and dual passwords (#2009)
+
+`users.insert` and `users.update` take `User.passwordPolicy`
+([built-in-authentication](https://docs.cloud.google.com/sql/docs/mysql/built-in-authentication);
+`gcloud sql users set-password-policy`), and `users.get` and `list` answer it with its `status`.
+An update sends only the fields given; the others stay, and any update of the policy unlocks the
+user, as the Users page's Unlock does (the console's Unlock sends the policy unchanged). Each part
+is the server's own:
+
+- **MySQL 8.0 and later**: `allowedFailedAttempts` with `enableFailedAttemptsCheck` is the account's
+  `FAILED_LOGIN_ATTEMPTS n PASSWORD_LOCK_TIME UNBOUNDED`, so MySQL itself refuses the account,
+  even with its right password, after n failed sign-ins in a row, until it is unlocked;
+  `status.locked` is read from the server's error log (`performance_schema.error_log`, MySQL's
+  `MY-013525` refusals since the last unlock and the server's start; the policy turns on
+  `log_error_verbosity` 3, which logs them), as MySQL keeps the lock in memory only.
+  `passwordExpirationDuration` is `PASSWORD EXPIRE INTERVAL` in whole days, rounded up (MySQL counts
+  days, 1 to 65535), with `status.passwordExpirationTime` from `password_last_changed`;
+  `enablePasswordVerification` is `PASSWORD REQUIRE CURRENT`. MySQL 5.7 takes only the expiration;
+  5.6 none (400).
+- **PostgreSQL**: `passwordExpirationDuration` is the role's `VALID UNTIL`, set again from each
+  password change, and `status.passwordExpirationTime` is it. A role with a policy is a member of
+  `cloudsqlpasswordpolicy`, which `pg_hba.conf` holds to its password (`md5`), so the server checks
+  the password and its expiry rather than trusting the connection, as it does other users.
+  `enablePasswordVerification` is 400 ("supported only for MySQL"). `allowedFailedAttempts` and
+  `enableFailedAttemptsCheck` are 501: PostgreSQL does not count failed sign-ins, and the lock Cloud
+  SQL adds is not served yet (#2014).
+
+`users.update` with `dualPasswordType` `DUAL_PASSWORD` and a password is MySQL's Retain current
+password (`ALTER USER ... RETAIN CURRENT PASSWORD`, `gcloud sql users set-password
+--retain-password`): the old and the new password both sign in, and `users.get` answers
+`dualPasswordType` `DUAL_PASSWORD`; `NO_DUAL_PASSWORD` without a password discards the old one
+(`DISCARD OLD PASSWORD`, `--discard-dual-password`), and with one sets it and discards the old.
+`DUAL_PASSWORD` without a password, on `users.insert`, on PostgreSQL or before MySQL 8.0 is 400.
+Tested by `TestCloudSQLUserPasswordPolicy` (compat) and, in the console (Add user account's Set user
+password policy; a user's Change password with Retain current password, Set password policy,
+Unlock and Discard old password; the Users list's Password status), by
+`TestCloudSQLConsoleUserPasswordPolicyAndRetainedPassword` (browser). Not as Google: a policy set
+in SQL is read back but a lock set by `ACCOUNT LOCK` is not reported; the 400s' wording is
+CloudBurrow's.
 
 ### Request fields (#1538)
 
@@ -367,7 +406,7 @@ request), or **refused** with 400 or 501 naming it. A field the discovery docume
 | `databaseCenterIntegration` `ENABLED` | 501, as `databaseCenterIntegrationEnabled` `true` is: Database Center is not served. `DISABLED` and `DATABASE_CENTER_INTEGRATION_UNSPECIFIED` are taken (#1700). |
 | `skipPrecheck` | Taken. A major version upgrade here has no separate precheck step to skip: what `preCheckMajorVersionUpgrade` reports is the validation `instances.patch` makes either way (#1700). |
 | `connectionName`, `ipAddresses`, `state`, `gceZone`, `serverCaCert`, `selfLink` and the other output fields | Ignored, as Cloud SQL ignores them. |
-| `users`: `databaseRoles`, `passwordPolicy`, `dualPasswordType` (other than `NO_DUAL_PASSWORD`), `iamEmail` | 501. `serverRoles` and `sqlserverUserDetails` are 400 (SQL Server). |
+| `users`: `databaseRoles`; `passwordPolicy.allowedFailedAttempts` and `enableFailedAttemptsCheck` on PostgreSQL (#2014) | 501. `serverRoles` and `sqlserverUserDetails` are 400 (SQL Server). `passwordPolicy` and `dualPasswordType` are served (#2009). |
 | `databases`: `sqlserverDatabaseDetails` | 400 (SQL Server). |
 | `backupRuns.insert`: `backupKind` `PHYSICAL` | 501: a backup is a logical dump. `location` is taken (see Backup locations); `diskEncryptionConfiguration` is 400 (a backup inherits its instance's), `timeZone` 400 (SQL Server). |
 

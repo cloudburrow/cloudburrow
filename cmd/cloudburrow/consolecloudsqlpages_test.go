@@ -83,7 +83,7 @@ func TestCloudSQLConsoleGoogleLayout(t *testing.T) {
 			t.Errorf("%s page actions %s; want %s", id, labels(secs[id].Actions), want)
 		}
 	}
-	rows := map[string]string{"databases": "Delete", "users": "Change password,Remove", "backups": "Restore,Delete"}
+	rows := map[string]string{"databases": "Delete", "users": "Change password,Set password policy,Unlock,Remove", "backups": "Restore,Delete"}
 	for id, want := range rows {
 		items := secs[id].Listing.Items
 		if len(items) != 1 || labels(items[0].Actions) != want || strings.Join(items[0].ActsOn, "/") != "pg" {

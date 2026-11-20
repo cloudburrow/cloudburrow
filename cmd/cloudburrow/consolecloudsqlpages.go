@@ -386,6 +386,7 @@ var sqlPlace = map[string]string{
 	"rotate-server-cert": "connections", "resolve-dns": "connections",
 
 	"add-user": "users", "add-iam-user": "users", "change-password": "users", "remove-user": "users",
+	"set-user-password-policy": "users", "unlock-user": "users", "discard-dual-password": "users",
 	"create-database": "databases", "drop-database": "databases",
 	"create-backup": "backups", "restore-backup": "backups", "delete-backup": "backups",
 	"pitr-restore": "backups", "binlog-clone": "backups",
@@ -408,6 +409,9 @@ var sqlPlace = map[string]string{
 var sqlRowActions = map[string]struct{ label, field string }{
 	"drop-database": {"Delete", "dbName"}, "change-password": {"Change password", "user"},
 	"remove-user": {"Remove", "user"}, "restore-backup": {"Restore", "backup"}, "delete-backup": {"Delete", "backup"},
+	// A user's own password policy, Unlock and Discard old password (#2009).
+	"set-user-password-policy": {"Set password policy", "user"}, "unlock-user": {"Unlock", "user"},
+	"discard-dual-password": {"Discard old password", "user"},
 }
 
 // sqlOverviewGroups puts each summary property on its Overview card.

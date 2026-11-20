@@ -10,7 +10,10 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strconv"
 	"strings"
+	"time"
 
 	sqladminapi "google.golang.org/api/sqladmin/v1"
 
@@ -50,14 +53,14 @@ func instanceDatabasesAndUsers(ctx context.Context, svc *sqladminapi.Service, pr
 		}
 		dbs.Total = len(dbs.Items)
 	}
-	users := console.Listing{Columns: []string{"Host", "Type"}, NameColumn: "User", Noun: "users",
+	users := console.Listing{Columns: []string{"Host", "Type", "Password status"}, NameColumn: "User", Noun: "users",
 		Note: "The instance's users, through users.list. A password is never shown; Change password sets a new one."}
 	if list, err := svc.Users.List(project, in.Name).Context(ctx).Do(); err != nil {
 		users.Unavailable = sqlAPIError(err).Error()
 	} else {
 		for _, u := range list.Items {
 			users.Items = append(users.Items, console.Resource{Name: sqlUserRef(u), Fields: map[string]string{
-				"Host": orDash(u.Host), "Type": orDash(u.Type)}})
+				"Host": orDash(u.Host), "Type": orDash(u.Type), "Password status": sqlUserStatus(u)}})
 			userRefs = append(userRefs, sqlUserRef(u))
 		}
 		users.Total = len(users.Items)
@@ -114,7 +117,8 @@ func databaseUserActions(in *sqladminapi.DatabaseInstance, dbNames, userRefs []s
 		{Name: "userName", Label: "User name", Type: "text", Required: true, VisibleWhen: builtIn},
 		{Name: "password", Label: "Password", Type: "password", VisibleWhen: builtIn, Help: "Optional."},
 		{Name: "userPasswordPolicy", Label: "Set user password policy", Type: "checkbox", VisibleWhen: builtIn,
-			Unavailable: "Not available locally: a user's own password policy (users.passwordPolicy) is not served; the instance's password policy applies."}}
+			Help: "Optional: the user's own policy (users.passwordPolicy), which the database server enforces."}}
+	add = append(add, sqlUserPolicyFields(mysql, map[string]string{"authentication": sqlAuthBuiltIn, "userPasswordPolicy": "true"})...)
 	if mysql {
 		add = append(add, console.Field{Name: "hostChoice", Label: "Host name", Type: "radio", Default: sqlHostAny, VisibleWhen: builtIn,
 			Options:      []string{sqlHostAny, sqlHostRestrict},
@@ -136,16 +140,110 @@ func databaseUserActions(in *sqladminapi.DatabaseInstance, dbNames, userRefs []s
 			{Name: "password", Label: "New password", Type: "password", Required: true}}
 		if mysql {
 			change = append(change, console.Field{Name: "retainCurrentPassword", Label: "Retain current password", Type: "checkbox",
-				Unavailable: "Not available locally: MySQL's dual passwords (RETAIN CURRENT PASSWORD) are not set through the Admin API here."})
+				Help: "The current password keeps signing in beside the new one until it is discarded (MySQL's RETAIN CURRENT PASSWORD)."})
 		}
+		pick := []console.Field{{Name: "user", Label: "User", Type: "select", Required: true, Options: userRefs}}
+		policy := append(append([]console.Field{}, pick...), sqlUserPolicyFields(mysql, nil)...)
 		acts = append(acts,
 			console.Action{ID: "change-password", Label: "Change password", Fields: change, Submit: "OK"},
+			console.Action{ID: "set-user-password-policy", Label: "Set password policy", Title: "Set user password policy",
+				Fields: policy, Submit: "Save"},
+			console.Action{ID: "unlock-user", Label: "Unlock", ConfirmTitle: "Unlock user account?", Fields: pick,
+				ConfirmStyle: console.DeleteConfirmClick,
+				Confirm:      "The user's failed sign-ins are forgotten and it can sign in again; its policy stays."})
+		if mysql {
+			acts = append(acts, console.Action{ID: "discard-dual-password", Label: "Discard old password", Fields: pick,
+				ConfirmTitle: "Discard old password?", ConfirmStyle: console.DeleteConfirmClick,
+				Confirm: "The retained (old) password stops signing in; the current one stays."})
+		}
+		acts = append(acts,
 			console.Action{ID: "remove-user", Label: "Remove", Destructive: true, ConfirmStyle: console.DeleteConfirmClick,
 				ConfirmTitle: "Remove user account?",
 				Confirm:      "The user can no longer connect; what it owns stays.",
 				Fields:       []console.Field{{Name: "user", Label: "User", Type: "select", Required: true, Options: userRefs}}})
 	}
 	return acts
+}
+
+// sqlUserPolicyFields are a user's own password policy (#2009), as the
+// Add user account dialog's User password policy has them: Lock after
+// failed attempts (MySQL; PostgreSQL's is #2014), Set password to expire,
+// and on MySQL Require current password.
+func sqlUserPolicyFields(mysql bool, when map[string]string) []console.Field {
+	with := func(k, v string) map[string]string {
+		m := map[string]string{k: v}
+		for a, b := range when {
+			m[a] = b
+		}
+		return m
+	}
+	lock := console.Field{Name: "policyLock", Label: "Lock after failed attempts", Type: "checkbox", VisibleWhen: when,
+		Help: "The user is locked after that many failed sign-ins in a row, until it is unlocked."}
+	if !mysql {
+		lock.Help = ""
+		lock.Unavailable = "Not available locally on PostgreSQL: the server does not count failed sign-ins (#2014)."
+	}
+	out := []console.Field{lock}
+	if mysql {
+		out = append(out, console.Field{Name: "policyAttempts", Label: "Number of failed attempts", Type: "number", Default: "5",
+			Required: true, VisibleWhen: with("policyLock", "true")})
+	}
+	out = append(out,
+		console.Field{Name: "policyExpire", Label: "Set password to expire", Type: "checkbox", VisibleWhen: when},
+		console.Field{Name: "policyExpireDays", Label: "Days until the password expires", Type: "number", Default: "90", Required: true,
+			VisibleWhen: with("policyExpire", "true")})
+	if mysql {
+		out = append(out, console.Field{Name: "policyRequireCurrent", Label: "Require current password when changing password",
+			Type: "checkbox", VisibleWhen: when})
+	}
+	return out
+}
+
+// sqlUserPolicy is the passwordPolicy sqlUserPolicyFields hold.
+func sqlUserPolicy(v map[string]string) (*sqladminapi.UserPasswordValidationPolicy, error) {
+	p := &sqladminapi.UserPasswordValidationPolicy{ForceSendFields: []string{"AllowedFailedAttempts", "EnableFailedAttemptsCheck", "PasswordExpirationDuration"}}
+	if v["policyLock"] == "true" {
+		n, err := strconv.ParseInt(strings.TrimSpace(v["policyAttempts"]), 10, 64)
+		if err != nil || n < 1 {
+			return nil, errors.New("the number of failed attempts is a whole number of at least 1")
+		}
+		p.AllowedFailedAttempts, p.EnableFailedAttemptsCheck = n, true
+	}
+	p.PasswordExpirationDuration = "0s"
+	if v["policyExpire"] == "true" {
+		d, err := strconv.ParseInt(strings.TrimSpace(v["policyExpireDays"]), 10, 64)
+		if err != nil || d < 1 {
+			return nil, errors.New("the days until the password expires is a whole number of at least 1")
+		}
+		p.PasswordExpirationDuration = fmt.Sprintf("%ds", d*86400)
+	}
+	if _, ok := v["policyRequireCurrent"]; ok {
+		p.EnablePasswordVerification = v["policyRequireCurrent"] == "true"
+		p.ForceSendFields = append(p.ForceSendFields, "EnablePasswordVerification")
+	}
+	return p, nil
+}
+
+// sqlUserStatus is a user's Password status column: locked, expired or
+// expiring, and a retained password.
+func sqlUserStatus(u *sqladminapi.User) string {
+	var out []string
+	if p := u.PasswordPolicy; p != nil && p.Status != nil {
+		if p.Status.Locked {
+			out = append(out, "Locked")
+		}
+		if t, err := time.Parse(time.RFC3339, p.Status.PasswordExpirationTime); err == nil {
+			if time.Now().After(t) {
+				out = append(out, "Password expired")
+			} else {
+				out = append(out, "Expires "+t.UTC().Format("2006-01-02 15:04 UTC"))
+			}
+		}
+	}
+	if u.DualPasswordType == "DUAL_PASSWORD" {
+		out = append(out, "Old password retained")
+	}
+	return orDash(strings.Join(out, "; "))
 }
 
 // databaseUserAct performs databaseUserActions; ok is false for any other
@@ -169,8 +267,13 @@ func databaseUserAct(ctx context.Context, svc *sqladminapi.Service, project, ins
 		if v["hostChoice"] == sqlHostAny {
 			host = "%"
 		}
-		_, err = svc.Users.Insert(project, instance, &sqladminapi.User{Name: strings.TrimSpace(v["userName"]),
-			Host: host, Password: v["password"]}).Context(ctx).Do()
+		u := &sqladminapi.User{Name: strings.TrimSpace(v["userName"]), Host: host, Password: v["password"]}
+		if v["userPasswordPolicy"] == "true" {
+			if u.PasswordPolicy, err = sqlUserPolicy(v); err != nil {
+				return true, err
+			}
+		}
+		_, err = svc.Users.Insert(project, instance, u).Context(ctx).Do()
 	case "add-iam-user":
 		// Add user account's Cloud IAM choice; still answered under its own
 		// ID for a page drawn before the two were one dialog.
@@ -188,11 +291,26 @@ func databaseUserAct(ctx context.Context, svc *sqladminapi.Service, project, ins
 			return true, errors.New("a new password is required")
 		}
 		name, host := parseSQLUserRef(v["user"])
-		call := svc.Users.Update(project, instance, &sqladminapi.User{Name: name, Host: host, Password: v["password"]}).Name(name)
-		if host != "" {
-			call = call.Host(host)
+		u := &sqladminapi.User{Name: name, Host: host, Password: v["password"]}
+		if v["retainCurrentPassword"] == "true" {
+			u.DualPasswordType = "DUAL_PASSWORD"
 		}
-		_, err = call.Context(ctx).Do()
+		err = updateSQLUser(ctx, svc, project, instance, u)
+	case "set-user-password-policy", "unlock-user", "discard-dual-password":
+		name, host := parseSQLUserRef(v["user"])
+		u := &sqladminapi.User{Name: name, Host: host}
+		switch action {
+		case "set-user-password-policy":
+			if u.PasswordPolicy, err = sqlUserPolicy(v); err != nil {
+				return true, err
+			}
+		case "unlock-user":
+			// Setting the policy, even to what it is, unlocks the user.
+			u.PasswordPolicy = &sqladminapi.UserPasswordValidationPolicy{}
+		default:
+			u.DualPasswordType = "NO_DUAL_PASSWORD"
+		}
+		err = updateSQLUser(ctx, svc, project, instance, u)
 	case "remove-user":
 		name, host := parseSQLUserRef(v["user"])
 		call := svc.Users.Delete(project, instance).Name(name)
@@ -207,4 +325,14 @@ func databaseUserAct(ctx context.Context, svc *sqladminapi.Service, project, ins
 		return true, sqlAPIError(err)
 	}
 	return true, nil
+}
+
+// updateSQLUser is users.update of u, named by its name and host.
+func updateSQLUser(ctx context.Context, svc *sqladminapi.Service, project, instance string, u *sqladminapi.User) error {
+	call := svc.Users.Update(project, instance, u).Name(u.Name)
+	if u.Host != "" {
+		call = call.Host(u.Host)
+	}
+	_, err := call.Context(ctx).Do()
+	return err
 }

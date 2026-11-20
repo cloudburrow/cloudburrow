@@ -282,6 +282,11 @@ func (p *Postgres) CreateIAMUser(ctx context.Context, u User, email, password st
 // pgEnsureIAMHBA puts pgIAMHBA at the top of pg_hba.conf, once, and
 // reloads it.
 func pgEnsureIAMHBA(ctx context.Context, c *pgx.Conn) error {
+	return pgEnsureHBA(ctx, c, pgIAMHBA...)
+}
+
+// pgEnsureHBA puts lines at the top of pg_hba.conf, once, and reloads it.
+func pgEnsureHBA(ctx context.Context, c *pgx.Conn, lines ...string) error {
 	var hbaFile, hba string
 	if err := c.QueryRow(ctx, "SHOW hba_file").Scan(&hbaFile); err != nil {
 		return pgError(err)
@@ -289,12 +294,12 @@ func pgEnsureIAMHBA(ctx context.Context, c *pgx.Conn) error {
 	if err := c.QueryRow(ctx, "SELECT pg_read_file($1)", hbaFile).Scan(&hba); err != nil {
 		return pgError(err)
 	}
-	if strings.Contains(hba, pgIAMHBA[0]) {
+	if strings.Contains(hba, lines[0]) {
 		return nil
 	}
 	// The first matching line wins, so the lines go first: the file is
 	// rewritten with them ahead of what it holds.
-	next := strings.Join(pgIAMHBA, "\n") + "\n" + hba
+	next := strings.Join(lines, "\n") + "\n" + hba
 	if _, err := c.Exec(ctx, "COPY (SELECT "+quotePGString(base64Std(next))+") TO PROGRAM "+
 		quotePGString("base64 -d > "+hbaFile)); err != nil {
 		return pgError(err)

@@ -156,8 +156,9 @@ func TestCloudSQLConsoleRound3(t *testing.T) {
 		addFields = append(addFields, f.Name)
 	}
 	if add.Title != "Add a user account to instance my" || add.Submit != "Add" ||
-		strings.Join(addFields, ",") != "authentication,userName,password,userPasswordPolicy,hostChoice,host,principal,type" ||
-		add.Fields[3].Unavailable == "" ||
+		strings.Join(addFields, ",") != "authentication,userName,password,userPasswordPolicy,policyLock,policyAttempts,"+
+			"policyExpire,policyExpireDays,policyRequireCurrent,hostChoice,host,principal,type" ||
+		add.Fields[3].Unavailable != "" || add.Fields[4].Unavailable != "" || add.Fields[5].VisibleWhen["policyLock"] != "true" ||
 		add.Fields[0].OptionLabels[sqlAuthBuiltIn] != "Built-in authentication" || add.Fields[0].Default != sqlAuthBuiltIn ||
 		add.Fields[2].Required {
 		t.Errorf("Add user account %+v", add)
@@ -165,8 +166,41 @@ func TestCloudSQLConsoleRound3(t *testing.T) {
 	if a := acts["remove-user"]; a.Label != "Remove" || a.ConfirmStyle != console.DeleteConfirmClick {
 		t.Errorf("Remove %+v; want Remove with nothing typed", a)
 	}
-	if a := acts["change-password"]; a.Submit != "OK" || a.Fields[len(a.Fields)-1].Unavailable == "" {
-		t.Errorf("Change password ends in %q; want OK", a.Submit)
+	// #2009: Retain current password, the user's policy, Unlock and
+	// Discard old password are served.
+	if a := acts["change-password"]; a.Submit != "OK" || a.Fields[len(a.Fields)-1].Name != "retainCurrentPassword" ||
+		a.Fields[len(a.Fields)-1].Unavailable != "" {
+		t.Errorf("Change password %+v; want OK and Retain current password available", a)
+	}
+	for _, id := range []string{"set-user-password-policy", "unlock-user", "discard-dual-password"} {
+		if _, ok := acts[id]; !ok {
+			t.Errorf("no %s action on MySQL", id)
+		}
+	}
+	for _, a := range databaseUserActions(&sqladminapi.DatabaseInstance{Name: "pg", DatabaseVersion: "POSTGRES_17"}, nil, []string{"u"}) {
+		if a.ID == "discard-dual-password" {
+			t.Error("Discard old password on PostgreSQL")
+		}
+		if a.ID == "add-user" {
+			for _, f := range a.Fields {
+				if f.Name == "policyLock" && f.Unavailable == "" {
+					t.Error("Lock after failed attempts is offered on PostgreSQL (#2014)")
+				}
+				if f.Name == "policyAttempts" || f.Name == "policyRequireCurrent" {
+					t.Errorf("%s on PostgreSQL", f.Name)
+				}
+			}
+		}
+	}
+	pol, err := sqlUserPolicy(map[string]string{"policyLock": "true", "policyAttempts": "3", "policyExpire": "true",
+		"policyExpireDays": "2", "policyRequireCurrent": "true"})
+	if err != nil || pol.AllowedFailedAttempts != 3 || !pol.EnableFailedAttemptsCheck || pol.PasswordExpirationDuration != "172800s" ||
+		!pol.EnablePasswordVerification {
+		t.Errorf("sqlUserPolicy %+v %v", pol, err)
+	}
+	if sqlUserStatus(&sqladminapi.User{DualPasswordType: "DUAL_PASSWORD", PasswordPolicy: &sqladminapi.UserPasswordValidationPolicy{
+		Status: &sqladminapi.PasswordStatus{Locked: true}}}) != "Locked; Old password retained" {
+		t.Error("sqlUserStatus")
 	}
 	if sqlDatabaseType("postgres") != "System" || sqlDatabaseType("shop") != "User" {
 		t.Error("database types")
