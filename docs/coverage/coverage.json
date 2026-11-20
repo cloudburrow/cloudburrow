@@ -1424,7 +1424,7 @@
           "test/compat/cloudbuildpubsub_test.go:108 TestTerraformCloudBuildPubsubTrigger",
           "test/compat/cloudbuildpubsub_test.go:31 TestCloudBuildPubsubTrigger",
           "test/compat/cloudbuildserviceaccount_test.go:92 TestCloudBuildServiceAccount",
-          "test/compat/cloudbuildtriggers_test.go:73 TestCloudBuildTriggersAndWorkerPools",
+          "test/compat/cloudbuildtriggers_test.go:75 TestCloudBuildTriggersAndWorkerPools",
           "test/compat/runconnectrepo_test.go:37 TestCloudRunContinuousDeployFromRepository",
           "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
         ]
@@ -1433,7 +1433,7 @@
         "method": "google.devtools.cloudbuild.v1.CloudBuild/CreateWorkerPool",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudbuildtriggers_test.go:73 TestCloudBuildTriggersAndWorkerPools",
+          "test/compat/cloudbuildtriggers_test.go:75 TestCloudBuildTriggersAndWorkerPools",
           "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
         ]
       },
@@ -1444,7 +1444,7 @@
           "test/compat/cloudbuildapproval_test.go:308 TestTerraformCloudBuildTriggerApproval",
           "test/compat/cloudbuildpubsub_test.go:108 TestTerraformCloudBuildPubsubTrigger",
           "test/compat/cloudbuildpubsub_test.go:31 TestCloudBuildPubsubTrigger",
-          "test/compat/cloudbuildtriggers_test.go:73 TestCloudBuildTriggersAndWorkerPools",
+          "test/compat/cloudbuildtriggers_test.go:75 TestCloudBuildTriggersAndWorkerPools",
           "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
         ]
       },
@@ -1452,7 +1452,7 @@
         "method": "google.devtools.cloudbuild.v1.CloudBuild/DeleteWorkerPool",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudbuildtriggers_test.go:73 TestCloudBuildTriggersAndWorkerPools",
+          "test/compat/cloudbuildtriggers_test.go:75 TestCloudBuildTriggersAndWorkerPools",
           "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
         ]
       },
@@ -1479,7 +1479,7 @@
           "test/compat/cloudbuildapproval_test.go:126 TestCloudBuildApproveBuild",
           "test/compat/cloudbuildapproval_test.go:308 TestTerraformCloudBuildTriggerApproval",
           "test/compat/cloudbuildpubsub_test.go:108 TestTerraformCloudBuildPubsubTrigger",
-          "test/compat/cloudbuildtriggers_test.go:73 TestCloudBuildTriggersAndWorkerPools",
+          "test/compat/cloudbuildtriggers_test.go:75 TestCloudBuildTriggersAndWorkerPools",
           "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
         ]
       },
@@ -1494,7 +1494,7 @@
         "method": "google.devtools.cloudbuild.v1.CloudBuild/GetWorkerPool",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudbuildtriggers_test.go:73 TestCloudBuildTriggersAndWorkerPools",
+          "test/compat/cloudbuildtriggers_test.go:75 TestCloudBuildTriggersAndWorkerPools",
           "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
         ]
       },
@@ -1502,7 +1502,7 @@
         "method": "google.devtools.cloudbuild.v1.CloudBuild/ListBuildTriggers",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudbuildtriggers_test.go:73 TestCloudBuildTriggersAndWorkerPools"
+          "test/compat/cloudbuildtriggers_test.go:75 TestCloudBuildTriggersAndWorkerPools"
         ]
       },
       {
@@ -1519,14 +1519,14 @@
         "method": "google.devtools.cloudbuild.v1.CloudBuild/ListWorkerPools",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudbuildtriggers_test.go:73 TestCloudBuildTriggersAndWorkerPools"
+          "test/compat/cloudbuildtriggers_test.go:75 TestCloudBuildTriggersAndWorkerPools"
         ]
       },
       {
         "method": "google.devtools.cloudbuild.v1.CloudBuild/ReceiveTriggerWebhook",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudbuildtriggers_test.go:73 TestCloudBuildTriggersAndWorkerPools"
+          "test/compat/cloudbuildtriggers_test.go:75 TestCloudBuildTriggersAndWorkerPools"
         ]
       },
       {
@@ -1544,7 +1544,7 @@
           "test/compat/cloudbuildapproval_test.go:246 TestGcloudBuildsApproveAndReject",
           "test/compat/cloudbuildapproval_test.go:308 TestTerraformCloudBuildTriggerApproval",
           "test/compat/cloudbuildserviceaccount_test.go:92 TestCloudBuildServiceAccount",
-          "test/compat/cloudbuildtriggers_test.go:73 TestCloudBuildTriggersAndWorkerPools",
+          "test/compat/cloudbuildtriggers_test.go:75 TestCloudBuildTriggersAndWorkerPools",
           "test/compat/runconnectrepo_test.go:37 TestCloudRunContinuousDeployFromRepository"
         ]
       },
@@ -1554,7 +1554,7 @@
         "tests": [
           "test/compat/cloudbuildapproval_test.go:308 TestTerraformCloudBuildTriggerApproval",
           "test/compat/cloudbuildpubsub_test.go:31 TestCloudBuildPubsubTrigger",
-          "test/compat/cloudbuildtriggers_test.go:73 TestCloudBuildTriggersAndWorkerPools",
+          "test/compat/cloudbuildtriggers_test.go:75 TestCloudBuildTriggersAndWorkerPools",
           "test/compat/runconnectrepo_test.go:37 TestCloudRunContinuousDeployFromRepository",
           "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
         ]
@@ -1563,7 +1563,7 @@
         "method": "google.devtools.cloudbuild.v1.CloudBuild/UpdateWorkerPool",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudbuildtriggers_test.go:73 TestCloudBuildTriggersAndWorkerPools",
+          "test/compat/cloudbuildtriggers_test.go:75 TestCloudBuildTriggersAndWorkerPools",
           "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
         ]
       }
@@ -2500,7 +2500,7 @@
           "test/compat/functionsapi_test.go:76 TestFunctionsAPI",
           "test/compat/functionsevents_test.go:215 TestFunctionsEventTriggers",
           "test/compat/functionsevents_test.go:519 TestGcloudFunctionsEventTriggers",
-          "test/compat/functionsfields_test.go:265 TestFunctionsSecretsBuildsAndMounts",
+          "test/compat/functionsfields_test.go:267 TestFunctionsSecretsBuildsAndMounts",
           "test/compat/functionsfields_test.go:62 TestFunctionsFields",
           "test/compat/terraform_batch9_test.go:127 TestTerraformCloudFunctions2FunctionIAM"
         ]
@@ -2513,7 +2513,7 @@
           "test/compat/functionsapi_test.go:76 TestFunctionsAPI",
           "test/compat/functionsevents_test.go:215 TestFunctionsEventTriggers",
           "test/compat/functionsevents_test.go:519 TestGcloudFunctionsEventTriggers",
-          "test/compat/functionsfields_test.go:265 TestFunctionsSecretsBuildsAndMounts",
+          "test/compat/functionsfields_test.go:267 TestFunctionsSecretsBuildsAndMounts",
           "test/compat/functionsfields_test.go:62 TestFunctionsFields",
           "test/compat/terraform_batch9_test.go:127 TestTerraformCloudFunctions2FunctionIAM"
         ]
@@ -2594,7 +2594,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolefunctionsv1_test.go:96 TestConsoleFunctionsV1",
-          "test/compat/functionsfields_test.go:182 TestFunctionsV1Fields",
+          "test/compat/functionsfields_test.go:184 TestFunctionsV1Fields",
           "test/compat/functionsv1_test.go:250 TestFunctionsV1BuildsAndServes",
           "test/compat/functionsv1_test.go:322 TestGcloudFunctionsV1",
           "test/compat/functionsv1_test.go:56 TestFunctionsV1API",
@@ -2605,7 +2605,7 @@
         "method": "google.cloud.functions.v1.CloudFunctionsService/DeleteFunction",
         "status": "Verified",
         "tests": [
-          "test/compat/functionsfields_test.go:182 TestFunctionsV1Fields",
+          "test/compat/functionsfields_test.go:184 TestFunctionsV1Fields",
           "test/compat/functionsv1_test.go:250 TestFunctionsV1BuildsAndServes",
           "test/compat/functionsv1_test.go:322 TestGcloudFunctionsV1",
           "test/compat/functionsv1_test.go:56 TestFunctionsV1API",
@@ -2624,7 +2624,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolefunctionsv1_test.go:96 TestConsoleFunctionsV1",
-          "test/compat/functionsfields_test.go:182 TestFunctionsV1Fields",
+          "test/compat/functionsfields_test.go:184 TestFunctionsV1Fields",
           "test/compat/functionsv1_test.go:322 TestGcloudFunctionsV1",
           "test/compat/functionsv1_test.go:56 TestFunctionsV1API"
         ]
@@ -2634,7 +2634,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolefunctionsv1_test.go:96 TestConsoleFunctionsV1",
-          "test/compat/functionsfields_test.go:182 TestFunctionsV1Fields",
+          "test/compat/functionsfields_test.go:184 TestFunctionsV1Fields",
           "test/compat/functionsv1_test.go:322 TestGcloudFunctionsV1",
           "test/compat/functionsv1_test.go:56 TestFunctionsV1API",
           "test/compat/terraformfunctionsv1_test.go:31 TestTerraformCloudFunctionsFunction"
@@ -13634,44 +13634,44 @@
         "method": "serviceusage.operations.cancel",
         "status": "Verified",
         "tests": [
-          "test/compat/serviceusage_test.go:268 TestServiceUsageOperations"
+          "test/compat/serviceusage_test.go:275 TestServiceUsageOperations"
         ]
       },
       {
         "method": "serviceusage.operations.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/serviceusage_test.go:268 TestServiceUsageOperations"
+          "test/compat/serviceusage_test.go:275 TestServiceUsageOperations"
         ]
       },
       {
         "method": "serviceusage.operations.get",
         "status": "Verified",
         "tests": [
-          "test/compat/serviceusage_test.go:268 TestServiceUsageOperations",
-          "test/compat/serviceusage_test.go:51 TestServiceUsageServices"
+          "test/compat/serviceusage_test.go:275 TestServiceUsageOperations",
+          "test/compat/serviceusage_test.go:52 TestServiceUsageServices"
         ]
       },
       {
         "method": "serviceusage.operations.list",
         "status": "Verified",
         "tests": [
-          "test/compat/serviceusage_test.go:268 TestServiceUsageOperations"
+          "test/compat/serviceusage_test.go:275 TestServiceUsageOperations"
         ]
       },
       {
         "method": "serviceusage.services.batchEnable",
         "status": "Verified",
         "tests": [
-          "test/compat/serviceusage_test.go:158 TestTerraformProjectService",
-          "test/compat/serviceusage_test.go:51 TestServiceUsageServices"
+          "test/compat/serviceusage_test.go:165 TestTerraformProjectService",
+          "test/compat/serviceusage_test.go:52 TestServiceUsageServices"
         ]
       },
       {
         "method": "serviceusage.services.batchGet",
         "status": "Verified",
         "tests": [
-          "test/compat/serviceusage_test.go:51 TestServiceUsageServices"
+          "test/compat/serviceusage_test.go:52 TestServiceUsageServices"
         ]
       },
       {
@@ -13684,9 +13684,9 @@
           "test/compat/apienable_test.go:211 TestServiceDisabledBigQuery",
           "test/compat/apienable_test.go:244 TestServiceDisabledFirestore",
           "test/compat/apienable_test.go:270 TestGcloudServicesDisableEnforced",
-          "test/compat/serviceusage_test.go:158 TestTerraformProjectService",
-          "test/compat/serviceusage_test.go:229 TestGcloudServices",
-          "test/compat/serviceusage_test.go:51 TestServiceUsageServices"
+          "test/compat/serviceusage_test.go:165 TestTerraformProjectService",
+          "test/compat/serviceusage_test.go:236 TestGcloudServices",
+          "test/compat/serviceusage_test.go:52 TestServiceUsageServices"
         ]
       },
       {
@@ -13699,18 +13699,18 @@
           "test/compat/apienable_test.go:211 TestServiceDisabledBigQuery",
           "test/compat/apienable_test.go:244 TestServiceDisabledFirestore",
           "test/compat/apienable_test.go:270 TestGcloudServicesDisableEnforced",
-          "test/compat/serviceusage_test.go:158 TestTerraformProjectService",
-          "test/compat/serviceusage_test.go:229 TestGcloudServices",
-          "test/compat/serviceusage_test.go:51 TestServiceUsageServices"
+          "test/compat/serviceusage_test.go:165 TestTerraformProjectService",
+          "test/compat/serviceusage_test.go:236 TestGcloudServices",
+          "test/compat/serviceusage_test.go:52 TestServiceUsageServices"
         ]
       },
       {
         "method": "serviceusage.services.get",
         "status": "Verified",
         "tests": [
-          "test/compat/serviceusage_test.go:158 TestTerraformProjectService",
-          "test/compat/serviceusage_test.go:229 TestGcloudServices",
-          "test/compat/serviceusage_test.go:51 TestServiceUsageServices"
+          "test/compat/serviceusage_test.go:165 TestTerraformProjectService",
+          "test/compat/serviceusage_test.go:236 TestGcloudServices",
+          "test/compat/serviceusage_test.go:52 TestServiceUsageServices"
         ]
       },
       {
@@ -13718,9 +13718,9 @@
         "status": "Verified",
         "tests": [
           "test/compat/loggingparents_test.go:278 TestServiceUsageFolderParentRefused",
-          "test/compat/serviceusage_test.go:158 TestTerraformProjectService",
-          "test/compat/serviceusage_test.go:229 TestGcloudServices",
-          "test/compat/serviceusage_test.go:51 TestServiceUsageServices"
+          "test/compat/serviceusage_test.go:165 TestTerraformProjectService",
+          "test/compat/serviceusage_test.go:236 TestGcloudServices",
+          "test/compat/serviceusage_test.go:52 TestServiceUsageServices"
         ]
       }
     ]

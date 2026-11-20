@@ -214,7 +214,7 @@ var gcloudOverrides = []struct {
 	// The Organization Policy API v2 (#1890), on the Resource Manager port.
 	{"orgpolicy", []string{"RESOURCEMANAGER"}},
 	{"serviceusage", []string{"SERVICEUSAGE", "RUN_SERVICEUSAGE"}},
-	{"apikeys", []string{"APIKEYS"}},
+	{"apikeys", []string{"APIKEYS", "RUN_APIKEYS"}},
 	{"run", []string{"RUN"}},
 	// Served on the Run port (#1347).
 	{"artifactregistry", []string{"RUN"}},

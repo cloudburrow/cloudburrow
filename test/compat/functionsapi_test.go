@@ -205,11 +205,14 @@ func TestFunctionsAPI(t *testing.T) {
 		t.Errorf("TestIamPermissions = %v, %v", p, err)
 	}
 
+	// An audit log trigger is served (#1853), and is an Eventarc trigger:
+	// Eventarc requires its serviceName and methodName filters, so one
+	// with neither is refused INVALID_ARGUMENT naming serviceName.
 	trig := &functionspb.Function{BuildConfig: in.GetBuildConfig(),
 		EventTrigger: &functionspb.EventTrigger{EventType: "google.cloud.audit.log.v1.written"}}
-	if _, err := fc.CreateFunction(ctx, &functionspb.CreateFunctionRequest{Parent: parent, FunctionId: "sdk-fn-trigger", Function: trig}); status.Code(err) != codes.Unimplemented ||
-		!strings.Contains(err.Error(), "event_type") {
-		t.Errorf("CreateFunction with an audit log trigger = %v; want UNIMPLEMENTED naming the event type", err)
+	if _, err := fc.CreateFunction(ctx, &functionspb.CreateFunctionRequest{Parent: parent, FunctionId: "sdk-fn-trigger", Function: trig}); status.Code(err) != codes.InvalidArgument ||
+		!strings.Contains(err.Error(), "serviceName") {
+		t.Errorf("CreateFunction with an audit log trigger and no filters = %v; want INVALID_ARGUMENT naming serviceName", err)
 	}
 
 	dop, err := fc.DeleteFunction(ctx, &functionspb.DeleteFunctionRequest{Name: name})

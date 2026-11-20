@@ -1042,8 +1042,12 @@ func (o *observed) request(fr frame) (frame, error) {
 			if err := CheckLabels(t.GetLabels()); err != nil {
 				return nil, err
 			}
-			if err := o.f.checkTopicKey(context.Background(), &t); err != nil {
-				return nil, err
+			// A state load restores a topic whose Cloud KMS key has since
+			// been disabled or destroyed as it was saved (StateLoadHeader).
+			if !stateLoad(o.context()) {
+				if err := o.f.checkTopicKey(context.Background(), &t); err != nil {
+					return nil, err
+				}
 			}
 			ss, err := o.f.takeTopicSchema(&t)
 			if err != nil {

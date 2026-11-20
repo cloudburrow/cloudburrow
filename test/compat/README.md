@@ -99,6 +99,7 @@ Set by `scripts/compat-env.sh` from a running instance:
 | `CLOUDBURROW_TEST_SQL_RESOURCEMANAGER` | as `RESOURCEMANAGER` | the purged project's Cloud SQL, Backup and DR and Artifact Registry, and Backup and DR's folder and organization fetch (#1568), in the sql shard, so the Resource Manager tests stay in storage |
 | `CLOUDBURROW_TEST_SQL_LOGGING` | as `LOGGING` | Backup and DR's job logs in Cloud Logging (#1924), in the sql shard, so the Logging tests stay in theirs |
 | `CLOUDBURROW_TEST_RUN_RESOURCEMANAGER`, `CLOUDBURROW_TEST_RUN_SERVICEUSAGE` | as `RESOURCEMANAGER` and `SERVICEUSAGE` | gcloud's Resource Manager and Service Usage overrides in the run shard: `gcloud functions deploy --trigger-service-account` reads the project number through the one and checks `run.googleapis.com` is enabled through the other (main run 38929852240), so neither suite runs twice; the run shard's browser suite enables the Container Scanning API through `RUN_SERVICEUSAGE` (#1912) |
+| `CLOUDBURROW_TEST_RUN_APIKEYS` | as `APIKEYS` | the API key a Cloud Build webhook trigger's URL carries (`?key=`), made through the API Keys API in the run shard, so the API Keys suite stays in storage (#1915) |
 | `CLOUDBURROW_TEST_GKE_SERVICEUSAGE` | as `SERVICEUSAGE` | gcloud's Service Usage override in the served shard: `gcloud container clusters create` checks `container.googleapis.com` is enabled through it (#1913), so the Service Usage suite does not run there too |
 | `CLOUDBURROW_TEST_LOGGING_RESOURCEMANAGER` | as `RESOURCEMANAGER` | the Cloud Logging folder and organization tests, which make a folder (#1395), in the served shard, so the Resource Manager tests stay in storage |
 | `CLOUDBURROW_TEST_SINK_LOGGING`, `CLOUDBURROW_TEST_SINK_STORAGE`, `CLOUDBURROW_TEST_SINK_PUBSUB` | as `LOGGING`, `STORAGE` and `PUBSUB` | the Cloud Logging sinks that deliver to Cloud Storage, Pub/Sub and BigQuery (#1404), in the emulators shard beside BigQuery, and `gcloud logging copy` and `CopyLogEntries` to a bucket (#1394) |
@@ -185,7 +186,7 @@ publish it on a host port. Both are skips, not failures, when unset.
 The gcloud, gsutil and bq tests run the gcloud named by `CLOUDBURROW_TEST_GCLOUD`, which must
 then exist, and the gsutil and bq beside it, or else the ones on PATH, and skip when there are
 none. CI
-sets it to the Google Cloud CLI release it installs, 586.0.0, whose archive checksum
+sets it to the Google Cloud CLI release it installs, 593.0.0, whose archive checksum
 dependencies.json records. The Terraform and OpenTofu modules require `hashicorp/google`
 exactly, and each test copies `testdata/terraform/.terraform.lock.hcl` into its module before
 init, so a provider package that matches no locked hash fails init. Every one of these tests
