@@ -16,8 +16,8 @@ import (
 // queue and Purge queue; Create queue is a page with the Region list and the
 // queue's configuration; the queue page has Pause queue, Purge queue and
 // Delete queue beside its title and the tabs Tasks, Metrics, Logs,
-// Configuration and Permissions, Logs holding Configure logging; Pause
-// queue pauses it, as the console API then reads.
+// Configuration and Permissions, Logs holding Enable logs; Pause queue,
+// then Pause at its prompt, pauses it, as the console API then reads.
 func TestTasksQueuePagesMatchGoogle(t *testing.T) {
 	needService(t, "tasks")
 	p := open(t)
@@ -77,16 +77,18 @@ func TestTasksQueuePagesMatchGoogle(t *testing.T) {
 			t.Errorf("the queue page's title line has %v; want %s", page.Actions, a)
 		}
 	}
-	if contains(page.Actions, "Configure logging") {
-		t.Errorf("Configure logging is beside the title: %v", page.Actions)
+	if contains(page.Actions, "Enable logs") {
+		t.Errorf("Enable logs is beside the title: %v", page.Actions)
 	}
 	if got := strings.Join(page.Tabs, "|"); !strings.HasPrefix(got, "Tasks|Metrics|Logs|Configuration|Permissions") {
 		t.Errorf("the queue page's tabs are %v", page.Tabs)
 	}
 	p.clickText(`#view [role="tab"]`, "Logs")
-	p.waitFor(`[...document.querySelectorAll("#view .section-actions button")].some((b) => b.textContent === "Configure logging")`)
+	p.waitFor(`[...document.querySelectorAll("#view .section-actions button")].some((b) => b.textContent === "Enable logs")`)
 
 	p.clickText("#view .page-actions button", "Pause queue")
+	p.waitFor(`document.querySelector(".modal.is-open button[type=submit]") !== null`)
+	p.clickText(".modal.is-open button", "Pause")
 	p.waitFor(`[...document.querySelectorAll("#view .page-actions button")].some((b) => b.textContent === "Resume queue")`)
 	code, body := consoleDo(t, http.MethodGet, "/api/resources/tasks?project="+project, "")
 	var listing struct {

@@ -150,7 +150,7 @@ func TestStorageObjectPageAndActions(t *testing.T) {
 	for _, a := range p.DetailActions(ctx, "p", row.Opens) {
 		ids = append(ids, a.ID)
 	}
-	if strings.Join(ids, ",") != "copy,move,editmetadata,storageclass,editholds,addacl" {
+	if strings.Join(ids, ",") != "copy,move,editmetadata,storageclass,editholds,deleteversions,addacl" {
 		t.Errorf("object page actions = %v", ids)
 	}
 }

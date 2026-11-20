@@ -3,12 +3,13 @@
 package browser
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
 	"testing"
 
+	"cloud.google.com/go/storage"
 	"github.com/chromedp/chromedp"
 )
 
@@ -20,30 +21,42 @@ import (
 // a Copy button and the note that it will not be shown again, which a click
 // on the backdrop does not close. Once Done closes it the secret is nowhere
 // in the page (the table, the Activity panel, the notifications) or the
-// browser's storage, and after a reload it is still nowhere while the key
-// is listed ACTIVE, its menu offering Deactivate and no Delete.
+// browser's storage, and after a reload it is still nowhere. Interoperability
+// lists the service account under "Access keys for service accounts"
+// (#2047), and its page lists the key with its state as a button: Active,
+// clicked, asks and ends in Deactivate; Inactive, clicked, activates at
+// once; Delete, on an inactive key only, asks for the access ID's first 10
+// characters. The official client reads each change. The tab passes the
+// WCAG 2.1 AA audit.
 func TestStorageHMACKeySecretShownOnce(t *testing.T) {
 	needService(t, "storage-settings")
 	p := open(t)
 	project := uniqueProject(t)
 	sa := "browser-hmac@" + project + ".iam.gserviceaccount.com"
+	gcs, _ := storageSDK(t)
+	ctx := context.Background()
 	t.Cleanup(func() {
-		_, body := consoleDo(t, http.MethodGet, "/api/resources/storage-settings?project="+project, "")
-		var l struct {
-			Items []struct{ Name, Status string }
-		}
-		_ = json.Unmarshal([]byte(body), &l)
-		for _, k := range l.Items {
-			act := func(a string) {
-				consoleDo(t, http.MethodPost, "/api/actions/storage-settings?project="+project,
-					fmt.Sprintf(`{"Name":%q,"Action":%q}`, k.Name, a))
+		it := gcs.ListHMACKeys(context.Background(), project)
+		for {
+			k, err := it.Next()
+			if err != nil {
+				return
 			}
-			if k.Status == "ACTIVE" {
-				act("deactivate")
+			h := gcs.HMACKeyHandle(project, k.AccessID)
+			if k.State == storage.Active {
+				_, _ = h.Update(context.Background(), storage.HMACKeyAttrsToUpdate{State: storage.Inactive})
 			}
-			act("delete")
+			_ = h.Delete(context.Background())
 		}
 	})
+	state := func(id string) storage.HMACState {
+		t.Helper()
+		k, err := gcs.HMACKeyHandle(project, id).Get(ctx)
+		if err != nil {
+			t.Fatalf("the official client's Get(%s): %v", id, err)
+		}
+		return k.State
+	}
 	creates := func() int { return len(p.sent(http.MethodPost, "/api/resources/storage-settings")) }
 	// holds reports whether the page or the browser's storage holds s.
 	holds := func(s string) bool {
@@ -69,7 +82,7 @@ func TestStorageHMACKeySecretShownOnce(t *testing.T) {
 	p.waitFor(`document.querySelector("#tab-interoperability.is-selected") !== null`)
 
 	// Cancel discards what was typed without asking (#783).
-	p.clickText("#view button", "Create key")
+	p.clickText("#view button", "Create a key for a service account")
 	p.waitFor(`document.querySelector(".modal.is-open #f-serviceAccountEmail") !== null`)
 	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #f-serviceAccountEmail`), sa))
 	p.clickText(".modal .modal-actions button", "Cancel")
@@ -78,10 +91,10 @@ func TestStorageHMACKeySecretShownOnce(t *testing.T) {
 		t.Fatalf("Cancel sent the create: %d requests", n)
 	}
 
-	p.clickText("#view button", "Create key")
+	p.clickText("#view button", "Create a key for a service account")
 	p.waitFor(`document.querySelector(".modal.is-open #f-serviceAccountEmail") !== null`)
 	p.run(chromedp.SendKeys(chromedp.CSS(`.modal #f-serviceAccountEmail`), sa))
-	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
+	p.clickText(".modal.is-open button", "Create key")
 	p.waitFor(`document.querySelector(".modal.is-open #one-time-value") !== null`)
 	var shown struct {
 		Secret, Note, Title string
@@ -109,33 +122,80 @@ func TestStorageHMACKeySecretShownOnce(t *testing.T) {
 	p.clickText("#one-time .modal-actions button", "Done")
 	p.waitFor(`document.querySelector(".modal") === null`)
 
-	var accessID string
-	p.waitFor(`document.querySelector("#view tbody tr td") !== null`)
-	p.eval(`[...document.querySelectorAll("#view tbody tr")].map((r) => r.getAttribute("aria-label") || "").find((l) => l.startsWith("Inspect GOOG")) || ""`, &accessID)
-	accessID = strings.TrimPrefix(accessID, "Inspect ")
-	if len(accessID) != 61 {
-		t.Fatalf("the table lists no key after the create (row %q)", accessID)
+	// The access ID, from the dialog's properties.
+	accessID := ""
+	if parts := strings.Split(shown.Props, "|"); len(parts) > 1 && parts[0] == "Access ID" {
+		accessID = parts[1]
 	}
+	if len(accessID) != 61 {
+		t.Fatalf("the create dialog names no access ID: %q", shown.Props)
+	}
+	// Access keys for service accounts lists the service account (#2047).
+	saRow := fmt.Sprintf(`tr[aria-label=%q]`, "Inspect "+sa)
+	p.waitFor(fmt.Sprintf(`document.querySelector(%q) !== null`, saRow))
 	if holds(shown.Secret) {
 		t.Errorf("after the dialog closed the page or the browser's storage still holds the secret")
 	}
 
-	// Reloaded, the key is listed and the secret is still nowhere.
+	// Reloaded, the service account is listed and the secret is nowhere.
 	p.navigate("/storage/settings?project=" + project + "&tab=interoperability")
-	row := fmt.Sprintf(`tr[aria-label=%q]`, "Inspect "+accessID)
-	p.waitFor(fmt.Sprintf(`document.querySelector(%q) !== null`, row))
+	p.waitFor(fmt.Sprintf(`document.querySelector(%q) !== null`, saRow))
 	if holds(shown.Secret) {
 		t.Errorf("after a reload the page holds the secret")
 	}
-	var status string
-	p.eval(fmt.Sprintf(`document.querySelector(%q).textContent`, row), &status)
-	if !strings.Contains(status, "ACTIVE") {
-		t.Errorf("the key's row reads %q; want ACTIVE", status)
+	var heading string
+	p.eval(`document.querySelector("#view .table-title")?.textContent || ""`, &heading)
+	if heading != "Access keys for service accounts" {
+		t.Errorf("the Interoperability table is headed %q", heading)
 	}
-	p.run(chromedp.Click(chromedp.CSS(fmt.Sprintf(`button[aria-label=%q]`, "Actions for "+accessID))))
-	var items []string
-	p.eval(`[...document.querySelectorAll('.overflow-menu:not([hidden]) [role="menuitem"]')].map((b) => b.textContent)`, &items)
-	if !contains(items, "Deactivate") || contains(items, "Delete") {
-		t.Errorf("an ACTIVE key's menu offers %v; want Deactivate and no Delete", items)
+
+	// The service account's page lists its key, its state a button.
+	p.clickText("#view tbody a", sa)
+	status := func(label string) string { return fmt.Sprintf(`button[aria-label=%q]`, label+" "+accessID) }
+	p.waitFor(fmt.Sprintf(`document.querySelector(%q) !== null`, status("Active")))
+	if holds(shown.Secret) {
+		t.Errorf("the service account's page holds the secret")
 	}
+	if p.has(status("Delete")) {
+		t.Error("an ACTIVE key offers Delete")
+	}
+	// To Inactive: asked first, ending in Deactivate.
+	p.run(chromedp.Click(chromedp.CSS(status("Active"))))
+	p.waitFor(`document.querySelector(".modal.is-open form[data-confirm=confirm]") !== null`)
+	p.clickText(".modal.is-open button", "Deactivate")
+	p.waitFor(`document.querySelector(".modal") === null`)
+	eventually(t, "the key to be INACTIVE", func() bool { return state(accessID) == storage.Inactive })
+	// To Active: no additional steps.
+	p.waitFor(fmt.Sprintf(`document.querySelector(%q) !== null`, status("Inactive")))
+	p.run(chromedp.Click(chromedp.CSS(status("Inactive"))))
+	eventually(t, "the key to be ACTIVE", func() bool { return state(accessID) == storage.Active })
+	if p.has(".modal.is-open") {
+		t.Error("activating a key asked first")
+	}
+	p.waitFor(fmt.Sprintf(`document.querySelector(%q) !== null`, status("Active")))
+	p.run(chromedp.Click(chromedp.CSS(status("Active"))))
+	p.clickText(".modal.is-open button", "Deactivate")
+	eventually(t, "the key to be INACTIVE", func() bool { return state(accessID) == storage.Inactive })
+	// Delete: the access ID's first 10 characters typed.
+	p.waitFor(fmt.Sprintf(`document.querySelector(%q) !== null`, status("Delete")))
+	p.run(chromedp.Click(chromedp.CSS(status("Delete"))))
+	p.waitFor(`document.querySelector(".modal.is-open #confirm-input") !== null`)
+	var word string
+	p.eval(`document.querySelector(".modal.is-open label[for=confirm-input] strong").textContent`, &word)
+	if word != accessID[:10] {
+		t.Errorf("Delete asks for %q typed; want the access ID's first 10 characters, %s", word, accessID[:10])
+	}
+	p.confirmByName(accessID[:10])
+	eventually(t, "the key to be deleted", func() bool { return state(accessID) == storage.Deleted })
+
+	// A key of the account's again, made with the official client, for the
+	// audit of its page.
+	if _, err := gcs.CreateHMACKey(ctx, project, sa); err != nil {
+		t.Fatalf("CreateHMACKey: %v", err)
+	}
+	auditScreens(t, []a11yPage{
+		{"Interoperability tab", "/storage/settings?project=" + project + "&tab=interoperability", settled + " && " +
+			fmt.Sprintf(`document.querySelector(%q) !== null`, saRow), ""},
+		{"service account HMAC keys", settingsAccountPage(sa, project), settled + ` && document.querySelector("#view tbody tr button") !== null`, ""},
+	})
 }
